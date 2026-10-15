@@ -31,7 +31,7 @@ pub(crate) fn script(shell: Shell) -> &'static str {
     }
 }
 
-/// 问宿主要会话和任务最多等这么久：补全卡住比少几个候选糟。
+/// 问宿主要会话和任务最多等这么久（连上、握手和回话一起算）：补全卡住比少几个候选糟。
 const HOST_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// 除了候选，shell 还能补什么。
@@ -323,10 +323,12 @@ fn read(previous: &[String]) -> Line<'_> {
             continue;
         }
         line.seen.push(word);
-        let Some(opt) = line.command.and_then(|command| find_option(command, line.positionals.first().copied(), word))
-        else {
-            continue;
+        let opt = match line.command {
+            Some(command) => find_option(command, line.positionals.first().copied(), word),
+            // 选项也能写在命令前面（见 `args::parse`），这时还不知道是哪条命令的，只看它带不带值。
+            None => any_option(word),
         };
+        let Some(opt) = opt else { continue };
         match opt.value {
             Value::None => {
                 // `--command [N]` 的次数可以不给，短的数字才算，见 `args::parse`。
@@ -355,6 +357,18 @@ fn read(previous: &[String]) -> Line<'_> {
 
 fn find_option(command: &str, sub: Option<&str>, flag: &str) -> Option<&'static Opt> {
     options(command, sub).iter().find(|opt| opt.flag == flag)
+}
+
+/// 随便哪条命令（和子命令）的这个选项；同名的选项在各条命令里带的值是同一种。
+fn any_option(flag: &str) -> Option<&'static Opt> {
+    COMMANDS
+        .iter()
+        .flat_map(|&(command, _)| {
+            let subs = subcommands(command).iter().map(|&(sub, _)| Some(sub));
+            std::iter::once(None).chain(subs).map(move |sub| options(command, sub))
+        })
+        .flatten()
+        .find(|opt| opt.flag == flag)
 }
 
 /// 候选和 shell 另外能补的东西。
@@ -458,22 +472,24 @@ fn sessions(env: &Env) -> Vec<(String, String)> {
 }
 
 fn list_sessions(env: &Env) -> Option<Vec<SessionInfo>> {
-    let connection = Connection::open(env).ok()?;
+    let deadline = Instant::now() + HOST_TIMEOUT;
+    let connection = Connection::open_by(env, deadline).ok()?;
     connection.send(&ClientMsg::ListSessions).ok()?;
-    match connection.reply_by(Instant::now() + HOST_TIMEOUT).ok()? {
+    match connection.reply_by(deadline).ok()? {
         HostMsg::SessionList { sessions } => Some(sessions),
         _ => None,
     }
 }
 
 fn board(env: &Env) -> Option<(Vec<Todo>, Vec<Schedule>)> {
-    let connection = Connection::open(env).ok()?;
+    let deadline = Instant::now() + HOST_TIMEOUT;
+    let connection = Connection::open_by(env, deadline).ok()?;
     if !connection.todos {
         return None;
     }
     let req = connection.req();
     connection.send(&ClientMsg::ListTodos { req }).ok()?;
-    match connection.reply_by(Instant::now() + HOST_TIMEOUT).ok()? {
+    match connection.reply_by(deadline).ok()? {
         HostMsg::Todos { todos, schedules, .. } => Some((todos, schedules)),
         _ => None,
     }
@@ -630,6 +646,17 @@ mod tests {
         // `--command 2` 吃掉次数，接着补会话；`--command` 后面也直接能补会话（没有宿主时没有候选）。
         assert_eq!(complete_offline("read --command 2 --l").1, ["--lines"]);
         assert_eq!(complete_offline("read --command --l").1, ["--lines"]);
+    }
+
+    #[test]
+    fn options_before_the_command_take_their_values() {
+        // `args::parse` 认选项写在命令前面：值不当成命令。
+        assert_eq!(complete_offline("--cwd /tmp open --r").1, ["--right"]);
+        assert_eq!(complete_offline("--lines 5 read --c").1, ["--command"]);
+        assert_eq!(complete_offline("--cwd ").0, Also::Dirs);
+        let env = Env { session: Some("abc".into()), ..Env::default() };
+        let (_, items) = candidates(&words("--lines 5 read"), "", &env);
+        assert_eq!(items.first().map(|(word, _)| word.as_str()), Some("self"));
     }
 
     #[test]

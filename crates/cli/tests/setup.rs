@@ -103,3 +103,17 @@ fn a_skill_dropped_from_the_list_is_removed() {
     assert!(!runode_cli::refresh(SetupTarget::Claude, home, &new).unwrap());
     assert!(!skills.join("runode").exists());
 }
+
+/// 从 main 装的、这一版没编进来的 skill 在 main 上改了名：记录里的文件还在就算装过，换成新的、旧的删掉。
+#[test]
+fn a_skill_renamed_on_main_is_replaced() {
+    let fake = FakeHost::start("setuprename", |_| vec![]);
+    let home = fake.env.dirs.home.as_deref().unwrap();
+    let skills = home.join(".claude/skills");
+    let file = |path: &str, content: &str| (path.to_owned(), content.to_owned());
+    runode_cli::setup(SetupTarget::Claude, home, &[file("old-name/SKILL.md", "---\nname: old-name\n")], true).unwrap();
+    let new = vec![file("new-name/SKILL.md", "---\nname: new-name\n")];
+    assert!(runode_cli::refresh(SetupTarget::Claude, home, &new).unwrap());
+    assert!(!skills.join("old-name").exists());
+    assert!(skills.join("new-name/SKILL.md").exists());
+}

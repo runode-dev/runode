@@ -142,3 +142,27 @@ fn the_scripts_mention_both_names_and_the_env_var() {
 fn full(n: u128) -> String {
     runode_protocol::SessionId(n).to_string()
 }
+
+/// 宿主接了连接却不回话时，连握手在内最多等两秒，不卡住 Tab 十秒。
+#[test]
+fn a_silent_host_does_not_hold_up_completion() {
+    let dir = std::env::temp_dir().join(format!("rnc-{}-silent", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let socket = dir.join("host.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    // 接下连接、一直不回话；连接留着不关，命令行看不到连接断了。
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming() {
+            held.push(stream);
+        }
+    });
+    let env = Env { socket: Some(socket), build: "test".into(), ..Env::default() };
+    let started = std::time::Instant::now();
+    let (kind, items) = complete("send ", &env);
+    assert_eq!(kind, "normal");
+    assert!(items.is_empty());
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
+    let _ = std::fs::remove_dir_all(dir);
+}

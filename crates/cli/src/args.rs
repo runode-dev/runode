@@ -381,7 +381,9 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                 }
                 "revoke" => {
                     no_more(words, 1, "remote revoke")?;
-                    Command::RemoteRevoke { device: words.first().ok_or("remote revoke needs a DEVICE")?.clone() }
+                    // 空的前缀对得上每一台设备：`revoke "$DEVICE"` 里变量没设时不能撤销掉唯一的那台。
+                    let device = words.first().filter(|device| !device.is_empty());
+                    Command::RemoteRevoke { device: device.ok_or("remote revoke needs a DEVICE")?.clone() }
                 }
                 other => return Err(format!("remote knows pair, devices and revoke, not {other}")),
             }
@@ -836,6 +838,8 @@ mod tests {
         assert!(parse("remote").unwrap_err().contains("pair, devices or revoke"));
         assert!(parse("remote frob").unwrap_err().contains("not frob"));
         assert!(parse("remote revoke").unwrap_err().contains("DEVICE"));
+        let empty = ["remote", "revoke", ""].map(str::to_owned);
+        assert!(super::parse(&empty).unwrap_err().contains("DEVICE"));
         assert!(parse("remote pair --addr nowhere").unwrap_err().contains("IP address"));
         assert!(parse("remote devices --addr 127.0.0.1").unwrap_err().contains("does not take --addr"));
         assert!(parse("remote pair extra").unwrap_err().contains("does not take extra"));

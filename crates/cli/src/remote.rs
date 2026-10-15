@@ -142,21 +142,21 @@ pub(crate) fn read_answer() -> Option<String> {
 /// 配对成了以后：宿主跑在 app 里时，退出 app 远程访问跟着停，手机就连不上了。配置里还没开
 /// `BACKGROUND_KEY` 时问用户要不要开，直接回车算要；开了以后退出 app 时宿主连同各终端和远程访问
 /// 留在后台（app 运行中改这一项马上算数）。`answer` 为 `None`（问不了）或者回答不要时不改配置，
-/// 只说怎么自己开。写不了配置文件时也照样算配对成了，说明原因。
+/// 只说怎么自己开。写不了配置文件时也照样算配对成了，说明原因。问的时候用户可能在 app 或编辑器里
+/// 改了配置，所以回答以后重新读一遍再改，不拿问之前读的那份盖掉。
 fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> Option<String>) -> anyhow::Result<()> {
     let Some(path) = env.dirs.config_file() else {
         return Ok(());
     };
     let shown = path.display();
-    let mut file = match ConfigFile::read(&path) {
-        Ok(file) => file,
+    let on = |file: &ConfigFile| file.values(BACKGROUND_KEY).last().is_some_and(|value| value == "true");
+    match ConfigFile::read(&path) {
+        Ok(file) if on(&file) => return Ok(()),
+        Ok(_) => {}
         Err(err) => {
             writeln!(out, "Cannot read {shown} ({err}), so remote access may stop when you quit runode.")?;
             return Ok(());
         }
-    };
-    if file.values(BACKGROUND_KEY).last().is_some_and(|value| value == "true") {
-        return Ok(());
     }
     write!(out, "Keep runode running in the background after you quit it, so the phone can still connect? [Y/n] ")?;
     out.flush()?;
@@ -175,6 +175,18 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
         )?;
         return Ok(());
     }
+    let mut file = match ConfigFile::read(&path) {
+        Ok(file) if on(&file) => return Ok(()),
+        Ok(file) => file,
+        Err(err) => {
+            writeln!(
+                out,
+                "Cannot read {shown} ({err}). To keep remote access running after you quit runode, set \
+                 `{BACKGROUND_KEY} = true` there yourself."
+            )?;
+            return Ok(());
+        }
+    };
     file.set(BACKGROUND_KEY, &["true".to_owned()]);
     match file.write(&path) {
         Ok(()) => writeln!(
@@ -318,6 +330,23 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "font-size = 14\nterminal-host = true\n");
         // 已经开着就不再问。
         assert_eq!(offer(&env, None), "");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 问的时候配置被别处改了：回答以后照改过的那份加上这一项，不拿问之前读的盖掉。
+    #[test]
+    fn changes_made_while_asking_are_kept() {
+        let (env, root) = env_in("edited");
+        let path = env.dirs.config_file().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "font-size = 14\n").unwrap();
+        let mut out = Vec::new();
+        offer_background(&env, &mut out, &mut || {
+            std::fs::write(&path, "font-size = 16\n").unwrap();
+            Some("y\n".into())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "font-size = 16\nterminal-host = true\n");
         let _ = std::fs::remove_dir_all(root);
     }
 

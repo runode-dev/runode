@@ -6,9 +6,9 @@
 //! skill 目录下的 `INSTALLED` 里，下到的清单里去掉的下次装时删掉。
 
 use std::{
-    io,
+    io::{self, Read as _},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 
 use anyhow::{Context as _, Result};
@@ -32,6 +32,8 @@ pub const SKILLS_URL: &str = "https://raw.githubusercontent.com/runode-dev/runod
 const MAX_FILE_BYTES: usize = 256 * 1024;
 /// 清单最多列这么多文件。
 const MAX_FILES: usize = 64;
+/// 下回来的清单最多这么大：`MAX_FILES` 个路径绰绰有余。
+const MAX_LIST_BYTES: usize = 16 * 1024;
 /// 上次装了哪些文件，一行一个路径，放在 skill 目录下；agent 只认 `<名字>/SKILL.md`，不会读它。
 const INSTALLED: &str = ".runode-files";
 
@@ -57,26 +59,37 @@ pub fn bundled_skills() -> SkillFiles {
 /// 清单里有一个路径不对、一个文件下不到或不像 skill，就整套不用，返回 `None`，免得装上新旧混着的
 /// 一套。外调 curl，清单下到后各个文件同时下，每个请求最多等十秒。
 pub fn fetch_skills(url: &str) -> Option<SkillFiles> {
-    let list = String::from_utf8(download(&format!("{url}/files.txt"))?).ok()?;
+    let list = String::from_utf8(download(&format!("{url}/files.txt"), MAX_LIST_BYTES)?).ok()?;
     let paths: Vec<&str> = list.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
     if paths.is_empty() || paths.len() > MAX_FILES || !paths.iter().all(|path| is_skill_path(path)) {
         return None;
     }
     let bodies: Vec<Option<Vec<u8>>> = std::thread::scope(|scope| {
         let downloads: Vec<_> =
-            paths.iter().map(|path| scope.spawn(move || download(&format!("{url}/{path}")))).collect();
+            paths.iter().map(|path| scope.spawn(move || download(&format!("{url}/{path}"), MAX_FILE_BYTES))).collect();
         downloads.into_iter().map(|download| download.join().ok().flatten()).collect()
     });
     paths.into_iter().zip(bodies).map(|(path, body)| Some((path.to_owned(), as_skill_file(path, body?)?))).collect()
 }
 
-fn download(url: &str) -> Option<Vec<u8>> {
-    let output = Command::new("curl")
+/// 下 `url`，最多收 `limit` 个字节：边读边数，超了就停掉 curl，不把整个回应攒在内存里再看大小。
+fn download(url: &str, limit: usize) -> Option<Vec<u8>> {
+    let mut child = Command::new("curl")
         .args(["--fail", "--silent", "--location", "--max-time", "10", "--proto", "=https", "--proto-redir", "=https"])
         .arg(url)
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    output.status.success().then_some(output.stdout)
+    let mut body = Vec::new();
+    let read = child.stdout.take()?.take(limit as u64 + 1).read_to_end(&mut body);
+    if read.is_err() || body.len() > limit {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    child.wait().ok()?.success().then_some(body)
 }
 
 /// 清单里的路径只能是 `<名字>/SKILL.md` 或 `<名字>/references/<主题>.md`，名字和主题只用小写字母、
@@ -147,11 +160,12 @@ pub fn setup(target: SetupTarget, home: &Path, files: &[(String, String)], lates
 /// 给 `target` 装过使用说明（`setup_paths` 或 `files` 里有文件在），又和 `files` 不一样、缺了文件
 /// 或清单变了时重装，返回重装了没有。`files` 得是 `fetch_skills` 下到的，app 启动时用它，skill
 /// 更新了不用手动再装；没装过的不装，不替用户装上他没要的东西，用户删掉了 skill 只剩记录的也算
-/// 没装过。
+/// 没装过。记录里的文件还在也算装过：从 main 装的、这一版没编进来的 skill 在 main 上去掉了，也要删掉。
 pub fn refresh(target: SetupTarget, home: &Path, files: &[(String, String)]) -> Result<bool> {
     let dir = skills_dir(target, home);
     let recorded = installed_paths(&dir)?;
-    let mut installed = setup_paths(target, home).iter().any(|path| path.exists());
+    let mut installed = setup_paths(target, home).iter().any(|path| path.exists())
+        || recorded.iter().flatten().any(|path| is_skill_path(path) && dir.join(path).exists());
     let mut stale = recorded.is_some_and(|recorded| !recorded.iter().eq(files.iter().map(|(path, _)| path)));
     for (path, content) in files {
         let path = dir.join(path);

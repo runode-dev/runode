@@ -269,3 +269,47 @@ fn read_a_command_and_say_when_it_was_cut_off() {
     assert_eq!((code, out.as_str()), (exit::OK, "output of 2\n"));
     assert!(err.contains("gone from the scrollback"), "{err}");
 }
+
+/// 有一个会话 `S`、读屏幕时回 `screen` 给的消息的假宿主。
+fn screen_host(name: &str, screen: impl Fn(SessionId) -> Vec<HostMsg> + Send + 'static) -> FakeHost {
+    let meta = at_prompt();
+    FakeHost::start(name, move |message| match message {
+        ClientMsg::ListSessions => vec![HostMsg::SessionList { sessions: vec![session(id(S), meta.clone())] }],
+        ClientMsg::Attach { id, .. } => vec![HostMsg::Attached {
+            id: *id,
+            channel: 7,
+            size: SIZE,
+            mode: AttachMode::MetaOnly,
+            meta: meta.clone(),
+            settings: None,
+        }],
+        ClientMsg::ReadScreen { id, .. } => screen(*id),
+        _ => vec![],
+    })
+}
+
+/// 宿主不回读屏幕的请求时，到了 `--timeout` 就超时，不等满回话的十秒。
+#[test]
+fn an_unanswered_screen_read_times_out_on_time() {
+    let fake = screen_host("screen-silent", |_| vec![]);
+    let started = Instant::now();
+    let (code, _, err) = run("wait 5e55 --for text never --timeout 0.3", &fake.env);
+    assert_eq!(code, exit::TIMEOUT, "{err}");
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+}
+
+/// 宿主摘掉了订阅（`Resync`）以后会话结束了也收不到，读屏幕等着的不再干等到超时。
+#[test]
+fn a_lost_subscription_ends_a_text_wait() {
+    let fake = screen_host("screen-resync", |id| {
+        vec![
+            HostMsg::Resync { id, reason: "the client reads too slowly".into() },
+            HostMsg::ScreenText { id, text: "$\n".into(), truncated: false },
+        ]
+    });
+    let started = Instant::now();
+    let (code, _, err) = run("wait 5e55 --for text never --timeout 5", &fake.env);
+    assert_eq!(code, exit::FAILED, "{err}");
+    assert!(err.contains("lost track"), "{err}");
+    assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
+}

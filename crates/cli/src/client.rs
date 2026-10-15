@@ -59,6 +59,8 @@ pub(crate) struct Connection {
     pending: RefCell<VecDeque<HostMsg>>,
     /// 等回话时见过 `Exited` 的会话，见 `exited`。
     exited: RefCell<HashSet<SessionId>>,
+    /// 等回话时见过 `Resync` 的会话，见 `lost`。
+    lost: RefCell<HashSet<SessionId>>,
     /// 下一个请求的编号。
     next_req: Cell<u32>,
     /// 宿主认得任务板的几条消息（`Welcome` 的 `todos`）。
@@ -68,6 +70,11 @@ pub(crate) struct Connection {
 impl Connection {
     /// 连上宿主并握手。
     pub(crate) fn open(env: &Env) -> Result<Self> {
+        Self::open_by(env, Instant::now() + REPLY_TIMEOUT)
+    }
+
+    /// 同 `open`，但握手最多等到 `deadline`：补全这类等不起十秒的用它。
+    pub(crate) fn open_by(env: &Env, deadline: Instant) -> Result<Self> {
         let socket = env.socket.as_deref().ok_or_else(|| anyhow!("no place to find the runode app's socket"))?;
         let stream = UnixStream::connect(socket)
             .with_context(|| format!("cannot reach the runode app at {}; is it running?", socket.display()))?;
@@ -89,6 +96,7 @@ impl Connection {
             messages,
             pending: RefCell::default(),
             exited: RefCell::default(),
+            lost: RefCell::default(),
             next_req: Cell::new(1),
             todos: false,
         };
@@ -102,7 +110,7 @@ impl Connection {
             // 命令行不决定会话的尺寸，用不着设备名。
             device: None,
         })?;
-        match connection.reply()? {
+        match connection.reply_by(deadline)? {
             HostMsg::Welcome { todos, .. } => {
                 connection.todos = todos;
                 Ok(connection)
@@ -149,12 +157,19 @@ impl Connection {
         self.reply_by(Instant::now() + REPLY_TIMEOUT)
     }
 
+    /// 同 `reply`，但给了 `deadline` 时不等过它：按用户给的超时等的命令用它。
+    pub(crate) fn reply_before(&self, deadline: Option<Instant>) -> Result<HostMsg> {
+        let by = Instant::now() + REPLY_TIMEOUT;
+        self.reply_by(deadline.map_or(by, |at| at.min(by)))
+    }
+
     /// 同 `reply`，但等到 `deadline`：宿主要办好一阵子的请求（`StartTodo` 可能先跑 `git worktree add`）用它。
     pub(crate) fn reply_by(&self, deadline: Instant) -> Result<HostMsg> {
         self.answer(deadline)?.map_err(|message| anyhow!(message))
     }
 
-    /// 回话，宿主报的错放在里层，由调用方决定怎么办。跳过的事件里有会话结束（`Exited`）时记下来。
+    /// 回话，宿主报的错放在里层，由调用方决定怎么办。跳过的事件里有会话结束（`Exited`）、宿主摘掉了
+    /// 订阅（`Resync`）时记下来。
     /// 宿主说 `Goodbye` 时是外层的错误，见 `goodbye`。
     fn answer(&self, deadline: Instant) -> Result<Result<HostMsg, String>> {
         loop {
@@ -175,8 +190,11 @@ impl Connection {
                 | HostMsg::Resized { .. }
                 | HostMsg::ResizeWindow { .. }
                 | HostMsg::ThemeApplied { .. }
-                | HostMsg::SnapshotEnd { .. }
-                | HostMsg::Resync { .. } => self.pending.borrow_mut().push_back(message),
+                | HostMsg::SnapshotEnd { .. } => self.pending.borrow_mut().push_back(message),
+                HostMsg::Resync { id, .. } => {
+                    self.lost.borrow_mut().insert(id);
+                    self.pending.borrow_mut().push_back(message);
+                }
                 // 问过 `Layout` 以后 app 的布局一变就来一条 `LayoutChanged`，问过 `ListTodos` 以后任务板
                 // 一变就来一条 `TodosChanged`，都不是回话。
                 HostMsg::UiRequest { .. } | HostMsg::LayoutChanged | HostMsg::TodosChanged | HostMsg::Unknown => {}
@@ -190,6 +208,11 @@ impl Connection {
     /// 等回话时见过这个会话结束了。
     pub(crate) fn exited(&self, id: SessionId) -> bool {
         self.exited.borrow().contains(&id)
+    }
+
+    /// 等回话时见过宿主摘掉了这个会话的订阅（`Resync`）：之后它的状态和结束都收不到了。
+    pub(crate) fn lost(&self, id: SessionId) -> bool {
+        self.lost.borrow().contains(&id)
     }
 
     /// 丢掉等回话时跳过的事件：一遍遍读屏幕的命令用不着它们，免得越攒越多。

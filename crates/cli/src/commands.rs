@@ -425,7 +425,7 @@ impl Watch<'_> {
         let give_up = Instant::now() + RECONNECT_TIMEOUT;
         let give_up = deadline.map_or(give_up, |at| at.min(give_up));
         let connection = loop {
-            match Connection::open(self.env) {
+            match Connection::open_by(self.env, give_up) {
                 Ok(connection) => break connection,
                 Err(err) => {
                     let now = Instant::now();
@@ -440,7 +440,7 @@ impl Watch<'_> {
             thread::sleep(RECONNECT_INTERVAL);
         };
         connection.send(&ClientMsg::ListSessions)?;
-        match connection.reply()? {
+        match connection.reply_before(deadline).map_err(|err| expired(err, deadline))? {
             HostMsg::SessionList { sessions } if sessions.iter().any(|info| info.id == self.id && !info.exited) => {}
             HostMsg::SessionList { .. } => return Err(Failure::Exited),
             other => return Err(unexpected(&other)),
@@ -453,7 +453,7 @@ impl Watch<'_> {
     /// 读一次整屏；宿主在升级时先重新连上新宿主再读，见 `recover`。
     fn read_screen(&mut self, deadline: Option<Instant>) -> Result<String, Failure> {
         loop {
-            match screen(&self.connection, self.id, None) {
+            match screen(&self.connection, self.id, None, deadline) {
                 Ok(text) => return Ok(text),
                 Err(failure) => self.recover(failure, deadline).map(drop)?,
             }
@@ -485,7 +485,7 @@ fn wait_until(
             // 上一次读到的、对上的行各有几行：`new` 时比它多出来的才算新出现的。
             let mut before: Option<HashMap<String, usize>> = None;
             loop {
-                let text = match screen(&watch.connection, id, *lines) {
+                let text = match screen(&watch.connection, id, *lines, deadline) {
                     Ok(text) => text,
                     Err(failure) => {
                         watch.recover(failure, deadline)?;
@@ -527,18 +527,19 @@ fn wait_until(
                     writeln!(out, "quiet")?;
                     return Ok(());
                 }
-                let text =
-                    match pause(&watch.connection, id, deadline).and_then(|()| screen(&watch.connection, id, None)) {
-                        Ok(text) => text,
-                        Err(failure) => {
-                            watch.recover(failure, deadline)?;
-                            // 交接本身要花时间，期间屏幕也可能变了：在新宿主上重新读一次、重新计时，
-                            // 不把交接的那几秒算成安静。
-                            last = watch.read_screen(deadline)?;
-                            since = Instant::now();
-                            continue;
-                        }
-                    };
+                let text = match pause(&watch.connection, id, deadline)
+                    .and_then(|()| screen(&watch.connection, id, None, deadline))
+                {
+                    Ok(text) => text,
+                    Err(failure) => {
+                        watch.recover(failure, deadline)?;
+                        // 交接本身要花时间，期间屏幕也可能变了：在新宿主上重新读一次、重新计时，
+                        // 不把交接的那几秒算成安静。
+                        last = watch.read_screen(deadline)?;
+                        since = Instant::now();
+                        continue;
+                    }
+                };
                 if text != last {
                     last = text;
                     since = Instant::now();
@@ -549,10 +550,20 @@ fn wait_until(
     }
 }
 
-/// 读一次屏幕，丢掉期间跳过的事件（会话结束了的话 `Connection::exited` 记着）。
-fn screen(connection: &Connection, id: SessionId, lines: Option<u32>) -> Result<String, Failure> {
+/// 读一次屏幕，丢掉期间跳过的事件（会话结束了的话 `Connection::exited` 记着）。等回话不过
+/// `deadline`，过了是 `Timeout`。
+fn screen(
+    connection: &Connection,
+    id: SessionId,
+    lines: Option<u32>,
+    deadline: Option<Instant>,
+) -> Result<String, Failure> {
     connection.send(&ClientMsg::ReadScreen { id, lines, command: None })?;
-    let reply = connection.reply()?;
+    let reply = connection.reply_before(deadline).map_err(|err| expired(err, deadline))?;
+    // 宿主摘掉了订阅（这边读得太慢）：之后会话结束了也收不到 `Exited`，读下去只会等到超时。
+    if connection.lost(id) && !connection.exited(id) {
+        return Err(anyhow!("lost track of the session").into());
+    }
     connection.drop_pending();
     match reply {
         HostMsg::ScreenText { text, .. } => Ok(text),
@@ -572,11 +583,18 @@ fn pause(connection: &Connection, id: SessionId, deadline: Option<Instant>) -> R
     let wake = deadline.map_or(now + POLL_INTERVAL, |at| at.min(now + POLL_INTERVAL));
     // 期间来的事件也看一眼：会话结束了不必等到下次读屏幕。
     while let Some(message) = connection.next(Some(wake))? {
-        if matches!(message, HostMsg::Exited { id: exited, .. } if exited == id) {
-            return Err(Failure::Exited);
+        match message {
+            HostMsg::Exited { id: exited, .. } if exited == id => return Err(Failure::Exited),
+            HostMsg::Resync { id: lost, .. } if lost == id => return Err(anyhow!("lost track of the session").into()),
+            _ => {}
         }
     }
     Ok(())
+}
+
+/// 等回话失败了：已经过了 `deadline` 时是超时，不然是 `err`。
+fn expired(err: anyhow::Error, deadline: Option<Instant>) -> Failure {
+    if deadline.is_some_and(|at| Instant::now() >= at) { Failure::Timeout } else { err.into() }
 }
 
 /// 等 shell 集成报告下一条命令运行完，打印 `exit N`；N 不是 0 时失败。
