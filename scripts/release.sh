@@ -129,6 +129,8 @@ rollback() {
     || die "$1，改回版本号也失败了，自己看一下 git status"
   die "$1，已撤回这次的标签、发版提交和版本号，草稿留在 ${notes}；修好后重新运行"
 }
+# 按 Ctrl-C 也一样撤（比如提交时等签名的口令）。推送前取消：推到一半被打断时远端可能已经收下，再撤就和远端对不上了。
+trap 'rollback "被中断"' INT TERM
 sed -i.bak '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$version"'"/' Cargo.toml \
   || rollback "改版本号失败"
 rm Cargo.toml.bak
@@ -137,5 +139,6 @@ cargo update --workspace || rollback "更新 Cargo.lock 失败"
 git add Cargo.toml Cargo.lock "$notes" || rollback "暂存发版的改动失败"
 git commit -m "chore: 发布 $tag${beta:+ beta}" || rollback "提交失败"
 git tag "$tag" || rollback "打标签失败"
+trap - INT TERM
 git push --atomic origin main "$tag" || rollback "推送失败"
 echo "已推送 ${tag}，release.yml 接着构建和发布：gh run watch" >&2
