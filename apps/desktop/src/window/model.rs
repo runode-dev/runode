@@ -378,7 +378,7 @@ impl WindowView {
     /// 同 `activate`，只是 `reveal_now` 为假时标签条等下一帧按新排好的位置把标签滚进来：刚切过来的 workspace
     /// 上次画出时的布局可能已经过时（开了侧栏、缩了窗口），按它算的偏移不准。
     fn show_tab(&mut self, ix: usize, reveal_now: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.mobile = None;
+        self.leave_mobile(cx);
         self.todo_board = None;
         // 焦点要交给终端，盖着终端的放大预览栏还原。
         self.restore_preview_zoom(cx);

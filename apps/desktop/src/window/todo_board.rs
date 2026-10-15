@@ -66,7 +66,7 @@ impl WindowView {
 
     /// 打开任务板，焦点给它；马上重问一次任务会话的状态，开着时接着轮询。
     pub(super) fn show_todo_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.mobile = None;
+        self.leave_mobile(cx);
         self.drop_settings(cx);
         if self.todo_board.is_none() {
             let view = cx.new(|cx| TodoBoard::new(AGENT_MARKS, cx));

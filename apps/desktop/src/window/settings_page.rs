@@ -37,7 +37,7 @@ pub(crate) fn show_settings(cx: &mut App) {
 impl WindowView {
     /// 打开设置页；已经开着时把焦点给它。
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.mobile = None;
+        self.leave_mobile(cx);
         self.todo_board = None;
         self.new_workspace = None;
         self.add_task = None;

@@ -731,12 +731,14 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::select_last_tab))
             .on_action(Self::act(cx, Self::new_split_right))
             .on_action(Self::act(cx, Self::new_split_down))
-            // 设置页、任务板开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏。
+            // 设置页、任务板、手机端引导页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏。
             .on_action(cx.listener(|this, action, window, cx| {
                 if this.settings.is_some() {
                     this.close_settings(window, cx);
                 } else if this.todo_board.is_some() {
                     this.close_todo_board(window, cx);
+                } else if this.mobile.is_some() {
+                    this.close_mobile(window, cx);
                 } else {
                     this.close_pane(action, window, cx);
                 }

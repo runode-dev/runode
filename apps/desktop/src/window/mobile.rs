@@ -187,10 +187,20 @@ impl WindowView {
         cx.notify();
     }
 
-    fn close_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.mobile.take().is_some() {
+    pub(super) fn close_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mobile.is_some() {
+            self.leave_mobile(cx);
             window.focus(&self.focus_handle(cx), cx);
             cx.notify();
+        }
+    }
+
+    /// 收起手机端引导页。输入框里改了的电脑名先写回：没按回车就切到别处时，页面连同监听失焦的订阅一起
+    /// 没了，等不到失焦再写。
+    pub(super) fn leave_mobile(&mut self, cx: &mut Context<Self>) {
+        if self.mobile.is_some() {
+            self.save_machine_name(cx);
+            self.mobile = None;
         }
     }
 
