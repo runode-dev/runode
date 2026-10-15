@@ -1767,13 +1767,23 @@ impl PlatformWindow for MacWindow {
         // focus (and therefore Space) defaults to Cancel, leaving the middle button of
         // prompts like "Save / Don't Save / Cancel" unreachable from the keyboard. Move
         // the initial focus onto the last non-cancel, non-default button instead.
-        let initial_focus_ix = answers
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, label)| !label.is_cancel())
-            .map(|(ix, _)| ix)
-            .filter(|&ix| ix > 0);
+        //
+        // runode: a prompt whose first (default) button is a Cancel button puts the safe
+        // answer first, like "Don't Allow / Allow" for a program reading the clipboard.
+        // That button keeps Return instead of taking Escape and also takes the initial
+        // focus, so neither Return nor Space picks the other answer.
+        let safe_default = answers.first().is_some_and(PromptButton::is_cancel);
+        let initial_focus_ix = if safe_default {
+            Some(0)
+        } else {
+            answers
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, label)| !label.is_cancel())
+                .map(|(ix, _)| ix)
+                .filter(|&ix| ix > 0)
+        };
 
         let alert = NSAlert::new(self.1);
         alert.setAlertStyle(match level {
@@ -1795,13 +1805,13 @@ impl PlatformWindow for MacWindow {
             let button = alert.addButtonWithTitle(&title);
             button.setTag(ix as NSInteger);
 
-            if answer.is_cancel() {
+            if Some(ix) == initial_focus_ix {
+                initial_focus_button = Some(button);
+            } else if answer.is_cancel() {
                 if let Some(key) = core::char::from_u32(crate::events::ESCAPE_KEY as u32) {
                     let key = NSString::from_str(&key.to_string());
                     button.setKeyEquivalent(&key);
                 }
-            } else if Some(ix) == initial_focus_ix {
-                initial_focus_button = Some(button);
             }
         }
 
