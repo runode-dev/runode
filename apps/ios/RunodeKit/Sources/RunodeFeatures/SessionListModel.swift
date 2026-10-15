@@ -652,6 +652,11 @@ public final class SessionListModel {
             }
         case .exited(let id, _):
             update(id) { $0.exited = true }
+        case .resync(let id, _):
+            // 读得太慢被宿主摘掉了订阅：重新只看状态，不然这个会话的状态就停在旧的上了。终端页开着的
+            // 会话归终端页自己重连，这里不发，不然会顶掉它要屏幕的订阅。
+            guard connected, !screens.contains(id), watching.contains(id) else { return }
+            link.send(.attach(id: id, size: nil, mode: .metaOnly))
         case .sizeOwner(let id, let mine, let owner):
             update(id) { $0.sizeOwner = mine ? String(localized: "本机") : owner }
         case .layout(Self.layoutRequest, let windows):

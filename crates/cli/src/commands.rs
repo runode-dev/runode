@@ -688,6 +688,10 @@ fn wait_for_prompt(connection: &Connection, id: SessionId, mut meta: SessionMeta
             None => break,
             Some(HostMsg::Meta { id: changed, meta: changed_meta }) if changed == id => meta = changed_meta,
             Some(HostMsg::Exited { id: exited, .. }) if exited == id => return Err(Failure::Exited),
+            // 宿主摘掉了订阅（这边读得太慢）：之后的状态都收不到了，等下去只会等到超时。
+            Some(HostMsg::Resync { id: lost, .. }) if lost == id => {
+                return Err(anyhow!("lost track of the session").into());
+            }
             Some(_) => {}
         }
     }

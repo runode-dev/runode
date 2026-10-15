@@ -1431,18 +1431,27 @@ fn check_size(size: GridSize) -> Result<(), String> {
 /// 一个会话往这条连接发事件的 `EventSink`。`MetaOnly` 的前端没有 VT，只要状态（含 `Bell`），
 /// 不要输出和改 VT 的标记。
 fn session_sink(id: SessionId, channel: u32, meta_only: bool, out: Outbox) -> EventSink {
+    // 积压过了上限时不再往里排，叫前端重新 Attach；返回 false 让会话摘掉这个 sink。状态消息也一样管：
+    // 只看状态的前端（手机挂起了、TCP 还没断）读不动时，频繁改标题的程序每次都发一整份 `SessionMeta`，
+    // 不管的话队列无上限地涨。重新 Attach 时拿到最新状态。
+    let resync = move |out: &Outbox| {
+        out.control(&HostMsg::Resync { id, reason: "the client reads too slowly".into() });
+        false
+    };
     Box::new(move |event| match event {
         Event::Output(_) if meta_only => true,
         Event::Output(data) => {
             if out.backed_up() {
-                out.control(&HostMsg::Resync { id, reason: "the client reads too slowly".into() });
-                return false;
+                return resync(&out);
             }
             out.push(FrameKind::Output, channel, data)
         }
         Event::Msg(message) => {
             if meta_only && matches!(*message, HostMsg::Resized { .. } | HostMsg::ThemeApplied { .. }) {
                 return true;
+            }
+            if out.backed_up() {
+                return resync(&out);
             }
             out.control(&message)
         }

@@ -526,7 +526,8 @@ impl<S: Vt> ScreenState<S> {
                 self.exited = true;
                 changes.exited = true;
             }
-            // 宿主没法再保证两份 VT 一样（这边读得太慢）：冻结着现在这份，重新要一份屏幕。
+            // 宿主没法再保证两份 VT 一样（这边读得太慢）：冻结着现在这份，重新要一份屏幕。只看状态的
+            // 订阅也会被宿主摘掉，重新只看状态，不然状态就停在旧的上了。
             HostMsg::Resync { reason, .. } => {
                 tracing::info!("resyncing: {reason}");
                 match std::mem::replace(&mut self.screen, Screen::Hidden) {
@@ -534,6 +535,12 @@ impl<S: Vt> ScreenState<S> {
                         self.screen = Screen::Attaching { since: now, keep: Some(session) };
                         self.attaching = Some(AttachMode::Snapshot);
                         changes.attach = Some(Attach { size: None, mode: AttachMode::Snapshot });
+                    }
+                    // 已经在重新只看状态（刚不显示、断开后重连）时不再发一次：在路上的那个 `Attach` 会换上
+                    // 新的订阅，被摘掉的是旧的那个。
+                    Screen::Hidden if self.attaching.is_none() => {
+                        self.attaching = Some(AttachMode::MetaOnly);
+                        changes.attach = Some(Attach { size: None, mode: AttachMode::MetaOnly });
                     }
                     other => self.screen = other,
                 }

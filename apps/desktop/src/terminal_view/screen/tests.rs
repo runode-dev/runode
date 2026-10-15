@@ -147,6 +147,11 @@ fn transitions() {
     assert_eq!(name(h.state.screen()), "Hidden");
     h.apply(vec![screen(AttachMode::MetaOnly, 3, SessionMeta::default(), b"")]);
     assert_eq!(name(h.state.screen()), "Hidden");
+    // 只看状态时收到 Resync（宿主摘掉了读得慢的订阅）→ 重新只看状态。
+    let changes = h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
+    assert_eq!(changes.attach, META_ONLY);
+    assert_eq!(name(h.state.screen()), "Hidden");
+    h.apply(vec![screen(AttachMode::MetaOnly, 3, SessionMeta::default(), b"")]);
     assert_eq!(h.state.set_visible(true, h.now), Some(Attach { size: Some(SIZE), mode: AttachMode::Snapshot }));
     assert_eq!(name(h.state.screen()), "Attaching");
     h.apply(vec![screen(AttachMode::Snapshot, 4, SessionMeta::default(), b"c")]);
