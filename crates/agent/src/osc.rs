@@ -1,4 +1,4 @@
-//! 从程序输出的原始字节里留下最近一次 OSC 9 报告的原文。
+//! 从程序输出的原始字节里留下最近一次 OSC 9;4 进度报告的原文。
 //!
 //! 终端解析 OSC 9;4 进度时只留下解析后的状态和百分比，规则要比的是原文（比如 `4;1;-1` 和
 //! `4;0;0` 在解析后分不出来），所以在输出进 VT 之前另扫一遍，只认 OSC 序列，别的字节跳过。
@@ -26,7 +26,7 @@ enum State {
     DiscardEscape,
 }
 
-/// 最近一次 OSC 9 报告的原文。
+/// 最近一次 OSC 9;4 进度报告的原文。
 #[derive(Debug, Default)]
 pub struct ProgressCapture {
     state: State,
@@ -80,7 +80,7 @@ impl ProgressCapture {
         }
     }
 
-    /// 最近一次 OSC 9 报告 `9;` 后面的部分，去掉了控制字符；没有过时为空。
+    /// 最近一次 OSC 9;4 进度报告 `9;` 后面的部分（`4;` 开头），去掉了控制字符；没有过时为空。
     pub fn latest(&self) -> &str {
         &self.latest
     }
@@ -120,7 +120,8 @@ impl ProgressCapture {
     }
 
     fn finish(&mut self) -> State {
-        if let Some(payload) = self.body.strip_prefix(b"9;") {
+        // OSC 9 别的用法（桌面通知、ConEmu 的其他子命令）不是进度，不能冲掉前面那条进度。
+        if let Some(payload) = self.body.strip_prefix(b"9;").filter(|payload| payload.starts_with(b"4;")) {
             self.latest =
                 String::from_utf8_lossy(payload).chars().filter(|c| !c.is_control()).take(MAX_CHARS).collect();
         }
@@ -143,6 +144,9 @@ mod tests {
         capture.observe(b"\x1b]9;4;");
         capture.observe(b"0;0\x1b");
         capture.observe(b"\\\x1b]2;x\x07");
+        assert_eq!(capture.latest(), "4;0;0");
+        // OSC 9 的桌面通知不是进度。
+        capture.observe(b"\x1b]9;Claude is waiting for your input\x07");
         assert_eq!(capture.latest(), "4;0;0");
         capture.clear();
         assert_eq!(capture.latest(), "");
