@@ -721,6 +721,10 @@ impl FileTree {
                 .on_click(cx.listener({
                     let path = path.clone();
                     move |this, event: &ClickEvent, _, cx| {
+                        // 双击时 GPUI 按一下、两下各发一次点击，目录只认第一下，不然刚展开又收起。
+                        if is_dir && event.click_count() >= 2 {
+                            return;
+                        }
                         if this.renaming(&path).is_none() {
                             this.click_file(&path, is_dir, event.click_count(), cx);
                         }
