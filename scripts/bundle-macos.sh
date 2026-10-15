@@ -159,6 +159,8 @@ fi
 
 # dmg 里放 .app 和指向 /Applications 的链接，打开后直接拖拽安装。
 staging=$(mktemp -d)
+# 中途失败或被中断时也删掉，不留一份完整的 .app；成功时下面做完 dmg 就删，不占着磁盘等公证。
+trap 'rm -rf "$staging"' EXIT
 cp -R "$app" "$staging/"
 ln -s /Applications "$staging/Applications"
 rm -f "$dmg"
