@@ -114,7 +114,8 @@ impl WindowView {
         if url.is_empty() {
             return;
         }
-        let command = format!("git clone {} .", shell_quote(&url));
+        // `--` 把地址和选项隔开：粘贴进来的文本以 `-` 开头时不能被 git 当成选项。
+        let command = format!("git clone -- {} .", shell_quote(&url));
         self.new_workspace_dir(repo_name(&url), Some(command), window, cx);
     }
 
