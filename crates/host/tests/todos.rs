@@ -130,8 +130,17 @@ fn wait_for_file(path: &Path) -> String {
     }
 }
 
+/// 跑测试自己要的 git 命令。不读开发者的全局和系统配置：那里开了提交签名（`commit.gpgsign`）或者
+/// 设了全局钩子（`core.hooksPath`）时提交会失败或者等着输口令；提交要的身份由调用处用 `-c` 给。
 fn git(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+    let output = Command::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
     assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
     String::from_utf8_lossy(&output.stdout).into_owned()
 }

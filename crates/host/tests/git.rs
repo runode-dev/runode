@@ -8,8 +8,16 @@ use common::{Peer, listen, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::git::{GitFileStatus, GitRequest};
 
+/// 跑测试自己要的 git 命令，不读开发者的全局和系统配置（模板目录、钩子、签名都不带进来）。
 fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git").arg("-C").arg(dir).args(args).status().unwrap();
+    let status = Command::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .status()
+        .unwrap();
     assert!(status.success(), "git {args:?}");
 }
 
