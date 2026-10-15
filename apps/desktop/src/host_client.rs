@@ -90,7 +90,8 @@ static NOTICE: Mutex<Option<Notice>> = Mutex::new(None);
 /// 要在界面上告诉用户的宿主的事。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Notice {
-    /// socket 上的宿主协议对不上（多半是旧版本的还活着），这次跑在 app 里，命令行连不上 app。
+    /// socket 上的宿主协议对不上（多半是旧版本的还活着），这次跑在 app 里，命令行连不上 app。用户
+    /// 要结束旧宿主却没结束成时也用它，界面上说的一样。
     Incompatible(String),
     /// socket 上是另一个 runode app 进程里的宿主：这次跑在 app 里、不开 socket，命令行连到的是
     /// 那个 app。
@@ -494,7 +495,12 @@ fn end_old_host(cx: &mut gpui::AsyncApp) {
                 tracing::warn!("the old host runs inside an older runode app, asking to quit it instead");
                 let _ = tx.send(Notice::OldAppRunning);
             }
-            Err(err) => tracing::warn!("failed to end the old host: {err}"),
+            Err(err) => {
+                tracing::warn!("failed to end the old host: {err}");
+                // 旧宿主多半还活着、这个 app 也没开 socket，和协议对不上时一样：终端跑在 app 里，命令行
+                // 连不上它们，请用户退出旧的或结束它的宿主进程后重开。
+                let _ = tx.send(Notice::Incompatible(err.to_string()));
+            }
         }
     });
     if let Err(err) = spawned {
