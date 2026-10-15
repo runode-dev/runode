@@ -8,7 +8,7 @@
 curl -s -A runode https://crates.io/api/v1/crates/gpui-pre-macos \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["crate"]["max_version"], [v["num"] for v in d["versions"][:5]])'
 grep -n 'gpui-pre' Cargo.toml
-grep -n '^version' vendor/gpui-pre-macos/Cargo.toml
+sed -n '/^\[package\]/,/^\[/s/^version = //p' vendor/gpui-pre-macos/Cargo.toml   # 只要包自己的版本，不要依赖的
 ```
 
 最新版等于 `<old>` 就不用升，告诉用户即可。两处版本对不上（根 `Cargo.toml` 和副本）先报给用户：那说明 patch 现在根本没生效。
