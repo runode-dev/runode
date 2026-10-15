@@ -170,7 +170,7 @@ pub(super) fn segmented(
 }
 
 /// 点开一个列表从里面挑的按钮：显示当前选的，`leading` 放在它左边（比如主题的色块），右边一个
-/// 下拉箭头。
+/// 下拉箭头。`width` 是基准字号下的点数，跟着界面字号缩放。
 pub(super) fn dropdown(
     id: impl Into<ElementId>,
     name: impl Into<SharedString>,
@@ -185,7 +185,7 @@ pub(super) fn dropdown(
         .role(Role::ComboBox)
         .aria_label(name)
         .aria_value(label.clone())
-        .w(px(width))
+        .w(scaled(width))
         .h(scaled(CONTROL_HEIGHT))
         .pl(px(10.))
         .pr(px(6.))
@@ -203,12 +203,13 @@ pub(super) fn dropdown(
         .child(svg().flex_none().path("icons/chevron-down.svg").size(px(12.)).text_color(theme.foreground.opacity(0.6)))
 }
 
-/// 设置页的输入框：比别处的 `Input` 矮一些，底色和别的控件一样；`width` 为 `None` 时占满剩下的宽度。
+/// 设置页的输入框：比别处的 `Input` 矮一些，底色和别的控件一样；`width` 是基准字号下的点数，跟着界面
+/// 字号缩放，为 `None` 时占满剩下的宽度。
 pub(super) fn input_box(input: &Entity<InputState>, width: Option<f32>, error: bool, theme: &Theme) -> Input {
     Input::new(input)
         .invalid(error)
         .map(|field| match width {
-            Some(width) => field.w(px(width)),
+            Some(width) => field.w(scaled(width)),
             None => field.flex_1().min_w_0(),
         })
         .h(scaled(CONTROL_HEIGHT))

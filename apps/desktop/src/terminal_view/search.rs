@@ -155,7 +155,7 @@ impl TerminalView {
             .absolute()
             .top(px(8.))
             .right(px(16.))
-            .w(px(320.))
+            .w(scaled(320.))
             .h(scaled(32.))
             .pl(px(10.))
             .pr(px(4.))
@@ -189,7 +189,7 @@ impl TerminalView {
                     .role(Role::Status)
                     .aria_label(status.clone())
                     .flex_none()
-                    .min_w(px(36.))
+                    .min_w(scaled(36.))
                     .text_right()
                     .text_color(fg.opacity(0.6))
                     .child(status),

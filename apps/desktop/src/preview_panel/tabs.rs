@@ -10,7 +10,9 @@ use crate::ui::{
     base_name,
     button::{Button, ButtonSize},
     file_icons::file_icon,
-    follow_move, hsla,
+    follow_move,
+    font_size::{self, scaled},
+    hsla,
     menu::{MenuHost as _, MenuItem},
     panel::TITLEBAR_HEIGHT,
     tabs::{drag_chip, drop_marker},
@@ -39,9 +41,9 @@ actions!(
     ]
 );
 
-/// 预览标签最宽这么宽，名字再长就截断。
+/// 预览标签最宽这么宽（基准字号下的点数，跟着界面字号缩放），名字再长就截断。
 const TAB_MAX_WIDTH: f32 = 180.;
-/// 拖动预览标签时跟着鼠标的卡片宽度。
+/// 拖动预览标签时跟着鼠标的卡片宽度，基准字号下的点数。
 const DRAG_CHIP_WIDTH: f32 = 140.;
 /// 当前标签顶上那条强调色细线的粗细。
 const TAB_ACCENT_HEIGHT: f32 = 2.;
@@ -158,7 +160,13 @@ struct DraggedPreviewTab {
 impl Render for DraggedPreviewTab {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 底色和当前标签一样。
-        drag_chip(px(DRAG_CHIP_WIDTH), px(TITLEBAR_HEIGHT), self.name.clone(), cx.theme().mix(0.08), cx)
+        drag_chip(
+            px(DRAG_CHIP_WIDTH * font_size::scale(cx)),
+            px(TITLEBAR_HEIGHT),
+            self.name.clone(),
+            cx.theme().mix(0.08),
+            cx,
+        )
     }
 }
 
@@ -267,7 +275,7 @@ impl PreviewPanel {
             })
             .group(group.clone())
             .flex_none()
-            .max_w(px(TAB_MAX_WIDTH))
+            .max_w(scaled(TAB_MAX_WIDTH))
             .h_full()
             .pl(px(10.))
             .pr(px(4.))

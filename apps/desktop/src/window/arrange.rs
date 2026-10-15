@@ -15,7 +15,7 @@ use gpui::{
 use runode_types::pane::{Axis, Node, Rect, SplitId};
 
 use super::{PressDown, TITLEBAR_HEIGHT, WindowView};
-use crate::ui::font_size::FontSize;
+use crate::ui::font_size::{FontSize, scaled};
 
 actions!(
     runode,
@@ -263,7 +263,7 @@ impl WindowView {
                 .flex()
                 .items_center()
                 .gap(px(6.))
-                .child(div().w(px(48.)).flex_none().text_color(fg.opacity(0.6)).child(label))
+                .child(div().w(scaled(48.)).flex_none().text_color(fg.opacity(0.6)).child(label))
         };
         let open = Button::new("arrange-open", rust_i18n::t!("layout.open"))
             .variant(ButtonVariant::Secondary)
@@ -277,7 +277,7 @@ impl WindowView {
             .aria_label(rust_i18n::t!("layout.title"))
             .track_focus(&picker.focus)
             .on_key_down(cx.listener(Self::arrange_key))
-            .w(px(380.))
+            .w(scaled(380.))
             .max_w_full()
             .p(px(12.))
             .flex()
