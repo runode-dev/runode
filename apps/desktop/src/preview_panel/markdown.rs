@@ -1420,7 +1420,11 @@ impl PreviewPanel {
                 };
             }
         }
-        let link = exact.and_then(|(key, offset)| doc.link_at(key, offset)).map(|(_, url)| url.to_owned());
+        // 按着 Shift 是在延长选区，松开时不打开链接。
+        let link = exact
+            .filter(|_| !event.modifiers.shift)
+            .and_then(|(key, offset)| doc.link_at(key, offset))
+            .map(|(_, url)| url.to_owned());
         // 双击、三击是在选字，松开时不打开链接。
         view.drag = Some(Drag { origin: event.position, moved: event.click_count > 1, link });
         cx.notify();
