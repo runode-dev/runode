@@ -24,7 +24,8 @@ devices_json="$(mktemp)"
 trap 'rm -f "$devices_json"' EXIT
 xcrun devicectl list devices --json-output "$devices_json" >/dev/null
 
-# 从 devicectl 的 JSON 里挑一台真机：按名字或 UDID 找，没给时先挑连着的 iPhone。
+# 从 devicectl 的 JSON 里挑一台真机：按名字或 UDID 找，没给时挑连着的 iPhone；没有连着的就不挑，
+# 免得跑完耗时的 Release 构建才在安装时失败。
 udid="$(/usr/bin/python3 -I -c '
 import json, sys
 want = sys.argv[2]
@@ -41,7 +42,7 @@ if want:
     ]
 else:
     phones = [d for d in devices if d["hardwareProperties"].get("deviceType") == "iPhone"]
-    picked = [d for d in phones if connected(d)] or phones
+    picked = [d for d in phones if connected(d)]
 print(picked[0]["hardwareProperties"]["udid"] if picked else "")
 ' "$devices_json" "${IOS_DEVICE:-}")"
 if [[ -z "$udid" ]]; then
