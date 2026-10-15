@@ -270,6 +270,32 @@ fn a_removed_worktree_is_made_again() {
     );
 }
 
+/// `.worktrees` 下几个候选名字的目录已经有了、却没有对应的分支（比如手建的、清剩下的）：跳过它们接着往后
+/// 换名字，不是候选用完了一次都没试就开不起来。
+#[test]
+fn occupied_worktree_directories_are_skipped() {
+    let (_host, dir, mut peer) = board("todo-worktree-occupied");
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]);
+
+    let out = dir.join("cwd.txt");
+    let agent = script(&dir, "agent", &format!("pwd > '{}'", out.display()));
+    let id = add(&mut peer, TodoSpec { worktree: true, ..spec("Taken", &repo, &agent) });
+    for name in ["taken".to_owned(), format!("taken-{id}"), format!("taken-{id}-2")] {
+        std::fs::create_dir_all(repo.join(".worktrees").join(name)).unwrap();
+    }
+    start(&mut peer, &id);
+    let made = repo.join(".worktrees").join(format!("taken-{id}-3"));
+    assert_eq!(std::fs::canonicalize(wait_for_file(&out).trim()).unwrap(), std::fs::canonicalize(&made).unwrap());
+    let todo = list(&mut peer).remove(0);
+    assert_eq!(
+        (todo.worktree_dir.as_deref(), todo.branch),
+        (Some(made.as_path()), Some(format!("runode/taken-{id}-3")))
+    );
+}
+
 /// 改、标完成、调先后、删，问过 `ListTodos` 的连接每次都收到 `TodosChanged`；不对的请求回 `Error`。
 #[test]
 fn edits_are_announced_and_checked() {

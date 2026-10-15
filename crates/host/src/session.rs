@@ -298,6 +298,12 @@ impl Handle {
         }
         self.inbox.send(message).is_ok()
     }
+
+    /// 测试用：发到 `inbox` 的一端，没有会话线程，由测试自己收、自己回话。
+    #[cfg(test)]
+    pub(crate) fn detached(inbox: mpsc::Sender<Inbox>) -> Self {
+        Self { inbox, killed: Arc::default(), driven: Arc::default() }
+    }
 }
 
 /// 开会话：在调用的线程里打开伪终端（`start` 时连 shell 一起启动），错误当场返回；再起会话线程，

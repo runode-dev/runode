@@ -7,8 +7,32 @@ use std::time::{Duration, Instant};
 
 use common::{Peer, SIZE, WAIT, contains, host, script, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
-use runode_protocol::AttachMode;
+use runode_protocol::{AttachMode, Frame, FrameKind, write_frame};
 use runode_types::{settings::TermSettings, shell::IntegrationMode};
+
+/// 两个会话的快照在同一条连接上交错着到：读一个的快照时先收下的另一个的，轮到读它时照样读得到，别的帧
+/// 先后不变。对着手写的帧测 `Peer::screen` 自己，不经宿主，交错的先后才定得下来。
+#[test]
+fn snapshots_held_while_reading_another_session_are_found_later() {
+    let (ours, mut theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+    let peer = Peer::over(ours);
+    let (a, b) = (SessionId(1), SessionId(2));
+    let control = |stream: &mut std::os::unix::net::UnixStream, message: &HostMsg| {
+        let frame = Frame::control(message).unwrap();
+        write_frame(stream, frame.kind, 0, &frame.payload).unwrap();
+    };
+    write_frame(&mut theirs, FrameKind::Snapshot, 2, b"screen of b").unwrap();
+    control(&mut theirs, &HostMsg::SnapshotEnd { id: b });
+    control(&mut theirs, &HostMsg::Bell { id: b });
+    write_frame(&mut theirs, FrameKind::Snapshot, 1, b"screen of a").unwrap();
+    control(&mut theirs, &HostMsg::SnapshotEnd { id: a });
+    control(&mut theirs, &HostMsg::Bell { id: a });
+
+    assert_eq!(peer.screen(a, 1, AttachMode::Snapshot), b"screen of a");
+    assert_eq!(peer.screen(b, 2, AttachMode::Snapshot), b"screen of b");
+    assert_eq!(peer.message(), HostMsg::Bell { id: b });
+    assert_eq!(peer.message(), HostMsg::Bell { id: a });
+}
 
 /// `cat` 当 shell：输入经宿主写给它，行规程的回显经宿主转回来；连上时给的是快照，带着宿主的主题。
 #[test]

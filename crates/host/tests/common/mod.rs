@@ -207,24 +207,49 @@ impl Peer {
     }
 
     /// `Attached` 之后的快照帧，读到这个会话的 `SnapshotEnd`；`MetaOnly` 时没有。同一条连接上别的会话在
-    /// 各自的线程里发事件，可能夹在快照帧中间：先收下，之后照先后读到。
+    /// 各自的线程里发事件，可能夹在快照帧中间：先收下，之后照先后读到。之前读别的会话的快照时可能已经
+    /// 收下了这个会话的，先在收下的里面找。
     pub fn screen(&self, id: SessionId, channel: u32, mode: AttachMode) -> Vec<u8> {
         let mut screen = Vec::new();
-        if mode != AttachMode::MetaOnly {
-            let deadline = Instant::now() + WAIT;
-            loop {
-                let frame = self
-                    .frames
-                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                    .expect("timed out waiting for the snapshot");
-                match frame.kind {
-                    FrameKind::Snapshot if frame.channel == channel => screen.extend_from_slice(&frame.payload),
-                    FrameKind::Control if matches!(frame.message().unwrap(), HostMsg::SnapshotEnd { id: end } if end == id) =>
-                    {
-                        break;
-                    }
-                    _ => self.held.lock().unwrap().push_back(frame),
+        if mode == AttachMode::MetaOnly {
+            return screen;
+        }
+        // 快照帧并进 `screen`，读到这个会话的 `SnapshotEnd` 时为 true；别的帧原样还回来。
+        let mut take = |frame: Frame| match frame.kind {
+            FrameKind::Snapshot if frame.channel == channel => {
+                screen.extend_from_slice(&frame.payload);
+                Ok(false)
+            }
+            FrameKind::Control if matches!(frame.message().unwrap(), HostMsg::SnapshotEnd { id: end } if end == id) => {
+                Ok(true)
+            }
+            _ => Err(frame),
+        };
+        let mut ended = false;
+        {
+            let mut held = self.held.lock().unwrap();
+            let mut rest = VecDeque::with_capacity(held.len());
+            for frame in held.drain(..) {
+                if ended {
+                    rest.push_back(frame);
+                    continue;
                 }
+                match take(frame) {
+                    Ok(end) => ended = end,
+                    Err(frame) => rest.push_back(frame),
+                }
+            }
+            *held = rest;
+        }
+        let deadline = Instant::now() + WAIT;
+        while !ended {
+            let frame = self
+                .frames
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("timed out waiting for the snapshot");
+            match take(frame) {
+                Ok(end) => ended = end,
+                Err(frame) => self.held.lock().unwrap().push_back(frame),
             }
         }
         screen

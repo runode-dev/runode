@@ -11,7 +11,7 @@ const MAX_TICK: Duration = Duration::from_millis(500);
 /// 只有会话、没有连接时仍按 `MAX_TICK` 看，`Host::kill` 结束会话不通知，要靠定时看出来。
 const LONG_TICK: Duration = Duration::from_secs(30);
 /// 收到 `Shutdown` 后，最多等这么久让各条连接写完 `Goodbye` 断开。
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// `Host::run_until_idle` 为什么返回。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -162,13 +162,24 @@ fn running(pid: libc::pid_t) -> bool {
 }
 
 /// Linux 上信号 0 对等着收尸的进程也成功，看 `/proc/<pid>/stat` 里的状态：`Z`（僵尸）和 `X`（正在消失）
-/// 不算。读不到时进程已经没了。
+/// 不算。文件没了时进程已经没了；别的读不了（描述符用完了、没权限）不能说明它死了，退回信号 0，宁可把
+/// 僵尸当成还在：认错成死了的话，交接时会去接手它还握着的 PTY。
 #[cfg(target_os = "linux")]
 fn running(pid: libc::pid_t) -> bool {
-    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
-    // 第二项是括起来的程序名，里面可能有空格和括号，状态是最后一个 `)` 后面的那一项。
-    let state = stat.rsplit_once(')').and_then(|(_, rest)| rest.split_whitespace().next());
-    !matches!(state, Some("Z" | "X" | "x"))
+    match std::fs::read(format!("/proc/{pid}/stat")) {
+        Ok(stat) => !matches!(stat_state(&stat), Some(b'Z' | b'X' | b'x')),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound || err.raw_os_error() == Some(libc::ESRCH) => false,
+        // SAFETY: 信号 0 只检查进程在不在。
+        Err(_) => unsafe { libc::kill(pid, 0) == 0 },
+    }
+}
+
+/// `/proc/<pid>/stat` 里的进程状态。第二项是括起来的程序名，可以是任意字节（不一定是 UTF-8），里面可能有
+/// 空格和括号，状态是最后一个 `)` 后面的那一项。
+#[cfg(any(test, target_os = "linux"))]
+fn stat_state(stat: &[u8]) -> Option<u8> {
+    let end = stat.iter().rposition(|&byte| byte == b')')?;
+    stat[end + 1..].iter().copied().find(|byte| !byte.is_ascii_whitespace())
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -201,5 +212,33 @@ mod tests {
         // 到这里还没收尸：它是个僵尸。
         assert!(child.wait().unwrap().success());
         assert!(!running(pid));
+    }
+
+    /// 程序名不是 UTF-8、带空格和括号时也读得出状态：读不出来的话活着的宿主会被当成死了。
+    #[test]
+    fn the_state_follows_any_program_name() {
+        assert_eq!(stat_state(b"42 (runode) S 1 42 42 0 -1"), Some(b'S'));
+        assert_eq!(stat_state(b"42 (a) b (c\xff\xfe) R 1 42"), Some(b'R'));
+        assert_eq!(stat_state(b"42 (\xc3() Z 1"), Some(b'Z'));
+        assert_eq!(stat_state(b"42 (no end"), None);
+    }
+
+    /// 活着的进程，程序名不是 UTF-8 时也算在跑。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_process_with_a_non_utf8_name_is_running() {
+        use std::os::unix::{ffi::OsStrExt as _, process::CommandExt as _};
+        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-comm", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 程序名取自 exec 时给的路径，经符号链接也一样；`argv[0]` 照旧，一个程序兼做多个命令的也认得出。
+        let program = dir.join(std::ffi::OsStr::from_bytes(b"sl\xffeep"));
+        std::os::unix::fs::symlink("/bin/sleep", &program).unwrap();
+        let mut child = Command::new(&program).arg0("sleep").arg("30").spawn().unwrap();
+        let pid = libc::pid_t::try_from(child.id()).unwrap();
+        assert!(running(pid));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

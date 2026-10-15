@@ -207,7 +207,7 @@ impl Shared {
         // 改目录、工作树的同时有人在开始这个任务的话，开出来的会话和库里记的会对不上。标完成、取消完成也占着：
         // 清工作树的（`sweep_worktrees`）占住以后重读、认定它完成了才清，这期间取消完成的话清掉的就是又要
         // 用的工作树；正在开始的也一样，开出来的会话记在一张完成了的任务上。
-        let _claim = self.claim_todo(id)?;
+        let claim = self.claim_todo(id)?;
         if let Some(spec) = spec {
             let old = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
             if old.started.is_none() {
@@ -223,6 +223,9 @@ impl Shared {
         if !self.todos.with_db(|db| db.update_todo(id, spec, done_at))? {
             return Err(no_todo(id));
         }
+        // 先放开再通知：叫醒的定时线程马上来清这张刚标完成的任务，还占着的话它跳过，要等下一次任务板变了
+        // 或者睡满才再看。
+        drop(claim);
         self.todos_changed();
         Ok(HostMsg::Done { req })
     }
@@ -517,9 +520,12 @@ fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
     let names = [slug.clone(), format!("{slug}-{}", todo.id)]
         .into_iter()
         .chain((2..).map(|n| format!("{slug}-{}-{n}", todo.id)));
+    // 跳过的名字不是分支已经有了、就是 `.worktrees` 下已经有了这一项，最多这么多个；只算分支的话，只占了
+    // 目录的几个名字就把候选用完了，一次都没去试。
+    let occupied = std::fs::read_dir(&worktrees).map_or(0, Iterator::count);
     let mut last = String::new();
     let mut attempts = 0;
-    for name in names.take(branches.len() + WORKTREE_ATTEMPTS) {
+    for name in names.take(branches.len() + occupied + WORKTREE_ATTEMPTS) {
         let (root, branch) = (worktrees.join(&name), format!("runode/{name}"));
         if branches.contains(&branch) || root.exists() {
             last = format!("{branch} or {} is taken", root.display());
@@ -626,6 +632,37 @@ mod tests {
         drop(claim);
         assert_eq!(shared.update_todo(3, &id, None, Some(true)), Ok(HostMsg::Done { req: 3 }));
         assert!(done(shared).is_some());
+    }
+
+    /// 标完成后叫醒定时线程时任务已经放开了：它马上来清就占得住，不跳过、等下一轮。不起定时线程，只看
+    /// 任务板变了的那一刻任务还占没占着。
+    #[test]
+    fn a_todo_marked_done_is_free_when_the_scheduler_wakes() {
+        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-wake", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = Host::new(runode_protocol::BuildId("test".into()));
+        host.shared.todos.lock().path = Some(dir.join("todos.db"));
+        let spec = TodoSpec { title: "t".into(), prompt: String::new(), dir, agent: "claude".into(), worktree: false };
+        let shared = &host.shared;
+        let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("expected the new todo") };
+
+        let todos = shared.todos.clone();
+        let seen = todos.generation();
+        let watched = id.clone();
+        let busy_on_wake = std::thread::spawn(move || {
+            let state = todos.lock();
+            let (state, _) = todos
+                .changed
+                .wait_timeout_while(state, Duration::from_secs(10), |state| state.generation == seen)
+                .unwrap();
+            assert_ne!(state.generation, seen, "the board never changed");
+            state.busy.contains(&watched)
+        });
+        // 让它先等上。
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(shared.update_todo(2, &id, None, Some(true)), Ok(HostMsg::Done { req: 2 }));
+        assert!(!busy_on_wake.join().unwrap(), "the todo was still claimed when the scheduler woke up");
     }
 
     #[test]

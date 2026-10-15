@@ -765,6 +765,60 @@ fn shutdown_ends_a_standalone_host() {
     }
 }
 
+/// 发 `Shutdown` 的连接一时不读、写线程卡着时，`run_until_idle` 等它把 `Goodbye` 写出去才返回（最多等一会儿），
+/// 不是一收到就撤掉这条连接的登记、当作没有连接了马上返回，单独跑的进程随之退出，`Goodbye` 没写出去。
+#[test]
+fn a_shutdown_waits_for_its_goodbye_to_be_written() {
+    use runode_protocol::{Frame, read_frame, write_frame};
+
+    let host = host();
+    let stopped = {
+        let host = host.clone();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || tx.send(host.run_until_idle(Duration::from_secs(60))));
+        rx
+    };
+    let stream = host.connect_pair().unwrap();
+    let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+    let mut frames = Vec::new();
+    let mut push = |message: &ClientMsg| {
+        let frame = Frame::control(message).unwrap();
+        write_frame(&mut frames, frame.kind, 0, &frame.payload).unwrap();
+    };
+    let hello = ClientMsg::Hello {
+        protocol: PROTOCOL_VERSION,
+        build: BuildId(BUILD.into()),
+        client: ClientKind::Cli,
+        caps: Caps { snapshot: false, vt_replay: true },
+        session: None,
+        device: None,
+    };
+    // 第一声之后的每一声都回一条错，回话（远多于 socket 的收发缓冲）塞满 socket，这边不读，写线程卡住，
+    // `Goodbye` 排在后面写不出去。
+    for _ in 0..200_000 {
+        push(&hello);
+    }
+    push(&ClientMsg::Shutdown { kill_sessions: true });
+    let writer = {
+        let mut stream = stream.try_clone().unwrap();
+        thread::spawn(move || std::io::Write::write_all(&mut stream, &frames).unwrap())
+    };
+    writer.join().unwrap();
+    assert_eq!(
+        stopped.recv_timeout(Duration::from_secs(1)),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "the host stopped before its goodbye was written"
+    );
+    let mut goodbye = false;
+    while let Some(frame) = read_frame(&mut reader).unwrap() {
+        goodbye |= frame.kind == FrameKind::Control
+            && frame.message::<HostMsg>().unwrap() == HostMsg::Goodbye { reason: GoodbyeReason::Shutdown };
+    }
+    assert!(goodbye, "no goodbye before the connection closed");
+    assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
+    drop(stream);
+}
+
 /// 没有会话也没有连接、持续给定的时长后 `run_until_idle` 返回：有连接、有会话时都不算空闲。
 /// 返回时 socket 删掉、锁放开。
 #[test]

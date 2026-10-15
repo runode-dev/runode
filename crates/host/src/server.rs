@@ -376,6 +376,10 @@ impl Host {
             }
             _ => {}
         }
+        // 起不来时要删掉刚建的 socket 文件，删的时候还得锁着：`start_listening` 出错时丢掉交给它的锁，放开以后
+        // 别的宿主就能拿到锁、在同一个路径上建好它的 socket，这时再删删掉的是它的。`flock` 锁的是打开的文件，
+        // 复制的这份描述符留着就一直锁着。
+        let held = lock.try_clone().context("failed to hold the lock")?;
         let listener =
             UnixListener::bind(socket).with_context(|| format!("failed to listen on {}", socket.display()))?;
         let started = std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))
@@ -383,8 +387,10 @@ impl Host {
             .and_then(|()| self.start_listening(listener, lock, socket, false));
         if let Err(err) = started {
             let _ = std::fs::remove_file(socket);
+            drop(held);
             return Err(err);
         }
+        drop(held);
         // 之后开的 shell 里的命令行连这个 socket，开发版和装好的版本同时开着时也不会连错。
         self.set_env(runode_protocol::ENV_SOCKET, socket.as_os_str());
         Ok(())
@@ -937,6 +943,11 @@ impl Connection {
                     Ok(message) => {
                         self.handle(message);
                         if self.closing {
+                            // `Goodbye` 和之前的回话可能还在写线程里：等它写完、断开再走。走了就撤掉登记，最后一条
+                            // 连接撤掉后 `Host::run_until_idle` 不再等，进程随之退出，没写出去的就丢了。写线程在
+                            // `Goodbye` 后面的 `Out::Close` 处结束，排在后面的这一声随之断开。最多等得和
+                            // `run_until_idle` 等各条连接一样久。
+                            let _ = self.out.detach().recv_timeout(crate::idle::DRAIN_TIMEOUT);
                             return;
                         }
                     }
