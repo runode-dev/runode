@@ -150,9 +150,9 @@ fn watch(
             paths.extend(dirs.remote_access_devices_file());
             paths.extend(dirs.remote_access_pairing_file());
             covered = files.follow(&paths);
-            fresh = coverage.newly_covered(paths, covered);
+            fresh = coverage.newly_covered(files.watching(), covered);
         }
-        // 这一轮才盯全的，上次比过以后、盯上之前改的没有动静，先比一遍再等。等着的配对口令过期时文件不变，
+        // 这一轮才盯全的、或者盯上了新的目录，上次比过以后、盯上之前改的没有动静，先比一遍再等。等着的配对口令过期时文件不变，
         // 这时也按时看一眼。
         let woken = if !wait || fresh {
             false
@@ -180,16 +180,18 @@ fn watch(
     }
 }
 
-/// 看配置的线程上一轮盯全了的那些文件，见 `Coverage::newly_covered`。
+/// 看配置的线程上一轮盯全时盯着的目录（`FileWatch::watching`），见 `Coverage::newly_covered`。
 #[derive(Default)]
 struct Coverage(Option<Vec<PathBuf>>);
 
 impl Coverage {
-    /// 这一轮 `paths` 都盯上了（`covered`），上一轮却没盯全、或者盯的不是这些（重读的配置引入了新文件）：
-    /// 上次比对之后、盯上之前改的不会再有动静，要先比一遍再等。
-    fn newly_covered(&mut self, paths: Vec<PathBuf>, covered: bool) -> bool {
-        let fresh = covered && self.0.as_ref() != Some(&paths);
-        self.0 = covered.then_some(paths);
+    /// 这一轮要盯的都盯上了（`covered`），盯着的目录 `dirs` 上一轮却没盯全、或者不是这些：上次比对之后、
+    /// 盯上之前在新盯的目录里改的不会再有动静，要先比一遍再等。按目录比不按文件比：要盯的文件不变，目录
+    /// 也会变（文件所在的目录建出来了、符号链接改指别处）；反过来文件变了目录没变时，那些文件的改动一直
+    /// 有动静排着，不会漏。
+    fn newly_covered(&mut self, dirs: &[PathBuf], covered: bool) -> bool {
+        let fresh = covered && self.0.as_deref() != Some(dirs);
+        self.0 = covered.then(|| dirs.to_vec());
         fresh
     }
 }
@@ -275,14 +277,36 @@ mod tests {
     #[test]
     fn newly_covered_files_are_checked_before_waiting() {
         let mut coverage = Coverage::default();
-        let paths = vec![PathBuf::from("/config/runode/config")];
-        assert!(!coverage.newly_covered(paths.clone(), false), "没盯全时按时醒，不用另比");
-        assert!(coverage.newly_covered(paths.clone(), true), "刚盯上");
-        assert!(!coverage.newly_covered(paths.clone(), true), "一直盯着，只等动静");
-        let more = vec![PathBuf::from("/config/runode/config"), PathBuf::from("/config/runode/themes/dark")];
-        assert!(coverage.newly_covered(more, true), "重读的配置引入了新文件");
-        assert!(!coverage.newly_covered(paths.clone(), false));
-        assert!(coverage.newly_covered(paths, true), "又盯不上以后再盯上");
+        let dirs = vec![PathBuf::from("/config/runode")];
+        assert!(!coverage.newly_covered(&dirs, false), "没盯全时按时醒，不用另比");
+        assert!(coverage.newly_covered(&dirs, true), "刚盯上");
+        assert!(!coverage.newly_covered(&dirs, true), "一直盯着，只等动静");
+        let more = vec![PathBuf::from("/config/runode"), PathBuf::from("/config/runode/themes")];
+        assert!(coverage.newly_covered(&more, true), "重读的配置引入了新目录里的文件");
+        assert!(!coverage.newly_covered(&dirs, false));
+        assert!(coverage.newly_covered(&dirs, true), "又盯不上以后再盯上");
+    }
+
+    /// 要盯的文件没变，所在的目录建出来以后改盯它：这一轮也要先比一遍，盯上之前在里面写的不会再有动静。
+    #[test]
+    fn a_newly_created_parent_dir_is_checked_before_waiting() {
+        let root = std::env::temp_dir().join(format!("rdr-coverage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = [root.join("remote/devices.json")];
+        let mut files = crate::config::FileWatch::new(|| {}).unwrap();
+        let mut coverage = Coverage::default();
+        let covered = files.follow(&paths);
+        coverage.newly_covered(files.watching(), covered);
+        let covered = files.follow(&paths);
+        assert!(!coverage.newly_covered(files.watching(), covered));
+        std::fs::create_dir(root.join("remote")).unwrap();
+        std::fs::write(&paths[0], "[]").unwrap();
+        let covered = files.follow(&paths);
+        assert!(covered);
+        assert!(coverage.newly_covered(files.watching(), covered), "盯的目录变了");
+        drop(files);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

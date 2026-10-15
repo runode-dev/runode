@@ -137,6 +137,11 @@ impl FileWatch {
         self.dirs = watched;
         self.dirs.len() == all
     }
+
+    /// 正盯着的目录（真实路径）。要盯的文件没变，盯的目录也会变：文件所在的目录建出来了、符号链接改指别处。
+    pub(crate) fn watching(&self) -> &[PathBuf] {
+        &self.dirs
+    }
 }
 
 /// 盯哪些目录才看得到 `paths` 变了，按真实路径去重：每个文件所在的目录；是符号链接时还有它指向的文件
