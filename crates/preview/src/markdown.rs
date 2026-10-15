@@ -190,6 +190,16 @@ const HTML_BLOCKS: [&str; 26] = [
     "td",
 ];
 
+/// 开 `name` 时先闭上没闭上的同类标签 `open`，和 HTML 一样：`<p>`、`<li>`、`<tr>`、`<td>` 不套同名的，
+/// `<dt>`、`<dd>` 互相闭上。
+fn closes_sibling(name: &str, open: &str) -> bool {
+    match name {
+        "p" | "li" | "tr" | "td" => name == open,
+        "dt" | "dd" => matches!(open, "dt" | "dd"),
+        _ => false,
+    }
+}
+
 /// `<h1>` 到 `<h6>` 的级别。
 fn html_heading(name: &str) -> Option<u8> {
     name.strip_prefix('h')?.parse().ok().filter(|level| (1..=6).contains(level))
@@ -400,6 +410,8 @@ struct HtmlOpen {
     /// 开的时候 `Builder::stack` 有几层；只有直接放在这一层里的块收进 `Block::Centered`，更里面的跟着
     /// 外层一起居中。
     depth: usize,
+    /// 开的时候行内样式和链接的样子：闭上时退回这里，标签里开了没关的行内标签到这里为止。
+    saved: InlineState,
 }
 
 /// 正在收行内片段的那个块。
@@ -458,8 +470,8 @@ struct Builder<'a> {
     /// 在 `<script>`、`<style>` 里：标签名。行内 HTML 的开标签、内容和闭标签是分开的几个事件，内容到
     /// 闭标签为止都不显示。
     raw_text: Option<&'static str>,
-    /// 正在收的 Markdown 段落、标题、表格单元格开头的样子；在 HTML 块里是块开头或最近打开的块级标签处
-    /// 的样子，见 `InlineState` 和 `rewind_html_inline_state`。
+    /// 正在收的 Markdown 段落、标题、表格单元格开头的样子；在 HTML 块里是正在收的段落第一段文字处或
+    /// 标题打开处的样子，见 `InlineState` 和 `close_html_inlines`。
     inline_saved: Option<InlineState>,
     /// 各层没摊平的列表项开头的样子：紧凑列表项里的文字没有段落标记，项结束时退回。
     item_saved: Vec<InlineState>,
@@ -507,6 +519,8 @@ impl Builder<'_> {
                 None => self.html(&text, true),
             },
             Event::InlineHtml(text) => self.html(&text, false),
+            // `<script>`、`<style>` 里的引用不显示，也不算引用。
+            Event::FootnoteReference(_) if self.raw_text.is_some() => {}
             Event::FootnoteReference(label) => {
                 let label = label.to_lowercase();
                 let style = InlineStyle { footnote: true, ..InlineStyle::default() };
@@ -578,7 +592,6 @@ impl Builder<'_> {
             }
             Tag::HtmlBlock => {
                 self.flush_implicit();
-                self.inline_saved = Some(self.inline_state());
                 self.html = Some(String::new());
             }
             Tag::List(start) => {
@@ -660,11 +673,12 @@ impl Builder<'_> {
             }
             TagEnd::HtmlBlock => {
                 if let Some(html) = self.html.take() {
+                    // 块的原文到这里才一起解释，这时的样子就是块开头的样子。
+                    let entry = self.inline_state();
                     self.html(&html, true);
-                    // 块里没闭上的段落、标题到这里为止。
+                    // 块里没闭上的段落、标题和行内标签到这里为止。
                     self.close_html_inlines();
-                    self.rewind_html_inline_state();
-                    self.inline_saved = None;
+                    self.rewind_inline_state(entry);
                 }
             }
             TagEnd::List(_) => {
@@ -772,6 +786,12 @@ impl Builder<'_> {
     /// 段落、标题这类块级标签；否则是段落里的行内 HTML，只认行内的标签。
     fn html(&mut self, html: &str, block: bool) {
         for token in html::tokens(html) {
+            // `<script>`、`<style>` 里只等它的闭标签：里面的标签不开样式、链接，也不闭外面的。
+            if let Some(raw) = self.raw_text
+                && !matches!(&token, html::Token::Close(name) if name == raw)
+            {
+                continue;
+            }
             match token {
                 html::Token::Text(text) if block => {
                     let text = html::decode_entities(&html::collapse_whitespace(text));
@@ -782,6 +802,11 @@ impl Builder<'_> {
                             .is_none_or(|last| last.text.ends_with(|ch: char| ch.is_ascii_whitespace()));
                     let text = if at_start { text.trim_start_matches(' ') } else { &text };
                     if !text.is_empty() {
+                        // 块里的段落从第一段文字开始，记下这时的样子：之前开的行内标签包着段落和后面的块
+                        // （`<div><a href>前<h2>标题</h2></a>`），之后开的到段落结束为止。
+                        if self.open.is_none() {
+                            self.inline_saved = Some(self.inline_state());
+                        }
                         self.push_text(text, false);
                     }
                 }
@@ -847,15 +872,21 @@ impl Builder<'_> {
                 }
                 self.close_html_inlines();
                 self.image_run = false;
+                // 和 HTML 一样，`<p>`、`<li>` 这类开在没闭上的同类标签里时先闭上那个（`<p>一<p>二`）。
+                if let Some(last) = self.html_open.last()
+                    && closes_sibling(&name, &last.name)
+                {
+                    let saved = last.saved;
+                    self.html_open.pop();
+                    self.rewind_inline_state(saved);
+                }
                 let center =
                     name == "center" || attr("align").is_some_and(|align| align.eq_ignore_ascii_case("center"));
                 if self.html_open.len() < MAX_NESTING {
-                    self.html_open.push(HtmlOpen { name, center, depth: self.stack.len() });
+                    self.html_open.push(HtmlOpen { name, center, depth: self.stack.len(), saved: self.inline_state() });
                 }
-                // 块里的段落、标题从这里开始，记下开头的样子（标题由 `open_inlines` 记）。
-                match heading {
-                    Some(level) => self.open_inlines(Open::Heading(level)),
-                    None => self.inline_saved = Some(self.inline_state()),
+                if let Some(level) = heading {
+                    self.open_inlines(Open::Heading(level));
                 }
             }
         }
@@ -872,13 +903,14 @@ impl Builder<'_> {
             _ if self.raw_text == Some(name) => self.raw_text = None,
             _ if !block => {}
             _ if html_heading(name).is_some() || HTML_BLOCKS.contains(&name) => {
-                // 先收起段落、标题，块还算在居中的标签里。块里开了没关的行内标签到这里为止，块里还没收文字
-                // 时（`<p><b></p>`）也一样。
+                // 先收起段落、标题，块还算在居中的标签里。标签里开了没关的行内标签到这里为止，还没收文字时
+                // （`<p><b></p>`）也一样。
                 self.close_html_inlines();
-                self.rewind_html_inline_state();
                 self.image_run = false;
                 if let Some(ix) = self.html_open.iter().rposition(|open| open.name == name) {
+                    let saved = self.html_open[ix].saved;
                     self.html_open.truncate(ix);
+                    self.rewind_inline_state(saved);
                 }
             }
             _ => {}
@@ -898,11 +930,14 @@ impl Builder<'_> {
     }
 
     /// HTML 的块边界：收起正在收的段落、标题，末尾的空白和块末尾 `<br>` 留下的换行不要；收了的话行内
-    /// 样式和链接退回段落开头的样子（`rewind_html_inline_state`）。还没收文字时不退：`<a href><h1>`
-    /// 里的链接是包着标题的。
+    /// 样式和链接退回段落开头的样子（`inline_saved`），段落里开了没关的标签到这里为止。还没收文字时不退：
+    /// `<a href><h1>` 里的链接是包着标题的。
     fn close_html_inlines(&mut self) {
+        let saved = self.inline_saved.take();
         if matches!(self.open, Some(Open::Paragraph { .. } | Open::Heading(_))) {
-            self.rewind_html_inline_state();
+            if let Some(saved) = saved {
+                self.rewind_inline_state(saved);
+            }
             while let Some(last) = self.inlines.last_mut() {
                 last.text.truncate(last.text.trim_end_matches([' ', '\n']).len());
                 if !last.text.is_empty() {
@@ -963,11 +998,9 @@ impl Builder<'_> {
         self.raw_text = saved.raw_text;
     }
 
-    /// HTML 块里的段落、标题结束时退回它开头的样子（`inline_saved`，在 HTML 块开头和块级标签打开处
-    /// 记下），留着给同一块里后面的段落用。只退掉开头以后开的标签：开头以前开、块里已经闭上的（`<b><p>a
-    /// </b></p>`）不再打开。
-    fn rewind_html_inline_state(&mut self) {
-        let Some(saved) = self.inline_saved else { return };
+    /// HTML 块里的段落、块级标签和整个块结束时退回它开头的样子 `saved`。只退掉开头以后开的标签：开头
+    /// 以前开、里面已经闭上的（`<b><p>a</b></p>`）不再打开。
+    fn rewind_inline_state(&mut self, saved: InlineState) {
         self.bold = self.bold.min(saved.bold);
         self.italic = self.italic.min(saved.italic);
         self.strike = self.strike.min(saved.strike);

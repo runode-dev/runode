@@ -608,6 +608,44 @@ fn inline_script_and_style_content_is_hidden() {
     let Some(Block::Paragraph(inlines)) = parse("a <style>p { color: red }</style> b\n").pop() else { panic!() };
     assert_eq!(inlines.iter().map(|inline| inline.text.as_str()).collect::<String>(), "a  b");
     assert_eq!(parse("a <script>x ![i](i.png) y\n\nnext\n"), vec![para("a "), para("next")]);
+    // 里面的标签不开样式、链接，也不闭外面的；里面的脚注引用不算引用。
+    assert_eq!(parse("before <script><b>x</script> after\n"), vec![para("before  after")]);
+    assert_eq!(parse("before <script><a href=\"u\">x</script> after\n"), vec![para("before  after")]);
+    let bold = InlineStyle { bold: true, ..InlineStyle::default() };
+    assert_eq!(parse("<b>x <script></b></script> y</b>\n"), vec![Block::Paragraph(vec![styled("x  y", bold)])]);
+    assert_eq!(parse("before <script>[^a]</script> after\n\n[^a]: note\n"), vec![para("before  after")]);
+}
+
+/// HTML 块里在段落文字之前开的行内标签包着段落和后面的子块，到它闭上或者外面的块级标签闭上为止；
+/// 整个 HTML 块结束时退回块开头的样子，块级标签里开的不带到后面。
+#[test]
+fn html_inline_tags_wrap_nested_blocks_until_closed() {
+    let bold = InlineStyle { bold: true, ..InlineStyle::default() };
+    assert_eq!(
+        parse("<div><a href=\"x\">before<h2>Title</h2>after</a></div>\n"),
+        vec![
+            Block::Paragraph(vec![link("before", "x")]),
+            Block::Heading { level: 2, inlines: vec![link("Title", "x")], id: "title".into() },
+            Block::Paragraph(vec![link("after", "x")]),
+        ]
+    );
+    assert_eq!(
+        parse("<div><b><p>one</p></div>\n\nafter\n"),
+        vec![Block::Paragraph(vec![styled("one", bold)]), para("after")]
+    );
+    assert_eq!(
+        parse("<div><a href=\"u\"><p>one</p></div>\n\nafter\n"),
+        vec![Block::Paragraph(vec![link("one", "u")]), para("after")]
+    );
+    // 段落里开的到段落结束为止；`<li>` 开在没闭上的 `<li>` 里时先闭上那个。
+    assert_eq!(
+        parse("<div>one <b>two<h2>T</h2></div>\n"),
+        vec![
+            Block::Paragraph(vec![plain("one "), styled("two", bold)]),
+            Block::Heading { level: 2, inlines: vec![plain("T")], id: "t".into() },
+        ]
+    );
+    assert_eq!(parse("<ul><li><b>one<li>two</ul>\n"), vec![Block::Paragraph(vec![styled("one", bold)]), para("two")]);
 }
 
 /// CommonMark 允许图片里套图片：里面的只把替代文字并进外面那张。

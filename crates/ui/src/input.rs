@@ -20,7 +20,7 @@ use gpui::{
 };
 
 use gpui::accesskit::ActionData;
-use unicode_segmentation::UnicodeSegmentation as _;
+use unicode_segmentation::GraphemeCursor;
 
 use crate::{
     actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
@@ -421,13 +421,22 @@ impl InputState {
 }
 
 /// 往左一个字：按用户看到的字（扩展字位簇）算，`👩‍💻` 这类连起来的 emoji、带附加符号的字和国旗不拆开。
+/// 按整段文字找边界：光标可能落在一个字中间（在 U+0301 前面插进 `e`、输入法给的范围），只看切出来的
+/// 那半段会把半个字当成一个字。光标在字中间时到这个字的开头。
 pub(super) fn previous_char(text: &str, offset: usize) -> usize {
-    text[..offset].grapheme_indices(true).next_back().map_or(0, |(i, _)| i)
+    match GraphemeCursor::new(offset, text.len(), true).prev_boundary(text, 0) {
+        Ok(boundary) => boundary.unwrap_or(0),
+        // 整段都给了，不会要更多的上下文；万一要了按码位退一个。
+        Err(_) => text[..offset].char_indices().next_back().map_or(0, |(i, _)| i),
+    }
 }
 
-/// 往右一个字，和 `previous_char` 一样按字位簇算。
+/// 往右一个字，和 `previous_char` 一样按整段文字的字位簇算；光标在字中间时到这个字的结尾。
 pub(super) fn next_char(text: &str, offset: usize) -> usize {
-    text[offset..].graphemes(true).next().map_or(text.len(), |g| offset + g.len())
+    match GraphemeCursor::new(offset, text.len(), true).next_boundary(text, 0) {
+        Ok(boundary) => boundary.unwrap_or(text.len()),
+        Err(_) => text[offset..].chars().next().map_or(text.len(), |c| offset + c.len_utf8()),
+    }
 }
 
 /// 输入法送来的 `typed` 滤掉控制字符后剩 `kept`，要换掉 `range`：只有控制字符（按 tab 送来的 `\t`）
@@ -983,6 +992,16 @@ mod tests {
         assert_eq!(previous_char(text, accent.end), accent.start);
         assert_eq!(next_char(text, accent.end), text.len());
         assert_eq!(previous_char(text, text.len()), accent.end);
+        // 光标在字中间（ZWJ 前面、附加符号前面）时往两边都到这个字的边界，不停在字里。
+        let inside_coder = 1 + "👩".len();
+        assert_eq!(next_char(text, inside_coder), coder.end);
+        assert_eq!(previous_char(text, inside_coder), coder.start);
+        assert_eq!(next_char(text, accent.start + 1), accent.end);
+        assert_eq!(previous_char(text, accent.start + 1), accent.start);
+        // 国旗的两个区域指示符号之间也一样。
+        let flag = accent.end;
+        assert_eq!(next_char(text, flag + "🇺".len()), text.len());
+        assert_eq!(previous_char(text, flag + "🇺".len()), flag);
     }
 
     #[test]

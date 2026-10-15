@@ -245,8 +245,9 @@ fn find(
 }
 
 /// 在 `chars` 里找盖住第 `pointer` 个字的网址。网址里还能有括号和方括号（维基百科的
-/// `Function_(mathematics)`、IPv6 的 `http://[::1]:3000/`），一起算进来，再去掉句末的标点和没配对的
-/// 右括号：`(见 https://x/a)`、`[文字](https://x/a)` 外面那层括号不是网址的。
+/// `Function_(mathematics)`、IPv6 的 `http://[::1]:3000/`），配对的一起算进来；没配对的右括号是网址的
+/// 结尾，`(见 https://x/a)`、`[文字](https://x/a)` 外面那层括号不是网址的，紧挨着的
+/// `[a](https://a)[b](https://b)` 也各是各的。最后去掉句末的标点。
 fn find_url(chars: &[char], pointer: usize) -> Option<(Range<usize>, LinkTarget)> {
     let url_char = |c: char| link_char(c) || matches!(c, '(' | ')' | '[' | ']');
     if !url_char(chars[pointer]) {
@@ -254,22 +255,36 @@ fn find_url(chars: &[char], pointer: usize) -> Option<(Range<usize>, LinkTarget)
     }
     let start = chars[..pointer].iter().rposition(|&c| !url_char(c)).map_or(0, |i| i + 1);
     let end = chars[pointer..].iter().position(|&c| !url_char(c)).map_or(chars.len(), |i| pointer + i);
-    let mut range = start + scheme_start(&chars[start..end])?..end;
+    // 一段里可能有几个网址，从前往后一个个看；网址里套着的网址（`?to=https://…`）算外面那一个。
+    let mut from = start;
     loop {
-        range = trim(chars, range);
-        let open = match range.end.checked_sub(1).filter(|&last| last >= range.start).map(|last| chars[last]) {
-            Some(')') => '(',
-            Some(']') => '[',
-            _ => break,
-        };
-        let close = chars[range.end - 1];
-        let count = |c: char| chars[range.clone()].iter().filter(|&&x| x == c).count();
-        if count(close) <= count(open) {
-            break;
+        let url_start = from + scheme_start(&chars[from..end])?;
+        if url_start > pointer {
+            return None;
         }
-        range.end -= 1;
+        let (mut parens, mut brackets) = (0usize, 0usize);
+        let mut url_end = end;
+        for (ix, &c) in chars.iter().enumerate().take(end).skip(url_start) {
+            let depth = match c {
+                '(' | ')' => &mut parens,
+                '[' | ']' => &mut brackets,
+                _ => continue,
+            };
+            if matches!(c, '(' | '[') {
+                *depth += 1;
+            } else if *depth == 0 {
+                url_end = ix;
+                break;
+            } else {
+                *depth -= 1;
+            }
+        }
+        let range = trim(chars, url_start..url_end);
+        if range.contains(&pointer) {
+            return Some((range.clone(), LinkTarget::Url(chars[range].iter().collect())));
+        }
+        from = url_end.max(url_start + 1);
     }
-    range.contains(&pointer).then(|| (range.clone(), LinkTarget::Url(chars[range].iter().collect())))
 }
 
 /// 能出现在网址和路径里的字。中日韩这类宽字符不算，免得把紧挨着路径的中文也吞进去。
@@ -393,6 +408,28 @@ mod tests {
             Some(("https://x.com/a".into(), url("https://x.com/a")))
         );
         assert_eq!(found("[doc](https://x.com/a)", "doc", &[]), None);
+    }
+
+    /// 紧挨着的两个 Markdown 链接各是各的：没配对的右括号是网址的结尾，不只在末尾才去掉。
+    #[test]
+    fn adjacent_markdown_links_stay_apart() {
+        let line = "[a](https://a.example)[b](https://b.example)";
+        assert_eq!(found(line, "a.example", &[]), Some(("https://a.example".into(), url("https://a.example"))));
+        assert_eq!(found(line, "b.example", &[]), Some(("https://b.example".into(), url("https://b.example"))));
+        let wiki = "https://x/Function_(mathematics)";
+        assert_eq!(found(&format!("[w]({wiki})[n](https://y/)"), "Function", &[]), Some((wiki.into(), url(wiki))));
+        // 网址里的网址（跳转参数）仍算外面那一个。
+        let outer = "https://x/go?to=https://y/";
+        assert_eq!(found(outer, "y/", &[]), Some((outer.into(), url(outer))));
+    }
+
+    /// 网址后面跟着很多没配对的右括号：只扫一遍，不随括号数平方地变慢。
+    #[test]
+    fn many_unmatched_closing_brackets_are_linear() {
+        let line = format!("https://x/{}", ")".repeat(200_000));
+        let started = std::time::Instant::now();
+        assert_eq!(found(&line, "x/", &[]), Some(("https://x/".into(), url("https://x/"))));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
     }
 
     #[test]
