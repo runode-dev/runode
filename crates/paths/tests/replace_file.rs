@@ -87,3 +87,34 @@ fn a_dangling_symlink_gets_its_target_created() {
     assert_eq!(std::fs::read_to_string(&real).unwrap(), "made\n");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn a_symlink_loop_is_an_error_and_stays_a_link() {
+    let dir = scratch("loop");
+    let link = dir.join("config.conf");
+    symlink("config.conf", &link).unwrap();
+
+    assert!(replace_file(&link, b"new\n").is_err());
+
+    assert_eq!(std::fs::read_link(&link).unwrap(), PathBuf::from("config.conf"));
+    assert_eq!(entries(&dir), ["config.conf"]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_chain_longer_than_the_link_limit_is_an_error() {
+    let dir = scratch("chain");
+    std::fs::write(dir.join("link-41"), "old\n").unwrap();
+    for i in 0..41 {
+        symlink(format!("link-{}", i + 1), dir.join(format!("link-{i}"))).unwrap();
+    }
+
+    assert!(replace_file(&dir.join("link-0"), b"new\n").is_err());
+
+    for i in 0..41 {
+        assert!(std::fs::symlink_metadata(dir.join(format!("link-{i}"))).unwrap().file_type().is_symlink());
+    }
+    assert_eq!(std::fs::read_to_string(dir.join("link-41")).unwrap(), "old\n");
+    assert_eq!(entries(&dir).len(), 42);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

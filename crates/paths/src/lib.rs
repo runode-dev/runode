@@ -251,7 +251,7 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
 
 /// 把 `contents` 整个换进用户的文件 `path`（配置文件这类用户手写过的）：先写到
 /// 同一目录的临时文件再改名换上，写到一半崩溃或磁盘满时原文件原样还在，不会被截成空的。`path` 是
-/// 符号链接时换的是它最终指向的文件，链接留着，dotfiles 管理器靠它；原文件的权限照旧。目录要已经有了。
+/// 符号链接时换的是它最终指向的文件，链接留着，dotfiles 管理器靠它；原文件的权限照旧，新建的文件只有自己能读。目录要已经有了。
 pub fn replace_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     use std::{
         io::Write as _,
@@ -266,11 +266,24 @@ pub fn replace_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         let Ok(link) = std::fs::read_link(&target) else { break };
         target = target.parent().map_or_else(|| link.clone(), |dir| dir.join(&link));
     }
+    // 走满了还是链接（链接成环或链太长）就报错，不然下面的改名会把这一层链接换成普通文件。
+    if std::fs::read_link(&target).is_ok() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{}: too many levels of symbolic links", path.display()),
+        ));
+    }
     let name = target.file_name().unwrap_or_default().to_string_lossy();
     let temp =
         target.with_file_name(format!(".{name}.{}.{}.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    // 临时文件一开始就只有自己能读：先按 umask 建再收紧权限的话，中间别的用户能把它打开并一直拿着
+    // 描述符，之后写进去的私密内容（设备表、口令）就漏了。原文件在的话下面再换回它的权限。
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     // 建不出临时文件时直接返回，不去删同名的那个：它不是这里建的。
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temp)?;
+    let mut file = options.open(&temp)?;
     let written = (|| {
         if let Ok(meta) = std::fs::metadata(&target) {
             file.set_permissions(meta.permissions())?;
