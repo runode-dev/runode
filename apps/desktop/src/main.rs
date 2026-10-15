@@ -70,6 +70,8 @@ fn main() {
 
     application().with_assets(assets::Assets).run(|cx: &mut App| {
         startup::mark("app_run");
+        assets::install_fonts(cx);
+        startup::mark("fonts_install");
         config::install(cx);
         startup::mark("config_install");
         update::install(cx);

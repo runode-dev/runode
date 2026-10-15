@@ -96,6 +96,8 @@ cp "$plist" "$app/Contents/Info.plist"
 # 和染色；形状不合规的旧式 icns 在 macOS 26 起会被套进灰框缩小显示。runode.icns 给旧系统用。
 # 两个文件是提交进仓库的产物，用 scripts/compile-icon.sh 生成。
 cp apps/desktop/assets/compiled/Assets.car apps/desktop/assets/compiled/runode.icns "$app/Contents/Resources/"
+# 终端字体 Hack Nerd Font Mono 编进了二进制，它的许可（MIT、Bitstream Vera）要求分发时带上许可证。
+cp apps/desktop/assets/fonts/HackNerdFontMono/LICENSE.md "$app/Contents/Resources/HackNerdFontMono-LICENSE.md"
 
 # 公证要带安全时间戳；ad-hoc 签名没有时间戳可带。
 sign_options=(--force --sign "$SIGN_IDENTITY")
