@@ -1407,6 +1407,8 @@ impl PreviewPanel {
         };
         let text = doc.rows.get(pos.row).and_then(|row| row.leaf.texts().get(pos.text).map(|text| text.to_string()));
         let at = |offset| MdPos { offset, ..pos };
+        // 按着 Shift、已有选区时是在延长选区，松开时不打开链接；没有选区时照常是单击。
+        let extend = event.modifiers.shift && view.selection.is_some();
         match (event.click_count, text) {
             (2, Some(text)) => {
                 let word = word_range_at(&text, pos.offset.min(text.len()));
@@ -1415,16 +1417,13 @@ impl PreviewPanel {
             (3.., Some(text)) => view.selection = Some((at(0), at(text.len()))),
             _ => {
                 view.selection = match view.selection {
-                    Some((anchor, _)) if event.modifiers.shift => Some((anchor, pos)),
+                    Some((anchor, _)) if extend => Some((anchor, pos)),
                     _ => Some((pos, pos)),
                 };
             }
         }
-        // 按着 Shift 是在延长选区，松开时不打开链接。
-        let link = exact
-            .filter(|_| !event.modifiers.shift)
-            .and_then(|(key, offset)| doc.link_at(key, offset))
-            .map(|(_, url)| url.to_owned());
+        let link =
+            exact.filter(|_| !extend).and_then(|(key, offset)| doc.link_at(key, offset)).map(|(_, url)| url.to_owned());
         // 双击、三击是在选字，松开时不打开链接。
         view.drag = Some(Drag { origin: event.position, moved: event.click_count > 1, link });
         cx.notify();
