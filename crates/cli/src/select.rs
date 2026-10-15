@@ -277,7 +277,7 @@ impl World {
         .flatten()
         {
             line.push_str("  ");
-            line.push_str(&part);
+            line.push_str(&crate::commands::plain(&part));
         }
         line
     }

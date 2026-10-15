@@ -110,14 +110,19 @@ pub(crate) fn revoke(env: &Env, device: &str, out: &mut dyn Write) -> anyhow::Re
         [found] => *found,
         several => {
             let names: Vec<String> =
-                several.iter().map(|known| format!("{} ({})", known.device_id, known.name)).collect();
+                several.iter().map(|known| format!("{} ({})", known.device_id, plain(&known.name))).collect();
             bail!("{device} matches {} devices: {}", several.len(), names.join(", "))
         }
     };
     if !revoke_device(&env.dirs, found.device_id).context("cannot update the paired devices")? {
         bail!("{} was revoked meanwhile", found.device_id);
     }
-    writeln!(out, "Revoked {} ({}); if it is connected, it is cut off within seconds.", found.name, found.device_id)?;
+    writeln!(
+        out,
+        "Revoked {} ({}); if it is connected, it is cut off within seconds.",
+        plain(&found.name),
+        found.device_id
+    )?;
     Ok(())
 }
 
