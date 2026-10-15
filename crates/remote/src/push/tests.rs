@@ -259,13 +259,19 @@ fn a_missing_key_file_is_read_again_later() {
         team_id: "T".into(),
         bundle: "dev.example.app".into(),
     };
-    sender.settings(Some(key), None);
+    sender.settings(Some(key), Some("https://relay.example".into()));
     let route = Route { env: ApnsEnv::Development, via: Via::Direct };
     sender.notify(vec![target(route, &["a"])]);
+    // 发送线程按先后办命令、按先后发排着的通知：等到这条中转的发出去，`a` 就已经因为读不到密钥
+    // 丢掉了，这时才补文件。换个会话，免得它顶掉排着的 `a`。
+    let mut marker = target(RELAY_PROD, &["marker"]);
+    marker.notification.session = SessionId(1);
+    sender.notify(vec![marker]);
+    scratch.wait_for(1);
     assert_eq!(test_key(&scratch.root).0, key_file);
     sender.notify(vec![target(route, &["b"])]);
-    let requests = scratch.wait_for(1);
-    assert_eq!(body(&requests[0])["aps"]["alert"]["body"], "b");
+    let requests = scratch.wait_for(2);
+    assert_eq!(body(&requests[1])["aps"]["alert"]["body"], "b");
 }
 
 /// token 不认时换另一个环境再发，成了把登记的环境改过来；两边都不认就删掉登记。
