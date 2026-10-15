@@ -163,15 +163,13 @@ pub enum Ended {
 }
 
 /// 用户要结束交接没成的旧宿主（连同它的会话）：说得通协议的同 `retire`；协议对不上的（`Probe`
-/// 是 `Incompatible`）没法让它自己退出，同 `terminate`。跑在另一个 app 里的不碰，返回错误。
+/// 是 `Incompatible`）没法让它自己退出，同 `terminate`。跑在另一个 app 里的不碰，返回 `Ended::NotAHost`。
 pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
     let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(build, ClientKind::Cli))?;
     match receive(&mut stream)? {
         HostMsg::Welcome { standalone: true, .. } => {}
-        HostMsg::Welcome { standalone: false, .. } => {
-            return Err(io::Error::other("the host runs inside another runode app"));
-        }
+        HostMsg::Welcome { standalone: false, .. } => return Ok(Ended::NotAHost),
         HostMsg::Incompatible { .. } => {
             drop(stream);
             return terminate(socket);

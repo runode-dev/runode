@@ -6,8 +6,7 @@
 
 use std::{
     collections::HashSet,
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -346,7 +345,7 @@ pub fn write(state: &State) -> io::Result<()> {
 }
 
 /// 把存档写到 `path`，经 `runode_paths::replace_file` 整个换上：写到一半退出、断电或者磁盘满时
-/// 不会留下半个文件，也不留下临时文件。
+/// 不会留下半个文件，写出错时也不留下临时文件。
 fn write_at(path: &Path, state: &State) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
