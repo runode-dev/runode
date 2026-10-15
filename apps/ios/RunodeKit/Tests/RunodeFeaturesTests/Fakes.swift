@@ -152,13 +152,22 @@ struct FakePairing: Pairing {
     }
 }
 
-/// 等 `gate` 里来一个值才配好的假配对；被撤掉时照样配好，看调用方还存不存。
+/// 等 `gate` 里来一个值才配好的假配对；被撤掉时照样配好，看调用方还存不存。像真的配对一样把私钥存进
+/// `keys`，`discard` 时删掉。
 struct GatedPairing: Pairing {
     let gate: AsyncStream<Void>
+    var keys = MemoryDeviceKeyStore()
+    /// 配好的电脑，每次都是它。
+    var machine = machineRecord()
 
     func pair(with invitation: PairingInvitation, deviceName: String) async throws -> MachineRecord {
         for await _ in gate { break }
-        return machineRecord()
+        try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: machine.id)
+        return machine
+    }
+
+    func discard(_ machine: MachineRecord) {
+        try? keys.deleteKey(for: machine.id)
     }
 }
 

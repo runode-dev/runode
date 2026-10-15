@@ -599,12 +599,13 @@ actor UnwritableMachineStore: MachineStore {
         #expect(message.hasPrefix("存不下这台电脑"))
     }
 
-    /// 配对页关掉以后配好的不存。
-    @Test func closingThePageDropsThePairing() async {
+    /// 配对页关掉以后配好的不存，为它存的私钥也删掉。
+    @Test func closingThePageDropsThePairing() async throws {
         var paired: [MachineRecord] = []
         let gate = AsyncStream<Void>.makeStream()
+        let gated = GatedPairing(gate: gate.stream)
         let model = PairingModel(
-            pairing: GatedPairing(gate: gate.stream), deviceName: "x",
+            pairing: gated, deviceName: "x",
             now: { Date(timeIntervalSince1970: 1_800_000_000) }, onPaired: { paired.append($0) })
         let pairing = Task { await model.scanned(link()) }
         #expect(await eventually { model.isBusy })
@@ -612,9 +613,24 @@ actor UnwritableMachineStore: MachineStore {
         gate.continuation.yield()
         await pairing.value
         #expect(paired.isEmpty)
+        #expect(try gated.keys.key(for: gated.machine.id) == nil, "the key saved for the dropped pairing is gone")
         if case .paired = model.phase { Issue.record("a closed page should not reach paired") }
         await model.scanned(link())
         #expect(paired.isEmpty, "a closed page does not pair again")
+    }
+
+    /// 没关页面时配好的照常存，私钥留着。
+    @Test func aKeptPairingKeepsItsKey() async throws {
+        var paired: [MachineRecord] = []
+        let gate = AsyncStream<Void>.makeStream()
+        let gated = GatedPairing(gate: gate.stream)
+        let model = PairingModel(
+            pairing: gated, deviceName: "x",
+            now: { Date(timeIntervalSince1970: 1_800_000_000) }, onPaired: { paired.append($0) })
+        gate.continuation.yield()
+        await model.scanned(link())
+        #expect(paired.map(\.id) == [gated.machine.id])
+        #expect(try gated.keys.key(for: gated.machine.id) != nil)
     }
 
     @Test func rejectionsAreExplained() async {

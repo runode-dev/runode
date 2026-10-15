@@ -5,6 +5,14 @@ import RunodeProtocol
 public protocol Pairing: Sendable {
     /// 配对成功时设备私钥已经存好，返回这台电脑的记录（还没存进 `MachineStore`）。
     func pair(with invitation: PairingInvitation, deviceName: String) async throws -> MachineRecord
+    /// `pair` 配好了、调用方却不要了（配对页已经关掉）：删掉为它存的设备私钥，不然这把钥匙没有记录认领，
+    /// 一直留在钥匙串里。
+    func discard(_ machine: MachineRecord)
+}
+
+extension Pairing {
+    /// 不存私钥的配对（测试、演示）没什么要删的。
+    public func discard(_ machine: MachineRecord) {}
 }
 
 /// 真的配对：按 Bonjour 找到的服务和二维码里的地址挨个试，门禁里发 `remote_pair`。
@@ -46,5 +54,9 @@ public struct RemotePairing: Pairing {
             try keyStore.save(key, for: record.id)
             return record
         }
+    }
+
+    public func discard(_ machine: MachineRecord) {
+        try? keyStore.deleteKey(for: machine.id)
     }
 }

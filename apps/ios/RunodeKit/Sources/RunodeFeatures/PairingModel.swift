@@ -69,7 +69,8 @@ public final class PairingModel {
         phase = .idle
     }
 
-    /// 配对页关掉了：撤掉正在跑的配对，配好了也不存（不换掉同一台电脑的旧配对）。已经在存的照样存完。
+    /// 配对页关掉了：撤掉正在跑的配对，配好了也不存（不换掉同一台电脑的旧配对），为它存的私钥删掉
+    /// （`Pairing.discard`）。已经在存的照样存完。
     public func cancel() {
         cancelled = true
         running?.cancel()
@@ -96,7 +97,10 @@ public final class PairingModel {
         defer { self.running = nil }
         do {
             let machine = try await running.value
-            guard !cancelled else { return }
+            guard !cancelled else {
+                pairing.discard(machine)
+                return
+            }
             do {
                 try await onPaired(machine)
             } catch {
