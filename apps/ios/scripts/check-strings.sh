@@ -7,6 +7,7 @@
 #   - 代码里有、catalog 里没有的键；
 #   - catalog 里缺英文或繁体翻译的键（没译完、译文为空的也算缺，复数这类变体每一条都要译好）；
 #   - 没被当成可本地化字符串的中文字面量（多半是该包 String(localized:) 却直接写了字符串）。
+# ghostty-vt 的 xcframework 还没编过时先编一份。
 #
 # 用法：apps/ios/scripts/check-strings.sh
 set -euo pipefail
@@ -14,6 +15,10 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ios_dir="$(cd "$script_dir/.." && pwd)"
 derived="$ios_dir/build/dd-strings"
+
+if [[ ! -d "$ios_dir/Frameworks/ghostty-vt.xcframework" ]]; then
+  "$script_dir/build-ghostty-vt.sh"
+fi
 
 xcodebuild -project "$ios_dir/Runode.xcodeproj" -scheme Runode -configuration Debug \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath "$derived" \
