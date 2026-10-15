@@ -57,7 +57,8 @@ pub fn theme_names() -> Vec<String> {
         .filter(|name| !name.starts_with('.'))
         .chain(BUNDLED_THEMES.iter().map(|(name, _)| (*name).to_owned()))
         .collect();
-    names.sort_by_key(|name| (!RUNODE_THEMES.contains(&name.as_str()), name.to_lowercase()));
+    // 末了按原名排，同名的才挨在一起让 `dedup` 去掉（`Dracula`、`dracula`、`Dracula` 只按小写排时可能不挨着）。
+    names.sort_by_key(|name| (!RUNODE_THEMES.contains(&name.as_str()), name.to_lowercase(), name.clone()));
     names.dedup();
     names
 }

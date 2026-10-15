@@ -32,6 +32,12 @@ fn triggers_normalize() {
     assert!(parse_trigger("cmd+").is_err());
     assert_eq!(parse_trigger("cmd+minus").unwrap(), "cmd--");
     assert!(parse_trigger("cmd+key_a-b").is_err());
+    assert_eq!(parse_trigger("cmd+key_a").unwrap(), "cmd-a");
+    assert_eq!(parse_trigger("cmd+digit_1").unwrap(), "cmd-1");
+    // `key_`、`digit_` 后面要恰好一个字母或数字，不能空着，也不能带空格变成两下按键。
+    for bad in ["cmd+key_", "cmd+key_a b", "cmd+key_ab", "cmd+digit_", "cmd+digit_a"] {
+        assert!(parse_trigger(bad).is_err(), "{bad}");
+    }
 }
 
 /// 录下来的 GPUI 写法写回配置的写法，再解析回去是同一个触发键。
@@ -133,5 +139,6 @@ fn digit_binds_one_to_nine() {
         !table.iter().any(|(k, _)| k.starts_with("cmd-") && k.ends_with(|c: char| c.is_ascii_digit()) && k != "cmd-0")
     );
     assert!(parse("cmd+digit>n=new_tab").is_err());
+    assert!(parse("ctrl+digit>alt+digit=new_tab").is_err());
     assert!(parse("cmd+t=goto_tab").is_err());
 }

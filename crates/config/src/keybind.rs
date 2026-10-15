@@ -463,12 +463,13 @@ pub fn parse(value: &str) -> Result<Vec<Keybind>, String> {
     let (trigger, action) = value.split_once('=').ok_or("expected TRIGGER=ACTION or clear")?;
     let keys = parse_trigger(trigger.trim())?;
     let action = action.trim();
-    let Some(prefix) = keys.strip_suffix(DIGIT) else {
-        if keys.contains(DIGIT) {
-            return Err("digit only works as the last key".into());
-        }
+    let (prefix, expand) = keys.strip_suffix(DIGIT).map_or((keys.as_str(), false), |prefix| (prefix, true));
+    if prefix.contains(DIGIT) {
+        return Err("digit only works as the last key".into());
+    }
+    if !expand {
         return Ok(vec![bind(keys, action)?]);
-    };
+    }
     (1..=9)
         .map(|n| {
             let action = match (action, n) {
@@ -617,14 +618,24 @@ fn key_name(key: &str) -> Result<String, String> {
     if let Some((_, named)) = NAMED_KEYS.iter().find(|(name, _)| *name == key) {
         return Ok((*named).to_owned());
     }
-    if let Some(rest) = key.strip_prefix("digit_").or_else(|| key.strip_prefix("key_")) {
-        return Ok(rest.to_owned());
+    // Ghostty 按键位的写法：`digit_` 后面是一个数字，`key_` 后面是一个字母。
+    if let Some(rest) = key.strip_prefix("digit_") {
+        return single(rest, |c| c.is_ascii_digit()).ok_or_else(|| format!("invalid key: {key}"));
+    }
+    if let Some(rest) = key.strip_prefix("key_") {
+        return single(rest, |c| c.is_ascii_alphabetic()).ok_or_else(|| format!("invalid key: {key}"));
     }
     let is_function_key = key.strip_prefix('f').is_some_and(|n| n.parse::<u8>().is_ok_and(|n| (1..=24).contains(&n)));
     if is_function_key || key.chars().count() == 1 {
         return Ok(key);
     }
     Err(format!("unknown key: {key}"))
+}
+
+/// `text` 恰好是一个满足 `ok` 的字符时返回它。
+fn single(text: &str, ok: impl Fn(char) -> bool) -> Option<String> {
+    let mut chars = text.chars();
+    chars.next().filter(|&c| ok(c) && chars.next().is_none()).map(String::from)
 }
 
 /// 展开 `text:` 里的转义：`\xHH`、`\u{...}`、`\n`、`\r`、`\t`、`\\`、`\"`、`\'`。
@@ -643,6 +654,10 @@ fn unescape(text: &str) -> Result<String, String> {
             Some(c @ ('\\' | '"' | '\'')) => out.push(c),
             Some('x') => {
                 let hex: String = chars.by_ref().take(2).collect();
+                // `from_str_radix` 认一位数和 `+` 号，`\x1` 这种写了一半的要报错。
+                if hex.len() != 2 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return Err("expected \\xHH".into());
+                }
                 let byte = u8::from_str_radix(&hex, 16).map_err(|_| "expected \\xHH")?;
                 out.push(char::from(byte));
             }
@@ -690,5 +705,7 @@ mod tests {
         assert_eq!(unescape(r"a\nb\t\\").unwrap(), "a\nb\t\\");
         assert_eq!(unescape(r"\u{263a}!").unwrap(), "☺!");
         assert!(unescape(r"\q").is_err());
+        assert!(unescape(r"\x1").is_err());
+        assert!(unescape(r"\x+1").is_err());
     }
 }

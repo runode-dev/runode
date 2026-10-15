@@ -10,6 +10,9 @@ use crate::{Config, parse::KEYS, template::setting_key};
 pub struct ConfigFile {
     lines: Vec<String>,
     trailing_newline: bool,
+    /// 文件以 BOM 开头。读的时候去掉，免得第一行的键带着 U+FEFF 认不出（加载配置时也这样去掉），
+    /// 写回时再加上。
+    bom: bool,
 }
 
 /// 没注释掉的设置行 `key = value` 的键名和值（去掉两边的引号），`parse_entries` 读配置时也按它。
@@ -30,7 +33,8 @@ fn commented(line: &str) -> Option<&str> {
 
 impl ConfigFile {
     pub fn parse(text: &str) -> Self {
-        Self { lines: text.lines().map(str::to_owned).collect(), trailing_newline: text.ends_with('\n') }
+        let (bom, text) = text.strip_prefix('\u{feff}').map_or((false, text), |text| (true, text));
+        Self { lines: text.lines().map(str::to_owned).collect(), trailing_newline: text.ends_with('\n'), bom }
     }
 
     /// 读 `path`；文件还不存在时是一份空的。
@@ -53,6 +57,9 @@ impl ConfigFile {
         let mut text = self.lines.join("\n");
         if self.trailing_newline && !text.is_empty() {
             text.push('\n');
+        }
+        if self.bom {
+            text.insert(0, '\u{feff}');
         }
         text
     }

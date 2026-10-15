@@ -55,6 +55,8 @@ fn rejects_malformed_colors() {
         "RGB:f/f/f",
         "rgbi:1.5/0/0",
         "rgbi:-0.5/0/0",
+        "rgbi:1.0000000000000001/0/0",
+        "rgbi:-0.0000000000000001/0/0",
         "rgbi:1e-1/0/0",
         "rgbi:./0/0",
         "#",

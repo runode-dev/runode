@@ -97,6 +97,9 @@ fn fraction(text: &[u8]) -> Option<f64> {
     }
     let mut digits = int_digits.len();
     let (mut frac, mut scale) = (0u64, 1u64);
+    // 没算进去的位里有不是 0 的：真值比算出来的略大，`1.0000000000000001`、`-0.0000000000000001`
+    // 这样超出范围的不能因为截掉了尾巴就算数。
+    let mut dropped = false;
     for &d in frac_digits.unwrap_or_default() {
         if !d.is_ascii_digit() {
             return None;
@@ -104,6 +107,8 @@ fn fraction(text: &[u8]) -> Option<f64> {
         if scale < 1_000_000_000_000_000 {
             frac = frac * 10 + u64::from(d - b'0');
             scale *= 10;
+        } else {
+            dropped |= d != b'0';
         }
         digits += 1;
     }
@@ -111,6 +116,9 @@ fn fraction(text: &[u8]) -> Option<f64> {
         return None;
     }
     let magnitude = int_part + frac as f64 / scale as f64;
+    if dropped && (negative || magnitude >= 1.) {
+        return None;
+    }
     let result = if negative { -magnitude } else { magnitude };
     (0. ..=1.).contains(&result).then_some(result)
 }

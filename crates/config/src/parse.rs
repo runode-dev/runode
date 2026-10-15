@@ -96,10 +96,12 @@ impl Config {
     /// 读取 Ghostty 与 runode 的配置。`dark` 用于 `theme = light:X,dark:Y`。
     pub fn load(dark: bool) -> Self {
         let mut sources = Vec::new();
+        // Ghostty 的几个配置文件算一层，其中有同一个文件（比如符号链接过去的）只读一次。
+        let mut visited = HashSet::new();
         // Ghostty 配置里的 keybind 针对的是另一套默认键位和动作，照搬过来含义会变，不读。
         let ghostty: Vec<Entry> = ghostty_config_paths()
             .iter()
-            .flat_map(|path| read_entries(path, &mut sources))
+            .flat_map(|path| read_file(path, &mut sources, &mut visited))
             .filter(|e| e.key != "keybind")
             .collect();
         let runode = config_path().map(|path| read_entries(&path, &mut sources)).unwrap_or_default();
@@ -273,6 +275,11 @@ impl Config {
                     or_default(empty, defaults.search_selected_foreground, || parse_terminal_color(value))?;
             }
             "palette" => {
+                // 值为空时去掉此前改过的颜色，前面几层写的也一样。
+                if empty {
+                    self.palette = defaults.palette;
+                    return Ok(());
+                }
                 let (index, color) = value.split_once('=').ok_or("expected N=COLOR")?;
                 let index: u8 = index.trim().parse().map_err(|_| "palette index must be 0-255")?;
                 let color = parse_color(color)?;
@@ -413,8 +420,9 @@ fn or_default<T>(empty: bool, default: T, parse: impl FnOnce() -> Result<T, Stri
     if empty { Ok(default) } else { parse() }
 }
 
+/// 有限的数：`parse` 认 `NaN`、`inf`，交给界面排版和画格子会出错，一并拒掉。
 fn parse_f32(value: &str) -> Result<f32, String> {
-    value.trim().parse().map_err(|_| "expected a number".into())
+    value.trim().parse().ok().filter(|n: &f32| n.is_finite()).ok_or_else(|| "expected a number".into())
 }
 
 /// 秒数，可以带小数；0 表示没有期限，为 `None`。
@@ -519,9 +527,19 @@ fn parse_terminal_color(value: &str) -> Result<TerminalColor, String> {
     }
 }
 
-/// 读一个配置文件及其 `config-file` 引入的文件，按出现顺序返回条目。
-/// 读到的文件记入 `sources`，同一文件只读一次以防循环引入。
+/// 读一个配置文件及其 `config-file` 引入的文件，按出现顺序返回条目。读过和试着读的文件都记入
+/// `sources` 供监视，引入了却还不存在的也算，建出来时要重载。
 fn read_entries(path: &Path, sources: &mut Vec<PathBuf>) -> Vec<Entry> {
+    read_file(path, sources, &mut HashSet::new())
+}
+
+/// `read_entries` 的一层。`visited` 是同一层配置里读过的文件，按 `canonicalize` 后的真实路径记，同一个文件经
+/// `../dir/x`、符号链接这类别的写法引入也只读一次，以防循环引入。它和 `sources` 分开记：Ghostty 和
+/// runode 两层各自引入同一个文件时，两层都要读到它。
+fn read_file(path: &Path, sources: &mut Vec<PathBuf>, visited: &mut HashSet<PathBuf>) -> Vec<Entry> {
+    if !sources.iter().any(|p| p == path) {
+        sources.push(path.to_owned());
+    }
     let mut text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
@@ -535,10 +553,9 @@ fn read_entries(path: &Path, sources: &mut Vec<PathBuf>) -> Vec<Entry> {
     if text.starts_with('\u{feff}') {
         text.drain(..'\u{feff}'.len_utf8());
     }
-    if sources.iter().any(|p| p == path) {
+    if !visited.insert(std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())) {
         return Vec::new();
     }
-    sources.push(path.to_owned());
 
     let mut entries = Vec::new();
     let mut includes = Vec::new();
@@ -564,7 +581,7 @@ fn read_entries(path: &Path, sources: &mut Vec<PathBuf>) -> Vec<Entry> {
         entries.push(entry);
     }
     for include in includes {
-        entries.extend(read_entries(&include, sources));
+        entries.extend(read_file(&include, sources, visited));
     }
     entries
 }
@@ -928,6 +945,62 @@ unknown-key = whatever
         assert!(config.agent_notifications_exclude.is_empty());
         assert_eq!(config.agent_done_sound.as_deref(), Some("Glass"));
         assert_eq!(load(&["agent-notifications-exclude = other"]).agent_notifications_exclude, [AgentKind::Other]);
+    }
+
+    /// 同一个文件经别的写法引入自己也只读一次；还不存在的引入文件记进 `sources`，建出来时要重载。
+    #[test]
+    fn includes_stop_at_the_same_file_and_record_missing_ones() {
+        let dir = std::env::temp_dir().join(format!("runode-include-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let main = dir.join("sub/main.conf");
+        std::fs::write(&main, "font-size = 15\nconfig-file = ../sub/main.conf\nconfig-file = ?extra.conf\n").unwrap();
+        let mut sources = Vec::new();
+        let read = read_entries(&main, &mut sources);
+        assert_eq!(read.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), ["font-size"]);
+        assert!(sources.contains(&dir.join("sub/extra.conf")), "{sources:?}");
+        assert!(sources.len() <= 3, "{sources:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Ghostty 和 runode 两层引入同一个文件时两层都读到它，runode 那层的照样盖过 Ghostty 的。
+    #[test]
+    fn both_layers_read_a_shared_include() {
+        let dir = std::env::temp_dir().join(format!("runode-shared-include-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("shared.conf"), "font-size = 15\n").unwrap();
+        std::fs::write(dir.join("ghostty"), "config-file = shared.conf\n").unwrap();
+        std::fs::write(dir.join("runode.conf"), "font-size = 20\nconfig-file = shared.conf\n").unwrap();
+        let mut sources = Vec::new();
+        let ghostty = read_entries(&dir.join("ghostty"), &mut sources);
+        let runode = read_entries(&dir.join("runode.conf"), &mut sources);
+        assert_eq!(runode.len(), 2);
+        assert_eq!(Config::from_layers(&[ghostty, runode], true, &mut sources).font_size, 15.);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn empty_palette_drops_earlier_overrides() {
+        let config = load(&["palette = 1=#ff0000\n", "palette =\npalette = 2=#00ff00\n"]);
+        let mut want = Config::default().palette;
+        want.retain(|(i, _)| *i != 2);
+        want.push((2, Rgb(0, 255, 0)));
+        assert_eq!(config.palette, want);
+    }
+
+    /// `NaN`、`inf` 交给界面会排版出错，跳过，保留前面的值。
+    #[test]
+    fn geometry_rejects_non_finite_numbers() {
+        for bad in ["NaN", "inf", "-inf"] {
+            let config = load(&[&format!(
+                "window-padding-x = 4\nwindow-padding-x = {bad}\nwindow-padding-y = 1,{bad}\n\
+                 adjust-cell-height = 10%\nadjust-cell-height = {bad}\nadjust-cell-height = {bad}%\n"
+            )]);
+            assert_eq!(config.window_padding_x, (4., 4.), "{bad}");
+            assert_eq!(config.window_padding_y, Config::default().window_padding_y, "{bad}");
+            assert_eq!(config.adjust_cell_height, Some(CellHeight::Percent(10.)), "{bad}");
+        }
     }
 
     #[test]

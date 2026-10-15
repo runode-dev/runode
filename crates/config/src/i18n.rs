@@ -10,13 +10,18 @@ const LIKELY_SCRIPTS: &[(&str, &str, &str)] =
     &[("zh", "tw", "hant"), ("zh", "hk", "hant"), ("zh", "mo", "hant"), ("zh", "", "hans")];
 
 /// 在有翻译的语言 `available` 里找和这个标签最接近的。认 BCP 47 和 POSIX 写法，比如
-/// `zh-Hans-CN`、`zh_TW.UTF-8`、`en-US`；先按原样找，再逐级去掉末尾的子标签。找不到返回 `None`。
+/// `zh-Hans-CN`、`zh_TW.UTF-8`、`en-US`；先按原样找（有 `zh-TW` 的翻译就用它），再按地区补上文字，
+/// 逐级去掉末尾的子标签。找不到返回 `None`。
 pub fn resolve(tag: &str, available: &[impl AsRef<str>]) -> Option<String> {
+    let find = |tag: &str| available.iter().map(AsRef::as_ref).find(|l| l.eq_ignore_ascii_case(tag)).map(str::to_owned);
     let tag = tag.split(['.', '@']).next().unwrap_or_default().replace('_', "-").to_ascii_lowercase();
+    if let Some(found) = find(&tag) {
+        return Some(found);
+    }
     let mut tag = with_likely_script(&tag);
     loop {
-        if let Some(found) = available.iter().map(AsRef::as_ref).find(|l| l.eq_ignore_ascii_case(&tag)) {
-            return Some(found.to_owned());
+        if let Some(found) = find(&tag) {
+            return Some(found);
         }
         tag.truncate(tag.rfind('-')?);
     }

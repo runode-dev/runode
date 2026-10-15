@@ -68,3 +68,15 @@ fn checks_values_like_the_loader() {
     assert!(check_value("keybind", "cmd+t=nope").is_err());
     assert!(check_value("no-such-key", "1").is_err());
 }
+
+/// 带 BOM 的文件：第一行的设置照样认得出、删得掉，写回时 BOM 还在。
+#[test]
+fn a_leading_bom_does_not_hide_the_first_setting() {
+    let text = "\u{feff}font-size = 20\nbackground = #000000\n";
+    let file = ConfigFile::parse(text);
+    assert_eq!(file.values("font-size"), ["20"]);
+    assert!(file.has("font-size"));
+    assert_eq!(file.text(), text);
+    assert_eq!(set(text, "font-size", &[]), "\u{feff}background = #000000\n");
+    assert_eq!(set(text, "font-size", &["18"]), text.replace("20", "18"));
+}

@@ -17,3 +17,11 @@ fn resolves_language_tags() {
     assert_eq!(resolve("ja-JP"), None);
     assert_eq!(resolve(""), None);
 }
+
+/// 有地区的翻译时先用它，不补上文字去找别的。
+#[test]
+fn exact_regional_tags_win_over_the_likely_script() {
+    assert_eq!(resolve("zh_TW.UTF-8", &["zh-TW", "zh-Hant"]).as_deref(), Some("zh-TW"));
+    assert_eq!(resolve("zh-TW", &["en", "zh-TW"]).as_deref(), Some("zh-TW"));
+    assert_eq!(resolve("zh-HK", &["zh-TW", "zh-Hant"]).as_deref(), Some("zh-Hant"));
+}
