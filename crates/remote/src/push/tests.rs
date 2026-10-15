@@ -280,13 +280,14 @@ fn bad_tokens_try_the_other_environment() {
     let requests = scratch.wait_for(2);
     assert_eq!(body(&requests[0])["env"], "production");
     assert_eq!(body(&requests[1])["env"], "development");
-    assert_eq!(scratch.registrations()[0].env, ApnsEnv::Development);
+    // 发送线程拿到响应之后才改登记，晚于假 curl 记下请求。
+    wait_until("the registration switches to development", || scratch.registrations()[0].env == ApnsEnv::Development);
 
     scratch.rule("/v2/notify", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
     scratch.rule("/v2/notify", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
     sender.notify(vec![target(RELAY_PROD, &[])]);
     scratch.wait_for(4);
-    assert_eq!(scratch.registrations(), []);
+    wait_until("the registration is dropped", || scratch.registrations().is_empty());
 }
 
 /// 连不上时退避重试。

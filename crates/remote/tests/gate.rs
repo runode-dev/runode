@@ -347,13 +347,18 @@ fn the_certificate_stays_the_same_across_restarts() {
         std::sync::Arc::new(|| Err(std::io::Error::other("unused"))),
     ));
     assert_eq!(second.err().map(|err| err.kind()), Some(std::io::ErrorKind::AddrInUse));
-    // 停了再开，证书不变，配对过的手机照样认得。
+    // 停了再开，证书不变，配对过的手机照样认得，没配对过的照旧不认。
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
     let before = harness.fingerprint;
     assert_eq!(harness.restart(), before);
     let mut phone = harness.phone();
     assert_eq!(phone.host_name, "测试的 Mac");
-    let auth = phone.auth_message(DeviceId([3; 16]), &Key::generate());
-    assert_eq!(phone.ask(&auth), rejected(RejectReason::UnknownDevice));
+    let auth = phone.auth_message(device_id, &key);
+    assert_eq!(phone.ask(&auth), Some(GateHostMsg::RemoteAccepted { device_id }));
+    let mut stranger = harness.phone();
+    let auth = stranger.auth_message(DeviceId([3; 16]), &Key::generate());
+    assert_eq!(stranger.ask(&auth), rejected(RejectReason::UnknownDevice));
     // 停下以后监听方的状态没了，命令行据此知道远程访问没开。
     harness.listener = None;
     assert_eq!(runode_remote::listener_status(&harness.dirs).unwrap(), None);

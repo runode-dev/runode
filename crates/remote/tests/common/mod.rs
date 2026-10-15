@@ -221,9 +221,13 @@ impl Phone {
         self.tls.flush().unwrap();
     }
 
-    /// 读一条门禁消息；连接关了时为 `None`。
+    /// 读一条门禁消息；连接干净地关了（读到结尾）时为 `None`。读超时、读出错时测试失败：
+    /// 监听卡住不回话和关了连接是两回事，不能都当成关了。
     pub fn read_gate(&mut self) -> Option<GateHostMsg> {
-        let frame = read_gate_frame(&mut self.tls).ok()??;
+        let frame = match read_gate_frame(&mut self.tls) {
+            Ok(frame) => frame?,
+            Err(err) => panic!("reading a gate message failed: {err}"),
+        };
         assert_eq!((frame.kind, frame.channel), (FrameKind::Control, 0));
         Some(frame.message().unwrap())
     }
@@ -262,9 +266,13 @@ impl Phone {
     }
 }
 
-/// 宿主那一端读一条前端的控制消息。
+/// 宿主那一端读一条前端的控制消息；桥接那头关了连接（读到结尾）时为 `None`。读超时、读出错时
+/// 测试失败：桥接没关宿主那头、只是不再写时，「已经关了」的断言不能因为超时照样通过。
 pub fn read_client_msg(host: &UnixStream) -> Option<ClientMsg> {
-    read_frame(&mut &*host).ok()?.map(|frame| frame.message().unwrap())
+    match read_frame(&mut &*host) {
+        Ok(frame) => frame.map(|frame| frame.message().unwrap()),
+        Err(err) => panic!("reading from the bridge failed: {err}"),
+    }
 }
 
 /// 只认证书指纹的校验，和手机端一样。
