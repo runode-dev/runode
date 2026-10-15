@@ -49,6 +49,11 @@ impl Release {
         if version_parts(&release.version).is_none() {
             return Err(Error::Manifest(format!("{:?} is not a version number", release.version)));
         }
+        // 新包可信靠签名核对，但 `page` 是原样交给系统打开的，清单被换掉时不能借它打开任意地址。
+        let https = |url: &str| url.starts_with("https://");
+        if !https(&release.page) || !release.archives.values().all(|url| https(url)) {
+            return Err(Error::Manifest("urls in the manifest must be https".into()));
+        }
         Ok(release)
     }
 
