@@ -621,6 +621,31 @@ fn turning_pushes_off_drops_backing_off_notifications() {
     assert_eq!(scratch.requests().len(), 1);
 }
 
+/// 设备表一时读不了（这里是文件坏了）不当成手机都注销了：照旧连着宿主，之后要等回答的照样推。
+#[test]
+fn an_unreadable_device_table_keeps_the_registrations() {
+    let scratch = Scratch::new("pusher-unreadable");
+    let host = FakeHost::default();
+    host.set(AgentState::Working);
+    let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();
+    pusher.set_settings(PushSettings {
+        delay: Duration::ZERO,
+        relay: Some("https://relay.example".into()),
+        ..PushSettings::default()
+    });
+    pusher.set_listening(Listening::On);
+    scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
+    wait_until("the first session list", || host.list_sessions.load(Ordering::SeqCst) >= 1);
+
+    std::fs::write(scratch.dirs.remote_access_devices_file().unwrap(), "{ not json").unwrap();
+    // 每轮先读设备表再要会话列表：又要了两份列表时，坏了的设备表至少读过一次。
+    let lists = host.list_sessions.load(Ordering::SeqCst);
+    wait_until("two more rounds", || host.list_sessions.load(Ordering::SeqCst) >= lists + 2);
+    host.set(AgentState::Blocked);
+    scratch.wait_for(1);
+    assert_eq!(host.connections.load(Ordering::SeqCst), 1);
+}
+
 /// 官方 App 只在这个构建带着中转时经中转推，没带时跳过。
 #[test]
 fn the_official_app_needs_a_relay() {

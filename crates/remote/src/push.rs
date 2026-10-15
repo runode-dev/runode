@@ -243,20 +243,24 @@ impl Poller {
             if poll {
                 self.next_poll = now + POLL_INTERVAL;
                 let registrations = if settings.enabled && listening == Listening::On {
-                    devices::push_registrations(&self.dirs).unwrap_or_else(|err| {
-                        tracing::warn!("cannot read push registrations: {err}");
-                        Vec::new()
-                    })
+                    // 设备表一时读不了（文件坏了、文件描述符用完）不等于手机都注销了：
+                    // 照旧用上一次读到的登记，排着的通知也不丢，下一轮再读。
+                    devices::push_registrations(&self.dirs)
+                        .inspect_err(|err| tracing::warn!("cannot read push registrations: {err}"))
+                        .ok()
                 } else {
-                    Vec::new()
+                    Some(Vec::new())
                 };
-                if registrations != self.registrations {
-                    // 关了推送、注销了或者换了 token 的手机，排着还没发出去的通知不发了。
-                    let kept =
-                        registrations.iter().map(|registration| (registration.device_id, registration.token.clone()));
-                    self.sender.keep(kept.collect());
+                if let Some(registrations) = registrations {
+                    if registrations != self.registrations {
+                        // 关了推送、注销了或者换了 token 的手机，排着还没发出去的通知不发了。
+                        let kept = registrations
+                            .iter()
+                            .map(|registration| (registration.device_id, registration.token.clone()));
+                        self.sender.keep(kept.collect());
+                    }
+                    self.registrations = registrations;
                 }
-                self.registrations = registrations;
             }
             if !self.active(&settings, listening) {
                 self.host = None;
