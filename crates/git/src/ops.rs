@@ -8,6 +8,7 @@ use std::{
     os::unix::{ffi::OsStrExt, process::CommandExt},
     path::{Component, Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
+    sync::{Arc, Mutex, PoisonError},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -17,6 +18,9 @@ use crate::{FileDiff, FileStatus, Stash, UntrackedCache, find_repo, git, git_com
 /// 一条写仓库的 git 命令最多跑这么久，到时杀掉：推送、拉取要联网，给得长些；等的是 ssh 问口令、
 /// 确认主机指纹或者 gpg 等着输密码这种永远等不来的输入时，不让后台线程一直挂着。
 const RUN_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// git 退出以后最多再等它的输出管道关上这么久：钩子留在后台的进程拿着管道时等不到头。
+const PIPE_GRACE: Duration = Duration::from_secs(1);
 
 /// 能在后台线程里用的仓库句柄，写操作都挂在它上面；由 `Snapshot::repo` 取得。git 命令
 /// 可能要跑好几秒（推送、拉取），界面线程别直接调。子模块和嵌套的仓库各用各的句柄。
@@ -112,14 +116,14 @@ fn run_for<S: AsRef<OsStr>>(
             let _ = stdin.write_all(&input);
         });
     }
-    let stdout = read_all(child.stdout.take());
-    let stderr = read_all(child.stderr.take());
+    let stdout = Drain::spawn(child.stdout.take());
+    let stderr = Drain::spawn(child.stderr.take());
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
-            Ok(Some(status)) if stdout.is_finished() && stderr.is_finished() => break status,
-            Ok(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            Ok(_) => {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(None) => {
                 kill_group(&mut child);
                 return Err(GitError::new(format!("git 超过 {} 秒没跑完，停下了", timeout.as_secs())));
             }
@@ -129,20 +133,44 @@ fn run_for<S: AsRef<OsStr>>(
             }
         }
     };
-    let stdout = stdout.join().unwrap_or_default();
-    let stderr = stderr.join().unwrap_or_default();
-    output_result(status, stdout, &stderr)
+    // git 写的这时都已经在管道里了。钩子拉起的后台进程继承了管道、一直不关时读不到头，最多等
+    // `PIPE_GRACE`，拿到现在读到的，读的线程留给它们。
+    let drained = Instant::now() + PIPE_GRACE;
+    while !(stdout.is_finished() && stderr.is_finished()) && Instant::now() < drained {
+        thread::sleep(Duration::from_millis(10));
+    }
+    output_result(status, stdout.take(), &stderr.take())
 }
 
-/// 在另一个线程里读完 `pipe`。
-fn read_all(pipe: Option<impl Read + Send + 'static>) -> JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let mut out = Vec::new();
-        if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut out);
-        }
-        out
-    })
+/// 在另一个线程里读 `pipe` 直到关上，读到的随时可取。
+struct Drain {
+    read: Arc<Mutex<Vec<u8>>>,
+    thread: JoinHandle<()>,
+}
+
+impl Drain {
+    fn spawn(pipe: Option<impl Read + Send + 'static>) -> Self {
+        let read = Arc::new(Mutex::new(Vec::new()));
+        let out = read.clone();
+        let thread = thread::spawn(move || {
+            let Some(mut pipe) = pipe else { return };
+            let mut chunk = [0; 8192];
+            while let Ok(n @ 1..) = pipe.read(&mut chunk) {
+                out.lock().unwrap_or_else(PoisonError::into_inner).extend_from_slice(&chunk[..n]);
+            }
+        });
+        Self { read, thread }
+    }
+
+    /// 管道关上了，读完了。
+    fn is_finished(&self) -> bool {
+        self.thread.is_finished()
+    }
+
+    /// 到现在读到的。
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(&mut *self.read.lock().unwrap_or_else(PoisonError::into_inner))
+    }
 }
 
 /// 没设 `GIT_SSH_COMMAND`、`GIT_SSH` 和 `core.sshCommand` 时让 ssh 用 `BatchMode`：要输口令、
@@ -652,6 +680,28 @@ mod tests {
             thread::sleep(Duration::from_millis(50));
         }
         assert!(!alive(), "钩子 {pid} 还活着");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 钩子把进程留在后台、拿着 git 的输出管道：git 退出了就算跑完，不等那个进程。
+    #[test]
+    fn returns_when_git_exits_though_a_hook_left_the_pipes_open() {
+        let dir = temp_repo("background-hook");
+        let pid_file = dir.join("hook.pid");
+        let hooks = dir.join(".git/test-hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        let hook = hooks.join("post-commit");
+        fs::write(&hook, format!("#!/bin/sh\nsleep 30 &\necho $! > '{}'\n", pid_file.display())).unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
+        let started = Instant::now();
+        let args = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
+        let result = run_for(&dir, args, None, Duration::from_secs(20));
+        let elapsed = started.elapsed();
+        let pid = fs::read_to_string(&pid_file).unwrap().trim().to_owned();
+        let _ = Command::new("kill").arg(&pid).status();
+        assert!(result.is_ok(), "{result:?}");
+        assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
         fs::remove_dir_all(&dir).unwrap();
     }
 
