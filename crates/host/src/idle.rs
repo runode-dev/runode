@@ -12,8 +12,8 @@ const MAX_TICK: Duration = Duration::from_millis(500);
 const LONG_TICK: Duration = Duration::from_secs(30);
 /// 收到 `Shutdown` 后，最多等这么久让各条连接写完 `Goodbye` 断开。
 pub(crate) const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
-/// 退出前（交接出去的除外）最多等这么久让会话线程都结束、杀掉 shell。会话线程丢掉 `Pty` 时先发
-/// SIGHUP，不退出的等一会儿（几百毫秒）再 SIGKILL，各个会话一起等。
+/// 退出前最多等这么久让会话线程都结束、杀掉 shell。会话线程丢掉 `Pty` 时先发 SIGHUP，不退出的等一会儿
+/// （几百毫秒）再 SIGKILL，各个会话一起等。
 const SESSIONS_END_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// `Host::run_until_idle` 为什么返回。
@@ -39,7 +39,8 @@ impl Host {
     /// 持续 `idle` 后退出；收到 `Shutdown` 时结束所有会话、给所有连接发 `Goodbye` 后退出。
     ///
     /// 返回前等会话线程都结束（连这时正在开的，开好后被拒绝、结束），shell 是它们丢掉 `Pty` 时杀的，
-    /// 最多等 `SESSIONS_END_TIMEOUT`。交接给了新宿主时不等：会话交出去了，不归这边结束。
+    /// 最多等 `SESSIONS_END_TIMEOUT`。交接给了新宿主时也等：交出去的会话交出 PTY 后线程就结束了，不费时间；
+    /// 没交出去的（交接开始前就在开、开好后被拒绝的，shell 已经退出、交接时结束掉的）还得这边杀掉 shell。
     ///
     /// 退出前不再接新连接，删掉 `Host::listen` 开的 socket、放开锁：判断空闲和停止接新连接在同一把
     /// 锁里，不会有连接在两者之间连上来又被丢下；之后来的前端连不上，自己拉起新的宿主，新宿主
@@ -98,11 +99,9 @@ impl Host {
         }
         // 正在开的会话开好时要拿 `peers` 看 `stop`，等会话线程时不能拿着它。
         drop(peers);
-        if reason != Stopped::Handoff {
-            let left = shared.session_threads.wait_until(Instant::now() + SESSIONS_END_TIMEOUT);
-            if left > 0 {
-                tracing::warn!("{left} session threads still running on exit");
-            }
+        let left = shared.session_threads.wait_until(Instant::now() + SESSIONS_END_TIMEOUT);
+        if left > 0 {
+            tracing::warn!("{left} session threads still running on exit");
         }
         tracing::info!("the host stops: {reason:?}");
         reason

@@ -162,16 +162,25 @@ fn running(pid: libc::pid_t) -> bool {
 }
 
 /// Linux 上信号 0 对等着收尸的进程也成功，看 `/proc/<pid>/stat` 里的状态：`Z`（僵尸）和 `X`（正在消失）
-/// 不算。文件没了时进程已经没了；别的读不了（描述符用完了、没权限）不能说明它死了，退回信号 0，宁可把
-/// 僵尸当成还在：认错成死了的话，交接时会去接手它还握着的 PTY。
+/// 不算。只有 `/proc` 是这个进程所在的 PID 命名空间的（`/proc/self` 指着自己）时，文件没了才说明进程没了：
+/// 没挂 `/proc`（比如在 chroot 里）、挂的是别的命名空间的时，活着的进程也查不到，或者查到的是别的进程。
+/// 这些情况和别的读不了（描述符用完了、没权限）一样退回信号 0（`signal_alive`），宁可把僵尸当成还在：
+/// 认错成死了的话，交接时会去接手它还握着的 PTY。
 #[cfg(target_os = "linux")]
 fn running(pid: libc::pid_t) -> bool {
-    match std::fs::read(format!("/proc/{pid}/stat")) {
-        Ok(stat) => !matches!(stat_state(&stat), Some(b'Z' | b'X' | b'x')),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound || err.raw_os_error() == Some(libc::ESRCH) => false,
-        // SAFETY: 信号 0 只检查进程在不在。
-        Err(_) => unsafe { libc::kill(pid, 0) == 0 },
+    // SAFETY: 没有参数，总是成功。
+    let own = unsafe { libc::getpid() };
+    let ours = std::fs::read_link("/proc/self").is_ok_and(|link| link.as_os_str() == own.to_string().as_str());
+    if ours {
+        match std::fs::read(format!("/proc/{pid}/stat")) {
+            Ok(stat) => return !matches!(stat_state(&stat), Some(b'Z' | b'X' | b'x')),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound || err.raw_os_error() == Some(libc::ESRCH) => {
+                return false;
+            }
+            Err(_) => {}
+        }
     }
+    signal_alive(pid)
 }
 
 /// `/proc/<pid>/stat` 里的进程状态。第二项是括起来的程序名，可以是任意字节（不一定是 UTF-8），里面可能有
@@ -184,8 +193,16 @@ fn stat_state(stat: &[u8]) -> Option<u8> {
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn running(pid: libc::pid_t) -> bool {
+    signal_alive(pid)
+}
+
+/// 用信号 0 看进程 `pid` 在不在。只有 `ESRCH` 算不在：`EPERM` 是进程在、只是不让给它发信号。等着收尸的
+/// 也算在。
+#[cfg(any(test, not(target_os = "macos")))]
+fn signal_alive(pid: libc::pid_t) -> bool {
     // SAFETY: 信号 0 只检查进程在不在。
-    unsafe { libc::kill(pid, 0) == 0 }
+    let sent = unsafe { libc::kill(pid, 0) } == 0;
+    sent || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 /// 日志里的毫秒数。
@@ -212,6 +229,17 @@ mod tests {
         // 到这里还没收尸：它是个僵尸。
         assert!(child.wait().unwrap().success());
         assert!(!running(pid));
+    }
+
+    /// 信号 0 探到的 `EPERM` 算在：不让发信号的进程（这里是 1 号进程，测试不以 root 跑时就是这样）还在跑，
+    /// 当成死了的话交接时会去接手它还握着的 PTY。收过尸的进程不在了。
+    #[test]
+    fn a_process_that_refuses_signals_is_alive() {
+        assert!(signal_alive(1));
+        let mut child = Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().unwrap();
+        let pid = libc::pid_t::try_from(child.id()).unwrap();
+        child.wait().unwrap();
+        assert!(!signal_alive(pid));
     }
 
     /// 程序名不是 UTF-8、带空格和括号时也读得出状态：读不出来的话活着的宿主会被当成死了。

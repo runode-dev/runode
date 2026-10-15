@@ -398,12 +398,23 @@ fn a_stopping_host_opens_no_more_sessions() {
 /// 才返回，不先走，留下进程退出后才起来的 shell。
 #[test]
 fn stopping_waits_for_a_session_being_opened() {
+    stops_after_a_session_being_opened(Stopped::Shutdown, 43);
+}
+
+/// 交接给新宿主时也一样：交接开始前就在开的会话不在交出去的里面，开好后被拒绝，shell 还得这边杀掉。
+#[test]
+fn a_handoff_waits_for_a_session_being_opened() {
+    stops_after_a_session_being_opened(Stopped::Handoff, 44);
+}
+
+/// 见 `stopping_waits_for_a_session_being_opened`：宿主因为 `reason` 退出。`marker` 让各个测试的 shell 认得出。
+fn stops_after_a_session_being_opened(reason: Stopped, marker: u32) {
     use std::os::unix::fs::PermissionsExt as _;
 
-    let dir = std::env::temp_dir().join(format!("rnh-{}-opening", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("rnh-{}-opening-{marker}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let marker = format!("{}{}", std::process::id(), 43);
+    let marker = format!("{}{marker}", std::process::id());
     let shell = dir.join("nohup.sh");
     std::fs::write(&shell, format!("#!/bin/sh\ntrap '' HUP\nexec /bin/sleep {marker}\n")).unwrap();
     std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -428,7 +439,7 @@ fn stopping_waits_for_a_session_being_opened() {
         assert!(Instant::now() < deadline, "the session never started opening");
         thread::sleep(Duration::from_millis(1));
     }
-    host.shared.peers().stop = Some(Stopped::Shutdown);
+    host.shared.peers().stop = Some(reason);
     let stopped = {
         let host = host.clone();
         let (tx, rx) = mpsc::channel();
@@ -442,7 +453,7 @@ fn stopping_waits_for_a_session_being_opened() {
     );
     drop(env);
     assert!(!opening.join().unwrap(), "a session was opened after the host stopped");
-    assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
+    assert_eq!(stopped.recv_timeout(WAIT), Ok(reason));
     assert!(!running(), "the shell was still running when the host stopped");
     assert_eq!(host.shared.session_threads.live(), 0);
     let _ = std::fs::remove_dir_all(&dir);
