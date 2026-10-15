@@ -285,8 +285,12 @@ pub trait MenuHost: Sized + 'static {
         let Some(menu) = self.menu_slot() else {
             return;
         };
+        // `ix` 来自上一帧画的闭包，菜单之后经 `replace_menu_items` 换成更短的列表时它可能已越界。
+        if ix >= menu.items.len() {
+            return;
+        }
         menu.highlighted = Some(ix);
-        let item = menu.items[ix].as_ref().filter(|item| item.enabled);
+        let item = menu.items.get(ix).and_then(Option::as_ref).filter(|item| item.enabled);
         let Some((action, keep_open)) =
             item.and_then(|item| Some((item.action.as_ref()?.boxed_clone(), item.keep_open)))
         else {
@@ -302,7 +306,8 @@ pub trait MenuHost: Sized + 'static {
 
     /// 按第 `ix` 项右边的第 `button` 个按钮。
     fn press_menu_button(&mut self, ix: usize, button: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let button = self.menu().and_then(|menu| menu.items[ix].as_ref()?.buttons.get(button));
+        // `ix` 可能是菜单换成更短列表之前的行号，取不到就不按。
+        let button = self.menu().and_then(|menu| menu.items.get(ix)?.as_ref()?.buttons.get(button));
         let Some((keep_open, action)) = button.map(|(button, action)| (button.keep_open, action.boxed_clone())) else {
             return;
         };
@@ -331,7 +336,7 @@ pub trait MenuHost: Sized + 'static {
         if modifiers.platform && !modifiers.shift && !modifiers.alt && !modifiers.control {
             let key = event.keystroke.key.as_str();
             let pressed = menu.highlighted.and_then(|ix| {
-                let buttons = &menu.items[ix].as_ref()?.buttons;
+                let buttons = &menu.items.get(ix)?.as_ref()?.buttons;
                 Some((ix, buttons.iter().position(|(button, _)| button.cmd_key == Some(key))?))
             });
             if let Some((ix, button)) = pressed {
@@ -447,7 +452,9 @@ pub trait MenuHost: Sized + 'static {
                 .when_some(item.tooltip.clone(), |row, text| row.tooltip(tooltip(text, None)))
                 .when(row_action, |row| {
                     row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                        if let Some(menu) = this.menu_slot().as_mut().filter(|_| *hovered) {
+                        // 上一帧的 `ix` 在菜单换成更短的列表后可能已越界，越界的不选。
+                        let menu = this.menu_slot().as_mut().filter(|menu| *hovered && ix < menu.items.len());
+                        if let Some(menu) = menu {
                             menu.highlighted = Some(ix);
                             cx.notify();
                         }
