@@ -4,9 +4,13 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
 fn main() {
-    // 当前提交变化时重新生成构建号。
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git/refs/heads");
+    // 当前提交变化时重新生成构建号。路径交给 git 解析：工作树里 `.git` 是个文件，HEAD 在主仓库的
+    // `worktrees/<名字>/` 下，手拼的路径不存在，cargo 会把它当成永远过期、每次都重编。
+    for name in ["HEAD", "refs/heads"] {
+        if let Some(path) = git_path(name) {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
     // 打包脚本在工作区有没提交的改动时设它（`dirty.<改动的摘要>`）：不然改了代码没提交就重新打包，
     // 构建号和在跑的宿主一样，新宿主接不了手（同构建的接手请求宿主一律回 `Busy`）。
     println!("cargo:rerun-if-env-changed=RUNODE_BUILD_TAG");
@@ -41,5 +45,12 @@ fn git_short_head() -> Option<String> {
         .output()
         .ok()
         .filter(|out| out.status.success())?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+/// 仓库里 `name`（`HEAD`、`refs/heads`）实际所在的路径，主仓库和工作树里都对；不在仓库里时为 `None`。
+fn git_path(name: &str) -> Option<String> {
+    let out =
+        Command::new("git").args(["rev-parse", "--git-path", name]).output().ok().filter(|out| out.status.success())?;
     Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
