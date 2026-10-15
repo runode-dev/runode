@@ -811,4 +811,56 @@ mod tests {
         assert!(state.listings.is_empty());
         assert_eq!(state.selected, None);
     }
+
+    /// 重扫后选中项没了行：在读不了、收起来的目录里时改选还有行的那个收起的目录，不看扫回来的先后；
+    /// 自己被删掉（上级的列表里没了）时不留选中。
+    #[test]
+    fn scans_move_a_selection_that_lost_its_row() {
+        let root = Path::new("/p");
+        let open = |selected: &str| {
+            let mut state = TreeState::default();
+            let listing = |dir: &str, entries| (PathBuf::from(dir), Some(entries));
+            let scan = TreeScan {
+                root: root.into(),
+                git: None,
+                listings: vec![
+                    listing("/p", vec![dir("a"), file("z")]),
+                    listing("/p/a", vec![dir("b"), file("y")]),
+                    listing("/p/a/b", vec![file("file")]),
+                ],
+                reveal: None,
+            };
+            assert!(state.apply_scan(scan, ALL));
+            state.expanded.extend([PathBuf::from("/p/a"), PathBuf::from("/p/a/b")]);
+            state.rebuild_rows(root, ALL);
+            state.selected = Some(PathBuf::from(selected));
+            assert!(state.selected_row().is_some());
+            state
+        };
+        let rescan = |state: &mut TreeState, listings| {
+            let scan = TreeScan { root: root.into(), git: None, listings, reveal: None };
+            assert!(state.apply_scan(scan, ALL));
+        };
+
+        // 两层都读不了：里层跟着外层收起没了行，改选外层。
+        for order in [["/p/a/b", "/p/a"], ["/p/a", "/p/a/b"]] {
+            let mut state = open("/p/a/b/file");
+            rescan(&mut state, order.iter().map(|dir| (PathBuf::from(dir), None)).collect());
+            assert_eq!(names(&state), [("a".into(), 0), ("z".into(), 0)], "{order:?}");
+            assert_eq!(state.selected, Some(PathBuf::from("/p/a")), "{order:?}");
+        }
+        // 只有里层读不了：它还有行，改选它。
+        let mut state = open("/p/a/b/file");
+        rescan(&mut state, vec![(PathBuf::from("/p/a/b"), None)]);
+        assert_eq!(state.selected, Some(PathBuf::from("/p/a/b")));
+        // 选中的文件从上级的列表里去掉了。
+        let mut state = open("/p/a/y");
+        rescan(&mut state, vec![(PathBuf::from("/p/a"), Some(vec![dir("b")]))]);
+        assert_eq!(state.selected, None);
+        // 选中的目录自己被删了：收起来，上级的列表里也没了它。
+        let mut state = open("/p/a/b");
+        rescan(&mut state, vec![(PathBuf::from("/p/a"), Some(vec![file("y")])), (PathBuf::from("/p/a/b"), None)]);
+        assert!(!state.expanded.contains(Path::new("/p/a/b")));
+        assert_eq!(state.selected, None);
+    }
 }
