@@ -105,7 +105,9 @@ impl Session {
             let (Some(start), Some(end)) = (line.index(start.x, start.y), line.index(end.x, end.y)) else {
                 return Ok(None);
             };
-            start.max(line.start).min(line.end)..(end + 1).min(line.end)
+            // 先夹终点再夹起点：选区整个落在提示符里时得到空区间，不能让起点越过终点。
+            let end = (end + 1).min(line.end);
+            start.max(line.start).min(end)..end
         };
         let count = line.chars(range.clone()) as usize;
         if count == 0 {
@@ -229,6 +231,10 @@ mod tests {
         session.select_drag(at(4.8, 0.5), false);
         session.select_release(at(4.8, 0.5));
         assert_eq!(session.delete_selection_keys().unwrap(), Some((-2, 3)));
+        // 选区只落在提示符里：什么都不删，退格照常交给程序。
+        session.select_press(at(0.2, 0.5), REPEAT);
+        session.select_release(at(0.2, 0.5));
+        assert_eq!(session.delete_selection_keys().unwrap(), None);
     }
 
     #[test]
