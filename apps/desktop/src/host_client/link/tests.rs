@@ -594,6 +594,68 @@ fn a_terminal_spawned_after_the_caller_gave_up_is_ended() {
     assert_eq!(killed_rx.recv_timeout(WAIT).unwrap(), SessionId(7));
 }
 
+/// 列命令超时只撤掉这一条：宿主另起线程读文件，卡住的只是它，连接照用，会话不收到 `Lost`，之后的请求
+/// 照常拿到回话；宿主随后补回的那条没人收，丢掉，不交给别的请求。
+#[test]
+fn a_task_listing_that_times_out_keeps_the_connection() {
+    let link = fake_host(move |mut stream| {
+        let mut late = None;
+        while let Ok(Some(frame)) = read_frame(&mut stream) {
+            let answers = match frame.message::<ClientMsg>() {
+                // 先不回，等下一个 `Layout` 时补上。
+                Ok(ClientMsg::ListTasks { req, dir }) => {
+                    late = Some(HostMsg::Tasks { req, dir, sources: Vec::new() });
+                    continue;
+                }
+                Ok(ClientMsg::ListSessions) => vec![HostMsg::SessionList { sessions: Vec::new() }],
+                // 超时的那条补回在这一条的回话前面。
+                Ok(ClientMsg::Layout { req }) => {
+                    late.take().into_iter().chain([HostMsg::Layout { req, windows: Vec::new() }]).collect()
+                }
+                _ => continue,
+            };
+            for answer in answers {
+                let frame = Frame::control(&answer).unwrap();
+                write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
+            }
+        }
+    });
+    let mut rx = link.attach(SessionId(1), None, AttachMode::Snapshot);
+    assert!(link.list_tasks(PathBuf::from("/stuck"), Duration::from_millis(100)).is_err());
+    assert!(link.connected());
+    assert!(link.inner.state().replies.is_empty(), "the timed-out request is no longer registered");
+    assert!(link.list_sessions(WAIT).unwrap().is_empty());
+    assert!(link.held_layout(WAIT).unwrap().is_empty());
+    assert!(link.connected());
+    assert!(rx.try_recv().is_err(), "the session did not hear Lost");
+}
+
+/// 读线程核对过代数、还没补发时连接正好换了：补发的 `Kill`（开好的会话没人要）和 `UiReply`（界面不收
+/// 请求了）只发在原来那条连接上，不发给新宿主，免得杀掉新宿主上编号相同的会话。
+#[test]
+fn messages_the_reader_sends_back_stay_on_their_connection() {
+    let (seen, seen_rx) = mpsc::channel();
+    let link = fake_host(move |mut stream| {
+        while let Ok(Some(frame)) = read_frame(&mut stream) {
+            if seen.send(frame.message::<ClientMsg>().unwrap()).is_err() {
+                break;
+            }
+        }
+    });
+    // 界面不收请求了，`UiRequest` 交不出去，读线程回 `UiReply`。
+    drop(link.ui_requests());
+    // 现在连着的是新宿主。把代数拨回上一条，`dispatch` 当成旧连接的读线程核对时还没换；补发时写的那端
+    // 已经是新宿主的。
+    let current = link.inner.state().generation;
+    let earlier = current - 1;
+    link.inner.state().generation = earlier;
+    dispatch(&link.inner, earlier, HostMsg::Spawned { req: 99, id: SessionId(7) });
+    dispatch(&link.inner, earlier, HostMsg::UiRequest { ui: 3, request: Box::new(ClientMsg::Layout { req: 1 }) });
+    link.inner.state().generation = current;
+    link.send(ClientMsg::ListSessions);
+    assert_eq!(seen_rx.recv_timeout(WAIT).unwrap(), ClientMsg::ListSessions);
+}
+
 #[test]
 fn a_shutdown_goodbye_ends_every_session() {
     let link = fake_host(|mut stream| {
