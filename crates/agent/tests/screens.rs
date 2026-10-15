@@ -7,7 +7,7 @@ use runode_types::agent::{AgentKind, AgentState};
 fn verdict(kind: AgentKind, screen: &str, title: &str, progress: &str) -> &'static str {
     let book = RuleBook::new(None);
     let rules = book.rules(kind).unwrap_or_else(|| panic!("no rules for {kind:?}"));
-    match rules.evaluate(Signals { screen, title, progress }) {
+    match rules.evaluate(Signals { screen: Some(screen), title, progress }) {
         Verdict::Matched { state: AgentState::Working, .. } => "working",
         Verdict::Matched { state: AgentState::Idle, .. } => "idle",
         Verdict::Matched { state: AgentState::Blocked, visible, rule } => {
@@ -186,6 +186,8 @@ fn maki_muse_qoder_qwen() {
     use AgentKind::*;
     assert_eq!(screen(Maki, "❯ \n ⠋ [BUILD] sonnet\n"), "working");
     assert_eq!(screen(Maki, "❯ \n [BUILD] sonnet\n"), "idle");
+    // 窄屏下状态栏盖掉了模式标签，看输入框；空输入框行尾的空格已经去掉了。
+    assert_eq!(screen(Maki, "❯\n─────\n ctx 12% · sonnet\n"), "idle");
     assert_eq!(screen(Muse, "◆ Working (3s · esc to interrupt)\n"), "working");
     assert_eq!(screen(Muse, "⟩\n"), "idle");
     assert_eq!(screen(Muse, "Settings\nenter confirm · esc go back\n"), "hold");

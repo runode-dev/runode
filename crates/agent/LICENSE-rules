@@ -1,8 +1,9 @@
 runode-agent 内置的 agent 识别规则（rules/ 目录下的 22 份 .toml 文件）取自 herdr
 （https://github.com/herdrdev/herdr，版本 0.9.3，提交 c4653a4f10502601ac110b12b2c45a5f7134082b，
 原路径 src/detect/manifests/），按 Apache License 2.0 使用，随 runode 的二进制一起分发。
-规则文件的改动只有两处：删掉了注释里指向 herdr 自身和它的 issue 编号的出处说明，
-删掉了 herdr 内部命名空间的别名（herdr:opencode、herdr:kilo、herdr:pi）；规则本身没有改动。
+规则文件的改动有三处：删掉了注释里指向 herdr 自身和它的 issue 编号的出处说明，
+删掉了 herdr 内部命名空间的别名（herdr:opencode、herdr:kilo、herdr:pi）；规则本身只改了
+maki 的 prompt_box_idle：runode 交给规则的屏幕文字去掉了行尾空白，它也要认只剩「❯」的空输入框。
 识别引擎、进程名识别和状态去抖是 runode 自己的实现，herdr 只作行为参考；进程名识别的别名表
 和 node、npm 包装的识别方式参照了 herdr 的 src/detect/mod.rs。
 

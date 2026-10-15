@@ -54,14 +54,15 @@ line_regex = ['^ \[(BUILD|PLAN|BASH)\]']
 # On narrow panes the right side of the status bar overwrites the mode label,
 # so fall back to the prompt chevron above the input box border. The not-gates
 # keep this from matching the streaming placeholder or a status bar that still
-# shows the spinner.
+# shows the spinner. Screen text has trailing whitespace trimmed, so an empty
+# input box reads as a bare chevron.
 [[rules]]
 id = "prompt_box_idle"
 state = "idle"
 priority = 840
 region = "bottom_non_empty_lines(3)"
 visible_idle = true
-line_regex = ['^❯ ']
+line_regex = ['^❯(?:\s|$)']
 not = [
   { contains = ["queue another prompt"] },
   { line_regex = ['^( [\x{2800}-\x{28FF}]){1,2} '] },

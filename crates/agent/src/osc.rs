@@ -7,6 +7,9 @@
 const MAX_CHARS: usize = 256;
 /// 一个 OSC 序列最多攒这么多字节，再长的整条丢掉。
 const MAX_BODY: usize = 4096;
+/// 取消正在读的控制序列的两个字节（CAN、SUB）。
+const CAN: u8 = 0x18;
+const SUB: u8 = 0x1a;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum State {
@@ -55,6 +58,7 @@ impl ProgressCapture {
                 State::Body => match b {
                     0x07 => self.finish(),
                     0x1b => State::BodyEscape,
+                    CAN | SUB => self.cancel(),
                     _ => self.push(b),
                 },
                 State::BodyEscape => match b {
@@ -63,12 +67,12 @@ impl ProgressCapture {
                     _ => self.after_escape(b),
                 },
                 State::Discard => match b {
-                    0x07 => State::Ground,
+                    0x07 | CAN | SUB => State::Ground,
                     0x1b => State::DiscardEscape,
                     _ => State::Discard,
                 },
                 State::DiscardEscape => match b {
-                    b'\\' => State::Ground,
+                    b'\\' | CAN | SUB => State::Ground,
                     0x1b => State::DiscardEscape,
                     _ => State::Discard,
                 },
@@ -81,9 +85,18 @@ impl ProgressCapture {
         &self.latest
     }
 
-    /// 忘掉留下的原文，换了一个程序时用，免得它沿用上一个程序的报告。
+    /// 忘掉留下的原文，换了一个程序时用，免得它沿用上一个程序的报告。上一个程序没写完的序列
+    /// 也一起丢掉：否则之后的一个 BEL 会把它补完，又报出来。
     pub fn clear(&mut self) {
+        self.state = State::Ground;
+        self.body.clear();
         self.latest.clear();
+    }
+
+    /// CAN、SUB 取消了正在读的序列，终端不执行它。
+    fn cancel(&mut self) -> State {
+        self.body.clear();
+        State::Ground
     }
 
     fn after_escape(&mut self, b: u8) -> State {
@@ -146,5 +159,38 @@ mod tests {
         long.extend(b"\x07\x1b]9;4;3\x07");
         capture.observe(&long);
         assert_eq!(capture.latest(), "4;3");
+    }
+
+    #[test]
+    fn cancelled_sequences_are_dropped() {
+        let mut capture = ProgressCapture::default();
+        capture.observe(b"\x1b]9;4;1;-1\x07");
+        capture.observe(b"\x1b]9;4;3\x18\x07");
+        assert_eq!(capture.latest(), "4;1;-1");
+        capture.observe(b"\x1b]9;4;3\x1a\x1b\\");
+        assert_eq!(capture.latest(), "4;1;-1");
+        // 丢弃太长的序列时被取消，紧接着的报告照样认。
+        let mut long = b"\x1b]9;".to_vec();
+        long.extend(std::iter::repeat_n(b'x', MAX_BODY + 10));
+        long.extend(b"\x18\x1b]9;4;0\x07");
+        capture.observe(&long);
+        assert_eq!(capture.latest(), "4;0");
+    }
+
+    #[test]
+    fn clear_drops_an_unfinished_sequence() {
+        let mut capture = ProgressCapture::default();
+        capture.observe(b"\x1b]9;4;3");
+        capture.clear();
+        // 上一个程序没写完的序列不会被之后的 BEL 补完。
+        capture.observe(b"\x07");
+        assert_eq!(capture.latest(), "");
+        // 丢弃太长的序列到一半时换了程序，下一个程序的第一条报告照样认。
+        let mut long = b"\x1b]9;".to_vec();
+        long.extend(std::iter::repeat_n(b'x', MAX_BODY + 10));
+        capture.observe(&long);
+        capture.clear();
+        capture.observe(b"\x1b]9;4;1;50\x07");
+        assert_eq!(capture.latest(), "4;1;50");
     }
 }

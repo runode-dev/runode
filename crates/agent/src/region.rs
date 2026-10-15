@@ -69,9 +69,15 @@ impl Region {
         Some(region)
     }
 
+    /// 这块区域是从屏幕文字里切的（不是标题或进度报告）。
+    pub(crate) fn reads_screen(self) -> bool {
+        !matches!(self, Self::OscTitle | Self::OscProgress)
+    }
+
     /// 从 `screen`（标题、进度报告另给）里切出这块区域。
     pub(crate) fn slice<'a>(self, screen: &'a str, title: &'a str, progress: &'a str) -> &'a str {
-        let lines = Lines::new(screen);
+        // 标题、进度报告和整段屏幕用不着按行切开。
+        let lines = std::cell::LazyCell::new(|| Lines::new(screen));
         match self {
             Self::OscTitle => title,
             Self::OscProgress => progress,

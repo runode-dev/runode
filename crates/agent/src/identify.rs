@@ -98,7 +98,13 @@ fn install_location(path: &str) -> bool {
         parts.iter().any(|part| matches!(*part, "node_modules" | "Cellar"))
             || parts.windows(2).any(|pair| pair == [".local", "bin"])
     };
-    known(path) || std::fs::canonicalize(path).is_ok_and(|real| known(&real))
+    known(path) || resolve(path).is_some_and(|real| known(&real))
+}
+
+/// 顺着符号链接找到真正的文件。相对路径不找：它相对的是那个进程的当前目录，这里不知道，
+/// 按自己的当前目录去找会找到不相干的文件。
+fn resolve(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    path.is_absolute().then(|| std::fs::canonicalize(path).ok()).flatten()
 }
 
 /// 按名字认 agent：命令名、路径或别名都行，不分大小写，`.exe`、`.js` 这类后缀不算。
@@ -212,23 +218,63 @@ fn wrapped_agent(runtime: &str, argv: &[String]) -> Option<String> {
 /// 运行时或 shell 的参数里要跑的脚本，见 `script_index`。
 fn script_path<'a>(runtime: &str, argv: &'a [String]) -> Option<&'a str> {
     let i = match lookup_name(basename(runtime)).as_str() {
-        "node" | "bun" => script_index(argv, JS_EVAL_FLAGS, &[]),
-        "sh" | "bash" | "zsh" | "fish" => script_index(argv, &["-c"], &[]),
-        name if is_python(name) => script_index(argv, &["-c"], &["-m"]),
+        "node" | "bun" => script_index(argv, JS_EVAL_FLAGS, &[], None),
+        "sh" | "bash" | "zsh" | "fish" => {
+            script_index(argv, &["-c"], &[], Some(Bundling { inline: &['c'], value: &['o', 'O'] }))
+        }
+        name if is_python(name) => {
+            script_index(argv, &["-c"], &["-m"], Some(Bundling { inline: &['c', 'm'], value: &['W', 'X'] }))
+        }
         _ => None,
     }?;
     Some(&argv[i])
 }
 
+/// 能把几个短选项连起来写的程序（`bash -lc`、`python3 -Ic`）怎么连写。
+#[derive(Clone, Copy)]
+struct Bundling {
+    /// 直接给代码、跑模块的选项字母：连写的一串里出现了它，也是直接给代码、跑模块。
+    inline: &'static [char],
+    /// 后面要跟值的选项字母：连写时它后面的都是值。
+    value: &'static [char],
+}
+
+impl Bundling {
+    /// `arg` 是连写的一串短选项，里面有 `inline` 的字母。
+    fn inline(self, arg: &str) -> bool {
+        let Some(letters) = arg.strip_prefix('-').filter(|letters| !letters.starts_with('-')) else {
+            return false;
+        };
+        for letter in letters.chars() {
+            if self.inline.contains(&letter) {
+                return true;
+            }
+            if !letter.is_ascii_alphabetic() || self.value.contains(&letter) {
+                return false;
+            }
+        }
+        false
+    }
+}
+
 /// 参数里第一个不是选项的（或者 `--` 后面那个）就是要跑的脚本，返回它在 `argv` 里的下标。遇到
-/// `eval_flags` 或 `module_flags`（直接给代码、跑模块）时为空。
-fn script_index(argv: &[String], eval_flags: &[&str], module_flags: &[&str]) -> Option<usize> {
+/// `eval_flags` 或 `module_flags`（直接给代码、跑模块），或者连写的短选项里有它们（`bundling`
+/// 不为空时）时为空。
+fn script_index(
+    argv: &[String],
+    eval_flags: &[&str],
+    module_flags: &[&str],
+    bundling: Option<Bundling>,
+) -> Option<usize> {
     let mut i = 1;
     while let Some(arg) = argv.get(i) {
         if arg == "--" {
             return (i + 1 < argv.len()).then_some(i + 1);
         }
-        if flag_matches(arg, eval_flags) || flag_matches(arg, module_flags) {
+        if flag_matches(arg, eval_flags)
+            || flag_matches(arg, module_flags)
+            || bundling.is_some_and(|bundling| bundling.inline(arg))
+        {
             return None;
         }
         if arg.starts_with('-') {
@@ -260,30 +306,33 @@ fn option_takes_value(arg: &str) -> bool {
             | "--inspect-port"
             | "-W"
             | "-X"
-            | "-S"
             | "-L"
             | "-o"
     )
 }
 
-/// 一个路径或命令名指的是哪个 agent，返回短名：先看文件名，再认 npm 包里的入口文件，最后
-/// 顺着符号链接找到真正的文件再看一次文件名。
+/// 一个路径或命令名指的是哪个 agent，返回认出它的名字：先看文件名，再认 npm 包里的入口文件
+/// （这时是 agent 的短名），最后顺着符号链接找到真正的文件再看一次文件名。返回原来的文件名
+/// 而不是短名，是因为 `AMBIGUOUS_NAMES` 只管撞名的那几个：`kilo-code` 不撞名，换成短名 `kilo`
+/// 就撞了。
 fn agent_from_path(token: &str) -> Option<String> {
     let token = token.trim_matches(['"', '\'']);
     if token.is_empty() || token.starts_with('-') {
         return None;
     }
-    agent_from_name(basename(token))
-        .or_else(|| agent_from_package_path(token))
+    let name = basename(token);
+    agent_from_name(name)
+        .map(|_| name.to_owned())
+        .or_else(|| agent_from_package_path(token).map(|kind| kind.label().to_owned()))
         .or_else(|| {
             let path = std::path::Path::new(token);
             if path.components().count() < 2 {
                 return None;
             }
-            let resolved = std::fs::canonicalize(path).ok()?;
-            agent_from_name(resolved.file_name()?.to_str()?)
+            let resolved = resolve(path)?;
+            let name = resolved.file_name()?.to_str()?;
+            agent_from_name(name).map(|_| name.to_owned())
         })
-        .map(|kind| kind.label().to_owned())
 }
 
 /// 装在 npm 包里的 agent 的入口文件。
@@ -398,14 +447,14 @@ fn letta_is_interactive(process: &ForegroundProcess) -> bool {
 
 /// letta 入口（它自己，或者 node、bun 跑的 letta 脚本）在参数里的位置。
 fn letta_entry(argv: &[String]) -> Option<usize> {
-    let is_letta = |arg: &str| agent_from_path(arg).as_deref() == Some(AgentKind::Letta.label());
+    let is_letta = |arg: &str| agent_from_path(arg).and_then(|name| agent_from_name(&name)) == Some(AgentKind::Letta);
     if is_letta(&argv[0]) {
         return Some(0);
     }
     if !matches!(lookup_name(basename(&argv[0])).as_str(), "node" | "bun") {
         return None;
     }
-    script_index(argv, JS_EVAL_FLAGS, &[]).filter(|&i| is_letta(&argv[i]))
+    script_index(argv, JS_EVAL_FLAGS, &[], None).filter(|&i| is_letta(&argv[i]))
 }
 
 /// hermes 的安装程序用 `python -I -c <固定的启动代码>` 启动它。只认这段启动代码原样出现、

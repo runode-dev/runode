@@ -305,7 +305,8 @@ impl Tracker {
     }
 
     /// 到了该求值的时候就求值，返回对外的状态是否变了。`last_input` 是最近一次向程序发输入
-    /// 的时刻；`screen` 读屏幕底部的文字，只在要比规则时才调用，读不到时为 `None`。
+    /// 的时刻；`screen` 读屏幕底部的文字，只在要比规则时才调用，读不到时为 `None`（这时只比
+    /// 标题和进度报告的规则）。
     pub fn poll(
         &mut self,
         now: Instant,
@@ -406,9 +407,15 @@ impl Tracker {
             self.grace_from = None;
         }
 
-        let screen = rules.rules(kind).and_then(|set| Some((set, screen()?)));
-        let verdict = screen.as_ref().map_or(Verdict::Unknown, |(set, screen)| {
-            set.evaluate(Signals { screen, title: &self.title_text, progress: self.progress_text.latest() })
+        // 读不到屏幕时照样比标题和进度报告的规则。
+        let set = rules.rules(kind);
+        let screen = set.as_ref().and_then(|_| screen());
+        let verdict = set.as_deref().map_or(Verdict::Unknown, |set| {
+            set.evaluate(Signals {
+                screen: screen.as_deref(),
+                title: &self.title_text,
+                progress: self.progress_text.latest(),
+            })
         });
         let (state, visible) = match verdict {
             Verdict::Matched { state, visible, .. } => (state, visible),

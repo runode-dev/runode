@@ -131,11 +131,19 @@ fn code_given_inline_is_not_a_script() {
         &["python3", "-c", "codex"],
         &["python3", "-m", "codex"],
         &["bash", "-c", "codex"],
+        &["bash", "-lc", "codex"],
+        &["zsh", "-ic", "codex"],
+        &["python3", "-Ic", "codex"],
+        &["python3", "-Bm", "codex"],
         &["node", "/path/to/other.js", "cline"],
         &["node", "/path/to/cline-helper"],
     ] {
         assert_eq!(alone(argv[0], argv), None, "{argv:?}");
     }
+    // 连写的短选项里没有 `-c` 的照样往后找脚本；`-S` 不带值，`-W` 带。
+    assert_eq!(alone("bash", &["bash", "-le", "/opt/bin/codex"]), Some(Codex));
+    assert_eq!(alone("python3", &["python3", "-S", "/opt/bin/codex"]), Some(Codex));
+    assert_eq!(alone("python3", &["python3", "-Wc", "/opt/bin/codex"]), Some(Codex));
     assert_eq!(alone("python3", &["python3", "/tmp/codex.py"]), None);
     assert_eq!(alone("python3", &["python3", "/tmp/codex"]), Some(Codex));
     assert_eq!(alone("MainThread", &["/path/to/other", "/path/to/cline"]), None);
@@ -206,6 +214,8 @@ fn ambiguous_names_need_an_install_location() {
     assert_eq!(alone("python3", &["python3", "/home/user/.local/bin/vibe"]), Some(MistralVibe));
     // 带 agent 字样的别名和不撞名的 agent 不受影响。
     assert_eq!(at("/home/user/bin/trae-cli", &["trae-cli"]), Some(Trae));
+    assert_eq!(alone("node", &["node", "/home/user/bin/kilo-code"]), Some(Kilo));
+    assert_eq!(alone("python3", &["python3", "/home/user/bin/trae-cli"]), Some(Trae));
     assert_eq!(at("/home/user/src/claude", &["claude"]), Some(Claude));
 }
 

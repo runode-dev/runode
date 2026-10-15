@@ -292,6 +292,16 @@ fn program_status_records_are_kept_per_id() {
 }
 
 #[test]
+fn an_unreadable_screen_still_compares_the_title_and_progress() {
+    let mut f = Fixture::started(Letta);
+    // letta 用 `4;3;` 报告在等用户；解析后的进度只说在进行中。
+    f.tracker.output(b"\x1b]9;4;3;\x07", f.at(GRACE_MS));
+    f.tracker.progress(true, f.at(GRACE_MS), || false);
+    f.tracker.poll(f.at(GRACE_MS), None, &f.rules, || None);
+    assert_eq!(f.tracker.agent(), agent(Letta, Blocked));
+}
+
+#[test]
 fn program_status_does_not_keep_an_expired_startup_grace_due() {
     let mut f = Fixture::new();
     f.tracker.foreground(Foreground::Program(Some(Pi)), f.at(0));

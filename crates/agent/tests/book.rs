@@ -17,7 +17,7 @@ fn user_rules_override_the_builtin_ones() {
     // 没有内置规则的 agent 也能用用户规则。
     std::fs::write(dir.join("omp.toml"), rule("omp")).unwrap();
     let book = RuleBook::new(Some(&dir));
-    let signals = Signals { screen: "MARK", ..Default::default() };
+    let signals = Signals { screen: Some("MARK"), ..Default::default() };
     let codex = book.rules(AgentKind::Codex).unwrap();
     let verdict = codex.evaluate(signals);
     assert!(matches!(verdict, Verdict::Matched { rule: "mine", .. }), "{verdict:?}");

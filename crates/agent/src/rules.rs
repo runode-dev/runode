@@ -28,6 +28,8 @@
 //! agent 自己的历史记录、菜单这类看不出当前状态的界面。不跳过的 unknown 规则命中时当作
 //! 没有规则命中。
 
+use std::cell::OnceCell;
+
 use regex::Regex;
 use runode_types::agent::{AgentKind, AgentState};
 use serde::Deserialize;
@@ -153,8 +155,9 @@ struct Gate {
 /// 求值用的输入。
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Signals<'a> {
-    /// 屏幕底部的文字：一行一行，行尾空白去掉，用 `\n` 连接。
-    pub screen: &'a str,
+    /// 屏幕底部的文字：一行一行，行尾空白去掉，用 `\n` 连接。读不到时为 `None`，这时只比
+    /// 标题和进度报告的规则，比屏幕的规则都不算命中。
+    pub screen: Option<&'a str>,
     /// 程序用 OSC 0/2 设的标题，没有时为空。
     pub title: &'a str,
     /// 程序最近一次 OSC 9 报告里 `9;` 后面的部分，没有时为空。
@@ -208,17 +211,22 @@ impl RuleSet {
 
     /// 按 `signals` 求值。
     pub fn evaluate<'r>(&'r self, signals: Signals<'_>) -> Verdict<'r> {
-        // 每块区域只转一次小写、压一次空白，供 `contains` 用；同一块区域多条规则共用。
-        let mut lowered: Vec<(Region, String)> = Vec::new();
+        // 每块区域只切一次；转小写、压空白供 `contains` 用，用到时才做一次。同一块区域多条规则共用。
+        let mut regions: Vec<(Region, &str, OnceCell<String>)> = Vec::new();
         for rule in &self.rules {
-            let text = rule.region.slice(signals.screen, signals.title, signals.progress);
-            let lower = match lowered.iter().position(|(region, _)| *region == rule.region) {
-                Some(i) => &lowered[i].1,
+            let i = match regions.iter().position(|(region, ..)| *region == rule.region) {
+                Some(i) => i,
                 None => {
-                    lowered.push((rule.region, fold(text)));
-                    &lowered[lowered.len() - 1].1
+                    let text = match signals.screen {
+                        Some(screen) => rule.region.slice(screen, signals.title, signals.progress),
+                        None if !rule.region.reads_screen() => rule.region.slice("", signals.title, signals.progress),
+                        None => continue,
+                    };
+                    regions.push((rule.region, text, OnceCell::new()));
+                    regions.len() - 1
                 }
             };
+            let (_, text, lower) = &regions[i];
             if !rule.gate.matches(text, lower) {
                 continue;
             }
@@ -285,6 +293,11 @@ fn compile_gate(spec: GateSpec, negated: bool) -> Result<Gate, String> {
     if !positive && !(negated && !spec.none.is_empty()) {
         return Err("a condition needs contains, regex, line_regex, all or any".into());
     }
+    let contains: Vec<String> = spec.contains.iter().map(|needle| fold(needle)).collect();
+    // 空的词（或者只有空白）处处都出现，等于没写条件。
+    if contains.iter().any(String::is_empty) {
+        return Err("empty contains entry".into());
+    }
     let regex = |patterns: Vec<String>| -> Result<Vec<Regex>, String> {
         patterns
             .into_iter()
@@ -295,7 +308,7 @@ fn compile_gate(spec: GateSpec, negated: bool) -> Result<Gate, String> {
         gates.into_iter().map(|gate| compile_gate(gate, negated)).collect()
     };
     Ok(Gate {
-        contains: spec.contains.iter().map(|needle| fold(needle)).collect(),
+        contains,
         regex: regex(spec.regex)?,
         line_regex: regex(spec.line_regex)?,
         all: nested(spec.all, false)?,
@@ -310,9 +323,12 @@ fn fold(text: &str) -> String {
 }
 
 impl Gate {
-    fn matches(&self, text: &str, lower: &str) -> bool {
-        self.contains.iter().all(|needle| lower.contains(needle.as_str()))
-            && self.regex.iter().all(|regex| regex.is_match(text))
+    /// `lower` 是 `text` 给 `contains` 比对用的写法（见 `fold`），用到时才算。
+    fn matches(&self, text: &str, lower: &OnceCell<String>) -> bool {
+        (self.contains.is_empty() || {
+            let lower = lower.get_or_init(|| fold(text));
+            self.contains.iter().all(|needle| lower.contains(needle.as_str()))
+        }) && self.regex.iter().all(|regex| regex.is_match(text))
             && self.line_regex.iter().all(|regex| text.lines().any(|line| regex.is_match(line)))
             && self.all.iter().all(|gate| gate.matches(text, lower))
             && (self.any.is_empty() || self.any.iter().any(|gate| gate.matches(text, lower)))
