@@ -357,8 +357,12 @@ impl WindowView {
                 layout_report::changed(cx);
             }
         });
-        let visibility_watch =
-            cx.observe_window_visibility(window, |this, _, window, cx| this.sync_visibility(window, cx));
+        let visibility_watch = cx.observe_window_visibility(window, |this, _, window, cx| {
+            this.sync_visibility(window, cx);
+            // 窗口先成了前台、后才看得见（切 Space、显示器醒来）时，成前台那会儿 `mark_seen` 因为看不见
+            // 没算数，到这时才算看到了当前分屏。
+            this.mark_seen(window, cx);
+        });
         let project_poll = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(project::POLL_INTERVAL).await;
