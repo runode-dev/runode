@@ -696,9 +696,10 @@ impl Link {
         answer
     }
 
-    /// 宿主在 `dir` 里列出的命令（Makefile 的目标、package.json 的 scripts），最多等 `timeout`。
+    /// 宿主在 `dir` 里列出的命令（Makefile 的目标、package.json 的 scripts），最多等 `timeout`。宿主
+    /// 另起线程读这些文件，`dir` 在卡住的网络挂载上时只卡那个线程，所以超时不当成连接断了。
     pub fn list_tasks(&self, dir: PathBuf, timeout: Duration) -> Result<Vec<TaskSource>> {
-        match self.request(|req| ClientMsg::ListTasks { req, dir }, timeout)? {
+        match self.request_on(|req| ClientMsg::ListTasks { req, dir }, timeout, OnTimeout::Wait)? {
             HostMsg::Tasks { sources, .. } => Ok(sources),
             other => Err(anyhow!("unexpected answer from the host: {other:?}")),
         }
@@ -707,7 +708,7 @@ impl Link {
     /// 宿主手里的布局（app 上次报给它的，加上之后没开 app 时它自己办的改动，见 `ClientMsg::Layout`），
     /// 最多等 `timeout`。
     pub fn held_layout(&self, timeout: Duration) -> Result<Vec<WindowLayout>> {
-        match self.request(|req| ClientMsg::Layout { req }, timeout)? {
+        match self.request_on(|req| ClientMsg::Layout { req }, timeout, OnTimeout::Disconnect)? {
             HostMsg::Layout { windows, .. } => Ok(windows),
             other => Err(anyhow!("unexpected answer from the host: {other:?}")),
         }
@@ -716,6 +717,16 @@ impl Link {
     /// 发 `make` 用新的请求编号造出的请求，等带着这个编号的回话，最多等 `timeout`；回 `Error` 时是
     /// 它的说明。超时时这条连接按断开处理（`Inner::timed_out`）。
     pub fn request(&self, make: impl FnOnce(u32) -> ClientMsg, timeout: Duration) -> Result<HostMsg> {
+        self.request_on(make, timeout, OnTimeout::Disconnect)
+    }
+
+    /// 同 `request`，超时时照 `on_timeout` 办。
+    fn request_on(
+        &self,
+        make: impl FnOnce(u32) -> ClientMsg,
+        timeout: Duration,
+        on_timeout: OnTimeout,
+    ) -> Result<HostMsg> {
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
         let (reply, generation) = self.expect_reply(req)?;
         if let Err(err) = self.inner.control_on(generation, &make(req)) {
@@ -724,7 +735,11 @@ impl Link {
         }
         let answer = reply.recv_timeout(timeout);
         if matches!(answer, Err(mpsc::RecvTimeoutError::Timeout)) {
-            self.inner.timed_out(generation);
+            match on_timeout {
+                OnTimeout::Disconnect => self.inner.timed_out(generation),
+                // 不等了：撤掉登记，回话晚到时没人收、丢掉。
+                OnTimeout::Wait => drop(self.inner.state().replies.remove(&req)),
+            }
         }
         match answer {
             Ok(HostMsg::Error { message, .. }) => Err(anyhow!(message)),
@@ -774,6 +789,15 @@ impl Link {
         state.replies.insert(req, tx);
         Ok((rx, state.generation))
     }
+}
+
+/// 等回话超时了怎么办。
+#[derive(Clone, Copy)]
+enum OnTimeout {
+    /// 宿主按先后处理这条连接上的消息，回话没来说明它卡住了：连接按断开处理。
+    Disconnect,
+    /// 宿主另起线程办的请求（读文件这类），只是这一个慢：不等了，连接照用。
+    Wait,
 }
 
 /// `HostMsg::Welcome` 里这边要的。
