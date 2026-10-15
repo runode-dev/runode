@@ -247,7 +247,12 @@ impl WindowView {
         );
         cx.spawn(async move |_, cx| {
             if answer.await.ok() == Some(0) {
-                cx.update(|cx| end_sessions(&ids, cx));
+                // 问的时候别的窗口可能接上了其中的会话，它已不在列表里，不能跟着结束；问完才出现的也不结束。
+                cx.update(|cx| {
+                    let listed = cx.try_global::<BackgroundSessions>().map_or(&[][..], |state| &state.sessions);
+                    let ids = still_listed(&ids, listed);
+                    end_sessions(&ids, cx);
+                });
             }
         })
         .detach();
@@ -306,6 +311,11 @@ impl WindowView {
                 .children(rows),
         )
     }
+}
+
+/// `ids` 里仍列在 `sessions` 里的那些。
+fn still_listed(ids: &[SessionId], sessions: &[SessionInfo]) -> Vec<SessionId> {
+    ids.iter().copied().filter(|id| sessions.iter().any(|session| session.id == *id)).collect()
 }
 
 /// 结束这些会话。
@@ -448,5 +458,14 @@ mod tests {
         };
         let sessions = [with_agent(1, AgentKind::Claude), with_agent(2, AgentKind::Other), session(3, false, false)];
         assert_eq!(agent_count(&sessions), 1);
+    }
+
+    #[test]
+    fn ending_skips_sessions_taken_while_asking() {
+        // 问的时候 2 被别的窗口接走了，4 是问完才出现的。
+        let ids = [SessionId(1), SessionId(2), SessionId(3)];
+        let listed = [session(3, false, false), session(1, false, false), session(4, false, false)];
+        assert_eq!(still_listed(&ids, &listed), [SessionId(1), SessionId(3)]);
+        assert!(still_listed(&ids, &[]).is_empty());
     }
 }
