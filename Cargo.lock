@@ -4690,7 +4690,6 @@ dependencies = [
 name = "runode-remote"
 version = "0.1.9"
 dependencies = [
- "anyhow",
  "libc",
  "rcgen",
  "ring",
