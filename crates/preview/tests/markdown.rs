@@ -614,6 +614,21 @@ fn inline_script_and_style_content_is_hidden() {
     let bold = InlineStyle { bold: true, ..InlineStyle::default() };
     assert_eq!(parse("<b>x <script></b></script> y</b>\n"), vec![Block::Paragraph(vec![styled("x  y", bold)])]);
     assert_eq!(parse("before <script>[^a]</script> after\n\n[^a]: note\n"), vec![para("before  after")]);
+    // 里面开的 Markdown 强调、链接、图片结束在闭标签之后时，也不带到后面的文字上。
+    assert_eq!(parse("a <script>*hidden</script> visible*\n"), vec![para("a  visible")]);
+    let strike = InlineStyle { strike: true, ..InlineStyle::default() };
+    assert_eq!(
+        parse("a <script>**h</script> v** ~~w~~\n"),
+        vec![Block::Paragraph(vec![plain("a  v "), styled("w", strike)])]
+    );
+    assert_eq!(parse("a <script>[hidden</script> visible](https://evil.example)\n"), vec![para("a  visible")]);
+    assert_eq!(parse("a <script>![h</script> v](i.png)\n"), vec![para("a  v")]);
+    // 闭标签之后、还在那个结束事件之前新开的照常算。
+    let italic = InlineStyle { italic: true, ..InlineStyle::default() };
+    assert_eq!(
+        parse("a <script>**h</script> *v* w**\n"),
+        vec![Block::Paragraph(vec![plain("a  "), styled("v", italic), plain(" w")])]
+    );
 }
 
 /// HTML 块里在段落文字之前开的行内标签包着段落和后面的子块，到它闭上或者外面的块级标签闭上为止；

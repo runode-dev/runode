@@ -470,6 +470,10 @@ struct Builder<'a> {
     /// 在 `<script>`、`<style>` 里：标签名。行内 HTML 的开标签、内容和闭标签是分开的几个事件，内容到
     /// 闭标签为止都不显示。
     raw_text: Option<&'static str>,
+    /// 没结束的 Markdown 行内标签（强调、加粗、删除线、链接、图片）由里到外各是不是开在
+    /// `raw_text` 里。开在里面的和它的结束事件一起不算，哪怕结束在闭标签之后（`<script>*a</script> b*`
+    /// 里的 b 不是斜体）：和浏览器一样，`<script>` 里的都只是文字。
+    raw_tags: Vec<bool>,
     /// 正在收的 Markdown 段落、标题、表格单元格开头的样子；在 HTML 块里是正在收的段落第一段文字处或
     /// 标题打开处的样子，见 `InlineState` 和 `close_html_inlines`。
     inline_saved: Option<InlineState>,
@@ -551,6 +555,13 @@ impl Builder<'_> {
     }
 
     fn start(&mut self, tag: Tag<'_>) {
+        if matches!(tag, Tag::Emphasis | Tag::Strong | Tag::Strikethrough | Tag::Link { .. } | Tag::Image { .. }) {
+            let raw = self.raw_text.is_some();
+            self.raw_tags.push(raw);
+            if raw {
+                return;
+            }
+        }
         // 列表项总跟着建好的列表新建一层，所以栈最多 `MAX_NESTING + 1` 层。
         let nests = matches!(tag, Tag::BlockQuote(_) | Tag::List(_) | Tag::FootnoteDefinition(_));
         if (nests || matches!(tag, Tag::Item)) && (self.flattened > 0 || (nests && self.stack.len() >= MAX_NESTING)) {
@@ -640,6 +651,11 @@ impl Builder<'_> {
         {
             self.flush_implicit();
             self.flattened -= 1;
+            return;
+        }
+        if matches!(tag, TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link | TagEnd::Image)
+            && self.raw_tags.pop() == Some(true)
+        {
             return;
         }
         match tag {
