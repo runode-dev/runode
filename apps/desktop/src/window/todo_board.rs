@@ -1,8 +1,8 @@
 //! 把铺满窗口的任务板接到窗口上。任务板本身在 `todo_board`：打开时建一个 `TodoBoard`，收起时丢掉。
 //! 这里启动时把和宿主说话的办法交给它（`watch_todos`），每次画之前交给它各 workspace 的目录和名字、当前的
-//! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上的入口；卡片上
-//! agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事（收起、把任务会话接进窗口）经
-//! `TodoBoardEvent` 交回来，它的对话框画在窗口最上层。
+//! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上定时、任务板两个
+//! 入口；卡片上 agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事（收起、换页、把任务会话接进
+//! 窗口）经 `TodoBoardEvent` 交回来，它的对话框画在窗口最上层。
 //!
 //! 看板和手机端引导页一样盖住标签和分屏：切到任何一个标签或 workspace、按 Esc 就收起。卡片的「打开终端」
 //! 把任务的会话接进它目录所在的 workspace 的一个新标签，已经在哪个分屏里时切过去。
@@ -20,7 +20,11 @@ use super::{
     titlebar::styled_agent_mark,
 };
 use crate::{
-    assets::CHECK_ICON, config::AppConfig, host_client, terminal_view::TerminalView, ui::theme::ActiveTheme as _,
+    assets::{CHECK_ICON, CLOCK_ICON},
+    config::AppConfig,
+    host_client,
+    terminal_view::TerminalView,
+    ui::theme::ActiveTheme as _,
 };
 
 /// 开着的任务板。
@@ -55,23 +59,31 @@ fn best_workspace(dirs: &[&Path], dir: &Path, worktree: Option<&Path>, home: Opt
 }
 
 impl WindowView {
-    /// 打开或收起任务板。
+    /// 打开或收起任务板；开着的是定时页时换到任务页。
     pub(super) fn toggle_todo_board(&mut self, _: &ToggleTodoBoard, window: &mut Window, cx: &mut Context<Self>) {
-        if self.todo_board.is_some() {
+        if self.showing_todo_page(false, cx) {
             self.close_todo_board(window, cx);
         } else {
-            self.show_todo_board(window, cx);
+            self.show_todo_board(false, window, cx);
         }
     }
 
-    /// 打开任务板，焦点给它；马上重问一次任务会话的状态，开着时接着轮询。
-    pub(super) fn show_todo_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// 看板开着，显示的是定时页（`schedules`）或任务页。
+    fn showing_todo_page(&self, schedules: bool, cx: &App) -> bool {
+        self.todo_board.as_ref().is_some_and(|board| board.view.read(cx).showing_schedules() == schedules)
+    }
+
+    /// 打开看板的定时页（`schedules`）或任务页，焦点给它；马上重问一次任务会话的状态，开着时接着轮询。
+    pub(super) fn show_todo_board(&mut self, schedules: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.leave_mobile(cx);
         self.drop_settings(cx);
-        if self.todo_board.is_none() {
-            let view = cx.new(|cx| TodoBoard::new(AGENT_MARKS, cx));
-            let events = cx.subscribe_in(&view, window, Self::on_todo_board_event);
-            self.todo_board = Some(OpenTodoBoard { view, _events: events });
+        match &self.todo_board {
+            Some(board) => board.view.update(cx, |board, cx| board.show_schedules(schedules, cx)),
+            None => {
+                let view = cx.new(|cx| TodoBoard::new(AGENT_MARKS, schedules, cx));
+                let events = cx.subscribe_in(&view, window, Self::on_todo_board_event);
+                self.todo_board = Some(OpenTodoBoard { view, _events: events });
+            }
         }
         if let Some(board) = &self.todo_board {
             window.focus(&board.view.focus_handle(cx), cx);
@@ -97,6 +109,7 @@ impl WindowView {
     ) {
         match event {
             TodoBoardEvent::Close => self.close_todo_board(window, cx),
+            TodoBoardEvent::PageChanged => cx.notify(),
             TodoBoardEvent::OpenSession { session, todo } => self.open_todo_session(*session, todo, window, cx),
         }
     }
@@ -144,12 +157,21 @@ impl WindowView {
         }
     }
 
-    /// 侧栏顶上的入口，任务板开着时高亮。
+    /// 侧栏顶上的定时入口，看板开着定时页时高亮。
+    pub(super) fn render_schedules_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let label = rust_i18n::t!("todo_board.schedules").into_owned();
+        let active = self.showing_todo_page(true, cx);
+        super::mobile::page_entry("schedules-entry", CLOCK_ICON, label, active, cx, |this, window, cx| {
+            this.show_todo_board(true, window, cx);
+        })
+    }
+
+    /// 侧栏顶上的任务板入口，看板开着任务页时高亮。
     pub(super) fn render_todo_board_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("todo_board.title").into_owned();
-        let active = self.todo_board.is_some();
+        let active = self.showing_todo_page(false, cx);
         super::mobile::page_entry("todo-board-entry", CHECK_ICON, label, active, cx, |this, window, cx| {
-            this.show_todo_board(window, cx);
+            this.show_todo_board(false, window, cx);
         })
     }
 

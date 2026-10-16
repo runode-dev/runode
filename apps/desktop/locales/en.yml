@@ -761,7 +761,6 @@ mobile:
 todo_board:
   title: Todo Board
   host_too_old: The terminal host is too old for the todo board; restart Runode to upgrade it.
-  todos: Tasks
   schedules: Schedules
   new_todo: New Task
   new_schedule: New Schedule

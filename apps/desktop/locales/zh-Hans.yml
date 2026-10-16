@@ -761,7 +761,6 @@ mobile:
 todo_board:
   title: 任务板
   host_too_old: 终端宿主太旧，不认得任务板；重开 Runode 让它升级。
-  todos: 任务
   schedules: 定时
   new_todo: 新建任务
   new_schedule: 新建定时
@@ -1029,7 +1028,7 @@ action:
   toggle_files: 显示或隐藏右侧的文件树，双击文件在预览里打开
   toggle_github_actions: 显示或隐藏右侧的 GitHub Actions 页：经 gh 看当前分支的运行、工作流，管 secret 和 variable
   toggle_tasks: 打开或关掉标题栏上的命令菜单，上下键选、回车运行
-  toggle_todo_board: "打开或收起铺满窗口的任务板：派给 agent 的任务按状态分列，和到点开任务的定时"
+  toggle_todo_board: "打开或收起铺满窗口的任务板：派给 agent 的任务按状态分列"
   run_task: 跑命令菜单里叫这个名字的命令（自己加的、Makefile 目标或 package.json 的 script），和在菜单里点它一样；同名的取菜单里靠上的
   goto_agent: 列出所有窗口里的 agent，选一个跳过去
   next_agent: 跳到下一个要处理的 agent：先是等你回答的，再是干完了还没看的

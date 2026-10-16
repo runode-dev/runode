@@ -105,6 +105,8 @@ pub struct AgentMarks {
 pub enum TodoBoardEvent {
     /// 收起看板：按了关闭或 Esc。
     Close,
+    /// 换了一页（侧栏的入口、定时的运行记录点回任务页），侧栏上的入口跟着换高亮。
+    PageChanged,
     /// 切到任务 `todo` 的会话 `session`：已经在哪个分屏里就切过去，否则接进窗口，看板随之收起。
     OpenSession { session: SessionId, todo: Box<Todo> },
 }
@@ -162,7 +164,7 @@ enum ToastState {
     Failed,
 }
 
-/// 任务板上并列的两页。
+/// 看板的两页，侧栏上各有一个入口。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     Todos,
@@ -246,13 +248,13 @@ impl Focusable for TodoBoard {
 }
 
 impl TodoBoard {
-    /// 新开的看板，在任务页上。卡片上 agent 的状态标记照 `marks` 画。开着时任务会话的状态由 app 经
-    /// `poll_sessions` 开始轮询，看板都收起后自己停下。
-    pub fn new(marks: AgentMarks, cx: &mut Context<Self>) -> Self {
+    /// 新开的看板，`schedules` 时在定时页上，否则在任务页上。卡片上 agent 的状态标记照 `marks` 画。开着时
+    /// 任务会话的状态由 app 经 `poll_sessions` 开始轮询，看板都收起后自己停下。
+    pub fn new(marks: AgentMarks, schedules: bool, cx: &mut Context<Self>) -> Self {
         store::register(cx.weak_entity(), cx);
         Self {
             focus: cx.focus_handle(),
-            page: Page::Todos,
+            page: if schedules { Page::Schedules } else { Page::Todos },
             columns_scroll: ScrollHandle::new(),
             schedules_scroll: ScrollHandle::new(),
             geometry: Rc::default(),
@@ -284,9 +286,18 @@ impl TodoBoard {
         self.dialog.as_ref().map(|(dialog, _)| dialog.clone())
     }
 
+    /// 换到定时页（`schedules`）或任务页：app 从侧栏的入口打开时调。
+    pub fn show_schedules(&mut self, schedules: bool, cx: &mut Context<Self>) {
+        self.set_page(if schedules { Page::Schedules } else { Page::Todos }, cx);
+    }
+
     fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        if self.page == page {
+            return;
+        }
         self.page = page;
         self.seen = None;
+        cx.emit(TodoBoardEvent::PageChanged);
         cx.notify();
     }
 
@@ -1154,34 +1165,12 @@ impl Render for TodoBoard {
         let a11y = window.is_a11y_active();
         let data = store::data(cx).clone();
         let data = &data;
-        let (fg, selected_bg, hover_bg) = (cx.theme().foreground, cx.theme().mix(0.12), cx.theme().mix(0.06));
-        let title = rust_i18n::t!("todo_board.title").into_owned();
-        let current = self.page;
-        let tab = |id: &'static str, page: Page, label: String, cx: &mut Context<Self>| {
-            let selected = current == page;
-            div()
-                .id(id)
-                .role(Role::Tab)
-                .aria_label(label.clone())
-                .aria_selected(selected)
-                .px(px(12.))
-                .py(px(4.))
-                .rounded(px(6.))
-                .cursor_pointer()
-                .when(selected, |tab| tab.bg(selected_bg).font_weight(FontWeight::SEMIBOLD))
-                .when(!selected, |tab| tab.text_color(fg.opacity(0.65)).hover(|tab| tab.bg(hover_bg)))
-                .child(label)
-                .on_press(cx, move |this, _, cx| this.set_page(page, cx))
-        };
-        let schedules_label = rust_i18n::t!("todo_board.schedules").into_owned();
-        let tabs = div()
-            .id("todo-board-pages")
-            .role(Role::TabList)
-            .aria_label(title.clone())
-            .flex()
-            .gap(px(4.))
-            .child(tab("todo-board-todos", Page::Todos, rust_i18n::t!("todo_board.todos").into_owned(), cx))
-            .child(tab("todo-board-schedules", Page::Schedules, schedules_label, cx));
+        let fg = cx.theme().foreground;
+        let title = match self.page {
+            Page::Todos => rust_i18n::t!("todo_board.title"),
+            Page::Schedules => rust_i18n::t!("todo_board.schedules"),
+        }
+        .into_owned();
         let (new_id, new_label) = match self.page {
             Page::Todos => ("todo-board-new", rust_i18n::t!("todo_board.new_todo").into_owned()),
             Page::Schedules => ("todo-board-new-schedule", rust_i18n::t!("todo_board.new_schedule").into_owned()),
@@ -1219,7 +1208,6 @@ impl Render for TodoBoard {
                     .font_weight(FontWeight::BOLD)
                     .child(title.clone()),
             )
-            .child(tabs)
             .child(div().flex_1())
             .child(new)
             .child(close);

@@ -215,8 +215,9 @@ impl WindowView {
             // 多留一点，第一行不贴着开关。
             .child(div().flex_none().h(px(TITLEBAR_HEIGHT + 6.)).on_mouse_down(MouseButton::Left, drag_window))
             .child(self.render_mobile_entry(cx))
+            .child(self.render_schedules_entry(cx))
             .child(self.render_todo_board_entry(cx))
-            // 手机端和任务板的入口不是 workspace，和下面的列表用一条线隔开。
+            // 手机端、定时和任务板的入口不是 workspace，和下面的列表用一条线隔开。
             .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(cx.theme().border))
             .child(
                 div()
