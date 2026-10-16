@@ -415,7 +415,14 @@ fn hand_over(socket: &Path, end_on_quit: bool, sessions: Option<usize>) -> Optio
     };
     tracing::info!("handoff: {outcome:?} after {:?}", started.elapsed());
     let failed = |reason: String| {
-        if sessions == Some(0) && !end_on_quit {
+        // 交接要等上几十秒，其间旧宿主上可能开了新会话（手机、命令行），结束前重探一次。卡住、握手超时时
+        // `probe` 也报 `Absent`，socket 还连得上就不当它没了。
+        let still_empty = || match launch::probe(socket, &build()) {
+            Probe::Running { sessions: 0, .. } => true,
+            Probe::Absent => std::os::unix::net::UnixStream::connect(socket).is_err(),
+            _ => false,
+        };
+        if sessions == Some(0) && !end_on_quit && still_empty() {
             tracing::warn!("the handoff failed ({reason}); the old host has no sessions, so replacing it");
             if let Err(err) = launch::retire(socket, &build()) {
                 tracing::warn!("failed to stop the old host: {err}");
