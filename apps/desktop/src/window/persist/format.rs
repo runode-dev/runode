@@ -176,8 +176,8 @@ impl SavedNode {
 pub struct RestorePlan {
     /// 要恢复的窗口：叶子的 `session` 只留下这次接得上的，其余清空（在原目录新开）。
     pub windows: Vec<SavedWindow>,
-    /// 启动时要结束的会话，免得一直留在宿主里、挡着宿主空闲退出：宿主里 shell 已经退出、没人连
-    /// 着的会话（不管存档里记没记），以及存档里记着、上次一直没启动的会话。
+    /// 启动时要结束的会话，免得一直留在宿主里、挡着宿主空闲退出：存档里记着、没人连着的会话中
+    /// shell 已经退出的和上次一直没启动的。
     pub end: Vec<SessionId>,
 }
 
@@ -187,7 +187,8 @@ pub struct RestorePlan {
 /// 不满足的清掉 `session`，在原目录新开；其中还在宿主里、没人连着、又已经退出或者没启动过的，
 /// 放进 `end`。没启动过要存档和宿主都这么说：存档记着 `unstarted`、宿主也读不到
 /// 前台程序（`SessionMeta::foreground`，shell 启动后就是 shell 自己）；存档的记录过时了、宿主
-/// 那边其实已经启动的照样接上。存档里没记着的会话，shell 已经退出、又没人连着的也放进 `end`。
+/// 那边其实已经启动的照样接上。存档里没记着的会话不在这里结束：任务板留着已经退出的会话给人看
+/// agent 最后的输出，这类会话由 `watch_background` 问过任务板再收。
 /// 宿主跑在 app 里时它是新的，`live` 为空，全部新开、什么都不结束。
 pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> RestorePlan {
     let mut seen = HashSet::new();
@@ -216,12 +217,6 @@ pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> Rest
             end.push(id);
         } else {
             *session = Some(id);
-        }
-    }
-    let orphans = live.iter().filter(|info| info.exited && !info.claimed).map(|info| info.id);
-    for id in orphans {
-        if !end.contains(&id) {
-            end.push(id);
         }
     }
     RestorePlan { windows, end }
@@ -570,9 +565,9 @@ mod tests {
         assert_eq!(plan.end, [SessionId(1), SessionId(2)]);
     }
 
-    /// 宿主里 shell 已经退出、没人连着的会话，存档里没记着也结束；有界面连着的、还在跑的不动。
+    /// 只结束存档里记着的、shell 已经退出又没人连着的会话；存档里没记着的、有界面连着的、还在跑的不动。
     #[test]
-    fn exited_sessions_nobody_holds_are_ended_even_if_not_saved() {
+    fn only_saved_exited_sessions_are_ended() {
         let windows = vec![window(vec![session_leaf(1, false), session_leaf(2, false)])];
         let live = [
             info(1, false, true),
@@ -584,9 +579,9 @@ mod tests {
         ];
         let plan = plan_restore(windows, &live);
         assert_eq!(sessions(&plan.windows), [None, Some(2)]);
-        assert_eq!(plan.end, [SessionId(1), SessionId(3)]);
-        // 没有存档要恢复时也照样结束。
-        assert_eq!(plan_restore(Vec::new(), &live).end, [SessionId(1), SessionId(3)]);
+        assert_eq!(plan.end, [SessionId(1)]);
+        // 存档里没记着的（3 可能是任务板留着的）不结束。
+        assert!(plan_restore(Vec::new(), &live).end.is_empty());
     }
 
     /// 存档说没启动过，宿主那边却已经有前台程序（标签切过去启动了 shell，存档没来得及重写）：
