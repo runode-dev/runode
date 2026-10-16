@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
 use gpui::{
-    Action, AnyElement, App, Context, Div, Entity, Focusable as _, Modifiers, Stateful, Subscription, Window, div,
-    prelude::*,
+    Action, AnyElement, App, Context, Div, Entity, Focusable as _, Modifiers, Stateful, StyleRefinement, Subscription,
+    Window, div, prelude::*,
 };
 use runode_protocol::{SessionId, todo::Todo};
 
@@ -252,8 +252,19 @@ impl WindowView {
             dir: self.workspace().dir.clone(),
             resident,
         };
-        board.update(cx, |board, _| board.set_input(input));
-        self.render_page_body(board.into_any_element(), window, cx)
+        if board.update(cx, |board, _| board.set_input(input)) {
+            // 画的时候发的通知不会再要一帧，等这一帧画完再通知。
+            let board = board.clone();
+            cx.defer(move |cx| board.update(cx, |_, cx| cx.notify()));
+        }
+        // 缓存：窗口跟着终端输出、标题、转圈几乎每帧都重画，看板只在自己的数据、悬停、动画变了时重画。辅助工具
+        // 开着时不缓存，理由同 `cached_slot`。
+        let page = if window.is_a11y_active() {
+            board.into_any_element()
+        } else {
+            board.cached(StyleRefinement::default().size_full()).into_any_element()
+        };
+        self.render_page_body(page, window, cx)
     }
 
     /// 看板开着的新建、编辑对话框，画在窗口最上层。

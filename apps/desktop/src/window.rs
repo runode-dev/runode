@@ -398,6 +398,10 @@ impl WindowView {
         let config_watch = cx.observe_global::<AppConfig>(|this, cx| {
             // 界面跟着 `ui-font-size` 缩放，Git 面板有多个仓库时的列表记着量过的行高，要重新量。
             this.git_panel.read(cx).remeasure();
+            // 看板是缓存的视图，不跟着窗口重画：字号、语言、卡片样式变了要叫它重画。
+            if let Some(board) = &this.kanban {
+                board.view.update(cx, |_, cx| cx.notify());
+            }
             cx.notify();
         });
         persist::track(cx);
@@ -566,8 +570,8 @@ impl WindowView {
     /// 画的缓存的几块、悬停提示和拖动预览读到的就是这个窗口的。每次画窗口时一开头调。
     ///
     /// 窗口的配色跟着有焦点的终端当前的配色走，程序用 OSC 10/11 改了默认色、配置改了调色板时没有谁
-    /// 通知缓存的几块，它们会停在旧颜色上：主题一变就叫它们重画。这时正在画窗口，画的时候发的通知
-    /// 不会再要一帧，所以等这一帧画完再通知。
+    /// 通知缓存的几块（连同缓存的看板），它们会停在旧颜色上：主题一变就叫它们重画。这时正在画窗口，
+    /// 画的时候发的通知不会再要一帧，所以等这一帧画完再通知。
     fn follow_colors(&mut self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
         let theme = Theme::new(fg, bg, ansi_colors(&cx.global::<AppConfig>().0.palette));
         if *cx.theme() != theme {
@@ -579,6 +583,9 @@ impl WindowView {
         self.slot_theme = Some(theme);
         if let Some(slots) = self.slots.clone() {
             cx.defer(move |cx| slots.notify_all(cx));
+        }
+        if let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) {
+            cx.defer(move |cx| board.update(cx, |_, cx| cx.notify()));
         }
     }
 

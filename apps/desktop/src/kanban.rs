@@ -83,7 +83,7 @@ const TOAST_SPINNER: (&[&str], Duration) =
     (&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], Duration::from_millis(80));
 
 /// app 每次画看板之前交进来的东西，见 `Kanban::set_input`。
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Input {
     /// 各 workspace 的目录和名字：卡片、定时的目录正好是哪个 workspace 的目录时写它的名字，否则写目录名。
     pub workspaces: Vec<(PathBuf, SharedString)>,
@@ -299,9 +299,11 @@ impl Kanban {
     }
 
     /// 换上 workspace 的目录和名字、新建时的目录、定时能不能在后台跑，见 `Input`。只记下来，不重画：app 在画的
-    /// 时候调。
-    pub fn set_input(&mut self, input: Input) {
+    /// 时候调，返回变了没有，变了由 app 等这一帧画完再通知看板重画（看板是缓存的视图）。
+    pub fn set_input(&mut self, input: Input) -> bool {
+        let changed = self.input != input;
         self.input = input;
+        changed
     }
 
     /// 显示着的是定时那一页：app 只在这时去查定时能不能在后台跑（`Input::resident`）。
