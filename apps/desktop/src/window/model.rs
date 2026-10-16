@@ -181,10 +181,18 @@ impl WindowView {
     }
 
     /// 找用户自己装的命令行工具（gh）用的 PATH：从访达打开时 app 自己的 PATH 里没有
-    /// brew 装的目录，用终端里 shell 报告的 PATH。
+    /// brew 装的目录，用终端里 shell 报告的 PATH（`terminal_path`），没有时才用 app 自己的。
     pub(super) fn shell_path(&self, cx: &App) -> Option<std::ffi::OsString> {
-        let path = self.focused_view().and_then(|view| view.read(cx).meta().shell_path.clone());
-        path.or_else(|| std::env::var_os("PATH"))
+        self.terminal_path(cx).or_else(|| std::env::var_os("PATH"))
+    }
+
+    /// 终端里 shell 报告的 PATH：先看有焦点的终端，当前 workspace 没有标签时看窗口里别的终端；
+    /// 窗口里一个终端都没有时为空。
+    pub(super) fn terminal_path(&self, cx: &App) -> Option<std::ffi::OsString> {
+        self.focused_view()
+            .into_iter()
+            .chain(self.terminal_views())
+            .find_map(|view| view.read(cx).meta().shell_path.clone())
     }
 
     /// shell 报告的 PATH 里有没有叫 `program` 的命令行工具（gh）。结果记在 `cache` 里，PATH 没变

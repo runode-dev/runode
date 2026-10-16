@@ -296,7 +296,7 @@ fn format_cpu(cpu: f32) -> String {
 
 impl WindowView {
     /// 这个窗口里所有的终端。
-    fn terminal_views(&self) -> impl Iterator<Item = &gpui::Entity<crate::terminal_view::TerminalView>> {
+    pub(super) fn terminal_views(&self) -> impl Iterator<Item = &gpui::Entity<crate::terminal_view::TerminalView>> {
         self.workspaces
             .iter()
             .flat_map(|workspace| &workspace.tabs)

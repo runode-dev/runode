@@ -46,6 +46,8 @@ const MAX_FILES_BYTES: usize = 6_000;
 const EXAMPLES: usize = 10;
 /// agent 最多等这么久，超时就杀掉报错，免得仓库一直写着在生成、提交不了。
 const TIMEOUT: Duration = Duration::from_secs(180);
+/// 问登录 shell 的 PATH 最多等这么久：配置里有等终端输入的东西时不至于卡住。
+const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(10);
 /// 到时限杀掉整组以后，再等输出管道关上这么久。
 const KILL_GRACE: Duration = Duration::from_secs(1);
 
@@ -202,9 +204,9 @@ impl WindowView {
             branch: repo.info.branch.clone().unwrap_or_else(|| "(detached)".to_owned()),
             files: limit(files.join("\n"), MAX_FILES_BYTES),
         };
-        // 从访达打开的 app 自己的 PATH 里没有 agent 装的目录，用终端里 shell 报告的 PATH。
-        let path = self.focused_view().and_then(|view| view.read(cx).meta().shell_path.clone());
-        let path = path.or_else(|| std::env::var_os("PATH"));
+        // 从访达打开的 app 自己的 PATH 里没有 agent 装的目录，用终端里 shell 报告的 PATH；窗口里
+        // 一个终端都没有时在后台问登录 shell。
+        let path = self.terminal_path(cx);
         let op =
             move |repo: &git::Repo| generate(repo, &recipe, &context, path).map_err(|message| GitError { message });
         self.with_git_panel(cx, |panel, cx| panel.write_message(root, op, window, cx));
@@ -227,6 +229,9 @@ fn generate(
         &[("basePrompt", &base), ("branch", &context.branch), ("stagedFiles", &context.files), ("stagedPatch", &patch)],
     );
     let (args, stdin) = command.args(&prompt);
+    let path = path
+        .or_else(|| login_shell_path(&runode_terminal::pty::default_shell(), &repo.root))
+        .or_else(|| std::env::var_os("PATH"));
     let stdout = run(&command.binary, &args, stdin, &repo.root, path, &command.env, TIMEOUT)?;
     let text = match command.agent.map_or(Output::Text, |agent| agent.output) {
         Output::Text => stdout,
@@ -416,6 +421,14 @@ fn limit(mut text: String, max: usize) -> String {
     text.truncate(end);
     text.push_str(&format!("\n[truncated: {omitted} bytes omitted]"));
     text
+}
+
+/// 用户的登录 shell `shell` 配好以后的 PATH，问不到时为空。交互加登录地起，`.zshrc` 这类只在交互时
+/// 读的配置里加的目录也算上；配置里打印的别的东西在 `PATH=` 那行之前，取最后一行。
+fn login_shell_path(shell: &str, dir: &Path) -> Option<OsString> {
+    let args = ["-i", "-l", "-c", "/usr/bin/env"].map(str::to_owned);
+    let env = run(shell, &args, None, dir, None, &[], LOGIN_SHELL_TIMEOUT).ok()?;
+    env.lines().rev().find_map(|line| line.strip_prefix("PATH=")).map(OsString::from)
 }
 
 /// 在 `dir` 里跑 `binary`，`stdin` 不为空时从标准输入交给它，返回标准输出；过了 `timeout` 杀掉。
@@ -771,6 +784,12 @@ mod tests {
     }
 
     /// 到时限连 agent 拉起的子进程一起杀掉；agent 自己退了、后台子进程还拿着输出管道时，到时限也不再等。
+    #[test]
+    fn asks_the_login_shell_for_its_path() {
+        let path = login_shell_path("sh", &std::env::temp_dir()).unwrap();
+        assert!(std::env::split_paths(&path).any(|dir| dir == Path::new("/bin")));
+    }
+
     #[test]
     fn kills_the_whole_process_group_at_the_deadline() {
         let dir = std::env::temp_dir();
