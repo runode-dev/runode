@@ -1,8 +1,8 @@
 //! 把铺满窗口的看板接到窗口上。看板本身在 `kanban`：打开时建一个 `Kanban`，收起时丢掉。
 //! 这里启动时把和宿主说话的办法交给它（`watch_todos`），每次画之前交给它各 workspace 的目录和名字、当前的
 //! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上新建任务、定时、看板三个
-//! 入口；卡片上 agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事（收起、换页、把任务会话接进
-//! 窗口）经 `KanbanEvent` 交回来，它的对话框画在窗口最上层。
+//! 入口（右边写着快捷键）；卡片上 agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事（收起、换页、
+//! 把任务会话接进窗口）经 `KanbanEvent` 交回来，它的对话框画在窗口最上层。
 //!
 //! 看板和手机端引导页一样盖住标签和分屏：切到任何一个标签或 workspace、按 Esc 就收起。卡片的「打开终端」
 //! 把任务的会话接进它目录所在的 workspace 的一个新标签，已经在哪个分屏里时切过去。
@@ -10,7 +10,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
-use gpui::{AnyElement, App, Context, Div, Entity, Focusable as _, Stateful, Subscription, Window, prelude::*};
+use gpui::{
+    Action, AnyElement, App, Context, Div, Entity, Focusable as _, Stateful, Subscription, Window, div, prelude::*,
+};
 use runode_protocol::{SessionId, todo::Todo};
 
 use super::{
@@ -24,7 +26,7 @@ use crate::{
     config::AppConfig,
     host_client,
     terminal_view::TerminalView,
-    ui::theme::ActiveTheme as _,
+    ui::{font_size::FontSize, theme::ActiveTheme as _, tooltip::shortcut_text},
 };
 
 /// 开着的看板。
@@ -194,6 +196,7 @@ impl WindowView {
         super::mobile::page_entry("new-todo-entry", PLUS_ICON, label, false, cx, |this, window, cx| {
             this.new_todo(&NewTodo, window, cx);
         })
+        .children(entry_shortcut(&NewTodo, cx))
     }
 
     /// 侧栏顶上的定时入口，看板开着定时页时高亮。
@@ -203,6 +206,7 @@ impl WindowView {
         super::mobile::page_entry("schedules-entry", CLOCK_ICON, label, active, cx, |this, window, cx| {
             this.show_kanban(true, window, cx);
         })
+        .children(entry_shortcut(&ToggleSchedules, cx))
     }
 
     /// 侧栏顶上的看板入口，看板开着任务页时高亮；有需要你处理的任务时右边是它们的数。
@@ -210,13 +214,16 @@ impl WindowView {
         let label = rust_i18n::t!("kanban.title").into_owned();
         let active = self.showing_todo_page(false, cx);
         let count = crate::kanban::needs_you(cx);
+        let shortcut = entry_shortcut(&ToggleKanban, cx);
+        let pushed = shortcut.is_some();
         super::mobile::page_entry("kanban-entry", KANBAN_ICON, label, active, cx, |this, window, cx| {
             this.show_kanban(false, window, cx);
         })
+        .children(shortcut)
         .when(count > 0, |entry| {
             entry
                 .aria_description(rust_i18n::t!("kanban.entry_needs_you", count = count).into_owned())
-                .child(crate::kanban::needs_you_badge(count).ml_auto())
+                .child(crate::kanban::needs_you_badge(count).when(!pushed, |badge| badge.ml_auto()))
         })
     }
 
@@ -244,6 +251,18 @@ impl WindowView {
     pub(super) fn todo_dialog(&self, cx: &App) -> Option<Entity<TodoDialog>> {
         self.kanban.as_ref().and_then(|board| board.view.read(cx).dialog())
     }
+}
+
+/// 侧栏入口右边淡淡的快捷键，从键位表里查，快捷键改了也跟着变；没绑时没有。
+fn entry_shortcut(action: &dyn Action, cx: &App) -> Option<Div> {
+    shortcut_text(action, cx).map(|text| {
+        div()
+            .flex_none()
+            .ml_auto()
+            .text_size(FontSize::Small)
+            .text_color(cx.theme().foreground.opacity(0.5))
+            .child(text)
+    })
 }
 
 #[cfg(test)]
