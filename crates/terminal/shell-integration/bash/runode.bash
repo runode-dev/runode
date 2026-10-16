@@ -202,7 +202,8 @@ if [ -z "${_runode_integrated-}" ]; then
             entry=${entry#\*}
             entry=${entry#"  "}
             _runode_encoded=
-            if [ -n "$num" ] && [ "$num" = "$_runode_histnext" ] && [ -n "$entry" ]; then
+            # 逐字编码的耗时随长度平方涨，粘贴的长命令不编码，原文留空。
+            if [ -n "$num" ] && [ "$num" = "$_runode_histnext" ] && [ -n "$entry" ] && [ "${#entry}" -le 4096 ]; then
                 _runode_urlencode "$entry"
             fi
             printf '\033]6973;%s;command=%s\007' "$_runode_report_token" "$_runode_encoded"

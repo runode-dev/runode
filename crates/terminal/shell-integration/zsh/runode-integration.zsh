@@ -181,7 +181,8 @@ _runode_hook_zle() {
 _runode_preexec() {
     if [[ -n ${_runode_report_token-} ]]; then
         'builtin' 'local' REPLY=
-        [[ -z $1 ]] || _runode_urlencode "$1"
+        # 逐字编码的耗时随长度平方涨，粘贴的长命令不编码，原文留空。
+        [[ -z $1 || $#1 -gt 4096 ]] || _runode_urlencode "$1"
         'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;command=$REPLY"$'\a'
     fi
     # 提示符上换过光标的，在命令开始前换回配置的样式。
