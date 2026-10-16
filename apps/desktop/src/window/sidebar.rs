@@ -57,7 +57,7 @@ const RENAME_FIELD_HEIGHT: f32 = 18.;
 
 /// 快捷键要按着的修饰键，查法和 `shortcut_hint` 一样：先找 `select` 的绑定，`is_last` 时再找 `last` 的，
 /// 都取最后一个绑定的第一键。
-fn shortcut_modifiers(select: &dyn Action, last: &dyn Action, is_last: bool, cx: &App) -> Option<Modifiers> {
+pub(super) fn shortcut_modifiers(select: &dyn Action, last: &dyn Action, is_last: bool, cx: &App) -> Option<Modifiers> {
     let keymap = cx.key_bindings();
     let keymap = keymap.borrow();
     let modifiers = |action: &dyn Action| {
@@ -215,9 +215,9 @@ impl WindowView {
             // 多留一点，第一行不贴着开关。
             .child(div().flex_none().h(px(TITLEBAR_HEIGHT + 6.)).on_mouse_down(MouseButton::Left, drag_window))
             .child(self.render_mobile_entry(cx))
-            .child(self.render_new_todo_entry(cx))
-            .child(self.render_schedules_entry(cx))
-            .child(self.render_kanban_entry(cx))
+            .child(self.render_new_todo_entry(modifiers, cx))
+            .child(self.render_schedules_entry(modifiers, cx))
+            .child(self.render_kanban_entry(modifiers, cx))
             // 手机端、新建任务、定时和看板的入口不是 workspace，和下面的列表用一条线隔开。
             .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(cx.theme().border))
             .child(

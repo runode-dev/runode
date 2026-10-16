@@ -1,8 +1,8 @@
 //! 把铺满窗口的看板接到窗口上。看板本身在 `kanban`：打开时建一个 `Kanban`，收起时丢掉。
 //! 这里启动时把和宿主说话的办法交给它（`watch_todos`），每次画之前交给它各 workspace 的目录和名字、当前的
 //! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上新建任务、定时、看板三个
-//! 入口（右边写着快捷键）；卡片上 agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事（收起、换页、
-//! 把任务会话接进窗口）经 `KanbanEvent` 交回来，它的对话框画在窗口最上层。
+//! 入口（按着修饰键时右边写着快捷键）；卡片上 agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事
+//! （收起、换页、把任务会话接进窗口）经 `KanbanEvent` 交回来，它的对话框画在窗口最上层。
 //!
 //! 看板和手机端引导页一样盖住标签和分屏：切到任何一个标签或 workspace、按 Esc 就收起。卡片的「打开终端」
 //! 把任务的会话接进它目录所在的 workspace 的一个新标签，已经在哪个分屏里时切过去。
@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 
 use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
 use gpui::{
-    Action, AnyElement, App, Context, Div, Entity, Focusable as _, Stateful, Subscription, Window, div, prelude::*,
+    Action, AnyElement, App, Context, Div, Entity, Focusable as _, Modifiers, Stateful, Subscription, Window, div,
+    prelude::*,
 };
 use runode_protocol::{SessionId, todo::Todo};
 
@@ -19,6 +20,7 @@ use super::{
     NewTodo, ToggleKanban, ToggleSchedules, WindowView,
     agents::{self, Mark},
     remote,
+    sidebar::shortcut_modifiers,
     titlebar::styled_agent_mark,
 };
 use crate::{
@@ -26,7 +28,11 @@ use crate::{
     config::AppConfig,
     host_client,
     terminal_view::TerminalView,
-    ui::{font_size::FontSize, theme::ActiveTheme as _, tooltip::shortcut_text},
+    ui::{
+        font_size::FontSize,
+        theme::ActiveTheme as _,
+        tooltip::{shortcut_text, tooltip},
+    },
 };
 
 /// 开着的看板。
@@ -191,34 +197,37 @@ impl WindowView {
     }
 
     /// 侧栏顶上的新建任务入口：打开任务页，弹出新建任务的对话框。
-    pub(super) fn render_new_todo_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_new_todo_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("kanban.new_todo").into_owned();
-        super::mobile::page_entry("new-todo-entry", PLUS_ICON, label, false, cx, |this, window, cx| {
+        super::mobile::page_entry("new-todo-entry", PLUS_ICON, label.clone(), false, cx, |this, window, cx| {
             this.new_todo(&NewTodo, window, cx);
         })
-        .children(entry_shortcut(&NewTodo, cx))
+        .tooltip(tooltip(label, Some(&NewTodo)))
+        .children(entry_shortcut(&NewTodo, modifiers, cx))
     }
 
     /// 侧栏顶上的定时入口，看板开着定时页时高亮。
-    pub(super) fn render_schedules_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_schedules_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("kanban.schedules").into_owned();
         let active = self.showing_todo_page(true, cx);
-        super::mobile::page_entry("schedules-entry", CLOCK_ICON, label, active, cx, |this, window, cx| {
+        super::mobile::page_entry("schedules-entry", CLOCK_ICON, label.clone(), active, cx, |this, window, cx| {
             this.show_kanban(true, window, cx);
         })
-        .children(entry_shortcut(&ToggleSchedules, cx))
+        .tooltip(tooltip(label, Some(&ToggleSchedules)))
+        .children(entry_shortcut(&ToggleSchedules, modifiers, cx))
     }
 
     /// 侧栏顶上的看板入口，看板开着任务页时高亮；有需要你处理的任务时右边是它们的数。
-    pub(super) fn render_kanban_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_kanban_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("kanban.title").into_owned();
         let active = self.showing_todo_page(false, cx);
         let count = crate::kanban::needs_you(cx);
-        let shortcut = entry_shortcut(&ToggleKanban, cx);
+        let shortcut = entry_shortcut(&ToggleKanban, modifiers, cx);
         let pushed = shortcut.is_some();
-        super::mobile::page_entry("kanban-entry", KANBAN_ICON, label, active, cx, |this, window, cx| {
+        super::mobile::page_entry("kanban-entry", KANBAN_ICON, label.clone(), active, cx, |this, window, cx| {
             this.show_kanban(false, window, cx);
         })
+        .tooltip(tooltip(label, Some(&ToggleKanban)))
         .children(shortcut)
         .when(count > 0, |entry| {
             entry
@@ -253,9 +262,11 @@ impl WindowView {
     }
 }
 
-/// 侧栏入口右边淡淡的快捷键，从键位表里查，快捷键改了也跟着变；没绑时没有。
-fn entry_shortcut(action: &dyn Action, cx: &App) -> Option<Div> {
-    shortcut_text(action, cx).map(|text| {
+/// 侧栏入口右边淡淡的快捷键，从键位表里查，快捷键改了也跟着变；没绑时没有。和 workspace 那几行一样，只在
+/// 按着它的修饰键或者单按 ⌘ 时显示，平时只在悬停提示里写着。不按时不占位置，看板的徽标一直贴着右边。
+fn entry_shortcut(action: &dyn Action, modifiers: Modifiers, cx: &App) -> Option<Div> {
+    let held = modifiers == Modifiers::command() || shortcut_modifiers(action, action, false, cx) == Some(modifiers);
+    shortcut_text(action, cx).filter(|_| held).map(|text| {
         div()
             .flex_none()
             .ml_auto()
