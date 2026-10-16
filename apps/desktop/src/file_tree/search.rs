@@ -177,6 +177,8 @@ pub(crate) struct FileSearch {
     searched: Option<SearchKey>,
     /// 后台正在跑的那次搜索和取消它的标志；换了搜索词时置位，停下上一次。
     pending: Option<(SearchKey, Arc<AtomicBool>)>,
+    /// 同一次搜索还在跑时文件树又重读过：跑完再搜一次。
+    rerun: bool,
     /// 按名称找时列出的文件，接着打字时不用每个键都再列一遍；文件树重读过、换了根目录时换一份。
     names: Option<Arc<NameList>>,
     selected: Option<usize>,
@@ -238,6 +240,7 @@ impl FileSearch {
             rows: Vec::new(),
             searched: None,
             pending: None,
+            rerun: false,
             names: None,
             selected: None,
             scroll: UniformListScrollHandle::new(),
@@ -464,6 +467,12 @@ impl FileTree {
         let key = SearchKey { root: self.files_root(), query, mode: search.mode, options };
         let search = &mut self.search;
         cx.notify();
+        // 文件一直在变时重读比按内容找的去抖还勤，每次都打断就永远搜不完：不打断，跑完再搜一次。
+        if force && search.pending.as_ref().is_some_and(|(pending, _)| *pending == key) {
+            search.rerun = true;
+            return;
+        }
+        search.rerun = false;
         // 文件树重读过，文件可能变了。
         if force || search.names.as_ref().is_some_and(|names| names.root != key.root) {
             search.names = None;
@@ -526,6 +535,9 @@ impl FileTree {
                 search.searched = Some(key);
                 search.relayout();
                 cx.notify();
+                if std::mem::take(&mut this.search.rerun) {
+                    this.search_files(true, cx);
+                }
             })
             .ok();
         })
