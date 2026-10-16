@@ -784,6 +784,7 @@ kanban:
   remove: 删除
   cancel: 取消
   save: 保存
+  save_and_start: 保存并开始
   edit_schedule: 编辑定时
   remove_schedule: 删除定时
   schedules_need_host: "定时只在终端宿主跑着时生效。退出 app 后也要跑的话，打开 terminal-host，并运行 `runode service install host`。"

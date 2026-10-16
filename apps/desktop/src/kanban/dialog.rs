@@ -24,7 +24,7 @@ use gpui::{
     Render, Role, Subscription, Window, div, prelude::*, px,
 };
 use runode_protocol::{
-    ClientMsg,
+    ClientMsg, HostMsg,
     todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When},
 };
 
@@ -154,8 +154,8 @@ fn first_line(text: &str) -> &str {
 pub(crate) enum DialogEvent {
     /// 按了取消、Esc 或点了外面：关掉，焦点交回看板。
     Dismissed,
-    /// 宿主办成了：关掉，焦点同样交回看板。
-    Saved,
+    /// 宿主办成了：关掉，焦点同样交回看板；按的是「保存并开始」时 `start` 是要接着开始的任务。
+    Saved { start: Option<String> },
 }
 
 impl EventEmitter<DialogEvent> for TodoDialog {}
@@ -229,13 +229,13 @@ impl TodoDialog {
         let mut events = Vec::new();
         for input in [&title, &agent, &at, &clock, &minutes] {
             events.push(cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| match event {
-                InputEvent::Next => this.save(cx),
+                InputEvent::Next => this.save(false, cx),
                 InputEvent::Dismiss => cx.emit(DialogEvent::Dismissed),
                 InputEvent::Changed(_) | InputEvent::Previous => {}
             }));
         }
         events.push(cx.subscribe_in(&prompt, window, |this, _, event: &TextareaEvent, _, cx| match event {
-            TextareaEvent::Submit => this.save(cx),
+            TextareaEvent::Submit => this.save(false, cx),
             TextareaEvent::Changed => {}
         }));
         window.focus(&title.focus_handle(cx), cx);
@@ -307,8 +307,18 @@ impl TodoDialog {
         .detach();
     }
 
-    /// 按对话框里填的发请求；填得不对时在对话框里说。宿主办成了就关掉对话框，没办成时说原因。
-    fn save(&mut self, cx: &mut Context<Self>) {
+    /// 能「保存并开始」：是任务，还没开始过也没做完。
+    fn startable(&self) -> bool {
+        match &self.editing {
+            None => !self.schedule,
+            Some(Editing::Todo(todo)) => todo.started.is_none() && todo.done_at.is_none(),
+            Some(Editing::Schedule(_)) => false,
+        }
+    }
+
+    /// 按对话框里填的发请求；填得不对时在对话框里说。宿主办成了就关掉对话框，`start` 时交给看板接着开始；
+    /// 没办成时说原因。
+    fn save(&mut self, start: bool, cx: &mut Context<Self>) {
         if self.saving {
             return;
         }
@@ -328,7 +338,15 @@ impl TodoDialog {
             let answer = answer.await;
             this.update(cx, |dialog, cx| {
                 match answer {
-                    Ok(_) => cx.emit(DialogEvent::Saved),
+                    Ok(answer) => {
+                        let start = match (answer, &dialog.editing) {
+                            (HostMsg::TodoAdded { id, .. }, _) => Some(id),
+                            (_, Some(Editing::Todo(todo))) => Some(todo.id.clone()),
+                            _ => None,
+                        }
+                        .filter(|_| start);
+                        cx.emit(DialogEvent::Saved { start });
+                    }
                     Err(err) => {
                         dialog.saving = false;
                         dialog.error = Some(format!("{err:#}"));
@@ -499,7 +517,16 @@ impl Render for TodoDialog {
             .on_press(cx, |_, _, cx| cx.emit(DialogEvent::Dismissed));
         let save = button("todo-dialog-save", rust_i18n::t!("kanban.save").into_owned(), ButtonVariant::Secondary)
             .when(dialog.saving, |button| button.opacity(0.5))
-            .on_press(cx, |this, _, cx| this.save(cx));
+            .on_press(cx, |this, _, cx| this.save(false, cx));
+        let save_and_start = dialog.startable().then(|| {
+            button(
+                "todo-dialog-save-start",
+                rust_i18n::t!("kanban.save_and_start").into_owned(),
+                ButtonVariant::Default,
+            )
+            .when(dialog.saving, |button| button.opacity(0.5))
+            .on_press(cx, |this, _, cx| this.save(true, cx))
+        });
         let panel = Dialog::new("todo-dialog", title.clone())
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
@@ -570,7 +597,9 @@ impl Render for TodoDialog {
                     .text_color(destructive)
                     .child(error)
             }))
-            .child(div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save));
+            .child(
+                div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save).children(save_and_start),
+            );
         div()
             .id("todo-dialog-backdrop")
             .absolute()

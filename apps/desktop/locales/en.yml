@@ -784,6 +784,7 @@ kanban:
   remove: Delete
   cancel: Cancel
   save: Save
+  save_and_start: Save & Start
   edit_schedule: Edit Schedule
   remove_schedule: Delete schedule
   schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit the app, turn on terminal-host and run `runode service install host`."
