@@ -15,7 +15,7 @@
 //!
 //! 卡片换了列时从原来的位置飞到新的位置，落下后淡入、描一圈强调色再褪掉；拖着放下的不飞，只描边。
 //! 每帧记下各卡片画在哪（`Geometry`），下一帧发现换了列就照上一帧的位置起飞。开始任务时顶上居中弹出
-//! 提示条（`Toast`），等宿主回话后说开始了没有。
+//! 提示条（`Toast`），等宿主回话后说开始了没有；别的请求没办成时也在这里说原因。
 
 mod dialog;
 mod store;
@@ -160,11 +160,11 @@ struct Toast {
     state: ToastState,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
 enum ToastState {
     Starting,
     Started,
-    Failed,
+    /// 没办成，带着要显示的话；不自己收起，等用户关掉或被新的顶掉。
+    Failed(String),
 }
 
 /// 看板的几页：任务页、定时页侧栏上各有一个入口，记录页从完成那一列的列头和定时进去。
@@ -413,27 +413,42 @@ impl Kanban {
     fn send_todos(steps: Vec<Step>, cx: &mut Context<Self>) {
         let sent = store::send(cx, steps);
         cx.spawn(async move |this, cx| {
-            if sent.await {
-                this.update(cx, |this, cx| this.reload_history(cx)).ok();
-            }
+            let sent = sent.await;
+            this.update(cx, |this, cx| match sent {
+                Ok(()) => this.reload_history(cx),
+                Err(reason) => {
+                    let text = rust_i18n::t!("kanban.toast.request_failed", reason = reason).into_owned();
+                    this.show_toast(ToastState::Failed(text), cx);
+                }
+            })
+            .ok();
         })
         .detach();
     }
 
-    /// 发开始任务的几条请求，顶上弹出提示条，等宿主回话后说开始了没有，过一会儿收起。
+    /// 发开始任务的几条请求，顶上弹出提示条，等宿主回话后说开始了没有；开始了的过一会儿收起。
     fn send_start(&mut self, steps: Vec<Step>, cx: &mut Context<Self>) {
         let sent = store::send(cx, steps);
-        self.serial += 1;
-        let serial = self.serial;
-        self.toast = Some(Toast { serial, state: ToastState::Starting });
-        cx.notify();
+        let serial = self.show_toast(ToastState::Starting, cx);
         cx.spawn(async move |this, cx| {
-            let state = if sent.await { ToastState::Started } else { ToastState::Failed };
-            this.update(cx, |this, cx| this.set_toast(serial, Some(state), cx)).ok();
+            if let Err(reason) = sent.await {
+                let text = rust_i18n::t!("kanban.toast.failed", reason = reason).into_owned();
+                this.update(cx, |this, cx| this.show_toast(ToastState::Failed(text), cx)).ok();
+                return;
+            }
+            this.update(cx, |this, cx| this.set_toast(serial, Some(ToastState::Started), cx)).ok();
             cx.background_executor().timer(TOAST_LINGER).await;
             this.update(cx, |this, cx| this.set_toast(serial, None, cx)).ok();
         })
         .detach();
+    }
+
+    /// 弹出一个新的提示条，顶掉原来的；返回它的编号。
+    fn show_toast(&mut self, state: ToastState, cx: &mut Context<Self>) -> u64 {
+        self.serial += 1;
+        self.toast = Some(Toast { serial: self.serial, state });
+        cx.notify();
+        self.serial
     }
 
     /// 换掉或收起第 `serial` 个提示条；它已经被新的顶掉、或者关掉了就不动。
@@ -629,12 +644,11 @@ impl Kanban {
 
     /// 顶上居中的提示条：开始任务时转着圈，宿主回话后说开始了没有。
     fn render_toast(&self, toast: &Toast, cx: &mut Context<Self>) -> AnyElement {
-        let text = match toast.state {
-            ToastState::Starting => rust_i18n::t!("kanban.toast.starting"),
-            ToastState::Started => rust_i18n::t!("kanban.toast.started"),
-            ToastState::Failed => rust_i18n::t!("kanban.toast.failed"),
-        }
-        .into_owned();
+        let text = match &toast.state {
+            ToastState::Starting => rust_i18n::t!("kanban.toast.starting").into_owned(),
+            ToastState::Started => rust_i18n::t!("kanban.toast.started").into_owned(),
+            ToastState::Failed(text) => text.clone(),
+        };
         // 前景色作底、背景色写字，和后面的看板反着，深色浅色主题下都分得开。
         let (toast_bg, toast_fg) = (cx.theme().mix_inverse(0.15), cx.theme().background);
         let icon = match toast.state {
@@ -645,9 +659,16 @@ impl Kanban {
             ToastState::Started => {
                 svg().path(CHECK_ICON).size(px(12.)).text_color(gpui::rgb(AGENT_DONE_COLOR)).into_any_element()
             }
-            ToastState::Failed => {
-                svg().path(CLOSE_ICON).size(px(12.)).text_color(gpui::rgb(AGENT_BLOCKED_COLOR)).into_any_element()
-            }
+            // 细线的叉在反色的提示条上看不清，又和右边的关闭按钮一个样：红底圆点里放白叉。
+            ToastState::Failed(_) => div()
+                .size(px(14.))
+                .rounded_full()
+                .bg(cx.theme().destructive)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(svg().path(CLOSE_ICON).size(px(8.)).text_color(gpui::white()))
+                .into_any_element(),
         };
         let serial = toast.serial;
         let close_label = rust_i18n::t!("kanban.toast.close").into_owned();
@@ -672,7 +693,11 @@ impl Kanban {
             .flex()
             .items_center()
             .gap(px(8.))
-            .h(scaled(32.))
+            // 长原因在中间折行，不铺满一行盖住标题栏两头的按钮。
+            .max_w_full()
+            .max_w(scaled(560.))
+            .min_h(scaled(32.))
+            .py(px(6.))
             .pl(px(12.))
             .pr(px(8.))
             .rounded(px(10.))
@@ -680,13 +705,14 @@ impl Kanban {
             .text_color(toast_fg)
             .shadow(card_shadow(None, true))
             .child(div().flex_none().w(px(14.)).flex().justify_center().child(icon))
-            .child(div().min_w_0().truncate().child(text))
+            .child(div().min_w_0().child(text))
             .child(close);
         div()
             .absolute()
             .top(px(10.))
             .left_0()
             .w_full()
+            .px(px(16.))
             .flex()
             .justify_center()
             .child(pill)

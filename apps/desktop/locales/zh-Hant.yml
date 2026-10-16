@@ -803,7 +803,8 @@ kanban:
   toast:
     starting: 正在開始任務…
     started: 任務已開始
-    failed: 沒能開始任務
+    failed: 沒能開始任務：%{reason}
+    request_failed: 沒能辦成：%{reason}
     close: 關掉提示
   column:
     todo: 待辦

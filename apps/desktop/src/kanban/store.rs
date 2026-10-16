@@ -33,7 +33,7 @@ pub(crate) struct TodoData {
     pub(crate) schedules: Vec<Schedule>,
     /// 宿主里的会话现在的样子，任务按标识来查；不在里面的会话已经没了。
     pub(crate) sessions: HashMap<SessionId, SessionInfo>,
-    /// 问不到看板、或者上一个请求没办成的说明。
+    /// 问不到看板的说明；请求没办成的原因由调用方弹提示条说。
     pub(crate) error: Option<String>,
 }
 
@@ -195,28 +195,15 @@ pub(crate) fn ask(cx: &mut App, step: Step) -> Task<Result<HostMsg>> {
 /// 一条看板的请求：拿到请求编号造出消息。
 pub type Step = Box<dyn FnOnce(u32) -> ClientMsg + Send>;
 
-/// 在后台依次发几条看板的请求，前一条没办成就不发后面的，原因显示在看板上；办成了的等宿主说变了再重问。
-/// 等到的是都办成了没有。
-pub(crate) fn send(cx: &mut App, steps: Vec<Step>) -> Task<bool> {
+/// 在后台依次发几条看板的请求，前一条没办成就不发后面的；办成了的等宿主说变了再重问。
+/// 等到的是没办成的原因。
+pub(crate) fn send(cx: &mut App, steps: Vec<Step>) -> Task<Result<(), String>> {
     let host = Host::get(cx);
-    cx.spawn(async move |cx| {
-        let sent = cx
-            .background_executor()
-            .spawn(async move {
-                for step in steps {
-                    (host.ask)(step)?;
-                }
-                anyhow::Ok(())
-            })
-            .await;
-        let Err(err) = sent else { return true };
-        let message = format!("{err:#}");
-        cx.update(|cx| {
-            let mut data = take(cx);
-            data.error = Some(message);
-            put(data, cx);
-        });
-        false
+    cx.background_executor().spawn(async move {
+        for step in steps {
+            (host.ask)(step).map_err(|err| format!("{err:#}"))?;
+        }
+        Ok(())
     })
 }
 

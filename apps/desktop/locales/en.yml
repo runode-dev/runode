@@ -803,7 +803,8 @@ kanban:
   toast:
     starting: Starting the task…
     started: Task started
-    failed: Couldn’t start the task
+    failed: "Couldn’t start the task: %{reason}"
+    request_failed: "Couldn’t do that: %{reason}"
     close: Dismiss
   column:
     todo: To Do
