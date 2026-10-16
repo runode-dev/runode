@@ -169,7 +169,14 @@ rm -f "$dmg"
 if diskutil image create from --help 2>&1 | grep -q -- --volumeName; then
     diskutil image create from --volumeName Runode --format UDZO "$staging" "$dmg" >/dev/null
 else
-    hdiutil create -volname Runode -srcfolder "$staging" -format UDZO "$dmg" >/dev/null
+    # GitHub 的 macOS runner 上 hdiutil 时不时报 Resource busy（镜像被系统占着），等一下重来就好。
+    for attempt in 1 2 3 4 5; do
+        hdiutil create -volname Runode -srcfolder "$staging" -format UDZO "$dmg" >/dev/null && break
+        [[ $attempt -lt 5 ]] || exit 1
+        echo "hdiutil create 失败，${attempt}0 秒后重试" >&2
+        rm -f "$dmg"
+        sleep $((attempt * 10))
+    done
 fi
 rm -rf "$staging"
 if [[ "$SIGN_IDENTITY" != - ]]; then
