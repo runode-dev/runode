@@ -348,6 +348,11 @@ impl Handle {
         self.inbox.send(message).is_ok()
     }
 
+    /// 这个登记项是不是拿着 `killed` 的那个会话线程的。
+    pub(crate) fn owns(&self, killed: &Arc<AtomicBool>) -> bool {
+        Arc::ptr_eq(&self.killed, killed)
+    }
+
     /// 测试用：发到 `inbox` 的一端，没有会话线程，由测试自己收、自己回话。
     #[cfg(test)]
     pub(crate) fn detached(inbox: mpsc::Sender<Inbox>) -> Self {
@@ -591,7 +596,7 @@ impl Runner {
         runner
     }
 
-    fn run(mut self, inbox: &mpsc::Receiver<Inbox>, killed: &AtomicBool) {
+    fn run(mut self, inbox: &mpsc::Receiver<Inbox>, killed: &Arc<AtomicBool>) {
         // 合并输出时多取出来的那条消息，下一轮先办它，见 `coalesce`。
         let mut stash = None;
         loop {
@@ -624,6 +629,8 @@ impl Runner {
                 Ok(false) => return,
                 Err(panic) => {
                     self.crashed(panic.as_ref());
+                    // 线程没了，登记项留着的话宿主不再空闲退出，任务和定时也一直当它还在跑。
+                    self.ui.forget(self.id, killed);
                     return;
                 }
             }
@@ -1439,7 +1446,7 @@ mod tests {
             tx.send(message).unwrap();
         }
         drop(tx);
-        runner(true).run(&rx, &AtomicBool::new(false));
+        runner(true).run(&rx, &Arc::new(AtomicBool::new(false)));
         let seen: Vec<Vec<u8>> = seen
             .lock()
             .unwrap()

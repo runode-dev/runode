@@ -34,7 +34,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, PoisonError, Weak,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc,
     },
     thread,
@@ -222,6 +222,15 @@ impl UiPort {
     /// 见 `Shared::ask_ui`。
     pub(crate) fn ask(&self, session: SessionId, preferred: Option<u64>, request: ClientMsg) -> Option<u64> {
         self.0.upgrade()?.ask_ui(session, preferred, request)
+    }
+
+    /// 会话线程 `id` 出了事退出时把它从登记表里摘掉；这个 id 已经换成别的线程（接手、收回）时不动。
+    pub(crate) fn forget(&self, id: SessionId, killed: &Arc<AtomicBool>) {
+        let Some(shared) = self.0.upgrade() else { return };
+        let mut registry = shared.registry();
+        if registry.sessions.get(&id).is_some_and(|handle| handle.owns(killed)) {
+            registry.sessions.remove(&id);
+        }
     }
 }
 

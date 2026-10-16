@@ -347,6 +347,7 @@ fn a_panicking_session_tells_its_front_end() {
         assert!(Instant::now() < deadline, "the session thread kept running");
         thread::sleep(Duration::from_millis(5));
     }
+    assert!(!host.shared.registry().sessions.contains_key(&id), "the crashed session is still registered");
     host.shared.kill_all();
 }
 
