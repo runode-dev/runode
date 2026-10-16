@@ -22,7 +22,7 @@ crate::icons! {
     pub PIN_ICON = "pin",
     /// 文件树「更多」菜单里用 VS Code 打开，预览栏里切到源码。
     pub CODE_ICON = "code",
-    /// 取消暂存、丢弃改动和打勾：Git 面板和预览栏的 diff 共用，打勾还有任务板和 Markdown 的任务列表。
+    /// 取消暂存、丢弃改动和打勾：Git 面板和预览栏的 diff 共用，打勾还有看板的卡片和 Markdown 的任务列表。
     pub MINUS_ICON = "minus",
     pub DISCARD_ICON = "discard",
     pub CHECK_ICON = "check",
@@ -39,9 +39,9 @@ crate::icons! {
     pub VIEW_LIST_ICON = "view-list",
     /// 浏览文件夹、在访达里打开：新建工作区对话框和文件树的「更多」菜单。
     pub FOLDER_OPEN_ICON = "folder-open",
-    /// 关闭、清空：分屏标题条、对话框、任务板和文件树的搜索框。
+    /// 关闭、清空：分屏标题条、对话框、看板和文件树的搜索框。
     pub CLOSE_ICON = "close",
-    /// 分支：Git 面板、侧栏和任务板的卡片。
+    /// 分支：Git 面板、侧栏和看板的卡片。
     pub BRANCH_ICON = "branch",
     /// Git：右侧面板顶上的标签、侧栏和 Git 面板多个仓库时的块头。
     pub GIT_ICON = "git",
@@ -82,8 +82,9 @@ crate::icons! {
     pub PLUG_ICON = "plug",
     /// 侧栏顶上手机端入口和引导页的图标。
     pub PHONE_ICON = "phone",
-    /// 侧栏顶上定时的入口。
+    /// 侧栏顶上定时和看板的入口。
     pub CLOCK_ICON = "clock",
+    pub KANBAN_ICON = "kanban",
     /// 设置页侧栏顶上的返回，以及各页的图标（终端、文件、agent、远程访问几页借用上面的）。
     pub ARROW_LEFT_ICON = "arrow-left",
     pub SETTINGS_ICON = "settings",

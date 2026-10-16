@@ -302,7 +302,7 @@ pub enum ClientMsg {
     /// 收发会卡上一两秒，打的字攒着一起到；一直有包来回它就醒着。宿主在 `Welcome` 的 `keep_awake`
     /// 里说自己认得它，旧宿主会回 `Error`，手机不发。
     KeepAwake,
-    /// 要任务板上的任务和定时（见 `todo` 模块），宿主回 `Todos`；之后任务或定时有变化时给这条连接发
+    /// 要看板上的任务和定时（见 `todo` 模块），宿主回 `Todos`；之后任务或定时有变化时给这条连接发
     /// `TodosChanged`。完成了的任务只给最近七天的。下面这几条宿主自己办，宿主在 `Welcome` 的 `todos`
     /// 里说自己认得它们；还没打开任务库（见 `runode_host` 的 `Host::serve_todos`）、正在交出会话时回
     /// `Error`。
@@ -364,7 +364,7 @@ pub enum HostMsg {
     /// 前端解不了这个格式时改要 `VtReplay`。`standalone` 是宿主单独一个进程在跑（`runode --host`）；
     /// 为假时宿主跑在某个 app 的进程里，那个 app 才是它的界面，别的 app 不该接手它的会话、也不该
     /// 让它退出。`handoff` 是宿主交出会话时写的交接格式（`handoff::HANDOFF_FORMAT`），0 是这个
-    /// 宿主不会交接。`keep_awake` 是宿主认得 `ClientMsg::KeepAwake`，`todos` 是认得任务板的几条
+    /// 宿主不会交接。`keep_awake` 是宿主认得 `ClientMsg::KeepAwake`，`todos` 是认得看板的几条
     /// 消息（`ClientMsg::ListTodos` 等）。
     Welcome {
         protocol: u32,
@@ -582,8 +582,9 @@ pub enum HostMsg {
         req: u32,
         id: String,
     },
-    /// 任务板变了（有人增删改、开始了任务、定时到点开了任务），发给问过 `ListTodos` 的连接；要看新的再
-    /// 发一次 `ListTodos`。任务会话里 agent 的状态变了不算，那个看会话自己的状态。
+    /// 看板变了（有人增删改、开始了任务、定时到点开了任务），或者没做完的任务的会话里 agent 的状态、前台
+    /// 是不是 shell 变了、shell 退出了（卡片可能换列），发给问过 `ListTodos` 的连接；要看新的再发一次
+    /// `ListTodos`，会话的状态另问。
     TodosChanged,
     /// 比自己新的宿主才有的消息，前端忽略它。
     #[serde(other)]

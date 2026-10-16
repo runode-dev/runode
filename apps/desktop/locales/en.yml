@@ -45,7 +45,7 @@ menu:
   toggle_files: Show or Hide Files
   toggle_github_actions: Show or Hide GitHub Actions
   toggle_tasks: Tasks…
-  toggle_todo_board: Todo Board
+  toggle_kanban: Kanban
   toggle_schedules: Schedules
   new_todo: New Task
   toggle_full_screen: Toggle Full Screen
@@ -760,13 +760,14 @@ mobile:
   paired_on: "Paired %{date}"
   date: "%{m}/%{d}/%{y}"
   pair_another: "Pair Another Device"
-todo_board:
-  title: Todo Board
-  host_too_old: The terminal host is too old for the todo board; restart Runode to upgrade it.
+kanban:
+  title: Kanban
+  entry_needs_you: "Needs you: %{count}"
+  host_too_old: The terminal host is too old for the Kanban; restart Runode to upgrade it.
   schedules: Schedules
   new_todo: New Task
   new_schedule: New Schedule
-  close: Close the todo board
+  close: Close the Kanban
   count: "%{count} tasks"
   empty: Nothing here
   started_at: "started %{time}"

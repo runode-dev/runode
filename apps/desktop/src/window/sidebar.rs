@@ -217,8 +217,8 @@ impl WindowView {
             .child(self.render_mobile_entry(cx))
             .child(self.render_new_todo_entry(cx))
             .child(self.render_schedules_entry(cx))
-            .child(self.render_todo_board_entry(cx))
-            // 手机端、新建任务、定时和任务板的入口不是 workspace，和下面的列表用一条线隔开。
+            .child(self.render_kanban_entry(cx))
+            // 手机端、新建任务、定时和看板的入口不是 workspace，和下面的列表用一条线隔开。
             .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(cx.theme().border))
             .child(
                 div()
@@ -243,8 +243,8 @@ impl WindowView {
     fn render_row(&self, ix: usize, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
-        // 开着手机端引导页、任务板时高亮的是入口。
-        let active = ix == self.active && self.mobile.is_none() && self.todo_board.is_none();
+        // 开着手机端引导页、看板时高亮的是入口。
+        let active = ix == self.active && self.mobile.is_none() && self.kanban.is_none();
         let active_bg = cx.theme().mix(0.10);
         let hover_bg = cx.theme().mix(0.06);
         let close_label = rust_i18n::t!("menu.close_workspace");

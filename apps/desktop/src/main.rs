@@ -12,6 +12,7 @@ mod github_actions;
 mod host_client;
 mod host_process;
 mod i18n;
+mod kanban;
 mod keybinds;
 mod menus;
 mod prespawn;
@@ -21,7 +22,6 @@ mod remote_access;
 mod settings;
 mod startup;
 mod terminal_view;
-mod todo_board;
 mod update;
 mod window;
 

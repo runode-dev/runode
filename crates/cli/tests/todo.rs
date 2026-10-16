@@ -53,7 +53,7 @@ fn todo(id: &str, title: &str) -> Todo {
     }
 }
 
-/// 认得任务板的假宿主：会话 `S` 里 claude 在干活；任务和定时照给的回，别的请求照常回话。
+/// 认得看板的假宿主：会话 `S` 里 claude 在干活；任务和定时照给的回，别的请求照常回话。
 fn host(name: &str, todos: Vec<Todo>, schedules: Vec<Schedule>) -> FakeHost {
     FakeHost::start(name, move |message| match message {
         ClientMsg::Hello { .. } => vec![welcome(true)],

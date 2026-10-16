@@ -187,8 +187,8 @@ pub struct RestorePlan {
 /// 不满足的清掉 `session`，在原目录新开；其中还在宿主里、没人连着、又已经退出或者没启动过的，
 /// 放进 `end`。没启动过要存档和宿主都这么说：存档记着 `unstarted`、宿主也读不到
 /// 前台程序（`SessionMeta::foreground`，shell 启动后就是 shell 自己）；存档的记录过时了、宿主
-/// 那边其实已经启动的照样接上。存档里没记着的会话不在这里结束：任务板留着已经退出的会话给人看
-/// agent 最后的输出，这类会话由 `watch_background` 问过任务板再收。
+/// 那边其实已经启动的照样接上。存档里没记着的会话不在这里结束：看板留着已经退出的会话给人看
+/// agent 最后的输出，这类会话由 `watch_background` 问过看板再收。
 /// 宿主跑在 app 里时它是新的，`live` 为空，全部新开、什么都不结束。
 pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> RestorePlan {
     let mut seen = HashSet::new();
@@ -580,7 +580,7 @@ mod tests {
         let plan = plan_restore(windows, &live);
         assert_eq!(sessions(&plan.windows), [None, Some(2)]);
         assert_eq!(plan.end, [SessionId(1)]);
-        // 存档里没记着的（3 可能是任务板留着的）不结束。
+        // 存档里没记着的（3 可能是看板留着的）不结束。
         assert!(plan_restore(Vec::new(), &live).end.is_empty());
     }
 

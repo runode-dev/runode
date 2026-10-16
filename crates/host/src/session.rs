@@ -45,6 +45,7 @@ use runode_terminal::{
     pty::{self, Pty, PtyEvent, PtyHandoff},
 };
 use runode_types::{
+    agent::AgentState,
     clipboard::ClipboardAccess,
     grid::GridSize,
     input::KeyChord,
@@ -149,7 +150,7 @@ pub(crate) enum Inbox {
     /// 按宿主 VT 当前的模式把这段文字当粘贴写给程序，见 `HostSession::encode_paste`。
     Paste(String),
     /// 等 shell 出了提示符（shell 集成报告了提示符所在的目录）再把这些字节写给程序，最多等
-    /// `TYPE_AT_PROMPT_PATIENCE`（注入了集成的等 `TYPE_AT_INTEGRATED_PROMPT_PATIENCE`）。任务板在新开的会话里打 agent 的命令用：shell 还在读配置时打进去的字
+    /// `TYPE_AT_PROMPT_PATIENCE`（注入了集成的等 `TYPE_AT_INTEGRATED_PROMPT_PATIENCE`）。看板在新开的会话里打 agent 的命令用：shell 还在读配置时打进去的字
     /// 可能被配置里的程序读走。
     TypeAtPrompt(Vec<u8>),
     /// 谁最近在操作这个会话，见 `SessionMeta::driver`：`Some` 是别的终端里的程序经 socket 做了
@@ -556,6 +557,8 @@ struct Runner {
     read_patience: Duration,
     /// 在等界面回的那个读剪贴板的请求，见 `clipboard`。
     clipboard_read: Option<clipboard::PendingRead>,
+    /// 上次公布的 agent 状态和前台是不是 shell，见 `publish_meta`。
+    board_state: Option<(Option<AgentState>, bool)>,
     /// 等着提示符出来再写的字节和收到请求的时刻，见 `Inbox::TypeAtPrompt`、`type_ahead_by`。
     type_ahead: Option<(Vec<u8>, Instant)>,
 }
@@ -589,6 +592,7 @@ impl Runner {
             clipboard: ClipboardAccess::default(),
             read_patience: CLIPBOARD_READ_PATIENCE,
             clipboard_read: None,
+            board_state: None,
             type_ahead: None,
         };
         // shell 已经在起始目录里跑起来了，不等第一次输出，前端一连上就有名字。
@@ -683,9 +687,16 @@ impl Runner {
     /// 会话结束了（前端要结束它，或者处理消息时 panic）：还没报告过退出的，告诉连着的前端
     /// （比如经 socket 等着 agent 的命令行）；叫结束的那一方多半已经不收了。
     fn ended(&mut self) {
-        if !std::mem::replace(&mut self.exited, true) {
-            self.emit(Event::msg(HostMsg::Exited { id: self.id, status: None }));
+        if !self.exited {
+            self.report_exit();
         }
+    }
+
+    /// shell 退出了：告诉连着的前端，也告诉宿主，任务会话的卡片要换列。
+    fn report_exit(&mut self) {
+        self.exited = true;
+        self.emit(Event::msg(HostMsg::Exited { id: self.id, status: None }));
+        self.ui.todo_session_changed(self.id);
     }
 
     /// 被结束时还排在收件箱里的消息（`first` 是已经取出来的那些：`run` 里取出的那条，或者交接冻结期间存下的
@@ -752,10 +763,7 @@ impl Runner {
                 self.output(&data);
                 self.credits.release(data.len());
             }
-            Inbox::Pty(PtyEvent::Exited) => {
-                self.exited = true;
-                self.emit(Event::msg(HostMsg::Exited { id: self.id, status: None }));
-            }
+            Inbox::Pty(PtyEvent::Exited) => self.report_exit(),
             Inbox::Detach { connection } => {
                 self.subscribers.retain(|s| s.connection != connection);
                 self.forget_viewer(connection);
@@ -763,8 +771,7 @@ impl Runner {
             Inbox::Start { integration } => {
                 if let Err(err) = self.session.start(self.shell.as_deref(), integration) {
                     tracing::error!("failed to start terminal session: {err:#}");
-                    self.exited = true;
-                    self.emit(Event::msg(HostMsg::Exited { id: self.id, status: None }));
+                    self.report_exit();
                     return;
                 }
                 self.refresh_foreground(Instant::now());
@@ -1248,6 +1255,11 @@ impl Runner {
     /// 对外公布的状态变了就发给前端。
     fn publish_meta(&mut self) {
         if let Some(meta) = self.session.take_meta() {
+            // 看板按这两样给任务分列，变了才告诉宿主；标题这类常变的不算。
+            let state = (meta.agent.as_ref().map(|agent| agent.state), meta.foreground_is_shell);
+            if self.board_state.replace(state) != Some(state) {
+                self.ui.todo_session_changed(self.id);
+            }
             let event = Event::msg(HostMsg::Meta { id: self.id, meta });
             // 状态不攒：连上时直接给最新的。
             self.subscribers.retain_mut(|s| (s.sink)(event.clone()));

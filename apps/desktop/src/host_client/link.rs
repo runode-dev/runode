@@ -6,7 +6,7 @@
 //!
 //! 读：一个 `host-link-reader` 线程读帧，按会话分发成 `LinkEvent`：输出帧按通道找到会话；快照帧
 //! 拼好到 `SnapshotEnd` 作为一份 `Screen` 交出去；带 `req` 的回话交给等着的调用方；
-//! `UiRequest` 交给界面（见 `Link::ui_requests`）；任务板变了（`TodosChanged`）告诉看任务板的一方
+//! `UiRequest` 交给界面（见 `Link::ui_requests`）；看板变了（`TodosChanged`）告诉看看板的一方
 //! （见 `Link::todos_changed`）；连接断开时给每个会话发 `LinkEvent::Lost`。读线程那一组函数在 `reader`。
 //!
 //! 连上一个会话（`attach`）时先登记再发 `Attach`。发出 `Attach` 到收到对应的 `Attached` 之间，
@@ -157,7 +157,7 @@ struct Inner {
     writer: Mutex<Option<Writer>>,
     ui: UnboundedSender<(UiTicket, ClientMsg)>,
     ui_requests: Mutex<Option<UnboundedReceiver<(UiTicket, ClientMsg)>>>,
-    /// 任务板变了，或者换了一条连接（新连接上还没问过任务板，宿主不会再说变了），见 `Link::todos_changed`。
+    /// 看板变了，或者换了一条连接（新连接上还没问过看板，宿主不会再说变了），见 `Link::todos_changed`。
     todos: UnboundedSender<()>,
     todos_changed: Mutex<Option<UnboundedReceiver<()>>>,
     next_req: AtomicU32,
@@ -207,7 +207,7 @@ struct State {
     host_build: Option<BuildId>,
     /// 现在这条连接上的宿主的进程号，见 `Link::host_pid`。
     host_pid: Option<u32>,
-    /// 现在这条连接上的宿主认得任务板的消息，见 `Link::host_knows_todos`。
+    /// 现在这条连接上的宿主认得看板的消息，见 `Link::host_knows_todos`。
     todos: bool,
 }
 
@@ -450,7 +450,7 @@ impl Link {
         if let Some(windows) = layout {
             let _ = self.inner.control(&ClientMsg::LayoutChanged { windows: Some(windows) });
         }
-        // 看着任务板的一方重新问一次，新连接上就又会收到变化。
+        // 看着看板的一方重新问一次，新连接上就又会收到变化。
         let _ = self.inner.todos.unbounded_send(());
         tracing::info!("connected to the host (pid {host_pid})");
         Ok(())
@@ -473,14 +473,14 @@ impl Link {
         self.inner.state().host_build.clone()
     }
 
-    /// 现在连着的宿主认得任务板的消息（`ClientMsg::ListTodos` 等，见 `HostMsg::Welcome`）。旧宿主不认得：
+    /// 现在连着的宿主认得看板的消息（`ClientMsg::ListTodos` 等，见 `HostMsg::Welcome`）。旧宿主不认得：
     /// 它回的 `Error` 不带请求编号，等的一方等到超时，整条连接按断开处理，所以不认得时一条都不发。
     pub fn host_knows_todos(&self) -> bool {
         let state = self.inner.state();
         state.connected && state.todos
     }
 
-    /// 任务板变了（`HostMsg::TodosChanged`，只给问过 `ListTodos` 的连接发），或者换了一条连接、要重新问。
+    /// 看板变了（`HostMsg::TodosChanged`，只给问过 `ListTodos` 的连接发），或者换了一条连接、要重新问。
     /// 只能取一次，第二次返回 `None`。
     pub fn todos_changed(&self) -> Option<UnboundedReceiver<()>> {
         self.inner.todos_changed.lock().unwrap_or_else(PoisonError::into_inner).take()

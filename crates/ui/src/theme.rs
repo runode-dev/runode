@@ -17,7 +17,7 @@ pub const REMOVED: Rgb = Rgb(0xE5, 0x53, 0x4B);
 pub const MODIFIED: Rgb = Rgb(0xD2, 0xA8, 0x3E);
 pub const RENAMED: Rgb = Rgb(0x53, 0x9B, 0xF5);
 
-/// agent 等用户回答、干完了用户还没看时标记的颜色；任务板上需要你、完成两列的圆点也用它们。
+/// agent 等用户回答、干完了用户还没看时标记的颜色；看板上需要你、完成两列的圆点也用它们。
 pub const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
 pub const AGENT_DONE_COLOR: u32 = 0x3FB950;
 
@@ -118,7 +118,7 @@ impl Theme {
         self.bg
     }
 
-    /// 前景色往背景色混 `k`：反色的浮层（任务板的提示条）的底色这样算。
+    /// 前景色往背景色混 `k`：反色的浮层（看板的提示条）的底色这样算。
     pub fn mix_inverse(&self, k: f32) -> Hsla {
         hsla(self.fg.mix(self.bg, k))
     }

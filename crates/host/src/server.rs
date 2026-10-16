@@ -111,7 +111,7 @@ pub(crate) struct Peers {
     pub(crate) activity_at: Instant,
     /// 没有会话也没有连接时也不算空闲，见 `Host::set_stay_up`。
     pub(crate) stay_up: bool,
-    /// 任务板上有定时：到点要开任务，没有会话也没有连接时也不算空闲，见 `todos`。
+    /// 看板上有定时：到点要开任务，没有会话也没有连接时也不算空闲，见 `todos`。
     pub(crate) scheduled: bool,
 }
 
@@ -155,7 +155,7 @@ impl Peers {
         }
     }
 
-    /// 任务板变了：告诉问过 `ListTodos` 的连接。
+    /// 看板变了：告诉问过 `ListTodos` 的连接。
     pub(crate) fn todos_changed(&self) {
         for peer in self.connections.values().filter(|peer| peer.watches_todos) {
             if let Some(out) = &peer.out {
@@ -183,7 +183,7 @@ struct Peer {
     out: Option<Outbox>,
     /// 问过 `Layout`：界面说布局变了时告诉它，见 `HostMsg::LayoutChanged`。
     watches_layout: bool,
-    /// 问过 `ListTodos`：任务板变了时告诉它，见 `HostMsg::TodosChanged`。
+    /// 问过 `ListTodos`：看板变了时告诉它，见 `HostMsg::TodosChanged`。
     watches_todos: bool,
 }
 
@@ -209,7 +209,7 @@ enum Asker {
     Session(SessionId),
 }
 
-/// 会话线程请界面办事的一头，见 `Shared::ask_ui`。拿着宿主的弱引用：
+/// 会话线程请界面办事、报状态变了的一头，见 `Shared::ask_ui`、`Shared::todo_session_changed`。拿着宿主的弱引用：
 /// 会话线程不该让宿主留着不放，宿主没了时什么都办不成。
 #[derive(Clone, Default)]
 pub(crate) struct UiPort(Weak<Shared>);
@@ -217,6 +217,13 @@ pub(crate) struct UiPort(Weak<Shared>);
 impl UiPort {
     pub(crate) fn new(shared: Weak<Shared>) -> Self {
         Self(shared)
+    }
+
+    /// 见 `Shared::todo_session_changed`。
+    pub(crate) fn todo_session_changed(&self, session: SessionId) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.todo_session_changed(session);
+        }
     }
 
     /// 见 `Shared::ask_ui`。
@@ -1379,7 +1386,7 @@ impl Connection {
         });
     }
 
-    /// 另起线程办一件任务板的请求，见 `todos`：要读写库、stat 目录，开始任务时还要跑 git、开会话。
+    /// 另起线程办一件看板的请求，见 `todos`：要读写库、stat 目录，开始任务时还要跑 git、开会话。
     fn todos(&self, req: u32, name: &str, answer: impl FnOnce(&Shared) -> Result<HostMsg, String> + Send + 'static) {
         let shared = self.shared.clone();
         self.read_files(req, name, move || answer(&shared));

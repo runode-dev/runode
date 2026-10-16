@@ -1,35 +1,35 @@
-//! 把铺满窗口的任务板接到窗口上。任务板本身在 `todo_board`：打开时建一个 `TodoBoard`，收起时丢掉。
+//! 把铺满窗口的看板接到窗口上。看板本身在 `kanban`：打开时建一个 `Kanban`，收起时丢掉。
 //! 这里启动时把和宿主说话的办法交给它（`watch_todos`），每次画之前交给它各 workspace 的目录和名字、当前的
-//! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上新建任务、定时、任务板三个
+//! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上新建任务、定时、看板三个
 //! 入口；卡片上 agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事（收起、换页、把任务会话接进
-//! 窗口）经 `TodoBoardEvent` 交回来，它的对话框画在窗口最上层。
+//! 窗口）经 `KanbanEvent` 交回来，它的对话框画在窗口最上层。
 //!
 //! 看板和手机端引导页一样盖住标签和分屏：切到任何一个标签或 workspace、按 Esc 就收起。卡片的「打开终端」
 //! 把任务的会话接进它目录所在的 workspace 的一个新标签，已经在哪个分屏里时切过去。
 
 use std::path::{Path, PathBuf};
 
-use crate::todo_board::{AgentMarks, Host, Input, TodoBoard, TodoBoardEvent, TodoDialog};
+use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
 use gpui::{AnyElement, App, Context, Div, Entity, Focusable as _, Stateful, Subscription, Window, prelude::*};
 use runode_protocol::{SessionId, todo::Todo};
 
 use super::{
-    NewTodo, ToggleSchedules, ToggleTodoBoard, WindowView,
+    NewTodo, ToggleKanban, ToggleSchedules, WindowView,
     agents::{self, Mark},
     remote,
     titlebar::styled_agent_mark,
 };
 use crate::{
-    assets::{CHECK_ICON, CLOCK_ICON, PLUS_ICON},
+    assets::{CLOCK_ICON, KANBAN_ICON, PLUS_ICON},
     config::AppConfig,
     host_client,
     terminal_view::TerminalView,
     ui::theme::ActiveTheme as _,
 };
 
-/// 开着的任务板。
-pub(super) struct OpenTodoBoard {
-    pub(super) view: Entity<TodoBoard>,
+/// 开着的看板。
+pub(super) struct OpenKanban {
+    pub(super) view: Entity<Kanban>,
     _events: Subscription,
 }
 
@@ -39,10 +39,10 @@ const AGENT_MARKS: AgentMarks = AgentMarks {
     describe: |agent| Mark::new(agent, false).describe(),
 };
 
-/// 在后台跟着任务板，见 `todo_board::watch`：经 `host_client` 和宿主说话，宿主说变了就重问。
+/// 在后台跟着看板，见 `kanban::watch`：经 `host_client` 和宿主说话，宿主说变了就重问。
 pub fn watch_todos(cx: &mut App) {
     let host = Host { ask: |step| host_client::ask_todos(step), list_sessions: host_client::list_sessions };
-    crate::todo_board::watch(host, host_client::todos_changed(), cx);
+    crate::kanban::watch(host, host_client::todos_changed(), cx);
 }
 
 /// 任务会话该接进哪个 workspace（`dirs` 是各 workspace 的目录）：目录正好是任务的工作树、正好是任务的
@@ -59,15 +59,15 @@ fn best_workspace(dirs: &[&Path], dir: &Path, worktree: Option<&Path>, home: Opt
 }
 
 impl WindowView {
-    /// 打开或收起任务板；开着的是定时页时换到任务页。
-    pub(super) fn toggle_todo_board(&mut self, _: &ToggleTodoBoard, window: &mut Window, cx: &mut Context<Self>) {
+    /// 打开或收起看板；开着的是定时页时换到任务页。
+    pub(super) fn toggle_kanban(&mut self, _: &ToggleKanban, window: &mut Window, cx: &mut Context<Self>) {
         if self.dialog_open(cx) {
             return;
         }
         if self.showing_todo_page(false, cx) {
-            self.close_todo_board(window, cx);
+            self.close_kanban(window, cx);
         } else {
-            self.show_todo_board(false, window, cx);
+            self.show_kanban(false, window, cx);
         }
     }
 
@@ -77,9 +77,9 @@ impl WindowView {
             return;
         }
         if self.showing_todo_page(true, cx) {
-            self.close_todo_board(window, cx);
+            self.close_kanban(window, cx);
         } else {
-            self.show_todo_board(true, window, cx);
+            self.show_kanban(true, window, cx);
         }
     }
 
@@ -88,8 +88,8 @@ impl WindowView {
         if self.dialog_open(cx) {
             return;
         }
-        self.show_todo_board(false, window, cx);
-        if let Some(board) = &self.todo_board {
+        self.show_kanban(false, window, cx);
+        if let Some(board) = &self.kanban {
             board.view.update(cx, |board, cx| board.new_todo(window, cx));
         }
     }
@@ -102,47 +102,46 @@ impl WindowView {
 
     /// 看板开着，显示的是定时页（`schedules`）或任务页。
     fn showing_todo_page(&self, schedules: bool, cx: &App) -> bool {
-        self.todo_board.as_ref().is_some_and(|board| board.view.read(cx).showing_schedules() == schedules)
+        self.kanban.as_ref().is_some_and(|board| board.view.read(cx).showing_schedules() == schedules)
     }
 
-    /// 打开看板的定时页（`schedules`）或任务页，焦点给它；马上重问一次任务会话的状态，开着时接着轮询。
-    pub(super) fn show_todo_board(&mut self, schedules: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// 打开看板的定时页（`schedules`）或任务页，焦点给它。
+    pub(super) fn show_kanban(&mut self, schedules: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.leave_mobile(cx);
         self.drop_settings(cx);
-        match &self.todo_board {
+        match &self.kanban {
             Some(board) => board.view.update(cx, |board, cx| board.show_schedules(schedules, cx)),
             None => {
-                let view = cx.new(|cx| TodoBoard::new(AGENT_MARKS, schedules, cx));
-                let events = cx.subscribe_in(&view, window, Self::on_todo_board_event);
-                self.todo_board = Some(OpenTodoBoard { view, _events: events });
+                let view = cx.new(|cx| Kanban::new(AGENT_MARKS, schedules, cx));
+                let events = cx.subscribe_in(&view, window, Self::on_kanban_event);
+                self.kanban = Some(OpenKanban { view, _events: events });
             }
         }
-        if let Some(board) = &self.todo_board {
+        if let Some(board) = &self.kanban {
             window.focus(&board.view.focus_handle(cx), cx);
         }
-        crate::todo_board::poll_sessions(cx);
         cx.notify();
     }
 
-    pub(super) fn close_todo_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.todo_board.take().is_some() {
+    pub(super) fn close_kanban(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.kanban.take().is_some() {
             window.focus(&self.focus_handle(cx), cx);
             cx.notify();
         }
     }
 
-    /// 任务板要窗口办的事。
-    fn on_todo_board_event(
+    /// 看板要窗口办的事。
+    fn on_kanban_event(
         &mut self,
-        _: &Entity<TodoBoard>,
-        event: &TodoBoardEvent,
+        _: &Entity<Kanban>,
+        event: &KanbanEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
-            TodoBoardEvent::Close => self.close_todo_board(window, cx),
-            TodoBoardEvent::PageChanged => cx.notify(),
-            TodoBoardEvent::OpenSession { session, todo } => self.open_todo_session(*session, todo, window, cx),
+            KanbanEvent::Close => self.close_kanban(window, cx),
+            KanbanEvent::PageChanged => cx.notify(),
+            KanbanEvent::OpenSession { session, todo } => self.open_todo_session(*session, todo, window, cx),
         }
     }
 
@@ -156,13 +155,13 @@ impl WindowView {
             .flat_map(|tab| &tab.panes)
             .find_map(|(pane, (terminal, _))| (terminal.read(cx).session_id() == Some(id)).then_some(*pane));
         if let Some(pane) = own {
-            self.todo_board = None;
+            self.kanban = None;
             self.show_pane(pane, window, cx);
             return;
         }
         // 当前窗口正在更新，`find_session` 读不到它，找到的是别的窗口。
         if let Some((target, pane)) = remote::find_session(id, cx) {
-            self.close_todo_board(window, cx);
+            self.close_kanban(window, cx);
             agents::reveal(target, pane, cx);
             return;
         }
@@ -174,7 +173,7 @@ impl WindowView {
                 return;
             }
         };
-        self.todo_board = None;
+        self.kanban = None;
         let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
         let dirs: Vec<PathBuf> = self.workspaces.iter().map(|workspace| canonical(&workspace.dir)).collect();
         let dir_refs: Vec<&Path> = dirs.iter().map(PathBuf::as_path).collect();
@@ -191,7 +190,7 @@ impl WindowView {
 
     /// 侧栏顶上的新建任务入口：打开任务页，弹出新建任务的对话框。
     pub(super) fn render_new_todo_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let label = rust_i18n::t!("todo_board.new_todo").into_owned();
+        let label = rust_i18n::t!("kanban.new_todo").into_owned();
         super::mobile::page_entry("new-todo-entry", PLUS_ICON, label, false, cx, |this, window, cx| {
             this.new_todo(&NewTodo, window, cx);
         })
@@ -199,25 +198,31 @@ impl WindowView {
 
     /// 侧栏顶上的定时入口，看板开着定时页时高亮。
     pub(super) fn render_schedules_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let label = rust_i18n::t!("todo_board.schedules").into_owned();
+        let label = rust_i18n::t!("kanban.schedules").into_owned();
         let active = self.showing_todo_page(true, cx);
         super::mobile::page_entry("schedules-entry", CLOCK_ICON, label, active, cx, |this, window, cx| {
-            this.show_todo_board(true, window, cx);
+            this.show_kanban(true, window, cx);
         })
     }
 
-    /// 侧栏顶上的任务板入口，看板开着任务页时高亮。
-    pub(super) fn render_todo_board_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let label = rust_i18n::t!("todo_board.title").into_owned();
+    /// 侧栏顶上的看板入口，看板开着任务页时高亮；有需要你处理的任务时右边是它们的数。
+    pub(super) fn render_kanban_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let label = rust_i18n::t!("kanban.title").into_owned();
         let active = self.showing_todo_page(false, cx);
-        super::mobile::page_entry("todo-board-entry", CHECK_ICON, label, active, cx, |this, window, cx| {
-            this.show_todo_board(false, window, cx);
+        let count = crate::kanban::needs_you(cx);
+        super::mobile::page_entry("kanban-entry", KANBAN_ICON, label, active, cx, |this, window, cx| {
+            this.show_kanban(false, window, cx);
+        })
+        .when(count > 0, |entry| {
+            entry
+                .aria_description(rust_i18n::t!("kanban.entry_needs_you", count = count).into_owned())
+                .child(crate::kanban::needs_you_badge(count).ml_auto())
         })
     }
 
-    /// 任务板开着时窗口的内容，摆法和手机端引导页一样。
+    /// 看板开着时窗口的内容，摆法和手机端引导页一样。
     pub(super) fn render_todo_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let Some(board) = self.todo_board.as_ref().map(|board| board.view.clone()) else { return Vec::new() };
+        let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) else { return Vec::new() };
         // 要读自启文件，只在定时那一页显示着时才查：窗口几乎每帧都重画。
         let resident = board.read(cx).showing_schedules()
             && cx.global::<AppConfig>().0.terminal_host
@@ -235,9 +240,9 @@ impl WindowView {
         self.render_page_body(board.into_any_element(), window, cx)
     }
 
-    /// 任务板开着的新建、编辑对话框，画在窗口最上层。
+    /// 看板开着的新建、编辑对话框，画在窗口最上层。
     pub(super) fn todo_dialog(&self, cx: &App) -> Option<Entity<TodoDialog>> {
-        self.todo_board.as_ref().and_then(|board| board.view.read(cx).dialog())
+        self.kanban.as_ref().and_then(|board| board.view.read(cx).dialog())
     }
 }
 

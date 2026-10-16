@@ -7,16 +7,16 @@
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |
 | `paths` | 配置、数据和缓存放在哪（`Dirs`），以及覆盖写用户手写过的文件（`replace_file`） | 只有 std |
-| `types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话标识、任务板、终端设置、剪贴板的规矩、输入事件 | std、serde |
+| `types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话标识、看板、终端设置、剪贴板的规矩、输入事件 | std、serde |
 | `protocol` | 宿主和各前端之间的消息；手机远程连接（`remote`）和推送通知（`push`）的线上格式以它为准 | types、serde、serde_json |
 | `git` | 用 git 命令行读仓库，做暂存、提交、分支、stash、工作树和同步 | 只有 std |
-| `todo` | 任务板的 SQLite 库（`Store`）和定时（`next_fire`）；宿主在跑时改任务板仍经宿主的消息，它才会告诉在看任务板的前端 | types、rusqlite、libc |
+| `todo` | 看板的 SQLite 库（`Store`）和定时（`next_fire`）；宿主在跑时改看板仍经宿主的消息，它才会告诉在看看板的前端 | types、rusqlite、libc |
 | `tasks` | 一个目录里能跑的命令：`tasks.json`、Makefile 目标、package.json scripts | types、paths、serde_json |
 | `preview` | 文件预览不碰界面的部分：读文件、语法高亮、解析 Markdown；界面是 `desktop` 的 `preview_panel` | std、syntect、two-face、pulldown-cmark、regex |
 | `agent` | 认出终端前台跑的 AI 编程 agent，判断它在干活、空闲还是等回答 | types、serde、regex、toml |
 | `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上，shell 集成，认出运行完的命令 | types、paths、agent、libghostty-vt、portable-pty |
 | `config` | Ghostty 兼容的配置文件、主题、快捷键和配置模板，生成 `TermSettings`。模板只有英文，配置项的说明写在 `docs`，动作的说明写在 `ActionSpec::doc`，译文都在 `desktop` 的 locales 里 | types、paths、tracing、objc2-foundation、objc2-app-kit |
-| `host` | 管终端会话的宿主（只有 lib），跑在 app 进程里或单独一个进程（`runode --host`）：持有 PTY 和权威的 VT，升级时新宿主接手旧宿主的会话、会话不断；也替前端读写 git、列目录和命令，持有任务板 | terminal、protocol、types、git、paths、todo、tasks、libc、anyhow、tracing |
+| `host` | 管终端会话的宿主（只有 lib），跑在 app 进程里或单独一个进程（`runode --host`）：持有 PTY 和权威的 VT，升级时新宿主接手旧宿主的会话、会话不断；也替前端读写 git、列目录和命令，持有看板 | terminal、protocol、types、git、paths、todo、tasks、libc、anyhow、tracing |
 | `remote` | 远程访问：TLS 监听、门禁、设备表、Bonjour，给手机推通知 | protocol、types、paths、rustls、rcgen、ring、libc、serde、serde_json、tracing |
 | `update` | 桌面 app 的自动更新：查 GitHub Release、下载、核对签名，退出时原子地换上 | serde、serde_json、tracing、libc、objc2、block2、objc2-foundation |
 | `autostart` | 登录时自启（launchd、systemd、`SMAppService`），命令行和设置页共用 | paths、objc2、objc2-foundation、objc2-service-management |
@@ -52,7 +52,7 @@ GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），只有它的
 - 同一个泛词在两处出现时，各自加上领域限定，读代码时才分得清说的是哪一个：比如预览里读文件、高亮这些不碰界面的部分叫 `preview`，预览栏的界面是 `desktop` 里的 `preview_panel`。
 - 模块名用 snake_case。有子模块的模块写成 `foo.rs` 加 `foo/` 目录，不用 `foo/mod.rs`；只有 `tests/common/mod.rs` 按 cargo 的惯例保留，这样 cargo 不把它当成一个单独的测试。
 - 一个模块的单元测试超过三百行左右时挪到 `foo/tests.rs`，`foo.rs` 里只留 `#[cfg(test)] mod tests;`。
-- 界面代码只分两处：能复用的部件和所有图标放在 `ui`，入口用 `use runode_ui as ui` 接进来，各模块写 `crate::ui::…`；部件要回调视图的写成对视图类型泛型（`RowButton<V>`、`MenuHost`）。只有桌面用的整页视图（`terminal_view`、`settings`、`github_actions`、`file_tree`、`git_panel`、`preview_panel`、`todo_board`）是 `desktop` 的顶层模块，各是独立的 Entity，和窗口只经 `set_input` 和自己的事件说话；`window` 下同名的模块是把它们接进窗口的接入层。不为单个页开 crate。`desktop` 顶层另外只放应用级的胶水，只被一个功能用的模块放进那个功能的目录。
+- 界面代码只分两处：能复用的部件和所有图标放在 `ui`，入口用 `use runode_ui as ui` 接进来，各模块写 `crate::ui::…`；部件要回调视图的写成对视图类型泛型（`RowButton<V>`、`MenuHost`）。只有桌面用的整页视图（`terminal_view`、`settings`、`github_actions`、`file_tree`、`git_panel`、`preview_panel`、`kanban`）是 `desktop` 的顶层模块，各是独立的 Entity，和窗口只经 `set_input` 和自己的事件说话；`window` 下同名的模块是把它们接进窗口的接入层。不为单个页开 crate。`desktop` 顶层另外只放应用级的胶水，只被一个功能用的模块放进那个功能的目录。
 
 # 桌面界面
 

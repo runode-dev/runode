@@ -45,7 +45,7 @@ menu:
   toggle_files: 显示或隐藏文件
   toggle_github_actions: 显示或隐藏 GitHub Actions
   toggle_tasks: 命令…
-  toggle_todo_board: 任务板
+  toggle_kanban: 看板
   toggle_schedules: 定时
   new_todo: 新建任务
   toggle_full_screen: 切换全屏
@@ -760,13 +760,14 @@ mobile:
   paired_on: "配对于 %{date}"
   date: "%{y}/%{m}/%{d}"
   pair_another: "与另一台设备配对"
-todo_board:
-  title: 任务板
-  host_too_old: 终端宿主太旧，不认得任务板；重开 Runode 让它升级。
+kanban:
+  title: 看板
+  entry_needs_you: "%{count} 个任务需要你处理"
+  host_too_old: 终端宿主太旧，不认得看板；重开 Runode 让它升级。
   schedules: 定时
   new_todo: 新建任务
   new_schedule: 新建定时
-  close: 关闭任务板
+  close: 关闭看板
   count: "%{count} 个任务"
   empty: 没有任务
   started_at: "开始于 %{time}"
@@ -1030,9 +1031,9 @@ action:
   toggle_files: 显示或隐藏右侧的文件树，双击文件在预览里打开
   toggle_github_actions: 显示或隐藏右侧的 GitHub Actions 页：经 gh 看当前分支的运行、工作流，管 secret 和 variable
   toggle_tasks: 打开或关掉标题栏上的命令菜单，上下键选、回车运行
-  toggle_todo_board: "打开或收起铺满窗口的任务板：派给 agent 的任务按状态分列"
-  toggle_schedules: 打开或收起任务板的定时页：到点开任务
-  new_todo: 打开任务板，弹出新建任务的对话框
+  toggle_kanban: "打开或收起铺满窗口的看板：派给 agent 的任务按状态分列"
+  toggle_schedules: 打开或收起看板的定时页：到点开任务
+  new_todo: 打开看板，弹出新建任务的对话框
   run_task: 跑命令菜单里叫这个名字的命令（自己加的、Makefile 目标或 package.json 的 script），和在菜单里点它一样；同名的取菜单里靠上的
   goto_agent: 列出所有窗口里的 agent，选一个跳过去
   next_agent: 跳到下一个要处理的 agent：先是等你回答的，再是干完了还没看的

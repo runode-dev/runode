@@ -63,7 +63,7 @@ pub(crate) struct Connection {
     lost: RefCell<HashSet<SessionId>>,
     /// 下一个请求的编号。
     next_req: Cell<u32>,
-    /// 宿主认得任务板的几条消息（`Welcome` 的 `todos`）。
+    /// 宿主认得看板的几条消息（`Welcome` 的 `todos`）。
     pub(crate) todos: bool,
 }
 
@@ -195,7 +195,7 @@ impl Connection {
                     self.lost.borrow_mut().insert(id);
                     self.pending.borrow_mut().push_back(message);
                 }
-                // 问过 `Layout` 以后 app 的布局一变就来一条 `LayoutChanged`，问过 `ListTodos` 以后任务板
+                // 问过 `Layout` 以后 app 的布局一变就来一条 `LayoutChanged`，问过 `ListTodos` 以后看板
                 // 一变就来一条 `TodosChanged`，都不是回话。
                 HostMsg::UiRequest { .. } | HostMsg::LayoutChanged | HostMsg::TodosChanged | HostMsg::Unknown => {}
                 HostMsg::Error { message, .. } => return Ok(Err(message)),

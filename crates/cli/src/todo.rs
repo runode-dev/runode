@@ -1,4 +1,4 @@
-//! `todo` 和 `schedule` 命令：经宿主读写任务板（见 `runode_protocol::todo`）上的任务和定时。
+//! `todo` 和 `schedule` 命令：经宿主读写看板（见 `runode_protocol::todo`）上的任务和定时。
 
 use std::{
     io::Write,
@@ -53,7 +53,7 @@ impl Spec {
     }
 }
 
-/// 连上宿主；宿主不认得任务板的消息时报错，不发。
+/// 连上宿主；宿主不认得看板的消息时报错，不发。
 fn open(env: &Env) -> Result<Connection> {
     let connection = Connection::open(env)?;
     if !connection.todos {
@@ -128,7 +128,7 @@ pub(crate) fn remove(env: &Env, id: String) -> Result<()> {
     }
 }
 
-/// 任务板上的任务和定时。
+/// 看板上的任务和定时。
 fn board(connection: &Connection) -> Result<(Vec<Todo>, Vec<Schedule>)> {
     let req = connection.req();
     connection.send(&ClientMsg::ListTodos { req })?;

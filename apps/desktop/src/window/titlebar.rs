@@ -20,7 +20,7 @@ use super::{
     panes::now_ms,
 };
 use crate::ui::a11y::A11yPress;
-// agent 状态标记的颜色和转圈在 `runode_ui`，任务板也用。
+// agent 状态标记的颜色和转圈在 `runode_ui`，看板也用。
 use crate::ui::{
     spinner::spinner,
     theme::{AGENT_BLOCKED_COLOR, AGENT_DONE_COLOR},

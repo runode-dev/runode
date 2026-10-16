@@ -76,7 +76,7 @@ pub(crate) enum Command {
         kind: Kind,
     },
     ServiceStatus,
-    /// 往任务板上加一张任务；`cwd` 没给时是当前目录，`agent` 没给时是 `runode_protocol::todo::DEFAULT_AGENT`。
+    /// 往看板上加一张任务；`cwd` 没给时是当前目录，`agent` 没给时是 `runode_protocol::todo::DEFAULT_AGENT`。
     TodoAdd {
         title: String,
         prompt: String,

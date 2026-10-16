@@ -38,7 +38,7 @@ impl WindowView {
     /// 打开设置页；已经开着时把焦点给它。
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.leave_mobile(cx);
-        self.todo_board = None;
+        self.kanban = None;
         self.new_workspace = None;
         self.add_task = None;
         self.commit_message_dialog = None;

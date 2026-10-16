@@ -893,7 +893,7 @@ mod bench {
     }
 }
 
-/// 任务板的回话按请求编号交回，宿主说任务板变了时通知看任务板的一方；连上时先通知一次，叫它去问。
+/// 看板的回话按请求编号交回，宿主说看板变了时通知看看板的一方；连上时先通知一次，叫它去问。
 #[test]
 fn todo_requests_get_their_answers_and_changes_are_announced() {
     let dir = temp_dir("todos");

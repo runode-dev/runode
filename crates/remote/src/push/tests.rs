@@ -377,7 +377,7 @@ fn backing_off_notifications_follow_the_registrations() {
     scratch.wait_for(1);
 }
 
-/// 假的宿主：每条连接一个线程，回 `Welcome`、会话列表和屏幕文字；有任务表时说认得任务板，回任务表，
+/// 假的宿主：每条连接一个线程，回 `Welcome`、会话列表和屏幕文字；有任务表时说认得看板，回任务表，
 /// 回完紧跟一条 `TodosChanged`。
 #[derive(Clone, Default)]
 struct FakeHost {
@@ -389,7 +389,7 @@ struct FakeHost {
     /// 收到过几条 `ListSessions`。
     list_sessions: Arc<AtomicUsize>,
     sessions: Arc<Mutex<Vec<SessionInfo>>>,
-    /// 任务表；为 `None` 时是不认得任务板的旧宿主。
+    /// 任务表；为 `None` 时是不认得看板的旧宿主。
     todos: Arc<Mutex<Option<Vec<Todo>>>>,
     /// 收到过几条 `ListTodos`。
     list_todos: Arc<AtomicUsize>,
@@ -543,7 +543,7 @@ fn the_pusher_follows_the_host() {
     thread::sleep(Duration::from_secs(3));
     assert_eq!(host.connections.load(Ordering::SeqCst), 1);
     assert_eq!(scratch.requests().len(), 1);
-    // 宿主不认得任务板：不要任务表。
+    // 宿主不认得看板：不要任务表。
     assert_eq!(host.list_todos.load(Ordering::SeqCst), 0);
 }
 

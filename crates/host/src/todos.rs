@@ -1,12 +1,12 @@
-//! 任务板（见 `runode_protocol::todo`）：任务和定时存在宿主自己的 SQLite 库里（`runode_todo::Store`），
+//! 看板（见 `runode_protocol::todo`）：任务和定时存在宿主自己的 SQLite 库里（`runode_todo::Store`），
 //! 前端经 `ClientMsg::ListTodos` 这几条消息要。app 在宿主拿到会话和监听的 socket 以后调
 //! `Host::serve_todos` 告诉它库在哪、起定时的线程（`schedule`）；之前这些消息都回 `Error`。
 //!
 //! 开始任务时在任务的目录（要工作树时先在仓库的 `.worktrees/` 下新开一个，分支 `runode/<名字>`）里开
 //! 一个会话，等 shell 的提示符出来再打 `<agent> "$RUNODE_TODO_PROMPT"`（写法照 shell 来，见
-//! `agent_command`）：提示词经环境变量交给 shell，不用照各家 shell 的规矩转义。任务会话不进宿主手里的布局，桌面在任务板上打开它时再接进窗口。
+//! `agent_command`）：提示词经环境变量交给 shell，不用照各家 shell 的规矩转义。任务会话不进宿主手里的布局，桌面在看板上打开它时再接进窗口。
 //!
-//! 只有拿着会话的宿主改任务板：开始交出会话（`Peers::handoff`）或者要退出（`Peers::stop`）以后不改库、
+//! 只有拿着会话的宿主改看板：开始交出会话（`Peers::handoff`）或者要退出（`Peers::stop`）以后不改库、
 //! 不开任务，定时也不触发；接手的新宿主提交后自己接着办。两边的库是同一个文件，SQLite 自己管得住两个
 //! 进程同时开着。锁的先后：拿着 `Todos::state` 可以再拿 `peers` 和 `registry`，反过来不行。
 
@@ -41,21 +41,24 @@ const MAX_SLUG: usize = 40;
 /// 给任务开工作树时最多拿这么多个没被占的名字去试，见 `add_worktree`。
 const WORKTREE_ATTEMPTS: usize = 2;
 
-/// 任务板：库和定时的线程要的状态。
+/// 看板：库和定时的线程要的状态。
 #[derive(Default)]
 pub(crate) struct Todos {
     state: Mutex<State>,
-    /// 任务板变了时通知定时的线程，见 `State::generation`。
+    /// 看板变了时通知定时的线程，见 `State::generation`。
     changed: Condvar,
+    /// 没做完的任务用的会话，看板一变就重读，连同读的是第几次变（`State::generation`）之后的库。会话线程拿它
+    /// 判断要不要报状态变了，见 `Shared::todo_session_changed`；单独一把锁，会话线程不等库。
+    sessions: Mutex<(u64, HashSet<SessionId>)>,
 }
 
 #[derive(Default)]
 struct State {
-    /// 库的路径，`Host::serve_todos` 给的；为空时任务板没开。
+    /// 库的路径，`Host::serve_todos` 给的；为空时看板没开。
     path: Option<PathBuf>,
     /// 打开着的库；打不开时为空，下次用时再试，用户修好文件后自己恢复。
     db: Option<Store>,
-    /// 任务板变一次加一，定时的线程据此知道要重新看。
+    /// 看板变一次加一，定时的线程据此知道要重新看。
     generation: u64,
     /// 正在开始、或者正在清工作树的任务，见 `Todos::claim`。
     busy: HashSet<String>,
@@ -88,13 +91,13 @@ impl Todos {
         self.lock().generation
     }
 
-    /// 等到任务板变了（`generation` 不再是 `seen`）或者过了 `timeout`。
+    /// 等到看板变了（`generation` 不再是 `seen`）或者过了 `timeout`。
     fn wait_for_change(&self, seen: u64, timeout: Duration) {
         let state = self.lock();
         let _ = self.changed.wait_timeout_while(state, timeout, |state| state.generation == seen);
     }
 
-    /// 在库上做 `f`。任务板没开、库打不开时报错；`f` 出错时关掉库，下次重新打开。
+    /// 在库上做 `f`。看板没开、库打不开时报错；`f` 出错时关掉库，下次重新打开。
     fn with_db<T>(&self, f: impl FnOnce(&mut Store) -> runode_todo::Result<T>) -> Result<T, String> {
         let mut state = self.lock();
         let Some(path) = state.path.clone() else {
@@ -118,7 +121,7 @@ fn unix_now() -> u64 {
 }
 
 impl Host {
-    /// 打开任务板：库在 `db`（没有时建一个），起定时的线程。在宿主拿到会话和监听的 socket 以后调：
+    /// 打开看板：库在 `db`（没有时建一个），起定时的线程。在宿主拿到会话和监听的 socket 以后调：
     /// `Host::listen` 之后，或者 `Host::take_over` 接手成功以后，只有一个宿主办定时。再调一次什么都不做。
     pub fn serve_todos(&self, db: PathBuf) {
         {
@@ -128,7 +131,7 @@ impl Host {
             }
             state.path = Some(db);
         }
-        // 监听已经开了：这之前问过 `ListTodos` 的连接拿到的是「没有任务板」，叫它们重问。
+        // 监听已经开了：这之前问过 `ListTodos` 的连接拿到的是「没有看板」，叫它们重问。
         self.shared.todos_changed();
         let todos = self.shared.todos.clone();
         let shared = Arc::downgrade(&self.shared);
@@ -141,7 +144,7 @@ impl Host {
 }
 
 impl Shared {
-    /// 能不能改任务板：正在交出会话或者要退出了的宿主不改，见模块文档。
+    /// 能不能改看板：正在交出会话或者要退出了的宿主不改，见模块文档。
     fn todos_writable(&self) -> Result<(), String> {
         let peers = self.peers();
         if peers.handoff.is_some() || peers.stop.is_some() {
@@ -150,11 +153,44 @@ impl Shared {
         Ok(())
     }
 
-    /// 任务板变了：叫醒定时的线程，告诉问过 `ListTodos` 的连接。
+    /// 看板变了：叫醒定时的线程，告诉问过 `ListTodos` 的连接。
     fn todos_changed(&self) {
-        self.todos.lock().generation += 1;
+        let generation = {
+            let mut state = self.todos.lock();
+            state.generation += 1;
+            state.generation
+        };
         self.todos.changed.notify_all();
+        self.watch_todo_sessions(generation);
         self.peers().todos_changed();
+    }
+
+    /// 看板第 `generation` 次变了以后重读没做完的任务用的会话，见 `Todos::sessions`。读不到库时照旧，下次变了
+    /// 再读。
+    fn watch_todo_sessions(&self, generation: u64) {
+        match self.todos.with_db(|db| db.list_todos(unix_now())) {
+            Ok(todos) => self.remember_todo_sessions(generation, &todos),
+            // 前端收到这次的 `TodosChanged` 会来问 `ListTodos`，那时读到了就补上，见 `list_todos`。
+            Err(err) => tracing::debug!("cannot list the todos to watch their sessions: {err}"),
+        }
+    }
+
+    /// 记下看板第 `generation` 次变了以后读到的 `todos` 里没做完的任务用的会话，见 `Todos::sessions`。
+    fn remember_todo_sessions(&self, generation: u64, todos: &[Todo]) {
+        let mut watched = self.todos.sessions.lock().unwrap_or_else(PoisonError::into_inner);
+        // 两个线程一起改看板时，先读的库可能后写回来：只留变得最晚的那次之后读到的。
+        if watched.0 < generation {
+            let open = todos.iter().filter(|todo| todo.done_at.is_none()).filter_map(|todo| todo.session);
+            *watched = (generation, open.collect());
+        }
+    }
+
+    /// 会话 `id` 的 agent 状态、前台是不是 shell 变了，或者 shell 退出了（会话线程报的）：是没做完的任务的
+    /// 会话时告诉问过 `ListTodos` 的连接，卡片可能换了列，前端不用轮询会话的状态。
+    pub(crate) fn todo_session_changed(&self, id: SessionId) {
+        if self.todos.sessions.lock().unwrap_or_else(PoisonError::into_inner).1.contains(&id) {
+            self.peers().todos_changed();
+        }
     }
 
     /// 有没有定时：有时单独跑的宿主不因空闲退出，见 `Host::run_until_idle`。
@@ -179,7 +215,11 @@ impl Shared {
     /// 回 `ClientMsg::ListTodos`。
     pub(crate) fn list_todos(&self, req: u32) -> Result<HostMsg, String> {
         let now = unix_now();
+        // 先取：读库之前看板又变了的话记得低一些，那次变了自己会再读。
+        let generation = self.todos.generation();
         let (todos, mut schedules) = self.todos.with_db(|db| Ok((db.list_todos(now)?, db.list_schedules()?)))?;
+        // 看板变了时没读到库的话，会话名单还是旧的，借这次读到的补上。
+        self.remember_todo_sessions(generation, &todos);
         for schedule in &mut schedules {
             schedule.next_fire = runode_todo::next_fire(&schedule.when, schedule.last_fired);
         }
@@ -224,7 +264,7 @@ impl Shared {
         if !self.todos.with_db(|db| db.update_todo(id, spec, done_at))? {
             return Err(no_todo(id));
         }
-        // 先放开再通知：叫醒的定时线程马上来清这张刚标完成的任务，还占着的话它跳过，要等下一次任务板变了
+        // 先放开再通知：叫醒的定时线程马上来清这张刚标完成的任务，还占着的话它跳过，要等下一次看板变了
         // 或者睡满才再看。
         drop(claim);
         self.todos_changed();
@@ -291,7 +331,7 @@ impl Shared {
     }
 
     /// 清掉完成了的任务的工作树和分支（见 `clean_worktree`），每张只试一次；会话还在的等它结束后再清。
-    /// 定时的线程每一轮都做，任务板一变就有一轮，所以标完成后很快就清。
+    /// 定时的线程每一轮都做，看板一变就有一轮，所以标完成后很快就清。
     fn sweep_worktrees(&self) {
         if self.todos_writable().is_err() {
             return;
@@ -694,7 +734,7 @@ mod tests {
     }
 
     /// 标完成后叫醒定时线程时任务已经放开了：它马上来清就占得住，不跳过、等下一轮。不起定时线程，只看
-    /// 任务板变了的那一刻任务还占没占着。
+    /// 看板变了的那一刻任务还占没占着。
     #[test]
     fn a_todo_marked_done_is_free_when_the_scheduler_wakes() {
         let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-wake", std::process::id()));

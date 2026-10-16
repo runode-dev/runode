@@ -1,5 +1,5 @@
-//! 任务板（`ClientMsg::ListTodos` 这几条消息）：开始任务时在会话里跑 agent、提示词原样交到、按需开工作树，
-//! 定时补跑，有定时时单独跑的宿主不因空闲退出，任务板变了告诉问过的连接。
+//! 看板（`ClientMsg::ListTodos` 这几条消息）：开始任务时在会话里跑 agent、提示词原样交到、按需开工作树，
+//! 定时补跑，有定时时单独跑的宿主不因空闲退出，看板变了告诉问过的连接。
 //!
 //! 宿主开任务会话用用户的 `$SHELL`，这里设成没有 shell 集成的 `/bin/sh`：提示符不报，等满
 //! `TYPE_AT_PROMPT_PATIENCE` 才打命令，所以开始任务的测试要几秒。
@@ -26,11 +26,11 @@ fn use_plain_sh() {
     static SET: Once = Once::new();
     // SAFETY: 只在这里改。并行的测试经 std 读环境变量（`temp_dir` 读 TMPDIR，开会话读 SHELL），std 的
     // 读写共用一把锁；绕过它直接读的 C 代码（算定时到点的 `localtime_r` 读 TZ、会话线程里的 VT）只在
-    // 打开任务板的宿主或开了会话之后才跑，这个测试程序里那些都先经过这里，等这次改完才开始。
+    // 打开看板的宿主或开了会话之后才跑，这个测试程序里那些都先经过这里，等这次改完才开始。
     SET.call_once(|| unsafe { std::env::set_var("SHELL", "/bin/sh") });
 }
 
-/// 开一个打开了任务板的宿主，库在 `dir` 里。
+/// 开一个打开了看板的宿主，库在 `dir` 里。
 fn board(name: &str) -> (Host, PathBuf, Peer) {
     use_plain_sh();
     let dir = temp_dir(name);
@@ -167,6 +167,28 @@ fn the_agent_gets_the_prompt_verbatim() {
     assert_eq!(start(&mut peer, &id), session);
 }
 
+/// 没做完的任务的会话里 shell 退出了，问过 `ListTodos` 的连接收到 `TodosChanged`，不用轮询会话的状态就知道
+/// 卡片换了列。
+#[test]
+fn a_todo_session_exiting_is_announced() {
+    let (_host, dir, mut peer) = board("todo-session-exit");
+    let ran = dir.join("ran");
+    let agent = script(&dir, "agent", &format!("echo ran > '{}'", ran.display()));
+    let id = add(&mut peer, spec("Exit", &dir, &agent));
+    let session = start(&mut peer, &id);
+    // 等 agent 跑完、前台回到 shell，之后会话的状态只会因为退出再变，收到的通知才是退出那条。
+    wait_for_file(&ran);
+    wait_until("the shell is back in front", || {
+        sessions(&mut peer).iter().any(|info| info.id == session && info.meta.foreground_is_shell)
+    });
+    let mut watcher = Peer::hello(&dir.join("host.sock"), false);
+    watcher.send(&ClientMsg::ListTodos { req: 1 });
+    assert!(matches!(watcher.reply(), HostMsg::Todos { req: 1, .. }));
+    peer.send(&ClientMsg::Kill { id: session });
+    assert_eq!(watcher.reply(), HostMsg::TodosChanged);
+    assert!(!sessions(&mut peer).iter().any(|info| info.id == session && !info.exited), "the session ended");
+}
+
 /// 要工作树的任务在仓库的 `.worktrees/` 下新开一个、拉新分支，主仓库的状态不受影响；删任务或标完成时
 /// 会话还在就留着工作树，会话没了就删掉干净的工作树和没有新提交的分支。
 #[test]
@@ -228,12 +250,15 @@ fn a_worktree_todo_runs_in_its_own_worktree() {
     peer.send(&ClientMsg::Kill { id: third_session });
     let done = ClientMsg::UpdateTodo { req: 6, id: third.clone(), spec: None, done: Some(true) };
     assert_eq!(ask(&mut peer, &done), HostMsg::Done { req: 6 });
-    // 看着任务板的连接先因为标完成、再因为清掉了工作树各收到一次 `TodosChanged`：清完以后它重读，读到的
-    // 不再指着删掉了的工作树。宿主删完目录还要试着删分支，之后才记进库、发通知。
-    assert_eq!(watcher.reply(), HostMsg::TodosChanged);
-    assert_eq!(watcher.reply(), HostMsg::TodosChanged);
-    let todo = list(&mut peer).into_iter().find(|todo| todo.id == third).unwrap();
-    assert_eq!(todo.worktree_dir, None);
+    // 看着看板的连接因为会话退出、标完成、清掉了工作树都收到 `TodosChanged`（前两样的先后和条数不定）：
+    // 清完以后它重读，读到的不再指着删掉了的工作树。宿主删完目录还要试着删分支，之后才记进库、发通知。
+    let todo = loop {
+        assert_eq!(watcher.reply(), HostMsg::TodosChanged);
+        let todo = list(&mut peer).into_iter().find(|todo| todo.id == third).unwrap();
+        if todo.worktree_dir.is_none() {
+            break todo;
+        }
+    };
     assert!(!third_worktree.exists());
     assert_eq!(todo.branch.as_deref(), Some("runode/ship-it"));
     assert!(git(&repo, &["branch", "--list", "runode/ship-it"]).contains("runode/ship-it"));
@@ -375,7 +400,7 @@ fn edits_are_announced_and_checked() {
     assert_eq!(list(&mut peer).len(), 1);
 }
 
-/// 没打开任务板的宿主回 `Error`，连接照旧。
+/// 没打开看板的宿主回 `Error`，连接照旧。
 #[test]
 fn a_host_without_a_board_says_so() {
     let dir = temp_dir("todo-none");
@@ -386,7 +411,7 @@ fn a_host_without_a_board_says_so() {
     assert!(peer.sessions().is_empty());
 }
 
-/// 错过的定时打开任务板时补跑一次：开一张来自它的任务并开始，下一次从现在算起。
+/// 错过的定时打开看板时补跑一次：开一张来自它的任务并开始，下一次从现在算起。
 #[test]
 fn a_missed_schedule_fires_once_when_the_board_opens() {
     use_plain_sh();

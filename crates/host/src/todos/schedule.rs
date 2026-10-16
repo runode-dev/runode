@@ -18,7 +18,7 @@ use crate::Shared;
 /// 定时的线程最多睡这么久就再看一次：电脑睡眠时单调时钟停着，醒来后按墙上时间补上。
 const MAX_SLEEP: Duration = Duration::from_secs(30);
 
-/// 定时的线程：清完成了的任务的工作树，到点的定时开任务，再睡到下一次到点、最多 `MAX_SLEEP`，任务板变了
+/// 定时的线程：清完成了的任务的工作树，到点的定时开任务，再睡到下一次到点、最多 `MAX_SLEEP`，看板变了
 /// 时提前醒。宿主没了就结束。
 pub(super) fn run(todos: &Arc<Todos>, shared: &Weak<Shared>) {
     loop {
@@ -34,7 +34,7 @@ pub(super) fn run(todos: &Arc<Todos>, shared: &Weak<Shared>) {
 }
 
 impl Shared {
-    /// 开到了点的定时，返回最早的下一次到点。不归这个宿主办（正在交出会话、要退出了）或者任务板没开时
+    /// 开到了点的定时，返回最早的下一次到点。不归这个宿主办（正在交出会话、要退出了）或者看板没开时
     /// 什么都不做。
     fn fire_due(&self) -> Option<u64> {
         if self.todos_writable().is_err() {

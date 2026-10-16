@@ -68,11 +68,11 @@ pub enum Action {
     GotoAgent,
     /// 不弹列表，直接跳到下一个要处理的 agent：先等回答的，再干完了没看的。
     NextAgent,
-    /// 打开或收起铺满窗口的任务板。
-    ToggleTodoBoard,
-    /// 打开或收起任务板的定时页。
+    /// 打开或收起铺满窗口的看板。
+    ToggleKanban,
+    /// 打开或收起看板的定时页。
     ToggleSchedules,
-    /// 打开任务板和新建任务的对话框。
+    /// 打开看板和新建任务的对话框。
     NewTodo,
     Copy,
     Paste,
@@ -268,16 +268,16 @@ pub static ACTIONS: &[ActionSpec] = &[
         Action::ToggleTasks
     ),
     plain!(
-        "toggle_todo_board",
-        "Open or close the full-window todo board: tasks handed to agents in columns by their state",
-        Action::ToggleTodoBoard
+        "toggle_kanban",
+        "Open or close the full-window Kanban: tasks handed to agents in columns by their state",
+        Action::ToggleKanban
     ),
     plain!(
         "toggle_schedules",
-        "Open or close the schedules page of the todo board, which starts tasks at set times",
+        "Open or close the schedules page of the Kanban, which starts tasks at set times",
         Action::ToggleSchedules
     ),
-    plain!("new_todo", "Open the todo board with the dialog for a new task", Action::NewTodo),
+    plain!("new_todo", "Open the Kanban with the dialog for a new task", Action::NewTodo),
     ActionSpec {
         name: "run_task",
         doc: "Run the task with this name from the tasks menu (your own, a Makefile target or a package.json script), as if clicked there; with duplicate names the one higher in the menu wins",
@@ -422,7 +422,7 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+shift+e=toggle_files",
     "cmd+shift+i=toggle_github_actions",
     "cmd+shift+r=toggle_tasks",
-    "cmd+shift+b=toggle_todo_board",
+    "cmd+shift+b=toggle_kanban",
     "cmd+shift+s=toggle_schedules",
     "cmd+shift+t=new_todo",
     "cmd+shift+a=goto_agent",

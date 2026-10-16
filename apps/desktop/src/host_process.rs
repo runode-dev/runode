@@ -118,8 +118,8 @@ pub fn take_over() -> i32 {
                 report.replayed.len(),
                 report.replayed,
             );
-            // 旧宿主交出会话以后就不再改任务板、不再触发定时，这边接着办。先于报告：app 看到报告就连上来
-            // 问 `ListTodos`，这时还没打开任务板的话回错，任务板一直停在错误上。
+            // 旧宿主交出会话以后就不再改看板、不再触发定时，这边接着办。先于报告：app 看到报告就连上来
+            // 问 `ListTodos`，这时还没打开看板的话回错，看板一直停在错误上。
             if let Some(db) = dirs.todos_db() {
                 host.serve_todos(db);
             }

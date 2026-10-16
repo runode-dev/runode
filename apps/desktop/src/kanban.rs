@@ -1,16 +1,16 @@
-//! 铺满窗口的任务板：派给 agent 的任务按列排开（待办、进行中、需要你、完成），和它平级的另一页列出
+//! 铺满窗口的看板：派给 agent 的任务按列排开（待办、进行中、需要你、完成），和它平级的另一页列出
 //! 定时。数据由宿主持有，这边经 `store` 读写；新建、编辑任务和定时的对话框在 `dialog`。
 //!
 //! 卡片在哪一列由任务和它会话里 agent 的状态推出来（`runode_protocol::todo::column`），拖拽就是做那一列
 //! 的动作（`drop_action`）：拖进进行中是开始，拖进完成是标完成，从完成拖出是取消完成，同一列里上下拖调
 //! 先后；办不到的放下不接，卡片留在原处。辅助工具拖不了：动作另有按钮，调先后另登记了加减（上移、下移）。
 //!
-//! 看板是一个单独的视图（`TodoBoard`），app 打开时建、收起时丢掉，一个窗口最多一个。它和手机端引导页一样盖住
+//! 看板是一个单独的视图（`Kanban`），app 打开时建、收起时丢掉，一个窗口最多一个。它和手机端引导页一样盖住
 //! 标签和分屏，摆在哪由 app 管。和宿主说话经 app 启动时交进来的 `Host`（`watch`），数据全 app 一份。各
 //! workspace 的目录和名字、新建时默认的目录、定时能不能在后台跑由 app 每次画之前经 `set_input` 交进来；卡片上
-//! agent 的状态标记和标签、侧栏上的一样，由 app 画（`AgentMarks`）。按了关闭、Esc（`TodoBoardEvent::Close`），
-//! 卡片的「打开终端」（`TodoBoardEvent::OpenSession`：把任务的会话接进窗口）交给 app 办。对话框盖住整个窗口，
-//! 由 app 画在窗口最上层（`TodoBoard::dialog`）。
+//! agent 的状态标记和标签、侧栏上的一样，由 app 画（`AgentMarks`）。按了关闭、Esc（`KanbanEvent::Close`），
+//! 卡片的「打开终端」（`KanbanEvent::OpenSession`：把任务的会话接进窗口）交给 app 办。对话框盖住整个窗口，
+//! 由 app 画在窗口最上层（`Kanban::dialog`）。
 //!
 //! 卡片换了列时从原来的位置飞到新的位置，落下后淡入、描一圈强调色再褪掉；拖着放下的不飞，只描边。
 //! 每帧记下各卡片画在哪（`Geometry`），下一帧发现换了列就照上一帧的位置起飞。开始任务时顶上居中弹出
@@ -52,7 +52,7 @@ use runode_protocol::{
 use runode_types::agent::Agent;
 
 pub use dialog::TodoDialog;
-pub use store::{Host, Step, poll_sessions, todo_sessions, watch};
+pub use store::{Host, Step, needs_you, todo_sessions, watch};
 
 use dialog::{DialogEvent, Editing};
 use store::TodoData;
@@ -81,7 +81,7 @@ const TOAST_LINGER: Duration = Duration::from_secs(2);
 const TOAST_SPINNER: (&[&str], Duration) =
     (&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], Duration::from_millis(80));
 
-/// app 每次画看板之前交进来的东西，见 `TodoBoard::set_input`。
+/// app 每次画看板之前交进来的东西，见 `Kanban::set_input`。
 #[derive(Clone, Debug, Default)]
 pub struct Input {
     /// 各 workspace 的目录和名字：卡片、定时的目录正好是哪个 workspace 的目录时写它的名字，否则写目录名。
@@ -92,7 +92,7 @@ pub struct Input {
     pub resident: bool,
 }
 
-/// 卡片上 agent 的状态标记，和标签、侧栏上的一样由 app 画，见 `TodoBoard::new`。
+/// 卡片上 agent 的状态标记，和标签、侧栏上的一样由 app 画，见 `Kanban::new`。
 #[derive(Clone, Copy)]
 pub struct AgentMarks {
     /// 画 `agent` 的状态标记；`id` 给它转圈用。只在画的时候调。
@@ -102,7 +102,7 @@ pub struct AgentMarks {
 }
 
 /// 要 app 办的事。
-pub enum TodoBoardEvent {
+pub enum KanbanEvent {
     /// 收起看板：按了关闭或 Esc。
     Close,
     /// 换了一页（侧栏的入口、定时的运行记录点回任务页），侧栏上的入口跟着换高亮。
@@ -111,8 +111,8 @@ pub enum TodoBoardEvent {
     OpenSession { session: SessionId, todo: Box<Todo> },
 }
 
-/// 开着的任务板，见模块说明。
-pub struct TodoBoard {
+/// 开着的看板，见模块说明。
+pub struct Kanban {
     focus: FocusHandle,
     page: Page,
     columns_scroll: ScrollHandle,
@@ -205,7 +205,7 @@ fn column_index(column: Column) -> usize {
     Column::ALL.iter().position(|c| *c == column).unwrap_or(0)
 }
 
-/// 卡片 `dragged` 放在 `column` 列第 `ix` 张（`target`）上时挪到谁前面，交给 `TodoBoard::drop_todo`。同一列里
+/// 卡片 `dragged` 放在 `column` 列第 `ix` 张（`target`）上时挪到谁前面，交给 `Kanban::drop_todo`。同一列里
 /// 往下拖时落点提示画在目标下边，挪到它后面：所有任务里紧跟在它后面的那张前面，没有时为空（排到这一列最后）；
 /// 别的时候挪到它前面。
 fn drop_before(dragged: &DraggedTodo, column: Column, ix: usize, target: &str, todos: &[Todo]) -> Option<String> {
@@ -229,6 +229,11 @@ fn unix_now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())
 }
 
+/// 需要你的计数：实心的徽标，一眼看得到。看板上那一列的列头和侧栏的看板入口都用。
+pub fn needs_you_badge(count: usize) -> Badge {
+    Badge::new(count.to_string()).bg(gpui::rgb(ACCENT)).text_color(gpui::white())
+}
+
 /// 按列分好的任务，列里保持宿主给的先后。
 fn columns(data: &TodoData, now: u64) -> [Vec<&Todo>; 4] {
     let mut columns: [Vec<&Todo>; 4] = Default::default();
@@ -239,17 +244,16 @@ fn columns(data: &TodoData, now: u64) -> [Vec<&Todo>; 4] {
     columns
 }
 
-impl EventEmitter<TodoBoardEvent> for TodoBoard {}
+impl EventEmitter<KanbanEvent> for Kanban {}
 
-impl Focusable for TodoBoard {
+impl Focusable for Kanban {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
 }
 
-impl TodoBoard {
-    /// 新开的看板，`schedules` 时在定时页上，否则在任务页上。卡片上 agent 的状态标记照 `marks` 画。开着时
-    /// 任务会话的状态由 app 经 `poll_sessions` 开始轮询，看板都收起后自己停下。
+impl Kanban {
+    /// 新开的看板，`schedules` 时在定时页上，否则在任务页上。卡片上 agent 的状态标记照 `marks` 画。
     pub fn new(marks: AgentMarks, schedules: bool, cx: &mut Context<Self>) -> Self {
         store::register(cx.weak_entity(), cx);
         Self {
@@ -303,7 +307,7 @@ impl TodoBoard {
         }
         self.page = page;
         self.seen = None;
-        cx.emit(TodoBoardEvent::PageChanged);
+        cx.emit(KanbanEvent::PageChanged);
         cx.notify();
     }
 
@@ -321,7 +325,7 @@ impl TodoBoard {
         cx.notify();
     }
 
-    /// 依次发几条任务板的请求，前一条没办成就不发后面的。
+    /// 依次发几条看板的请求，前一条没办成就不发后面的。
     fn send_todos(steps: Vec<Step>, cx: &mut Context<Self>) {
         store::send(cx, steps).detach();
     }
@@ -438,9 +442,9 @@ impl TodoBoard {
         }
         let answer = window.prompt(
             gpui::PromptLevel::Warning,
-            &rust_i18n::t!("todo_board.remove_title", title = todo.spec.title.as_str()),
-            Some(&rust_i18n::t!("todo_board.remove_detail")),
-            &[&*rust_i18n::t!("todo_board.remove"), &*rust_i18n::t!("todo_board.cancel")],
+            &rust_i18n::t!("kanban.remove_title", title = todo.spec.title.as_str()),
+            Some(&rust_i18n::t!("kanban.remove_detail")),
+            &[&*rust_i18n::t!("kanban.remove"), &*rust_i18n::t!("kanban.cancel")],
             cx,
         );
         cx.spawn(async move |_, cx| {
@@ -455,9 +459,9 @@ impl TodoBoard {
         Self::send_todos(vec![Box::new(move |req| ClientMsg::RemoveSchedule { req, id })], cx);
     }
 
-    /// 请 app 切到任务会话，见 `TodoBoardEvent::OpenSession`。
+    /// 请 app 切到任务会话，见 `KanbanEvent::OpenSession`。
     fn open_session(session: SessionId, todo: &Todo, cx: &mut Context<Self>) {
-        cx.emit(TodoBoardEvent::OpenSession { session, todo: Box::new(todo.clone()) });
+        cx.emit(KanbanEvent::OpenSession { session, todo: Box::new(todo.clone()) });
     }
 
     /// 和上一帧比，记下换了列的卡片，从上一帧画的位置起飞；飞完、描边褪完的清掉。
@@ -533,9 +537,9 @@ impl TodoBoard {
     /// 顶上居中的提示条：开始任务时转着圈，宿主回话后说开始了没有。
     fn render_toast(&self, toast: &Toast, cx: &mut Context<Self>) -> AnyElement {
         let text = match toast.state {
-            ToastState::Starting => rust_i18n::t!("todo_board.toast.starting"),
-            ToastState::Started => rust_i18n::t!("todo_board.toast.started"),
-            ToastState::Failed => rust_i18n::t!("todo_board.toast.failed"),
+            ToastState::Starting => rust_i18n::t!("kanban.toast.starting"),
+            ToastState::Started => rust_i18n::t!("kanban.toast.started"),
+            ToastState::Failed => rust_i18n::t!("kanban.toast.failed"),
         }
         .into_owned();
         // 前景色作底、背景色写字，和后面的看板反着，深色浅色主题下都分得开。
@@ -553,7 +557,7 @@ impl TodoBoard {
             }
         };
         let serial = toast.serial;
-        let close_label = rust_i18n::t!("todo_board.toast.close").into_owned();
+        let close_label = rust_i18n::t!("kanban.toast.close").into_owned();
         let close = div()
             .id("todo-toast-close")
             .role(Role::Button)
@@ -636,7 +640,7 @@ impl TodoBoard {
     ) -> Stateful<Div> {
         let fg = cx.theme().foreground;
         let name = column_name(column);
-        let count = rust_i18n::t!("todo_board.count", count = cards.len()).into_owned();
+        let count = rust_i18n::t!("kanban.count", count = cards.len()).into_owned();
         let rows: Vec<_> = cards
             .iter()
             .enumerate()
@@ -645,14 +649,14 @@ impl TodoBoard {
         let empty = cards.is_empty().then(|| {
             div().flex_1().flex().items_center().justify_center().child(label_row(
                 ("todo-column-empty", column_index(column)),
-                rust_i18n::t!("todo_board.empty").into_owned(),
+                rust_i18n::t!("kanban.empty").into_owned(),
                 fg.opacity(0.4),
             ))
         });
         // 需要你那一列有卡片时计数是个实心的徽标，一眼看得到。
         let badge = column == Column::NeedsYou && !cards.is_empty();
         let tally = if badge {
-            Badge::new(cards.len().to_string()).bg(gpui::rgb(ACCENT)).text_color(gpui::white()).into_any_element()
+            needs_you_badge(cards.len()).into_any_element()
         } else {
             div()
                 .flex_none()
@@ -666,7 +670,7 @@ impl TodoBoard {
                 .text_size(FontSize::Small)
                 .text_color(fg.opacity(0.4))
                 .font_weight(FontWeight::NORMAL)
-                .child(rust_i18n::t!("todo_board.done_window").into_owned())
+                .child(rust_i18n::t!("kanban.done_window").into_owned())
         });
         let accept_bg = cx.theme().mix(0.1);
         div()
@@ -745,7 +749,7 @@ impl TodoBoard {
         let footer: Vec<String> = [
             agent.is_none().then(|| todo.spec.agent.clone()),
             todo.started.map(|at| short_time(at, now)),
-            schedule.map(|s| rust_i18n::t!("todo_board.from_schedule", name = s.spec.title.as_str()).into_owned()),
+            schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned()),
         ]
         .into_iter()
         .flatten()
@@ -829,14 +833,13 @@ impl TodoBoard {
         let schedule = todo.schedule.as_ref().and_then(|id| data.schedules.iter().find(|s| &s.id == id));
         let status = agent.map_or_else(|| todo.spec.agent.clone(), self.marks.describe);
         let started =
-            todo.started.map(|at| rust_i18n::t!("todo_board.started_at", time = short_time(at, now)).into_owned());
-        let from =
-            schedule.map(|s| rust_i18n::t!("todo_board.from_schedule", name = s.spec.title.as_str()).into_owned());
+            todo.started.map(|at| rust_i18n::t!("kanban.started_at", time = short_time(at, now)).into_owned());
+        let from = schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned());
         let line2: Vec<String> = [Some(place), todo.branch.clone()].into_iter().flatten().collect();
         let line3: Vec<String> = [Some(status), started, from].into_iter().flatten().collect();
         let number = if todo.number > 0 { format!("#{}", todo.number) } else { String::new() };
         let description =
-            [number, line2.join(" · "), line3.join(" · "), rust_i18n::t!("todo_board.reorder_hint").into_owned()]
+            [number, line2.join(" · "), line3.join(" · "), rust_i18n::t!("kanban.reorder_hint").into_owned()]
                 .into_iter()
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>()
@@ -850,7 +853,7 @@ impl TodoBoard {
         let primary = if todo.started.is_none() && todo.done_at.is_none() {
             let id = id.clone();
             Some(
-                Button::new("todo-start", rust_i18n::t!("todo_board.start").into_owned())
+                Button::new("todo-start", rust_i18n::t!("kanban.start").into_owned())
                     .variant(ButtonVariant::Default)
                     .with_size(ButtonSize::Sm)
                     .font_weight(FontWeight::MEDIUM)
@@ -861,7 +864,7 @@ impl TodoBoard {
             Some(match open_session {
                 Some(session_id) => {
                     let todo = todo.clone();
-                    Button::new("todo-open", rust_i18n::t!("todo_board.open").into_owned())
+                    Button::new("todo-open", rust_i18n::t!("kanban.open").into_owned())
                         .variant(ButtonVariant::Default)
                         .with_size(ButtonSize::Sm)
                         .font_weight(FontWeight::MEDIUM)
@@ -870,7 +873,7 @@ impl TodoBoard {
                 }
                 None => {
                     let id = id.clone();
-                    Button::new("todo-done", rust_i18n::t!("todo_board.finish").into_owned())
+                    Button::new("todo-done", rust_i18n::t!("kanban.finish").into_owned())
                         .variant(ButtonVariant::Default)
                         .with_size(ButtonSize::Sm)
                         .font_weight(FontWeight::MEDIUM)
@@ -891,7 +894,7 @@ impl TodoBoard {
         if shown {
             if let Some(session_id) = open_session.filter(|_| primary_id != Some("open")) {
                 let todo = todo.clone();
-                let label = rust_i18n::t!("todo_board.open").into_owned();
+                let label = rust_i18n::t!("kanban.open").into_owned();
                 buttons.push(
                     Button::new("todo-open", label.clone())
                         .icon(TERMINAL_ICON)
@@ -904,7 +907,7 @@ impl TodoBoard {
             }
             if primary_id != Some("done") {
                 let done = todo.done_at.is_none();
-                let label = if done { rust_i18n::t!("todo_board.finish") } else { rust_i18n::t!("todo_board.reopen") };
+                let label = if done { rust_i18n::t!("kanban.finish") } else { rust_i18n::t!("kanban.reopen") };
                 let label = label.into_owned();
                 let id = id.clone();
                 buttons.push(
@@ -919,7 +922,7 @@ impl TodoBoard {
             }
             {
                 let todo = todo.clone();
-                let label = rust_i18n::t!("todo_board.edit").into_owned();
+                let label = rust_i18n::t!("kanban.edit").into_owned();
                 buttons.push(
                     Button::new("todo-edit", label.clone())
                         .icon(PENCIL_ICON)
@@ -934,7 +937,7 @@ impl TodoBoard {
             }
             {
                 let id = id.clone();
-                let label = rust_i18n::t!("todo_board.remove_todo").into_owned();
+                let label = rust_i18n::t!("kanban.remove_todo").into_owned();
                 buttons.push(
                     Button::new("todo-remove", label.clone())
                         .icon(TRASH_ICON)
@@ -1031,16 +1034,12 @@ impl TodoBoard {
         let fg = cx.theme().foreground;
         let now = unix_now();
         let hint = (!self.input.resident).then(|| {
-            label_row(
-                "todo-schedules-hint",
-                rust_i18n::t!("todo_board.schedules_need_host").into_owned(),
-                fg.opacity(0.6),
-            )
+            label_row("todo-schedules-hint", rust_i18n::t!("kanban.schedules_need_host").into_owned(), fg.opacity(0.6))
         });
         let rows: Vec<_> =
             data.schedules.iter().map(|schedule| self.render_schedule(schedule, data, now, cx)).collect();
         let empty = rows.is_empty().then(|| {
-            label_row("todo-schedules-empty", rust_i18n::t!("todo_board.no_schedules").into_owned(), fg.opacity(0.45))
+            label_row("todo-schedules-empty", rust_i18n::t!("kanban.no_schedules").into_owned(), fg.opacity(0.45))
         });
         div().size_full().flex().flex_col().gap(px(8.)).children(hint).child(
             div()
@@ -1051,7 +1050,7 @@ impl TodoBoard {
                     div()
                         .id("todo-schedules")
                         .role(Role::List)
-                        .aria_label(rust_i18n::t!("todo_board.schedules").into_owned())
+                        .aria_label(rust_i18n::t!("kanban.schedules").into_owned())
                         .size_full()
                         .overflow_y_scroll()
                         .track_scroll(&self.schedules_scroll)
@@ -1070,11 +1069,11 @@ impl TodoBoard {
         let hover_bg = cx.theme().mix(0.06);
         let rule = describe_when(&schedule.when);
         let next = schedule.next_fire.map_or_else(
-            || rust_i18n::t!("todo_board.no_next").into_owned(),
-            |at| rust_i18n::t!("todo_board.next", time = short_time(at, now)).into_owned(),
+            || rust_i18n::t!("kanban.no_next").into_owned(),
+            |at| rust_i18n::t!("kanban.next", time = short_time(at, now)).into_owned(),
         );
         let place = self.place_name(&schedule.spec.dir);
-        let worktree = schedule.spec.worktree.then(|| rust_i18n::t!("todo_board.worktree_on").into_owned());
+        let worktree = schedule.spec.worktree.then(|| rust_i18n::t!("kanban.worktree_on").into_owned());
         let details: Vec<String> =
             [Some(place), Some(schedule.spec.agent.clone()), worktree].into_iter().flatten().collect();
         let runs = recent_runs(&data.todos, &schedule.id);
@@ -1106,7 +1105,7 @@ impl TodoBoard {
             .collect();
         let edit = {
             let schedule = schedule.clone();
-            let label = rust_i18n::t!("todo_board.edit_schedule").into_owned();
+            let label = rust_i18n::t!("kanban.edit_schedule").into_owned();
             Button::new("todo-schedule-edit", label.clone())
                 .icon(PENCIL_ICON)
                 .icon_size(13.)
@@ -1119,7 +1118,7 @@ impl TodoBoard {
         };
         let remove = {
             let id = schedule.id.clone();
-            let label = rust_i18n::t!("todo_board.remove_schedule").into_owned();
+            let label = rust_i18n::t!("kanban.remove_schedule").into_owned();
             Button::new("todo-schedule-remove", label.clone())
                 .icon(TRASH_ICON)
                 .icon_size(13.)
@@ -1165,7 +1164,7 @@ impl TodoBoard {
     }
 }
 
-impl Render for TodoBoard {
+impl Render for Kanban {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.track_moves(cx);
         let a11y = window.is_a11y_active();
@@ -1173,13 +1172,13 @@ impl Render for TodoBoard {
         let data = &data;
         let fg = cx.theme().foreground;
         let title = match self.page {
-            Page::Todos => rust_i18n::t!("todo_board.title"),
-            Page::Schedules => rust_i18n::t!("todo_board.schedules"),
+            Page::Todos => rust_i18n::t!("kanban.title"),
+            Page::Schedules => rust_i18n::t!("kanban.schedules"),
         }
         .into_owned();
         // 新建任务的入口在侧栏上，这里只给定时页放新建定时。
         let new_schedule = (self.page == Page::Schedules).then(|| {
-            Button::new("todo-board-new-schedule", rust_i18n::t!("todo_board.new_schedule").into_owned())
+            Button::new("kanban-new-schedule", rust_i18n::t!("kanban.new_schedule").into_owned())
                 .variant(ButtonVariant::Secondary)
                 .icon(PLUS_ICON)
                 .icon_size(12.)
@@ -1189,14 +1188,14 @@ impl Render for TodoBoard {
                 .cursor_pointer()
                 .on_press(cx, |this, window, cx| this.open_dialog(true, None, window, cx))
         });
-        let close_label = rust_i18n::t!("todo_board.close").into_owned();
-        let close = Button::new("todo-board-close", close_label.clone())
+        let close_label = rust_i18n::t!("kanban.close").into_owned();
+        let close = Button::new("kanban-close", close_label.clone())
             .icon(CLOSE_ICON)
             .icon_size(13.)
             .with_size(ButtonSize::Icon)
             .cursor_pointer()
             .tooltip(tooltip(close_label, None))
-            .on_press(cx, |_, _, cx| cx.emit(TodoBoardEvent::Close));
+            .on_press(cx, |_, _, cx| cx.emit(KanbanEvent::Close));
         let header = div()
             .flex_none()
             .flex()
@@ -1204,7 +1203,7 @@ impl Render for TodoBoard {
             .gap(px(12.))
             .child(
                 div()
-                    .id("todo-board-title")
+                    .id("kanban-title")
                     .role(Role::Heading)
                     .aria_level(1)
                     .aria_label(title.clone())
@@ -1215,7 +1214,7 @@ impl Render for TodoBoard {
             .child(div().flex_1())
             .children(new_schedule)
             .child(close);
-        let error = data.error.clone().map(|error| label_row("todo-board-error", error, fg.opacity(0.75)));
+        let error = data.error.clone().map(|error| label_row("kanban-error", error, fg.opacity(0.75)));
         let (content, flights) = match self.page {
             Page::Todos => (self.render_columns(data, a11y, cx).into_any_element(), self.render_flights(data, cx)),
             Page::Schedules => (self.render_schedules(data, cx).into_any_element(), Vec::new()),
@@ -1223,14 +1222,14 @@ impl Render for TodoBoard {
         let toast = self.toast.as_ref().map(|toast| self.render_toast(toast, cx));
         let geometry = self.geometry.clone();
         div()
-            .id("todo-board")
+            .id("kanban")
             .role(Role::Group)
             .aria_label(title)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
                     cx.stop_propagation();
-                    cx.emit(TodoBoardEvent::Close);
+                    cx.emit(KanbanEvent::Close);
                 }
             }))
             .relative()
@@ -1313,10 +1312,10 @@ fn label_row(id: impl Into<gpui::ElementId>, text: String, color: Hsla) -> State
 
 fn column_name(column: Column) -> String {
     match column {
-        Column::Todo => rust_i18n::t!("todo_board.column.todo"),
-        Column::InProgress => rust_i18n::t!("todo_board.column.in_progress"),
-        Column::NeedsYou => rust_i18n::t!("todo_board.column.needs_you"),
-        Column::Done => rust_i18n::t!("todo_board.column.done"),
+        Column::Todo => rust_i18n::t!("kanban.column.todo"),
+        Column::InProgress => rust_i18n::t!("kanban.column.in_progress"),
+        Column::NeedsYou => rust_i18n::t!("kanban.column.needs_you"),
+        Column::Done => rust_i18n::t!("kanban.column.done"),
     }
     .into_owned()
 }
@@ -1324,21 +1323,21 @@ fn column_name(column: Column) -> String {
 /// 定时的规则给人看的写法：「每天 09:30 · 周一、周三」「每 15 分钟」「一次 · 10-13 14:00」。
 fn describe_when(when: &When) -> String {
     match *when {
-        When::Once { at } => rust_i18n::t!("todo_board.when.once", time = dialog::full_time(at)).into_owned(),
+        When::Once { at } => rust_i18n::t!("kanban.when.once", time = dialog::full_time(at)).into_owned(),
         When::Daily { hour, minute, days } => {
             let time = format!("{hour:02}:{minute:02}");
             if days == 0 {
-                rust_i18n::t!("todo_board.when.daily", time = time).into_owned()
+                rust_i18n::t!("kanban.when.daily", time = time).into_owned()
             } else {
                 let names: Vec<String> = (0..7).filter(|day| days & (1 << day) != 0).map(dialog::weekday).collect();
-                rust_i18n::t!("todo_board.when.weekly", time = time, days = names.join(" ")).into_owned()
+                rust_i18n::t!("kanban.when.weekly", time = time, days = names.join(" ")).into_owned()
             }
         }
         When::Every { minutes } if minutes % 60 == 0 => {
-            rust_i18n::t!("todo_board.when.every_hours", count = minutes / 60).into_owned()
+            rust_i18n::t!("kanban.when.every_hours", count = minutes / 60).into_owned()
         }
-        When::Every { minutes } => rust_i18n::t!("todo_board.when.every_minutes", count = minutes).into_owned(),
-        When::Unknown => rust_i18n::t!("todo_board.when.unknown").into_owned(),
+        When::Every { minutes } => rust_i18n::t!("kanban.when.every_minutes", count = minutes).into_owned(),
+        When::Unknown => rust_i18n::t!("kanban.when.unknown").into_owned(),
     }
 }
 

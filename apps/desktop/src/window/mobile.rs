@@ -88,7 +88,7 @@ impl WindowView {
     /// 打开手机端引导页；已经开着时把焦点给它。
     pub(super) fn show_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.drop_settings(cx);
-        self.todo_board = None;
+        self.kanban = None;
         if self.mobile.is_none() {
             let system_name = host_name();
             let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
@@ -252,7 +252,7 @@ impl WindowView {
     }
 }
 
-/// 侧栏顶上打开一页（手机端、任务板）的入口，那一页开着时高亮。按下鼠标就开，辅助工具的按下另外登记。
+/// 侧栏顶上打开一页（手机端、看板）的入口，那一页开着时高亮。按下鼠标就开，辅助工具的按下另外登记。
 pub(super) fn page_entry(
     id: &'static str,
     icon: &'static str,
@@ -308,7 +308,7 @@ pub(super) fn page_entry(
 }
 
 impl WindowView {
-    /// 铺满窗口的一页（手机端引导页、任务板）开着时窗口的内容：侧栏（收着时没有），右边整块是 `page`，
+    /// 铺满窗口的一页（手机端引导页、看板）开着时窗口的内容：侧栏（收着时没有），右边整块是 `page`，
     /// 顶上留一条拖动窗口、放红绿灯。
     pub(super) fn render_page_body(
         &mut self,

@@ -22,7 +22,7 @@
 //! 见 `browse`；会话卡片上列的 Makefile 目标和 package.json 的 scripts 也是（`ClientMsg::ListTasks`），
 //! 见 `runode_tasks`。
 //!
-//! 任务板（派给 agent 的任务和定时）也由宿主持有：存在它自己的库里（`runode_todo`），到点开任务、开会话
+//! 看板（派给 agent 的任务和定时）也由宿主持有：存在它自己的库里（`runode_todo`），到点开任务、开会话
 //! 跑 agent，见 `todos`。
 
 mod browse;
@@ -98,7 +98,7 @@ struct Shared {
     handoff_deadline: Mutex<Duration>,
     /// 读剪贴板最多等界面多久，见 `Host::set_clipboard_read_patience`。
     clipboard_patience: Mutex<Duration>,
-    /// 任务板，见 `todos`；定时的线程也拿着一份。锁的先后：拿着它可以再拿 `peers` 和 `registry`。
+    /// 看板，见 `todos`；定时的线程也拿着一份。锁的先后：拿着它可以再拿 `peers` 和 `registry`。
     todos: Arc<todos::Todos>,
     /// 还没结束的会话线程，要退出时等它们杀掉 shell，见 `session::Threads`。
     session_threads: Arc<session::Threads>,

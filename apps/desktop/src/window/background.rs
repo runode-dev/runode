@@ -7,7 +7,7 @@
 //! 里的会话不 attach，免得宿主把它们算成有界面连着。列表不空时每 `POLL_INTERVAL` 重问一次，空了
 //! 就停；启动、接上、结束之后各问一次。问到 shell 已经退出、谁都没连着的会话（多半是列表里的后台
 //! 会话自己退出了）顺手结束，免得它一直留在宿主里、挡着宿主空闲退出；任务的会话不结束，要不要结束
-//! 现问宿主的任务板，问不到时这一轮一个都不结束。
+//! 现问宿主的看板，问不到时这一轮一个都不结束。
 
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::theme::ActiveTheme as _;
@@ -35,7 +35,7 @@ use crate::{
 
 /// 列表不空时隔这么久重问一次宿主。
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
-/// 列表空着、只因为任务板没问到或者会话没列出来才再问时隔这么久：库是新版本写的这类情况会一直问不到，
+/// 列表空着、只因为看板没问到或者会话没列出来才再问时隔这么久：库是新版本写的这类情况会一直问不到，
 /// 别每两秒唤醒宿主。
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 /// 每个会话一行：标题和目录各占一行，和 workspace 的行一样高。
@@ -86,7 +86,7 @@ struct Live {
     todos: Option<HashSet<SessionId>>,
 }
 
-/// 宿主里的会话，连同任务板；宿主跑在 app 里时为 `None`，没有后台会话可言。任务板每次都现问：任务的会话
+/// 宿主里的会话，连同看板；宿主跑在 app 里时为 `None`，没有后台会话可言。看板每次都现问：任务的会话
 /// 不列进来，「全部结束」也就不会结束正在干活的任务。
 fn live_sessions() -> Option<Result<Live>> {
     (host_client::mode() != Mode::InProcess).then(|| {
@@ -95,9 +95,9 @@ fn live_sessions() -> Option<Result<Live>> {
     })
 }
 
-/// 任务用到的会话，现问宿主的任务板：任务没做完时宿主特意留着 shell 已经退出的会话，给人看 agent 最后
-/// 的输出，不能当成没人要的结束掉。看板那份（`todo_board::todo_sessions`）启动时还没问到、开始了
-/// 新任务时还没更新，靠不住。宿主不认得任务板时没有任务；问不到时为 `None`。
+/// 任务用到的会话，现问宿主的看板：任务没做完时宿主特意留着 shell 已经退出的会话，给人看 agent 最后
+/// 的输出，不能当成没人要的结束掉。界面上看板那份（`kanban::todo_sessions`）启动时还没问到、开始了
+/// 新任务时还没更新，靠不住。宿主不认得看板时没有任务；问不到时为 `None`。
 fn todo_sessions() -> Option<HashSet<SessionId>> {
     let link = host_client::link();
     if link.connected() && !link.host_knows_todos() {
@@ -116,18 +116,18 @@ fn todo_sessions() -> Option<HashSet<SessionId>> {
     }
 }
 
-/// 按问到的会话更新列表，重画窗口；列表不空、或者任务板没问到又有会话等着结束时排好下一次。问不到时列表不变，
+/// 按问到的会话更新列表，重画窗口；列表不空、或者看板没问到又有会话等着结束时排好下一次。问不到时列表不变，
 /// 也排好下一次。
 fn apply(live: Option<Result<Live>>, cx: &mut App) {
     let previous = cx.default_global::<BackgroundSessions>().sessions.clone();
-    // 任务板没问到时，有会话等着结束也要再问，不然列表空着就不再轮询，它们一直留在宿主里。
+    // 看板没问到时，有会话等着结束也要再问，不然列表空着就不再轮询，它们一直留在宿主里。
     let mut retry = false;
     let sessions = match live {
         None => Vec::new(),
         Some(Ok(Live { sessions: live, todos })) => {
-            // 任务的会话在任务板上，不列在这里；没问到任务板时用看板那份兜底。
+            // 任务的会话在看板上，不列在这里；没问到宿主的看板时用界面上那份兜底。
             let mut held = held_sessions(cx);
-            held.extend(crate::todo_board::todo_sessions(cx));
+            held.extend(crate::kanban::todo_sessions(cx));
             held.extend(todos.iter().flatten());
             retry = todos.is_none() && live.iter().any(|session| session.exited);
             let link = host_client::link();

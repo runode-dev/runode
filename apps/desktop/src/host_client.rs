@@ -50,7 +50,7 @@ pub enum Mode {
 
 /// 列会话最多等这么久。
 const LIST_TIMEOUT: Duration = Duration::from_secs(2);
-/// 任务板的请求最多等这么久：开始任务时宿主要跑 `git worktree add`，没成时换个名字再跑一次；删任务时
+/// 看板的请求最多等这么久：开始任务时宿主要跑 `git worktree add`，没成时换个名字再跑一次；删任务时
 /// 跑 `git worktree remove` 和 `git branch -d`。每条 git 自己最多 120 秒，等不到时整条连接按断开处理，
 /// 所以盖住两条。
 const TODO_TIMEOUT: Duration = Duration::from_secs(250);
@@ -246,7 +246,7 @@ pub fn serve_ui() -> Option<UnboundedReceiver<(UiTicket, ClientMsg)>> {
     link().ui_requests()
 }
 
-/// 任务板变了、或者换了一条连接要重新问任务板，见 `Link::todos_changed`。只能取一次。
+/// 看板变了、或者换了一条连接要重新问看板，见 `Link::todos_changed`。只能取一次。
 pub fn todos_changed() -> Option<UnboundedReceiver<()>> {
     link().todos_changed()
 }
@@ -303,13 +303,13 @@ pub fn list_tasks(dir: PathBuf) -> Result<Vec<TaskSource>> {
     link().list_tasks(dir, LIST_TIMEOUT)
 }
 
-/// 发一条任务板的请求（`ClientMsg::ListTodos` 等），等宿主回话；宿主不认得这些消息时直接报错，见
+/// 发一条看板的请求（`ClientMsg::ListTodos` 等），等宿主回话；宿主不认得这些消息时直接报错，见
 /// `Link::host_knows_todos`。开始任务要建工作树，大仓库上要一会儿，所以等得久些。会等宿主回话，别在
 /// 主线程上调。
 pub fn ask_todos(make: impl FnOnce(u32) -> ClientMsg) -> Result<runode_protocol::HostMsg> {
     let link = link();
     if !link.host_knows_todos() {
-        return Err(anyhow!(rust_i18n::t!("todo_board.host_too_old").into_owned()));
+        return Err(anyhow!(rust_i18n::t!("kanban.host_too_old").into_owned()));
     }
     link.request(make, TODO_TIMEOUT)
 }
@@ -632,14 +632,14 @@ fn listen_in_app(host: &Host) {
     }
 }
 
-/// 建好 runode 自己的 `run/` 目录，拿着宿主的锁在宿主的 socket 上开监听，再打开任务板，返回 socket 的
+/// 建好 runode 自己的 `run/` 目录，拿着宿主的锁在宿主的 socket 上开监听，再打开看板，返回 socket 的
 /// 路径。跑在 app 里的宿主（`listen_in_app`）和单独跑的宿主（`host_process::run`）都这样开。
 pub fn listen(host: &Host, dirs: &runode_paths::Dirs) -> Result<PathBuf> {
     dirs.create_runtime_dir()?;
     let socket = dirs.host_socket_file().ok_or_else(|| anyhow!("the socket path is too long"))?;
     let lock = dirs.host_lock_file().ok_or_else(|| anyhow!("no place for the host lock"))?;
     host.listen(&socket, &lock)?;
-    // 拿着锁的宿主只有一个，任务板和定时也只由它办。
+    // 拿着锁的宿主只有一个，看板和定时也只由它办。
     if let Some(db) = dirs.todos_db() {
         host.serve_todos(db);
     }

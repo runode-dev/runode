@@ -96,7 +96,7 @@ fn serve(mut stream: UnixStream, tx: &mpsc::Sender<Received>, script: &Mutex<imp
     }
 }
 
-/// 回 `Hello` 的 `Welcome`；`todos` 是宿主认得任务板的消息。
+/// 回 `Hello` 的 `Welcome`；`todos` 是宿主认得看板的消息。
 pub fn welcome(todos: bool) -> HostMsg {
     HostMsg::Welcome {
         protocol: PROTOCOL_VERSION,

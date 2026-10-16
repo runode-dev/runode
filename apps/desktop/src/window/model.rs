@@ -379,7 +379,7 @@ impl WindowView {
     /// 上次画出时的布局可能已经过时（开了侧栏、缩了窗口），按它算的偏移不准。
     fn show_tab(&mut self, ix: usize, reveal_now: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.leave_mobile(cx);
-        self.todo_board = None;
+        self.kanban = None;
         // 焦点要交给终端，盖着终端的放大预览栏还原。
         self.restore_preview_zoom(cx);
         let workspace = self.workspace_mut();
@@ -643,7 +643,7 @@ impl WindowView {
         self.forget_previews(id, cx);
         self.file_tree.update(cx, |tree, _| tree.forget_workspace(id));
         self.git_panel.update(cx, |panel, _| panel.forget_workspace(id));
-        // 关的是别的 workspace 时只把下标挪到原来那个上：再切一遍会收掉正在看的手机引导页、任务板，抢走
+        // 关的是别的 workspace 时只把下标挪到原来那个上：再切一遍会收掉正在看的手机引导页、看板，抢走
         // 焦点，还把没看过的结果标成看过。
         if ix != self.active {
             self.active = closed_index(self.active, ix);

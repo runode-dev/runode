@@ -1,8 +1,8 @@
-//! agent 停下来等回答、任务板上的任务做完时给登记过的手机推一条通知（线上格式和整个流程见
+//! agent 停下来等回答、看板上的任务做完时给登记过的手机推一条通知（线上格式和整个流程见
 //! `runode_protocol::push`）。
 //!
 //! `Pusher` 跟着监听活在同一个进程里：开着推送、监听开着、设备表里至少有一条登记时，它像命令行一样
-//! 经 `Connect` 连上宿主（`ClientKind::Cli`），每 `POLL_INTERVAL` 要一次会话列表，宿主认得任务板
+//! 经 `Connect` 连上宿主（`ClientKind::Cli`），每 `POLL_INTERVAL` 要一次会话列表，宿主认得看板
 //! （`Welcome` 的 `todos`）时接着要一次任务表（`ListTodos`），交给 `Rounds` 决定什么时候推，要读屏幕时
 //! 发 `ReadScreen`；要发的推送交给发送线程（`send`）。两份回话谁先到不一定（宿主另起线程回），
 //! `Rounds` 等同一轮的两份都到了才看任务，任务表按请求编号认是不是这一轮的；问过 `ListTodos` 后宿主
@@ -461,7 +461,7 @@ fn route(registration: &PushRegistration, settings: &PushSettings) -> Option<Rou
 struct HostLink {
     stream: UnixStream,
     messages: mpsc::Receiver<HostMsg>,
-    /// 宿主认得任务板（`Welcome` 的 `todos`）；旧宿主不认得，对 `ListTodos` 回 `Error`，不发。
+    /// 宿主认得看板（`Welcome` 的 `todos`）；旧宿主不认得，对 `ListTodos` 回 `Error`，不发。
     todos: bool,
 }
 

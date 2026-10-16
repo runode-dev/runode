@@ -120,7 +120,7 @@ pub(super) fn thaw(cx: &mut App) {
 /// 读不了时为空；读不了时文件挪到一边（`format::load`），从默认布局开始。没开 app 时手机、命令行
 /// 经宿主新开的终端、新建的工作区和改的名字按宿主手里的布局接进来（`format::adopt`）。终端记的会话按宿主里
 /// 还活着的会话定下接不接（`format::plan_restore`）；存档记着、没人连着的会话中 shell 已经退出的和一直没
-/// 启动的这时结束掉，存档里没记着的孤儿会话由 `watch_background` 问过任务板再收。
+/// 启动的这时结束掉，存档里没记着的孤儿会话由 `watch_background` 问过看板再收。
 pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
     let mut windows = format::load().map(|state| state.windows).unwrap_or_default();
     let live = live_sessions();

@@ -1,5 +1,5 @@
 //! 宿主单独一个进程跑时（`runode --host`）什么时候退出：没有会话也没有连接、持续一段时间后
-//! 自己退出（`Host::set_stay_up` 时、任务板上有定时时不因空闲退出），或者前端发来 `Shutdown`。
+//! 自己退出（`Host::set_stay_up` 时、看板上有定时时不因空闲退出），或者前端发来 `Shutdown`。
 
 use std::time::{Duration, Instant};
 

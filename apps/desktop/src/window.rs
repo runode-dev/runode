@@ -9,7 +9,7 @@
 //! 右侧的预览栏、Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的
 //! 就地输入框（`inline_edit`），新建 workspace 的对话框（`new_workspace`），开窗口（`open`），存档（`persist`，存档文件的格式在
 //! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
-//! （`quit`），侧栏顶上手机端入口打开的引导页（`mobile`），铺满窗口的任务板（`todo_board`），铺满窗口的设置页（`settings_page`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
+//! （`quit`），侧栏顶上手机端入口打开的引导页（`mobile`），铺满窗口的看板（`kanban`），铺满窗口的设置页（`settings_page`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
 //! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），经远程访问配对过的设备
 //! （`devices`），以及窗口底部的状态栏（`status_bar`）。
 //!
@@ -26,6 +26,7 @@ mod devices;
 mod files;
 mod git_panel;
 mod github_actions;
+mod kanban;
 mod layout_report;
 mod mobile;
 mod model;
@@ -44,7 +45,6 @@ mod slot;
 mod status_bar;
 mod tasks;
 mod titlebar;
-mod todo_board;
 
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Instant};
 
@@ -80,12 +80,12 @@ pub use crate::file_tree::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
+pub use kanban::watch_todos;
 pub(crate) use settings_page::show_settings;
 pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
 pub use status_bar::watch as watch_status;
 pub use tasks::RunNamedTask;
 pub use titlebar::titlebar_options;
-pub use todo_board::watch_todos;
 
 use crate::ui::a11y::{Hide, PressDown};
 // 关标签、关分屏和放大分屏这几个动作在 `runode_ui::actions`，焦点在预览栏里时由预览栏接住；
@@ -146,11 +146,11 @@ actions!(
         GotoAgent,
         /// 跳到下一个要处理的 agent：先等回答的，再干完了没看的。
         NextAgent,
-        /// 打开或收起铺满窗口的任务板。
-        ToggleTodoBoard,
-        /// 打开或收起任务板的定时页。
+        /// 打开或收起铺满窗口的看板。
+        ToggleKanban,
+        /// 打开或收起看板的定时页。
         ToggleSchedules,
-        /// 打开任务板和新建任务的对话框。
+        /// 打开看板和新建任务的对话框。
         NewTodo
     ]
 );
@@ -274,8 +274,8 @@ pub struct WindowView {
     mobile: Option<mobile::MobilePage>,
     /// 开着的设置页，盖住整个窗口。
     settings: Option<settings_page::SettingsPage>,
-    /// 开着的任务板，和手机端引导页一样盖住标签和分屏；新建、编辑任务和定时的对话框。
-    todo_board: Option<todo_board::OpenTodoBoard>,
+    /// 开着的看板，和手机端引导页一样盖住标签和分屏；新建、编辑任务和定时的对话框。
+    kanban: Option<kanban::OpenKanban>,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
     empty_focus: FocusHandle,
     /// 开着的 agent 列表。
@@ -442,7 +442,7 @@ impl WindowView {
             commit_message_dialog: None,
             mobile: None,
             settings: None,
-            todo_board: None,
+            kanban: None,
             empty_focus: cx.focus_handle(),
             agent_picker: None,
             arrange_picker: None,
@@ -648,7 +648,7 @@ impl MenuHost for WindowView {
 }
 
 impl Focusable for WindowView {
-    /// 开着设置页、手机端引导页、任务板时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
+    /// 开着设置页、手机端引导页、看板时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         if let Some(page) = &self.settings {
             return page.view.focus_handle(cx);
@@ -656,7 +656,7 @@ impl Focusable for WindowView {
         if let Some(page) = &self.mobile {
             return page.focus.clone();
         }
-        if let Some(board) = &self.todo_board {
+        if let Some(board) = &self.kanban {
             return board.view.focus_handle(cx);
         }
         match self.focused_view() {
@@ -679,7 +679,7 @@ impl Render for WindowView {
             (theme.background, vec![page.view.clone().into_any_element()])
         } else if self.mobile.is_some() {
             (if cards(cx) { theme.frame } else { theme.background }, self.render_mobile_body(window, cx))
-        } else if self.todo_board.is_some() {
+        } else if self.kanban.is_some() {
             (if cards(cx) { theme.frame } else { theme.background }, self.render_todo_body(window, cx))
         } else if cards(cx) {
             (theme.frame, self.render_cards_body(window, cx))
@@ -735,12 +735,12 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::select_last_tab))
             .on_action(Self::act(cx, Self::new_split_right))
             .on_action(Self::act(cx, Self::new_split_down))
-            // 设置页、任务板、手机端引导页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏。
+            // 设置页、看板、手机端引导页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏。
             .on_action(cx.listener(|this, action, window, cx| {
                 if this.settings.is_some() {
                     this.close_settings(window, cx);
-                } else if this.todo_board.is_some() {
-                    this.close_todo_board(window, cx);
+                } else if this.kanban.is_some() {
+                    this.close_kanban(window, cx);
                 } else if this.mobile.is_some() {
                     this.close_mobile(window, cx);
                 } else {
@@ -779,7 +779,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::toggle_github_actions))
             .on_action(Self::act(cx, Self::goto_agent))
             .on_action(Self::act(cx, Self::next_agent))
-            .on_action(Self::act(cx, Self::toggle_todo_board))
+            .on_action(Self::act(cx, Self::toggle_kanban))
             .on_action(Self::act(cx, Self::toggle_schedules))
             .on_action(Self::act(cx, Self::new_todo))
             .on_action(Self::act(cx, Self::arrange_panes))

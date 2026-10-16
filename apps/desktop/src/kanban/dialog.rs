@@ -3,7 +3,7 @@
 //! `localtime_r` 和 `mktime`。填得不对时在对话框里说，不发请求；宿主那边还会再查一遍。
 //!
 //! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，盖住整个窗口，所以由 app 画在窗口的最上层
-//! （`TodoBoard::dialog`）。关掉、存好了经 `DialogEvent` 告诉看板。
+//! （`Kanban::dialog`）。关掉、存好了经 `DialogEvent` 告诉看板。
 
 use std::path::PathBuf;
 
@@ -28,7 +28,7 @@ use runode_protocol::{
     todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When},
 };
 
-use crate::todo_board::store;
+use crate::kanban::store;
 
 /// 对话框改的是哪一个；新建时为空。
 #[derive(Clone)]
@@ -187,22 +187,22 @@ impl TodoDialog {
         };
         let title = field(
             spec.as_ref().map(|spec| spec.title.clone()).unwrap_or_default(),
-            "todo_board.dialog.title_label",
-            "todo_board.dialog.title_placeholder",
+            "kanban.dialog.title_label",
+            "kanban.dialog.title_placeholder",
             cx,
         );
         let agent = field(
             spec.as_ref().map_or_else(|| DEFAULT_AGENT.to_owned(), |spec| spec.agent.clone()),
-            "todo_board.dialog.agent",
-            "todo_board.dialog.agent_placeholder",
+            "kanban.dialog.agent",
+            "kanban.dialog.agent_placeholder",
             cx,
         );
         let prompt_text = spec.as_ref().map(|spec| spec.prompt.clone()).unwrap_or_default();
         let prompt = cx.new(|cx| {
             let mut area = TextareaState::new(cx);
             area.set_line_limits(3, 10, cx);
-            area.set_label(rust_i18n::t!("todo_board.dialog.prompt"), cx);
-            area.set_placeholder(rust_i18n::t!("todo_board.dialog.prompt_placeholder").into_owned().into(), cx);
+            area.set_label(rust_i18n::t!("kanban.dialog.prompt"), cx);
+            area.set_placeholder(rust_i18n::t!("kanban.dialog.prompt_placeholder").into_owned().into(), cx);
             area.set_text(prompt_text, cx);
             area
         });
@@ -222,9 +222,9 @@ impl TodoDialog {
             None => (Some(Kind::Daily), String::new(), "09:00".to_owned(), "60".to_owned(), 0),
         };
         let at_text = if at_text.is_empty() { next_hour() } else { at_text };
-        let at = field(at_text, "todo_board.dialog.once", "todo_board.dialog.once_placeholder", cx);
-        let clock = field(clock_text, "todo_board.dialog.daily", "todo_board.dialog.daily_placeholder", cx);
-        let minutes = field(minutes_text, "todo_board.dialog.every", "todo_board.dialog.every_placeholder", cx);
+        let at = field(at_text, "kanban.dialog.once", "kanban.dialog.once_placeholder", cx);
+        let clock = field(clock_text, "kanban.dialog.daily", "kanban.dialog.daily_placeholder", cx);
+        let minutes = field(minutes_text, "kanban.dialog.every", "kanban.dialog.every_placeholder", cx);
         // 输入框里回车保存，Esc 关掉对话框；提示词里 ⌘回车保存。
         let mut events = Vec::new();
         for input in [&title, &agent, &at, &clock, &minutes] {
@@ -292,7 +292,7 @@ impl TodoDialog {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some(rust_i18n::t!("todo_board.dialog.choose_dir").into_owned().into()),
+            prompt: Some(rust_i18n::t!("kanban.dialog.choose_dir").into_owned().into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
@@ -373,7 +373,7 @@ impl Render for TodoDialog {
                 .when(!on, |pill| pill.hover(move |pill| pill.bg(hover_bg)))
                 .child(label)
         };
-        let dir_label = rust_i18n::t!("todo_board.dialog.dir").into_owned();
+        let dir_label = rust_i18n::t!("kanban.dialog.dir").into_owned();
         let dir_text = display_dir(&dialog.dir);
         let dir = div()
             .id("todo-dialog-dir")
@@ -396,7 +396,7 @@ impl Render for TodoDialog {
             })
             .when(dialog.locked, |dir| dir.opacity(0.6))
             .aria_disabled(dialog.locked);
-        let worktree_label = rust_i18n::t!("todo_board.dialog.worktree").into_owned();
+        let worktree_label = rust_i18n::t!("kanban.dialog.worktree").into_owned();
         // 一行字配一个开关，点字也算点开关。
         let worktree = Switch::new("todo-dialog-worktree", worktree_label.clone(), dialog.worktree)
             .label(worktree_label)
@@ -423,7 +423,7 @@ impl Render for TodoDialog {
                         cx.notify();
                     })
             };
-            let when_label = rust_i18n::t!("todo_board.dialog.when").into_owned();
+            let when_label = rust_i18n::t!("kanban.dialog.when").into_owned();
             let kinds = div()
                 .id("todo-dialog-when")
                 .role(Role::RadioGroup)
@@ -433,15 +433,15 @@ impl Render for TodoDialog {
                 .gap(px(2.))
                 .rounded(px(6.))
                 .bg(bg_h)
-                .child(kind("todo-dialog-once", Kind::Once, "todo_board.dialog.kind_once", cx))
-                .child(kind("todo-dialog-daily", Kind::Daily, "todo_board.dialog.kind_daily", cx))
-                .child(kind("todo-dialog-every", Kind::Every, "todo_board.dialog.kind_every", cx));
+                .child(kind("todo-dialog-once", Kind::Once, "kanban.dialog.kind_once", cx))
+                .child(kind("todo-dialog-daily", Kind::Daily, "kanban.dialog.kind_daily", cx))
+                .child(kind("todo-dialog-every", Kind::Every, "kanban.dialog.kind_every", cx));
             let when_input = match dialog.kind {
                 Some(Kind::Once) => input(&dialog.at).into_any_element(),
                 Some(Kind::Daily) => input(&dialog.clock).into_any_element(),
                 Some(Kind::Every) => input(&dialog.minutes).into_any_element(),
                 None => {
-                    let hint = rust_i18n::t!("todo_board.dialog.unknown_hint").into_owned();
+                    let hint = rust_i18n::t!("kanban.dialog.unknown_hint").into_owned();
                     div()
                         .id("todo-dialog-unknown")
                         .role(Role::Label)
@@ -470,7 +470,7 @@ impl Render for TodoDialog {
                     div()
                         .text_size(FontSize::Small)
                         .text_color(fg_h.opacity(0.55))
-                        .child(rust_i18n::t!("todo_board.dialog.days_hint").into_owned()),
+                        .child(rust_i18n::t!("kanban.dialog.days_hint").into_owned()),
                 )
             });
             div()
@@ -489,16 +489,15 @@ impl Render for TodoDialog {
                 .children(days)
         });
         let title = match (&dialog.editing, dialog.schedule) {
-            (Some(_), false) => rust_i18n::t!("todo_board.edit"),
-            (Some(_), true) => rust_i18n::t!("todo_board.edit_schedule"),
-            (None, false) => rust_i18n::t!("todo_board.new_todo"),
-            (None, true) => rust_i18n::t!("todo_board.new_schedule"),
+            (Some(_), false) => rust_i18n::t!("kanban.edit"),
+            (Some(_), true) => rust_i18n::t!("kanban.edit_schedule"),
+            (None, false) => rust_i18n::t!("kanban.new_todo"),
+            (None, true) => rust_i18n::t!("kanban.new_schedule"),
         }
         .into_owned();
-        let cancel =
-            button("todo-dialog-cancel", rust_i18n::t!("todo_board.cancel").into_owned(), ButtonVariant::Ghost)
-                .on_press(cx, |_, _, cx| cx.emit(DialogEvent::Dismissed));
-        let save = button("todo-dialog-save", rust_i18n::t!("todo_board.save").into_owned(), ButtonVariant::Secondary)
+        let cancel = button("todo-dialog-cancel", rust_i18n::t!("kanban.cancel").into_owned(), ButtonVariant::Ghost)
+            .on_press(cx, |_, _, cx| cx.emit(DialogEvent::Dismissed));
+        let save = button("todo-dialog-save", rust_i18n::t!("kanban.save").into_owned(), ButtonVariant::Secondary)
             .when(dialog.saving, |button| button.opacity(0.5))
             .on_press(cx, |this, _, cx| this.save(cx));
         let panel = Dialog::new("todo-dialog", title.clone())
@@ -536,11 +535,11 @@ impl Render for TodoDialog {
                     .flex_col()
                     .gap(px(12.))
                     .child(field(
-                        rust_i18n::t!("todo_board.dialog.title_label").into_owned(),
+                        rust_i18n::t!("kanban.dialog.title_label").into_owned(),
                         input(&dialog.title).into_any_element(),
                     ))
                     .child(field(
-                        rust_i18n::t!("todo_board.dialog.prompt").into_owned(),
+                        rust_i18n::t!("kanban.dialog.prompt").into_owned(),
                         Textarea::new(&dialog.prompt)
                             .min_h(scaled(28.))
                             .py(px(4.))
@@ -558,7 +557,7 @@ impl Render for TodoDialog {
                             .child(dir),
                     )
                     .child(field(
-                        rust_i18n::t!("todo_board.dialog.agent").into_owned(),
+                        rust_i18n::t!("kanban.dialog.agent").into_owned(),
                         input(&dialog.agent).into_any_element(),
                     ))
                     .child(div().flex().child(worktree)),
@@ -596,15 +595,15 @@ impl TodoDialog {
         let typed = self.title.read(cx).query().trim().to_owned();
         let title = if typed.is_empty() { first_line(&prompt).to_owned() } else { typed };
         if title.is_empty() {
-            return Err(rust_i18n::t!("todo_board.dialog.need_title").into_owned());
+            return Err(rust_i18n::t!("kanban.dialog.need_title").into_owned());
         }
         let agent = self.agent.read(cx).query().trim().to_owned();
         if agent.is_empty() {
-            return Err(rust_i18n::t!("todo_board.dialog.need_agent").into_owned());
+            return Err(rust_i18n::t!("kanban.dialog.need_agent").into_owned());
         }
         // 开始过的任务目录改不了，宿主也允许原目录没了（agent 还在工作树里跑）时只改文字。
         if !self.locked && !self.dir.is_dir() {
-            return Err(rust_i18n::t!("todo_board.dialog.bad_dir").into_owned());
+            return Err(rust_i18n::t!("kanban.dialog.bad_dir").into_owned());
         }
         let spec = TodoSpec { title, prompt, dir: self.dir.clone(), agent, worktree: self.worktree };
         if !self.schedule {
@@ -626,17 +625,17 @@ impl TodoDialog {
                 };
                 When::Once {
                     at: once_at(self.at.read(cx).query(), original)
-                        .ok_or_else(|| rust_i18n::t!("todo_board.dialog.bad_once").into_owned())?,
+                        .ok_or_else(|| rust_i18n::t!("kanban.dialog.bad_once").into_owned())?,
                 }
             }
             Some(Kind::Daily) => {
                 let (hour, minute) = parse_clock(self.clock.read(cx).query())
-                    .ok_or_else(|| rust_i18n::t!("todo_board.dialog.bad_daily").into_owned())?;
+                    .ok_or_else(|| rust_i18n::t!("kanban.dialog.bad_daily").into_owned())?;
                 When::Daily { hour, minute, days: self.days }
             }
             Some(Kind::Every) => When::Every {
                 minutes: parse_minutes(self.minutes.read(cx).query())
-                    .ok_or_else(|| rust_i18n::t!("todo_board.dialog.bad_every").into_owned())?,
+                    .ok_or_else(|| rust_i18n::t!("kanban.dialog.bad_every").into_owned())?,
             },
         };
         Ok(match &self.editing {
@@ -653,7 +652,7 @@ impl TodoDialog {
 
 /// 星期几的简称，`day` 从 0（星期日）数。
 pub(crate) fn weekday(day: u8) -> String {
-    let key = format!("todo_board.weekday.{day}");
+    let key = format!("kanban.weekday.{day}");
     rust_i18n::t!(&key).into_owned()
 }
 
