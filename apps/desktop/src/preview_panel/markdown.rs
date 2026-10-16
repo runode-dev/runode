@@ -66,6 +66,9 @@ const OVERDRAW: f32 = 400.;
 const DRAG_THRESHOLD: f32 = 3.;
 /// 一篇文档最多读这么多个不同的本地图片文件，再多的只显示替代文字。
 const MAX_LOCAL_IMAGES: usize = 256;
+/// 一篇文档读进的本地图片合起来最多占这么多字节（`Picture::bytes`），超出的只显示替代文字：SVG 画成
+/// 位图，几十字节的文件就能占上百 MB。
+const MAX_LOCAL_IMAGE_BYTES: usize = 512 << 20;
 /// 一篇文档最多下载这么多个不同的网络图片，再多的只显示替代文字。
 const MAX_REMOTE_IMAGES: usize = 64;
 
@@ -351,6 +354,7 @@ impl Doc {
             cell_width,
             picture: &picture,
             pictures: HashMap::new(),
+            picture_bytes: 0,
             footnote: false,
             center: 0,
             ids: 0,
@@ -428,6 +432,8 @@ struct Flatten<'a> {
     picture: &'a dyn Fn(&Path) -> Option<Picture>,
     /// 读过的本地图片文件，读不了的也记着，不再读第二次。
     pictures: HashMap<PathBuf, Option<Picture>>,
+    /// `pictures` 里的图合起来占的字节，见 `MAX_LOCAL_IMAGE_BYTES`。
+    picture_bytes: usize,
     /// 正在摊平文末的脚注。
     footnote: bool,
     /// 套在几层 HTML 居中的块里。
@@ -519,7 +525,7 @@ impl Flatten<'_> {
     }
 
     /// 本地图片地址 `url` 读出的图：按解析好的路径记着，同一个文件只读一次；读过 `MAX_LOCAL_IMAGES`
-    /// 个文件以后不再读新的。
+    /// 个文件以后不再读新的，合起来超过 `MAX_LOCAL_IMAGE_BYTES` 的那张不要。
     fn local_picture(&mut self, url: &str) -> Option<Picture> {
         let path = image_path(self.dir, url)?;
         if let Some(picture) = self.pictures.get(&path) {
@@ -528,7 +534,14 @@ impl Flatten<'_> {
         if self.pictures.len() >= MAX_LOCAL_IMAGES {
             return None;
         }
-        let picture = (self.picture)(&path);
+        let picture = (self.picture)(&path).filter(|picture| {
+            let total = self.picture_bytes + picture.bytes();
+            let fits = total <= MAX_LOCAL_IMAGE_BYTES;
+            if fits {
+                self.picture_bytes = total;
+            }
+            fits
+        });
         self.pictures.insert(path, picture.clone());
         picture
     }
