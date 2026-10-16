@@ -1,6 +1,6 @@
 //! 写成文字的组合键：解析、写回去、连按几下，以及写错时的说明。
 
-use runode_types::input::{Key, KeyChord, MAX_KEY_REPEAT, Mods, parse_keys};
+use runode_types::input::{Key, KeyChord, MAX_KEY_REPEAT, MAX_KEYS, Mods, parse_key_list, parse_keys};
 
 fn chord(s: &str) -> KeyChord {
     s.parse().unwrap_or_else(|err| panic!("{s}: {err}"))
@@ -82,6 +82,16 @@ fn a_count_repeats_the_chord() {
     for bad in ["down*0", "down*", "down*x", "down*-1", &format!("up*{}", MAX_KEY_REPEAT + 1), "nope*2", "*3"] {
         assert!(parse_keys(bad).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn a_key_list_is_capped_in_total() {
+    assert_eq!(parse_key_list(&["down*2", "enter"]).unwrap(), [chord("down"), chord("down"), chord("enter")]);
+    let full = vec![format!("a*{MAX_KEY_REPEAT}"); MAX_KEYS / MAX_KEY_REPEAT as usize];
+    assert_eq!(parse_key_list(&full).unwrap().len(), MAX_KEYS);
+    let over = [full, vec!["a".to_owned()]].concat();
+    assert!(parse_key_list(&over).is_err());
+    assert!(parse_key_list(&["a", "nope"]).is_err());
 }
 
 #[test]

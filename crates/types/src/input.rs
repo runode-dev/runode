@@ -155,6 +155,9 @@ pub struct KeyChord {
 /// `down*3` 这种写法最多连按几下，免得一个笔误写出成千上万个按键。
 pub const MAX_KEY_REPEAT: u32 = 1000;
 
+/// 一次最多发这么多下（`parse_key_list` 展开后合起来）：几万项 `a*1000` 能展开出上亿个按键。
+pub const MAX_KEYS: usize = 10_000;
+
 /// 有名字的键和它们的写法；第一个是 `Display` 用的，后面的是也认的别名。
 const NAMED_KEYS: &[(Key, &[&str])] = &[
     (Key::Escape, &["esc", "escape"]),
@@ -355,4 +358,16 @@ pub fn parse_keys(spec: &str) -> Result<Vec<KeyChord>, String> {
     };
     let chord: KeyChord = chord.parse()?;
     Ok(vec![chord; times as usize])
+}
+
+/// 一串按键写法（见 `parse_keys`）按先后展开成每一下，合起来超过 `MAX_KEYS` 下时报错。
+pub fn parse_key_list<S: AsRef<str>>(specs: &[S]) -> Result<Vec<KeyChord>, String> {
+    let mut keys = Vec::new();
+    for spec in specs {
+        keys.extend(parse_keys(spec.as_ref())?);
+        if keys.len() > MAX_KEYS {
+            return Err(format!("at most {MAX_KEYS} keys at a time"));
+        }
+    }
+    Ok(keys)
 }

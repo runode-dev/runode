@@ -47,7 +47,7 @@ use runode_protocol::{
     PROTOCOL_VERSION, SessionId, SessionInfo, WindowLayout, git::GitRequest, read_frame, write_frame,
 };
 use runode_terminal::pty;
-use runode_types::{grid::GridSize, input::parse_keys, session::DriveAction};
+use runode_types::{grid::GridSize, input::parse_key_list, session::DriveAction};
 
 use crate::{
     Host, Shared, SpawnOptions, Stopped, browse,
@@ -1081,13 +1081,10 @@ impl Connection {
             }
             ClientMsg::Focus { focused: false, .. } => {}
             ClientMsg::ReadScreen { id, lines, command } => self.read_screen(id, lines, command),
-            ClientMsg::SendKeys { req, id, keys } => {
-                let parsed: Result<Vec<_>, _> = keys.iter().map(|key| parse_keys(key)).collect();
-                match parsed {
-                    Ok(keys) => self.deliver_done(req, id, DriveAction::Keys, Inbox::Keys(keys.concat())),
-                    Err(err) => self.error(Some(req), Some(id), err),
-                }
-            }
+            ClientMsg::SendKeys { req, id, keys } => match parse_key_list(&keys) {
+                Ok(keys) => self.deliver_done(req, id, DriveAction::Keys, Inbox::Keys(keys)),
+                Err(err) => self.error(Some(req), Some(id), err),
+            },
             ClientMsg::Paste { req, id, text } => self.deliver_done(req, id, DriveAction::Paste, Inbox::Paste(text)),
             ClientMsg::Open { req, .. }
             | ClientMsg::OpenWorkspace { req, .. }
