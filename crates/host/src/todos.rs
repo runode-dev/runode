@@ -22,7 +22,7 @@ use std::{
 use runode_git::Repo;
 use runode_protocol::{
     HostMsg, SessionId, SessionInfo,
-    todo::{Todo, TodoSpec, When},
+    todo::{DONE_TODOS_PAGE, Todo, TodoSpec, When},
 };
 use runode_todo::Store;
 use runode_types::shell::Shell;
@@ -224,6 +224,12 @@ impl Shared {
             schedule.next_fire = runode_todo::next_fire(&schedule.when, schedule.last_fired);
         }
         Ok(HostMsg::Todos { req, todos, schedules })
+    }
+
+    /// 回 `ClientMsg::ListDoneTodos`。
+    pub(crate) fn list_done_todos(&self, req: u32, schedule: Option<&str>, offset: u32) -> Result<HostMsg, String> {
+        let (todos, more) = self.todos.with_db(|db| db.list_done_todos(schedule, offset, DONE_TODOS_PAGE))?;
+        Ok(HostMsg::DoneTodos { req, todos, more })
     }
 
     /// 回 `ClientMsg::AddTodo`。

@@ -239,3 +239,28 @@ fn concurrent_writers_wait_for_each_other() {
     numbers.sort_unstable();
     assert_eq!(numbers, (1..=100).collect::<Vec<_>>());
 }
+
+/// 完成了的记录不管多久以前的都翻得到，完成得晚的在前，分页、按定时筛。
+#[test]
+fn done_todos_page_newest_first() {
+    let mut store = Store::open(&temp_db("done")).unwrap();
+    let old = store.add_todo(&spec("old"), 100, Some("sched01")).unwrap();
+    let new = store.add_todo(&spec("new"), 101, None).unwrap();
+    let open = store.add_todo(&spec("open"), 102, Some("sched01")).unwrap();
+    let mid = store.add_todo(&spec("mid"), 103, Some("sched01")).unwrap();
+    store.update_todo(&old, None, Some(Some(200))).unwrap();
+    store.update_todo(&new, None, Some(Some(400))).unwrap();
+    store.update_todo(&mid, None, Some(Some(300))).unwrap();
+    let done = |schedule, offset, limit| -> (Vec<String>, bool) {
+        let (todos, more) = store.list_done_todos(schedule, offset, limit).unwrap();
+        (todos.into_iter().map(|todo| todo.id).collect(), more)
+    };
+    assert_eq!(done(None, 0, 10), (vec![new.clone(), mid.clone(), old.clone()], false));
+    // 正好翻到最后一张时说后面没了，少要一张时说还有。
+    assert_eq!(done(None, 1, 1), (vec![mid.clone()], true));
+    assert_eq!(done(None, 1, 2), (vec![mid.clone(), old.clone()], false));
+    assert_eq!(done(Some("sched01"), 0, 10), (vec![mid, old], false));
+    assert!(!done(None, 0, 10).0.contains(&open));
+    // 七天的窗口只管看板，不管记录。
+    assert!(ids(&store, 400 + DONE_KEPT + 1).iter().all(|id| *id == open));
+}

@@ -930,6 +930,8 @@ fn todo_requests_get_their_answers_and_changes_are_announced() {
     assert!(matches!(got, HostMsg::Todo { ref todo, .. } if todo.id == id), "{got:?}");
     let moved = link.request(|req| ClientMsg::MoveTodo { req, id, before: None }, WAIT).unwrap();
     assert!(matches!(moved, HostMsg::Done { .. }), "{moved:?}");
+    let done = link.request(|req| ClientMsg::ListDoneTodos { req, schedule: None, offset: 0 }, WAIT).unwrap();
+    assert!(matches!(done, HostMsg::DoneTodos { ref todos, more: false, .. } if todos.is_empty()), "{done:?}");
     // 宿主回的错带着请求编号，交回给等着的一方，连接照旧。
     let missing = link.request(|req| ClientMsg::RemoveTodo { req, id: "nothere".into() }, WAIT);
     assert!(missing.is_err());

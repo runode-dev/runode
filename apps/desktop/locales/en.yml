@@ -793,6 +793,13 @@ kanban:
   next: "next %{time}"
   worktree_on: own worktree
   done_window: Last 7 days
+  all_history: All history
+  history: History
+  history_of: "History of “%{name}”"
+  no_history: No finished tasks yet
+  load_more: Load more
+  done_at: "Finished %{time}"
+  back: Back
   toast:
     starting: Starting the task…
     started: Task started

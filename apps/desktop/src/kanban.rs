@@ -1,5 +1,6 @@
 //! 铺满窗口的看板：派给 agent 的任务按列排开（待办、进行中、需要你、完成），和它平级的另一页列出
-//! 定时。数据由宿主持有，这边经 `store` 读写；新建、编辑任务和定时的对话框在 `dialog`。
+//! 定时。完成那一列只有最近七天的，再早的在记录页上翻（`History`），从完成那一列的列头和各个定时进去，
+//! 后者只列那个定时开出的。数据由宿主持有，这边经 `store` 读写；新建、编辑任务和定时的对话框在 `dialog`。
 //!
 //! 卡片在哪一列由任务和它会话里 agent 的状态推出来（`runode_protocol::todo::column`），拖拽就是做那一列
 //! 的动作（`drop_action`）：拖进进行中是开始，拖进完成是标完成，从完成拖出是取消完成，同一列里上下拖调
@@ -33,7 +34,7 @@ use crate::ui::{
     base_name,
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{self, FontSize, scaled},
-    icons::{BRANCH_ICON, CHECK_ICON, CLOSE_ICON, PENCIL_ICON, PLUS_ICON, TERMINAL_ICON, TRASH_ICON},
+    icons::{ARROW_LEFT_ICON, BRANCH_ICON, CHECK_ICON, CLOSE_ICON, PENCIL_ICON, PLUS_ICON, TERMINAL_ICON, TRASH_ICON},
     scrollbar::scrollbar,
     spinner::spinner,
     tabs::{drag_chip, drop_marker},
@@ -46,7 +47,7 @@ use gpui::{
     SharedString, Stateful, Subscription, Window, canvas, div, ease_out_quint, point, prelude::*, px, svg,
 };
 use runode_protocol::{
-    ClientMsg, SessionId,
+    ClientMsg, HostMsg, SessionId,
     todo::{Column, DropAction, Schedule, Todo, When, column, drop_action},
 };
 use runode_types::agent::Agent;
@@ -117,6 +118,8 @@ pub struct Kanban {
     page: Page,
     columns_scroll: ScrollHandle,
     schedules_scroll: ScrollHandle,
+    history_scroll: ScrollHandle,
+    history: History,
     /// 上一帧各卡片和看板画在哪，画的时候记下。
     geometry: Rc<RefCell<Geometry>>,
     /// 上一帧各任务在哪一列；刚打开、刚切回任务页时为空，这一帧不飞。
@@ -164,11 +167,30 @@ enum ToastState {
     Failed,
 }
 
-/// 看板的两页，侧栏上各有一个入口。
+/// 看板的几页：任务页、定时页侧栏上各有一个入口，记录页从完成那一列的列头和定时进去。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     Todos,
     Schedules,
+    History,
+}
+
+/// 记录页翻到的完成了的任务（`ClientMsg::ListDoneTodos`），只在这个看板里用，不放进全 app 的数据。
+#[derive(Default)]
+struct History {
+    /// 只看这个定时开出的；为空时看全部。
+    schedule: Option<String>,
+    /// 完成得晚的在前。
+    todos: Vec<Todo>,
+    /// 宿主说后面还有。
+    more: bool,
+    /// 第一页回来了：没回来之前不说没有记录。
+    loaded: bool,
+    /// 有一问还没回来：这时不翻下一页，从头重问的还没回来时照旧的张数往后翻会重了、漏了。
+    loading: bool,
+    error: Option<String>,
+    /// 第几次问，回来晚了的旧答案不要。
+    serial: u64,
 }
 
 /// 拖着的卡片：跟着鼠标画出来，放到别处时按 `id` 做那一列的动作。
@@ -261,6 +283,8 @@ impl Kanban {
             page: if schedules { Page::Schedules } else { Page::Todos },
             columns_scroll: ScrollHandle::new(),
             schedules_scroll: ScrollHandle::new(),
+            history_scroll: ScrollHandle::new(),
+            history: History::default(),
             geometry: Rc::default(),
             seen: None,
             moves: HashMap::new(),
@@ -301,6 +325,60 @@ impl Kanban {
         self.open_dialog(false, None, window, cx);
     }
 
+    /// 换到记录页，只看定时 `schedule` 开出的（为空时看全部），从头翻。
+    fn show_history(&mut self, schedule: Option<String>, cx: &mut Context<Self>) {
+        self.history = History { schedule, serial: self.history.serial, ..History::default() };
+        self.set_page(Page::History, cx);
+        self.load_history(false, cx);
+    }
+
+    /// 看板变了、记录页上办成了事：开着记录页时从头重翻。
+    /// shortcut: 翻过的几页丢掉、只重读第一页，翻得很深时改完会跳回顶上；嫌烦再按已翻的张数重读。
+    pub(crate) fn reload_history(&mut self, cx: &mut Context<Self>) {
+        if self.page == Page::History {
+            self.load_history(false, cx);
+        }
+    }
+
+    /// 问宿主记录的下一页（`more`），或者从头问。
+    fn load_history(&mut self, more: bool, cx: &mut Context<Self>) {
+        if more && self.history.loading {
+            return;
+        }
+        let offset = if more { u32::try_from(self.history.todos.len()).unwrap_or(u32::MAX) } else { 0 };
+        let schedule = self.history.schedule.clone();
+        self.history.serial += 1;
+        self.history.loading = true;
+        let serial = self.history.serial;
+        let answer = store::ask(cx, Box::new(move |req| ClientMsg::ListDoneTodos { req, schedule, offset }));
+        cx.spawn(async move |this, cx| {
+            let answer = answer.await;
+            this.update(cx, |this, cx| {
+                let history = &mut this.history;
+                if history.serial != serial {
+                    return;
+                }
+                history.loading = false;
+                match answer {
+                    Ok(HostMsg::DoneTodos { todos, more: rest, .. }) => {
+                        if !more {
+                            history.todos.clear();
+                        }
+                        history.todos.extend(todos);
+                        history.more = rest;
+                        history.loaded = true;
+                        history.error = None;
+                    }
+                    Ok(other) => history.error = Some(format!("unexpected answer from the host: {other:?}")),
+                    Err(err) => history.error = Some(format!("{err:#}")),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
         if self.page == page {
             return;
@@ -328,9 +406,16 @@ impl Kanban {
         cx.notify();
     }
 
-    /// 依次发几条看板的请求，前一条没办成就不发后面的。
+    /// 依次发几条看板的请求，前一条没办成就不发后面的。办成了重翻记录：完成了七天以上的任务改了，看板的数据不变，
+    /// 不会因此重翻。
     fn send_todos(steps: Vec<Step>, cx: &mut Context<Self>) {
-        store::send(cx, steps).detach();
+        let sent = store::send(cx, steps);
+        cx.spawn(async move |this, cx| {
+            if sent.await {
+                this.update(cx, |this, cx| this.reload_history(cx)).ok();
+            }
+        })
+        .detach();
     }
 
     /// 发开始任务的几条请求，顶上弹出提示条，等宿主回话后说开始了没有，过一会儿收起。
@@ -437,7 +522,7 @@ impl Kanban {
     /// 删掉任务；它的会话还在时先问一句（会话留着，在后台照常跑）。
     fn remove_todo(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let data = store::data(cx);
-        let Some(todo) = data.todos.iter().find(|todo| todo.id == id) else { return };
+        let Some(todo) = data.todos.iter().chain(&self.history.todos).find(|todo| todo.id == id) else { return };
         let alive = todo.session.is_some_and(|session| data.sessions.get(&session).is_some_and(|info| !info.exited));
         if !alive {
             Self::send_todos(vec![Box::new(move |req| ClientMsg::RemoveTodo { req, id })], cx);
@@ -450,9 +535,12 @@ impl Kanban {
             &[&*rust_i18n::t!("kanban.remove"), &*rust_i18n::t!("kanban.cancel")],
             cx,
         );
-        cx.spawn(async move |_, cx| {
+        cx.spawn(async move |this, cx| {
             if answer.await.ok() == Some(0) {
-                cx.update(|cx| store::send(cx, vec![Box::new(move |req| ClientMsg::RemoveTodo { req, id })]).detach());
+                this.update(cx, |_, cx| {
+                    Self::send_todos(vec![Box::new(move |req| ClientMsg::RemoveTodo { req, id })], cx)
+                })
+                .ok();
             }
         })
         .detach();
@@ -670,10 +758,16 @@ impl Kanban {
         };
         let window_hint = (column == Column::Done).then(|| {
             div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .gap(px(8.))
                 .text_size(FontSize::Small)
                 .text_color(fg.opacity(0.4))
                 .font_weight(FontWeight::NORMAL)
                 .child(rust_i18n::t!("kanban.done_window").into_owned())
+                .child(div().flex_1())
+                .child(history_link("todo-done-history").on_press(cx, |this, _, cx| this.show_history(None, cx)))
         });
         let accept_bg = cx.theme().mix(0.1);
         div()
@@ -899,12 +993,7 @@ impl Kanban {
                 let todo = todo.clone();
                 let label = rust_i18n::t!("kanban.open").into_owned();
                 buttons.push(
-                    Button::new("todo-open", label.clone())
-                        .icon(TERMINAL_ICON)
-                        .icon_size(13.)
-                        .with_size(ButtonSize::Icon)
-                        .cursor_pointer()
-                        .tooltip(tooltip(label, None))
+                    icon_button("todo-open", TERMINAL_ICON, label)
                         .on_press(cx, move |_, _, cx| Self::open_session(session_id, &todo, cx)),
                 );
             }
@@ -914,40 +1003,22 @@ impl Kanban {
                 let label = label.into_owned();
                 let id = id.clone();
                 buttons.push(
-                    Button::new("todo-done", label.clone())
-                        .icon(CHECK_ICON)
-                        .icon_size(13.)
-                        .with_size(ButtonSize::Icon)
-                        .cursor_pointer()
-                        .tooltip(tooltip(label, None))
+                    icon_button("todo-done", CHECK_ICON, label)
                         .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), done, cx)),
                 );
             }
             {
                 let todo = todo.clone();
                 let label = rust_i18n::t!("kanban.edit").into_owned();
-                buttons.push(
-                    Button::new("todo-edit", label.clone())
-                        .icon(PENCIL_ICON)
-                        .icon_size(13.)
-                        .with_size(ButtonSize::Icon)
-                        .cursor_pointer()
-                        .tooltip(tooltip(label, None))
-                        .on_press(cx, move |this, window, cx| {
-                            this.open_dialog(false, Some(Editing::Todo(todo.clone())), window, cx)
-                        }),
-                );
+                buttons.push(icon_button("todo-edit", PENCIL_ICON, label).on_press(cx, move |this, window, cx| {
+                    this.open_dialog(false, Some(Editing::Todo(todo.clone())), window, cx)
+                }));
             }
             {
                 let id = id.clone();
                 let label = rust_i18n::t!("kanban.remove_todo").into_owned();
                 buttons.push(
-                    Button::new("todo-remove", label.clone())
-                        .icon(TRASH_ICON)
-                        .icon_size(13.)
-                        .with_size(ButtonSize::Icon)
-                        .cursor_pointer()
-                        .tooltip(tooltip(label, None))
+                    icon_button("todo-remove", TRASH_ICON, label)
                         .on_press(cx, move |this, window, cx| this.remove_todo(id.clone(), window, cx)),
                 );
             }
@@ -1080,7 +1151,7 @@ impl Kanban {
         let details: Vec<String> =
             [Some(place), Some(schedule.spec.agent.clone()), worktree].into_iter().flatten().collect();
         let runs = recent_runs(&data.todos, &schedule.id);
-        let run_rows: Vec<_> = runs
+        let mut run_rows: Vec<AnyElement> = runs
             .iter()
             .map(|todo| {
                 let session = todo.session.and_then(|id| data.sessions.get(&id));
@@ -1104,30 +1175,28 @@ impl Kanban {
                     Some(session) => row.on_press(cx, move |_, _, cx| Self::open_session(session, &todo, cx)),
                     None => row.on_press(cx, |this, _, cx| this.set_page(Page::Todos, cx)),
                 }
+                .into_any_element()
             })
             .collect();
+        {
+            let id = schedule.id.clone();
+            run_rows.push(
+                history_link(named("todo-schedule-history", &schedule.id))
+                    .on_press(cx, move |this, _, cx| this.show_history(Some(id.clone()), cx))
+                    .into_any_element(),
+            );
+        }
         let edit = {
             let schedule = schedule.clone();
             let label = rust_i18n::t!("kanban.edit_schedule").into_owned();
-            Button::new("todo-schedule-edit", label.clone())
-                .icon(PENCIL_ICON)
-                .icon_size(13.)
-                .with_size(ButtonSize::Icon)
-                .cursor_pointer()
-                .tooltip(tooltip(label, None))
-                .on_press(cx, move |this, window, cx| {
-                    this.open_dialog(true, Some(Editing::Schedule(schedule.clone())), window, cx)
-                })
+            icon_button("todo-schedule-edit", PENCIL_ICON, label).on_press(cx, move |this, window, cx| {
+                this.open_dialog(true, Some(Editing::Schedule(schedule.clone())), window, cx)
+            })
         };
         let remove = {
             let id = schedule.id.clone();
             let label = rust_i18n::t!("kanban.remove_schedule").into_owned();
-            Button::new("todo-schedule-remove", label.clone())
-                .icon(TRASH_ICON)
-                .icon_size(13.)
-                .with_size(ButtonSize::Icon)
-                .cursor_pointer()
-                .tooltip(tooltip(label, None))
+            icon_button("todo-schedule-remove", TRASH_ICON, label)
                 .on_press(cx, move |this, _, cx| this.remove_schedule(id.clone(), cx))
         };
         div()
@@ -1159,11 +1228,127 @@ impl Kanban {
                             .truncate()
                             .child(details.join(" · ")),
                     )
-                    .when(!run_rows.is_empty(), |info| {
-                        info.child(div().pt(px(4.)).flex().flex_wrap().gap(px(4.)).children(run_rows))
-                    }),
+                    .child(div().pt(px(4.)).flex().flex_wrap().items_center().gap(px(4.)).children(run_rows)),
             )
             .child(div().flex_none().flex().items_start().gap(px(2.)).child(edit).child(remove))
+    }
+
+    /// 记录页：完成了的任务一行一张，完成得晚的在前，翻到底下再要下一页。
+    fn render_history(&self, data: &TodoData, title: String, cx: &mut Context<Self>) -> Div {
+        let fg = cx.theme().foreground;
+        let history = &self.history;
+        let error = history.error.clone().map(|error| label_row("todo-history-error", error, fg.opacity(0.75)));
+        let rows: Vec<_> = history.todos.iter().map(|todo| self.render_done(todo, data, cx)).collect();
+        let empty = (history.loaded && rows.is_empty()).then(|| {
+            label_row("todo-history-empty", rust_i18n::t!("kanban.no_history").into_owned(), fg.opacity(0.45))
+        });
+        let more = history.more.then(|| {
+            div().flex_none().flex().justify_center().child(
+                Button::new("todo-history-more", rust_i18n::t!("kanban.load_more").into_owned())
+                    .variant(ButtonVariant::Secondary)
+                    .with_size(ButtonSize::Sm)
+                    .cursor_pointer()
+                    .on_press(cx, |this, _, cx| this.load_history(true, cx)),
+            )
+        });
+        div().size_full().flex().flex_col().gap(px(8.)).children(error).child(
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .child(
+                    div()
+                        .id("todo-history")
+                        .role(Role::List)
+                        .aria_label(title)
+                        .size_full()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.history_scroll)
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .children(rows)
+                        .children(empty)
+                        .children(more),
+                )
+                .child(scrollbar("todo-history-scrollbar", self.history_scroll.clone(), Axis::Vertical)),
+        )
+    }
+
+    /// 记录页上的一张任务：标题，下面是编号、目录、agent、分支、完成的时间和来自哪个定时；右边打开终端（会话还在时）、
+    /// 取消完成、删除。
+    fn render_done(&self, todo: &Todo, data: &TodoData, cx: &mut Context<Self>) -> Stateful<Div> {
+        let fg = cx.theme().foreground;
+        // 只看一个定时的记录时不再逐行写来自它。
+        let schedule = todo
+            .schedule
+            .as_ref()
+            .filter(|_| self.history.schedule.is_none())
+            .and_then(|id| data.schedules.iter().find(|s| &s.id == id));
+        let details: Vec<String> = [
+            (todo.number > 0).then(|| format!("#{}", todo.number)),
+            Some(self.place_name(&todo.spec.dir)),
+            Some(todo.spec.agent.clone()),
+            todo.branch.clone(),
+            todo.done_at.map(|at| rust_i18n::t!("kanban.done_at", time = dialog::full_time(at)).into_owned()),
+            schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let mut buttons: Vec<Button> = Vec::new();
+        if let Some(session) = todo.session.filter(|id| data.sessions.contains_key(id)) {
+            let todo = todo.clone();
+            let label = rust_i18n::t!("kanban.open").into_owned();
+            buttons.push(
+                icon_button("todo-open", TERMINAL_ICON, label)
+                    .on_press(cx, move |_, _, cx| Self::open_session(session, &todo, cx)),
+            );
+        }
+        {
+            let id = todo.id.clone();
+            let label = rust_i18n::t!("kanban.reopen").into_owned();
+            buttons.push(
+                icon_button("todo-done", CHECK_ICON, label)
+                    .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), false, cx)),
+            );
+        }
+        {
+            let id = todo.id.clone();
+            let label = rust_i18n::t!("kanban.remove_todo").into_owned();
+            buttons.push(
+                icon_button("todo-remove", TRASH_ICON, label)
+                    .on_press(cx, move |this, window, cx| this.remove_todo(id.clone(), window, cx)),
+            );
+        }
+        div()
+            .id(named("todo-history-row", &todo.id))
+            .role(Role::ListItem)
+            .aria_label(todo.spec.title.clone())
+            .aria_description(details.join("。"))
+            .flex_none()
+            .p(px(12.))
+            .flex()
+            .gap(px(12.))
+            .rounded(px(8.))
+            .bg(cx.theme().mix(0.03))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(div().truncate().font_weight(FontWeight::MEDIUM).child(todo.spec.title.clone()))
+                    .child(
+                        div()
+                            .text_size(FontSize::Small)
+                            .text_color(fg.opacity(0.55))
+                            .truncate()
+                            .child(details.join(" · ")),
+                    ),
+            )
+            .child(div().flex_none().flex().items_start().gap(px(2.)).children(buttons))
     }
 }
 
@@ -1177,8 +1362,20 @@ impl Render for Kanban {
         let title = match self.page {
             Page::Todos => rust_i18n::t!("kanban.title"),
             Page::Schedules => rust_i18n::t!("kanban.schedules"),
+            Page::History => {
+                match self.history.schedule.as_ref().and_then(|id| data.schedules.iter().find(|s| &s.id == id)) {
+                    Some(schedule) => rust_i18n::t!("kanban.history_of", name = schedule.spec.title.as_str()),
+                    None => rust_i18n::t!("kanban.history"),
+                }
+            }
         }
         .into_owned();
+        // 记录页回到进来的那一页：只看一个定时的回定时页。
+        let back = (self.page == Page::History).then(|| {
+            let label = rust_i18n::t!("kanban.back").into_owned();
+            let to = if self.history.schedule.is_some() { Page::Schedules } else { Page::Todos };
+            icon_button("kanban-back", ARROW_LEFT_ICON, label).on_press(cx, move |this, _, cx| this.set_page(to, cx))
+        });
         // 新建任务的入口在侧栏上，这里只给定时页放新建定时。
         let new_schedule = (self.page == Page::Schedules).then(|| {
             Button::new("kanban-new-schedule", rust_i18n::t!("kanban.new_schedule").into_owned())
@@ -1192,18 +1389,14 @@ impl Render for Kanban {
                 .on_press(cx, |this, window, cx| this.open_dialog(true, None, window, cx))
         });
         let close_label = rust_i18n::t!("kanban.close").into_owned();
-        let close = Button::new("kanban-close", close_label.clone())
-            .icon(CLOSE_ICON)
-            .icon_size(13.)
-            .with_size(ButtonSize::Icon)
-            .cursor_pointer()
-            .tooltip(tooltip(close_label, None))
-            .on_press(cx, |_, _, cx| cx.emit(KanbanEvent::Close));
+        let close =
+            icon_button("kanban-close", CLOSE_ICON, close_label).on_press(cx, |_, _, cx| cx.emit(KanbanEvent::Close));
         let header = div()
             .flex_none()
             .flex()
             .items_center()
             .gap(px(12.))
+            .children(back)
             .child(
                 div()
                     .id("kanban-title")
@@ -1221,6 +1414,7 @@ impl Render for Kanban {
         let (content, flights) = match self.page {
             Page::Todos => (self.render_columns(data, a11y, cx).into_any_element(), self.render_flights(data, cx)),
             Page::Schedules => (self.render_schedules(data, cx).into_any_element(), Vec::new()),
+            Page::History => (self.render_history(data, title.clone(), cx).into_any_element(), Vec::new()),
         };
         let toast = self.toast.as_ref().map(|toast| self.render_toast(toast, cx));
         let geometry = self.geometry.clone();
@@ -1306,6 +1500,24 @@ fn column_color(column: Column, fg: Hsla) -> Hsla {
         Column::NeedsYou => gpui::rgb(AGENT_BLOCKED_COLOR).into(),
         Column::Done => gpui::rgb(AGENT_DONE_COLOR).into(),
     }
+}
+
+/// 看板上的图标按钮：`label` 是辅助工具读的名字，也是悬停的提示。
+fn icon_button(id: impl Into<ElementId>, icon: &'static str, label: String) -> Button {
+    Button::new(id, label.clone())
+        .icon(icon)
+        .icon_size(13.)
+        .with_size(ButtonSize::Icon)
+        .cursor_pointer()
+        .tooltip(tooltip(label, None))
+}
+
+/// 进记录页的链接，放在完成那一列的列头和各个定时下面；按下做什么由调用方接上。
+fn history_link(id: impl Into<ElementId>) -> Button {
+    Button::new(id, rust_i18n::t!("kanban.all_history").into_owned())
+        .variant(ButtonVariant::Link)
+        .with_size(ButtonSize::Sm)
+        .cursor_pointer()
 }
 
 /// 只起提示作用的一行字，报给辅助工具。

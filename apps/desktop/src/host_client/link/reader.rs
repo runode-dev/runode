@@ -103,6 +103,7 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
         message @ (HostMsg::Tasks { req, .. }
         | HostMsg::Layout { req, .. }
         | HostMsg::Todos { req, .. }
+        | HostMsg::DoneTodos { req, .. }
         | HostMsg::Todo { req, .. }
         | HostMsg::TodoAdded { req, .. }
         | HostMsg::Done { req }

@@ -1,9 +1,11 @@
-//! 看板的数据：宿主手里的任务和定时（`ClientMsg::ListTodos`），和任务会话现在的状态，全 app 一份。
+//! 看板的数据：宿主手里的任务和定时（`ClientMsg::ListTodos`），和任务会话现在的状态，全 app 一份；记录页翻的
+//! 完成了的任务各个看板自己问（`Kanban::reload_history`）。
 //!
 //! 和宿主说话经 app 在启动时交进来的 `Host`（`watch`）。启动时问一次宿主，这一问也让宿主之后在看板变了时
 //! 说一声（app 交进来的通知），说了就重问；换了一条连接也重问。卡片在哪一列要看任务会话里 agent 的状态，
 //! 宿主在没做完的任务的会话里 agent 的状态、前台是不是 shell 变了或者 shell 退出时也说一声，所以每次连同
-//! 宿主里的会话一起问，只留任务用到的，不轮询；不 attach，免得宿主把它们算成有界面连着。
+//! 宿主里的会话一起问，全留着（记录页上完成了七天以上的任务也要看会话还在不在），不轮询；不 attach，
+//! 免得宿主把它们算成有界面连着。
 //! 数据变了才重画开着的看板，各窗口只在需要你的数（`needs_you`）变了时重画；刚开始的任务过宽限期时列会变、
 //! 数据却不变，所以排一个定时器等到那时（`wait_for_grace`）。
 //! 请求都在后台线程上等宿主回话。
@@ -29,7 +31,7 @@ pub(crate) struct TodoData {
     pub(crate) todos: Vec<Todo>,
     /// 按建的先后排好的定时。
     pub(crate) schedules: Vec<Schedule>,
-    /// 任务用到的会话现在的样子；不在里面的会话已经没了。
+    /// 宿主里的会话现在的样子，任务按标识来查；不在里面的会话已经没了。
     pub(crate) sessions: HashMap<SessionId, SessionInfo>,
     /// 问不到看板、或者上一个请求没办成的说明。
     pub(crate) error: Option<String>,
@@ -137,11 +139,16 @@ pub(crate) fn register(board: WeakEntity<Kanban>, cx: &mut App) {
     boards.push(board);
 }
 
-/// 重画各窗口开着的看板。
-fn notify_boards(cx: &mut App) {
+/// 重画各窗口开着的看板；任务变了（`changed`）时开着记录页的重翻记录。
+fn notify_boards(changed: bool, cx: &mut App) {
     let boards: Vec<_> = cx.default_global::<Boards>().0.iter().filter_map(WeakEntity::upgrade).collect();
     for board in boards {
-        board.update(cx, |_, cx| cx.notify());
+        board.update(cx, |board, cx| {
+            if changed {
+                board.reload_history(cx);
+            }
+            cx.notify();
+        });
     }
 }
 
@@ -164,9 +171,7 @@ fn refresh_todos(cx: &mut App) -> Task<bool> {
                 Ok(HostMsg::Todos { todos, schedules, .. }) => {
                     missed = live.is_none();
                     if let Some(live) = live {
-                        let wanted: HashSet<SessionId> = todos.iter().filter_map(|todo| todo.session).collect();
-                        let live = live.into_iter().filter(|info| wanted.contains(&info.id));
-                        data.sessions = live.map(|info| (info.id, info)).collect();
+                        data.sessions = live.into_iter().map(|info| (info.id, info)).collect();
                     }
                     data.todos = todos;
                     data.schedules = schedules;
@@ -223,8 +228,10 @@ fn take(cx: &mut App) -> TodoData {
 /// 放回改过的数据；和原来的不一样时重画看板、重排宽限期的定时器，再重算需要你的数。
 fn put(data: TodoData, cx: &mut App) {
     let old = std::mem::replace(cx.default_global::<TodoData>(), data);
-    if old != *cx.global::<TodoData>() {
-        notify_boards(cx);
+    let new = cx.global::<TodoData>();
+    if old != *new {
+        // 会话的状态一变数据就不同，只在任务本身变了时重翻记录，不然 agent 一动记录页就跳回第一页。
+        notify_boards(old.todos != new.todos, cx);
         wait_for_grace(cx);
     }
     count_needs_you(cx);
@@ -245,7 +252,7 @@ fn wait_for_grace(cx: &mut App) {
         cx.spawn(async move |cx| {
             cx.background_executor().timer(Duration::from_secs(end - now)).await;
             cx.update(|cx| {
-                notify_boards(cx);
+                notify_boards(false, cx);
                 count_needs_you(cx);
                 wait_for_grace(cx);
             });

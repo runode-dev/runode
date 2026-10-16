@@ -254,6 +254,23 @@ impl Store {
         rows.collect::<rusqlite::Result<_>>().map_err(failed)
     }
 
+    /// 完成了的任务，完成得晚的在前，跳过前 `offset` 张、最多 `limit` 张；`schedule` 给了时只要它开出的。
+    /// 另给后面还有没有：多要一张看看。
+    pub fn list_done_todos(&self, schedule: Option<&str>, offset: u32, limit: u32) -> Result<(Vec<Todo>, bool)> {
+        let mut statement = self
+            .conn
+            .prepare(&format!(
+                "SELECT {TODO_COLUMNS} FROM todos WHERE done_at IS NOT NULL AND (?1 IS NULL OR schedule = ?1)
+                 ORDER BY done_at DESC, created DESC, id LIMIT ?2 OFFSET ?3"
+            ))
+            .map_err(failed)?;
+        let rows = statement.query_map(params![schedule, limit.saturating_add(1), offset], todo).map_err(failed)?;
+        let mut todos: Vec<Todo> = rows.collect::<rusqlite::Result<_>>().map_err(failed)?;
+        let more = todos.len() > limit as usize;
+        todos.truncate(limit as usize);
+        Ok((todos, more))
+    }
+
     pub fn todo_by_id(&self, id: &str) -> Result<Option<Todo>> {
         self.conn
             .query_row(&format!("SELECT {TODO_COLUMNS} FROM todos WHERE id = ?1"), [id], todo)

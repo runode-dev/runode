@@ -1157,6 +1157,11 @@ impl Connection {
             ClientMsg::StartTodo { req, id } => self.todos(req, "host-start-todo", move |shared| {
                 shared.start_todo(&id).map(|session| HostMsg::Opened { req, id: session })
             }),
+            ClientMsg::ListDoneTodos { req, schedule, offset } => {
+                self.todos(req, "host-list-done-todos", move |shared| {
+                    shared.list_done_todos(req, schedule.as_deref(), offset)
+                })
+            }
             ClientMsg::GetTodo { req, id } => {
                 self.todos(req, "host-get-todo", move |shared| shared.get_todo(req, &id));
             }

@@ -241,6 +241,7 @@ fn client_messages_round_trip() {
         ClientMsg::RemoveTodo { req: 23, id: "0000abcd".into() },
         ClientMsg::StartTodo { req: 24, id: "0000abcd".into() },
         ClientMsg::GetTodo { req: 28, id: "#5".into() },
+        ClientMsg::ListDoneTodos { req: 29, schedule: Some("0000cafe".into()), offset: 100 },
         ClientMsg::MoveTodo { req: 25, id: "0000abcd".into(), before: Some("0000beef".into()) },
         ClientMsg::MoveTodo { req: 26, id: "0000abcd".into(), before: None },
         ClientMsg::AddSchedule { req: 27, spec: todo_spec(), when: When::Daily { hour: 9, minute: 30, days: 62 } },
@@ -388,6 +389,7 @@ fn host_messages_round_trip() {
             }],
         },
         HostMsg::Todo { req: 28, todo: sample_todo() },
+        HostMsg::DoneTodos { req: 29, todos: vec![sample_todo()], more: true },
         HostMsg::TodoAdded { req: 20, id: "0000abcd".into() },
         HostMsg::TodosChanged,
     ];

@@ -14,6 +14,9 @@ use crate::message::SessionInfo;
 /// agent 起来、认出来都要时间。
 pub const START_GRACE: u64 = 30;
 
+/// `HostMsg::DoneTodos` 一页最多给这么多张任务。
+pub const DONE_TODOS_PAGE: u32 = 100;
+
 /// 看板上的一列。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

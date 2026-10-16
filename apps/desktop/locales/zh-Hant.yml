@@ -793,6 +793,13 @@ kanban:
   next: "下一次 %{time}"
   worktree_on: 獨立工作樹
   done_window: 最近 7 天
+  all_history: 全部記錄
+  history: 記錄
+  history_of: "「%{name}」的記錄"
+  no_history: 還沒有完成的任務
+  load_more: 載入更多
+  done_at: "完成於 %{time}"
+  back: 返回
   toast:
     starting: 正在開始任務…
     started: 任務已開始

@@ -379,10 +379,17 @@ fn edits_are_announced_and_checked() {
     assert_eq!(watcher.reply(), HostMsg::TodosChanged);
     assert_eq!(list(&mut peer).iter().map(|todo| todo.id.clone()).collect::<Vec<_>>(), [b.clone(), a.clone()]);
 
-    let done = ClientMsg::UpdateTodo { req: 6, id: a, spec: None, done: Some(true) };
+    let done = ClientMsg::UpdateTodo { req: 6, id: a.clone(), spec: None, done: Some(true) };
     assert_eq!(ask(&mut peer, &done), HostMsg::Done { req: 6 });
     let todos = list(&mut peer);
     assert_eq!(column(&todos[1], None, todos[1].done_at.unwrap()), Column::Done);
+    // 记录里只有完成了的。
+    match ask(&mut peer, &ClientMsg::ListDoneTodos { req: 14, schedule: None, offset: 0 }) {
+        HostMsg::DoneTodos { req: 14, todos, more: false } => {
+            assert_eq!(todos.iter().map(|todo| todo.id.as_str()).collect::<Vec<_>>(), [a.as_str()]);
+        }
+        other => panic!("expected the done todos, got {other:?}"),
+    }
 
     // 不对的请求：没有这个任务（标识、编号）、标题空着、目录不存在、不在仓库里却要工作树、时间已经过了。
     for (req, message) in [
