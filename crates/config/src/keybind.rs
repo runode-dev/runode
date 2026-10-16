@@ -70,6 +70,10 @@ pub enum Action {
     NextAgent,
     /// 打开或收起铺满窗口的任务板。
     ToggleTodoBoard,
+    /// 打开或收起任务板的定时页。
+    ToggleSchedules,
+    /// 打开任务板和新建任务的对话框。
+    NewTodo,
     Copy,
     Paste,
     PasteSelection,
@@ -265,9 +269,15 @@ pub static ACTIONS: &[ActionSpec] = &[
     ),
     plain!(
         "toggle_todo_board",
-        "Open or close the full-window todo board: tasks handed to agents in columns by their state, and the schedules that start them",
+        "Open or close the full-window todo board: tasks handed to agents in columns by their state",
         Action::ToggleTodoBoard
     ),
+    plain!(
+        "toggle_schedules",
+        "Open or close the schedules page of the todo board, which starts tasks at set times",
+        Action::ToggleSchedules
+    ),
+    plain!("new_todo", "Open the todo board with the dialog for a new task", Action::NewTodo),
     ActionSpec {
         name: "run_task",
         doc: "Run the task with this name from the tasks menu (your own, a Makefile target or a package.json script), as if clicked there; with duplicate names the one higher in the menu wins",
@@ -413,6 +423,8 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+shift+i=toggle_github_actions",
     "cmd+shift+r=toggle_tasks",
     "cmd+shift+b=toggle_todo_board",
+    "cmd+shift+s=toggle_schedules",
+    "cmd+shift+t=new_todo",
     "cmd+shift+a=goto_agent",
     "cmd+alt+a=next_agent",
     "cmd+c=copy_to_clipboard",

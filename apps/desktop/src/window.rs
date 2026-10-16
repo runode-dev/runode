@@ -147,7 +147,11 @@ actions!(
         /// 跳到下一个要处理的 agent：先等回答的，再干完了没看的。
         NextAgent,
         /// 打开或收起铺满窗口的任务板。
-        ToggleTodoBoard
+        ToggleTodoBoard,
+        /// 打开或收起任务板的定时页。
+        ToggleSchedules,
+        /// 打开任务板和新建任务的对话框。
+        NewTodo
     ]
 );
 
@@ -776,6 +780,8 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::goto_agent))
             .on_action(Self::act(cx, Self::next_agent))
             .on_action(Self::act(cx, Self::toggle_todo_board))
+            .on_action(Self::act(cx, Self::toggle_schedules))
+            .on_action(Self::act(cx, Self::new_todo))
             .on_action(Self::act(cx, Self::arrange_panes))
             // 写提交说明对话框里 agent 菜单的项派发到窗口的焦点上。
             .on_action(cx.listener(Self::select_commit_agent))

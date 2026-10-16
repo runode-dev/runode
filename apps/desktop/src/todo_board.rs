@@ -291,6 +291,12 @@ impl TodoBoard {
         self.set_page(if schedules { Page::Schedules } else { Page::Todos }, cx);
     }
 
+    /// 换到任务页，弹出新建任务的对话框：app 从侧栏的入口或快捷键打开时调。
+    pub fn new_todo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_page(Page::Todos, cx);
+        self.open_dialog(false, None, window, cx);
+    }
+
     fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
         if self.page == page {
             return;
@@ -1171,20 +1177,18 @@ impl Render for TodoBoard {
             Page::Schedules => rust_i18n::t!("todo_board.schedules"),
         }
         .into_owned();
-        let (new_id, new_label) = match self.page {
-            Page::Todos => ("todo-board-new", rust_i18n::t!("todo_board.new_todo").into_owned()),
-            Page::Schedules => ("todo-board-new-schedule", rust_i18n::t!("todo_board.new_schedule").into_owned()),
-        };
-        let page = self.page;
-        let new = Button::new(new_id, new_label)
-            .variant(ButtonVariant::Secondary)
-            .icon(PLUS_ICON)
-            .icon_size(12.)
-            .h_auto()
-            .px(px(10.))
-            .py(px(4.))
-            .cursor_pointer()
-            .on_press(cx, move |this, window, cx| this.open_dialog(page == Page::Schedules, None, window, cx));
+        // 新建任务的入口在侧栏上，这里只给定时页放新建定时。
+        let new_schedule = (self.page == Page::Schedules).then(|| {
+            Button::new("todo-board-new-schedule", rust_i18n::t!("todo_board.new_schedule").into_owned())
+                .variant(ButtonVariant::Secondary)
+                .icon(PLUS_ICON)
+                .icon_size(12.)
+                .h_auto()
+                .px(px(10.))
+                .py(px(4.))
+                .cursor_pointer()
+                .on_press(cx, |this, window, cx| this.open_dialog(true, None, window, cx))
+        });
         let close_label = rust_i18n::t!("todo_board.close").into_owned();
         let close = Button::new("todo-board-close", close_label.clone())
             .icon(CLOSE_ICON)
@@ -1209,7 +1213,7 @@ impl Render for TodoBoard {
                     .child(title.clone()),
             )
             .child(div().flex_1())
-            .child(new)
+            .children(new_schedule)
             .child(close);
         let error = data.error.clone().map(|error| label_row("todo-board-error", error, fg.opacity(0.75)));
         let (content, flights) = match self.page {

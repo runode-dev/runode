@@ -26,11 +26,11 @@ use crate::{
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath,
         DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal,
-        GotoAgent, NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace,
+        GotoAgent, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab, NextWorkspace,
         OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder,
         RunNamedTask, SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace, SelectNextFile,
         SelectPreviousFile, SelectTab, SelectWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, TogglePaneFold,
-        TogglePaneZoom, ToggleSidebar, ToggleStatusBar, ToggleTasks, ToggleTodoBoard,
+        TogglePaneZoom, ToggleSchedules, ToggleSidebar, ToggleStatusBar, ToggleTasks, ToggleTodoBoard,
     },
 };
 
@@ -104,6 +104,8 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::GotoAgent => (boxed(GotoAgent), WINDOW),
         Action::NextAgent => (boxed(NextAgent), WINDOW),
         Action::ToggleTodoBoard => (boxed(ToggleTodoBoard), WINDOW),
+        Action::ToggleSchedules => (boxed(ToggleSchedules), WINDOW),
+        Action::NewTodo => (boxed(NewTodo), WINDOW),
         Action::Copy => (boxed(Copy), COPY),
         Action::Paste => (boxed(Paste), PASTE),
         Action::PasteSelection => (boxed(PasteSelection), TERMINAL),

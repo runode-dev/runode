@@ -20,9 +20,9 @@ use crate::{
     },
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
-        NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,
+        NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,
         PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, TogglePaneFold,
-        TogglePaneZoom, ToggleSidebar, ToggleStatusBar, ToggleTasks, ToggleTodoBoard,
+        TogglePaneZoom, ToggleSchedules, ToggleSidebar, ToggleStatusBar, ToggleTasks, ToggleTodoBoard,
     },
 };
 
@@ -157,6 +157,8 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.toggle_github_actions"), ToggleGitHubActions),
             MenuItem::action(tr("menu.toggle_tasks"), ToggleTasks),
             MenuItem::action(tr("menu.toggle_todo_board"), ToggleTodoBoard),
+            MenuItem::action(tr("menu.toggle_schedules"), ToggleSchedules),
+            MenuItem::action(tr("menu.new_todo"), NewTodo),
             MenuItem::action(tr("menu.toggle_full_screen"), ToggleFullScreen),
         ]),
         Menu::new(tr("menu.window")).items([

@@ -46,6 +46,8 @@ menu:
   toggle_github_actions: Show or Hide GitHub Actions
   toggle_tasks: Tasks…
   toggle_todo_board: Todo Board
+  toggle_schedules: Schedules
+  new_todo: New Task
   toggle_full_screen: Toggle Full Screen
   window: Window
   minimize: Minimize

@@ -1,6 +1,6 @@
 //! 把铺满窗口的任务板接到窗口上。任务板本身在 `todo_board`：打开时建一个 `TodoBoard`，收起时丢掉。
 //! 这里启动时把和宿主说话的办法交给它（`watch_todos`），每次画之前交给它各 workspace 的目录和名字、当前的
-//! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上定时、任务板两个
+//! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上新建任务、定时、任务板三个
 //! 入口；卡片上 agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事（收起、换页、把任务会话接进
 //! 窗口）经 `TodoBoardEvent` 交回来，它的对话框画在窗口最上层。
 //!
@@ -14,13 +14,13 @@ use gpui::{AnyElement, App, Context, Div, Entity, Focusable as _, Stateful, Subs
 use runode_protocol::{SessionId, todo::Todo};
 
 use super::{
-    ToggleTodoBoard, WindowView,
+    NewTodo, ToggleSchedules, ToggleTodoBoard, WindowView,
     agents::{self, Mark},
     remote,
     titlebar::styled_agent_mark,
 };
 use crate::{
-    assets::{CHECK_ICON, CLOCK_ICON},
+    assets::{CHECK_ICON, CLOCK_ICON, PLUS_ICON},
     config::AppConfig,
     host_client,
     terminal_view::TerminalView,
@@ -61,11 +61,43 @@ fn best_workspace(dirs: &[&Path], dir: &Path, worktree: Option<&Path>, home: Opt
 impl WindowView {
     /// 打开或收起任务板；开着的是定时页时换到任务页。
     pub(super) fn toggle_todo_board(&mut self, _: &ToggleTodoBoard, window: &mut Window, cx: &mut Context<Self>) {
+        if self.dialog_open(cx) {
+            return;
+        }
         if self.showing_todo_page(false, cx) {
             self.close_todo_board(window, cx);
         } else {
             self.show_todo_board(false, window, cx);
         }
+    }
+
+    /// 打开或收起定时页；开着的是任务页时换到定时页。
+    pub(super) fn toggle_schedules(&mut self, _: &ToggleSchedules, window: &mut Window, cx: &mut Context<Self>) {
+        if self.dialog_open(cx) {
+            return;
+        }
+        if self.showing_todo_page(true, cx) {
+            self.close_todo_board(window, cx);
+        } else {
+            self.show_todo_board(true, window, cx);
+        }
+    }
+
+    /// 打开看板的任务页，弹出新建任务的对话框。
+    pub(super) fn new_todo(&mut self, _: &NewTodo, window: &mut Window, cx: &mut Context<Self>) {
+        if self.dialog_open(cx) {
+            return;
+        }
+        self.show_todo_board(false, window, cx);
+        if let Some(board) = &self.todo_board {
+            board.view.update(cx, |board, cx| board.new_todo(window, cx));
+        }
+    }
+
+    /// 看板的新建、编辑对话框开着。它画在窗口根上，窗口的快捷键在里面照样触发，这时换页、收起或再开一个
+    /// 都会把写了一半的内容丢掉，所以这几个快捷键不理。
+    fn dialog_open(&self, cx: &App) -> bool {
+        self.todo_dialog(cx).is_some()
     }
 
     /// 看板开着，显示的是定时页（`schedules`）或任务页。
@@ -155,6 +187,14 @@ impl WindowView {
             }
             None => self.insert_workspace(self.active + 1, todo.spec.dir.clone(), None, view, window, cx),
         }
+    }
+
+    /// 侧栏顶上的新建任务入口：打开任务页，弹出新建任务的对话框。
+    pub(super) fn render_new_todo_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let label = rust_i18n::t!("todo_board.new_todo").into_owned();
+        super::mobile::page_entry("new-todo-entry", PLUS_ICON, label, false, cx, |this, window, cx| {
+            this.new_todo(&NewTodo, window, cx);
+        })
     }
 
     /// 侧栏顶上的定时入口，看板开着定时页时高亮。
