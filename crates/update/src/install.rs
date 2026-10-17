@@ -69,8 +69,7 @@ impl Installation {
         }
         fs::create_dir(dir).map_err(|err| io(dir, err))?;
         let zip = dir.join("update.zip");
-        let body = crate::fetch::get(url, ARCHIVE_TIMEOUT, progress)?;
-        fs::write(&zip, body).map_err(|err| io(&zip, err))?;
+        crate::fetch::download(url, &zip, ARCHIVE_TIMEOUT, progress)?;
         // ditto 解压时保留符号链接（.app 里的 rn）和扩展属性，签名才对得上。
         run(Command::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(dir))?;
         fs::remove_file(&zip).map_err(|err| io(&zip, err))?;
