@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -15,7 +15,7 @@ use std::{
 
 use runode_paths::Dirs;
 use runode_protocol::{
-    ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo,
+    ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo,
     push::{ApnsEnv, EXPIRES_AFTER, Notification, NotificationKind, OFFICIAL_BUNDLE},
     read_frame,
     remote::{Bytes, DeviceId},
@@ -394,6 +394,8 @@ struct FakeHost {
     /// 收到过几条 `ListTodos`。
     list_todos: Arc<AtomicUsize>,
     connections: Arc<AtomicUsize>,
+    /// 设了时下一条 `ListSessions` 回 `Goodbye`（交接开始了）并断开，回完自己清掉。
+    goodbye: Arc<AtomicBool>,
     /// 宿主这头的各条连接，`hang_up` 用。
     streams: Arc<Mutex<Vec<UnixStream>>>,
 }
@@ -433,6 +435,10 @@ impl FakeHost {
                         keep_awake: false,
                         todos: self.todos.lock().unwrap().is_some(),
                     }
+                }
+                ClientMsg::ListSessions if self.goodbye.swap(false, Ordering::SeqCst) => {
+                    write(&writer, &HostMsg::Goodbye { reason: GoodbyeReason::Handoff });
+                    return;
                 }
                 ClientMsg::ListSessions => {
                     self.list_sessions.fetch_add(1, Ordering::SeqCst);
@@ -545,6 +551,28 @@ fn the_pusher_follows_the_host() {
     assert_eq!(scratch.requests().len(), 1);
     // 宿主不认得看板：不要任务表。
     assert_eq!(host.list_todos.load(Ordering::SeqCst), 0);
+}
+
+/// 宿主开始交接时说了 `Goodbye`，交接却回滚了：照常重连，接着推。
+#[test]
+fn a_rolled_back_handoff_keeps_pushing() {
+    let scratch = Scratch::new("pusher-rollback");
+    let host = FakeHost::default();
+    host.set(AgentState::Blocked);
+    let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();
+    let settings =
+        PushSettings { delay: Duration::ZERO, relay: Some("https://relay.example".into()), ..PushSettings::default() };
+    pusher.set_settings(settings);
+    pusher.set_listening(Listening::On);
+    scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
+    wait_until("the pusher connects", || host.connections.load(Ordering::SeqCst) == 1);
+    host.goodbye.store(true, Ordering::SeqCst);
+    wait_until("the pusher reconnects", || host.connections.load(Ordering::SeqCst) >= 2);
+
+    host.set(AgentState::Working);
+    thread::sleep(Duration::from_millis(2500));
+    host.set(AgentState::Blocked);
+    scratch.wait_for(1);
 }
 
 /// 任务从进行中变成做完：经中转的 v3 接口推一条任务做完的通知，不推等回答的。

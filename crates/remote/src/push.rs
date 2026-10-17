@@ -13,8 +13,8 @@
 //! 推送的路线按登记的 bundle id 定：等于配置的 `ApnsKey::bundle` 时用那把密钥直连 APNs，等于官方 App
 //! 的 `OFFICIAL_BUNDLE` 而这个构建带着中转（`RELAY_URL`）时经中转服务，别的跳过（每个 bundle 记一次日志）。
 //!
-//! 发出去的通知撤不回，答完的由手机自己清掉。宿主说它交接给了新版本（`GoodbyeReason::Handoff`）以后
-//! 这边不再连，推送由新宿主进程里的 `Pusher` 接着办。
+//! 发出去的通知撤不回，答完的由手机自己清掉。宿主交接时会回 `Goodbye`，这边断开后照常重连：交接回滚了
+//! 就接着推；交接成了旧宿主不再接连接，这个进程随即停掉远程访问，推送由新宿主进程里的 `Pusher` 接着办。
 
 mod apns;
 mod curl;
@@ -36,7 +36,7 @@ use std::{
 
 use runode_paths::Dirs;
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION,
+    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION,
     push::{ApnsEnv, Notification, OFFICIAL_BUNDLE, RELAY_URL},
     read_frame, write_frame,
 };
@@ -181,12 +181,12 @@ struct Poller {
     host: Option<HostLink>,
     rounds: Rounds,
     registrations: Vec<PushRegistration>,
+    /// 读不了设备表：第一次记警告，之后只记调试日志。
+    registrations_failing: bool,
     /// curl 能不能用，第一次要推时看一次。
     curl_ok: Option<bool>,
     /// 交给发送线程的密钥和中转基址，变了才再交。
     sent_settings: Option<(Option<ApnsKey>, Option<String>)>,
-    /// 宿主交接给了新版本，不再连。
-    handed_off: bool,
     /// 下次要会话列表、读设备表的时刻。
     next_poll: Instant,
     /// 连不上宿主的次数：第一次记警告，之后只记调试日志。
@@ -211,9 +211,9 @@ impl Poller {
             host: None,
             rounds: Rounds::new(PushSettings::default().delay, true),
             registrations: Vec::new(),
+            registrations_failing: false,
             curl_ok: None,
             sent_settings: None,
-            handed_off: false,
             next_poll: Instant::now(),
             connect_failures: 0,
             skipped: HashSet::new(),
@@ -245,9 +245,21 @@ impl Poller {
                 let registrations = if settings.enabled && listening == Listening::On {
                     // 设备表一时读不了（文件坏了、文件描述符用完）不等于手机都注销了：
                     // 照旧用上一次读到的登记，排着的通知也不丢，下一轮再读。
-                    devices::push_registrations(&self.dirs)
-                        .inspect_err(|err| tracing::warn!("cannot read push registrations: {err}"))
-                        .ok()
+                    match devices::push_registrations(&self.dirs) {
+                        Ok(registrations) => {
+                            self.registrations_failing = false;
+                            Some(registrations)
+                        }
+                        Err(err) => {
+                            if self.registrations_failing {
+                                tracing::debug!("still cannot read push registrations: {err}");
+                            } else {
+                                tracing::warn!("cannot read push registrations: {err}");
+                            }
+                            self.registrations_failing = true;
+                            None
+                        }
+                    }
                 } else {
                     Some(Vec::new())
                 };
@@ -349,11 +361,12 @@ impl Poller {
                     Vec::new()
                 }
                 Ok(HostMsg::Goodbye { reason }) => {
-                    if reason == GoodbyeReason::Handoff {
-                        tracing::info!("the host handed its sessions over, leaving the pushes to the new host");
-                        self.handed_off = true;
-                    }
+                    // 交接可能回滚，所以不认定宿主已经交走了，下一轮照常重连；交接成了的话宿主不再接
+                    // 连接，这个进程也随即丢掉 `Pusher`。
+                    tracing::debug!("the host said goodbye: {reason:?}");
                     self.host = None;
+                    // 交接期间和交接成了以后重连都会失败，是预期的，只记调试日志；真连上了会清零。
+                    self.connect_failures = self.connect_failures.max(1);
                     Vec::new()
                 }
                 Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => Vec::new(),
@@ -367,10 +380,10 @@ impl Poller {
         }
     }
 
-    /// 现在该不该连着宿主推：开着推送、监听开着、有推得出去的登记、curl 能用、宿主没交接走。
+    /// 现在该不该连着宿主推：开着推送、监听开着、有推得出去的登记、curl 能用。
     fn active(&mut self, settings: &PushSettings, listening: Listening) -> bool {
         let routable = self.registrations.iter().any(|registration| route(registration, settings).is_some());
-        if !settings.enabled || listening != Listening::On || !routable || self.handed_off {
+        if !settings.enabled || listening != Listening::On || !routable {
             return false;
         }
         *self.curl_ok.get_or_insert_with(|| {

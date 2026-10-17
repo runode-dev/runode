@@ -169,19 +169,20 @@ pub(crate) struct Desk {
 
 impl Desk {
     /// 设备拿 `secret` 来配对：口令对上了（没过期、没用过）才调 `verify` 验签、拿到要登记
-    /// 的设备，登记好后把口令文件改成配好了。
+    /// 的设备，登记好后把口令文件改成配好了。读写口令文件或设备表出错时回 `Disabled`：那是这边
+    /// 的毛病，不该算成口令不对（会计入限速，手机也会叫用户重新扫码）。
     pub(crate) fn redeem(
         &mut self,
         dirs: &Dirs,
         secret: &[u8],
         verify: impl FnOnce() -> Result<Device, RejectReason>,
     ) -> Result<Device, RejectReason> {
-        let Some(path) = dirs.remote_access_pairing_file() else { return Err(RejectReason::PairingInvalid) };
+        let Some(path) = dirs.remote_access_pairing_file() else { return Err(RejectReason::Disabled) };
         let file = match read_json::<PairingFile>(&path) {
             Ok(file) => file,
             Err(err) => {
                 tracing::warn!("cannot read the pairing code {}: {err}", path.display());
-                None
+                return Err(RejectReason::Disabled);
             }
         };
         let Some(mut file) = file else { return Err(RejectReason::PairingInvalid) };
@@ -197,7 +198,7 @@ impl Desk {
         let device = verify()?;
         if let Err(err) = devices::add(dirs, device.clone()) {
             tracing::warn!("cannot record the paired device: {err}");
-            return Err(RejectReason::PairingInvalid);
+            return Err(RejectReason::Disabled);
         }
         file.secret = None;
         file.state = State::Paired;

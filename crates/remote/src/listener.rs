@@ -372,6 +372,8 @@ fn listen_v6_only(port: u16) -> io::Result<TcpListener> {
 /// 设备表，断开撤销了的设备。唤醒管道有动静（`Listener` 丢掉了）时结束。
 fn accept_loop(shared: &Arc<Shared>, listeners: &[TcpListener], wake: &io::PipeReader) {
     let mut seen_devices = None;
+    let mut table_failing = false;
+    let mut crowded = false;
     let mut checked_at = Instant::now();
     loop {
         let mut fds: Vec<libc::pollfd> = std::iter::once(wake.as_raw_fd())
@@ -395,18 +397,19 @@ fn accept_loop(shared: &Arc<Shared>, listeners: &[TcpListener], wake: &io::PipeR
         }
         for (listener, fd) in listeners.iter().zip(&fds[1..]) {
             if fd.revents != 0 {
-                accept_ready(shared, listener);
+                accept_ready(shared, listener, &mut crowded);
             }
         }
         if checked_at.elapsed() >= REVOKE_CHECK {
             checked_at = Instant::now();
-            check_revoked(shared, &mut seen_devices);
+            check_revoked(shared, &mut seen_devices, &mut table_failing);
         }
     }
 }
 
-/// 设备表变了（或者第一次看）时读一遍，断开撤销了的设备连着的连接。读不了时不断开谁。
-fn check_revoked(shared: &Shared, seen: &mut Option<Option<(SystemTime, u64)>>) {
+/// 设备表变了（或者第一次看）时读一遍，断开撤销了的设备连着的连接。读不了时不断开谁，下一轮
+/// 照样重读，一时读失败时刚好撤销的设备也不会漏掉；`failing` 记着在读不了，警告只记第一次。
+fn check_revoked(shared: &Shared, seen: &mut Option<Option<(SystemTime, u64)>>, failing: &mut bool) {
     let stamp = devices::stamp(&shared.dirs);
     if seen.as_ref() == Some(&stamp) {
         return;
@@ -414,15 +417,24 @@ fn check_revoked(shared: &Shared, seen: &mut Option<Option<(SystemTime, u64)>>) 
     match devices::list_devices(&shared.dirs) {
         Ok(list) => {
             *seen = Some(stamp);
+            *failing = false;
             let known: HashSet<DeviceId> = list.iter().map(|device| device.device_id).collect();
             shared.cut_revoked(&known);
         }
-        Err(err) => tracing::warn!("cannot read the paired device table: {err}"),
+        Err(err) => {
+            if *failing {
+                tracing::debug!("still cannot read the paired device table: {err}");
+            } else {
+                tracing::warn!("cannot read the paired device table: {err}");
+            }
+            *failing = true;
+        }
     }
 }
 
 /// 把 `listener` 的 backlog 里排着的连接接下来（最多 `ACCEPT_BATCH` 条），各起一个线程服务。
-fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener) {
+/// `crowded` 记着名额是不是满着。
+fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener, crowded: &mut bool) {
     for _ in 0..ACCEPT_BATCH {
         if shared.stopping.load(Ordering::Relaxed) {
             return;
@@ -451,10 +463,17 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener) {
             tracing::warn!("failed to set up a remote connection: {err}");
             continue;
         }
+        // 名额满着时只在刚满那次记警告，之后记调试日志，免得有人反复建连接把日志刷满。
         let Some((id, cut)) = register(shared, &tcp, ip) else {
-            tracing::warn!("too many remote connections, dropping one from {ip}");
+            if *crowded {
+                tracing::debug!("still too many remote connections, dropping one from {ip}");
+            } else {
+                tracing::warn!("too many remote connections, dropping one from {ip}");
+            }
+            *crowded = true;
             continue;
         };
+        *crowded = false;
         let thread_shared = shared.clone();
         let spawned = thread::Builder::new().name("remote-connection".into()).spawn(move || {
             gate::serve(&thread_shared, id, &tcp, ip, &cut);

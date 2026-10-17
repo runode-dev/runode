@@ -309,6 +309,37 @@ fn only_wrong_signatures_and_codes_count_as_failures() {
     harness.pair(&Key::generate());
 }
 
+/// 设备表读不了（比如降级后读到更新版本写的表）是电脑这边的毛病：回 `Disabled` 让手机当作离线，
+/// 不回 `UnknownDevice`（手机会叫用户删掉还有效的配对），也不计入限速。
+#[test]
+fn a_device_table_this_runode_cannot_read_does_not_revoke_phones() {
+    let harness = Harness::start("unreadable");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    let table = harness.dirs.remote_access_devices_file().unwrap();
+    let saved = std::fs::read(&table).unwrap();
+    std::fs::write(&table, br#"{"version":99,"devices":[]}"#).unwrap();
+    for attempt in 0..12 {
+        let mut phone = harness.phone();
+        let auth = phone.auth_message(device_id, &key);
+        assert_eq!(phone.ask(&auth), rejected(RejectReason::Disabled), "{attempt}");
+    }
+    // 口令对的配对也登记不上，同样回 `Disabled`，口令留着下次用。
+    let ticket = harness.ticket();
+    let mut phone = harness.phone();
+    let pair = phone.pair_message(&ticket.secret(), "新手机", &Key::generate());
+    assert_eq!(phone.ask(&pair), rejected(RejectReason::Disabled));
+    assert_eq!(ticket.poll().unwrap(), PairingProgress::Waiting);
+    // 表恢复以后同一台设备照常登录：配对一直都在，前面那些也没把这个地址限住。
+    std::fs::write(&table, &saved).unwrap();
+    let mut phone = harness.phone();
+    let auth = phone.auth_message(device_id, &key);
+    assert_eq!(phone.ask(&auth), Some(GateHostMsg::RemoteAccepted { device_id }));
+    let mut phone = harness.phone();
+    let pair = phone.pair_message(&ticket.secret(), "新手机", &Key::generate());
+    assert!(matches!(phone.ask(&pair), Some(GateHostMsg::RemoteAccepted { .. })));
+}
+
 #[test]
 fn one_source_cannot_fill_the_gate() {
     let harness = Harness::start("gating");

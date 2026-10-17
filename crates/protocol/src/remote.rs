@@ -148,7 +148,7 @@ pub enum RejectReason {
     PairingInvalid,
     /// 这个地址失败太多次，过一会儿再试。
     RateLimited,
-    /// 远程访问正在关掉。
+    /// 远程访问正在关掉，或者电脑这边一时办不了（读写不了设备表、口令文件）；不是手机的错，过一会儿再试。
     Disabled,
     /// 比自己新的宿主才有的原因，客户端按通用失败处理。
     #[serde(other)]

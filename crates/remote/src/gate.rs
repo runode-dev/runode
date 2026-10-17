@@ -94,9 +94,17 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     // 先登记再回话：从这里起撤销这台设备会断开这条连接。登记之前刚好撤销的，撤销的检查可能已经
     // 看过了这条连接，这里再看一眼设备表。
     shared.attach_device(id, device_id);
-    if !matches!(devices::find(&shared.dirs, device_id), Ok(Some(_))) {
-        send(&mut tls, &GateHostMsg::RemoteRejected { reason: RejectReason::UnknownDevice })?;
-        return Ok(());
+    match devices::find(&shared.dirs, device_id) {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            send(&mut tls, &GateHostMsg::RemoteRejected { reason: RejectReason::UnknownDevice })?;
+            return Ok(());
+        }
+        Err(err) => {
+            tracing::warn!("cannot read the paired device table: {err}");
+            send(&mut tls, &GateHostMsg::RemoteRejected { reason: RejectReason::Disabled })?;
+            return Ok(());
+        }
     }
     send(&mut tls, &GateHostMsg::RemoteAccepted { device_id })?;
     tracing::info!("remote device {device_id} connected from {peer}");
@@ -155,7 +163,8 @@ fn auth(shared: &Shared, id: DeviceId, signature: &Bytes, signed: &[u8]) -> Resu
         Ok(None) => return Err(RejectReason::UnknownDevice),
         Err(err) => {
             tracing::warn!("cannot read the paired device table: {err}");
-            return Err(RejectReason::UnknownDevice);
+            // 是这边读不了设备表，不是设备被撤销了：回 `UnknownDevice` 手机会删掉还有效的配对。
+            return Err(RejectReason::Disabled);
         }
     };
     if !verify(&device.public_key.0, signed, &signature.0) {
@@ -188,7 +197,7 @@ fn pair(
         if key.len() != PUBLIC_KEY_LEN || key[0] != 0x04 || !verify(key, signed, &signature.0) {
             return Err(RejectReason::BadSignature);
         }
-        let device_id = DeviceId(random().map_err(|_| RejectReason::PairingInvalid)?);
+        let device_id = DeviceId(random().map_err(|_| RejectReason::Disabled)?);
         let now = now_unix();
         Ok(Device { device_id, name: name.clone(), public_key: public_key.clone(), paired_at: now, last_seen: now })
     })?;
