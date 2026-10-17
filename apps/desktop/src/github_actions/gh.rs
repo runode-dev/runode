@@ -406,12 +406,12 @@ fn failure(stderr: &[u8]) -> String {
     line.map_or_else(|| format!("{PROGRAM} failed"), str::to_owned)
 }
 
-/// 有没跑完的运行或 job、或者等着登录时隔多久重读，别的隔多久重读。
+/// 有没跑完的运行或 job、或者等着登录、找不到 gh 时隔多久重读，别的隔多久重读。
 const POLL_RUNNING: Duration = Duration::from_secs(10);
 const POLL_IDLE: Duration = Duration::from_secs(60);
 
 /// 每秒问一次：上次读到 `data`、在 `fetched` 读完的一份数据到 `now` 该不该重读。没读过的马上读；等登录
-/// 的按快的间隔读，在终端里登好后页上自己恢复。差不到一秒算到了，免得每次都晚一秒。
+/// 或找不到 gh 的按快的间隔读，在终端里登好、装好或 shell 报上 PATH 后页上自己恢复。差不到一秒算到了，免得每次都晚一秒。
 ///
 /// 读到的 job 都跑完了也照常按慢的间隔重读：等部署审批的、按上一个 job 的输出生成的 matrix job 会后来
 /// 才出现，那次尝试不见得结束了。
@@ -419,7 +419,7 @@ const POLL_IDLE: Duration = Duration::from_secs(60);
 pub(super) fn due(data: Option<&Result<Data, String>>, fetched: Option<Instant>, now: Instant) -> bool {
     let every = match data {
         Some(Ok(data)) if data.running() => POLL_RUNNING,
-        Some(Err(err)) if err == LOGIN => POLL_RUNNING,
+        Some(Err(err)) if err == LOGIN || err == MISSING => POLL_RUNNING,
         _ => POLL_IDLE,
     };
     fetched.is_none_or(|at| now.duration_since(at) + Duration::from_secs(1) >= every)
@@ -558,8 +558,9 @@ mod tests {
         // 跑完的一分钟一次。
         assert!(!due(Some(&runs("completed")), Some(t0), at(30)));
         assert!(due(Some(&runs("completed")), Some(t0), at(59)));
-        // 等登录的十秒一次，别的错一分钟一次。
+        // 等登录和找不到 gh 的十秒一次，别的错一分钟一次。
         assert!(due(Some(&Err(LOGIN.to_owned())), Some(t0), at(9)));
+        assert!(due(Some(&Err(MISSING.to_owned())), Some(t0), at(9)));
         assert!(!due(Some(&Err("HTTP 404".to_owned())), Some(t0), at(9)));
         // 在跑的 job 十秒一次；都跑完了也一分钟一次，后来才出现的 job 还读得到。
         let jobs = |status: &str| {

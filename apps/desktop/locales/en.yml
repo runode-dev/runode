@@ -777,6 +777,7 @@ kanban:
   save_and_start: Save & Start
   edit_schedule: Edit Schedule
   remove_schedule: Delete schedule
+  remove_schedule_detail: "Its prompt and schedule are deleted too and can't be recovered."
   schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit the app, turn on terminal-host and run `runode service install host`."
   no_schedules: No schedules yet
   no_next: Will not run again

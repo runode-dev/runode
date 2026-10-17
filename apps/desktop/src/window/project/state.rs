@@ -53,8 +53,8 @@ pub(in crate::window) struct Project {
 
 impl Workspace {
     /// 换上后台读到的结果：窗口这边有变化时第一项为真；第二项是交给文件树（`FileTree::apply_scan`）的那份，
-    /// 终端换了目录时带上新目录，文件树定位过去。
-    pub(super) fn apply_scan(&mut self, scan: Scan) -> (bool, TreeScan) {
+    /// 终端换了目录时带上新目录，文件树定位过去；`started` 是发起这次读时取的 `read_ticket`。
+    pub(super) fn apply_scan(&mut self, scan: Scan, started: u64) -> (bool, TreeScan) {
         let project = &mut self.project;
         // 第一次读时 `root` 还是空的，下面换上根目录时一定算作有变化。
         let mut changed = false;
@@ -74,7 +74,7 @@ impl Workspace {
             project.dir = Some(scan.dir);
             changed = true;
         }
-        let tree = TreeScan { root: scan.root, git: project.git.clone(), listings: scan.listings, reveal };
+        let tree = TreeScan { root: scan.root, git: project.git.clone(), listings: scan.listings, reveal, started };
         (changed, tree)
     }
 }

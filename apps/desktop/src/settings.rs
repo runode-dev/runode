@@ -88,6 +88,8 @@ pub struct SettingsView {
     theme_looks: HashMap<String, Option<theme::Look>>,
     scroll: ScrollHandle,
     test_push: test_push::State,
+    /// 正在后台装上或去掉的自启，按 `Kind::name`。
+    autostart_jobs: HashMap<&'static str, Task<()>>,
     _observe: Subscription,
 }
 
@@ -108,6 +110,7 @@ impl SettingsView {
             theme_looks: HashMap::new(),
             scroll: ScrollHandle::new(),
             test_push: test_push::State::default(),
+            autostart_jobs: HashMap::new(),
             _observe: observe,
         }
     }

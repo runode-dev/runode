@@ -565,8 +565,26 @@ impl Kanban {
         .detach();
     }
 
-    fn remove_schedule(&mut self, id: String, cx: &mut Context<Self>) {
-        Self::send_todos(vec![Box::new(move |req| ClientMsg::RemoveSchedule { req, id })], cx);
+    /// 删掉定时，先问一句：宿主那边是硬删，定时的提示词和规则找不回来。
+    fn remove_schedule(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let data = store::data(cx);
+        let Some(schedule) = data.schedules.iter().find(|schedule| schedule.id == id) else { return };
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            &rust_i18n::t!("kanban.remove_title", title = schedule.spec.title.as_str()),
+            Some(&rust_i18n::t!("kanban.remove_schedule_detail")),
+            &[&*rust_i18n::t!("kanban.remove"), &*rust_i18n::t!("kanban.cancel")],
+            cx,
+        );
+        cx.spawn(async move |this, cx| {
+            if answer.await.ok() == Some(0) {
+                this.update(cx, |_, cx| {
+                    Self::send_todos(vec![Box::new(move |req| ClientMsg::RemoveSchedule { req, id })], cx)
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     /// 请 app 切到任务会话，见 `KanbanEvent::OpenSession`。
@@ -1227,7 +1245,7 @@ impl Kanban {
             let id = schedule.id.clone();
             let label = rust_i18n::t!("kanban.remove_schedule").into_owned();
             icon_button("todo-schedule-remove", TRASH_ICON, label)
-                .on_press(cx, move |this, _, cx| this.remove_schedule(id.clone(), cx))
+                .on_press(cx, move |this, window, cx| this.remove_schedule(id.clone(), window, cx))
         };
         div()
             .id(named("todo-schedule", &schedule.id))

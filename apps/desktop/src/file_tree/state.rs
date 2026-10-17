@@ -11,7 +11,7 @@ use runode_git as git;
 
 use crate::file_tree::{
     TreeScan,
-    listing::{Decoration, Decorator, DirEntry, Listings, MAX_COMPACT, single_dir},
+    listing::{Decoration, Decorator, DirEntry, GitChanges, Listings, MAX_COMPACT, single_dir},
 };
 
 /// 文件树里显示哪些：被 git 忽略的、名字以 `.` 开头的。整个窗口一个设置，见 `FileTree::filter`。
@@ -41,6 +41,9 @@ pub(crate) struct TreeState {
     pub root: Option<PathBuf>,
     /// 最近一次读到的 git 状态，由 app 交进来，行按它着色；不在 git 仓库里时为空。
     pub git: Option<Arc<git::Repos>>,
+    /// 按 `git` 那一份快照算好的改动表，git 换了才重算，免得每次重排都在主线程上把所有改动过一遍。
+    /// 留着那份 `Arc`，快照就不会释放、地址不会被新快照占用，按指针比不会认错。
+    git_changes: Option<(Arc<git::Repos>, GitChanges)>,
     pub expanded: HashSet<PathBuf>,
     pub listings: HashMap<PathBuf, Vec<DirEntry>>,
     /// 文件树里选中的路径。
@@ -51,13 +54,25 @@ pub(crate) struct TreeState {
     pub scroll: UniformListScrollHandle,
     /// 等着在后台读的目录，由 `FileTree` 取走去读，读完经 `apply_listings` 换上。
     pub to_list: Vec<PathBuf>,
+    /// 每个目录换上的内容是哪一次读的（`read_ticket`，读不了的也算）。扫描和后台列目录谁先读回来不一定，
+    /// 发起更早的读到的是更旧的内容，不能盖掉发起更晚的已经换上的，按这个比先后。
+    read_at: HashMap<PathBuf, u64>,
     /// 等目录读回来再定位一次的 `reveal`：要定位的路径所在的目录还没读到，读到以后才排得出那一行。
     pending_reveal: Option<(PathBuf, bool, ScrollStrategy)>,
 }
 
 impl TreeState {
     pub(crate) fn rebuild_rows(&mut self, root: &Path, filter: TreeFilter) {
-        let decorator = Decorator::new(self.git.as_deref());
+        match &self.git {
+            Some(git) if !self.git_changes.as_ref().is_some_and(|(cached, _)| Arc::ptr_eq(git, cached)) => {
+                self.git_changes = Some((git.clone(), GitChanges::new(Some(git))));
+            }
+            Some(_) => {}
+            None => self.git_changes = None,
+        }
+        let none = GitChanges::default();
+        let changes = self.git_changes.as_ref().map_or(&none, |(_, changes)| changes);
+        let decorator = Decorator::new(self.git.as_deref(), changes);
         let mut rows = Vec::new();
         self.push_dir(root, 0, &decorator, filter, &mut rows);
         self.rows = rows;
@@ -109,18 +124,25 @@ impl TreeState {
         }
     }
 
+    /// `dir` 换上的内容是 `started` 之后发起的读读到的。
+    fn newer_than(&self, dir: &Path, started: u64) -> bool {
+        self.read_at.get(dir).is_some_and(|&at| at > started)
+    }
+
     /// 记下要在后台读的 `dirs`（连同往下多看的一层，见 `list_dirs`）：大目录、慢的卷读起来会卡住界面。
     fn list_later(&mut self, dirs: Vec<PathBuf>) {
         self.to_list.extend(dirs);
     }
 
     /// 换上后台读回来的目录；读不了的（删掉了、改了名或者没权限）和 `apply_scan` 一样丢掉记着的旧列表、
-    /// 收起来，不再把旧的内容当真。根目录已经换了时不是这里的目录，不要。有等着的 `reveal` 时再定位一次。
-    pub(crate) fn apply_listings(&mut self, listings: Listings, root: &Path, filter: TreeFilter) {
+    /// 收起来，不再把旧的内容当真。根目录已经换了时不是这里的目录，不要；`since`（发起时的 `read_ticket`）
+    /// 之后发起的读已经换上的目录，这里读到的是旧内容，也不要。有等着的 `reveal` 时再定位一次。
+    pub(crate) fn apply_listings(&mut self, listings: Listings, since: u64, root: &Path, filter: TreeFilter) {
         let mut read = HashSet::new();
         let mut collapsed = Vec::new();
         for (dir, listing) in listings {
-            if dir.starts_with(root) {
+            if dir.starts_with(root) && !self.newer_than(&dir, since) {
+                self.read_at.insert(dir.clone(), since);
                 match listing {
                     Some(listing) => {
                         self.listings.insert(dir.clone(), listing);
@@ -354,7 +376,7 @@ impl TreeState {
 
     /// 换上 app 在后台读到的结果，有变化时返回真。
     pub(crate) fn apply_scan(&mut self, scan: TreeScan, filter: TreeFilter) -> bool {
-        let TreeScan { root, git, listings, reveal } = scan;
+        let TreeScan { root, git, listings, reveal, started } = scan;
         // 第一次读时 `root` 还是空的，下面换上根目录时一定算作有变化。
         let mut changed = false;
         // 终端换到了别的仓库或目录：上一处的目录列表和选中的行不再相干，选中项留着的话删除、改名
@@ -362,6 +384,7 @@ impl TreeState {
         if self.root.as_ref() != Some(&root) {
             self.root = Some(root.clone());
             self.listings.clear();
+            self.read_at.clear();
             self.selected = None;
             self.scroll.scroll_to_item(0, ScrollStrategy::Top);
             changed = true;
@@ -377,6 +400,11 @@ impl TreeState {
         }
         let mut collapsed = Vec::new();
         for (dir, listing) in listings {
+            // 扫描发起之后又列过的目录（比如新建、改名后重读的），扫描读到的是旧内容。
+            if self.newer_than(&dir, started) {
+                continue;
+            }
+            self.read_at.insert(dir.clone(), started);
             match listing {
                 Some(entries) => {
                     if self.listings.get(&dir) != Some(&entries) {
@@ -458,7 +486,8 @@ mod tests {
     #[test]
     fn decorates_paths_by_status() {
         let git = snapshot();
-        let decorator = Decorator::new(Some(&git));
+        let changes = GitChanges::new(Some(&git));
+        let decorator = Decorator::new(Some(&git), &changes);
         let of = |path: &str, is_dir| decorator.of(Path::new(path), is_dir);
         assert_eq!(of("/repo/src/a/b.rs", false), Decoration::Status(FileStatus::Modified));
         // 目录按里面最要紧的改动着色：有修改算修改，只有新文件的才算新增或未跟踪。
@@ -488,7 +517,8 @@ mod tests {
             ignored: HashSet::from(["build".into()]),
             info: Default::default(),
         });
-        let decorator = Decorator::new(Some(&git));
+        let changes = GitChanges::new(Some(&git));
+        let decorator = Decorator::new(Some(&git), &changes);
         let of = |path: &str, is_dir| decorator.of(Path::new(path), is_dir);
         // 子模块里的文件按子模块自己的状态，忽略也按它自己的规则。
         assert_eq!(of("/repo/libs/lib/src/x.rs", false), Decoration::Status(FileStatus::Added));
@@ -555,13 +585,33 @@ mod tests {
         assert_eq!(state.rows.len(), 3);
 
         // 只装着被忽略目录的目录不和它并成一行。
-        Arc::get_mut(state.git.as_mut().unwrap()).unwrap().main.ignored.insert("out/target".into());
+        let mut git = snapshot();
+        git.main.ignored.insert("out/target".into());
+        state.git = Some(Arc::new(git));
         state.listings.insert(root.into(), vec![dir("out")]);
         state.listings.insert("/repo/out".into(), vec![dir("target")]);
         state.rebuild_rows(root, NO_IGNORED);
         assert_eq!(names(&state), [("out".into(), 0)]);
         state.rebuild_rows(root, ALL);
         assert_eq!(names(&state), [("out".into(), 0)]);
+        assert_eq!(state.rows[0].decoration, Decoration::None);
+    }
+
+    /// 改动表按 git 快照留着一份，换了一份快照就重算，着色不停在旧的状态上。
+    #[test]
+    fn recomputes_changes_when_git_changes() {
+        let mut state = TreeState { git: Some(Arc::new(snapshot())), ..Default::default() };
+        let root = Path::new("/repo");
+        state.listings.insert(root.into(), vec![file("new.txt")]);
+        state.rebuild_rows(root, ALL);
+        assert_eq!(state.rows[0].decoration, Decoration::Status(FileStatus::Untracked));
+        let mut clean = snapshot();
+        clean.main.statuses.clear();
+        state.git = Some(Arc::new(clean));
+        state.rebuild_rows(root, ALL);
+        assert_eq!(state.rows[0].decoration, Decoration::None);
+        state.git = None;
+        state.rebuild_rows(root, ALL);
         assert_eq!(state.rows[0].decoration, Decoration::None);
     }
 
@@ -679,18 +729,18 @@ mod tests {
         state.toggle_dir(Path::new("/p/a"), root, ALL);
         assert_eq!(std::mem::take(&mut state.to_list), [PathBuf::from("/p/a")]);
         assert_eq!(state.rows.len(), 2);
-        state.apply_listings(vec![(PathBuf::from("/p/a"), Some(vec![file("b")]))], root, ALL);
+        state.apply_listings(vec![(PathBuf::from("/p/a"), Some(vec![file("b")]))], 0, root, ALL);
         assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 1), ("z".into(), 0)]);
         // 重读时读不了（删掉了或者没权限）的目录不再显示记着的旧内容，收起来。
         state.relist(vec![PathBuf::from("/p/a")], root, ALL);
         let read = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, None)).collect();
-        state.apply_listings(read, root, ALL);
+        state.apply_listings(read, 0, root, ALL);
         assert_eq!(names(&state), [("a".into(), 0), ("z".into(), 0)]);
         assert!(!state.expanded.contains(Path::new("/p/a")));
         assert!(!state.listings.contains_key(Path::new("/p/a")));
         state.toggle_dir(Path::new("/p/a"), root, ALL);
         state.to_list.clear();
-        state.apply_listings(vec![(PathBuf::from("/p/a"), Some(vec![file("b")]))], root, ALL);
+        state.apply_listings(vec![(PathBuf::from("/p/a"), Some(vec![file("b")]))], 0, root, ALL);
         assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 1), ("z".into(), 0)]);
 
         // 新建的文件要等重读回来才排得出那一行，那时再选中它。
@@ -698,7 +748,7 @@ mod tests {
         state.reveal_file(Path::new("/p/a/new"), root, ALL);
         assert_eq!(state.selected, None);
         let read = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, Some(vec![file("b"), file("new")])));
-        state.apply_listings(read.collect(), root, ALL);
+        state.apply_listings(read.collect(), 0, root, ALL);
         assert_eq!(state.selected, Some(PathBuf::from("/p/a/new")));
 
         // 删掉的不等重读回来就从行里去掉。
@@ -710,7 +760,7 @@ mod tests {
         state.reveal_dir(Path::new("/p/gone/x"), root, ALL);
         let read: Listings = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, None)).collect();
         assert!(!read.is_empty());
-        state.apply_listings(read, root, ALL);
+        state.apply_listings(read, 0, root, ALL);
         assert!(state.to_list.is_empty());
         assert!(state.pending_reveal.is_none());
 
@@ -725,17 +775,17 @@ mod tests {
         assert_eq!(state.selected, Some(PathBuf::from("/p/a/b")));
         state.relist(vec![PathBuf::from("/p/a")], root, ALL);
         let read = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, None)).collect();
-        state.apply_listings(read, root, ALL);
+        state.apply_listings(read, 0, root, ALL);
         assert_eq!(state.selected, Some(PathBuf::from("/p/a")));
         assert_eq!(state.selected_row(), Some(0));
         // 收起的目录自己的行也没了（上级的列表里已经去掉了它）时不留选中。
         open_a(&mut state);
         assert_eq!(state.selected, Some(PathBuf::from("/p/a/b")));
         state.listings.insert(root.into(), vec![file("z")]);
-        state.apply_listings(vec![(PathBuf::from("/p/a"), None)], root, ALL);
+        state.apply_listings(vec![(PathBuf::from("/p/a"), None)], 0, root, ALL);
         assert_eq!(state.selected, None);
         // 根目录换了以后才读回来的不要。
-        state.apply_listings(vec![(PathBuf::from("/q"), Some(vec![file("y")]))], root, ALL);
+        state.apply_listings(vec![(PathBuf::from("/q"), Some(vec![file("y")]))], 0, root, ALL);
         assert!(!state.listings.contains_key(Path::new("/q")));
     }
 
@@ -749,7 +799,7 @@ mod tests {
         state.reveal_file(Path::new("/p/a/file"), root, ALL);
         assert_eq!(state.to_list, [PathBuf::from("/p/a")]);
         let read = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, None)).collect();
-        state.apply_listings(read, root, ALL);
+        state.apply_listings(read, 0, root, ALL);
         assert!(!state.expanded.contains(Path::new("/p/a")));
         assert!(!state.rows[0].expanded);
         assert!(state.to_list.is_empty());
@@ -778,10 +828,52 @@ mod tests {
         for order in [["/p/a/b", "/p/a"], ["/p/a", "/p/a/b"]] {
             let mut state = open();
             let read = order.iter().map(|dir| (PathBuf::from(dir), None)).collect();
-            state.apply_listings(read, Path::new("/p"), ALL);
+            state.apply_listings(read, 0, Path::new("/p"), ALL);
             assert_eq!(names(&state), [("a".into(), 0), ("z".into(), 0)], "{order:?}");
             assert_eq!(state.selected, Some(PathBuf::from("/p/a")), "{order:?}");
         }
+    }
+
+    /// 后台列目录发起之后又发起、先换上的扫描写过的目录，读回来的旧内容不盖掉扫描的结果；扫描没碰过的目录、
+    /// 扫描之后才发起的照常换上。
+    #[test]
+    fn older_listings_do_not_overwrite_newer_scans() {
+        let mut state = TreeState::default();
+        let root = Path::new("/p");
+        let listing = |dir: &str, entries| (PathBuf::from(dir), Some(entries));
+        let scan = |listings, started| TreeScan { root: root.into(), git: None, listings, reveal: None, started };
+        state.apply_scan(scan(vec![listing("/p", vec![dir("a")])], 1), ALL);
+        state.toggle_dir(Path::new("/p/a"), root, ALL);
+        state.apply_scan(scan(vec![listing("/p/a", vec![dir("sub"), file("c")])], 3), ALL);
+        let old = vec![listing("/p/a", vec![dir("sub"), file("b"), file("c")]), listing("/p/a/sub", vec![file("x")])];
+        state.apply_listings(old, 2, root, ALL);
+        assert_eq!(state.listings[Path::new("/p/a")], [dir("sub"), file("c")]);
+        assert_eq!(state.listings[Path::new("/p/a/sub")], [file("x")]);
+        state.apply_listings(vec![listing("/p/a", vec![file("d")])], 4, root, ALL);
+        assert_eq!(state.listings[Path::new("/p/a")], [file("d")]);
+    }
+
+    /// 扫描比列目录发起得早、换上得晚（新建或改名后重读的那种）：扫描读到的旧内容不盖掉列目录的结果，
+    /// 等着定位的新文件照样选中；扫描里列目录没碰过的目录照常换上。
+    #[test]
+    fn older_scans_do_not_overwrite_newer_listings() {
+        let mut state = TreeState::default();
+        let root = Path::new("/p");
+        let listing = |dir: &str, entries| (PathBuf::from(dir), Some(entries));
+        let scan = |listings, started| TreeScan { root: root.into(), git: None, listings, reveal: None, started };
+        state.apply_scan(scan(vec![listing("/p", vec![dir("a"), file("z")])], 1), ALL);
+        // 扫描 2 发起后新建了 /p/new，重读 /p（列目录 3）并定位它；列目录先读回来。
+        state.relist(vec![root.into()], root, ALL);
+        state.reveal_file(Path::new("/p/new"), root, ALL);
+        assert_eq!(std::mem::take(&mut state.to_list), [PathBuf::from("/p")]);
+        state.apply_listings(vec![listing("/p", vec![dir("a"), file("new"), file("z")])], 3, root, ALL);
+        assert_eq!(state.selected, Some(PathBuf::from("/p/new")));
+        state
+            .apply_scan(scan(vec![listing("/p", vec![dir("a"), file("z")]), listing("/p/a", vec![file("b")])], 2), ALL);
+        assert_eq!(state.listings[root], [dir("a"), file("new"), file("z")]);
+        assert_eq!(state.listings[Path::new("/p/a")], [file("b")]);
+        assert_eq!(state.selected, Some(PathBuf::from("/p/new")));
+        assert_eq!(state.selected_row(), Some(1));
     }
 
     /// 换上扫描结果：换了根目录时丢掉上一处的目录列表，同一份 git 状态不算变化，读不了的目录收起来，
@@ -795,6 +887,7 @@ mod tests {
             git: None,
             listings,
             reveal: reveal.map(PathBuf::from),
+            started: 0,
         };
         assert!(state.apply_scan(scan(vec![listing("/p", vec![dir("a"), file("b")])], None), ALL));
         assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 0)]);
@@ -806,7 +899,7 @@ mod tests {
         assert!(!state.expanded.contains(Path::new("/p/a")));
         // 换了根目录时上一处选中的路径不留着，免得删除、改名作用在看不见的旧路径上。
         state.selected = Some(PathBuf::from("/p/b"));
-        let moved = TreeScan { root: "/q".into(), git: None, listings: Vec::new(), reveal: None };
+        let moved = TreeScan { root: "/q".into(), git: None, listings: Vec::new(), reveal: None, started: 0 };
         assert!(state.apply_scan(moved, ALL));
         assert!(state.listings.is_empty());
         assert_eq!(state.selected, None);
@@ -829,6 +922,7 @@ mod tests {
                     listing("/p/a/b", vec![file("file")]),
                 ],
                 reveal: None,
+                started: 0,
             };
             assert!(state.apply_scan(scan, ALL));
             state.expanded.extend([PathBuf::from("/p/a"), PathBuf::from("/p/a/b")]);
@@ -838,7 +932,7 @@ mod tests {
             state
         };
         let rescan = |state: &mut TreeState, listings| {
-            let scan = TreeScan { root: root.into(), git: None, listings, reveal: None };
+            let scan = TreeScan { root: root.into(), git: None, listings, reveal: None, started: 0 };
             assert!(state.apply_scan(scan, ALL));
         };
 

@@ -280,12 +280,27 @@ pub(super) fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result 
 /// 把 `path` 移到废纸篓，在访达里能放回原处。
 #[cfg(target_os = "macos")]
 pub(super) fn trash(path: &Path) -> Result {
-    use objc2_foundation::{NSFileManager, NSString, NSURL};
+    use objc2_foundation::NSFileManager;
 
-    let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+    let url = file_url(path).map_err(OpError::Io)?;
     NSFileManager::defaultManager()
         .trashItemAtURL_resultingItemURL_error(&url, None)
         .map_err(|err| OpError::Io(io::Error::other(err.localizedDescription().to_string())))
+}
+
+/// `path` 原样的字节拼成的文件 URL，不经 UTF-8：名字不是合法 UTF-8 时不会指到名字恰好是替换字符的那个文件上。
+#[cfg(target_os = "macos")]
+fn file_url(path: &Path) -> io::Result<objc2::rc::Retained<objc2_foundation::NSURL>> {
+    let c = c_path(path)?;
+    // SAFETY: `c` 在调用期间一直活着，并且以 NUL 结尾。不按目录拼：废纸篓只按路径找，指向目录的符号链接
+    // 不带结尾的斜杠也不会顺着链接删到目标。
+    Ok(unsafe {
+        objc2_foundation::NSURL::fileURLWithFileSystemRepresentation_isDirectory_relativeToURL(
+            std::ptr::NonNull::new(c.as_ptr().cast_mut()).expect("CString 的指针不为空"),
+            false,
+            None,
+        )
+    })
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -296,6 +311,17 @@ pub(super) fn trash(_: &Path) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn trash_urls_keep_raw_bytes() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let path = Path::new(std::ffi::OsStr::from_bytes(b"/tmp/a\xff"));
+        let url = file_url(path).unwrap();
+        // SAFETY: `fileSystemRepresentation` 返回以 NUL 结尾、跟着 `url` 活着的 C 字符串。
+        let back = unsafe { std::ffi::CStr::from_ptr(url.fileSystemRepresentation().as_ptr()) };
+        assert_eq!(back.to_bytes(), b"/tmp/a\xff");
+    }
 
     /// 每个测试一个空的临时目录，结束时删掉。
     struct TempDir(PathBuf);

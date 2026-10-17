@@ -229,6 +229,7 @@ impl WindowView {
         project.refreshed_at = Some(Instant::now());
         let id = workspace.id;
         let untracked = std::mem::take(&mut project.untracked);
+        let started = crate::file_tree::read_ticket();
         let job = cx.background_spawn(async move { scan(dir, expanded, untracked, worktrees) });
         cx.spawn(async move |this, cx| {
             let scan = job.await;
@@ -239,7 +240,7 @@ impl WindowView {
                 };
                 workspace.project.refreshing = false;
                 workspace.project.scan_cost = scan.cost;
-                let (changed, tree) = workspace.apply_scan(scan);
+                let (changed, tree) = workspace.apply_scan(scan, started);
                 let git = workspace.project.git.clone();
                 if changed {
                     cx.notify();

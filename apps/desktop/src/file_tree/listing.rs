@@ -59,7 +59,8 @@ pub(crate) fn single_dir(entries: &[DirEntry]) -> Option<&OsStr> {
 /// 读 `dirs` 这些目录，再往下多看一层：收起的子目录只有一个子目录时要和它并成一行，得先
 /// 知道它里面有什么；这样的链条一直读到头。被忽略的子目录（按 git 状态 `git` 算）不往下看，里面多半很大。
 pub fn list_dirs(dirs: Vec<PathBuf>, git: Option<&git::Repos>) -> Listings {
-    let decorator = Decorator::new(git);
+    let changes = GitChanges::new(git);
+    let decorator = Decorator::new(git, &changes);
     let mut listed: HashSet<PathBuf> = dirs.iter().cloned().collect();
     let mut listings: Vec<_> = dirs
         .into_iter()
@@ -119,17 +120,18 @@ fn dir_status(current: Option<FileStatus>, status: FileStatus) -> FileStatus {
     }
 }
 
-/// 按 git 状态给文件树里的路径找标记。子模块和嵌套仓库里的文件按它们自己那个仓库的状态。
-pub(crate) struct Decorator<'a> {
-    git: Option<&'a git::Repos>,
+/// 按一份 git 状态算好的改动表：哪些文件有改动、哪些目录里含着改动。改动多时算一遍不便宜，文件树按
+/// 快照留着一份，git 状态换了才重算。
+#[derive(Default)]
+pub(crate) struct GitChanges {
     /// 主仓库和子仓库里有改动的文件，相对主仓库根，见 `Repos::statuses`。
     statuses: HashMap<PathBuf, FileStatus>,
     /// 含有改动文件的目录，相对主仓库根，值是归总后的状态。
     changed_dirs: HashMap<PathBuf, FileStatus>,
 }
 
-impl<'a> Decorator<'a> {
-    pub(crate) fn new(git: Option<&'a git::Repos>) -> Self {
+impl GitChanges {
+    pub(crate) fn new(git: Option<&git::Repos>) -> Self {
         let statuses: HashMap<_, _> = git.iter().flat_map(|git| git.statuses()).collect();
         let mut changed_dirs: HashMap<PathBuf, FileStatus> = HashMap::new();
         for (path, &status) in &statuses {
@@ -138,7 +140,20 @@ impl<'a> Decorator<'a> {
                 changed_dirs.insert(dir.to_path_buf(), dir_status(current, status));
             }
         }
-        Self { git, statuses, changed_dirs }
+        Self { statuses, changed_dirs }
+    }
+}
+
+/// 按 git 状态给文件树里的路径找标记。子模块和嵌套仓库里的文件按它们自己那个仓库的状态。`changes` 要是
+/// 按同一份 `git` 算的。
+pub(crate) struct Decorator<'a> {
+    git: Option<&'a git::Repos>,
+    changes: &'a GitChanges,
+}
+
+impl<'a> Decorator<'a> {
+    pub(crate) fn new(git: Option<&'a git::Repos>, changes: &'a GitChanges) -> Self {
+        Self { git, changes }
     }
 
     pub(crate) fn of(&self, path: &Path, is_dir: bool) -> Decoration {
@@ -151,10 +166,10 @@ impl<'a> Decorator<'a> {
         if git.is_ignored(rel) {
             return Decoration::Ignored;
         }
-        let own = self.statuses.get(rel).copied();
+        let own = self.changes.statuses.get(rel).copied();
         if is_dir {
             // 目录自己也可能有状态：子模块记着的提交号变了，嵌套仓库在外层是个未跟踪的目录。
-            let inside = self.changed_dirs.get(rel).copied();
+            let inside = self.changes.changed_dirs.get(rel).copied();
             if let Some(status) = own.map(|own| dir_status(inside, own)).or(inside) {
                 return Decoration::ContainsChanges(status);
             }

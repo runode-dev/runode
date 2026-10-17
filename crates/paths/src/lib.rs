@@ -181,6 +181,11 @@ impl Dirs {
         self.cache_file("first-terminal-size")
     }
 
+    /// 写出的终端屏幕内容。里面可能有密钥，所以放在用户自己的缓存目录，不放多人共用的临时目录。
+    pub fn screen_files_dir(&self) -> Option<PathBuf> {
+        self.cache_file("screens")
+    }
+
     /// 侧栏里 GitHub 仓库的 owner 头像，按 owner 的名字存一份。
     pub fn github_avatar_file(&self, owner: &str) -> Option<PathBuf> {
         self.cache_file(&format!("github-avatars/{owner}.png"))
@@ -317,6 +322,7 @@ mod tests {
         assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.runode/agent-detection".into()));
         assert_eq!(dirs.shell_integration_dir(), Some("/home/me/.runode/cache/shell-integration".into()));
         assert_eq!(dirs.prespawn_size_file(), Some("/home/me/.runode/cache/first-terminal-size".into()));
+        assert_eq!(dirs.screen_files_dir(), Some("/home/me/.runode/cache/screens".into()));
         assert_eq!(dirs.ghostty_themes_dir(), Some("/home/me/.config/ghostty/themes".into()));
     }
 

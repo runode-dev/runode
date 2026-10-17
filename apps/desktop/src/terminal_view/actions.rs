@@ -167,12 +167,16 @@ impl TerminalView {
     }
 }
 
-/// 屏幕内容写到临时目录下一个新文件里，返回它的路径。顺手删掉以前写的、放了超过
-/// `SCREEN_FILE_TTL` 的，免得回滚历史一直堆在临时目录里。
+/// 屏幕内容写到 `Dirs::screen_files_dir` 下一个新文件里，返回它的路径。顺手删掉以前写的、放了超过
+/// `SCREEN_FILE_TTL` 的，免得回滚历史一直堆在缓存目录里；以前的版本写在临时目录的 `runode` 下，
+/// 那里的也照样清掉。
 fn write_screen_file(text: &str) -> std::io::Result<std::path::PathBuf> {
-    let dir = std::env::temp_dir().join("runode");
-    std::fs::create_dir_all(&dir)?;
     let now = std::time::SystemTime::now();
+    remove_old_screen_files(&std::env::temp_dir().join("runode"), now);
+    let dir = runode_paths::Dirs::from_env()
+        .screen_files_dir()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no home directory"))?;
+    std::fs::create_dir_all(&dir)?;
     remove_old_screen_files(&dir, now);
     let stamp = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
     let path = dir.join(format!("screen-{}-{stamp}.txt", std::process::id()));

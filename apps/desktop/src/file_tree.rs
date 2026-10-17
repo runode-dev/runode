@@ -25,7 +25,10 @@ use std::{
     collections::HashMap,
     ops::Range,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use crate::ui::{
@@ -141,6 +144,15 @@ pub struct TreeScan {
     pub listings: Listings,
     /// 终端换了目录时是新的目录，文件树展开到它、选中它。
     pub reveal: Option<PathBuf>,
+    /// 发起这次读时取的 `read_ticket`。
+    pub started: u64,
+}
+
+/// 发起一次后台读目录（项目扫描或 `list_queued`）时取的序号，越晚发起越大。读回来的目录按它比先后：
+/// 发起更早的读到的是更旧的内容，不管谁先读回来，都不盖掉发起更晚的已经换上的。
+pub fn read_ticket() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// 整个窗口一份的开关，app 随窗口存档，见 `FileTree::options`。
@@ -802,12 +814,12 @@ impl FileTree {
         if state.to_list.is_empty() {
             return;
         }
-        let (dirs, git) = (std::mem::take(&mut state.to_list), state.git.clone());
+        let (dirs, git, since) = (std::mem::take(&mut state.to_list), state.git.clone(), read_ticket());
         let job = cx.background_spawn(async move { list_dirs(dirs, git.as_deref()) });
         cx.spawn(async move |this, cx| {
             let listings = job.await;
             this.update(cx, |this, cx| {
-                this.with_tree_of(ws, cx, |state, root, filter| state.apply_listings(listings, root, filter));
+                this.with_tree_of(ws, cx, |state, root, filter| state.apply_listings(listings, since, root, filter));
                 cx.notify();
             })
             .ok();
