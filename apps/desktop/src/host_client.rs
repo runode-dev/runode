@@ -18,7 +18,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Condvar, LazyLock, Mutex, OnceLock, PoisonError,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -276,8 +276,14 @@ pub fn reconnect() -> Result<()> {
                     tracing::warn!("another runode app took the host socket, running the host in this app");
                     in_process(false)
                 }
-                Err(err) if end_on_quit => {
-                    tracing::info!("the leftover host is gone, running the host in the app: {err}");
+                // 卡住、握手超时也报 `Io`：socket 还连得上就先不当它没了，报错等下次再连，免得改在 app 里另起
+                // 宿主后，原来的会话再也连不回。连着 `STUCK_TRIES` 次都这样就当它卡死了，照样改在 app 里跑，
+                // 不然重开永远没反应。
+                Err(err)
+                    if end_on_quit
+                        && (socket_gone(&socket) || STUCK.fetch_add(1, Ordering::Relaxed) + 1 >= STUCK_TRIES) =>
+                {
+                    tracing::info!("the leftover host is gone or stuck, running the host in the app: {err}");
                     in_process(true)
                 }
                 Err(err) => return Err(err.into()),
@@ -285,7 +291,17 @@ pub fn reconnect() -> Result<()> {
         }
     };
     *MODE.lock().unwrap_or_else(PoisonError::into_inner) = mode;
+    STUCK.store(0, Ordering::Relaxed);
     if link.connected() { Ok(()) } else { Err(anyhow!("could not reconnect to the host")) }
+}
+
+/// `reconnect` 连着几次连上了 socket 却握不了手，见那里。
+static STUCK: AtomicU32 = AtomicU32::new(0);
+const STUCK_TRIES: u32 = 3;
+
+/// 没有宿主在 `socket` 上听了。
+fn socket_gone(socket: &Path) -> bool {
+    std::os::unix::net::UnixStream::connect(socket).is_err()
 }
 
 /// 宿主里所有的会话。
@@ -419,7 +435,7 @@ fn hand_over(socket: &Path, end_on_quit: bool, sessions: Option<usize>) -> Optio
         // `probe` 也报 `Absent`，socket 还连得上就不当它没了。
         let still_empty = || match launch::probe(socket, &build()) {
             Probe::Running { sessions: 0, .. } => true,
-            Probe::Absent => std::os::unix::net::UnixStream::connect(socket).is_err(),
+            Probe::Absent => socket_gone(socket),
             _ => false,
         };
         if sessions == Some(0) && !end_on_quit && still_empty() {
@@ -484,7 +500,6 @@ fn end_old_host(cx: &mut gpui::AsyncApp) {
     let (tx, rx) = futures::channel::oneshot::channel();
     let spawned = thread::Builder::new().name("end-old-host".into()).spawn(move || {
         let Some(socket) = socket_path() else { return };
-        let gone = || std::os::unix::net::UnixStream::connect(&socket).is_err();
         let ended = match launch::probe(&socket, &build()) {
             Probe::Running { build: theirs, .. } if theirs == build() => {
                 tracing::warn!("the host on the socket is already this build, so not ending it");
@@ -493,13 +508,13 @@ fn end_old_host(cx: &mut gpui::AsyncApp) {
             }
             // 弹框期间旧宿主自己退了：不用结束谁，直接开 socket。旧宿主卡住、握手超时时 `probe` 也报
             // `Absent`，那时 socket 还连得上，照常去结束它。
-            Probe::Absent if gone() => {
+            Probe::Absent if socket_gone(&socket) => {
                 tracing::info!("the old host is already gone");
                 Ok(launch::Ended::Ended)
             }
             // 探完到动手之间旧宿主也可能刚好退了，结束它就会出错：socket 连不上了的不算失败。
             _ => launch::end_old_host(&socket, &build()).or_else(|err| {
-                if !gone() {
+                if !socket_gone(&socket) {
                     return Err(err);
                 }
                 tracing::info!("the old host went away while ending it: {err}");
