@@ -278,7 +278,7 @@ impl WindowView {
         };
         let view = cx.entity().downgrade();
         div()
-            .id(("tab", ix))
+            .id(("tab", id))
             .role(Role::Tab)
             .aria_label(a11y_label)
             .aria_selected(active)
@@ -385,7 +385,7 @@ impl WindowView {
                     .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", ix), fg).tooltip(driven)))
                     .children(mark.map(|mark| styled_agent_mark(mark, ("tab-agent", ix), fg, true)))
                     .map(|el| {
-                        let close = Button::new(("tab-close", ix), close_label.clone())
+                        let close = Button::new(("tab-close", id), close_label.clone())
                             .with_size(ButtonSize::IconXs)
                             .text_size(px(14.))
                             .child("×")
@@ -427,7 +427,7 @@ impl WindowView {
                 }
                 _ => el
                     .child(
-                        Button::new(("tab-close", ix), close_label)
+                        Button::new(("tab-close", id), close_label)
                             .with_size(ButtonSize::IconXs)
                             .text_size(px(14.))
                             .child("×")

@@ -88,6 +88,8 @@ pub(super) fn row(
     error: Option<String>,
     theme: &Theme,
 ) -> Div {
+    let title = title.into();
+    let error_id = SharedString::from(format!("row-error-{title}"));
     div()
         .py(px(12.))
         .flex()
@@ -102,24 +104,28 @@ pub(super) fn row(
                 .flex()
                 .flex_col()
                 .gap(px(3.))
-                .child(div().text_size(FontSize::Medium).font_weight(gpui::FontWeight::MEDIUM).child(title.into()))
+                .child(div().text_size(FontSize::Medium).font_weight(gpui::FontWeight::MEDIUM).child(title))
                 .children(
                     hint.map(|hint| {
                         div().text_size(FontSize::Body).text_color(theme.foreground.opacity(0.55)).child(hint)
                     }),
                 )
-                .children(error.map(|err| {
-                    div()
-                        .id(SharedString::from(format!("row-error-{err}")))
-                        .role(Role::Label)
-                        .aria_label(err.clone())
-                        .text_size(FontSize::Small)
-                        .text_color(theme.destructive)
-                        .child(err)
-                })),
+                .children(error.map(|err| error_text(error_id, err, theme))),
         )
         // 控件贴着右边，恢复按钮有的时候放在它左边。
         .child(div().flex_none().flex().items_center().gap(px(6.)).children(reset).child(control))
+}
+
+/// 上次写回失败的原因，用 `Role::Label` 报给辅助工具；`id` 按它属于哪一项取，不按错误文字取，几项同样的
+/// 错误才不会撞 id。
+pub(super) fn error_text(id: impl Into<ElementId>, err: String, theme: &Theme) -> Stateful<Div> {
+    div()
+        .id(id)
+        .role(Role::Label)
+        .aria_label(err.clone())
+        .text_size(FontSize::Small)
+        .text_color(theme.destructive)
+        .child(err)
 }
 
 /// 分段选项：几个挨在一起的按钮，选中的那个高亮。`options` 是 (值, 显示的文字)，`label` 是这一组的名字。

@@ -191,7 +191,7 @@ impl WindowView {
                 let (target, pane) = (entry.window, entry.pane);
                 let place = SharedString::from(format!("{} · {}", entry.workspace_name, entry.tab_title));
                 div()
-                    .id(("agent-row", ix))
+                    .id(("agent-row", pane))
                     .role(Role::ListBoxOption)
                     .aria_label(format!("{} · {place}", entry.kind_name()))
                     .aria_description(format!("{} · {dir}", entry.mark.status.label()))

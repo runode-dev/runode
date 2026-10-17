@@ -330,7 +330,7 @@ impl WindowView {
         div()
             // 改名时换一个 id：双击那次按下被 GPUI 记作待拖动，改名期间不挂 `on_drag`，松开时也就没人清它，
             // 换了 id 旧的元素状态连同这次按下一起丢掉，改完名不会一动鼠标就拖起整行。
-            .id(if renaming.is_some() { ("workspace-renaming", ix) } else { ("workspace", ix) })
+            .id(if renaming.is_some() { ("workspace-renaming", id) } else { ("workspace", id) })
             .role(Role::Tab)
             .aria_label(workspace.name.clone())
             .aria_selected(active)
@@ -398,7 +398,7 @@ impl WindowView {
                     .justify_end()
                     .child(div().group_hover(group.clone(), |hint| hint.invisible()).child(hint))
                     .child(
-                        Button::new(("workspace-close", ix), close_label)
+                        Button::new(("workspace-close", id), close_label)
                             .with_size(ButtonSize::IconXs)
                             .text_size(px(14.))
                             .child("×")

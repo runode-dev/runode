@@ -7,7 +7,7 @@ use runode_types::agent::AgentKind;
 
 use super::{
     Commit, SettingsView,
-    controls::{Cards, Press, chip, dropdown, input_box, row, segmented, swatch},
+    controls::{Cards, Press, chip, dropdown, error_text, input_box, row, segmented, swatch},
     picker::{PickItem, PickTarget},
 };
 use crate::{
@@ -525,9 +525,7 @@ impl SettingsView {
                             .child(swatch(color, 18., theme))
                             .child(input_box(&input, Some(92.), error.is_some(), theme)),
                     )
-                    .children(
-                        error.map(|err| div().text_size(FontSize::Small).text_color(theme.destructive).child(err)),
-                    )
+                    .children(error.map(|err| error_text(SharedString::from(format!("error:{id}")), err, theme)))
             })
             .collect();
         div()
@@ -643,9 +641,7 @@ impl SettingsView {
                             .child(input_box(&input, None, error.is_some(), theme))
                             .child(div().w(px(20.)).children(remove)),
                     )
-                    .children(
-                        error.map(|err| div().text_size(FontSize::Small).text_color(theme.destructive).child(err)),
-                    ),
+                    .children(error.map(|err| error_text(SharedString::from(format!("error:{id}")), err, theme))),
             );
         }
         out

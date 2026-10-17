@@ -474,10 +474,10 @@ impl SettingsView {
                     }
                     report(this, &values, cx);
                 });
-            out.push(
-                row(line, None, remove, None, Some(rust_i18n::t!("settings.invalid", err = err).into()), theme)
-                    .into_any_element(),
-            );
+            // 同一行写错两次时 `row` 给的错误 id 一样，包一层按第几次出现取 id 的外层隔开。
+            let wrap = SharedString::from(format!("bad-keybind-{line}-{nth}"));
+            let error = Some(rust_i18n::t!("settings.invalid", err = err).into());
+            out.push(div().id(wrap).child(row(line, None, remove, None, error, theme)).into_any_element());
         }
 
         let group_start = |name: &str| keybind::ACTIONS.iter().position(|spec| spec.name == name).unwrap_or(0);

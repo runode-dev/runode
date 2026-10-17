@@ -353,7 +353,8 @@ fn background_row(ix: usize, session: &SessionInfo, cx: &mut Context<WindowView>
             .children(dir.map(|dir| div().flex_1().min_w_0().overflow_hidden().text_ellipsis_start().child(dir)))
     });
     div()
-        .id(("background-session", ix))
+        // 会话 id 是 128 位随机数，取低 64 位不会撞。
+        .id(("background-session", session.id.0 as u64))
         .role(Role::Button)
         .aria_label(title(session))
         .when(!description.is_empty(), |row| row.aria_description(description))

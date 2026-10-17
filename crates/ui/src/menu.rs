@@ -3,9 +3,11 @@
 //! （`MenuItem`）、键盘和鼠标的操作、画法。文件树、预览标签、Git 面板、状态栏和标题栏的命令按钮都用它；
 //! 菜单开着时存在哪个视图里由 `MenuHost` 说，同一时刻只开一个。颜色在画的时候从主题读。
 
+use std::collections::HashMap;
+
 use gpui::{
-    Action, Anchor, AnyElement, App, Context, Div, FocusHandle, KeyDownEvent, MouseButton, Pixels, Point, Role,
-    ScrollHandle, SharedString, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
+    Action, Anchor, AnyElement, App, Context, Div, ElementId, FocusHandle, KeyDownEvent, MouseButton, Pixels, Point,
+    Role, ScrollHandle, SharedString, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
 };
 
 use crate::{
@@ -160,28 +162,74 @@ impl Menu {
         Self { position, items, target, focus, focus_pending: true, highlighted: None, scroll: ScrollHandle::new() }
     }
 
-    /// 第 `ix` 项能选：整行点了有动作。
-    fn selectable(&self, ix: usize) -> bool {
-        self.items[ix].as_ref().is_some_and(|item| item.enabled && item.action.is_some())
-    }
-
     /// 选中往下（`down`）或往上数的下一个能选的项，到头了绕回来。
     fn move_highlight(&mut self, down: bool) {
-        let n = self.items.len();
-        let next = (1..=n)
-            .map(|step| match (self.highlighted, down) {
-                (Some(ix), true) => (ix + step) % n,
-                (Some(ix), false) => (ix + n - step) % n,
-                (None, true) => step - 1,
-                (None, false) => n - step,
-            })
-            .find(|&ix| self.selectable(ix));
         // 一项能选的都没有（比如换成了空的）时不选，回车、Cmd 加键才不会按到不在了的项。
+        let next = next_selectable(&self.items, self.highlighted, down);
         self.highlighted = next;
         if let Some(ix) = next {
             self.scroll.scroll_to_item(ix);
         }
     }
+}
+
+/// 第 `ix` 项能选：整行点了有动作。
+fn selectable(items: &[Option<MenuItem>], ix: usize) -> bool {
+    items.get(ix).and_then(Option::as_ref).is_some_and(|item| item.enabled && item.action.is_some())
+}
+
+/// 从第 `from` 项往下（`down`）或往上数的下一个能选的项，到头了绕回来；没有 `from` 时从头或尾数起。
+fn next_selectable(items: &[Option<MenuItem>], from: Option<usize>, down: bool) -> Option<usize> {
+    let n = items.len();
+    (1..=n)
+        .map(|step| match (from, down) {
+            (Some(ix), true) => (ix + step) % n,
+            (Some(ix), false) => (ix + n - step) % n,
+            (None, true) => step - 1,
+            (None, false) => n - step,
+        })
+        .find(|&ix| selectable(items, ix))
+}
+
+/// 换了各项后原来选中的第 `ix` 项不能选了（那一项删掉了）时改选哪一项：它后面能选的那一项；删的是最后
+/// 一项、`ix` 越界时选新的最后一项（不能选时往上找），不绕回最上面。
+fn highlight_after_replace(items: &[Option<MenuItem>], ix: usize) -> Option<usize> {
+    match ix {
+        _ if selectable(items, ix) => Some(ix),
+        _ if ix >= items.len() => next_selectable(items, Some(items.len()), false),
+        _ => next_selectable(items, Some(ix), true),
+    }
+}
+
+/// 菜单各行的元素 id：按所在的组和字取，不按行号，后台重列、前面多了几行时辅助工具的焦点和按下才不会
+/// 跑到别的项上。组是开头和每条分隔线后面第一项的字（命令菜单里就是按来源分的组标题），不同的组里同名的项
+/// （Makefile 和 package.json 都有 build）才分得开；同一组里同名的几项按第几次出现再区分。说明、选中和
+/// 收起这些会变的不算进去。
+fn row_ids(items: &[Option<MenuItem>]) -> Vec<ElementId> {
+    let mut section = "";
+    let mut seen = HashMap::<String, usize>::new();
+    let mut after_separator = true;
+    items
+        .iter()
+        .map(|item| {
+            let key = match item {
+                Some(item) => {
+                    if std::mem::take(&mut after_separator) {
+                        section = &item.label;
+                    }
+                    format!("{section}\u{1f}{}", item.label)
+                }
+                None => {
+                    after_separator = true;
+                    "\u{1f}separator".to_owned()
+                }
+            };
+            let count = seen.entry(key.clone()).or_default();
+            let key = if *count > 0 { format!("{key}\u{1f}{count}") } else { key };
+            *count += 1;
+            ElementId::Name(format!("file-menu-{key}").into())
+        })
+        .collect()
 }
 
 /// `items` 里和原来第 `near` 项 `old` 是同一项的那一项：整行派发的动作一样，其中右边各按钮派发的动作也一样、
@@ -271,10 +319,12 @@ pub trait MenuHost: Sized + 'static {
                 menu.highlighted = Some(ix);
                 menu.scroll.scroll_to_item(ix);
             }
-            // 选中的那一项没了（删掉了一条）时，选中它后面能选的那一项。
-            if let Some(ix) = menu.highlighted.filter(|&ix| ix >= menu.items.len() || !menu.selectable(ix)) {
-                menu.highlighted = Some(ix.min(menu.items.len().saturating_sub(1)));
-                menu.move_highlight(true);
+            // 选中的那一项没了（删掉了一条）时，选中它后面能选的那一项，删的是最后一项时选新的最后一项。
+            if let Some(ix) = menu.highlighted {
+                menu.highlighted = highlight_after_replace(&menu.items, ix);
+                if let Some(ix) = menu.highlighted {
+                    menu.scroll.scroll_to_item(ix);
+                }
             }
             cx.notify();
         }
@@ -415,6 +465,7 @@ pub trait MenuHost: Sized + 'static {
         let fg = theme.popover_foreground;
         // 有勾选项时每一行左边都留出打勾的那一列，字对齐。
         let check_column = menu.items.iter().flatten().any(|item| item.checked.is_some());
+        let ids = row_ids(&menu.items);
         let items = menu.items.iter().enumerate().map(|(ix, item)| {
             let Some(item) = item else {
                 return div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(fg.opacity(0.12)).into_any_element();
@@ -427,7 +478,7 @@ pub trait MenuHost: Sized + 'static {
             let buttons = (!disabled && (!row_action || highlighted || a11y)).then_some(&item.buttons);
             let view = cx.entity().downgrade();
             div()
-                .id(("file-menu", ix))
+                .id(ids[ix].clone())
                 // 没有动作的一行是小标题；灰着的项报成不可用。
                 .map(|row| match item.checked {
                     _ if item.action.is_none() => row.role(Role::Label),
@@ -497,7 +548,7 @@ pub trait MenuHost: Sized + 'static {
                         |(b, (button, _))| {
                             let view = cx.entity().downgrade();
                             // 菜单项高亮着时底色已经亮了一档，悬停再亮一些。
-                            Button::new(("file-menu-button", ix * 4 + b), button.tooltip.clone())
+                            Button::new(("file-menu-button", b), button.tooltip.clone())
                                 .icon(button.icon)
                                 .icon_size(12.)
                                 .with_size(ButtonSize::IconSm)
@@ -577,5 +628,45 @@ mod tests {
         assert_eq!(find_item(&renamed, 1, &old), Some(2));
         let neither = [item(Box::new(Second)), task("a", Box::new(Second)), task("c", Box::new(Second))];
         assert_eq!(find_item(&neither, 1, &old), Some(1));
+    }
+
+    /// 删掉了选中的一项后改选的项：删的是最后一项（`ix` 越界）时选新的最后一项，它不能选时往上找；
+    /// `ix` 还在、那一行不能选时往后找；空了不选。
+    #[test]
+    fn highlight_after_replace_stays_near_the_removed_item() {
+        let items = [item(Box::new(First)), None, item(Box::new(Second)), item(Box::new(Third))];
+        assert_eq!(highlight_after_replace(&items, 4), Some(3));
+        let disabled = Some(MenuItem::label(String::new(), None, None));
+        let last_disabled = [item(Box::new(First)), item(Box::new(Second)), disabled, None];
+        assert_eq!(highlight_after_replace(&last_disabled, 4), Some(1));
+        assert_eq!(highlight_after_replace(&items, 1), Some(2));
+        assert_eq!(highlight_after_replace(&[], 0), None);
+    }
+
+    /// 菜单行的 id 按所在的组和字取：不同组里同名的项不撞，前面插进一组后原来各项的 id 不变，同一组里
+    /// 同名的两项也不撞。
+    #[test]
+    fn row_ids_follow_section_and_label() {
+        let group = |name: &str| Some(MenuItem::group(name.to_owned(), None, false, Box::new(First)));
+        let task = |name: &str| Some(MenuItem::label(name.to_owned(), None, Some(Box::new(Second))));
+        let items = [task("add"), None, group("Makefile"), task("build"), None, group("package.json"), task("build")];
+        let ids = row_ids(&items);
+        assert_ne!(ids[3], ids[6]);
+        let more = [
+            task("add"),
+            None,
+            group("mine"),
+            task("build"),
+            None,
+            group("Makefile"),
+            task("build"),
+            None,
+            group("package.json"),
+            task("build"),
+        ];
+        let moved = row_ids(&more);
+        assert_eq!((&moved[5], &moved[6], &moved[9]), (&ids[2], &ids[3], &ids[6]));
+        let twice = row_ids(&[group("mine"), task("build"), task("build")]);
+        assert_ne!(twice[1], twice[2]);
     }
 }
