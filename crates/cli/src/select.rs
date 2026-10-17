@@ -442,7 +442,8 @@ enum Wanted {
 
 impl Wanted {
     fn new(dir: &str, home: Option<&Path>) -> Self {
-        if !(dir.contains('/') || dir.starts_with('~') || dir.starts_with('.')) {
+        // `.config`、`~foo` 这种不带 `/` 的写法是名字，只有 `~`、`.`、`..` 单独写时才是路径。
+        if !(dir.contains('/') || matches!(dir, "~" | "." | "..")) {
             return Self::Name(dir.into());
         }
         let path = match (dir, dir.strip_prefix("~/"), home) {
@@ -527,5 +528,10 @@ mod tests {
         let home = Path::new("/Users/me");
         assert!(Wanted::new("~/src", Some(home)).matches(Path::new("/Users/me/src")));
         assert!(Wanted::new("~", Some(home)).matches(home));
+        let dotted = Wanted::new(".config", None);
+        assert!(dotted.matches(Path::new("/Users/me/.config")));
+        assert!(!dotted.matches(Path::new("/x/.config/sub")));
+        assert!(matches!(Wanted::new("..", None), Wanted::Path(_)));
+        assert!(matches!(Wanted::new(".", None), Wanted::Path(_)));
     }
 }

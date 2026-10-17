@@ -76,7 +76,9 @@ shell integration it waits for the command to finish, prints `exit N` and fails
 with status 4 if N is not 0; for an agent it waits until the agent has worked
 and stopped, and fails if the agent shows no activity within 10 seconds (Enter
 may not have submitted the prompt, or it was a command that finishes at once);
-otherwise until the screen has been quiet for 2 seconds.
+if the agent was asking a question and a different one is on screen by then
+(say the next permission prompt), it prints `blocked` instead; otherwise until
+the screen has been quiet for 2 seconds.
 
 When a wait fails or times out, the input may still have been delivered:
 `runode read` the terminal before deciding what to send, and never send the
@@ -100,7 +102,11 @@ Without `--for`, `wait` waits for `stopped`: the agent is idle, asking a
 question, or gone. `--for working`, `idle` or `blocked` wait for that state.
 `--for text` looks at the whole screen, so without `--new` it also matches
 what is already there, the command you just typed included; `--lines N` widens
-it to the last N lines, scrollback included.
+it to the last N lines, scrollback included. `--new` compares how many times
+each matching line is there, so a watcher that clears the screen and prints
+the same line again (`cargo watch -c`, `jest --watch`) never shows it as new;
+match something that changes every run (a line with the time) or use
+`--for quiet`, and always give `--timeout`.
 
 `--timeout SECS` gives up with status 124; on `send` it only works together
 with `--wait`. Status 3 means the terminal exited.
@@ -171,7 +177,9 @@ it, or say why it is not a problem. Write your answers to /tmp/blue.md." \
   so neither waits for the other. A short `--timeout` is no way to avoid
   waiting: it only ends in `timed out` while the agent keeps working.
 - Long or multi-line prompts go with `--paste`; give file paths rather than
-  pasting large content.
+  pasting large content. `send --wait` on a shell prompt refuses typed text
+  with line breaks (each line would run as its own command and the wait would
+  stop after the first): use `--paste` or join the commands with `&&`.
 - Leave the agents' panes open when you are done: the user may want to read
   them or keep talking to them.
 

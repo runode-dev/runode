@@ -72,6 +72,23 @@ fn open_beside_your_own_session() {
     );
 }
 
+/// 自己的会话已经不在了（tmux 里留着旧终端的 `RUNODE_SESSION`）时照在 runode 外面办，交给 app 挑
+/// 最前面的窗口；明说了 `--near` 那个旧会话的照旧报错。
+#[test]
+fn open_with_a_stale_own_session_uses_the_front_window() {
+    const GONE: u128 = 0x3333_0000_0000_0000_0000_0000_0000_0003;
+    let mut fake = app("openstale");
+    fake.env.session = Some(SessionId(GONE).to_string());
+    let (code, _, err) = run("open --right", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    let open = controls(&fake).into_iter().find(|m| matches!(m, ClientMsg::Open { .. })).unwrap();
+    let ClientMsg::Open { placement, near, from, .. } = open else { unreachable!() };
+    assert_eq!((placement, near, from), (Placement::Right, None, Some(SessionId(GONE))));
+
+    let (code, _, _) = run("open --near 3333", &fake.env);
+    assert_eq!(code, exit::FAILED);
+}
+
 /// 在 runode 外面 `open` 时不指定旁边是谁，交给 app 挑最前面的窗口；给了命令就打进新终端。
 #[test]
 fn open_types_the_command_into_the_new_terminal() {

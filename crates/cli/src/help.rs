@@ -120,12 +120,15 @@ Options:
                       the like; 'down*3' (quoted for the shell) presses it
                       three times
       --enter         Press Enter at the end
-      --wait          Wait after sending: for the agent like `wait --for
-                      done` if one runs there (failing if it shows no
-                      activity within 10 seconds), for the command like `wait
-                      --for command` if Enter ran one at a shell prompt with
-                      shell integration, else until the screen is quiet for 2
-                      seconds. It says which on stderr
+      --wait          Wait after sending: for the agent like `wait --for done`
+                      if one runs there (failing if it shows no activity
+                      within 10 seconds, or printing blocked if it was asking
+                      and the screen shows a different question by then), for
+                      the command like `wait --for command` if Enter ran one
+                      at a shell prompt with shell integration, else until the
+                      screen is quiet for 2 seconds. It says which on stderr.
+                      Waiting for a command refuses typed text with line
+                      breaks: use --paste or join the commands with &&
       --timeout SECS  Stop waiting after SECS; only with --wait
   -h, --help          Show this help
 ";
@@ -154,7 +157,8 @@ Options:
                         quiet SECS
                                  the screen did not change for SECS
       --lines N       With `--for text`: look only at the last N lines
-      --new           With `--for text`: skip the lines already there
+      --new           With `--for text`: skip the lines already there. A line
+                      that is cleared and printed again unchanged is not new
       --timeout SECS  Give up after SECS
   -h, --help          Show this help
 

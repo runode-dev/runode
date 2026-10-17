@@ -110,6 +110,23 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 Text::Given(text) => text,
                 Text::Stdin => stdin_text()?,
             };
+            let waiting = wait.then(|| send_wait(&meta, enter || presses_enter(&keys)));
+            // 打进去的换行 shell 当回车执行，等命令只等得到第一条运行完；数条数又对不上续行和
+            // heredoc，所以什么都没打之前就拒绝。
+            if !paste && matches!(waiting, Some((Until::Command, _))) && text.contains(['\n', '\r']) {
+                return Err(anyhow!(
+                    "typed text with line breaks runs as several commands, and --wait would stop after the first; \
+                     use --paste or join the commands with &&"
+                )
+                .into());
+            }
+            // 发送前 agent 就在提问时记下屏幕，停滞检测到点时比一比，见 `Stall::asking`。
+            let asking = match (&waiting, meta.agent) {
+                (Some(_), Some(agent)) if agent.state == AgentState::Blocked => {
+                    Some(screen(&connection, id, None, None)?)
+                }
+                _ => None,
+            };
             // 从这里起宿主升级打断时不叫用户重跑：输入可能已经送到了，见 `after_sending`。
             let delivered = (|| -> Result<(), Failure> {
                 let mut sent = false;
@@ -139,10 +156,10 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 Ok(())
             })();
             delivered.map_err(|failure| after_sending(failure, UPGRADED_WHILE_SENDING))?;
-            if wait {
-                let (until, waiting) = send_wait(&meta, enter || presses_enter(&keys));
+            if let Some((until, waiting)) = waiting {
                 writeln!(err, "runode: waiting {waiting}")?;
-                wait_until(&mut Watch { env, connection, id }, &meta, &until, timeout, Some(SEND_STALL), out)
+                let stall = Stall { after: SEND_STALL, asking };
+                wait_until(&mut Watch { env, connection, id }, &meta, &until, timeout, Some(&stall), out)
                     .map_err(|failure| after_sending(failure, UPGRADED_WHILE_WAITING))?;
             }
         }
@@ -157,8 +174,14 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
         }
         Command::Open { placement, near, cwd, focus, fold, command } => {
             let connection = Connection::open(env)?;
-            let near = match near.or_else(|| env.session.as_ref().map(|_| Selector::Own)) {
+            let near = match near {
                 Some(near) => Some(resolve(&connection, env, &near)?.id),
+                // 自己的会话已经不在了（比如 tmux 里留着旧终端的 RUNODE_SESSION），照在 runode 外面办，
+                // 交给宿主开在最前面的窗口。
+                None if env.session.is_some() => {
+                    let world = World::load(&connection, env, false)?;
+                    world.own.filter(|own| world.sessions.iter().any(|info| info.id == *own))
+                }
                 None => None,
             };
             let cwd = cwd.map(|dir| std::env::current_dir().map(|here| here.join(dir))).transpose()?;
@@ -447,13 +470,13 @@ impl Watch<'_> {
 
 /// 等到 `until`，到了就打印结果。`meta` 是连上时的状态。宿主升级时重新连上接着等（见
 /// `Watch::recover`），等命令运行完（`Until::Command`）除外：新宿主不会重报交接时正在跑的命令。
-/// 等 agent 时给了 `stall`，这么久里 agent 既没干活也没提问就失败，见 `wait_for_agent`。
+/// 等 agent 时给了 `stall`，一段时间里 agent 既没干活也没提问就失败，见 `wait_for_agent`。
 fn wait_until(
     watch: &mut Watch<'_>,
     meta: &SessionMeta,
     until: &Until,
     timeout: Option<Duration>,
-    stall: Option<Duration>,
+    stall: Option<&Stall>,
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     // 大到加上去就溢出的超时（`--timeout 1.8e19`）当作不设。
@@ -623,24 +646,40 @@ fn wait_for_command(
     }
 }
 
+/// `send --wait` 的停滞检测：发出输入后 `after` 这么久里 agent 既没干活也没新进入提问，就当输入
+/// 没提交上，报错不再等。
+struct Stall {
+    after: Duration,
+    /// 发送前 agent 在提问时的整屏。答完一个提问紧接着问下一个、中间的干活短到没认出来时，状态一直是
+    /// Blocked，宿主不发状态，看不出动静；到点时屏幕和它不一样就当成换了提问，照停在提问上算。
+    /// 打进去的文字没提交上、回显在屏幕上时也会这样算，那也只是停在 `blocked`，调用方照样要读屏幕。
+    asking: Option<String>,
+}
+
 /// 等 agent 到 `until` 说的状态，到了就打印它现在的状态。`agent` 是连上时的样子。给了 `stall`
-/// 时，这么久里 agent 一直没干活也没提问就失败，不等到 `deadline`。
+/// 时，这么久里 agent 一直没干活也没提问就失败，不等到 `deadline`；连上时就在提问的不算。
 fn wait_for_agent(
     watch: &mut Watch<'_>,
     mut agent: Option<Agent>,
     until: &Until,
     deadline: Option<Instant>,
-    stall: Option<Duration>,
+    stall: Option<&Stall>,
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     let mut worked = false;
-    let mut stall_at = stall.map(|stall| Instant::now() + stall);
+    let mut stall_at = stall.map(|stall| Instant::now() + stall.after);
+    let mut last = agent.map(|agent| agent.state);
     loop {
         let state = agent.map(|agent| agent.state);
         worked |= state == Some(AgentState::Working);
-        if matches!(state, Some(AgentState::Working | AgentState::Blocked)) {
+        // 只有新进入的提问才算动静：发送前就在提问的，按 esc 或答「不」后可能不干活直接回到空闲，
+        // 不能因此把停滞检测关掉。
+        if state == Some(AgentState::Working)
+            || (state == Some(AgentState::Blocked) && last != Some(AgentState::Blocked))
+        {
             stall_at = None;
         }
+        last = state;
         let reached = match until {
             Until::Done => worked && state != Some(AgentState::Working),
             Until::Working => state == Some(AgentState::Working),
@@ -663,10 +702,18 @@ fn wait_for_agent(
         };
         match next {
             None if stalls.is_some() => {
+                let asking = stall.and_then(|stall| stall.asking.as_ref());
+                if let Some(before) = asking
+                    && state == Some(AgentState::Blocked)
+                    && watch.read_screen(deadline)? != *before
+                {
+                    writeln!(out, "{}", state_name(AgentState::Blocked))?;
+                    return Ok(());
+                }
                 return Err(anyhow!(
                     "the agent showed no activity within {}s of the input: it may not have been submitted, or it \
                      finished without working; check with `runode read` before sending it again",
-                    stall.unwrap_or_default().as_secs()
+                    stall.map_or(0, |stall| stall.after.as_secs())
                 )
                 .into());
             }

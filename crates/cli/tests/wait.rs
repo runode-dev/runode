@@ -210,6 +210,35 @@ fn send_wait_picks_what_to_wait_for() {
     }
 }
 
+/// 等命令时，打进去的多行文字会被 shell 当成几条命令，等到第一条就返回，所以一个字都不打就拒绝；
+/// 粘贴的照常等。
+#[test]
+fn send_wait_for_a_command_refuses_typed_line_breaks() {
+    let send = |name: &str, paste: bool| {
+        let fake = host(name, at_prompt(), vec![finished(Some(0))], vec!["$\n"]);
+        let mut args = vec!["send", "5e55", "cd app\nmake", "--enter", "--wait"];
+        if paste {
+            args.push("--paste");
+        }
+        let args: Vec<String> = args.into_iter().map(String::from).collect();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = runode_cli::run(&args, &fake.env, &mut out, &mut err);
+        (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap(), fake.drain())
+    };
+
+    let (code, _, err, received) = send("multiline", false);
+    assert_ne!(code, exit::OK, "{err}");
+    assert!(err.contains("--paste"), "{err}");
+    let typed = received.iter().any(|r| {
+        matches!(r, Received::Input(..) | Received::Control(ClientMsg::Paste { .. } | ClientMsg::SendKeys { .. }))
+    });
+    assert!(!typed, "nothing is typed");
+
+    let (code, out, err, _) = send("multilinepaste", true);
+    assert_eq!((code, out.as_str()), (exit::OK, "exit 0\n"), "{err}");
+    assert!(err.contains("--for command"), "{err}");
+}
+
 /// 发给 agent 的输入没让它干活（回车没提交上）时，`send --wait` 过一会儿就失败，不等到 `--timeout`。
 #[test]
 fn send_wait_gives_up_when_the_agent_never_starts() {
@@ -219,6 +248,34 @@ fn send_wait_gives_up_when_the_agent_never_starts() {
     assert_eq!(code, exit::FAILED, "{err}");
     assert!(err.contains("no activity"), "{err}");
     assert!(started.elapsed() < Duration::from_secs(30));
+}
+
+#[test]
+fn send_wait_gives_up_when_a_blocked_agent_goes_idle_without_working() {
+    let idle =
+        HostMsg::Meta { id: id(S), meta: meta("claude", Some((AgentKind::Claude, AgentState::Idle))), shell: None };
+    let fake =
+        host("stallblocked", meta("claude", Some((AgentKind::Claude, AgentState::Blocked))), vec![idle], vec!["$\n"]);
+    let started = Instant::now();
+    let (code, _, err) = run("send 5e55 --key esc --wait --timeout 60", &fake.env);
+    assert_eq!(code, exit::FAILED, "{err}");
+    assert!(err.contains("no activity"), "{err}");
+    assert!(started.elapsed() < Duration::from_secs(30));
+}
+
+/// 答完一个提问紧接着问下一个、中间的干活没认出来时状态一直是 Blocked，宿主不发状态：到点时屏幕上换了
+/// 提问就停在 `blocked`，还是同一个提问才当成没提交上。
+#[test]
+fn send_wait_to_a_blocked_agent_stops_at_the_next_question() {
+    let blocked = || meta("claude", Some((AgentKind::Claude, AgentState::Blocked)));
+    let fake = host("nextquestion", blocked(), vec![], vec!["Allow ls?\n", "Allow rm?\n"]);
+    let (code, out, err) = run("send 5e55 1 --wait --timeout 60", &fake.env);
+    assert_eq!((code, out.as_str()), (exit::OK, "blocked\n"), "{err}");
+
+    let fake = host("samequestion", blocked(), vec![], vec!["Allow ls?\n"]);
+    let (code, _, err) = run("send 5e55 1 --wait --timeout 60", &fake.env);
+    assert_eq!(code, exit::FAILED, "{err}");
+    assert!(err.contains("no activity"), "{err}");
 }
 
 #[test]

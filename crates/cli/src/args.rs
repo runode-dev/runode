@@ -300,7 +300,8 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                 flags.enter = true;
             }
             let text = match text {
-                [dash] if dash == "-" => Text::Stdin,
+                // `--` 后面的 `-` 是要打的字，不是读 stdin。
+                [dash] if dash == "-" && literal_from.is_none_or(|from| from > 2) => Text::Stdin,
                 words => Text::Given(words.join(" ")),
             };
             if text == Text::Given(String::new()) && flags.keys.is_empty() && !flags.enter {
@@ -677,6 +678,7 @@ mod tests {
         assert_eq!((enter, wait, timeout), (true, true, Some(Duration::from_millis(1500))));
         assert_eq!(parse("send ab12 hello  world"), Ok(send("ab12", "hello world")));
         assert!(matches!(parse("send ab12 -"), Ok(Command::Send { text: Text::Stdin, .. })));
+        assert_eq!(parse("send ab12 -- -"), Ok(send("ab12", "-")));
         assert_eq!(parse("send ab12 -- --enter"), Ok(send("ab12", "--enter")));
         // 末尾单独的 Enter 照 tmux 当回车，`--` 后面的才是字。
         let entered = |text: &str| {

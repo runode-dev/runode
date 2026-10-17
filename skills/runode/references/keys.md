@@ -18,6 +18,8 @@ keys, the kitty keyboard protocol), as if the user pressed them.
 
 One `send` types the text first, then presses the keys, then Enter; for another
 order, use several `send` commands. Text is typed literally; `--paste` sends it
-as a paste, which multi-line input and editors handle better. `-` instead of
-TEXT reads it from stdin. A last word `Enter` presses Enter like `--enter` (the
-tmux habit); put `--` before text that has to end with the word Enter.
+as a paste, which multi-line input and editors handle better. Typed line breaks
+press Enter, so `--wait` for a shell command refuses them: paste, or join the
+commands with `&&`. `-` instead of TEXT reads it from stdin. A last word
+`Enter` presses Enter like `--enter` (the tmux habit); put `--` before text
+that has to end with the word Enter.
