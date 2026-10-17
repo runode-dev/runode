@@ -671,7 +671,7 @@ fn wait_for_agent(
                 .into());
             }
             None => return Err(Failure::Timeout),
-            Some(HostMsg::Meta { id: changed, meta }) if changed == id => agent = meta.agent,
+            Some(HostMsg::Meta { id: changed, meta, .. }) if changed == id => agent = meta.agent,
             Some(HostMsg::Exited { id: exited, .. }) if exited == id => return Err(Failure::Exited),
             Some(HostMsg::Resync { id: lost, .. }) if lost == id => {
                 return Err(anyhow!("lost track of the session").into());
@@ -689,7 +689,7 @@ fn wait_for_prompt(connection: &Connection, id: SessionId, mut meta: SessionMeta
     while meta.prompt_cwd.is_none() {
         match connection.next(Some(deadline))? {
             None => break,
-            Some(HostMsg::Meta { id: changed, meta: changed_meta }) if changed == id => meta = changed_meta,
+            Some(HostMsg::Meta { id: changed, meta: changed_meta, .. }) if changed == id => meta = changed_meta,
             Some(HostMsg::Exited { id: exited, .. }) if exited == id => return Err(Failure::Exited),
             // 宿主摘掉了订阅（这边读得太慢）：之后的状态都收不到了，等下去只会等到超时。
             Some(HostMsg::Resync { id: lost, .. }) if lost == id => {

@@ -500,7 +500,8 @@ impl HostLink {
             // 只在要快照时比对构建，这里不要。
             build: BuildId(String::new()),
             client: ClientKind::Cli,
-            caps: Caps::default(),
+            // 用不着 shell 集成报告的 PATH 和函数名，没变时不必再收。
+            caps: Caps { shell_report: true, ..Caps::default() },
             session: None,
             device: None,
         })?;

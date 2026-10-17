@@ -41,6 +41,7 @@ fn host(name: &str, meta: SessionMeta, then: Vec<HostMsg>, screens: Vec<&'static
                 mode: AttachMode::MetaOnly,
                 meta: meta.clone(),
                 settings: None,
+                shell: None,
             }];
             replies.extend(then.iter().cloned());
             replies
@@ -106,6 +107,7 @@ fn a_window_resize_request_is_not_an_answer() {
             mode: AttachMode::MetaOnly,
             meta: meta.clone(),
             settings: None,
+            shell: None,
         }],
         ClientMsg::ReadScreen { id, .. } => vec![
             HostMsg::ResizeWindow { id: *id, rows: 50, columns: 120 },
@@ -171,8 +173,8 @@ fn an_exited_session_ends_a_text_wait() {
 #[test]
 fn send_wait_picks_what_to_wait_for() {
     let agent = |state| meta("claude", Some((AgentKind::Claude, state)));
-    let working = HostMsg::Meta { id: id(S), meta: agent(AgentState::Working) };
-    let idle = HostMsg::Meta { id: id(S), meta: agent(AgentState::Idle) };
+    let working = HostMsg::Meta { id: id(S), meta: agent(AgentState::Working), shell: None };
+    let idle = HostMsg::Meta { id: id(S), meta: agent(AgentState::Idle), shell: None };
     let cases = [
         // 有 agent：等它干完。
         ("send 5e55 go --enter --wait", agent(AgentState::Idle), vec![working, idle], "--for done", exit::OK, "idle\n"),
@@ -183,7 +185,7 @@ fn send_wait_picks_what_to_wait_for() {
         (
             "send 5e55 make --enter --wait",
             SessionMeta { prompt_cwd: None, ..at_prompt() },
-            vec![HostMsg::Meta { id: id(S), meta: at_prompt() }, finished(Some(1))],
+            vec![HostMsg::Meta { id: id(S), meta: at_prompt(), shell: None }, finished(Some(1))],
             "--for command",
             4,
             "exit 1\n",
@@ -284,6 +286,7 @@ fn screen_host(name: &str, screen: impl Fn(SessionId) -> Vec<HostMsg> + Send + '
             mode: AttachMode::MetaOnly,
             meta: meta.clone(),
             settings: None,
+            shell: None,
         }],
         ClientMsg::ReadScreen { id, .. } => screen(*id),
         _ => vec![],

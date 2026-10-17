@@ -112,7 +112,7 @@ fn agent(state: AgentState) -> SessionMeta {
 }
 
 fn meta(meta: SessionMeta) -> LinkEvent {
-    msg(HostMsg::Meta { id: SessionId(1), meta })
+    msg(HostMsg::Meta { id: SessionId(1), meta, shell: None })
 }
 
 fn name(screen: &Screen<Fake>) -> &'static str {

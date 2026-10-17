@@ -812,12 +812,12 @@ impl Runner {
             }
             Inbox::Subscribe(subscribe) => self.subscribe(subscribe),
             // 列会话的（推送每两秒轮询一次、桌面的后台会话列表、命令行、手机）都不读 shell 的
-            // 别名和函数，一个会话可能有几十 KB，不带；要它的界面从 `Attached` 和 `Meta` 拿。
+            // PATH 和函数名，函数名可能有几百个，不带；要它们的界面从 `Attached` 和 `Meta` 拿。
             Inbox::Info(reply) => {
                 let _ = reply.send(SessionInfo {
                     id: self.id,
                     size: self.session.size(),
-                    meta: SessionMeta { shell_names: Arc::default(), ..self.session.meta() },
+                    meta: SessionMeta { shell_path: None, shell_names: Arc::default(), ..self.session.meta() },
                     clients: u32::try_from(self.subscribers.len()).unwrap_or(u32::MAX),
                     claimed: self.subscribers.iter().any(|s| s.desktop),
                     exited: self.exited,
@@ -1281,7 +1281,7 @@ impl Runner {
             if self.board_state.replace(state) != Some(state) {
                 self.ui.todo_session_changed(self.id);
             }
-            let event = Event::msg(HostMsg::Meta { id: self.id, meta });
+            let event = Event::msg(HostMsg::Meta { id: self.id, meta, shell: None });
             // 状态不攒：连上时直接给最新的。
             self.subscribers.retain_mut(|s| (s.sink)(event.clone()));
         }

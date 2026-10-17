@@ -20,7 +20,7 @@ fn connect(host: &Host, client: ClientKind, device: Option<&str>) -> Peer {
         protocol: PROTOCOL_VERSION,
         build: BuildId(BUILD.into()),
         client,
-        caps: Caps { snapshot: true, vt_replay: true },
+        caps: Caps { snapshot: true, vt_replay: true, shell_report: false },
         session: None,
         device: device.map(Into::into),
     });

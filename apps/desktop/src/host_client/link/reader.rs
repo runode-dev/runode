@@ -135,7 +135,7 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
                 let _ = inner.control_on(generation, &ClientMsg::UiReply { ui, reply: Box::new(reply) });
             }
         }
-        HostMsg::Attached { id, channel, size, mode, meta, settings } => {
+        HostMsg::Attached { id, channel, size, mode, mut meta, settings, shell } => {
             let Some(route) = state.sessions.get_mut(&id) else {
                 // 等着的时候不看了（`Detach`、`Kill` 已经跟在 `Attach` 后面发出去了）。
                 return;
@@ -146,6 +146,10 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
                 return;
             }
             route.channel = Some(channel);
+            route.shell = shell;
+            if let Some(report) = &route.shell {
+                report.fill(&mut meta);
+            }
             let queued = std::mem::take(&mut route.queued);
             let attached = Attached { id, channel, size, mode, meta, settings };
             let alive = if mode == AttachMode::MetaOnly {
@@ -197,13 +201,16 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
             }
         }
         HostMsg::Error { message, .. } => tracing::warn!("the host reported an error: {message}"),
-        message => {
+        mut message => {
             let Some(id) = session_of(&message) else {
                 tracing::debug!("ignored a message from the host: {message:?}");
                 return;
             };
             let alive = match state.sessions.get_mut(&id) {
-                Some(route) if route.attaching == 0 => route.deliver(LinkEvent::Msg(message)),
+                Some(route) if route.attaching == 0 => {
+                    route.complete_meta(&mut message);
+                    route.deliver(LinkEvent::Msg(message))
+                }
                 // 正连着时旧订阅的消息用不上：新的屏幕和 `Attached` 带着最新的状态。只有会话结束了
                 // 要留着：新的订阅可能连不上（会话已经没了），视图只能靠它知道。
                 Some(route) if matches!(message, HostMsg::Exited { .. }) => {

@@ -77,7 +77,7 @@ import Testing
         #expect(hello["type"] as? String == "hello")
         #expect(hello["client"] as? String == "mobile")
         #expect(hello["device"] as? String == "测试 iPhone")
-        #expect((hello["caps"] as? [String: Bool]) == ["snapshot": false, "vt_replay": true])
+        #expect((hello["caps"] as? [String: Bool]) == ["snapshot": false, "vt_replay": true, "shell_report": true])
         let generation = try #require(await waitReady(&events))
 
         link.send(.listSessions)

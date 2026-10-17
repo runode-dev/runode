@@ -110,7 +110,7 @@ impl Peer {
             protocol: PROTOCOL_VERSION,
             build: BuildId(BUILD.into()),
             client,
-            caps: Caps { snapshot, vt_replay: true },
+            caps: Caps { snapshot, vt_replay: true, shell_report: false },
             session,
             device: None,
         });

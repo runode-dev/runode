@@ -25,15 +25,19 @@ public enum Placement: String, Hashable, Sendable, Codable {
 public struct Caps: Hashable, Sendable, Encodable {
     public var snapshot: Bool
     public var vtReplay: Bool
+    /// 宿主可以把 shell 集成报告的 PATH 和函数名从 `meta` 里拆出来、没变时不发。手机不读这些，说了能省流量。
+    public var shellReport: Bool
 
-    public init(snapshot: Bool, vtReplay: Bool) {
+    public init(snapshot: Bool, vtReplay: Bool, shellReport: Bool) {
         self.snapshot = snapshot
         self.vtReplay = vtReplay
+        self.shellReport = shellReport
     }
 
     enum CodingKeys: String, CodingKey {
         case snapshot
         case vtReplay = "vt_replay"
+        case shellReport = "shell_report"
     }
 }
 

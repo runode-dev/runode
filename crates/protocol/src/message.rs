@@ -29,10 +29,14 @@
 //!
 //! `handoff_compat` 测试里存着格式 1 的样例，永远要读得了。
 
-use std::{fmt, path::PathBuf};
+use std::{ffi::OsString, fmt, path::PathBuf, sync::Arc};
 
 use runode_types::{
-    clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
+    clipboard::ClipboardAccess,
+    grid::GridSize,
+    session::SessionMeta,
+    settings::TermSettings,
+    shell::{IntegrationMode, ShellNames},
 };
 pub use runode_types::{
     session::{InvalidSessionId, SessionId},
@@ -78,6 +82,10 @@ pub struct Caps {
     pub snapshot: bool,
     /// 自己跑着一份 VT，能接 VT 重放（`AttachMode::VtReplay`）。
     pub vt_replay: bool,
+    /// 能自己留着 shell 集成报告的东西：宿主把它从 `SessionMeta` 拆出来放进 `HostMsg::Attached::shell`，
+    /// 之后只在变了时随 `HostMsg::Meta::shell` 再带。为假时宿主照旧每次整份放在 `meta` 里，不认这一项的
+    /// 旧前端靠它读。
+    pub shell_report: bool,
 }
 
 /// 连上会话时要什么。
@@ -417,6 +425,10 @@ pub enum HostMsg {
         meta: SessionMeta,
         #[serde(default)]
         settings: Option<TermSettings>,
+        /// 连接说了 `Caps::shell_report` 时宿主总带着它，`meta` 里的 `shell_path`、`shell_names` 留空；
+        /// 没说的连接，或者宿主比这一项旧时为空，这两项照旧在 `meta` 里。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shell: Option<ShellReport>,
     },
     /// 快照或 VT 重放发完了，之后的 `Output` 帧接着它喂。
     SnapshotEnd {
@@ -438,6 +450,11 @@ pub enum HostMsg {
     Meta {
         id: SessionId,
         meta: SessionMeta,
+        /// 连接说了 `Caps::shell_report` 时，`meta` 里的 `shell_path`、`shell_names` 总是空的，这两项变了
+        /// 才在这里带上；为空是没变，前端沿用上一份（`Attached::shell` 是第一份）。没说的连接照旧
+        /// 整份收在 `meta` 里。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shell: Option<ShellReport>,
     },
     /// shell 集成报告一条命令运行完了，要记进历史时由前端记。
     CommandFinished {
@@ -649,13 +666,66 @@ pub enum Placement {
     Down,
 }
 
+/// shell 集成报告的东西：shell 自己的 PATH 和函数名，对应 `SessionMeta` 的 `shell_path`、
+/// `shell_names`。函数名可能有几百个，宿主只给说了 `Caps::shell_report` 的前端拆出来单独带，没变时
+/// 不再发，见 `HostMsg::Meta::shell`。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShellReport {
+    /// PATH 是合法的 UTF-8 时写成字符串，不是时才照 `OsString` 的写法写成一串字节。
+    #[serde(with = "os_text")]
+    pub path: Option<OsString>,
+    pub names: Arc<ShellNames>,
+}
+
+impl ShellReport {
+    /// 从 `meta` 里拿出这两项，`meta` 里留空。
+    pub fn take(meta: &mut SessionMeta) -> Self {
+        Self { path: meta.shell_path.take(), names: std::mem::take(&mut meta.shell_names) }
+    }
+
+    /// 放回 `meta` 里。
+    pub fn fill(&self, meta: &mut SessionMeta) {
+        meta.shell_path.clone_from(&self.path);
+        meta.shell_names = Arc::clone(&self.names);
+    }
+}
+
+/// `ShellReport::path` 的写法：合法 UTF-8 时是字符串，否则照 serde 给 `OsString` 的默认写法；两种都读。
+mod os_text {
+    use std::ffi::OsString;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(value: &Option<OsString>, serializer: S) -> Result<S::Ok, S::Error> {
+        match value.as_deref().map(|os| os.to_str().ok_or(os)) {
+            Some(Ok(text)) => serializer.serialize_str(text),
+            Some(Err(os)) => os.serialize(serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<OsString>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Either {
+            Text(String),
+            Os(OsString),
+        }
+        Ok(Option::<Either>::deserialize(deserializer)?.map(|either| match either {
+            Either::Text(text) => text.into(),
+            Either::Os(os) => os,
+        }))
+    }
+}
+
 /// `SessionList` 里的一个会话。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub id: SessionId,
     pub size: GridSize,
-    /// 会话对外公布的状态，只是 `shell_names` 总是空的：列会话的都用不着，要它的从 `Attached`
-    /// 和 `Meta` 拿。
+    /// 会话对外公布的状态，只是 `shell_path`、`shell_names` 总是空的：列会话的都用不着，要它们的
+    /// 从 `Attached` 和 `Meta` 拿。
     pub meta: SessionMeta,
     /// 现在连着它的前端有几个。
     #[serde(default)]

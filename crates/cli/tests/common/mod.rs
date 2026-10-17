@@ -137,7 +137,7 @@ pub fn session(id: SessionId, meta: SessionMeta) -> SessionInfo {
 
 /// 状态变成 `state` 的 `Meta`。
 pub fn agent_now(id: SessionId, state: AgentState) -> HostMsg {
-    HostMsg::Meta { id, meta: meta("agent", Some((AgentKind::Claude, state))) }
+    HostMsg::Meta { id, meta: meta("agent", Some((AgentKind::Claude, state))), shell: None }
 }
 
 /// 收到过的控制消息，等连接上的消息都到了再取。

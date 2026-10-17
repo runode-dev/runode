@@ -315,7 +315,7 @@ fn a_pending_snapshot_does_not_resync_the_session() {
     };
     out.push(FrameKind::Snapshot, 1, vec![0; MOBILE_OUTBOX_LIMIT + 1].into());
     assert!(matches!(rx.recv().unwrap(), Out::Frame { kind: FrameKind::Snapshot, .. }));
-    let mut sink = session_sink(id, 1, false, out.clone());
+    let mut sink = session_sink(id, 1, false, None, out.clone());
     assert!(sink(Event::msg(HostMsg::SizeOwner { id, mine: true, owner: None })));
     assert!(matches!(control(rx.recv().unwrap()), HostMsg::SizeOwner { .. }));
     assert!(out.backed_up());
@@ -323,6 +323,48 @@ fn a_pending_snapshot_does_not_resync_the_session() {
     rx.recv().unwrap();
     assert!(!sink(Event::msg(HostMsg::Bell { id })));
     assert!(matches!(control(rx.recv().unwrap()), HostMsg::Resync { .. }));
+}
+
+/// 说了 `Caps::shell_report` 的连接：`Meta` 里的 shell 集成报告拆出来，和上一次发的一样就不带；
+/// 没说的照旧整份放在 `meta` 里。
+#[test]
+fn meta_carries_the_shell_report_only_when_it_changes() {
+    use runode_types::{session::SessionMeta, shell::ShellNames};
+
+    let (tx, rx) = mpsc::channel();
+    let out = Outbox { tx, queued: Arc::default(), limit: MOBILE_OUTBOX_LIMIT };
+    let id = SessionId(1);
+    let next = || match rx.recv().unwrap() {
+        Out::Frame { kind: FrameKind::Control, channel, payload } => {
+            match (Frame { kind: FrameKind::Control, channel, payload: payload.to_vec() }).message::<HostMsg>().unwrap()
+            {
+                HostMsg::Meta { meta, shell, .. } => (meta, shell),
+                other => panic!("expected meta, got {other:?}"),
+            }
+        }
+        _ => panic!("expected a control frame"),
+    };
+    let names = Arc::new(ShellNames { functions: vec!["runode-reload".into()] });
+    let meta = |path: &str, title: &str| SessionMeta {
+        title: Some(title.into()),
+        shell_path: Some(path.into()),
+        shell_names: names.clone(),
+        ..SessionMeta::default()
+    };
+    let stripped = |title: &str| SessionMeta { title: Some(title.into()), ..SessionMeta::default() };
+    let report = |path: &str| ShellReport { path: Some(path.into()), names: names.clone() };
+
+    let mut sink = session_sink(id, 1, true, Some(report("/bin")), out.clone());
+    assert!(sink(Event::msg(HostMsg::Meta { id, meta: meta("/bin", "a"), shell: None })));
+    assert_eq!(next(), (stripped("a"), None));
+    assert!(sink(Event::msg(HostMsg::Meta { id, meta: meta("/opt/bin", "a"), shell: None })));
+    assert_eq!(next(), (stripped("a"), Some(report("/opt/bin"))));
+    assert!(sink(Event::msg(HostMsg::Meta { id, meta: meta("/opt/bin", "b"), shell: None })));
+    assert_eq!(next(), (stripped("b"), None));
+
+    let mut legacy = session_sink(id, 2, true, None, out);
+    assert!(legacy(Event::msg(HostMsg::Meta { id, meta: meta("/bin", "a"), shell: None })));
+    assert_eq!(next(), (meta("/bin", "a"), None));
 }
 
 /// 发请求的连接断开后，它转给界面、界面还没回话的请求跟着撤掉；界面之后再回话也只是丢掉。

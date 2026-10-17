@@ -2,8 +2,8 @@
 
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, Frame, FrameKind, GoodbyeReason, HandoffRefusal,
-    HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, TabLayout, TaskEntry, TaskSource, TaskSourceKind,
-    WindowLayout, WorkspaceLayout,
+    HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, ShellReport, TabLayout, TaskEntry, TaskSource,
+    TaskSourceKind, WindowLayout, WorkspaceLayout,
     message::InvalidSessionId,
     push::ApnsEnv,
     read_frame,
@@ -16,7 +16,7 @@ use runode_types::{
     grid::GridSize,
     session::{DriveAction, Driver, SessionMeta},
     settings::TermSettings,
-    shell::{IntegrationMode, Shell},
+    shell::{IntegrationMode, Shell, ShellNames},
 };
 use serde::Serialize;
 
@@ -39,6 +39,15 @@ fn meta() -> SessionMeta {
 }
 
 /// 一个窗口、两个工作区，当前标签里左右两个分屏。
+fn shell_report(path: &[u8]) -> ShellReport {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    ShellReport {
+        path: Some(std::ffi::OsStr::from_bytes(path).to_owned()),
+        names: ShellNames { functions: vec!["runode-reload".into()] }.into(),
+    }
+}
+
 fn layout() -> Vec<WindowLayout> {
     let pane = |index, id, x, focused| PaneLayout {
         index,
@@ -131,7 +140,7 @@ fn client_messages_round_trip() {
             protocol: runode_protocol::PROTOCOL_VERSION,
             build: BuildId("0.1.0+abc".into()),
             client: ClientKind::Desktop,
-            caps: Caps { snapshot: true, vt_replay: true },
+            caps: Caps { snapshot: true, vt_replay: true, shell_report: true },
             session: None,
             device: Some("Ethan 的 MacBook".into()),
         },
@@ -312,6 +321,7 @@ fn host_messages_round_trip() {
             mode: AttachMode::VtReplay,
             meta: meta(),
             settings: None,
+            shell: None,
         },
         HostMsg::Attached {
             id: ID,
@@ -320,6 +330,7 @@ fn host_messages_round_trip() {
             mode: AttachMode::Snapshot,
             meta: SessionMeta::default(),
             settings: Some(TermSettings::default()),
+            shell: Some(shell_report(b"/usr/bin:/bin")),
         },
         HostMsg::SnapshotEnd { id: ID },
         HostMsg::Resized { id: ID, size: size() },
@@ -327,7 +338,9 @@ fn host_messages_round_trip() {
             id: ID,
             settings: TermSettings { scrollback_limit: 4 << 20, ..TermSettings::default() },
         },
-        HostMsg::Meta { id: ID, meta: SessionMeta::default() },
+        HostMsg::Meta { id: ID, meta: SessionMeta::default(), shell: None },
+        // PATH 不是合法的 UTF-8 时也原样带过去。
+        HostMsg::Meta { id: ID, meta: meta(), shell: Some(shell_report(b"/opt/\xff/bin")) },
         HostMsg::CommandFinished {
             id: ID,
             command: FinishedCommand { cmd: "ls -la".into(), cwd: Some("/".into()), exit: Some(0), ts: 1_790_000_000 },
@@ -419,6 +432,43 @@ fn the_wire_format_is_readable_json() {
     assert_eq!(json, r#"{"type":"attach","id":"0123456789abcdef0011223344556677","size":null,"mode":"meta_only"}"#);
     let json = serde_json::to_string(&HostMsg::Goodbye { reason: GoodbyeReason::Shutdown }).unwrap();
     assert_eq!(json, r#"{"type":"goodbye","reason":{"kind":"shutdown"}}"#);
+}
+
+/// 拆出来的 PATH 写成字符串，不是 `OsString` 那串数字；`Meta` 里没拆的旧写法照样读，不带 `shell`。
+#[test]
+fn shell_report_wire_format() {
+    let json = serde_json::to_value(HostMsg::Meta {
+        id: ID,
+        meta: SessionMeta::default(),
+        shell: Some(shell_report(b"/bin")),
+    })
+    .unwrap();
+    assert_eq!(json["shell"]["path"], "/bin");
+    assert_eq!(json["shell"]["names"]["functions"][0], "runode-reload");
+    // 拆走后 `meta` 里不再写这两项。
+    assert!(json["meta"].get("shell_path").is_none() && json["meta"].get("shell_names").is_none());
+    let old: HostMsg = serde_json::from_str(
+        r#"{"type":"meta","id":"0123456789abcdef0011223344556677",
+            "meta":{"shell_path":{"Unix":[47,98,105,110]},"shell_names":{"functions":["f"]}}}"#,
+    )
+    .unwrap();
+    let HostMsg::Meta { meta, shell: None, .. } = old else { panic!("not a meta without shell: {old:?}") };
+    assert_eq!(meta.shell_path, Some("/bin".into()));
+    // 照 `OsString` 的写法写的 PATH 也读得了。
+    let report: ShellReport = serde_json::from_str(r#"{"path":{"Unix":[47,255]}}"#).unwrap();
+    assert_eq!(report, ShellReport { path: shell_report(b"/\xff").path, names: Default::default() });
+}
+
+#[test]
+fn shell_report_moves_in_and_out_of_meta() {
+    let mut meta =
+        SessionMeta { shell_path: shell_report(b"/bin").path, shell_names: shell_report(b"").names, ..meta() };
+    let full = meta.clone();
+    let report = ShellReport::take(&mut meta);
+    assert_eq!(report, shell_report(b"/bin"));
+    assert_eq!(meta, SessionMeta { shell_path: None, shell_names: Default::default(), ..full.clone() });
+    report.fill(&mut meta);
+    assert_eq!(meta, full);
 }
 
 #[test]

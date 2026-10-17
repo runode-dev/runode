@@ -114,7 +114,7 @@ fn wait_for_meta(peer: &Peer, id: SessionId, wanted: impl Fn(&SessionMeta) -> bo
     loop {
         let frame = peer.next_frame(deadline.saturating_duration_since(Instant::now())).expect("timed out");
         if frame.kind == FrameKind::Control
-            && let HostMsg::Meta { id: changed, meta } = frame.message().unwrap()
+            && let HostMsg::Meta { id: changed, meta, .. } = frame.message().unwrap()
             && changed == id
             && wanted(&meta)
         {

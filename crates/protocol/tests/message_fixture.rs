@@ -7,8 +7,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, FinishedCommand,
-    GoodbyeReason, HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, TabLayout, TaskEntry, TaskSource,
-    TaskSourceKind, WindowLayout, WorkspaceLayout,
+    GoodbyeReason, HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, ShellReport, TabLayout, TaskEntry,
+    TaskSource, TaskSourceKind, WindowLayout, WorkspaceLayout,
     git::{
         GitBranch, GitFile, GitFileDiff, GitFileStatus, GitHunk, GitLine, GitLineKind, GitOperation, GitRequest,
         GitStatus,
@@ -160,7 +160,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 protocol: 4,
                 build: BuildId("ios-0.1.0+1".into()),
                 client: ClientKind::Mobile,
-                caps: Caps { snapshot: false, vt_replay: true },
+                caps: Caps { snapshot: false, vt_replay: true, shell_report: true },
                 session: None,
                 device: Some("Ethan 的 iPhone".into()),
             },
@@ -268,7 +268,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 sessions: vec![SessionInfo {
                     id: ID,
                     size: size(),
-                    meta: meta(),
+                    meta: SessionMeta { shell_path: None, shell_names: Default::default(), ..meta() },
                     clients: 2,
                     claimed: true,
                     exited: false,
@@ -284,14 +284,15 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 channel: 7,
                 size: size(),
                 mode: AttachMode::VtReplay,
-                meta: meta(),
+                meta: SessionMeta { shell_path: None, shell_names: Default::default(), ..meta() },
                 settings: Some(TermSettings::default()),
+                shell: Some(ShellReport { path: meta().shell_path, names: meta().shell_names }),
             },
         ),
         ("snapshot_end", HostMsg::SnapshotEnd { id: ID }),
         ("resized", HostMsg::Resized { id: ID, size: size() }),
         ("theme_applied", HostMsg::ThemeApplied { id: ID, settings: custom_settings() }),
-        ("meta", HostMsg::Meta { id: ID, meta: SessionMeta::default() }),
+        ("meta", HostMsg::Meta { id: ID, meta: SessionMeta::default(), shell: None }),
         (
             "command_finished",
             HostMsg::CommandFinished {

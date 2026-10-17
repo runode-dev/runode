@@ -41,7 +41,7 @@ fn agent(state: AgentState) -> SessionMeta {
 }
 
 fn attached(id: runode_protocol::SessionId, meta: SessionMeta) -> HostMsg {
-    HostMsg::Attached { id, channel: 7, size: SIZE, mode: AttachMode::MetaOnly, meta, settings: None }
+    HostMsg::Attached { id, channel: 7, size: SIZE, mode: AttachMode::MetaOnly, meta, settings: None, shell: None }
 }
 
 fn socket(fake: &FakeHost) -> PathBuf {

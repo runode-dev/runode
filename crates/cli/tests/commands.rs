@@ -27,6 +27,7 @@ fn host(name: &str, state: Option<AgentState>, then: Vec<AgentState>) -> FakeHos
                 mode: AttachMode::MetaOnly,
                 meta: meta("claude here", state.map(|state| (AgentKind::Claude, state))),
                 settings: None,
+                shell: None,
             }];
             replies.extend(then.iter().map(|&state| agent_now(*id, state)));
             replies
@@ -193,6 +194,7 @@ fn wait_reports_an_exited_session() {
                 mode: AttachMode::MetaOnly,
                 meta: meta("x", Some((AgentKind::Codex, AgentState::Working))),
                 settings: None,
+                shell: None,
             },
             HostMsg::Exited { id: *id, status: None },
         ],

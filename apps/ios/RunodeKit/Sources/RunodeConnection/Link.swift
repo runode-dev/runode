@@ -143,7 +143,7 @@ public struct ClientIdentity: Hashable, Sendable {
     /// 连上后的第一条消息：手机，只要 VT 重放。
     public var hello: ClientMsg {
         .hello(
-            protocol: protocolVersion, build: build, client: .mobile, caps: Caps(snapshot: false, vtReplay: true),
-            session: nil, device: deviceName)
+            protocol: protocolVersion, build: build, client: .mobile,
+            caps: Caps(snapshot: false, vtReplay: true, shellReport: true), session: nil, device: deviceName)
     }
 }

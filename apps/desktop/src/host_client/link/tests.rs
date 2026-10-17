@@ -266,7 +266,7 @@ fn frames_between_attach_and_attached_are_dropped() {
     assert!(link.reattach(id, None, AttachMode::Snapshot));
     output(&link.inner, 0, 1, b"stale".to_vec());
     dispatch(&link.inner, 0, HostMsg::Resized { id, size: SIZE });
-    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default() });
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default(), shell: None });
     assert!(rx.try_recv().is_err(), "nothing reaches the view while attaching");
     dispatch(
         &link.inner,
@@ -278,6 +278,7 @@ fn frames_between_attach_and_attached_are_dropped() {
             mode: AttachMode::Snapshot,
             meta: SessionMeta::default(),
             settings: None,
+            shell: None,
         },
     );
     snapshot(&link.inner, 0, 2, b"snap");
@@ -309,13 +310,65 @@ fn two_attaches_in_a_row_wait_for_the_second_attached() {
         mode: AttachMode::MetaOnly,
         meta: SessionMeta::default(),
         settings: None,
+        shell: None,
     };
     dispatch(&link.inner, 0, attached(1));
-    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default() });
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default(), shell: None });
     assert!(rx.try_recv().is_err());
     dispatch(&link.inner, 0, attached(2));
     let LinkEvent::Screen(screen) = rx.try_recv().unwrap() else { panic!("expected the screen") };
     assert_eq!(screen.attached.channel, 2);
+}
+
+/// 宿主拆出来单独发的 shell 集成报告装回 `meta`：`Attached` 带的是第一份，`Meta` 没带时沿用上一份；
+/// 不拆的旧宿主发来的 `Meta` 原样交出去。
+#[test]
+fn meta_gets_back_the_shell_report() {
+    let link = Link::new(BuildId(BUILD.into()));
+    link.inner.state().connected = true;
+    let id = SessionId(1);
+    let report = |path: &str| ShellReport {
+        path: Some(path.into()),
+        names: Arc::new(runode_types::shell::ShellNames { functions: vec!["runode-reload".into()] }),
+    };
+    let full = |path: &str| {
+        let mut meta = SessionMeta::default();
+        report(path).fill(&mut meta);
+        meta
+    };
+    let attached = |shell| HostMsg::Attached {
+        id,
+        channel: 1,
+        size: SIZE,
+        mode: AttachMode::MetaOnly,
+        meta: SessionMeta::default(),
+        settings: None,
+        shell,
+    };
+    let meta = |rx: &mut UnboundedReceiver<LinkEvent>| match rx.try_recv() {
+        Ok(LinkEvent::Msg(HostMsg::Meta { meta, shell: None, .. })) => meta,
+        other => panic!("expected meta, got {other:?}"),
+    };
+
+    let mut rx = link.attach(id, None, AttachMode::MetaOnly);
+    dispatch(&link.inner, 0, attached(Some(report("/bin"))));
+    let LinkEvent::Screen(screen) = rx.try_recv().unwrap() else { panic!("expected the screen") };
+    assert_eq!(screen.attached.meta, full("/bin"));
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default(), shell: None });
+    assert_eq!(meta(&mut rx), full("/bin"));
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default(), shell: Some(report("/opt/bin")) });
+    assert_eq!(meta(&mut rx), full("/opt/bin"));
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default(), shell: None });
+    assert_eq!(meta(&mut rx), full("/opt/bin"));
+
+    // 旧宿主：`Attached` 不带，`Meta` 里本来就是整份的。
+    assert!(link.reattach(id, None, AttachMode::MetaOnly));
+    dispatch(&link.inner, 0, attached(None));
+    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Screen(_))));
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: full("/usr/bin"), shell: None });
+    assert_eq!(meta(&mut rx), full("/usr/bin"));
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default(), shell: None });
+    assert_eq!(meta(&mut rx), SessionMeta::default());
 }
 
 /// 连着、已经连上会话 `id`（通道 1）的 `Link`，返回收这个会话事件的一端。
@@ -359,7 +412,7 @@ fn an_exit_while_reattaching_reaches_the_view() {
     let id = SessionId(1);
     let (link, mut rx) = attached_link(id);
     assert!(link.reattach(id, None, AttachMode::Snapshot));
-    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default() });
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default(), shell: None });
     dispatch(&link.inner, 0, HostMsg::Exited { id, status: None });
     assert!(rx.try_recv().is_err(), "nothing reaches the view while attaching");
     dispatch(&link.inner, 0, HostMsg::Error { req: None, id: Some(id), message: format!("no session {id}") });
@@ -383,6 +436,7 @@ fn an_exit_while_attaching_follows_the_new_screen() {
         mode,
         meta: SessionMeta::default(),
         settings: None,
+        shell: None,
     };
     dispatch(&link.inner, 0, attached(2, AttachMode::Snapshot));
     snapshot(&link.inner, 0, 2, b"snap");

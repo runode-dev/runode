@@ -105,7 +105,7 @@ impl PairDesktop {
             protocol: PROTOCOL_VERSION,
             build: BuildId(common::BUILD.into()),
             client: ClientKind::Desktop,
-            caps: Caps { snapshot: true, vt_replay: true },
+            caps: Caps { snapshot: true, vt_replay: true, shell_report: false },
             session: None,
             device: None,
         });

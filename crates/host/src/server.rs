@@ -45,8 +45,8 @@ use std::{
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, Frame, FrameError, FrameKind, GoodbyeReason,
-    HANDOFF_FORMAT, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo, WindowLayout, git::GitRequest, read_frame,
-    write_frame,
+    HANDOFF_FORMAT, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo, ShellReport, WindowLayout, git::GitRequest,
+    read_frame, write_frame,
 };
 use runode_terminal::pty;
 use runode_types::{grid::GridSize, input::parse_key_list, session::DriveAction};
@@ -741,6 +741,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         by: None,
         device: None,
         snapshots: false,
+        shell_report: false,
         channels: HashMap::new(),
         next_channel: 1,
         waiting: Waiting::default(),
@@ -930,6 +931,8 @@ struct Connection {
     device: Option<String>,
     /// 前端解得了快照：自己说能解，构建也和宿主一样。
     snapshots: bool,
+    /// 前端说了 `Caps::shell_report`：shell 集成报告的东西拆出来单独发，没变时不发。
+    shell_report: bool,
     /// 连着的会话，按通道。
     channels: HashMap<u32, SessionId>,
     next_channel: u32,
@@ -983,6 +986,7 @@ impl Connection {
         self.by = session;
         self.device = device;
         self.snapshots = caps.snapshot && build == self.shared.build;
+        self.shell_report = caps.shell_report;
         // 登记界面和回 `Welcome` 在同一把锁里做：界面收到 `Welcome` 后，别的连接转来的请求一定
         // 交给它；别的连接也只有在 `Welcome` 排进 `Outbox` 之后才看得到它，请求不会抢在前面。
         let mut peers = self.shared.peers();
@@ -1363,15 +1367,19 @@ impl Connection {
         let channel = self.next_channel;
         self.next_channel = self.next_channel.checked_add(1).unwrap_or(1);
         let out = self.out.clone();
+        let shell_report = self.shell_report;
         let start = Box::new(move |screen: Screen| {
             let meta_only = screen.mode == AttachMode::MetaOnly;
+            let mut meta = screen.meta;
+            let shell = shell_report.then(|| ShellReport::take(&mut meta));
             let attached = HostMsg::Attached {
                 id,
                 channel,
                 size: screen.size,
                 mode: screen.mode,
-                meta: screen.meta,
+                meta,
                 settings: Some(screen.settings),
+                shell: shell.clone(),
             };
             if !out.control(&attached) {
                 return None;
@@ -1382,7 +1390,7 @@ impl Connection {
                 }
                 out.control(&HostMsg::SnapshotEnd { id });
             }
-            Some(session_sink(id, channel, meta_only, out))
+            Some(session_sink(id, channel, meta_only, shell, out))
         });
         let desktop = self.kind == ClientKind::Desktop;
         let device = self.device.clone();
@@ -1536,8 +1544,15 @@ fn check_size(size: GridSize) -> Result<(), String> {
 }
 
 /// 一个会话往这条连接发事件的 `EventSink`。`MetaOnly` 的前端没有 VT，只要状态（含 `Bell`），
-/// 不要输出和改 VT 的标记。
-fn session_sink(id: SessionId, channel: u32, meta_only: bool, out: Outbox) -> EventSink {
+/// 不要输出和改 VT 的标记。`shell` 是前端说了 `Caps::shell_report` 时最近一次发给它的 shell 集成
+/// 报告（`Attached` 里的那份起头）：`Meta` 里的这部分拆出来，和它一样就不带。
+fn session_sink(
+    id: SessionId,
+    channel: u32,
+    meta_only: bool,
+    mut shell: Option<ShellReport>,
+    out: Outbox,
+) -> EventSink {
     // 积压过了上限时不再往里排，叫前端重新 Attach；返回 false 让会话摘掉这个 sink。状态消息也一样管：
     // 只看状态的前端（手机挂起了、TCP 还没断）读不动时，频繁改标题的程序每次都发一整份 `SessionMeta`，
     // 不管的话队列无上限地涨。重新 Attach 时拿到最新状态。
@@ -1553,12 +1568,19 @@ fn session_sink(id: SessionId, channel: u32, meta_only: bool, out: Outbox) -> Ev
             }
             out.push(FrameKind::Output, channel, data)
         }
-        Event::Msg(message) => {
+        Event::Msg(mut message) => {
             if meta_only && matches!(*message, HostMsg::Resized { .. } | HostMsg::ThemeApplied { .. }) {
                 return true;
             }
             if out.streaming_backed_up() {
                 return resync(&out);
+            }
+            if let (Some(sent), HostMsg::Meta { meta, shell: carried, .. }) = (&mut shell, &mut *message) {
+                let report = ShellReport::take(meta);
+                if report != *sent {
+                    *sent = report.clone();
+                    *carried = Some(report);
+                }
             }
             out.control(&message)
         }

@@ -815,7 +815,7 @@ fn a_shutdown_waits_for_its_goodbye_to_be_written() {
         protocol: PROTOCOL_VERSION,
         build: BuildId(BUILD.into()),
         client: ClientKind::Cli,
-        caps: Caps { snapshot: false, vt_replay: true },
+        caps: Caps { snapshot: false, vt_replay: true, shell_report: false },
         session: None,
         device: None,
     };

@@ -26,9 +26,11 @@ pub struct SessionMeta {
     pub foreground_is_shell: bool,
     /// shell 集成报告的 shell 自己的 PATH；界面找用户装的命令行工具（gh）时用。PATH 不一定是合法的 UTF-8，
     /// 所以按操作系统的字符串存。
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_path: Option<OsString>,
-    /// shell 集成报告的函数名。列表可能很长，状态每次变了都要整份交出去，所以共享着放：名字没变时
+    /// shell 集成报告的函数名。列表可能很长，状态每次变了都要拷一份，所以共享着放：名字没变时
     /// 各份状态指向同一份，不必每次深拷贝。
+    #[serde(skip_serializing_if = "no_names")]
     pub shell_names: Arc<ShellNames>,
     /// 前台程序的名字（进程名，不带路径）；还没启动、读不到时为 `None`。
     pub foreground: Option<String>,
@@ -36,6 +38,11 @@ pub struct SessionMeta {
     pub driver: Option<Driver>,
     /// shell 的进程号；还没启动时为 `None`。界面按它把进程和监听的端口归到终端上。
     pub pid: Option<u32>,
+}
+
+/// 没有函数名时不写出来，读的一方按默认值读回同样的空表。
+fn no_names(names: &Arc<ShellNames>) -> bool {
+    **names == ShellNames::default()
 }
 
 /// 别的终端里的程序操作了这个会话：谁、做了什么、什么时候。

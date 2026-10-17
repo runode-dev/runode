@@ -50,7 +50,7 @@ use anyhow::{Result, anyhow};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, Frame, FrameError, FrameKind, HostMsg, PROTOCOL_VERSION,
-    SessionId, SessionInfo, TaskSource, WindowLayout, read_frame, write_frame,
+    SessionId, SessionInfo, ShellReport, TaskSource, WindowLayout, read_frame, write_frame,
 };
 use runode_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
@@ -227,6 +227,9 @@ struct Route {
     first_screen: Option<mpsc::Sender<Result<Screen, String>>>,
     /// 正连着时收到的 `Exited`，等这次连上（或者没连成）后交出去，见 `Route::settle`。
     exited: Option<HostMsg>,
+    /// 宿主拆出来单独发的 shell 集成报告，最近收到的那份（见 `Caps::shell_report`）；不拆的旧宿主
+    /// 发来的 `Attached` 不带，为 `None` 时 `Meta` 照原样交出去。
+    shell: Option<ShellReport>,
 }
 
 impl Route {
@@ -239,6 +242,20 @@ impl Route {
             queued: Vec::new(),
             first_screen: None,
             exited: None,
+            shell: None,
+        }
+    }
+
+    /// 宿主拆出来的 shell 集成报告装回 `Meta` 里：带着的换上，没带的沿用上一份。视图收到的
+    /// `SessionMeta` 总是整份的。
+    fn complete_meta(&mut self, message: &mut HostMsg) {
+        if let HostMsg::Meta { meta, shell, .. } = message {
+            if let Some(report) = shell.take() {
+                self.shell = Some(report);
+            }
+            if let Some(report) = &self.shell {
+                report.fill(meta);
+            }
         }
     }
 
@@ -817,7 +834,7 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
         protocol: PROTOCOL_VERSION,
         build: build.clone(),
         client: ClientKind::Desktop,
-        caps: Caps { snapshot: true, vt_replay: true },
+        caps: Caps { snapshot: true, vt_replay: true, shell_report: true },
         session: None,
         device: device_name(),
     };

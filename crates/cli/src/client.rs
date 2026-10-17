@@ -104,7 +104,8 @@ impl Connection {
             protocol: PROTOCOL_VERSION,
             build: BuildId(env.build.clone()),
             client: ClientKind::Cli,
-            caps: Caps::default(),
+            // 用不着 shell 集成报告的 PATH 和函数名，没变时不必再收。
+            caps: Caps { shell_report: true, ..Caps::default() },
             // 宿主据此记下是哪个终端里的程序在操作别的终端，见 `SessionMeta::driver`。
             session: env.session.as_deref().and_then(|own| own.parse().ok()),
             // 命令行不决定会话的尺寸，用不着设备名。

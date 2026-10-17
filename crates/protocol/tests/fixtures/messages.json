@@ -43,28 +43,6 @@
         "foreground_is_shell": false,
         "pid": 4242,
         "prompt_cwd": "/tmp",
-        "shell_names": {
-          "functions": [
-            "runode-reload"
-          ]
-        },
-        "shell_path": {
-          "Unix": [
-            47,
-            117,
-            115,
-            114,
-            47,
-            98,
-            105,
-            110,
-            58,
-            47,
-            98,
-            105,
-            110
-          ]
-        },
         "title": "修 bug"
       },
       "mode": "vt_replay",
@@ -248,6 +226,14 @@
         "shell_features": {
           "cursor": true
         }
+      },
+      "shell": {
+        "names": {
+          "functions": [
+            "runode-reload"
+          ]
+        },
+        "path": "/usr/bin:/bin"
       },
       "size": {
         "cell_height_px": 32,
@@ -508,6 +494,7 @@
     "hello": {
       "build": "ios-0.1.0+1",
       "caps": {
+        "shell_report": true,
         "snapshot": false,
         "vt_replay": true
       },
@@ -641,10 +628,6 @@
         "foreground_is_shell": false,
         "pid": null,
         "prompt_cwd": null,
-        "shell_names": {
-          "functions": []
-        },
-        "shell_path": null,
         "title": null
       },
       "type": "meta"
@@ -790,28 +773,6 @@
             "foreground_is_shell": false,
             "pid": 4242,
             "prompt_cwd": "/tmp",
-            "shell_names": {
-              "functions": [
-                "runode-reload"
-              ]
-            },
-            "shell_path": {
-              "Unix": [
-                47,
-                117,
-                115,
-                114,
-                47,
-                98,
-                105,
-                110,
-                58,
-                47,
-                98,
-                105,
-                110
-              ]
-            },
             "title": "修 bug"
           },
           "size": {

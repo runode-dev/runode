@@ -53,8 +53,9 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             switch name {
             case "hello":
                 .hello(
-                    protocol: 4, build: "ios-0.1.0+1", client: .mobile, caps: Caps(snapshot: false, vtReplay: true),
-                    session: nil, device: "Ethan 的 iPhone")
+                    protocol: 4, build: "ios-0.1.0+1", client: .mobile,
+                    caps: Caps(snapshot: false, vtReplay: true, shellReport: true), session: nil,
+                    device: "Ethan 的 iPhone")
             case "list": .listSessions
             case "layout_request": .layout(req: 0)
             case "open": .open(req: 7, placement: .tab, near: nil, cwd: nil, focus: false)
@@ -114,7 +115,9 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     /// 回来对一遍这张表。
     @Test func mobileSendsOnlyAllowedKinds() throws {
         let samples: [ClientMsg] = [
-            .hello(protocol: 4, build: "b", client: .mobile, caps: Caps(snapshot: false, vtReplay: true), session: nil, device: nil),
+            .hello(
+                protocol: 4, build: "b", client: .mobile, caps: Caps(snapshot: false, vtReplay: true, shellReport: true),
+                session: nil, device: nil),
             .listSessions, .layout(req: 0), .open(req: 1, placement: .tab, near: id, cwd: "/tmp", focus: false),
             .openWorkspace(req: 1, dir: "/tmp", focus: false),
             .renameWorkspace(req: 1, window: 1, workspace: 1, name: "a"), .listDirs(req: 1, path: nil),
