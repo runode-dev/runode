@@ -503,7 +503,7 @@ public final class TerminalModel {
                 autoFit = mine
                 applySizeMode(wasFitting: wasFitting)
             }
-        case .error(_, _, let message) where awaitingAttach && message.hasPrefix("the connection is backed up"):
+        case .error(_, _, let message) where awaitingAttach && message.hasPrefix(HostMsg.backedUpPrefix):
             // 宿主那边这条连接还积压着（多半刚因此发来 `Resync`），不接新的订阅：等它发完再连。
             let rejoin = rejoin
             let generation = generation
@@ -514,7 +514,7 @@ public final class TerminalModel {
                 else { return }
                 self.attach(rejoin)
             }
-        case .error(_, _, let message) where awaitingAttach && message.hasPrefix("no session"):
+        case .error(_, _, let message) where awaitingAttach && message.hasPrefix(HostMsg.noSessionPrefix):
             // 宿主说没有这个会话。同一条连接上会话列表读预览出错（读屏幕超时之类）也回不带编号、带着
             // 会话的 `Error`，那些不算会话结束。
             awaitingAttach = false

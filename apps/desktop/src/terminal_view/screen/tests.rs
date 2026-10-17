@@ -411,7 +411,7 @@ fn bells_ring_with_or_without_the_view_vt() {
 
 #[test]
 fn a_failed_attach_means_the_session_is_gone() {
-    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: "no session".into() };
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: format!("{ERROR_NO_SESSION} 1") };
     // 平常连不成（会话被命令行结束了，它的 `Exited` 在连的时候被丢掉了）：按 shell 退出，关掉终端。
     let mut h = Harness::live(b"");
     h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
@@ -435,6 +435,60 @@ fn a_failed_attach_means_the_session_is_gone() {
     let changes = h.apply(vec![msg(error)]);
     assert!(!changes.lost && !changes.exited);
     assert_eq!(name(h.state.screen()), "Live");
+}
+
+/// 宿主以积压拒了 `Attach`：会话还在，冻结着那一屏接着等，过一会儿照原样再连一次。
+#[test]
+fn a_backed_up_attach_is_retried() {
+    let mut h = Harness::live(b"old");
+    h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: ERROR_BACKED_UP.into() };
+    let changes = h.apply(vec![msg(error)]);
+    assert!(changes.retry_attach && !changes.exited && !changes.lost);
+    assert_eq!(name(h.state.screen()), "Attaching(keep)");
+    assert_eq!(h.state.retry_attach(), SNAPSHOT);
+    assert_eq!(h.state.retry_attach(), None, "one retry per rejection");
+    h.apply(vec![screen(AttachMode::Snapshot, 2, SessionMeta::default(), b"new")]);
+    assert_eq!(h.state.retry_attach(), None);
+}
+
+/// 被积压拒掉后、重发之前另发了 `Attach`（这里是不显示满了宽限）：到点时不再重发，那一个还在路上。
+#[test]
+fn a_backed_up_attach_replaced_meanwhile_is_not_sent_again() {
+    let mut h = Harness::live(b"old");
+    h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: ERROR_BACKED_UP.into() };
+    assert!(h.apply(vec![msg(error)]).retry_attach);
+    h.state.set_visible(false, h.now);
+    assert_eq!(h.state.tick(h.now + HIDE_GRACE), META_ONLY);
+    assert_eq!(h.state.retry_attach(), None);
+}
+
+/// 第一次连会话就被积压拒了（`TerminalView::connect` 等）：显示着等屏幕，照原样不带尺寸再连。
+#[test]
+fn a_first_attach_backed_up_is_retried_without_a_size() {
+    let mut state: ScreenState<Fake> = ScreenState::new_attaching(AttachMode::Snapshot, SIZE, Instant::now());
+    assert!(state.is_attaching());
+    let alive = Rc::new(Cell::new(0));
+    let mut build = |screen: HostScreen| Ok(Fake::new(&screen.data, &alive));
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: ERROR_BACKED_UP.into() };
+    let changes = state.apply(vec![msg(error)], &mut build, Instant::now());
+    assert!(changes.retry_attach && !changes.exited && !changes.lost);
+    assert_eq!(state.retry_attach(), SNAPSHOT);
+    state.apply(vec![screen(AttachMode::Snapshot, 2, SessionMeta::default(), b"new")], &mut build, Instant::now());
+    assert_eq!(state.live().unwrap().fed, b"new");
+}
+
+/// 连不成、又不是会话没了（比如尺寸太大）：按断开处理，不关掉终端、不结束会话。
+#[test]
+fn an_attach_failing_for_another_reason_counts_as_lost() {
+    let mut h = Harness::live(b"old");
+    h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: "too large".into() };
+    let changes = h.apply(vec![msg(error)]);
+    assert!(changes.lost && !changes.exited);
+    assert_eq!(name(h.state.screen()), "Lost(screen)");
+    assert_eq!(h.state.retry_attach(), None);
 }
 
 #[test]

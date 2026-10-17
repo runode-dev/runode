@@ -705,6 +705,11 @@ public final class SessionListModel {
             }
             onSpawned(id)
         case .error(let req, let id, let message):
+            if let id, req == nil, message.hasPrefix(HostMsg.backedUpPrefix) {
+                // 宿主积压时拒掉了重新只看状态的 Attach（`Resync` 之后、关掉终端页时），订阅没建成：放出来让下一次
+                // sessionList 补订。读屏幕被拒也是同样的回话、分不出来，多订一次无害；不 return，预览照旧在下面收尾。
+                watching.remove(id)
+            }
             if let req, var pending = pendingSpawn, req == pending.req {
                 if let fallback = pending.fallback {
                     // 电脑上的 app 没开着窗口：开一个只在后台跑的会话。
@@ -725,7 +730,7 @@ public final class SessionListModel {
             } else if req == Self.layoutRequest {
                 // 电脑上没有 app 的界面连着宿主：所有会话都在后台。
                 windows = []
-            } else if let id, message.hasPrefix("no session") {
+            } else if let id, message.hasPrefix(HostMsg.noSessionPrefix) {
                 // 宿主说没有这个会话：别处已经结束了它。读屏幕超时这类错误不算。
                 watching.remove(id)
                 sessions.removeAll { $0.id == id }

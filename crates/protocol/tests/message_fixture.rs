@@ -6,8 +6,9 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use runode_protocol::{
-    AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, GoodbyeReason, HostMsg, PaneLayout, PaneRect,
-    Placement, SessionId, SessionInfo, TabLayout, TaskEntry, TaskSource, TaskSourceKind, WindowLayout, WorkspaceLayout,
+    AttachMode, BuildId, Caps, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, FinishedCommand,
+    GoodbyeReason, HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, TabLayout, TaskEntry, TaskSource,
+    TaskSourceKind, WindowLayout, WorkspaceLayout,
     git::{
         GitBranch, GitFile, GitFileDiff, GitFileStatus, GitHunk, GitLine, GitLineKind, GitOperation, GitRequest,
         GitStatus,
@@ -383,6 +384,8 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ),
         ("tasks", HostMsg::Tasks { req: 6, dir: "/Users/ethan/dev/app/web".into(), sources: tasks() }),
         ("error", HostMsg::Error { req: None, id: Some(ID), message: "no session".into() }),
+        ("error_backed_up", HostMsg::Error { req: None, id: Some(ID), message: ERROR_BACKED_UP.into() }),
+        ("error_no_session", HostMsg::Error { req: None, id: Some(ID), message: format!("{ERROR_NO_SESSION} {ID}") }),
         ("goodbye", HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "bye".into() } }),
         ("goodbye_handoff", HostMsg::Goodbye { reason: GoodbyeReason::Handoff }),
         ("size_owner", HostMsg::SizeOwner { id: ID, mine: false, owner: Some("Ethan 的 MacBook".into()) }),

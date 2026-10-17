@@ -26,7 +26,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_protocol::{AttachMode, HostMsg, SessionId};
+use runode_protocol::{AttachMode, ERROR_BACKED_UP, ERROR_NO_SESSION, HostMsg, SessionId};
 use runode_types::{
     agent::Agent,
     grid::{GridSize, merge_window_resize},
@@ -131,6 +131,8 @@ pub(super) struct Changes {
     pub(super) lost: bool,
     /// 要重新连上会话（收到 `Resync`）。
     pub(super) attach: Option<Attach>,
+    /// 宿主以积压拒了这次 `Attach`（`ERROR_BACKED_UP`），会话还在：过一会儿用 `retry_attach` 再连。
+    pub(super) retry_attach: bool,
 }
 
 /// 一个视图的屏幕状态和宿主公布的会话状态。
@@ -144,8 +146,10 @@ pub(super) struct ScreenState<S> {
     sized: bool,
     /// shell 已经退出。
     exited: bool,
-    /// 发出去、还没等到屏幕的 `Attach` 要的模式。
-    attaching: Option<AttachMode>,
+    /// 发出去、还没等到屏幕的 `Attach`。
+    attaching: Option<Attach>,
+    /// `attaching` 被宿主以积压拒了、还没再发，见 `retry_attach`。
+    backed_up: bool,
     /// 视图在窗口里显示着。
     visible: bool,
     /// 从什么时候起不显示，见 `tick`。
@@ -190,6 +194,7 @@ impl<S: Vt> ScreenState<S> {
             sized: false,
             exited: false,
             attaching: None,
+            backed_up: false,
             visible: true,
             hidden_since: None,
             meta_known: false,
@@ -204,13 +209,13 @@ impl<S: Vt> ScreenState<S> {
         Self { meta_known: true, ..Self::base(Screen::Live { session, channel }, meta, size) }
     }
 
-    /// 发出了 `mode` 的 `Attach`、还没等到屏幕：要屏幕时是 `Attaching`（视图显示着），只看状态时是
-    /// `Hidden`（视图不显示）。
+    /// 发出了 `mode`、不带尺寸的 `Attach`，还没等到屏幕：要屏幕时是 `Attaching`（视图显示着），只看
+    /// 状态时是 `Hidden`（视图不显示）。
     pub(super) fn new_attaching(mode: AttachMode, size: GridSize, now: Instant) -> Self {
         let meta_only = mode == AttachMode::MetaOnly;
         let screen = if meta_only { Screen::Hidden } else { Screen::Attaching { since: now, keep: None } };
         Self {
-            attaching: Some(mode),
+            attaching: Some(Attach { size: None, mode }),
             visible: !meta_only,
             hidden_since: meta_only.then_some(now),
             ..Self::base(screen, SessionMeta::default(), size)
@@ -256,6 +261,22 @@ impl<S: Vt> ScreenState<S> {
 
     pub(super) fn is_lost(&self) -> bool {
         matches!(self.screen, Screen::Lost { .. })
+    }
+
+    /// 被宿主以积压拒掉（`Changes::retry_attach`）后还在等同一次连接时，返回要再发的那个 `Attach`，
+    /// 同一次拒绝只返回一回；之后已经连上、断开、退出或者另发了 `Attach`（那一个还在路上）时为 `None`。
+    pub(super) fn retry_attach(&mut self) -> Option<Attach> {
+        if !std::mem::take(&mut self.backed_up) || self.exited || self.is_lost() {
+            return None;
+        }
+        self.attaching
+    }
+
+    /// 记下要发的 `Attach` 并返回它。之前被积压拒掉、等着重发的那次不再重发：这个替了它。
+    fn attach(&mut self, attach: Attach) -> Option<Attach> {
+        self.attaching = Some(attach);
+        self.backed_up = false;
+        self.attaching
     }
 
     /// 别的前端的视图在决定这个会话的尺寸时是它，见 `SizeOwner`。
@@ -330,8 +351,7 @@ impl<S: Vt> ScreenState<S> {
             return None;
         }
         self.screen = Screen::Attaching { since: now, keep: None };
-        self.attaching = Some(AttachMode::Snapshot);
-        Some(Attach { size: Some(self.last_size), mode: AttachMode::Snapshot })
+        self.attach(Attach { size: Some(self.last_size), mode: AttachMode::Snapshot })
     }
 
     /// 不显示满了 `HIDE_GRACE` 时丢掉界面这份 VT、改成只看状态，返回要发的 `Attach`。
@@ -341,8 +361,7 @@ impl<S: Vt> ScreenState<S> {
             return None;
         }
         self.screen = Screen::Hidden;
-        self.attaching = Some(AttachMode::MetaOnly);
-        Some(Attach { size: None, mode: AttachMode::MetaOnly })
+        self.attach(Attach { size: None, mode: AttachMode::MetaOnly })
     }
 
     /// 和宿主断开后又连上了、会话还在：重新连上它。显示着的要一份屏幕，断开前的那一屏冻结着画到
@@ -358,12 +377,10 @@ impl<S: Vt> ScreenState<S> {
         self.meta_known = false;
         if self.visible {
             self.screen = Screen::Attaching { since: now, keep };
-            self.attaching = Some(AttachMode::Snapshot);
-            Some(Attach { size: Some(self.last_size), mode: AttachMode::Snapshot })
+            self.attach(Attach { size: Some(self.last_size), mode: AttachMode::Snapshot })
         } else {
             self.screen = Screen::Hidden;
-            self.attaching = Some(AttachMode::MetaOnly);
-            Some(Attach { size: None, mode: AttachMode::MetaOnly })
+            self.attach(Attach { size: None, mode: AttachMode::MetaOnly })
         }
     }
 
@@ -427,7 +444,7 @@ impl<S: Vt> ScreenState<S> {
         let (mode, channel, size) = (attached.mode, attached.channel, attached.size);
         // 只认最近一次 `Attach` 要的那种：要屏幕时到了只看状态的（或者反过来）是之前那次的，不管它。
         // 连接那一层已经只交最近一次的，这里再挡一道。
-        if let Some(wanted) = self.attaching
+        if let Some(Attach { mode: wanted, .. }) = self.attaching
             && (wanted == AttachMode::MetaOnly) != (mode == AttachMode::MetaOnly)
         {
             tracing::debug!("ignored a {mode:?} screen while waiting for {wanted:?}");
@@ -533,24 +550,29 @@ impl<S: Vt> ScreenState<S> {
                 match std::mem::replace(&mut self.screen, Screen::Hidden) {
                     Screen::Live { session, .. } => {
                         self.screen = Screen::Attaching { since: now, keep: Some(session) };
-                        self.attaching = Some(AttachMode::Snapshot);
-                        changes.attach = Some(Attach { size: None, mode: AttachMode::Snapshot });
+                        changes.attach = self.attach(Attach { size: None, mode: AttachMode::Snapshot });
                     }
                     // 已经在重新只看状态（刚不显示、断开后重连）时不再发一次：在路上的那个 `Attach` 会换上
                     // 新的订阅，被摘掉的是旧的那个。
                     Screen::Hidden if self.attaching.is_none() => {
-                        self.attaching = Some(AttachMode::MetaOnly);
-                        changes.attach = Some(Attach { size: None, mode: AttachMode::MetaOnly });
+                        changes.attach = self.attach(Attach { size: None, mode: AttachMode::MetaOnly });
                     }
                     other => self.screen = other,
                 }
             }
-            // 正连着时的错误是这次没连成。断开后重新连上时按断开处理，用户可以再点重开；平常是会话
-            // 已经没了（比如被命令行结束了，它的 `Exited` 在连的时候被连接那一层丢掉了），按 shell
-            // 退出处理，关掉这个终端。
+            // 正连着时的错误是这次没连成。这条连接积压着时会话还在，接着等、过一会儿再连（冻结的那一屏
+            // 照旧画着）。断开后重新连上时按断开处理，用户可以再点重开；宿主说会话已经没了（比如被命令行
+            // 结束了，它的 `Exited` 在连的时候被连接那一层丢掉了）时按 shell 退出处理，关掉这个终端。
+            // 别的原因不能当成会话没了（关掉终端会结束它），按断开处理。
             HostMsg::Error { message, .. } if self.attaching.is_some() => {
+                if message.starts_with(ERROR_BACKED_UP) {
+                    tracing::info!("the host is backed up, attaching again soon");
+                    self.backed_up = true;
+                    changes.retry_attach = true;
+                    return;
+                }
                 tracing::warn!("failed to attach: {message}");
-                if self.reconnecting {
+                if self.reconnecting || !message.starts_with(ERROR_NO_SESSION) {
                     self.reconnecting = false;
                     self.lose(changes);
                 } else {

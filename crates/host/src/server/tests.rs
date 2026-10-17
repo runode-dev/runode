@@ -216,14 +216,14 @@ fn a_backed_up_connection_gets_no_more_snapshots_or_replies() {
     let (mut stream, frames) = greet(&host, ClientKind::Cli);
     // 假装积压过了上限：写的线程写出去时只减它真写的那些，假的这份一直在。
     let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
-    out.queued.fetch_add(OUTBOX_LIMIT + 1, Ordering::Relaxed);
+    out.queued.streaming.fetch_add(OUTBOX_LIMIT + 1, Ordering::Relaxed);
     send(&mut stream, &ClientMsg::Attach { id, size: None, mode: AttachMode::VtReplay });
     send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
     for _ in 0..2 {
         match message(&frames) {
             HostMsg::Error { id: Some(errored), message, .. } => {
                 assert_eq!(errored, id);
-                assert!(message.contains("backed up"), "{message}");
+                assert!(message.starts_with(ERROR_BACKED_UP), "{message}");
             }
             other => panic!("expected the request to be refused: {other:?}"),
         }
@@ -234,12 +234,12 @@ fn a_backed_up_connection_gets_no_more_snapshots_or_replies() {
         match message(&frames) {
             HostMsg::Error { req, message, .. } => {
                 assert_eq!(req, expected);
-                assert!(message.contains("backed up"), "{message}");
+                assert!(message.starts_with(ERROR_BACKED_UP), "{message}");
             }
             other => panic!("expected the request to be refused: {other:?}"),
         }
     }
-    out.queued.fetch_sub(OUTBOX_LIMIT + 1, Ordering::Relaxed);
+    out.queued.streaming.fetch_sub(OUTBOX_LIMIT + 1, Ordering::Relaxed);
     send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
     assert!(matches!(message(&frames), HostMsg::ScreenText { .. }));
     send(&mut stream, &ClientMsg::ListSessions);
@@ -255,15 +255,74 @@ fn mobile_connections_back_up_sooner() {
         let id = host.shared.spawn(options("/bin/cat")).unwrap();
         let (mut stream, frames) = greet(&host, client);
         let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
-        out.queued.fetch_add(MOBILE_OUTBOX_LIMIT + 1, Ordering::Relaxed);
+        out.queued.streaming.fetch_add(MOBILE_OUTBOX_LIMIT + 1, Ordering::Relaxed);
         send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
         match message(&frames) {
-            HostMsg::Error { message, .. } if backed_up => assert!(message.contains("backed up"), "{message}"),
+            HostMsg::Error { message, .. } if backed_up => assert!(message.starts_with(ERROR_BACKED_UP), "{message}"),
             HostMsg::ScreenText { .. } if !backed_up => {}
             other => panic!("{client:?}: unexpected reply {other:?}"),
         }
         host.shared.kill_all();
     }
+}
+
+/// 只发不读、积压远超上限的连接，下一个请求到时直接断开，不再往积压上加回话；同样多的积压
+/// 要是都是还没写出去的快照（桌面一下子连上很多会话），连接留着，请求照旧只回 `Error`。
+#[test]
+fn a_connection_that_stopped_reading_is_closed() {
+    for (client, snapshots, closed) in
+        [(ClientKind::Cli, false, true), (ClientKind::Mobile, false, true), (ClientKind::Desktop, true, false)]
+    {
+        let host = Host::new(BuildId("test".into()));
+        let (mut stream, frames) = greet(&host, client);
+        let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
+        // 假装积压过了硬上限，同 `a_backed_up_connection_gets_no_more_snapshots_or_replies`。
+        let kind = if snapshots { FrameKind::Snapshot } else { FrameKind::Control };
+        out.queued.add(kind, OUTBOX_HARD_LIMIT + 1);
+        // 输入不往积压上加回话，不断开。
+        write_frame(&mut *stream, FrameKind::Input, 1, b"x").unwrap();
+        assert!(
+            matches!(frames.recv_timeout(Duration::from_millis(200)), Err(mpsc::RecvTimeoutError::Timeout)),
+            "{client:?}"
+        );
+        send(&mut stream, &ClientMsg::ListSessions);
+        if closed {
+            assert!(matches!(frames.recv_timeout(WAIT), Err(mpsc::RecvTimeoutError::Disconnected)), "{client:?}");
+        } else {
+            match message(&frames) {
+                HostMsg::Error { message, .. } => assert!(message.starts_with(ERROR_BACKED_UP), "{message}"),
+                other => panic!("expected the request to be refused: {other:?}"),
+            }
+            out.queued.sub(kind, OUTBOX_HARD_LIMIT + 1);
+            send(&mut stream, &ClientMsg::ListSessions);
+            assert!(matches!(message(&frames), HostMsg::SessionList { .. }));
+        }
+    }
+}
+
+/// 连上会话时排进去的大屏幕还没写出去，不算会话输出的积压：紧接着的状态照常发，不回 `Resync`；
+/// 但新的连上、读屏幕照旧被拒。快照之后真积压了，照旧回 `Resync`。
+#[test]
+fn a_pending_snapshot_does_not_resync_the_session() {
+    let (tx, rx) = mpsc::channel();
+    let out = Outbox { tx, queued: Arc::default(), limit: MOBILE_OUTBOX_LIMIT };
+    let id = SessionId(1);
+    let control = |out: Out| match out {
+        Out::Frame { kind: FrameKind::Control, channel, payload } => {
+            Frame { kind: FrameKind::Control, channel, payload: payload.to_vec() }.message::<HostMsg>().unwrap()
+        }
+        _ => panic!("expected a control frame"),
+    };
+    out.push(FrameKind::Snapshot, 1, vec![0; MOBILE_OUTBOX_LIMIT + 1].into());
+    assert!(matches!(rx.recv().unwrap(), Out::Frame { kind: FrameKind::Snapshot, .. }));
+    let mut sink = session_sink(id, 1, false, out.clone());
+    assert!(sink(Event::msg(HostMsg::SizeOwner { id, mine: true, owner: None })));
+    assert!(matches!(control(rx.recv().unwrap()), HostMsg::SizeOwner { .. }));
+    assert!(out.backed_up());
+    out.push(FrameKind::Output, 1, vec![0; MOBILE_OUTBOX_LIMIT + 1].into());
+    rx.recv().unwrap();
+    assert!(!sink(Event::msg(HostMsg::Bell { id })));
+    assert!(matches!(control(rx.recv().unwrap()), HostMsg::Resync { .. }));
 }
 
 /// 发请求的连接断开后，它转给界面、界面还没回话的请求跟着撤掉；界面之后再回话也只是丢掉。

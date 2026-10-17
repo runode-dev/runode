@@ -44,6 +44,22 @@ import Testing
         #expect(link.sent.isEmpty)
     }
 
+    /// `Resync` 后重新只看状态被宿主以积压拒掉：下一次列会话时再订；终端页开着的会话不因此多发。
+    @Test func aBackedUpRewatchIsRetriedOnTheNextList() {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.state(.connected(hostName: "homelab", address: nil)))
+        model.handle(.ready(generation: 1))
+        model.screenOpened(sessionB)
+        model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
+        model.handle(.message(.resync(id: sessionA, reason: "slow")))
+        let backedUp = HostMsg.backedUpPrefix + "; read first"
+        model.handle(.message(.error(req: nil, id: sessionA, message: backedUp)))
+        model.handle(.message(.error(req: nil, id: sessionB, message: backedUp)))
+        link.clearSent()
+        model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
+        #expect(attaches(link.sent) == [.attach(id: sessionA, size: nil, mode: .metaOnly)])
+    }
+
     @Test func metaUpdatesArriveLive() {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))

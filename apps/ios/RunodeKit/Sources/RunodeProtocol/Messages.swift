@@ -292,6 +292,12 @@ public enum GoodbyeReason: Hashable, Sendable, Decodable {
 /// `#[serde(other)]` 一样），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的
 /// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只读 `keep_awake`。
 public enum HostMsg: Hashable, Sendable, Decodable {
+    /// `error` 以它开头：这条连接在宿主那边积压着，请求没办、会话还在，过一会儿再来。对应宿主的
+    /// `runode_protocol::ERROR_BACKED_UP`，是认错误种类的约定。
+    public static let backedUpPrefix = "the connection is backed up"
+    /// `error` 以它开头：会话已经没了。对应宿主的 `runode_protocol::ERROR_NO_SESSION`。
+    public static let noSessionPrefix = "no session"
+
     /// `keepAwake`：宿主认得 `ClientMsg.keepAwake`。
     case welcome(keepAwake: Bool)
     case incompatible(protocol: UInt32, build: String, reason: String)

@@ -5,8 +5,8 @@
 //! 读的线程先等 `Hello`，回 `Welcome`（协议版本对不上时回 `Incompatible` 后断开），之后把控制
 //! 消息和输入帧转给宿主。写的线程按到达的先后把帧写出去：连上的会话在自己的线程里把事件交给
 //! 这条连接的 `Outbox`，一个会话的帧在连接上的先后就是它发生的先后。前端读得太慢、积压超过
-//! `OUTBOX_LIMIT` 时，那个会话不再往这条连接发输出，改发 `Resync`，前端重新 `Attach`。转给
-//! 连接的输出里，shell 集成的报告抹掉了内容（见 `ReportRedactor`），报告带的口令不出宿主。
+//! `OUTBOX_LIMIT` 时，那个会话不再往这条连接发输出，改发 `Resync`，前端重新 `Attach`；连上会话时
+//! 排进去的屏幕不算会话输出的积压。转给连接的输出里，shell 集成的报告抹掉了内容（见 `ReportRedactor`），报告带的口令不出宿主。
 //!
 //! 读的线程不等会话线程回话：列会话、读屏幕先在读的线程里把请求按先后送到会话线程，再起一个
 //! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。一条连接上这样在等的请求
@@ -14,7 +14,8 @@
 //! 联网的 git 操作卡住时列会话、读屏幕照常。列目录（`ClientMsg::ListDirs`）和列命令
 //! （`ClientMsg::ListTasks`）也另起线程办、另算一份名额：断掉的网络挂载上 stat 会一直卡住，
 //! 卡住的只是那个线程。积压过了上限的连接，列会话、读屏幕、连上会话和 git 请求都当场回 `Error`，
-//! 不再往积压上加回话。开会话还在读的线程里办（开伪终端、启动 shell 要几毫秒）。
+//! 不再往积压上加回话；别的回话照办（输入的 `Done` 回错的话粘贴就丢了），积压远超上限
+//! （`OUTBOX_HARD_LIMIT`）时前端显然不读了，读的线程直接断开连接。开会话还在读的线程里办（开伪终端、启动 shell 要几毫秒）。
 //!
 //! 能连上 socket 就能读写所有终端：socket 放在只有自己能进的目录里（见调用方建目录的方式），
 //! 连上来的进程也要是同一个用户的。`Hello` 里的 `ClientKind` 是前端自报的，宿主不核实：终端里的
@@ -43,8 +44,9 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{
-    AttachMode, ClientKind, ClientMsg, Frame, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HostMsg,
-    PROTOCOL_VERSION, SessionId, SessionInfo, WindowLayout, git::GitRequest, read_frame, write_frame,
+    AttachMode, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, Frame, FrameError, FrameKind, GoodbyeReason,
+    HANDOFF_FORMAT, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo, WindowLayout, git::GitRequest, read_frame,
+    write_frame,
 };
 use runode_terminal::pty;
 use runode_types::{grid::GridSize, input::parse_key_list, session::DriveAction};
@@ -63,6 +65,10 @@ const OUTBOX_LIMIT: usize = 32 << 20;
 /// 手机连接（`ClientKind::Mobile`）的 `OUTBOX_LIMIT`：手机隔着 Wi-Fi 和 TLS 读得慢，积压的每个字节都是
 /// 回显前要等的，宁可早点 `Resync` 跳过一段输出，也不让画面落后几秒。
 const MOBILE_OUTBOX_LIMIT: usize = 1 << 20;
+/// 不算快照的积压过了它，读的线程不再办这条连接的请求，直接断开，见 `Outbox::overflowing`。过了
+/// `OUTBOX_LIMIT` 的会话输出改发 `Resync`、多数请求回 `Error`，但列目录、看板、`Done` 这些回话不看积压，
+/// 只发不读的前端能让它们一直涨；正常读着的前端积压到这里之前早就 `Resync` 了，留了好几倍的余量。
+const OUTBOX_HARD_LIMIT: usize = 8 * OUTBOX_LIMIT;
 /// 等会话线程回话（列会话、读屏幕）的最长时间。
 pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求、列目录和列命令的
@@ -777,10 +783,32 @@ fn start_writer(stream: &UnixStream) -> Option<Outbox> {
 #[derive(Clone)]
 pub(crate) struct Outbox {
     tx: mpsc::Sender<Out>,
-    /// 已经交给写的线程、还没写出去的载荷字节数。
-    queued: Arc<AtomicUsize>,
+    queued: Arc<Queued>,
     /// `queued` 过了它就算积压，见 `backed_up`；收到 `Hello` 后按前端种类定，之后才有会话的 sink 克隆它。
     limit: usize,
+}
+
+/// 已经交给写的线程、还没写出去的载荷字节数，快照和别的分开记：`session_sink` 判断积压时只看
+/// `streaming`（见 `streaming_backed_up`），各记各的，读它不会撞上另一个数正改到一半。
+#[derive(Default)]
+struct Queued {
+    streaming: AtomicUsize,
+    /// `FrameKind::Snapshot` 的。
+    snapshots: AtomicUsize,
+}
+
+impl Queued {
+    fn add(&self, kind: FrameKind, len: usize) {
+        self.of(kind).fetch_add(len, Ordering::Relaxed);
+    }
+
+    fn sub(&self, kind: FrameKind, len: usize) {
+        self.of(kind).fetch_sub(len, Ordering::Relaxed);
+    }
+
+    fn of(&self, kind: FrameKind) -> &AtomicUsize {
+        if kind == FrameKind::Snapshot { &self.snapshots } else { &self.streaming }
+    }
 }
 
 enum Out {
@@ -799,7 +827,7 @@ enum Out {
 impl Outbox {
     /// 交一帧给写的线程；连接已经断了时返回 false。
     fn push(&self, kind: FrameKind, channel: u32, payload: Arc<[u8]>) -> bool {
-        self.queued.fetch_add(payload.len(), Ordering::Relaxed);
+        self.queued.add(kind, payload.len());
         self.tx.send(Out::Frame { kind, channel, payload }).is_ok()
     }
 
@@ -827,13 +855,31 @@ impl Outbox {
     }
 
     fn backed_up(&self) -> bool {
-        self.queued.load(Ordering::Relaxed) > self.limit
+        self.streaming() + self.queued.snapshots.load(Ordering::Relaxed) > self.limit
+    }
+
+    /// 不算还没写出去的快照，只看排在后面的输出和状态有没有过上限。连上会话时排进去的一整份
+    /// 屏幕（手机的 `VtReplay` 带着回滚，常常超过 `MOBILE_OUTBOX_LIMIT`）要是也算，紧接着的
+    /// `SizeOwner` 就让这条连接上所有会话的 sink 回 `Resync`，前端重连又排一份，永远连不上。
+    fn streaming_backed_up(&self) -> bool {
+        self.streaming() > self.limit
+    }
+
+    /// 不算快照的积压过了 `OUTBOX_HARD_LIMIT`，这条连接该断了。快照不算：连上会话本来就看积压，
+    /// 桌面一下子恢复几十个分屏时排进去的屏幕加起来可以很大，但写得出去，不是对面不读。
+    fn overflowing(&self) -> bool {
+        self.streaming() > OUTBOX_HARD_LIMIT
+    }
+
+    /// 已经交给写线程、还没写出去的字节里不是快照的那些。
+    fn streaming(&self) -> usize {
+        self.queued.streaming.load(Ordering::Relaxed)
     }
 }
 
 /// 写的线程：有帧就写，一批写完再刷出去。写不出去（对面断了）或者要断开时关掉连接，读的那边
 /// 也随之结束；`Out::Detach` 时写完就结束，不断开。
-fn write_out(stream: UnixStream, frames: &mpsc::Receiver<Out>, queued: &AtomicUsize) {
+fn write_out(stream: UnixStream, frames: &mpsc::Receiver<Out>, queued: &Queued) {
     let mut writer = BufWriter::with_capacity(WRITE_BUFFER, &stream);
     let mut write_all = || -> Result<Option<mpsc::Sender<()>>, FrameError> {
         while let Ok(first) = frames.recv() {
@@ -842,7 +888,7 @@ fn write_out(stream: UnixStream, frames: &mpsc::Receiver<Out>, queued: &AtomicUs
                 match out {
                     Out::Frame { kind, channel, payload } => {
                         write_frame(&mut writer, kind, channel, &payload)?;
-                        queued.fetch_sub(payload.len(), Ordering::Relaxed);
+                        queued.sub(kind, payload.len());
                     }
                     Out::Close => {
                         writer.flush()?;
@@ -955,6 +1001,13 @@ impl Connection {
                 }
             };
             match frame.kind {
+                // 回话写不出去，再办只会往积压上加：不发 `Goodbye`（也排在积压后面），直接断开，写的
+                // 线程随之出错退出，排着的帧跟着丢掉。
+                FrameKind::Control if self.out.overflowing() => {
+                    tracing::warn!("closing connection {}: the client stopped reading its replies", self.id);
+                    let _ = reader.get_ref().shutdown(Shutdown::Both);
+                    return;
+                }
                 FrameKind::Control => match frame.message::<ClientMsg>() {
                     Ok(message) => {
                         self.handle(message);
@@ -1026,7 +1079,7 @@ impl Connection {
             ClientMsg::Hello { .. } => self.error(None, None, "already said hello".into()),
             ClientMsg::ListSessions => {
                 if self.out.backed_up() {
-                    self.error(None, None, BACKED_UP.into());
+                    self.error(None, None, ERROR_BACKED_UP.into());
                     return;
                 }
                 let Some(slot) = self.waiting.enter() else {
@@ -1055,7 +1108,7 @@ impl Connection {
             }
             ClientMsg::Start { id, integration } => {
                 if !self.shared.deliver(id, Inbox::Start { integration }) {
-                    self.error(None, Some(id), format!("no session {id}"));
+                    self.error(None, Some(id), format!("{ERROR_NO_SESSION} {id}"));
                 }
             }
             ClientMsg::Attach { id, size, mode } => self.attach(id, size, mode),
@@ -1299,7 +1352,7 @@ impl Connection {
             return;
         }
         if self.out.backed_up() {
-            self.error(None, Some(id), BACKED_UP.into());
+            self.error(None, Some(id), ERROR_BACKED_UP.into());
             return;
         }
         self.forget(id);
@@ -1337,7 +1390,7 @@ impl Connection {
         if self.shared.deliver(id, Inbox::Subscribe(subscribe)) {
             self.channels.insert(channel, id);
         } else {
-            self.error(None, Some(id), format!("no session {id}"));
+            self.error(None, Some(id), format!("{ERROR_NO_SESSION} {id}"));
         }
     }
 
@@ -1345,7 +1398,7 @@ impl Connection {
     /// 之前送去的输入后面），回话另起线程等。
     fn read_screen(&self, id: SessionId, lines: Option<u32>, command: Option<u32>) {
         if self.out.backed_up() {
-            self.error(None, Some(id), BACKED_UP.into());
+            self.error(None, Some(id), ERROR_BACKED_UP.into());
             return;
         }
         let Some(slot) = self.waiting.enter() else {
@@ -1354,7 +1407,7 @@ impl Connection {
         };
         let (reply, text) = mpsc::channel();
         if !self.shared.deliver(id, Inbox::ReadScreen { lines, command, reply }) {
-            self.error(None, Some(id), format!("no session {id}"));
+            self.error(None, Some(id), format!("{ERROR_NO_SESSION} {id}"));
             return;
         }
         let out = self.out.clone();
@@ -1401,7 +1454,7 @@ impl Connection {
     /// 工作线程，见 `git` 模块。
     fn git(&mut self, req: u32, id: SessionId, request: GitRequest) {
         if self.out.backed_up() {
-            self.error(Some(req), None, BACKED_UP.into());
+            self.error(Some(req), None, ERROR_BACKED_UP.into());
             return;
         }
         let Some(slot) = self.git_waiting.enter() else {
@@ -1410,7 +1463,7 @@ impl Connection {
         };
         let (reply, info) = mpsc::channel();
         if !self.shared.deliver(id, Inbox::Info(reply)) {
-            self.error(Some(req), None, format!("no session {id}"));
+            self.error(Some(req), None, format!("{ERROR_NO_SESSION} {id}"));
             return;
         }
         if self.git.is_none() {
@@ -1447,7 +1500,7 @@ impl Connection {
         if self.shared.deliver(id, message) {
             self.out.control(&HostMsg::Done { req });
         } else {
-            self.error(Some(req), Some(id), format!("no session {id}"));
+            self.error(Some(req), Some(id), format!("{ERROR_NO_SESSION} {id}"));
         }
     }
 
@@ -1474,10 +1527,6 @@ impl Connection {
     }
 }
 
-/// 前端读得太慢、`Outbox` 积压过了上限时，连上会话、读屏幕、列会话和 git 请求不再往里排快照和
-/// 回话，回这句。
-const BACKED_UP: &str = "the connection is backed up; read what the host already sent first";
-
 /// 前端给的尺寸行列都不超过 `MAX_GRID` 时为 `Ok`。
 fn check_size(size: GridSize) -> Result<(), String> {
     if size.cols > MAX_GRID || size.rows > MAX_GRID {
@@ -1499,7 +1548,7 @@ fn session_sink(id: SessionId, channel: u32, meta_only: bool, out: Outbox) -> Ev
     Box::new(move |event| match event {
         Event::Output(_) if meta_only => true,
         Event::Output(data) => {
-            if out.backed_up() {
+            if out.streaming_backed_up() {
                 return resync(&out);
             }
             out.push(FrameKind::Output, channel, data)
@@ -1508,7 +1557,7 @@ fn session_sink(id: SessionId, channel: u32, meta_only: bool, out: Outbox) -> Ev
             if meta_only && matches!(*message, HostMsg::Resized { .. } | HostMsg::ThemeApplied { .. }) {
                 return true;
             }
-            if out.backed_up() {
+            if out.streaming_backed_up() {
                 return resync(&out);
             }
             out.control(&message)

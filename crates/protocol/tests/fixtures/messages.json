@@ -296,6 +296,18 @@
       "req": null,
       "type": "error"
     },
+    "error_backed_up": {
+      "id": "0123456789abcdef0011223344556677",
+      "message": "the connection is backed up; read what the host already sent first",
+      "req": null,
+      "type": "error"
+    },
+    "error_no_session": {
+      "id": "0123456789abcdef0011223344556677",
+      "message": "no session 0123456789abcdef0011223344556677",
+      "req": null,
+      "type": "error"
+    },
     "exited": {
       "id": "0123456789abcdef0011223344556677",
       "status": 1,

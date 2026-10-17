@@ -270,6 +270,12 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(
             try decode("dirs") == .dirs(req: 5, path: "/Users/ethan", dirs: [".config", "dev", "中文"], truncated: true))
         #expect(try decode("error") == .error(req: nil, id: id, message: "no session"))
+        // 宿主实际发的两句：措辞一改，重新生成样例后这里就对不上。
+        guard case .error(_, _, let backedUp) = try decode("error_backed_up"),
+            case .error(_, _, let noSession) = try decode("error_no_session")
+        else { Issue.record("expected errors"); return }
+        #expect(backedUp.hasPrefix(HostMsg.backedUpPrefix))
+        #expect(noSession.hasPrefix(HostMsg.noSessionPrefix))
         #expect(try decode("goodbye") == .goodbye(.error("bye")))
         #expect(try decode("goodbye_handoff") == .goodbye(.handoff))
         #expect(try decode("screen_text") == .screenText(id: id, text: "a\n", truncated: false))

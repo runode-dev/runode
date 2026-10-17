@@ -20,7 +20,7 @@ use std::{
 
 use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, task::ArcWake};
 use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
-use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId};
+use runode_protocol::{AttachMode, ClientMsg, ERROR_BACKED_UP, HostMsg, SessionId};
 use runode_terminal::{
     pty::dir_label,
     session::{self, Request, SYNC_OUTPUT_TIMEOUT, Session},
@@ -59,6 +59,8 @@ const MAX_OUTPUT_BATCH: usize = 1024 * 1024;
 const MAX_EVENT_BATCH: usize = 4096;
 /// 连上会话时最多等这么久宿主给的第一份屏幕。
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
+/// 宿主以积压拒了 `Attach` 后隔这么久再连。
+const ATTACH_RETRY: Duration = Duration::from_millis(100);
 /// `run_command` 最多等 shell 出提示符这么久。
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -108,16 +110,30 @@ fn live(id: SessionId, screen: Screen, settings: &TermSettings) -> anyhow::Resul
     Ok(ScreenState::new_live(session, channel, meta, size))
 }
 
+/// 宿主以积压拒了等第一份屏幕的 `Attach`（`ERROR_BACKED_UP`）：会话还在，不算没连成。
+fn backed_up(err: &anyhow::Error) -> bool {
+    err.to_string().starts_with(ERROR_BACKED_UP)
+}
+
+/// 第一次连会话 `id` 被宿主以积压拒了：重新登记、再要一次屏幕，视图先显示着等它（画背景）；又被拒
+/// 的话照 `Changes::retry_attach` 过一会儿再连。
+fn attach_later(id: SessionId) -> (ScreenState<Session>, UnboundedReceiver<LinkEvent>) {
+    tracing::info!("the host is backed up, attaching session {id} again");
+    let rx = host_client::link().attach(id, None, AttachMode::Snapshot);
+    (ScreenState::new_attaching(AttachMode::Snapshot, PROVISIONAL_SIZE, Instant::now()), rx)
+}
+
 /// 连上宿主里的会话 `id`，等它给第一份屏幕，建好界面这边的 VT，返回它和收之后的事件的一端。
-/// 连不上时结束这个会话（用于刚开的会话）。
+/// 连不上时结束这个会话（用于刚开的会话）；宿主积压着时不结束，见 `attach_later`。
 fn connect(
     id: SessionId,
     settings: &TermSettings,
 ) -> anyhow::Result<(ScreenState<Session>, UnboundedReceiver<LinkEvent>)> {
     let link = host_client::link();
-    let connected = link
-        .attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT)
-        .and_then(|(screen, rx)| Ok((live(id, screen, settings)?, rx)));
+    let connected = match link.attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT) {
+        Err(err) if backed_up(&err) => return Ok(attach_later(id)),
+        attached => attached.and_then(|(screen, rx)| Ok((live(id, screen, settings)?, rx))),
+    };
     if connected.is_err() {
         link.kill(id);
     }
@@ -205,7 +221,8 @@ impl TerminalView {
 
     /// 用宿主里已有的会话 `id` 建视图（存档恢复、接上后台会话）。`cwd` 是调用方记着的目录，宿主
     /// 还没报告目录时当作它的目录。`visible` 为假时视图只看状态（`AttachMode::MetaOnly`），等
-    /// `request_visible` 再看屏幕。会话已经启动过，不再 `start`。连不上时返回错误，不结束会话。
+    /// `request_visible` 再看屏幕。会话已经启动过，不再 `start`。连不上时返回错误，不结束会话；宿主
+    /// 积压着时不算连不上，见 `attach_later`。
     pub fn reattach(
         id: SessionId,
         cwd: Option<&Path>,
@@ -219,13 +236,18 @@ impl TerminalView {
             anyhow::bail!("not connected to the host");
         }
         let (screen, rx) = if visible {
-            let (screen, rx) = link.attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT)?;
-            match live(id, screen, &config.term_settings()) {
-                Ok(screen) => (screen, rx),
-                Err(err) => {
-                    // 不留着订阅：不然宿主一直当它有窗口在看，进不了后台会话。
-                    link.detach(id);
-                    return Err(err);
+            match link.attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT) {
+                Err(err) if backed_up(&err) => attach_later(id),
+                attached => {
+                    let (screen, rx) = attached?;
+                    match live(id, screen, &config.term_settings()) {
+                        Ok(screen) => (screen, rx),
+                        Err(err) => {
+                            // 不留着订阅：不然宿主一直当它有窗口在看，进不了后台会话。
+                            link.detach(id);
+                            return Err(err);
+                        }
+                    }
                 }
             }
         } else {
@@ -380,6 +402,20 @@ impl TerminalView {
         if let Some(attach) = changes.attach {
             tracing::info!("session {} attaches again ({:?})", self.session_text(), attach.mode);
             self.send_attach(attach);
+        }
+        if changes.retry_attach {
+            // 等宿主把这条连接上积压的写出去：和手机重连的间隔一样。不留着 `Task`：到点时已经连上、
+            // 断开、退出或者另发了 `Attach` 的话 `retry_attach` 为 `None`，什么也不发。
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(ATTACH_RETRY).await;
+                this.update(cx, |view, _| {
+                    if let Some(attach) = view.screen.retry_attach() {
+                        view.send_attach(attach);
+                    }
+                })
+                .ok();
+            })
+            .detach();
         }
         if changes.lost {
             tracing::warn!("session {} lost its host; its last screen stays", self.session_text());

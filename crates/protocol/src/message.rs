@@ -358,6 +358,14 @@ pub enum ClientMsg {
     Unknown,
 }
 
+/// `HostMsg::Error` 的这句开头表示这条连接积压了：宿主没办这条请求，会话还在，前端读完已经发来的
+/// 东西后稍后再来。前端按开头认出它，所以一字不能改：新旧宿主和新旧前端要互相认得。
+pub const ERROR_BACKED_UP: &str = "the connection is backed up; read what the host already sent first";
+
+/// `HostMsg::Error` 以这句开头（后面跟着会话标识）表示会话已经没了。和 `ERROR_BACKED_UP` 一样是前端
+/// 认错误种类的约定，不能改字。
+pub const ERROR_NO_SESSION: &str = "no session";
+
 /// 宿主发给前端的消息。带 `id` 的消息和这个会话的 `FrameKind::Output` 帧在同一条连接上按
 /// 顺序到达，`Resized`、`ThemeApplied` 这类标记的位置就是 VT 要做这件事的位置。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -532,7 +540,8 @@ pub enum HostMsg {
         ui: u64,
         request: Box<ClientMsg>,
     },
-    /// 请求没法办，`req`、`id` 是对得上的那条请求的。
+    /// 请求没法办，`req`、`id` 是对得上的那条请求的。前端要分辨的两种原因见 `ERROR_BACKED_UP` 和
+    /// `ERROR_NO_SESSION`。
     Error {
         req: Option<u32>,
         id: Option<SessionId>,
