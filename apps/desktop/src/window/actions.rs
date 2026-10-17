@@ -16,8 +16,8 @@ use crate::terminal_view::TerminalView;
 const RESIZE_STEP: f32 = 10.;
 
 impl WindowView {
-    /// 切到目录是 `dir` 的 workspace，给了 `name` 就改成这个名字；还没有时在当前 workspace 下面新建
-    /// 一个，`name` 为空时按目录取名。
+    /// 切到目录是 `dir` 的 workspace（目录按规范化后的比，经过符号链接也认得出），给了 `name` 就改成
+    /// 这个名字；还没有时在当前 workspace 下面新建一个，`name` 为空时按目录取名。
     pub(super) fn open_workspace(
         &mut self,
         dir: PathBuf,
@@ -25,7 +25,8 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(ix) = self.workspaces.iter().position(|workspace| workspace.dir == dir) {
+        let target = super::model::canonical_dir(&dir);
+        if let Some(ix) = self.workspaces.iter().position(|workspace| workspace.real_dir() == target) {
             if let Some(name) = name {
                 self.set_workspace_name(ix, name.into(), window, cx);
             }

@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
+    sync::{Arc, OnceLock},
     time::Instant,
 };
 
@@ -63,6 +64,21 @@ pub(super) fn home_dir() -> Option<PathBuf> {
     runode_paths::Dirs::from_env().home
 }
 
+/// `path` 解开符号链接后的写法，比两个目录是不是同一个用；解不开（目录没了）时照原样。
+pub(super) fn canonical_dir(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// 在单独的线程上算 `dir` 的 `canonical_dir`，算好之前为空：目录在挂死的网络卷、autofs 上时会一直卡着，
+/// 不能在界面线程上算，也不占后台线程池。
+pub(super) fn canonical_dir_later(dir: &Path) -> Arc<OnceLock<PathBuf>> {
+    let cell = Arc::new(OnceLock::new());
+    let (out, dir) = (cell.clone(), dir.to_path_buf());
+    // 起不了线程时一直为空，比的时候照 `dir` 原样比。
+    let _ = std::thread::Builder::new().name("canonical-dir".into()).spawn(move || out.set(canonical_dir(&dir)));
+    cell
+}
+
 /// 新 workspace 的名字：家目录叫 `~`；在 git 仓库里取仓库根的目录名，其余取目录名。
 /// 往上找仓库根时不看家目录本身，免得家目录是个管配置文件的仓库时个个都叫用户名。
 pub(super) fn workspace_name(dir: &Path) -> String {
@@ -87,6 +103,8 @@ pub(super) struct Workspace {
     pub(super) name: SharedString,
     /// 项目目录：新终端取不到当前终端的目录时从这里开始。
     pub(super) dir: PathBuf,
+    /// `dir` 的 `canonical_dir`，建 workspace 时由 `canonical_dir_later` 算，见 `real_dir`。
+    pub(super) canonical: Arc<OnceLock<PathBuf>>,
     /// 侧栏这一行上的当前分支和 GitHub 头像。
     pub(super) repo: RepoBadge,
     /// 可以没有：最后一个关掉后 workspace 留着，显示一个空的标签区，等用户新开。
@@ -106,6 +124,11 @@ pub(super) struct Workspace {
 }
 
 impl Workspace {
+    /// `dir` 解开符号链接后的写法，比两个目录是不是同一个用；后台还没算好时照 `dir` 原样。
+    pub(super) fn real_dir(&self) -> &Path {
+        self.canonical.get().unwrap_or(&self.dir)
+    }
+
     fn active_tab(&self) -> Option<&Tab> {
         self.tabs.get(self.active)
     }
@@ -297,6 +320,7 @@ impl WindowView {
             id: self.next_id(),
             name: name.unwrap_or_else(|| workspace_name(&dir)).into(),
             repo: RepoBadge::default(),
+            canonical: canonical_dir_later(&dir),
             dir,
             tabs: vec![tab],
             active: 0,
@@ -386,10 +410,15 @@ impl WindowView {
     /// 同 `activate`，只是 `reveal_now` 为假时标签条等下一帧按新排好的位置把标签滚进来：刚切过来的 workspace
     /// 上次画出时的布局可能已经过时（开了侧栏、缩了窗口），按它算的偏移不准。
     fn show_tab(&mut self, ix: usize, reveal_now: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.leave_mobile(cx);
-        self.kanban = None;
-        // 焦点要交给终端，盖着终端的放大预览栏还原。
-        self.restore_preview_zoom(cx);
+        // 看板的对话框开着时只在后面换标签，不收看板、不抢焦点：标签里的程序退出、`runode open --focus`
+        // 也会走到这里，收了看板写到一半的任务就没了。
+        let keep = self.dialog_open(cx);
+        if !keep {
+            self.leave_mobile(cx);
+            self.kanban = None;
+            // 焦点要交给终端，盖着终端的放大预览栏还原。
+            self.restore_preview_zoom(cx);
+        }
         let workspace = self.workspace_mut();
         workspace.active = ix;
         if let Some(tab) = workspace.tabs.get_mut(ix) {
@@ -402,7 +431,9 @@ impl WindowView {
         }
         self.start_shown(cx);
         self.sync_visibility(window, cx);
-        window.focus(&self.focus_handle(cx), cx);
+        if !keep {
+            window.focus(&self.focus_handle(cx), cx);
+        }
         self.sync_window_title(window, cx);
         self.mark_seen(window, cx);
         self.save(cx);
@@ -497,13 +528,18 @@ impl WindowView {
         let workspace = &mut self.workspaces[wi];
         let tab = workspace.tabs.remove(ti);
         super::agents::dismiss_alerts(tab.panes.keys().copied(), cx);
-        if workspace.active > 0 && (ti < workspace.active || workspace.active == workspace.tabs.len()) {
+        let was_shown = ti == workspace.active;
+        if !was_shown {
+            workspace.active = closed_index(workspace.active, ti);
+        } else if workspace.active > 0 && workspace.active == workspace.tabs.len() {
             workspace.active -= 1;
         }
         let active = workspace.active;
-        if wi == self.active {
+        if wi == self.active && was_shown {
             self.activate(active, window, cx);
         } else {
+            // 关的不是正显示着的标签时只挪下标：再切一遍会收掉正在看的手机引导页、看板，抢走焦点，还把
+            // 没看过的结果标成看过。
             self.save(cx);
             cx.notify();
         }
@@ -765,7 +801,7 @@ pub(super) fn sessions_to_end<T: Copy + PartialEq>(layout: &[Vec<Vec<T>>], closi
     }
 }
 
-/// 关掉另一个（第 `closed` 个）workspace 后，原来第 `active` 个的当前 workspace 在第几个：关的在它前面时
+/// 关掉另一个（第 `closed` 个）workspace 或标签后，原来第 `active` 个的当前那个在第几个：关的在它前面时
 /// 往前挪一个。
 fn closed_index(active: usize, closed: usize) -> usize {
     debug_assert_ne!(active, closed);
@@ -814,6 +850,22 @@ mod tests {
     use super::*;
 
     const NONE: [u32; 0] = [];
+
+    /// 目录解开符号链接的写法在别的线程上算好后交回来。
+    #[test]
+    fn resolves_canonical_dirs_off_thread() {
+        let root = std::env::temp_dir().join(format!("rdr-canonical-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
+        let cell = canonical_dir_later(&root.join("link"));
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while cell.get().is_none() && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert_eq!(cell.get(), Some(&std::fs::canonicalize(root.join("real")).unwrap()));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     /// 两个 workspace：第一个有两个标签（分屏 1、2 在同一个标签里，3 单独一个），第二个只有分屏 4。
     fn layout() -> Vec<Vec<Vec<u32>>> {

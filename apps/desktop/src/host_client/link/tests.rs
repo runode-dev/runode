@@ -648,8 +648,8 @@ fn a_terminal_spawned_after_the_caller_gave_up_is_ended() {
     assert_eq!(killed_rx.recv_timeout(WAIT).unwrap(), SessionId(7));
 }
 
-/// 列命令超时只撤掉这一条：宿主另起线程读文件，卡住的只是它，连接照用，会话不收到 `Lost`，之后的请求
-/// 照常拿到回话；宿主随后补回的那条没人收，丢掉，不交给别的请求。
+/// 列命令和看板的请求超时只撤掉这一条：宿主另起线程办它们，卡住的只是那个线程，连接照用，会话不收到
+/// `Lost`，之后的请求照常拿到回话；宿主随后补回的那条没人收，丢掉，不交给别的请求。
 #[test]
 fn a_task_listing_that_times_out_keeps_the_connection() {
     let link = fake_host(move |mut stream| {
@@ -659,6 +659,10 @@ fn a_task_listing_that_times_out_keeps_the_connection() {
                 // 先不回，等下一个 `Layout` 时补上。
                 Ok(ClientMsg::ListTasks { req, dir }) => {
                     late = Some(HostMsg::Tasks { req, dir, sources: Vec::new() });
+                    continue;
+                }
+                Ok(ClientMsg::ListTodos { req }) => {
+                    late = Some(HostMsg::Todos { req, todos: Vec::new(), schedules: Vec::new() });
                     continue;
                 }
                 Ok(ClientMsg::ListSessions) => vec![HostMsg::SessionList { sessions: Vec::new() }],
@@ -679,6 +683,11 @@ fn a_task_listing_that_times_out_keeps_the_connection() {
     assert!(link.connected());
     assert!(link.inner.state().replies.is_empty(), "the timed-out request is no longer registered");
     assert!(link.list_sessions(WAIT).unwrap().is_empty());
+    assert!(link.held_layout(WAIT).unwrap().is_empty());
+    assert!(link.connected());
+    assert!(link.request(|req| ClientMsg::ListTodos { req }, Duration::from_millis(100)).is_err());
+    assert!(link.connected());
+    assert!(link.inner.state().replies.is_empty(), "the timed-out request is no longer registered");
     assert!(link.held_layout(WAIT).unwrap().is_empty());
     assert!(link.connected());
     assert!(rx.try_recv().is_err(), "the session did not hear Lost");

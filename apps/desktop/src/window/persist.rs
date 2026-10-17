@@ -379,6 +379,7 @@ impl WindowView {
                 id,
                 name: name.into(),
                 repo: Default::default(),
+                canonical: super::model::canonical_dir_later(&saved_workspace.dir),
                 dir: saved_workspace.dir,
                 active: active_tab,
                 tabs,

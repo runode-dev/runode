@@ -247,6 +247,11 @@ impl Caffeinate {
             .spawn()
             .map(Self)
     }
+
+    /// 被别人结束了或者自己崩了；问不出来时也算退出了，宁可重拉也不假装还拦着休眠。
+    pub(super) fn exited(&mut self) -> bool {
+        !matches!(self.0.try_wait(), Ok(None))
+    }
 }
 
 impl Drop for Caffeinate {
@@ -266,6 +271,16 @@ mod tests {
             parse_ps("    1     0  12000   0.0\n  200     1   2048  12,5\nbogus line\n  300   200   1024   1.5\n");
         assert_eq!(procs.len(), 3);
         assert_eq!(procs[&200], Proc { ppid: 1, memory: 2048 * 1024, cpu: 12.5 });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_killed_caffeinate_counts_as_exited() {
+        let mut caffeinate = Caffeinate::start().unwrap();
+        assert!(!caffeinate.exited());
+        caffeinate.0.kill().unwrap();
+        caffeinate.0.wait().unwrap();
+        assert!(caffeinate.exited());
     }
 
     #[cfg(target_os = "macos")]

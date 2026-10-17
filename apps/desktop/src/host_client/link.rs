@@ -26,8 +26,8 @@
 //! `spawn` 例外，超时了连接照旧：宿主多半只是开会话慢，开好后回的 `Spawned` 没人等，读线程见了就
 //! 结束那个会话；断开的话这个回话读不到，会话留在宿主里没人看得见。宿主的会话列表里没有能对上
 //! 请求的东西，重连后认不出哪个会话是它开的，只能这样。真卡住时，下一个别的请求超时照样断开。
-//! `list_tasks` 也例外，超时只撤掉这条请求（`OnTimeout::Wait`）：宿主另起线程读目录办它，读得慢
-//! 不说明连接卡住了，晚到的回话没人收、丢掉。
+//! `list_tasks` 和看板的请求（`request`）也例外，超时只撤掉这条请求（`OnTimeout::Wait`）：宿主
+//! 另起线程读目录、办看板，办得慢不说明连接卡住了，晚到的回话没人收、丢掉。
 
 mod reader;
 
@@ -734,9 +734,10 @@ impl Link {
     }
 
     /// 发 `make` 用新的请求编号造出的请求，等带着这个编号的回话，最多等 `timeout`；回 `Error` 时是
-    /// 它的说明。超时时这条连接按断开处理（`Inner::timed_out`）。
+    /// 它的说明。超时只撤掉这条请求，连接照用，晚到的回话丢掉：用它的看板请求是宿主另起线程办的，慢只
+    /// 说明那个线程慢。
     pub fn request(&self, make: impl FnOnce(u32) -> ClientMsg, timeout: Duration) -> Result<HostMsg> {
-        self.request_on(make, timeout, OnTimeout::Disconnect)
+        self.request_on(make, timeout, OnTimeout::Wait)
     }
 
     /// 同 `request`，超时时照 `on_timeout` 办。

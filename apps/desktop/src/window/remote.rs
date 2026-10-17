@@ -251,10 +251,9 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(EntityId, SessionId), &'static str> {
-        let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let dir = canonical(dir);
+        let dir = super::model::canonical_dir(dir);
         let dir = dir.as_path();
-        if let Some(wi) = self.workspaces.iter().position(|workspace| canonical(&workspace.dir) == dir) {
+        if let Some(wi) = self.workspaces.iter().position(|workspace| workspace.real_dir() == dir) {
             let workspace = &self.workspaces[wi];
             if let Some(tab) = workspace.tabs.get(workspace.active)
                 && let Some(session) = tab.focused_view().read(cx).session_id()

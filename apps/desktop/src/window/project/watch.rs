@@ -64,7 +64,8 @@ impl ProjectWatch {
     /// 改它们；`root` 下面的 git 目录（主仓库的 `.git`、子模块在 `.git/modules` 下的、嵌套
     /// 仓库自己的 `.git`）按路径里的 `.git` 认。被忽略的文件只在它所在的目录正显示在文件树里
     /// （`listed`，见 `FileTree::is_listed`）时才算，免得编译时产物目录里一直在写，跟着一直重读；忽略与否按
-    /// 文件所在的那个仓库（`git`）算。
+    /// 文件所在的那个仓库（`git`）算。不在 git 仓库里时所有文件都按被忽略的算，只认文件树正显示着的目录，
+    /// 免得在家目录这类目录里 `~/Library` 一直在写，跟着一直重读。
     pub(super) fn affects(&self, path: &Path, git: Option<&git::Repos>, listed: &dyn Fn(&Path) -> bool) -> bool {
         // 文件系统监视的守护进程每次 `git status` 都会在自己的目录里写一下，也不看。
         let git_internal = |rel: &Path| {
@@ -80,7 +81,7 @@ impl ProjectWatch {
         if let Some(ix) = rel.components().position(|part| part.as_os_str() == ".git") {
             return git_internal(&rel.components().skip(ix + 1).collect::<PathBuf>());
         }
-        let ignored = git.is_some_and(|git| git.is_ignored(rel));
+        let ignored = git.is_none_or(|git| git.is_ignored(rel));
         !ignored || rel.parent().is_some_and(|parent| listed(&self.root.join(parent)))
     }
 }
@@ -123,6 +124,19 @@ mod tests {
         assert_eq!(changed_paths(Ok(rescan), &everything).as_ref(), Some(&all));
         let failed = Err(notify::Error::generic("dropped events"));
         assert_eq!(changed_paths(failed, &everything).as_ref(), Some(&all));
+    }
+
+    /// 不在仓库里时只有文件树正显示着的目录里的改动才算，`.git` 照旧不看文件树。
+    #[test]
+    fn non_repo_changes_count_only_in_listed_dirs() {
+        let root = std::env::temp_dir();
+        let watch = ProjectWatch::new(root.clone(), vec![], futures::channel::mpsc::unbounded().0).unwrap();
+        let only_root = |dir: &Path| dir == root;
+        assert!(watch.affects(&root.join("a.txt"), None, &only_root));
+        assert!(!watch.affects(&root.join("sub/b.txt"), None, &only_root));
+        assert!(watch.affects(&root.join(".git/index"), None, &only_root));
+        let with_sub = |dir: &Path| dir == root || dir == root.join("sub");
+        assert!(watch.affects(&root.join("sub/b.txt"), None, &with_sub));
     }
 
     /// 防抖时并起来的几批里有一批要求整个重读，并完也要整个重读。

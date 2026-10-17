@@ -7,7 +7,7 @@
 //! 看板和手机端引导页一样盖住标签和分屏：切到任何一个标签或 workspace、按 Esc 就收起。卡片的「打开终端」
 //! 把任务的会话接进它目录所在的 workspace 的一个新标签，已经在哪个分屏里时切过去。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
 use gpui::{
@@ -103,8 +103,9 @@ impl WindowView {
     }
 
     /// 看板的新建、编辑对话框开着。它画在窗口根上，窗口的快捷键在里面照样触发，这时换页、收起或再开一个
-    /// 都会把写了一半的内容丢掉，所以这几个快捷键不理。
-    fn dialog_open(&self, cx: &App) -> bool {
+    /// 都会把写了一半的内容丢掉，所以这几个快捷键不理；窗口上经 `act` 派发的动作、关分屏的键（`ClosePane`）、
+    /// 打开设置页和从访达拖文件夹进来（`open_dropped_dirs`，对话框不接拖放，会冒泡到窗口根上）也一样不理。
+    pub(super) fn dialog_open(&self, cx: &App) -> bool {
         self.todo_dialog(cx).is_some()
     }
 
@@ -186,12 +187,11 @@ impl WindowView {
             }
         };
         self.kanban = None;
-        let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
-        let dirs: Vec<PathBuf> = self.workspaces.iter().map(|workspace| canonical(&workspace.dir)).collect();
-        let dir_refs: Vec<&Path> = dirs.iter().map(PathBuf::as_path).collect();
+        let canonical = super::model::canonical_dir;
+        let dirs: Vec<&Path> = self.workspaces.iter().map(|workspace| workspace.real_dir()).collect();
         let home = super::model::home_dir().map(|home| canonical(&home));
         let worktree = todo.worktree_dir.as_deref().map(canonical);
-        match best_workspace(&dir_refs, &canonical(&todo.spec.dir), worktree.as_deref(), home.as_deref()) {
+        match best_workspace(&dirs, &canonical(&todo.spec.dir), worktree.as_deref(), home.as_deref()) {
             Some(ix) => {
                 self.activate_workspace(ix, window, cx);
                 self.insert_tab(self.workspace().active + 1, view, window, cx);

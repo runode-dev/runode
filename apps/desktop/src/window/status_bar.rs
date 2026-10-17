@@ -164,6 +164,10 @@ impl Status {
 
     /// 照现在的模式和 agent 的状态拿起或放下 `Caffeinate`。
     fn apply_sleep(&mut self) {
+        // 被外面结束了的（比如 `killall caffeinate`）放掉，下面照要不要重拉，免得一直显示生效中。
+        if self.caffeinate.as_mut().is_some_and(Caffeinate::exited) {
+            self.caffeinate = None;
+        }
         let want = match self.sleep {
             SleepMode::On => true,
             SleepMode::Agent => self.working,
