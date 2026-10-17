@@ -13,6 +13,10 @@
 #   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，说明这次命令开始是真的，值是用户
 #                输入的命令原文（百分号编码），拿不到时为空，终端从屏幕上读；runode 只把这样
 #                认过的命令当作真的跑过，报告给等它的前端
+#   6973;<口令>;end=  runode 私有：紧接在 133;D 前面，说明这次命令结束是真的；runode 只认这样的
+#                133;D，命令输出里伪造的、别家集成另发的都不算
+#   6973;<口令>;version=2  runode 私有：集成脚本的版本，每条命令开始时和 command 一起发，2 起
+#                133;D 前面有 end；升级后接手的 runode 据此知道这个 shell 会发 end
 #
 # 标记直接写进 PS1、PS2、RPROMPT，提示符因为改窗口大小等原因重画时会跟着重发。
 #
@@ -64,7 +68,7 @@ _runode_save_status() {
 # 排在 precmd 钩子的最后面，别的钩子改完 PS1 之后再加标记。
 _runode_precmd() {
     if [[ -n $_runode_ran ]]; then
-        'builtin' 'print' -rn -- $'\e]133;D;'"$_runode_last_status"$'\a'
+        _runode_command_end $_runode_last_status
         _runode_ran=
     fi
     if [[ $PS1 != "$_runode_ps1" ]]; then
@@ -183,12 +187,21 @@ _runode_preexec() {
         'builtin' 'local' REPLY=
         # 逐字编码的耗时随长度平方涨，粘贴的长命令不编码，原文留空。
         [[ -z $1 || $#1 -gt 4096 ]] || _runode_urlencode "$1"
-        'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;command=$REPLY"$'\a'
+        'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;version=2"$'\a\e]6973;'"$_runode_report_token;command=$REPLY"$'\a'
     fi
     # 提示符上换过光标的，在命令开始前换回配置的样式。
     [[ -z $_runode_cursor ]] || 'builtin' 'print' -rn -- $'\e[0 q'
     'builtin' 'print' -rn -- $'\e]133;C\a'
     _runode_ran=1
+}
+
+# 报告命令执行完了，退出码是 $1；有口令时前面先发带口令的 end 报告，runode 才认这个 133;D。
+_runode_command_end() {
+    if [[ -n ${_runode_report_token-} ]]; then
+        'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;end="$'\a\e]133;D;'"$1"$'\a'
+    else
+        'builtin' 'print' -rn -- $'\e]133;D;'"$1"$'\a'
+    fi
 }
 
 # 吞掉漏到命令行上的 SGR 鼠标报告（ESC [ < 按键;列;行 M 或 m）。开着鼠标上报的程序退出前
@@ -238,7 +251,7 @@ runode-reload() {
     (( ${+ZDOTDIR} )) && vars+=(RUNODE_ZSH_ZDOTDIR=$ZDOTDIR)
     [[ -z ${_runode_report_token-} ]] || vars+=(RUNODE_REPORT_TOKEN=$_runode_report_token)
     'builtin' 'fc' -AI 2>/dev/null
-    'builtin' 'print' -rn -- $'\e]133;D;0\a'
+    _runode_command_end 0
     _runode_ran=
     'builtin' 'exec' 'env' $vars $zsh -l
 }

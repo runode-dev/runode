@@ -2,13 +2,12 @@
 //! 发 OSC 133 标记（nushell 自己会发，脚本只补报告）。终端据此分清提示符、用户输入和命令输出，
 //! 单击挪光标、删除选区和按命令跳转都靠它。
 //!
-//! 脚本编进二进制，第一次用到时写到用户自己的缓存目录里；用户的 shell 配置照常加载，
-//! 不需要改动。
+//! 脚本编进二进制，每次起 shell 前写到用户自己的缓存目录里（和二进制里一样的不重写）；用户的
+//! shell 配置照常加载，不需要改动。
 
 use std::{
     io,
     path::{Path, PathBuf},
-    sync::OnceLock,
 };
 
 use portable_pty::CommandBuilder;
@@ -44,7 +43,7 @@ const NUSHELL_CONF: &str = include_str!("../shell-integration/nushell/runode.nu"
 /// 或者生成不了口令时为 `None`，这时脚本不发报告。
 pub fn prepare(mode: IntegrationMode, program: &str, features: &str, cmd: &mut CommandBuilder) -> Option<String> {
     let shell = resolve(mode, program);
-    let dir = shell.and_then(|_| match install_dir() {
+    let dir = shell.and_then(|_| match install(&runode_paths::Dirs::from_env()) {
         Ok(dir) => Some(dir),
         Err(err) => {
             tracing::warn!("shell integration unavailable: {err}");
@@ -164,20 +163,11 @@ fn report_token() -> Option<String> {
     Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// 脚本所在的目录，每个进程第一次成功写入后记住。写不出来时不记，下次起 shell 再试，免得一次
-/// 暂时性的错误让这个宿主之后起的 shell 都没有集成。
-fn install_dir() -> io::Result<&'static Path> {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    if let Some(dir) = DIR.get() {
-        return Ok(dir);
-    }
-    let dir = install()?;
-    Ok(DIR.get_or_init(|| dir))
-}
-
-fn install() -> io::Result<PathBuf> {
-    let dir =
-        runode_paths::Dirs::from_env().shell_integration_dir().ok_or_else(|| io::Error::other("no home directory"))?;
+/// 把脚本写进 `dirs` 的集成目录，返回这个目录。每次起 shell 都写一遍，不记住写过：宿主跑着时用户
+/// 可能清掉了缓存目录，那样 zsh 的 ZDOTDIR、bash 的 --rcfile 就指着不存在的文件，连用户自己的
+/// 配置都不加载。内容没变时只读不写，几个会话同时起 shell 也不会互相踩（见 `install_into`）。
+fn install(dirs: &runode_paths::Dirs) -> io::Result<PathBuf> {
+    let dir = dirs.shell_integration_dir().ok_or_else(|| io::Error::other("no home directory"))?;
     install_into(&dir)?;
     Ok(dir)
 }
@@ -270,6 +260,21 @@ mod tests {
         assert!(!fish.join("runode.fish").exists());
         assert_eq!(std::fs::read_to_string(fish.join("runode-integration.fish")).unwrap(), FISH_CONF);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 宿主跑着时用户清掉了缓存目录，下一次起 shell 时脚本又写回去。
+    #[test]
+    fn scripts_are_written_again_after_the_cache_is_cleared() {
+        let home = std::env::temp_dir().join(format!("runode-shell-integration-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let dirs = runode_paths::Dirs::from_vars(|key| (key == "HOME").then(|| home.clone().into()));
+        let dir = install(&dirs).unwrap();
+        assert!(dir.starts_with(&home));
+        std::fs::remove_dir_all(&home).unwrap();
+        assert_eq!(install(&dirs).unwrap(), dir);
+        assert_eq!(std::fs::read_to_string(dir.join("zsh/runode-integration.zsh")).unwrap(), ZSH_INTEGRATION);
+        assert_eq!(std::fs::read_to_string(dir.join("bash/runode.bash")).unwrap(), BASH_RC);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

@@ -509,6 +509,34 @@ fn an_exported_session_is_imported_as_it_was() {
     assert_eq!(imported.meta().shell_path, Some("/opt/bin".into()));
 }
 
+/// 脚本给命令结束签名（报告过版本 2）这件事不随交接带走：接手方认得交接时正在跑的那条命令不带
+/// `end` 的结束（升级前加载的旧版脚本就是这样结束的），之后脚本在下一条命令开始时又报告版本，
+/// 输出里伪造的结束就又不算了。
+#[test]
+fn signed_ends_are_learned_again_after_a_handoff() {
+    let (mut session, _out) = reporting_session();
+    let start = |command: &str| {
+        format!("{command}\r\n\x1b]6973;{TOKEN};version=2\x07\x1b]6973;{TOKEN};command={command}\x07\x1b]133;C\x07")
+    };
+    session.feed(PROMPT);
+    session.feed(start("make").as_bytes());
+    assert!(session.take_commands().is_empty());
+    let snapshot = session.snapshot().unwrap();
+    let (export, pty, _new_out) = hand_over(&mut session);
+    let mut imported = import(pty, ImportScreen::Snapshot(&snapshot), export);
+    imported.feed(b"\x1b]133;D;3\x07");
+    let finished: Vec<_> = imported.take_commands().into_iter().map(|c| (c.cmd, c.exit)).collect();
+    assert_eq!(finished, [("make".to_owned(), Some(3))]);
+
+    imported.feed(PROMPT);
+    imported.feed(start("test").as_bytes());
+    imported.feed(b"\x1b]133;D;0\x07");
+    assert!(imported.take_commands().is_empty());
+    imported.feed(format!("\x1b]6973;{TOKEN};end=\x07\x1b]133;D;1\x07").as_bytes());
+    let finished: Vec<_> = imported.take_commands().into_iter().map(|c| (c.cmd, c.exit)).collect();
+    assert_eq!(finished, [("test".to_owned(), Some(1))]);
+}
+
 /// 停着接手：打开闸门之前一个字节都不从 PTY 读，交出时没写出去的输入和之后写的都不写；打开
 /// 之后按先后写出去，PTY 里攒着的输出照常读到。
 #[test]

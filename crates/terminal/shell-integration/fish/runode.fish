@@ -11,6 +11,10 @@
 #   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，说明这次命令开始是真的，值是用户
 #                输入的命令原文（百分号编码），拿不到时为空，终端从屏幕上读；runode 只把这样
 #                认过的命令当作真的跑过，报告给等它的前端
+#   6973;<口令>;end=  runode 私有：紧接在 133;D 前面，说明这次命令结束是真的；runode 只认这样的
+#                133;D，命令输出里伪造的、别家集成另发的都不算
+#   6973;<口令>;version=2  runode 私有：集成脚本的版本，每条命令开始时和 command 一起发，2 起
+#                133;D 前面有 end；升级后接手的 runode 据此知道这个 shell 会发 end
 #
 # runode 还经 RUNODE_SHELL_FEATURES 告诉集成脚本另外开哪些功能（逗号隔开，和 Ghostty 的
 # GHOSTTY_SHELL_FEATURES 一个写法）：
@@ -63,26 +67,45 @@ status is-interactive; or exit 0
 set -q __runode_integrated; and exit 0
 set -g __runode_integrated 1
 
-# 用户的 fish_prompt、fish_right_prompt 在这个脚本之后才定义，第一次显示提示符前再把它们
-# 包起来，在前后加上提示符的开始和结束标记。右侧提示符画在用户输入的同一行末尾：不能用
+# 用户的 fish_prompt、fish_right_prompt 在这个脚本之后才定义，每次显示提示符前再看一眼，还没包
+# 起来就包上，在前后加上提示符的开始和结束标记：用户之后还会换提示符（fish_config prompt choose、
+# tide configure、funced），换上来的新函数也要包。右侧提示符画在用户输入的同一行末尾：不能用
 # 133;A，它会先换到新的一行；画完要回到用户输入，之后敲的字才不会被当成提示符。
 #
+# 每条命令开始前换回用户自己的函数，下次显示提示符时再包：命令里 funcsave、fish_config prompt save 存下的，
+# Python venv 的 activate.fish 拷走的，funced 改的，都是用户自己的提示符，不是这里的包装。存下包装的话，以后
+# 开的每个 fish 都会去调一个不存在的函数。还原前看一眼提示符还是不是包装：别的 fish_prompt 事件处理器
+# 可能在这之后又换了一个，那就不动它。
+#
 # 原来的提示符最先跑、输出先收起来，和标记一起打印：先打印标记的话 $status、$pipestatus 就成了
-# printf 的，提示符显示不出上一条命令失败。fish 本来就是收起提示符的输出再画，收一道不改变什么。
+# printf 的，提示符显示不出上一条命令失败。fish 本来就是收起提示符的输出再画，收一道不改变什么。参数照传：
+# 开了 fish_transient_prompt 时 fish 带 --final-rendering 重画提示符。
 function __runode_wrap_prompt --on-event fish_prompt
-    functions -e __runode_wrap_prompt
-    if functions -q fish_right_prompt
+    if functions -q fish_right_prompt; and not functions -q __runode_original_right_prompt
         functions -c fish_right_prompt __runode_original_right_prompt
         function fish_right_prompt
-            set -l prompt (__runode_original_right_prompt | string collect --no-trim-newlines)
+            set -l prompt (__runode_original_right_prompt $argv | string collect --no-trim-newlines)
             printf '\e]133;P;k=r\a%s\e]133;B\a' "$prompt"
         end
     end
-    functions -q fish_prompt; or return
-    functions -c fish_prompt __runode_original_prompt
-    function fish_prompt
-        set -l prompt (__runode_original_prompt | string collect --no-trim-newlines)
-        printf '\e]133;A;cl=line;redraw=1\a%s\e]133;B\a' "$prompt"
+    if functions -q fish_prompt; and not functions -q __runode_original_prompt
+        functions -c fish_prompt __runode_original_prompt
+        function fish_prompt
+            set -l prompt (__runode_original_prompt $argv | string collect --no-trim-newlines)
+            printf '\e]133;A;cl=line;redraw=1\a%s\e]133;B\a' "$prompt"
+        end
+    end
+end
+
+function __runode_unwrap_prompt --on-event fish_preexec
+    for name in fish_prompt fish_right_prompt
+        set -l original __runode_original_(string replace fish_ '' $name)
+        functions -q $original; or continue
+        if functions -q $name; and functions $name | string match -q "*$original*"
+            functions -e $name
+            functions -c $original $name
+        end
+        functions -e $original
     end
 end
 
@@ -119,7 +142,7 @@ function runode-reload --description 'Restart this shell to reload its configura
     test -z "$__runode_report_token"; or set -a vars RUNODE_REPORT_TOKEN=$__runode_report_token
     set -q __runode_features; and set -a vars RUNODE_SHELL_FEATURES=(string join , -- $__runode_features)
     history save
-    printf '\e]133;D;0\a'
+    __runode_command_end 0
     exec env $vars $fish --features no-mark-prompt -l
 end
 
@@ -161,11 +184,20 @@ function __runode_preexec --on-event fish_preexec
         if test -n "$argv[1]"
             set command (string escape --style=url -- $argv[1])
         end
-        printf '\e]6973;%s;command=%s\a' $__runode_report_token "$command"
+        printf '\e]6973;%s;version=2\a\e]6973;%s;command=%s\a' $__runode_report_token $__runode_report_token "$command"
     end
     printf '\e]133;C\a'
 end
 
 function __runode_postexec --on-event fish_postexec
-    printf '\e]133;D;%s\a' $status
+    __runode_command_end $status
+end
+
+# 报告命令执行完了，退出码是 $argv[1]；有口令时前面先发带口令的 end 报告，runode 才认这个 133;D。
+function __runode_command_end
+    if test -n "$__runode_report_token"
+        printf '\e]6973;%s;end=\a\e]133;D;%s\a' $__runode_report_token $argv[1]
+    else
+        printf '\e]133;D;%s\a' $argv[1]
+    end
 end

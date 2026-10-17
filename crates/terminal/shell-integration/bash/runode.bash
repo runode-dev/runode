@@ -14,6 +14,10 @@
 #   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，说明这次命令开始是真的，值尽量是
 #                命令原文（百分号编码），拿不到时为空，终端从屏幕上读；runode 只把这样认过的
 #                命令当作真的跑过，报告给等它的前端。bash 4.4 起才有，更老的 bash 没有命令开始的标记
+#   6973;<口令>;end=  runode 私有：紧接在 133;D 前面，说明这次命令结束是真的；runode 只认这样的
+#                133;D，命令输出里伪造的、别家集成另发的都不算
+#   6973;<口令>;version=2  runode 私有：集成脚本的版本，每条命令开始时和 command 一起发，2 起
+#                133;D 前面有 end；升级后接手的 runode 据此知道这个 shell 会发 end
 #
 # 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的。runode 只认
 # 带着这个口令的 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec bash
@@ -102,7 +106,7 @@ if [ -z "${_runode_integrated-}" ]; then
 
     _runode_prompt_command() {
         if [ -n "$_runode_prompted" ]; then
-            printf '\033]133;D;%s\007' "$_runode_last_status"
+            _runode_command_end "$_runode_last_status"
         fi
         _runode_prompted=1
         # ${var@P} 也是 4.4 才有，和 PS0 一起判断。
@@ -150,6 +154,15 @@ if [ -z "${_runode_integrated-}" ]; then
         [ "$joined" = "$_runode_names" ] && return
         _runode_names=$joined
         printf '\033]6973;%s;functions=%s\007' "$_runode_report_token" "$joined"
+    }
+
+    # 报告命令执行完了，退出码是 $1；有口令时前面先发带口令的 end 报告，runode 才认这个 133;D。
+    _runode_command_end() {
+        if [ -n "${_runode_report_token-}" ]; then
+            printf '\033]6973;%s;end=\007\033]133;D;%s\007' "$_runode_report_token" "$1"
+        else
+            printf '\033]133;D;%s\007' "$1"
+        fi
     }
 
     # 把 $? 换回记下的退出码。调用时接上 `&& :`：用户开了 `set -e` 时，返回非零的函数单独一条会让
@@ -206,7 +219,8 @@ if [ -z "${_runode_integrated-}" ]; then
             if [ -n "$num" ] && [ "$num" = "$_runode_histnext" ] && [ -n "$entry" ] && [ "${#entry}" -le 4096 ]; then
                 _runode_urlencode "$entry"
             fi
-            printf '\033]6973;%s;command=%s\007' "$_runode_report_token" "$_runode_encoded"
+            printf '\033]6973;%s;version=2\007\033]6973;%s;command=%s\007' "$_runode_report_token" \
+                "$_runode_report_token" "$_runode_encoded"
         fi
         # 提示符上换过光标的，在命令开始前换回配置的样式。
         [ -z "$_runode_cursor" ] || printf '\033[0 q'
@@ -247,7 +261,7 @@ if [ -z "${_runode_integrated-}" ]; then
         [ -z "${_runode_report_token-}" ] || vars+=("RUNODE_REPORT_TOKEN=$_runode_report_token")
         [ -z "${_runode_features+X}" ] || vars+=("RUNODE_SHELL_FEATURES=$_runode_features")
         builtin history -a 2>/dev/null
-        printf '\033]133;D;0\007'
+        _runode_command_end 0
         _runode_prompted=
         exec env ${vars[@]+"${vars[@]}"} "$bash" --rcfile "$_runode_rcfile"
     }

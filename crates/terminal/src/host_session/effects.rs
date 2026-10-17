@@ -49,6 +49,17 @@ pub(super) struct Effects {
     /// 表示没收到；里面是命令原文，shell 拿不到原文时为 `None`，到时从屏幕上读。由下一个
     /// 133;C 取走，先来了 133;A、133;B 或 133;D 就作废，免得被之后伪造的 133;C 借用。
     pub(super) command_report: RefCell<Option<Option<String>>>,
+    /// 收到了带口令的 `end` 报告：shell 说紧接着的 OSC 133;D 是它真的报告命令结束。由下一个
+    /// OSC 133 标记取走，不管它是不是 133;D。
+    pub(super) end_report: StdCell<bool>,
+    /// 这条命令开始时，集成脚本用 `version` 报告过它在 133;D 前面先发 `end` 报告（版本 2 起），这条命令
+    /// 不跟在 `end` 报告后面的 133;D 就都不算：程序输出里伪造的、内层 shell 或别家集成（iTerm2、
+    /// oh-my-posh）发的，都会让等命令的前端以为命令跑完了。按命令算，认了结束就清掉：同一个会话里
+    /// `runode-reload` 换上旧版脚本（比如开发版和发布版同时在跑，共用一份脚本目录）时，下一条命令照旧版的办。
+    ///
+    /// 不随交接带走，免得交接格式和导出导入都要多一项：接手的宿主从下一条命令起就又认得了，交接时正在跑
+    /// 的那条照旧版的办，它的结束在这期间可能被伪造。
+    pub(super) signed_ends: StdCell<bool>,
     /// 程序读写剪贴板的请求，按到达的先后，由 `HostSession::take_clipboard` 取走。
     pub(super) clipboard: RefCell<Vec<ClipboardRequest>>,
     /// 程序可以写剪贴板（配置项 `clipboard-write` 是 allow），见 `HostSession::set_clipboard_writes`。
@@ -59,7 +70,9 @@ pub(super) struct Effects {
 /// shell 集成在显示提示符时、内容和上次报告的不一样时用的私有 OSC：
 /// `ESC ] 6973;<口令>;<字段>=<百分号编码的值> BEL`。字段是 `cwd`（shell 的当前目录，每次显示
 /// 提示符前都发）、`path`（PATH）或 `functions`（名字之间用空格分开），别的字段不认识，丢掉。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
-/// 原文（拿不到时为空），见 `Effects::command_report`。
+/// 原文（拿不到时为空），见 `Effects::command_report`；`end`：紧接在 OSC 133;D 前面发，值为空，见
+/// `Effects::end_report`；`version`：集成脚本的版本，每条命令开始时和 `command` 一起发，2 起
+/// 有 `end`，见 `Effects::signed_ends`。
 ///
 /// 报告运行完的命令（`HostMsg::CommandFinished`）同样只认这条报告，133;C 自带的命令原文一律
 /// 不用：伪造的命令会让 `runode wait` 这类等命令的前端以为命令跑完了。
@@ -92,6 +105,17 @@ impl Effects {
         if field == b"command" {
             if let Ok(mut pending) = self.command_report.try_borrow_mut() {
                 *pending = Some((!value.is_empty()).then(|| String::from_utf8_lossy(&value).into_owned()));
+            }
+            return;
+        }
+        if field == b"end" {
+            self.end_report.set(true);
+            return;
+        }
+        if field == b"version" {
+            let version = std::str::from_utf8(&value).ok().and_then(|value| value.parse::<u32>().ok());
+            if version.is_some_and(|version| version >= 2) {
+                self.signed_ends.set(true);
             }
             return;
         }
@@ -130,7 +154,8 @@ pub(super) enum PromptEvent {
     /// 命令开始运行（OSC 133;C），带着运行完时要报告的命令。前面没有带口令的 `command` 报告
     /// （可能是伪造的）、或者报告没带原文又没能从屏幕上读到时为 `None`，不报。
     OutputStart(Option<String>),
-    /// 命令运行结束（OSC 133;D），带着退出码。
+    /// 命令运行结束（OSC 133;D），带着退出码。脚本给结束签名时（`Effects::signed_ends`）只有跟在
+    /// `end` 报告后面的才有这一步。
     CommandEnd(Option<i32>),
 }
 
@@ -197,6 +222,11 @@ impl HostSession {
                 }
                 PromptEvent::OutputStart(command) => {
                     self.prompt_reported = false;
+                    // 用户配置里另接的 shell 集成（iTerm2、oh-my-posh）在 runode 之后再发一遍不带
+                    // 口令的 133;C，不能把认过的那条命令盖掉，不然它永远等不到结束。
+                    if command.is_none() && self.running.is_some() {
+                        continue;
+                    }
                     let ts = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
                     self.running = command.map(|cmd| FinishedCommand {
                         cmd,
@@ -511,6 +541,55 @@ mod tests {
         session.feed(PROMPT);
         session.feed(format!("ls\r\n\x1b]6973;{TOKEN};command=ls\x07\x1b]133;C\x07\x1b]133;D;0\x07").as_bytes());
         assert!(session.take_commands().is_empty());
+    }
+
+    /// 用户配置里另接的集成（iTerm2、oh-my-posh）在 runode 之后再发一遍不带口令的 133;C：认过的
+    /// 命令照旧在跑，结束时照常报告。
+    #[test]
+    fn a_second_unreported_command_start_keeps_the_running_command() {
+        let mut session = reporting_host();
+        session.feed(PROMPT);
+        session.feed(format!("ls\r\n\x1b]6973;{TOKEN};command=ls\x07\x1b]133;C\x07\x1b]133;C;\x07out\r\n").as_bytes());
+        session.feed(b"\x1b]133;D;2\x07");
+        let commands = session.take_commands();
+        assert_eq!(commands.iter().map(|c| (c.cmd.as_str(), c.exit)).collect::<Vec<_>>(), [("ls", Some(2))]);
+    }
+
+    /// 脚本报告过版本 2，只认跟在带口令的 `end` 报告后面的 133;D；没报告过的旧版脚本哪个都认。
+    #[test]
+    fn signed_ends_are_required_once_the_script_says_it_signs_them() {
+        let start = |command: &str| {
+            format!("{command}\r\n\x1b]6973;{TOKEN};version=2\x07\x1b]6973;{TOKEN};command={command}\x07\x1b]133;C\x07")
+        };
+        let end = |exit: i32| format!("\x1b]6973;{TOKEN};end=\x07\x1b]133;D;{exit}\x07");
+        let wrong = "0123456789abcdef0123456789abcdee";
+        let mut session = reporting_host();
+        session.feed(PROMPT);
+        session.feed(start("make").as_bytes());
+        // 输出里伪造的结束、口令不对的 `end`、`end` 之后先来了别的标记，都不算。
+        session.feed(b"\x1b]133;D;0\x07");
+        session.feed(format!("\x1b]6973;{wrong};end=\x07\x1b]133;D;0\x07").as_bytes());
+        session.feed(format!("\x1b]6973;{TOKEN};end=\x07\x1b]133;A\x07\x1b]133;D;0\x07").as_bytes());
+        assert!(session.take_commands().is_empty());
+        session.feed(end(2).as_bytes());
+        let commands = session.take_commands();
+        assert_eq!(commands.iter().map(|c| (c.cmd.as_str(), c.exit)).collect::<Vec<_>>(), [("make", Some(2))]);
+        // 按命令算：`runode-reload` 换上旧版脚本以后，下一条不报版本的命令照旧认不带 `end` 的结束。
+        session.feed(PROMPT);
+        session.feed(format!("ls\r\n\x1b]6973;{TOKEN};command=ls\x07\x1b]133;C\x07\x1b]133;D;0\x07").as_bytes());
+        assert_eq!(session.take_commands().len(), 1);
+
+        // 旧版脚本不报告版本，不带 `end` 的结束照旧认。
+        let mut session = reporting_host();
+        session.feed(PROMPT);
+        session.feed(format!("ls\r\n\x1b]6973;{TOKEN};command=ls\x07\x1b]133;C\x07\x1b]133;D;0\x07").as_bytes());
+        assert_eq!(session.take_commands().len(), 1);
+        // 版本 1 或者认不出的版本也一样；口令不对的版本报告不算。
+        session.feed(format!("\x1b]6973;{TOKEN};version=1\x07\x1b]6973;{TOKEN};version=x\x07").as_bytes());
+        session.feed(format!("\x1b]6973;{wrong};version=2\x07").as_bytes());
+        session.feed(PROMPT);
+        session.feed(format!("ls\r\n\x1b]6973;{TOKEN};command=ls\x07\x1b]133;C\x07\x1b]133;D;0\x07").as_bytes());
+        assert_eq!(session.take_commands().len(), 1);
     }
 
     #[test]

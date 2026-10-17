@@ -7,6 +7,11 @@
 #   6973;<口令>;functions=runode-reload  加载时发一次，runode 据此知道集成装好了、能用 runode-reload
 #   6973;<口令>;command=…  命令开始执行时、紧接在 nushell 的 133;C 前面发，值是命令原文（百分号
 #                编码）；runode 只把这样认过的命令当作真的跑过，报告给等它的前端
+#   6973;<口令>;end=  紧接在 133;D 前面，说明这次命令结束是真的；runode 只认这样的 133;D，命令输出里
+#                伪造的、别家集成另发的都不算。nushell 自己的 133;D 紧跟在命令后面发，中间插不进
+#                钩子，所以显示提示符前另发一遍前面带 end 的 133;D，nushell 自己的那个 runode 不认
+#   6973;<口令>;version=2  集成脚本的版本，每条命令开始时和 command 一起发，2 起 133;D 前面有 end；
+#                升级后接手的 runode 据此知道这个 shell 会发 end
 #
 # runode 还经 RUNODE_SHELL_FEATURES 告诉集成脚本另外开哪些功能（逗号隔开，和 Ghostty 的
 # GHOSTTY_SHELL_FEATURES 一个写法）：
@@ -36,6 +41,10 @@ $env.__runode = {
     features: ($env.RUNODE_SHELL_FEATURES? | default "" | split row "," | where $it != "")
     data_dir: ($env.RUNODE_NU_DATA_DIR? | default "")
     path: null
+    # 上一个提示符之后跑过命令，下一次显示提示符前要报告它执行完了。
+    ran: false
+    # 那条命令的退出码，见 pre_prompt。
+    status: 0
 }
 hide-env -i RUNODE_REPORT_TOKEN RUNODE_SHELL_FEATURES RUNODE_NU_DATA_DIR
 
@@ -62,8 +71,15 @@ def __runode_cursor []: nothing -> string {
     }
 }
 
-# 每次显示提示符前报告当前目录；PATH 和上次报告的不一样时也报告。
-$env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt? | default [] | append {||
+# 每次显示提示符前报告当前目录；PATH 和上次报告的不一样时也报告。退出码在最前面就取下来：这个脚本在
+# 用户的 config.nu 之后加载，后面这个钩子跑时，排在前面的用户钩子可能已经改了 LAST_EXIT_CODE。
+$env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt? | default [] | prepend {||
+    $env.__runode.status = $env.LAST_EXIT_CODE
+} | append {||
+    if ($env.__runode?.ran? | default false) {
+        $env.__runode.ran = false
+        print -n $"\e]6973;($env.__runode.token);end=\a\e]133;D;($env.__runode.status)\a"
+    }
     let cursor = __runode_cursor
     if $cursor != "" {
         print -n $"\e[($cursor) q"
@@ -92,7 +108,8 @@ $env.config.hooks.pre_execution = ($env.config.hooks.pre_execution? | default []
     }
     let token = $env.__runode?.token? | default ""
     if $token != "" {
-        print -n $"\e]6973;($token);command=($command | url encode --all)\a"
+        print -n $"\e]6973;($token);version=2\a\e]6973;($token);command=($command | url encode --all)\a"
+        $env.__runode.ran = true
     }
 })
 
@@ -111,6 +128,9 @@ def --env runode-reload [] {
         $env.RUNODE_REPORT_TOKEN = $state.token
     }
     $env.RUNODE_SHELL_FEATURES = $state.features? | default [] | str join ","
+    if ($state.token? | default "") != "" {
+        print -n $"\e]6973;($state.token);end=\a"
+    }
     print -n "\e]133;D;0\a"
     exec $nu.current-exe -l
 }

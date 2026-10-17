@@ -678,6 +678,58 @@ fn real_fish_prompts_see_the_exit_status() {
     assert_eq!(shell.output(1), "1 0 1 1\n");
 }
 
+/// 用户之后换了提示符（`fish_config prompt choose`、`tide configure` 都是重新定义 fish_prompt）：新的
+/// 提示符照样标出来、只包一层，宿主照旧记下每轮提示符的目录。
+#[test]
+fn real_fish_marks_a_redefined_prompt() {
+    let Some(mut shell) = RealShell::start("fish", "fish-new-prompt", &fish_rc(""), "[f]>", &["[f]>"]) else { return };
+    let sub = shell.home.join("sub");
+    std::fs::create_dir(&sub).unwrap();
+    let marked = b"[g]> \x1b]133;B\x07";
+    let start = shell.raw.len();
+    shell.session.write(b"function fish_prompt; echo -n '[g]> '; end\r".to_vec());
+    shell.wait_for_bytes("the new prompt", start, marked);
+    let start = shell.raw.len();
+    shell.session.write(b"cd sub\r".to_vec());
+    shell.wait_for_bytes("the new prompt in sub", start, marked);
+    shell.session.take_commands();
+    let cwd = shell.session.meta().prompt_cwd.and_then(|cwd| cwd.canonicalize().ok());
+    assert_eq!(cwd, sub.canonicalize().ok());
+    assert!(rfind(&shell.raw, b"redraw=1\x07\x1b]133;A").is_none(), "wrapped twice: {}", shell.screen());
+}
+
+/// Python venv 的 activate.fish 把包好的提示符拷走、再定义一个调这份拷贝的提示符；包它的时候不能让
+/// 那份拷贝调回新提示符自己。`deactivate` 把拷贝换回来以后照样标。
+#[test]
+fn real_fish_wraps_a_prompt_that_calls_a_copied_wrapper() {
+    let Some(mut shell) = RealShell::start("fish", "fish-venv-prompt", &fish_rc(""), "[f]>", &["[f]>"]) else {
+        return;
+    };
+    let start = shell.raw.len();
+    shell.session.write(
+        b"functions -c fish_prompt _old_fish_prompt; function fish_prompt; echo -n '(venv) '; _old_fish_prompt; end\r"
+            .to_vec(),
+    );
+    shell.wait_for_bytes("the venv prompt", start, b"(venv) [f]> \x1b]133;B\x07");
+    assert!(rfind(&shell.raw[start..], b"redraw=1\x07(venv) \x1b]133;A").is_none(), "marked twice: {}", shell.screen());
+    let start = shell.raw.len();
+    shell.session.write(b"functions -e fish_prompt; functions -c _old_fish_prompt fish_prompt\r".to_vec());
+    shell.wait_for_bytes("the prompt after deactivate", start, b"redraw=1\x07[f]> \x1b]133;B\x07");
+}
+
+/// `funcsave`（`fish_config prompt save` 也是它）存下的是用户自己的提示符，不是包装：存下包装的话以后开的
+/// fish 都去调一个不存在的函数。
+#[test]
+fn real_fish_saves_the_users_own_prompt() {
+    let Some(mut shell) = RealShell::start("fish", "fish-funcsave", &fish_rc(""), "[f]>", &["[f]>"]) else {
+        return;
+    };
+    shell.run("funcsave -q fish_prompt");
+    shell
+        .run("string match -q '*__runode*' < ~/.config/fish/functions/fish_prompt.fish; and echo wrapped; or echo own");
+    assert_eq!(shell.output(1), "own\n");
+}
+
 #[test]
 fn real_fish_cursor_follows_the_prompt() {
     let Some(mut shell) = RealShell::start("fish", "fish-cursor", &fish_rc(""), "[f]>", &["[f]>"]) else { return };
@@ -714,6 +766,48 @@ fn reports_functions_and_exit_status(shell: Option<RealShell>, fail: &str) {
     assert_eq!(cwd, dir.canonicalize().ok(), "{}", shell.name);
 }
 
+/// 用户配置里还接着别家的 shell 集成（iTerm2、oh-my-posh 那样）：它们在 runode 的标记之后再发一遍
+/// 不带口令的 133;C，提示符前另发退出码不对的 133;D，命令自己的输出里也伪造了一个 133;D。宿主只认
+/// 集成带口令报告的开始和结束：`command`（先打印一个伪造的命令结束，退出码 0，再失败）记作跑完
+/// 一次，退出码是 1。
+fn foreign_marks_do_not_end_commands(shell: Option<RealShell>, command: &str) {
+    let Some(mut shell) = shell else { return };
+    shell.session.take_commands();
+    shell.run(command);
+    let finished = shell.session.take_commands();
+    let got: Vec<_> = finished.iter().map(|finished| (finished.cmd.as_str(), finished.exit)).collect();
+    assert_eq!(got, [(command, Some(1))], "{}: {}", shell.name, shell.screen());
+}
+
+const FORGED_END: &str = "printf '\\033]133;D;0\\007'; false";
+
+#[test]
+fn real_zsh_ignores_foreign_command_marks() {
+    let rc = "PROMPT='[z]%% '\n\
+              _other_preexec() { print -n '\\e]133;C\\a' }\n_other_precmd() { print -n '\\e]133;D;0\\a' }\n\
+              preexec_functions+=(_other_preexec)\nprecmd_functions+=(_other_precmd)\n";
+    foreign_marks_do_not_end_commands(RealShell::start("zsh", "zsh-foreign", rc, "[z]%", &["[z]%"]), FORGED_END);
+}
+
+#[test]
+fn real_bash_ignores_foreign_command_marks() {
+    // 4.4 以下没有 PS0，不报告命令开始，也就不记命令。
+    if !bash_at_least(4, 4) {
+        return;
+    }
+    let rc = "PS1='[b]\\$ '\nPS0='\\e]133;C\\a'\nPROMPT_COMMAND='printf \"\\033]133;D;0\\007\"'\n";
+    foreign_marks_do_not_end_commands(RealShell::start("bash", "bash-foreign", rc, "[b]$", &["[b]$"]), FORGED_END);
+}
+
+#[test]
+fn real_fish_ignores_foreign_command_marks() {
+    let rc = fish_rc(
+        "function __other_preexec --on-event fish_preexec; printf '\\e]133;C\\a'; end\n\
+         function __other_postexec --on-event fish_postexec; printf '\\e]133;D;0\\a'; end\n",
+    );
+    foreign_marks_do_not_end_commands(RealShell::start("fish", "fish-foreign", &rc, "[f]>", &["[f]>"]), FORGED_END);
+}
+
 /// elvish 的提示符：`[e]>`，没有右侧提示符，加上 `extra`。
 fn elvish_rc(extra: &str) -> String {
     format!("set edit:prompt = {{ put '[e]> ' }}\nset edit:rprompt = {{ put '' }}\n{extra}")
@@ -739,6 +833,25 @@ fn real_elvish_keeps_what_the_user_rc_defines() {
     let Some(mut shell) = RealShell::start("elvish", "elvish-rc", &rc, "[e]>", &["[e]>"]) else { return };
     shell.run("shout hi");
     assert_eq!(shell.output(1), "HI\n", "{}", shell.screen());
+}
+
+/// 用户 rc.elv 里起的程序拿不到口令，交互环境里也没留下读口令用的变量。
+#[test]
+fn real_elvish_rc_programs_do_not_get_the_token() {
+    let rc = elvish_rc("/bin/sh -c 'echo ${RUNODE_REPORT_TOKEN-gone} > ~/seen'\n");
+    let Some(mut shell) = RealShell::start("elvish", "elvish-rc-token", &rc, "[e]>", &["[e]>"]) else { return };
+    assert_eq!(std::fs::read_to_string(shell.home.join("seen")).unwrap(), "gone\n");
+    // 变量还在的话打印 `▶ <口令>`，不在是编译错误。
+    shell.run("put $runode-token");
+    assert!(!shell.output(1).contains('▶'), "{}", shell.screen());
+}
+
+#[test]
+fn real_elvish_ignores_a_forged_command_end() {
+    foreign_marks_do_not_end_commands(
+        RealShell::start("elvish", "elvish-forged", &elvish_rc(""), "[e]>", &["[e]>"]),
+        "print \"\\e]133;D;0\\a\"; /usr/bin/false",
+    );
 }
 
 #[test]
@@ -787,9 +900,32 @@ fn real_nushell_cursor_follows_the_prompt() {
 }
 
 #[test]
+fn real_nushell_ignores_a_forged_command_end() {
+    foreign_marks_do_not_end_commands(
+        RealShell::start("nu", "nushell-forged", &nushell_rc(""), "[n]>", &["[n]>"]),
+        "print -n \"\\e]133;D;0\\a\"; ^false",
+    );
+}
+
+#[test]
 fn real_nushell_reports_functions_and_exit_status() {
     reports_functions_and_exit_status(
         RealShell::start("nu", "nushell-status", &nushell_rc(""), "[n]>", &["[n]>"]),
+        "^false",
+    );
+}
+
+/// 用户自己的 pre_prompt 钩子改了 LAST_EXIT_CODE 也照样报上一条命令的退出码。
+#[test]
+fn real_nushell_reports_the_exit_status_past_user_hooks() {
+    reports_functions_and_exit_status(
+        RealShell::start(
+            "nu",
+            "nushell-hooks",
+            &nushell_rc("$env.config.hooks.pre_prompt = [{|| $env.LAST_EXIT_CODE = 0 }]\n"),
+            "[n]>",
+            &["[n]>"],
+        ),
         "^false",
     );
 }

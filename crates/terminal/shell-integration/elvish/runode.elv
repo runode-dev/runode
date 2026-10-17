@@ -8,6 +8,10 @@
 #   6973;<口令>;functions=runode-reload  runode 私有：加载时发一次，runode 据此知道集成装好了
 #   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，值是用户输入的命令原文（百分号编码）；
 #                runode 只把这样认过的命令当作真的跑过，报告给等它的前端
+#   6973;<口令>;end=  runode 私有：紧接在 133;D 前面，说明这次命令结束是真的；runode 只认这样的
+#                133;D，命令输出里伪造的、别家集成另发的都不算
+#   6973;<口令>;version=2  runode 私有：集成脚本的版本，每条命令开始时和 command 一起发，2 起
+#                133;D 前面有 end；升级后接手的 runode 据此知道这个 shell 会发 end
 #
 # elvish 把提示符函数输出里的控制字符转义成可见的文字，提示符是在后台算好、晚一点才画的，脚本里
 # 没有办法在提示符画完之后发 133;B（见 https://github.com/elves/elvish/pull/1917）。所以 133;B 和
@@ -31,6 +35,13 @@ use re
 use str
 use runtime
 
+# 口令和功能最先读进变量，再从环境里删掉：加载用户 rc.elv 时启动的程序，以及这个 shell 里运行的
+# 所有程序都继承不到它。集成那一块拷进自己的局部变量后，最后把这两个删掉。
+var runode-token = $E:RUNODE_REPORT_TOKEN
+var runode-features = [(str:split , $E:RUNODE_SHELL_FEATURES)]
+unset-env RUNODE_REPORT_TOKEN
+unset-env RUNODE_SHELL_FEATURES
+
 {
   # elvish 0.21 先找旧位置 ~/.elvish/rc.elv，没有时用 $XDG_CONFIG_HOME（没设时是 ~/.config）下的
   # elvish/rc.elv。
@@ -44,8 +55,12 @@ use runtime
   }
   if (os:is-regular $rc) {
     try {
+      # rc.elv 编译不过时 on-end 也会被调，拿到的是个空的 ns（repr 是 `<ns 0x0>`，和 $nil 比不出来）：
+      # 对它 keys 会让 elvish 直接崩掉，try 接不住。
       eval (slurp < $rc) &on-end={|ns|
-        edit:add-vars (keys $ns | each {|name| put [$name $ns[$name]] } | make-map)
+        if (!=s (repr $ns) '<ns 0x0>') {
+          edit:add-vars (keys $ns | each {|name| put [$name $ns[$name]] } | make-map)
+        }
       }
     } catch e {
       show $e
@@ -54,11 +69,8 @@ use runtime
 }
 
 {
-  # 口令和功能读进局部变量后从环境里删掉，这个 shell 里运行的程序都继承不到。
-  var token = $E:RUNODE_REPORT_TOKEN
-  var features = [(str:split , $E:RUNODE_SHELL_FEATURES)]
-  unset-env RUNODE_REPORT_TOKEN
-  unset-env RUNODE_SHELL_FEATURES
+  var token = $runode-token
+  var features = $runode-features
   var rc = (src)[name]
 
   # 百分号编码：字母、数字和 `-._~/` 原样，别的按 UTF-8 的每个字节写成 %XX，分号、换行和控制字符
@@ -113,6 +125,7 @@ use runtime
     if (!=s $cursor '') {
       print "\e[0 q"
     }
+    report version 2
     report command $line
     print "\e]133;C\a"
     set running = $true
@@ -132,6 +145,7 @@ use runtime
         set status = $error[reason][exit-status]
       }
     }
+    report end ''
     print "\e]133;D;"$status"\a"
   }
 
@@ -146,9 +160,11 @@ use runtime
       set-env RUNODE_REPORT_TOKEN $token
     }
     set-env RUNODE_SHELL_FEATURES (str:join , $features)
+    report end ''
     print "\e]133;D;0\a"
     exec $runtime:elvish-path -rc $rc
   }
 
   report functions runode-reload
 }
+del runode-token runode-features

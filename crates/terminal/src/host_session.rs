@@ -852,12 +852,13 @@ fn register_callbacks(
         })?
         // 命令开始运行的那一刻它还原样留在屏幕上，在这里就读出来，之后的输出可能把它冲掉。
         // 只有 shell 集成用带口令的 `command` 报告认过的命令开始才记，133;C 自带的原文不用，
-        // 见 `Effects::command_report`。回调运行在 extern "C" 函数里，不能 panic，所以借用
-        // 失败时丢掉这一步。
+        // 见 `Effects::command_report`；命令结束同样只认 `end` 报告认过的，见 `Effects::signed_ends`。
+        // 回调运行在 extern "C" 函数里，不能 panic，所以借用失败时丢掉这一步。
         .on_semantic_prompt({
             let effects = effects.clone();
             move |term, event| {
                 let pending = effects.command_report.try_borrow_mut().ok().and_then(|mut pending| pending.take());
+                let signed_end = effects.end_report.take();
                 let event = match event {
                     // 报告的目录当场取走：一次喂进来的输出里可能有好几轮提示符，各轮报告各的。
                     SemanticPrompt::InputStart => {
@@ -870,7 +871,11 @@ fn register_callbacks(
                         }
                         None => None,
                     }),
-                    SemanticPrompt::CommandEnd { exit_code, .. } => PromptEvent::CommandEnd(exit_code),
+                    SemanticPrompt::CommandEnd { .. } if effects.signed_ends.get() && !signed_end => return,
+                    SemanticPrompt::CommandEnd { exit_code, .. } => {
+                        effects.signed_ends.set(false);
+                        PromptEvent::CommandEnd(exit_code)
+                    }
                     _ => return,
                 };
                 if let Ok(mut prompts) = effects.prompts.try_borrow_mut() {
