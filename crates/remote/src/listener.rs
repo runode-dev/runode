@@ -221,6 +221,7 @@ impl Listener {
         let port = addrs.first().map_or(port, SocketAddr::port);
         let host_name = host_name.unwrap_or_else(addrs::host_name);
         let fp = encode_base64url(&fingerprint);
+        let limiter = remembered_limiter(&dirs);
         let status = ListenerStatus {
             port,
             fingerprint: Bytes(fingerprint.to_vec()),
@@ -237,7 +238,7 @@ impl Listener {
             stopping: AtomicBool::new(false),
             connections: Mutex::default(),
             next_id: AtomicU64::new(1),
-            limiter: Mutex::default(),
+            limiter: Mutex::new(limiter),
             desk: Mutex::default(),
         });
         let (wake_rx, wake) = io::pipe()?;
@@ -486,6 +487,22 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener, crowded: &mut bool
     }
 }
 
+/// 门禁的限速，先记上设备表里各台设备最近一次登录的地址：不然监听一重开（重启、交接宿主、改名字），
+/// 别人先占满门禁的名额，连过的手机就过不了门禁，也就再也成不了 `RateLimiter::trusted`。
+fn remembered_limiter(dirs: &Dirs) -> RateLimiter {
+    let mut limiter = RateLimiter::default();
+    match devices::seen_from(dirs) {
+        Ok(ips) => {
+            let now = Instant::now();
+            for ip in ips {
+                limiter.succeeded(ip, now);
+            }
+        }
+        Err(err) => tracing::warn!("cannot read where paired devices last connected from: {err}"),
+    }
+    limiter
+}
+
 /// 登记一条从 `ip` 来的新连接，返回它的编号和断开它的开关；连接太多时返回 `None`。
 fn register(shared: &Shared, tcp: &TcpStream, ip: IpAddr) -> Option<(u64, Arc<AtomicBool>)> {
     let trusted = shared.limiter().trusted(ip);
@@ -535,5 +552,30 @@ mod tests {
             connections.insert(1000 + i as u64, live(phone));
         }
         assert!(!room_for(&connections, phone, true));
+    }
+
+    /// 监听重开时，设备表里记着的上次登录的地址一开始就算过过门禁。
+    #[test]
+    fn a_new_listener_trusts_where_devices_last_connected_from() {
+        let root = std::env::temp_dir().join(format!("rra-remembered-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let id = runode_protocol::remote::DeviceId([7; 16]);
+        let device = devices::Device {
+            device_id: id,
+            name: "phone".into(),
+            public_key: Bytes(vec![4; 65]),
+            paired_at: 0,
+            last_seen: 0,
+        };
+        devices::add(&dirs, device).unwrap();
+        let phone: IpAddr = "2001:db8::abcd".parse().unwrap();
+        assert!(!remembered_limiter(&dirs).trusted(phone));
+        devices::touch(&dirs, id, 1, phone).unwrap();
+        let limiter = remembered_limiter(&dirs);
+        assert!(limiter.trusted(phone));
+        assert!(!limiter.trusted("2001:db8::abce".parse().unwrap()));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

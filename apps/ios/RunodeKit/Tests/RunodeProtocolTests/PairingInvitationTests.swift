@@ -29,11 +29,6 @@ import Testing
         #expect(invitation.isExpired(at: Date(timeIntervalSince1970: 1_900_000_000)))
     }
 
-    @Test func acceptsAHexFingerprintToo() throws {
-        let hex = fingerprint.map { String(format: "%02x", $0) }.joined()
-        #expect(try PairingInvitation.parse(link(fp: hex)).fingerprint.bytes == fingerprint)
-    }
-
     @Test func emptyAddressListIsAllowed() throws {
         #expect(try PairingInvitation.parse(link(addr: "")).addresses.isEmpty)
     }

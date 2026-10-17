@@ -9,24 +9,10 @@ public struct CertificateFingerprint: Hashable, Sendable, Codable, CustomStringC
         self.bytes = bytes
     }
 
-    /// 读二维码和 Bonjour TXT 里的 `fp`。规格说二进制字段一律 base64url，这里另外认 64 位
-    /// 十六进制，电脑那边万一写成十六进制也对得上。
+    /// 读二维码和 Bonjour TXT 里的 `fp`，base64url。
     public init?(text: String) {
-        if text.count == 64, text.allSatisfy(\.isHexDigit) {
-            var bytes = Data(capacity: 32)
-            var index = text.startIndex
-            while index < text.endIndex {
-                let next = text.index(index, offsetBy: 2)
-                guard let byte = UInt8(text[index..<next], radix: 16) else { return nil }
-                bytes.append(byte)
-                index = next
-            }
-            self.init(bytes: bytes)
-        } else if let bytes = Base64URL.decode(text) {
-            self.init(bytes: bytes)
-        } else {
-            return nil
-        }
+        guard let bytes = Base64URL.decode(text) else { return nil }
+        self.init(bytes: bytes)
     }
 
     public var description: String { Base64URL.encode(bytes) }

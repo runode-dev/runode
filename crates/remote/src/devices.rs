@@ -5,8 +5,11 @@
 //! 同一个文件里还有手机登记的推送（`PushRegistration`，见 `runode_protocol::push`），按设备一条，和
 //! `Device` 分开放：`runode remote list --json` 把 `Device` 整个打印出来，token 不该跟着出去。撤销设备时
 //! 一起删。旧版本读得了带着它的表（不认识的字段忽略），但它改表时会把它丢掉，手机下次连上时重新登记。
+//!
+//! 每台设备最近一次登录的来源地址（`SeenFrom`）也这样另外放，只留最近一个，不打印出去：监听重开时
+//! 据此认出连过的手机，见 `seen_from`。旧版本改表时丢掉它，下次登录时再记上。
 
-use std::{fs::OpenOptions, io, os::unix::fs::OpenOptionsExt as _, path::PathBuf};
+use std::{fs::OpenOptions, io, net::IpAddr, os::unix::fs::OpenOptionsExt as _, path::PathBuf};
 
 use runode_paths::Dirs;
 use runode_protocol::{
@@ -51,12 +54,21 @@ pub struct PushRegistration {
     pub updated_at: u64,
 }
 
+/// 一台设备最近一次登录时从哪个地址连来。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct SeenFrom {
+    device_id: DeviceId,
+    ip: IpAddr,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Table {
     version: u32,
     devices: Vec<Device>,
     #[serde(default)]
     push: Vec<PushRegistration>,
+    #[serde(default)]
+    seen_from: Vec<SeenFrom>,
 }
 
 /// 所有配对过的设备，按配对的先后。
@@ -68,11 +80,12 @@ pub fn list_devices(dirs: &Dirs) -> io::Result<Vec<Device>> {
 pub fn revoke_device(dirs: &Dirs, id: DeviceId) -> io::Result<bool> {
     let mut revoked = false;
     update(dirs, |table| {
-        let before = (table.devices.len(), table.push.len());
+        let before = (table.devices.len(), table.push.len(), table.seen_from.len());
         table.devices.retain(|device| device.device_id != id);
         table.push.retain(|push| push.device_id != id);
+        table.seen_from.retain(|seen| seen.device_id != id);
         revoked = table.devices.len() != before.0;
-        (table.devices.len(), table.push.len()) != before
+        (table.devices.len(), table.push.len(), table.seen_from.len()) != before
     })?;
     Ok(revoked)
 }
@@ -129,7 +142,14 @@ pub(crate) fn drop_push_token(dirs: &Dirs, id: DeviceId, token: &str) -> io::Res
 
 /// 表里的设备 `id`。
 pub(crate) fn find(dirs: &Dirs, id: DeviceId) -> io::Result<Option<Device>> {
-    Ok(read(dirs)?.devices.into_iter().find(|device| device.device_id == id))
+    Ok(find_with_address(dirs, id)?.map(|(device, _)| device))
+}
+
+/// 同 `find`，连同这台设备最近一次登录的地址（见 `touch`）。
+pub(crate) fn find_with_address(dirs: &Dirs, id: DeviceId) -> io::Result<Option<(Device, Option<IpAddr>)>> {
+    let table = read(dirs)?;
+    let ip = table.seen_from.iter().find(|seen| seen.device_id == id).map(|seen| seen.ip);
+    Ok(table.devices.into_iter().find(|device| device.device_id == id).map(|device| (device, ip)))
 }
 
 /// 加一台新配对的设备。
@@ -142,14 +162,21 @@ pub(crate) fn add(dirs: &Dirs, device: Device) -> io::Result<()> {
     .map(drop)
 }
 
-/// 记下设备 `id` 在 `now` 登录过。
-pub(crate) fn touch(dirs: &Dirs, id: DeviceId, now: u64) -> io::Result<()> {
+/// 记下设备 `id` 在 `now` 从 `ip` 登录过，地址换掉它上次的。
+pub(crate) fn touch(dirs: &Dirs, id: DeviceId, now: u64, ip: IpAddr) -> io::Result<()> {
     update(dirs, |table| {
         let Some(device) = table.devices.iter_mut().find(|device| device.device_id == id) else { return false };
         device.last_seen = now;
+        table.seen_from.retain(|seen| seen.device_id != id);
+        table.seen_from.push(SeenFrom { device_id: id, ip });
         true
     })
     .map(drop)
+}
+
+/// 表里各台设备最近一次登录的地址。
+pub(crate) fn seen_from(dirs: &Dirs) -> io::Result<Vec<IpAddr>> {
+    Ok(read(dirs)?.seen_from.into_iter().map(|seen| seen.ip).collect())
 }
 
 /// 设备表文件现在的样子（修改时刻和大小），没变时不必重新读，见 `listener` 里撤销的检查。
@@ -219,6 +246,42 @@ mod tests {
         let mut ids: Vec<u8> = list_devices(&dirs).unwrap().iter().map(|device| device.device_id.0[0]).collect();
         ids.sort_unstable();
         assert_eq!(ids, (0..16).collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 每台设备只留最近一次登录的地址，撤销时一起删；没有这一项的旧表照样读得了。
+    #[test]
+    fn only_the_latest_address_of_each_device_is_kept() {
+        let root = std::env::temp_dir().join(format!("rra-seen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let device = |n: u8| Device {
+            device_id: DeviceId([n; 16]),
+            name: format!("phone {n}"),
+            public_key: Bytes(vec![4; 65]),
+            paired_at: 0,
+            last_seen: 0,
+        };
+        add(&dirs, device(1)).unwrap();
+        add(&dirs, device(2)).unwrap();
+        let ip = |text: &str| text.parse::<IpAddr>().unwrap();
+        assert_eq!(seen_from(&dirs).unwrap(), Vec::<IpAddr>::new());
+        touch(&dirs, DeviceId([1; 16]), 10, ip("192.0.2.1")).unwrap();
+        touch(&dirs, DeviceId([2; 16]), 10, ip("192.0.2.2")).unwrap();
+        touch(&dirs, DeviceId([1; 16]), 20, ip("2001:db8::1")).unwrap();
+        assert_eq!(seen_from(&dirs).unwrap(), [ip("192.0.2.2"), ip("2001:db8::1")]);
+        // 没登记的设备不记。
+        touch(&dirs, DeviceId([3; 16]), 20, ip("192.0.2.3")).unwrap();
+        assert_eq!(seen_from(&dirs).unwrap().len(), 2);
+        assert!(revoke_device(&dirs, DeviceId([1; 16])).unwrap());
+        assert_eq!(seen_from(&dirs).unwrap(), [ip("192.0.2.2")]);
+        // 设备本身的样子（`runode remote list --json` 打印的）不带地址。
+        let printed = serde_json::to_value(&list_devices(&dirs).unwrap()[0]).unwrap();
+        assert!(!printed.to_string().contains("192.0.2.2"), "{printed}");
+
+        std::fs::write(path(&dirs).unwrap(), r#"{"version":1,"devices":[]}"#).unwrap();
+        assert_eq!(seen_from(&dirs).unwrap(), Vec::<IpAddr>::new());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

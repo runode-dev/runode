@@ -243,12 +243,6 @@ impl fmt::Debug for Bytes {
     }
 }
 
-impl From<&[u8]> for Bytes {
-    fn from(bytes: &[u8]) -> Self {
-        Self(bytes.to_vec())
-    }
-}
-
 impl Serialize for Bytes {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&encode_base64url(&self.0))

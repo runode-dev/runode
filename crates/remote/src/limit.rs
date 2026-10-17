@@ -28,7 +28,8 @@ type Key = (IpAddr, bool);
 #[derive(Default)]
 pub(crate) struct RateLimiter {
     failures: HashMap<Key, VecDeque<Instant>>,
-    /// 过过门禁的地址和最近一次过的时刻。
+    /// 过过门禁的地址和最近一次过的时刻。监听开起来时先填上各台设备上次登录的地址，见
+    /// `devices::seen_from`。
     trusted: HashMap<IpAddr, Instant>,
 }
 

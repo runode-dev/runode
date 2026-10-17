@@ -62,11 +62,11 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     } else {
         match message {
             GateClientMsg::RemoteAuth { device_id, signature } => {
-                auth(shared, device_id, &signature, &signed_bytes(&nonce, &exporter, Purpose::Auth))
+                auth(shared, device_id, &signature, &signed_bytes(&nonce, &exporter, Purpose::Auth), peer)
             }
             GateClientMsg::RemotePair { secret, device_name, public_key, signature } => {
                 let signed = signed_bytes(&nonce, &exporter, Purpose::Pair);
-                pair(shared, &secret, &device_name, public_key, &signature, &signed)
+                pair(shared, &secret, &device_name, public_key, &signature, &signed, peer)
             }
             // `challenge` 已经拒掉了。
             GateClientMsg::Unknown => return Err(io::Error::other("an unknown gate message")),
@@ -157,9 +157,15 @@ fn challenge(
 }
 
 /// 已经配对过的设备登录：设备表里有它、签名用它的公钥验得过。
-fn auth(shared: &Shared, id: DeviceId, signature: &Bytes, signed: &[u8]) -> Result<DeviceId, RejectReason> {
-    let device = match devices::find(&shared.dirs, id) {
-        Ok(Some(device)) => device,
+fn auth(
+    shared: &Shared,
+    id: DeviceId,
+    signature: &Bytes,
+    signed: &[u8],
+    peer: IpAddr,
+) -> Result<DeviceId, RejectReason> {
+    let (device, seen_from) = match devices::find_with_address(&shared.dirs, id) {
+        Ok(Some(found)) => found,
         Ok(None) => return Err(RejectReason::UnknownDevice),
         Err(err) => {
             tracing::warn!("cannot read the paired device table: {err}");
@@ -171,8 +177,10 @@ fn auth(shared: &Shared, id: DeviceId, signature: &Bytes, signed: &[u8]) -> Resu
         return Err(RejectReason::BadSignature);
     }
     let now = now_unix();
-    if now.saturating_sub(device.last_seen) >= SEEN_GRANULARITY
-        && let Err(err) = devices::touch(&shared.dirs, id, now)
+    // 地址和这台设备上次的不一样也记一笔：监听重开时要认得出它，见 `devices::seen_from`。按设备比，不看
+    // 这个地址这次监听里过没过门禁：DHCP 换了地址、几台设备走同一个出口时，那是别的设备过的。
+    if (seen_from != Some(peer) || now.saturating_sub(device.last_seen) >= SEEN_GRANULARITY)
+        && let Err(err) = devices::touch(&shared.dirs, id, now, peer)
     {
         tracing::warn!("cannot record when {id} was last seen: {err}");
     }
@@ -187,6 +195,7 @@ fn pair(
     public_key: Bytes,
     signature: &Bytes,
     signed: &[u8],
+    peer: IpAddr,
 ) -> Result<DeviceId, RejectReason> {
     if secret.0.len() != SECRET_LEN {
         return Err(RejectReason::PairingInvalid);
@@ -202,6 +211,10 @@ fn pair(
         Ok(Device { device_id, name: name.clone(), public_key: public_key.clone(), paired_at: now, last_seen: now })
     })?;
     tracing::info!("paired remote device {} ({})", device.device_id, device.name);
+    // 配对用的这条连接接着用，下一次登录可能隔很久：地址现在就记下，见 `auth`。
+    if let Err(err) = devices::touch(&shared.dirs, device.device_id, device.last_seen, peer) {
+        tracing::warn!("cannot record where {} paired from: {err}", device.device_id);
+    }
     Ok(device.device_id)
 }
 

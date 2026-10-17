@@ -81,6 +81,7 @@ fn host_level_requests_from_the_phone_are_refused_between_frames() {
     ] {
         phone.send_control(refused.as_bytes());
     }
+    phone.send_control(&serde_json::to_vec(&ClientMsg::SetTheme { settings: Default::default() }).unwrap());
     phone.send_control(br#"{"type":"list_sessions"}"#);
     write_frame(&mut phone.tls, FrameKind::Input, 1, b"ls\r").unwrap();
     phone.tls.flush().unwrap();
@@ -114,7 +115,7 @@ fn host_level_requests_from_the_phone_are_refused_between_frames() {
             },
         }
     }
-    assert_eq!((outputs, errors), (40, 4));
+    assert_eq!((outputs, errors), (40, 5));
     let host = finisher.join().unwrap();
     // 连接还在：照常往来。
     phone.send_control(br#"{"type":"list_sessions"}"#);

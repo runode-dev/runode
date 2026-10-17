@@ -3,7 +3,7 @@ import Testing
 
 @testable import RunodeProtocol
 
-/// Rust 那边放的门禁样例目录：`crates/protocol/tests/fixtures/remote`。还没有时相关测试跳过。
+/// Rust 那边放的门禁样例目录：`crates/protocol/tests/fixtures/remote`。找不到样例时相关测试失败，不跳过。
 let remoteFixtureDirectory: URL = URL(filePath: #filePath)
     .deletingLastPathComponent()  // RunodeProtocolTests
     .deletingLastPathComponent()  // Tests
@@ -79,8 +79,8 @@ func remoteFixtures() -> [URL] {
 
     /// Rust 那边的门禁消息样例（`remote_*.json`）：每个都能读；认识的读出来再写回去和原文一样，
     /// 以后才有的拒绝原因读成 `unknown`。
-    @Test(.enabled(if: !remoteFixtures().isEmpty, "Rust 侧还没放门禁样例"))
-    func macGateMessagesRoundTrip() throws {
+    @Test func macGateMessagesRoundTrip() throws {
+        try #require(!remoteFixtures().isEmpty)
         for url in remoteFixtures() where url.lastPathComponent.hasPrefix("remote_") {
             let data = try Data(contentsOf: url)
             let message = try JSONDecoder().decode(GateMessage.self, from: data)
@@ -96,8 +96,7 @@ func remoteFixtures() -> [URL] {
     }
 
     /// Rust 那边被签字节串的样例（`signed_bytes_*.json`）和这里拼出来的一样。
-    @Test(.enabled(if: !remoteFixtures().isEmpty, "Rust 侧还没放门禁样例"))
-    func macSignedBytesMatch() throws {
+    @Test func macSignedBytesMatch() throws {
         struct Sample: Decodable {
             var nonce: String
             var exporter: String
@@ -105,7 +104,7 @@ func remoteFixtures() -> [URL] {
             var signed: String
         }
         let files = remoteFixtures().filter { $0.lastPathComponent.hasPrefix("signed_bytes_") }
-        #expect(!files.isEmpty)
+        try #require(!files.isEmpty)
         for url in files {
             let sample = try JSONDecoder().decode(Sample.self, from: Data(contentsOf: url))
             let purpose = try #require(GatePurpose(rawValue: sample.purpose))
@@ -117,8 +116,7 @@ func remoteFixtures() -> [URL] {
     }
 
     /// Rust 那边配对链接的样例（`pair_uri.json`）解出来的各项和它列的一样。
-    @Test(.enabled(if: FileManager.default.fileExists(atPath: remoteFixtureDirectory.appending(path: "pair_uri.json").path)))
-    func macPairingLinkParses() throws {
+    @Test func macPairingLinkParses() throws {
         struct Sample: Decodable {
             var uri: String
             var host_name: String

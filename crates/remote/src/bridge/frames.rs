@@ -261,6 +261,8 @@ mod tests {
             control(r#"{"type":"handoff_done"}"#),
             control(r#"{"type":"set_options","record_history":false}"#),
             control(r#"{"type":"ui_reply","ui":1,"reply":{"type":"done","req":1}}"#),
+            // 主题的字段多，照默认设置序列化出来。
+            control(&serde_json::to_string(&ClientMsg::SetTheme { settings: Default::default() }).unwrap()),
         ];
         let mut stream = Vec::new();
         for (allowed, refused) in allowed.iter().zip(refused.iter().chain(std::iter::repeat(&Vec::new()))) {
