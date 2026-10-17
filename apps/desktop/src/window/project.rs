@@ -10,7 +10,6 @@ mod state;
 mod watch;
 
 use std::{
-    fs,
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -102,10 +101,56 @@ impl WindowView {
         self.workspace().panel == Some(SidePanel::Git)
     }
 
-    /// 右侧面板读哪个目录：当前终端的目录，取不到时是 workspace 的目录。
+    /// 右侧面板读哪个目录：当前终端的目录，取不到、或者后台看过它不是目录（删掉了，ssh 报来的远端目录）时是
+    /// workspace 的目录。在不在由 `check_cwd` 在后台看：这里每秒都跑，目录在挂死的网络卷上时 stat 会卡住，
+    /// 不能在界面线程上看。还没看过时沿用上次读的目录，不先拿它去读，免得每 cd 进一个不存在的目录面板就闪一下。
     pub(super) fn project_dir(&self, cx: &Context<Self>) -> PathBuf {
-        let cwd = self.focused_view().and_then(|view| view.read(cx).cwd());
-        cwd.filter(|cwd| cwd.is_dir()).unwrap_or_else(|| self.workspace().dir.clone())
+        let workspace = self.workspace();
+        let Some(cwd) = self.focused_view().and_then(|view| view.read(cx).cwd()) else {
+            return workspace.dir.clone();
+        };
+        match &workspace.project.cwd {
+            Some((dir, true)) if *dir == cwd => cwd,
+            Some((dir, false)) if *dir == cwd => workspace.dir.clone(),
+            _ => workspace.project.dir.clone().unwrap_or_else(|| workspace.dir.clone()),
+        }
+    }
+
+    /// 在后台看当前终端的目录是不是目录，记下来；`project_dir` 因此变了时按新目录再检查一遍。
+    fn check_cwd(&mut self, cx: &mut Context<Self>) {
+        let Some(cwd) = self.focused_view().and_then(|view| view.read(cx).cwd()) else {
+            return;
+        };
+        let workspace = &mut self.workspaces[self.active];
+        if workspace.project.cwd_checking.as_ref() == Some(&cwd) {
+            return;
+        }
+        workspace.project.cwd_checking = Some(cwd.clone());
+        let id = workspace.id;
+        let job = cx.background_spawn({
+            let cwd = cwd.clone();
+            async move { cwd.is_dir() }
+        });
+        cx.spawn(async move |this, cx| {
+            let is_dir = job.await;
+            this.update(cx, |this, cx| {
+                // 看的时候 workspace 可能已经关掉了。
+                let Some(ix) = this.workspaces.iter().position(|workspace| workspace.id == id) else {
+                    return;
+                };
+                let before = this.project_dir(cx);
+                let project = &mut this.workspaces[ix].project;
+                if project.cwd_checking.as_ref() == Some(&cwd) {
+                    project.cwd_checking = None;
+                }
+                project.cwd = Some((cwd, is_dir));
+                if ix == this.active && this.project_dir(cx) != before {
+                    this.poll_project(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 正在监听当前 workspace 的文件树根目录。
@@ -122,29 +167,7 @@ impl WindowView {
             self.project_watch = None;
             return;
         };
-        let real_root = fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
-        // 主仓库是 worktree 时它的 git 目录、连同里面子模块的 git 目录都不在 `root` 下面；一个
-        // 套在另一个里面的只听外面那个。worktree 的分支、tag 在 `commondir` 指向的共用 git 目录里，
-        // 也要听。
-        let mut git_dirs: Vec<(PathBuf, PathBuf)> = project
-            .git
-            .iter()
-            .flat_map(|git| git.iter())
-            .flat_map(|repo| {
-                let common = fs::read_to_string(repo.git_dir.join("commondir"))
-                    .ok()
-                    .map(|common| repo.git_dir.join(common.trim()));
-                std::iter::once(repo.git_dir.clone()).chain(common)
-            })
-            .map(|dir| {
-                let real = fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
-                (dir, real)
-            })
-            .filter(|(_, real)| !real.starts_with(&real_root))
-            .collect();
-        git_dirs.sort_by(|a, b| a.1.cmp(&b.1));
-        git_dirs.dedup_by(|inner, outer| inner.1.starts_with(&outer.1));
-        let git_dirs: Vec<_> = git_dirs.into_iter().map(|(dir, _)| dir).collect();
+        let git_dirs = project.watch_git_dirs.clone();
         if self.project_watch.as_ref().is_some_and(|watch| watch.root == root && watch.git_dirs == git_dirs) {
             return;
         }
@@ -208,6 +231,8 @@ impl WindowView {
     /// 在后台重读当前终端目录的 git 状态和展开的目录；右侧面板都收着时不读，上次还没读完时
     /// 记下来，读完再读一次。
     pub(super) fn refresh_project(&mut self, cx: &mut Context<Self>) {
+        // 终端换了目录时，看过它在不在之后 `check_cwd` 再按新目录读。
+        self.check_cwd(cx);
         if !self.project_visible(cx) {
             // 切到右侧什么都不显示的 workspace 时，放掉上一个 workspace 的目录监听。
             self.sync_project_watch(cx);
@@ -313,6 +338,7 @@ impl WindowView {
     /// 定时检查：终端换了目录时重读；有没读的改动时按 `refresh_if_due` 重读；监听不了时
     /// 退回定时重读，离上次开始读至少隔 `FALLBACK_INTERVAL`，上次读得慢时按耗时拉长。
     pub(super) fn poll_project(&mut self, cx: &mut Context<Self>) {
+        self.check_cwd(cx);
         self.list_tasks(cx);
         self.poll_github_actions(cx);
         self.refresh_repo_badges(cx);

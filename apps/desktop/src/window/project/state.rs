@@ -23,6 +23,12 @@ pub(in crate::window) struct Project {
     pub root: Option<PathBuf>,
     /// 上次读的是哪个目录，终端换了目录时据此让文件树定位过去。
     pub(super) dir: Option<PathBuf>,
+    /// 监听 `root` 时还要另外听的 git 目录，和 `root` 是同一次读到的。
+    pub(super) watch_git_dirs: Vec<PathBuf>,
+    /// 后台上次看的终端目录和它是不是目录（`check_cwd`）。
+    pub(super) cwd: Option<(PathBuf, bool)>,
+    /// 正在后台看的那个终端目录。按目录记：在挂死的卷上看不完时，cd 到别处照样能看新的目录。
+    pub(super) cwd_checking: Option<PathBuf>,
     /// 最近一次读到的 git 状态：主仓库以及它里面的子模块和嵌套仓库；不在 git 仓库里时为空。和预览栏、文件树
     /// 共用一份，变了才换一份新的。
     pub git: Option<Arc<git::Repos>>,
@@ -61,6 +67,7 @@ impl Workspace {
         project.untracked = scan.untracked;
         project.in_repo = Some(scan.git.is_some());
         project.probed = Some((scan.dir.clone(), Instant::now()));
+        project.watch_git_dirs = scan.watch_git_dirs;
         if project.root.as_ref() != Some(&scan.root) {
             project.root = Some(scan.root.clone());
             changed = true;
