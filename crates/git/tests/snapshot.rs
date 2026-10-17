@@ -1,5 +1,5 @@
 //! 快照的公开查询：被忽略的目录连带它里面的路径；读快照时不跟着未跟踪的符号链接去读，也不
-//! 执行仓库配置里的 `core.fsmonitor` 和 filter；不是 UTF-8 的文件名原样留着。
+//! 执行仓库配置里的 `core.fsmonitor`、filter 和 `gpg.program`；不是 UTF-8 的文件名原样留着。
 
 mod common;
 
@@ -135,6 +135,36 @@ fn does_not_run_filters_from_included_config() {
         repo.write(".git/evil.cfg", &format!("[filter \"evil\"]\n\tclean = \"{command}\"\n"));
         repo.git(&["config", "include.path", "evil.cfg"]);
     });
+}
+
+/// 仓库开了 `log.showSignature`、把 `gpg.program` 设成脚本时，读快照（`stash list` 内部跑 `log`）和
+/// 读提交历史都不执行它去校验签过名的提交。
+#[test]
+fn does_not_run_the_repository_gpg_program() {
+    let repo = TestRepo::new("snapshot-gpg");
+    repo.commit_file("a.txt", "one\n", "init");
+    repo.write("a.txt", "two\n");
+    repo.git(&["stash", "-q"]);
+    // 给 stash 的提交补上 gpgsig 头，换掉 `refs/stash`；签名不必是真的，git 见到就会拿去校验。
+    let raw = repo.git(&["cat-file", "commit", "refs/stash"]);
+    let (headers, message) = raw.split_once("\n\n").unwrap();
+    let signature = "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEz\n -----END PGP SIGNATURE-----";
+    repo.write(".git/signed", &format!("{headers}\n{signature}\n\n{message}\n"));
+    let signed = repo.git(&["hash-object", "-t", "commit", "-w", ".git/signed"]);
+    repo.git(&["update-ref", "refs/stash", &signed]);
+    let marker = repo.path().join(".git/gpg-ran");
+    let script = repo.path().join(".git/gpg.sh");
+    std::fs::write(&script, format!("#!/bin/sh\ntouch '{}'\nexit 1\n", marker.display())).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    repo.git(&["config", "log.showSignature", "true"]);
+    repo.git(&["config", "gpg.program", &script.to_string_lossy()]);
+    let snapshot = read(&repo);
+    assert_eq!(snapshot.info.stashes[0].id, signed);
+    snapshot.repo().history(10).unwrap();
+    assert!(!marker.exists(), "读快照时执行了 gpg.program");
+    // 对照：不关掉时 git stash list 会执行它，上面的断言才有意义。
+    repo.git(&["stash", "list"]);
+    assert!(marker.exists());
 }
 
 #[test]

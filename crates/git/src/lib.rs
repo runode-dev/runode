@@ -39,12 +39,21 @@ use std::{
 
 /// 在 `dir` 里跑 git 的命令，各处共用的开头都在这里：标准输入是空的，路径里的中文等非 ASCII
 /// 字符原样输出、不转成八进制转义，所有命令都关掉 `core.fsmonitor`：仓库自己的配置能把它设成任意
-/// 命令，读状态时 git 就会执行它，进一个别人给的目录不能因此跑了里面的脚本。命令行上的 `-c` 压过
-/// 仓库的配置。仓库自己配置的过滤器（`filter.*.clean`、`process`）同理，但只在后台读状态时覆盖掉
+/// 命令，读状态时 git 就会执行它，进一个别人给的目录不能因此跑了里面的脚本。`log.showSignature` 同理
+/// 也关掉：开着时 `log` 和内部跑 `log` 的 `stash list` 见到签过名的提交就执行 `gpg.program`（或
+/// `gpg.ssh.program`、`gpg.x509.program`）去校验，这几项仓库的配置都能设成任意命令；关了签名的校验结果
+/// 也不会混进读出来的提交说明。命令行上的 `-c` 压过仓库的配置，也传给 git 自己拉起的 git。
+/// 只读的命令里别的会执行命令的配置不用管：`diff.external` 和 textconv 由 `diff_args` 关掉，`log` 不带 `-p`
+/// 不比内容，`core.pager` 只在输出到终端时用，钩子只在写操作里跑，`core.sshCommand` 只在连远端时用。
+/// 仓库自己配置的过滤器（`filter.*.clean`、`process`）同理，但只在后台读状态时覆盖掉
 /// （见 `filter_overrides`）：暂存、提交这些写操作要靠过滤器才对，不覆盖。
 pub(crate) fn git_command(dir: &Path) -> Command {
     let mut command = Command::new("git");
-    command.arg("-C").arg(dir).args(["-c", "core.quotePath=false", "-c", "core.fsmonitor=false"]).stdin(Stdio::null());
+    command
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "core.quotePath=false", "-c", "core.fsmonitor=false", "-c", "log.showSignature=false"])
+        .stdin(Stdio::null());
     command
 }
 

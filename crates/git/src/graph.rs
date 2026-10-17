@@ -293,7 +293,7 @@ impl Repo {
             return Ok(History::default());
         }
         let count = format!("--max-count={}", limit.saturating_add(1));
-        let mut args = vec!["-c", "log.showSignature=false", "log", "--date-order", "-z", "--no-color"];
+        let mut args = vec!["log", "--date-order", "-z", "--no-color"];
         args.extend(["--decorate=full", "--decorate-refs-exclude=refs/stash", LOG_FORMAT, &count]);
         if has_head {
             args.push("HEAD");
