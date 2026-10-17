@@ -189,7 +189,9 @@ fn install_into(dir: &Path) -> io::Result<()> {
         ("zsh/.zshenv", ZSH_ENV),
         ("zsh/runode-integration.zsh", ZSH_INTEGRATION),
         ("bash/runode.bash", BASH_RC),
-        ("fish-data/fish/vendor_conf.d/runode.fish", FISH_CONF),
+        // fish 的 conf.d 同名文件只加载一个，用户目录的优先：不能叫 runode.fish，那是 `runode completions fish`
+        // 建议装进 ~/.config/fish/conf.d 的补全脚本的名字，装了它集成就不加载。
+        ("fish-data/fish/vendor_conf.d/runode-integration.fish", FISH_CONF),
         ("elvish/runode.elv", ELVISH_RC),
         ("nushell-data/nushell/vendor/autoload/runode.nu", NUSHELL_CONF),
     ] {
@@ -201,6 +203,11 @@ fn install_into(dir: &Path) -> io::Result<()> {
             std::fs::create_dir_all(parent)?;
         }
         runode_paths::replace_file(&path, contents.as_bytes())?;
+    }
+    // 早先的版本装成 runode.fish，留着会和新名字的脚本各加载一遍。
+    match std::fs::remove_file(dir.join("fish-data/fish/vendor_conf.d/runode.fish")) {
+        Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err),
+        _ => {}
     }
     Ok(())
 }
@@ -216,6 +223,8 @@ mod tests {
         assert!(token.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_ne!(report_token().unwrap(), token);
         let mut cmd = CommandBuilder::new("/bin/zsh");
+        // CommandBuilder 带着本进程的环境，测试本身跑在 runode 的终端里时那里可能也有这两个变量。
+        cmd.env_clear();
         assert_eq!(prepare(IntegrationMode::Off, "/bin/zsh", "cursor:steady", &mut cmd), None);
         assert_eq!(cmd.get_env("RUNODE_REPORT_TOKEN"), None);
         assert_eq!(cmd.get_env("RUNODE_SHELL_FEATURES"), None);
@@ -254,6 +263,12 @@ mod tests {
             .filter(|name| name.to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+        // 旧名字的 fish 集成换成新名字，不两份都留着。
+        let fish = dir.join("fish-data/fish/vendor_conf.d");
+        std::fs::write(fish.join("runode.fish"), "old").unwrap();
+        install_into(&dir).unwrap();
+        assert!(!fish.join("runode.fish").exists());
+        assert_eq!(std::fs::read_to_string(fish.join("runode-integration.fish")).unwrap(), FISH_CONF);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

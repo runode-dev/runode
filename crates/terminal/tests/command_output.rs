@@ -222,7 +222,7 @@ impl RealShell {
             "bash" => (".bash_profile", format!("{program} --rcfile {}", integration("bash/runode.bash")), &POSIX),
             "zsh" => (".zshrc", format!("ZDOTDIR={} {program} -l", integration("zsh")), &POSIX),
             "fish" => {
-                let data = data_dir("fish-data", "fish/vendor_conf.d/runode.fish", "fish/runode.fish");
+                let data = data_dir("fish-data", "fish/vendor_conf.d/runode-integration.fish", "fish/runode.fish");
                 (
                     ".config/fish/config.fish",
                     format!(
