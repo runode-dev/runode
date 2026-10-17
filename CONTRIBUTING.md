@@ -24,7 +24,7 @@ make test
 cargo deny check bans   # 检查 crate 之间的依赖方向
 ```
 
-终端的测试会起真的 bash、zsh、fish、elvish 和 nushell 跑集成脚本，系统里没有的 shell 不测（macOS 自带的 bash 还是 3.2，有几项要新 bash 的也不测）。
+终端的测试会起真的 bash、zsh、fish、elvish 和 nushell 跑集成脚本，系统里没有的 shell 不测（macOS 自带的 bash 还是 3.2，有几项要新 bash 的也不测）。CI 会装齐这几个 shell，并设 `RUNODE_REQUIRE_SHELLS=1`，缺了哪个就直接失败。
 
 CI 会跑同样的检查。代码分在哪个 crate、能依赖谁，以及命名、注释和测试的约定，见 [AGENTS.md](AGENTS.md)。
 

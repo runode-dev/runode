@@ -1,0 +1,56 @@
+# 在 Mac 上对 iOS 端的 RunodeKit 跑 swift test。手机端解协议用的样例由 Rust 的 protocol 测试写出，
+# 所以样例一改也要跑，Rust 那边改了线上格式、手机端解不开时在这里变红。
+# libghostty-vt 的 xcframework 不进 git，先用 apps/ios 自带的脚本从 vendor/ghostty 编出来。
+name: iOS
+
+# AgentLogos.xcassets 里的 SVG 是指向 crates/ui/assets/icons 的符号链接，缺了 actool 编不过；
+# vendor/ghostty 是子模块指针。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/ios/**"
+      - "crates/protocol/tests/fixtures/**"
+      - "crates/ui/assets/icons/**"
+      - "vendor/ghostty"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "apps/ios/**"
+      - "crates/protocol/tests/fixtures/**"
+      - "crates/ui/assets/icons/**"
+      - "vendor/ghostty"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # 只要 ghostty，用不到 libghostty-rs；ghostty 自己没有子模块。
+      - name: 拉 ghostty 子模块
+        run: git submodule update --init vendor/ghostty
+      # vendor/ghostty 的 build.zig.zon 要求的 zig 版本（minimum_zig_version）。
+      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+        with:
+          version: 0.16.0
+      - name: 编 libghostty-vt 的 xcframework
+        run: apps/ios/scripts/build-ghostty-vt.sh
+      - name: 测试
+        run: swift test --package-path apps/ios/RunodeKit
+      # 界面代码在 `#if os(iOS)` 里，上面的 swift test 在 Mac 上跑，编不到它们；按模拟器编一遍整个 app。
+      - name: 编 iOS app
+        run: |
+          xcodebuild -project apps/ios/Runode.xcodeproj -scheme Runode -configuration Debug \
+            -destination "generic/platform=iOS Simulator" CODE_SIGNING_ALLOWED=NO -quiet build

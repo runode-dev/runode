@@ -1,6 +1,7 @@
 # 每次推到 main 和每个 PR：检查格式和 crate 分层（cargo-deny），再类型检查、跑测试、跑 clippy。
 # libghostty-vt 从 vendor/ghostty 用 zig 编译，GPUI 要用 Xcode 的 Metal 编译器编着色器，
 # 所以在 macOS 上跑。发版时 release.yml 也调它（workflow_call），对要发的那个标签再查一遍。
+# iOS 端（RunodeKit）的测试由单独的 ios.yml 跑。
 name: CI
 
 # 只改文档、iOS/Android 端、发版和 issue 模板这类 Rust 编译和测试用不到的文件时不跑。skills/ 被编进 cli，
@@ -17,6 +18,7 @@ on:
       - "scripts/perf*"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/workflows/release.yml"
+      - ".github/workflows/ios.yml"
       - ".github/workflows/update-command-specs.yml"
       - "*.md"
       - "LICENSE"
@@ -30,6 +32,7 @@ on:
       - "scripts/perf*"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/workflows/release.yml"
+      - ".github/workflows/ios.yml"
       - ".github/workflows/update-command-specs.yml"
       - "*.md"
       - "LICENSE"
@@ -86,13 +89,20 @@ jobs:
         run: cargo deny check bans
       - name: 类型检查
         run: make check
+      # 终端的集成测试要起这几个 shell，runner 上默认没有；RUNODE_REQUIRE_SHELLS 让缺了的直接失败，不悄悄跳过。
+      # 系统自带的 bash 是 3.2，要新版 bash 的测试会跳过，所以另装一个，它在 PATH 里排在 /bin 前面。
+      - name: 装测试用的 shell
+        run: brew install bash fish elvish nushell
       - name: 测试
         run: make test
+        env:
+          RUNODE_REQUIRE_SHELLS: "1"
       - name: clippy
         run: make clippy CLIPPY_ARGS="-- -D warnings"
 
-  # 发版时 Linux 也要编出 runode（命令行和宿主），平时就在 Linux 上类型检查一遍，免得到打标签时才发现
-  # 编不过。
+  # 发版时 Linux 也要编出 runode（命令行和宿主），平时就在 Linux 上类型检查并 lint 全部 crate（含测试代码），
+  # 免得到打标签时才发现编不过；另外跑只在 Linux 上才走得到的交接和描述符传递测试。整套测试暂时不在 Linux 上跑：
+  # 其中有依赖环境的测试（真 shell、systemd、计时），还没在 Linux 上核对过。
   check-linux:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
@@ -117,4 +127,11 @@ jobs:
             libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: clippy
-        run: cargo clippy -p runode -- -D warnings
+        run: make clippy CLIPPY_ARGS="-- -D warnings"
+      # 交接时传描述符（MSG_NOSIGNAL、MSG_CMSG_CLOEXEC、253 个的上限）和读 /proc 判断进程死活的 Linux 分支。
+      - name: Linux 专有的交接测试
+        run: |
+          cargo test -p runode-terminal --lib fd_passing
+          cargo test -p runode-terminal --test fd_passing --test handoff
+          cargo test -p runode-host --lib handoff::
+          cargo test -p runode-host --test handoff

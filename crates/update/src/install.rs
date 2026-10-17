@@ -359,6 +359,7 @@ mod tests {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
 
+    #[cfg(target_os = "macos")]
     const TEAM: &str = "ABCDE12345";
 
     /// 在 `dir` 里建一个 ad-hoc 签名的最小 .app：bundle id 是 `BUNDLE_ID`，版本号是 `version`。

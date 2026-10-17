@@ -200,9 +200,17 @@ fn bash_at_least(major: u32, minor: u32) -> bool {
 
 impl RealShell {
     /// 起 `shell`（`bash`、`zsh`、`fish`、`elvish` 或 `nu`，见 `find_shell`），`rc` 写进它的启动配置；
-    /// `name` 在同时跑的测试里各不相同，失败时也用它说是哪一个。系统里没有这个 shell 时为 `None`。
+    /// `name` 在同时跑的测试里各不相同，失败时也用它说是哪一个。系统里没有这个 shell 时为 `None`，
+    /// 设了环境变量 `RUNODE_REQUIRE_SHELLS` 时直接失败（CI 用它保证 fish、elvish、nushell 真的测到）。
     fn start(shell: &str, name: &str, rc: &str, prompt: &'static str, idle: &'static [&'static str]) -> Option<Self> {
-        let program = quoted(find_shell(shell)?.display());
+        let Some(path) = find_shell(shell) else {
+            assert!(
+                std::env::var_os("RUNODE_REQUIRE_SHELLS").is_none(),
+                "设了 RUNODE_REQUIRE_SHELLS，却找不到 {shell}"
+            );
+            return None;
+        };
+        let program = quoted(path.display());
         let home = std::env::temp_dir().join(format!("rn-cmdout-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();
