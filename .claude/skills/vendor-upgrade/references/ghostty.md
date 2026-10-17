@@ -15,7 +15,7 @@
 
 ## 0. 环境
 
-- **工具链**：zig 和固定版本的 Rust 来自仓库的 `flake.nix`。macOS 上用 `nix shell $R -c <命令>`（例如 `nix shell $R -c zig build test-lib-vt`），`nix develop` 在 macOS 上没有 devShell，会报找不到 zig；Linux 上用 `nix develop $R -c`。`$R` 要写出来，因为跑 zig 时当前目录在 ghostty 里。
+- **工具链**：用本机装的 zig（版本见 `CONTRIBUTING.md`）和 `rust-toolchain.toml` 指定的 Rust。
 - **Metal Toolchain**：`desktop`（包名 `runode`）和 `ui` 编 GPUI 时要用 Xcode 的 Metal 编译器。`xcrun -sdk macosx metal --version` 报 "missing Metal Toolchain" 时，这两个 crate 编不了，和升级无关；不要自己去装（`xcodebuild -downloadComponent MetalToolchain` 改的是系统），先用 `--exclude runode --exclude runode-ui` 把其余 crate 测掉，在报告里写明没测这两个和原因，让用户决定要不要装。
 - **在 runode 的 worktree 里做**（用户要求隔离时）：从**本地** main 开（`git worktree add <路径> -b <分支> main`），本地 main 常有还没推的提交，从 `origin/main` 开会漏掉它们，跟着上游改 runode 时可能重复做本地已经做过的事。会话自带的建 worktree 功能默认从 origin 开，而且它的隔离模式不让在子模块里跑 git，所以用 `git worktree add` 自己建。新 worktree 的子模块要自己初始化：
   ```sh
@@ -56,7 +56,7 @@ done
 
 ```sh
 cd "$S/gh-check"
-nix shell $R -c zig build test-lib-vt --summary all -Dtest-filter="<测试名 1>" -Dtest-filter="<测试名 2>" …
+zig build test-lib-vt --summary all -Dtest-filter="<测试名 1>" -Dtest-filter="<测试名 2>" …
 ```
 
 `test-lib-vt` 收了 `src/terminal` 下的测试；改动不在 libghostty-vt 里时换成 `zig build test`。失败的测试和第一条断言这样看（输出带颜色码，同一份失败会打两遍）：
@@ -82,7 +82,7 @@ git -C vendor/ghostty checkout -B main <new>
 git -C vendor/ghostty cherry-pick <保留的提交，按原顺序>
 ```
 
-有冲突时解决冲突，保持"一处修复一个提交、彼此独立"：解决时不要把两个修复揉进一个提交，也不要顺手改别的。解决完把每个保留提交带的测试在新的 `main` 上跑一遍，再跑一遍 `nix shell $R -c zig build test-lib-vt --summary failures` 全套（很慢的话至少把 `src/terminal` 相关的过滤跑掉）。
+有冲突时解决冲突，保持"一处修复一个提交、彼此独立"：解决时不要把两个修复揉进一个提交，也不要顺手改别的。解决完把每个保留提交带的测试在新的 `main` 上跑一遍，再跑一遍 `zig build test-lib-vt --summary failures` 全套（很慢的话至少把 `src/terminal` 相关的过滤跑掉）。
 
 如果某个保留的修复碰了 `include/`（C 头文件），记下来：nix 构建用的是 `GHOSTTY_COMMIT` 那版上游的头文件，不带我们的改动，两者会不一致，要在报告里提给用户。
 
@@ -101,7 +101,7 @@ git clone vendor/libghostty-rs "$S/rs-gen"
 cp vendor/libghostty-rs/crates/libghostty-vt-sys/build.rs "$S/rs-gen/crates/libghostty-vt-sys/build.rs"
 cd "$S/rs-gen"
 GHOSTTY_SOURCE_DIR=$R/vendor/ghostty \
-  nix shell $R -c cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings
+  cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings
 cp crates/libghostty-vt-sys/src/bindings.rs $R/vendor/libghostty-rs/crates/libghostty-vt-sys/src/bindings.rs
 ```
 
@@ -121,7 +121,7 @@ git -C vendor/libghostty-rs diff crates/libghostty-vt-sys/src/bindings.rs
 
 ```sh
 cd vendor/libghostty-rs
-GHOSTTY_SOURCE_DIR=$R/vendor/ghostty nix shell $R -c cargo test
+GHOSTTY_SOURCE_DIR=$R/vendor/ghostty cargo test
 ```
 
 改了 crate 版本号时还要 `cargo update -w --manifest-path example/Cargo.toml`，见它的 `AGENTS.md`。
@@ -141,10 +141,10 @@ GHOSTTY_SOURCE_DIR=$R/vendor/ghostty nix shell $R -c cargo test
 
 ```sh
 git add vendor/ghostty vendor/libghostty-rs   # 两个指针一起挪
-nix shell $R -c make check
-nix shell $R -c make test
-nix shell $R -c make clippy CLIPPY_ARGS="-- -D warnings"
-nix shell $R -c cargo deny check bans
+make check
+make test
+make clippy CLIPPY_ARGS="-- -D warnings"
+cargo deny check bans
 ```
 
 - 绑定有破坏性变化时，看 `crates/terminal` 要不要跟着改；接口改名的，跟着改名，不在 runode 里写兼容层。

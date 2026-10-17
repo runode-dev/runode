@@ -21,7 +21,7 @@ runode 的 vendor 下有三样东西，各自的来历和不变量写在根 `AGE
 2. **核对我们自己的补丁**，见下一节。这是这个 skill 最要紧的部分。
 3. **找新功能和行为变化**，见再下一节。
 4. **动手**：ghostty 和 libghostty-rs 照 `references/ghostty.md`，gpui 照 `references/gpui.md`。
-5. **验证**：fork 各自的测试、runode 的 `make check`、`make test`、`make clippy CLIPPY_ARGS="-- -D warnings"`、`make fmt-check`、`cargo deny check bans`。工具链怎么取（macOS 上 `nix shell <runode 根> -c`）、缺 Metal Toolchain 时怎么办、在 worktree 里怎么初始化子模块，见 `references/ghostty.md` 的"环境"。哪项没跑、为什么没跑，报告里照实写。
+5. **验证**：fork 各自的测试、runode 的 `make check`、`make test`、`make clippy CLIPPY_ARGS="-- -D warnings"`、`make fmt-check`、`cargo deny check bans`。工具链、缺 Metal Toolchain 时怎么办、在 worktree 里怎么初始化子模块，见 `references/ghostty.md` 的"环境"。哪项没跑、为什么没跑，报告里照实写。
 6. **报告**，格式见最后一节；推送 fork 之前等用户点头。
 
 ## 核对我们自己的补丁：上游修了，就用上游的
@@ -61,7 +61,7 @@ libghostty-rs 也是同一个道理，规矩在 `AGENTS.md`：Uzaaft 上游已�
 2. **C 接口的破坏性变化**：改名、删除、常量值变了、结构体字段变了。这些会让 libghostty-rs 或 runode 编不过，或者更糟、编得过但语义变了，必须处理。
 3. **新能力**：新的 C 接口、新的回调、新支持的 VT 序列或 OSC，runode 也许想用。
 4. **快照格式版本变了**：宿主升级接手时，格式不同会退回重放（`a_different_snapshot_format_falls_back_to_a_replay` 测的就是这个），能用但接手更慢，值得一提。
-5. 构建要求变了：Zig 最低版本（要跟着改根 `flake.nix` 的 zig、libghostty-rs 的 `AGENTS.md` 和 CI）。
+5. 构建要求变了：Zig 最低版本（要跟着改 `CONTRIBUTING.md` 里的 zig 版本、libghostty-rs 的 `AGENTS.md` 和 CI）。
 
 gpui 这边对应的是 gpui-pre 的公开接口变化和新能力，`desktop` 和 `ui` 可能要跟着改或者能用上。
 

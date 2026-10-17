@@ -111,7 +111,7 @@ echo
 zig_old=$(git -C "$gh" show "$old_base:build.zig.zon" | sed -n 's/.*minimum_zig_version = "\(.*\)".*/\1/p')
 zig_new=$(git -C "$gh" show "$new_base:build.zig.zon" | sed -n 's/.*minimum_zig_version = "\(.*\)".*/\1/p')
 echo "- minimum_zig_version：$zig_old → $zig_new"
-[ "$zig_old" = "$zig_new" ] || echo "- **Zig 版本变了：根 flake.nix 的 zig、libghostty-rs 的 AGENTS.md 和 CI 都要跟**"
+[ "$zig_old" = "$zig_new" ] || echo "- **Zig 版本变了：CONTRIBUTING.md 的 zig 版本、libghostty-rs 的 AGENTS.md 和 CI 都要跟**"
 git -C "$gh" log --no-merges --format='    %h %cs %s' "$old_base..$new_base" -- build.zig build.zig.zon src/build
 
 echo
