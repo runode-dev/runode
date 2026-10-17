@@ -164,10 +164,15 @@ fn report_token() -> Option<String> {
     Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// 脚本所在的目录，每次启动应用时按二进制里的版本重写一遍。
-fn install_dir() -> Result<&'static Path, String> {
-    static DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
-    DIR.get_or_init(|| install().map_err(|err| err.to_string())).as_ref().map(PathBuf::as_path).map_err(Clone::clone)
+/// 脚本所在的目录，每个进程第一次成功写入后记住。写不出来时不记，下次起 shell 再试，免得一次
+/// 暂时性的错误让这个宿主之后起的 shell 都没有集成。
+fn install_dir() -> io::Result<&'static Path> {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(dir) = DIR.get() {
+        return Ok(dir);
+    }
+    let dir = install()?;
+    Ok(DIR.get_or_init(|| dir))
 }
 
 fn install() -> io::Result<PathBuf> {

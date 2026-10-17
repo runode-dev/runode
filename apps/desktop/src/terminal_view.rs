@@ -25,11 +25,11 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc,
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{
     Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Pixels, Point,
-    Render, Role, ShapedLine, SharedString, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
+    Render, Role, ShapedLine, SharedString, Subscription, Task, Window, actions, div, prelude::*, px, relative, rgb,
 };
 use runode_config::Config;
 use runode_protocol::SessionId;
-use runode_terminal::session::{Link, Session};
+use runode_terminal::session::{Link, LinkTarget, Session};
 use runode_types::{color::Rgb, frame::Frame, grid::GridSize};
 
 use crate::{
@@ -174,6 +174,8 @@ pub struct TerminalView {
     reporting_press: bool,
     /// 按着 ⌘ 悬停时指针下的链接，画下划线、指针显示成手形；⌘ 点击打开它。
     hovered_link: Option<Link>,
+    /// 按着 ⌘ 时指针下的候选链接，以及后台查路径存在与否的进度；见 `LinkLookup`。
+    link_lookup: Option<input::LinkLookup>,
     /// 这次左键按下是一次不带修饰键的单击，按在哪一格；松开时还在这一格就把光标挪过去。
     click_cell: Option<(i32, i32)>,
     /// 闪烁光标当前处于亮的一半周期。
@@ -300,6 +302,7 @@ impl Render for TerminalView {
             );
         let lost = self.screen.is_lost().then(|| self.render_lost_bar(foreground, background, cx));
         let size_owner = self.render_size_owner(foreground, background, cx);
+        let link_target = self.render_link_target(foreground, background);
         div()
             .track_focus(&self.pane_focus)
             .relative()
@@ -307,6 +310,7 @@ impl Render for TerminalView {
             .child(terminal)
             .children(search_bar)
             .children(size_owner)
+            .children(link_target)
             .children(lost)
     }
 }
@@ -375,6 +379,40 @@ impl TerminalView {
                     window.focus(&view.focus_handle, cx);
                     view.report_focus(true);
                 }),
+        )
+    }
+
+    /// 按着 ⌘ 悬停在网址上时左下角显示它的真实目标（右下角让给尺寸提示）：OSC 8 的链接显示的字可以
+    /// 和打开的 URI 毫不相干，点之前要让用户看得到会打开什么。屏幕上认出的路径看到的就是打开的，不显示。
+    fn render_link_target(&self, foreground: Rgb, background: Rgb) -> Option<gpui::Stateful<gpui::Div>> {
+        if self.screen.is_lost() {
+            return None;
+        }
+        let LinkTarget::Url(uri) = &self.hovered_link.as_ref()?.target else {
+            return None;
+        };
+        let fg = hsla(foreground);
+        Some(
+            div()
+                .id("link-target")
+                .role(Role::Label)
+                .aria_label(uri.clone())
+                .absolute()
+                .bottom(px(6.))
+                .left(px(8.))
+                .max_w(relative(0.6))
+                .px(px(8.))
+                .py(px(2.))
+                .rounded(px(4.))
+                .bg(hsla(background.mix(foreground, 0.1)))
+                .border_1()
+                .border_color(fg.opacity(0.15))
+                .text_size(FontSize::Small)
+                .text_color(fg.opacity(0.8))
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .text_ellipsis()
+                .child(uri.clone()),
         )
     }
 

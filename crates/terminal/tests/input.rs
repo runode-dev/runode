@@ -36,6 +36,19 @@ fn multiline_paste_needs_confirmation_unless_bracketed() {
     assert_eq!(input(&requests), None);
 }
 
+/// 需要确认的粘贴在用户确认前不动选区；确认后重试才像别的输入一样清掉选区。
+#[test]
+fn paste_awaiting_confirmation_keeps_the_selection() {
+    let (mut session, _requests) = capturing_session();
+    session.feed(b"some text");
+    session.select_all();
+    assert!(session.selection_text().is_some());
+    assert_eq!(session.paste("a\nb", false), Paste::NeedsConfirmation);
+    assert!(session.selection_text().is_some());
+    assert_eq!(session.paste("a\nb", true), Paste::Done);
+    assert_eq!(session.selection_text(), None);
+}
+
 #[test]
 fn clear_screen_goes_through_the_host() {
     let (mut session, requests) = capturing_session();

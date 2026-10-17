@@ -33,7 +33,7 @@ pub(super) struct Renderer {
     /// 搜索匹配的颜色：普通匹配和选中匹配各一对（背景、文字）。
     pub(super) search_colors: [(TerminalColor, TerminalColor); 2],
     /// 高亮或颜色变了，下一次刷新不能只画脏行。
-    force_full: bool,
+    pub(super) force_full: bool,
 }
 
 /// 视口第 `y` 行从 `x0` 到 `x1`（含）的一段搜索匹配。

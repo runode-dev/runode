@@ -2,11 +2,13 @@
 
 use std::time::Duration;
 
+use futures::{FutureExt, future::Shared};
+
 use gpui::{
     App, Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, Window,
+    Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, Task, Window,
 };
-use runode_terminal::session::{LinkTarget, Session};
+use runode_terminal::session::{Link, LinkCandidates, LinkTarget, Session};
 use runode_types::{
     grid::GridPoint,
     input::{self, Mods, SelectionAdjust},
@@ -14,6 +16,16 @@ use runode_types::{
 
 use super::TerminalView;
 use super::keys;
+
+/// 按着 ⌘ 时指针下的候选链接。路径要查存在与否，路径在断开的网络卷或 autofs 下时 stat 能卡几十秒，
+/// 所以放到后台去查，查完再把结果记进 `hovered_link`；指针挪到别的候选上时换掉这一份，丢掉任务，
+/// 旧的结果就不会再回来。
+pub(super) struct LinkLookup {
+    candidates: LinkCandidates,
+    /// 后台查的结果，查完就清掉；没查完时 ⌘ 点下去的也等它。
+    check: Option<Shared<Task<Option<Link>>>>,
+    _task: Task<()>,
+}
 
 /// 拖选到网格外时自动滚动的间隔，每次滚一行。
 const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(15);
@@ -116,11 +128,7 @@ impl TerminalView {
             return;
         };
         // ⌘ 点在链接上：打开它，不选择也不上报（程序开着鼠标上报时也一样，上报本来就不带 ⌘）。
-        if event.button == MouseButton::Left
-            && event.modifiers.platform
-            && let Some(link) = self.screen.shown().and_then(|session| session.link_at(at))
-        {
-            open_link(&link.target, cx);
+        if event.button == MouseButton::Left && event.modifiers.platform && self.click_link(at, cx) {
             return;
         }
         // 程序开了鼠标上报时按键归程序，按住 Shift 照常选择。
@@ -223,17 +231,86 @@ impl TerminalView {
         }
     }
 
-    /// 按着 ⌘ 悬停时记下指针下的链接，画下划线、指针换成手形；`active` 为假时清掉。
+    /// 按着 ⌘ 悬停时记下指针下的链接，画下划线、指针换成手形，网址在左下角显示真实目标；
+    /// `active` 为假时清掉。
     fn hover_link(&mut self, active: bool, at: GridPoint, cx: &mut Context<Self>) {
-        let link = if active { self.screen.shown().and_then(|session| session.link_at(at)) } else { None };
-        if link != self.hovered_link {
-            self.hovered_link = link;
-            cx.notify();
-        }
+        let candidates = if active { self.screen.shown().and_then(|session| session.links_at(at)) } else { None };
+        self.look_up_link(candidates, cx);
     }
 
     fn clear_hovered_link(&mut self, cx: &mut Context<Self>) {
-        if self.hovered_link.take().is_some() {
+        self.look_up_link(None, cx);
+    }
+
+    /// ⌘ 点在 `at` 上：是链接就打开，还在查就等查完再打开，这两种都算点中了链接，返回真；
+    /// 查过不是链接时返回假，照常选择或上报。
+    fn click_link(&mut self, at: GridPoint, cx: &mut Context<Self>) -> bool {
+        let candidates = self.screen.shown().and_then(|session| session.links_at(at));
+        self.look_up_link(candidates, cx);
+        match &self.link_lookup {
+            Some(LinkLookup { check: Some(check), .. }) => {
+                // 松开 ⌘、指针挪开都不撤回这一下：后台查完是链接就打开。查完不是时这一下什么都不做，
+                // 选择已经错过了：只有按下 ⌘ 的同一瞬间点在不存在的路径上才会这样，不为它记下按的位置。
+                let check = check.clone();
+                cx.spawn(async move |_, cx| {
+                    if let Some(link) = check.await {
+                        cx.update(|cx| open_link(&link.target, cx));
+                    }
+                })
+                .detach();
+                true
+            }
+            Some(_) if let Some(link) = &self.hovered_link => {
+                open_link(&link.target, cx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// 换成 `candidates` 这一份候选：和手上的一样时什么都不做（同一个词上挪动不重复查）；网址当场就有
+    /// 结果，路径交给后台查。查的时候先不画下划线，查出存在才画。
+    fn look_up_link(&mut self, candidates: Option<LinkCandidates>, cx: &mut Context<Self>) {
+        if self.link_lookup.as_ref().map(|lookup| &lookup.candidates) == candidates.as_ref() {
+            return;
+        }
+        let Some(candidates) = candidates else {
+            self.link_lookup = None;
+            self.set_hovered_link(None, cx);
+            return;
+        };
+        if !candidates.checks_paths() {
+            self.set_hovered_link(candidates.clone().resolve(), cx);
+            self.link_lookup = Some(LinkLookup { candidates, check: None, _task: Task::ready(()) });
+            return;
+        }
+        self.set_hovered_link(None, cx);
+        let check = cx
+            .background_executor()
+            .spawn({
+                let candidates = candidates.clone();
+                async move { candidates.resolve() }
+            })
+            .shared();
+        let task = cx.spawn({
+            let check = check.clone();
+            async move |this, cx| {
+                let link = check.await;
+                this.update(cx, |view, cx| {
+                    if let Some(lookup) = &mut view.link_lookup {
+                        lookup.check = None;
+                    }
+                    view.set_hovered_link(link, cx);
+                })
+                .ok();
+            }
+        });
+        self.link_lookup = Some(LinkLookup { candidates, check: Some(check), _task: task });
+    }
+
+    fn set_hovered_link(&mut self, link: Option<Link>, cx: &mut Context<Self>) {
+        if link != self.hovered_link {
+            self.hovered_link = link;
             cx.notify();
         }
     }

@@ -25,6 +25,40 @@ fn synchronized_output_freezes_the_frame_until_released() {
     assert_eq!(row_text(&session.frame(), 0), "after");
 }
 
+/// 冻结期间改配置或换主题不能把冻住的那一帧丢成空帧，解冻后照常画新内容。
+#[test]
+fn config_and_theme_changes_keep_the_held_frame() {
+    let mut session = idle_session();
+    session.feed(b"before");
+    session.feed(b"\x1b[?2026h\r\x1b[2Kafter");
+    assert!(session.render_held());
+    session.apply_config(&TermSettings::default());
+    session.apply_theme(&TermSettings::default());
+    {
+        let frame = session.frame();
+        assert!(frame.cols > 0 && frame.rows > 0);
+        assert_eq!(row_text(&frame, 0), "before");
+    }
+
+    session.feed(b"\x1b[?2026l");
+    assert_eq!(row_text(&session.frame(), 0), "after");
+}
+
+/// 只改选区颜色、没有新输出时，下一帧也要用新颜色画选区。
+#[test]
+fn selection_color_change_redraws_without_new_output() {
+    let mut session = idle_session();
+    session.feed(b"text");
+    session.select_press(at(0.2, 0.5), REPEAT);
+    session.select_drag(at(2.8, 0.5), false);
+    let _ = session.frame();
+    session.apply_config(&TermSettings {
+        selection_background: Some(TerminalColor::Rgb(Rgb(4, 5, 6))),
+        ..TermSettings::default()
+    });
+    assert_eq!(session.frame().row(0)[0].bg, Some(Rgb(4, 5, 6)));
+}
+
 #[test]
 fn default_colors_come_from_the_theme() {
     let mut session = idle_session();

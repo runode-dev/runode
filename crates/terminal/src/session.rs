@@ -41,7 +41,6 @@ use libghostty_vt::{
 };
 
 use runode_types::{
-    frame::Frame,
     grid::{GridPoint, GridSize},
     session::SessionMeta,
     settings::{self, TermSettings},
@@ -52,7 +51,7 @@ use crate::{
     vt,
 };
 pub use input::Paste;
-pub use link::{Link, LinkSpan, LinkTarget};
+pub use link::{Link, LinkCandidates, LinkSpan, LinkTarget};
 use render::Renderer;
 use selection::Selecting;
 
@@ -184,16 +183,16 @@ impl Session {
         ];
         renderer.cursor_color = settings.cursor_color;
         renderer.cursor_text = settings.cursor_text;
-        // 选区颜色不经过 VT 的脏标记，强制下一帧整屏重画。
-        renderer.frame = Frame::default();
+        // 选区颜色不经过 VT 的脏标记，下一次刷新要整屏重画；不清空帧，同步输出冻结时还得画冻住的那一帧。
+        renderer.force_full = true;
         self.option_as_alt = settings.option_as_alt;
     }
 
     /// 在宿主套用主题的位置（`HostMsg::ThemeApplied`）套用同样的主题，见 `vt::apply_theme`。
     pub fn apply_theme(&mut self, settings: &TermSettings) {
         vt::apply_theme(&mut self.terminal, settings);
-        // 默认颜色变了，整屏重画。
-        self.renderer.borrow_mut().frame = Frame::default();
+        // 默认颜色变了，下一次刷新整屏重画；不清空帧，理由同 `apply_config`。
+        self.renderer.borrow_mut().force_full = true;
     }
 
     /// 把宿主转来的 PTY 输出喂给 VT。

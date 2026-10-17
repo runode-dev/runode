@@ -40,6 +40,27 @@ pub struct LinkSpan {
     pub x: Range<u16>,
 }
 
+/// 指针下可能的链接，按先后排好，第一个能打开的才是：网址直接算，路径要存在。读屏幕文字就能排出来，
+/// 不碰文件系统；查路径在不在（`resolve`）可能卡很久，留给调用方放到别的线程上做。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkCandidates(Vec<Link>);
+
+impl LinkCandidates {
+    /// 要不要查文件系统：第一个候选是路径时要。不要时 `resolve` 当场就有结果。
+    pub fn checks_paths(&self) -> bool {
+        matches!(self.0[0].target, LinkTarget::Path(_))
+    }
+
+    /// 第一个能打开的候选。会对路径做 stat，路径在断开的网络卷或 autofs 下时可能阻塞几十秒，
+    /// `checks_paths` 为真时别在界面线程上调。
+    pub fn resolve(self) -> Option<Link> {
+        self.0.into_iter().find(|link| match &link.target {
+            LinkTarget::Url(_) => true,
+            LinkTarget::Path(path) => path.exists(),
+        })
+    }
+}
+
 impl Link {
     /// 视口里 (`x`, `y`) 这一格在不在链接上。
     pub fn contains(&self, x: u16, y: u16) -> bool {
@@ -59,10 +80,11 @@ struct LineCell {
 }
 
 impl Session {
-    /// 视口里 `at` 这一格上的链接：程序用 OSC 8 标了超链接的就是它；没标的在这一行（连同软换行接着的
-    /// 上下几行，以及 `join_hard_wraps` 认出的硬换行续行）的文字里找指针所在的网址或路径。路径只认存在的，
-    /// 相对路径按 shell 当前所在的目录解析，不知道目录时只认绝对路径和 `~/` 开头的。
-    pub fn link_at(&self, at: GridPoint) -> Option<Link> {
+    /// 视口里 `at` 这一格上可能的链接：程序用 OSC 8 标了超链接的就是它；没标的在这一行（连同软换行接着的
+    /// 上下几行，以及 `join_hard_wraps` 认出的硬换行续行）的文字里找指针所在的网址或路径。路径只认存在的
+    /// （由 `LinkCandidates::resolve` 查），相对路径按 shell 当前所在的目录解析，不知道目录时只认绝对路径
+    /// 和 `~/` 开头的。一个候选也没有时为 `None`。
+    pub fn links_at(&self, at: GridPoint) -> Option<LinkCandidates> {
         let size = self.size.get();
         if at.x < 0. || at.y < 0. || at.x >= f32::from(size.cols) || at.y >= f32::from(size.rows) {
             return None;
@@ -74,12 +96,16 @@ impl Session {
             let same = |cell: &LineCell| cell.uri.as_ref() == Some(uri);
             let first = line[..index].iter().rposition(|cell| !same(cell)).map_or(0, |i| i + 1);
             let last = line[index..].iter().position(|cell| !same(cell)).map_or(line.len(), |i| index + i);
-            return Some(Link { target: LinkTarget::Url(uri.clone()), spans: spans(&line[first..last]) });
+            let link = Link { target: LinkTarget::Url(uri.clone()), spans: spans(&line[first..last]) };
+            return Some(LinkCandidates(vec![link]));
         }
         let cwd = self.cwd();
         let home = runode_paths::Dirs::from_env().home;
         let find_in = |cells: &[LineCell]| {
-            let index = cells.iter().position(|cell| cell.y == y && (cell.x..cell.x + cell.width).contains(&x))?;
+            let Some(index) = cells.iter().position(|cell| cell.y == y && (cell.x..cell.x + cell.width).contains(&x))
+            else {
+                return Vec::new();
+            };
             let mut chars = Vec::new();
             let mut owners = Vec::new();
             for (i, cell) in cells.iter().enumerate() {
@@ -88,13 +114,30 @@ impl Session {
                     owners.push(i);
                 }
             }
-            let pointer = owners.iter().position(|&owner| owner == index)?;
-            let (range, target) = find(&chars, pointer, |text| resolve_path(text, cwd.as_deref(), home.as_deref()))?;
-            Some(Link { target, spans: spans(&cells[owners[range.start]..=owners[range.end - 1]]) })
+            let Some(pointer) = owners.iter().position(|&owner| owner == index) else {
+                return Vec::new();
+            };
+            find(&chars, pointer, |text| path_of(text, cwd.as_deref(), home.as_deref()))
+                .into_iter()
+                .map(|(range, target)| Link {
+                    target,
+                    spans: spans(&cells[owners[range.start]..=owners[range.end - 1]]),
+                })
+                .collect()
         };
         // 接上硬换行的续行后认不出（比如本来就到行尾为止的路径接上了下一行的字）时，只在这一行里找。
         let joined = log_err("read hard-wrapped lines", join_hard_wraps(&self.terminal, &line, size.rows)).flatten();
-        joined.as_deref().and_then(find_in).or_else(|| find_in(&line))
+        let mut links: Vec<Link> = Vec::new();
+        for link in joined.as_deref().map(find_in).unwrap_or_default().into_iter().chain(find_in(&line)) {
+            // 网址一定能打开，后面的轮不到；同一个路径前面查过不在，后面也不用再查。
+            if links.last().is_some_and(|last| matches!(last.target, LinkTarget::Url(_))) {
+                break;
+            }
+            if !links.iter().any(|seen| seen.target == link.target) {
+                links.push(link);
+            }
+        }
+        (!links.is_empty()).then_some(LinkCandidates(links))
     }
 }
 
@@ -195,18 +238,15 @@ fn spans(cells: &[LineCell]) -> Vec<LinkSpan> {
     spans
 }
 
-/// 在 `chars` 里找盖住第 `pointer` 个字的网址或路径，返回它在 `chars` 里的范围和打开的目标。
-/// `resolve` 把像路径的文字解析成存在的路径，不存在时为 `None`。
-fn find(
-    chars: &[char],
-    pointer: usize,
-    resolve: impl Fn(&str) -> Option<PathBuf>,
-) -> Option<(Range<usize>, LinkTarget)> {
+/// 在 `chars` 里找盖住第 `pointer` 个字的网址或路径，按先后返回各个候选在 `chars` 里的范围和打开的目标：
+/// 网址只有一个；路径有几种读法（带不带 git 的前缀、从不从等号后面算），存在的第一个才是。
+/// `path_of` 把像路径的文字换成完整路径，不查存在与否，换不了时为 `None`。
+fn find(chars: &[char], pointer: usize, path_of: impl Fn(&str) -> Option<PathBuf>) -> Vec<(Range<usize>, LinkTarget)> {
     if let Some(url) = find_url(chars, pointer) {
-        return Some(url);
+        return vec![url];
     }
     if !link_char(chars[pointer]) {
-        return None;
+        return Vec::new();
     }
     let start = chars[..pointer].iter().rposition(|&c| !link_char(c)).map_or(0, |i| i + 1);
     let end = chars[pointer..].iter().position(|&c| !link_char(c)).map_or(chars.len(), |i| pointer + i);
@@ -215,33 +255,34 @@ fn find(
     if let Some(scheme) = scheme_start(&chars[range.clone()]) {
         range.start += scheme;
         if !range.contains(&pointer) {
-            return None;
+            return Vec::new();
         }
         let url: String = chars[range.clone()].iter().collect();
-        return Some((range, LinkTarget::Url(url)));
+        return vec![(range, LinkTarget::Url(url))];
     }
     if !range.contains(&pointer) {
-        return None;
+        return Vec::new();
     }
-    let resolve_in = |range: Range<usize>| {
-        let text: String = chars[range].iter().collect();
-        resolve(strip_location(&text))
-            // git diff 的 `a/`、`b/` 前缀。
-            .or_else(|| {
-                text.strip_prefix("a/")
-                    .or_else(|| text.strip_prefix("b/"))
-                    .and_then(|rest| resolve(strip_location(rest)))
-            })
+    let mut found = Vec::new();
+    let mut add = |range: Range<usize>| {
+        let text: String = chars[range.clone()].iter().collect();
+        // git diff 的 `a/`、`b/` 前缀。
+        let unprefixed = text.strip_prefix("a/").or_else(|| text.strip_prefix("b/"));
+        for text in [Some(text.as_str()), unprefixed].into_iter().flatten() {
+            if let Some(path) = path_of(strip_location(text)) {
+                found.push((range.clone(), LinkTarget::Path(path)));
+            }
+        }
     };
-    if let Some(path) = resolve_in(range.clone()) {
-        return Some((range, LinkTarget::Path(path)));
-    }
+    add(range.clone());
     // `S=路径`、`--out=路径` 这样前面粘着变量名或选项的，从等号后面算。
-    range.start += chars[range.clone()].iter().position(|&c| c == '=')? + 1;
-    if !range.contains(&pointer) {
-        return None;
+    if let Some(eq) = chars[range.clone()].iter().position(|&c| c == '=') {
+        range.start += eq + 1;
+        if range.contains(&pointer) {
+            add(range);
+        }
     }
-    resolve_in(range.clone()).map(|path| (range, LinkTarget::Path(path)))
+    found
 }
 
 /// 在 `chars` 里找盖住第 `pointer` 个字的网址。网址里还能有括号和方括号（维基百科的
@@ -339,30 +380,34 @@ fn strip_location(text: &str) -> &str {
     text
 }
 
-/// 像路径的文字解析成存在的路径：`~/` 开头的按家目录 `home`，相对路径按 `cwd`。
-fn resolve_path(text: &str, cwd: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+/// 像路径的文字换成完整路径：`~/` 开头的按家目录 `home`，相对路径按 `cwd`。不查存在与否。
+fn path_of(text: &str, cwd: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
     if text.is_empty() || text == "~" {
         return None;
     }
-    let path = match text.strip_prefix("~/") {
+    Some(match text.strip_prefix("~/") {
         Some(rest) => home?.join(rest),
         None if text.starts_with('/') => PathBuf::from(text),
         None => cwd?.join(text),
-    };
-    path.exists().then_some(path)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 在 `line` 里找盖住 `needle` 第一个字的链接；`exists` 里的相对路径算存在，解析成 `/cwd/` 下。
+    /// 在 `line` 里找盖住 `needle` 第一个字的链接，取第一个能打开的候选（和 `LinkCandidates::resolve`
+    /// 一样）；`exists` 里的相对路径算存在，都解析成 `/cwd/` 下。
     fn found(line: &str, needle: &str, exists: &[&str]) -> Option<(String, LinkTarget)> {
         let chars: Vec<char> = line.chars().collect();
         let byte = line.find(needle).unwrap();
         let pointer = line[..byte].chars().count();
+        let cwd = |text: &str| Path::new("/cwd").join(text);
         let (range, target) =
-            find(&chars, pointer, |text| exists.contains(&text).then(|| Path::new("/cwd").join(text)))?;
+            find(&chars, pointer, |text| Some(cwd(text))).into_iter().find(|(_, target)| match target {
+                LinkTarget::Url(_) => true,
+                LinkTarget::Path(path) => exists.iter().any(|text| cwd(text) == *path),
+            })?;
         Some((chars[range].iter().collect(), target))
     }
 

@@ -154,19 +154,19 @@ impl Session {
     /// 括号序列包起来，没开时换行换成回车。
     ///
     /// 文本可能注入命令时（未开 bracketed paste 却含换行或回车，或含 bracketed paste
-    /// 结束序列），除非 `allow_unsafe`，否则什么也不写并返回 `Paste::NeedsConfirmation`，
+    /// 结束序列），除非 `allow_unsafe`，否则什么也不写、也不动选区和滚动位置，并返回 `Paste::NeedsConfirmation`，
     /// 由界面向用户确认后再带 `allow_unsafe` 重试。
     ///
     /// 这边的 VT 不注册 `on_pty_write`，所以不经 `Terminal::paste_text`，而是按它对纯文本粘贴
     /// 的同样规则自己编码：剪贴板读取回调没装，程序开了粘贴事件（mode 5522）时它也照样写文本。
     pub fn paste(&mut self, text: &str, allow_unsafe: bool) -> Paste {
-        self.before_input();
         let bracketed = self.terminal.mode(Mode::BRACKETED_PASTE).unwrap_or(false);
         // 括号包着时换行无妨，只有结束序列能逃出括号；没包时换行（回车也一样是回车键）就会执行命令。
         let safe = !text.contains("\x1b[201~") && (bracketed || !text.contains(['\n', '\r']));
         if !safe && !allow_unsafe {
             return Paste::NeedsConfirmation;
         }
+        self.before_input();
         if text.is_empty() {
             return Paste::Done;
         }
