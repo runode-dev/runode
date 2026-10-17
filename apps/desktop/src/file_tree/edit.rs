@@ -54,19 +54,36 @@ fn error_text(err: &OpError, name: &str) -> String {
 
 impl FileTree {
     pub(super) fn new_file(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
-        let dir = self.target_dir();
-        self.start_file_edit(EditTarget::New { dir, is_dir: false }, window, cx);
+        let dir = self.target_dir(cx);
+        if self.shown_for_edit(&dir, cx) {
+            self.start_file_edit(EditTarget::New { dir, is_dir: false }, window, cx);
+        }
     }
 
     pub(super) fn new_folder(&mut self, _: &NewFolder, window: &mut Window, cx: &mut Context<Self>) {
-        let dir = self.target_dir();
-        self.start_file_edit(EditTarget::New { dir, is_dir: true }, window, cx);
+        let dir = self.target_dir(cx);
+        if self.shown_for_edit(&dir, cx) {
+            self.start_file_edit(EditTarget::New { dir, is_dir: true }, window, cx);
+        }
     }
 
     pub(super) fn rename_file(&mut self, _: &RenameFile, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((path, is_dir)) = self.selected_entry() {
+        if let Some((path, is_dir)) = self.selected_entry(cx)
+            && self.shown_for_edit(&path, cx)
+        {
             self.start_file_edit(EditTarget::Rename { path, is_dir }, window, cx);
         }
+    }
+
+    /// 搜索时选中的结果在树里不一定显示着，编辑会换回文件树：先展开到 `path`。它还不在树里（目录还在读，
+    /// 或者被过滤藏着，比如没开显示点文件）时为假，这时不编辑：输入框看不见，按的键却在改名、建文件。
+    /// 读回来以后再按一次就行。
+    fn shown_for_edit(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
+        if !self.searching(cx) {
+            return true;
+        }
+        self.reveal_file(path, cx);
+        *path == self.files_root() || self.state().rows.iter().any(|row| row.path == path)
     }
 
     /// 正在改 `path` 的名字时是那个输入框。
@@ -246,7 +263,7 @@ impl FileTree {
     /// 选中的那一项先问一下，再在后台移到废纸篓：外置卷上可能要复制一遍。
     pub(super) fn delete_file(&mut self, _: &DeleteFile, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
-        let Some((path, is_dir)) = self.selected_entry() else {
+        let Some((path, is_dir)) = self.selected_entry(cx) else {
             return;
         };
         let name = base_name(&path);
@@ -307,8 +324,8 @@ impl FileTree {
 
     /// 选中项所在的仓库（子仓库里的算子仓库）的根目录、相对它的路径和是不是目录；不在仓库里、
     /// 已经被忽略、或者选中的就是仓库根目录时为空。
-    pub(super) fn gitignore_target(&self) -> Option<(Repo, PathBuf, bool)> {
-        let (path, is_dir) = self.selected_entry()?;
+    pub(super) fn gitignore_target(&self, cx: &gpui::App) -> Option<(Repo, PathBuf, bool)> {
+        let (path, is_dir) = self.selected_entry(cx)?;
         let git = self.state().git.as_ref()?;
         let rel = path.strip_prefix(&git.main.root).ok()?;
         if git.is_ignored(rel) {
@@ -322,7 +339,7 @@ impl FileTree {
     /// 不再跟踪它（文件留在磁盘上）。
     pub(super) fn add_to_gitignore(&mut self, _: &AddToGitignore, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
-        let Some((repo, rel, is_dir)) = self.gitignore_target() else {
+        let Some((repo, rel, is_dir)) = self.gitignore_target(cx) else {
             return;
         };
         let tracked = cx.background_spawn({
@@ -368,7 +385,7 @@ impl FileTree {
     /// 剪切（`cut`）或复制选中的那一项，等着粘贴。
     pub(super) fn copy_file(&mut self, cut: bool, cx: &mut Context<Self>) {
         self.menu = None;
-        if let Some((path, _)) = self.selected_entry() {
+        if let Some((path, _)) = self.selected_entry(cx) {
             self.clipboard = Some(FileClipboard { path, cut });
             cx.notify();
         }
@@ -378,7 +395,7 @@ impl FileTree {
     pub(super) fn paste_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
         if let Some(clip) = self.clipboard.clone() {
-            let mut dir = self.target_dir();
+            let mut dir = self.target_dir(cx);
             // 选中的就是复制下来的目录时，副本放在它旁边，不然成了放进它自己里面。
             if dir == clip.path
                 && let Some(parent) = clip.path.parent()

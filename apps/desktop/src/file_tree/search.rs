@@ -141,6 +141,33 @@ fn layout_rows(found: &[Found], tree: bool, collapsed: &HashSet<PathBuf>) -> Vec
     rows
 }
 
+/// 第 `ix` 行结果指的文件或目录（`root` 是搜的根目录）和它是不是目录；命中的行指它所在的文件。
+fn row_entry(rows: &[SearchRow], found: &[Found], root: &Path, ix: usize) -> Option<(PathBuf, bool)> {
+    match rows.get(ix)? {
+        SearchRow::Dir { path, .. } => Some((root.join(path), true)),
+        SearchRow::File { file, .. } | SearchRow::Line { file, .. } => Some((found[*file].path.clone(), false)),
+    }
+}
+
+/// 认一行结果：目录（相对根目录）、文件，或者文件里的第几处；重搜后按它找回同一行。
+fn row_key(rows: &[SearchRow], found: &[Found], ix: usize) -> Option<(PathBuf, Option<usize>)> {
+    match rows.get(ix)? {
+        SearchRow::Dir { path, .. } => Some((path.clone(), None)),
+        SearchRow::File { file, .. } => Some((found[*file].path.clone(), None)),
+        SearchRow::Line { file, line, .. } => Some((found[*file].path.clone(), Some(*line))),
+    }
+}
+
+/// 键盘在 `len` 行结果里上下移动选中的行，`step` 为负往上；没选中时往下从第一行开始，往上从最后一行开始。
+fn step_row(len: usize, selected: Option<usize>, step: isize) -> Option<usize> {
+    let last = len.checked_sub(1)?;
+    Some(match selected {
+        Some(ix) => ix.saturating_add_signed(step).min(last),
+        None if step > 0 => 0,
+        None => last,
+    })
+}
+
 /// 一次搜索：在哪个根目录、按什么词、哪种方式和选项。
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SearchKey {
@@ -521,8 +548,10 @@ impl FileTree {
                 }
                 let search = &mut this.search;
                 search.pending = None;
-                // 只是重读后重搜（同一个根目录，词、方式和选项都没变）时留着选中的行和滚动位置。
+                // 只是重读后重搜（同一个根目录，词、方式和选项都没变）时留着选中的行和滚动位置。选中的行按它
+                // 指着的东西找回来，不按行号：多出、少了文件时行号就指到别的文件上，删除、改名都按它办。
                 let same = search.searched.as_ref() == Some(&key);
+                let keep = search.selected.filter(|_| same).and_then(|ix| row_key(&search.rows, &search.found, ix));
                 if !same {
                     search.selected = None;
                     search.collapsed.clear();
@@ -534,6 +563,12 @@ impl FileTree {
                 };
                 search.searched = Some(key);
                 search.relayout();
+                if same {
+                    search.selected = keep.and_then(|keep| {
+                        (0..search.rows.len())
+                            .find(|&ix| row_key(&search.rows, &search.found, ix).as_ref() == Some(&keep))
+                    });
+                }
                 cx.notify();
                 if std::mem::take(&mut this.search.rerun) {
                     this.search_files(true, cx);
@@ -559,6 +594,40 @@ impl FileTree {
     fn set_search_mode(&mut self, mode: SearchMode, cx: &mut Context<Self>) {
         self.search.mode = mode;
         self.sync_file_search(cx);
+    }
+
+    /// 搜索时选中的那一行结果指的文件或目录和它是不是目录：搜索时按键作用在看得见的结果上，不作用在
+    /// 藏起来的文件树上。没选中、或者显示的还不是这个根目录的结果时为空。
+    pub(super) fn selected_search_entry(&self) -> Option<(PathBuf, bool)> {
+        let search = &self.search;
+        let key = search.searched.as_ref().filter(|key| key.root == self.files_root())?;
+        row_entry(&search.rows, &search.found, &key.root, search.selected?)
+    }
+
+    /// 搜索时键盘移动选中的结果：`to` 拿行数和选中的那一行，返回新选中的那一行；滚到那里，关掉右键菜单。
+    pub(super) fn move_search_selection(
+        &mut self,
+        to: impl FnOnce(usize, Option<usize>) -> Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        let search = &mut self.search;
+        if let Some(ix) = to(search.rows.len(), search.selected).filter(|&ix| ix < search.rows.len()) {
+            search.selected = Some(ix);
+            search.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+        }
+        self.menu = None;
+        cx.notify();
+    }
+
+    pub(super) fn step_search_selection(&mut self, step: isize, cx: &mut Context<Self>) {
+        self.move_search_selection(|len, selected| step_row(len, selected, step), cx);
+    }
+
+    /// 回车：打开选中的那一行结果。
+    pub(super) fn open_selected_search_row(&mut self, cx: &mut Context<Self>) {
+        if let Some(ix) = self.search.selected {
+            self.open_search_row(ix, false, cx);
+        }
     }
 
     /// 在预览栏里打开第 `ix` 行结果，`pin` 时开成固定标签；内容结果跳到那一行，目录展开或收起。
@@ -1041,6 +1110,31 @@ mod tests {
         );
         let collapsed = HashSet::from([PathBuf::from("src")]);
         assert_eq!(layout_rows(&found, true, &collapsed), [dir(false), SearchRow::File { file: 1, depth: 0 }]);
+    }
+
+    #[test]
+    fn selected_rows_point_at_their_file_or_dir() {
+        let root = Path::new("/r");
+        let line = FoundLine { line: 3, text: "x".into(), hit: None };
+        let found = vec![found(root, "src/b.rs".into(), vec![line]), found(root, "a.rs".into(), Vec::new())];
+        let rows = layout_rows(&found, true, &HashSet::new());
+        let entry = |ix| row_entry(&rows, &found, root, ix);
+        assert_eq!(entry(0), Some((PathBuf::from("/r/src"), true)));
+        assert_eq!(entry(1), Some((PathBuf::from("/r/src/b.rs"), false)));
+        // 命中的行指它所在的文件。
+        assert_eq!(entry(2), Some((PathBuf::from("/r/src/b.rs"), false)));
+        assert_eq!(entry(3), Some((PathBuf::from("/r/a.rs"), false)));
+        assert_eq!(entry(4), None);
+    }
+
+    #[test]
+    fn steps_through_rows_and_stops_at_the_ends() {
+        assert_eq!(step_row(3, None, 1), Some(0));
+        assert_eq!(step_row(3, None, -1), Some(2));
+        assert_eq!(step_row(3, Some(1), 1), Some(2));
+        assert_eq!(step_row(3, Some(2), 1), Some(2));
+        assert_eq!(step_row(3, Some(0), -1), Some(0));
+        assert_eq!(step_row(0, None, 1), None);
     }
 
     fn literal(query: &str) -> Regex {

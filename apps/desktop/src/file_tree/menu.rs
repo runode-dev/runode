@@ -18,7 +18,7 @@ impl FileTree {
     /// 在 `position` 弹出文件树的右键菜单，作用在当前选中的那一项上：选中文件、选中目录和点在
     /// 空白处各有不同。
     pub(super) fn open_file_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
-        let selected = self.selected_entry();
+        let selected = self.selected_entry(cx);
         let can_paste = self.clipboard.is_some();
         let item = |key: &str, action: Box<dyn Action>| Some(MenuItem::new(rust_i18n::t!(key), action, true, cx));
         let mut items = vec![
@@ -45,7 +45,7 @@ impl FileTree {
             item("files.copy_path", Box::new(CopyPath)),
             item("files.copy_relative_path", Box::new(CopyRelativePath)),
         ]);
-        if self.gitignore_target().is_some() {
+        if self.gitignore_target(cx).is_some() {
             items.extend([None, item("files.add_to_gitignore", Box::new(AddToGitignore))]);
         }
         if selected.is_some() {
@@ -60,32 +60,32 @@ impl FileTree {
     }
 
     /// 选中的那一项，没选中时是根目录。
-    fn selected_or_root(&self) -> PathBuf {
-        self.selected_entry().map_or_else(|| self.files_root(), |(path, _)| path)
+    fn selected_or_root(&self, cx: &gpui::App) -> PathBuf {
+        self.selected_entry(cx).map_or_else(|| self.files_root(), |(path, _)| path)
     }
 
     pub(super) fn reveal_in_finder(&mut self, _: &RevealInFinder, _: &mut Window, cx: &mut Context<Self>) {
-        cx.reveal_path(&self.selected_or_root());
+        cx.reveal_path(&self.selected_or_root(cx));
     }
 
     pub(super) fn insert_file_path(&mut self, _: &InsertFilePath, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some((path, _)) = self.selected_entry() {
+        if let Some((path, _)) = self.selected_entry(cx) {
             cx.emit(FileTreeEvent::InsertPath(path));
         }
     }
 
     /// 在当前 workspace 里开一个新标签页，终端的目录是 `target_dir`。
     pub(super) fn open_in_terminal(&mut self, _: &OpenInTerminal, _: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(FileTreeEvent::OpenTerminal(self.target_dir()));
+        cx.emit(FileTreeEvent::OpenTerminal(self.target_dir(cx)));
     }
 
     pub(super) fn copy_path(&mut self, _: &CopyPath, _: &mut Window, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(self.selected_or_root().display().to_string()));
+        cx.write_to_clipboard(ClipboardItem::new_string(self.selected_or_root(cx).display().to_string()));
     }
 
     /// 相对文件树根目录的路径；根目录本身是 `.`。
     pub(super) fn copy_relative_path(&mut self, _: &CopyRelativePath, _: &mut Window, cx: &mut Context<Self>) {
-        let (root, path) = (self.files_root(), self.selected_or_root());
+        let (root, path) = (self.files_root(), self.selected_or_root(cx));
         let rel = path.strip_prefix(&root).unwrap_or(&path);
         let text = if rel.as_os_str().is_empty() { Path::new(".") } else { rel };
         cx.write_to_clipboard(ClipboardItem::new_string(text.display().to_string()));

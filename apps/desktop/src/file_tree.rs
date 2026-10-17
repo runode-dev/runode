@@ -432,8 +432,11 @@ impl FileTree {
         self.open_context_menu(position, items, target, cx);
     }
 
-    /// 选中的那一项和它是不是目录；没选中时为空。
-    fn selected_entry(&self) -> Option<(PathBuf, bool)> {
+    /// 选中的那一项和它是不是目录；没选中时为空。搜索时是选中的那一行结果，不是藏起来的树里选中的。
+    fn selected_entry(&self, cx: &App) -> Option<(PathBuf, bool)> {
+        if self.searching(cx) {
+            return self.selected_search_entry();
+        }
         let state = self.state();
         let path = state.selected.clone()?;
         let is_dir = match state.selected_row() {
@@ -444,8 +447,8 @@ impl FileTree {
     }
 
     /// 新建、粘贴和开终端落在哪个目录：选中的目录，选中文件所在的目录，没选中时是根目录。
-    fn target_dir(&self) -> PathBuf {
-        match self.selected_entry() {
+    fn target_dir(&self, cx: &App) -> PathBuf {
+        match self.selected_entry(cx) {
             Some((path, true)) => path,
             Some((path, false)) => path.parent().map_or_else(|| self.files_root(), Path::to_path_buf),
             None => self.files_root(),
@@ -843,31 +846,54 @@ impl FileTree {
     }
 
     fn select_previous_file(&mut self, _: &SelectPreviousFile, _: &mut Window, cx: &mut Context<Self>) {
+        if self.searching(cx) {
+            return self.step_search_selection(-1, cx);
+        }
         self.move_selection(|state, _, _| state.select_step(-1), cx);
     }
 
     fn select_next_file(&mut self, _: &SelectNextFile, _: &mut Window, cx: &mut Context<Self>) {
+        if self.searching(cx) {
+            return self.step_search_selection(1, cx);
+        }
         self.move_selection(|state, _, _| state.select_step(1), cx);
     }
 
     fn select_first_file(&mut self, _: &SelectFirstFile, _: &mut Window, cx: &mut Context<Self>) {
+        if self.searching(cx) {
+            return self.move_search_selection(|_, _| Some(0), cx);
+        }
         self.move_selection(|state, _, _| state.select_row(0), cx);
     }
 
     fn select_last_file(&mut self, _: &SelectLastFile, _: &mut Window, cx: &mut Context<Self>) {
+        if self.searching(cx) {
+            return self.move_search_selection(|len, _| len.checked_sub(1), cx);
+        }
         self.move_selection(|state, _, _| state.select_row(state.rows.len().checked_sub(1)?), cx);
     }
 
     fn collapse_selected_file(&mut self, _: &CollapseSelectedFile, _: &mut Window, cx: &mut Context<Self>) {
+        // 搜索时树藏着，不去展开、收起看不见的目录。
+        if self.searching(cx) {
+            return;
+        }
         self.move_selection(TreeState::select_out, cx);
     }
 
     fn expand_selected_file(&mut self, _: &ExpandSelectedFile, _: &mut Window, cx: &mut Context<Self>) {
+        // 搜索时树藏着，不去展开、收起看不见的目录。
+        if self.searching(cx) {
+            return;
+        }
         self.move_selection(TreeState::select_in, cx);
     }
 
     fn open_selected_file(&mut self, _: &OpenSelectedFile, _: &mut Window, cx: &mut Context<Self>) {
-        let Some((path, is_dir)) = self.selected_entry() else {
+        if self.searching(cx) {
+            return self.open_selected_search_row(cx);
+        }
+        let Some((path, is_dir)) = self.selected_entry(cx) else {
             return;
         };
         if is_dir {
