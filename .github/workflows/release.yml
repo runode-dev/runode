@@ -181,6 +181,10 @@ jobs:
         with:
           # 带上目标三元组，不接着用以前在 Intel runner 上存的缓存。
           key: macos-${{ matrix.target }}
+      # 参数和 bundle-macos.sh 里的 cargo build 一样，先在导入证书、写密钥前编完：依赖的构建脚本跑时钥匙串还没解锁、
+      # 环境里也没有 NOTARY_KEY 这些，打包时那次 cargo build 基本什么都不用编。
+      - name: 编译
+        run: cargo build --profile release
       - name: 导入签名证书
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
