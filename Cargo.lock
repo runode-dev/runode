@@ -4574,6 +4574,7 @@ dependencies = [
  "qrcode",
  "raw-window-handle",
  "regex",
+ "runode-agent",
  "runode-autostart",
  "runode-cli",
  "runode-config",
@@ -4598,9 +4599,11 @@ dependencies = [
 name = "runode-agent"
 version = "0.1.10"
 dependencies = [
+ "libc",
  "regex",
  "runode-types",
  "serde",
+ "serde_json",
  "toml 1.1.8+spec-1.1.0",
 ]
 

@@ -121,6 +121,10 @@ impl WindowView {
             Some(board) => board.view.update(cx, |board, cx| board.show_schedules(schedules, cx)),
             None => {
                 let view = cx.new(|cx| Kanban::new(AGENT_MARKS, schedules, cx));
+                // 先交一次输入：从「新建任务」打开时对话框当场就要填工作区，等不到画的时候。`resident` 画定时页时
+                // 才查，这里先当没开。
+                let input = self.kanban_input(false, cx);
+                view.update(cx, |board, _| board.set_input(input));
                 let events = cx.subscribe_in(&view, window, Self::on_kanban_event);
                 self.kanban = Some(OpenKanban { view, _events: events });
             }
@@ -236,6 +240,20 @@ impl WindowView {
         })
     }
 
+    /// 交给看板的 `Input`。
+    fn kanban_input(&self, resident: bool, cx: &App) -> Input {
+        Input {
+            workspaces: self
+                .workspaces
+                .iter()
+                .map(|workspace| (workspace.dir.clone(), workspace.name.clone()))
+                .collect(),
+            dir: self.workspace().dir.clone(),
+            shell_path: self.shell_path(cx),
+            resident,
+        }
+    }
+
     /// 看板开着时窗口的内容，摆法和手机端引导页一样。
     pub(super) fn render_todo_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) else { return Vec::new() };
@@ -243,15 +261,7 @@ impl WindowView {
         let resident = board.read(cx).showing_schedules()
             && cx.global::<AppConfig>().0.terminal_host
             && runode_autostart::is_installed(runode_autostart::Kind::Host, &runode_paths::Dirs::from_env());
-        let input = Input {
-            workspaces: self
-                .workspaces
-                .iter()
-                .map(|workspace| (workspace.dir.clone(), workspace.name.clone()))
-                .collect(),
-            dir: self.workspace().dir.clone(),
-            resident,
-        };
+        let input = self.kanban_input(resident, cx);
         if board.update(cx, |board, _| board.set_input(input)) {
             // 画的时候发的通知不会再要一帧，等这一帧画完再通知。
             let board = board.clone();

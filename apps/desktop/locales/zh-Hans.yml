@@ -831,10 +831,19 @@ kanban:
     title_placeholder: 空着时用提示词的第一行
     prompt: 交给 agent 的提示词
     prompt_placeholder: 要 agent 做什么？⌘↩ 保存
-    agent: agent 命令
-    agent_placeholder: claude
-    dir: 目录
-    choose_dir: 选择
+    workspace: 工作区
+    choose_dir: 选择目录…
+    agent: Agent
+    model: 模型
+    effort: 强度
+    default: 默认
+    custom: 自己写命令
+    command: 命令
+    command_placeholder: claude --model opus
+    loading_models: "正在向 %{agent} 问模型…"
+    no_models: "问不到 %{agent} 的模型。"
+    empty_models: "%{agent} 没有给出模型，可能要先登录或者配好 API 密钥。"
+    agent_missing: "找不到 %{agent} 命令。请先安装，或者确认它在 shell 的 PATH 里。"
     worktree: 在独立的工作树里做
     when: 什么时候跑
     kind_once: 一次

@@ -1,27 +1,38 @@
-//! 新建、编辑任务和定时的对话框：标题、提示词、目录、agent、要不要独立的工作树；定时多一组什么时候跑
+//! 新建、编辑任务和定时的对话框：标题、提示词、在哪个工作区或目录里做、agent 和它的模型、强度（见 `runode_agent::models`），
+//! 要不要独立的工作树；定时多一组什么时候跑
 //! （一次、每天某时可选星期几、每隔几分钟）。时间都按本机的本地时间填、显示，换算用 libc 的
 //! `localtime_r` 和 `mktime`。填得不对时在对话框里说，不发请求；宿主那边还会再查一遍。
 //!
 //! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，盖住整个窗口，所以由 app 画在窗口的最上层
 //! （`Kanban::dialog`）。关掉、存好了经 `DialogEvent` 告诉看板。
 
-use std::path::PathBuf;
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+    ffi::OsString,
+    path::PathBuf,
+    rc::Rc,
+    sync::{Arc, LazyLock, Mutex},
+};
 
+use crate::assets::CHEVRON_DOWN_ICON;
 use crate::ui::{
-    a11y::{Disable as _, Press},
+    a11y::{Disable as _, Press, PressDown as _},
     button::{Button, ButtonVariant},
     dialog::Dialog,
     display_dir,
     font_size::{FontSize, scaled},
     input::{Input, InputEvent, InputState},
+    menu::{Menu, MenuHost, MenuItem},
     panel::TITLEBAR_HEIGHT,
     switch::Switch,
     textarea::{Textarea, TextareaEvent, TextareaState},
     theme::ActiveTheme as _,
 };
 use gpui::{
-    App, Context, Entity, EventEmitter, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, PathPromptOptions,
-    Render, Role, Subscription, Window, div, prelude::*, px,
+    Action, App, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
+    MouseButton, PathPromptOptions, Render, Role, SharedString, Stateful, Subscription, Window, canvas, div,
+    prelude::*, px, svg,
 };
 use runode_protocol::{
     ClientMsg, HostMsg,
@@ -29,12 +40,58 @@ use runode_protocol::{
 };
 
 use crate::kanban::store;
+use runode_agent::models::{Catalog, LAUNCHERS, Launcher, Pick, Unanswered};
+
+/// 问到的各家 agent 的模型清单：下次打开对话框先用着，同时再问一遍。
+static CATALOGS: LazyLock<Mutex<HashMap<&'static str, Arc<Catalog>>>> = LazyLock::new(Mutex::default);
+
+/// 上次问到的 `launcher` 的清单。
+fn cached(launcher: &Launcher) -> Option<Arc<Catalog>> {
+    CATALOGS.lock().ok()?.get(launcher.command).cloned()
+}
+
+/// agent 菜单的一项：`LAUNCHERS` 里第 `index` 个，为空时是自己写的命令。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(crate) struct PickTodoAgent {
+    index: Option<usize>,
+}
+
+/// 模型菜单的一项：写进命令的模型名，为空时是默认。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(crate) struct PickTodoModel {
+    value: Option<String>,
+}
+
+/// 强度菜单的一项，为空时是默认。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(crate) struct PickTodoEffort {
+    value: Option<String>,
+}
+
+/// 工作区菜单的一项：第 `index` 个工作区的目录，为空时弹出目录选择框。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(crate) struct PickTodoWorkspace {
+    index: Option<usize>,
+}
 
 /// 对话框改的是哪一个；新建时为空。
 #[derive(Clone)]
 pub(crate) enum Editing {
     Todo(Todo),
     Schedule(Schedule),
+}
+
+/// 点了弹出菜单的几个框。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Combo {
+    Workspace,
+    Agent,
+    Model,
+    Effort,
 }
 
 /// 定时跑的方式，对话框里三选一。
@@ -52,7 +109,16 @@ pub struct TodoDialog {
     editing: Option<Editing>,
     title: Entity<InputState>,
     prompt: Entity<TextareaState>,
-    agent: Entity<InputState>,
+    /// 挑的 agent、模型和强度；为空时跑 `command` 里自己写的命令。
+    agent: Option<Pick>,
+    command: Entity<InputState>,
+    /// 各工作区的目录和名字，工作区菜单里列。
+    workspaces: Vec<(PathBuf, SharedString)>,
+    /// 找 agent 用的 PATH，问模型清单时用。
+    shell_path: Option<OsString>,
+    /// 正在问模型清单的 agent（`LAUNCHERS` 里第几个），和没问到的、为什么没问到。
+    loading: HashSet<usize>,
+    failed: HashMap<usize, Unanswered>,
     dir: PathBuf,
     worktree: bool,
     /// 任务开始过了：目录和要不要工作树不能再改。
@@ -67,7 +133,24 @@ pub struct TodoDialog {
     days: u8,
     error: Option<String>,
     saving: bool,
+    /// 菜单里点了一项后焦点交给它，动作从这里派发到对话框。
+    focus: FocusHandle,
+    menu: Option<Menu>,
+    /// 开着的菜单是哪个框的，菜单挂在它下面。
+    menu_for: Option<Combo>,
+    /// 各个框上一帧的下沿离窗口顶多远（按 `Combo` 的次序），菜单最高到窗口底边。
+    combo_bottoms: Rc<[Cell<f32>; 4]>,
     _events: Vec<Subscription>,
+}
+
+impl MenuHost for TodoDialog {
+    fn menu_slot(&mut self) -> &mut Option<Menu> {
+        &mut self.menu
+    }
+
+    fn menu(&self) -> Option<&Menu> {
+        self.menu.as_ref()
+    }
 }
 
 /// 本地时间的年月日时分。
@@ -162,10 +245,13 @@ impl EventEmitter<DialogEvent> for TodoDialog {}
 
 impl TodoDialog {
     /// 新建（`editing` 为空）或编辑任务、定时的对话框，焦点给标题；新建时目录先填 `dir`（当前 workspace 的）。
+    /// `workspaces` 是各工作区的目录和名字，`shell_path` 是找 agent 用的 PATH。
     pub(crate) fn new(
         schedule: bool,
         editing: Option<Editing>,
         dir: PathBuf,
+        workspaces: Vec<(PathBuf, SharedString)>,
+        shell_path: Option<OsString>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -191,12 +277,9 @@ impl TodoDialog {
             "kanban.dialog.title_placeholder",
             cx,
         );
-        let agent = field(
-            spec.as_ref().map_or_else(|| DEFAULT_AGENT.to_owned(), |spec| spec.agent.clone()),
-            "kanban.dialog.agent",
-            "kanban.dialog.agent_placeholder",
-            cx,
-        );
+        let saved_agent = spec.as_ref().map_or_else(|| DEFAULT_AGENT.to_owned(), |spec| spec.agent.clone());
+        let agent = Pick::parse(&saved_agent);
+        let command = field(saved_agent, "kanban.dialog.command", "kanban.dialog.command_placeholder", cx);
         let prompt_text = spec.as_ref().map(|spec| spec.prompt.clone()).unwrap_or_default();
         let prompt = cx.new(|cx| {
             let mut area = TextareaState::new(cx);
@@ -227,7 +310,7 @@ impl TodoDialog {
         let minutes = field(minutes_text, "kanban.dialog.every", "kanban.dialog.every_placeholder", cx);
         // 输入框里回车保存，Esc 关掉对话框；提示词里 ⌘回车保存。
         let mut events = Vec::new();
-        for input in [&title, &agent, &at, &clock, &minutes] {
+        for input in [&title, &command, &at, &clock, &minutes] {
             events.push(cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| match event {
                 InputEvent::Next => this.save(false, cx),
                 InputEvent::Dismiss => cx.emit(DialogEvent::Dismissed),
@@ -245,6 +328,11 @@ impl TodoDialog {
             title,
             prompt,
             agent,
+            command,
+            workspaces,
+            shell_path,
+            loading: HashSet::new(),
+            failed: HashMap::new(),
             dir,
             worktree,
             locked,
@@ -255,10 +343,17 @@ impl TodoDialog {
             days,
             error: None,
             saving: false,
+            focus: cx.focus_handle(),
+            menu: None,
+            menu_for: None,
+            combo_bottoms: Rc::default(),
             _events: events,
         };
         if new_todo {
             dialog.check_repo(cx);
+        }
+        if let Some(pick) = &dialog.agent {
+            dialog.fetch_models(pick.agent, cx);
         }
         dialog
     }
@@ -286,6 +381,15 @@ impl TodoDialog {
         .detach();
     }
 
+    /// 换了目录：重新看要不要工作树，再问一遍挑着的 agent 的模型清单（有的 agent 读项目里的配置）。
+    fn dir_changed(&mut self, cx: &mut Context<Self>) {
+        self.check_repo(cx);
+        // shortcut: 上一次还在问着时不再问，清单按旧目录的算；目录换得比 agent 答得快时再按目录分开记。
+        if let Some(pick) = &self.agent {
+            self.fetch_models(pick.agent, cx);
+        }
+    }
+
     /// 弹出系统的目录选择框，选好的目录换上。
     fn browse_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
@@ -299,12 +403,266 @@ impl TodoDialog {
             let Some(dir) = paths.into_iter().next() else { return };
             this.update(cx, |dialog, cx| {
                 dialog.dir = dir;
-                dialog.check_repo(cx);
+                dialog.dir_changed(cx);
                 cx.notify();
             })
             .ok();
         })
         .detach();
+    }
+
+    /// 在后台问第 `agent` 个 agent 的模型清单（`runode_agent::models::fetch`），记进 `CATALOGS`；问着的时候不再问；
+    /// 问到之前菜单里用上次问到的，问到的是空的也不盖掉上次的。找不到命令而同一家还有别的版本（`same_kind`）时，
+    /// 还没挑模型和强度的换成那个版本再问。
+    fn fetch_models(&mut self, agent: usize, cx: &mut Context<Self>) {
+        if !self.loading.insert(agent) {
+            return;
+        }
+        let (dir, path) = (self.dir.clone(), self.shell_path.clone());
+        let job = cx.background_executor().spawn(async move {
+            let launcher = &LAUNCHERS[agent];
+            let catalog = runode_agent::models::fetch(launcher, &dir, path)?;
+            if let Ok(mut catalogs) = CATALOGS.lock()
+                && (!catalog.models.is_empty() || !catalogs.contains_key(launcher.command))
+            {
+                catalogs.insert(launcher.command, Arc::new(catalog));
+            }
+            Ok(())
+        });
+        cx.spawn(async move |this, cx| {
+            let catalog = job.await;
+            this.update(cx, |dialog, cx| {
+                dialog.loading.remove(&agent);
+                match catalog {
+                    Ok(()) => dialog.failed.remove(&agent),
+                    Err(why) => dialog.failed.insert(agent, why),
+                };
+                // 挑了模型或强度的不换，存着的任务里挑了的也一样。什么都没挑的换：存着的 `opencode2 mini --prompt`
+                // 在没有 opencode2 的机器上本来就跑不起来，换成 1.x 的写法，保存时命令跟着变。
+                if catalog == Err(Unanswered::Missing)
+                    && let Some(other) = runode_agent::models::same_kind(agent)
+                    && let Some(pick) = dialog
+                        .agent
+                        .as_mut()
+                        .filter(|pick| pick.agent == agent && pick.model.is_none() && pick.effort.is_none())
+                {
+                    *pick = Pick { agent: other, model: None, effort: None };
+                    dialog.fetch_models(other, cx);
+                }
+                // 模型、强度的菜单开着时换上问到的清单。
+                dialog.refresh_menu(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 在框 `combo` 下面弹出它的菜单，点了的那项派发到对话框；已经开着时关掉（辅助工具的按下也走这里）。
+    fn toggle_menu(&mut self, combo: Combo, window: &mut Window, cx: &mut Context<Self>) {
+        if self.menu_for == Some(combo) && self.dropdown_open() {
+            self.close_menu(window, cx);
+            return;
+        }
+        let items = self.menu_items(combo);
+        self.menu_for = Some(combo);
+        let target = self.focus.clone();
+        self.open_dropdown(items, target, None, cx);
+    }
+
+    /// 开着的菜单照现在的清单重建：问到了模型清单时用。
+    fn refresh_menu(&mut self, cx: &mut Context<Self>) {
+        if let Some(combo) = self.menu_for.filter(|_| self.dropdown_open()) {
+            let items = self.menu_items(combo);
+            self.replace_menu_items(items, cx);
+        }
+    }
+
+    /// 框 `combo` 的菜单项。
+    fn menu_items(&self, combo: Combo) -> Vec<Option<MenuItem>> {
+        match combo {
+            Combo::Workspace => self.workspace_items(),
+            Combo::Agent => self.agent_items(),
+            Combo::Model => self.model_items(),
+            Combo::Effort => self.effort_items(),
+        }
+    }
+
+    /// agent 菜单：`LAUNCHERS` 里每家一项（`listed`），最后是自己写的命令。
+    fn agent_items(&self) -> Vec<Option<MenuItem>> {
+        let current = self.agent.as_ref().map(|pick| pick.launcher().label);
+        let mut items: Vec<_> = LAUNCHERS
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| runode_agent::models::listed(*index))
+            .map(|(index, spec)| {
+                let action = Box::new(PickTodoAgent { index: Some(index) });
+                Some(MenuItem::checkbox(spec.label.to_owned(), None, current == Some(spec.label), action))
+            })
+            .collect();
+        let custom = rust_i18n::t!("kanban.dialog.custom").into_owned();
+        let action = Box::new(PickTodoAgent { index: None });
+        items.extend([None, Some(MenuItem::checkbox(custom, None, current.is_none(), action))]);
+        items
+    }
+
+    /// 模型或强度的菜单：先是默认，再是 `options`（值和显示的名字），`current` 打勾；还没问到清单时最后说一句。
+    fn options_items(
+        &self,
+        options: Vec<(String, String)>,
+        current: Option<&str>,
+        action: fn(Option<String>) -> Box<dyn Action>,
+    ) -> Vec<Option<MenuItem>> {
+        let default = rust_i18n::t!("kanban.dialog.default").into_owned();
+        let note = self.agent.as_ref().and_then(|pick| self.catalog_note(pick.agent));
+        let mut items: Vec<_> = std::iter::once((None, default))
+            .chain(options.into_iter().map(|(value, label)| (Some(value), label)))
+            .map(|(value, label)| {
+                let checked = value.as_deref() == current;
+                Some(MenuItem::checkbox(label, None, checked, action(value)))
+            })
+            .collect();
+        if let Some(note) = note {
+            items.extend([None, Some(MenuItem::label(note, None, None))]);
+        }
+        items
+    }
+
+    /// 第 `agent` 个 agent 的模型清单还没问到、或者问到的是空的时说的话：正在问、找不到这个命令、问不到，或者它
+    /// 没给出模型（多半是没登录、没配密钥）。
+    fn catalog_note(&self, agent: usize) -> Option<String> {
+        let empty = match cached(&LAUNCHERS[agent]) {
+            Some(catalog) if !catalog.models.is_empty() => return None,
+            known => known.is_some(),
+        };
+        let key = match (self.loading.contains(&agent), self.failed.get(&agent)) {
+            (true, _) => "kanban.dialog.loading_models",
+            (false, Some(Unanswered::Missing)) => "kanban.dialog.agent_missing",
+            (false, _) if empty => "kanban.dialog.empty_models",
+            (false, _) => "kanban.dialog.no_models",
+        };
+        Some(rust_i18n::t!(key, agent = LAUNCHERS[agent].label).into_owned())
+    }
+
+    /// 挑着的 agent 的模型菜单。
+    fn model_items(&self) -> Vec<Option<MenuItem>> {
+        let Some(pick) = &self.agent else { return Vec::new() };
+        let options = cached(pick.launcher()).map_or_else(Vec::new, |catalog| {
+            catalog.models.iter().map(|model| (model.id.clone(), model.label.clone())).collect()
+        });
+        let action = |value| -> Box<dyn Action> { Box::new(PickTodoModel { value }) };
+        self.options_items(options, pick.model.as_deref(), action)
+    }
+
+    /// 挑着的模型的强度菜单。
+    fn effort_items(&self) -> Vec<Option<MenuItem>> {
+        let Some(pick) = &self.agent else { return Vec::new() };
+        let options = cached(pick.launcher()).map_or_else(Vec::new, |catalog| {
+            catalog.efforts(pick.model.as_deref()).iter().map(|effort| (effort.clone(), effort.clone())).collect()
+        });
+        let action = |value| -> Box<dyn Action> { Box::new(PickTodoEffort { value }) };
+        self.options_items(options, pick.effort.as_deref(), action)
+    }
+
+    /// 工作区菜单：各工作区，最后是另选目录。
+    fn workspace_items(&self) -> Vec<Option<MenuItem>> {
+        let mut items: Vec<_> = self
+            .workspaces
+            .iter()
+            .enumerate()
+            .map(|(index, (dir, name))| {
+                let action = Box::new(PickTodoWorkspace { index: Some(index) });
+                Some(
+                    MenuItem::checkbox(name.to_string(), None, *dir == self.dir, action).with_tooltip(display_dir(dir)),
+                )
+            })
+            .collect();
+        let browse = rust_i18n::t!("kanban.dialog.choose_dir").into_owned();
+        items.extend([None, Some(MenuItem::label(browse, None, Some(Box::new(PickTodoWorkspace { index: None }))))]);
+        items
+    }
+
+    /// 框 `combo` 按下就开关它的菜单。菜单开着时在捕获阶段就关掉、不再往下传：不然菜单自己的「点到外面就关」
+    /// 先关了，按下又把它打开。
+    fn opens_menu(combo: Combo, element: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+        element
+            .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
+                if this.menu_for == Some(combo) && this.dropdown_open() {
+                    cx.stop_propagation();
+                    this.close_menu(window, cx);
+                }
+            }))
+            .on_press_down(cx, move |this, window, cx| this.toggle_menu(combo, window, cx))
+    }
+
+    /// 挂在框 `combo` 下面的菜单，开着的不是它的菜单时为空。
+    fn combo_menu(&self, combo: Combo, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
+        let bottom = self.combo_bottoms[combo as usize].get();
+        self.menu_for.filter(|open| *open == combo).and_then(|_| self.render_dropdown_menu(bottom, window, cx))
+    }
+
+    /// 换 agent：模型和强度回到默认；换成自己写的命令时先填上刚才挑的那条，焦点给它。
+    fn pick_agent(&mut self, action: &PickTodoAgent, window: &mut Window, cx: &mut Context<Self>) {
+        // 挑的还是同一家（`fetch_models` 可能已经换成了它的另一个版本）就不换，只再问一遍清单：问不到时登录了、
+        // 装好了回来再点一下就行。
+        let picked = action.index.and_then(|index| LAUNCHERS.get(index)).map(|spec| spec.label);
+        if let Some(pick) = &self.agent
+            && picked == Some(pick.launcher().label)
+        {
+            self.fetch_models(pick.agent, cx);
+            return;
+        }
+        match action.index.filter(|index| *index < LAUNCHERS.len()) {
+            Some(agent) => {
+                self.agent = Some(Pick { agent, model: None, effort: None });
+                self.fetch_models(agent, cx);
+            }
+            None => {
+                if let Some(pick) = self.agent.take() {
+                    let text = pick.command();
+                    self.command.update(cx, |input, cx| input.set_query(text, cx));
+                }
+                window.focus(&self.command.focus_handle(cx), cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// 换模型：挑着的强度新模型用不了、或者换回默认模型而强度要跟着模型写时，强度回到默认。
+    fn pick_model(&mut self, action: &PickTodoModel, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(pick) = &mut self.agent {
+            pick.model.clone_from(&action.value);
+            let usable = |effort: &String| match cached(pick.launcher()) {
+                Some(catalog) => catalog.efforts(pick.model.as_deref()).contains(effort),
+                None => true,
+            };
+            if pick.effort.as_ref().is_some_and(|effort| !usable(effort))
+                || (pick.model.is_none() && pick.launcher().effort_needs_model)
+            {
+                pick.effort = None;
+            }
+            cx.notify();
+        }
+    }
+
+    fn pick_effort(&mut self, action: &PickTodoEffort, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(pick) = &mut self.agent {
+            pick.effort.clone_from(&action.value);
+            cx.notify();
+        }
+    }
+
+    fn pick_workspace(&mut self, action: &PickTodoWorkspace, window: &mut Window, cx: &mut Context<Self>) {
+        match action.index.and_then(|index| self.workspaces.get(index)) {
+            Some((dir, _)) => {
+                if *dir != self.dir {
+                    self.dir = dir.clone();
+                    self.dir_changed(cx);
+                }
+                cx.notify();
+            }
+            None => self.browse_dir(window, cx),
+        }
     }
 
     /// 能「保存并开始」：是任务，还没开始过也没做完。
@@ -361,7 +719,8 @@ impl TodoDialog {
 }
 
 impl Render for TodoDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.focus_menu(window, cx);
         let dialog = &*self;
         let theme = cx.theme();
         let hover_bg = theme.mix(0.10);
@@ -391,29 +750,118 @@ impl Render for TodoDialog {
                 .when(!on, |pill| pill.hover(move |pill| pill.bg(hover_bg)))
                 .child(label)
         };
-        let dir_label = rust_i18n::t!("kanban.dialog.dir").into_owned();
-        let dir_text = display_dir(&dialog.dir);
-        let dir = div()
-            .id("todo-dialog-dir")
-            .role(Role::Button)
-            .aria_label(dir_label.clone())
-            .aria_value(dir_text.clone())
-            .min_h(scaled(28.))
-            .px(px(8.))
-            .flex()
-            .items_center()
-            .rounded(px(6.))
-            .bg(bg_h)
-            .border_1()
-            // 和上下的输入框（`Input`）一样的边框。
-            .border_color(input_border)
-            .truncate()
-            .child(dir_text)
-            .when(!dialog.locked, |dir| {
-                dir.cursor_pointer().on_press(cx, |this, window, cx| this.browse_dir(window, cx))
-            })
-            .when(dialog.locked, |dir| dir.opacity(0.6))
-            .aria_disabled(dialog.locked);
+        // 点了弹出菜单的框：左边是挑着的值，右边一个下拉箭头，菜单（`menu`）挂在它下面。
+        let open = |kind: Combo| dialog.menu_for == Some(kind) && dialog.dropdown_open();
+        let combo = |id: &'static str, kind: Combo, label: String, value: String, enabled: bool, menu: Option<Div>| {
+            let bottoms = dialog.combo_bottoms.clone();
+            div()
+                .id(id)
+                .role(Role::ComboBox)
+                .aria_label(label)
+                .aria_value(value.clone())
+                .aria_expanded(open(kind))
+                .relative()
+                .min_w_0()
+                .min_h(scaled(28.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .rounded(px(6.))
+                .bg(bg_h)
+                .border_1()
+                // 和上下的输入框（`Input`）一样的边框。
+                .border_color(input_border)
+                .child(div().flex_1().min_w_0().truncate().child(value))
+                .child(svg().path(CHEVRON_DOWN_ICON).flex_none().size(px(12.)).text_color(fg_h.opacity(0.6)))
+                .when(enabled, |combo| combo.cursor_pointer().hover(move |combo| combo.bg(hover_bg)))
+                .when(!enabled, |combo| combo.opacity(0.6))
+                .aria_disabled(!enabled)
+                // 记下下沿，菜单的最大高度按它算。
+                .child(
+                    canvas(
+                        move |bounds, _, _| bottoms[kind as usize].set(f32::from(bounds.bottom())),
+                        |_, (), _, _| {},
+                    )
+                    .absolute()
+                    .size_full(),
+                )
+                .children(menu)
+        };
+        let workspace_label = rust_i18n::t!("kanban.dialog.workspace").into_owned();
+        let workspace_text = dialog
+            .workspaces
+            .iter()
+            .find(|(dir, _)| *dir == dialog.dir)
+            .map_or_else(|| display_dir(&dialog.dir), |(_, name)| name.to_string());
+        let menu = dialog.combo_menu(Combo::Workspace, window, cx);
+        let workspace = combo(
+            "todo-dialog-workspace",
+            Combo::Workspace,
+            workspace_label.clone(),
+            workspace_text,
+            !dialog.locked,
+            menu,
+        );
+        let workspace = if dialog.locked { workspace } else { Self::opens_menu(Combo::Workspace, workspace, cx) };
+        let default = rust_i18n::t!("kanban.dialog.default").into_owned();
+        let agent_label = rust_i18n::t!("kanban.dialog.agent").into_owned();
+        let agent_text = dialog.agent.as_ref().map_or_else(
+            || rust_i18n::t!("kanban.dialog.custom").into_owned(),
+            |pick| pick.launcher().label.to_owned(),
+        );
+        let menu = dialog.combo_menu(Combo::Agent, window, cx);
+        let agent = Self::opens_menu(
+            Combo::Agent,
+            combo("todo-dialog-agent", Combo::Agent, agent_label.clone(), agent_text, true, menu),
+            cx,
+        );
+        // 挑了 agent 时并排挑模型和强度；自己写命令时下面是命令框。
+        let agent_row = match &dialog.agent {
+            Some(pick) => {
+                let launcher = pick.launcher();
+                let catalog = cached(launcher);
+                // 没有模型或强度参数的 agent 不画那一栏；强度接在模型名后面的，挑了模型才能挑强度。
+                let model = launcher.model_arg.map(|_| {
+                    let text = pick.model.as_deref().map_or_else(
+                        || default.clone(),
+                        |model| catalog.as_deref().map_or(model, |catalog: &Catalog| catalog.label(model)).to_owned(),
+                    );
+                    let label = rust_i18n::t!("kanban.dialog.model").into_owned();
+                    let menu = dialog.combo_menu(Combo::Model, window, cx);
+                    Self::opens_menu(
+                        Combo::Model,
+                        combo("todo-dialog-model", Combo::Model, label, text, true, menu),
+                        cx,
+                    )
+                });
+                let effort = launcher.effort_arg.map(|_| {
+                    let enabled = pick.model.is_some() || !launcher.effort_needs_model;
+                    let text = pick.effort.clone().filter(|_| enabled).unwrap_or_else(|| default.clone());
+                    let label = rust_i18n::t!("kanban.dialog.effort").into_owned();
+                    let menu = dialog.combo_menu(Combo::Effort, window, cx);
+                    let effort = combo("todo-dialog-effort", Combo::Effort, label, text, enabled, menu);
+                    if enabled { Self::opens_menu(Combo::Effort, effort, cx) } else { effort }
+                });
+                let column = |key: &str, child: gpui::Stateful<gpui::Div>| {
+                    div().flex_1().min_w_0().child(field(rust_i18n::t!(key).into_owned(), child.into_any_element()))
+                };
+                div()
+                    .flex()
+                    .gap(px(8.))
+                    .child(column("kanban.dialog.agent", agent))
+                    .children(model.map(|model| column("kanban.dialog.model", model)))
+                    .children(effort.map(|effort| column("kanban.dialog.effort", effort)))
+                    .into_any_element()
+            }
+            None => div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(field(agent_label, agent.into_any_element()))
+                .child(input(&dialog.command))
+                .into_any_element(),
+        };
         let worktree_label = rust_i18n::t!("kanban.dialog.worktree").into_owned();
         // 一行字配一个开关，点字也算点开关。
         let worktree = Switch::new("todo-dialog-worktree", worktree_label.clone(), dialog.worktree)
@@ -528,6 +976,11 @@ impl Render for TodoDialog {
             .on_press(cx, |this, _, cx| this.save(true, cx))
         });
         let panel = Dialog::new("todo-dialog", title.clone())
+            .track_focus(&dialog.focus)
+            .on_action(cx.listener(Self::pick_agent))
+            .on_action(cx.listener(Self::pick_model))
+            .on_action(cx.listener(Self::pick_effort))
+            .on_action(cx.listener(Self::pick_workspace))
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
                     cx.stop_propagation();
@@ -575,18 +1028,8 @@ impl Render for TodoDialog {
                             .into_any_element(),
                     ))
                     .children(when)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.))
-                            .child(div().text_color(fg_h.opacity(0.7)).child(dir_label))
-                            .child(dir),
-                    )
-                    .child(field(
-                        rust_i18n::t!("kanban.dialog.agent").into_owned(),
-                        input(&dialog.agent).into_any_element(),
-                    ))
+                    .child(field(workspace_label, workspace.into_any_element()))
+                    .child(agent_row)
                     .child(div().flex().child(worktree)),
             )
             .children(dialog.error.clone().map(|error| {
@@ -626,7 +1069,10 @@ impl TodoDialog {
         if title.is_empty() {
             return Err(rust_i18n::t!("kanban.dialog.need_title").into_owned());
         }
-        let agent = self.agent.read(cx).query().trim().to_owned();
+        let agent = match &self.agent {
+            Some(pick) => pick.command(),
+            None => self.command.read(cx).query().trim().to_owned(),
+        };
         if agent.is_empty() {
             return Err(rust_i18n::t!("kanban.dialog.need_agent").into_owned());
         }

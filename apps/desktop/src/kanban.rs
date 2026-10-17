@@ -89,6 +89,8 @@ pub struct Input {
     pub workspaces: Vec<(PathBuf, SharedString)>,
     /// 当前 workspace 的目录：新建任务、定时时先填它。
     pub dir: PathBuf,
+    /// 找 agent 用的 PATH：对话框向 agent 问模型清单时用。
+    pub shell_path: Option<std::ffi::OsString>,
     /// 定时在 app 退出后也照跑（打开了 `terminal-host`，宿主登录时自启）；否则定时那一页上说一句。
     pub resident: bool,
 }
@@ -393,8 +395,8 @@ impl Kanban {
 
     /// 打开新建（`editing` 为空）或编辑任务、定时的对话框。
     fn open_dialog(&mut self, schedule: bool, editing: Option<Editing>, window: &mut Window, cx: &mut Context<Self>) {
-        let dir = self.input.dir.clone();
-        let dialog = cx.new(|cx| TodoDialog::new(schedule, editing, dir, window, cx));
+        let Input { workspaces, dir, shell_path, .. } = self.input.clone();
+        let dialog = cx.new(|cx| TodoDialog::new(schedule, editing, dir, workspaces, shell_path, window, cx));
         let events = cx.subscribe_in(&dialog, window, |this, _, event: &DialogEvent, window, cx| {
             this.dialog = None;
             if let DialogEvent::Saved { start: Some(id) } = event {

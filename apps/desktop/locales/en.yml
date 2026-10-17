@@ -831,10 +831,19 @@ kanban:
     title_placeholder: Defaults to the first line of the prompt
     prompt: Prompt for the agent
     prompt_placeholder: What should the agent do? ⌘↩ saves
-    agent: Agent command
-    agent_placeholder: claude
-    dir: Directory
-    choose_dir: Choose
+    workspace: Workspace
+    choose_dir: Choose a directory…
+    agent: Agent
+    model: Model
+    effort: Effort
+    default: Default
+    custom: Custom command
+    command: Command
+    command_placeholder: claude --model opus
+    loading_models: "Asking %{agent} for its models…"
+    no_models: "Could not get the models from %{agent}."
+    empty_models: "%{agent} gave no models. You may need to sign in or set an API key first."
+    agent_missing: "Cannot find the %{agent} command. Install it, or make sure it is on your shell's PATH."
     worktree: Work in its own worktree
     when: Runs
     kind_once: Once
