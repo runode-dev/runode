@@ -385,6 +385,17 @@ impl Store {
         rows.collect::<rusqlite::Result<_>>().map_err(failed)
     }
 
+    /// 完成了的任务开过的会话，不按 `DONE_KEPT` 滤：给宿主收 shell 已经退出的会话。只读会话一列，不读提示词。
+    pub fn done_sessions(&self) -> Result<Vec<SessionId>> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT DISTINCT session FROM todos WHERE done_at IS NOT NULL AND session IS NOT NULL")
+            .map_err(failed)?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0)).map_err(failed)?;
+        let ids: Vec<String> = rows.collect::<rusqlite::Result<_>>().map_err(failed)?;
+        Ok(ids.iter().filter_map(|id| SessionId::from_str(id).ok()).collect())
+    }
+
     /// 记下清过任务的工作树了：删掉了的工作树、分支不再记着。
     pub fn set_swept(&self, id: &str, worktree_gone: bool, branch_gone: bool) -> Result<()> {
         self.conn

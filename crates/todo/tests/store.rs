@@ -264,3 +264,22 @@ fn done_todos_page_newest_first() {
     // 七天的窗口只管看板，不管记录。
     assert!(ids(&store, 400 + DONE_KEPT + 1).iter().all(|id| *id == open));
 }
+
+/// 宿主收会话用的：完成了的任务开过的会话都给，不管完成了多久，没完成的和没开始的不给。
+#[test]
+fn done_sessions_lists_every_finished_todo_session() {
+    let mut store = Store::open(&temp_db("done-sessions")).unwrap();
+    let open = store.add_todo(&spec("open"), 100, None).unwrap();
+    let recent = store.add_todo(&spec("recent"), 101, None).unwrap();
+    let old = store.add_todo(&spec("old"), 102, None).unwrap();
+    let never_started = store.add_todo(&spec("never"), 103, None).unwrap();
+    store.set_started(&open, 110, SessionId(1), None).unwrap();
+    store.set_started(&recent, 110, SessionId(2), None).unwrap();
+    store.set_started(&old, 110, SessionId(3), None).unwrap();
+    store.update_todo(&recent, None, Some(Some(200 + DONE_KEPT))).unwrap();
+    store.update_todo(&old, None, Some(Some(1))).unwrap();
+    store.update_todo(&never_started, None, Some(Some(200 + DONE_KEPT))).unwrap();
+    let mut sessions = store.done_sessions().unwrap();
+    sessions.sort_by_key(|session| session.0);
+    assert_eq!(sessions, [SessionId(2), SessionId(3)]);
+}

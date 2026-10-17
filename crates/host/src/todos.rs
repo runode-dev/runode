@@ -321,18 +321,21 @@ impl Shared {
         if self.todos_writable().is_err() {
             return;
         }
+        // 只看还在 registry 里的会话，别的 `end_if_exited` 本来也不动；先取好再放掉锁，不和库锁同时拿。
+        let live: HashSet<SessionId> = self.registry().sessions.keys().copied().collect();
+        if live.is_empty() {
+            return;
+        }
         // 不按看板只留七天的规矩滤：完成很久以后 shell 才退出的会话也要收掉，不然单独跑的宿主一直不空闲。
-        let todos = match self.todos.with_db(|db| db.list_todos(0)) {
-            Ok(todos) => todos,
+        let sessions = match self.todos.with_db(|db| db.done_sessions()) {
+            Ok(sessions) => sessions,
             Err(err) => {
                 tracing::warn!("cannot read the todos: {err}");
                 return;
             }
         };
-        for todo in todos.iter().filter(|todo| todo.done_at.is_some()) {
-            if let Some(session) = todo.session {
-                self.end_if_exited(session);
-            }
+        for session in sessions.into_iter().filter(|session| live.contains(session)) {
+            self.end_if_exited(session);
         }
     }
 
