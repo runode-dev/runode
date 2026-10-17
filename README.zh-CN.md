@@ -47,10 +47,11 @@ curl -fsSL https://raw.githubusercontent.com/runode-dev/runode/main/scripts/inst
 
 ## 快速上手
 
-在 Runode 的终端里，把 runode 的用法教给你的 agent：
+装上 runode 的 skill，把用法教给你的 agent（Claude Code、Codex 等都能用）：
 
 ```sh
-runode setup claude    # 或 runode setup codex
+npx skills add runode-dev/runode --skill runode -g
+npx skills update runode -g    # 以后更新到最新
 ```
 
 之后 agent 会在需要时自己操作旁边的终端。你也可以亲手用：

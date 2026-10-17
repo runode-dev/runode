@@ -137,7 +137,6 @@ const SCHEDULE_ADD_OPTS: &[Opt] = &[
     opt("--worktree", "Give each task a new git worktree and branch", Value::None),
     HELP,
 ];
-const SETUP_OPTS: &[Opt] = &[opt("--print", "Show the skills instead of installing them", Value::None), HELP];
 const PAIR_OPTS: &[Opt] =
     &[Opt { flag: "--addr", doc: "Also offer this address to the phone", value: Value::Free, repeatable: true }, HELP];
 
@@ -152,7 +151,6 @@ fn options(command: &str, sub: Option<&str>) -> &'static [Opt] {
         ("todo", Some("add")) => TODO_ADD_OPTS,
         ("todo", Some("list" | "show")) | ("schedule", Some("list")) | ("remote", Some("devices")) => &[JSON, HELP],
         ("schedule", Some("add")) => SCHEDULE_ADD_OPTS,
-        ("setup", _) => SETUP_OPTS,
         ("remote", Some("pair")) => PAIR_OPTS,
         _ => &[HELP],
     }
@@ -228,7 +226,6 @@ const COMMANDS: &[(&str, &str)] = &[
     ("focus", "Show a session's pane and bring its window to the front"),
     ("todo", "Put tasks for agents on the task board and start them"),
     ("schedule", "Start a task for an agent at set times"),
-    ("setup", "Teach an agent to use runode"),
     ("remote", "Pair phones for remote access and manage them"),
     ("service", "Start runode at login"),
     ("completions", "Print a completion script for your shell"),
@@ -248,7 +245,6 @@ fn subcommands(command: &str) -> &'static [(&'static str, &'static str)] {
             ("rm", "Remove a task"),
         ],
         "schedule" => &[("add", "Add a schedule"), ("list", "List the schedules"), ("rm", "Remove a schedule")],
-        "setup" => &[("claude", "Claude Code: ~/.claude/skills"), ("codex", "Codex: ~/.agents/skills")],
         "remote" => &[("pair", "Pair a phone"), ("devices", "List the paired phones"), ("revoke", "Unpair a phone")],
         "service" => &[
             ("install", "Install the login service"),
@@ -412,7 +408,7 @@ fn candidates(previous: &[String], current: &str, env: &Env) -> (Also, Vec<(Stri
         }
         ("read" | "send" | "wait" | "kill" | "focus", _, 0) => (Also::Nothing, sessions(env)),
         ("open", _, _) if line.literal => (Also::Files, Vec::new()),
-        ("todo" | "schedule" | "setup" | "remote" | "service" | "completions", None, 0) => {
+        ("todo" | "schedule" | "remote" | "service" | "completions", None, 0) => {
             (Also::Nothing, owned(subcommands(command)))
         }
         ("todo", Some(sub @ ("show" | "start" | "done" | "rm")), 1) => (Also::Nothing, todos(env, sub)),
@@ -536,7 +532,6 @@ mod tests {
             ("focus", &[None]),
             ("todo", &[Some("add"), Some("list"), Some("show"), Some("start"), Some("done"), Some("rm")]),
             ("schedule", &[Some("add"), Some("list"), Some("rm")]),
-            ("setup", &[None]),
             ("remote", &[Some("pair"), Some("devices"), Some("revoke")]),
             ("service", &[Some("install"), Some("uninstall"), Some("status")]),
             ("completions", &[Some("bash")]),
@@ -593,7 +588,7 @@ mod tests {
         assert_eq!(items[0], "list");
         assert!(items.contains(&"completions".to_owned()));
         let (_, items) = complete_offline("se");
-        assert_eq!(items, ["send", "setup", "service"]);
+        assert_eq!(items, ["send", "service"]);
         let (_, items) = complete_offline("--");
         assert_eq!(items, ["--help", "--version"]);
     }
@@ -629,9 +624,8 @@ mod tests {
         );
         assert_eq!(complete_offline("service install ").1, ["host", "app"]);
         assert_eq!(complete_offline("service install host ").1, Vec::<String>::new());
-        assert_eq!(complete_offline("setup ").1, ["claude", "codex"]);
         assert_eq!(complete_offline("completions ").1, ["bash", "fish", "zsh"]);
-        assert_eq!(complete_offline("help se").1, ["send", "setup", "service", "session"]);
+        assert_eq!(complete_offline("help se").1, ["send", "service", "session"]);
     }
 
     #[test]

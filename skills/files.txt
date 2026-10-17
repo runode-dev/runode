@@ -1,5 +1,0 @@
-runode/SKILL.md
-runode/references/sessions.md
-runode/references/keys.md
-runode/references/examples.md
-runode/references/task-board.md

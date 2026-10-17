@@ -2,7 +2,7 @@
 
 代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（Rust 的 `apps/desktop` 和 Swift 的 `apps/ios`），给它们用的库放在 `crates/` 下。`apps/` 下不全是 Rust 项目，新加的 Rust app 要在根 `Cargo.toml` 的 `members` 和 `default-members` 里列出。包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义；`apps/` 下的包名等于可执行文件名，所以桌面 app 的包名是 `runode`。
 
-根目录的 `skills/` 放教 agent 用 runode 的 skill：`skills/runode/SKILL.md` 是入口，不是每次都用得上的细节放在 `references/<主题>.md`，由 `SKILL.md` 链过去，skill 下只能放这两种文件。加 skill 或 reference 只加文件、改清单 `skills/files.txt`，不改代码（测试核对清单和链接）。`runode setup` 和桌面 app 启动时装的都是 GitHub 上 main 里的那一套，所以只改 skill 推到 main 就到了用户那里，不用发版。
+根目录的 `skills/` 放教 agent 用 runode 的 skill：`skills/runode/SKILL.md` 是入口，不是每次都用得上的细节放在 `references/<主题>.md`，由 `SKILL.md` 链过去，skill 下只能放这两种文件。加 skill 或 reference 只加文件，不改代码（`cli` 的测试核对元数据和链接）。用户用 `npx skills add runode-dev/runode --skill runode -g` 从 GitHub 上的 main 装、用 `npx skills update` 更新，runode 自己不装 skill，所以只改 skill 推到 main 就到了用户那里，不用发版。
 
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |
@@ -21,7 +21,7 @@
 | `update` | 桌面 app 的自动更新：查 GitHub Release、下载、核对签名，退出时原子地换上 | serde、serde_json、tracing、libc、objc2、block2、objc2-foundation |
 | `autostart` | 登录时自启（launchd、systemd、`SMAppService`），命令行和设置页共用 | paths、objc2、objc2-foundation、objc2-service-management |
 | `ui` | 桌面几处界面共用的 GPUI 部件（照 shadcn 起名，variant、size 选样子）、全 app 一份的主题 `Theme`（只能在 render 和 paint 里读）、所有图标、界面字号和无障碍的共用写法；界面文字由调用方翻译好交进来 | types、paths、GPUI、tracing、unicode-segmentation、objc2-app-kit、objc2-foundation |
-| `cli` | 命令行前端（`runode list`、`send`、`todo` 等），经宿主的 Unix socket 按 protocol 说话；`setup`、`remote`、`service` 不经宿主 | protocol、types、paths、config、remote、autostart、qrcode、libc |
+| `cli` | 命令行前端（`runode list`、`send`、`todo` 等），经宿主的 Unix socket 按 protocol 说话；`remote`、`service` 不经宿主 | protocol、types、paths、config、remote、autostart、qrcode、libc |
 | `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档；带子命令时交给 `cli`，带 `--host` 时是单独的宿主进程，和命令行、宿主是同一个可执行文件；远程访问的监听开在宿主所在的进程里（`remote_access`） | 以上全部、GPUI |
 
 终端仿真用的 libghostty-vt 不在 `crates/` 下，取自子模块 `vendor/libghostty-rs`。它是 runode-dev 对 Uzaaft 的 libghostty-rs（MIT 或 Apache-2.0）的 fork，runode 用它的 `main` 分支，里面有安全封装 `libghostty-vt` 和 C 接口绑定 `libghostty-vt-sys`；绑定由 bindgen 生成后提交在那边，重新生成时在 fork 的一份单独克隆里设 `GHOSTTY_SOURCE_DIR` 指向 runode 的 `vendor/ghostty`，跑 `cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings`；别在子模块里跑，`vendor/rustfmt.toml` 关掉了 vendor 下的格式化，生成的绑定不会排版。它自成一个 workspace，根 `Cargo.toml` 按路径依赖它，`vendor` 在 `exclude` 里，所以本仓库的 lint 不管它。`.cargo/config.toml` 设的 `GHOSTTY_SOURCE_DIR` 让 `libghostty-vt-sys` 的构建脚本从 `vendor/ghostty` 编出库，不去网上拉。runode 要用而上游还没有的接口加在 `main` 上，一样东西一个提交，好在以后变基；上游已有同样能力、只是名字或形状不同的，改 runode 去适应，不改 fork。

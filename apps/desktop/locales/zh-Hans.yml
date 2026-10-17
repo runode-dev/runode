@@ -421,16 +421,6 @@ layout:
   count: 个数
   open: 打开
   hint: ←→ 选方向 · 1–4 选个数 · 回车打开 · Esc 取消
-setup:
-  menu: 安装 agent 集成…
-  confirm_title: 给 Claude Code 和 Codex 装上 runode 的使用说明？
-  confirm_detail: "装好后它们就知道怎样用 runode 命令行查看和操作别的终端。会写这两个文件：\n%{paths}"
-  install: 安装
-  cancel: 取消
-  done_title: 装好了 agent 集成
-  done_detail: "写好了：\n%{paths}\n\n之后新开的 Claude Code、Codex 会话会读到。"
-  failed_title: 没能装好 agent 集成
-  ok: 好
 settings:
   back: 返回
   remove: 删除

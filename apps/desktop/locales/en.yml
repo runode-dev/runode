@@ -421,16 +421,6 @@ layout:
   count: Count
   open: Open
   hint: ←→ direction · 1–4 count · Return to open · Esc to cancel
-setup:
-  menu: Install Agent Integration…
-  confirm_title: Install the runode instructions for Claude Code and Codex?
-  confirm_detail: "They will then know how to use the runode command line to read and drive other terminals. These files will be written:\n%{paths}"
-  install: Install
-  cancel: Cancel
-  done_title: Agent integration installed
-  done_detail: "Written:\n%{paths}\n\nNew Claude Code and Codex sessions will pick them up."
-  failed_title: Could not install the agent integration
-  ok: OK
 settings:
   back: Back
   remove: Remove

@@ -421,16 +421,6 @@ layout:
   count: 個數
   open: 打開
   hint: ←→ 選方向 · 1–4 選個數 · Return 打開 · Esc 取消
-setup:
-  menu: 安裝 agent 整合…
-  confirm_title: 為 Claude Code 和 Codex 裝上 runode 的使用說明？
-  confirm_detail: "裝好後它們就知道怎樣用 runode 命令列查看和操作別的終端機。會寫入這兩個檔案：\n%{paths}"
-  install: 安裝
-  cancel: 取消
-  done_title: 已裝好 agent 整合
-  done_detail: "已寫入：\n%{paths}\n\n之後新開的 Claude Code、Codex 工作階段會讀到。"
-  failed_title: 未能裝好 agent 整合
-  ok: 好
 settings:
   back: 返回
   remove: 刪除

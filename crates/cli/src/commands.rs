@@ -214,22 +214,6 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             let req = connection.req();
             connection.request_done(&ClientMsg::Reveal { req, id })?;
         }
-        Command::Setup { target, print } => {
-            let latest = env.skills_url.as_deref().and_then(crate::fetch_skills);
-            let fetched = latest.is_some();
-            let skills = latest.unwrap_or_else(crate::bundled_skills);
-            if print {
-                let files: Vec<String> =
-                    skills.iter().map(|(path, content)| format!("==> {path} <==\n{content}")).collect();
-                out.write_all(files.join("\n").as_bytes())?;
-            } else {
-                let home =
-                    env.dirs.home.as_deref().ok_or_else(|| anyhow!("cannot tell where your home directory is"))?;
-                for path in crate::setup(target, home, &skills, fetched)? {
-                    writeln!(out, "installed {}", path.display())?;
-                }
-            }
-        }
         Command::RemotePair { addrs } => {
             crate::remote::pair(env, &addrs, out, &mut crate::remote::read_answer, crate::remote::LISTENER_WAIT)?
         }

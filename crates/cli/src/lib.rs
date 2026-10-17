@@ -1,5 +1,5 @@
-//! 命令行前端：`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`todo`、`schedule`、`setup`、
-//! `remote` 和 `service`。
+//! 命令行前端：`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`todo`、`schedule`、`remote`
+//! 和 `service`。
 //! 经宿主的 Unix socket 按 `runode_protocol` 说话，不碰终端仿真和界面；`remote`（给手机配对远程
 //! 访问、列出和撤销配对过的设备）不经宿主，读写 `runode_remote` 管的文件。
 //!
@@ -8,7 +8,7 @@
 //! 哪个会话里（`runode_protocol::ENV_SESSION`），所以 agent 能在自己的终端里调度别的终端。
 //!
 //! 命令的解析在 `args`，连宿主和收发消息在 `client`，按写法找会话在 `select`，各个命令在
-//! `commands`，用法说明在 `help`，给 agent 装使用说明在 `setup`，远程访问在 `remote`，看板（`todo`、
+//! `commands`，用法说明在 `help`，远程访问在 `remote`，看板（`todo`、
 //! `schedule`）在 `todo`，定时的本地钟点在 `local_time`，shell 补全在 `complete`。
 
 mod args;
@@ -20,12 +20,9 @@ mod local_time;
 mod remote;
 mod select;
 mod service;
-mod setup;
 mod todo;
 
 use std::{ffi::OsString, io::Write, path::PathBuf};
-
-pub use setup::{SKILLS_URL, SetupTarget, SkillFiles, bundled_skills, fetch_skills, refresh, setup, setup_paths};
 
 /// 桌面 app 给 shell 设的环境变量：runode 可执行文件的路径，没把它放进 PATH 时也能调用命令行。
 pub const ENV_BIN: &str = "RUNODE_BIN";
@@ -58,11 +55,8 @@ pub struct Env {
     pub session: Option<String>,
     /// 这次构建的标识，握手时报给宿主。
     pub build: String,
-    /// runode 的各个目录，`remote` 在这里找远程访问的文件。其中的家目录：显示目录时缩成 `~`，
-    /// `setup` 往这里装使用说明。
+    /// runode 的各个目录，`remote` 在这里找远程访问的文件。其中的家目录：显示目录时缩成 `~`。
     pub dirs: runode_paths::Dirs,
-    /// `setup` 从哪里下最新的 skill（见 `SKILLS_URL`）；为 `None` 时不下，用编进这一版的。
-    pub skills_url: Option<String>,
 }
 
 impl Env {
@@ -75,7 +69,6 @@ impl Env {
             session: var(runode_protocol::ENV_SESSION).map(|value| value.to_string_lossy().into_owned()),
             build: build.into(),
             dirs,
-            skills_url: Some(crate::SKILLS_URL.to_owned()),
         }
     }
 }

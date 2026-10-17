@@ -8,9 +8,13 @@ Drive the terminals of the running runode app from the command line.
 Usage: runode [COMMAND]
 
 Without a command, runode opens its window. `rn` is a short name for runode:
-`rn list` is `runode list`. Except setup, remote and service, commands talk to
-the running runode app; inside a runode terminal they find it through
+`rn list` is `runode list`. Except remote and service, commands talk to the
+running runode app; inside a runode terminal they find it through
 RUNODE_SOCKET, and RUNODE_SESSION names the terminal they run in.
+
+To teach your agents to use runode, install its skill:
+  npx skills add runode-dev/runode --skill runode -g
+and update it with `npx skills update runode -g`.
 
 Commands:
   list         List the terminal sessions
@@ -22,7 +26,6 @@ Commands:
   focus        Show a session's pane and bring its window to the front
   todo         Put tasks for agents on the task board and start them
   schedule     Start a task for an agent at set times
-  setup        Teach an agent to use runode
   remote       Pair phones for remote access and manage them
   service      Start runode at login
   completions  Print a completion script for your shell
@@ -51,7 +54,6 @@ pub(crate) const PAGES: &[(&str, &str)] = &[
     ("focus", FOCUS),
     ("todo", TODO),
     ("schedule", SCHEDULE),
-    ("setup", SETUP),
     ("remote", REMOTE),
     ("service", SERVICE),
     ("completions", COMPLETIONS),
@@ -306,19 +308,6 @@ Options:
                        branch; DIR must be in a git repository
       --json           With `list`: print JSON instead of a table
   -h, --help           Show this help
-";
-
-const SETUP: &str = "\
-Teach an agent to use runode: installs runode's skills in ~/.claude/skills
-(claude) or ~/.agents/skills (codex).
-The latest skills come from runode's GitHub repository; without a network,
-the ones built into this version.
-
-Usage: runode setup claude|codex [--print]
-
-Options:
-      --print  Show the skills instead of installing them
-  -h, --help   Show this help
 ";
 
 const REMOTE: &str = "\

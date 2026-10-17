@@ -3,11 +3,9 @@
 //! 菜单项上显示的快捷键由 GPUI 从键位绑定里反查，快捷键只在 `keybinds` 里绑，
 //! 菜单和键盘自动保持一致。
 
-use gpui::{App, Menu, MenuItem, OsAction, PromptLevel, SystemMenuType, actions};
-use runode_cli::SetupTarget;
+use gpui::{App, Menu, MenuItem, OsAction, SystemMenuType, actions};
 
 use crate::{
-    config::AppConfig,
     i18n::tr,
     terminal_view::{
         ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ReloadShell, ResetFontSize,
@@ -15,7 +13,6 @@ use crate::{
     },
     ui::{
         actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
-        display_dir,
         input::{SearchNext, SearchPrevious},
     },
     window::{
@@ -47,8 +44,6 @@ actions!(
         Minimize,
         Zoom,
         ToggleFullScreen,
-        /// 给 Claude Code 和 Codex 装上 runode 命令行的使用说明（`runode setup`），先确认一句。
-        InstallAgentIntegration,
     ]
 );
 
@@ -73,8 +68,6 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Minimize, cx| with_active_window(cx, |w| w.minimize_window()));
     cx.on_action(|_: &Zoom, cx| with_active_window(cx, |w| w.zoom_window()));
     cx.on_action(|_: &ToggleFullScreen, cx| with_active_window(cx, |w| w.toggle_fullscreen()));
-    // 从菜单派发时窗口正在处理这个动作，这时在它上面弹不了框，等这一轮更新结束再弹。
-    cx.on_action(|_: &InstallAgentIntegration, cx| cx.defer(install_agent_integration));
 
     // 装快捷键时会顺带设置菜单。
     crate::keybinds::install(cx);
@@ -95,7 +88,6 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(crate::update::menu_label(cx), CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action(tr("menu.settings"), OpenSettings),
-                MenuItem::action(tr("setup.menu"), InstallAgentIntegration),
                 MenuItem::separator(),
                 MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),
                 MenuItem::separator(),
@@ -226,103 +218,6 @@ fn fix_key_equivalents(menu: &objc2_app_kit::NSMenu) {
             fix_key_equivalents(&submenu);
         }
     }
-}
-
-/// 装给哪些 agent。
-const SETUP_TARGETS: [SetupTarget; 2] = [SetupTarget::Claude, SetupTarget::Codex];
-
-/// 装过 agent 集成的，把装着的使用说明换成 GitHub 上最新的：skill 更新了不用再从菜单装一遍。
-/// 下不到时不动装着的；关了自动更新时也不动，没装过时不联网。要在配置装上之后调用。和自动更新的第一次
-/// 检查一样等 `update::FIRST_CHECK` 再下，不和开窗口抢 CPU 和网络。
-pub fn refresh_agent_integration(cx: &App) {
-    if !cx.global::<AppConfig>().0.auto_update {
-        return;
-    }
-    let Some(home) = runode_paths::Dirs::from_env().home else {
-        return;
-    };
-    let executor = cx.background_executor().clone();
-    cx.background_executor()
-        .spawn(async move {
-            executor.timer(crate::update::FIRST_CHECK).await;
-            let installed = SETUP_TARGETS
-                .iter()
-                .flat_map(|target| runode_cli::setup_paths(*target, &home))
-                .any(|path| path.exists());
-            if !installed {
-                return;
-            }
-            let Some(skills) = runode_cli::fetch_skills(runode_cli::SKILLS_URL) else {
-                return;
-            };
-            for target in SETUP_TARGETS {
-                match runode_cli::refresh(target, &home, &skills) {
-                    Ok(true) => tracing::info!("refreshed the agent integration for {target:?}"),
-                    Ok(false) => {}
-                    Err(err) => tracing::warn!("failed to refresh the agent integration: {err:#}"),
-                }
-            }
-        })
-        .detach();
-}
-
-/// 问一句要不要装，列出会写的文件；装好后说装到了哪里，失败时说原因。
-fn install_agent_integration(cx: &mut App) {
-    let Some(home) = runode_paths::Dirs::from_env().home else {
-        tracing::warn!("cannot install the agent integration: no home directory");
-        return;
-    };
-    let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
-        return;
-    };
-    let paths = setup_paths(SETUP_TARGETS.iter().flat_map(|target| runode_cli::setup_paths(*target, &home)));
-    let title = rust_i18n::t!("setup.confirm_title");
-    let detail = rust_i18n::t!("setup.confirm_detail", paths = paths);
-    let answers = [&*rust_i18n::t!("setup.install"), &*rust_i18n::t!("setup.cancel")];
-    let Ok(answer) =
-        window.update(cx, |_, window, cx| window.prompt(PromptLevel::Info, &title, Some(&detail), &answers, cx))
-    else {
-        return;
-    };
-    cx.spawn(async move |cx| {
-        if answer.await.ok() != Some(0) {
-            return;
-        }
-        // 下最新的 skill 要联网，放到后台，别卡住界面。
-        let installed: anyhow::Result<Vec<_>> = cx
-            .background_executor()
-            .spawn(async move {
-                let latest = runode_cli::fetch_skills(runode_cli::SKILLS_URL);
-                let fetched = latest.is_some();
-                let skills = latest.unwrap_or_else(runode_cli::bundled_skills);
-                SETUP_TARGETS.iter().map(|target| runode_cli::setup(*target, &home, &skills, fetched)).collect()
-            })
-            .await;
-        let installed = installed.map(|paths| paths.into_iter().flatten());
-        let (level, title, detail) = match installed {
-            Ok(paths) => (
-                PromptLevel::Info,
-                rust_i18n::t!("setup.done_title"),
-                rust_i18n::t!("setup.done_detail", paths = setup_paths(paths)),
-            ),
-            Err(err) => {
-                tracing::error!("failed to install the agent integration: {err:#}");
-                (PromptLevel::Critical, rust_i18n::t!("setup.failed_title"), format!("{err:#}").into())
-            }
-        };
-        let answer = window.update(cx, |_, window, cx| {
-            window.prompt(level, &title, Some(&detail), &[&*rust_i18n::t!("setup.ok")], cx)
-        });
-        if let Ok(answer) = answer {
-            let _ = answer.await;
-        }
-    })
-    .detach();
-}
-
-/// 提示框里一行一个文件，家目录底下的写成 `~/…`。
-fn setup_paths(paths: impl IntoIterator<Item = std::path::PathBuf>) -> String {
-    paths.into_iter().map(|path| display_dir(&path)).collect::<Vec<_>>().join("\n")
 }
 
 fn with_active_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window)) {

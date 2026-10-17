@@ -47,10 +47,11 @@ Every version is on [Releases](https://github.com/runode-dev/runode/releases). T
 
 ## Quick start
 
-Inside a Runode terminal, teach your agent how to use runode:
+Teach your agents how to use runode by installing its skill (works with Claude Code, Codex and other agents):
 
 ```sh
-runode setup claude    # or: runode setup codex
+npx skills add runode-dev/runode --skill runode -g
+npx skills update runode -g    # later, to get the latest version
 ```
 
 From then on the agent drives neighbouring terminals when it needs to. You can use it by hand as well:

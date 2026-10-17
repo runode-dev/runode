@@ -6,7 +6,7 @@ use runode_autostart::Kind;
 use runode_protocol::{Placement, todo::When};
 use runode_types::input::parse_keys;
 
-use crate::{SetupTarget, help, local_time::LocalTime, select::Selector};
+use crate::{help, local_time::LocalTime, select::Selector};
 
 /// 一条命令。
 #[derive(Clone, Debug, PartialEq)]
@@ -52,10 +52,6 @@ pub(crate) enum Command {
     },
     Focus {
         session: Option<Selector>,
-    },
-    Setup {
-        target: SetupTarget,
-        print: bool,
     },
     /// 给手机配对远程访问。`addrs` 是除了本机地址以外另外放进配对 URI 的地址，排在前面。
     RemotePair {
@@ -193,7 +189,6 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             "--wait" => flags.wait = true,
             "--paste" => flags.paste = true,
             "--new" => flags.new = true,
-            "--print" => flags.print = true,
             "--key" => {
                 let key = value(&mut rest, arg)?;
                 parse_keys(key).map_err(|err| format!("--key: {err}"))?;
@@ -362,16 +357,6 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             no_more(words, 1, name)?;
             Command::Focus { session: session(words.first())? }
         }
-        "setup" => {
-            no_more(words, 1, name)?;
-            let target = match words.first().map(String::as_str) {
-                Some("claude") => SetupTarget::Claude,
-                Some("codex") => SetupTarget::Codex,
-                Some(other) => return Err(format!("setup knows claude and codex, not {other}")),
-                None => return Err("setup needs claude or codex".into()),
-            };
-            Command::Setup { target, print: std::mem::take(&mut flags.print) }
-        }
         "remote" => {
             let (what, words) = words.split_first().ok_or("remote needs pair, devices or revoke")?;
             match what.as_str() {
@@ -515,7 +500,6 @@ struct Flags {
     wait: bool,
     paste: bool,
     new: bool,
-    print: bool,
     keys: Vec<String>,
     lines: Option<u32>,
     command: Option<u32>,
@@ -546,7 +530,6 @@ impl Flags {
             (self.wait, "--wait"),
             (self.paste, "--paste"),
             (self.new, "--new"),
-            (self.print, "--print"),
             (!self.keys.is_empty(), "--key"),
             (self.lines.is_some(), "--lines"),
             (self.command.is_some(), "--command"),
@@ -765,14 +748,6 @@ mod tests {
         assert!(parse("wait ab12 --for quiet soon").unwrap_err().contains("seconds"));
         assert!(parse("wait ab12 --for done --new").unwrap_err().contains("does not take --new"));
         assert!(parse("wait ab12 --lines 5").unwrap_err().contains("does not take --lines"));
-    }
-
-    #[test]
-    fn setup_targets() {
-        assert_eq!(parse("setup claude"), Ok(Command::Setup { target: SetupTarget::Claude, print: false }));
-        assert_eq!(parse("setup codex --print"), Ok(Command::Setup { target: SetupTarget::Codex, print: true }));
-        assert!(parse("setup").unwrap_err().contains("claude or codex"));
-        assert!(parse("setup vim").unwrap_err().contains("not vim"));
     }
 
     #[test]
