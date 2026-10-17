@@ -113,6 +113,7 @@ impl Staged {
 
     /// 再核对一次签名和版本号，和装着的 .app 对调，再删掉换下来的旧版本。在跑的进程照常跑完，下次
     /// 启动的是新版本。从下好到退出可能隔了几个小时，暂存目录又是用户写得了的，所以装上前再核对。
+    /// 这期间用户可能自己装了更新的版本，此刻装着的不比暂存的旧时不对调，删掉暂存目录就算办完。
     /// 没装上（签名不对、对调失败）时装着的那份不动，暂存目录照样删掉，下次重新下载。
     pub fn install(self) -> Result<(), Error> {
         self.install_checked(verify)
@@ -120,6 +121,16 @@ impl Staged {
 
     /// `install` 的实现。`verify` 由测试换掉：测试里签不出 Developer ID 签名，走不到对调。
     fn install_checked(self, verify: fn(&Path, &str, &str) -> Result<(), Error>) -> Result<(), Error> {
+        // 装着的那份读不出版本号时照旧换上：它多半已经坏了。
+        if let Ok(current) = bundle_version(&self.target)
+            && !crate::is_newer(&self.version, &current)
+        {
+            tracing::info!("Runode {current} is installed, not replacing it with {}", self.version);
+            if let Err(err) = fs::remove_dir_all(&self.dir) {
+                tracing::warn!("failed to remove {}: {err}", self.dir.display());
+            }
+            return Ok(());
+        }
         let installed = verify(&self.new_app, &self.team, &self.version)
             .and_then(|()| swap(&self.new_app, &self.target).map_err(|err| io(&self.target, err)));
         // 装上了时暂存目录里是换下来的旧版本，没装上时是用不上的新包；对调是原子的，失败时什么都没换。
@@ -145,15 +156,20 @@ fn bundle_of(exe: &Path) -> Option<PathBuf> {
 /// `app` 的签名完好、满足 `requirement(team)`，版本号是 `version`。
 fn verify(app: &Path, team: &str, version: &str) -> Result<(), Error> {
     run(&mut satisfies(app, &requirement(team))).map_err(|err| Error::Rejected(err.to_string()))?;
-    let plist = app.join("Contents/Info.plist");
-    let found = run(Command::new("/usr/bin/plutil")
-        .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
-        .arg(&plist))?;
-    let found = found.trim();
+    let found = bundle_version(app)?;
     if found != version {
         return Err(Error::Rejected(format!("the update is version {found}, the release says {version}")));
     }
     Ok(())
+}
+
+/// `app` 的 `Info.plist` 里的 `CFBundleShortVersionString`。
+fn bundle_version(app: &Path) -> Result<String, Error> {
+    let plist = app.join("Contents/Info.plist");
+    let found = run(Command::new("/usr/bin/plutil")
+        .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
+        .arg(&plist))?;
+    Ok(found.trim().to_owned())
 }
 
 /// 用 `team` 的 Developer ID Application 证书签的 `BUNDLE_ID`。两个 `exists` 是 Developer ID 证书
@@ -440,6 +456,30 @@ mod tests {
         assert!(matches!(installed, Err(Error::Io(_))), "{installed:?}");
         assert_eq!(fs::read_to_string(target.join("version")).unwrap(), "old");
         assert!(!dir.exists());
+    }
+
+    /// 装着的那份不比暂存的旧（用户自己装了同样或更新的版本）时不对调，暂存目录删掉；比暂存的旧时照常换上。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn installing_keeps_an_installed_app_that_is_not_older() {
+        for (installed, swapped) in [("0.3.0", false), ("0.2.0", false), ("0.1.9", true)] {
+            let scratch = Scratch::new(&format!("installed-{installed}"));
+            let target = ad_hoc_bundle(&scratch.0, installed);
+            let dir = scratch.0.join(".Runode.app.update");
+            let new_app = dir.join("Runode.app");
+            fs::create_dir_all(&new_app).unwrap();
+            fs::write(new_app.join("version"), "new").unwrap();
+            let staged = Staged {
+                dir: dir.clone(),
+                new_app,
+                target: target.clone(),
+                team: TEAM.into(),
+                version: "0.2.0".into(),
+            };
+            staged.install_checked(|_, _, _| Ok(())).unwrap();
+            assert_eq!(target.join("version").exists(), swapped, "installed {installed}");
+            assert!(!dir.exists());
+        }
     }
 
     /// 没签名的目录读不出 Team ID。
