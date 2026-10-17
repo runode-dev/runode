@@ -650,20 +650,22 @@ fn single(text: &str, ok: impl Fn(char) -> bool) -> Option<String> {
     chars.next().filter(|&c| ok(c) && chars.next().is_none()).map(String::from)
 }
 
-/// 展开 `text:` 里的转义：`\xHH`、`\u{...}`、`\n`、`\r`、`\t`、`\\`、`\"`、`\'`。
+/// 展开 `text:` 里的转义：`\xHH`、`\u{...}`、`\n`、`\r`、`\t`、`\\`、`\"`、`\'`。`\xHH` 是原始字节，
+/// 照 Ghostty 的写法连写几个拼出一个字符，拼不成合法的 UTF-8 时报错。
 fn unescape(text: &str) -> Result<String, String> {
-    let mut out = String::new();
+    let mut out = Vec::new();
+    let push = |out: &mut Vec<u8>, c: char| out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
     let mut chars = text.chars();
     while let Some(c) = chars.next() {
         if c != '\\' {
-            out.push(c);
+            push(&mut out, c);
             continue;
         }
         match chars.next() {
-            Some('n') => out.push('\n'),
-            Some('r') => out.push('\r'),
-            Some('t') => out.push('\t'),
-            Some(c @ ('\\' | '"' | '\'')) => out.push(c),
+            Some('n') => push(&mut out, '\n'),
+            Some('r') => push(&mut out, '\r'),
+            Some('t') => push(&mut out, '\t'),
+            Some(c @ ('\\' | '"' | '\'')) => push(&mut out, c),
             Some('x') => {
                 let hex: String = chars.by_ref().take(2).collect();
                 // `from_str_radix` 认一位数和 `+` 号，`\x1` 这种写了一半的要报错。
@@ -671,7 +673,7 @@ fn unescape(text: &str) -> Result<String, String> {
                     return Err("expected \\xHH".into());
                 }
                 let byte = u8::from_str_radix(&hex, 16).map_err(|_| "expected \\xHH")?;
-                out.push(char::from(byte));
+                out.push(byte);
             }
             Some('u') => {
                 let rest = chars.as_str();
@@ -680,13 +682,13 @@ fn unescape(text: &str) -> Result<String, String> {
                     .and_then(|b| u32::from_str_radix(b, 16).ok())
                     .and_then(char::from_u32)
                     .ok_or("expected \\u{HEX}")?;
-                out.push(code);
+                push(&mut out, code);
                 chars = rest[body.unwrap_or_default().len() + 2..].chars();
             }
             _ => return Err("unknown escape".into()),
         }
     }
-    Ok(out)
+    String::from_utf8(out).map_err(|_| "\\xHH bytes must form valid UTF-8, or use \\u{...}".into())
 }
 
 /// 默认绑定叠上配置里的 `keybind`，得到最终的 (触发键, 动作) 列表。同一个触发键只保留
@@ -719,5 +721,8 @@ mod tests {
         assert!(unescape(r"\q").is_err());
         assert!(unescape(r"\x1").is_err());
         assert!(unescape(r"\x+1").is_err());
+        assert_eq!(unescape(r"\xe2\x98\xba").unwrap(), "☺");
+        assert!(unescape(r"\x9b").is_err());
+        assert!(unescape(r"a\xe2").is_err());
     }
 }

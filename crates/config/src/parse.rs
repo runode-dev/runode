@@ -119,8 +119,12 @@ impl Config {
     pub fn watch_paths(&self) -> Vec<PathBuf> {
         let mut paths = ghostty_config_paths();
         paths.extend(config_path());
-        paths.extend(self.sources.iter().cloned());
-        paths.dedup();
+        // `sources` 里也记着上面这几个配置文件，不挨着，`dedup` 去不掉。
+        for path in &self.sources {
+            if !paths.contains(path) {
+                paths.push(path.clone());
+            }
+        }
         paths
     }
 
@@ -1038,5 +1042,15 @@ unknown-key = whatever
         assert_eq!(config.cursor_text, Some(TerminalColor::CellBackground));
         assert_eq!(config.selection_background, Some(TerminalColor::CellBackground));
         assert_eq!(config.selection_foreground, Some(TerminalColor::Rgb(Rgb(1, 2, 3))));
+    }
+
+    /// 加载时也把 Ghostty 和 runode 的配置文件记进了 `sources`：监视列表里它们只出现一次，顺序不变。
+    #[test]
+    fn watch_paths_list_each_file_once() {
+        let mut config = Config::default();
+        let base = config.watch_paths();
+        config.sources = base.iter().cloned().chain([PathBuf::from("/x/theme")]).collect();
+        let expected: Vec<_> = base.iter().cloned().chain([PathBuf::from("/x/theme")]).collect();
+        assert_eq!(config.watch_paths(), expected);
     }
 }

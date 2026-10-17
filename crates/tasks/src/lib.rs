@@ -168,10 +168,12 @@ fn make_prefix(dir: &Path, at: &Path) -> Option<String> {
     target.map(|target| format!("make -C {}", quote(target)))
 }
 
+/// 读整个文件；比 `MAX_FILE_BYTES` 大的返回 None，不截断着读。
 fn read_small(file: &Path) -> Option<String> {
     let mut text = String::new();
-    fs::File::open(file).ok()?.take(MAX_FILE_BYTES).read_to_string(&mut text).ok()?;
-    Some(text)
+    // 多读一个字节才知道超没超；不先看文件长度，读的过程中文件可能变大。
+    fs::File::open(file).ok()?.take(MAX_FILE_BYTES + 1).read_to_string(&mut text).ok()?;
+    (text.len() as u64 <= MAX_FILE_BYTES).then_some(text)
 }
 
 /// Makefile 里显式写出来的目标和它那一行 `##` 后面的说明，按先后、去重。不算以 `.` 开头的特殊目标
@@ -327,6 +329,22 @@ build: other
                 ("long".to_owned(), None),
             ]
         );
+    }
+
+    /// 正好到上限的文件照读，超过上限的整个不读，不截断着读。
+    #[test]
+    fn files_over_the_limit_are_not_read() {
+        let root = std::env::temp_dir().join(format!("runode-tasks-large-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let limit = MAX_FILE_BYTES as usize;
+        fs::write(root.join("fits"), "a".repeat(limit)).unwrap();
+        fs::write(root.join("over"), "a".repeat(limit + 1)).unwrap();
+        let fits = read_small(&root.join("fits"));
+        let over = read_small(&root.join("over"));
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(fits.map(|text| text.len()), Some(limit));
+        assert_eq!(over, None);
     }
 
     /// 请求的目录经过符号链接时，`make -C ..` 里的 `..` 由 make 从真实的目录算，到不了找到的
