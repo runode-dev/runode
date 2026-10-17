@@ -19,10 +19,11 @@ pub const MAX_TASKS: usize = 200;
 pub struct TaskSource {
     pub kind: TaskSourceKind,
     /// 文件的绝对路径。
+    #[serde(serialize_with = "crate::lossy_path::serialize")]
     pub file: PathBuf,
     /// `Custom` 的命令是给哪个项目目录的，也是它们跑的目录（不是请求的目录时，前端在这里开终端跑）；
     /// 别的种类为空，在请求的目录里跑。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", serialize_with = "crate::lossy_path::serialize_opt")]
     pub project: Option<PathBuf>,
     /// 按文件里的先后，最多 `MAX_TASKS` 条。
     pub tasks: Vec<TaskEntry>,

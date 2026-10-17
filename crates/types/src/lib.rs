@@ -9,6 +9,7 @@ pub mod color;
 pub mod frame;
 pub mod grid;
 pub mod input;
+pub mod lossy_path;
 pub mod pane;
 pub mod session;
 pub mod settings;

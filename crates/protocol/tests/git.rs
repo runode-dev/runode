@@ -192,3 +192,29 @@ fn replies() {
         }),
     );
 }
+
+/// 不是合法 UTF-8 的路径（`/tmp/\xff` 这种）照样编得出来，坏掉的字节换成 U+FFFD，整条状态不至于发不出去。
+#[cfg(unix)]
+#[test]
+fn non_utf8_paths_are_written_lossily() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+    let bad = |bytes: &[u8]| std::path::PathBuf::from(OsStr::from_bytes(bytes));
+    let status = GitStatus {
+        root: bad(b"/tmp/\xff"),
+        unstaged: vec![GitFile {
+            path: bad(b"a\xfe.txt"),
+            old_path: Some(bad(b"b\xfe.txt")),
+            status: GitFileStatus::Renamed,
+            added: 0,
+            removed: 0,
+            binary: false,
+            gitlink: false,
+        }],
+        ..GitStatus::default()
+    };
+    let json = serde_json::to_value(HostMsg::GitStatus { req: 1, id: ID, status: Some(status) }).unwrap();
+    assert_eq!(json["status"]["root"], "/tmp/\u{fffd}");
+    assert_eq!(json["status"]["unstaged"][0]["path"], "a\u{fffd}.txt");
+    assert_eq!(json["status"]["unstaged"][0]["old_path"], "b\u{fffd}.txt");
+}

@@ -534,6 +534,7 @@ pub enum HostMsg {
     /// 不分大小写排好，最多 `MAX_DIRS` 个；多出来的不给，`truncated` 为真。
     Dirs {
         req: u32,
+        #[serde(serialize_with = "runode_types::lossy_path::serialize")]
         path: PathBuf,
         dirs: Vec<String>,
         #[serde(default)]
@@ -543,6 +544,7 @@ pub enum HostMsg {
     /// 一样都没找到时为空。
     Tasks {
         req: u32,
+        #[serde(serialize_with = "runode_types::lossy_path::serialize")]
         dir: PathBuf,
         sources: Vec<TaskSource>,
     },
@@ -692,20 +694,26 @@ impl ShellReport {
 }
 
 /// `ShellReport::path` 的写法：合法 UTF-8 时是字符串，否则照 serde 给 `OsString` 的默认写法；两种都读。
-mod os_text {
-    use std::ffi::OsString;
+/// 交接里的路径也用它。
+pub(crate) mod os_text {
+    use std::ffi::{OsStr, OsString};
 
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub(super) fn serialize<S: Serializer>(value: &Option<OsString>, serializer: S) -> Result<S::Ok, S::Error> {
-        match value.as_deref().map(|os| os.to_str().ok_or(os)) {
+    pub(crate) fn serialize<P: AsRef<OsStr>, S: Serializer>(
+        value: &Option<P>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value.as_ref().map(|os| os.as_ref().to_str().ok_or(os.as_ref())) {
             Some(Ok(text)) => serializer.serialize_str(text),
             Some(Err(os)) => os.serialize(serializer),
             None => serializer.serialize_none(),
         }
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<OsString>, D::Error> {
+    pub(crate) fn deserialize<'de, T: From<OsString>, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<T>, D::Error> {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum Either {
@@ -713,8 +721,8 @@ mod os_text {
             Os(OsString),
         }
         Ok(Option::<Either>::deserialize(deserializer)?.map(|either| match either {
-            Either::Text(text) => text.into(),
-            Either::Os(os) => os,
+            Either::Text(text) => OsString::from(text).into(),
+            Either::Os(os) => os.into(),
         }))
     }
 }

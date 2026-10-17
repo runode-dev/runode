@@ -63,6 +63,7 @@ pub enum GitRequest {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitStatus {
     /// 仓库根目录，宿主那边的绝对路径。
+    #[serde(serialize_with = "runode_types::lossy_path::serialize")]
     pub root: PathBuf,
     /// 当前分支；分离头指针时为空。
     #[serde(default)]
@@ -106,9 +107,10 @@ pub enum GitOperation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitFile {
     /// 相对仓库根；删掉的文件是原来的路径。
+    #[serde(serialize_with = "runode_types::lossy_path::serialize")]
     pub path: PathBuf,
     /// 改名前的路径。
-    #[serde(default)]
+    #[serde(default, serialize_with = "runode_types::lossy_path::serialize_opt")]
     pub old_path: Option<PathBuf>,
     pub status: GitFileStatus,
     #[serde(default)]

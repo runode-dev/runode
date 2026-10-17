@@ -75,7 +75,7 @@ pub struct ShellNames {
 pub struct FinishedCommand {
     pub cmd: String,
     /// 命令在哪个目录里运行。
-    #[serde(default)]
+    #[serde(default, serialize_with = "crate::lossy_path::serialize_opt")]
     pub cwd: Option<PathBuf>,
     /// 退出码；shell 没报告时为空。
     #[serde(default)]

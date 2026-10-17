@@ -46,3 +46,17 @@ fn driver_tolerates_missing_and_newer_fields() {
     let json = serde_json::to_string(&Driver { by: None, action: DriveAction::ClearScreen, at_ms: 1 }).unwrap();
     assert_eq!(json, r#"{"by":null,"action":"clear_screen","at_ms":1}"#);
 }
+
+/// 不是合法 UTF-8 的目录照样编得出来，坏掉的字节换成 U+FFFD。
+#[cfg(unix)]
+#[test]
+fn non_utf8_cwd_still_encodes() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::PathBuf};
+
+    let cwd = PathBuf::from(OsStr::from_bytes(b"/tmp/\xff"));
+    let meta = SessionMeta { cwd: Some(cwd.clone()), prompt_cwd: Some(cwd), ..SessionMeta::default() };
+    let json = serde_json::to_string(&meta).unwrap();
+    let back: SessionMeta = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.cwd, Some(PathBuf::from("/tmp/\u{fffd}")));
+    assert_eq!(back.prompt_cwd, back.cwd);
+}

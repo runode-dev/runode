@@ -19,8 +19,10 @@ pub struct SessionMeta {
     /// 前台 agent 和它的状态；不是 agent 在前台时为 `None`。
     pub agent: Option<Agent>,
     /// shell 当前所在的目录。
+    #[serde(serialize_with = "crate::lossy_path::serialize_opt")]
     pub cwd: Option<PathBuf>,
     /// shell 最近一次等着输入时所在的目录；还没等过输入时为 `None`。插件管理器在提示符出来后可能临时切进别的目录，所以和 `cwd` 分开。
+    #[serde(serialize_with = "crate::lossy_path::serialize_opt")]
     pub prompt_cwd: Option<PathBuf>,
     /// 前台是不是 shell 自己，即没有命令在运行。
     pub foreground_is_shell: bool,

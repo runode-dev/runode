@@ -88,6 +88,73 @@ fn parts_round_trip() {
     }
 }
 
+/// 路径不是 UTF-8 的会话照样交得出去：交接自己的路径原样交给新宿主，`meta` 里的有损地写。
+#[test]
+fn non_utf8_paths_are_handed_over() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _, path::PathBuf};
+
+    let odd = PathBuf::from(OsStr::from_bytes(b"/tmp/\xff"));
+    let HandoffPart::Session {
+        id,
+        started,
+        pid,
+        size,
+        report_token,
+        settings,
+        shell,
+        mut meta,
+        prompt_reported,
+        running,
+        pending_command,
+        redactor,
+        ..
+    } = session(None)
+    else {
+        unreachable!()
+    };
+    meta.prompt_cwd = Some(odd.clone());
+    let part = HandoffPart::Session {
+        id,
+        started,
+        pid,
+        size,
+        report_token,
+        settings,
+        shell,
+        start_dir: Some(odd.clone()),
+        meta,
+        prompt_reported,
+        running: running.map(|running| RunningCommand { cwd: Some(odd.clone()), ..running }),
+        pending_shell_cwd: Some(odd.clone()),
+        pending_command,
+        redactor,
+    };
+    let (decoded, _) = decode_part(&encode_part(&part, &[b"", b""]).unwrap()).unwrap();
+    let HandoffPart::Session { start_dir, running, pending_shell_cwd, meta, .. } = decoded else { unreachable!() };
+    assert_eq!((start_dir.as_ref(), pending_shell_cwd.as_ref()), (Some(&odd), Some(&odd)));
+    assert_eq!(running.unwrap().cwd.as_ref(), Some(&odd));
+    assert_eq!(meta.prompt_cwd, Some(PathBuf::from("/tmp/\u{fffd}")));
+
+    let HandoffPart::Host {
+        format, build, snapshot_format, sessions, theme, record_history, clipboard, layout, ..
+    } = host()
+    else {
+        unreachable!()
+    };
+    let part = HandoffPart::Host {
+        format,
+        build,
+        snapshot_format,
+        sessions,
+        theme,
+        record_history,
+        socket: odd.join("host.sock"),
+        clipboard,
+        layout,
+    };
+    assert_eq!(decode_part(&encode_part(&part, &[]).unwrap()).unwrap().0, part);
+}
+
 /// `pending_command` 的三种状态在 JSON 里各不相同：没有字段、`null`、字符串。
 #[test]
 fn pending_command_keeps_all_three_states() {
@@ -209,26 +276,6 @@ fn an_unreadable_layout_reads_as_none() {
         layout.clear();
     }
     assert_eq!(part, expected);
-}
-
-/// JSON 只放得下 UTF-8 的路径，放不下时编码报错而不是 panic。
-#[cfg(unix)]
-#[test]
-fn non_utf8_paths_fail_to_encode() {
-    use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _, path::PathBuf};
-
-    let part = HandoffPart::Host {
-        format: HANDOFF_FORMAT,
-        build: BuildId::default(),
-        snapshot_format: 1,
-        sessions: 0,
-        theme: None,
-        record_history: true,
-        socket: PathBuf::from(OsStr::from_bytes(b"/tmp/\xff.sock")),
-        clipboard: ClipboardAccess::default(),
-        layout: Vec::new(),
-    };
-    assert!(matches!(encode_part(&part, &[]), Err(HandoffPartError::Json(_))));
 }
 
 /// 交接的消息可能进日志，`Debug` 不打出报告口令。

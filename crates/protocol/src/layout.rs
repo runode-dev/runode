@@ -29,7 +29,7 @@ pub struct WorkspaceLayout {
     #[serde(default)]
     pub name: Option<String>,
     /// 工作区的目录。
-    #[serde(default)]
+    #[serde(default, serialize_with = "runode_types::lossy_path::serialize_opt")]
     pub dir: Option<PathBuf>,
     /// 是窗口当前显示的工作区。
     #[serde(default)]

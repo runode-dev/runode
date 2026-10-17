@@ -56,6 +56,7 @@ pub enum HandoffPart {
         /// 旧宿主记不记命令历史，见 `ClientMsg::SetOptions`；现在的宿主不看它，照旧写 false。
         record_history: bool,
         /// 监听的 socket 的路径。描述符传过去后路径不变，shell 里的 `RUNODE_SOCKET` 照样有效。
+        #[serde(with = "os_path::required")]
         socket: PathBuf,
         /// 会话里的程序读写剪贴板的规矩，见 `ClientMsg::SetOptions`。旧宿主没有这一项，新宿主按默认值读，
         /// 等桌面重连后补发。
@@ -87,7 +88,7 @@ pub enum HandoffPart {
         #[serde(default)]
         shell: Option<String>,
         /// 会话开在哪个目录。
-        #[serde(default)]
+        #[serde(default, with = "crate::message::os_text")]
         start_dir: Option<PathBuf>,
         /// 会话对外公布的状态。装箱只是为了别让这种消息比另外几种大太多，JSON 里一样。
         #[serde(default)]
@@ -99,7 +100,7 @@ pub enum HandoffPart {
         #[serde(default)]
         running: Option<RunningCommand>,
         /// shell 集成在这次提示符前报告的目录，还没被下一次等输入取走。
-        #[serde(default)]
+        #[serde(default, with = "crate::message::os_text")]
         pending_shell_cwd: Option<PathBuf>,
         /// 收到了、还没被下一个 OSC 133;C 取走的 `command` 报告：外层为空是没收到，里面为空是报告
         /// 没带命令原文。JSON 里没有这个字段是外层为空，`null` 是里面为空。
@@ -145,7 +146,7 @@ impl HandoffPart {
 pub struct RunningCommand {
     pub cmd: String,
     /// 命令在哪个目录里运行。
-    #[serde(default)]
+    #[serde(default, with = "crate::message::os_text")]
     pub cwd: Option<PathBuf>,
     /// 开始运行的时刻，Unix 秒。
     pub ts: u64,
@@ -216,8 +217,28 @@ impl std::error::Error for HandoffPartError {
     }
 }
 
-/// 把一条交接消息编成描述符消息的数据：头连同 `blocks` 原样拼在后面。`part` 里的路径不是 UTF-8
-/// 时编不成 JSON，返回错误。
+/// 交接里的路径照 `ShellReport::path` 的写法（`os_text`）：不是 UTF-8 时写成一串字节，原样交给新宿主，
+/// 也不让整条消息编不成。合法 UTF-8 时和普通的字符串一样，旧版本照样读。`meta` 里的路径按发给前端的
+/// 写法有损地写，shell 下次报告目录时就又对了；`layout` 里工作区的目录也是有损的，要等桌面连上来报
+/// 新的布局才对。
+mod os_path {
+    /// `os_text` 用在一定有的路径上。
+    pub(super) mod required {
+        use std::path::{Path, PathBuf};
+
+        use serde::{Deserializer, Serializer, de::Error as _};
+
+        pub(in super::super) fn serialize<S: Serializer>(value: &Path, serializer: S) -> Result<S::Ok, S::Error> {
+            crate::message::os_text::serialize(&Some(value), serializer)
+        }
+
+        pub(in super::super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<PathBuf, D::Error> {
+            crate::message::os_text::deserialize(deserializer)?.ok_or_else(|| D::Error::custom("the path is missing"))
+        }
+    }
+}
+
+/// 把一条交接消息编成描述符消息的数据：头连同 `blocks` 原样拼在后面。
 pub fn encode_part(part: &HandoffPart, blocks: &[&[u8]]) -> Result<Vec<u8>, HandoffPartError> {
     let header = Header { part, blocks: blocks.iter().map(|block| block.len() as u64).collect() };
     let json = serde_json::to_vec(&header).map_err(HandoffPartError::Json)?;

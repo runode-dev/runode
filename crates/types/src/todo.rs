@@ -21,6 +21,7 @@ pub struct TodoSpec {
     #[serde(default)]
     pub prompt: String,
     /// 在哪个目录里做，绝对路径。
+    #[serde(serialize_with = "crate::lossy_path::serialize")]
     pub dir: PathBuf,
     /// 跑哪个 agent：提示词前面的那段命令，比如 `claude`、`codex --full-auto`。
     #[serde(default = "default_agent")]
@@ -59,7 +60,7 @@ pub struct Todo {
     #[serde(default)]
     pub session: Option<SessionId>,
     /// 给它新开的工作树的根目录和分支；没开时为空。
-    #[serde(default)]
+    #[serde(default, serialize_with = "crate::lossy_path::serialize_opt")]
     pub worktree_dir: Option<PathBuf>,
     #[serde(default)]
     pub branch: Option<String>,
