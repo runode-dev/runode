@@ -1,6 +1,6 @@
 //! 按 shell 集成标出的提示符读某条命令的输出（`read --command`）：先是手写的理想序列，后面
 //! 是真的 bash、zsh、fish、elvish、nushell 加载仓库里的集成脚本发出的序列。系统里没有的 shell
-//! 不测，仓库的 nix 环境（`nix shell`）都给。
+//! 不测。
 
 mod common;
 
@@ -173,7 +173,7 @@ fn integration_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("shell-integration")
 }
 
-/// 找 `shell`：先照 PATH（`nix shell` 给的在这里），再看 `/bin/`，跳过不能执行的同名文件。都没有时为 `None`。
+/// 找 `shell`：先照 PATH（自己装的新版在这里，`/bin/bash` 还是 3.2），再看 `/bin/`，跳过不能执行的同名文件。都没有时为 `None`。
 fn find_shell(shell: &str) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt as _;
     let path = std::env::var_os("PATH").unwrap_or_default();
