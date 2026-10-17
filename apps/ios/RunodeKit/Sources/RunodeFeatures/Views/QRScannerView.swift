@@ -38,7 +38,11 @@
             }
 
             func start(_ scanner: DataScannerViewController) {
-                guard DataScannerViewController.isSupported else { return report(.unsupported) }
+                // 正在建视图时不能改页面的状态：下一轮再报。
+                guard DataScannerViewController.isSupported else {
+                    Task { report(.unsupported) }
+                    return
+                }
                 Task { [weak scanner] in
                     // 头一次用时先问相机权限，问过了直接得到结果。
                     guard await AVCaptureDevice.requestAccess(for: .video) else { return report(.cameraRestricted) }

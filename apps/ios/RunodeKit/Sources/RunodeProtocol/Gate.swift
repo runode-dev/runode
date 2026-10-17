@@ -15,7 +15,7 @@ public enum GateRejection: Hashable, Sendable, Codable {
     /// 配对口令不对、过期或已经用过。
     case pairingInvalid
     case rateLimited
-    /// 电脑上关了远程访问。
+    /// 电脑上关了远程访问，或者电脑那边一时办不了（读不了设备表、读写不了口令文件）。
     case disabled
     case unknown(String)
 

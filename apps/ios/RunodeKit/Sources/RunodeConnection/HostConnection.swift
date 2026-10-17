@@ -4,8 +4,8 @@ import Synchronization
 
 /// 断线重连等多久：第 n 次连续失败后等 `base * 2^(n-1)`，最多 `maximum`；用户没在看的电脑
 /// （`HostLink.setFocused`）最多 `idleMaximum`。电脑离线（连不上、没开远程访问）时不按这个退避
-/// 一遍遍试，等它在局域网里重新公布 Bonjour 服务再连，兜底每 `offlineRetry` 探一次（不在局域网里的电脑
-/// 没有 Bonjour 可等）。
+/// 一遍遍试，等它在局域网里重新公布 Bonjour 服务、或者本机网络恢复或变化时再连，兜底每 `offlineRetry`
+/// 探一次（经记着的地址连的电脑没有 Bonjour 可等，网络恢复、VPN 连好时要靠后者）。
 public struct ReconnectPolicy: Hashable, Sendable {
     public var base: Duration
     public var maximum: Duration
@@ -39,6 +39,8 @@ public actor HostConnection: HostLink {
     private var identity: ClientIdentity
     private let policy: ReconnectPolicy
     private let open: TransportOpener
+    /// 电脑离线时除了等 Bonjour，也等本机网络恢复或变化，见 `awaitNetworkChange`。
+    private let networkChange: @Sendable () async -> Void
 
     private var subscribers: [Int: Subscriber] = [:]
     private var nextSubscriber = 0
@@ -73,7 +75,8 @@ public actor HostConnection: HostLink {
         discovery: any HostDiscovery, identity: ClientIdentity, policy: ReconnectPolicy = ReconnectPolicy(),
         open: @escaping TransportOpener = { target, fingerprint in
             try await TLSChannel.open(to: target, fingerprint: fingerprint)
-        }
+        },
+        networkChange: @escaping @Sendable () async -> Void = awaitNetworkChange
     ) {
         self.machine = machine
         self.keyStore = keyStore
@@ -82,6 +85,7 @@ public actor HostConnection: HostLink {
         self.identity = identity
         self.policy = policy
         self.open = open
+        self.networkChange = networkChange
         (outgoing, outbox) = AsyncStream.makeStream(of: Outgoing.self)
     }
 
@@ -261,17 +265,23 @@ public actor HostConnection: HostLink {
             }
             guard wanted, !Task.isCancelled else { break }
             let delay = policy.delay(afterFailures: failures, focused: focused.withLock { $0 })
-            // 电脑离线时不一遍遍试：退避过后等它在局域网里重新公布服务，兜底到 `offlineRetry` 再探一次。
+            // 电脑离线时不一遍遍试：退避过后等它在局域网里重新公布服务，本机网络恢复或变化时也再试（但离上次失败
+            // 不短于退避：换接口、连 VPN 时路径会接连变好几次，不能每变一次都连一回），兜底到 `offlineRetry` 再探一次。
             // 用户点重试、回到这台电脑的页面（`focusGained`）照样马上试。
             let retryAfter = offline ? max(delay, policy.offlineRetry) : delay
             setState(
                 .waiting(reason: reason, retryAt: .now + TimeInterval(retryAfter.components.seconds), offline: offline))
-            let backoff = Task { [discovery, fingerprint = machine.fingerprint] in
+            let earliest = ContinuousClock.now + delay
+            let backoff = Task { [discovery, networkChange, fingerprint = machine.fingerprint] in
                 guard offline else { return try await Task.sleep(for: delay) }
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask {
                         try await Task.sleep(for: delay)
                         await discovery.awaitPresence(fingerprint)
+                    }
+                    group.addTask {
+                        await networkChange()
+                        try await Task.sleep(until: earliest, clock: .continuous)
                     }
                     group.addTask { try await Task.sleep(for: retryAfter) }
                     defer { group.cancelAll() }

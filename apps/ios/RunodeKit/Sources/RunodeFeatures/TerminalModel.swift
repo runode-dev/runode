@@ -27,7 +27,7 @@ public enum SizePreference: String, Hashable, Sendable, CaseIterable, Codable {
 public enum SizeOwnerHint: Hashable, Sendable {
     /// 没有：电脑上没有窗口在显示它（手机新开的、后台会话）。
     case none
-    /// 有，比如电脑上的窗口。
+    /// 有，比如电脑上的窗口。列表的记录可能已经过时，连上后以宿主报的 `SizeOwner` 为准，等不到就当作没有。
     case someone
     /// 不知道（不是从列表打开的）：连上后等宿主的 `SizeOwner`，等不到就当作没有。
     case unknown
@@ -35,8 +35,8 @@ public enum SizeOwnerHint: Hashable, Sendable {
 
 /// 终端页的视图模型：连上一个会话、持有手机这边的那份 VT、把用户的输入编码后发出去。
 ///
-/// 尺寸：自动模式下，会话没有尺寸 owner 时（`SizeOwnerHint.none`，或连上后宿主没报 `SizeOwner`）
-/// 按手机屏幕适配，带尺寸 `Attach` 或发 `Resize` 加 `Focus` 接管；有电脑在决定尺寸时不带尺寸
+/// 尺寸：自动模式下，会话没有尺寸 owner 时（`SizeOwnerHint.none`，或连上后宿主没报 `SizeOwner`，
+/// 列表说有 owner 也一样，列表的记录可能已经过时）按手机屏幕适配，带尺寸 `Attach` 或发 `Resize` 加 `Focus` 接管；有电脑在决定尺寸时不带尺寸
 /// `Attach`，跟随电脑，视图按可读的最小字号缩放、横向平移。owner 变了（`SizeOwner`）自动模式跟着
 /// 重新判断；用户手动选过以后以用户为准。从适配换成跟随时 `Detach` 后不带尺寸重新 `Attach`，丢掉
 /// 宿主记着的这条连接请求过的尺寸：宿主对没请求过尺寸的连接，打字不算交互，不会把尺寸抢回来。
@@ -123,7 +123,7 @@ public final class TerminalModel {
     static let keepAwakeInterval: Duration = .milliseconds(200)
 
     /// `onOpen`、`onClose` 告诉会话列表这个会话正被终端页看着（列表就不再给它发只看状态的 `Attach`，
-    /// 免得换掉这里的订阅）；关掉时由列表改回只看状态。`ownerProbeDelay` 是 `ownerHint` 为 `unknown`
+    /// 免得换掉这里的订阅）；关掉时由列表改回只看状态。`ownerProbeDelay` 是 `ownerHint` 不为 `none`
     /// 时，重放完以后等宿主报 `SizeOwner` 的时间，等不到就当作没有 owner。`linkState` 是这台电脑的连接
     /// 现在的状态，订阅到第一个事件之前标题下面就照它显示，切分屏时不先闪一下「未连接」。
     public init(
@@ -524,10 +524,10 @@ public final class TerminalModel {
         }
     }
 
-    /// 不知道有没有 owner 时（不是从列表打开的，或者断线重连了）：重放完以后宿主若有 owner 会马上报
-    /// `SizeOwner`；等一会儿没等到就当作没有，自动模式改成适配手机。
+    /// 列表说有 owner 或不知道有没有、或者断线重连了：重放完以后宿主若有 owner 会马上报 `SizeOwner`；
+    /// 等一会儿没等到就当作没有，自动模式改成适配手机。
     private func probeOwnerIfNeeded() {
-        guard ownerHint == .unknown || rejoin == .reconnect, sizePreference == .automatic, sizeOwnership == .unknown else { return }
+        guard ownerHint != .none || rejoin == .reconnect, sizePreference == .automatic, sizeOwnership == .unknown else { return }
         let delay = ownerProbeDelay
         Task { [weak self] in
             try? await Task.sleep(for: delay)

@@ -251,6 +251,68 @@ import Testing
         await link.stop()
     }
 
+    /// 经记着的地址连的电脑离线（没有 Bonjour 可等）：本机网络恢复或变化时马上再试，不等兜底的重试。
+    @Test func anOfflineHostIsRetriedWhenTheNetworkChanges() async throws {
+        let network = NetworkSignal()
+        let link = HostConnection(
+            machine: machine, keyStore: keys, machines: store, discovery: NoDiscovery(),
+            identity: ClientIdentity(build: "ios-test", deviceName: "测试 iPhone"),
+            policy: ReconnectPolicy(base: .milliseconds(10), maximum: .milliseconds(20), offlineRetry: .seconds(30)),
+            open: supply.opener, networkChange: { await network.wait() })
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        while let event = await events.next() {
+            if case .state(.waiting(_, let retryAt, let offline)) = event, retryAt.timeIntervalSinceNow > 10 {
+                #expect(offline)
+                break
+            }
+        }
+        let attempts = supply.requestedTargets.count
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(supply.requestedTargets.count == attempts)
+        let transport = FakeTransport()
+        supply.add(transport)
+        let started = ContinuousClock.now
+        await network.change()
+        var host = FakeHost(transport)
+        _ = try await admit(&host)
+        #expect(await waitReady(&events) != nil)
+        #expect(ContinuousClock.now - started < .seconds(2))
+        await link.stop()
+    }
+
+    /// 网络接连变化（换接口、连 VPN）时也守着退避：离上次失败不到退避的时长不再试，到了才试。
+    @Test func networkChangesDoNotBypassTheBackoff() async throws {
+        let network = NetworkSignal()
+        let link = HostConnection(
+            machine: machine, keyStore: keys, machines: store, discovery: NoDiscovery(),
+            identity: ClientIdentity(build: "ios-test", deviceName: "测试 iPhone"),
+            policy: ReconnectPolicy(base: .milliseconds(600), maximum: .milliseconds(600), offlineRetry: .seconds(30)),
+            open: supply.opener, networkChange: { await network.wait() })
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        while let event = await events.next() {
+            if case .state(.waiting(_, _, let offline)) = event {
+                #expect(offline)
+                break
+            }
+        }
+        let attempts = supply.requestedTargets.count
+        try await Task.sleep(for: .milliseconds(20))
+        let started = ContinuousClock.now
+        await network.change()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(supply.requestedTargets.count == attempts)
+        let transport = FakeTransport()
+        supply.add(transport)
+        var host = FakeHost(transport)
+        _ = try await admit(&host)
+        #expect(await waitReady(&events) != nil)
+        // 是那次网络变化在退避过后叫醒的，不是兜底的重试。
+        #expect(ContinuousClock.now - started < .seconds(2))
+        await link.stop()
+    }
+
     @Test func triesTheNextAddressWhenOneFails() async throws {
         let transport = FakeTransport()
         // 第一个地址打不开（没有准备连接），第二个连上。
@@ -466,6 +528,22 @@ import Testing
 }
 
 /// 找不到电脑，直到测试调 `appear`：那之后 `awaitPresence` 立刻返回。
+/// 测试代替本机网络监听：`change` 叫醒正在等的。
+actor NetworkSignal {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func change() {
+        for waiter in waiters {
+            waiter.resume()
+        }
+        waiters.removeAll()
+    }
+}
+
 actor SignalDiscovery: HostDiscovery {
     private var present = false
     private var waiters: [CheckedContinuation<Void, Never>] = []

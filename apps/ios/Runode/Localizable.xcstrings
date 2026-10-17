@@ -4299,6 +4299,29 @@
         }
       }
     },
+    "暂存以后它们算作已解决，里面的冲突标记会跟着提交进去。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Staging marks them as resolved, and any conflict markers left in them will be committed."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂存以后它们算作已解决，里面的冲突标记会跟着提交进去。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暫存以後它們算作已解決，裡面的衝突標記會跟著提交進去。"
+          }
+        }
+      }
+    },
     "有冲突" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5288,25 +5311,25 @@
         }
       }
     },
-    "电脑上没有打开远程访问" : {
+    "电脑上没有打开远程访问，或者电脑那边暂时出了问题" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Remote access isn't turned on on the Mac"
+            "value" : "Remote access isn't turned on on the Mac, or the Mac is having trouble right now"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "电脑上没有打开远程访问"
+            "value" : "电脑上没有打开远程访问，或者电脑那边暂时出了问题"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "電腦上沒有開啟遠端存取"
+            "value" : "電腦上沒有開啟遠端存取，或者電腦那邊暫時出了問題"
           }
         }
       }
@@ -6276,6 +6299,29 @@
         }
       }
     },
+    "读不了改动" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't Read Changes"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读不了改动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀不了變更"
+          }
+        }
+      }
+    },
     "读不了这个文件的改动：%@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6479,6 +6525,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "執行配對命令"
+          }
+        }
+      }
+    },
+    "还有 %lld 个文件有冲突，也一起暂存吗？" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Stage %lld file that still has conflicts?"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Stage %lld files that still have conflicts?"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还有 %lld 个文件有冲突，也一起暂存吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還有 %lld 個檔案有衝突，也一起暫存嗎？"
           }
         }
       }

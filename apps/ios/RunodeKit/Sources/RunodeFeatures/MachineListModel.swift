@@ -86,8 +86,9 @@ public final class MachineListModel {
     public func delete(_ id: UUID) async {
         await willDelete(id)
         do {
-            try keyStore.deleteKey(for: id)
+            // 记录删掉了才删私钥：删记录失败时电脑照样能用；删私钥失败只留下一把用不上的钥匙。
             try await store.remove(id: id)
+            try? keyStore.deleteKey(for: id)
         } catch {
             errorMessage = String(localized: "删不掉这台电脑：\(error.localizedDescription)")
         }

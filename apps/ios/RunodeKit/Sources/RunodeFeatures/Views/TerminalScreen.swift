@@ -322,6 +322,8 @@
                     .padding(.vertical, 4)
                 }
                 .onAppear { proxy.scrollTo(current, anchor: .center) }
+                // 切分屏时页面不重建，只换了 `current`。
+                .onChange(of: current) { _, id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
             }
         }
 

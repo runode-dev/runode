@@ -51,7 +51,8 @@
                     SessionListView(
                         model: model,
                         onOpen: { session in app.openTerminal(machine: id, session: session) },
-                        onOpenGit: { session in app.openGit(machine: id, session: session) })
+                        onOpenGit: { session in app.openGit(machine: id, session: session) },
+                        fontSize: app.settings.preferences.fontSize)
                 } else {
                     ContentUnavailableView("找不到这台电脑", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
                 }

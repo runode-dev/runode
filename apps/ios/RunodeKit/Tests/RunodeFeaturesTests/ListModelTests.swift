@@ -546,6 +546,21 @@ extension LinkState {
         #expect(try keys.key(for: old.id) != nil)
         #expect(try keys.key(for: new.id) == nil)
     }
+
+    /// 删不掉记录：电脑和私钥都留着，照样能连，错误交给设置页。
+    @Test func aFailedDeleteKeepsTheMachine() async throws {
+        let store = UnwritableMachineStore()
+        let keys = MemoryDeviceKeyStore()
+        let model = MachineListModel(store: store, keyStore: keys)
+        let machine = machineRecord()
+        await store.memory.upsert(machine)
+        try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: machine.id)
+        await model.load()
+        await model.delete(machine.id)
+        #expect(model.machines.map(\.id) == [machine.id])
+        #expect(try keys.key(for: machine.id) != nil)
+        #expect(model.errorMessage?.hasPrefix("删不掉这台电脑") == true)
+    }
 }
 
 /// 读得出、写不进的电脑列表。

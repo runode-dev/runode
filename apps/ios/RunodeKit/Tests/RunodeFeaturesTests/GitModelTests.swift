@@ -156,6 +156,52 @@ import Testing
         #expect(model.diffTarget == other)
     }
 
+    /// 读 diff 出错：错误归 diff 页显示，不当成没有改动；重读时清掉。
+    @Test func diffFailure() async throws {
+        let model = try await connectedModel(status(unstaged: [changed]))
+        await model.openDiff(GitDiffTarget(path: "src/a.rs", staged: false))
+        let req = try lastGit(.diff(path: "src/a.rs", staged: false))
+        model.handle(.error(req: req, id: sessionA, message: "坏了"))
+        #expect(model.diffError != nil)
+        #expect(!model.isLoadingDiff)
+        #expect(model.diff == nil)
+        #expect(model.errorMessage == nil)
+        await model.refresh()
+        #expect(model.diffError == nil)
+        #expect(model.isLoadingDiff)
+    }
+
+    /// 旧 diff 请求的错误不落到新打开的 diff 上，新的那个还在读。
+    @Test func staleDiffFailureIsIgnored() async throws {
+        let model = try await connectedModel(status(unstaged: [changed]))
+        await model.openDiff(GitDiffTarget(path: "src/a.rs", staged: false))
+        let first = try lastGit(.diff(path: "src/a.rs", staged: false))
+        await model.openDiff(GitDiffTarget(path: "src/a.rs", staged: true))
+        model.handle(.error(req: first, id: sessionA, message: "坏了"))
+        #expect(model.diffError == nil)
+        #expect(model.isLoadingDiff)
+    }
+
+    /// 数未暂存段里有冲突的文件，"全部暂存"据此先请用户确认。
+    @Test func countsUnstagedConflicts() async throws {
+        let conflicted = GitFile(path: "src/b.rs", status: .conflicted)
+        let resolved = try await connectedModel(status(staged: [conflicted], unstaged: [changed]))
+        #expect(resolved.unstagedConflicts == 0)
+        let other = GitFile(path: "src/c.rs", status: .conflicted)
+        let model = try await connectedModel(status(unstaged: [changed, conflicted, other]))
+        #expect(model.unstagedConflicts == 2)
+    }
+
+    /// 断着线打开 diff：不发请求，也不在读；diff 页据 `isReady` 显示没连上，不说没有改动。
+    @Test func diffWhileDisconnected() async throws {
+        let model = try await connectedModel(status(unstaged: [changed]))
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        await model.openDiff(GitDiffTarget(path: "src/a.rs", staged: false))
+        #expect(link.sent.isEmpty)
+        #expect(!model.isLoadingDiff)
+        #expect(!model.isReady)
+    }
+
     @Test func branchesAndCheckout() async throws {
         let model = try await connectedModel(status())
         await model.loadBranches()

@@ -121,7 +121,8 @@ import Testing
 
     let fit = GridSize(cols: 45, rows: 30, cellWidthPx: 24, cellHeightPx: 48)
 
-    /// 有电脑在显示的会话（列表里有尺寸 owner）：不带尺寸连上，跟随电脑。
+    /// 有电脑在显示的会话（列表里有尺寸 owner）：不带尺寸连上，跟随电脑。宿主有 owner 时重放完会补发
+    /// `SizeOwner`，这里照样补上，免得等不到它的探测把页面改成适配手机。
     func followingModel() -> TerminalModel {
         let model = TerminalModel(sessionId: sessionA, title: "zsh", link: link, ownerHint: .someone, onClose: { _ in })
         model.attachDisplay(display)
@@ -129,6 +130,7 @@ import Testing
         model.handle(.ready(generation: 1))
         model.handle(attached(channel: 5))
         model.handle(.message(.snapshotEnd(id: sessionA)))
+        model.handle(.message(.sizeOwner(id: sessionA, mine: false, owner: "Ethan 的 MacBook")))
         return model
     }
 
@@ -176,6 +178,23 @@ import Testing
         #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
         model.handle(attached(channel: 5))
         model.handle(.message(.snapshotEnd(id: sessionA)))
+        #expect(await eventually { model.fitsPhone })
+        #expect(link.sent.suffix(2) == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
+    }
+
+    /// 列表说有 owner（记录已经过时，比如手机自己刚关掉这个会话的页面），宿主却没报 `SizeOwner`：等一会儿
+    /// 改成适配手机。
+    @Test func aStaleOwnerHintFitsThePhone() async {
+        let model = TerminalModel(
+            sessionId: sessionA, title: "zsh", link: link, ownerHint: .someone, ownerProbeDelay: .milliseconds(10),
+            onClose: { _ in })
+        model.attachDisplay(display)
+        model.updateFitSize(fit)
+        model.handle(.ready(generation: 1))
+        #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
+        model.handle(attached(channel: 5))
+        model.handle(.message(.snapshotEnd(id: sessionA)))
+        #expect(!model.fitsPhone)
         #expect(await eventually { model.fitsPhone })
         #expect(link.sent.suffix(2) == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
     }
@@ -338,7 +357,8 @@ import Testing
         link.clearSent()
         model.handle(.message(.error(req: nil, id: sessionA, message: "the connection is backed up; read first")))
         #expect(link.sent.isEmpty)
-        try await Task.sleep(for: .milliseconds(300))
+        // 别的测试同时占着主线程时重试会晚到：等到它发出来，不按固定的时间看。
+        #expect(await eventually { !link.sent.isEmpty })
         #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
     }
 

@@ -180,6 +180,7 @@
 
         private var actionSection: some View {
             let spawnable = app.spawnableLists
+            let targets = spawnTargets
             return Section {
                 ListSectionHeader(title: String(localized: "快捷操作"))
                 HStack(spacing: 10) {
@@ -187,7 +188,6 @@
                         app.startPairing()
                     }
                     ActionTile(title: String(localized: "新开会话"), systemImage: "plus", busy: spawnable.contains(where: \.isSpawning)) {
-                        let targets = spawnTargets
                         if targets.count == 1, let target = targets.first {
                             spawn(at: target)
                         } else {
@@ -196,10 +196,10 @@
                     }
                     .disabled(spawnable.isEmpty)
                     .confirmationDialog(
-                        spawnTargets.contains { $0.section != nil } ? Text("在哪里新开终端？") : Text("在哪台电脑上新开终端？"),
+                        targets.contains { $0.section != nil } ? Text("在哪里新开终端？") : Text("在哪台电脑上新开终端？"),
                         isPresented: $choosingSpawnTarget, titleVisibility: .visible
                     ) {
-                        ForEach(spawnTargets) { target in
+                        ForEach(targets) { target in
                             Button(target.title) { spawn(at: target) }
                         }
                     }
@@ -261,8 +261,13 @@
             return app.machineLists.first { $0.errorMessage != nil }
         }
 
+        /// 电脑列表出的错；设置页盖着首页时留给设置页自己弹。
+        private var machineError: String? {
+            app.showingSettings ? nil : machines.errorMessage
+        }
+
         private var errorMessage: String? {
-            machines.errorMessage ?? spawnErrorList?.errorMessage
+            machineError ?? spawnErrorList?.errorMessage
         }
 
         private var showsError: Binding<Bool> {
@@ -270,7 +275,7 @@
                 get: { errorMessage != nil },
                 set: { shown in
                     guard !shown else { return }
-                    if machines.errorMessage != nil {
+                    if machineError != nil {
                         machines.errorMessage = nil
                     } else {
                         spawnErrorList?.errorMessage = nil

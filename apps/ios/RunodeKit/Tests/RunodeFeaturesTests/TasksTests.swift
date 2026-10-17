@@ -50,6 +50,30 @@ import Testing
         }
     }
 
+    /// 断线丢了回话的目录重新连上后再列；有结果的不重发。
+    @Test func reconnectingRelistsLostTasks() async {
+        let model = model([info(sessionA)])
+        await model.loadTasks(in: dir)
+        guard case .listTasks? = link.sent.first else {
+            Issue.record("expected a list_tasks, got \(link.sent)")
+            return
+        }
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        link.clearSent()
+        model.handle(.ready(generation: 2))
+        #expect(await eventually { link.sent.contains { if case .listTasks(_, dir) = $0 { true } else { false } } })
+        let relisted = link.sent.compactMap { if case .listTasks(let req, _) = $0 { req } else { nil } }
+        guard let req = relisted.last else { return }
+        model.handle(.message(.tasks(req: req, dir: dir, sources: [make])))
+
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        link.clearSent()
+        model.handle(.ready(generation: 3))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(link.sent.contains(.listSessions))
+        #expect(!link.sent.contains { if case .listTasks = $0 { true } else { false } })
+    }
+
     /// 列不出来的目录记成空的，不再要。
     @Test func errorsLeaveTheDirectoryEmpty() async {
         let model = model([info(sessionA)])

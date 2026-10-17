@@ -15,8 +15,12 @@
         let onOpen: (SessionId) -> Void
         /// 打开会话所在仓库的 Git 页。
         var onOpenGit: (SessionId) -> Void = { _ in }
+        /// 设置里的手动字号，为空时跟随动态字体。
+        var fontSize: Double? = nil
         @Environment(\.displayScale) private var displayScale
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+        /// 页面的大小，后台新开会话时按它和字号算网格（`spawnSize`）。
+        @State private var pageSize: CGSize?
         /// 正在改名的工作区和输入框里的名字。
         @State private var renaming: SessionSection?
         @State private var renameText = ""
@@ -25,6 +29,14 @@
             ScrollViewReader { proxy in
                 list(proxy)
             }
+        }
+
+        /// 和打开终端后适配的网格一样大，宿主起会话时就不用再改尺寸。
+        private func updateSpawnSize() {
+            guard let pageSize else { return }
+            model.spawnSize = TerminalView.gridSize(
+                fitting: pageSize, scale: displayScale, contentSize: UIContentSizeCategory(dynamicTypeSize),
+                fontSize: fontSize.map { CGFloat($0) })
         }
 
         private func list(_ proxy: ScrollViewProxy) -> some View {
@@ -133,9 +145,11 @@
             }
             .task { await model.keepRefreshing() }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-                model.spawnSize = TerminalView.gridSize(
-                    fitting: size, scale: displayScale, contentSize: UIContentSizeCategory(dynamicTypeSize))
+                pageSize = size
+                updateSpawnSize()
             }
+            .onChange(of: fontSize) { updateSpawnSize() }
+            .onChange(of: dynamicTypeSize) { updateSpawnSize() }
             // 按钮里用 `presenting` 带进来的节：对话框关掉时绑定先被清掉，不能再读 `renaming`。
             .alert(
                 "给工作区改名", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }),

@@ -85,7 +85,7 @@ public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
             case .badSignature: String(localized: "签名校验失败，请删除这台电脑后重新配对")
             case .pairingInvalid: String(localized: "配对口令不对、已过期或已经用过，请在电脑上重新生成二维码")
             case .rateLimited: String(localized: "尝试太频繁，电脑暂时拒绝了连接，稍后自动重试")
-            case .disabled: String(localized: "电脑上没有打开远程访问")
+            case .disabled: String(localized: "电脑上没有打开远程访问，或者电脑那边暂时出了问题")
             case .unknown(let kind): String(localized: "电脑拒绝了连接（\(kind)）")
             }
         case .gateVersion(let version): String(localized: "电脑上的 Runode 使用了更新的连接方式（版本 \(version)），请升级这个 app")

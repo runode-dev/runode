@@ -66,6 +66,25 @@ public struct NoDiscovery: HostDiscovery {
     }
 }
 
+/// 等本机网络恢复或变化：开始等时的路径算基准，之后路径变了、并且通着时返回（Wi-Fi 回来、VPN 连好、
+/// Wi-Fi 换成蜂窝）。取消时也返回。经记着的地址连的电脑离线时，`HostConnection` 据此再试一次，
+/// 离上次失败不短于退避的时长。
+///
+/// shortcut: 失败和开始监听之间路径恰好恢复时漏一次唤醒，由 offlineRetry 兜底；要根治就让 monitor 跟着连接常驻、按路径代数比较
+public func awaitNetworkChange() async {
+    let monitor = NWPathMonitor()
+    let (paths, continuation) = AsyncStream.makeStream(of: NWPath.Status.self)
+    monitor.pathUpdateHandler = { continuation.yield($0.status) }
+    monitor.start(queue: DispatchQueue(label: "runode.network-change"))
+    defer { monitor.cancel() }
+    var updates = paths.makeAsyncIterator()
+    // 第一次回调是现在的路径。
+    guard await updates.next() != nil else { return }
+    while let status = await updates.next() {
+        if status == .satisfied { return }
+    }
+}
+
 /// `BonjourDiscovery.locate` 里等结果的一方和给结果的一方谁先到都行。
 private struct Waiting {
     var continuation: CheckedContinuation<TransportTarget?, Never>?

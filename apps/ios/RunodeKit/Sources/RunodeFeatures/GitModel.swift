@@ -52,10 +52,13 @@ public final class GitModel {
     /// 分支列表，`loadBranches` 读来的。
     public private(set) var branches: [GitBranch] = []
     public private(set) var isLoadingBranches = false
-    /// 打开着的 diff 和读到的内容；读到的为空而 `isLoadingDiff` 为假时，这个文件在那一段里已经没有改动了。
+    /// 打开着的 diff 和读到的内容；读到的为空、`isLoadingDiff` 为假、也没有 `diffError` 时，这个文件在那一段里
+    /// 已经没有改动了。
     public private(set) var diffTarget: GitDiffTarget?
     public private(set) var diff: GitFileDiff?
     public private(set) var isLoadingDiff = false
+    /// 打开着的 diff 没读成的原因，由 diff 页自己显示。
+    public private(set) var diffError: String?
 
     @ObservationIgnored private let link: any HostLink
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -167,6 +170,11 @@ public final class GitModel {
         await perform(.discard, .discard(paths: files.map(\.path)))
     }
 
+    /// 未暂存段里还有冲突的文件数。不为零时视图先请用户确认再全部暂存：暂存了它们就算解决了，冲突标记会跟着提交。
+    public var unstagedConflicts: Int {
+        status?.unstaged.filter { $0.status == .conflicted }.count ?? 0
+    }
+
     public func stageAll() async {
         await perform(.stage, .stageAll)
     }
@@ -203,12 +211,14 @@ public final class GitModel {
     public func openDiff(_ target: GitDiffTarget) async {
         diffTarget = target
         diff = nil
+        diffError = nil
         await requestDiff(target)
     }
 
     public func closeDiff() {
         diffTarget = nil
         diff = nil
+        diffError = nil
         isLoadingDiff = false
     }
 
@@ -224,6 +234,7 @@ public final class GitModel {
     private func requestDiff(_ target: GitDiffTarget) async {
         guard isReady else { return }
         isLoadingDiff = true
+        diffError = nil
         await request(.diff(path: target.path, staged: target.staged), as: .diff(target))
     }
 
@@ -294,9 +305,11 @@ public final class GitModel {
             errorMessage = String(localized: "\(Presentation.gitAction(action))没成功：\(message)")
             // 失败的操作可能做了一半（拉取合出了冲突）：重读状态。
             Task { await refresh() }
-        case .diff:
+        case .diff(let target):
+            // 跟成功时一样：旧 diff 请求的错误不落到新打开的 diff 上。
+            guard target == diffTarget else { return }
             isLoadingDiff = false
-            errorMessage = String(localized: "读不了这个文件的改动：\(message)")
+            diffError = String(localized: "读不了这个文件的改动：\(message)")
         case .branches:
             isLoadingBranches = false
             errorMessage = String(localized: "读不了分支：\(message)")

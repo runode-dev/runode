@@ -32,6 +32,16 @@
                     MachineSettingsView(app: app, machines: machines, id: id)
                 }
             }
+            // 设置页盖着首页，首页的提示弹不出来：电脑改名、删除出的错在这里说。
+            .alert(
+                "出错了",
+                isPresented: Binding(
+                    get: { machines.errorMessage != nil }, set: { if !$0 { machines.errorMessage = nil } })
+            ) {
+                Button("好") {}
+            } message: {
+                Text(machines.errorMessage ?? "")
+            }
         }
 
         // MARK: 终端
@@ -316,7 +326,11 @@
         private func rename(_ machine: MachineRecord) {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty, trimmed != machine.name else { return }
-            Task { await machines.rename(id, to: trimmed) }
+            Task {
+                await machines.rename(id, to: trimmed)
+                // 没改成时输入框退回原来的名字，和标题对得上。
+                name = machines.machine(id)?.name ?? name
+            }
         }
     }
 #endif

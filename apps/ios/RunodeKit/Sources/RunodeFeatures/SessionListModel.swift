@@ -494,7 +494,8 @@ public final class SessionListModel {
     }
 
     /// 列 `dir` 里的命令：卡片出现、会话换了目录时要一次，列过的不再要；`refreshing` 为真时（下拉
-    /// 刷新，Makefile、package.json 可能改过了）列过的也再要。同一个目录同时只等一次回话。
+    /// 刷新，Makefile、package.json 可能改过了）列过的也再要。同一个目录同时只等一次回话。重新连上时
+    /// 各会话目录里还没有结果的再要一次：断线丢掉的回话不会再来，cwd 没变时视图也不会重新要。
     public func loadTasks(in dir: String, refreshing: Bool = false) async {
         guard connected, !listingDirs.contains(dir),
             refreshing || tasks[dir] == nil
@@ -503,6 +504,17 @@ public final class SessionListModel {
         let req = await link.nextRequestId()
         pendingTasks[req] = dir
         link.send(.listTasks(req: req, dir: dir))
+    }
+
+    /// 重新连上：列断线前已知会话里还没有结果的目录，有结果的不重发。
+    private func loadMissingTasks() {
+        let dirs = Set(sessions.compactMap(\.meta.cwd)).sorted()
+        guard !dirs.isEmpty else { return }
+        Task { [weak self] in
+            for dir in dirs {
+                await self?.loadTasks(in: dir)
+            }
+        }
     }
 
     /// 下拉刷新：重新列一遍各个会话目录里的命令。
@@ -609,6 +621,7 @@ public final class SessionListModel {
             listCurrent = false
             watching = []
             refresh()
+            loadMissingTasks()
         case .message(let message):
             handle(message)
         case .frame:

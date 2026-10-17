@@ -18,6 +18,8 @@
         @State private var diffTarget: GitDiffTarget?
         /// 等用户确认丢弃改动的文件。
         @State private var discarding: [GitFile] = []
+        /// 等用户确认一起暂存的冲突文件数，0 是没在问。
+        @State private var stagingConflicts = 0
         @State private var showingBranches = false
         @FocusState private var editingMessage: Bool
         @Environment(\.themeColors) private var colors
@@ -78,6 +80,15 @@
                 }
             } message: {
                 Text("未跟踪的文件会从电脑上删掉，丢掉的改动找不回来。已暂存的改动不受影响。")
+            }
+            .confirmationDialog(
+                "还有 \(stagingConflicts) 个文件有冲突，也一起暂存吗？",
+                isPresented: Binding(get: { stagingConflicts > 0 }, set: { if !$0 { stagingConflicts = 0 } }),
+                titleVisibility: .visible
+            ) {
+                Button("全部暂存", role: .destructive) { Task { await model.stageAll() } }
+            } message: {
+                Text("暂存以后它们算作已解决，里面的冲突标记会跟着提交进去。")
             }
             .alert(
                 "出错了", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
@@ -228,7 +239,13 @@
                     Spacer()
                     Button(staged ? "全部取消暂存" : "全部暂存") {
                         Task {
-                            if staged { await model.unstageAll() } else { await model.stageAll() }
+                            if staged {
+                                await model.unstageAll()
+                            } else if model.unstagedConflicts > 0 {
+                                stagingConflicts = model.unstagedConflicts
+                            } else {
+                                await model.stageAll()
+                            }
                         }
                     }
                     .font(.subheadline)
@@ -557,6 +574,13 @@
                 }
             } else if model.isLoadingDiff || model.diffTarget != target {
                 ProgressView("正在读取改动…")
+            } else if !model.isReady {
+                // 没连上时读不了：重新连上后 `refresh` 会重读。
+                ConnectionStatusRow(state: model.linkState, onRetry: model.reconnect)
+                    .cardBackground()
+                    .padding()
+            } else if let error = model.diffError {
+                ContentUnavailableView("读不了改动", systemImage: "exclamationmark.triangle", description: Text(error))
             } else {
                 ContentUnavailableView(
                     "没有改动了", systemImage: "checkmark.circle",
