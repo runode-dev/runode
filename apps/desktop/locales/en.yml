@@ -372,6 +372,8 @@ git:
   stage_all_confirm: Stage and Commit
   conflicts_title: Resolve the conflicts first
   conflicts_detail: Some files still have conflicts. Resolve them and stage them before committing.
+  stage_conflicts_title: "Stage files that still have conflicts (%{count})?"
+  stage_conflicts_detail: Staging marks them as resolved, and any conflict markers left in them will be committed.
   operation:
     merge: "Merging: resolve the conflicts, stage them, then commit"
     rebase: "Rebasing: resolve the conflicts, then continue in the terminal"

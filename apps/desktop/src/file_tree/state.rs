@@ -306,8 +306,12 @@ impl TreeState {
         }
     }
 
-    /// `path` 被删掉了：它和下面的目录不再展开，上级目录的列表里马上去掉它，不等重读回来。
+    /// `path` 被删掉了：它和下面的目录不再展开，上级目录的列表里马上去掉它，不等重读回来。选中的是它或在它
+    /// 下面时不留选中，免得删除、改名作用在不存在的路径上。
     pub(crate) fn removed(&mut self, path: &Path) {
+        if self.selected.as_deref().is_some_and(|selected| selected.starts_with(path)) {
+            self.selected = None;
+        }
         self.expanded.retain(|dir| !dir.starts_with(path));
         self.listings.retain(|dir, _| !dir.starts_with(path));
         if let Some((parent, name)) = path.parent().zip(path.file_name())
@@ -751,10 +755,20 @@ mod tests {
         state.apply_listings(read.collect(), 0, root, ALL);
         assert_eq!(state.selected, Some(PathBuf::from("/p/a/new")));
 
-        // 删掉的不等重读回来就从行里去掉。
+        // 删掉的不等重读回来就从行里去掉，选中的是它或在它下面时不留选中；选中别处的不动。
         state.removed(Path::new("/p/a/new"));
         state.rebuild_rows(root, ALL);
         assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 1), ("z".into(), 0)]);
+        assert_eq!(state.selected, None);
+        state.selected = Some(PathBuf::from("/p/a/b"));
+        state.removed(Path::new("/p/z"));
+        assert_eq!(state.selected, Some(PathBuf::from("/p/a/b")));
+        state.removed(Path::new("/p/a"));
+        assert_eq!(state.selected, None);
+        state.listings.insert(root.into(), vec![dir("a"), file("z")]);
+        state.listings.insert("/p/a".into(), vec![file("b")]);
+        state.expanded.insert("/p/a".into());
+        state.rebuild_rows(root, ALL);
 
         // 读不了的目录读过一次就不再读，不会一直读下去。
         state.reveal_dir(Path::new("/p/gone/x"), root, ALL);

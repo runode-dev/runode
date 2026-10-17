@@ -298,6 +298,12 @@ impl Preview {
             }
     }
 
+    /// 切回来时要不要重读：`stale` 里没读过的那种只算记下要重读的（比如后台 workspace 里跟着改名换上的
+    /// 标签），没记下的是第一次读还在路上，不打断它。
+    fn needs_refresh(&self) -> bool {
+        self.stale() && (self.content.is_some() || self.reload)
+    }
+
     fn lines(&self) -> Option<&[String]> {
         match &self.content {
             Some(Loaded::Text { lines, .. }) => Some(lines),
@@ -702,14 +708,23 @@ impl PreviewPanel {
         cx.notify();
     }
 
-    /// 关掉 `path` 和它下面的文件的标签（连同它们的 diff 标签）：文件删掉了。
+    /// 关掉各 workspace 里 `path` 和它下面的文件的标签（连同它们的 diff 标签）：文件删掉了。文件在哪个
+    /// workspace 里删的都一样，几个 workspace 可能开在同一个目录下。只有当前 workspace 关完了发事件，
+    /// 别的 workspace 换上的当前标签切回去时由 `refresh_if_changed` 读。
     pub fn close_under(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        self.retain_previews(|_, preview| !preview.path.starts_with(path), window, cx);
+        let keep = |_: usize, preview: &Preview| !preview.path.starts_with(path);
+        for (_, tabs) in self.workspaces.iter_mut().filter(|(ws, _)| **ws != self.ws) {
+            for tab in tabs.retain(keep) {
+                tab.release_image(cx);
+            }
+        }
+        self.retain_previews(keep, window, cx);
     }
 
-    /// `from` 改了名或挪到了 `to`：它和它下面的文件的预览标签跟过去，当前标签换了就重读。
+    /// `from` 改了名或挪到了 `to`：各 workspace 里它和它下面的文件的预览标签都跟过去（剪贴板整个窗口一份，
+    /// 可以跨 workspace 挪）。当前 workspace 的当前标签换了就重读，别的等切过去时再读。
     pub fn moved(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
-        for old in self.tabs_mut().moved(from, to) {
+        for old in self.workspaces.values_mut().flat_map(|tabs| tabs.moved(from, to)) {
             old.release_image(cx);
         }
         if self.preview().is_some_and(|tab| tab.content.is_none()) {
@@ -721,10 +736,7 @@ impl PreviewPanel {
     /// 窗口切回前台、切回这个 workspace 时，当前预览的文件变过就重读；在后台时监听到的改动只等到这时。
     /// 别的标签等切过去时再看。
     pub fn refresh_if_changed(&mut self, cx: &mut Context<Self>) {
-        if let Some(preview) = self.preview()
-            && preview.content.is_some()
-            && preview.stale()
-        {
+        if self.preview().is_some_and(Preview::needs_refresh) {
             self.load_preview(cx);
         }
     }
@@ -1160,5 +1172,15 @@ mod tests {
         assert!(!tab.stale());
         tab.reload = true;
         assert!(tab.stale());
+    }
+
+    /// 刚开的标签第一次读还在路上，切回来时不打断；后台 workspace 里跟着改名换上、还没读过的标签切回来要读。
+    #[test]
+    fn a_tab_moved_in_the_background_is_read_when_shown_again() {
+        let mut previews = PreviewTabs::default();
+        previews.open(Path::new("/nonexistent/runode-preview/a.rs"), None, true);
+        assert!(!previews.tabs[0].needs_refresh());
+        previews.moved(Path::new("/nonexistent/runode-preview"), Path::new("/nonexistent/runode-moved"));
+        assert!(previews.tabs[0].needs_refresh());
     }
 }

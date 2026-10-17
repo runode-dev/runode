@@ -372,6 +372,8 @@ git:
   stage_all_confirm: 暂存并提交
   conflicts_title: 先解决冲突
   conflicts_detail: 还有文件有冲突，解决并暂存以后再提交。
+  stage_conflicts_title: 还有 %{count} 个文件有冲突，也一起暂存吗？
+  stage_conflicts_detail: 暂存以后它们算作已解决，里面的冲突标记会跟着提交进去。
   operation:
     merge: 正在合并：解决冲突并暂存后提交
     rebase: 正在变基：解决冲突后在终端里继续

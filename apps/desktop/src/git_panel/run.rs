@@ -450,8 +450,35 @@ impl GitPanel {
         self.run_on_target(Busy::Sync, window, cx, git::Repo::sync);
     }
 
+    /// 暂存全部；还有冲突的文件时先问一句，免得冲突标记被顺手标成已解决、一路提交进去。
     pub(crate) fn git_stage_all(&mut self, _: &GitStageAll, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_on_target(Busy::Stage, window, cx, git::Repo::stage_all);
+        let Some(root) = self.git_target(window, cx) else {
+            return;
+        };
+        let conflicts =
+            self.state().git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root)).map_or(0, |repo| {
+                repo.unstaged.iter().filter(|file| file.status == git::FileStatus::Conflicted).count()
+            });
+        if conflicts == 0 {
+            self.run_git(&root, Busy::Stage, window, cx, git::Repo::stage_all, |_, (), _, _| {});
+            return;
+        }
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            &rust_i18n::t!("git.stage_conflicts_title", count = conflicts),
+            Some(&rust_i18n::t!("git.stage_conflicts_detail")),
+            &[&*rust_i18n::t!("git.stage_all"), &*rust_i18n::t!("git.cancel")],
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await.ok() == Some(0) {
+                this.update_in(cx, |this, window, cx| {
+                    this.run_git(&root, Busy::Stage, window, cx, git::Repo::stage_all, |_, (), _, _| {});
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn git_unstage_all(&mut self, _: &GitUnstageAll, window: &mut Window, cx: &mut Context<Self>) {

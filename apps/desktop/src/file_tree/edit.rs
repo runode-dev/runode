@@ -15,6 +15,7 @@ use runode_git::Repo;
 use crate::file_tree::{
     AddToGitignore, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder, RenameFile, WorkspaceId,
     ops::{self, OpError},
+    state::TreeState,
 };
 
 /// 剪切或复制下来等着粘贴的文件或目录。
@@ -208,8 +209,8 @@ impl FileTree {
         cx.notify();
     }
 
-    /// workspace `ws` 里 `from` 改了名或挪到了 `to`：展开的目录、选中的路径和预览的文件跟过去，重读两边的目录。
-    /// 剪贴板整个窗口一份，不管是哪个 workspace 都跟过去。
+    /// workspace `ws` 里 `from` 改了名或挪到了 `to`：展开的目录、选中的路径和预览的文件跟过去，重读两边的目录，
+    /// 选中挪过去的那一项。剪贴板整个窗口一份，别的 workspace 的树和预览也跟过去。
     fn after_move(&mut self, ws: Option<WorkspaceId>, from: &Path, to: &Path, cx: &mut Context<Self>) {
         self.with_tree_of(ws, cx, |state, _, _| state.moved(from, to));
         if let Some(clip) = &mut self.clipboard
@@ -217,10 +218,29 @@ impl FileTree {
         {
             clip.path = path;
         }
-        let dirs = [from.parent(), to.parent()].into_iter().flatten().map(Path::to_path_buf).collect();
+        let dirs: Vec<PathBuf> = [from.parent(), to.parent()].into_iter().flatten().map(Path::to_path_buf).collect();
+        self.update_other_trees(ws, &dirs, cx, |state| state.moved(from, to));
         self.relist_and_reveal(ws, dirs, to, cx);
-        let ws = ws.unwrap_or_default();
-        cx.emit(FileTreeEvent::Moved { ws, from: from.to_path_buf(), to: to.to_path_buf() });
+        cx.emit(FileTreeEvent::Moved { from: from.to_path_buf(), to: to.to_path_buf() });
+    }
+
+    /// 除了 `ws` 以外各 workspace 的树做 `f`，再重读 `dirs` 里那棵树读过的目录：剪贴板整个窗口一份，可以
+    /// 跨 workspace 挪、删，几个 workspace 也可能开在同一个目录下。不动它们选中的行。
+    fn update_other_trees(
+        &mut self,
+        ws: Option<WorkspaceId>,
+        dirs: &[PathBuf],
+        cx: &mut Context<Self>,
+        f: impl Fn(&mut TreeState),
+    ) {
+        let others: Vec<_> = self.workspaces.keys().copied().map(Some).filter(|&id| id != ws).collect();
+        for id in others {
+            self.with_tree_of(id, cx, |state, root, filter| {
+                f(state);
+                let listed = dirs.iter().filter(|dir| state.listings.contains_key(*dir)).cloned().collect();
+                state.relist(listed, root, filter);
+            });
+        }
     }
 
     /// 选中的那一项先问一下，再在后台移到废纸篓：外置卷上可能要复制一遍。
@@ -240,7 +260,7 @@ impl FileTree {
             &[&*rust_i18n::t!("files.delete_confirm"), &*rust_i18n::t!("files.cancel")],
             cx,
         );
-        // 完成时可能已经切到了别的 workspace，改的是发起的那个 workspace 的树和预览。
+        // 完成时可能已经切到了别的 workspace，选中和定位的是发起的那个 workspace 的树（预览和别的树都跟着改）。
         let ws = self.ws;
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() != Some(0) {
@@ -260,13 +280,15 @@ impl FileTree {
         .detach();
     }
 
-    /// workspace `ws` 里 `path` 移到了废纸篓：关掉它和它下面的文件的预览标签，选中原来那个位置上的行，接着按
-    /// 删除键可以一路删下去。剪贴板整个窗口一份，不管是哪个 workspace 都清掉。
+    /// workspace `ws` 里 `path` 移到了废纸篓：关掉各 workspace 里它和它下面的文件的预览标签，选中原来那个位置上
+    /// 的行，接着按删除键可以一路删下去；别的 workspace 的树也去掉它。剪贴板整个窗口一份，不管是哪个 workspace
+    /// 都清掉。
     fn after_delete(&mut self, ws: Option<WorkspaceId>, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(FileTreeEvent::Removed { ws: ws.unwrap_or_default(), path: path.to_path_buf() });
+        cx.emit(FileTreeEvent::Removed(path.to_path_buf()));
         if self.clipboard.as_ref().is_some_and(|clip| clip.path.starts_with(path)) {
             self.clipboard = None;
         }
+        self.update_other_trees(ws, &[], cx, |state| state.removed(path));
         self.with_tree_of(ws, cx, |state, root, filter| {
             let ix = state.selected_row();
             state.removed(path);
@@ -393,7 +415,7 @@ impl FileTree {
 
     /// 在后台把 `src` 挪进（`cut`）或复制进 `dir`，目录可能很大；完了选中挪过去或复制出来的那一项。
     fn transfer(&mut self, src: PathBuf, dir: PathBuf, cut: bool, window: &mut Window, cx: &mut Context<Self>) {
-        // 同 `delete_file`：完成时可能已经切走了，改的是发起的那个 workspace。
+        // 同 `delete_file`：完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树，失败时也只重读它的目录。
         let ws = self.ws;
         let job = cx.background_spawn({
             let (src, dir) = (src.clone(), dir.clone());

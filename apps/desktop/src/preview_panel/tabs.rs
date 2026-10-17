@@ -135,13 +135,14 @@ impl PreviewTabs {
         self.active = to;
     }
 
-    /// `from` 改了名或挪到了 `to`：它和它下面的文件的标签换成新路径，固定与否不变。返回换下来的
-    /// 旧标签。diff 标签不跟，扫描到新的改动时它自己会重读。
+    /// `from` 改了名或挪到了 `to`：它和它下面的文件的标签换成新路径，固定与否不变，记下要重读。返回
+    /// 换下来的旧标签。diff 标签不跟，扫描到新的改动时它自己会重读。
     pub fn moved(&mut self, from: &Path, to: &Path) -> Vec<Preview> {
         let mut old = Vec::new();
         for tab in self.tabs.iter_mut().filter(|tab| tab.diff.is_none()) {
             if let Some(path) = follow_move(&tab.path, from, to) {
-                let new = Preview::new(path, None, tab.pinned);
+                let mut new = Preview::new(path, None, tab.pinned);
+                new.reload = true;
                 old.push(std::mem::replace(tab, new));
             }
         }
