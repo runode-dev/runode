@@ -19,7 +19,6 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/workflows/release.yml"
       - ".github/workflows/ios.yml"
-      - ".github/workflows/update-command-specs.yml"
       - "*.md"
       - "LICENSE"
   pull_request:
@@ -33,7 +32,6 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/workflows/release.yml"
       - ".github/workflows/ios.yml"
-      - ".github/workflows/update-command-specs.yml"
       - "*.md"
       - "LICENSE"
   workflow_dispatch:
