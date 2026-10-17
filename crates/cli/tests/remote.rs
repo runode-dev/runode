@@ -35,14 +35,23 @@ impl Root {
 
     /// 照设备表的格式写两台设备。
     fn write_devices(&self) {
+        self.write_device_list(&[(PHONE, "Ethan 的 iPhone", 1, 2), (TABLET, "iPad", 3, 4)]);
+    }
+
+    /// 照设备表的格式写下这些设备：标识、名字、配对时刻、最后一次连上的时刻。
+    fn write_device_list(&self, devices: &[(&str, &str, u64, u64)]) {
         let dir = self.dirs().remote_access_dir().unwrap();
         std::fs::create_dir_all(&dir).unwrap();
         let key = "BAEIDxYdJCsyOUBHTlVcY2pxeH-GjZSboqmwt77FzNPa4ejv9v0ECxIZICcuNTxDSlFYX2ZtdHuCiZCXnqWss7o";
-        let json = format!(
-            r#"{{"version":1,"devices":[
-                {{"device_id":"{PHONE}","name":"Ethan 的 iPhone","public_key":"{key}","paired_at":1,"last_seen":2}},
-                {{"device_id":"{TABLET}","name":"iPad","public_key":"{key}","paired_at":3,"last_seen":4}}]}}"#
-        );
+        let devices: Vec<String> = devices
+            .iter()
+            .map(|(id, name, paired, seen)| {
+                format!(
+                    r#"{{"device_id":"{id}","name":"{name}","public_key":"{key}","paired_at":{paired},"last_seen":{seen}}}"#
+                )
+            })
+            .collect();
+        let json = format!(r#"{{"version":1,"devices":[{}]}}"#, devices.join(","));
         std::fs::write(self.dirs().remote_access_devices_file().unwrap(), json).unwrap();
     }
 }
@@ -64,6 +73,15 @@ fn devices_are_listed_and_revoked_by_prefix() {
     let (code, out, _) = run("remote devices", &env);
     assert_eq!(code, exit::OK);
     assert!(out.starts_with("ID "), "{out}");
+    let ago = format!("{}d ago", (runode_remote::now_unix() - 1) / 86_400);
+    assert_eq!(
+        out,
+        format!(
+            "ID                                NAME             PAIRED      LAST SEEN\n\
+             {PHONE}  Ethan 的 iPhone  {ago}  {ago}\n\
+             {TABLET}  iPad             {ago}  {ago}\n"
+        )
+    );
     assert!(out.contains(PHONE) && out.contains("Ethan 的 iPhone") && out.contains("iPad"), "{out}");
     let (_, json, _) = run("remote devices --json", &env);
     let json: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -80,6 +98,22 @@ fn devices_are_listed_and_revoked_by_prefix() {
     let (code, _, err) = run(&format!("remote revoke {PHONE}"), &env);
     assert_eq!(code, exit::FAILED);
     assert!(err.contains("no paired device"), "{err}");
+}
+
+#[test]
+fn the_paired_column_is_ten_wide_even_when_short() {
+    let root = Root::new("short");
+    let now = runode_remote::now_unix();
+    root.write_device_list(&[(TABLET, "iPad", now, now)]);
+    let (code, out, _) = run("remote devices", &root.env());
+    assert_eq!(code, exit::OK);
+    assert_eq!(
+        out,
+        format!(
+            "ID                                NAME  PAIRED      LAST SEEN\n\
+             {TABLET}  iPad  just now    just now\n"
+        )
+    );
 }
 
 #[test]

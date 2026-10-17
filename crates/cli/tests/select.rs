@@ -190,6 +190,16 @@ fn list_shows_where_each_terminal_is() {
     assert_eq!(code, exit::OK, "{err}");
     let rows: Vec<Vec<&str>> = out.lines().map(|line| line.split_whitespace().collect()).collect();
     assert_eq!(
+        out,
+        "  ID        WIN  WS  TAB  PANE  REL    AGENT        STATE    FG   TITLE   DIR           VIEW\n\
+         * a0000000  1    1   1    1     self   Claude Code  working  -    claude  /tmp/project  shown\n\
+         \x20 b0000000  1    1   1    2     -      -            -        -    zsh     /tmp/project  shown\n\
+         \x20 c0000000  1    1   1    3     right  -            -        zsh  zsh     /tmp/web      shown\n\
+         \x20 d0000000  1    1   2    1     -      -            -        -    logs    /tmp/project  hidden\n\
+         \x20 e0000000  2    1   1    1     -      -            -        -    vim     /tmp/project  shown\n\
+         \x20 f0000000  -    -   -    -     -      Codex        idle     -    server  /tmp/api      bg\n"
+    );
+    assert_eq!(
         rows[0],
         ["ID", "WIN", "WS", "TAB", "PANE", "REL", "AGENT", "STATE", "FG", "TITLE", "DIR", "VIEW"],
         "{out}"

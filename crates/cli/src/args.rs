@@ -4,7 +4,7 @@ use std::{net::IpAddr, path::PathBuf, time::Duration};
 
 use runode_autostart::Kind;
 use runode_protocol::{Placement, todo::When};
-use runode_types::input::parse_keys;
+use runode_types::input::parse_key_list;
 
 use crate::{help, local_time::LocalTime, select::Selector};
 
@@ -189,11 +189,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             "--wait" => flags.wait = true,
             "--paste" => flags.paste = true,
             "--new" => flags.new = true,
-            "--key" => {
-                let key = value(&mut rest, arg)?;
-                parse_keys(key).map_err(|err| format!("--key: {err}"))?;
-                flags.keys.push(key.to_owned());
-            }
+            "--key" => flags.keys.push(value(&mut rest, arg)?.to_owned()),
             "--lines" => flags.lines = Some(value(&mut rest, arg)?.parse().map_err(|_| "--lines takes a count")?),
             "--command" => {
                 // 次数可以不给。会话标识也可能全是数字，所以只把短的数字当次数，长的留给会话。
@@ -259,6 +255,8 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             _ => words.push(arg.clone()),
         }
     }
+    // 逐项和合起来的总数（宿主同样用 `parse_key_list` 查）都在这里查：宿主拒绝按键时字已经打出去了。
+    parse_key_list(&flags.keys).map_err(|err| format!("--key: {err}"))?;
     let topic = |word: Option<&String>| {
         word.map(|word| help::topic(word).ok_or_else(|| format!("no help for {word}"))).transpose()
     };
@@ -719,6 +717,10 @@ mod tests {
         // 写错的键在发出去之前就报，算参数错误。
         assert!(parse("send ab12 --key ctrl-?").unwrap_err().contains("--key"));
         assert!(parse("send ab12 --key down*0").unwrap_err().contains("--key"));
+        // 每项都合规、合起来超过 `MAX_KEYS` 下的也在发之前就报。
+        let many = format!("send ab12 text{}", " --key a*1000".repeat(11));
+        assert!(parse(&many).unwrap_err().contains("at most"));
+        assert!(parse(&format!("send ab12 text{}", " --key a*1000".repeat(10))).is_ok());
         assert!(parse("send ab12").unwrap_err().contains("TEXT, --key or --enter"));
     }
 

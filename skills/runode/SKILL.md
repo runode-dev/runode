@@ -46,6 +46,11 @@ id=$(runode open --right --cwd ~/src/app)            # split your pane
 id=$(runode open --down -- npm run dev)              # and run a command in it
 ```
 
+The words after `--` are joined by spaces and typed into the new shell as they
+are, so the quotes your shell removed are gone. For a command that needs quotes,
+pass it as one argument with the quotes inside:
+`runode open --right -- 'codex "what is wrong?"'`.
+
 `--near SESSION` opens next to another terminal instead of yours; the new one
 starts in that terminal's directory unless you give `--cwd`. Split a wide pane
 `--right` and a narrow or tall one `--down`, and avoid splitting the same way
@@ -61,8 +66,9 @@ workspace (no split, no `--focus`) and `runode focus` fails.
 A split opened from your terminal is folded down to its title bar so it takes
 no room; the program keeps running and the user unfolds it by clicking the bar.
 Add `--no-fold` for a split the user should see right away (a review, a result
-to read), or `--fold` to force it. Both only work with `--right` or `--down`,
-and `--fold` cannot be combined with `--focus`.
+to read), or `--fold` to force it. `--fold` only works with `--right` or
+`--down` (`--no-fold` on a tab does nothing) and cannot be combined with
+`--focus`.
 
 ## Run a command and wait for it
 

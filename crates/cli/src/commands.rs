@@ -326,60 +326,36 @@ fn list(world: &World, json: bool, out: &mut dyn Write) -> anyhow::Result<()> {
         return Ok(());
     }
     let positions = world.layout.as_ref().is_some_and(|windows| !windows.is_empty());
-    let mut header = vec![" ", "ID"];
+    // 第一列是标在自己的会话前的 `*`，和标识之间只隔一格。
+    let mut header = vec!["  ID"];
     if positions {
         header.extend(["WIN", "WS", "TAB", "PANE", "REL"]);
     }
     header.extend(["AGENT", "STATE", "FG", "TITLE", "DIR", "VIEW"]);
-    let header: Vec<String> = header.into_iter().map(String::from).collect();
     let dash = |value: Option<String>| value.filter(|value| !value.is_empty()).unwrap_or_else(|| "-".into());
-    let rows: Vec<Vec<String>> = sessions
-        .iter()
-        .map(|(info, place)| {
-            let mut row = vec![if current(info) { "*" } else { " " }.into(), info.id.to_string()[..SHORT_ID].into()];
-            if positions {
-                let number = |n: Option<u32>| dash(n.map(|n| n.to_string()));
-                row.extend([
-                    number(place.map(|p| p.window.index)),
-                    number(place.map(|p| p.workspace.index)),
-                    number(place.map(|p| p.tab.index)),
-                    number(place.map(|p| p.pane.index)),
-                    dash(Some(rel(info.id).join(","))),
-                ]);
-            }
+    let rows = sessions.iter().map(|(info, place)| {
+        let mut row = vec![format!("{} {}", if current(info) { '*' } else { ' ' }, &info.id.to_string()[..SHORT_ID])];
+        if positions {
+            let number = |n: Option<u32>| dash(n.map(|n| n.to_string()));
             row.extend([
-                info.meta.agent.map_or("-", |agent| agent.kind.display_name()).into(),
-                if info.exited { "exited" } else { info.meta.agent.map_or("-", |agent| state_name(agent.state)) }
-                    .into(),
-                dash(info.meta.foreground.clone()),
-                title(&info.meta).unwrap_or_default(),
-                info.meta.cwd.as_deref().map(|cwd| tilde(cwd, world.home.as_deref())).unwrap_or_default(),
-                view(*place).into(),
+                number(place.map(|p| p.window.index)),
+                number(place.map(|p| p.workspace.index)),
+                number(place.map(|p| p.tab.index)),
+                number(place.map(|p| p.pane.index)),
+                dash(Some(rel(info.id).join(","))),
             ]);
-            row
-        })
-        .collect();
-    let rows: Vec<Vec<String>> = rows.iter().map(|row| row.iter().map(|cell| plain(cell)).collect()).collect();
-    let mut widths = vec![0; header.len()];
-    for row in std::iter::once(&header).chain(&rows) {
-        for (width, cell) in widths.iter_mut().zip(row) {
-            *width = (*width).max(cell.width());
         }
-    }
-    for row in std::iter::once(&header).chain(&rows) {
-        let mut line = String::new();
-        for (i, (cell, width)) in row.iter().zip(&widths).enumerate() {
-            if i > 1 {
-                line.push_str("  ");
-            } else if i == 1 {
-                line.push(' ');
-            }
-            line.push_str(cell);
-            line.extend(std::iter::repeat_n(' ', width - cell.width()));
-        }
-        writeln!(out, "{}", line.trim_end())?;
-    }
-    Ok(())
+        row.extend([
+            info.meta.agent.map_or("-", |agent| agent.kind.display_name()).into(),
+            if info.exited { "exited" } else { info.meta.agent.map_or("-", |agent| state_name(agent.state)) }.into(),
+            dash(info.meta.foreground.clone()),
+            title(&info.meta).unwrap_or_default(),
+            info.meta.cwd.as_deref().map(|cwd| tilde(cwd, world.home.as_deref())).unwrap_or_default(),
+            view(*place).into(),
+        ]);
+        row
+    });
+    table(&header, rows, out)
 }
 
 /// `send --wait` 等什么，以及告诉用户的说法：有 agent 时等它干完；前台是开了 shell 集成的
@@ -812,6 +788,32 @@ pub(crate) fn plain(text: &str) -> String {
             }
         })
         .collect()
+}
+
+/// 打印表格：各列按最宽的格子的显示宽度补齐，列间两个空格。
+pub(crate) fn table(
+    header: &[&str],
+    rows: impl Iterator<Item = Vec<String>>,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    let header: Vec<String> = header.iter().map(|&cell| cell.to_owned()).collect();
+    let rows = rows.map(|row| row.iter().map(|cell| plain(cell)).collect());
+    let rows: Vec<Vec<String>> = std::iter::once(header).chain(rows).collect();
+    let mut widths = vec![0; rows[0].len()];
+    for row in &rows {
+        for (width, cell) in widths.iter_mut().zip(row) {
+            *width = (*width).max(cell.width());
+        }
+    }
+    for row in &rows {
+        let cells: Vec<String> = row
+            .iter()
+            .zip(&widths)
+            .map(|(cell, width)| format!("{cell}{}", " ".repeat(width - cell.width())))
+            .collect();
+        writeln!(out, "{}", cells.join("  ").trim_end())?;
+    }
+    Ok(())
 }
 
 /// 家目录下的路径写成 `~/…`。

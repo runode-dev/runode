@@ -3,7 +3,7 @@
 use std::{
     io::Write,
     path::{Path, PathBuf},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Result, anyhow, bail};
@@ -11,15 +11,15 @@ use runode_protocol::{
     ClientMsg, HostMsg, SessionId, SessionInfo,
     todo::{Column, DEFAULT_AGENT, Schedule, Todo, TodoSpec, When, column},
 };
+use runode_remote::now_unix;
 
 use crate::{
     Env,
     args::{DAYS, Timing},
     client::{Connection, kind},
-    commands::{plain, tilde},
+    commands::{plain, table, tilde},
     local_time::LocalTime,
 };
-use unicode_width::UnicodeWidthStr as _;
 
 /// 等 `StartTodo`、`RemoveTodo` 回话的最长时间：开始任务时宿主可能先在大仓库里跑 `git worktree add`，
 /// 没成时换个名字再跑一次；删任务时跑 `git worktree remove` 和 `git branch -d`。每条 git 自己的上限是
@@ -138,10 +138,6 @@ fn board(connection: &Connection) -> Result<(Vec<Todo>, Vec<Schedule>)> {
     }
 }
 
-fn unix_now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs())
-}
-
 /// 列名，同 JSON 里的写法（`in_progress`）。
 fn column_name(column: Column) -> String {
     serde_json::to_value(column).ok().and_then(|value| value.as_str().map(str::to_owned)).unwrap_or_default()
@@ -166,7 +162,7 @@ pub(crate) fn list(env: &Env, json: bool, out: &mut dyn Write) -> Result<()> {
     let connection = open(env)?;
     let sessions = sessions(&connection)?;
     let (todos, _) = board(&connection)?;
-    let now = unix_now();
+    let now = now_unix();
     let mut todos: Vec<(Todo, Column)> = todos
         .into_iter()
         .map(|todo| {
@@ -218,7 +214,7 @@ pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Resu
     };
     let sessions = sessions(&connection)?;
     let session = sessions.iter().find(|info| Some(info.id) == todo.session);
-    let column = column(&todo, session, unix_now());
+    let column = column(&todo, session, now_unix());
     let (_, schedules) = board(&connection)?;
     let schedule = todo.schedule.as_ref().and_then(|id| schedules.iter().find(|schedule| &schedule.id == id));
     if json {
@@ -277,7 +273,7 @@ pub(crate) fn add_schedule(env: &Env, spec: Spec, timing: Timing, out: &mut dyn 
         Timing::Repeat(when) => when,
         Timing::At(at) => {
             let unix = at.unix().ok_or_else(|| anyhow!("there is no {at} here"))?;
-            if unix <= unix_now() {
+            if unix <= now_unix() {
                 bail!("{at} has passed");
             }
             When::Once { at: unix }
@@ -361,28 +357,6 @@ fn days_text(days: u8) -> String {
         day += 1;
     }
     parts.join(",")
-}
-
-/// 打印表格：各列按最宽的格子的显示宽度补齐，列间两个空格。
-fn table(header: &[&str], rows: impl Iterator<Item = Vec<String>>, out: &mut dyn Write) -> Result<()> {
-    let header: Vec<String> = header.iter().map(|&cell| cell.to_owned()).collect();
-    let rows = rows.map(|row| row.iter().map(|cell| plain(cell)).collect());
-    let rows: Vec<Vec<String>> = std::iter::once(header).chain(rows).collect();
-    let mut widths = vec![0; rows[0].len()];
-    for row in &rows {
-        for (width, cell) in widths.iter_mut().zip(row) {
-            *width = (*width).max(cell.width());
-        }
-    }
-    for row in &rows {
-        let cells: Vec<String> = row
-            .iter()
-            .zip(&widths)
-            .map(|(cell, width)| format!("{cell}{}", " ".repeat(width - cell.width())))
-            .collect();
-        writeln!(out, "{}", cells.join("  ").trim_end())?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

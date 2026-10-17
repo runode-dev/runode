@@ -69,6 +69,33 @@ fn help_and_version_need_no_app() {
     assert!(err.contains("unknown command frobnicate"), "{err}");
 }
 
+/// 读的一头已经关了的管道（`runode help | head`）。
+struct ClosedPipe;
+
+impl std::io::Write for ClosedPipe {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::ErrorKind::BrokenPipe.into())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_closed_pipe_ends_quietly() {
+    let mut err = Vec::new();
+    let code = runode_cli::run(&["help".into()], &Env::default(), &mut ClosedPipe, &mut err);
+    assert_eq!(code, exit::OK);
+    assert!(err.is_empty(), "{}", String::from_utf8_lossy(&err));
+
+    // `--json` 经 serde_json 写，错误是包着 `io::Error` 的 `serde_json::Error`。
+    let fake = host("closedjson", Some(AgentState::Working), vec![]);
+    let code = runode_cli::run(&["list".into(), "--json".into()], &fake.env, &mut ClosedPipe, &mut err);
+    assert_eq!(code, exit::OK);
+    assert!(err.is_empty(), "{}", String::from_utf8_lossy(&err));
+}
+
 #[test]
 fn list_shows_sessions_and_marks_your_own() {
     let mut fake = host("list", Some(AgentState::Working), vec![]);
@@ -81,6 +108,12 @@ fn list_shows_sessions_and_marks_your_own() {
     assert_eq!(words(lines[0]), "ID AGENT STATE FG TITLE DIR VIEW", "{out}");
     assert_eq!(words(lines[1]), "abcd0000 Claude Code working - claude here /tmp/project bg", "{out}");
     assert!(lines[2].starts_with("* abce0000  -"), "{out}");
+    assert_eq!(
+        out,
+        "  ID        AGENT        STATE    FG  TITLE        DIR           VIEW\n\
+         \x20 abcd0000  Claude Code  working  -   claude here  /tmp/project  bg\n\
+         * abce0000  -            -        -   zsh          /tmp/project  bg\n"
+    );
 }
 
 #[test]

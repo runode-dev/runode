@@ -110,8 +110,10 @@ Usage: runode send SESSION [TEXT...] [--paste] [--key KEY]... [--enter]
 Arguments:
   SESSION    The session to type into. See `runode help session`
   [TEXT...]  Words joined by spaces; `-` reads the text from stdin. A last
-             word Enter presses Enter, as in tmux send-keys. Put `--` before
-             text that starts with a dash or ends with the word Enter
+             word Enter presses Enter, as in tmux send-keys. A word that
+             starts with a dash is taken for an option: put `--` before the
+             text if any word of it does (echo -n) or it ends with the word
+             Enter
 
 Options:
       --paste         Paste TEXT instead of typing it
@@ -173,7 +175,10 @@ Usage: runode open [--tab | --right | --down] [--near SESSION] [--cwd DIR]
                    [--focus] [--fold | --no-fold] [-- COMMAND...]
 
 Arguments:
-  [COMMAND...]  Typed into the new shell
+  [COMMAND...]  Typed into the new shell: the words are joined by spaces
+                and typed as they are, so quotes your shell removed are
+                gone. For a command that needs quotes, pass it as one
+                argument with the quotes inside: -- 'codex \"what is wrong?\"'
 
 Options:
       --tab           Open a new tab after the one SESSION is in (default)

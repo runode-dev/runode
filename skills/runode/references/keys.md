@@ -21,5 +21,6 @@ order, use several `send` commands. Text is typed literally; `--paste` sends it
 as a paste, which multi-line input and editors handle better. Typed line breaks
 press Enter, so `--wait` for a shell command refuses them: paste, or join the
 commands with `&&`. `-` instead of TEXT reads it from stdin. A last word
-`Enter` presses Enter like `--enter` (the tmux habit); put `--` before text
-that has to end with the word Enter.
+`Enter` presses Enter like `--enter` (the tmux habit). A word that starts with
+a dash is taken for an option, so put `--` before text that has one
+(`runode send right -- echo -n hi`) or has to end with the word Enter.

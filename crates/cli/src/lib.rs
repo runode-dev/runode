@@ -119,6 +119,20 @@ pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write)
             let _ = writeln!(err, "runode: timed out");
             exit::TIMEOUT
         }
+        // 读输出的一头先关了（`| head`）：照别的命令行工具安静地停下。Rust 忽略 SIGPIPE，写不进去只是个
+        // 错误；这个进程也是桌面 app 和宿主，不能全局改回 SIGPIPE。和宿主的连接断了的错误不带 `io::Error`。
+        // `--json` 写的是 `serde_json::Error`，它的 `source` 跳过了里面的 `io::Error`，要单独认。
+        Err(commands::Failure::Error(error))
+            if error.chain().any(|cause| {
+                cause
+                    .downcast_ref::<std::io::Error>()
+                    .map(std::io::Error::kind)
+                    .or_else(|| cause.downcast_ref::<serde_json::Error>().and_then(serde_json::Error::io_error_kind))
+                    == Some(std::io::ErrorKind::BrokenPipe)
+            }) =>
+        {
+            exit::OK
+        }
         Err(commands::Failure::Error(error)) => {
             let _ = writeln!(err, "runode: {error:#}");
             exit::FAILED
