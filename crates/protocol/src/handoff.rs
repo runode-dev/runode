@@ -114,7 +114,19 @@ pub enum HandoffPart {
     Commit {
         #[serde(default)]
         pending_input: Vec<SessionId>,
+        /// 其中有的会话那块末尾的几个字节要等 shell 出了提示符再写（看板在新开的会话里打的 agent
+        /// 命令），新宿主从接手时起重新等。放在块的末尾而不另起一块，是让不认识这一项的旧版本照旧
+        /// 当场写它们，不丢。旧宿主没有这一项，新宿主整块当场写。
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        at_prompt: Vec<AtPrompt>,
     },
+}
+
+/// `HandoffPart::Commit` 里会话 `id` 那块末尾 `len` 个字节要等提示符再写。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AtPrompt {
+    pub id: SessionId,
+    pub len: u64,
 }
 
 impl HandoffPart {
@@ -123,7 +135,7 @@ impl HandoffPart {
         match self {
             Self::Host { .. } => 0,
             Self::Session { .. } => 2,
-            Self::Commit { pending_input } => pending_input.len(),
+            Self::Commit { pending_input, .. } => pending_input.len(),
         }
     }
 }

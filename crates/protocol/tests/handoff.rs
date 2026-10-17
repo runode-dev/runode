@@ -1,8 +1,9 @@
-//! 交接消息的编解码：往返、各种损坏的数据、`pending_command` 的三种状态，以及口令不进 `Debug`。
+//! 交接消息的编解码：往返、各种损坏的数据、`pending_command` 的三种状态、`Commit` 的 `at_prompt` 和旧版本
+//! 读得了的样子，以及口令不进 `Debug`。
 
 use runode_protocol::{
-    BuildId, HANDOFF_FORMAT, HandoffPart, HandoffPartError, OLDEST_READABLE_HANDOFF_FORMAT, RedactorState, ReportToken,
-    RunningCommand, SessionId, WindowLayout, decode_part, encode_part,
+    AtPrompt, BuildId, HANDOFF_FORMAT, HandoffPart, HandoffPartError, OLDEST_READABLE_HANDOFF_FORMAT, RedactorState,
+    ReportToken, RunningCommand, SessionId, WindowLayout, decode_part, encode_part,
 };
 use runode_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -54,7 +55,13 @@ fn session(pending_command: Option<Option<String>>) -> HandoffPart {
 }
 
 fn commit() -> HandoffPart {
-    HandoffPart::Commit { pending_input: vec![ID, SessionId(2)] }
+    HandoffPart::Commit { pending_input: vec![ID, SessionId(2)], at_prompt: vec![AtPrompt { id: ID, len: 1 }] }
+}
+
+/// 编好的消息的头（JSON）。
+fn header_of(data: &[u8]) -> String {
+    let len = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
+    String::from_utf8(data[4..4 + len].to_vec()).unwrap()
 }
 
 #[test]
@@ -71,7 +78,7 @@ fn parts_round_trip() {
         (session(Some(None)), vec![b"", b""]),
         (session(Some(Some("ls -la".into()))), vec![b"", b"x"]),
         (commit(), vec![b"\x03", b"ls\r"]),
-        (HandoffPart::Commit { pending_input: Vec::new() }, vec![]),
+        (HandoffPart::Commit { pending_input: Vec::new(), at_prompt: Vec::new() }, vec![]),
     ];
     for (part, blocks) in cases {
         let data = encode_part(&part, &blocks).unwrap();
@@ -84,14 +91,38 @@ fn parts_round_trip() {
 /// `pending_command` 的三种状态在 JSON 里各不相同：没有字段、`null`、字符串。
 #[test]
 fn pending_command_keeps_all_three_states() {
-    let header = |part: &HandoffPart| {
-        let data = encode_part(part, &[b"", b""]).unwrap();
-        let len = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
-        String::from_utf8(data[4..4 + len].to_vec()).unwrap()
-    };
+    let header = |part: &HandoffPart| header_of(&encode_part(part, &[b"", b""]).unwrap());
     assert!(!header(&session(None)).contains("pending_command"));
     assert!(header(&session(Some(None))).contains(r#""pending_command":null"#));
     assert!(header(&session(Some(Some("ls".into())))).contains(r#""pending_command":"ls""#));
+}
+
+/// 没有等提示符的输入时 `Commit` 不写 `at_prompt`，和不认识它的版本写的一样。
+#[test]
+fn an_empty_at_prompt_is_left_out() {
+    let part = HandoffPart::Commit { pending_input: vec![ID], at_prompt: Vec::new() };
+    assert!(!header_of(&encode_part(&part, &[b"x"]).unwrap()).contains("at_prompt"));
+}
+
+/// 不认识 `at_prompt` 的版本（这里照它冻结的样子写一份 `Commit`）照样读得了带着它的 `Commit`，块也一块不少：
+/// 等提示符的字节在块末尾，它整块当场写，不丢。
+#[test]
+fn a_commit_with_at_prompt_reads_in_an_older_version() {
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum OldPart {
+        Commit { pending_input: Vec<SessionId> },
+    }
+    #[derive(serde::Deserialize)]
+    struct OldHeader {
+        part: OldPart,
+        blocks: Vec<u64>,
+    }
+    let data = encode_part(&commit(), &[b"ls\ragent\r", b"q"]).unwrap();
+    let header: OldHeader = serde_json::from_str(&header_of(&data)).unwrap();
+    let OldPart::Commit { pending_input } = header.part;
+    assert_eq!(pending_input, [ID, SessionId(2)]);
+    assert_eq!(header.blocks, [9, 1]);
 }
 
 /// 以后的版本在已有的块后面加的块，读的一方不认识就不管。

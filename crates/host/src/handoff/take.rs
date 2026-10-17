@@ -16,9 +16,9 @@ use std::{
 };
 
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal,
-    HostMsg, OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, WindowLayout, decode_part, read_frame,
-    write_frame,
+    AtPrompt, BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart,
+    HandoffRefusal, HostMsg, OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, WindowLayout, decode_part,
+    read_frame, write_frame,
 };
 use runode_terminal::{
     fd_passing,
@@ -35,7 +35,7 @@ use super::{TakeOverError, TakeOverOptions, TakeOverReport, ms, peer_pid, runnin
 use crate::{
     Host, Shared, SpawnOptions,
     server::ListenControl,
-    session::{self, Adopted, Handle, Inbox},
+    session::{self, Adopted, Handle, Inbox, Unwritten},
 };
 
 /// 握手和收会话时，旧宿主一次最多这么久不说话。它让会话停下来最多花五秒多，大的回滚历史编码、
@@ -156,8 +156,9 @@ impl Host {
     }
 
     /// 旧宿主提交了：登记会话，套用旧宿主的主题和手里的布局（剪贴板的规矩也交给各个会话，它们
-    /// 开出来时拿的是默认的），把它没写进 PTY 的输入排进各个会话的写队列，打开各个会话的闸门。
-    fn commit(&self, taken: &mut Taken, mut pending: HashMap<SessionId, Vec<u8>>) {
+    /// 开出来时拿的是默认的），把它没写进 PTY 的输入排进各个会话的写队列（还在等提示符的接着等），
+    /// 打开各个会话的闸门。
+    fn commit(&self, taken: &mut Taken, mut pending: HashMap<SessionId, Unwritten>) {
         let shared = &self.shared;
         {
             let mut registry = shared.registry();
@@ -447,12 +448,12 @@ fn abort(stream: &UnixStream, reason: String, started: Instant) -> TakeOverError
 
 /// 等旧宿主的 `Commit`，返回它没写进 PTY 的输入。它没发就断开时：进程已经不在了当作提交了
 /// （输入丢了），还在跑就是回滚了，返回原因。
-fn wait_for_commit(stream: &UnixStream, old_pid: Option<libc::pid_t>) -> Result<HashMap<SessionId, Vec<u8>>, String> {
+fn wait_for_commit(stream: &UnixStream, old_pid: Option<libc::pid_t>) -> Result<HashMap<SessionId, Unwritten>, String> {
     let received = receive_commit(stream).map_err(|err| err.to_string());
     let error = match received.map(|(data, _)| data) {
         Ok(data) => match decode_part(&data) {
-            Ok((HandoffPart::Commit { pending_input }, blocks)) => {
-                return Ok(pending_input.into_iter().zip(blocks).map(|(id, input)| (id, input.to_vec())).collect());
+            Ok((HandoffPart::Commit { pending_input, at_prompt }, blocks)) => {
+                return Ok(unwritten(pending_input, &at_prompt, &blocks));
             }
             // 旧宿主只在提交时发东西：读不懂也是提交了。
             Ok((other, _)) => {
@@ -480,6 +481,24 @@ fn wait_for_commit(stream: &UnixStream, old_pid: Option<libc::pid_t>) -> Result<
         "the old host {pid} died without committing ({error}); taking the sessions over, input it had not written yet is lost"
     );
     Ok(HashMap::new())
+}
+
+/// `Commit` 里各个会话没写进 PTY 的输入：块末尾 `at_prompt` 说的那么多字节要等提示符。长度超出了块的
+/// 不分，整块当场写，同不认识 `at_prompt` 的版本。
+fn unwritten(pending_input: Vec<SessionId>, at_prompt: &[AtPrompt], blocks: &[&[u8]]) -> HashMap<SessionId, Unwritten> {
+    pending_input
+        .into_iter()
+        .zip(blocks)
+        .map(|(id, block)| {
+            let split = at_prompt
+                .iter()
+                .find(|at| at.id == id)
+                .and_then(|at| block.len().checked_sub(usize::try_from(at.len).ok()?))
+                .unwrap_or(block.len());
+            let (now, waiting) = block.split_at(split);
+            (id, Unwritten { now: now.to_vec(), at_prompt: waiting.to_vec() })
+        })
+        .collect()
 }
 
 /// 收旧宿主的 `Commit`，整个收下来最多 `COMMIT_TIMEOUT`。`SO_RCVTIMEO` 只管每一次 `recvmsg`，`Commit` 分几次
@@ -540,5 +559,32 @@ fn receive_message(stream: &UnixStream) -> io::Result<HostMsg> {
         }
         Some(frame) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("unexpected {:?} frame", frame.kind))),
         None => Err(io::ErrorKind::UnexpectedEof.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 旧宿主交出的输入经 `Commit` 原样到这边，等提示符的那部分还是等提示符的；`at_prompt` 的长度超出块时
+    /// 整块当场写，不越界。
+    #[test]
+    fn the_commit_keeps_input_waiting_for_the_prompt_apart() {
+        let pending = [
+            (SessionId(1), Unwritten { now: b"ls\r".to_vec(), at_prompt: b"agent\r".to_vec() }),
+            (SessionId(2), Unwritten { now: Vec::new(), at_prompt: b"agent\r".to_vec() }),
+            (SessionId(3), Unwritten { now: b"q".to_vec(), at_prompt: Vec::new() }),
+        ];
+        let data = super::super::give::commit_part(&pending).unwrap();
+        let (HandoffPart::Commit { pending_input, at_prompt }, blocks) = decode_part(&data).unwrap() else {
+            panic!("not a commit");
+        };
+        let mut got: Vec<_> = unwritten(pending_input, &at_prompt, &blocks).into_iter().collect();
+        got.sort_by_key(|(id, _)| *id);
+        assert_eq!(got, pending);
+
+        let oversized = [AtPrompt { id: SessionId(1), len: 99 }];
+        let got = unwritten(vec![SessionId(1)], &oversized, &[b"ls\r"]);
+        assert_eq!(got[&SessionId(1)], Unwritten { now: b"ls\r".to_vec(), at_prompt: Vec::new() });
     }
 }

@@ -17,8 +17,8 @@ use std::{
 };
 
 use runode_protocol::{
-    BuildId, ClientMsg, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal, HostMsg,
-    ReportToken, RunningCommand, SessionId, encode_part, read_frame,
+    AtPrompt, BuildId, ClientMsg, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffPartError,
+    HandoffRefusal, HostMsg, ReportToken, RunningCommand, SessionId, encode_part, read_frame,
 };
 use runode_terminal::{fd_passing, host_session::SessionExport, pty::PtyHandoff};
 use runode_types::shell::IntegrationMode;
@@ -27,7 +27,7 @@ use super::{kill_peer, ms, peer_pid, running};
 use crate::{
     Shared, SpawnOptions, Stopped,
     server::{ListenControl, Outbox},
-    session::{self, Adopted, Exported, Handle, Inbox, Prepared},
+    session::{self, Adopted, Exported, Handle, Inbox, Prepared, Unwritten},
 };
 
 /// 各个会话停下来交出状态最多等这么久；它们并行地停，每个最多花一秒多编快照。
@@ -148,18 +148,14 @@ pub(crate) fn give(
     for id in &gone {
         shared.kill(*id);
     }
-    let pending_bytes: usize = pending.iter().map(|(_, input)| input.len()).sum();
+    let pending_bytes: usize = pending.iter().map(|(_, input)| input.now.len() + input.at_prompt.len()).sum();
     // 有会话没按时交出 PTY 时不发 `Commit`：它的写线程可能还在写，没写出去的输入也还没交回来，新宿主这时
     // 打开闸门就是两边一起写同一个 PTY。新宿主等不到 `Commit` 会放弃，下面 `reclaim` 把会话接回来。
     let commit_sent = late.is_empty() && {
-        let ids: Vec<SessionId> = pending.iter().map(|(id, _)| *id).collect();
-        let blocks: Vec<&[u8]> = pending.iter().map(|(_, input)| input.as_slice()).collect();
-        let sent = encode_part(&HandoffPart::Commit { pending_input: ids }, &blocks)
-            .map_err(|err| io::Error::other(err.to_string()))
-            .and_then(|data| {
-                stream.set_write_timeout(Some(DONE_TIMEOUT))?;
-                fd_passing::send_with_fds(stream, &data, &[])
-            });
+        let sent = commit_part(&pending).map_err(|err| io::Error::other(err.to_string())).and_then(|data| {
+            stream.set_write_timeout(Some(DONE_TIMEOUT))?;
+            fd_passing::send_with_fds(stream, &data, &[])
+        });
         if let Err(err) = &sent {
             tracing::error!("failed to send the commit to the new host: {err}");
         }
@@ -367,6 +363,21 @@ fn session_part(id: SessionId, exported: &Exported) -> HandoffPart {
     }
 }
 
+/// 提交的 `HandoffPart::Commit`：各个会话没写进 PTY 的输入一块，还在等提示符的接在块末尾，长度记进
+/// `at_prompt`。
+pub(super) fn commit_part(pending: &[(SessionId, Unwritten)]) -> Result<Vec<u8>, HandoffPartError> {
+    let pending_input = pending.iter().map(|(id, _)| *id).collect();
+    let at_prompt = pending
+        .iter()
+        .filter(|(_, input)| !input.at_prompt.is_empty())
+        .map(|(id, input)| AtPrompt { id: *id, len: u64::try_from(input.at_prompt.len()).unwrap_or(u64::MAX) })
+        .collect();
+    let blocks: Vec<Vec<u8>> =
+        pending.iter().map(|(_, input)| [input.now.as_slice(), &input.at_prompt].concat()).collect();
+    let blocks: Vec<&[u8]> = blocks.iter().map(Vec::as_slice).collect();
+    encode_part(&HandoffPart::Commit { pending_input, at_prompt }, &blocks)
+}
+
 /// 新宿主对交过去的会话怎么说。
 enum Reply {
     Ready,
@@ -431,12 +442,12 @@ impl Watchdog {
 }
 
 /// 等会话交出 PTY 的回话：交出时没写进 PTY 的输入。
-type ReleaseReply = mpsc::Receiver<Vec<u8>>;
+type ReleaseReply = mpsc::Receiver<Unwritten>;
 
 /// `release` 的结果。
 struct Released {
     /// 交出了 PTY 的会话没写进 PTY 的输入，只列有的。
-    pending: Vec<(SessionId, Vec<u8>)>,
+    pending: Vec<(SessionId, Unwritten)>,
     /// 没按时交出 PTY 的会话和等它回话的一端（线程已经结束了的不算没交：它的 PTY 随线程关掉了）。原来的
     /// 线程可能还握着 PTY，回滚时要先等它交出来，见 `settle`。
     late: Vec<(SessionId, ReleaseReply)>,
@@ -488,7 +499,7 @@ struct Unconfirmed {
     /// 交出去的会话的状态和这边留着的那份 master。
     kept: Vec<(SessionId, Box<Exported>)>,
     /// 按时交出了 PTY 的会话没写进 PTY 的输入。
-    pending: Vec<(SessionId, Vec<u8>)>,
+    pending: Vec<(SessionId, Unwritten)>,
     /// 没按时交出 PTY 的会话，见 `Released::late`。
     late: Vec<(SessionId, ReleaseReply)>,
     /// 新宿主的进程号。
@@ -506,8 +517,8 @@ struct Unconfirmed {
 /// 理由同上。
 ///
 /// 接回的屏幕停在交出时，之后的输出还在 PTY 里；新宿主打开闸门后读走的那些丢了。没写进 PTY 的
-/// 输入（`pending`）只在 `Commit` 没发出去（`commit_sent` 为假）时写回：发出去了的话新宿主可能
-/// 已经写了，再写一遍就重了。
+/// 输入（`pending`）只在 `Commit` 没发出去（`commit_sent` 为假）时写回，还在等提示符的接着等：发出去了
+/// 的话新宿主可能已经写了，再写一遍就重了。
 fn reclaim(shared: &Shared, unconfirmed: Unconfirmed) -> bool {
     let Unconfirmed { kept, pending, late, successor, commit_sent } = unconfirmed;
     // SAFETY: 没有参数，总是成功。
@@ -530,7 +541,7 @@ fn reclaim(shared: &Shared, unconfirmed: Unconfirmed) -> bool {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    let mut pending: HashMap<SessionId, Vec<u8>> = if commit_sent {
+    let mut pending: HashMap<SessionId, Unwritten> = if commit_sent {
         if !pending.is_empty() {
             tracing::warn!("dropped input the new host may already have written to {} sessions", pending.len());
         }
@@ -556,17 +567,19 @@ fn reclaim(shared: &Shared, unconfirmed: Unconfirmed) -> bool {
     true
 }
 
-/// 等没按时交出 PTY 的会话（`late`）交出来，最多等到 `until`：交出时没写进 PTY 的输入并进 `pending`，返回
-/// 到时还没交的。线程没交就结束了的不算没交，同 `release`。
+/// 等没按时交出 PTY 的会话（`late`）交出来，最多等到 `until`：交出时没写进 PTY 的输入放进 `pending`（这些
+/// 会话本来不在里面），返回到时还没交的。线程没交就结束了的不算没交，同 `release`。
 fn settle(
     late: Vec<(SessionId, ReleaseReply)>,
-    pending: &mut HashMap<SessionId, Vec<u8>>,
+    pending: &mut HashMap<SessionId, Unwritten>,
     until: Instant,
 ) -> Vec<SessionId> {
     let mut stuck = Vec::new();
     for (id, reply) in late {
         match reply.recv_timeout(until.saturating_duration_since(Instant::now())) {
-            Ok(input) if !input.is_empty() => pending.entry(id).or_default().extend_from_slice(&input),
+            Ok(input) if !input.is_empty() => {
+                pending.insert(id, input);
+            }
             Ok(_) => {}
             Err(mpsc::RecvTimeoutError::Timeout) => stuck.push(id),
             Err(mpsc::RecvTimeoutError::Disconnected) => tracing::warn!("session {id} ended instead of releasing"),
@@ -606,15 +619,20 @@ fn take_back(shared: &Shared, id: SessionId, exported: Exported) -> anyhow::Resu
 mod tests {
     use super::*;
 
+    /// 没写进 PTY 的输入：`now` 当场写，`at_prompt` 是还在等提示符的。
+    fn unwritten(now: &[u8], at_prompt: &[u8]) -> Unwritten {
+        Unwritten { now: now.to_vec(), at_prompt: at_prompt.to_vec() }
+    }
+
     /// 一个会话：收到 `Inbox::Release` 后，`gate` 为空时当场回 `input`；不为空时等测试从 `gate` 放行才回，
     /// 测试丢掉放行的一端时不回就走。什么时候回全由测试定，不靠睡多久。
-    fn session(gate: Option<mpsc::Receiver<()>>, input: &'static [u8]) -> (Handle, thread::JoinHandle<()>) {
+    fn session(gate: Option<mpsc::Receiver<()>>, input: Unwritten) -> (Handle, thread::JoinHandle<()>) {
         let (tx, rx) = mpsc::channel();
         let thread = thread::spawn(move || {
             while let Ok(message) = rx.recv() {
                 let Inbox::Release(reply) = message else { continue };
                 if gate.is_none_or(|gate| gate.recv().is_ok()) {
-                    let _ = reply.send(input.to_vec());
+                    let _ = reply.send(input);
                 }
                 return;
             }
@@ -622,26 +640,30 @@ mod tests {
         (Handle::detached(tx), thread)
     }
 
-    /// 没按时交出 PTY 的会话不当作没有输入丢掉：回滚时再等它交出来，晚交的输入照样写回；到时还不交的
-    /// 报出来、不接回，免得原来的线程和接回的会话一起读写同一个 PTY。
+    /// 没按时交出 PTY 的会话不当作没有输入丢掉：回滚时再等它交出来，晚交的输入照样写回，还在等提示符的
+    /// 照样等；到时还不交的报出来、不接回，免得原来的线程和接回的会话一起读写同一个 PTY。
     #[test]
     fn a_late_release_is_waited_for_before_taking_the_session_back() {
         let ids = [SessionId(1), SessionId(2), SessionId(3)];
         let (open_late, late_gate) = mpsc::channel();
         let (keep_stuck, stuck_gate) = mpsc::channel::<()>();
-        let sessions = [session(None, b"on time"), session(Some(late_gate), b"late"), session(Some(stuck_gate), b"")];
+        let sessions = [
+            session(None, unwritten(b"on time", b"")),
+            session(Some(late_gate), unwritten(b"late", b"agent\r")),
+            session(Some(stuck_gate), unwritten(b"", b"")),
+        ];
         let handles: Vec<(SessionId, Handle)> =
             ids.iter().zip(&sessions).map(|(id, (handle, _))| (*id, handle.clone())).collect();
         let Released { pending, late } = release(&handles, &ids, Duration::from_millis(500));
-        assert_eq!(pending, vec![(ids[0], b"on time".to_vec())]);
+        assert_eq!(pending, vec![(ids[0], unwritten(b"on time", b""))]);
         assert_eq!(late.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [ids[1], ids[2]]);
 
         // 第二个这时才交，第三个一直不交，直到看过结果。
         open_late.send(()).unwrap();
-        let mut pending: HashMap<SessionId, Vec<u8>> = pending.into_iter().collect();
+        let mut pending: HashMap<SessionId, Unwritten> = pending.into_iter().collect();
         let stuck = settle(late, &mut pending, Instant::now() + Duration::from_millis(500));
         assert_eq!(stuck, [ids[2]]);
-        assert_eq!(pending.get(&ids[1]).map(Vec::as_slice), Some(&b"late"[..]));
+        assert_eq!(pending.get(&ids[1]), Some(&unwritten(b"late", b"agent\r")));
         drop(keep_stuck);
         for (_, thread) in sessions {
             thread.join().unwrap();

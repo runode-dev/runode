@@ -21,8 +21,8 @@ pub mod todo;
 
 pub use frame::{Frame, FrameError, FrameKind, MAX_PAYLOAD, read_frame, read_frame_limited, write_frame};
 pub use handoff::{
-    HANDOFF_FORMAT, HandoffPart, HandoffPartError, OLDEST_READABLE_HANDOFF_FORMAT, RedactorState, ReportToken,
-    RunningCommand, decode_part, encode_part,
+    AtPrompt, HANDOFF_FORMAT, HandoffPart, HandoffPartError, OLDEST_READABLE_HANDOFF_FORMAT, RedactorState,
+    ReportToken, RunningCommand, decode_part, encode_part,
 };
 pub use layout::{PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout};
 pub use message::{

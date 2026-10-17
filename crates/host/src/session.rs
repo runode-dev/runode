@@ -162,11 +162,12 @@ pub(crate) enum Inbox {
     Prepare(mpsc::Sender<Prepared>),
     /// 交出 PTY（不结束 shell），回交出时还没写进 PTY 的输入，线程随即结束：旧宿主在交接提交时
     /// 发，新宿主不接手了时发（PTY 停在闸门上，原样交回）。
-    Release(mpsc::Sender<Vec<u8>>),
+    Release(mpsc::Sender<Unwritten>),
     /// 交接回滚（旧宿主）：接着读 PTY，按先后重放冻结期间存下的请求。
     Resume,
-    /// 交接提交了（新宿主）：先把旧宿主没写进 PTY 的这些输入排进写队列，再打开读写线程的闸门。
-    Open(Vec<u8>),
+    /// 交接提交了（新宿主）：先把旧宿主没写进 PTY 的这些输入排进写队列，再打开读写线程的闸门；
+    /// 还在等提示符的从这时起重新等，同 `TypeAtPrompt`。
+    Open(Unwritten),
     /// 读写剪贴板的规矩改了，见 `ClientMsg::SetOptions`。
     Clipboard(ClipboardAccess),
     /// 界面回了会话经 `UiPort::ask` 请它办的事，`ui` 是那条请求的编号；界面没回就断开了时是
@@ -175,6 +176,21 @@ pub(crate) enum Inbox {
         ui: u64,
         reply: Box<HostMsg>,
     },
+}
+
+/// 会话交出 PTY 时还没写进 PTY 的输入，见 `Inbox::Release`、`Inbox::Open`。
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Unwritten {
+    /// 接手的一方当场写的。
+    pub(crate) now: Vec<u8>,
+    /// 还在等提示符的 `Inbox::TypeAtPrompt`：接手的一方接着等，不当场写。空的就是没有。
+    pub(crate) at_prompt: Vec<u8>,
+}
+
+impl Unwritten {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.now.is_empty() && self.at_prompt.is_empty()
+    }
 }
 
 /// 会话对 `Inbox::Prepare` 的回话。
@@ -833,9 +849,12 @@ impl Runner {
                 self.session.drive(by.map(|by| by.to_string()), action, at_ms);
             }
             Inbox::Driven(None) => self.session.clear_driver(),
-            Inbox::Open(pending) => {
-                if !pending.is_empty() {
-                    self.session.write(pending);
+            Inbox::Open(Unwritten { now, at_prompt }) => {
+                if !now.is_empty() {
+                    self.session.write(now);
+                }
+                if !at_prompt.is_empty() {
+                    self.type_ahead = Some((at_prompt, Instant::now()));
                 }
                 if let Err(err) = self.session.resume_reading() {
                     tracing::error!("session {} cannot read its pty after the handoff: {err:#}", self.id);
@@ -1002,10 +1021,10 @@ impl Runner {
         self.publish_meta();
     }
 
-    /// 交接提交了：交出 PTY（不结束 shell），返回交出时没写进 PTY 的输入，还在等提示符的
-    /// `TypeAtPrompt` 和 `held` 里存下的输入编好接在后面。还没启动 shell 的会话没有 PTY 可交，只有存下的
-    /// 输入。
-    fn release(&mut self, held: Vec<Inbox>) -> Vec<u8> {
+    /// 交接提交了：交出 PTY（不结束 shell），返回交出时没写进 PTY 的输入，`held` 里存下的输入编好
+    /// 接在后面；还在等提示符的 `TypeAtPrompt`（`held` 里的后来的替掉先前的，同 `handle`）单独交出，
+    /// 接手的一方接着等。还没启动 shell 的会话没有 PTY 可交，只有存下的输入。
+    fn release(&mut self, held: Vec<Inbox>) -> Unwritten {
         // 在等桌面回话的读剪贴板请求新宿主接不过去（它不知道在等什么，也不会替它计时），程序会一直等：交出
         // PTY 之前回它空的，回话写不出去的话随没写出去的输入一起交给新宿主。冻结期间存下的界面回话随
         // `held` 丢掉。
@@ -1013,7 +1032,7 @@ impl Runner {
             tracing::info!("session {} answered a clipboard read with nothing: the host is handing over", self.id);
             self.finish_read(read, None);
         }
-        let mut pending = match self.session.release_pty() {
+        let mut now = match self.session.release_pty() {
             // 丢掉交出来的 master 只关这边这份，新宿主手里还有一份。
             Ok(handoff) => handoff.pending_input,
             Err(err) => {
@@ -1021,22 +1040,24 @@ impl Runner {
                 Vec::new()
             }
         };
-        if let Some((data, _)) = self.type_ahead.take() {
-            pending.extend_from_slice(&data);
-        }
+        let mut at_prompt = self.type_ahead.take().map(|(data, _)| data).unwrap_or_default();
         for message in held {
             let bytes = match message {
-                Inbox::Input { data, .. } | Inbox::TypeAtPrompt(data) => Ok(data),
+                Inbox::Input { data, .. } => Ok(data),
+                Inbox::TypeAtPrompt(data) => {
+                    at_prompt = data;
+                    continue;
+                }
                 Inbox::Keys(keys) => self.session.encode_keys(&keys),
                 Inbox::Paste(text) => self.session.encode_paste(&text),
                 _ => continue,
             };
             match bytes {
-                Ok(bytes) => pending.extend_from_slice(&bytes),
+                Ok(bytes) => now.extend_from_slice(&bytes),
                 Err(err) => tracing::warn!("session {} drops input held during the handoff: {err:#}", self.id),
             }
         }
-        pending
+        Unwritten { now, at_prompt }
     }
 
     /// 交接回滚：接着读 PTY，按先后重放冻结期间存下的请求。
@@ -1292,7 +1313,7 @@ struct Freeze {
 }
 
 enum Decision {
-    Release(mpsc::Sender<Vec<u8>>),
+    Release(mpsc::Sender<Unwritten>),
     Resume,
 }
 
@@ -1502,6 +1523,29 @@ mod tests {
         tx.send(Inbox::Kill).unwrap();
         screen.recv_timeout(WAIT).expect("the held subscribe was not answered");
         session.join().unwrap();
+    }
+
+    /// 交出 PTY 时还在等提示符的 `TypeAtPrompt`（冻结期间存下的替掉先前的）不混进当场写的输入；接手的一方
+    /// `Open` 后接着等提示符，不当场写。
+    #[test]
+    fn input_waiting_for_the_prompt_is_handed_over_apart() {
+        let mut giver = runner(false);
+        giver.handle(Inbox::TypeAtPrompt(b"old\r".to_vec()));
+        let held = vec![
+            Inbox::Input { connection: 1, data: b"ls\r".to_vec() },
+            Inbox::TypeAtPrompt(b"agent\r".to_vec()),
+            Inbox::Input { connection: 1, data: b"q".to_vec() },
+        ];
+        let unwritten = giver.release(held);
+        assert_eq!(unwritten, Unwritten { now: b"ls\rq".to_vec(), at_prompt: b"agent\r".to_vec() });
+        assert!(giver.type_ahead.is_none());
+
+        let mut taker = runner(false);
+        let before = Instant::now();
+        taker.handle(Inbox::Open(unwritten));
+        let (data, since) = taker.type_ahead.as_ref().expect("still waiting for the prompt");
+        assert_eq!(data, b"agent\r");
+        assert!(*since >= before, "the wait starts over when the session is taken over");
     }
 
     #[test]

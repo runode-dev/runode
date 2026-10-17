@@ -6,8 +6,8 @@
 //! `SessionMeta`），要改回来，不要改样例。见 `message` 和 `handoff` 的模块文档。
 
 use runode_protocol::{
-    BuildId, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HandoffPart, HandoffRefusal, HostMsg, RedactorState,
-    ReportToken, RunningCommand, SessionId, decode_part, read_frame,
+    AtPrompt, BuildId, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HandoffPart, HandoffRefusal, HostMsg,
+    RedactorState, ReportToken, RunningCommand, SessionId, decode_part, read_frame,
 };
 use runode_types::{
     clipboard::ClipboardAccess,
@@ -263,6 +263,28 @@ fn commit_part_is_readable() {
     let header = format!(r#"{{"part":{{"type":"commit","pending_input":["{ID}","{OTHER}"]}},"blocks":[3,1]}}"#);
     let data = message(&header, &[b"ls\r", b"q"]);
     let (part, blocks) = decode_part(&data).unwrap();
-    assert_eq!(part, HandoffPart::Commit { pending_input: vec![ID.parse().unwrap(), OTHER.parse().unwrap()] });
+    assert_eq!(
+        part,
+        HandoffPart::Commit { pending_input: vec![ID.parse().unwrap(), OTHER.parse().unwrap()], at_prompt: Vec::new() }
+    );
     assert_eq!(blocks, [&b"ls\r"[..], &b"q"[..]]);
+}
+
+/// 后来加的 `at_prompt`：第一个会话那块末尾 6 个字节等提示符再写。
+#[test]
+fn commit_part_with_at_prompt_is_readable() {
+    let header = format!(
+        r#"{{"part":{{"type":"commit","pending_input":["{ID}","{OTHER}"],"at_prompt":[{{"id":"{ID}","len":6}}]}},
+          "blocks":[9,1]}}"#
+    );
+    let data = message(&header, &[b"ls\ragent\r", b"q"]);
+    let (part, blocks) = decode_part(&data).unwrap();
+    assert_eq!(
+        part,
+        HandoffPart::Commit {
+            pending_input: vec![ID.parse().unwrap(), OTHER.parse().unwrap()],
+            at_prompt: vec![AtPrompt { id: ID.parse().unwrap(), len: 6 }],
+        }
+    );
+    assert_eq!(blocks, [&b"ls\ragent\r"[..], &b"q"[..]]);
 }
