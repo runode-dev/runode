@@ -7,12 +7,12 @@
 //! 没有窗口可显示：开终端一律开成工作区里排在最后的新标签（要分屏的也是），不切过去；切到终端
 //! （`Reveal`）回 `Error`。已经不在宿主里的会话每次用这份布局前去掉，见 `tidy`。
 
-use std::{fs, path::PathBuf, sync::mpsc};
+use std::{fs, path::PathBuf};
 
 use runode_protocol::{HostMsg, PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
 use runode_types::{grid::GridSize, shell::IntegrationMode};
 
-use crate::{Shared, SpawnOptions, server::REPLY_TIMEOUT, session::Inbox};
+use crate::{Shared, SpawnOptions};
 
 /// 宿主自己开的会话一开始的尺寸：没有窗口，等有前端带着尺寸连上来时再改。
 const SPAWN_SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };
@@ -97,7 +97,7 @@ impl Shared {
             };
             ((window, workspace), peers.layout[window].workspaces[workspace].dir.clone())
         };
-        let cwd = cwd.or_else(|| near.and_then(|id| self.cwd(id))).or(dir);
+        let cwd = cwd.or_else(|| near.and_then(|id| self.session_info(id)?.meta.cwd)).or(dir);
         let id = self.spawn(spawn_options(cwd)).map_err(|err| format!("{err:#}"))?;
         let mut peers = self.peers();
         self.tidy(&mut peers.layout);
@@ -140,15 +140,6 @@ impl Shared {
     fn tidy(&self, layout: &mut Vec<WindowLayout>) {
         let registry = self.registry();
         tidy(layout, |id| registry.sessions.contains_key(&id));
-    }
-
-    /// 会话 `id` 的 shell 现在所在的目录；会话不在、没回话、不知道目录时为空。
-    fn cwd(&self, id: SessionId) -> Option<PathBuf> {
-        let (reply, info) = mpsc::channel();
-        if !self.deliver(id, Inbox::Info(reply)) {
-            return None;
-        }
-        info.recv_timeout(REPLY_TIMEOUT).ok()?.meta.cwd
     }
 }
 

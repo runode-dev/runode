@@ -10,13 +10,17 @@ mod common;
 use std::{
     collections::HashSet,
     fs::File,
-    io::Write as _,
-    os::unix::{
-        net::{UnixListener, UnixStream},
-        process::ExitStatusExt as _,
+    io::{Read as _, Write as _},
+    net::Shutdown,
+    os::{
+        fd::{AsFd as _, AsRawFd as _, FromRawFd as _, OwnedFd},
+        unix::{
+            net::{UnixListener, UnixStream},
+            process::ExitStatusExt as _,
+        },
     },
     path::{Path, PathBuf},
-    process::{Command, ExitStatus, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::Mutex,
     thread,
     time::{Duration, Instant},
@@ -29,13 +33,14 @@ use runode_host::{
 use runode_protocol::{
     AttachMode, Caps, ClientKind, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart,
     OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout,
-    decode_part, read_frame, write_frame,
+    decode_part, encode_part, read_frame, write_frame,
 };
 use runode_terminal::fd_passing;
 use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     grid::GridSize,
+    settings::TermSettings,
     shell::IntegrationMode,
 };
 
@@ -50,8 +55,11 @@ const SNAPSHOT_FORMAT: &str = "RUNODE_HANDOFF_SNAPSHOT_FORMAT";
 /// 新宿主的构建，没设时是 `NEW_BUILD`。连续交接时每一棒要是不同的构建：同一个构建的不交接。
 const SUCCESSOR_BUILD: &str = "RUNODE_HANDOFF_BUILD";
 /// 假的新宿主收下所有会话后怎么办：`die` 退出，`hang` 一直不回话，`abort` 回 `HandoffAbort`，
-/// `die-after-commit` 回 `HandoffReady`、收到 `Commit` 后不回 `HandoffDone` 就退出。
+/// `die-after-commit` 回 `HandoffReady`、收到 `Commit` 后不回 `HandoffDone` 就退出。假的旧宿主收到
+/// `HandoffReady` 后怎么办：`die` 退出，`disconnect` 只断开连接、进程留着。
 const FAKE: &str = "RUNODE_HANDOFF_FAKE";
+/// 假的旧宿主交出的那个会话。
+const FAKE_OLD_SESSION: SessionId = SessionId(0x0123_4567_89ab_cdef_0011_2233_4455_6677);
 
 const OLD_BUILD: &str = "old-build";
 const NEW_BUILD: &str = "new-build";
@@ -132,6 +140,95 @@ fn role_fake_successor() {
     }
 }
 
+/// 假的旧宿主：在 socket 上等新宿主，按协议交出一个会话（`cat` 跑在新开的伪终端里），收到
+/// `HandoffReady` 后不发 `Commit`，按 `RUNODE_HANDOFF_FAKE` 退出或者只断开连接。只断开的接着等
+/// 测试写 `go`，再往伪终端里写一行，`cat` 照样回过来就写 `fake-old.echo`：新宿主没弄坏手里那份 PTY。
+#[test]
+fn role_fake_old() {
+    let Some(dir) = role("fake-old") else { return };
+    let listener = UnixListener::bind(socket_in(&dir)).unwrap();
+    let lock = File::create(dir.join("host.lock")).unwrap();
+    let (master, mut cat) = cat_on_a_pty();
+    std::fs::write(dir.join("fake-old.listening"), "1").unwrap();
+    let (stream, _) = listener.accept().unwrap();
+    assert!(matches!(receive::<ClientMsg>(&stream), ClientMsg::Hello { client: ClientKind::Successor, .. }));
+    send(
+        &stream,
+        &HostMsg::Welcome {
+            protocol: PROTOCOL_VERSION,
+            build: BuildId("fake-old".into()),
+            host_pid: std::process::id(),
+            snapshot_format: 0,
+            standalone: true,
+            handoff: HANDOFF_FORMAT,
+            keep_awake: false,
+            todos: false,
+        },
+    );
+    assert!(matches!(receive::<ClientMsg>(&stream), ClientMsg::Handoff { .. }));
+    send(&stream, &HostMsg::HandoffBegin { format: HANDOFF_FORMAT, sessions: 1 });
+    // 只写必填的字段，别的按默认值读：照着别的版本的旧宿主写，交接格式加了字段也不用改这里。
+    let host = serde_json::json!({
+        "type": "host", "format": HANDOFF_FORMAT, "build": "fake-old", "snapshot_format": 0, "sessions": 1,
+        "record_history": false, "socket": socket_in(&dir),
+    });
+    let session = serde_json::json!({
+        "type": "session", "id": FAKE_OLD_SESSION, "started": true, "pid": cat.id(), "size": SIZE,
+        "settings": TermSettings::default(),
+    });
+    let encode = |part, blocks: &[&[u8]]| encode_part(&serde_json::from_value(part).unwrap(), blocks).unwrap();
+    fd_passing::send_with_fds(&stream, &encode(host, &[]), &[listener.as_fd(), lock.as_fd()]).unwrap();
+    fd_passing::send_with_fds(&stream, &encode(session, &[b"", b""]), &[master.as_fd()]).unwrap();
+    assert!(matches!(receive::<ClientMsg>(&stream), ClientMsg::HandoffReady));
+    match std::env::var(FAKE).unwrap().as_str() {
+        "die" => std::process::exit(0),
+        "disconnect" => {
+            stream.shutdown(Shutdown::Both).unwrap();
+            wait_file(&dir.join("go"));
+            let mut master = File::from(master);
+            master.write_all(b"ping\n").unwrap();
+            // 伪终端回显一遍，`cat` 再写一遍。新宿主把主端设成了非阻塞（同一个打开的文件），读不到时歇一下。
+            let mut seen = Vec::new();
+            while seen.windows(4).filter(|window| window == b"ping").count() < 2 {
+                let mut buf = [0; 256];
+                match master.read(&mut buf) {
+                    Ok(0) => panic!("the pty hung up: {}", String::from_utf8_lossy(&seen)),
+                    Ok(read) => seen.extend_from_slice(&buf[..read]),
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10))
+                    }
+                    Err(err) => panic!("cannot read the pty: {err}"),
+                }
+            }
+            std::fs::write(dir.join("fake-old.echo"), "ok").unwrap();
+            let _ = cat.kill();
+        }
+        other => panic!("unknown fake {other}"),
+    }
+}
+
+/// 新开一个伪终端，`cat` 跑在它的从端上，返回主端和 `cat`。
+fn cat_on_a_pty() -> (OwnedFd, Child) {
+    let (mut master, mut slave) = (0, 0);
+    // SAFETY: 输出参数指向本地变量；名字、termios、窗口尺寸都不要，传空指针。
+    let opened = unsafe {
+        libc::openpty(&raw mut master, &raw mut slave, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
+    };
+    assert_eq!(opened, 0, "openpty: {}", std::io::Error::last_os_error());
+    // SAFETY: 两个描述符是 openpty 刚开的，归这里。
+    let (master, slave) = unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+    // 主端别漏给 `cat`，不然新宿主手里那份关了伪终端也不挂断。
+    // SAFETY: 描述符有效，只设 close-on-exec。
+    assert_eq!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) }, 0);
+    let cat = Command::new("/bin/cat")
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave)
+        .spawn()
+        .unwrap();
+    (master, cat)
+}
+
 /// 在这个进程里演角色时返回目录。
 fn role(name: &str) -> Option<PathBuf> {
     (std::env::var(ROLE).ok()? == name).then(|| PathBuf::from(std::env::var_os(DIR).unwrap()))
@@ -200,6 +297,7 @@ impl Role {
             "old" => "role_old",
             "successor" => "role_successor",
             "fake" => "role_fake_successor",
+            "fake-old" => "role_fake_old",
             "rollbacks" => "role_rollbacks",
             other => panic!("unknown role {other}"),
         };
@@ -359,15 +457,24 @@ fn assert_handoff_goodbye(peer: &Peer) {
     );
 }
 
-fn send(stream: &UnixStream, message: &ClientMsg) {
+/// 发一条控制消息：前端发 `ClientMsg`，假的旧宿主发 `HostMsg`。
+fn send(stream: &UnixStream, message: &impl serde::Serialize) {
     let frame = Frame::control(message).unwrap();
     write_frame(&mut &*stream, frame.kind, 0, &frame.payload).unwrap();
 }
 
-fn receive(stream: &UnixStream) -> HostMsg {
+/// 收一条控制消息，`HostMsg` 或 `ClientMsg` 由调用处定。
+fn receive<T: serde::de::DeserializeOwned>(stream: &UnixStream) -> T {
     let frame = read_frame(&mut &*stream).unwrap().unwrap();
     assert_eq!(frame.kind, FrameKind::Control);
     frame.message().unwrap()
+}
+
+/// 起一个假的旧宿主（`role_fake_old`），等它开始监听，返回它和 socket。
+fn fake_old(dir: &Path, fake: &str) -> (Role, PathBuf) {
+    let old = Role::start("fake-old", dir, &[(FAKE, fake)]);
+    wait_file(&dir.join("fake-old.listening"));
+    (old, socket_in(dir))
 }
 
 /// 假的新宿主：握手、要交接、收下所有会话（描述符都关掉），返回会话数。
@@ -604,6 +711,39 @@ fn a_successor_that_dies_after_the_commit_gives_the_sessions_back() {
     assert_eq!(result, "ok 1");
     let (mut new, _) = hello_build(&socket);
     new.wait_screen(id, Some(10), |text| text.contains("end"));
+}
+
+/// 旧宿主收到 `HandoffReady` 后没发 `Commit` 就死了：新宿主当作它提交了，照样接手，会话接着能用。
+#[test]
+fn an_old_host_that_dies_before_committing_is_taken_over() {
+    let dir = temp_dir("olddies");
+    let (mut old, socket) = fake_old(&dir, "die");
+    let host = Host::new(BuildId(NEW_BUILD.into()));
+    host.mark_standalone();
+    let report = host.take_over(&socket, TakeOverOptions::default()).unwrap();
+    assert_eq!(report.sessions, 1);
+    assert!(old.wait().success());
+    let mut peer = Peer::pair(&host);
+    let (channel, _) = peer.attach(FAKE_OLD_SESSION, AttachMode::Snapshot);
+    peer.input(channel, b"hi\r");
+    peer.wait_for_output(channel, b"hi\r\nhi");
+    peer.send(&ClientMsg::Kill { id: FAKE_OLD_SESSION });
+}
+
+/// 旧宿主收到 `HandoffReady` 后没发 `Commit` 就断开、进程还在：它回滚了，新宿主接手失败，收下的 PTY
+/// 原样交回、不留会话，旧宿主手里那份照常能用。
+#[test]
+fn an_old_host_that_only_disconnects_keeps_its_sessions() {
+    let dir = temp_dir("olddisconnects");
+    let (mut old, socket) = fake_old(&dir, "disconnect");
+    let host = Host::new(BuildId(NEW_BUILD.into()));
+    host.mark_standalone();
+    let result = host.take_over(&socket, TakeOverOptions::default());
+    assert!(matches!(&result, Err(TakeOverError::Failed(reason)) if reason.contains("rolled back")), "{result:?}");
+    assert!(Peer::pair(&host).sessions().is_empty());
+    std::fs::write(dir.join("go"), "1").unwrap();
+    assert_eq!(wait_file(&dir.join("fake-old.echo")), "ok");
+    assert!(old.wait().success());
 }
 
 /// 新宿主卡住不回话：期限一到旧宿主杀掉它、回滚；放弃的（`HandoffAbort`）也回滚。会话都照常。

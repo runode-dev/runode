@@ -204,7 +204,7 @@ impl Shared {
     }
 
     /// 会话 `id` 现在的状态；没有这个会话、或者它没及时回话时为空。
-    fn session_info(&self, id: SessionId) -> Option<SessionInfo> {
+    pub(crate) fn session_info(&self, id: SessionId) -> Option<SessionInfo> {
         let (reply, info) = mpsc::channel();
         if !self.deliver(id, Inbox::Info(reply)) {
             return None;

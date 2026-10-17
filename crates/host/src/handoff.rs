@@ -196,6 +196,18 @@ fn running(pid: libc::pid_t) -> bool {
     signal_alive(pid)
 }
 
+/// 等进程 `pid` 退出完，最多 `take::EXIT_GRACE`，每 10 毫秒看一次；到时还在跑返回假。
+fn exits_in_grace(pid: libc::pid_t) -> bool {
+    let until = Instant::now() + take::EXIT_GRACE;
+    while running(pid) {
+        if Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    true
+}
+
 /// 用信号 0 看进程 `pid` 在不在。只有 `ESRCH` 算不在：`EPERM` 是进程在、只是不让给它发信号。等着收尸的
 /// 也算在。
 #[cfg(any(test, not(target_os = "macos")))]

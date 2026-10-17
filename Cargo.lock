@@ -4663,6 +4663,8 @@ dependencies = [
  "runode-terminal",
  "runode-todo",
  "runode-types",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 

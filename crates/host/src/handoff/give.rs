@@ -23,7 +23,7 @@ use runode_protocol::{
 use runode_terminal::{fd_passing, host_session::SessionExport, pty::PtyHandoff};
 use runode_types::shell::IntegrationMode;
 
-use super::{kill_peer, ms, peer_pid, running};
+use super::{exits_in_grace, kill_peer, ms, peer_pid, running};
 use crate::{
     Shared, SpawnOptions, Stopped,
     server::{ListenControl, Outbox},
@@ -531,15 +531,9 @@ fn reclaim(shared: &Shared, unconfirmed: Unconfirmed) -> bool {
     if running(pid) && unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
         tracing::warn!("failed to kill the new host {pid}: {}", io::Error::last_os_error());
     }
-    let until = Instant::now() + super::take::EXIT_GRACE;
-    while running(pid) {
-        if Instant::now() >= until {
-            tracing::error!(
-                "the new host {pid} did not confirm the handoff and is still running; leaving the sessions"
-            );
-            return false;
-        }
-        thread::sleep(Duration::from_millis(10));
+    if !exits_in_grace(pid) {
+        tracing::error!("the new host {pid} did not confirm the handoff and is still running; leaving the sessions");
+        return false;
     }
     let mut pending: HashMap<SessionId, Unwritten> = if commit_sent {
         if !pending.is_empty() {

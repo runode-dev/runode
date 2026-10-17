@@ -31,7 +31,7 @@ use runode_types::{
     shell::{FinishedCommand, IntegrationMode},
 };
 
-use super::{TakeOverError, TakeOverOptions, TakeOverReport, ms, peer_pid, running};
+use super::{TakeOverError, TakeOverOptions, TakeOverReport, exits_in_grace, ms, peer_pid};
 use crate::{
     Host, Shared, SpawnOptions,
     server::ListenControl,
@@ -470,12 +470,8 @@ fn wait_for_commit(stream: &UnixStream, old_pid: Option<libc::pid_t>) -> Result<
     let Some(pid) = old_pid else {
         return Err(format!("the old host went away without committing ({error}) and its pid is unknown"));
     };
-    let until = Instant::now() + EXIT_GRACE;
-    while running(pid) {
-        if Instant::now() >= until {
-            return Err(format!("the old host {pid} rolled back without committing ({error})"));
-        }
-        thread::sleep(Duration::from_millis(10));
+    if !exits_in_grace(pid) {
+        return Err(format!("the old host {pid} rolled back without committing ({error})"));
     }
     tracing::error!(
         "the old host {pid} died without committing ({error}); taking the sessions over, input it had not written yet is lost"
