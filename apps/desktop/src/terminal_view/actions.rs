@@ -111,7 +111,15 @@ impl TerminalView {
     }
 
     pub(super) fn jump_to_prompt(&mut self, action: &JumpToPrompt, _: &mut Window, cx: &mut Context<Self>) {
-        self.with_shown(cx, |s| s.jump_to_prompt(action.0 < 0));
+        // 和 Ghostty 一样跳 N 个提示符；那个方向上没有提示符了就停，不再白扫一遍回滚。
+        let backward = action.0 < 0;
+        self.with_shown(cx, |s| {
+            for _ in 0..action.0.unsigned_abs() {
+                if !s.jump_to_prompt(backward) {
+                    break;
+                }
+            }
+        });
     }
 
     pub(super) fn send_text(&mut self, action: &SendText, _: &mut Window, cx: &mut Context<Self>) {

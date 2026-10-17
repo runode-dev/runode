@@ -52,8 +52,8 @@ impl Session {
     }
 
     /// 视口跳到上一个（`backward`）或下一个提示符所在的行，靠 shell 集成标在提示符上的记号。
-    /// 往后没有提示符时回到底部。
-    pub fn jump_to_prompt(&mut self, backward: bool) {
+    /// 往后没有提示符时回到底部。返回是不是跳到了一个提示符上：往前没有了、往后回到底部时为假。
+    pub fn jump_to_prompt(&mut self, backward: bool) -> bool {
         self.scroll_offset = 0.;
         let result = self.terminal.scrollbar().map(|scrollbar| {
             let is_prompt = |y: u64| {
@@ -70,9 +70,15 @@ impl Session {
             }
         });
         match log_err("jump to prompt", result) {
-            Some(Some(row)) => self.terminal.scroll_viewport(ScrollViewport::Row(row as usize)),
-            Some(None) if !backward => self.terminal.scroll_viewport(ScrollViewport::Bottom),
-            _ => {}
+            Some(Some(row)) => {
+                self.terminal.scroll_viewport(ScrollViewport::Row(row as usize));
+                true
+            }
+            Some(None) if !backward => {
+                self.terminal.scroll_viewport(ScrollViewport::Bottom);
+                false
+            }
+            _ => false,
         }
     }
 }

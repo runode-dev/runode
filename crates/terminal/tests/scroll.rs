@@ -61,11 +61,14 @@ fn jumping_between_marked_prompts() {
     session.feed(PROMPT);
     // 4 行高的视口最上面一行是 "$ cmd2"，往上跳到它之前的那个提示符。
     assert_eq!(row_text(&session.frame(), 0), "$ cmd2");
-    session.jump_to_prompt(true);
+    assert!(session.jump_to_prompt(true));
     assert_eq!(row_text(&session.frame(), 0), "$ cmd1");
-    session.jump_to_prompt(true);
+    assert!(session.jump_to_prompt(true));
     assert_eq!(row_text(&session.frame(), 0), "$ cmd0");
-    session.jump_to_prompt(false);
+    // 再往上没有提示符了：不动，说没跳成。
+    assert!(!session.jump_to_prompt(true));
+    assert_eq!(row_text(&session.frame(), 0), "$ cmd0");
+    assert!(session.jump_to_prompt(false));
     assert_eq!(row_text(&session.frame(), 0), "$ cmd1");
 }
 
