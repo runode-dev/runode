@@ -2,10 +2,14 @@
 //! 块头。块和工作区改动列表里的一样（同样的 `git diff` 参数，默认的上下文行数），按块暂存、丢弃
 //! 用的就是这些块；再读新的那一边的全文，按块头的行号把块嵌进去。
 
-use std::{fs, path::Path};
+use std::{
+    ffi::{OsStr, OsString},
+    fs,
+    path::Path,
+};
 
 use crate::{
-    FileDiff, FileStatus, GitError, LineKind, Repo, Result, git,
+    FileDiff, FileStatus, GitError, LineKind, Repo, Result, filter_overrides, git,
     parse::expand_tabs,
     snapshot::{MAX_DIFF_BYTES, diff, read_untracked, worktree_bytes},
 };
@@ -147,8 +151,7 @@ impl Repo {
     /// 放进 `old_path`，不然认不出是改名。已经没有改动时为空，`git diff` 失败时报错，不当成没有改动。
     /// 未跟踪的文件整篇都是加的行。
     pub fn file_view(&self, path: &Path, old_path: Option<&Path>, side: &DiffSide) -> Result<Option<DiffView>> {
-        let specs: Vec<String> =
-            std::iter::once(path).chain(old_path).map(|path| format!(":(literal){}", path.display())).collect();
+        let specs = std::iter::once(path).chain(old_path).map(literal);
         let empty_tree = || {
             git(&self.root, &["hash-object", "-t", "tree", "/dev/null"])
                 .map(|tree| String::from_utf8_lossy(&tree).trim().to_owned())
@@ -157,17 +160,18 @@ impl Repo {
             DiffSide::Commit { parent, .. } => parent.clone().or_else(empty_tree),
             _ => None,
         };
-        let mut args: Vec<&str> = match (side, &base) {
-            (DiffSide::Worktree, _) => vec!["-2"],
+        let mut args: Vec<OsString> = match (side, &base) {
+            (DiffSide::Worktree, _) => vec!["-2".into()],
             // 还没有提交时 `--cached` 自己和空树比。
-            (DiffSide::Index, _) => vec!["--cached"],
-            (DiffSide::Commit { id, .. }, Some(base)) => vec![base, id],
+            (DiffSide::Index, _) => vec!["--cached".into()],
+            (DiffSide::Commit { id, .. }, Some(base)) => vec![base.into(), id.into()],
             _ => return Ok(None),
         };
-        args.push("--");
-        args.extend(specs.iter().map(String::as_str));
-        let files =
-            diff(&self.root, &args).ok_or_else(|| GitError::new(format!("没能读出 {} 的 diff", path.display())))?;
+        args.push("--".into());
+        args.extend(specs);
+        // 和改动列表一样覆盖掉仓库自己的过滤器，块才和列表里的一样。
+        let files = diff(&self.root, &filter_overrides(&self.root), &args)
+            .ok_or_else(|| GitError::new(format!("没能读出 {} 的 diff", path.display())))?;
         let mut file = files.into_iter().find(|file| file.path == path);
         if file.is_none() && *side == DiffSide::Worktree && self.untracked(path) {
             let full = self.root.join(path);
@@ -210,8 +214,8 @@ impl Repo {
                 }
                 worktree_bytes(&full, options.max_bytes)
             }
-            DiffSide::Index => return self.blob(&format!(":{}", path.display()), options),
-            DiffSide::Commit { id, .. } => return self.blob(&format!("{id}:{}", path.display()), options),
+            DiffSide::Index => return self.blob(&blob_spec("", path), options),
+            DiffSide::Commit { id, .. } => return self.blob(&blob_spec(id, path), options),
         };
         match bytes {
             Some(bytes) if bytes.len() as u64 > options.max_bytes => Err(TooLarge),
@@ -229,11 +233,11 @@ impl Repo {
         side: &DiffSide,
         options: ReadOptions,
     ) -> std::result::Result<Option<Vec<u8>>, TooLarge> {
-        let path = old_path.unwrap_or(path).display();
+        let path = old_path.unwrap_or(path);
         let spec = match side {
-            DiffSide::Worktree => format!(":{path}"),
-            DiffSide::Index => format!("HEAD:{path}"),
-            DiffSide::Commit { parent: Some(parent), .. } => format!("{parent}:{path}"),
+            DiffSide::Worktree => blob_spec("", path),
+            DiffSide::Index => blob_spec("HEAD", path),
+            DiffSide::Commit { parent: Some(parent), .. } => blob_spec(parent, path),
             DiffSide::Commit { parent: None, .. } => return Ok(None),
         };
         self.blob(&spec, options)
@@ -242,8 +246,8 @@ impl Repo {
     /// blob `spec`（`版本:路径`）的字节，读不到时为空；先用 `cat-file -s` 查大小，比 `options.max_bytes`
     /// 大的是 `TooLarge`，不读出来。先把 `spec` 解析成对象 id 再按 id 查大小、读：暂存区或分支在这之间
     /// 换成了别的（大）文件，读到的也还是查过大小的那一个。
-    fn blob(&self, spec: &str, options: ReadOptions) -> std::result::Result<Option<Vec<u8>>, TooLarge> {
-        let Some(id) = git(&self.root, &["rev-parse", "--verify", "--quiet", spec])
+    fn blob(&self, spec: &OsStr, options: ReadOptions) -> std::result::Result<Option<Vec<u8>>, TooLarge> {
+        let Some(id) = git(&self.root, &["rev-parse".as_ref(), "--verify".as_ref(), "--quiet".as_ref(), spec])
             .and_then(|out| String::from_utf8(out).ok())
             .map(|id| id.trim().to_owned())
         else {
@@ -265,8 +269,21 @@ impl Repo {
 
     /// `path` 在工作区里、不是目录（符号链接看它自己）、git 没跟踪它。
     fn untracked(&self, path: &Path) -> bool {
-        let spec = format!(":(literal){}", path.display());
         fs::symlink_metadata(self.root.join(path)).is_ok_and(|meta| !meta.is_dir())
-            && git(&self.root, &["ls-files", "--error-unmatch", "--", &spec]).is_none()
+            && git(&self.root, &["ls-files".into(), "--error-unmatch".into(), "--".into(), literal(path)]).is_none()
     }
+}
+
+/// 按原样匹配 `path` 的 pathspec。路径按原始字节拼，不是 UTF-8 的文件名也找得到。
+pub(crate) fn literal(path: &Path) -> OsString {
+    let mut spec = OsString::from(":(literal)");
+    spec.push(path);
+    spec
+}
+
+/// `版本:路径` 形式的 blob 名，`rev` 为空时是暂存区里的。
+fn blob_spec(rev: &str, path: &Path) -> OsString {
+    let mut spec = OsString::from(format!("{rev}:"));
+    spec.push(path);
+    spec
 }

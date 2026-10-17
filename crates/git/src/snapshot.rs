@@ -3,6 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    ffi::{OsStr, OsString},
     fs,
     os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
@@ -10,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    Repo, RepoInfo, RepoKind, find_repo, git, info,
+    Repo, RepoInfo, RepoKind, filter_overrides, find_repo, git, git_with, info,
     parse::{expand_tabs, parse_diff, parse_status, status_sections},
     repos,
 };
@@ -214,11 +215,12 @@ pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
     args.into_iter().map(str::to_owned).collect()
 }
 
-/// `repo` 里的 `git diff`，参数见 `diff_args`；git 报错时为空，不当成没有改动。
-pub(crate) fn diff(repo: &Path, args: &[&str]) -> Option<Vec<FileDiff>> {
-    let full = diff_args(args);
-    let full: Vec<&str> = full.iter().map(String::as_str).collect();
-    let mut files = parse_diff(&String::from_utf8_lossy(&git(repo, &full)?));
+/// `repo` 里的 `git diff`，参数见 `diff_args`，`filters` 是 `filter_overrides` 给的环境变量；
+/// git 报错时为空，不当成没有改动。
+pub(crate) fn diff(repo: &Path, filters: &[(String, String)], args: &[impl AsRef<OsStr>]) -> Option<Vec<FileDiff>> {
+    let full: Vec<OsString> =
+        diff_args(&[]).into_iter().map(OsString::from).chain(args.iter().map(|arg| arg.as_ref().to_owned())).collect();
+    let mut files = parse_diff(&String::from_utf8_lossy(&git_with(repo, filters, &full)?));
     // 超过大小上限的文本文件也被报成二进制：工作区里的文件超过上限、开头又没有 NUL 字节的
     // 认回来，提示改动太多。暂存段也按工作区里的文件认，暂存后又改过的可能认错，只影响提示。
     for file in files.iter_mut().filter(|file| file.binary) {
@@ -261,35 +263,36 @@ pub(crate) fn read_repo(
     seen: &mut UntrackedCache,
 ) -> Option<Found> {
     let repo = root.as_path();
+    let filters = filter_overrides(repo);
     // 状态、暂存段和未暂存段互不依赖，几个 git 进程同时跑；stash、远端和子模块也一起读。
     let (status, staged, unstaged, extra, submodules) = std::thread::scope(|scope| {
         let status = scope.spawn(|| {
             // 开头多一项 `## 分支...上游 [ahead 1, behind 2]`。里面有改动的子模块也报出来，连同没
             // 写进 `.gitmodules` 的 gitlink，据此认出子仓库；列进改动的条目以 `diff` 为准。
-            git(
-                repo,
-                &[
-                    "status",
-                    "--porcelain=v1",
-                    "-z",
-                    "--untracked-files=all",
-                    "--ignored=matching",
-                    "--ignore-submodules=none",
-                    "--branch",
-                    "--ahead-behind",
-                ],
-            )
+            // shortcut: status 递归进子模块时，子模块自己配置的过滤器不在覆盖之列；要挡就得连子模块的配置
+            // 一起列出来，或者把 --ignore-submodules 改成 dirty。
+            let args = [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                "--ignored=matching",
+                "--ignore-submodules=none",
+                "--branch",
+                "--ahead-behind",
+            ];
+            git_with(repo, &filters, &args)
         });
         let staged = scope.spawn(|| {
             // 还没有提交时 `--cached` 自己和空树比，暂存了的新文件也算进来。短哈希给 `RepoInfo::head`。
             let head = git(repo, &["rev-parse", "--verify", "--quiet", "--short", "HEAD"])
                 .map(|head| String::from_utf8_lossy(&head).trim().to_owned());
-            (diff(repo, &["--cached"]), head)
+            (diff(repo, &filters, &["--cached"]), head)
         });
         let extra = scope.spawn(|| info::read_extra(repo));
         let submodules = scope.spawn(|| repos::submodules(repo));
         // 冲突的文件和「我方」比，不然 git 给的是三方合并的格式。
-        let unstaged = diff(repo, &["-2"]);
+        let unstaged = diff(repo, &filters, &["-2"]);
         let status = status.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         let staged = staged.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         let extra = extra.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));

@@ -13,7 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{FileDiff, FileStatus, Stash, UntrackedCache, find_repo, git, git_command};
+use crate::{
+    FileDiff, FileStatus, Stash, UntrackedCache, find_repo, git, git_command, snapshot::MAX_DIFF_BYTES, view::literal,
+};
 
 /// 一条写仓库的 git 命令最多跑这么久，到时杀掉：推送、拉取要联网，给得长些；等的是 ssh 问口令、
 /// 确认主机指纹或者 gpg 等着输密码这种永远等不来的输入时，不让后台线程一直挂着。
@@ -331,8 +333,7 @@ impl Repo {
 
     /// git 跟踪着 `path`（相对 `root`）；是目录时看它下面有没有跟踪着的文件。
     pub fn is_tracked(&self, path: &Path) -> bool {
-        let spec = format!(":(literal){}", path.display());
-        git(&self.root, &["ls-files", "--", &spec]).is_some_and(|out| !out.is_empty())
+        git(&self.root, &["ls-files".into(), "--".into(), literal(path)]).is_some_and(|out| !out.is_empty())
     }
 
     /// 不再跟踪这些文件或目录：从暂存区拿掉，工作区里的留着，下次提交时从仓库里删掉。暂存区里有和
@@ -455,8 +456,18 @@ impl Repo {
     pub fn pending_diff(&self, staged: bool) -> Result<String> {
         // 用户配的外部 diff 工具（`diff.external`）、`color.ui=always` 的颜色码和 textconv 转出来的文字
         // 都不是改动本身，关掉，给 AI 看的是 git 原样的补丁。
-        let diff =
-            |target: &str| run(&self.root, ["diff", "--no-ext-diff", "--no-color", "--no-textconv", target], None);
+        // 超过 `MAX_DIFF_BYTES` 的文件按二进制只报一行，免得 git 吐出几百 MB 的全文，也免得一个大文件
+        // 占满调用方给补丁留的额度。末尾的 `--` 免得工作区里叫 HEAD 的文件让 git 分不清是版本还是路径。
+        // shortcut: 大小没变的大文件，git 的 autoRefreshIndex 比对会先读全文、阈值不生效，要彻底设上限得在
+        // `run` 里边读边截断；等真碰上这种仓库再改。
+        let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
+        let diff = |target: &str| {
+            run(
+                &self.root,
+                ["-c", &threshold, "diff", "--no-ext-diff", "--no-color", "--no-textconv", target, "--"],
+                None,
+            )
+        };
         let diff = if staged {
             diff("--cached")?
         } else if has_head(&self.root) {

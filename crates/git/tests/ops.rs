@@ -222,6 +222,36 @@ fn pending_diff_ignores_external_diff_color_and_textconv() {
     assert!(!staged.contains("EXTERNAL") && !staged.contains("TEXTCONV") && !staged.contains('\x1b'), "{staged}");
 }
 
+/// 比 `MAX_DIFF_BYTES`（1MB）大的文件只报一行二进制，补丁不会被一个大文件撑满。
+#[test]
+fn pending_diff_reports_big_files_as_binary() {
+    let repo = TestRepo::new("ops-pending-big");
+    let handle = read(&repo).repo();
+    repo.commit_file("big.txt", "x\n", "first");
+    repo.commit_file("small.txt", "one\n", "second");
+    repo.write("big.txt", &"y\n".repeat(1_000_000));
+    repo.write("small.txt", "two\n");
+    let check = |diff: String| {
+        assert!(diff.contains("Binary files a/big.txt and b/big.txt differ"), "{diff}");
+        assert!(diff.contains("-one\n+two\n") && diff.len() < 10_000, "{}", diff.len());
+    };
+    check(handle.pending_diff(false).unwrap());
+    handle.stage(&paths(&["big.txt", "small.txt"])).unwrap();
+    check(handle.pending_diff(true).unwrap());
+}
+
+/// 工作区里有叫 HEAD 的文件时，git 不把版本 `HEAD` 认成路径。
+#[test]
+fn pending_diff_with_a_file_named_head() {
+    let repo = TestRepo::new("ops-pending-head-file");
+    let handle = read(&repo).repo();
+    repo.commit_file("HEAD", "one\n", "first");
+    repo.write("HEAD", "two\n");
+    assert!(handle.pending_diff(false).unwrap().contains("-one\n+two\n"));
+    handle.stage(&paths(&["HEAD"])).unwrap();
+    assert!(handle.pending_diff(true).unwrap().contains("-one\n+two\n"));
+}
+
 #[test]
 fn commits_and_amends() {
     let repo = TestRepo::new("ops-commit");

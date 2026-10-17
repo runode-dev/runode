@@ -19,7 +19,7 @@ use std::{
 };
 
 use common::{TestRepo, read};
-use runode_git::{DiffSide, FileStatus, RepoInfo, RepoKind, Snapshot, UntrackedCache, snapshot};
+use runode_git::{DiffSide, FileStatus, ReadOptions, RepoInfo, RepoKind, Snapshot, UntrackedCache, snapshot};
 
 #[test]
 fn ignored_dirs_cover_their_contents() {
@@ -91,6 +91,52 @@ fn does_not_run_the_repository_fsmonitor() {
     assert!(marker.exists());
 }
 
+/// `.gitattributes` 指定的过滤器 `filter` 由仓库的配置给命令（`config` 写进去），读快照时不执行；
+/// 过滤器设了 `required` 也照样读得出来。
+fn does_not_run_repository_filters(name: &str, filter: &str, config: impl Fn(&TestRepo, &str)) {
+    let repo = TestRepo::new(name);
+    repo.commit_file(".gitattributes", &format!("* filter={filter}\n"), "attributes");
+    repo.commit_file("a.txt", "one\n", "init");
+    let marker = repo.path().join(".git/filter-ran");
+    config(&repo, &format!("sh -c 'echo x >> \"{}\"; cat'", marker.display()));
+    // stat 和暂存区里记的对不上，git 就要过一遍过滤器比内容。
+    let later = std::time::SystemTime::now() + Duration::from_secs(60);
+    fs::File::options().write(true).open(repo.path().join("a.txt")).unwrap().set_modified(later).unwrap();
+    let snapshot = snapshot(repo.path(), &mut UntrackedCache::default()).expect("过滤器覆盖后状态读不出来");
+    assert!(!marker.exists(), "读快照时执行了仓库配置的过滤器");
+    assert!(snapshot.is_clean(), "{:?}", snapshot.unstaged);
+    // 对照：不覆盖时 git status 会执行它，上面的断言才有意义。
+    repo.try_git(&["status"]);
+    assert!(marker.exists());
+}
+
+#[test]
+fn does_not_run_the_repository_filters() {
+    does_not_run_repository_filters("snapshot-filter", "evil", |repo, command| {
+        repo.git(&["config", "filter.evil.clean", command]);
+        repo.git(&["config", "filter.evil.process", command]);
+        repo.git(&["config", "filter.evil.required", "true"]);
+    });
+}
+
+/// 名字里带 `=` 的过滤器：`-c filter.a=b.clean=` 会被 git 在第一个 `=` 处切开，覆盖不到它。
+#[test]
+fn does_not_run_filters_with_equals_in_name() {
+    does_not_run_repository_filters("snapshot-filter-equals", "a=b", |repo, command| {
+        repo.git(&["config", "filter.a=b.clean", command]);
+        repo.git(&["config", "filter.a=b.required", "true"]);
+    });
+}
+
+#[test]
+fn does_not_run_filters_from_included_config() {
+    does_not_run_repository_filters("snapshot-filter-include", "evil", |repo, command| {
+        let command = command.replace('\\', "\\\\").replace('"', "\\\"");
+        repo.write(".git/evil.cfg", &format!("[filter \"evil\"]\n\tclean = \"{command}\"\n"));
+        repo.git(&["config", "include.path", "evil.cfg"]);
+    });
+}
+
 #[test]
 fn keeps_file_names_that_are_not_utf8() {
     let repo = TestRepo::new("snapshot-latin1");
@@ -115,8 +161,18 @@ fn keeps_file_names_that_are_not_utf8() {
     let snapshot = read(&repo);
     assert_eq!(snapshot.statuses.get(&path), Some(&FileStatus::Deleted));
     assert_eq!(snapshot.unstaged.iter().map(|file| &file.path).collect::<Vec<_>>(), [&path]);
-    snapshot.repo().stage(std::slice::from_ref(&path)).unwrap();
+    // 按路径找它的查询拿的是原始字节，找得到。
+    let handle = snapshot.repo();
+    let options = ReadOptions { max_bytes: 1024 };
+    let head = DiffSide::Commit { id: "HEAD".into(), parent: None };
+    assert!(handle.is_tracked(&path));
+    let view = handle.file_view(&path, None, &DiffSide::Worktree).unwrap().expect("工作区那边的 diff");
+    assert_eq!(view.file.status, FileStatus::Deleted);
+    assert_eq!(handle.old_bytes(&path, None, &DiffSide::Worktree, options), Ok(Some(b"x\n".to_vec())));
+    assert_eq!(handle.new_bytes(&path, &head, options), Ok(Some(b"x\n".to_vec())));
+    handle.stage(std::slice::from_ref(&path)).unwrap();
     assert_eq!(read(&repo).staged.iter().map(|file| &file.path).collect::<Vec<_>>(), [&path]);
+    assert!(handle.file_view(&path, None, &DiffSide::Index).unwrap().is_some());
 
     // 文件系统让建时（Linux）再试未跟踪的。
     if fs::write(repo.path().join(name), "y\n").is_ok() {
