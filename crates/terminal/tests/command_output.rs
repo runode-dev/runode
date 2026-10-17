@@ -375,10 +375,13 @@ fn read_commands_from(shell: Option<RealShell>) {
     assert_eq!(shell.output(1), format!("{}\n{}\n", &wide[..40], &wide[40..]), "{name}");
     assert_eq!(shell.output(3 + blank), "a\nb\nc\n", "{name}");
 
-    // 还在跑的命令读到底：读输入时只有第一行。
+    // 还在跑的命令读到底：读输入时只有第一行和读输入的提示符。等提示符也画出来再读，不然 fish
+    // 画没画 `read>` 看时机，读到的时有时无。
     shell.session.write(format!("{}\r", syntax.read).into_bytes());
-    shell.wait_until("the first line", |session| session.screen_text(Some(200)).unwrap().contains("\none\n"));
-    assert_eq!(shell.output(1), "one\n", "{name}");
+    let first = format!("\none\n{}", syntax.read_prompt);
+    shell.wait_until("the first line", |session| session.screen_text(Some(200)).unwrap().contains(&first));
+    let running = if syntax.read_prompt.is_empty() { "one\n".into() } else { format!("one\n{}\n", syntax.read_prompt) };
+    assert_eq!(shell.output(1), running, "{name}");
     assert_eq!(shell.output(2), format!("{}\n{}\n", &wide[..40], &wide[40..]), "{name}");
     shell.session.write(b"\r".to_vec());
     shell.wait_for_prompt();
