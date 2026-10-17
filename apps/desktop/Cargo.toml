@@ -30,6 +30,9 @@ runode-autostart.workspace = true
 runode-ui.workspace = true
 # 预览栏读文件、判断类型、语法高亮和 Markdown 解析，不碰界面。
 runode-preview.workspace = true
+# Markdown 引用的图片解码前先读头算解码后多大。
+gif.workspace = true
+image.workspace = true
 # 设置页里配对手机时画二维码。
 qrcode.workspace = true
 gpui.workspace = true

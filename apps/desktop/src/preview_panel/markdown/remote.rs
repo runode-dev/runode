@@ -35,8 +35,10 @@ const WORKERS: usize = 4;
 /// 下载中或下完的图片，等到的是画好的图，下不了时为空。
 pub(super) type Pending = Shared<oneshot::Receiver<Option<Picture>>>;
 
-/// 下好的图一共最多留这么多字节（位图按下载的字节，SVG 按画好的位图），多了先放掉最久没要过的。
-const MAX_KEPT_BYTES: usize = 96 << 20;
+/// 下好的图一共最多留这么多字节（`Picture::bytes`：位图按解码后的大小，SVG 按画好的位图），多了先放掉
+/// 最久没要过的。和一篇文档里本地图片的上限（`MAX_LOCAL_IMAGE_BYTES`）一样大：小了的话一篇图多的 README
+/// 自己就装不下，正显示着的图被放掉又重解，一闪一闪。
+const MAX_KEPT_BYTES: usize = 512 << 20;
 
 /// 按地址记着的下载，`used` 是最后一次要它时 `clock` 的值。
 #[derive(Default)]
@@ -471,7 +473,7 @@ mod tests {
         static DOWNLOADS: LazyLock<Mutex<Downloads>> = LazyLock::new(Default::default);
         static RUNS: AtomicUsize = AtomicUsize::new(0);
         let url = "https://example.com/a.png";
-        let picture = || Picture::Bitmap(Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![1])));
+        let picture = || Picture::Bitmap(Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![1])), 1);
         let run = |result: Option<Picture>| {
             move |_: &str| {
                 RUNS.fetch_add(1, Ordering::SeqCst);
@@ -500,7 +502,7 @@ mod tests {
     fn kept_pictures_are_trimmed_least_recently_used_first() {
         static DOWNLOADS: LazyLock<Mutex<Downloads>> = LazyLock::new(Default::default);
         let get = |url: &str| {
-            let picture = Picture::Bitmap(Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![0; 4])));
+            let picture = Picture::Bitmap(Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![0; 4])), 4);
             futures::executor::block_on(fetch_with(&DOWNLOADS, url, move |_| Some(picture))).unwrap();
         };
         let kept = || {

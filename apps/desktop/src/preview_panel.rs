@@ -432,6 +432,9 @@ fn loaded(content: Content, svg: &SvgRenderer, cell_width: fn(char) -> u8) -> Lo
             Ok(image) => Loaded::Svg(image),
             Err(err) => Loaded::Note(Note::Unreadable(err)),
         },
+        Content::Image { format, bytes } if markdown::too_large_to_decode(format, &bytes) => {
+            Loaded::Note(Note::TooLarge)
+        }
         Content::Image { format, bytes } => Loaded::Image(Arc::new(Image::from_bytes(gpui_format(format), bytes))),
         Content::Binary => Loaded::Note(Note::Binary),
         Content::TooLarge => Loaded::Note(Note::TooLarge),
@@ -1114,6 +1117,27 @@ impl Render for PreviewPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 图片文件解码后太大时按太大处理，不交给 GPUI 解码：BMP 的头里写着 10000×10000，解开要 400MB。
+    #[test]
+    fn images_too_large_to_decode_are_notes() {
+        let mut bmp = vec![0u8; 54];
+        bmp[..2].copy_from_slice(b"BM");
+        bmp[2..6].copy_from_slice(&54u32.to_le_bytes());
+        bmp[10..14].copy_from_slice(&54u32.to_le_bytes());
+        bmp[14..18].copy_from_slice(&40u32.to_le_bytes());
+        bmp[18..22].copy_from_slice(&10_000i32.to_le_bytes());
+        bmp[22..26].copy_from_slice(&10_000i32.to_le_bytes());
+        bmp[26..28].copy_from_slice(&1u16.to_le_bytes());
+        bmp[28..30].copy_from_slice(&24u16.to_le_bytes());
+        let svg = SvgRenderer::new(Arc::new(()));
+        let cell_width = |_: char| -> u8 { 1 };
+        let load = |bytes: Vec<u8>| loaded(Content::Image { format: ImageFormat::Bmp, bytes }, &svg, cell_width);
+        assert!(matches!(load(bmp.clone()), Loaded::Note(Note::TooLarge)));
+        bmp[18..22].copy_from_slice(&10i32.to_le_bytes());
+        bmp[22..26].copy_from_slice(&10i32.to_le_bytes());
+        assert!(matches!(load(bmp), Loaded::Image(_)));
+    }
 
     #[test]
     fn picks_the_widest_line() {

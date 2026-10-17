@@ -61,6 +61,11 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-f
 # 文件预览里 Markdown 的解析（MIT），开 GFM 的表格、删除线和任务列表。不要默认特性：命令行参数
 # 解析和输出 HTML 都用不上。
 pulldown-cmark = { version = "0.13.4", default-features = false }
+# 预览栏的 Markdown 引用图片时先读文件头算解码后多大，太大的不交给 GPUI 解码。GPUI 本来就用它解码，
+# 不另编一份；只开 GPUI 能解的这几种格式，它也都开着。
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "jpeg", "png", "tiff", "webp"] }
+# image 解 GIF 用的那个：只数帧、不解像素，见桌面 app 的 `decoded_bytes`。
+gif = "0.14"
 # AppKit 和 Foundation 的绑定，只在 macOS 上用。不要默认特性，各 crate 按用到的类型自己开。
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false }
