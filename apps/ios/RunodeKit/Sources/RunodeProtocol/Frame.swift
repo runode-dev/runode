@@ -19,6 +19,8 @@ public struct Frame: Sendable, Equatable {
     public static let headerLength = 9
     /// 载荷上限，和宿主的 `MAX_PAYLOAD` 一样；再长就是对面出了错。
     public static let maxPayload: UInt32 = 64 << 20
+    /// 手机发的控制帧载荷的上限，和电脑那边远程访问的 `MAX_CONTROL_PAYLOAD` 一样；超了电脑断开整条连接。
+    public static let maxControlPayload = 1 << 20
     /// 门禁阶段单帧载荷的上限，见远程访问规格。
     public static let gateMaxPayload: UInt32 = 16 << 10
 

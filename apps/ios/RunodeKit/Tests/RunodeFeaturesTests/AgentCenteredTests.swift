@@ -306,6 +306,22 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(delivered == [waiting])
     }
 
+    /// 装不进一条控制消息的字不发（电脑会断开连接），草稿留着；刚好装得下的照发。
+    @Test func textTooLongForOneMessageIsNotSent() async throws {
+        let reply = QuickReplyModel(sessionId: waiting, link: link)
+        let overhead = try Frame.control(ClientMsg.paste(req: .max, id: waiting, text: "")).payload.count
+        let longest = String(repeating: "a", count: Frame.maxControlPayload - overhead)
+        reply.draft = longest + "a"
+        await reply.sendDraft()
+        #expect(link.sent.isEmpty)
+        #expect(reply.draft == longest + "a")
+        #expect(reply.failedCount == 1)
+        #expect(reply.errorMessage != nil)
+        reply.draft = longest
+        await reply.sendDraft()
+        #expect(link.sent.count == 2)
+    }
+
     @Test func failuresAreShown() async {
         let reply = QuickReplyModel(sessionId: waiting, link: link)
         await reply.press(QuickKey.standard[0])

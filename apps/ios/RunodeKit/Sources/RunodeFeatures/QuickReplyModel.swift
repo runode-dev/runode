@@ -83,7 +83,7 @@ public final class QuickReplyModel {
     /// 把文本框里的字粘贴进去再按回车。
     public func sendDraft() async {
         let text = draft
-        guard canSendDraft, ensureConnected() else { return }
+        guard canSendDraft, fits(text), ensureConnected() else { return }
         draft = ""
         restored = nil
         let epoch = disconnects
@@ -98,6 +98,17 @@ public final class QuickReplyModel {
         unsent[paste] = text
         link.send(.paste(req: paste, id: sessionId, text: text))
         link.send(.sendKeys(req: enter, id: sessionId, keys: ["enter"]))
+    }
+
+    /// 这段字装得进一条控制消息：超了电脑断开连接，放回文本框重发又断。不拆成几次粘贴，那样程序收到的是
+    /// 几段分开的粘贴。装不下时按失败报出来，草稿留着。
+    private func fits(_ text: String) -> Bool {
+        // 请求编号取最长的，算出来的就是发出去时最大的样子。
+        let message = ClientMsg.paste(req: .max, id: sessionId, text: text)
+        if let size = try? Frame.control(message).payload.count, size <= Frame.maxControlPayload { return true }
+        failedCount += 1
+        errorMessage = String(localized: "文字太长了，发不出去")
+        return false
     }
 
     /// 断着时 `HostConnection` 会把消息丢掉：不发，按失败报出来，草稿留着。
