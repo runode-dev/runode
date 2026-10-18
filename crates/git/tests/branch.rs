@@ -104,3 +104,20 @@ fn checks_out_a_remote_branch_shadowed_by_a_tag() {
     assert_eq!(repo.git(&["config", "branch.topic.merge"]), "refs/heads/topic");
     assert_eq!(repo.git(&["rev-parse", "topic"]), repo.git(&["rev-parse", "refs/remotes/origin/topic"]));
 }
+
+/// 远端上 `-` 开头的分支（`update-ref` 建得出来）切掉远端名后不当成 `git switch` 的选项。
+#[test]
+fn refuses_a_remote_branch_named_like_an_option() {
+    let remote = TestRepo::bare("branches-dash-remote");
+    let upstream = TestRepo::clone_of(&remote, "branches-dash-upstream");
+    upstream.commit_file("a.txt", "one\n", "init");
+    upstream.git(&["push", "-q", "origin", "main"]);
+    upstream.git(&["push", "-q", "origin", "main:refs/heads/-d"]);
+
+    let repo = TestRepo::clone_of(&remote, "branches-dash-local");
+    repo.git(&["update-ref", "refs/heads/-d", "HEAD"]);
+    let handle = common::read(&repo).repo();
+    let dash = handle.branches().into_iter().find(|branch| branch.name == "origin/-d").unwrap();
+    assert!(handle.checkout(&dash).is_err());
+    assert_eq!(repo.git(&["branch", "--show-current"]), "main");
+}

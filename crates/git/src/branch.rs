@@ -96,6 +96,10 @@ impl Repo {
             .filter_map(|remote| branch.name.strip_prefix(remote.trim())?.strip_prefix('/'))
             .min_by_key(|local| local.len())
             .ok_or_else(|| GitError::new(format!("找不到 {} 所属的远端", branch.name)))?;
+        // 远端上的分支名 git 不查（`update-ref` 建得出 `-d`），切掉远端名以后也会原样交给 `git switch`。
+        if local.starts_with('-') {
+            return Err(GitError::new(format!("不是分支名：{local}")));
+        }
         let local_ref = format!("refs/heads/{local}");
         if git(&self.root, &["rev-parse", "--verify", "--quiet", &local_ref]).is_some() {
             return run(&self.root, ["switch", local], None).map(drop);
