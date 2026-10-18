@@ -499,15 +499,16 @@ impl FileTree {
             search.rerun = true;
             return;
         }
-        search.rerun = false;
         // 文件树重读过，文件可能变了。
         if force || search.names.as_ref().is_some_and(|names| names.root != key.root) {
             search.names = None;
         }
         let current = search.pending.as_ref().map(|(key, _)| key).or(search.searched.as_ref());
+        // 条件没变时不动 `rerun`：还在跑的那次跑完照样要再搜一次，不然重读后的改动就漏了。
         if !force && current == Some(&key) {
             return;
         }
+        search.rerun = false;
         if let Some((_, cancel)) = search.pending.take() {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -636,6 +637,10 @@ impl FileTree {
 
     /// 在预览栏里打开第 `ix` 行结果，`pin` 时开成固定标签；内容结果跳到那一行，目录展开或收起。
     fn open_search_row(&mut self, ix: usize, pin: bool, cx: &mut Context<Self>) {
+        // 换了 workspace 或根目录、重搜完之前，行还是另一个根目录的结果（没显示出来），回车不能打开那边的文件。
+        if !self.search.searched.as_ref().is_some_and(|key| key.root == self.files_root()) {
+            return;
+        }
         let search = &mut self.search;
         match search.rows.get(ix).cloned() {
             Some(SearchRow::Dir { path, .. }) => {
