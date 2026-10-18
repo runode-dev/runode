@@ -1,7 +1,7 @@
 //! 提交历史和图表：读最近的提交和指向它们的引用，排出每一行左边的分支线（lane），读单个提交
 //! 改了什么。界面只管照着 `GraphRow` 画线。
 
-use std::{collections::HashSet, fs, path::Path};
+use std::{collections::HashSet, ffi::OsStr, fs, os::unix::ffi::OsStrExt, path::Path};
 
 use crate::{FileDiff, GitError, Repo, Result, git, ops::run, parse::parse_diff, snapshot::diff_args};
 
@@ -278,29 +278,33 @@ impl Repo {
     pub fn history(&self, limit: usize) -> Result<History> {
         let refs =
             run(&self.root, ["for-each-ref", "--format=%(refname)%00%(upstream)", "refs/heads", "refs/remotes"], None)?;
-        let refs = String::from_utf8_lossy(&refs).into_owned();
-        let existing: HashSet<&str> = refs.lines().filter_map(|line| line.split('\0').next()).collect();
-        let mut upstreams: Vec<&str> = refs
-            .lines()
-            .filter_map(|line| line.split('\0').nth(1))
+        // 引用名按原样的字节用：不是 UTF-8 的上游换了字就成了不存在的引用，`git log` 整条报错。
+        let lines: Vec<(&[u8], &[u8])> = refs
+            .split(|b| *b == b'\n')
+            .filter_map(|line| line.iter().position(|b| *b == 0).map(|nul| (&line[..nul], &line[nul + 1..])))
+            .collect();
+        let existing: HashSet<&[u8]> = lines.iter().map(|(name, _)| *name).collect();
+        let mut upstreams: Vec<&[u8]> = lines
+            .iter()
+            .map(|(_, upstream)| *upstream)
             .filter(|upstream| !upstream.is_empty() && existing.contains(upstream))
             .collect();
         upstreams.sort_unstable();
         upstreams.dedup();
         let has_head = git(&self.root, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_some();
-        let has_branches = existing.iter().any(|name| name.starts_with("refs/heads/"));
+        let has_branches = existing.iter().any(|name| name.starts_with(b"refs/heads/"));
         if !has_head && !has_branches {
             return Ok(History::default());
         }
         let count = format!("--max-count={}", limit.saturating_add(1));
-        let mut args = vec!["log", "--date-order", "-z", "--no-color"];
-        args.extend(["--decorate=full", "--decorate-refs-exclude=refs/stash", LOG_FORMAT, &count]);
+        let mut args: Vec<&OsStr> = ["log", "--date-order", "-z", "--no-color"].map(OsStr::new).into();
+        args.extend(["--decorate=full", "--decorate-refs-exclude=refs/stash", LOG_FORMAT, &count].map(OsStr::new));
         if has_head {
-            args.push("HEAD");
+            args.push(OsStr::new("HEAD"));
         }
-        args.push("--branches");
-        args.extend(upstreams);
-        args.push("--");
+        args.push(OsStr::new("--branches"));
+        args.extend(upstreams.into_iter().map(OsStr::from_bytes));
+        args.push(OsStr::new("--"));
         let mut commits = parse_log(&run(&self.root, args, None)?);
         let more = commits.len() > limit;
         commits.truncate(limit);

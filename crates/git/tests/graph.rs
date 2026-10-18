@@ -297,3 +297,29 @@ fn tells_ref_changes_from_other_files() {
     assert!(refs_changed(&wt_dir, &git_dir.join("refs/tags/v2")));
     assert!(!refs_changed(&wt_dir, &git_dir.join("HEAD")));
 }
+
+/// 上游的名字不是 UTF-8（只能在 packed-refs 里，macOS 上建不出这样的文件）：照样读得出历史，不因为它整条报错。
+#[test]
+fn reads_history_with_an_upstream_whose_name_is_not_utf8() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt, process::Command};
+
+    let repo = TestRepo::new("non-utf8-upstream");
+    repo.commit_file("a.txt", "a", "one");
+    repo.commit_file("a.txt", "b", "two");
+    let first = repo.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let packed = [format!("{first} refs/remotes/origin/").as_bytes(), b"caf\xe9\n"].concat();
+    std::fs::write(repo.path().join(".git/packed-refs"), packed).unwrap();
+    repo.git(&["config", "remote.origin.url", "/nowhere"]);
+    repo.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+    repo.git(&["config", "branch.main.remote", "origin"]);
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(repo.path())
+        .args(["config", "branch.main.merge"])
+        .arg(OsStr::from_bytes(b"refs/heads/caf\xe9"))
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let history = read(&repo).repo().history(10).unwrap();
+    assert_eq!(history.commits.len(), 2, "{:?}", history.commits);
+}
