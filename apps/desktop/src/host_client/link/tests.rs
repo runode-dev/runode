@@ -321,6 +321,31 @@ fn two_attaches_in_a_row_wait_for_the_second_attached() {
     assert_eq!(screen.attached.channel, 2);
 }
 
+/// 同一个会话新开一个订阅：旧订阅的通道撤掉，它晚到的帧不交给新订阅。
+#[test]
+fn a_new_subscription_drops_the_old_channel() {
+    let id = SessionId(1);
+    let (link, _old) = attached_link(id);
+    let mut rx = link.attach(id, None, AttachMode::MetaOnly);
+    dispatch(
+        &link.inner,
+        0,
+        HostMsg::Attached {
+            id,
+            channel: 2,
+            size: SIZE,
+            mode: AttachMode::MetaOnly,
+            meta: SessionMeta::default(),
+            settings: None,
+            shell: None,
+        },
+    );
+    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Screen(_))));
+    output(&link.inner, 0, 1, b"old channel".to_vec());
+    assert!(rx.try_recv().is_err());
+    assert!(!link.inner.state().channels.contains_key(&1));
+}
+
 /// 宿主拆出来单独发的 shell 集成报告装回 `meta`：`Attached` 带的是第一份，`Meta` 没带时沿用上一份；
 /// 不拆的旧宿主发来的 `Meta` 原样交出去。
 #[test]

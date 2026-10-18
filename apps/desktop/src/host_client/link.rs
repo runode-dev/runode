@@ -747,7 +747,10 @@ impl Link {
                 Some(mut route) => {
                     // 原来那个 `Attach` 的 `Attached` 还会到，要算着它，不然会被当成这次的。
                     route.attaching = attaching;
-                    state.sessions.insert(id, route);
+                    // 换下的旧订阅的通道也撤掉，不然它晚到的帧会交给新订阅。
+                    if let Some(channel) = state.sessions.insert(id, route).and_then(|old| old.channel) {
+                        state.channels.remove(&channel);
+                    }
                     state.sessions.get_mut(&id)
                 }
                 None => state.sessions.get_mut(&id),
@@ -854,13 +857,15 @@ impl Link {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host: {err}"));
         }
-        let answer = reply.recv_timeout(timeout);
+        let mut answer = reply.recv_timeout(timeout);
         if matches!(answer, Err(mpsc::RecvTimeoutError::Timeout)) {
             match on_timeout {
                 OnTimeout::Disconnect => self.inner.timed_out(generation),
                 // 不等了：撤掉登记，回话晚到时没人收、丢掉。
                 OnTimeout::Wait => drop(self.inner.state().replies.remove(&req)),
             }
+            // 超时和撤掉之间正好到了的照常用，同 `spawn_within`。
+            answer = reply.try_recv().map_err(|_| mpsc::RecvTimeoutError::Timeout);
         }
         match answer {
             Ok(HostMsg::Error { message, .. }) => Err(anyhow!(message)),
