@@ -628,6 +628,18 @@ pub enum HostMsg {
     Unknown,
 }
 
+impl HostMsg {
+    /// 编好的一条消息（`Frame::control` 的载荷）回的是哪条请求，没带 `req` 时为空。只认最外层的 `req`，
+    /// 不解出整条消息：一条回话大得装不进一帧时，宿主照它改回一条 `Error`，请求方不必等到超时。
+    pub fn req_in(payload: &[u8]) -> Option<u32> {
+        #[derive(Deserialize)]
+        struct Req {
+            req: Option<u32>,
+        }
+        serde_json::from_slice::<Req>(payload).ok()?.req
+    }
+}
+
 /// 剪贴板里的文字，见 `ClientMsg::WriteClipboard`、`HostMsg::ClipboardText`。线上就是一个字符串；
 /// `Debug` 只写字节数，带着它的消息（以及包着它们的 `UiRequest`、`UiReply`）怎么记进日志都不会带出
 /// 剪贴板的内容。

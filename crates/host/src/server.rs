@@ -45,8 +45,8 @@ use std::{
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, Frame, FrameError, FrameKind, GoodbyeReason,
-    HANDOFF_FORMAT, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo, ShellReport, WindowLayout, git::GitRequest,
-    read_frame, write_frame,
+    HANDOFF_FORMAT, HostMsg, MAX_PAYLOAD, PROTOCOL_VERSION, SessionId, SessionInfo, ShellReport, WindowLayout,
+    git::GitRequest, read_frame, write_frame,
 };
 use runode_terminal::pty;
 use runode_types::{grid::GridSize, input::parse_key_list, session::DriveAction};
@@ -834,6 +834,20 @@ impl Outbox {
 
     pub(crate) fn control(&self, message: &HostMsg) -> bool {
         match Frame::control(message) {
+            // 写线程写不出超过上限的帧，只能断开整条连接，重连后再要还是断：这条不发，回话改回 `Error`，请求方
+            // 不必等到超时。读屏幕的回话（`ScreenText`）不带 `req`，前端按会话认。
+            Ok(frame) if frame.payload.len() > MAX_PAYLOAD as usize => {
+                tracing::warn!("dropping a control message of {} bytes, over the frame limit", frame.payload.len());
+                let req = HostMsg::req_in(&frame.payload);
+                let id = match message {
+                    HostMsg::ScreenText { id, .. } => Some(*id),
+                    _ => None,
+                };
+                if req.is_none() && id.is_none() {
+                    return true;
+                }
+                self.control(&HostMsg::Error { req, id, message: "the answer is too large to send".into() })
+            }
             Ok(frame) => self.push(FrameKind::Control, 0, frame.payload.into()),
             Err(err) => {
                 tracing::warn!("failed to encode {message:?}: {err}");

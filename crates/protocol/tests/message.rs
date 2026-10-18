@@ -907,3 +907,14 @@ fn task_messages() {
     assert_eq!(sources[0].tasks[0].description, None);
     assert!(!sources[0].truncated);
 }
+
+/// 编好的回话里只认最外层的 `req`：转给界面的请求里套着的不算。
+#[test]
+fn the_req_of_an_encoded_reply() {
+    let req_in = |message: &HostMsg| HostMsg::req_in(&Frame::control(message).unwrap().payload);
+    assert_eq!(req_in(&HostMsg::Spawned { req: 3, id: ID }), Some(3));
+    assert_eq!(req_in(&HostMsg::Error { req: None, id: Some(ID), message: "gone".into() }), None);
+    assert_eq!(req_in(&HostMsg::Bell { id: ID }), None);
+    let ui = HostMsg::UiRequest { ui: 1, request: Box::new(ClientMsg::ListTodos { req: 9 }) };
+    assert_eq!(req_in(&ui), None);
+}

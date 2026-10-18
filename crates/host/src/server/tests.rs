@@ -325,6 +325,35 @@ fn a_pending_snapshot_does_not_resync_the_session() {
     assert!(matches!(control(rx.recv().unwrap()), HostMsg::Resync { .. }));
 }
 
+/// 装不进一帧的回话不交给写线程（交了它写不出、只能断开连接）：带 `req` 的改回一条带着它的 `Error`，
+/// 不带的丢掉。
+#[test]
+fn an_answer_over_the_frame_limit_is_not_queued() {
+    let (tx, rx) = mpsc::channel();
+    let out = Outbox { tx, queued: Arc::default(), limit: OUTBOX_LIMIT };
+    let huge = "x".repeat(MAX_PAYLOAD as usize);
+    assert!(out.control(&HostMsg::Error { req: Some(4), id: None, message: huge.clone() }));
+    let Ok(Out::Frame { kind: FrameKind::Control, channel, payload }) = rx.try_recv() else {
+        panic!("expected a control frame")
+    };
+    let frame = Frame { kind: FrameKind::Control, channel, payload: payload.to_vec() };
+    match frame.message::<HostMsg>().unwrap() {
+        HostMsg::Error { req: Some(4), message, .. } => assert!(message.contains("too large"), "{message}"),
+        other => panic!("expected an error for the request: {other:?}"),
+    }
+    let id = SessionId(1);
+    assert!(out.control(&HostMsg::ScreenText { id, text: huge.clone(), truncated: false }));
+    let Ok(Out::Frame { payload: screen, .. }) = rx.try_recv() else { panic!("expected a control frame") };
+    let frame = Frame { kind: FrameKind::Control, channel, payload: screen.to_vec() };
+    assert!(
+        matches!(frame.message::<HostMsg>().unwrap(), HostMsg::Error { req: None, id: Some(got), .. } if got == id),
+        "the screen text turns into an error for its session"
+    );
+    assert!(out.control(&HostMsg::Error { req: None, id: None, message: huge }));
+    assert!(rx.try_recv().is_err());
+    assert_eq!(out.streaming(), payload.len() + screen.len());
+}
+
 /// 说了 `Caps::shell_report` 的连接：`Meta` 里的 shell 集成报告拆出来，和上一次发的一样就不带；
 /// 没说的照旧整份放在 `meta` 里。
 #[test]

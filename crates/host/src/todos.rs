@@ -35,6 +35,10 @@ const ENV_TODO_PROMPT: &str = "RUNODE_TODO_PROMPT";
 /// 提示词最长这么多字节：它要放进环境变量，系统给参数和环境变量的空间有限。
 const MAX_PROMPT: usize = 64 * 1024;
 
+/// 新交来的任务和定时的标题最长这么多字节（`check_title`）：看板每张卡片都带着它，列看板（`ListTodos`）
+/// 一次回所有未完成的任务。
+const MAX_TITLE: usize = 1024;
+
 /// 分支名和工作树目录名里取自标题的部分最长这么多个字符。
 const MAX_SLUG: usize = 40;
 
@@ -235,6 +239,7 @@ impl Shared {
     /// 回 `ClientMsg::AddTodo`。
     pub(crate) fn add_todo(&self, req: u32, spec: &TodoSpec) -> Result<HostMsg, String> {
         self.todos_writable()?;
+        check_title(spec)?;
         check_spec(spec)?;
         let id = self.todos.with_db(|db| db.add_todo(spec, unix_now(), None))?;
         self.todos_changed();
@@ -256,6 +261,7 @@ impl Shared {
         // 用的工作树；正在开始的也一样，开出来的会话记在一张完成了的任务上。
         let claim = self.claim_todo(id)?;
         if let Some(spec) = spec {
+            check_title(spec)?;
             let old = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
             if old.started.is_none() {
                 check_spec(spec)?;
@@ -406,6 +412,7 @@ impl Shared {
     /// 回 `ClientMsg::AddSchedule`。
     pub(crate) fn add_schedule(&self, req: u32, spec: &TodoSpec, when: &When) -> Result<HostMsg, String> {
         self.todos_writable()?;
+        check_title(spec)?;
         check_spec(spec)?;
         let now = unix_now();
         check_when(when, now)?;
@@ -424,7 +431,7 @@ impl Shared {
     ) -> Result<HostMsg, String> {
         self.todos_writable()?;
         let now = unix_now();
-        spec.map_or(Ok(()), check_spec)?;
+        spec.map_or(Ok(()), |spec| check_title(spec).and_then(|()| check_spec(spec)))?;
         when.map_or(Ok(()), |when| check_when(when, now))?;
         if !self.todos.with_db(|db| db.update_schedule(id, spec, when, now))? {
             return Err(format!("no schedule {id}"));
@@ -535,6 +542,15 @@ fn check_spec(spec: &TodoSpec) -> Result<(), String> {
     }
     if spec.worktree && Repo::open(&spec.dir).is_none() {
         return Err(format!("{} is not in a git repository, so it cannot have a worktree", spec.dir.display()));
+    }
+    Ok(())
+}
+
+/// 前端新交来的标题不能太长。只查新交来的：开始任务时重查（`start_todo`）不查它，升级前存下的长标题
+/// 照样开得起来。
+fn check_title(spec: &TodoSpec) -> Result<(), String> {
+    if spec.title.len() > MAX_TITLE {
+        return Err(format!("the title is longer than {} KiB; put the details in the prompt", MAX_TITLE / 1024));
     }
     Ok(())
 }
@@ -788,6 +804,10 @@ mod tests {
         assert!(check_spec(&spec("t", "claude\nrm -rf ~")).is_err());
         assert!(check_spec(&TodoSpec { dir: "relative".into(), ..spec("t", "claude") }).is_err());
         assert!(check_spec(&TodoSpec { prompt: "x".repeat(MAX_PROMPT + 1), ..spec("t", "claude") }).is_err());
+        assert!(check_title(&spec(&"x".repeat(MAX_TITLE), "claude")).is_ok());
+        assert!(check_title(&spec(&"x".repeat(MAX_TITLE + 1), "claude")).is_err());
+        // 开始任务时的重查不管标题长度：升级前存下的长标题照样开得起来。
+        assert!(check_spec(&spec(&"x".repeat(MAX_TITLE + 1), "claude")).is_ok());
 
         assert!(check_when(&When::Once { at: 101 }, 100).is_ok());
         assert!(check_when(&When::Once { at: 100 }, 100).is_err());
