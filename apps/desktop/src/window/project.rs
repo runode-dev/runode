@@ -116,7 +116,8 @@ impl WindowView {
         }
     }
 
-    /// 在后台看当前终端的目录是不是目录，记下来；`project_dir` 因此变了时按新目录再检查一遍。
+    /// 在单独的线程上（`fs_probe::off_thread`，不占后台线程池）看当前终端的目录是不是目录，记下来；
+    /// `project_dir` 因此变了时按新目录再检查一遍。
     fn check_cwd(&mut self, cx: &mut Context<Self>) {
         let Some(cwd) = self.focused_view().and_then(|view| view.read(cx).cwd()) else {
             return;
@@ -127,10 +128,14 @@ impl WindowView {
         }
         workspace.project.cwd_checking = Some(cwd.clone());
         let id = workspace.id;
-        let job = cx.background_spawn({
-            let cwd = cwd.clone();
-            async move { cwd.is_dir() }
-        });
+        // 起不了线程时当它是目录，照终端报的目录读。
+        let job = crate::fs_probe::off_thread(
+            {
+                let cwd = cwd.clone();
+                move || cwd.is_dir()
+            },
+            true,
+        );
         cx.spawn(async move |this, cx| {
             let is_dir = job.await;
             this.update(cx, |this, cx| {
