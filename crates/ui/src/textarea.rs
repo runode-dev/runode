@@ -497,6 +497,11 @@ impl TextareaState {
     }
 
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
+        // 组字时输入法把 Cmd+V 交回来（`doCommandBySelector:`）也会派发到这里：换掉选区会把还没确定的字
+        // 当成已经打上的，之后输入法再改它就对不上了，同 `cut`、`undo`。
+        if self.marked.is_some() {
+            return;
+        }
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
