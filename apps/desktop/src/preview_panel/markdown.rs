@@ -1033,7 +1033,11 @@ impl PreviewPanel {
                 view.list.scroll_to(top);
             }
             view.hinted_width.set(laid);
-            cx.notify();
+            // 画的时候发的通知不会再要一帧，等这一帧画完再通知，下一帧才按排好的宽度重估。
+            let this = cx.entity().downgrade();
+            cx.defer(move |cx| {
+                this.update(cx, |_, cx| cx.notify()).ok();
+            });
         }
         // 行在 `list` 排版时才画，那时它正可变借着 `ListState`，行里再读它就 panic，所以在这里先读好。
         let scroll = (view.list.logical_scroll_top(), f32::from(view.list.viewport_bounds().size.height));
