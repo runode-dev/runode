@@ -521,8 +521,16 @@ impl HostSession {
     fn clear_above_cursor(&self) -> Vec<u8> {
         let x = self.terminal.cursor_x().unwrap_or(0);
         let y = self.terminal.cursor_y().unwrap_or(0);
+        // DL 只删滚动区域里的行，CUP 在原点模式下相对区域：区域不从第一行起、光标在区域外、设了左右边距
+        // 或者开着原点模式时删不准，只清回滚历史；读不出来时也这样。
+        let fits = matches!(vt::scroll_margins(&self.terminal), Ok(((0, bottom), false)) if y <= bottom)
+            && self.terminal.mode(Mode::ORIGIN).is_ok_and(|origin| !origin);
         // DL 从第一行起删掉 y 行，下面的内容跟着上移。
-        if y > 0 { format!("\x1b[3J\x1b[H\x1b[{y}M\x1b[1;{}H", x + 1).into_bytes() } else { b"\x1b[3J".to_vec() }
+        if y > 0 && fits {
+            format!("\x1b[3J\x1b[H\x1b[{y}M\x1b[1;{}H", x + 1).into_bytes()
+        } else {
+            b"\x1b[3J".to_vec()
+        }
     }
 
     /// shell 当前所在的目录：还没启动时是起始目录，否则现读。
@@ -969,6 +977,35 @@ mod tests {
         assert_eq!(session.terminal.cursor_x().unwrap(), 7);
         assert_eq!(screen_row(&session.terminal, 0), "running");
         assert!((1..4).all(|y| screen_row(&session.terminal, y).is_empty()));
+    }
+
+    /// 程序设了滚动区域或者开着原点模式时，DL 删不到区域外的行：区域不从第一行起、光标在区域外或者
+    /// 开着原点模式时只清回滚历史，屏幕和光标不动；区域从第一行起、光标在区域里时照常顶上去，区域下面的
+    /// 行不动。
+    #[test]
+    fn clear_above_cursor_respects_the_scrolling_region() {
+        let cleared = |setup: &[u8]| {
+            let mut session = idle_host();
+            session.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\n");
+            session.feed(setup);
+            let bytes = session.clear_above_cursor();
+            session.terminal.vt_write(&bytes);
+            let rows: Vec<String> = (0..4).map(|y| screen_row(&session.terminal, y)).collect();
+            (rows, session.terminal.cursor_y().unwrap(), session.terminal.cursor_x().unwrap())
+        };
+        let unchanged = |rows: &[&str], y| (rows.iter().map(|&row| row.to_owned()).collect::<Vec<_>>(), y, 7);
+        let screen = b"\x1b[2J\x1b[1;1Hheader\x1b[3;1Hrunning";
+        // 上边距在第二行：光标所在行顶不到第一行。
+        assert_eq!(cleared(&[b"\x1b[2;4r", &screen[..]].concat()), unchanged(&["header", "", "running", ""], 2));
+        // 原点模式下 CUP 相对区域。
+        assert_eq!(cleared(&[b"\x1b[?6h", &screen[..]].concat()), unchanged(&["header", "", "running", ""], 2));
+        // 光标在区域下面（比如程序在底下留的状态行上）。
+        assert_eq!(cleared(&[b"\x1b[1;2r", &screen[..]].concat()), unchanged(&["header", "", "running", ""], 2));
+        // 区域从第一行起、光标在区域里：照常顶上去，区域下面的状态行不动。
+        assert_eq!(
+            cleared(b"\x1b[2J\x1b[1;3r\x1b[1;1Hheader\x1b[4;1Hstatus\x1b[2;1Hrunning"),
+            (vec!["running".into(), String::new(), String::new(), "status".into()], 0, 7)
+        );
     }
 
     #[test]

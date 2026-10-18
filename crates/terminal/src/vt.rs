@@ -415,6 +415,29 @@ pub(crate) fn snapshot_format() -> std::result::Result<u16, SnapshotError> {
     }
 }
 
+/// 滚动区域的上下边距（DECSTBM，从 0 起、含两端），以及设没设左右边距（DECSLRM）。libghostty-vt
+/// 没有直接读的接口，借格式化只输出左上一格加上滚动区域解出来：区域不是整屏时它才写出这两条序列。
+pub(crate) fn scroll_margins(terminal: &Terminal<'_, '_>) -> Result<((u16, u16), bool)> {
+    let corner = || terminal.grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }));
+    let selection = Selection::new(corner()?, corner()?, false);
+    let options =
+        FormatterOptions::new().with_format(Format::Vt).with_scrolling_region(true).with_selection(&selection);
+    let bytes = Formatter::new(terminal, options)?.format_alloc(None)?.to_vec();
+    let mut rows = (0, terminal.rows()?.saturating_sub(1));
+    let mut sides = false;
+    // 一格的内容里没有 ESC，ESC 起头的只有格式化写出的这两条。
+    for seq in bytes.split(|&b| b == 0x1b).skip(1) {
+        let Some((&last, params)) = seq.strip_prefix(b"[").and_then(<[u8]>::split_last) else { continue };
+        let mut params = params.split(|&b| b == b';').map(|p| std::str::from_utf8(p).ok()?.parse::<u16>().ok());
+        match (last, params.next().flatten(), params.next().flatten()) {
+            (b'r', Some(top), Some(bottom)) => rows = (top.saturating_sub(1), bottom.saturating_sub(1)),
+            (b's', ..) => sides = true,
+            _ => {}
+        }
+    }
+    Ok((rows, sides))
+}
+
 /// 整个屏幕（含回滚历史）第 `first` 到 `last` 行的纯文字，一行一项，行尾空白去掉。软换行
 /// 不接起来，和屏幕上的行一一对应；末尾的空行可能没有。
 pub(crate) fn screen_lines(terminal: &Terminal<'_, '_>, first: usize, last: usize) -> Result<Vec<String>> {
