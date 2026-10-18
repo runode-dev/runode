@@ -298,9 +298,12 @@ impl ListenControl {
     fn set(&self, to: ListenState) {
         {
             let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-            if *state != ListenState::Stopped {
-                *state = to;
+            // 停过以后线程可能已经结束、唤醒管道的读端跟着关了，再写只会失败（比如交接后
+            // `run_until_idle` 退出时又调一次 `stop`）。
+            if *state == ListenState::Stopped {
+                return;
             }
+            *state = to;
         }
         if let Err(err) = (&self.wake).write_all(&[1]) {
             tracing::warn!("failed to wake the listener thread: {err}");
