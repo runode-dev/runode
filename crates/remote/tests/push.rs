@@ -89,9 +89,11 @@ fn revoking_a_device_removes_its_registration() {
     let (key, other_key) = (Key::generate(), Key::generate());
     let device_id = harness.pair(&key);
     let other = harness.pair(&other_key);
-    for (id, key) in [(device_id, &key), (other, &other_key)] {
+    // 两台手机，各有各的 token：同一个 token 只登记一次。
+    let other_token = TOKEN.replace('8', "9");
+    for (id, key, token) in [(device_id, &key, TOKEN), (other, &other_key, other_token.as_str())] {
         let (mut phone, _host) = harness.bridged(id, key);
-        phone.send_control(&register(1, Some(TOKEN)));
+        phone.send_control(&register(1, Some(token)));
         assert_eq!(phone.read_host_msg(), HostMsg::Done { req: 1 });
     }
     assert_eq!(push_registrations(&harness.dirs).unwrap().len(), 2);

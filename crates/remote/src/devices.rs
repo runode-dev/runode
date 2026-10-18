@@ -95,14 +95,15 @@ pub fn push_registrations(dirs: &Dirs) -> io::Result<Vec<PushRegistration>> {
     Ok(read(dirs)?.push)
 }
 
-/// 记下（或者换掉）设备 `registration.device_id` 登记的推送。表里没有这台设备（刚被撤销）时不记，
-/// 返回 false。
+/// 记下（或者换掉）设备 `registration.device_id` 登记的推送，别的设备登记的同一个 token 一起换掉：
+/// 手机删掉这台电脑再重新配对后是一台新设备，旧的那条还登记着同一个 token，每条通知会推两遍。
+/// 表里没有这台设备（刚被撤销）时不记，返回 false。
 pub(crate) fn set_push(dirs: &Dirs, registration: PushRegistration) -> io::Result<bool> {
     update(dirs, |table| {
         if !table.devices.iter().any(|device| device.device_id == registration.device_id) {
             return false;
         }
-        table.push.retain(|push| push.device_id != registration.device_id);
+        table.push.retain(|push| push.device_id != registration.device_id && push.token != registration.token);
         table.push.push(registration);
         true
     })
@@ -246,6 +247,42 @@ mod tests {
         let mut ids: Vec<u8> = list_devices(&dirs).unwrap().iter().map(|device| device.device_id.0[0]).collect();
         ids.sort_unstable();
         assert_eq!(ids, (0..16).collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 同一台手机重新配对成了新设备、登记同一个 token 时，旧设备那条登记换掉；别的 token 不动。
+    #[test]
+    fn a_token_is_registered_once() {
+        let root = std::env::temp_dir().join(format!("rra-push-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let push = |n: u8, token: &str| PushRegistration {
+            device_id: DeviceId([n; 16]),
+            token: token.into(),
+            env: ApnsEnv::Production,
+            bundle: "dev.runode.ios".into(),
+            machine: "mac".into(),
+            machine_name: "Mac".into(),
+            updated_at: 0,
+        };
+        for n in 1..=3 {
+            add(
+                &dirs,
+                Device {
+                    device_id: DeviceId([n; 16]),
+                    name: format!("phone {n}"),
+                    public_key: Bytes(vec![4; 65]),
+                    paired_at: 0,
+                    last_seen: 0,
+                },
+            )
+            .unwrap();
+        }
+        assert!(set_push(&dirs, push(1, "aa")).unwrap());
+        assert!(set_push(&dirs, push(3, "cc")).unwrap());
+        assert!(set_push(&dirs, push(2, "aa")).unwrap());
+        assert_eq!(push_registrations(&dirs).unwrap(), [push(3, "cc"), push(2, "aa")]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
