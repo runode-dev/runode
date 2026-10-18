@@ -1,6 +1,6 @@
 //! `Pick` 拼出的命令和从命令认回来的要对得上。
 
-use runode_agent::models::{LAUNCHERS, Pick, listed, resume_command, same_kind};
+use runode_agent::models::{LAUNCHERS, Pick, listed, resume_command, same_kind, start_command};
 
 /// 命令开头是 `command` 的那一项。
 fn pick(command: &str, model: Option<&str>, effort: Option<&str>) -> Pick {
@@ -54,14 +54,23 @@ fn lists_one_launcher_per_agent() {
     assert_eq!(labels, unique);
 }
 
-/// 续接的命令插在程序名后面，别的参数照留，末尾等提示词的参数去掉；认不出的、没有续接参数的不续。
+/// 能指定对话号的开始时带上号，别家原样。
+#[test]
+fn start_commands_pin_the_session_where_they_can() {
+    assert_eq!(start_command("claude --model opus", "S"), "claude --session-id S --model opus");
+    assert_eq!(start_command("codex -m gpt-5", "S"), "codex -m gpt-5");
+    assert_eq!(start_command("claudex", "S"), "claudex");
+}
+
+/// 续接的命令插在程序名后面，别的参数照留，末尾等提示词的参数去掉；能指定对话号的按号接回；认不出的、
+/// 没有续接参数的不续。
 #[test]
 fn resume_commands_keep_the_other_arguments() {
     for (command, resumed) in [
-        ("claude", Some("claude --continue")),
+        ("claude", Some("claude --resume S")),
         (
             "claude --model opus --dangerously-skip-permissions",
-            Some("claude --continue --model opus --dangerously-skip-permissions"),
+            Some("claude --resume S --model opus --dangerously-skip-permissions"),
         ),
         ("codex -m gpt-5", Some("codex resume --last -m gpt-5")),
         ("copilot --reasoning-effort max -i", Some("copilot --continue --reasoning-effort max")),
@@ -70,6 +79,6 @@ fn resume_commands_keep_the_other_arguments() {
         ("claudex", None),
         ("/usr/local/bin/claude", None),
     ] {
-        assert_eq!(resume_command(command).as_deref(), resumed, "{command}");
+        assert_eq!(resume_command(command, "S").as_deref(), resumed, "{command}");
     }
 }

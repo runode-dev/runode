@@ -34,6 +34,9 @@ pub struct Launcher {
     prompt_arg: &'static str,
     /// 接着当前目录里最近一次对话的参数，插在 `command` 后面，连着前面的空格；没有的为空，见 `resume_command`。
     resume_arg: Option<&'static str>,
+    /// 开始时指定对话号、续接时按号接回那场对话的两个参数，各连着前后的空格；不能指定对话号的为空，只能用
+    /// `resume_arg` 接目录里最近一次的，那可能是用户在同一目录里另开的对话。见 `start_command`。
+    session_args: Option<(&'static str, &'static str)>,
     probe: Probe,
 }
 
@@ -71,6 +74,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         prompt_arg: "",
         resume_arg: Some(" --continue"),
+        session_args: Some((" --session-id ", " --resume ")),
         // SDK 用的控制协议：初始化的回话里有账号能用的模型和每个模型的强度，不调模型。不读设置文件，免得跑
         // 用户的 hook；`--bare` 也不跑 hook，但它不读登录状态，问到的模型和账号的对不上。
         probe: Probe {
@@ -97,6 +101,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         prompt_arg: "",
         resume_arg: Some(" resume --last"),
+        session_args: None,
         // app-server 的 JSON-RPC，不用登录也答；标准输入关了它就不回话直接退出。
         probe: Probe {
             args: &["app-server"],
@@ -116,6 +121,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         prompt_arg: "",
         resume_arg: Some(" --continue"),
+        session_args: None,
         probe: Probe {
             args: &["--mode", "rpc", "--no-session"],
             request: "{\"id\":\"runode\",\"type\":\"get_available_models\"}\n",
@@ -130,6 +136,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         prompt_arg: "",
         resume_arg: Some(" --continue"),
+        session_args: None,
         // 只列配了密钥的服务商；它的 RPC 也能问，但一个密钥都没有时起不来。
         probe: Probe { args: &["models", "--json"], request: "", answer: Answer::Output(omp_catalog) },
     },
@@ -145,6 +152,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: true,
         prompt_arg: " --prompt",
         resume_arg: None,
+        session_args: None,
         // 不带 `--standalone` 时会拉起后台服务、问完了也留着。
         probe: Probe {
             args: &["api", "--standalone", "GET", "/api/model"],
@@ -163,6 +171,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         // 直接跟在后面的是项目目录。
         prompt_arg: " --prompt",
         resume_arg: Some(" --continue"),
+        session_args: None,
         probe: Probe { args: &["models"], request: "", answer: Answer::Output(opencode_catalog) },
     },
     Launcher {
@@ -173,6 +182,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         prompt_arg: " -i",
         resume_arg: Some(" --continue"),
+        session_args: None,
         // 账号能用的模型要登录才问得到（`--headless --stdio` 的 `models.list`），这里读配置说明里列的那些。
         probe: Probe { args: &["help", "config"], request: "", answer: Answer::Output(copilot_catalog) },
     },
@@ -185,6 +195,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         prompt_arg: "",
         resume_arg: Some(" resume"),
+        session_args: None,
         // 要登录才列得出来。
         probe: Probe { args: &["models"], request: "", answer: Answer::Output(cursor_catalog) },
     },
@@ -197,6 +208,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         // 提示词直接跟在后面会报多余的参数。
         prompt_arg: " -i",
         resume_arg: None,
+        session_args: None,
         // `--output-format` 要写在 `models` 前面。要登录（或者配了 API 密钥）才列得出来。
         probe: Probe { args: &["--output-format", "json", "models"], request: "", answer: Answer::Lines(agy_catalog) },
     },
@@ -208,6 +220,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         prompt_arg: "",
         resume_arg: None,
+        session_args: None,
         // `serve` 的 JSON-RPC：初始化答了才能说 `initialized`，再问清单。没登录时清单是空的；0.2.x 没有 `serve`。
         probe: Probe {
             args: &["serve"],
@@ -636,18 +649,34 @@ fn muse_catalog(line: &str) -> Reply {
     Reply::Done(catalog)
 }
 
+/// 开始任务时跑的命令（提示词跟在后面）：那家能指定对话号时把 `session` 插在程序名后面，之后 `resume_command`
+/// 凭同一个号接回这场对话。Claude 要求对话号是 UUID。认不出、不能指定的原样。
+pub fn start_command(command: &str, session: &str) -> String {
+    match launcher_of(command) {
+        Some((spec, rest)) if let Some((arg, _)) = spec.session_args => format!("{}{arg}{session}{rest}", spec.command),
+        _ => command.to_owned(),
+    }
+}
+
 /// 在原来的目录里接着 agent 上次对话的命令：`command` 是开始任务时跑的那条（不带提示词），按开头的程序名认出
-/// 是哪家，把那家的续接参数插在程序名后面，别的参数（模型、权限这些）照留，末尾等着提示词的参数去掉。认不出、
-/// 或者那家没有续接参数时为空。
-pub fn resume_command(command: &str) -> Option<String> {
+/// 是哪家，把那家的续接参数插在程序名后面，别的参数（模型、权限这些）照留，末尾等着提示词的参数去掉。能指定
+/// 对话号的按 `start_command` 用过的 `session` 接回，别家接目录里最近一次的。认不出、或者那家没有续接参数时为空。
+pub fn resume_command(command: &str, session: &str) -> Option<String> {
+    let (spec, rest) = launcher_of(command)?;
+    let rest = rest.strip_suffix(spec.prompt_arg).unwrap_or(rest);
+    let resume = match spec.session_args {
+        Some((_, arg)) => format!("{arg}{session}"),
+        None => spec.resume_arg?.to_owned(),
+    };
+    Some(format!("{}{resume}{rest}", spec.command))
+}
+
+/// `command` 开头的程序名是哪家，和后面的参数。
+fn launcher_of(command: &str) -> Option<(&'static Launcher, &str)> {
     let command = command.trim();
     LAUNCHERS.iter().find_map(|spec| {
         let rest = command.strip_prefix(spec.command)?;
-        if !(rest.is_empty() || rest.starts_with(char::is_whitespace)) {
-            return None;
-        }
-        let rest = rest.strip_suffix(spec.prompt_arg).unwrap_or(rest);
-        Some(format!("{}{}{rest}", spec.command, spec.resume_arg?))
+        (rest.is_empty() || rest.starts_with(char::is_whitespace)).then_some((spec, rest))
     })
 }
 

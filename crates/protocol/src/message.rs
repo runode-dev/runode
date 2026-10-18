@@ -339,8 +339,8 @@ pub enum ClientMsg {
     /// 还在跑时不再开，回原来那个；shell 已经退出时收掉旧会话再开新的。
     StartTodo { req: u32, id: String },
     /// 接回开始过的任务（完成了的也行）的会话，回 `Opened`：会话还在跑时就是那个；没了时在任务的目录（工作树
-    /// 还在时在工作树）里开一个新的，在提示符上跑这家 agent 接着这个目录里最近一次对话的命令
-    /// （`runode_agent::models::resume_command`），认不出是哪家时只开 shell。不重跑任务的提示词。
+    /// 还在时在工作树）里开一个新的，在提示符上跑这家 agent 接着任务那场对话的命令（不能按对话号接的接这个
+    /// 目录里最近一次，见 `runode_agent::models::resume_command`），认不出是哪家时只开 shell。不重跑任务的提示词。
     ResumeTodo { req: u32, id: String },
     /// 翻完成了的任务（完成了多久的都有），完成得晚的在前，跳过前 `offset` 张；`schedule` 给了时只要这个定时
     /// 开出的。回 `DoneTodos`，一次最多 `todo::DONE_TODOS_PAGE` 张。

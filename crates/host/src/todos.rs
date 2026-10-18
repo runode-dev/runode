@@ -492,7 +492,7 @@ impl Shared {
         self.end_if_exited(old);
         // 库可以不经宿主直接写（见 `start_todo`），打进 shell 之前再查一遍命令是不是一行。
         check_text(&todo.spec)?;
-        let resume = runode_agent::models::resume_command(&todo.spec.agent);
+        let resume = runode_agent::models::resume_command(&todo.spec.agent, &agent_session(&todo.id, started));
         // 清掉的工作树库里记成空的（`set_swept`），要看任务要没要过工作树。
         let (cwd, command) = match todo.worktree_dir.as_ref().filter(|root| root.is_dir()) {
             Some(root) => (in_worktree(root, &todo.spec.dir), resume),
@@ -547,10 +547,12 @@ impl Shared {
             }
         };
         // 任务会话不指定 shell，起的是 `default_shell`。
-        let command = agent_command(&todo.spec.agent, &runode_terminal::pty::default_shell());
+        let started = unix_now();
+        let agent = runode_agent::models::start_command(&todo.spec.agent, &agent_session(&todo.id, started));
+        let command = agent_command(&agent, &runode_terminal::pty::default_shell());
         self.deliver(session, Inbox::TypeAtPrompt(command.into_bytes()));
         let worktree = made.as_ref().map(|(root, branch)| (root.as_path(), branch.as_str()));
-        if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, unix_now(), session, worktree)) {
+        if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, started, session, worktree)) {
             self.kill(session);
             undo_worktree();
             return Err(err);
@@ -569,6 +571,12 @@ fn agent_command(agent: &str, shell: &str) -> String {
         _ => format!("\"${ENV_TODO_PROMPT}\""),
     };
     format!("{agent} {prompt}\r")
+}
+
+/// 任务这次开始时给 agent 的对话号，续接时由同样的任务标识和开始时刻再算出来，不用另存。写成 UUID 的样子，
+/// Claude 只认 UUID；每次重新开始的时刻不同，号也不同，不撞上一次的对话。
+fn agent_session(todo: &str, started: u64) -> String {
+    format!("{todo}-0000-4000-8000-{started:012x}")
 }
 
 fn no_todo(id: &str) -> String {
@@ -725,6 +733,11 @@ fn slug(title: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_sessions_look_like_uuids() {
+        assert_eq!(agent_session("0a1b2c3d", 1_760_000_000), "0a1b2c3d-0000-4000-8000-000068e77800");
+    }
 
     #[test]
     fn agent_commands_read_the_prompt_the_way_each_shell_does() {
