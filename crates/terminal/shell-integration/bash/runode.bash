@@ -157,8 +157,11 @@ if [ -z "${_runode_integrated-}" ]; then
         else
             [ -n "$_runode_names_collected" ] && return
             _runode_names_collected=1
-            local IFS=$'\n' GLOBIGNORE='*'
-            list=($(compgen -A function))
+            # 逐行读进数组，不靠按 IFS 拆分加 GLOBIGNORE 挡通配：局部的 GLOBIGNORE 出了函数被还原成
+            # 未设置时，bash 会顺手关掉用户自己开的 dotglob。
+            local names
+            names=$(compgen -A function)
+            while IFS= read -r name; do list+=("$name"); done <<<"$names"
         fi
         for name in "${list[@]}"; do
             [[ $name =~ ^[[:alnum:]][[:alnum:]_.:+@,=-]*$ ]] || continue

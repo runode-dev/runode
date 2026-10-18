@@ -506,6 +506,16 @@ fn real_bash_survives_errexit_while_restoring_the_exit_status() {
     assert_eq!(shell.output(1), "1\n");
 }
 
+/// 集成收集函数名不改用户的 shell 选项：老 bash 那支早先用局部的 GLOBIGNORE，出函数时 bash 顺手关掉了
+/// 用户开的 dotglob。
+#[test]
+fn real_bash_keeps_the_users_dotglob() {
+    let rc = "PS1='[b]\\$ '\nshopt -s dotglob\n";
+    let Some(mut shell) = RealShell::start("bash", "bash-dotglob", rc, "[b]$", &["[b]$"]) else { return };
+    shell.run("shopt -q dotglob && echo on || echo off");
+    assert_eq!(shell.output(1), "on\n");
+}
+
 #[test]
 fn real_bash_commands_are_read_under_a_two_line_prompt() {
     read_commands_from(RealShell::start("bash", "bash-two-line", "PS1='\\W\\n[b]\\$ '\n", "[b]$", &["[b]$"]));
