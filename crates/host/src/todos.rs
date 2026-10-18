@@ -13,7 +13,7 @@
 mod schedule;
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -51,9 +51,9 @@ pub(crate) struct Todos {
     state: Mutex<State>,
     /// 看板变了时通知定时的线程，见 `State::generation`。
     changed: Condvar,
-    /// 没做完的任务用的会话，看板一变就重读，连同读的是第几次变（`State::generation`）之后的库。会话线程拿它
-    /// 判断要不要报状态变了，见 `Shared::todo_session_changed`；单独一把锁，会话线程不等库。
-    sessions: Mutex<(u64, HashSet<SessionId>)>,
+    /// 任务用的会话和任务做没做完，看板一变就重读，连同读的是第几次变（`State::generation`）之后的库。会话线程
+    /// 拿它判断要不要报状态变了，见 `Shared::todo_session_changed`；单独一把锁，会话线程不等库。
+    sessions: Mutex<(u64, HashMap<SessionId, bool>)>,
 }
 
 #[derive(Default)]
@@ -169,7 +169,7 @@ impl Shared {
         self.peers().todos_changed();
     }
 
-    /// 看板第 `generation` 次变了以后重读没做完的任务用的会话，见 `Todos::sessions`。读不到库时照旧，下次变了
+    /// 看板第 `generation` 次变了以后重读任务用的会话，见 `Todos::sessions`。读不到库时照旧，下次变了
     /// 再读。
     fn watch_todo_sessions(&self, generation: u64) {
         match self.todos.with_db(|db| db.list_todos(unix_now())) {
@@ -179,20 +179,22 @@ impl Shared {
         }
     }
 
-    /// 记下看板第 `generation` 次变了以后读到的 `todos` 里没做完的任务用的会话，见 `Todos::sessions`。
+    /// 记下看板第 `generation` 次变了以后读到的 `todos` 用的会话，见 `Todos::sessions`。
     fn remember_todo_sessions(&self, generation: u64, todos: &[Todo]) {
         let mut watched = self.todos.sessions.lock().unwrap_or_else(PoisonError::into_inner);
         // 两个线程一起改看板时，先读的库可能后写回来：只留变得最晚的那次之后读到的。
         if watched.0 < generation {
-            let open = todos.iter().filter(|todo| todo.done_at.is_none()).filter_map(|todo| todo.session);
-            *watched = (generation, open.collect());
+            let sessions = todos.iter().filter_map(|todo| Some((todo.session?, todo.done_at.is_none())));
+            *watched = (generation, sessions.collect());
         }
     }
 
-    /// 会话 `id` 的 agent 状态、前台是不是 shell 变了，或者 shell 退出了（会话线程报的）：是没做完的任务的
-    /// 会话时告诉问过 `ListTodos` 的连接，卡片可能换了列，前端不用轮询会话的状态。
-    pub(crate) fn todo_session_changed(&self, id: SessionId) {
-        if self.todos.sessions.lock().unwrap_or_else(PoisonError::into_inner).1.contains(&id) {
+    /// 会话 `id` 的 agent 状态、前台是不是 shell 变了，或者会话结束了（`ended`：shell 退出或者会话被收掉，
+    /// 会话线程报的）：告诉问过 `ListTodos` 的连接，前端不用轮询会话的状态。没做完的任务的卡片可能换了列；
+    /// 完成了的任务只在会话结束时报，卡片上打开终端的按钮要跟着收起，agent 的状态变了不影响它。
+    pub(crate) fn todo_session_changed(&self, id: SessionId, ended: bool) {
+        let open = self.todos.sessions.lock().unwrap_or_else(PoisonError::into_inner).1.get(&id).copied();
+        if open.is_some_and(|open| open || ended) {
             self.peers().todos_changed();
         }
     }
@@ -470,6 +472,45 @@ impl Shared {
         // 会话还在时上面已经直接给出，不因原目录没了打不开。
         check_spec(&todo.spec)?;
         let session = self.launch_todo(&todo)?;
+        self.todos_changed();
+        Ok(session)
+    }
+
+    /// 回 `ClientMsg::ResumeTodo`：接回开始过的任务的会话，没了时开一个接着 agent 上次的对话。工作树已经清掉时
+    /// 对话的目录没了、接不上，只在任务的目录里开 shell：在那里续上的会是别的对话。
+    pub(crate) fn resume_todo(&self, id: &str) -> Result<SessionId, String> {
+        self.todos_writable()?;
+        let id = &self.resolve_todo(id)?;
+        let _claim = self.claim_todo(id)?;
+        let todo = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
+        let (Some(started), Some(old)) = (todo.started, todo.session) else {
+            return Err(format!("todo {id} has not started"));
+        };
+        if self.running(old) {
+            return Ok(old);
+        }
+        self.end_if_exited(old);
+        // 库可以不经宿主直接写（见 `start_todo`），打进 shell 之前再查一遍命令是不是一行。
+        check_text(&todo.spec)?;
+        let resume = runode_agent::models::resume_command(&todo.spec.agent);
+        // 清掉的工作树库里记成空的（`set_swept`），要看任务要没要过工作树。
+        let (cwd, command) = match todo.worktree_dir.as_ref().filter(|root| root.is_dir()) {
+            Some(root) => (in_worktree(root, &todo.spec.dir), resume),
+            None if todo.spec.worktree => (todo.spec.dir.clone(), None),
+            None => (todo.spec.dir.clone(), resume),
+        };
+        if !cwd.is_dir() {
+            return Err(format!("{} is not a directory", cwd.display()));
+        }
+        let session = self.spawn_with(spawn_options(Some(cwd)), &[]).map_err(|err| format!("{err:#}"))?;
+        if let Some(command) = command {
+            self.deliver(session, Inbox::TypeAtPrompt(format!("{command}\r").into_bytes()));
+        }
+        if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, started, session, None)) {
+            self.kill(session);
+            return Err(err);
+        }
+        tracing::info!("todo {} resumed in session {session}", todo.id);
         self.todos_changed();
         Ok(session)
     }

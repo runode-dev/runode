@@ -338,11 +338,15 @@ pub enum ClientMsg {
     /// 开始任务：在它的目录（要工作树时先新开一个）里开会话、在提示符上跑 agent，回 `Opened`。会话
     /// 还在跑时不再开，回原来那个；shell 已经退出时收掉旧会话再开新的。
     StartTodo { req: u32, id: String },
+    /// 接回开始过的任务（完成了的也行）的会话，回 `Opened`：会话还在跑时就是那个；没了时在任务的目录（工作树
+    /// 还在时在工作树）里开一个新的，在提示符上跑这家 agent 接着这个目录里最近一次对话的命令
+    /// （`runode_agent::models::resume_command`），认不出是哪家时只开 shell。不重跑任务的提示词。
+    ResumeTodo { req: u32, id: String },
     /// 翻完成了的任务（完成了多久的都有），完成得晚的在前，跳过前 `offset` 张；`schedule` 给了时只要这个定时
     /// 开出的。回 `DoneTodos`，一次最多 `todo::DONE_TODOS_PAGE` 张。
     ListDoneTodos { req: u32, schedule: Option<String>, offset: u32 },
     /// 要一张任务的全部内容，完成了多久的都行，回 `Todo`。这几条要任务标识的消息（`UpdateTodo`、
-    /// `RemoveTodo`、`StartTodo`、`MoveTodo` 和它）都也认编号，写成 `5` 或 `#5`（`Todo::number`）；
+    /// `RemoveTodo`、`StartTodo`、`ResumeTodo`、`MoveTodo` 和它）都也认编号，写成 `5` 或 `#5`（`Todo::number`）；
     /// 正好也是哪张任务的标识时按标识算。
     GetTodo { req: u32, id: String },
     /// 调任务的先后：挪到 `before` 前面，为空时挪到最后；回 `Done`。

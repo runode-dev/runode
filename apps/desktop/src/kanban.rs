@@ -10,8 +10,8 @@
 //! 标签和分屏，摆在哪由 app 管。和宿主说话经 app 启动时交进来的 `Host`（`watch`），数据全 app 一份。各
 //! workspace 的目录和名字、新建时默认的目录、定时能不能在后台跑由 app 每次画之前经 `set_input` 交进来；卡片上
 //! agent 的状态标记和标签、侧栏上的一样，由 app 画（`AgentMarks`）。按了关闭、Esc（`KanbanEvent::Close`），
-//! 卡片的「打开终端」（`KanbanEvent::OpenSession`：把任务的会话接进窗口）交给 app 办。对话框盖住整个窗口，
-//! 由 app 画在窗口最上层（`Kanban::dialog`）。
+//! 卡片的「打开终端」（`KanbanEvent::OpenSession`：把任务的会话接进窗口）交给 app 办，会话没了时先请宿主另开
+//! 一个接着 agent 上次的对话（`open_todo`）。对话框盖住整个窗口，由 app 画在窗口最上层（`Kanban::dialog`）。
 //!
 //! 卡片换了列时从原来的位置飞到新的位置，落下后淡入、描一圈强调色再褪掉；拖着放下的不飞，只描边。
 //! 每帧记下各卡片画在哪（`Geometry`），下一帧发现换了列就照上一帧的位置起飞。开始任务时顶上居中弹出
@@ -592,6 +592,34 @@ impl Kanban {
         cx.emit(KanbanEvent::OpenSession { session, todo: Box::new(todo.clone()) });
     }
 
+    /// 打开开始过的任务的终端：会话还在就切过去，没了（终端关了）就请宿主另开一个接着 agent 上次的对话
+    /// （`ClientMsg::ResumeTodo`），开好了再切过去。
+    fn open_todo(&mut self, todo: &Todo, cx: &mut Context<Self>) {
+        if let Some(session) = todo.session.filter(|id| store::data(cx).sessions.contains_key(id)) {
+            Self::open_session(session, todo, cx);
+            return;
+        }
+        let id = todo.id.clone();
+        let asked = store::ask(cx, Box::new(move |req| ClientMsg::ResumeTodo { req, id }));
+        let todo = todo.clone();
+        cx.spawn(async move |this, cx| {
+            let answer = asked.await;
+            this.update(cx, |this, cx| match answer {
+                Ok(HostMsg::Opened { id, .. }) => Self::open_session(id, &todo, cx),
+                answer => {
+                    let reason = match answer {
+                        Err(err) => format!("{err:#}"),
+                        Ok(other) => format!("unexpected answer from the host: {other:?}"),
+                    };
+                    let text = rust_i18n::t!("kanban.toast.request_failed", reason = reason).into_owned();
+                    this.show_toast(ToastState::Failed(text), cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// 和上一帧比，记下换了列的卡片，从上一帧画的位置起飞；飞完、描边褪完的清掉。
     fn track_moves(&mut self, cx: &App) {
         if self.page != Page::Todos {
@@ -1037,12 +1065,12 @@ impl Kanban {
         let shown = a11y || self.hovered.as_ref() == Some(&todo.id);
         let mut buttons: Vec<Button> = Vec::new();
         if shown {
-            if let Some(session_id) = open_session.filter(|_| primary_id != Some("open")) {
+            if todo.session.is_some() && primary_id != Some("open") {
                 let todo = todo.clone();
                 let label = rust_i18n::t!("kanban.open").into_owned();
                 buttons.push(
                     icon_button("todo-open", TERMINAL_ICON, label)
-                        .on_press(cx, move |_, _, cx| Self::open_session(session_id, &todo, cx)),
+                        .on_press(cx, move |this, _, cx| this.open_todo(&todo, cx)),
                 );
             }
             if primary_id != Some("done") {
@@ -1345,12 +1373,12 @@ impl Kanban {
         .flatten()
         .collect();
         let mut buttons: Vec<Button> = Vec::new();
-        if let Some(session) = todo.session.filter(|id| data.sessions.contains_key(id)) {
+        if todo.session.is_some() {
             let todo = todo.clone();
             let label = rust_i18n::t!("kanban.open").into_owned();
             buttons.push(
                 icon_button("todo-open", TERMINAL_ICON, label)
-                    .on_press(cx, move |_, _, cx| Self::open_session(session, &todo, cx)),
+                    .on_press(cx, move |this, _, cx| this.open_todo(&todo, cx)),
             );
         }
         {

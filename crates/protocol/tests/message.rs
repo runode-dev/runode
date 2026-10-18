@@ -251,6 +251,7 @@ fn client_messages_round_trip() {
         ClientMsg::UpdateTodo { req: 22, id: "0000abcd".into(), spec: None, done: Some(true) },
         ClientMsg::RemoveTodo { req: 23, id: "0000abcd".into() },
         ClientMsg::StartTodo { req: 24, id: "0000abcd".into() },
+        ClientMsg::ResumeTodo { req: 30, id: "#5".into() },
         ClientMsg::GetTodo { req: 28, id: "#5".into() },
         ClientMsg::ListDoneTodos { req: 29, schedule: Some("0000cafe".into()), offset: 100 },
         ClientMsg::MoveTodo { req: 25, id: "0000abcd".into(), before: Some("0000beef".into()) },

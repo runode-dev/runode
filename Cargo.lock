@@ -4658,6 +4658,7 @@ version = "0.1.10"
 dependencies = [
  "anyhow",
  "libc",
+ "runode-agent",
  "runode-git",
  "runode-paths",
  "runode-protocol",

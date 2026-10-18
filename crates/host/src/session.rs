@@ -701,9 +701,12 @@ impl Runner {
     }
 
     /// 会话结束了（前端要结束它，或者处理消息时 panic）：还没报告过退出的，告诉连着的前端
-    /// （比如经 socket 等着 agent 的命令行）；叫结束的那一方多半已经不收了。
+    /// （比如经 socket 等着 agent 的命令行）；叫结束的那一方多半已经不收了。报告过的也告诉宿主一声，
+    /// 任务卡片上打开终端的按钮要收起。
     fn ended(&mut self) {
-        if !self.exited {
+        if self.exited {
+            self.ui.todo_session_changed(self.id, true);
+        } else {
             self.report_exit();
         }
     }
@@ -712,7 +715,7 @@ impl Runner {
     fn report_exit(&mut self) {
         self.exited = true;
         self.emit(Event::msg(HostMsg::Exited { id: self.id, status: None }));
-        self.ui.todo_session_changed(self.id);
+        self.ui.todo_session_changed(self.id, true);
     }
 
     /// 被结束时还排在收件箱里的消息（`first` 是已经取出来的那些：`run` 里取出的那条，或者交接冻结期间存下的
@@ -1279,7 +1282,7 @@ impl Runner {
             // 看板按这两样给任务分列，变了才告诉宿主；标题这类常变的不算。
             let state = (meta.agent.as_ref().map(|agent| agent.state), meta.foreground_is_shell);
             if self.board_state.replace(state) != Some(state) {
-                self.ui.todo_session_changed(self.id);
+                self.ui.todo_session_changed(self.id, false);
             }
             let event = Event::msg(HostMsg::Meta { id: self.id, meta, shell: None });
             // 状态不攒：连上时直接给最新的。

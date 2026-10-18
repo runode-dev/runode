@@ -32,6 +32,8 @@ pub struct Launcher {
     pub effort_needs_model: bool,
     /// 提示词前面的参数（`-i`、`--prompt`），连着前面的空格；提示词直接跟在后面的为空。
     prompt_arg: &'static str,
+    /// 接着当前目录里最近一次对话的参数，插在 `command` 后面，连着前面的空格；没有的为空，见 `resume_command`。
+    resume_arg: Option<&'static str>,
     probe: Probe,
 }
 
@@ -68,6 +70,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --effort "),
         effort_needs_model: false,
         prompt_arg: "",
+        resume_arg: Some(" --continue"),
         // SDK 用的控制协议：初始化的回话里有账号能用的模型和每个模型的强度，不调模型。不读设置文件，免得跑
         // 用户的 hook；`--bare` 也不跑 hook，但它不读登录状态，问到的模型和账号的对不上。
         probe: Probe {
@@ -93,6 +96,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" -c model_reasoning_effort="),
         effort_needs_model: false,
         prompt_arg: "",
+        resume_arg: Some(" resume --last"),
         // app-server 的 JSON-RPC，不用登录也答；标准输入关了它就不回话直接退出。
         probe: Probe {
             args: &["app-server"],
@@ -111,6 +115,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --thinking "),
         effort_needs_model: false,
         prompt_arg: "",
+        resume_arg: Some(" --continue"),
         probe: Probe {
             args: &["--mode", "rpc", "--no-session"],
             request: "{\"id\":\"runode\",\"type\":\"get_available_models\"}\n",
@@ -124,6 +129,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --thinking "),
         effort_needs_model: false,
         prompt_arg: "",
+        resume_arg: Some(" --continue"),
         // 只列配了密钥的服务商；它的 RPC 也能问，但一个密钥都没有时起不来。
         probe: Probe { args: &["models", "--json"], request: "", answer: Answer::Output(omp_catalog) },
     },
@@ -138,6 +144,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some("'#'"),
         effort_needs_model: true,
         prompt_arg: " --prompt",
+        resume_arg: None,
         // 不带 `--standalone` 时会拉起后台服务、问完了也留着。
         probe: Probe {
             args: &["api", "--standalone", "GET", "/api/model"],
@@ -155,6 +162,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         // 直接跟在后面的是项目目录。
         prompt_arg: " --prompt",
+        resume_arg: Some(" --continue"),
         probe: Probe { args: &["models"], request: "", answer: Answer::Output(opencode_catalog) },
     },
     Launcher {
@@ -164,6 +172,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --reasoning-effort "),
         effort_needs_model: false,
         prompt_arg: " -i",
+        resume_arg: Some(" --continue"),
         // 账号能用的模型要登录才问得到（`--headless --stdio` 的 `models.list`），这里读配置说明里列的那些。
         probe: Probe { args: &["help", "config"], request: "", answer: Answer::Output(copilot_catalog) },
     },
@@ -175,6 +184,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: None,
         effort_needs_model: false,
         prompt_arg: "",
+        resume_arg: Some(" resume"),
         // 要登录才列得出来。
         probe: Probe { args: &["models"], request: "", answer: Answer::Output(cursor_catalog) },
     },
@@ -186,6 +196,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         // 提示词直接跟在后面会报多余的参数。
         prompt_arg: " -i",
+        resume_arg: None,
         // `--output-format` 要写在 `models` 前面。要登录（或者配了 API 密钥）才列得出来。
         probe: Probe { args: &["--output-format", "json", "models"], request: "", answer: Answer::Lines(agy_catalog) },
     },
@@ -196,6 +207,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --reasoning-effort "),
         effort_needs_model: false,
         prompt_arg: "",
+        resume_arg: None,
         // `serve` 的 JSON-RPC：初始化答了才能说 `initialized`，再问清单。没登录时清单是空的；0.2.x 没有 `serve`。
         probe: Probe {
             args: &["serve"],
@@ -622,6 +634,21 @@ fn muse_catalog(line: &str) -> Reply {
         catalog.models.push(Model { id: id.to_owned(), label, efforts });
     }
     Reply::Done(catalog)
+}
+
+/// 在原来的目录里接着 agent 上次对话的命令：`command` 是开始任务时跑的那条（不带提示词），按开头的程序名认出
+/// 是哪家，把那家的续接参数插在程序名后面，别的参数（模型、权限这些）照留，末尾等着提示词的参数去掉。认不出、
+/// 或者那家没有续接参数时为空。
+pub fn resume_command(command: &str) -> Option<String> {
+    let command = command.trim();
+    LAUNCHERS.iter().find_map(|spec| {
+        let rest = command.strip_prefix(spec.command)?;
+        if !(rest.is_empty() || rest.starts_with(char::is_whitespace)) {
+            return None;
+        }
+        let rest = rest.strip_suffix(spec.prompt_arg).unwrap_or(rest);
+        Some(format!("{}{}{rest}", spec.command, spec.resume_arg?))
+    })
 }
 
 /// 挑好的 agent（`LAUNCHERS` 里第几个）、模型和强度（空着是默认）。

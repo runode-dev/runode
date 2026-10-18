@@ -190,6 +190,59 @@ fn a_todo_session_exiting_is_announced() {
     assert!(!sessions(&mut peer).iter().any(|info| info.id == session && !info.exited), "the session ended");
 }
 
+fn resume(peer: &mut Peer, id: &str) -> HostMsg {
+    ask(peer, &ClientMsg::ResumeTodo { req: 7, id: id.into() })
+}
+
+/// 接回任务的会话：还在跑时就是原来那个；会话没了（终端关了）时另开一个记进任务，完成了的任务也行，开始的
+/// 时间不变；没开始过的接不回。
+#[test]
+fn a_todo_session_can_be_resumed() {
+    let (_host, dir, mut peer) = board("todo-resume");
+    let ran = dir.join("ran");
+    let agent = script(&dir, "agent", &format!("echo ran >> '{}'", ran.display()));
+    let id = add(&mut peer, spec("Resume", &dir, &agent));
+    assert!(matches!(resume(&mut peer, &id), HostMsg::Error { req: Some(7), .. }));
+    let session = start(&mut peer, &id);
+    wait_for_file(&ran);
+    assert_eq!(resume(&mut peer, &id), HostMsg::Opened { req: 7, id: session });
+
+    let done = ClientMsg::UpdateTodo { req: 4, id: id.clone(), spec: None, done: Some(true) };
+    assert_eq!(ask(&mut peer, &done), HostMsg::Done { req: 4 });
+    let started = list(&mut peer)[0].started;
+    peer.send(&ClientMsg::Kill { id: session });
+    let HostMsg::Opened { id: resumed, .. } = resume(&mut peer, &id) else { panic!("not resumed") };
+    assert_ne!(resumed, session);
+    let todo = list(&mut peer).remove(0);
+    assert_eq!((todo.session, todo.started), (Some(resumed), started));
+    assert!(sessions(&mut peer).iter().any(|info| info.id == resumed && !info.exited));
+    // 认不出是哪家 agent，只开 shell，不重跑任务。
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(wait_for_file(&ran), "ran\n");
+}
+
+/// 完成了的任务的会话被收掉（界面关了它的终端）也说一声：卡片上打开终端的按钮要收起，不然按了打不开。
+#[test]
+fn a_done_todo_session_ending_is_announced() {
+    let (_host, dir, mut peer) = board("todo-done-session-end");
+    let ran = dir.join("ran");
+    let agent = script(&dir, "agent", &format!("echo ran > '{}'", ran.display()));
+    let id = add(&mut peer, spec("Done", &dir, &agent));
+    let session = start(&mut peer, &id);
+    wait_for_file(&ran);
+    wait_until("the shell is back in front", || {
+        sessions(&mut peer).iter().any(|info| info.id == session && info.meta.foreground_is_shell)
+    });
+    let done = ClientMsg::UpdateTodo { req: 4, id, spec: None, done: Some(true) };
+    assert_eq!(ask(&mut peer, &done), HostMsg::Done { req: 4 });
+    let mut watcher = Peer::hello(&dir.join("host.sock"), false);
+    watcher.send(&ClientMsg::ListTodos { req: 1 });
+    assert!(matches!(watcher.reply(), HostMsg::Todos { req: 1, .. }));
+    peer.send(&ClientMsg::Kill { id: session });
+    assert_eq!(watcher.reply(), HostMsg::TodosChanged);
+    assert!(!sessions(&mut peer).iter().any(|info| info.id == session), "the session is gone");
+}
+
 /// 要工作树的任务在仓库的 `.worktrees/` 下新开一个、拉新分支，主仓库的状态不受影响；删任务或标完成时
 /// 会话还在就留着工作树，会话没了就删掉干净的工作树和没有新提交的分支。
 #[test]

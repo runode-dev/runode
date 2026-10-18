@@ -228,9 +228,9 @@ impl UiPort {
     }
 
     /// 见 `Shared::todo_session_changed`。
-    pub(crate) fn todo_session_changed(&self, session: SessionId) {
+    pub(crate) fn todo_session_changed(&self, session: SessionId, ended: bool) {
         if let Some(shared) = self.0.upgrade() {
-            shared.todo_session_changed(session);
+            shared.todo_session_changed(session, ended);
         }
     }
 
@@ -1238,6 +1238,9 @@ impl Connection {
             }
             ClientMsg::StartTodo { req, id } => self.todos(req, "host-start-todo", move |shared| {
                 shared.start_todo(&id).map(|session| HostMsg::Opened { req, id: session })
+            }),
+            ClientMsg::ResumeTodo { req, id } => self.todos(req, "host-resume-todo", move |shared| {
+                shared.resume_todo(&id).map(|session| HostMsg::Opened { req, id: session })
             }),
             ClientMsg::ListDoneTodos { req, schedule, offset } => {
                 self.todos(req, "host-list-done-todos", move |shared| {
