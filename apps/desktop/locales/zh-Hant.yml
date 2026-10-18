@@ -852,6 +852,25 @@ kanban:
     bad_once: "時間寫成 YYYY-MM-DD HH:MM。"
     bad_daily: "鐘點寫成 HH:MM。"
     bad_every: 間隔至少一分鐘。
+    templates: 範本
+    template_blank: 空白
+    templates_hint: "把 Markdown 檔案放進 %{dir} 就能加自己的範本。"
+    skills: Skill
+    none: 不用
+    no_skills: 這裡沒有找到 skill。
+    subagent: 自訂 agent
+    attachments: 附件
+    add_attachment: 加入檔案…
+    remove_attachment: "移除「%{name}」"
+    auto: 免確認，一路跑完
+    need_input: "填上%{label}。"
+  template:
+    issue: 修復 Issue
+    issue_input: Issue 編號或連結
+    pr_fix: 處理 PR 的審查和 CI
+    pr_fix_input: PR 編號或連結
+    pr_review: 審查 PR
+    pr_review_input: PR 編號或連結
 github_actions:
   name: 名稱
   dialog_cancel: 取消

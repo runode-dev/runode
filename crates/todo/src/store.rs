@@ -1,5 +1,5 @@
-//! 任务库：任务和定时存在一个 SQLite 文件里，表结构的版本记在 `PRAGMA user_version`。比自己认得的
-//! 新的库（装回了旧版本）不读也不写，免得弄坏新版本的数据。路径存成原样的字节，不要求是 UTF-8。
+//! 任务库：任务和定时存在一个 SQLite 文件里，表结构的版本记在 `PRAGMA user_version`。版本和自己
+//! 认得的不一样的库（装回了旧版本，或者旧版本留下的）不读也不写，也不升级，免得弄坏别的版本的数据。路径存成原样的字节，不要求是 UTF-8。
 
 use std::{
     ffi::OsStr,
@@ -16,7 +16,7 @@ use runode_types::{
 use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior, params};
 
 /// 这个版本认得的表结构。
-const VERSION: i64 = 2;
+const VERSION: i64 = 3;
 
 /// 完成了的任务给前端最近这么久（秒）的，更早的留在库里。
 pub const DONE_KEPT: u64 = 7 * 24 * 60 * 60;
@@ -29,6 +29,12 @@ CREATE TABLE todos (
     dir BLOB NOT NULL,
     agent TEXT NOT NULL,
     worktree INTEGER NOT NULL,
+    -- 一行一个 skill 的名字。
+    skills TEXT NOT NULL,
+    subagent TEXT,
+    -- 附上的文件，路径的字节用 NUL 隔开。
+    attachments BLOB NOT NULL,
+    auto INTEGER NOT NULL,
     created INTEGER NOT NULL,
     started INTEGER,
     session TEXT,
@@ -52,6 +58,12 @@ CREATE TABLE schedules (
     dir BLOB NOT NULL,
     agent TEXT NOT NULL,
     worktree INTEGER NOT NULL,
+    -- 一行一个 skill 的名字。
+    skills TEXT NOT NULL,
+    subagent TEXT,
+    -- 附上的文件，路径的字节用 NUL 隔开。
+    attachments BLOB NOT NULL,
+    auto INTEGER NOT NULL,
     kind TEXT NOT NULL,
     at INTEGER,
     hour INTEGER,
@@ -62,10 +74,10 @@ CREATE TABLE schedules (
 );
 ";
 
-const TODO_COLUMNS: &str = "id, number, title, prompt, dir, agent, worktree, created, started, session, worktree_dir, \
-     branch, done_at, schedule, rank";
-const SCHEDULE_COLUMNS: &str =
-    "id, title, prompt, dir, agent, worktree, kind, at, hour, minute, days, minutes, last_fired";
+const TODO_COLUMNS: &str = "id, number, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto, \
+     created, started, session, worktree_dir, branch, done_at, schedule, rank";
+const SCHEDULE_COLUMNS: &str = "id, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto, kind, at, \
+     hour, minute, days, minutes, last_fired";
 
 /// 库出了错：错误说明。
 pub type Result<T> = std::result::Result<T, String>;
@@ -88,6 +100,15 @@ fn path_from(bytes: Vec<u8>) -> PathBuf {
     PathBuf::from(OsStr::from_bytes(&bytes))
 }
 
+/// 附件存成的字节：各个路径用 NUL 隔开，路径里不会有 NUL。
+fn paths_bytes(paths: &[PathBuf]) -> Vec<u8> {
+    paths.iter().map(|path| path_bytes(path)).collect::<Vec<_>>().join(&0)
+}
+
+fn paths_from(bytes: &[u8]) -> Vec<PathBuf> {
+    bytes.split(|byte| *byte == 0).filter(|path| !path.is_empty()).map(|path| path_from(path.to_vec())).collect()
+}
+
 fn secs(value: i64) -> u64 {
     u64::try_from(value).unwrap_or(0)
 }
@@ -99,6 +120,10 @@ fn spec(row: &Row<'_>) -> rusqlite::Result<TodoSpec> {
         dir: path_from(row.get("dir")?),
         agent: row.get("agent")?,
         worktree: row.get("worktree")?,
+        skills: row.get::<_, String>("skills")?.lines().map(str::to_owned).collect(),
+        subagent: row.get("subagent")?,
+        attachments: paths_from(&row.get::<_, Vec<u8>>("attachments")?),
+        auto: row.get("auto")?,
     })
 }
 
@@ -165,8 +190,10 @@ fn insert_todo(tx: &Transaction<'_>, spec: &TodoSpec, now: u64, schedule: Option
         tx.query_row("SELECT value FROM meta WHERE key = 'next_number'", [], |row| row.get(0)).map_err(failed)?;
     tx.execute("UPDATE meta SET value = ?1 WHERE key = 'next_number'", [number + 1]).map_err(failed)?;
     tx.execute(
-        "INSERT INTO todos (id, number, title, prompt, dir, agent, worktree, created, schedule, rank)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, (SELECT COALESCE(MAX(rank), 0) + 1 FROM todos))",
+        "INSERT INTO todos (id, number, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto,
+             created, schedule, rank)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+             (SELECT COALESCE(MAX(rank), 0) + 1 FROM todos))",
         params![
             id,
             number,
@@ -175,6 +202,10 @@ fn insert_todo(tx: &Transaction<'_>, spec: &TodoSpec, now: u64, schedule: Option
             path_bytes(&spec.dir),
             spec.agent,
             spec.worktree,
+            spec.skills.join("\n"),
+            spec.subagent,
+            paths_bytes(&spec.attachments),
+            spec.auto,
             now as i64,
             schedule
         ],
@@ -235,7 +266,7 @@ impl Store {
         match version {
             0 => tx.execute_batch(&format!("{SCHEMA} PRAGMA user_version = {VERSION};")).map_err(failed)?,
             VERSION => {}
-            newer => return Err(format!("{} was written by a newer runode (schema {newer})", path.display())),
+            other => return Err(format!("{} was written by another runode version (schema {other})", path.display())),
         }
         tx.commit().map_err(failed)?;
         Ok(Self { conn })
@@ -324,8 +355,21 @@ impl Store {
         let tx = self.conn.transaction().map_err(failed)?;
         if let Some(spec) = spec {
             tx.execute(
-                "UPDATE todos SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6 WHERE id = ?1",
-                params![id, spec.title, spec.prompt, path_bytes(&spec.dir), spec.agent, spec.worktree],
+                "UPDATE todos SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6, skills = ?7,
+                     subagent = ?8, attachments = ?9, auto = ?10
+                 WHERE id = ?1",
+                params![
+                    id,
+                    spec.title,
+                    spec.prompt,
+                    path_bytes(&spec.dir),
+                    spec.agent,
+                    spec.worktree,
+                    spec.skills.join("\n"),
+                    spec.subagent,
+                    paths_bytes(&spec.attachments),
+                    spec.auto
+                ],
             )
             .map_err(failed)?;
         }
@@ -450,26 +494,31 @@ impl Store {
         let id = new_id(&tx)?;
         let (kind, [at, hour, minute, days, minutes]) = when_columns(when)?;
         tx.execute(
-        &format!(
-            "INSERT INTO schedules ({SCHEDULE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"
-        ),
-        params![
-            id,
-            spec.title,
-            spec.prompt,
-            path_bytes(&spec.dir),
-            spec.agent,
-            spec.worktree,
-            kind,
-            at,
-            hour,
-            minute,
-            days,
-            minutes,
-            now as i64
-        ],
-    )
-    .map_err(failed)?;
+            &format!(
+                "INSERT INTO schedules ({SCHEDULE_COLUMNS})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
+            ),
+            params![
+                id,
+                spec.title,
+                spec.prompt,
+                path_bytes(&spec.dir),
+                spec.agent,
+                spec.worktree,
+                spec.skills.join("\n"),
+                spec.subagent,
+                paths_bytes(&spec.attachments),
+                spec.auto,
+                kind,
+                at,
+                hour,
+                minute,
+                days,
+                minutes,
+                now as i64
+            ],
+        )
+        .map_err(failed)?;
         tx.commit().map_err(failed)?;
         Ok(id)
     }
@@ -485,8 +534,21 @@ impl Store {
         let tx = self.conn.transaction().map_err(failed)?;
         if let Some(spec) = spec {
             tx.execute(
-                "UPDATE schedules SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6 WHERE id = ?1",
-                params![id, spec.title, spec.prompt, path_bytes(&spec.dir), spec.agent, spec.worktree],
+                "UPDATE schedules SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6, skills = ?7,
+                     subagent = ?8, attachments = ?9, auto = ?10
+                 WHERE id = ?1",
+                params![
+                    id,
+                    spec.title,
+                    spec.prompt,
+                    path_bytes(&spec.dir),
+                    spec.agent,
+                    spec.worktree,
+                    spec.skills.join("\n"),
+                    spec.subagent,
+                    paths_bytes(&spec.attachments),
+                    spec.auto
+                ],
             )
             .map_err(failed)?;
         }

@@ -25,6 +25,7 @@ fn todo() -> Todo {
             dir: PathBuf::from("/src/app"),
             agent: "claude".into(),
             worktree: false,
+            ..TodoSpec::default()
         },
         created: STARTED - 60,
         started: None,

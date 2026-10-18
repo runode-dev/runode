@@ -49,6 +49,7 @@ impl Spec {
             },
             agent: self.agent.unwrap_or_else(|| DEFAULT_AGENT.to_owned()),
             worktree: self.worktree,
+            ..TodoSpec::default()
         })
     }
 }

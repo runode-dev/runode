@@ -492,7 +492,8 @@ impl Shared {
         self.end_if_exited(old);
         // 库可以不经宿主直接写（见 `start_todo`），打进 shell 之前再查一遍命令是不是一行。
         check_text(&todo.spec)?;
-        let resume = runode_agent::models::resume_command(&todo.spec.agent, &agent_session(&todo.id, started));
+        let resume =
+            runode_agent::models::resume_command(&agent_with_options(&todo.spec), &agent_session(&todo.id, started));
         // 清掉的工作树库里记成空的（`set_swept`），要看任务要没要过工作树。
         let (cwd, command) = match todo.worktree_dir.as_ref().filter(|root| root.is_dir()) {
             Some(root) => (in_worktree(root, &todo.spec.dir), resume),
@@ -538,7 +539,8 @@ impl Shared {
                 tracing::warn!("cannot remove the branch {branch} made for todo {}: {err}", todo.id);
             }
         };
-        let env = [(ENV_TODO_PROMPT, todo.spec.prompt())];
+        let instructions = todo.spec.instructions();
+        let env = [(ENV_TODO_PROMPT, instructions.as_str())];
         let session = match self.spawn_with(spawn_options(Some(cwd)), &env) {
             Ok(session) => session,
             Err(err) => {
@@ -548,7 +550,8 @@ impl Shared {
         };
         // 任务会话不指定 shell，起的是 `default_shell`。
         let started = unix_now();
-        let agent = runode_agent::models::start_command(&todo.spec.agent, &agent_session(&todo.id, started));
+        let agent =
+            runode_agent::models::start_command(&agent_with_options(&todo.spec), &agent_session(&todo.id, started));
         let command = agent_command(&agent, &runode_terminal::pty::default_shell());
         self.deliver(session, Inbox::TypeAtPrompt(command.into_bytes()));
         let worktree = made.as_ref().map(|(root, branch)| (root.as_path(), branch.as_str()));
@@ -571,6 +574,11 @@ fn agent_command(agent: &str, shell: &str) -> String {
         _ => format!("\"${ENV_TODO_PROMPT}\""),
     };
     format!("{agent} {prompt}\r")
+}
+
+/// 任务要跑的 agent 命令，带上免确认和自定义 agent 的参数（`runode_agent::models::with_options`）。
+fn agent_with_options(spec: &TodoSpec) -> String {
+    runode_agent::models::with_options(&spec.agent, spec.auto, spec.subagent.as_deref())
 }
 
 /// 任务这次开始时给 agent 的对话号，续接时由同样的任务标识和开始时刻再算出来，不用另存。写成 UUID 的样子，
@@ -604,12 +612,24 @@ fn check_title(spec: &TodoSpec) -> Result<(), String> {
     Ok(())
 }
 
-/// `check_spec` 里不看目录的部分：标题、提示词和 agent。
+/// `check_spec` 里不看目录的部分：标题、提示词、agent、skill 和附件。附件只查是不是绝对路径，文件可以
+/// 后来才有。
 fn check_text(spec: &TodoSpec) -> Result<(), String> {
     if spec.title.trim().is_empty() {
         return Err("a todo needs a title".into());
     }
-    let prompt = spec.prompt();
+    let one_line = |name: &str| !name.trim().is_empty() && !name.chars().any(char::is_control);
+    if !spec.skills.iter().all(|skill| one_line(skill)) {
+        return Err("each skill must be a one-line name".into());
+    }
+    // 名字要原样拼进 shell 命令，只收不用加引号的。
+    if spec.subagent.as_deref().is_some_and(|name| !runode_agent::models::subagent_name(name)) {
+        return Err("the subagent name may only contain letters, digits and -_.:".into());
+    }
+    if let Some(path) = spec.attachments.iter().find(|path| !path.is_absolute()) {
+        return Err(format!("the attachment {} is not an absolute path", path.display()));
+    }
+    let prompt = spec.instructions();
     if prompt.len() > MAX_PROMPT {
         return Err(format!("the prompt is longer than {} KiB", MAX_PROMPT / 1024));
     }
@@ -799,7 +819,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let host = Host::new(runode_protocol::BuildId("test".into()));
         host.serve_todos(dir.join("todos.db"));
-        let spec = TodoSpec { title: "t".into(), prompt: String::new(), dir, agent: "claude".into(), worktree: false };
+        let spec = TodoSpec {
+            title: "t".into(),
+            prompt: String::new(),
+            dir,
+            agent: "claude".into(),
+            worktree: false,
+            ..TodoSpec::default()
+        };
         let shared = &host.shared;
         let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("expected the new todo") };
         let done = |shared: &Shared| shared.todos.with_db(|db| db.todo_by_id(&id)).unwrap().unwrap().done_at;
@@ -821,7 +848,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let host = Host::new(runode_protocol::BuildId("test".into()));
         host.shared.todos.lock().path = Some(dir.join("todos.db"));
-        let spec = TodoSpec { title: "t".into(), prompt: String::new(), dir, agent: "claude".into(), worktree: false };
+        let spec = TodoSpec {
+            title: "t".into(),
+            prompt: String::new(),
+            dir,
+            agent: "claude".into(),
+            worktree: false,
+            ..TodoSpec::default()
+        };
         let shared = &host.shared;
         let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("expected the new todo") };
 
@@ -852,12 +886,27 @@ mod tests {
             dir: dir.clone(),
             agent: agent.into(),
             worktree: false,
+            ..TodoSpec::default()
         };
         assert!(check_spec(&spec("t", "claude")).is_ok());
         assert!(check_spec(&spec("  ", "claude")).is_err());
         assert!(check_spec(&spec("t", "claude\nrm -rf ~")).is_err());
         assert!(check_spec(&TodoSpec { dir: "relative".into(), ..spec("t", "claude") }).is_err());
         assert!(check_spec(&TodoSpec { prompt: "x".repeat(MAX_PROMPT + 1), ..spec("t", "claude") }).is_err());
+        let named = |skills: &[&str], subagent: Option<&str>| TodoSpec {
+            skills: skills.iter().map(|skill| (*skill).to_owned()).collect(),
+            subagent: subagent.map(str::to_owned),
+            ..spec("t", "claude")
+        };
+        assert!(check_spec(&named(&["review"], Some("reviewer"))).is_ok());
+        assert!(check_spec(&named(&["review\nrm -rf ~"], None)).is_err());
+        assert!(check_spec(&named(&[" "], None)).is_err());
+        assert!(check_spec(&named(&[], Some("a\nb"))).is_err());
+        assert!(check_spec(&named(&[], Some("x'; touch /tmp/pwn; #"))).is_err());
+        assert!(check_spec(&TodoSpec { attachments: vec!["notes.md".into()], ..spec("t", "claude") }).is_err());
+        // 附上的文件列进提示词，算进长度。
+        let long = TodoSpec { attachments: vec![format!("/{}", "x".repeat(MAX_PROMPT)).into()], ..spec("t", "claude") };
+        assert!(check_spec(&long).is_err());
         assert!(check_title(&spec(&"x".repeat(MAX_TITLE), "claude")).is_ok());
         assert!(check_title(&spec(&"x".repeat(MAX_TITLE + 1), "claude")).is_err());
         // 开始任务时的重查不管标题长度：升级前存下的长标题照样开得起来。

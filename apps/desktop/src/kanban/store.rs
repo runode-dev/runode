@@ -272,6 +272,7 @@ mod tests {
                 dir: "/tmp".into(),
                 agent: "claude".into(),
                 worktree: false,
+                ..Default::default()
             },
             created: 0,
             started,

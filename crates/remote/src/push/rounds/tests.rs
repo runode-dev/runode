@@ -154,6 +154,7 @@ fn todo(id: &str, session: SessionId) -> Todo {
             dir: "/tmp".into(),
             agent: "claude".into(),
             worktree: false,
+            ..TodoSpec::default()
         },
         created: UNIX - 200,
         started: Some(UNIX - 100),

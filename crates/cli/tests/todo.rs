@@ -33,7 +33,14 @@ fn now() -> u64 {
 }
 
 fn spec(title: &str, dir: &str) -> TodoSpec {
-    TodoSpec { title: title.into(), prompt: String::new(), dir: dir.into(), agent: "claude".into(), worktree: false }
+    TodoSpec {
+        title: title.into(),
+        prompt: String::new(),
+        dir: dir.into(),
+        agent: "claude".into(),
+        worktree: false,
+        ..TodoSpec::default()
+    }
 }
 
 /// 编号取标识的末位，`00000003` 是 #3。
@@ -141,6 +148,7 @@ fn add_outside_a_repository_needs_no_worktree_and_start_follows() {
             dir: PathBuf::from(&dir),
             agent: "codex".into(),
             worktree: false,
+            ..TodoSpec::default()
         }
     );
     // `--no-worktree` 在仓库里也不要工作树。

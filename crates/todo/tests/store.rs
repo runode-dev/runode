@@ -15,6 +15,7 @@ fn spec(title: &str) -> TodoSpec {
         dir: "/src/app".into(),
         agent: "claude".into(),
         worktree: true,
+        ..TodoSpec::default()
     }
 }
 
@@ -116,6 +117,27 @@ fn schedules_round_trip() {
 }
 
 #[test]
+fn skills_subagent_attachments_and_auto_round_trip() {
+    let mut store = Store::open(&temp_db("extras")).unwrap();
+    let full = TodoSpec {
+        skills: vec!["review".into(), "plugin:fix".into()],
+        subagent: Some("reviewer".into()),
+        attachments: vec!["/tmp/a b.png".into(), "/src/app/spec.md".into()],
+        auto: true,
+        ..spec("full")
+    };
+    let id = store.add_todo(&full, 100, None).unwrap();
+    assert_eq!(store.todo_by_id(&id).unwrap().unwrap().spec, full);
+    let empty = spec("empty");
+    assert!(store.update_todo(&id, Some(&empty), None).unwrap());
+    assert_eq!(store.todo_by_id(&id).unwrap().unwrap().spec, empty);
+    let schedule = store.add_schedule(&full, &When::Every { minutes: 5 }, 100).unwrap();
+    assert_eq!(store.list_schedules().unwrap()[0].spec, full);
+    assert!(store.update_schedule(&schedule, Some(&empty), None, 100).unwrap());
+    assert_eq!(store.list_schedules().unwrap()[0].spec, empty);
+}
+
+#[test]
 fn firing_a_schedule_follows_what_the_database_says_now() {
     let mut store = Store::open(&temp_db("fire")).unwrap();
     let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, 100).unwrap();
@@ -180,12 +202,12 @@ fn a_schedule_that_fails_to_add_its_todo_is_left_as_it_was() {
 }
 
 #[test]
-fn refuses_a_database_from_a_newer_runode_and_leaves_it_alone() {
+fn refuses_a_database_from_another_runode_and_leaves_it_alone() {
     let path = temp_db("newer");
     drop(Store::open(&path).unwrap());
     Connection::open(&path).unwrap().execute_batch("PRAGMA user_version = 99").unwrap();
     let err = Store::open(&path).unwrap_err();
-    assert!(err.contains("newer runode"), "{err}");
+    assert!(err.contains("another runode version"), "{err}");
     let version: i64 = Connection::open(&path).unwrap().query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
     assert_eq!(version, 99);
 }

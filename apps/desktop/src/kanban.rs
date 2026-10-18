@@ -1,6 +1,7 @@
 //! 铺满窗口的看板：派给 agent 的任务按列排开（待办、进行中、需要你、完成），和它平级的另一页列出
 //! 定时。完成那一列只有最近七天的，再早的在记录页上翻（`History`），从完成那一列的列头和各个定时进去，
-//! 后者只列那个定时开出的。数据由宿主持有，这边经 `store` 读写；新建、编辑任务和定时的对话框在 `dialog`。
+//! 后者只列那个定时开出的。数据由宿主持有，这边经 `store` 读写；新建、编辑任务和定时的对话框在 `dialog`，任务的
+//! 那个占满看板，是平级的又一页。
 //!
 //! 卡片在哪一列由任务和它会话里 agent 的状态推出来（`runode_protocol::todo::column`），拖拽就是做那一列
 //! 的动作（`drop_action`）：拖进进行中是开始，拖进完成是标完成，从完成拖出是取消完成，同一列里上下拖调
@@ -18,7 +19,9 @@
 //! 提示条（`Toast`），等宿主回话后说开始了没有；别的请求没办成时也在这里说原因。
 
 mod dialog;
+mod skills;
 mod store;
+mod templates;
 
 use std::{
     cell::RefCell,
@@ -313,9 +316,26 @@ impl Kanban {
         self.page == Page::Schedules
     }
 
-    /// 开着的新建、编辑对话框。它盖住整个窗口，app 画在窗口的最上层，开着时把下面的界面藏起来不给辅助工具读。
-    pub fn dialog(&self) -> Option<Entity<TodoDialog>> {
-        self.dialog.as_ref().map(|(dialog, _)| dialog.clone())
+    /// 开着的定时的新建、编辑对话框。它盖住整个窗口，app 画在窗口的最上层，开着时把下面的界面藏起来不给辅助工具读。
+    /// 任务的是看板里的一页，看板自己画，不在这里。
+    pub fn dialog(&self, cx: &App) -> Option<Entity<TodoDialog>> {
+        self.dialog.as_ref().map(|(dialog, _)| dialog.clone()).filter(|dialog| !dialog.read(cx).page)
+    }
+
+    /// 关掉新建、编辑任务那一页，焦点交回看板；开着的不是那一页时什么都不做，为假。
+    pub fn close_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.dialog.as_ref().is_some_and(|(dialog, _)| dialog.read(cx).page) {
+            return false;
+        }
+        self.dialog = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+        true
+    }
+
+    /// 开着新建、编辑的对话框或那一页：写到一半，换页、收起看板会丢掉。
+    pub fn editing(&self) -> bool {
+        self.dialog.is_some()
     }
 
     /// 换到定时页（`schedules`）或任务页：app 从侧栏的入口打开时调。
@@ -1430,6 +1450,18 @@ impl Kanban {
 
 impl Render for Kanban {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 新建、编辑任务那一页占满看板；焦点在它的输入框里，Esc 由它自己管。
+        if let Some((dialog, _)) = self.dialog.as_ref().filter(|(dialog, _)| dialog.read(cx).page) {
+            return div()
+                .id("kanban")
+                .track_focus(&self.focus)
+                .size_full()
+                .p(px(16.))
+                .text_size(FontSize::Body)
+                .text_color(cx.theme().foreground)
+                .child(dialog.clone())
+                .into_any_element();
+        }
         self.track_moves(cx);
         let a11y = window.is_a11y_active();
         let data = store::data(cx).clone();
@@ -1526,6 +1558,7 @@ impl Render for Kanban {
             .child(div().flex_1().min_h_0().child(content))
             .children(flights)
             .children(toast)
+            .into_any_element()
     }
 }
 
@@ -1663,6 +1696,7 @@ mod tests {
                 dir: "/src".into(),
                 agent: "claude".into(),
                 worktree: false,
+                ..Default::default()
             },
             created: 0,
             started,

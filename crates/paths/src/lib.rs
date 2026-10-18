@@ -160,6 +160,11 @@ impl Dirs {
         self.data_file(TODOS_DB)
     }
 
+    /// 用户自己加的任务模板，一个模板一个 `.md` 文件，新建任务那一页上列出来。
+    pub fn todo_templates_dir(&self) -> Option<PathBuf> {
+        self.data_file("templates")
+    }
+
     /// Git 面板 AI 写提交说明的预设：用哪个 agent、加什么参数、提示词模板，分所有仓库的默认值和
     /// 按仓库根目录分开的。
     pub fn commit_message_file(&self) -> Option<PathBuf> {

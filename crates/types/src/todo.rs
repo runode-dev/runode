@@ -14,7 +14,7 @@ use crate::session::SessionId;
 pub const DEFAULT_AGENT: &str = "claude";
 
 /// 任务要做的事，新建任务和定时都用它。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TodoSpec {
     pub title: String,
     /// 交给 agent 的提示词；为空时用标题，见 `TodoSpec::prompt`。
@@ -29,12 +29,39 @@ pub struct TodoSpec {
     /// 给任务新开一个工作树和分支，不在 `dir` 里直接改；`dir` 要在 git 仓库里。
     #[serde(default)]
     pub worktree: bool,
+    /// 要 agent 用的 skill 的名字，列进提示词，见 `TodoSpec::instructions`。
+    #[serde(default)]
+    pub skills: Vec<String>,
+    /// 以哪个自定义 agent 的身份跑（Claude、Copilot 的 `--agent`）；为空时不指定，那家没有这个参数时不管它。
+    #[serde(default)]
+    pub subagent: Option<String>,
+    /// 附上的文件，绝对路径，列进提示词。
+    #[serde(default, serialize_with = "crate::lossy_path::serialize_vec")]
+    pub attachments: Vec<PathBuf>,
+    /// 不问权限、一路跑完：起 agent 时加上那家免确认的参数。
+    #[serde(default)]
+    pub auto: bool,
 }
 
 impl TodoSpec {
     /// 实际交给 agent 的提示词：没写时用标题。
     pub fn prompt(&self) -> &str {
         if self.prompt.trim().is_empty() { &self.title } else { &self.prompt }
+    }
+
+    /// 起 agent 时交给它的整段话：提示词，后面列上要用的 skill 和附上的文件。用英文写，各家 agent 都认得。
+    pub fn instructions(&self) -> String {
+        let mut text = self.prompt().to_owned();
+        if !self.skills.is_empty() {
+            text += &format!("\n\nUse these skills: {}.", self.skills.join(", "));
+        }
+        if !self.attachments.is_empty() {
+            text += "\n\nAttached files:";
+            for path in &self.attachments {
+                text += &format!("\n- {}", path.display());
+            }
+        }
+        text
     }
 }
 

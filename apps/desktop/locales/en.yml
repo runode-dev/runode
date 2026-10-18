@@ -852,6 +852,25 @@ kanban:
     bad_once: "Write the time as YYYY-MM-DD HH:MM."
     bad_daily: "Write the time of day as HH:MM."
     bad_every: The interval is at least one minute.
+    templates: Templates
+    template_blank: Blank
+    templates_hint: "Add your own templates as Markdown files in %{dir}."
+    skills: Skills
+    none: None
+    no_skills: No skills found here.
+    subagent: Custom agent
+    attachments: Attachments
+    add_attachment: Add files…
+    remove_attachment: "Remove %{name}"
+    auto: Run without asking for permission
+    need_input: "Fill in %{label}."
+  template:
+    issue: Fix an issue
+    issue_input: Issue number or URL
+    pr_fix: Address PR feedback
+    pr_fix_input: PR number or URL
+    pr_review: Review a PR
+    pr_review_input: PR number or URL
 github_actions:
   name: Name
   dialog_cancel: Cancel

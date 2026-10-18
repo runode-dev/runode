@@ -591,6 +591,7 @@ fn finished_todos_are_pushed() {
             dir: "/tmp".into(),
             agent: "claude".into(),
             worktree: false,
+            ..TodoSpec::default()
         },
         created: now - 200,
         started: Some(now - 100),

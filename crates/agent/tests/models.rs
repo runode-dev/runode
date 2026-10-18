@@ -1,6 +1,8 @@
 //! `Pick` 拼出的命令和从命令认回来的要对得上。
 
-use runode_agent::models::{LAUNCHERS, Pick, listed, resume_command, same_kind, start_command};
+use runode_agent::models::{
+    LAUNCHERS, Pick, listed, resume_command, same_kind, start_command, subagent_name, with_options,
+};
 
 /// 命令开头是 `command` 的那一项。
 fn pick(command: &str, model: Option<&str>, effort: Option<&str>) -> Pick {
@@ -55,6 +57,27 @@ fn lists_one_launcher_per_agent() {
 }
 
 /// 能指定对话号的开始时带上号，别家原样。
+#[test]
+fn options_go_after_the_program_and_survive_resuming() {
+    let claude = with_options("claude --model opus", true, Some("code-reviewer"));
+    assert_eq!(claude, "claude --permission-mode bypassPermissions --agent code-reviewer --model opus");
+    assert_eq!(
+        resume_command(&claude, "S").as_deref(),
+        Some("claude --resume S --permission-mode bypassPermissions --agent code-reviewer --model opus")
+    );
+    // 会被 shell 再解释的名字不拼进去。
+    assert!(subagent_name("plugin:reviewer_2.1") && !subagent_name("") && !subagent_name("a b"));
+    assert_eq!(with_options("claude", false, Some("x'; touch /tmp/pwn; echo '")), "claude");
+    // 没有这个参数的那家、自己写的命令都不加。
+    assert_eq!(
+        with_options("codex -m gpt-5", true, Some("x")),
+        "codex --dangerously-bypass-approvals-and-sandbox -m gpt-5"
+    );
+    assert_eq!(with_options("pi", true, Some("x")), "pi");
+    assert_eq!(with_options("claudex --yolo", true, Some("x")), "claudex --yolo");
+    assert_eq!(with_options("claude", false, None), "claude");
+}
+
 #[test]
 fn start_commands_pin_the_session_where_they_can() {
     assert_eq!(start_command("claude --model opus", "S"), "claude --session-id S --model opus");

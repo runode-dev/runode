@@ -23,6 +23,7 @@ fn todo(id: &str, number: u64, title: &str, done: bool) -> Todo {
             dir: "/tmp/project".into(),
             agent: "claude".into(),
             worktree: false,
+            ..TodoSpec::default()
         },
         created: 1,
         started: None,

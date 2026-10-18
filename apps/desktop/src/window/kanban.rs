@@ -67,9 +67,9 @@ fn best_workspace(dirs: &[&Path], dir: &Path, worktree: Option<&Path>, home: Opt
 }
 
 impl WindowView {
-    /// 打开或收起看板；开着的是定时页时换到任务页。
+    /// 打开或收起看板；开着的是定时页时换到任务页，开着新建、编辑任务那一页时回到看板（当作取消）。
     pub(super) fn toggle_kanban(&mut self, _: &ToggleKanban, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog_open(cx) {
+        if self.todo_dialog(cx).is_some() || self.close_todo_page(window, cx) {
             return;
         }
         if self.showing_todo_page(false, cx) {
@@ -79,11 +79,12 @@ impl WindowView {
         }
     }
 
-    /// 打开或收起定时页；开着的是任务页时换到定时页。
+    /// 打开或收起定时页；开着的是任务页（或新建、编辑任务那一页，当作取消）时换到定时页。
     pub(super) fn toggle_schedules(&mut self, _: &ToggleSchedules, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog_open(cx) {
+        if self.todo_dialog(cx).is_some() {
             return;
         }
+        self.close_todo_page(window, cx);
         if self.showing_todo_page(true, cx) {
             self.close_kanban(window, cx);
         } else {
@@ -102,11 +103,17 @@ impl WindowView {
         }
     }
 
-    /// 看板的新建、编辑对话框开着。它画在窗口根上，窗口的快捷键在里面照样触发，这时换页、收起或再开一个
-    /// 都会把写了一半的内容丢掉，所以这几个快捷键不理；窗口上经 `act` 派发的动作、关分屏的键（`ClosePane`）、
+    /// 看板的新建、编辑对话框或任务那一页开着。对话框画在窗口根上，窗口的快捷键在里面照样触发，这时换页、收起或再开一个
+    /// 都会把写了一半的内容丢掉，所以这几个快捷键不理（看板、定时的入口除外，见 `toggle_kanban`）；窗口上经 `act` 派发的动作、关分屏的键（`ClosePane`）、
     /// 打开设置页和从访达拖文件夹进来（`open_dropped_dirs`，对话框不接拖放，会冒泡到窗口根上）也一样不理。
     pub(super) fn dialog_open(&self, cx: &App) -> bool {
-        self.todo_dialog(cx).is_some()
+        self.kanban.as_ref().is_some_and(|board| board.view.read(cx).editing())
+    }
+
+    /// 关掉看板里新建、编辑任务那一页；没开着时为假。
+    fn close_todo_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(board) = &self.kanban else { return false };
+        board.view.update(cx, |board, cx| board.close_page(window, cx))
     }
 
     /// 看板开着，显示的是定时页（`schedules`）或任务页。
@@ -291,7 +298,7 @@ impl WindowView {
 
     /// 看板开着的新建、编辑对话框，画在窗口最上层。
     pub(super) fn todo_dialog(&self, cx: &App) -> Option<Entity<TodoDialog>> {
-        self.kanban.as_ref().and_then(|board| board.view.read(cx).dialog())
+        self.kanban.as_ref().and_then(|board| board.view.read(cx).dialog(cx))
     }
 }
 

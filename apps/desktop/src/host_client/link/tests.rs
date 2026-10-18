@@ -1013,6 +1013,7 @@ fn todo_requests_get_their_answers_and_changes_are_announced() {
         dir,
         agent: "claude".into(),
         worktree: false,
+        ..Default::default()
     };
     let HostMsg::TodoAdded { id, .. } = link.request(|req| ClientMsg::AddTodo { req, spec }, WAIT).unwrap() else {
         panic!("expected the new todo");

@@ -30,6 +30,10 @@ pub struct Launcher {
     pub effort_arg: Option<&'static str>,
     /// 强度接在模型名后面，不挑模型就挑不了强度。
     pub effort_needs_model: bool,
+    /// 不问权限、一路跑完的参数，连着前面的空格；没有、或者本来就不问的为空。见 `with_options`。
+    pub auto_arg: Option<&'static str>,
+    /// 以自定义 agent 的身份跑的参数，在名字前面，连着前面的空格；没有的为空。
+    pub subagent_arg: Option<&'static str>,
     /// 提示词前面的参数（`-i`、`--prompt`），连着前面的空格；提示词直接跟在后面的为空。
     prompt_arg: &'static str,
     /// 接着当前目录里最近一次对话的参数，插在 `command` 后面，连着前面的空格；没有的为空，见 `resume_command`。
@@ -72,6 +76,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         model_arg: Some(" --model "),
         effort_arg: Some(" --effort "),
         effort_needs_model: false,
+        auto_arg: Some(" --permission-mode bypassPermissions"),
+        subagent_arg: Some(" --agent "),
         prompt_arg: "",
         resume_arg: Some(" --continue"),
         session_args: Some((" --session-id ", " --resume ")),
@@ -99,6 +105,9 @@ pub const LAUNCHERS: &[Launcher] = &[
         model_arg: Some(" -m "),
         effort_arg: Some(" -c model_reasoning_effort="),
         effort_needs_model: false,
+        // 只免确认（`--full-auto`）还在沙箱里，连不上网，`gh` 推不了分支。
+        auto_arg: Some(" --dangerously-bypass-approvals-and-sandbox"),
+        subagent_arg: None,
         prompt_arg: "",
         resume_arg: Some(" resume --last"),
         session_args: None,
@@ -119,6 +128,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         model_arg: Some(" --model "),
         effort_arg: Some(" --thinking "),
         effort_needs_model: false,
+        auto_arg: None,
+        subagent_arg: None,
         prompt_arg: "",
         resume_arg: Some(" --continue"),
         session_args: None,
@@ -134,6 +145,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         model_arg: Some(" --model "),
         effort_arg: Some(" --thinking "),
         effort_needs_model: false,
+        auto_arg: None,
+        subagent_arg: None,
         prompt_arg: "",
         resume_arg: Some(" --continue"),
         session_args: None,
@@ -150,6 +163,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         // `#` 加引号：zsh 开了 extendedglob 时不加引号的 `#` 是通配符，找不到文件就报错。
         effort_arg: Some("'#'"),
         effort_needs_model: true,
+        auto_arg: None,
+        subagent_arg: None,
         prompt_arg: " --prompt",
         resume_arg: None,
         session_args: None,
@@ -168,6 +183,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         // 全屏界面没有强度参数，只有 `run` 有。
         effort_arg: None,
         effort_needs_model: false,
+        auto_arg: None,
+        subagent_arg: None,
         // 直接跟在后面的是项目目录。
         prompt_arg: " --prompt",
         resume_arg: Some(" --continue"),
@@ -180,6 +197,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         model_arg: Some(" --model "),
         effort_arg: Some(" --reasoning-effort "),
         effort_needs_model: false,
+        auto_arg: Some(" --allow-all-tools --allow-all-paths"),
+        subagent_arg: Some(" --agent "),
         prompt_arg: " -i",
         resume_arg: Some(" --continue"),
         session_args: None,
@@ -193,6 +212,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         model_arg: Some(" --model "),
         effort_arg: None,
         effort_needs_model: false,
+        auto_arg: Some(" --force"),
+        subagent_arg: None,
         prompt_arg: "",
         resume_arg: Some(" resume"),
         session_args: None,
@@ -205,6 +226,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         model_arg: Some(" --model "),
         effort_arg: Some(" --effort "),
         effort_needs_model: false,
+        auto_arg: None,
+        subagent_arg: None,
         // 提示词直接跟在后面会报多余的参数。
         prompt_arg: " -i",
         resume_arg: None,
@@ -218,6 +241,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         model_arg: Some(" --model "),
         effort_arg: Some(" --reasoning-effort "),
         effort_needs_model: false,
+        auto_arg: None,
+        subagent_arg: None,
         prompt_arg: "",
         resume_arg: None,
         session_args: None,
@@ -656,6 +681,26 @@ pub fn start_command(command: &str, session: &str) -> String {
         Some((spec, rest)) if let Some((arg, _)) = spec.session_args => format!("{}{arg}{session}{rest}", spec.command),
         _ => command.to_owned(),
     }
+}
+
+/// 加上免确认（`auto`）和以自定义 agent（`subagent`）的身份跑的参数，插在程序名后面，`start_command`、
+/// `resume_command` 照样认得出是哪家、续接时也带着。那家没有这个参数、认不出是哪家（自己写的命令）时不加；
+/// 名字不是 `subagent_name` 那样的也不加：它要原样拼进 shell 命令，`quote` 不转义单引号。
+pub fn with_options(command: &str, auto: bool, subagent: Option<&str>) -> String {
+    let Some((spec, rest)) = launcher_of(command) else { return command.to_owned() };
+    let mut with = spec.command.to_owned();
+    if let Some(arg) = spec.auto_arg.filter(|_| auto) {
+        with += arg;
+    }
+    if let (Some(arg), Some(name)) = (spec.subagent_arg, subagent.filter(|name| subagent_name(name))) {
+        with += &format!("{arg}{name}");
+    }
+    with + rest
+}
+
+/// 自定义 agent 的名字能不能用：只有字母、数字和 `-_.:`，拼进 shell 命令不用加引号。
+pub fn subagent_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || "-_.:".contains(ch))
 }
 
 /// 在原来的目录里接着 agent 上次对话的命令：`command` 是开始任务时跑的那条（不带提示词），按开头的程序名认出

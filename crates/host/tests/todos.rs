@@ -42,7 +42,14 @@ fn board(name: &str) -> (Host, PathBuf, Peer) {
 }
 
 fn spec(title: &str, dir: &Path, agent: &str) -> TodoSpec {
-    TodoSpec { title: title.into(), prompt: String::new(), dir: dir.into(), agent: agent.into(), worktree: false }
+    TodoSpec {
+        title: title.into(),
+        prompt: String::new(),
+        dir: dir.into(),
+        agent: agent.into(),
+        worktree: false,
+        ..TodoSpec::default()
+    }
 }
 
 fn add(peer: &mut Peer, spec: TodoSpec) -> String {

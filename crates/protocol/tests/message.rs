@@ -121,6 +121,7 @@ fn todo_spec() -> TodoSpec {
         dir: "/Users/me/中文".into(),
         agent: "codex --full-auto".into(),
         worktree: true,
+        ..TodoSpec::default()
     }
 }
 

@@ -1,10 +1,11 @@
 //! 新建、编辑任务和定时的对话框：标题、提示词、在哪个工作区或目录里做、agent 和它的模型、强度（见 `runode_agent::models`），
-//! 要不要独立的工作树；定时多一组什么时候跑
+//! 要用的 skill、以哪个自定义 agent 的身份跑（`skills`）、附上的文件，免不免确认，要不要独立的工作树；定时多一组什么时候跑
 //! （一次、每天某时可选星期几、每隔几分钟）。时间都按本机的本地时间填、显示，换算用 libc 的
 //! `localtime_r` 和 `mktime`。填得不对时在对话框里说，不发请求；宿主那边还会再查一遍。
 //!
-//! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，盖住整个窗口，所以由 app 画在窗口的最上层
-//! （`Kanban::dialog`）。关掉、存好了经 `DialogEvent` 告诉看板。
+//! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，关掉、存好了经 `DialogEvent` 告诉看板。定时的
+//! 盖住整个窗口，由 app 画在窗口的最上层（`Kanban::dialog`）；任务的是看板里的一页（`TodoDialog::page`），由看板
+//! 画，新建时左边列出模板（`templates`），点一个就照它填好，带 `{{input}}` 的另要填一项（issue、PR 号），保存时换进去。
 
 use std::{
     cell::Cell,
@@ -16,12 +17,18 @@ use std::{
 };
 
 use crate::assets::CHEVRON_DOWN_ICON;
+use crate::kanban::{
+    skills::{self, Found},
+    templates::{self, Template},
+};
 use crate::ui::{
     a11y::{Disable as _, Press, PressDown as _},
+    base_name,
     button::{Button, ButtonVariant},
     dialog::Dialog,
     display_dir,
     font_size::{FontSize, scaled},
+    icons::{CLOSE_ICON, PLUS_ICON},
     input::{Input, InputEvent, InputState},
     menu::{Menu, MenuHost, MenuItem},
     panel::TITLEBAR_HEIGHT,
@@ -78,6 +85,20 @@ pub(crate) struct PickTodoWorkspace {
     index: Option<usize>,
 }
 
+/// skill 菜单的一项：挑上或去掉这个 skill。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(crate) struct PickTodoSkill {
+    name: String,
+}
+
+/// 自定义 agent 菜单的一项，为空时是不指定。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(crate) struct PickTodoSubagent {
+    name: Option<String>,
+}
+
 /// 对话框改的是哪一个；新建时为空。
 #[derive(Clone)]
 pub(crate) enum Editing {
@@ -92,6 +113,8 @@ enum Combo {
     Agent,
     Model,
     Effort,
+    Skills,
+    Subagent,
 }
 
 /// 定时跑的方式，对话框里三选一。
@@ -106,7 +129,15 @@ enum Kind {
 pub struct TodoDialog {
     /// 是定时（否则是任务）。
     schedule: bool,
+    /// 是看板里的一页（任务的），不是盖住窗口的对话框（定时的）。
+    pub(crate) page: bool,
     editing: Option<Editing>,
+    /// 新建任务时左边列的模板，后台读好前为空；挑着的是第几个，空白的为空。
+    templates: Vec<Template>,
+    template: Option<usize>,
+    /// 挑着的模板要另外填的一项（`Template::input`），换模板时跟着换说明。
+    input: Entity<InputState>,
+    input_events: Option<Subscription>,
     title: Entity<InputState>,
     prompt: Entity<TextareaState>,
     /// 挑的 agent、模型和强度；为空时跑 `command` 里自己写的命令。
@@ -121,6 +152,12 @@ pub struct TodoDialog {
     failed: HashMap<usize, Unanswered>,
     dir: PathBuf,
     worktree: bool,
+    /// 挑上的 skill、自定义 agent 和附上的文件，见 `TodoSpec`；`found` 是在 `dir` 能找到的 skill 和自定义 agent。
+    skills: Vec<String>,
+    subagent: Option<String>,
+    attachments: Vec<PathBuf>,
+    found: Found,
+    auto: bool,
     /// 任务开始过了：目录和要不要工作树不能再改。
     locked: bool,
     /// 读不懂的定时规则（`When::Unknown`）在用户选一种之前为空，存的时候规则照原样留着。
@@ -139,7 +176,7 @@ pub struct TodoDialog {
     /// 开着的菜单是哪个框的，菜单挂在它下面。
     menu_for: Option<Combo>,
     /// 各个框上一帧的下沿离窗口顶多远（按 `Combo` 的次序），菜单最高到窗口底边。
-    combo_bottoms: Rc<[Cell<f32>; 4]>,
+    combo_bottoms: Rc<[Cell<f32>; 6]>,
     _events: Vec<Subscription>,
 }
 
@@ -308,23 +345,26 @@ impl TodoDialog {
         let at = field(at_text, "kanban.dialog.once", "kanban.dialog.once_placeholder", cx);
         let clock = field(clock_text, "kanban.dialog.daily", "kanban.dialog.daily_placeholder", cx);
         let minutes = field(minutes_text, "kanban.dialog.every", "kanban.dialog.every_placeholder", cx);
+        let input = cx.new(|cx| InputState::new(String::new(), cx));
         // 输入框里回车保存，Esc 关掉对话框；提示词里 ⌘回车保存。
         let mut events = Vec::new();
         for input in [&title, &command, &at, &clock, &minutes] {
-            events.push(cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| match event {
-                InputEvent::Next => this.save(false, cx),
-                InputEvent::Dismiss => cx.emit(DialogEvent::Dismissed),
-                InputEvent::Changed(_) | InputEvent::Previous => {}
-            }));
+            events.push(Self::subscribe_input(input, window, cx));
         }
         events.push(cx.subscribe_in(&prompt, window, |this, _, event: &TextareaEvent, _, cx| match event {
             TextareaEvent::Submit => this.save(false, cx),
             TextareaEvent::Changed => {}
         }));
         window.focus(&title.focus_handle(cx), cx);
+        let spec = spec.unwrap_or_default();
         let mut dialog = Self {
             schedule,
+            page: !schedule,
             editing,
+            templates: Vec::new(),
+            template: None,
+            input_events: None,
+            input,
             title,
             prompt,
             agent,
@@ -335,6 +375,11 @@ impl TodoDialog {
             failed: HashMap::new(),
             dir,
             worktree,
+            skills: spec.skills,
+            subagent: spec.subagent,
+            attachments: spec.attachments,
+            found: Found::default(),
+            auto: spec.auto,
             locked,
             kind,
             at,
@@ -351,11 +396,165 @@ impl TodoDialog {
         };
         if new_todo {
             dialog.check_repo(cx);
+            dialog.load_templates(cx);
         }
+        dialog.find_skills(cx);
         if let Some(pick) = &dialog.agent {
             dialog.fetch_models(pick.agent, cx);
         }
         dialog
+    }
+
+    /// 输入框里回车保存，Esc 关掉对话框。
+    fn subscribe_input(input: &Entity<InputState>, window: &mut Window, cx: &mut Context<Self>) -> Subscription {
+        cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| match event {
+            InputEvent::Next => this.save(false, cx),
+            InputEvent::Dismiss => cx.emit(DialogEvent::Dismissed),
+            InputEvent::Changed(_) | InputEvent::Previous => {}
+        })
+    }
+
+    /// 在后台读模板（`templates::load`），读好了列出来。
+    fn load_templates(&mut self, cx: &mut Context<Self>) {
+        let dir = runode_paths::Dirs::from_env().todo_templates_dir();
+        let load = cx.background_executor().spawn(async move { templates::load(dir.as_deref()) });
+        cx.spawn(async move |this, cx| {
+            let templates = load.await;
+            this.update(cx, |dialog, cx| {
+                dialog.templates = templates;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 在后台找 `dir` 能用的 skill 和自定义 agent（`skills::find`），找完了还是这个目录时换上。
+    fn find_skills(&mut self, cx: &mut Context<Self>) {
+        let dir = self.dir.clone();
+        let home = runode_paths::Dirs::from_env().home;
+        let find = cx.background_executor().spawn({
+            let dir = dir.clone();
+            async move { skills::find(home.as_deref(), &dir) }
+        });
+        cx.spawn(async move |this, cx| {
+            let found = find.await;
+            this.update(cx, |dialog, cx| {
+                if dialog.dir == dir {
+                    dialog.found = found;
+                    dialog.refresh_menu(cx);
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 照第 `index` 个模板填好（为空时是空白的）：免不免确认和工作树换成它的，skill 加上它的；标题、提示词
+    /// 是空的或者还是上一个模板的原样时换成它的，用户改过的不动。要另外填一项的，那一栏换上它的说明，焦点给它。
+    fn pick_template(&mut self, index: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        let before = self.template.map(|index| self.templates[index].clone()).unwrap_or_default();
+        let untouched = |text: &str, original: &str| text.trim().is_empty() || text.trim() == original.trim();
+        self.template = index.filter(|index| *index < self.templates.len());
+        let template = self.template.map(|index| self.templates[index].clone()).unwrap_or_default();
+        if untouched(self.title.read(cx).query(), &before.title) {
+            self.title.update(cx, |input, cx| input.set_query(template.title.clone(), cx));
+        }
+        if untouched(self.prompt.read(cx).text(), &before.prompt) {
+            self.prompt.update(cx, |area, cx| area.set_text(template.prompt.clone(), cx));
+        }
+        self.auto = template.auto;
+        for skill in &template.skills {
+            if !self.skills.contains(skill) {
+                self.skills.push(skill.clone());
+            }
+        }
+        self.worktree = template.worktree;
+        self.check_repo(cx);
+        let focus = match &template.input {
+            Some(label) => {
+                let (label, placeholder) = (label.clone(), label.clone());
+                self.input =
+                    cx.new(|cx| InputState::new(String::new(), cx).with_label(label).with_placeholder(placeholder));
+                self.input_events = Some(Self::subscribe_input(&self.input, window, cx));
+                self.input.focus_handle(cx)
+            }
+            None => self.title.focus_handle(cx),
+        };
+        window.focus(&focus, cx);
+        self.error = None;
+        cx.notify();
+    }
+
+    /// 弹出系统的文件选择框，选好的文件附上。
+    fn browse_attachments(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(rust_i18n::t!("kanban.dialog.add_attachment").into_owned().into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else { return };
+            this.update(cx, |dialog, cx| {
+                for path in paths {
+                    if !dialog.attachments.contains(&path) {
+                        dialog.attachments.push(path);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn pick_skill(&mut self, action: &PickTodoSkill, _: &mut Window, cx: &mut Context<Self>) {
+        match self.skills.iter().position(|skill| *skill == action.name) {
+            Some(index) => {
+                self.skills.remove(index);
+            }
+            None => self.skills.push(action.name.clone()),
+        }
+        cx.notify();
+    }
+
+    fn pick_subagent(&mut self, action: &PickTodoSubagent, _: &mut Window, cx: &mut Context<Self>) {
+        self.subagent.clone_from(&action.name);
+        cx.notify();
+    }
+
+    /// skill 菜单：找到的和挑上的（可能是模板带来、或者在别的目录里找到的），挑上的打勾；一个都没有时说一句。
+    fn skill_items(&self) -> Vec<Option<MenuItem>> {
+        let mut names: Vec<&String> = self.found.skills.iter().chain(&self.skills).collect();
+        names.sort();
+        names.dedup();
+        if names.is_empty() {
+            return vec![Some(MenuItem::label(rust_i18n::t!("kanban.dialog.no_skills").into_owned(), None, None))];
+        }
+        names
+            .into_iter()
+            .map(|name| {
+                let action = Box::new(PickTodoSkill { name: name.clone() });
+                Some(MenuItem::checkbox(name.clone(), None, self.skills.contains(name), action))
+            })
+            .collect()
+    }
+
+    /// 自定义 agent 菜单：先是不指定，再是找到的，挑着的不在里面时也列上。
+    fn subagent_items(&self) -> Vec<Option<MenuItem>> {
+        let none = rust_i18n::t!("kanban.dialog.none").into_owned();
+        let mut names: Vec<&String> = self.found.subagents.iter().chain(&self.subagent).collect();
+        names.sort();
+        names.dedup();
+        std::iter::once((None, none))
+            .chain(names.into_iter().map(|name| (Some(name.clone()), name.clone())))
+            .map(|(name, label)| {
+                let checked = name == self.subagent;
+                Some(MenuItem::checkbox(label, None, checked, Box::new(PickTodoSubagent { name })))
+            })
+            .collect()
     }
 
     /// 在后台看目录在不在 git 仓库里（`repo_root` 要起 git，慢的时候别冻住界面），看完了定要不要工作树：不在
@@ -372,7 +571,8 @@ impl TodoDialog {
                 if dialog.dir != dir || dialog.worktree != worktree {
                     return;
                 }
-                let new_todo = !dialog.schedule && dialog.editing.is_none();
+                // 挑了模板时照模板的。
+                let new_todo = !dialog.schedule && dialog.editing.is_none() && dialog.template.is_none();
                 dialog.worktree = repo && (dialog.worktree || new_todo);
                 cx.notify();
             })
@@ -384,6 +584,7 @@ impl TodoDialog {
     /// 换了目录：重新看要不要工作树，再问一遍挑着的 agent 的模型清单（有的 agent 读项目里的配置）。
     fn dir_changed(&mut self, cx: &mut Context<Self>) {
         self.check_repo(cx);
+        self.find_skills(cx);
         // shortcut: 上一次还在问着时不再问，清单按旧目录的算；目录换得比 agent 答得快时再按目录分开记。
         if let Some(pick) = &self.agent {
             self.fetch_models(pick.agent, cx);
@@ -485,6 +686,8 @@ impl TodoDialog {
             Combo::Agent => self.agent_items(),
             Combo::Model => self.model_items(),
             Combo::Effort => self.effort_items(),
+            Combo::Skills => self.skill_items(),
+            Combo::Subagent => self.subagent_items(),
         }
     }
 
@@ -663,6 +866,11 @@ impl TodoDialog {
             }
             None => self.browse_dir(window, cx),
         }
+    }
+
+    /// 挑着的 agent 能以自定义 agent 的身份跑（`Launcher::subagent_arg`）。
+    fn takes_subagent(&self) -> bool {
+        self.agent.as_ref().is_some_and(|pick| pick.launcher().subagent_arg.is_some())
     }
 
     /// 能「保存并开始」：是任务，还没开始过也没做完。
@@ -872,6 +1080,93 @@ impl Render for TodoDialog {
                 .child(input(&dialog.command))
                 .into_any_element(),
         };
+        let none = rust_i18n::t!("kanban.dialog.none").into_owned();
+        let skills_label = rust_i18n::t!("kanban.dialog.skills").into_owned();
+        let skills_text = if dialog.skills.is_empty() { none.clone() } else { dialog.skills.join(", ") };
+        let menu = dialog.combo_menu(Combo::Skills, window, cx);
+        let skills = Self::opens_menu(
+            Combo::Skills,
+            combo("todo-dialog-skills", Combo::Skills, skills_label.clone(), skills_text, true, menu),
+            cx,
+        );
+        // 挑着的 agent 有自定义 agent 的参数、或者已经挑了（自己写的命令也可能用得上，存着的不能悄悄丢掉）时，
+        // 和 skill 并排挑。
+        let subagent = (dialog.takes_subagent() || dialog.subagent.is_some()).then(|| {
+            let label = rust_i18n::t!("kanban.dialog.subagent").into_owned();
+            let text = dialog.subagent.clone().unwrap_or_else(|| none.clone());
+            let menu = dialog.combo_menu(Combo::Subagent, window, cx);
+            let subagent = combo("todo-dialog-subagent", Combo::Subagent, label.clone(), text, true, menu);
+            let subagent = Self::opens_menu(Combo::Subagent, subagent, cx);
+            div().flex_1().min_w_0().child(field(label, subagent.into_any_element()))
+        });
+        let skills_row = div()
+            .flex()
+            .gap(px(8.))
+            .child(div().flex_1().min_w_0().child(field(skills_label, skills.into_any_element())))
+            .children(subagent);
+        // 附件一个一块，写文件名，报给辅助工具的是整个路径；后面跟着添加的按钮。
+        let chips: Vec<_> = dialog
+            .attachments
+            .iter()
+            .map(|path| {
+                let name = base_name(path);
+                let remove = rust_i18n::t!("kanban.dialog.remove_attachment", name = name.as_str()).into_owned();
+                let id = format!("todo-attachment-{}", path.display());
+                let gone = path.clone();
+                div()
+                    .id(gpui::ElementId::Name(id.clone().into()))
+                    .role(Role::Group)
+                    .aria_label(display_dir(path))
+                    .flex()
+                    .items_center()
+                    .gap(px(2.))
+                    .pl(px(8.))
+                    .rounded(px(4.))
+                    .bg(primary_bg)
+                    .child(div().max_w(scaled(220.)).truncate().child(name))
+                    .child(
+                        super::icon_button(gpui::ElementId::Name(format!("{id}-remove").into()), CLOSE_ICON, remove)
+                            .on_press(cx, move |dialog, _, cx| {
+                                dialog.attachments.retain(|path| *path != gone);
+                                cx.notify();
+                            }),
+                    )
+            })
+            .collect();
+        let add_attachment =
+            Button::new("todo-dialog-attach", rust_i18n::t!("kanban.dialog.add_attachment").into_owned())
+                .variant(ButtonVariant::Ghost)
+                .icon(PLUS_ICON)
+                .icon_size(12.)
+                .h_auto()
+                .px(px(8.))
+                .py(px(3.))
+                .cursor_pointer()
+                .on_press(cx, |dialog, window, cx| dialog.browse_attachments(window, cx));
+        let attachments = field(
+            rust_i18n::t!("kanban.dialog.attachments").into_owned(),
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(6.))
+                .children(chips)
+                .child(add_attachment)
+                .into_any_element(),
+        );
+        let auto_label = rust_i18n::t!("kanban.dialog.auto").into_owned();
+        let auto = Switch::new("todo-dialog-auto", auto_label.clone(), dialog.auto)
+            .label(auto_label)
+            .cursor_pointer()
+            .on_press(cx, |dialog, _, cx| {
+                dialog.auto = !dialog.auto;
+                cx.notify();
+            });
+        // 挑着的模板要另外填的那一项，放在最上面。
+        let template_input = dialog
+            .template
+            .and_then(|index| dialog.templates[index].input.clone())
+            .map(|label| field(label, input(&dialog.input).into_any_element()));
         let worktree_label = rust_i18n::t!("kanban.dialog.worktree").into_owned();
         // 一行字配一个开关，点字也算点开关。
         let worktree = Switch::new("todo-dialog-worktree", worktree_label.clone(), dialog.worktree)
@@ -985,20 +1280,64 @@ impl Render for TodoDialog {
             .when(dialog.saving, |button| button.opacity(0.5))
             .on_press(cx, |this, _, cx| this.save(true, cx))
         });
+        let page = dialog.page;
+        // 新建任务那一页左边的模板，空白的在最前面。
+        let templates = (page && dialog.editing.is_none()).then(|| {
+            let label = rust_i18n::t!("kanban.dialog.templates").into_owned();
+            let blank = rust_i18n::t!("kanban.dialog.template_blank").into_owned();
+            let rows: Vec<_> = std::iter::once((None, "blank".to_owned(), blank))
+                .chain(
+                    dialog.templates.iter().enumerate().map(|(index, t)| (Some(index), t.id.clone(), t.name.clone())),
+                )
+                .map(|(index, id, name)| {
+                    let id = gpui::ElementId::Name(format!("todo-template-{id}").into());
+                    pill(id, name, dialog.template == index, Role::RadioButton)
+                        .truncate()
+                        .on_press(cx, move |dialog, window, cx| dialog.pick_template(index, window, cx))
+                })
+                .collect();
+            let hint = runode_paths::Dirs::from_env().todo_templates_dir().map(|dir| {
+                let hint = rust_i18n::t!("kanban.dialog.templates_hint", dir = display_dir(&dir)).into_owned();
+                div()
+                    .id("todo-templates-hint")
+                    .role(Role::Label)
+                    .aria_label(hint.clone())
+                    .pt(px(8.))
+                    .text_size(FontSize::Small)
+                    .text_color(fg_h.opacity(0.55))
+                    .child(hint)
+            });
+            div()
+                .id("todo-templates")
+                .role(Role::RadioGroup)
+                .aria_label(label.clone())
+                .flex_none()
+                .w(scaled(200.))
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .overflow_y_scroll()
+                .child(div().pb(px(6.)).text_color(fg_h.opacity(0.7)).child(label))
+                .children(rows)
+                .children(hint)
+        });
         let panel = Dialog::new("todo-dialog", title.clone())
+            .when(page, |panel| panel.role(Role::Group))
             .track_focus(&dialog.focus)
             .on_action(cx.listener(Self::pick_agent))
             .on_action(cx.listener(Self::pick_model))
             .on_action(cx.listener(Self::pick_effort))
             .on_action(cx.listener(Self::pick_workspace))
+            .on_action(cx.listener(Self::pick_skill))
+            .on_action(cx.listener(Self::pick_subagent))
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
                     cx.stop_propagation();
                     cx.emit(DialogEvent::Dismissed);
                 }
             }))
-            .w(px(480.))
-            .max_w_full()
+            .when(page, |panel| panel.flex_1().min_w_0().max_w(px(720.)))
+            .when(!page, |panel| panel.w(px(480.)).max_w_full())
             .max_h_full()
             .p(px(20.))
             .flex()
@@ -1024,6 +1363,7 @@ impl Render for TodoDialog {
                     .flex()
                     .flex_col()
                     .gap(px(12.))
+                    .children(template_input)
                     .child(field(
                         rust_i18n::t!("kanban.dialog.title_label").into_owned(),
                         input(&dialog.title).into_any_element(),
@@ -1040,7 +1380,9 @@ impl Render for TodoDialog {
                     .children(when)
                     .child(field(workspace_label, workspace.into_any_element()))
                     .child(agent_row)
-                    .child(div().flex().child(worktree)),
+                    .child(skills_row)
+                    .child(attachments)
+                    .child(div().flex().flex_wrap().gap(px(16.)).child(worktree).child(auto)),
             )
             .children(dialog.error.clone().map(|error| {
                 div()
@@ -1053,6 +1395,16 @@ impl Render for TodoDialog {
             .child(
                 div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save).children(save_and_start),
             );
+        if page {
+            return div()
+                .id("todo-page")
+                .size_full()
+                .flex()
+                .gap(px(16.))
+                .children(templates)
+                .child(panel)
+                .into_any_element();
+        }
         div()
             .id("todo-dialog-backdrop")
             .absolute()
@@ -1067,14 +1419,23 @@ impl Render for TodoDialog {
             .occlude()
             .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| cx.emit(DialogEvent::Dismissed)))
             .child(panel)
+            .into_any_element()
     }
 }
 
 impl TodoDialog {
     /// 按填的内容造出要发的请求；填得不对时是给人看的原因。
     fn request(&self, cx: &App) -> Result<store::Step, String> {
-        let prompt = self.prompt.read(cx).text().trim().to_owned();
-        let typed = self.title.read(cx).query().trim().to_owned();
+        let mut prompt = self.prompt.read(cx).text().trim().to_owned();
+        let mut typed = self.title.read(cx).query().trim().to_owned();
+        if let Some(label) = self.template.and_then(|index| self.templates[index].input.as_ref()) {
+            let input = self.input.read(cx).query().trim();
+            if input.is_empty() {
+                return Err(rust_i18n::t!("kanban.dialog.need_input", label = label).into_owned());
+            }
+            prompt = templates::fill(&prompt, input);
+            typed = templates::fill(&typed, input);
+        }
         let title = if typed.is_empty() { first_line(&prompt).to_owned() } else { typed };
         if title.is_empty() {
             return Err(rust_i18n::t!("kanban.dialog.need_title").into_owned());
@@ -1086,7 +1447,17 @@ impl TodoDialog {
         if agent.is_empty() {
             return Err(rust_i18n::t!("kanban.dialog.need_agent").into_owned());
         }
-        let spec = TodoSpec { title, prompt, dir: self.dir.clone(), agent, worktree: self.worktree };
+        let spec = TodoSpec {
+            title,
+            prompt,
+            dir: self.dir.clone(),
+            agent,
+            worktree: self.worktree,
+            skills: self.skills.clone(),
+            subagent: self.subagent.clone(),
+            attachments: self.attachments.clone(),
+            auto: self.auto,
+        };
         if !self.schedule {
             return Ok(match &self.editing {
                 Some(Editing::Todo(todo)) => {

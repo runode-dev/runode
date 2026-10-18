@@ -798,8 +798,9 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::toggle_github_actions))
             .on_action(Self::act(cx, Self::goto_agent))
             .on_action(Self::act(cx, Self::next_agent))
-            .on_action(Self::act(cx, Self::toggle_kanban))
-            .on_action(Self::act(cx, Self::toggle_schedules))
+            // 新建任务那一页开着时也接（不经 `act` 挡掉）：侧栏的入口露在外面，按了要回到看板、定时页。
+            .on_action(cx.listener(Self::toggle_kanban))
+            .on_action(cx.listener(Self::toggle_schedules))
             .on_action(Self::act(cx, Self::new_todo))
             .on_action(Self::act(cx, Self::arrange_panes))
             // 写提交说明对话框里 agent 菜单的项派发到窗口的焦点上。
