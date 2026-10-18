@@ -104,8 +104,11 @@ public final class TLSChannel: FrameTransport {
                     switch state {
                     case .ready:
                         if once.claim() { continuation.resume() }
+                    case .waiting(.dns(let code)) where code == DNSServiceErrorType(kDNSServiceErr_PolicyDenied):
+                        // 用户还没答「本地网络」的权限询问：答了允许就接着连，等到超时为止。
+                        break
                     case .failed(let error), .waiting(let error):
-                        // `waiting` 是连不上、等网络变化后再试；这里不等，换下一个地址。
+                        // 别的 `waiting` 是连不上、等网络变化后再试；这里不等，换下一个地址。
                         if once.claim() {
                             connection.cancel()
                             continuation.resume(
