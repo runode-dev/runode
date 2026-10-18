@@ -35,7 +35,7 @@ pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
 #[cfg(test)]
 pub use link::Attached;
-pub use link::{ConnectError, Link, LinkEvent, Screen, SpawnOptions, UiTicket};
+pub use link::{ConnectError, Link, LinkEvent, Output, Screen, SpawnOptions, UiTicket};
 
 /// 宿主现在怎么跑。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

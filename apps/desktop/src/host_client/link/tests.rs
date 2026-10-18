@@ -262,7 +262,7 @@ fn frames_between_attach_and_attached_are_dropped() {
         state.channels.insert(1, id);
     }
     output(&link.inner, 0, 1, b"live".to_vec());
-    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if data == b"live"));
+    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if *data == *b"live"));
     // 重新连上：这之后、新的 `Attached` 之前，旧订阅的输出和标记都不要。
     assert!(link.reattach(id, None, AttachMode::Snapshot));
     output(&link.inner, 0, 1, b"stale".to_vec());
@@ -290,7 +290,7 @@ fn frames_between_attach_and_attached_are_dropped() {
     assert_eq!(screen.data, b"snapshot");
     assert_eq!(screen.attached.channel, 2);
     output(&link.inner, 0, 2, b"new".to_vec());
-    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if data == b"new"));
+    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if *data == *b"new"));
     dispatch(&link.inner, 0, HostMsg::Bell { id });
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Bell { .. }))));
     dispatch(&link.inner, 0, HostMsg::SizeOwner { id, mine: false, owner: Some("studio".into()) });
@@ -400,7 +400,7 @@ fn frames_from_an_earlier_connection_are_dropped() {
     assert!(rx.try_recv().is_err());
     assert!(requests.try_recv().is_err());
     output(&link.inner, 1, 1, b"fresh".to_vec());
-    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if data == b"fresh"));
+    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if *data == *b"fresh"));
     dispatch(&link.inner, 1, HostMsg::UiRequest { ui: 5, request: Box::new(ClientMsg::Layout { req: 2 }) });
     let (ticket, _) = requests.try_recv().unwrap();
     assert_eq!(ticket, UiTicket::new(5, 1));
@@ -866,7 +866,7 @@ mod bench {
     fn output(rx: &mut UnboundedReceiver<LinkEvent>) -> Vec<u8> {
         loop {
             match futures::executor::block_on(rx.next()).expect("the link dropped the session") {
-                LinkEvent::Output(data) => return data,
+                LinkEvent::Output(data) => return data.to_vec(),
                 LinkEvent::Lost => panic!("lost the host"),
                 _ => {}
             }
@@ -1003,4 +1003,82 @@ fn todo_requests_get_their_answers_and_changes_are_announced() {
     let missing = link.request(|req| ClientMsg::RemoveTodo { req, id: "nothere".into() }, WAIT);
     assert!(missing.is_err());
     assert!(link.connected());
+}
+
+/// 超过 `MAX_PAYLOAD` 的一帧写不出去，连接却照用；一大段输入拆成几帧，宿主收到的连起来一字不差。
+#[test]
+fn an_oversized_frame_keeps_the_connection_and_long_input_goes_in_chunks() {
+    let data: Vec<u8> = (0..INPUT_CHUNK * 2 + 5).map(|i| i as u8).collect();
+    let total = data.len();
+    let (seen_tx, seen_rx) = mpsc::channel();
+    let link = fake_host(move |mut stream| {
+        let mut frames = Vec::new();
+        let mut got = 0;
+        while got < total {
+            let frame = read_frame(&mut stream).unwrap().unwrap();
+            if frame.kind == FrameKind::Input {
+                assert_eq!(frame.channel, 1);
+                got += frame.payload.len();
+                frames.push(frame.payload);
+            }
+        }
+        seen_tx.send(frames).unwrap();
+    });
+    let id = SessionId(1);
+    let (events, _rx) = unbounded();
+    {
+        let mut state = link.inner.state();
+        let mut route = Route::new(events);
+        route.channel = Some(1);
+        state.sessions.insert(id, route);
+        state.channels.insert(1, id);
+    }
+    let too_long = vec![0; runode_protocol::MAX_PAYLOAD as usize + 1];
+    assert!(link.inner.write(FrameKind::Input, 1, &too_long).is_err());
+    assert!(link.connected());
+    link.input(id, &data);
+    let frames = seen_rx.recv_timeout(WAIT).unwrap();
+    assert_eq!(frames.iter().map(Vec::len).collect::<Vec<_>>(), [INPUT_CHUNK, INPUT_CHUNK, 5]);
+    assert_eq!(frames.concat(), data);
+}
+
+/// 视图积压着超过 `UNREAD_LIMIT` 的输出时，读线程不再交输出，改交一条 `Resync`，之后的输出丢掉；视图
+/// 处理掉积压、照 `Resync` 重新连上后，新订阅的输出照常交。
+#[test]
+fn a_view_that_falls_behind_gets_a_resync() {
+    let id = SessionId(1);
+    let (link, mut rx) = attached_link(id);
+    let unread = || link.inner.state().sessions[&id].unread.bytes.load(Ordering::Relaxed);
+    output(&link.inner, 0, 1, vec![b'x'; UNREAD_LIMIT]);
+    output(&link.inner, 0, 1, b"y".to_vec());
+    assert_eq!(unread(), UNREAD_LIMIT + 1);
+    output(&link.inner, 0, 1, b"z".to_vec());
+    output(&link.inner, 0, 1, b"dropped".to_vec());
+    let backlog: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert_eq!(backlog.len(), 3);
+    assert!(matches!(&backlog[..2], [LinkEvent::Output(a), LinkEvent::Output(b)] if a.is_stale() && b.is_stale()));
+    assert!(matches!(backlog[2], LinkEvent::Msg(HostMsg::Resync { id: got, .. }) if got == id));
+    drop(backlog);
+    assert_eq!(unread(), 0, "handled output no longer counts");
+    assert!(link.reattach(id, None, AttachMode::Snapshot));
+    dispatch(
+        &link.inner,
+        0,
+        HostMsg::Attached {
+            id,
+            channel: 2,
+            size: SIZE,
+            mode: AttachMode::Snapshot,
+            meta: SessionMeta::default(),
+            settings: None,
+            shell: None,
+        },
+    );
+    snapshot(&link.inner, 0, 2, b"snapshot");
+    dispatch(&link.inner, 0, HostMsg::SnapshotEnd { id });
+    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Screen(_))));
+    output(&link.inner, 0, 2, b"fresh".to_vec());
+    let fresh = rx.try_recv().unwrap();
+    assert!(matches!(&fresh, LinkEvent::Output(data) if **data == *b"fresh" && !data.is_stale()));
+    assert_eq!(unread(), 5);
 }

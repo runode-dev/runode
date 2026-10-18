@@ -1,7 +1,7 @@
 //! 桌面和宿主之间的那条连接：一条 Unix socket 承载所有会话，按 `runode_protocol` 的帧说话。
 //! 宿主跑在 app 里时是 `Host::connect_pair` 给的一端，单独一个进程时是连它的 socket。
 //!
-//! 写：调用方（主线程、提前拉起 shell 的线程）在锁里直接写帧，每帧写完就刷出去，不经别的线程
+//! 写：调用方（主线程、提前拉起 shell 的线程）在锁里直接写帧，写完就刷出去，不经别的线程
 //! 转手。socket 设了发送超时（`WRITE_TIMEOUT`），宿主卡住、一直写不出去时按连接断开处理。
 //!
 //! 读：一个 `host-link-reader` 线程读帧，按会话分发成 `LinkEvent`：输出帧按通道找到会话；快照帧
@@ -39,7 +39,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex, MutexGuard, OnceLock, PoisonError,
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
         mpsc,
     },
     thread,
@@ -66,6 +66,11 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_BUFFER: usize = 256 << 10;
 /// 写的缓冲：帧头和小的载荷攒成一次写；更大的载荷直接写。
 const WRITE_BUFFER: usize = 64 << 10;
+/// 输入（比如一大段粘贴）按这么大拆成几帧写，见 `Inner::write_input`。
+const INPUT_CHUNK: usize = 1 << 20;
+/// 一个会话交给视图、视图还没处理完的输出最多这么多字节，见 `Route::deliver_output`。按会话算，几个
+/// 分屏一起刷屏时加起来是它的几倍，所以比宿主给整条连接的积压上限（`OUTBOX_LIMIT`）小。
+const UNREAD_LIMIT: usize = 8 << 20;
 
 /// 宿主给的一个会话的样子，来自 `HostMsg::Attached`。
 #[derive(Clone, Debug, PartialEq)]
@@ -94,12 +99,66 @@ pub enum LinkEvent {
     /// 连上（或重新连上）了，从这份屏幕接着喂之后的输出。
     Screen(Screen),
     /// PTY 的输出。
-    Output(Vec<u8>),
+    Output(Output),
     /// 这个会话的控制消息：`Resized`、`ThemeApplied`、`Meta`、`CommandFinished`、`Bell`、`Exited`、
     /// `Resync`，以及带着它的 `Error`。
     Msg(HostMsg),
     /// 和宿主的连接断了，之后不会再有这个会话的事件；重连后要重新 `attach`。
     Lost,
+}
+
+/// 一块 PTY 输出，当 `[u8]` 用。交给视图时记进这次订阅还没处理的字节数（`Route::unread`），丢掉
+/// （处理完，或者不要了）时减回去。
+#[derive(Debug)]
+pub struct Output {
+    data: Vec<u8>,
+    unread: Arc<Unread>,
+}
+
+impl Output {
+    fn counted(data: Vec<u8>, unread: &Arc<Unread>) -> Self {
+        unread.bytes.fetch_add(data.len(), Ordering::Relaxed);
+        Self { data, unread: unread.clone() }
+    }
+
+    /// 积压超限、已经交了 `Resync`：这块马上要被新的屏幕换掉，视图不用再喂。
+    pub fn is_stale(&self) -> bool {
+        self.unread.stale.load(Ordering::Relaxed)
+    }
+}
+
+/// 一个会话的一次订阅交给视图的输出：还没处理完的字节数，和积压超限后这些输出是不是作废了。
+#[derive(Debug, Default)]
+struct Unread {
+    bytes: AtomicUsize,
+    stale: AtomicBool,
+}
+
+/// 自己记数的一块输出，测试里造事件用。
+impl From<Vec<u8>> for Output {
+    fn from(data: Vec<u8>) -> Self {
+        Self::counted(data, &Arc::default())
+    }
+}
+
+impl std::ops::Deref for Output {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl std::borrow::Borrow<[u8]> for Output {
+    fn borrow(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl Drop for Output {
+    fn drop(&mut self) {
+        self.unread.bytes.fetch_sub(self.data.len(), Ordering::Relaxed);
+    }
 }
 
 /// 新开一个会话，对应 `ClientMsg::Spawn`。
@@ -232,6 +291,8 @@ struct Route {
     /// 宿主拆出来单独发的 shell 集成报告，最近收到的那份（见 `Caps::shell_report`）；不拆的旧宿主
     /// 发来的 `Attached` 不带，为 `None` 时 `Meta` 照原样交出去。
     shell: Option<ShellReport>,
+    /// 这次订阅交给视图、视图还没处理完的输出，见 `Output`。重新连上（`start_attach`）时换一份新的。
+    unread: Arc<Unread>,
 }
 
 impl Route {
@@ -245,6 +306,7 @@ impl Route {
             first_screen: None,
             exited: None,
             shell: None,
+            unread: Arc::default(),
         }
     }
 
@@ -272,6 +334,22 @@ impl Route {
         }
     }
 
+    /// 交给会话 `id` 一块输出，返回收的一方还在不在。视图积压着超过 `UNREAD_LIMIT` 的输出没处理完
+    /// （几个终端一起刷屏、主线程跟不上）时不再交，改交一条 `Resync`，和宿主那边这条连接积压了时一样：
+    /// 视图冻结着现在这屏、重新要一份屏幕。已经排着的那些标成作废，视图跳过不喂（`Output::is_stale`）。
+    /// 不让读线程停下来等：别的会话的帧也要它读。
+    fn deliver_output(&mut self, id: SessionId, data: Vec<u8>) -> bool {
+        if self.unread.stale.load(Ordering::Relaxed) {
+            return true;
+        }
+        if self.unread.bytes.load(Ordering::Relaxed) > UNREAD_LIMIT {
+            self.unread.stale.store(true, Ordering::Relaxed);
+            let reason = "the view fell behind on output".to_owned();
+            return self.deliver(LinkEvent::Msg(HostMsg::Resync { id, reason }));
+        }
+        self.deliver(LinkEvent::Output(Output::counted(data, &self.unread)))
+    }
+
     /// 交给会话一件事，返回收的一方还在不在。
     fn deliver(&mut self, event: LinkEvent) -> bool {
         match event {
@@ -293,13 +371,30 @@ impl Inner {
     }
 
     /// 写一帧并刷出去。没连着时返回错误；写不出去（对面断了、超时）时关掉连接，读线程随之
-    /// 读到结尾，给各个会话发 `Lost`。
+    /// 读到结尾，给各个会话发 `Lost`。载荷超过 `MAX_PAYLOAD` 时只返回错误，什么都没写。
     fn write(&self, kind: FrameKind, channel: u32, payload: &[u8]) -> io::Result<()> {
         self.write_on(None, kind, channel, payload)
     }
 
     /// 同 `write`；`generation` 给了时只写在第这么多条连接上，连接换过了时返回错误。
     fn write_on(&self, generation: Option<u64>, kind: FrameKind, channel: u32, payload: &[u8]) -> io::Result<()> {
+        self.write_frames(generation, kind, channel, [payload])
+    }
+
+    /// 把给会话程序的输入写在通道 `channel` 上，同 `write`。一大段（比如粘贴）按 `INPUT_CHUNK` 拆成
+    /// 几帧：宿主把各帧按字节流接着写进 PTY，和一帧一样，一帧却可能超过 `MAX_PAYLOAD`、写不出去。
+    fn write_input(&self, channel: u32, data: &[u8]) -> io::Result<()> {
+        self.write_frames(None, FrameKind::Input, channel, data.chunks(INPUT_CHUNK))
+    }
+
+    /// 同 `write_on`，写几帧再刷出去。整段拿着写锁，别的线程的帧插不进这几帧中间。
+    fn write_frames<'a>(
+        &self,
+        generation: Option<u64>,
+        kind: FrameKind,
+        channel: u32,
+        payloads: impl IntoIterator<Item = &'a [u8]>,
+    ) -> io::Result<()> {
         let mut guard = self.writer();
         let Some(writer) = guard.as_mut() else {
             return Err(io::Error::new(io::ErrorKind::NotConnected, "not connected to the host"));
@@ -307,18 +402,21 @@ impl Inner {
         if generation.is_some_and(|generation| generation != writer.generation) {
             return Err(io::Error::new(io::ErrorKind::NotConnected, "connected to another host since"));
         }
-        let written = write_frame(&mut writer.stream, kind, channel, payload)
-            .map_err(|err| match err {
-                FrameError::Io(err) => err,
-                err => io::Error::other(err.to_string()),
-            })
-            .and_then(|()| writer.stream.flush());
-        if let Err(err) = &written {
-            tracing::warn!("lost the host while writing: {err}");
-            let _ = writer.stream.get_ref().shutdown(Shutdown::Both);
-            *guard = None;
+        let written = payloads
+            .into_iter()
+            .try_for_each(|payload| write_frame(&mut writer.stream, kind, channel, payload))
+            .and_then(|()| writer.stream.flush().map_err(FrameError::Io));
+        match written {
+            Ok(()) => Ok(()),
+            Err(FrameError::Io(err)) => {
+                tracing::warn!("lost the host while writing: {err}");
+                let _ = writer.stream.get_ref().shutdown(Shutdown::Both);
+                *guard = None;
+                Err(err)
+            }
+            // 载荷太长：`write_frame` 一个字节都没写，连接照用。
+            Err(err) => Err(io::Error::other(err.to_string())),
         }
-        written
     }
 
     fn control(&self, message: &ClientMsg) -> io::Result<()> {
@@ -544,7 +642,7 @@ impl Link {
                 }
             }
         };
-        if let Err(err) = self.inner.write(FrameKind::Input, channel, data) {
+        if let Err(err) = self.inner.write_input(channel, data) {
             tracing::debug!("dropped input for session {id}: {err}");
         }
     }
@@ -660,6 +758,7 @@ impl Link {
             mode = attach_mode(mode, snapshots);
             route.attaching += 1;
             route.assembling = None;
+            route.unread = Arc::default();
             if let Some(channel) = route.channel.take() {
                 state.channels.remove(&channel);
             }

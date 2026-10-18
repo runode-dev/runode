@@ -34,7 +34,7 @@ use runode_types::{
     settings::TermSettings,
 };
 
-use crate::host_client::{LinkEvent, Screen as HostScreen};
+use crate::host_client::{LinkEvent, Output, Screen as HostScreen};
 
 /// 离开显示这么久后丢掉界面这份 VT、只看状态；这期间切回来就什么都不用做。
 pub(super) const HIDE_GRACE: Duration = Duration::from_secs(5);
@@ -393,11 +393,11 @@ impl<S: Vt> ScreenState<S> {
         now: Instant,
     ) -> Changes {
         let mut changes = Changes::default();
-        let mut pending: Vec<Vec<u8>> = Vec::new();
+        let mut pending: Vec<Output> = Vec::new();
         for event in events {
             if let LinkEvent::Output(data) = event {
-                // 没在看（在等新的屏幕、只看状态、断开了）时的输出接不上界面这份 VT。
-                if matches!(self.screen, Screen::Live { .. }) {
+                // 没在看（在等新的屏幕、只看状态、断开了）时的输出接不上界面这份 VT；作废了的马上被新屏幕换掉。
+                if matches!(self.screen, Screen::Live { .. }) && !data.is_stale() {
                     pending.push(data);
                 }
                 continue;
@@ -415,7 +415,7 @@ impl<S: Vt> ScreenState<S> {
     }
 
     /// 把攒着的几块输出一次喂给 VT，返回是否喂了。
-    fn feed(&mut self, pending: &mut Vec<Vec<u8>>) -> bool {
+    fn feed(&mut self, pending: &mut Vec<Output>) -> bool {
         let Some(session) = self.live_mut() else {
             pending.clear();
             return false;

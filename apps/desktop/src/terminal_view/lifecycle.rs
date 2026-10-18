@@ -1161,8 +1161,8 @@ mod tests {
     #[test]
     fn take_batch_bounds_output_bytes() {
         let (tx, mut rx) = mpsc::unbounded();
-        tx.unbounded_send(LinkEvent::Output(vec![b'x'; MAX_OUTPUT_BATCH])).unwrap();
-        tx.unbounded_send(LinkEvent::Output(b"y".to_vec())).unwrap();
+        tx.unbounded_send(LinkEvent::Output(vec![b'x'; MAX_OUTPUT_BATCH].into())).unwrap();
+        tx.unbounded_send(LinkEvent::Output(b"y".to_vec().into())).unwrap();
         let mut task = std::task::Context::from_waker(futures::task::noop_waker_ref());
         let (first, closed) = take_batch(&mut rx, &mut task);
         assert_eq!((first.len(), closed), (1, false));

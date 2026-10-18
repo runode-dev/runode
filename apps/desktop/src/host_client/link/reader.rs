@@ -49,7 +49,7 @@ pub(super) fn output(inner: &Inner, generation: u64, channel: u32, data: Vec<u8>
     }
     let Some(&id) = state.channels.get(&channel) else { return };
     let alive = match state.sessions.get_mut(&id) {
-        Some(route) if route.attaching == 0 && route.assembling.is_none() => route.deliver(LinkEvent::Output(data)),
+        Some(route) if route.attaching == 0 && route.assembling.is_none() => route.deliver_output(id, data),
         _ => true,
     };
     if !alive {
@@ -165,7 +165,7 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
             }
             // 拿着 `state` 写：别的线程要等这里写完才看得到通道，之后的输入排在攒着的后面。
             for data in queued {
-                if inner.write(FrameKind::Input, channel, &data).is_err() {
+                if inner.write_input(channel, &data).is_err() {
                     break;
                 }
             }

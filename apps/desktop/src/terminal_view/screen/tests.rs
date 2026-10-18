@@ -104,7 +104,7 @@ fn msg(message: HostMsg) -> LinkEvent {
 }
 
 fn output(data: &[u8]) -> LinkEvent {
-    LinkEvent::Output(data.to_vec())
+    LinkEvent::Output(data.to_vec().into())
 }
 
 fn agent(state: AgentState) -> SessionMeta {
