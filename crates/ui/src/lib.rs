@@ -5,7 +5,7 @@
 //! 复制粘贴这类共用的编辑动作（`actions`），标签条共用的拖动卡片和落点提示（`tabs`），把调色板的颜色换成
 //! GPUI 颜色的 `hsla`，以及把家目录写成 `~` 显示路径的 `display_dir`、取路径最后一段的 `base_name`、跟着改名挪路径的
 //! `follow_move`、在标题栏这类地方按下鼠标拖动窗口的 `drag_window`，放掉图片在图集里那份的 `drop_render_image`、
-//! `release_bitmap`，把一组相对路径按目录排成树的 `path_tree`，让辅助工具认得界面的共用写法（`a11y`），以及各部件取颜色的
+//! `release_bitmap`（要放的位图画的时候先经 `draw_bitmap` 记下），把一组相对路径按目录排成树的 `path_tree`，让辅助工具认得界面的共用写法（`a11y`），以及各部件取颜色的
 //! 主题 token（`theme`）。
 //!
 //! 不依赖桌面 app 里的功能模块，它们要的东西由调用方经参数、事件或 `font_size::UiFontSize` 这类
@@ -38,8 +38,9 @@ pub mod theme;
 pub mod tooltip;
 
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex, PoisonError},
 };
 
 use gpui::{App, Hsla, Image, ImageSource, MouseDownEvent, RenderImage, Window, rgb};
@@ -90,9 +91,27 @@ pub fn drop_render_image(image: Arc<RenderImage>, cx: &mut App) {
     cx.defer(move |cx| cx.drop_image(image, None));
 }
 
+/// 画过的位图（`Image::id`），见 `draw_bitmap`。
+static DRAWN_BITMAPS: Mutex<BTreeSet<u64>> = Mutex::new(BTreeSet::new());
+
+/// 要交给 `img()` 或 `Image::use_render_image` 画的位图先经过它：记下画过，`release_bitmap` 才去放它。
+pub fn draw_bitmap(image: &Arc<Image>) -> Arc<Image> {
+    DRAWN_BITMAPS.lock().unwrap_or_else(PoisonError::into_inner).insert(image.id());
+    image.clone()
+}
+
+/// 画过的位图 `id` 要放了：画过且还没放过时为真，同时忘掉它。
+fn forget_drawn(id: u64) -> bool {
+    DRAWN_BITMAPS.lock().unwrap_or_else(PoisonError::into_inner).remove(&id)
+}
+
 /// 放掉 `img()` 画过的位图：GPUI 缓存的解码结果和它在图集里的纹理。`remove_asset` 只清前者，
 /// 纹理要拿解码结果另外删，解码结果只能经窗口取，所以和 `drop_render_image` 一样等窗口都放回去。
+/// 没经 `draw_bitmap` 画过（或者已经放过）的不动：取解码结果时缓存里没有，`get_render_image` 会白起一次解码。
 pub fn release_bitmap(image: Arc<Image>, cx: &mut App) {
+    if !forget_drawn(image.id()) {
+        return;
+    }
     cx.defer(move |cx| {
         let decoded = cx
             .windows()
@@ -104,4 +123,22 @@ pub fn release_bitmap(image: Arc<Image>, cx: &mut App) {
         }
         ImageSource::Image(image).remove_asset(cx);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gpui::{Image, ImageFormat};
+
+    use super::{draw_bitmap, forget_drawn};
+
+    #[test]
+    fn only_a_drawn_bitmap_is_released_and_only_once() {
+        let image = Arc::new(Image::from_bytes(ImageFormat::Png, b"release-test".to_vec()));
+        assert!(!forget_drawn(image.id()), "never drawn");
+        draw_bitmap(&image);
+        assert!(forget_drawn(image.id()));
+        assert!(!forget_drawn(image.id()), "already released");
+    }
 }

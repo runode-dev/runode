@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use crate::ui::{
-    hsla,
+    self as ui, hsla,
     panel::{PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, panel_message},
     scrollbar::{row_markers, scrollbar},
     theme::{ADDED, ActiveTheme as _, MODIFIED, REMOVED, RENAMED, Theme},
@@ -92,7 +92,7 @@ impl PreviewPanel {
                 .flex()
                 .justify_center()
                 .items_start()
-                .child(img(image.clone()).max_w_full().max_h_full())
+                .child(img(ui::draw_bitmap(image)).max_w_full().max_h_full())
                 .into_any_element(),
             Some(Loaded::ImageDiff { old, new }) => {
                 // 改之前在左、改之后在右；栏太窄、图片并排缩得比上下排还小时改成上下排。
@@ -100,7 +100,7 @@ impl PreviewPanel {
                 let sizes: Vec<_> = [old, new]
                     .into_iter()
                     .flatten()
-                    .filter_map(|image| image.clone().use_render_image(window, cx))
+                    .filter_map(|image| ui::draw_bitmap(image).use_render_image(window, cx))
                     .map(|image| {
                         let size = image.size(0);
                         (size.width.0 as f32, size.height.0 as f32)
@@ -132,7 +132,7 @@ impl PreviewPanel {
                                 .w_full()
                                 .flex()
                                 .justify_center()
-                                .child(img(image.clone()).max_w_full().max_h_full())
+                                .child(img(ui::draw_bitmap(image)).max_w_full().max_h_full())
                                 .into_any_element(),
                             None => div()
                                 .text_color(missing)

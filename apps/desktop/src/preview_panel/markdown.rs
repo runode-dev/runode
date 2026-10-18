@@ -1414,7 +1414,7 @@ impl PreviewPanel {
     ) -> AnyElement {
         let picture = if image.remote { view.remote.get(&image.url).cloned().flatten() } else { image.picture.clone() };
         let size = picture.as_ref().and_then(|picture| match picture {
-            Picture::Bitmap(bitmap, _) => bitmap.clone().use_render_image(window, cx).map(|bitmap| {
+            Picture::Bitmap(bitmap, _) => ui::draw_bitmap(bitmap).use_render_image(window, cx).map(|bitmap| {
                 let size = bitmap.size(0);
                 (size.width.0 as f32, size.height.0 as f32)
             }),
