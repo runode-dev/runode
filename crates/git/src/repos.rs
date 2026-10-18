@@ -337,12 +337,13 @@ pub(crate) fn submodules(root: &Path) -> Vec<PathBuf> {
     }
     let args = ["config", "-z", "--file", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"];
     let output = git(root, &args).unwrap_or_default();
-    // 每项是「键\n值」，项与项之间是 NUL。
+    // 每项是「键\n值」，项与项之间是 NUL。值按原样的字节用，不是 UTF-8 的路径换了字就找不到目录；
+    // 收集 `components` 顺带去掉末尾的 `/`。
     let mut paths: Vec<PathBuf> = output
         .split(|b| *b == 0)
         .filter_map(|entry| {
-            let entry = String::from_utf8_lossy(entry);
-            let path = PathBuf::from(entry.split_once('\n')?.1.trim_end_matches('/'));
+            let value = &entry[entry.iter().position(|b| *b == b'\n')? + 1..];
+            let path: PathBuf = Path::new(OsStr::from_bytes(value)).components().collect();
             let normal = path.components().next().is_some()
                 && path.components().all(|part| matches!(part, Component::Normal(_)));
             (normal && git_dir_of(&root.join(&path)).is_some()).then_some(path)
