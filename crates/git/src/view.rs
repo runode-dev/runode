@@ -281,9 +281,10 @@ pub(crate) fn literal(path: &Path) -> OsString {
     spec
 }
 
-/// `版本:路径` 形式的 blob 名，`rev` 为空时是暂存区里的。
+/// `版本:路径` 形式的 blob 名，`rev` 为空时是暂存区里的（写成 `:0:路径`：只写 `:` 时 `1:a` 这样的文件名
+/// 会被当成 `a` 冲突时的第 1 份）。
 fn blob_spec(rev: &str, path: &Path) -> OsString {
-    let mut spec = OsString::from(format!("{rev}:"));
+    let mut spec = OsString::from(if rev.is_empty() { ":0:".to_owned() } else { format!("{rev}:") });
     spec.push(path);
     spec
 }
