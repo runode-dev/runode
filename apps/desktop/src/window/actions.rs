@@ -17,7 +17,8 @@ const RESIZE_STEP: f32 = 10.;
 
 impl WindowView {
     /// 切到目录是 `dir` 的 workspace（目录按规范化后的比，经过符号链接也认得出），给了 `name` 就改成
-    /// 这个名字；还没有时在当前 workspace 下面新建一个，`name` 为空时按目录取名。
+    /// 这个名字；还没有时在当前 workspace 下面新建一个，`name` 为空时按目录取名。规范化在别的线程上做
+    /// （`inspect_dir`），做完才办。
     pub(super) fn open_workspace(
         &mut self,
         dir: PathBuf,
@@ -25,7 +26,21 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let target = super::model::canonical_dir(&dir);
+        cx.spawn_in(window, async move |this, cx| {
+            let (_, target) = super::model::inspect_dir(dir.clone()).await;
+            this.update_in(cx, |this, window, cx| this.open_workspace_resolved(dir, &target, name, window, cx)).ok();
+        })
+        .detach();
+    }
+
+    fn open_workspace_resolved(
+        &mut self,
+        dir: PathBuf,
+        target: &std::path::Path,
+        name: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(ix) = self.workspaces.iter().position(|workspace| workspace.real_dir() == target) {
             if let Some(name) = name {
                 self.set_workspace_name(ix, name.into(), window, cx);

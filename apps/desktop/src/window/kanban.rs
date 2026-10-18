@@ -7,7 +7,7 @@
 //! 看板和手机端引导页一样盖住标签和分屏：切到任何一个标签或 workspace、按 Esc 就收起。卡片的「打开终端」
 //! 把任务的会话接进它目录所在的 workspace 的一个新标签，已经在哪个分屏里时切过去。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
 use gpui::{
@@ -187,17 +187,29 @@ impl WindowView {
             }
         };
         self.kanban = None;
-        let canonical = super::model::canonical_dir;
-        let dirs: Vec<&Path> = self.workspaces.iter().map(|workspace| workspace.real_dir()).collect();
-        let home = super::model::home_dir().map(|home| canonical(&home));
-        let worktree = todo.worktree_dir.as_deref().map(canonical);
-        match best_workspace(&dirs, &canonical(&todo.spec.dir), worktree.as_deref(), home.as_deref()) {
-            Some(ix) => {
-                self.activate_workspace(ix, window, cx);
-                self.insert_tab(self.workspace().active + 1, view, window, cx);
-            }
-            None => self.insert_workspace(self.active + 1, todo.spec.dir.clone(), None, view, window, cx),
-        }
+        let (dir, worktree) = (todo.spec.dir.clone(), todo.worktree_dir.clone());
+        // 目录也许在挂死的网络卷上，规范化在别的线程上做（`inspect_dir`），做好再摆。
+        cx.spawn_in(window, async move |this, cx| {
+            let real = async |dir: Option<PathBuf>| match dir {
+                Some(dir) => Some(super::model::inspect_dir(dir).await.1),
+                None => None,
+            };
+            let todo_dir = real(Some(dir.clone())).await.unwrap_or_default();
+            let worktree = real(worktree).await;
+            let home = real(super::model::home_dir()).await;
+            this.update_in(cx, |this, window, cx| {
+                let dirs: Vec<&Path> = this.workspaces.iter().map(|workspace| workspace.real_dir()).collect();
+                match best_workspace(&dirs, &todo_dir, worktree.as_deref(), home.as_deref()) {
+                    Some(ix) => {
+                        this.activate_workspace(ix, window, cx);
+                        this.insert_tab(this.workspace().active + 1, view, window, cx);
+                    }
+                    None => this.insert_workspace(this.active + 1, dir, None, view, window, cx),
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 侧栏顶上的新建任务入口：打开任务页，弹出新建任务的对话框。

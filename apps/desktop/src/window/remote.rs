@@ -29,11 +29,55 @@ pub fn serve_requests(cx: &mut App) {
                 cx.update(|cx| clipboard::read(ticket, id, ask, program, cx));
                 continue;
             }
+            // 查目录可能卡在挂死的网络卷上，在单独的线程上查，自己回话，不挡住后面的请求。
+            if let ClientMsg::OpenWorkspace { req, dir, focus, name } = request {
+                cx.update(|cx| {
+                    cx.spawn(async move |cx| {
+                        let (is_dir, real) = super::model::inspect_dir(dir.clone()).await;
+                        let reply = cx.update(|cx| open_workspace(req, &dir, is_dir, &real, focus, name, cx));
+                        host_client::link().ui_reply(ticket, reply);
+                    })
+                    .detach();
+                });
+                continue;
+            }
             let reply = cx.update(|cx| handle(request, cx));
             host_client::link().ui_reply(ticket, reply);
         }
     })
     .detach();
+}
+
+/// 在最前面的窗口里开 `dir` 的 workspace（`OpenWorkspace`），返回回话。`is_dir`、`real` 是在别的线程上
+/// 查好的（`inspect_dir`）。
+fn open_workspace(
+    req: u32,
+    dir: &Path,
+    is_dir: bool,
+    real: &Path,
+    focus: bool,
+    name: Option<String>,
+    cx: &mut App,
+) -> HostMsg {
+    let fail = |message: String| HostMsg::Error { req: Some(req), id: None, message };
+    let Some(window) = front_window(cx) else {
+        return fail("there is no runode window to open it in".into());
+    };
+    if !dir.is_absolute() || !is_dir {
+        return fail(format!("{} is not a directory", dir.display()));
+    }
+    let name = name.map(|name| name.trim().to_owned()).filter(|name| !name.is_empty());
+    let opened = window.update(cx, |view, window, cx| view.open_workspace_at(real, name, focus, window, cx));
+    match opened {
+        Ok(Ok((pane, id))) => {
+            if focus {
+                reveal(window, pane, cx);
+            }
+            HostMsg::Opened { req, id }
+        }
+        Ok(Err(message)) => fail(message.into()),
+        Err(_) => fail("the runode window went away".into()),
+    }
 }
 
 /// 办一条请求，返回回话。
@@ -70,26 +114,6 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
                     HostMsg::Opened { req, id }
                 }
                 None => fail(req, "could not start a terminal".into()),
-            }
-        }
-        ClientMsg::OpenWorkspace { req, dir, focus, name } => {
-            let Some(window) = front_window(cx) else {
-                return fail(req, "there is no runode window to open it in".into());
-            };
-            if !dir.is_absolute() || !dir.is_dir() {
-                return fail(req, format!("{} is not a directory", dir.display()));
-            }
-            let name = name.map(|name| name.trim().to_owned()).filter(|name| !name.is_empty());
-            let opened = window.update(cx, |view, window, cx| view.open_workspace_at(&dir, name, focus, window, cx));
-            match opened {
-                Ok(Ok((pane, id))) => {
-                    if focus {
-                        reveal(window, pane, cx);
-                    }
-                    HostMsg::Opened { req, id }
-                }
-                Ok(Err(message)) => fail(req, message.into()),
-                Err(_) => fail(req, "the runode window went away".into()),
             }
         }
         ClientMsg::RenameWorkspace { req, window, workspace, name } => {
@@ -239,7 +263,7 @@ impl WindowView {
         session
     }
 
-    /// 切到或者新建目录是 `dir` 的 workspace，返回它当前标签里有焦点的分屏和那个分屏的会话。已经有
+    /// 切到或者新建目录是 `dir`（已经规范化过，见 `inspect_dir`）的 workspace，返回它当前标签里有焦点的分屏和那个分屏的会话。已经有
     /// 这个目录的 workspace 时不新建（目录按规范化后的比，`dir` 经过符号链接也认得出），名字也不改；
     /// 那个分屏还没开会话、或者 workspace 里没有标签时在它末尾另开一个标签。没有时在 `dir` 开一个终端，
     /// 新 workspace 插在当前 workspace 后面，和菜单里新建的一样，`name` 为空时按目录取名。不切过去
@@ -253,8 +277,6 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(EntityId, SessionId), &'static str> {
-        let dir = super::model::canonical_dir(dir);
-        let dir = dir.as_path();
         if let Some(wi) = self.workspaces.iter().position(|workspace| workspace.real_dir() == dir) {
             let workspace = &self.workspaces[wi];
             if let Some(tab) = workspace.tabs.get(workspace.active)

@@ -160,22 +160,47 @@ impl WindowView {
     }
 
     /// 让监听跟上当前 workspace 的文件树根目录；右侧面板都收着时不听。
-    pub(super) fn sync_project_watch(&mut self, cx: &App) {
+    /// 建监听要看、要解析目录，目录在挂死的网络卷上时会一直卡着，所以在单独的线程上建（同
+    /// `canonical_dir_later`），建好之前照旧的监听或定时重读。
+    pub(super) fn sync_project_watch(&mut self, cx: &mut Context<Self>) {
         let project = &self.workspace().project;
         let root = project.root.clone().filter(|_| self.project_visible(cx));
         let Some(root) = root else {
             self.project_watch = None;
+            self.building_watch = None;
             return;
         };
-        let git_dirs = project.watch_git_dirs.clone();
-        if self.project_watch.as_ref().is_some_and(|watch| watch.root == root && watch.git_dirs == git_dirs) {
+        let target = (root, project.watch_git_dirs.clone());
+        let built =
+            self.project_watch.as_ref().is_some_and(|watch| (&watch.root, &watch.git_dirs) == (&target.0, &target.1));
+        if built || self.building_watch.as_ref() == Some(&target) {
             return;
         }
-        self.project_watch = ProjectWatch::new(root, git_dirs, self.project_events.clone());
-        // 监听建好之前那次读的期间改了什么听不到，按有改动再读一次。
-        if self.project_watch.is_some() {
-            self.workspace_mut().project.stale = true;
-        }
+        self.building_watch = Some(target.clone());
+        let (done, watch) = futures::channel::oneshot::channel();
+        let (root, git_dirs, events) = (target.0.clone(), target.1.clone(), self.project_events.clone());
+        // 起不了线程时 `done` 跟着丢掉，下面收到的是空的。
+        let _ = std::thread::Builder::new()
+            .name("project-watch".into())
+            .spawn(move || done.send(ProjectWatch::new(root, git_dirs, events)).ok());
+        cx.spawn(async move |this, cx| {
+            let watch = watch.await.ok().flatten();
+            this.update(cx, |this, cx| {
+                // 建的时候又换了要听的目录：这个不要了。
+                if this.building_watch.as_ref() != Some(&target) {
+                    return;
+                }
+                this.building_watch = None;
+                this.project_watch = watch;
+                // 监听建好之前那次读的期间改了什么听不到，按有改动再读一次。
+                if this.project_watch.is_some() && this.workspace().project.root.as_ref() == Some(&target.0) {
+                    this.workspace_mut().project.stale = true;
+                    this.refresh_if_due(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 监听到 `changes`：有要紧的就重读。窗口在后台时只记下来，切到前台时再读。说不准哪里变了
