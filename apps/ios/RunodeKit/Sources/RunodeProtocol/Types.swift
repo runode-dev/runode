@@ -12,7 +12,8 @@ public struct SessionId: Hashable, Sendable, Codable, CustomStringConvertible {
 
     /// 写法不对（不是正好 32 个十六进制数字）时返回 `nil`。
     public init?(_ text: String) {
-        guard text.count == 32, text.allSatisfy(\.isHexDigit) else { return nil }
+        // `isHexDigit` 也认全角数字，宿主只认 ASCII。
+        guard text.utf8.count == 32, text.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
         rawValue = text.lowercased()
     }
 
