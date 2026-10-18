@@ -200,6 +200,13 @@ impl Desk {
             tracing::warn!("cannot record the paired device: {err}");
             return Err(RejectReason::Disabled);
         }
+        // 验签、写设备表的这会儿又跑了一次 `runode remote pair`（或者命令行已经删了文件）：口令文件已经
+        // 不是读到的那份，不拿旧的盖掉它。读不了时照旧写，写不成就记进 `spent`。
+        // shortcut: 重读和写回之间仍有极短的窗口，要彻底排除得让 `PairingTicket::begin` 和这里共用一把文件锁。
+        if matches!(read_json::<PairingFile>(&path), Ok(now) if now.as_ref().is_none_or(|now| now.ticket != file.ticket))
+        {
+            return Ok(device);
+        }
         file.secret = None;
         file.state = State::Paired;
         file.device_id = Some(device.device_id);
@@ -252,6 +259,33 @@ mod tests {
         assert_eq!(desk.redeem(&dirs, &ticket.secret(), || Ok(device(2))).err(), Some(RejectReason::PairingInvalid));
         assert_eq!(devices::list_devices(&dirs).unwrap().len(), 1);
         drop(ticket);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn redeeming_an_old_code_keeps_a_newer_one() {
+        let root = std::env::temp_dir().join(format!("rra-replaced-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let old = PairingTicket::begin(&dirs, Duration::from_secs(60)).unwrap();
+        let mut newer = None;
+        let paired = Desk::default().redeem(&dirs, &old.secret(), || {
+            // 读过口令文件以后、写回之前又跑了一次 `runode remote pair`。
+            newer = Some(PairingTicket::begin(&dirs, Duration::from_secs(60)).unwrap());
+            Ok(Device {
+                device_id: DeviceId([1; 16]),
+                name: "phone".into(),
+                public_key: Bytes(vec![4; 65]),
+                paired_at: 0,
+                last_seen: 0,
+            })
+        });
+        assert!(paired.is_ok());
+        let newer = newer.unwrap();
+        assert_eq!(newer.poll().unwrap(), PairingProgress::Waiting);
+        drop(old);
+        drop(newer);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
