@@ -10,7 +10,13 @@
 
 pub(super) mod format;
 
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{
+    collections::HashMap,
+    io,
+    path::Path,
+    sync::{Mutex, PoisonError},
+    time::Duration,
+};
 
 use gpui::{
     App, Bounds, Context, EntityId, Global, Task, WeakEntity, Window, WindowBounds, WindowOptions, point, px, size,
@@ -45,6 +51,8 @@ struct Saver {
     written: Option<State>,
     /// 等着写文件的任务。
     pending: Option<Task<()>>,
+    /// 最近一次开始写的编号，见 `write_in_order`。
+    seq: u64,
     /// 已经开始退出，最后的布局已经写好（`freeze`）：之后窗口一个个被关掉、分屏随会话结束一个个
     /// 关掉，都不是用户改了布局，不再改存档。
     frozen: bool,
@@ -205,7 +213,7 @@ pub(super) fn update(window: WeakEntity<WindowView>, snapshot: SavedWindow, cx: 
     if saver.pending.is_none() {
         let task = cx.spawn(async |cx| {
             cx.background_executor().timer(WRITE_DELAY).await;
-            cx.update(write);
+            cx.update(write_later);
         });
         cx.global_mut::<Saver>().pending = Some(task);
     }
@@ -258,18 +266,64 @@ fn closed(view: &mut WindowView, window: WeakEntity<WindowView>, cx: &mut App) {
     write(cx);
 }
 
+/// 当场写存档：退出、关窗口时用，app 随即可能退出，要写完再走。
 fn write(cx: &mut App) {
+    let Some((seq, state)) = next_write(cx) else {
+        return;
+    };
+    match write_in_order(seq, &state) {
+        Ok(()) => cx.global_mut::<Saver>().written = Some(state),
+        Err(err) => tracing::warn!("failed to save the window layout: {err}"),
+    }
+}
+
+/// 在后台写存档：`replace_file` 要把文件刷到盘上，在界面线程上做时拖窗口、切标签会一卡一卡的。
+fn write_later(cx: &mut App) {
+    let Some((seq, state)) = next_write(cx) else {
+        return;
+    };
+    let job = cx.background_executor().spawn({
+        let state = state.clone();
+        async move { write_in_order(seq, &state) }
+    });
+    cx.spawn(async move |cx| match job.await {
+        Ok(()) => cx.update(|cx| {
+            // 写的时候又开始了一次写，文件里是哪份要等那次说了算。
+            let saver = cx.global_mut::<Saver>();
+            if saver.seq == seq {
+                saver.written = Some(state);
+            }
+        }),
+        Err(err) => tracing::warn!("failed to save the window layout: {err}"),
+    })
+    .detach();
+}
+
+/// 要写的存档和它的编号；和上次写进文件的一样时不用写。
+fn next_write(cx: &mut App) -> Option<(u64, State)> {
     let saver = cx.global_mut::<Saver>();
     saver.pending = None;
     let windows: Vec<_> = saver.windows.iter().map(|(_, saved)| saved.clone()).collect();
     let state = State::new(windows);
     if saver.written.as_ref() == Some(&state) {
-        return;
+        return None;
     }
-    match format::write(&state) {
-        Ok(()) => saver.written = Some(state),
-        Err(err) => tracing::warn!("failed to save the window layout: {err}"),
+    saver.seq += 1;
+    Some((saver.seq, state))
+}
+
+/// 已经写进文件的那次写的编号。
+static WRITTEN_SEQ: Mutex<u64> = Mutex::new(0);
+
+/// 按编号写：后台的写和退出时的写会交错，开始得早的晚写完时不盖掉新的。
+fn write_in_order(seq: u64, state: &State) -> io::Result<()> {
+    let mut written = WRITTEN_SEQ.lock().unwrap_or_else(PoisonError::into_inner);
+    if *written > seq {
+        return Ok(());
     }
+    format::write(state)?;
+    *written = seq;
+    Ok(())
 }
 
 impl WindowView {
