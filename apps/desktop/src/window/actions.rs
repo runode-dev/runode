@@ -215,7 +215,8 @@ impl WindowView {
 
     /// 切到当前标签里的另一个终端；放大着的话先恢复，否则看不到它。
     pub(super) fn focus_pane_in_active_tab(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(tab) = self.tab_mut() else {
+        // 调用方记着的分屏可能已经关掉了，切过去 `Tab::focused_view` 就找不到它。
+        let Some(tab) = self.tab_mut().filter(|tab| tab.panes.contains_key(&pane)) else {
             return;
         };
         tab.focused = pane;
