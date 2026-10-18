@@ -125,7 +125,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             // 发送前 agent 就在提问时记下屏幕，停滞检测到点时比一比，见 `Stall::asking`。
             let asking = match (&waiting, meta.agent) {
                 (Some(_), Some(agent)) if agent.state == AgentState::Blocked => {
-                    Some(screen(&connection, id, None, None)?)
+                    Some(screen_keeping_events(&connection, id, None, None)?)
                 }
                 _ => None,
             };
@@ -547,13 +547,24 @@ fn screen(
     lines: Option<u32>,
     deadline: Option<Instant>,
 ) -> Result<String, Failure> {
+    let text = screen_keeping_events(connection, id, lines, deadline)?;
+    connection.drop_pending();
+    Ok(text)
+}
+
+/// 同 `screen`，但留着期间跳过的事件：之后还要照它们等的（`send --wait` 发送前记屏幕时来的 `Meta`）用它。
+fn screen_keeping_events(
+    connection: &Connection,
+    id: SessionId,
+    lines: Option<u32>,
+    deadline: Option<Instant>,
+) -> Result<String, Failure> {
     connection.send(&ClientMsg::ReadScreen { id, lines, command: None })?;
     let reply = connection.reply_before(deadline).map_err(|err| expired(err, deadline))?;
     // 宿主摘掉了订阅（这边读得太慢）：之后会话结束了也收不到 `Exited`，读下去只会等到超时。
     if connection.lost(id) && !connection.exited(id) {
         return Err(anyhow!("lost track of the session").into());
     }
-    connection.drop_pending();
     match reply {
         HostMsg::ScreenText { text, .. } => Ok(text),
         other => Err(unexpected(&other)),

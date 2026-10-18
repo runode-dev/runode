@@ -254,8 +254,13 @@ fn send_wait_gives_up_when_the_agent_never_starts() {
 fn send_wait_gives_up_when_a_blocked_agent_goes_idle_without_working() {
     let idle =
         HostMsg::Meta { id: id(S), meta: meta("claude", Some((AgentKind::Claude, AgentState::Idle))), shell: None };
-    let fake =
-        host("stallblocked", meta("claude", Some((AgentKind::Claude, AgentState::Blocked))), vec![idle], vec!["$\n"]);
+    // 回到空闲的状态紧跟在连上之后、发送前记屏幕的回话之前到；屏幕跟着换了，状态却没跟上的话会当成换了提问。
+    let fake = host(
+        "stallblocked",
+        meta("claude", Some((AgentKind::Claude, AgentState::Blocked))),
+        vec![idle],
+        vec!["Allow ls?\n", "$\n"],
+    );
     let started = Instant::now();
     let (code, _, err) = run("send 5e55 --key esc --wait --timeout 60", &fake.env);
     assert_eq!(code, exit::FAILED, "{err}");
