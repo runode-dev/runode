@@ -47,7 +47,7 @@ struct Saver {
     /// 开着的窗口和它们最近一次的布局，按打开的先后；关掉它们 app 随即退出的窗口（见 `closed`）
     /// 也留着，记关掉时的布局。
     windows: Vec<(WeakEntity<WindowView>, SavedWindow)>,
-    /// 上次写进文件的内容，没变就不再写。
+    /// 最近一次交去写的内容，没变就不再写；写失败时清掉（`write_failed`），下次照样写。
     written: Option<State>,
     /// 等着写文件的任务。
     pending: Option<Task<()>>,
@@ -61,6 +61,24 @@ struct Saver {
 impl Global for Saver {}
 
 impl Saver {
+    /// 要写 `state` 时这次写的编号；和最近一次交去写的一样时不用写。交出去就记下，不等写完：等写完再记的话，
+    /// 后台的一次写还没写完、布局又改回上次写完的那份时会当作不用写，等那次写完文件就停在它那份上。
+    fn begin_write(&mut self, state: &State) -> Option<u64> {
+        if self.written.as_ref() == Some(state) {
+            return None;
+        }
+        self.seq += 1;
+        self.written = Some(state.clone());
+        Some(self.seq)
+    }
+
+    /// 编号 `seq` 的写失败了。之后又开始了别的写时文件里是哪份由那次说了算，不动。
+    fn write_failed(&mut self, seq: u64) {
+        if self.seq == seq {
+            self.written = None;
+        }
+    }
+
     /// 把窗口 `window` 的布局记成 `snapshot`：已经记着这个窗口时替换，没有时加在后面。
     /// 返回布局变了没有。
     fn upsert(&mut self, window: WeakEntity<WindowView>, snapshot: SavedWindow) -> bool {
@@ -271,9 +289,9 @@ fn write(cx: &mut App) {
     let Some((seq, state)) = next_write(cx) else {
         return;
     };
-    match write_in_order(seq, &state) {
-        Ok(()) => cx.global_mut::<Saver>().written = Some(state),
-        Err(err) => tracing::warn!("failed to save the window layout: {err}"),
+    if let Err(err) = write_in_order(seq, &state) {
+        tracing::warn!("failed to save the window layout: {err}");
+        cx.global_mut::<Saver>().write_failed(seq);
     }
 }
 
@@ -282,19 +300,12 @@ fn write_later(cx: &mut App) {
     let Some((seq, state)) = next_write(cx) else {
         return;
     };
-    let job = cx.background_executor().spawn({
-        let state = state.clone();
-        async move { write_in_order(seq, &state) }
-    });
-    cx.spawn(async move |cx| match job.await {
-        Ok(()) => cx.update(|cx| {
-            // 写的时候又开始了一次写，文件里是哪份要等那次说了算。
-            let saver = cx.global_mut::<Saver>();
-            if saver.seq == seq {
-                saver.written = Some(state);
-            }
-        }),
-        Err(err) => tracing::warn!("failed to save the window layout: {err}"),
+    let job = cx.background_executor().spawn(async move { write_in_order(seq, &state) });
+    cx.spawn(async move |cx| {
+        if let Err(err) = job.await {
+            tracing::warn!("failed to save the window layout: {err}");
+            cx.update(|cx| cx.global_mut::<Saver>().write_failed(seq));
+        }
     })
     .detach();
 }
@@ -305,11 +316,7 @@ fn next_write(cx: &mut App) -> Option<(u64, State)> {
     saver.pending = None;
     let windows: Vec<_> = saver.windows.iter().map(|(_, saved)| saved.clone()).collect();
     let state = State::new(windows);
-    if saver.written.as_ref() == Some(&state) {
-        return None;
-    }
-    saver.seq += 1;
-    Some((saver.seq, state))
+    Some((saver.begin_write(&state)?, state))
 }
 
 /// 已经写进文件的那次写的编号。
@@ -619,6 +626,22 @@ impl WindowView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 一次写还没写完、布局又改回上次写的那份时照样再写一次，不然等那次写完文件停在它那份上；写失败了下次照样写。
+    #[test]
+    fn writing_back_the_previous_layout_while_a_write_is_running() {
+        let (a, b) = (State::new(Vec::new()), State::new(vec![SavedWindow::default()]));
+        let mut saver = Saver::default();
+        assert_eq!(saver.begin_write(&a), Some(1));
+        assert_eq!(saver.begin_write(&b), Some(2));
+        assert_eq!(saver.begin_write(&a), Some(3));
+        assert_eq!(saver.begin_write(&a), None);
+        // 早开始的写失败了不动：文件里是哪份由后来那次说了算。
+        saver.write_failed(2);
+        assert_eq!(saver.begin_write(&a), None);
+        saver.write_failed(3);
+        assert_eq!(saver.begin_write(&a), Some(4));
+    }
 
     /// 前面的叶子开不起来时，焦点和折叠的叶子仍按存档里的位置找，不往前错一位落到别的终端上。
     #[test]
