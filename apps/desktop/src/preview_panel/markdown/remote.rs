@@ -346,8 +346,10 @@ fn fetch_once(url: &str, deadline: Instant) -> Option<Hop> {
         let _ = child.wait();
         return None;
     }
+    // 先收掉 curl 再看标准错误：服务器回的内容类型不是 UTF-8 时读不出来，提前返回也不留下僵尸进程。
+    let status = child.wait().ok()?;
     let out = meta.join().ok()??;
-    if !child.wait().ok()?.success() {
+    if !status.success() {
         return None;
     }
     let mut lines = out.lines();
