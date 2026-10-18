@@ -4,6 +4,7 @@
 
 use std::{
     collections::BTreeMap,
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
 };
 
@@ -18,20 +19,21 @@ pub enum TreeItem {
 
 #[derive(Default)]
 struct Node {
-    /// 子目录，按名字排；键是不分大小写的名字加原名，同名不同大小写的也分得开。
-    dirs: BTreeMap<(String, String), Node>,
+    /// 子目录，按名字排；键是不分大小写的名字加原名，同名不同大小写的也分得开。原名按原样的字节存：
+    /// 不是 UTF-8 的目录名换了字，拼出的路径就指不到它。
+    dirs: BTreeMap<(String, OsString), Node>,
     files: Vec<(String, usize)>,
 }
 
 impl Node {
-    fn child(&mut self, name: &str) -> &mut Self {
-        self.dirs.entry((name.to_lowercase(), name.to_owned())).or_default()
+    fn child(&mut self, name: &OsStr) -> &mut Self {
+        self.dirs.entry((name.to_string_lossy().to_lowercase(), name.to_owned())).or_default()
     }
 
     /// 只有一个子目录、没有文件时是那个子目录。
-    fn single_dir(&self) -> Option<(&str, &Self)> {
+    fn single_dir(&self) -> Option<(&OsStr, &Self)> {
         match (self.dirs.len(), self.files.is_empty()) {
-            (1, true) => self.dirs.iter().next().map(|((_, name), node)| (name.as_str(), node)),
+            (1, true) => self.dirs.iter().next().map(|((_, name), node)| (name.as_os_str(), node)),
             _ => None,
         }
     }
@@ -43,14 +45,14 @@ pub fn path_tree(files: &[(usize, &Path)], expanded: impl Fn(&Path) -> bool) -> 
     let mut root = Node::default();
     for &(index, path) in files {
         let mut node = &mut root;
-        let mut parts: Vec<_> = path.iter().map(|part| part.to_string_lossy().into_owned()).collect();
+        let mut parts: Vec<_> = path.iter().collect();
         let Some(name) = parts.pop() else {
             continue;
         };
-        for part in &parts {
+        for part in parts {
             node = node.child(part);
         }
-        node.files.push((name, index));
+        node.files.push((name.to_string_lossy().into_owned(), index));
     }
     let mut items = Vec::new();
     push_node(&root, Path::new(""), 0, &expanded, &mut items);
@@ -60,11 +62,11 @@ pub fn path_tree(files: &[(usize, &Path)], expanded: impl Fn(&Path) -> bool) -> 
 fn push_node(node: &Node, dir: &Path, depth: usize, expanded: &impl Fn(&Path) -> bool, items: &mut Vec<TreeItem>) {
     for ((_, name), child) in &node.dirs {
         let mut path = dir.join(name);
-        let mut label = name.clone();
+        let mut label = name.to_string_lossy().into_owned();
         let mut child = child;
         while let Some((next, node)) = child.single_dir() {
             path.push(next);
-            label = format!("{label}/{next}");
+            label = format!("{label}/{}", next.to_string_lossy());
             child = node;
         }
         let open = expanded(&path);
@@ -145,5 +147,25 @@ mod tests {
         let files = [(0, Path::new("b.txt")), (1, Path::new("a.txt"))];
         assert_eq!(path_tree(&files, |_| true), [file(1, 0), file(0, 0)]);
         assert!(path_tree(&[], |_| true).is_empty());
+    }
+
+    #[test]
+    fn keeps_directory_names_that_are_not_utf8() {
+        use std::os::unix::ffi::OsStrExt;
+        let path = Path::new(OsStr::from_bytes(b"d\xff/a.txt"));
+        let items = path_tree(&[(0, path)], |_| true);
+        // 显示的名字换了字，路径还是原来的字节，拼出来指得到那个目录。
+        assert_eq!(
+            items,
+            [
+                TreeItem::Dir {
+                    path: OsStr::from_bytes(b"d\xff").into(),
+                    name: "d\u{fffd}".into(),
+                    depth: 0,
+                    expanded: true
+                },
+                file(0, 1)
+            ]
+        );
     }
 }
