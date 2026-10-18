@@ -19,7 +19,7 @@
 #   6973;<口令>;version=2  runode 私有：集成脚本的版本，每条命令开始时和 command 一起发，2 起
 #                133;D 前面有 end；升级后接手的 runode 据此知道这个 shell 会发 end
 #
-# 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的。runode 只认
+# 口令是 runode 启动这个 shell 时随机生成、经 RUNODE_REPORT_TOKEN_FILE 指着的文件给的。runode 只认
 # 带着这个口令的 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec bash
 # 或者在里面再开一层 bash，新的 shell 拿不到口令，runode 就沿用之前报告的内容。
 #
@@ -32,15 +32,27 @@
 # runode-reload 用同一个 bash 程序换掉当前的 shell（exec），重新读用户配置：改了 .bashrc 等文件
 # 以后，在早先启动的终端里用它，新的 shell 照样接上集成、带着同一个口令和同样的功能，目录不变。
 # 直接 exec bash 会丢掉集成。
+#
+# 用到口令的函数都把标准错误接到 /dev/null：开着 set -x 时 bash 把展开后的命令行（带着口令）打到
+# 标准错误，也就是屏幕上。这些函数里只有集成自己的命令，不吞用户的输出。设了 BASH_XTRACEFD 时跟踪
+# 不走标准错误，所以 4.4 起（有 `local -`）进函数先关掉跟踪，返回时还原；BASH_XTRACEFD 4.1 起才有，
+# 4.1 到 4.3 挡不住。
 
-# 加载用户配置之前就把口令读进不导出的变量，再从环境里删掉：加载配置时启动的程序，以及这个
-# shell 里运行的所有程序都继承不到它。这个文件又被加载一次时环境里已经没有口令，保留已经读到的。
-if [ -n "${RUNODE_REPORT_TOKEN-}" ]; then
+# 加载用户配置之前就把口令读进不导出的变量，删掉文件和环境变量：口令不能直接放进环境变量，进程
+# 启动时的环境（ps -E）同一用户的程序都读得到，unset 也改不掉。早先版本的 runode-reload 直接给
+# RUNODE_REPORT_TOKEN，升级后在旧 shell 里换 shell 时照样认。这个文件又被加载一次时环境里已经没有
+# 口令，保留已经读到的。
+if [ -n "${RUNODE_REPORT_TOKEN_FILE-}" ]; then
     # 先删掉同名变量：它要是从环境里继承来的，直接赋值还会带着导出属性。
+    unset _runode_report_token
+    _runode_report_token=
+    read -r _runode_report_token 2>/dev/null <"$RUNODE_REPORT_TOKEN_FILE"
+    command rm -f -- "$RUNODE_REPORT_TOKEN_FILE"
+elif [ -n "${RUNODE_REPORT_TOKEN-}" ]; then
     unset _runode_report_token
     _runode_report_token=$RUNODE_REPORT_TOKEN
 fi
-unset RUNODE_REPORT_TOKEN
+unset RUNODE_REPORT_TOKEN RUNODE_REPORT_TOKEN_FILE
 # 另外开哪些功能也一样读进不导出的变量。
 if [ -n "${RUNODE_SHELL_FEATURES+X}" ]; then
     unset _runode_features
@@ -105,6 +117,7 @@ if [ -z "${_runode_integrated-}" ]; then
     fi
 
     _runode_prompt_command() {
+        [ -z "$_runode_ps0" ] || { local -; set +x; }
         if [ -n "$_runode_prompted" ]; then
             _runode_command_end "$_runode_last_status"
         fi
@@ -131,7 +144,7 @@ if [ -z "${_runode_integrated-}" ]; then
             printf '\033]6973;%s;path=%s\007' "$_runode_report_token" "$_runode_encoded"
         fi
         _runode_report_names
-    }
+    } 2>/dev/null
 
     # 把函数名报告给 runode，它据此看集成脚本装好了没有：只报以字母或数字开头、由字母数字和
     # `_.:+@,=-` 组成的名字，用 %20 连起来（这样就已经是百分号编码）；和上次报告的一样就不发。
@@ -158,12 +171,13 @@ if [ -z "${_runode_integrated-}" ]; then
 
     # 报告命令执行完了，退出码是 $1；有口令时前面先发带口令的 end 报告，runode 才认这个 133;D。
     _runode_command_end() {
+        [ -z "$_runode_ps0" ] || { local -; set +x; }
         if [ -n "${_runode_report_token-}" ]; then
             printf '\033]6973;%s;end=\007\033]133;D;%s\007' "$_runode_report_token" "$1"
         else
             printf '\033]133;D;%s\007' "$1"
         fi
-    }
+    } 2>/dev/null
 
     # 把 $? 换回记下的退出码。调用时接上 `&& :`：用户开了 `set -e` 时，返回非零的函数单独一条会让
     # shell 退出，放在 `&&` 前面不会，退出码照样留在 $? 里。
@@ -206,6 +220,7 @@ if [ -z "${_runode_integrated-}" ]; then
     # HISTIGNORE 忽略、关了历史等）时最新一条是别的命令，报告的原文为空，终端从屏幕上读。
     # 没有口令时只报告命令开始，runode 不把它报告给等命令的前端。
     _runode_command_start() {
+        [ -z "$_runode_ps0" ] || { local -; set +x; }
         if [ -n "${_runode_report_token-}" ]; then
             local entry num
             entry=$(HISTTIMEFORMAT= builtin history 1)
@@ -225,7 +240,7 @@ if [ -z "${_runode_integrated-}" ]; then
         # 提示符上换过光标的，在命令开始前换回配置的样式。
         [ -z "$_runode_cursor" ] || printf '\033[0 q'
         printf '\033]133;C\007'
-    }
+    } 2>/dev/null
 
     # 吞掉漏到命令行上的 SGR 鼠标报告（ESC [ < 按键;列;行 M 或 m）。开着鼠标上报的程序退出前
     # 已经不读输入、还没关上报的那一小段里，鼠标一动报告就留在终端里，等提示符出来被 readline
@@ -252,13 +267,18 @@ if [ -z "${_runode_integrated-}" ]; then
         unset _runode_keymap
     fi
 
-    # 换成一个新的 bash，重新读用户配置，接上集成：口令和功能经环境变量交回去，runode 照样认得
-    # 新 shell 的报告。换之前把这个 shell 的历史写进文件，再报告这条命令执行完了：exec 之后不会
-    # 再有它的 133;D。
+    # 换成一个新的 bash，重新读用户配置，接上集成：口令写进新的临时文件（mktemp 建的只有自己能读写），
+    # 和功能一起经环境变量交回去，runode 照样认得新 shell 的报告。换之前把这个 shell 的历史写进文件，
+    # 再报告这条命令执行完了：exec 之后不会再有它的 133;D。
     runode-reload() {
+        [ -z "$_runode_ps0" ] || { local -; set +x; }
         local bash=${BASH:-bash}
         local -a vars=()
-        [ -z "${_runode_report_token-}" ] || vars+=("RUNODE_REPORT_TOKEN=$_runode_report_token")
+        local file
+        if { [ -n "${_runode_report_token-}" ] && file=$(command mktemp) &&
+            printf '%s\n' "$_runode_report_token" >|"$file"; } 2>/dev/null; then
+            vars+=("RUNODE_REPORT_TOKEN_FILE=$file")
+        fi
         [ -z "${_runode_features+X}" ] || vars+=("RUNODE_SHELL_FEATURES=$_runode_features")
         builtin history -a 2>/dev/null
         _runode_command_end 0

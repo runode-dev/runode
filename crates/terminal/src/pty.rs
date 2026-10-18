@@ -392,6 +392,8 @@ pub struct Pty {
     /// 启动 shell 时交给集成脚本的报告口令，见 `shell_integration::prepare`；没注入集成或者
     /// 还没启动时为 `None`。
     report_token: Option<String>,
+    /// 交口令给集成脚本的文件，脚本读完自己删；shell 没读就退出时由 `Drop` 删。
+    report_token_file: Option<PathBuf>,
     /// 启动 shell 时另外设的环境变量，见 `set_env`。
     env: Vec<(OsString, OsString)>,
     /// 启动 shell 时告诉集成脚本开哪些功能，见 `set_shell_features`。
@@ -505,6 +507,7 @@ impl Pty {
             writer,
             writer_thread: Some(writer_thread),
             report_token: None,
+            report_token_file: None,
             env: Vec::new(),
             shell_features: shell_integration::features(&TermSettings::default()),
             size: Cell::new(size),
@@ -599,6 +602,7 @@ impl Pty {
             writer,
             writer_thread: Some(writer_thread),
             report_token,
+            report_token_file: None,
             // 接手来的 shell 早就启动了，没有要设的环境变量。
             env: Vec::new(),
             shell_features: String::new(),
@@ -674,6 +678,8 @@ impl Pty {
                 tracing::warn!("failed to start the pty reaper thread: {err}");
             }
         }
+        // 交接时 shell 可能刚起、还没读口令文件，留给它自己删，免得它拿不到口令。
+        self.report_token_file = None;
         let master = self.master.take().context("the pty has already been handed off")?;
         let master = take_master(master).context("failed to take back the pty master")?;
         Ok(PtyHandoff { master, pid, size: self.size.get(), report_token: self.report_token.clone(), pending_input })
@@ -724,7 +730,8 @@ impl Pty {
         let shell = shell.map_or_else(default_shell, str::to_owned);
         let mut cmd = CommandBuilder::new(&shell);
         // 用登录 shell，这样会执行用户的 profile。
-        let report_token = shell_integration::prepare(integration, &shell, &self.shell_features, &mut cmd);
+        let dirs = runode_paths::Dirs::from_env();
+        let report = shell_integration::prepare(&dirs, integration, &shell, &self.shell_features, &mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "runode");
@@ -736,14 +743,22 @@ impl Pty {
         for (key, value) in &self.env {
             cmd.env(key, value);
         }
-        let cwd = cwd.map(Into::into).or_else(|| runode_paths::Dirs::from_env().home);
+        let cwd = cwd.map(Into::into).or(dirs.home);
         if let Some(cwd) = cwd {
             cmd.cwd::<std::path::PathBuf>(cwd);
         }
 
-        let child = slave.spawn_command(cmd).context("failed to spawn shell")?;
+        let child = match slave.spawn_command(cmd) {
+            Ok(child) => child,
+            Err(err) => {
+                if let Some((_, file)) = &report {
+                    let _ = std::fs::remove_file(file);
+                }
+                return Err(err.context("failed to spawn shell"));
+            }
+        };
         self.shell = Some(Shell::Child(child));
-        self.report_token = report_token;
+        (self.report_token, self.report_token_file) = report.unzip();
         let (slave, sink) = self.pending.take().expect("the pending slave was checked above");
         // 子进程持有自己的 slave 副本；我们这份必须关掉，子进程退出时才会读到 EOF。
         drop(slave);
@@ -940,6 +955,9 @@ fn process_cwd(_pid: libc::pid_t) -> Option<PathBuf> {
 
 impl Drop for Pty {
     fn drop(&mut self) {
+        if let Some(file) = self.report_token_file.take() {
+            let _ = std::fs::remove_file(file);
+        }
         // `adopt_paused` 接手来、从没开过闸：交出方还没提交，shell 归它管，这里只关自己的描述符，
         // 不结束 shell。读写线程还停在闸门上，不放过去的话它们一直等着、master 也一直关不掉。
         if let Some(gate) = self.gate.take() {

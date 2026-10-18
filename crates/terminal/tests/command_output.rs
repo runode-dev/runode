@@ -139,6 +139,8 @@ struct Syntax {
     /// 空着回车算不算一条命令：elvish 只能在画提示符之前标出用户输入开始，提示符的文字被当成
     /// 了输入，算。
     blank_counts: bool,
+    /// 打印 shell 自己的进程号。
+    pid: &'static str,
 }
 
 const POSIX: Syntax = Syntax {
@@ -147,15 +149,18 @@ const POSIX: Syntax = Syntax {
     read: "echo one; read x; echo two",
     read_prompt: "",
     blank_counts: false,
+    pid: "echo $$",
 };
-const FISH: Syntax = Syntax { read_prompt: "read>", ..POSIX };
+const FISH: Syntax = Syntax { read_prompt: "read>", pid: "echo $fish_pid", ..POSIX };
 const ELVISH: Syntax = Syntax {
     abc: "print \"a\\nb\\nc\\n\"",
     read: "echo one; var x = (read-line); echo two",
     blank_counts: true,
+    pid: "echo $pid",
     ..POSIX
 };
-const NUSHELL: Syntax = Syntax { nothing: "^true", read: "print one; input | ignore; print two", ..POSIX };
+const NUSHELL: Syntax =
+    Syntax { nothing: "^true", read: "print one; input | ignore; print two", pid: "print $nu.pid", ..POSIX };
 
 impl Drop for RealShell {
     fn drop(&mut self) {
@@ -167,6 +172,8 @@ const REAL_SIZE: GridSize = GridSize { cols: 40, rows: 12, cell_width_px: 8, cel
 const REAL_WAIT: Duration = Duration::from_secs(10);
 /// 真 shell 的集成报告带的口令。
 const REPORT_TOKEN: &str = "0123456789abcdef";
+/// 家目录里交口令给集成的文件，集成读完就删。
+const TOKEN_FILE: &str = "report-token";
 
 /// 仓库里的集成脚本所在的目录。
 fn integration_dir() -> PathBuf {
@@ -202,7 +209,20 @@ impl RealShell {
     /// 起 `shell`（`bash`、`zsh`、`fish`、`elvish` 或 `nu`，见 `find_shell`），`rc` 写进它的启动配置；
     /// `name` 在同时跑的测试里各不相同，失败时也用它说是哪一个。系统里没有这个 shell 时为 `None`，
     /// 设了环境变量 `RUNODE_REQUIRE_SHELLS` 时直接失败（CI 用它保证 fish、elvish、nushell 真的测到）。
+    /// 口令和 `shell_integration::prepare` 一样经 `RUNODE_REPORT_TOKEN_FILE` 指着的文件交给集成。
     fn start(shell: &str, name: &str, rc: &str, prompt: &'static str, idle: &'static [&'static str]) -> Option<Self> {
+        Self::start_handing_token(shell, name, rc, prompt, idle, false)
+    }
+
+    /// 同 `start`；`legacy` 时照早先版本的 `runode-reload` 那样直接经环境变量 `RUNODE_REPORT_TOKEN` 交口令。
+    fn start_handing_token(
+        shell: &str,
+        name: &str,
+        rc: &str,
+        prompt: &'static str,
+        idle: &'static [&'static str],
+        legacy: bool,
+    ) -> Option<Self> {
         let Some(path) = find_shell(shell) else {
             assert!(
                 std::env::var_os("RUNODE_REQUIRE_SHELLS").is_none(),
@@ -261,13 +281,19 @@ impl RealShell {
         let rc_file = home.join(rc_file);
         std::fs::create_dir_all(rc_file.parent().unwrap()).unwrap();
         std::fs::write(rc_file, rc).unwrap();
+        let token = if legacy {
+            format!("RUNODE_REPORT_TOKEN={REPORT_TOKEN}")
+        } else {
+            let file = home.join(TOKEN_FILE);
+            std::fs::write(&file, format!("{REPORT_TOKEN}\n")).unwrap();
+            format!("RUNODE_REPORT_TOKEN_FILE={}", quoted(file.display()))
+        };
         let launcher = home.join("launch.sh");
         std::fs::write(
             &launcher,
             format!(
                 "#!/bin/sh\nexec /usr/bin/env -i HOME={} PATH=/usr/bin:/bin TERM=xterm-256color LANG=en_US.UTF-8 \
-                 BASH_SILENCE_DEPRECATION_WARNING=1 RUNODE_REPORT_TOKEN={REPORT_TOKEN} \
-                 RUNODE_SHELL_FEATURES=cursor:steady {launch}\n",
+                 BASH_SILENCE_DEPRECATION_WARNING=1 {token} RUNODE_SHELL_FEATURES=cursor:steady {launch}\n",
                 quoted(home.display())
             ),
         )
@@ -355,6 +381,21 @@ impl RealShell {
         let (text, truncated) = self.session.command_output(n).unwrap();
         assert!(!truncated, "{}: command {n} truncated", self.name);
         text
+    }
+
+    /// shell 进程（`exec` 换上现在的程序时）拿到的环境：macOS 的 `ps -E`、Linux 的 `/proc/<pid>/environ`
+    /// 读的都是它，事后在 shell 里删掉变量也改不掉，同一用户的任何程序都读得到。macOS 不给看苹果自带
+    /// 的程序（`/bin/zsh`、`/bin/bash`）的环境，这时为 `None`。
+    fn startup_env(&mut self) -> Option<String> {
+        self.run(self.syntax.pid);
+        let pid = self.output(1).trim().to_owned();
+        let env = if cfg!(target_os = "linux") {
+            std::fs::read(format!("/proc/{pid}/environ")).unwrap()
+        } else {
+            std::process::Command::new("ps").args(["-wwE", "-o", "command=", "-p", &pid]).output().unwrap().stdout
+        };
+        let env = String::from_utf8_lossy(&env).into_owned();
+        env.contains("HOME=").then_some(env)
     }
 }
 
@@ -570,20 +611,31 @@ fn real_bash_cursor_follows_the_prompt() {
 }
 
 /// `runode-reload` 换成一个新的 shell：重新读了用户配置，集成照旧，报告带着同一个口令，口令
-/// 不留在环境里。用户配置加载 `extra`，换之前才写进去；`check` 打印 `RELOADED` 的值（没有时
-/// `no`）和口令在不在环境里（不在时 `gone`）。
+/// 不留在环境里，换前换后 shell 启动时的环境里都没有口令，交口令的文件读完就删了。用户配置加载
+/// `extra`，换之前才写进去；`check` 打印 `RELOADED` 的值（没有时 `no`），口令和口令文件的变量在不在
+/// 环境里（不在时 `gone`）。
 fn reload_in(shell: Option<RealShell>, check: &str) {
     let Some(mut shell) = shell else { return };
     let name = shell.name.clone();
+    assert!(!shell.home.join(TOKEN_FILE).exists(), "{name}: the token file is left behind");
+    assert!(
+        shell.startup_env().is_none_or(|env| !env.contains(REPORT_TOKEN)),
+        "{name}: the token is in the environment"
+    );
     std::fs::write(shell.home.join("extra"), "export RELOADED=yes\n").unwrap();
     let start = shell.raw.len();
     shell.run(" runode-reload");
     shell.wait_for_bytes("a report after the reload", start, b"\x1b]6973;0123456789abcdef;cwd=");
     shell.run(check);
-    assert_eq!(shell.output(1), "yes gone\n", "{name}");
+    assert_eq!(shell.output(1), "yes gone gone\n", "{name}");
+    let env = shell.startup_env();
+    assert!(
+        env.is_none_or(|env| !env.contains(REPORT_TOKEN)),
+        "{name}: the token is in the environment after the reload"
+    );
 }
 
-const POSIX_RELOAD_CHECK: &str = "echo ${RELOADED-no} ${RUNODE_REPORT_TOKEN-gone}";
+const POSIX_RELOAD_CHECK: &str = "echo ${RELOADED-no} ${RUNODE_REPORT_TOKEN-gone} ${RUNODE_REPORT_TOKEN_FILE-gone}";
 
 /// 集成绑的换 shell 按键在 vi 命令模式里按下（`Session::reload_shell` 就是这么按的）：换成了新 shell，
 /// 行上原来的命令（建出 `bad`）没被执行。`rc` 开 vi 模式、加载 `extra`。
@@ -740,7 +792,8 @@ fn real_fish_cursor_follows_the_prompt() {
 fn real_fish_reloads_with_the_integration() {
     reload_in(
         RealShell::start("fish", "fish-reload", &fish_rc("test -r ~/extra; and source ~/extra\n"), "[f]>", &["[f]>"]),
-        "echo (set -q RELOADED; and echo $RELOADED; or echo no) (set -q RUNODE_REPORT_TOKEN; and echo $RUNODE_REPORT_TOKEN; or echo gone)",
+        "echo (set -q RELOADED; and echo $RELOADED; or echo no) (set -q RUNODE_REPORT_TOKEN; and echo $RUNODE_REPORT_TOKEN; or echo gone) \
+         (set -q RUNODE_REPORT_TOKEN_FILE; and echo $RUNODE_REPORT_TOKEN_FILE; or echo gone)",
     );
 }
 
@@ -838,9 +891,9 @@ fn real_elvish_keeps_what_the_user_rc_defines() {
 /// 用户 rc.elv 里起的程序拿不到口令，交互环境里也没留下读口令用的变量。
 #[test]
 fn real_elvish_rc_programs_do_not_get_the_token() {
-    let rc = elvish_rc("/bin/sh -c 'echo ${RUNODE_REPORT_TOKEN-gone} > ~/seen'\n");
+    let rc = elvish_rc("/bin/sh -c 'echo ${RUNODE_REPORT_TOKEN-gone} ${RUNODE_REPORT_TOKEN_FILE-gone} > ~/seen'\n");
     let Some(mut shell) = RealShell::start("elvish", "elvish-rc-token", &rc, "[e]>", &["[e]>"]) else { return };
-    assert_eq!(std::fs::read_to_string(shell.home.join("seen")).unwrap(), "gone\n");
+    assert_eq!(std::fs::read_to_string(shell.home.join("seen")).unwrap(), "gone gone\n");
     // 变量还在的话打印 `▶ <口令>`，不在是编译错误。
     shell.run("put $runode-token");
     assert!(!shell.output(1).contains('▶'), "{}", shell.screen());
@@ -873,7 +926,8 @@ fn real_elvish_reloads_with_the_integration() {
             &["[e]>"],
         ),
         "echo (if (has-env RELOADED) { put $E:RELOADED } else { put no }) \
-         (if (has-env RUNODE_REPORT_TOKEN) { put $E:RUNODE_REPORT_TOKEN } else { put gone })",
+         (if (has-env RUNODE_REPORT_TOKEN) { put $E:RUNODE_REPORT_TOKEN } else { put gone }) \
+         (if (has-env RUNODE_REPORT_TOKEN_FILE) { put $E:RUNODE_REPORT_TOKEN_FILE } else { put gone })",
     );
 }
 
@@ -889,6 +943,16 @@ fn nushell_rc(extra: &str) -> String {
 fn real_nushell_commands_are_read() {
     let rc = nushell_rc("$env.PROMPT_COMMAND_RIGHT = {|| '<r>' }\n");
     read_commands_from(RealShell::start("nu", "nushell", &rc, "[n]>", &["[n]>", "<r>"]));
+}
+
+/// 用户在 config.nu 里盖掉了 `open`、`rm`（macOS 上常见的 `alias open = ^open`、进废纸篓的 `rm`）也照样
+/// 读得到口令、删掉口令文件：集成脚本在 config.nu 之后加载。
+#[test]
+fn real_nushell_reads_the_token_past_user_overrides() {
+    let rc = nushell_rc("alias open = ^open\ndef rm [...files: string] { print 'trashed' }\n");
+    let Some(mut shell) = RealShell::start("nu", "nushell-overrides", &rc, "[n]>", &["[n]>"]) else { return };
+    shell.wait_for_bytes("a signed report", 0, b"\x1b]6973;0123456789abcdef;cwd=");
+    assert!(!shell.home.join(TOKEN_FILE).exists(), "the token file is left behind");
 }
 
 #[test]
@@ -940,6 +1004,79 @@ fn real_nushell_reloads_with_the_integration() {
             "[n]>",
             &["[n]>"],
         ),
-        "print $\"($env.RELOADED? | default no) ($env.RUNODE_REPORT_TOKEN? | default gone)\"",
+        "print $\"($env.RELOADED? | default no) ($env.RUNODE_REPORT_TOKEN? | default gone) ($env.RUNODE_REPORT_TOKEN_FILE? | default gone)\"",
     );
+}
+
+/// 早先版本的 `runode-reload` 直接经环境变量 `RUNODE_REPORT_TOKEN` 交口令：升级后在旧 shell 里换 shell 时，
+/// 新的集成照样认这个口令；它自己再换 shell 时改交文件，新 shell 启动时的环境里没有口令。
+fn legacy_token_in(shell: Option<RealShell>) {
+    let Some(mut shell) = shell else { return };
+    let name = shell.name.clone();
+    shell.wait_for_bytes("a report with the legacy token", 0, b"\x1b]6973;0123456789abcdef;cwd=");
+    let start = shell.raw.len();
+    shell.run(" runode-reload");
+    shell.wait_for_bytes("a report after the reload", start, b"\x1b]6973;0123456789abcdef;cwd=");
+    let env = shell.startup_env();
+    assert!(
+        env.is_none_or(|env| !env.contains(REPORT_TOKEN)),
+        "{name}: the token is in the environment after the reload"
+    );
+}
+
+#[test]
+fn real_shells_take_the_token_from_an_old_reload() {
+    let start =
+        |shell, name, rc: &str, prompt, idle| RealShell::start_handing_token(shell, name, rc, prompt, idle, true);
+    legacy_token_in(start("zsh", "zsh-legacy", "PROMPT='[z]%% '\n", "[z]%", &["[z]%"]));
+    legacy_token_in(start("bash", "bash-legacy", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]));
+    legacy_token_in(start("fish", "fish-legacy", &fish_rc(""), "[f]>", &["[f]>"]));
+    legacy_token_in(start("elvish", "elvish-legacy", &elvish_rc(""), "[e]>", &["[e]>"]));
+    legacy_token_in(start("nu", "nushell-legacy", &nushell_rc(""), "[n]>", &["[n]>"]));
+}
+
+/// 用户开着命令跟踪（zsh 的 xtrace、bash 的 set -x、fish 的 fish_trace）：跟踪打到屏幕上的命令行里没有
+/// 口令，换 shell 以后也没有，口令只出现在集成发的报告里。`traced` 是跟踪打出的 `echo hi` 那一行的一部分。
+fn trace_hides_the_token(shell: Option<RealShell>, traced: &str) {
+    let Some(mut shell) = shell else { return };
+    let name = shell.name.clone();
+    shell.run("echo hi");
+    assert!(shell.screen().contains(traced), "{name}: not traced: {}", shell.screen());
+    let start = shell.raw.len();
+    shell.run(" runode-reload");
+    shell.wait_for_bytes("a report after the reload", start, b"\x1b]6973;0123456789abcdef;cwd=");
+    shell.run("echo hi");
+    let raw = &shell.raw;
+    let leaked = (0..raw.len())
+        .filter(|&i| raw[i..].starts_with(REPORT_TOKEN.as_bytes()))
+        .any(|i| !raw[..i].ends_with(b"\x1b]6973;"));
+    assert!(!leaked, "{name}: the token is traced: {}", shell.screen());
+}
+
+#[test]
+fn real_zsh_xtrace_hides_the_token() {
+    let rc = "PROMPT='[z]%% '\nsetopt xtrace\n";
+    trace_hides_the_token(RealShell::start("zsh", "zsh-xtrace", rc, "[z]%", &["[z]%"]), "> echo hi");
+}
+
+#[test]
+fn real_bash_xtrace_hides_the_token() {
+    let rc = "PS1='[b]\\$ '\nset -x\n";
+    trace_hides_the_token(RealShell::start("bash", "bash-xtrace", rc, "[b]$", &["[b]$"]), "+ echo hi");
+}
+
+/// 跟踪另接到一个描述符上（`BASH_XTRACEFD`）时也一样。它 4.1 起才有，`local -` 4.4 起才有。
+#[test]
+fn real_bash_xtrace_to_its_own_fd_hides_the_token() {
+    if !bash_at_least(4, 4) {
+        return;
+    }
+    let rc = "PS1='[b]\\$ '\nexec 5>&2\nBASH_XTRACEFD=5\nset -x\n";
+    trace_hides_the_token(RealShell::start("bash", "bash-xtracefd", rc, "[b]$", &["[b]$"]), "+ echo hi");
+}
+
+#[test]
+fn real_fish_trace_hides_the_token() {
+    let rc = fish_rc("set -g fish_trace 1\n");
+    trace_hides_the_token(RealShell::start("fish", "fish-trace", &rc, "[f]>", &["[f]>"]), "> echo hi");
 }

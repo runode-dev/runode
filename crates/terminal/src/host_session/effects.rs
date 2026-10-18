@@ -78,9 +78,9 @@ pub(super) struct Effects {
 /// 不用：伪造的命令会让 `runode wait` 这类等命令的前端以为命令跑完了。
 ///
 /// 任何打印到终端的内容（`cat` 一个文件、ssh 远端的输出）都能写出这样的序列，而报告的 PATH
-/// 会被界面拿去找命令行工具（gh）来跑，所以只认带着本 shell 口令的报告。口令只留在 shell 自己的变量里，子进程的
-/// 环境里没有，在 shell 里运行的程序打印不出它。只看是否处在提示符状态挡不住伪造：输出里可以先
-/// 伪造一个 OSC 133;D。
+/// 会被界面拿去找命令行工具（gh）来跑，所以只认带着本 shell 口令的报告。口令经一个用完就删的文件交给 shell（不经
+/// 环境变量，见 `shell_integration::prepare`），之后只留在 shell 自己不导出的变量里，在 shell 里运行的
+/// 程序正常拿不到它。只看是否处在提示符状态挡不住伪造：输出里可以先伪造一个 OSC 133;D。
 pub(super) const SHELL_REPORT: &[u8] = super::redact::REPORT_START.split_at(2).1;
 
 impl Effects {

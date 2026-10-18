@@ -19,8 +19,8 @@
 #   cursor:blink、cursor:steady  提示符上把光标换成竖线（闪或不闪），跑命令前用 CSI 0 SP q 换回
 #                配置的样式；用户自己配了 $env.config.cursor_shape 时不管
 #
-# 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的。runode 只认带着这个
-# 口令的 6973 报告，屏幕上的别的输出伪造不了。
+# 口令是 runode 启动这个 shell 时随机生成、经 RUNODE_REPORT_TOKEN_FILE 指着的文件给的。runode 只认带着
+# 这个口令的 6973 报告，屏幕上的别的输出伪造不了。
 #
 # runode 把这个文件所在的数据目录加进 XDG_DATA_DIRS，nushell 读完用户的 config.nu 以后自动加载
 # vendor/autoload 里的脚本。先把加进去的那一项去掉，免得在这个 shell 里启动的程序继承它。
@@ -34,10 +34,21 @@ if ($env.RUNODE_NU_DATA_DIR? | default "") != "" and 'XDG_DATA_DIRS' in $env {
     }
 }
 
-# 口令、功能和数据目录读进 $env.__runode 后从环境里删掉。它的值是记录，nushell 不把它交给子进程，
-# 这个 shell 里运行的程序拿不到口令；runode-reload 再经环境变量交给新的 nushell。
+# 口令、功能和数据目录读进 $env.__runode 后从环境里删掉，口令文件读完也删掉。它的值是记录，nushell
+# 不把它交给子进程，这个 shell 里运行的程序拿不到口令；runode-reload 再写一个文件交给新的 nushell。
+# 口令不能直接放进环境变量：进程启动时的环境（ps -E）同一用户的程序都读得到，hide-env 也改不掉。
+# 早先版本的 runode-reload 直接给 RUNODE_REPORT_TOKEN，升级后在旧 shell 里换 shell 时照样认。
 $env.__runode = {
-    token: ($env.RUNODE_REPORT_TOKEN? | default "")
+    token: (if ($env.RUNODE_REPORT_TOKEN_FILE? | default "") != "" {
+        let file = $env.RUNODE_REPORT_TOKEN_FILE
+        # 用外部命令：这个脚本在用户的 config.nu 之后加载，用户的 alias、def（比如 `alias open = ^open`）
+        # 会盖住同名的内建命令。
+        let token = try { ^cat $file | str trim } catch { "" }
+        ^rm -f -- $file
+        $token
+    } else {
+        $env.RUNODE_REPORT_TOKEN? | default ""
+    })
     features: ($env.RUNODE_SHELL_FEATURES? | default "" | split row "," | where $it != "")
     data_dir: ($env.RUNODE_NU_DATA_DIR? | default "")
     path: null
@@ -46,7 +57,7 @@ $env.__runode = {
     # 那条命令的退出码，见 pre_prompt。
     status: 0
 }
-hide-env -i RUNODE_REPORT_TOKEN RUNODE_SHELL_FEATURES RUNODE_NU_DATA_DIR
+hide-env -i RUNODE_REPORT_TOKEN RUNODE_REPORT_TOKEN_FILE RUNODE_SHELL_FEATURES RUNODE_NU_DATA_DIR
 
 # runode 的提示符、输入和输出的边界全靠 nushell 自己的 OSC 133。
 $env.config.shell_integration.osc133 = true
@@ -114,8 +125,8 @@ $env.config.hooks.pre_execution = ($env.config.hooks.pre_execution? | default []
 })
 
 # 换成一个新的 nushell，重新读用户配置，接上集成：数据目录照 runode 启动时那样加回 XDG_DATA_DIRS，
-# 口令和功能经环境变量交回去，runode 照样认得新 shell 的报告。换之前报告这条命令执行完了：exec 之后
-# 不会再有它的 133;D。
+# 口令写进新的临时文件（mktemp 建的只有自己能读写），和功能一起经环境变量交回去，runode 照样认得新
+# shell 的报告。换之前报告这条命令执行完了：exec 之后不会再有它的 133;D。
 def --env runode-reload [] {
     let state = $env.__runode? | default {}
     if ($state.data_dir? | default "") != "" {
@@ -125,7 +136,11 @@ def --env runode-reload [] {
         $env.RUNODE_NU_DATA_DIR = $state.data_dir
     }
     if ($state.token? | default "") != "" {
-        $env.RUNODE_REPORT_TOKEN = $state.token
+        try {
+            let file = mktemp
+            $"($state.token)\n" | save -f $file
+            $env.RUNODE_REPORT_TOKEN_FILE = $file
+        }
     }
     $env.RUNODE_SHELL_FEATURES = $state.features? | default [] | str join ","
     if ($state.token? | default "") != "" {

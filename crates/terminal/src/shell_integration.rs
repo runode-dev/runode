@@ -37,13 +37,21 @@ const NUSHELL_CONF: &str = include_str!("../shell-integration/nushell/runode.nu"
 /// 按 `features`（见 `features`）。集成脚本写不出来或认不出 shell 时照常以登录 shell 启动，不注入。
 /// `mode` 指定了种类而 `program` 认得出是另一种 shell 时，按程序名认出的那种注入。
 ///
-/// 注入了集成时返回这个 shell 的报告口令：随机生成，经环境变量 `RUNODE_REPORT_TOKEN` 交给
-/// 集成脚本，脚本读进不导出的变量后马上从环境里删掉，子进程继承不到。shell 报告 PATH 等信息时
-/// 带上它，终端据此认出报告确实来自这个 shell，而不是被打印到屏幕上的别的输出伪造的。没注入
-/// 或者生成不了口令时为 `None`，这时脚本不发报告。
-pub fn prepare(mode: IntegrationMode, program: &str, features: &str, cmd: &mut CommandBuilder) -> Option<String> {
+/// 注入了集成时返回这个 shell 的报告口令和装着它的文件（见 `write_token_file`）。口令随机生成，
+/// shell 报告 PATH 等信息时带上它，终端据此认出报告确实来自这个 shell，而不是被打印到屏幕上的
+/// 别的输出伪造的。口令本身不放进环境变量：macOS 的 `ps -E`、Linux 的 `/proc/<pid>/environ` 读的
+/// 是进程启动时的环境，脚本事后删掉变量也改不掉，同一用户的任何程序都读得到。环境里只给文件的
+/// 路径（`RUNODE_REPORT_TOKEN_FILE`），集成脚本读出口令后马上删掉文件和这个变量；shell 没读就退出
+/// 时由 `Pty` 删。没注入、生成不了口令或者写不出文件时为 `None`，这时脚本不发报告。
+pub fn prepare(
+    dirs: &runode_paths::Dirs,
+    mode: IntegrationMode,
+    program: &str,
+    features: &str,
+    cmd: &mut CommandBuilder,
+) -> Option<(String, PathBuf)> {
     let shell = resolve(mode, program);
-    let dir = shell.and_then(|_| match install(&runode_paths::Dirs::from_env()) {
+    let dir = shell.and_then(|_| match install(dirs) {
         Ok(dir) => Some(dir),
         Err(err) => {
             tracing::warn!("shell integration unavailable: {err}");
@@ -94,8 +102,50 @@ pub fn prepare(mode: IntegrationMode, program: &str, features: &str, cmd: &mut C
     }
     cmd.env("RUNODE_SHELL_FEATURES", features);
     let token = report_token()?;
-    cmd.env("RUNODE_REPORT_TOKEN", &token);
-    Some(token)
+    let file = match write_token_file(dirs, &token) {
+        Ok(file) => file,
+        Err(err) => {
+            tracing::warn!("shell reports disabled, cannot hand over the token: {err}");
+            return None;
+        }
+    };
+    cmd.env("RUNODE_REPORT_TOKEN_FILE", &file);
+    Some((token, file))
+}
+
+/// 把 `token` 写进运行时目录（只有自己能进）里一个新建的、只有自己能读的文件，返回它的路径。
+/// 文件名另取随机数，免得被人抢先建好同名文件或者猜着去读。
+fn write_token_file(dirs: &runode_paths::Dirs, token: &str) -> io::Result<PathBuf> {
+    use std::{io::Write as _, os::unix::fs::OpenOptionsExt as _};
+    let name = report_token().ok_or_else(|| io::Error::other("no random file name"))?;
+    let dir = dirs.create_runtime_dir()?;
+    remove_stale_token_files(&dir);
+    let path = dir.join(format!("report-token-{name}"));
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+    if let Err(err) = writeln!(file, "{token}") {
+        let _ = std::fs::remove_file(&path);
+        return Err(err);
+    }
+    Ok(path)
+}
+
+/// 删掉 `dir` 里一天前写下的口令文件。shell 启动时就读、读完就删，还在的是没人会读的了：集成脚本没跑到
+/// 那一步（比如用户配置里先 exec 了别的程序）的会话交接给了新宿主，没人记着它的文件；宿主崩溃时也会留下。
+fn remove_stale_token_files(dir: &Path) {
+    const STALE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry.file_name().to_string_lossy().starts_with("report-token-")
+            && entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|at| at.elapsed().is_ok_and(|age| age > STALE));
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// 按 `mode` 定给 `program` 注入哪种 shell 的集成，不注入时为 `None`。指定的种类只对认不出程序名的
@@ -215,9 +265,36 @@ mod tests {
         let mut cmd = CommandBuilder::new("/bin/zsh");
         // CommandBuilder 带着本进程的环境，测试本身跑在 runode 的终端里时那里可能也有这两个变量。
         cmd.env_clear();
-        assert_eq!(prepare(IntegrationMode::Off, "/bin/zsh", "cursor:steady", &mut cmd), None);
-        assert_eq!(cmd.get_env("RUNODE_REPORT_TOKEN"), None);
+        let dirs = runode_paths::Dirs::default();
+        assert_eq!(prepare(&dirs, IntegrationMode::Off, "/bin/zsh", "cursor:steady", &mut cmd), None);
+        assert_eq!(cmd.get_env("RUNODE_REPORT_TOKEN_FILE"), None);
         assert_eq!(cmd.get_env("RUNODE_SHELL_FEATURES"), None);
+    }
+
+    /// 口令不进环境变量（启动时的环境同一用户的程序都读得到），只交一个只有自己能读的文件。
+    #[test]
+    fn the_token_is_handed_over_in_a_private_file_not_the_environment() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let home = std::env::temp_dir().join(format!("runode-shell-integration-token-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let dirs = runode_paths::Dirs::from_vars(|key| (key == "HOME").then(|| home.clone().into()));
+        let mut cmd = CommandBuilder::new("/bin/zsh");
+        cmd.env_clear();
+        let (token, file) = prepare(&dirs, IntegrationMode::Detect, "/bin/zsh", "", &mut cmd).unwrap();
+        for (key, value) in cmd.iter_extra_env_as_str() {
+            assert!(!value.contains(&token), "{key} carries the token");
+        }
+        assert_eq!(cmd.get_env("RUNODE_REPORT_TOKEN_FILE"), Some(file.as_os_str()));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{token}\n"));
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::metadata(file.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+        // 一天前没人读的口令文件下次写时清掉，刚写的留着。
+        let stale = file.with_file_name("report-token-stale");
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 60 * 60);
+        std::fs::File::create(&stale).unwrap().set_modified(old).unwrap();
+        let (_, second) = prepare(&dirs, IntegrationMode::Detect, "/bin/zsh", "", &mut cmd).unwrap();
+        assert!(!stale.exists() && file.exists() && second.exists());
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

@@ -26,8 +26,9 @@
 #   cursor:blink、cursor:steady  提示符上把光标换成竖线（闪或不闪），vi 命令模式和可视模式里是
 #                方块，跑命令前用 CSI 0 SP q 换回配置的样式
 #
-# 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的，集成目录里的
-# .zshenv 最先把它读进不导出的 _runode_report_token 并从环境里删掉。runode 只认带着这个口令的
+# 口令是 runode 启动这个 shell 时随机生成、经 RUNODE_REPORT_TOKEN_FILE 指着的文件给的，集成目录里的
+# .zshenv 最先把它读进不导出的 _runode_report_token，删掉文件和环境变量。用到口令的函数开头都关掉
+# xtrace：开着时 zsh 把展开后的命令行（带着口令）当普通文字打到屏幕上。runode 只认带着这个口令的
 # 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec zsh 或者在里面再开
 # 一层 zsh，新的 shell 拿不到口令，runode 就沿用之前报告的内容。
 #
@@ -67,6 +68,7 @@ _runode_save_status() {
 
 # 排在 precmd 钩子的最后面，别的钩子改完 PS1 之后再加标记。
 _runode_precmd() {
+    'builtin' 'setopt' localoptions noxtrace
     if [[ -n $_runode_ran ]]; then
         _runode_command_end $_runode_last_status
         _runode_ran=
@@ -114,6 +116,7 @@ _runode_precmd() {
 # 数字开头、由字母数字和 `_.:+@,=-` 组成的名字：用不着逐字编码，名字之间写 %20 就是百分号编码，
 # 也顺带滤掉补全系统和 runode 自己以 `_` 开头的内部函数。全是 zsh 内部的展开，不起子进程。
 _runode_report_names() {
+    'builtin' 'setopt' localoptions noxtrace
     [[ -n ${_runode_report_token-} ]] || 'builtin' 'return' 0
     'builtin' 'emulate' -L zsh -o extended_glob
     'builtin' 'local' raw=${(j: :)${(k)functions}} joined
@@ -183,6 +186,7 @@ _runode_hook_zle() {
 # $1 是用户输入的命令原文，放在带口令的 command 报告里；拿不到时报告的原文为空，终端从屏幕上
 # 读。没有口令时只报告命令开始，runode 不把它报告给等命令的前端。
 _runode_preexec() {
+    'builtin' 'setopt' localoptions noxtrace
     if [[ -n ${_runode_report_token-} ]]; then
         'builtin' 'local' REPLY=
         # 逐字编码的耗时随长度平方涨，粘贴的长命令不编码，原文留空。
@@ -197,6 +201,7 @@ _runode_preexec() {
 
 # 报告命令执行完了，退出码是 $1；有口令时前面先发带口令的 end 报告，runode 才认这个 133;D。
 _runode_command_end() {
+    'builtin' 'setopt' localoptions noxtrace
     if [[ -n ${_runode_report_token-} ]]; then
         'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;end="$'\a\e]133;D;'"$1"$'\a'
     else
@@ -237,11 +242,12 @@ _runode_bind_reload_key() {
 }
 
 # 换成一个新的 zsh，重新读用户配置，接上集成：ZDOTDIR 指回集成目录，现在的 ZDOTDIR 经
-# RUNODE_ZSH_ZDOTDIR 交给集成目录里的 .zshenv 还原；口令和功能经环境变量交回去，runode 照样认得
-# 新 shell 的报告。换之前把这个 shell 的历史写进文件，再报告这条命令执行完了：exec 之后不会再有
-# 它的 133;D。
+# RUNODE_ZSH_ZDOTDIR 交给集成目录里的 .zshenv 还原；口令写进新的临时文件（mktemp 建的只有自己能
+# 读写），和功能一起经环境变量交回去，runode 照样认得新 shell 的报告。换之前把这个 shell 的历史写进
+# 文件，再报告这条命令执行完了：exec 之后不会再有它的 133;D。
 runode-reload() {
     'builtin' 'emulate' -L zsh
+    'builtin' 'setopt' localoptions noxtrace
     # 启动这个 shell 的程序；登录 shell 的 argv[0] 可能带着开头的 -，或者只是个名字。
     'builtin' 'local' zsh=${ZSH_ARGZERO#-}
     [[ $zsh == */* ]] || zsh=${commands[$zsh]-}
@@ -249,7 +255,11 @@ runode-reload() {
     'builtin' 'local' -a vars
     vars=(ZDOTDIR=$_runode_dir RUNODE_SHELL_FEATURES=${_runode_features-})
     (( ${+ZDOTDIR} )) && vars+=(RUNODE_ZSH_ZDOTDIR=$ZDOTDIR)
-    [[ -z ${_runode_report_token-} ]] || vars+=(RUNODE_REPORT_TOKEN=$_runode_report_token)
+    'builtin' 'local' file
+    if [[ -n ${_runode_report_token-} ]] && file=$('command' 'mktemp' 2>/dev/null) &&
+        'builtin' 'print' -r -- $_runode_report_token >| $file; then
+        vars+=(RUNODE_REPORT_TOKEN_FILE=$file)
+    fi
     'builtin' 'fc' -AI 2>/dev/null
     _runode_command_end 0
     _runode_ran=

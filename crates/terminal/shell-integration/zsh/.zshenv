@@ -4,13 +4,18 @@
 #
 # 这个文件可能在别名生效时被读取，命令都加了引号，免得被别名替换。
 
-# runode 给的报告口令最先读进不导出的变量，再从环境里删掉：后面加载用户配置时启动的程序，以及
-# 这个 shell 里运行的所有程序都继承不到它。集成脚本报告 PATH 等信息时带上它，见集成脚本
-# 开头的说明。
-if [[ -n "${RUNODE_REPORT_TOKEN-}" ]]; then
+# runode 给的报告口令最先读进不导出的变量，集成脚本报告 PATH 等信息时带上它，见集成脚本开头的
+# 说明。口令在一个只有自己能读的文件里，环境变量 RUNODE_REPORT_TOKEN_FILE 给出路径，读完马上删掉
+# 文件和变量：口令不能直接放进环境变量，进程启动时的环境（ps -E）同一用户的程序都读得到，unset 也
+# 改不掉。早先版本的 runode-reload 直接给 RUNODE_REPORT_TOKEN，升级后在旧 shell 里换 shell 时照样认。
+if [[ -n "${RUNODE_REPORT_TOKEN_FILE-}" ]]; then
+    'builtin' 'typeset' -g +x _runode_report_token=
+    { 'builtin' 'read' -r _runode_report_token < "$RUNODE_REPORT_TOKEN_FILE" } 2>/dev/null
+    'command' 'rm' -f -- "$RUNODE_REPORT_TOKEN_FILE"
+elif [[ -n "${RUNODE_REPORT_TOKEN-}" ]]; then
     'builtin' 'typeset' -g +x _runode_report_token="$RUNODE_REPORT_TOKEN"
 fi
-'builtin' 'unset' 'RUNODE_REPORT_TOKEN'
+'builtin' 'unset' 'RUNODE_REPORT_TOKEN' 'RUNODE_REPORT_TOKEN_FILE'
 # 集成脚本另外开哪些功能也一样读进不导出的变量，见集成脚本里的 cursor。
 'builtin' 'typeset' -g +x _runode_features="${RUNODE_SHELL_FEATURES-}"
 'builtin' 'unset' 'RUNODE_SHELL_FEATURES'

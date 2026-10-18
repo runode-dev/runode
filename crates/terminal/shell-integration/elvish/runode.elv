@@ -23,21 +23,33 @@
 #   cursor:blink、cursor:steady  提示符上把光标换成竖线（闪或不闪），跑命令前用 CSI 0 SP q 换回
 #                配置的样式
 #
-# 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的。runode 只认带着这个
-# 口令的 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告。
+# 口令是 runode 启动这个 shell 时随机生成、经 RUNODE_REPORT_TOKEN_FILE 指着的文件给的。runode 只认带着
+# 这个口令的 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告。
 #
 # elvish 不会自动加载别的脚本，runode 用 `-rc` 让它读这个文件，这里先照 elvish 自己的规矩加载用户的
 # rc.elv，定义的变量、函数和模块照样留在交互环境里，再接上集成。runode-reload 用同一个 elvish 程序
 # 和同一个 rc 换掉当前的 shell（exec），重新读用户配置。
 
+use file
 use os
 use re
 use str
 use runtime
 
-# 口令和功能最先读进变量，再从环境里删掉：加载用户 rc.elv 时启动的程序，以及这个 shell 里运行的
-# 所有程序都继承不到它。集成那一块拷进自己的局部变量后，最后把这两个删掉。
+# 口令和功能最先读进变量，删掉口令文件和环境变量：加载用户 rc.elv 时启动的程序，以及这个 shell 里
+# 运行的所有程序都拿不到口令。口令不能直接放进环境变量：进程启动时的环境（ps -E）同一用户的程序都
+# 读得到，unset-env 也改不掉。早先版本的 runode-reload 直接给 RUNODE_REPORT_TOKEN，升级后在旧 shell 里
+# 换 shell 时照样认。集成那一块拷进自己的局部变量后，最后把这两个变量删掉。
 var runode-token = $E:RUNODE_REPORT_TOKEN
+if (has-env RUNODE_REPORT_TOKEN_FILE) {
+  try {
+    set runode-token = (str:trim-space (slurp < $E:RUNODE_REPORT_TOKEN_FILE))
+  } catch {
+    set runode-token = ''
+  }
+  try { os:remove $E:RUNODE_REPORT_TOKEN_FILE } catch { }
+  unset-env RUNODE_REPORT_TOKEN_FILE
+}
 var runode-features = [(str:split , $E:RUNODE_SHELL_FEATURES)]
 unset-env RUNODE_REPORT_TOKEN
 unset-env RUNODE_SHELL_FEATURES
@@ -153,11 +165,17 @@ unset-env RUNODE_SHELL_FEATURES
   set edit:after-readline = (conj $edit:after-readline $after-readline~)
   set edit:after-command = (conj $edit:after-command $after-command~)
 
-  # 换成一个新的 elvish，重新读用户配置，接上集成：口令和功能经环境变量交回去，runode 照样认得新
-  # shell 的报告。换之前报告这条命令执行完了：exec 之后不会再有它的 133;D。
+  # 换成一个新的 elvish，重新读用户配置，接上集成：口令写进新的临时文件（只有自己能读写），和功能一起
+  # 经环境变量交回去，runode 照样认得新 shell 的报告。换之前报告这条命令执行完了：exec 之后不会再有
+  # 它的 133;D。
   edit:add-var runode-reload~ {
     if (!=s $token '') {
-      set-env RUNODE_REPORT_TOKEN $token
+      try {
+        var f = (os:temp-file)
+        echo $token > $f[name]
+        file:close $f
+        set-env RUNODE_REPORT_TOKEN_FILE $f[name]
+      } catch { }
     }
     set-env RUNODE_SHELL_FEATURES (str:join , $features)
     report end ''
