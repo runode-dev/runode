@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         let notifications = SystemPushNotifications()
         let app = AppModel(dependencies: AppComposition.dependencies(notifications: notifications))
         notifications.onOpen = { [weak app] link in app?.open(link) }
+        notifications.shows = { [weak app] link in app?.showsNotification(for: link) ?? true }
         self.notifications = notifications
         self.app = app
         super.init()

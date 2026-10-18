@@ -17,6 +17,9 @@ public struct MachineRecord: Hashable, Sendable, Codable, Identifiable {
     /// 配对时宿主发的设备编号。
     public var deviceId: String
     public var pairedAt: Date
+    /// 用户删掉了它、电脑那边却还没注销这部手机的推送时，记着删掉的时刻：列表里不再显示，私钥留着，下次
+    /// 连上注销好了再真删。为空时没删。
+    public var deletedAt: Date?
 
     public init(
         id: UUID = UUID(), name: String, hostName: String, fingerprint: CertificateFingerprint, port: UInt16,

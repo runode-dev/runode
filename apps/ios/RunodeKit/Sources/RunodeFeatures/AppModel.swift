@@ -116,7 +116,7 @@ public final class AppModel {
             enabled: settings.preferences.alertsBlockedAgents)
         recent = dependencies.recents.load()
         savedTheme = dependencies.themes.load()
-        machineList.willDelete = { [weak self] id in await self?.forget(machine: id) }
+        machineList.willDelete = { [weak self] id in await self?.forget(machine: id) ?? true }
         machineList.didLoad = { [weak self] in self?.syncConnections() }
         settings.deviceNameDidChange = { [weak self] name in self?.deviceNameChanged(name) }
         settings.alertsDidChange = { [weak self] enabled in self?.push.enabled = enabled }
@@ -238,7 +238,8 @@ public final class AppModel {
 
     public func sessionList(for machineId: UUID) -> SessionListModel? {
         if let existing = sessionLists[machineId] { return existing }
-        guard let machine = machineList.machine(machineId) else { return nil }
+        guard let machine = machineList.machine(machineId) ?? machineList.leaving.first(where: { $0.id == machineId })
+        else { return nil }
         let model = SessionListModel(machine: machine, link: dependencies.makeLink(machine))
         model.onSpawned = { [weak self] session in self?.openTerminal(machine: machineId, session: session) }
         model.onThemeChanged = { [weak self] in self?.saveTheme() }
@@ -319,6 +320,13 @@ public final class AppModel {
         switch event {
         case .ready:
             push.connected(list.machine, link: list.link)
+            if list.machine.deletedAt != nil {
+                Task { [weak self] in await self?.finishDeleting(machine: id) }
+            }
+        case .state(.failed(.rejected(.unknownDevice))) where list.machine.deletedAt != nil:
+            // 电脑那边撤销了这部手机，撤销时连推送登记一起删了，用不着再注销；不再连了，留着只剩一把私钥。
+            push.disconnected(id)
+            Task { [weak self] in await self?.machineList.purge(id) }
         case .state(let state) where !state.isConnected:
             push.disconnected(id)
         case .message(let message):
@@ -381,7 +389,8 @@ public final class AppModel {
     /// 配对过的电脑变了（配对、改名、删除之后重新读了列表）：每台都有一条连接，删掉的断开，改了
     /// 名字的换上新记录。
     private func syncConnections() {
-        let machines = machineList.machines
+        // 删掉了、还没注销推送的也连着，连上了好注销。
+        let machines = machineList.machines + machineList.leaving
         let present = Set(machines.map(\.id))
         for (id, list) in sessionLists where !present.contains(id) {
             list.stop()
@@ -428,12 +437,25 @@ public final class AppModel {
         }
     }
 
-    /// 要删掉的电脑：先退出它的页面；连着的话注销推送，等电脑回话（最多两秒）再断开连接。
-    private func forget(machine id: UUID) async {
+    /// 要删掉的电脑：先退出它的页面；连着的话注销推送，等电脑回话（最多两秒）再断开连接。电脑那边注销好了
+    /// 时为真。
+    private func forget(machine id: UUID) async -> Bool {
         path.removeAll { $0.machine == id }
-        await push.unregister(id, timeout: .seconds(2))
+        let unregistered = await push.unregister(id, timeout: .seconds(2))
         push.forget(id)
         sessionLists[id]?.stop()
         sessionLists[id] = nil
+        return unregistered
+    }
+
+    /// 删掉时没注销成推送的电脑（`MachineRecord.deletedAt`）又连上了：注销好了才真删掉。
+    private func finishDeleting(machine id: UUID) async {
+        guard await push.unregister(id, timeout: .seconds(5)) else { return }
+        await machineList.purge(id)
+    }
+
+    /// App 在前台时这条通知弹不弹：删掉了的、不认识的电脑的不弹。电脑列表还没读进来时照弹。
+    public func showsNotification(for link: SessionLink) -> Bool {
+        !machineList.loaded || machineList.machine(link.machine) != nil
     }
 }

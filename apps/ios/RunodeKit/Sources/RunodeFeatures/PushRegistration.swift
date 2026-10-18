@@ -159,6 +159,8 @@ public final class PushRegistration {
     /// 这台电脑连上了（`HostEvent.ready`）：登记一次；打开着提醒时先看系统还允不允许发通知，有了结果再登记。
     func connected(_ machine: MachineRecord, link: any HostLink) {
         peers[machine.id] = Peer(name: machine.name, link: link)
+        // 删掉了、等着注销的（见 `unregister`），连上了也不再登记。
+        if machine.deletedAt != nil { leaving.insert(machine.id) }
         if enabled {
             authorize(registering: [machine.id])
         } else {
@@ -181,13 +183,17 @@ public final class PushRegistration {
     }
 
     /// 这台电脑要删掉了：连着的话先注销，等电脑回话（最多 `timeout`）再返回，免得删掉以后电脑上的 agent
-    /// 等回答时还往这部手机推它的提醒，点开又找不到这台电脑。没连着时马上返回。
-    func unregister(_ id: UUID, timeout: Duration) async {
+    /// 等回答时还往这部手机推它的提醒，点开又找不到这台电脑。电脑注销好了或者从来不登记推送时为真；电脑
+    /// 回错（写不了设备表，登记还在）、没回话时为假，没连着时马上返回假。
+    func unregister(_ id: UUID, timeout: Duration) async -> Bool {
         leaving.insert(id)
-        guard peers[id] != nil else { return }
+        guard system != nil, identity != nil else { return true }
+        guard peers[id] != nil else { return false }
+        statuses[id] = nil
         register(id, unregistering: true, timeout: timeout)
         // 回话到了（`handle`）、断开了（`disconnected`）或者超时，等回话的任务都会结束。
         await pending[id]?.task.value
+        return statuses[id] == .registered
     }
 
     /// 这台电脑删掉了：连它的结果一起忘掉。
@@ -290,6 +296,8 @@ public final class PushRegistration {
     {
         /// 点开了一条等回答的通知。
         public var onOpen: @MainActor (SessionLink) -> Void = { _ in }
+        /// App 在前台时这条通知弹不弹，见 `AppModel.showsNotification(for:)`。
+        public var shows: @MainActor (SessionLink) -> Bool = { _ in true }
         private let tokens: AsyncStream<Data>
         private let tokenSink: AsyncStream<Data>.Continuation
         private let failures: AsyncStream<String>
@@ -347,7 +355,8 @@ public final class PushRegistration {
         public func userNotificationCenter(
             _ center: UNUserNotificationCenter, willPresent notification: UNNotification
         ) async -> UNNotificationPresentationOptions {
-            [.banner, .list, .sound]
+            if let link = SessionLink(userInfo: notification.request.content.userInfo), !shows(link) { return [] }
+            return [.banner, .list, .sound]
         }
 
         // 跟着类在主线程上跑：系统交来的完成回调在方法返回的地方调，UIKit 收到后马上更新 App 快照，不在

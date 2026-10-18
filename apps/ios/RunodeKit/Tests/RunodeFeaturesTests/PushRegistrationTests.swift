@@ -184,7 +184,7 @@ private let secondToken = Data([0x01, 0x02])
         #expect(link.registrations.last?.token == nil)
         let req = try #require(link.registrations.last?.req)
         push.handle(.done(req: req), from: machine.id)
-        await leaving.value
+        #expect(await leaving.value)
         #expect(push.statuses[machine.id] == .registered)
     }
 
@@ -308,13 +308,15 @@ private let secondToken = Data([0x01, 0x02])
     let link = FakeLink()
     let system = FakePushNotifications()
     let preferences = DefaultsStore<AppPreferences>("preferences", defaults: .temporary())
+    let store = MemoryMachineStore()
+    let keys = MemoryDeviceKeyStore()
 
     func app(load: Bool = true) async -> AppModel {
-        let store = MemoryMachineStore()
         await store.upsert(machine)
+        try? keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: machine.id)
         let link = self.link
         var dependencies = AppDependencies(
-            store: store, keyStore: MemoryDeviceKeyStore(), pairing: FakePairing { _ in machineRecord() },
+            store: store, keyStore: keys, pairing: FakePairing { _ in machineRecord() },
             makeLink: { _ in link }, deviceName: "测试 iPhone", preferences: preferences)
         dependencies.notifications = system
         dependencies.pushIdentity = pushIdentity
@@ -382,14 +384,54 @@ private let secondToken = Data([0x01, 0x02])
         #expect(app.push.statuses[machine.id] == nil)
     }
 
-    /// 没连着的电脑删掉时不发注销，也不等。
-    @Test func deletingADisconnectedMachineDoesNotWait() async throws {
+    /// 没连着的电脑删掉时不发注销，也不等；记录和私钥留着，下次连上时只注销、不登记，电脑回了话才真删。
+    @Test func aDisconnectedMachineIsUnregisteredWhenItConnects() async throws {
         let app = await app()
         system.give(token: Data([0xab]))
         #expect(await eventually { app.push.token == "ab" })
         await app.machineList.delete(machine.id)
         #expect(app.machineList.machines.isEmpty)
         #expect(link.registrations.isEmpty)
+        #expect(try keys.key(for: machine.id) != nil)
+        #expect(!app.showsNotification(for: SessionLink(machine: machine.id, session: "1")))
+        let list = try #require(app.sessionList(for: machine.id))
+        connect(list)
+        #expect(await eventually { link.registrations.count == 1 })
+        #expect(link.registrations.first?.token == nil)
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(link.registrations.count == 1)
+        let req = try #require(link.registrations.first?.req)
+        list.handle(.message(.done(req: req)))
+        #expect(await eventually { app.machineList.leaving.isEmpty })
+        #expect(await store.all().isEmpty)
+        #expect(try keys.key(for: machine.id) == nil)
+    }
+
+    /// 删掉没连着的电脑后，连上时电脑回错（登记还在）：照样留着等下次；电脑撤销了这部手机：直接真删。
+    @Test func aLeavingMachineStaysUntilItIsReallyUnregistered() async throws {
+        let app = await app()
+        system.give(token: Data([0xab]))
+        #expect(await eventually { app.push.token == "ab" })
+        await app.machineList.delete(machine.id)
+        let list = try #require(app.sessionList(for: machine.id))
+        connect(list)
+        #expect(await eventually { link.registrations.count == 1 })
+        let req = try #require(link.registrations.first?.req)
+        list.handle(.message(.error(req: req, id: nil, message: "cannot write the device table")))
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(app.machineList.leaving.map(\.id) == [machine.id])
+        #expect(try keys.key(for: machine.id) != nil)
+        list.handle(.state(.failed(.rejected(.unknownDevice))))
+        #expect(await eventually { app.machineList.leaving.isEmpty })
+        #expect(await store.all().isEmpty)
+        #expect(try keys.key(for: machine.id) == nil)
+    }
+
+    /// 前台时不认识的电脑的通知不弹，认识的照弹。
+    @Test func notificationsOfUnknownMachinesAreNotShown() async throws {
+        let app = await app()
+        #expect(app.showsNotification(for: SessionLink(machine: machine.id, session: "1")))
+        #expect(!app.showsNotification(for: SessionLink(machine: UUID(), session: "1")))
     }
 
     /// 进后台断开时不再等回话（不然到时候会被当成不支持），回前台连上时再登记。

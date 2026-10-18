@@ -494,7 +494,10 @@ extension LinkState {
         let keys = MemoryDeviceKeyStore()
         let model = MachineListModel(store: store, keyStore: keys)
         var deleted: [UUID] = []
-        model.willDelete = { deleted.append($0) }
+        model.willDelete = {
+            deleted.append($0)
+            return true
+        }
         let machine = machineRecord()
         try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: machine.id)
         try await model.add(machine)
@@ -533,7 +536,10 @@ extension LinkState {
         let keys = MemoryDeviceKeyStore()
         let model = MachineListModel(store: store, keyStore: keys)
         var deleted: [UUID] = []
-        model.willDelete = { deleted.append($0) }
+        model.willDelete = {
+            deleted.append($0)
+            return true
+        }
         let old = machineRecord(name: "旧")
         await store.memory.upsert(old)
         try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: old.id)
@@ -545,6 +551,47 @@ extension LinkState {
         #expect(deleted.isEmpty)
         #expect(try keys.key(for: old.id) != nil)
         #expect(try keys.key(for: new.id) == nil)
+    }
+
+    /// 电脑那边没注销好推送：记录和私钥留着、记下删掉的时刻，列表里不再显示；注销好了（`purge`）才真删。
+    @Test func aMachineNotUnregisteredIsHiddenUntilPurged() async throws {
+        let store = MemoryMachineStore()
+        let keys = MemoryDeviceKeyStore()
+        let model = MachineListModel(store: store, keyStore: keys)
+        model.willDelete = { _ in false }
+        let machine = machineRecord()
+        try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: machine.id)
+        try await model.add(machine)
+        await model.delete(machine.id)
+        #expect(model.machines.isEmpty)
+        #expect(model.leaving.map(\.id) == [machine.id])
+        #expect(await store.all().first?.deletedAt != nil)
+        #expect(try keys.key(for: machine.id) != nil)
+        // 重新读一遍（App 重启）也还藏着。
+        await model.load()
+        #expect(model.machines.isEmpty)
+        await model.purge(machine.id)
+        #expect(model.leaving.isEmpty)
+        #expect(await store.all().isEmpty)
+        #expect(try keys.key(for: machine.id) == nil)
+    }
+
+    /// 删掉一个月还没注销成的，读列表时真删掉。
+    @Test func aMachineLeftForAMonthIsPurged() async throws {
+        let store = MemoryMachineStore()
+        let keys = MemoryDeviceKeyStore()
+        let model = MachineListModel(store: store, keyStore: keys)
+        var old = machineRecord()
+        old.deletedAt = .now - MachineListModel.leavingLimit - 60
+        var recent = machineRecord()
+        recent.deletedAt = .now - 60
+        await store.upsert(old)
+        await store.upsert(recent)
+        try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: old.id)
+        await model.load()
+        #expect(model.leaving.map(\.id) == [recent.id])
+        #expect(await store.all().map(\.id) == [recent.id])
+        #expect(try keys.key(for: old.id) == nil)
     }
 
     /// 删不掉记录：电脑和私钥都留着，照样能连，错误交给设置页。
