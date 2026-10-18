@@ -84,11 +84,7 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
                 shared.limiter().failed(peer, Instant::now());
             }
             tracing::info!("refused a remote connection from {peer}: {reason:?}");
-            send(&mut tls, &GateHostMsg::RemoteRejected { reason })?;
-            tls.conn.send_close_notify();
-            tls.flush()?;
-            linger(tcp);
-            return Ok(());
+            return reject(&mut tls, tcp, reason);
         }
     };
     // 先登记再回话：从这里起撤销这台设备会断开这条连接。登记之前刚好撤销的，撤销的检查可能已经
@@ -96,14 +92,10 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     shared.attach_device(id, device_id);
     match devices::find(&shared.dirs, device_id) {
         Ok(Some(_)) => {}
-        Ok(None) => {
-            send(&mut tls, &GateHostMsg::RemoteRejected { reason: RejectReason::UnknownDevice })?;
-            return Ok(());
-        }
+        Ok(None) => return reject(&mut tls, tcp, RejectReason::UnknownDevice),
         Err(err) => {
             tracing::warn!("cannot read the paired device table: {err}");
-            send(&mut tls, &GateHostMsg::RemoteRejected { reason: RejectReason::Disabled })?;
-            return Ok(());
+            return reject(&mut tls, tcp, RejectReason::Disabled);
         }
     }
     send(&mut tls, &GateHostMsg::RemoteAccepted { device_id })?;
@@ -228,6 +220,15 @@ fn device_name(name: &str) -> String {
     let name: String = name.chars().filter(|c| !c.is_control()).take(MAX_DEVICE_NAME).collect();
     let name = name.trim();
     if name.is_empty() { "unnamed device".into() } else { name.into() }
+}
+
+/// 回 `RemoteRejected`，关掉 TLS，等手机读完回话再断（见 `linger`），不然回话可能丢。
+fn reject(tls: &mut StreamOwned<ServerConnection, Deadline>, tcp: &TcpStream, reason: RejectReason) -> io::Result<()> {
+    send(tls, &GateHostMsg::RemoteRejected { reason })?;
+    tls.conn.send_close_notify();
+    tls.flush()?;
+    linger(tcp);
+    Ok(())
 }
 
 fn send(tls: &mut StreamOwned<ServerConnection, Deadline>, message: &GateHostMsg) -> io::Result<()> {
