@@ -31,9 +31,9 @@ config="$data/config.conf"
 # 新宿主和 app 只带 launchd 平时给 app 的这几个变量起，和在程序坞里打开时一样：宿主开的终端都继承它的
 # 环境，带上调用这个脚本的终端里的变量（CLAUDECODE、CLAUDE_CODE_*、RUNODE_SESSION 这类），终端里的
 # 程序会以为自己跑在别的程序里面。`open` 也会把调用方的环境传给 app。SHELL 取账户记录里的登录 shell：
-# 新宿主不是 launchd 拉起的，沿用这里给的 SHELL，而调用方的可能是 chsh 之前的旧值。
+# 新宿主经 `env -i` 起，沿用这里给的 SHELL，而调用方的可能是 chsh 之前的旧值。
 login_shell=$(id -P 2>/dev/null | awk -F: '{print $NF}' || true)
-launch_env=(env -i HOME="$HOME" USER="$USER" LOGNAME="${LOGNAME:-$USER}" SHELL="${login_shell:-${SHELL:-/bin/zsh}}"
+launch_env=(/usr/bin/env -i HOME="$HOME" USER="$USER" LOGNAME="${LOGNAME:-$USER}" SHELL="${login_shell:-${SHELL:-/bin/zsh}}"
   TMPDIR="${TMPDIR:-/tmp}" PATH=/usr/bin:/bin:/usr/sbin:/sbin)
 for name in LANG SSH_AUTH_SOCK __CF_USER_TEXT_ENCODING; do
   if [[ -n "${!name:-}" ]]; then launch_env+=("$name=${!name}"); fi
@@ -121,11 +121,31 @@ if [[ -n "$old_host" ]]; then
   status_dir=$(mktemp -d "${TMPDIR:-/tmp}/runode-restart.XXXXXX")
   status_fifo="$status_dir/status"
   mkfifo "$status_fifo"
-  nohup "${launch_env[@]}" "$bin" --host --take-over 3>"$status_fifo" >/dev/null 2>&1 </dev/null &
-  new_host=$!
-  disown
+  # 和 app 一样经 launchd 拉起（`runode_host::launch` 的 `launchd` 模块），让新宿主有自己的 coalition：从这里
+  # 直接起的会留在这个终端所在的、早已没了主人的 coalition 里，之后从它的终端打开的 GUI 程序退出时，程序坞
+  # 把宿主和所有会话当成那个程序留在后台的进程，点「停止在后台运行」就一起杀掉。launchd 不传描述符，任务里
+  # 先跑一段 sh 把 FIFO 打开到 fd 3 上、写一行自己的 pid，再换成宿主。Label 的前缀和 app 的一样，退出后由
+  # app 清掉。
+  label="dev.runode.host.restart.$$"
+  plist="$status_dir/job.plist"
+  xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n'
+    printf '\t<key>Label</key>\n\t<string>%s</string>\n\t<key>ProgramArguments</key>\n\t<array>\n' "$(xml "$label")"
+    # shellcheck disable=SC2016 # $0、$$、$@ 留给任务里的 sh 展开
+    for arg in /bin/sh -c 'exec 3>"$0" && echo $$ >&3 && exec "$@"' "$status_fifo" \
+      "${launch_env[@]}" "$bin" --host --take-over; do
+      printf '\t\t<string>%s</string>\n' "$(xml "$arg")"
+    done
+    printf '\t</array>\n\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>ProcessType</key>\n\t<string>Interactive</string>\n'
+    printf '\t<key>AbandonProcessGroup</key>\n\t<true/>\n</dict>\n</plist>\n'
+  } >"$plist"
+  # 进程号重用时同名的旧任务可能还挂着（不在跑），先去掉，不然 bootstrap 报已经加载过。
+  launchctl remove "$label" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$plist"
   exec 4<"$status_fifo"
   rm -rf "$status_dir"
+  IFS= read -r -t 10 -u 4 new_host || true
   result=""
   # 读到结尾是新宿主没报结果就退出了；一行等太久（app 那边最多等 45 秒）当没接成。
   while IFS= read -r -t 60 -u 4 line; do

@@ -355,3 +355,17 @@ pub fn responsible_pid(pid: libc::pid_t) -> libc::pid_t {
     // SAFETY: 只按 pid 查，不碰内存。
     unsafe { responsibility_get_pid_responsible_for_pid(pid) }
 }
+
+/// `pid` 所在的资源 coalition（macOS 给进程分的组，launchd 每个任务一个，子进程继承）。
+#[cfg(target_os = "macos")]
+pub fn coalition(pid: libc::pid_t) -> u64 {
+    // `sys/proc_info.h` 的 `PROC_PIDCOALITIONINFO`，答的是 `struct proc_pidcoalitioninfo`：头一项是资源
+    // coalition 的号。
+    const PROC_PIDCOALITIONINFO: libc::c_int = 20;
+    let mut info = [0u64; 5];
+    let size = libc::c_int::try_from(std::mem::size_of_val(&info)).unwrap();
+    // SAFETY: 缓冲是本地数组，大小如实给出。
+    let read = unsafe { libc::proc_pidinfo(pid, PROC_PIDCOALITIONINFO, 0, info.as_mut_ptr().cast(), size) };
+    assert_eq!(read, size, "cannot read the coalition of {pid}");
+    info[0]
+}

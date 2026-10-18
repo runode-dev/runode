@@ -1,5 +1,10 @@
 //! 拉起单独一个进程的宿主（`runode --host`）：和拉起它的 app 脱开，app 退出后照样跑着。升级时
-//! 拉起的接手旧宿主的新宿主（`runode --host --take-over`）见 `launch_successor`。
+//! 拉起的接手旧宿主的新宿主（`runode --host --take-over`）见 `launch_successor`。macOS 上经 launchd
+//! 拉起，宿主不留在 app 的 coalition 里，见 `launchd`；用不了 launchd 时和别的系统一样直接
+//! `posix_spawn`（`detach`）。
+
+#[cfg(target_os = "macos")]
+mod launchd;
 
 use std::{
     ffi::{CStr, CString, c_char},
@@ -54,13 +59,21 @@ fn environ() -> *const *mut c_char {
 
 /// 用 `exe --host` 拉起宿主进程，返回它的 pid，不等它连上 socket。
 ///
-/// 子进程在新的会话里（`setsid`），标准输入输出接 `/dev/null`，除此之外不继承任何描述符
-/// （`POSIX_SPAWN_CLOEXEC_DEFAULT`：app 开着的 socket、PTY 这些都不带过去），信号处理恢复默认、
-/// 信号屏蔽清空，环境变量照抄，macOS 上自己担着责任进程（见 `responsibility_spawnattrs_setdisclaim`）。
-/// 退出后由这里起的一个线程收尸，不留僵尸进程。
+/// 子进程不在 app 的会话和进程组里（`detach` 时自己开一个会话，macOS 上经 launchd 时在 launchd 的会话里、
+/// 自己当进程组的组长），标准输入输出接 `/dev/null`，除此之外不继承任何描述符（app 开着的 socket、PTY
+/// 这些都不带过去），信号处理恢复默认、信号屏蔽清空，环境变量照抄，macOS 上自己担着责任进程，也有自己的
+/// coalition（见 `launchd`）。
 ///
 /// 连上它（每隔几毫秒试一次 socket，撞上它正因空闲退出时重来）是调用方的事。
 pub fn launch(exe: &Path) -> io::Result<u32> {
+    #[cfg(target_os = "macos")]
+    match launchd::submit(exe, &["--host"], false) {
+        Ok((pid, _)) => return Ok(pid),
+        Err(launchd::Error::Failed(err)) => return Err(err),
+        Err(launchd::Error::Unavailable(err)) => {
+            tracing::warn!("cannot start the host through launchd, it stays in our coalition: {err}");
+        }
+    }
     detach(exe, &[c"--host"], None)
 }
 
@@ -78,9 +91,17 @@ pub struct Successor {
 /// 升级时用 `exe --host --take-over` 拉起新宿主，让它接手 socket 上旧宿主的会话，不等它接完。
 ///
 /// 和 `launch` 一样在新的会话里、标准输入输出接 `/dev/null`、只继承下面这一个描述符、信号恢复
-/// 默认、退出后有线程收尸；另外开一根管道，写端接到新进程的 `STATUS_FD` 上，读端交给调用方
-/// 读结果。这边的写端拉起后马上关掉，新宿主一退出调用方就读到结尾。
+/// 默认；另外开一根管道（macOS 上经 launchd 拉起时是 FIFO），写端接到新进程的 `STATUS_FD` 上，读端
+/// 交给调用方读结果。这边不留写端，新宿主一退出调用方就读到结尾。
 pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
+    #[cfg(target_os = "macos")]
+    match launchd::submit(exe, &["--host", "--take-over"], true) {
+        Ok((pid, status)) => return Ok(Successor { pid, status }),
+        Err(launchd::Error::Failed(err)) => return Err(err),
+        Err(launchd::Error::Unavailable(err)) => {
+            tracing::warn!("cannot start the new host through launchd, it stays in our coalition: {err}");
+        }
+    }
     // 两端都设了 close-on-exec：别处拉起的进程不会带走写端，让这边等不到结尾。
     let (reader, writer) = io::pipe()?;
     let mut writer = OwnedFd::from(writer);
@@ -102,8 +123,8 @@ pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
 
 /// 让这个宿主进程自己担着责任进程：带上 `responsibility_spawnattrs_setdisclaim` 原地重新执行自己一次
 /// （`POSIX_SPAWN_SETEXEC`，pid、参数、环境和没设 close-on-exec 的描述符都不变），重新执行后的那次调用
-/// 直接返回。`launch` 拉起的本来就自己担着；在终端里直接跑的（重启脚本拉起的新宿主就是）挂在那个终端
-/// 的责任进程（通常是旧宿主）名下，那个进程一退出，这个宿主开的终端就都连不上局域网。成功时不返回。
+/// 直接返回。`launch` 拉起的本来就自己担着；在终端里手动跑的挂在那个终端的责任进程（在 runode 的终端里
+/// 就是宿主）名下，那个进程一退出，这个宿主开的终端就都连不上局域网。成功时不返回。
 ///
 /// # Safety
 ///

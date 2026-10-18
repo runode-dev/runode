@@ -1,5 +1,5 @@
-//! 拉起单独的宿主进程：子进程在自己的会话里，不继承拉起它的进程开着的描述符。这里拉起的不是
-//! 真宿主，是一个不看参数的脚本。
+//! 拉起单独的宿主进程：子进程不在拉起它的进程的会话和进程组里（macOS 上也不在它的 coalition 里），
+//! 不继承拉起它的进程开着的描述符。这里拉起的不是真宿主，是一个不看参数的脚本。
 
 mod common;
 
@@ -40,14 +40,23 @@ fn the_host_runs_in_its_own_session_without_our_descriptors() {
     let (sid, pgid, ours) = unsafe { (libc::getsid(pid), libc::getpgid(pid), libc::getsid(0)) };
     let fds = std::fs::read_to_string(&listing).unwrap();
     #[cfg(target_os = "macos")]
-    let responsible = common::responsible_pid(pid);
-    // SAFETY: 结束拉起的子进程；它由 `launch` 起的线程收尸。
+    let (responsible, coalitions) = (
+        common::responsible_pid(pid),
+        (common::coalition(pid), common::coalition(libc::pid_t::try_from(std::process::id()).unwrap())),
+    );
+    // SAFETY: 结束拉起的子进程；launchd 或者 `launch` 起的线程收尸。
     unsafe { libc::kill(pid, libc::SIGTERM) };
 
-    assert_eq!((sid, pgid), (pid, pid), "the host leads its own session");
-    assert_ne!(sid, ours);
+    assert_eq!(pgid, pid, "the host leads its own process group");
+    assert_ne!(sid, ours, "the host is not in our session");
+    // launchd 拉起的任务在 launchd 的会话里，不是会话首进程。
+    #[cfg(not(target_os = "macos"))]
+    assert_eq!(sid, pid, "the host leads its own session");
     #[cfg(target_os = "macos")]
-    assert_eq!(responsible, pid, "the host is its own responsible process, not ours");
+    {
+        assert_eq!(responsible, pid, "the host is its own responsible process, not ours");
+        assert_ne!(coalitions.0, coalitions.1, "the host is not in our coalition");
+    }
     let fds: Vec<&str> = fds.split_whitespace().collect();
     assert!(!fds.contains(&LEAKY_FD.to_string().as_str()), "inherited {fds:?}");
     assert!(fds.contains(&"0") && fds.contains(&"2"), "{fds:?}");
