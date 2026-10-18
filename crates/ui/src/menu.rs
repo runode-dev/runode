@@ -232,6 +232,13 @@ fn row_ids(items: &[Option<MenuItem>]) -> Vec<ElementId> {
         .collect()
 }
 
+/// 上一帧画出的行 `id`（`row_ids`）现在是第几项；那一项没了时为 `None`。点击、辅助工具的按下记着行 id
+/// 而不记行号：菜单在下一帧之前经 `replace_menu_items` 换了各项时，按行号取会跑到挪到那一行上的别的项上
+/// （跑错命令、删错自定义命令）。
+fn row_of(items: &[Option<MenuItem>], id: &ElementId) -> Option<usize> {
+    row_ids(items).iter().position(|row| row == id)
+}
+
 /// `items` 里和原来第 `near` 项 `old` 是同一项的那一项：整行派发的动作一样，其中右边各按钮派发的动作也一样、
 /// 字也一样的优先。只比整行的动作不够：两个名字不同的自定义命令整行跑的可能是同一条命令，删除、编辑按钮
 /// 带着名字才分得开。一样像的有几项时取离第 `near` 项最近的。
@@ -330,12 +337,25 @@ pub trait MenuHost: Sized + 'static {
         }
     }
 
+    /// 点了上一帧画出的行 `id`：按它现在的位置办，那一项没了就不办。
+    fn activate_menu_row(&mut self, id: &ElementId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ix) = self.menu().and_then(|menu| row_of(&menu.items, id)) {
+            self.activate_menu_item(ix, window, cx);
+        }
+    }
+
+    /// 按上一帧画出的行 `id` 右边的第 `button` 个按钮，见 `activate_menu_row`。
+    fn press_menu_row_button(&mut self, id: &ElementId, button: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ix) = self.menu().and_then(|menu| row_of(&menu.items, id)) {
+            self.press_menu_button(ix, button, window, cx);
+        }
+    }
+
     /// 点了或回车第 `ix` 项：`keep_open` 的直接派发，菜单和焦点都不动；别的先关掉菜单。
     fn activate_menu_item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(menu) = self.menu_slot() else {
             return;
         };
-        // `ix` 来自上一帧画的闭包，菜单之后经 `replace_menu_items` 换成更短的列表时它可能已越界。
         if ix >= menu.items.len() {
             return;
         }
@@ -356,7 +376,6 @@ pub trait MenuHost: Sized + 'static {
 
     /// 按第 `ix` 项右边的第 `button` 个按钮。
     fn press_menu_button(&mut self, ix: usize, button: usize, window: &mut Window, cx: &mut Context<Self>) {
-        // `ix` 可能是菜单换成更短列表之前的行号，取不到就不按。
         let button = self.menu().and_then(|menu| menu.items.get(ix)?.as_ref()?.buttons.get(button));
         let Some((keep_open, action)) = button.map(|(button, action)| (button.keep_open, action.boxed_clone())) else {
             return;
@@ -477,8 +496,9 @@ pub trait MenuHost: Sized + 'static {
             let disabled = item.action.is_some() && !item.enabled;
             let buttons = (!disabled && (!row_action || highlighted || a11y)).then_some(&item.buttons);
             let view = cx.entity().downgrade();
+            let id = ids[ix].clone();
             div()
-                .id(ids[ix].clone())
+                .id(id.clone())
                 // 没有动作的一行是小标题；灰着的项报成不可用。
                 .map(|row| match item.checked {
                     _ if item.action.is_none() => row.role(Role::Label),
@@ -502,6 +522,7 @@ pub trait MenuHost: Sized + 'static {
                 .when(highlighted, |row| row.bg(hover_bg))
                 .when_some(item.tooltip.clone(), |row, text| row.tooltip(tooltip(text, None)))
                 .when(row_action, |row| {
+                    let pressed = id.clone();
                     row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         // 上一帧的 `ix` 在菜单换成更短的列表后可能已越界，越界的不选。
                         let menu = this.menu_slot().as_mut().filter(|menu| *hovered && ix < menu.items.len());
@@ -514,11 +535,11 @@ pub trait MenuHost: Sized + 'static {
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
-                            this.activate_menu_item(ix, window, cx);
+                            this.activate_menu_row(&pressed, window, cx);
                         }),
                     )
                     // 只有按下的处理时辅助工具按不到，另外登记。
-                    .on_a11y_press(view, move |this, window, cx| this.activate_menu_item(ix, window, cx))
+                    .on_a11y_press(view, move |this, window, cx| this.activate_menu_row(&id, window, cx))
                 })
                 .when(check_column, |row| {
                     row.child(
@@ -547,6 +568,7 @@ pub trait MenuHost: Sized + 'static {
                     div().flex_none().mr(px(-6.)).flex().gap(px(2.)).children(buttons.iter().enumerate().map(
                         |(b, (button, _))| {
                             let view = cx.entity().downgrade();
+                            let (id, pressed) = (ids[ix].clone(), ids[ix].clone());
                             // 菜单项高亮着时底色已经亮了一档，悬停再亮一些。
                             Button::new(("file-menu-button", b), button.tooltip.clone())
                                 .icon(button.icon)
@@ -559,10 +581,12 @@ pub trait MenuHost: Sized + 'static {
                                     MouseButton::Left,
                                     cx.listener(move |this, _, window, cx| {
                                         cx.stop_propagation();
-                                        this.press_menu_button(ix, b, window, cx);
+                                        this.press_menu_row_button(&pressed, b, window, cx);
                                     }),
                                 )
-                                .on_a11y_press(view, move |this, window, cx| this.press_menu_button(ix, b, window, cx))
+                                .on_a11y_press(view, move |this, window, cx| {
+                                    this.press_menu_row_button(&id, b, window, cx)
+                                })
                         },
                     ))
                 }))
@@ -641,6 +665,17 @@ mod tests {
         assert_eq!(highlight_after_replace(&last_disabled, 4), Some(1));
         assert_eq!(highlight_after_replace(&items, 1), Some(2));
         assert_eq!(highlight_after_replace(&[], 0), None);
+    }
+
+    /// 换了各项以后按上一帧的行 id 找回原来那一项：上面多了一行时找到它的新位置，不落到挪到它原来那一行上
+    /// 的别的项；它删掉了时找不到，不办别的项。
+    #[test]
+    fn rows_are_found_by_id_after_replacing() {
+        let group = || Some(MenuItem::group("mine".to_owned(), None, false, Box::new(First)));
+        let task = |name: &str| Some(MenuItem::label(name.to_owned(), None, Some(Box::new(Second))));
+        let old = row_ids(&[group(), task("a"), task("b")]);
+        assert_eq!(row_of(&[group(), task("new"), task("a"), task("b")], &old[2]), Some(3));
+        assert_eq!(row_of(&[group(), task("a"), task("c")], &old[2]), None);
     }
 
     /// 菜单行的 id 按所在的组和字取：不同组里同名的项不撞，前面插进一组后原来各项的 id 不变，同一组里
