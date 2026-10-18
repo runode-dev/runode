@@ -144,10 +144,6 @@ pub(crate) fn give(
             registry.sessions.remove(id);
         }
     }
-    // shell 已经退出的会话不交，结束掉。
-    for id in &gone {
-        shared.kill(*id);
-    }
     let pending_bytes: usize = pending.iter().map(|(_, input)| input.now.len() + input.at_prompt.len()).sum();
     // 有会话没按时交出 PTY 时不发 `Commit`：它的写线程可能还在写，没写出去的输入也还没交回来，新宿主这时
     // 打开闸门就是两边一起写同一个 PTY。新宿主等不到 `Commit` 会放弃，下面 `reclaim` 把会话接回来。
@@ -165,6 +161,10 @@ pub(crate) fn give(
     if !done && reclaim(shared, Unconfirmed { kept, pending, late, successor, commit_sent }) {
         giving.roll_back(shared, started, "the new host did not confirm taking the sessions over; took them back");
         return;
+    }
+    // shell 已经退出的会话不交，结束掉；回滚时照旧留着，所以等确认交出去了才结束。
+    for id in &gone {
+        shared.kill(*id);
     }
     {
         let mut peers = shared.peers();
