@@ -397,8 +397,7 @@ impl WindowView {
             .child(eyebrow_text);
         let paired = devices(cx).to_vec();
         if !paired.is_empty() {
-            let rows: Vec<_> =
-                paired.iter().enumerate().map(|(ix, device)| device_row(ix, device, theme, cx)).collect();
+            let rows: Vec<_> = paired.iter().map(|device| device_row(device, theme, cx)).collect();
             let another = Button::new("mobile-pair-another", rust_i18n::t!("mobile.pair_another").into_owned())
                 .variant(ButtonVariant::Outline)
                 .with_size(ButtonSize::Lg)
@@ -800,7 +799,7 @@ impl WindowView {
 }
 
 /// 配对过的一台设备：图标，名字，连着没有和哪天配的，右边撤销（先问一句，见 `revoke_device`）。
-fn device_row(ix: usize, device: &Paired, theme: &Theme, cx: &mut Context<WindowView>) -> Stateful<Div> {
+fn device_row(device: &Paired, theme: &Theme, cx: &mut Context<WindowView>) -> Stateful<Div> {
     let id = device.id;
     let (year, month, day) = local_date(device.paired_at);
     let date = rust_i18n::t!("mobile.date", y = year, m = month, d = day);
@@ -819,7 +818,7 @@ fn device_row(ix: usize, device: &Paired, theme: &Theme, cx: &mut Context<Window
         status.child(paired_on)
     };
     div()
-        .id(("mobile-device", ix))
+        .id(SharedString::from(format!("mobile-device-{id}")))
         .role(Role::ListItem)
         .aria_label(device.name.clone())
         .aria_description(summary)
@@ -859,7 +858,7 @@ fn device_row(ix: usize, device: &Paired, theme: &Theme, cx: &mut Context<Window
                 .child(status),
         )
         .child(
-            Button::new(("mobile-device-revoke", ix), rust_i18n::t!("machine.revoke"))
+            Button::new(SharedString::from(format!("mobile-device-revoke-{id}")), rust_i18n::t!("machine.revoke"))
                 .icon(TRASH_ICON)
                 .icon_size(15.)
                 .with_size(ButtonSize::Icon)
