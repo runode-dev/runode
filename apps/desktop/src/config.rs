@@ -73,16 +73,32 @@ pub fn install(cx: &mut App) {
                 cx.background_executor().timer(WATCH_INTERVAL).await;
             }
             while events.try_recv().is_ok() {}
-            all_watched = cx.update(|cx| {
-                // 先盯上再比：比完才盯上的话，中间那一下保存既没比到、也没有事件。新配置要多盯的目录在重载后
-                // 的下一轮盯上（重载会再发一个事件），那一轮盯上以后还会再比一次。
-                let all_watched =
-                    files.as_mut().is_none_or(|files| files.follow(&cx.global::<AppConfig>().0.watch_paths()));
-                let stamp = watch_stamp(&cx.global::<AppConfig>().0);
-                if cx.try_global::<Seen>().is_some_and(|seen| seen.0 != stamp) {
+            // 解符号链接、找已有的目录、取修改时间都在单独的线程上做：`config-file` 引入的文件可以在挂死的
+            // 网络卷上。先盯上再比：比完才盯上的话，中间那一下保存既没比到、也没有事件。新配置要多盯的目录在
+            // 重载后的下一轮盯上（重载会再发一个事件），那一轮盯上以后还会再比一次。起不了线程时不再盯目录，
+            // 退回隔一会儿比一次。
+            let config = cx.update(|cx| cx.global::<AppConfig>().0.clone());
+            let (back, watched, stamp) = crate::fs_probe::off_thread(
+                {
+                    let config = config.clone();
+                    move || {
+                        let watched = files.as_mut().is_none_or(|files| files.follow(&config.watch_paths()));
+                        (files, watched, Some(watch_stamp(&config)))
+                    }
+                },
+                (None, false, None),
+            )
+            .await;
+            (files, all_watched) = (back, watched);
+            cx.update(|cx| {
+                // 比的时候设置页写回、重载过的，按新配置记的修改时间对不上这一份，等它发的那个事件下一轮再比。
+                let current = Arc::ptr_eq(&cx.global::<AppConfig>().0, &config);
+                if let Some(stamp) = stamp
+                    && current
+                    && cx.try_global::<Seen>().is_some_and(|seen| seen.0 != stamp)
+                {
                     reload(cx);
                 }
-                all_watched
             });
         }
     })
