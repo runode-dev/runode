@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use gpui::{ClipboardItem, Context, PromptLevel, Window, px};
+use gpui::{AppContext as _, ClipboardItem, Context, PromptLevel, Window, px};
 use runode_terminal::session::{Paste as PasteResult, Session};
 use runode_types::grid::ViewportScroll;
 
@@ -133,20 +133,27 @@ impl TerminalView {
         let Some(text) = self.screen.shown().and_then(Session::screen_text) else {
             return;
         };
-        let path = match write_screen_file(&text) {
-            Ok(path) => path,
-            Err(err) => {
-                tracing::warn!("failed to write the screen file: {err:#}");
-                return;
-            }
-        };
-        match action.0 {
-            ScreenFile::CopyPath => {
-                cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
-            }
-            ScreenFile::PastePath => self.paste_text(path.display().to_string(), window, cx),
-            ScreenFile::Open => cx.open_with_system(&path),
-        }
+        // 屏幕内容在这里取好，清旧文件和写文件放到后台：缓存目录在挂住的网络卷上时会一直卡着。
+        let job = cx.background_spawn(async move { write_screen_file(&text) });
+        let what = action.0;
+        cx.spawn_in(window, async move |this, cx| {
+            let path = match job.await {
+                Ok(path) => path,
+                Err(err) => {
+                    tracing::warn!("failed to write the screen file: {err:#}");
+                    return;
+                }
+            };
+            this.update_in(cx, |this, window, cx| match what {
+                ScreenFile::CopyPath => {
+                    cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
+                }
+                ScreenFile::PastePath => this.paste_text(path.display().to_string(), window, cx),
+                ScreenFile::Open => cx.open_with_system(&path),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub(super) fn increase_font_size(&mut self, _: &IncreaseFontSize, _: &mut Window, cx: &mut Context<Self>) {

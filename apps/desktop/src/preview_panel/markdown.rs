@@ -1576,12 +1576,36 @@ impl PreviewPanel {
     /// 点了排版视图里的链接：网址交给系统浏览器，本地文件在预览栏里打开（和文件树单击一样开成
     /// 临时标签），`#锚点` 滚到对应的标题或脚注，别的不管。
     fn open_markdown_link(&mut self, url: &str, cx: &mut Context<Self>) {
-        let Some(dir) = self.preview().and_then(|preview| preview.path.parent()).map(Path::to_path_buf) else {
+        let Some(source) = self.preview().map(|preview| preview.path.clone()) else {
             return;
         };
-        match link_target(&dir, url) {
+        let Some(dir) = source.parent() else {
+            return;
+        };
+        match link_target(dir, url) {
             Some(LinkTarget::Web(url)) => cx.open_url(&url),
-            Some(LinkTarget::File(path)) if path.is_file() => self.open(&path, false, cx),
+            // 是不是文件在单独的线程上看（`fs_probe::off_thread`）；看完时已经换了 workspace 或标签的不开。
+            Some(LinkTarget::File(path)) => {
+                let id = self.ws;
+                let job = crate::fs_probe::off_thread(
+                    {
+                        let path = path.clone();
+                        move || path.is_file()
+                    },
+                    false,
+                );
+                cx.spawn(async move |this, cx| {
+                    if job.await {
+                        this.update(cx, |this, cx| {
+                            if this.ws == id && this.preview().is_some_and(|preview| preview.path == source) {
+                                this.open(&path, false, cx);
+                            }
+                        })
+                        .ok();
+                    }
+                })
+                .detach();
+            }
             Some(LinkTarget::Anchor(id)) => {
                 if let Some(preview) = self.preview_mut()
                     && let Some(Loaded::Text { markdown: Some(doc), .. }) = &preview.content
@@ -1598,7 +1622,7 @@ impl PreviewPanel {
     /// 换上解析好的文档后，在后台下载里面的网络图片，下好一张换上一张。`cancel` 是读这次文件的那个，
     /// 又重读了时丢掉结果（重读会再要一次，下过的直接拿到）。
     pub(super) fn load_remote_images(&mut self, id: WorkspaceId, cancel: &Arc<AtomicBool>, cx: &mut Context<Self>) {
-        let Some((preview, _)) = self.preview_for(id, cancel) else {
+        let Some((preview, ..)) = self.preview_for(id, cancel) else {
             return;
         };
         let Some(Loaded::Text { markdown: Some(doc), .. }) = &preview.content else {
@@ -1620,7 +1644,7 @@ impl PreviewPanel {
                     if cancel.load(Ordering::Relaxed) {
                         return;
                     }
-                    if let Some((preview, _)) = this.preview_for(id, &cancel) {
+                    if let Some((preview, ..)) = this.preview_for(id, &cancel) {
                         preview.markdown_view.remote.insert(url.clone(), picture);
                         cx.notify();
                     }

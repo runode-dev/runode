@@ -7,6 +7,7 @@ mod about;
 mod assets;
 mod config;
 mod file_tree;
+mod fs_probe;
 mod git_panel;
 mod github_actions;
 mod host_client;

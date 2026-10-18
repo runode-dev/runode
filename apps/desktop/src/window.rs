@@ -48,7 +48,7 @@ mod titlebar;
 
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Instant};
 
-use futures::StreamExt as _;
+use futures::{StreamExt as _, future::Shared};
 use gpui::{
     Action, AnyElement, App, Context, Div, Empty, Entity, EntityId, ExternalPaths, FocusHandle, Focusable,
     KeyDownEvent, MouseButton, Render, Role, ScrollHandle, SharedString, Stateful, StyleRefinement, Subscription, Task,
@@ -287,6 +287,8 @@ pub struct WindowView {
     /// 显示着驱动标记时，到最早的那个该消失的时候（`now_ms` 的毫秒数）重画的计时器，见
     /// `schedule_driver_redraw`。
     driver_redraw: Option<(u64, Task<()>)>,
+    /// 最近一次把路径打进终端（`insert_paths`）的任务：下一次等它打完再打，先后不乱。
+    inserting: Option<Shared<Task<()>>>,
     /// workspace、标签和分屏节点的标识都从这里取。
     next_id: u64,
     layout: Rc<RefCell<PaneLayout>>,
@@ -454,6 +456,7 @@ impl WindowView {
             arrange_picker: None,
             status_popover: None,
             driver_redraw: None,
+            inserting: None,
             next_id: 0,
             layout: Rc::default(),
             dragging_divider: None,

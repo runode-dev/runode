@@ -73,7 +73,7 @@ impl WindowView {
                 self.click_diff(target, *clicks, cx);
             }
             GitPanelEvent::OpenFile(path) => self.open_preview(path, true, cx),
-            GitPanelEvent::InsertPath(path) => self.insert_path(path, None, window, cx),
+            GitPanelEvent::InsertPath(path) => self.insert_paths(vec![path.clone()], None, window, cx),
             GitPanelEvent::OpenTerminal(dir) => {
                 if let Some(view) = self.spawn_terminal(Some(dir), window, cx) {
                     self.insert_tab(self.workspace().active + 1, view, window, cx);

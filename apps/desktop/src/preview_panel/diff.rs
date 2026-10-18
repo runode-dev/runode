@@ -8,6 +8,7 @@
 
 use crate::ui::theme::ActiveTheme as _;
 use std::{
+    fs,
     ops::Range,
     path::PathBuf,
     sync::{
@@ -215,7 +216,10 @@ impl PreviewPanel {
         // 工作区的 diff 记下文件的大小和修改时间，见 `Preview::stale`。先记再读：读的期间又改了的，下次比出来
         // 不一样，再读一次。
         let stamp_path = (target.side == git::DiffSide::Worktree).then(|| path.clone());
+        let file = path.clone();
         let job = cx.background_spawn(async move {
+            // 解析符号链接也在这里，见 `Preview::real_path`。
+            let real_path = fs::canonicalize(&file).ok();
             let stamp = stamp_path.and_then(|path| file_stamp(&path));
             // 读出错时是 git 的说明，不当成没有改动。
             let read = || -> Result<_, String> {
@@ -245,10 +249,10 @@ impl PreviewPanel {
                 });
                 Ok(Some((view, image)))
             };
-            (stamp, read())
+            (stamp, read(), real_path)
         });
         cx.spawn(async move |this, cx| {
-            let (stamp, read) = job.await;
+            let (stamp, read, real_path) = job.await;
             let (read, error) = match read {
                 Ok(read) => (read, None),
                 Err(err) => (None, Some(err)),
@@ -257,8 +261,12 @@ impl PreviewPanel {
             let texts = this
                 .update(cx, |this, cx| {
                     let cell_width = this.cell_width;
-                    let (preview, git) = this.preview_for(id, &cancel)?;
+                    let (preview, git, real_root) = this.preview_for(id, &cancel)?;
                     preview.stamp = stamp;
+                    // 同 `load_preview`：解析不了时留着上次的。
+                    if let Some(real_path) = real_path {
+                        preview.real_path = real_path;
+                    }
                     // 和上次读到的一样（比如按块暂存后马上读了一次，扫描后又读一次）就留着，不重新高亮；
                     // 上次的高亮还没做完就被这次读取取消了的，重新起。
                     if let (Some(Loaded::Diff(old)), Some(view)) = (&preview.content, &view)
@@ -302,7 +310,7 @@ impl PreviewPanel {
                     };
                     preview.selection = None;
                     preview.content = Some(content);
-                    preview.refresh_marks(git);
+                    preview.refresh_marks(git, real_root);
                     cx.notify();
                     texts
                 })
@@ -322,7 +330,7 @@ impl PreviewPanel {
                 })
                 .await;
             this.update(cx, |this, cx| {
-                if let Some((preview, _)) = this.preview_for(id, &cancel)
+                if let Some((preview, ..)) = this.preview_for(id, &cancel)
                     && let Some(Loaded::Diff(content)) = &mut preview.content
                 {
                     content.new_spans = new_spans.map(Arc::new);
@@ -805,14 +813,14 @@ mod tests {
         let target = DiffTarget { root: "/r".into(), rel: "a.rs".into(), old_rel: None, side: DiffSide::Worktree };
         let mut tab = super::super::Preview::new("/r/a.rs".into(), Some(target), true);
         let old = repos(vec![diff("a.rs", 1), diff("b.rs", 1)]);
-        tab.git_changed(Some(&old), Some(&repos(vec![diff("a.rs", 1), diff("b.rs", 2)])));
+        tab.git_changed(Some(&old), Some(&repos(vec![diff("a.rs", 1), diff("b.rs", 2)])), None);
         assert!(!tab.reload, "别的文件变了不重读");
-        tab.git_changed(Some(&old), Some(&repos(vec![diff("a.rs", 2), diff("b.rs", 1)])));
+        tab.git_changed(Some(&old), Some(&repos(vec![diff("a.rs", 2), diff("b.rs", 1)])), None);
         assert!(tab.reload);
         // 工作区的 diff 标签也跟着文件事件重读：二进制文件再改一次，扫描结果里的改动可能一模一样。
         let binary = FileDiff { binary: true, hunks: Vec::new(), ..diff("a.rs", 0) };
         tab.reload = false;
-        tab.git_changed(Some(&repos(vec![binary.clone()])), Some(&repos(vec![binary])));
+        tab.git_changed(Some(&repos(vec![binary.clone()])), Some(&repos(vec![binary])), None);
         assert!(!tab.reload);
         assert!(tab.affected_by(&["/r/a.rs".into()]));
         assert!(!tab.affected_by(&["/r/b.rs".into()]));

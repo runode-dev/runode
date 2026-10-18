@@ -191,15 +191,28 @@ impl FileTree {
             self.show_invalid_name(name, window, cx);
             return;
         };
-        if let Err(err) = ops::create(&path, is_dir) {
-            self.show_file_error(error_text(&err, name), window, cx);
-            return;
-        }
-        self.relist_and_reveal(self.ws, vec![dir.to_path_buf()], &path, cx);
-        // 新建的文件直接开成固定标签，接着就能看。
-        if !is_dir {
-            cx.emit(FileTreeEvent::Open { path, line: None, pin: true });
-        }
+        // 同 `transfer`：在后台建，网络卷挂住时不卡界面；完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树。
+        let (ws, dir, name) = (self.ws, dir.to_path_buf(), name.to_owned());
+        let job = cx.background_spawn({
+            let path = path.clone();
+            async move { ops::create(&path, is_dir) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = job.await;
+            this.update_in(cx, |this, window, cx| {
+                if let Err(err) = result {
+                    this.show_file_error(error_text(&err, &name), window, cx);
+                    return;
+                }
+                this.relist_and_reveal(ws, vec![dir], &path, cx);
+                // 新建的文件直接开成固定标签，接着就能看；已经切到别的 workspace 时不开到那边的预览栏里。
+                if !is_dir && ws == this.ws {
+                    cx.emit(FileTreeEvent::Open { path, line: None, pin: true });
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 改名只改名字，不挪到别的目录。
@@ -211,10 +224,21 @@ impl FileTree {
             self.show_invalid_name(name, window, cx);
             return;
         };
-        match ops::rename(path, &to) {
-            Ok(()) => self.after_move(self.ws, path, &to, cx),
-            Err(err) => self.show_file_error(error_text(&err, name), window, cx),
-        }
+        // 同 `create_entry`，在后台改。
+        let (ws, from, name) = (self.ws, path.to_path_buf(), name.to_owned());
+        let job = cx.background_spawn({
+            let (from, to) = (from.clone(), to.clone());
+            async move { ops::rename(&from, &to) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = job.await;
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(()) => this.after_move(ws, &from, &to, cx),
+                Err(err) => this.show_file_error(error_text(&err, &name), window, cx),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 当场重读 workspace `ws` 的树里的 `dirs`，再选中 `path`、滚到它。

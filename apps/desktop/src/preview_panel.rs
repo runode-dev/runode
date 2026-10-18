@@ -81,6 +81,9 @@ const FADE_WIDTH: f32 = 24.;
 /// workspace 的标识，由 app 给，挪动位置后不变。
 pub type WorkspaceId = u64;
 
+/// 仓库根目录和它解析过符号链接的路径，见 `PreviewTabs::real_root`。
+type RealRoot = (PathBuf, PathBuf);
+
 /// app 每次画预览栏之前交进来的东西，见 `PreviewPanel::set_input`。
 #[derive(Clone)]
 pub struct Input {
@@ -142,7 +145,8 @@ struct Preview {
     pinned: bool,
     /// 文件的 git 状态，标签名按它上色；和 `marks` 一起重算。
     status: Option<FileStatus>,
-    /// 打开时解析过符号链接的路径；监听到的事件里是真实路径，按两个都比一下。
+    /// 解析过符号链接的路径；监听到的事件里是真实路径，按两个都比一下。读的时候在后台解析好填上，
+    /// 读完之前就是 `path`。
     real_path: PathBuf,
     /// 读完之前为空；重读时先留着旧的，读完再换。
     content: Option<Loaded>,
@@ -216,14 +220,13 @@ impl Preview {
     }
 
     fn new(path: PathBuf, diff: Option<DiffTarget>, pinned: bool) -> Self {
-        let real_path = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
         Self {
+            real_path: path.clone(),
             path,
             diff,
             reload: false,
             pinned,
             status: None,
-            real_path,
             content: None,
             stamp: None,
             selection: None,
@@ -237,12 +240,13 @@ impl Preview {
     }
 
     /// 按 git 状态 `git` 重算改动标记和标签上的状态：子模块和嵌套仓库里的文件按它们自己那个
-    /// 仓库算；不在仓库里或文件不在仓库下时都没有。
-    fn refresh_marks(&mut self, git: Option<&git::Repos>) {
+    /// 仓库算；不在仓库里或文件不在仓库下时都没有。字面上不在仓库根下的按真实路径比，仓库根的真实路径
+    /// 是 `real_root`（见 `PreviewTabs::real_root`），还没解析好时它就是字面的根目录。
+    fn refresh_marks(&mut self, git: Option<&git::Repos>, real_root: Option<&RealRoot>) {
         (self.marks, self.status) = git
             .and_then(|git| {
                 let rel = self.path.strip_prefix(&git.main.root).ok().map(Path::to_path_buf).or_else(|| {
-                    let root = fs::canonicalize(&git.main.root).ok()?;
+                    let (_, root) = real_root.filter(|(root, _)| *root == git.main.root)?;
                     self.real_path.strip_prefix(root).ok().map(Path::to_path_buf)
                 })?;
                 let (repo, rel) = git.locate(&rel);
@@ -253,8 +257,8 @@ impl Preview {
 
     /// 扫描到 git 状态从 `old` 变成了 `new`：重算改动标记；工作区和暂存区的 diff 标签在这个文件的
     /// 那一段改动变了时记下要重读，别的文件、别的仓库变了不管；提交里的不会变。
-    fn git_changed(&mut self, old: Option<&git::Repos>, new: Option<&git::Repos>) {
-        self.refresh_marks(new);
+    fn git_changed(&mut self, old: Option<&git::Repos>, new: Option<&git::Repos>, real_root: Option<&RealRoot>) {
+        self.refresh_marks(new, real_root);
         if let Some(diff) = &self.diff
             && diff_file(old, diff) != diff_file(new, diff)
         {
@@ -288,20 +292,16 @@ impl Preview {
 
     /// 这个标签要不要重读：还没读过；普通标签是文件在磁盘上变过，diff 标签是 git 状态变过。工作区的 diff
     /// 标签也比文件：窗口在后台、切到了别的 workspace 时听不到文件事件，二进制、改动太多的文件扫描结果
-    /// 又看不出再改过一次（见 `affected_by`）。
-    fn stale(&self) -> bool {
-        let moved = || file_stamp(&self.path) != self.stamp;
-        self.content.is_none()
-            || match &self.diff {
-                None => self.reload || moved(),
-                Some(diff) => self.reload || (diff.side == git::DiffSide::Worktree && moved()),
-            }
+    /// 又看不出再改过一次（见 `affected_by`）。`stamp` 是文件现在的大小和修改时间，由调用方在后台取，
+    /// 见 `PreviewPanel::reload_if`。
+    fn stale(&self, stamp: Option<(u64, SystemTime)>) -> bool {
+        self.content.is_none() || self.reload || (self.follows_file() && stamp != self.stamp)
     }
 
     /// 切回来时要不要重读：`stale` 里没读过的那种只算记下要重读的（比如后台 workspace 里跟着改名换上的
     /// 标签），没记下的是第一次读还在路上，不打断它。
-    fn needs_refresh(&self) -> bool {
-        self.stale() && (self.content.is_some() || self.reload)
+    fn needs_refresh(&self, stamp: Option<(u64, SystemTime)>) -> bool {
+        self.stale(stamp) && (self.content.is_some() || self.reload)
     }
 
     fn lines(&self) -> Option<&[String]> {
@@ -515,8 +515,9 @@ impl PreviewPanel {
     }
 
     /// workspace `ws` 最近读到的 git 状态，改动标记和 diff 按它算。和上次交来的不是同一份时，重算各标签的
-    /// 改动标记，这个文件的改动变了的 diff 标签记下要重读。
-    pub fn set_git(&mut self, ws: WorkspaceId, git: Option<Arc<git::Repos>>) {
+    /// 改动标记，这个文件的改动变了的 diff 标签记下要重读。主仓库换了根目录时在单独的线程上解析它的真实路径，
+    /// 解析好了再重算一遍，见 `PreviewTabs::real_root`。
+    pub fn set_git(&mut self, ws: WorkspaceId, git: Option<Arc<git::Repos>>, cx: &mut Context<Self>) {
         let tabs = self.workspaces.entry(ws).or_default();
         let same = match (&tabs.git, &git) {
             (Some(old), Some(new)) => Arc::ptr_eq(old, new),
@@ -527,8 +528,44 @@ impl PreviewPanel {
         }
         let old = std::mem::replace(&mut tabs.git, git);
         for preview in &mut tabs.tabs {
-            preview.git_changed(old.as_deref(), tabs.git.as_deref());
+            preview.git_changed(old.as_deref(), tabs.git.as_deref(), tabs.real_root.as_ref());
         }
+        let Some(root) = tabs.git.as_ref().map(|git| git.main.root.clone()) else {
+            return;
+        };
+        if tabs.real_root.as_ref().is_some_and(|(known, _)| *known == root) {
+            return;
+        }
+        // 解析好之前先按字面路径占上，扫描接连换来新的 git 状态时不再起线程；按它比和不比一样。
+        tabs.real_root = Some((root.clone(), root.clone()));
+        let job = crate::fs_probe::off_thread(
+            {
+                let root = root.clone();
+                move || fs::canonicalize(&root).ok()
+            },
+            None,
+        );
+        cx.spawn(async move |this, cx| {
+            let Some(real) = job.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                // 解析的期间 workspace 关了或换了仓库的不要。
+                let Some(tabs) = this.workspaces.get_mut(&ws) else {
+                    return;
+                };
+                if tabs.git.as_ref().is_none_or(|git| git.main.root != root) {
+                    return;
+                }
+                tabs.real_root = Some((root, real));
+                for preview in &mut tabs.tabs {
+                    preview.refresh_marks(tabs.git.as_deref(), tabs.real_root.as_ref());
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// workspace `ws` 关掉了，丢掉它的标签，连同 GPUI 里解码的图片，和关标签时一样。
@@ -669,7 +706,7 @@ impl PreviewPanel {
         let Some(tab) = previews.tabs.get(ix) else {
             return;
         };
-        let (path, stale) = (tab.path.clone(), tab.stale());
+        let path = tab.path.clone();
         // 换下去的标签不显示了，图片的解码结果先放掉，切回来时再解码。
         if ix != previews.active
             && let Some(old) = previews.active()
@@ -679,9 +716,7 @@ impl PreviewPanel {
         previews.active = ix;
         previews.scroll.scroll_to_item(ix);
         cx.emit(PreviewEvent::Reveal(path));
-        if stale {
-            self.load_preview(cx);
-        }
+        self.reload_if(Preview::stale, cx);
         cx.notify();
     }
 
@@ -739,9 +774,39 @@ impl PreviewPanel {
     /// 窗口切回前台、切回这个 workspace 时，当前预览的文件变过就重读；在后台时监听到的改动只等到这时。
     /// 别的标签等切过去时再看。
     pub fn refresh_if_changed(&mut self, cx: &mut Context<Self>) {
-        if self.preview().is_some_and(Preview::needs_refresh) {
+        self.reload_if(Preview::needs_refresh, cx);
+    }
+
+    /// 当前预览标签按 `check`（`Preview::stale` 或 `needs_refresh`）要重读就读。不看文件就定了的当场读；
+    /// 跟着文件变的标签要比文件的大小和修改时间，在单独的线程上取（`fs_probe::off_thread`）。取回来时
+    /// 换了 workspace、换了标签或已经又读过一次（`cancel` 换了）就不管，切回来时会再比。
+    fn reload_if(&mut self, check: fn(&Preview, Option<(u64, SystemTime)>) -> bool, cx: &mut Context<Self>) {
+        let Some(preview) = self.preview() else {
+            return;
+        };
+        // 拿上次记下的当作文件现在的，比出来要读的就是不看文件也知道的那些。
+        if check(preview, preview.stamp) {
             self.load_preview(cx);
+            return;
         }
+        // 没读过的上面已经定了（第一次读还在路上的不打断），不随文件变的不用比。
+        if preview.content.is_none() || !preview.follows_file() {
+            return;
+        }
+        let (id, path, cancel) = (self.ws, preview.path.clone(), preview.cancel.clone());
+        // 起不了线程时当作变了，重读一次。
+        let job = crate::fs_probe::off_thread(move || file_stamp(&path), None);
+        cx.spawn(async move |this, cx| {
+            let stamp = job.await;
+            this.update(cx, |this, cx| {
+                let current = this.preview().filter(|preview| this.ws == id && Arc::ptr_eq(&preview.cancel, &cancel));
+                if current.is_some_and(|preview| check(preview, stamp)) {
+                    this.load_preview(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 监听到 `paths` 变了：当前预览的文件在里面就重读。别的工作区 diff 标签记下要重读，切过去时再读；
@@ -794,16 +859,21 @@ impl PreviewPanel {
             let path = path.clone();
             let svg = svg.clone();
             async move {
+                let real_path = fs::canonicalize(&path).ok();
                 let stamp = file_stamp(&path);
-                (loaded(runode_preview::load(&path), &svg, cell_width), stamp)
+                (loaded(runode_preview::load(&path), &svg, cell_width), stamp, real_path)
             }
         });
         cx.spawn(async move |this, cx| {
-            let (mut content, stamp) = job.await;
+            let (mut content, stamp, real_path) = job.await;
             let lines = this
                 .update(cx, |this, cx| {
-                    let (preview, git) = this.preview_for(id, &cancel)?;
+                    let (preview, git, real_root) = this.preview_for(id, &cancel)?;
                     preview.stamp = stamp;
+                    // 解析不了（文件删了）时留着上次的，重新建出来时监听到的真实路径还对得上。
+                    if let Some(real_path) = real_path {
+                        preview.real_path = real_path;
+                    }
                     // 排版视图的旧文档在新文档解析完之前还显示着，它的图片等换上新文档时再按用没用到放。
                     let (old_highlights, old_markdown) = match preview.content.take() {
                         Some(Loaded::Text { highlights, markdown, .. }) => (highlights, markdown),
@@ -840,7 +910,7 @@ impl PreviewPanel {
                         }
                     };
                     preview.content = Some(content);
-                    preview.refresh_marks(git);
+                    preview.refresh_marks(git, real_root);
                     cx.notify();
                     lines
                 })
@@ -863,7 +933,7 @@ impl PreviewPanel {
                 this.update(cx, |this, cx| {
                     let font_size = this.input.font_size;
                     if let Some(doc) = doc
-                        && let Some((preview, _)) = this.preview_for(id, &cancel)
+                        && let Some((preview, ..)) = this.preview_for(id, &cancel)
                         && let Some(Loaded::Text { markdown: slot, .. }) = &mut preview.content
                     {
                         preview.markdown_view.replace_doc(slot.as_deref(), &doc, font_size);
@@ -884,7 +954,7 @@ impl PreviewPanel {
                 })
                 .await;
             this.update(cx, |this, cx| {
-                if let Some((preview, _)) = this.preview_for(id, &cancel)
+                if let Some((preview, ..)) = this.preview_for(id, &cancel)
                     && let Some(Loaded::Text { highlights: slot, .. }) = &mut preview.content
                 {
                     *slot = highlights.map(Arc::new);
@@ -896,16 +966,16 @@ impl PreviewPanel {
         .detach();
     }
 
-    /// workspace `id` 里拿着 `cancel` 的那个预览标签和最近读到的 git 状态；标签关掉了、换了文件
-    /// 或又读了一次时为空。
+    /// workspace `id` 里拿着 `cancel` 的那个预览标签、最近读到的 git 状态和仓库根的真实路径（`refresh_marks`
+    /// 用）；标签关掉了、换了文件或又读了一次时为空。
     fn preview_for(
         &mut self,
         id: WorkspaceId,
         cancel: &Arc<AtomicBool>,
-    ) -> Option<(&mut Preview, Option<&git::Repos>)> {
+    ) -> Option<(&mut Preview, Option<&git::Repos>, Option<&RealRoot>)> {
         let tabs = self.workspaces.get_mut(&id)?;
         let preview = tabs.tabs.iter_mut().find(|preview| Arc::ptr_eq(&preview.cancel, cancel))?;
-        Some((preview, tabs.git.as_deref()))
+        Some((preview, tabs.git.as_deref(), tabs.real_root.as_ref()))
     }
 
     fn copy_preview(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
@@ -1166,10 +1236,10 @@ mod tests {
             tab
         };
         let (worktree, index) = (tab(git::DiffSide::Worktree), tab(git::DiffSide::Index));
-        assert!(!worktree.stale() && !index.stale());
+        assert!(!worktree.stale(file_stamp(&path)) && !index.stale(file_stamp(&path)));
         fs::write(&path, b"three").unwrap();
-        assert!(worktree.stale(), "文件变了，工作区的 diff 要重读");
-        assert!(!index.stale(), "暂存区的 diff 等扫描");
+        assert!(worktree.stale(file_stamp(&path)), "文件变了，工作区的 diff 要重读");
+        assert!(!index.stale(file_stamp(&path)), "暂存区的 diff 等扫描");
         fs::remove_dir_all(&root).ok();
     }
 
@@ -1193,9 +1263,9 @@ mod tests {
         let mut tab = Preview::new(PathBuf::from("/nonexistent/runode-preview/a.rs"), None, false);
         tab.content = Some(Loaded::Note(Note::Binary));
         tab.stamp = None;
-        assert!(!tab.stale());
+        assert!(!tab.stale(None));
         tab.reload = true;
-        assert!(tab.stale());
+        assert!(tab.stale(None));
     }
 
     /// 刚开的标签第一次读还在路上，切回来时不打断；后台 workspace 里跟着改名换上、还没读过的标签切回来要读。
@@ -1203,8 +1273,8 @@ mod tests {
     fn a_tab_moved_in_the_background_is_read_when_shown_again() {
         let mut previews = PreviewTabs::default();
         previews.open(Path::new("/nonexistent/runode-preview/a.rs"), None, true);
-        assert!(!previews.tabs[0].needs_refresh());
+        assert!(!previews.tabs[0].needs_refresh(None));
         previews.moved(Path::new("/nonexistent/runode-preview"), Path::new("/nonexistent/runode-moved"));
-        assert!(previews.tabs[0].needs_refresh());
+        assert!(previews.tabs[0].needs_refresh(None));
     }
 }

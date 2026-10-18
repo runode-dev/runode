@@ -26,7 +26,7 @@ impl WindowView {
         let (id, git) = (workspace.id, workspace.project.git.clone());
         self.preview.update(cx, |panel, cx| {
             panel.set_workspace(id);
-            panel.set_git(id, git);
+            panel.set_git(id, git, cx);
             f(panel, cx)
         })
     }
@@ -105,7 +105,7 @@ impl WindowView {
             return;
         };
         let git = workspace.project.git.clone();
-        self.preview.update(cx, |panel, _| panel.set_git(id, git));
+        self.preview.update(cx, |panel, cx| panel.set_git(id, git, cx));
     }
 
     /// 还原当前 workspace 放大着的预览栏：焦点要交给终端了。
@@ -164,7 +164,7 @@ impl WindowView {
             PreviewEvent::ZoomChanged => cx.notify(),
             PreviewEvent::Reveal(path) => self.with_file_tree(cx, |tree, cx| tree.reveal_file(path, cx)),
             PreviewEvent::OptionsChanged => self.save(cx),
-            PreviewEvent::InsertPath { path, line } => self.insert_path(path, Some(*line), window, cx),
+            PreviewEvent::InsertPath { path, line } => self.insert_paths(vec![path.clone()], Some(*line), window, cx),
             // 经 Git 面板跑，和面板上的操作一起按仓库排队；做完它发 `GitPanelEvent::HunkApplied`，再重读 diff。
             PreviewEvent::ApplyHunk { root, file, hunk, action } => {
                 self.with_git_panel(cx, |panel, cx| panel.apply_hunk(root, file.clone(), *hunk, *action, window, cx));

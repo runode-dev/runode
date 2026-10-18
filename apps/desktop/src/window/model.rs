@@ -79,15 +79,11 @@ pub(super) fn canonical_dir_later(dir: &Path) -> Arc<OnceLock<PathBuf>> {
     cell
 }
 
-/// 在单独的线程上看 `dir` 是不是目录、算它的 `canonical_dir`，等它算完：理由同 `canonical_dir_later`，
+/// 在单独的线程上看 `dir` 是不是目录、算它的 `canonical_dir`，等它算完（`fs_probe::off_thread`），
 /// 界面线程上要用结果的地方 await 它。起不了线程时当作不是目录，目录照原样。
 pub(super) async fn inspect_dir(dir: PathBuf) -> (bool, PathBuf) {
-    let (tx, rx) = futures::channel::oneshot::channel();
-    let fallback = dir.clone();
-    let _ = std::thread::Builder::new().name("canonical-dir".into()).spawn(move || {
-        let _ = tx.send((dir.is_dir(), canonical_dir(&dir)));
-    });
-    rx.await.unwrap_or((false, fallback))
+    let fallback = (false, dir.clone());
+    crate::fs_probe::off_thread(move || (dir.is_dir(), canonical_dir(&dir)), fallback).await
 }
 
 /// 新 workspace 的名字：家目录叫 `~`；在 git 仓库里取仓库根的目录名，其余取目录名。

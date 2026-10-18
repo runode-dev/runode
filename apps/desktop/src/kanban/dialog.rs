@@ -691,9 +691,19 @@ impl TodoDialog {
         self.saving = true;
         self.error = None;
         cx.notify();
-        let answer = store::ask(cx, message);
+        // 目录在不在放到单独的线程上查（`fs_probe::off_thread`），查过了再发；起不了线程时交给宿主查。开始过的
+        // 任务目录改不了，宿主也允许原目录没了（agent 还在工作树里跑）时只改文字，不查。
+        let dir = (!self.locked).then(|| self.dir.clone());
+        let dir_ok = crate::fs_probe::off_thread(move || dir.is_none_or(|dir| dir.is_dir()), true);
         cx.spawn(async move |this, cx| {
-            let answer = answer.await;
+            let answer = if dir_ok.await {
+                let Ok(answer) = this.update(cx, |_, cx| store::ask(cx, message)) else {
+                    return;
+                };
+                answer.await
+            } else {
+                Err(anyhow::anyhow!(rust_i18n::t!("kanban.dialog.bad_dir").into_owned()))
+            };
             this.update(cx, |dialog, cx| {
                 match answer {
                     Ok(answer) => {
@@ -1075,10 +1085,6 @@ impl TodoDialog {
         };
         if agent.is_empty() {
             return Err(rust_i18n::t!("kanban.dialog.need_agent").into_owned());
-        }
-        // 开始过的任务目录改不了，宿主也允许原目录没了（agent 还在工作树里跑）时只改文字。
-        if !self.locked && !self.dir.is_dir() {
-            return Err(rust_i18n::t!("kanban.dialog.bad_dir").into_owned());
         }
         let spec = TodoSpec { title, prompt, dir: self.dir.clone(), agent, worktree: self.worktree };
         if !self.schedule {

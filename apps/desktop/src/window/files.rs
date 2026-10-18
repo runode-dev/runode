@@ -4,11 +4,12 @@
 //! 它要窗口办的事（开预览、把路径打进终端、开新标签、预览跟着改名和删除、重读、焦点交回终端、开关变了要存档）
 //! 经 `FileTreeEvent` 交回来。
 //!
-//! 把路径打进终端（`insert_path`）和拖到终端上（`drop_paths_on_pane`）也在这里，预览栏、Git 面板和分屏都用。
+//! 把路径打进终端（`insert_paths`）和拖到终端上（`drop_paths_on_pane`）也在这里，预览栏、Git 面板和分屏都用。
 
 use std::path::{Path, PathBuf};
 
 use crate::file_tree::{FileTree, FileTreeEvent, Input};
+use futures::FutureExt as _;
 use gpui::{Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*, px};
 use runode_config::PreviewClick;
 
@@ -110,7 +111,7 @@ impl WindowView {
         match event {
             FileTreeEvent::Open { path, line: None, pin } => self.open_preview(path, *pin, cx),
             FileTreeEvent::Open { path, line: Some(line), pin } => self.open_preview_at(path, *line, *pin, cx),
-            FileTreeEvent::InsertPath(path) => self.insert_path(path, None, window, cx),
+            FileTreeEvent::InsertPath(path) => self.insert_paths(vec![path.clone()], None, window, cx),
             FileTreeEvent::OpenTerminal(dir) => {
                 if let Some(view) = self.spawn_terminal(Some(dir), window, cx) {
                     self.insert_tab(self.workspace().active + 1, view, window, cx);
@@ -134,42 +135,71 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         self.focus_pane_in_active_tab(pane, window, cx);
-        for path in paths {
-            self.insert_path(path, None, window, cx);
-        }
+        self.insert_paths(paths.to_vec(), None, window, cx);
     }
 
-    /// 把 `path` 打进当前终端，在它的目录下时写相对路径，后面带上行号 `line` 和一个空格，
-    /// 再把焦点交回终端。图片写绝对路径：Claude Code 只把绝对路径认成图片附件。
-    pub(super) fn insert_path(&mut self, path: &Path, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
+    /// 把 `paths` 一个个打进当前终端，在它的目录下时写相对路径，后面带上行号 `line` 和一个空格，
+    /// 再把焦点交回终端。比目录要解符号链接，在单独的线程上算好再打进去（`fs_probe::off_thread`）。
+    pub(super) fn insert_paths(
+        &mut self,
+        paths: Vec<PathBuf>,
+        line: Option<u32>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(view) = self.focused_view().cloned() else {
             return;
         };
         let cwd = view.read(cx).cwd();
-        let text = if line.is_none() && is_image(path) {
-            let absolute = match &cwd {
-                Some(cwd) if path.is_relative() => cwd.join(path),
-                _ => path.to_path_buf(),
-            };
-            shell_escape(&absolute.display().to_string())
-        } else {
-            // 终端报的目录和面板里的路径可能一个经过符号链接、一个没有，对不上时都换成真实路径再比。
-            let relative = |path: &Path, cwd: &Path| {
-                path.strip_prefix(cwd).ok().map(Path::to_path_buf).or_else(|| {
-                    let (path, cwd) = (path.canonicalize().ok()?, cwd.canonicalize().ok()?);
-                    path.strip_prefix(cwd).ok().map(Path::to_path_buf)
-                })
-            };
-            let rel = cwd.as_deref().and_then(|cwd| relative(path, cwd)).filter(|rel| !rel.as_os_str().is_empty());
-            let mut text = rel.as_deref().unwrap_or(path).display().to_string();
-            if let Some(line) = line {
-                text = format!("{text}:{line}");
-            }
-            shell_quote(&text)
-        };
-        view.update(cx, |view, cx| view.paste_text(format!("{text} "), window, cx));
         window.focus(&view.focus_handle(cx), cx);
+        // 起不了线程时不比目录，照原样打进去。
+        let fallback = paths.iter().map(|path| path_text(path, line, None)).collect();
+        let job = crate::fs_probe::off_thread(
+            move || paths.iter().map(|path| path_text(path, line, cwd.as_deref())).collect(),
+            fallback,
+        );
+        // 打进算的时候拿着焦点的那个终端；它关掉了就不打。上一次的先算完时等它打完，连点两次不会倒过来。
+        let view = view.downgrade();
+        let previous = self.inserting.take();
+        let task = cx.spawn_in(window, async move |_, cx| {
+            let texts: Vec<String> = job.await;
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            view.update_in(cx, |view, window, cx| {
+                for text in texts {
+                    view.paste_text(format!("{text} "), window, cx);
+                }
+            })
+            .ok();
+        });
+        self.inserting = Some(task.shared());
     }
+}
+
+/// `path` 打进终端时的写法，见 `WindowView::insert_paths`。图片写绝对路径：Claude Code 只把绝对路径认成
+/// 图片附件。
+fn path_text(path: &Path, line: Option<u32>, cwd: Option<&Path>) -> String {
+    if line.is_none() && is_image(path) {
+        let absolute = match cwd {
+            Some(cwd) if path.is_relative() => cwd.join(path),
+            _ => path.to_path_buf(),
+        };
+        return shell_escape(&absolute.display().to_string());
+    }
+    // 终端报的目录和面板里的路径可能一个经过符号链接、一个没有，对不上时都换成真实路径再比。
+    let relative = |path: &Path, cwd: &Path| {
+        path.strip_prefix(cwd).ok().map(Path::to_path_buf).or_else(|| {
+            let (path, cwd) = (path.canonicalize().ok()?, cwd.canonicalize().ok()?);
+            path.strip_prefix(cwd).ok().map(Path::to_path_buf)
+        })
+    };
+    let rel = cwd.and_then(|cwd| relative(path, cwd)).filter(|rel| !rel.as_os_str().is_empty());
+    let mut text = rel.as_deref().unwrap_or(path).display().to_string();
+    if let Some(line) = line {
+        text = format!("{text}:{line}");
+    }
+    shell_quote(&text)
 }
 
 #[cfg(test)]

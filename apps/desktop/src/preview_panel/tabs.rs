@@ -26,7 +26,7 @@ use gpui::{
 use runode_git::{self as git, FileStatus};
 use runode_types::color::Rgb;
 
-use super::{DIFF_ICON, DiffTarget, Preview, PreviewPanel};
+use super::{DIFF_ICON, DiffTarget, Preview, PreviewPanel, RealRoot};
 
 actions!(
     runode,
@@ -75,6 +75,9 @@ pub(super) struct PreviewTabs {
     pub maximized: bool,
     /// 这个 workspace 最近读到的 git 状态，见 `PreviewPanel::set_git`。
     pub git: Option<Arc<git::Repos>>,
+    /// `git` 主仓库的根目录和它解析过符号链接的路径，`Preview::refresh_marks` 比字面上不在根下的文件用；
+    /// 由 `PreviewPanel::set_git` 在单独的线程上解析，解析好之前（或解析不了时）两个都是字面的根目录。
+    pub real_root: Option<RealRoot>,
 }
 
 impl PreviewTabs {
