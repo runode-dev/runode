@@ -41,6 +41,7 @@ pub(crate) fn setting_key(line: &str) -> Option<&str> {
 fn fill_missing_keys(text: &str) -> String {
     let d = Config::default();
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let mut inserted = false;
     let keys: Vec<(usize, &str)> =
         KEYS.iter().enumerate().flat_map(|(group, keys)| keys.iter().map(move |key| (group, *key))).collect();
     for (ix, &(group, key)) in keys.iter().enumerate() {
@@ -59,6 +60,11 @@ fn fill_missing_keys(text: &str) -> String {
         }
         block.push_str(&key_block(&d, key));
         lines.splice(at..at, block.lines().map(str::to_owned));
+        inserted = true;
+    }
+    // 拆行再拼会把 CRLF 换成 LF，没补键时原样返回，免得每次启动都重写用户的文件。
+    if !inserted {
+        return text.to_owned();
     }
     let mut out = lines.join("\n");
     if text.ends_with('\n') {
@@ -238,6 +244,8 @@ mod tests {
         ];
         assert_eq!(fill_missing_keys(&without(&full, &agents)), full);
         assert_eq!(fill_missing_keys(&full), full);
+        let crlf = full.replace('\n', "\r\n");
+        assert_eq!(fill_missing_keys(&crlf), crlf);
         // 用户自己写的设置算写到了，空文件不补。
         let mine = "font-size = 16\n";
         assert!(fill_missing_keys(mine).starts_with("font-size = 16\n## "));
