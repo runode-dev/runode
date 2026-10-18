@@ -204,13 +204,13 @@ impl FileTree {
 
     /// 改名只改名字，不挪到别的目录。
     fn rename_entry(&mut self, path: &Path, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if ops::unchanged_name(path, name) {
+            return;
+        }
         let Some(to) = path.parent().and_then(|parent| ops::child_name(parent, name)) else {
             self.show_invalid_name(name, window, cx);
             return;
         };
-        if to == path {
-            return;
-        }
         match ops::rename(path, &to) {
             Ok(()) => self.after_move(self.ws, path, &to, cx),
             Err(err) => self.show_file_error(error_text(&err, name), window, cx),

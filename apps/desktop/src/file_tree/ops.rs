@@ -40,6 +40,12 @@ pub(super) fn child_name(dir: &Path, name: &str) -> Option<PathBuf> {
     child_path(dir, name).filter(|_| Path::new(name.trim()).components().count() == 1)
 }
 
+/// 改名框里的 `name` 和打开时填进去的一样（都去掉首尾空白比）。框里填的是有损的名字：非 UTF-8 的字节
+/// 换成了 `�`，读回来又去了首尾空白，原样拿去改名会把这样的名字悄悄改掉。
+pub(super) fn unchanged_name(path: &Path, name: &str) -> bool {
+    path.file_name().is_some_and(|old| old.to_string_lossy().trim() == name.trim())
+}
+
 /// 新建空文件或目录，中间缺的目录一并建出来；已经有了时报 `Exists`。
 pub(super) fn create(path: &Path, is_dir: bool) -> Result {
     if let Some(parent) = path.parent() {
@@ -353,6 +359,17 @@ mod tests {
         assert_eq!(child_path(dir, "a/../../x"), None);
         assert_eq!(child_name(dir, "b.rs"), Some(PathBuf::from("/p/b.rs")));
         assert_eq!(child_name(dir, "a/b.rs"), None);
+    }
+
+    /// 开关一下改名框不改名：非 UTF-8 的名字、首尾带空白的名字填进框里再读回来都不一样了。
+    #[cfg(unix)]
+    #[test]
+    fn untouched_rename_keeps_lossy_names() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let path = Path::new(std::ffi::OsStr::from_bytes(b"/p/a\xff.txt"));
+        assert!(unchanged_name(path, &crate::ui::base_name(path)));
+        assert!(unchanged_name(Path::new("/p/ b.txt "), "b.txt"));
+        assert!(!unchanged_name(path, "a.txt"));
     }
 
     #[test]
