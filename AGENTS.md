@@ -32,7 +32,7 @@ GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），只有它的
 
 不变量：
 
-- 只有 `desktop` 和它的部件库 `ui` 能依赖 GPUI（`gpui-pre`；`gpui-pre-platform` 只有 `desktop`）；`libghostty-vt` 和 portable-pty 只有 `terminal` 能直接依赖，`libghostty-vt-sys` 只有 `libghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen 和 ring 只有 `remote` 能直接依赖；rusqlite 只有 `todo` 能直接依赖；只有 `desktop` 能直接依赖 `host`。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`；加 crate 时相应地更新它的 `wrappers` 和上面这张表。
+- 只有 `desktop` 和它的部件库 `ui` 能依赖 GPUI（`gpui-pre`；`gpui-pre-platform` 只有 `desktop`）；`libghostty-vt` 和 portable-pty 只有 `terminal` 能直接依赖，`libghostty-vt-sys` 只有 `libghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen 和 ring 只有 `remote` 能直接依赖；rusqlite 只有 `todo` 能直接依赖；只有 `desktop` 能直接依赖 `host`，只有 `desktop` 和 `host` 能直接依赖 `terminal`。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`；加 crate 时相应地更新它的 `wrappers` 和上面这张表。
 - `types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git`、`preview`、`update` 不依赖任何 runode crate。
 - `protocol` 只依赖 `types`，不碰终端仿真、PTY 和界面。消息里用到的类型，别的 crate 也要用的放 `types`，只在协议里用的（帧、连接方式等）放 `protocol` 自己；`protocol` 把消息里用到的 `types` 类型转出去，前端照旧从 `protocol` 引。
 - `agent` 只依赖 `types`，不碰终端仿真、PTY 和界面：屏幕文字、前台进程组由 `terminal` 读好了交给它，用户规则目录由调用方从 `paths` 取来传进去。
