@@ -1,8 +1,8 @@
 //! 定时到点开任务的线程（`run`），下一次到点由 `runode_todo::next_fire` 按本地时间算。
 //!
 //! 错过的（电脑睡着、宿主没在跑）补一次：上一次到点后的下一次已经过了就算到点，开一张任务，把到点的
-//! 时刻记成现在，下一次从现在算起，所以睡了三天醒来也只补一次。同一个定时上次开出的任务还在干活时
-//! 这次跳过，免得两个 agent 改同一处。
+//! 时刻记成现在，下一次从现在算起，所以睡了三天醒来也只补一次。同一个定时上次开出的任务还在干活、或者
+//! agent 停在权限询问上时这次跳过，免得两个 agent 改同一处。
 
 use std::{
     sync::{Arc, Weak},
@@ -11,6 +11,7 @@ use std::{
 
 use runode_protocol::todo::{Column, Schedule, column};
 use runode_todo::next_fire;
+use runode_types::agent::AgentState;
 
 use super::{Todos, unix_now};
 use crate::Shared;
@@ -63,8 +64,8 @@ impl Shared {
         soonest
     }
 
-    /// 定时到点：记下到点的时刻（一次性的删掉），开一张新任务并开始它；上次开出的那张没开始成或者还在干活时
-    /// 跳过。
+    /// 定时到点：记下到点的时刻（一次性的删掉），开一张新任务并开始它；上次开出的那张没开始成、还在干活或者
+    /// 停在询问上时跳过。
     fn fire(&self, schedule: &Schedule, now: u64) {
         // 查不到上次那张时不开：库只是一时打不开的话，开出来可能和还在干活的上一个 agent 撞在一起；下一轮再看。
         let previous = match self.todos.with_db(|db| db.latest_open_todo_of(&schedule.id)) {
@@ -79,14 +80,18 @@ impl Shared {
             && match todo.session {
                 None => true,
                 Some(session) => match self.session_info(session) {
-                    Some(info) => column(todo, Some(&info), now) == Column::InProgress,
+                    // 停在权限询问上的看板算「需要你」，可用户一答应它就接着改。
+                    Some(info) => {
+                        column(todo, Some(&info), now) == Column::InProgress
+                            || !info.exited && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Blocked)
+                    }
                     // 会话还在却没及时回话：看不出它在不在干活，当它在干，免得两个 agent 一起跑。
                     None => self.registry().sessions.contains_key(&session),
                 },
             }
         {
             tracing::info!(
-                "schedule {} skips this run: its last todo {} has not started or is still in progress",
+                "schedule {} skips this run: its last todo {} has not started, is still in progress or is blocked",
                 schedule.id,
                 todo.id
             );

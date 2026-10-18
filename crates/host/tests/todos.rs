@@ -20,6 +20,7 @@ use runode_protocol::{
     SessionInfo,
     todo::{Column, Schedule, Todo, TodoSpec, When, column},
 };
+use runode_types::agent::AgentState;
 
 /// 宿主开的任务会话跑的 shell。
 fn use_plain_sh() {
@@ -519,6 +520,44 @@ fn an_exited_todo_session_is_replaced_and_ended() {
     wait_until("the finished todo's session ending", || {
         !sessions(&mut peer).iter().any(|session| session.id == second)
     });
+}
+
+/// 上次开出的任务的 agent 停在权限询问上（看板上算「需要你」）：到点跳过，不另开一个 agent 改同一处。
+#[test]
+fn a_schedule_skips_while_its_last_agent_is_blocked() {
+    let (_host, dir, mut peer) = board("todo-blocked");
+    // 前台进程叫 claude、屏幕上是 Claude 的权限询问，宿主就认成停在询问上的 Claude。
+    let claude = dir.join("claude");
+    std::os::unix::fs::symlink("/bin/sleep", &claude).unwrap();
+    let ask_body = "printf 'Bash command\\n\\nDo you want to proceed?\\n  1. Yes\\n  2. No\\n\\nEsc to cancel\\n'";
+    let agent = script(&dir, "agent", &format!("{ask_body}\nexec '{}' 1000", claude.display()));
+    let when = When::Every { minutes: 60 };
+    peer.send(&ClientMsg::AddSchedule { req: 1, spec: spec("Nightly fix", &dir, &agent), when });
+    let HostMsg::TodoAdded { req: 1, id: schedule } = peer.reply() else { panic!("expected the schedule") };
+    let store = runode_todo::Store::open(&dir.join("todos.db")).unwrap();
+    let fired = |peer: &mut Peer| board_state(peer).1.iter().all(|schedule| schedule.last_fired > 1);
+    // 让它到点；加一张别的任务叫醒定时的线程。
+    store.set_fired(&schedule, 1).unwrap();
+    add(&mut peer, spec("Poke", &dir, "true"));
+    let mut session = None;
+    wait_until("the first run", || {
+        session = list(&mut peer).iter().find_map(|todo| todo.session);
+        session.is_some()
+    });
+    let session = session.unwrap();
+    wait_until("the agent to ask for permission", || {
+        sessions(&mut peer)
+            .iter()
+            .any(|info| info.id == session && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Blocked))
+    });
+
+    store.set_fired(&schedule, 1).unwrap();
+    add(&mut peer, spec("Poke again", &dir, "true"));
+    wait_until("the second run", || fired(&mut peer));
+    let (todos, _) = board_state(&mut peer);
+    let from_schedule = todos.iter().filter(|todo| todo.schedule.as_deref() == Some(schedule.as_str())).count();
+    assert_eq!(from_schedule, 1);
+    peer.send(&ClientMsg::Kill { id: session });
 }
 
 /// 定时的目录没了，开出的任务开始不了：之后到点跳过，不再每次多一张开不起来的待办。
