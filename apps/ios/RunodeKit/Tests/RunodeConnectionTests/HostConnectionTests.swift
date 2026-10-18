@@ -251,6 +251,42 @@ import Testing
         await link.stop()
     }
 
+    /// 连不上、服务却还公布着（Mac 睡着、睡眠代理替它公布）：不按退避一遍遍连，也不干等兜底的重试，
+    /// 按 `idleMaximum` 隔一会儿试一次。
+    @Test func aPublishedButUnreachableHostIsRetriedAtTheIdlePace() async throws {
+        struct Published: HostDiscovery {
+            func locate(_ fingerprint: CertificateFingerprint, timeout: Duration) async -> TransportTarget? {
+                .address("192.168.1.30", port: 7290)
+            }
+        }
+        let link = HostConnection(
+            machine: machine, keyStore: keys, machines: store, discovery: Published(),
+            identity: ClientIdentity(build: "ios-test", deviceName: "测试 iPhone"),
+            policy: ReconnectPolicy(
+                base: .milliseconds(10), maximum: .milliseconds(20), idleMaximum: .milliseconds(800),
+                offlineRetry: .seconds(30)),
+            open: supply.opener)
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        while let event = await events.next() {
+            if case .state(.waiting(_, _, let offline)) = event {
+                #expect(offline)
+                break
+            }
+        }
+        let attempts = supply.requestedTargets.count
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(supply.requestedTargets.count == attempts)
+        let transport = FakeTransport()
+        supply.add(transport)
+        let started = ContinuousClock.now
+        var host = FakeHost(transport)
+        _ = try await admit(&host)
+        #expect(await waitReady(&events) != nil)
+        #expect(ContinuousClock.now - started < .seconds(5))
+        await link.stop()
+    }
+
     /// 经记着的地址连的电脑离线（没有 Bonjour 可等）：本机网络恢复或变化时马上再试，不等兜底的重试。
     @Test func anOfflineHostIsRetriedWhenTheNetworkChanges() async throws {
         let network = NetworkSignal()

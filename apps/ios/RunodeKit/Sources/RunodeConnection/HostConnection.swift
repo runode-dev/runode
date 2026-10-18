@@ -272,11 +272,18 @@ public actor HostConnection: HostLink {
             setState(
                 .waiting(reason: reason, retryAt: .now + TimeInterval(retryAfter.components.seconds), offline: offline))
             let earliest = ContinuousClock.now + delay
-            let backoff = Task { [discovery, networkChange, fingerprint = machine.fingerprint] in
+            let backoff = Task { [discovery, networkChange, policy, fingerprint = machine.fingerprint] in
                 guard offline else { return try await Task.sleep(for: delay) }
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask {
-                        try await Task.sleep(for: delay)
+                        // 连不上时它还公布着服务（Mac 睡着、睡眠代理替它公布，或者组播通、连接被挡）：等「公布」会
+                        // 立刻返回，退化成按退避一遍遍连；Mac 醒来时记录也可能不变，干等 `offlineRetry` 又要等五分钟。
+                        // 所以这时按 `idleMaximum` 一分钟试一次，比退避稀，醒来后也不久就连上。
+                        let published = await discovery.locate(fingerprint, timeout: .seconds(2)) != nil
+                        try await Task.sleep(until: earliest, clock: .continuous)
+                        guard !published else {
+                            return try await Task.sleep(until: earliest - delay + policy.idleMaximum, clock: .continuous)
+                        }
                         await discovery.awaitPresence(fingerprint)
                     }
                     group.addTask {
