@@ -6,6 +6,7 @@
 use std::{
     io::{BufRead as _, IsTerminal as _, Write},
     net::IpAddr,
+    sync::atomic::{AtomicI32, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -48,6 +49,8 @@ pub(crate) fn pair(
         Some(status) => status,
         None => turn_on(env, out, listener_wait)?,
     };
+    // 在 `ticket` 之前建，丢的时候 `ticket` 先删掉口令文件、再放开信号。
+    let signals = Signals::catch();
     let ticket = PairingTicket::begin(&env.dirs, PAIRING_TTL).context("cannot write the pairing code")?;
     let uri = ticket.uri(&status, extra)?.to_string();
     out.write_all(qr_code(&uri)?.as_bytes())?;
@@ -64,17 +67,75 @@ pub(crate) fn pair(
         match ticket.poll().context("cannot read the pairing code")? {
             PairingProgress::Waiting => {}
             PairingProgress::Paired { device_id, name } => {
+                // 后面还要问用户，Ctrl-C 得照常打断。
+                drop(signals);
                 writeln!(out, "Paired with {name} ({device_id}).")?;
                 return offer_background(env, out, answer);
             }
             PairingProgress::Expired => bail!("the pairing code expired before a phone used it"),
             PairingProgress::Replaced => bail!("another `runode remote pair` replaced this pairing code"),
         }
+        if let Some(signal) = signals.caught() {
+            return Err(Interrupted(signal).into());
+        }
         polls += 1;
         if polls.is_multiple_of(STATUS_EVERY) && listener_status(&env.dirs).ok().flatten().is_none() {
             bail!("remote access stopped while waiting for the phone");
         }
         thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// `pair` 等手机时收到了信号 `.0`，口令文件已经删掉；退出码照 shell 的惯例是 128 加信号。
+#[derive(Debug)]
+pub(crate) struct Interrupted(pub(crate) i32);
+
+impl std::fmt::Display for Interrupted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "stopped by signal {}", self.0)
+    }
+}
+
+impl std::error::Error for Interrupted {}
+
+/// `Signals` 接住的信号，没接到时为 0。信号处理函数里只能做这种无锁的写。
+static CAUGHT: AtomicI32 = AtomicI32::new(0);
+
+extern "C" fn note_signal(signal: libc::c_int) {
+    CAUGHT.store(signal, Ordering::Relaxed);
+}
+
+/// `pair` 等手机期间接住 Ctrl-C、关掉终端和 `kill`：按默认处理进程当场死掉，`PairingTicket` 来不及
+/// 删口令文件，口令在过期前一直配得上。丢掉时换回原来的处理。
+struct Signals([(libc::c_int, libc::sighandler_t); 3]);
+
+impl Signals {
+    fn catch() -> Self {
+        CAUGHT.store(0, Ordering::Relaxed);
+        Self([libc::SIGINT, libc::SIGHUP, libc::SIGTERM].map(|signal| {
+            let handler: extern "C" fn(libc::c_int) = note_signal;
+            // SAFETY: `note_signal` 只写一个原子变量，在信号处理函数里可以调。
+            let previous = unsafe { libc::signal(signal, handler as libc::sighandler_t) };
+            // 原来就忽略的（`nohup` 下的 SIGHUP）照旧忽略。
+            if previous == libc::SIG_IGN {
+                // SAFETY: 换回忽略，不涉及别的状态。
+                unsafe { libc::signal(signal, libc::SIG_IGN) };
+            }
+            (signal, previous)
+        }))
+    }
+
+    fn caught(&self) -> Option<i32> {
+        Some(CAUGHT.load(Ordering::Relaxed)).filter(|&signal| signal != 0)
+    }
+}
+
+impl Drop for Signals {
+    fn drop(&mut self) {
+        for (signal, previous) in self.0 {
+            // SAFETY: `previous` 是 `catch` 时 `signal` 返回的原处理。
+            unsafe { libc::signal(signal, previous) };
+        }
     }
 }
 

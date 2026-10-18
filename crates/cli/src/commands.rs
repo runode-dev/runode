@@ -61,6 +61,8 @@ pub(crate) enum Failure {
     Exited,
     /// 等的命令运行失败了，退出码已经打印出来。
     CommandFailed,
+    /// 收到了这个信号，停下了。
+    Signal(i32),
 }
 
 impl<E: Into<anyhow::Error>> From<E> for Failure {
@@ -238,7 +240,11 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             connection.request_done(&ClientMsg::Reveal { req, id })?;
         }
         Command::RemotePair { addrs } => {
-            crate::remote::pair(env, &addrs, out, &mut crate::remote::read_answer, crate::remote::LISTENER_WAIT)?
+            crate::remote::pair(env, &addrs, out, &mut crate::remote::read_answer, crate::remote::LISTENER_WAIT)
+                .map_err(|error| match error.downcast::<crate::remote::Interrupted>() {
+                    Ok(crate::remote::Interrupted(signal)) => Failure::Signal(signal),
+                    Err(error) => Failure::Error(error),
+                })?
         }
         Command::RemoteDevices { json } => crate::remote::devices(env, json, out)?,
         Command::RemoteRevoke { device } => crate::remote::revoke(env, &device, out)?,

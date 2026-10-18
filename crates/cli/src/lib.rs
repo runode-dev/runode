@@ -115,6 +115,7 @@ pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write)
             let _ = writeln!(err, "runode: the session exited");
             exit::EXITED
         }
+        Err(commands::Failure::Signal(signal)) => 128 + signal,
         Err(commands::Failure::Timeout) => {
             let _ = writeln!(err, "runode: timed out");
             exit::TIMEOUT

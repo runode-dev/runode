@@ -189,3 +189,45 @@ fn pairing_shows_a_code_and_a_link_and_waits() {
     let status = runode_remote::listener_status(&root.dirs()).unwrap().unwrap();
     assert_eq!(uri.fingerprint.to_vec(), status.fingerprint.0);
 }
+
+/// 设了它时 `ctrl_c_withdraws_the_pairing_code` 是被测的子进程，值是它的临时目录。
+const CHILD_ROOT: &str = "RUNODE_TEST_PAIR_ROOT";
+
+/// Ctrl-C 停下等待时删掉口令文件，退出码是 130。信号发给整个进程，所以 `pair` 跑在重新起的这个测试
+/// 程序里，不打断同一进程里别的测试。
+#[test]
+fn ctrl_c_withdraws_the_pairing_code() {
+    if let Some(root) = std::env::var_os(CHILD_ROOT) {
+        let env = Env { dirs: Dirs::from_vars(|_| Some(root.clone())), build: "test".into(), ..Env::default() };
+        std::process::exit(run("remote pair --addr 127.0.0.1", &env).0);
+    }
+    let root = Root::new("signal");
+    let _listener = Listener::start(Options {
+        dirs: root.dirs(),
+        port: 0,
+        bind: Bind::Loopback,
+        host_name: Some("测试的 Mac".into()),
+        advertise: false,
+        connect: Arc::new(|| Err(std::io::Error::other("no host in this test"))),
+    })
+    .unwrap();
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "ctrl_c_withdraws_the_pairing_code", "--nocapture"])
+        .env(CHILD_ROOT, &root.0)
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let file = root.dirs().remote_access_pairing_file().unwrap();
+    for _ in 0..250 {
+        if file.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(file.exists());
+    let pid = i32::try_from(child.id()).unwrap();
+    // SAFETY: 给自己起的子进程发信号。
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
+    assert_eq!(child.wait().unwrap().code(), Some(130));
+    assert!(!file.exists());
+}
