@@ -314,7 +314,6 @@ pub trait MenuHost: Sized + 'static {
         }
     }
 
-    /// 关掉菜单，焦点给 `target`，再派发 `action`：和按快捷键走同一条路。
     /// 换掉开着的菜单的各项，选中的位置尽量不变。
     fn replace_menu_items(&mut self, items: Vec<Option<MenuItem>>, cx: &mut Context<Self>) {
         if let Some(menu) = self.menu_slot() {
@@ -388,6 +387,7 @@ pub trait MenuHost: Sized + 'static {
         }
     }
 
+    /// 关掉菜单，焦点给 `target`，再派发 `action`：和按快捷键走同一条路。
     fn run_menu_action(&mut self, action: &dyn Action, window: &mut Window, cx: &mut Context<Self>) {
         let Some(menu) = self.menu_slot().take() else {
             return;

@@ -262,7 +262,7 @@ impl Listener {
         Ok(Self { shared, port, addrs, wake, thread: Some(thread), _bonjour: bonjour, _lock: lock })
     }
 
-    /// 开监听时要的端口（`Options::port`，可能是 0）。
+    /// 实际在听的端口：`Options::port` 是 0 时是系统分配的那个。
     pub fn port(&self) -> u16 {
         self.port
     }
