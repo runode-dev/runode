@@ -273,7 +273,7 @@ impl WindowView {
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
-        let mark = mark.map(|mark| styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)));
+        let mark = mark.map(|mark| styled_agent_mark(mark, ("workspace-agent", id), fg, cards(cx)));
         let name: AnyElement = match renaming {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx))).into_any_element(),
             None => div()
@@ -358,6 +358,9 @@ impl WindowView {
                         return;
                     }
                     cx.stop_propagation();
+                    // 按 id 找行号：画出这一行以后 workspace 可能已经增删、挪了位置（手机端、命令行开关的），
+                    // 照画的时候的行号会切到别的 workspace 上，甚至越界。
+                    let Some(ix) = this.workspaces.iter().position(|w| w.id == id) else { return };
                     if event.click_count >= 2 {
                         this.start_rename(ix, window, cx);
                     } else {
@@ -366,7 +369,11 @@ impl WindowView {
                 }),
             )
             // 按下要看双击，用不了 `PressDown`；辅助工具按下时就是单击切过去，改名走菜单里的「重命名」。
-            .on_a11y_press(view, move |this, window, cx| this.activate_workspace(ix, window, cx))
+            .on_a11y_press(view, move |this, window, cx| {
+                if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {
+                    this.activate_workspace(ix, window, cx);
+                }
+            })
             // 改名时在输入框里拖选文字，不能把整行拖走。
             .when(renaming.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
             .drag_over::<DraggedWorkspace>(move |style, dragged, _, cx| {

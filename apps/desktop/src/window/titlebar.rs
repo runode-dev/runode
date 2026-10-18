@@ -215,6 +215,14 @@ pub(super) fn shortcut_hint(select: &dyn Action, last: &dyn Action, is_last: boo
 }
 
 impl WindowView {
+    /// 切到当前 workspace 里的标签 `id`。点标签时按 id 找：画出标签条以后标签可能已经增删、挪了位置，
+    /// 也可能换了 workspace，照画的时候的序号会切到别的标签上，甚至越界。
+    fn activate_tab_id(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ix) = self.workspace().tabs.iter().position(|tab| tab.id == id) {
+            self.activate(ix, window, cx);
+        }
+    }
+
     pub(super) fn render_tab(&self, ix: usize, width: Pixels, cards: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = self.workspace();
         let tab = &workspace.tabs[ix];
@@ -319,12 +327,12 @@ impl WindowView {
                     if event.click_count >= 2 {
                         window.titlebar_double_click();
                     } else {
-                        this.activate(ix, window, cx);
+                        this.activate_tab_id(id, window, cx);
                     }
                 }),
             )
             // 按下要看双击，用不了 `PressDown`；辅助工具按下时就是单击切过去。
-            .on_a11y_press(view, move |this, window, cx| this.activate(ix, window, cx))
+            .on_a11y_press(view, move |this, window, cx| this.activate_tab_id(id, window, cx))
             .on_mouse_down(
                 MouseButton::Middle,
                 cx.listener(move |this, _, window, cx| {
@@ -382,8 +390,8 @@ impl WindowView {
                     })
                     .child(icons)
                     .child(label)
-                    .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", ix), fg).tooltip(driven)))
-                    .children(mark.map(|mark| styled_agent_mark(mark, ("tab-agent", ix), fg, true)))
+                    .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", id), fg).tooltip(driven)))
+                    .children(mark.map(|mark| styled_agent_mark(mark, ("tab-agent", id), fg, true)))
                     .map(|el| {
                         let close = Button::new(("tab-close", id), close_label.clone())
                             .with_size(ButtonSize::IconXs)
@@ -447,8 +455,8 @@ impl WindowView {
                             .tooltip(close_tooltip)
                             .on_press_down(cx, move |this, window, cx| this.close_tab_by_id(id, window, cx)),
                     )
-                    .child(titled(title, mark, ("tab-agent", ix), fg).flex_1())
-                    .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", ix), fg).tooltip(driven)))
+                    .child(titled(title, mark, ("tab-agent", id), fg).flex_1())
+                    .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", id), fg).tooltip(driven)))
                     .children(side_slot),
             })
     }
