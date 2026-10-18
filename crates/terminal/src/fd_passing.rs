@@ -149,7 +149,8 @@ fn send_some(stream: &UnixStream, parts: [&[u8]; 2], skip: usize, fds: &[RawFd])
     }
 }
 
-/// 收描述符时就设上 `FD_CLOEXEC`；macOS 没有这个标志，收到后再设，见 `recv_some`。
+/// 收描述符时就设上 `FD_CLOEXEC`；macOS 没有这个标志，收到后再设，见 `recv_some`。其间别的线程
+/// 起的子进程会继承这些描述符；现在只有接手的新宿主收，那时它还不起子进程（会话停在闸门上）。
 #[cfg(target_os = "linux")]
 const RECV_FLAGS: libc::c_int = libc::MSG_CMSG_CLOEXEC;
 #[cfg(not(target_os = "linux"))]
