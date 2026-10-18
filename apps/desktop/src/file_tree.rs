@@ -336,7 +336,7 @@ impl FileTree {
             if changed {
                 cx.notify();
             }
-            self.refresh_file_search(cx);
+            self.refresh_file_search(changed, cx);
         }
     }
 

@@ -579,9 +579,13 @@ impl FileTree {
         .detach();
     }
 
-    /// 文件树重读过，文件可能变了：有搜索词时重搜。
-    pub(crate) fn refresh_file_search(&mut self, cx: &mut Context<Self>) {
-        self.search_files(true, cx);
+    /// 文件树重读过，文件可能变了：有搜索词时重搜。按名称找只看有哪些文件，读到的目录和 git 状态都没变
+    /// （`changed` 为假）时不用重搜；按内容找时这两样看不出文件内容变没变（改一个已经改过的文件，git 状态
+    /// 不变），照旧重搜。
+    pub(crate) fn refresh_file_search(&mut self, changed: bool, cx: &mut Context<Self>) {
+        if changed || self.search.mode == SearchMode::Content {
+            self.search_files(true, cx);
+        }
     }
 
     pub(super) fn toggle_search_tree(&mut self, cx: &mut Context<Self>) {
