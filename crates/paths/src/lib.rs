@@ -166,6 +166,11 @@ impl Dirs {
         self.data_file("commit-message.json")
     }
 
+    /// Git 面板 AI 写提交说明时 agent 在里面跑的空目录，每次清空重建。
+    pub fn ai_message_dir(&self) -> Option<PathBuf> {
+        self.cache_file("ai-message")
+    }
+
     /// 用户自己的 agent 识别规则，`<agent 短名>.toml` 覆盖内置的同名规则。
     pub fn agent_detection_dir(&self) -> Option<PathBuf> {
         self.data_file("agent-detection")

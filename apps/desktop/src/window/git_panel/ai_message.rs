@@ -20,11 +20,11 @@ use std::{
     os::{
         fd::{AsRawFd, RawFd},
         raw::c_int,
-        unix::process::CommandExt,
+        unix::{fs::DirBuilderExt, process::CommandExt},
     },
     path::{Path, PathBuf},
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
-    sync::{Mutex, PoisonError},
+    sync::{Mutex, MutexGuard, PoisonError},
     thread,
     time::{Duration, Instant},
 };
@@ -229,10 +229,19 @@ fn generate(
         &[("basePrompt", &base), ("branch", &context.branch), ("stagedFiles", &context.files), ("stagedPatch", &patch)],
     );
     let (args, stdin) = command.args(&prompt);
+    // 内置的 agent 和登录 shell 都在空目录里跑：陌生仓库里的项目配置（`.claude/settings.json` 的钩子、
+    // `opencode.json`、direnv 的 `.envrc` 这类）会被它们读到、执行，提示词里已经有要的全部内容。用户自己
+    // 写的命令可能就要在仓库里跑（比如自己调 git），照旧在仓库里。
+    let scratch = Dirs::from_env()
+        .ai_message_dir()
+        .ok_or_else(|| "no home directory".to_owned())
+        .and_then(|dir| ScratchDir::new(dir).map_err(|err| err.to_string()))?;
     let path = path
-        .or_else(|| login_shell_path(&runode_terminal::pty::default_shell(), &repo.root))
+        .or_else(|| login_shell_path(&runode_terminal::pty::default_shell(), &scratch.dir))
         .or_else(|| std::env::var_os("PATH"));
-    let stdout = run(&command.binary, &args, stdin, &repo.root, path, &command.env, TIMEOUT)?;
+    let dir = if command.agent.is_some() { &scratch.dir } else { &repo.root };
+    let stdout = run(&command.binary, &args, stdin, dir, path, &command.env, TIMEOUT)?;
+    drop(scratch);
     let text = match command.agent.map_or(Output::Text, |agent| agent.output) {
         Output::Text => stdout,
         Output::OpenCodeEvents => opencode_text(&stdout)?,
@@ -242,6 +251,37 @@ fn generate(
         return Err(rust_i18n::t!("git.ai_message.empty").into_owned());
     }
     Ok(message)
+}
+
+/// agent 在里面跑的空目录（`Dirs::ai_message_dir`），丢掉时连同 agent 在里面留下的东西一起删掉。路径每次
+/// 一样：Claude Code 这类 agent 按工作目录在自己的全局配置里记一条，每次换个新目录的话越记越多。几次生成
+/// 同时跑时轮流用它。
+struct ScratchDir {
+    dir: PathBuf,
+    _in_use: MutexGuard<'static, ()>,
+}
+
+impl ScratchDir {
+    fn new(dir: PathBuf) -> io::Result<Self> {
+        static IN_USE: Mutex<()> = Mutex::new(());
+        let guard = IN_USE.lock().unwrap_or_else(PoisonError::into_inner);
+        // 上次没删掉的（app 被强退）先清掉；`remove_dir_all` 遇到符号链接只删链接本身。
+        match fs::remove_dir_all(&dir) {
+            Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err),
+            _ => {}
+        }
+        if let Some(parent) = dir.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::DirBuilder::new().mode(0o700).create(&dir)?;
+        Ok(Self { dir, _in_use: guard })
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.dir).ok();
+    }
 }
 
 /// 按预设要跑的命令：哪家 agent（自己定义的命令为空）、程序和用户写的参数。
@@ -846,6 +886,21 @@ mod tests {
         fs::remove_file(&marker).ok();
         // 写不进去的那行 bash 的 `echo` 留在自己的缓冲里，会跟着下一个 `echo` 一起写进文件，只看最后一行。
         assert_eq!(result.lines().last(), Some("closed"), "{result}");
+    }
+
+    /// 每次都是空目录，用完连里面的东西一起删掉；上次没删掉的下次清空。
+    #[test]
+    fn scratch_dirs_are_fresh_and_removed() {
+        let dir = std::env::temp_dir().join(format!("runode-ai-message-test-{}", std::process::id()));
+        let a = ScratchDir::new(dir.clone()).unwrap();
+        assert_eq!(fs::read_dir(&a.dir).unwrap().count(), 0);
+        fs::write(a.dir.join("left-over"), "x").unwrap();
+        drop(a);
+        assert!(!dir.exists());
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("crashed"), "x").unwrap();
+        let b = ScratchDir::new(dir).unwrap();
+        assert_eq!(fs::read_dir(&b.dir).unwrap().count(), 0);
     }
 
     #[test]
