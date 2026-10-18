@@ -762,6 +762,15 @@ impl Pty {
         let (slave, sink) = self.pending.take().expect("the pending slave was checked above");
         // 子进程持有自己的 slave 副本；我们这份必须关掉，子进程退出时才会读到 EOF。
         drop(slave);
+        // 也看着 shell 退出：Linux 上会话首进程退出时内核不收回终端，后台程序还开着从设备的话
+        // master 一直读不到 EOF。
+        // shell 已经起来了，这里不能再失败返回：开不了就照旧只靠 EOF。
+        if let Some(pid) = self.shell_pid() {
+            match Notifier::new(Some(pid)) {
+                Ok(notifier) => self.notifier = Arc::new(notifier),
+                Err(err) => tracing::warn!("failed to watch the shell for its exit: {err}"),
+            }
+        }
 
         self.reader = Some(Reader::start(master, self.notifier.clone(), sink, None)?);
         Ok(())

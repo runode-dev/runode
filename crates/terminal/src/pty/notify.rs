@@ -6,8 +6,9 @@
 //! 那一刻就通知，还没被回收（僵尸）也认得出，所以结束 shell 时不会把信号发给重用了这个进程号
 //! 的别的进程。
 //!
-//! 别的系统上叫醒用一根非阻塞的管道（两个描述符），shell 退没退出定时 `kill(pid, 0)`：进程没了
-//! （`ESRCH`）才算退出，认不出还没被回收的僵尸；不过接手的一方不是父进程，僵尸由 init 很快回收。
+//! 别的系统上叫醒用一根非阻塞的管道（两个描述符），shell 退没退出定时查：自己起的 shell 用 `waitid`
+//! 不回收地问，接手来的用 `kill(pid, 0)`，进程没了（`ESRCH`）才算退出，认不出还没被回收的僵尸；
+//! 不过接手的一方不是父进程，僵尸由 init 很快回收。
 
 #[cfg(target_os = "macos")]
 use std::os::fd::FromRawFd;
@@ -244,8 +245,21 @@ fn hangup_group(group: libc::pid_t) {
     }
 }
 
-/// 进程已经不在了。
+/// 进程已经不在了，或者是自己的子进程、已经退出还没回收：`kill(pid, 0)` 认不出僵尸，自己的子进程
+/// 要等 `Drop` 时才回收，所以先用 `WNOWAIT` 问一下，不回收它。
 fn gone(pid: libc::pid_t) -> bool {
+    // SAFETY: 全零的 siginfo_t 是合法的值，`waitid` 只往里写。
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let Ok(id) = libc::id_t::try_from(pid) else {
+        return true;
+    };
+    // SAFETY: `info` 是本地变量；`WNOHANG` 不阻塞，`WNOWAIT` 不回收。不是自己的子进程时返回 ECHILD。
+    if unsafe { libc::waitid(libc::P_PID, id, &raw mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) } == 0
+        // SAFETY: `waitid` 成功，`si_pid` 有值；没有退出的子进程时为 0。
+        && unsafe { info.si_pid() } != 0
+    {
+        return true;
+    }
     // SAFETY: 信号 0 不发信号，只检查进程在不在。
     unsafe { libc::kill(pid, 0) != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) }
 }
@@ -285,9 +299,9 @@ mod tests {
         let notifier = Notifier::new(Some(pid_of(&child))).unwrap();
         assert!(!notifier.has_exited());
         child.kill().unwrap();
-        if !notifier.polls_exit() {
-            eventually("the exit", || notifier.has_exited());
-        }
+        eventually("the exit", || notifier.has_exited());
+        // 轮询的那支（macOS 以外）也认得出自己的子进程变成了僵尸。
+        eventually("the zombie", || gone(pid_of(&child)));
         child.wait().unwrap();
         eventually("the exit", || notifier.has_exited());
     }
