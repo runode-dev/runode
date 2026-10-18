@@ -490,8 +490,10 @@ impl SettingsView {
 
     fn open_font_picker(&mut self, ix: usize, current: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         let mut names = cx.text_system().all_font_names();
-        names.sort_by_key(|name| name.to_lowercase());
+        // 先按原样排好去重，再按不分大小写排：只差大小写的名字夹在中间时，一样的名字不挨着，`dedup` 去不掉。
+        names.sort_unstable();
         names.dedup();
+        names.sort_by_key(|name| name.to_lowercase());
         let items = names.into_iter().map(|name| PickItem::new(name.clone(), name)).collect();
         self.open_picker(key_title("font-family"), items, current, PickTarget::FontFamily(ix), window, cx);
     }

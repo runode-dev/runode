@@ -169,7 +169,9 @@ impl SettingsView {
                     Some(font) => *font = value,
                     None => fonts.push(value),
                 }
-                fonts.dedup();
+                // 选了列表里别处已有的字体时只留前面那个。
+                let mut seen = std::collections::HashSet::new();
+                fonts.retain(|font| seen.insert(font.clone()));
                 self.write_or_report("font-family", fonts, cx);
             }
             PickTarget::Theme(slot) => self.set_theme(slot, value, cx),
