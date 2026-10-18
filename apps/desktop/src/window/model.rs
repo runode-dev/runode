@@ -86,6 +86,12 @@ pub(super) async fn inspect_dir(dir: PathBuf) -> (bool, PathBuf) {
     crate::fs_probe::off_thread(move || (dir.is_dir(), canonical_dir(&dir)), fallback).await
 }
 
+/// 拖进来的路径里是目录的那些，在单独的线程上看（`fs_probe::off_thread`）：访达里还开着已经断掉的网络卷时，
+/// 拖出来的东西一看就卡住。起不了线程时当作都不是目录。
+pub(super) async fn dropped_dirs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    crate::fs_probe::off_thread(move || paths.into_iter().filter(|path| path.is_dir()).collect(), Vec::new()).await
+}
+
 /// 新 workspace 的名字：家目录叫 `~`；在 git 仓库里取仓库根的目录名，其余取目录名。
 /// 往上找仓库根时不看家目录本身，免得家目录是个管配置文件的仓库时个个都叫用户名。
 pub(super) fn workspace_name(dir: &Path) -> String {

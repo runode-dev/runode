@@ -844,12 +844,21 @@ impl WindowView {
         if self.dialog_open(cx) {
             return;
         }
-        if dropped.paths().iter().any(|path| path.is_dir()) {
-            self.close_settings(window, cx);
-        }
-        for dir in dropped.paths().iter().filter(|path| path.is_dir()) {
-            self.open_workspace(dir.clone(), None, window, cx);
-        }
+        let paths = dropped.paths().to_vec();
+        cx.spawn_in(window, async move |this, cx| {
+            let dirs = model::dropped_dirs(paths).await;
+            this.update_in(cx, |this, window, cx| {
+                if dirs.is_empty() || this.dialog_open(cx) {
+                    return;
+                }
+                this.close_settings(window, cx);
+                for dir in dirs {
+                    this.open_workspace(dir, None, window, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 经典样式下标题栏画不画、两头让出多宽。

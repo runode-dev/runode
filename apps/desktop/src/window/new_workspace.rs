@@ -291,10 +291,19 @@ impl WindowView {
                 .items_start()
                 .bg(Hsla::black().opacity(0.15))
                 .drag_over::<ExternalPaths>(|style, _, _, _| style.bg(Hsla::black().opacity(0.25)))
-                .on_drop(cx.listener(|this, dropped: &ExternalPaths, window, cx| {
-                    if let Some(dir) = dropped.paths().iter().find(|path| path.is_dir()) {
-                        this.open_new_workspace(dir.clone(), window, cx);
-                    }
+                .on_drop(cx.listener(|_, dropped: &ExternalPaths, window, cx| {
+                    let paths = dropped.paths().to_vec();
+                    cx.spawn_in(window, async move |this, cx| {
+                        let Some(dir) = super::model::dropped_dirs(paths).await.into_iter().next() else { return };
+                        this.update_in(cx, |this, window, cx| {
+                            // 看的时候对话框可能已经关了。
+                            if this.new_workspace.is_some() {
+                                this.open_new_workspace(dir, window, cx);
+                            }
+                        })
+                        .ok();
+                    })
+                    .detach();
                 }))
                 .occlude()
                 .on_mouse_down(
