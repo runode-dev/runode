@@ -90,6 +90,8 @@ pub struct SettingsView {
     test_push: test_push::State,
     /// 正在后台装上或去掉的自启，按 `Kind::name`。
     autostart_jobs: HashMap<&'static str, Task<()>>,
+    /// 各自启装没装，按 `Kind::name`，在后台查（`refresh_autostart`）；还没查到的不在里面。
+    autostart: HashMap<&'static str, bool>,
     _observe: Subscription,
 }
 
@@ -98,7 +100,7 @@ impl EventEmitter<Close> for SettingsView {}
 impl SettingsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe_global_in::<AppConfig>(window, |this, window, cx| this.config_changed(window, cx));
-        Self {
+        let mut view = Self {
             focus_handle: cx.focus_handle(),
             page: Page::General,
             config: cx.global::<AppConfig>().0.clone(),
@@ -111,8 +113,11 @@ impl SettingsView {
             scroll: ScrollHandle::new(),
             test_push: test_push::State::default(),
             autostart_jobs: HashMap::new(),
+            autostart: HashMap::new(),
             _observe: observe,
-        }
+        };
+        view.refresh_autostart(cx);
+        view
     }
 
     /// 配置重载了：换上新值，没在编辑的输入框跟着更新。
