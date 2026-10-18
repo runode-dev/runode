@@ -4,7 +4,8 @@
 //! 终端目录；同一份里同名的换成新的命令行。命令菜单里这些命令行尾的编辑按钮用同一个对话框改，改完留在
 //! 原来的位置；删除按钮从文件里删掉它。对话框里还能录一个快捷键，存成配置里的 `keybind = 触发键=run_task:名字`；
 //! 快捷键按名字找命令，改名、删除时一起改掉、删掉，别的份里还有同名命令时留着原来的。文件由宿主列出来
-//! （`TaskSourceKind::Custom`、`Global`），手机上也看得到。
+//! （`TaskSourceKind::Custom`、`Global`），手机上也看得到。Makefile、package.json 的命令不能改，同一个
+//! 对话框只录快捷键（`bind_task`），名字和命令行只写出来、不写命令文件。
 
 use crate::ui::theme::ActiveTheme as _;
 use std::{
@@ -14,8 +15,8 @@ use std::{
 };
 
 use gpui::{
-    App, Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, Keystroke, MouseButton, Role, Stateful,
-    Subscription, Window, div, prelude::*, px,
+    App, Context, Div, Entity, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent, Keystroke, MouseButton, Role,
+    Stateful, Subscription, Window, div, prelude::*, px,
 };
 use runode_config::{
     ConfigFile, Keybind,
@@ -24,7 +25,7 @@ use runode_config::{
 use runode_paths::Dirs;
 use serde_json::{Map, Value};
 
-use super::{AddTask, EditTask};
+use super::{AddTask, BindTask, EditTask};
 use crate::ui::button::{Button, ButtonVariant};
 use crate::ui::dialog::Dialog;
 use crate::{
@@ -41,6 +42,9 @@ use crate::{
 pub(in crate::window) struct AddTaskDialog {
     /// 编辑时是改哪一份（项目目录，通用的为空）里的哪一条；添加时为空。
     editing: Option<(Option<PathBuf>, String)>,
+    /// 只给 Makefile、package.json 里的命令录快捷键时，它的名字和命令行；这时没有输入框，焦点给对话框。
+    binding: Option<(String, String)>,
+    focus: FocusHandle,
     /// 选的是通用的。
     global: bool,
     name: Entity<InputState>,
@@ -72,6 +76,17 @@ impl WindowView {
         let EditTask { project, name, command } = action.clone();
         self.open_task_dialog(Some((project, name.clone())), name, command, window, cx);
         self.focus_add_task_field(false, window, cx);
+    }
+
+    /// 打开给 Makefile、package.json 里的一条命令录快捷键的对话框，一打开就在录。
+    pub(in crate::window) fn bind_task(&mut self, action: &BindTask, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_task_dialog(None, String::new(), String::new(), window, cx);
+        if let Some(dialog) = &mut self.add_task {
+            dialog.shortcut = task_shortcut(&action.name, cx);
+            dialog.initial_shortcut = dialog.shortcut.clone();
+            dialog.binding = Some((action.name.clone(), action.command.clone()));
+        }
+        self.record_task_shortcut(window, cx);
     }
 
     /// 换上一个新的对话框，两个输入框里先填好 `name` 和 `command`。
@@ -106,6 +121,8 @@ impl WindowView {
             let shortcut = editing.as_ref().and_then(|(_, name)| task_shortcut(name, cx));
             self.add_task = Some(AddTaskDialog {
                 editing,
+                binding: None,
+                focus: cx.focus_handle(),
                 global,
                 name,
                 command,
@@ -124,8 +141,12 @@ impl WindowView {
         let Some(dialog) = &self.add_task else {
             return;
         };
-        let field = if command { &dialog.command } else { &dialog.name };
-        window.focus(&field.focus_handle(cx), cx);
+        let field = match &dialog.binding {
+            Some(_) => &dialog.focus,
+            None if command => &dialog.command.focus_handle(cx),
+            None => &dialog.name.focus_handle(cx),
+        };
+        window.focus(field, cx);
         cx.notify();
     }
 
@@ -173,12 +194,22 @@ impl WindowView {
         }
     }
 
-    /// Tab 在名字和命令之间切换。
+    /// Tab 在名字和命令之间切换；只录快捷键时回车保存、Esc 关掉。
     fn add_task_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = &self.add_task else {
             return;
         };
-        if event.keystroke.key == "tab" && !event.keystroke.modifiers.control && !event.keystroke.modifiers.platform {
+        if dialog.binding.is_some() {
+            match event.keystroke.unparse().as_str() {
+                "enter" => self.save_task(window, cx),
+                "escape" => self.close_add_task(window, cx),
+                _ => return,
+            }
+            cx.stop_propagation();
+        } else if event.keystroke.key == "tab"
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.platform
+        {
             cx.stop_propagation();
             let in_name = dialog.name.focus_handle(cx).is_focused(window);
             self.focus_add_task_field(in_name, window, cx);
@@ -194,6 +225,9 @@ impl WindowView {
         let Some(dialog) = &mut self.add_task else {
             return;
         };
+        if let Some((name, _)) = dialog.binding.clone() {
+            return self.save_task_shortcut(name, window, cx);
+        }
         let command = dialog.command.read(cx).query().trim().to_owned();
         if command.is_empty() || dialog.saving {
             if command.is_empty() {
@@ -249,9 +283,16 @@ impl WindowView {
                         // 对话框里的键还在，再保存就是改绑到这条上。
                         let kept = elsewhere && had_shortcut && matches!(keybind, Some(TaskKeybind::Rename { .. }));
                         let keybind = if elsewhere { keybind.and_then(TaskKeybind::keep_old) } else { keybind };
-                        let bound = keybind.map_or(Ok(()), |keybind| write_task_keybind(&keybind, cx)).and_then(|()| {
-                            if kept { Err(rust_i18n::t!("tasks.shortcut_kept_elsewhere").into_owned()) } else { Ok(()) }
-                        });
+                        let bound =
+                            keybind.map_or(Ok(true), |keybind| write_task_keybind(&keybind, cx)).and_then(|applied| {
+                                if !applied {
+                                    Err(rust_i18n::t!("tasks.shortcut_not_applied").into_owned())
+                                } else if kept {
+                                    Err(rust_i18n::t!("tasks.shortcut_kept_elsewhere").into_owned())
+                                } else {
+                                    Ok(())
+                                }
+                            });
                         this.workspace_mut().project.tasks_stale = true;
                         this.list_tasks(cx);
                         match bound {
@@ -282,6 +323,29 @@ impl WindowView {
             .ok();
         })
         .detach();
+    }
+
+    /// 只录快捷键时保存：改了快捷键就换掉绑在这个名字上的，改好了关掉对话框，改不成时把原因写在对话框里。
+    fn save_task_shortcut(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(dialog) = &mut self.add_task else {
+            return;
+        };
+        dialog.recording = None;
+        let change = (dialog.shortcut != dialog.initial_shortcut).then(|| TaskKeybind::Rebind {
+            old: Some(name.clone()),
+            new: dialog.shortcut.clone().map(|trigger| (trigger, name.clone())),
+        });
+        let error = match change.map_or(Ok(true), |change| write_task_keybind(&change, cx)) {
+            Ok(true) => return self.close_add_task(window, cx),
+            Ok(false) => rust_i18n::t!("tasks.bind_not_applied").into_owned(),
+            Err(err) => err,
+        };
+        let shortcut = task_shortcut(&name, cx);
+        if let Some(dialog) = &mut self.add_task {
+            dialog.initial_shortcut = shortcut;
+            dialog.error = Some(error);
+        }
+        cx.notify();
     }
 
     pub(in crate::window) fn render_add_task(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
@@ -366,19 +430,25 @@ impl WindowView {
         });
         let taken = dialog.shortcut.as_deref().filter(|_| dialog.recording.is_none()).and_then(|trigger| {
             let typed = dialog.name.read(cx).query().trim().to_owned();
-            let own = dialog.editing.as_ref().map_or(typed.as_str(), |(_, name)| name.as_str());
+            let own = match (&dialog.binding, &dialog.editing) {
+                (Some((name, _)), _) | (None, Some((_, name))) => name.as_str(),
+                (None, None) => typed.as_str(),
+            };
             shortcut_taken_by(trigger, own, cx)
         });
-        let hint = if dialog.global {
+        let hint = if let Some((name, _)) = &dialog.binding {
+            rust_i18n::t!("tasks.bind_hint", name = name)
+        } else if dialog.global {
             rust_i18n::t!("tasks.hint_global", file = TASKS_FILE_HINT)
         } else {
             rust_i18n::t!("tasks.hint_project", file = TASKS_FILE_HINT)
         };
         let cancel = button("add-task-cancel", rust_i18n::t!("tasks.cancel").into_owned(), ButtonVariant::Ghost)
             .on_press(cx, |this, window, cx| this.close_add_task(window, cx));
-        let (title, save) = match dialog.editing {
-            Some(_) => (rust_i18n::t!("tasks.edit_title"), rust_i18n::t!("tasks.update")),
-            None => (rust_i18n::t!("tasks.add_title"), rust_i18n::t!("tasks.save")),
+        let (title, save) = match (&dialog.binding, &dialog.editing) {
+            (Some((name, _)), _) => (rust_i18n::t!("tasks.bind_title", name = name), rust_i18n::t!("tasks.update")),
+            (None, Some(_)) => (rust_i18n::t!("tasks.edit_title"), rust_i18n::t!("tasks.update")),
+            (None, None) => (rust_i18n::t!("tasks.add_title"), rust_i18n::t!("tasks.save")),
         };
         let save = button("add-task-save", save.into_owned(), ButtonVariant::Secondary)
             .when(dialog.saving, |button| button.opacity(0.5))
@@ -386,6 +456,7 @@ impl WindowView {
         let (title, scope_label, hint) =
             (title.into_owned(), rust_i18n::t!("tasks.scope").into_owned(), hint.into_owned());
         let panel = Dialog::new("add-task-dialog", title.clone())
+            .when(dialog.binding.is_some(), |panel| panel.track_focus(&dialog.focus))
             .on_key_down(cx.listener(Self::add_task_key))
             .w(px(420.))
             .max_w_full()
@@ -403,38 +474,51 @@ impl WindowView {
                     .font_weight(FontWeight::BOLD)
                     .child(title),
             )
-            .child(field(rust_i18n::t!("tasks.name").into_owned(), &dialog.name))
-            .child(field(rust_i18n::t!("tasks.command").into_owned(), &dialog.command))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(div().text_color(fg.opacity(0.7)).child(scope_label.clone()))
+            .when_some(dialog.binding.as_ref(), |panel, (_, command)| {
+                panel.child(
+                    div()
+                        .id("add-task-bound-command")
+                        .role(Role::Label)
+                        .aria_label(command.clone())
+                        .text_color(fg.opacity(0.7))
+                        .child(command.clone()),
+                )
+            })
+            .when(dialog.binding.is_none(), |panel| {
+                panel
+                    .child(field(rust_i18n::t!("tasks.name").into_owned(), &dialog.name))
+                    .child(field(rust_i18n::t!("tasks.command").into_owned(), &dialog.command))
                     .child(
                         div()
-                            .id("add-task-scope")
-                            .role(Role::RadioGroup)
-                            .aria_label(scope_label)
                             .flex()
-                            .p(px(2.))
-                            .gap(px(2.))
-                            .rounded(px(6.))
-                            .bg(cx.theme().background)
-                            .child(scope(
-                                "add-task-project",
-                                false,
-                                rust_i18n::t!("tasks.scope_project").into_owned(),
-                                cx,
-                            ))
-                            .child(scope(
-                                "add-task-global",
-                                true,
-                                rust_i18n::t!("tasks.scope_global").into_owned(),
-                                cx,
-                            )),
-                    ),
-            )
+                            .items_center()
+                            .gap(px(8.))
+                            .child(div().text_color(fg.opacity(0.7)).child(scope_label.clone()))
+                            .child(
+                                div()
+                                    .id("add-task-scope")
+                                    .role(Role::RadioGroup)
+                                    .aria_label(scope_label)
+                                    .flex()
+                                    .p(px(2.))
+                                    .gap(px(2.))
+                                    .rounded(px(6.))
+                                    .bg(cx.theme().background)
+                                    .child(scope(
+                                        "add-task-project",
+                                        false,
+                                        rust_i18n::t!("tasks.scope_project").into_owned(),
+                                        cx,
+                                    ))
+                                    .child(scope(
+                                        "add-task-global",
+                                        true,
+                                        rust_i18n::t!("tasks.scope_global").into_owned(),
+                                        cx,
+                                    )),
+                            ),
+                    )
+            })
             .child(
                 div()
                     .flex()
@@ -550,8 +634,8 @@ impl TaskKeybind {
 }
 
 /// 按 `change` 改配置里的 `keybind`，没变时不写；写完（配置随之重载）再按合并了 `config-file` 引入的
-/// 文件的配置核对一遍，没改成时返回原因：只改得了主配置文件，绑在引入的文件里的行改不到。
-pub(super) fn write_task_keybind(change: &TaskKeybind, cx: &mut App) -> Result<(), String> {
+/// 文件的配置核对一遍，给出改没改成：只改得了主配置文件，绑在引入的文件里的行改不到。
+pub(super) fn write_task_keybind(change: &TaskKeybind, cx: &mut App) -> Result<bool, String> {
     let path = runode_config::config_path().ok_or("no home directory")?;
     let values = ConfigFile::read(&path).map_err(|err| format!("{}: {err}", path.display()))?.values("keybind");
     let renamed: Vec<String> = match change {
@@ -563,8 +647,7 @@ pub(super) fn write_task_keybind(change: &TaskKeybind, cx: &mut App) -> Result<(
         crate::config::write_values(&path, "keybind", &updated, cx)
             .map_err(|err| format!("{}: {err}", path.display()))?;
     }
-    let applied = keybind_applied(&cx.global::<AppConfig>().0.keybinds, change, &renamed);
-    applied.then_some(()).ok_or_else(|| rust_i18n::t!("tasks.shortcut_not_applied").into_owned())
+    Ok(keybind_applied(&cx.global::<AppConfig>().0.keybinds, change, &renamed))
 }
 
 /// 叠上默认绑定后绑在 `run_task:name` 上的触发键，GPUI 的写法。

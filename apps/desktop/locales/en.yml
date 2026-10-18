@@ -219,6 +219,10 @@ tasks:
   shortcut_taken: "“%{what}” uses this key now; saving makes it run this task instead."
   shortcut_not_applied: "The task was saved, but its shortcut did not change: another keybind line, maybe in a file included with config-file, still overrides it. Edit that line in the config."
   shortcut_kept_elsewhere: "The task was saved, but its shortcut stayed with another task of the old name. Save again to move the shortcut to this task."
+  bind: "Set Shortcut (Cmd+K)"
+  bind_title: "Shortcut for “%{name}”"
+  bind_hint: "The shortcut runs a task by name (run_task:%{name}): in another project it runs the task of that name there, and a task of yours with the same name runs first."
+  bind_not_applied: "The shortcut did not change: another keybind line, maybe in a file included with config-file, still overrides it. Edit that line in the config."
 tooltip:
   show_sidebar: Show Sidebar
   hide_sidebar: Hide Sidebar

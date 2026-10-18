@@ -2,7 +2,8 @@
 //! package.json 的 scripts，由宿主列出、拼好命令行（`ClientMsg::ListTasks`），和手机会话卡片上的
 //! 是同一份。右侧面板开关左边的按钮弹出分组的菜单，点一条在当前标签里分出一个终端（或按配置开新标签）、
 //! 在列命令的目录里跑它；菜单最上面一项添加自己的
-//! 命令，自己加的命令行尾有编辑和删除按钮，添加、编辑的对话框和改写命令文件在 `custom`。
+//! 命令，自己加的命令行尾有编辑和删除按钮，Makefile、package.json 的命令行尾有设快捷键的按钮，这几个
+//! 对话框和改写命令文件在 `custom`。
 
 mod custom;
 
@@ -25,7 +26,7 @@ use crate::ui::a11y::A11yPress;
 use crate::ui::button::Toggle;
 use crate::ui::menu::MenuHost as _;
 use crate::{
-    assets::{PENCIL_ICON, PLAY_ICON, TRASH_ICON},
+    assets::{KEYBOARD_ICON, PENCIL_ICON, PLAY_ICON, TRASH_ICON},
     config::AppConfig,
     host_client,
     terminal_view::TerminalView,
@@ -80,6 +81,15 @@ pub(super) struct DeleteTask {
 #[action(namespace = runode, no_json)]
 pub(super) struct EditTask {
     project: Option<PathBuf>,
+    name: String,
+    command: String,
+}
+
+/// Makefile、package.json 的命令行尾的快捷键按钮：给叫 `name` 的命令录快捷键，对话框里写出它的命令行
+/// `command`。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(super) struct BindTask {
     name: String,
     command: String,
 }
@@ -310,8 +320,10 @@ impl WindowView {
                 match deleted {
                     Ok(false) => {
                         let change = custom::TaskKeybind::Rebind { old: Some(name), new: None };
-                        if let Err(err) = custom::write_task_keybind(&change, cx) {
-                            tracing::warn!("could not remove the task shortcut: {err}");
+                        match custom::write_task_keybind(&change, cx) {
+                            Ok(true) => {}
+                            Ok(false) => tracing::warn!("the task shortcut is still bound by another keybind line"),
+                            Err(err) => tracing::warn!("could not remove the task shortcut: {err}"),
                         }
                     }
                     Ok(true) => {}
@@ -330,9 +342,9 @@ impl WindowView {
     }
 
     /// 命令菜单的各项：最上面是添加命令，下面每份一组。自己加的两份标题是「我的命令」「通用命令」，
-    /// 别的是文件，在列命令的目录里的写相对路径，在上层目录里的写 `~/…`；标题后面是命令条数，点了收起或展开，收起的组只留标题；命令名后面
-    /// 淡淡地写它的说明，自己加的命令选中时行尾有编辑和删除按钮。另外给出上次跑的命令在第几项，它所在的组
-    /// 收着或者它没了时为空。
+    /// 别的是文件，在列命令的目录里的写相对路径，在上层目录里的写 `~/…`；标题后面是命令条数，点了收起或
+    /// 展开，收起的组只留标题；命令名后面淡淡地写它的说明，选中时行尾自己加的命令有编辑和删除按钮，别的
+    /// 有设快捷键的按钮。另外给出上次跑的命令在第几项，它所在的组收着或者它没了时为空。
     fn tasks_menu_items(&self, cx: &App) -> (Vec<Option<MenuItem>>, Option<usize>) {
         let mut items = vec![Some(MenuItem::new(rust_i18n::t!("tasks.add"), Box::new(AddTask), true, cx))];
         let mut last = None;
@@ -376,7 +388,14 @@ impl WindowView {
                     MenuItem::label(task.name.clone(), description.map(SharedString::from), Some(Box::new(action)))
                         .with_tooltip(full);
                 if !custom {
-                    return Some(item);
+                    let bind = BindTask { name: task.name.clone(), command: task.command.clone() };
+                    let bind_button = MenuButton {
+                        icon: KEYBOARD_ICON,
+                        tooltip: rust_i18n::t!("tasks.bind").into(),
+                        keep_open: false,
+                        cmd_key: Some("k"),
+                    };
+                    return Some(item.with_button(bind_button, Box::new(bind)));
                 }
                 // 自己加的命令的说明就是写在文件里的命令行。
                 let edit = EditTask {
