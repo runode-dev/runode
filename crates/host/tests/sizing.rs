@@ -485,6 +485,7 @@ fn oversized_grids_are_refused() {
         req: 7,
         size: huge,
         cwd: None,
+        fallback_cwd: None,
         integration: IntegrationMode::Off,
         start: true,
         shell: Some("/bin/cat".into()),

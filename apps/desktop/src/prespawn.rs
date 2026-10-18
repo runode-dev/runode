@@ -61,6 +61,7 @@ fn spawn(config: &Config) -> Option<Prespawned> {
     let spawned = host_client::link().spawn(SpawnOptions {
         size,
         cwd: None,
+        fallback_cwd: None,
         integration: config.shell_integration,
         start: true,
         shell: None,

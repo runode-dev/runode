@@ -11,11 +11,13 @@
 //! 读的线程不等会话线程回话：列会话、读屏幕先在读的线程里把请求按先后送到会话线程，再起一个
 //! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。一条连接上这样在等的请求
 //! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程；git 请求另算一份名额，
-//! 联网的 git 操作卡住时列会话、读屏幕照常。列目录（`ClientMsg::ListDirs`）和列命令
-//! （`ClientMsg::ListTasks`）也另起线程办、另算一份名额：断掉的网络挂载上 stat 会一直卡住，
-//! 卡住的只是那个线程。积压过了上限的连接，列会话、读屏幕、连上会话和 git 请求都当场回 `Error`，
-//! 不再往积压上加回话；别的回话照办（输入的 `Done` 回错的话粘贴就丢了），积压远超上限
-//! （`OUTBOX_HARD_LIMIT`）时前端显然不读了，读的线程直接断开连接。开会话还在读的线程里办（开伪终端、启动 shell 要几毫秒）。
+//! 联网的 git 操作卡住时列会话、读屏幕照常。列目录（`ClientMsg::ListDirs`）、列命令
+//! （`ClientMsg::ListTasks`）和开会话（`ClientMsg::Spawn`，要 stat、进起始目录）也另起线程办、另算名额
+//! （开会话再单算一份，卡住的列目录占满了也开得了别处的终端）：断掉的网络挂载上 stat 会一直卡住，卡住的
+//! 只是那个线程，回话按 `req` 认，先后不定。积压过了
+//! 上限的连接，列会话、读屏幕、连上会话和 git 请求都当场回 `Error`，不再往积压上加回话；别的回话照办
+//! （输入的 `Done` 回错的话粘贴就丢了），积压远超上限（`OUTBOX_HARD_LIMIT`）时前端显然不读了，读的线程
+//! 直接断开连接。
 //!
 //! 能连上 socket 就能读写所有终端：socket 放在只有自己能进的目录里（见调用方建目录的方式），
 //! 连上来的进程也要是同一个用户的。`Hello` 里的 `ClientKind` 是前端自报的，宿主不核实：终端里的
@@ -747,6 +749,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         waiting: Waiting::default(),
         git_waiting: Waiting::default(),
         files_waiting: Waiting::default(),
+        spawn_waiting: Waiting::default(),
         git: None,
         closing: false,
     };
@@ -956,6 +959,8 @@ struct Connection {
     git_waiting: Waiting,
     /// 在另起的线程里读文件系统的请求（列目录、列命令），也和 `waiting` 分开算，见 `read_files`。
     files_waiting: Waiting,
+    /// 在另起的线程里开的会话，和 `files_waiting` 同理另算。
+    spawn_waiting: Waiting,
     /// 办 git 请求的工作线程，第一次要时才起。
     git: Option<GitWorker>,
     /// 这条连接发来的 `Shutdown` 让宿主退出了：之后的请求都不办，读的线程结束。
@@ -1111,18 +1116,21 @@ impl Connection {
                     drop(slot);
                 });
             }
-            ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings } => {
+            ClientMsg::Spawn { req, size, cwd, fallback_cwd, integration, start, shell, settings } => {
                 if let Err(message) = check_size(size) {
                     self.error(Some(req), None, message);
                     return;
                 }
-                let options = SpawnOptions { size, cwd, integration, start, shell, settings };
-                match self.shared.spawn(options) {
-                    Ok(id) => self.out.control(&HostMsg::Spawned { req, id }),
-                    Err(err) => {
-                        self.out.control(&HostMsg::Error { req: Some(req), id: None, message: format!("{err:#}") })
-                    }
-                };
+                let shared = self.shared.clone();
+                self.read_files_in(&self.spawn_waiting, req, "host-spawn", move || {
+                    // 备用目录也不在时交给 `Pty::start`，它从家目录开。
+                    let cwd = match (cwd, fallback_cwd) {
+                        (Some(cwd), Some(fallback)) if !cwd.is_dir() => Some(fallback),
+                        (cwd, _) => cwd,
+                    };
+                    let options = SpawnOptions { size, cwd, integration, start, shell, settings };
+                    shared.spawn(options).map(|id| HostMsg::Spawned { req, id }).map_err(|err| format!("{err:#}"))
+                });
             }
             ClientMsg::Start { id, integration } => {
                 if !self.shared.deliver(id, Inbox::Start { integration }) {
@@ -1454,7 +1462,18 @@ impl Connection {
     /// 的一个名额：断掉的网络挂载上 stat、读目录会一直卡住，卡住的不能是读线程。`answer` 的 `Err` 回成带着
     /// `req` 的 `Error`。
     fn read_files(&self, req: u32, name: &str, answer: impl FnOnce() -> Result<HostMsg, String> + Send + 'static) {
-        let Some(slot) = self.files_waiting.enter() else {
+        self.read_files_in(&self.files_waiting, req, name, answer);
+    }
+
+    /// 同 `read_files`，占 `slots` 的名额。
+    fn read_files_in(
+        &self,
+        slots: &Waiting,
+        req: u32,
+        name: &str,
+        answer: impl FnOnce() -> Result<HostMsg, String> + Send + 'static,
+    ) {
+        let Some(slot) = slots.enter() else {
             self.error(Some(req), None, "too many requests are waiting for an answer".into());
             return;
         };

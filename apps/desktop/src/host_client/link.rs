@@ -108,6 +108,8 @@ pub struct SpawnOptions {
     pub size: GridSize,
     /// shell 从哪个目录开始，`None` 时从家目录。
     pub cwd: Option<PathBuf>,
+    /// `cwd` 不是目录时改从这里开，见 `ClientMsg::Spawn::fallback_cwd`。
+    pub fallback_cwd: Option<PathBuf>,
     pub integration: IntegrationMode,
     /// 现在就启动 shell；为 false 时等 `ClientMsg::Start`。
     pub start: bool,
@@ -555,10 +557,10 @@ impl Link {
 
     /// 同 `spawn`，最多等 `timeout`。
     fn spawn_within(&self, options: SpawnOptions, timeout: Duration) -> Result<SessionId> {
-        let SpawnOptions { size, cwd, integration, start, shell, settings } = options;
+        let SpawnOptions { size, cwd, fallback_cwd, integration, start, shell, settings } = options;
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
         let (reply, generation) = self.expect_reply(req)?;
-        let spawn = ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings };
+        let spawn = ClientMsg::Spawn { req, size, cwd, fallback_cwd, integration, start, shell, settings };
         if let Err(err) = self.inner.control_on(generation, &spawn) {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host for a terminal: {err}"));

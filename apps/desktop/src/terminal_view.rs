@@ -138,6 +138,8 @@ pub struct TerminalView {
     colors: (Rgb, Rgb),
     /// 调用方记着的这个终端的目录，宿主还没报告目录时用，见 `reattach`。
     start_dir: Option<PathBuf>,
+    /// `deferred` 建的视图开会话时 `start_dir` 不是目录的话改从哪里开。
+    start_fallback: Option<PathBuf>,
     /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。`deferred` 建的视图开会话
     /// 之前为 `None`。
     id: Option<SessionId>,

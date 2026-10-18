@@ -202,6 +202,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 req: 3,
                 size: size(),
                 cwd: None,
+                fallback_cwd: None,
                 integration: IntegrationMode::Detect,
                 start: true,
                 shell: None,

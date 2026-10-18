@@ -152,19 +152,30 @@ impl ArcWake for Unpark {
 impl TerminalView {
     /// 建好视图，在 `cwd` 下启动 shell，`cwd` 为 `None` 时从家目录开始；shell 等第一次布局后
     /// 才启动，见 `start`。伪终端开不了时返回错误，不建视图。
-    pub fn spawn(cwd: Option<&Path>, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
-        let view = Self::unstarted(cwd, window, cx)?;
+    pub fn spawn(
+        cwd: Option<&Path>,
+        fallback: Option<&Path>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<Entity<Self>> {
+        let view = Self::unstarted(cwd, fallback, window, cx)?;
         view.update(cx, |view, cx| view.start(cx));
         Ok(view)
     }
 
     /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时显示出来的终端用它，
-    /// 等第一次布局量出尺寸再启动；看不见的连会话都不开，见 `deferred`。
-    pub fn unstarted(cwd: Option<&Path>, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
+    /// 等第一次布局量出尺寸再启动；看不见的连会话都不开，见 `deferred`。`cwd` 不是目录时从 `fallback` 开。
+    pub fn unstarted(
+        cwd: Option<&Path>,
+        fallback: Option<&Path>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<Entity<Self>> {
         let config = cx.global::<AppConfig>().0.clone();
         let id = host_client::link().spawn(SpawnOptions {
             size: PROVISIONAL_SIZE,
             cwd: cwd.map(Into::into),
+            fallback_cwd: fallback.map(Into::into),
             integration: config.shell_integration,
             start: false,
             shell: None,
@@ -178,16 +189,18 @@ impl TerminalView {
     /// （`request_visible`）或者要启动（`start_at`）时再在 `cwd` 下开，为 `None` 时从家目录开始。
     /// 恢复布局时看不见、又从没启动过的终端用它，恢复很多标签时只有显示出来的那几个马上开。
     /// 开之前标题和目录按起始目录给，和宿主给还没启动的会话的一样。
-    pub fn deferred(cwd: Option<&Path>, window: &mut Window, cx: &mut App) -> Entity<Self> {
+    pub fn deferred(cwd: Option<&Path>, fallback: Option<&Path>, window: &mut Window, cx: &mut App) -> Entity<Self> {
         let dir = cwd.map(Path::to_path_buf).or_else(|| runode_paths::Dirs::from_env().home);
         let meta = SessionMeta { fallback_title: dir.as_deref().map(dir_label), cwd: dir, ..SessionMeta::default() };
         let screen = ScreenState::new_unopened(meta, PROVISIONAL_SIZE, Instant::now());
         // 还没有会话也就没有事件：发的一端直接丢掉，读事件的任务一开始就结束，开了会话再起。
         let (_, rx) = futures::channel::mpsc::unbounded();
         let start_dir = cwd.map(Path::to_path_buf);
+        let start_fallback = fallback.map(Path::to_path_buf);
         cx.new(|cx| {
             let mut view = Self::new(None, screen, false, rx, window, cx);
             view.start_dir = start_dir;
+            view.start_fallback = start_fallback;
             view
         })
     }
@@ -200,6 +213,7 @@ impl TerminalView {
         let spawned = link.spawn(SpawnOptions {
             size: self.screen.last_size(),
             cwd: self.start_dir.clone(),
+            fallback_cwd: self.start_fallback.clone(),
             integration: self.config.shell_integration,
             start,
             shell: None,
@@ -643,8 +657,8 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// 在 `cwd`（为 `None` 时家目录）按 `size` 开一个已经启动的新会话、连上它，换掉现在的；换下来的
-    /// 会话随之结束。
+    /// 在 `cwd`（为 `None` 时家目录，不是目录时 `start_fallback`）按 `size` 开一个已经启动的新会话、连上它，
+    /// 换掉现在的；换下来的会话随之结束。
     fn replace_session(
         &mut self,
         size: GridSize,
@@ -656,6 +670,7 @@ impl TerminalView {
         let id = link.spawn(SpawnOptions {
             size,
             cwd,
+            fallback_cwd: self.start_fallback.clone(),
             integration: self.config.shell_integration,
             start: true,
             shell: None,
@@ -766,6 +781,7 @@ impl TerminalView {
             pending_end: None,
             colors: (settings.foreground, settings.background),
             start_dir: None,
+            start_fallback: None,
             id,
             ended: false,
             bell_pending: false,

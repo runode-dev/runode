@@ -242,7 +242,18 @@ impl WindowView {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Entity<TerminalView>> {
-        match TerminalView::spawn(cwd, window, cx) {
+        self.spawn_terminal_or(cwd, None, window, cx)
+    }
+
+    /// 同 `spawn_terminal`，`cwd` 不是目录时从 `fallback` 开。
+    pub(super) fn spawn_terminal_or(
+        &mut self,
+        cwd: Option<&Path>,
+        fallback: Option<&Path>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Entity<TerminalView>> {
+        match TerminalView::spawn(cwd, fallback, window, cx) {
             Ok(view) => {
                 self.record_spawn(&view, cwd);
                 Some(view)
@@ -745,11 +756,12 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<TerminalView>> {
-        // 目录已经被删掉时 shell 起不来，退回 workspace 的目录，再退回家目录；workspace 里没有终端
-        // 时从它的目录开始。
+        // 目录已经被删掉时宿主退回 workspace 的目录，再退回家目录；workspace 里没有终端时从它的目录开始。
+        // 不在界面线程上看目录还在不在，见 `format::start_dir`。
+        let fallback = self.workspace().dir.clone();
         let cwd = self.focused_view().and_then(|view| view.read(cx).cwd());
-        let cwd = format::start_dir(cwd.as_deref(), &self.workspace().dir);
-        self.spawn_terminal(cwd.as_deref(), window, cx)
+        let cwd = format::start_dir(cwd.as_deref(), &fallback);
+        self.spawn_terminal_or(Some(&cwd), Some(&fallback), window, cx)
     }
 }
 

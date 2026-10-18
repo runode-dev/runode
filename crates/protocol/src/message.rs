@@ -131,6 +131,10 @@ pub enum ClientMsg {
         req: u32,
         size: GridSize,
         cwd: Option<PathBuf>,
+        /// `cwd` 不是目录（删掉了、卷没挂上）时改从这里开，也不是目录时从家目录。前端不在自己的线程上
+        /// 查目录，网络卷挂死时卡住的是宿主开会话的线程。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fallback_cwd: Option<PathBuf>,
         integration: IntegrationMode,
         /// 现在就启动 shell；为假时只开好伪终端，等 `Start`。
         #[serde(default = "yes")]

@@ -500,7 +500,7 @@ impl WindowView {
     fn push_default_workspace(&mut self, shell: Option<Prespawned>, window: &mut Window, cx: &mut Context<Self>) {
         let started = match shell {
             Some(shell) => TerminalView::adopt(shell, window, cx),
-            None => TerminalView::spawn(None, window, cx),
+            None => TerminalView::spawn(None, None, window, cx),
         };
         let ix = self.workspaces.len();
         match started {

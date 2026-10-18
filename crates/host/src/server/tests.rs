@@ -495,6 +495,7 @@ fn a_stopping_host_opens_no_more_sessions() {
             req: 1,
             size: SIZE,
             cwd: None,
+            fallback_cwd: None,
             integration: IntegrationMode::Off,
             start: true,
             shell: Some("/bin/cat".into()),

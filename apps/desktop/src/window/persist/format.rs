@@ -288,10 +288,10 @@ pub fn adopt(
     }
 }
 
-/// 恢复的终端从哪里开始：记下的目录还在就用它，否则用 workspace 的目录；都不在了为空，
-/// 也就是家目录。
-pub fn start_dir(cwd: Option<&Path>, workspace_dir: &Path) -> Option<PathBuf> {
-    cwd.filter(|cwd| cwd.is_dir()).or_else(|| Some(workspace_dir).filter(|dir| dir.is_dir())).map(Path::to_path_buf)
+/// 新开的终端从哪里开始：记下的目录，没有时是 workspace 的目录。不看它还在不在：目录在挂死的网络卷上时
+/// stat 会卡住界面线程；不在了由宿主开会话时退回 workspace 的目录（`ClientMsg::Spawn::fallback_cwd`）。
+pub fn start_dir(cwd: Option<&Path>, workspace_dir: &Path) -> PathBuf {
+    cwd.unwrap_or(workspace_dir).to_path_buf()
 }
 
 /// 读存档，没有存档时为 `None`。读不了、内容坏了或者是别的版本时也为 `None`，并把原文件挪到一边
@@ -673,10 +673,9 @@ mod tests {
     }
 
     #[test]
-    fn start_dir_falls_back_to_workspace_then_home() {
+    fn start_dir_falls_back_to_the_workspace_without_touching_the_disk() {
         let missing = Path::new("/nonexistent/runode-test");
-        assert_eq!(start_dir(Some(Path::new("/")), Path::new("/tmp")), Some("/".into()));
-        assert_eq!(start_dir(Some(missing), Path::new("/tmp")), Some("/tmp".into()));
-        assert_eq!(start_dir(None, missing), None);
+        assert_eq!(start_dir(Some(missing), Path::new("/tmp")), PathBuf::from(missing));
+        assert_eq!(start_dir(None, missing), PathBuf::from(missing));
     }
 }

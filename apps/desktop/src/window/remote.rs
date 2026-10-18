@@ -189,8 +189,9 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<SessionId> {
         let Some(beside) = beside else {
-            let cwd = format::start_dir(cwd.as_deref(), &self.workspace().dir);
-            let view = self.spawn_terminal(cwd.as_deref(), window, cx)?;
+            let fallback = self.workspace().dir.clone();
+            let cwd = format::start_dir(cwd.as_deref(), &fallback);
+            let view = self.spawn_terminal_or(Some(&cwd), Some(&fallback), window, cx)?;
             let session = view.read(cx).session_id();
             self.insert_tab(0, view, window, cx);
             return session;
@@ -198,8 +199,9 @@ impl WindowView {
         let (wi, ti) = self.locate(beside)?;
         let near = self.workspaces[wi].tabs[ti].panes[&beside].0.clone();
         let cwd = cwd.or_else(|| near.read(cx).cwd());
-        let cwd = format::start_dir(cwd.as_deref(), &self.workspaces[wi].dir);
-        let view = self.spawn_terminal(cwd.as_deref(), window, cx)?;
+        let fallback = self.workspaces[wi].dir.clone();
+        let cwd = format::start_dir(cwd.as_deref(), &fallback);
+        let view = self.spawn_terminal_or(Some(&cwd), Some(&fallback), window, cx)?;
         // `spawn` 建的视图当场开好了会话。
         let session = view.read(cx).session_id();
         match placement {

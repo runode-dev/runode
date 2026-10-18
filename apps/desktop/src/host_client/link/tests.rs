@@ -42,6 +42,7 @@ fn spawn(link: &Link, shell: String) -> SessionId {
     link.spawn(SpawnOptions {
         size: SIZE,
         cwd: None,
+        fallback_cwd: None,
         integration: IntegrationMode::Off,
         start: true,
         shell: Some(shell),
@@ -579,6 +580,7 @@ fn every_session_hears_when_the_host_goes_away() {
         link.spawn(SpawnOptions {
             size: SIZE,
             cwd: None,
+            fallback_cwd: None,
             integration: IntegrationMode::Off,
             start: true,
             shell: None,
@@ -637,6 +639,7 @@ fn a_terminal_spawned_after_the_caller_gave_up_is_ended() {
     let options = SpawnOptions {
         size: SIZE,
         cwd: None,
+        fallback_cwd: None,
         integration: IntegrationMode::Off,
         start: true,
         shell: None,
@@ -851,6 +854,7 @@ mod bench {
         link.spawn(SpawnOptions {
             size,
             cwd: None,
+            fallback_cwd: None,
             integration: IntegrationMode::Off,
             start: true,
             shell: Some(shell),

@@ -117,6 +117,7 @@ fn sessions_can_be_spawned_over_the_socket() {
         req: 7,
         size: SIZE,
         cwd: None,
+        fallback_cwd: None,
         integration: IntegrationMode::Off,
         start: true,
         shell: None,

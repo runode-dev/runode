@@ -136,6 +136,7 @@ impl PairDesktop {
             req: 1,
             size,
             cwd: None,
+            fallback_cwd: None,
             integration: IntegrationMode::Off,
             start: true,
             shell: Some(shell),

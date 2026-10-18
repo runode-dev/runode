@@ -88,6 +88,7 @@ fn spawn_settings_apply_only_before_the_first_theme() {
             req,
             size: SIZE,
             cwd: None,
+            fallback_cwd: None,
             integration: IntegrationMode::Off,
             start: true,
             shell: Some("/bin/cat".into()),
@@ -163,6 +164,31 @@ fn unstarted_sessions_start_on_request() {
     peer.input(channel, b"go\r");
     peer.wait_for_output(channel, b"go");
     peer.send(&ClientMsg::Kill { id });
+}
+
+/// 起始目录不在了（比如记下的目录被删了）照样开得起来：从前端给的备用目录开，它也不在时从家目录开。
+#[test]
+fn a_missing_start_directory_falls_back() {
+    let host = host();
+    let mut peer = Peer::pair(&host);
+    let dir = temp_dir("missingcwd");
+    let home = runode_paths::Dirs::from_env().home.unwrap().canonicalize().unwrap();
+    for (fallback, expected) in [(dir.clone(), dir.canonicalize().unwrap()), (dir.join("also-gone"), home)] {
+        let out = dir.join("pwd.txt");
+        let _ = std::fs::remove_file(&out);
+        let shell = script(&dir, "pwd.sh", &format!("pwd -P > '{}'\nexec /bin/cat", out.display()));
+        let id = peer.spawn_falling_back(&shell, dir.join("gone"), fallback);
+        let deadline = Instant::now() + WAIT;
+        let pwd = loop {
+            match std::fs::read_to_string(&out) {
+                Ok(text) if text.ends_with('\n') => break text,
+                _ => assert!(Instant::now() < deadline, "the shell never ran"),
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(pwd.trim_end(), expected.to_str().unwrap());
+        peer.send(&ClientMsg::Kill { id });
+    }
 }
 
 /// shell 的环境里有自己的会话标识和宿主设的变量。

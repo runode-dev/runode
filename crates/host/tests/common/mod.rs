@@ -261,21 +261,34 @@ impl Peer {
     }
 
     pub fn spawn_with(&mut self, shell: &str, start: bool, cwd: Option<PathBuf>) -> SessionId {
-        self.spawn_in(shell, SIZE, start, cwd)
+        self.spawn_in(shell, SIZE, start, cwd, None)
+    }
+
+    /// 同 `spawn_with`，当场启动，`cwd` 不是目录时从 `fallback` 开。
+    pub fn spawn_falling_back(&mut self, shell: &str, cwd: PathBuf, fallback: PathBuf) -> SessionId {
+        self.spawn_in(shell, SIZE, true, Some(cwd), Some(fallback))
     }
 
     /// 开一个按 `size` 跑 `shell` 的会话（不开 shell 集成），`start` 为假时等 `Start`。
     pub fn spawn_sized(&mut self, shell: &str, size: GridSize, start: bool) -> SessionId {
-        self.spawn_in(shell, size, start, None)
+        self.spawn_in(shell, size, start, None, None)
     }
 
-    fn spawn_in(&mut self, shell: &str, size: GridSize, start: bool, cwd: Option<PathBuf>) -> SessionId {
+    fn spawn_in(
+        &mut self,
+        shell: &str,
+        size: GridSize,
+        start: bool,
+        cwd: Option<PathBuf>,
+        fallback_cwd: Option<PathBuf>,
+    ) -> SessionId {
         let req = self.next_req;
         self.next_req += 1;
         self.send(&ClientMsg::Spawn {
             req,
             size,
             cwd,
+            fallback_cwd,
             integration: IntegrationMode::Off,
             start,
             shell: Some(shell.into()),

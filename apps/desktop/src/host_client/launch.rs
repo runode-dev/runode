@@ -538,6 +538,7 @@ mod tests {
                 .spawn(SpawnOptions {
                     size: SIZE,
                     cwd: None,
+                    fallback_cwd: None,
                     integration: IntegrationMode::Off,
                     start: false,
                     shell: Some("/bin/cat".into()),

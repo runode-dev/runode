@@ -444,14 +444,14 @@ impl WindowView {
                 let view = match reattached {
                     Some(view) => view,
                     None => {
-                        let start = format::start_dir(cwd.as_deref(), dir);
+                        let start = Some(format::start_dir(cwd.as_deref(), dir));
                         // 提前拉起的 shell 在家目录里，只交给同样从家目录开始的终端。
-                        let in_home = start.is_none() || start.as_deref() == home;
+                        let in_home = start.as_deref() == home;
                         let view = match shell.and_then(|shell| shell.take_if(|_| in_home)) {
                             Some(shell) => TerminalView::adopt(shell, window, cx),
-                            None if shown => TerminalView::unstarted(start.as_deref(), window, cx),
+                            None if shown => TerminalView::unstarted(start.as_deref(), Some(dir), window, cx),
                             // 看不见的标签切过去时才在宿主里开会话。
-                            None => Ok(TerminalView::deferred(start.as_deref(), window, cx)),
+                            None => Ok(TerminalView::deferred(start.as_deref(), Some(dir), window, cx)),
                         };
                         let view = match view {
                             Ok(view) => view,
