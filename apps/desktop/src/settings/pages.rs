@@ -366,14 +366,14 @@ impl SettingsView {
                 let open = denied.then(|| {
                     Button::new("open-notification-settings", rust_i18n::t!("settings.open_notification_settings"))
                         .variant(ButtonVariant::Outline)
-                        .on_click(|_, _, cx| {
+                        .on_press(cx, |_, _, cx| {
                             cx.open_url("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
                         })
                 });
                 let test = notify.then(|| {
                     Button::new("test-notification", rust_i18n::t!("settings.test_notification"))
                         .variant(ButtonVariant::Outline)
-                        .on_click(|_, _, cx| crate::window::test_notification(cx))
+                        .on_press(cx, |_, _, cx| crate::window::test_notification(cx))
                 });
                 div().flex().items_center().gap(px(8.)).children(open).children(test).child(switch).into_any_element()
             }
