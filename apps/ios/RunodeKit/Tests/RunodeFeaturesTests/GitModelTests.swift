@@ -249,6 +249,39 @@ import Testing
         #expect(model.status?.unstaged == [changed])
     }
 
+    /// 取请求编号时连接断了：不记下等不到回话的请求，重新连上后读状态的回话一到就不再转圈。
+    @Test func aDisconnectWhileNumberingDoesNotLeaveARefreshPending() async throws {
+        let held = HeldRequestLink()
+        held.release()
+        let model = GitModel(sessionId: sessionA, link: held)
+        model.handle(.state(.connected(hostName: "mac", address: nil)))
+        model.handle(.ready(generation: 1))
+        #expect(await eventually { !held.inner.sent.isEmpty })
+        guard case .git(let first, _, .status)? = held.inner.sent.last else {
+            Issue.record("\(held.inner.sent)")
+            return
+        }
+        model.handle(.gitStatus(req: first, id: sessionA, status: status()))
+
+        held.hold()
+        let refreshing = Task { await model.refresh() }
+        #expect(await eventually { held.waiting == 1 })
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        held.release()
+        await refreshing.value
+
+        held.inner.clearSent()
+        model.handle(.state(.connected(hostName: "mac", address: nil)))
+        model.handle(.ready(generation: 2))
+        #expect(await eventually { !held.inner.sent.isEmpty })
+        guard case .git(let again, _, .status)? = held.inner.sent.last else {
+            Issue.record("\(held.inner.sent)")
+            return
+        }
+        model.handle(.gitStatus(req: again, id: sessionA, status: status()))
+        #expect(!model.isRefreshing)
+    }
+
     /// 别的请求的回话和错误不归它管。
     @Test func ignoresOtherReplies() async throws {
         let model = try await connectedModel(status())

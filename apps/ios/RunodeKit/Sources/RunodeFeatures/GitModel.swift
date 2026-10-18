@@ -246,6 +246,9 @@ public final class GitModel {
 
     private func request(_ request: GitRequest, as kind: Pending) async {
         let req = await link.nextRequestId()
+        // 取编号时连接可能断了：`connectionLost` 已经放开了转圈，这时记下的请求永远等不到回话，读状态的
+        // 那条还会让 `isRefreshing` 以后一直为真，下拉刷新转个不停。
+        guard isReady else { return }
         pending[req] = kind
         link.send(.git(req: req, id: sessionId, request: request))
     }
