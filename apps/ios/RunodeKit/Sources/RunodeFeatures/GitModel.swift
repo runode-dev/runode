@@ -226,6 +226,12 @@ public final class GitModel {
 
     private func perform(_ action: Action, _ request: GitRequest) async {
         guard running == nil, isReady else { return }
+        // 超过一条控制消息的上限电脑会断开整条连接，重试又断：一次选太多文件时不发，报出来。
+        let largest = ClientMsg.git(req: .max, id: sessionId, request: request)
+        guard let size = try? Frame.control(largest).payload.count, size <= Frame.maxControlPayload else {
+            errorMessage = String(localized: "文件太多了，一次发不出去")
+            return
+        }
         running = action
         errorMessage = nil
         await self.request(request, as: .action(action))
