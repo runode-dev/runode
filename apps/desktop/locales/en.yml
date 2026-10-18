@@ -107,8 +107,6 @@ workspace:
   choose: Open
   close_title: Close the workspace “%{name}”?
   close_detail: Its %{count} terminals will be closed along with it.
-  close_confirm: Close
-  close_cancel: Cancel
   browse: Browse Folder
   browse_hint: A local project, Git repository or any folder; you can also drop one on the window
   other: Other Ways
@@ -180,7 +178,6 @@ size_owner:
 background:
   title: Background Sessions
   end_all: End All
-  empty: No background sessions
   end_title: End all background sessions?
   end_detail: "Agents still running in them: %{count}. They will be stopped."
 panel:
@@ -226,9 +223,7 @@ tooltip:
   show_sidebar: Show Sidebar
   hide_sidebar: Hide Sidebar
   show_git: Show Git
-  hide_git: Hide Git
   show_files: Show Files
-  hide_files: Hide Files
   show_github_actions: Show GitHub Actions
   show_panel: Show Panel
   hide_panel: Hide Panel
