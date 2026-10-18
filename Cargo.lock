@@ -4558,7 +4558,7 @@ dependencies = [
 
 [[package]]
 name = "runode"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -4599,7 +4599,7 @@ dependencies = [
 
 [[package]]
 name = "runode-agent"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "libc",
  "regex",
@@ -4611,7 +4611,7 @@ dependencies = [
 
 [[package]]
 name = "runode-autostart"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
@@ -4621,7 +4621,7 @@ dependencies = [
 
 [[package]]
 name = "runode-cli"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "libc",
@@ -4639,7 +4639,7 @@ dependencies = [
 
 [[package]]
 name = "runode-config"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
@@ -4650,11 +4650,11 @@ dependencies = [
 
 [[package]]
 name = "runode-git"
-version = "0.1.10"
+version = "0.1.11"
 
 [[package]]
 name = "runode-host"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "libc",
@@ -4673,11 +4673,11 @@ dependencies = [
 
 [[package]]
 name = "runode-paths"
-version = "0.1.10"
+version = "0.1.11"
 
 [[package]]
 name = "runode-preview"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "pulldown-cmark",
  "regex",
@@ -4687,7 +4687,7 @@ dependencies = [
 
 [[package]]
 name = "runode-protocol"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "runode-types",
  "serde",
@@ -4696,7 +4696,7 @@ dependencies = [
 
 [[package]]
 name = "runode-remote"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "libc",
  "rcgen",
@@ -4712,7 +4712,7 @@ dependencies = [
 
 [[package]]
 name = "runode-tasks"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "runode-paths",
  "runode-types",
@@ -4721,7 +4721,7 @@ dependencies = [
 
 [[package]]
 name = "runode-terminal"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "libc",
@@ -4735,7 +4735,7 @@ dependencies = [
 
 [[package]]
 name = "runode-todo"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "libc",
  "runode-types",
@@ -4744,7 +4744,7 @@ dependencies = [
 
 [[package]]
 name = "runode-types"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "serde",
  "serde_json",
@@ -4752,7 +4752,7 @@ dependencies = [
 
 [[package]]
 name = "runode-ui"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "gpui-pre",
  "objc2-app-kit 0.3.2",
@@ -4765,7 +4765,7 @@ dependencies = [
 
 [[package]]
 name = "runode-update"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "block2 0.6.2",
  "libc",
