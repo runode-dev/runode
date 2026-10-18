@@ -273,6 +273,8 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Tab {
         let (id, entry) = self.pane_entry(view, window, cx);
+        // 关掉最后一个 workspace 后取消了退出、又开了终端的窗口照常存档。
+        self.emptied = false;
         Tab {
             id: self.next_id(),
             root: Node::Leaf(id),
@@ -691,7 +693,15 @@ impl WindowView {
         super::agents::dismiss_alerts(self.workspaces[ix].tabs.iter().flat_map(|tab| tab.panes.keys().copied()), cx);
         if self.workspaces.len() == 1 {
             self.emptied = true;
-            window.remove_window();
+            // 退出时可能点了取消，窗口留着：还没开会话的标签（恢复布局时看不见的）收不到会话结束，不会自己
+            // 关掉，这里拿掉；开着会话的等会话结束了自己关。
+            let workspace = &mut self.workspaces[ix];
+            workspace.tabs.retain(|tab| tab.panes.values().any(|(view, _)| view.read(cx).session_id().is_some()));
+            workspace.active = workspace.active.min(workspace.tabs.len().saturating_sub(1));
+            cx.notify();
+            // 是最后一个窗口时 app 跟着退出，后台会话怎么办归退出管（`quit::close_window`），该问就问；
+            // 这个 workspace 的终端上面已经问过、结束了，退出时不再算。
+            super::quit::close_window(window.window_handle(), cx);
             return;
         }
         let id = self.workspaces.remove(ix).id;

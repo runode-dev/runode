@@ -541,9 +541,11 @@ struct ShownAgent {
     workspace: String,
 }
 
-/// 各窗口里的终端，对每个终端调 `f`（带上所在 workspace 的名字）。
-fn for_each_view(cx: &App, mut f: impl FnMut(&TerminalView, &str)) {
-    for view in remote::windows(cx).into_iter().filter_map(|window| window.read(cx).ok()) {
+/// 各窗口里的终端，对每个终端调 `f`（带上所在 workspace 的名字）；`skip_emptied` 时跳过 workspace 都关掉了
+/// 的窗口（`WindowView::emptied`）。
+fn for_each_view(cx: &App, skip_emptied: bool, mut f: impl FnMut(&TerminalView, &str)) {
+    let windows = remote::windows(cx).into_iter().filter_map(|window| window.read(cx).ok());
+    for view in windows.filter(|view| !(skip_emptied && view.emptied)) {
         for workspace in &view.workspaces {
             for tab in &workspace.tabs {
                 for (view, _) in tab.panes.values() {
@@ -554,10 +556,11 @@ fn for_each_view(cx: &App, mut f: impl FnMut(&TerminalView, &str)) {
     }
 }
 
-/// 各窗口里前台在跑 agent 的终端，每个一项。
+/// 各窗口里前台在跑 agent 的终端，每个一项。关掉了最后一个 workspace 的窗口不算：那些终端关的时候问过、
+/// 已经结束了，等着退出的这会儿视图还在。
 fn window_agents(cx: &App) -> Vec<ShownAgent> {
     let mut agents = Vec::new();
-    for_each_view(cx, |view, workspace| {
+    for_each_view(cx, true, |view, workspace| {
         if let Some(kind) = view.agent().map(|agent| agent.kind).filter(|kind| kind.is_known()) {
             agents.push(ShownAgent { kind, workspace: workspace.to_owned() });
         }
@@ -568,7 +571,8 @@ fn window_agents(cx: &App) -> Vec<ShownAgent> {
 /// 各窗口里的终端占着的会话。
 pub(super) fn held_sessions(cx: &App) -> HashSet<SessionId> {
     let mut held = HashSet::new();
-    for_each_view(cx, |view, _| {
+    // 结束了的会话宿主可能还没收掉，照样算占着，免得当成后台会话再问一遍。
+    for_each_view(cx, false, |view, _| {
         held.extend(view.session_id());
     });
     held

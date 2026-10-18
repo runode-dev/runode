@@ -225,9 +225,11 @@ enum OnClose {
 /// 关掉一个窗口时存档怎么办（见 `closed`）。`frozen`：已经冻结了（`freeze`）；`leaving`：关掉它
 /// 以后一个窗口都不剩；`emptied`：它的 workspace 都关掉了。
 fn on_close(frozen: bool, leaving: bool, emptied: bool) -> OnClose {
+    // 关掉最后一个窗口的最后一个 workspace 时，退出要冻结存档，那时窗口里还留着这个 workspace。
     match () {
+        _ if emptied => OnClose::Forget,
         _ if frozen => OnClose::Ignore,
-        _ if leaving && !emptied => OnClose::Keep,
+        _ if leaving => OnClose::Keep,
         _ => OnClose::Forget,
     }
 }
@@ -589,13 +591,12 @@ mod tests {
     }
 
     /// 冻结以后（会话随宿主一起结束、视图一个个关掉分屏乃至窗口），不管怎么关都不动存档，留下
-    /// 冻结时的布局。
+    /// 冻结时的布局；只有 workspace 都关掉了的窗口照样拿掉。
     #[test]
     fn closing_after_freezing_leaves_the_layout_alone() {
         for leaving in [false, true] {
-            for emptied in [false, true] {
-                assert_eq!(on_close(true, leaving, emptied), OnClose::Ignore, "{leaving} {emptied}");
-            }
+            assert_eq!(on_close(true, leaving, false), OnClose::Ignore, "{leaving}");
+            assert_eq!(on_close(true, leaving, true), OnClose::Forget, "{leaving}");
         }
     }
 }

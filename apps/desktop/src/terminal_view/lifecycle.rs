@@ -209,6 +209,10 @@ impl TerminalView {
     /// 的事件由调用方起读事件的任务（或者等屏幕）来收。开不了时当作和宿主断开了：断开交给那个任务
     /// 处理，视图显示断开的提示，点「在原目录重开」再开。
     fn open_session(&mut self, start: bool, attach: Attach) {
+        // 已经结束了的（所在的 workspace 关掉了）不再开：开出来的会话关标签时没人结束它。
+        if self.ended {
+            return;
+        }
         let link = host_client::link();
         let spawned = link.spawn(SpawnOptions {
             size: self.screen.last_size(),
