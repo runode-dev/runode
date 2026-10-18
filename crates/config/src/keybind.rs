@@ -62,8 +62,6 @@ pub enum Action {
     ToggleGitHubActions,
     /// 打开或关掉标题栏上的命令菜单。
     ToggleTasks,
-    /// 跑命令菜单里叫这个名字的命令，和在菜单里点它一样。
-    RunTask(String),
     /// 列出所有窗口里的 agent，选一个跳过去。
     GotoAgent,
     /// 不弹列表，直接跳到下一个要处理的 agent：先等回答的，再干完了没看的。
@@ -278,12 +276,6 @@ pub static ACTIONS: &[ActionSpec] = &[
         Action::ToggleSchedules
     ),
     plain!("new_todo", "Open the Kanban with the dialog for a new task", Action::NewTodo),
-    ActionSpec {
-        name: "run_task",
-        doc: "Run the task with this name from the tasks menu (your own, a Makefile target or a package.json script), as if clicked there; with duplicate names the one higher in the menu wins",
-        param: Some("NAME"),
-        parse: |param| Ok(Action::RunTask(required(param)?.to_owned())),
-    },
     plain!("goto_agent", "List the agents in every window and jump to the one you pick", Action::GotoAgent),
     plain!(
         "next_agent",

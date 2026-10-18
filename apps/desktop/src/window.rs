@@ -84,7 +84,7 @@ pub use kanban::watch_todos;
 pub(crate) use settings_page::show_settings;
 pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
 pub use status_bar::watch as watch_status;
-pub use tasks::RunNamedTask;
+pub use tasks::{RunTaskKey, TaskKeys};
 pub use titlebar::titlebar_options;
 
 use crate::ui::a11y::{Hide, PressDown};
@@ -782,7 +782,8 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::toggle_git))
             .on_action(Self::act(cx, Self::toggle_status_item))
             .on_action(Self::act(cx, Self::run_task))
-            .on_action(Self::act(cx, Self::run_named_task))
+            // 这里没绑时要交给别的绑定，不经 `act`：它在对话框开着时把键吞掉。
+            .on_action(cx.listener(Self::run_task_key))
             .on_action(Self::act(cx, Self::add_task))
             .on_action(Self::act(cx, Self::toggle_tasks))
             .on_action(Self::act(cx, Self::toggle_task_group))

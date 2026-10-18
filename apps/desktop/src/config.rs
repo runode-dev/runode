@@ -1,5 +1,5 @@
-//! 界面这边的配置：把加载好的配置放进全局，配置文件保存后自动重载，系统深浅色变了时
-//! 换到对应的主题，以及用文本编辑器打开配置文件。在界面里改设置见 `settings`。配置的读取和解析见 `runode_config`。
+//! 界面这边的配置：把加载好的配置和命令的快捷键（`TaskKeys`，在 `tasks.json` 里）放进全局，这些文件
+//! 保存后自动重载，系统深浅色变了时换到对应的主题，以及用文本编辑器打开配置文件。在界面里改设置见 `settings`。配置的读取和解析见 `runode_config`。
 
 use std::{
     io,
@@ -82,7 +82,7 @@ pub fn install(cx: &mut App) {
                 {
                     let config = config.clone();
                     move || {
-                        let watched = files.as_mut().is_none_or(|files| files.follow(&config.watch_paths()));
+                        let watched = files.as_mut().is_none_or(|files| files.follow(&watch_paths(&config)));
                         (files, watched, Some(watch_stamp(&config)))
                     }
                 },
@@ -217,6 +217,9 @@ fn apply(cx: &mut App, config: Config, seen: Stamps) {
     // 宿主先换主题，视图等它在各个会话的输出流里标出位置后再跟着换。
     crate::host_client::configure(&config);
     cx.set_global(Seen(seen));
+    // 在配置之前换上：装快捷键的跟着配置重载，那时读到的已经是新的。
+    let task_keys = crate::window::TaskKeys::read().or_else(|| cx.try_global::<crate::window::TaskKeys>().cloned());
+    cx.set_global(task_keys.unwrap_or_default());
     cx.set_global(runode_ui::font_size::UiFontSize(config.ui_font_size));
     // 主题 token 的初值；各窗口画的时候再换成自己的配色，见 `WindowView::follow_colors`。
     let palette = runode_ui::theme::ansi_colors(&config.palette);
@@ -279,6 +282,13 @@ fn system_is_dark(cx: &App) -> bool {
     matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark)
 }
 
+/// 要盯的文件：`config` 的各配置文件，再加上存着命令快捷键的 `tasks.json`。
+fn watch_paths(config: &Config) -> Vec<PathBuf> {
+    let mut paths = config.watch_paths();
+    paths.extend(runode_paths::Dirs::from_env().tasks_file());
+    paths
+}
+
 /// 所有可能的配置文件的修改时间。还不存在的文件也算在内，新建配置文件同样会触发重载。
 pub(crate) fn watch_stamp(config: &Config) -> Stamps {
     seen_after(&[], config)
@@ -288,8 +298,7 @@ pub(crate) fn watch_stamp(config: &Config) -> Stamps {
 /// `before`，读的时候正好有人写进来，下一轮照样看得出变了；新配置才盯上的文件（比如换了主题）只能
 /// 现在取。
 pub(crate) fn seen_after(before: &[(PathBuf, Option<SystemTime>)], config: &Config) -> Stamps {
-    config
-        .watch_paths()
+    watch_paths(config)
         .into_iter()
         .map(|path| {
             let modified = match before.iter().find(|(seen, _)| *seen == path) {
@@ -356,7 +365,7 @@ mod tests {
     #[test]
     fn files_stamped_before_reading_keep_that_stamp() {
         let config = Config::default();
-        let paths = config.watch_paths();
+        let paths = watch_paths(&config);
         assert!(!paths.is_empty());
         let before: Vec<_> = paths.iter().map(|path| (path.clone(), Some(SystemTime::UNIX_EPOCH))).collect();
         assert_eq!(seen_after(&before, &config), before);

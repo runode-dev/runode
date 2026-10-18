@@ -800,7 +800,7 @@ mod tests {
     /// 每个动作都有行可放，默认绑定都落在某一行上，`goto_tab` 一行管 1 到 9。
     #[test]
     fn rows_cover_actions_and_defaults() {
-        for spec in keybind::ACTIONS.iter().filter(|spec| !matches!(spec.name, "text" | "esc" | "csi" | "run_task")) {
+        for spec in keybind::ACTIONS.iter().filter(|spec| !matches!(spec.name, "text" | "esc" | "csi")) {
             let usages = base_usages(spec);
             assert!(!usages.is_empty(), "{}", spec.name);
             for usage in usages {

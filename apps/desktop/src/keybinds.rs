@@ -1,5 +1,6 @@
 //! 装上快捷键：`keybind` 的写法、动作名和默认绑定在 `runode_config::keybind`，这里把解析好的
-//! 动作换成 GPUI 的动作，定下各自在哪些上下文里生效，再加上搜索框和多行输入框自己的编辑键。
+//! 动作换成 GPUI 的动作，定下各自在哪些上下文里生效，再加上命令的快捷键（`TaskKeys`）和搜索框、多行输入框
+//! 自己的编辑键。
 
 use gpui::{App, Global, KeyBinding};
 use runode_config::{
@@ -28,9 +29,9 @@ use crate::{
         DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal,
         GotoAgent, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab, NextWorkspace,
         OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder,
-        RunNamedTask, SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace, SelectNextFile,
-        SelectPreviousFile, SelectTab, SelectWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, ToggleKanban,
-        TogglePaneFold, TogglePaneZoom, ToggleSchedules, ToggleSidebar, ToggleStatusBar, ToggleTasks,
+        RunTaskKey, SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace, SelectNextFile,
+        SelectPreviousFile, SelectTab, SelectWorkspace, TaskKeys, ToggleFiles, ToggleGit, ToggleGitHubActions,
+        ToggleKanban, TogglePaneFold, TogglePaneZoom, ToggleSchedules, ToggleSidebar, ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -100,7 +101,6 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::ToggleFiles => (boxed(ToggleFiles), WINDOW),
         Action::ToggleGitHubActions => (boxed(ToggleGitHubActions), WINDOW),
         Action::ToggleTasks => (boxed(ToggleTasks), WINDOW),
-        Action::RunTask(name) => (boxed(RunNamedTask(name)), WINDOW),
         Action::GotoAgent => (boxed(GotoAgent), WINDOW),
         Action::NextAgent => (boxed(NextAgent), WINDOW),
         Action::ToggleKanban => (boxed(ToggleKanban), WINDOW),
@@ -170,9 +170,10 @@ fn fixed_bindings() -> Vec<KeyBinding> {
     ]
 }
 
-/// 上次装上的 `keybind`、界面语言和菜单里有没有「退出并结束所有会话」（跟着配置项
-/// `terminal-host` 变），配置重载但三者都没变时不必重绑、重设菜单。
-struct Bound(Vec<Keybind>, String, bool);
+/// 上次装上的 `keybind`、命令的快捷键、界面语言和菜单里有没有「退出并结束所有会话」（跟着配置项
+/// `terminal-host` 变），配置重载但都没变时不必重绑、重设菜单。
+#[derive(PartialEq)]
+struct Bound(Vec<Keybind>, TaskKeys, String, bool);
 
 impl Global for Bound {}
 
@@ -184,23 +185,26 @@ pub fn install(cx: &mut App) {
 
 fn bind(cx: &mut App) {
     let keybinds = cx.global::<AppConfig>().0.keybinds.clone();
+    let tasks = cx.try_global::<TaskKeys>().cloned().unwrap_or_default();
     let locale = crate::i18n::current();
     let end_sessions = crate::window::end_sessions_in_menu();
-    if cx.try_global::<Bound>().is_some_and(|bound| bound.0 == keybinds && bound.1 == locale && bound.2 == end_sessions)
-    {
+    let bound = Bound(keybinds, tasks, locale, end_sessions);
+    if cx.try_global::<Bound>() == Some(&bound) {
         return;
     }
     let mut bindings = Vec::new();
-    for (keys, action) in keybind::resolve(&keybinds) {
+    let table = keybind::resolve(&bound.0);
+    for (keys, action) in &table {
         // 设置页里没有分屏，关分屏的键收起设置页。
-        if action == Action::CloseSurface {
-            bindings.extend(load(&keys, Box::new(crate::settings::CloseSettings), Some("Settings")));
+        if *action == Action::CloseSurface {
+            bindings.extend(load(keys, Box::new(crate::settings::CloseSettings), Some("Settings")));
         }
-        let (action, contexts) = gpui_action(action);
+        let (action, contexts) = gpui_action(action.clone());
         for context in contexts {
-            bindings.extend(load(&keys, action.boxed_clone(), *context));
+            bindings.extend(load(keys, action.boxed_clone(), *context));
         }
     }
+    bindings.extend(task_bindings(&table, &bound.1.triggers()));
     // 固定绑定放在后面：同一上下文里后加的优先，搜索时 Esc 照样先关搜索栏；菜单上的快捷键
     // 取的是一个动作最早的绑定，这样「查找下一个」显示 ⌘G 而不是搜索框里的回车。
     bindings.extend(fixed_bindings());
@@ -208,7 +212,23 @@ fn bind(cx: &mut App) {
     cx.bind_keys(bindings);
     // 菜单上显示的快捷键是设置菜单时从键位表里查的，换了绑定要重设一次。
     crate::menus::set_menus(cx);
-    cx.set_global(Bound(keybinds, locale, end_sessions));
+    cx.set_global(bound);
+}
+
+/// 命令的快捷键 `triggers`（GPUI 的写法），要放在配置 `table` 的绑定后面，同一上下文里先试它们。这个键原来的
+/// 动作在哪些上下文里生效，它也在那里绑一份，不然更深的上下文里原来的动作先跑。这里没绑这个键时
+/// `RunTaskKey` 往下传，原来的动作照样跑。
+fn task_bindings(table: &[(String, Action)], triggers: &[&str]) -> Vec<KeyBinding> {
+    let mut bindings = Vec::new();
+    for keys in triggers {
+        let mut contexts = WINDOW.to_vec();
+        let action = table.iter().find(|(bound, _)| bound == keys).map(|(_, action)| gpui_action(action.clone()).1);
+        contexts.extend(action.into_iter().flatten().filter(|context| !WINDOW.contains(context)));
+        for context in contexts {
+            bindings.extend(load(keys, Box::new(RunTaskKey((*keys).to_owned())), context));
+        }
+    }
+    bindings
 }
 
 /// 把一条按键写法绑到 `action` 上，只在 `context` 里生效；写法不认得时记一条警告，返回 `None`。
@@ -280,6 +300,30 @@ mod tests {
         };
         assert_eq!(first(&["Window", "TextArea"]), Some(gpui::Action::name(&SubmitText)));
         assert_eq!(first(&["Window", "Terminal"]), Some(gpui::Action::name(&ToggleFullScreen)));
+    }
+
+    /// 命令的键在原来动作生效的上下文里排在它前面（它往下传时原来的动作接着跑），没绑别的动作的键也在窗口里生效。
+    #[test]
+    fn task_keys_come_before_the_bound_action() {
+        let table = keybind::resolve(&[]);
+        let mut bindings: Vec<KeyBinding> = Vec::new();
+        for (keys, action) in &table {
+            let (action, contexts) = gpui_action(action.clone());
+            for context in contexts {
+                bindings.extend(load(keys, action.boxed_clone(), *context));
+            }
+        }
+        bindings.extend(task_bindings(&table, &["cmd-k", "cmd-r"]));
+        let keymap = gpui::Keymap::new(bindings);
+        let actions = |keys: &str| {
+            let input = [gpui::Keystroke::parse(keys).unwrap()];
+            let stack: Vec<_> = ["Window", "Terminal"].iter().map(|c| gpui::KeyContext::parse(c).unwrap()).collect();
+            let (found, _) = keymap.bindings_for_input(&input, &stack);
+            found.iter().map(|binding| binding.action().name()).collect::<Vec<_>>()
+        };
+        let run = gpui::Action::name(&RunTaskKey(String::new()));
+        assert_eq!(actions("cmd-k")[..2], [run, gpui::Action::name(&ClearScreen)]);
+        assert_eq!(actions("cmd-r"), [run]);
     }
 
     /// 配置这边转出来的触发键 GPUI 都认：每个有名字的键、功能键、单个字符，各配上修饰键和按键序列。

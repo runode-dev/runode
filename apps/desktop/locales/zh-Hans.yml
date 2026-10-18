@@ -217,12 +217,9 @@ tasks:
   shortcut_press: "按下快捷键，Esc 取消"
   shortcut_clear: "清除"
   shortcut_taken: "「%{what}」现在用着这个键，保存后改成跑这条命令。"
-  shortcut_not_applied: "命令存好了，快捷键没改成：配置里还有别的 keybind 行盖着它，可能在 config-file 引入的文件里，要到配置里改那一行。"
-  shortcut_kept_elsewhere: "命令存好了，快捷键没跟着改名：别处还有同名的命令用着这个键。要把它改给这条命令，再保存一次。"
   bind: "设快捷键（Cmd+K）"
   bind_title: "「%{name}」的快捷键"
-  bind_hint: "快捷键按名字跑命令（run_task:%{name}），在别的项目里按，跑的是那里叫这个名字的命令；自己加的命令里有同名的时先跑它。"
-  bind_not_applied: "快捷键没改成：配置里还有别的 keybind 行盖着它，可能在 config-file 引入的文件里，要到配置里改那一行。"
+  bind_hint: "快捷键只在这个项目里有效，别的项目可以把同一个键绑给自己的命令；通用命令的快捷键在没绑这个键的项目里都能用。"
 tooltip:
   show_sidebar: 显示侧栏
   hide_sidebar: 隐藏侧栏
@@ -1044,7 +1041,6 @@ action:
   toggle_kanban: "打开或收起铺满窗口的看板：派给 agent 的任务按状态分列"
   toggle_schedules: 打开或收起看板的定时页：到点开任务
   new_todo: 打开看板，弹出新建任务的对话框
-  run_task: 跑命令菜单里叫这个名字的命令（自己加的、Makefile 目标或 package.json 的 script），和在菜单里点它一样；同名的取菜单里靠上的
   goto_agent: 列出所有窗口里的 agent，选一个跳过去
   next_agent: 跳到下一个要处理的 agent：先是等你回答的，再是干完了还没看的
   copy_to_clipboard: 复制
