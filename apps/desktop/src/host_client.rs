@@ -84,8 +84,8 @@ static KEEP_SESSIONS: AtomicBool = AtomicBool::new(false);
 static REMOTE: Mutex<Option<runode_remote::Service>> = Mutex::new(None);
 /// `start` 的后台线程读到的配置，和读之前取的配置文件的修改时间，见 `take_config`。
 static LOADED_CONFIG: Mutex<Option<(Config, crate::config::Stamps)>> = Mutex::new(None);
-/// 要在界面上告诉用户的事（比如旧版本的宿主还活着），见 `take_notice`。
-static NOTICE: Mutex<Option<Notice>> = Mutex::new(None);
+/// 要在界面上告诉用户的事（比如旧版本的宿主还活着），按发生的先后，见 `take_notice`。
+static NOTICE: Mutex<Vec<Notice>> = Mutex::new(Vec::new());
 
 /// 要在界面上告诉用户的宿主的事。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,7 +117,7 @@ pub enum Notice {
 }
 
 fn notify(notice: Notice) {
-    *NOTICE.lock().unwrap_or_else(PoisonError::into_inner) = Some(notice);
+    NOTICE.lock().unwrap_or_else(PoisonError::into_inner).push(notice);
 }
 
 /// 启动时在后台线程 `host-connect` 里：读配置、定宿主怎么跑、连上它，再做 `then`（比如提前拉起
@@ -210,9 +210,9 @@ pub fn yield_sessions() -> Result<(), String> {
     Err(reason)
 }
 
-/// 取走要在界面上告诉用户的事，只给一次。
-pub fn take_notice() -> Option<Notice> {
-    NOTICE.lock().unwrap_or_else(PoisonError::into_inner).take()
+/// 取走要在界面上告诉用户的事，按发生的先后，只给一次。
+pub fn take_notice() -> Vec<Notice> {
+    std::mem::take(&mut *NOTICE.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
 /// 把配置里宿主关心的部分告诉它：主题（各个会话在输出流里标出换主题的位置，视图到那里再换）、
@@ -662,9 +662,17 @@ pub fn listen(host: &Host, dirs: &runode_paths::Dirs) -> Result<PathBuf> {
 }
 
 /// 有要告诉用户的宿主的事（见 `Notice`）时，在最前面的窗口上弹框说一声；交接没成时弹框问用户
-/// 留着旧宿主（默认）还是结束它。回滚历史没带过来这种不用做决定的事发系统通知，不弹框。
+/// 留着旧宿主（默认）还是结束它。回滚历史没带过来这种不用做决定的事发系统通知，不弹框。同一次
+/// 启动里攒了几件要弹框的事时只弹最后那件，系统通知照发。
 pub fn show_notice(cx: &mut App) {
-    let Some(notice) = take_notice() else { return };
+    let mut last = None;
+    for notice in take_notice() {
+        match notice {
+            Notice::HandoffDegraded { count } => report_degraded(count, cx),
+            notice => last = Some(notice),
+        }
+    }
+    let Some(notice) = last else { return };
     // `end`：问用户留着旧宿主还是结束它。
     let (title, detail, end) = match notice {
         Notice::Incompatible(reason) => (
@@ -692,10 +700,7 @@ pub fn show_notice(cx: &mut App) {
             rust_i18n::t!("host.build_mismatch_detail", host = host, app = build().0),
             false,
         ),
-        Notice::HandoffDegraded { count } => {
-            report_degraded(count, cx);
-            return;
-        }
+        Notice::HandoffDegraded { .. } => return,
     };
     let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
         return;
