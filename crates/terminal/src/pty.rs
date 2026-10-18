@@ -713,7 +713,8 @@ impl Pty {
     }
 
     /// 在 `cwd` 下启动 shell 和读线程，参数同 `spawn`。已经启动过时什么都不做。shell 起不来
-    /// （程序或者目录不存在）时什么都没动，还算没启动，可以换个参数再来。
+    /// （程序或者目录不存在）时什么都没动，还算没启动，可以换个参数再来。读线程起不来时 shell
+    /// 已经启动过，这时结束它再返回错误，算启动过、不能再来。
     pub fn start(
         &mut self,
         shell: Option<&str>,
@@ -772,7 +773,16 @@ impl Pty {
             }
         }
 
-        self.reader = Some(Reader::start(master, self.notifier.clone(), sink, None)?);
+        match Reader::start(master, self.notifier.clone(), sink, None) {
+            Ok(reader) => self.reader = Some(reader),
+            Err(err) => {
+                // 没人读 PTY，会话随即报告结束；shell 当场结束，不留到丢掉 `Pty` 时。
+                if let Some(Shell::Child(child)) = self.shell.take() {
+                    end_child(child);
+                }
+                return Err(err);
+            }
+        }
         Ok(())
     }
 
@@ -962,6 +972,14 @@ fn process_cwd(_pid: libc::pid_t) -> Option<PathBuf> {
     None
 }
 
+/// 结束自己启动的 shell 并在单独的线程里回收，见 `Pty` 的 `drop`。
+fn end_child(mut child: Box<dyn Child + Send + Sync>) {
+    let _ = child.kill();
+    let _ = thread::Builder::new().name("pty-reaper".into()).spawn(move || {
+        let _ = child.wait();
+    });
+}
+
 impl Drop for Pty {
     fn drop(&mut self) {
         if let Some(file) = self.report_token_file.take() {
@@ -977,12 +995,7 @@ impl Drop for Pty {
             // 关窗口即结束会话；master 关闭后 shell 本来也会收到 SIGHUP，kill() 只是让它立即退出。
             // 子进程退出后还得 wait 才会被系统回收，否则每关一个标签就留一个僵尸进程；
             // shell 可能忽略 SIGHUP，所以放到单独的线程里等，不阻塞界面。
-            Some(Shell::Child(mut child)) => {
-                let _ = child.kill();
-                let _ = thread::Builder::new().name("pty-reaper".into()).spawn(move || {
-                    let _ = child.wait();
-                });
-            }
+            Some(Shell::Child(child)) => end_child(child),
             // 接手来的 shell 不是自己的子进程，不能 wait，也不归这边回收；给前台进程组和它的
             // 进程组发 SIGHUP，不退出再 SIGKILL。shell 已经退出、前台程序还在时，前台进程组照样
             // 收到 SIGHUP。
