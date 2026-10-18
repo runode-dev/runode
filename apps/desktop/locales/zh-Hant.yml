@@ -1,6 +1,7 @@
 _version: 1
 menu:
   about: 關於 Runode
+  install_skill: 安裝 Agent Skill
   settings: 設定…
   services: 服務
   hide: 隱藏 Runode

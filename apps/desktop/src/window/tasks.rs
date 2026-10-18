@@ -20,8 +20,9 @@ pub(super) use custom::AddTaskDialog;
 pub use keys::{RunTaskKey, TaskKeys};
 
 use super::{
-    ToggleTasks,
+    InstallSkill, ToggleTasks,
     files::{MenuButton, MenuItem},
+    model::home_dir,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
 };
 use crate::ui::a11y::A11yPress;
@@ -167,6 +168,14 @@ impl WindowView {
         if self.run_in_terminal(&dir, action.command.clone(), window, cx).is_some() {
             self.workspace_mut().project.tasks_last = Some(action.command.clone());
         }
+    }
+
+    /// 菜单里的「安装 Agent Skill」：在家目录开一个终端跑安装命令，装的过程和出错都看得到。
+    pub(super) fn install_skill(&mut self, _: &InstallSkill, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(home) = home_dir() else {
+            return;
+        };
+        self.run_in_terminal(&home, "npx skills add runode-dev/runode --skill runode -g".into(), window, cx);
     }
 
     /// 在 `dir` 里开一个终端跑 `command`：按配置项 `task-placement` 在当前标签里分出来或者在它右边开新标签。

@@ -17,9 +17,9 @@ use crate::{
     },
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
-        NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,
-        PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, ToggleKanban, TogglePaneFold,
-        TogglePaneZoom, ToggleSchedules, ToggleSidebar, ToggleStatusBar, ToggleTasks,
+        InstallSkill, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab, NextWorkspace,
+        PreviousTab, PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, ToggleKanban,
+        TogglePaneFold, TogglePaneZoom, ToggleSchedules, ToggleSidebar, ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -88,6 +88,7 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(crate::update::menu_label(cx), CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action(tr("menu.settings"), OpenSettings),
+                MenuItem::action(tr("menu.install_skill"), InstallSkill),
                 MenuItem::separator(),
                 MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),
                 MenuItem::separator(),

@@ -151,7 +151,9 @@ actions!(
         /// 打开或收起看板的定时页。
         ToggleSchedules,
         /// 打开看板和新建任务的对话框。
-        NewTodo
+        NewTodo,
+        /// 开一个终端，用 `npx skills` 把教 agent 用 runode 的 skill 装到全局。
+        InstallSkill
     ]
 );
 
@@ -782,6 +784,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::toggle_git))
             .on_action(Self::act(cx, Self::toggle_status_item))
             .on_action(Self::act(cx, Self::run_task))
+            .on_action(Self::act(cx, Self::install_skill))
             // 这里没绑时要交给别的绑定，不经 `act`：它在对话框开着时把键吞掉。
             .on_action(cx.listener(Self::run_task_key))
             .on_action(Self::act(cx, Self::add_task))

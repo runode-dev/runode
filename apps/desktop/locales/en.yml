@@ -1,6 +1,7 @@
 _version: 1
 menu:
   about: About Runode
+  install_skill: Install Agent Skill
   settings: Settings…
   services: Services
   hide: Hide Runode
