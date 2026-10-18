@@ -1059,6 +1059,15 @@ fn real_zsh_xtrace_hides_the_token() {
     trace_hides_the_token(RealShell::start("zsh", "zsh-xtrace", rc, "[z]%", &["[z]%"]), "> echo hi");
 }
 
+/// 用户开着 `nounset`、没设右侧提示符：集成照样发报告，不报参数没设。
+#[test]
+fn real_zsh_nounset_keeps_reporting() {
+    let rc = "PROMPT='[z]%% '\nsetopt nounset\n";
+    let Some(mut shell) = RealShell::start("zsh", "zsh-nounset", rc, "[z]%", &["[z]%"]) else { return };
+    shell.wait_for_bytes("a cwd report", 0, format!("\x1b]6973;{REPORT_TOKEN};cwd=").as_bytes());
+    assert!(!shell.screen().contains("parameter not set"), "nounset error: {}", shell.screen());
+}
+
 #[test]
 fn real_bash_xtrace_hides_the_token() {
     let rc = "PS1='[b]\\$ '\nset -x\n";

@@ -83,7 +83,7 @@ _runode_precmd() {
     fi
     # 右侧提示符画在用户输入的同一行末尾。不能用 133;A，它会先换到新的一行；画完要回到
     # 用户输入，之后敲的字才不会被当成提示符。
-    if [[ -n $RPROMPT && $RPROMPT != "$_runode_rps1" ]]; then
+    if [[ -n ${RPROMPT-} && $RPROMPT != "$_runode_rps1" ]]; then
         _runode_rps1=$'%{\e]133;P;k=r\a%}'"$RPROMPT"$'%{\e]133;B\a%}'
         RPROMPT=$_runode_rps1
     fi
