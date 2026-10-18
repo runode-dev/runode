@@ -29,6 +29,9 @@ const PICKER_WIDTH: f32 = 520.;
 const ROW_HEIGHT: f32 = 28.;
 /// 最多显示这么多行，多了滚动。
 const VISIBLE_ROWS: f32 = 12.;
+/// 最多列这么多个分支：浮层画在每帧都重画的窗口上，不虚拟化，上万个远端分支时一行行排版会掉帧。
+/// shortcut: 多出的分支不提示，要输入文字筛出来；用户找不到分支时改成 `uniform_list`。
+const MAX_BRANCH_ROWS: usize = 200;
 
 /// 开着的分支列表。
 pub(in crate::window) struct BranchPicker {
@@ -72,7 +75,11 @@ impl BranchPicker {
         if !self.create_only {
             let needle = query.to_lowercase();
             rows.extend(
-                branches.iter().filter(|branch| branch.name.to_lowercase().contains(&needle)).map(PickerRow::Branch),
+                branches
+                    .iter()
+                    .filter(|branch| branch.name.to_lowercase().contains(&needle))
+                    .take(MAX_BRANCH_ROWS)
+                    .map(PickerRow::Branch),
             );
         }
         rows
