@@ -56,6 +56,17 @@ public enum GateClient {
     public static func run(
         over transport: any FrameTransport, credential: GateCredential, timeout: Duration = GateClient.timeout
     ) async throws -> GateOutcome {
+        // 收发不理会取消，取消时关掉连接才停得下来，免得配对页关了还把 `remote_pair` 发出去。
+        try await withTaskCancellationHandler {
+            try await exchange(over: transport, credential: credential, timeout: timeout)
+        } onCancel: {
+            transport.close()
+        }
+    }
+
+    private static func exchange(
+        over transport: any FrameTransport, credential: GateCredential, timeout: Duration
+    ) async throws -> GateOutcome {
         try await withTimeout(timeout, onTimeout: { transport.close() }) {
             var reader = FrameReader(transport: transport, decoder: FrameDecoder(maxPayload: Frame.gateMaxPayload))
             let challenge = try JSONDecoder().decode(GateMessage.self, from: try await reader.nextControl())
@@ -78,6 +89,7 @@ public enum GateClient {
                     secret: secret, deviceName: deviceName, publicKey: try key.publicKeyX963,
                     signature: try key.signature(for: payload))
             }
+            try Task.checkCancellation()
             transport.send(try Frame.control(reply).encoded())
             let verdict = try JSONDecoder().decode(GateMessage.self, from: try await reader.nextControl())
             switch verdict {
