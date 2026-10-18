@@ -121,12 +121,14 @@ notarize() {
     fi
     local result id status
     # 公证队列积压或连接挂起时别一直等：发版的并发组不取消在跑的，这一步卡住后面所有发版都排队。
-    result=$(xcrun notarytool submit "$1" "${auth[@]}" --wait --timeout 45m --output-format json)
+    # 退出码不作数（文档没写没通过、等超时时退出码是几），以输出的 status 为准；不然退出码非 0 时
+    # `set -e` 直接退出，打不出下面的公证日志。
+    result=$(xcrun notarytool submit "$1" "${auth[@]}" --wait --timeout 45m --output-format json) || true
     id=$(jq -r .id <<<"$result")
     status=$(jq -r .status <<<"$result")
     if [[ "$status" != Accepted ]]; then
-        echo "公证没通过（$status）：$1" >&2
-        xcrun notarytool log "$id" "${auth[@]}" >&2 || true
+        echo "公证没通过（${status}）：${1}" >&2
+        [[ -z "$id" || "$id" == null ]] || xcrun notarytool log "$id" "${auth[@]}" >&2 || true
         exit 1
     fi
 }
