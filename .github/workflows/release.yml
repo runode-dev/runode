@@ -43,7 +43,9 @@ on:
         type: string
         required: false
 
-# 同一时间只发一个版本，不取消正在跑的：发到一半取消会留下推了标签却没有 Release 的局面。
+# 同一时间只发一个版本，不取消正在跑的：发到一半取消会留下推了标签却没有 Release 的局面。排队的只留一个，
+# 再来一个会把排着的那次取消掉，所以发版脚本在有发版在跑或排队时不推标签；还是被取消了的，
+# 在 Actions 页面对那个标签的运行点 Re-run。
 concurrency:
   group: release
 

@@ -55,6 +55,14 @@ declined="docs/releases/$tag.draft.md"
 git fetch -q --tags origin main
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "本地 main 和 origin/main 不一致，先同步"
 ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "标签 $tag 已经有了"
+# 发版工作流的并发组 `release` 里新来的会顶掉排着队的那次，推了标签却没有 Release，所以有发版在跑或排队时不推。
+if command -v gh >/dev/null; then
+  busy=$(gh run list --workflow release.yml --limit 20 --json status --jq '[.[] | select(.status != "completed")] | length') \
+    || die "没能用 gh 查发版有没有在跑"
+  [[ "$busy" == 0 ]] || die "有 $busy 次发版在跑或排队，等它发完再发"
+else
+  echo "没装 gh，没查有没有发版在跑；有的话这次推上去可能顶掉排着队的那次" >&2
+fi
 
 # 上个标签以来某一类提交的标题，去掉前缀，一行一条。
 commits() {
