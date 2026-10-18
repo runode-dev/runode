@@ -8,8 +8,8 @@ use std::{
     ffi::OsString,
     fs,
     io::{self, Read},
-    os::unix::process::CommandExt as _,
-    path::PathBuf,
+    os::unix::{fs::OpenOptionsExt as _, process::CommandExt as _},
+    path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -28,6 +28,8 @@ pub(super) const NOT_ORG: &str = "repository is not owned by an organization";
 pub(super) const LOGIN_COMMAND: &str = "gh auth login";
 /// gh 一次最多跑多久，到点连同它拉起的进程一起结束：gh 或凭据 helper 卡住时查询报错，不会一直在读。
 const TIMEOUT: Duration = Duration::from_secs(60);
+/// 本地的工作流文件最多读这么多，多出来的不看。
+const MAX_WORKFLOW_BYTES: u64 = 1 << 20;
 /// 列运行时最多列几条。
 const RUN_LIMIT: &str = "20";
 const RUN_FIELDS: &str = "databaseId,number,displayTitle,workflowName,status,conclusion,event,headBranch,attempt,url";
@@ -221,8 +223,8 @@ impl Gh {
                     self.json(&["workflow", "list", "--all", "-L", "200", "--json", "id,name,path,state"])?;
                 for workflow in &mut workflows {
                     // 本地没有这个文件（只在别的分支上）时让 gh 去判断。
-                    let source = fs::read_to_string(self.dir.join(&workflow.path));
-                    workflow.dispatch = source.map_or(true, |source| dispatchable(&source));
+                    let source = read_workflow(&self.dir.join(&workflow.path));
+                    workflow.dispatch = source.is_none_or(|source| dispatchable(&source));
                 }
                 Data::Workflows(workflows)
             }
@@ -453,6 +455,19 @@ pub(super) fn set_command(secret: bool, scope: &Scope, name: &str) -> String {
     command
 }
 
+/// 本地工作流文件 `path` 的内容，最多读 `MAX_WORKFLOW_BYTES`。不是普通文件或读不了时为空：仓库是别人的，
+/// 指向 `/dev/zero` 的符号链接、管道都能让这里读不完或卡住。
+fn read_workflow(path: &Path) -> Option<String> {
+    // 打开时不跟随符号链接、不等管道的写端，再看打开的是不是普通文件，中间换掉也骗不过。
+    let file = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_WORKFLOW_BYTES).read_to_end(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// 工作流文件里有没有 `workflow_dispatch` 触发，有才能手动触发。
 pub(super) fn dispatchable(source: &str) -> bool {
     // shortcut: 不解析 YAML，按字面找；注释里写了它也算，要按 on: 精确判断时再引 YAML 解析。
@@ -615,5 +630,24 @@ mod tests {
     fn finds_the_dispatch_trigger() {
         assert!(dispatchable("on:\n  workflow_dispatch:\n  push:\n"));
         assert!(!dispatchable("on: push\n"));
+    }
+
+    /// 只读普通文件：符号链接（哪怕指向 `/dev/zero`）、管道都当本地没有。
+    #[test]
+    fn reads_only_regular_workflow_files() {
+        let dir = std::env::temp_dir().join(format!("runode-gh-workflow-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("ci.yml"), "on: workflow_dispatch\n").unwrap();
+        std::os::unix::fs::symlink("/dev/zero", dir.join("zero.yml")).unwrap();
+        std::os::unix::fs::symlink("ci.yml", dir.join("link.yml")).unwrap();
+        let fifo = std::ffi::CString::new(dir.join("fifo.yml").into_os_string().into_encoded_bytes()).unwrap();
+        // SAFETY: `fifo` 是以 NUL 结尾的路径，调用期间活着。
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert_eq!(read_workflow(&dir.join("ci.yml")).as_deref(), Some("on: workflow_dispatch\n"));
+        for name in ["zero.yml", "link.yml", "fifo.yml", "missing.yml"] {
+            assert_eq!(read_workflow(&dir.join(name)), None, "{name}");
+        }
+        fs::remove_dir_all(&dir).ok();
     }
 }
