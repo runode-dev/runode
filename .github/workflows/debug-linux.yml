@@ -1,0 +1,28 @@
+name: Debug Linux handoff
+on:
+  push:
+    branches: [debug/linux-handoff]
+jobs:
+  debug:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make submodules
+      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+        with:
+          version: 0.16.0
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: failing tests with logs
+        continue-on-error: true
+        run: |
+          set +e
+          for t in a_successor_of_the_same_build_is_told_the_host_is_busy input_the_old_host_could_not_write_arrives_exactly_once a_new_host_takes_every_session_over rolled_back_handoffs_do_not_leak_descriptors; do
+            rm -rf /tmp/rnh-*
+            echo "########## $t"
+            cargo test -p runode-host --test handoff "$t" -- --exact --nocapture 2>&1 | grep -v Compiling | tail -60
+            for f in /tmp/rnh-*/*; do [ -f "$f" ] || continue; echo "== $f"; head -c 6000 "$f"; echo; done
+          done
