@@ -72,9 +72,9 @@ impl ProgressCapture {
                     _ => State::Discard,
                 },
                 State::DiscardEscape => match b {
-                    b'\\' | CAN | SUB => State::Ground,
-                    0x1b => State::DiscardEscape,
-                    _ => State::Discard,
+                    b'\\' => State::Ground,
+                    // 同 `BodyEscape`：ESC 打断了这条 OSC。
+                    _ => self.after_escape(b),
                 },
             };
         }
@@ -163,6 +163,12 @@ mod tests {
         long.extend(b"\x07\x1b]9;4;3\x07");
         capture.observe(&long);
         assert_eq!(capture.latest(), "4;3");
+        // 丢弃太长的序列时被新的 ESC ] 打断，也算新的那条。
+        let mut long = b"\x1b]9;".to_vec();
+        long.extend(std::iter::repeat_n(b'x', MAX_BODY + 10));
+        long.extend(b"\x1b]9;4;1;20\x07");
+        capture.observe(&long);
+        assert_eq!(capture.latest(), "4;1;20");
     }
 
     #[test]
