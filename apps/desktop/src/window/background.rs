@@ -153,13 +153,30 @@ fn apply(live: Option<Result<Live>>, cx: &mut App) {
     }
 }
 
-/// 换上新列表，变了时重画各窗口。
+/// 换上新列表，变了时重画各窗口的侧栏；有没有后台会话翻转时整个窗口重画（见 `notify_shown`）。
 fn set(sessions: Vec<SessionInfo>, cx: &mut App) {
-    ANY.store(!sessions.is_empty(), Ordering::Relaxed);
+    let any = !sessions.is_empty();
+    let flipped = ANY.swap(any, Ordering::Relaxed) != any;
     let state = cx.default_global::<BackgroundSessions>();
-    if state.sessions != sessions {
-        state.sessions = sessions;
-        cx.refresh_windows();
+    if state.sessions == sessions {
+        return;
+    }
+    state.sessions = sessions;
+    // 可能是在某个窗口自己的更新里调的（比如侧栏里按了「全部结束」），这时更新不了那个窗口，等这次更新完。
+    cx.defer(move |cx| {
+        for handle in super::remote::windows(cx) {
+            let _ = handle.update(cx, |view, _, cx| notify_shown(view, flipped, cx));
+        }
+    });
+}
+
+/// 列表只画在侧栏里，只叫侧栏那一块重画：会话的标题、agent 状态一变就换一份列表，每两秒问一次，
+/// 叫整个窗口重画的话窗口里缓存的几块都跟着重画。`flipped`（有没有后台会话翻转了）时侧栏默认显不显示
+/// （`WindowView::sidebar_visible`）跟着变，要整个窗口重新排版。
+fn notify_shown(view: &mut WindowView, flipped: bool, cx: &mut Context<WindowView>) {
+    match &view.slots {
+        Some(slots) if !flipped => slots.sidebar.update(cx, |_, cx| cx.notify()),
+        _ => cx.notify(),
     }
 }
 
