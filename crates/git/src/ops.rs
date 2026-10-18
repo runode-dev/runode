@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fmt, fs,
     io::{ErrorKind, Read, Write},
     os::unix::{ffi::OsStrExt, process::CommandExt},
@@ -241,15 +241,19 @@ fn nested_repos(dir: &Path) -> Vec<PathBuf> {
     output
         .split(|b| *b == 0)
         .filter(|entry| entry.ends_with(b"/"))
-        .map(|entry| PathBuf::from(String::from_utf8_lossy(entry).trim_end_matches('/')))
+        .map(|entry| PathBuf::from(OsStr::from_bytes(entry.strip_suffix(b"/").unwrap_or(entry))))
         .filter(|path| dir.join(path).join(".git").exists())
         .collect()
 }
 
 /// `git add -A` 整个仓库，但跳过里面嵌套的仓库：不然 git 会把它当子模块那样记一个提交号。
 fn add_all(dir: &Path) -> Result {
-    let mut args = vec!["add".to_owned(), "-A".to_owned(), "--".to_owned(), ".".to_owned()];
-    args.extend(nested_repos(dir).iter().map(|path| format!(":(exclude,literal){}", path.to_string_lossy())));
+    let mut args: Vec<OsString> = ["add", "-A", "--", "."].map(OsString::from).into();
+    args.extend(nested_repos(dir).iter().map(|path| {
+        let mut spec = OsString::from(":(exclude,literal)");
+        spec.push(path);
+        spec
+    }));
     run(dir, &args, None).map(drop)
 }
 

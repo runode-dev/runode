@@ -11,7 +11,9 @@
 
 use std::{
     collections::HashSet,
+    ffi::OsStr,
     fs,
+    os::unix::ffi::OsStrExt,
     path::{Component, Path, PathBuf},
 };
 
@@ -195,39 +197,40 @@ impl Repo {
         let Some(Component::Normal(top)) = path.strip_prefix(&root).ok().and_then(|rel| rel.components().next()) else {
             return Ok(());
         };
-        let top = top.to_string_lossy();
-        if git(&self.root, &["check-ignore", "-q", "--", &format!("{top}/")]).is_some() {
+        let mut dir = top.to_os_string();
+        dir.push("/");
+        if git(&self.root, &[OsStr::new("check-ignore"), OsStr::new("-q"), OsStr::new("--"), &dir]).is_some() {
             return Ok(());
         }
         // 忽略规则一行一条，换行写不进去。
-        if top.contains(['\n', '\r']) {
+        if top.as_bytes().iter().any(|b| matches!(b, b'\n' | b'\r')) {
             return Err(crate::GitError::new(format!("{top:?} 里有换行，没法写进 info/exclude")));
         }
-        let pattern = format!("/{}/", ignore_literal(&top));
+        let pattern = [&b"/"[..], &ignore_literal(top.as_bytes()), b"/\n"].concat();
         let exclude = git(&self.root, &["rev-parse", "--git-path", "info/exclude"])
             .ok_or_else(|| crate::GitError::new("没能找到 info/exclude"))?;
-        let exclude = self.root.join(String::from_utf8_lossy(&exclude).trim_end());
+        let exclude = self.root.join(OsStr::from_bytes(exclude.trim_ascii_end()));
         let write = || -> std::io::Result<()> {
             if let Some(dir) = exclude.parent() {
                 fs::create_dir_all(dir)?;
             }
             let old = fs::read(&exclude).unwrap_or_default();
             let mut file = fs::OpenOptions::new().create(true).append(true).open(&exclude)?;
-            let newline = if old.is_empty() || old.ends_with(b"\n") { "" } else { "\n" };
-            std::io::Write::write_all(&mut file, format!("{newline}{pattern}\n").as_bytes())
+            let newline: &[u8] = if old.is_empty() || old.ends_with(b"\n") { b"" } else { b"\n" };
+            std::io::Write::write_all(&mut file, &[newline, &pattern[..]].concat())
         };
         write().map_err(|err| crate::GitError::new(format!("没能写 {}：{err}", exclude.display())))
     }
 }
 
 /// 把名字转成按字面匹配的忽略规则：`[`、`*`、`?` 这些通配符和反斜杠本身前面加反斜杠。
-fn ignore_literal(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    for c in name.chars() {
-        if matches!(c, '\\' | '[' | ']' | '*' | '?') {
-            out.push('\\');
+fn ignore_literal(name: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(name.len());
+    for &b in name {
+        if matches!(b, b'\\' | b'[' | b']' | b'*' | b'?') {
+            out.push(b'\\');
         }
-        out.push(c);
+        out.push(b);
     }
     out
 }
