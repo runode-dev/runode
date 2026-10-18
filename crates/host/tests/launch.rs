@@ -48,7 +48,9 @@ fn the_host_runs_in_its_own_session_without_our_descriptors() {
     unsafe { libc::kill(pid, libc::SIGTERM) };
 
     assert_eq!(pgid, pid, "the host leads its own process group");
-    assert_ne!(sid, ours, "the host is not in our session");
+    // 测试进程本身是 launchd 直接拉起、没开过会话时（CI 的 runner），和经 launchd 拉起的宿主同在
+    // launchd 的会话里。
+    assert!(sid != ours || (cfg!(target_os = "macos") && ours == 1), "the host is not in our session");
     // launchd 拉起的任务在 launchd 的会话里，不是会话首进程。
     #[cfg(not(target_os = "macos"))]
     assert_eq!(sid, pid, "the host leads its own session");
