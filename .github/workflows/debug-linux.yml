@@ -14,15 +14,18 @@ jobs:
       - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
         with:
           version: 0.16.0
-      - run: rustup toolchain install
+      - run: |
+          rustup toolchain install
+          rustup component add clippy
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: failing tests with logs
-        continue-on-error: true
+      - name: clippy
+        run: make clippy CLIPPY_ARGS="-- -D warnings"
+      - name: Linux 专有的交接测试
         run: |
-          set +e
-          for t in a_successor_of_the_same_build_is_told_the_host_is_busy input_the_old_host_could_not_write_arrives_exactly_once a_new_host_takes_every_session_over rolled_back_handoffs_do_not_leak_descriptors; do
-            rm -rf /tmp/rnh-*
-            echo "########## $t"
-            cargo test -p runode-host --test handoff "$t" -- --exact --nocapture 2>&1 | grep -v Compiling | tail -60
-            for f in /tmp/rnh-*/*; do [ -f "$f" ] || continue; echo "== $f"; head -c 6000 "$f"; echo; done
-          done
+          cargo test -p runode-terminal --lib fd_passing
+          cargo test -p runode-terminal --lib pty::tests
+          cargo test -p runode-terminal --test fd_passing --test handoff
+          cargo test -p runode-host --lib handoff::
+          cargo test -p runode-host --test handoff

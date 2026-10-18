@@ -952,22 +952,75 @@ fn process_args(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
     (!argv.is_empty()).then_some((exe, argv))
 }
 
-#[cfg(not(target_os = "macos"))]
+/// 进程名：`/proc/<pid>/comm`，内核截到 15 字节。
+#[cfg(target_os = "linux")]
+pub(crate) fn process_name(pid: libc::pid_t) -> Option<String> {
+    let comm = std::fs::read(format!("/proc/{pid}/comm")).ok()?;
+    let name = String::from_utf8_lossy(comm.strip_suffix(b"\n").unwrap_or(&comm)).into_owned();
+    (!name.is_empty()).then_some(name)
+}
+
+#[cfg(target_os = "linux")]
+fn process_cwd(pid: libc::pid_t) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+}
+
+/// 进程组里的进程号：扫一遍 `/proc` 里各进程的 `stat`；组长总在里面，读不到组员时只有组长。
+#[cfg(target_os = "linux")]
+fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
+    let mut pids: Vec<libc::pid_t> = std::fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
+        .filter(|&pid: &libc::pid_t| {
+            std::fs::read(format!("/proc/{pid}/stat")).ok().and_then(|stat| stat_group(&stat)) == Some(leader)
+        })
+        .collect();
+    if !pids.contains(&leader) {
+        pids.insert(0, leader);
+    }
+    pids
+}
+
+/// `/proc/<pid>/stat` 里的进程组号。第二项是括起来的程序名，可以带空格和括号，所以从最后一个 `)` 往后数：
+/// 状态、父进程号、进程组号。
+#[cfg(any(test, target_os = "linux"))]
+fn stat_group(stat: &[u8]) -> Option<libc::pid_t> {
+    let end = stat.iter().rposition(|&byte| byte == b')')?;
+    std::str::from_utf8(&stat[end + 1..]).ok()?.split_ascii_whitespace().nth(2)?.parse().ok()
+}
+
+/// 进程的可执行文件路径（`/proc/<pid>/exe`）和全部参数（`/proc/<pid>/cmdline`，各个参数以 NUL 结尾）。
+/// 程序运行中改了 argv[0]（比如 node 的 `process.title`）时读到的是改过的。
+#[cfg(target_os = "linux")]
+fn process_args(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let argv: Vec<String> = cmdline
+        .strip_suffix(b"\0")
+        .unwrap_or(&cmdline)
+        .split(|&b| b == 0)
+        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+        .collect();
+    let exe = std::fs::read_link(format!("/proc/{pid}/exe")).map(|exe| exe.to_string_lossy().into_owned());
+    (!cmdline.is_empty()).then_some((exe.unwrap_or_default(), argv))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
     vec![leader]
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn process_args(_pid: libc::pid_t) -> Option<(String, Vec<String>)> {
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn process_name(_pid: libc::pid_t) -> Option<String> {
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn process_cwd(_pid: libc::pid_t) -> Option<PathBuf> {
     None
 }
@@ -1023,6 +1076,29 @@ mod tests {
         let result = unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCGWINSZ, &raw mut size) };
         assert_eq!(result, 0, "{}", std::io::Error::last_os_error());
         size
+    }
+
+    /// 程序名里带空格和括号时也读得出进程组号。
+    #[test]
+    fn the_group_follows_any_program_name() {
+        assert_eq!(stat_group(b"42 (claude) S 1 40 40 0 -1"), Some(40));
+        assert_eq!(stat_group(b"42 (a) b (c) R 1 7 7"), Some(7));
+        assert_eq!(stat_group(b"42 (no end"), None);
+    }
+
+    /// 读得出自己的名字、参数、当前目录和进程组。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_reads_a_process_from_proc() {
+        let pid = libc::pid_t::try_from(std::process::id()).unwrap();
+        let (exe, argv) = process_args(pid).unwrap();
+        assert_eq!(exe, std::env::current_exe().unwrap().to_string_lossy());
+        assert_eq!(argv, std::env::args().collect::<Vec<_>>());
+        assert!(!process_name(pid).unwrap().is_empty());
+        assert_eq!(process_cwd(pid).unwrap(), std::env::current_dir().unwrap());
+        // SAFETY: 只读自己的进程组号。
+        let group = unsafe { libc::getpgrp() };
+        assert!(group_members(group).contains(&pid));
     }
 
     #[test]

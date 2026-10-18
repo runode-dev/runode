@@ -234,6 +234,12 @@ fn role(name: &str) -> Option<PathBuf> {
     (std::env::var(ROLE).ok()? == name).then(|| PathBuf::from(std::env::var_os(DIR).unwrap()))
 }
 
+/// 只跑 `cat` 的会话程序。不直接用 `/bin/cat`：认不出的 shell 会被加上 `-l`，GNU cat 不认这个选项，
+/// 一启动就退出。
+fn cat(dir: &Path) -> String {
+    script(dir, "cat.sh", "exec cat")
+}
+
 fn socket_in(dir: &Path) -> PathBuf {
     dir.join("host.sock")
 }
@@ -643,9 +649,10 @@ fn input_the_old_host_could_not_write_arrives_exactly_once() {
     let id = cli.spawn(&script(&dir, "late-cat.sh", "stty -icanon -echo\necho ready\nsleep 3\nexec cat"));
     cli.wait_screen(id, None, |text| text.contains("ready"));
     let (channel, _) = cli.attach(id, AttachMode::MetaOnly);
-    let lines = 800;
-    let input: String = (1..=lines).map(|n| format!("L{n:04}\n")).collect();
-    // PTY 只收得下 1 KiB 左右，剩下的留在旧宿主的写队列里。
+    // macOS 的 PTY 只收得下 1 KiB 左右；Linux 的行规程和 tty 缓冲加起来能收下 60 多 KiB。剩下的留在
+    // 旧宿主的写队列里。
+    let lines = if cfg!(target_os = "linux") { 30_000 } else { 800 };
+    let input: String = (1..=lines).map(|n| format!("L{n:05}\n")).collect();
     cli.input(channel, input.as_bytes());
     thread::sleep(Duration::from_millis(100));
 
@@ -654,11 +661,15 @@ fn input_the_old_host_could_not_write_arrives_exactly_once() {
     let log = std::fs::read_to_string(dir.join("old.log")).unwrap();
     assert!(log.contains("bytes of input not written yet") && !log.contains(" 0 bytes of input"), "{log}");
     let (mut new, _) = hello_build(&socket);
-    let last = format!("L{lines:04}");
+    let last = format!("L{lines:05}");
     let text = new.wait_screen(id, Some(lines + 100), |text| text.contains(&last));
+    let mut seen = std::collections::HashMap::new();
+    for line in text.lines() {
+        *seen.entry(line).or_insert(0) += 1;
+    }
     for n in 1..=lines {
-        let line = format!("L{n:04}");
-        assert_eq!(text.lines().filter(|l| *l == line).count(), 1, "{line} in {text}");
+        let line = format!("L{n:05}");
+        assert_eq!(seen.get(line.as_str()), Some(&1), "{line} in {text}");
     }
 }
 
@@ -824,7 +835,7 @@ fn a_connected_desktop_or_an_in_app_host_refuses() {
     let dir = temp_dir("refuse");
     let (_old, socket) = old_here(&dir);
     let mut desktop = Peer::desktop(&socket);
-    let id = desktop.spawn("/bin/cat");
+    let id = desktop.spawn(&cat(&dir));
     let new = Host::new(BuildId(NEW_BUILD.into()));
     new.mark_standalone();
     for _ in 0..2 {
@@ -882,7 +893,7 @@ fn a_successor_of_the_same_build_is_told_the_host_is_busy() {
     let dir = temp_dir("same");
     let (_old, socket) = old_here(&dir);
     let mut cli = Peer::hello(&socket, false);
-    let id = cli.spawn("/bin/cat");
+    let id = cli.spawn(&cat(&dir));
     match Host::new(BuildId(OLD_BUILD.into())).take_over(&socket, TakeOverOptions::default()) {
         Err(TakeOverError::Refused(HandoffRefusal::Busy)) => {}
         other => panic!("expected busy, got {other:?}"),
@@ -1055,7 +1066,7 @@ fn role_rollbacks() {
     let Some(dir) = role("rollbacks") else { return };
     let (_old, socket) = old_here(&dir);
     let mut cli = Peer::hello(&socket, false);
-    let id = cli.spawn("/bin/cat");
+    let id = cli.spawn(&cat(&dir));
     drop(cli);
     let settle = || thread::sleep(Duration::from_millis(200));
     let roll_back = || {
