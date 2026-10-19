@@ -561,7 +561,7 @@ impl WindowView {
                         .cursor_pointer()
                         .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
                 );
-            // 宿主跑在 app 里时退出 app 远程访问跟着停，提醒一句。
+            // `terminal-host` 关着时退出 app 宿主跟着退出、远程访问跟着停，提醒一句。
             let background = (!background_on).then(|| {
                 notice("mobile-background", rust_i18n::t!("settings.pairing.background").into_owned(), theme).child(
                     div().pt(px(10.)).child(

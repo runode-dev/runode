@@ -1,6 +1,5 @@
 //! 宿主怎么跑：看 socket 上有没有单独一个进程的宿主（`runode --host`）在跑、它有没有会话、是不是
-//! 这个构建，按配置项 `terminal-host` 决定跑在 app 里、连上它、把它拉起来，还是让新宿主接手它的
-//! 会话（`choose_mode`）。
+//! 这个构建，决定连上它、把它拉起来、让新宿主接手它的会话，还是跑在 app 里（`choose_mode`）。
 
 use std::{
     io,
@@ -34,51 +33,38 @@ pub enum Probe {
     /// 有没有被认领、有没有会话都说明不了什么（那个 app 可能刚提前拉起 shell 还没连上，或者还没
     /// 开会话）。
     OtherApp,
-    /// 有，`sessions` 个会话，其中 `claimed` 个有桌面的界面连着；`build` 是它的构建。
-    Running { sessions: usize, claimed: usize, build: BuildId },
+    /// 有，`sessions` 个会话，`desktops` 个桌面的界面连着；`build` 是它的构建。
+    Running { sessions: usize, desktops: usize, build: BuildId },
 }
 
 /// 这次启动宿主怎么跑，见 `choose_mode`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Choice {
-    /// 跑在 app 里；`listen` 时开 socket 让命令行连上来（另一个宿主拿着锁时开不了，不开）。
-    InProcess { listen: bool },
-    /// 连上在跑的那个；`end_on_quit` 时这次退出时让它连会话一起退出。
-    Keep { end_on_quit: bool },
-    /// 让在跑的那个（没有会话）退出，再跑在 app 里。
-    Retire,
+    /// 跑在 app 里，不开 socket（锁在别的宿主手里）。
+    InProcess,
+    /// 连上在跑的那个。
+    Keep,
     /// 拉起单独一个进程的宿主再连上；已经有在跑的就直接连。
     Launch,
-    /// 在跑的是别的构建：拉起这个构建的新宿主接手它的会话再连上，`end_on_quit` 同 `Keep`。
-    HandOver { end_on_quit: bool },
+    /// 在跑的是别的构建：拉起这个构建的新宿主接手它的会话再连上。
+    HandOver,
 }
 
-/// 按配置项 `terminal-host`、socket 上探到的宿主和这个构建（`build`）决定这次怎么跑：
+/// 按 socket 上探到的宿主和这个构建（`build`）决定这次怎么跑。宿主平常都单独一个进程跑，配置项
+/// `terminal-host` 只管退出时会话留不留下（见 `host_client::quit_keeps_sessions`）：
 ///
-/// - 开着：连上在跑的宿主，没有就拉起一个。在跑的是别的构建时让新宿主接手（`HandOver`），
-///   它没有会话时也一样（交接不成再让它退出、拉起新的，见 `host_client::establish`）。
-/// - 关着：没有在跑的宿主时跑在 app 里。有（上次开着时留下的）而且带着没有界面连着的会话时，
-///   这次接着连它、把会话接回来（别的构建时先让新宿主接手），这次退出时让它连会话一起退出，
-///   下次就跑在 app 里；没有会话时让它退出。有会话连着别的桌面时，那是另一个 runode 的宿主，
-///   不碰它，跑在 app 里也不开 socket。
-/// - 协议对不上：按开关走 `HandOver`（开关关着时当作留下的会话没有界面连着，交接后这次退出时
-///   结束）。
-/// - socket 上是另一个 app 进程里的宿主：不管开关，都不连进去当它的界面、也不让它退出，跑在
-///   app 里，不开 socket（锁在那个 app 手里）。
-pub fn choose_mode(terminal_host: bool, probe: &Probe, build: &BuildId) -> Choice {
-    match (terminal_host, probe) {
-        (_, Probe::OtherApp) => Choice::InProcess { listen: false },
-        (on, Probe::Incompatible { .. }) => Choice::HandOver { end_on_quit: !on },
-        (true, Probe::Running { build: theirs, .. }) if theirs != build => Choice::HandOver { end_on_quit: false },
-        (true, Probe::Running { .. }) => Choice::Keep { end_on_quit: false },
-        (true, Probe::Absent) => Choice::Launch,
-        (false, Probe::Absent) => Choice::InProcess { listen: true },
-        (false, Probe::Running { sessions: 0, .. }) => Choice::Retire,
-        (false, Probe::Running { claimed: 0, build: theirs, .. }) if theirs != build => {
-            Choice::HandOver { end_on_quit: true }
-        }
-        (false, Probe::Running { claimed: 0, .. }) => Choice::Keep { end_on_quit: true },
-        (false, Probe::Running { .. }) => Choice::InProcess { listen: false },
+/// - 没有在跑的宿主时拉起一个；在跑的是这个构建时连上它（有别的桌面连着也一样，退出时只结束自己的
+///   会话，见 `host_client::other_desktops`），是别的构建（或者协议对不上）时让新宿主接手
+///   （`HandOver`），它没有会话时也一样（交接不成再让它退出、拉起新的，见 `host_client::establish`）。
+/// - socket 上是另一个 app 进程里的宿主：不连进去当它的界面、也不让它退出，跑在 app 里，不开
+///   socket（锁在那个 app 手里）。
+pub fn choose_mode(probe: &Probe, build: &BuildId) -> Choice {
+    match probe {
+        Probe::OtherApp => Choice::InProcess,
+        Probe::Incompatible { .. } => Choice::HandOver,
+        Probe::Absent => Choice::Launch,
+        Probe::Running { build: theirs, .. } if theirs != build => Choice::HandOver,
+        Probe::Running { .. } => Choice::Keep,
     }
 }
 
@@ -106,8 +92,8 @@ fn probe_once(socket: &Path, build: &BuildId) -> io::Result<Probe> {
         return Ok(Probe::Absent);
     };
     send(&mut stream, &hello(build, ClientKind::Cli))?;
-    let build = match receive(&mut stream)? {
-        HostMsg::Welcome { standalone: true, build, .. } => build,
+    let (build, desktops) = match receive(&mut stream)? {
+        HostMsg::Welcome { standalone: true, build, desktops, .. } => (build, desktops),
         HostMsg::Welcome { standalone: false, .. } => return Ok(Probe::OtherApp),
         HostMsg::Incompatible { protocol, reason, .. } => return Ok(Probe::Incompatible { protocol, reason }),
         other => return Err(io::Error::other(format!("unexpected answer {other:?}"))),
@@ -115,8 +101,8 @@ fn probe_once(socket: &Path, build: &BuildId) -> io::Result<Probe> {
     send(&mut stream, &ClientMsg::ListSessions)?;
     loop {
         if let HostMsg::SessionList { sessions } = receive(&mut stream)? {
-            let claimed = sessions.iter().filter(|session| session.claimed).count();
-            return Ok(Probe::Running { sessions: sessions.len(), claimed, build });
+            let desktops = usize::try_from(desktops).unwrap_or(usize::MAX);
+            return Ok(Probe::Running { sessions: sessions.len(), desktops, build });
         }
     }
 }
@@ -378,8 +364,8 @@ mod tests {
 
     const OURS: &str = "this-build";
 
-    fn running(sessions: usize, claimed: usize, build: &str) -> Probe {
-        Probe::Running { sessions, claimed, build: BuildId(build.into()) }
+    fn running(sessions: usize, desktops: usize, build: &str) -> Probe {
+        Probe::Running { sessions, desktops, build: BuildId(build.into()) }
     }
 
     fn incompatible(protocol: u32) -> Probe {
@@ -460,41 +446,28 @@ mod tests {
         assert!(launched_as_host(&args));
     }
 
-    /// 决策表：开关 × 探到的宿主 → 怎么跑。
+    /// 决策表：探到的宿主 → 怎么跑。
     #[test]
     fn the_decision_table() {
         use Choice::*;
         let table = [
-            // 开关开着：连上在跑的，没有就拉起；别的构建交接，没有会话也交接。
-            (true, Probe::Absent, Launch),
-            (true, running(3, 1, OURS), Keep { end_on_quit: false }),
-            (true, running(0, 0, OURS), Keep { end_on_quit: false }),
-            (true, running(3, 1, "older"), HandOver { end_on_quit: false }),
-            (true, running(3, 0, "older"), HandOver { end_on_quit: false }),
-            (true, running(0, 0, "older"), HandOver { end_on_quit: false }),
-            // 开关关着：没有就跑在 app 里；留下的会话接回来、这次退出时结束；别的构建先交接。
-            (false, Probe::Absent, InProcess { listen: true }),
-            (false, running(2, 0, OURS), Keep { end_on_quit: true }),
-            (false, running(2, 0, "older"), HandOver { end_on_quit: true }),
-            (false, running(0, 0, OURS), Retire),
-            (false, running(0, 0, "older"), Retire),
-            (false, running(2, 1, OURS), InProcess { listen: false }),
-            (false, running(2, 1, "older"), InProcess { listen: false }),
+            // 连上在跑的，没有就拉起；别的构建交接，没有会话、有别的桌面连着也交接。
+            (Probe::Absent, Launch),
+            (running(3, 1, OURS), Keep),
+            (running(0, 0, OURS), Keep),
+            (running(1, 2, OURS), Keep),
+            (running(3, 1, "older"), HandOver),
+            (running(3, 0, "older"), HandOver),
+            (running(0, 0, "older"), HandOver),
             // 另一个 app 里的宿主：不碰。
-            (true, Probe::OtherApp, InProcess { listen: false }),
-            (false, Probe::OtherApp, InProcess { listen: false }),
-            // 协议对不上：按开关交接。
-            (true, incompatible(3), HandOver { end_on_quit: false }),
-            (true, incompatible(5), HandOver { end_on_quit: false }),
-            (false, incompatible(5), HandOver { end_on_quit: true }),
+            (Probe::OtherApp, InProcess),
+            // 协议对不上：交接。
+            (incompatible(3), HandOver),
+            (incompatible(5), HandOver),
         ];
         let ours = BuildId(OURS.into());
-        for (terminal_host, probe, expected) in table {
-            assert_eq!(
-                choose_mode(terminal_host, &probe, &ours),
-                expected,
-                "terminal-host = {terminal_host}, {probe:?}"
-            );
+        for (probe, expected) in table {
+            assert_eq!(choose_mode(&probe, &ours), expected, "{probe:?}");
         }
     }
 
@@ -547,8 +520,7 @@ mod tests {
                 .unwrap();
             let probed = probe(&socket, &build());
             assert_eq!(probed, Probe::OtherApp);
-            assert_eq!(choose_mode(false, &probed, &build()), Choice::InProcess { listen: false });
-            assert_eq!(choose_mode(true, &probed, &build()), Choice::InProcess { listen: false });
+            assert_eq!(choose_mode(&probed, &build()), Choice::InProcess);
             assert!(retire(&socket, &build()).is_err());
             assert!(matches!(connect(&Link::new(build()), &socket), Err(ConnectError::NotStandalone)));
             let sessions = other_app.list_sessions(WAIT).unwrap();
@@ -572,17 +544,16 @@ mod tests {
             other_app.connect(host.connect_pair().unwrap()).unwrap();
             let probed = probe(&socket, &build());
             assert_eq!(probed, Probe::OtherApp);
-            assert_eq!(choose_mode(false, &probed, &build()), Choice::InProcess { listen: false });
-            assert_eq!(choose_mode(true, &probed, &build()), Choice::InProcess { listen: false });
+            assert_eq!(choose_mode(&probed, &build()), Choice::InProcess);
             assert!(retire(&socket, &build()).is_err());
             let exe = PathBuf::from("/nonexistent/runode");
             assert!(matches!(connect_or_launch(&Link::new(build()), &socket, &exe), Err(ConnectError::NotStandalone)));
             assert!(other_app.list_sessions(WAIT).is_ok(), "the other app's host is still there");
         }
 
-        /// 单独一个进程的宿主没有会话：探得出来，开关关着时让它退出。
+        /// 单独一个进程的宿主没有会话：探得出来，连上它，之后探到的桌面有一个；要它退出时它退出。
         #[test]
-        fn a_standalone_host_without_sessions_is_retired() {
+        fn a_standalone_host_without_sessions_is_kept_or_retired() {
             let (host, socket) = listening("retire");
             let stopped = {
                 let (tx, rx) = mpsc::channel();
@@ -597,8 +568,11 @@ mod tests {
                     probed => break probed,
                 }
             };
-            assert_eq!(probed, Probe::Running { sessions: 0, claimed: 0, build: build() });
-            assert_eq!(choose_mode(false, &probed, &build()), Choice::Retire);
+            assert_eq!(probed, Probe::Running { sessions: 0, desktops: 0, build: build() });
+            assert_eq!(choose_mode(&probed, &build()), Choice::Keep);
+            let desktop = Link::new(build());
+            connect(&desktop, &socket).unwrap();
+            assert!(matches!(probe(&socket, &build()), Probe::Running { desktops: 1, .. }));
             retire(&socket, &build()).unwrap();
             assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
         }

@@ -283,6 +283,7 @@ fn host_messages_round_trip() {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            desktops: 0,
         },
         HostMsg::Welcome {
             protocol: 4,
@@ -293,6 +294,7 @@ fn host_messages_round_trip() {
             handoff: 1,
             keep_awake: true,
             todos: false,
+            desktops: 0,
         },
         HostMsg::Incompatible { protocol: 2, build: BuildId("b".into()), reason: "too new".into() },
         HostMsg::SessionList {

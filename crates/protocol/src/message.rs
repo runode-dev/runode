@@ -382,6 +382,10 @@ pub const ERROR_BACKED_UP: &str = "the connection is backed up; read what the ho
 /// 认错误种类的约定，不能改字。
 pub const ERROR_NO_SESSION: &str = "no session";
 
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
 /// 宿主发给前端的消息。带 `id` 的消息和这个会话的 `FrameKind::Output` 帧在同一条连接上按
 /// 顺序到达，`Resized`、`ThemeApplied` 这类标记的位置就是 VT 要做这件事的位置。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -392,7 +396,8 @@ pub enum HostMsg {
     /// 为假时宿主跑在某个 app 的进程里，那个 app 才是它的界面，别的 app 不该接手它的会话、也不该
     /// 让它退出。`handoff` 是宿主交出会话时写的交接格式（`handoff::HANDOFF_FORMAT`），0 是这个
     /// 宿主不会交接。`keep_awake` 是宿主认得 `ClientMsg::KeepAwake`，`todos` 是认得看板的几条
-    /// 消息（`ClientMsg::ListTodos` 等）。
+    /// 消息（`ClientMsg::ListTodos` 等）。`desktops` 是有几个桌面的界面连着（回桌面的 `Hello` 时不
+    /// 算它自己）：退出时不留会话的桌面看到还有别的桌面，只结束自己的会话，不让宿主退出。
     Welcome {
         protocol: u32,
         build: BuildId,
@@ -406,6 +411,8 @@ pub enum HostMsg {
         keep_awake: bool,
         #[serde(default)]
         todos: bool,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        desktops: u32,
     },
     /// 协议版本对不上，宿主接着关掉连接。
     Incompatible {

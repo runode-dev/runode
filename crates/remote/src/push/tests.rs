@@ -434,6 +434,7 @@ impl FakeHost {
                         handoff: 0,
                         keep_awake: false,
                         todos: self.todos.lock().unwrap().is_some(),
+                        desktops: 0,
                     }
                 }
                 ClientMsg::ListSessions if self.goodbye.swap(false, Ordering::SeqCst) => {

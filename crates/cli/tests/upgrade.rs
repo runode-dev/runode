@@ -175,6 +175,7 @@ fn an_unknown_goodbye_reason_closes_the_connection() {
                             handoff: 1,
                             keep_awake: false,
                             todos: false,
+                            desktops: 0,
                         };
                         Frame::control(&welcome).unwrap().payload
                     }

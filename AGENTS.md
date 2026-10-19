@@ -37,7 +37,7 @@ GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），只有它的
 - `protocol` 只依赖 `types`，不碰终端仿真、PTY 和界面。消息里用到的类型，别的 crate 也要用的放 `types`，只在协议里用的（帧、连接方式等）放 `protocol` 自己；`protocol` 把消息里用到的 `types` 类型转出去，前端照旧从 `protocol` 引。
 - `agent` 只依赖 `types`，不碰终端仿真、PTY 和界面：屏幕文字、前台进程组由 `terminal` 读好了交给它，用户规则目录由调用方从 `paths` 取来传进去。
 - `host` 不依赖 GPUI，VT 和 PTY 经 `terminal` 的 `HostSession` 用。一个终端有两份 VT，宿主那份（`HostSession`）是权威的，只有它应答终端查询；界面那份（`Session`）只消费同样的字节流，改 VT 状态的操作（改尺寸、清屏、换主题）一律经宿主在输出流里标出位置后两边一起做。前端（桌面也一样）和宿主说话只经 `protocol`，不碰宿主的内部：桌面在同一个进程里时用 `Host::connect_pair` 的一对 socket，别的前端连 `paths` 的 `host_socket_file`。
-- 宿主进程自己担着 macOS 的责任进程（`disclaim_responsibility`），打包时每个版本写同一个 Mach-O UUID，升级接手后的终端才连得上局域网。改宿主的拉起方式或打包脚本前，先读这两处的说明。
+- 宿主进程自己担着 macOS 的责任进程（`disclaim_responsibility`），打包时每个版本写同一个 Mach-O UUID，交出会话的旧宿主等它的 shell 都结束了才退出，升级接手后的终端才连得上局域网。所以宿主平常单独一个进程跑，跑在 app 里的宿主不把会话交出去（shell 算在 app 名下，app 一退出就连不上）。改宿主的拉起方式或打包脚本前，先读这几处的说明。
 - 宿主不管窗口：要界面办的请求包成 `HostMsg::UiRequest` 转给 `ClientKind::Desktop` 的连接，桌面用 `ClientMsg::UiReply` 回话。没有桌面连着时，布局、开终端、新建和改名工作区由宿主照记着的布局自己办（`host` 的 `workspaces`）。会话里的程序读写剪贴板（OSC 52）、要求改窗口尺寸（CSI 8 t）也是宿主那份 VT 认出来、交给桌面决定办不办，宿主自己不碰剪贴板，也不因此改会话尺寸。
 - `cli` 只经 socket 和宿主说话，不依赖 `host`、`terminal` 和 GPUI。`deny.toml` 连测试依赖一起查，所以它的测试对着 `tests/common` 里按 protocol 回话的假宿主跑。宿主给每个 shell 设 `RUNODE_SESSION`、`RUNODE_SOCKET`，桌面另设 `RUNODE_BIN`，命令行据此找到开它的那个 app 和自己所在的会话。
 - 命令行的命令或选项一改（加、删、改名、改写法或说明），同一个提交里改齐两处：`cli` 的用法说明（`help` 模块的总览 `OVERVIEW` 和 `PAGES` 里那条命令的页）、教 agent 用 runode 的 skill（`skills/runode/`）。只给别的程序调的命令 skill 里不写。skill 没有测试守着，要自己记得改。

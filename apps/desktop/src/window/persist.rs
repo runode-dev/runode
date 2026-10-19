@@ -137,11 +137,6 @@ pub(super) fn keeps_windows(cx: &App) -> bool {
     cx.try_global::<Saver>().is_some_and(|saver| !saver.windows.is_empty())
 }
 
-/// 冻结之后又不退出了（退出前没能把会话交出去，用户取消了）：存档重新跟着布局变。
-pub(super) fn thaw(cx: &mut App) {
-    cx.global_mut::<Saver>().frozen = false;
-}
-
 /// 上次存下的各个窗口，以及恢复时打开它们用的窗口选项（位置、大小、所在屏幕）。没有存档或
 /// 读不了时为空；读不了时文件挪到一边（`format::load`），从默认布局开始。没开 app 时手机、命令行
 /// 经宿主新开的终端、新建的工作区和改的名字按宿主手里的布局接进来（`format::adopt`）。终端记的会话按宿主里

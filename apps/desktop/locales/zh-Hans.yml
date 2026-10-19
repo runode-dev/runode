@@ -145,8 +145,6 @@ quit:
   keep_running_count: 还有 %{count} 个 agent 在运行。
   keep: 留在后台并退出
   keep_detail: 留在后台的话，退出后它们照常运行，下次打开 Runode 接着用。以后退出也都这样，可以在设置里关掉「退出后保留会话」。
-  yield_failed_title: 没能把会话留在后台
-  yield_failed_detail: "%{reason}\n\n现在退出，所有会话都会一起结束。"
 update:
   menu_check: 检查更新…
   menu_checking: 正在检查更新…

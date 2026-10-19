@@ -145,8 +145,6 @@ quit:
   keep_running_count: "Agents still running: %{count}."
   keep: Keep in Background and Quit
   keep_detail: "If you keep them, they go on running after Runode quits and come back when it opens again. Later quits will do the same; you can turn off “Keep sessions after quitting” in Settings."
-  yield_failed_title: Couldn't keep the sessions in the background
-  yield_failed_detail: "%{reason}\n\nQuitting now ends every session."
 update:
   menu_check: Check for Updates…
   menu_checking: Checking for Updates…

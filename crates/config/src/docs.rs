@@ -109,7 +109,7 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
             "Let a program in the terminal resize the window with the xterm sequence CSI 8 ; rows ; columns t: true, false. A zero or missing size keeps that dimension, sizes below 40 columns by 10 rows are raised to that, and the window never grows past the screen. The request is ignored unless the terminal is showing, has its tab to itself (no splits), and the window is not full screen. Off by default, since any program, including one on a remote machine over ssh, could change the size of your window."
         }
         "terminal-host" => {
-            "Keep terminal sessions in a separate background process: true, false. With true, quitting Runode leaves the sessions running and the next launch picks them up; with false they end with the app. Only read when Runode starts, so a change takes effect at the next launch. Switching it off while sessions are still running in the background brings them back once more; quitting then ends them."
+            "Keep terminal sessions running in the background after Runode quits: true, false. With true, quitting Runode leaves the sessions running and the next launch picks them up; with false they end when Runode quits. Takes effect right away. Switching it off while sessions are still running in the background brings them back once more; quitting then ends them."
         }
         "auto-update" => {
             "Check for a new version of Runode when it starts and every few hours after that: true, false. With true, a new version is downloaded in the background and installed when you quit Runode; with false, Runode only checks when you choose Check for Updates in the Runode menu. Only a Runode.app signed by its publisher updates itself."

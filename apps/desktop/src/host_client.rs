@@ -1,9 +1,12 @@
 //! 桌面这一侧连终端宿主的客户端：宿主管着每个会话的 PTY 和权威的那份 VT（见 `runode_host`），
-//! 桌面经一条连接（`Link`）按 `runode_protocol` 和它说话。宿主跑在 app 进程里（`Host::connect_pair`
-//! 的一对 socket），或者单独一个进程（`runode --host`，app 退出后会话还在），由配置项
-//! `terminal-host` 在启动时定下，见 `launch::choose_mode`。单独跑的宿主是别的构建时（app 升级了），先让这个构建
-//! 的新宿主接手它的会话，见 `handoff`。运行中改了 `terminal-host` 不换宿主，只改退出时会话怎么办
-//! （`quit_keeps_sessions`）：跑在 app 里时，退出前把会话交给单独一个进程的宿主（`yield_sessions`）。
+//! 桌面经一条连接（`Link`）按 `runode_protocol` 和它说话。宿主平常单独一个进程跑（`runode --host`），
+//! 连不上也拉不起来、或者 socket 被别的宿主占着时才跑在 app 进程里（`Host::connect_pair` 的一对
+//! socket），见 `launch::choose_mode`。单独跑的宿主是别的构建时（app 升级了），先让这个构建的新宿主
+//! 接手它的会话，见 `handoff`。配置项 `terminal-host` 只管退出时会话留不留下（`quit_keeps_sessions`）。
+//!
+//! 跑在 app 里的宿主不把会话交出去：shell 是 app 的子进程、算在 app 名下（macOS 的责任进程），app
+//! 一退出，交出去的终端就连不上局域网（No route to host）。单独跑的宿主交出会话后等它的 shell 都
+//! 结束了才退出，见 `host_process`。
 //!
 //! 启动时 `start` 在后台线程里读配置、定模式、连上宿主，主线程第一次用 `link` 时等它连好，读到的
 //! 配置交给主线程当第一份生效的配置（`take_config`）。
@@ -40,11 +43,10 @@ pub use link::{ConnectError, Link, LinkEvent, Output, Screen, SpawnOptions, UiTi
 /// 宿主现在怎么跑。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// 跑在 app 进程里，app 退出时会话跟着结束。
+    /// 跑在 app 进程里，app 退出时会话跟着结束，见模块文档。
     InProcess,
-    /// 单独一个进程（`runode --host`），app 退出后会话还在。配置项 `terminal-host` 关着时（比如
-    /// 这次是把上次留下的会话接回来）退出时让它连会话一起退出（发 `Shutdown { kill_sessions: true }`），
-    /// 下次启动就跑在 app 里。
+    /// 单独一个进程（`runode --host`），app 退出后会话还在。配置项 `terminal-host` 关着时退出时让它
+    /// 连会话一起退出（发 `Shutdown { kill_sessions: true }`）。
     Standalone,
 }
 
@@ -76,8 +78,6 @@ static READY_CHANGED: Condvar = Condvar::new();
 static MODE: Mutex<Mode> = Mutex::new(Mode::InProcess);
 /// 跑在 app 里的宿主，用到时才建。
 static IN_PROCESS: OnceLock<Host> = OnceLock::new();
-/// 跑在 app 里的宿主开着 socket（`listen_in_app` 成了）：只有这时退出前才交得出会话。
-static LISTENING: AtomicBool = AtomicBool::new(false);
 /// 配置项 `terminal-host`：退出后保留会话，跟着配置走，见 `quit_keeps_sessions`。
 static KEEP_SESSIONS: AtomicBool = AtomicBool::new(false);
 /// 跑在 app 里的宿主的远程访问，第一次要开时才建，见 `configure`。
@@ -131,7 +131,7 @@ pub fn start(then: impl FnOnce(&Config) + Send + 'static) {
         let before = crate::config::watch_stamp(&Config::default());
         let config = Config::load(true);
         KEEP_SESSIONS.store(config.terminal_host, Ordering::Relaxed);
-        establish(config.terminal_host);
+        establish();
         *LOADED_CONFIG.lock().unwrap_or_else(PoisonError::into_inner) = Some((config.clone(), before));
         drop(ready);
         then(&config);
@@ -139,7 +139,7 @@ pub fn start(then: impl FnOnce(&Config) + Send + 'static) {
     if let Err(err) = spawned {
         tracing::warn!("failed to start the host-connect thread, connecting in place: {err}");
         let _ready = MarkReady;
-        establish(false);
+        establish();
     }
 }
 
@@ -175,39 +175,10 @@ pub fn mode() -> Mode {
     *MODE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// 退出时要不要把会话留下：配置项 `terminal-host`，设置里改了马上算数，不用重启。留不留得下见
-/// `can_keep_sessions`。
+/// 退出时要不要把会话留下：配置项 `terminal-host`，设置里改了马上算数，不用重启。宿主跑在 app 里时
+/// 留不下，见模块文档。
 pub fn quit_keeps_sessions() -> bool {
     KEEP_SESSIONS.load(Ordering::Relaxed)
-}
-
-/// 退出时留得下会话：单独跑的宿主总留得下；跑在 app 里的要开着 socket（另一个宿主拿着锁时开不了），
-/// 才交得出去，见 `yield_sessions`。
-pub fn can_keep_sessions() -> bool {
-    mode() == Mode::Standalone || LISTENING.load(Ordering::Relaxed)
-}
-
-/// 宿主跑在 app 里、退出时要留下会话：拉起这个构建的单独一个进程的宿主，接过所有会话和 socket
-/// （`Host::yield_on_quit`，交接本身和升级时一样，见 `handoff`），成了之后 app 照常退出，下次启动
-/// 连上它把会话接回来。阻塞到有结果，最多 `handoff::READY_TIMEOUT` 加 `handoff::RESULT_TIMEOUT`。
-/// 没成时会话照旧在 app 里、连接也还在，返回原因。
-pub fn yield_sessions() -> Result<(), String> {
-    let host = IN_PROCESS
-        .get()
-        .filter(|_| LISTENING.load(Ordering::Relaxed))
-        .ok_or_else(|| "the host in the app has no socket to hand over".to_owned())?;
-    let exe = std::env::current_exe().map_err(|err| format!("cannot tell where this app is: {err}"))?;
-    host.yield_on_quit(true);
-    let started = Instant::now();
-    let outcome = handoff::hand_over(&exe, handoff::Timing::default());
-    tracing::info!("handing the sessions over on quit: {outcome:?} after {:?}", started.elapsed());
-    let reason = match outcome {
-        handoff::Outcome::TookOver { .. } => return Ok(()),
-        handoff::Outcome::Refused(reason) => format!("the host refused to hand over: {reason:?}"),
-        handoff::Outcome::Failed(reason) => reason,
-    };
-    host.yield_on_quit(false);
-    Err(reason)
 }
 
 /// 取走要在界面上告诉用户的事，按发生的先后，只给一次。
@@ -252,8 +223,8 @@ pub fn todos_changed() -> Option<UnboundedReceiver<()>> {
 }
 
 /// 和宿主的连接断了以后重新连上：跑在 app 里时重开一对 socket；单独一个进程时重连它的 socket，
-/// 没有就重新拉起（`terminal-host` 已经关了、只是接回上次的会话时，改成跑在 app 里）。重连期间
-/// 最多卡住调用的线程约 2 秒。已经连着时什么都不做。之前的会话要重新 `attach`。
+/// 没有就重新拉起，拉不起来时改成跑在 app 里。重连期间最多卡住调用的线程约 2 秒。已经连着时什么都
+/// 不做。之前的会话要重新 `attach`。
 pub fn reconnect() -> Result<()> {
     let link = link();
     if link.connected() {
@@ -262,15 +233,9 @@ pub fn reconnect() -> Result<()> {
     let mode = match mode() {
         Mode::InProcess => in_process(false),
         Mode::Standalone => {
-            let end_on_quit = !quit_keeps_sessions();
             let socket = socket_path().ok_or_else(|| anyhow!("no place for the host socket"))?;
-            let connected = if end_on_quit {
-                launch::connect(link, &socket)
-            } else {
-                let exe = std::env::current_exe()?;
-                launch::connect_or_launch(link, &socket, &exe)
-            };
-            match connected {
+            let exe = std::env::current_exe()?;
+            match launch::connect_or_launch(link, &socket, &exe) {
                 Ok(()) => Mode::Standalone,
                 Err(ConnectError::NotStandalone) => {
                     tracing::warn!("another runode app took the host socket, running the host in this app");
@@ -279,11 +244,8 @@ pub fn reconnect() -> Result<()> {
                 // 卡住、握手超时也报 `Io`：socket 还连得上就先不当它没了，报错等下次再连，免得改在 app 里另起
                 // 宿主后，原来的会话再也连不回。连着 `STUCK_TRIES` 次都这样就当它卡死了，照样改在 app 里跑，
                 // 不然重开永远没反应。
-                Err(err)
-                    if end_on_quit
-                        && (socket_gone(&socket) || STUCK.fetch_add(1, Ordering::Relaxed) + 1 >= STUCK_TRIES) =>
-                {
-                    tracing::info!("the leftover host is gone or stuck, running the host in the app: {err}");
+                Err(err) if socket_gone(&socket) || STUCK.fetch_add(1, Ordering::Relaxed) + 1 >= STUCK_TRIES => {
+                    tracing::info!("the host is gone or stuck, running the host in the app: {err}");
                     in_process(true)
                 }
                 Err(err) => return Err(err.into()),
@@ -302,6 +264,18 @@ const STUCK_TRIES: u32 = 3;
 /// 没有宿主在 `socket` 上听了。
 fn socket_gone(socket: &Path) -> bool {
     std::os::unix::net::UnixStream::connect(socket).is_err()
+}
+
+/// 单独跑的宿主上除了这个 app 还有别的桌面连着：开关关着时退出只结束这个 app 窗口里的会话，不让宿主
+/// 退出，免得连别人的会话一起结束。最多卡住调用的线程 `launch::probe` 的超时；问不到时当作没有。
+pub fn other_desktops() -> bool {
+    if mode() != Mode::Standalone {
+        return false;
+    }
+    let Some(socket) = socket_path() else { return false };
+    // 探的是命令行的连接，连着的桌面里有这个 app 自己。
+    let ours = usize::from(link().connected());
+    matches!(launch::probe(&socket, &build()), Probe::Running { desktops, .. } if desktops > ours)
 }
 
 /// 宿主里所有的会话。
@@ -342,34 +316,26 @@ fn socket_path() -> Option<PathBuf> {
     }
 }
 
-/// 按配置项 `terminal-host` 定下宿主怎么跑、连上它。
-fn establish(terminal_host: bool) {
+/// 定下宿主怎么跑、连上它，见 `launch::choose_mode`。
+fn establish() {
     let build = build();
     let socket = socket_path();
     let mut busy = 0;
     let mode = loop {
         let probe = socket.as_deref().map_or(Probe::Absent, |socket| launch::probe(socket, &build));
-        let choice = launch::choose_mode(terminal_host, &probe, &build);
-        tracing::info!("host: {probe:?} with terminal-host = {terminal_host}, so {choice:?}");
+        let choice = launch::choose_mode(&probe, &build);
+        tracing::info!("host: {probe:?}, so {choice:?}");
         if probe == Probe::OtherApp {
             tracing::warn!("another runode app runs the host on the socket, so this one runs its own without a socket");
             notify(Notice::OtherApp);
         }
         break match (choice, socket.as_deref()) {
-            (Choice::InProcess { listen }, _) => in_process(listen),
-            (Choice::Retire, Some(socket)) => {
-                if let Err(err) = launch::retire(socket, &build) {
-                    tracing::warn!("failed to stop the leftover host: {err}");
-                }
-                in_process(true)
-            }
-            (Choice::Keep { end_on_quit }, Some(socket)) => {
+            (Choice::InProcess, _) => in_process(false),
+            (Choice::Keep, Some(socket)) => {
                 let connected = launch::connect(&LINK, socket).or_else(|err| match err {
                     ConnectError::Incompatible(_) | ConnectError::NotStandalone => Err(err),
-                    // 开关关着，只是来接上次留下的会话：不为它另拉起宿主。
-                    err if end_on_quit => Err(err),
-                    // 宿主在跑却连不上（比如卡住了，或者刚好在退出）：照开关开着时的办法，连不上就拉起
-                    // 新的；它还拿着锁时新拉起的抢不到、自己退出，等它放开后再拉。
+                    // 宿主在跑却连不上（比如卡住了，或者刚好在退出）：拉起新的；它还拿着锁时新拉起的抢不到、
+                    // 自己退出，等它放开后再拉。
                     err => {
                         tracing::warn!("failed to connect to the running host, starting one: {err}");
                         launch_host(socket)
@@ -384,12 +350,12 @@ fn establish(terminal_host: bool) {
                 Ok(()) => Mode::Standalone,
                 Err(err) => fall_back(err),
             },
-            (Choice::HandOver { end_on_quit }, Some(socket)) => {
+            (Choice::HandOver, Some(socket)) => {
                 let sessions = match &probe {
                     Probe::Running { sessions, .. } => Some(*sessions),
                     _ => None,
                 };
-                match hand_over(socket, end_on_quit, sessions) {
+                match hand_over(socket, sessions) {
                     Some(mode) => mode,
                     None if busy < BUSY_TRIES => {
                         busy += 1;
@@ -422,8 +388,8 @@ fn establish(terminal_host: bool) {
 /// 调用方过一会儿重新探。
 ///
 /// 没交成时旧宿主连同会话照常跑着，这次跑在 app 里、不开 socket（锁在它手里），弹框问用户；只有
-/// 开关开着、旧宿主又没有会话时，没什么可丢的，让它退出、拉起这个构建的。
-fn hand_over(socket: &Path, end_on_quit: bool, sessions: Option<usize>) -> Option<Mode> {
+/// 旧宿主没有会话时，没什么可丢的，让它退出、拉起这个构建的。
+fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
     let started = Instant::now();
     let outcome = match std::env::current_exe() {
         Ok(exe) => handoff::hand_over(&exe, handoff::Timing::default()),
@@ -438,7 +404,7 @@ fn hand_over(socket: &Path, end_on_quit: bool, sessions: Option<usize>) -> Optio
             Probe::Absent => socket_gone(socket),
             _ => false,
         };
-        if sessions == Some(0) && !end_on_quit && still_empty() {
+        if sessions == Some(0) && still_empty() {
             tracing::warn!("the handoff failed ({reason}); the old host has no sessions, so replacing it");
             if let Err(err) = launch::retire(socket, &build()) {
                 tracing::warn!("failed to stop the old host: {err}");
@@ -634,7 +600,6 @@ fn listen_in_app(host: &Host) {
     loop {
         match listen(host, &dirs) {
             Ok(socket) => {
-                LISTENING.store(true, Ordering::Relaxed);
                 tracing::info!("host listening on {}", socket.display());
                 return;
             }

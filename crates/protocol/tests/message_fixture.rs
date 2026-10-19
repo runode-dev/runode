@@ -260,6 +260,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 handoff: 1,
                 keep_awake: true,
                 todos: false,
+                desktops: 0,
             },
         ),
         ("incompatible", HostMsg::Incompatible { protocol: 5, build: BuildId("x".into()), reason: "old".into() }),

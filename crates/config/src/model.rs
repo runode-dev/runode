@@ -133,8 +133,8 @@ pub struct Config {
     /// 终端里的程序可以用 CSI 8 t 改窗口尺寸。只在终端独占标签、窗口不是全屏时改，见 `WindowView`
     /// 处理 `TerminalEvent::ResizeWindow` 的地方。
     pub vt_window_resize_allowed: bool,
-    /// 终端会话放在单独一个进程（`runode --host`）里，退出 app 后会话还在，下次打开接着用；关着时
-    /// 会话跑在 app 进程里，跟着 app 一起结束。只在 app 启动时读，改了下次启动才生效。
+    /// 退出 app 后会话留在单独一个进程的宿主（`runode --host`）里，下次打开接着用；关着时退出 app
+    /// 让宿主连会话一起退出。改了马上算数。
     pub terminal_host: bool,
     /// 启动后和之后每隔几个小时查一次新版本，有了就在后台下载好、退出时装上；关着时只在菜单里点
     /// 「检查更新」时查。只有用 Developer ID 签过名的 Runode.app 会自己更新。

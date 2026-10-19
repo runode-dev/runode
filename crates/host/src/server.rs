@@ -113,8 +113,6 @@ pub(crate) struct Peers {
     /// 正在把会话交给新宿主：那条连接的编号，见 `handoff::give`。这期间新来的连接收到
     /// `Goodbye { Handoff }`，也不开新会话。
     pub(crate) handoff: Option<u64>,
-    /// 跑在 app 里的宿主要在 app 退出时交出会话，见 `Host::yield_on_quit`。
-    pub(crate) yielding: bool,
     /// 最近一次有连接连上或者断开的时刻，空闲从这时起算。
     pub(crate) activity_at: Instant,
     /// 没有会话也没有连接时也不算空闲，见 `Host::set_stay_up`。
@@ -136,7 +134,6 @@ impl Default for Peers {
             standalone: false,
             stop: None,
             handoff: None,
-            yielding: false,
             activity_at: Instant::now(),
             stay_up: false,
             scheduled: false,
@@ -152,6 +149,11 @@ impl Peers {
     /// 有桌面的界面连着。
     pub(crate) fn has_desktop(&self) -> bool {
         !self.desktops.is_empty()
+    }
+
+    /// 连着几个桌面的界面。
+    pub(crate) fn desktop_count(&self) -> u32 {
+        u32::try_from(self.desktops.len()).unwrap_or(u32::MAX)
     }
 
     /// 布局变了：告诉问过 `Layout` 的连接。
@@ -172,12 +174,11 @@ impl Peers {
         }
     }
 
-    /// 给 `except` 以外的连接都发 `Goodbye`，写完后断开；`spare_desktops` 时桌面的界面也不发。
+    /// 给 `except` 以外的连接都发 `Goodbye`，写完后断开。
     /// 写线程还没起好的连接起好时自己发，见 `serve`。
-    pub(crate) fn say_goodbye(&self, except: Option<u64>, spare_desktops: bool, reason: &GoodbyeReason) {
+    pub(crate) fn say_goodbye(&self, except: Option<u64>, reason: &GoodbyeReason) {
         for (&id, peer) in &self.connections {
             if Some(id) != except
-                && !(spare_desktops && self.desktops.contains(&id))
                 && let Some(out) = &peer.out
             {
                 out.control(&HostMsg::Goodbye { reason: reason.clone() });
@@ -547,7 +548,7 @@ impl Shared {
         for (_, handle) in self.registry().sessions.drain() {
             handle.send(Inbox::Kill);
         }
-        peers.say_goodbye(None, false, &GoodbyeReason::Shutdown);
+        peers.say_goodbye(None, &GoodbyeReason::Shutdown);
         drop(peers);
         self.peers_changed.notify_all();
         true
@@ -987,8 +988,10 @@ impl Connection {
         // 接手的新宿主不比对协议版本，永远如此，见 `runode_protocol::message` 的模块文档。
         if client == ClientKind::Successor {
             self.kind = client;
-            let standalone = self.shared.peers().standalone;
-            self.out.control(&self.welcome(standalone));
+            let peers = self.shared.peers();
+            let welcome = self.welcome(peers.standalone, peers.desktop_count());
+            drop(peers);
+            self.out.control(&welcome);
             self.successor(reader, build);
             return;
         }
@@ -1012,10 +1015,10 @@ impl Connection {
         // 登记界面和回 `Welcome` 在同一把锁里做：界面收到 `Welcome` 后，别的连接转来的请求一定
         // 交给它；别的连接也只有在 `Welcome` 排进 `Outbox` 之后才看得到它，请求不会抢在前面。
         let mut peers = self.shared.peers();
+        self.out.control(&self.welcome(peers.standalone, peers.desktop_count()));
         if client == ClientKind::Desktop {
             peers.desktops.push(self.id);
         }
-        self.out.control(&self.welcome(peers.standalone));
         drop(peers);
         loop {
             let frame = match read_frame(reader) {
@@ -1067,7 +1070,7 @@ impl Connection {
         }
     }
 
-    fn welcome(&self, standalone: bool) -> HostMsg {
+    fn welcome(&self, standalone: bool, desktops: u32) -> HostMsg {
         HostMsg::Welcome {
             protocol: PROTOCOL_VERSION,
             build: self.shared.build.clone(),
@@ -1077,6 +1080,7 @@ impl Connection {
             handoff: HANDOFF_FORMAT,
             keep_awake: true,
             todos: true,
+            desktops,
         }
     }
 

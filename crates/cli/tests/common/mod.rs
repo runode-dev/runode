@@ -107,6 +107,7 @@ pub fn welcome(todos: bool) -> HostMsg {
         handoff: 0,
         keep_awake: false,
         todos,
+        desktops: 0,
     }
 }
 

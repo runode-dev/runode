@@ -6,8 +6,8 @@
 //! 刚打开远程访问、或者刚改了给手机看的名字（`remote-access-name`）时，监听方要过一会儿才开好、换好
 //! 名字，这时先等它（`Pairing::Starting`），好了再生成口令，二维码里不会是旧名字。
 //!
-//! 配好以后和命令行一样提醒 `terminal-host`（`BACKGROUND_KEY`）：宿主跑在 app 里时，退出 app 远程访问
-//! 跟着停，手机就连不上了。
+//! 配好以后和命令行一样提醒 `terminal-host`（`BACKGROUND_KEY`）：它关着时退出 app 宿主跟着退出，远程
+//! 访问跟着停，手机就连不上了。
 
 use std::{net::IpAddr, rc::Rc, time::Duration};
 

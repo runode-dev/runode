@@ -145,8 +145,6 @@ quit:
   keep_running_count: 還有 %{count} 個 agent 在執行。
   keep: 留在背景並結束
   keep_detail: 留在背景的話，結束後它們照常執行，下次打開 Runode 接著用。以後結束也都這樣，可以在設定裡關掉「結束後保留工作階段」。
-  yield_failed_title: 沒能把工作階段留在背景
-  yield_failed_detail: "%{reason}\n\n現在結束，所有工作階段都會一併終止。"
 update:
   menu_check: 檢查更新…
   menu_checking: 正在檢查更新…
