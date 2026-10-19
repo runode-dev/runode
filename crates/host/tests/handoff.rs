@@ -26,7 +26,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{Peer, SIZE, script, temp_dir};
+use common::{Peer, SIZE, WAIT, script, temp_dir};
 use runode_host::{
     BuildId, ClientMsg, HandoffRefusal, Host, HostMsg, SessionId, Stopped, TakeOverError, TakeOverOptions,
 };
@@ -645,14 +645,16 @@ fn input_the_old_host_could_not_write_arrives_exactly_once() {
     let dir = temp_dir("pending");
     let (_old, socket) = old_process(&dir);
     let mut cli = Peer::hello(&socket, false);
-    // 不回显、不按行缓冲；先睡着不读输入，交接完了才 `cat` 出来。
-    let id = cli.spawn(&script(&dir, "late-cat.sh", "stty -icanon -echo\necho ready\nsleep 3\nexec cat"));
+    // 不回显、不按行缓冲；先睡着不读输入，交接完了才 `cat` 进文件。不 `cat` 到屏幕上：回滚历史只留
+    // 一万行，调试构建的 VT 啃几百 KiB 也要好几秒。
+    let out = dir.join("cat.out");
+    let late_cat = format!("stty -icanon -echo\necho ready\nsleep 3\nexec cat > {}", out.display());
+    let id = cli.spawn(&script(&dir, "late-cat.sh", &late_cat));
     cli.wait_screen(id, None, |text| text.contains("ready"));
     let (channel, _) = cli.attach(id, AttachMode::MetaOnly);
     // macOS 的 PTY 只收得下 1 KiB 左右；Linux 的行规程和 tty 缓冲加起来能收下 60 多 KiB。剩下的留在
     // 旧宿主的写队列里。
-    let lines = if cfg!(target_os = "linux") { 30_000 } else { 800 };
-    let input: String = (1..=lines).map(|n| format!("L{n:05}\n")).collect();
+    let input: String = (1..=30_000).map(|n| format!("L{n:05}\n")).collect();
     cli.input(channel, input.as_bytes());
     thread::sleep(Duration::from_millis(100));
 
@@ -660,16 +662,14 @@ fn input_the_old_host_could_not_write_arrives_exactly_once() {
     assert_eq!(result, "ok 1");
     let log = std::fs::read_to_string(dir.join("old.log")).unwrap();
     assert!(log.contains("bytes of input not written yet") && !log.contains(" 0 bytes of input"), "{log}");
-    let (mut new, _) = hello_build(&socket);
-    let last = format!("L{lines:05}");
-    let text = new.wait_screen(id, Some(lines + 100), |text| text.contains(&last));
-    let mut seen = std::collections::HashMap::new();
-    for line in text.lines() {
-        *seen.entry(line).or_insert(0) += 1;
-    }
-    for n in 1..=lines {
-        let line = format!("L{n:05}");
-        assert_eq!(seen.get(line.as_str()), Some(&1), "{line} in {text}");
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let got = std::fs::read_to_string(&out).unwrap_or_default();
+        if got.len() >= input.len() || Instant::now() > deadline {
+            assert!(got == input, "cat read {} of {} bytes, or not exactly the input", got.len(), input.len());
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
     }
 }
 

@@ -313,7 +313,13 @@ impl Peer {
     pub fn wait_screen(&mut self, id: SessionId, lines: Option<u32>, mut done: impl FnMut(&str) -> bool) -> String {
         let deadline = Instant::now() + WAIT;
         loop {
-            let text = self.screen_text(id, lines);
+            self.send(&ClientMsg::ReadScreen { id, lines, command: None });
+            let text = match self.reply() {
+                HostMsg::ScreenText { id: read, text, .. } if read == id => text,
+                // 调试构建的 VT 啃积压的输出时，读屏排在后面会过了宿主等回话的时限：宿主只是忙，接着等。
+                HostMsg::Error { message, .. } if message.ends_with("did not answer") => String::new(),
+                other => panic!("expected the screen, got {other:?}"),
+            };
             if done(&text) {
                 return text;
             }
