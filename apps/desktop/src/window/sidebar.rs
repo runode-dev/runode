@@ -39,9 +39,10 @@ const SIDEBAR_MAX_WIDTH: f32 = 480.;
 /// 红绿灯右边收起、展开侧栏的按钮。
 const SIDEBAR_TOGGLE_WIDTH: f32 = 28.;
 const SIDEBAR_TOGGLE_HEIGHT: f32 = 24.;
-/// 开关按钮离窗口左边多远：紧挨着红绿灯；全屏时没有红绿灯，只留一点边。
+/// 开关按钮离窗口左边多远：紧挨着红绿灯；全屏时没有红绿灯，只留一点边。别的系统用窗口管理器的标题栏，
+/// 窗口里也没有红绿灯。
 fn sidebar_toggle_left(fullscreen: bool) -> f32 {
-    if fullscreen { 8. } else { TRAFFIC_LIGHTS_WIDTH }
+    if fullscreen || !cfg!(target_os = "macos") { 8. } else { TRAFFIC_LIGHTS_WIDTH }
 }
 /// 侧栏收着时标题栏左边让出的宽度：红绿灯（全屏时没有）和开关按钮，再空一点才到标签，图标离两边差不多远。
 pub(super) fn sidebar_toggle_inset(fullscreen: bool) -> f32 {

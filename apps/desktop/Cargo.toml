@@ -66,5 +66,10 @@ block2.workspace = true
 # 程序要求改窗口尺寸时经 AppKit 改窗口的 frame。
 raw-window-handle.workspace = true
 
+[features]
+# Linux 的窗口后端。不开时 gpui_linux 只有无头平台，开不出窗口，可执行文件只依赖 libc，没有图形库的服务器上
+# 也能跑命令行和宿主；开了启动时就要 libxcb、libxkbcommon、libxkbcommon-x11 和 libfreetype。
+linux-desktop = ["gpui_platform/x11", "gpui_platform/wayland"]
+
 [lints]
 workspace = true

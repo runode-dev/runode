@@ -251,8 +251,8 @@ jobs:
 
   build-linux:
     needs: prepare
-    # 在较老的 Ubuntu 上编，glibc 版本低，新一些的发行版都能跑。GPUI 在 Linux 上的图形库都是运行时
-    # 才 dlopen 的，可执行文件只依赖 libc，没有图形界面的服务器上也能跑命令行和宿主。
+    # 在较老的 Ubuntu 上编，glibc 版本低，新一些的发行版都能跑。不开 runode 的 linux-desktop 特性，
+    # 可执行文件只依赖 libc，没有图形界面的服务器上也能跑命令行和宿主。
     strategy:
       matrix:
         include:

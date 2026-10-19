@@ -127,8 +127,9 @@ jobs:
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
             libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # 连 Linux 的窗口后端一起查，发版的无头包不开它。
       - name: clippy
-        run: make clippy CLIPPY_ARGS="-- -D warnings"
+        run: make clippy CLIPPY_ARGS="--features runode/linux-desktop -- -D warnings"
       # 交接时传描述符（MSG_NOSIGNAL、MSG_CMSG_CLOEXEC、253 个的上限）和读 /proc 判断进程死活的 Linux 分支。
       - name: Linux 专有的交接测试
         run: |
