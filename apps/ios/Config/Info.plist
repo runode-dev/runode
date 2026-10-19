@@ -15,11 +15,11 @@
 			</array>
 		</dict>
 	</array>
-	<key>RunodeAPSEnvironment</key>
-	<string>$(RUNODE_APS_ENVIRONMENT)</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_runode._tcp</string>
 	</array>
+	<key>RunodeAPSEnvironment</key>
+	<string>$(RUNODE_APS_ENVIRONMENT)</string>
 </dict>
 </plist>
