@@ -13,7 +13,7 @@ use futures::FutureExt as _;
 use gpui::{Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*, px};
 use runode_config::PreviewClick;
 
-// 菜单在 `runode_ui::menu`，窗口里各处照旧从这里引。
+// 菜单部件在 `runode_ui::menu`，窗口里各处从这里引。
 pub(super) use crate::ui::menu::{MenuButton, MenuItem};
 
 use super::{WindowView, cards, project::panel_shell};

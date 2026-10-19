@@ -13,14 +13,10 @@
 //! 排成行的状态在 `rows`，列表的各行在 `list`，在后台跑 git 在 `run`。git 命令本身由 `runode_git::Repo`
 //! 去跑。
 //!
-//! 页是一个单独的视图（`GitPanel`），一个窗口一个，各 workspace 的面板（排好的行、展开收起、提交说明框、
-//! 正在跑的操作、读到的历史）按 `WorkspaceId` 各记一份（`rows` 的 `PanelState`），显示的、操作的是 app 经
-//! `set_workspace` 说的那个 workspace 的。git 状态由 app 在后台读，每次读完经 `set_git` 交进来；栏宽和状态栏
-//! 的高度由 app 每次画之前经 `set_input` 交进来。同一个仓库的操作排队：面板上的操作、预览栏里按块暂存
-//! （`apply_hunk`）、AI 写提交说明（`write_message`）和分支列表选好以后切换、新建分支（`checkout`、
-//! `create_branch`）都经这里跑，跑的时候这个仓库不接新的操作。要 app 办的事（开 diff 和文件的预览、把路径
-//! 打进终端、开新标签、重读、打开分支列表和写提交说明的对话框、拖图表的分隔线、开关变了要存档）经
-//! `GitPanelEvent` 交出去。右键菜单存在页自己身上。显示设置和图表的高度整个窗口一份，app 随窗口存档。
+//! 页是一个单独的视图（`GitPanel`），一个窗口一个，各 workspace 的面板（`rows` 的 `PanelState`）按
+//! `WorkspaceId` 各记一份，显示的、操作的是 app 经 `set_workspace` 说的那个 workspace 的。git 状态经
+//! `set_git` 交进来，栏宽和状态栏的高度经 `set_input` 交进来。同一个仓库的操作排队，跑的时候这个仓库
+//! 不接新的操作。要 app 办的事经 `GitPanelEvent` 交出去。显示设置和图表的高度整个窗口一份，app 随窗口存档。
 
 mod graph;
 mod list;
@@ -740,7 +736,7 @@ impl GitPanel {
         };
         // 推送、拉取要跑好几秒：跑的时候按钮写着在做什么，连远端的图标还转着圈，免得以为没点上。
         let label = running.map_or(label, Busy::label);
-        // 主按钮的底色由前景混进背景算出，跟着主题走，和新建工作区对话框的主按钮一样。
+        // 主按钮的底色由前景混进背景算出，跟着主题走。
         let (accent, accent_hover, on_accent) = (cx.theme().mix(0.16), cx.theme().mix(0.22), fg_hsla);
         let icon = match running {
             Some(running) if running.is_remote() => {

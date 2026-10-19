@@ -1,5 +1,5 @@
 //! 铺满窗口的看板：派给 agent 的任务按列排开（待办、进行中、需要你、完成），和它平级的另一页列出
-//! 定时。完成那一列只有最近七天的，再早的在记录页上翻（`History`），从完成那一列的列头和各个定时进去，
+//! 定时。完成那一列只放近期完成的，再早的在记录页上翻（`History`），从完成那一列的列头和各个定时进去，
 //! 后者只列那个定时开出的。数据由宿主持有，这边经 `store` 读写；新建、编辑任务和定时的对话框在 `dialog`，任务的
 //! 那个占满看板，是平级的又一页。
 //!
@@ -430,7 +430,7 @@ impl Kanban {
         cx.notify();
     }
 
-    /// 依次发几条看板的请求，前一条没办成就不发后面的。办成了重翻记录：完成了七天以上的任务改了，看板的数据不变，
+    /// 依次发几条看板的请求，前一条没办成就不发后面的。办成了重翻记录：完成已久（不在完成那一列）的任务改了，看板的数据不变，
     /// 不会因此重翻。
     fn send_todos(steps: Vec<Step>, cx: &mut Context<Self>) {
         let sent = store::send(cx, steps);
@@ -960,7 +960,7 @@ impl Kanban {
             .child(div().min_w_0().truncate().child(place))
             .child(div().flex_1())
             .children(corner)
-            // 旧宿主没给编号（0）时不写。
+            // 没有编号（0）时不写。
             .when(todo.number > 0, |row| row.child(div().flex_none().child(format!("#{}", todo.number))));
         // 分支单独一行，和目录挤在一行时窄列里两个都截得认不出。
         let branch = todo.branch.clone().map(|branch| {

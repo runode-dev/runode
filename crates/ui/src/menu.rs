@@ -1,7 +1,6 @@
 //! 菜单：右键菜单（ContextMenu，`MenuHost::open_context_menu` 打开、`render_context_menu` 画）和按钮下面
 //! 弹出的菜单（DropdownMenu，`open_dropdown` 打开、按钮用 `render_dropdown_menu` 画在自己下面）共用的菜单项
-//! （`MenuItem`）、键盘和鼠标的操作、画法。文件树、预览标签、Git 面板、状态栏和标题栏的命令按钮都用它；
-//! 菜单开着时存在哪个视图里由 `MenuHost` 说，同一时刻只开一个。颜色在画的时候从主题读。
+//! （`MenuItem`）、键盘和鼠标的操作、画法。菜单存在哪个视图里由 `MenuHost` 说，同一时刻只开一个。
 
 use std::collections::HashMap;
 
@@ -139,11 +138,9 @@ impl MenuItem {
 }
 
 /// 打开着的右键菜单：右键按下的位置，打开时就定下的各项（`None` 是分隔线），以及点了以后
-/// 先把焦点交给谁、再派发动作。没有位置的是按钮下面弹出的菜单，由按钮自己画。菜单放在哪个视图里由
-/// `MenuHost` 说。
+/// 先把焦点交给谁、再派发动作。没有位置的是按钮下面弹出的菜单，由按钮自己画。
 ///
-/// 菜单开着时焦点在它自己身上，上下键选、回车派发、Esc 关掉；不这样的话上下键和回车先被
-/// 文件树这类地方绑定的动作拿走。
+/// 菜单开着时焦点在它自己身上，上下键选、回车派发、Esc 关掉。
 pub struct Menu {
     position: Option<Point<Pixels>>,
     items: Vec<Option<MenuItem>>,
@@ -201,10 +198,8 @@ fn highlight_after_replace(items: &[Option<MenuItem>], ix: usize) -> Option<usiz
     }
 }
 
-/// 菜单各行的元素 id：按所在的组和字取，不按行号，后台重列、前面多了几行时辅助工具的焦点和按下才不会
-/// 跑到别的项上。组是开头和每条分隔线后面第一项的字（命令菜单里就是按来源分的组标题），不同的组里同名的项
-/// （Makefile 和 package.json 都有 build）才分得开；同一组里同名的几项按第几次出现再区分。说明、选中和
-/// 收起这些会变的不算进去。
+/// 菜单各行的元素 id：按所在的组（开头和每条分隔线后第一项的字）和字取，不按行号；同组同名的按第几次出现区分。
+/// 说明、选中和收起这些会变的不算进去。
 fn row_ids(items: &[Option<MenuItem>]) -> Vec<ElementId> {
     let mut section = "";
     let mut seen = HashMap::<String, usize>::new();
@@ -232,16 +227,14 @@ fn row_ids(items: &[Option<MenuItem>]) -> Vec<ElementId> {
         .collect()
 }
 
-/// 上一帧画出的行 `id`（`row_ids`）现在是第几项；那一项没了时为 `None`。点击、辅助工具的按下记着行 id
-/// 而不记行号：菜单在下一帧之前经 `replace_menu_items` 换了各项时，按行号取会跑到挪到那一行上的别的项上
-/// （跑错命令、删错自定义命令）。
+/// 上一帧画出的行 `id`（`row_ids`）现在是第几项；那一项没了时为 `None`。点击和辅助工具的按下按行 id 找，
+/// 因为各项可能已被 `replace_menu_items` 换过。
 fn row_of(items: &[Option<MenuItem>], id: &ElementId) -> Option<usize> {
     row_ids(items).iter().position(|row| row == id)
 }
 
-/// `items` 里和原来第 `near` 项 `old` 是同一项的那一项：整行派发的动作一样，其中右边各按钮派发的动作也一样、
-/// 字也一样的优先。只比整行的动作不够：两个名字不同的自定义命令整行跑的可能是同一条命令，删除、编辑按钮
-/// 带着名字才分得开。一样像的有几项时取离第 `near` 项最近的。
+/// `items` 里和原来第 `near` 项 `old` 是同一项的那一项：整行动作一样，按钮的动作和字也一样的优先；
+/// 一样像的有几项时取离 `near` 最近的。
 fn find_item(items: &[Option<MenuItem>], near: usize, old: &MenuItem) -> Option<usize> {
     let action = old.action.as_deref()?;
     let same_buttons = |item: &MenuItem| {

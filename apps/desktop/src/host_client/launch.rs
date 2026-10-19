@@ -50,14 +50,10 @@ pub enum Choice {
     HandOver,
 }
 
-/// 按 socket 上探到的宿主和这个构建（`build`）决定这次怎么跑。宿主平常都单独一个进程跑，配置项
-/// `terminal-host` 只管退出时会话留不留下（见 `host_client::quit_keeps_sessions`）：
-///
-/// - 没有在跑的宿主时拉起一个；在跑的是这个构建时连上它（有别的桌面连着也一样，退出时只结束自己的
-///   会话，见 `host_client::other_desktops`），是别的构建（或者协议对不上）时让新宿主接手
-///   （`HandOver`），它没有会话时也一样（交接不成再让它退出、拉起新的，见 `host_client::establish`）。
-/// - socket 上是另一个 app 进程里的宿主：不连进去当它的界面、也不让它退出，跑在 app 里，不开
-///   socket（锁在那个 app 手里）。
+/// 按 socket 上探到的宿主和这个构建（`build`）决定这次怎么跑：没有在跑的宿主时拉起一个；是这个
+/// 构建时连上它；是别的构建、协议对不上或者没有会话时也让新宿主接手（`HandOver`，交接不成见
+/// `host_client::establish`）。socket 上是另一个 app 进程里的宿主时，不连进去也不让它退出，跑在
+/// app 里、不开 socket。
 pub fn choose_mode(probe: &Probe, build: &BuildId) -> Choice {
     match probe {
         Probe::OtherApp => Choice::InProcess,
@@ -256,11 +252,9 @@ fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
     Some(args)
 }
 
-/// `socket` 上宿主进程的 pid：打个招呼，等它回话（`Welcome`，协议对不上的回
-/// `Incompatible`），回过话再读连接对端（`peer_pid`）。监听的 socket 交接过以后，对方 accept
-/// 之前读到的是最早建它的那个进程（可能早已退出、号被别的进程占了），回过话就一定 accept 了。
-/// `Welcome` 里有宿主自报的 `host_pid` 时以它为准，和对端对不上时记一笔；`Incompatible` 不带
-/// pid，用对端的。不回话的不猜，返回错误。
+/// `socket` 上宿主进程的 pid：打个招呼，等它回话（`Welcome` 或 `Incompatible`）后再读连接对端
+/// （`peer_pid`），因为交接过的 socket 在对方 accept 之前读到的是最早建它的那个进程。
+/// `Welcome` 里有 `host_pid` 时以它为准，没有时用对端的。不回话的返回错误。
 fn host_pid(socket: &Path) -> io::Result<libc::pid_t> {
     let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(&super::build(), ClientKind::Cli))?;

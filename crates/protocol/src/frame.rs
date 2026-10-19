@@ -9,17 +9,14 @@ use std::io::{self, Read, Write};
 /// 帧头的字节数：载荷长度、类型、通道。
 pub const HEADER_LEN: usize = 9;
 
-/// 一帧载荷的上限。默认的回滚上限（每个终端 10 MiB、1 万行）下，回滚历史填满时 200 列的
-/// 快照约 5 MiB，一帧放得下；用户把配置项 `scrollback-limit` 调大以后快照可能超过这个上限，
-/// 要分成几帧发。再长的帧就是对面出了错或者不怀好意。
+/// 一帧载荷的上限。快照可能超过它，要分成几帧发；再长的帧就是对面出了错或者不怀好意。
 pub const MAX_PAYLOAD: u32 = 64 << 20;
 
 /// 帧的类型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum FrameKind {
-    /// 宿主发给前端的 PTY 输出，原样的字节；只有 shell 集成报告给宿主的 OSC 6973（带着 shell
-    /// 的口令）抹掉了编号之后的内容，VT 处理起来和原来那条一样，都是不认识的 OSC。
+    /// 宿主发给前端的 PTY 输出，原样的字节，只有 shell 集成的报告被抹掉了口令。
     Output = 0,
     /// 前端发给宿主、要写进 PTY 的输入，原样的字节。
     Input = 1,

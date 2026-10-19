@@ -3,7 +3,7 @@ import Testing
 
 @testable import RunodeProtocol
 
-/// Rust 那边放的门禁样例目录：`crates/protocol/tests/fixtures/remote`。找不到样例时相关测试失败，不跳过。
+/// Rust 那边放的门禁样例目录（`runode_protocol` 的 `remote` 模块的样例）。找不到样例时相关测试失败，不跳过。
 let remoteFixtureDirectory: URL = URL(filePath: #filePath)
     .deletingLastPathComponent()  // RunodeProtocolTests
     .deletingLastPathComponent()  // Tests

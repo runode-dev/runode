@@ -75,7 +75,7 @@ pub struct Todo {
     /// 宿主给的标识，8 个小写十六进制数字。
     pub id: String,
     /// 宿主给的编号：从 1 起按加的先后，删掉了也不再给别的任务，界面和命令行上写成 `#5`。要标识的消息
-    /// 也认编号（`5` 或 `#5`），见 `ClientMsg::GetTodo`。旧宿主没有编号，为 0。
+    /// 也认编号（`5` 或 `#5`），见 `ClientMsg::GetTodo`。
     #[serde(default)]
     pub number: u64,
     pub spec: TodoSpec,

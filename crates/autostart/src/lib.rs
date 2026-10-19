@@ -195,7 +195,7 @@ fn systemd_unit_file(dirs: &Dirs) -> io::Result<PathBuf> {
     }
 }
 
-/// 装了没有。app 登记成登录项的系统上，从 macOS 12 升上来时留下的 LaunchAgent 也算：它照样在登录时开 app。
+/// 装了没有。app 登记成登录项的系统上，已有的 LaunchAgent 也算：它照样在登录时开 app。
 pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
     let has_file = service_file(kind, dirs).is_some_and(|path| path.exists());
     #[cfg(target_os = "macos")]
@@ -335,7 +335,7 @@ pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
         if registered {
             login_item::unregister()?;
         }
-        // 从 macOS 12 升上来时留下的 LaunchAgent 一起删，见 `is_installed`。
+        // 已有的 LaunchAgent 一起删，见 `is_installed`。
         return Ok(remove_if_there(&path)? || registered);
     }
     // Linux 上候选的位置都看，在不同的环境里装过时一起删掉。

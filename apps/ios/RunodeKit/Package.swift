@@ -19,7 +19,7 @@ let package = Package(
         .library(name: "RunodeFeatures", targets: ["RunodeFeatures"]),
     ],
     targets: [
-        // libghostty-vt 的 xcframework，由 apps/ios 自带的构建脚本从 ghostty 子模块编出来，不进 git。
+        // libghostty-vt 的 xcframework，由 iOS 端自带的构建脚本从 ghostty 子模块编出来，不进 git。
         .binaryTarget(name: "GhosttyVt", path: "../Frameworks/ghostty-vt.xcframework"),
         .target(name: "RunodeProtocol"),
         .target(name: "RunodeConnection", dependencies: ["RunodeProtocol"]),

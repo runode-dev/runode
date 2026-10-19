@@ -92,7 +92,7 @@ impl Session {
             }
             // 程序崩溃或忘了释放时，不能让屏幕永远冻结：超时后照常画，这次冻结就不管了，等程序
             // 关掉再重新开始冻结（render-hold 回调）时再遵守。VT 里的 mode 2026 不动：界面这份
-            // VT 只跟着字节流变，和宿主那份一样，程序查询这个模式时宿主答的也是它。
+            // VT 只跟着字节流变，和宿主那份保持一致。
             self.held_since.set(None);
         }
         let highlights = match &mut self.search {
@@ -268,13 +268,14 @@ impl Renderer {
     }
 }
 
-/// 把配置的颜色按单元格的前景、背景色解析成具体值。
+/// 没配选区底色时的统一底色，按背景深浅取深色或浅色那种。
 fn default_selection_bg(background: Rgb) -> Rgb {
     let Rgb(r, g, b) = background;
     let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
     if luma < 128. { theme::SELECTION_ON_DARK } else { theme::SELECTION_ON_LIGHT }
 }
 
+/// 把配置的颜色按单元格的前景、背景色解析成具体值。
 fn resolve(color: TerminalColor, fg: Rgb, bg: Rgb) -> Rgb {
     match color {
         TerminalColor::Rgb(color) => color,

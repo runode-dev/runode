@@ -53,12 +53,9 @@ public enum ApnsEnv: String, Hashable, Sendable, Encodable {
     case development
 }
 
-/// 前端发给宿主的消息。只列出手机这个前端会发的几种：`Hello`、`ListSessions`、`Layout`、`Open`、
-/// `OpenWorkspace`、`RenameWorkspace`、`ListDirs`、`Spawn`、`Attach`、`Detach`、`Resize`、`Focus`、`Kill`、
-/// `ReadScreen`、`SendKeys`、`Paste`、`Git`、`PushRegister`、`KeepAwake`。JSON 的样子和
-/// 宿主的 `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。宿主对手机连接上的 `Shutdown`、
-/// 交接（`Handoff` 等）、`UiReply`、`SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就
-/// 发不出去。
+/// 前端发给宿主的消息。只定义手机这个前端会发的几种；宿主对手机连接上的 `Shutdown`、交接、`UiReply`、
+/// `SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就发不出去。JSON 的样子和宿主的
+/// `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。
 public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 连上后的第一条消息。手机的 `client` 是 `mobile`，`caps` 只要 VT 重放。
     case hello(protocol: UInt32, build: String, client: ClientKind, caps: Caps, session: SessionId?, device: String?)

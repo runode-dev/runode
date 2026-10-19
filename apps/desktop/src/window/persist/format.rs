@@ -137,11 +137,8 @@ pub enum SavedNode {
         /// 终端在宿主里的会话。
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
-        /// 写存档时终端的 shell 还没启动过。宿主里有会话的（接上的会话一直没切过去）接上也是空的，
-        /// 下次启动时宿主那边看着也没启动的话结束它，在原目录另开；从没在宿主里开过会话的
-        /// （`TerminalView::deferred` 建的、一直没显示过）`session` 为空，下次启动直接在原目录
-        /// 新开。shell 启动时布局不变、
-        /// 不一定重写存档，所以这一项可能已经过时，恢复时以宿主为准（见 `plan_restore`）。
+        /// 写存档时终端的 shell 还没启动过。shell 启动时布局不变、不一定重写存档，所以这一项可能
+        /// 已经过时，恢复时以宿主为准（见 `plan_restore`）。
         #[serde(default, skip_serializing_if = "is_false")]
         unstarted: bool,
     },
@@ -222,13 +219,10 @@ pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> Rest
     RestorePlan { windows, end }
 }
 
-/// 没开 app 时手机、命令行经宿主办的事接进要恢复的存档：宿主手里的布局 `held`（app 上次报给它的，
-/// 加上之后宿主自己办的改动，见 `ClientMsg::LayoutChanged`）里有、存档里没有的工作区，存档里哪儿都没
-/// 记着、也没有别的界面连着的活会话，以及改过的工作区名字。两边按窗口的序号对；窗口里目录一样的工作区
-/// 是同一个（几个同目录的先看序号一样的），名字跟着宿主那边改，新会话各开一个标签加在后面；存档里没有
-/// 这个目录的，在同一个序号的窗口（没有时最后一个窗口，一个窗口都没有时新开一个）末尾按宿主那边的目录
-/// 和名字新建，会话都没了的也建，和 app 里关掉最后一个标签后工作区还在一样；没有名字时用 `name_of`
-/// 按目录取。宿主那边不知道目录的工作区不接，里面的会话成为后台会话。
+/// 把没开 app 时经宿主办的事接进要恢复的存档：宿主手里的布局 `held`（见 `ClientMsg::LayoutChanged`）
+/// 里有、存档里没有的工作区，没人连着的活会话，以及改过的工作区名字。两边按窗口的序号对，窗口里目录
+/// 一样的工作区是同一个，名字跟着宿主改，新会话各开一个标签加在后面；存档里没有的目录在对应序号的窗口
+/// 末尾新建，没有名字时用 `name_of` 按目录取。宿主不知道目录的工作区不接，里面的会话成为后台会话。
 pub fn adopt(
     windows: &mut Vec<SavedWindow>,
     held: &[WindowLayout],

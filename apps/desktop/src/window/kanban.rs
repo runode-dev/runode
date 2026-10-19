@@ -103,9 +103,9 @@ impl WindowView {
         }
     }
 
-    /// 看板的新建、编辑对话框或任务那一页开着。对话框画在窗口根上，窗口的快捷键在里面照样触发，这时换页、收起或再开一个
-    /// 都会把写了一半的内容丢掉，所以这几个快捷键不理（看板、定时的入口除外，见 `toggle_kanban`）；窗口上经 `act` 派发的动作、关分屏的键（`ClosePane`）、
-    /// 打开设置页和从访达拖文件夹进来（`open_dropped_dirs`，对话框不接拖放，会冒泡到窗口根上）也一样不理。
+    /// 看板的新建、编辑对话框或任务那一页开着。窗口的快捷键在里面照样触发，换页、收起或再开一个
+    /// 会丢掉写了一半的内容，所以经 `act` 派发的动作、`ClosePane`、打开设置页和 `open_dropped_dirs`
+    /// 都不理（看板、定时的入口除外，见 `toggle_kanban`）。
     pub(super) fn dialog_open(&self, cx: &App) -> bool {
         self.kanban.as_ref().is_some_and(|board| board.view.read(cx).editing())
     }

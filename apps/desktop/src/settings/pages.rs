@@ -537,7 +537,7 @@ impl SettingsView {
             .child(div().py(px(10.)).grid().grid_cols(4).gap_x(px(12.)).gap_y(px(8.)).children(cells))
     }
 
-    /// 状态栏上不显示的几块，一块一个标签；写回时和状态栏的右键菜单一样写成一行，逗号隔开。
+    /// 状态栏上不显示的几块，一块一个标签；写回时写成一行，逗号隔开。
     fn render_status_bar_hidden(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         const KEY: &str = "status-bar-hidden";
         let hidden = self.config.status_bar_hidden.clone();

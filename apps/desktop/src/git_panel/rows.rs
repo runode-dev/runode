@@ -784,7 +784,7 @@ mod tests {
     #[test]
     fn one_block_per_repository() {
         let mut panel = PanelState::default();
-        // 只有一个仓库时没有块头，和以前一样；图表单独排，还没读历史时是「在读」。
+        // 只有一个仓库时没有块头；图表单独排，还没读历史时是「在读」。
         let single = git::Repos::new(repo("", RepoKind::Main, &["a.txt"]));
         panel.rebuild(Some(&single));
         assert_eq!(panel.rows, [GitRow::Section(0, GitSection::Unstaged), GitRow::File(0, Section::Unstaged, 0)]);

@@ -514,11 +514,9 @@ impl WindowView {
         // 先把下标指到位：关掉当前 workspace 后 `active` 可能已经越界，下面关浮层时要经 `workspace()`
         // 取焦点句柄。
         self.active = ix;
-        // 分支列表可能列的是上一个 workspace 的仓库。不按下标判断换没换：关掉或拖动 workspace 时
-        // 下标和 workspace 对不上。
+        // 分支列表可能列的是上一个 workspace 的仓库；关掉或拖动 workspace 时下标对不上，不按下标判断换没换。
         self.close_branch_picker(window, cx);
-        // 各处的菜单也是：撤销提交、丢掉全部、新建、加进 .gitignore、关闭其他标签、跑命令这些项作用到当前
-        // workspace，切过去再按就按到别的仓库、别的目录、别的标签上。
+        // 各处的菜单里的项作用到当前 workspace，也要关掉。
         self.git_panel.update(cx, |page, cx| page.close_menu(window, cx));
         self.file_tree.update(cx, |tree, cx| tree.close_menu(window, cx));
         self.preview.update(cx, |preview, cx| preview.close_menu(window, cx));
@@ -712,8 +710,7 @@ impl WindowView {
             workspace.tabs.retain(|tab| tab.panes.values().any(|(view, _)| view.read(cx).session_id().is_some()));
             workspace.active = workspace.active.min(workspace.tabs.len().saturating_sub(1));
             cx.notify();
-            // 是最后一个窗口时 app 跟着退出，后台会话怎么办归退出管（`quit::close_window`），该问就问；
-            // 这个 workspace 的终端上面已经问过、结束了，退出时不再算。
+            // 是最后一个窗口时 app 跟着退出，见 `quit::close_window`；这个 workspace 的终端已经结束，退出时不再算。
             super::quit::close_window(window.window_handle(), cx);
             return;
         }

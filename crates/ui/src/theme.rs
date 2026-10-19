@@ -1,10 +1,8 @@
 //! 界面的主题 token：各部件的底色、字色、边框色都从这里取，名字照 shadcn（`background`、`popover`、
 //! `muted`、`border`、`ring`……）。
 //!
-//! 每个窗口的配色跟着自己有焦点的终端走，token 却只有全 app 一份（`cx.global::<Theme>()`，经
-//! `ActiveTheme::theme` 读）：每个窗口画的时候一开头（桌面 app 的 `WindowView::render`）按本窗口的配色
-//! 把它换上，同一次绘制里接着画的缓存视图、悬停提示、拖动预览读到的都是这个窗口的。所以 token
-//! 只能在 render 和 paint 里读；事件处理、构造函数里读到的可能是别的窗口刚画时换上的。
+//! token 只有全 app 一份（`cx.global::<Theme>()`，经 `ActiveTheme::theme` 读），每个窗口画的时候一开头
+//! 按本窗口的配色换上，所以只能在 render 和 paint 里读；事件处理、构造函数里读到的可能是别的窗口的。
 
 use gpui::{App, Global, Hsla};
 use runode_types::color::Rgb;
@@ -17,7 +15,7 @@ pub const REMOVED: Rgb = Rgb(0xE5, 0x53, 0x4B);
 pub const MODIFIED: Rgb = Rgb(0xD2, 0xA8, 0x3E);
 pub const RENAMED: Rgb = Rgb(0x53, 0x9B, 0xF5);
 
-/// agent 等用户回答、干完了用户还没看时标记的颜色；看板上需要你、完成两列的圆点也用它们。
+/// agent 等用户回答、干完了用户还没看时标记的颜色。
 pub const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
 pub const AGENT_DONE_COLOR: u32 = 0x3FB950;
 
@@ -64,7 +62,7 @@ pub struct Theme {
     pub is_light: bool,
     /// 调色板的 ANSI 16 色。
     pub ansi: [Rgb; 16],
-    /// 算 `mix` 用的原色：在 sRGB 里按整数混，和各处原来的写法逐值一样。
+    /// 算 `mix` 用的原色：在 sRGB 里按整数混。
     fg: Rgb,
     bg: Rgb,
 }
@@ -178,7 +176,7 @@ mod tests {
         std::array::from_fn(|i| Rgb(i as u8 * 10, 0x40, 0x80))
     }
 
-    /// 每个 token 和搬过来以前各处的写法逐值相等：右边照抄原来的算式。
+    /// 每个 token 逐值等于它的算式。
     #[test]
     fn tokens_match_the_colors_they_replace() {
         for (fg, bg) in [DARK, LIGHT] {
@@ -188,7 +186,7 @@ mod tests {
             // 窗口、卡片（`Card`）的底色和字色。
             assert_eq!((theme.background, theme.foreground), (b, f));
             assert_eq!(theme.card, b);
-            // 菜单和各个浮层（`Popover`）的底色，原来菜单的写法。
+            // 菜单和各个浮层（`Popover`）的底色。
             assert_eq!(theme.popover, hsla(bg.mix(fg, 0.06)));
             assert_eq!(theme.popover_foreground, f);
             assert_eq!((theme.primary, theme.primary_foreground), (f, b));
@@ -200,13 +198,13 @@ mod tests {
             assert_eq!(theme.muted_foreground, f.opacity(0.5));
             // 各处的悬停底色。
             assert_eq!(theme.accent, hsla(bg.mix(fg, 0.06)));
-            // 分隔线（原来的 `divider_color`）和浮层的描边。
+            // 分隔线和浮层的描边。
             assert_eq!(theme.border, f.opacity(0.09));
             assert_eq!(theme.input, f.opacity(0.15));
             assert_eq!(theme.destructive, hsla(ansi[1]));
             assert_eq!(theme.ring, hsla(ansi[4]));
             assert_eq!(theme.ansi, ansi);
-            // 窗口外框和标签条：原来 `WindowView` 里的算式。
+            // 窗口外框和标签条。
             let luma = |c: Rgb| 0.299 * f32::from(c.0) + 0.587 * f32::from(c.1) + 0.114 * f32::from(c.2);
             let light = luma(bg) > luma(fg);
             assert_eq!(theme.is_light, light);

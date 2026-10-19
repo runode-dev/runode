@@ -197,7 +197,7 @@ impl RuleSet {
             let id = rule.id.clone();
             rules.push(compile_rule(rule, spec.min_engine_version).map_err(|err| format!("rule {id}: {err}"))?);
         }
-        // 稳定排序：优先级一样的保持原来的先后。
+        // 稳定排序：优先级一样的保持文件里的先后。
         rules.sort_by_key(|rule| std::cmp::Reverse(rule.priority));
         Ok(Self { id: spec.id, aliases: spec.aliases, rules })
     }

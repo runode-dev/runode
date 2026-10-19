@@ -346,10 +346,8 @@ impl WindowView {
         .detach();
     }
 
-    /// 命令菜单的各项：最上面是添加命令，下面每份一组。自己加的两份标题是「我的命令」「通用命令」，
-    /// 别的是文件，在列命令的目录里的写相对路径，在上层目录里的写 `~/…`；标题后面是命令条数，点了收起或
-    /// 展开，收起的组只留标题；命令名后面淡淡地写它的说明，选中时行尾自己加的命令有编辑和删除按钮，别的
-    /// 有设快捷键的按钮。另外给出上次跑的命令在第几项，它所在的组收着或者它没了时为空。
+    /// 命令菜单的各项：最上面是添加命令，下面每份命令一组，点标题收起或展开。另外给出上次跑的命令
+    /// 在第几项，它所在的组收着或者它没了时为空。
     fn tasks_menu_items(&self, cx: &App) -> (Vec<Option<MenuItem>>, Option<usize>) {
         let mut items = vec![Some(MenuItem::new(rust_i18n::t!("tasks.add"), Box::new(AddTask), true, cx))];
         let mut last = None;

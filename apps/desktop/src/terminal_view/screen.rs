@@ -3,8 +3,8 @@
 //! 视图经连接做的事放在返回值里（`Attach`），视图照着做。
 //!
 //! 两份 VT 一样的前提：界面这份从宿主给的屏幕开始，之后只喂那份屏幕之后的输出和标记。所以发出
-//! `Attach` 到收到它的屏幕之间，输出、改尺寸和换主题一律丢掉（连接那一层已经丢掉了 `Attached`
-//! 之前的，这里再挡住 `Attached` 和快照拼完之间漏过来的）；快照解出来的 VT 已经套着宿主的主题，
+//! `Attach` 到收到它的屏幕之间，输出、改尺寸和换主题一律丢掉（包括 `Attached` 和快照拼完之间
+//! 漏过来的）；快照解出来的 VT 已经套着宿主的主题，
 //! 之后不再另外 `apply_theme`。
 //!
 //! 后台标签、看不见的窗口里的终端不留界面这份 VT：离开显示 `HIDE_GRACE` 后改成只看状态
@@ -443,7 +443,6 @@ impl<S: Vt> ScreenState<S> {
         let attached = &screen.attached;
         let (mode, channel, size) = (attached.mode, attached.channel, attached.size);
         // 只认最近一次 `Attach` 要的那种：要屏幕时到了只看状态的（或者反过来）是之前那次的，不管它。
-        // 连接那一层已经只交最近一次的，这里再挡一道。
         if let Some(Attach { mode: wanted, .. }) = self.attaching
             && (wanted == AttachMode::MetaOnly) != (mode == AttachMode::MetaOnly)
         {

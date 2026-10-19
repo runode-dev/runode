@@ -172,7 +172,7 @@ public actor HostConnection: HostLink {
     }
 
     /// 不在看的电脑连不上时最多等 `ReconnectPolicy.idleMaximum` 再试：首页上连着所有配对过的电脑，关着的
-    /// 那几台每 15 秒找一遍 Bonjour、挨个试地址太费电。变回在看时，还要等比 `maximum` 久的马上重试。
+    /// 那几台一遍遍找 Bonjour、挨个试地址太费电。变回在看时，还要等比 `maximum` 久的马上重试。
     public nonisolated func setFocused(_ focused: Bool) {
         let gained = self.focused.withLock { old in
             defer { old = focused }
@@ -277,8 +277,8 @@ public actor HostConnection: HostLink {
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask {
                         // 连不上时它还公布着服务（Mac 睡着、睡眠代理替它公布，或者组播通、连接被挡）：等「公布」会
-                        // 立刻返回，退化成按退避一遍遍连；Mac 醒来时记录也可能不变，干等 `offlineRetry` 又要等五分钟。
-                        // 所以这时按 `idleMaximum` 一分钟试一次，比退避稀，醒来后也不久就连上。
+                        // 立刻返回，退化成按退避一遍遍连；Mac 醒来时记录也可能不变，干等 `offlineRetry` 又太久。
+                        // 所以这时按 `idleMaximum` 试一次，比退避稀，醒来后也不久就连上。
                         let published = await discovery.locate(fingerprint, timeout: .seconds(2)) != nil
                         try await Task.sleep(until: earliest, clock: .continuous)
                         guard !published else {

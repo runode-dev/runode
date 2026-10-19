@@ -93,8 +93,8 @@
             didSet { if !acceptsInput, isFirstResponder { resignFirstResponder() } }
         }
 
-        /// 默认字号（13 点）和可读的最小字号（9 点），都按动态字体放大缩小；用户定了字号时默认字号用它，
-        /// 可读的最小字号不超过它。
+        /// 默认字号和可读的最小字号，都按动态字体放大缩小；用户定了字号时默认字号用它，可读的最小字号
+        /// 不超过它。
         static func fontSizes(for traits: UITraitCollection, override: CGFloat? = nil) -> (
             base: CGFloat, readable: CGFloat
         ) {
@@ -253,11 +253,9 @@
             scheduleRefresh()
         }
 
-        /// VT 变了：下一轮主循环再从 render state 抄变了的行，一轮里多块输出只刷新一次。刷屏时输出一块块
-        /// 地来，每块都整屏抄一遍、重画一遍会占满主线程，喂 VT 反倒跟不上；所以两次刷新至少隔一帧，抄和
-        /// 画得慢时再拉开：画发生在刷新之后的空档里，空档取这一轮抄加上一轮画的耗时的两倍，抄和画最多占
-        /// 一半主线程。空档最多 250 毫秒：拖动滚动时直接刷新引起的画也记在里面，不能让它把下一次刷新推得
-        /// 太远。离上次刷新已经够久时（打字回显）照旧马上刷。
+        /// VT 变了：合并一轮里的多块输出，下一轮主循环再从 render state 抄变了的行。刷屏时两次刷新至少
+        /// 隔一帧，抄和画得慢时按它们耗时的两倍拉开，让抄和画最多占一半主线程，空档有上限；离上次刷新
+        /// 已经够久时（打字回显）马上刷。
         public func scheduleRefresh() {
             guard !refreshScheduled else { return }
             refreshScheduled = true
@@ -407,8 +405,7 @@
         /// 按当前缩放比例重画，放大后字不发虚。位图的边长和总像素有上限，免得超大的网格吃光内存。
         private func updateRasterScale() {
             let screenScale = window?.screen.scale ?? traitCollection.displayScale
-            // 平常不低于 1，缩小着看也不糊；网格大到连 1 都超过上限时（宿主给的尺寸最大 2000×2000）照上限
-            // 再往下压，宁可糊一些也不吃光内存。
+            // 平常不低于 1，缩小着看也不糊；网格大到连 1 都超过上限时照上限再往下压，宁可糊一些。
             var scale = max(max(scrollView.zoomScale, 0.1) * screenScale, 1)
             let size = grid.bounds.size
             if size.width > 0, size.height > 0 {
@@ -449,12 +446,9 @@
             gridContainer.clipsToBounds = shift != 0
         }
 
-        /// 网格比屏幕窄时左右居中；比屏幕矮出整行时贴着底边（靠近键盘和底栏，新输出在那里），上面空着的
-        /// 地方露出视图的背景，也就是终端的背景色。不足一行的零头（行数是按视图高度向下取整的）留在底下，
-        /// 不在网格上面空出半行。适配手机时网格马上会改成正好铺满视图，多出的整行只是在等宿主改尺寸（收起
-        /// 键盘时视图变高）：上面有回滚历史时，宿主改完尺寸把历史拉下来补在上面，照样贴底边，网格跟着键盘往下
-        /// 滑；没有历史时新的行加在底下，贴着顶边放，免得网格先往下跳、改完尺寸又跳回来。弹出键盘时底部的
-        /// 按键栏比键盘先让开，视图先变高一下，也贴着顶边，网格不先往下沉再跟着键盘上来。
+        /// 网格比屏幕窄时左右居中；比屏幕矮出整行时贴着底边，上面空着的地方露出终端的背景色，不足一行的
+        /// 零头留在底下。适配手机时多出的整行只是在等宿主改尺寸：上面有回滚历史时照样贴底边；没有历史、
+        /// 或键盘正在弹出（`keyboardMotion`）时贴着顶边，免得网格先往下跳又跳回来。
         private func centerContent(stickToBottom: Bool = false) {
             let horizontal = max(0, (scrollView.bounds.width - scrollView.contentSize.width) / 2)
             let rowHeight = grid.font.cellHeight * scrollView.zoomScale

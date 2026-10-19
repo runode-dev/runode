@@ -105,7 +105,7 @@ fn user_keybinds_override_unbind_and_clear() {
     assert_eq!(table, [("cmd-q".to_owned(), Action::Quit)]);
 }
 
-/// 默认绑定转换后与原来写死的 GPUI 写法一致，升级后快捷键不变。
+/// 默认绑定转换成 GPUI 的按键写法。
 #[test]
 fn defaults_keep_gpui_keystrokes() {
     let table = resolve(&[]);

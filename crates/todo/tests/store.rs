@@ -1,4 +1,4 @@
-//! 任务库：任务和定时读写的来回、排序和编号，旧库的升级，不碰比自己新的库和不是库的文件。
+//! 任务库：任务和定时读写的来回、排序和编号，不碰别的版本的库和不是库的文件。
 
 use std::path::{Path, PathBuf};
 
@@ -57,7 +57,7 @@ fn todos_round_trip_and_keep_their_order() {
     assert!(store.move_todo(&a, Some("nothere")).is_err());
     assert!(store.move_todo("nothere", None).is_err());
 
-    // 完成了的只给最近七天的，取消完成后又回来。
+    // 完成了的只给 `DONE_KEPT` 内的，取消完成后又回来。
     assert!(store.update_todo(&a, None, Some(Some(200))).unwrap());
     assert_eq!(ids(&store, 200 + DONE_KEPT), [a.clone(), b.clone(), c.clone()]);
     assert_eq!(ids(&store, 201 + DONE_KEPT), [b.clone(), c.clone()]);
@@ -283,7 +283,7 @@ fn done_todos_page_newest_first() {
     assert_eq!(done(None, 1, 2), (vec![mid.clone(), old.clone()], false));
     assert_eq!(done(Some("sched01"), 0, 10), (vec![mid, old], false));
     assert!(!done(None, 0, 10).0.contains(&open));
-    // 七天的窗口只管看板，不管记录。
+    // `DONE_KEPT` 的窗口只管看板，不管记录。
     assert!(ids(&store, 400 + DONE_KEPT + 1).iter().all(|id| *id == open));
 }
 

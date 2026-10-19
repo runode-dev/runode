@@ -36,8 +36,8 @@ pub const RESULT_TIMEOUT: Duration = Duration::from_secs(45);
 
 const _: () = assert!(READY_BY.as_millis() > GIVE_READY_WINDOW.as_millis());
 const _: () = assert!(RESULT_TIMEOUT.as_millis() > TAKE_OVER_AFTER_READY.as_millis());
-/// 旧宿主说还有桌面连着（`HandoffRefusal::DesktopConnected`）时，最多重试这么久：旧版本的 app 刚
-/// 退出时，它的连接可能还没断干净。
+/// 旧宿主说还有桌面连着（`HandoffRefusal::DesktopConnected`）时，最多重试这么久：app 刚退出时，
+/// 它的连接可能还没断干净。
 pub const DESKTOP_RETRY: Duration = Duration::from_secs(2);
 /// 两次重试之间隔这么久。
 const RETRY_PAUSE: Duration = Duration::from_millis(200);
@@ -346,7 +346,7 @@ mod tests {
         assert!(matches!(&outcome, Outcome::Failed(reason) if reason.contains("without reporting")), "{outcome:?}");
     }
 
-    /// 旧版本的 app 刚退出、连接还没断干净：重新拉起新宿主再试，第二次成了。
+    /// app 刚退出、连接还没断干净：重新拉起新宿主再试，第二次成了。
     #[test]
     fn a_desktop_still_connected_is_retried_for_a_while() {
         let refused =

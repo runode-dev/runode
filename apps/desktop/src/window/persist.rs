@@ -106,9 +106,8 @@ pub(super) fn install(cx: &mut App) {
     .detach();
 }
 
-/// 要退出了：把各窗口现在的布局写进存档，之后布局怎么变都不再写。退出时一定会做；会话要先于
-/// app 结束时（让单独跑的宿主连会话一起退出），视图会先收到会话结束、一个个关掉分屏，要在那之前
-/// 调，下次启动才能照原样在原目录新开。已经冻结了时什么都不做。
+/// 要退出了：把各窗口现在的布局写进存档，之后布局怎么变都不再写。会话先于 app 结束时要在会话结束
+/// 之前调，免得视图一个个关掉分屏。已经冻结了时什么都不做。
 pub(super) fn freeze(cx: &mut App) {
     if cx.global::<Saver>().frozen {
         return;
@@ -138,10 +137,8 @@ pub(super) fn keeps_windows(cx: &App) -> bool {
 }
 
 /// 上次存下的各个窗口，以及恢复时打开它们用的窗口选项（位置、大小、所在屏幕）。没有存档或
-/// 读不了时为空；读不了时文件挪到一边（`format::load`），从默认布局开始。没开 app 时手机、命令行
-/// 经宿主新开的终端、新建的工作区和改的名字按宿主手里的布局接进来（`format::adopt`）。终端记的会话按宿主里
-/// 还活着的会话定下接不接（`format::plan_restore`）；存档记着、没人连着的会话中 shell 已经退出的和一直没
-/// 启动的这时结束掉，存档里没记着的孤儿会话由 `watch_background` 问过看板再收。
+/// 读不了时为空（`format::load`）。没开 app 时宿主里改的布局按宿主手里的接进来（`format::adopt`），
+/// 终端记的会话接不接按宿主里还活着的会话定（`format::plan_restore`），要结束的这时结束掉。
 pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
     let mut windows = format::load().map(|state| state.windows).unwrap_or_default();
     let live = live_sessions();
@@ -261,10 +258,8 @@ pub(super) fn track(cx: &mut Context<WindowView>) {
     cx.on_release(move |view, cx| closed(view, window, cx)).detach();
 }
 
-/// 窗口关掉了。关掉它以后一个窗口都不剩时，是关掉了最后一个窗口或者一下关掉了所有窗口（这时
-/// 各个窗口都先从 app 里拿掉，再一个个放掉），app 随即退出：和退出一样留下它关掉时的布局，下次
-/// 启动恢复。还有别的窗口开着时是单独关掉了它，里面的会话随之结束，从存档里拿掉。所有
-/// workspace 都关掉了的窗口不留。
+/// 窗口关掉了，按 `on_close` 更新存档：关掉后一个窗口都不剩时 app 随即退出，和退出一样留下它的
+/// 布局；还有别的窗口开着时它的会话随之结束，从存档里拿掉。
 fn closed(view: &mut WindowView, window: WeakEntity<WindowView>, cx: &mut App) {
     super::layout_report::changed(cx);
     let id = window.entity_id();

@@ -2,10 +2,8 @@
     import RunodeConnection
     import SwiftUI
 
-    /// 新建工作区时选电脑上的目录：从家目录开始，点子目录进去，「上一级」退出来，选好了点「在这里新建」。
-    /// 同一页里换目录，不一层层推进导航栈，退出来也就不用一层层返回。能顺手填工作区的名字，空着时按目录
-    /// 取。电脑上的 app 没开着窗口时建不了工作区，选好的目录里开的是后台终端，页脚说明这一点，也不出名字
-    /// 的输入框。
+    /// 新建工作区时选电脑上的目录：同一页里换目录，不推进导航栈。能顺手填工作区的名字，空着时按目录
+    /// 取。电脑上的 app 没开着窗口时开的是后台终端，页脚说明这一点，也不出名字的输入框。
     struct DirectoryPickerView: View {
         @Bindable var picker: DirectoryPickerModel
         let hasDesktopWindow: Bool

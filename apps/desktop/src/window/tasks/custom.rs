@@ -1,11 +1,7 @@
 //! 自己加的命令：添加和编辑的对话框，以及改写 runode 根目录的 `tasks.json`（`Dirs::tasks_file`）。
-//! 一条命令要么只用于一个项目（`projects` 下按项目目录分，在项目目录里跑），要么通用（`global`，在
-//! 终端当前目录里跑），对话框里选。添加到本项目时，项目目录取终端目录所在仓库的根目录，不在仓库里时取
-//! 终端目录；同一份里同名的换成新的命令行。命令菜单里这些命令行尾的编辑按钮用同一个对话框改，改完留在
-//! 原来的位置；删除按钮从文件里删掉它。对话框里还能录一个快捷键，存在同一个文件的 `keys` 里（见 `keys`）：
-//! 通用命令的记在通用的那份，别的记在终端目录用的那个项目的那份；快捷键按名字找命令，改名、换份、删除时
-//! 跟着改。文件由宿主列出来（`TaskSourceKind::Custom`、`Global`），手机上也看得到。Makefile、package.json
-//! 的命令不能改，同一个对话框只录快捷键（`bind_task`），名字和命令行只写出来、不写命令。
+//! 一条命令要么只用于一个项目（在项目目录里跑），要么通用（`global`，在终端当前目录里跑）。对话框
+//! 里还能录一个快捷键，存在同一个文件的 `keys` 里（见 `keys`），按名字找命令，改名、换份、删除时
+//! 跟着改。Makefile、package.json 的命令不能改，同一个对话框只录快捷键（`bind_task`）。
 
 use crate::ui::theme::ActiveTheme as _;
 use std::{
@@ -225,9 +221,7 @@ impl WindowView {
     }
 
     /// 在后台把填好的命令写进文件，写好了关掉对话框、重列命令；写不了时把原因写在对话框里。名字
-    /// 空着时用命令行当名字。编辑时换掉原来那一条，同一份里改了名字也留在原来的位置；换到另一份时
-    /// 加在那一份的最后。快捷键没改过时原来绑的键跟着命令改名、换份，改了时换成录的这一个；新加的没录
-    /// 快捷键时不碰这个名字上已经绑着的键。
+    /// 空着时用命令行当名字。编辑时换掉原来那一条，见 `write_task`。
     fn save_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let dir = self.project_dir(cx);
         let Some(dialog) = &mut self.add_task else {
@@ -741,8 +735,8 @@ fn key_table<'a>(
     scope_tasks(keys.as_object_mut().ok_or("`keys` is not a JSON object")?, project)
 }
 
-/// 终端目录 `dir` 的项目快捷键记在哪份：和 `TaskKeys::project` 一样先找已经有键的那份，没有时取自己加的
-/// 命令所在的项目（`projects` 里最深的），再没有时取 `dir` 所在仓库的根目录，不在仓库里时取 `dir`。
+/// 终端目录 `dir` 的项目快捷键记在哪份：先找已经有键的那份（同 `TaskKeys::project`），再找自己加的
+/// 命令所在的项目，都没有时取 `dir` 所在仓库的根目录，不在仓库里时取 `dir`。
 fn key_project(root: &Map<String, Value>, dir: &Path) -> PathBuf {
     let deepest = |table: Option<&Value>| {
         let dirs = table.and_then(Value::as_object).into_iter().flatten().map(|(at, _)| Path::new(at));

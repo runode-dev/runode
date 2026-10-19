@@ -25,10 +25,9 @@ use runode_types::{
 
 use crate::session::convert::{ghostty_cursor_style, ghostty_rgb};
 
-/// 回滚历史最多留多少行。另有字节上限（`configure_common` 的 `scrollback_bytes`，默认 10 MiB），先到
-/// 哪个按哪个算。两个上限都按 page 整块丢弃最老的历史，实际留下的比上限少一些，最多少一个
-/// page。一行占的字节随列数变：默认上限下 80 列先到行数上限（留 9800 多行），200 列先到字节
-/// 上限（留五千多行）。
+/// 回滚历史最多留多少行。另有字节上限（`configure_common` 的 `scrollback_bytes`，默认
+/// `DEFAULT_SCROLLBACK_LIMIT`），先到哪个按哪个算。两个上限都按 page 整块丢弃最老的历史，实际
+/// 留下的比上限少一些，最多少一个 page。一行占的字节随列数变，列数多时先到字节上限。
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 
 /// 留给未知 OSC 的最多字节数：函数很多的 shell 报告的函数名能有几十 KB。更长的被截断，
@@ -41,8 +40,7 @@ pub(crate) const CONTINUATION_MAX_BYTES: usize = 1024 * 1024;
 
 /// 按 `size` 新建一个 VT，按默认配置设好 `configure_common` 的选项（之后 `apply_theme` 再按
 /// 实际配置设一遍），并从一开始就记录没写完的序列，随时能编快照。要在喂输入之前开始记录：
-/// 开的时候已经停在序列中间的话，这条序列编不出来，要等它结束。记录的开销可以忽略（release
-/// 下喂 100 MiB 混合输出实测，和不记录的差别在测量误差以内）。
+/// 开的时候已经停在序列中间的话，这条序列编不出来，要等它结束。记录的开销可以忽略。
 pub(crate) fn new_terminal(size: GridSize) -> Result<Terminal<'static, 'static>> {
     let mut terminal = Terminal::new(size.cols, size.rows)?;
     configure_common(&mut terminal, Some(DEFAULT_SCROLLBACK_LIMIT))?;
@@ -65,7 +63,7 @@ pub(crate) fn terminal_size(terminal: &Terminal<'_, '_>) -> Result<GridSize> {
 
 /// 设好两份 VT 必须一致的选项：回滚历史的行数和字节上限，未知序列的长度上限。新建的、从
 /// 快照解出来的 VT 都要调，配置变了也要调；快照里带着的选项（比如回滚上限）照样设一遍，
-/// 免得哪天快照格式不再带它时两边悄悄分叉，或者退回 libghostty 自己的默认值。
+/// 两边才不依赖快照的内容。
 ///
 /// `scrollback_bytes` 是回滚历史最多占多少字节，即配置项 `scrollback-limit`；`None` 表示不限，
 /// 只按行数算。调低回滚上限会立刻丢掉超出的历史。默认颜色和光标样式由 `apply_theme` 设，不在这里。

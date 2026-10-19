@@ -422,7 +422,7 @@ impl TerminalView {
             self.send_attach(attach);
         }
         if changes.retry_attach {
-            // 等宿主把这条连接上积压的写出去：和手机重连的间隔一样。不留着 `Task`：到点时已经连上、
+            // 等宿主把这条连接上积压的写出去。不留着 `Task`：到点时已经连上、
             // 断开、退出或者另发了 `Attach` 的话 `retry_attach` 为 `None`，什么也不发。
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(ATTACH_RETRY).await;
@@ -898,9 +898,8 @@ impl TerminalView {
         self.screen.resize(size);
         self.start_pending = false;
         let Some(id) = self.id else {
-            // 现在的调用方给的都是已有会话的视图，走不到这里。以后若有 `deferred` 建的视图走到
-            // 这里，界面这份状态没标成正在附着（不像 `request_visible` 经 `set_visible` 标上），
-            // 附着失败时宿主回的错误就不会被认成会话没了，要先补上这一步。
+            // `deferred` 建的视图走到这里时，界面这份状态没标成正在附着（`request_visible` 经 `set_visible`
+            // 才标上），附着失败时宿主回的错误不会被认成会话没了。
             self.open_session(true, Attach { size: None, mode: AttachMode::MetaOnly });
             self._reader = Self::read_events(self.events.clone(), window, cx);
             return;

@@ -2,9 +2,8 @@
     import RunodeConnection
     import SwiftUI
 
-    /// 设置页：终端的默认尺寸方式、字号、响铃震动，agent 等回答时的通知，配对过的电脑，报给电脑的
-    /// 设备名，以及版本和开源许可。开关、选择器要系统的行样式，所以用分组的 `Form`，不用首页那种自己画的卡片列表。改了马上
-    /// 生效、马上存（见 `SettingsModel`）。
+    /// 设置页：终端、通知、配对过的电脑、报给电脑的设备名，以及版本和开源许可。开关、选择器要系统的
+    /// 行样式，所以用分组的 `Form`，不用自己画的卡片列表。改了马上生效、马上存（见 `SettingsModel`）。
     struct SettingsView: View {
         let app: AppModel
         @Bindable var settings: SettingsModel

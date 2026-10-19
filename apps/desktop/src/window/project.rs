@@ -24,7 +24,7 @@ use gpui::{
     Action, AnyElement, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Role, Stateful, Window,
     div, prelude::*, px,
 };
-// 面板外框在 `runode_ui::panel`，窗口里各面板照旧从这里引。
+// 面板外框在 `runode_ui::panel`，窗口里各面板从这里引。
 use crate::ui::a11y::A11yPress;
 pub(super) use crate::ui::panel::{panel_message, panel_shell};
 use crate::{

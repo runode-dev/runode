@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{agent::Agent, shell::ShellNames};
 
-/// 一个终端会话对外公布的状态。缺的字段按默认值读，以后加字段时旧的一方照样能读。
+/// 一个终端会话对外公布的状态。缺的字段按默认值读。
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct SessionMeta {

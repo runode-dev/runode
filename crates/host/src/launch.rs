@@ -59,10 +59,7 @@ fn environ() -> *const *mut c_char {
 
 /// 用 `exe --host` 拉起宿主进程，返回它的 pid，不等它连上 socket。
 ///
-/// 子进程不在 app 的会话和进程组里（`detach` 时自己开一个会话，macOS 上经 launchd 时在 launchd 的会话里、
-/// 自己当进程组的组长），标准输入输出接 `/dev/null`，除此之外不继承任何描述符（app 开着的 socket、PTY
-/// 这些都不带过去），信号处理恢复默认、信号屏蔽清空，环境变量照抄，macOS 上自己担着责任进程，也有自己的
-/// coalition（见 `launchd`）。
+/// 子进程和拉起它的 app 脱开：不在 app 的会话和进程组里，不继承 app 的描述符，见 `detach` 和 `launchd`。
 ///
 /// 连上它（每隔几毫秒试一次 socket，撞上它正因空闲退出时重来）是调用方的事。
 pub fn launch(exe: &Path) -> io::Result<u32> {
@@ -90,8 +87,7 @@ pub struct Successor {
 
 /// 升级时用 `exe --host --take-over` 拉起新宿主，让它接手 socket 上旧宿主的会话，不等它接完。
 ///
-/// 和 `launch` 一样在新的会话里、标准输入输出接 `/dev/null`、只继承下面这一个描述符、信号恢复
-/// 默认；另外开一根管道（macOS 上经 launchd 拉起时是 FIFO），写端接到新进程的 `STATUS_FD` 上，读端
+/// 和 `launch` 一样与 app 脱开，只多继承下面这一个描述符；另外开一根管道（macOS 上经 launchd 拉起时是 FIFO），写端接到新进程的 `STATUS_FD` 上，读端
 /// 交给调用方读结果。这边不留写端，新宿主一退出调用方就读到结尾。
 pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
     #[cfg(target_os = "macos")]

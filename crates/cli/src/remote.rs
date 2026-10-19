@@ -1,7 +1,6 @@
 //! `runode remote …`：给手机配对远程访问（`pair`）、列出（`devices`）和撤销（`revoke`）配对过的设备。
 //! 不经宿主，读写 `runode_remote` 管的文件：监听方（宿主所在的进程）开着时才能配对，列和
-//! 撤销不用它开着。配置里还没开 `remote-access` 时，`pair` 替用户写上再等监听方起来。配对成了以后，`terminal-host` 还没开时问一句要不要开，免得退出 app 后远程访问
-//! 跟着停掉、手机连不上。
+//! 撤销不用它开着。配对前见 `turn_on`，配对后见 `offer_background`。
 
 use std::{
     io::{BufRead as _, IsTerminal as _, Write},
@@ -34,7 +33,7 @@ const QUIET_ZONE: usize = 2;
 const BACKGROUND_KEY: &str = "terminal-host";
 /// 开远程访问的配置项，见 `turn_on`。
 const REMOTE_KEY: &str = "remote-access";
-/// `turn_on` 写完配置后等监听方起来的最长时间：app 和单独跑的宿主每秒看一眼配置文件。
+/// `turn_on` 写完配置后等监听方起来的最长时间。
 pub(crate) const LISTENER_WAIT: Duration = Duration::from_secs(10);
 
 /// `answer` 读用户对「要不要在后台跑」的回答，见 `offer_background`；`listener_wait` 是 `turn_on` 等监听方的时间。
@@ -198,11 +197,10 @@ pub(crate) fn read_answer() -> Option<String> {
     }
 }
 
-/// 配对成了以后：宿主跑在 app 里时，退出 app 远程访问跟着停，手机就连不上了。配置里还没开
-/// `BACKGROUND_KEY` 时问用户要不要开，直接回车算要；开了以后退出 app 时宿主连同各终端和远程访问
-/// 留在后台（app 运行中改这一项马上算数）。`answer` 为 `None`（问不了）或者回答不要时不改配置，
-/// 只说怎么自己开。写不了配置文件时也照样算配对成了，说明原因。问的时候用户可能在 app 或编辑器里
-/// 改了配置，所以回答以后重新读一遍再改，不拿问之前读的那份盖掉。
+/// 配对成了以后，配置里还没开 `BACKGROUND_KEY` 时问用户要不要开，直接回车算要：宿主跑在 app 里时，
+/// 退出 app 远程访问跟着停，手机就连不上。`answer` 为 `None`（问不了）或者回答不要时不改配置，只说
+/// 怎么自己开；写不了配置文件也照样算配对成了，说明原因。回答以后重新读一遍配置再改，免得盖掉问的
+/// 时候别处做的修改。
 fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> Option<String>) -> anyhow::Result<()> {
     let Some(path) = env.dirs.config_file() else {
         return Ok(());

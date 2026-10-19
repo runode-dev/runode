@@ -2,16 +2,8 @@
 //! 预览栏、Git 面板和文件树。workspace 对应一个项目目录，各有一组标签；窗口的布局随改随存，下次启动时
 //! 恢复。
 //!
-//! 这里是窗口的根视图 `WindowView`、窗口绑定的动作，以及把各部分拼起来的渲染。其余按职责分在
-//! 子模块里：workspace、标签和分屏的数据与增删切换（`model`）、动作的处理（`actions`）、
-//! agent 的状态标记、提醒和跳转（`agents`，系统通知和提示音在 `agents::alert`）、列出所有 agent
-//! 的浮层（`agent_picker`）、标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、
-//! 右侧的预览栏、Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的
-//! 就地输入框（`inline_edit`），新建 workspace 的对话框（`new_workspace`），开窗口（`open`），存档（`persist`，存档文件的格式在
-//! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
-//! （`quit`），侧栏顶上手机端入口打开的引导页（`mobile`），铺满窗口的看板（`kanban`），铺满窗口的设置页（`settings_page`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
-//! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），经远程访问配对过的设备
-//! （`devices`），以及窗口底部的状态栏（`status_bar`）。
+//! 这里是窗口的根视图 `WindowView`、窗口绑定的动作，以及把各部分拼起来的渲染；其余按职责分在
+//! 子模块里，各模块开头有自己的说明。
 //!
 //! 窗口有两种样子，按配置的 `WindowStyle` 画：卡片样式（`render_cards_body`）和经典样式
 //! （`render_classic_body`）。
@@ -75,7 +67,7 @@ pub use quit::{
     terminal_windows,
 };
 pub use remote::serve_requests;
-// 文件树的动作跟着文件树在 `file_tree`，快捷键表照旧从这里引。
+// 文件树的动作在 `file_tree`，这里转出去给快捷键表用。
 pub use crate::file_tree::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
@@ -89,7 +81,7 @@ pub use titlebar::titlebar_options;
 
 use crate::ui::a11y::{Hide, PressDown};
 // 关标签、关分屏和放大分屏这几个动作在 `runode_ui::actions`，焦点在预览栏里时由预览栏接住；
-// 标题栏的高度、拖动窗口和标签的关闭按钮也在 `runode_ui`，窗口里照旧从这里引。
+// 标题栏的高度、拖动窗口和标签的关闭按钮也在 `runode_ui`。
 use crate::file_tree::FileTree;
 use crate::git_panel::GitPanel;
 use crate::github_actions::ActionsPanel;

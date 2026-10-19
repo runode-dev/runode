@@ -54,11 +54,9 @@ pub(super) struct Effects {
     pub(super) end_report: StdCell<bool>,
     /// 这条命令开始时，集成脚本用 `version` 报告过它在 133;D 前面先发 `end` 报告（版本 2 起），这条命令
     /// 不跟在 `end` 报告后面的 133;D 就都不算：程序输出里伪造的、内层 shell 或别家集成（iTerm2、
-    /// oh-my-posh）发的，都会让等命令的前端以为命令跑完了。按命令算，认了结束就清掉：同一个会话里
-    /// `runode-reload` 换上旧版脚本（比如开发版和发布版同时在跑，共用一份脚本目录）时，下一条命令照旧版的办。
+    /// oh-my-posh）发的，都会让等命令的前端以为命令跑完了。按命令算，认了结束就清掉。
     ///
-    /// 不随交接带走，免得交接格式和导出导入都要多一项：接手的宿主从下一条命令起就又认得了，交接时正在跑
-    /// 的那条照旧版的办，它的结束在这期间可能被伪造。
+    /// 不随交接带走：接手的宿主从下一条命令起就又认得了，交接时正在跑的那条不要求 `end` 报告。
     pub(super) signed_ends: StdCell<bool>,
     /// 程序读写剪贴板的请求，按到达的先后，由 `HostSession::take_clipboard` 取走。
     pub(super) clipboard: RefCell<Vec<ClipboardRequest>>,
@@ -475,7 +473,7 @@ mod tests {
     fn shell_reports_without_the_right_token_are_ignored() {
         let mut session = reporting_host();
         let wrong = "0123456789abcdef0123456789abcdee";
-        // 口令不对、少一位、缺口令（旧格式）、空口令，都不采用。
+        // 口令不对、少一位、缺口令、空口令，都不采用。
         session.feed(format!("\x1b]6973;{wrong};path=/evil\x07").as_bytes());
         session.feed(format!("\x1b]6973;{};path=/evil\x07", &TOKEN[1..]).as_bytes());
         session.feed(b"\x1b]6973;path=/evil\x07\x1b]6973;;path=/evil\x07\x1b]6973;functions=git\x07");

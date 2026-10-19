@@ -2,7 +2,7 @@
 //! 签名（`Installation::stage`），以及和装着的那份对调（`Staged::install`）。
 //!
 //! 暂存目录和 .app 在同一个目录里（`/Applications/.Runode.app.update`），对调才能用一次
-//! `renamex_np(RENAME_SWAP)` 原子地做完：不会有哪一刻 .app 不在，退出时也只要几毫秒。
+//! `renamex_np(RENAME_SWAP)` 原子地做完：不会有哪一刻 .app 不在，退出时也很快做完。
 
 use std::{
     ffi::OsStr,
@@ -16,7 +16,7 @@ use crate::{BUNDLE_ID, Error, Release};
 
 /// 下载更新包最多等这么久。
 const ARCHIVE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-/// 更新包里的 .app 叫这个名字（打包脚本 `bundle-macos.sh` 定的）。装着的那份被用户改了名（`Runode Work.app`）
+/// 更新包里的 .app 叫这个名字（打包脚本定的）。装着的那份被用户改了名（`Runode Work.app`）
 /// 也一样，对调后装着的位置还是用户起的名字。
 const ARCHIVE_APP: &str = "Runode.app";
 

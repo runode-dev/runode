@@ -4,10 +4,10 @@
 //!
 //! 同一个文件里还有手机登记的推送（`PushRegistration`，见 `runode_protocol::push`），按设备一条，和
 //! `Device` 分开放：`runode remote list --json` 把 `Device` 整个打印出来，token 不该跟着出去。撤销设备时
-//! 一起删。旧版本读得了带着它的表（不认识的字段忽略），但它改表时会把它丢掉，手机下次连上时重新登记。
+//! 一起删。
 //!
 //! 每台设备最近一次登录的来源地址（`SeenFrom`）也这样另外放，只留最近一个，不打印出去：监听重开时
-//! 据此认出连过的手机，见 `seen_from`。旧版本改表时丢掉它，下次登录时再记上。
+//! 据此认出连过的手机，见 `seen_from`。
 
 use std::{fs::OpenOptions, io, net::IpAddr, os::unix::fs::OpenOptionsExt as _, path::PathBuf};
 

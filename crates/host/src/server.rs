@@ -9,15 +9,12 @@
 //! 排进去的屏幕不算会话输出的积压。转给连接的输出里，shell 集成的报告抹掉了内容（见 `ReportRedactor`），报告带的口令不出宿主。
 //!
 //! 读的线程不等会话线程回话：列会话、读屏幕先在读的线程里把请求按先后送到会话线程，再起一个
-//! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。一条连接上这样在等的请求
-//! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程；git 请求另算一份名额，
-//! 联网的 git 操作卡住时列会话、读屏幕照常。列目录（`ClientMsg::ListDirs`）、列命令
-//! （`ClientMsg::ListTasks`）和开会话（`ClientMsg::Spawn`，要 stat、进起始目录）也另起线程办、另算名额
-//! （开会话再单算一份，卡住的列目录占满了也开得了别处的终端）：断掉的网络挂载上 stat 会一直卡住，卡住的
-//! 只是那个线程，回话按 `req` 认，先后不定。积压过了
-//! 上限的连接，列会话、读屏幕、连上会话和 git 请求都当场回 `Error`，不再往积压上加回话；别的回话照办
-//! （输入的 `Done` 回错的话粘贴就丢了），积压远超上限（`OUTBOX_HARD_LIMIT`）时前端显然不读了，读的线程
-//! 直接断开连接。
+//! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。这类等回话的请求按 `Waiting`
+//! 限量，超出的当场回 `Error`；git 请求、列目录（`ClientMsg::ListDirs`）、列命令（`ClientMsg::ListTasks`）
+//! 和开会话（`ClientMsg::Spawn`）各另起线程办、另算名额，一类卡住（联网的 git、断掉的网络挂载上的
+//! stat）不挤占别的；回话按 `req` 认，先后不定。积压过了 `OUTBOX_LIMIT` 的连接，列会话、读屏幕、
+//! 连上会话和 git 请求都当场回 `Error`，不再往积压上加回话；别的回话照办（输入的 `Done` 回错的话
+//! 粘贴就丢了），积压远超上限（`OUTBOX_HARD_LIMIT`）时读的线程直接断开连接。
 //!
 //! 能连上 socket 就能读写所有终端：socket 放在只有自己能进的目录里（见调用方建目录的方式），
 //! 连上来的进程也要是同一个用户的。`Hello` 里的 `ClientKind` 是前端自报的，宿主不核实：终端里的
@@ -81,10 +78,10 @@ const MAX_WAITING: usize = 16;
 const MAX_GRID: u16 = 2000;
 /// 接受连接出错（比如文件描述符用完了）后等一会儿再接，免得空转。
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
-/// 每条连接 socket 的收发缓冲。macOS 上默认只有 8 KiB，刷屏的输出一块就塞满，读写两边来回
-/// 切换的次数多到吞吐上不去；内核允许的上限（`kern.ipc.maxsockbuf`）是 8 MiB。
+/// 每条连接 socket 的收发缓冲。系统默认的缓冲太小，刷屏的输出一块就塞满，读写两边来回
+/// 切换的次数多到吞吐上不去；受内核上限（`kern.ipc.maxsockbuf`）限制。
 const SOCKET_BUFFER: libc::c_int = 4 << 20;
-/// 手机连接的发送缓冲：发出去的积压在这里也有一份，同样为了回显不排在几 MiB 的旧输出后面。
+/// 手机连接的发送缓冲：发出去的积压在这里也有一份，同样为了回显不排在一大段旧输出后面。
 const MOBILE_SOCKET_BUFFER: libc::c_int = 256 << 10;
 /// 写的线程一次最多攒这么多字节再写出去。
 const WRITE_BUFFER: usize = 256 << 10;
@@ -1167,8 +1164,7 @@ impl Connection {
             }
             ClientMsg::SetTheme { settings } => self.shared.set_theme(settings),
             // 读写剪贴板的规矩是用户在 app 里的设置，只认说自己是界面的连接。种类是自报的，这只防
-            // 命令行之类误发，不防同一个用户的程序冒充界面，见模块文档。`record_history` 是旧宿主
-            // 用的，不看。
+            // 命令行之类误发，不防同一个用户的程序冒充界面，见模块文档。
             ClientMsg::SetOptions { clipboard, .. } => {
                 if self.kind == ClientKind::Desktop {
                     self.shared.set_clipboard(clipboard);

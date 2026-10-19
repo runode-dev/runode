@@ -1468,7 +1468,7 @@ impl TodoDialog {
             });
         }
         let when = match self.kind {
-            // 只有编辑读不懂的定时、还没选一种时为空：和原来的一样，下面就不发 `when`，规则照原样留着。
+            // 只有编辑读不懂的定时、还没选一种时为空：下面就不发 `when`，规则照原样留着。
             None => When::Unknown,
             Some(Kind::Once) => {
                 let original = match &self.editing {

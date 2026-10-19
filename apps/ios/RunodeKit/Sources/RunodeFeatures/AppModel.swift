@@ -66,8 +66,7 @@ public struct AppDependencies {
 /// 各页重新 `Attach`。
 ///
 /// agent 等回答时由电脑经 APNs 推通知，手机不用连着：每台电脑连上时由 `PushRegistration` 登记推送。
-/// 电脑撤不回发出去的通知，App 在前台、连着某台电脑时，通知中心里它上面已经不等回答的会话的通知就在
-/// 这里清掉。
+/// 已经不等回答的会话的通知由 `clearAnsweredNotifications` 清掉。
 @Observable
 @MainActor
 public final class AppModel {
@@ -437,7 +436,7 @@ public final class AppModel {
         }
     }
 
-    /// 要删掉的电脑：先退出它的页面；连着的话注销推送，等电脑回话（最多两秒）再断开连接。电脑那边注销好了
+    /// 要删掉的电脑：先退出它的页面；连着的话注销推送，限时等电脑回话再断开连接。电脑那边注销好了
     /// 时为真。
     private func forget(machine id: UUID) async -> Bool {
         path.removeAll { $0.machine == id }

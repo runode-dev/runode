@@ -291,14 +291,14 @@ impl Host {
         Self { shared: Arc::new_cyclic(shared) }
     }
 
-    /// 交出会话时给接手的新宿主多久收下会话（发送也算在内）、回 `HandoffReady`，默认 20 秒，
+    /// 交出会话时给接手的新宿主多久收下会话（发送也算在内）、回 `HandoffReady`，默认见 `DEFAULT_DEADLINE`，
     /// 到期就杀掉它、回滚。改了它，`GIVE_READY_WINDOW` 就不准了；测试用来缩短。
     pub fn set_handoff_deadline(&self, deadline: Duration) {
         *self.shared.handoff_deadline.lock().unwrap_or_else(PoisonError::into_inner) = deadline;
     }
 
     /// 之后开的会话里的程序读剪贴板时最多等界面多久（多半在等用户点询问框），过了就回程序一个空的
-    /// 剪贴板，默认 30 秒；已经开着的会话不受影响。测试用来缩短。
+    /// 剪贴板，默认见 `CLIPBOARD_READ_PATIENCE`；已经开着的会话不受影响。测试用来缩短。
     pub fn set_clipboard_read_patience(&self, patience: Duration) {
         *self.shared.clipboard_patience.lock().unwrap_or_else(PoisonError::into_inner) = patience;
     }

@@ -126,7 +126,7 @@ pub struct Notification {
     pub agent: String,
     /// 屏幕底部的问题，最多 `BLOCKED_LINES` 行、每行 `LINE_LIMIT` 个字；不带屏幕文字时为空。
     pub lines: Vec<String>,
-    /// 等回答时不写出来，等回答的线上格式和加它之前一样。
+    /// 等回答时不写出来。
     #[serde(default, skip_serializing_if = "NotificationKind::is_blocked")]
     pub kind: NotificationKind,
 }

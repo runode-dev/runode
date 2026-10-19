@@ -134,8 +134,8 @@ impl TreeState {
         self.to_list.extend(dirs);
     }
 
-    /// 换上后台读回来的目录；读不了的（删掉了、改了名或者没权限）和 `apply_scan` 一样丢掉记着的旧列表、
-    /// 收起来，不再把旧的内容当真。根目录已经换了时不是这里的目录，不要；`since`（发起时的 `read_ticket`）
+    /// 换上后台读回来的目录；读不了的（删掉了、改了名或者没权限）丢掉记着的旧列表、收起来，
+    /// 不再把旧的内容当真（`apply_scan` 同）。根目录已经换了时不是这里的目录，不要；`since`（发起时的 `read_ticket`）
     /// 之后发起的读已经换上的目录，这里读到的是旧内容，也不要。有等着的 `reveal` 时再定位一次。
     pub(crate) fn apply_listings(&mut self, listings: Listings, since: u64, root: &Path, filter: TreeFilter) {
         let mut read = HashSet::new();
@@ -157,7 +157,7 @@ impl TreeState {
             read.insert(dir);
         }
         self.rebuild_rows(root, filter);
-        // 选中的在收起的目录里面时，和 `toggle_dir` 一样改成这个目录（它的行也没了时不留选中），免得看不见的
+        // 选中的在收起的目录里面时改成这个目录（见 `toggle_dir`；它的行也没了时不留选中），免得看不见的
         // 选中项还被删除、改名用上。套着的几层都读不了时，里层的行跟着外层收起没了，改成还有行的那一层，
         // 不看读回来的先后。等着的 `reveal` 随后照样定位。
         let holding: Vec<_> = collapsed
@@ -428,8 +428,8 @@ impl TreeState {
         }
         if changed {
             self.rebuild_rows(&root, filter);
-            // 选中的那一项没了行（删掉了，或者在上面收起的目录里）时，和 `apply_listings` 一样改成还有行的
-            // 收起的目录，没有的话不留选中，免得看不见的选中项还被删除、改名、新建用上。
+            // 选中的那一项没了行（删掉了，或者在上面收起的目录里）时改成还有行的收起的目录（见
+            // `apply_listings`），没有的话不留选中，免得看不见的选中项还被删除、改名、新建用上。
             if self.selected_row().is_none() {
                 let selected = self.selected.take();
                 self.selected = collapsed.into_iter().find(|dir| {

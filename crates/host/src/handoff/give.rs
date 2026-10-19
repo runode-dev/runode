@@ -30,12 +30,11 @@ use crate::{
     session::{self, Adopted, Exported, Handle, Inbox, Prepared, Unwritten},
 };
 
-/// 各个会话停下来交出状态最多等这么久；它们并行地停，每个最多花一秒多编快照。
+/// 各个会话停下来交出状态最多等这么久；它们并行地停。
 pub(super) const PREPARE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 等写线程把 `HandoffBegin` 和之前的帧写完。
 pub(super) const DETACH_TIMEOUT: Duration = Duration::from_secs(5);
-/// 提交时等各个会话交出 PTY。新宿主等 `Commit` 的时限（`take::COMMIT_TIMEOUT`）要比它加上写
-/// `Commit`（`DONE_TIMEOUT`）宽。
+/// 提交时等各个会话交出 PTY，和 `DONE_TIMEOUT` 一起受 `take::COMMIT_TIMEOUT` 约束。
 pub(super) const RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 写 `Commit` 最多这么久，发出后再等新宿主回 `HandoffDone` 也最多这么久。
 pub(super) const DONE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -306,7 +305,7 @@ fn send_parts<'a>(
         snapshot_format: shared.snapshot_format,
         sessions: u32::try_from(handed.len()).unwrap_or(u32::MAX),
         theme,
-        // 现在的宿主不记命令历史，也不看这一项。
+        // 宿主不记命令历史。
         record_history: false,
         socket: giving.socket.clone(),
         clipboard,
@@ -506,17 +505,13 @@ struct Unconfirmed {
     commit_sent: bool,
 }
 
-/// 提交以后新宿主没确认接手（见 `wait_for_done`）：多半是它死了，或者没收到 `Commit`（包括这边有会话没按时
-/// 交出 PTY、没发 `Commit`）、自己放弃了，
-/// 这时 PTY 只剩这边留着的那份 master（`kept`）。先杀掉它（`successor`）、等它不在了，再用留着的
-/// master 和交出去的状态把会话接回来，和新宿主接手一样（`session::adopt`），返回 true。认不出、
-/// 杀不掉新宿主时不接回、返回 false：两个宿主一起读写同一个 PTY 比丢掉更糟。没按时交出 PTY 的会话
-/// （`late`）原来的线程可能还握着 PTY、写线程还在写，再等它交出来（`settle`）才接回；还是不交的不接回，
-/// 理由同上。
+/// 提交以后新宿主没确认接手（见 `wait_for_done`）：PTY 只剩这边留着的那份 master（`kept`）。先杀掉
+/// 新宿主（`successor`）、等它不在了，再用 `kept` 和交出去的状态把会话接回来（`session::adopt`），返回
+/// true。认不出、杀不掉新宿主时不接回、返回 false：两个宿主读写同一个 PTY 不行。没按时交出 PTY 的会话
+/// （`late`）等它交出来（`settle`）才接回，还是不交的不接回。
 ///
-/// 接回的屏幕停在交出时，之后的输出还在 PTY 里；新宿主打开闸门后读走的那些丢了。没写进 PTY 的
-/// 输入（`pending`）只在 `Commit` 没发出去（`commit_sent` 为假）时写回，还在等提示符的接着等：发出去了
-/// 的话新宿主可能已经写了，再写一遍就重了。
+/// 接回的屏幕停在交出时，新宿主打开闸门后读走的输出丢了。没写进 PTY 的输入（`pending`）只在 `Commit`
+/// 没发出去（`commit_sent` 为假）时写回：发出去了的话新宿主可能已经写了。
 fn reclaim(shared: &Shared, unconfirmed: Unconfirmed) -> bool {
     let Unconfirmed { kept, pending, late, successor, commit_sent } = unconfirmed;
     // SAFETY: 没有参数，总是成功。

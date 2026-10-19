@@ -13,7 +13,7 @@ use super::super::WindowView;
 
 /// 隔多久重新问一次当前 workspace 的分支。
 const BRANCH_INTERVAL: Duration = Duration::from_secs(5);
-/// 别的 workspace 隔多久问一次：每个都 5 秒起一次 git 太多。切过去以后按 `BRANCH_INTERVAL` 算，
+/// 别的 workspace 隔多久问一次：每个都按 `BRANCH_INTERVAL` 起 git 太多。切过去以后按 `BRANCH_INTERVAL` 算，
 /// 下一轮就问。
 const BACKGROUND_BRANCH_INTERVAL: Duration = Duration::from_secs(60);
 /// 缓存的头像过了这么久再下载一次，owner 换了头像也跟得上。

@@ -86,8 +86,7 @@ impl Notifier {
 
     /// 结束 shell：先给终端的前台进程组 `foreground` 发 SIGHUP（shell 已经退出、前台程序还在时
     /// 也发），再给 shell 的进程组发 SIGHUP，等一会儿还没退出就 SIGKILL。和自己的子进程那支的
-    /// `kill` 一样就在调用方的线程里等（最多 `HANGUP_GRACE`）：调用方是会话线程，宿主关停时等会话
-    /// 线程结束，SIGKILL 就一定在进程退出前发出，不理 SIGHUP 的 shell 不会活下来。shell 已经退出的
+    /// `kill` 一样就在调用方的线程里等（最多 `HANGUP_GRACE`），SIGKILL 因此一定在进程退出前发出。shell 已经退出的
     /// 不再给它发信号，免得进程号被别的进程重用后误杀；`foreground` 由调用方当场从终端读出、确认过
     /// 属于 shell 的会话，见 `Pty` 的 `Drop`。
     pub(super) fn terminate(&self, foreground: Option<libc::pid_t>) {

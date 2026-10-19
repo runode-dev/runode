@@ -41,7 +41,7 @@ pub(crate) enum Selector {
     Title(String),
     /// 前台在跑这种 agent（`AgentKind::label`），给了状态时还要在这个状态。
     Agent { kind: String, state: Option<AgentState> },
-    /// 在这个目录里：含 `/` 或以 `~`、`.` 开头的按路径比，否则比目录的名字。
+    /// 在这个目录里，按路径或目录名比，见 `Wanted`。
     Cwd(String),
 }
 
@@ -176,7 +176,7 @@ pub(crate) struct World {
     pub(crate) layout: Option<Vec<WindowLayout>>,
     /// 自己所在的会话，见 `Env::session`。
     pub(crate) own: Option<SessionId>,
-    /// 家目录，见 `Env::home`。
+    /// 家目录，来自 `Env::dirs`。
     pub(crate) home: Option<PathBuf>,
 }
 

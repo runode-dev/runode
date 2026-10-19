@@ -38,12 +38,10 @@ use crate::{
     session::{self, Adopted, Handle, Inbox, Unwritten},
 };
 
-/// 握手和收会话时，旧宿主一次最多这么久不说话。它让会话停下来最多花五秒多，大的回滚历史编码、
-/// 发送也要一会儿。
+/// 握手和收会话时，旧宿主一次最多这么久不说话。大的回滚历史编码、发送要一会儿。
 const RECEIVE_TIMEOUT: Duration = Duration::from_secs(25);
-/// 发出 `HandoffReady` 后最多等旧宿主这么久发 `Commit`。旧宿主收到 `HandoffReady` 后只是让会话
-/// 交出 PTY（`give::RELEASE_TIMEOUT`）、写出 `Commit`（`give::DONE_TIMEOUT`），要比这两个之和宽。
-/// 算进 `TAKE_OVER_AFTER_READY`。
+/// 发出 `HandoffReady` 后最多等旧宿主这么久发 `Commit`。要比 `give::RELEASE_TIMEOUT` 与
+/// `give::DONE_TIMEOUT` 之和宽（下面的断言守着），算进 `TAKE_OVER_AFTER_READY`。
 pub(super) const COMMIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// 旧宿主没发 `Commit` 就断开时，最多等它这么久退出完，再判断它是死了还是回滚了。
 pub(super) const EXIT_GRACE: Duration = Duration::from_secs(2);
@@ -480,7 +478,7 @@ fn wait_for_commit(stream: &UnixStream, old_pid: Option<libc::pid_t>) -> Result<
 }
 
 /// `Commit` 里各个会话没写进 PTY 的输入：块末尾 `at_prompt` 说的那么多字节要等提示符。长度超出了块的
-/// 不分，整块当场写，同不认识 `at_prompt` 的版本。
+/// 不分，整块当场写。
 fn unwritten(pending_input: Vec<SessionId>, at_prompt: &[AtPrompt], blocks: &[&[u8]]) -> HashMap<SessionId, Unwritten> {
     pending_input
         .into_iter()

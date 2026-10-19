@@ -15,9 +15,8 @@ pub enum IntegrationMode {
     Force(Shell),
 }
 
-/// 配置项 `shell-integration-features` 里 runode 做的几项。写法和 Ghostty 一样，Ghostty 的
-/// `sudo`、`title`、`ssh-env`、`ssh-terminfo`、`path` 也认，但不做：标题由宿主按前台程序和目录
-/// 自己定，`TERM` 是 `xterm-256color`，不用另装 terminfo，runode 所在的目录宿主已经加进了 `PATH`。
+/// 配置项 `shell-integration-features` 里 runode 做的几项。写法和 Ghostty 一样；Ghostty 的
+/// `sudo`、`title`、`ssh-env`、`ssh-terminfo`、`path` 也认，但不做。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ShellFeatures {

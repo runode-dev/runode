@@ -188,10 +188,8 @@ extension Presentation {
         return words
     }
 
-    /// `old` 改成 `new` 时两边各自改了的范围，规则和电脑上的 `changed_words` 一样，改一边要跟着改另一边：
-    /// 连续的字母数字和 `_` 算一个词，一串空白算一个，别的字（标点、汉字）一个字算一个；求最长公共
-    /// 子序列，没对上的就是改了的，中间只隔着空白的并成一段。两边相同的部分不到长的那行的四分之一时
-    /// 当整行重写，都不标。收到的行里制表符已经展开，不用另外处理。
+    /// `old` 改成 `new` 时两边各自改了的范围：切成词，求最长公共子序列，没对上的就是改了的。规则和电脑上
+    /// 的 `changed_words` 一样，改一边要跟着改另一边。
     public static func gitChangedWords(_ old: String, _ new: String) -> ([Range<String.Index>], [Range<String.Index>]) {
         let (rangesA, rangesB) = (wordTokens(old), wordTokens(new))
         // 词换成编号再比，免得在最长公共子序列的内层循环里比字符串。按字节认：`Substring` 的相等把

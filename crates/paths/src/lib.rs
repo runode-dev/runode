@@ -5,7 +5,7 @@
 //! 随时能重新生成的缓存（shell 集成脚本、首个终端的尺寸、宿主进程的日志）放在根目录的
 //! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里，远程访问的证书、设备表和配对口令放在
 //! 根目录的 `remote-access/` 里。
-//! Ghostty 自己的配置和主题照旧在它原来的位置读。
+//! Ghostty 自己的配置和主题在 Ghostty 约定的位置读。
 
 use std::{
     ffi::OsString,
@@ -19,7 +19,7 @@ const HOST_NAME: &str = if cfg!(debug_assertions) { "host-dev" } else { "host" }
 /// 看板的库名。调试构建的宿主另用一份：两边的宿主各自在跑，共用一份库时定时会触发两次。
 const TODOS_DB: &str = if cfg!(debug_assertions) { "todos-dev.db" } else { "todos.db" };
 
-/// `sockaddr_un.sun_path` 的长度（macOS 上最短，104 字节），含结尾的 NUL；socket 路径的
+/// `sockaddr_un.sun_path` 的长度（各系统里最短的那个），含结尾的 NUL；socket 路径的
 /// 字节数要比它小，否则绑定和连接都会失败。
 const SUN_PATH_LEN: usize = 104;
 
@@ -367,8 +367,7 @@ mod tests {
 
     #[test]
     fn socket_paths_must_fit_in_sun_path() {
-        // 家目录下的 `/.runode/run/host-dev.sock` 共 26 字节（release 构建的 `host.sock` 短 4
-        // 字节），家目录拼上它正好 103 字节；再长就放不下了。
+        // 家目录拼上 socket 的相对路径刚好放满 `sun_path`（留一个字节给 NUL）；再长就放不下了。
         let fits =
             format!("/{}", "x".repeat(SUN_PATH_LEN - 2 - "/.runode/run/".len() - HOST_NAME.len() - ".sock".len()));
         let socket = dirs(&[("HOME", &fits)]).host_socket_file().unwrap();

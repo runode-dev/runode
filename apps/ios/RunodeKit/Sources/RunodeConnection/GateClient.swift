@@ -49,7 +49,7 @@ struct FrameReader {
 }
 
 /// 走一遍门禁：等宿主的 `remote_challenge`，签好名回 `remote_auth` 或 `remote_pair`，等宿主放行。
-/// 规格要求门禁阶段 10 秒内走完，单帧载荷不超过 16 KiB；超时时关掉连接。
+/// 门禁阶段限时（`timeout`）走完，单帧载荷不超过 `Frame.gateMaxPayload`；超时时关掉连接。
 public enum GateClient {
     public static let timeout: Duration = .seconds(10)
 

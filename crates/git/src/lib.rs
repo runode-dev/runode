@@ -1,5 +1,4 @@
-//! 项目目录的 git：读工作区相对 HEAD 的逐行改动、每个文件的状态、分支和 stash，供右侧的
-//! 文件树、预览栏和 Git 面板使用；主仓库里的子模块和嵌套仓库各读一份，见 `snapshot_repos`。
+//! 项目目录的 git：读工作区相对 HEAD 的逐行改动、每个文件的状态、分支和 stash；主仓库里的子模块和嵌套仓库各读一份，见 `snapshot_repos`。
 //! 暂存、按块暂存、提交、切分支、stash 和同步远端这些写操作，以及读提交历史和图表（`graph`），
 //! 挂在 `Repo` 上；预览栏看一个文件的整篇 diff 见 `view`，一对改过的行里改了哪些字见 `changed_words`，
 //! 文件树按名字和内容找文件见 `search`。
@@ -37,16 +36,11 @@ use std::{
     process::{Command, Stdio},
 };
 
-/// 在 `dir` 里跑 git 的命令，各处共用的开头都在这里：标准输入是空的，路径里的中文等非 ASCII
-/// 字符原样输出、不转成八进制转义，所有命令都关掉 `core.fsmonitor`：仓库自己的配置能把它设成任意
-/// 命令，读状态时 git 就会执行它，进一个别人给的目录不能因此跑了里面的脚本。`log.showSignature` 同理
-/// 也关掉：开着时 `log` 和内部跑 `log` 的 `stash list` 见到签过名的提交就执行 `gpg.program`（或
-/// `gpg.ssh.program`、`gpg.x509.program`）去校验，这几项仓库的配置都能设成任意命令；关了签名的校验结果
-/// 也不会混进读出来的提交说明。命令行上的 `-c` 压过仓库的配置，也传给 git 自己拉起的 git。
-/// 只读的命令里别的会执行命令的配置不用管：`diff.external` 和 textconv 由 `diff_args` 关掉，`log` 不带 `-p`
-/// 不比内容，`core.pager` 只在输出到终端时用，钩子只在写操作里跑，`core.sshCommand` 只在连远端时用。
-/// 仓库自己配置的过滤器（`filter.*.clean`、`process`）同理，但只在后台读状态时覆盖掉
-/// （见 `filter_overrides`）：暂存、提交这些写操作要靠过滤器才对，不覆盖。
+/// 在 `dir` 里跑 git 的命令，各处共用的开头：标准输入是空的，非 ASCII 路径原样输出。
+/// 关掉 `core.fsmonitor` 和 `log.showSignature`：仓库自己的配置能把前者、以及校验签名用的
+/// `gpg.*.program` 设成任意命令，进一个别人给的目录不能因此跑了里面的脚本。
+/// 命令行上的 `-c` 压过仓库的配置，也传给 git 自己拉起的 git。其余会执行命令的配置：
+/// `diff.external` 和 textconv 由 `diff_args` 关掉，过滤器见 `filter_overrides`。
 pub(crate) fn git_command(dir: &Path) -> Command {
     let mut command = Command::new("git");
     command
@@ -71,12 +65,9 @@ pub(crate) fn git_with<S: AsRef<OsStr>>(dir: &Path, env: &[(String, String)], ar
 
 /// 覆盖掉 `dir` 所在仓库自己配置的过滤器的环境变量，设给只读的 `status`、`diff`（经 `git_with`）：
 /// `.gitattributes` 指定的过滤器在 git 比对工作区文件时执行，仓库的配置能把它设成任意命令，
-/// 后台自动读状态不能因此跑了别人目录里的脚本。只管仓库级的配置（含 `include.path` 引进来的），
-/// 用户全局装的照旧；`git lfs install --local` 写进仓库的 LFS 标准命令（`LFS_COMMANDS`）也照旧，
-/// 关了它没改过的 LFS 文件会拿原文和指针比，显示成改过。但 git-lfs clean 时会执行 `lfs.extension.<名>.clean`
-/// 配的命令，仓库级配了任何 `lfs.extension.*` 时，所有过滤器（全局装的、手写成别的样子的 git-lfs 也算）一样覆盖掉；
-/// git-lfs 别的会执行命令的配置（`lfs.customtransfer.*` 等）只在传输时用，clean 不碰。
-/// `required` 也要关掉，不然没了命令的过滤器让 git 直接报错。
+/// 后台自动读状态不能因此跑了别人目录里的脚本；暂存、提交这些写操作要靠过滤器，不覆盖。
+/// 只管仓库级的配置，用户全局装的和 `LFS_COMMANDS` 照旧；仓库级配了 `lfs.extension.*` 时，
+/// 所有过滤器一样覆盖掉（git-lfs clean 会执行它配的命令）。`required` 也要关掉，免得 git 报错。
 /// 经 `GIT_CONFIG_KEY_n`、`GIT_CONFIG_VALUE_n` 给而不用 `-c`：`-c` 在第一个 `=` 处切开键和值，
 /// 名字里带 `=` 的过滤器（`.gitattributes` 能写 `filter=a=b`）就覆盖不到。
 pub(crate) fn filter_overrides(dir: &Path) -> Vec<(String, String)> {

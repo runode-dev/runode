@@ -618,9 +618,8 @@ fn code_text(lines: &[String], highlights: &[Vec<Span>]) -> (String, Vec<Span>) 
     (text, spans)
 }
 
-/// 第 `ix` 行上面空多少，按预览字号的倍数，照 GitHub 的外边距：段落、列表、引用、表格、代码块之间
-/// 1em，标题上面 1.5em、下面 1em，分割线上下 1.5em；同一个列表的相邻项 0.25em（松散列表 1em），
-/// 子列表紧贴着上一级的文字；提示块的标题和正文之间 0.5em。
+/// 第 `ix` 行上面空多少，按预览字号的倍数，照 GitHub 的外边距：块之间、标题、分割线、同一个列表的相邻项
+/// （松散列表另算）、子列表和提示块标题各有各的间距，具体数值见函数体。
 pub(super) fn gap(rows: &[Row], ix: usize) -> f32 {
     let (Some(prev), Some(row)) = (ix.checked_sub(1).and_then(|prev| rows.get(prev)), rows.get(ix)) else {
         return 0.;
@@ -722,8 +721,7 @@ pub(super) enum LinkTarget {
 }
 
 /// 链接或图片地址 `url` 指向哪儿；`dir` 是 Markdown 文件所在的目录。别的协议为空；本地路径去掉
-/// `#锚点` 和 `?参数` 后做百分号解码，`..`、`.` 按字面消掉（不跟符号链接），和文件树里打开的同一个
-/// 文件路径一样。
+/// `#锚点` 和 `?参数` 后做百分号解码，`..`、`.` 按字面消掉（不跟符号链接）。
 pub(super) fn link_target(dir: &Path, url: &str) -> Option<LinkTarget> {
     let url = url.trim();
     if let Some((scheme, _)) = url.split_once(':')
@@ -1577,7 +1575,7 @@ impl PreviewPanel {
         }
     }
 
-    /// 点了排版视图里的链接：网址交给系统浏览器，本地文件在预览栏里打开（和文件树单击一样开成
+    /// 点了排版视图里的链接：网址交给系统浏览器，本地文件在预览栏里打开（开成
     /// 临时标签），`#锚点` 滚到对应的标题或脚注，别的不管。
     fn open_markdown_link(&mut self, url: &str, cx: &mut Context<Self>) {
         let Some(source) = self.preview().map(|preview| preview.path.clone()) else {

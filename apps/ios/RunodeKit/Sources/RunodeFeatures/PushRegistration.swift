@@ -65,14 +65,11 @@ public struct PushIdentity: Hashable, Sendable {
 /// 向各台电脑登记推送：电脑上有会话的 agent 停下来等回答时，经 APNs 用这里交出的 device token 给手机
 /// 推一条通知，手机不用连着。
 ///
-/// 打开着提醒时，每台电脑连上（`ready`）都要一次通知权限：第一次弹系统的询问框，之后直接给结果，用户在
-/// 系统设置里改了也就跟着知道了。权限有了结果才登记，免得用缓存的 token 抢在前面。允许了才向 APNs 要
-/// device token；拿到 token、系统允许时对连着的电脑登记，token 变了再登记一次。系统不允许时注销（`token`
-/// 为空的同一条消息）：电脑记着登记，不注销的话它会接着把问题内容推给 APNs。设置里关掉提醒时同样对连着的
-/// 电脑注销，之后连上的也注销；再打开时重新登记。
+/// 打开着提醒时，每台电脑连上（`ready`）都要一次通知权限，有了结果才登记；允许了才向 APNs 要 device
+/// token，token 变了再登记一次。系统不允许、或设置里关掉提醒时对电脑注销（`token` 为空的同一条消息）：
+/// 电脑记着登记，不注销它会接着把问题内容推给 APNs。
 ///
-/// 电脑回 `Done` 算办好了；回带编号的 `Error` 记下原因，只在设置页里显示，不弹错误；`replyTimeout` 内
-/// 没回话就不再等。
+/// 电脑回 `Done` 算办好了；回带编号的 `Error` 记下原因，只在设置页里显示；`replyTimeout` 内没回话就不再等。
 @Observable
 @MainActor
 public final class PushRegistration {

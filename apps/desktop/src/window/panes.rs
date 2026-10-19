@@ -73,8 +73,8 @@ fn driver_name(by: Option<&str>, name_of: impl Fn(SessionId) -> Option<String>) 
     Some(title.unwrap_or_else(|| by.chars().take(8).collect()))
 }
 
-/// 驱动标记上的文字：「由 <驱动方> 操作 · <动作>」，按 `locale` 的语言。不写过了几秒：那样标记
-/// 显示着的十秒里要每秒重画一次，窗口就一直在画帧；标记还在就说明是十秒内的操作。
+/// 驱动标记上的文字：「由 <驱动方> 操作 · <动作>」，按 `locale` 的语言。不写过了几秒，免得标记
+/// 显示期间每秒重画一次。
 fn driver_text(name: Option<&str>, action: DriveAction, locale: &str) -> String {
     let who = match name {
         Some(name) => name.to_owned(),

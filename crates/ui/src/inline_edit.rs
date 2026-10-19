@@ -1,4 +1,4 @@
-//! 就地输入框：侧栏改 workspace 的名字、文件树新建和改名、GitHub Actions 页加 secret 共用。回车确定，
+//! 就地输入框：回车确定，
 //! Esc 取消，点到别处也算确定；切到别的应用时窗口失去焦点，回来接着改。
 
 use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Subscription, Window, prelude::*, px};

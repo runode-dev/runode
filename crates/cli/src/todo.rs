@@ -21,9 +21,7 @@ use crate::{
     local_time::LocalTime,
 };
 
-/// 等 `StartTodo`、`RemoveTodo` 回话的最长时间：开始任务时宿主可能先在大仓库里跑 `git worktree add`，
-/// 没成时换个名字再跑一次；删任务时跑 `git worktree remove` 和 `git branch -d`。每条 git 自己的上限是
-/// 120 秒，这里盖住两条。
+/// 等 `StartTodo`、`RemoveTodo` 回话的最长时间：宿主要先跑工作树和分支的 git 命令，比一般请求久。
 const GIT_TIMEOUT: Duration = Duration::from_secs(250);
 
 /// `todo add`、`schedule add` 共有的部分，见 `args::Command::TodoAdd`。
@@ -64,7 +62,7 @@ fn open(env: &Env) -> Result<Connection> {
 }
 
 /// 目录或它的上级里有 `.git`（仓库是目录，工作树和子模块是文件）。先解开符号链接和 `..`，按目录实际
-/// 所在的位置找，同宿主问 git 的结果一致。
+/// 所在的位置找。
 // shortcut: 不认 GIT_DIR 这类环境变量指的仓库；认错了宿主会报错，那时再改成问 git。
 fn in_git_repo(dir: &Path) -> bool {
     dir.canonicalize().is_ok_and(|dir| dir.ancestors().any(|dir| dir.join(".git").exists()))
@@ -153,7 +151,7 @@ fn sessions(connection: &Connection) -> Result<Vec<SessionInfo>> {
     }
 }
 
-/// 任务的编号，写成 `#5`；旧宿主没给编号时为 `-`。
+/// 任务的编号，写成 `#5`；`Todo::number` 为 0（没有编号）时为 `-`。
 fn number_text(todo: &Todo) -> String {
     if todo.number == 0 { "-".into() } else { format!("#{}", todo.number) }
 }

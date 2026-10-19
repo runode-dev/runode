@@ -74,11 +74,9 @@ impl Session {
 
     /// 光标停在 shell 提示符上、shell 集成定义了 `runode-reload` 时，清掉正在编辑的输入，
     /// 输入 ` runode-reload` 并回车：换成一个新的 shell，重新读用户配置。集成绑了专用的按键
-    /// （`RELOAD_KEY_FUNCTION`）时只按它，由 shell 自己换掉整行：vi 命令模式里退格只挪光标、不删字，
-    /// 照下面那样按，回车会把用户原来那行执行掉。没绑的（fish 这些、老的 bash）先按方向键挪到输入
-    /// 末尾，再按输入的字数退格；命令前面加个空格，开了 HIST_IGNORE_SPACE 之类设置的 shell
-    /// 不把它记进历史。读不到提示符上的输入（没有 shell 集成、命令在跑、全屏程序开着）、这个
-    /// shell 的集成没报告过这个函数（比如更早的版本启动的 shell）或编码不出按键时什么也不发，
+    /// （`RELOAD_KEY_FUNCTION`）时只按它，由 shell 换掉整行（vi 命令模式里退格不删字）；没绑的
+    /// 先按方向键挪到输入末尾，再按输入的字数退格。命令前的空格让开了 HIST_IGNORE_SPACE 之类设置
+    /// 的 shell 不记历史。读不到提示符上的输入、集成没报告过这个函数或编码不出按键时什么也不发，
     /// 返回 false。
     pub fn reload_shell(&mut self) -> bool {
         let has = |name| self.meta.shell_names.functions.iter().any(|function| function == name);
@@ -201,9 +199,8 @@ impl Session {
         self.scroll_offset = 0.;
     }
 
-    /// 清屏（⌘K）：请宿主清掉屏幕和回滚历史，宿主把清屏要写进 VT 的字节当成一段输出发回来，
-    /// 两份 VT 一起清。备用屏幕归全屏程序（vim、less 等）自己管，不动；宿主那边到时还会再看
-    /// 一遍。
+    /// 清屏（⌘K）：请宿主清掉屏幕和回滚历史，见 `Request::ClearScreen`。备用屏幕归全屏程序
+    /// （vim、less 等）自己管，不动。
     pub fn clear_screen(&mut self) {
         if self.terminal.active_screen().is_ok_and(|s| s == Screen::Alternate) {
             return;

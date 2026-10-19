@@ -78,7 +78,7 @@ pub(crate) enum Command {
         prompt: String,
         cwd: Option<PathBuf>,
         agent: Option<String>,
-        /// 要新开的工作树；不在 git 仓库里时命令再改成不要。
+        /// 要新开的工作树。
         worktree: bool,
         start: bool,
     },
@@ -131,7 +131,7 @@ pub(crate) enum Shell {
 /// `schedule add` 什么时候到点。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Timing {
-    /// `--at`：本地的钟点，命令再换成 `When::Once`。
+    /// `--at`：本地的钟点。
     At(LocalTime),
     /// `--daily`、`--every`。
     Repeat(When),

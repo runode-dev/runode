@@ -355,7 +355,7 @@ fn screen_host(name: &str, screen: impl Fn(SessionId) -> Vec<HostMsg> + Send + '
     })
 }
 
-/// 宿主不回读屏幕的请求时，到了 `--timeout` 就超时，不等满回话的十秒。
+/// 宿主不回读屏幕的请求时，到了 `--timeout` 就超时，不等满回话的上限。
 #[test]
 fn an_unanswered_screen_read_times_out_on_time() {
     let fake = screen_host("screen-silent", |_| vec![]);

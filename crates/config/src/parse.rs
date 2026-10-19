@@ -206,7 +206,7 @@ impl Config {
             }
             "status-bar" => self.status_bar = or_default(empty, defaults.status_bar, || parse_bool(value))?,
             "status-bar-hidden" => {
-                // 和 `agent-notifications-exclude` 一样：逗号隔开、可以写多行，值为空时清空。
+                // 写法见 `agent-notifications-exclude`。
                 if empty {
                     self.status_bar_hidden.clear();
                 } else {

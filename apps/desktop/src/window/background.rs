@@ -35,8 +35,7 @@ use crate::{
 
 /// 列表不空时隔这么久重问一次宿主。
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
-/// 列表空着、只因为看板没问到或者会话没列出来才再问时隔这么久：库是新版本写的这类情况会一直问不到，
-/// 别每两秒唤醒宿主。
+/// 列表空着、只因为看板没问到或者会话没列出来才再问时隔这么久，免得一直问不到时每两秒唤醒宿主。
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 /// 每个会话一行：标题和目录各占一行，和 workspace 的行一样高。
 const ROW_HEIGHT: f32 = 40.;

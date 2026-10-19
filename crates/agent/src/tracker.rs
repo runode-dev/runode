@@ -46,7 +46,7 @@ pub const IDLE_CONFIRMATIONS: u8 = 3;
 pub const IDLE_CAP: Duration = Duration::from_millis(700);
 /// 刚认出 agent 后不看屏幕的时长。
 pub const STARTUP_GRACE: Duration = Duration::from_secs(3);
-/// 最多记这么多条 OSC 7501 记录，再多就丢掉最久没更新的。协议要求至少 64、至多 256 条。
+/// 最多记这么多条 OSC 7501 记录，再多就丢掉最久没更新的。
 const MAX_STATUS_RECORDS: usize = 256;
 /// 两段输出隔得比这短就算同一阵输出。
 pub const BURST_GAP: Duration = Duration::from_millis(800);
@@ -145,12 +145,10 @@ impl Tracker {
     }
 
     /// 接着交接前公布的状态 `agent`：宿主升级时会话换了一个 `Tracker`，先喂好眼下能拿到的信号
-    /// （前台进程、标题），再调这里。对外的状态直接是 `agent`；`agent` 的进程已经认出来的，不再
-    /// 等启动宽限期；交接时丢了的信号（进度报告、空闲的 codex 不带前缀的标题）认不出是哪个
-    /// agent 时，前台换程序或回到 shell 之前按 `agent` 算。交接前靠输出活动判成工作中的，交接
-    /// 期间读线程停着、没有输出，等输出重新流起来（`output_resumed`）再从那一刻接着算。之后照常
-    /// 立即求值一次，按眼前的屏幕和信号校正；结论和 `agent` 一样时 `poll` 不报变化，界面上的
-    /// agent 指示不会闪一下。
+    /// （前台进程、标题），再调这里。对外的状态直接是 `agent`，并立即求值一次校正；结论和
+    /// `agent` 一样时 `poll` 不报变化。`agent` 的进程已经认出来的不等启动宽限期；交接丢了的信号
+    /// 认不出是哪个 agent 时，前台换程序或回到 shell 之前按 `agent` 算；交接前靠输出活动判成
+    /// 工作中的，等 `output_resumed` 再从那一刻接着算。
     pub fn resume(&mut self, agent: Option<Agent>, now: Instant) {
         self.published = agent;
         self.carried = agent;

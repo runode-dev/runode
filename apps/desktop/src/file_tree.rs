@@ -668,7 +668,7 @@ impl FileTree {
             let (view, path) = (cx.entity().downgrade(), path.clone());
             move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
                 view.update(cx, |this, cx| match want {
-                    // 和点击一样，正在改名的那一行不动。
+                    // 正在改名的那一行不动。
                     _ if this.renaming(&path).is_some() => {}
                     Some(want) if want == expanded => {}
                     Some(_) => {
@@ -676,7 +676,7 @@ impl FileTree {
                         this.with_tree(cx, |state, root, filter| state.toggle_dir(&path, root, filter));
                         cx.notify();
                     }
-                    // 和点击一样把焦点交给文件树。按两下的打开法：预览设成双击才打开时单击什么也不做，而辅助
+                    // 焦点交给文件树。按两下的打开法：预览设成双击才打开时单击什么也不做，而辅助
                     // 工具按下总该打开文件；目录不看按了几下，照样展开、收起。
                     None => {
                         window.focus(&this.focus, cx);

@@ -62,7 +62,7 @@ const MAX_GRAPH_WIDTH: f32 = 80.;
 const MIN_LANE_WIDTH: f32 = 4.;
 /// 一行最多显示几个引用标签，其余合成「+N」。
 const MAX_REF_LABELS: usize = 2;
-/// 引用标签最宽这么宽，再长的截断；估算宽度时按每个字 6 点加两边留白。这里到 `MORE_LABEL_WIDTH`
+/// 引用标签最宽这么宽，再长的截断。这里到 `MORE_LABEL_WIDTH`
 /// 都是基准字号下的点数，跟着界面字号等比缩放。
 const MAX_LABEL_WIDTH: f32 = 90.;
 /// 说明首行至少留这么宽：放不下时先不显示日期，再少显示标签。

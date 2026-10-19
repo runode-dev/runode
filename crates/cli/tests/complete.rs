@@ -144,7 +144,7 @@ fn full(n: u128) -> String {
     runode_protocol::SessionId(n).to_string()
 }
 
-/// 宿主接了连接却不回话时，连握手在内最多等两秒，不卡住 Tab 十秒。
+/// 宿主接了连接却不回话时，补全按自己的短超时放弃，不卡住 Tab。
 #[test]
 fn a_silent_host_does_not_hold_up_completion() {
     let dir = std::env::temp_dir().join(format!("rnc-{}-silent", std::process::id()));

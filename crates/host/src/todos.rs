@@ -1,6 +1,6 @@
 //! 看板（见 `runode_protocol::todo`）：任务和定时存在宿主自己的 SQLite 库里（`runode_todo::Store`），
 //! 前端经 `ClientMsg::ListTodos` 这几条消息要。app 在宿主拿到会话和监听的 socket 以后调
-//! `Host::serve_todos` 告诉它库在哪、起定时的线程（`schedule`）；之前这些消息都回 `Error`。
+//! `Host::serve_todos` 告诉它库在哪、起定时的线程（`schedule`）；没调时这些消息都回 `Error`。
 //!
 //! 开始任务时在任务的目录（要工作树时先在仓库的 `.worktrees/` 下新开一个，分支 `runode/<名字>`）里开
 //! 一个会话，等 shell 的提示符出来再打 `<agent> "$RUNODE_TODO_PROMPT"`（写法照 shell 来，见
@@ -334,7 +334,7 @@ impl Shared {
         if live.is_empty() {
             return;
         }
-        // 不按看板只留七天的规矩滤：完成很久以后 shell 才退出的会话也要收掉，不然单独跑的宿主一直不空闲。
+        // 不按看板保留期的规矩滤：完成很久以后 shell 才退出的会话也要收掉，不然单独跑的宿主一直不空闲。
         let sessions = match self.todos.with_db(|db| db.done_sessions()) {
             Ok(sessions) => sessions,
             Err(err) => {
@@ -603,8 +603,7 @@ fn check_spec(spec: &TodoSpec) -> Result<(), String> {
     Ok(())
 }
 
-/// 前端新交来的标题不能太长。只查新交来的：开始任务时重查（`start_todo`）不查它，升级前存下的长标题
-/// 照样开得起来。
+/// 前端新交来的标题不能太长。只查新交来的：开始任务时重查（`start_todo`）不查它。
 fn check_title(spec: &TodoSpec) -> Result<(), String> {
     if spec.title.len() > MAX_TITLE {
         return Err(format!("the title is longer than {} KiB; put the details in the prompt", MAX_TITLE / 1024));
@@ -655,8 +654,8 @@ fn check_when(when: &When, now: u64) -> Result<(), String> {
 }
 
 /// 给任务新开工作树：仓库的 `.worktrees/<名字>`，分支 `runode/<名字>`，名字取自标题；已经有了时名字后面
-/// 加上任务的标识，还有的话再加上序号。工作树被删了、分支留着时每开始一次占掉一个名字，占掉了的（分支或者
-/// 目录已经有了，见 `taken`）直接跳过，不用 git 去试；真去试的最多 `WORKTREE_ATTEMPTS` 个。返回工作树的根目录和分支。
+/// 加上任务的标识，还有的话再加上序号。占掉了的（见 `taken`）直接跳过，不用 git 去试；
+/// 真去试的最多 `WORKTREE_ATTEMPTS` 个。返回工作树的根目录和分支。
 fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
     let repo =
         Repo::open(&todo.spec.dir).ok_or_else(|| format!("{} is not in a git repository", todo.spec.dir.display()))?;
@@ -909,7 +908,7 @@ mod tests {
         assert!(check_spec(&long).is_err());
         assert!(check_title(&spec(&"x".repeat(MAX_TITLE), "claude")).is_ok());
         assert!(check_title(&spec(&"x".repeat(MAX_TITLE + 1), "claude")).is_err());
-        // 开始任务时的重查不管标题长度：升级前存下的长标题照样开得起来。
+        // 开始任务时的重查不管标题长度。
         assert!(check_spec(&spec(&"x".repeat(MAX_TITLE + 1), "claude")).is_ok());
 
         assert!(check_when(&When::Once { at: 101 }, 100).is_ok());

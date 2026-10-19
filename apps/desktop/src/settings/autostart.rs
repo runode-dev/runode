@@ -62,7 +62,7 @@ impl SettingsView {
     }
 
     /// 在后台装上或去掉 `kind` 的自启，失败的原因记在那一行下面。要起 launchctl、systemctl 或走
-    /// SMAppService，用户的 systemd 连不上时还要重试好几秒，不能卡着界面；跑着时开关不可用，连点不会排出
+    /// SMAppService，可能很慢，不能卡着界面；跑着时开关不可用，连点不会排出
     /// 一装一卸两个任务。
     fn toggle_autostart(&mut self, kind: Kind, cx: &mut Context<Self>) {
         if self.autostart_jobs.contains_key(kind.name()) {

@@ -1,10 +1,9 @@
-//! 单行文字输入框：终端的搜索栏、选 agent 和分支的弹窗、文件树和 workspace 就地改名都用它。
+//! 单行文字输入框。
 //!
 //! 照 shadcn 分成两样：`InputState` 是管编辑的 entity，`Input` 是包在它外面画边框、底色的组件。
 //! `InputState` 管文字编辑（光标、选区、鼠标点选拖选、输入法组字、撤销重做），把文字的变化和回车、
-//! Shift+回车、Esc 作为 `InputEvent` 交给调用方；输入框外面的东西（搜索的匹配数、上下切换
-//! 按钮、候选列表）由调用方画。回车、Shift+回车、Esc 绑定的是 `SearchNext`、`SearchPrevious`、
-//! `EndSearch`，终端没开搜索栏时这几个动作也由终端自己响应。
+//! Shift+回车、Esc 作为 `InputEvent` 交给调用方；输入框外面的东西由调用方画。回车、Shift+回车、Esc
+//! 绑定的是 `SearchNext`、`SearchPrevious`、`EndSearch`。
 //!
 //! 多行输入框 `TextareaState` 和它共用的编辑内核也在这里：撤销记录 `History`、按字符和按词移动、
 //! 字节偏移和输入法用的 UTF-16 偏移之间的换算。
@@ -667,7 +666,7 @@ impl EntityInputHandler for InputState {
 }
 
 /// 输入框的外框（照 shadcn 的 `Input`），里面是 `InputState`：高 28 点、左右留白 8px、圆角 6px，终端背景色
-/// 的底、前景色的字，字号跟着外面的。边框和设置页原来的一样：出错（`invalid`）时是 `Theme::destructive`，
+/// 的底、前景色的字，字号跟着外面的。边框：出错（`invalid`）时是 `Theme::destructive`，
 /// 有焦点时是 `Theme::ring`，平时是 `Theme::input`。`prefix` 画在文字前面，子元素画在文字后面。
 ///
 /// 调用方接着写的样式盖在这些上面（render 时先取下调用方写的，铺上外框的，再叠回去）；写了

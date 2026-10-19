@@ -8,10 +8,8 @@
 //! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开，见 `diff`。
 //!
 //! 预览栏是一个单独的视图（`PreviewPanel`），一个窗口一个，标签按 workspace 各记一份（`PreviewTabs`），
-//! 显示的是 app 经 `set_workspace` 说的那个 workspace 的。字体、栏宽和配置里的预览字号由 app 每次画之前
-//! 经 `set_input` 交进来，颜色（连同语法高亮用的 ANSI 16 色）画的时候从主题（`ActiveTheme`）读，各
-//! workspace 最近读到的 git 状态经 `set_git` 交进来；要 app 办的事（文件树定位、预览栏出现收起和放大还原、
-//! 开关变了要存档、把路径打进终端、按块暂存）经 `PreviewEvent` 交出去。右键菜单存在页自己身上。
+//! 显示的是 app 经 `set_workspace` 说的那个 workspace 的。字体、栏宽和预览字号经 `set_input` 交进来，
+//! 颜色画的时候从主题（`ActiveTheme`）读，git 状态经 `set_git` 交进来；要 app 办的事经 `PreviewEvent` 交出去。
 //!
 //! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画：标签条在 `tabs`，正文的
 //! 行和图片在 `body`，行号旁的改动标记在 `marks`，自动换行在 `wrap`，Markdown 的排版视图在 `markdown`。

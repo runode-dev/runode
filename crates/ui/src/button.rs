@@ -269,7 +269,7 @@ impl RenderOnce for Button {
 }
 
 /// 开关按钮：只有图标，按下着（`pressed`）时底色一直亮着、图标也亮一些，悬停时底色和图标变亮。
-/// 标题栏和面板上那几个用它。报给辅助工具切换着没有；调用方自己报了 `aria_expanded`、`aria_selected`
+/// 报给辅助工具切换着没有；调用方自己报了 `aria_expanded`、`aria_selected`
 /// 时以那个为准，不再报切换（展开菜单、面板的按钮，标签）。尺寸由调用方写。
 #[derive(IntoElement)]
 pub struct Toggle {

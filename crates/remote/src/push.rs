@@ -474,7 +474,7 @@ fn route(registration: &PushRegistration, settings: &PushSettings) -> Option<Rou
 struct HostLink {
     stream: UnixStream,
     messages: mpsc::Receiver<HostMsg>,
-    /// 宿主认得看板（`Welcome` 的 `todos`）；旧宿主不认得，对 `ListTodos` 回 `Error`，不发。
+    /// 宿主认得看板（`Welcome` 的 `todos`）；不认得时不发 `ListTodos`。
     todos: bool,
 }
 

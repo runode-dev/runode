@@ -1,5 +1,5 @@
 //! 提交历史和图表：读最近的提交和指向它们的引用，排出每一行左边的分支线（lane），读单个提交
-//! 改了什么。界面只管照着 `GraphRow` 画线。
+//! 改了什么。
 
 use std::{collections::HashSet, ffi::OsStr, fs, os::unix::ffi::OsStrExt, path::Path};
 
@@ -118,9 +118,7 @@ fn free_lane(lanes: &mut Vec<Option<Lane>>) -> usize {
 ///   已经有 lane 等着时（别的分支先走到了它）不另占，下半段斜着连过去。
 /// - 和这个提交无关的 lane 上下两段都是竖线。lane 空出来以后留在原处，不往左挪，下一个新分支
 ///   先用它；最右边空着的去掉。
-/// - 颜色见 `LaneColor`：HEAD 的点和它往下那条换成 `Current`。HEAD 还没推上去（从带远端分支的
-///   提交走不到它）时，那条上第一个推上去了的提交（带远端分支，或是从带远端分支的提交走得到）
-///   换成 `Remote`，上半段进来的线还是原来的颜色。
+/// - 颜色见 `LaneColor`；换成 `Remote` 的那个提交，上半段进来的线还是原来的颜色。
 pub fn graph_layout(commits: &[Commit]) -> Vec<GraphRow> {
     let mut lanes: Vec<Option<Lane>> = Vec::new();
     let mut next_color = 0;

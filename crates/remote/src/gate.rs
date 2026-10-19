@@ -252,8 +252,7 @@ fn read_control(tls: &mut StreamOwned<ServerConnection, Deadline>) -> io::Result
 const KEEPALIVE_IDLE_SECS: libc::c_int = 20;
 /// 两次探测之间隔多久。
 const KEEPALIVE_INTERVAL_SECS: libc::c_int = 10;
-/// 连着这么多次探测没回应就断开：空闲的连接在 `KEEPALIVE_IDLE_SECS` 加这么多个间隔（一分钟）内
-/// 发现对面没了。
+/// 连着这么多次探测没回应就断开：空闲的连接在 `KEEPALIVE_IDLE_SECS` 加这么多个间隔内发现对面没了。
 const KEEPALIVE_PROBES: libc::c_int = 4;
 const _: () = assert!(KEEPALIVE_IDLE_SECS + KEEPALIVE_INTERVAL_SECS * KEEPALIVE_PROBES <= 60);
 /// macOS 的 `TCP_RXT_CONNDROPTIME`（`netinet/tcp.h`，`libc` 里没有）：发出去的数据一直没有回应、
@@ -266,7 +265,7 @@ const TCP_RXT_CONNDROPTIME: libc::c_int = 0x80;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
 const RETRANSMIT_DROP_SECS: libc::c_int = 60;
 
-/// 让手机静默消失（离开 Wi-Fi、休眠、切网）的连接在一分钟左右断开：没有这个，半开的连接永远
+/// 让手机静默消失（离开 Wi-Fi、休眠、切网）的连接及时断开：没有这个，半开的连接永远
 /// 不会读到结尾，桥接的线程、描述符和宿主里的那条连接都不会放开。不另设应用层的空闲超时：协议
 /// 里没有心跳，手机静静看着一个没输出的终端也是正常的连接；对面的系统还在时会回 keepalive 的探测，
 /// 不在了才断。

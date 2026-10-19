@@ -34,7 +34,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// 任务 Label 的前缀，后面接拉起它的进程号和序号。重启脚本（`restart-macos.sh`）提交的任务也用它，
+/// 任务 Label 的前缀，后面接拉起它的进程号和序号。重启脚本提交的任务也用它，
 /// 好让这边一并清掉。
 const LABEL_PREFIX: &str = "dev.runode.host.";
 

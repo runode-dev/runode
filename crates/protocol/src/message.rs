@@ -168,8 +168,7 @@ pub enum ClientMsg {
     /// VT 后，在每个会话的输出流里发带着这份设置的 `ThemeApplied`，连着的前端到那里才应用，
     /// 不管是不是自己发的，见 `HostMsg::ThemeApplied`。
     SetTheme { settings: TermSettings },
-    /// 改宿主的选项：终端里的程序读写剪贴板（OSC 52）的规矩。旧的界面不带 `clipboard`，按默认值
-    /// （照写、读前先问）。
+    /// 改宿主的选项：终端里的程序读写剪贴板（OSC 52）的规矩。
     SetOptions {
         /// 旧宿主据此决定记不记命令历史；现在的宿主不记、不看它，前端照旧发 false，旧宿主读得了。
         record_history: bool,
@@ -197,7 +196,7 @@ pub enum ClientMsg {
     /// 界面里的布局变了（开关窗口、工作区、标签、分屏，换了焦点、调了分屏大小）。只有桌面的界面发，
     /// 不用回；宿主转成 `HostMsg::LayoutChanged` 告诉问过布局的连接。`windows` 是新的布局，宿主记下
     /// 它：没有界面连着时手机、命令行要的布局照它回，在工作区里开终端、新建工作区、改名也由宿主改它，
-    /// 界面再连上时用 `Layout` 要回去。旧的界面不带，宿主手里的布局不变。
+    /// 界面再连上时用 `Layout` 要回去。不带时宿主手里的布局不变。
     LayoutChanged {
         #[serde(default)]
         windows: Option<Vec<WindowLayout>>,
@@ -262,7 +261,7 @@ pub enum ClientMsg {
     /// 会话 `id` 里的程序用 OSC 52 写剪贴板，`text` 是解码好的文字（不超过
     /// `clipboard::MAX_CLIPBOARD_BYTES`）。宿主自己发起的请求，只出现在 `HostMsg::UiRequest` 里：
     /// 界面写好后回 `Done`，`req` 为 0（没有发请求的一方，也就没有它的编号）。前端直接发给宿主的
-    /// 回 `Error`。旧的界面读成 `Unknown`，回 `Error`，宿主记一笔日志。
+    /// 回 `Error`。
     WriteClipboard { id: SessionId, text: ClipboardContent },
     /// 会话 `id` 里的程序用 OSC 52 读剪贴板。和 `WriteClipboard` 一样只出现在 `HostMsg::UiRequest`
     /// 里。`ask` 为真时界面先弹框问用户（配置项 `clipboard-read` 是 `ask`），`program` 是那时会话
@@ -315,7 +314,7 @@ pub enum ClientMsg {
     /// 里说自己认得它，旧宿主会回 `Error`，手机不发。
     KeepAwake,
     /// 要看板上的任务和定时（见 `todo` 模块），宿主回 `Todos`；之后任务或定时有变化时给这条连接发
-    /// `TodosChanged`。完成了的任务只给最近七天的。下面这几条宿主自己办，宿主在 `Welcome` 的 `todos`
+    /// `TodosChanged`。完成了的任务只给最近的，更早的用 `ListDoneTodos` 翻。下面这几条宿主自己办，宿主在 `Welcome` 的 `todos`
     /// 里说自己认得它们；还没打开任务库（见 `runode_host` 的 `Host::serve_todos`）、正在交出会话时回
     /// `Error`。
     ListTodos { req: u32 },

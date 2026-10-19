@@ -33,8 +33,7 @@ use runode_protocol::{HandoffRefusal, SessionId};
 pub(crate) const DEFAULT_DEADLINE: Duration = Duration::from_secs(20);
 
 /// 旧宿主（默认期限下）从收到新宿主的 `ClientMsg::Handoff` 到不再接受 `HandoffReady`、回滚，最多
-/// 这么久：停下各个会话 + 写完 `HandoffBegin` + `DEFAULT_DEADLINE`（发出会话、等回话）。新宿主
-/// 这之后才回 `HandoffReady` 只会被回滚，拉起新宿主的一方等结果时要比它宽。
+/// 这么久，由 `give` 的各段期限加 `DEFAULT_DEADLINE` 得出。新宿主这之后才回 `HandoffReady` 只会被回滚，拉起新宿主的一方等结果时要比它宽。
 pub const GIVE_READY_WINDOW: Duration =
     give::PREPARE_TIMEOUT.checked_add(give::DETACH_TIMEOUT).unwrap().checked_add(DEFAULT_DEADLINE).unwrap();
 
@@ -184,7 +183,7 @@ fn running(pid: libc::pid_t) -> bool {
     signal_alive(pid)
 }
 
-/// 等进程 `pid` 退出完，最多 `take::EXIT_GRACE`，每 10 毫秒看一次；到时还在跑返回假。
+/// 等进程 `pid` 退出完，最多 `take::EXIT_GRACE`，隔一小会儿看一次；到时还在跑返回假。
 fn exits_in_grace(pid: libc::pid_t) -> bool {
     let until = Instant::now() + take::EXIT_GRACE;
     while running(pid) {

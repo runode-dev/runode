@@ -17,8 +17,8 @@
 //!
 //! 命令行（`runode remote …`）不经宿主，直接读写数据目录里的文件：`PairingTicket` 写一个短命的
 //! 配对口令文件，监听方每次有人来配对时读它；`listener_status` 看监听方开着没有（它一直锁着一个
-//! 锁文件）、在哪个端口、证书指纹是什么；`list_devices`、`revoke_device` 读写设备表，监听方每秒
-//! 看一次设备表，撤销的设备连着的连接随之断开。文件的位置都经 `runode_paths` 取。
+//! 锁文件）、在哪个端口、证书指纹是什么；`list_devices`、`revoke_device` 读写设备表，监听方
+//! 盯着设备表，撤销的设备连着的连接随之断开。文件的位置都经 `runode_paths` 取。
 
 mod addrs;
 mod bonjour;

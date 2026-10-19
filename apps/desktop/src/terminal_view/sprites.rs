@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn line_width_rounds_up_to_device_pixels() {
-        // Hack 与 Menlo 的下划线粗细都是 90/2048 em；13px 下 Retina 为 2 设备像素、1x 为 1。
+        // 比例同 `UNDERLINE_THICKNESS_EM`；13px 下 Retina 为 2 设备像素、1x 为 1。
         let underline = 13. * 90. / 2048.;
         assert_eq!(Metrics::new(8., 16., underline, 2.).thickness, 2);
         assert_eq!(Metrics::new(8., 16., underline, 1.).thickness, 1);

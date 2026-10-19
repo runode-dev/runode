@@ -1,5 +1,5 @@
 //! 本机的本地时间：`schedule add --at` 的钟点换成 Unix 时间，`schedule list` 把 Unix 时间写成钟点。
-//! 时区按 C 库的规矩（`TZ`、`/etc/localtime`），和宿主算定时的下一次到点用的是同一套。
+//! 时区按 C 库的规矩（`TZ`、`/etc/localtime`）。
 
 use std::fmt;
 
@@ -29,7 +29,7 @@ impl LocalTime {
         })
     }
 
-    /// 换成 Unix 时间的秒数；没有这一天时为空。春天跳过的钟点挪到前后一小时，同宿主一样。
+    /// 换成 Unix 时间的秒数；没有这一天时为空。春天跳过的钟点由 `mktime` 挪到前后一小时。
     pub(crate) fn unix(self) -> Option<u64> {
         // SAFETY: `tm` 是纯数据，全零是合法的值。
         let mut tm: libc::tm = unsafe { std::mem::zeroed() };

@@ -358,7 +358,7 @@ fn a_host_that_never_comes_back_times_out() {
     assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
 }
 
-/// 新宿主列得出会话、却不回重新连上会话的请求：也最多等到 `--timeout`，不等满回话的十秒。
+/// 新宿主列得出会话、却不回重新连上会话的请求：也最多等到 `--timeout`，不等满回话的上限。
 #[test]
 fn an_unanswered_attach_on_the_new_host_times_out_on_time() {
     let new = FakeHost::start("stuckb", |message| match message {

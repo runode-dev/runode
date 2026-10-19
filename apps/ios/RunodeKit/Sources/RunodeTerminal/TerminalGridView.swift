@@ -238,9 +238,8 @@
             color(colors(of: cell).foreground, alpha: cell.attributes.contains(.faint) ? 0.6 : 1)
         }
 
-        /// 等宽字体里直接有字形的格子按同字体、同颜色攒成一段，一次 `CTFontDrawGlyphs` 画完，省掉逐格的
-        /// 状态保存、字形查找和排版。全屏的 agent 界面每滚一下都整屏重画，大半时间花在这里。其余的格子
-        /// （制表符、Powerline、私用区图标、多码位的字素簇）由 `drawText` 逐格画。
+        /// 有直接字形的格子按同字体、同颜色攒成一段，一次 `CTFontDrawGlyphs` 画完，省掉逐格的状态保存、
+        /// 字形查找和排版。其余的格子（见 `plainGlyph`）由 `drawText` 逐格画。
         private func drawPlainGlyphs(row: Int, baseline: CGFloat, in context: CGContext) {
             context.saveGState()
             defer { context.restoreGState() }
@@ -276,8 +275,8 @@
             flush()
         }
 
-        /// 一个能直接画的字形：等宽字体里的画在格子左边；后备字体里的（中文等）带着宽度，在格子里居中，
-        /// 和 `drawGlyphs` 里 CTLine 的画法一样。
+        /// 一个能直接画的字形：等宽字体里的画在格子左边；后备字体里的（中文等）带着宽度，在格子里居中
+        /// （同 `drawGlyphs` 的 CTLine 路径）。
         private struct PlainGlyph {
             let font: CTFont
             let glyph: CGGlyph
@@ -314,7 +313,8 @@
         }
 
         /// 制表符、块元素和 Powerline 的几何分隔符按格子自己画（见 `BoxDrawing`、`BlockElement`、
-        /// `PowerlineGlyph`）；不是这类字符时返回 false。Powerline 的形状左右各多画半个像素，盖住和相邻格子背景之间因为格子宽度不是整像素而露出的缝。
+        /// `PowerlineGlyph`）；不是这类字符时返回 false。Powerline 的形状左右各多画半个像素，盖住格子宽度
+        /// 不是整像素时和相邻格子背景之间露出的缝。
         private func drawPowerline(_ text: String, in rect: CGRect, color: CGColor, context: CGContext) -> Bool {
             guard let scalar = text.unicodeScalars.first, text.unicodeScalars.count == 1 else { return false }
             if BoxDrawing.handles(scalar) {

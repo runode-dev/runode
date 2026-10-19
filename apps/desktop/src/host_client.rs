@@ -52,9 +52,8 @@ pub enum Mode {
 
 /// 列会话最多等这么久。
 const LIST_TIMEOUT: Duration = Duration::from_secs(2);
-/// 看板的请求最多等这么久：开始任务时宿主要跑 `git worktree add`，没成时换个名字再跑一次；删任务时
-/// 跑 `git worktree remove` 和 `git branch -d`。每条 git 自己最多 120 秒，办成了却先超时的话这边报错、
-/// 晚到的回话（比如开好的会话）也丢掉，所以盖住两条。
+/// 看板的请求最多等这么久：宿主办一条要连跑两条 git 命令，比单条 git 的超时长，否则办成了这边却
+/// 先超时，晚到的回话（比如开好的会话）也丢了。
 const TODO_TIMEOUT: Duration = Duration::from_secs(250);
 /// 让留下的宿主退出后，最多等这么久拿到它放开的锁、开自己的 socket。
 const LISTEN_RETRY: Duration = Duration::from_secs(2);
@@ -187,7 +186,7 @@ pub fn take_notice() -> Vec<Notice> {
 }
 
 /// 把配置里宿主关心的部分告诉它：主题（各个会话在输出流里标出换主题的位置，视图到那里再换）、
-/// 不把命令记进历史文件（界面已经不读它），以及终端里的程序读写剪贴板的规矩。和宿主现在的一样时它什么都不做；重连后 `Link` 自己补发。
+/// 不把命令记进历史文件，以及终端里的程序读写剪贴板的规矩。重连后 `Link` 自己补发。
 ///
 /// 宿主跑在 app 里时，远程访问的监听也开在 app 里，在这里按配置开关；单独跑的宿主自己读配置，
 /// 见 `remote_access`。
@@ -455,13 +454,12 @@ fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
 }
 
 /// 用户在弹框里选了结束旧宿主（连同它的会话）：在后台线程里结束它（见 `launch::end_old_host`），
-/// 之后这个 app 里的宿主开 socket，让命令行连得上。对面不是单独的宿主进程（宿主跑在别的版本的
-/// app 里）时不结束它，改请用户先退出那个版本（`Notice::OldAppRunning`）。
+/// 之后这个 app 里的宿主开 socket，让命令行连得上。对面不是单独的宿主进程时不结束它，改请用户先
+/// 退出那个 app（`Notice::OldAppRunning`）。
 ///
-/// 动手前再探一次：旧宿主已经自己退了的，直接开 socket。弹框之后 socket 上也可能已经换成这个
-/// 构建的宿主（交接比这边等的久、最后成了，或者另一个同版本的 app 让新宿主接手了），结束它就把
-/// 刚接过去的会话全结束了。这时不结束，告诉用户（`Notice::AlreadyUpgraded`）。不在运行中把这个
-/// app 改连过去：窗口里的终端都在 app 自己的宿主里，换了连接它们就断了。
+/// 动手前再探一次：旧宿主已经退了的直接开 socket；socket 上已经是这个构建的宿主时不能结束它，
+/// 那会结束刚接过去的会话，只告诉用户（`Notice::AlreadyUpgraded`）。这个 app 不改连过去：窗口里的
+/// 终端都在 app 自己的宿主里。
 fn end_old_host(cx: &mut gpui::AsyncApp) {
     let (tx, rx) = futures::channel::oneshot::channel();
     let spawned = thread::Builder::new().name("end-old-host".into()).spawn(move || {

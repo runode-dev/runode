@@ -348,7 +348,7 @@ fn a_new_subscription_drops_the_old_channel() {
 }
 
 /// 宿主拆出来单独发的 shell 集成报告装回 `meta`：`Attached` 带的是第一份，`Meta` 没带时沿用上一份；
-/// 不拆的旧宿主发来的 `Meta` 原样交出去。
+/// 从没带过时 `Meta` 原样交出去。
 #[test]
 fn meta_gets_back_the_shell_report() {
     let link = Link::new(BuildId(BUILD.into()));
@@ -388,7 +388,7 @@ fn meta_gets_back_the_shell_report() {
     dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default(), shell: None });
     assert_eq!(meta(&mut rx), full("/opt/bin"));
 
-    // 旧宿主：`Attached` 不带，`Meta` 里本来就是整份的。
+    // `Attached` 不带：`Meta` 里本来就是整份的。
     assert!(link.reattach(id, None, AttachMode::MetaOnly));
     dispatch(&link.inner, 0, attached(None));
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Screen(_))));
@@ -810,7 +810,7 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
 /// cargo test --release -p runode bench_ -- --ignored --nocapture --test-threads=1
 /// ```
 ///
-/// `RUNODE_LATENCY_N` 改回显的次数（默认 1 万），`RUNODE_THROUGHPUT_MB` 改文件大小（默认 100）。
+/// `RUNODE_LATENCY_N` 改回显的次数，`RUNODE_THROUGHPUT_MB` 改文件大小。
 mod bench {
     use std::process::{Child, Command};
 

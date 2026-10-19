@@ -480,7 +480,7 @@ pub(super) fn step_url(job: &Job, step: &Step) -> String {
 }
 
 /// 打进 shell 的参数：只含常见字符时原样，否则用单引号括起来；开头是 `=` 或 `%` 时也括起来，zsh 会把
-/// `=foo` 展开成命令的路径。和桌面文件树往终端里插路径时括法一样。
+/// `=foo` 展开成命令的路径。
 fn shell_quote(text: &str) -> String {
     let plain = |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '=');
     if !text.is_empty() && !text.starts_with(['=', '%']) && text.chars().all(plain) {

@@ -2,8 +2,8 @@
 //! 情况退避重试、换环境或者放弃。一个请求在退避时别的照发。
 //!
 //! 出错时：
-//! - 没拿到响应、5xx、429：隔 2、10、30 秒（之后都是 30 秒，429 带了 `Retry-After` 时至少等那么久）
-//!   再试，最多试到排进队一分钟。
+//! - 没拿到响应、5xx、429：按 `BACKOFF` 隔着再试（429 带了 `Retry-After` 时至少等那么久），最多试到
+//!   排进队满 `DEADLINE`。
 //! - device token 不认（410、400 `BadDeviceToken`）：可能是登记的环境不对，换另一个环境再发一次；成了
 //!   把登记的环境改过来，还不认就删掉这条登记。
 //! - 直连的密钥不对（403 `InvalidProviderToken`）：记错误，直连的都不发了，直到配置换了密钥。
@@ -213,7 +213,7 @@ impl Worker {
     fn work(&mut self, index: usize) {
         let item = &self.queue[index];
         let (route, session) = (item.target.route, item.target.notification.session);
-        // 排在前面的请求每个最多等十几秒，轮到时可能已经过了期限。
+        // 排在前面的请求要等响应，轮到时可能已经过了期限。
         if Instant::now() > item.deadline {
             tracing::warn!("giving up a push for session {session}: it waited too long to be sent");
             self.queue.remove(index);

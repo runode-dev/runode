@@ -196,11 +196,9 @@ pub(super) fn windows(cx: &App) -> Vec<WindowHandle<WindowView>> {
 
 impl WindowView {
     /// 在 `beside` 这个分屏旁边开一个新终端，返回它的会话。`cwd` 为空时沿用旁边那个终端的
-    /// 目录。不切过去（`focus` 为假）时当前的 workspace、标签和焦点都不动，新终端看不见的话
-    /// 按旁边那个终端的尺寸现在就启动 shell，别的进程马上就能往里打字。`beside` 为空时当前
-    /// workspace 里没有标签：新终端不管 `placement`，作为它的第一个标签当场显示出来。`fold` 为真
-    /// 时分出来的新分屏直接折叠；经典样式没有标题条可收，标签里没有别的展开着的分屏时也折不了，
-    /// 都照常展开。
+    /// 目录。不切过去（`focus` 为假）时当前的 workspace、标签和焦点都不动，看不见的新终端也马上
+    /// 启动 shell。`beside` 为空时当前 workspace 里没有标签：新终端不管 `placement`，作为它的第一个
+    /// 标签当场显示。`fold` 为真时新分屏直接折叠，经典样式或标签里没有别的展开着的分屏而折不了时照常展开。
     #[allow(clippy::too_many_arguments)]
     fn open_beside(
         &mut self,
@@ -263,12 +261,11 @@ impl WindowView {
         session
     }
 
-    /// 切到或者新建目录是 `dir`（已经规范化过，见 `inspect_dir`）的 workspace，返回它当前标签里有焦点的分屏和那个分屏的会话。已经有
-    /// 这个目录的 workspace 时不新建（目录按规范化后的比，`dir` 经过符号链接也认得出），名字也不改；
-    /// 那个分屏还没开会话、或者 workspace 里没有标签时在它末尾另开一个标签。没有时在 `dir` 开一个终端，
-    /// 新 workspace 插在当前 workspace 后面，和菜单里新建的一样，`name` 为空时按目录取名。不切过去
-    /// （`focus` 为假）时当前的 workspace 不动，新终端按当前显示的分屏的尺寸现在就启动 shell，别的进程
-    /// 马上就能往里打字；切过去时由调用方 `reveal` 它。
+    /// 切到或者新建目录是 `dir`（已经规范化过，见 `inspect_dir`）的 workspace，返回它当前标签里有焦点的
+    /// 分屏和那个分屏的会话。已经有这个目录的 workspace 时不新建、不改名；那个分屏还没开会话、或者
+    /// workspace 里没有标签时在它末尾另开一个标签。没有时在 `dir` 开一个终端，新 workspace 插在当前
+    /// workspace 后面，`name` 为空时按目录取名。不切过去（`focus` 为假）时当前的 workspace 不动，新终端
+    /// 马上启动 shell；切过去时由调用方 `reveal` 它。
     fn open_workspace_at(
         &mut self,
         dir: &Path,

@@ -548,7 +548,7 @@ mod tests {
         assert_eq!(phase.finish_check(), Asked::Nobody);
     }
 
-    /// 下载失败后回到空闲，下一轮定时（每隔 `CHECK_INTERVAL`，6 小时）照常再查。
+    /// 下载失败后回到空闲，下一轮定时（每隔 `CHECK_INTERVAL`）照常再查。
     #[test]
     fn a_failed_download_is_retried_on_the_next_check() {
         assert_eq!(CHECK_INTERVAL, Duration::from_secs(6 * 60 * 60));

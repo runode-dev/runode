@@ -416,7 +416,7 @@ fn snippet(text: &str, matcher: Option<&Regex>) -> (String, Option<Range<usize>>
 }
 
 /// 交给搜索的词：按名称找时去掉两头的空白；按内容找时原样搜，搜 `fn ` 不变成搜 `fn`，只有整串都是空白时
-/// 当作没输入，和 `FileTree::searching` 一致。
+/// 当作没输入，见 `FileTree::searching`。
 fn search_query(mode: SearchMode, text: &str) -> String {
     match mode {
         SearchMode::Name => text.trim().to_owned(),
@@ -984,7 +984,7 @@ impl FileTree {
             .aria_level(depth + 1)
             .aria_selected(selected)
             .when_some(expanded_state, |item, expanded| item.aria_expanded(expanded))
-            // 点击要看点了几下，辅助工具按下另外登记，和单击一样。
+            // 点击要看点了几下，辅助工具按下另外登记。
             .on_a11y_press(view, move |this, _, cx| this.open_search_row(ix, false, cx))
             .map(|item| if selected { item.bg(selected_bg) } else { item.hover(|item| item.bg(hover_bg)) })
             .child(content)

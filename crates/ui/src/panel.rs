@@ -84,7 +84,7 @@ pub fn chevron(expanded: bool, cx: &App) -> gpui::Svg {
         .text_color(cx.theme().foreground.opacity(0.45))
 }
 
-/// 同步图标；`spinning` 时一直转圈，表示还在连远端。Git 面板的同步按钮、提交按钮和状态栏的更新都用。
+/// 同步图标；`spinning` 时一直转圈，表示还在连远端。
 pub fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, color: Hsla) -> AnyElement {
     let icon = svg().flex_none().path(SYNC_ICON).size(px(size)).text_color(color);
     if !spinning {

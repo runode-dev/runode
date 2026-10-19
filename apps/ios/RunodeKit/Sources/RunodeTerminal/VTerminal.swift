@@ -12,9 +12,8 @@ import RunodeProtocol
 public final class VTerminal {
     /// 回滚历史最多留多少行，和宿主的 `SCROLLBACK_LINES` 一致；另有字节上限，见 `scrollbackBytesCap`。
     static let scrollbackLines = 10_000
-    /// 回滚历史的字节上限取宿主下发的 `TermSettings.scrollbackLimit`（默认 10 MiB）和它中小的那个：手机
-    /// 这份 VT 从宿主的重放起步，本来就没有连上之前的历史，用不着和桌面留一样多；iPhone 内存紧，一个
-    /// 会话占太多会被 jetsam 杀掉。
+    /// 回滚历史的字节上限取宿主下发的 `TermSettings.scrollbackLimit` 和它中小的那个：这份 VT 从宿主的
+    /// 重放起步，用不着和桌面留一样多；iPhone 内存紧，一个会话占太多会被 jetsam 杀掉。
     static let scrollbackBytesCap: UInt64 = 4 << 20
     /// 未知 OSC 最多留多少字节，和宿主的 `UNKNOWN_SEQUENCE_MAX_BYTES` 一致。
     static let unknownSequenceMaxBytes = 256 * 1024
@@ -148,9 +147,8 @@ public final class VTerminal {
             handle, newSize.cols, newSize.rows, UInt32(newSize.cellWidthPx), UInt32(newSize.cellHeightPx))
     }
 
-    /// 在宿主套用主题的位置（`HostMsg.themeApplied`）套用同一份主题。做法和宿主的 `vt::apply_theme`
-    /// 一模一样：先把默认调色板重置回内置的再叠加配置，设默认前景、背景、光标色，再设默认光标形状
-    /// 和闪烁（不冲掉程序用 DEC 模式 12 自己设的闪烁），最后是回滚上限这些两边必须一致的选项。
+    /// 在宿主套用主题的位置（`HostMsg.themeApplied`）套用同一份主题，步骤和宿主的 `vt::apply_theme`
+    /// 一致，两份 VT 才不会分叉。
     public func applyTheme(_ newSettings: TermSettings) {
         settings = newSettings
         ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, nil)
@@ -217,10 +215,10 @@ public final class VTerminal {
         ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, unsafeBitCast(callback, to: UnsafeRawPointer.self))
     }
 
-    /// 先别刷新屏幕：程序要求的（同步输出），且还没超过一秒，超时后不再遵守，免得程序出错时画面卡死；
-    /// 或者刚改过尺寸，程序还没重画完。shell 集成说了会自己重画提示符（OSC 133 的 `redraw=1`）时，
-    /// libghostty 改尺寸就先把提示符擦掉，等 shell 收到 SIGWINCH 画回来，这要经宿主转一趟才到。改尺寸后
-    /// 300 毫秒内，等到改完以后的输出、并且停了 50 毫秒再画，不画出提示符擦掉了还没画回来的那一帧。
+    /// 先别刷新屏幕：程序用同步输出冻结着屏幕（有时限，免得程序出错时画面卡死），或者刚改过尺寸、
+    /// 程序还没重画完。后者是因为 shell 集成说了会自己重画提示符（OSC 133 的 `redraw=1`）时，libghostty
+    /// 改尺寸先把提示符擦掉，等 shell 收到 SIGWINCH 画回来要经宿主转一趟；改尺寸后短时间内等到改完以后
+    /// 的输出再画，不画出擦掉了还没画回来的那一帧。
     public var isRenderHeld: Bool {
         let now = ContinuousClock.now
         if let since = hold.since, now - since < .seconds(1) { return true }

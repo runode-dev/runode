@@ -85,9 +85,7 @@ fn installed(process: &ForegroundProcess) -> bool {
     retitled || process.exe.as_deref().into_iter().chain(argv.first().map(String::as_str)).any(install_location)
 }
 
-/// 路径（原样或顺着符号链接找到的真正文件）在包管理器装程序的地方：npm、pnpm、bun 的
-/// `node_modules`，pipx、uv 和各家安装脚本用的 `~/.local/bin`，Homebrew 的 `Cellar`。只有名字、
-/// 没有目录的不算。
+/// 路径（原样或顺着符号链接找到的真正文件）在包管理器装程序的常见位置。只有名字、没有目录的不算。
 fn install_location(path: &str) -> bool {
     let path = std::path::Path::new(path.trim_matches(['"', '\'']));
     if path.components().count() < 2 {

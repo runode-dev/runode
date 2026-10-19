@@ -91,7 +91,7 @@ pub(super) fn ring(mut outer: Vec<[f32; 2]>, inner: Vec<[f32; 2]>) -> Vec<[f32; 
     outer
 }
 
-/// 圆周上均匀取 32 个点，最大径向误差约 0.5% 半径。
+/// 圆周上均匀取点围成的多边形，近似圆。
 pub(super) fn circle(cx: f32, cy: f32, r: f32) -> Vec<[f32; 2]> {
     (0..32)
         .map(|i| {

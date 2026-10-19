@@ -10,7 +10,7 @@ public struct KeyModifiers: OptionSet, Sendable, Hashable {
     public static let alt = KeyModifiers(rawValue: 1 << 2)
     public static let command = KeyModifiers(rawValue: 1 << 3)
 
-    /// libghostty 的 `GhosttyMods` 位：shift 1、ctrl 2、alt 4、super 8，alt 在右边时另置一位。
+    /// 转成 libghostty 的 `GhosttyMods`，alt 在右边时另置右边的位。
     func ghosttyMods(rightAlt: Bool) -> GhosttyMods {
         var mods: GhosttyMods = 0
         if contains(.shift) { mods |= 1 << 0 }

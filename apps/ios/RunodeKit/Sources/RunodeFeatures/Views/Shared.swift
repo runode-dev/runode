@@ -192,7 +192,7 @@
     }
 
     /// 应用的标志：应用图标里的提示符 `>`、光标和指示灯，不带图标的底，能放在任何底色上。坐标照抄
-    /// 图标的几个图层（824 见方，原点在 100,100）。
+    /// 应用图标的几个图层。
     struct RunodeMark: View {
         var body: some View {
             Canvas { context, size in

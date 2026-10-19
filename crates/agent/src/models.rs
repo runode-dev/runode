@@ -154,9 +154,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         probe: Probe { args: &["models", "--json"], request: "", answer: Answer::Output(omp_catalog) },
     },
     Launcher {
-        // OpenCode V2（`@opencode/cli`）：命令行和 1.x 不兼容，装上以后 `opencode` 也成了 V2，另外还有 `opencode2`。
-        // 有 `opencode2` 就按 V2 写，没有时调用方退到下面同名的 1.x 那一项（`same_kind`）。全屏界面不认 `-m`，
-        // 小界面（`mini`）认，强度写成 `服务商/模型#强度`。
+        // OpenCode V2（`@opencode/cli`），命令行和 1.x 不兼容；没有 `opencode2` 时换下面同名的 1.x（`same_kind`）。
+        // 全屏界面不认 `-m`，小界面（`mini`）认，强度写成 `服务商/模型#强度`。
         label: "OpenCode",
         command: "opencode2 mini",
         model_arg: Some(" -m "),

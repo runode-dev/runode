@@ -1,12 +1,9 @@
 //! 一个目录里能跑的命令：用户自己加的命令、Makefile 的目标、package.json 的 scripts，回
 //! `ClientMsg::ListTasks`。手机在会话卡片上列出来，点一下就在那个会话里跑。
 //!
-//! 自己加的命令都在 runode 根目录的 `tasks.json` 里（`runode_paths::Dirs::tasks_file`）：
-//! `{"global": {"名字": "命令行", …}, "projects": {"/项目/目录": {"名字": "命令行", …}, …}}`，桌面另在
-//! 同一个文件的 `keys` 里按同样的分份记命令的快捷键，宿主不读它。宿主列出
-//! 请求的目录所在的那个项目（`projects` 里是它自己或上级的、最深的那个）的命令和通用的命令，再从请求的
-//! 目录往上找最近的 Makefile 和最近的 package.json（各找各的）；每一份是一个 `TaskSource`。每条命令的完整命令行由宿主拼好（`make -C ..`、按锁文件挑 `pnpm`、`yarn` 这类），
-//! 前端在 `TaskSource::project`（为空时是请求的目录）里原样打进 shell 就行，不用懂各种构建工具。
+//! 自己加的命令存在 `runode_paths::Dirs::tasks_file` 的 `tasks.json` 里，分 `global` 和按项目目录的
+//! `projects` 两份。每一份是一个 `TaskSource`；每条命令的完整命令行由宿主拼好，前端在
+//! `TaskSource::project`（为空时是请求的目录）里原样打进 shell 就行，不用懂各种构建工具。
 
 use std::path::PathBuf;
 

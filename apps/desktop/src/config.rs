@@ -245,10 +245,9 @@ pub fn write_values(path: &Path, key: &str, values: &[String], cx: &mut App) -> 
 }
 
 /// 逗号隔开、各层叠加的列表键（`status-bar-hidden`、`agent-notifications-exclude`）要写回 runode 配置文件的
-/// 各行：`written` 是文件里原来写的，`current` 是各层叠出来生效的名字，`values` 是要换成的。读配置时各层的值
-/// 接在一起，下面一层（Ghostty 的配置）里有的，本文件删掉也还在；读进来的配置去了重，看不出一个名字是不是两层
-/// 都写了。所以生效的名字有要去掉的，或者文件里已经写了清空的空行时，前面先写一行空值清掉别处加的，不然取消
-/// 不掉它们。只是加名字时不用：别处加的都已经在 `values` 里了。
+/// 各行：`written` 是文件里原来写的，`current` 是各层叠出来生效的名字，`values` 是要换成的。下面一层
+/// （Ghostty 的配置）里有的名字，本文件删掉也还在，而读进来的配置已去重、看不出是不是两层都写了；所以要去掉
+/// 生效的名字，或文件里已有清空的空行时，前面先写一行空值清掉别处加的。只加名字时不用。
 ///
 /// shortcut: `config-file` 引入的文件排在本文件的各行后面，那里加的这一行清不掉。
 pub(crate) fn clear_first(written: &[String], current: &[String], mut values: Vec<String>) -> Vec<String> {

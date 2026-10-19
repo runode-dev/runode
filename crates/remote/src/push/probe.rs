@@ -22,8 +22,7 @@ pub struct TestPush {
     pub lines: Vec<String>,
 }
 
-/// 给每条登记发一条内容是 `content` 的通知。会阻塞到发完（每个请求最多等十几秒），调用方放到后台
-/// 跑。推送开没开（`PushSettings::enabled`）不管。
+/// 给每条登记发一条内容是 `content` 的通知。会阻塞到发完，调用方放到后台跑。推送开没开（`PushSettings::enabled`）不管。
 ///
 /// 回推到了几台；没有登记时是 `Ok(0)`。登记都推不到时回原因。
 pub fn send_test_push(dirs: &Dirs, settings: &PushSettings, content: &TestPush) -> Result<usize, String> {

@@ -73,7 +73,7 @@ impl Connection {
         Self::open_by(env, Instant::now() + REPLY_TIMEOUT)
     }
 
-    /// 同 `open`，但握手最多等到 `deadline`：补全这类等不起十秒的用它。
+    /// 同 `open`，但握手最多等到 `deadline`：补全这类不能久等的用它。
     pub(crate) fn open_by(env: &Env, deadline: Instant) -> Result<Self> {
         let socket = env.socket.as_deref().ok_or_else(|| anyhow!("no place to find the runode app's socket"))?;
         let stream = UnixStream::connect(socket)

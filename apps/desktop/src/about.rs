@@ -2,8 +2,7 @@
 
 /// 应用图标，由矢量源图渲染成 256×256 的 PNG 后编进二进制，只给未打包运行时用。
 /// 不用 1024 的大图：Dock 图标最大也就 128 点（Retina 下 256 像素），而设成应用图标时
-/// AppKit 按原尺寸栅格化。实测未打包运行时换成 256 的，开窗早了四十毫秒左右，静置后的
-/// phys_footprint 少了约 30 MiB。
+/// AppKit 按原尺寸栅格化，大图白白多占内存、拖慢开窗。
 #[cfg(target_os = "macos")]
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 

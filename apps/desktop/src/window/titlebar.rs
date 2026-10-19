@@ -25,7 +25,7 @@ use crate::ui::{
     spinner::spinner,
     theme::{AGENT_BLOCKED_COLOR, AGENT_DONE_COLOR},
 };
-// 标签共用的拖动卡片和落点提示在 `runode_ui::tabs`，侧栏照旧从这里引。
+// 标签共用的拖动卡片和落点提示在 `runode_ui::tabs`，侧栏从这里引。
 pub(super) use crate::ui::tabs::{drag_chip, drop_marker};
 use crate::{
     assets::{PIXEL_QUESTION_ICON, PLUS_ICON, PROMPT_ICON},

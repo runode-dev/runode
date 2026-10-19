@@ -152,8 +152,7 @@ fn watch(
             covered = files.follow(&paths);
             fresh = coverage.newly_covered(files.watching(), covered);
         }
-        // 这一轮才盯全的、或者盯上了新的目录，上次比过以后、盯上之前改的没有动静，先比一遍再等。等着的配对口令过期时文件不变，
-        // 这时也按时看一眼。
+        // 刚盯全或者盯上了新目录时先比一遍再等；等着的配对口令过期时文件不变，也要按时看一眼。
         let woken = if !wait || fresh {
             false
         } else if covered && !stay.awaiting_pairing() {
@@ -185,10 +184,9 @@ fn watch(
 struct Coverage(Option<Vec<PathBuf>>);
 
 impl Coverage {
-    /// 这一轮要盯的都盯上了（`covered`），盯着的目录 `dirs` 上一轮却没盯全、或者不是这些：上次比对之后、
-    /// 盯上之前在新盯的目录里改的不会再有动静，要先比一遍再等。按目录比不按文件比：要盯的文件不变，目录
-    /// 也会变（文件所在的目录建出来了、符号链接改指别处）；反过来文件变了目录没变时，那些文件的改动一直
-    /// 有动静排着，不会漏。
+    /// 这一轮要盯的都盯上了（`covered`），盯着的目录 `dirs` 上一轮却没盯全、或者不是这些：盯上之前在
+    /// 新盯的目录里改的不会再有动静，要先比一遍再等。按目录比不按文件比，因为要盯的文件不变时目录也会变
+    /// （文件所在的目录建出来了、符号链接改指别处）。
     fn newly_covered(&mut self, dirs: &[PathBuf], covered: bool) -> bool {
         let fresh = covered && self.0.as_deref() != Some(dirs);
         self.0 = covered.then(|| dirs.to_vec());
@@ -214,7 +212,6 @@ struct StayUp {
 
 impl StayUp {
     /// 配置开着远程访问，而且有配对过的设备，或者有还在等设备的配对口令（`runode remote pair` 正在等）。
-    /// 关着远程访问时照旧空闲退出。
     fn check(&mut self, config: &Config, dirs: &runode_paths::Dirs) -> bool {
         if !config.remote_access {
             self.pairing = None;

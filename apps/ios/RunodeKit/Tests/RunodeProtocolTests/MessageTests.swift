@@ -3,8 +3,7 @@ import Testing
 
 @testable import RunodeProtocol
 
-/// 宿主（Rust）序列化出来的样例：`crates/protocol/tests/fixtures/messages.json`，按名字存着各条消息的
-/// JSON，由 `runode_protocol` 的测试 `message_fixture` 生成。
+/// 宿主（Rust）序列化出来的各条消息样例，按名字存着 JSON，由 `runode_protocol` 的测试 `message_fixture` 生成。
 enum RustSamples {
     static let url: URL = URL(filePath: #filePath)
         .deletingLastPathComponent()  // RunodeProtocolTests

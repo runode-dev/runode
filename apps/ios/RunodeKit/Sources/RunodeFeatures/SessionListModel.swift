@@ -130,7 +130,7 @@ public final class SessionListModel {
         didSet { onSessionsChanged() }
     }
     /// 这次连上以后收到过列表：`sessions` 是电脑上现在的样子。断开后、重连上还没收到新列表时为假，
-    /// 那时 `sessions` 还是断开前的。首页等回答的卡片看着它。
+    /// 那时 `sessions` 还是断开前的。
     private(set) var listCurrent = false
     /// 这台电脑上终端的主题：只看状态的 `Attach` 回话里带着，终端页开着时它收到的 `ThemeApplied`
     /// 也经同一条连接到这里。没收到过时为空。
@@ -464,11 +464,9 @@ public final class SessionListModel {
         connected && !session.exited
     }
 
-    /// 跑一条会话 `id` 目录里列出的命令，在 `project`（来源的 `TaskSource.project`，为空时是会话
-    /// 目录）里跑。shell 停在提示符上、要跑的目录就是会话目录时像快速回复一样在这个会话里粘贴再回车，
-    /// 返回真；前台在跑别的程序（agent、vim……）时打进去会落进那个程序，要跑的目录不是会话目录时打进去
-    /// 会跑错地方，这两种都改在电脑上把它分屏、右边开一个那个目录的新终端跑，开好后调 `onSpawned` 打开新终端，
-    /// 返回假。
+    /// 跑会话 `id` 目录里列出的一条命令，在 `project`（`TaskSource.project`，为空时是会话目录）里跑。
+    /// shell 停在提示符上、要跑的目录就是会话目录时，在这个会话里粘贴再回车，返回真；否则（前台在跑
+    /// 别的程序、或目录不同）在它右边分屏开一个那个目录的新终端跑，开好后调 `onSpawned`，返回假。
     @discardableResult
     public func runTask(_ task: TaskEntry, at project: String? = nil, in id: SessionId) async -> Bool {
         guard let session = session(id), canRunTask(in: session) else { return false }
@@ -493,9 +491,7 @@ public final class SessionListModel {
         return false
     }
 
-    /// 列 `dir` 里的命令：卡片出现、会话换了目录时要一次，列过的不再要；`refreshing` 为真时（下拉
-    /// 刷新，Makefile、package.json 可能改过了）列过的也再要。同一个目录同时只等一次回话。重新连上时
-    /// 各会话目录里还没有结果的再要一次：断线丢掉的回话不会再来，cwd 没变时视图也不会重新要。
+    /// 列 `dir` 里的命令：列过的不再要，`refreshing` 为真时照要；同一个目录同时只等一次回话。
     public func loadTasks(in dir: String, refreshing: Bool = false) async {
         guard connected, !listingDirs.contains(dir),
             refreshing || tasks[dir] == nil

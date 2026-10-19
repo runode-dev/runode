@@ -1,7 +1,7 @@
 import RunodeProtocol
 
-// 画一屏要的全部数据，从 libghostty 的 render state 抄出来的纯 Swift 值。画的一方（现在是
-// CoreText 的 `TerminalGridView`，以后可以换成 Metal）只读这些，不碰 libghostty。
+// 画一屏要的全部数据，从 libghostty 的 render state 抄出来的纯 Swift 值。画的一方（`TerminalGridView`）
+// 只读这些，不碰 libghostty。
 
 /// 单元格占几列。
 public enum CellWidth: Sendable, Hashable {

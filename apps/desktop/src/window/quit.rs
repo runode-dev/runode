@@ -1,28 +1,16 @@
 //! 退出应用、关掉窗口时宿主里的会话怎么办，以及要结束正在干活的 agent 之前先问一句。
 //!
-//! 会话结不结束看宿主怎么跑（`host_client::Mode`）、配置项 `terminal-host`（退出后保留会话，设置里
-//! 改了马上算数，见 `host_client::quit_keeps_sessions`）和用户做了什么（`QuitAction`），决策在
-//! `quit_plan`：开关开着时，退出（包括关掉最后一个窗口、关掉所有窗口）把会话留在单独跑的宿主里、
-//! 不再看它们，等下次启动接回来；要连会话一起结束用「退出并结束所有会话」。开关关着时退出让宿主连
-//! 会话一起退出；宿主还连着别的桌面时只结束这个 app 窗口里的会话，免得连别人的一起结束
-//! （`Ending::EndOwn`）。宿主跑在 app 里时会话留不下，随 app 结束（见 `host_client` 的模块文档）。
-//! 只有会结束会话、又有 agent 在跑时才弹框确认，免得一按 cmd+q 把正在干活或者攒着上下文的会话一起
-//! 结束掉；留得下会话时框里默认的按钮是「留在后台并退出」，选了它顺带打开开关。结束会话之前先冻结
-//! 存档（`persist::freeze`）：视图会先收到会话结束、一个个关掉分屏，冻结了才不会把存档清空，下次
-//! 启动照原样接回会话或者在原目录新开。
-//!
-//! 重启以更新（`quit_to_update`）也按退出走，只是不看开关：留得下就把会话留下，新版本打开时接回来；
-//! 留不下又有 agent 在跑时照样先问。
+//! 会话留下还是结束由宿主怎么跑（`host_client::Mode`）、配置项 `terminal-host`（见
+//! `host_client::quit_keeps_sessions`）和用户做了什么（`QuitAction`）决定，决策在 `quit_plan`。
+//! 要结束会话、又有 agent 在跑时才弹框确认；结束会话之前先冻结存档（`persist::freeze`），视图随后
+//! 关掉分屏时才不会把存档清空。
 //!
 //! 关掉的窗口不是最后一个时，app 不退出，结束这个窗口里的会话（`WindowView::end_sessions`），不问。
+//! 弹框之前都先推迟到当前的更新结束：回调运行时触发它的窗口正被借出，读不到它里面的 agent，也没法
+//! 在它上面弹框。
 //!
-//! 弹框之前都先推迟到当前的更新结束：动作和关闭按钮的回调运行时，触发它的窗口正被借出，这时
-//! 既读不到它里面的 agent，也没法在它上面弹框。
-//!
-//! 从 Dock 退出、注销、关机这类系统发起的退出不经过上面这些：GPUI 没接 `applicationShouldTerminate`，
-//! 拦不下也弹不了框，只在 `applicationWillTerminate` 里调 `on_app_quit` 的观察者。`install` 装的观察者
-//! 在这次退出没经过 `run` 时按退出（`QuitAction::Quit`）做不用问的那部分（`unprompted`），有 agent
-//! 在跑也不问。
+//! 从 Dock 退出、注销、关机这类系统发起的退出拦不下也弹不了框：`install` 装的观察者在这次退出没经过
+//! `run` 时只做 `unprompted` 定下的那部分，有 agent 在跑也不问。
 
 use std::{collections::HashSet, time::Duration};
 
@@ -220,11 +208,9 @@ pub fn quit_to_update(cx: &mut App) {
         let window = front_window(cx);
         run(QuitAction::Update, window, cx, |cx| {
             cx.restart();
-            // GPUI 拉不起重启的脚本时只记日志、不退出。拉起了的话退出已经排进主线程的队列（macOS 上
-            // 按先后办），这个任务排在它后面、轮不到；轮到了就是没退成，复位 `Settled`，之后从 Dock
-            // 退出照常收尾。退出前冻结了的存档（交出会话、让宿主连会话一起退出之前）不解冻：走到这里时
-            // 会话已经交给了别的宿主或者结束了，视图随后一个个关掉分屏，解冻了就会拿缺了终端的布局盖掉
-            // 下次启动接回会话、在原目录新开要用的那份。代价是这次不退出以后布局变了也不存。
+            // 退出已经排进主线程的队列，这个任务排在它后面；轮到了就是没退成（GPUI 拉不起重启的
+            // 脚本），复位 `Settled` 让之后从 Dock 退出照常收尾。冻结了的存档不解冻：会话已经交出或
+            // 结束，解冻会拿缺了终端的布局盖掉要用的那份。
             cx.spawn(async |cx| cx.update(|cx| cx.set_global(Settled(false)))).detach();
         });
     });
@@ -404,8 +390,7 @@ enum Answer {
 }
 
 /// `names` 是 `Prompt::Quit` 要列出的 agent，`count` 是别的几种给出的个数。`offer_keep` 时多一个
-/// 「留在后台并退出」，标题改成问要不要留下（几个按钮都退出，只是会话去向不同），说明里只说谁还在
-/// 跑、选了留下会怎样，不再说会随之结束，结束的按钮写明会结束会话。
+/// 「留在后台并退出」，标题改成问要不要留下。
 fn prompt_text(prompt: Prompt, names: &[String], count: usize, offer_keep: bool) -> PromptText {
     let t = |key: &str| rust_i18n::t!(key).into_owned();
     let agents = names.join(rust_i18n::t!("quit.separator").as_ref());

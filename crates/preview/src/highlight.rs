@@ -138,8 +138,8 @@ type Assets = (SyntaxSet, Theme);
 /// 加载好的 `Assets` 和最后一次取用的时间，为空时下次用到再加载。
 type Slot = Mutex<Option<(Arc<Assets>, Instant)>>;
 
-/// 这么久没人用就丢掉 `Assets`：每种语言第一次高亮时编译的正则都挂在 `SyntaxSet` 里，看过十几种
-/// 语言能占两百多 MB，丢掉后重新加载只要几毫秒，重新编译某种语言的正则在后台线程里也只要零点几秒。
+/// 这么久没人用就丢掉 `Assets`：每种语言第一次高亮时编译的正则都挂在 `SyntaxSet` 里，看过很多种
+/// 语言时占内存很大，丢掉后重新加载很快。
 const IDLE: Duration = Duration::from_secs(60);
 
 static ASSETS: Slot = Mutex::new(None);

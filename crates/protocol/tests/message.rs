@@ -451,7 +451,7 @@ fn shell_report_wire_format() {
     .unwrap();
     assert_eq!(json["shell"]["path"], "/bin");
     assert_eq!(json["shell"]["names"]["functions"][0], "runode-reload");
-    // 拆走后 `meta` 里不再写这两项。
+    // `meta` 里不写这两项。
     assert!(json["meta"].get("shell_path").is_none() && json["meta"].get("shell_names").is_none());
     let old: HostMsg = serde_json::from_str(
         r#"{"type":"meta","id":"0123456789abcdef0011223344556677",
@@ -609,8 +609,7 @@ fn version_3_fields_have_old_defaults() {
     assert_eq!((info.clients, info.claimed, info.exited), (0, false, false));
 }
 
-/// `Welcome` 后加的 `standalone`：没有它的宿主读成跑在 app 里。第 3 版协议还没发布过，没有哪个
-/// 已发布的宿主会少这个字段，所以不升协议版本。
+/// `Welcome` 没有 `standalone` 时读成跑在 app 里。
 #[test]
 fn welcome_without_standalone_reads_as_in_app() {
     let welcome: HostMsg =

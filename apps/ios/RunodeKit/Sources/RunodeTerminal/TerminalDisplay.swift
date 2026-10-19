@@ -16,7 +16,7 @@ public enum TerminalInput: Sendable, Hashable {
 }
 
 /// 画终端的一方。视图模型在 VT 换了、内容变了、响铃时通知它；它自己从 VT 读要画的东西。
-/// 现在是 CoreText 画的 `TerminalView`，以后换 Metal 也只要实现这个协议。
+/// 实现者是 `TerminalView`。
 @MainActor
 public protocol TerminalDisplay: AnyObject {
     /// 换了一份 VT（重新 `Attach` 时新建的），或者没有了（`nil`）。

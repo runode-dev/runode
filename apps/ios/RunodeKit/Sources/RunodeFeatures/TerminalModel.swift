@@ -119,13 +119,12 @@ public final class TerminalModel {
     @ObservationIgnored private var attachRetry: Task<Void, Never>?
     /// 页面开着时按 `keepAwakeInterval` 发 `keepAwake`。
     @ObservationIgnored private var keepAwake: Task<Void, Never>?
-    /// 实测每秒一个包时 iPhone 的 Wi-Fi 照样省电，收发常卡一两秒；每 0.2 秒一个就一直醒着。
+    /// 间隔够短，iPhone 的 Wi-Fi 才一直醒着，不会省电到收发卡一两秒。
     static let keepAwakeInterval: Duration = .milliseconds(200)
 
-    /// `onOpen`、`onClose` 告诉会话列表这个会话正被终端页看着（列表就不再给它发只看状态的 `Attach`，
-    /// 免得换掉这里的订阅）；关掉时由列表改回只看状态。`ownerProbeDelay` 是 `ownerHint` 不为 `none`
-    /// 时，重放完以后等宿主报 `SizeOwner` 的时间，等不到就当作没有 owner。`linkState` 是这台电脑的连接
-    /// 现在的状态，订阅到第一个事件之前标题下面就照它显示，切分屏时不先闪一下「未连接」。
+    /// `onOpen`、`onClose` 告诉会话列表终端页开始、不再看这个会话（见 `SessionListModel.screenOpened`）。
+    /// `ownerProbeDelay` 是 `ownerHint` 不为 `none` 时，重放完以后等宿主报 `SizeOwner` 的时间，等不到
+    /// 就当作没有 owner。`linkState` 是这台电脑的连接状态，订阅到第一个事件之前标题下面照它显示。
     public init(
         sessionId: SessionId, title: String, agent: Agent? = nil, link: any HostLink, linkState: LinkState = .idle,
         ownerHint: SizeOwnerHint = .unknown, sizePreference: SizePreference = .automatic,
@@ -543,10 +542,10 @@ public final class TerminalModel {
 
 /// Claude Code 全屏界面滚轮加速的镜像：把「想滚几行」换成「该发几个滚轮事件」，让它滚的行数跟着手指走。
 ///
-/// 它（2.1 版）对 runode 这种不算 wheelFlood 的 macOS 终端这样滚：离上一个滚轮事件超过 40 毫秒，这次滚
-/// 1 行；不到 40 毫秒，倍率加 0.3、取整后滚那么多行，最多 6 行。换方向的头一个事件被吞掉；吞掉后 200
-/// 毫秒内又折回原方向，会换成猛得多的另一套加速。手机按一行发一个事件的话，快拖和甩出去的惯性会被放大
-/// 好几倍、一跳好几行，所以这里按同样的规则算每个事件会滚几行，攒够了才发，折回时等过那 200 毫秒。
+/// 它（2.1 版）对 runode 这种不算 wheelFlood 的 macOS 终端的规则：事件间隔短时倍率累加、一次滚好几行，
+/// 间隔长时只滚 1 行；换方向的头一个事件被吞掉，吞掉后很快又折回原方向会换成猛得多的另一套加速。
+/// 手机按一行发一个事件会被放大好几倍，所以这里按同样的规则算每个事件会滚几行，攒够了才发，折回时
+/// 等过那段时间。
 ///
 /// ponytail: 照抄了 Claude Code 的常量，假定用户没改滚动速度、没关加速；它改了算法这里要跟着改。
 struct ClaudeWheelPacer {

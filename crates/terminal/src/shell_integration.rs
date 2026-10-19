@@ -244,7 +244,7 @@ fn install_into(dir: &Path) -> io::Result<()> {
         }
         runode_paths::replace_file(&path, contents.as_bytes())?;
     }
-    // 早先的版本装成 runode.fish，留着会和新名字的脚本各加载一遍。
+    // 删掉旧名 runode.fish：和现名的脚本并存会各加载一遍。
     match std::fs::remove_file(dir.join("fish-data/fish/vendor_conf.d/runode.fish")) {
         Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err),
         _ => {}

@@ -501,5 +501,5 @@ pub(crate) fn status_letter(status: FileStatus) -> Div {
     div().flex_none().w(px(12.)).flex().justify_center().text_color(hsla(status_color(status))).child(status.letter())
 }
 
-// 展开、收起的箭头在 `crate::ui::panel`，面板里各处照旧从这里引。
+// 展开、收起的箭头，面板里各处从这里引。
 pub(crate) use crate::ui::panel::chevron;

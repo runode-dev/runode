@@ -21,13 +21,11 @@
 //! 换主题、改选项和报布局（`SetTheme`、`SetOptions`、`LayoutChanged`）记着最近一次的，重连后补发。
 //!
 //! 等回话的请求（`attach_now`、`list_sessions`、`held_layout`）超时了，这条连接按断开处理
-//! （`Inner::timed_out`）：宿主按先后处理同一条连接上的消息，一个请求等不到回话，说明它卡住了，
-//! socket 却没断，不断开的话之后每个请求都要在主线程上等满超时。断开后请求立刻失败，等重连。
+//! （`Inner::timed_out`）：宿主按先后处理同一条连接上的消息，等不到回话说明它卡住了。断开后请求
+//! 立刻失败，等重连。
 //! `spawn` 例外，超时了连接照旧：宿主多半只是开会话慢，开好后回的 `Spawned` 没人等，读线程见了就
-//! 结束那个会话；断开的话这个回话读不到，会话留在宿主里没人看得见。宿主的会话列表里没有能对上
-//! 请求的东西，重连后认不出哪个会话是它开的，只能这样。真卡住时，下一个别的请求超时照样断开。
-//! `list_tasks` 和看板的请求（`request`）也例外，超时只撤掉这条请求（`OnTimeout::Wait`）：宿主
-//! 另起线程读目录、办看板，办得慢不说明连接卡住了，晚到的回话没人收、丢掉。
+//! 结束那个会话（重连后认不出哪个会话是它开的）。`list_tasks` 和看板的请求（`request`）也例外，
+//! 超时只撤掉这条请求（`OnTimeout::Wait`）：宿主另起线程办它们，办得慢不说明连接卡住了。
 
 mod reader;
 
@@ -181,7 +179,7 @@ pub struct SpawnOptions {
 /// 连宿主没连成的原因。
 #[derive(Debug)]
 pub enum ConnectError {
-    /// 宿主说协议版本对不上，多半是旧版本的宿主还活着。
+    /// 宿主说协议版本对不上，多半是别的构建的宿主还活着。
     Incompatible(String),
     /// 要连单独一个进程的宿主，socket 上的却跑在另一个 app 里（`Welcome::standalone` 为假），见
     /// `Link::connect_standalone`。
@@ -288,8 +286,8 @@ struct Route {
     first_screen: Option<mpsc::Sender<Result<Screen, String>>>,
     /// 正连着时收到的 `Exited`，等这次连上（或者没连成）后交出去，见 `Route::settle`。
     exited: Option<HostMsg>,
-    /// 宿主拆出来单独发的 shell 集成报告，最近收到的那份（见 `Caps::shell_report`）；不拆的旧宿主
-    /// 发来的 `Attached` 不带，为 `None` 时 `Meta` 照原样交出去。
+    /// 宿主拆出来单独发的 shell 集成报告，最近收到的那份（见 `Caps::shell_report`）；
+    /// 为 `None` 时 `Meta` 照原样交出去。
     shell: Option<ShellReport>,
     /// 这次订阅交给视图、视图还没处理完的输出，见 `Output`。重新连上（`start_attach`）时换一份新的。
     unread: Arc<Unread>,
@@ -590,8 +588,8 @@ impl Link {
         self.inner.state().host_build.clone()
     }
 
-    /// 现在连着的宿主认得看板的消息（`ClientMsg::ListTodos` 等，见 `HostMsg::Welcome`）。旧宿主不认得：
-    /// 它回的 `Error` 不带请求编号，等的一方等到超时，整条连接按断开处理，所以不认得时一条都不发。
+    /// 现在连着的宿主认得看板的消息（`ClientMsg::ListTodos` 等，见 `HostMsg::Welcome`）。不认得的宿主
+    /// 回的 `Error` 不带请求编号，会让请求超时、连接被断开，所以不认得时一条都不发。
     pub fn host_knows_todos(&self) -> bool {
         let state = self.inner.state();
         state.connected && state.todos

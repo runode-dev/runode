@@ -11,15 +11,13 @@
 //! 接手，PTY 停在闸门上，`Inbox::Open` 提交后打开闸门，`Inbox::Release` 不接手了原样交回去。
 //!
 //! 尺寸归属：几个前端带着屏幕看同一个会话时，会话的尺寸由最近交互过的那个（owner）决定，见
-//! `Runner::owner`。带着屏幕连着、请求过尺寸（带尺寸的 `Inbox::Subscribe` 或者 `Inbox::Resize`）的
-//! 连接（`Viewer`）才有资格；只看状态的（命令行都是）没有，带着屏幕却从不说尺寸的（比如手机跟着 Mac
-//! 的尺寸看）也没有：它们的输入和获得焦点都不算交互，免得手机打一个字就把 owner 抢走，它不报尺寸，
-//! 当上 owner 也不改尺寸，桌面却以为尺寸归别人管、裁切着画。交互是带尺寸的 `Inbox::Subscribe`、这条
-//! 连接发来的 `Inbox::Input` 和 `Inbox::Focus`；命令行发的键和粘贴（`Inbox::Keys`、`Inbox::Paste`）
-//! 不算。owner 的 `Inbox::Resize` 当场应用，别的只记下，等它
-//! 当上 owner 时再用；还没有 owner 时谁的都照旧应用。尺寸照旧只在宿主插进输出流的 `HostMsg::Resized` 处改，两份 VT 不会分叉；
-//! owner 换了用 `HostMsg::SizeOwner` 告诉带着屏幕连着的前端。owner 是连接级的状态，交接时所有
-//! 连接都断了，新宿主上的会话从没有 owner 开始。
+//! `Runner::owner`。只有带着屏幕连着、请求过尺寸的连接（`Viewer`）有资格：只看状态的（命令行都是）
+//! 和从不说尺寸的（比如手机跟着 Mac 的尺寸看）没有，它们的输入和焦点不算交互，免得抢走 owner 却
+//! 没人改尺寸、桌面被裁切着画。交互是带尺寸的 `Inbox::Subscribe`、这条连接的 `Inbox::Input` 和
+//! `Inbox::Focus`；命令行的 `Inbox::Keys`、`Inbox::Paste` 不算。owner 的 `Inbox::Resize` 当场应用，
+//! 别的只记下，等它当上 owner 再用；还没有 owner 时谁的都应用。尺寸只在宿主插进输出流的
+//! `HostMsg::Resized` 处改，两份 VT 不会分叉；owner 换了用 `HostMsg::SizeOwner` 告诉前端。owner 是
+//! 连接级的状态，交接后新宿主上的会话从没有 owner 开始。
 //!
 //! 程序读写剪贴板（OSC 52）的请求按配置办，要桌面办的交给最近和这个会话交互过的桌面，见 `clipboard`。
 
@@ -63,14 +61,13 @@ pub(crate) use clipboard::CLIPBOARD_READ_PATIENCE;
 /// PTY 读线程最多积压这么多字节的输出，再多就等会话线程处理。按字节而不按块数算：程序不停输出
 /// 时一次只读到 1 KiB 左右，按块数限的话积压不了多少，会话线程稍一耽搁读线程就得停下。也不能
 /// 太大：前端的输入和改尺寸跟输出排在同一个收件箱里，刷屏时 Ctrl-C 要等前面积压的输出都处理完
-/// 才写给程序。积压的输出按 `COALESCE_BYTES` 合成大块处理以后，1 MiB（发布构建里 16 块合满的
-/// 输出）已经够会话线程短暂耽搁时读线程不停下；原先的 4 MiB 让 `yes` 刷屏时按 Ctrl-C 到会话结束
-/// 要 0.2 到 0.4 秒，降到 1 MiB 后约 20 毫秒，吞吐不变。
+/// 才写给程序。积压的输出按 `COALESCE_BYTES` 合成大块处理，这个量够会话线程短暂耽搁时读线程
+/// 不停下。
 const PTY_BACKLOG_BYTES: usize = 1024 * 1024;
 /// 会话线程一次最多把这么多字节相邻的 PTY 输出合成一块处理，见 `coalesce`。处理一块时不看
 /// 轮询的时刻和 `Handle::killed`，所以块的大小也是它们最多被耽搁多久：发布构建里 VT 喂 64 KiB
-/// 不到 1 ms；开发构建的 libghostty 是 Zig 的 Debug 构建，喂 64 KiB 要三秒左右，前台进程和结束
-/// 会话都跟着拖住，所以只合到 4 KiB。
+/// 很快；开发构建的 libghostty 是 Zig 的 Debug 构建，喂得极慢，前台进程和结束会话都跟着拖住，
+/// 所以开发构建合得小。
 const COALESCE_BYTES: usize = if cfg!(debug_assertions) { 4 * 1024 } else { 64 * 1024 };
 /// 重新读取前台进程的间隔：不输出的程序（比如 `sleep`）启动后，标签名也能跟上。
 const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -434,9 +431,7 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 /// `Adopting::finish`。闸门等 `Inbox::Open` 打开，不接手了发 `Inbox::Release`。
 ///
 /// 失败时 PTY 已经原样交回、关掉了这边的描述符，shell 不受影响（交出方还拿着自己那份）。
-/// PTY 在会话线程起好之后才经 channel 交过去：起不了线程时它还在这里，用 `Pty::release` 交回去。
-/// 停着、从没开过闸的 `Pty` 直接丢掉其实也不结束 shell（见 `Pty::adopt_paused`），明着交回是把
-/// 「不接手了」说清楚、出错时记一笔，不靠丢掉时对停着的 `Pty` 的特殊处理。
+/// PTY 在会话线程起好之后才经 channel 交过去：起不了线程时它还在这里，用 `Pty::release` 明着交回。
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
     let Setup { id, settings: _, env: _, ui, clipboard, read_patience, alive } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
