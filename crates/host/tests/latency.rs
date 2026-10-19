@@ -56,7 +56,6 @@ fn percentiles(name: &str, mut samples: Vec<Duration>) {
     ));
 }
 
-/// 回显用的脚本。
 fn echo_script(dir: &std::path::Path) -> String {
     common::script(dir, "echo.sh", "stty raw -echo\nexec /bin/cat -u")
 }
@@ -173,7 +172,6 @@ impl PairDesktop {
         write_frame(&mut self.writer, FrameKind::Input, channel, data).unwrap();
     }
 
-    /// 下一块输出。
     fn output(&mut self, channel: u32) -> Vec<u8> {
         loop {
             let frame = self.frame();

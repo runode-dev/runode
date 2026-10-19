@@ -53,7 +53,7 @@ pub enum HandoffPart {
         /// 前端用 `SetTheme` 设过的主题；没设过时为空，新宿主照旧等前端来设。
         #[serde(default)]
         theme: Option<TermSettings>,
-        /// 旧宿主记不记命令历史，见 `ClientMsg::SetOptions`；现在的宿主不看它，照旧写 false。
+        /// 必填字段，宿主不看它，一律写 false；见 `ClientMsg::SetOptions`。
         record_history: bool,
         /// 监听的 socket 的路径。描述符传过去后路径不变，shell 里的 `RUNODE_SOCKET` 照样有效。
         #[serde(with = "os_path::required")]

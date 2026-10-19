@@ -76,7 +76,7 @@ pub(crate) fn read(status: &[u8], head: Option<String>, git_dir: &Path, extra: E
 
 /// 解析 `git status --porcelain=v1 --branch` 开头那一项，只填分支、上游和 ahead/behind。
 /// 写法有 `## main`、`## main...origin/main [ahead 1, behind 2]`、`## main...origin/main [gone]`、
-/// `## No commits yet on main`（老版本是 `Initial commit on main`）和 `## HEAD (no branch)`。
+/// `## No commits yet on main`（也认 `Initial commit on main`）和 `## HEAD (no branch)`。
 /// 分支名里不会有空格、`[` 和 `..`，按这几个切开不会切错。
 pub(crate) fn parse_branch(line: &str) -> RepoInfo {
     let mut info = RepoInfo::default();

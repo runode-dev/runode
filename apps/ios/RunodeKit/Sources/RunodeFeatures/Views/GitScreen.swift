@@ -12,7 +12,7 @@
         @Bindable var model: GitModel
         @AppStorage("gitFileTree") private var asTree = false
         /// 收起的目录，按仓库根和段分开记，键见 `collapsedKey`。
-        // ponytail: 改动没了的目录也一直记着，攒多了再在读到状态时清掉不在改动里的。
+        // shortcut: 改动没了的目录也一直记着，攒多了再在读到状态时清掉不在改动里的
         @AppStorage("gitCollapsedDirectories") private var collapsedData = Data()
         @State private var diffTarget: GitDiffTarget?
         /// 等用户确认丢弃改动的文件。

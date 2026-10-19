@@ -271,7 +271,7 @@ fn commit_part_is_readable() {
     assert_eq!(blocks, [&b"ls\r"[..], &b"q"[..]]);
 }
 
-/// 后来加的 `at_prompt`：第一个会话那块末尾 6 个字节等提示符再写。
+/// `at_prompt`：第一个会话那块末尾 6 个字节等提示符再写。
 #[test]
 fn commit_part_with_at_prompt_is_readable() {
     let header = format!(

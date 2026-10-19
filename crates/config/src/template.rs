@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn fills_keys_added_after_the_file_was_written() {
         let full = template();
-        // 一组里缺了后面几个、整组都缺、多值的键缺了、组中间后来加的键缺了，补回来都和
+        // 一组里缺了后面几个、整组都缺、多值的键缺了、组中间的键缺了，补回来都和
         // 模板一样。
         for keys in
             [&["preview-font-size", "file-tree-preview-click"][..], &["language"], &["palette"], &["scrollback-limit"]]
@@ -234,7 +234,7 @@ mod tests {
         }
         let group = without(&full, &["file-tree-preview-click", "preview-font-size"]);
         assert_eq!(fill_missing_keys(&group), full);
-        // agent 通知这一组是后来加的，旧配置文件整组都没有。
+        // 整组都缺（agent 通知这一组）。
         let agents = [
             "agent-notifications",
             "agent-notifications-exclude",

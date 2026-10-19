@@ -296,7 +296,7 @@ impl Picture {
         }
     }
 
-    /// 关掉或换掉时放掉解码结果，和 `Preview::release_image` 一样。
+    /// 关掉或换掉时放掉解码结果，见 `Preview::release_image`。
     fn release(&self, cx: &mut App) {
         match self {
             Picture::Bitmap(image, _) => ui::release_bitmap(image.clone(), cx),

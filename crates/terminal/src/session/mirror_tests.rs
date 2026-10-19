@@ -128,7 +128,6 @@ fn pair(size: GridSize, started: bool) -> (HostSession, Session) {
     (host, view)
 }
 
-/// 喂一段同样的字节。
 fn feed(host: &mut HostSession, view: &mut Session, data: &[u8]) {
     host.feed(data);
     view.feed(data);
@@ -265,7 +264,6 @@ fn redacted_shell_reports_keep_the_terminals_in_step() {
     assert_same("redacted", &host, &view);
 }
 
-/// `haystack` 里有没有 `needle`。
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }

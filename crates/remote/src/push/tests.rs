@@ -348,7 +348,7 @@ fn backing_off_notifications_are_cancelled_or_replaced() {
     scratch.wait_for(3);
 }
 
-/// 任务做完的通知发到中转的 v3 接口；旧中转没有这个接口、回 404 时算推不了，不重试。
+/// 任务做完的通知发到中转的 v3 接口；中转服务没有这个接口、回 404 时算推不了，不重试。
 #[test]
 fn todo_done_needs_the_v3_relay() {
     let scratch = Scratch::new("v3");

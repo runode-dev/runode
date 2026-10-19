@@ -83,8 +83,7 @@ pub struct Caps {
     /// 自己跑着一份 VT，能接 VT 重放（`AttachMode::VtReplay`）。
     pub vt_replay: bool,
     /// 能自己留着 shell 集成报告的东西：宿主把它从 `SessionMeta` 拆出来放进 `HostMsg::Attached::shell`，
-    /// 之后只在变了时随 `HostMsg::Meta::shell` 再带。为假时宿主照旧每次整份放在 `meta` 里，不认这一项的
-    /// 旧前端靠它读。
+    /// 之后只在变了时随 `HostMsg::Meta::shell` 再带。为假时宿主照旧每次整份放在 `meta` 里。
     pub shell_report: bool,
 }
 
@@ -170,7 +169,7 @@ pub enum ClientMsg {
     SetTheme { settings: TermSettings },
     /// 改宿主的选项：终端里的程序读写剪贴板（OSC 52）的规矩。
     SetOptions {
-        /// 旧宿主据此决定记不记命令历史；现在的宿主不记、不看它，前端照旧发 false，旧宿主读得了。
+        /// 必填字段，宿主不看它，前端一律发 false。
         record_history: bool,
         #[serde(default)]
         clipboard: ClipboardAccess,
@@ -311,7 +310,7 @@ pub enum ClientMsg {
     },
     /// 手机看着终端时每隔一小会儿发一条，宿主不回、什么都不做：iPhone 的 Wi-Fi 一闲下来就省电，
     /// 收发会卡上一两秒，打的字攒着一起到；一直有包来回它就醒着。宿主在 `Welcome` 的 `keep_awake`
-    /// 里说自己认得它，旧宿主会回 `Error`，手机不发。
+    /// 里说自己认得它时手机才发。
     KeepAwake,
     /// 要看板上的任务和定时（见 `todo` 模块），宿主回 `Todos`；之后任务或定时有变化时给这条连接发
     /// `TodosChanged`。完成了的任务只给最近的，更早的用 `ListDoneTodos` 翻。下面这几条宿主自己办，宿主在 `Welcome` 的 `todos`
@@ -440,7 +439,7 @@ pub enum HostMsg {
         #[serde(default)]
         settings: Option<TermSettings>,
         /// 连接说了 `Caps::shell_report` 时宿主总带着它，`meta` 里的 `shell_path`、`shell_names` 留空；
-        /// 没说的连接，或者宿主比这一项旧时为空，这两项照旧在 `meta` 里。
+        /// 没说的连接上为空，这两项照旧在 `meta` 里。
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shell: Option<ShellReport>,
     },
@@ -808,7 +807,7 @@ pub enum HandoffRefusal {
     Unknown,
 }
 
-/// `ClientMsg::Spawn::start` 缺省时为真：旧的前端开会话时一律当场启动。
+/// `ClientMsg::Spawn::start` 缺省时为真，即当场启动。
 fn yes() -> bool {
     true
 }

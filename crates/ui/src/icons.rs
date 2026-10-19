@@ -19,16 +19,13 @@ crate::icons! {
     pub BAN_ICON = "ban",
     pub COPY_ICON = "copy",
     pub PIN_ICON = "pin",
-    /// 源码。
     pub CODE_ICON = "code",
     /// 取消暂存、丢弃改动和打勾。
     pub MINUS_ICON = "minus",
     pub DISCARD_ICON = "discard",
     pub CHECK_ICON = "check",
-    /// 向下、向上的箭头。
     pub ARROW_DOWN_ICON = "arrow-down",
     pub ARROW_UP_ICON = "arrow-up",
-    /// 放大和还原。
     pub MAXIMIZE_ICON = "maximize",
     pub MINIMIZE_ICON = "minimize",
     /// 「更多」菜单。
@@ -40,18 +37,14 @@ crate::icons! {
     pub FOLDER_OPEN_ICON = "folder-open",
     /// 关闭、清空。
     pub CLOSE_ICON = "close",
-    /// 分支。
     pub BRANCH_ICON = "branch",
-    /// Git。
     pub GIT_ICON = "git",
     /// 让 AI 写东西。
     pub SPARKLE_ICON = "sparkle",
     /// 搜索框前面的过滤图标。
     pub FILTER_ICON = "filter",
-    /// stash 的应用和弹出。
     pub STASH_APPLY_ICON = "stash-apply",
     pub STASH_POP_ICON = "stash-pop",
-    /// diff 和自动换行。
     pub DIFF_ICON = "diff",
     pub WRAP_ICON = "wrap",
     /// GitHub 提示块（`> [!NOTE]` 这类）标题前的图标。
@@ -60,26 +53,22 @@ crate::icons! {
     pub ALERT_IMPORTANT_ICON = "alert-important",
     pub ALERT_WARNING_ICON = "alert-warning",
     pub ALERT_CAUTION_ICON = "alert-caution",
-    /// 侧栏。
     pub SIDEBAR_ICON = "sidebar",
     /// 文件树和右侧面板。
     pub FILES_ICON = "files",
     pub PANEL_RIGHT_ICON = "panel-right",
     /// 向上的箭头（展开）。
     pub CHEVRON_UP_ICON = "chevron-up",
-    /// 向右、向下分屏。
     pub SPLIT_RIGHT_ICON = "split-right",
     pub SPLIT_DOWN_ICON = "split-down",
     /// 深色底上的提示符。
     pub PROMPT_ICON = "prompt",
-    /// 像素画的问号。
     pub PIXEL_QUESTION_ICON = "pixel-question",
     /// 防止休眠、内存、终端数和端口。
     pub COFFEE_ICON = "coffee",
     pub MEMORY_ICON = "memory",
     pub SHELL_ICON = "shell",
     pub PLUG_ICON = "plug",
-    /// 手机。
     pub PHONE_ICON = "phone",
     /// 定时和看板。
     pub CLOCK_ICON = "clock",
@@ -90,7 +79,6 @@ crate::icons! {
     pub SLIDERS_ICON = "sliders",
     pub PALETTE_ICON = "palette",
     pub KEYBOARD_ICON = "keyboard",
-    /// 显示器。
     pub MONITOR_ICON = "monitor",
 }
 

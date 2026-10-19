@@ -396,7 +396,7 @@
         private func cachedLine(_ text: String, font ctFont: CTFont) -> (line: CTLine, advance: CGFloat) {
             let key = LineKey(text: text, font: ctFont)
             if let cached = lineCache[key] { return cached }
-            // ponytail: 不按冷热淘汰，满了整个清掉；一屏能出现的字有限，真常常清空再换 LRU。
+            // shortcut: 不按冷热淘汰，满了整个清掉，一屏能出现的字有限；真常常清空时换 LRU
             if lineCache.count > 20_000 { lineCache.removeAll() }
             let attributed = NSAttributedString(
                 string: text,

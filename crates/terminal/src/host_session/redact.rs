@@ -9,7 +9,6 @@ const SUB: u8 = 0x1a;
 /// 报告的开头 `ESC ] 6973;`：抹过的报告只剩它和结束序列。
 pub(super) const REPORT_START: [u8; 7] = *b"\x1b]6973;";
 
-/// 报告开头的 `ESC ] 6973;` 有几个字节。
 const PREFIX_LEN: usize = REPORT_START.len();
 
 /// 把 PTY 输出转给别的进程前，抹掉 shell 集成报告（`ESC ] 6973;<口令>;<字段>=<值> BEL`）

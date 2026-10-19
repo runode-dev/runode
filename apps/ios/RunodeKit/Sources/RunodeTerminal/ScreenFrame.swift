@@ -19,7 +19,6 @@ public enum UnderlineStyle: UInt8, Sendable, Hashable {
     case none = 0, single, double, curly, dotted, dashed
 }
 
-/// 单元格的文字属性。
 public struct CellAttributes: OptionSet, Sendable, Hashable {
     public let rawValue: UInt8
     public init(rawValue: UInt8) { self.rawValue = rawValue }
@@ -33,7 +32,6 @@ public struct CellAttributes: OptionSet, Sendable, Hashable {
     public static let blink = CellAttributes(rawValue: 1 << 6)
 }
 
-/// 一个单元格。
 public struct ScreenCell: Sendable, Hashable {
     /// 整个字素簇；空格子为空串。
     public var text: String
@@ -61,12 +59,10 @@ public struct ScreenCell: Sendable, Hashable {
     }
 }
 
-/// 光标的形状。
 public enum CursorShape: Sendable, Hashable {
     case block, blockHollow, bar, underline
 }
 
-/// 视口里的光标。
 public struct ScreenCursor: Sendable, Hashable {
     public var column: Int
     public var row: Int
@@ -76,7 +72,6 @@ public struct ScreenCursor: Sendable, Hashable {
     public var onWideTail: Bool
 }
 
-/// 一屏的内容。
 public struct ScreenFrame: Sendable {
     public var columns: Int
     public var rows: Int

@@ -214,7 +214,7 @@ impl RealShell {
         Self::start_handing_token(shell, name, rc, prompt, idle, false)
     }
 
-    /// 同 `start`；`legacy` 时照早先版本的 `runode-reload` 那样直接经环境变量 `RUNODE_REPORT_TOKEN` 交口令。
+    /// 同 `start`；`legacy` 时直接经环境变量 `RUNODE_REPORT_TOKEN` 交口令，不经文件。
     fn start_handing_token(
         shell: &str,
         name: &str,
@@ -1018,8 +1018,8 @@ fn real_nushell_reloads_with_the_integration() {
     );
 }
 
-/// 早先版本的 `runode-reload` 直接经环境变量 `RUNODE_REPORT_TOKEN` 交口令：升级后在旧 shell 里换 shell 时，
-/// 新的集成照样认这个口令；它自己再换 shell 时改交文件，新 shell 启动时的环境里没有口令。
+/// shell 启动时直接带着环境变量 `RUNODE_REPORT_TOKEN` 交来的口令，集成照样认；它自己再换 shell 时
+/// 改交文件，新 shell 启动时的环境里没有口令。
 fn legacy_token_in(shell: Option<RealShell>) {
     let Some(mut shell) = shell else { return };
     let name = shell.name.clone();

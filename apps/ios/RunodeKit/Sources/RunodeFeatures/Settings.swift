@@ -19,7 +19,7 @@ public struct AppPreferences: Hashable, Sendable, Codable {
     /// 手动字号能调的范围。
     public static let fontSizes: ClosedRange<Double> = 9...28
 
-    // 新加的字段在旧的存档里没有：缺了就用默认值，不让整份设置读不出来。
+    // 字段缺了就用默认值，不让整份设置读不出来。
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         defaultSize = try container.decodeIfPresent(SizePreference.self, forKey: .defaultSize) ?? .automatic

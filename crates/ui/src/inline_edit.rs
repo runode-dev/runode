@@ -23,7 +23,7 @@ impl InlineEdit {
         cx: &mut Context<V>,
     ) -> Self {
         let field = cx.new(|cx| InputState::editing(text, select, cx).with_label(label));
-        // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和取消。
+        // 复用搜索框的事件：`Next`（回车）在这里是确定，`Dismiss`（Esc）是取消。
         let events = cx.subscribe_in(&field, window, move |this, _, event: &InputEvent, window, cx| match event {
             InputEvent::Next => finish(this, true, window, cx),
             InputEvent::Dismiss => finish(this, false, window, cx),

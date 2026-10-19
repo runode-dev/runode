@@ -87,7 +87,6 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     case resize(id: SessionId, size: GridSize)
     /// 这个会话在前端被看着；`focused` 为真算一次交互，可能轮到这条连接决定尺寸。
     case focus(id: SessionId, focused: Bool)
-    /// 结束会话。
     case kill(id: SessionId)
     /// 读会话屏幕底部的文字：从最后一个有字的行往上 `lines` 行（含回滚历史），为空时是当前一屏。
     /// `command` 为 `n` 时不看 `lines`，读倒数第 n 条命令（1 是最近一条）的输出，不含提示符，要 shell

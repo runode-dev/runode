@@ -80,7 +80,6 @@ fn open_workspace(
     }
 }
 
-/// 办一条请求，返回回话。
 fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
     let fail = |req: u32, message: String| HostMsg::Error { req: Some(req), id: None, message };
     match request {

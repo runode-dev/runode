@@ -54,7 +54,6 @@ use probe::{Caffeinate, Port, Procs, Usage};
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 /// 隔多久重新问一次在监听的端口：状态栏上只是个小数字，`lsof` 又比 `ps` 慢得多；开着端口浮层时每次都问。
 const PORTS_INTERVAL: Duration = Duration::from_secs(15);
-/// 状态栏的高度。
 pub(super) const STATUS_BAR_HEIGHT: f32 = 26.;
 /// 浮层离状态栏和窗口边留的距离。
 const POPOVER_GAP: f32 = 6.;
@@ -299,7 +298,6 @@ fn format_cpu(cpu: f32) -> String {
 }
 
 impl WindowView {
-    /// 这个窗口里所有的终端。
     pub(super) fn terminal_views(&self) -> impl Iterator<Item = &gpui::Entity<crate::terminal_view::TerminalView>> {
         self.workspaces
             .iter()
@@ -308,7 +306,6 @@ impl WindowView {
             .map(|(view, _)| view)
     }
 
-    /// 窗口底部的状态栏。
     pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let fg_h = cx.theme().foreground;
         let (sleep, effective, total, terminals, ours) = match cx.try_global::<Status>() {

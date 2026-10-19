@@ -13,7 +13,6 @@ public enum FrameKind: UInt8, Sendable, Hashable {
     case snapshot = 3
 }
 
-/// 一帧。
 public struct Frame: Sendable, Equatable {
     /// 帧头的字节数：载荷长度、类型、通道。
     public static let headerLength = 9

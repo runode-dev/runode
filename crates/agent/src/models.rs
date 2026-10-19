@@ -245,7 +245,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         prompt_arg: "",
         resume_arg: None,
         session_args: None,
-        // `serve` 的 JSON-RPC：初始化答了才能说 `initialized`，再问清单。没登录时清单是空的；0.2.x 没有 `serve`。
+        // `serve` 的 JSON-RPC：初始化答了才能说 `initialized`，再问清单。没登录时清单是空的。
         probe: Probe {
             args: &["serve"],
             request: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"runode\",\"version\":\"0\"}}}\n",
@@ -907,7 +907,7 @@ mod tests {
         assert_eq!(quote("=opus"), "'=opus'");
     }
 
-    /// 一行一行认：读到 `want` 就答完，读到 `then` 就再写 `send`。
+    /// 一行一行认：读到 `first` 就再写 `second`，读到 `second` 就答完。
     fn lines_probe(args: &'static [&'static str], request: &'static str) -> Probe {
         fn answer(line: &str) -> Reply {
             match line {

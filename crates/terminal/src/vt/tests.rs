@@ -306,11 +306,9 @@ fn replay_keeps_the_cursor_inside_the_region_in_origin_mode() {
     assert_eq!(screen_lines(&a, 0, 9).unwrap(), screen_lines(&b, 0, 9).unwrap());
 }
 
-/// 重放丢掉的东西。快照都带着；版本对不上、只能重放时，界面上会看到这些差别。哪天这里的
-/// 断言不成立了，说明格式化能带上它了，改注释和测试。
+/// 屏幕上带 OSC 8 超链接的字一格格都带着链接，不只是光标当前的那个。
 #[test]
 fn replay_keeps_the_hyperlinks_of_cells() {
-    // 屏幕上带 OSC 8 超链接的字一格格都带着链接，不只是光标当前的那个。
     let mut a = new_terminal(size(20, 4)).unwrap();
     a.vt_write(b"\x1b]8;id=a;https://x\x07link\x1b]8;;\x07 \x1b]8;;https://y\x07two\x1b]8;;\x07");
     let b = replayed(&a);
@@ -327,6 +325,7 @@ fn replay_keeps_the_hyperlinks_of_cells() {
     }
 }
 
+/// 重放丢掉的东西：快照都带着，快照用不了、只能重放时界面上会看到这些差别。
 #[test]
 fn replay_loses_what_the_formatter_cannot_express() {
     // 备用屏幕上只重放备用屏幕：主屏幕和回滚历史都没了，退出备用屏幕后是空的。
@@ -362,7 +361,7 @@ fn replay_loses_what_the_formatter_cannot_express() {
     assert_ne!(b.color_palette().unwrap().0[2], theme.0[2]);
 }
 
-/// 第 0 阶段要汇报的几个数字。在 release 下跑才有意义：
+/// 测快照编解码的耗时和大小，以及记录没写完的序列对喂输出速度的影响。在 release 下跑才有意义：
 /// `cargo test --release -p runode-terminal vt::tests::snapshot_costs -- --ignored --nocapture`
 #[test]
 #[ignore = "测量耗时，手动跑"]

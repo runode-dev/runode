@@ -518,7 +518,7 @@ fn long_runs_of_autolink_candidates_parse_quickly() {
     let blocks = parse(&text);
     assert!(started.elapsed() < std::time::Duration::from_secs(1), "took {:?}", started.elapsed());
     assert!(matches!(&blocks[..], [Block::Paragraph(_)]));
-    // 网址最长认 2048 字节左右，再长的后面照留成文字。
+    // 网址有长度上限，再长的后面照留成文字。
     let long = format!("https://x.dev/{}", "a".repeat(5000));
     let Block::Paragraph(inlines) = &parse(&long)[0] else { panic!() };
     assert!(inlines[0].link.is_some() && inlines[0].text.len() <= 2052 && inlines[1].link.is_none());

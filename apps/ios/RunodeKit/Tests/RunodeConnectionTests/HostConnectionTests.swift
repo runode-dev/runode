@@ -563,7 +563,6 @@ import Testing
     }
 }
 
-/// 找不到电脑，直到测试调 `appear`：那之后 `awaitPresence` 立刻返回。
 /// 测试代替本机网络监听：`change` 叫醒正在等的。
 actor NetworkSignal {
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -580,6 +579,7 @@ actor NetworkSignal {
     }
 }
 
+/// 找不到电脑，直到测试调 `appear`：那之后 `awaitPresence` 立刻返回。
 actor SignalDiscovery: HostDiscovery {
     private var present = false
     private var waiters: [CheckedContinuation<Void, Never>] = []

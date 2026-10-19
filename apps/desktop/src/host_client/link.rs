@@ -578,7 +578,6 @@ impl Link {
         self.inner.lost(generation);
     }
 
-    /// 现在连着宿主。
     pub fn connected(&self) -> bool {
         self.inner.state().connected
     }
@@ -776,7 +775,6 @@ impl Link {
         self.send(ClientMsg::Detach { id });
     }
 
-    /// 结束会话。
     pub fn kill(&self, id: SessionId) {
         self.send(ClientMsg::Kill { id });
     }

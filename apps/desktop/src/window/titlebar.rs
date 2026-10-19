@@ -461,7 +461,7 @@ impl WindowView {
             })
     }
 
-    /// 卡片样式下标签条右边的新建标签按钮。`bg` 是外框的颜色。
+    /// 卡片样式下标签条右边的新建标签按钮。
     pub(super) fn render_new_tab_button_card(&self, cx: &mut Context<Self>) -> Button {
         let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab));
         Button::new("new-tab", rust_i18n::t!("menu.new_tab"))

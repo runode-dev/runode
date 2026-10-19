@@ -508,7 +508,6 @@
         }
     }
 
-    /// 上次打开的终端。
     private struct ResumeCard: View {
         let item: ResumeItem
 

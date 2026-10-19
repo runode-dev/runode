@@ -261,7 +261,6 @@ impl Session {
         }
     }
 
-    /// VT 现在的尺寸。
     pub fn size(&self) -> GridSize {
         self.size.get()
     }

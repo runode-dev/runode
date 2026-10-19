@@ -57,7 +57,7 @@ pub struct InputState {
     /// 按住鼠标拖选中；双击后拖动按词扩展。
     drag: Option<Drag>,
     history: History,
-    /// 空着时画的提示，默认是「搜索」；拿来就地改名时不画。
+    /// 空着时画的提示，没设时不画。
     placeholder: Option<SharedString>,
     /// 报给辅助工具的名字，比如设置项的标题；界面上不画。
     label: Option<SharedString>,
@@ -665,7 +665,7 @@ impl EntityInputHandler for InputState {
     }
 }
 
-/// 输入框的外框（照 shadcn 的 `Input`），里面是 `InputState`：高 28 点、左右留白 8px、圆角 6px，终端背景色
+/// 输入框的外框（照 shadcn 的 `Input`），里面是 `InputState`：带圆角和左右留白，终端背景色
 /// 的底、前景色的字，字号跟着外面的。边框：出错（`invalid`）时是 `Theme::destructive`，
 /// 有焦点时是 `Theme::ring`，平时是 `Theme::input`。`prefix` 画在文字前面，子元素画在文字后面。
 ///

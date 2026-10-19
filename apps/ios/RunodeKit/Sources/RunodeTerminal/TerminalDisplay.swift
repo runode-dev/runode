@@ -23,9 +23,7 @@ public protocol TerminalDisplay: AnyObject {
     func terminalDidReset(_ terminal: VTerminal?, settings: TermSettings)
     /// VT 的内容变了（喂了输出、改了尺寸）；画的一方自己决定什么时候刷新。
     func terminalContentDidChange()
-    /// 换了主题。
     func terminalSettingsDidChange(_ settings: TermSettings)
-    /// 程序响了铃。
     func terminalDidRingBell()
     /// 尺寸方式换了：适配手机时网格马上会变成正好铺满视图的大小，视图回到不缩放；跟随电脑时按可读的
     /// 最小字号缩放，超出的部分横向平移。

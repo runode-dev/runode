@@ -259,7 +259,6 @@ impl WindowView {
         })
     }
 
-    /// 交给看板的 `Input`。
     fn kanban_input(&self, resident: bool, cx: &App) -> Input {
         Input {
             workspaces: self

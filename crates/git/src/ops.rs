@@ -103,7 +103,7 @@ fn run_for<S: AsRef<OsStr>>(
     command
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
-        // 新版 git 不再给「hint:」那些建议；本地化后的提示不以「hint:」开头，滤不掉。
+        // 关掉「hint:」建议：本地化后的提示不以「hint:」开头，事后滤不掉。
         .env("GIT_ADVICE", "0")
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())

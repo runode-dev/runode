@@ -8,7 +8,6 @@ use runode_types::input::parse_key_list;
 
 use crate::{help, local_time::LocalTime, select::Selector};
 
-/// 一条命令。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Command {
     /// 打印说明：没给话题是总览，给了是 `help::PAGES` 里那一页。
@@ -120,7 +119,6 @@ pub(crate) enum Command {
     },
 }
 
-/// `completions` 支持的 shell。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Shell {
     Bash,
@@ -142,7 +140,6 @@ pub(crate) enum Timing {
 pub(crate) enum Text {
     /// 参数里给的，可能为空（只按键或回车）。
     Given(String),
-    /// 从标准输入读。
     Stdin,
 }
 

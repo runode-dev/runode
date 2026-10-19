@@ -846,7 +846,6 @@ impl TerminalView {
                 early.push(event);
             }
         }
-        // 结束留给读事件的任务（或者回到显示时等屏幕的地方）：现在还没有谁订阅这个视图的事件。
         view.pending_end = if ended_early { early.pop() } else { None };
         if !early.is_empty() {
             view.handle_link_events(early, window, cx);

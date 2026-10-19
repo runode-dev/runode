@@ -702,7 +702,6 @@ impl Pty {
         self.shell = None;
     }
 
-    /// 已经启动了 shell。
     pub fn started(&self) -> bool {
         self.pending.is_none()
     }

@@ -191,7 +191,6 @@ impl Peer {
         }
     }
 
-    /// 等到输出里出现 `needle`。
     pub fn wait_for_output(&self, channel: u32, needle: &[u8]) -> Vec<u8> {
         self.wait(channel, |_, output| contains(output, needle))
     }
@@ -328,7 +327,6 @@ impl Peer {
         }
     }
 
-    /// 列会话。
     pub fn sessions(&mut self) -> Vec<runode_protocol::SessionInfo> {
         self.send(&ClientMsg::ListSessions);
         match self.reply() {

@@ -35,7 +35,6 @@ impl TerminalView {
         if session.paste(&text, false) == PasteResult::Done {
             return;
         }
-        // 可能直接执行命令的粘贴先让用户确认。
         let detail = rust_i18n::t!("paste.detail");
         let answer = window.prompt(
             PromptLevel::Warning,

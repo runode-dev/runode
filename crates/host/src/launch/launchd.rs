@@ -117,7 +117,6 @@ fn unavailable(message: &str) -> Error {
     Error::Unavailable(io::Error::other(message))
 }
 
-/// `path` 能不能执行。
 fn access_executable(path: &Path) -> io::Result<()> {
     let path = CString::new(path.as_os_str().as_bytes())?;
     // SAFETY: 路径以 NUL 结尾，调用期间活着。

@@ -175,7 +175,6 @@
         }
     }
 
-    /// 取景框的四个角。
     private struct ReticleCorners: Shape {
         var length: CGFloat = 32
 

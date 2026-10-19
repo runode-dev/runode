@@ -33,7 +33,7 @@ impl Switch {
     }
 }
 
-/// 把 `el` 画成轨道：34×20，四周留 2px，钮 16px。
+/// 把 `el` 画成轨道，里面一颗圆钮。
 fn track<E: Styled + ParentElement + FluentBuilder>(el: E, checked: bool, color: gpui::Hsla) -> E {
     el.w(px(34.))
         .h(px(20.))

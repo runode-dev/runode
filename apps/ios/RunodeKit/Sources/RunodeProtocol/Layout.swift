@@ -30,7 +30,7 @@ public struct WorkspaceLayout: Hashable, Sendable, Decodable {
     public var index: UInt32
     /// 侧栏里显示的名字。
     public var name: String?
-    /// 工作区的目录；旧的电脑不报。
+    /// 工作区的目录；宿主没报时为空。
     public var dir: String?
     /// 是窗口当前显示的工作区。
     public var active: Bool

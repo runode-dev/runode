@@ -1,5 +1,5 @@
 //! 管终端会话的宿主：每个会话的 PTY 和权威的那份 VT（`HostSession`）都在这里，一个会话一个
-//! 线程。前端（桌面的界面、命令行，以后的 TUI）连上来，收 PTY 输出和状态，发输入和请求。
+//! 线程。前端（桌面的界面、命令行）连上来，收 PTY 输出和状态，发输入和请求。
 //!
 //! 前端一律经一条连接按 `runode_protocol` 的帧和消息说话，见 `server`：别的进程连 `Host::listen`
 //! 开的 Unix socket，同一个进程里的桌面用 `Host::connect_pair` 拿到的一对 socket 的一端，两条路
@@ -85,7 +85,6 @@ struct Shared {
     /// 这个构建编的快照的格式版本，见 `HostMsg::Welcome`。
     snapshot_format: u16,
     registry: Mutex<Registry>,
-    /// 下一条连接的编号。
     next_connection: AtomicU64,
     /// 之后启动的 shell 另外设的环境变量，见 `Host::set_env`。
     env: Mutex<Vec<(String, OsString)>>,
@@ -237,7 +236,6 @@ impl Shared {
         })
     }
 
-    /// 结束所有会话。
     fn kill_all(&self) {
         let handles: Vec<_> = self.registry().sessions.drain().map(|(_, handle)| handle).collect();
         for handle in handles {

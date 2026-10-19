@@ -172,7 +172,7 @@ impl TextareaState {
         cx.notify();
     }
 
-    /// 高度随内容在 `min..=max` 行之间变，超过 `max` 行时竖着滚动，始终让光标露出来。默认 1..=10。
+    /// 高度随内容在 `min..=max` 行之间变，超过 `max` 行时竖着滚动，始终让光标露出来。
     pub fn set_line_limits(&mut self, min: usize, max: usize, cx: &mut Context<Self>) {
         self.min_lines = min.max(1);
         self.max_lines = max.max(self.min_lines);
@@ -532,7 +532,7 @@ impl TextareaState {
 }
 
 /// 多行输入框的外框（照 shadcn 的 `Textarea`），里面是 `TextareaState`：和单行的 `Input` 一样的边框、底色、
-/// 圆角和左右留白，上下留白 6px，高度跟着行数。子元素画在文字后面。调用方接着写的样式盖在这些上面，见
+/// 圆角和左右留白，另有上下留白，高度跟着行数。子元素画在文字后面。调用方接着写的样式盖在这些上面，见
 /// `Input`。
 #[derive(IntoElement)]
 pub struct Textarea {

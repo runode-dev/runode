@@ -151,7 +151,7 @@ fn limits_how_deep_it_looks() {
     // 被忽略的目录里的仓库不找。
     repo.nested("vendor/pkg");
     let repos = read_all(&repo);
-    // 往下找三层：a、a/b、a/b/c，第四层的 a/b/c/d 不读。
+    // 往下找的层数有上限：a、a/b、a/b/c 读，再下一层的 a/b/c/d 不读。
     assert_eq!(
         layout(&repos),
         [

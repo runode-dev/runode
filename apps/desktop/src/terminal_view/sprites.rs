@@ -74,8 +74,6 @@ pub fn shapes(text: &str, m: Metrics) -> Option<Vec<Shape>> {
     Some(out)
 }
 
-// ---- 绘制 ----
-
 /// 把 `shapes` 画在左上角为 `origin` 的单元格里。原点先对齐到设备像素，
 /// 整像素矩形才能和设备像素网格重合。
 pub fn paint(shapes: &[Shape], origin: Point<Pixels>, scale: f32, color: Hsla, window: &mut Window) {

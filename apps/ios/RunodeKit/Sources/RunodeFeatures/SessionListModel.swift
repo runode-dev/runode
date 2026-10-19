@@ -182,7 +182,6 @@ public final class SessionListModel {
     /// 正在列的目录：取请求编号之前就记上，同一个目录不会同时要两次。
     @ObservationIgnored private var listingDirs: Set<String> = []
 
-    /// 在等回话的新开请求。
     private struct PendingSpawn {
         var req: UInt32
         /// 发着 `Open` 时预先取好的、退回 `Spawn` 用的编号；新建工作区、已经退回去了时为空。
@@ -707,8 +706,8 @@ public final class SessionListModel {
             isSpawning = false
             refresh()
             if let command {
-                // ponytail: 不等提示符就发，靠伪终端把输入攒着等 shell 读；shell 启动时清掉预输入的话
-                // 命令会丢，那时改成等这个会话的 meta 报 shell 在提示符上再发。
+                // shortcut: 不等提示符就发，靠伪终端把输入攒着等 shell 读，shell 启动时清掉预输入的话
+                // 命令会丢，那时改成等这个会话的 meta 报 shell 在提示符上再发
                 link.send(.paste(req: command.paste, id: id, text: command.text))
                 link.send(.sendKeys(req: command.enter, id: id, keys: ["enter"]))
             }

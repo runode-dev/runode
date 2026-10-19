@@ -349,7 +349,6 @@ import Testing
         #expect(link.sent.suffix(2) == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
     }
 
-    /// 适配着的时候 `Resync`：宿主还记着这条连接要过的尺寸，不带尺寸重新订阅，也不再发 `Focus`。
     /// `Resync` 后重新连时宿主说这条连接还积压着、不接订阅：过一会儿再连，不停在「连接中」。
     @Test func resyncRetriesWhileTheConnectionIsBackedUp() async throws {
         let model = live()
@@ -362,6 +361,7 @@ import Testing
         #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
     }
 
+    /// 适配着的时候 `Resync`：宿主还记着这条连接要过的尺寸，不带尺寸重新订阅，也不再发 `Focus`。
     @Test func resyncWhileFittingDoesNotClaimAgain() {
         let model = followingModel()
         model.setSizePreference(.fitPhone)

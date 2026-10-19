@@ -541,7 +541,6 @@ fn decoding_keeps_the_scrollback_limits() {
 /// 字节上限很紧（不到三个 page，约 1.2 MB；比如 libghostty 自己默认的 10000 字节）时，解码会
 /// 丢掉一大截回滚历史：80 列、700 行带样式的输出，651 行历史解出来只剩几十行，多半是解码后
 /// 按字节上限又剪了一遍。默认的 10 MiB 下不会这样，见 `decoding_keeps_a_full_scrollback`。
-/// 哪天这里不成立了，说明 libghostty 修好了，删掉这个测试。
 #[test]
 fn decoding_drops_history_under_a_tight_byte_limit() {
     let mut source = vt::new_terminal(size(80, 50)).unwrap();
@@ -772,7 +771,7 @@ fn a_session_from_a_snapshot_applies_the_theme_like_the_host() {
 #[test]
 fn scrollback_pruning_diverges_after_a_snapshot() {
     let data = long_scrollback();
-    // 切在哪里会分叉要看 page 怎么划分；这个切点上，原来那份最后留 757 行历史，解出来的留 885 行。
+    // 切在哪里会分叉要看 page 怎么划分；这个切点上两份留下的历史行数不同。
     let cut = data.len() / 10;
     let new_terminal = || {
         let mut terminal = vt::new_terminal(size(LONG_SCROLLBACK_COLS, 6)).unwrap();

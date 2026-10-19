@@ -23,7 +23,7 @@ use crate::{
 const MENU_MARGIN: f32 = 8.;
 /// 按钮下面弹出的菜单离按钮这么远。
 const DROPDOWN_GAP: f32 = 4.;
-/// 菜单的宽度，按基准字号 12 的点数写，跟界面字号一起缩放。
+/// 菜单的宽度，按基准字号下的点数写，跟界面字号一起缩放。
 const MENU_WIDTH: f32 = 240.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
@@ -547,7 +547,7 @@ pub trait MenuHost: Sized + 'static {
                 .children(
                     item.shortcut
                         .clone()
-                        // 命令的说明可能很长，最多占一行的六成，多了截断。
+                        // 命令的说明可能很长，限定它占一行的比例，多了截断。
                         .map(|shortcut| {
                             div()
                                 .flex_none()

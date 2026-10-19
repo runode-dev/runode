@@ -334,7 +334,6 @@ fn still_listed(ids: &[SessionId], sessions: &[SessionInfo]) -> Vec<SessionId> {
     ids.iter().copied().filter(|id| sessions.iter().any(|session| session.id == *id)).collect()
 }
 
-/// 结束这些会话。
 fn end_sessions(ids: &[SessionId], cx: &mut App) {
     let link = host_client::link();
     for id in ids {

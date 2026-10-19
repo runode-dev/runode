@@ -303,7 +303,6 @@ public final class TerminalModel {
         keyboardVisible = visible
     }
 
-    /// 唤起键盘。
     public func showKeyboard() {
         display?.terminalShowKeyboard()
     }
@@ -547,7 +546,7 @@ public final class TerminalModel {
 /// 手机按一行发一个事件会被放大好几倍，所以这里按同样的规则算每个事件会滚几行，攒够了才发，折回时
 /// 等过那段时间。
 ///
-/// ponytail: 照抄了 Claude Code 的常量，假定用户没改滚动速度、没关加速；它改了算法这里要跟着改。
+/// shortcut: 照抄 Claude Code 的常量，假定用户没改滚动速度、没关加速，它改了算法时这里要跟着改
 struct ClaudeWheelPacer {
     /// 还没发出去的行数，负数往上。
     private var pending = 0

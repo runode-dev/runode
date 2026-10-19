@@ -47,7 +47,6 @@ impl TerminalView {
             .map_or(f32::from(self.font_size) * 0.6, |a| f32::from(a.width));
         let ascent = text_system.ascent(font_id, self.font_size);
         let descent = text_system.descent(font_id, self.font_size).abs();
-        // 行高取字体本身的 ascent + descent，再按配置的 adjust-cell-height 增减。
         let natural = f32::from(ascent) + f32::from(descent);
         let height = match self.config.adjust_cell_height {
             Some(CellHeight::Pixels(delta)) => natural + delta,
@@ -204,7 +203,6 @@ pub(super) fn paint_frame(
                 ));
             }
 
-            // 字形和装饰线。
             let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
             for (y, row) in rows() {
                 for (x, cell) in row.iter().enumerate() {
@@ -215,7 +213,6 @@ pub(super) fn paint_frame(
                     let bg = cell.bg.unwrap_or(frame.background);
                     let mut fg = if cell.attrs.faint { faint(cell.fg, bg) } else { cell.fg };
                     let mut attrs = cell.attrs;
-                    // 按着 ⌘ 悬停的链接加下划线。
                     if let (Some(link), Ok(y)) = (&view.hovered_link, u16::try_from(y))
                         && link.contains(x, y)
                     {

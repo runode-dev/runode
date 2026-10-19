@@ -1,6 +1,5 @@
 internal import GhosttyVt
 
-/// 修饰键。
 public struct KeyModifiers: OptionSet, Sendable, Hashable {
     public let rawValue: UInt8
     public init(rawValue: UInt8) { self.rawValue = rawValue }

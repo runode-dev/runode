@@ -143,12 +143,10 @@ impl Peers {
         self.connections.len()
     }
 
-    /// 有桌面的界面连着。
     pub(crate) fn has_desktop(&self) -> bool {
         !self.desktops.is_empty()
     }
 
-    /// 连着几个桌面的界面。
     pub(crate) fn desktop_count(&self) -> u32 {
         u32::try_from(self.desktops.len()).unwrap_or(u32::MAX)
     }

@@ -284,7 +284,6 @@ impl TreeState {
     pub(crate) fn collapse_all(&mut self, root: &Path, filter: TreeFilter) {
         self.expanded.retain(|dir| !dir.starts_with(root));
         self.rebuild_rows(root, filter);
-        // 选中的行跟着收起来看不见了，不留着。
         if self.selected_row().is_none() {
             self.selected = None;
         }
@@ -438,7 +437,6 @@ impl TreeState {
                 });
             }
         }
-        // 终端换了目录，文件树跟过去。
         if let Some(dir) = reveal {
             self.reveal_dir(&dir, &root, filter);
             changed = true;

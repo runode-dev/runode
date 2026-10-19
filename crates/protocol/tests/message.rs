@@ -38,7 +38,6 @@ fn meta() -> SessionMeta {
     }
 }
 
-/// 一个窗口、两个工作区，当前标签里左右两个分屏。
 fn shell_report(path: &[u8]) -> ShellReport {
     use std::os::unix::ffi::OsStrExt as _;
 
@@ -48,6 +47,7 @@ fn shell_report(path: &[u8]) -> ShellReport {
     }
 }
 
+/// 一个窗口、两个工作区，当前标签里左右两个分屏。
 fn layout() -> Vec<WindowLayout> {
     let pane = |index, id, x, focused| PaneLayout {
         index,
@@ -97,7 +97,6 @@ fn tasks() -> Vec<TaskSource> {
     ]
 }
 
-/// 经过帧编码、解码再读回来。
 fn sample_todo() -> Todo {
     Todo {
         id: "0000abcd".into(),
@@ -125,6 +124,7 @@ fn todo_spec() -> TodoSpec {
     }
 }
 
+/// 经过帧编码、解码再读回来。
 fn through_frame<T: Serialize + serde::de::DeserializeOwned>(message: &T) -> T {
     let frame = Frame::control(message).unwrap();
     let mut stream = Vec::new();
@@ -492,14 +492,14 @@ fn missing_and_unknown_fields_are_tolerated() {
             device: None,
         }
     );
-    // 旧客户端的 `Spawn` 还带着已经删掉的 `env`，照样读。
+    // `Spawn` 里多出来的 `env` 忽略。
     let spawn: ClientMsg = serde_json::from_str(&format!(
         r#"{{"type":"spawn","req":1,"size":{},"cwd":null,"integration":"detect","env":[]}}"#,
         serde_json::to_string(&size()).unwrap()
     ))
     .unwrap();
     assert!(matches!(spawn, ClientMsg::Spawn { req: 1, .. }));
-    // 旧的界面报布局变了时不带布局。
+    // 不带布局的 `LayoutChanged`。
     let changed: ClientMsg = serde_json::from_str(r#"{"type":"layout_changed"}"#).unwrap();
     assert_eq!(changed, ClientMsg::LayoutChanged { windows: None });
     // 必填字段缺了读不了。
@@ -568,9 +568,8 @@ fn open_fills_in_defaults() {
     assert_eq!(serde_json::from_str::<HostMsg>(&serde_json::to_string(&opened).unwrap()).unwrap(), opened);
 }
 
-/// 第 3 版协议新加的字段，旧的一方发来的消息里没有时的读法：`Spawn` 照旧当场启动、用用户的
-/// shell；`ReadScreen` 读屏幕而不是命令输出；`Attached`、`ScreenText`、`SessionInfo` 缺的按空、
-/// 假读。
+/// 这些字段缺了时的读法：`Spawn` 当场启动、用用户的 shell；`ReadScreen` 读屏幕而不是命令输出；
+/// `Attached`、`ScreenText`、`SessionInfo` 缺的按空、假读。
 #[test]
 fn version_3_fields_have_old_defaults() {
     let spawn: ClientMsg = serde_json::from_str(&format!(
@@ -665,8 +664,7 @@ fn layouts_read_with_defaults() {
     );
 }
 
-/// 第 4 版协议新加的字段，旧的一方发来的消息里没有时的读法：前端没报设备名，宿主不会交接，
-/// 会话没有 owner。
+/// 这些字段缺了时的读法：前端没报设备名，宿主不会交接，会话没有 owner。
 #[test]
 fn version_4_fields_have_old_defaults() {
     let hello: ClientMsg =
@@ -687,8 +685,7 @@ fn version_4_fields_have_old_defaults() {
     assert_eq!(owner, HostMsg::SizeOwner { id: ID, mine: false, owner: None });
 }
 
-/// 早先的 `Handoff` 是不带字段的，读成格式范围 0..=0，哪个格式都不在里面；`HandoffAbort` 缺了
-/// 原因读成空的。
+/// 不带字段的 `Handoff` 读成格式范围 0..=0，哪个格式都不在里面；`HandoffAbort` 缺了原因读成空的。
 #[test]
 fn bare_handoff_reads_as_an_empty_range() {
     let handoff: ClientMsg = serde_json::from_str(r#"{"type":"handoff"}"#).unwrap();

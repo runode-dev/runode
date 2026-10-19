@@ -70,7 +70,6 @@ fn list(peer: &mut Peer) -> Vec<Todo> {
     }
 }
 
-/// 任务和定时。
 fn board_state(peer: &mut Peer) -> (Vec<Todo>, Vec<Schedule>) {
     peer.send(&ClientMsg::ListTodos { req: 2 });
     loop {
@@ -93,7 +92,6 @@ fn sessions(peer: &mut Peer) -> Vec<SessionInfo> {
     }
 }
 
-/// 等到 `done` 成立。
 fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(20);
     while !done() {

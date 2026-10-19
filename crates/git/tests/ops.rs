@@ -222,7 +222,7 @@ fn pending_diff_ignores_external_diff_color_and_textconv() {
     assert!(!staged.contains("EXTERNAL") && !staged.contains("TEXTCONV") && !staged.contains('\x1b'), "{staged}");
 }
 
-/// 比 `MAX_DIFF_BYTES`（1MB）大的文件只报一行二进制，补丁不会被一个大文件撑满。
+/// 比 `MAX_DIFF_BYTES` 大的文件只报一行二进制，补丁不会被一个大文件撑满。
 #[test]
 fn pending_diff_reports_big_files_as_binary() {
     let repo = TestRepo::new("ops-pending-big");

@@ -223,7 +223,7 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
     if kind == Kind::App && login_item::available() {
         bundle()?;
         login_item::register()?;
-        // macOS 12 时写的 LaunchAgent 删掉，不然登录时 app 开两回。
+        // 已有的 LaunchAgent 删掉，不然登录时 app 开两回。
         remove_if_there(&path)?;
         return Ok(None);
     }

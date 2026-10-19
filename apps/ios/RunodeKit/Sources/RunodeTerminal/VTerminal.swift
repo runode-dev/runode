@@ -672,7 +672,6 @@ public final class VTerminal {
     }
 }
 
-/// 新建 VT 失败。
 public enum VTerminalError: Error, Sendable {
     case creationFailed
 }

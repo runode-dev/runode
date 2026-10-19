@@ -23,7 +23,7 @@ pub struct Branch {
 /// `name` 能不能用作新分支的名字，按 `git check-ref-format --branch` 的规矩。不看哪个仓库，在根目录里跑：
 /// 不读进程当前目录所在仓库的配置，当前目录被删掉了也照常判断。
 pub fn valid_branch_name(name: &str) -> bool {
-    // `@{-1}` 这类写法 git 会当成「上一个分支」去解析，`HEAD` 新版 git 也不让用。
+    // `@{-1}` 这类写法 git 会当成「上一个分支」去解析，`HEAD` 也不能用。
     if name.is_empty() || name.starts_with('-') || name.contains("@{") || name == "HEAD" {
         return false;
     }

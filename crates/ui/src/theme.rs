@@ -123,7 +123,7 @@ impl Theme {
 }
 
 /// 从配置的调色板（`(序号, 颜色)`，后写的算数）取 ANSI 16 色，`Theme::new` 用。没配置的序号用
-/// 默认配色里的；强调色（4）和出错色（1）没配置时另有缺省，和设置页一样。
+/// 默认配色里的；强调色（4）和出错色（1）没配置时另有缺省。
 pub fn ansi_colors(palette: &[(u8, Rgb)]) -> [Rgb; 16] {
     let mut ansi = runode_types::theme::ANSI;
     ansi[1] = DESTRUCTIVE_FALLBACK;
@@ -221,7 +221,7 @@ mod tests {
         assert!(!Theme::new(DARK.0, DARK.1, palette()).is_light);
     }
 
-    /// 调色板里后写的算数；强调色和出错色没配置时和设置页一样用缺省的蓝和红。
+    /// 调色板里后写的算数；强调色和出错色没配置时用缺省的蓝和红。
     #[test]
     fn ansi_colors_follow_the_palette() {
         let ansi = ansi_colors(&[(2, Rgb(1, 1, 1)), (2, Rgb(2, 2, 2)), (200, Rgb(3, 3, 3))]);

@@ -65,7 +65,7 @@ pub(crate) use clipboard::CLIPBOARD_READ_PATIENCE;
 /// 不停下。
 const PTY_BACKLOG_BYTES: usize = 1024 * 1024;
 /// 会话线程一次最多把这么多字节相邻的 PTY 输出合成一块处理，见 `coalesce`。处理一块时不看
-/// 轮询的时刻和 `Handle::killed`，所以块的大小也是它们最多被耽搁多久：发布构建里 VT 喂 64 KiB
+/// 轮询的时刻和 `Handle::killed`，所以块的大小也是它们最多被耽搁多久：发布构建里 VT 喂一整块
 /// 很快；开发构建的 libghostty 是 Zig 的 Debug 构建，喂得极慢，前台进程和结束会话都跟着拖住，
 /// 所以开发构建合得小。
 const COALESCE_BYTES: usize = if cfg!(debug_assertions) { 4 * 1024 } else { 64 * 1024 };
@@ -535,7 +535,6 @@ fn release(pty: &mut Pty) {
 struct Runner {
     id: SessionId,
     session: HostSession,
-    /// 连着的前端。
     subscribers: Vec<Subscriber>,
     /// 带着屏幕连着的连接，有资格决定尺寸，见 `Viewer`。
     viewers: Vec<Viewer>,

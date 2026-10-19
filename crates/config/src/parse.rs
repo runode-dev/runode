@@ -438,7 +438,6 @@ fn parse_timeout(value: &str) -> Result<Option<Duration>, String> {
     Duration::try_from_secs_f32(secs).map(Some).map_err(|_| "expected a non-negative number of seconds".into())
 }
 
-/// 大于 0 的数。
 fn parse_positive(value: &str) -> Result<f32, String> {
     Some(parse_f32(value)?).filter(|n| *n > 0.).ok_or_else(|| "expected a positive number".into())
 }

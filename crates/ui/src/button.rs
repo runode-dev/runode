@@ -36,18 +36,18 @@ pub enum ButtonVariant {
 /// 按钮的尺寸。文字档的高度跟着界面字号（`scaled`），图标档是定死的方块。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonSize {
-    /// 高 26 点，正文字号。
+    /// 正文字号。
     #[default]
     Default,
-    /// 高 22 点，小一号的字。
+    /// 比 `Default` 矮，小一号的字。
     Sm,
-    /// 高 36 点，大一号的字。
+    /// 比 `Default` 高，大一号的字。
     Lg,
-    /// 24px 见方，图标 14px。
+    /// 图标档里最大的方块。
     Icon,
-    /// 20px 见方，图标 14px。
+    /// 图标档里中等的方块。
     IconSm,
-    /// 16px 见方，图标 12px。
+    /// 图标档里最小的方块。
     IconXs,
 }
 
@@ -289,7 +289,7 @@ impl Toggle {
         self
     }
 
-    /// 图标的边长，默认 16px。
+    /// 图标的边长，不写时用默认值。
     pub fn icon_size(mut self, size: f32) -> Self {
         self.icon_size = size;
         self

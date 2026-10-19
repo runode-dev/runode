@@ -823,13 +823,13 @@ mod tests {
         assert_eq!(out, "a b\n");
     }
 
-    /// 到时限连 agent 拉起的子进程一起杀掉；agent 自己退了、后台子进程还拿着输出管道时，到时限也不再等。
     #[test]
     fn asks_the_login_shell_for_its_path() {
         let path = login_shell_path("sh", &std::env::temp_dir()).unwrap();
         assert!(std::env::split_paths(&path).any(|dir| dir == Path::new("/bin")));
     }
 
+    /// 到时限连 agent 拉起的子进程一起杀掉；agent 自己退了、后台子进程还拿着输出管道时，到时限也不再等。
     #[test]
     fn kills_the_whole_process_group_at_the_deadline() {
         let dir = std::env::temp_dir();

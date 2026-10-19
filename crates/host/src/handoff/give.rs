@@ -69,7 +69,6 @@ pub(crate) fn give(
     let ids: Vec<SessionId> = giving.handles.iter().map(|(id, _)| *id).collect();
     tracing::info!("handing {} sessions over to a new host", ids.len());
 
-    // 各个会话并行地停下来、交出状态。
     let Ready { handed, gone } = match prepare(&giving.handles) {
         Ok(ready) => ready,
         Err(reason) => {
