@@ -1,5 +1,6 @@
 #!/bin/bash
 # 发版：写好中英双语的更新说明，改版本号、提交、打标签、推上去，之后由 release.yml 构建和发布。
+# main 的 CI 没过时不发，还在跑就先等它跑完。
 #
 # 更新说明存成 docs/releases/vX.Y.Z.md，和版本号一起提交；release.yml 发 Release 时拿它当说明，
 # 没有这个文件时（比如在 Actions 页面手动发版）退回 GitHub 自动生成的说明。
@@ -55,14 +56,19 @@ declined="docs/releases/$tag.draft.md"
 git fetch -q --tags origin main
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "本地 main 和 origin/main 不一致，先同步"
 ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "标签 $tag 已经有了"
+command -v gh >/dev/null || die "要装 gh：发版前要查 main 的 CI 和有没有发版在跑"
+# CI 没过时不发：标签一推上去就收不回来，等发版工作流里的 CI 挂了才知道就晚了。看 main 上最近一次 CI，
+# 没跑完就等它：只改了 CI 忽略的文件（文档、iOS 端这类）的提交不跑 CI，最近一次跑的就是管着 HEAD 的。
+# shortcut: 刚推上去、CI 还没建出运行的那几秒里看到的是上一次，推完等 CI 开跑再发。
+run=$(gh run list --workflow ci.yml --branch main --limit 1 --json databaseId --jq '.[0].databaseId // empty') \
+  || die "没能用 gh 查 main 的 CI"
+[[ -n "$run" ]] || die "main 上还没跑过 CI"
+echo "等 main 的 CI 跑完（gh run view $run）……" >&2
+gh run watch "$run" --exit-status >/dev/null 2>&1 || die "main 最近一次 CI 没过（gh run view $run），修好再发"
 # 发版工作流的并发组 `release` 里新来的会顶掉排着队的那次，推了标签却没有 Release，所以有发版在跑或排队时不推。
-if command -v gh >/dev/null; then
-  busy=$(gh run list --workflow release.yml --limit 20 --json status --jq '[.[] | select(.status != "completed")] | length') \
-    || die "没能用 gh 查发版有没有在跑"
-  [[ "$busy" == 0 ]] || die "有 $busy 次发版在跑或排队，等它发完再发"
-else
-  echo "没装 gh，没查有没有发版在跑；有的话这次推上去可能顶掉排着队的那次" >&2
-fi
+busy=$(gh run list --workflow release.yml --limit 20 --json status --jq '[.[] | select(.status != "completed")] | length') \
+  || die "没能用 gh 查发版有没有在跑"
+[[ "$busy" == 0 ]] || die "有 $busy 次发版在跑或排队，等它发完再发"
 
 # 上个标签以来某一类提交的标题，去掉前缀，一行一条。
 commits() {
