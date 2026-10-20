@@ -605,7 +605,7 @@ impl PreviewPanel {
                     let style =
                         runode_preview::Style { color: runode_preview::Color::Foreground, bold: false, italic: false };
                     let words: Vec<_> = words.iter().map(|range| Span { range: range.clone(), style }).collect();
-                    let color = bg.mix(if kind == LineKind::Added { ADDED } else { REMOVED }, 0.6);
+                    let color = bg.mix(if kind == LineKind::Added { ADDED } else { REMOVED }, 0.32);
                     let emphasis = HighlightStyle { background_color: Some(hsla(color)), ..HighlightStyle::default() };
                     let words = runode_preview::display_line(text, &words, MAX_COLUMNS).spans;
                     runs = combine_highlights(runs, words.into_iter().map(|span| (span.range, emphasis))).collect();
