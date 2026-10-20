@@ -1,20 +1,34 @@
 //! 预览栏的编辑模式：普通标签里的文本文件换成多行输入框来改，⌘S 存回磁盘。改过没存的标签名后面
-//! 带一个圆点，关掉它或退出编辑之前先问一句；文件在磁盘上被别人改过时存之前也先问。
+//! 带一个圆点，关掉它或退出编辑之前先问一句；文件在磁盘上被别人改过时存之前也先问。语法高亮在停下
+//! 打字 `REHIGHLIGHT_DELAY` 之后在后台对全文重算，算好之前输入框里的样式段跟着改动挪。
 //!
 //! 从 Dock 退出、注销、关机这类系统发起的退出弹不了框，没存的修改会丢。
 
-use std::{fs, io, path::Path, time::SystemTime};
+use std::{
+    cell::RefCell,
+    fs, io,
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, SystemTime},
+};
 
 use gpui::{
-    Context, Entity, Focusable as _, KeyDownEvent, PromptLevel, SharedString, Subscription, Window, prelude::*, px,
+    Context, Entity, Focusable as _, KeyDownEvent, PromptLevel, SharedString, Subscription, Task, Window, prelude::*,
+    px,
 };
 use runode_preview::MAX_TEXT_BYTES;
 
-use super::{BODY_PADDING, Loaded, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, file_stamp};
+use super::{BODY_PADDING, Loaded, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, body::highlight_style, file_stamp};
 use crate::ui::{
     textarea::{Textarea, TextareaEvent, TextareaState},
-    theme::ActiveTheme as _,
+    theme::{ActiveTheme as _, Theme},
 };
+
+/// 停下打字这么久之后重算语法高亮。
+const REHIGHLIGHT_DELAY: Duration = Duration::from_millis(200);
 
 pub(super) struct Editor {
     area: Entity<TextareaState>,
@@ -28,7 +42,19 @@ pub(super) struct Editor {
     stamp: Option<(u64, SystemTime)>,
     /// 正在存：这时再按 ⌘S 不管，免得两次写的先后乱了，旧的盖掉新的。
     saving: bool,
+    /// 正在算的语法高亮：换上新的任务时旧的随之丢掉，`highlight_cancel` 让后台已经开始的那次停下。
+    highlight: Task<()>,
+    highlight_cancel: Arc<AtomicBool>,
+    /// 编辑器所在窗口上一次画时的主题，高亮的颜色按它取：全局的主题在事件和任务里读到的可能是别的
+    /// 窗口的。画的时候发现变了就重算高亮。
+    palette: RefCell<Option<Theme>>,
     _changed: Subscription,
+}
+
+impl Drop for Editor {
+    fn drop(&mut self) {
+        self.highlight_cancel.store(true, Ordering::Relaxed);
+    }
 }
 
 /// 读进来要编辑的文件：原文去掉 BOM、换行统一成 `\n` 之前记下的样子，和读时的大小、修改时间。
@@ -158,6 +184,7 @@ impl PreviewPanel {
                         && let Some(editor) = this.editor_mut(&area)
                     {
                         editor.dirty = area.read(cx).text() != editor.saved;
+                        this.rehighlight(&area, Some(REHIGHLIGHT_DELAY), cx);
                         cx.notify();
                     }
                 });
@@ -167,13 +194,16 @@ impl PreviewPanel {
                 // 和输入框里换行统一过的文字比，`\r\n` 的文件刚读进来不算改过。
                 let saved = area.read(cx).text().to_owned();
                 preview.editor = Some(Editor {
-                    area,
+                    area: area.clone(),
                     saved,
                     dirty: false,
                     crlf: source.crlf,
                     bom: source.bom,
                     stamp: source.stamp,
                     saving: false,
+                    highlight: Task::ready(()),
+                    highlight_cancel: Arc::default(),
+                    palette: RefCell::new(None),
                     _changed: changed,
                 });
                 cx.notify();
@@ -183,6 +213,14 @@ impl PreviewPanel {
         .detach();
     }
 
+    fn editor(&self, area: &Entity<TextareaState>) -> Option<&Editor> {
+        self.workspaces
+            .values()
+            .flat_map(|tabs| &tabs.tabs)
+            .filter_map(|tab| tab.editor.as_ref())
+            .find(|editor| editor.area == *area)
+    }
+
     /// 输入框 `area` 所在的编辑器，在哪个 workspace 都找。
     fn editor_mut(&mut self, area: &Entity<TextareaState>) -> Option<&mut Editor> {
         self.workspaces
@@ -190,6 +228,63 @@ impl PreviewPanel {
             .flat_map(|tabs| &mut tabs.tabs)
             .filter_map(|tab| tab.editor.as_mut())
             .find(|editor| editor.area == *area)
+    }
+
+    /// 等 `delay` 之后在后台给编辑器 `area` 的全文重算语法高亮，算好时文字没再改过就换上；颜色按那时的主题。
+    /// 之前还没算完的那次作废。
+    fn rehighlight(&mut self, area: &Entity<TextareaState>, delay: Option<Duration>, cx: &mut Context<Self>) {
+        let Some(path) = self
+            .workspaces
+            .values()
+            .flat_map(|tabs| &tabs.tabs)
+            .find(|tab| tab.editor.as_ref().is_some_and(|editor| editor.area == *area))
+            .map(|tab| tab.path.clone())
+        else {
+            return;
+        };
+        let Some(editor) = self.editor_mut(area) else {
+            return;
+        };
+        editor.highlight_cancel.store(true, Ordering::Relaxed);
+        let cancel = Arc::new(AtomicBool::new(false));
+        editor.highlight_cancel = cancel.clone();
+        let area = area.clone();
+        editor.highlight = cx.spawn(async move |this, cx| {
+            if let Some(delay) = delay {
+                cx.background_executor().timer(delay).await;
+            }
+            let (text, version) = area.read_with(cx, |area, _| (area.text().to_owned(), area.version()));
+            let (lines, spans) = cx
+                .background_spawn({
+                    let cancel = cancel.clone();
+                    async move {
+                        let lines: Vec<String> = text.split('\n').map(str::to_owned).collect();
+                        let spans = runode_preview::highlight(&path, &lines, &cancel);
+                        (lines, spans)
+                    }
+                })
+                .await;
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            let palette = this
+                .read_with(cx, |this, _| this.editor(&area).and_then(|editor| editor.palette.borrow().clone()))
+                .ok()
+                .flatten();
+            let Some(palette) = palette else {
+                return;
+            };
+            let mut start = 0;
+            let mut highlights = Vec::new();
+            // 认不出语言时换上空的，去掉改动之前那种语言的颜色。
+            for (line, spans) in lines.iter().zip(spans.unwrap_or_default()) {
+                highlights.extend(spans.into_iter().map(|span| {
+                    (start + span.range.start..start + span.range.end, highlight_style(span.style, &palette))
+                }));
+                start += line.len() + 1;
+            }
+            area.update(cx, |area, cx| area.set_highlights(version, highlights, cx));
+        });
     }
 
     /// 问要不要放弃 `count` 个标签里没存的修改，答 0 是放弃。
@@ -285,6 +380,15 @@ impl PreviewPanel {
     ) -> impl IntoElement {
         let font_size = self.input.font_size;
         let area = editor.area.clone();
+        // 第一次画、换了主题时按这个窗口的主题重算高亮。
+        let theme = cx.theme();
+        if editor.palette.borrow().as_ref() != Some(theme) {
+            editor.palette.replace(Some(theme.clone()));
+            let (view, area) = (cx.entity().downgrade(), area.clone());
+            cx.defer(move |cx| {
+                view.update(cx, |this, cx| this.rehighlight(&area, None, cx)).ok();
+            });
+        }
         Textarea::new(&editor.area)
             .id("preview-editor")
             .flex_1()

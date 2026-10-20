@@ -15,8 +15,9 @@ use std::ops::Range;
 
 use gpui::{
     AccessibleAction, App, Bounds, Context, ElementId, Entity, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, KeyDownEvent, MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollWheelEvent, SharedString,
-    TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, actions, div, point, prelude::*, px,
+    Focusable, HighlightStyle, KeyDownEvent, MouseButton, MouseDownEvent, Pixels, Point, Render, Role,
+    ScrollWheelEvent, SharedString, TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, actions,
+    combine_highlights, div, point, prelude::*, px,
 };
 
 use gpui::accesskit::ActionData;
@@ -64,6 +65,9 @@ pub struct TextareaState {
     goal_x: Option<Pixels>,
     /// 正在组的字在 `content` 里的范围。
     marked: Option<Range<usize>>,
+    /// 文字的样式段（语法高亮），按 `content` 里的字节范围从前到后排、互不重叠。改文字时跟着挪，
+    /// 被改到的那部分去掉，等调用方按新文字重算后经 `set_highlights` 换上。
+    highlights: Vec<(Range<usize>, HighlightStyle)>,
     /// 去掉组字后的文字，即 `text()` 交出去的。
     committed: String,
     /// 空着时画的提示文字。
@@ -119,6 +123,7 @@ impl TextareaState {
             upstream: false,
             goal_x: None,
             marked: None,
+            highlights: Vec::new(),
             committed: String::new(),
             placeholder: SharedString::default(),
             label: None,
@@ -150,7 +155,7 @@ impl TextareaState {
         self.upstream = false;
         self.goal_x = None;
         self.marked = None;
-        self.content = text;
+        self.replace_all(text);
         // 文字没变时 `sync` 不发，这里照样发一次，调用方不必区分。
         if !self.sync(cx) {
             cx.emit(TextareaEvent::Changed);
@@ -162,6 +167,38 @@ impl TextareaState {
         self.set_text(text, cx);
         self.history = History::default();
         self.move_to(0, false, cx);
+    }
+
+    /// 文字的版本，每改一次（含输入法组字）变一次；交给 `set_highlights` 认出算样式段时的文字。
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// 换上按版本 `version` 的文字算的样式段（字节范围，从前到后不重叠）。文字已经又改过、或者正在组字时
+    /// 对不上，丢掉。
+    pub fn set_highlights(
+        &mut self,
+        version: u64,
+        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        cx: &mut Context<Self>,
+    ) {
+        if version != self.version || self.marked.is_some() {
+            return;
+        }
+        debug_assert!(highlights.iter().all(|(range, _)| range.end <= self.content.len()));
+        self.highlights = highlights;
+        cx.notify();
+    }
+
+    fn shift_highlights(&mut self, range: &Range<usize>, len: usize) {
+        shift_spans(&mut self.highlights, range, len);
+    }
+
+    /// 整个换掉文字（撤销、`set_text`）：只当中间不同的那段改了，样式段照常跟着挪，不整篇褪色。
+    fn replace_all(&mut self, text: String) {
+        let (range, len) = changed_middle(&self.content, &text);
+        self.shift_highlights(&range, len);
+        self.content = text;
     }
 
     /// 在光标处插入 `text`（有选区时换掉选区，可撤销），光标停在它后面。
@@ -258,7 +295,7 @@ impl TextareaState {
     }
 
     fn restore(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
-        self.content = snapshot.text;
+        self.replace_all(snapshot.text);
         self.selected = snapshot.selected;
         self.reversed = snapshot.reversed;
         self.upstream = false;
@@ -288,6 +325,7 @@ impl TextareaState {
 
     /// 把 `range` 换成 `new_text`，光标停在新文字后面。
     fn replace(&mut self, range: Range<usize>, new_text: &str, cx: &mut Context<Self>) {
+        self.shift_highlights(&range, new_text.len());
         self.content.replace_range(range.clone(), new_text);
         let end = range.start + new_text.len();
         self.selected = end..end;
@@ -347,30 +385,35 @@ impl TextareaState {
         index_at_point(&self.rows, at, metrics.line_height)
     }
 
-    /// 排版用的样式段：正在组的字加下划线。
+    /// 排版用的样式段：叠上 `highlights`，正在组的字加下划线。
     fn runs(&self, style: &TextStyle) -> Vec<TextRun> {
-        let run = |len: usize| TextRun {
+        let run = |style: &TextStyle, len: usize| TextRun {
             len,
             font: style.font(),
             color: style.color,
             background_color: None,
-            underline: None,
+            underline: style.underline,
             strikethrough: None,
         };
-        match &self.marked {
-            Some(marked) => [
-                run(marked.start),
-                TextRun {
-                    underline: Some(UnderlineStyle { color: Some(style.color), thickness: px(1.), wavy: false }),
-                    ..run(marked.len())
-                },
-                run(self.content.len() - marked.end),
-            ]
-            .into_iter()
-            .filter(|run| run.len > 0)
-            .collect(),
-            None => vec![run(self.content.len())],
+        let plain = TextStyle { underline: None, ..style.clone() };
+        let marked = self.marked.iter().map(|marked| {
+            let underline = UnderlineStyle { color: Some(style.color), thickness: px(1.), wavy: false };
+            (marked.clone(), HighlightStyle { underline: Some(underline), ..HighlightStyle::default() })
+        });
+        let mut runs = Vec::new();
+        let mut at = 0;
+        for (range, highlight) in combine_highlights(self.highlights.iter().cloned(), marked) {
+            if range.start > at {
+                runs.push(run(&plain, range.start - at));
+            }
+            runs.push(run(&plain.clone().highlight(highlight), range.len()));
+            at = range.end;
         }
+        if at < self.content.len() || runs.is_empty() {
+            runs.push(run(&plain, self.content.len() - at));
+        }
+        runs.retain(|run| run.len > 0);
+        runs
     }
 
     /// 内容比框高出多少，即最多能往下滚多少。
@@ -682,6 +725,7 @@ impl EntityInputHandler for TextareaState {
         if self.marked.is_none() {
             self.record(Some(EditKind::Insert));
         }
+        self.shift_highlights(&range, text.len());
         self.content.replace_range(range.clone(), text);
         self.marked = (!text.is_empty()).then(|| range.start..range.start + text.len());
         // 输入法给的选区相对于组字开头，按 UTF-16 计。
@@ -749,6 +793,36 @@ fn word_range_at(text: &str, offset: usize) -> Range<usize> {
     line.start + word.start..line.start + word.end
 }
 
+/// `range` 换成了 `len` 字节的新文字：后面的样式段跟着挪，和 `range` 重叠的部分去掉。
+fn shift_spans(spans: &mut Vec<(Range<usize>, HighlightStyle)>, range: &Range<usize>, len: usize) {
+    let shift = |at: usize| at - range.end + range.start + len;
+    let mut shifted = Vec::with_capacity(spans.len());
+    for (span, style) in spans.drain(..) {
+        if span.start < range.start {
+            shifted.push((span.start..span.end.min(range.start), style));
+        }
+        if span.end > range.end {
+            shifted.push((shift(span.start.max(range.end))..shift(span.end), style));
+        }
+    }
+    *spans = shifted;
+}
+
+/// `old` 换成 `new` 时中间不同的那段：返回它在 `old` 里的范围和在 `new` 里的长度，两头落在字的边界上。
+fn changed_middle(old: &str, new: &str) -> (Range<usize>, usize) {
+    let (a, b) = (old.as_bytes(), new.as_bytes());
+    let mut prefix = a.iter().zip(b).take_while(|(x, y)| x == y).count();
+    while !old.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+    let room = a.len().min(b.len()) - prefix;
+    let mut suffix = a.iter().rev().zip(b.iter().rev()).take(room).take_while(|(x, y)| x == y).count();
+    while !old.is_char_boundary(a.len() - suffix) {
+        suffix -= 1;
+    }
+    (prefix..a.len() - suffix, b.len() - prefix - suffix)
+}
+
 /// 换行统一成 `\n`：`\r\n` 和单独的 `\r` 都换掉。
 fn normalize_newlines(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
@@ -792,6 +866,26 @@ mod tests {
         assert_eq!(next_char(text, 5), 6);
         assert_eq!(next_char(text, text.len()), text.len());
         assert_eq!(previous_char(text, 0), 0);
+    }
+
+    /// 改文字时样式段跟着挪：前面的不动，后面的平移，被改到的那部分去掉，范围始终落在字的边界上。
+    #[test]
+    fn highlights_follow_edits() {
+        let style = HighlightStyle::default();
+        let mut highlights = vec![(0..3, style), (4..10, style), (12..14, style)];
+        shift_spans(&mut highlights, &(6..8), 1);
+        let ranges: Vec<_> = highlights.iter().map(|(range, _)| range.clone()).collect();
+        assert_eq!(ranges, [0..3, 4..6, 7..9, 11..13]);
+    }
+
+    /// 撤销这类整篇换掉的改动只算中间不同的那段，样式段不整篇丢掉；切开多字节字时退到字的边界。
+    #[test]
+    fn whole_text_changes_touch_only_the_middle() {
+        assert_eq!(changed_middle("let a = 1;", "let ab = 1;"), (5..5, 1));
+        assert_eq!(changed_middle("abc", "abc"), (3..3, 0));
+        assert_eq!(changed_middle("aa", "aaa"), (2..2, 1));
+        assert_eq!(changed_middle("中文", "中字"), (3..6, 3));
+        assert_eq!(changed_middle("x", ""), (0..1, 0));
     }
 
     #[test]
