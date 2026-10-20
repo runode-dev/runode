@@ -123,6 +123,7 @@ workspace:
   list: 工作區
   bell: 響過鈴
 close:
+  unsaved: "有 %{count} 個檔案改過還沒儲存，關閉後修改會遺失。"
   pane_title: 關閉這個終端機？
   tab_title: 關閉這個分頁？
   running: "%{programs} 還在執行，關閉後會隨之結束。"
@@ -938,6 +939,16 @@ preview:
   wrap: 自動換行
   show_source: 顯示原始碼
   show_rendered: 顯示排版
+  edit: 編輯
+  edit_failed: 無法編輯這個檔案
+  save_failed: 檔案沒有存下來
+  modified_tab: "%{name}（已修改）"
+  unsaved_title: "捨棄 %{count} 個檔案裡沒儲存的修改？"
+  unsaved_detail: 改過的內容會遺失。
+  discard_edits: 捨棄修改
+  changed_on_disk_title: 檔案在磁碟上被改過了
+  changed_on_disk_detail: 儲存會蓋掉在 runode 之外做的修改。
+  overwrite: 覆蓋
   alert:
     note: 備註
     tip: 提示

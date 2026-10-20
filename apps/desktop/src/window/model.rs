@@ -730,18 +730,26 @@ impl WindowView {
         self.activate_workspace(active, window, cx);
     }
 
-    /// 关掉第 `ix` 个 workspace；里面不止一个终端或者还有程序在跑时先问一句，免得误点关掉一整个项目。
+    /// 关掉第 `ix` 个 workspace；里面不止一个终端、还有程序在跑或者预览栏里有没存的修改时先问一句，免得误点
+    /// 关掉一整个项目。确认了就放弃那些修改。
     pub(super) fn confirm_close_workspace(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let workspace = &self.workspaces[ix];
         let count = workspace.pane_count();
         let id = workspace.id;
         let title = rust_i18n::t!("workspace.close_title", name = workspace.name);
-        let detail = (count > 1).then(|| rust_i18n::t!("workspace.close_detail", count = count));
+        let unsaved = self.preview.read(cx).unsaved(Some(id));
+        let detail = [
+            (count > 1).then(|| rust_i18n::t!("workspace.close_detail", count = count)),
+            (unsaved > 0).then(|| rust_i18n::t!("close.unsaved", count = unsaved)),
+        ];
+        let detail = detail.into_iter().flatten().collect::<Vec<_>>().join("\n\n");
         let running =
             running_programs(workspace.tabs.iter().flat_map(|tab| tab.panes.values().map(|(view, _)| view)), cx);
+        let detail = (!detail.is_empty()).then_some(detail);
         self.confirm_closing(&title, detail.as_deref(), &running, window, cx, move |this, window, cx| {
             // 问的时候 workspace 可能已经挪了位置或者自己关掉了。
             if let Some(ix) = this.workspaces.iter().position(|workspace| workspace.id == id) {
+                this.preview.update(cx, |panel, cx| panel.discard_edits(Some(id), cx));
                 this.close_workspace_at(ix, window, cx);
             }
         });

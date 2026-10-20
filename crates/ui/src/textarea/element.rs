@@ -106,7 +106,7 @@ impl Element for TextareaText {
         _: Option<&GlobalElementId>,
         _: Option<&gpui::InspectorElementId>,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) -> (LayoutId, ()) {
         // 高度要等知道宽度、折好行才定，所以量尺寸放到排版时做；那时文本样式已经出栈，先取好。
         let style = window.text_style();
@@ -115,12 +115,23 @@ impl Element for TextareaText {
         let area = self.area.clone();
         let mut layout = Style::default();
         layout.size.width = relative(1.).into();
+        if area.read(cx).fill {
+            layout.size.height = relative(1.).into();
+        }
         let id = window.request_measured_layout(layout, move |known, available, window, cx| {
             let width = known.width.or(match available.width {
                 AvailableSpace::Definite(width) => Some(width),
                 _ => None,
             });
             let area = area.read(cx);
+            if area.fill
+                && let Some(height) = known.height.or(match available.height {
+                    AvailableSpace::Definite(height) => Some(height),
+                    _ => None,
+                })
+            {
+                return size(width.unwrap_or_default(), height);
+            }
             // 和 `prepaint` 用一样的折行宽度和样式段，排好的结果在同一帧里能复用。
             let count = |text: SharedString, runs: &[TextRun], wrap: Option<Pixels>, window: &mut Window| match wrap {
                 Some(wrap) => window

@@ -73,6 +73,8 @@ pub struct TextareaState {
     /// 高度在这么多行之间伸缩。
     min_lines: usize,
     max_lines: usize,
+    /// 高度撑满父元素，不随行数伸缩，见 `fill_height`。
+    fill: bool,
     /// 按住鼠标拖选中；双击、三击后拖动按词、按行扩展。
     drag: Option<Drag>,
     history: History,
@@ -122,6 +124,7 @@ impl TextareaState {
             label: None,
             min_lines: 1,
             max_lines: 10,
+            fill: false,
             drag: None,
             history: History::default(),
             version: 0,
@@ -154,6 +157,13 @@ impl TextareaState {
         }
     }
 
+    /// 换上全部文字，清空撤销记录，光标放到开头，发 `Changed`：拿来编辑一份读进来的文件时用。
+    pub fn load_text(&mut self, text: String, cx: &mut Context<Self>) {
+        self.set_text(text, cx);
+        self.history = History::default();
+        self.move_to(0, false, cx);
+    }
+
     /// 在光标处插入 `text`（有选区时换掉选区，可撤销），光标停在它后面。
     pub fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
         self.record(None);
@@ -177,6 +187,12 @@ impl TextareaState {
         self.min_lines = min.max(1);
         self.max_lines = max.max(self.min_lines);
         self.autoscroll = true;
+        cx.notify();
+    }
+
+    /// 高度撑满父元素，不再按 `set_line_limits` 的行数伸缩，内容超出时竖着滚动；外框也要撑满。
+    pub fn fill_height(&mut self, cx: &mut Context<Self>) {
+        self.fill = true;
         cx.notify();
     }
 
@@ -595,6 +611,7 @@ impl Render for TextareaState {
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(|_, _: &SubmitText, _, cx| cx.emit(TextareaEvent::Submit)))
             .w_full()
+            .when(self.fill, |el| el.h_full())
             .cursor_text()
             .child(TextareaText { area: cx.entity() })
     }

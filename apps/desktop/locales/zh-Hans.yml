@@ -123,6 +123,7 @@ workspace:
   list: 工作区
   bell: 响过铃
 close:
+  unsaved: "有 %{count} 个文件改过还没保存，关闭后修改会丢掉。"
   pane_title: 关闭这个终端？
   tab_title: 关闭这个标签页？
   running: "%{programs} 还在运行，关闭后会随之结束。"
@@ -938,6 +939,16 @@ preview:
   wrap: 自动换行
   show_source: 显示源码
   show_rendered: 显示排版
+  edit: 编辑
+  edit_failed: 无法编辑这个文件
+  save_failed: 文件没有存下来
+  modified_tab: "%{name}（已修改）"
+  unsaved_title: "放弃 %{count} 个文件里没保存的修改？"
+  unsaved_detail: 改过的内容会丢掉。
+  discard_edits: 放弃修改
+  changed_on_disk_title: 文件在磁盘上被改过了
+  changed_on_disk_detail: 保存会盖掉在 runode 之外做的修改。
+  overwrite: 覆盖
   alert:
     note: 备注
     tip: 提示

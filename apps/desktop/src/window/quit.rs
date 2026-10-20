@@ -6,11 +6,12 @@
 //! 关掉分屏时才不会把存档清空。
 //!
 //! 关掉的窗口不是最后一个时，app 不退出，结束这个窗口里的会话（`WindowView::end_sessions`），不问。
+//! 不管关的是哪个窗口、退不退出，要关掉的窗口里预览栏有没存的修改时都先问要不要放弃（`discard_unsaved`）。
 //! 弹框之前都先推迟到当前的更新结束：回调运行时触发它的窗口正被借出，读不到它里面的 agent，也没法
 //! 在它上面弹框。
 //!
 //! 从 Dock 退出、注销、关机这类系统发起的退出拦不下也弹不了框：`install` 装的观察者在这次退出没经过
-//! `run` 时只做 `unprompted` 定下的那部分，有 agent 在跑也不问。
+//! `run` 时只做 `unprompted` 定下的那部分，有 agent 在跑、有没存的修改也不问。
 
 use std::{collections::HashSet, time::Duration};
 
@@ -230,8 +231,10 @@ pub fn close_window(window: AnyWindowHandle, cx: &mut App) {
         };
         let windows = terminal_windows(cx);
         if windows > 1 {
-            view.update(cx, |view, _, cx| view.end_sessions(Closing::Window { windows }, cx)).ok();
-            remove(cx);
+            discard_unsaved(vec![window], Some(window), cx, move |cx| {
+                view.update(cx, |view, _, cx| view.end_sessions(Closing::Window { windows }, cx)).ok();
+                remove(cx);
+            });
         } else {
             run(QuitAction::CloseLastWindow, Some(window), cx, remove);
         }
@@ -250,14 +253,14 @@ pub fn close_all_windows(cx: &mut App) {
     });
 }
 
-/// 点了窗口的关闭按钮：不是最后一个窗口时结束它里面的会话、照常关；是最后一个时先不关，交给
-/// `close_window` 按退出处理。
+/// 点了窗口的关闭按钮：不是最后一个窗口、预览栏里也没有没存的修改时结束它里面的会话、照常关；否则先不关，
+/// 交给 `close_window` 问过再关。
 pub fn should_close(window: &mut Window, cx: &mut App) -> bool {
     let Some(Some(view)) = window.root::<WindowView>() else {
         return true;
     };
     let windows = terminal_windows(cx);
-    if windows > 1 {
+    if windows > 1 && view.read(cx).preview.read(cx).unsaved(None) == 0 {
         view.update(cx, |view, cx| view.end_sessions(Closing::Window { windows }, cx));
         return true;
     }
@@ -275,12 +278,70 @@ fn front_window(cx: &App) -> Option<AnyWindowHandle> {
     cx.active_window().or_else(|| cx.windows().into_iter().next())
 }
 
-/// 按 `quit_plan` 做 `action`：该问就在 `window` 上问，确认了（或者不用问）再做 `then`，要让宿主
-/// 连会话一起退出时先让它退出。
+/// 预览栏里有没存的修改时先问要不要放弃（`discard_unsaved`），再按 `quit_plan` 做 `action`：该问就在 `window`
+/// 上问，确认了（或者不用问）再做 `then`，要让宿主连会话一起退出时先让它退出。
 fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: impl FnOnce(&mut App) + 'static) {
     if prompting(cx) {
         return;
     }
+    discard_unsaved(cx.windows(), window, cx, move |cx| end_sessions_then(action, window, cx, then));
+}
+
+/// `windows` 的预览栏里有没存的修改时，在 `window` 上问要不要放弃；放弃了先丢掉修改再做 `then`，取消了
+/// 什么都不做。没有要问的或没有窗口能弹框时直接做 `then`。
+fn discard_unsaved(
+    windows: Vec<AnyWindowHandle>,
+    window: Option<AnyWindowHandle>,
+    cx: &mut App,
+    then: impl FnOnce(&mut App) + 'static,
+) {
+    if prompting(cx) {
+        return;
+    }
+    let views: Vec<_> = windows.into_iter().filter_map(|window| window.downcast::<WindowView>()).collect();
+    let unsaved: usize =
+        views.iter().filter_map(|view| view.read_with(cx, |view, cx| view.preview.read(cx).unsaved(None)).ok()).sum();
+    let answer = window.filter(|_| unsaved > 0).and_then(|window| {
+        window
+            .update(cx, |_, window, cx| {
+                window.prompt(
+                    PromptLevel::Warning,
+                    &rust_i18n::t!("preview.unsaved_title", count = unsaved),
+                    Some(&rust_i18n::t!("preview.unsaved_detail")),
+                    &[&*rust_i18n::t!("preview.discard_edits"), &*rust_i18n::t!("quit.cancel")],
+                    cx,
+                )
+            })
+            .ok()
+    });
+    let Some(answer) = answer else {
+        then(cx);
+        return;
+    };
+    cx.set_global(Prompting(true));
+    cx.spawn(async move |cx| {
+        let discard = answer.await.ok() == Some(0);
+        cx.update(|cx| {
+            cx.set_global(Prompting(false));
+            if !discard {
+                return;
+            }
+            for view in views {
+                view.update(cx, |view, _, cx| view.preview.update(cx, |panel, cx| panel.discard_edits(None, cx))).ok();
+            }
+            then(cx);
+        });
+    })
+    .detach();
+}
+
+/// 按 `quit_plan` 结束会话、做 `then`，见 `run`。
+fn end_sessions_then(
+    action: QuitAction,
+    window: Option<AnyWindowHandle>,
+    cx: &mut App,
+    then: impl FnOnce(&mut App) + 'static,
+) {
     // 走到 `then` 时会话怎么办已经办了，接着的退出不用 `install` 的收尾再办。
     let then = move |cx: &mut App| {
         cx.set_global(Settled(true));

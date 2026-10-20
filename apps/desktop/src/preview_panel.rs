@@ -12,13 +12,15 @@
 //! 颜色画的时候从主题（`ActiveTheme`）读，git 状态经 `set_git` 交进来；要 app 办的事经 `PreviewEvent` 交出去。
 //!
 //! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画：标签条在 `tabs`，正文的
-//! 行和图片在 `body`，行号旁的改动标记在 `marks`，自动换行在 `wrap`，Markdown 的排版视图在 `markdown`。
+//! 行和图片在 `body`，行号旁的改动标记在 `marks`，自动换行在 `wrap`，Markdown 的排版视图在 `markdown`，
+//! 编辑模式在 `edit`。
 //!
 //! 标签条右边能打开自动换行、Markdown 文件在排版和源码之间切（这两个整个窗口一份，app 随窗口存档），以及
 //! 把预览栏放大到盖住终端区（每个 workspace 各自的，不进存档）。
 
 mod body;
 mod diff;
+mod edit;
 mod markdown;
 mod marks;
 mod tabs;
@@ -47,7 +49,7 @@ use crate::ui::{
     font_size::FontSize,
     icons::{
         ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, ARROW_UP_ICON,
-        CODE_ICON, DIFF_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, WRAP_ICON,
+        CODE_ICON, DIFF_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, PENCIL_ICON, WRAP_ICON,
     },
     menu::{Menu, MenuHost},
     panel::{panel_header, panel_shell},
@@ -165,6 +167,8 @@ struct Preview {
     /// 要滚到的条目（文本的行或 diff 的行）和滚到哪儿。等画的时候再滚：内容可能还没读完，
     /// 换行时条目在第几行也要那时才知道。
     reveal: Cell<Option<(usize, ScrollStrategy)>>,
+    /// 在编辑模式里时正文换成它，见 `edit`。
+    editor: Option<edit::Editor>,
 }
 
 enum Loaded {
@@ -234,6 +238,7 @@ impl Preview {
             cancel: Arc::new(AtomicBool::new(false)),
             marks: HashMap::new(),
             reveal: Cell::new(None),
+            editor: None,
         }
     }
 
@@ -566,6 +571,27 @@ impl PreviewPanel {
         .detach();
     }
 
+    /// workspace `ws`（为空时所有 workspace）里改过没存的文件有几个。
+    pub fn unsaved(&self, ws: Option<WorkspaceId>) -> usize {
+        self.workspaces
+            .iter()
+            .filter(|(id, _)| ws.is_none_or(|ws| ws == **id))
+            .flat_map(|(_, tabs)| &tabs.tabs)
+            .filter(|tab| tab.dirty())
+            .count()
+    }
+
+    /// 放弃 workspace `ws`（为空时所有 workspace）里没存的修改，那些标签退出编辑：关 workspace、关窗口时
+    /// 问过了，之后的确认不再为它们问一次。
+    pub fn discard_edits(&mut self, ws: Option<WorkspaceId>, cx: &mut Context<Self>) {
+        for (_, tabs) in self.workspaces.iter_mut().filter(|(id, _)| ws.is_none_or(|ws| ws == **id)) {
+            for tab in tabs.tabs.iter_mut().filter(|tab| tab.dirty()) {
+                tab.editor = None;
+            }
+        }
+        cx.notify();
+    }
+
     /// workspace `ws` 关掉了，丢掉它的标签，连同 GPUI 里解码的图片，和关标签时一样。
     pub fn remove_workspace(&mut self, ws: WorkspaceId, cx: &mut App) {
         for tab in self.workspaces.remove(&ws).iter().flat_map(|tabs| &tabs.tabs) {
@@ -719,8 +745,39 @@ impl PreviewPanel {
     }
 
     /// 只留下 `keep` 为真的预览标签，当前标签关掉了就切到旁边的。都关掉时预览栏收起，焦点在
-    /// 预览栏上的交回终端。
+    /// 预览栏上的交回终端。要关的标签里有改过没存的，先问要不要放弃修改。
     fn retain_previews(
+        &mut self,
+        mut keep: impl FnMut(usize, &Preview) -> bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tabs = self.tabs().map_or(&[][..], |tabs| &tabs.tabs[..]);
+        let closing: Vec<_> = tabs.iter().enumerate().filter(|(ix, tab)| !keep(*ix, tab)).map(|(_, tab)| tab).collect();
+        let dirty = closing.iter().filter(|tab| tab.dirty()).count();
+        if dirty == 0 {
+            self.close_previews(keep, window, cx);
+            return;
+        }
+        // 问的期间标签可能挪了位置，按身份记下要关的。
+        let closing: Vec<_> = closing.iter().map(|tab| (tab.path.clone(), tab.diff.clone())).collect();
+        let (ws, answer) = (self.ws, self.ask_discard(dirty, window, cx));
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await.ok() == Some(0) {
+                this.update_in(cx, |this, window, cx| {
+                    // 问的期间切到了别的 workspace 时不关，免得关到那边同名的标签。
+                    if this.ws != ws {
+                        return;
+                    }
+                    this.close_previews(|_, tab| !closing.contains(&(tab.path.clone(), tab.diff.clone())), window, cx);
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    fn close_previews(
         &mut self,
         keep: impl FnMut(usize, &Preview) -> bool,
         window: &mut Window,
@@ -746,9 +803,9 @@ impl PreviewPanel {
 
     /// 关掉各 workspace 里 `path` 和它下面的文件的标签（连同它们的 diff 标签）：文件删掉了。文件在哪个
     /// workspace 里删的都一样，几个 workspace 可能开在同一个目录下。只有当前 workspace 关完了发事件，
-    /// 别的 workspace 换上的当前标签切回去时由 `refresh_if_changed` 读。
+    /// 别的 workspace 换上的当前标签切回去时由 `refresh_if_changed` 读。改过没存的标签留着，存的时候再建出文件。
     pub fn close_under(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        let keep = |_: usize, preview: &Preview| !preview.path.starts_with(path);
+        let keep = |_: usize, preview: &Preview| !preview.path.starts_with(path) || preview.dirty();
         for (_, tabs) in self.workspaces.iter_mut().filter(|(ws, _)| **ws != self.ws) {
             for tab in tabs.retain(keep) {
                 tab.release_image(cx);
@@ -1065,12 +1122,26 @@ impl PreviewPanel {
         // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
         let view = cx.entity().downgrade();
         let typeset = self.markdown_shown(preview);
+        let editing = preview.editor.is_some();
         let buttons = div()
             .flex_none()
             .flex()
             .items_center()
             .gap(px(2.))
-            .when(preview.typesettable(), |buttons| {
+            .when(editing || preview.editable(), |buttons| {
+                buttons.child(
+                    toggle("preview-edit", PENCIL_ICON, editing, rust_i18n::t!("preview.edit"))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.toggle_edit(window, cx);
+                            }),
+                        )
+                        .on_a11y_press(view.clone(), Self::toggle_edit),
+                )
+            })
+            .when(!editing && preview.typesettable(), |buttons| {
                 let text =
                     if typeset { rust_i18n::t!("preview.show_source") } else { rust_i18n::t!("preview.show_rendered") };
                 // 悬停提示说按了会怎样，跟着状态换；报给辅助工具的名字不换，开着表示正显示源码。
@@ -1088,7 +1159,7 @@ impl PreviewPanel {
                 )
             })
             // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图里有。
-            .when(!typeset, |buttons| {
+            .when(!typeset && !editing, |buttons| {
                 buttons.child(
                     toggle("preview-wrap", WRAP_ICON, self.wrap, rust_i18n::t!("preview.wrap"))
                         .on_mouse_down(
@@ -1143,7 +1214,10 @@ impl PreviewPanel {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(self.render_preview_body(preview, width, font, window, cx));
+            .map(|body| match &preview.editor {
+                Some(editor) => body.child(self.render_editor(editor, font, cx)),
+                None => body.child(self.render_preview_body(preview, width, font, window, cx)),
+            });
         Some(
             panel_shell("preview-panel", width, cards, cx)
                 .key_context("Preview")

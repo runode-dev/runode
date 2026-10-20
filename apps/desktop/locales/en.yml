@@ -123,6 +123,7 @@ workspace:
   list: Workspaces
   bell: Bell rang
 close:
+  unsaved: "%{count} files have unsaved changes, which will be lost."
   pane_title: Close this terminal?
   tab_title: Close this tab?
   running: "Still running: %{programs}. Closing ends whatever is running here."
@@ -938,6 +939,16 @@ preview:
   wrap: Word Wrap
   show_source: Show Source
   show_rendered: Show Formatted
+  edit: Edit
+  edit_failed: "Can't edit this file"
+  save_failed: "Couldn't save the file"
+  modified_tab: "%{name} (modified)"
+  unsaved_title: "Discard unsaved changes in %{count} files?"
+  unsaved_detail: Your edits will be lost.
+  discard_edits: Discard Changes
+  changed_on_disk_title: The file changed on disk
+  changed_on_disk_detail: Saving will overwrite the changes made outside runode.
+  overwrite: Overwrite
   alert:
     note: Note
     tip: Tip
