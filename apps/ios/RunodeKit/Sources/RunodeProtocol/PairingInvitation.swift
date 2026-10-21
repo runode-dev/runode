@@ -45,10 +45,12 @@ public struct PairingInvitation: Hashable, Sendable {
     /// 生成二维码时电脑的非回环地址，挨个试。
     public var addresses: [String]
     public var expiresAt: Date
+    /// 跨网络连接的地址（iroh 的公钥），电脑没开时为空：不在同一个网络时按它拨过去。
+    public var node: String?
 
     public init(
         hostName: String, fingerprint: CertificateFingerprint, secret: Data, port: UInt16, addresses: [String],
-        expiresAt: Date
+        expiresAt: Date, node: String? = nil
     ) {
         self.hostName = hostName
         self.fingerprint = fingerprint
@@ -56,6 +58,7 @@ public struct PairingInvitation: Hashable, Sendable {
         self.port = port
         self.addresses = addresses
         self.expiresAt = expiresAt
+        self.node = node
     }
 
     public func isExpired(at now: Date = .now) -> Bool {
@@ -89,7 +92,7 @@ public struct PairingInvitation: Hashable, Sendable {
         guard let exp = TimeInterval(expText) else { throw .invalid("exp") }
         return PairingInvitation(
             hostName: name, fingerprint: fingerprint, secret: secret, port: port, addresses: addresses,
-            expiresAt: Date(timeIntervalSince1970: exp))
+            expiresAt: Date(timeIntervalSince1970: exp), node: fields["node"].flatMap { $0.isEmpty ? nil : $0 })
     }
 }
 

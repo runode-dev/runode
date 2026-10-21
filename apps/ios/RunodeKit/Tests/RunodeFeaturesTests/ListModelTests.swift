@@ -618,6 +618,7 @@ actor UnwritableMachineStore: MachineStore {
     func all() async -> [MachineRecord] { await memory.all() }
     func upsert(_ machine: MachineRecord) throws { throw WriteFailed() }
     func updateLastAddress(id: UUID, _ address: String) throws { throw WriteFailed() }
+    func updateNode(id: UUID, _ node: String) throws { throw WriteFailed() }
     func remove(id: UUID) throws { throw WriteFailed() }
 }
 

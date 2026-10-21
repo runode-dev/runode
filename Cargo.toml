@@ -91,6 +91,9 @@ raw-window-handle = "0.6"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 ring = "0.17"
+# 远程访问跨网络时的连接：iroh 按公钥拨号，先打洞直连，打不通走中继。密码学后端和 rustls 一样用 ring。
+iroh = { version = "1.4", default-features = false, features = ["tls-ring", "portmapper", "fast-apple-datapath"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "macros", "time"] }
 # 看板的库（MIT）：任务和定时存在一个 SQLite 文件里。编进 SQLite 的源码（bundled），不依赖系统的
 # libsqlite3，单独跑的宿主在没装它的 Linux 上也能用。只许 runode-todo 直接依赖，见 deny.toml。
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }

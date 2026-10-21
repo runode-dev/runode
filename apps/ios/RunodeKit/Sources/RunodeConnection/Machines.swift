@@ -16,6 +16,8 @@ public struct MachineRecord: Hashable, Sendable, Codable, Identifiable {
     public var lastAddress: String?
     /// 配对时宿主发的设备编号。
     public var deviceId: String
+    /// 跨网络连接的地址（iroh 的公钥），每次连上时按电脑报的更新；为空时只能在同一个网络里连。
+    public var node: String?
     public var pairedAt: Date
     /// 用户删掉了它、电脑那边却还没注销这部手机的推送时，记着删掉的时刻：列表里不再显示，私钥留着，下次
     /// 连上注销好了再真删。为空时没删。
@@ -23,7 +25,7 @@ public struct MachineRecord: Hashable, Sendable, Codable, Identifiable {
 
     public init(
         id: UUID = UUID(), name: String, hostName: String, fingerprint: CertificateFingerprint, port: UInt16,
-        addresses: [String], lastAddress: String?, deviceId: String, pairedAt: Date = .now
+        addresses: [String], lastAddress: String?, deviceId: String, pairedAt: Date = .now, node: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -33,6 +35,7 @@ public struct MachineRecord: Hashable, Sendable, Codable, Identifiable {
         self.addresses = addresses
         self.lastAddress = lastAddress
         self.deviceId = deviceId
+        self.node = node
         self.pairedAt = pairedAt
     }
 
@@ -53,6 +56,8 @@ public protocol MachineStore: Sendable {
     func upsert(_ machine: MachineRecord) async throws
     /// 只改存着的那条的 `lastAddress`，别的字段（用户改过的名字）照旧；这条已经删了时什么也不做。
     func updateLastAddress(id: UUID, _ address: String) async throws
+    /// 只改存着的那条的 `node`，同 `updateLastAddress`。
+    func updateNode(id: UUID, _ node: String) async throws
     func remove(id: UUID) async throws
 }
 
@@ -74,6 +79,11 @@ public actor MemoryMachineStore: MachineStore {
     public func updateLastAddress(id: UUID, _ address: String) {
         guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
         machines[index].lastAddress = address
+    }
+
+    public func updateNode(id: UUID, _ node: String) {
+        guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
+        machines[index].node = node
     }
 
     public func remove(id: UUID) { machines.removeAll { $0.id == id } }
@@ -133,6 +143,13 @@ public actor FileMachineStore: MachineStore {
         var machines = try load()
         guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
         machines[index].lastAddress = address
+        try write(machines)
+    }
+
+    public func updateNode(id: UUID, _ node: String) throws {
+        var machines = try load()
+        guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
+        machines[index].node = node
         try write(machines)
     }
 

@@ -119,6 +119,50 @@ import Testing
         await link.stop()
     }
 
+    static let node = "ae58ff8833241ac82d6ff7611046ed67b5072d142c588d0063e942d9a75502b6"
+
+    /// 电脑在挑战里报的跨网络地址记进电脑的记录，下次不在同一个网络时按它拨。
+    @Test func remembersTheNodeFromTheChallenge() async throws {
+        await store.upsert(machine)
+        let transport = FakeTransport()
+        supply.add(transport)
+        let link = connection()
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        var host = FakeHost(transport)
+        host.challenge(node: Self.node)
+        _ = try await host.readControl()
+        host.send(.accepted(deviceId: machine.deviceId))
+        _ = try await host.readControl()
+        host.send(json: FakeHost.welcome)
+        _ = try #require(await waitReady(&events))
+        #expect(await store.all().first?.node == Self.node)
+        await link.stop()
+    }
+
+    /// 记着的地址都连不上时经 iroh 按公钥拨过去，门禁照常走。
+    @Test func fallsBackToTheTunnel() async throws {
+        var remote = machine
+        remote.node = Self.node
+        let tunnelled = FakeTransport(remoteAddress: nil)
+        let dialed = Mutex<[String]>([])
+        let link = HostConnection(
+            machine: remote, keyStore: keys, machines: store, discovery: NoDiscovery(),
+            identity: ClientIdentity(build: "ios-test", deviceName: "测试 iPhone"),
+            policy: ReconnectPolicy(base: .milliseconds(10), maximum: .milliseconds(20)), open: supply.opener,
+            tunnel: { node, _ in
+                dialed.withLock { $0.append(node) }
+                return tunnelled
+            })
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        var host = FakeHost(tunnelled)
+        _ = try await admit(&host)
+        _ = try #require(await waitReady(&events))
+        #expect(dialed.withLock { $0 } == [Self.node])
+        await link.stop()
+    }
+
     @Test func reconnectsAfterTheHostGoesAway() async throws {
         let first = FakeTransport()
         let second = FakeTransport()

@@ -45,10 +45,14 @@ public enum GateRejection: Hashable, Sendable, Codable {
     }
 }
 
+/// 跨网络连接的 ALPN，和电脑那边 `runode_protocol::remote::TUNNEL_ALPN` 一样。
+public let tunnelALPN = "runode/remote/1"
+
 /// 门禁阶段的消息，两个方向的都在这里。
 public enum GateMessage: Hashable, Sendable, Codable {
-    /// 宿主在 TLS 握手后立刻发：门禁版本、32 字节随机数、主机名。
-    case challenge(version: UInt32, nonce: Data, hostName: String)
+    /// 宿主在 TLS 握手后立刻发：门禁版本、32 字节随机数、主机名，以及跨网络连接的地址（iroh 的公钥，
+    /// 电脑没开时为空）。
+    case challenge(version: UInt32, nonce: Data, hostName: String, node: String? = nil)
     /// 已配对的设备登录。
     case auth(deviceId: String, signature: Data)
     /// 第一次配对：二维码里的口令、设备名、P-256 公钥（X9.63 未压缩 65 字节）。
@@ -59,7 +63,7 @@ public enum GateMessage: Hashable, Sendable, Codable {
     case unknown(String)
 
     private enum Keys: String, CodingKey {
-        case type, version, nonce, secret, signature, reason
+        case type, version, nonce, secret, signature, reason, node
         case hostName = "host_name"
         case deviceId = "device_id"
         case deviceName = "device_name"
@@ -82,7 +86,8 @@ public enum GateMessage: Hashable, Sendable, Codable {
             self = .challenge(
                 version: try c.decode(UInt32.self, forKey: .version),
                 nonce: try binary(.nonce),
-                hostName: try c.decodeIfPresent(String.self, forKey: .hostName) ?? "")
+                hostName: try c.decodeIfPresent(String.self, forKey: .hostName) ?? "",
+                node: try c.decodeIfPresent(String.self, forKey: .node))
         case "remote_auth":
             self = .auth(deviceId: try c.decode(String.self, forKey: .deviceId), signature: try binary(.signature))
         case "remote_pair":
@@ -103,11 +108,12 @@ public enum GateMessage: Hashable, Sendable, Codable {
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: Keys.self)
         switch self {
-        case let .challenge(version, nonce, hostName):
+        case let .challenge(version, nonce, hostName, node):
             try c.encode("remote_challenge", forKey: .type)
             try c.encode(version, forKey: .version)
             try c.encode(Base64URL.encode(nonce), forKey: .nonce)
             try c.encode(hostName, forKey: .hostName)
+            try c.encodeIfPresent(node, forKey: .node)
         case let .auth(deviceId, signature):
             try c.encode("remote_auth", forKey: .type)
             try c.encode(deviceId, forKey: .deviceId)

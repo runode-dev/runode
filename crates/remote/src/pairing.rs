@@ -120,6 +120,7 @@ impl PairingTicket {
             port: status.port,
             addrs,
             expires_at: self.expires_at,
+            node: status.node.clone(),
         })
     }
 

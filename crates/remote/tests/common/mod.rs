@@ -133,6 +133,7 @@ pub fn options(dirs: &Dirs, connect: runode_remote::Connect) -> Options {
         bind: Bind::Loopback,
         host_name: Some("测试的 Mac".into()),
         advertise: false,
+        tunnel: false,
         connect,
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen"))),
     }
@@ -195,7 +196,7 @@ impl Phone {
         let exporter = tls.conn.export_keying_material([0u8; 32], EXPORTER_LABEL, None).map_err(io::Error::other)?;
         let mut phone = Self { tls, nonce: [0; 32], exporter, host_name: String::new() };
         match phone.read_gate() {
-            Some(GateHostMsg::RemoteChallenge { version: 1, nonce, host_name }) => {
+            Some(GateHostMsg::RemoteChallenge { version: 1, nonce, host_name, .. }) => {
                 phone.nonce = nonce.0.try_into().unwrap();
                 phone.host_name = host_name;
                 Ok(phone)

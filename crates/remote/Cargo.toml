@@ -20,6 +20,8 @@ tracing.workspace = true
 rustls.workspace = true
 rcgen.workspace = true
 ring.workspace = true
+iroh.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

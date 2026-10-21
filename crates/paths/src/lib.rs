@@ -134,6 +134,11 @@ impl Dirs {
         self.remote_access_file("key.der")
     }
 
+    /// 跨网络连接（iroh）的 Ed25519 私钥，32 字节；它的公钥就是手机拨号用的地址。
+    pub fn remote_access_tunnel_key_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("tunnel.key")
+    }
+
     /// 配对过的设备表（JSON）。
     pub fn remote_access_devices_file(&self) -> Option<PathBuf> {
         self.remote_access_file("devices.json")

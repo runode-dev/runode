@@ -36,6 +36,7 @@ fn a_new_name_restarts_the_listener_under_that_name() {
         bind: Bind::Loopback,
         host_name: None,
         advertise: false,
+        tunnel: false,
         connect: Arc::new(|| Err(std::io::Error::other("no host"))),
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen"))),
     })

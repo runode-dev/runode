@@ -15,12 +15,14 @@ extension Pairing {
     public func discard(_ machine: MachineRecord) {}
 }
 
-/// 真的配对：按 Bonjour 找到的服务和二维码里的地址挨个试，门禁里发 `remote_pair`。
-/// 配对用的连接在放行后就关掉，之后按已配对的设备正常登录。
+/// 真的配对：按 Bonjour 找到的服务和二维码里的地址挨个试，都不通时经 iroh 按二维码里的公钥拨过去，
+/// 门禁里发 `remote_pair`。口令只能用一次，所以一条一条试、不同时连。配对用的连接在放行后就关掉，之后按
+/// 已配对的设备正常登录。
 public struct RemotePairing: Pairing {
     private let keyStore: any DeviceKeyStore
     private let discovery: any HostDiscovery
     private let open: TransportOpener
+    private let tunnel: TunnelOpener
     private let generateKey: @Sendable () throws -> StoredDeviceKey
 
     public init(
@@ -28,11 +30,15 @@ public struct RemotePairing: Pairing {
         open: @escaping TransportOpener = { target, fingerprint in
             try await TLSChannel.open(to: target, fingerprint: fingerprint)
         },
+        tunnel: @escaping TunnelOpener = { node, fingerprint in
+            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint)
+        },
         generateKey: @escaping @Sendable () throws -> StoredDeviceKey = { try StoredDeviceKey.generate() }
     ) {
         self.keyStore = keyStore
         self.discovery = discovery
         self.open = open
+        self.tunnel = tunnel
         self.generateKey = generateKey
     }
 
@@ -42,17 +48,28 @@ public struct RemotePairing: Pairing {
         let targets = await discovery.targets(
             for: invitation.fingerprint,
             then: invitation.addresses.compactMap { TransportTarget.address($0, port: invitation.port) })
-        return try await firstSuccess(of: targets) { target in
-            let transport = try await open(target, invitation.fingerprint)
+        let attempt = { (transport: any FrameTransport) async throws -> MachineRecord in
             defer { transport.close() }
             let outcome = try await GateClient.run(
                 over: transport, credential: .pair(secret: invitation.secret, deviceName: deviceName, key: key))
             let record = MachineRecord(
                 name: invitation.hostName, hostName: outcome.hostName.isEmpty ? invitation.hostName : outcome.hostName,
                 fingerprint: invitation.fingerprint, port: invitation.port, addresses: invitation.addresses,
-                lastAddress: transport.remoteAddress, deviceId: outcome.deviceId)
+                lastAddress: transport.remoteAddress, deviceId: outcome.deviceId, node: outcome.node ?? invitation.node)
             try keyStore.save(key, for: record.id)
             return record
+        }
+        do {
+            return try await firstSuccess(of: targets) { target in
+                try await attempt(try await open(target, invitation.fingerprint))
+            }
+        } catch let failure as LinkFailure where failure.isFatal {
+            throw failure
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            guard let node = invitation.node else { throw error }
+            return try await attempt(try await tunnel(node, invitation.fingerprint))
         }
     }
 

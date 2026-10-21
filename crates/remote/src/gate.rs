@@ -144,6 +144,7 @@ fn challenge(
             version: GATE_VERSION,
             nonce: Bytes(nonce.to_vec()),
             host_name: shared.host_name.clone(),
+            node: shared.node.clone(),
         },
     )?;
     match read_control(tls)? {

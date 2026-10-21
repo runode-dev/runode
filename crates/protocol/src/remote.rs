@@ -60,6 +60,13 @@
 //! 记录是 `v=1`（`GATE_VERSION`）和 `fp=<证书指纹>`。客户端按存下的指纹找这台 Mac 现在的地址，
 //! 找不到再试上次成功的地址和二维码里的地址。
 //!
+//! # 跨网络
+//!
+//! 手机和 Mac 不在同一个局域网时经 iroh 连：Mac 开着远程访问时另起一个 iroh 端点，按 Ed25519 公钥
+//! 寻址（`node`，64 个小写十六进制字符），iroh 先打洞直连，打不通走中继。手机按 ALPN `TUNNEL_ALPN`
+//! 连上后开一条双向流，流上的字节原样当作一条 TCP 连接：从 TLS 握手起和局域网完全一样。`node` 在
+//! 二维码里（`PairingUri::node`），也在每次的 `RemoteChallenge` 里，换了也能跟上。
+//!
 //! # 以后怎么改
 //!
 //! 和 `message` 一样：已有字段的名字、类型和含义不改，新加的字段带 `#[serde(default)]`；
@@ -83,6 +90,8 @@ pub const SIGNATURE_DOMAIN: &[u8; 16] = b"runode-remote-v1";
 pub const EXPORTER_LABEL: &[u8] = b"EXPORTER-runode-remote";
 /// TLS exporter 取多少字节。
 pub const EXPORTER_LEN: usize = 32;
+/// 跨网络连接的 ALPN，见模块文档的「跨网络」。
+pub const TUNNEL_ALPN: &[u8] = b"runode/remote/1";
 /// `GateHostMsg::RemoteChallenge::nonce` 的字节数。
 pub const NONCE_LEN: usize = 32;
 /// 配对口令的字节数。
@@ -111,8 +120,15 @@ pub fn read_gate_frame(reader: &mut impl std::io::Read) -> Result<Option<Frame>,
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GateHostMsg {
-    /// TLS 握手完成后宿主发的第一条消息。`host_name` 是给人看的主机名（macOS 的电脑名）。
-    RemoteChallenge { version: u32, nonce: Bytes, host_name: String },
+    /// TLS 握手完成后宿主发的第一条消息。`host_name` 是给人看的主机名（macOS 的电脑名），`node` 是
+    /// 跨网络连接的地址，没开时不带。
+    RemoteChallenge {
+        version: u32,
+        nonce: Bytes,
+        host_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<String>,
+    },
     /// 门禁通过了；配对时 `device_id` 是新分配给这台设备的，客户端存下来以后登录用。
     RemoteAccepted { device_id: DeviceId },
     /// 门禁没通过，宿主接着关闭连接。
@@ -312,12 +328,12 @@ pub fn decode_base64url(text: &str) -> Result<Vec<u8>, InvalidBase64> {
 /// 二维码里的配对 URI：
 ///
 /// ```text
-/// runode://pair?v=1&name=<主机名，百分号编码>&fp=<证书指纹>&secret=<配对口令>&port=<端口>&addr=<地址1>,<地址2>,...&exp=<Unix 秒>
+/// runode://pair?v=1&name=<主机名，百分号编码>&fp=<证书指纹>&secret=<配对口令>&port=<端口>&addr=<地址1>,<地址2>,...&exp=<Unix 秒>&node=<跨网络的地址>
 /// ```
 ///
 /// 指纹和口令是 base64url、不带填充；`addr` 是生成时 Mac 所有非回环、非链路本地的 IPv4、IPv6
-/// 地址（IPv6 不带方括号），逗号隔开，可以为空；`exp` 是口令过期的时刻。读的时候参数的先后不限，
-/// 不认识的参数忽略。
+/// 地址（IPv6 不带方括号），逗号隔开，可以为空；`exp` 是口令过期的时刻；`node` 见模块文档的
+/// 「跨网络」，没开时不带。读的时候参数的先后不限，不认识的参数忽略。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PairingUri {
     pub host_name: String,
@@ -327,6 +343,7 @@ pub struct PairingUri {
     pub addrs: Vec<IpAddr>,
     /// 口令过期的时刻，Unix 秒。
     pub expires_at: u64,
+    pub node: Option<String>,
 }
 
 impl fmt::Display for PairingUri {
@@ -341,7 +358,11 @@ impl fmt::Display for PairingUri {
             self.port,
             addrs.join(","),
             self.expires_at,
-        )
+        )?;
+        match &self.node {
+            Some(node) => write!(f, "&node={}", percent_encode(node)),
+            None => Ok(()),
+        }
     }
 }
 
@@ -387,6 +408,7 @@ impl FromStr for PairingUri {
             port: param("port")?.parse().map_err(|_| bad("bad port"))?,
             addrs,
             expires_at: param("exp")?.parse().map_err(|_| bad("bad exp"))?,
+            node: params.get("node").map(|node| percent_decode(node).ok_or_else(|| bad("bad node"))).transpose()?,
         })
     }
 }

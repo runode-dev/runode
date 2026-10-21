@@ -37,11 +37,12 @@ deny = [
     # two-face 打包的语法定义要和 syntect 配套，它也直接依赖 syntect。
     { crate = "syntect", wrappers = ["runode-preview", "two-face"], reason = "语法高亮只在 runode-preview 里，对外给与界面无关的高亮结果" },
     { crate = "two-face", wrappers = ["runode-preview"], reason = "语法高亮只在 runode-preview 里，对外给与界面无关的高亮结果" },
-    { crate = "rustls", wrappers = ["runode-remote"], reason = "远程访问的 TLS 只在 runode-remote 里，别的 crate 经它的接口用" },
+    { crate = "rustls", wrappers = ["runode-remote", "iroh", "iroh-dns", "iroh-relay", "n0-dns-resolver", "noq", "noq-proto", "hyper-rustls", "reqwest", "rustls-platform-verifier", "tokio-rustls"], reason = "远程访问的 TLS 只在 runode-remote 里（连同它用的 iroh），别的 crate 经它的接口用" },
+    { crate = "iroh", wrappers = ["runode-remote"], reason = "远程访问跨网络的连接只在 runode-remote 里" },
     { crate = "objc2-screen-capture-kit", wrappers = ["runode-screen"], reason = "远程桌面的屏幕采集只在 runode-screen 里" },
     { crate = "objc2-video-toolbox", wrappers = ["runode-screen"], reason = "远程桌面的视频编码只在 runode-screen 里" },
     { crate = "rusqlite", wrappers = ["runode-todo"], reason = "看板的库只在 runode-todo 里，别的 crate 经它的 Store 读写" },
     { crate = "rcgen", wrappers = ["runode-remote"], reason = "远程访问的自签证书只在 runode-remote 里生成" },
     # rustls、它的证书校验（rustls-webpki）和 rcgen 拿 ring 当密码学后端，也直接依赖它。
-    { crate = "ring", wrappers = ["runode-remote", "rustls", "rustls-webpki", "rcgen"], reason = "远程访问的签名校验和随机数只在 runode-remote 里" },
+    { crate = "ring", wrappers = ["runode-remote", "rustls", "rustls-webpki", "rcgen", "noq-proto", "tokio-websockets"], reason = "远程访问的签名校验和随机数只在 runode-remote 里（连同它用的 iroh）" },
 ]

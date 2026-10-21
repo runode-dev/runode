@@ -129,8 +129,8 @@ struct FakeHost {
 
     static let nonce = Data((0..<32).map { UInt8($0) })
 
-    func challenge(version: UInt32 = 1) {
-        send(.challenge(version: version, nonce: Self.nonce, hostName: "Ethan 的 MacBook Pro"))
+    func challenge(version: UInt32 = 1, node: String? = nil) {
+        send(.challenge(version: version, nonce: Self.nonce, hostName: "Ethan 的 MacBook Pro", node: node))
     }
 
     static let welcome =

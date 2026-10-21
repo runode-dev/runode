@@ -65,4 +65,12 @@ done
 mkdir -p "$out_dir"
 rm -rf "$out_dir/ghostty-vt.xcframework"
 cp -R "$xcframework" "$out_dir/ghostty-vt.xcframework"
+# 静态库的 xcframework 链进来时各自的 Headers 都拷进同一个 include 目录，iroh 的 xcframework 根上也有
+# module.modulemap，两份撞在一起编不过；挪进以模块名命名的子目录，clang 照样找得到。
+for headers in "$out_dir"/ghostty-vt.xcframework/*/Headers; do
+  mkdir -p "$headers/GhosttyVt"
+  sed 's|umbrella header "ghostty/vt.h"|umbrella header "../ghostty/vt.h"|' "$headers/module.modulemap" \
+    >"$headers/GhosttyVt/module.modulemap"
+  rm "$headers/module.modulemap"
+done
 echo "已生成 $out_dir/ghostty-vt.xcframework（ghostty $(git -C "$ghostty_dir" rev-parse --short HEAD)，${optimize}）"

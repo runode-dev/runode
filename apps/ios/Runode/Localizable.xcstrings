@@ -5564,6 +5564,29 @@
         }
       }
     },
+    "电脑报的跨网络地址不对" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The computer's cross-network address is malformed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑报的跨网络地址不对"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電腦回報的跨網路位址不對"
+          }
+        }
+      }
+    },
     "电脑拒绝了连接（%@）" : {
       "extractionState" : "manual",
       "localizations" : {

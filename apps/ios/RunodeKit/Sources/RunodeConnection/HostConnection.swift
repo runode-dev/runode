@@ -39,6 +39,7 @@ public actor HostConnection: HostLink {
     private var identity: ClientIdentity
     private let policy: ReconnectPolicy
     private let open: TransportOpener
+    private let tunnel: TunnelOpener
     /// 电脑离线时除了等 Bonjour，也等本机网络恢复或变化，见 `awaitNetworkChange`。
     private let networkChange: @Sendable () async -> Void
 
@@ -76,6 +77,9 @@ public actor HostConnection: HostLink {
         open: @escaping TransportOpener = { target, fingerprint in
             try await TLSChannel.open(to: target, fingerprint: fingerprint)
         },
+        tunnel: @escaping TunnelOpener = { node, fingerprint in
+            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint)
+        },
         networkChange: @escaping @Sendable () async -> Void = awaitNetworkChange
     ) {
         self.machine = machine
@@ -85,6 +89,7 @@ public actor HostConnection: HostLink {
         self.identity = identity
         self.policy = policy
         self.open = open
+        self.tunnel = tunnel
         self.networkChange = networkChange
         (outgoing, outbox) = AsyncStream.makeStream(of: Outgoing.self)
     }
@@ -313,23 +318,35 @@ public actor HostConnection: HostLink {
         var keepAwake: Bool
     }
 
-    /// Bonjour 找到的地址和记着的地址（上次成功的、二维码里的，按顺序试）同时连，谁先过门禁用谁：组播
-    /// 不通的 Wi-Fi 上 Bonjour 要等满超时，记着的地址不跟着等。晚到的那条也连上了就关掉。不能重试的
-    /// 失败直接报；都失败时报先到的那个不是「没有地址」的错，有限速的拒绝时报它。
+    /// Bonjour 找到的地址、记着的地址（上次成功的、二维码里的，按顺序试）和跨网络的 iroh 同时连，谁先过
+    /// 门禁用谁：组播不通的 Wi-Fi 上 Bonjour 要等满超时，记着的地址不跟着等；iroh 晚 `tunnelDelay` 才拨，
+    /// 在同一个局域网里时直连先到。晚到的那条也连上了就关掉。不能重试的失败直接报；都失败时报先到的那个
+    /// 不是「没有地址」的错，有限速的拒绝时报它。
     private func establish() async throws -> Session {
         guard let key = try keyStore.key(for: machine.id) else { throw LinkFailure.missingKey }
         let discovery = discovery
         let fingerprint = machine.fingerprint
         let fallback = machine.fallbackTargets
+        let node = machine.node
+        let open = open
+        let tunnel = tunnel
         return try await withThrowingTaskGroup(of: Session.self) { group in
             group.addTask {
-                try await firstSuccess(of: fallback) { target in try await self.handshake(with: target, key: key) }
+                try await firstSuccess(of: fallback) { target in
+                    try await self.handshake(key: key) { try await open(target, fingerprint) }
+                }
             }
             group.addTask {
                 guard let found = await discovery.locate(fingerprint, timeout: .seconds(2)) else {
                     throw LinkFailure.noAddress
                 }
-                return try await self.handshake(with: found, key: key)
+                return try await self.handshake(key: key) { try await open(found, fingerprint) }
+            }
+            if let node {
+                group.addTask {
+                    try await Task.sleep(for: tunnelDelay)
+                    return try await self.handshake(key: key) { try await tunnel(node, fingerprint) }
+                }
             }
             var winner: Session?
             var failure: (any Error)?
@@ -360,8 +377,10 @@ public actor HostConnection: HostLink {
         }
     }
 
-    private func handshake(with target: TransportTarget, key: StoredDeviceKey) async throws -> Session {
-        let transport = try await open(target, machine.fingerprint)
+    private func handshake(
+        key: StoredDeviceKey, connect: @Sendable () async throws -> any FrameTransport
+    ) async throws -> Session {
+        let transport = try await connect()
         // 握手中途 `stop`：超时任务跟着取消、不会关连接，卡着的读不响应取消，这里关掉连接让它报错。
         return try await withTaskCancellationHandler {
             try await admit(over: transport, key: key)
@@ -387,6 +406,10 @@ public actor HostConnection: HostLink {
                     default: continue
                     }
                 }
+            }
+            if let node = outcome.node, node != machine.node {
+                machine.node = node
+                try? await machines.updateNode(id: machine.id, node)
             }
             if let address = transport.remoteAddress, address != machine.lastAddress {
                 machine.lastAddress = address

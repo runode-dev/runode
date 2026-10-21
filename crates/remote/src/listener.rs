@@ -28,6 +28,7 @@ use crate::{
     limit::{self, RateLimiter},
     pairing::Desk,
     status::{ListenerStatus, lock_listener},
+    tunnel::Tunnel,
 };
 
 /// 还没过门禁的连接最多这么多，再来的直接关掉。
@@ -74,6 +75,8 @@ pub struct Options {
     pub host_name: Option<String>,
     /// 用 Bonjour 公布。
     pub advertise: bool,
+    /// 另开 iroh 端点，手机不在同一个网络时也连得上，见 `tunnel`。
+    pub tunnel: bool,
     /// 门禁过了以后要一条到宿主的新连接。
     pub connect: Connect,
     /// 门禁过了、手机要远程桌面（第一帧是 `ScreenClientMsg::ScreenHello`）时要一条到采集进程的
@@ -89,6 +92,7 @@ pub struct Listener {
     wake: io::PipeWriter,
     thread: Option<JoinHandle<()>>,
     _bonjour: Option<bonjour::Registration>,
+    _tunnel: Option<Tunnel>,
     /// 一直拿着，丢掉时放开，见 `status::lock_listener`。
     _lock: File,
 }
@@ -97,6 +101,8 @@ pub struct Listener {
 pub(crate) struct Shared {
     pub(crate) dirs: Dirs,
     pub(crate) host_name: String,
+    /// 跨网络连接的地址，`RemoteChallenge` 里带给手机。
+    pub(crate) node: Option<String>,
     /// 开监听时写进状态文件的，设备连上、断开时填上 `connected` 重写，见 `publish`。
     status: ListenerStatus,
     pub(crate) tls: Arc<ServerConfig>,
@@ -208,7 +214,7 @@ fn cut(live: &Live) {
 impl Listener {
     /// 开监听。另一个进程已经开着（锁在它手里）、端口被占时返回错误，调用方隔一会儿再试。
     pub fn start(options: Options) -> io::Result<Self> {
-        let Options { dirs, port, bind, host_name, advertise, connect, connect_screen } = options;
+        let Options { dirs, port, bind, host_name, advertise, tunnel, connect, connect_screen } = options;
         let lock = lock_listener(&dirs)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::AddrInUse, "another runode process is serving remote access")
         })?;
@@ -226,16 +232,23 @@ impl Listener {
         let host_name = host_name.unwrap_or_else(addrs::host_name);
         let fp = encode_base64url(&fingerprint);
         let limiter = remembered_limiter(&dirs);
+        let tunnel = tunnel.then(|| Tunnel::start(&dirs, port)).transpose().unwrap_or_else(|err| {
+            tracing::warn!("remote access stays on this network only: {err}");
+            None
+        });
+        let node = tunnel.as_ref().map(|tunnel| tunnel.node().to_owned());
         let status = ListenerStatus {
             port,
             fingerprint: Bytes(fingerprint.to_vec()),
             host_name: host_name.clone(),
             connected: Vec::new(),
+            node: node.clone(),
         };
         write_json(&dirs.remote_access_status_file().ok_or_else(no_home)?, &status)?;
         let shared = Arc::new(Shared {
             dirs,
             host_name: host_name.clone(),
+            node,
             status,
             tls: Arc::new(tls),
             connect,
@@ -264,7 +277,7 @@ impl Listener {
             None
         };
         tracing::info!("remote access listening on {addrs:?} as {host_name:?}, certificate {fp}");
-        Ok(Self { shared, port, addrs, wake, thread: Some(thread), _bonjour: bonjour, _lock: lock })
+        Ok(Self { shared, port, addrs, wake, thread: Some(thread), _bonjour: bonjour, _tunnel: tunnel, _lock: lock })
     }
 
     /// 实际在听的端口：`Options::port` 是 0 时是系统分配的那个。

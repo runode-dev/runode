@@ -125,6 +125,7 @@ func remoteFixtures() -> [URL] {
             var port: UInt16
             var addrs: [String]
             var expires_at: TimeInterval
+            var node: String?
         }
         let sample = try JSONDecoder().decode(
             Sample.self, from: Data(contentsOf: remoteFixtureDirectory.appending(path: "pair_uri.json")))
@@ -135,5 +136,6 @@ func remoteFixtures() -> [URL] {
         #expect(invitation.port == sample.port)
         #expect(invitation.addresses == sample.addrs)
         #expect(invitation.expiresAt == Date(timeIntervalSince1970: sample.expires_at))
+        #expect(invitation.node == sample.node && sample.node != nil)
     }
 }

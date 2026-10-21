@@ -1,6 +1,6 @@
-//! 远程访问：手机经局域网或 Tailscale 这类网络连到 Mac 上的宿主。线上格式（TLS 1.3、门禁消息、
-//! 签名的拼法、配对 URI、Bonjour 的 TXT 记录）定义在 `runode_protocol::remote`，这里是 Mac 这边的
-//! 实现。
+//! 远程访问：手机经局域网或 Tailscale 这类网络连到 Mac 上的宿主，都不通时经 iroh 跨网络连过来
+//! （`tunnel`）。线上格式（TLS 1.3、门禁消息、签名的拼法、配对 URI、Bonjour 的 TXT 记录）定义在
+//! `runode_protocol::remote`，这里是 Mac 这边的实现。
 //!
 //! `Listener` 是开着的监听：IPv4 和 IPv6 各一个 TCP 监听，一个线程接连接，每条连接一个线程。连接
 //! 先做 TLS 1.3（rustls，ring 后端，证书是第一次开时生成的自签证书，见 `identity`），再过门禁
@@ -33,6 +33,7 @@ mod pairing;
 mod push;
 mod service;
 mod status;
+mod tunnel;
 
 use std::{io, os::unix::net::UnixStream, sync::Arc};
 

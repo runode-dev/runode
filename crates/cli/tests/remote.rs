@@ -136,6 +136,7 @@ fn pairing_turns_remote_access_on_in_the_config_and_waits_for_the_listener() {
         bind: Bind::Loopback,
         host_name: Some("测试的 Mac".into()),
         advertise: false,
+        tunnel: false,
         connect: Arc::new(|| Err(std::io::Error::other("no host in this test"))),
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen in this test"))),
     })
@@ -164,6 +165,7 @@ fn pairing_shows_a_code_and_a_link_and_waits() {
         bind: Bind::Loopback,
         host_name: Some("测试的 Mac".into()),
         advertise: false,
+        tunnel: false,
         connect: Arc::new(|| Err(std::io::Error::other("no host in this test"))),
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen in this test"))),
     })
@@ -210,6 +212,7 @@ fn ctrl_c_withdraws_the_pairing_code() {
         bind: Bind::Loopback,
         host_name: Some("测试的 Mac".into()),
         advertise: false,
+        tunnel: false,
         connect: Arc::new(|| Err(std::io::Error::other("no host in this test"))),
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen in this test"))),
     })

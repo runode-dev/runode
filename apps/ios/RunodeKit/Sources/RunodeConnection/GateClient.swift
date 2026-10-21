@@ -15,6 +15,8 @@ public struct GateOutcome: Sendable {
     public var deviceId: String
     /// `remote_challenge` 里报的主机名。
     public var hostName: String
+    /// `remote_challenge` 里报的跨网络连接的地址，电脑没开时为空。
+    public var node: String?
     /// 门禁之后剩下、还没切成帧的字节；`Hello` 接着它读。
     public var decoder: FrameDecoder
 }
@@ -70,7 +72,7 @@ public enum GateClient {
         try await withTimeout(timeout, onTimeout: { transport.close() }) {
             var reader = FrameReader(transport: transport, decoder: FrameDecoder(maxPayload: Frame.gateMaxPayload))
             let challenge = try JSONDecoder().decode(GateMessage.self, from: try await reader.nextControl())
-            guard case let .challenge(version, nonce, hostName) = challenge else {
+            guard case let .challenge(version, nonce, hostName, node) = challenge else {
                 throw LinkFailure.protocolViolation(String(localized: "第一条消息不是 remote_challenge"))
             }
             guard version == gateVersion else { throw LinkFailure.gateVersion(version) }
@@ -96,7 +98,7 @@ public enum GateClient {
             case .accepted(let deviceId):
                 var decoder = reader.decoder
                 decoder.maxPayload = Frame.maxPayload
-                return GateOutcome(deviceId: deviceId, hostName: hostName, decoder: decoder)
+                return GateOutcome(deviceId: deviceId, hostName: hostName, node: node, decoder: decoder)
             case .rejected(let reason):
                 throw LinkFailure.rejected(reason)
             default:

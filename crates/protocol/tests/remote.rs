@@ -58,6 +58,9 @@ fn signature() -> Bytes {
     Bytes(der)
 }
 
+/// 跨网络连接的地址，iroh 的 Ed25519 公钥的小写十六进制。
+const NODE: &str = "ae58ff8833241ac82d6ff7611046ed67b5072d142c588d0063e942d9a75502b6";
+
 #[test]
 fn host_messages_match_the_fixtures() {
     matches(
@@ -66,6 +69,16 @@ fn host_messages_match_the_fixtures() {
             version: 1,
             nonce: Bytes(nonce().to_vec()),
             host_name: "Ethan 的 MacBook Pro".into(),
+            node: None,
+        },
+    );
+    matches(
+        "remote_challenge_node.json",
+        &GateHostMsg::RemoteChallenge {
+            version: 1,
+            nonce: Bytes(nonce().to_vec()),
+            host_name: "Ethan 的 MacBook Pro".into(),
+            node: Some(NODE.into()),
         },
     );
     matches("remote_accepted.json", &GateHostMsg::RemoteAccepted { device_id: device() });
@@ -172,7 +185,9 @@ fn the_pairing_uri_matches_the_fixture() {
         port: 7866,
         addrs,
         expires_at: json["expires_at"].as_u64().unwrap(),
+        node: json["node"].as_str().map(String::from),
     };
+    assert_eq!(uri.node.as_deref(), Some(NODE));
     assert_eq!(bytes(&json["secret"]), secret());
     let text = json["uri"].as_str().unwrap();
     assert_eq!(uri.to_string(), text);
@@ -184,7 +199,7 @@ fn the_pairing_uri_matches_the_fixture() {
         encode_base64url(&uri.fingerprint)
     );
     let read: PairingUri = shuffled.parse().unwrap();
-    assert_eq!((read.host_name.as_str(), read.addrs.len()), ("a+b", 0));
+    assert_eq!((read.host_name.as_str(), read.addrs.len(), read.node), ("a+b", 0, None));
     assert!(text.replace("v=1", "v=2").parse::<PairingUri>().is_err());
     assert!(text.replace("&port=7866", "").parse::<PairingUri>().is_err());
     assert!(text.replace("runode://pair", "https://pair").parse::<PairingUri>().is_err());

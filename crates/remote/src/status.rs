@@ -24,6 +24,9 @@ pub struct ListenerStatus {
     /// 正连着（过了门禁）的设备，每台一次，按连上的先后。
     #[serde(default)]
     pub connected: Vec<DeviceId>,
+    /// 跨网络连接的地址，没开成时为空，见 `runode_protocol::remote::PairingUri::node`。
+    #[serde(default)]
+    pub node: Option<String>,
 }
 
 /// 开着的监听方的状态；没有监听方在跑时为 `None`。
@@ -80,6 +83,7 @@ mod tests {
             fingerprint: Bytes(vec![1; 32]),
             host_name: "old".to_owned(),
             connected: Vec::new(),
+            node: None,
         };
         write_json(&dirs.remote_access_status_file().unwrap(), &stale).unwrap();
 

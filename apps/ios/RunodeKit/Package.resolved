@@ -1,0 +1,15 @@
+{
+  "originHash" : "bc9e113622753117160a67030b56fdf1b3f64af54dc2d6c9e2e434e832cef3e3",
+  "pins" : [
+    {
+      "identity" : "iroh-ffi",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/n0-computer/iroh-ffi",
+      "state" : {
+        "revision" : "5e451092dba0c1a09ee83ff6e5be37b1152a5c58",
+        "version" : "1.1.0"
+      }
+    }
+  ],
+  "version" : 3
+}

@@ -78,6 +78,7 @@ pub fn service(host: &Host) -> Option<Service> {
         bind: Bind::All,
         host_name: None,
         advertise: true,
+        tunnel: true,
         connect,
         connect_screen: Arc::new(connect_screen),
     };
