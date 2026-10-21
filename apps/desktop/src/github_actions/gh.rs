@@ -1,6 +1,7 @@
 //! 经用户自己装的 gh 读写 GitHub Actions：列运行、job 和 step，列工作流，列仓库、组织和部署环境的
 //! secret 和 variable，重跑、取消运行，删 secret 和 variable；要用户在终端里看着或答话的（看日志、
-//! 盯着运行、触发工作流时填输入、填 secret 的值）拼成命令行交给终端去跑。这里不碰界面。
+//! 盯着运行、触发工作流时填输入、填 secret 的值）拼成命令行交给终端去跑。看板也经它读、开任务分支上的
+//! PR（`Gh::pull_request`、`Gh::create_pull_request`）。这里不碰界面。
 //!
 //! gh 在仓库目录里跑，仓库是哪个、登录用哪个账号都由它按 git 远端和自己的配置定。
 
@@ -156,6 +157,68 @@ impl State {
     }
 }
 
+/// 一个分支上的 PR，`gh pr view` 读到的。
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PullRequest {
+    pub number: u64,
+    /// `OPEN`、`CLOSED` 或 `MERGED`。
+    pub state: String,
+    pub url: String,
+    #[serde(default)]
+    pub is_draft: bool,
+    /// `APPROVED`、`CHANGES_REQUESTED`、`REVIEW_REQUIRED`；仓库不要求评审时为空。
+    #[serde(default)]
+    pub review_decision: String,
+    #[serde(default, rename = "statusCheckRollup")]
+    checks: Vec<Check>,
+}
+
+/// PR 上的一项检查：GitHub Actions 的是 check run（`status`、`conclusion`），别家 CI 报的是 commit status（`state`）。
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+struct Check {
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    conclusion: String,
+    #[serde(default)]
+    state: String,
+}
+
+/// PR 的检查合起来怎么样。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Checks {
+    None,
+    Pending,
+    Passing,
+    Failing,
+}
+
+impl PullRequest {
+    /// 有一项失败就算失败，否则有一项没跑完就算在跑。
+    pub fn checks(&self) -> Checks {
+        let failed = |check: &Check| {
+            matches!(
+                check.conclusion.as_str(),
+                "FAILURE" | "TIMED_OUT" | "CANCELLED" | "ACTION_REQUIRED" | "STARTUP_FAILURE"
+            ) || matches!(check.state.as_str(), "FAILURE" | "ERROR")
+        };
+        let pending = |check: &Check| {
+            (!check.status.is_empty() && check.status != "COMPLETED")
+                || matches!(check.state.as_str(), "PENDING" | "EXPECTED")
+        };
+        if self.checks.is_empty() {
+            Checks::None
+        } else if self.checks.iter().any(failed) {
+            Checks::Failing
+        } else if self.checks.iter().any(pending) {
+            Checks::Pending
+        } else {
+            Checks::Passing
+        }
+    }
+}
+
 /// secret 和 variable 在哪一级：仓库、组织（只读，列的是这个仓库能用的）或某个部署环境。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Scope {
@@ -203,13 +266,13 @@ impl Data {
 
 /// 在 `dir` 里跑 gh；`path` 是终端里 shell 报告的 PATH，从访达打开的 app 自己的 PATH 里没有 brew 装的目录。
 #[derive(Clone, Debug)]
-pub(super) struct Gh {
+pub(crate) struct Gh {
     pub dir: PathBuf,
     pub path: Option<OsString>,
 }
 
 impl Gh {
-    pub fn fetch(&self, query: &Query) -> Result<Data, String> {
+    pub(super) fn fetch(&self, query: &Query) -> Result<Data, String> {
         Ok(match query {
             Query::BranchRuns(branch) => {
                 Data::Runs(self.json(&["run", "list", "-b", branch, "-L", RUN_LIMIT, "--json", RUN_FIELDS])?)
@@ -259,6 +322,21 @@ impl Gh {
         })
     }
 
+    /// `branch` 上最近的 PR，没有时为 `None`。
+    pub fn pull_request(&self, branch: &str) -> Result<Option<PullRequest>, String> {
+        const FIELDS: &str = "number,state,url,isDraft,reviewDecision,statusCheckRollup";
+        match self.json(&["pr", "view", branch, "--json", FIELDS]) {
+            Ok(pr) => Ok(Some(pr)),
+            Err(err) if err.starts_with("no pull requests found") => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// 给已经推上去的 `branch` 开 PR，标题和正文按分支上的提交填。
+    pub fn create_pull_request(&self, branch: &str) -> Result<(), String> {
+        self.output(&["pr", "create", "--head", branch, "--fill"]).map(drop)
+    }
+
     pub fn rerun(&self, run: u64) -> Result<(), String> {
         self.output(&["run", "rerun", &run.to_string()]).map(drop)
     }
@@ -268,7 +346,7 @@ impl Gh {
     }
 
     /// 删掉 `scope` 那一级叫 `name` 的 secret（`secret` 为真）或 variable。
-    pub fn delete(&self, secret: bool, scope: &Scope, name: &str) -> Result<(), String> {
+    pub(super) fn delete(&self, secret: bool, scope: &Scope, name: &str) -> Result<(), String> {
         // 组织那一级这里只读；`env_args` 对它不加范围参数，照发会删掉仓库里同名的那个。
         if matches!(scope, Scope::Org) {
             return Err(NOT_ORG.to_owned());
@@ -493,6 +571,22 @@ fn shell_quote(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 检查有一项失败就算失败，没失败但有没跑完的算在跑；check run 和 commit status 都认。
+    #[test]
+    fn pull_request_checks_roll_up() {
+        let pr = |checks: &str| {
+            let json = format!(r#"{{"number":1,"state":"OPEN","url":"u","statusCheckRollup":[{checks}]}}"#);
+            serde_json::from_str::<PullRequest>(&json).unwrap().checks()
+        };
+        let done = r#"{"__typename":"CheckRun","status":"COMPLETED","conclusion":"SUCCESS"}"#;
+        assert_eq!(pr(""), Checks::None);
+        assert_eq!(pr(done), Checks::Passing);
+        assert_eq!(pr(&format!(r#"{done},{{"status":"IN_PROGRESS","conclusion":""}}"#)), Checks::Pending);
+        assert_eq!(pr(&format!(r#"{done},{{"state":"PENDING"}}"#)), Checks::Pending);
+        assert_eq!(pr(r#"{"state":"ERROR"},{"status":"QUEUED"}"#), Checks::Failing);
+        assert_eq!(pr(r#"{"status":"COMPLETED","conclusion":"TIMED_OUT"}"#), Checks::Failing);
+    }
 
     #[test]
     fn org_settings_url_keeps_the_host() {

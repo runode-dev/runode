@@ -766,6 +766,7 @@ kanban:
   finish: Mark as done
   reopen: Mark as not done
   edit: Edit Task
+  create_pr: "Push branch and open PR"
   remove_todo: Delete task
   remove_title: "Delete “%{title}”?"
   remove_detail: Its terminal keeps running in the background.
@@ -789,7 +790,21 @@ kanban:
   load_more: Load more
   done_at: "Finished %{time}"
   back: Back
+  pr:
+    number: "PR #%{number}"
+    merged: "Merged"
+    closed: "Closed"
+    draft: "Draft"
+    checks_passing: "Checks passed"
+    checks_failing: "Checks failed"
+    checks_pending: "Checks running"
+    approved: "Approved"
+    changes_requested: "Changes requested"
+    review_required: "Review required"
+    open_in_browser: "Open %{pr} in the browser"
   toast:
+    creating_pr: "Pushing the branch and opening a PR…"
+    pr_failed: "Couldn't open the PR: %{reason}"
     starting: Starting the task…
     started: Task started
     failed: "Couldn’t start the task: %{reason}"

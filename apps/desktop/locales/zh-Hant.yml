@@ -766,6 +766,7 @@ kanban:
   finish: 標為完成
   reopen: 取消完成
   edit: 編輯任務
+  create_pr: "推送分支並開 PR"
   remove_todo: 刪除任務
   remove_title: "刪除「%{title}」？"
   remove_detail: 它的終端機還會在背景繼續跑。
@@ -789,7 +790,21 @@ kanban:
   load_more: 載入更多
   done_at: "完成於 %{time}"
   back: 返回
+  pr:
+    number: "PR #%{number}"
+    merged: "已合併"
+    closed: "已關閉"
+    draft: "草稿"
+    checks_passing: "檢查通過"
+    checks_failing: "檢查失敗"
+    checks_pending: "檢查中"
+    approved: "已核准"
+    changes_requested: "要求修改"
+    review_required: "待審查"
+    open_in_browser: "在瀏覽器裡打開 %{pr}"
   toast:
+    creating_pr: "正在推送分支、開 PR…"
+    pr_failed: "沒能開 PR：%{reason}"
     starting: 正在開始任務…
     started: 任務已開始
     failed: 沒能開始任務：%{reason}

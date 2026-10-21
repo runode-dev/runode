@@ -10,7 +10,7 @@
 //! `ActionsEvent` 交出去。经用户自己装的 gh 读写，见 `gh`；app 在窗口在前台时每秒调一次 `poll`，页上
 //! 显示着的和固定在状态栏上的数据隔 `POLL_IDLE` 重读一次，有没跑完的运行或 job 时隔 `POLL_RUNNING`。
 
-mod gh;
+pub(crate) mod gh;
 
 use crate::ui::theme::ActiveTheme as _;
 use std::{

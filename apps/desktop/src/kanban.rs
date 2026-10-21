@@ -19,6 +19,7 @@
 //! 提示条（`Toast`），等宿主回话后说开始了没有；别的请求没办成时也在这里说原因。
 
 mod dialog;
+mod pulls;
 mod skills;
 mod store;
 mod templates;
@@ -37,11 +38,16 @@ use crate::ui::{
     base_name,
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{self, FontSize, scaled},
-    icons::{ARROW_LEFT_ICON, BRANCH_ICON, CHECK_ICON, CLOSE_ICON, PENCIL_ICON, PLUS_ICON, TERMINAL_ICON, TRASH_ICON},
+    hsla,
+    icons::{
+        ARROW_LEFT_ICON, BRANCH_ICON, CHECK_ICON, CLOSE_ICON, GIT_ICON, PENCIL_ICON, PLUS_ICON, TERMINAL_ICON,
+        TRASH_ICON,
+        github_actions::{FAILURE_ICON, PENDING_ICON, SUCCESS_ICON},
+    },
     scrollbar::scrollbar,
     spinner::spinner,
     tabs::{drag_chip, drop_marker},
-    theme::{AGENT_BLOCKED_COLOR, AGENT_DONE_COLOR, ActiveTheme as _},
+    theme::{ADDED, AGENT_BLOCKED_COLOR, AGENT_DONE_COLOR, ActiveTheme as _, MODIFIED, REMOVED},
     tooltip::tooltip,
 };
 use gpui::{
@@ -58,6 +64,7 @@ use runode_types::agent::Agent;
 pub use dialog::TodoDialog;
 pub use store::{Host, Step, needs_you, todo_sessions, watch};
 
+use crate::github_actions::gh::{Checks, PullRequest};
 use dialog::{DialogEvent, Editing};
 use store::TodoData;
 
@@ -142,6 +149,9 @@ pub struct Kanban {
     marks: AgentMarks,
     /// 开着的新建、编辑对话框。
     dialog: Option<(Entity<TodoDialog>, Subscription)>,
+    /// 各任务分支上的 PR，见 `pulls`。
+    pulls: pulls::Pulls,
+    _poll_pulls: gpui::Task<()>,
 }
 
 /// 窗口坐标下的位置。
@@ -167,6 +177,8 @@ struct Toast {
 
 enum ToastState {
     Starting,
+    /// 正在推送任务的分支、开 PR。
+    Creating,
     Started,
     /// 没办成，带着要显示的话；不自己收起，等用户关掉或被新的顶掉。
     Failed(String),
@@ -300,6 +312,8 @@ impl Kanban {
             input: Input::default(),
             marks,
             dialog: None,
+            pulls: pulls::Pulls::new(),
+            _poll_pulls: pulls::poll(cx),
         }
     }
 
@@ -714,13 +728,14 @@ impl Kanban {
     fn render_toast(&self, toast: &Toast, cx: &mut Context<Self>) -> AnyElement {
         let text = match &toast.state {
             ToastState::Starting => rust_i18n::t!("kanban.toast.starting").into_owned(),
+            ToastState::Creating => rust_i18n::t!("kanban.toast.creating_pr").into_owned(),
             ToastState::Started => rust_i18n::t!("kanban.toast.started").into_owned(),
             ToastState::Failed(text) => text.clone(),
         };
         // 前景色作底、背景色写字，和后面的看板反着，深色浅色主题下都分得开。
         let (toast_bg, toast_fg) = (cx.theme().mix_inverse(0.15), cx.theme().background);
         let icon = match toast.state {
-            ToastState::Starting => {
+            ToastState::Starting | ToastState::Creating => {
                 let (frames, frame_time) = TOAST_SPINNER;
                 div().child(spinner("todo-toast-spinner", frames, frame_time)).into_any_element()
             }
@@ -974,6 +989,7 @@ impl Kanban {
                 .child(svg().path(BRANCH_ICON).flex_none().size(px(11.)).text_color(fg.opacity(0.45)))
                 .child(div().min_w_0().truncate().child(branch))
         });
+        let pull = self.pulls.get(&todo.id).map(|pr| pull_row(pr, &todo.id, cx));
         let bottom = div()
             .flex()
             .items_center()
@@ -1005,6 +1021,7 @@ impl Kanban {
             .shadow(card_shadow(None, false))
             .child(top)
             .children(branch)
+            .children(pull)
             .child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(todo.spec.title.clone()))
             .child(bottom)
     }
@@ -1028,7 +1045,8 @@ impl Kanban {
         let started =
             todo.started.map(|at| rust_i18n::t!("kanban.started_at", time = short_time(at, now)).into_owned());
         let from = schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned());
-        let line2: Vec<String> = [Some(place), todo.branch.clone()].into_iter().flatten().collect();
+        let pull = self.pulls.get(&todo.id).map(pull_summary);
+        let line2: Vec<String> = [Some(place), todo.branch.clone(), pull].into_iter().flatten().collect();
         let line3: Vec<String> = [Some(status), started, from].into_iter().flatten().collect();
         let number = if todo.number > 0 { format!("#{}", todo.number) } else { String::new() };
         let description =
@@ -1091,6 +1109,14 @@ impl Kanban {
                 buttons.push(
                     icon_button("todo-open", TERMINAL_ICON, label)
                         .on_press(cx, move |this, _, cx| this.open_todo(&todo, cx)),
+                );
+            }
+            if todo.worktree_dir.is_some() && todo.branch.is_some() && !self.pulls.contains_key(&todo.id) {
+                let todo = todo.clone();
+                let label = rust_i18n::t!("kanban.create_pr").into_owned();
+                buttons.push(
+                    icon_button("todo-create-pr", GIT_ICON, label)
+                        .on_press(cx, move |this, _, cx| this.create_pull_request(&todo, cx)),
                 );
             }
             if primary_id != Some("done") {
@@ -1612,6 +1638,64 @@ fn column_color(column: Column, fg: Hsla) -> Hsla {
 }
 
 /// 看板上的图标按钮：`label` 是辅助工具读的名字，也是悬停的提示。
+/// PR 的说法：编号，不是开着的写状态，开着的写检查和评审。
+fn pull_summary(pr: &PullRequest) -> String {
+    let state = match pr.state.as_str() {
+        "MERGED" => Some(rust_i18n::t!("kanban.pr.merged")),
+        "CLOSED" => Some(rust_i18n::t!("kanban.pr.closed")),
+        _ if pr.is_draft => Some(rust_i18n::t!("kanban.pr.draft")),
+        _ => None,
+    };
+    let open = pr.state == "OPEN";
+    let checks = match pr.checks() {
+        Checks::Passing => Some(rust_i18n::t!("kanban.pr.checks_passing")),
+        Checks::Failing => Some(rust_i18n::t!("kanban.pr.checks_failing")),
+        Checks::Pending => Some(rust_i18n::t!("kanban.pr.checks_pending")),
+        Checks::None => None,
+    };
+    let review = match pr.review_decision.as_str() {
+        "APPROVED" => Some(rust_i18n::t!("kanban.pr.approved")),
+        "CHANGES_REQUESTED" => Some(rust_i18n::t!("kanban.pr.changes_requested")),
+        "REVIEW_REQUIRED" => Some(rust_i18n::t!("kanban.pr.review_required")),
+        _ => None,
+    };
+    let number = rust_i18n::t!("kanban.pr.number", number = pr.number);
+    [Some(number), state, checks.filter(|_| open), review.filter(|_| open)]
+        .into_iter()
+        .flatten()
+        .map(|part| part.into_owned())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// 卡片上 PR 那一行：检查的图标（开着时）和 `pull_summary`，按下在浏览器里打开 PR。
+fn pull_row(pr: &PullRequest, todo: &str, cx: &mut Context<Kanban>) -> Stateful<Div> {
+    let fg = cx.theme().foreground;
+    let icon = match (pr.state.as_str(), pr.checks()) {
+        ("OPEN", Checks::Passing) => svg().path(SUCCESS_ICON).text_color(hsla(ADDED)),
+        ("OPEN", Checks::Failing) => svg().path(FAILURE_ICON).text_color(hsla(REMOVED)),
+        ("OPEN", Checks::Pending) => svg().path(PENDING_ICON).text_color(hsla(MODIFIED)),
+        _ => svg().path(GIT_ICON).text_color(fg.opacity(0.45)),
+    };
+    let summary = pull_summary(pr);
+    let url = pr.url.clone();
+    div()
+        .id(named("todo-pr", todo))
+        .role(Role::Link)
+        .aria_label(rust_i18n::t!("kanban.pr.open_in_browser", pr = summary.as_str()).into_owned())
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .min_w_0()
+        .text_size(FontSize::Small)
+        .text_color(fg.opacity(0.55))
+        .cursor_pointer()
+        .hover(move |row| row.text_color(fg))
+        .child(icon.flex_none().size(px(11.)))
+        .child(div().min_w_0().truncate().child(summary))
+        .on_press(cx, move |_, _, cx| cx.open_url(&url))
+}
+
 fn icon_button(id: impl Into<ElementId>, icon: &'static str, label: String) -> Button {
     Button::new(id, label.clone())
         .icon(icon)
