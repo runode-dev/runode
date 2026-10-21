@@ -767,6 +767,7 @@ kanban:
   finish: Mark as done
   reopen: Mark as not done
   edit: Edit Task
+  in_review: "In review"
   create_pr: "Push branch and open PR"
   remove_todo: Delete task
   remove_title: "Delete “%{title}”?"

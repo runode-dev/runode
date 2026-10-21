@@ -767,6 +767,7 @@ kanban:
   finish: 標為完成
   reopen: 取消完成
   edit: 編輯任務
+  in_review: "待審查"
   create_pr: "推送分支並開 PR"
   remove_todo: 刪除任務
   remove_title: "刪除「%{title}」？"

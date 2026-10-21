@@ -1,5 +1,6 @@
-//! 任务分支上的 PR：看板开着时隔 `POLL` 经用户自己装的 gh 读一次各任务分支上的 PR，卡片上显示；还没有
-//! PR 的可以把分支推上去开一个（`Kanban::create_pull_request`）。gh 没装、没登录、仓库不在 GitHub 上时读不到，
+//! 任务分支上的 PR：看板开着时隔 `POLL` 经用户自己装的 gh 读一次各任务分支上的 PR，卡片上显示；PR 合并了的
+//! 任务标成完成，宿主随后照常收掉它的终端、工作树和分支。还没有 PR 的可以把分支推上去开一个
+//! （`Kanban::create_pull_request`）。gh 没装、没登录、仓库不在 GitHub 上时读不到，
 //! 卡片上就不显示，不报错。
 
 use std::{collections::HashMap, ffi::OsString, path::PathBuf, time::Duration};
@@ -37,6 +38,9 @@ pub(super) fn poll(cx: &mut Context<Kanban>) -> Task<()> {
                 for (id, found) in found {
                     match found {
                         Ok(Some(pr)) => {
+                            if pr.state == "MERGED" {
+                                this.finish_merged(&id, cx);
+                            }
                             this.pulls.insert(id, pr);
                         }
                         Ok(None) => {
@@ -77,6 +81,14 @@ fn create(worktree: PathBuf, branch: String, path: Option<OsString>) -> Result<O
 }
 
 impl Kanban {
+    /// PR 合并了：还没完成的任务标成完成。每个任务在这个看板里只标一次，用户取消完成后不再标回去。
+    fn finish_merged(&mut self, id: &str, cx: &mut Context<Self>) {
+        let open = store::data(cx).todos.iter().any(|todo| todo.id == id && todo.done_at.is_none());
+        if open && self.merged.insert(id.to_owned()) {
+            self.finish_todo(id.to_owned(), true, cx);
+        }
+    }
+
     /// 把任务的分支推上去开 PR，顶上的提示条说办没办成。只给还有工作树和分支的任务。
     pub(super) fn create_pull_request(&mut self, todo: &Todo, cx: &mut Context<Self>) {
         let (Some(worktree), Some(branch)) = (todo.worktree_dir.clone(), todo.branch.clone()) else {

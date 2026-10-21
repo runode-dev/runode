@@ -34,7 +34,7 @@ use std::{
 
 use crate::ui::{
     a11y::Press,
-    badge::Badge,
+    badge::{Badge, BadgeVariant},
     base_name,
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{self, FontSize, scaled},
@@ -151,6 +151,8 @@ pub struct Kanban {
     dialog: Option<(Entity<TodoDialog>, Subscription)>,
     /// 各任务分支上的 PR，见 `pulls`。
     pulls: pulls::Pulls,
+    /// PR 合并后标成完成过的任务，见 `pulls`。
+    merged: std::collections::HashSet<String>,
     _poll_pulls: gpui::Task<()>,
 }
 
@@ -313,6 +315,7 @@ impl Kanban {
             marks,
             dialog: None,
             pulls: pulls::Pulls::new(),
+            merged: std::collections::HashSet::new(),
             _poll_pulls: pulls::poll(cx),
         }
     }
@@ -974,6 +977,9 @@ impl Kanban {
             .child(place_badge(&place))
             .child(div().min_w_0().truncate().child(place))
             .child(div().flex_1())
+            .when(self.in_review(todo, data, now), |row| {
+                row.child(Badge::new(rust_i18n::t!("kanban.in_review").into_owned()).variant(BadgeVariant::Secondary))
+            })
             .children(corner)
             // 没有编号（0）时不写。
             .when(todo.number > 0, |row| row.child(div().flex_none().child(format!("#{}", todo.number))));
@@ -1026,6 +1032,14 @@ impl Kanban {
             .child(bottom)
     }
 
+    /// 待评审：在「需要你」那一列、分支上的 PR 开着、agent 也没在等回答，要用户去看的是 PR。
+    fn in_review(&self, todo: &Todo, data: &TodoData, now: u64) -> bool {
+        let session = todo.session.and_then(|id| data.sessions.get(&id));
+        column(todo, session, now) == Column::NeedsYou
+            && !session.and_then(|info| info.meta.agent).is_some_and(Agent::is_blocked)
+            && self.pulls.get(&todo.id).is_some_and(|pr| pr.state == "OPEN" && !pr.is_draft)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_card(
         &self,
@@ -1047,7 +1061,8 @@ impl Kanban {
         let from = schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned());
         let pull = self.pulls.get(&todo.id).map(pull_summary);
         let line2: Vec<String> = [Some(place), todo.branch.clone(), pull].into_iter().flatten().collect();
-        let line3: Vec<String> = [Some(status), started, from].into_iter().flatten().collect();
+        let review = self.in_review(todo, data, now).then(|| rust_i18n::t!("kanban.in_review").into_owned());
+        let line3: Vec<String> = [review, Some(status), started, from].into_iter().flatten().collect();
         let number = if todo.number > 0 { format!("#{}", todo.number) } else { String::new() };
         let description =
             [number, line2.join(" · "), line3.join(" · "), rust_i18n::t!("kanban.reorder_hint").into_owned()]
