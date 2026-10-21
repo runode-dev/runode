@@ -182,10 +182,14 @@ impl TerminalView {
             start: false,
             shell: None,
             settings: None,
-            resume,
+            resume: resume.clone(),
         })?;
         let (screen, rx) = connect(id, &config.term_settings())?;
-        Ok(cx.new(|cx| Self::new(Some(id), screen, false, rx, window, cx)))
+        Ok(cx.new(|cx| {
+            let mut view = Self::new(Some(id), screen, false, rx, window, cx);
+            view.start_resume = resume;
+            view
+        }))
     }
 
     /// 建好视图但还不在宿主里开会话：不开伪终端、不起会话线程、不建 VT，回到显示
@@ -232,7 +236,7 @@ impl TerminalView {
             start,
             shell: None,
             settings: None,
-            resume: self.start_resume.take(),
+            resume: self.start_resume.clone(),
         });
         match spawned {
             Ok(id) => {
@@ -411,6 +415,9 @@ impl TerminalView {
             cx.emit(TerminalEvent::TitleChanged);
         }
         if changes.meta_changed {
+            if self.screen.meta().agent.is_some() {
+                self.start_resume = None;
+            }
             cx.emit(TerminalEvent::MetaChanged);
         }
         if changes.agent_changed {
@@ -939,6 +946,11 @@ impl TerminalView {
     pub fn title(&self) -> &str {
         let meta = self.screen.meta();
         meta.title.as_deref().or(meta.fallback_title.as_deref()).unwrap_or(DEFAULT_TITLE)
+    }
+
+    /// 前台 agent 在进行的对话，写进窗口存档；恢复出来、agent 还没起来的终端是要接回的那场。
+    pub fn conversation(&self) -> Option<Conversation> {
+        self.screen.meta().conversation.clone().or_else(|| self.start_resume.clone())
     }
 
     /// 前台 agent 在标题里报告的状态；不是 agent 在前台时为 `None`。

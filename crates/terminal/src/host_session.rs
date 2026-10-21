@@ -838,9 +838,15 @@ fn register_callbacks(
         .on_desktop_notification({
             let effects = effects.clone();
             move |_, notification| {
-                let mut pending = effects.notifications.borrow_mut();
-                if pending.len() < MAX_NOTIFICATIONS {
-                    pending.push((notification_text(notification.title()), notification_text(notification.body())));
+                let now = Instant::now();
+                let (since, count) = match effects.notify_window.get() {
+                    Some((since, count)) if now.saturating_duration_since(since) < NOTIFY_WINDOW => (since, count),
+                    _ => (now, 0),
+                };
+                effects.notify_window.set(Some((since, count.saturating_add(1))));
+                if count < MAX_NOTIFICATIONS {
+                    let text = (notification_text(notification.title()), notification_text(notification.body()));
+                    effects.notifications.borrow_mut().push(text);
                 }
             }
         })?
@@ -937,8 +943,9 @@ fn register_callbacks(
 /// `SessionMeta::driver` 的时刻最多这么久更新一次，毫秒。
 const DRIVER_RESOLUTION_MS: u64 = 1000;
 
-/// 两次取走之间最多攒这么多条桌面通知，再多的丢掉：刷屏的程序不该刷出一串通知。
+/// 每 `NOTIFY_WINDOW` 最多转这么多条桌面通知，再多的丢掉：循环发通知的程序不该刷出一串系统通知。
 const MAX_NOTIFICATIONS: usize = 4;
+const NOTIFY_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
 /// 通知的标题和正文各留这么多个字符。
 const MAX_NOTIFICATION_CHARS: usize = 256;
 
@@ -972,6 +979,18 @@ fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> 
 mod tests {
     use super::*;
     use crate::testing::*;
+
+    /// 循环发通知的程序在一段时间里只转出 `MAX_NOTIFICATIONS` 条，不管分了几块输出。
+    #[test]
+    fn notifications_are_rate_limited_across_chunks() {
+        let mut session = idle_host();
+        session.feed(b"\x1b]9;one\x07\x1b]777;notify;T;two\x07");
+        assert_eq!(session.take_notifications(), [(String::new(), "one".into()), ("T".into(), "two".into())]);
+        for _ in 0..MAX_NOTIFICATIONS {
+            session.feed(b"\x1b]9;more\x07");
+        }
+        assert_eq!(session.take_notifications().len(), MAX_NOTIFICATIONS - 2);
+    }
 
     /// 回滚历史的字节上限随主题一起变，开着的终端也立刻按新上限来；0 表示不留回滚历史。
     #[test]

@@ -14,6 +14,8 @@ use crate::github_actions::gh::{Gh, PullRequest};
 
 /// 隔多久重读一次。
 const POLL: Duration = Duration::from_secs(60);
+/// 看板建好后等这么久再读第一次：app 在第一次画之前才交进 `Input`，那之前没有找 gh 用的 PATH。
+const FIRST_POLL: Duration = Duration::from_millis(500);
 
 /// 各任务（按标识）分支上的 PR。
 pub(super) type Pulls = HashMap<String, PullRequest>;
@@ -26,6 +28,7 @@ fn target(todo: &Todo) -> Option<(String, PathBuf, String)> {
 /// 一直隔 `POLL` 读一次，看板丢掉时随返回的任务一起停。读不到的保留上次的。
 pub(super) fn poll(cx: &mut Context<Kanban>) -> Task<()> {
     cx.spawn(async move |this, cx| {
+        cx.background_executor().timer(FIRST_POLL).await;
         loop {
             let Ok((targets, path)) = this.update(cx, |this, cx| {
                 let targets: Vec<_> = store::data(cx).todos.iter().filter_map(target).collect();

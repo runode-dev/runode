@@ -612,7 +612,7 @@ impl WindowView {
                     cwd,
                     session: view.session_id(),
                     unstarted: !view.started(),
-                    conversation: view.meta().conversation.clone(),
+                    conversation: view.conversation(),
                 }
             }
             Node::Split(split) => SavedNode::Split {

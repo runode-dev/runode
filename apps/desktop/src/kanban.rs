@@ -1652,7 +1652,6 @@ fn column_color(column: Column, fg: Hsla) -> Hsla {
     }
 }
 
-/// 看板上的图标按钮：`label` 是辅助工具读的名字，也是悬停的提示。
 /// PR 的说法：编号，不是开着的写状态，开着的写检查和评审。
 fn pull_summary(pr: &PullRequest) -> String {
     let state = match pr.state.as_str() {
@@ -1711,6 +1710,7 @@ fn pull_row(pr: &PullRequest, todo: &str, cx: &mut Context<Kanban>) -> Stateful<
         .on_press(cx, move |_, _, cx| cx.open_url(&url))
 }
 
+/// 看板上的图标按钮：`label` 是辅助工具读的名字，也是悬停的提示。
 fn icon_button(id: impl Into<ElementId>, icon: &'static str, label: String) -> Button {
     Button::new(id, label.clone())
         .icon(icon)

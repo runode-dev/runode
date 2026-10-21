@@ -487,8 +487,6 @@ impl PreviewPanel {
         }
     }
 
-    /// 块头上的按钮：暂存、丢掉或取消暂存这一块，交给 app 做（`PreviewEvent::ApplyHunk`）。丢掉先问一下。
-    /// 用的是这次读到的块，文件在这之后又改过时 git 认不出来，报错后跟着扫描重读即可。
     /// 块头上的按钮：`action` 为空的是「交给 agent」，把这一块连同路径和行号贴进当前终端（`PreviewEvent::Quote`）。
     fn hunk_button(&mut self, hunk: usize, action: Option<HunkAction>, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(action) = action {
@@ -506,6 +504,8 @@ impl PreviewPanel {
         }
     }
 
+    /// 暂存、丢掉或取消暂存这一块，交给 app 做（`PreviewEvent::ApplyHunk`）。丢掉先问一下。
+    /// 用的是这次读到的块，文件在这之后又改过时 git 认不出来，报错后跟着扫描重读即可。
     fn diff_hunk_action(&mut self, hunk: usize, action: HunkAction, window: &mut Window, cx: &mut Context<Self>) {
         let Some(preview) = self.preview() else {
             return;
