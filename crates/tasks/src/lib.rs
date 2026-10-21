@@ -1,6 +1,6 @@
-//! 列一个目录里能跑的命令（`list`）：先是 runode 根目录的 `tasks.json` 里自己加的、这个目录所在
-//! 项目的和通用的命令，再从目录往上找最近的 Makefile 和 package.json，读出目标和 scripts，拼好在这个
-//! 目录里能直接跑的命令行。宿主用它回 `ClientMsg::ListTasks`，手机在会话卡片上、桌面在标题栏的
+//! 列一个目录里能跑的命令（`list`），以及看板新开的工作树先跑什么（`worktree_setup`）。`list` 先列
+//! runode 根目录的 `tasks.json` 里自己加的、这个目录所在项目的和通用的命令，再从目录往上找最近的
+//! Makefile 和 package.json，读出目标和 scripts，拼好在这个目录里能直接跑的命令行。宿主用它回 `ClientMsg::ListTasks`，手机在会话卡片上、桌面在标题栏的
 //! 菜单里列出来。只读几个小文件，但在断掉的网络挂载上也会一直卡住，调用方别在要及时响应的线程上调。
 
 use std::{
@@ -107,12 +107,7 @@ fn custom_sources(text: &str, file: &Path, dir: &Path) -> Vec<TaskSource> {
             .collect();
         (!tasks.is_empty()).then(|| TaskSource { kind, file: file.to_path_buf(), project, tasks, truncated })
     };
-    let projects = json.get("projects").and_then(serde_json::Value::as_object);
-    let project = projects
-        .into_iter()
-        .flatten()
-        .filter(|(at, _)| dir.starts_with(at))
-        .max_by_key(|(at, _)| Path::new(at).components().count());
+    let project = deepest(json.get("projects"), dir);
     let global = json.get("global").and_then(serde_json::Value::as_object);
     [
         project.and_then(|(at, tasks)| source(TaskSourceKind::Custom, Some(PathBuf::from(at)), tasks.as_object())),
@@ -121,6 +116,28 @@ fn custom_sources(text: &str, file: &Path, dir: &Path) -> Vec<TaskSource> {
     .into_iter()
     .flatten()
     .collect()
+}
+
+/// 给看板新开的工作树先跑的命令：`tasks.json` 的 `setup` 里给 `dir`（任务的目录）自己或上级的、最深的
+/// 那一项，在工作树里跑。没有文件、读不懂、没配时为 `None`。和 `list` 一样会读文件。
+pub fn worktree_setup(dir: &Path) -> Option<String> {
+    let text = read_small(&runode_paths::Dirs::from_env().tasks_file()?)?;
+    setup_in(&text, dir)
+}
+
+fn setup_in(text: &str, dir: &Path) -> Option<String> {
+    let json = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    let line = deepest(json.get("setup"), dir)?.1.as_str()?.trim();
+    (!line.is_empty()).then(|| line.to_owned())
+}
+
+/// 按目录分份的表 `table` 里给 `dir` 的那份：键是 `dir` 自己或上级的、最深的那个。
+fn deepest<'a>(table: Option<&'a serde_json::Value>, dir: &Path) -> Option<(&'a String, &'a serde_json::Value)> {
+    table?
+        .as_object()?
+        .iter()
+        .filter(|(at, _)| dir.starts_with(at))
+        .max_by_key(|(at, _)| Path::new(at).components().count())
 }
 
 /// 往上找的目录：从 `dir` 起，到家目录为止（`dir` 在家目录里时），否则到根目录。
@@ -245,6 +262,18 @@ fn quote(word: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// setup 取最深的那个项目；空的和不是字符串的当没配。
+    #[test]
+    fn setup_picks_the_deepest_project() {
+        let text = r#"{"setup": {"/w": "make deps", "/w/app": " pnpm install ", "/w/empty": " ", "/w/n": 1}}"#;
+        assert_eq!(setup_in(text, Path::new("/w/app/src")).as_deref(), Some("pnpm install"));
+        assert_eq!(setup_in(text, Path::new("/w/lib")).as_deref(), Some("make deps"));
+        assert_eq!(setup_in(text, Path::new("/w/empty")), None);
+        assert_eq!(setup_in(text, Path::new("/w/n")), None);
+        assert_eq!(setup_in(text, Path::new("/elsewhere")), None);
+        assert_eq!(setup_in("{", Path::new("/w")), None);
+    }
 
     /// 取最深的那个项目，在项目目录里跑；通用的在请求的目录里跑；值不是字符串的跳过，没有命令的那份不给。
     #[test]

@@ -22,7 +22,10 @@ runode todo add 'Update the CLI docs' --agent 'codex --full-auto' --prompt '...'
 
 - `--cwd DIR` picks the repository or directory (default: the current one).
   The worktree is made from it; outside a git repository the task works in
-  DIR itself, and `--no-worktree` asks for that inside one too.
+  DIR itself, and `--no-worktree` asks for that inside one too. If
+  `~/.runode/tasks.json` has a `setup` entry for the project
+  (`"setup": {"/path/to/repo": "pnpm install"}`), a fresh worktree runs it
+  first and the agent starts only if it succeeds.
 - `--agent CMD` is the command the prompt is given to (default `claude`).
 - Without `--start` the task waits in the todo column for the user to start
   it. `--start` starts it at once and prints the task id, then the id of the

@@ -32,6 +32,9 @@ use crate::{Host, Shared, server::REPLY_TIMEOUT, session::Inbox, workspaces::spa
 /// 宿主给任务会话的 shell 设的环境变量：交给 agent 的提示词。
 const ENV_TODO_PROMPT: &str = "RUNODE_TODO_PROMPT";
 
+/// 宿主给新开了工作树的任务会话的 shell 设的环境变量：起 agent 之前先跑的命令（`runode_tasks::worktree_setup`）。
+const ENV_TODO_SETUP: &str = "RUNODE_TODO_SETUP";
+
 /// 提示词最长这么多字节：它要放进环境变量，系统给参数和环境变量的空间有限。
 const MAX_PROMPT: usize = 64 * 1024;
 
@@ -540,7 +543,9 @@ impl Shared {
             }
         };
         let instructions = todo.spec.instructions();
-        let env = [(ENV_TODO_PROMPT, instructions.as_str())];
+        let setup = made.as_ref().and_then(|_| runode_tasks::worktree_setup(&todo.spec.dir));
+        let mut env = vec![(ENV_TODO_PROMPT, instructions.as_str())];
+        env.extend(setup.as_deref().map(|setup| (ENV_TODO_SETUP, setup)));
         let session = match self.spawn_with(spawn_options(Some(cwd)), &env) {
             Ok(session) => session,
             Err(err) => {
@@ -552,7 +557,7 @@ impl Shared {
         let started = unix_now();
         let agent =
             runode_agent::models::start_command(&agent_with_options(&todo.spec), &agent_session(&todo.id, started));
-        let command = agent_command(&agent, &runode_terminal::pty::default_shell());
+        let command = agent_command(&agent, &runode_terminal::pty::default_shell(), setup.is_some());
         self.deliver(session, Inbox::TypeAtPrompt(command.into_bytes()));
         let worktree = made.as_ref().map(|(root, branch)| (root.as_path(), branch.as_str()));
         if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, started, session, worktree)) {
@@ -566,14 +571,18 @@ impl Shared {
 }
 
 /// 在 `shell` 的提示符上打的命令：跑 `agent`，提示词取自环境变量 `ENV_TODO_PROMPT`、整个当一个参数。
-/// nushell、elvish 不在双引号里展开 `$名字`，取环境变量也各有写法。
-fn agent_command(agent: &str, shell: &str) -> String {
-    let prompt = match Shell::detect(shell) {
-        Some(Shell::Nushell) => format!("$env.{ENV_TODO_PROMPT}"),
-        Some(Shell::Elvish) => format!("$E:{ENV_TODO_PROMPT}"),
-        _ => format!("\"${ENV_TODO_PROMPT}\""),
+/// `setup` 时先用 `sh -c` 跑环境变量 `ENV_TODO_SETUP` 里的命令，成功了才跑 agent。nushell、elvish 不在
+/// 双引号里展开 `$名字`，取环境变量也各有写法，也没有 `&&`：外部命令失败时它们自己停下后面的命令。
+fn agent_command(agent: &str, shell: &str, setup: bool) -> String {
+    let shell = Shell::detect(shell);
+    let var = |name: &str| match shell {
+        Some(Shell::Nushell) => format!("$env.{name}"),
+        Some(Shell::Elvish) => format!("$E:{name}"),
+        _ => format!("\"${name}\""),
     };
-    format!("{agent} {prompt}\r")
+    let then = if matches!(shell, Some(Shell::Nushell | Shell::Elvish)) { "; " } else { " && " };
+    let setup = if setup { format!("sh -c {}{then}", var(ENV_TODO_SETUP)) } else { String::new() };
+    format!("{setup}{agent} {}\r", var(ENV_TODO_PROMPT))
 }
 
 /// 任务要跑的 agent 命令，带上免确认和自定义 agent 的参数（`runode_agent::models::with_options`）。
@@ -760,10 +769,18 @@ mod tests {
 
     #[test]
     fn agent_commands_read_the_prompt_the_way_each_shell_does() {
-        assert_eq!(agent_command("claude", "/bin/zsh"), "claude \"$RUNODE_TODO_PROMPT\"\r");
-        assert_eq!(agent_command("claude", "/opt/homebrew/bin/fish"), "claude \"$RUNODE_TODO_PROMPT\"\r");
-        assert_eq!(agent_command("codex --full-auto", "-nu"), "codex --full-auto $env.RUNODE_TODO_PROMPT\r");
-        assert_eq!(agent_command("claude", "/usr/local/bin/elvish"), "claude $E:RUNODE_TODO_PROMPT\r");
+        assert_eq!(agent_command("claude", "/bin/zsh", false), "claude \"$RUNODE_TODO_PROMPT\"\r");
+        assert_eq!(agent_command("claude", "/opt/homebrew/bin/fish", false), "claude \"$RUNODE_TODO_PROMPT\"\r");
+        assert_eq!(agent_command("codex --full-auto", "-nu", false), "codex --full-auto $env.RUNODE_TODO_PROMPT\r");
+        assert_eq!(agent_command("claude", "/usr/local/bin/elvish", false), "claude $E:RUNODE_TODO_PROMPT\r");
+        assert_eq!(
+            agent_command("claude", "/bin/zsh", true),
+            "sh -c \"$RUNODE_TODO_SETUP\" && claude \"$RUNODE_TODO_PROMPT\"\r"
+        );
+        assert_eq!(
+            agent_command("claude", "/usr/bin/nu", true),
+            "sh -c $env.RUNODE_TODO_SETUP; claude $env.RUNODE_TODO_PROMPT\r"
+        );
     }
 
     #[test]
