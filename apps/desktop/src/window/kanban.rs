@@ -67,7 +67,7 @@ fn best_workspace(dirs: &[&Path], dir: &Path, worktree: Option<&Path>, home: Opt
 }
 
 impl WindowView {
-    /// 打开或收起看板；开着的是定时页时换到任务页，开着新建、编辑任务那一页时回到看板（当作取消）。
+    /// 打开或收起看板；开着的是定时页时换到任务页，开着新建、编辑任务那一页时回到看板（`close_todo_page`）。
     pub(super) fn toggle_kanban(&mut self, _: &ToggleKanban, window: &mut Window, cx: &mut Context<Self>) {
         if self.todo_dialog(cx).is_some() || self.close_todo_page(window, cx) {
             return;
@@ -79,7 +79,7 @@ impl WindowView {
         }
     }
 
-    /// 打开或收起定时页；开着的是任务页（或新建、编辑任务那一页，当作取消）时换到定时页。
+    /// 打开或收起定时页；开着的是任务页（或新建、编辑任务那一页，`close_todo_page`）时换到定时页。
     pub(super) fn toggle_schedules(&mut self, _: &ToggleSchedules, window: &mut Window, cx: &mut Context<Self>) {
         if self.todo_dialog(cx).is_some() {
             return;
@@ -92,33 +92,50 @@ impl WindowView {
         }
     }
 
-    /// 打开看板的任务页，弹出新建任务的对话框。
+    /// 打开新建任务那一页，上回离开时写到一半的接着写。看板没开着时它单独占着这一页，取消就收起，存好了才露出看板。
     pub(super) fn new_todo(&mut self, _: &NewTodo, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog_open(cx) {
+        if !self.leave_todo_page(window, cx) {
             return;
         }
+        let alone = self.kanban.is_none();
         self.show_kanban(false, window, cx);
+        let draft = self.todo_draft.take();
         if let Some(board) = &self.kanban {
-            board.view.update(cx, |board, cx| board.new_todo(window, cx));
+            board.view.update(cx, |board, cx| board.new_todo(alone, draft, window, cx));
         }
     }
 
-    /// 看板的新建、编辑对话框或任务那一页开着。窗口的快捷键在里面照样触发，换页、收起或再开一个
-    /// 会丢掉写了一半的内容，所以经 `act` 派发的动作、`ClosePane`、打开设置页和 `open_dropped_dirs`
-    /// 都不理（看板、定时的入口除外，见 `toggle_kanban`）。
+    /// 用户要去别处：写到一半的新建任务那一页收起来留着（`todo_draft`），露出看板；开着别的对话框或页时为假，
+    /// 留在原处，免得丢掉写了一半的内容。
+    pub(super) fn leave_todo_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) else { return true };
+        if let Some(draft) = board.update(cx, |board, cx| board.take_draft(window, cx)) {
+            self.todo_draft = Some(draft);
+        }
+        !self.dialog_open(cx)
+    }
+
+    /// 看板的新建、编辑对话框或任务那一页开着：换页、收起或再开一个会丢掉写了一半的内容。
     pub(super) fn dialog_open(&self, cx: &App) -> bool {
         self.kanban.as_ref().is_some_and(|board| board.view.read(cx).editing())
     }
 
-    /// 关掉看板里新建、编辑任务那一页；没开着时为假。
+    /// 关掉看板里新建、编辑任务那一页，新建的收起来留着；没开着时为假。
     fn close_todo_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(board) = &self.kanban else { return false };
-        board.view.update(cx, |board, cx| board.close_page(window, cx))
+        let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) else { return false };
+        if let Some(draft) = board.update(cx, |board, cx| board.take_draft(window, cx)) {
+            self.todo_draft = Some(draft);
+            return true;
+        }
+        board.update(cx, |board, cx| board.close_page(window, cx))
     }
 
-    /// 看板开着，显示的是定时页（`schedules`）或任务页。
+    /// 看板开着，显示的是定时页（`schedules`）或任务页；只为新建任务开着时都不算。
     fn showing_todo_page(&self, schedules: bool, cx: &App) -> bool {
-        self.kanban.as_ref().is_some_and(|board| board.view.read(cx).showing_schedules() == schedules)
+        self.kanban.as_ref().is_some_and(|board| {
+            let board = board.view.read(cx);
+            !board.creating() && board.showing_schedules() == schedules
+        })
     }
 
     /// 打开看板的定时页（`schedules`）或任务页，焦点给它。
@@ -219,10 +236,11 @@ impl WindowView {
         .detach();
     }
 
-    /// 侧栏顶上的新建任务入口：打开任务页，弹出新建任务的对话框。
+    /// 侧栏顶上的新建任务入口，只为新建任务开着那一页时高亮。
     pub(super) fn render_new_todo_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("kanban.new_todo").into_owned();
-        super::mobile::page_entry("new-todo-entry", PLUS_ICON, label.clone(), false, cx, |this, window, cx| {
+        let active = self.kanban.as_ref().is_some_and(|board| board.view.read(cx).creating());
+        super::mobile::page_entry("new-todo-entry", PLUS_ICON, label.clone(), active, cx, |this, window, cx| {
             this.new_todo(&NewTodo, window, cx);
         })
         .tooltip(tooltip(label, Some(&NewTodo)))
@@ -234,6 +252,7 @@ impl WindowView {
         let label = rust_i18n::t!("kanban.schedules").into_owned();
         let active = self.showing_todo_page(true, cx);
         super::mobile::page_entry("schedules-entry", CLOCK_ICON, label.clone(), active, cx, |this, window, cx| {
+            this.close_todo_page(window, cx);
             this.show_kanban(true, window, cx);
         })
         .tooltip(tooltip(label, Some(&ToggleSchedules)))
@@ -248,6 +267,7 @@ impl WindowView {
         let shortcut = entry_shortcut(&ToggleKanban, modifiers, cx);
         let pushed = shortcut.is_some();
         super::mobile::page_entry("kanban-entry", KANBAN_ICON, label.clone(), active, cx, |this, window, cx| {
+            this.close_todo_page(window, cx);
             this.show_kanban(false, window, cx);
         })
         .tooltip(tooltip(label, Some(&ToggleKanban)))

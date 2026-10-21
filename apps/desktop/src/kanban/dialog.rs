@@ -884,6 +884,16 @@ impl TodoDialog {
 
     /// 按对话框里填的发请求；填得不对时在对话框里说。宿主办成了就关掉对话框，`start` 时交给看板接着开始；
     /// 没办成时说原因。
+    /// 是写到一半的新建任务那一页，离开时能收起来留着；正在存的不算。
+    pub(crate) fn draft(&self) -> bool {
+        self.page && self.editing.is_none() && !self.saving
+    }
+
+    /// 标题输入框的焦点，收起来的那一页重新摆出来时交给它。
+    pub(crate) fn title_focus(&self, cx: &App) -> FocusHandle {
+        self.title.focus_handle(cx)
+    }
+
     fn save(&mut self, start: bool, cx: &mut Context<Self>) {
         if self.saving {
             return;

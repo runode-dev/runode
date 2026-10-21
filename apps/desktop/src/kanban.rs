@@ -149,6 +149,8 @@ pub struct Kanban {
     marks: AgentMarks,
     /// 开着的新建、编辑对话框。
     dialog: Option<(Entity<TodoDialog>, Subscription)>,
+    /// 看板只为新建任务那一页开着：取消时整个收起，存好了才露出看板。
+    alone: bool,
     /// 各任务分支上的 PR，见 `pulls`。
     pulls: pulls::Pulls,
     /// PR 合并后标成完成过的任务，见 `pulls`。
@@ -314,6 +316,7 @@ impl Kanban {
             input: Input::default(),
             marks,
             dialog: None,
+            alone: false,
             pulls: pulls::Pulls::new(),
             merged: std::collections::HashSet::new(),
             _poll_pulls: pulls::poll(cx),
@@ -345,6 +348,7 @@ impl Kanban {
             return false;
         }
         self.dialog = None;
+        self.alone = false;
         window.focus(&self.focus, cx);
         cx.notify();
         true
@@ -360,10 +364,39 @@ impl Kanban {
         self.set_page(if schedules { Page::Schedules } else { Page::Todos }, cx);
     }
 
-    /// 换到任务页，弹出新建任务的对话框：app 从侧栏的入口或快捷键打开时调。
-    pub fn new_todo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// 换到任务页，打开新建任务那一页，有收起来的（`draft`）就接着写：app 从侧栏的入口或快捷键打开时调。
+    /// `alone` 是看板只为这一页才开的，取消时发 `KanbanEvent::Close`。
+    pub fn new_todo(
+        &mut self,
+        alone: bool,
+        draft: Option<Entity<TodoDialog>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.set_page(Page::Todos, cx);
-        self.open_dialog(false, None, window, cx);
+        match draft {
+            Some(dialog) => {
+                let focus = dialog.read(cx).title_focus(cx);
+                window.focus(&focus, cx);
+                self.show_dialog(dialog, window, cx);
+            }
+            None => self.open_dialog(false, None, window, cx),
+        }
+        self.alone = alone;
+    }
+
+    /// 取下写到一半的新建任务那一页（`TodoDialog::draft`），露出看板：用户要去别处时 app 收起来留着。
+    pub fn take_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<TodoDialog>> {
+        let (dialog, _) = self.dialog.take_if(|(dialog, _)| dialog.read(cx).draft())?;
+        self.alone = false;
+        window.focus(&self.focus, cx);
+        cx.notify();
+        Some(dialog)
+    }
+
+    /// 显示着的是只为新建任务开的那一页，看板还没露出来。
+    pub fn creating(&self) -> bool {
+        self.alone
     }
 
     /// 换到记录页，只看定时 `schedule` 开出的（为空时看全部），从头翻。
@@ -434,11 +467,18 @@ impl Kanban {
     fn open_dialog(&mut self, schedule: bool, editing: Option<Editing>, window: &mut Window, cx: &mut Context<Self>) {
         let Input { workspaces, dir, shell_path, .. } = self.input.clone();
         let dialog = cx.new(|cx| TodoDialog::new(schedule, editing, dir, workspaces, shell_path, window, cx));
+        self.show_dialog(dialog, window, cx);
+    }
+
+    fn show_dialog(&mut self, dialog: Entity<TodoDialog>, window: &mut Window, cx: &mut Context<Self>) {
         let events = cx.subscribe_in(&dialog, window, |this, _, event: &DialogEvent, window, cx| {
             this.dialog = None;
-            if let DialogEvent::Saved { start: Some(id) } = event {
-                this.start_todo(id.clone(), cx);
+            match event {
+                DialogEvent::Dismissed if std::mem::take(&mut this.alone) => return cx.emit(KanbanEvent::Close),
+                DialogEvent::Saved { start: Some(id) } => this.start_todo(id.clone(), cx),
+                _ => {}
             }
+            this.alone = false;
             // 焦点在对话框的输入框里，对话框一丢就没了着落，看板的 Esc 也收不到：关掉、存好了都交回看板。
             window.focus(&this.focus, cx);
             cx.notify();

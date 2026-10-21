@@ -207,7 +207,7 @@ impl WindowView {
             return;
         };
         let name = name.to_owned();
-        if self.dialog_open(cx) {
+        if !self.leave_todo_page(window, cx) {
             return;
         }
         self.close_settings(window, cx);

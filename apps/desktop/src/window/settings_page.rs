@@ -37,7 +37,7 @@ pub(crate) fn show_settings(cx: &mut App) {
 impl WindowView {
     /// 打开设置页；已经开着时把焦点给它。
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog_open(cx) {
+        if !self.leave_todo_page(window, cx) {
             return;
         }
         self.leave_mobile(cx);
@@ -55,13 +55,13 @@ impl WindowView {
         cx.notify();
     }
 
-    /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板的对话框开着时不理（见 `dialog_open`）。
+    /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板的对话框开着时不理（见 `leave_todo_page`）。
     pub(super) fn act<A: Action>(
         cx: &mut Context<Self>,
         f: fn(&mut Self, &A, &mut Window, &mut Context<Self>),
     ) -> impl Fn(&A, &mut Window, &mut App) + 'static {
         cx.listener(move |this, action, window, cx| {
-            if this.dialog_open(cx) {
+            if !this.leave_todo_page(window, cx) {
                 return;
             }
             this.close_settings(window, cx);

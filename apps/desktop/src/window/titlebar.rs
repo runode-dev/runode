@@ -218,7 +218,9 @@ impl WindowView {
     /// 切到当前 workspace 里的标签 `id`。点标签时按 id 找：画出标签条以后标签可能已经增删、挪了位置，
     /// 也可能换了 workspace，照画的时候的序号会切到别的标签上，甚至越界。
     fn activate_tab_id(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(ix) = self.workspace().tabs.iter().position(|tab| tab.id == id) {
+        if let Some(ix) = self.workspace().tabs.iter().position(|tab| tab.id == id)
+            && self.leave_todo_page(window, cx)
+        {
             self.activate(ix, window, cx);
         }
     }

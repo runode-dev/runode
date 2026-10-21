@@ -362,6 +362,9 @@ impl WindowView {
                     // 按 id 找行号：画出这一行以后 workspace 可能已经增删、挪了位置（手机端、命令行开关的），
                     // 照画的时候的行号会切到别的 workspace 上，甚至越界。
                     let Some(ix) = this.workspaces.iter().position(|w| w.id == id) else { return };
+                    if !this.leave_todo_page(window, cx) {
+                        return;
+                    }
                     if event.click_count >= 2 {
                         this.start_rename(ix, window, cx);
                     } else {
@@ -371,7 +374,9 @@ impl WindowView {
             )
             // 按下要看双击，用不了 `PressDown`；辅助工具按下时就是单击切过去，改名走菜单里的「重命名」。
             .on_a11y_press(view, move |this, window, cx| {
-                if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {
+                if let Some(ix) = this.workspaces.iter().position(|w| w.id == id)
+                    && this.leave_todo_page(window, cx)
+                {
                     this.activate_workspace(ix, window, cx);
                 }
             })

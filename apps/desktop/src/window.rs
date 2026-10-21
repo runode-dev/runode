@@ -270,6 +270,8 @@ pub struct WindowView {
     settings: Option<settings_page::SettingsPage>,
     /// 开着的看板，和手机端引导页一样盖住标签和分屏；新建、编辑任务和定时的对话框。
     kanban: Option<kanban::OpenKanban>,
+    /// 离开时收起来的写到一半的新建任务那一页，下回新建任务时接着写。
+    todo_draft: Option<Entity<crate::kanban::TodoDialog>>,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
     empty_focus: FocusHandle,
     /// 开着的 agent 列表。
@@ -445,6 +447,7 @@ impl WindowView {
             mobile: None,
             settings: None,
             kanban: None,
+            todo_draft: None,
             empty_focus: cx.focus_handle(),
             agent_picker: None,
             arrange_picker: None,
@@ -749,7 +752,7 @@ impl Render for WindowView {
                 if this.settings.is_some() {
                     this.close_settings(window, cx);
                 } else if this.kanban.is_some() {
-                    if !this.dialog_open(cx) {
+                    if this.leave_todo_page(window, cx) {
                         this.close_kanban(window, cx);
                     }
                 } else if this.mobile.is_some() {
@@ -839,7 +842,7 @@ fn covered_panes(panes: AnyElement, covered: bool) -> Stateful<Div> {
 impl WindowView {
     /// 从访达拖来的文件夹各开一个 workspace，已经开着的就切过去；文件不算。
     fn open_dropped_dirs(&mut self, dropped: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog_open(cx) {
+        if !self.leave_todo_page(window, cx) {
             return;
         }
         let paths = dropped.paths().to_vec();

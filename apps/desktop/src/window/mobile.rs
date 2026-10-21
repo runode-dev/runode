@@ -87,6 +87,7 @@ pub(crate) fn show_pairing(cx: &mut App) {
 impl WindowView {
     /// 打开手机端引导页；已经开着时把焦点给它。
     pub(super) fn show_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave_todo_page(window, cx);
         self.drop_settings(cx);
         self.kanban = None;
         if self.mobile.is_none() {
