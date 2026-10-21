@@ -7,12 +7,14 @@
 
     /// 一台电脑上的会话，按工作区分节（分节见 `SessionListModel.sections`），节头能新开终端、长按改名。
     /// 一个会话一张卡片，带 agent 状态和屏幕最后几行的预览，等你回答的带快速回复；点开终端，左滑结束，
-    /// 长按有更多操作。有会话等你回答时列表顶上汇总一张卡片。右上角新开终端、新建工作区。
+    /// 长按有更多操作。有会话等你回答时列表顶上汇总一张卡片。右上角新开终端、新建工作区，打开远程桌面。
     struct SessionListView: View {
         @Bindable var model: SessionListModel
         let onOpen: (SessionId) -> Void
         /// 打开会话所在仓库的 Git 页。
         var onOpenGit: (SessionId) -> Void = { _ in }
+        /// 打开这台电脑的远程桌面；为空时没有这个入口。
+        var onOpenScreen: (() -> Void)? = nil
         /// 设置里的手动字号，为空时跟随动态字体。
         var fontSize: Double? = nil
         @Environment(\.displayScale) private var displayScale
@@ -98,6 +100,12 @@
             }
             .leadingNavigationTitle(model.machine.name, subtitle: linkSubtitle)
             .toolbar {
+                if let onOpenScreen {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("远程桌面", systemImage: "display", action: onOpenScreen)
+                            .disabled(!model.linkState.isConnected)
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Menu("新建", systemImage: "plus") {
                         let choices = model.spawnChoices

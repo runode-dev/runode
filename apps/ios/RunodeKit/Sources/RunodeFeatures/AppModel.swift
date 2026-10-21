@@ -11,11 +11,13 @@ public enum Route: Hashable, Sendable {
     case terminal(machine: UUID, session: SessionId)
     /// 一个会话所在仓库的 Git 页。
     case git(machine: UUID, session: SessionId)
+    /// 一台电脑的远程桌面。
+    case screen(UUID)
 
     /// 这一页属于哪台电脑。
     public var machine: UUID {
         switch self {
-        case .machine(let machine), .terminal(let machine, _), .git(let machine, _): machine
+        case .machine(let machine), .terminal(let machine, _), .git(let machine, _), .screen(let machine): machine
         }
     }
 }
@@ -39,6 +41,10 @@ public struct AppDependencies {
     public var notifications: (any PushNotifications)?
     /// 登记推送时报给电脑的 App 身份，App 入口从 Info.plist 读；为空时不登记推送。
     public var pushIdentity: PushIdentity?
+    /// 连上一台电脑的远程桌面；为空时没有远程桌面的入口（测试、演示模式）。
+    public var openScreen: ScreenOpener?
+    /// 远程桌面里解锁电脑用的登录密码存在哪里；为空时每次都要用户输。
+    public var unlockPasswords: (any UnlockPasswordStore)?
 
     @MainActor
     public init(
@@ -58,6 +64,8 @@ public struct AppDependencies {
         self.themes = themes
         notifications = nil
         pushIdentity = nil
+        openScreen = nil
+        unlockPasswords = nil
     }
 }
 
@@ -94,6 +102,7 @@ public final class AppModel {
     @ObservationIgnored private var sessionLists: [UUID: SessionListModel] = [:]
     @ObservationIgnored private var terminals: [Route: TerminalModel] = [:]
     @ObservationIgnored private var gits: [Route: GitModel] = [:]
+    @ObservationIgnored private var screens: [Route: ScreenModel] = [:]
     /// 终端页上切过去的分屏：键是栈里的终端页，值是它现在显示的会话。切分屏不改导航栈：栈顶的值一变，
     /// SwiftUI 会把这一页工具栏上的按钮整组重建，右上角闪一下。
     private var panes: [Route: SessionId] = [:]
@@ -185,6 +194,29 @@ public final class AppModel {
         let model = GitModel(sessionId: session, link: list.link)
         gits[route] = model
         model.open()
+        return model
+    }
+
+    /// 有没有远程桌面可开。
+    public var canOpenScreen: Bool { dependencies.openScreen != nil }
+
+    /// 打开一台电脑的远程桌面，压在它的会话列表上面。
+    public func openScreen(machine: UUID) {
+        let route = Route.screen(machine)
+        if path.last == route { return }
+        if path.first == .machine(machine) {
+            path.append(route)
+        } else {
+            path = [.machine(machine), route]
+        }
+    }
+
+    public func screen(machine machineId: UUID) -> ScreenModel? {
+        let route = Route.screen(machineId)
+        if let existing = screens[route] { return existing }
+        guard let open = dependencies.openScreen, let machine = machineList.machine(machineId) else { return nil }
+        let model = ScreenModel(machine: machine, open: open, passwords: dependencies.unlockPasswords)
+        screens[route] = model
         return model
     }
 
@@ -372,6 +404,10 @@ public final class AppModel {
         for (route, model) in gits where !live.contains(route) {
             model.close()
             gits[route] = nil
+        }
+        for (route, model) in screens where !live.contains(route) {
+            model.close()
+            screens[route] = nil
         }
         if case .terminal(let machine, let session)? = path.last.map(shown) {
             remember(machine: machine, session: session)

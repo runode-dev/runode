@@ -25,6 +25,30 @@
         }
       }
     },
+    "NSFaceIDUsageDescription" : {
+      "comment" : "面容 ID 权限的说明，远程桌面里解锁电脑时取出记住的登录密码用。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock your locked Mac with the login password you saved."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取出记住的电脑登录密码，替你解开锁着屏的电脑。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取出記住的電腦登入密碼，替你解開鎖定的電腦。"
+          }
+        }
+      }
+    },
     "NSLocalNetworkUsageDescription" : {
       "comment" : "本地网络权限的说明。",
       "extractionState" : "manual",

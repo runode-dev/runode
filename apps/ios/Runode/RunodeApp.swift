@@ -67,6 +67,12 @@ enum AppComposition {
             deviceName: systemName, recents: DefaultsStore("recentTerminal"), preferences: preferences,
             themes: DefaultsStore("theme"))
         dependencies.notifications = notifications
+        // 按存着的最新记录连：终端的连接每次连上都会记下电脑报的跨网络地址，打开页面时拿到的记录可能还没有。
+        dependencies.openScreen = { machine in
+            let latest = await store.all().first { $0.id == machine.id } ?? machine
+            return try await ScreenConnection.open(machine: latest, keyStore: keyStore, discovery: discovery)
+        }
+        dependencies.unlockPasswords = KeychainUnlockPasswords()
         dependencies.pushIdentity = PushIdentity(
             info: Bundle.main.infoDictionary ?? [:], bundle: Bundle.main.bundleIdentifier)
         return dependencies

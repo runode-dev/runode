@@ -488,7 +488,7 @@ public actor HostConnection: HostLink {
         case .output, .snapshot:
             broadcast(.frame(frame, generation: generation))
             return nil
-        case .input:
+        case .input, .video:
             return nil
         }
     }

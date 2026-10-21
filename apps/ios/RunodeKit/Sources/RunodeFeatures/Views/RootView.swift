@@ -52,6 +52,7 @@
                         model: model,
                         onOpen: { session in app.openTerminal(machine: id, session: session) },
                         onOpenGit: { session in app.openGit(machine: id, session: session) },
+                        onOpenScreen: app.canOpenScreen ? { app.openScreen(machine: id) } : nil,
                         fontSize: app.settings.preferences.fontSize)
                 } else {
                     ContentUnavailableView("找不到这台电脑", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
@@ -84,6 +85,12 @@
                     GitScreen(model: model)
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
+                }
+            case .screen(let machine):
+                if let model = app.screen(machine: machine) {
+                    RemoteDesktopScreen(model: model)
+                } else {
+                    ContentUnavailableView("找不到这台电脑", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
                 }
             }
         }

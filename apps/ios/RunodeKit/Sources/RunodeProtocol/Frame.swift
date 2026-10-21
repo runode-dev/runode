@@ -11,6 +11,8 @@ public enum FrameKind: UInt8, Sendable, Hashable {
     case control = 2
     /// 快照或 VT 重放的一段，以 `HostMsg.snapshotEnd` 结束。
     case snapshot = 3
+    /// 远程桌面编好的一帧画面，载荷见 `VideoFrame(payload:)`。
+    case video = 4
 }
 
 public struct Frame: Sendable, Equatable {
