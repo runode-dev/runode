@@ -31,6 +31,7 @@ runode-remote = { path = "crates/remote" }
 runode-update = { path = "crates/update" }
 runode-autostart = { path = "crates/autostart" }
 runode-ui = { path = "crates/ui" }
+runode-screen = { path = "crates/screen" }
 # libghostty-vt 的 Rust 绑定（MIT 或 Apache-2.0），取自子模块 vendor/libghostty-rs，即 runode-dev 对
 # libghostty-rs 的 fork 的 main 分支。它自成一个 workspace，不是本 workspace 的成员（见 exclude）。
 # 它的 C 接口绑定 libghostty-vt-sys 只经 libghostty-vt 间接用到，不列在这里。
@@ -75,6 +76,14 @@ objc2-user-notifications = { version = "0.3", default-features = false }
 objc2-service-management = { version = "0.3", default-features = false }
 # 给 Objective-C 的方法传回调（NSURLSession 的完成回调、问通知授权的回调）。
 block2 = "0.6"
+# 远程桌面：ScreenCaptureKit 采集，VideoToolbox 硬件编码，CoreGraphics 注入输入。
+objc2-screen-capture-kit = { version = "0.3", default-features = false }
+objc2-video-toolbox = { version = "0.3", default-features = false }
+objc2-core-media = { version = "0.3", default-features = false }
+objc2-core-video = { version = "0.3", default-features = false }
+objc2-core-graphics = { version = "0.3", default-features = false }
+objc2-core-foundation = { version = "0.3", default-features = false }
+dispatch2 = { version = "0.3", default-features = false }
 # 从 GPUI 的窗口拿到 NSWindow：程序要求改窗口尺寸时直接设 frame，保持左上角不动。
 raw-window-handle = "0.6"
 # 远程访问：TLS 1.3 用 rustls，密码学后端用 ring（不用默认的 aws-lc-rs，免得再编一份 C 的密码库），

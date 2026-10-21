@@ -18,6 +18,7 @@
 | `config` | Ghostty 兼容的配置文件、主题、快捷键和配置模板，生成 `TermSettings`。模板只有英文，配置项的说明写在 `docs`，动作的说明写在 `ActionSpec::doc`，译文都在 `desktop` 的 locales 里 | types、paths、tracing、objc2-foundation、objc2-app-kit |
 | `host` | 管终端会话的宿主（只有 lib），跑在 app 进程里或单独一个进程（`runode --host`）：持有 PTY 和权威的 VT，升级时新宿主接手旧宿主的会话、会话不断；也替前端读写 git、列目录和命令，持有看板 | terminal、protocol、types、git、paths、todo、tasks、agent、libc、anyhow、tracing |
 | `remote` | 远程访问：TLS 监听、门禁、设备表、Bonjour，给手机推通知 | protocol、types、paths、rustls、rcgen、ring、libc、serde、serde_json、tracing |
+| `screen` | 远程桌面在电脑这边：采集屏幕、编成低延迟的硬件 HEVC（`Capture`），把手机发来的键鼠输入注入系统（`Injector`）；传输和协议不在这里 | types、tracing、objc2、block2、dispatch2、objc2-screen-capture-kit、objc2-video-toolbox、objc2-core-media、objc2-core-video、objc2-core-graphics |
 | `update` | 桌面 app 的自动更新：查 GitHub Release、下载、核对签名，退出时原子地换上 | serde、serde_json、tracing、libc、objc2、block2、objc2-foundation |
 | `autostart` | 登录时自启（launchd、systemd、`SMAppService`），命令行和设置页共用 | paths、objc2、objc2-foundation、objc2-service-management |
 | `ui` | 桌面几处界面共用的 GPUI 部件（照 shadcn 起名，variant、size 选样子）、全 app 一份的主题 `Theme`（只能在 render 和 paint 里读）、所有图标、界面字号和无障碍的共用写法；界面文字由调用方翻译好交进来 | types、paths、GPUI、tracing、unicode-segmentation、objc2-app-kit、objc2-foundation |
@@ -32,7 +33,7 @@ GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），只有它的
 
 不变量：
 
-- 只有 `desktop` 和它的部件库 `ui` 能依赖 GPUI（`gpui-pre`；`gpui-pre-platform` 只有 `desktop`）；`libghostty-vt` 和 portable-pty 只有 `terminal` 能直接依赖，`libghostty-vt-sys` 只有 `libghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen 和 ring 只有 `remote` 能直接依赖；rusqlite 只有 `todo` 能直接依赖；只有 `desktop` 能直接依赖 `host`，只有 `desktop` 和 `host` 能直接依赖 `terminal`。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`；加 crate 时相应地更新它的 `wrappers` 和上面这张表。
+- 只有 `desktop` 和它的部件库 `ui` 能依赖 GPUI（`gpui-pre`；`gpui-pre-platform` 只有 `desktop`）；`libghostty-vt` 和 portable-pty 只有 `terminal` 能直接依赖，`libghostty-vt-sys` 只有 `libghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen 和 ring 只有 `remote` 能直接依赖；rusqlite 只有 `todo` 能直接依赖；ScreenCaptureKit 和 VideoToolbox 的绑定只有 `screen` 能直接依赖；只有 `desktop` 能直接依赖 `host`，只有 `desktop` 和 `host` 能直接依赖 `terminal`。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`；加 crate 时相应地更新它的 `wrappers` 和上面这张表。
 - `types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git`、`preview`、`update` 不依赖任何 runode crate。
 - `protocol` 只依赖 `types`，不碰终端仿真、PTY 和界面。消息里用到的类型，别的 crate 也要用的放 `types`，只在协议里用的（帧、连接方式等）放 `protocol` 自己；`protocol` 把消息里用到的 `types` 类型转出去，前端照旧从 `protocol` 引。
 - `agent` 只依赖 `types`，不碰终端仿真、PTY 和界面：屏幕文字、前台进程组由 `terminal` 读好了交给它，用户规则目录由调用方从 `paths` 取来传进去。

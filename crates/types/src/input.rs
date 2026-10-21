@@ -2,7 +2,7 @@
 
 /// 接近物理键位的按键。字母、数字和符号键按美式布局里产生它的那个键命名；别的布局上没有
 /// 对应键位的字符用 `Unidentified`，字符本身由 `KeyInput::text` 带出。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Key {
     Unidentified,
     A,
@@ -107,7 +107,8 @@ pub struct KeyInput {
 }
 
 /// 上报给程序的鼠标按键。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MouseButton {
     Left,
     Right,

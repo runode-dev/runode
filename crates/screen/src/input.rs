@@ -1,0 +1,387 @@
+//! 把手机发来的 `ScreenInput` 变成系统的鼠标和键盘事件（`CGEvent`），发到 HID 层，程序收到的和真的
+//! 键鼠一样。没有注入事件的授权时系统悄悄丢掉，见 `permissions`。
+
+use std::time::{Duration, Instant};
+
+use objc2_core_foundation::{CGPoint, CGRect};
+use objc2_core_graphics::{
+    CGDisplayBounds, CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventType, CGMouseButton,
+    CGScrollEventUnit,
+};
+use runode_types::{
+    input::{Key, MouseButton},
+    screen::{ScreenInput, ScreenMods},
+};
+
+/// 同一个键在这么久以内、`CLICK_SLOP` 点以内再按下算连击，系统据此认双击和三击。
+const DOUBLE_CLICK: Duration = Duration::from_millis(500);
+const CLICK_SLOP: f64 = 4.0;
+/// 一个键盘事件最多带这么多个 UTF-16 码元的文字，再长的拆成几个事件。
+const TEXT_CHUNK: usize = 20;
+
+/// 往一块屏幕上注入输入，记着按住的鼠标键（挪动时发拖动）和连击。
+pub struct Injector {
+    display: u32,
+    pressed: Option<MouseButton>,
+    clicks: Clicks,
+}
+
+impl Injector {
+    /// `display` 是 `ScreenInput` 的坐标所在的屏幕，和采集的是同一块。
+    pub fn new(display: u32) -> Self {
+        Self { display, pressed: None, clicks: Clicks::default() }
+    }
+
+    pub fn inject(&mut self, input: &ScreenInput) {
+        match input {
+            ScreenInput::MouseMove { x, y } => {
+                let kind = match self.pressed {
+                    None => CGEventType::MouseMoved,
+                    Some(MouseButton::Left) => CGEventType::LeftMouseDragged,
+                    Some(MouseButton::Right) => CGEventType::RightMouseDragged,
+                    Some(MouseButton::Middle) => CGEventType::OtherMouseDragged,
+                };
+                let button = self.pressed.map_or(CGMouseButton::Left, cg_button);
+                post(CGEvent::new_mouse_event(None, kind, self.point(*x, *y), button));
+            }
+            ScreenInput::MouseButton { button, down, x, y, mods } => {
+                let at = self.point(*x, *y);
+                let kind = match (button, down) {
+                    (MouseButton::Left, true) => CGEventType::LeftMouseDown,
+                    (MouseButton::Left, false) => CGEventType::LeftMouseUp,
+                    (MouseButton::Right, true) => CGEventType::RightMouseDown,
+                    (MouseButton::Right, false) => CGEventType::RightMouseUp,
+                    (MouseButton::Middle, true) => CGEventType::OtherMouseDown,
+                    (MouseButton::Middle, false) => CGEventType::OtherMouseUp,
+                };
+                let clicks =
+                    if *down { self.clicks.press(*button, (at.x, at.y), Instant::now()) } else { self.clicks.count };
+                self.pressed = down.then_some(*button);
+                let event = CGEvent::new_mouse_event(None, kind, at, cg_button(*button));
+                CGEvent::set_integer_value_field(event.as_deref(), CGEventField::MouseEventClickState, clicks);
+                CGEvent::set_flags(event.as_deref(), flags(*mods));
+                post(event);
+            }
+            ScreenInput::Scroll { dx, dy } => {
+                post(CGEvent::new_scroll_wheel_event2(None, CGScrollEventUnit::Pixel, 2, *dy, *dx, 0));
+            }
+            ScreenInput::Key { key, mods } => {
+                let Some(code) = key_code(*key) else { return };
+                // 像真的键盘一样先按下修饰键、最后松开：有的程序（锁屏的密码框也是）看修饰键本身有没有按着，
+                // 不只看事件上的标志。
+                let held = modifier_keys(*mods);
+                let mut flags = CGEventFlags::empty();
+                for &(modifier, flag) in &held {
+                    flags |= flag;
+                    post_key(modifier, true, flags);
+                }
+                post_key(code, true, flags);
+                post_key(code, false, flags);
+                for &(modifier, flag) in held.iter().rev() {
+                    flags.remove(flag);
+                    post_key(modifier, false, flags);
+                }
+            }
+            ScreenInput::Text { text } => {
+                let units: Vec<u16> = text.encode_utf16().collect();
+                for chunk in units.chunks(TEXT_CHUNK) {
+                    for down in [true, false] {
+                        let event = CGEvent::new_keyboard_event(None, 0, down);
+                        // SAFETY: 指针和长度来自同一个切片，调用期间有效。
+                        unsafe {
+                            CGEvent::keyboard_set_unicode_string(event.as_deref(), chunk.len() as _, chunk.as_ptr())
+                        };
+                        post(event);
+                    }
+                }
+            }
+        }
+    }
+
+    fn point(&self, x: f64, y: f64) -> CGPoint {
+        to_screen(CGDisplayBounds(self.display), x, y)
+    }
+}
+
+fn post(event: Option<objc2_core_foundation::CFRetained<CGEvent>>) {
+    CGEvent::post(CGEventTapLocation::HIDEventTap, event.as_deref());
+}
+
+/// 屏幕上的比例换成全局坐标（点），超出屏幕的贴到边上。
+fn to_screen(bounds: CGRect, x: f64, y: f64) -> CGPoint {
+    CGPoint {
+        x: bounds.origin.x + x.clamp(0.0, 1.0) * (bounds.size.width - 1.0).max(0.0),
+        y: bounds.origin.y + y.clamp(0.0, 1.0) * (bounds.size.height - 1.0).max(0.0),
+    }
+}
+
+fn post_key(code: u16, down: bool, flags: CGEventFlags) {
+    let event = CGEvent::new_keyboard_event(None, code, down);
+    CGEvent::set_flags(event.as_deref(), flags);
+    post(event);
+}
+
+/// 按着的修饰键各自的键码（`kVK_Command` 这些）和标志。
+fn modifier_keys(mods: ScreenMods) -> Vec<(u16, CGEventFlags)> {
+    [
+        (mods.cmd, 0x37, CGEventFlags::MaskCommand),
+        (mods.ctrl, 0x3B, CGEventFlags::MaskControl),
+        (mods.alt, 0x3A, CGEventFlags::MaskAlternate),
+        (mods.shift, 0x38, CGEventFlags::MaskShift),
+    ]
+    .into_iter()
+    .filter_map(|(held, code, flag)| held.then_some((code, flag)))
+    .collect()
+}
+
+fn cg_button(button: MouseButton) -> CGMouseButton {
+    match button {
+        MouseButton::Left => CGMouseButton::Left,
+        MouseButton::Right => CGMouseButton::Right,
+        MouseButton::Middle => CGMouseButton::Center,
+    }
+}
+
+fn flags(mods: ScreenMods) -> CGEventFlags {
+    let mut flags = CGEventFlags::empty();
+    flags.set(CGEventFlags::MaskShift, mods.shift);
+    flags.set(CGEventFlags::MaskControl, mods.ctrl);
+    flags.set(CGEventFlags::MaskAlternate, mods.alt);
+    flags.set(CGEventFlags::MaskCommand, mods.cmd);
+    flags
+}
+
+#[derive(Default)]
+struct Clicks {
+    last: Option<(MouseButton, Instant, (f64, f64))>,
+    count: i64,
+}
+
+impl Clicks {
+    /// 按下一次，返回这是第几连击。
+    fn press(&mut self, button: MouseButton, at: (f64, f64), now: Instant) -> i64 {
+        let again = self.last.is_some_and(|(last, when, (x, y))| {
+            last == button
+                && now.duration_since(when) <= DOUBLE_CLICK
+                && (at.0 - x).abs() <= CLICK_SLOP
+                && (at.1 - y).abs() <= CLICK_SLOP
+        });
+        self.count = if again { self.count + 1 } else { 1 };
+        self.last = Some((button, now, at));
+        self.count
+    }
+}
+
+const LETTERS: [Key; 26] = [
+    Key::A,
+    Key::B,
+    Key::C,
+    Key::D,
+    Key::E,
+    Key::F,
+    Key::G,
+    Key::H,
+    Key::I,
+    Key::J,
+    Key::K,
+    Key::L,
+    Key::M,
+    Key::N,
+    Key::O,
+    Key::P,
+    Key::Q,
+    Key::R,
+    Key::S,
+    Key::T,
+    Key::U,
+    Key::V,
+    Key::W,
+    Key::X,
+    Key::Y,
+    Key::Z,
+];
+const DIGITS: [Key; 10] = [
+    Key::Digit0,
+    Key::Digit1,
+    Key::Digit2,
+    Key::Digit3,
+    Key::Digit4,
+    Key::Digit5,
+    Key::Digit6,
+    Key::Digit7,
+    Key::Digit8,
+    Key::Digit9,
+];
+
+/// 按美式键盘把 `text` 拆成一串按键，每个带着要不要按住 Shift。锁屏的密码框不认只带字符的输入事件
+/// （`ScreenInput::Text`），只认真的键码，所以密码得这样敲。有美式键盘上敲不出的字符时返回 `None`。
+pub fn key_strokes(text: &str) -> Option<Vec<(Key, bool)>> {
+    text.chars()
+        .map(|c| {
+            Some(match c {
+                'a'..='z' => (LETTERS[c as usize - 'a' as usize], false),
+                'A'..='Z' => (LETTERS[c as usize - 'A' as usize], true),
+                '0'..='9' => (DIGITS[c as usize - '0' as usize], false),
+                ')' => (Key::Digit0, true),
+                '!' => (Key::Digit1, true),
+                '@' => (Key::Digit2, true),
+                '#' => (Key::Digit3, true),
+                '$' => (Key::Digit4, true),
+                '%' => (Key::Digit5, true),
+                '^' => (Key::Digit6, true),
+                '&' => (Key::Digit7, true),
+                '*' => (Key::Digit8, true),
+                '(' => (Key::Digit9, true),
+                ' ' => (Key::Space, false),
+                '-' | '_' => (Key::Minus, c == '_'),
+                '=' | '+' => (Key::Equal, c == '+'),
+                '[' | '{' => (Key::BracketLeft, c == '{'),
+                ']' | '}' => (Key::BracketRight, c == '}'),
+                '\\' | '|' => (Key::Backslash, c == '|'),
+                ';' | ':' => (Key::Semicolon, c == ':'),
+                '\'' | '"' => (Key::Quote, c == '"'),
+                ',' | '<' => (Key::Comma, c == '<'),
+                '.' | '>' => (Key::Period, c == '>'),
+                '/' | '?' => (Key::Slash, c == '?'),
+                '`' | '~' => (Key::Backquote, c == '~'),
+                _ => return None,
+            })
+        })
+        .collect()
+}
+
+/// macOS 的虚拟键码（`kVK_*`），按美式布局的键位。
+fn key_code(key: Key) -> Option<u16> {
+    Some(match key {
+        Key::Unidentified => return None,
+        Key::A => 0x00,
+        Key::S => 0x01,
+        Key::D => 0x02,
+        Key::F => 0x03,
+        Key::H => 0x04,
+        Key::G => 0x05,
+        Key::Z => 0x06,
+        Key::X => 0x07,
+        Key::C => 0x08,
+        Key::V => 0x09,
+        Key::B => 0x0B,
+        Key::Q => 0x0C,
+        Key::W => 0x0D,
+        Key::E => 0x0E,
+        Key::R => 0x0F,
+        Key::Y => 0x10,
+        Key::T => 0x11,
+        Key::Digit1 => 0x12,
+        Key::Digit2 => 0x13,
+        Key::Digit3 => 0x14,
+        Key::Digit4 => 0x15,
+        Key::Digit6 => 0x16,
+        Key::Digit5 => 0x17,
+        Key::Equal => 0x18,
+        Key::Digit9 => 0x19,
+        Key::Digit7 => 0x1A,
+        Key::Minus => 0x1B,
+        Key::Digit8 => 0x1C,
+        Key::Digit0 => 0x1D,
+        Key::BracketRight => 0x1E,
+        Key::O => 0x1F,
+        Key::U => 0x20,
+        Key::BracketLeft => 0x21,
+        Key::I => 0x22,
+        Key::P => 0x23,
+        Key::Enter => 0x24,
+        Key::L => 0x25,
+        Key::J => 0x26,
+        Key::Quote => 0x27,
+        Key::K => 0x28,
+        Key::Semicolon => 0x29,
+        Key::Backslash => 0x2A,
+        Key::Comma => 0x2B,
+        Key::Slash => 0x2C,
+        Key::N => 0x2D,
+        Key::M => 0x2E,
+        Key::Period => 0x2F,
+        Key::Tab => 0x30,
+        Key::Space => 0x31,
+        Key::Backquote => 0x32,
+        Key::Backspace => 0x33,
+        Key::Escape => 0x35,
+        Key::F5 => 0x60,
+        Key::F6 => 0x61,
+        Key::F7 => 0x62,
+        Key::F3 => 0x63,
+        Key::F8 => 0x64,
+        Key::F9 => 0x65,
+        Key::F11 => 0x67,
+        Key::F10 => 0x6D,
+        Key::F12 => 0x6F,
+        Key::Insert => 0x72,
+        Key::Home => 0x73,
+        Key::PageUp => 0x74,
+        Key::Delete => 0x75,
+        Key::F4 => 0x76,
+        Key::End => 0x77,
+        Key::F2 => 0x78,
+        Key::PageDown => 0x79,
+        Key::F1 => 0x7A,
+        Key::ArrowLeft => 0x7B,
+        Key::ArrowRight => 0x7C,
+        Key::ArrowDown => 0x7D,
+        Key::ArrowUp => 0x7E,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use objc2_core_foundation::CGSize;
+
+    use super::*;
+
+    #[test]
+    fn clicks_count_only_quick_nearby_presses_of_the_same_button() {
+        let mut clicks = Clicks::default();
+        let t = Instant::now();
+        assert_eq!(clicks.press(MouseButton::Left, (10.0, 10.0), t), 1);
+        assert_eq!(clicks.press(MouseButton::Left, (12.0, 11.0), t + Duration::from_millis(200)), 2);
+        assert_eq!(clicks.press(MouseButton::Left, (12.0, 11.0), t + Duration::from_millis(400)), 3);
+        assert_eq!(clicks.press(MouseButton::Right, (12.0, 11.0), t + Duration::from_millis(500)), 1);
+        assert_eq!(clicks.press(MouseButton::Right, (40.0, 11.0), t + Duration::from_millis(600)), 1);
+        assert_eq!(clicks.press(MouseButton::Right, (40.0, 11.0), t + Duration::from_secs(2)), 1);
+    }
+
+    /// 副屏的原点不在 (0, 0)，越界的比例贴边，不落到别的屏幕上。
+    #[test]
+    fn maps_fractions_into_the_display() {
+        let bounds = CGRect { origin: CGPoint { x: -1000.0, y: 200.0 }, size: CGSize { width: 1001.0, height: 501.0 } };
+        let p = to_screen(bounds, 0.5, 2.0);
+        assert_eq!((p.x, p.y), (-500.0, 700.0));
+        let p = to_screen(bounds, -1.0, 0.0);
+        assert_eq!((p.x, p.y), (-1000.0, 200.0));
+    }
+
+    #[test]
+    fn passwords_become_us_key_strokes() {
+        assert_eq!(
+            key_strokes("aZ9!_ ~"),
+            Some(vec![
+                (Key::A, false),
+                (Key::Z, true),
+                (Key::Digit9, false),
+                (Key::Digit1, true),
+                (Key::Minus, true),
+                (Key::Space, false),
+                (Key::Backquote, true),
+            ])
+        );
+        assert_eq!(key_strokes("密码"), None);
+        assert_eq!(key_strokes("é"), None);
+    }
+
+    #[test]
+    fn key_codes_follow_the_us_layout() {
+        assert_eq!(key_code(Key::A), Some(0x00));
+        assert_eq!(key_code(Key::Enter), Some(0x24));
+        assert_eq!(key_code(Key::ArrowUp), Some(0x7E));
+        assert_eq!(key_code(Key::Unidentified), None);
+    }
+}

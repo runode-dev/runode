@@ -1,5 +1,6 @@
 //! runode 各部分共用的纯数据：终端画面的快照、网格的尺寸和坐标、分屏布局、agent 的状态、
-//! shell 报告的名字、终端会话对外公布的状态、终端设置、读写剪贴板的规矩、默认配色和输入事件。
+//! shell 报告的名字、终端会话对外公布的状态、终端设置、读写剪贴板的规矩、默认配色、终端和远程桌面的
+//! 输入事件。
 //!
 //! 这里只有数据和不依赖外部状态的计算，只用标准库和 serde；界面、终端状态机和 PTY 都不碰。
 
@@ -11,6 +12,7 @@ pub mod grid;
 pub mod input;
 pub mod lossy_path;
 pub mod pane;
+pub mod screen;
 pub mod session;
 pub mod settings;
 pub mod shell;
