@@ -35,7 +35,7 @@ pub(super) fn read_loop(inner: &Inner, generation: u64, stream: UnixStream) {
                 Ok(message) => dispatch(inner, generation, message),
                 Err(err) => tracing::debug!("unreadable message from the host: {err}"),
             },
-            FrameKind::Input => tracing::debug!("the host sent an input frame"),
+            FrameKind::Input | FrameKind::Video => tracing::debug!("the host sent a {:?} frame", frame.kind),
         }
     }
 }

@@ -31,7 +31,7 @@ pub fn run() -> i32 {
     // SAFETY: `main` 直接交到这里，还没开别的线程。
     let disclaimed = unsafe { runode_host::disclaim_responsibility() };
     let dirs = runode_paths::Dirs::from_env();
-    init_logging(&dirs);
+    init_logging(dirs.host_log_file());
     warn_if_not_disclaimed(disclaimed);
     let host = prepare(&dirs);
     match crate::host_client::listen(&host, &dirs) {
@@ -87,7 +87,7 @@ pub fn take_over() -> i32 {
     // 先于打开任何文件：没有状态管道时 `STATUS_FD` 这个号会被日志文件这类占去。
     let mut status = StatusPipe::take();
     let dirs = runode_paths::Dirs::from_env();
-    init_logging(&dirs);
+    init_logging(dirs.host_log_file());
     warn_if_not_disclaimed(disclaimed);
     if status.0.is_none() {
         tracing::warn!("no status pipe on fd {STATUS_FD}; nobody will hear how the takeover went");
@@ -207,9 +207,9 @@ fn warn_if_not_disclaimed(result: std::io::Result<()>) {
     }
 }
 
-/// 日志追加写到 `host_log_file`，超过 `LOG_LIMIT` 时清空重写；写不了时不记日志。
-fn init_logging(dirs: &runode_paths::Dirs) {
-    let Some(path) = dirs.host_log_file() else { return };
+/// 日志追加写到 `path`，超过 `LOG_LIMIT` 时清空重写；写不了时不记日志。
+pub(crate) fn init_logging(path: Option<std::path::PathBuf>) {
+    let Some(path) = path else { return };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

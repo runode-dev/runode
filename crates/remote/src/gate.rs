@@ -1,6 +1,6 @@
-//! 一条远程连接从头到尾：TLS 握手、门禁（见 `runode_protocol::remote` 的模块文档）、检查第一帧是
-//! 手机的 `Hello`，然后接到宿主上搬字节（`bridge`）。门禁阶段的读写都按同一个截止时刻
-//! （`GATE_TIMEOUT`）设超时，对面一个字节一个字节地慢慢发也拖不过它。
+//! 一条远程连接从头到尾：TLS 握手、门禁（见 `runode_protocol::remote` 的模块文档）、按第一帧是手机的
+//! `Hello` 还是 `ScreenHello` 接到宿主或者远程桌面的采集进程上搬字节（`bridge`）。门禁阶段的读写
+//! 都按同一个截止时刻（`GATE_TIMEOUT`）设超时，对面一个字节一个字节地慢慢发也拖不过它。
 
 use std::{
     io::{self, Read, Write},
@@ -17,6 +17,7 @@ use runode_protocol::{
         Bytes, DeviceId, EXPORTER_LABEL, EXPORTER_LEN, GATE_TIMEOUT, GATE_VERSION, GateClientMsg, GateHostMsg,
         NONCE_LEN, PUBLIC_KEY_LEN, Purpose, RejectReason, SECRET_LEN, read_gate_frame, signed_bytes,
     },
+    screen::ScreenClientMsg,
     write_frame,
 };
 use rustls::{ServerConnection, StreamOwned};
@@ -104,13 +105,16 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     let hello = read_gate_frame(&mut tls)
         .map_err(io::Error::other)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "closed before hello"))?;
-    let is_mobile_hello = hello.kind == FrameKind::Control
-        && hello.channel == 0
-        && matches!(hello.message::<ClientMsg>(), Ok(ClientMsg::Hello { client: ClientKind::Mobile, .. }));
-    if !is_mobile_hello {
-        return Err(io::Error::other("the first frame after the gate is not a mobile hello"));
-    }
-    let host = (shared.connect)()?;
+    let control = hello.kind == FrameKind::Control && hello.channel == 0;
+    // 第一帧定下这条连接接到哪里：终端的宿主，或者远程桌面的采集进程。
+    let host =
+        if control && matches!(hello.message::<ClientMsg>(), Ok(ClientMsg::Hello { client: ClientKind::Mobile, .. })) {
+            (shared.connect)()?
+        } else if control && matches!(hello.message::<ScreenClientMsg>(), Ok(ScreenClientMsg::ScreenHello { .. })) {
+            (shared.connect_screen)()?
+        } else {
+            return Err(io::Error::other("the first frame after the gate is neither a mobile nor a screen hello"));
+        };
     write_frame(&mut &host, hello.kind, hello.channel, &hello.payload).map_err(io::Error::other)?;
     let StreamOwned { mut conn, sock } = tls;
     drop(sock);

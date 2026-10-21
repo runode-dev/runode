@@ -23,6 +23,8 @@ runode-cli.workspace = true
 runode-config.workspace = true
 # 远程访问的监听跟着宿主活：宿主跑在 app 里时由 app 开，单独跑时由 `runode --host` 开。
 runode-remote.workspace = true
+# 远程桌面的采集、编码和输入注入。
+runode-screen.workspace = true
 # 自动更新：查新版本、下载、核对签名、退出时换上 .app。
 runode-update.workspace = true
 runode-autostart.workspace = true

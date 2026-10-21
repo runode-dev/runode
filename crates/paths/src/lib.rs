@@ -15,6 +15,8 @@ use std::{
 /// 宿主进程的 socket、锁和日志的文件名（不含扩展名）。调试构建用另一个名字，免得开发版
 /// 连上装好的那个版本的宿主，或者反过来。
 const HOST_NAME: &str = if cfg!(debug_assertions) { "host-dev" } else { "host" };
+/// 远程桌面的采集进程的 socket、锁和日志的名字，开发版和装好的版本分开。
+const SCREEN_NAME: &str = if cfg!(debug_assertions) { "screen-dev" } else { "screen" };
 
 /// 看板的库名。调试构建的宿主另用一份：两边的宿主各自在跑，共用一份库时定时会触发两次。
 const TODOS_DB: &str = if cfg!(debug_assertions) { "todos-dev.db" } else { "todos.db" };
@@ -74,6 +76,23 @@ impl Dirs {
     /// 宿主进程的日志。宿主没有终端可写，出了问题只能看这里。
     pub fn host_log_file(&self) -> Option<PathBuf> {
         self.cache_file(&format!("{HOST_NAME}.log"))
+    }
+
+    /// 远程桌面的采集进程（`runode --screen`）的 Unix socket，在 `runtime_dir` 里。路径太长、放不进
+    /// `sun_path` 时为 `None`。
+    pub fn screen_socket_file(&self) -> Option<PathBuf> {
+        let path = self.runtime_dir()?.join(format!("{SCREEN_NAME}.sock"));
+        (path.as_os_str().len() < SUN_PATH_LEN).then_some(path)
+    }
+
+    /// 保证只有一个采集进程的锁文件，和 socket 放在一起。
+    pub fn screen_lock_file(&self) -> Option<PathBuf> {
+        Some(self.runtime_dir()?.join(format!("{SCREEN_NAME}.lock")))
+    }
+
+    /// 采集进程的日志。
+    pub fn screen_log_file(&self) -> Option<PathBuf> {
+        self.cache_file(&format!("{SCREEN_NAME}.log"))
     }
 
     /// 放宿主进程的 socket 和锁的目录，即 `data` 下的 `run`。别的用户不能进这个目录，见
@@ -362,6 +381,7 @@ mod tests {
         assert_eq!(dirs.host_socket_file(), Some(format!("/home/me/.runode/run/{HOST_NAME}.sock").into()));
         assert_eq!(dirs.host_lock_file(), Some(format!("/home/me/.runode/run/{HOST_NAME}.lock").into()));
         assert_eq!(dirs.host_log_file(), Some(format!("/home/me/.runode/cache/{HOST_NAME}.log").into()));
+        assert_eq!(dirs.screen_socket_file(), Some(format!("/home/me/.runode/run/{SCREEN_NAME}.sock").into()));
         assert_eq!(Dirs::default().host_socket_file(), None);
     }
 

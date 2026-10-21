@@ -1,5 +1,6 @@
 //! 远程访问（手机经网络连上宿主，见 `runode_remote`）跟着宿主活：宿主跑在哪个进程里，监听
-//! 就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上。开关（配置项
+//! 就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上，要远程桌面的接到采集进程上
+//! （`connect_screen`）。开关（配置项
 //! `remote-access`）、端口（`remote-access-port`）和给手机看的名字（`remote-access-name`）随配置变，
 //! 几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
 //! 这几项和 `apns-*`）同样随配置变，见 `push_settings`。
@@ -13,15 +14,22 @@
 pub mod pairing;
 
 use std::{
+    io,
+    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{Arc, Weak, mpsc},
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use runode_config::Config;
 use runode_host::Host;
 use runode_remote::{ApnsKey, Bind, Connect, Options, PushSettings, Service};
+
+/// 拉起采集进程后最多等它这么久开好监听。
+const SCREEN_START_TIMEOUT: Duration = Duration::from_secs(5);
+/// 等采集进程开好监听时隔多久试连一次。
+const SCREEN_RETRY: Duration = Duration::from_millis(20);
 
 /// 盯不了文件时，单独跑的宿主隔多久看一次配置文件、设备表和配对口令；有配对口令在等时也按它看过期没有。
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
@@ -71,8 +79,37 @@ pub fn service(host: &Host) -> Option<Service> {
         host_name: None,
         advertise: true,
         connect,
+        connect_screen: Arc::new(connect_screen),
     };
     Service::start(options).map_err(|err| tracing::warn!("cannot start remote access: {err}")).ok()
+}
+
+/// 连上远程桌面的采集进程（`runode --screen`），没有在跑的就拉起一个。
+///
+/// shortcut: 连上的正好是因空闲正要退出的采集进程时这条连接随即断开，由手机重连；常见了再在采集进程
+/// 里加握手确认
+fn connect_screen() -> io::Result<UnixStream> {
+    if !cfg!(target_os = "macos") {
+        return Err(io::Error::new(io::ErrorKind::Unsupported, "remote desktop is only available on macOS"));
+    }
+    let socket = runode_paths::Dirs::from_env()
+        .screen_socket_file()
+        .ok_or_else(|| io::Error::other("no place for the screen socket"))?;
+    let deadline = Instant::now() + SCREEN_START_TIMEOUT;
+    let mut launched = false;
+    loop {
+        match UnixStream::connect(&socket) {
+            Ok(stream) => return Ok(stream),
+            Err(err) if Instant::now() >= deadline => return Err(err),
+            Err(err) if !launched => {
+                tracing::info!("starting the screen process: {err}");
+                runode_host::launch_screen(&std::env::current_exe()?)?;
+                launched = true;
+            }
+            Err(_) => {}
+        }
+        thread::sleep(SCREEN_RETRY);
+    }
 }
 
 /// 单独跑的宿主的远程访问：读一遍配置定下开不开，之后在后台线程里盯着配置文件，变了就重读。返回的

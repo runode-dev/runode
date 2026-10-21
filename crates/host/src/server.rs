@@ -1057,8 +1057,8 @@ impl Connection {
                     }
                     None => tracing::debug!("input for unknown channel {}", frame.channel),
                 },
-                FrameKind::Output | FrameKind::Snapshot => {
-                    self.goodbye("clients do not send output or snapshots");
+                FrameKind::Output | FrameKind::Snapshot | FrameKind::Video => {
+                    self.goodbye("clients do not send output, snapshots or video");
                     return;
                 }
             }

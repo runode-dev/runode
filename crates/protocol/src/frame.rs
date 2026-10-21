@@ -24,6 +24,8 @@ pub enum FrameKind {
     Control = 2,
     /// 快照或 VT 重放的一段，见 `AttachMode`；一份可以分成几帧，以 `HostMsg::SnapshotEnd` 结束。
     Snapshot = 3,
+    /// 远程桌面编好的一帧画面，载荷见 `screen::encode_video`。
+    Video = 4,
 }
 
 impl FrameKind {
@@ -33,6 +35,7 @@ impl FrameKind {
             1 => Self::Input,
             2 => Self::Control,
             3 => Self::Snapshot,
+            4 => Self::Video,
             _ => return None,
         })
     }

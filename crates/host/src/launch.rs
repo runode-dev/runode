@@ -63,15 +63,25 @@ fn environ() -> *const *mut c_char {
 ///
 /// 连上它（每隔几毫秒试一次 socket，撞上它正因空闲退出时重来）是调用方的事。
 pub fn launch(exe: &Path) -> io::Result<u32> {
+    launch_with(exe, c"--host")
+}
+
+/// 用 `exe --screen` 拉起远程桌面的采集进程，返回它的 pid，不等它连上 socket。和宿主一样与拉起它的
+/// 进程脱开、自己担着责任进程，屏幕录制和辅助功能的授权按这个 app 算。
+pub fn launch_screen(exe: &Path) -> io::Result<u32> {
+    launch_with(exe, c"--screen")
+}
+
+fn launch_with(exe: &Path, arg: &CStr) -> io::Result<u32> {
     #[cfg(target_os = "macos")]
-    match launchd::submit(exe, &["--host"], false) {
+    match launchd::submit(exe, &[arg.to_str().map_err(io::Error::other)?], false) {
         Ok((pid, _)) => return Ok(pid),
         Err(launchd::Error::Failed(err)) => return Err(err),
         Err(launchd::Error::Unavailable(err)) => {
-            tracing::warn!("cannot start the host through launchd, it stays in our coalition: {err}");
+            tracing::warn!("cannot start {exe:?} {arg:?} through launchd, it stays in our coalition: {err}");
         }
     }
-    detach(exe, &[c"--host"], None)
+    detach(exe, &[arg], None)
 }
 
 /// 新宿主在这个描述符上报告接手的结果，见 `launch_successor`。

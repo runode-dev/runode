@@ -1,7 +1,7 @@
 //! runode：面向 AI 编程 agent 的桌面工作台。终端用 libghostty-vt 仿真，窗口和绘制用 GPUI。
 //! 带子命令启动时是命令行（`runode list` 等），不开窗口，见 `runode_cli`；`runode --host` 是单独
 //! 一个进程跑的终端宿主，`runode --host --take-over` 是升级时接手旧宿主会话的新宿主，见
-//! `host_process`。
+//! `host_process`；`runode --screen` 是远程桌面的采集进程，见 `screen_process`。
 
 mod about;
 mod assets;
@@ -20,6 +20,8 @@ mod prespawn;
 mod preview_panel;
 mod process_env;
 mod remote_access;
+#[cfg(target_os = "macos")]
+mod screen_process;
 mod settings;
 mod startup;
 mod terminal_view;
@@ -53,6 +55,10 @@ fn main() {
     }
     if args == ["--host", "--take-over"] {
         std::process::exit(host_process::take_over());
+    }
+    #[cfg(target_os = "macos")]
+    if args == ["--screen"] {
+        std::process::exit(screen_process::run());
     }
     if runode_cli::wants_cli(&args) {
         let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();

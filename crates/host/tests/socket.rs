@@ -222,7 +222,7 @@ fn switching_attach_modes_keeps_channels_apart() {
                     last_output += frame.payload.len();
                 }
             }
-            FrameKind::Input => unreachable!(),
+            FrameKind::Input | FrameKind::Video => unreachable!(),
         }
     }
     assert_eq!(attached.iter().collect::<std::collections::HashSet<_>>().len(), 3);

@@ -4881,6 +4881,7 @@ dependencies = [
  "runode-preview",
  "runode-protocol",
  "runode-remote",
+ "runode-screen",
  "runode-terminal",
  "runode-types",
  "runode-ui",

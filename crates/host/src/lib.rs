@@ -49,7 +49,7 @@ use std::{
 use anyhow::Result;
 pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeOverOptions, TakeOverReport, peer_pid};
 pub use idle::Stopped;
-pub use launch::{STATUS_FD, Successor, disclaim_responsibility, launch, launch_successor};
+pub use launch::{STATUS_FD, Successor, disclaim_responsibility, launch, launch_screen, launch_successor};
 pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
 use runode_types::{clipboard::ClipboardAccess, grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 pub use server::{same_user, set_buffers};

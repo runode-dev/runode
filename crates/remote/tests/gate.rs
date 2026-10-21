@@ -210,6 +210,24 @@ fn the_first_frame_after_the_gate_must_be_a_mobile_hello() {
     assert!(harness.hosts.try_recv().is_err());
 }
 
+/// 第一帧是远程桌面的握手时接到采集进程上，握手原样转过去，宿主那边一条连接都不要。
+#[test]
+fn a_screen_hello_goes_to_the_screen_process() {
+    let harness = Harness::start("screen");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    let mut phone = harness.phone();
+    let auth = phone.auth_message(device_id, &key);
+    assert_eq!(phone.ask(&auth), Some(GateHostMsg::RemoteAccepted { device_id }));
+    let hello = br#"{"type":"screen_hello","version":1}"#;
+    phone.send_control(hello);
+    let screen = harness.screens.recv_timeout(PATIENCE).expect("no connection to the screen process");
+    screen.set_read_timeout(Some(PATIENCE)).unwrap();
+    let frame = runode_protocol::read_frame(&mut &screen).unwrap().unwrap();
+    assert_eq!((frame.kind, frame.payload.as_slice()), (FrameKind::Control, &hello[..]));
+    assert!(harness.hosts.try_recv().is_err());
+}
+
 #[test]
 fn revoking_a_device_disconnects_it() {
     let harness = Harness::start("revoke");

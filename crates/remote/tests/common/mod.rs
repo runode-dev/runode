@@ -47,6 +47,8 @@ pub struct Harness {
     pub fingerprint: [u8; 32],
     /// 门禁过了以后每要一条到宿主的连接，宿主那一端就送到这里。
     pub hosts: mpsc::Receiver<UnixStream>,
+    /// 同上，到远程桌面的采集进程的。
+    pub screens: mpsc::Receiver<UnixStream>,
 }
 
 impl Harness {
@@ -57,18 +59,14 @@ impl Harness {
         std::fs::create_dir_all(&root).unwrap();
         let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
         let (tx, hosts) = mpsc::channel();
-        let tx = Mutex::new(tx);
-        let connect = Arc::new(move || -> io::Result<UnixStream> {
-            let (ours, theirs) = UnixStream::pair()?;
-            tx.lock().unwrap().send(theirs).map_err(io::Error::other)?;
-            Ok(ours)
-        });
-        let listener = Listener::start(options(&dirs, connect)).unwrap();
+        let (screen_tx, screens) = mpsc::channel();
+        let options = Options { connect_screen: pair_to(screen_tx), ..options(&dirs, pair_to(tx)) };
+        let listener = Listener::start(options).unwrap();
         let addr = listener.local_addrs()[0];
         let status = listener_status(&dirs).unwrap().expect("the listener writes its status");
         assert_eq!((status.port, status.host_name.as_str()), (addr.port(), "测试的 Mac"));
         let fingerprint = status.fingerprint.0.try_into().unwrap();
-        Self { root, dirs, listener: Some(listener), addr, fingerprint, hosts }
+        Self { root, dirs, listener: Some(listener), addr, fingerprint, hosts, screens }
     }
 
     /// 停掉监听再开一个，返回新的证书指纹。宿主连接换成一个连不上的。
@@ -118,6 +116,16 @@ impl Harness {
     }
 }
 
+/// 每要一条连接就开一对 Unix socket，对面那一端送到 `tx`。
+fn pair_to(tx: mpsc::Sender<UnixStream>) -> runode_remote::Connect {
+    let tx = Mutex::new(tx);
+    Arc::new(move || -> io::Result<UnixStream> {
+        let (ours, theirs) = UnixStream::pair()?;
+        tx.lock().unwrap().send(theirs).map_err(io::Error::other)?;
+        Ok(ours)
+    })
+}
+
 pub fn options(dirs: &Dirs, connect: runode_remote::Connect) -> Options {
     Options {
         dirs: dirs.clone(),
@@ -126,6 +134,7 @@ pub fn options(dirs: &Dirs, connect: runode_remote::Connect) -> Options {
         host_name: Some("测试的 Mac".into()),
         advertise: false,
         connect,
+        connect_screen: Arc::new(|| Err(std::io::Error::other("no screen"))),
     }
 }
 
