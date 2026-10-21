@@ -265,6 +265,31 @@ impl WindowView {
         cx.notify();
     }
 
+    /// 程序要求发桌面通知：用户没在看这个分屏时发，标题为空时用分屏所在的 workspace 和标签。前台是
+    /// agent 的不发，它停下来要人处理时已经有自己的提醒。返回发没发。
+    pub(super) fn program_notified(
+        &self,
+        pane: EntityId,
+        (wi, ti): (usize, usize),
+        (title, body): (&str, &str),
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let tab = &self.workspaces[wi].tabs[ti];
+        if self.is_watching_pane(pane, wi, ti, window) || tab.panes[&pane].0.read(cx).agent().is_some() {
+            return false;
+        }
+        let title = match title {
+            "" => {
+                let tab = tab.panes[&pane].0.read(cx).title().to_owned();
+                rust_i18n::t!("agent.notification_body", workspace = self.workspaces[wi].name, tab = tab).into_owned()
+            }
+            title => title.to_owned(),
+        };
+        alert::program(notification_tag(pane), title, body.to_owned(), cx);
+        true
+    }
+
     /// agent 不再停在空闲时（又开始工作或者退出了），之前记的 done 作废，「干完了」的通知
     /// 也一并收回；不再等回答了时，「等回答」的通知也收回。
     pub(super) fn forget_stale_done(&mut self, pane: EntityId, wi: usize, ti: usize, cx: &mut App) {

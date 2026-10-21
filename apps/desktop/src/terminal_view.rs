@@ -108,6 +108,8 @@ pub enum TerminalEvent {
     Focused,
     /// 程序响铃（BEL）。
     Bell,
+    /// 程序用 OSC 9、OSC 777 要求发桌面通知，`title` 可能为空。
+    Notify { title: String, body: String },
     /// 程序用 CSI 8 t 要求把窗口改成能装下这么多行、列，0 是那一维不变。
     ResizeWindow { rows: u16, columns: u16 },
     /// 前台 agent 从工作中停了下来（干完了、等着用户回答或者退出了）。

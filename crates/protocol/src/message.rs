@@ -494,6 +494,13 @@ pub enum HostMsg {
     Bell {
         id: SessionId,
     },
+    /// 程序用 OSC 9 或 OSC 777 要求发桌面通知，`title` 可能为空。紧跟在含这条序列的那块 `Output`
+    /// 之后；发不发由前端定。
+    Notify {
+        id: SessionId,
+        title: String,
+        body: String,
+    },
     /// 程序用 CSI 8 t 要求把窗口改成能装下 `rows` 行、`columns` 列的大小，0 是那一维不变。紧跟在
     /// 含这条序列的那块 `Output` 之后。宿主自己不改尺寸，桌面按配置项 `vt-window-resize-allowed`
     /// 决定改不改窗口；手机读成 `Unknown`，不理。

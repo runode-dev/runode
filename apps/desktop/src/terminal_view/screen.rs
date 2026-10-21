@@ -123,6 +123,8 @@ pub(super) struct Changes {
     pub(super) agent_blocked: bool,
     /// 程序响过铃。
     pub(super) bell: bool,
+    /// 程序要求发的桌面通知（标题、正文），按先后。
+    pub(super) notifications: Vec<(String, String)>,
     /// 程序要求把窗口改成的行数和列数（CSI 8 t），这一批里的几次合起来，0 是那一维不变。
     pub(super) resize_window: Option<(u16, u16)>,
     /// shell 退出了。
@@ -533,6 +535,7 @@ impl<S: Vt> ScreenState<S> {
                 self.size_owner = follows.then_some(SizeOwner { device: owner });
             }
             HostMsg::Bell { .. } => changes.bell = true,
+            HostMsg::Notify { title, body, .. } => changes.notifications.push((title, body)),
             // 尺寸归别的前端（比如手机）管时不改窗口：宿主不会照这边的新网格改会话尺寸，窗口白变。
             HostMsg::ResizeWindow { rows, columns, .. } if self.size_owner.is_none() => {
                 changes.resize_window = Some(merge_window_resize(changes.resize_window, (rows, columns)));

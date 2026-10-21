@@ -22,6 +22,8 @@ pub(super) struct Effects {
     pub(super) title_changed: StdCell<bool>,
     /// 程序响过铃（BEL），由 `HostSession::take_bell` 取走。
     pub(super) bell: StdCell<bool>,
+    /// 程序用 OSC 9、OSC 777 要求发的桌面通知（标题、正文），由 `HostSession::take_notifications` 取走。
+    pub(super) notifications: RefCell<Vec<(String, String)>>,
     /// 程序用 CSI 8 t 要求改窗口尺寸：几次要求合起来的行数和列数（`merge_window_resize`），0 是那一维
     /// 不变，由 `HostSession::take_resize_window` 取走。
     pub(super) resize_window: StdCell<Option<(u16, u16)>>,

@@ -151,6 +151,29 @@ fn spawn_types_the_resume_command() {
     peer.send(&ClientMsg::Kill { id: refused });
 }
 
+/// OSC 9 和 OSC 777 的通知各发一条 `Notify`；OSC 9;4 是进度，不算通知。
+#[test]
+fn desktop_notifications_follow_their_output() {
+    let dir = temp_dir("notify");
+    let host = host();
+    let mut peer = Peer::pair(&host);
+    let body = r"read line; printf '\033]9;4;1;50\007\033]9;hello there\007\033]777;notify;Build;done\007'; exec cat";
+    let id = peer.spawn(&script(&dir, "notify.sh", body));
+    let (channel, _) = peer.attach(id, AttachMode::Snapshot);
+    peer.input(channel, b"go\r");
+    let mut seen = Vec::new();
+    peer.wait(channel, |message, _| {
+        if let Some(HostMsg::Notify { id: from, title, body }) = message {
+            assert_eq!(*from, id);
+            seen.push((title.clone(), body.clone()));
+        }
+        seen.len() == 2
+    });
+    assert_eq!(seen, [(String::new(), "hello there".into()), ("Build".into(), "done".into())]);
+    peer.send(&ClientMsg::Kill { id });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// 清屏的字节当成一段输出发回来；前台是 shell 时还给它发一个 FF，`cat` 把它回显成 `^L`。
 #[test]
 fn clear_screen_comes_back_as_output() {

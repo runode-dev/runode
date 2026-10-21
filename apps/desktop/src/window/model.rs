@@ -418,6 +418,12 @@ impl WindowView {
                     cx.notify();
                 }
             }
+            TerminalEvent::Notify { title, body } => {
+                if self.program_notified(id, (wi, ti), (title, body), window, cx) && !shown {
+                    self.workspaces[wi].tabs[ti].bell = true;
+                    cx.notify();
+                }
+            }
             TerminalEvent::AgentFinished => self.agent_finished(id, wi, ti, window, cx),
             TerminalEvent::AgentBlocked => self.agent_blocked(id, wi, ti, window, cx),
             TerminalEvent::ResizeWindow { rows, columns } => {

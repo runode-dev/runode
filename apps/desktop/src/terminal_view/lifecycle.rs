@@ -425,6 +425,9 @@ impl TerminalView {
         if changes.bell {
             self.bell_pending = true;
         }
+        for (title, body) in changes.notifications {
+            cx.emit(TerminalEvent::Notify { title, body });
+        }
         if let Some((rows, columns)) = changes.resize_window {
             cx.emit(TerminalEvent::ResizeWindow { rows, columns });
         }

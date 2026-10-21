@@ -625,6 +625,11 @@ impl HostSession {
         self.effects.bell.take()
     }
 
+    /// 自上次以来程序要求发的桌面通知（标题、正文）；标题可能为空。
+    pub fn take_notifications(&self) -> Vec<(String, String)> {
+        self.effects.notifications.take()
+    }
+
     /// 自上次以来程序用 CSI 8 t 要求改窗口尺寸的话，返回几次要求合起来的行数和列数，0 是那一维不变。
     /// VT 自己不改尺寸，改不改窗口由界面按配置定。
     pub fn take_resize_window(&self) -> Option<(u16, u16)> {
@@ -830,6 +835,15 @@ fn register_callbacks(
             let effects = effects.clone();
             move |_| effects.bell.set(true)
         })?
+        .on_desktop_notification({
+            let effects = effects.clone();
+            move |_, notification| {
+                let mut pending = effects.notifications.borrow_mut();
+                if pending.len() < MAX_NOTIFICATIONS {
+                    pending.push((notification_text(notification.title()), notification_text(notification.body())));
+                }
+            }
+        })?
         .on_resize_window({
             let effects = effects.clone();
             move |_, request| {
@@ -922,6 +936,22 @@ fn register_callbacks(
 
 /// `SessionMeta::driver` 的时刻最多这么久更新一次，毫秒。
 const DRIVER_RESOLUTION_MS: u64 = 1000;
+
+/// 两次取走之间最多攒这么多条桌面通知，再多的丢掉：刷屏的程序不该刷出一串通知。
+const MAX_NOTIFICATIONS: usize = 4;
+/// 通知的标题和正文各留这么多个字符。
+const MAX_NOTIFICATION_CHARS: usize = 256;
+
+/// 通知的字节不一定是 UTF-8，控制字符换成空格。
+fn notification_text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .chars()
+        .take(MAX_NOTIFICATION_CHARS)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
 
 /// 这个构建编的快照的格式版本，前端据此判断解不解得了宿主的快照，见 `vt::snapshot_format`。
 /// 宿主升级时也按它决定交接用快照还是退回 VT 重放：格式号相同就当解得了，不再比较构建。

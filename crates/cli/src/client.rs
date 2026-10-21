@@ -188,6 +188,7 @@ impl Connection {
                 HostMsg::Meta { .. }
                 | HostMsg::CommandFinished { .. }
                 | HostMsg::Bell { .. }
+                | HostMsg::Notify { .. }
                 | HostMsg::Resized { .. }
                 | HostMsg::ResizeWindow { .. }
                 | HostMsg::ThemeApplied { .. }

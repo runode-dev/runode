@@ -64,6 +64,21 @@ pub fn alert(alert: AgentAlert, cx: &mut App) {
     }
 }
 
+/// 程序自己要求发的通知（OSC 9、OSC 777），开着通知又在 .app 里时发；同一个分屏的新通知替换旧的。
+/// 不记进 `posted`：agent 的状态变了、用户看过了都不收回，留在通知中心里。
+pub fn program(tag: String, title: String, body: String, cx: &mut App) {
+    if !cx.global::<AppConfig>().0.agent_notifications || !notifications_available() {
+        return;
+    }
+    listen(cx);
+    cx.show_system_notification(SystemNotification {
+        tag: tag.into(),
+        title: title.into(),
+        body: body.into(),
+        actions: Vec::new(),
+    });
+}
+
 /// 设置页里的「发送测试通知」：播放「干完了」的提示音，在 .app 里发一条测试通知。第一次发时
 /// 系统会弹出授权框。点它时标识认不出分屏，什么都不做。
 pub fn test(cx: &mut App) {
