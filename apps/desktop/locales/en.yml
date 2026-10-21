@@ -283,6 +283,7 @@ git:
     create: "Create branch “%{name}”"
     local: Local
     remote: Remote
+  quote_hunk: Send to Agent
   stage_hunk: Stage Hunk
   unstage_hunk: Unstage Hunk
   discard_hunk: Discard Hunk

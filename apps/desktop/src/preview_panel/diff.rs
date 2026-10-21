@@ -10,7 +10,7 @@ use crate::ui::theme::ActiveTheme as _;
 use std::{
     fs,
     ops::Range,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -22,7 +22,7 @@ use crate::ui::{
     button::{Button, ButtonSize},
     font_size::FontSize,
     hsla,
-    icons::{ARROW_DOWN_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
+    icons::{ARROW_DOWN_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON, PROMPT_ICON},
     panel::{added_label, removed_label},
     scrollbar::{row_markers, scrollbar},
     theme::{ADDED, REMOVED},
@@ -489,6 +489,23 @@ impl PreviewPanel {
 
     /// 块头上的按钮：暂存、丢掉或取消暂存这一块，交给 app 做（`PreviewEvent::ApplyHunk`）。丢掉先问一下。
     /// 用的是这次读到的块，文件在这之后又改过时 git 认不出来，报错后跟着扫描重读即可。
+    /// 块头上的按钮：`action` 为空的是「交给 agent」，把这一块连同路径和行号贴进当前终端（`PreviewEvent::Quote`）。
+    fn hunk_button(&mut self, hunk: usize, action: Option<HunkAction>, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(action) = action {
+            self.diff_hunk_action(hunk, action, window, cx);
+            return;
+        }
+        let Some(preview) = self.preview() else {
+            return;
+        };
+        let (Some(target), Some(Loaded::Diff(content))) = (&preview.diff, &preview.content) else {
+            return;
+        };
+        if let Some(hunk) = content.view.file.hunks.get(hunk) {
+            cx.emit(PreviewEvent::Quote(hunk_quote(&target.rel, hunk)));
+        }
+    }
+
     fn diff_hunk_action(&mut self, hunk: usize, action: HunkAction, window: &mut Window, cx: &mut Context<Self>) {
         let Some(preview) = self.preview() else {
             return;
@@ -681,14 +698,17 @@ impl PreviewPanel {
             return row.into_any_element();
         };
         let header = content.view.file.hunks[hunk].header.clone();
-        let buttons: Vec<(&'static str, &'static str, HunkAction)> = match (&target.side, actionable) {
+        // 没有按块操作的是「交给 agent」，哪种 diff 都有。
+        let mut buttons: Vec<(&'static str, &'static str, Option<HunkAction>)> =
+            vec![(PROMPT_ICON, "git.quote_hunk", None)];
+        buttons.extend(match (&target.side, actionable) {
             (DiffSide::Worktree, true) => vec![
-                (DISCARD_ICON, "git.discard_hunk", HunkAction::Discard),
-                (PLUS_ICON, "git.stage_hunk", HunkAction::Stage),
+                (DISCARD_ICON, "git.discard_hunk", Some(HunkAction::Discard)),
+                (PLUS_ICON, "git.stage_hunk", Some(HunkAction::Stage)),
             ],
-            (DiffSide::Index, true) => vec![(MINUS_ICON, "git.unstage_hunk", HunkAction::Unstage)],
+            (DiffSide::Index, true) => vec![(MINUS_ICON, "git.unstage_hunk", Some(HunkAction::Unstage))],
             _ => Vec::new(),
-        };
+        });
         // 按钮挂在 diff 的行里，跟着正文的 `preview-font-size` 走，不跟界面字号，才装得进这一行。
         let font_size = self.input.font_size;
         let fg_hsla = cx.theme().foreground;
@@ -708,7 +728,7 @@ impl PreviewPanel {
                     .id(("preview-diff-hunk-button", hunk * 4 + bi))
                     .role(Role::Button)
                     .aria_label(rust_i18n::t!(key).into_owned())
-                    .on_a11y_press(view, move |this, window, cx| this.diff_hunk_action(hunk, action, window, cx))
+                    .on_a11y_press(view, move |this, window, cx| this.hunk_button(hunk, action, window, cx))
                     .flex_none()
                     .px(px(6.))
                     .h(px(font_size + ROW_EXTRA_HEIGHT - 3.))
@@ -725,12 +745,39 @@ impl PreviewPanel {
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
-                            this.diff_hunk_action(hunk, action, window, cx);
+                            this.hunk_button(hunk, action, window, cx);
                         }),
                     )
             }))
             .into_any_element()
     }
+}
+
+/// 交给 agent 的一块改动：`路径:起-止`（新文件里的行号，只删了行的用旧文件的），下面是这块 diff。代码里有
+/// 三个反引号时围栏多加一个，不提前收尾。
+fn hunk_quote(rel: &Path, hunk: &git::Hunk) -> String {
+    let new: Vec<u32> = hunk.lines.iter().filter_map(|line| line.new).collect();
+    let numbers = if new.is_empty() { hunk.lines.iter().filter_map(|line| line.old).collect() } else { new };
+    let place = match (numbers.first(), numbers.last()) {
+        (Some(first), Some(last)) if first != last => format!("{}:{first}-{last}", rel.display()),
+        (Some(first), _) => format!("{}:{first}", rel.display()),
+        _ => rel.display().to_string(),
+    };
+    let fence = if hunk.lines.iter().any(|line| line.text.contains("```")) { "````" } else { "```" };
+    let mut text = format!("{place}\n{fence}diff\n{}\n", hunk.header);
+    for line in &hunk.lines {
+        let sign = match line.kind {
+            LineKind::Added => '+',
+            LineKind::Removed => '-',
+            LineKind::Context => ' ',
+        };
+        text.push(sign);
+        text.push_str(&line.text);
+        text.push('\n');
+    }
+    text.push_str(fence);
+    text.push('\n');
+    text
 }
 
 #[cfg(test)]
@@ -763,6 +810,27 @@ mod tests {
         let new_lines = vec!["a much longer new line".to_owned(), "b".to_owned(), "c".to_owned()];
         let rows = git::merge_rows(&file, &new_lines).unwrap();
         DiffView { file, new_lines, rows }
+    }
+
+    /// 行号取新文件的首尾，只删了行的取旧文件的；代码里的三个反引号不会提前收尾。
+    #[test]
+    fn hunks_are_quoted_with_their_place() {
+        let line = |kind, old, new, text: &str| Line { kind, old, new, text: text.into() };
+        let hunk = |lines| Hunk { header: "@@ -3,2 +3,2 @@".into(), lines };
+        let changed = hunk(vec![
+            line(LineKind::Removed, Some(3), None, "old"),
+            line(LineKind::Added, None, Some(3), "new"),
+            line(LineKind::Context, Some(4), Some(4), "same"),
+        ]);
+        assert_eq!(
+            hunk_quote(Path::new("src/a.rs"), &changed),
+            "src/a.rs:3-4\n```diff\n@@ -3,2 +3,2 @@\n-old\n+new\n same\n```\n"
+        );
+        let removed = hunk(vec![line(LineKind::Removed, Some(9), None, "let s = \"```\";")]);
+        assert_eq!(
+            hunk_quote(Path::new("b.md"), &removed),
+            "b.md:9\n````diff\n@@ -3,2 +3,2 @@\n-let s = \"```\";\n````\n"
+        );
     }
 
     #[test]

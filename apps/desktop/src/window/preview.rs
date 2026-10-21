@@ -164,6 +164,12 @@ impl WindowView {
             PreviewEvent::Reveal(path) => self.with_file_tree(cx, |tree, cx| tree.reveal_file(path, cx)),
             PreviewEvent::OptionsChanged => self.save(cx),
             PreviewEvent::InsertPath { path, line } => self.insert_paths(vec![path.clone()], Some(*line), window, cx),
+            PreviewEvent::Quote(text) => {
+                if let Some(view) = self.focused_view().cloned() {
+                    window.focus(&view.focus_handle(cx), cx);
+                    view.update(cx, |view, cx| view.paste_text(text.clone(), window, cx));
+                }
+            }
             // 经 Git 面板跑，和面板上的操作一起按仓库排队；做完它发 `GitPanelEvent::HunkApplied`，再重读 diff。
             PreviewEvent::ApplyHunk { root, file, hunk, action } => {
                 self.with_git_panel(cx, |panel, cx| panel.apply_hunk(root, file.clone(), *hunk, *action, window, cx));

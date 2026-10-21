@@ -128,6 +128,9 @@ pub enum PreviewEvent {
     OptionsChanged,
     /// 把「路径:行号」打进当前终端：双击了工作区 diff 里没删掉的一行。
     InsertPath { path: PathBuf, line: u32 },
+    /// 把这段文字贴进当前终端、焦点交过去，不回车：diff 块头上按了「交给 agent」，文字是这块改动和它的位置，
+    /// 用户接着写要 agent 做什么。
+    Quote(String),
     /// 按块暂存、丢弃或取消暂存 `root` 仓库里 `file` 的第 `hunk` 块；丢弃已经问过了。做完后 app 调
     /// `PreviewPanel::reload_diff`，接着点下一块时块还对得上。
     ApplyHunk { root: PathBuf, file: git::FileDiff, hunk: usize, action: HunkAction },

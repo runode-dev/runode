@@ -283,6 +283,7 @@ git:
     create: "新增分支「%{name}」"
     local: 本機
     remote: 遠端
+  quote_hunk: 交給 agent
   stage_hunk: 暫存這一塊
   unstage_hunk: 取消暫存這一塊
   discard_hunk: 捨棄這一塊
