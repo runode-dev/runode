@@ -39,7 +39,7 @@ use libghostty_vt::{
 };
 use runode_agent::Tracker;
 use runode_types::{
-    agent::{Agent, AgentState},
+    agent::{Agent, AgentState, Conversation},
     grid::{GridSize, merge_window_resize},
     session::{DriveAction, Driver, SessionMeta},
     settings::TermSettings,
@@ -148,6 +148,8 @@ pub struct HostSession {
     title: Option<String>,
     /// 前台 agent 和它的状态，由 `agent_tracker` 合成；不是 agent 在前台时为 `None`。
     agent: Option<Agent>,
+    /// 前台 agent 在进行的对话，见 `SessionMeta::conversation`。
+    conversation: Option<Conversation>,
     /// 识别前台 agent 用的各路信号和去抖状态，见 `runode_agent::Tracker`。
     agent_tracker: Tracker,
     /// 上次认前台进程组的结果，见 `detect::ForegroundProbe`。
@@ -255,6 +257,7 @@ impl HostSession {
             replies,
             title: None,
             agent: None,
+            conversation: None,
             agent_tracker: Tracker::new(),
             foreground_probe: detect::ForegroundProbe::default(),
             fallback_title: None,
@@ -416,6 +419,7 @@ impl HostSession {
         self.title.clone_from(&meta.title);
         self.fallback_title.clone_from(&meta.fallback_title);
         self.agent = meta.agent;
+        self.conversation.clone_from(&meta.conversation);
         self.cwd.clone_from(&meta.cwd);
         self.prompt_cwd.clone_from(&meta.prompt_cwd);
         self.foreground_is_shell = meta.foreground_is_shell;
@@ -564,6 +568,7 @@ impl HostSession {
             title: self.title.clone(),
             fallback_title: self.fallback_title.clone(),
             agent: self.agent,
+            conversation: self.conversation.clone(),
             cwd: self.cwd.clone(),
             foreground_is_shell: self.foreground_is_shell,
             shell_path: self.effects.shell_path.borrow().clone(),

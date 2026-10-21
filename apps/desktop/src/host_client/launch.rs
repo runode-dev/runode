@@ -510,6 +510,7 @@ mod tests {
                     start: false,
                     shell: Some("/bin/cat".into()),
                     settings: None,
+                    resume: None,
                 })
                 .unwrap();
             let probed = probe(&socket, &build());

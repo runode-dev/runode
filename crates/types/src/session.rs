@@ -6,7 +6,10 @@ use std::{ffi::OsString, fmt, path::PathBuf, str::FromStr, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{agent::Agent, shell::ShellNames};
+use crate::{
+    agent::{Agent, Conversation},
+    shell::ShellNames,
+};
 
 /// 一个终端会话对外公布的状态。缺的字段按默认值读。
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -18,6 +21,9 @@ pub struct SessionMeta {
     pub fallback_title: Option<String>,
     /// 前台 agent 和它的状态；不是 agent 在前台时为 `None`。
     pub agent: Option<Agent>,
+    /// 前台 agent 正在进行的对话；认不出是哪场、或者那家 agent 不能按号接回时为 `None`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<Conversation>,
     /// shell 当前所在的目录。
     #[serde(serialize_with = "crate::lossy_path::serialize_opt")]
     pub cwd: Option<PathBuf>,

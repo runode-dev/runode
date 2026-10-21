@@ -122,6 +122,7 @@ fn sessions_can_be_spawned_over_the_socket() {
         start: true,
         shell: None,
         settings: None,
+        resume: None,
     });
     let HostMsg::Spawned { req: 7, id } = peer.reply() else { panic!("expected spawned") };
     peer.attach(id, AttachMode::VtReplay);

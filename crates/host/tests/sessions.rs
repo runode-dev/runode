@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use common::{Peer, SIZE, WAIT, contains, host, script, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
-use runode_protocol::{AttachMode, Frame, FrameKind, write_frame};
-use runode_types::{settings::TermSettings, shell::IntegrationMode};
+use runode_protocol::{AttachMode, Conversation, Frame, FrameKind, write_frame};
+use runode_types::{agent::AgentKind, settings::TermSettings, shell::IntegrationMode};
 
 /// 两个会话的快照在同一条连接上交错着到：读一个的快照时先收下的另一个的，轮到读它时照样读得到，别的帧
 /// 先后不变。对着手写的帧测 `Peer::screen` 自己，不经宿主，交错的先后才定得下来。
@@ -93,6 +93,7 @@ fn spawn_settings_apply_only_before_the_first_theme() {
             start: true,
             shell: Some("/bin/cat".into()),
             settings: Some(early.clone()),
+            resume: None,
         });
         match peer.reply() {
             HostMsg::Spawned { req: answered, id } if answered == req => id,
@@ -118,6 +119,36 @@ fn spawn_settings_apply_only_before_the_first_theme() {
     assert_eq!(attached_settings(&mut peer, second), Some(theme));
     peer.send(&ClientMsg::Kill { id: first });
     peer.send(&ClientMsg::Kill { id: second });
+}
+
+/// 恢复窗口时新开的会话在提示符上接回 agent 的对话；不像对话号的不打进去。
+#[test]
+fn spawn_types_the_resume_command() {
+    let host = host();
+    let mut peer = Peer::pair(&host);
+    let spawn = |peer: &mut Peer, req: u32, id: &str| {
+        peer.send(&ClientMsg::Spawn {
+            req,
+            size: SIZE,
+            cwd: None,
+            fallback_cwd: None,
+            integration: IntegrationMode::Off,
+            start: true,
+            shell: Some("/bin/cat".into()),
+            settings: None,
+            resume: Some(Conversation { kind: AgentKind::Claude, id: id.into() }),
+        });
+        match peer.reply() {
+            HostMsg::Spawned { req: answered, id } if answered == req => id,
+            other => panic!("expected spawned, got {other:?}"),
+        }
+    };
+    let resumed = spawn(&mut peer, 1, "ab-12");
+    let refused = spawn(&mut peer, 2, "ab; echo hi");
+    peer.wait_screen(resumed, None, |text| text.replace('\n', "").contains("claude --resume ab-12"));
+    assert!(!peer.screen_text(refused, None).contains("claude"));
+    peer.send(&ClientMsg::Kill { id: resumed });
+    peer.send(&ClientMsg::Kill { id: refused });
 }
 
 /// 清屏的字节当成一段输出发回来；前台是 shell 时还给它发一个 FF，`cat` 把它回显成 `^L`。

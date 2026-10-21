@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use runode_protocol::{SessionId, SessionInfo, WindowLayout};
+use runode_protocol::{Conversation, SessionId, SessionInfo, WindowLayout};
 use runode_types::pane::Axis;
 use serde::{Deserialize, Serialize};
 
@@ -141,6 +141,9 @@ pub enum SavedNode {
         /// 已经过时，恢复时以宿主为准（见 `plan_restore`）。
         #[serde(default, skip_serializing_if = "is_false")]
         unstarted: bool,
+        /// 前台 agent 在进行的对话：会话接不上、要在原目录新开时接着它。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation: Option<Conversation>,
     },
     Split {
         axis: Axis,
@@ -251,7 +254,12 @@ pub fn adopt(
                 .filter_map(|pane| live.iter().find(|info| info.id == pane.id && !info.exited && !info.claimed))
                 .filter(|info| known.insert(info.id))
                 .map(|info| SavedTab {
-                    root: SavedNode::Leaf { cwd: info.meta.cwd.clone(), session: Some(info.id), unstarted: false },
+                    root: SavedNode::Leaf {
+                        cwd: info.meta.cwd.clone(),
+                        session: Some(info.id),
+                        unstarted: false,
+                        conversation: info.meta.conversation.clone(),
+                    },
                     focused: 0,
                     zoomed: false,
                     collapsed: Vec::new(),

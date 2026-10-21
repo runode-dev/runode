@@ -47,8 +47,8 @@ use std::{
 use anyhow::{Result, anyhow};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use runode_protocol::{
-    AttachMode, BuildId, Caps, ClientKind, ClientMsg, Frame, FrameError, FrameKind, HostMsg, PROTOCOL_VERSION,
-    SessionId, SessionInfo, ShellReport, TaskSource, WindowLayout, read_frame, write_frame,
+    AttachMode, BuildId, Caps, ClientKind, ClientMsg, Conversation, Frame, FrameError, FrameKind, HostMsg,
+    PROTOCOL_VERSION, SessionId, SessionInfo, ShellReport, TaskSource, WindowLayout, read_frame, write_frame,
 };
 use runode_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
@@ -174,6 +174,8 @@ pub struct SpawnOptions {
     pub shell: Option<String>,
     /// 宿主还没收到过 `SetTheme` 时这个会话一开始套的主题。
     pub settings: Option<TermSettings>,
+    /// 出了提示符后接回的 agent 对话。
+    pub resume: Option<Conversation>,
 }
 
 /// 连宿主没连成的原因。
@@ -652,10 +654,10 @@ impl Link {
 
     /// 同 `spawn`，最多等 `timeout`。
     fn spawn_within(&self, options: SpawnOptions, timeout: Duration) -> Result<SessionId> {
-        let SpawnOptions { size, cwd, fallback_cwd, integration, start, shell, settings } = options;
+        let SpawnOptions { size, cwd, fallback_cwd, integration, start, shell, settings, resume } = options;
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
         let (reply, generation) = self.expect_reply(req)?;
-        let spawn = ClientMsg::Spawn { req, size, cwd, fallback_cwd, integration, start, shell, settings };
+        let spawn = ClientMsg::Spawn { req, size, cwd, fallback_cwd, integration, start, shell, settings, resume };
         if let Err(err) = self.inner.control_on(generation, &spawn) {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host for a terminal: {err}"));

@@ -6,11 +6,13 @@
 //! - `title`：agent 在标题前缀里自己报告的状态。
 //! - `osc`：从输出里留下 OSC 9 报告的原文给规则用。
 //! - `tracker`：把这些合成对外的状态，并去抖、节流。
+//! - `conversation`：前台 agent 在进行哪场对话，新 shell 里怎么接回。
 //! - `models`：起 agent 时挑模型和强度，命令怎么写，模型清单怎么向 agent 本身问。
 //!
 //! 这里不碰终端仿真、PTY 和界面：屏幕文字、前台进程都由调用方读好了交进来。
 
 mod book;
+pub mod conversation;
 mod identify;
 pub mod models;
 mod osc;

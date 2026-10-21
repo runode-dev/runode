@@ -20,7 +20,7 @@ use std::{
 
 use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, task::ArcWake};
 use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
-use runode_protocol::{AttachMode, ClientMsg, ERROR_BACKED_UP, HostMsg, SessionId};
+use runode_protocol::{AttachMode, ClientMsg, Conversation, ERROR_BACKED_UP, HostMsg, SessionId};
 use runode_terminal::{
     pty::dir_label,
     session::{self, Request, SYNC_OUTPUT_TIMEOUT, Session},
@@ -158,16 +158,18 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
-        let view = Self::unstarted(cwd, fallback, window, cx)?;
+        let view = Self::unstarted(cwd, fallback, None, window, cx)?;
         view.update(cx, |view, cx| view.start(cx));
         Ok(view)
     }
 
     /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时显示出来的终端用它，
     /// 等第一次布局量出尺寸再启动；看不见的连会话都不开，见 `deferred`。`cwd` 不是目录时从 `fallback` 开。
+    /// `resume` 是出了提示符后接回的 agent 对话。
     pub fn unstarted(
         cwd: Option<&Path>,
         fallback: Option<&Path>,
+        resume: Option<Conversation>,
         window: &mut Window,
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
@@ -180,6 +182,7 @@ impl TerminalView {
             start: false,
             shell: None,
             settings: None,
+            resume,
         })?;
         let (screen, rx) = connect(id, &config.term_settings())?;
         Ok(cx.new(|cx| Self::new(Some(id), screen, false, rx, window, cx)))
@@ -189,7 +192,13 @@ impl TerminalView {
     /// （`request_visible`）或者要启动（`start_at`）时再在 `cwd` 下开，为 `None` 时从家目录开始。
     /// 恢复布局时看不见、又从没启动过的终端用它，恢复很多标签时只有显示出来的那几个马上开。
     /// 开之前标题和目录按起始目录给，和宿主给还没启动的会话的一样。
-    pub fn deferred(cwd: Option<&Path>, fallback: Option<&Path>, window: &mut Window, cx: &mut App) -> Entity<Self> {
+    pub fn deferred(
+        cwd: Option<&Path>,
+        fallback: Option<&Path>,
+        resume: Option<Conversation>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
         let dir = cwd.map(Path::to_path_buf).or_else(|| runode_paths::Dirs::from_env().home);
         let meta = SessionMeta { fallback_title: dir.as_deref().map(dir_label), cwd: dir, ..SessionMeta::default() };
         let screen = ScreenState::new_unopened(meta, PROVISIONAL_SIZE, Instant::now());
@@ -201,6 +210,7 @@ impl TerminalView {
             let mut view = Self::new(None, screen, false, rx, window, cx);
             view.start_dir = start_dir;
             view.start_fallback = start_fallback;
+            view.start_resume = resume;
             view
         })
     }
@@ -222,6 +232,7 @@ impl TerminalView {
             start,
             shell: None,
             settings: None,
+            resume: self.start_resume.take(),
         });
         match spawned {
             Ok(id) => {
@@ -679,6 +690,7 @@ impl TerminalView {
             start: true,
             shell: None,
             settings: None,
+            resume: None,
         })?;
         let (mut screen, rx) = connect(id, &self.config.term_settings())?;
         if let Some(old) = self.id.replace(id) {
@@ -786,6 +798,7 @@ impl TerminalView {
             colors: (settings.foreground, settings.background),
             start_dir: None,
             start_fallback: None,
+            start_resume: None,
             id,
             ended: false,
             bell_pending: false,

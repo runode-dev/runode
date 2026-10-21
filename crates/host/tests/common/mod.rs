@@ -292,6 +292,7 @@ impl Peer {
             start,
             shell: Some(shell.into()),
             settings: None,
+            resume: None,
         });
         match self.reply() {
             HostMsg::Spawned { req: answered, id } if answered == req => id,

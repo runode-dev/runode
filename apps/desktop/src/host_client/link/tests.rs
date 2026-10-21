@@ -47,6 +47,7 @@ fn spawn(link: &Link, shell: String) -> SessionId {
         start: true,
         shell: Some(shell),
         settings: None,
+        resume: None,
     })
     .unwrap()
 }
@@ -613,6 +614,7 @@ fn every_session_hears_when_the_host_goes_away() {
             start: true,
             shell: None,
             settings: None,
+            resume: None,
         })
         .is_err()
     );
@@ -672,6 +674,7 @@ fn a_terminal_spawned_after_the_caller_gave_up_is_ended() {
         start: true,
         shell: None,
         settings: None,
+        resume: None,
     };
     assert!(link.spawn_within(options, Duration::from_millis(100)).is_err());
     assert!(link.connected());
@@ -888,6 +891,7 @@ mod bench {
             start: true,
             shell: Some(shell),
             settings: None,
+            resume: None,
         })
         .unwrap()
     }

@@ -6,11 +6,12 @@
 //! `HostSession::agent_deadline` 到了时调 `HostSession::poll_agent`。
 
 use std::{
+    path::{Path, PathBuf},
     sync::OnceLock,
     time::{Duration, Instant},
 };
 
-use runode_agent::{Foreground, RuleBook, identify_job};
+use runode_agent::{Foreground, RuleBook, conversation, identify_job};
 use runode_types::agent::AgentKind;
 
 use super::{HostSession, log_err};
@@ -29,12 +30,19 @@ pub(super) struct ForegroundProbe {
     since: Option<Instant>,
     probed_at: Option<Instant>,
     agent: Option<AgentKind>,
+    /// 上次认的时候组里的进程，找 agent 记着的对话用。
+    pids: Vec<u32>,
 }
 
 /// 全部终端共用的识别规则，用户规则从 `runode_paths::Dirs::agent_detection_dir` 读。
 fn rules() -> &'static RuleBook {
     static RULES: OnceLock<RuleBook> = OnceLock::new();
     RULES.get_or_init(|| RuleBook::new(runode_paths::Dirs::from_env().agent_detection_dir().as_deref()))
+}
+
+fn home() -> Option<&'static Path> {
+    static HOME: OnceLock<Option<PathBuf>> = OnceLock::new();
+    HOME.get_or_init(|| runode_paths::Dirs::from_env().home).as_deref()
 }
 
 impl HostSession {
@@ -62,8 +70,17 @@ impl HostSession {
         if changed {
             self.agent = self.agent_tracker.agent();
             tracing::debug!(agent = ?self.agent, "foreground agent changed");
+            self.refresh_conversation();
         }
         changed
+    }
+
+    /// 重读前台 agent 在进行的对话。agent 每次换状态时读一次：`/clear` 这类命令会换一场对话。
+    fn refresh_conversation(&mut self) {
+        self.conversation = match (self.agent, home()) {
+            (Some(agent), Some(home)) => conversation::current(agent.kind, &self.foreground_probe.pids, home),
+            _ => None,
+        };
     }
 
     /// 看前台在跑什么程序（`foreground` 是刚读的 `Pty::foreground`），认出是哪个 agent 交给
@@ -87,7 +104,9 @@ impl HostSession {
             && probe.probed_at.is_none_or(|at| now.saturating_duration_since(at) >= REPROBE_INTERVAL);
         if fresh || retry {
             probe.probed_at = Some(now);
-            probe.agent = pty::process_group(leader).as_ref().and_then(identify_job);
+            let job = pty::process_group(leader);
+            probe.agent = job.as_ref().and_then(identify_job);
+            probe.pids = job.map(|job| job.processes.iter().map(|process| process.pid).collect()).unwrap_or_default();
         }
         self.agent_tracker.foreground(Foreground::Program(probe.agent), now);
     }

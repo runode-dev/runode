@@ -1,7 +1,7 @@
 //! 会话对外公布的状态 `SessionMeta` 的 JSON 读写。
 
 use runode_types::{
-    agent::{Agent, AgentKind, AgentState},
+    agent::{Agent, AgentKind, AgentState, Conversation},
     session::{DriveAction, Driver, SessionMeta},
     shell::ShellNames,
 };
@@ -18,6 +18,7 @@ fn round_trips_through_json() {
         title: Some("修 bug".into()),
         fallback_title: Some("runode".into()),
         agent: Some(Agent { kind: AgentKind::GithubCopilot, state: AgentState::Blocked }),
+        conversation: Some(Conversation { kind: AgentKind::Claude, id: "ab-12".into() }),
         cwd: Some("/tmp/中文".into()),
         prompt_cwd: Some("/tmp".into()),
         foreground_is_shell: false,

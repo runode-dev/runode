@@ -11,7 +11,7 @@ use runode_protocol::{
     write_frame,
 };
 use runode_types::{
-    agent::{Agent, AgentKind, AgentState},
+    agent::{Agent, AgentKind, AgentState, Conversation},
     clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     grid::GridSize,
     session::{DriveAction, Driver, SessionMeta},
@@ -171,6 +171,7 @@ fn client_messages_round_trip() {
             start: false,
             shell: Some("/bin/zsh".into()),
             settings: Some(TermSettings { cursor_blink: Some(false), ..TermSettings::default() }),
+            resume: Some(Conversation { kind: AgentKind::Claude, id: "c5539cb0-8025-413c-9be3-4f0187ac4bba".into() }),
         },
         ClientMsg::Spawn {
             req: 4,
@@ -181,6 +182,7 @@ fn client_messages_round_trip() {
             start: true,
             shell: None,
             settings: None,
+            resume: None,
         },
         ClientMsg::Start { id: ID, integration: IntegrationMode::Off },
         ClientMsg::Attach { id: ID, size: Some(size()), mode: AttachMode::Snapshot },
@@ -588,6 +590,7 @@ fn version_3_fields_have_old_defaults() {
             start: true,
             shell: None,
             settings: None,
+            resume: None,
         }
     );
     let read: ClientMsg = serde_json::from_str(&format!(r#"{{"type":"read_screen","id":"{ID}","lines":3}}"#)).unwrap();

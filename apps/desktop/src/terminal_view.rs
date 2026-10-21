@@ -28,7 +28,7 @@ use gpui::{
     Render, Role, ShapedLine, SharedString, Subscription, Task, Window, actions, div, prelude::*, px, relative, rgb,
 };
 use runode_config::Config;
-use runode_protocol::SessionId;
+use runode_protocol::{Conversation, SessionId};
 use runode_terminal::session::{Link, LinkTarget, Session};
 use runode_types::{color::Rgb, frame::Frame, grid::GridSize};
 
@@ -140,6 +140,8 @@ pub struct TerminalView {
     start_dir: Option<PathBuf>,
     /// `deferred` 建的视图开会话时 `start_dir` 不是目录的话改从哪里开。
     start_fallback: Option<PathBuf>,
+    /// `deferred` 建的视图开会话时接回的 agent 对话。
+    start_resume: Option<Conversation>,
     /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。`deferred` 建的视图开会话
     /// 之前为 `None`。
     id: Option<SessionId>,

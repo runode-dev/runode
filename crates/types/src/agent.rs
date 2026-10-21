@@ -64,6 +64,13 @@ pub struct Agent {
     pub state: AgentState,
 }
 
+/// agent 自己记着的一场对话，在新 shell 里能按 `id` 接回来。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Conversation {
+    pub kind: AgentKind,
+    pub id: String,
+}
+
 impl Agent {
     pub fn is_working(self) -> bool {
         self.state == AgentState::Working

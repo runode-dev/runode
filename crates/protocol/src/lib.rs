@@ -26,8 +26,9 @@ pub use handoff::{
 };
 pub use layout::{PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout};
 pub use message::{
-    AttachMode, BuildId, Caps, ClientKind, ClientMsg, ClipboardContent, ERROR_BACKED_UP, ERROR_NO_SESSION,
-    FinishedCommand, GoodbyeReason, HandoffRefusal, HostMsg, Placement, SessionId, SessionInfo, ShellReport,
+    AttachMode, BuildId, Caps, ClientKind, ClientMsg, ClipboardContent, Conversation, ERROR_BACKED_UP,
+    ERROR_NO_SESSION, FinishedCommand, GoodbyeReason, HandoffRefusal, HostMsg, Placement, SessionId, SessionInfo,
+    ShellReport,
 };
 pub use runode_types::tasks::{self, MAX_TASKS, TaskEntry, TaskSource, TaskSourceKind};
 

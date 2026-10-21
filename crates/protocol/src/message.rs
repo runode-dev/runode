@@ -31,16 +31,17 @@
 
 use std::{ffi::OsString, fmt, path::PathBuf, sync::Arc};
 
+pub use runode_types::{
+    agent::Conversation,
+    session::{InvalidSessionId, SessionId},
+    shell::FinishedCommand,
+};
 use runode_types::{
     clipboard::ClipboardAccess,
     grid::GridSize,
     session::SessionMeta,
     settings::TermSettings,
     shell::{IntegrationMode, ShellNames},
-};
-pub use runode_types::{
-    session::{InvalidSessionId, SessionId},
-    shell::FinishedCommand,
 };
 use serde::{Deserialize, Serialize};
 
@@ -145,6 +146,9 @@ pub enum ClientMsg {
         /// 提前开的会话用前端自己读到的配置；收到过时一律用宿主当前的主题。
         #[serde(default)]
         settings: Option<TermSettings>,
+        /// shell 出了提示符后接回这场 agent 的对话，恢复窗口时用；接不回的什么都不打。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume: Option<Conversation>,
     },
     /// 启动 `Spawn` 时 `start` 为假的会话的 shell；已经启动过时什么都不做。启动不了时宿主在
     /// 这个会话的输出流里发 `HostMsg::Exited`。

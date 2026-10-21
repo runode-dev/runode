@@ -490,6 +490,7 @@ fn oversized_grids_are_refused() {
         start: true,
         shell: Some("/bin/cat".into()),
         settings: None,
+        resume: None,
     });
     assert!(matches!(a.reply(), HostMsg::Error { req: Some(7), .. }));
 

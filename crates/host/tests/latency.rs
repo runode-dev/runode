@@ -139,6 +139,7 @@ impl PairDesktop {
             start: true,
             shell: Some(shell),
             settings: None,
+            resume: None,
         });
         loop {
             if let HostMsg::Spawned { id, .. } = self.message() {

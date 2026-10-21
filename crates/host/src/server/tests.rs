@@ -500,6 +500,7 @@ fn a_stopping_host_opens_no_more_sessions() {
             start: true,
             shell: Some("/bin/cat".into()),
             settings: None,
+            resume: None,
         },
     ] {
         let frame = Frame::control(&message).unwrap();

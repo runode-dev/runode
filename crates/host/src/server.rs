@@ -1118,7 +1118,7 @@ impl Connection {
                     drop(slot);
                 });
             }
-            ClientMsg::Spawn { req, size, cwd, fallback_cwd, integration, start, shell, settings } => {
+            ClientMsg::Spawn { req, size, cwd, fallback_cwd, integration, start, shell, settings, resume } => {
                 if let Err(message) = check_size(size) {
                     self.error(Some(req), None, message);
                     return;
@@ -1131,7 +1131,11 @@ impl Connection {
                         (cwd, _) => cwd,
                     };
                     let options = SpawnOptions { size, cwd, integration, start, shell, settings };
-                    shared.spawn(options).map(|id| HostMsg::Spawned { req, id }).map_err(|err| format!("{err:#}"))
+                    let id = shared.spawn(options).map_err(|err| format!("{err:#}"))?;
+                    if let Some(command) = resume.as_ref().and_then(runode_agent::conversation::resume_command) {
+                        shared.deliver(id, Inbox::TypeAtPrompt(format!("{command}\r").into_bytes()));
+                    }
+                    Ok(HostMsg::Spawned { req, id })
                 });
             }
             ClientMsg::Start { id, integration } => {

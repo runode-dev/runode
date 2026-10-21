@@ -1,11 +1,11 @@
 use super::*;
 
 fn leaf(cwd: &str) -> SavedNode {
-    SavedNode::Leaf { cwd: Some(cwd.into()), session: None, unstarted: false }
+    SavedNode::Leaf { cwd: Some(cwd.into()), session: None, unstarted: false, conversation: None }
 }
 
 fn session_leaf(id: u128, unstarted: bool) -> SavedNode {
-    SavedNode::Leaf { cwd: Some("/tmp".into()), session: Some(SessionId(id)), unstarted }
+    SavedNode::Leaf { cwd: Some("/tmp".into()), session: Some(SessionId(id)), unstarted, conversation: None }
 }
 
 fn state() -> State {
@@ -17,7 +17,12 @@ fn state() -> State {
             second: Box::new(SavedNode::Split {
                 axis: Axis::Vertical,
                 ratio: 0.5,
-                first: Box::new(SavedNode::Leaf { cwd: None, session: Some(SessionId(7)), unstarted: true }),
+                first: Box::new(SavedNode::Leaf {
+                    cwd: None,
+                    session: Some(SessionId(7)),
+                    unstarted: true,
+                    conversation: None,
+                }),
                 second: Box::new(leaf("/")),
             }),
         },
