@@ -32,19 +32,25 @@ pub(crate) type Sink = dyn Fn(Event) + Send + Sync;
 pub(crate) struct Encoder {
     session: CFRetained<VTCompressionSession>,
     /// 编码回调的 refcon 指着它，所以装箱、比会话活得久（`Drop` 里先关会话）。
-    _sink: Box<Arc<Sink>>,
+    shared: Box<Shared>,
+}
+
+/// 编码回调也要用的。
+struct Shared {
+    sink: Arc<Sink>,
+    /// 下一帧编成关键帧；硬要的那帧被编码器丢掉或编坏时回调再置上，免得要的关键帧一直不来。
     force_keyframe: AtomicBool,
 }
 
-// SAFETY: VideoToolbox 的编码会话可以在任意线程上调用；`sink` 本身是 Send + Sync。
+// SAFETY: VideoToolbox 的编码会话可以在任意线程上调用；`Shared` 本身是 Send + Sync。
 unsafe impl Send for Encoder {}
 // SAFETY: 同上。
 unsafe impl Sync for Encoder {}
 
 impl Encoder {
     pub(crate) fn new(width: u32, height: u32, fps: u32, bitrate: u32, sink: Arc<Sink>) -> io::Result<Self> {
-        let sink = Box::new(sink);
-        let refcon = ptr::from_ref::<Arc<Sink>>(&sink).cast_mut().cast::<c_void>();
+        let shared = Box::new(Shared { sink, force_keyframe: AtomicBool::new(false) });
+        let refcon = ptr::from_ref::<Shared>(&shared).cast_mut().cast::<c_void>();
         // 低延迟码率控制不是每种编码器都支持，建不了就退回普通的码率控制，仍然要硬件编码。
         let session = create(width, height, refcon, true).or_else(|status| {
             tracing::warn!("low-latency HEVC encoding is unavailable ({status}), using the normal rate control");
@@ -52,7 +58,7 @@ impl Encoder {
         });
         let session =
             session.map_err(|status| io::Error::other(format!("cannot create the HEVC encoder ({status})")))?;
-        let encoder = Self { session, _sink: sink, force_keyframe: AtomicBool::new(false) };
+        let encoder = Self { session, shared };
         // SAFETY: 读 VideoToolbox 导出的常量。
         unsafe {
             encoder.set(kVTCompressionPropertyKey_RealTime, CFBoolean::new(true))?;
@@ -79,16 +85,16 @@ impl Encoder {
 
     /// 下一帧编成关键帧，并带上参数集。
     pub(crate) fn request_keyframe(&self) {
-        self.force_keyframe.store(true, Ordering::Relaxed);
+        self.shared.force_keyframe.store(true, Ordering::Relaxed);
     }
 
     /// 要了的关键帧还没交给编码器。
     pub(crate) fn keyframe_requested(&self) -> bool {
-        self.force_keyframe.load(Ordering::Relaxed)
+        self.shared.force_keyframe.load(Ordering::Relaxed)
     }
 
     pub(crate) fn encode(&self, image: &CVImageBuffer, pts: CMTime) {
-        let force = self.force_keyframe.swap(false, Ordering::Relaxed);
+        let force = self.shared.force_keyframe.swap(false, Ordering::Relaxed);
         let options = force.then(|| {
             CFDictionary::<CFString, CFBoolean>::from_slices(
                 // SAFETY: 读 VideoToolbox 导出的常量。
@@ -96,6 +102,8 @@ impl Encoder {
                 &[CFBoolean::new(true)],
             )
         });
+        // 回调凭非空的 sourceFrameRefcon 认出硬要的关键帧，它只当标记、不解引用。
+        let marker = if force { NonNull::<c_void>::dangling().as_ptr() } else { ptr::null_mut() };
         // SAFETY: 图像和选项在调用期间有效；编出的帧经建会话时给的回调交出。
         let status = unsafe {
             self.session.encode_frame(
@@ -103,26 +111,30 @@ impl Encoder {
                 pts,
                 kCMTimeInvalid,
                 options.as_deref().map(AsRef::as_ref),
-                ptr::null_mut(),
+                marker,
                 ptr::null_mut(),
             )
         };
         if status != 0 {
             tracing::warn!("cannot encode a screen frame ({status})");
             if force {
-                self.force_keyframe.store(true, Ordering::Relaxed);
+                self.shared.force_keyframe.store(true, Ordering::Relaxed);
             }
         }
+    }
+
+    /// 等交给编码器的帧都编完、经回调交出去再返回。
+    pub(crate) fn complete(&self) {
+        // SAFETY: 会话活着；时间戳无效表示全部。
+        unsafe { self.session.complete_frames(kCMTimeInvalid) };
     }
 }
 
 impl Drop for Encoder {
     fn drop(&mut self) {
-        // SAFETY: 等还在编的帧交出去再关会话，之后回调不会再用到 `sink`。
-        unsafe {
-            self.session.complete_frames(kCMTimeInvalid);
-            self.session.invalidate();
-        }
+        self.complete();
+        // SAFETY: 还在编的帧都交出去了，关会话以后回调不会再用到 `shared`。
+        unsafe { self.session.invalidate() };
     }
 }
 
@@ -167,28 +179,30 @@ fn create(
 
 unsafe extern "C-unwind" fn on_encoded(
     refcon: *mut c_void,
-    _frame: *mut c_void,
+    frame: *mut c_void,
     status: i32,
     flags: VTEncodeInfoFlags,
     sample: *mut CMSampleBuffer,
 ) {
-    // SAFETY: refcon 是 `Encoder::new` 给的，指着 `Encoder::_sink`，会话关掉之前一直有效。
-    let sink = unsafe { &*refcon.cast_const().cast::<Arc<Sink>>() };
-    if status != 0 {
-        tracing::warn!("the HEVC encoder failed on a frame ({status})");
-        return;
-    }
-    if flags.contains(VTEncodeInfoFlags::FrameDropped) {
+    // SAFETY: refcon 是 `Encoder::new` 给的，指着 `Encoder::shared`，会话关掉之前一直有效。
+    let shared = unsafe { &*refcon.cast_const().cast::<Shared>() };
+    if status != 0 || flags.contains(VTEncodeInfoFlags::FrameDropped) {
+        if status != 0 {
+            tracing::warn!("the HEVC encoder failed on a frame ({status})");
+        }
+        if !frame.is_null() {
+            shared.force_keyframe.store(true, Ordering::Relaxed);
+        }
         return;
     }
     // SAFETY: 回调期间样本有效。
     let Some(sample) = (unsafe { sample.as_ref() }) else { return };
-    if let Some(frame) = frame(sample) {
-        sink(Event::Frame(frame));
+    if let Some(frame) = video_frame(sample) {
+        (shared.sink)(Event::Frame(frame));
     }
 }
 
-fn frame(sample: &CMSampleBuffer) -> Option<VideoFrame> {
+fn video_frame(sample: &CMSampleBuffer) -> Option<VideoFrame> {
     // SAFETY: 读样本的数据和时间戳，复制到自己的缓冲里。
     unsafe {
         let block = sample.data_buffer()?;

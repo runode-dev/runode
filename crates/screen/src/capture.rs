@@ -38,6 +38,8 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
 /// 要了关键帧这么久还没有新帧把它带出来，就重编最近一张：屏幕在变时用不着重编，接连要关键帧时
 /// 也不至于一直重编。
 const REPEAT_DELAY: Duration = Duration::from_millis(100);
+/// `SCStreamConfiguration::queueDepth` 不该超过的帧数，ScreenCaptureKit 的文档这样要求。
+const MAX_QUEUE_DEPTH: isize = 8;
 
 /// 怎么采集。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,8 +91,8 @@ impl Capture {
             config.setMinimumFrameInterval(CMTime::new(1, options.fps.max(1) as i32));
             config.setPixelFormat(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
             config.setShowsCursor(true);
-            // `Latest` 一直留着一张，多要一张免得 ScreenCaptureKit 没有空的缓冲可写。
-            config.setQueueDepth(config.queueDepth() + 1);
+            // `Latest` 一直留着一张，多要一张免得 ScreenCaptureKit 没有空的缓冲可写，但不过它的上限。
+            config.setQueueDepth((config.queueDepth() + 1).min(MAX_QUEUE_DEPTH));
             let delegate = ProtocolObject::<dyn SCStreamDelegate>::from_ref(&*output);
             let stream =
                 SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &config, Some(delegate));
@@ -136,9 +138,11 @@ impl Drop for Capture {
         if let Err(err) = wait(&rx, "stop the screen capture") {
             tracing::warn!("{err}");
         }
-        // `request_keyframe` 排着的重编不再做，正在做的等它做完，丢掉以后才不再出帧。
+        // `request_keyframe` 排着的重编不再做，正在做的等它做完，编码器里还没交出的帧也等它交出，
+        // 丢掉以后才不再出帧。
         self.latest.stopped.store(true, Ordering::Relaxed);
         self.queue.exec_sync(|| {});
+        self.latest.encoder.complete();
     }
 }
 
