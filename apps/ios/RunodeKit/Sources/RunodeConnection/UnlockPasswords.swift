@@ -74,13 +74,14 @@ public struct KeychainUnlockPasswords: UnlockPasswordStore {
         }.value
     }
 
+    /// 先删后加：改 `userPresence` 保护的项要先过一次 Face ID。
     public func save(_ password: String, for machine: UUID) throws {
-        deletePassword(for: machine)
         var error: Unmanaged<CFError>?
         guard
             let access = SecAccessControlCreateWithFlags(
                 nil, kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .userPresence, &error)
         else { throw LinkFailure.keychain(String(describing: error?.takeRetainedValue())) }
+        deletePassword(for: machine)
         var add = query(for: machine)
         add[kSecValueData as String] = Data(password.utf8)
         add[kSecAttrAccessControl as String] = access

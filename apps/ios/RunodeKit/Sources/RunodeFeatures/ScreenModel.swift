@@ -62,7 +62,8 @@ public final class ScreenModel {
     @ObservationIgnored private var passwordToSave: String?
     /// 这次发的是存着的密码：没解开时删掉它。
     @ObservationIgnored private var sentStoredPassword = false
-    @ObservationIgnored private var unlockTimeout: Task<Void, Never>?
+    /// 在等 Face ID 或等电脑解开；解开、没解开、断开时取消，迟到的结果不再算数。
+    @ObservationIgnored private var unlockTask: Task<Void, Never>?
     @ObservationIgnored private var connection: ScreenConnection?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// 第几次 `start`，旧的那次结束时据此认出自己已经过时。
@@ -149,9 +150,9 @@ public final class ScreenModel {
         // 等 Face ID 时也算在解锁：再点一次按钮、电脑又报一次锁屏时不再弹一次。
         unlocking = true
         let machine = machine.id
-        Task { [weak self] in
+        unlockTask = Task { [weak self] in
             let password = try? await passwords.password(for: machine, reason: String(localized: "解开电脑的锁屏"))
-            guard let self else { return }
+            guard let self, !Task.isCancelled else { return }
             if let password {
                 sendUnlock(password, save: nil, stored: true)
             } else {
@@ -173,8 +174,8 @@ public final class ScreenModel {
         passwordToSave = save
         sentStoredPassword = stored
         connection?.send(.unlock(password: password))
-        unlockTimeout?.cancel()
-        unlockTimeout = Task { [weak self, unlockWait] in
+        unlockTask?.cancel()
+        unlockTask = Task { [weak self, unlockWait] in
             try? await Task.sleep(for: unlockWait)
             guard !Task.isCancelled else { return }
             self?.unlockFailed(String(localized: "电脑还锁着，密码可能不对"))
@@ -182,7 +183,7 @@ public final class ScreenModel {
     }
 
     private func unlocked() {
-        unlockTimeout?.cancel()
+        unlockTask?.cancel()
         if unlocking, let passwordToSave {
             try? passwords?.save(passwordToSave, for: machine.id)
         }
@@ -195,7 +196,7 @@ public final class ScreenModel {
 
     private func unlockFailed(_ message: String) {
         guard unlocking else { return }
-        unlockTimeout?.cancel()
+        unlockTask?.cancel()
         if sentStoredPassword {
             passwords?.deletePassword(for: machine.id)
         }
@@ -226,13 +227,19 @@ public final class ScreenModel {
         connection?.send(.start(display: display.id, width: width, height: height, fps: Self.fps, bitrate: Self.bitrate))
     }
 
-    /// 断开；离开页面时调。
+    /// 断开；离开页面、退到后台时调。
     public func close() {
         attempt += 1
         task?.cancel()
         task = nil
         connection?.close()
         connection = nil
+        // 断开不算密码不对：作废在等的解锁，新的连接会重新报锁屏。
+        unlockTask?.cancel()
+        unlocking = false
+        passwordToSave = nil
+        locked = false
+        triedAutomatically = false
     }
 
     /// 断了以后重新连。

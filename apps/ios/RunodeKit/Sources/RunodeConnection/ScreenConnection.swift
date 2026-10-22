@@ -116,36 +116,13 @@ public final class ScreenConnection: Sendable {
         return ScreenConnection(transport: transport, decoder: decoder, ready: ready)
     }
 
-    /// 电脑发来的消息和画面，到连接断开为止；只能取一次。流结束时连接已经关了。
-    public func events() -> AsyncThrowingStream<ScreenEvent, any Error> {
-        let transport = transport
-        let initial = decoder
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                var decoder = initial
-                do {
-                    while true {
-                        while let frame = try decoder.next() {
-                            continuation.yield(try Self.event(from: frame))
-                        }
-                        guard let chunk = try await transport.receive() else {
-                            try decoder.finish()
-                            throw LinkFailure.closed(String(localized: "电脑关闭了远程桌面"))
-                        }
-                        decoder.append(chunk)
-                    }
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in
-                task.cancel()
-                transport.close()
-            }
-        }
+    /// 电脑发来的消息和画面，到连接断开为止；只能取一次。流结束时连接已经关了。取一个才读一个：
+    /// 页面处理不过来时不再往下读，由 TCP 压住电脑，不在手机上越积越多。
+    public func events() -> ScreenEvents {
+        ScreenEvents(transport: transport, decoder: decoder)
     }
 
-    private static func event(from frame: Frame) throws -> ScreenEvent {
+    fileprivate static func event(from frame: Frame) throws -> ScreenEvent {
         switch frame.kind {
         case .control:
             return .message((try? frame.message(ScreenHostMsg.self)) ?? .unknown)
@@ -166,5 +143,38 @@ public final class ScreenConnection: Sendable {
 
     public func close() {
         transport.close()
+    }
+}
+
+public struct ScreenEvents: AsyncSequence, Sendable {
+    fileprivate let transport: any FrameTransport
+    fileprivate let decoder: FrameDecoder
+
+    public func makeAsyncIterator() -> Iterator {
+        Iterator(transport: transport, decoder: decoder)
+    }
+
+    public struct Iterator: AsyncIteratorProtocol, Sendable {
+        fileprivate let transport: any FrameTransport
+        fileprivate var decoder: FrameDecoder
+        fileprivate var finished = false
+
+        public mutating func next() async throws -> ScreenEvent? {
+            guard !finished else { return nil }
+            do {
+                while true {
+                    if let frame = try decoder.next() { return try ScreenConnection.event(from: frame) }
+                    guard let chunk = try await transport.receive() else {
+                        try decoder.finish()
+                        throw LinkFailure.closed(String(localized: "电脑关闭了远程桌面"))
+                    }
+                    decoder.append(chunk)
+                }
+            } catch {
+                finished = true
+                transport.close()
+                throw error
+            }
+        }
     }
 }

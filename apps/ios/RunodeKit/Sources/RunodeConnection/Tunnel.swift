@@ -113,10 +113,11 @@ final class LoopbackProxy: Sendable {
         let queue = DispatchQueue(label: "dev.runode.tunnel")
         let once = OnceFlag()
         let port: NWEndpoint.Port = try await withCheckedThrowingContinuation { continuation in
-            listener.stateUpdateHandler = { state in
+            // 回调都不强引用 `listener`：它持有回调，强引用会成环，关掉以后也放不掉。
+            listener.stateUpdateHandler = { [weak listener] state in
                 switch state {
                 case .ready:
-                    if let port = listener.port, once.claim() { continuation.resume(returning: port) }
+                    if let port = listener?.port, once.claim() { continuation.resume(returning: port) }
                 case .failed(let error):
                     if once.claim() { continuation.resume(throwing: LinkFailure.connectionFailed(error.localizedDescription)) }
                 case .cancelled:
@@ -133,7 +134,7 @@ final class LoopbackProxy: Sendable {
         listener.newConnectionHandler = { [weak proxy] connection in
             guard let proxy, proxy.accepted.withLock({ $0 == nil }) else { return connection.cancel() }
             proxy.accepted.withLock { $0 = connection }
-            listener.cancel()
+            proxy.listener.cancel()
             connection.start(queue: queue)
             proxy.pump(connection, stream)
         }

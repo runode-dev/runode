@@ -179,4 +179,41 @@ private func encodedKeyframe() throws -> VideoFrame {
         model.handle(.message(.lock(locked: true)))
         #expect(!model.askingPassword)
     }
+
+    /// 取密码（等 Face ID）时电脑已经解开了：回来的密码不再发，过了等待时间也不当成密码不对。
+    @Test func aPasswordArrivingAfterTheUnlockIsDropped() async throws {
+        let passwords = SlowPasswords(machine: machine.id)
+        let model = ScreenModel(machine: machine, open: { _ in throw CancellationError() }, passwords: passwords)
+        model.unlockWait = .milliseconds(50)
+        model.handle(.message(.lock(locked: true)))
+        model.handle(.message(.lock(locked: false)))
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(!model.unlocking && !model.askingPassword && passwords.hasPassword(for: machine.id))
+    }
+
+    /// 解锁途中断开不算密码不对：存着的密码留着，也不请用户输。
+    @Test func closingMidUnlockKeepsTheStoredPassword() async throws {
+        try passwords.save("secret", for: machine.id)
+        let model = model()
+        model.handle(.message(.lock(locked: true)))
+        #expect(await eventually { model.unlocking })
+        model.close()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!model.unlocking && !model.askingPassword && passwords.hasPassword(for: machine.id))
+    }
+}
+
+/// 取密码要等一会儿，像在等 Face ID。
+private final class SlowPasswords: UnlockPasswordStore {
+    private let stored = MemoryUnlockPasswords()
+
+    init(machine: UUID) { try? stored.save("secret", for: machine) }
+
+    func hasPassword(for machine: UUID) -> Bool { stored.hasPassword(for: machine) }
+    func password(for machine: UUID, reason: String) async throws -> String? {
+        try await Task.sleep(for: .milliseconds(100))
+        return try await stored.password(for: machine, reason: reason)
+    }
+    func save(_ password: String, for machine: UUID) throws { try stored.save(password, for: machine) }
+    func deletePassword(for machine: UUID) { stored.deletePassword(for: machine) }
 }

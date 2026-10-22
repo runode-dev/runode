@@ -337,6 +337,10 @@ public final class AppModel {
         for list in sessionLists.values {
             if isActive { list.start() } else { list.stop() }
         }
+        // 远程桌面开着时电脑一直在采集，退到后台就断开，回来再连。
+        for model in screens.values {
+            if isActive { model.start() } else { model.close() }
+        }
         // 在后台时打开的终端页（点通知、系统交来链接比回到前台先到）只建了模型、没订阅连接。
         if isActive {
             for model in terminals.values {
