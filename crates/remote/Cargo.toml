@@ -21,7 +21,7 @@ rustls.workspace = true
 rcgen.workspace = true
 ring.workspace = true
 iroh.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 [lints]
 workspace = true

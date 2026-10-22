@@ -4,14 +4,15 @@
 //!
 //! iroh 是 async 的，自己一个线程跑一个单线程的 tokio 运行时，丢掉 `Tunnel` 时关掉端点、线程结束。
 //!
-//! shortcut: 经这里来的连接在监听方看来都来自 127.0.0.1，按来源的限速和名额由它们共用；有人拿着公钥
-//! 硬试时再按 iroh 的对端公钥分开记
+//! shortcut: 经这里来的连接共用 `MAX_CONNECTIONS` 个转发的名额，在监听方看来都来自 127.0.0.1，按来源的
+//! 限速和名额也由它们共用；有人拿着公钥硬试时再按 iroh 的对端公钥分开记
 
 use std::{
     io,
     net::Ipv4Addr,
-    sync::mpsc,
+    sync::{Arc, mpsc},
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use iroh::{
@@ -19,10 +20,21 @@ use iroh::{
     endpoint::{Incoming, presets},
 };
 use runode_paths::Dirs;
-use runode_protocol::remote::TUNNEL_ALPN;
-use tokio::{io::AsyncWriteExt as _, net::TcpStream, sync::oneshot};
+use runode_protocol::remote::{GATE_TIMEOUT, TUNNEL_ALPN};
+use tokio::{
+    io::AsyncWriteExt as _,
+    net::TcpStream,
+    sync::{Semaphore, oneshot},
+    time::timeout,
+};
 
-use crate::files::{no_home, random, read_optional, write_private};
+use crate::{
+    files::{no_home, random, read_optional, write_private},
+    listener::MAX_CONNECTIONS,
+};
+
+/// 监听方不再说话以后，最多等这么久让手机读完最后的字节。
+const LINGER: Duration = Duration::from_secs(5);
 
 /// 开着的 iroh 端点。
 pub(crate) struct Tunnel {
@@ -81,36 +93,57 @@ impl Drop for Tunnel {
 }
 
 async fn accept(endpoint: &Endpoint, port: u16) {
+    // 对端开出第一条流之前碰不到监听方的名额，所以握手前就在这里占名额。
+    let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     while let Some(incoming) = endpoint.accept().await {
+        let Ok(slot) = slots.clone().try_acquire_owned() else {
+            tracing::debug!("too many tunnelled remote connections, refusing one");
+            incoming.refuse();
+            continue;
+        };
         tokio::spawn(async move {
             if let Err(err) = forward(incoming, port).await {
                 tracing::debug!("a tunnelled remote connection ended: {err}");
             }
+            drop(slot);
         });
     }
 }
 
-/// 一条 iroh 连接上的第一条双向流和到本机监听的 TCP 连接之间两个方向搬字节，两边都说完为止。
+/// 一条 iroh 连接上的第一条双向流和到本机监听的 TCP 连接之间搬字节，直到手机和监听方都说完，
+/// 或者监听方先说完。握手加开出第一条流限时 `GATE_TIMEOUT`。
 async fn forward(incoming: Incoming, port: u16) -> io::Result<()> {
-    let connection = incoming.await.map_err(io::Error::other)?;
-    let (mut send, mut recv) = connection.accept_bi().await.map_err(io::Error::other)?;
+    let opened = timeout(GATE_TIMEOUT, async {
+        let connection = incoming.await.map_err(io::Error::other)?;
+        let streams = connection.accept_bi().await.map_err(io::Error::other)?;
+        io::Result::Ok((connection, streams))
+    });
+    let (_connection, (mut send, mut recv)) = opened.await??;
     let mut tcp = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await?;
     tcp.set_nodelay(true)?;
-    let (mut from_listener, mut to_listener) = tcp.split();
-    let up = async {
-        let copied = tokio::io::copy(&mut recv, &mut to_listener).await;
-        let _ = to_listener.shutdown().await;
-        copied
+    let copied = {
+        let (mut from_listener, mut to_listener) = tcp.split();
+        let up = async {
+            let copied = tokio::io::copy(&mut recv, &mut to_listener).await;
+            let _ = to_listener.shutdown().await;
+            copied
+        };
+        let down = async {
+            let copied = tokio::io::copy(&mut from_listener, &mut send).await;
+            let _ = send.finish();
+            copied
+        };
+        tokio::pin!(up, down);
+        tokio::select! {
+            up = &mut up => up.and(down.await),
+            // 监听方说完就是关了连接（门禁拒绝、超时、撤销），手机再发的没人收，不等它说完。
+            down = &mut down => down,
+        }
     };
-    let down = async {
-        let copied = tokio::io::copy(&mut from_listener, &mut send).await;
-        let _ = send.finish();
-        copied
-    };
-    let (up, down) = tokio::join!(up, down);
-    // 等手机读完最后的字节再关连接，不然它收不到 close_notify 和拒绝的回话。
-    let _ = send.stopped().await;
-    up.and(down).map(drop)
+    drop(tcp);
+    // 等手机读完最后的字节再关连接，不然它收不到 close_notify 和拒绝的回话；它不读也不久等。
+    let _ = timeout(LINGER, send.stopped()).await;
+    copied.map(drop)
 }
 
 /// 读存着的私钥，还没有时生成一把存下。读到的长度不对时报错，不悄悄换掉：换了手机就拨不到了。
@@ -143,11 +176,8 @@ mod tests {
         Endpoint::builder(presets::Minimal).alpns(alpns).bind().await.unwrap()
     }
 
-    /// 锁定转发两个方向原样搬字节：手机说完以后监听那边读到结尾，监听回的话手机读得完。
-    #[tokio::test]
-    async fn forwards_both_ways_until_both_sides_are_done() {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+    /// 起一个转发到本机 `port` 的端点，返回它的地址和接连接的任务。
+    async fn tunnel_to(port: u16) -> (EndpointAddr, tokio::task::JoinHandle<()>) {
         let server = local_endpoint(vec![TUNNEL_ALPN.to_vec()]).await;
         let addr = server
             .bound_sockets()
@@ -156,9 +186,15 @@ mod tests {
             .fold(EndpointAddr::new(server.id()), |addr, socket| {
                 addr.with_ip_addr((Ipv4Addr::LOCALHOST, socket.port()).into())
             });
-        let accepting = tokio::spawn(async move {
-            accept(&server, port).await;
-        });
+        (addr, tokio::spawn(async move { accept(&server, port).await }))
+    }
+
+    /// 锁定转发两个方向原样搬字节：手机说完以后监听那边读到结尾，监听回的话手机读得完。
+    #[tokio::test]
+    async fn forwards_both_ways_until_both_sides_are_done() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (addr, accepting) = tunnel_to(port).await;
         let echo = tokio::spawn(async move {
             let (mut tcp, _) = listener.accept().await.unwrap();
             let mut got = Vec::new();
@@ -174,6 +210,27 @@ mod tests {
         let reply = recv.read_to_end(1024).await.unwrap();
         assert_eq!(reply, b"hello back");
         echo.await.unwrap();
+        accepting.abort();
+    }
+
+    /// 锁定监听方先关了连接、手机一直不关发送的一边时，转发照样结束、关掉 iroh 连接，名额才放得出来。
+    #[tokio::test]
+    async fn ends_when_the_listener_closes_first() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (addr, accepting) = tunnel_to(port).await;
+        let refuse = tokio::spawn(async move {
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            tcp.write_all(b"no").await.unwrap();
+        });
+
+        let phone = local_endpoint(Vec::new()).await;
+        let connection = phone.connect(addr, TUNNEL_ALPN).await.unwrap();
+        let (mut send, mut recv) = connection.open_bi().await.unwrap();
+        send.write_all(b"hello").await.unwrap();
+        assert_eq!(recv.read_to_end(1024).await.unwrap(), b"no");
+        timeout(GATE_TIMEOUT, connection.closed()).await.unwrap();
+        refuse.await.unwrap();
         accepting.abort();
     }
 }

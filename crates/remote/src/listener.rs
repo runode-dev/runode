@@ -43,7 +43,7 @@ const MAX_GATING_PER_SOURCE: usize = 4;
 /// 连过的手机不会被别人占满的门禁挡在外面。
 const MAX_GATING_PER_PREFIX: usize = 16;
 /// 连接（含已经接到宿主上的）最多这么多。
-const MAX_CONNECTIONS: usize = 64;
+pub(crate) const MAX_CONNECTIONS: usize = 64;
 /// 同一台设备最多同时连着这么多条，见 `Shared::attach_device`。
 const MAX_PER_DEVICE: usize = 8;
 /// 隔多久看一次设备表，撤销了的设备在这么久之内断开。
