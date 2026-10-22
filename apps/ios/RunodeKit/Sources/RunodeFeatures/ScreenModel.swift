@@ -99,6 +99,7 @@ public final class ScreenModel {
             if let failure { phase = .failed(failure) }
             connection = nil
             task = nil
+            forgetLock()
         }
     }
 
@@ -234,7 +235,11 @@ public final class ScreenModel {
         task = nil
         connection?.close()
         connection = nil
-        // 断开不算密码不对：作废在等的解锁，新的连接会重新报锁屏。
+        forgetLock()
+    }
+
+    /// 断开不算密码不对：作废在等的解锁，新的连接会重新报锁屏。
+    private func forgetLock() {
         unlockTask?.cancel()
         unlocking = false
         passwordToSave = nil
