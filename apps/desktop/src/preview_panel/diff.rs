@@ -500,7 +500,7 @@ impl PreviewPanel {
             return;
         };
         if let Some(hunk) = content.view.file.hunks.get(hunk) {
-            cx.emit(PreviewEvent::Quote(hunk_quote(&target.rel, hunk)));
+            cx.emit(PreviewEvent::Quote(hunk_quote(&target.root.join(&target.rel), hunk)));
         }
     }
 
@@ -753,17 +753,19 @@ impl PreviewPanel {
     }
 }
 
-/// 交给 agent 的一块改动：`路径:起-止`（新文件里的行号，只删了行的用旧文件的），下面是这块 diff。代码里有
-/// 三个反引号时围栏多加一个，不提前收尾。
-fn hunk_quote(rel: &Path, hunk: &git::Hunk) -> String {
+/// 交给 agent 的一块改动：`路径:起-止`（新文件里的行号，只删了行的用旧文件的），下面是这块 diff。围栏比块里
+/// 最长的一串反引号长，不提前收尾。
+fn hunk_quote(path: &Path, hunk: &git::Hunk) -> String {
     let new: Vec<u32> = hunk.lines.iter().filter_map(|line| line.new).collect();
     let numbers = if new.is_empty() { hunk.lines.iter().filter_map(|line| line.old).collect() } else { new };
     let place = match (numbers.first(), numbers.last()) {
-        (Some(first), Some(last)) if first != last => format!("{}:{first}-{last}", rel.display()),
-        (Some(first), _) => format!("{}:{first}", rel.display()),
-        _ => rel.display().to_string(),
+        (Some(first), Some(last)) if first != last => format!("{}:{first}-{last}", path.display()),
+        (Some(first), _) => format!("{}:{first}", path.display()),
+        _ => path.display().to_string(),
     };
-    let fence = if hunk.lines.iter().any(|line| line.text.contains("```")) { "````" } else { "```" };
+    let texts = std::iter::once(&hunk.header).chain(hunk.lines.iter().map(|line| &line.text));
+    let longest = texts.flat_map(|text| text.split(|c| c != '`')).map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest.max(2) + 1);
     let mut text = format!("{place}\n{fence}diff\n{}\n", hunk.header);
     for line in &hunk.lines {
         let sign = match line.kind {
@@ -775,7 +777,7 @@ fn hunk_quote(rel: &Path, hunk: &git::Hunk) -> String {
         text.push_str(&line.text);
         text.push('\n');
     }
-    text.push_str(fence);
+    text.push_str(&fence);
     text.push('\n');
     text
 }
@@ -831,6 +833,9 @@ mod tests {
             hunk_quote(Path::new("b.md"), &removed),
             "b.md:9\n````diff\n@@ -3,2 +3,2 @@\n-let s = \"```\";\n````\n"
         );
+        // 上下文行的前缀是空格，单独一行的围栏照样能收尾，所以外层要比它长。
+        let fenced = hunk(vec![line(LineKind::Context, Some(3), Some(3), "````")]);
+        assert_eq!(hunk_quote(Path::new("c.md"), &fenced), "c.md:3\n`````diff\n@@ -3,2 +3,2 @@\n ````\n`````\n");
     }
 
     #[test]

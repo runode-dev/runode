@@ -163,9 +163,16 @@ impl WindowView {
             PreviewEvent::ZoomChanged => cx.notify(),
             PreviewEvent::Reveal(path) => self.with_file_tree(cx, |tree, cx| tree.reveal_file(path, cx)),
             PreviewEvent::OptionsChanged => self.save(cx),
-            PreviewEvent::InsertPath { path, line } => self.insert_paths(vec![path.clone()], Some(*line), window, cx),
+            PreviewEvent::InsertPath { path, line } => {
+                self.restore_preview_zoom(cx);
+                cx.notify();
+                self.insert_paths(vec![path.clone()], Some(*line), window, cx);
+            }
             PreviewEvent::Quote(text) => {
                 if let Some(view) = self.focused_view().cloned() {
+                    // 放大的预览栏盖着终端，还原了才看得到贴进去的字。
+                    self.restore_preview_zoom(cx);
+                    cx.notify();
                     window.focus(&view.focus_handle(cx), cx);
                     view.update(cx, |view, cx| view.paste_text(text.clone(), window, cx));
                 }
