@@ -142,8 +142,8 @@ pub struct TerminalView {
     start_dir: Option<PathBuf>,
     /// `deferred` 建的视图开会话时 `start_dir` 不是目录的话改从哪里开。
     start_fallback: Option<PathBuf>,
-    /// 恢复时要接回的 agent 对话：`deferred` 建的视图开会话时交给宿主。会话报出 agent 之前
-    /// `SessionMeta::conversation` 还是空的，写存档时用它代替（`conversation`），报出后清掉。
+    /// 恢复时要接回的 agent 对话：`deferred` 建的视图开会话时交给宿主。会话报出对话之前
+    /// `SessionMeta::conversation` 还是空的，写存档时用它代替（`conversation`）。
     start_resume: Option<Conversation>,
     /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。`deferred` 建的视图开会话
     /// 之前为 `None`。

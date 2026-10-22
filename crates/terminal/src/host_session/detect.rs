@@ -21,6 +21,9 @@ use crate::{pty, vt::detection_text};
 /// agent 启动后才改 argv[0]，npx 这类先起包装进程、再起真正的 agent。
 const REPROBE_WINDOW: Duration = Duration::from_secs(10);
 const REPROBE_INTERVAL: Duration = Duration::from_secs(1);
+/// agent 在前台时隔这么久重读一次它记着的对话：它启动后才写对话文件，`/clear`、`/resume` 换对话时
+/// 状态不一定变。
+const CONVERSATION_RECHECK: Duration = Duration::from_secs(2);
 
 /// 上次认前台进程组的结果。进程组没换时不再读各进程的参数。
 #[derive(Debug, Default)]
@@ -32,6 +35,7 @@ pub(super) struct ForegroundProbe {
     agent: Option<AgentKind>,
     /// 上次认的时候组里的进程，找 agent 记着的对话用。
     pids: Vec<u32>,
+    conversation_read_at: Option<Instant>,
 }
 
 /// 全部终端共用的识别规则，用户规则从 `runode_paths::Dirs::agent_detection_dir` 读。
@@ -68,19 +72,32 @@ impl HostSession {
             tracing::warn!("{warning}");
         }
         if changed {
-            self.agent = self.agent_tracker.agent();
+            let agent = self.agent_tracker.agent();
+            if agent.map(|agent| agent.kind) != self.agent.map(|agent| agent.kind) {
+                self.conversation = None;
+                self.foreground_probe.conversation_read_at = None;
+            }
+            self.agent = agent;
             tracing::debug!(agent = ?self.agent, "foreground agent changed");
-            self.refresh_conversation();
         }
+        self.recheck_conversation(now, home());
         changed
     }
 
-    /// 重读前台 agent 在进行的对话。agent 每次换状态时读一次：`/clear` 这类命令会换一场对话。
-    fn refresh_conversation(&mut self) {
-        self.conversation = match (self.agent, home()) {
-            (Some(agent), Some(home)) => conversation::current(agent.kind, &self.foreground_probe.pids, home),
-            _ => None,
-        };
+    /// 前台有 agent 时按 `CONVERSATION_RECHECK` 重读它在进行的对话，变了就标脏。读不到（文件还没写、
+    /// 正在重写）时留着上次的。
+    fn recheck_conversation(&mut self, now: Instant, home: Option<&Path>) {
+        let (Some(agent), Some(home)) = (self.agent, home) else { return };
+        let probe = &mut self.foreground_probe;
+        if probe.conversation_read_at.is_some_and(|at| now.saturating_duration_since(at) < CONVERSATION_RECHECK) {
+            return;
+        }
+        probe.conversation_read_at = Some(now);
+        let Some(found) = conversation::current(agent.kind, &probe.pids, home) else { return };
+        if self.conversation.as_ref() != Some(&found) {
+            self.conversation = Some(found);
+            self.meta_dirty = true;
+        }
     }
 
     /// 看前台在跑什么程序（`foreground` 是刚读的 `Pty::foreground`），认出是哪个 agent 交给
@@ -169,6 +186,40 @@ mod tests {
         assert!(session.agent_deadline().is_some());
         assert!(session.poll_agent_at(fed + EVAL_INTERVAL));
         assert_eq!(session.agent, claude(AgentState::Idle));
+    }
+
+    /// 对话文件在认出 agent 之后才写、状态不变时换了对话号，都要跟上；读不到时不丢上次的。
+    #[test]
+    fn the_conversation_is_rechecked_without_a_state_change() {
+        use runode_types::agent::{Agent, AgentState};
+
+        let home = std::env::temp_dir().join(format!("runode-detect-conversation-{}", std::process::id()));
+        let sessions = home.join(".claude").join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let file = sessions.join("4242.json");
+        let write = |id: &str| std::fs::write(&file, format!(r#"{{"sessionId":"{id}"}}"#)).unwrap();
+        let mut session = idle_host();
+        session.agent = Some(Agent { kind: AgentKind::Claude, state: AgentState::Idle });
+        session.foreground_probe.pids = vec![4242];
+        let start = Instant::now();
+        let id = |session: &HostSession| session.conversation.as_ref().map(|c| c.id.clone());
+
+        session.recheck_conversation(start, Some(&home));
+        assert_eq!(id(&session), None);
+        write("first");
+        session.meta_dirty = false;
+        session.recheck_conversation(start + CONVERSATION_RECHECK / 2, Some(&home));
+        assert_eq!(id(&session), None, "rechecks are throttled");
+        session.recheck_conversation(start + CONVERSATION_RECHECK, Some(&home));
+        assert_eq!(id(&session).as_deref(), Some("first"));
+        assert!(session.meta_dirty);
+        write("second");
+        session.recheck_conversation(start + CONVERSATION_RECHECK * 2, Some(&home));
+        assert_eq!(id(&session).as_deref(), Some("second"));
+        std::fs::remove_file(&file).unwrap();
+        session.recheck_conversation(start + CONVERSATION_RECHECK * 3, Some(&home));
+        assert_eq!(id(&session).as_deref(), Some("second"));
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

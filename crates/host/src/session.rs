@@ -686,9 +686,12 @@ impl Runner {
         }
     }
 
-    /// 等着的 `Inbox::TypeAtPrompt` 最晚什么时候写出去。注入集成的事可能在请求之后才发生（shell 还没
-    /// 启动），所以每次现查。
+    /// 等着的 `Inbox::TypeAtPrompt` 最晚什么时候写出去；shell 还没启动时不写，等待从 `Inbox::Start` 起算。
+    /// 注入集成的事可能在请求之后才发生，所以每次现查。
     fn type_ahead_by(&self) -> Option<Instant> {
+        if !self.session.started() {
+            return None;
+        }
         let (_, since) = self.type_ahead.as_ref()?;
         let integrated = self.session.has_shell_integration();
         Some(*since + if integrated { TYPE_AT_INTEGRATED_PROMPT_PATIENCE } else { TYPE_AT_PROMPT_PATIENCE })
@@ -787,7 +790,11 @@ impl Runner {
                     self.report_exit();
                     return;
                 }
-                self.refresh_foreground(Instant::now());
+                let now = Instant::now();
+                if let Some((_, since)) = &mut self.type_ahead {
+                    *since = now;
+                }
+                self.refresh_foreground(now);
             }
             // 先轮到它决定尺寸（要改的话，`Resized` 排在这次输入的回显前面），再写给程序。
             Inbox::Input { connection, data } => {
@@ -1546,6 +1553,21 @@ mod tests {
         let (data, since) = taker.type_ahead.as_ref().expect("still waiting for the prompt");
         assert_eq!(data, b"agent\r");
         assert!(*since >= before, "the wait starts over when the session is taken over");
+    }
+
+    /// 没启动的 shell 不会被等超时的输入抢先写进 PTY，免得绕过提示符检测被启动脚本读走。
+    #[test]
+    fn typing_at_the_prompt_waits_for_the_shell_to_start() {
+        let mut runner = runner(false);
+        let long_ago = Instant::now().checked_sub(TYPE_AT_PROMPT_PATIENCE * 2).unwrap();
+        runner.type_ahead = Some((b"claude\r".to_vec(), long_ago));
+        assert_eq!(runner.deadline(), None);
+        runner.type_at_prompt();
+        assert!(runner.type_ahead.is_some(), "written before the shell started");
+        let before = Instant::now();
+        runner.handle(Inbox::Start { integration: IntegrationMode::Off });
+        let (_, since) = runner.type_ahead.as_ref().expect("still waiting for the prompt");
+        assert!(*since >= before, "the wait starts when the shell starts");
     }
 
     #[test]

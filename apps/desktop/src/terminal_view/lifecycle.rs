@@ -415,7 +415,11 @@ impl TerminalView {
             cx.emit(TerminalEvent::TitleChanged);
         }
         if changes.meta_changed {
-            if self.screen.meta().agent.is_some() {
+            // 会话报了对话就用它的；换了别家 agent、或者 agent 退出了（续接取消、失败）时要接回的那场作废。
+            let meta = self.screen.meta();
+            let other_agent =
+                meta.agent.zip(self.start_resume.as_ref()).is_some_and(|(agent, resume)| agent.kind != resume.kind);
+            if meta.conversation.is_some() || other_agent || (changes.agent_changed && meta.agent.is_none()) {
                 self.start_resume = None;
             }
             cx.emit(TerminalEvent::MetaChanged);
