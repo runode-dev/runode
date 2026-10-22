@@ -3,19 +3,24 @@
 
 use std::{
     io,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::Duration,
 };
 
 use block2::RcBlock;
-use dispatch2::{DispatchQueue, DispatchRetained};
+use dispatch2::{DispatchQueue, DispatchRetained, DispatchTime};
 use objc2::{
     AllocAnyThread as _, DefinedClass as _, define_class, msg_send,
     rc::Retained,
     runtime::{NSObject, NSObjectProtocol, ProtocolObject},
 };
+use objc2_core_foundation::CFRetained;
 use objc2_core_media::{CMSampleBuffer, CMTime};
-use objc2_core_video::kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+use objc2_core_video::{CVImageBuffer, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange};
 use objc2_foundation::{NSArray, NSError};
 use objc2_screen_capture_kit::{
     SCContentFilter, SCDisplay, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamDelegate, SCStreamOutput,
@@ -30,6 +35,9 @@ use crate::{
 
 /// 等 ScreenCaptureKit 的完成回调最多这么久。
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
+/// 要了关键帧这么久还没有新帧把它带出来，就重编最近一张：屏幕在变时用不着重编，接连要关键帧时
+/// 也不至于一直重编。
+const REPEAT_DELAY: Duration = Duration::from_millis(100);
 
 /// 怎么采集。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,9 +56,9 @@ pub struct Options {
 /// 开着的采集，丢掉时停下。
 pub struct Capture {
     stream: Retained<SCStream>,
-    encoder: Arc<Encoder>,
+    latest: Arc<Latest>,
     _output: Retained<Output>,
-    _queue: DispatchRetained<DispatchQueue>,
+    queue: DispatchRetained<DispatchQueue>,
     _awake: KeepAwake,
 }
 
@@ -66,10 +74,10 @@ impl Capture {
         let sink: Arc<Sink> = Arc::new(on_event);
         let awake = KeepAwake::acquire();
         let display = display(options.display)?;
-        let encoder =
-            Arc::new(Encoder::new(options.width, options.height, options.fps, options.bitrate, sink.clone())?);
+        let encoder = Encoder::new(options.width, options.height, options.fps, options.bitrate, sink.clone())?;
         encoder.request_keyframe();
-        let output = Output::new(Ivars { encoder: encoder.clone(), sink });
+        let latest = Arc::new(Latest { encoder, last: Mutex::new(None), stopped: AtomicBool::new(false) });
+        let output = Output::new(Ivars { latest: latest.clone(), sink });
         let queue = DispatchQueue::new("dev.runode.screen", None);
         // SAFETY: 以下都是 ScreenCaptureKit 的普通调用，对象都由 Retained 持有到 `Capture` 丢掉。
         unsafe {
@@ -81,6 +89,8 @@ impl Capture {
             config.setMinimumFrameInterval(CMTime::new(1, options.fps.max(1) as i32));
             config.setPixelFormat(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
             config.setShowsCursor(true);
+            // `Latest` 一直留着一张，多要一张免得 ScreenCaptureKit 没有空的缓冲可写。
+            config.setQueueDepth(config.queueDepth() + 1);
             let delegate = ProtocolObject::<dyn SCStreamDelegate>::from_ref(&*output);
             let stream =
                 SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &config, Some(delegate));
@@ -97,18 +107,21 @@ impl Capture {
             });
             stream.startCaptureWithCompletionHandler(Some(&done));
             wait(&rx, "start the screen capture")?;
-            Ok(Self { stream, encoder, _output: output, _queue: queue, _awake: awake })
+            Ok(Self { stream, latest, _output: output, queue, _awake: awake })
         }
     }
 
-    /// 下一帧编成带参数集的关键帧：手机丢了帧、刚连上要从头解时用。
+    /// 出一帧带参数集的关键帧：手机丢了帧、刚连上要从头解时用。屏幕静止时也出，重编最近一张画面。
     pub fn request_keyframe(&self) {
-        self.encoder.request_keyframe();
+        self.latest.encoder.request_keyframe();
+        let latest = self.latest.clone();
+        let when = DispatchTime::try_from(REPEAT_DELAY).unwrap_or(DispatchTime::NOW);
+        let _ = self.queue.after(when, move || latest.encode_again());
     }
 
     /// 改平均码率，单位 bit/s。
     pub fn set_bitrate(&self, bitrate: u32) -> io::Result<()> {
-        self.encoder.set_bitrate(bitrate)
+        self.latest.encoder.set_bitrate(bitrate)
     }
 }
 
@@ -123,7 +136,53 @@ impl Drop for Capture {
         if let Err(err) = wait(&rx, "stop the screen capture") {
             tracing::warn!("{err}");
         }
+        // `request_keyframe` 排着的重编不再做，正在做的等它做完，丢掉以后才不再出帧。
+        self.latest.stopped.store(true, Ordering::Relaxed);
+        self.queue.exec_sync(|| {});
     }
+}
+
+/// 编码器和最近交给它的画面、时间戳；画面只在采集的队列上编。
+struct Latest {
+    encoder: Encoder,
+    last: Mutex<Option<(CFRetained<CVImageBuffer>, CMTime)>>,
+    stopped: AtomicBool,
+}
+
+// SAFETY: CVPixelBuffer 可以在任意线程上读，这里只在锁里碰它；`Encoder` 本身是 Send + Sync。
+unsafe impl Send for Latest {}
+// SAFETY: 同上。
+unsafe impl Sync for Latest {}
+
+impl Latest {
+    fn encode(&self, image: CFRetained<CVImageBuffer>, pts: CMTime) {
+        let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
+        let pts = match &*last {
+            // SAFETY: 时间戳的算术。
+            Some((_, previous)) => unsafe { pts.maximum(after(*previous)) },
+            None => pts,
+        };
+        self.encoder.encode(&image, pts);
+        *last = Some((image, pts));
+    }
+
+    /// 屏幕静止时 ScreenCaptureKit 不出新帧，要的关键帧还没出时把最近一张再编一次。
+    fn encode_again(&self) {
+        if self.stopped.load(Ordering::Relaxed) || !self.encoder.keyframe_requested() {
+            return;
+        }
+        let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((image, pts)) = &mut *last {
+            *pts = after(*pts);
+            self.encoder.encode(image, *pts);
+        }
+    }
+}
+
+/// `pts` 之后一毫秒：编码器要时间戳一直往后走，重编的画面排在上一帧之后。
+fn after(pts: CMTime) -> CMTime {
+    // SAFETY: 时间戳的算术。
+    unsafe { pts.add(CMTime::new(1, 1000)) }
 }
 
 fn error_text(error: *mut NSError) -> Result<(), String> {
@@ -170,7 +229,7 @@ fn display(id: u32) -> io::Result<Retained<SCDisplay>> {
 }
 
 struct Ivars {
-    encoder: Arc<Encoder>,
+    latest: Arc<Latest>,
     sink: Arc<Sink>,
 }
 
@@ -190,7 +249,7 @@ define_class!(
             // SAFETY: 回调期间样本有效；屏幕没变时样本不带画面，跳过。
             unsafe {
                 if let Some(image) = sample.image_buffer() {
-                    self.ivars().encoder.encode(&image, sample.presentation_time_stamp());
+                    self.ivars().latest.encode(image, sample.presentation_time_stamp());
                 }
             }
         }

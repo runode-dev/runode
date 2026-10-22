@@ -19,45 +19,43 @@ const CLICK_SLOP: f64 = 4.0;
 /// 一个键盘事件最多带这么多个 UTF-16 码元的文字，再长的拆成几个事件。
 const TEXT_CHUNK: usize = 20;
 
-/// 往一块屏幕上注入输入，记着按住的鼠标键（挪动时发拖动）和连击。
+/// 往一块屏幕上注入输入，记着按住的鼠标键（挪动时发拖动）和连击。丢掉时在最后的位置松开还按着的
+/// 鼠标键：断线或换屏时手机来不及发松开，不松就一直按着。
 pub struct Injector {
     display: u32,
-    pressed: Option<MouseButton>,
+    /// 按下的先后排。
+    pressed: Vec<MouseButton>,
+    /// 最后一个鼠标事件的全局坐标。
+    at: CGPoint,
     clicks: Clicks,
 }
 
 impl Injector {
     /// `display` 是 `ScreenInput` 的坐标所在的屏幕，和采集的是同一块。
     pub fn new(display: u32) -> Self {
-        Self { display, pressed: None, clicks: Clicks::default() }
+        Self { display, pressed: Vec::new(), at: CGPoint { x: 0.0, y: 0.0 }, clicks: Clicks::default() }
     }
 
     pub fn inject(&mut self, input: &ScreenInput) {
         match input {
             ScreenInput::MouseMove { x, y } => {
-                let kind = match self.pressed {
+                let held = self.pressed.first().copied();
+                let kind = match held {
                     None => CGEventType::MouseMoved,
                     Some(MouseButton::Left) => CGEventType::LeftMouseDragged,
                     Some(MouseButton::Right) => CGEventType::RightMouseDragged,
                     Some(MouseButton::Middle) => CGEventType::OtherMouseDragged,
                 };
-                let button = self.pressed.map_or(CGMouseButton::Left, cg_button);
-                post(CGEvent::new_mouse_event(None, kind, self.point(*x, *y), button));
+                self.at = self.point(*x, *y);
+                post(CGEvent::new_mouse_event(None, kind, self.at, held.map_or(CGMouseButton::Left, cg_button)));
             }
             ScreenInput::MouseButton { button, down, x, y, mods } => {
                 let at = self.point(*x, *y);
-                let kind = match (button, down) {
-                    (MouseButton::Left, true) => CGEventType::LeftMouseDown,
-                    (MouseButton::Left, false) => CGEventType::LeftMouseUp,
-                    (MouseButton::Right, true) => CGEventType::RightMouseDown,
-                    (MouseButton::Right, false) => CGEventType::RightMouseUp,
-                    (MouseButton::Middle, true) => CGEventType::OtherMouseDown,
-                    (MouseButton::Middle, false) => CGEventType::OtherMouseUp,
-                };
                 let clicks =
                     if *down { self.clicks.press(*button, (at.x, at.y), Instant::now()) } else { self.clicks.count };
-                self.pressed = down.then_some(*button);
-                let event = CGEvent::new_mouse_event(None, kind, at, cg_button(*button));
+                self.press(*button, *down);
+                self.at = at;
+                let event = CGEvent::new_mouse_event(None, button_event(*button, *down), at, cg_button(*button));
                 CGEvent::set_integer_value_field(event.as_deref(), CGEventField::MouseEventClickState, clicks);
                 CGEvent::set_flags(event.as_deref(), flags(*mods));
                 post(event);
@@ -83,8 +81,7 @@ impl Injector {
                 }
             }
             ScreenInput::Text { text } => {
-                let units: Vec<u16> = text.encode_utf16().collect();
-                for chunk in units.chunks(TEXT_CHUNK) {
+                for chunk in text_chunks(text) {
                     for down in [true, false] {
                         let event = CGEvent::new_keyboard_event(None, 0, down);
                         // SAFETY: 指针和长度来自同一个切片，调用期间有效。
@@ -101,6 +98,46 @@ impl Injector {
     fn point(&self, x: f64, y: f64) -> CGPoint {
         to_screen(CGDisplayBounds(self.display), x, y)
     }
+
+    fn press(&mut self, button: MouseButton, down: bool) {
+        self.pressed.retain(|&held| held != button);
+        if down {
+            self.pressed.push(button);
+        }
+    }
+}
+
+impl Drop for Injector {
+    fn drop(&mut self) {
+        for button in std::mem::take(&mut self.pressed) {
+            post(CGEvent::new_mouse_event(None, button_event(button, false), self.at, cg_button(button)));
+        }
+    }
+}
+
+fn button_event(button: MouseButton, down: bool) -> CGEventType {
+    match (button, down) {
+        (MouseButton::Left, true) => CGEventType::LeftMouseDown,
+        (MouseButton::Left, false) => CGEventType::LeftMouseUp,
+        (MouseButton::Right, true) => CGEventType::RightMouseDown,
+        (MouseButton::Right, false) => CGEventType::RightMouseUp,
+        (MouseButton::Middle, true) => CGEventType::OtherMouseDown,
+        (MouseButton::Middle, false) => CGEventType::OtherMouseUp,
+    }
+}
+
+/// 按 `TEXT_CHUNK` 分块，不把一个字符的代理对拆到两块里。
+fn text_chunks(text: &str) -> Vec<Vec<u16>> {
+    let mut chunks: Vec<Vec<u16>> = Vec::new();
+    for c in text.chars() {
+        let mut buf = [0; 2];
+        let units = c.encode_utf16(&mut buf);
+        match chunks.last_mut() {
+            Some(chunk) if chunk.len() + units.len() <= TEXT_CHUNK => chunk.extend_from_slice(units),
+            _ => chunks.push(units.to_vec()),
+        }
+    }
+    chunks
 }
 
 fn post(event: Option<objc2_core_foundation::CFRetained<CGEvent>>) {
@@ -375,6 +412,29 @@ mod tests {
         );
         assert_eq!(key_strokes("密码"), None);
         assert_eq!(key_strokes("é"), None);
+    }
+
+    /// 松开一个键不影响别的键还按着，挪动时仍按拖动发。
+    #[test]
+    fn tracks_each_mouse_button_separately() {
+        let mut injector = Injector::new(0);
+        injector.press(MouseButton::Left, true);
+        injector.press(MouseButton::Right, true);
+        injector.press(MouseButton::Right, false);
+        assert_eq!(injector.pressed, [MouseButton::Left]);
+        injector.press(MouseButton::Left, false);
+        assert!(injector.pressed.is_empty());
+    }
+
+    #[test]
+    fn text_chunks_keep_surrogate_pairs_together() {
+        let text = format!("{}😀a", "x".repeat(TEXT_CHUNK - 1));
+        let chunks = text_chunks(&text);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len(), TEXT_CHUNK - 1);
+        assert_eq!(String::from_utf16(&chunks[1]).unwrap(), "😀a");
+        assert_eq!(text_chunks(&"y".repeat(TEXT_CHUNK)).len(), 1);
+        assert!(text_chunks("").is_empty());
     }
 
     #[test]

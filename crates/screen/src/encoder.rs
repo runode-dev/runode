@@ -82,6 +82,11 @@ impl Encoder {
         self.force_keyframe.store(true, Ordering::Relaxed);
     }
 
+    /// 要了的关键帧还没交给编码器。
+    pub(crate) fn keyframe_requested(&self) -> bool {
+        self.force_keyframe.load(Ordering::Relaxed)
+    }
+
     pub(crate) fn encode(&self, image: &CVImageBuffer, pts: CMTime) {
         let force = self.force_keyframe.swap(false, Ordering::Relaxed);
         let options = force.then(|| {

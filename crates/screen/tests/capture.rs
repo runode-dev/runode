@@ -9,7 +9,8 @@ use std::{
 
 use runode_screen::{Capture, Display, Event, Options};
 
-/// 锁定第一帧是带三个参数集（VPS、SPS、PPS）的关键帧，手机才能从头解；要关键帧时下一帧就是。
+/// 锁定第一帧是带三个参数集（VPS、SPS、PPS）的关键帧，手机才能从头解；要了关键帧，屏幕静止时也很快
+/// 来一个。
 #[test]
 #[ignore = "needs the screen recording permission"]
 fn first_frame_and_requested_frames_are_keyframes() {
@@ -25,19 +26,16 @@ fn first_frame_and_requested_frames_are_keyframes() {
     assert!(first.keyframe);
     assert_eq!(first.parameter_sets.len(), 3);
 
-    // 屏幕静止时没有新帧，就不会有关键帧；只确认要了以后来的第一帧是关键帧。
+    // 要之前已经在编的帧可能先到，跳过。
     capture.request_keyframe();
     let deadline = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(Event::Frame(frame)) => {
-                assert!(frame.keyframe);
-                assert_eq!(frame.parameter_sets.len(), 3);
-                break;
-            }
-            Ok(Event::Stopped(reason)) => panic!("capture stopped: {reason}"),
-            Err(_) => {}
+    loop {
+        let frame = next_frame(&rx);
+        if frame.keyframe {
+            assert_eq!(frame.parameter_sets.len(), 3);
+            break;
         }
+        assert!(Instant::now() < deadline, "no keyframe after asking for one");
     }
 }
 

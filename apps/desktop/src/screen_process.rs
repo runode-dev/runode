@@ -16,7 +16,7 @@ use std::{
     sync::{
         Arc, Mutex, OnceLock, PoisonError, Weak,
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc,
+        mpsc::{self, TrySendError},
     },
     thread,
     time::{Duration, Instant},
@@ -36,6 +36,10 @@ const IDLE_EXIT: Duration = Duration::from_secs(10);
 const CONTROL_LIMIT: u32 = 1 << 20;
 /// 还没写出去的画面最多这么多帧，再来的丢掉，见 `Pacer`。
 const MAX_QUEUED: usize = 3;
+/// 还没写出去的控制消息最多这么多条，再多就是客户端只发不收，断开它。
+const MAX_QUEUED_CONTROL: usize = 64;
+/// 客户端这么久一点都不收就断开它，写的线程不一直卡着。
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 跑采集进程，返回进程的退出码。
 pub fn run() -> i32 {
@@ -106,15 +110,16 @@ fn serve(listener: &UnixListener) {
             continue;
         }
         active.fetch_add(1, Ordering::Relaxed);
-        let active = active.clone();
+        let counter = active.clone();
         let spawned = thread::Builder::new().name("screen-connection".into()).spawn(move || {
             if let Err(err) = connection(stream) {
                 tracing::info!("screen connection ended: {err}");
             }
-            active.fetch_sub(1, Ordering::Relaxed);
+            counter.fetch_sub(1, Ordering::Relaxed);
         });
         if let Err(err) = spawned {
             tracing::warn!("cannot serve a screen connection: {err}");
+            active.fetch_sub(1, Ordering::Relaxed);
         }
     }
 }
@@ -305,18 +310,23 @@ fn start(options: &Options, outbox: &Outbox) -> Option<Arc<Capture>> {
 /// 发往客户端的帧都经一个线程按先后写出去；画面另外数着还没写出去的帧，见 `Pacer`。
 #[derive(Clone)]
 struct Outbox {
-    tx: mpsc::Sender<(FrameKind, Vec<u8>)>,
+    tx: mpsc::SyncSender<(FrameKind, Vec<u8>)>,
     queued_video: Arc<AtomicUsize>,
+    stream: Arc<UnixStream>,
 }
 
 impl Outbox {
-    /// 开写出去的线程。写失败时关掉连接，读的一边随之结束。
+    /// 开写出去的线程。写失败、写超时或者控制消息积压过 `MAX_QUEUED_CONTROL` 时关掉连接，
+    /// 读的一边随之结束。
     fn start(stream: UnixStream) -> io::Result<Self> {
-        let (tx, rx) = mpsc::channel::<(FrameKind, Vec<u8>)>();
+        stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+        let stream = Arc::new(stream);
+        let (tx, rx) = mpsc::sync_channel::<(FrameKind, Vec<u8>)>(MAX_QUEUED + MAX_QUEUED_CONTROL);
         let queued_video = Arc::new(AtomicUsize::new(0));
         let queued = queued_video.clone();
+        let writing = stream.clone();
         thread::Builder::new().name("screen-writer".into()).spawn(move || {
-            let mut writer = BufWriter::new(&stream);
+            let mut writer = BufWriter::new(&*writing);
             for (kind, payload) in rx {
                 let written =
                     write_frame(&mut writer, kind, 0, &payload).map_err(io::Error::other).and_then(|()| writer.flush());
@@ -325,24 +335,37 @@ impl Outbox {
                 }
                 if let Err(err) = written {
                     tracing::debug!("cannot write to the screen client: {err}");
-                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    let _ = writing.shutdown(std::net::Shutdown::Both);
                     return;
                 }
             }
         })?;
-        Ok(Self { tx, queued_video })
+        Ok(Self { tx, queued_video, stream })
     }
 
     fn control(&self, message: &ScreenHostMsg) {
         if let Ok(frame) = Frame::control(message) {
-            let _ = self.tx.send((FrameKind::Control, frame.payload));
+            self.send(FrameKind::Control, frame.payload);
         }
     }
 
     fn video(&self, payload: Vec<u8>) {
         self.queued_video.fetch_add(1, Ordering::Relaxed);
-        if self.tx.send((FrameKind::Video, payload)).is_err() {
+        if !self.send(FrameKind::Video, payload) {
             self.queued_video.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    /// 排进队列；画面有 `Pacer` 限着，队列满了只能是控制消息积压，断开连接。
+    fn send(&self, kind: FrameKind, payload: Vec<u8>) -> bool {
+        match self.tx.try_send((kind, payload)) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => {
+                tracing::info!("the screen client does not read its messages, disconnecting");
+                let _ = self.stream.shutdown(std::net::Shutdown::Both);
+                false
+            }
+            Err(TrySendError::Disconnected(_)) => false,
         }
     }
 
