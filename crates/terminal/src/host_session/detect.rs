@@ -36,6 +36,8 @@ pub(super) struct ForegroundProbe {
     /// 上次认的时候组里的进程，找 agent 记着的对话用。
     pids: Vec<u32>,
     conversation_read_at: Option<Instant>,
+    /// 被节流跳过的那次重读补在什么时候：之后没有新输出也要补上，免得漏掉最后一次换对话。
+    conversation_due: Option<Instant>,
 }
 
 /// 全部终端共用的识别规则，用户规则从 `runode_paths::Dirs::agent_detection_dir` 读。
@@ -58,9 +60,9 @@ impl HostSession {
     }
 
     /// 下次该调 `poll_agent` 的时刻：有新输出要看、正在确认 agent 是不是停下了、启动宽限期
-    /// 快到了等；没有要做的事时为 `None`。
+    /// 快到了、要补读 agent 的对话等；没有要做的事时为 `None`。
     pub fn agent_deadline(&self) -> Option<Instant> {
-        self.agent_tracker.deadline()
+        [self.agent_tracker.deadline(), self.foreground_probe.conversation_due].into_iter().flatten().min()
     }
 
     pub(super) fn poll_agent_at(&mut self, now: Instant) -> bool {
@@ -87,9 +89,13 @@ impl HostSession {
     /// 前台有 agent 时按 `CONVERSATION_RECHECK` 重读它在进行的对话，变了就标脏。读不到（文件还没写、
     /// 正在重写）时留着上次的。
     fn recheck_conversation(&mut self, now: Instant, home: Option<&Path>) {
-        let (Some(agent), Some(home)) = (self.agent, home) else { return };
         let probe = &mut self.foreground_probe;
-        if probe.conversation_read_at.is_some_and(|at| now.saturating_duration_since(at) < CONVERSATION_RECHECK) {
+        probe.conversation_due = None;
+        let (Some(agent), Some(home)) = (self.agent, home) else { return };
+        if let Some(at) = probe.conversation_read_at
+            && now.saturating_duration_since(at) < CONVERSATION_RECHECK
+        {
+            probe.conversation_due = Some(at + CONVERSATION_RECHECK);
             return;
         }
         probe.conversation_read_at = Some(now);
@@ -210,6 +216,7 @@ mod tests {
         session.meta_dirty = false;
         session.recheck_conversation(start + CONVERSATION_RECHECK / 2, Some(&home));
         assert_eq!(id(&session), None, "rechecks are throttled");
+        assert_eq!(session.agent_deadline(), Some(start + CONVERSATION_RECHECK), "the skipped one is made up");
         session.recheck_conversation(start + CONVERSATION_RECHECK, Some(&home));
         assert_eq!(id(&session).as_deref(), Some("first"));
         assert!(session.meta_dirty);
