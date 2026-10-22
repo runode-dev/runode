@@ -443,9 +443,10 @@ impl WindowView {
     /// 上次画出时的布局可能已经过时（开了侧栏、缩了窗口），按它算的偏移不准。
     fn show_tab(&mut self, ix: usize, reveal_now: bool, window: &mut Window, cx: &mut Context<Self>) {
         // 看板的对话框开着时只在后面换标签，不收看板、不抢焦点：标签里的程序退出、`runode open --focus`
-        // 也会走到这里，收了看板写到一半的任务就没了。
-        let keep = self.dialog_open(cx);
+        // 也会走到这里，收了看板写到一半的任务就没了。用户自己按键换的离开新建任务那一页，留着它。
+        let keep = self.dialog_open(cx) && !(self.acting && self.drafting(cx));
         if !keep {
+            self.leave_todo_page(window, cx);
             self.leave_mobile(cx);
             self.kanban = None;
             // 焦点要交给终端，盖着终端的放大预览栏还原。

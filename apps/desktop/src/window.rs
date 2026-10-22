@@ -272,6 +272,8 @@ pub struct WindowView {
     kanban: Option<kanban::OpenKanban>,
     /// 离开时收起来的写到一半的新建任务那一页，下回新建任务时接着写。
     todo_draft: Option<Entity<crate::kanban::TodoDialog>>,
+    /// 正在办用户按的窗口动作（`act`）：这时换标签算用户要离开新建任务那一页。
+    acting: bool,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
     empty_focus: FocusHandle,
     /// 开着的 agent 列表。
@@ -448,6 +450,7 @@ impl WindowView {
             settings: None,
             kanban: None,
             todo_draft: None,
+            acting: false,
             empty_focus: cx.focus_handle(),
             agent_picker: None,
             arrange_picker: None,

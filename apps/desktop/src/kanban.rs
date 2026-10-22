@@ -388,7 +388,12 @@ impl Kanban {
         self.alone = alone;
     }
 
-    /// 取下写到一半的新建任务那一页（`TodoDialog::draft`），露出看板：用户要去别处时 app 收起来留着。
+    /// 开着的是写到一半、能收起来留着的新建任务那一页（`TodoDialog::draft`）。
+    pub fn drafting(&self, cx: &App) -> bool {
+        self.dialog.as_ref().is_some_and(|(dialog, _)| dialog.read(cx).draft())
+    }
+
+    /// 取下写到一半的新建任务那一页，露出看板：用户要去别处时 app 收起来留着。
     pub fn take_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<TodoDialog>> {
         let (dialog, _) = self.dialog.take_if(|(dialog, _)| dialog.read(cx).draft())?;
         self.alone = false;

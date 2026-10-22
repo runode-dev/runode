@@ -55,17 +55,19 @@ impl WindowView {
         cx.notify();
     }
 
-    /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板的对话框开着时不理（见 `leave_todo_page`）。
+    /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板开着新建任务那一页以外的对话框时不理。
     pub(super) fn act<A: Action>(
         cx: &mut Context<Self>,
         f: fn(&mut Self, &A, &mut Window, &mut Context<Self>),
     ) -> impl Fn(&A, &mut Window, &mut App) + 'static {
         cx.listener(move |this, action, window, cx| {
-            if !this.leave_todo_page(window, cx) {
+            if this.dialog_open(cx) && !this.drafting(cx) {
                 return;
             }
             this.close_settings(window, cx);
+            this.acting = true;
             f(this, action, window, cx);
+            this.acting = false;
         })
     }
 

@@ -105,14 +105,23 @@ impl WindowView {
         }
     }
 
-    /// 用户要去别处：写到一半的新建任务那一页收起来留着（`todo_draft`），露出看板；开着别的对话框或页时为假，
-    /// 留在原处，免得丢掉写了一半的内容。
+    /// 用户要去别处：写到一半的新建任务那一页收起来留着（`todo_draft`），看板只为这一页开着时一起收起，
+    /// 否则露出看板；开着别的对话框或页时为假，留在原处，免得丢掉写了一半的内容。
     pub(super) fn leave_todo_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) else { return true };
+        let alone = board.read(cx).creating();
         if let Some(draft) = board.update(cx, |board, cx| board.take_draft(window, cx)) {
             self.todo_draft = Some(draft);
+            if alone {
+                self.close_kanban(window, cx);
+            }
         }
         !self.dialog_open(cx)
+    }
+
+    /// 看板开着写到一半的新建任务那一页，离开时能收起来留着（`leave_todo_page`）。
+    pub(super) fn drafting(&self, cx: &App) -> bool {
+        self.kanban.as_ref().is_some_and(|board| board.view.read(cx).drafting(cx))
     }
 
     /// 看板的新建、编辑对话框或任务那一页开着：换页、收起或再开一个会丢掉写了一半的内容。
