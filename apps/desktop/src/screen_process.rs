@@ -14,7 +14,7 @@ use std::{
         },
     },
     sync::{
-        Arc, Mutex, OnceLock, PoisonError, Weak,
+        Arc, Mutex, OnceLock, PoisonError,
         atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, TrySendError},
     },
@@ -27,7 +27,7 @@ use runode_protocol::{
     screen::{SCREEN_VERSION, ScreenClientMsg, ScreenDisplay, ScreenHostMsg, ScreenInput, ScreenMods, encode_video},
     write_frame,
 };
-use runode_screen::{Capture, Display, Event, Injector, KeepAwake, Options};
+use runode_screen::{Capture, Display, Event, Injector, KeepAwake, Keyframes, Options};
 use runode_types::input::Key;
 
 /// 持续这么久没有连接就退出。拉起它的一方马上就连，所以不必等很久。
@@ -154,7 +154,7 @@ fn connection(stream: UnixStream) -> io::Result<()> {
     });
     let _watch = watch_lock(&outbox);
     let mut injector = Injector::new(displays[0].id);
-    let mut capture: Option<Arc<Capture>> = None;
+    let mut capture: Option<Capture> = None;
     while let Some(message) = read_message(&mut reader)? {
         match message {
             ScreenClientMsg::ScreenHello { .. } => return Err(io::Error::other("a second screen hello")),
@@ -271,9 +271,9 @@ fn even(value: u32) -> u32 {
 }
 
 /// 按 `options` 开始采集，画面经 `outbox` 发出去；开不起来时告诉客户端原因。
-fn start(options: &Options, outbox: &Outbox) -> Option<Arc<Capture>> {
+fn start(options: &Options, outbox: &Outbox) -> Option<Capture> {
     // 丢帧时要向采集要关键帧，而回调在 `Capture` 建好之前就交出去了，所以经这里转一下。
-    let handle: Arc<OnceLock<Weak<Capture>>> = Arc::default();
+    let handle: Arc<OnceLock<Keyframes>> = Arc::default();
     let pacer = Mutex::new(Pacer::default());
     let sink = outbox.clone();
     let keyframes = handle.clone();
@@ -284,8 +284,8 @@ fn start(options: &Options, outbox: &Outbox) -> Option<Arc<Capture>> {
         Event::Frame(frame) => {
             let (send, want_keyframe) =
                 pacer.lock().unwrap_or_else(PoisonError::into_inner).admit(frame.keyframe, sink.queued_video());
-            if want_keyframe && let Some(capture) = keyframes.get().and_then(Weak::upgrade) {
-                capture.request_keyframe();
+            if want_keyframe && let Some(keyframes) = keyframes.get() {
+                keyframes.request();
             }
             if send {
                 sink.video(encode_video(&frame));
@@ -295,8 +295,7 @@ fn start(options: &Options, outbox: &Outbox) -> Option<Arc<Capture>> {
     });
     match started {
         Ok(capture) => {
-            let capture = Arc::new(capture);
-            let _ = handle.set(Arc::downgrade(&capture));
+            let _ = handle.set(capture.keyframes());
             Some(capture)
         }
         Err(err) => {

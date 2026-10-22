@@ -18,7 +18,7 @@ mod nal;
 #[cfg(target_os = "macos")]
 pub use awake::KeepAwake;
 #[cfg(target_os = "macos")]
-pub use capture::{Capture, Options};
+pub use capture::{Capture, Keyframes, Options};
 #[cfg(target_os = "macos")]
 pub use input::{Injector, key_strokes};
 

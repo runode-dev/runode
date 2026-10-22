@@ -4,7 +4,7 @@
 use std::{
     io,
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Mutex, PoisonError, Weak,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -115,10 +115,12 @@ impl Capture {
 
     /// 出一帧带参数集的关键帧：手机丢了帧、刚连上要从头解时用。屏幕静止时也出，重编最近一张画面。
     pub fn request_keyframe(&self) {
-        self.latest.encoder.request_keyframe();
-        let latest = self.latest.clone();
-        let when = DispatchTime::try_from(REPEAT_DELAY).unwrap_or(DispatchTime::NOW);
-        let _ = self.queue.after(when, move || latest.encode_again());
+        self.latest.request_keyframe(&self.queue);
+    }
+
+    /// 在 `on_event` 里要关键帧用的句柄，不让采集活下去。
+    pub fn keyframes(&self) -> Keyframes {
+        Keyframes { latest: Arc::downgrade(&self.latest), queue: self.queue.clone() }
     }
 
     /// 改平均码率，单位 bit/s。
@@ -146,6 +148,26 @@ impl Drop for Capture {
     }
 }
 
+/// 向采集要关键帧，编码回调里也能用：编码器最后一份要是在编码回调里丢掉，就在回调里等它交完帧，
+/// 等不到，所以回调只持有弱引用，到采集的队列上才升成强引用。
+#[derive(Clone)]
+pub struct Keyframes {
+    latest: Weak<Latest>,
+    queue: DispatchRetained<DispatchQueue>,
+}
+
+impl Keyframes {
+    /// 出一帧带参数集的关键帧，屏幕静止时也出；采集已经丢掉时什么都不做。
+    pub fn request(&self) {
+        let (latest, queue) = (self.latest.clone(), self.queue.clone());
+        self.queue.exec_async(move || {
+            if let Some(latest) = latest.upgrade() {
+                latest.request_keyframe(&queue);
+            }
+        });
+    }
+}
+
 /// 编码器和最近交给它的画面、时间戳；画面只在采集的队列上编。
 struct Latest {
     encoder: Encoder,
@@ -159,6 +181,14 @@ unsafe impl Send for Latest {}
 unsafe impl Sync for Latest {}
 
 impl Latest {
+    /// 硬要一帧关键帧，过 `REPEAT_DELAY` 还没出时重编最近一张。
+    fn request_keyframe(self: &Arc<Self>, queue: &DispatchQueue) {
+        self.encoder.request_keyframe();
+        let latest = self.clone();
+        let when = DispatchTime::try_from(REPEAT_DELAY).unwrap_or(DispatchTime::NOW);
+        let _ = queue.after(when, move || latest.encode_again());
+    }
+
     fn encode(&self, image: CFRetained<CVImageBuffer>, pts: CMTime) {
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         let pts = match &*last {
