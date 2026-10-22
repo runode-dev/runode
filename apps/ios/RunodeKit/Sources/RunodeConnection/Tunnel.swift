@@ -30,9 +30,20 @@ public actor IrohDialer {
         let connection: Connection
         let stream: BiStream
         do {
-            connection = try await endpoint.connect(
-                addr: EndpointAddr(id: id, relayUrl: nil, addresses: []), alpn: Data(tunnelALPN.utf8))
-            stream = try await connection.openBi()
+            (connection, stream) = try await abandoningOnCancel {
+                let connection = try await endpoint.connect(
+                    addr: EndpointAddr(id: id, relayUrl: nil, addresses: []), alpn: Data(tunnelALPN.utf8))
+                do {
+                    return (connection, try await connection.openBi())
+                } catch {
+                    try? connection.close(errorCode: 0, reason: Data())
+                    throw error
+                }
+            } discard: { connection, _ in
+                try? connection.close(errorCode: 0, reason: Data())
+            }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw LinkFailure.connectionFailed(error.localizedDescription)
         }
@@ -66,6 +77,84 @@ public actor IrohDialer {
         } catch {
             binding = nil
             throw LinkFailure.connectionFailed(error.localizedDescription)
+        }
+    }
+}
+
+/// 跑不理会取消的 `work`（iroh-ffi 的异步调用取消了也要等到它自己成功或超时）：取消时马上抛
+/// `CancellationError`，不等它；它晚到的结果交给 `discard` 收掉。
+func abandoningOnCancel<T: Sendable>(
+    _ work: @escaping @Sendable () async throws -> T,
+    discard: @escaping @Sendable (T) -> Void
+) async throws -> T {
+    let waiter = Abandonable<T>()
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+            guard waiter.arm(continuation) else { return }
+            Task {
+                let result: Result<T, any Error>
+                do {
+                    result = .success(try await work())
+                } catch {
+                    result = .failure(error)
+                }
+                if !waiter.finish(result), case .success(let value) = result { discard(value) }
+            }
+        }
+    } onCancel: {
+        waiter.cancel()
+    }
+}
+
+/// `abandoningOnCancel` 的续体，结果和取消谁先到都只恢复一次。
+private final class Abandonable<T: Sendable>: Sendable {
+    private enum State {
+        case idle
+        case waiting(CheckedContinuation<T, any Error>)
+        case cancelled
+        case done
+    }
+
+    private let state = Mutex(State.idle)
+
+    /// 已经取消时当场抛出，为假。
+    func arm(_ continuation: CheckedContinuation<T, any Error>) -> Bool {
+        let cancelled = state.withLock { state in
+            if case .cancelled = state {
+                state = .done
+                return true
+            }
+            state = .waiting(continuation)
+            return false
+        }
+        if cancelled { continuation.resume(throwing: CancellationError()) }
+        return !cancelled
+    }
+
+    /// 交出 `work` 的结果；已经因取消恢复过时为假，结果没人要。
+    func finish(_ result: Result<T, any Error>) -> Bool {
+        guard let continuation = take() else { return false }
+        continuation.resume(with: result)
+        return true
+    }
+
+    func cancel() {
+        let continuation = state.withLock { state -> CheckedContinuation<T, any Error>? in
+            if case .waiting(let continuation) = state {
+                state = .done
+                return continuation
+            }
+            state = .cancelled
+            return nil
+        }
+        continuation?.resume(throwing: CancellationError())
+    }
+
+    private func take() -> CheckedContinuation<T, any Error>? {
+        state.withLock { state in
+            guard case .waiting(let continuation) = state else { return nil }
+            state = .done
+            return continuation
         }
     }
 }
