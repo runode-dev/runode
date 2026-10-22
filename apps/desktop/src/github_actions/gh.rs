@@ -165,6 +165,9 @@ pub(crate) struct PullRequest {
     /// `OPEN`、`CLOSED` 或 `MERGED`。
     pub state: String,
     pub url: String,
+    /// 开出来的时刻，Unix 时间的秒数。
+    #[serde(default)]
+    pub created_at: u64,
     #[serde(default)]
     pub is_draft: bool,
     /// `APPROVED`、`CHANGES_REQUESTED`、`REVIEW_REQUIRED`；仓库不要求评审时为空。
@@ -324,8 +327,8 @@ impl Gh {
 
     /// `branch` 上最近的 PR，没有时为 `None`。
     pub fn pull_request(&self, branch: &str) -> Result<Option<PullRequest>, String> {
-        const FIELDS: &str = "number,state,url,isDraft,reviewDecision,statusCheckRollup";
-        match self.json(&["pr", "view", branch, "--json", FIELDS]) {
+        const FIELDS: &str = "number,state,url,createdAt,isDraft,reviewDecision,statusCheckRollup";
+        match self.json(&["pr", "view", branch, "--json", FIELDS, "--jq", ".createdAt |= fromdateiso8601"]) {
             Ok(pr) => Ok(Some(pr)),
             Err(err) if err.starts_with("no pull requests found") => Ok(None),
             Err(err) => Err(err),

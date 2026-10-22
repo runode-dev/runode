@@ -155,6 +155,8 @@ pub struct Kanban {
     pulls: pulls::Pulls,
     /// PR 合并后标成完成过的任务，见 `pulls`。
     merged: std::collections::HashSet<String>,
+    /// 正在推送分支、开 PR 的任务。
+    creating_pulls: std::collections::HashSet<String>,
     _poll_pulls: gpui::Task<()>,
 }
 
@@ -319,6 +321,7 @@ impl Kanban {
             alone: false,
             pulls: pulls::Pulls::new(),
             merged: std::collections::HashSet::new(),
+            creating_pulls: std::collections::HashSet::new(),
             _poll_pulls: pulls::poll(cx),
         }
     }
@@ -490,12 +493,18 @@ impl Kanban {
     /// 依次发几条看板的请求，前一条没办成就不发后面的。办成了重翻记录：完成已久（不在完成那一列）的任务改了，看板的数据不变，
     /// 不会因此重翻。
     fn send_todos(steps: Vec<Step>, cx: &mut Context<Self>) {
+        Self::send_todos_then(steps, |_| {}, cx);
+    }
+
+    /// 和 `send_todos` 一样，没办成时先做 `failed`。
+    fn send_todos_then(steps: Vec<Step>, failed: impl FnOnce(&mut Self) + 'static, cx: &mut Context<Self>) {
         let sent = store::send(cx, steps);
         cx.spawn(async move |this, cx| {
             let sent = sent.await;
             this.update(cx, |this, cx| match sent {
                 Ok(()) => this.reload_history(cx),
                 Err(reason) => {
+                    failed(this);
                     let text = rust_i18n::t!("kanban.toast.request_failed", reason = reason).into_owned();
                     this.show_toast(ToastState::Failed(text), cx);
                 }
@@ -1167,10 +1176,12 @@ impl Kanban {
                 );
             }
             if todo.worktree_dir.is_some() && todo.branch.is_some() && !self.pulls.contains_key(&todo.id) {
+                let creating = self.creating_pulls.contains(&todo.id);
                 let todo = todo.clone();
                 let label = rust_i18n::t!("kanban.create_pr").into_owned();
                 buttons.push(
                     icon_button("todo-create-pr", GIT_ICON, label)
+                        .disabled(creating)
                         .on_press(cx, move |this, _, cx| this.create_pull_request(&todo, cx)),
                 );
             }

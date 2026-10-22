@@ -7,9 +7,9 @@ use std::{collections::HashMap, ffi::OsString, path::PathBuf, time::Duration};
 
 use gpui::{Context, Task};
 use runode_git::Repo;
-use runode_protocol::todo::Todo;
+use runode_protocol::{ClientMsg, todo::Todo};
 
-use super::{Kanban, ToastState, store};
+use super::{Kanban, ToastState, store, store::Step};
 use crate::github_actions::gh::{Gh, PullRequest};
 
 /// 隔多久重读一次。
@@ -21,8 +21,20 @@ const FIRST_POLL: Duration = Duration::from_millis(500);
 pub(super) type Pulls = HashMap<String, PullRequest>;
 
 /// 有分支的任务：在任务的目录里问 gh 这个分支上的 PR，仓库由 gh 按远端认。
-fn target(todo: &Todo) -> Option<(String, PathBuf, String)> {
-    Some((todo.id.clone(), todo.spec.dir.clone(), todo.branch.clone()?))
+fn target(todo: &Todo) -> Option<Target> {
+    Some(Target {
+        id: todo.id.clone(),
+        dir: todo.spec.dir.clone(),
+        branch: todo.branch.clone()?,
+        started: todo.started?,
+    })
+}
+
+struct Target {
+    id: String,
+    dir: PathBuf,
+    branch: String,
+    started: u64,
 }
 
 /// 一直隔 `POLL` 读一次，看板丢掉时随返回的任务一起停。读不到的保留上次的。
@@ -64,12 +76,14 @@ pub(super) fn poll(cx: &mut Context<Kanban>) -> Task<()> {
 
 type Found = Vec<(String, Result<Option<PullRequest>, String>)>;
 
-fn fetch(targets: Vec<(String, PathBuf, String)>, path: Option<OsString>) -> Found {
+/// 任务开始前开的 PR 不算：分支名取自标题，旧分支删了以后同名的新任务会再用上它，GitHub 上还留着
+/// 以前那个分支合并了的 PR。
+fn fetch(targets: Vec<Target>, path: Option<OsString>) -> Found {
     targets
         .into_iter()
-        .map(|(id, dir, branch)| {
+        .map(|Target { id, dir, branch, started }| {
             let gh = Gh { dir, path: path.clone() };
-            (id, gh.pull_request(&branch))
+            (id, gh.pull_request(&branch).map(|pr| pr.filter(|pr| pr.created_at >= started)))
         })
         .collect()
 }
@@ -84,12 +98,16 @@ fn create(worktree: PathBuf, branch: String, path: Option<OsString>) -> Result<O
 }
 
 impl Kanban {
-    /// PR 合并了：还没完成的任务标成完成。每个任务在这个看板里只标一次，用户取消完成后不再标回去。
+    /// PR 合并了：还没完成的任务标成完成。每个任务在这个看板里只标成一次，用户取消完成后不再标回去；
+    /// 宿主没办成的下一轮再标。
     fn finish_merged(&mut self, id: &str, cx: &mut Context<Self>) {
         let open = store::data(cx).todos.iter().any(|todo| todo.id == id && todo.done_at.is_none());
-        if open && self.merged.insert(id.to_owned()) {
-            self.finish_todo(id.to_owned(), true, cx);
+        if !open || !self.merged.insert(id.to_owned()) {
+            return;
         }
+        let (id, sent) = (id.to_owned(), id.to_owned());
+        let step: Step = Box::new(move |req| ClientMsg::UpdateTodo { req, id: sent, spec: None, done: Some(true) });
+        Self::send_todos_then(vec![step], move |this| _ = this.merged.remove(&id), cx);
     }
 
     /// 把任务的分支推上去开 PR，顶上的提示条说办没办成。只给还有工作树和分支的任务。
@@ -97,21 +115,27 @@ impl Kanban {
         let (Some(worktree), Some(branch)) = (todo.worktree_dir.clone(), todo.branch.clone()) else {
             return;
         };
+        if !self.creating_pulls.insert(todo.id.clone()) {
+            return;
+        }
         let (id, path) = (todo.id.clone(), self.input.shell_path.clone());
         let serial = self.show_toast(ToastState::Creating, cx);
         let created = cx.background_executor().spawn(async move { create(worktree, branch, path) });
         cx.spawn(async move |this, cx| {
             let created = created.await;
-            this.update(cx, |this, cx| match created {
-                Ok(pr) => {
-                    if let Some(pr) = pr {
-                        this.pulls.insert(id, pr);
+            this.update(cx, |this, cx| {
+                this.creating_pulls.remove(&id);
+                match created {
+                    Ok(pr) => {
+                        if let Some(pr) = pr {
+                            this.pulls.insert(id, pr);
+                        }
+                        this.set_toast(serial, None, cx);
                     }
-                    this.set_toast(serial, None, cx);
-                }
-                Err(reason) => {
-                    let text = rust_i18n::t!("kanban.toast.pr_failed", reason = reason).into_owned();
-                    this.show_toast(ToastState::Failed(text), cx);
+                    Err(reason) => {
+                        let text = rust_i18n::t!("kanban.toast.pr_failed", reason = reason).into_owned();
+                        this.show_toast(ToastState::Failed(text), cx);
+                    }
                 }
             })
             .ok();
