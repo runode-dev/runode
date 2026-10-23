@@ -207,7 +207,9 @@ impl Pty {
         let master = self.master.clone();
         let waited = thread::Builder::new().name("pty-waiter".into()).spawn(move || {
             let _ = child.wait();
-            drop(master.lock().unwrap_or_else(PoisonError::into_inner).take());
+            // 放开锁再关：关伪控制台可能要等读线程把输出读完，读线程又可能等着拿锁改尺寸的会话线程。
+            let closed = master.lock().unwrap_or_else(PoisonError::into_inner).take();
+            drop(closed);
         });
         if let Err(err) = waited {
             let _ = killer.kill();
