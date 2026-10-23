@@ -550,7 +550,8 @@ fn run(
         pipes.pump(until - now);
     }
     let (stdout, stderr) = pipes.into_outputs();
-    let (stdout, stderr) = (String::from_utf8_lossy(&stdout).into_owned(), String::from_utf8_lossy(&stderr).into_owned());
+    let (stdout, stderr) =
+        (String::from_utf8_lossy(&stdout).into_owned(), String::from_utf8_lossy(&stderr).into_owned());
     if !status.success() {
         let detail = [stderr.trim(), stdout.trim()].into_iter().find(|text| !text.is_empty());
         return Err(format!("{binary}: {}", detail.map_or_else(|| status.to_string(), str::to_owned)));
@@ -699,7 +700,8 @@ impl Pipes {
             // agent 不收时写会失败，和不收时不报错一样。
             thread::Builder::new().name("ai-message-stdin".into()).spawn(move || drop(stdin.write_all(&input)))?;
         }
-        let read = std::sync::Arc::new((Mutex::new(Collected { open: 2, ..Collected::default() }), std::sync::Condvar::new()));
+        let read =
+            std::sync::Arc::new((Mutex::new(Collected { open: 2, ..Collected::default() }), std::sync::Condvar::new()));
         let reader = |pipe: Option<Box<dyn Read + Send>>, err: bool| {
             let read = read.clone();
             move || {

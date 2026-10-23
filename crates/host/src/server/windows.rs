@@ -37,7 +37,13 @@ pub(super) fn wait(wake: &WakeReader, listener: &UnixListener, accepting: bool) 
 pub(super) fn set_buffer(stream: &UnixStream, option: i32, size: i32) {
     // SAFETY: socket 来自 `stream`；值指向本地变量，长度是它的大小。
     let result = unsafe {
-        setsockopt(stream.as_raw_socket() as SOCKET, SOL_SOCKET, option, (&raw const size).cast(), size_of::<i32>() as i32)
+        setsockopt(
+            stream.as_raw_socket() as SOCKET,
+            SOL_SOCKET,
+            option,
+            (&raw const size).cast(),
+            size_of::<i32>() as i32,
+        )
     };
     if result != 0 {
         tracing::debug!("failed to set a socket buffer: {}", io::Error::last_os_error());

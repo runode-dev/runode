@@ -52,24 +52,24 @@ use std::{
 
 #[cfg(unix)]
 use anyhow::{Context as _, Result, anyhow, bail};
+use portable_pty::PtySize;
 #[cfg(unix)]
 use portable_pty::{Child, CommandBuilder, SlavePty, native_pty_system};
-use portable_pty::PtySize;
 use runode_agent::{ForegroundJob, ForegroundProcess};
 use runode_types::grid::GridSize;
 #[cfg(unix)]
 use runode_types::{settings::TermSettings, shell::IntegrationMode};
 
-#[cfg(windows)]
-pub use conpty::{Pty, default_shell};
-#[cfg(windows)]
-pub(crate) use conpty::process_name;
+#[cfg(unix)]
+use crate::shell_integration;
 #[cfg(windows)]
 use conpty::group_members;
 #[cfg(windows)]
 pub use conpty::process_args;
-#[cfg(unix)]
-use crate::shell_integration;
+#[cfg(windows)]
+pub(crate) use conpty::process_name;
+#[cfg(windows)]
+pub use conpty::{Pty, default_shell};
 #[cfg(unix)]
 use notify::Notifier;
 #[cfg(unix)]

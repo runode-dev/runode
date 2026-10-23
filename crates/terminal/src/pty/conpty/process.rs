@@ -16,7 +16,9 @@ use windows_sys::{
         System::{
             Diagnostics::{
                 Debug::ReadProcessMemory,
-                ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS},
+                ToolHelp::{
+                    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+                },
             },
             Threading::{
                 GetProcessTimes, OpenProcess, PEB, PROCESS_BASIC_INFORMATION, PROCESS_NAME_WIN32,
@@ -229,9 +231,8 @@ pub(super) fn process_cwd(pid: u32) -> Option<PathBuf> {
     let mut chars = vec![0u16; len];
     let mut read = 0;
     // SAFETY: 输出缓冲是本地的 `chars`，长度如实传入。
-    let ok = unsafe {
-        ReadProcessMemory(process.0, dir.Buffer.cast(), chars.as_mut_ptr().cast(), len * 2, &mut read)
-    } != 0;
+    let ok =
+        unsafe { ReadProcessMemory(process.0, dir.Buffer.cast(), chars.as_mut_ptr().cast(), len * 2, &mut read) } != 0;
     if !ok || read != len * 2 {
         return None;
     }

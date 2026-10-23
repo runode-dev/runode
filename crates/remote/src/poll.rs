@@ -91,6 +91,8 @@ pub(crate) fn waker() -> io::Result<(WakeRx, WakeTx)> {
     let rx = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
     let tx = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
     tx.connect(rx.local_addr()?)?;
+    // 只收 `tx` 发来的：回环上别的进程往这个端口发一个包，不能叫停监听。
+    rx.connect(tx.local_addr()?)?;
     Ok((rx, tx))
 }
 

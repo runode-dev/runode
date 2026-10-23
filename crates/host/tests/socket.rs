@@ -13,9 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{BUILD, CAT, Peer, SIZE, WAIT, contains, host, listen, temp_dir};
 #[cfg(unix)]
 use common::script;
+use common::{BUILD, CAT, Peer, SIZE, WAIT, contains, host, listen, temp_dir};
 use runode_host::{ClientMsg, Host, HostMsg, Placement, SessionId, Stopped};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, FrameKind, GoodbyeReason, PROTOCOL_VERSION, PaneLayout, PaneRect, TabLayout,

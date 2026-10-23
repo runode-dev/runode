@@ -318,8 +318,7 @@ fn set_tcp_option(tcp: &TcpStream, name: i32, value: i32) -> io::Result<()> {
     use std::os::windows::io::AsRawSocket as _;
     use windows_sys::Win32::Networking::WinSock::{IPPROTO_TCP, WSAGetLastError, setsockopt};
     // SAFETY: socket 来自 `tcp`；值指向本地变量，长度是它的大小。
-    let result =
-        unsafe { setsockopt(tcp.as_raw_socket() as usize, IPPROTO_TCP, name, (&raw const value).cast(), 4) };
+    let result = unsafe { setsockopt(tcp.as_raw_socket() as usize, IPPROTO_TCP, name, (&raw const value).cast(), 4) };
     // SAFETY: 只读本线程上一次 socket 调用的错误码。
     if result == 0 { Ok(()) } else { Err(io::Error::from_raw_os_error(unsafe { WSAGetLastError() })) }
 }

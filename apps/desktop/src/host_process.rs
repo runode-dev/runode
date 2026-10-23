@@ -9,7 +9,6 @@
 //! socket 上旧宿主的会话和 socket，再照常跑。交出会话的旧宿主不马上退出，等它拉起的 shell 都结束了
 //! 才退出（`wait_for_children`）。
 
-use std::{fs::OpenOptions, sync::Mutex, time::Duration};
 #[cfg(unix)]
 use std::{
     fs::File,
@@ -18,6 +17,7 @@ use std::{
     sync::{Arc, PoisonError},
     time::Instant,
 };
+use std::{fs::OpenOptions, sync::Mutex, time::Duration};
 
 use runode_host::{BuildId, Host};
 #[cfg(unix)]

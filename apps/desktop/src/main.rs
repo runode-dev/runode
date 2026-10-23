@@ -24,12 +24,12 @@ mod menus;
 mod prespawn;
 mod preview_panel;
 mod process_env;
-mod subprocess;
 mod remote_access;
 #[cfg(target_os = "macos")]
 mod screen_process;
 mod settings;
 mod startup;
+mod subprocess;
 mod terminal_view;
 mod update;
 mod window;
@@ -72,7 +72,9 @@ fn main() {
         #[cfg(windows)]
         // SAFETY: 只是接上父进程的控制台，没有指针参数。
         unsafe {
-            windows_sys::Win32::System::Console::AttachConsole(windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS)
+            windows_sys::Win32::System::Console::AttachConsole(
+                windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS,
+            )
         };
         let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
         let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));

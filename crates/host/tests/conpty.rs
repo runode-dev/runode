@@ -36,7 +36,9 @@ fn resizing_reaches_the_program() {
     peer.send(&ClientMsg::Resize { id, size: GridSize { cols: 70, rows: 20, ..SIZE } });
     peer.wait(channel, |message, _| matches!(message, Some(HostMsg::Resized { .. })));
     peer.input(channel, b"mode con\r");
-    peer.wait_screen(id, Some(50), |text| text.lines().any(|line| line.contains(':') && line.trim_end().ends_with(" 70")));
+    peer.wait_screen(id, Some(50), |text| {
+        text.lines().any(|line| line.contains(':') && line.trim_end().ends_with(" 70"))
+    });
     peer.send(&ClientMsg::Kill { id });
 }
 
@@ -85,7 +87,8 @@ fn a_running_command_is_the_foreground() {
     let (channel, _) = peer.attach(id, AttachMode::Snapshot);
     peer.input(channel, b"ping -n 30 127.0.0.1\r");
     wait_meta(&mut peer, id, |meta| {
-        !meta.foreground_is_shell && meta.foreground.as_deref().is_some_and(|name| name.eq_ignore_ascii_case("PING.EXE"))
+        !meta.foreground_is_shell
+            && meta.foreground.as_deref().is_some_and(|name| name.eq_ignore_ascii_case("PING.EXE"))
     });
     peer.input(channel, b"\x03");
     wait_meta(&mut peer, id, |meta| meta.foreground_is_shell);

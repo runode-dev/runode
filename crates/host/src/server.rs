@@ -47,10 +47,6 @@ use std::os::unix::{
 use anyhow::{Context as _, Result, anyhow};
 #[cfg(unix)]
 use libc::{SO_RCVBUF, SO_SNDBUF};
-#[cfg(windows)]
-pub(crate) use uds_windows::{UnixListener, UnixStream};
-#[cfg(windows)]
-use windows_sys::Win32::Networking::WinSock::{SO_RCVBUF, SO_SNDBUF};
 use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, Frame, FrameError, FrameKind, GoodbyeReason,
     HANDOFF_FORMAT, HostMsg, MAX_PAYLOAD, PROTOCOL_VERSION, SessionId, SessionInfo, ShellReport, WindowLayout,
@@ -58,6 +54,10 @@ use runode_protocol::{
 };
 use runode_terminal::pty;
 use runode_types::{grid::GridSize, input::parse_key_list, session::DriveAction};
+#[cfg(windows)]
+pub(crate) use uds_windows::{UnixListener, UnixStream};
+#[cfg(windows)]
+use windows_sys::Win32::Networking::WinSock::{SO_RCVBUF, SO_SNDBUF};
 
 use crate::{
     Host, Shared, SpawnOptions, Stopped, browse,
@@ -1677,9 +1677,9 @@ fn session_sink(
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{peer_pid, same_user};
-#[cfg(windows)]
 use windows::{WakeReader, WakeWriter, set_buffer, wait, wake_pair};
+#[cfg(windows)]
+pub use windows::{peer_pid, same_user};
 
 #[cfg(test)]
 mod tests;

@@ -174,7 +174,10 @@ fn up_interfaces() -> Vec<(String, IpAddr)> {
             NO_ERROR => break,
             ERROR_BUFFER_OVERFLOW => continue,
             _ => {
-                tracing::warn!("cannot list the network addresses: {}", std::io::Error::from_raw_os_error(result as i32));
+                tracing::warn!(
+                    "cannot list the network addresses: {}",
+                    std::io::Error::from_raw_os_error(result as i32)
+                );
                 return Vec::new();
             }
         }
@@ -195,9 +198,9 @@ fn up_interfaces() -> Vec<(String, IpAddr)> {
                 unicast = address.Next;
                 let sockaddr = address.Address.lpSockaddr;
                 let addr = match (*sockaddr).sa_family {
-                    AF_INET => IpAddr::V4(Ipv4Addr::from(u32::from_be(
-                        (*sockaddr.cast::<SOCKADDR_IN>()).sin_addr.S_un.S_addr,
-                    ))),
+                    AF_INET => {
+                        IpAddr::V4(Ipv4Addr::from(u32::from_be((*sockaddr.cast::<SOCKADDR_IN>()).sin_addr.S_un.S_addr)))
+                    }
                     AF_INET6 => IpAddr::V6(Ipv6Addr::from((*sockaddr.cast::<SOCKADDR_IN6>()).sin6_addr.u.Byte)),
                     _ => continue,
                 };

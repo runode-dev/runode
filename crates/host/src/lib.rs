@@ -52,9 +52,9 @@ use anyhow::Result;
 #[cfg(unix)]
 pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeOverOptions, TakeOverReport, peer_pid};
 pub use idle::Stopped;
-pub use launch::{disclaim_responsibility, launch, launch_screen};
 #[cfg(unix)]
 pub use launch::{STATUS_FD, Successor, launch_successor};
+pub use launch::{disclaim_responsibility, launch, launch_screen};
 pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
 use runode_types::{clipboard::ClipboardAccess, grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 #[cfg(windows)]

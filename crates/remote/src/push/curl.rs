@@ -64,7 +64,8 @@ impl Curl {
 
     /// 看 curl 能不能用：运行得了，而且编进了 HTTP/2（`curl --version` 的 Features 里有 `HTTP2`）。
     pub(crate) fn check(&self) -> Result<(), String> {
-        let output = self.command()
+        let output = self
+            .command()
             .arg("--version")
             .stdin(Stdio::null())
             .stderr(Stdio::null())
@@ -86,7 +87,8 @@ impl Curl {
 
     /// 发 `request`，等到响应。curl 运行不了、连不上、超时这类没有拿到响应的情况是 `Err`。
     pub(crate) fn send(&self, request: &Request) -> Result<Response, String> {
-        let mut child = self.command()
+        let mut child = self
+            .command()
             // `-q` 必须在最前面：不读 `~/.curlrc`，免得里面的 `fail`、`location` 改了行为。走代理时
             // `--include` 会先输出代理 CONNECT 的应答，`--suppress-connect-headers` 去掉它，解析看到的
             // 头一块才是 APNs 的响应。

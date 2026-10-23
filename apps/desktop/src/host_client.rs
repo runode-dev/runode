@@ -2,7 +2,8 @@
 //! 桌面经一条连接（`Link`）按 `runode_protocol` 和它说话。宿主平常单独一个进程跑（`runode --host`），
 //! 连不上也拉不起来、或者 socket 被别的宿主占着时才跑在 app 进程里（`Host::connect_pair` 的一对
 //! socket），见 `launch::choose_mode`。单独跑的宿主是别的构建时（app 升级了），先让这个构建的新宿主
-//! 接手它的会话，见 `handoff`；Windows 上的 ConPTY 交不出去，旧宿主连同会话结束，会话跟着重启。配置项 `terminal-host` 只管退出时会话留不留下（`quit_keeps_sessions`）。
+//! 接手它的会话，见 `handoff`；Windows 上的 ConPTY 交不出去，旧宿主连同会话结束，会话跟着重启。
+//! 配置项 `terminal-host` 只管退出时会话留不留下（`quit_keeps_sessions`）。
 //!
 //! 跑在 app 里的宿主不把会话交出去：shell 是 app 的子进程、算在 app 名下（macOS 的责任进程），app
 //! 一退出，交出去的终端就连不上局域网（No route to host）。单独跑的宿主交出会话后等它的 shell 都
@@ -40,13 +41,13 @@ use runode_protocol::{SessionInfo, TaskSource, WindowLayout};
 #[cfg(unix)]
 pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
+#[cfg(test)]
+pub use link::Attached;
+pub use link::{ConnectError, Link, LinkEvent, Output, Screen, SpawnOptions, UiTicket};
 #[cfg(unix)]
 pub(crate) use std::os::unix::net::UnixStream;
 #[cfg(windows)]
 pub(crate) use uds_windows::UnixStream;
-#[cfg(test)]
-pub use link::Attached;
-pub use link::{ConnectError, Link, LinkEvent, Output, Screen, SpawnOptions, UiTicket};
 
 /// 宿主现在怎么跑。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -358,6 +359,12 @@ fn establish() {
                 Ok(()) => Mode::Standalone,
                 Err(err) => fall_back(err),
             },
+            // 旧宿主上还连着旧版本的 app：结束它会连带结束那个 app 里开着的终端，不碰它。
+            #[cfg(windows)]
+            (Choice::HandOver, Some(_)) if matches!(probe, Probe::Running { desktops, .. } if desktops > 0) => {
+                notify(Notice::OtherApp);
+                in_process(false)
+            }
             (Choice::HandOver, Some(socket)) => {
                 let sessions = match &probe {
                     Probe::Running { sessions, .. } => Some(*sessions),

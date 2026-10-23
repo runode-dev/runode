@@ -275,12 +275,14 @@ fn handle_ctrl_c() {
 fn read_loop(mut pipe: Box<dyn Read + Send>, mut sink: PtySink) {
     set_current_thread_interactive();
     let mut buf = vec![0u8; 64 * 1024];
+    // 收的一方不要了也读到 EOF：没人读输出管道时，关伪控制台会一直等下去。
+    let mut wanted = true;
     loop {
         match pipe.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                if !sink(PtyEvent::Output(buf[..n].into())) {
-                    return;
+                if wanted {
+                    wanted = sink(PtyEvent::Output(buf[..n].into()));
                 }
             }
             Err(err) if err.kind() == ErrorKind::Interrupted => {}
@@ -291,7 +293,9 @@ fn read_loop(mut pipe: Box<dyn Read + Send>, mut sink: PtySink) {
             }
         }
     }
-    sink(PtyEvent::Exited);
+    if wanted {
+        sink(PtyEvent::Exited);
+    }
 }
 
 impl Drop for Pty {
