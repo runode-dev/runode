@@ -6,10 +6,14 @@ use runode_types::todo::When;
 /// `at` 的本地时间：时、分、星期几。
 fn local(at: u64) -> (i32, i32, u32) {
     let at = libc::time_t::try_from(at).unwrap();
-    // SAFETY: `tm` 是纯数据，全零是合法的值；`localtime_r` 只写它。
+    // SAFETY: `tm` 是纯数据，全零是合法的值；`localtime_r` 和 `localtime_s` 只写它。
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: 两个指针都指向这里的局部变量，调用期间有效。
+    #[cfg(unix)]
     assert!(!unsafe { libc::localtime_r(&raw const at, &raw mut tm) }.is_null());
+    // SAFETY: 同上。
+    #[cfg(windows)]
+    assert_eq!(unsafe { libc::localtime_s(&raw mut tm, &raw const at) }, 0);
     (tm.tm_hour, tm.tm_min, u32::try_from(tm.tm_wday).unwrap())
 }
 

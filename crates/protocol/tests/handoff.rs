@@ -89,6 +89,7 @@ fn parts_round_trip() {
 }
 
 /// 路径不是 UTF-8 的会话照样交得出去：交接自己的路径原样交给新宿主，`meta` 里的有损地写。
+#[cfg(unix)]
 #[test]
 fn non_utf8_paths_are_handed_over() {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _, path::PathBuf};

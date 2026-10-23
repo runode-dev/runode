@@ -38,13 +38,13 @@ fn meta() -> SessionMeta {
     }
 }
 
+/// `path` 在 Unix 上按原样的字节，Windows 上的路径不是字节串，按 UTF-8 有损地解。
 fn shell_report(path: &[u8]) -> ShellReport {
-    use std::os::unix::ffi::OsStrExt as _;
-
-    ShellReport {
-        path: Some(std::ffi::OsStr::from_bytes(path).to_owned()),
-        names: ShellNames { functions: vec!["runode-reload".into()] }.into(),
-    }
+    #[cfg(unix)]
+    let path = <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(path).to_owned();
+    #[cfg(not(unix))]
+    let path = std::ffi::OsString::from(String::from_utf8_lossy(path).into_owned());
+    ShellReport { path: Some(path), names: ShellNames { functions: vec!["runode-reload".into()] }.into() }
 }
 
 /// 一个窗口、两个工作区，当前标签里左右两个分屏。
@@ -442,7 +442,7 @@ fn the_wire_format_is_readable_json() {
     assert_eq!(json, r#"{"type":"goodbye","reason":{"kind":"shutdown"}}"#);
 }
 
-/// 拆出来的 PATH 写成字符串，不是 `OsString` 那串数字；`Meta` 里没拆的旧写法照样读，不带 `shell`。
+/// 拆出来的 PATH 写成字符串，不是 `OsString` 那串数字。
 #[test]
 fn shell_report_wire_format() {
     let json = serde_json::to_value(HostMsg::Meta {
@@ -455,6 +455,12 @@ fn shell_report_wire_format() {
     assert_eq!(json["shell"]["names"]["functions"][0], "runode-reload");
     // `meta` 里不写这两项。
     assert!(json["meta"].get("shell_path").is_none() && json["meta"].get("shell_names").is_none());
+}
+
+/// `Meta` 里没拆的旧写法照样读，不带 `shell`；照 `OsString` 的写法（`{"Unix": [字节]}`）写的 PATH 也读得了。
+#[cfg(unix)]
+#[test]
+fn shell_report_reads_os_string_paths() {
     let old: HostMsg = serde_json::from_str(
         r#"{"type":"meta","id":"0123456789abcdef0011223344556677",
             "meta":{"shell_path":{"Unix":[47,98,105,110]},"shell_names":{"functions":["f"]}}}"#,
@@ -462,7 +468,6 @@ fn shell_report_wire_format() {
     .unwrap();
     let HostMsg::Meta { meta, shell: None, .. } = old else { panic!("not a meta without shell: {old:?}") };
     assert_eq!(meta.shell_path, Some("/bin".into()));
-    // 照 `OsString` 的写法写的 PATH 也读得了。
     let report: ShellReport = serde_json::from_str(r#"{"path":{"Unix":[47,255]}}"#).unwrap();
     assert_eq!(report, ShellReport { path: shell_report(b"/\xff").path, names: Default::default() });
 }

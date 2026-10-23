@@ -2,6 +2,8 @@
 //! 是真的 bash、zsh、fish、elvish、nushell 加载仓库里的集成脚本发出的序列。系统里没有的 shell
 //! 不测。
 
+#![cfg(unix)]
+
 mod common;
 
 use std::{

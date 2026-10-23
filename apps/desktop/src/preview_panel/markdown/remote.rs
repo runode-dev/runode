@@ -315,6 +315,7 @@ fn fetch_once(url: &str, deadline: Instant) -> Option<Hop> {
         IpAddr::V6(ip) => format!("[{ip}]"),
     };
     let mut command = Command::new("curl");
+    crate::subprocess::hide_window(&mut command);
     // `-q` 得是第一个参数，不读用户的 ~/.curlrc（里面的代理、跟重定向等会绕开这里的检查）；`-g` 不展开
     // 网址里的 `{}`、`[]`，一个网址只请求一次。`--noproxy '*'` 不走 `http_proxy` 这些环境变量里的代理：
     // 代理自己解析主机，`--resolve` 管不到，查过的公网地址就作废了。

@@ -151,7 +151,7 @@ fn a_silent_host_does_not_hold_up_completion() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let socket = dir.join("host.sock");
-    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let listener = UnixListener::bind(&socket).unwrap();
     // 接下连接、一直不回话；连接留着不关，命令行看不到连接断了。
     std::thread::spawn(move || {
         let mut held = Vec::new();

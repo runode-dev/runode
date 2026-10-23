@@ -52,9 +52,11 @@ impl Shell {
         }
     }
 
-    /// 按可执行文件的名字认 shell；登录 shell 的 argv[0] 可能带前缀 `-`。nushell 的程序叫 `nu`。
+    /// 按可执行文件的名字认 shell；登录 shell 的 argv[0] 可能带前缀 `-`，Windows 上的带 `.exe`。
+    /// nushell 的程序叫 `nu`。
     pub fn detect(program: &str) -> Option<Self> {
-        match Path::new(program).file_name()?.to_str()?.trim_start_matches('-') {
+        let name = Path::new(program).file_name()?.to_str()?.trim_start_matches('-');
+        match name.strip_suffix(".exe").unwrap_or(name) {
             "nu" => Some(Self::Nushell),
             name => Self::from_name(name),
         }

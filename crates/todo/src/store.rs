@@ -2,8 +2,6 @@
 //! 认得的不一样的库不读也不写，免得弄坏别的版本的数据。路径存成原样的字节，不要求是 UTF-8。
 
 use std::{
-    ffi::OsStr,
-    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     str::FromStr as _,
     time::Duration,
@@ -93,11 +91,19 @@ pub struct Store {
 }
 
 fn path_bytes(path: &Path) -> &[u8] {
-    path.as_os_str().as_bytes()
+    path.as_os_str().as_encoded_bytes()
 }
 
+#[cfg(unix)]
 fn path_from(bytes: Vec<u8>) -> PathBuf {
-    PathBuf::from(OsStr::from_bytes(&bytes))
+    PathBuf::from(<std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&bytes))
+}
+
+/// Windows 上存的是 `as_encoded_bytes` 的 WTF-8，不是合法 UTF-8 的（落单的代理项）换成替换符：
+/// 库文件里的字节不可信，不能交给 `from_encoded_bytes_unchecked`。
+#[cfg(not(unix))]
+fn path_from(bytes: Vec<u8>) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// 附件存成的字节：各个路径用 NUL 隔开，路径里不会有 NUL。

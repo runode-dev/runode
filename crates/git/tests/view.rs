@@ -250,7 +250,9 @@ fn does_not_read_sides_over_the_size_limit() {
     assert_eq!(handle.old_bytes(path, None, &DiffSide::Worktree, max(4)), Err(TooLarge));
 }
 
-/// 名字像 `1:a` 的文件，暂存区里读的是它自己，不当成 `a` 冲突时的第 1 份。
+/// 名字像 `1:a` 的文件，暂存区里读的是它自己，不当成 `a` 冲突时的第 1 份。Windows 的文件名里不能有
+/// `:`。
+#[cfg(unix)]
 #[test]
 fn reads_the_index_side_of_a_file_named_like_a_stage() {
     let repo = TestRepo::new("stage-like-name");

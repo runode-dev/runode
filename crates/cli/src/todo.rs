@@ -375,6 +375,7 @@ mod tests {
         assert_eq!(days_text(0x7f), "");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_repository_is_found_where_the_directory_really_is() {
         let root = std::env::temp_dir().join(format!("rnc-{}-in-repo", std::process::id()));

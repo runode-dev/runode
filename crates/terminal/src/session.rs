@@ -298,11 +298,13 @@ fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::*;
+    #[cfg(unix)]
     use crate::{
         host_session::HostSession,
         pty::{Pty, PtyEvent},
-        testing::*,
     };
+    #[cfg(unix)]
     use runode_types::input::{Key, KeyInput, Mods};
 
     /// 改尺寸只是请求：VT 等宿主标出位置后才改，重复的请求不再发。
@@ -333,6 +335,7 @@ mod tests {
 
     /// 端到端：真实 shell 经过 PTY，宿主那份 VT 和界面这份同时喂同样的输出，按键从界面经宿主
     /// 送达子进程，彩色和宽字符输出落进帧，子进程退出时读到 EOF，两份 VT 的屏幕一样。
+    #[cfg(unix)]
     #[test]
     fn shell_round_trip() {
         let size = GridSize { cols: 40, rows: 10, cell_width_px: 8, cell_height_px: 16 };

@@ -2,7 +2,7 @@
 //! 桌面经一条连接（`Link`）按 `runode_protocol` 和它说话。宿主平常单独一个进程跑（`runode --host`），
 //! 连不上也拉不起来、或者 socket 被别的宿主占着时才跑在 app 进程里（`Host::connect_pair` 的一对
 //! socket），见 `launch::choose_mode`。单独跑的宿主是别的构建时（app 升级了），先让这个构建的新宿主
-//! 接手它的会话，见 `handoff`。配置项 `terminal-host` 只管退出时会话留不留下（`quit_keeps_sessions`）。
+//! 接手它的会话，见 `handoff`；Windows 上的 ConPTY 交不出去，旧宿主连同会话结束，会话跟着重启。配置项 `terminal-host` 只管退出时会话留不留下（`quit_keeps_sessions`）。
 //!
 //! 跑在 app 里的宿主不把会话交出去：shell 是 app 的子进程、算在 app 名下（macOS 的责任进程），app
 //! 一退出，交出去的终端就连不上局域网（No route to host）。单独跑的宿主交出会话后等它的 shell 都
@@ -13,6 +13,7 @@
 //! 主题和剪贴板的规矩跟着配置走，见 `configure`；别的进程经宿主请界面办的事见 `serve_ui`；
 //! 连接断了以后用 `reconnect` 重新连上。
 
+#[cfg(unix)]
 mod handoff;
 mod launch;
 mod link;
@@ -32,10 +33,17 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{App, PromptLevel};
 use runode_config::Config;
 use runode_host::{BuildId, ClientMsg, Host};
-use runode_protocol::{HandoffRefusal, SessionInfo, TaskSource, WindowLayout};
+#[cfg(unix)]
+use runode_protocol::HandoffRefusal;
+use runode_protocol::{SessionInfo, TaskSource, WindowLayout};
 
+#[cfg(unix)]
 pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
+#[cfg(unix)]
+pub(crate) use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+pub(crate) use uds_windows::UnixStream;
 #[cfg(test)]
 pub use link::Attached;
 pub use link::{ConnectError, Link, LinkEvent, Output, Screen, SpawnOptions, UiTicket};
@@ -102,6 +110,7 @@ pub enum Notice {
     /// 留着它还是结束它。
     HandoffFailed { reason: String, sessions: Option<usize> },
     /// 交接成了，但 `count` 个终端退成了重放，回滚历史没带过来。不用用户做什么，不弹框。
+    #[cfg_attr(not(unix), expect(dead_code, reason = "Windows 上不交接"))]
     HandoffDegraded { count: usize },
     /// 旧版本的 app 还开着：它连着旧宿主、旧宿主不交（`HandoffRefusal::DesktopConnected`），或者
     /// 用户要结束的旧宿主其实跑在它的进程里（见 `launch::Ended::NotAHost`）。这次跑在 app 里、
@@ -262,7 +271,7 @@ const STUCK_TRIES: u32 = 3;
 
 /// 没有宿主在 `socket` 上听了。
 fn socket_gone(socket: &Path) -> bool {
-    std::os::unix::net::UnixStream::connect(socket).is_err()
+    UnixStream::connect(socket).is_err()
 }
 
 /// 单独跑的宿主上除了这个 app 还有别的桌面连着：开关关着时退出只结束这个 app 窗口里的会话，不让宿主
@@ -382,12 +391,31 @@ fn establish() {
     *MODE.lock().unwrap_or_else(PoisonError::into_inner) = mode;
 }
 
+/// Windows 上的 ConPTY 交不出去：让 `socket` 上的旧宿主连同它的 `sessions` 个会话结束，再拉起这个
+/// 构建的宿主，会话跟着重启。旧宿主跑在另一个 app 里时不碰它，这次跑在 app 里、不开 socket。
+#[cfg(windows)]
+fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
+    match launch::end_old_host(socket, &build()) {
+        Ok(launch::Ended::Ended) => tracing::info!("ended the old host and its {sessions:?} sessions to upgrade it"),
+        Ok(launch::Ended::NotAHost) => {
+            notify(Notice::OtherApp);
+            return Some(in_process(false));
+        }
+        Err(err) => tracing::warn!("failed to end the old host: {err}"),
+    }
+    Some(match launch_host(socket) {
+        Ok(()) => Mode::Standalone,
+        Err(err) => fall_back(err),
+    })
+}
+
 /// 让这个构建的新宿主接手 `socket` 上旧宿主的会话（见 `handoff::hand_over`），成了就连上它。
 /// `sessions` 是旧宿主有几个会话，协议对不上时不知道。另一个新 app 正在交接时返回 `None`，由
 /// 调用方过一会儿重新探。
 ///
 /// 没交成时旧宿主连同会话照常跑着，这次跑在 app 里、不开 socket（锁在它手里），弹框问用户；只有
 /// 旧宿主没有会话时，没什么可丢的，让它退出、拉起这个构建的。
+#[cfg(unix)]
 fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
     let started = Instant::now();
     let outcome = match std::env::current_exe() {
@@ -554,6 +582,9 @@ pub(crate) fn expose_cli(host: &Host) {
     if let Some(path) = exe.parent().and_then(|dir| path_with(std::env::var_os("PATH"), dir)) {
         host.set_env("PATH", path);
     }
+    // Windows 上这个程序是界面程序，在终端里跑不出输出，命令行交给旁边的控制台程序 `rn.exe`。
+    #[cfg(windows)]
+    let exe = Some(exe.with_file_name("rn.exe")).filter(|rn| rn.is_file()).unwrap_or(exe);
     host.set_env(runode_cli::ENV_BIN, exe);
 }
 
@@ -707,17 +738,21 @@ mod tests {
 
     use super::path_with;
 
+    /// 按本机的分隔符拼成 PATH。
+    fn joined(dirs: &[&str]) -> OsString {
+        std::env::join_paths(dirs).unwrap()
+    }
+
     #[test]
     fn the_runode_directory_goes_last_on_the_path() {
-        let path =
-            path_with(Some(OsString::from("/usr/bin:/bin")), Path::new("/Applications/Runode.app/Contents/MacOS"));
-        assert_eq!(path, Some(OsString::from("/usr/bin:/bin:/Applications/Runode.app/Contents/MacOS")));
+        let path = path_with(Some(joined(&["/usr/bin", "/bin"])), Path::new("/Applications/Runode.app/Contents/MacOS"));
+        assert_eq!(path, Some(joined(&["/usr/bin", "/bin", "/Applications/Runode.app/Contents/MacOS"])));
     }
 
     #[test]
     fn a_path_that_has_it_already_stays_as_it_is() {
-        let path = path_with(Some(OsString::from("/opt/runode:/usr/bin")), Path::new("/opt/runode"));
-        assert_eq!(path, Some(OsString::from("/opt/runode:/usr/bin")));
+        let path = path_with(Some(joined(&["/opt/runode", "/usr/bin"])), Path::new("/opt/runode"));
+        assert_eq!(path, Some(joined(&["/opt/runode", "/usr/bin"])));
     }
 
     #[test]

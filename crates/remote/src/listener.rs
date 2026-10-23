@@ -5,10 +5,8 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io::{self, Read as _, Write as _},
-    mem::size_of,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpListener, TcpStream},
-    os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
+    io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV6, TcpListener, TcpStream},
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -27,6 +25,7 @@ use crate::{
     gate, identity,
     limit::{self, RateLimiter},
     pairing::Desk,
+    poll,
     status::{ListenerStatus, lock_listener},
     tunnel::Tunnel,
 };
@@ -89,7 +88,7 @@ pub struct Listener {
     shared: Arc<Shared>,
     port: u16,
     addrs: Vec<SocketAddr>,
-    wake: io::PipeWriter,
+    wake: poll::WakeTx,
     thread: Option<JoinHandle<()>>,
     _bonjour: Option<bonjour::Registration>,
     _tunnel: Option<Tunnel>,
@@ -259,7 +258,7 @@ impl Listener {
             limiter: Mutex::new(limiter),
             desk: Mutex::default(),
         });
-        let (wake_rx, wake) = io::pipe()?;
+        let (wake_rx, wake) = poll::waker()?;
         let thread_shared = shared.clone();
         let thread = thread::Builder::new()
             .name("remote-listener".into())
@@ -294,7 +293,7 @@ impl Listener {
 impl Drop for Listener {
     fn drop(&mut self) {
         self.shared.stopping.store(true, Ordering::Relaxed);
-        let _ = self.wake.write_all(&[1]);
+        poll::wake(&self.wake);
         if let Some(thread) = self.thread.take()
             && thread.join().is_err()
         {
@@ -318,7 +317,7 @@ fn open(bind: Bind, port: u16) -> io::Result<Vec<TcpListener>> {
             let mut listeners = vec![TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))?];
             match listen_v6_only(port) {
                 Ok(listener) => listeners.push(listener),
-                Err(err) if err.raw_os_error() == Some(libc::EAFNOSUPPORT) => {
+                Err(err) if err.raw_os_error() == Some(NO_IPV6) => {
                     tracing::info!("no IPv6, remote access listens on IPv4 only");
                 }
                 Err(err) => return Err(err),
@@ -332,77 +331,40 @@ fn open(bind: Bind, port: u16) -> io::Result<Vec<TcpListener>> {
     Ok(listeners)
 }
 
+/// 系统没开 IPv6 时建 IPv6 socket 报的错。
+#[cfg(unix)]
+const NO_IPV6: i32 = libc::EAFNOSUPPORT;
+#[cfg(windows)]
+const NO_IPV6: i32 = windows_sys::Win32::Networking::WinSock::WSAEAFNOSUPPORT;
+
 /// 在 `[::]:port` 上开只收 IPv6 的监听（`IPV6_V6ONLY`）：macOS 默认 IPv6 的监听也收 IPv4，会和
-/// `0.0.0.0` 上的那个撞端口。标准库开监听时没法在绑定前设这个选项，所以自己建 socket。
+/// `0.0.0.0` 上的那个撞端口。标准库开监听时没法在绑定前设这个选项，所以自己建 socket。socket2 建的
+/// socket 和标准库的一样不让子进程继承（宿主拉起的 git 之类），不然监听关了端口还被它们占着。
 fn listen_v6_only(port: u16) -> io::Result<TcpListener> {
-    // SAFETY: 只建一个 socket，返回的描述符马上交给 `OwnedFd`。
-    let fd = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_STREAM, 0) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: `fd` 是上面新建的、没人用的描述符。
-    let socket = unsafe { OwnedFd::from_raw_fd(fd) };
-    // 和标准库建的 socket 一样不让子进程继承（宿主拉起的 git 之类），不然监听关了端口还被它们占着。
-    // SAFETY: 描述符开着，只设它自己的标志。
-    if unsafe { libc::fcntl(socket.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let set = |level, name| {
-        let on: libc::c_int = 1;
-        // SAFETY: 描述符开着；值指向本地变量，长度是它的大小。
-        let result = unsafe {
-            libc::setsockopt(
-                socket.as_raw_fd(),
-                level,
-                name,
-                (&raw const on).cast(),
-                size_of::<libc::c_int>() as libc::socklen_t,
-            )
-        };
-        if result == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
-    };
-    set(libc::IPPROTO_IPV6, libc::IPV6_V6ONLY)?;
-    // 和标准库开 IPv4 监听时一样，旧连接还在 TIME_WAIT 时也能重新绑定。
-    set(libc::SOL_SOCKET, libc::SO_REUSEADDR)?;
-    // SAFETY: 全零的 sockaddr_in6 是合法的值（`::`）；下面填上族和端口。
-    let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
-    addr.sin6_family = libc::AF_INET6 as libc::sa_family_t;
-    addr.sin6_port = port.to_be();
-    addr.sin6_addr.s6_addr = Ipv6Addr::UNSPECIFIED.octets();
-    #[cfg(target_os = "macos")]
-    {
-        addr.sin6_len = size_of::<libc::sockaddr_in6>() as u8;
-    }
-    // SAFETY: `addr` 是填好的 sockaddr_in6，长度如实给出。
-    let bound = unsafe {
-        libc::bind(socket.as_raw_fd(), (&raw const addr).cast(), size_of::<libc::sockaddr_in6>() as libc::socklen_t)
-    };
-    if bound != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: 描述符开着、已经绑好。
-    if unsafe { libc::listen(socket.as_raw_fd(), 128) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(TcpListener::from(socket))
+    use socket2::{Domain, Socket, Type};
+    let socket = Socket::new(Domain::IPV6, Type::STREAM, None)?;
+    socket.set_only_v6(true)?;
+    // 和标准库开 IPv4 监听时一样，旧连接还在 TIME_WAIT 时也能重新绑定。Windows 上这个选项的意思是
+    // 能抢别人占着的端口，标准库也不设。
+    #[cfg(unix)]
+    socket.set_reuse_address(true)?;
+    socket.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0).into())?;
+    socket.listen(128)?;
+    Ok(socket.into())
 }
 
-/// 接连接的线程：`poll` 唤醒管道和各个监听，有连接就接下来起线程服务；每隔 `REVOKE_CHECK` 看一眼
-/// 设备表，断开撤销了的设备。唤醒管道有动静（`Listener` 丢掉了）时结束。
-fn accept_loop(shared: &Arc<Shared>, listeners: &[TcpListener], wake: &io::PipeReader) {
+/// 接连接的线程：`poll` 唤醒端口和各个监听，有连接就接下来起线程服务；每隔 `REVOKE_CHECK` 看一眼
+/// 设备表，断开撤销了的设备。唤醒端口有动静（`Listener` 丢掉了）时结束。
+fn accept_loop(shared: &Arc<Shared>, listeners: &[TcpListener], wake: &poll::WakeRx) {
     let mut seen_devices = None;
     let mut table_failing = false;
     let mut crowded = false;
     let mut checked_at = Instant::now();
     loop {
-        let mut fds: Vec<libc::pollfd> = std::iter::once(wake.as_raw_fd())
-            .chain(listeners.iter().map(|listener| listener.as_raw_fd()))
-            .map(|fd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 })
+        let mut fds: Vec<poll::Entry> = std::iter::once(poll::entry(wake, poll::IN))
+            .chain(listeners.iter().map(|listener| poll::entry(listener, poll::IN)))
             .collect();
-        let tick = REVOKE_CHECK.as_millis() as libc::c_int;
-        // SAFETY: `fds` 是本地的数组，长度如实给出；各个描述符在这次调用期间都开着。
-        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, tick) } < 0 {
-            let err = io::Error::last_os_error();
+        if let Err(err) = poll::wait(&mut fds, REVOKE_CHECK) {
             if err.kind() != io::ErrorKind::Interrupted {
                 tracing::warn!("failed to wait for remote connections: {err}");
                 thread::sleep(ACCEPT_BACKOFF);
@@ -410,8 +372,6 @@ fn accept_loop(shared: &Arc<Shared>, listeners: &[TcpListener], wake: &io::PipeR
             continue;
         }
         if fds[0].revents != 0 || shared.stopping.load(Ordering::Relaxed) {
-            let mut drained = [0u8; 16];
-            let _ = (&*wake).read(&mut drained);
             return;
         }
         for (listener, fd) in listeners.iter().zip(&fds[1..]) {

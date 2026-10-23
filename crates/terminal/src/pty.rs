@@ -14,6 +14,8 @@
 //! 的输入交出来。非阻塞记在打开的文件上，交出去的描述符也是非阻塞的，接手方用的同样是这里的
 //! 读写线程。
 //!
+//! Windows 上的伪终端是 ConPTY（`conpty`）：没有能交出去的描述符，不能交接，读写都是阻塞的。
+//!
 //! 交接分两步走，交出方提交之前接手方不能碰 PTY：`Pty::adopt_paused` 把读写线程先起好、停在
 //! 闸门（`Gate`）上，一个字节都不读不写；`Pty::resume_reading` 打开闸门，不接手了就
 //! `Pty::release` 原样交回去。线程事先起好，开闸这一步不会失败。从没开过闸的 `Pty` 直接丢掉
@@ -21,38 +23,79 @@
 //! 描述符，不发信号：那时 shell 还归交出方管，它回滚后照常用。开过闸以后丢掉照常结束 shell，
 //! 见 `Drop`。
 
+#[cfg(windows)]
+mod conpty;
+#[cfg(unix)]
 mod notify;
+#[cfg(unix)]
 mod reader;
 
+#[cfg(unix)]
 use std::{
     cell::Cell,
     ffi::OsString,
     fmt,
     os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
-    path::{Path, PathBuf},
-    sync::{
-        Arc, Condvar, Mutex, PoisonError,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc,
-    },
+    path::PathBuf,
+    sync::{Condvar, Mutex, PoisonError, atomic::AtomicBool},
     thread::{self, JoinHandle},
     time::Duration,
 };
+use std::{
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
+};
 
+#[cfg(unix)]
 use anyhow::{Context as _, Result, anyhow, bail};
-use portable_pty::{Child, CommandBuilder, PtySize, SlavePty, native_pty_system};
+#[cfg(unix)]
+use portable_pty::{Child, CommandBuilder, SlavePty, native_pty_system};
+use portable_pty::PtySize;
 use runode_agent::{ForegroundJob, ForegroundProcess};
-use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
+use runode_types::grid::GridSize;
+#[cfg(unix)]
+use runode_types::{settings::TermSettings, shell::IntegrationMode};
 
+#[cfg(windows)]
+pub use conpty::{Pty, default_shell};
+#[cfg(windows)]
+pub(crate) use conpty::process_name;
+#[cfg(windows)]
+use conpty::group_members;
+#[cfg(windows)]
+pub use conpty::process_args;
+#[cfg(unix)]
 use crate::shell_integration;
+#[cfg(unix)]
 use notify::Notifier;
+#[cfg(unix)]
 use reader::Reader;
+
+/// 进程号：Unix 上是 `pid_t`，Windows 上是 `u32`。
+#[cfg(unix)]
+pub(crate) type Pid = libc::pid_t;
+#[cfg(windows)]
+pub(crate) type Pid = u32;
+
+/// `pid` 写成对外用的 `u32`；不是正数的（Unix 上）为 `None`。
+pub(crate) fn pid_u32(pid: Pid) -> Option<u32> {
+    #[cfg(unix)]
+    return u32::try_from(pid).ok();
+    #[cfg(windows)]
+    Some(pid)
+}
 
 /// 写队列里还没写出的字节超过这么多时丢掉终端查询的回复：程序不读输入时，不断发查询的输出
 /// 会让回复无限地堆在队列里。
 const MAX_QUEUED_FOR_REPLY: usize = 1 << 20;
+#[cfg(unix)]
 /// 写线程写不进去（程序不读输入）时，隔这么久看一眼是不是要交接了。
 const WRITER_STUCK_POLL: Duration = Duration::from_millis(50);
+#[cfg(unix)]
 /// `raise_fd_limit` 最多把描述符的软上限提到这么高：macOS 的 `OPEN_MAX`，`setrlimit` 不接受
 /// 比它大的软上限。
 const FD_LIMIT_TARGET: libc::rlim_t = 10240;
@@ -80,6 +123,7 @@ enum WriterMsg {
 pub struct PtyWriter(mpsc::Sender<WriterMsg>, Arc<AtomicUsize>);
 
 /// 闸门的状态，见 `Gate`。
+#[cfg(unix)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum GateState {
     Closed,
@@ -90,11 +134,13 @@ enum GateState {
 
 /// `Pty::adopt_paused` 接手来的 PTY 上，读写线程起好后先等着的闸门：交出方提交之前，接手方
 /// 不能从 PTY 读走输出，也不能往里写输入。只开（或放弃）一次。
+#[cfg(unix)]
 struct Gate {
     state: Mutex<GateState>,
     changed: Condvar,
 }
 
+#[cfg(unix)]
 impl Gate {
     fn closed() -> Arc<Self> {
         Arc::new(Self { state: Mutex::new(GateState::Closed), changed: Condvar::new() })
@@ -116,6 +162,7 @@ impl Gate {
 }
 
 /// 写线程，交接时要叫停它、等它结束。
+#[cfg(unix)]
 struct WriterThread {
     /// 置上后写线程写不进去时不再等，把没写出的交回来。
     stop: Arc<AtomicBool>,
@@ -123,6 +170,7 @@ struct WriterThread {
 }
 
 /// 一次写到底的结果。
+#[cfg(unix)]
 enum Written {
     All,
     /// 要交接了，从这个位置起没写出去。
@@ -160,7 +208,10 @@ impl PtyWriter {
         }
         self.write(data);
     }
+}
 
+#[cfg(unix)]
+impl PtyWriter {
     /// 起写线程，把排进队列的数据按顺序写进 `master`。所有发送端都没了、写出错或者收到
     /// `WriterMsg::Finish` 时结束。给了 `gate` 时先等它打开再写，放弃了就一个字节都不写，排着的
     /// 输入等 `WriterMsg::Finish` 原样交回去。
@@ -211,6 +262,7 @@ impl PtyWriter {
     }
 }
 
+#[cfg(unix)]
 fn write_loop(master: &OwnedFd, rx: &mpsc::Receiver<WriterMsg>, stop: &AtomicBool, queued: &AtomicUsize) {
     set_current_thread_interactive();
     while let Ok(message) = rx.recv() {
@@ -240,6 +292,7 @@ fn write_loop(master: &OwnedFd, rx: &mpsc::Receiver<WriterMsg>, stop: &AtomicBoo
 
 /// 把 `pending` 和队列里排在 `Finish` 前面的输入一起交回去。发送端都没了也没等到 `Finish` 时
 /// 丢掉。
+#[cfg(unix)]
 fn hand_back(rx: &mpsc::Receiver<WriterMsg>, mut pending: Vec<u8>) {
     for message in rx {
         match message {
@@ -253,6 +306,7 @@ fn hand_back(rx: &mpsc::Receiver<WriterMsg>, mut pending: Vec<u8>) {
 }
 
 /// 把 `data` 都写进非阻塞的 `master`；写不进去时等它能写，要交接了（`stop`）就不等了。
+#[cfg(unix)]
 fn write_all(master: &OwnedFd, data: &[u8], stop: &AtomicBool) -> Written {
     let mut at = 0;
     while at < data.len() {
@@ -296,6 +350,7 @@ pub fn set_current_thread_interactive() {
 /// 把本进程能同时打开的描述符数（`RLIMIT_NOFILE` 的软上限）提到硬上限，最多 `FD_LIMIT_TARGET`；
 /// 已经够高时不动。返回提完之后的软上限。每个会话要占两个描述符，从 Finder 启动的 app 软上限
 /// 只有 256，开得多了会不够。
+#[cfg(unix)]
 pub fn raise_fd_limit() -> std::io::Result<u64> {
     let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
     // SAFETY: 只往传进去的本地结构里写。
@@ -317,6 +372,7 @@ pub fn raise_fd_limit() -> std::io::Result<u64> {
 /// 交出去的会话：在另一个进程（或者同一个进程的别处）用 `Pty::adopt` 重建。`master` 要经
 /// Unix socket 的 `SCM_RIGHTS` 传过去，其余字段由调用方自己编码。丢掉它会关掉这份描述符；
 /// 交出方和接手方都关了以后，shell 收到 SIGHUP。
+#[cfg(unix)]
 pub struct PtyHandoff {
     /// PTY master 的描述符，带 `FD_CLOEXEC`，是非阻塞的。
     pub master: OwnedFd,
@@ -330,6 +386,7 @@ pub struct PtyHandoff {
     pub pending_input: Vec<u8>,
 }
 
+#[cfg(unix)]
 impl fmt::Debug for PtyHandoff {
     /// 口令不打出来，只说有没有。
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -344,26 +401,31 @@ impl fmt::Debug for PtyHandoff {
 }
 
 /// `Pty::adopt` 失败：交来的东西原样还给调用方，没有关掉描述符，shell 不受影响。
+#[cfg(unix)]
 #[derive(Debug)]
 pub struct AdoptError {
     pub handoff: PtyHandoff,
     pub error: anyhow::Error,
 }
 
+#[cfg(unix)]
 impl fmt::Display for AdoptError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "failed to adopt the pty: {:#}", self.error)
     }
 }
 
+#[cfg(unix)]
 impl std::error::Error for AdoptError {}
 
 /// 没指定 shell 时 `Pty::start` 起的那个：用户的 `$SHELL`，没有时 zsh。
+#[cfg(unix)]
 pub fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into())
 }
 
 /// PTY 上跑着的 shell。
+#[cfg(unix)]
 enum Shell {
     /// 自己启动的子进程，退出时自己回收。
     Child(Box<dyn Child + Send + Sync>),
@@ -371,6 +433,7 @@ enum Shell {
     Adopted(libc::pid_t),
 }
 
+#[cfg(unix)]
 pub struct Pty {
     /// PTY master 的描述符，和读线程、写线程共用；交出去以后为 `None`，改尺寸、读前台进程都不再
     /// 碰 PTY。
@@ -412,6 +475,7 @@ fn pty_size(size: GridSize) -> PtySize {
 }
 
 /// 改 PTY 的尺寸（`TIOCSWINSZ`），前台程序随之收到 SIGWINCH。
+#[cfg(unix)]
 fn set_winsize(master: BorrowedFd<'_>, size: GridSize) -> std::io::Result<()> {
     let size = pty_size(size);
     let winsize = libc::winsize {
@@ -428,6 +492,7 @@ fn set_winsize(master: BorrowedFd<'_>, size: GridSize) -> std::io::Result<()> {
 }
 
 /// 给描述符设上 `O_NONBLOCK`。
+#[cfg(unix)]
 fn set_nonblocking(fd: BorrowedFd<'_>) -> std::io::Result<()> {
     // SAFETY: `fd` 开着；F_GETFL/F_SETFL 只读写文件状态标志。
     unsafe {
@@ -440,6 +505,7 @@ fn set_nonblocking(fd: BorrowedFd<'_>) -> std::io::Result<()> {
 }
 
 /// 终端的前台进程组号；没有前台进程组或者读不到时为 `None`。
+#[cfg(unix)]
 fn foreground_group(master: BorrowedFd<'_>) -> Option<libc::pid_t> {
     // SAFETY: `master` 在这次调用期间一直开着。
     let group = unsafe { libc::tcgetpgrp(master.as_raw_fd()) };
@@ -448,6 +514,7 @@ fn foreground_group(master: BorrowedFd<'_>) -> Option<libc::pid_t> {
 
 /// 终端的前台进程组，要它属于以 `shell` 为首的会话：终端还是 shell 的控制终端，或者这个组的
 /// 组长还在 shell 的会话里。当场从终端读出，所以不会是进程号被重用了的别的进程组。
+#[cfg(unix)]
 fn shell_foreground(master: BorrowedFd<'_>, shell: libc::pid_t) -> Option<libc::pid_t> {
     let group = foreground_group(master)?;
     // SAFETY: 两个调用都只查询，失败时返回 -1。
@@ -456,10 +523,12 @@ fn shell_foreground(master: BorrowedFd<'_>, shell: libc::pid_t) -> Option<libc::
 }
 
 /// 共用的 master 在读写线程都结束后只剩这一份，取出来；万一还有别的引用，复制一份。
+#[cfg(unix)]
 fn take_master(master: Arc<OwnedFd>) -> std::io::Result<OwnedFd> {
     Arc::try_unwrap(master).or_else(|shared| shared.try_clone())
 }
 
+#[cfg(unix)]
 impl Pty {
     /// 在 `cwd` 下以登录 shell 方式启动 `shell`（为 `None` 时用用户的 `$SHELL`），按 `integration`
     /// 注入 shell 集成，并启动读线程，输出交给 `sink`。
@@ -834,17 +903,17 @@ impl Pty {
 
 /// 以 `leader` 为组长的进程组里的全部进程，带着进程名和参数，认 agent 用。一个都读不到时
 /// 为 `None`。
-pub(crate) fn process_group(leader: libc::pid_t) -> Option<ForegroundJob> {
+pub(crate) fn process_group(leader: Pid) -> Option<ForegroundJob> {
     let processes: Vec<ForegroundProcess> = group_members(leader)
         .into_iter()
         .filter_map(|pid| {
             let (exe, argv) = process_args(pid).unzip();
             Some(ForegroundProcess {
-                pid: u32::try_from(pid).ok()?,
+                pid: pid_u32(pid)?,
                 name: process_name(pid)?,
                 exe: exe.filter(|exe| !exe.is_empty()),
                 argv0: argv.as_ref().and_then(|argv| argv.first()).and_then(|first| {
-                    let name = first.rsplit('/').next().unwrap_or(first);
+                    let name = first.rsplit(std::path::is_separator).next().unwrap_or(first);
                     let name = name.strip_prefix('-').unwrap_or(name);
                     (!name.is_empty()).then(|| name.to_owned())
                 }),
@@ -852,7 +921,7 @@ pub(crate) fn process_group(leader: libc::pid_t) -> Option<ForegroundJob> {
             })
         })
         .collect();
-    let leader = u32::try_from(leader).ok()?;
+    let leader = pid_u32(leader)?;
     (!processes.is_empty()).then_some(ForegroundJob { leader, processes })
 }
 
@@ -983,7 +1052,7 @@ fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
 
 /// `/proc/<pid>/stat` 里的进程组号。第二项是括起来的程序名，可以带空格和括号，所以从最后一个 `)` 往后数：
 /// 状态、父进程号、进程组号。
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(any(all(test, unix), target_os = "linux"))]
 fn stat_group(stat: &[u8]) -> Option<libc::pid_t> {
     let end = stat.iter().rposition(|&byte| byte == b')')?;
     std::str::from_utf8(&stat[end + 1..]).ok()?.split_ascii_whitespace().nth(2)?.parse().ok()
@@ -1004,27 +1073,28 @@ fn process_args(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
     (!cmdline.is_empty()).then_some((exe.unwrap_or_default(), argv))
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
     vec![leader]
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 fn process_args(_pid: libc::pid_t) -> Option<(String, Vec<String>)> {
     None
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 pub(crate) fn process_name(_pid: libc::pid_t) -> Option<String> {
     None
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 fn process_cwd(_pid: libc::pid_t) -> Option<PathBuf> {
     None
 }
 
 /// 结束自己启动的 shell 并在单独的线程里回收，见 `Pty` 的 `drop`。
+#[cfg(unix)]
 fn end_child(mut child: Box<dyn Child + Send + Sync>) {
     let _ = child.kill();
     let _ = thread::Builder::new().name("pty-reaper".into()).spawn(move || {
@@ -1032,6 +1102,7 @@ fn end_child(mut child: Box<dyn Child + Send + Sync>) {
     });
 }
 
+#[cfg(unix)]
 impl Drop for Pty {
     fn drop(&mut self) {
         if let Some(file) = self.report_token_file.take() {
@@ -1065,7 +1136,7 @@ impl Drop for Pty {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

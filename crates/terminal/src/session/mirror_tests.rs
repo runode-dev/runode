@@ -119,7 +119,7 @@ fn themes() -> [TermSettings; 3] {
 fn pair(size: GridSize, started: bool) -> (HostSession, Session) {
     let settings = base_theme();
     let pty = if started {
-        Pty::spawn(size, Some("/bin/cat"), None, IntegrationMode::Off, Box::new(|_| true)).unwrap()
+        Pty::spawn(size, Some(crate::testing::CAT), None, IntegrationMode::Off, Box::new(|_| true)).unwrap()
     } else {
         unstarted_pty(size.cols, size.rows)
     };

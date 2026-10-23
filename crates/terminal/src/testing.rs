@@ -37,10 +37,13 @@ pub(crate) fn screen_row(terminal: &Terminal<'static, 'static>, y: u32) -> Strin
 
 const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
 
-/// 宿主这边的会话：`cat` 当 shell，自己不输出，VT 只会收到测试喂进去的内容。它也是前台
-/// 进程，所以前台总是「shell」。
+/// 测试里当 shell 用的程序：一直开着读输入，不起子进程，所以前台总是它自己。Windows 上没有
+/// `cat`，用 cmd。
+pub(crate) const CAT: &str = if cfg!(windows) { "cmd.exe" } else { "/bin/cat" };
+
+/// 宿主这边的会话：`CAT` 当 shell，它的输出不进 VT，VT 只会收到测试喂进去的内容。
 pub(crate) fn idle_host() -> HostSession {
-    let pty = Pty::spawn(SIZE, Some("/bin/cat"), None, IntegrationMode::Off, Box::new(|_| true)).unwrap();
+    let pty = Pty::spawn(SIZE, Some(CAT), None, IntegrationMode::Off, Box::new(|_| true)).unwrap();
     HostSession::new(SIZE, pty, None, &TermSettings::default()).unwrap()
 }
 

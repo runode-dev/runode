@@ -5,7 +5,6 @@ use std::{
     ffi::{OsStr, OsString},
     fmt, fs,
     io::{ErrorKind, Read, Write},
-    os::unix::{ffi::OsStrExt, process::CommandExt},
     path::{Component, Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{Arc, Mutex, PoisonError},
@@ -107,9 +106,10 @@ fn run_for<S: AsRef<OsStr>>(
         .env("GIT_ADVICE", "0")
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // 自成一个进程组，超时时连同 git 拉起的 ssh、gpg 一起杀掉，它们拿着输出的管道。
-        .process_group(0);
+        .stderr(Stdio::piped());
+    // 自成一个进程组，超时时连同 git 拉起的 ssh、gpg 一起杀掉，它们拿着输出的管道。
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     batch_ssh(&mut command, dir);
     let mut child = command.spawn().map_err(|err| GitError::new(format!("没能运行 git：{err}")))?;
     // 一边写输入一边读输出，输入输出都大时谁也不会等着谁。不用作用域线程：超时杀掉以后，脱离了
@@ -211,6 +211,7 @@ fn kill_group(child: &mut Child) {
 
 /// 给 git 所在的进程组发 `signal`。进程组号就是 git 的进程号（`process_group(0)`）；std 里没有给进程组
 /// 发信号的接口，借 `kill`。
+#[cfg(unix)]
 fn signal_group(child: &Child, signal: &str) {
     let _ = Command::new("kill")
         .args([signal, "--", &format!("-{}", child.id())])
@@ -218,6 +219,18 @@ fn signal_group(child: &Child, signal: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+/// Windows 没有 TERM，只在 `-KILL` 时连同子孙进程一起强杀（`taskkill /T /F`）。
+#[cfg(windows)]
+fn signal_group(child: &Child, signal: &str) {
+    if signal != "-KILL" {
+        return;
+    }
+    let mut command = Command::new("taskkill");
+    command.args(["/T", "/F", "/PID", &child.id().to_string()]).stdin(Stdio::null()).stdout(Stdio::null());
+    crate::hide_window(&mut command);
+    let _ = command.stderr(Stdio::null()).status();
 }
 
 /// git 退出以后，成功时是标准输出，失败时把标准错误（没有就用标准输出）整理成错误。
@@ -241,7 +254,7 @@ fn nested_repos(dir: &Path) -> Vec<PathBuf> {
     output
         .split(|b| *b == 0)
         .filter(|entry| entry.ends_with(b"/"))
-        .map(|entry| PathBuf::from(OsStr::from_bytes(entry.strip_suffix(b"/").unwrap_or(entry))))
+        .map(|entry| PathBuf::from(&crate::os_str(entry.strip_suffix(b"/").unwrap_or(entry))))
         .filter(|path| dir.join(path).join(".git").exists())
         .collect()
 }
@@ -556,7 +569,7 @@ impl Repo {
         }
         // `--git-path` 给的是相对仓库根目录的路径（git 目录在别处时是绝对路径），接在根目录后面。
         let squash = git(&self.root, &["rev-parse", "--git-path", "SQUASH_MSG"]);
-        if squash.is_some_and(|path| self.root.join(OsStr::from_bytes(path.trim_ascii_end())).exists()) {
+        if squash.is_some_and(|path| self.root.join(crate::os_str(path.trim_ascii_end())).exists()) {
             return Err(GitError::new("squash 合并了还没提交，没有撤销"));
         }
         let id = head.id.as_str();
@@ -680,6 +693,7 @@ impl Repo {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
@@ -692,6 +706,7 @@ mod tests {
         dir
     }
 
+    #[cfg(unix)]
     #[test]
     fn kills_git_that_runs_past_the_timeout() {
         let dir = temp_repo("timeout");
@@ -728,6 +743,7 @@ mod tests {
     }
 
     /// 钩子把进程留在后台、拿着 git 的输出管道：git 退出了就算跑完，不等那个进程。
+    #[cfg(unix)]
     #[test]
     fn returns_when_git_exits_though_a_hook_left_the_pipes_open() {
         let dir = temp_repo("background-hook");

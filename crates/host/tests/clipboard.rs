@@ -2,6 +2,8 @@
 //! （`SetOptions::clipboard`）丢掉、回空或者等桌面的回话，再把读到的文字写回程序。程序是 shell
 //! 脚本，读请求的回话由 `cat -v` 原样显示在输出里（ESC 显示成 `^[`，BEL 显示成 `^G`）。
 
+#![cfg(unix)]
+
 mod common;
 
 use common::{Peer, contains, host, script, temp_dir};

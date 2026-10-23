@@ -17,16 +17,20 @@ use std::{
     ffi::OsString,
     fs, io,
     io::{ErrorKind, Read, Write},
-    os::{
-        fd::{AsRawFd, RawFd},
-        raw::c_int,
-        unix::{fs::DirBuilderExt, process::CommandExt},
-    },
     path::{Path, PathBuf},
-    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{Mutex, MutexGuard, PoisonError},
     thread,
     time::{Duration, Instant},
+};
+
+#[cfg(unix)]
+use std::{
+    os::{
+        fd::{AsRawFd, RawFd},
+        raw::c_int,
+    },
+    process::{ChildStderr, ChildStdin, ChildStdout},
 };
 
 use crate::git_panel::show_git_error;
@@ -273,7 +277,10 @@ impl ScratchDir {
         if let Some(parent) = dir.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::DirBuilder::new().mode(0o700).create(&dir)?;
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut fs::DirBuilder::new(), 0o700).create(&dir)?;
+        #[cfg(not(unix))]
+        fs::create_dir(&dir)?;
         Ok(Self { dir, _in_use: guard })
     }
 }
@@ -488,9 +495,9 @@ fn run(
         .current_dir(dir)
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // 自成一个进程组：包装脚本拉起的真 agent、后台的 helper 都在组里，到时限时一起杀掉。
-        .process_group(0);
+        .stderr(Stdio::piped());
+    // 包装脚本拉起的真 agent、后台的 helper 到时限时一起杀掉。
+    crate::subprocess::isolate(&mut command);
     if let Some(path) = path {
         command.env("PATH", path);
     }
@@ -499,9 +506,8 @@ fn run(
         ErrorKind::NotFound => rust_i18n::t!("git.ai_message.missing", binary = binary).into_owned(),
         _ => format!("{binary}: {err}"),
     })?;
-    let group = child.id() as libc::pid_t;
-    // SAFETY: 只是给自己拉起的那个进程组发信号，不碰内存；组里已经没有进程时只是返回错误。
-    let kill_group = || unsafe { libc::killpg(group, libc::SIGKILL) };
+    let group = child.id();
+    let kill_group = || crate::subprocess::kill(group);
     let timed_out = || rust_i18n::t!("git.ai_message.timeout", binary = binary).into_owned();
     // 提示词和输出都可能比管道的缓冲大，一边等 agent 退出一边写、读，不然两边都停下来等对方。
     let mut pipes = match Pipes::new(&mut child, stdin) {
@@ -543,8 +549,8 @@ fn run(
         }
         pipes.pump(until - now);
     }
-    let stdout = String::from_utf8_lossy(&pipes.stdout_bytes).into_owned();
-    let stderr = String::from_utf8_lossy(&pipes.stderr_bytes).into_owned();
+    let (stdout, stderr) = pipes.into_outputs();
+    let (stdout, stderr) = (String::from_utf8_lossy(&stdout).into_owned(), String::from_utf8_lossy(&stderr).into_owned());
     if !status.success() {
         let detail = [stderr.trim(), stdout.trim()].into_iter().find(|text| !text.is_empty());
         return Err(format!("{binary}: {}", detail.map_or_else(|| status.to_string(), str::to_owned)));
@@ -557,6 +563,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// `run` 拉起的 agent 的三条管道，都设成非阻塞，在当前线程里用 `poll` 一起写、读，不另起线程：
 /// 拿着管道的后代杀不到时，这边到时限丢掉 `Pipes` 就关上了，没有线程卡在读写上，fd 也不漏。
+#[cfg(unix)]
 struct Pipes {
     stdin: Option<ChildStdin>,
     /// 要写进标准输入的提示词，和写到了哪儿。
@@ -569,6 +576,7 @@ struct Pipes {
     stderr_bytes: Vec<u8>,
 }
 
+#[cfg(unix)]
 impl Pipes {
     fn new(child: &mut Child, input: Option<String>) -> io::Result<Self> {
         let input = input.map(String::into_bytes).unwrap_or_default();
@@ -584,6 +592,11 @@ impl Pipes {
             set_nonblocking(fd)?;
         }
         Ok(Self { stdin, input, written: 0, stdout, stderr, stdout_bytes: Vec::new(), stderr_bytes: Vec::new() })
+    }
+
+    /// 读到的标准输出和标准错误。
+    fn into_outputs(self) -> (Vec<u8>, Vec<u8>) {
+        (self.stdout_bytes, self.stderr_bytes)
     }
 
     /// 标准输出和标准错误都读到头了。
@@ -635,6 +648,7 @@ impl Pipes {
 }
 
 /// 从 `pipe` 读一次，读到的接在 `bytes` 后面；读到头或出错时关上，读到的照样留着。
+#[cfg(unix)]
 fn read_some(pipe: &mut Option<impl Read>, bytes: &mut Vec<u8>) {
     let Some(reader) = pipe else {
         return;
@@ -648,6 +662,7 @@ fn read_some(pipe: &mut Option<impl Read>, bytes: &mut Vec<u8>) {
     }
 }
 
+#[cfg(unix)]
 fn set_nonblocking(fd: RawFd) -> io::Result<()> {
     // SAFETY: `fd` 是调用方拿着、开着的管道，F_GETFL 只读它的状态标志。
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -656,6 +671,80 @@ fn set_nonblocking(fd: RawFd) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Windows 的匿名管道不能 `poll`：写标准输入、读两条输出各起一个线程，`pump` 只等它们。
+/// shortcut: 杀不到的子孙一直拿着输出管道时，读的线程卡在读上，直到那个进程退出才结束；碰上了再改用
+/// 重叠 I/O。
+#[cfg(windows)]
+struct Pipes {
+    read: std::sync::Arc<(Mutex<Collected>, std::sync::Condvar)>,
+}
+
+/// 读到的标准输出、标准错误，和还没读到头的有几条。
+#[cfg(windows)]
+#[derive(Default)]
+struct Collected {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    open: usize,
+}
+
+#[cfg(windows)]
+impl Pipes {
+    fn new(child: &mut Child, input: Option<String>) -> io::Result<Self> {
+        let input = input.map(String::into_bytes).unwrap_or_default();
+        // 没有要写的就直接关上标准输入，agent 读到头。
+        if let Some(mut stdin) = child.stdin.take().filter(|_| !input.is_empty()) {
+            // agent 不收时写会失败，和不收时不报错一样。
+            thread::Builder::new().name("ai-message-stdin".into()).spawn(move || drop(stdin.write_all(&input)))?;
+        }
+        let read = std::sync::Arc::new((Mutex::new(Collected { open: 2, ..Collected::default() }), std::sync::Condvar::new()));
+        let reader = |pipe: Option<Box<dyn Read + Send>>, err: bool| {
+            let read = read.clone();
+            move || {
+                if let Some(mut pipe) = pipe {
+                    let mut buf = [0; 16 * 1024];
+                    loop {
+                        match pipe.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                let mut out = read.0.lock().unwrap_or_else(PoisonError::into_inner);
+                                if err { &mut out.stderr } else { &mut out.stdout }.extend_from_slice(&buf[..n]);
+                            }
+                            Err(err) if err.kind() == ErrorKind::Interrupted => {}
+                            Err(_) => break,
+                        }
+                    }
+                }
+                read.0.lock().unwrap_or_else(PoisonError::into_inner).open -= 1;
+                read.1.notify_all();
+            }
+        };
+        let stdout = child.stdout.take().map(|pipe| -> Box<dyn Read + Send> { Box::new(pipe) });
+        let stderr = child.stderr.take().map(|pipe| -> Box<dyn Read + Send> { Box::new(pipe) });
+        thread::Builder::new().name("ai-message-stdout".into()).spawn(reader(stdout, false))?;
+        thread::Builder::new().name("ai-message-stderr".into()).spawn(reader(stderr, true))?;
+        Ok(Self { read })
+    }
+
+    /// 读到的标准输出和标准错误。
+    fn into_outputs(self) -> (Vec<u8>, Vec<u8>) {
+        let mut out = self.read.0.lock().unwrap_or_else(PoisonError::into_inner);
+        (std::mem::take(&mut out.stdout), std::mem::take(&mut out.stderr))
+    }
+
+    /// 标准输出和标准错误都读到头了。
+    fn outputs_closed(&self) -> bool {
+        self.read.0.lock().unwrap_or_else(PoisonError::into_inner).open == 0
+    }
+
+    /// 最多等 `wait`，有一条输出读到头就提前回来。
+    fn pump(&mut self, wait: Duration) {
+        let out = self.read.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let open = out.open;
+        drop(self.read.1.wait_timeout_while(out, wait, |out| out.open == open));
+    }
 }
 
 /// OpenCode `--format json` 的输出里最后一步的文字；出错的事件报它的错。
@@ -806,6 +895,7 @@ mod tests {
     }
 
     /// 提示词经标准输入给，比管道的缓冲大也不卡；失败时报标准错误。
+    #[cfg(unix)]
     #[test]
     fn runs_a_command_with_the_prompt_on_stdin() {
         let dir = std::env::temp_dir();
@@ -823,6 +913,26 @@ mod tests {
         assert_eq!(out, "a b\n");
     }
 
+    /// Windows 上同样：提示词经标准输入给，比管道的缓冲大也不卡；失败时报标准错误；到时限连子进程一起
+    /// 结束。
+    #[cfg(windows)]
+    #[test]
+    fn runs_a_command_with_the_prompt_on_stdin_on_windows() {
+        let dir = std::env::temp_dir();
+        let prompt = format!("{}\n", "x".repeat(99)).repeat(2000);
+        let out = run("findstr", &["^".into()], Some(prompt), &dir, None, &[], TIMEOUT).unwrap();
+        assert_eq!(out.lines().count(), 2000);
+        let err =
+            run("cmd", &["/c".into(), "(echo boom)1>&2 & exit 3".into()], None, &dir, None, &[], TIMEOUT).unwrap_err();
+        assert_eq!(err, "cmd: boom");
+        let started = Instant::now();
+        let ping = ["/c".into(), "ping -n 30 127.0.0.1".into()];
+        let err = run("cmd", &ping, None, &dir, None, &[], Duration::from_secs(1)).unwrap_err();
+        assert!(err.contains("cmd"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(unix)]
     #[test]
     fn asks_the_login_shell_for_its_path() {
         let path = login_shell_path("sh", &std::env::temp_dir()).unwrap();
@@ -830,6 +940,7 @@ mod tests {
     }
 
     /// 到时限连 agent 拉起的子进程一起杀掉；agent 自己退了、后台子进程还拿着输出管道时，到时限也不再等。
+    #[cfg(unix)]
     #[test]
     fn kills_the_whole_process_group_at_the_deadline() {
         let dir = std::env::temp_dir();
@@ -843,6 +954,7 @@ mod tests {
     }
 
     /// 拿着输出管道的后台进程自己另起了进程组、杀整组杀不到它时，到时限稍等一会儿就报超时，不一直等。
+    #[cfg(unix)]
     #[test]
     fn gives_up_on_pipes_held_outside_the_process_group() {
         let dir = std::env::temp_dir();
@@ -859,6 +971,7 @@ mod tests {
 
     /// 那样的后代一直拿着输出管道时，`run` 返回时把管道也关上了：没有读线程替它收着，它之后再写
     /// 只会写不进去（EPIPE），不会每重试一次就漏一份。
+    #[cfg(unix)]
     #[test]
     fn closes_pipes_held_outside_the_process_group() {
         let dir = std::env::temp_dir();

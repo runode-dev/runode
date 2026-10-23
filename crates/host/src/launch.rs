@@ -1,20 +1,20 @@
 //! 拉起单独一个进程的宿主（`runode --host`）：和拉起它的 app 脱开，app 退出后照样跑着。升级时
 //! 拉起的接手旧宿主的新宿主（`runode --host --take-over`）见 `launch_successor`。macOS 上经 launchd
-//! 拉起，宿主不留在 app 的 coalition 里，见 `launchd`；用不了 launchd 时和别的系统一样直接
-//! `posix_spawn`（`detach`）。
+//! 拉起，宿主不留在 app 的 coalition 里，见 `launchd`；用不了 launchd 时和别的 Unix 一样直接
+//! `posix_spawn`（`detach`）。Windows 上不接 app 的控制台、自成一个进程组地拉起。
 
 #[cfg(target_os = "macos")]
 mod launchd;
 
+use std::{ffi::CStr, io, path::Path};
+#[cfg(unix)]
 use std::{
-    ffi::{CStr, CString, c_char},
+    ffi::{CString, c_char},
     fs::File,
-    io,
     os::{
         fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
         unix::ffi::OsStrExt as _,
     },
-    path::Path,
     ptr, thread,
 };
 
@@ -22,14 +22,14 @@ use std::{
 /// app 的会话和进程组里，app 所在的终端关掉、app 的进程组收到信号都不波及它。`libc` 里没有。
 #[cfg(target_os = "macos")]
 const POSIX_SPAWN_SETSID: libc::c_int = 0x0400;
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 const POSIX_SPAWN_SETSID: libc::c_int = 0x80;
 
 /// 除了显式接上的，子进程不继承任何描述符。只有 macOS 有这个标志；别的系统上靠各处打开描述符时
 /// 都设了 close-on-exec（Rust 标准库默认如此）。
 #[cfg(target_os = "macos")]
 const CLOEXEC_DEFAULT: libc::c_int = libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 const CLOEXEC_DEFAULT: libc::c_int = 0;
 
 // libSystem 导出、没有公开头文件的接口：子进程不再把拉起它的 app 当作「责任进程」，自己担着。
@@ -48,7 +48,7 @@ fn environ() -> *const *mut c_char {
     unsafe { (*libc::_NSGetEnviron()).cast_const() }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn environ() -> *const *mut c_char {
     unsafe extern "C" {
         static environ: *const *mut c_char;
@@ -72,6 +72,7 @@ pub fn launch_screen(exe: &Path) -> io::Result<u32> {
     launch_with(exe, c"--screen")
 }
 
+#[cfg(unix)]
 fn launch_with(exe: &Path, arg: &CStr) -> io::Result<u32> {
     #[cfg(target_os = "macos")]
     match launchd::submit(exe, &[arg.to_str().map_err(io::Error::other)?], false) {
@@ -84,10 +85,40 @@ fn launch_with(exe: &Path, arg: &CStr) -> io::Result<u32> {
     detach(exe, &[arg], None)
 }
 
+/// 标准输入输出接空设备，不接 app 的控制台（`DETACHED_PROCESS`），app 的控制台收到 Ctrl+C 不波及它；
+/// app 在作业对象里（比如从终端里起的）时尽量脱出去（`CREATE_BREAKAWAY_FROM_JOB`），作业不让脱就留在
+/// 里面。不用 `CREATE_NEW_PROCESS_GROUP`：它让宿主和宿主起的 shell 都忽略 Ctrl+C。
+#[cfg(windows)]
+fn launch_with(exe: &Path, arg: &CStr) -> io::Result<u32> {
+    use std::{
+        os::windows::process::CommandExt as _,
+        process::{Command, Stdio},
+    };
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let arg = arg.to_str().map_err(io::Error::other)?;
+    let spawn = |flags| {
+        Command::new(exe)
+            .arg(arg)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(flags)
+            .spawn()
+    };
+    let child = match spawn(DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB) {
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => spawn(DETACHED_PROCESS)?,
+        spawned => spawned?,
+    };
+    Ok(child.id())
+}
+
 /// 新宿主在这个描述符上报告接手的结果，见 `launch_successor`。
+#[cfg(unix)]
 pub const STATUS_FD: libc::c_int = 3;
 
 /// `launch_successor` 拉起的新宿主。
+#[cfg(unix)]
 #[derive(Debug)]
 pub struct Successor {
     pub pid: u32,
@@ -99,6 +130,7 @@ pub struct Successor {
 ///
 /// 和 `launch` 一样与 app 脱开，只多继承下面这一个描述符；另外开一根管道（macOS 上经 launchd 拉起时是 FIFO），写端接到新进程的 `STATUS_FD` 上，读端
 /// 交给调用方读结果。这边不留写端，新宿主一退出调用方就读到结尾。
+#[cfg(unix)]
 pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
     #[cfg(target_os = "macos")]
     match launchd::submit(exe, &["--host", "--take-over"], true) {
@@ -172,6 +204,7 @@ pub unsafe fn disclaim_responsibility() -> io::Result<()> {
 /// 在新的会话里用 `exe extra_args...` 拉起进程，返回 pid：标准输入输出接 `/dev/null`，给了
 /// `status` 时把它接到 `STATUS_FD` 上，此外不继承任何描述符；信号处理恢复默认、信号屏蔽清空，
 /// 环境变量照抄，macOS 上自己担着责任进程。退出后由这里起的一个线程收尸。
+#[cfg(unix)]
 fn detach(exe: &Path, extra_args: &[&CStr], status: Option<&OwnedFd>) -> io::Result<u32> {
     let program = CString::new(exe.as_os_str().as_bytes())?;
     let argv: Vec<*mut c_char> = std::iter::once(program.as_c_str())
@@ -218,6 +251,7 @@ fn detach(exe: &Path, extra_args: &[&CStr], status: Option<&OwnedFd>) -> io::Res
 }
 
 /// 等子进程退出、收尸。
+#[cfg(unix)]
 fn reap(pid: libc::pid_t) {
     let mut status = 0;
     loop {
@@ -230,13 +264,16 @@ fn reap(pid: libc::pid_t) {
 }
 
 /// posix_spawn 系列返回的是错误码本身，不设 errno。
+#[cfg(unix)]
 fn check(code: libc::c_int) -> io::Result<()> {
     if code == 0 { Ok(()) } else { Err(io::Error::from_raw_os_error(code)) }
 }
 
 /// 初始化过的 `posix_spawn_file_actions_t`，丢掉时销毁。
+#[cfg(unix)]
 struct FileActions(libc::posix_spawn_file_actions_t);
 
+#[cfg(unix)]
 impl FileActions {
     fn new() -> io::Result<Self> {
         // SAFETY: 不论是指针（macOS）还是结构体（Linux），全零都是合法的待初始化值。
@@ -255,6 +292,7 @@ impl FileActions {
     }
 }
 
+#[cfg(unix)]
 impl Drop for FileActions {
     fn drop(&mut self) {
         // SAFETY: 由 `new` 初始化，只销毁这一次。
@@ -263,8 +301,10 @@ impl Drop for FileActions {
 }
 
 /// 初始化过的 `posix_spawnattr_t`，丢掉时销毁。
+#[cfg(unix)]
 struct SpawnAttr(libc::posix_spawnattr_t);
 
+#[cfg(unix)]
 impl SpawnAttr {
     fn new() -> io::Result<Self> {
         // SAFETY: 同 `FileActions::new`。
@@ -283,6 +323,7 @@ impl SpawnAttr {
     }
 }
 
+#[cfg(unix)]
 impl Drop for SpawnAttr {
     fn drop(&mut self) {
         // SAFETY: 由 `new` 初始化，只销毁这一次。

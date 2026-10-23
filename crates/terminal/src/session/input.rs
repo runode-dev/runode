@@ -218,7 +218,8 @@ pub enum Paste {
     NeedsConfirmation,
 }
 
-#[cfg(test)]
+/// Option 当 Alt 只在 macOS 上的 libghostty-vt 里生效。
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
     use crate::testing::*;

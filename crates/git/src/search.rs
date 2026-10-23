@@ -1,9 +1,7 @@
 //! 在项目里找文件：按名字找时列出仓库里的文件（`list_files`），按内容找时调 `git grep`（`grep`）。
 
 use std::{
-    ffi::OsStr,
     io::{BufRead, BufReader, Read},
-    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
@@ -37,7 +35,7 @@ pub fn list_files(root: &Path) -> Option<Vec<PathBuf>> {
     let out = git(root, &["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"])?;
     // 嵌套仓库（自带 `.git` 的未跟踪目录）会以结尾带 `/` 的目录项列出来，不是文件，丢掉。
     let paths = out.split(|&b| b == 0).filter(|path| !path.is_empty() && !path.ends_with(b"/"));
-    Some(paths.map(|path| PathBuf::from(OsStr::from_bytes(path))).collect())
+    Some(paths.map(|path| PathBuf::from(&crate::os_str(path))).collect())
 }
 
 /// 按内容找什么、在哪些文件里找。
@@ -109,7 +107,7 @@ pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -
             };
             let text = String::from_utf8_lossy(text);
             matches.push(GrepMatch {
-                path: OsStr::from_bytes(path).into(),
+                path: PathBuf::from(&crate::os_str(path)),
                 line: number,
                 text: text.trim_end_matches('\r').to_owned(),
             });

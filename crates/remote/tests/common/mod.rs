@@ -6,7 +6,6 @@
 use std::{
     io::{self, Write as _},
     net::{SocketAddr, TcpStream},
-    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{Arc, Mutex, mpsc},
     time::Duration,
@@ -33,6 +32,11 @@ use rustls::{
     pki_types::{CertificateDer, ServerName, UnixTime},
     version::TLS13,
 };
+
+#[cfg(unix)]
+pub use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+pub use uds_windows::UnixStream;
 
 /// 读写最多等这么久，监听那边出了问题时测试失败而不是卡住。
 pub const PATIENCE: Duration = Duration::from_secs(5);

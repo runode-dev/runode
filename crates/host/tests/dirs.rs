@@ -3,11 +3,9 @@
 
 mod common;
 
-use std::{
-    fs,
-    os::unix::{ffi::OsStrExt as _, fs::PermissionsExt as _},
-    path::PathBuf,
-};
+#[cfg(unix)]
+use std::os::unix::{ffi::OsStrExt as _, fs::PermissionsExt as _};
+use std::{fs, path::PathBuf};
 
 use common::{Peer, listen, temp_dir};
 use runode_host::{ClientMsg, HostMsg};
@@ -20,6 +18,7 @@ fn list(peer: &mut Peer, req: u32, path: Option<PathBuf>) -> HostMsg {
 
 /// 文件、指向文件的和指向不在了的东西的符号链接都不列；指向目录的符号链接和隐藏目录列出来。给的路径
 /// 不规范时回规范化后的那个。
+#[cfg(unix)]
 #[test]
 fn only_subdirectories_are_listed_in_name_order() {
     let dir = temp_dir("dirs");
@@ -82,6 +81,7 @@ fn long_listings_are_truncated() {
 }
 
 /// 相对路径、不存在的、不是目录的、没权限读的：回带着请求编号的 `Error`，连接照旧。
+#[cfg(unix)]
 #[test]
 fn unlistable_paths_are_errors() {
     let dir = temp_dir("dirserr");

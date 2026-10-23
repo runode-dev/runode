@@ -4,14 +4,18 @@
 
 mod common;
 
+#[cfg(unix)]
+use std::path::Path;
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
 
-use common::{BUILD, Peer, SIZE, WAIT, contains, host, listen, script, temp_dir};
+use common::{BUILD, CAT, Peer, SIZE, WAIT, contains, host, listen, temp_dir};
+#[cfg(unix)]
+use common::script;
 use runode_host::{ClientMsg, Host, HostMsg, Placement, SessionId, Stopped};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, FrameKind, GoodbyeReason, PROTOCOL_VERSION, PaneLayout, PaneRect, TabLayout,
@@ -42,12 +46,13 @@ fn a_different_protocol_is_refused() {
 }
 
 /// 输入帧写给会话里的程序，输出帧原样回来；读屏幕和列会话看得到同一个会话。
+#[cfg(unix)]
 #[test]
 fn input_and_output_flow_over_the_socket() {
     let dir = temp_dir("io");
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    let id = peer.spawn("/bin/cat");
+    let id = peer.spawn(CAT);
     let (channel, _) = peer.attach(id, AttachMode::VtReplay);
     peer.input(channel, b"hello\r");
     peer.wait_for_output(channel, b"hello");
@@ -70,7 +75,7 @@ fn a_late_client_gets_the_current_screen() {
     let dir = temp_dir("late");
     let (_host, socket) = listen(&dir);
     let mut first = Peer::hello(&socket, false);
-    let id = first.spawn("/bin/cat");
+    let id = first.spawn(CAT);
     let (channel, _) = first.attach(id, AttachMode::VtReplay);
     first.input(channel, b"earlier\r");
     first.wait_for_output(channel, b"earlier");
@@ -95,7 +100,7 @@ fn meta_only_clients_get_no_output() {
     let dir = temp_dir("meta");
     let (_host, socket) = listen(&dir);
     let mut typist = Peer::hello(&socket, false);
-    let id = typist.spawn("/bin/cat");
+    let id = typist.spawn(CAT);
     let mut watcher = Peer::hello(&socket, false);
     watcher.attach(id, AttachMode::MetaOnly);
     let (channel, _) = typist.attach(id, AttachMode::VtReplay);
@@ -131,6 +136,7 @@ fn sessions_can_be_spawned_over_the_socket() {
 
 /// `start` 为假时只开好伪终端：标题和目录是起始目录的，`Start` 后程序才跑起来，带着宿主设的环境
 /// 变量和会话自己的标识。
+#[cfg(unix)]
 #[test]
 fn sessions_spawned_unstarted_start_on_request() {
     let dir = temp_dir("start");
@@ -173,7 +179,7 @@ fn attaching_again_replaces_the_channel() {
     let dir = temp_dir("again");
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    let id = peer.spawn("/bin/cat");
+    let id = peer.spawn(CAT);
     let (old, _) = peer.attach(id, AttachMode::VtReplay);
     let (new, _) = peer.attach(id, AttachMode::VtReplay);
     assert_ne!(old, new);
@@ -190,6 +196,7 @@ fn attaching_again_replaces_the_channel() {
 
 /// 从看屏幕切到只看状态再切回来：旧通道的帧都在下一个 `Attached` 之前，新通道的帧（快照和输出）
 /// 都在它自己的 `Attached` 之后，前端按 `Attached` 切换不会混进别的通道的东西。
+#[cfg(unix)]
 #[test]
 fn switching_attach_modes_keeps_channels_apart() {
     let dir = temp_dir("switch");
@@ -236,7 +243,7 @@ fn shutting_down_inside_the_app_only_ends_sessions() {
     let dir = temp_dir("refuse");
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    let id = peer.spawn("/bin/cat");
+    let id = peer.spawn(CAT);
     peer.attach(id, AttachMode::MetaOnly);
     for message in [ClientMsg::Shutdown { kill_sessions: false }, ClientMsg::Handoff { min_format: 1, max_format: 1 }] {
         peer.send(&message);
@@ -254,7 +261,7 @@ fn socket_clients_can_change_the_theme() {
     let dir = temp_dir("theme");
     let (_host, socket) = listen(&dir);
     let mut desktop = Peer::desktop(&socket);
-    let id = desktop.spawn("/bin/cat");
+    let id = desktop.spawn(CAT);
     desktop.attach(id, AttachMode::Snapshot);
     let mut peer = Peer::hello(&socket, false);
     peer.attach(id, AttachMode::VtReplay);
@@ -270,6 +277,7 @@ fn socket_clients_can_change_the_theme() {
 
 /// shell 集成的报告带着口令，转给连接上的前端（经 socket 的、经一对 socket 的桌面）时抹掉内容，
 /// 报告被切在两块输出之间也一样。之后连上来的前端拿到的屏幕（VT 重放）里本来就没有这些报告。
+#[cfg(unix)]
 #[test]
 fn shell_reports_do_not_leave_the_host() {
     const TOKEN: &str = "0123456789abcdef0123456789abcdef";
@@ -304,6 +312,7 @@ fn shell_reports_do_not_leave_the_host() {
 
 /// 报告写到一半时连上来要快照：宿主那份 VT 正停在报告里，没写完的报告连着口令在它的续接里。
 /// 前端收到的快照和之后的输出里都没有口令；解出快照接着喂输出，屏幕和宿主读到的一样。
+#[cfg(unix)]
 #[test]
 fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
     use runode_terminal::session::Session;
@@ -349,6 +358,7 @@ fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
 
 /// 会话被结束时，还排在积压的输出后面没连上的前端也有回话：`Attached`，接着 `Exited`，不会
 /// 干等到超时。
+#[cfg(unix)]
 #[test]
 fn clients_still_attaching_when_a_session_is_killed_get_an_answer() {
     let dir = temp_dir("killq");
@@ -381,7 +391,7 @@ fn killing_a_session_tells_its_clients() {
     let dir = temp_dir("kill");
     let (_host, socket) = listen(&dir);
     let mut killer = Peer::hello(&socket, false);
-    let id = killer.spawn("/bin/cat");
+    let id = killer.spawn(CAT);
     let mut watcher = Peer::hello(&socket, false);
     watcher.attach(id, AttachMode::MetaOnly);
     killer.send(&ClientMsg::Kill { id });
@@ -389,12 +399,13 @@ fn killing_a_session_tells_its_clients() {
 }
 
 /// shell 退出以后才连上来的前端，在 `Attached` 之后马上收到 `Exited`。
+#[cfg(unix)]
 #[test]
 fn a_late_client_learns_the_shell_has_exited() {
     let dir = temp_dir("dead");
     let (_host, socket) = listen(&dir);
     let mut first = Peer::hello(&socket, false);
-    let id = first.spawn("/bin/cat");
+    let id = first.spawn(CAT);
     let (channel, _) = first.attach(id, AttachMode::MetaOnly);
     first.input(channel, b"\x04");
     assert!(matches!(first.reply(), HostMsg::Exited { .. }));
@@ -598,6 +609,7 @@ fn without_a_desktop_the_host_keeps_the_workspaces() {
     );
 }
 
+#[cfg(unix)]
 /// 一个界面报了布局 `windows` 后断开，等宿主看到它断开了（`cli` 问布局时不再转给界面），返回宿主回的布局。
 fn report_and_leave(socket: &Path, cli: &mut Peer, windows: Vec<WindowLayout>) -> Vec<WindowLayout> {
     let mut desktop = Peer::desktop(socket);
@@ -618,6 +630,7 @@ fn report_and_leave(socket: &Path, cli: &mut Peer, windows: Vec<WindowLayout>) -
 
 /// 界面记的目录经过软链接、没规范化：手机对同一个目录发 `OpenWorkspace` 时，不管写成布局里的软链接
 /// 还是真实路径都认得出这个工作区，不另建一个。
+#[cfg(unix)]
 #[test]
 fn a_workspace_is_found_by_the_dir_the_desktop_wrote() {
     let dir = temp_dir("written");
@@ -644,11 +657,12 @@ fn a_workspace_is_found_by_the_dir_the_desktop_wrote() {
 
 /// 界面报来的布局宿主记着：界面断开后照它回布局、在里面开终端；界面再连上时问 `Layout`，宿主回自己
 /// 手里的，不转给界面。
+#[cfg(unix)]
 #[test]
 fn the_desktops_layout_outlives_the_desktop() {
     let (_host, socket) = listen(&temp_dir("held"));
     let mut cli = Peer::hello(&socket, false);
-    let id = cli.spawn("/bin/cat");
+    let id = cli.spawn(CAT);
     assert_eq!(report_and_leave(&socket, &mut cli, layout(id)), layout(id));
     cli.send(&ClientMsg::Open {
         req: 2,
@@ -677,7 +691,7 @@ fn only_desktops_claim_sessions() {
     let dir = temp_dir("claim");
     let (_host, socket) = listen(&dir);
     let mut cli = Peer::hello(&socket, false);
-    let id = cli.spawn("/bin/cat");
+    let id = cli.spawn(CAT);
     let claimed = |cli: &mut Peer| cli.sessions().iter().find(|info| info.id == id).map(|info| info.claimed);
     cli.attach(id, AttachMode::VtReplay);
     assert_eq!(claimed(&mut cli), Some(false));
@@ -694,6 +708,7 @@ fn only_desktops_claim_sessions() {
 
 /// 程序响铃时，含 BEL 的那块输出之后紧跟一条 `Bell`；只看状态的前端也收得到。OSC 结尾的 BEL
 /// 不算响铃。
+#[cfg(unix)]
 #[test]
 fn bells_follow_the_output_that_rang() {
     let dir = temp_dir("bell");
@@ -724,6 +739,7 @@ fn bells_follow_the_output_that_rang() {
     viewer.send(&ClientMsg::Kill { id });
 }
 
+#[cfg(unix)]
 /// 有没有带着 `marker` 的进程在跑。
 fn running(marker: &str) -> bool {
     std::process::Command::new("pgrep").args(["-f", marker]).output().is_ok_and(|out| out.status.success())
@@ -731,6 +747,7 @@ fn running(marker: &str) -> bool {
 
 /// 单独一个进程跑时收到 `Shutdown`：结束所有会话，每条连接收到 `Goodbye { Shutdown }` 后断开，
 /// `run_until_idle` 返回，socket 删掉、锁放开，下一个宿主拿得到。
+#[cfg(unix)]
 #[test]
 fn shutdown_ends_a_standalone_host() {
     let dir = temp_dir("shutdown");
@@ -769,6 +786,7 @@ fn shutdown_ends_a_standalone_host() {
 
 /// 单独跑的宿主收到 `Shutdown` 后，等会话线程杀掉 shell 才从 `run_until_idle` 返回：shell 是会话线程丢掉
 /// PTY 时杀的，不等的话进程先退出，忽略 SIGHUP 的 shell 只收到内核那一声 SIGHUP，活了下来。
+#[cfg(unix)]
 #[test]
 fn shutdown_waits_for_shells_that_ignore_sighup() {
     let dir = temp_dir("shutdown-hup");
@@ -849,6 +867,7 @@ fn a_shutdown_waits_for_its_goodbye_to_be_written() {
 
 /// 没有会话也没有连接、持续给定的时长后 `run_until_idle` 返回：有连接、有会话时都不算空闲。
 /// 返回时 socket 删掉、锁放开。
+#[cfg(unix)]
 #[test]
 fn an_idle_standalone_host_stops() {
     const IDLE: Duration = Duration::from_millis(300);
@@ -863,7 +882,7 @@ fn an_idle_standalone_host_stops() {
     // 连着一个前端。
     assert!(stopped.recv_timeout(IDLE * 3).is_err());
     // 前端走了，留下一个会话。
-    let id = peer.spawn("/bin/cat");
+    let id = peer.spawn(CAT);
     drop(peer);
     assert!(stopped.recv_timeout(IDLE * 3).is_err());
     let mut peer = Peer::hello(&socket, false);
@@ -958,6 +977,7 @@ fn ui_errors_without_req_get_the_request_s() {
 
 /// `same_user`：同一个进程两端的 socket 是同一个用户；拿不到对端凭据（描述符根本不是 socket）时
 /// 当成别人，不放行。换个 uid 连上来要 root，测不了。
+#[cfg(unix)]
 #[test]
 fn same_user_needs_the_peer_credentials() {
     let (ours, _theirs) = std::os::unix::net::UnixStream::pair().unwrap();

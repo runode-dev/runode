@@ -2,6 +2,11 @@
 //! 带子命令启动时是命令行（`runode list` 等），不开窗口，见 `runode_cli`；`runode --host` 是单独
 //! 一个进程跑的终端宿主，`runode --host --take-over` 是升级时接手旧宿主会话的新宿主，见
 //! `host_process`；`runode --screen` 是远程桌面的采集进程，见 `screen_process`。
+//!
+//! Windows 上这个程序是界面程序，打开时不带控制台窗口；在终端里跑命令行用同一个包里的控制台程序
+//! `rn`。
+
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod about;
 mod assets;
@@ -19,6 +24,7 @@ mod menus;
 mod prespawn;
 mod preview_panel;
 mod process_env;
+mod subprocess;
 mod remote_access;
 #[cfg(target_os = "macos")]
 mod screen_process;
@@ -53,6 +59,7 @@ fn main() {
     if args == ["--host"] {
         std::process::exit(host_process::run());
     }
+    #[cfg(unix)]
     if args == ["--host", "--take-over"] {
         std::process::exit(host_process::take_over());
     }
@@ -61,6 +68,12 @@ fn main() {
         std::process::exit(screen_process::run());
     }
     if runode_cli::wants_cli(&args) {
+        // 界面程序没有控制台：接上终端的，输出才看得见（shell 不等它跑完，正经用 `rn`）。
+        #[cfg(windows)]
+        // SAFETY: 只是接上父进程的控制台，没有指针参数。
+        unsafe {
+            windows_sys::Win32::System::Console::AttachConsole(windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS)
+        };
         let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
         let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));
         let code = runode_cli::run(&args, &env, &mut std::io::stdout().lock(), &mut std::io::stderr().lock());
@@ -75,6 +88,7 @@ fn main() {
         .init();
     startup::mark_main();
     // 每个终端占两个描述符，从 Finder 启动时软上限只有 256。
+    #[cfg(unix)]
     if let Err(err) = runode_terminal::pty::raise_fd_limit() {
         tracing::warn!("failed to raise the open file limit: {err}");
     }

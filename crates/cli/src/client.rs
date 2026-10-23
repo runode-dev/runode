@@ -6,17 +6,21 @@
 use std::{
     cell::{Cell, RefCell},
     collections::{HashSet, VecDeque},
-    os::unix::net::UnixStream,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
+
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use runode_protocol::{
     BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId,
     WindowLayout, read_frame, write_frame,
 };
+#[cfg(windows)]
+use uds_windows::UnixStream;
 
 use crate::Env;
 

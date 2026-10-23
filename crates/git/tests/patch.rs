@@ -145,6 +145,7 @@ fn refuses_hunks_cut_off_by_the_line_limit() {
 }
 
 /// 文件既改了权限又有两块改动：按块暂存、丢弃只动这一块的内容，不带上权限的改动。
+#[cfg(unix)]
 #[test]
 fn leaves_the_mode_change_alone() {
     use std::os::unix::fs::PermissionsExt;

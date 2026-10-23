@@ -1,5 +1,7 @@
 //! 经 socket 请宿主在会话所在的仓库里读写 git（`ClientMsg::Git`）。
 
+#![cfg(unix)]
+
 mod common;
 
 use std::{path::Path, process::Command};

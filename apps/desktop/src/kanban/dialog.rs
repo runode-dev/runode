@@ -201,13 +201,7 @@ pub(crate) struct Local {
 
 /// `at`（Unix 秒）的本地时间。
 pub(crate) fn local(at: u64) -> Option<Local> {
-    let at = libc::time_t::try_from(at).ok()?;
-    // SAFETY: `tm` 是纯数据，全零是合法的值；`localtime_r` 只写它，两个指针都指向这里的局部变量。
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: 同上。
-    if unsafe { libc::localtime_r(&raw const at, &raw mut tm) }.is_null() {
-        return None;
-    }
+    let tm = runode_cli::local_tm(libc::time_t::try_from(at).ok()?)?;
     Some(Local {
         year: tm.tm_year + 1900,
         month: u32::try_from(tm.tm_mon + 1).ok()?,
@@ -219,7 +213,7 @@ pub(crate) fn local(at: u64) -> Option<Local> {
 
 /// 本地时间的这一刻（Unix 秒）；日子不存在（2 月 30 日）时为空。
 fn from_local(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> Option<u64> {
-    // SAFETY: 同 `local`。
+    // SAFETY: `tm` 是纯数据，全零是合法的值。
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     tm.tm_year = year - 1900;
     tm.tm_mon = i32::try_from(month).ok()? - 1;
@@ -227,8 +221,7 @@ fn from_local(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> Option
     tm.tm_hour = i32::try_from(hour).ok()?;
     tm.tm_min = i32::try_from(minute).ok()?;
     tm.tm_isdst = -1;
-    // SAFETY: 指针指向局部变量，`mktime` 规范化它。
-    let at = unsafe { libc::mktime(&raw mut tm) };
+    let at = runode_cli::mktime(&mut tm);
     // 规范化挪了日子（2 月 30 日成了 3 月 2 日）就是填错了；春天跳过的钟点只挪时，照收。
     (tm.tm_mday == i32::try_from(day).ok()? && tm.tm_mon == i32::try_from(month).ok()? - 1)
         .then(|| u64::try_from(at).ok())

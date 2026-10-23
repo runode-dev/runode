@@ -301,6 +301,7 @@ mod tests {
         assert_eq!(procs.forest(&HashSet::from([10, 11, 20])), Usage { cpu: 6.0, memory: 118 * 1024 });
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_command_that_hangs_is_killed_and_gives_nothing() {
         let started = Instant::now();

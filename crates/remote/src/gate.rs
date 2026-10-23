@@ -5,7 +5,6 @@
 use std::{
     io::{self, Read, Write},
     net::{IpAddr, Shutdown, TcpStream},
-    os::fd::AsRawFd as _,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
@@ -123,6 +122,12 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     let mut push = PushRequests { dirs: &shared.dirs, device: device_id };
     bridge(&mut conn, tcp, &host, cut, &mut push);
     let _ = host.shutdown(Shutdown::Both);
+    // Windows 上关了读的一边（`serve` 收尾时）以后对面再发来什么，连接马上被重置，已经交给系统、手机
+    // 还没读走的输出跟着丢掉：先只关写的一边，等手机读完、自己关了再收尾。
+    #[cfg(windows)]
+    if !cut.load(Ordering::Relaxed) && tcp.set_nonblocking(false).is_ok() {
+        linger(tcp);
+    }
     tracing::info!("remote device {device_id} disconnected");
     Ok(())
 }
@@ -254,52 +259,69 @@ fn read_control(tls: &mut StreamOwned<ServerConnection, Deadline>) -> io::Result
 }
 
 /// TCP keepalive 开始探测前空闲多久。
-const KEEPALIVE_IDLE_SECS: libc::c_int = 20;
+const KEEPALIVE_IDLE: Duration = Duration::from_secs(20);
 /// 两次探测之间隔多久。
-const KEEPALIVE_INTERVAL_SECS: libc::c_int = 10;
-/// 连着这么多次探测没回应就断开：空闲的连接在 `KEEPALIVE_IDLE_SECS` 加这么多个间隔内发现对面没了。
-const KEEPALIVE_PROBES: libc::c_int = 4;
-const _: () = assert!(KEEPALIVE_IDLE_SECS + KEEPALIVE_INTERVAL_SECS * KEEPALIVE_PROBES <= 60);
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
+/// 连着这么多次探测没回应就断开：空闲的连接在 `KEEPALIVE_IDLE` 加这么多个间隔内发现对面没了。
+const KEEPALIVE_PROBES: u32 = 4;
+const _: () = assert!(KEEPALIVE_IDLE.as_secs() + KEEPALIVE_INTERVAL.as_secs() * KEEPALIVE_PROBES as u64 <= 60);
 /// macOS 的 `TCP_RXT_CONNDROPTIME`（`netinet/tcp.h`，`libc` 里没有）：发出去的数据一直没有回应、
 /// 重传这么久（秒）后断开。keepalive 只管空闲的连接，宿主正往手机发输出时对面没了靠这个发现。
 #[cfg(target_os = "macos")]
-const TCP_RXT_CONNDROPTIME: libc::c_int = 0x80;
+const TCP_RXT_CONNDROPTIME: i32 = 0x80;
 /// 有数据没送到时最多重传多久就断开，和 keepalive 发现空闲连接断了的时间相当。macOS 用
-/// `TCP_RXT_CONNDROPTIME`（秒），Linux 用 `TCP_USER_TIMEOUT`（毫秒）：Linux 的 keepalive 同样不管
-/// 有数据没送到的连接，不设它要重传十几分钟才断。
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
-const RETRANSMIT_DROP_SECS: libc::c_int = 60;
+/// `TCP_RXT_CONNDROPTIME`（秒），Linux 用 `TCP_USER_TIMEOUT`，Windows 用 `TCP_MAXRT`（秒）：Linux 的
+/// keepalive 同样不管有数据没送到的连接，不设它要重传十几分钟才断。
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android", windows))]
+const RETRANSMIT_DROP: Duration = Duration::from_secs(60);
 
 /// 让手机静默消失（离开 Wi-Fi、休眠、切网）的连接及时断开：没有这个，半开的连接永远
 /// 不会读到结尾，桥接的线程、描述符和宿主里的那条连接都不会放开。不另设应用层的空闲超时：协议
 /// 里没有心跳，手机静静看着一个没输出的终端也是正常的连接；对面的系统还在时会回 keepalive 的探测，
 /// 不在了才断。
 pub(crate) fn keep_alive(tcp: &TcpStream) -> io::Result<()> {
-    let set = |level: libc::c_int, name: libc::c_int, value: libc::c_int| {
-        // SAFETY: 描述符来自 `tcp`；值指向本地变量，长度是它的大小。
-        let result = unsafe {
-            libc::setsockopt(
-                tcp.as_raw_fd(),
-                level,
-                name,
-                (&raw const value).cast(),
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            )
-        };
-        if result == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
-    };
-    set(libc::SOL_SOCKET, libc::SO_KEEPALIVE, 1)?;
+    let socket = socket2::SockRef::from(tcp);
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(KEEPALIVE_IDLE)
+        .with_interval(KEEPALIVE_INTERVAL)
+        .with_retries(KEEPALIVE_PROBES);
+    socket.set_tcp_keepalive(&keepalive)?;
     #[cfg(target_os = "macos")]
-    set(libc::IPPROTO_TCP, libc::TCP_KEEPALIVE, KEEPALIVE_IDLE_SECS)?;
-    #[cfg(not(target_os = "macos"))]
-    set(libc::IPPROTO_TCP, libc::TCP_KEEPIDLE, KEEPALIVE_IDLE_SECS)?;
-    set(libc::IPPROTO_TCP, libc::TCP_KEEPINTVL, KEEPALIVE_INTERVAL_SECS)?;
-    set(libc::IPPROTO_TCP, libc::TCP_KEEPCNT, KEEPALIVE_PROBES)?;
-    #[cfg(target_os = "macos")]
-    set(libc::IPPROTO_TCP, TCP_RXT_CONNDROPTIME, RETRANSMIT_DROP_SECS)?;
+    set_tcp_option(tcp, TCP_RXT_CONNDROPTIME, RETRANSMIT_DROP.as_secs() as i32)?;
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    set(libc::IPPROTO_TCP, libc::TCP_USER_TIMEOUT, RETRANSMIT_DROP_SECS * 1000)?;
+    socket.set_tcp_user_timeout(Some(RETRANSMIT_DROP))?;
+    #[cfg(windows)]
+    set_tcp_option(tcp, windows_sys::Win32::Networking::WinSock::TCP_MAXRT, RETRANSMIT_DROP.as_secs() as i32)?;
     Ok(())
+}
+
+/// 设一个 `IPPROTO_TCP` 层、值是整数的选项（socket2 没有的）。
+#[cfg(target_os = "macos")]
+fn set_tcp_option(tcp: &TcpStream, name: i32, value: i32) -> io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+    // SAFETY: 描述符来自 `tcp`；值指向本地变量，长度是它的大小。
+    let result = unsafe {
+        libc::setsockopt(
+            tcp.as_raw_fd(),
+            libc::IPPROTO_TCP,
+            name,
+            (&raw const value).cast(),
+            size_of::<i32>() as libc::socklen_t,
+        )
+    };
+    if result == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+}
+
+/// 设一个 `IPPROTO_TCP` 层、值是整数的选项（socket2 没有的）。
+#[cfg(windows)]
+fn set_tcp_option(tcp: &TcpStream, name: i32, value: i32) -> io::Result<()> {
+    use std::os::windows::io::AsRawSocket as _;
+    use windows_sys::Win32::Networking::WinSock::{IPPROTO_TCP, WSAGetLastError, setsockopt};
+    // SAFETY: socket 来自 `tcp`；值指向本地变量，长度是它的大小。
+    let result =
+        unsafe { setsockopt(tcp.as_raw_socket() as usize, IPPROTO_TCP, name, (&raw const value).cast(), 4) };
+    // SAFETY: 只读本线程上一次 socket 调用的错误码。
+    if result == 0 { Ok(()) } else { Err(io::Error::from_raw_os_error(unsafe { WSAGetLastError() })) }
 }
 
 /// 关掉写的一边，等对面读完回话后关连接（读到结尾），最多等 `LINGER`。
@@ -360,8 +382,10 @@ impl Write for Deadline {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn connections_detect_a_vanished_phone_within_a_minute() {
+        use std::os::fd::AsRawFd as _;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let tcp = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         keep_alive(&tcp).unwrap();
@@ -374,16 +398,39 @@ mod tests {
             assert_eq!(result, 0, "{}", io::Error::last_os_error());
             value
         };
+        let secs = |duration: Duration| duration.as_secs() as libc::c_int;
         assert_ne!(get(libc::SOL_SOCKET, libc::SO_KEEPALIVE), 0);
-        assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_KEEPINTVL), KEEPALIVE_INTERVAL_SECS);
-        assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_KEEPCNT), KEEPALIVE_PROBES);
+        assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_KEEPINTVL), secs(KEEPALIVE_INTERVAL));
+        assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_KEEPCNT), KEEPALIVE_PROBES as libc::c_int);
         #[cfg(target_os = "macos")]
         {
-            assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_KEEPALIVE), KEEPALIVE_IDLE_SECS);
-            assert_eq!(get(libc::IPPROTO_TCP, TCP_RXT_CONNDROPTIME), RETRANSMIT_DROP_SECS);
+            assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_KEEPALIVE), secs(KEEPALIVE_IDLE));
+            assert_eq!(get(libc::IPPROTO_TCP, TCP_RXT_CONNDROPTIME), secs(RETRANSMIT_DROP));
         }
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_USER_TIMEOUT), RETRANSMIT_DROP_SECS * 1000);
+        assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_USER_TIMEOUT), secs(RETRANSMIT_DROP) * 1000);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn connections_detect_a_vanished_phone_within_a_minute() {
+        use std::os::windows::io::AsRawSocket as _;
+        use windows_sys::Win32::Networking::WinSock::{IPPROTO_TCP, TCP_KEEPCNT, TCP_MAXRT, getsockopt};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let tcp = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        keep_alive(&tcp).unwrap();
+        let get = |name: i32| {
+            let mut value = 0i32;
+            let mut len = 4;
+            // SAFETY: socket 来自 `tcp`；输出参数指向本地变量，长度如实给出。
+            let result = unsafe {
+                getsockopt(tcp.as_raw_socket() as usize, IPPROTO_TCP, name, (&raw mut value).cast(), &raw mut len)
+            };
+            assert_eq!(result, 0);
+            value
+        };
+        assert_eq!(get(TCP_KEEPCNT), KEEPALIVE_PROBES as i32);
+        assert_eq!(get(TCP_MAXRT), RETRANSMIT_DROP.as_secs() as i32);
     }
 
     #[test]

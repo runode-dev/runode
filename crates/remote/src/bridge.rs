@@ -19,13 +19,14 @@ pub(crate) mod push;
 use std::{
     io::{self, Read as _, Write as _},
     net::{Shutdown, TcpStream},
-    os::{fd::AsRawFd as _, unix::net::UnixStream},
     sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
 };
 
 use rustls::ServerConnection;
 
 use self::frames::{FromPhone, LocalRequests, ToPhone};
+use crate::{UnixStream, poll};
 
 /// 手机发来、还没写给宿主的明文最多攒这么多。
 const TO_HOST_LIMIT: usize = 1 << 20;
@@ -37,7 +38,7 @@ const TO_PHONE_LIMIT: usize = 1 << 20;
 /// 一次从 socket 读这么多。
 const CHUNK: usize = 64 << 10;
 /// `poll` 最多等这么久就回来看一眼 `cut`，见 `bridge`。
-const POLL_TICK_MS: libc::c_int = 1000;
+const POLL_TICK: Duration = Duration::from_secs(1);
 
 /// 搬到两边都说完，或者 `cut` 被置上（撤销了设备、关了远程访问；置上的一方同时会 `shutdown` 手机的
 /// 连接，这边马上醒）。手机发来的请求里由这边办的交给 `local`。返回时两个连接都还开着，由调用方关。
@@ -229,27 +230,23 @@ impl Bridge {
         let read_host = !self.host_done && self.from_host.is_empty();
         let write_host = self.host_writable && !self.to_host.is_empty();
         let mut fds = [
-            libc::pollfd {
-                fd: phone.as_raw_fd(),
-                events: (if read_phone { libc::POLLIN } else { 0 })
-                    | (if conn.wants_write() { libc::POLLOUT } else { 0 }),
-                revents: 0,
-            },
+            poll::entry(
+                phone,
+                (if read_phone { poll::IN } else { 0 }) | (if conn.wants_write() { poll::OUT } else { 0 }),
+            ),
             // 宿主那头既不读也不写时不等它：它挂断了的话 `POLLHUP` 会让 `poll` 一直返回、空转。
-            libc::pollfd {
-                fd: if read_host || write_host { host.as_raw_fd() } else { -1 },
-                events: (if read_host { libc::POLLIN } else { 0 }) | (if write_host { libc::POLLOUT } else { 0 }),
-                revents: 0,
+            if read_host || write_host {
+                poll::entry(host, (if read_host { poll::IN } else { 0 }) | (if write_host { poll::OUT } else { 0 }))
+            } else {
+                poll::skipped()
             },
         ];
-        // SAFETY: `fds` 是本地数组，长度如实给出；两个描述符在这次调用期间都开着。
-        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, POLL_TICK_MS) } < 0 {
-            let err = io::Error::last_os_error();
+        if let Err(err) = poll::wait(&mut fds, POLL_TICK) {
             return if err.kind() == io::ErrorKind::Interrupted { Ok(true) } else { Err(err) };
         }
-        let gone = libc::POLLHUP | libc::POLLERR | libc::POLLNVAL;
+        let gone = poll::HUP | poll::ERR | poll::NVAL;
         let [phone_fd, host_fd] = fds;
-        if read_phone && phone_fd.revents & (libc::POLLIN | gone) != 0 {
+        if read_phone && phone_fd.revents & (poll::IN | gone) != 0 {
             match conn.read_tls(&mut &*phone) {
                 Ok(0) => return Ok(false),
                 Ok(_) => {
@@ -265,7 +262,7 @@ impl Bridge {
         } else if phone_fd.revents & gone != 0 {
             return Ok(false);
         }
-        if read_host && host_fd.revents & (libc::POLLIN | gone) != 0 {
+        if read_host && host_fd.revents & (poll::IN | gone) != 0 {
             match (&*host).read(&mut self.buf) {
                 Ok(0) => self.host_done = true,
                 Ok(n) => self.from_host.extend_from_slice(&self.buf[..n]),

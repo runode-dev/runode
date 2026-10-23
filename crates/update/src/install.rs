@@ -422,6 +422,7 @@ mod tests {
     }
 
     /// 包里的 .app 是指向装着的那份的符号链接时不收：不然核对的是装着的那份，对调后它被删掉。
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_app_in_the_update_is_rejected() {
         let scratch = Scratch::new("symlink");

@@ -3,23 +3,42 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// 给人看的主机名：macOS 上是「系统设置 › 通用 › 共享」里的电脑名（比如「Ethan 的 MacBook Pro」），
-/// 取不到时（以及别的系统上）用 `gethostname` 去掉 `.local`。
+/// 取不到时（以及别的系统上）用系统的主机名去掉 `.local`。
 pub fn host_name() -> String {
     #[cfg(target_os = "macos")]
     if let Some(name) = computer_name::get() {
         return name;
     }
+    let name = system_host_name();
+    let name = name.strip_suffix(".local").unwrap_or(&name).to_owned();
+    if name.is_empty() { "runode".into() } else { name }
+}
+
+/// `gethostname`；取不到时为空。
+#[cfg(unix)]
+fn system_host_name() -> String {
     let mut buf = [0u8; 256];
     // SAFETY: 缓冲是本地数组，长度如实给出；返回后按 NUL 截断。
     let ok = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } == 0;
-    let name = if ok {
-        let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-        String::from_utf8_lossy(&buf[..len]).into_owned()
-    } else {
-        String::new()
-    };
-    let name = name.strip_suffix(".local").unwrap_or(&name).to_owned();
-    if name.is_empty() { "runode".into() } else { name }
+    if !ok {
+        return String::new();
+    }
+    let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..len]).into_owned()
+}
+
+/// 「设置 › 系统 › 系统信息」里的设备名（DNS 主机名，大小写照用户起的）；取不到时为空。
+#[cfg(windows)]
+fn system_host_name() -> String {
+    use windows_sys::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};
+    let mut buf = [0u16; 256];
+    let mut len = buf.len() as u32;
+    // SAFETY: 缓冲是本地数组，长度如实给出；成功时 `len` 是写进去的字数，不含结尾的 NUL。
+    let ok = unsafe { GetComputerNameExW(ComputerNameDnsHostname, buf.as_mut_ptr(), &raw mut len) } != 0;
+    if !ok {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buf[..len as usize])
 }
 
 #[cfg(target_os = "macos")]
@@ -71,8 +90,22 @@ pub fn local_addresses() -> Vec<IpAddr> {
     local_interfaces().into_iter().map(|(_, addr)| addr).collect()
 }
 
-/// 和 `local_addresses` 一样的地址，各带着所在网卡的名字（`en0`、`utun3` 这样），给人挑用哪个网络。
+/// 和 `local_addresses` 一样的地址，各带着所在网卡的名字（`en0`、`utun3`，Windows 上是「WLAN」
+/// 这样的网络连接名），给人挑用哪个网络。
 pub fn local_interfaces() -> Vec<(String, IpAddr)> {
+    let mut addrs: Vec<(String, IpAddr)> = Vec::new();
+    for (name, addr) in up_interfaces() {
+        if reachable(addr) && !addrs.iter().any(|(_, seen)| *seen == addr) {
+            addrs.push((name, addr));
+        }
+    }
+    addrs.sort_by_key(|(_, addr)| addr.is_ipv6());
+    addrs
+}
+
+/// 开着的、不是回环的网卡上的地址，按网卡的顺序。
+#[cfg(unix)]
+fn up_interfaces() -> Vec<(String, IpAddr)> {
     let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
     // SAFETY: 输出参数指向本地变量；成功时返回的链表下面用完释放。
     if unsafe { libc::getifaddrs(&mut list) } != 0 {
@@ -104,15 +137,74 @@ pub fn local_interfaces() -> Vec<(String, IpAddr)> {
                 _ => continue,
             }
         };
-        if reachable(addr) && !addrs.iter().any(|(_, seen)| *seen == addr) {
-            // SAFETY: `ifa_name` 是 getifaddrs 给的以 NUL 结尾的网卡名，释放前一直有效。
-            let name = unsafe { std::ffi::CStr::from_ptr(entry.ifa_name) }.to_string_lossy().into_owned();
-            addrs.push((name, addr));
-        }
+        // SAFETY: `ifa_name` 是 getifaddrs 给的以 NUL 结尾的网卡名，释放前一直有效。
+        let name = unsafe { std::ffi::CStr::from_ptr(entry.ifa_name) }.to_string_lossy().into_owned();
+        addrs.push((name, addr));
     }
     // SAFETY: 释放上面 getifaddrs 给的链表，之后不再用。
     unsafe { libc::freeifaddrs(list) };
-    addrs.sort_by_key(|(_, addr)| addr.is_ipv6());
+    addrs
+}
+
+/// 开着的、不是回环的网卡上的地址，按网卡的顺序。
+#[cfg(windows)]
+fn up_interfaces() -> Vec<(String, IpAddr)> {
+    use windows_sys::Win32::{
+        Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR},
+        NetworkManagement::{
+            IpHelper::{
+                GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, GetAdaptersAddresses,
+                IF_TYPE_SOFTWARE_LOOPBACK, IP_ADAPTER_ADDRESSES_LH,
+            },
+            Ndis::IfOperStatusUp,
+        },
+        Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6},
+    };
+
+    let flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    let mut size: u32 = 16 << 10;
+    // 按 8 字节对齐分配：结构里有 64 位的字段。网卡在两次调用之间变多时再要一次。
+    let mut buf: Vec<u64>;
+    loop {
+        buf = vec![0; (size as usize).div_ceil(8)];
+        let first = buf.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+        // SAFETY: 缓冲有 `size` 字节，可写；不够时函数只改 `size`。
+        let result = unsafe { GetAdaptersAddresses(u32::from(AF_UNSPEC), flags, std::ptr::null(), first, &mut size) };
+        match result {
+            NO_ERROR => break,
+            ERROR_BUFFER_OVERFLOW => continue,
+            _ => {
+                tracing::warn!("cannot list the network addresses: {}", std::io::Error::from_raw_os_error(result as i32));
+                return Vec::new();
+            }
+        }
+    }
+    let mut addrs = Vec::new();
+    let mut adapter = buf.as_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+    // SAFETY: 链表、名字和地址都在 `buf` 里，函数按文档填好；`buf` 在这期间一直活着。
+    unsafe {
+        while let Some(entry) = adapter.as_ref() {
+            adapter = entry.Next;
+            if entry.OperStatus != IfOperStatusUp || entry.IfType == IF_TYPE_SOFTWARE_LOOPBACK {
+                continue;
+            }
+            let name_len = (0..).take_while(|&i| *entry.FriendlyName.add(i) != 0).count();
+            let name = String::from_utf16_lossy(std::slice::from_raw_parts(entry.FriendlyName, name_len));
+            let mut unicast = entry.FirstUnicastAddress;
+            while let Some(address) = unicast.as_ref() {
+                unicast = address.Next;
+                let sockaddr = address.Address.lpSockaddr;
+                let addr = match (*sockaddr).sa_family {
+                    AF_INET => IpAddr::V4(Ipv4Addr::from(u32::from_be(
+                        (*sockaddr.cast::<SOCKADDR_IN>()).sin_addr.S_un.S_addr,
+                    ))),
+                    AF_INET6 => IpAddr::V6(Ipv6Addr::from((*sockaddr.cast::<SOCKADDR_IN6>()).sin6_addr.u.Byte)),
+                    _ => continue,
+                };
+                addrs.push((name.clone(), addr));
+            }
+        }
+    }
     addrs
 }
 

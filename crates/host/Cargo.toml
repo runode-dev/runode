@@ -14,7 +14,7 @@ runode-terminal.workspace = true
 runode-protocol.workspace = true
 runode-types.workspace = true
 anyhow.workspace = true
-# 锁文件（flock）和认连上来的进程是谁（getpeereid）。
+# 认连上来的进程是谁（getpeereid）、拉起单独的宿主进程（posix_spawn）。
 libc.workspace = true
 tracing.workspace = true
 # 看板的库和定时，见 `todos`。
@@ -23,6 +23,18 @@ runode-todo.workspace = true
 runode-tasks.workspace = true
 # 接回任务会话时各家 agent 怎么接着上次的对话。
 runode-agent.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# Windows 10 起有的 AF_UNIX socket，前端连宿主用。
+uds_windows.workspace = true
+# 认连上来的进程是谁（对端进程号和它的用户 SID）、设 socket 的收发缓冲。
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_System_IO",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 # 测试里假的旧宿主照着别的版本写交接消息，只写必填的字段；收发 `HostMsg` 和 `ClientMsg` 共用一对函数。

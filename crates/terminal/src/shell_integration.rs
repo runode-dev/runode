@@ -92,8 +92,11 @@ pub fn prepare(
             cmd.arg(dir.join("elvish/runode.elv"));
             true
         }
+        // Windows 上的 shell（PowerShell、cmd）没有登录 shell 一说，有的不认 `-l`。
         None => {
-            cmd.arg("-l");
+            if cfg!(unix) {
+                cmd.arg("-l");
+            }
             false
         }
     };
@@ -116,12 +119,16 @@ pub fn prepare(
 /// 把 `token` 写进运行时目录（只有自己能进）里一个新建的、只有自己能读的文件，返回它的路径。
 /// 文件名另取随机数，免得被人抢先建好同名文件或者猜着去读。
 fn write_token_file(dirs: &runode_paths::Dirs, token: &str) -> io::Result<PathBuf> {
-    use std::{io::Write as _, os::unix::fs::OpenOptionsExt as _};
+    use std::io::Write as _;
     let name = report_token().ok_or_else(|| io::Error::other("no random file name"))?;
     let dir = dirs.create_runtime_dir()?;
     remove_stale_token_files(&dir);
     let path = dir.join(format!("report-token-{name}"));
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(&path)?;
     if let Err(err) = writeln!(file, "{token}") {
         let _ = std::fs::remove_file(&path);
         return Err(err);
@@ -203,14 +210,13 @@ pub(crate) fn features(settings: &TermSettings) -> String {
 
 /// 新的报告口令：128 位随机数，写成 32 个十六进制字符。读不到随机数时为 `None`。
 fn report_token() -> Option<String> {
-    use std::io::Read as _;
-    let mut bytes = [0u8; 16];
-    let read = std::fs::File::open("/dev/urandom").and_then(|mut random| random.read_exact(&mut bytes));
-    if let Err(err) = read {
-        tracing::warn!("shell reports disabled, no random token: {err}");
-        return None;
+    match runode_types::session::SessionId::random() {
+        Ok(random) => Some(random.to_string()),
+        Err(err) => {
+            tracing::warn!("shell reports disabled, no random token: {err}");
+            None
+        }
     }
-    Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// 把脚本写进 `dirs` 的集成目录，返回这个目录。每次起 shell 都写一遍，不记住写过：宿主跑着时用户
@@ -272,6 +278,7 @@ mod tests {
     }
 
     /// 口令不进环境变量（启动时的环境同一用户的程序都读得到），只交一个只有自己能读的文件。
+    #[cfg(unix)]
     #[test]
     fn the_token_is_handed_over_in_a_private_file_not_the_environment() {
         use std::os::unix::fs::PermissionsExt as _;

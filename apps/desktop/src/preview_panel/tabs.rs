@@ -475,7 +475,9 @@ mod tests {
         previews.tabs[2].pinned = false;
         let old = previews.moved(Path::new("dir"), Path::new("new"));
         assert_eq!(old.len(), 2);
-        assert_eq!(tabs(&previews), ["a", "new/b", ">new/c*"]);
+        // 新路径按本机的分隔符拼。
+        let (b, c) = (Path::new("new").join("b"), Path::new("new").join("c"));
+        assert_eq!(tabs(&previews), ["a".to_owned(), b.display().to_string(), format!(">{}*", c.display())]);
         // 改名的就是开着的文件：新路径不带结尾的 `/`。
         previews.moved(Path::new("a"), Path::new("z"));
         assert_eq!(previews.tabs[0].path.as_os_str(), "z");

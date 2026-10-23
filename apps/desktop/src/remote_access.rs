@@ -15,7 +15,6 @@ pub mod pairing;
 
 use std::{
     io,
-    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{Arc, Weak, mpsc},
     thread,
@@ -25,6 +24,8 @@ use std::{
 use runode_config::Config;
 use runode_host::Host;
 use runode_remote::{ApnsKey, Bind, Connect, Options, PushSettings, Service};
+
+use crate::host_client::UnixStream;
 
 /// 拉起采集进程后最多等它这么久开好监听。
 const SCREEN_START_TIMEOUT: Duration = Duration::from_secs(5);

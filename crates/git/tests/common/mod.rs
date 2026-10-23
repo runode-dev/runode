@@ -34,7 +34,9 @@ impl TestRepo {
     /// 从 `remote` 克隆一份。
     pub fn clone_of(remote: &TestRepo, name: &str) -> Self {
         let repo = Self::empty_dir(name);
-        let status = Command::new("git").args(["clone", "-q"]).arg(remote.path()).arg(repo.path()).output().unwrap();
+        // 检出时就不改换行，和 `configure` 写进去的一致。
+        let clone = ["-c", "core.autocrlf=false", "clone", "-q"];
+        let status = Command::new("git").args(clone).arg(remote.path()).arg(repo.path()).output().unwrap();
         assert!(status.status.success(), "git clone: {}", String::from_utf8_lossy(&status.stderr));
         repo.configure();
         repo
@@ -102,7 +104,9 @@ impl TestRepo {
         let inner = self.dir.join(path);
         std::fs::create_dir_all(&inner).unwrap();
         self.git(&["-C", path, "init", "-q", "-b", "main"]);
-        for (key, value) in [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")] {
+        for (key, value) in
+            [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false"), ("core.autocrlf", "false")]
+        {
             self.git(&["-C", path, "config", key, value]);
         }
         self.write(&format!("{path}/a.txt"), "one\n");
@@ -114,8 +118,11 @@ impl TestRepo {
     /// 把 `source` 作为子模块加到 `path` 并提交；本地路径的子模块要显式允许 file 协议。
     pub fn add_submodule(&self, source: &TestRepo, path: &str) {
         let source = source.path().to_string_lossy().into_owned();
-        self.git(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", &source, path]);
+        // `-c` 也传给 git 自己拉起的那个克隆子模块的 git：检出时不改换行。
+        let protocol = ["-c", "protocol.file.allow=always", "-c", "core.autocrlf=false"];
+        self.git(&[&protocol[..], &["submodule", "add", "-q", &source, path]].concat());
         self.git(&["commit", "-q", "-m", &format!("add {path}")]);
+        self.git(&["-C", path, "config", "core.autocrlf", "false"]);
         self.git(&["-C", path, "config", "user.name", "t"]);
         self.git(&["-C", path, "config", "user.email", "t@t"]);
         self.git(&["-C", path, "config", "commit.gpgsign", "false"]);

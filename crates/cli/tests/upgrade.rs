@@ -6,7 +6,6 @@ mod common;
 
 use std::{
     io::Write as _,
-    os::unix::net::UnixListener,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,

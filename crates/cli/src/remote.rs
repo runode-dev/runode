@@ -104,14 +104,20 @@ extern "C" fn note_signal(signal: libc::c_int) {
     CAUGHT.store(signal, Ordering::Relaxed);
 }
 
-/// `pair` 等手机期间接住 Ctrl-C、关掉终端和 `kill`：按默认处理进程当场死掉，`PairingTicket` 来不及
-/// 删口令文件，口令在过期前一直配得上。丢掉时换回原来的处理。
-struct Signals([(libc::c_int, libc::sighandler_t); 3]);
+/// `Signals` 接住的信号：Ctrl-C、关掉终端（Windows 上没有 SIGHUP）和 `kill`。
+#[cfg(unix)]
+const SIGNALS: [libc::c_int; 3] = [libc::SIGINT, libc::SIGHUP, libc::SIGTERM];
+#[cfg(windows)]
+const SIGNALS: [libc::c_int; 2] = [libc::SIGINT, libc::SIGTERM];
+
+/// `pair` 等手机期间接住 `SIGNALS`：按默认处理进程当场死掉，`PairingTicket` 来不及删口令文件，口令
+/// 在过期前一直配得上。丢掉时换回原来的处理。
+struct Signals([(libc::c_int, libc::sighandler_t); SIGNALS.len()]);
 
 impl Signals {
     fn catch() -> Self {
         CAUGHT.store(0, Ordering::Relaxed);
-        Self([libc::SIGINT, libc::SIGHUP, libc::SIGTERM].map(|signal| {
+        Self(SIGNALS.map(|signal| {
             let handler: extern "C" fn(libc::c_int) = note_signal;
             // SAFETY: `note_signal` 只写一个原子变量，在信号处理函数里可以调。
             let previous = unsafe { libc::signal(signal, handler as libc::sighandler_t) };

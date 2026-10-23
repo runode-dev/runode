@@ -378,6 +378,7 @@ build: other
 
     /// 请求的目录经过符号链接时，`make -C ..` 里的 `..` 由 make 从真实的目录算，到不了找到的
     /// Makefile 那里：改用它所在目录的绝对路径。
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_directory_gets_an_absolute_make_dir() {
         let root = std::env::temp_dir().join(format!("runode-tasks-{}", std::process::id()));
@@ -400,6 +401,7 @@ build: other
 
     /// 经过符号链接、Makefile 所在目录的绝对路径又拼不进命令行（这里带反斜杠）时不列：退回 `make -C ..`
     /// 跑的是另一个目录里的 Makefile。
+    #[cfg(unix)]
     #[test]
     fn an_unreachable_makefile_with_an_unquotable_path_is_not_listed() {
         let root = std::env::temp_dir().join(format!("runode-tasks-unquotable-{}", std::process::id()));

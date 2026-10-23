@@ -372,6 +372,7 @@ mod tests {
         assert_eq!(seen_after(&[], &config), watch_stamp(&config));
     }
 
+    #[cfg(unix)]
     #[test]
     fn watch_dirs_cover_symlinks_and_missing_dirs() {
         let root = std::env::temp_dir().join(format!("rdr-watch-dirs-{}", std::process::id()));
@@ -397,6 +398,7 @@ mod tests {
     }
 
     /// 编辑器写临时文件再改名换上、改符号链接指向的文件，都叫得醒。
+    #[cfg(unix)]
     #[test]
     fn file_watch_sees_atomic_saves_and_symlink_targets() {
         let root = std::env::temp_dir().join(format!("rdr-file-watch-{}", std::process::id()));

@@ -9,7 +9,7 @@
 //! 每台设备最近一次登录的来源地址（`SeenFrom`）也这样另外放，只留最近一个，不打印出去：监听重开时
 //! 据此认出连过的手机，见 `seen_from`。
 
-use std::{fs::OpenOptions, io, net::IpAddr, os::unix::fs::OpenOptionsExt as _, path::PathBuf};
+use std::{io, net::IpAddr, path::PathBuf};
 
 use runode_paths::Dirs;
 use runode_protocol::{
@@ -18,7 +18,7 @@ use runode_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::files::{no_home, read_json, write_json};
+use crate::files::{no_home, private_options, read_json, write_json};
 
 /// 设备表格式的版本，格式变了、旧版本读不懂时加一。
 const TABLE_VERSION: u32 = 1;
@@ -205,7 +205,7 @@ fn read(dirs: &Dirs) -> io::Result<Table> {
 fn update(dirs: &Dirs, change: impl FnOnce(&mut Table) -> bool) -> io::Result<bool> {
     dirs.create_remote_access_dir()?;
     let lock_path = dirs.remote_access_devices_lock_file().ok_or_else(no_home)?;
-    let lock = OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(&lock_path)?;
+    let lock = private_options().create(true).truncate(false).write(true).open(&lock_path)?;
     lock.lock()?;
     let mut table = read(dirs)?;
     let changed = change(&mut table);

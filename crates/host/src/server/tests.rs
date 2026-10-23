@@ -5,6 +5,8 @@ use super::*;
 
 const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
 const WAIT: Duration = Duration::from_secs(10);
+/// 测试里当 shell 用的程序：一直开着读输入，不起子进程。Windows 上没有 `cat`，用 cmd。
+const CAT: &str = if cfg!(windows) { "cmd.exe" } else { "/bin/cat" };
 
 fn send(stream: &mut UnixStream, message: &ClientMsg) {
     let frame = Frame::control(message).unwrap();
@@ -90,7 +92,7 @@ fn greet(host: &Host, client: ClientKind) -> (Client, mpsc::Receiver<Frame>) {
 
 /// 开一个线程卡在不返回的 `Subscribe::start` 里、答不了话的会话；丢掉返回的发送端时放开。
 fn stuck_session(host: &Host) -> (SessionId, mpsc::Sender<()>) {
-    let stuck = host.shared.spawn(options("/bin/cat")).unwrap();
+    let stuck = host.shared.spawn(options(CAT)).unwrap();
     let (release, released) = mpsc::channel::<()>();
     let (entered, stuck_now) = mpsc::channel();
     let start = Box::new(move |_: Screen| {
@@ -113,7 +115,7 @@ fn waiting_for_answers_does_not_hold_up_input() {
     let host = Host::new(BuildId("test".into()));
     let (stuck, release) = stuck_session(&host);
     let (mut stream, frames) = greet(&host, ClientKind::Cli);
-    let other = host.shared.spawn(options("/bin/cat")).unwrap();
+    let other = host.shared.spawn(options(CAT)).unwrap();
     send(&mut stream, &ClientMsg::Attach { id: other, size: None, mode: AttachMode::VtReplay });
     let channel = loop {
         if let HostMsg::Attached { channel, .. } = message(&frames) {
@@ -188,7 +190,7 @@ fn too_many_waiting_requests_are_refused() {
 fn stuck_git_requests_do_not_take_the_other_slots() {
     let host = Host::new(BuildId("test".into()));
     let (stuck, release) = stuck_session(&host);
-    let other = host.shared.spawn(options("/bin/cat")).unwrap();
+    let other = host.shared.spawn(options(CAT)).unwrap();
     let (mut stream, frames) = greet(&host, ClientKind::Cli);
     // 会话答不了它的目录，git 工作线程卡在第一件上，后面的排着，名额都占着。
     for req in 0..=MAX_WAITING as u32 {
@@ -212,7 +214,7 @@ fn stuck_git_requests_do_not_take_the_other_slots() {
 #[test]
 fn a_backed_up_connection_gets_no_more_snapshots_or_replies() {
     let host = Host::new(BuildId("test".into()));
-    let id = host.shared.spawn(options("/bin/cat")).unwrap();
+    let id = host.shared.spawn(options(CAT)).unwrap();
     let (mut stream, frames) = greet(&host, ClientKind::Cli);
     // 假装积压过了上限：写的线程写出去时只减它真写的那些，假的这份一直在。
     let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
@@ -252,7 +254,7 @@ fn a_backed_up_connection_gets_no_more_snapshots_or_replies() {
 fn mobile_connections_back_up_sooner() {
     for (client, backed_up) in [(ClientKind::Cli, false), (ClientKind::Mobile, true)] {
         let host = Host::new(BuildId("test".into()));
-        let id = host.shared.spawn(options("/bin/cat")).unwrap();
+        let id = host.shared.spawn(options(CAT)).unwrap();
         let (mut stream, frames) = greet(&host, client);
         let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
         out.queued.streaming.fetch_add(MOBILE_OUTBOX_LIMIT + 1, Ordering::Relaxed);
@@ -445,7 +447,7 @@ fn layout_changes_reach_connections_that_asked_for_the_layout() {
 #[test]
 fn a_panicking_session_tells_its_front_end() {
     let host = Host::new(BuildId("test".into()));
-    let id = host.shared.spawn(options("/bin/cat")).unwrap();
+    let id = host.shared.spawn(options(CAT)).unwrap();
     let (tx, rx) = mpsc::channel();
     let start = Box::new(move |_: Screen| {
         let sink: EventSink = Box::new(move |event| match event {
@@ -498,7 +500,7 @@ fn a_stopping_host_opens_no_more_sessions() {
             fallback_cwd: None,
             integration: IntegrationMode::Off,
             start: true,
-            shell: Some("/bin/cat".into()),
+            shell: Some(CAT.into()),
             settings: None,
             resume: None,
         },
@@ -523,23 +525,26 @@ fn a_stopping_host_opens_no_more_sessions() {
     // 判定空闲退出以后开好的会话也不登记。
     let host = Host::new(BuildId("test".into()));
     host.shared.peers().stop = Some(Stopped::Idle);
-    assert!(host.shared.spawn(options("/bin/cat")).is_err());
+    assert!(host.shared.spawn(options(CAT)).is_err());
     assert!(host.shared.registry().sessions.is_empty());
 }
 
 /// 要退出时正有会话在开（比如没有界面时另起的线程开终端）：`run_until_idle` 等它开好、被拒绝、杀掉 shell
 /// 才返回，不先走，留下进程退出后才起来的 shell。
+#[cfg(unix)]
 #[test]
 fn stopping_waits_for_a_session_being_opened() {
     stops_after_a_session_being_opened(Stopped::Shutdown, 43);
 }
 
 /// 交接给新宿主时也一样：交接开始前就在开的会话不在交出去的里面，开好后被拒绝，shell 还得这边杀掉。
+#[cfg(unix)]
 #[test]
 fn a_handoff_waits_for_a_session_being_opened() {
     stops_after_a_session_being_opened(Stopped::Handoff, 44);
 }
 
+#[cfg(unix)]
 /// 见 `stopping_waits_for_a_session_being_opened`：宿主因为 `reason` 退出。`marker` 让各个测试的 shell 认得出。
 fn stops_after_a_session_being_opened(reason: Stopped, marker: u32) {
     use std::os::unix::fs::PermissionsExt as _;

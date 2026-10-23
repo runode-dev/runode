@@ -44,12 +44,14 @@ const TAB_SIDE_SLOT: f32 = 20.;
 /// 比这窄的标签只留标题：快捷键提示收起，关闭按钮悬停时浮在标题左边。
 const TAB_COMPACT_WIDTH: f32 = 120.;
 
-/// 窗口的标题栏设置：透明，终端背景一直铺到窗口顶部，标签栏画在红绿灯或侧栏右边。
+/// 窗口的标题栏设置：macOS 上透明，终端背景一直铺到窗口顶部，标签栏画在红绿灯或侧栏右边；别的系统
+/// 上用系统自己的标题栏和边框，标签栏在它下面。
 pub fn titlebar_options() -> TitlebarOptions {
+    let macos = cfg!(target_os = "macos");
     TitlebarOptions {
         title: Some(DEFAULT_TITLE.into()),
-        appears_transparent: true,
-        traffic_light_position: Some(point(px(TRAFFIC_LIGHTS_ORIGIN.0), px(TRAFFIC_LIGHTS_ORIGIN.1))),
+        appears_transparent: macos,
+        traffic_light_position: macos.then(|| point(px(TRAFFIC_LIGHTS_ORIGIN.0), px(TRAFFIC_LIGHTS_ORIGIN.1))),
     }
 }
 

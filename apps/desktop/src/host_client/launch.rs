@@ -3,7 +3,6 @@
 
 use std::{
     io,
-    os::unix::net::UnixStream,
     path::Path,
     thread,
     time::{Duration, Instant},
@@ -13,7 +12,10 @@ use runode_protocol::{
     BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION, read_frame, write_frame,
 };
 
-use super::link::{ConnectError, Link};
+use super::{
+    UnixStream,
+    link::{ConnectError, Link},
+};
 
 /// 试连之间隔这么久。
 const RETRY_INTERVAL: Duration = Duration::from_millis(5);
@@ -105,6 +107,7 @@ fn probe_once(socket: &Path, build: &BuildId) -> io::Result<Probe> {
 
 /// 让 `socket` 上在跑的宿主结束所有会话后退出，等它断开，最多 `CONNECT_TIMEOUT`。宿主跑在另一个
 /// app 里时不碰它，返回错误。
+#[cfg(unix)]
 pub fn retire(socket: &Path, build: &BuildId) -> io::Result<()> {
     let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(build, ClientKind::Cli))?;
@@ -162,13 +165,13 @@ pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
     Ok(Ended::Ended)
 }
 
-/// 给 `socket` 上的宿主进程发 SIGTERM（连同它的会话一起结束），不管它说什么协议：pid 见
+/// 结束 `socket` 上的宿主进程（连同它的会话），不管它说什么协议：pid 见
 /// `host_pid`，只认同一个用户的进程，而且只认以 `--host` 启动的单独宿主进程（见
 /// `launched_as_host`）；别的（另一个 app 进程里的宿主）不发，返回 `Ended::NotAHost`。发了之后等到
 /// socket 连不上为止，最多 `CONNECT_TIMEOUT`。
 fn terminate(socket: &Path) -> io::Result<Ended> {
     let pid = host_pid(socket)?;
-    if pid <= 0 || pid.unsigned_abs() == std::process::id() {
+    if pid == 0 || pid == std::process::id() {
         return Err(io::Error::other(format!("refusing to end process {pid}")));
     }
     let args = process_args(pid)?;
@@ -176,11 +179,8 @@ fn terminate(socket: &Path) -> io::Result<Ended> {
         tracing::warn!("process {pid} on the host socket is not a standalone host, leaving it alone");
         return Ok(Ended::NotAHost);
     }
-    // SAFETY: 只发信号，参数都是值。
-    if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    tracing::info!("sent SIGTERM to the old host {pid}");
+    end_process(pid)?;
+    tracing::info!("ended the old host {pid}");
     // 它退出后监听的 socket 跟着关掉，连不上了。
     let deadline = Instant::now() + CONNECT_TIMEOUT;
     while UnixStream::connect(socket).is_ok() {
@@ -192,6 +192,28 @@ fn terminate(socket: &Path) -> io::Result<Ended> {
     Ok(Ended::Ended)
 }
 
+/// 给进程 `pid` 发 SIGTERM；Windows 上没有信号，直接结束它（`taskkill /F`）。
+fn end_process(pid: u32) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let pid = libc::pid_t::try_from(pid).map_err(io::Error::other)?;
+        // SAFETY: 只发信号，参数都是值。
+        if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        use std::process::{Command, Stdio};
+        let mut command = Command::new("taskkill");
+        command.args(["/F", "/PID", &pid.to_string()]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        crate::subprocess::hide_window(&mut command);
+        let status = command.status()?;
+        if status.success() { Ok(()) } else { Err(io::Error::other(format!("taskkill failed: {status}"))) }
+    }
+}
+
 /// 启动参数（不含程序名）里有没有 `--host`：有的是单独跑的宿主进程（`runode --host`，以及
 /// `--host --take-over`），没有的是 app 本身。
 fn launched_as_host(args: &[Vec<u8>]) -> bool {
@@ -200,14 +222,15 @@ fn launched_as_host(args: &[Vec<u8>]) -> bool {
 
 /// 进程 `pid` 的启动参数（含程序名），读 `/proc/<pid>/cmdline`：各个参数以 NUL 结尾接在一起。
 #[cfg(target_os = "linux")]
-fn process_args(pid: libc::pid_t) -> io::Result<Vec<Vec<u8>>> {
+fn process_args(pid: u32) -> io::Result<Vec<Vec<u8>>> {
     let data = std::fs::read(format!("/proc/{pid}/cmdline"))?;
     Ok(data.split(|&byte| byte == 0).filter(|arg| !arg.is_empty()).map(<[u8]>::to_vec).collect())
 }
 
 /// 进程 `pid` 的启动参数（含程序名），用 `sysctl(KERN_PROCARGS2)` 读，见 `parse_procargs`。
-#[cfg(not(target_os = "linux"))]
-fn process_args(pid: libc::pid_t) -> io::Result<Vec<Vec<u8>>> {
+#[cfg(all(unix, not(target_os = "linux")))]
+fn process_args(pid: u32) -> io::Result<Vec<Vec<u8>>> {
+    let pid = libc::pid_t::try_from(pid).map_err(io::Error::other)?;
     let mut max: libc::c_int = 0;
     let mut size = std::mem::size_of::<libc::c_int>();
     let mut mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
@@ -232,10 +255,19 @@ fn process_args(pid: libc::pid_t) -> io::Result<Vec<Vec<u8>>> {
     })
 }
 
+/// 进程 `pid` 的启动参数（含程序名），按 `CommandLineToArgvW` 的规矩拆开命令行。
+#[cfg(windows)]
+fn process_args(pid: u32) -> io::Result<Vec<Vec<u8>>> {
+    let (_, args) = runode_terminal::pty::process_args(pid).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("cannot read the arguments of process {pid}"))
+    })?;
+    Ok(args.into_iter().map(String::into_bytes).collect())
+}
+
 /// 解 `KERN_PROCARGS2` 的结果：本机字节序的 `int argc`，可执行文件的路径（以 NUL 结尾，后面可能
 /// 补几个 NUL 对齐），接着 `argc` 个以 NUL 结尾的参数（第一个是程序名），再往后是环境变量，不要。
 /// 格式不对时为 `None`。
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", windows), allow(dead_code))]
 fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
     let argc = usize::try_from(i32::from_ne_bytes(data.get(..4)?.try_into().ok()?)).ok()?;
     let rest = &data[4..];
@@ -255,11 +287,11 @@ fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
 /// `socket` 上宿主进程的 pid：打个招呼，等它回话（`Welcome` 或 `Incompatible`）后再读连接对端
 /// （`peer_pid`），因为交接过的 socket 在对方 accept 之前读到的是最早建它的那个进程。
 /// `Welcome` 里有 `host_pid` 时以它为准，没有时用对端的。不回话的返回错误。
-fn host_pid(socket: &Path) -> io::Result<libc::pid_t> {
+fn host_pid(socket: &Path) -> io::Result<u32> {
     let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(&super::build(), ClientKind::Cli))?;
     let reported = match receive(&mut stream)? {
-        HostMsg::Welcome { host_pid, .. } => libc::pid_t::try_from(host_pid).ok().filter(|pid| *pid > 0),
+        HostMsg::Welcome { host_pid, .. } => Some(host_pid).filter(|&pid| pid > 0),
         HostMsg::Incompatible { .. } => None,
         other => return Err(io::Error::other(format!("unexpected answer {other:?}"))),
     };
@@ -275,11 +307,15 @@ fn host_pid(socket: &Path) -> io::Result<libc::pid_t> {
 }
 
 /// 连接对端进程的 pid，只认同一个用户的。要在对方回过话之后读，见 `host_pid`。
-fn peer_pid(stream: &UnixStream) -> io::Result<libc::pid_t> {
+fn peer_pid(stream: &UnixStream) -> io::Result<u32> {
     if !runode_host::same_user(stream) {
         return Err(io::Error::new(io::ErrorKind::PermissionDenied, "the host belongs to another user"));
     }
-    runode_host::peer_pid(stream).ok_or_else(|| io::Error::other("cannot read the host's process id"))
+    #[cfg(unix)]
+    let pid = runode_host::peer_pid(stream).and_then(|pid| u32::try_from(pid).ok());
+    #[cfg(windows)]
+    let pid = runode_host::peer_pid(stream);
+    pid.ok_or_else(|| io::Error::other("cannot read the host's process id"))
 }
 
 /// `link` 连上 `socket` 上单独一个进程的宿主（见 `Link::connect_standalone`）。连上却在 `Welcome` 前
@@ -419,20 +455,19 @@ mod tests {
     /// 真读一个进程：读这个测试进程自己，和它看到的参数一样，也不是宿主。
     #[test]
     fn this_process_reads_its_own_arguments() {
-        let pid = libc::pid_t::try_from(std::process::id()).unwrap();
-        let args = process_args(pid).unwrap();
+        let args = process_args(std::process::id()).unwrap();
         let expected: Vec<Vec<u8>> = std::env::args_os().map(|arg| arg.into_encoded_bytes()).collect();
         assert_eq!(args, expected);
         assert!(!launched_as_host(&args));
     }
 
     /// 读另一个进程：启动参数里带 `--host` 的认得出来。
+    #[cfg(unix)]
     #[test]
     fn another_process_started_with_host_is_recognised() {
         // 后面的 `:` 让 sh 不直接 exec 成 sleep，参数留在 sh 身上。
         let mut child = std::process::Command::new("/bin/sh").args(["-c", "sleep 5; :", "--host"]).spawn().unwrap();
-        let pid = libc::pid_t::try_from(child.id()).unwrap();
-        let args = process_args(pid);
+        let args = process_args(child.id());
         let _ = child.kill();
         let _ = child.wait();
         let args = args.unwrap();
@@ -467,16 +502,24 @@ mod tests {
 
     /// 对着真的宿主探：socket 上是另一个 app 进程里的宿主（只 `listen`、没进 `Host::run_until_idle`）。
     mod against_a_host {
-        use std::{path::PathBuf, sync::mpsc};
+        use std::path::PathBuf;
+        #[cfg(unix)]
+        use std::sync::mpsc;
 
-        use runode_host::{Host, Stopped};
+        use runode_host::Host;
+        #[cfg(unix)]
+        use runode_host::Stopped;
+        #[cfg(unix)]
         use runode_types::{grid::GridSize, shell::IntegrationMode};
 
         use super::*;
+        #[cfg(unix)]
         use crate::host_client::link::SpawnOptions;
 
         const BUILD: &str = "launch-test";
+        #[cfg(unix)]
         const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
+        #[cfg(unix)]
         const WAIT: Duration = Duration::from_secs(10);
 
         fn build() -> BuildId {
@@ -496,6 +539,7 @@ mod tests {
 
         /// 另一个 app 刚提前拉起了 shell（`start: false`，还没有视图连上它，没被认领）：探到的是
         /// 别的 app 的宿主，开关开着关着都不连进去，也不让它退出，它的会话还在。
+        #[cfg(unix)]
         #[test]
         fn another_app_that_just_prespawned() {
             let (host, socket) = listening("prespawn");
@@ -532,6 +576,7 @@ mod tests {
         }
 
         /// 另一个 app 还没开会话：同样不碰它。
+        #[cfg(unix)]
         #[test]
         fn another_app_without_sessions() {
             let (host, socket) = listening("empty");
@@ -547,6 +592,7 @@ mod tests {
         }
 
         /// 单独一个进程的宿主没有会话：探得出来，连上它，之后探到的桌面有一个；要它退出时它退出。
+        #[cfg(unix)]
         #[test]
         fn a_standalone_host_without_sessions_is_kept_or_retired() {
             let (host, socket) = listening("retire");

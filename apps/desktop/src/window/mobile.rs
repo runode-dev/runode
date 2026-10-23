@@ -875,12 +875,8 @@ fn device_row(device: &Paired, theme: &Theme, cx: &mut Context<WindowView>) -> S
 /// Unix 秒在本地时区里是哪年哪月哪天。
 fn local_date(secs: u64) -> (i32, i32, i32) {
     let time = libc::time_t::try_from(secs).unwrap_or(libc::time_t::MAX);
-    // SAFETY: `tm` 是本地变量，全零是合法的初值；localtime_r 只读 `time`、只写 `tm`。
-    let tm = unsafe {
-        let mut tm: libc::tm = std::mem::zeroed();
-        libc::localtime_r(&time, &mut tm);
-        tm
-    };
+    // SAFETY: `tm` 是纯数据，全零是合法的值；读不出时就用它。
+    let tm = runode_cli::local_tm(time).unwrap_or(unsafe { std::mem::zeroed() });
     (tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday)
 }
 
@@ -1036,12 +1032,14 @@ fn spoken(label: &str) -> SharedString {
 mod tests {
     use super::*;
 
+    /// 只有 Unix 的 `tm` 带着时差（`tm_gmtoff`）。
+    #[cfg(unix)]
     #[test]
     fn the_pairing_day_is_read_in_local_time() {
         // 2026-10-08 12:00 UTC：本地比 UTC 早不到 12 小时（UTC-12 到 UTC+11:59）还是这一天，
         // 早 12 小时及以上（UTC+12 到 UTC+14）已经是第二天。时区按跑测试的机器，不改进程的 TZ。
         let time: libc::time_t = 1_791_460_800;
-        // SAFETY: 同 `local_date`。
+        // SAFETY: `tm` 是本地变量，全零是合法的初值；localtime_r 只读 `time`、只写 `tm`。
         let offset = unsafe {
             let mut tm: libc::tm = std::mem::zeroed();
             libc::localtime_r(&time, &mut tm);

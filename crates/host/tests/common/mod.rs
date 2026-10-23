@@ -5,7 +5,6 @@
 
 use std::{
     collections::VecDeque,
-    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     sync::{Mutex, mpsc},
     thread,
@@ -18,9 +17,17 @@ use runode_protocol::{
 };
 use runode_types::{grid::GridSize, shell::IntegrationMode};
 
+#[cfg(unix)]
+pub use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+pub use uds_windows::UnixStream;
+
 pub const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
 pub const WAIT: Duration = Duration::from_secs(10);
 pub const BUILD: &str = "test-build";
+/// 测试里当 shell 用的程序：一直开着读输入，不起子进程，所以前台总是它自己。Windows 上没有
+/// `cat`，用 cmd。
+pub const CAT: &str = if cfg!(windows) { "cmd.exe" } else { "/bin/cat" };
 
 pub fn host() -> Host {
     Host::new(BuildId(BUILD.into()))
@@ -44,6 +51,7 @@ pub fn listen(dir: &Path) -> (Host, PathBuf) {
 
 /// 在 `dir` 里写一个叫 `name` 的可执行脚本当 shell 用，返回它的路径。登录 shell 会多带一个 `-l`
 /// 参数，脚本不看参数。
+#[cfg(unix)]
 pub fn script(dir: &Path, name: &str, body: &str) -> String {
     use std::os::unix::fs::PermissionsExt as _;
 

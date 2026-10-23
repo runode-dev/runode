@@ -28,7 +28,7 @@ const CONVERSATION_RECHECK: Duration = Duration::from_secs(2);
 /// 上次认前台进程组的结果。进程组没换时不再读各进程的参数。
 #[derive(Debug, Default)]
 pub(super) struct ForegroundProbe {
-    leader: Option<libc::pid_t>,
+    leader: Option<crate::pty::Pid>,
     /// 这个进程组第一次被看到的时刻。
     since: Option<Instant>,
     probed_at: Option<Instant>,
@@ -108,7 +108,7 @@ impl HostSession {
 
     /// 看前台在跑什么程序（`foreground` 是刚读的 `Pty::foreground`），认出是哪个 agent 交给
     /// tracker。取不到前台进程时什么都不做。
-    pub(super) fn probe_foreground(&mut self, foreground: Option<(libc::pid_t, bool)>, now: Instant) {
+    pub(super) fn probe_foreground(&mut self, foreground: Option<(crate::pty::Pid, bool)>, now: Instant) {
         let Some((leader, is_shell)) = foreground else {
             return;
         };

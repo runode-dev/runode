@@ -17,5 +17,18 @@ anyhow.workspace = true
 libc.workspace = true
 tracing.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# 读别的进程的父子关系、命令行和当前目录，认前台的 agent、取 shell 所在的目录；让 shell 照常处理 Ctrl+C。
+windows-sys = { workspace = true, features = [
+    "Wdk_System_Threading",
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Kernel",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+] }
+
 [lints]
 workspace = true

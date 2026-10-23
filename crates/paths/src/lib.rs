@@ -29,7 +29,7 @@ const SUN_PATH_LEN: usize = 104;
 /// 由它算出的文件也都是 `None`。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Dirs {
-    /// 家目录，即 `HOME`。
+    /// 家目录，即 `HOME`；Windows 上没设时用 `USERPROFILE`。
     pub home: Option<PathBuf>,
     /// 用户配置的根目录：`$XDG_CONFIG_HOME`，没设时 `~/.config`。Ghostty 的配置在这下面。
     pub config: Option<PathBuf>,
@@ -49,7 +49,7 @@ impl Dirs {
     /// 按 `var` 给出的环境变量算出各个目录，空值当作没设。
     pub fn from_vars(var: impl Fn(&str) -> Option<OsString>) -> Self {
         let var = |key: &str| var(key).filter(|v| !v.is_empty()).map(PathBuf::from);
-        let home = var("HOME");
+        let home = var("HOME").or_else(|| if cfg!(windows) { var("USERPROFILE") } else { None });
         let config = var("XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|home| home.join(".config")));
         let data = home.as_ref().map(|home| home.join(".runode"));
         let cache = data.as_ref().map(|data| data.join("cache"));
@@ -106,7 +106,6 @@ impl Dirs {
     ///
     /// 已经存在的不是真目录（比如是指向别处的符号链接），或者属主和上一级目录（runode 的根
     /// 目录，用户自己的）不一样时拒绝，不去改它的权限：那多半是别人布下的。
-    #[cfg(unix)]
     pub fn create_runtime_dir(&self) -> std::io::Result<PathBuf> {
         create_private_dir(self.runtime_dir())
     }
@@ -119,7 +118,6 @@ impl Dirs {
     }
 
     /// 建好 `remote_access_dir`，权限和检查同 `create_runtime_dir`：里面有私钥和配对口令。
-    #[cfg(unix)]
     pub fn create_remote_access_dir(&self) -> std::io::Result<PathBuf> {
         create_private_dir(self.remote_access_dir())
     }
@@ -285,6 +283,21 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
         return Err(Error::new(ErrorKind::PermissionDenied, format!("{} belongs to another user", dir.display())));
     }
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    Ok(dir)
+}
+
+/// 建好 `dir`（`None` 时报没有家目录）。目录继承用户目录的权限（只有本人、SYSTEM 和管理员能进），
+/// 不另设 ACL；已经存在的不是真目录（比如是目录联接）时拒绝。
+#[cfg(windows)]
+fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
+    use std::io::{Error, ErrorKind};
+
+    let dir = dir.ok_or_else(|| Error::new(ErrorKind::NotFound, "no home directory"))?;
+    std::fs::create_dir_all(&dir)?;
+    let meta = std::fs::symlink_metadata(&dir)?;
+    if !meta.file_type().is_dir() || meta.file_type().is_symlink() {
+        return Err(Error::new(ErrorKind::InvalidInput, format!("{} is not a directory", dir.display())));
+    }
     Ok(dir)
 }
 

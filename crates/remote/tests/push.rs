@@ -22,7 +22,7 @@ fn register(req: u32, token: Option<&str>) -> Vec<u8> {
 }
 
 /// 宿主那一端接下来收到的是手机随后发的 `ListSessions`：前面登记推送的请求没转过去。
-fn nothing_else_reached_the_host(phone: &mut Phone, host: &std::os::unix::net::UnixStream) {
+fn nothing_else_reached_the_host(phone: &mut Phone, host: &UnixStream) {
     phone.send_control(br#"{"type":"list_sessions"}"#);
     assert_eq!(read_client_msg(host), Some(ClientMsg::ListSessions));
 }

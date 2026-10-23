@@ -7,12 +7,15 @@
 
 use runode_protocol::{
     AtPrompt, BuildId, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HandoffPart, HandoffRefusal, HostMsg,
-    RedactorState, ReportToken, RunningCommand, SessionId, decode_part, read_frame,
+    RedactorState, decode_part, read_frame,
 };
+#[cfg(unix)]
+use runode_protocol::{ReportToken, RunningCommand, SessionId};
+#[cfg(unix)]
+use runode_types::grid::GridSize;
 use runode_types::{
     clipboard::ClipboardAccess,
     color::{Rgb, TerminalColor},
-    grid::GridSize,
     settings::{OptionAsAlt, TermSettings},
 };
 
@@ -177,6 +180,7 @@ fn host_part_is_readable() {
     assert!(blocks.is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn session_part_is_readable() {
     let header = format!(

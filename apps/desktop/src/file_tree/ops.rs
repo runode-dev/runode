@@ -62,8 +62,8 @@ pub(super) fn create(path: &Path, is_dir: bool) -> Result {
 /// 把 `from` 改名成 `to`。`to` 已经有了时报 `Exists`，只改大小写除外：不分大小写的文件系统上
 /// `to` 查到的就是 `from` 自己。
 pub(super) fn rename(from: &Path, to: &Path) -> Result {
-    if let Ok(existing) = fs::symlink_metadata(to) {
-        if !same_file(&existing, &fs::symlink_metadata(from)?) {
+    if fs::symlink_metadata(to).is_ok() {
+        if !same_file(from, to)? {
             return Err(OpError::Exists);
         }
         return Ok(fs::rename(from, to)?);
@@ -114,14 +114,17 @@ fn rename_checked(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn same_file(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
     use std::os::unix::fs::MetadataExt as _;
-    (a.dev(), a.ino()) == (b.dev(), b.ino())
+    let (a, b) = (fs::symlink_metadata(a)?, fs::symlink_metadata(b)?);
+    Ok((a.dev(), a.ino()) == (b.dev(), b.ino()))
 }
 
+/// Windows 上取不到稳定的文件号，按规范化后的路径比：规范化给的是盘上的真名，只差大小写的两个名字
+/// 规范化后一样。
 #[cfg(not(unix))]
-fn same_file(_: &fs::Metadata, _: &fs::Metadata) -> bool {
-    false
+fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
+    Ok(fs::canonicalize(a)? == fs::canonicalize(b)?)
 }
 
 /// 把 `src` 挪进目录 `dir`，返回挪过去的路径；本来就在 `dir` 里时不动。不能挪进它自己或者

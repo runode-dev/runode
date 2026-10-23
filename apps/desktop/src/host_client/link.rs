@@ -33,7 +33,6 @@ use std::{
     collections::{HashMap, VecDeque},
     io::{self, BufWriter, Write as _},
     net::Shutdown,
-    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{
         Arc, Mutex, MutexGuard, OnceLock, PoisonError,
@@ -53,6 +52,8 @@ use runode_protocol::{
 use runode_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
 };
+
+use super::UnixStream;
 
 /// 写一帧最多等这么久，超时按连接断开处理。
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -970,6 +971,7 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
 
 /// 报给宿主的设备名：这台机器的主机名的第一段，见 `short_host_name`。几个前端看同一个会话时，
 /// 别的前端据此显示「尺寸由谁控制」，见 `HostMsg::SizeOwner`。取不到时为 `None`。
+#[cfg(unix)]
 fn device_name() -> Option<String> {
     let mut buf = [0u8; 256];
     // SAFETY: `buf` 可写、长度如实传入；`gethostname` 最多写这么多字节，名字太长时可能不带结尾的 0，
@@ -979,6 +981,12 @@ fn device_name() -> Option<String> {
     }
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     short_host_name(&String::from_utf8_lossy(&buf[..end]))
+}
+
+/// Windows 上是计算机名（`COMPUTERNAME`）。
+#[cfg(windows)]
+fn device_name() -> Option<String> {
+    short_host_name(&std::env::var("COMPUTERNAME").ok()?)
 }
 
 /// 主机名第一个点之前的部分：局域网和路由器会给主机名加上 `.local`、`.lan`、`.home` 这类域名，

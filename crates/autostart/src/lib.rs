@@ -521,6 +521,7 @@ mod tests {
         assert_eq!(app_bundle(Path::new("/home/me/.local/lib/runode/runode")), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn service_files_live_in_the_users_launch_directories() {
         let dirs = Dirs::from_vars(|key| (key == "HOME").then(|| "/home/me".into()));

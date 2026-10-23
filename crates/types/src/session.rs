@@ -99,6 +99,19 @@ impl SessionId {
         std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
         Ok(Self(u128::from_le_bytes(bytes)))
     }
+
+    /// 一个新的随机标识，从系统的随机数源取（`ProcessPrng`，标准库的随机数也取自它，不会失败）。
+    #[cfg(windows)]
+    pub fn random() -> std::io::Result<Self> {
+        #[link(name = "bcryptprimitives", kind = "raw-dylib")]
+        unsafe extern "system" {
+            fn ProcessPrng(data: *mut u8, len: usize) -> i32;
+        }
+        let mut bytes = [0u8; 16];
+        // SAFETY: 指针和长度来自这里的局部数组。
+        unsafe { ProcessPrng(bytes.as_mut_ptr(), bytes.len()) };
+        Ok(Self(u128::from_le_bytes(bytes)))
+    }
 }
 
 impl fmt::Display for SessionId {

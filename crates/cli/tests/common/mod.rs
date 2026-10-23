@@ -3,8 +3,9 @@
 
 #![allow(dead_code)]
 
+#[cfg(unix)]
+pub use std::os::unix::net::{UnixListener, UnixStream};
 use std::{
-    os::unix::net::{UnixListener, UnixStream},
     sync::{Arc, Mutex, mpsc},
     thread,
     time::Duration,
@@ -20,11 +21,14 @@ use runode_types::{
     grid::GridSize,
     session::SessionMeta,
 };
+#[cfg(windows)]
+pub use uds_windows::{UnixListener, UnixStream};
 
 pub const SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };
 
 /// 假宿主收到的东西。
 #[derive(Debug, PartialEq)]
+#[allow(clippy::large_enum_variant, reason = "Windows 的路径大，`ClientMsg` 跟着大；测试里收的消息不多")]
 pub enum Received {
     Control(ClientMsg),
     Input(u32, Vec<u8>),

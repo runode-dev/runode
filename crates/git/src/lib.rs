@@ -30,6 +30,7 @@ pub use view::{DiffRow, DiffSide, DiffView, ReadOptions, TooLarge, first_lines, 
 pub use words::changed_words;
 
 use std::{
+    borrow::Cow,
     ffi::OsStr,
     fs,
     path::{Path, PathBuf},
@@ -43,12 +44,37 @@ use std::{
 /// `diff.external` 和 textconv 由 `diff_args` 关掉，过滤器见 `filter_overrides`。
 pub(crate) fn git_command(dir: &Path) -> Command {
     let mut command = Command::new("git");
+    hide_window(&mut command);
     command
         .arg("-C")
         .arg(dir)
         .args(["-c", "core.quotePath=false", "-c", "core.fsmonitor=false", "-c", "log.showSignature=false"])
         .stdin(Stdio::null());
     command
+}
+
+/// git 输出里的一段路径。Unix 上按原样的字节，不是 UTF-8 的文件名也找得到；Windows 上的路径不是
+/// 字节串，git 按 UTF-8 输出，解不开的字换成替换符。
+#[cfg(unix)]
+pub(crate) fn os_str(bytes: &[u8]) -> Cow<'_, OsStr> {
+    Cow::Borrowed(std::os::unix::ffi::OsStrExt::from_bytes(bytes))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn os_str(bytes: &[u8]) -> Cow<'_, OsStr> {
+    match String::from_utf8_lossy(bytes) {
+        Cow::Borrowed(text) => Cow::Borrowed(OsStr::new(text)),
+        Cow::Owned(text) => Cow::Owned(text.into()),
+    }
+}
+
+/// Windows 上拉起控制台程序时不开窗口（`CREATE_NO_WINDOW`）：app 和宿主都没有控制台，不然每跑一次
+/// git 就闪一个黑窗。别的系统上什么都不做。
+pub(crate) fn hide_window(command: &mut Command) {
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(command, 0x0800_0000);
+    #[cfg(not(windows))]
+    let _ = command;
 }
 
 pub(crate) fn git<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Option<Vec<u8>> {
@@ -202,6 +228,7 @@ mod tests {
         assert_eq!(local_filter_names(&evil), ["lfs", "mine"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn keeps_the_symlinked_spelling_of_the_root() {
         let base = std::env::temp_dir().join(format!("runode-git-root-{}", std::process::id()));
@@ -215,6 +242,7 @@ mod tests {
         std::fs::remove_dir_all(&base).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn falls_back_to_the_git_root_when_the_spelling_does_not_lead_there() {
         let base = std::env::temp_dir().join(format!("runode-git-root-inner-{}", std::process::id()));

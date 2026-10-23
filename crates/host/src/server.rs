@@ -26,11 +26,6 @@ use std::{
     fs::{File, OpenOptions},
     io::{self, BufReader, BufWriter, Read as _, Write as _},
     net::Shutdown,
-    os::unix::{
-        fs::{OpenOptionsExt as _, PermissionsExt as _},
-        io::AsRawFd as _,
-        net::{UnixListener, UnixStream},
-    },
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, PoisonError, Weak,
@@ -41,7 +36,21 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(unix)]
+pub(crate) use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(unix)]
+use std::os::unix::{
+    fs::{OpenOptionsExt as _, PermissionsExt as _},
+    io::AsRawFd as _,
+};
+
 use anyhow::{Context as _, Result, anyhow};
+#[cfg(unix)]
+use libc::{SO_RCVBUF, SO_SNDBUF};
+#[cfg(windows)]
+pub(crate) use uds_windows::{UnixListener, UnixStream};
+#[cfg(windows)]
+use windows_sys::Win32::Networking::WinSock::{SO_RCVBUF, SO_SNDBUF};
 use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, Frame, FrameError, FrameKind, GoodbyeReason,
     HANDOFF_FORMAT, HostMsg, MAX_PAYLOAD, PROTOCOL_VERSION, SessionId, SessionInfo, ShellReport, WindowLayout,
@@ -53,7 +62,6 @@ use runode_types::{grid::GridSize, input::parse_key_list, session::DriveAction};
 use crate::{
     Host, Shared, SpawnOptions, Stopped, browse,
     git::{GitWorker, Job},
-    handoff,
     session::{Drive, Event, EventSink, Inbox, Screen, Subscribe},
 };
 
@@ -80,9 +88,9 @@ const MAX_GRID: u16 = 2000;
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 /// 每条连接 socket 的收发缓冲。系统默认的缓冲太小，刷屏的输出一块就塞满，读写两边来回
 /// 切换的次数多到吞吐上不去；受内核上限（`kern.ipc.maxsockbuf`）限制。
-const SOCKET_BUFFER: libc::c_int = 4 << 20;
+const SOCKET_BUFFER: i32 = 4 << 20;
 /// 手机连接的发送缓冲：发出去的积压在这里也有一份，同样为了回显不排在一大段旧输出后面。
-const MOBILE_SOCKET_BUFFER: libc::c_int = 256 << 10;
+const MOBILE_SOCKET_BUFFER: i32 = 256 << 10;
 /// 写的线程一次最多攒这么多字节再写出去。
 const WRITE_BUFFER: usize = 256 << 10;
 
@@ -143,6 +151,7 @@ impl Peers {
         self.connections.len()
     }
 
+    #[cfg(unix)]
     pub(crate) fn has_desktop(&self) -> bool {
         !self.desktops.is_empty()
     }
@@ -249,8 +258,10 @@ impl UiPort {
 pub(crate) struct Listening {
     pub(crate) socket: PathBuf,
     /// 监听的 socket，和接受连接的线程共用；交接时把它的描述符交给新宿主。
+    #[cfg_attr(not(unix), expect(dead_code, reason = "只在交接时读"))]
     pub(crate) listener: Arc<UnixListener>,
-    /// 锁住了的锁文件，交接时连同描述符交给新宿主。
+    /// 锁住了的锁文件，交接时连同描述符交给新宿主；拿着它就一直锁着。
+    #[cfg_attr(not(unix), expect(dead_code, reason = "只在交接时读"))]
     pub(crate) lock: File,
     /// 让接受连接的线程停下、接着接或者结束。
     pub(crate) control: Arc<ListenControl>,
@@ -272,16 +283,18 @@ enum ListenState {
 pub(crate) struct ListenControl {
     /// 线程接连接时一直拿着它，所以 `pause`、`stop` 返回之后线程不会再接。
     state: Mutex<ListenState>,
-    wake: io::PipeWriter,
+    wake: WakeWriter,
 }
 
 impl ListenControl {
     /// 不再接新连接，返回时已经不会再接，见 `ListenState::Paused`。
+    #[cfg(unix)]
     pub(crate) fn pause(&self) {
         self.set(ListenState::Paused);
     }
 
     /// 接着接新连接，先接 backlog 里排着的。
+    #[cfg(unix)]
     pub(crate) fn resume(&self) {
         self.set(ListenState::Accepting);
     }
@@ -309,31 +322,27 @@ impl ListenControl {
 
 /// 接受连接的线程：按 `control` 的状态 `poll` 唤醒管道（停着时只等它）和监听的 socket，有连接
 /// 就接下来、登记、起线程服务。
-fn accept_loop(shared: &Arc<Shared>, listener: &UnixListener, control: &ListenControl, wake: &io::PipeReader) {
+fn accept_loop(shared: &Arc<Shared>, listener: &UnixListener, control: &ListenControl, wake: &WakeReader) {
     loop {
         let state = *control.state.lock().unwrap_or_else(PoisonError::into_inner);
         if state == ListenState::Stopped {
             return;
         }
-        let mut fds = [
-            libc::pollfd { fd: wake.as_raw_fd(), events: libc::POLLIN, revents: 0 },
-            libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 },
-        ];
-        let count: libc::nfds_t = if state == ListenState::Accepting { 2 } else { 1 };
-        // SAFETY: `fds` 是本地数组，`count` 不超过它的长度；两个描述符在这次调用期间都开着。
-        if unsafe { libc::poll(fds.as_mut_ptr(), count, -1) } < 0 {
-            let err = io::Error::last_os_error();
-            if err.kind() != io::ErrorKind::Interrupted {
-                tracing::warn!("failed to wait for connections: {err}");
-                thread::sleep(ACCEPT_BACKOFF);
+        let (woken, connecting) = match wait(wake, listener, state == ListenState::Accepting) {
+            Ok(ready) => ready,
+            Err(err) => {
+                if err.kind() != io::ErrorKind::Interrupted {
+                    tracing::warn!("failed to wait for connections: {err}");
+                    thread::sleep(ACCEPT_BACKOFF);
+                }
+                continue;
             }
-            continue;
-        }
-        if fds[0].revents != 0 {
+        };
+        if woken {
             let mut drained = [0u8; 64];
             let _ = (&*wake).read(&mut drained);
         }
-        if count < 2 || fds[1].revents == 0 {
+        if !connecting {
             continue;
         }
         let (accepted, failed) = {
@@ -355,6 +364,31 @@ fn accept_loop(shared: &Arc<Shared>, listener: &UnixListener, control: &ListenCo
             thread::sleep(ACCEPT_BACKOFF);
         }
     }
+}
+
+#[cfg(unix)]
+type WakeReader = io::PipeReader;
+#[cfg(unix)]
+type WakeWriter = io::PipeWriter;
+
+#[cfg(unix)]
+fn wake_pair() -> io::Result<(WakeReader, WakeWriter)> {
+    io::pipe()
+}
+
+/// 等唤醒管道可读，`accepting` 时也等监听的 socket 来连接；返回两者各自就绪没有。
+#[cfg(unix)]
+fn wait(wake: &WakeReader, listener: &UnixListener, accepting: bool) -> io::Result<(bool, bool)> {
+    let mut fds = [
+        libc::pollfd { fd: wake.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+        libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+    ];
+    let count: libc::nfds_t = if accepting { 2 } else { 1 };
+    // SAFETY: `fds` 是本地数组，`count` 不超过它的长度；两个描述符在这次调用期间都开着。
+    if unsafe { libc::poll(fds.as_mut_ptr(), count, -1) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((fds[0].revents != 0, accepting && fds[1].revents != 0))
 }
 
 /// 把 backlog 里排着的连接都接下来；出错（比如文件描述符用完了）时停下，第二项为 true。
@@ -405,9 +439,7 @@ impl Host {
         let held = lock.try_clone().context("failed to hold the lock")?;
         let listener =
             UnixListener::bind(socket).with_context(|| format!("failed to listen on {}", socket.display()))?;
-        let started = std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))
-            .map_err(anyhow::Error::from)
-            .and_then(|()| self.start_listening(listener, lock, socket, false));
+        let started = restrict(socket).and_then(|()| self.start_listening(listener, lock, socket, false));
         if let Err(err) = started {
             let _ = std::fs::remove_file(socket);
             drop(held);
@@ -440,7 +472,7 @@ impl Host {
         // 前后两个宿主共用这个打开的 socket）时回去接着等，不卡在 `accept` 里叫不停。
         listener.set_nonblocking(true).context("failed to make the listener non-blocking")?;
         let listener = Arc::new(listener);
-        let (wake_rx, wake_tx) = io::pipe().context("failed to create the listener's wake pipe")?;
+        let (wake_rx, wake_tx) = wake_pair().context("failed to create the listener's wake pipe")?;
         let state = if paused { ListenState::Paused } else { ListenState::Accepting };
         let control = Arc::new(ListenControl { state: Mutex::new(state), wake: wake_tx });
         let shared = self.shared.clone();
@@ -632,34 +664,39 @@ fn answer_later(name: &str, answer: impl FnOnce() + Send + 'static) {
     }
 }
 
-/// 打开并锁住锁文件，拿不到时返回错误。进程退出（或者丢掉返回的文件）时锁自动放开。
+/// 把 socket 文件的权限设成只有自己能读写。Windows 上的 socket 文件继承所在目录的权限，见
+/// `Dirs::create_runtime_dir`。
+fn restrict(socket: &Path) -> Result<()> {
+    #[cfg(unix)]
+    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
+    #[cfg(not(unix))]
+    let _ = socket;
+    Ok(())
+}
+
+/// 打开并锁住锁文件（Unix 上是 `flock`），拿不到时返回错误。进程退出（或者丢掉返回的文件）时锁自动
+/// 放开。
 fn lock_exclusively(path: &Path) -> Result<File> {
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .mode(0o600)
-        .open(path)
-        .with_context(|| format!("failed to open the lock {}", path.display()))?;
-    // SAFETY: 描述符来自上面打开的文件，在这次调用期间一直有效。
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        let err = io::Error::last_os_error();
-        return Err(if err.kind() == io::ErrorKind::WouldBlock {
-            anyhow!("another runode already holds {}", path.display())
-        } else {
-            anyhow!("failed to lock {}: {err}", path.display())
-        });
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(false).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let file = options.open(path).with_context(|| format!("failed to open the lock {}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(anyhow!("another runode already holds {}", path.display())),
+        Err(std::fs::TryLockError::Error(err)) => Err(anyhow!("failed to lock {}: {err}", path.display())),
     }
-    Ok(file)
 }
 
 /// 连上来的进程是不是和自己同一个用户。
+#[cfg(unix)]
 pub fn same_user(stream: &UnixStream) -> bool {
     // SAFETY: 没有参数，总是成功。
     peer_uid(stream) == Some(unsafe { libc::geteuid() })
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 fn peer_uid(stream: &UnixStream) -> Option<libc::uid_t> {
     let (mut uid, mut gid) = (0, 0);
     // SAFETY: 描述符来自 `stream`，两个输出参数指向本地变量。
@@ -680,13 +717,14 @@ fn peer_uid(stream: &UnixStream) -> Option<libc::uid_t> {
 
 /// 把 socket 的收发缓冲设成 `SOCKET_BUFFER`；设不了时记日志，照常用。
 pub fn set_buffers(stream: &UnixStream) {
-    for option in [libc::SO_SNDBUF, libc::SO_RCVBUF] {
+    for option in [SO_SNDBUF, SO_RCVBUF] {
         set_buffer(stream, option, SOCKET_BUFFER);
     }
 }
 
 /// 把 socket 的一个缓冲（`SO_SNDBUF` 或 `SO_RCVBUF`）设成 `size`；设不了时记日志，照常用。
-fn set_buffer(stream: &UnixStream, option: libc::c_int, size: libc::c_int) {
+#[cfg(unix)]
+fn set_buffer(stream: &UnixStream, option: i32, size: i32) {
     // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
     let result = unsafe {
         libc::setsockopt(
@@ -981,6 +1019,7 @@ impl Connection {
             return;
         };
         // 接手的新宿主不比对协议版本，永远如此，见 `runode_protocol::message` 的模块文档。
+        #[cfg(unix)]
         if client == ClientKind::Successor {
             self.kind = client;
             let peers = self.shared.peers();
@@ -988,6 +1027,12 @@ impl Connection {
             drop(peers);
             self.out.control(&welcome);
             self.successor(reader, build);
+            return;
+        }
+        // Windows 上的 ConPTY 交不出去，升级时会话跟着重启。
+        #[cfg(not(unix))]
+        if client == ClientKind::Successor {
+            self.goodbye("this host cannot hand over its sessions");
             return;
         }
         if protocol != PROTOCOL_VERSION {
@@ -1001,7 +1046,7 @@ impl Connection {
         self.kind = client;
         if client == ClientKind::Mobile {
             self.out.limit = MOBILE_OUTBOX_LIMIT;
-            set_buffer(reader.get_ref(), libc::SO_SNDBUF, MOBILE_SOCKET_BUFFER);
+            set_buffer(reader.get_ref(), SO_SNDBUF, MOBILE_SOCKET_BUFFER);
         }
         self.by = session;
         self.device = device;
@@ -1081,6 +1126,7 @@ impl Connection {
 
     /// 接手的新宿主（构建是 `build`）连上来：只认 `ClientMsg::Handoff`，交给 `handoff::give`，之后
     /// 这条连接归它。
+    #[cfg(unix)]
     fn successor(&self, reader: &mut BufReader<&UnixStream>, build: runode_protocol::BuildId) {
         let message = match read_frame(reader) {
             Ok(Some(frame)) if frame.kind == FrameKind::Control => frame.message::<ClientMsg>().ok(),
@@ -1092,8 +1138,8 @@ impl Connection {
         };
         match message {
             Some(ClientMsg::Handoff { min_format, max_format }) => {
-                let asked = handoff::Asked { formats: min_format..=max_format, build };
-                handoff::give(&self.shared, self.id, &self.out, reader, &asked);
+                let asked = crate::handoff::Asked { formats: min_format..=max_format, build };
+                crate::handoff::give(&self.shared, self.id, &self.out, reader, &asked);
             }
             _ => self.goodbye("a successor must ask for the handoff"),
         }
@@ -1627,6 +1673,13 @@ fn session_sink(
         }
     })
 }
+
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::{peer_pid, same_user};
+#[cfg(windows)]
+use windows::{WakeReader, WakeWriter, set_buffer, wait, wake_pair};
 
 #[cfg(test)]
 mod tests;

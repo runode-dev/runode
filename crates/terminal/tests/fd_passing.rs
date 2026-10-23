@@ -1,5 +1,7 @@
 //! 在 Unix socket 上连同描述符一起收发消息。
 
+#![cfg(unix)]
+
 use std::{
     io::{self, Read as _, Write as _},
     os::{

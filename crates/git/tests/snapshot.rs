@@ -5,21 +5,27 @@ mod common;
 
 use std::{
     collections::{HashMap, HashSet},
-    ffi::{OsStr, OsString},
     fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+#[cfg(unix)]
+use std::{
+    ffi::{OsStr, OsString},
     os::unix::{
         ffi::OsStrExt,
         fs::{PermissionsExt, symlink},
     },
-    path::{Path, PathBuf},
     process::Command,
     sync::mpsc,
     thread,
-    time::Duration,
 };
 
 use common::{TestRepo, read};
-use runode_git::{DiffSide, FileStatus, ReadOptions, RepoInfo, RepoKind, Snapshot, UntrackedCache, snapshot};
+#[cfg(unix)]
+use runode_git::{DiffSide, ReadOptions};
+use runode_git::{FileStatus, RepoInfo, RepoKind, Snapshot, UntrackedCache, snapshot};
 
 #[test]
 fn ignored_dirs_cover_their_contents() {
@@ -41,6 +47,7 @@ fn ignored_dirs_cover_their_contents() {
     assert!(!snapshot.is_ignored(Path::new("targets/x")));
 }
 
+#[cfg(unix)]
 #[test]
 fn untracked_symlinks_show_their_target_without_following_it() {
     let repo = TestRepo::new("snapshot-symlink");
@@ -74,6 +81,7 @@ fn untracked_symlinks_show_their_target_without_following_it() {
     assert_eq!(view.new_lines, ["/dev/zero"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn does_not_run_the_repository_fsmonitor() {
     let repo = TestRepo::new("snapshot-fsmonitor");
@@ -139,6 +147,7 @@ fn does_not_run_filters_from_included_config() {
 
 /// 仓库开了 `log.showSignature`、把 `gpg.program` 设成脚本时，读快照（`stash list` 内部跑 `log`）和
 /// 读提交历史都不执行它去校验签过名的提交。
+#[cfg(unix)]
 #[test]
 fn does_not_run_the_repository_gpg_program() {
     let repo = TestRepo::new("snapshot-gpg");
@@ -167,6 +176,7 @@ fn does_not_run_the_repository_gpg_program() {
     assert!(marker.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn keeps_file_names_that_are_not_utf8() {
     let repo = TestRepo::new("snapshot-latin1");

@@ -30,12 +30,19 @@ mod identity;
 mod limit;
 mod listener;
 mod pairing;
+mod poll;
 mod push;
 mod service;
 mod status;
 mod tunnel;
 
-use std::{io, os::unix::net::UnixStream, sync::Arc};
+use std::{io, sync::Arc};
+
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+
+#[cfg(windows)]
+use uds_windows::UnixStream;
 
 pub use addrs::{host_name, local_addresses, local_interfaces};
 pub use devices::{Device, PushRegistration, list_devices, push_registrations, revoke_device};

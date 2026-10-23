@@ -3,8 +3,6 @@
 
 use std::{
     collections::HashMap,
-    ffi::{OsStr, OsString},
-    os::unix::ffi::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
 };
 
@@ -22,7 +20,7 @@ pub(crate) fn parse_status(output: &[u8]) -> (HashMap<PathBuf, FileStatus>, Vec<
         }
         let (x, y) = (field[0], field[1]);
         // 按原来的字节，不是 UTF-8 的文件名也原样留着，暂存、丢弃时才找得到它。
-        let path = PathBuf::from(OsStr::from_bytes(field[3..].strip_suffix(b"/").unwrap_or(&field[3..])));
+        let path = PathBuf::from(&crate::os_str(field[3..].strip_suffix(b"/").unwrap_or(&field[3..])));
         // 改名和复制后面跟着原来的路径，单独占一项。
         if matches!(x, b'R' | b'C') || matches!(y, b'R' | b'C') {
             fields.next();
@@ -62,9 +60,9 @@ pub(crate) fn status_sections(output: &[u8]) -> (Vec<FileDiff>, Vec<FileDiff>) {
             continue;
         }
         let (x, y) = (field[0], field[1]);
-        let path = PathBuf::from(OsStr::from_bytes(field[3..].strip_suffix(b"/").unwrap_or(&field[3..])));
+        let path = PathBuf::from(&crate::os_str(field[3..].strip_suffix(b"/").unwrap_or(&field[3..])));
         let old_path = (matches!(x, b'R' | b'C') || matches!(y, b'R' | b'C'))
-            .then(|| fields.next().map(|old| PathBuf::from(OsStr::from_bytes(old))))
+            .then(|| fields.next().map(|old| PathBuf::from(&crate::os_str(old))))
             .flatten();
         if matches!((x, y), (b'U', _) | (_, b'U') | (b'A', b'A') | (b'D', b'D')) {
             continue;
@@ -255,7 +253,7 @@ fn unquote(text: &str) -> PathBuf {
             None => bytes.push(b'\\'),
         }
     }
-    PathBuf::from(OsString::from_vec(bytes))
+    PathBuf::from(&crate::os_str(&bytes))
 }
 
 pub(crate) fn expand_tabs(text: &str) -> String {
@@ -357,11 +355,18 @@ Binary files /dev/null and b/logo.png differ
         assert!(!statuses.contains_key(Path::new("a.rs")));
         assert_eq!(statuses.len(), 5);
         assert_eq!(ignored, vec![PathBuf::from("target")]);
+    }
 
-        // 两个不同的非 UTF-8 名字各占一个键，不都变成 U+FFFD。
+    /// 非 UTF-8 的名字按原样的字节留着，不变成 U+FFFD；只有 Unix 的路径是字节串。
+    #[cfg(unix)]
+    #[test]
+    fn keeps_non_utf8_paths() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
         let (statuses, _) = parse_status(b"?? caf\xe9\0?? caf\xe8\0");
         assert_eq!(statuses.len(), 2);
         assert!(statuses.contains_key(Path::new(OsStr::from_bytes(b"caf\xe9"))));
+        assert_eq!(unquote("\"caf\\351.txt\"").as_os_str().as_bytes(), b"caf\xe9.txt");
+        assert_eq!(header_path("\"a/\\351\" \"b/\\351\"").unwrap().as_os_str().as_bytes(), b"\xe9");
     }
 
     #[test]
@@ -369,9 +374,6 @@ Binary files /dev/null and b/logo.png differ
         assert_eq!(unquote("\"a\\\"b\\tc\""), Path::new("a\"b\tc"));
         assert_eq!(unquote("\"t\\rr\\a\\b\\v\\f\""), Path::new("t\rr\x07\x08\x0b\x0c"));
         assert_eq!(unquote("\"\\346\\226\\207.txt\""), Path::new("文.txt"));
-        // 不是 UTF-8 的字节原样还原，不换成 U+FFFD。
-        assert_eq!(unquote("\"caf\\351.txt\"").as_os_str().as_bytes(), b"caf\xe9.txt");
-        assert_eq!(header_path("\"a/\\351\" \"b/\\351\"").unwrap().as_os_str().as_bytes(), b"\xe9");
         assert_eq!(unquote("plain"), Path::new("plain"));
         assert_eq!(header_path("a/x y.txt b/x y.txt"), Some(PathBuf::from("x y.txt")));
         assert_eq!(header_path("\"a/q\\\"x\" \"b/q\\\"x\""), Some(PathBuf::from("q\"x")));

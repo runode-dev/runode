@@ -3,11 +3,11 @@
 //! `UiRequest` 交给界面；连接断开或者宿主说 `Goodbye` 时退出。每帧都带着读线程自己那条连接的代数，
 //! 连接已经换过时丢掉：换上新连接后旧连接上已经读进来的帧不能按新连接的通道、请求号和会话处理。
 
-use std::{io::BufReader, os::unix::net::UnixStream, sync::mpsc};
+use std::{io::BufReader, sync::mpsc};
 
 use runode_protocol::{AttachMode, ClientMsg, FrameKind, GoodbyeReason, HostMsg, SessionId, read_frame};
 
-use super::{Attached, Inner, LinkEvent, READ_BUFFER, Screen, State, UiTicket};
+use super::{Attached, Inner, LinkEvent, READ_BUFFER, Screen, State, UiTicket, UnixStream};
 
 /// 读线程：读到连接断开（或者宿主说 `Goodbye`）为止。
 pub(super) fn read_loop(inner: &Inner, generation: u64, stream: UnixStream) {

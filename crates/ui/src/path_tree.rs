@@ -149,6 +149,7 @@ mod tests {
         assert!(path_tree(&[], |_| true).is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn keeps_directory_names_that_are_not_utf8() {
         use std::os::unix::ffi::OsStrExt;

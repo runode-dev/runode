@@ -9,7 +9,6 @@ use std::{
     ffi::OsString,
     fs,
     io::{self, Read},
-    os::unix::{fs::OpenOptionsExt as _, process::CommandExt as _},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     thread::{self, JoinHandle},
@@ -413,14 +412,16 @@ impl Gh {
 /// 跑完 `command` 拿输出；`timeout` 内没跑完时杀掉它的整个进程组，返回错误。
 fn output_within(command: &mut Command, timeout: Duration) -> Result<Output, String> {
     // 自成一个进程组，到点时连同拉起的凭据 helper 一起杀掉，它们可能拿着输出的管道。
-    let spawned = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0).spawn();
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    crate::subprocess::isolate(command);
+    let spawned = command.spawn();
     let mut child = spawned.map_err(spawn_error)?;
     // 输出另起线程读，多过管道的缓冲时 gh 不会卡在写上。到点时不等这两个线程：脱离了进程组的子孙进程
     // 可能还拿着管道。
     let (stdout, stderr) = (read_all(child.stdout.take()), read_all(child.stderr.take()));
     let deadline = Instant::now() + timeout;
     loop {
-        // 两个管道都读到头了才收尸：收了尸它的进程号就可能给了别的进程，到点时 killpg 会杀到别人。
+        // 两个管道都读到头了才收尸：收了尸它的进程号就可能给了别的进程，到点时会杀到别人。
         let waited = if stdout.is_finished() && stderr.is_finished() { child.try_wait() } else { Ok(None) };
         match waited {
             Ok(Some(status)) => {
@@ -429,8 +430,7 @@ fn output_within(command: &mut Command, timeout: Duration) -> Result<Output, Str
             }
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             waited => {
-                // 进程组号就是 gh 的进程号（`process_group(0)`）。
-                unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL) };
+                crate::subprocess::kill(child.id());
                 let _ = child.wait();
                 return Err(match waited {
                     Err(err) => format!("{PROGRAM}: {err}"),
@@ -539,8 +539,15 @@ pub(super) fn set_command(secret: bool, scope: &Scope, name: &str) -> String {
 /// 本地工作流文件 `path` 的内容，最多读 `MAX_WORKFLOW_BYTES`。不是普通文件或读不了时为空：仓库是别人的，
 /// 指向 `/dev/zero` 的符号链接、管道都能让这里读不完或卡住。
 fn read_workflow(path: &Path) -> Option<String> {
-    // 打开时不跟随符号链接、不等管道的写端，再看打开的是不是普通文件，中间换掉也骗不过。
-    let file = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path).ok()?;
+    // 打开时不跟随符号链接、不等管道的写端（Windows 上打开链接本身，`FILE_FLAG_OPEN_REPARSE_POINT`），
+    // 再看打开的是不是普通文件，中间换掉也骗不过。
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(&mut options, 0x0020_0000);
+    let file = options.open(path).ok()?;
     if !file.metadata().ok()?.is_file() {
         return None;
     }
@@ -711,6 +718,7 @@ mod tests {
         assert_eq!(logs_command(9), "gh run view --log --job 9");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_stuck_command_is_killed_at_the_timeout() {
         let started = Instant::now();
@@ -730,6 +738,7 @@ mod tests {
     }
 
     /// 只读普通文件：符号链接（哪怕指向 `/dev/zero`）、管道都当本地没有。
+    #[cfg(unix)]
     #[test]
     fn reads_only_regular_workflow_files() {
         let dir = std::env::temp_dir().join(format!("runode-gh-workflow-{}", std::process::id()));

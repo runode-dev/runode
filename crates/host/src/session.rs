@@ -6,7 +6,7 @@
 //! 一些，程序输出得比宿主的 VT 处理得快时，被拖慢的是程序，不是内存。前端的请求不限量，发的
 //! 一方从不等。没有事的时候按 agent 识别和前台进程轮询要的时刻醒来。
 //!
-//! 宿主升级时会话交给新宿主（见 `handoff`）：旧宿主这边 `Inbox::Prepare` 让会话停下来交出状态、
+//! 宿主升级时会话交给新宿主（见 `handoff`，只在 Unix 上）：旧宿主这边 `Inbox::Prepare` 让会话停下来交出状态、
 //! 冻结，`Inbox::Release` 提交（交出 PTY、线程结束）、`Inbox::Resume` 回滚；新宿主这边 `adopt`
 //! 接手，PTY 停在闸门上，`Inbox::Open` 提交后打开闸门，`Inbox::Release` 不接手了原样交回去。
 //!
@@ -24,7 +24,6 @@
 use std::{
     any::Any,
     ffi::OsString,
-    os::fd::OwnedFd,
     panic::{self, AssertUnwindSafe},
     sync::{
         Arc, Condvar, Mutex, PoisonError,
@@ -37,10 +36,18 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{AttachMode, HostMsg, SessionId, SessionInfo};
+#[cfg(unix)]
+use std::os::fd::OwnedFd;
+
+#[cfg(unix)]
 use runode_terminal::{
     SnapshotError,
-    host_session::{HostSession, ImportError, ImportScreen, RedactorState, ReportRedactor, SessionExport},
-    pty::{self, Pty, PtyEvent, PtyHandoff},
+    host_session::{ImportError, ImportScreen, RedactorState, SessionExport},
+    pty::PtyHandoff,
+};
+use runode_terminal::{
+    host_session::{HostSession, ReportRedactor},
+    pty::{self, Pty, PtyEvent},
 };
 use runode_types::{
     agent::AgentState,
@@ -81,10 +88,13 @@ const TYPE_AT_INTEGRATED_PROMPT_PATIENCE: Duration = Duration::from_secs(60);
 const FOREGROUND_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 /// 交接时 VT 停在一条编不进快照的序列中间（`SnapshotError::Unfinished`），最多这么久里让程序
 /// 接着输出、再试；还不行就只交重放。
+#[cfg(unix)]
 const SNAPSHOT_PATIENCE: Duration = Duration::from_secs(1);
 /// 编不出快照时每次让程序接着输出这么久再停下来试。
+#[cfg(unix)]
 const UNFINISHED_RETRY: Duration = Duration::from_millis(100);
 /// 交接时等读线程停下的过程中，隔这么久看一次它停了没有。
+#[cfg(unix)]
 const DRAIN_POLL: Duration = Duration::from_millis(2);
 
 /// 会话发给一个连着的前端的一件事，同一个会话的按发生的先后。
@@ -156,14 +166,18 @@ pub(crate) enum Inbox {
     Kill,
     /// 交接（旧宿主）：停下读 PTY、处理完已经读出来的输出，交出会话的状态，之后冻结，见
     /// `Runner::hand_over`。
+    #[cfg(unix)]
     Prepare(mpsc::Sender<Prepared>),
     /// 交出 PTY（不结束 shell），回交出时还没写进 PTY 的输入，线程随即结束：旧宿主在交接提交时
     /// 发，新宿主不接手了时发（PTY 停在闸门上，原样交回）。
+    #[cfg(unix)]
     Release(mpsc::Sender<Unwritten>),
     /// 交接回滚（旧宿主）：接着读 PTY，按先后重放冻结期间存下的请求。
+    #[cfg(unix)]
     Resume,
     /// 交接提交了（新宿主）：先把旧宿主没写进 PTY 的这些输入排进写队列，再打开读写线程的闸门；
     /// 还在等提示符的从这时起重新等，同 `TypeAtPrompt`。
+    #[cfg(unix)]
     Open(Unwritten),
     /// 读写剪贴板的规矩改了，见 `ClientMsg::SetOptions`。
     Clipboard(ClipboardAccess),
@@ -176,6 +190,7 @@ pub(crate) enum Inbox {
 }
 
 /// 会话交出 PTY 时还没写进 PTY 的输入，见 `Inbox::Release`、`Inbox::Open`。
+#[cfg(unix)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Unwritten {
     /// 接手的一方当场写的。
@@ -184,6 +199,7 @@ pub(crate) struct Unwritten {
     pub(crate) at_prompt: Vec<u8>,
 }
 
+#[cfg(unix)]
 impl Unwritten {
     pub(crate) fn is_empty(&self) -> bool {
         self.now.is_empty() && self.at_prompt.is_empty()
@@ -191,6 +207,7 @@ impl Unwritten {
 }
 
 /// 会话对 `Inbox::Prepare` 的回话。
+#[cfg(unix)]
 pub(crate) enum Prepared {
     /// 不交：shell 已经退出了，或者会话正被结束。交接提交时结束它，回滚时照旧留着。
     Gone,
@@ -200,6 +217,7 @@ pub(crate) enum Prepared {
 }
 
 /// 会话交给新宿主的东西，见 `runode_protocol::HandoffPart::Session`。
+#[cfg(unix)]
 pub(crate) struct Exported {
     pub(crate) export: SessionExport,
     /// 复制的一份 PTY master，自己这份照常留着直到提交；还没启动 shell 时为空。交出方发出去以后
@@ -218,6 +236,7 @@ pub(crate) struct Exported {
 }
 
 /// 交接过来、已经启动了 shell 的会话，见 `adopt`。
+#[cfg(unix)]
 pub(crate) struct Adopted {
     pub(crate) handoff: PtyHandoff,
     pub(crate) export: SessionExport,
@@ -275,7 +294,7 @@ impl Threads {
     }
 
     /// 测试用：现在记着几个。
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn live(&self) -> usize {
         *self.live.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -368,7 +387,7 @@ impl Handle {
     }
 
     /// 测试用：发到 `inbox` 的一端，没有会话线程，由测试自己收、自己回话。
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn detached(inbox: mpsc::Sender<Inbox>) -> Self {
         Self { inbox, killed: Arc::default(), driven: Arc::default() }
     }
@@ -432,6 +451,7 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 ///
 /// 失败时 PTY 已经原样交回、关掉了这边的描述符，shell 不受影响（交出方还拿着自己那份）。
 /// PTY 在会话线程起好之后才经 channel 交过去：起不了线程时它还在这里，用 `Pty::release` 明着交回。
+#[cfg(unix)]
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
     let Setup { id, settings: _, env: _, ui, clipboard, read_patience, alive } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
@@ -480,11 +500,13 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
 }
 
 /// 正在重建的接手来的会话，见 `adopt`。
+#[cfg(unix)]
 pub(crate) struct Adopting {
     handle: Handle,
     created: mpsc::Receiver<Result<bool>>,
 }
 
+#[cfg(unix)]
 impl Adopting {
     /// 等会话线程把会话建好，返回它和它的屏幕是不是从重放重建的。失败时 PTY 已经原样交回。
     pub(crate) fn finish(self) -> Result<(Handle, bool)> {
@@ -495,6 +517,7 @@ impl Adopting {
 
 /// 用快照（没有或者解不开时用重放）把交接过来的会话建起来，返回会话和是不是用的重放。都不成时
 /// 把 PTY 原样交回去再报错。
+#[cfg(unix)]
 fn import(
     id: SessionId,
     pty: Pty,
@@ -525,6 +548,7 @@ fn import(
 }
 
 /// 把接手来、还停着的 PTY 原样交回去：只关这边的描述符，不结束 shell。
+#[cfg(unix)]
 fn release(pty: &mut Pty) {
     if let Err(err) = pty.release() {
         tracing::warn!("failed to give a pty back: {err:#}");
@@ -635,6 +659,7 @@ impl Runner {
             // 处理一条消息时 panic 的话，`HostSession` 可能停在半路，不能再往下处理；告诉前端会话
             // 没了，免得视图一直停在最后一屏不动。
             let handled = panic::catch_unwind(AssertUnwindSafe(|| match message {
+                #[cfg(unix)]
                 Some(Inbox::Prepare(reply)) => self.hand_over(&reply, inbox, killed),
                 message => self.step(message),
             }));
@@ -658,6 +683,7 @@ impl Runner {
                 self.ended();
                 return false;
             }
+            #[cfg(unix)]
             Some(Inbox::Release(reply)) => {
                 let _ = reply.send(self.release(Vec::new()));
                 return false;
@@ -853,6 +879,7 @@ impl Runner {
                 self.session.drive(by.map(|by| by.to_string()), action, at_ms);
             }
             Inbox::Driven(None) => self.session.clear_driver(),
+            #[cfg(unix)]
             Inbox::Open(Unwritten { now, at_prompt }) => {
                 if !now.is_empty() {
                     self.session.write(now);
@@ -868,7 +895,9 @@ impl Runner {
             Inbox::UiAnswer { ui, reply } => self.ui_answered(ui, *reply),
             // 交接以外的时候收到的：`Prepare` 在 `run` 里办，丢掉回话的一端，等的一方当会话没了；
             // `Release` 在 `step` 里办；没有冻结着时 `Resume` 没什么可做。
-            Inbox::Kill | Inbox::Prepare(_) | Inbox::Release(_) | Inbox::Resume => {}
+            Inbox::Kill => {}
+            #[cfg(unix)]
+            Inbox::Prepare(_) | Inbox::Release(_) | Inbox::Resume => {}
         }
     }
 
@@ -881,6 +910,7 @@ impl Runner {
     /// 收到 `Goodbye`）。只读的请求（列会话、读屏幕）照常办；断开当场放开订阅，它让出的尺寸归属
     /// （会改尺寸）也存下回滚时重放。不按时刻轮询 agent：读线程停着没有输出，拖久了会把工作中的
     /// agent 判成空闲。
+    #[cfg(unix)]
     fn hand_over(
         &mut self,
         reply: &mpsc::Sender<Prepared>,
@@ -916,6 +946,7 @@ impl Runner {
     /// 交接的第一步：已经启动了 shell 的，叫停读线程，把它已经读出来的输出处理完，编原始快照
     /// （VT 停在编不进快照的序列中间时让程序再输出一会儿再试，最多 `SNAPSHOT_PATIENCE`）和重放，
     /// 复制一份 PTY master；还没启动的只交状态。期间别的消息按冻结的规矩办，见 `hand_over`。
+    #[cfg(unix)]
     fn prepare(&mut self, inbox: &mpsc::Receiver<Inbox>, killed: &AtomicBool, freeze: &mut Freeze) -> Prepared {
         if self.exited {
             return Prepared::Gone;
@@ -980,6 +1011,7 @@ impl Runner {
     /// 读线程叫停以后，把它已经交来的输出都处理完：等到 `pty_reader_finished`（之后读线程不会再
     /// 往收件箱里放东西），再取完收件箱里剩下的。别的消息按冻结的规矩办。会话被结束或者宿主没了
     /// 时返回 false。
+    #[cfg(unix)]
     fn drain(&mut self, inbox: &mpsc::Receiver<Inbox>, killed: &AtomicBool, freeze: &mut Freeze) -> bool {
         loop {
             if killed.load(Ordering::Acquire) {
@@ -1003,6 +1035,7 @@ impl Runner {
     }
 
     /// 交接期间收到的一条消息，见 `hand_over`。
+    #[cfg(unix)]
     fn frozen(&mut self, message: Inbox, freeze: &mut Freeze) {
         match message {
             message @ (Inbox::Pty(_) | Inbox::Info(_) | Inbox::ReadScreen { .. }) => self.handle(message),
@@ -1028,6 +1061,7 @@ impl Runner {
     /// 交接提交了：交出 PTY（不结束 shell），返回交出时没写进 PTY 的输入，`held` 里存下的输入编好
     /// 接在后面；还在等提示符的 `TypeAtPrompt`（`held` 里的后来的替掉先前的，同 `handle`）单独交出，
     /// 接手的一方接着等。还没启动 shell 的会话没有 PTY 可交，只有存下的输入。
+    #[cfg(unix)]
     fn release(&mut self, held: Vec<Inbox>) -> Unwritten {
         // 在等桌面回话的读剪贴板请求新宿主接不过去（它不知道在等什么，也不会替它计时），程序会一直等：交出
         // PTY 之前回它空的，回话写不出去的话随没写出去的输入一起交给新宿主。冻结期间存下的界面回话随
@@ -1065,6 +1099,7 @@ impl Runner {
     }
 
     /// 交接回滚：接着读 PTY，按先后重放冻结期间存下的请求。
+    #[cfg(unix)]
     fn resume(&mut self, held: Vec<Inbox>) {
         if let Err(err) = self.session.resume_reading() {
             tracing::error!("session {} cannot read its pty after the handoff was rolled back: {err:#}", self.id);
@@ -1311,6 +1346,7 @@ impl Runner {
 }
 
 /// 交接期间冻结着的会话存下的东西，见 `Runner::hand_over`。
+#[cfg(unix)]
 #[derive(Default)]
 struct Freeze {
     /// 冻结期间收到的、改会话的请求，按先后。
@@ -1319,6 +1355,7 @@ struct Freeze {
     decision: Option<Decision>,
 }
 
+#[cfg(unix)]
 enum Decision {
     Release(mpsc::Sender<Unwritten>),
     Resume,
@@ -1432,15 +1469,17 @@ mod tests {
     use super::*;
 
     const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
+    /// 测试里当 shell 用的程序：一直开着读输入，不起子进程。Windows 上没有 `cat`，用 cmd。
+    const CAT: &str = if cfg!(windows) { "cmd.exe" } else { "/bin/cat" };
 
-    /// `cat` 当 shell 的会话线程状态，`start` 时已经启动。
+    /// `CAT` 当 shell 的会话线程状态，`start` 时已经启动。
     fn runner(start: bool) -> Runner {
         let mut pty = Pty::open(SIZE, Box::new(|_| true)).unwrap();
         if start {
-            pty.start(Some("/bin/cat"), None, IntegrationMode::Off).unwrap();
+            pty.start(Some(CAT), None, IntegrationMode::Off).unwrap();
         }
         let session = HostSession::new(SIZE, pty, None, &TermSettings::default()).unwrap();
-        Runner::new(SessionId(1), session, Some("/bin/cat".into()), TermSettings::default(), Arc::default())
+        Runner::new(SessionId(1), session, Some(CAT.into()), TermSettings::default(), Arc::default())
     }
 
     #[test]
@@ -1503,6 +1542,7 @@ mod tests {
 
     /// 交接冻结期间被结束：冻结时存下的 `Subscribe` 也要回，前端才收得到 `Attached`（和随后的 `Exited`），
     /// 不干等到超时。
+    #[cfg(unix)]
     #[test]
     fn a_session_killed_while_frozen_answers_held_subscribes() {
         const WAIT: Duration = Duration::from_secs(10);
@@ -1534,6 +1574,7 @@ mod tests {
 
     /// 交出 PTY 时还在等提示符的 `TypeAtPrompt`（冻结期间存下的替掉先前的）不混进当场写的输入；接手的一方
     /// `Open` 后接着等提示符，不当场写。
+    #[cfg(unix)]
     #[test]
     fn input_waiting_for_the_prompt_is_handed_over_apart() {
         let mut giver = runner(false);

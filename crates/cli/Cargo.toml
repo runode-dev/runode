@@ -21,12 +21,16 @@ anyhow.workspace = true
 regex.workspace = true
 # `list --json` 的输出。
 serde_json.workspace = true
-# `schedule` 按本机的本地时间换算定时的钟点（`mktime`、`localtime_r`）。
+# `schedule` 按本机的本地时间换算定时的钟点（`mktime`、`localtime_r`）；`remote pair` 接住信号。
 libc.workspace = true
 # `list`、`todo list` 这些表格按显示宽度补齐。
 unicode-width.workspace = true
 # `remote pair` 在终端里画配对的二维码。
 qrcode.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# Windows 10 起有的 AF_UNIX socket，连宿主用。
+uds_windows.workspace = true
 
 [lints]
 workspace = true

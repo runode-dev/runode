@@ -1,6 +1,8 @@
 //! 别的终端里的程序经 socket 操作会话：发控制键、粘贴、读某条命令的输出，以及宿主记下谁在
 //! 操作（`SessionMeta::driver`）、用户在界面里打字后清掉。
 
+#![cfg(unix)]
+
 mod common;
 
 use std::{thread, time::Duration, time::Instant};

@@ -52,9 +52,19 @@ impl Default for Curl {
 }
 
 impl Curl {
+    /// 拉起 curl 的命令。Windows 上不开控制台窗口（`CREATE_NO_WINDOW`）：宿主没有控制台，不然每推一次
+    /// 就闪一个黑窗。
+    fn command(&self) -> Command {
+        #[cfg_attr(not(windows), expect(unused_mut, reason = "只在 Windows 上设标志"))]
+        let mut command = Command::new(&self.program);
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+        command
+    }
+
     /// 看 curl 能不能用：运行得了，而且编进了 HTTP/2（`curl --version` 的 Features 里有 `HTTP2`）。
     pub(crate) fn check(&self) -> Result<(), String> {
-        let output = Command::new(&self.program)
+        let output = self.command()
             .arg("--version")
             .stdin(Stdio::null())
             .stderr(Stdio::null())
@@ -76,7 +86,7 @@ impl Curl {
 
     /// 发 `request`，等到响应。curl 运行不了、连不上、超时这类没有拿到响应的情况是 `Err`。
     pub(crate) fn send(&self, request: &Request) -> Result<Response, String> {
-        let mut child = Command::new(&self.program)
+        let mut child = self.command()
             // `-q` 必须在最前面：不读 `~/.curlrc`，免得里面的 `fail`、`location` 改了行为。走代理时
             // `--include` 会先输出代理 CONNECT 的应答，`--suppress-connect-headers` 去掉它，解析看到的
             // 头一块才是 APNs 的响应。

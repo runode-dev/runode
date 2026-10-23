@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 use common::{TestRepo, paths_of, read_all};
 use runode_git::{FileStatus, RepoKind, Section, hunk_actionable};
 
+/// 各个仓库的前缀（分隔符一律写成 `/`）和种类。
 fn layout(repos: &runode_git::Repos) -> Vec<(String, RepoKind)> {
-    repos.iter().map(|repo| (repo.prefix.to_string_lossy().into_owned(), repo.kind)).collect()
+    repos.iter().map(|repo| (repo.prefix.to_string_lossy().replace('\\', "/"), repo.kind)).collect()
 }
 
 #[test]
@@ -274,6 +275,7 @@ fn adds_a_worktree_inside_the_repo_without_dirtying_it() {
     assert!(handle.delete_merged_branch("-D").is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn removes_the_new_worktree_and_branch_when_info_exclude_cannot_be_written() {
     let repo = TestRepo::new("repos-add-worktree-no-exclude");

@@ -384,12 +384,15 @@ fn a_phone_pinning_another_certificate_does_not_connect() {
 #[test]
 fn the_certificate_stays_the_same_across_restarts() {
     let mut harness = Harness::start("restart");
-    let cert = harness.dirs.remote_access_cert_file().unwrap();
-    let key = harness.dirs.remote_access_key_file().unwrap();
-    for path in [&cert, &key] {
-        assert_eq!(mode(path), 0o600, "{}", path.display());
+    #[cfg(unix)]
+    {
+        let cert = harness.dirs.remote_access_cert_file().unwrap();
+        let key = harness.dirs.remote_access_key_file().unwrap();
+        for path in [&cert, &key] {
+            assert_eq!(mode(path), 0o600, "{}", path.display());
+        }
+        assert_eq!(mode(&harness.dirs.remote_access_dir().unwrap()), 0o700);
     }
-    assert_eq!(mode(&harness.dirs.remote_access_dir().unwrap()), 0o700);
     // 同一时刻只有一个监听方。
     let second = runode_remote::Listener::start(options(
         &harness.dirs,
@@ -454,6 +457,7 @@ fn a_corrupt_certificate_stops_the_listener_without_replacing_it() {
     assert_eq!(harness.restart(), harness.fingerprint);
 }
 
+#[cfg(unix)]
 fn mode(path: &Path) -> u32 {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
@@ -498,10 +502,7 @@ fn a_device_keeps_at_most_eight_connections() {
 /// 停掉的监听的连接线程晚收尾时不重写状态文件，不然重开的监听写好的新端口会被换回旧的。
 #[test]
 fn a_stopped_listener_does_not_bring_its_status_back() {
-    use std::{
-        os::unix::net::UnixStream,
-        sync::{Arc, Mutex, mpsc},
-    };
+    use std::sync::{Arc, Mutex, mpsc};
 
     let mut harness = Harness::start("stopped");
     let key = Key::generate();

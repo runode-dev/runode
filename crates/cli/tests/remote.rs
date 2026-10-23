@@ -195,10 +195,12 @@ fn pairing_shows_a_code_and_a_link_and_waits() {
 }
 
 /// 设了它时 `ctrl_c_withdraws_the_pairing_code` 是被测的子进程，值是它的临时目录。
+#[cfg(unix)]
 const CHILD_ROOT: &str = "RUNODE_TEST_PAIR_ROOT";
 
 /// Ctrl-C 停下等待时删掉口令文件，退出码是 130。信号发给整个进程，所以 `pair` 跑在重新起的这个测试
 /// 程序里，不打断同一进程里别的测试。
+#[cfg(unix)]
 #[test]
 fn ctrl_c_withdraws_the_pairing_code() {
     if let Some(root) = std::env::var_os(CHILD_ROOT) {

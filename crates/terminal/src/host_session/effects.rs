@@ -123,16 +123,14 @@ impl Effects {
         }
         if field == b"path" {
             if let Ok(mut path) = self.shell_path.try_borrow_mut() {
-                use std::os::unix::ffi::OsStringExt as _;
-                *path = Some(std::ffi::OsString::from_vec(value));
+                *path = Some(os_string(value));
                 self.reported.set(true);
             }
             return;
         }
         if field == b"cwd" {
             if let Ok(mut cwd) = self.shell_cwd.try_borrow_mut() {
-                use std::os::unix::ffi::OsStringExt as _;
-                *cwd = (!value.is_empty()).then(|| std::ffi::OsString::from_vec(value).into());
+                *cwd = (!value.is_empty()).then(|| os_string(value).into());
             }
             return;
         }
@@ -312,6 +310,18 @@ fn percent_decode(bytes: &[u8]) -> Vec<u8> {
         }
     }
     out
+}
+
+/// shell 报告的路径。Unix 上按原样的字节；Windows 上的路径不是字节串，按 UTF-8 解，解不开的字换成
+/// 替换符。
+#[cfg(unix)]
+fn os_string(bytes: Vec<u8>) -> std::ffi::OsString {
+    std::os::unix::ffi::OsStringExt::from_vec(bytes)
+}
+
+#[cfg(not(unix))]
+fn os_string(bytes: Vec<u8>) -> std::ffi::OsString {
+    String::from_utf8_lossy(&bytes).into_owned().into()
 }
 
 #[cfg(test)]

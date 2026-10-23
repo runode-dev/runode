@@ -1,9 +1,9 @@
-use std::{
-    path::Path,
-    time::{Duration, Instant},
-};
+#[cfg(unix)]
+use std::path::Path;
+use std::time::{Duration, Instant};
 
 use runode_host::Host;
+#[cfg(unix)]
 use runode_terminal::session::Session;
 
 use super::{
@@ -23,6 +23,7 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 /// 写一个当 shell 用的脚本；登录 shell 多带的参数它不看。
+#[cfg(unix)]
 fn script(dir: &Path, name: &str, body: &str) -> String {
     use std::os::unix::fs::PermissionsExt as _;
 
@@ -38,6 +39,7 @@ fn connected(host: &Host) -> Link {
     link
 }
 
+#[cfg(unix)]
 fn spawn(link: &Link, shell: String) -> SessionId {
     link.spawn(SpawnOptions {
         size: SIZE,
@@ -64,6 +66,7 @@ fn next(rx: &mut UnboundedReceiver<LinkEvent>) -> LinkEvent {
     }
 }
 
+#[cfg(unix)]
 /// 等到输出里出现 `needle`，跳过别的事件。
 fn wait_for_output(rx: &mut UnboundedReceiver<LinkEvent>, needle: &[u8]) {
     let mut seen = Vec::new();
@@ -77,6 +80,7 @@ fn wait_for_output(rx: &mut UnboundedReceiver<LinkEvent>, needle: &[u8]) {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn attaching_assembles_a_snapshot_the_view_can_decode() {
     let dir = temp_dir("snapshot");
@@ -102,6 +106,7 @@ fn attaching_assembles_a_snapshot_the_view_can_decode() {
     link.kill(id);
 }
 
+#[cfg(unix)]
 #[test]
 fn input_and_output_go_through_the_session_channel() {
     let dir = temp_dir("echo");
@@ -119,6 +124,7 @@ fn input_and_output_go_through_the_session_channel() {
     link.kill(id);
 }
 
+#[cfg(unix)]
 #[test]
 fn two_sessions_get_their_own_output() {
     let dir = temp_dir("two");
@@ -814,6 +820,7 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
 /// ```
 ///
 /// `RUNODE_LATENCY_N` 改回显的次数，`RUNODE_THROUGHPUT_MB` 改文件大小。
+#[cfg(unix)]
 mod bench {
     use std::process::{Child, Command};
 

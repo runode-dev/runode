@@ -107,13 +107,14 @@ fn avatar_for(dir: &Path) -> Option<PathBuf> {
 fn download_avatar(owner: &str, file: &Path) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let partial = file.with_extension(format!("{}-{}.part", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
-    let downloaded = Command::new("curl")
+    let mut command = Command::new("curl");
+    command
         .args(["-sfL", "--create-dirs", "--max-time", AVATAR_TIMEOUT_SECS, "-o"])
         .arg(&partial)
         .arg(format!("https://github.com/{owner}.png?size=64"))
-        .stdin(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
+        .stdin(Stdio::null());
+    crate::subprocess::hide_window(&mut command);
+    let downloaded = command.status().is_ok_and(|status| status.success());
     if !downloaded || std::fs::rename(&partial, file).is_err() {
         let _ = std::fs::remove_file(&partial);
     }

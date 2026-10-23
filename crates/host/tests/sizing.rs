@@ -4,7 +4,9 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use common::{BUILD, Peer, WAIT, host, script, temp_dir};
+use common::{BUILD, CAT, Peer, WAIT, host};
+#[cfg(unix)]
+use common::{script, temp_dir};
 use runode_host::{ClientMsg, Host, HostMsg, SessionId};
 use runode_protocol::{AttachMode, BuildId, Caps, ClientKind, FrameKind, PROTOCOL_VERSION, SessionInfo};
 use runode_types::{grid::GridSize, shell::IntegrationMode};
@@ -34,6 +36,7 @@ fn desktop(host: &Host, device: &str) -> Peer {
 
 /// 连接上收到的一件事：某个通道的输出，或者一条控制消息。
 #[derive(Debug)]
+#[cfg_attr(not(unix), expect(dead_code, reason = "输出只有 Unix 上的测试看"))]
 enum Seen {
     Output(u32, Vec<u8>),
     Msg(Box<HostMsg>),
@@ -140,7 +143,7 @@ fn settle(peer: &mut Peer, id: SessionId) {
 }
 
 fn cat(peer: &mut Peer) -> SessionId {
-    peer.spawn("/bin/cat")
+    peer.spawn(CAT)
 }
 
 /// 两个前端带着尺寸连上：后连上的说了算。先连上的在输出流里收到 `Resized` 和不是自己的
@@ -165,6 +168,7 @@ fn the_last_to_attach_with_a_size_decides() {
 
 /// 不是 owner 的前端打字就接管：`Resized` 在两条连接的输出流里落在同一个位置（前面的输出一样），
 /// 两边各自收到新的 `SizeOwner`。
+#[cfg(unix)]
 #[test]
 fn typing_takes_the_size_at_the_same_point_in_both_streams() {
     let dir = temp_dir("sizing-typing");
@@ -488,7 +492,7 @@ fn oversized_grids_are_refused() {
         fallback_cwd: None,
         integration: IntegrationMode::Off,
         start: true,
-        shell: Some("/bin/cat".into()),
+        shell: Some(CAT.into()),
         settings: None,
         resume: None,
     });
@@ -512,6 +516,7 @@ fn oversized_grids_are_refused() {
 
 /// 程序用 CSI 8 t 要求改窗口尺寸：宿主不改会话尺寸，跟在含这条序列的那块输出后面转一条 `ResizeWindow`。
 /// 同一块里先后几次的合并见 `merge_window_resize` 的测试：PTY 不保证两次写进同一块，这里只发一次。
+#[cfg(unix)]
 #[test]
 fn a_window_resize_request_follows_its_output() {
     let host = host();

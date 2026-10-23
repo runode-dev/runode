@@ -22,7 +22,6 @@ mod redact;
 use std::{
     cell::{Cell as StdCell, RefCell},
     fmt,
-    os::fd::OwnedFd,
     path::{Path, PathBuf},
     rc::Rc,
     time::Instant,
@@ -48,7 +47,7 @@ use runode_types::{
 
 use crate::{
     prompt_input,
-    pty::{Pty, PtyHandoff, PtyWriter},
+    pty::{Pty, PtyWriter},
     vt::{self, CommandOutput, SnapshotError},
 };
 pub use clipboard::{ClipboardQuery, ClipboardRequest};
@@ -300,12 +299,14 @@ impl HostSession {
     /// 交接的第一步：让 PTY 的读线程停下，见 `Pty::stop_reading`。之后还要把 `PtySink` 那头
     /// 已经收到的输出喂完，等 `pty_reader_finished` 为 true，再编快照、`release_pty`。快照编不
     /// 出来（`SnapshotError::Unfinished`）或者不交了时 `resume_reading`。
+    #[cfg(unix)]
     pub fn stop_reading(&mut self) {
         self.pty.stop_reading();
     }
 
     /// `stop_reading` 之后接着读，见 `Pty::resume_reading`；`import` 导入、PTY 还停着的会话在这里
     /// 打开闸门。交接前按输出活动判成工作中的 agent 从这一刻接着算，见 `Tracker::output_resumed`。
+    #[cfg(unix)]
     pub fn resume_reading(&mut self) -> Result<()> {
         self.pty.resume_reading()?;
         self.agent_tracker.output_resumed(Instant::now());
@@ -313,6 +314,7 @@ impl HostSession {
     }
 
     /// PTY 的读线程已经结束，`PtySink` 不会再收到东西，见 `Pty::reader_finished`。
+    #[cfg(unix)]
     pub fn pty_reader_finished(&self) -> bool {
         self.pty.reader_finished()
     }
@@ -320,18 +322,20 @@ impl HostSession {
     /// 把 PTY 交出去，不结束 shell，见 `Pty::release`。交出后这个会话不再管 shell：写进去的丢掉，
     /// 改尺寸只改这边的 VT、不碰已经交出去的 PTY，读不到前台进程，丢掉它也不结束 shell；VT 还在，
     /// 照样能编快照。出错时什么都没动。
-    pub fn release_pty(&mut self) -> Result<PtyHandoff> {
+    #[cfg(unix)]
+    pub fn release_pty(&mut self) -> Result<crate::pty::PtyHandoff> {
         self.pty.release()
     }
 
     /// 复制一份 PTY master 的描述符，交接时先传给新宿主，自己这份照常用，见 `Pty::dup_master`。
-    pub fn dup_master(&self) -> std::io::Result<OwnedFd> {
+    #[cfg(unix)]
+    pub fn dup_master(&self) -> std::io::Result<std::os::fd::OwnedFd> {
         self.pty.dup_master()
     }
 
     /// shell 的进程号；还没启动或者 PTY 交出去以后为 `None`。
     pub fn shell_pid(&self) -> Option<u32> {
-        self.pty.shell_pid().and_then(|pid| u32::try_from(pid).ok())
+        self.pty.shell_pid().and_then(crate::pty::pid_u32)
     }
 
     /// 交接时要交给新宿主的会话状态，见 `SessionExport`。在 `take_commands` 之后取：还没取走的
@@ -554,7 +558,7 @@ impl HostSession {
     /// 比，才认得出前台换了一个程序（哪怕同名）。
     pub fn foreground_program(&self) -> Option<(u32, Option<String>)> {
         let (leader, _) = self.pty.foreground()?;
-        Some((u32::try_from(leader).ok()?, crate::pty::process_name(leader)))
+        Some((crate::pty::pid_u32(leader)?, crate::pty::process_name(leader)))
     }
 
     /// 前台是不是 shell 自己，现读。

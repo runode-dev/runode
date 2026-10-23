@@ -428,6 +428,7 @@ fn snapshot_costs() {
 
 /// 回滚历史填满时实际留下多少行、占多少内存、快照多大。各跑一个进程才量得准 RSS：
 /// `cargo test --release -p runode-terminal vt::tests::scrollback_capacity_80_cols -- --ignored --exact --nocapture`
+#[cfg(unix)]
 #[test]
 #[ignore = "测量内存，手动跑"]
 fn scrollback_capacity_80_cols() {
@@ -435,12 +436,14 @@ fn scrollback_capacity_80_cols() {
 }
 
 /// 同 `scrollback_capacity_80_cols`。
+#[cfg(unix)]
 #[test]
 #[ignore = "测量内存，手动跑"]
 fn scrollback_capacity_200_cols() {
     scrollback_capacity(200);
 }
 
+#[cfg(unix)]
 #[allow(clippy::print_stderr, reason = "手动跑的测量，结果直接打出来看")]
 fn scrollback_capacity(cols: u16) {
     let max_rss = || {

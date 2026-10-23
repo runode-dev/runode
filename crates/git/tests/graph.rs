@@ -299,6 +299,7 @@ fn tells_ref_changes_from_other_files() {
 }
 
 /// 上游的名字不是 UTF-8（只能在 packed-refs 里，macOS 上建不出这样的文件）：照样读得出历史，不因为它整条报错。
+#[cfg(unix)]
 #[test]
 fn reads_history_with_an_upstream_whose_name_is_not_utf8() {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt, process::Command};

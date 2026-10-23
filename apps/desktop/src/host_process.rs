@@ -5,20 +5,25 @@
 //! `remote_access::follow_config`），app 关着时手机也连得上；开着远程访问、又有手机可能连上来
 //! （配对过的设备，或者正在配对）时不因空闲退出。
 //!
-//! `runode --host --take-over`（`take_over`）是升级时新版本的 app 拉起的新宿主：先接手 socket 上
-//! 旧宿主的会话和 socket，再照常跑。交出会话的旧宿主不马上退出，等它拉起的 shell 都结束了才退出
-//! （`wait_for_children`）。
+//! `runode --host --take-over`（`take_over`，只在 Unix 上）是升级时新版本的 app 拉起的新宿主：先接手
+//! socket 上旧宿主的会话和 socket，再照常跑。交出会话的旧宿主不马上退出，等它拉起的 shell 都结束了
+//! 才退出（`wait_for_children`）。
 
+use std::{fs::OpenOptions, sync::Mutex, time::Duration};
+#[cfg(unix)]
 use std::{
-    fs::{File, OpenOptions},
+    fs::File,
     io::Write as _,
     os::fd::FromRawFd as _,
-    sync::{Arc, Mutex, PoisonError},
-    time::{Duration, Instant},
+    sync::{Arc, PoisonError},
+    time::Instant,
 };
 
-use runode_host::{BuildId, Host, STATUS_FD, Stopped, TakeOverError, TakeOverOptions};
+use runode_host::{BuildId, Host};
+#[cfg(unix)]
+use runode_host::{STATUS_FD, Stopped, TakeOverError, TakeOverOptions};
 
+#[cfg(unix)]
 use crate::host_client::{HandoffFailure, HandoffStatus, READY_BY};
 
 /// 没有会话也没有连接，持续这么久就退出。
@@ -52,6 +57,7 @@ fn serve(host: &Host) {
     let stopped = host.run_until_idle(IDLE_EXIT);
     // 先停远程访问再退出：交接时新宿主在等这个进程放开端口。
     drop(remote);
+    #[cfg(unix)]
     if stopped == Stopped::Handoff {
         tracing::info!("host {} handed off; waiting for its shells to exit", std::process::id());
         wait_for_children();
@@ -63,6 +69,7 @@ fn serve(host: &Host) {
 /// 责任进程是拉起它的宿主：宿主一退出，shell 里的程序连局域网就被拦（No route to host），新宿主
 /// 接手了也一样，所以交出会话后还得留着。交接时每个 shell 已经有一个线程在等它（`pty-reaper`），
 /// 这里谁先收到都行。
+#[cfg(unix)]
 fn wait_for_children() {
     loop {
         // SAFETY: 不要退出状态，只等任意一个子进程结束。
@@ -79,6 +86,7 @@ fn wait_for_children() {
 /// `HandoffStatus` 交给拉起它的 app（状态管道，`STATUS_FD`），成了就照 `run` 跑下去；没成时会话
 /// 还在旧宿主手里，退出。要回 `HandoffReady` 之前先写一行 `HandoffStatus::ready`，从启动起过了
 /// `READY_BY` 就不再回，见 `host_client::handoff` 的模块文档。返回进程的退出码。
+#[cfg(unix)]
 pub fn take_over() -> i32 {
     // 先于认领状态管道：认领后它带着 close-on-exec，重新执行就丢了。
     // SAFETY: `main` 直接交到这里，还没开别的线程。
@@ -144,6 +152,7 @@ pub fn take_over() -> i32 {
 
 /// 两种跑法共用的准备：放宽描述符上限、换到家目录，建好标成单独跑的宿主。
 fn prepare(dirs: &runode_paths::Dirs) -> Host {
+    #[cfg(unix)]
     if let Err(err) = runode_terminal::pty::raise_fd_limit() {
         tracing::warn!("failed to raise the open file limit: {err}");
     }
@@ -161,8 +170,10 @@ fn prepare(dirs: &runode_paths::Dirs) -> Host {
 }
 
 /// 拉起这个进程的 app 读结果的管道（`STATUS_FD`）；没有（比如手动跑的）时为空，报告什么都不做。
+#[cfg(unix)]
 struct StatusPipe(Option<File>);
 
+#[cfg(unix)]
 impl StatusPipe {
     /// 认领 `STATUS_FD`：它开着而且是管道时才用，设上 close-on-exec，之后启动的 shell 不会带走它
     /// （带走了 app 就等不到结尾）。

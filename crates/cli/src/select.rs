@@ -442,8 +442,9 @@ enum Wanted {
 
 impl Wanted {
     fn new(dir: &str, home: Option<&Path>) -> Self {
-        // `.config`、`~foo` 这种不带 `/` 的写法是名字，只有 `~`、`.`、`..` 单独写时才是路径。
-        if !(dir.contains('/') || matches!(dir, "~" | "." | "..")) {
+        // `.config`、`~foo` 这种不带路径分隔符（Windows 上 `\` 也算）的写法是名字，只有 `~`、`.`、`..`
+        // 单独写时才是路径。
+        if !(dir.contains(std::path::is_separator) || matches!(dir, "~" | "." | "..")) {
             return Self::Name(dir.into());
         }
         let path = match (dir, dir.strip_prefix("~/"), home) {
@@ -517,6 +518,7 @@ mod tests {
         assert!(Selector::parse("agent:claude:asleep").is_err());
     }
 
+    #[cfg(unix)]
     #[test]
     fn directories_match_by_path_or_name() {
         let name = Wanted::new("runode", None);
@@ -533,5 +535,17 @@ mod tests {
         assert!(!dotted.matches(Path::new("/x/.config/sub")));
         assert!(matches!(Wanted::new("..", None), Wanted::Path(_)));
         assert!(matches!(Wanted::new(".", None), Wanted::Path(_)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_directories_match_by_path_or_name() {
+        let target = Path::new(r"C:\src\runode");
+        assert!(Wanted::new("runode", None).matches(target));
+        assert!(Wanted::new(r"C:\src\.\runode\", None).matches(target));
+        assert!(Wanted::new("C:/src/runode", None).matches(target));
+        assert!(!Wanted::new(r"C:\other\runode", None).matches(target));
+        let home = Path::new(r"C:\Users\me");
+        assert!(Wanted::new("~/src", Some(home)).matches(&home.join("src")));
     }
 }

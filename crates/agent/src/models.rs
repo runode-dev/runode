@@ -7,7 +7,6 @@
 use std::{
     ffi::OsString,
     io::{BufRead as _, BufReader, ErrorKind, Read as _, Write as _},
-    os::unix::process::CommandExt as _,
     path::Path,
     process::{Command, Stdio},
     sync::mpsc::{self, RecvTimeoutError},
@@ -330,9 +329,11 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
         .current_dir(dir)
         .stdin(if probe.request.is_empty() { Stdio::null() } else { Stdio::piped() })
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        // 自成一个进程组：包装脚本（npx、node）拉起的真 agent 也在组里，完了一起杀掉。
-        .process_group(0);
+        .stderr(Stdio::null());
+    // 自成一个进程组：包装脚本（npx、node）拉起的真 agent 也在组里，完了一起杀掉。
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    hide_window(&mut command);
     if let Some(path) = path {
         command.env("PATH", path);
     }
@@ -340,9 +341,8 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
         ErrorKind::NotFound => Unanswered::Missing,
         _ => Unanswered::NoAnswer,
     })?;
-    let group = child.id() as libc::pid_t;
-    // SAFETY: 只是给自己拉起的那个进程组发信号；组长还没收尸，组号不会被别的进程占去。
-    let kill_group = move || unsafe { libc::killpg(group, libc::SIGKILL) };
+    let group = child.id();
+    let kill_group = move || kill_tree(group);
     let (done, timer) = mpsc::channel::<()>();
     // 到时限杀掉整组，读着的标准输出跟着到头。
     let watchdog = std::thread::spawn(move || {
@@ -378,12 +378,8 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
             Answer::Output(answer) => {
                 let mut output = String::new();
                 stdout.read_to_string(&mut output).ok()?;
-                // 等它自己退出再杀组：先杀的话还没退的会算成被杀，退出码就看不出它是不是出错了。只等不收尸
-                // （`WNOWAIT`），组号在下面杀组时还是它的。
-                // SAFETY: `info` 是纯数据，全零合法；`waitid` 只写它。
-                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-                // SAFETY: 等的是自己拉起的子进程，`info` 指向局部变量。
-                unsafe { libc::waitid(libc::P_PID, child.id(), &raw mut info, libc::WEXITED | libc::WNOWAIT) };
+                // 等它自己退出再杀组：先杀的话还没退的会算成被杀，退出码就看不出它是不是出错了。
+                wait_unreaped(&mut child);
                 answer(&output)
             }
         }
@@ -396,6 +392,47 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
     // 读整段输出的要它正常退出才算：出错退出时标准输出空着，看起来像一份空清单。
     let failed = matches!(probe.answer, Answer::Output(_)) && !status.is_some_and(|status| status.success());
     found.filter(|_| !failed).ok_or(Unanswered::NoAnswer)
+}
+
+/// 杀掉 `ask` 拉起的整组进程，组号就是组长的进程号。
+#[cfg(unix)]
+fn kill_tree(group: u32) {
+    // SAFETY: 只是给自己拉起的那个进程组发信号；组长还没收尸，组号不会被别的进程占去。
+    unsafe { libc::killpg(group as libc::pid_t, libc::SIGKILL) };
+}
+
+/// 连同子孙进程一起强杀（`taskkill /T /F`）。
+/// shortcut: 进程已经退出时 taskkill 找不到这棵树，留下的子孙进程不杀；真碰上再改用 Job 对象。
+#[cfg(windows)]
+fn kill_tree(pid: u32) {
+    let mut command = Command::new("taskkill");
+    command.args(["/T", "/F", "/PID", &pid.to_string()]).stdin(Stdio::null()).stdout(Stdio::null());
+    hide_window(&mut command);
+    let _ = command.stderr(Stdio::null()).status();
+}
+
+/// Windows 上拉起控制台程序时不开窗口（`CREATE_NO_WINDOW`）：宿主没有控制台，不然每问一次就闪一个
+/// 黑窗。别的系统上什么都不做。
+fn hide_window(command: &mut Command) {
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(command, 0x0800_0000);
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
+/// 等 `child` 退出但不收尸（`WNOWAIT`），组号在之后杀组时还是它的。
+#[cfg(unix)]
+fn wait_unreaped(child: &mut std::process::Child) {
+    // SAFETY: `info` 是纯数据，全零合法；`waitid` 只写它。
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    // SAFETY: 等的是自己拉起的子进程，`info` 指向局部变量。
+    unsafe { libc::waitid(libc::P_PID, child.id(), &raw mut info, libc::WEXITED | libc::WNOWAIT) };
+}
+
+/// `Child` 拿着进程句柄，收尸以后进程号也不会被别的进程占去。
+#[cfg(windows)]
+fn wait_unreaped(child: &mut std::process::Child) {
+    let _ = child.wait();
 }
 
 /// 字符串数组里的字符串。
@@ -908,6 +945,7 @@ mod tests {
     }
 
     /// 一行一行认：读到 `first` 就再写 `second`，读到 `second` 就答完。
+    #[cfg(unix)]
     fn lines_probe(args: &'static [&'static str], request: &'static str) -> Probe {
         fn answer(line: &str) -> Reply {
             match line {
@@ -919,6 +957,7 @@ mod tests {
         Probe { args, request, answer: Answer::Lines(answer) }
     }
 
+    #[cfg(unix)]
     #[test]
     fn asks_and_stops_the_agent() {
         // 要等一句回话才说下一句、答完了还不退的程序：认出回话就杀掉，不等到时限。

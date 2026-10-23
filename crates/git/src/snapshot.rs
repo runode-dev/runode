@@ -5,7 +5,6 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::{OsStr, OsString},
     fs,
-    os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -445,7 +444,7 @@ fn recorded_gitlinks(repo: &Path, tree: Option<&str>) -> HashMap<PathBuf, String
                 return None;
             }
             let oid = fields.nth(oid_field - 1)?;
-            let path = PathBuf::from(std::ffi::OsString::from_vec(entry[tab + 1..].to_vec()));
+            let path = PathBuf::from(&crate::os_str(&entry[tab + 1..]));
             Some((path, String::from_utf8_lossy(oid).into_owned()))
         })
         .collect()
@@ -531,7 +530,7 @@ pub(crate) fn worktree_bytes(full: &Path, max_bytes: u64) -> Option<Vec<u8>> {
     use std::io::Read;
     let meta = fs::symlink_metadata(full).ok()?;
     if meta.file_type().is_symlink() {
-        return fs::read_link(full).ok().map(|target| target.into_os_string().into_vec());
+        return fs::read_link(full).ok().map(|target| target.into_os_string().into_encoded_bytes());
     }
     if !meta.is_file() {
         return None;
@@ -542,6 +541,7 @@ pub(crate) fn worktree_bytes(full: &Path, max_bytes: u64) -> Option<Vec<u8>> {
 }
 
 /// `O_NONBLOCK` 的值，和 libc 里的一样（标准库没有这个常量）；没列出的平台为空，照旧阻塞地打开。
+#[cfg(unix)]
 const O_NONBLOCK: Option<i32> = if cfg!(target_vendor = "apple") {
     Some(0x0004)
 } else if cfg!(all(
@@ -563,6 +563,7 @@ const O_NONBLOCK: Option<i32> = if cfg!(target_vendor = "apple") {
 };
 
 /// `O_NOFOLLOW` 的值，和 libc 里的一样；Linux 上各架构不同。没列出的平台为空，照旧跟着符号链接打开。
+#[cfg(unix)]
 const O_NOFOLLOW: Option<i32> = if cfg!(target_vendor = "apple") {
     Some(0x0100)
 } else if cfg!(all(
@@ -586,14 +587,20 @@ const O_NOFOLLOW: Option<i32> = if cfg!(target_vendor = "apple") {
 /// 别的（命名管道、指向设备的符号链接），所以打开以后对着打开的这个再看一次，读的才一定是普通文件。
 /// 不阻塞地打开：换成了没有写端的命名管道时阻塞式的打开一直等，走不到这次检查；对普通文件这个标志
 /// 不起作用。也不跟着符号链接打开，换成了符号链接时报错，和 `worktree_bytes` 不跟过去读的规矩一致。
+/// Windows 上没有命名管道这种文件，打开符号链接本身（`FILE_FLAG_OPEN_REPARSE_POINT`）不跟过去。
 fn open_regular(path: &Path) -> std::io::Result<fs::File> {
-    use std::os::unix::fs::OpenOptionsExt as _;
     let mut options = fs::OpenOptions::new();
     options.read(true);
-    let flags = O_NONBLOCK.unwrap_or(0) | O_NOFOLLOW.unwrap_or(0);
-    if flags != 0 {
-        options.custom_flags(flags);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let flags = O_NONBLOCK.unwrap_or(0) | O_NOFOLLOW.unwrap_or(0);
+        if flags != 0 {
+            options.custom_flags(flags);
+        }
     }
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(&mut options, 0x0020_0000);
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
         return Err(std::io::Error::other("not a regular file"));
@@ -615,6 +622,7 @@ mod tests {
     }
 
     /// 看过是普通文件以后路径被换成没有写端的命名管道或符号链接：打开不阻塞、不跟过去，报错。
+    #[cfg(unix)]
     #[test]
     fn open_regular_rejects_a_fifo_or_symlink_swapped_in() {
         use std::{process::Command, sync::mpsc, thread, time::Duration};

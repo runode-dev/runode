@@ -21,13 +21,13 @@ mod curl;
 mod probe;
 mod rounds;
 mod send;
-#[cfg(test)]
+// 假的 curl 是 shell 脚本。
+#[cfg(all(test, unix))]
 mod tests;
 
 use std::{
     collections::HashSet,
     io,
-    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{Arc, Condvar, Mutex, PoisonError, mpsc},
     thread,
@@ -49,7 +49,7 @@ use self::{
     send::{Sender, Target},
 };
 use crate::{
-    Connect,
+    Connect, UnixStream,
     devices::{self, PushRegistration},
 };
 

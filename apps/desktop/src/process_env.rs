@@ -3,6 +3,7 @@
 
 /// 在 `main` 最开头调用：要改环境变量，那时还没有别的线程。
 pub fn fix() {
+    #[cfg(unix)]
     use_login_shell();
     #[cfg(target_os = "macos")]
     ensure_lang();
@@ -12,6 +13,7 @@ pub fn fix() {
 /// 账户记录里的登录 shell。`open` 会把调用方的环境带给 app：在 chsh 之前起的终端里打开时带进来的是旧
 /// shell，宿主和各个终端都继承它，在这些终端里再重启 app 又带下去，一直换不过来。别的进程拉起的
 /// （从终端里直接运行的，app 拉起的宿主）沿用父进程给的 `SHELL`。
+#[cfg(unix)]
 fn use_login_shell() {
     // SAFETY: getppid 总是成功，没有副作用。
     if unsafe { libc::getppid() } != 1 {
@@ -24,6 +26,7 @@ fn use_login_shell() {
 }
 
 /// 账户记录（passwd）里的登录 shell，没有时为 `None`。
+#[cfg(unix)]
 fn login_shell() -> Option<std::ffi::OsString> {
     use std::os::unix::ffi::OsStrExt as _;
     // SAFETY: `passwd` 只有整数和指针，全零是合法的值。

@@ -3,16 +3,15 @@
 //! 据此拼配对 URI，或者告诉用户远程访问没开；桌面 app 的标题栏据此显示连着哪些设备。
 
 use std::{
-    fs::{File, OpenOptions, TryLockError},
+    fs::{File, TryLockError},
     io,
-    os::unix::fs::OpenOptionsExt as _,
 };
 
 use runode_paths::Dirs;
 use runode_protocol::remote::{Bytes, DeviceId};
 use serde::{Deserialize, Serialize};
 
-use crate::files::{no_home, read_json};
+use crate::files::{no_home, private_options, read_json};
 
 /// 开着的监听方的状态。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,7 +53,7 @@ pub fn listener_status(dirs: &Dirs) -> io::Result<Option<ListenerStatus>> {
 pub(crate) fn lock_listener(dirs: &Dirs) -> io::Result<Option<File>> {
     dirs.create_remote_access_dir()?;
     let path = dirs.remote_access_lock_file().ok_or_else(no_home)?;
-    let file = OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(path)?;
+    let file = private_options().create(true).truncate(false).write(true).open(path)?;
     match file.try_lock() {
         Ok(()) => {}
         Err(TryLockError::WouldBlock) => return Ok(None),

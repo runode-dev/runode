@@ -899,6 +899,7 @@ mod tests {
     const NONE: [u32; 0] = [];
 
     /// 目录解开符号链接的写法在别的线程上算好后交回来。
+    #[cfg(unix)]
     #[test]
     fn resolves_canonical_dirs_off_thread() {
         let root = std::env::temp_dir().join(format!("rdr-canonical-dir-{}", std::process::id()));

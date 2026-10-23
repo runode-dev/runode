@@ -5,7 +5,8 @@
 //! 开的 Unix socket，同一个进程里的桌面用 `Host::connect_pair` 拿到的一对 socket 的一端，两条路
 //! 走的是同一套代码。宿主可以跑在 app 进程里，也可以单独一个进程（`runode --host`，见
 //! `Host::run_until_idle` 和 `launch`）。单独跑的宿主升级时，新版本的宿主经同一个 socket 接过
-//! 所有会话和 socket 本身，shell 不中断（`Host::take_over`，见 `handoff`）。
+//! 所有会话和 socket 本身，shell 不中断（`Host::take_over`，见 `handoff`）；Windows 上的 ConPTY
+//! 交不出去，升级时会话跟着重启。
 //!
 //! 每个会话的线程按到达的先后处理 PTY 输出和前端的请求：输出先转给连着的前端，再喂宿主的
 //! VT；改 VT 状态的请求（改尺寸、换主题、清屏）在输出流里插一条标记（`HostMsg::Resized`、
@@ -27,6 +28,7 @@
 
 mod browse;
 mod git;
+#[cfg(unix)]
 mod handoff;
 mod idle;
 mod launch;
@@ -47,11 +49,16 @@ use std::{
 };
 
 use anyhow::Result;
+#[cfg(unix)]
 pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeOverOptions, TakeOverReport, peer_pid};
 pub use idle::Stopped;
-pub use launch::{STATUS_FD, Successor, disclaim_responsibility, launch, launch_screen, launch_successor};
+pub use launch::{disclaim_responsibility, launch, launch_screen};
+#[cfg(unix)]
+pub use launch::{STATUS_FD, Successor, launch_successor};
 pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
 use runode_types::{clipboard::ClipboardAccess, grid::GridSize, settings::TermSettings, shell::IntegrationMode};
+#[cfg(windows)]
+pub use server::peer_pid;
 pub use server::{same_user, set_buffers};
 
 /// 新开一个会话。
@@ -94,6 +101,7 @@ struct Shared {
     /// 有连接断开、或者要退出时通知，`Host::run_until_idle` 等在它上面。
     peers_changed: Condvar,
     /// 交出会话时给新宿主多久收下会话、回 `HandoffReady`，见 `Host::set_handoff_deadline`。
+    #[cfg(unix)]
     handoff_deadline: Mutex<Duration>,
     /// 读剪贴板最多等界面多久，见 `Host::set_clipboard_read_patience`。
     clipboard_patience: Mutex<Duration>,
@@ -281,6 +289,7 @@ impl Host {
             env: Mutex::default(),
             peers: Mutex::default(),
             peers_changed: Condvar::new(),
+            #[cfg(unix)]
             handoff_deadline: Mutex::new(handoff::DEFAULT_DEADLINE),
             clipboard_patience: Mutex::new(session::CLIPBOARD_READ_PATIENCE),
             todos: Arc::default(),
@@ -291,6 +300,7 @@ impl Host {
 
     /// 交出会话时给接手的新宿主多久收下会话（发送也算在内）、回 `HandoffReady`，默认见 `DEFAULT_DEADLINE`，
     /// 到期就杀掉它、回滚。改了它，`GIVE_READY_WINDOW` 就不准了；测试用来缩短。
+    #[cfg(unix)]
     pub fn set_handoff_deadline(&self, deadline: Duration) {
         *self.shared.handoff_deadline.lock().unwrap_or_else(PoisonError::into_inner) = deadline;
     }

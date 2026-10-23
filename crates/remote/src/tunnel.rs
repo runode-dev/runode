@@ -221,6 +221,8 @@ mod tests {
         let (addr, accepting) = tunnel_to(port).await;
         let refuse = tokio::spawn(async move {
             let (mut tcp, _) = listener.accept().await.unwrap();
+            // 先读掉手机发来的：关连接时还有没读的，Windows 发 RST，对面还没读走的「no」跟着丢掉。
+            tcp.read_exact(&mut [0; 5]).await.unwrap();
             tcp.write_all(b"no").await.unwrap();
         });
 

@@ -1,7 +1,7 @@
 //! 提交历史和图表：读最近的提交和指向它们的引用，排出每一行左边的分支线（lane），读单个提交
 //! 改了什么。
 
-use std::{collections::HashSet, ffi::OsStr, fs, os::unix::ffi::OsStrExt, path::Path};
+use std::{collections::HashSet, ffi::OsStr, fs, path::Path};
 
 use crate::{FileDiff, GitError, Repo, Result, git, ops::run, parse::parse_diff, snapshot::diff_args};
 
@@ -262,8 +262,24 @@ pub fn refs_changed(git_dir: &Path, path: &Path) -> bool {
     if under(git_dir, true) {
         return true;
     }
+    // `commondir` 一般是 `../..` 这样的相对路径。规范化的路径在 Windows 上带 `\\?\` 前缀，和事件里的
+    // 路径比不上，所以另按字面去掉 `..` 比一次。
     let common = fs::read_to_string(git_dir.join("commondir")).ok().map(|common| git_dir.join(common.trim()));
-    common.is_some_and(|common| under(&common, false))
+    common.is_some_and(|common| under(&common, false) || under(&without_parent_dirs(&common), false))
+}
+
+/// 按字面去掉路径里的 `..`（连同它前面的一段），不碰文件系统。
+fn without_parent_dirs(path: &Path) -> std::path::PathBuf {
+    let mut out = std::path::PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// 提交号、父提交、作者、相对时间、引用和说明首行，字段之间用 0x1f 隔开。
@@ -301,7 +317,8 @@ impl Repo {
             args.push(OsStr::new("HEAD"));
         }
         args.push(OsStr::new("--branches"));
-        args.extend(upstreams.into_iter().map(OsStr::from_bytes));
+        let upstreams: Vec<_> = upstreams.into_iter().map(crate::os_str).collect();
+        args.extend(upstreams.iter().map(|upstream| &**upstream));
         args.push(OsStr::new("--"));
         let mut commits = parse_log(&run(&self.root, args, None)?);
         let more = commits.len() > limit;

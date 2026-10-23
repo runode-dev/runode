@@ -1,6 +1,8 @@
 //! 宿主的黑盒测试：经 `Host::connect_pair` 按协议说话（桌面走的路），开会话、连上、发输入和控制
 //! 消息，看输出流和事件。
 
+#![cfg(unix)]
+
 mod common;
 
 use std::time::{Duration, Instant};

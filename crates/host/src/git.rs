@@ -55,8 +55,8 @@ impl GitWorker {
     }
 
     /// 排进队列；工作线程已经不在了时把这件交回来。
-    pub(crate) fn submit(&self, job: Job) -> Result<(), Job> {
-        self.jobs.send(job).map_err(|mpsc::SendError(job)| job)
+    pub(crate) fn submit(&self, job: Job) -> Result<(), Box<Job>> {
+        self.jobs.send(job).map_err(|mpsc::SendError(job)| Box::new(job))
     }
 }
 
@@ -233,10 +233,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         git(&dir, &["init", "-q", "-b", "main"]);
-        // 不依赖本机的全局配置：身份、签名、钩子都写进仓库自己的配置。
-        for (key, value) in
-            [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false"), ("core.hooksPath", "no-hooks")]
-        {
+        // 不依赖本机的全局配置：身份、签名、钩子、换行都写进仓库自己的配置。
+        for (key, value) in [
+            ("user.name", "t"),
+            ("user.email", "t@t"),
+            ("commit.gpgsign", "false"),
+            ("core.hooksPath", "no-hooks"),
+            ("core.autocrlf", "false"),
+        ] {
             git(&dir, &["config", key, value]);
         }
         dir

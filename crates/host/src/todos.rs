@@ -794,6 +794,7 @@ mod tests {
 
     /// 候选的工作树目录上有悬空的符号链接、候选分支和已有的分支一个在另一个下面时都算占了：git 在那开不出来，
     /// 不跳过的话白白用掉一次尝试。
+    #[cfg(unix)]
     #[test]
     fn names_git_would_refuse_are_taken() {
         let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-taken", std::process::id()));

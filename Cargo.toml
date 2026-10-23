@@ -40,6 +40,12 @@ gpui = { package = "gpui-pre", version = "=0.3.9" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9" }
 anyhow = "1"
 portable-pty = "0.9"
+# socket 选项的跨平台写法：keepalive、IPV6_V6ONLY，以及绑定前设选项。
+socket2 = { version = "0.6", features = ["all"] }
+# Windows 的系统接口，只在 Windows 上用。各 crate 按用到的接口自己开特性。
+windows-sys = "0.61"
+# Windows 10 起有的 AF_UNIX socket，接口照着标准库的 `UnixStream`、`UnixListener`；宿主的 socket 用它。
+uds_windows = "1.2"
 futures = "0.3"
 libc = "0.2"
 tracing = "0.1"

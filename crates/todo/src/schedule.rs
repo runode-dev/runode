@@ -19,13 +19,7 @@ fn daily(base: u64, hour: u8, minute: u8, days: u8) -> Option<u64> {
     if hour >= 24 || minute >= 60 {
         return None;
     }
-    let base_t = libc::time_t::try_from(base).ok()?;
-    // SAFETY: `tm` 是纯数据，全零是合法的值；`localtime_r` 只写它。
-    let mut today: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: 两个指针都指向这里的局部变量，调用期间有效。
-    if unsafe { libc::localtime_r(&raw const base_t, &raw mut today) }.is_null() {
-        return None;
-    }
+    let today = local_time(libc::time_t::try_from(base).ok()?)?;
     let passed = (today.tm_hour, today.tm_min) >= (i32::from(hour), i32::from(minute));
     // 第一天加上整整一周，星期几总有一天对得上。
     (i32::from(passed)..i32::from(passed) + 8).find_map(|offset| {
@@ -35,9 +29,37 @@ fn daily(base: u64, hour: u8, minute: u8, days: u8) -> Option<u64> {
         day.tm_min = i32::from(minute);
         day.tm_sec = 0;
         day.tm_isdst = -1;
-        // SAFETY: 指针指向局部变量；`mktime` 规范化它并填好星期几。
-        let at = u64::try_from(unsafe { libc::mktime(&raw mut day) }).ok()?;
+        let at = u64::try_from(mktime(&mut day)).ok()?;
         let weekday = u32::try_from(day.tm_wday).ok()?;
         (at > base && (days == 0 || days & (1 << weekday) != 0)).then_some(at)
     })
+}
+
+fn local_time(at: libc::time_t) -> Option<libc::tm> {
+    // SAFETY: `tm` 是纯数据，全零是合法的值。
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: 两个指针都指向这里的局部变量，调用期间有效；函数只写 `tm`。
+    #[cfg(unix)]
+    let ok = !unsafe { libc::localtime_r(&raw const at, &raw mut tm) }.is_null();
+    // SAFETY: 同上。
+    #[cfg(windows)]
+    let ok = unsafe { libc::localtime_s(&raw mut tm, &raw const at) } == 0;
+    ok.then_some(tm)
+}
+
+/// 规范化 `tm` 并填好星期几，返回它的 Unix 时间。
+fn mktime(tm: &mut libc::tm) -> libc::time_t {
+    #[cfg(windows)]
+    unsafe extern "C" {
+        // UCRT 只导出带位宽的名字，C 头文件里的 `mktime` 是它的内联别名。
+        #[link_name = "_mktime64"]
+        safe fn mktime(tm: &mut libc::tm) -> libc::time_t;
+    }
+    #[cfg(windows)]
+    return mktime(tm);
+    // SAFETY: 指针来自可变引用，调用期间有效。
+    #[cfg(unix)]
+    unsafe {
+        libc::mktime(tm)
+    }
 }

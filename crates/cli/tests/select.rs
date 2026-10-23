@@ -112,7 +112,11 @@ fn positions_are_found_from_your_own_pane() {
         ("cwd:web", C),
         ("cwd:/tmp/web/", C),
         ("f000", F),
-    ] {
+    ]
+    .into_iter()
+    // 假宿主报的目录是 Unix 的写法，Windows 上 `/tmp/web` 不是绝对路径，按它比不上。
+    .filter(|(selector, _)| cfg!(unix) || !selector.starts_with("cwd:/"))
+    {
         assert_eq!(read(&fake, selector), Ok(expected), "{selector}");
     }
 }

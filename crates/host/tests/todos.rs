@@ -8,18 +8,24 @@ mod common;
 
 use std::{
     path::{Path, PathBuf},
-    process::Command,
     sync::Once,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use common::{Peer, listen, script, temp_dir};
-use runode_host::{ClientMsg, Host, HostMsg, SessionId, Stopped};
-use runode_protocol::{
-    SessionInfo,
-    todo::{Column, Schedule, Todo, TodoSpec, When, column},
-};
+use common::{Peer, listen, temp_dir};
+#[cfg(unix)]
+use std::process::Command;
+
+#[cfg(unix)]
+use common::script;
+#[cfg(unix)]
+use runode_host::SessionId;
+use runode_host::{ClientMsg, Host, HostMsg, Stopped};
+#[cfg(unix)]
+use runode_protocol::SessionInfo;
+use runode_protocol::todo::{Column, Schedule, Todo, TodoSpec, When, column};
+#[cfg(unix)]
 use runode_types::agent::AgentState;
 
 /// 宿主开的任务会话跑的 shell。
@@ -81,6 +87,7 @@ fn board_state(peer: &mut Peer) -> (Vec<Todo>, Vec<Schedule>) {
     }
 }
 
+#[cfg(unix)]
 fn sessions(peer: &mut Peer) -> Vec<SessionInfo> {
     peer.send(&ClientMsg::ListSessions);
     loop {
@@ -100,6 +107,7 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
+#[cfg(unix)]
 fn start(peer: &mut Peer, id: &str) -> SessionId {
     peer.send(&ClientMsg::StartTodo { req: 3, id: id.into() });
     loop {
@@ -122,6 +130,7 @@ fn ask(peer: &mut Peer, message: &ClientMsg) -> HostMsg {
     }
 }
 
+#[cfg(unix)]
 /// 等到 `path` 有内容，返回它。
 fn wait_for_file(path: &Path) -> String {
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -136,6 +145,7 @@ fn wait_for_file(path: &Path) -> String {
     }
 }
 
+#[cfg(unix)]
 /// 跑测试自己要的 git 命令。不读开发者的全局和系统配置：那里开了提交签名（`commit.gpgsign`）或者
 /// 设了全局钩子（`core.hooksPath`）时提交会失败或者等着输口令；提交要的身份由调用处用 `-c` 给。
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -152,6 +162,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 }
 
 /// 提示词经环境变量原样交给 agent：引号、`$`、反引号、换行都不被 shell 解释。
+#[cfg(unix)]
 #[test]
 fn the_agent_gets_the_prompt_verbatim() {
     let (_host, dir, mut peer) = board("todo-prompt");
@@ -175,6 +186,7 @@ fn the_agent_gets_the_prompt_verbatim() {
 
 /// 没做完的任务的会话里 shell 退出了，问过 `ListTodos` 的连接收到 `TodosChanged`，不用轮询会话的状态就知道
 /// 卡片换了列。
+#[cfg(unix)]
 #[test]
 fn a_todo_session_exiting_is_announced() {
     let (_host, dir, mut peer) = board("todo-session-exit");
@@ -195,12 +207,14 @@ fn a_todo_session_exiting_is_announced() {
     assert!(!sessions(&mut peer).iter().any(|info| info.id == session && !info.exited), "the session ended");
 }
 
+#[cfg(unix)]
 fn resume(peer: &mut Peer, id: &str) -> HostMsg {
     ask(peer, &ClientMsg::ResumeTodo { req: 7, id: id.into() })
 }
 
 /// 接回任务的会话：还在跑时就是原来那个；会话没了（终端关了）时另开一个记进任务，完成了的任务也行，开始的
 /// 时间不变；没开始过的接不回。
+#[cfg(unix)]
 #[test]
 fn a_todo_session_can_be_resumed() {
     let (_host, dir, mut peer) = board("todo-resume");
@@ -227,6 +241,7 @@ fn a_todo_session_can_be_resumed() {
 }
 
 /// 完成了的任务的会话被收掉（界面关了它的终端）也说一声：卡片上打开终端的按钮要收起，不然按了打不开。
+#[cfg(unix)]
 #[test]
 fn a_done_todo_session_ending_is_announced() {
     let (_host, dir, mut peer) = board("todo-done-session-end");
@@ -250,6 +265,7 @@ fn a_done_todo_session_ending_is_announced() {
 
 /// 要工作树的任务在仓库的 `.worktrees/` 下新开一个、拉新分支，主仓库的状态不受影响；删任务或标完成时
 /// 会话还在就留着工作树，会话没了就删掉干净的工作树和没有新提交的分支。
+#[cfg(unix)]
 #[test]
 fn a_worktree_todo_runs_in_its_own_worktree() {
     let (_host, dir, mut peer) = board("todo-worktree");
@@ -324,6 +340,7 @@ fn a_worktree_todo_runs_in_its_own_worktree() {
 }
 
 /// 任务的工作树被删了以后再开始，另开一个工作树，不在不存在的目录（PTY 会改在家目录）里跑 agent。
+#[cfg(unix)]
 #[test]
 fn a_removed_worktree_is_made_again() {
     let (_host, dir, mut peer) = board("todo-worktree-gone");
@@ -365,6 +382,7 @@ fn a_removed_worktree_is_made_again() {
 
 /// `.worktrees` 下几个候选名字的目录已经有了、却没有对应的分支（比如手建的、清剩下的）：跳过它们接着往后
 /// 换名字，不是候选用完了一次都没试就开不起来。
+#[cfg(unix)]
 #[test]
 fn occupied_worktree_directories_are_skipped() {
     let (_host, dir, mut peer) = board("todo-worktree-occupied");
@@ -392,6 +410,7 @@ fn occupied_worktree_directories_are_skipped() {
 /// git 不肯用的候选名字也跳过、不白试：`.worktrees` 下是个悬空的符号链接（git 不跟着链接看，照样说已经有了），
 /// 分支名和已有的分支一个在另一个下面（`runode/a` 和 `runode/a/old` 不能并存）。两个都去试的话尝试次数就用完了，
 /// 后面空着的名字开不出来。
+#[cfg(unix)]
 #[test]
 fn names_git_would_refuse_are_skipped() {
     let (_host, dir, mut peer) = board("todo-worktree-refused");
@@ -478,6 +497,7 @@ fn a_host_without_a_board_says_so() {
 }
 
 /// 错过的定时打开看板时补跑一次：开一张来自它的任务并开始，下一次从现在算起。
+#[cfg(unix)]
 #[test]
 fn a_missed_schedule_fires_once_when_the_board_opens() {
     use_plain_sh();
@@ -543,7 +563,9 @@ fn a_bad_todo_written_straight_into_the_database_does_not_start() {
     assert!(matches!(reply, HostMsg::Error { req: Some(3), .. }), "{reply:?}");
 }
 
-/// 会话还在时再开始任务直接给出那个会话，任务的目录没了也一样：检查任务内容只管开新会话。
+/// 会话还在时再开始任务直接给出那个会话，任务的目录没了也一样：检查任务内容只管开新会话。Windows 上
+/// 删不掉还有进程待在里面的目录。
+#[cfg(unix)]
 #[test]
 fn a_running_todo_reopens_after_its_directory_is_gone() {
     let (_host, dir, mut peer) = board("todo-reopen");
@@ -560,6 +582,7 @@ fn a_running_todo_reopens_after_its_directory_is_gone() {
 }
 
 /// agent 把 shell 也带走了：再开始任务开新会话、收掉旧的；标完成后新会话的 shell 退出了也收掉。
+#[cfg(unix)]
 #[test]
 fn an_exited_todo_session_is_replaced_and_ended() {
     let (_host, dir, mut peer) = board("todo-exited");
@@ -581,6 +604,7 @@ fn an_exited_todo_session_is_replaced_and_ended() {
 }
 
 /// 上次开出的任务的 agent 停在权限询问上（看板上算「需要你」）：到点跳过，不另开一个 agent 改同一处。
+#[cfg(unix)]
 #[test]
 fn a_schedule_skips_while_its_last_agent_is_blocked() {
     let (_host, dir, mut peer) = board("todo-blocked");
