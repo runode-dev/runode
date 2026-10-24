@@ -1,0 +1,52 @@
+# 在 Actions 页面手动运行，打 iOS app 的 Release 包传到 TestFlight（fastlane 的 beta lane）。
+#
+# 用 release.yml 公证用的那把 App Store Connect API 密钥（NOTARY_KEY_P8、NOTARY_KEY_ID、
+# NOTARY_ISSUER），它的角色要是 Admin：上传 TestFlight 之外，xcodebuild 还拿它在开发者账号里
+# 建签名证书和描述文件。
+name: TestFlight
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: testflight
+
+permissions:
+  contents: read
+
+jobs:
+  beta:
+    # 手机端照最新的 Xcode 写，老版编不过。
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 拉 ghostty 子模块
+        run: git submodule update --init vendor/ghostty
+      # vendor/ghostty 的 build.zig.zon 要求的 zig 版本（minimum_zig_version）。
+      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+        with:
+          version: 0.16.0
+      - name: 编 libghostty-vt 的 xcframework
+        run: apps/ios/scripts/build-ghostty-vt.sh
+      - uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+          working-directory: apps/ios
+      - name: 写下 API 密钥
+        env:
+          ASC_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+        run: printf '%s\n' "$ASC_KEY_P8" >"$RUNNER_TEMP/asc.p8"
+      - name: 打包、上传
+        working-directory: apps/ios
+        env:
+          ASC_KEY_PATH: ${{ runner.temp }}/asc.p8
+          ASC_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.NOTARY_ISSUER }}
+        run: bundle exec fastlane beta
+      - name: 删掉密钥
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc.p8"

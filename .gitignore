@@ -7,6 +7,9 @@
 /apps/ios/build/
 /apps/ios/RunodeKit/.build/
 /apps/ios/RunodeKit/.swiftpm/
+# fastlane 每次跑完写的报告和自动生成的 lane 说明
+/apps/ios/fastlane/report.xml
+/apps/ios/fastlane/README.md
 xcuserdata/
 /.playwright-cli/
 /docs/spec/

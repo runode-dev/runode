@@ -1,0 +1,36 @@
+# 打包 iOS app 传到 TestFlight：cd apps/ios && bundle exec fastlane beta
+#
+# 登录 App Store Connect 用 API 密钥，从环境变量读：ASC_KEY_ID、ASC_ISSUER_ID，
+# 和 .p8 私钥的路径 ASC_KEY_PATH。签名照工程里的自动签名，xcodebuild 也拿这把密钥去开发者账号里
+# 补证书和描述文件，所以不用在 Xcode 里登录，CI 上也能跑。
+opt_out_usage
+default_platform(:ios)
+
+platform :ios do
+  lane :beta do
+    key_id = ENV.fetch("ASC_KEY_ID")
+    issuer_id = ENV.fetch("ASC_ISSUER_ID")
+    key_path = File.expand_path(ENV.fetch("ASC_KEY_PATH"))
+    app_store_connect_api_key(key_id: key_id, issuer_id: issuer_id, key_filepath: key_path)
+
+    unless File.directory?("../Frameworks/ghostty-vt.xcframework")
+      sh("../scripts/build-ghostty-vt.sh")
+    end
+
+    # 构建号只在打包时传给 xcodebuild，不改工程文件；TestFlight 要求它比传过的都大。
+    build_number = latest_testflight_build_number(initial_build_number: 0) + 1
+    auth = "-allowProvisioningUpdates -authenticationKeyPath #{key_path.shellescape} " \
+           "-authenticationKeyID #{key_id} -authenticationKeyIssuerID #{issuer_id}"
+    build_app(
+      project: "Runode.xcodeproj",
+      scheme: "Runode",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "build/fastlane",
+      derived_data_path: "build/dd-fastlane",
+      xcargs: "#{auth} CURRENT_PROJECT_VERSION=#{build_number}",
+      export_xcargs: auth
+    )
+    upload_to_testflight(skip_waiting_for_build_processing: true)
+  end
+end
