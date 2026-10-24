@@ -759,6 +759,8 @@ status:
   no_terminals: 這個視窗裡沒有終端機
   app: 主程序
   host: 宿主
+  speech: 語音辨識
+  screen: 遠端桌面
   ports_title: 連接埠
   ports_summary: "%{ours} 個終端機 · %{external} 個外部"
   no_ports: 終端機裡沒有程式在監聽連接埠

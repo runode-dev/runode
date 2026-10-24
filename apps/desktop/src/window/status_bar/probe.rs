@@ -18,6 +18,17 @@ pub(super) struct Proc {
     pub ppid: u32,
     pub memory: u64,
     pub cpu: f32,
+    pub helper: Option<Helper>,
+}
+
+/// runode 按需拉起的子进程，按命令行认：这个 app 的可执行文件加一个参数。采集进程经 launchd 拉起，
+/// 父进程是 1 号进程，不在 app 和宿主的子孙里。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Helper {
+    /// `runode --speech`
+    Speech,
+    /// `runode --screen`
+    Screen,
 }
 
 /// 一组进程的 CPU 和内存加起来。
@@ -60,6 +71,13 @@ impl Procs {
             stack.extend(self.children.get(&pid).into_iter().flatten().filter(|&&child| child != pid));
         }
         all
+    }
+
+    /// 在跑的子进程，按种类和进程号排好。
+    pub(super) fn helpers(&self) -> Vec<(Helper, u32)> {
+        let mut helpers: Vec<_> = self.procs.iter().filter_map(|(&pid, proc)| Some((proc.helper?, pid))).collect();
+        helpers.sort_unstable();
+        helpers
     }
 
     /// 只算 `pid` 这一个进程。
@@ -118,9 +136,14 @@ pub(super) struct Port {
 /// 现在的进程表；`ps` 跑不了时是空的。phys_footprint 只问 `roots` 和它们的子孙：状态栏只算这些进程的内存，
 /// 别的进程只用来认父子关系，`ps` 列出的几百个进程挨个问一遍白白耗时。
 pub(super) fn processes(roots: &HashSet<u32>) -> Procs {
-    let text = output(Command::new("/bin/ps").args(["-axo", "pid=,ppid=,rss=,%cpu="]), PROBE_TIMEOUT);
-    let mut procs = Procs::new(parse_ps(&text));
-    let used: HashSet<u32> = roots.iter().flat_map(|&root| procs.subtree(root)).collect();
+    let text = output(Command::new("/bin/ps").args(["-axo", "pid=,ppid=,rss=,%cpu=,args="]), PROBE_TIMEOUT);
+    let exe = std::env::current_exe().map(|exe| exe.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut procs = Procs::new(parse_ps(&text, &exe));
+    let used: HashSet<u32> = roots
+        .iter()
+        .flat_map(|&root| procs.subtree(root))
+        .chain(procs.helpers().into_iter().map(|(_, pid)| pid))
+        .collect();
     for pid in used {
         if let (Some(proc), Some(footprint)) = (procs.procs.get_mut(&pid), phys_footprint(pid)) {
             proc.memory = footprint;
@@ -193,9 +216,9 @@ fn output(command: &mut Command, timeout: Duration) -> String {
     reader.join().map(|data| String::from_utf8_lossy(&data).into_owned()).unwrap_or_default()
 }
 
-/// `ps -axo pid=,ppid=,rss=,%cpu=` 的输出：每行进程号、父进程号、常驻内存（KB）和 CPU 百分比。
-/// 常驻内存先填进 `memory`，读得到 phys_footprint 时 `processes` 再换掉。
-fn parse_ps(text: &str) -> HashMap<u32, Proc> {
+/// `ps -axo pid=,ppid=,rss=,%cpu=,args=` 的输出：每行进程号、父进程号、常驻内存（KB）、CPU 百分比和命令行。
+/// 常驻内存先填进 `memory`，读得到 phys_footprint 时 `processes` 再换掉。`exe` 是这个 app 的可执行文件。
+fn parse_ps(text: &str, exe: &str) -> HashMap<u32, Proc> {
     text.lines()
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
@@ -204,7 +227,16 @@ fn parse_ps(text: &str) -> HashMap<u32, Proc> {
             let rss = fields.next()?.parse::<u64>().ok()? * 1024;
             // 有的语言环境里小数点是逗号。
             let cpu = fields.next()?.replace(',', ".").parse().ok()?;
-            Some((pid, Proc { ppid, memory: rss, cpu }))
+            let args: Vec<&str> = fields.collect();
+            let helper = match args.split_last() {
+                Some((&flag, command)) if command.iter().copied().eq(exe.split_whitespace()) => match flag {
+                    "--speech" => Some(Helper::Speech),
+                    "--screen" => Some(Helper::Screen),
+                    _ => None,
+                },
+                _ => None,
+            };
+            Some((pid, Proc { ppid, memory: rss, cpu, helper }))
         })
         .collect()
 }
@@ -267,10 +299,22 @@ mod tests {
 
     #[test]
     fn ps_lines_become_processes() {
-        let procs =
-            parse_ps("    1     0  12000   0.0\n  200     1   2048  12,5\nbogus line\n  300   200   1024   1.5\n");
-        assert_eq!(procs.len(), 3);
-        assert_eq!(procs[&200], Proc { ppid: 1, memory: 2048 * 1024, cpu: 12.5 });
+        let exe = "/Applications/My Apps/Runode.app/Contents/MacOS/runode";
+        let procs = parse_ps(
+            concat!(
+                "    1     0  12000   0.0 /sbin/launchd\n",
+                "  200     1   2048  12,5 /Applications/My Apps/Runode.app/Contents/MacOS/runode\n",
+                "bogus line\n",
+                "  300   200   1024   1.5 /Applications/My Apps/Runode.app/Contents/MacOS/runode --speech\n",
+                "  400     1   1024   0.0 /Applications/My Apps/Runode.app/Contents/MacOS/runode --screen\n",
+                "  500   200   1024   0.0 /usr/local/bin/other --screen\n",
+            ),
+            exe,
+        );
+        assert_eq!(procs.len(), 5);
+        assert_eq!(procs[&200], Proc { ppid: 1, memory: 2048 * 1024, cpu: 12.5, helper: None });
+        assert_eq!(procs[&500].helper, None);
+        assert_eq!(Procs::new(procs).helpers(), [(Helper::Speech, 300), (Helper::Screen, 400)]);
     }
 
     #[cfg(target_os = "macos")]
@@ -291,7 +335,7 @@ mod tests {
 
     #[test]
     fn trees_sum_descendants_and_owners_walk_up() {
-        let procs = Procs::new(parse_ps("1 0 1 0\n10 1 100 1.0\n11 10 10 2.0\n12 11 1 3.0\n20 1 7 0\n"));
+        let procs = Procs::new(parse_ps("1 0 1 0\n10 1 100 1.0\n11 10 10 2.0\n12 11 1 3.0\n20 1 7 0\n", ""));
         assert_eq!(procs.tree(10), Usage { cpu: 6.0, memory: 111 * 1024 });
         assert_eq!(procs.one(10), Usage { cpu: 1.0, memory: 100 * 1024 });
         assert_eq!(procs.owner(12, |pid| pid == 10), Some(10));

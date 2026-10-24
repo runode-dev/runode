@@ -759,6 +759,8 @@ status:
   no_terminals: 这个窗口里没有终端
   app: 主进程
   host: 宿主
+  speech: 语音识别
+  screen: 远程桌面
   ports_title: 端口
   ports_summary: "%{ours} 个终端 · %{external} 个外部"
   no_ports: 终端里没有程序在监听端口

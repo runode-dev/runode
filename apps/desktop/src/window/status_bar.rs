@@ -48,7 +48,7 @@ use crate::{
         tooltip::tooltip,
     },
 };
-use probe::{Caffeinate, Port, Procs, Usage};
+use probe::{Caffeinate, Helper, Port, Procs, Usage};
 
 /// 隔多久重新问一次系统。
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -148,11 +148,14 @@ impl Status {
         self.host.filter(|&host| host != std::process::id())
     }
 
-    /// runode 一共占的：app、宿主和各个终端的 shell 各自连同子孙进程，已经算在别的里面的不重复算。
-    /// shell 要单独算，因为升级接手后它们不在 app 或宿主的子孙里。
+    /// runode 一共占的：app、宿主、各个终端的 shell 和 `Helper` 各自连同子孙进程，已经算在别的里面的
+    /// 不重复算。shell 要单独算，因为升级接手后它们不在 app 或宿主的子孙里。
     fn total(&self) -> Usage {
-        let roots: HashSet<u32> =
-            std::iter::once(std::process::id()).chain(self.host()).chain(self.shells.iter().copied()).collect();
+        let roots: HashSet<u32> = std::iter::once(std::process::id())
+            .chain(self.host())
+            .chain(self.shells.iter().copied())
+            .chain(self.procs.helpers().into_iter().map(|(_, pid)| pid))
+            .collect();
         self.procs.forest(&roots)
     }
 
@@ -647,8 +650,16 @@ impl WindowView {
             rows.push(empty_note(rust_i18n::t!("status.no_terminals").into_owned(), fg_h).into_any_element());
         }
         let app = std::process::id();
+        let helpers = procs.helpers().into_iter().map(|(helper, pid)| {
+            let key = match helper {
+                Helper::Speech => "status.speech",
+                Helper::Screen => "status.screen",
+            };
+            (rust_i18n::t!(key).into_owned(), pid)
+        });
         let own: Vec<_> = std::iter::once((rust_i18n::t!("status.app").into_owned(), app))
             .chain(status.host().map(|host| (rust_i18n::t!("status.host").into_owned(), host)))
+            .chain(helpers)
             .map(|(name, pid)| (SharedString::from(name), procs.one(pid)))
             .collect();
         let own_sum = own.iter().fold(Usage::default(), |sum, (_, usage)| sum + *usage);

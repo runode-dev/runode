@@ -759,6 +759,8 @@ status:
   no_terminals: No terminals in this window
   app: Main Process
   host: Host
+  speech: Speech Recognition
+  screen: Remote Desktop
   ports_title: Ports
   ports_summary: "%{ours} in terminals · %{external} external"
   no_ports: No program in a terminal is listening on a port
