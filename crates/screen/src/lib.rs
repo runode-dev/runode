@@ -1,8 +1,9 @@
 //! 远程桌面在电脑这边的部分：采集一块屏幕、编成低延迟的硬件 HEVC（`Capture`），把手机发来的
 //! 鼠标和键盘输入注入系统（`Injector`）。传输和协议不在这里。
 //!
-//! 目前只有 macOS：ScreenCaptureKit 采集，VideoToolbox 编码，CoreGraphics 注入。采集要「屏幕录制」
-//! 的授权，注入要「辅助功能」的授权，都按调用进程的责任进程记（`permissions`）。
+//! macOS 上 ScreenCaptureKit 采集，VideoToolbox 编码，CoreGraphics 注入；采集要「屏幕录制」的授权，
+//! 注入要「辅助功能」的授权，都按调用进程的责任进程记（`permissions`）。Windows 上 DXGI 桌面复制
+//! 采集，Media Foundation 编码，`SendInput` 注入，不用授权。
 
 #[cfg(target_os = "macos")]
 mod awake;
@@ -12,15 +13,21 @@ mod capture;
 mod encoder;
 #[cfg(target_os = "macos")]
 mod input;
-#[cfg(target_os = "macos")]
+mod keys;
+#[cfg(any(target_os = "macos", windows))]
 mod nal;
+#[cfg(windows)]
+mod win;
 
 #[cfg(target_os = "macos")]
 pub use awake::KeepAwake;
 #[cfg(target_os = "macos")]
-pub use capture::{Capture, Keyframes, Options};
+pub use capture::{Capture, Keyframes};
 #[cfg(target_os = "macos")]
-pub use input::{Injector, key_strokes};
+pub use input::Injector;
+pub use keys::key_strokes;
+#[cfg(windows)]
+pub use win::{Capture, Injector, KeepAwake, Keyframes};
 
 pub use runode_types::screen::VideoFrame;
 
@@ -32,15 +39,29 @@ pub enum Event {
     Stopped(String),
 }
 
+/// 怎么采集。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Options {
+    /// 采哪块屏幕，见 `Display`。
+    pub display: u32,
+    /// 画面的像素尺寸；和屏幕的宽高比不同时留黑边。
+    pub width: u32,
+    pub height: u32,
+    /// 帧率上限。
+    pub fps: u32,
+    /// 平均码率，单位 bit/s。
+    pub bitrate: u32,
+}
+
 /// 一块屏幕。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Display {
-    /// `CGDirectDisplayID`。
+    /// macOS 上是 `CGDirectDisplayID`，Windows 上是显卡和它的输出的序号（`win::display`）。
     pub id: u32,
     /// 点数，`ScreenInput` 的坐标按它换算。
     pub width: u32,
     pub height: u32,
-    /// 像素数，Retina 屏是点数的两倍。
+    /// 像素数，Retina 屏是点数的两倍，Windows 上按显示缩放比例算。
     pub pixel_width: u32,
     pub pixel_height: u32,
 }
@@ -78,6 +99,18 @@ impl Display {
         displays
     }
 
+    /// 主屏（任务栏所在的那块）。
+    #[cfg(windows)]
+    pub fn main() -> Self {
+        Self::all().swap_remove(0)
+    }
+
+    /// 开着的各块屏幕，主屏排第一；一块都列不出时是按系统报的主屏尺寸凑的一块。
+    #[cfg(windows)]
+    pub fn all() -> Vec<Self> {
+        win::displays()
+    }
+
     #[cfg(target_os = "macos")]
     fn with_id(id: u32) -> Self {
         use objc2_core_graphics::{CGDisplayBounds, CGDisplayCopyDisplayMode, CGDisplayMode};
@@ -101,6 +134,12 @@ pub fn screen_locked() -> bool {
         .get(&CFString::from_static_str("CGSSessionScreenIsLocked"))
         .and_then(|value| value.downcast::<CFBoolean>().ok())
         .is_some_and(|value| value.as_bool())
+}
+
+/// 电脑现在是不是锁着屏（锁屏界面在安全桌面上，采不到也注入不了）。查不到时当成没锁。
+#[cfg(windows)]
+pub fn screen_locked() -> bool {
+    win::screen_locked()
 }
 
 /// 这个进程的责任进程有没有拿到授权。
@@ -127,4 +166,15 @@ pub fn request_permissions() -> Permissions {
         screen_capture: now.screen_capture || CGRequestScreenCaptureAccess(),
         post_event: now.post_event || CGRequestPostEventAccess(),
     }
+}
+
+/// Windows 上采集和注入都不用授权。
+#[cfg(windows)]
+pub fn permissions() -> Permissions {
+    Permissions { screen_capture: true, post_event: true }
+}
+
+#[cfg(windows)]
+pub fn request_permissions() -> Permissions {
+    permissions()
 }

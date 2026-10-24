@@ -25,7 +25,7 @@ mod prespawn;
 mod preview_panel;
 mod process_env;
 mod remote_access;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 mod screen_process;
 mod settings;
 mod startup;
@@ -63,7 +63,7 @@ fn main() {
     if args == ["--host", "--take-over"] {
         std::process::exit(host_process::take_over());
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     if args == ["--screen"] {
         std::process::exit(screen_process::run());
     }

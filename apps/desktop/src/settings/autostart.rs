@@ -103,6 +103,11 @@ impl SettingsView {
 
 const KINDS: [Kind; 2] = [Kind::App, Kind::Host];
 
+/// 这个系统上有没有能装的自启；一个都没有时通用页不画「登录时启动」这一节。
+pub(super) fn any_supported() -> bool {
+    KINDS.into_iter().any(Kind::supported)
+}
+
 fn error_id(kind: Kind) -> String {
     format!("autostart-{}", kind.name())
 }

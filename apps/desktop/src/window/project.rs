@@ -63,8 +63,9 @@ pub(super) const TOGGLE_WIDTH: f32 = 28.;
 pub(super) const TOGGLE_HEIGHT: f32 = 24.;
 const TOGGLE_GAP: f32 = 4.;
 pub(super) const TOGGLE_MARGIN: f32 = 10.;
-/// 右侧面板都收着时标题栏右边给右上角的命令按钮和面板开关让出的宽度。
-pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH * 2. + TOGGLE_GAP + TOGGLE_MARGIN + 6.;
+/// 右侧面板都收着时标题栏右边给右上角的命令按钮、面板开关和窗口按钮让出的宽度。
+pub(super) const PANEL_TOGGLES_INSET: f32 =
+    TOGGLE_WIDTH * 2. + TOGGLE_GAP + TOGGLE_MARGIN + 6. + super::titlebar::WINDOW_CONTROLS_WIDTH;
 
 /// 右侧面板显示的那一页。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

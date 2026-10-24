@@ -46,6 +46,10 @@ socket2 = { version = "0.6", features = ["all"] }
 windows-sys = "0.61"
 # Windows 10 起有的 AF_UNIX socket，接口照着标准库的 `UnixStream`、`UnixListener`；宿主的 socket 用它。
 uds_windows = "1.2"
+# Windows 的 COM 接口（D3D11、DXGI、Media Foundation），远程桌面的采集和编码用；版本跟 GPUI 用的一致。
+windows = "0.62"
+# 把图标编进 Windows 的可执行文件（资源脚本交给 rc.exe 编）。
+embed-resource = "3"
 futures = "0.3"
 libc = "0.2"
 tracing = "0.1"

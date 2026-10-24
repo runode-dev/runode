@@ -18,7 +18,7 @@
 | `config` | Ghostty 兼容的配置文件、主题、快捷键和配置模板，生成 `TermSettings`。模板只有英文，配置项的说明写在 `docs`，动作的说明写在 `ActionSpec::doc`，译文都在 `desktop` 的 locales 里 | types、paths、tracing、objc2-foundation、objc2-app-kit |
 | `host` | 管终端会话的宿主（只有 lib），跑在 app 进程里或单独一个进程（`runode --host`）：持有 PTY 和权威的 VT，升级时新宿主接手旧宿主的会话、会话不断（Windows 上不交接，会话跟着重启）；也替前端读写 git、列目录和命令，持有看板 | terminal、protocol、types、git、paths、todo、tasks、agent、libc（Unix）、uds_windows 和 windows-sys（Windows）、anyhow、tracing |
 | `remote` | 远程访问：TLS 监听、门禁、设备表、Bonjour，给手机推通知；不在同一个网络时经 iroh 按公钥连过来（`tunnel`，打洞直连，打不通走中继），流上照样跑 TLS 和门禁 | protocol、types、paths、rustls、rcgen、ring、iroh、tokio、socket2、libc（Unix）、uds_windows 和 windows-sys（Windows）、serde、serde_json、tracing |
-| `screen` | 远程桌面在电脑这边：采集屏幕、编成低延迟的硬件 HEVC（`Capture`），把手机发来的键鼠输入注入系统（`Injector`）；传输和协议不在这里 | types、tracing、objc2、block2、dispatch2、objc2-screen-capture-kit、objc2-video-toolbox、objc2-core-media、objc2-core-video、objc2-core-graphics |
+| `screen` | 远程桌面在电脑这边：采集屏幕、编成低延迟的硬件 HEVC（`Capture`），把手机发来的键鼠输入注入系统（`Injector`）；macOS 上用 ScreenCaptureKit 和 VideoToolbox，Windows 上用 DXGI 桌面复制和 Media Foundation；传输和协议不在这里 | types、tracing、objc2、block2、dispatch2、objc2-screen-capture-kit、objc2-video-toolbox、objc2-core-media、objc2-core-video、objc2-core-graphics（macOS）、windows（Windows） |
 | `update` | 桌面 app 的自动更新：查 GitHub Release、下载、核对签名，退出时原子地换上 | serde、serde_json、tracing、libc、objc2、block2、objc2-foundation |
 | `autostart` | 登录时自启（launchd、systemd、`SMAppService`），命令行和设置页共用 | paths、objc2、objc2-foundation、objc2-service-management |
 | `ui` | 桌面几处界面共用的 GPUI 部件（照 shadcn 起名，variant、size 选样子）、全 app 一份的主题 `Theme`（只能在 render 和 paint 里读）、所有图标、界面字号和无障碍的共用写法；界面文字由调用方翻译好交进来 | types、paths、GPUI、tracing、unicode-segmentation、objc2-app-kit、objc2-foundation |

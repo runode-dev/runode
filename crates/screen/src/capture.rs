@@ -28,7 +28,7 @@ use objc2_screen_capture_kit::{
 };
 
 use crate::{
-    Event,
+    Event, Options,
     awake::KeepAwake,
     encoder::{Encoder, Sink},
 };
@@ -40,20 +40,6 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
 const REPEAT_DELAY: Duration = Duration::from_millis(100);
 /// `SCStreamConfiguration::queueDepth` 不该超过的帧数，ScreenCaptureKit 的文档这样要求。
 const MAX_QUEUE_DEPTH: isize = 8;
-
-/// 怎么采集。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Options {
-    /// 采哪块屏幕，见 `Display`。
-    pub display: u32,
-    /// 画面的像素尺寸；和屏幕的宽高比不同时 ScreenCaptureKit 留黑边。
-    pub width: u32,
-    pub height: u32,
-    /// 帧率上限。
-    pub fps: u32,
-    /// 平均码率，单位 bit/s。
-    pub bitrate: u32,
-}
 
 /// 开着的采集，丢掉时停下。
 pub struct Capture {

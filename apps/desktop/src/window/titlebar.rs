@@ -1,11 +1,13 @@
 //! 标题栏：窗口的标题栏设置、标签和新建标签按钮、拖动中的标签，以及标题、agent 状态标记和快捷键提示。
 
+use std::borrow::Cow;
+
 use crate::ui::theme::ActiveTheme as _;
 
 use gpui::{
     Action, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla, MouseButton, MouseDownEvent, Pixels,
-    Render, Role, SharedString, Stateful, TitlebarOptions, Window, div, linear_color_stop, linear_gradient, point,
-    prelude::*, px, svg,
+    Render, Role, SharedString, Stateful, TitlebarOptions, Window, WindowControlArea, div, linear_color_stop,
+    linear_gradient, point, prelude::*, px, svg,
 };
 use runode_types::agent::AgentKind;
 
@@ -44,13 +46,22 @@ const TAB_SIDE_SLOT: f32 = 20.;
 /// 比这窄的标签只留标题：快捷键提示收起，关闭按钮悬停时浮在标题左边。
 const TAB_COMPACT_WIDTH: f32 = 120.;
 
-/// 窗口的标题栏设置：macOS 上透明，终端背景一直铺到窗口顶部，标签栏画在红绿灯或侧栏右边；别的系统
-/// 上用系统自己的标题栏和边框，标签栏在它下面。
+/// Windows 上标题栏右上角一个窗口按钮的宽度，和系统画的一样。
+const WINDOW_CONTROL_WIDTH: f32 = 46.;
+/// 标题栏右上角给窗口按钮（`render_window_controls`）让出的宽度，只有 Windows 上不为零。
+pub(super) const WINDOW_CONTROLS_WIDTH: f32 = if cfg!(windows) { 3. * WINDOW_CONTROL_WIDTH } else { 0. };
+/// 窗口按钮的图标字体，Windows 10 起自带，系统自己的标题栏也用它。
+const WINDOW_CONTROL_FONT: &str = "Segoe MDL2 Assets";
+/// 鼠标停在关闭按钮上时的底色，和系统的一样。
+const WINDOW_CLOSE_HOVER: u32 = 0xC42B1C;
+
+/// 窗口的标题栏设置：macOS 和 Windows 上透明，终端背景一直铺到窗口顶部，macOS 上标签栏画在红绿灯
+/// 或侧栏右边，Windows 上右上角自己画窗口按钮；别的系统上用系统自己的标题栏和边框，标签栏在它下面。
 pub fn titlebar_options() -> TitlebarOptions {
     let macos = cfg!(target_os = "macos");
     TitlebarOptions {
         title: Some(DEFAULT_TITLE.into()),
-        appears_transparent: macos,
+        appears_transparent: macos || cfg!(windows),
         traffic_light_position: macos.then(|| point(px(TRAFFIC_LIGHTS_ORIGIN.0), px(TRAFFIC_LIGHTS_ORIGIN.1))),
     }
 }
@@ -217,6 +228,75 @@ pub(super) fn shortcut_hint(select: &dyn Action, last: &dyn Action, is_last: boo
 }
 
 impl WindowView {
+    /// Windows 上标题栏右上角的最小化、最大化（最大化着时是还原）和关闭按钮，盖在窗口最上层，全屏时不画。
+    /// 鼠标按下由系统照命中测试的结果（`WindowControlArea`）办，这里只画样子；辅助工具的按下另外登记。
+    pub(super) fn render_window_controls(&self, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
+        if !cfg!(windows) || window.is_fullscreen() {
+            return None;
+        }
+        let fg = cx.theme().foreground;
+        let hover = cx.theme().mix(0.08);
+        let view = cx.entity().downgrade();
+        let button = |id: &'static str, area: WindowControlArea, glyph: &'static str, label: Cow<'_, str>| {
+            div()
+                .id(id)
+                .role(Role::Button)
+                .aria_label(SharedString::from(label.into_owned()))
+                .window_control_area(area)
+                // 挡住下面的拖动区：GPUI 按登记的先后认窗口控制区，先画的拖动区会抢在前面。
+                .occlude()
+                .w(px(WINDOW_CONTROL_WIDTH))
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .font_family(WINDOW_CONTROL_FONT)
+                .text_size(px(10.))
+                .text_color(fg)
+                .child(glyph)
+        };
+        let (max_glyph, max_label) = if window.is_maximized() {
+            ("\u{E923}", rust_i18n::t!("window_controls.restore"))
+        } else {
+            ("\u{E922}", rust_i18n::t!("window_controls.maximize"))
+        };
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .h(px(TITLEBAR_HEIGHT))
+                .flex()
+                .child(
+                    button(
+                        "window-minimize",
+                        WindowControlArea::Min,
+                        "\u{E921}",
+                        rust_i18n::t!("window_controls.minimize"),
+                    )
+                    .hover(|el| el.bg(hover))
+                    .on_a11y_press(view.clone(), |_, window, _| window.minimize_window()),
+                )
+                .child(
+                    button("window-maximize", WindowControlArea::Max, max_glyph, max_label)
+                        .hover(|el| el.bg(hover))
+                        .on_a11y_press(view.clone(), |_, window, _| window.zoom_window()),
+                )
+                .child(
+                    button(
+                        "window-close",
+                        WindowControlArea::Close,
+                        "\u{E8BB}",
+                        rust_i18n::t!("window_controls.close"),
+                    )
+                    .hover(|el| el.bg(gpui::rgb(WINDOW_CLOSE_HOVER)).text_color(gpui::white()))
+                    .on_a11y_press(view, |_, window, cx| {
+                        window.dispatch_action(Box::new(crate::menus::CloseWindow), cx);
+                    }),
+                ),
+        )
+    }
+
     /// 切到当前 workspace 里的标签 `id`。点标签时按 id 找：画出标签条以后标签可能已经增删、挪了位置，
     /// 也可能换了 workspace，照画的时候的序号会切到别的标签上，甚至越界。
     fn activate_tab_id(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {

@@ -91,8 +91,11 @@ pub fn service(host: &Host) -> Option<Service> {
 /// shortcut: 连上的正好是因空闲正要退出的采集进程时这条连接随即断开，由手机重连；常见了再在采集进程
 /// 里加握手确认
 fn connect_screen() -> io::Result<UnixStream> {
-    if !cfg!(target_os = "macos") {
-        return Err(io::Error::new(io::ErrorKind::Unsupported, "remote desktop is only available on macOS"));
+    if !cfg!(any(target_os = "macos", windows)) {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "remote desktop is only available on macOS and Windows",
+        ));
     }
     let socket = runode_paths::Dirs::from_env()
         .screen_socket_file()

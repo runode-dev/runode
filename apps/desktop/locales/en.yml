@@ -122,6 +122,11 @@ workspace:
   empty: No terminals in this workspace
   list: Workspaces
   bell: Bell rang
+window_controls:
+  minimize: Minimize
+  maximize: Maximize
+  restore: Restore Down
+  close: Close
 close:
   unsaved: "%{count} files have unsaved changes, which will be lost."
   pane_title: Close this terminal?

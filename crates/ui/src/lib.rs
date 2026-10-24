@@ -52,7 +52,7 @@ pub fn display_dir(dir: &Path) -> String {
         if rest.as_os_str().is_empty() {
             return "~".into();
         }
-        return format!("~/{}", rest.display());
+        return format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display());
     }
     dir.display().to_string()
 }

@@ -12,7 +12,7 @@ use std::{net::IpAddr, rc::Rc};
 
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
-    MouseButton, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
+    MouseButton, Role, SharedString, Stateful, Subscription, Window, WindowControlArea, div, prelude::*, px, svg,
 };
 use runode_remote::{host_name, local_interfaces};
 
@@ -330,7 +330,13 @@ impl WindowView {
             .h_full()
             .flex()
             .flex_col()
-            .child(div().flex_none().h(px(TITLEBAR_HEIGHT)).on_mouse_down(MouseButton::Left, drag_window))
+            .child(
+                div()
+                    .flex_none()
+                    .h(px(TITLEBAR_HEIGHT))
+                    .window_control_area(WindowControlArea::Drag)
+                    .on_mouse_down(MouseButton::Left, drag_window),
+            )
             .child(if cards {
                 Card::new()
                     .flex_1()

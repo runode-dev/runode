@@ -3,16 +3,11 @@
 //! 持续 `IDLE_EXIT` 没有连接就退出，没人看时不占资源。采集和编码跑在这个进程里，崩了只断远程桌面，
 //! 宿主里的终端会话不受影响。
 
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::{
     fs::{File, OpenOptions},
     io::{self, BufReader, BufWriter, Write as _},
-    os::{
-        fd::AsRawFd as _,
-        unix::{
-            fs::{OpenOptionsExt as _, PermissionsExt as _},
-            net::{UnixListener, UnixStream},
-        },
-    },
     sync::{
         Arc, Mutex, OnceLock, PoisonError,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -29,6 +24,8 @@ use runode_protocol::{
 };
 use runode_screen::{Capture, Display, Event, Injector, KeepAwake, Keyframes, Options};
 use runode_types::input::Key;
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 
 /// 持续这么久没有连接就退出。拉起它的一方马上就连，所以不必等很久。
 const IDLE_EXIT: Duration = Duration::from_secs(10);
@@ -71,17 +68,20 @@ fn listen(dirs: &runode_paths::Dirs) -> io::Result<(UnixListener, std::path::Pat
     dirs.create_runtime_dir()?;
     let socket = dirs.screen_socket_file().ok_or_else(|| io::Error::other("the socket path is too long"))?;
     let lock = dirs.screen_lock_file().ok_or_else(|| io::Error::other("no place for the lock"))?;
-    let lock = OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(lock)?;
-    // SAFETY: 描述符来自上面打开的文件，在这次调用期间一直有效。
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(false).write(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let lock = options.open(lock)?;
+    lock.try_lock().map_err(io::Error::from)?;
     match std::fs::remove_file(&socket) {
         Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err),
         _ => {}
     }
     let listener = UnixListener::bind(&socket)?;
-    std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
+    // Windows 上 socket 文件不单独设权限，谁能连由所在的运行目录的权限决定。
+    #[cfg(unix)]
+    std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     Ok((listener, socket, lock))
 }
 
@@ -125,10 +125,22 @@ fn serve(listener: &UnixListener) {
 }
 
 /// 等 `listener` 来连接最多 `timeout`。
+#[cfg(unix)]
 fn readable(listener: &UnixListener, timeout: Duration) -> bool {
+    use std::os::fd::AsRawFd as _;
     let mut fd = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
     // SAFETY: 只等这一个描述符，`fd` 是本地变量。
     unsafe { libc::poll(&mut fd, 1, timeout.as_millis() as libc::c_int) > 0 }
+}
+
+/// 等 `listener` 来连接最多 `timeout`。
+#[cfg(windows)]
+fn readable(listener: &UnixListener, timeout: Duration) -> bool {
+    use std::os::windows::io::AsRawSocket as _;
+    use windows_sys::Win32::Networking::WinSock::{POLLRDNORM, WSAPOLLFD, WSAPoll};
+    let mut fd = WSAPOLLFD { fd: listener.as_raw_socket() as usize, events: POLLRDNORM, revents: 0 };
+    // SAFETY: 只等这一个 socket，`fd` 是本地变量。
+    unsafe { WSAPoll(&mut fd, 1, timeout.as_millis() as i32) > 0 }
 }
 
 /// 服务一条连接，到对面断开或者说错话为止。第一帧要是 `ScreenHello`。
@@ -236,6 +248,10 @@ fn watch_lock(outbox: &Outbox) -> StopFlag {
 /// 把密码敲进锁屏的密码框再回车。没锁屏时什么都不敲；每敲一个键前都再看一眼，中途解开了（别人在电脑前
 /// 解了）就停下，免得把密码敲进别的窗口。
 fn unlock(injector: &mut Injector, password: &str) -> Result<(), &'static str> {
+    // 锁屏界面在安全桌面上，普通进程往那里注入不了按键。
+    if cfg!(windows) {
+        return Err("the lock screen cannot be typed into on Windows");
+    }
     let strokes = runode_screen::key_strokes(password).ok_or("the password has keys a US keyboard cannot type")?;
     for (key, shift) in strokes.into_iter().chain([(Key::Enter, false)]) {
         if !runode_screen::screen_locked() {

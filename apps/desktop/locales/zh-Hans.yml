@@ -122,6 +122,11 @@ workspace:
   empty: 这个工作区里还没有终端
   list: 工作区
   bell: 响过铃
+window_controls:
+  minimize: 最小化
+  maximize: 最大化
+  restore: 向下还原
+  close: 关闭
 close:
   unsaved: "有 %{count} 个文件改过还没保存，关闭后修改会丢掉。"
   pane_title: 关闭这个终端？

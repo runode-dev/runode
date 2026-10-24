@@ -6237,6 +6237,7 @@ version = "0.1.12"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
+ "embed-resource",
  "futures",
  "gif",
  "gpui-pre",
@@ -6412,6 +6413,7 @@ dependencies = [
  "objc2-video-toolbox",
  "runode-types",
  "tracing",
+ "windows 0.62.2",
 ]
 
 [[package]]

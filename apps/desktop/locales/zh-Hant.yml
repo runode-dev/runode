@@ -122,6 +122,11 @@ workspace:
   empty: 這個工作區裡還沒有終端機
   list: 工作區
   bell: 響過鈴
+window_controls:
+  minimize: 最小化
+  maximize: 最大化
+  restore: 向下還原
+  close: 關閉
 close:
   unsaved: "有 %{count} 個檔案改過還沒儲存，關閉後修改會遺失。"
   pane_title: 關閉這個終端機？

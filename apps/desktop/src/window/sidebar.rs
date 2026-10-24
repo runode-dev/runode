@@ -7,8 +7,8 @@ use crate::ui::button::{Button, ButtonSize, Toggle};
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
     Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Modifiers, MouseButton,
-    MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, TextAlign, Window, canvas, div, img, prelude::*,
-    px, relative, svg,
+    MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, TextAlign, Window, WindowControlArea, canvas,
+    div, img, prelude::*, px, relative, svg,
 };
 
 use super::{
@@ -193,6 +193,8 @@ impl WindowView {
             .w(px(SIDEBAR_TOGGLE_WIDTH))
             .h(px(SIDEBAR_TOGGLE_HEIGHT))
             .tooltip(tooltip)
+            // 压在拖窗口的区域上：不挡住的话 Windows 把这里当标题栏，按下被拿去拖窗口。
+            .occlude()
             .on_press_down(cx, |this, window, cx| this.toggle_sidebar(&ToggleSidebar, window, cx))
     }
 
@@ -214,7 +216,13 @@ impl WindowView {
             .text_size(FontSize::Body)
             // 顶上这条放红绿灯（全屏时没有）和侧栏开关，和标题栏一样能拖动窗口、双击缩放，比标题栏
             // 多留一点，第一行不贴着开关。
-            .child(div().flex_none().h(px(TITLEBAR_HEIGHT + 6.)).on_mouse_down(MouseButton::Left, drag_window))
+            .child(
+                div()
+                    .flex_none()
+                    .h(px(TITLEBAR_HEIGHT + 6.))
+                    .window_control_area(WindowControlArea::Drag)
+                    .on_mouse_down(MouseButton::Left, drag_window),
+            )
             .child(self.render_mobile_entry(cx))
             .child(self.render_new_todo_entry(modifiers, cx))
             .child(self.render_schedules_entry(modifiers, cx))

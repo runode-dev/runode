@@ -396,16 +396,18 @@ impl SettingsView {
 
 /// 顶上那一条：放红绿灯，按住拖动窗口，双击缩放。
 fn titlebar_strip() -> gpui::Div {
-    div().flex_none().h(px(crate::window::TITLEBAR_HEIGHT)).w_full().on_mouse_down(
-        MouseButton::Left,
-        |event: &MouseDownEvent, window: &mut Window, _: &mut App| {
+    div()
+        .flex_none()
+        .h(px(crate::window::TITLEBAR_HEIGHT))
+        .w_full()
+        .window_control_area(gpui::WindowControlArea::Drag)
+        .on_mouse_down(MouseButton::Left, |event: &MouseDownEvent, window: &mut Window, _: &mut App| {
             if event.click_count >= 2 {
                 window.titlebar_double_click();
             } else {
                 window.start_window_move();
             }
-        },
-    )
+        })
 }
 
 /// `palette` 一行的序号。

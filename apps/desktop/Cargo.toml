@@ -60,8 +60,8 @@ regex.workspace = true
 [target.'cfg(windows)'.dependencies]
 # Windows 10 起有的 AF_UNIX socket，连宿主用。
 uds_windows.workspace = true
-# 界面程序跑命令行时接上终端的控制台（`AttachConsole`）。
-windows-sys = { workspace = true, features = ["Win32_System_Console"] }
+# 界面程序跑命令行时接上终端的控制台（`AttachConsole`）；远程桌面的采集进程等连接（`WSAPoll`）。
+windows-sys = { workspace = true, features = ["Win32_Networking_WinSock", "Win32_System_Console"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
@@ -78,6 +78,9 @@ raw-window-handle.workspace = true
 # Linux 的窗口后端。不开时 gpui_linux 只有无头平台，开不出窗口，可执行文件只依赖 libc，没有图形库的服务器上
 # 也能跑命令行和宿主；开了启动时就要 libxcb、libxkbcommon、libxkbcommon-x11 和 libfreetype。
 linux-desktop = ["gpui_platform/x11", "gpui_platform/wayland"]
+
+[build-dependencies]
+embed-resource.workspace = true
 
 [lints]
 workspace = true

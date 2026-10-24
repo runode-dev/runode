@@ -282,6 +282,7 @@ impl SettingsView {
         let mut cards = Cards::new(page, theme);
         // 发布的版本经中转推官方 App，用不着直连 APNs 的密钥，这一节只在自己编译的版本里显示。
         let official = runode_protocol::push::RELAY_URL.is_some();
+        let autostart = super::autostart::any_supported();
         let shown = |item: &&Item| {
             !(official
                 && matches!(
@@ -289,6 +290,7 @@ impl SettingsView {
                     Item::Section("push_key")
                         | Item::Row("apns-key-file" | "apns-key-id" | "apns-team-id" | "apns-bundle-id", _)
                 ))
+                && (autostart || !matches!(item, Item::Section("login") | Item::Autostart))
         };
         for item in self.page.items().iter().filter(shown) {
             let element = match *item {

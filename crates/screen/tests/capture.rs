@@ -1,6 +1,6 @@
-//! 真采一块屏幕、真编 HEVC：要屏幕录制的授权，CI 上没有，所以 `#[ignore]`，在有授权的终端里用
-//! `cargo test -p runode-screen -- --ignored` 跑。
-#![cfg(target_os = "macos")]
+//! 真采一块屏幕、真编 HEVC：macOS 上要屏幕录制的授权，Windows 上要在登录着的桌面上跑、要有能编 HEVC
+//! 的显卡，CI 上都没有，所以 `#[ignore]`，在桌面的终端里用 `cargo test -p runode-screen -- --ignored` 跑。
+#![cfg(any(target_os = "macos", windows))]
 
 use std::{
     sync::mpsc,

@@ -37,6 +37,12 @@ fn main() {
         // 跟随系统语言显示「版本」等字样。
         println!("cargo:rustc-link-arg-bins=-Wl,-sectcreate,__TEXT,__info_plist,{}", plist.display());
     }
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        // GPUI 拿编号为 1 的图标资源当窗口和任务栏的图标，资源管理器里的程序图标也是它。
+        println!("cargo:rerun-if-changed=runode.rc");
+        println!("cargo:rerun-if-changed=assets/compiled/runode.ico");
+        embed_resource::compile("runode.rc", embed_resource::NONE).manifest_required().unwrap();
+    }
 }
 
 fn git_short_head() -> Option<String> {

@@ -44,7 +44,7 @@ use futures::{StreamExt as _, future::Shared};
 use gpui::{
     Action, AnyElement, App, Context, Div, Empty, Entity, EntityId, ExternalPaths, FocusHandle, Focusable,
     KeyDownEvent, MouseButton, Render, Role, ScrollHandle, SharedString, Stateful, StyleRefinement, Subscription, Task,
-    Window, WindowBounds, actions, div, prelude::*, px,
+    Window, WindowBounds, WindowControlArea, actions, div, prelude::*, px,
 };
 use runode_config::WindowStyle;
 use runode_types::{
@@ -633,8 +633,11 @@ fn row_slot(slot: &Entity<Slot>, height: f32, window: &Window) -> AnyElement {
 
 /// 辅助工具开着时不缓存：GPUI 在 prepaint 里逐帧重建报给辅助工具的节点，照搬上一帧的视图跳过了
 /// prepaint，它里面的按钮、列表就从树里消失了。
+///
+/// shortcut: Windows 上一律不缓存，GPUI 照搬上一帧时不重放拖窗口的区域（`window_control_area`），
+/// 标题栏和侧栏就拖不动窗口；GPUI 重放它以后去掉
 fn cached_slot(slot: &Entity<Slot>, style: StyleRefinement, window: &Window) -> AnyElement {
-    if window.is_a11y_active() {
+    if window.is_a11y_active() || cfg!(windows) {
         slot.clone().into_any_element()
     } else {
         slot.clone().cached(style).into_any_element()
@@ -700,6 +703,7 @@ impl Render for WindowView {
         } else {
             (theme.background, self.render_classic_body(window, cx))
         };
+        let window_controls = self.render_window_controls(window, cx);
         let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
         let menu = self.render_context_menu(window, cx);
         let agent_picker = self.render_agent_picker(window, cx);
@@ -824,6 +828,7 @@ impl Render for WindowView {
                     .child(div().relative().flex_1().min_h_0().flex().children(body))
                     .children(status_bar),
             )
+            .children(window_controls)
             .children(drag)
             .children(menu)
             .children(agent_picker)
@@ -906,7 +911,7 @@ impl WindowView {
             self.render_panel_toggles(window, cx)
                 .absolute()
                 .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
-                .right(px(project::TOGGLE_MARGIN))
+                .right(px(project::TOGGLE_MARGIN + titlebar::WINDOW_CONTROLS_WIDTH))
         });
         let titlebar = titlebar_shown.then(|| row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window));
         let panes = covered_panes(panes, maximized_preview.is_some());
@@ -960,7 +965,7 @@ impl WindowView {
                 .w(px(right_inset))
                 .h_full()
                 .when(right_inset > 0., |inset| inset.border_l_1().border_color(cx.theme().border));
-            let spacer = div().id("tabs-spacer").flex_1().h_full();
+            let spacer = div().id("tabs-spacer").flex_1().h_full().window_control_area(WindowControlArea::Drag);
             vec![
                 strip.into_any_element(),
                 self.render_new_tab_button(cx).into_any_element(),
@@ -983,6 +988,7 @@ impl WindowView {
                     .role(Role::Heading)
                     .aria_label(title.clone())
                     .when_some(mark, |el, mark| el.aria_description(mark.describe()))
+                    .window_control_area(WindowControlArea::Drag)
                     .flex_1()
                     .min_w_0()
                     .h_full()
@@ -1006,6 +1012,7 @@ impl WindowView {
             // 左边那条对称。
             .child(
                 div()
+                    .window_control_area(WindowControlArea::Drag)
                     .flex_none()
                     .w(px(left_inset))
                     .h_full()
@@ -1108,14 +1115,14 @@ impl WindowView {
             .flex_none()
             .flex()
             .items_center()
-            .pr(px(CARD_GAP))
+            .pr(px(CARD_GAP + titlebar::WINDOW_CONTROLS_WIDTH))
             .text_size(FontSize::Body)
             .on_mouse_down(MouseButton::Left, drag_window)
-            .child(div().flex_none().w(px(left_inset)))
+            .child(div().flex_none().w(px(left_inset)).h_full().window_control_area(WindowControlArea::Drag))
             .child(strip)
             .child(self.render_new_tab_button_card(cx))
             // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
-            .child(div().flex_1().h_full())
+            .child(div().flex_1().h_full().window_control_area(WindowControlArea::Drag))
             .child(self.render_panel_toggles(window, cx))
             .into_any_element()
     }
