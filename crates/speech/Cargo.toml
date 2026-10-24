@@ -1,0 +1,19 @@
+[package]
+name = "runode-speech"
+description = "Speech-to-text: downloads and verifies the recognition models, records the microphone and transcribes it on the device with sherpa-onnx, or in the cloud, and polishes the text with a language model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+runode-types.workspace = true
+anyhow.workspace = true
+cpal.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sherpa-onnx.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

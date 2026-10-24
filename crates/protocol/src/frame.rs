@@ -26,6 +26,8 @@ pub enum FrameKind {
     Snapshot = 3,
     /// 远程桌面编好的一帧画面，载荷见 `screen::encode_video`。
     Video = 4,
+    /// 手机交给电脑识别的一段录音，载荷见 `speech`。
+    Audio = 5,
 }
 
 impl FrameKind {
@@ -36,6 +38,7 @@ impl FrameKind {
             2 => Self::Control,
             3 => Self::Snapshot,
             4 => Self::Video,
+            5 => Self::Audio,
             _ => return None,
         })
     }

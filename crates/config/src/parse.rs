@@ -12,6 +12,7 @@ use runode_types::{
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, MIN_SCROLLBACK_LIMIT, OptionAsAlt},
     shell::{IntegrationMode, Shell, ShellFeatures},
+    speech::{DictationCloud, SpeechModel},
 };
 
 use crate::{
@@ -38,6 +39,19 @@ pub const KEYS: &[&[&str]] = &[
     ],
     &["file-tree-preview-click", "preview-font-size"],
     &["task-placement"],
+    &[
+        "dictation-model",
+        "dictation-words",
+        "dictation-cloud",
+        "dictation-openai-url",
+        "dictation-openai-key",
+        "dictation-openai-model",
+        "dictation-doubao-app-id",
+        "dictation-doubao-key",
+        "dictation-polish-url",
+        "dictation-polish-key",
+        "dictation-polish-model",
+    ],
     &[
         "theme",
         "background",
@@ -238,6 +252,41 @@ impl Config {
                     _ => return Err("expected right, down or tab".into()),
                 };
             }
+            "dictation-model" => {
+                self.dictation_model = match value {
+                    "" => SpeechModel::default(),
+                    _ => SpeechModel::from_name(value).ok_or("expected sense-voice or fire-red-asr2")?,
+                };
+            }
+            "dictation-words" => {
+                // 写法和 `agent-notifications-exclude` 一样：空值清空，逗号隔开，可以写多行。
+                if empty {
+                    self.dictation_words.clear();
+                }
+                for word in value.split(',').map(str::trim).filter(|word| !word.is_empty()) {
+                    if !self.dictation_words.iter().any(|known| known == word) {
+                        self.dictation_words.push(word.to_owned());
+                    }
+                }
+            }
+            "dictation-cloud" => {
+                self.dictation_cloud = match value {
+                    "" => DictationCloud::default(),
+                    _ => DictationCloud::from_name(value).ok_or("expected none, openai or doubao")?,
+                };
+            }
+            "dictation-openai-url" => {
+                self.dictation_openai_url = text(value).unwrap_or(defaults.dictation_openai_url);
+            }
+            "dictation-openai-key" => self.dictation_openai_key = text(value),
+            "dictation-openai-model" => {
+                self.dictation_openai_model = text(value).unwrap_or(defaults.dictation_openai_model);
+            }
+            "dictation-doubao-app-id" => self.dictation_doubao_app_id = text(value),
+            "dictation-doubao-key" => self.dictation_doubao_key = text(value),
+            "dictation-polish-url" => self.dictation_polish_url = text(value),
+            "dictation-polish-key" => self.dictation_polish_key = text(value),
+            "dictation-polish-model" => self.dictation_polish_model = text(value),
             "cursor-style" => {
                 self.cursor_style = match value {
                     "" | "block" => CursorStyle::Block,
@@ -876,6 +925,31 @@ unknown-key = whatever
         // 写之前问用户还没做，写成 ask 的按 deny 办。
         assert_eq!(load(&["clipboard-write = ask"]).clipboard_write, ClipboardWrite::Deny);
         assert!(Config::default().apply("clipboard-write", "ask", true).is_err());
+    }
+
+    #[test]
+    fn dictation_model_defaults_to_sense_voice() {
+        assert_eq!(Config::default().dictation_model, SpeechModel::SenseVoice);
+        assert_eq!(load(&["dictation-model = fire-red-asr2"]).dictation_model, SpeechModel::FireRedAsr2);
+        assert_eq!(
+            load(&["dictation-model = fire-red-asr2\ndictation-model = whisper"]).dictation_model,
+            SpeechModel::FireRedAsr2
+        );
+    }
+
+    #[test]
+    fn dictation_words_accumulate_and_an_empty_value_clears_them() {
+        let config = load(&["dictation-words = runode, ghostty\ndictation-words = GPUI,runode"]);
+        assert_eq!(config.dictation_words, ["runode", "ghostty", "GPUI"]);
+        assert!(load(&["dictation-words = runode\ndictation-words ="]).dictation_words.is_empty());
+    }
+
+    #[test]
+    fn dictation_cloud_settings() {
+        let config = load(&["dictation-cloud = doubao\ndictation-cloud = baidu\ndictation-openai-url ="]);
+        assert_eq!(config.dictation_cloud, DictationCloud::Doubao);
+        assert_eq!(config.dictation_openai_url, Config::default().dictation_openai_url);
+        assert_eq!(load(&[]).dictation_cloud, DictationCloud::None);
     }
 
     #[test]

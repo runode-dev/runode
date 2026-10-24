@@ -53,6 +53,8 @@ pub struct Harness {
     pub hosts: mpsc::Receiver<UnixStream>,
     /// 同上，到远程桌面的采集进程的。
     pub screens: mpsc::Receiver<UnixStream>,
+    /// 同上，到识别的。
+    pub speeches: mpsc::Receiver<UnixStream>,
 }
 
 impl Harness {
@@ -64,13 +66,18 @@ impl Harness {
         let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
         let (tx, hosts) = mpsc::channel();
         let (screen_tx, screens) = mpsc::channel();
-        let options = Options { connect_screen: pair_to(screen_tx), ..options(&dirs, pair_to(tx)) };
+        let (speech_tx, speeches) = mpsc::channel();
+        let options = Options {
+            connect_screen: pair_to(screen_tx),
+            connect_speech: pair_to(speech_tx),
+            ..options(&dirs, pair_to(tx))
+        };
         let listener = Listener::start(options).unwrap();
         let addr = listener.local_addrs()[0];
         let status = listener_status(&dirs).unwrap().expect("the listener writes its status");
         assert_eq!((status.port, status.host_name.as_str()), (addr.port(), "测试的 Mac"));
         let fingerprint = status.fingerprint.0.try_into().unwrap();
-        Self { root, dirs, listener: Some(listener), addr, fingerprint, hosts, screens }
+        Self { root, dirs, listener: Some(listener), addr, fingerprint, hosts, screens, speeches }
     }
 
     /// 停掉监听再开一个，返回新的证书指纹。宿主连接换成一个连不上的。
@@ -140,6 +147,7 @@ pub fn options(dirs: &Dirs, connect: runode_remote::Connect) -> Options {
         tunnel: false,
         connect,
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen"))),
+        connect_speech: Arc::new(|| Err(std::io::Error::other("no speech"))),
     }
 }
 

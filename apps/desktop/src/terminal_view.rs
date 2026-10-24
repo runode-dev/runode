@@ -10,6 +10,7 @@
 mod actions;
 mod crop;
 mod cursor_blink;
+mod dictation;
 mod element;
 mod ime;
 mod input;
@@ -54,7 +55,9 @@ actions!(
         ScrollToSelection,
         IncreaseFontSize,
         DecreaseFontSize,
-        ResetFontSize
+        ResetFontSize,
+        /// 语音输入：按住说话、松开打进终端，或者点一下开始、再点一下结束，见 `dictation`。
+        Dictate
     ]
 );
 
@@ -221,6 +224,8 @@ pub struct TerminalView {
     /// 包住终端和搜索栏的外层：焦点进到其中任何一处都算这个终端获得了焦点。
     pane_focus: FocusHandle,
     _focus_watch: [Subscription; 4],
+    /// 正在录的或正在识别的语音输入。
+    dictation: Option<dictation::Dictation>,
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -285,6 +290,9 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::increase_font_size))
             .on_action(cx.listener(Self::decrease_font_size))
             .on_action(cx.listener(Self::reset_font_size))
+            .on_action(cx.listener(Self::dictate))
+            .on_key_up(cx.listener(Self::dictation_key_up))
+            .on_modifiers_changed(cx.listener(Self::dictation_modifiers_changed))
             .size_full()
             .flex()
             .flex_col()
@@ -310,6 +318,7 @@ impl Render for TerminalView {
         let lost = self.screen.is_lost().then(|| self.render_lost_bar(foreground, background, cx));
         let size_owner = self.render_size_owner(foreground, background, cx);
         let link_target = self.render_link_target(foreground, background);
+        let dictation = self.render_dictation(foreground, background);
         div()
             .track_focus(&self.pane_focus)
             .relative()
@@ -318,6 +327,7 @@ impl Render for TerminalView {
             .children(search_bar)
             .children(size_owner)
             .children(link_target)
+            .children(dictation)
             .children(lost)
     }
 }

@@ -308,6 +308,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "扫电脑上 Runode 显示的配对二维码。";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "取出记住的电脑登录密码，替你解开锁着屏的电脑。";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "在局域网里找到并连接你电脑上的 Runode。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "语音输入：按住麦克风键说话，识别成文字打进终端。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -342,6 +343,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "扫电脑上 Runode 显示的配对二维码。";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "取出记住的电脑登录密码，替你解开锁着屏的电脑。";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "在局域网里找到并连接你电脑上的 Runode。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "语音输入：按住麦克风键说话，识别成文字打进终端。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

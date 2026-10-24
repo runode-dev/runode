@@ -81,6 +81,9 @@ pub struct Options {
     /// 门禁过了、手机要远程桌面（第一帧是 `ScreenClientMsg::ScreenHello`）时要一条到采集进程的
     /// 新连接。
     pub connect_screen: Connect,
+    /// 门禁过了、手机要电脑识别录音（第一帧是 `SpeechClientMsg::SpeechHello`）时要一条到识别的
+    /// 新连接。
+    pub connect_speech: Connect,
 }
 
 /// 开着的监听，丢掉时停下。
@@ -107,6 +110,7 @@ pub(crate) struct Shared {
     pub(crate) tls: Arc<ServerConfig>,
     pub(crate) connect: Connect,
     pub(crate) connect_screen: Connect,
+    pub(crate) connect_speech: Connect,
     /// 要停了：门禁阶段的连接回 `RejectReason::Disabled`。
     pub(crate) stopping: AtomicBool,
     connections: Mutex<HashMap<u64, Live>>,
@@ -213,7 +217,8 @@ fn cut(live: &Live) {
 impl Listener {
     /// 开监听。另一个进程已经开着（锁在它手里）、端口被占时返回错误，调用方隔一会儿再试。
     pub fn start(options: Options) -> io::Result<Self> {
-        let Options { dirs, port, bind, host_name, advertise, tunnel, connect, connect_screen } = options;
+        let Options { dirs, port, bind, host_name, advertise, tunnel, connect, connect_screen, connect_speech } =
+            options;
         let lock = lock_listener(&dirs)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::AddrInUse, "another runode process is serving remote access")
         })?;
@@ -252,6 +257,7 @@ impl Listener {
             tls: Arc::new(tls),
             connect,
             connect_screen,
+            connect_speech,
             stopping: AtomicBool::new(false),
             connections: Mutex::default(),
             next_id: AtomicU64::new(1),

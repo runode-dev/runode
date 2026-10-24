@@ -56,6 +56,10 @@ impl TerminalView {
         if self.marked_text.is_some() {
             return;
         }
+        if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() && self.cancel_dictation(cx) {
+            cx.stop_propagation();
+            return;
+        }
         // 在 shell 提示符上选中了一段命令时，退格和 Delete 删掉选中的文字。
         let keystroke = &event.keystroke;
         if matches!(keystroke.key.as_str(), "backspace" | "delete")

@@ -6,7 +6,8 @@
 
     /// 终端页：整页铺终端的背景色，标题下面一行 agent 和连接的状态。断线时终端上方叠一条带「重试」的
     /// 横幅；agent 等回答时底部出现快速回复栏；软键盘没弹出时底部常驻一条按键栏，弹出后由键盘上方的
-    /// 辅助栏接手。电脑上这个终端所在的标签分了屏时，导航栏下面一排标签切换各个分屏。
+    /// 辅助栏接手。电脑上这个终端所在的标签分了屏时，导航栏下面一排标签切换各个分屏。按键栏上的麦克风键
+    /// 语音输入，录音、识别时终端底部正中有提示。
     struct TerminalScreen: View {
         @Bindable var model: TerminalModel
         /// 设置里的字号和响铃震动。
@@ -19,6 +20,10 @@
         var onPaneEnded: ([SessionId]) -> Void = { _ in }
         /// 这台电脑的会话列表，「⋯」菜单里的命令从它取、经它跑。
         var sessions: SessionListModel?
+        /// 语音输入；为空时麦克风键不起作用。
+        var dictation: DictationModel?
+        /// 这个终端所在的电脑，交给电脑识别时连它。
+        var machine: MachineRecord?
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
         /// 嵌着的终端视图，底部的按键栏按了发给它。
@@ -35,11 +40,18 @@
         var body: some View {
             TerminalViewRepresentable(
                 model: model, preferences: preferences, topObstruction: bannerMessage == nil ? 0 : bannerHeight,
-                onMake: { view in terminalView = view })
+                dictating: dictation?.phase == .recording,
+                onMake: { view in terminalView = view },
+                onDictation: { press in
+                    dictation?.press(press, machine: machine, source: preferences.dictationSource) { [model] text in
+                        model.send(.paste(text))
+                    }
+                })
                 .ignoresSafeArea(.container, edges: .horizontal)
                 .overlay(alignment: .top) { banner }
                 // 印章的出现要由外层驱动；动画只挂在这层 ZStack 上，不让终端跟着按键栏收起播改尺寸的动画。
                 .overlay { ZStack { endedStamp }.animation(.spring(duration: 0.3), value: model.isEnded) }
+                .overlay(alignment: .bottom) { dictationBadge }
                 .overlay(alignment: .bottomTrailing) {
                     if model.scrolledBack {
                         Button("回到最新", systemImage: "arrow.down.to.line") { model.scrollToBottom() }
@@ -80,6 +92,17 @@
                 .onChange(of: model.isEnded) { _, ended in
                     if ended, tabMates.contains(model.sessionId) { onPaneEnded(tabMates) }
                 }
+                .sensoryFeedback(.start, trigger: dictation?.phase == .recording) { _, recording in recording }
+                .onDisappear { dictation?.cancel() }
+                .alert(
+                    "语音输入没有成功",
+                    isPresented: Binding(
+                        get: { dictation?.errorMessage != nil }, set: { if !$0 { dictation?.errorMessage = nil } })
+                ) {
+                    Button("好") {}
+                } message: {
+                    Text(dictation?.errorMessage ?? "")
+                }
         }
 
         private var paneIds: [SessionId] {
@@ -115,6 +138,30 @@
                 .environment(\.colorScheme, scheme)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isHeader)
+            }
+        }
+
+        /// 终端底部正中的提示：正在听、正在识别。
+        @ViewBuilder
+        private var dictationBadge: some View {
+            if let phase = dictation?.phase, phase != .idle {
+                HStack(spacing: 6) {
+                    if phase == .recording {
+                        Circle().fill(.red).frame(width: 8, height: 8)
+                    } else {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Text(phase == .recording ? "正在听…" : "正在识别…")
+                        .font(.footnote)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.regularMaterial, in: .capsule)
+                .environment(\.colorScheme, scheme)
+                .padding(.bottom, 8)
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .combine)
+                .transition(.opacity)
             }
         }
 
@@ -378,8 +425,11 @@
         let preferences: AppPreferences
         /// 叠在终端顶上的横幅的高度。
         var topObstruction: CGFloat = 0
+        /// 正在录音，麦克风键显示成按下去的样子。
+        var dictating = false
         /// 建好了终端视图，页面的按键栏要用它。
         var onMake: (TerminalView) -> Void = { _ in }
+        var onDictation: (DictationPress) -> Void = { _ in }
 
         func makeCoordinator() -> Coordinator {
             Coordinator(model: model)
@@ -411,11 +461,14 @@
             view.fontSizeOverride = preferences.fontSize.map { CGFloat($0) }
             view.bellHaptics = preferences.bellHaptics
             view.acceptsInput = !model.isEnded
+            view.dictating = dictating
+            context.coordinator.onDictation = onDictation
         }
 
         @MainActor
         final class Coordinator: TerminalViewDelegate {
             var model: TerminalModel
+            var onDictation: (DictationPress) -> Void = { _ in }
 
             init(model: TerminalModel) {
                 self.model = model
@@ -435,6 +488,10 @@
 
             func terminalView(_ view: TerminalView, keyboardVisible visible: Bool) {
                 model.setKeyboardVisible(visible)
+            }
+
+            func terminalView(_ view: TerminalView, dictation press: DictationPress) {
+                onDictation(press)
             }
         }
     }

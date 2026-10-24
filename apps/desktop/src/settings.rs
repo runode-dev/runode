@@ -11,6 +11,7 @@
 
 mod autostart;
 mod controls;
+mod dictation;
 mod keybinds;
 pub(crate) use keybinds::caps as keybind_caps;
 mod pages;
@@ -93,6 +94,8 @@ pub struct SettingsView {
     /// 各自启装没装，按 `Kind::name`，在后台查（`refresh_autostart`）；还没查到的不在里面。
     autostart: HashMap<&'static str, bool>,
     _observe: Subscription,
+    /// 语音输入的模型下载有了进度。
+    _downloads: Subscription,
 }
 
 impl EventEmitter<Close> for SettingsView {}
@@ -115,6 +118,7 @@ impl SettingsView {
             autostart_jobs: HashMap::new(),
             autostart: HashMap::new(),
             _observe: observe,
+            _downloads: cx.observe_global::<crate::dictation::Downloads>(|_, cx| cx.notify()),
         };
         view.refresh_autostart(cx);
         view

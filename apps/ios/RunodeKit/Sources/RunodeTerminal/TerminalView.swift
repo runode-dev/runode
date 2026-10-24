@@ -13,6 +13,8 @@
         func terminalView(_ view: TerminalView, didScrollBack scrolledBack: Bool)
         /// 终端拿到或交出了键盘焦点（软键盘弹出、收起）。
         func terminalView(_ view: TerminalView, keyboardVisible visible: Bool)
+        /// 辅助栏上的麦克风键按下、松开或者滑出去放开。
+        func terminalView(_ view: TerminalView, dictation press: DictationPress)
     }
 
     /// 终端视图：按宿主给的网格尺寸画（网格比屏幕大时缩放到不小于可读字号，超出的横向平移；有输出或
@@ -109,6 +111,14 @@
             didSet {
                 accessoryBar.setControlLatched(controlLatched)
                 restingBar?.setControlLatched(controlLatched)
+            }
+        }
+
+        /// 正在录音：两条按键栏上的麦克风键显示成按下去的样子。
+        public var dictating = false {
+            didSet {
+                accessoryBar.setDictating(dictating)
+                restingBar?.setDictating(dictating)
             }
         }
 
@@ -537,6 +547,7 @@
         public func makeRestingKeyBar() -> UIView {
             let bar = KeyboardAccessoryBar(owner: self, resting: true)
             bar.setControlLatched(controlLatched)
+            bar.setDictating(dictating)
             restingBar = bar
             return bar
         }

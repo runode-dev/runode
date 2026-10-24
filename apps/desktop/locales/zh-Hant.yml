@@ -173,6 +173,17 @@ update:
   failed_title: 檢查更新失敗
   download_failed_title: 下載更新失敗
   ok: 好
+dictation:
+  listening: 正在聽… 放開或再按一次結束，Esc 放棄
+  transcribing: 正在辨識…
+  no_model:
+    title: 語音輸入要先下載辨識模型
+    detail: "請先在設定裡下載語音辨識模型（%{size}），它在這台電腦上離線執行。"
+    open_settings: 開啟設定
+  cancel: 取消
+  silent: 麥克風只錄到了靜音。請在系統的隱私設定裡允許 Runode 使用麥克風。
+  failed: 語音輸入失敗
+  ok: 好
 host_lost:
   message: 和終端機工作階段的連線中斷了，現在看到的是中斷前的最後一個畫面。
   reopen: 在原目錄重新開啟
@@ -468,6 +479,9 @@ settings:
     clipboard: 剪貼簿
     tasks: 命令
     login: 登入時啟動
+    dictation: 語音輸入
+    dictation_cloud: 雲端辨識
+    dictation_polish: 大模型潤飾
     push: 手機通知
     push_key: 自己編譯的手機 App
   theme:
@@ -490,6 +504,17 @@ settings:
     file_tree_preview_click: 在預覽欄打開檔案
     preview_font_size: 預覽欄字級
     task_placement: 執行命令
+    dictation_model: 辨識模型
+    dictation_words: 熱詞
+    dictation_cloud: 雲端辨識
+    dictation_openai_url: API 位址
+    dictation_openai_key: API Key
+    dictation_openai_model: 模型
+    dictation_doubao_app_id: App ID
+    dictation_doubao_key: API Key
+    dictation_polish_url: API 位址
+    dictation_polish_key: API Key
+    dictation_polish_model: 模型
     theme: 主題
     background: 背景
     foreground: 前景
@@ -545,6 +570,17 @@ settings:
     file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
     preview_font_size: 單位是點。
     task_placement: 標題列命令選單裡點了一條命令時，在哪開終端執行它。
+    dictation_model: 兩個都在這台電腦上離線執行。SenseVoice 快，帶標點；FireRedASR2 中文最準，但更大、更慢，不加標點。
+    dictation_words: "要認準的專案名、專業詞，用逗號隔開。離線模型用不上，交給雲端辨識和潤飾時才用。"
+    dictation_cloud: "離線模型沒下載或辨識出錯時用。錄音會上傳到選的服務。"
+    dictation_openai_url: "OpenAI 相容的 API，後面接 /audio/transcriptions。"
+    dictation_openai_key: "明文存在設定檔裡。"
+    dictation_openai_model: "這個 API 上的語音轉文字模型。"
+    dictation_doubao_app_id: "只有火山引擎舊版控制台的應用要填；用新版控制台的 API Key 時留空。"
+    dictation_doubao_key: "新版控制台的 API Key，或舊版控制台應用的 Access Token。明文存在設定檔裡。"
+    dictation_polish_url: "OpenAI 相容的 API，後面接 /chat/completions。由它的模型改正聽錯的字、標點和大小寫。留空不潤飾；潤飾出錯時打進去的是辨識出的原文。"
+    dictation_polish_key: "明文存在設定檔裡。"
+    dictation_polish_model: "這個 API 上的對話模型。"
     theme: 下面寫了的顏色會蓋過主題。選「淺色深色分開」時跟著系統外觀換。
     background: "顏色，例如 #1e1e2e，或顏色名稱。"
     foreground: 文字的顏色。
@@ -613,6 +649,13 @@ settings:
       right: 右邊分割
       down: 下方分割
       tab: 新分頁
+    dictation_model:
+      sense-voice: SenseVoice
+      fire-red-asr2: FireRedASR2
+    dictation_cloud:
+      none: 不用
+      openai: OpenAI 相容
+      doubao: 豆包
     clipboard_write:
       allow: 允許
       deny: 拒絕
@@ -620,6 +663,15 @@ settings:
       allow: 允許
       ask: 詢問
       deny: 拒絕
+  dictation:
+    title: 模型檔案
+    not_downloaded: "還沒下載，約 %{size}。"
+    downloading: "正在下載 %{percent}%（%{done} / %{total}）"
+    downloaded: "已下載，%{size}。"
+    download: 下載
+    cancel: 取消
+    remove: 刪除
+    failed: "下載失敗：%{err}"
   autostart:
     app:
       title: 登入時打開 Runode
@@ -1117,3 +1169,4 @@ action:
   increase_font_size: 放大字體，步長固定，N 可省略
   decrease_font_size: 縮小字體，步長固定，N 可省略
   reset_font_size: 重設字體大小
+  dictate: 語音輸入：按住說話、放開打進終端，或者點一下開始、再點一下結束

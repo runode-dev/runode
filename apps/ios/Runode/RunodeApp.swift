@@ -73,6 +73,11 @@ enum AppComposition {
             return try await ScreenConnection.open(machine: latest, keyStore: keyStore, discovery: discovery)
         }
         dependencies.unlockPasswords = KeychainUnlockPasswords()
+        dependencies.openSpeech = { machine in
+            let latest = await store.all().first { $0.id == machine.id } ?? machine
+            return try await SpeechConnection.open(machine: latest, keyStore: keyStore, discovery: discovery)
+        }
+        dependencies.speechModels = URL.applicationSupportDirectory.appending(path: "speech-models")
         dependencies.pushIdentity = PushIdentity(
             info: Bundle.main.infoDictionary ?? [:], bundle: Bundle.main.bundleIdentifier)
         return dependencies

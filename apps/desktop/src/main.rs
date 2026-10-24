@@ -1,7 +1,8 @@
 //! runode：面向 AI 编程 agent 的桌面工作台。终端用 libghostty-vt 仿真，窗口和绘制用 GPUI。
 //! 带子命令启动时是命令行（`runode list` 等），不开窗口，见 `runode_cli`；`runode --host` 是单独
 //! 一个进程跑的终端宿主，`runode --host --take-over` 是升级时接手旧宿主会话的新宿主，见
-//! `host_process`；`runode --screen` 是远程桌面的采集进程，见 `screen_process`。
+//! `host_process`；`runode --screen` 是远程桌面的采集进程，见 `screen_process`；`runode --speech` 是
+//! 识别手机交来的录音的子进程，见 `dictation::remote`。
 //!
 //! Windows 上这个程序是界面程序，打开时不带控制台窗口；在终端里跑命令行用同一个包里的控制台程序
 //! `rn`。
@@ -11,6 +12,7 @@
 mod about;
 mod assets;
 mod config;
+mod dictation;
 mod file_tree;
 mod fs_probe;
 mod git_panel;
@@ -62,6 +64,9 @@ fn main() {
     #[cfg(unix)]
     if args == ["--host", "--take-over"] {
         std::process::exit(host_process::take_over());
+    }
+    if args == ["--speech"] {
+        std::process::exit(dictation::remote::run_worker());
     }
     #[cfg(any(target_os = "macos", windows))]
     if args == ["--screen"] {

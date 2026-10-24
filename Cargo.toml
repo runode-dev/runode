@@ -32,6 +32,7 @@ runode-update = { path = "crates/update" }
 runode-autostart = { path = "crates/autostart" }
 runode-ui = { path = "crates/ui" }
 runode-screen = { path = "crates/screen" }
+runode-speech = { path = "crates/speech" }
 # libghostty-vt 的 Rust 绑定（MIT 或 Apache-2.0），取自子模块 vendor/libghostty-rs，即 runode-dev 对
 # libghostty-rs 的 fork 的 main 分支。它自成一个 workspace，不是本 workspace 的成员（见 exclude）。
 # 它的 C 接口绑定 libghostty-vt-sys 只经 libghostty-vt 间接用到，不列在这里。
@@ -107,6 +108,13 @@ tokio = { version = "1", default-features = false, features = ["rt", "net", "io-
 # 看板的库（MIT）：任务和定时存在一个 SQLite 文件里。编进 SQLite 的源码（bundled），不依赖系统的
 # libsqlite3，单独跑的宿主在没装它的 Linux 上也能用。只许 runode-todo 直接依赖，见 deny.toml。
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+# 语音转文字（Apache-2.0）：sherpa-onnx 的 Rust 封装，构建时下载它预编译的静态库（连同 onnxruntime）
+# 链进来；只许 runode-speech 直接依赖，见 deny.toml。
+sherpa-onnx = "2"
+# 录麦克风：macOS 上是 CoreAudio，Windows 上是 WASAPI，Linux 上是 ALSA。
+cpal = "0.18"
+# 核对下载的模型文件。
+sha2 = "0.11"
 # 配对的二维码：`runode remote pair` 画在终端里，设置页画在界面上；不要默认特性（画成图片、SVG 用不上）。
 qrcode = { version = "0.14", default-features = false }
 

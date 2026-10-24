@@ -8,6 +8,7 @@ use runode_types::{
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt, TermSettings},
     shell::{IntegrationMode, ShellFeatures},
+    speech::{DictationCloud, SpeechModel},
 };
 
 use crate::keybind::Action;
@@ -90,6 +91,21 @@ pub struct Config {
     /// 预览栏的字号。
     pub preview_font_size: f32,
     pub task_placement: TaskPlacement,
+    pub dictation_model: SpeechModel,
+    /// 热词：交给云端识别时帮它认出专有名词，润色时也交给大模型。
+    pub dictation_words: Vec<String>,
+    pub dictation_cloud: DictationCloud,
+    /// OpenAI 兼容 API 的根，后面接 `/audio/transcriptions`。
+    pub dictation_openai_url: String,
+    pub dictation_openai_key: Option<String>,
+    pub dictation_openai_model: String,
+    /// 豆包旧版控制台的 App ID；为空时 `dictation_doubao_key` 是新版控制台的 API Key。
+    pub dictation_doubao_app_id: Option<String>,
+    pub dictation_doubao_key: Option<String>,
+    /// 润色用的 OpenAI 兼容 API 的根；为空时不润色。
+    pub dictation_polish_url: Option<String>,
+    pub dictation_polish_key: Option<String>,
+    pub dictation_polish_model: Option<String>,
     /// 配置里写的 `theme`，原样保留（可能是 `light:A,dark:B`）；没写时为 `None`。
     pub theme: Option<String>,
     pub cursor_style: CursorStyle,
@@ -196,6 +212,17 @@ impl Default for Config {
             file_tree_preview_click: PreviewClick::Single,
             preview_font_size: 13.,
             task_placement: TaskPlacement::Right,
+            dictation_model: SpeechModel::SenseVoice,
+            dictation_words: Vec::new(),
+            dictation_cloud: DictationCloud::None,
+            dictation_openai_url: "https://api.openai.com/v1".into(),
+            dictation_openai_key: None,
+            dictation_openai_model: "gpt-4o-transcribe".into(),
+            dictation_doubao_app_id: None,
+            dictation_doubao_key: None,
+            dictation_polish_url: None,
+            dictation_polish_key: None,
+            dictation_polish_model: None,
             theme: None,
             cursor_style: term.cursor_style,
             cursor_style_blink: term.cursor_blink,

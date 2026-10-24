@@ -15,6 +15,14 @@ public enum TerminalInput: Sendable, Hashable {
     case click(column: Int, row: Int)
 }
 
+/// 辅助栏上麦克风键的动作。
+public enum DictationPress: Sendable {
+    case down
+    case up
+    /// 手指滑出按键再松开，或者被系统打断。
+    case cancel
+}
+
 /// 画终端的一方。视图模型在 VT 换了、内容变了、响铃时通知它；它自己从 VT 读要画的东西。
 /// 实现者是 `TerminalView`。
 @MainActor

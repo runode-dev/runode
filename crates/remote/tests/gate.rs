@@ -229,6 +229,23 @@ fn a_screen_hello_goes_to_the_screen_process() {
 }
 
 #[test]
+fn a_speech_hello_goes_to_the_recognizer() {
+    let harness = Harness::start("speech");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    let mut phone = harness.phone();
+    let auth = phone.auth_message(device_id, &key);
+    assert_eq!(phone.ask(&auth), Some(GateHostMsg::RemoteAccepted { device_id }));
+    let hello = br#"{"type":"speech_hello","version":1}"#;
+    phone.send_control(hello);
+    let speech = harness.speeches.recv_timeout(PATIENCE).expect("no connection to the recognizer");
+    speech.set_read_timeout(Some(PATIENCE)).unwrap();
+    let frame = runode_protocol::read_frame(&mut &speech).unwrap().unwrap();
+    assert_eq!((frame.kind, frame.payload.as_slice()), (FrameKind::Control, &hello[..]));
+    assert!(harness.hosts.try_recv().is_err() && harness.screens.try_recv().is_err());
+}
+
+#[test]
 fn revoking_a_device_disconnects_it() {
     let harness = Harness::start("revoke");
     let key = Key::generate();

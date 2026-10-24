@@ -104,7 +104,7 @@ sign_options=(--force --sign "$SIGN_IDENTITY")
 if [[ "$SIGN_IDENTITY" != - ]]; then
     sign_options+=(--timestamp)
 fi
-codesign "${sign_options[@]}" --options runtime "$app"
+codesign "${sign_options[@]}" --options runtime --entitlements apps/desktop/runode.entitlements "$app"
 
 if [[ "$target" == app ]]; then
     echo "$app"

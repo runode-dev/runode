@@ -72,6 +72,30 @@
           }
         }
       }
+    },
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "麦克风权限的说明，终端页语音输入用。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dictation: hold the microphone key and speak, and the words are typed into the terminal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音输入：按住麦克风键说话，识别成文字打进终端。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "語音輸入：按住麥克風鍵說話，辨識成文字打進終端機。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

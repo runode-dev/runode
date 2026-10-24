@@ -13,6 +13,7 @@ public struct AppPreferences: Hashable, Sendable, Codable {
     public var deviceName: String?
     /// agent 停下来等回答时，由电脑经推送发通知提醒。关掉时向各台电脑注销推送。
     public var alertsBlockedAgents = true
+    public var dictationSource: DictationSource = .phone
 
     public init() {}
 
@@ -27,6 +28,7 @@ public struct AppPreferences: Hashable, Sendable, Codable {
         bellHaptics = try container.decodeIfPresent(Bool.self, forKey: .bellHaptics) ?? true
         deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
         alertsBlockedAgents = try container.decodeIfPresent(Bool.self, forKey: .alertsBlockedAgents) ?? true
+        dictationSource = try container.decodeIfPresent(DictationSource.self, forKey: .dictationSource) ?? .phone
     }
 }
 

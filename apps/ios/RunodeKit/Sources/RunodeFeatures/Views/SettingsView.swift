@@ -1,8 +1,9 @@
 #if os(iOS)
     import RunodeConnection
+    import RunodeSpeech
     import SwiftUI
 
-    /// 设置页：终端、通知、配对过的电脑、报给电脑的设备名，以及版本和开源许可。开关、选择器要系统的
+    /// 设置页：终端、语音输入、通知、配对过的电脑、报给电脑的设备名，以及版本和开源许可。开关、选择器要系统的
     /// 行样式，所以用分组的 `Form`，不用自己画的卡片列表。改了马上生效、马上存（见 `SettingsModel`）。
     struct SettingsView: View {
         let app: AppModel
@@ -14,6 +15,7 @@
             NavigationStack {
                 Form {
                     terminalSection
+                    DictationSection(dictation: app.dictation, settings: settings)
                     alertSection
                     machineSection
                     deviceSection
@@ -329,6 +331,54 @@
                 await machines.rename(id, to: trimmed)
                 // 没改成时输入框退回原来的名字，和标题对得上。
                 name = machines.machine(id)?.name ?? name
+            }
+        }
+    }
+
+    /// 设置页的语音输入：在哪里识别，手机上的模型下没下（下载、进度、删除）。
+    private struct DictationSection: View {
+        let dictation: DictationModel
+        @Bindable var settings: SettingsModel
+
+        var body: some View {
+            Section {
+                Picker("识别", selection: $settings.preferences.dictationSource) {
+                    Text("在手机上").tag(DictationSource.phone)
+                    Text("交给电脑").tag(DictationSource.computer)
+                }
+                modelRow
+            } header: {
+                Text("语音输入")
+            } footer: {
+                Text("终端页键盘上方的麦克风键按住说话，松开后把文字打进终端；点一下则一直录到再点一次。在手机上识别不用联网，手机上还没下载模型时交给电脑；交给电脑时用电脑设置里的模型。")
+            }
+            .themedRows()
+        }
+
+        @ViewBuilder
+        private var modelRow: some View {
+            let size = SpeechModels.downloadSize.formatted(.byteCount(style: .file))
+            switch dictation.download {
+            case .running(let done):
+                LabeledContent("手机上的模型") {
+                    HStack {
+                        ProgressView(value: Double(done), total: Double(SpeechModels.downloadSize))
+                            .frame(maxWidth: 100)
+                        Button("取消") { dictation.cancelDownload() }
+                    }
+                }
+                .accessibilityValue(
+                    String(localized: "正在下载，\(Int(done * 100 / SpeechModels.downloadSize))%"))
+            case .idle where dictation.installed:
+                LabeledContent("手机上的模型", value: String(localized: "已下载，\(size)"))
+                Button("删除手机上的模型", role: .destructive) { dictation.remove() }
+            case .idle, .failed:
+                LabeledContent("手机上的模型", value: String(localized: "未下载，约 \(size)"))
+                Button("下载") { dictation.startDownload() }
+                if case .failed(let message) = dictation.download {
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
             }
         }
     }

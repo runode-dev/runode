@@ -3,11 +3,13 @@
 
     /// 键盘上方的一条辅助栏：软键盘上没有的 Esc、粘住的 Ctrl、Tab，回车（软键盘收着时也按得到）、方向键
     /// 和几个常用符号，横着能拖。软键盘收着时界面底部放一条一样的（`resting` 为真，见
-    /// `TerminalView.makeRestingKeyBar`）。开关软键盘的键固定在右端，不跟着别的键滚走，两条都用键盘图标：
+    /// `TerminalView.makeRestingKeyBar`）。语音输入的麦克风键和开关软键盘的键固定在右端，不跟着别的键
+    /// 滚走；麦克风键按下、松开都报给代理，录音时显示成按下去的样子。开关软键盘的键两条都用键盘图标：
     /// 底部那条是「打开键盘」，跟着软键盘的那条是「收起键盘」，按下去的样子表示键盘开着。
     final class KeyboardAccessoryBar: UIInputView {
         private weak var owner: TerminalView?
         private var controlButton: UIButton?
+        private var micButton: UIButton?
 
         init(owner: TerminalView, resting: Bool = false) {
             self.owner = owner
@@ -31,12 +33,19 @@
             if !resting { highlight(keyboard, true) }
             keyboard.translatesAutoresizingMaskIntoConstraints = false
             addSubview(keyboard)
+            let mic = microphone()
+            micButton = mic
+            mic.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(mic)
             // 软键盘不弹出时（接了硬件键盘）这条栏贴在屏幕最底下，按钮要排在安全区里，避开 Home 条和圆角；
             // 栏自己的背景照样铺到底。横屏时左右也让开刘海。
             let safe = safeAreaLayoutGuide
             NSLayoutConstraint.activate([
                 scroll.leadingAnchor.constraint(equalTo: safe.leadingAnchor),
-                scroll.trailingAnchor.constraint(equalTo: keyboard.leadingAnchor, constant: -2),
+                scroll.trailingAnchor.constraint(equalTo: mic.leadingAnchor, constant: -2),
+                mic.trailingAnchor.constraint(equalTo: keyboard.leadingAnchor, constant: -6),
+                mic.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
+                mic.heightAnchor.constraint(equalTo: keyboard.heightAnchor),
                 keyboard.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -8),
                 keyboard.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
                 keyboard.heightAnchor.constraint(equalTo: scroll.heightAnchor, constant: -12),
@@ -77,6 +86,28 @@
             highlight(controlButton, latched)
         }
 
+        func setDictating(_ dictating: Bool) {
+            guard let micButton else { return }
+            highlight(micButton, dictating)
+            micButton.accessibilityValue = dictating ? String(localized: "正在录音") : nil
+        }
+
+        /// 麦克风键：按下、松开要分开报，按住说话和点一下开始都由视图模型判断，所以不用 `primaryAction`。
+        private func microphone() -> UIButton {
+            let mic = styled("mic", symbol: true, label: String(localized: "语音输入"))
+            mic.accessibilityHint = String(localized: "按住说话，松开后把文字打进终端；也可以点一下开始、再点一下结束")
+            let report: (DictationPress) -> UIAction = { [weak self] press in
+                UIAction { _ in
+                    guard let owner = self?.owner else { return }
+                    owner.delegate?.terminalView(owner, dictation: press)
+                }
+            }
+            mic.addAction(report(.down), for: .touchDown)
+            mic.addAction(report(.up), for: .touchUpInside)
+            mic.addAction(report(.cancel), for: [.touchUpOutside, .touchCancel])
+            return mic
+        }
+
         /// 按下去的样子（粘住的 Ctrl、开着的键盘）：反色，和 app 里的实心按钮一样黑白为主。不用 `tintColor`：
         /// 这条栏在键盘的窗口里，接不到 app 设的强调色，会是系统的蓝色。
         private func highlight(_ button: UIButton, _ on: Bool) {
@@ -85,9 +116,7 @@
             button.configuration?.baseForegroundColor = on ? .systemBackground : .label
         }
 
-        private func button(
-            _ title: String, symbol: Bool = false, label: String, action: @escaping @MainActor (TerminalView) -> Void
-        ) -> UIButton {
+        private func styled(_ title: String, symbol: Bool = false, label: String) -> UIButton {
             var configuration = UIButton.Configuration.filled()
             configuration.baseBackgroundColor = .secondarySystemFill
             configuration.baseForegroundColor = .label
@@ -103,14 +132,21 @@
                 attributed.font = .monospacedSystemFont(ofSize: 15, weight: .medium)
                 configuration.attributedTitle = attributed
             }
-            let button = UIButton(
-                configuration: configuration,
-                primaryAction: UIAction { [weak self] _ in
+            let button = UIButton(configuration: configuration)
+            button.accessibilityLabel = label
+            return button
+        }
+
+        private func button(
+            _ title: String, symbol: Bool = false, label: String, action: @escaping @MainActor (TerminalView) -> Void
+        ) -> UIButton {
+            let button = styled(title, symbol: symbol, label: label)
+            button.addAction(
+                UIAction { [weak self] _ in
                     guard let owner = self?.owner else { return }
                     UIDevice.current.playInputClick()
                     action(owner)
-                })
-            button.accessibilityLabel = label
+                }, for: .primaryActionTriggered)
             return button
         }
     }

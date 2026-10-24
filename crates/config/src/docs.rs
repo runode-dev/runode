@@ -44,6 +44,29 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
             "How to open a file from the file tree in the preview pane: single (default) or double. With single, a click opens a temporary tab that the next opened file replaces, and a double-click keeps it open. With double, a double-click opens a tab that stays."
         }
         "preview-font-size" => "Preview pane font size: a positive number, in points.",
+        "dictation-model" => {
+            "Speech recognition model for dictation: sense-voice (default) or fire-red-asr2. Both run offline on this computer and are downloaded the first time from the settings page. sense-voice (about 240 MB) is fast and knows Chinese, English, Japanese, Korean and Cantonese; fire-red-asr2 (about 1.2 GB) is the most accurate for Chinese and English but slower and writes no punctuation."
+        }
+        "dictation-words" => {
+            "Words dictation should get right, such as project names and technical terms; separated by commas, can be repeated, empty clears them. The offline models do not take them; they are passed to the cloud recognizer and to the polishing model."
+        }
+        "dictation-cloud" => {
+            "Cloud recognizer used when the offline model is not downloaded or fails: none (default), openai or doubao. openai is any service with an OpenAI-compatible /audio/transcriptions endpoint; doubao is Volcengine's Doubao flash recognition. The recording is uploaded to that service."
+        }
+        "dictation-openai-url" => {
+            "Base URL of the OpenAI-compatible API for cloud recognition, https://api.openai.com/v1 by default; /audio/transcriptions is appended."
+        }
+        "dictation-openai-key" => "API key for dictation-openai-url.",
+        "dictation-openai-model" => "Transcription model at dictation-openai-url, gpt-4o-transcribe by default.",
+        "dictation-doubao-app-id" => {
+            "App ID of a Doubao speech app from the old Volcengine console, with its access token in dictation-doubao-key. Leave it empty when dictation-doubao-key is an API key from the new console."
+        }
+        "dictation-doubao-key" => "API key (new console) or access token (old console) for Doubao recognition.",
+        "dictation-polish-url" => {
+            "Base URL of an OpenAI-compatible API (/chat/completions is appended) whose model cleans up recognized text: fixes misheard words, punctuation and casing. Empty (default) turns polishing off. When polishing fails, the text is typed as recognized."
+        }
+        "dictation-polish-key" => "API key for dictation-polish-url.",
+        "dictation-polish-model" => "Chat model at dictation-polish-url that polishes the text.",
         "task-placement" => {
             "Where the title bar's task menu runs a task: right (default), down or tab. right and down split the current terminal in the current tab and put the new one to its right or below; tab opens a new tab to the right of the current one."
         }

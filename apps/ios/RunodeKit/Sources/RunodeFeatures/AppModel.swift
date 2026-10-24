@@ -45,6 +45,10 @@ public struct AppDependencies {
     public var openScreen: ScreenOpener?
     /// 远程桌面里解锁电脑用的登录密码存在哪里；为空时每次都要用户输。
     public var unlockPasswords: (any UnlockPasswordStore)?
+    /// 连上一台电脑的识别；为空时语音输入只在手机上识别（测试、演示模式）。
+    public var openSpeech: SpeechOpener?
+    /// 手机上的语音模型下载到哪里；不给时放在临时目录里（测试、演示模式）。
+    public var speechModels: URL?
 
     @MainActor
     public init(
@@ -66,6 +70,8 @@ public struct AppDependencies {
         pushIdentity = nil
         openScreen = nil
         unlockPasswords = nil
+        openSpeech = nil
+        speechModels = nil
     }
 }
 
@@ -93,6 +99,7 @@ public final class AppModel {
     public let settings: SettingsModel
     /// 向各台电脑登记推送，设置页按它显示哪台电脑不支持。
     public let push: PushRegistration
+    public let dictation: DictationModel
     /// 上次打开的终端，首页的「上次打开」用它。
     public private(set) var recent: RecentTerminal?
     /// 上次用的主题，电脑还没连上时用它。
@@ -122,6 +129,9 @@ public final class AppModel {
         push = PushRegistration(
             system: dependencies.notifications, identity: dependencies.pushIdentity,
             enabled: settings.preferences.alertsBlockedAgents)
+        dictation = DictationModel(
+            root: dependencies.speechModels ?? FileManager.default.temporaryDirectory.appending(path: "speech-models"),
+            openSpeech: dependencies.openSpeech)
         recent = dependencies.recents.load()
         savedTheme = dependencies.themes.load()
         machineList.willDelete = { [weak self] id in await self?.forget(machine: id) ?? true }

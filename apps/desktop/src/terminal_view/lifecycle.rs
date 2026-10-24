@@ -850,6 +850,7 @@ impl TerminalView {
             _activation_watch: activation_watch,
             _appearance_watch: appearance_watch,
             _reconnect_watch: reconnect_watch,
+            dictation: None,
             pane_focus,
             _focus_watch: focus_watch,
         };

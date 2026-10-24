@@ -3,7 +3,7 @@
 use crate::ui::theme::Theme;
 use gpui::{AnyElement, Context, Div, ElementId, Role, SharedString, Window, div, prelude::*, px};
 use runode_config::StatusItem;
-use runode_types::agent::AgentKind;
+use runode_types::{agent::AgentKind, speech::DictationCloud};
 
 use super::{
     Commit, SettingsView,
@@ -52,6 +52,8 @@ enum Item {
     TestPush,
     /// 登录时自启的两项（宿主、app），装没装看服务文件，不是配置里的键。
     Autostart,
+    /// 语音输入选中的模型下没下，下载、删除它；文件在不在看模型目录，不是配置里的键。
+    Dictation,
 }
 
 #[derive(Clone, Copy)]
@@ -120,6 +122,21 @@ impl Page {
                 Row("language", Language),
                 Row("terminal-host", Switch),
                 Row("auto-update", Switch),
+                Section("dictation"),
+                Row("dictation-model", Choice(&["sense-voice", "fire-red-asr2"])),
+                Dictation,
+                Row("dictation-words", Text(300.)),
+                Section("dictation_cloud"),
+                Row("dictation-cloud", Choice(&["none", "openai", "doubao"])),
+                Row("dictation-openai-url", Text(300.)),
+                Row("dictation-openai-key", Text(300.)),
+                Row("dictation-openai-model", Text(300.)),
+                Row("dictation-doubao-app-id", Text(300.)),
+                Row("dictation-doubao-key", Text(300.)),
+                Section("dictation_polish"),
+                Row("dictation-polish-url", Text(300.)),
+                Row("dictation-polish-key", Text(300.)),
+                Row("dictation-polish-model", Text(300.)),
                 Section("login"),
                 Autostart,
                 Section("config_file"),
@@ -218,7 +235,12 @@ impl Page {
                 Item::StatusBarHidden => Some("status-bar-hidden"),
                 Item::AgentExclude => Some("agent-notifications-exclude"),
                 Item::ConfigFiles => Some("config-file"),
-                Item::Section(_) | Item::ConfigFileActions | Item::Pairing | Item::TestPush | Item::Autostart => None,
+                Item::Section(_)
+                | Item::ConfigFileActions
+                | Item::Pairing
+                | Item::TestPush
+                | Item::Autostart
+                | Item::Dictation => None,
             })
             .collect()
     }
@@ -283,6 +305,7 @@ impl SettingsView {
         // 发布的版本经中转推官方 App，用不着直连 APNs 的密钥，这一节只在自己编译的版本里显示。
         let official = runode_protocol::push::RELAY_URL.is_some();
         let autostart = super::autostart::any_supported();
+        let cloud = self.config.dictation_cloud;
         let shown = |item: &&Item| {
             !(official
                 && matches!(
@@ -291,6 +314,12 @@ impl SettingsView {
                         | Item::Row("apns-key-file" | "apns-key-id" | "apns-team-id" | "apns-bundle-id", _)
                 ))
                 && (autostart || !matches!(item, Item::Section("login") | Item::Autostart))
+                // 只显示选中的那家云端识别的几项。
+                && match item {
+                    Item::Row(key, _) if key.starts_with("dictation-openai-") => cloud == DictationCloud::OpenAi,
+                    Item::Row(key, _) if key.starts_with("dictation-doubao-") => cloud == DictationCloud::Doubao,
+                    _ => true,
+                }
         };
         for item in self.page.items().iter().filter(shown) {
             let element = match *item {
@@ -317,6 +346,7 @@ impl SettingsView {
                 Item::Pairing => self.render_pairing(theme, cx).into_any_element(),
                 Item::TestPush => self.render_test_push(theme, cx).into_any_element(),
                 Item::Autostart => self.render_autostart(theme, cx).into_any_element(),
+                Item::Dictation => self.render_dictation(theme, cx).into_any_element(),
             };
             cards.push(element);
         }
@@ -678,6 +708,9 @@ fn key_placeholder(key: &str) -> SharedString {
         "apns-key-id" => return "ABC123DEFG".into(),
         "apns-team-id" => return "DEF123GHIJ".into(),
         "apns-bundle-id" => return "com.example.runode".into(),
+        "dictation-words" => return "runode, Ghostty, GPUI".into(),
+        "dictation-polish-url" => return "https://api.deepseek.com/v1".into(),
+        "dictation-polish-model" => return "deepseek-chat".into(),
         _ => {}
     }
     match runode_config::Config::default().values(key).into_iter().next() {

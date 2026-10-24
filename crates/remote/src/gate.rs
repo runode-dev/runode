@@ -1,5 +1,5 @@
 //! 一条远程连接从头到尾：TLS 握手、门禁（见 `runode_protocol::remote` 的模块文档）、按第一帧是手机的
-//! `Hello` 还是 `ScreenHello` 接到宿主或者远程桌面的采集进程上搬字节（`bridge`）。门禁阶段的读写
+//! `Hello`、`ScreenHello` 还是 `SpeechHello` 接到宿主、远程桌面的采集进程或者识别上搬字节（`bridge`）。门禁阶段的读写
 //! 都按同一个截止时刻（`GATE_TIMEOUT`）设超时，对面一个字节一个字节地慢慢发也拖不过它。
 
 use std::{
@@ -17,6 +17,7 @@ use runode_protocol::{
         NONCE_LEN, PUBLIC_KEY_LEN, Purpose, RejectReason, SECRET_LEN, read_gate_frame, signed_bytes,
     },
     screen::ScreenClientMsg,
+    speech::SpeechClientMsg,
     write_frame,
 };
 use rustls::{ServerConnection, StreamOwned};
@@ -105,14 +106,16 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
         .map_err(io::Error::other)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "closed before hello"))?;
     let control = hello.kind == FrameKind::Control && hello.channel == 0;
-    // 第一帧定下这条连接接到哪里：终端的宿主，或者远程桌面的采集进程。
+    // 第一帧定下这条连接接到哪里：终端的宿主、远程桌面的采集进程或者识别。
     let host =
         if control && matches!(hello.message::<ClientMsg>(), Ok(ClientMsg::Hello { client: ClientKind::Mobile, .. })) {
             (shared.connect)()?
         } else if control && matches!(hello.message::<ScreenClientMsg>(), Ok(ScreenClientMsg::ScreenHello { .. })) {
             (shared.connect_screen)()?
+        } else if control && matches!(hello.message::<SpeechClientMsg>(), Ok(SpeechClientMsg::SpeechHello { .. })) {
+            (shared.connect_speech)()?
         } else {
-            return Err(io::Error::other("the first frame after the gate is neither a mobile nor a screen hello"));
+            return Err(io::Error::other("the first frame after the gate is not a mobile, screen or speech hello"));
         };
     write_frame(&mut &host, hello.kind, hello.channel, &hello.payload).map_err(io::Error::other)?;
     let StreamOwned { mut conn, sock } = tls;

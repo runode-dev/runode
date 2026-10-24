@@ -13,6 +13,8 @@ public enum FrameKind: UInt8, Sendable, Hashable {
     case snapshot = 3
     /// 远程桌面编好的一帧画面，载荷见 `VideoFrame(payload:)`。
     case video = 4
+    /// 交给电脑识别的一段录音，载荷见 `speechSampleRate`。
+    case audio = 5
 }
 
 public struct Frame: Sendable, Equatable {

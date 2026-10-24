@@ -55,6 +55,20 @@ impl Config {
                 }
                 .into(),
             ],
+            "dictation-model" => vec![self.dictation_model.name().into()],
+            // 一行写全，设置页的一个输入框改得了。
+            "dictation-words" => {
+                Some(self.dictation_words.join(", ")).filter(|words| !words.is_empty()).into_iter().collect()
+            }
+            "dictation-cloud" => vec![self.dictation_cloud.name().into()],
+            "dictation-openai-url" => vec![self.dictation_openai_url.clone()],
+            "dictation-openai-key" => self.dictation_openai_key.iter().cloned().collect(),
+            "dictation-openai-model" => vec![self.dictation_openai_model.clone()],
+            "dictation-doubao-app-id" => self.dictation_doubao_app_id.iter().cloned().collect(),
+            "dictation-doubao-key" => self.dictation_doubao_key.iter().cloned().collect(),
+            "dictation-polish-url" => self.dictation_polish_url.iter().cloned().collect(),
+            "dictation-polish-key" => self.dictation_polish_key.iter().cloned().collect(),
+            "dictation-polish-model" => self.dictation_polish_model.iter().cloned().collect(),
             "theme" => self.theme.iter().cloned().collect(),
             "background" => vec![hex(self.background)],
             "foreground" => vec![hex(self.foreground)],

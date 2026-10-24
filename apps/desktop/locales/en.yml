@@ -173,6 +173,17 @@ update:
   failed_title: Couldn't check for updates
   download_failed_title: Couldn't download the update
   ok: OK
+dictation:
+  listening: Listening… release, or press again, to finish. Esc cancels.
+  transcribing: Transcribing…
+  no_model:
+    title: Dictation needs a speech model
+    detail: "Download the speech recognition model (%{size}) in Settings first. It runs offline on this computer."
+    open_settings: Open Settings
+  cancel: Cancel
+  silent: The microphone recorded only silence. Check that Runode is allowed to use the microphone in the system privacy settings.
+  failed: Dictation failed
+  ok: OK
 host_lost:
   message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.
   reopen: Reopen in This Directory
@@ -468,6 +479,9 @@ settings:
     clipboard: Clipboard
     tasks: Tasks
     login: Start at Login
+    dictation: Dictation
+    dictation_cloud: Cloud recognition
+    dictation_polish: Polish with a model
     push: Phone Notifications
     push_key: Your Own Phone App
   theme:
@@ -490,6 +504,17 @@ settings:
     file_tree_preview_click: Open files in the preview with
     preview_font_size: Preview font size
     task_placement: Run tasks in
+    dictation_model: Speech model
+    dictation_words: Hotwords
+    dictation_cloud: Cloud recognition
+    dictation_openai_url: API URL
+    dictation_openai_key: API key
+    dictation_openai_model: Model
+    dictation_doubao_app_id: App ID
+    dictation_doubao_key: API key
+    dictation_polish_url: API URL
+    dictation_polish_key: API key
+    dictation_polish_model: Model
     theme: Theme
     background: Background
     foreground: Foreground
@@ -545,6 +570,17 @@ settings:
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.
     task_placement: Where a task picked from the title bar's task menu runs.
+    dictation_model: Both run offline on this computer. SenseVoice is fast and adds punctuation; FireRedASR2 is the most accurate for Chinese but larger, slower and without punctuation.
+    dictation_words: "Project names and technical terms dictation should get right, separated by commas. The offline models do not use them; cloud recognition and polishing do."
+    dictation_cloud: "Used when the offline model is not downloaded or fails. The recording is uploaded to the service you choose."
+    dictation_openai_url: "An OpenAI-compatible API; /audio/transcriptions is appended."
+    dictation_openai_key: "Stored in plain text in the config file."
+    dictation_openai_model: "Speech-to-text model of that API."
+    dictation_doubao_app_id: "Only for apps in the old Volcengine console; leave empty when using an API key from the new console."
+    dictation_doubao_key: "API key from the new console, or the access token of the old console's app. Stored in plain text in the config file."
+    dictation_polish_url: "An OpenAI-compatible API; /chat/completions is appended. Its model fixes misheard words, punctuation and casing. Leave empty to turn polishing off; when it fails, the text is typed as recognized."
+    dictation_polish_key: "Stored in plain text in the config file."
+    dictation_polish_model: "Chat model of that API."
     theme: Colors below override the theme. With Light & Dark the theme follows the system appearance.
     background: "A color such as #1e1e2e, or a color name."
     foreground: The color of text.
@@ -613,6 +649,13 @@ settings:
       right: Split right
       down: Split down
       tab: New tab
+    dictation_model:
+      sense-voice: SenseVoice
+      fire-red-asr2: FireRedASR2
+    dictation_cloud:
+      none: "Off"
+      openai: OpenAI-compatible
+      doubao: Doubao
     clipboard_write:
       allow: Allow
       deny: Deny
@@ -620,6 +663,15 @@ settings:
       allow: Allow
       ask: Ask
       deny: Deny
+  dictation:
+    title: Model files
+    not_downloaded: "Not downloaded, about %{size}."
+    downloading: "Downloading %{percent}% (%{done} of %{total})"
+    downloaded: "Downloaded, %{size}."
+    download: Download
+    cancel: Cancel
+    remove: Delete
+    failed: "Download failed: %{err}"
   autostart:
     app:
       title: Open Runode at login

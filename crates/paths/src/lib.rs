@@ -187,6 +187,11 @@ impl Dirs {
         self.data_file("templates")
     }
 
+    /// 语音转文字的识别模型，按模型分子目录。下载一次几百 MB 到 1 GB 多，所以放根目录不放缓存。
+    pub fn speech_models_dir(&self) -> Option<PathBuf> {
+        self.data_file("speech-models")
+    }
+
     /// Git 面板 AI 写提交说明的预设：用哪个 agent、加什么参数、提示词模板，分所有仓库的默认值和
     /// 按仓库根目录分开的。
     pub fn commit_message_file(&self) -> Option<PathBuf> {

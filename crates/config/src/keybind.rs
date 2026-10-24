@@ -97,6 +97,7 @@ pub enum Action {
     IncreaseFontSize,
     DecreaseFontSize,
     ResetFontSize,
+    Dictate,
 }
 
 /// 把屏幕和回滚内容写进临时文件之后做什么。
@@ -364,6 +365,11 @@ pub static ACTIONS: &[ActionSpec] = &[
         parse: |param| optional_amount(param).map(|()| Action::DecreaseFontSize),
     },
     plain!("reset_font_size", "Reset the font size", Action::ResetFontSize),
+    plain!(
+        "dictate",
+        "Dictate into the terminal: hold to talk and release to type it in, or tap to start and tap again to stop",
+        Action::Dictate
+    ),
 ];
 
 /// 默认绑定，写法与配置文件里 `keybind =` 的值相同。
@@ -450,6 +456,7 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+plus=increase_font_size:1",
     "cmd+minus=decrease_font_size:1",
     "cmd+0=reset_font_size",
+    "cmd+shift+space=dictate",
 ];
 
 /// 触发键里代表数字 1 到 9 的键名，配置和 GPUI 的写法相同。

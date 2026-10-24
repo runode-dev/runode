@@ -34,8 +34,7 @@ public final class ScreenConnection: Sendable {
         var postEvent: Bool
     }
 
-    /// 连上 `machine` 的远程桌面。Bonjour 找到的地址、记着的地址和跨网络的 iroh（晚 `tunnelDelay` 才拨）
-    /// 同时试，谁先握完手用谁。
+    /// 连上 `machine` 的远程桌面。
     public static func open(
         machine: MachineRecord, keyStore: any DeviceKeyStore, discovery: any HostDiscovery,
         open: @escaping TransportOpener = { target, fingerprint in
@@ -45,56 +44,11 @@ public final class ScreenConnection: Sendable {
             try await IrohDialer.shared.open(node: node, fingerprint: fingerprint)
         }
     ) async throws -> ScreenConnection {
-        guard let key = try keyStore.key(for: machine.id) else { throw LinkFailure.missingKey }
-        let attempt: @Sendable (@Sendable () async throws -> any FrameTransport) async throws -> ScreenConnection = {
-            connect in
-            let transport = try await connect()
-            return try await withTaskCancellationHandler {
-                do {
-                    return try await handshake(over: transport, deviceId: machine.deviceId, key: key)
-                } catch {
-                    transport.close()
-                    throw error
-                }
-            } onCancel: {
-                transport.close()
-            }
-        }
-        let fallback = machine.fallbackTargets
-        let fingerprint = machine.fingerprint
-        return try await withThrowingTaskGroup(of: ScreenConnection.self) { group in
-            group.addTask {
-                try await firstSuccess(of: fallback) { target in try await attempt { try await open(target, fingerprint) } }
-            }
-            group.addTask {
-                guard let found = await discovery.locate(fingerprint, timeout: .seconds(2)) else {
-                    throw LinkFailure.noAddress
-                }
-                return try await attempt { try await open(found, fingerprint) }
-            }
-            if let node = machine.node {
-                group.addTask {
-                    try await Task.sleep(for: tunnelDelay)
-                    return try await attempt { try await tunnel(node, fingerprint) }
-                }
-            }
-            var winner: ScreenConnection?
-            var failure: (any Error)?
-            // 有了结果也把另一条等完：它可能也连上了，要关掉。
-            while let result = await group.nextResult() {
-                switch result {
-                case .success(let connection) where winner == nil:
-                    winner = connection
-                    group.cancelAll()
-                case .success(let connection):
-                    connection.close()
-                case .failure(let error):
-                    if failure == nil || (failure as? LinkFailure) == .noAddress { failure = error }
-                }
-            }
-            if let winner { return winner }
-            throw failure ?? LinkFailure.noAddress
-        }
+        let deviceId = machine.deviceId
+        return try await dial(
+            machine, keyStore: keyStore, discovery: discovery, open: open, tunnel: tunnel,
+            handshake: { transport, key in try await handshake(over: transport, deviceId: deviceId, key: key) },
+            close: { $0.close() })
     }
 
     private static func handshake(
@@ -131,7 +85,7 @@ public final class ScreenConnection: Sendable {
                 throw LinkFailure.protocolViolation(String(localized: "画面的格式不对"))
             }
             return .video(video)
-        case .output, .input, .snapshot:
+        case .output, .input, .snapshot, .audio:
             throw LinkFailure.protocolViolation(String(localized: "远程桌面上收到了类型 \(frame.kind.rawValue) 的帧"))
         }
     }

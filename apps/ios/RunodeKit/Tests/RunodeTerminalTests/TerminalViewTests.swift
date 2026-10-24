@@ -14,6 +14,7 @@
             func terminalView(_ view: TerminalView, fitSizeDidChange size: GridSize) { fitSizes.append(size) }
             func terminalView(_ view: TerminalView, didScrollBack scrolledBack: Bool) {}
             func terminalView(_ view: TerminalView, keyboardVisible visible: Bool) {}
+            func terminalView(_ view: TerminalView, dictation press: DictationPress) {}
         }
 
         /// 键盘动的时候视图的高度一下变好几次，只在停稳以后按最后的大小报一次。

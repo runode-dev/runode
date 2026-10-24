@@ -76,7 +76,8 @@
                                 app.leaveEndedPane(machine: machine, session: session, tabMates: mates)
                             }
                         },
-                        sessions: app.sessionList(for: machine))
+                        sessions: app.sessionList(for: machine),
+                        dictation: app.dictation, machine: app.machineList.machine(machine))
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
                 }
