@@ -95,6 +95,7 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn new() -> std::io::Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
+        #[cfg_attr(not(unix), expect(unused_mut))]
         let mut builder = fs::DirBuilder::new();
         #[cfg(unix)]
         std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
