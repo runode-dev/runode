@@ -219,7 +219,10 @@ public final class DictationModel {
         do {
             try recorder.start()
         } catch {
-            remote?.cancel()
+            if let remote {
+                remote.cancel()
+                Task { try? await remote.value.close() }
+            }
             errorMessage = Self.message(for: error)
             return
         }

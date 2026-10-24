@@ -21,7 +21,11 @@ const HOLD: Duration = Duration::from_millis(350);
 
 pub(super) enum Dictation {
     Recording {
-        recorder: Recorder,
+        /// 麦克风还在开时是 `None`：蓝牙耳机要先切到通话模式，可能要一两秒，不在界面线程上等。
+        recorder: Option<Recorder>,
+        _opening: Task<()>,
+        /// 麦克风开好之前就该结束了，开好就结束。
+        finish_when_open: bool,
         started: Instant,
         /// 按下快捷键时按着的修饰键，松开其中任何一个都算松开了快捷键：macOS 按着 ⌘ 时不发别的键的松开。
         modifiers: Modifiers,
@@ -35,10 +39,10 @@ pub(super) enum Dictation {
 
 impl TerminalView {
     pub(super) fn dictate(&mut self, _: &Dictate, window: &mut Window, cx: &mut Context<Self>) {
-        match self.dictation.take() {
+        match &self.dictation {
             None => self.start_dictation(window, cx),
-            Some(Dictation::Recording { recorder, held: false, .. }) => self.finish_dictation(recorder, window, cx),
-            ongoing => self.dictation = ongoing,
+            Some(Dictation::Recording { held: false, .. }) => self.end_recording(window, cx),
+            Some(_) => {}
         }
         cx.notify();
     }
@@ -63,13 +67,44 @@ impl TerminalView {
             .detach();
             return;
         }
-        match Recorder::start() {
-            Ok(recorder) => {
-                let modifiers = window.modifiers();
-                self.dictation =
-                    Some(Dictation::Recording { recorder, started: Instant::now(), modifiers, held: true });
+        let open = cx.background_spawn(async { Recorder::start() });
+        let opening = cx.spawn_in(window, async move |this, cx| {
+            let opened = open.await;
+            this.update_in(cx, |view, window, cx| {
+                match opened {
+                    Ok(opened) => {
+                        if let Some(Dictation::Recording { recorder, finish_when_open, .. }) = &mut view.dictation {
+                            *recorder = Some(opened);
+                            if *finish_when_open {
+                                view.end_recording(window, cx);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        view.dictation = None;
+                        report(&err, window, cx);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        });
+        self.dictation = Some(Dictation::Recording {
+            recorder: None,
+            _opening: opening,
+            finish_when_open: false,
+            started: Instant::now(),
+            modifiers: window.modifiers(),
+            held: true,
+        });
+    }
+
+    fn end_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(Dictation::Recording { recorder, finish_when_open, .. }) = &mut self.dictation {
+            match recorder.take() {
+                Some(recorder) => self.finish_dictation(recorder, window, cx),
+                None => *finish_when_open = true,
             }
-            Err(err) => report(&err, window, cx),
         }
     }
 
@@ -116,10 +151,8 @@ impl TerminalView {
             return;
         }
         *held = false;
-        if started.elapsed() >= HOLD
-            && let Some(Dictation::Recording { recorder, .. }) = self.dictation.take()
-        {
-            self.finish_dictation(recorder, window, cx);
+        if started.elapsed() >= HOLD {
+            self.end_recording(window, cx);
         }
         cx.notify();
     }
@@ -129,7 +162,7 @@ impl TerminalView {
         if !matches!(self.dictation, Some(Dictation::Recording { .. })) {
             return false;
         }
-        if let Some(Dictation::Recording { recorder, .. }) = self.dictation.take() {
+        if let Some(Dictation::Recording { recorder: Some(recorder), .. }) = self.dictation.take() {
             cx.background_spawn(async move { drop(recorder.stop()) }).detach();
         }
         cx.notify();
@@ -139,7 +172,7 @@ impl TerminalView {
     /// 终端底部正中的提示：正在听、正在识别。
     pub(super) fn render_dictation(&self, foreground: Rgb, background: Rgb) -> Option<Stateful<gpui::Div>> {
         let (message, recording) = match self.dictation.as_ref()? {
-            Dictation::Recording { .. } => (rust_i18n::t!("dictation.listening"), true),
+            Dictation::Recording { recorder, .. } => (rust_i18n::t!("dictation.listening"), recorder.is_some()),
             Dictation::Transcribing { .. } => (rust_i18n::t!("dictation.transcribing"), false),
         };
         let fg = hsla(foreground);

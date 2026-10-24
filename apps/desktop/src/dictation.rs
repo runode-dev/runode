@@ -217,10 +217,14 @@ fn recognize_locally(model: SpeechModel, samples: &[f32]) -> anyhow::Result<Stri
 }
 
 fn unload_when_idle() {
+    let mut wait = IDLE_UNLOAD;
     loop {
-        std::thread::sleep(IDLE_UNLOAD);
+        std::thread::sleep(wait);
         let mut slot = RECOGNIZER.lock().unwrap_or_else(|e| e.into_inner());
-        if slot.loaded.as_ref().is_some_and(|(.., used)| used.elapsed() < IDLE_UNLOAD) {
+        if let Some((.., used)) = &slot.loaded
+            && let Some(left) = IDLE_UNLOAD.checked_sub(used.elapsed()).filter(|left| !left.is_zero())
+        {
+            wait = left;
             continue;
         }
         slot.loaded = None;

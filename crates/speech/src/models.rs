@@ -140,7 +140,8 @@ pub fn download(
             continue;
         }
         fs::create_dir_all(path.parent().unwrap_or(root))?;
-        let part = path.with_extension("part");
+        // 几个模型共用的文件（VAD）可能同时在下，各用各的 `.part`。
+        let part = path.with_extension(format!("{}.part", model.name()));
         let mut errors = Vec::new();
         for url in asset.urls(china_first) {
             // 上次已经下全（只差核对、改名）的不再请求：续传位置在文件末尾时服务器回 416。
