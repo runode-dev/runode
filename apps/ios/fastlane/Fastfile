@@ -28,8 +28,8 @@ platform :ios do
       export_method: "app-store",
       output_directory: "build/fastlane",
       derived_data_path: "build/dd-fastlane",
-      xcargs: "#{auth} CURRENT_PROJECT_VERSION=#{build_number}",
-      export_xcargs: auth
+      # gym 导出时也带上 xcargs，所以签名的认证参数只在这里给一次。
+      xcargs: "#{auth} CURRENT_PROJECT_VERSION=#{build_number}"
     )
     upload_to_testflight(skip_waiting_for_build_processing: true)
   end
