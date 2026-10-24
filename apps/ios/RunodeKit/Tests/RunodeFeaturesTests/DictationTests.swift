@@ -11,8 +11,8 @@ import Testing
     final class FakeRecorder: DictationRecorder, @unchecked Sendable {
         var started = false
         var stopped = false
-        func start() throws { started = true }
-        func stop() throws -> [Float] {
+        func start() async throws { started = true }
+        func stop() async throws -> [Float] {
             stopped = true
             return [0.1, 0.2]
         }
@@ -35,6 +35,11 @@ import Testing
             root: root, openSpeech: nil, makeRecorder: { _ in recorder }, transcribe: { "第\($0.count)段" })
     }
 
+    /// 录音器的启停在别的线程上，轮询到它做完为止。
+    func until(_ done: () -> Bool) async {
+        while !done() { await Task.yield() }
+    }
+
     func settle(_ model: DictationModel) async {
         while model.phase == .transcribing { await Task.yield() }
     }
@@ -43,7 +48,8 @@ import Testing
         let model = model()
         var typed: [String] = []
         model.press(.down, machine: nil, source: .phone) { typed.append($0) }
-        #expect(model.phase == .recording && recorder.started)
+        #expect(model.phase == .recording)
+        await until { recorder.started }
         try await Task.sleep(for: DictationModel.hold + .milliseconds(50))
         model.press(.up, machine: nil, source: .phone) { _ in }
         #expect(model.phase == .transcribing)
@@ -65,11 +71,12 @@ import Testing
         #expect(typed == ["第2段"])
     }
 
-    @Test func slidingOffCancels() {
+    @Test func slidingOffCancels() async {
         let model = model()
         model.press(.down, machine: nil, source: .phone) { _ in Issue.record("nothing should be typed") }
         model.press(.cancel, machine: nil, source: .phone) { _ in }
-        #expect(model.phase == .idle && recorder.stopped)
+        #expect(model.phase == .idle)
+        await until { recorder.stopped }
     }
 
     /// 手机上没模型、又没有电脑可交时不录，说清楚要去下载。

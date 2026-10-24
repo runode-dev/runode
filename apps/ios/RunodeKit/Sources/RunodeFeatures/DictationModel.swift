@@ -19,8 +19,8 @@ public enum DictationSource: String, Hashable, Sendable, CaseIterable, Codable {
 
 /// 录音的一方，真的是 `SpeechRecorder`，测试换成假的。
 protocol DictationRecorder: AnyObject, Sendable {
-    func start() throws
-    func stop() throws -> [Float]
+    func start() async throws
+    func stop() async throws -> [Float]
 }
 
 extension SpeechRecorder: DictationRecorder {}
@@ -59,6 +59,9 @@ public final class DictationModel {
     @ObservationIgnored private let transcribe: @Sendable ([Float]) async throws -> String
     @ObservationIgnored private var downloading: Task<Void, Never>?
     @ObservationIgnored private var take: Take?
+    /// 上一段录音器的停用。`start`、`stop` 不在主线程上进录音器的队列，先后要在这里排好：
+    /// 停用等这段的启用，下一段的启用等上一段的停用。
+    @ObservationIgnored private var stopping: Task<Void, Never>?
 
     /// 正在录的一段。
     private final class Take {
@@ -67,6 +70,7 @@ public final class DictationModel {
         let remote: Task<SpeechConnection, any Error>?
         let insert: (String) -> Void
         let started = ContinuousClock.now
+        var starting: Task<Void, any Error>?
         /// 麦克风键还按着。
         var held = true
 
@@ -184,7 +188,7 @@ public final class DictationModel {
         guard let take else { return }
         self.take = nil
         phase = .idle
-        _ = try? take.recorder.stop()
+        _ = stop(take)
         take.closeRemote()
     }
 
@@ -216,19 +220,27 @@ public final class DictationModel {
                 return connection
             }
         }
-        do {
-            try recorder.start()
-        } catch {
-            if let remote {
-                remote.cancel()
-                Task { try? await remote.value.close() }
-            }
-            errorMessage = Self.message(for: error)
-            return
-        }
         let take = Take(recorder: recorder, remote: remote, insert: insert)
         self.take = take
         phase = .recording
+        // 录音器开起来之前就可能松手或取消，所以开不起来时只在这段还是当前这段时才复位。
+        let previous = stopping
+        take.starting = Task { [weak self] in
+            await previous?.value
+            do {
+                try await recorder.start()
+            } catch {
+                take.closeRemote()
+                if let self {
+                    errorMessage = Self.message(for: error)
+                    if self.take === take {
+                        self.take = nil
+                        phase = .idle
+                    }
+                }
+                throw error
+            }
+        }
         Task { [weak self, weak take] in
             try? await Task.sleep(for: .seconds(maxSpeechSeconds))
             if let take, self?.take === take { self?.finish() }
@@ -240,9 +252,10 @@ public final class DictationModel {
         self.take = nil
         phase = .transcribing
         let transcribe = transcribe
+        let stopped = stop(take)
         Task {
             do {
-                let samples = try take.recorder.stop()
+                let samples = try await stopped.value
                 let text: String
                 if let remote = take.remote {
                     let connection = try await remote.value
@@ -261,6 +274,18 @@ public final class DictationModel {
             }
             phase = .idle
         }
+    }
+
+    /// 等这段的录音器开起来再停；没开起来就不停，交出启用时的错误。
+    private func stop(_ take: Take) -> Task<[Float], any Error> {
+        let starting = take.starting
+        let recorder = take.recorder
+        let stopped = Task {
+            try await starting?.value
+            return try await recorder.stop()
+        }
+        stopping = Task { _ = await stopped.result }
+        return stopped
     }
 
     static func message(for error: any Error) -> String {
