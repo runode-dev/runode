@@ -77,10 +77,15 @@
 
         // MARK: 各块
 
+        /// 统计和快捷操作那两排：字号到了无障碍档时横着放不下，改成竖排。
+        private var tileRow: AnyLayout {
+            dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+        }
+
         private var summarySection: some View {
             let summary = app.summary
             return Section {
-                HStack(spacing: 10) {
+                tileRow {
                     StatTile(
                         value: summary.waiting, title: String(localized: "等你回答"), systemImage: Presentation.symbol(for: .waiting),
                         tint: summary.waiting > 0 ? .orange : .secondary)
@@ -124,7 +129,7 @@
                     }
                     .buttonStyle(CardButtonStyle())
                     .plainListRow()
-                    .swipeActions(edge: .trailing) {
+                    .trailingSwipeActions {
                         // 不用 `.destructive`，理由同会话列表左滑结束：系统会先把这一行移走，确认框跟着消失。
                         Button("删除", systemImage: "trash") {
                             machines.deleteTarget = machine.id
@@ -183,7 +188,7 @@
             let targets = spawnTargets
             return Section {
                 ListSectionHeader(title: String(localized: "快捷操作"))
-                HStack(spacing: 10) {
+                tileRow {
                     ActionTile(title: String(localized: "配对电脑"), systemImage: "qrcode.viewfinder", busy: false) {
                         app.startPairing()
                     }
@@ -369,14 +374,19 @@
         let systemImage: String
         var tint: Color = .secondary
         @Environment(\.themeColors) private var colors
+        @ScaledMetric(relativeTo: .title3) private var side: CGFloat = 40
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+        /// 只是装饰：字号到了无障碍档时不画，宽度留给卡片上的字。
         var body: some View {
-            Image(systemName: systemImage)
-                .font(.title3)
-                .foregroundStyle(tint)
-                .frame(width: 40, height: 40)
-                .background(colors.fill, in: .inner)
-                .accessibilityHidden(true)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Image(systemName: systemImage)
+                    .font(.title3)
+                    .foregroundStyle(tint)
+                    .frame(width: side, height: side)
+                    .background(colors.fill, in: .inner)
+                    .accessibilityHidden(true)
+            }
         }
     }
 
@@ -422,6 +432,7 @@
         let action: () -> Void
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.themeColors) private var colors
+        @ScaledMetric(relativeTo: .body) private var iconSide: CGFloat = 32
 
         var body: some View {
             Button(action: action) {
@@ -434,7 +445,7 @@
                                 .font(.body.weight(.semibold))
                         }
                     }
-                    .frame(width: 32, height: 32)
+                    .frame(width: iconSide, height: iconSide)
                     .background(colors.fill, in: .inner)
                     Text(title)
                         .font(.subheadline.weight(.semibold))
@@ -487,7 +498,7 @@
                     Text(machine.name)
                         .font(.headline)
                         .foregroundStyle(state.isConnected ? .primary : .secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         StatusDot(state: state)
                         LinkClock(state: state) { now in

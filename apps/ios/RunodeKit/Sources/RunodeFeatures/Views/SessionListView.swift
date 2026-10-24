@@ -67,13 +67,6 @@
                                 renameText = Presentation.sectionTitle(section)
                                 renaming = section
                             })
-                        if section.sessions.isEmpty {
-                            Text("没有终端")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .cardBackground()
-                                .plainListRow()
-                        }
                         ForEach(section.sessions, id: \.id) { session in
                             row(session, in: section)
                         }
@@ -213,7 +206,7 @@
         private func row(_ session: SessionInfo, in section: SessionSection) -> some View {
             card(session, in: section)
                 .plainListRow()
-                .swipeActions(edge: .trailing) {
+                .trailingSwipeActions {
                     // 不用 `.destructive`：那样系统当作这一行被删了，先把它动画移走，挂在上面的确认框
                     // 跟着消失。只要红色。
                     Button("结束", systemImage: "xmark.circle") {
@@ -357,15 +350,25 @@
                             .lineLimit(1)
                             .truncationMode(.head)
                     }
+                    // 空工作区不另起一张卡片，在标题下写一行，一屏才放得下有会话的那几节。
+                    if section.sessions.isEmpty {
+                        Text("没有终端")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 Spacer(minLength: 8)
                 if canSpawn {
-                    Button("在这里新开终端", systemImage: "plus", action: onSpawn)
-                        .labelStyle(.iconOnly)
-                        .font(.body.weight(.semibold))
-                        .buttonStyle(.borderless)
-                        .disabled(isSpawning)
-                        .accessibilityLabel("在「\(Presentation.sectionTitle(section))」里新开终端")
+                    Button(action: onSpawn) {
+                        Label("在这里新开终端", systemImage: "plus")
+                            .labelStyle(.iconOnly)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .font(.body.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .disabled(isSpawning)
+                    .accessibilityLabel("在「\(Presentation.sectionTitle(section))」里新开终端")
                 }
             }
             .padding(.horizontal, 16)

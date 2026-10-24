@@ -109,6 +109,26 @@
         func themedRows() -> some View {
             modifier(ThemedRows())
         }
+
+        /// `List` 一行的左滑按钮。`List` 会把左滑按钮在无障碍操作里报两遍，所以 VoiceOver 和切换控制
+        /// 开着时不挂左滑，同一组按钮改挂成无障碍操作。
+        func trailingSwipeActions<Actions: View>(@ViewBuilder _ actions: () -> Actions) -> some View {
+            modifier(TrailingSwipeActions(actions: actions()))
+        }
+    }
+
+    private struct TrailingSwipeActions<Actions: View>: ViewModifier {
+        let actions: Actions
+        @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+        @Environment(\.accessibilitySwitchControlEnabled) private var switchControl
+
+        func body(content: Content) -> some View {
+            if voiceOver || switchControl {
+                content.accessibilityActions { actions }
+            } else {
+                content.swipeActions(edge: .trailing) { actions }
+            }
+        }
     }
 
     private struct CardBackground: ViewModifier {
@@ -467,6 +487,7 @@
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
             .background(colors.secondaryFill, in: .inner)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("屏幕预览：\(lines.joined(separator: "，"))")
         }
 

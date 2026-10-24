@@ -288,7 +288,7 @@
                 stageButton([file], staged: staged)
             }
             .padding(.leading, indent(depth))
-            .swipeActions(edge: .trailing) {
+            .trailingSwipeActions {
                 stageSwipe([file], staged: staged)
                 if !staged { discardButton([file]) }
             }
@@ -335,7 +335,7 @@
                 stageButton(files, staged: staged)
             }
             .padding(.leading, indent(depth))
-            .swipeActions(edge: .trailing) {
+            .trailingSwipeActions {
                 stageSwipe(files, staged: staged)
                 if !staged { discardButton(files) }
             }
