@@ -201,7 +201,7 @@ pub(crate) struct Local {
 
 /// `at`（Unix 秒）的本地时间。
 pub(crate) fn local(at: u64) -> Option<Local> {
-    let tm = runode_cli::local_tm(libc::time_t::try_from(at).ok()?)?;
+    let tm = runode_todo::local_tm(libc::time_t::try_from(at).ok()?)?;
     Some(Local {
         year: tm.tm_year + 1900,
         month: u32::try_from(tm.tm_mon + 1).ok()?,
@@ -221,7 +221,7 @@ fn from_local(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> Option
     tm.tm_hour = i32::try_from(hour).ok()?;
     tm.tm_min = i32::try_from(minute).ok()?;
     tm.tm_isdst = -1;
-    let at = runode_cli::mktime(&mut tm);
+    let at = runode_todo::mktime(&mut tm);
     // 规范化挪了日子（2 月 30 日成了 3 月 2 日）就是填错了；春天跳过的钟点只挪时，照收。
     (tm.tm_mday == i32::try_from(day).ok()? && tm.tm_mon == i32::try_from(month).ok()? - 1)
         .then(|| u64::try_from(at).ok())

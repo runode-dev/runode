@@ -10,7 +10,7 @@
 | `types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话标识、看板、终端设置、剪贴板的规矩、输入事件、语音识别的模型 | std、serde |
 | `protocol` | 宿主和各前端之间的消息；手机远程连接（`remote`）和推送通知（`push`）的线上格式以它为准 | types、serde、serde_json |
 | `git` | 用 git 命令行读仓库，做暂存、提交、分支、stash、工作树和同步 | 只有 std |
-| `todo` | 看板的 SQLite 库（`Store`）和定时（`next_fire`）；宿主在跑时改看板仍经宿主的消息，它才会告诉在看看板的前端 | types、rusqlite、libc |
+| `todo` | 看板的 SQLite 库（`Store`）和定时（`next_fire`），以及本地时间和 Unix 时间的换算（`local_tm`、`mktime`）；宿主在跑时改看板仍经宿主的消息，它才会告诉在看看板的前端 | types、rusqlite、libc |
 | `tasks` | 一个目录里能跑的命令：`tasks.json`、Makefile 目标、package.json scripts | types、paths、serde_json |
 | `preview` | 文件预览不碰界面的部分：读文件、语法高亮、解析 Markdown；界面是 `desktop` 的 `preview_panel` | std、syntect、two-face、pulldown-cmark、regex |
 | `agent` | 认出终端前台跑的 AI 编程 agent，判断它在干活、空闲还是等回答；起 agent 时挑模型和强度、续上次的对话，向 agent 本身问模型清单（`models`） | types、serde、serde_json、regex、toml、libc |
@@ -23,7 +23,7 @@
 | `update` | 桌面 app 的自动更新：查 GitHub Release、下载、核对签名，退出时原子地换上 | serde、serde_json、tracing、libc、objc2、block2、objc2-foundation |
 | `autostart` | 登录时自启（launchd、systemd、`SMAppService`），命令行和设置页共用 | paths、objc2、objc2-foundation、objc2-service-management |
 | `ui` | 桌面几处界面共用的 GPUI 部件（照 shadcn 起名，variant、size 选样子）、全 app 一份的主题 `Theme`（只能在 render 和 paint 里读）、所有图标、界面字号和无障碍的共用写法；界面文字由调用方翻译好交进来 | types、paths、GPUI、tracing、unicode-segmentation、objc2-app-kit、objc2-foundation |
-| `cli` | 命令行前端（`runode list`、`send`、`todo` 等），经宿主的 Unix socket（Windows 上是 AF_UNIX）按 protocol 说话；`remote`、`service` 不经宿主 | protocol、types、paths、config、remote、autostart、qrcode、libc、uds_windows（Windows） |
+| `cli` | 命令行前端（`runode list`、`send`、`todo` 等），经宿主的 Unix socket（Windows 上是 AF_UNIX）按 protocol 说话；`remote`、`service` 不经宿主 | protocol、types、paths、config、remote、autostart、todo、qrcode、libc、uds_windows（Windows） |
 | `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档；带子命令时交给 `cli`，带 `--host` 时是单独的宿主进程，带 `--screen` 时是远程桌面的采集进程（`screen_process`，宿主所在的进程按需拉起，崩了不连累终端会话），带 `--speech` 时是识别手机交来的录音的子进程（`dictation::remote`，同样为了崩了不连累终端会话），和命令行、宿主是同一个可执行文件；Windows 上它是界面程序，命令行另由同一个包里的控制台程序 `rn` 跑；远程访问的监听开在宿主所在的进程里（`remote_access`） | 以上全部、GPUI |
 
 终端仿真用的 libghostty-vt 不在 `crates/` 下，取自子模块 `vendor/libghostty-rs`。它是 runode-dev 对 Uzaaft 的 libghostty-rs（MIT 或 Apache-2.0）的 fork，runode 用它的 `main` 分支，里面有安全封装 `libghostty-vt` 和 C 接口绑定 `libghostty-vt-sys`；绑定由 bindgen 生成后提交在那边，重新生成时在 fork 的一份单独克隆里设 `GHOSTTY_SOURCE_DIR` 指向 runode 的 `vendor/ghostty`，跑 `cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings`；别在子模块里跑，`vendor/rustfmt.toml` 关掉了 vendor 下的格式化，生成的绑定不会排版。它自成一个 workspace，根 `Cargo.toml` 按路径依赖它，`vendor` 在 `exclude` 里，所以本仓库的 lint 不管它。`.cargo/config.toml` 设的 `GHOSTTY_SOURCE_DIR` 让 `libghostty-vt-sys` 的构建脚本从 `vendor/ghostty` 编出库，不去网上拉。runode 要用而上游还没有的接口加在 `main` 上，一样东西一个提交，好在以后变基；上游已有同样能力、只是名字或形状不同的，改 runode 去适应，不改 fork。

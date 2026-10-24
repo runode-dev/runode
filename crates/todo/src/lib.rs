@@ -8,5 +8,5 @@
 mod schedule;
 mod store;
 
-pub use schedule::next_fire;
+pub use schedule::{local_tm, mktime, next_fire};
 pub use store::{DONE_KEPT, Result, Store};

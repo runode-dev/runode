@@ -24,8 +24,6 @@ mod todo;
 
 use std::{ffi::OsString, io::Write, path::PathBuf};
 
-pub use local_time::{local_tm, mktime};
-
 /// 桌面 app 给 shell 设的环境变量：runode 可执行文件的路径，没把它放进 PATH 时也能调用命令行。
 pub const ENV_BIN: &str = "RUNODE_BIN";
 

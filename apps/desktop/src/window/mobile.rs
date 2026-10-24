@@ -882,7 +882,7 @@ fn device_row(device: &Paired, theme: &Theme, cx: &mut Context<WindowView>) -> S
 fn local_date(secs: u64) -> (i32, i32, i32) {
     let time = libc::time_t::try_from(secs).unwrap_or(libc::time_t::MAX);
     // SAFETY: `tm` 是纯数据，全零是合法的值；读不出时就用它。
-    let tm = runode_cli::local_tm(time).unwrap_or(unsafe { std::mem::zeroed() });
+    let tm = runode_todo::local_tm(time).unwrap_or(unsafe { std::mem::zeroed() });
     (tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday)
 }
 

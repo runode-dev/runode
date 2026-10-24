@@ -34,6 +34,8 @@ runode-ui.workspace = true
 runode-preview.workspace = true
 # 语音输入：下载识别模型、录音、在本机转文字。
 runode-speech.workspace = true
+# 看板的定时对话框和手机设置页按本地时间写钟点。
+runode-todo.workspace = true
 # Markdown 引用的图片解码前先读头算解码后多大。
 gif.workspace = true
 image.workspace = true

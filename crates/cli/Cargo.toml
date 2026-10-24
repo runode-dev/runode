@@ -16,6 +16,7 @@ runode-protocol.workspace = true
 runode-types.workspace = true
 # `remote` 命令：配对口令、设备表和监听方的状态，以及配对 URI 里的本机地址。
 runode-remote.workspace = true
+runode-todo.workspace = true
 anyhow.workspace = true
 # `wait --for text` 按正则找屏幕上的行。
 regex.workspace = true
