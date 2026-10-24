@@ -8726,25 +8726,25 @@
         }
       }
     },
-    "正在下载，%lld%%" : {
+    "正在下载，%@" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Downloading, %lld%%"
+            "value" : "Downloading, %@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在下载，%lld%%"
+            "value" : "正在下载，%@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在下載，%lld%%"
+            "value" : "正在下載，%@"
           }
         }
       }

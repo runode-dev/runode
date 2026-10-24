@@ -360,6 +360,8 @@
             let size = SpeechModels.downloadSize.formatted(.byteCount(style: .file))
             switch dictation.download {
             case .running(let done):
+                let percent = (Double(done) / Double(SpeechModels.downloadSize))
+                    .formatted(.percent.precision(.fractionLength(0)).rounded(rule: .down))
                 LabeledContent("手机上的模型") {
                     HStack {
                         ProgressView(value: Double(done), total: Double(SpeechModels.downloadSize))
@@ -367,8 +369,7 @@
                         Button("取消") { dictation.cancelDownload() }
                     }
                 }
-                .accessibilityValue(
-                    String(localized: "正在下载，\(Int(done * 100 / SpeechModels.downloadSize))%"))
+                .accessibilityValue(String(localized: "正在下载，\(percent)"))
             case .idle where dictation.installed:
                 LabeledContent("手机上的模型", value: String(localized: "已下载，\(size)"))
                 Button("删除手机上的模型", role: .destructive) { dictation.remove() }
