@@ -51,7 +51,8 @@ jobs:
       - name: 测试
         run: swift test --package-path apps/ios/RunodeKit
       # 界面代码在 `#if os(iOS)` 里，上面的 swift test 在 Mac 上跑，编不到它们；按模拟器编一遍整个 app。
+      # libghostty-vt 的模拟器切片只有 arm64，generic 目标默认还要 x86_64，所以只编 arm64。
       - name: 编 iOS app
         run: |
           xcodebuild -project apps/ios/Runode.xcodeproj -scheme Runode -configuration Debug \
-            -destination "generic/platform=iOS Simulator" CODE_SIGNING_ALLOWED=NO -quiet build
+            -destination "generic/platform=iOS Simulator" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO -quiet build

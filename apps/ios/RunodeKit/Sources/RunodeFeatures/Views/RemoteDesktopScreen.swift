@@ -200,7 +200,7 @@
         func updateUIView(_ view: ScreenSurfaceView, context: Context) {
             view.videoSize = model.videoSize
             if keyboardVisible, !view.keys.isFirstResponder {
-                view.keys.becomeFirstResponder()
+                _ = view.keys.becomeFirstResponder()
             } else if !keyboardVisible, view.keys.isFirstResponder {
                 _ = view.keys.resignFirstResponder()
             }
