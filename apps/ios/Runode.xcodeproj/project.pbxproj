@@ -104,6 +104,7 @@
 				A1000000000000000000000A /* Sources */,
 				A1000000000000000000000B /* Frameworks */,
 				A1000000000000000000000C /* Resources */,
+				A10000000000000000000027 /* 删掉被拷进来的静态库 */,
 			);
 			buildRules = (
 			);
@@ -204,6 +205,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A10000000000000000000027 /* 删掉被拷进来的静态库 */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/onnxruntime.framework",
+				"$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/SherpaOnnxC.framework",
+			);
+			name = "删掉被拷进来的静态库";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/static-frameworks-removed",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# onnxruntime 和 sherpa-onnx 是装在 .framework 里的静态库，已链进主程序；SwiftPM 仍把它们拷进\n# Frameworks，App Store 校验读不出这份拷贝的最低系统版本，拒收整个包（ITMS-90208）。\nset -e\nrm -rf \"${SCRIPT_INPUT_FILE_0}\" \"${SCRIPT_INPUT_FILE_1}\"\ntouch \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A1000000000000000000000A /* Sources */ = {
@@ -353,6 +374,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5VRL2M2A3V;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Runode;
@@ -388,6 +410,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5VRL2M2A3V;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Runode;
