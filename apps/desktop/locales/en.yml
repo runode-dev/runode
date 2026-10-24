@@ -466,6 +466,7 @@ settings:
     terminal: Terminal
     files: Files & Preview
     agents: Agents
+    dictation: Dictation
     remote: Remote Access
     keybinds: Keyboard Shortcuts
   section:
@@ -479,7 +480,6 @@ settings:
     clipboard: Clipboard
     tasks: Tasks
     login: Start at Login
-    dictation: Dictation
     dictation_cloud: Cloud recognition
     dictation_polish: Polish with a model
     push: Phone Notifications

@@ -29,6 +29,7 @@ pub(super) enum Page {
     Terminal,
     Files,
     Agents,
+    Dictation,
     Remote,
     Keybinds,
 }
@@ -69,13 +70,14 @@ enum Control {
 }
 
 impl Page {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::General,
         Self::Appearance,
         Self::Colors,
         Self::Terminal,
         Self::Files,
         Self::Agents,
+        Self::Dictation,
         Self::Remote,
         Self::Keybinds,
     ];
@@ -88,6 +90,7 @@ impl Page {
             Self::Terminal => "terminal",
             Self::Files => "files",
             Self::Agents => "agents",
+            Self::Dictation => "dictation",
             Self::Remote => "remote",
             Self::Keybinds => "keybinds",
         }
@@ -99,7 +102,7 @@ impl Page {
 
     pub fn icon(self) -> &'static str {
         use crate::assets::{
-            FILES_ICON, KEYBOARD_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON, SPARKLE_ICON,
+            FILES_ICON, KEYBOARD_ICON, MIC_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON, SPARKLE_ICON,
             TERMINAL_ICON,
         };
         match self {
@@ -109,6 +112,7 @@ impl Page {
             Self::Terminal => TERMINAL_ICON,
             Self::Files => FILES_ICON,
             Self::Agents => SPARKLE_ICON,
+            Self::Dictation => MIC_ICON,
             Self::Remote => PHONE_ICON,
             Self::Keybinds => KEYBOARD_ICON,
         }
@@ -122,7 +126,13 @@ impl Page {
                 Row("language", Language),
                 Row("terminal-host", Switch),
                 Row("auto-update", Switch),
-                Section("dictation"),
+                Section("login"),
+                Autostart,
+                Section("config_file"),
+                ConfigFileActions,
+                ConfigFiles,
+            ],
+            Self::Dictation => &[
                 Row("dictation-model", Choice(&["sense-voice", "fire-red-asr2"])),
                 Dictation,
                 Row("dictation-words", Text(300.)),
@@ -137,11 +147,6 @@ impl Page {
                 Row("dictation-polish-url", Text(300.)),
                 Row("dictation-polish-key", Text(300.)),
                 Row("dictation-polish-model", Text(300.)),
-                Section("login"),
-                Autostart,
-                Section("config_file"),
-                ConfigFileActions,
-                ConfigFiles,
             ],
             Self::Appearance => &[
                 Theme,

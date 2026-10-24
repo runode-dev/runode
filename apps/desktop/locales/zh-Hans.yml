@@ -466,6 +466,7 @@ settings:
     terminal: 终端
     files: 文件与预览
     agents: Agent
+    dictation: 语音输入
     remote: 远程访问
     keybinds: 快捷键
   section:
@@ -479,7 +480,6 @@ settings:
     clipboard: 剪贴板
     tasks: 命令
     login: 登录时启动
-    dictation: 语音输入
     dictation_cloud: 云端识别
     dictation_polish: 大模型润色
     push: 手机通知

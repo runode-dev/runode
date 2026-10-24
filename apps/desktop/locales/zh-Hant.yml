@@ -466,6 +466,7 @@ settings:
     terminal: 終端機
     files: 檔案與預覽
     agents: Agent
+    dictation: 語音輸入
     remote: 遠端存取
     keybinds: 快速鍵
   section:
@@ -479,7 +480,6 @@ settings:
     clipboard: 剪貼簿
     tasks: 命令
     login: 登入時啟動
-    dictation: 語音輸入
     dictation_cloud: 雲端辨識
     dictation_polish: 大模型潤飾
     push: 手機通知

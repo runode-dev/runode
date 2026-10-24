@@ -1,4 +1,4 @@
-//! 通用页语音输入的模型文件一行：选中的模型下没下、下载进度，以及下载、取消和删除。
+//! 语音输入页的模型文件一行：选中的模型下没下、下载进度，以及下载、取消和删除。
 
 use crate::ui::theme::Theme;
 use gpui::{AppContext as _, Context, Div};

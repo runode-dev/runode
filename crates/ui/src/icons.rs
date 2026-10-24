@@ -79,6 +79,7 @@ crate::icons! {
     pub SLIDERS_ICON = "sliders",
     pub PALETTE_ICON = "palette",
     pub KEYBOARD_ICON = "keyboard",
+    pub MIC_ICON = "mic",
     pub MONITOR_ICON = "monitor",
 }
 
