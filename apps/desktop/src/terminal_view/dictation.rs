@@ -109,7 +109,7 @@ impl TerminalView {
     }
 
     fn finish_dictation(&mut self, recorder: Recorder, window: &mut Window, cx: &mut Context<Self>) {
-        let job = crate::dictation::transcribe(crate::dictation::Settings::new(&self.config), recorder, cx);
+        let job = crate::dictation::transcribe(recorder, cx);
         let task = cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
             this.update_in(cx, |view, window, cx| {

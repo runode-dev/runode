@@ -2,7 +2,7 @@
 //! 带子命令启动时是命令行（`runode list` 等），不开窗口，见 `runode_cli`；`runode --host` 是单独
 //! 一个进程跑的终端宿主，`runode --host --take-over` 是升级时接手旧宿主会话的新宿主，见
 //! `host_process`；`runode --screen` 是远程桌面的采集进程，见 `screen_process`；`runode --speech` 是
-//! 识别手机交来的录音的子进程，见 `dictation::remote`。
+//! 语音输入的识别子进程，见 `dictation::worker`。
 //!
 //! Windows 上这个程序是界面程序，打开时不带控制台窗口；在终端里跑命令行用同一个包里的控制台程序
 //! `rn`。
@@ -66,7 +66,7 @@ fn main() {
         std::process::exit(host_process::take_over());
     }
     if args == ["--speech"] {
-        std::process::exit(dictation::remote::run_worker());
+        std::process::exit(dictation::worker::run());
     }
     #[cfg(any(target_os = "macos", windows))]
     if args == ["--screen"] {

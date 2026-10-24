@@ -1,8 +1,9 @@
-//! 语音输入在应用里只有一份的东西：识别模型的下载（全局 `Downloads`，设置页和终端都看它）、加载好的
-//! 识别器，以及按配置先本机、再云端识别，最后润色（`recognize`）。录音和把文字打进终端在 `terminal_view`
-//! 的 `dictation`，手机交来的录音在 `remote`。
+//! 语音输入在应用里只有一份的东西：识别模型的下载（全局 `Downloads`，设置页和终端都看它），以及按配置
+//! 先本机、再云端识别，最后润色（`recognize`，跑在识别子进程 `worker` 里）。录音和把文字打进终端在
+//! `terminal_view` 的 `dictation`，手机交来的录音在 `remote`。
 
 pub mod remote;
+pub mod worker;
 
 use std::{
     collections::HashMap,
@@ -11,18 +12,19 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use anyhow::{Context as _, bail};
 use gpui::{App, AppContext as _, BorrowAppContext as _, Global, Task};
 use runode_config::Config;
+use runode_protocol::speech::SpeechHostMsg;
 use runode_speech::{Cloud, DictationCloud, Polish, Recognizer, Recorder, SpeechModel};
 
 /// 下载时多久刷新一次进度。
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
-/// 识别器这么久没用就卸掉：FireRedASR2 加载后占一个多 GB 内存，用一次就一直占着不划算。
-const IDLE_UNLOAD: Duration = Duration::from_secs(180);
+/// 本机录的一段最多等这么久识别：慢机器上 FireRedASR2 识别满长的录音再交给大模型润色，要好几分钟。
+const RECOGNIZE_TIMEOUT: Duration = Duration::from_secs(600);
 
 pub enum Download {
     Running { done: u64, total: u64, cancel: Arc<AtomicBool> },
@@ -35,14 +37,8 @@ pub struct Downloads(pub HashMap<SpeechModel, Download>);
 
 impl Global for Downloads {}
 
-static RECOGNIZER: Mutex<Slot> = Mutex::new(Slot { loaded: None, watching: false });
-
-struct Slot {
-    /// 加载好的识别器和上次用它的时刻。
-    loaded: Option<(SpeechModel, Recognizer, Instant)>,
-    /// 有一个线程在等识别器闲下来卸掉它。
-    watching: bool,
-}
+/// 识别子进程里加载好的识别器。
+static RECOGNIZER: Mutex<Option<(SpeechModel, Recognizer)>> = Mutex::new(None);
 
 pub fn models_dir() -> Option<PathBuf> {
     runode_paths::Dirs::from_env().speech_models_dir()
@@ -111,12 +107,9 @@ pub fn cancel_download(model: SpeechModel, cx: &mut App) {
     }
 }
 
-/// 删掉下好的 `model`，加载着的话先卸掉。
+/// 删掉下好的 `model`，先结束闲着的识别子进程，免得它还占着模型的内存。
 pub fn remove(model: SpeechModel) -> std::io::Result<()> {
-    let mut slot = RECOGNIZER.lock().unwrap_or_else(|e| e.into_inner());
-    if slot.loaded.as_ref().is_some_and(|(loaded, ..)| *loaded == model) {
-        slot.loaded = None;
-    }
+    worker::end();
     models_dir().map_or(Ok(()), |root| runode_speech::remove(model, &root))
 }
 
@@ -161,17 +154,33 @@ impl Settings {
     }
 }
 
-/// 停下录音，在后台识别录到的音。识别连同云端和润色可能要等几分钟，占着一个自己的线程，不放进 GPUI
+/// 停下录音，交给识别子进程识别。识别连同云端和润色可能要等几分钟，占着一个自己的线程，不放进 GPUI
 /// 的后台执行器。
-pub fn transcribe(settings: Settings, recorder: Recorder, cx: &mut App) -> Task<anyhow::Result<String>> {
+pub fn transcribe(recorder: Recorder, cx: &mut App) -> Task<anyhow::Result<String>> {
     let (done, result) = futures::channel::oneshot::channel();
     let spawned = std::thread::Builder::new()
         .name("speech-transcribe".into())
-        .spawn(move || drop(done.send(recorder.stop().and_then(|samples| recognize(&settings, &samples)))));
+        .spawn(move || drop(done.send(recorder.stop().and_then(|samples| recognize_in_worker(&samples)))));
     cx.background_spawn(async move {
         spawned?;
         result.await.context("the transcription thread ended")?
     })
+}
+
+const _: () = assert!(runode_speech::MAX_RECORDING_SECS <= runode_protocol::speech::MAX_AUDIO_SECS);
+
+fn recognize_in_worker(samples: &[f32]) -> anyhow::Result<String> {
+    // 重采样可能比 `runode_speech::MAX_RECORDING_SECS` 多出几个样本，超出子进程收的上限。
+    let pcm: Vec<u8> = samples
+        .iter()
+        .take(worker::MAX_AUDIO_BYTES / 2)
+        .flat_map(|s| ((s.clamp(-1., 1.) * 32767.) as i16).to_le_bytes())
+        .collect();
+    match worker::recognize(&pcm, RECOGNIZE_TIMEOUT)? {
+        SpeechHostMsg::Text { text } => Ok(text),
+        SpeechHostMsg::Failed { reason } => bail!(reason),
+        other => bail!("unexpected reply from the speech process: {other:?}"),
+    }
 }
 
 /// 识别 `samples`（`runode_speech::SAMPLE_RATE` 的单声道），阻塞到识别完：本机的模型下好了就在本机识别，
@@ -199,38 +208,16 @@ pub fn recognize(settings: &Settings, samples: &[f32]) -> anyhow::Result<String>
     }))
 }
 
-/// 用 `model` 在本机识别。识别器没加载或换了模型时先加载，闲了 `IDLE_UNLOAD` 之后卸掉。
+/// 用 `model` 在本机识别，识别器没加载或换了模型时先加载。
 fn recognize_locally(model: SpeechModel, samples: &[f32]) -> anyhow::Result<String> {
     let mut slot = RECOGNIZER.lock().unwrap_or_else(|e| e.into_inner());
-    if slot.loaded.as_ref().is_none_or(|(loaded, ..)| *loaded != model) {
-        slot.loaded = None;
+    if slot.as_ref().is_none_or(|(loaded, _)| *loaded != model) {
+        *slot = None;
         let root = models_dir().context("no home directory")?;
-        slot.loaded = Some((model, Recognizer::load(model, &root)?, Instant::now()));
+        *slot = Some((model, Recognizer::load(model, &root)?));
     }
-    let (_, recognizer, used) = slot.loaded.as_mut().expect("loaded above");
-    let text = recognizer.transcribe(samples);
-    *used = Instant::now();
-    if !slot.watching {
-        slot.watching = std::thread::Builder::new().name("speech-unload".into()).spawn(unload_when_idle).is_ok();
-    }
-    Ok(text)
-}
-
-fn unload_when_idle() {
-    let mut wait = IDLE_UNLOAD;
-    loop {
-        std::thread::sleep(wait);
-        let mut slot = RECOGNIZER.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((.., used)) = &slot.loaded
-            && let Some(left) = IDLE_UNLOAD.checked_sub(used.elapsed()).filter(|left| !left.is_zero())
-        {
-            wait = left;
-            continue;
-        }
-        slot.loaded = None;
-        slot.watching = false;
-        return;
-    }
+    let (_, recognizer) = slot.as_mut().expect("loaded above");
+    Ok(recognizer.transcribe(samples))
 }
 
 /// 给人看的大小，按 1000 进位，和系统的「访达」一致。
