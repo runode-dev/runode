@@ -615,7 +615,7 @@ public final class VTerminal {
         }
         func attempt() -> GhosttyResult {
             guard let text else { return run(nil, 0) }
-            return text.withCString { run($0, strlen($0)) }
+            return text.withCString { run($0, text.utf8.count) }
         }
         var result = attempt()
         if result == GHOSTTY_OUT_OF_SPACE {

@@ -71,12 +71,12 @@ public enum TerminalKey: Sendable, Hashable {
         case .right: return GHOSTTY_KEY_ARROW_RIGHT
         case .function(let n):
             guard (1...24).contains(n) else { return GHOSTTY_KEY_UNIDENTIFIED }
-            return GhosttyKey(rawValue: GHOSTTY_KEY_F1.rawValue + Int32(n - 1))
+            return GhosttyKey(rawValue: GHOSTTY_KEY_F1.rawValue + numericCast(n - 1))
         case .character(let character):
             guard let scalar = character.unicodeScalars.first?.value else { return GHOSTTY_KEY_UNIDENTIFIED }
             switch character {
-            case "a"..."z": return GhosttyKey(rawValue: GHOSTTY_KEY_A.rawValue + Int32(scalar - 0x61))
-            case "0"..."9": return GhosttyKey(rawValue: GHOSTTY_KEY_DIGIT_0.rawValue + Int32(scalar - 0x30))
+            case "a"..."z": return GhosttyKey(rawValue: GHOSTTY_KEY_A.rawValue + numericCast(scalar - 0x61))
+            case "0"..."9": return GhosttyKey(rawValue: GHOSTTY_KEY_DIGIT_0.rawValue + numericCast(scalar - 0x30))
             case "`": return GHOSTTY_KEY_BACKQUOTE
             case "\\": return GHOSTTY_KEY_BACKSLASH
             case "[": return GHOSTTY_KEY_BRACKET_LEFT
