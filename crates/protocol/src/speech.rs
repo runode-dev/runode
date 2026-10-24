@@ -2,7 +2,7 @@
 //! `FrameKind::Control`，手机发 `SpeechClientMsg`，电脑发 `SpeechHostMsg`；录音是通道 0 的
 //! `FrameKind::Audio`，载荷是 `AUDIO_SAMPLE_RATE` 的单声道 16 位小端 PCM，边录边发，一帧多长不限。
 //!
-//! 手机经远程访问连上来时，过了门禁（见 `remote`）发的第一帧是 `SpeechHello`，这条连接就接到电脑的
+//! 手机经远程访问连上来时，过了门禁发的第一帧是 `SpeechHello`，这条连接就接到电脑的
 //! 识别上。电脑回 `Ready`（版本不同时回 `Incompatible` 后断开）。手机录完发 `Finish`，电脑识别完回
 //! `Text` 或 `Failed` 后断开。一条连接识别一段话；不要了就直接断开。
 //!
@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 这套消息和录音格式的版本，见 `SpeechClientMsg::SpeechHello`。
+/// 这套消息和录音格式的版本，手机在 `SpeechClientMsg::SpeechHello` 里报自己的。
 pub const SPEECH_VERSION: u32 = 1;
 
 /// `FrameKind::Audio` 的采样率。

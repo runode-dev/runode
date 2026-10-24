@@ -56,7 +56,7 @@ actions!(
         IncreaseFontSize,
         DecreaseFontSize,
         ResetFontSize,
-        /// 语音输入：按住说话、松开打进终端，或者点一下开始、再点一下结束，见 `dictation`。
+        /// 语音输入：按住说话、松开打进终端，或者点一下开始、再点一下结束。
         Dictate
     ]
 );

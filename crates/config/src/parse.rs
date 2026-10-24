@@ -259,7 +259,7 @@ impl Config {
                 };
             }
             "dictation-words" => {
-                // 写法和 `agent-notifications-exclude` 一样：空值清空，逗号隔开，可以写多行。
+                // 空值清空，逗号隔开，可以写多行。
                 if empty {
                     self.dictation_words.clear();
                 }
