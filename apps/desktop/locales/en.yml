@@ -217,10 +217,10 @@ tasks:
   hint_global: "Listed in every directory and run in the terminal's current directory. Saved in %{file}, also on your phone."
   group_project: "My Tasks"
   group_global: "Global Tasks"
-  edit: "Edit Task (Cmd+E)"
+  edit: "Edit Task (%{key})"
   edit_title: "Edit Task"
   update: "Save"
-  delete: "Delete Task (Cmd+Backspace)"
+  delete: "Delete Task (%{key})"
   add_title: "Add Task"
   name: "Name"
   name_placeholder: "e.g. dev; defaults to the command"
@@ -233,7 +233,7 @@ tasks:
   shortcut_press: "Press a shortcut, Esc to cancel"
   shortcut_clear: "Clear"
   shortcut_taken: "“%{what}” uses this key now; saving makes it run this task instead."
-  bind: "Set Shortcut (Cmd+K)"
+  bind: "Set Shortcut (%{key})"
   bind_title: "Shortcut for “%{name}”"
   bind_hint: "The shortcut works in this project only; other projects can bind the same key to their own tasks. Shortcuts of tasks for every directory work wherever a project has not bound the key."
 tooltip:
@@ -335,8 +335,8 @@ git:
     stashes: Stashes
     graph: Graph
   message_label: Commit message
-  message_placeholder: Message (⌘↩ to commit)
-  message_placeholder_branch: "Message (⌘↩ to commit on “%{branch}”)"
+  message_placeholder: Message (%{key} to commit)
+  message_placeholder_branch: "Message (%{key} to commit on “%{branch}”)"
   commit: Commit
   commit_amend: Commit (Amend)
   commit_and_push: Commit & Push
@@ -893,7 +893,7 @@ kanban:
     title_label: Title
     title_placeholder: Defaults to the first line of the prompt
     prompt: Prompt for the agent
-    prompt_placeholder: What should the agent do? ⌘↩ saves
+    prompt_placeholder: What should the agent do? %{key} saves
     workspace: Workspace
     choose_dir: Choose a directory…
     agent: Agent

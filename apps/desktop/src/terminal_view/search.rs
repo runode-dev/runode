@@ -89,13 +89,15 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// 搜索栏开着时切到下一个或上一个匹配；没开时这些键不做事。
+    /// 搜索栏开着时切到下一个或上一个匹配；没开时按键照常交给终端里的程序。
     pub(super) fn search_next(&mut self, _: &SearchNext, _: &mut Window, cx: &mut Context<Self>) {
         if self.search_field.is_some()
             && let Some(session) = self.screen.shown_mut()
         {
             session.search_step(false);
             cx.notify();
+        } else {
+            cx.propagate();
         }
     }
 
@@ -105,6 +107,8 @@ impl TerminalView {
         {
             session.search_step(true);
             cx.notify();
+        } else {
+            cx.propagate();
         }
     }
 

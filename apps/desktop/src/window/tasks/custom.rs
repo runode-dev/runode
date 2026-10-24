@@ -26,7 +26,7 @@ use crate::ui::button::{Button, ButtonVariant};
 use crate::ui::dialog::Dialog;
 use crate::{
     config::AppConfig,
-    settings::keybind_caps,
+    settings::keybind_text,
     ui::{
         a11y::Press,
         font_size::{FontSize, scaled},
@@ -359,9 +359,7 @@ impl WindowView {
         };
         let shortcut_label = match (&dialog.recording, &dialog.shortcut) {
             (Some(_), _) => rust_i18n::t!("tasks.shortcut_press").into_owned(),
-            (None, Some(trigger)) => {
-                keybind_caps(trigger).iter().map(|stroke| stroke.concat()).collect::<Vec<_>>().join(" ")
-            }
+            (None, Some(trigger)) => keybind_text(trigger),
             (None, None) => rust_i18n::t!("tasks.shortcut_none").into_owned(),
         };
         let shortcut_title = rust_i18n::t!("tasks.shortcut").into_owned();

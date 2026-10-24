@@ -3,21 +3,43 @@
 
 use runode_config::{
     Keybind,
-    keybind::{ACTIONS, Action, DEFAULTS, ScreenFile, format_trigger, parse, parse_action, parse_trigger, resolve},
+    keybind::{
+        ACTIONS, Action, MACOS_DEFAULTS, OTHER_DEFAULTS, ScreenFile, format_trigger, parse, parse_action,
+        parse_trigger, resolve,
+    },
 };
 use runode_types::pane::Direction;
 
 #[test]
 fn defaults_parse_and_action_names_are_unique() {
-    for default in DEFAULTS {
-        let binds = parse(default).unwrap_or_else(|err| panic!("{default}: {err}"));
-        assert!(binds.iter().all(|b| matches!(b, Keybind::Bind { .. })), "{default}");
+    for defaults in [MACOS_DEFAULTS, OTHER_DEFAULTS] {
+        let mut triggers = Vec::new();
+        for default in defaults {
+            let binds = parse(default).unwrap_or_else(|err| panic!("{default}: {err}"));
+            assert!(binds.iter().all(|b| matches!(b, Keybind::Bind { .. })), "{default}");
+            triggers.extend(binds.into_iter().map(|b| match b {
+                Keybind::Bind { keys, .. } => keys,
+                _ => unreachable!(),
+            }));
+        }
+        let count = triggers.len();
+        triggers.sort();
+        triggers.dedup();
+        assert_eq!(triggers.len(), count, "a default trigger is bound twice");
     }
     let names: Vec<_> = ACTIONS.iter().map(|a| a.name).collect();
     let mut unique = names.clone();
     unique.sort();
     unique.dedup();
     assert_eq!(names.len(), unique.len());
+}
+
+/// Windows 的 Win 键加字母多半是系统的快捷键，按下去到不了 runode。
+#[test]
+fn defaults_off_macos_leave_the_super_key_alone() {
+    for default in OTHER_DEFAULTS {
+        assert!(!parse_trigger(default.split_once('=').unwrap().0).unwrap().contains("cmd"), "{default}");
+    }
 }
 
 #[test]
@@ -56,7 +78,7 @@ fn recorded_keystrokes_format_back() {
         let normalized = parse_trigger(config).unwrap();
         assert_eq!(format_trigger(&normalized).as_deref(), Some(config));
     }
-    for default in DEFAULTS.iter().filter(|d| !d.contains("digit")) {
+    for default in MACOS_DEFAULTS.iter().chain(OTHER_DEFAULTS).filter(|d| !d.contains("digit")) {
         let keys = parse_trigger(default.split_once('=').unwrap().0).unwrap();
         let formatted = format_trigger(&keys).unwrap_or_else(|| panic!("{default}"));
         assert_eq!(parse_trigger(&formatted).unwrap(), keys);
@@ -99,7 +121,8 @@ fn user_keybinds_override_unbind_and_clear() {
     assert_eq!(lookup("cmd-t"), [Action::NewWindow]);
     assert!(lookup("cmd-w").is_empty());
     assert_eq!(lookup("ctrl-a c"), [Action::NewTab]);
-    assert_eq!(lookup("cmd-q"), [Action::Quit]);
+    let quit = if cfg!(target_os = "macos") { "cmd-q" } else { "ctrl-shift-q" };
+    assert_eq!(lookup(quit), [Action::Quit]);
 
     let table = resolve(&[parse("clear").unwrap(), parse("cmd+q=quit").unwrap()].concat());
     assert_eq!(table, [("cmd-q".to_owned(), Action::Quit)]);
@@ -110,6 +133,15 @@ fn user_keybinds_override_unbind_and_clear() {
 fn defaults_keep_gpui_keystrokes() {
     let table = resolve(&[]);
     let has = |keys: &str, action: Action| table.iter().any(|(k, a)| k == keys && *a == action);
+    if !cfg!(target_os = "macos") {
+        assert!(has("ctrl-shift-,", Action::ReloadConfig));
+        assert!(has("ctrl-+", Action::IncreaseFontSize));
+        assert!(has("ctrl--", Action::DecreaseFontSize));
+        assert!(has("ctrl-alt-shift-=", Action::EqualizeSplits));
+        assert!(has("shift-pageup", Action::ScrollPageUp));
+        assert!(has("alt-f4", Action::CloseWindow));
+        return;
+    }
     assert!(has("shift-cmd-,", Action::ReloadConfig));
     assert!(has("alt-cmd-h", Action::HideOthers));
     assert!(has("alt-shift-cmd-w", Action::CloseAllWindows));
@@ -124,12 +156,13 @@ fn defaults_keep_gpui_keystrokes() {
 /// `digit` 一条顶九条：按的数字就是第几个，9 是最后一个；解绑也一次解九个。
 #[test]
 fn digit_binds_one_to_nine() {
-    let table = resolve(&parse("ctrl+digit=goto_tab").unwrap());
+    let table = resolve(&parse("alt+shift+digit=goto_tab").unwrap());
     let lookup = |keys: &str| table.iter().find(|(k, _)| k == keys).map(|(_, a)| a.clone());
-    assert_eq!(lookup("ctrl-1"), Some(Action::GotoTab(0)));
-    assert_eq!(lookup("ctrl-8"), Some(Action::GotoTab(7)));
-    assert_eq!(lookup("ctrl-9"), Some(Action::LastTab));
-    assert_eq!(lookup("cmd-3"), Some(Action::GotoTab(2)));
+    assert_eq!(lookup("alt-shift-1"), Some(Action::GotoTab(0)));
+    assert_eq!(lookup("alt-shift-8"), Some(Action::GotoTab(7)));
+    assert_eq!(lookup("alt-shift-9"), Some(Action::LastTab));
+    let default_tab = if cfg!(target_os = "macos") { "cmd-3" } else { "ctrl-3" };
+    assert_eq!(lookup(default_tab), Some(Action::GotoTab(2)));
     assert_eq!(lookup("alt-9"), Some(Action::LastWorkspace));
 
     let table = resolve(&parse("cmd+digit=unbind").unwrap());

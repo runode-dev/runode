@@ -182,7 +182,7 @@ pub struct TerminalView {
     /// 按下的那一下已经上报给了程序。分屏时每个终端都在窗口上监听移动和松开，
     /// 只有按下发生在自己这里的终端才上报对应的拖动和松开。
     reporting_press: bool,
-    /// 按着 ⌘ 悬停时指针下的链接，画下划线、指针显示成手形；⌘ 点击打开它。
+    /// 按着 ⌘ 悬停时指针下的链接，画下划线、指针显示成手形；⌘ 点击打开它。别的平台上 ⌘ 换成 Ctrl。
     hovered_link: Option<Link>,
     /// 按着 ⌘ 时指针下的候选链接，以及后台查路径存在与否的进度；见 `LinkLookup`。
     link_lookup: Option<input::LinkLookup>,

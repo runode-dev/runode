@@ -217,10 +217,10 @@ tasks:
   hint_global: "在所有目录里都列出，在终端当前目录里跑。保存在 %{file}，手机上也能用。"
   group_project: "我的命令"
   group_global: "通用命令"
-  edit: "编辑命令（Cmd+E）"
+  edit: "编辑命令（%{key}）"
   edit_title: "编辑命令"
   update: "保存"
-  delete: "删除命令（Cmd+Backspace）"
+  delete: "删除命令（%{key}）"
   add_title: "添加命令"
   name: "名字"
   name_placeholder: "比如 dev，空着时用命令本身"
@@ -233,7 +233,7 @@ tasks:
   shortcut_press: "按下快捷键，Esc 取消"
   shortcut_clear: "清除"
   shortcut_taken: "「%{what}」现在用着这个键，保存后改成跑这条命令。"
-  bind: "设快捷键（Cmd+K）"
+  bind: "设快捷键（%{key}）"
   bind_title: "「%{name}」的快捷键"
   bind_hint: "快捷键只在这个项目里有效，别的项目可以把同一个键绑给自己的命令；通用命令的快捷键在没绑这个键的项目里都能用。"
 tooltip:
@@ -335,8 +335,8 @@ git:
     stashes: 储藏
     graph: 图表
   message_label: 提交说明
-  message_placeholder: 提交说明（⌘↩ 提交）
-  message_placeholder_branch: 提交说明（⌘↩ 提交到“%{branch}”）
+  message_placeholder: 提交说明（%{key} 提交）
+  message_placeholder_branch: 提交说明（%{key} 提交到“%{branch}”）
   commit: 提交
   commit_amend: 提交（修改上次提交）
   commit_and_push: 提交并推送
@@ -893,7 +893,7 @@ kanban:
     title_label: 标题
     title_placeholder: 空着时用提示词的第一行
     prompt: 交给 agent 的提示词
-    prompt_placeholder: 要 agent 做什么？⌘↩ 保存
+    prompt_placeholder: 要 agent 做什么？%{key} 保存
     workspace: 工作区
     choose_dir: 选择目录…
     agent: Agent

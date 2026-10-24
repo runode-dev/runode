@@ -475,7 +475,11 @@ impl WindowView {
             .py(px(5.))
             .disabled(blocker.is_some())
             .child(rust_i18n::t!("git.ai_message.generate").into_owned())
-            .child(div().text_color(cx.theme().primary_foreground.opacity(0.6)).child("⌘↩"))
+            .child(
+                div()
+                    .text_color(cx.theme().primary_foreground.opacity(0.6))
+                    .child(crate::settings::secondary_text("enter")),
+            )
             .map(|button| match blocker {
                 Some(reason) => button
                     .aria_description(rust_i18n::t!(reason).into_owned())

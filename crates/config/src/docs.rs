@@ -183,12 +183,13 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         }
         "keybind" => {
             "Key bindings: TRIGGER=ACTION, can be repeated; the last line for a trigger wins.\n\
-     A trigger joins modifiers and a key with +; the modifiers are cmd, ctrl, alt, shift. Separate a key\n\
+     A trigger joins modifiers and a key with +; the modifiers are cmd, ctrl, alt, shift. cmd (or super)\n\
+     is the Command key on macOS and the Windows or Super key elsewhere. Separate a key\n\
      sequence with >, e.g. ctrl+a>n. A key is the character itself or a name such as left, right, up,\n\
      down, page_up, page_down, home, end, enter, escape, tab, backspace, delete, space, equal, plus,\n\
      minus, f1 to f24. The key digit stands for 1 through 9 and binds all nine at once; goto_tab and\n\
      goto_workspace without a parameter then go to the pressed number, 9 to the last one, e.g.\n\
-     cmd+digit=goto_tab.\n\
+     ctrl+digit=goto_tab.\n\
      TRIGGER=unbind removes a binding; keybind = clear removes every earlier binding, including the\n\
      defaults below.\n\
      Only Runode's own configuration file is read for keybind; keybind in the Ghostty configuration has\n\

@@ -13,7 +13,7 @@ mod autostart;
 mod controls;
 mod dictation;
 mod keybinds;
-pub(crate) use keybinds::caps as keybind_caps;
+pub(crate) use keybinds::{caps_text as keybind_text, secondary_text};
 mod pages;
 mod pairing;
 mod picker;

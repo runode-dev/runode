@@ -46,12 +46,12 @@ pub struct MenuItem {
 }
 
 /// 菜单项右边的图标按钮：图标和悬停时的说明；`keep_open` 时按了菜单不关、焦点不动；选中这一行时按
-/// Cmd 加 `cmd_key` 也按它。
+/// Cmd（别的平台是 Ctrl）加 `secondary_key` 也按它。
 pub struct MenuButton {
     pub icon: &'static str,
     pub tooltip: SharedString,
     pub keep_open: bool,
-    pub cmd_key: Option<&'static str>,
+    pub secondary_key: Option<&'static str>,
 }
 
 impl MenuItem {
@@ -395,11 +395,11 @@ pub trait MenuHost: Sized + 'static {
             return;
         };
         let modifiers = event.keystroke.modifiers;
-        if modifiers.platform && !modifiers.shift && !modifiers.alt && !modifiers.control {
+        if modifiers.secondary() && modifiers.number_of_modifiers() == 1 {
             let key = event.keystroke.key.as_str();
             let pressed = menu.highlighted.and_then(|ix| {
                 let buttons = &menu.items.get(ix)?.as_ref()?.buttons;
-                Some((ix, buttons.iter().position(|(button, _)| button.cmd_key == Some(key))?))
+                Some((ix, buttons.iter().position(|(button, _)| button.secondary_key == Some(key))?))
             });
             if let Some((ix, button)) = pressed {
                 cx.stop_propagation();
@@ -633,7 +633,7 @@ mod tests {
     /// 原来那项挪下去时，不选到挪到它原来位置上的另一项。字改了也先认按钮；按钮也对不上时只比整行的动作。
     #[test]
     fn tells_apart_items_with_the_same_action() {
-        let button = || MenuButton { icon: "", tooltip: SharedString::default(), keep_open: true, cmd_key: None };
+        let button = || MenuButton { icon: "", tooltip: SharedString::default(), keep_open: true, secondary_key: None };
         let task = |name: &str, delete: Box<dyn Action>| {
             Some(MenuItem::label(name.to_owned(), None, Some(Box::new(First))).with_button(button(), delete))
         };

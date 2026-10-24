@@ -133,42 +133,52 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
 }
 
 /// 单行、多行输入框自己的编辑键，搜索时在终端里按 Esc 关掉搜索栏，以及文件树里的按键，不开放配置。
+/// `secondary` 在 macOS 上是 Cmd，别处是 Ctrl。
 fn fixed_bindings() -> Vec<KeyBinding> {
     let tree = Some(FILE_TREE);
-    vec![
+    let mut bindings = vec![
         KeyBinding::new("enter", SearchNext, Some("TextField")),
         KeyBinding::new("shift-enter", SearchPrevious, Some("TextField")),
         KeyBinding::new("escape", EndSearch, Some("TextField")),
-        KeyBinding::new("cmd-x", Cut, Some("TextField")),
-        KeyBinding::new("cmd-z", Undo, Some("TextField")),
-        KeyBinding::new("cmd-shift-z", Redo, Some("TextField")),
+        KeyBinding::new("secondary-x", Cut, Some("TextField")),
+        KeyBinding::new("secondary-z", Undo, Some("TextField")),
+        KeyBinding::new("secondary-shift-z", Redo, Some("TextField")),
         // 点回终端后搜索栏还开着，Esc 照样关掉它；没在搜索时 Esc 照常发给程序。
         KeyBinding::new("escape", EndSearch, Some("Terminal && searching")),
-        // 多行输入框里回车换行（输入框自己处理），cmd-enter 提交。默认配置里 cmd-enter 是全局的
+        // 多行输入框里回车换行（输入框自己处理），secondary-enter 提交。macOS 的默认配置里 cmd-enter 是全局的
         // 切换全屏，GPUI 把全局绑定当作和最深的上下文一样深，同样深时后加的优先，所以这条放在后面就盖过它。
-        KeyBinding::new("cmd-enter", SubmitText, Some("TextArea")),
-        KeyBinding::new("cmd-x", Cut, Some("TextArea")),
-        KeyBinding::new("cmd-z", Undo, Some("TextArea")),
-        KeyBinding::new("cmd-shift-z", Redo, Some("TextArea")),
+        KeyBinding::new("secondary-enter", SubmitText, Some("TextArea")),
+        KeyBinding::new("secondary-x", Cut, Some("TextArea")),
+        KeyBinding::new("secondary-z", Undo, Some("TextArea")),
+        KeyBinding::new("secondary-shift-z", Redo, Some("TextArea")),
         KeyBinding::new("up", SelectPreviousFile, tree),
         KeyBinding::new("down", SelectNextFile, tree),
         KeyBinding::new("home", SelectFirstFile, tree),
         KeyBinding::new("end", SelectLastFile, tree),
-        KeyBinding::new("cmd-up", SelectFirstFile, tree),
+        KeyBinding::new("secondary-up", SelectFirstFile, tree),
         KeyBinding::new("left", CollapseSelectedFile, tree),
         KeyBinding::new("right", ExpandSelectedFile, tree),
         // 空格在预览栏里打开，回车改名。
         KeyBinding::new("space", OpenSelectedFile, tree),
-        KeyBinding::new("cmd-down", OpenSelectedFile, tree),
+        KeyBinding::new("secondary-down", OpenSelectedFile, tree),
         KeyBinding::new("enter", RenameFile, tree),
         KeyBinding::new("f2", RenameFile, tree),
-        KeyBinding::new("cmd-backspace", DeleteFile, tree),
-        KeyBinding::new("cmd-x", Cut, tree),
-        KeyBinding::new("cmd-alt-r", RevealInFinder, tree),
-        KeyBinding::new("cmd-alt-c", CopyPath, tree),
-        KeyBinding::new("cmd-alt-shift-c", CopyRelativePath, tree),
+        KeyBinding::new("secondary-backspace", DeleteFile, tree),
+        KeyBinding::new("secondary-x", Cut, tree),
+        KeyBinding::new("secondary-alt-r", RevealInFinder, tree),
+        KeyBinding::new("secondary-alt-c", CopyPath, tree),
+        KeyBinding::new("secondary-alt-shift-c", CopyRelativePath, tree),
         KeyBinding::new("escape", FocusTerminal, tree),
-    ]
+    ];
+    // 别的平台上终端里单按 Ctrl 的键归 shell，复制、粘贴是 Ctrl+Shift 加字母；终端外照那里的习惯单按 Ctrl。
+    if cfg!(not(target_os = "macos")) {
+        let outside_terminal = |contexts: Contexts| contexts.iter().flatten().filter(|c| **c != "Terminal");
+        bindings.extend(outside_terminal(COPY).map(|c| KeyBinding::new("ctrl-c", Copy, Some(c))));
+        bindings.extend(outside_terminal(PASTE).map(|c| KeyBinding::new("ctrl-v", Paste, Some(c))));
+        bindings.extend(outside_terminal(SELECT_ALL).map(|c| KeyBinding::new("ctrl-a", SelectAll, Some(c))));
+        bindings.extend(["TextField", "TextArea"].map(|c| KeyBinding::new("ctrl-y", Redo, Some(c))));
+    }
+    bindings
 }
 
 /// 上次装上的 `keybind`、命令的快捷键、界面语言和菜单里有没有「退出并结束所有会话」（跟着配置项
@@ -274,9 +284,9 @@ mod tests {
         }
     }
 
-    /// 多行输入框里 cmd-enter 是提交，盖过默认配置里全局的 cmd-enter（切换全屏）；别处照旧切换全屏。
+    /// 多行输入框里 secondary-enter 是提交，盖过 macOS 默认配置里全局的 cmd-enter（切换全屏）；别处照旧切换全屏。
     #[test]
-    fn cmd_enter_submits_in_textarea() {
+    fn secondary_enter_submits_in_textarea() {
         let mut bindings = Vec::new();
         for (keys, action) in keybind::resolve(&[]) {
             let (action, contexts) = gpui_action(action);
@@ -294,13 +304,15 @@ mod tests {
         }
         bindings.extend(fixed_bindings());
         let keymap = gpui::Keymap::new(bindings);
-        let input = [gpui::Keystroke::parse("cmd-enter").unwrap()];
+        let input = [gpui::Keystroke::parse("secondary-enter").unwrap()];
         let first = |contexts: &[&str]| {
             let stack: Vec<_> = contexts.iter().map(|c| gpui::KeyContext::parse(c).unwrap()).collect();
             keymap.bindings_for_input(&input, &stack).0.first().map(|binding| binding.action().name())
         };
         assert_eq!(first(&["Window", "TextArea"]), Some(gpui::Action::name(&SubmitText)));
-        assert_eq!(first(&["Window", "Terminal"]), Some(gpui::Action::name(&ToggleFullScreen)));
+        if cfg!(target_os = "macos") {
+            assert_eq!(first(&["Window", "Terminal"]), Some(gpui::Action::name(&ToggleFullScreen)));
+        }
     }
 
     /// 命令的键在原来动作生效的上下文里排在它前面（它往下传时原来的动作接着跑），没绑别的动作的键也在窗口里生效。
@@ -314,7 +326,9 @@ mod tests {
                 bindings.extend(load(keys, action.boxed_clone(), *context));
             }
         }
-        bindings.extend(task_bindings(&table, &["cmd-k", "cmd-r"]));
+        let new_tab =
+            table.iter().find(|(_, action)| *action == Action::NewTab).map(|(keys, _)| keys.as_str()).unwrap();
+        bindings.extend(task_bindings(&table, &[new_tab, "ctrl-alt-shift-f9"]));
         let keymap = gpui::Keymap::new(bindings);
         let actions = |keys: &str| {
             let input = [gpui::Keystroke::parse(keys).unwrap()];
@@ -323,8 +337,8 @@ mod tests {
             found.iter().map(|binding| binding.action().name()).collect::<Vec<_>>()
         };
         let run = gpui::Action::name(&RunTaskKey(String::new()));
-        assert_eq!(actions("cmd-k")[..2], [run, gpui::Action::name(&ClearScreen)]);
-        assert_eq!(actions("cmd-r"), [run]);
+        assert_eq!(actions(new_tab)[..2], [run, gpui::Action::name(&NewTab)]);
+        assert_eq!(actions("ctrl-alt-shift-f9"), [run]);
     }
 
     /// 配置这边转出来的触发键 GPUI 都认：每个有名字的键、功能键、单个字符，各配上修饰键和按键序列。

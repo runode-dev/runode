@@ -160,6 +160,15 @@ fn row_key(spec: &ActionSpec, usage: &str, digits: bool) -> Option<RowKey> {
     keybind::parse_action(usage).ok().map(RowKey::Action)
 }
 
+/// Ctrl、Alt、Shift 和 Cmd（Windows 上是 Win 键，Linux 上是 Super 键）的键帽。
+const MODIFIER_CAPS: [&str; 4] = if cfg!(target_os = "macos") {
+    ["⌃", "⌥", "⇧", "⌘"]
+} else if cfg!(windows) {
+    ["Ctrl", "Alt", "Shift", "Win"]
+} else {
+    ["Ctrl", "Alt", "Shift", "Super"]
+};
+
 /// 触发键一个键一个键帽，连按的几个键各一组；`digit` 显示成 1…9，认不出的原样一个键帽。
 pub(crate) fn caps(trigger: &str) -> Vec<Vec<String>> {
     let Ok(keys) = keybind::parse_trigger(trigger) else {
@@ -172,7 +181,8 @@ pub(crate) fn caps(trigger: &str) -> Vec<Vec<String>> {
                 return vec![stroke.to_owned()];
             };
             let m = keystroke.modifiers;
-            let mut caps: Vec<String> = [(m.control, "⌃"), (m.alt, "⌥"), (m.shift, "⇧"), (m.platform, "⌘")]
+            let [control, alt, shift, platform] = MODIFIER_CAPS;
+            let mut caps: Vec<String> = [(m.control, control), (m.alt, alt), (m.shift, shift), (m.platform, platform)]
                 .into_iter()
                 .filter(|(on, _)| *on)
                 .map(|(_, symbol)| symbol.to_owned())
@@ -183,7 +193,36 @@ pub(crate) fn caps(trigger: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// 触发键写成一段字：macOS 上键帽连写（⌃⇧T），别处用加号连起来（Ctrl+Shift+T），连按的几个键用空格隔开。
+pub(crate) fn caps_text(trigger: &str) -> String {
+    let joiner = if cfg!(target_os = "macos") { "" } else { "+" };
+    caps(trigger).iter().map(|stroke| stroke.join(joiner)).collect::<Vec<_>>().join(" ")
+}
+
+/// Cmd（别的平台是 Ctrl）加 `key` 写成一段字，给界面文字里提到这类快捷键的地方用。
+pub(crate) fn secondary_text(key: &str) -> String {
+    caps_text(&format!("{}+{key}", if cfg!(target_os = "macos") { "cmd" } else { "ctrl" }))
+}
+
 fn key_symbol(key: &str) -> String {
+    if !cfg!(target_os = "macos") {
+        let name = match key {
+            "enter" => "Enter",
+            "escape" => "Esc",
+            "tab" => "Tab",
+            "backspace" => "Backspace",
+            "delete" => "Delete",
+            "pageup" => "PgUp",
+            "pagedown" => "PgDn",
+            "home" => "Home",
+            "end" => "End",
+            "space" => "Space",
+            _ => "",
+        };
+        if !name.is_empty() {
+            return name.to_owned();
+        }
+    }
     let symbol = match key {
         "enter" => "↩",
         "escape" => "⎋",
@@ -620,10 +659,9 @@ impl SettingsView {
         });
         let conflict =
             self.keybinds.conflict.as_ref().filter(|conflict| conflict.target.row == row.key).map(|conflict| {
-                let keys: Vec<String> = caps(&conflict.trigger).into_iter().map(|stroke| stroke.concat()).collect();
                 let message = rust_i18n::t!(
                     "settings.keybind.conflict",
-                    keys = keys.join(" "),
+                    keys = caps_text(&conflict.trigger),
                     actions = conflict.others.join(" / ")
                 );
                 let replace = Button::new(
@@ -714,11 +752,20 @@ mod tests {
         assert_eq!(join("cmd+t", "text", Some(r"\x01")), r"cmd+t=text:\x01");
     }
 
+    /// 本平台默认绑给 `action` 的触发键：配置的写法和 GPUI 的写法。
+    fn default_trigger(action: &str) -> (String, String) {
+        let line = keybind::DEFAULTS.iter().find(|line| line.ends_with(&format!("={action}"))).unwrap();
+        let trigger = line.split_once('=').unwrap().0.to_owned();
+        let keys = keybind::parse_trigger(&trigger).unwrap();
+        (trigger, keys)
+    }
+
     #[test]
     fn triggers_show_as_keycaps() {
-        assert_eq!(caps("shift+cmd+t"), [["⇧", "⌘", "T"]]);
-        assert_eq!(caps("cmd+digit"), [["⌘", "1…9"]]);
-        assert_eq!(caps("ctrl+a>left"), [vec!["⌃", "A"], vec!["←"]]);
+        let [control, _, shift, platform] = MODIFIER_CAPS;
+        assert_eq!(caps("shift+cmd+t"), [[shift, platform, "T"]]);
+        assert_eq!(caps("cmd+digit"), [[platform, "1…9"]]);
+        assert_eq!(caps("ctrl+a>left"), [vec![control, "A"], vec!["←"]]);
         assert_eq!(caps("nope+t"), [["nope+t"]]);
     }
 
@@ -731,19 +778,20 @@ mod tests {
         assert!(replace_user_line(&mut values, 0, "ctrl+x", "ctrl+y"));
         assert_eq!(values, lines(&["ctrl+y=new_window", "ctrl+y=new_tab"]));
 
-        let mut values = lines(&["cmd+t=new_tab"]);
-        assert!(replace_user_line(&mut values, 0, "cmd+t", "ctrl+t"));
-        assert_eq!(values, lines(&["cmd+t=unbind", "ctrl+t=new_tab"]));
+        let (tab, tab_keys) = default_trigger("new_tab");
+        let mut values = lines(&[&format!("{tab}=new_tab")]);
+        assert!(replace_user_line(&mut values, 0, &tab, "ctrl+t"));
+        assert_eq!(values, [format!("{tab}=unbind"), "ctrl+t=new_tab".to_owned()]);
         let resolved = keybind::resolve(&values.iter().flat_map(|v| keybind::parse(v).unwrap()).collect::<Vec<_>>());
-        assert!(!resolved.iter().any(|(keys, _)| keys == "cmd-t"));
+        assert!(!resolved.iter().any(|(keys, _)| *keys == tab_keys));
 
         // 自己写的那行盖着的是别的动作的默认绑定（录键时从 `new_tab` 抢过来的）：换走以后旧键也空出来，
         // 不又绑回 `new_tab`。
-        let mut values = lines(&["cmd+t=new_window"]);
-        assert!(replace_user_line(&mut values, 0, "cmd+t", "ctrl+y"));
-        assert_eq!(values, lines(&["cmd+t=unbind", "ctrl+y=new_window"]));
+        let mut values = lines(&[&format!("{tab}=new_window")]);
+        assert!(replace_user_line(&mut values, 0, &tab, "ctrl+y"));
+        assert_eq!(values, [format!("{tab}=unbind"), "ctrl+y=new_window".to_owned()]);
         let resolved = keybind::resolve(&values.iter().flat_map(|v| keybind::parse(v).unwrap()).collect::<Vec<_>>());
-        assert!(!resolved.iter().any(|(keys, _)| keys == "cmd-t"));
+        assert!(!resolved.iter().any(|(keys, _)| *keys == tab_keys));
 
         let mut values = lines(&["clear"]);
         assert!(!replace_user_line(&mut values, 0, "cmd+t", "ctrl+t"));
@@ -769,27 +817,31 @@ mod tests {
         };
         let new_window = keybind::parse_action("new_window").ok();
 
-        let mut values = lines(&["cmd+digit=goto_tab", "cmd+1=new_window"]);
-        assert!(replace_user_line(&mut values, 0, "cmd+digit", "ctrl+digit"));
-        assert_eq!(values, lines(&["cmd+digit=unbind", "cmd+1=new_window", "ctrl+digit=goto_tab"]));
+        // 换成两个平台都没默认绑的 alt+shift+digit。
+        let (digits, digit_keys) = default_trigger("goto_tab");
+        let (prefix, key_prefix) = (digits.strip_suffix("digit").unwrap(), digit_keys.strip_suffix("digit").unwrap());
+        let one = format!("{prefix}1=new_window");
+        let mut values = lines(&[&format!("{digits}=goto_tab"), &one]);
+        assert!(replace_user_line(&mut values, 0, &digits, "alt+shift+digit"));
+        assert_eq!(values, [format!("{digits}=unbind"), one.clone(), "alt+shift+digit=goto_tab".to_owned()]);
         let resolved = resolve(&values);
-        assert_eq!(action(&resolved, "cmd-1"), new_window);
-        assert_eq!(action(&resolved, "cmd-2"), None);
-        assert_eq!(action(&resolved, "ctrl-2"), Some(Action::GotoTab(1)));
+        assert_eq!(action(&resolved, &format!("{key_prefix}1")), new_window);
+        assert_eq!(action(&resolved, &format!("{key_prefix}2")), None);
+        assert_eq!(action(&resolved, "alt-shift-2"), Some(Action::GotoTab(1)));
 
-        let mut values = lines(&["cmd+digit=goto_tab", "cmd+1=new_window"]);
-        remove_user_line(&mut values, 0, "cmd+digit");
-        assert_eq!(values, lines(&["cmd+digit=unbind", "cmd+1=new_window"]));
+        let mut values = lines(&[&format!("{digits}=goto_tab"), &one]);
+        remove_user_line(&mut values, 0, &digits);
+        assert_eq!(values, [format!("{digits}=unbind"), one.clone()]);
         let resolved = resolve(&values);
-        assert_eq!(action(&resolved, "cmd-1"), new_window);
-        assert_eq!(action(&resolved, "cmd-2"), None);
+        assert_eq!(action(&resolved, &format!("{key_prefix}1")), new_window);
+        assert_eq!(action(&resolved, &format!("{key_prefix}2")), None);
 
-        // 默认的 `cmd+digit` 被自己写的 `cmd+1` 盖过一个，去掉默认的那一行时 `cmd+1` 还在。
-        let mut values = lines(&["cmd+1=new_window"]);
-        unbind_default(&mut values, "cmd+digit");
+        // 默认的那一行被自己写的单个数字盖过一个，去掉默认的那一行时单个数字的还在。
+        let mut values = lines(&[&one]);
+        unbind_default(&mut values, &digits);
         let resolved = resolve(&values);
-        assert_eq!(action(&resolved, "cmd-1"), new_window);
-        assert_eq!(action(&resolved, "cmd-3"), None);
+        assert_eq!(action(&resolved, &format!("{key_prefix}1")), new_window);
+        assert_eq!(action(&resolved, &format!("{key_prefix}3")), None);
 
         // 只有后面的行绑着旧键、前面没有露出来的：不写解绑。
         let mut values = lines(&["ctrl+x=new_tab", "ctrl+x=new_window"]);

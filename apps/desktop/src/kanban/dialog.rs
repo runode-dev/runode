@@ -315,7 +315,12 @@ impl TodoDialog {
             let mut area = TextareaState::new(cx);
             area.set_line_limits(3, 10, cx);
             area.set_label(rust_i18n::t!("kanban.dialog.prompt"), cx);
-            area.set_placeholder(rust_i18n::t!("kanban.dialog.prompt_placeholder").into_owned().into(), cx);
+            area.set_placeholder(
+                rust_i18n::t!("kanban.dialog.prompt_placeholder", key = crate::settings::secondary_text("enter"))
+                    .into_owned()
+                    .into(),
+                cx,
+            );
             area.set_text(prompt_text, cx);
             area
         });

@@ -131,8 +131,8 @@ impl TerminalView {
         let Some(at) = self.grid_point(event.position) else {
             return;
         };
-        // ⌘ 点在链接上：打开它，不选择也不上报（程序开着鼠标上报时也一样，上报本来就不带 ⌘）。
-        if event.button == MouseButton::Left && event.modifiers.platform && self.click_link(at, cx) {
+        // ⌘（别的平台是 Ctrl）点在链接上：打开它，不选择，程序开着鼠标上报时也不上报。
+        if event.button == MouseButton::Left && event.modifiers.secondary() && self.click_link(at, cx) {
             return;
         }
         // 程序开了鼠标上报时按键归程序，按住 Shift 照常选择。
@@ -179,7 +179,7 @@ impl TerminalView {
             cx.notify();
             return;
         }
-        self.hover_link(inside && event.pressed_button.is_none() && event.modifiers.platform, at, cx);
+        self.hover_link(inside && event.pressed_button.is_none() && event.modifiers.secondary(), at, cx);
         // 没按键的移动只报给指针下的终端；按着键的拖动只报给按下时所在的终端。
         let ours = if event.pressed_button.is_some() { self.reporting_press } else { inside };
         if ours
@@ -230,7 +230,7 @@ impl TerminalView {
     ) {
         let at = pointer.and_then(|pointer| self.grid_point(pointer));
         match at {
-            Some(at) => self.hover_link(modifiers.platform, at, cx),
+            Some(at) => self.hover_link(modifiers.secondary(), at, cx),
             None => self.clear_hovered_link(cx),
         }
     }

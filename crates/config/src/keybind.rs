@@ -372,8 +372,11 @@ pub static ACTIONS: &[ActionSpec] = &[
     ),
 ];
 
-/// 默认绑定，写法与配置文件里 `keybind =` 的值相同。
-pub static DEFAULTS: &[&str] = &[
+/// 本平台的默认绑定，写法与配置文件里 `keybind =` 的值相同。
+pub static DEFAULTS: &[&str] = if cfg!(target_os = "macos") { MACOS_DEFAULTS } else { OTHER_DEFAULTS };
+
+/// macOS 上的默认绑定。
+pub static MACOS_DEFAULTS: &[&str] = &[
     "cmd+q=quit",
     "cmd+,=open_settings",
     "cmd+shift+,=reload_config",
@@ -457,6 +460,72 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+minus=decrease_font_size:1",
     "cmd+0=reset_font_size",
     "cmd+shift+space=dictate",
+];
+
+/// Windows 和 Linux 上的默认绑定：`cmd` 在那里是 Win（Super）键，组合键多半被系统占着，所以不用它。
+/// 终端里常用的照 Ghostty 在 Linux 上的默认，以 `ctrl+shift` 开头，单按 `ctrl` 的留给 shell；
+/// 程序自己常用的 Alt、Shift 加方向键、Home、End 也不占。runode 自己的面板沿用 macOS 上的字母，撞了的
+/// 再加 `alt`。macOS 上管应用和窗口的几个动作这里没有。
+pub static OTHER_DEFAULTS: &[&str] = &[
+    "ctrl+shift+q=quit",
+    "ctrl+,=open_settings",
+    "ctrl+shift+,=reload_config",
+    "ctrl+shift+n=new_window",
+    "alt+f4=close_window",
+    "f11=toggle_fullscreen",
+    "ctrl+shift+t=new_tab",
+    "ctrl+shift+w=close_surface",
+    "ctrl+shift+alt+w=close_tab",
+    "ctrl+tab=next_tab",
+    "ctrl+shift+tab=previous_tab",
+    "ctrl+page_down=next_tab",
+    "ctrl+page_up=previous_tab",
+    "ctrl+digit=goto_tab",
+    "ctrl+shift+d=new_split:right",
+    "ctrl+shift+alt+d=new_split:down",
+    "ctrl+alt+left=goto_split:left",
+    "ctrl+alt+right=goto_split:right",
+    "ctrl+alt+up=goto_split:up",
+    "ctrl+alt+down=goto_split:down",
+    "ctrl+shift+alt+left=resize_split:left",
+    "ctrl+shift+alt+right=resize_split:right",
+    "ctrl+shift+alt+up=resize_split:up",
+    "ctrl+shift+alt+down=resize_split:down",
+    "ctrl+shift+alt+equal=equalize_splits",
+    "ctrl+shift+enter=toggle_split_zoom",
+    "ctrl+shift+alt+minus=toggle_split_fold",
+    "ctrl+shift+l=arrange_splits",
+    "ctrl+shift+alt+n=new_workspace",
+    "ctrl+alt+page_down=next_workspace",
+    "ctrl+alt+page_up=previous_workspace",
+    "alt+digit=goto_workspace",
+    "ctrl+shift+b=toggle_sidebar",
+    "ctrl+shift+g=toggle_git",
+    "ctrl+shift+e=toggle_files",
+    "ctrl+shift+i=toggle_github_actions",
+    "ctrl+shift+r=toggle_tasks",
+    "ctrl+shift+k=toggle_kanban",
+    "ctrl+shift+s=toggle_schedules",
+    "ctrl+shift+alt+t=new_todo",
+    "ctrl+shift+a=goto_agent",
+    "ctrl+shift+alt+a=next_agent",
+    "ctrl+shift+c=copy_to_clipboard",
+    "ctrl+shift+v=paste_from_clipboard",
+    "shift+insert=paste_from_clipboard",
+    "shift+page_up=scroll_page_up",
+    "shift+page_down=scroll_page_down",
+    "ctrl+shift+page_up=jump_to_prompt:-1",
+    "ctrl+shift+page_down=jump_to_prompt:1",
+    "ctrl+shift+f=start_search",
+    "f3=navigate_search:next",
+    "shift+f3=navigate_search:previous",
+    "ctrl+shift+j=write_screen_file:paste",
+    "ctrl+shift+alt+j=write_screen_file:open",
+    "ctrl+equal=increase_font_size:1",
+    "ctrl+plus=increase_font_size:1",
+    "ctrl+minus=decrease_font_size:1",
+    "ctrl+0=reset_font_size",
+    "ctrl+shift+space=dictate",
 ];
 
 /// 触发键里代表数字 1 到 9 的键名，配置和 GPUI 的写法相同。
