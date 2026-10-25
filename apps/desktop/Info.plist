@@ -29,6 +29,6 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Runode uses the microphone for dictation, recognized offline on this Mac.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright (c) Runode 2026-present. All rights reserved.</string>
+	<string>© 2026 Runode</string>
 </dict>
 </plist>
