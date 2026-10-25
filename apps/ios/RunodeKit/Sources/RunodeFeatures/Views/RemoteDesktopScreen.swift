@@ -55,7 +55,7 @@
             }
             .overlay(alignment: .topLeading) {
                 floatingButton("返回", systemImage: "chevron.left") { dismiss() }
-                    .padding(8)
+                    .padding(FloatingButton.margin)
             }
             .overlay(alignment: .topTrailing) {
                 HStack(spacing: 12) {
@@ -88,7 +88,7 @@
                         }
                     }
                 }
-                .padding(8)
+                .padding(FloatingButton.margin)
             }
             .sheet(isPresented: $model.askingPassword) {
                 UnlockSheet(model: model)
@@ -112,12 +112,18 @@
         }
     }
 
+    /// 浮在画面左上、右上角的圆形按钮：边长和离安全区边缘的距离。
+    private enum FloatingButton {
+        static let size: CGFloat = 44
+        static let margin: CGFloat = 8
+    }
+
     extension View {
         /// 浮在画面上的圆形小按钮的样子。
         fileprivate func floatingStyle() -> some View {
             font(.body.weight(.semibold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+                .frame(width: FloatingButton.size, height: FloatingButton.size)
                 .background(.ultraThinMaterial, in: Circle())
                 .environment(\.colorScheme, .dark)
         }
@@ -258,7 +264,16 @@
                 video.frame = bounds
                 return
             }
-            video.frame = AVMakeRect(aspectRatio: videoSize, insideRect: bounds)
+            let fitted = AVMakeRect(aspectRatio: videoSize, insideRect: bounds)
+            // 两边的黑边放不下浮动按钮时，画面让到按钮那一条下面，电脑屏幕的左上角、右上角才点得到。
+            let reach = FloatingButton.margin + FloatingButton.size
+            let top = safeAreaInsets.top + reach
+            guard fitted.minX < safeAreaInsets.left + reach, fitted.minY < top else {
+                video.frame = fitted
+                return
+            }
+            let below = bounds.inset(by: UIEdgeInsets(top: top, left: 0, bottom: 0, right: 0))
+            video.frame = AVMakeRect(aspectRatio: videoSize, insideRect: below)
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { video }
