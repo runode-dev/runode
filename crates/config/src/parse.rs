@@ -109,6 +109,15 @@ pub(crate) struct Entry {
 impl Config {
     /// 读取 Ghostty 与 runode 的配置。`dark` 用于 `theme = light:X,dark:Y`。
     pub fn load(dark: bool) -> Self {
+        Self::load_except(dark, None)
+    }
+
+    /// 删掉 runode 配置文件里 `key` 的各行后会读到的配置。
+    pub fn load_without(dark: bool, key: &str) -> Self {
+        Self::load_except(dark, Some(key))
+    }
+
+    fn load_except(dark: bool, skip: Option<&str>) -> Self {
         let mut sources = Vec::new();
         // Ghostty 的几个配置文件算一层，其中有同一个文件（比如符号链接过去的）只读一次。
         let mut visited = HashSet::new();
@@ -118,7 +127,8 @@ impl Config {
             .flat_map(|path| read_file(path, &mut sources, &mut visited))
             .filter(|e| e.key != "keybind")
             .collect();
-        let runode = config_path().map(|path| read_entries(&path, &mut sources)).unwrap_or_default();
+        let mut runode = config_path().map(|path| read_entries(&path, &mut sources)).unwrap_or_default();
+        runode.retain(|e| Some(e.key.as_str()) != skip);
         Self::from_layers(&[ghostty, runode], dark, &mut sources)
     }
 

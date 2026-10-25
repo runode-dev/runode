@@ -359,8 +359,7 @@ impl SettingsView {
         cards.finish()
     }
 
-    /// runode 的配置文件里写了 `key` 时的恢复按钮。写的正是内置默认值也留着：Ghostty 的配置或主题可能写了
-    /// 别的值，删掉这几行才回到那个值。
+    /// runode 的配置文件里写了 `key` 时的恢复按钮。
     pub(super) fn reset(&self, key: &'static str, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.file.has(key).then(|| {
             let label = rust_i18n::t!("settings.reset").into_owned();
@@ -393,8 +392,9 @@ impl SettingsView {
         let control = match control {
             Control::Switch => {
                 let on = current.first().is_some_and(|value| value == "true");
-                let switch = Switch::new(id("switch", key), key_title(key), on)
-                    .on_press(cx, move |this, _, cx| this.write_or_report(key, vec![(!on).to_string()], cx));
+                let switch = Switch::new(id("switch", key), key_title(key), on).on_press(cx, move |this, _, cx| {
+                    this.write_or_report(key, this.single(key, (!on).to_string()), cx)
+                });
                 let notify = key == "agent-notifications" && on;
                 // 开着通知、系统设置里却拒绝了：通知发不出来，提示去系统设置里打开。
                 let denied = notify && crate::window::notifications_denied(cx);
@@ -419,8 +419,7 @@ impl SettingsView {
                 let options = values.iter().map(|value| (value.to_string(), choice_label(key, value))).collect();
                 let selected = current.first().map_or("", String::as_str);
                 segmented(key, key_title(key), options, Some(selected), theme, cx, move |this, value, _, cx| {
-                    let values = if value.is_empty() { Vec::new() } else { vec![value.to_owned()] };
-                    this.write_or_report(key, values, cx);
+                    this.write_or_report(key, this.single(key, value.to_owned()), cx);
                 })
                 .into_any_element()
             }

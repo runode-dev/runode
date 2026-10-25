@@ -258,7 +258,7 @@ impl SettingsView {
         // 清空一行删掉了它，下面的行往上挪了一格。
         let mut removed = false;
         let written = match commit {
-            Commit::Value(key) => self.write(key, if text.is_empty() { Vec::new() } else { vec![text] }, cx),
+            Commit::Value(key) => self.write(key, self.single(key, text), cx),
             Commit::Item(key, ix) => {
                 let mut values = self.list_values(key);
                 match (ix < values.len(), text.is_empty()) {
@@ -318,6 +318,16 @@ impl SettingsView {
                 .map_err(|err| rust_i18n::t!("settings.invalid", err = err).into_owned())?;
         }
         self.write_unchecked(key, &values, cx)
+    }
+
+    /// 单值的项要写回的各行。值正是删掉这一项后会回到的值（Ghostty 的配置、主题或内置的值）时删掉这一项，
+    /// 恢复按钮跟着消失。
+    fn single(&self, key: &str, value: String) -> Vec<String> {
+        if value.is_empty() || Config::load_without(self.config.dark, key).same_value(key, &value) {
+            Vec::new()
+        } else {
+            vec![value]
+        }
     }
 
     fn write_unchecked(&mut self, key: &str, values: &[String], cx: &mut Context<Self>) -> Result<(), String> {

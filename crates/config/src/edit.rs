@@ -141,3 +141,15 @@ pub fn check_value(key: &str, value: &str) -> Result<(), String> {
     }
     Config::default().apply(key, value, true)
 }
+
+impl Config {
+    /// 在这份配置上再写一行 `key = value`，生效的配置是不是不变。写不进去的值算变了；`theme` 和
+    /// `config-file` 在应用各层之前就已处理，`apply` 不动它们，也算变了。
+    pub fn same_value(&self, key: &str, value: &str) -> bool {
+        if matches!(key, "theme" | "config-file") {
+            return false;
+        }
+        let mut written = self.clone();
+        written.apply(key, value, true).is_ok() && written == *self
+    }
+}

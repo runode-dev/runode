@@ -1,6 +1,6 @@
 //! 设置界面改配置文件：换掉一个键的设置行，别的行原样留着；以及写之前的检查。
 
-use runode_config::{ConfigFile, check_value};
+use runode_config::{Config, ConfigFile, check_value};
 
 const FILE: &str = "\
 ## 说明
@@ -79,4 +79,16 @@ fn a_leading_bom_does_not_hide_the_first_setting() {
     assert_eq!(file.text(), text);
     assert_eq!(set(text, "font-size", &[]), "\u{feff}background = #000000\n");
     assert_eq!(set(text, "font-size", &["18"]), text.replace("20", "18"));
+}
+
+/// 设置页靠它判断写回的值是不是删掉这一项后本来就有的值，写法不同而解析出来一样的也要算一样。
+#[test]
+fn same_value_compares_parsed_values() {
+    let config = Config::default();
+    assert!(config.same_value("task-placement", "right"));
+    assert!(!config.same_value("task-placement", "tab"));
+    assert!(config.same_value("font-size", "14.0"));
+    assert!(config.same_value("background", &runode_config::hex(config.background).to_uppercase()));
+    assert!(!config.same_value("font-size", "abc"));
+    assert!(!config.same_value("theme", ""));
 }
