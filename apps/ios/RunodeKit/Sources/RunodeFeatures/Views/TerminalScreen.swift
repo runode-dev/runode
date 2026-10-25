@@ -47,7 +47,6 @@
                         model.send(.paste(text))
                     }
                 })
-                .ignoresSafeArea(.container, edges: .horizontal)
                 .overlay(alignment: .top) { banner }
                 // 印章的出现要由外层驱动；动画只挂在这层 ZStack 上，不让终端跟着按键栏收起播改尺寸的动画。
                 .overlay { ZStack { endedStamp }.animation(.spring(duration: 0.3), value: model.isEnded) }
