@@ -20,7 +20,7 @@ pub(super) use custom::AddTaskDialog;
 pub use keys::{RunTaskKey, TaskKeys};
 
 use super::{
-    InstallSkill, ToggleTasks,
+    InstallSkill, ToggleTasks, cards,
     files::{MenuButton, MenuItem},
     model::home_dir,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
@@ -58,12 +58,11 @@ pub(super) struct RunTask {
     dir: Option<PathBuf>,
 }
 
-/// 命令菜单里分组的标题：收起或展开 `group_key` 为 `key` 的一组，`folded` 是点之前收没收着。
+/// 命令菜单里分组的标题：收起或展开 `group_key` 为 `key` 的一组。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(super) struct ToggleTaskGroup {
     key: PathBuf,
-    folded: bool,
 }
 
 /// 自己加的命令行尾的删除按钮：删掉 `project`（通用的为空）那一份里的 `name`。
@@ -96,14 +95,6 @@ pub(super) struct BindTask {
 /// 记一组收没收起用的键：自己加的命令按项目目录，通用的和各个文件按文件，几份不会撞上。
 fn group_key(source: &TaskSource) -> PathBuf {
     source.project.clone().unwrap_or_else(|| source.file.clone())
-}
-
-/// 没点过标题时这一组收不收着：配置项 `task-files-collapsed` 开着时收起 Makefile 和 package.json，
-/// 上次跑的命令 `last` 在这一组里时不收，打开菜单就选得中它。
-fn task_folded_by_default(source: &TaskSource, collapse_files: bool, last: Option<&String>) -> bool {
-    collapse_files
-        && matches!(source.kind, TaskSourceKind::Makefile | TaskSourceKind::PackageJson)
-        && !source.tasks.iter().any(|task| Some(&task.command) == last)
 }
 
 /// 这一组是自己加的命令（本项目的或通用的）。
@@ -168,14 +159,24 @@ impl WindowView {
     }
 
     /// 命令菜单里点了一条：按配置项 `task-placement` 在当前标签里分出一个终端或者在它右边开一个新标签，
-    /// 在列命令的目录里跑它。
+    /// 在列命令的目录里跑它。分出来的分屏按配置项 `task-split-fold` 折叠起来，焦点留在原来的分屏。
     pub(super) fn run_task(&mut self, action: &RunTask, window: &mut Window, cx: &mut Context<Self>) {
         let listed = self.workspace().project.tasks.as_ref().map(|(dir, _)| dir.clone());
         let Some(dir) = action.dir.clone().or(listed) else {
             return;
         };
-        if self.run_in_terminal(&dir, action.command.clone(), window, cx).is_some() {
-            self.workspace_mut().project.tasks_last = Some(action.command.clone());
+        let config = &cx.global::<AppConfig>().0;
+        let fold = config.task_split_fold && config.task_placement != TaskPlacement::Tab && cards(cx);
+        let before = self.tab().map(|tab| tab.focused);
+        let Some(view) = self.run_in_terminal(&dir, action.command.clone(), window, cx) else {
+            return;
+        };
+        self.workspace_mut().project.tasks_last = Some(action.command.clone());
+        if let Some(before) = before.filter(|_| fold)
+            && let Some(tab) = self.tab_mut()
+        {
+            tab.collapsed.insert(view.entity_id());
+            self.focus_pane_in_active_tab(before, window, cx);
         }
     }
 
@@ -311,7 +312,10 @@ impl WindowView {
 
     /// 命令菜单里点了分组的标题：收起或展开这一组，菜单开着不关。
     pub(super) fn toggle_task_group(&mut self, action: &ToggleTaskGroup, _: &mut Window, cx: &mut Context<Self>) {
-        self.workspace_mut().project.tasks_folded.insert(action.key.clone(), !action.folded);
+        let folded = &mut self.workspace_mut().project.tasks_folded;
+        if !folded.remove(&action.key) {
+            folded.insert(action.key.clone());
+        }
         let (items, _) = self.tasks_menu_items(cx);
         self.replace_menu_items(items, cx);
     }
@@ -358,7 +362,6 @@ impl WindowView {
         let mut items = vec![Some(MenuItem::new(rust_i18n::t!("tasks.add"), Box::new(AddTask), true, cx))];
         let mut last = None;
         let project = &self.workspace().project;
-        let collapse_files = cx.global::<AppConfig>().0.task_files_collapsed;
         let listed = project.tasks.as_ref();
         for (dir, source) in
             listed.into_iter().flat_map(|(dir, sources)| sources.iter().map(move |source| (dir, source)))
@@ -373,18 +376,14 @@ impl WindowView {
                 (_, Ok(rel)) => rel.display().to_string(),
                 (_, Err(_)) => display_dir(&source.file),
             };
-            let custom = is_custom(source);
-            let key = group_key(source);
-            let folded = project
-                .tasks_folded
-                .get(&key)
-                .copied()
-                .unwrap_or_else(|| task_folded_by_default(source, collapse_files, project.tasks_last.as_ref()));
+            let folded = project.tasks_folded.contains(&group_key(source));
             let count = Some(source.tasks.len().to_string().into());
-            items.push(Some(MenuItem::group(label, count, folded, Box::new(ToggleTaskGroup { key, folded }))));
+            let toggle = ToggleTaskGroup { key: group_key(source) };
+            items.push(Some(MenuItem::group(label, count, folded, Box::new(toggle))));
             if folded {
                 continue;
             }
+            let custom = is_custom(source);
             if let Some(ix) = source.tasks.iter().position(|task| project.tasks_last.as_ref() == Some(&task.command))
                 && last.is_none()
             {
@@ -448,24 +447,5 @@ mod tests {
         assert!(is_task_file(Path::new("pnpm-lock.yaml")));
         assert!(!is_task_file(Path::new("/a/Makefile.bak")));
         assert!(!is_task_file(Path::new("/a/src/main.rs")));
-    }
-
-    /// 只收 Makefile 和 package.json，上次跑的命令所在的那组不收，选得中它。
-    #[test]
-    fn folds_only_command_files_without_the_last_task() {
-        let source = |kind| TaskSource {
-            kind,
-            file: "/a/Makefile".into(),
-            project: None,
-            tasks: vec![runode_protocol::TaskEntry { name: "t".into(), command: "make t".into(), description: None }],
-            truncated: false,
-        };
-        let last = "make t".to_owned();
-        assert!(task_folded_by_default(&source(TaskSourceKind::Makefile), true, None));
-        assert!(task_folded_by_default(&source(TaskSourceKind::PackageJson), true, None));
-        assert!(!task_folded_by_default(&source(TaskSourceKind::Makefile), true, Some(&last)));
-        assert!(!task_folded_by_default(&source(TaskSourceKind::Makefile), false, None));
-        assert!(!task_folded_by_default(&source(TaskSourceKind::Custom), true, None));
-        assert!(!task_folded_by_default(&source(TaskSourceKind::Unknown), true, None));
     }
 }

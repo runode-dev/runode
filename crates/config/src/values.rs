@@ -55,7 +55,7 @@ impl Config {
                 }
                 .into(),
             ],
-            "task-files-collapsed" => bool(self.task_files_collapsed),
+            "task-split-fold" => bool(self.task_split_fold),
             "dictation-model" => vec![self.dictation_model.name().into()],
             // 一行写全，设置页的一个输入框改得了。
             "dictation-words" => {

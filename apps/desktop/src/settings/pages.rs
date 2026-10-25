@@ -193,7 +193,7 @@ impl Page {
                 Row("vt-window-resize-allowed", Switch),
                 Section("tasks"),
                 Row("task-placement", Choice(&["right", "down", "tab"])),
-                Row("task-files-collapsed", Switch),
+                Row("task-split-fold", Switch),
             ],
             Self::Files => {
                 &[Row("file-tree-preview-click", Choice(&["single", "double"])), Row("preview-font-size", Text(80.))]

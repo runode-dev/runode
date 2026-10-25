@@ -505,7 +505,7 @@ settings:
     file_tree_preview_click: 在預覽欄打開檔案
     preview_font_size: 預覽欄字級
     task_placement: 執行命令
-    task_files_collapsed: 收起 Makefile 和 package.json 的命令
+    task_split_fold: 摺疊執行命令的分割畫面
     dictation_model: 辨識模型
     dictation_words: 熱詞
     dictation_cloud: 雲端辨識
@@ -572,7 +572,7 @@ settings:
     file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
     preview_font_size: 單位是點。
     task_placement: 標題列命令選單裡點了一條命令時，在哪開終端執行它。
-    task_files_collapsed: 命令選單打開時先收著，點標題展開；有上次執行過的命令的那組不收。
+    task_split_fold: 從命令選單執行的命令在右邊或下邊分割畫面時，分割畫面摺疊成標題列，不佔地方，點標題列展開。只在卡片樣式的視窗裡起作用。
     dictation_model: 兩個都在這台電腦上離線執行。SenseVoice 快，帶標點；FireRedASR2 中文最準，但更大、更慢，不加標點。
     dictation_words: "要認準的專案名、專業詞，用逗號隔開。離線模型用不上，交給雲端辨識和潤飾時才用。"
     dictation_cloud: "離線模型沒下載或辨識出錯時用。錄音會上傳到選的服務。"

@@ -91,8 +91,8 @@ pub struct Config {
     /// 预览栏的字号。
     pub preview_font_size: f32,
     pub task_placement: TaskPlacement,
-    /// 命令菜单里 Makefile、package.json 的分组一开始收着。
-    pub task_files_collapsed: bool,
+    /// 命令菜单开出的跑命令的分屏一开始折叠着。
+    pub task_split_fold: bool,
     pub dictation_model: SpeechModel,
     /// 热词：交给云端识别时帮它认出专有名词，润色时也交给大模型。
     pub dictation_words: Vec<String>,
@@ -214,7 +214,7 @@ impl Default for Config {
             file_tree_preview_click: PreviewClick::Single,
             preview_font_size: 13.,
             task_placement: TaskPlacement::Right,
-            task_files_collapsed: true,
+            task_split_fold: true,
             dictation_model: SpeechModel::SenseVoice,
             dictation_words: Vec::new(),
             dictation_cloud: DictationCloud::None,

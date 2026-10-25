@@ -38,7 +38,7 @@ pub const KEYS: &[&[&str]] = &[
         "status-bar-hidden",
     ],
     &["file-tree-preview-click", "preview-font-size"],
-    &["task-placement", "task-files-collapsed"],
+    &["task-placement", "task-split-fold"],
     &[
         "dictation-model",
         "dictation-words",
@@ -252,8 +252,8 @@ impl Config {
                     _ => return Err("expected right, down or tab".into()),
                 };
             }
-            "task-files-collapsed" => {
-                self.task_files_collapsed = or_default(empty, defaults.task_files_collapsed, || parse_bool(value))?;
+            "task-split-fold" => {
+                self.task_split_fold = or_default(empty, defaults.task_split_fold, || parse_bool(value))?;
             }
             "dictation-model" => {
                 self.dictation_model = match value {
@@ -964,9 +964,9 @@ unknown-key = whatever
     }
 
     #[test]
-    fn task_files_collapsed_defaults_to_true() {
-        assert!(Config::default().task_files_collapsed);
-        assert!(!load(&["task-files-collapsed = false"]).task_files_collapsed);
+    fn task_split_fold_defaults_to_true() {
+        assert!(Config::default().task_split_fold);
+        assert!(!load(&["task-split-fold = false"]).task_split_fold);
     }
 
     #[test]
