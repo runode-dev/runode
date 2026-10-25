@@ -312,6 +312,8 @@ impl WindowView {
                     |_, (), _, _| {},
                 )
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full(),
             )
             // 蒙层没有鼠标处理，点击照样落到下面的终端上。
@@ -344,6 +346,8 @@ impl WindowView {
                 .child(
                     canvas(move |bounds, _, _| _ = layout.borrow_mut().panes.insert(id, bounds), |_, (), _, _| {})
                         .absolute()
+                        .top_0()
+                        .left_0()
                         .size_full(),
                 )
                 .into_any_element();
