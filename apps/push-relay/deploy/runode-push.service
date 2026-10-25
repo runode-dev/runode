@@ -1,0 +1,32 @@
+[Unit]
+Description=runode push relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/runode-push
+# RELAY_HANDLE_KEYS、APNS_KEY_ID、APNS_TEAM_ID 写在这里，文件只给 root 读。
+EnvironmentFile=/etc/runode-push/env
+# .p8 交给 systemd 转交，服务的用户是临时分配的，读不到 /etc 下的原文件也没关系。
+LoadCredential=apns.p8:/etc/runode-push/AuthKey.p8
+Environment=APNS_KEY_FILE=%d/apns.p8
+Environment=RELAY_LISTEN=127.0.0.1:8080
+Environment=RELAY_TRUST_PROXY=1
+DynamicUser=yes
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

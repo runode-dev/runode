@@ -1,8 +1,9 @@
 [workspace]
 resolver = "3"
-# apps/ 下不全是 Rust 项目（以后的手机端是各平台自己的工程），桌面 app 单独列出。
-members = ["crates/*", "apps/desktop"]
-# 不带 -p 的 cargo 命令覆盖全部 crate。
+# apps/ 下不全是 Rust 项目（手机端是各平台自己的工程），Rust 的 app 单独列出。
+members = ["crates/*", "apps/desktop", "apps/push-relay"]
+# 不带 -p 的 cargo 命令覆盖全部 crate，推送中转除外：它只在服务器上跑，开发桌面时不用跟着编 axum；
+# 要编它用 `-p runode-push` 或 `--workspace`。
 default-members = ["crates/*", "apps/desktop"]
 # vendor 下的依赖不是本 workspace 的成员；不排除的话，根目录下的 path 依赖
 # 会被自动收编为本 workspace 的成员。
@@ -105,6 +106,10 @@ ring = "0.17"
 # 远程访问跨网络时的连接：iroh 按公钥拨号，先打洞直连，打不通走中继。密码学后端和 rustls 一样用 ring。
 iroh = { version = "1.4", default-features = false, features = ["tls-ring", "portmapper", "fast-apple-datapath"] }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "macros", "time"] }
+# 推送中转的 HTTP 服务和发给 APNs 的 HTTP/2 客户端；TLS 用上面那份 ring 后端的 rustls。
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+reqwest = { version = "0.13", default-features = false, features = ["http2", "rustls-no-provider"] }
+tower = { version = "0.5", features = ["util"] }
 # 看板的库（MIT）：任务和定时存在一个 SQLite 文件里。编进 SQLite 的源码（bundled），不依赖系统的
 # libsqlite3，单独跑的宿主在没装它的 Linux 上也能用。只许 runode-todo 直接依赖，见 deny.toml。
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }

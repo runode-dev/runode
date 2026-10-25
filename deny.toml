@@ -1,7 +1,8 @@
 # cargo-deny 的配置，CI 里只跑 `cargo deny check bans`，用来守住 crate 的分层：
 # 界面框架只许 app（runode）和它的部件库（runode-ui）直接依赖，终端仿真和 PTY 只许 runode-terminal 直接依赖，
 # 语法高亮只许 runode-preview 直接依赖，终端宿主只许 app 直接依赖，TLS 和密码学只许
-# runode-remote 直接依赖，SQLite 只许 runode-todo 直接依赖，终端会话（runode-terminal）只许 app 和宿主直接依赖。
+# runode-remote 和推送中转 runode-push 直接依赖，SQLite 只许 runode-todo 直接依赖，
+# 终端会话（runode-terminal）只许 app 和宿主直接依赖。
 # `wrappers` 列出的 crate 可以直接依赖被禁的 crate，其他 crate 直接依赖时报错；经由这些
 # crate 间接用到不算违规。
 
@@ -38,7 +39,7 @@ deny = [
     { crate = "syntect", wrappers = ["runode-preview", "two-face"], reason = "语法高亮只在 runode-preview 里，对外给与界面无关的高亮结果" },
     { crate = "two-face", wrappers = ["runode-preview"], reason = "语法高亮只在 runode-preview 里，对外给与界面无关的高亮结果" },
     # ureq 是 sherpa-onnx-sys 的构建脚本下载预编译库用的，只在构建时跑，不进 app。
-    { crate = "rustls", wrappers = ["runode-remote", "iroh", "iroh-dns", "iroh-relay", "n0-dns-resolver", "noq", "noq-proto", "hyper-rustls", "reqwest", "rustls-platform-verifier", "tokio-rustls", "ureq"], reason = "远程访问的 TLS 只在 runode-remote 里（连同它用的 iroh），别的 crate 经它的接口用" },
+    { crate = "rustls", wrappers = ["runode-remote", "runode-push", "iroh", "iroh-dns", "iroh-relay", "n0-dns-resolver", "noq", "noq-proto", "hyper-rustls", "reqwest", "rustls-platform-verifier", "tokio-rustls", "ureq"], reason = "远程访问的 TLS 只在 runode-remote 里（连同它用的 iroh），推送中转 runode-push 自己连 APNs；别的 crate 经它们的接口用" },
     { crate = "iroh", wrappers = ["runode-remote"], reason = "远程访问跨网络的连接只在 runode-remote 里" },
     { crate = "objc2-screen-capture-kit", wrappers = ["runode-screen"], reason = "远程桌面的屏幕采集只在 runode-screen 里" },
     { crate = "objc2-video-toolbox", wrappers = ["runode-screen"], reason = "远程桌面的视频编码只在 runode-screen 里" },
@@ -46,5 +47,5 @@ deny = [
     { crate = "sherpa-onnx", wrappers = ["runode-speech"], reason = "语音识别只在 runode-speech 里，别的 crate 经它的 Recognizer 用" },
     { crate = "rcgen", wrappers = ["runode-remote"], reason = "远程访问的自签证书只在 runode-remote 里生成" },
     # rustls、它的证书校验（rustls-webpki）和 rcgen 拿 ring 当密码学后端，也直接依赖它。
-    { crate = "ring", wrappers = ["runode-remote", "rustls", "rustls-webpki", "rcgen", "noq-proto", "tokio-websockets"], reason = "远程访问的签名校验和随机数只在 runode-remote 里（连同它用的 iroh）" },
+    { crate = "ring", wrappers = ["runode-remote", "runode-push", "rustls", "rustls-webpki", "rcgen", "noq-proto", "tokio-websockets"], reason = "远程访问的签名校验和随机数只在 runode-remote 里（连同它用的 iroh），推送中转 runode-push 自己封句柄、签 APNs 的 JWT" },
 ]

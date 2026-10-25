@@ -1,6 +1,6 @@
 # Crate 分层
 
-代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（Rust 的 `apps/desktop` 和 Swift 的 `apps/ios`），给它们用的库放在 `crates/` 下。`apps/` 下不全是 Rust 项目，新加的 Rust app 要在根 `Cargo.toml` 的 `members` 和 `default-members` 里列出。包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义；`apps/` 下的包名等于可执行文件名，所以桌面 app 的包名是 `runode`。
+代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（Rust 的 `apps/desktop`、`apps/push-relay` 和 Swift 的 `apps/ios`），给它们用的库放在 `crates/` 下。`apps/` 下不全是 Rust 项目，新加的 Rust app 要在根 `Cargo.toml` 的 `members` 和 `default-members` 里列出；只在服务器上跑的推送中转 `push-relay` 只列在 `members`，开发桌面时不用跟着编它的 HTTP 服务，`make` 的检查、测试和 clippy 带 `--workspace`，照样管它。包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义；`apps/` 下的包名等于可执行文件名，所以桌面 app 的包名是 `runode`。
 
 根目录的 `skills/` 放教 agent 用 runode 的 skill：`skills/runode/SKILL.md` 是入口，不是每次都用得上的细节放在 `references/<主题>.md`，由 `SKILL.md` 链过去，skill 下只能放这两种文件。加 skill 或 reference 只加文件，不改代码（`cli` 的测试核对元数据和链接）。用户用 `npx skills add runode-dev/runode --skill runode -g` 从 GitHub 上的 main 装、用 `npx skills update` 更新，runode 自己不装 skill，所以只改 skill 推到 main 就到了用户那里，不用发版。
 
@@ -25,6 +25,7 @@
 | `ui` | 桌面几处界面共用的 GPUI 部件（照 shadcn 起名，variant、size 选样子）、全 app 一份的主题 `Theme`（只能在 render 和 paint 里读）、所有图标、界面字号和无障碍的共用写法；界面文字由调用方翻译好交进来 | types、paths、GPUI、tracing、unicode-segmentation、objc2-app-kit、objc2-foundation |
 | `cli` | 命令行前端（`runode list`、`send`、`todo` 等），经宿主的 Unix socket（Windows 上是 AF_UNIX）按 protocol 说话；`remote`、`service` 不经宿主 | protocol、types、paths、config、remote、autostart、todo、qrcode、libc、uds_windows（Windows） |
 | `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档；带子命令时交给 `cli`，带 `--host` 时是单独的宿主进程，带 `--screen` 时是远程桌面的采集进程（`screen_process`，宿主所在的进程按需拉起，崩了不连累终端会话），带 `--speech` 时是语音输入的识别子进程（`dictation::worker`，本机录的音和手机交来的录音都交给它，同样为了崩了不连累窗口和终端会话，闲了就退出、把模型占的内存还给系统），和命令行、宿主是同一个可执行文件；Windows 上它是界面程序，命令行另由同一个包里的控制台程序 `rn` 跑；远程访问的监听开在宿主所在的进程里（`remote_access`） | 以上全部、GPUI |
+| `push-relay` | 官方 iOS App 的推送中转（`runode-push`，跑在 push.runode.dev）：把手机交来的 device token 封成句柄（`handle`），电脑交回句柄时解开、按句柄限频、签 JWT 发给 APNs（`apns`）；不存状态，部署文件在它的 `deploy` 目录 | protocol、axum、tokio、reqwest、rustls、ring、serde_json、tracing、tracing-subscriber |
 
 终端仿真用的 libghostty-vt 不在 `crates/` 下，取自子模块 `vendor/libghostty-rs`。它是 runode-dev 对 Uzaaft 的 libghostty-rs（MIT 或 Apache-2.0）的 fork，runode 用它的 `main` 分支，里面有安全封装 `libghostty-vt` 和 C 接口绑定 `libghostty-vt-sys`；绑定由 bindgen 生成后提交在那边，重新生成时在 fork 的一份单独克隆里设 `GHOSTTY_SOURCE_DIR` 指向 runode 的 `vendor/ghostty`，跑 `cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings`；别在子模块里跑，`vendor/rustfmt.toml` 关掉了 vendor 下的格式化，生成的绑定不会排版。它自成一个 workspace，根 `Cargo.toml` 按路径依赖它，`vendor` 在 `exclude` 里，所以本仓库的 lint 不管它。`.cargo/config.toml` 设的 `GHOSTTY_SOURCE_DIR` 让 `libghostty-vt-sys` 的构建脚本从 `vendor/ghostty` 编出库，不去网上拉。runode 要用而上游还没有的接口加在 `main` 上，一样东西一个提交，好在以后变基；上游已有同样能力、只是名字或形状不同的，改 runode 去适应，不改 fork。
 
@@ -34,7 +35,7 @@ GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），只有它的
 
 不变量：
 
-- 只有 `desktop` 和它的部件库 `ui` 能依赖 GPUI（`gpui-pre`；`gpui-pre-platform` 只有 `desktop`）；`libghostty-vt` 和 portable-pty 只有 `terminal` 能直接依赖，`libghostty-vt-sys` 只有 `libghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen、ring 和 iroh 只有 `remote` 能直接依赖（iroh 自己的 crate 用 rustls、ring 不算）；rusqlite 只有 `todo` 能直接依赖；sherpa-onnx 只有 `speech` 能直接依赖；ScreenCaptureKit 和 VideoToolbox 的绑定只有 `screen` 能直接依赖；只有 `desktop` 能直接依赖 `host`，只有 `desktop` 和 `host` 能直接依赖 `terminal`。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`；加 crate 时相应地更新它的 `wrappers` 和上面这张表。
+- 只有 `desktop` 和它的部件库 `ui` 能依赖 GPUI（`gpui-pre`；`gpui-pre-platform` 只有 `desktop`）；`libghostty-vt` 和 portable-pty 只有 `terminal` 能直接依赖，`libghostty-vt-sys` 只有 `libghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen、ring 和 iroh 只有 `remote` 能直接依赖（iroh 自己的 crate 用 rustls、ring 不算），推送中转 `push-relay` 自己连 APNs、封句柄，也直接用 rustls 和 ring；rusqlite 只有 `todo` 能直接依赖；sherpa-onnx 只有 `speech` 能直接依赖；ScreenCaptureKit 和 VideoToolbox 的绑定只有 `screen` 能直接依赖；只有 `desktop` 能直接依赖 `host`，只有 `desktop` 和 `host` 能直接依赖 `terminal`。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`；加 crate 时相应地更新它的 `wrappers` 和上面这张表。
 - `types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git`、`preview`、`update` 不依赖任何 runode crate。
 - `protocol` 只依赖 `types`，不碰终端仿真、PTY 和界面。消息里用到的类型，别的 crate 也要用的放 `types`，只在协议里用的（帧、连接方式等）放 `protocol` 自己；`protocol` 把消息里用到的 `types` 类型转出去，前端照旧从 `protocol` 引。
 - `agent` 只依赖 `types`，不碰终端仿真、PTY 和界面：屏幕文字、前台进程组由 `terminal` 读好了交给它，用户规则目录由调用方从 `paths` 取来传进去。
@@ -43,7 +44,7 @@ GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），只有它的
 - 宿主不管窗口：要界面办的请求包成 `HostMsg::UiRequest` 转给 `ClientKind::Desktop` 的连接，桌面用 `ClientMsg::UiReply` 回话。没有桌面连着时，布局、开终端、新建和改名工作区由宿主照记着的布局自己办（`host` 的 `workspaces`）。会话里的程序读写剪贴板（OSC 52）、要求改窗口尺寸（CSI 8 t）也是宿主那份 VT 认出来、交给桌面决定办不办，宿主自己不碰剪贴板，也不因此改会话尺寸。
 - `cli` 只经 socket 和宿主说话，不依赖 `host`、`terminal` 和 GPUI。`deny.toml` 连测试依赖一起查，所以它的测试对着 `tests/common` 里按 protocol 回话的假宿主跑。宿主给每个 shell 设 `RUNODE_SESSION`、`RUNODE_SOCKET`，桌面另设 `RUNODE_BIN`，命令行据此找到开它的那个 app 和自己所在的会话。
 - 命令行的命令或选项一改（加、删、改名、改写法或说明），同一个提交里改齐两处：`cli` 的用法说明（`help` 模块的总览 `OVERVIEW` 和 `PAGES` 里那条命令的页）、教 agent 用 runode 的 skill（`skills/runode/`）。只给别的程序调的命令 skill 里不写。skill 没有测试守着，要自己记得改。
-- `remote` 不依赖 `host`：过了门禁的连接经调用方给的闭包（`Connect`）接到宿主上，手机发来的控制帧由它筛过才转。监听开在宿主所在的进程里，app 连着单独跑的宿主时不开；只有占着监听的进程推通知。命令行和监听方之间只经数据目录里的文件，不经宿主。线上格式以 `protocol` 的 `remote` 模块为准，`crates/protocol/tests/fixtures/remote` 里的样例手机端的测试也读，改格式要两边一起改。
+- `remote` 不依赖 `host`：过了门禁的连接经调用方给的闭包（`Connect`）接到宿主上，手机发来的控制帧由它筛过才转。监听开在宿主所在的进程里，app 连着单独跑的宿主时不开；只有占着监听的进程推通知。命令行和监听方之间只经数据目录里的文件，不经宿主。线上格式以 `protocol` 的 `remote` 模块为准，`crates/protocol/tests/fixtures/remote` 里的样例手机端的测试也读，改格式要两边一起改。推送中转的请求体（`protocol` 的 `push` 模块里的 `Relay*`）同理，改了同一个提交里改 `push-relay` 和手机端。
 - 家目录和 runode 自己的配置、数据、缓存路径一律经 `paths` 取，不在别处读 HOME 或自己拼路径；别的程序的文件（比如 shell 的历史）按那个程序的规矩找。
 - 新依赖先加进根 `Cargo.toml` 的 `[workspace.dependencies]`，各 crate 用 `xxx.workspace = true`；lint 规则在 `[workspace.lints]`，每个 crate 都写 `[lints] workspace = true`。
 - 只经 crate 公开接口测的黑盒测试放在和 `src` 同级的 `tests/` 目录，按主题分文件，几个文件共用的辅助放 `tests/common/mod.rs`；测私有实现的单元测试留在 `src` 里的 `#[cfg(test)]` 模块。不为了搬测试把内部的东西改成 pub。`desktop` 是二进制 crate，`tests/` 引用不到它，测试都留在 `src` 里。

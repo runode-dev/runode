@@ -1,0 +1,4 @@
+# Caddy 自己申请和续期证书。别开请求体日志：通知内容和句柄都在请求体里。
+push.runode.dev {
+	reverse_proxy 127.0.0.1:8080
+}
