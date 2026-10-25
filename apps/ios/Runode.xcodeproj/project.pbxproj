@@ -220,7 +220,7 @@
 			outputPaths = (
 				"$(DERIVED_FILE_DIR)/static-frameworks-removed",
 			);
-			runOnlyForDeploymentPostprocessing = 0;
+			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/sh;
 			shellScript = "# onnxruntime 和 sherpa-onnx 是装在 .framework 里的静态库，已链进主程序；SwiftPM 仍把它们拷进\n# Frameworks，App Store 校验读不出这份拷贝的最低系统版本，拒收整个包（ITMS-90208）。\nset -e\nrm -rf \"${SCRIPT_INPUT_FILE_0}\" \"${SCRIPT_INPUT_FILE_1}\"\ntouch \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 		};
