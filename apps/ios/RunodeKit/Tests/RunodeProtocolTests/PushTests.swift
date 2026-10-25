@@ -61,6 +61,18 @@ private let sampleSession = "0123456789abcdef0011223344556677"
         }
     }
 
+    /// 官方 App 向中转服务换句柄的请求体和回话。
+    @Test func relayRegistrationMatchesTheSamples() throws {
+        let register = RelayRegister(
+            env: .production, token: "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011",
+            machine: sampleMachine.uuidString)
+        #expect(try sameJSON(JSONEncoder().encode(register), PushSamples.data("relay_register.json")))
+        let handle = try JSONDecoder().decode(RelayHandle.self, from: PushSamples.data("relay_handle.json"))
+        #expect(handle.handle == "q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ-aE5uR_oTiBlM")
+        let error = try JSONDecoder().decode(PushError.self, from: PushSamples.data("push_error.json"))
+        #expect(error.reason == "BadDeviceToken")
+    }
+
     @Test func otherNotificationsHaveNoSession() {
         #expect(SessionLink(userInfo: [:]) == nil)
         #expect(SessionLink(userInfo: ["machine": "not-a-uuid", "session": sampleSession]) == nil)

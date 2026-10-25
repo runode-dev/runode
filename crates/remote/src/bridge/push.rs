@@ -1,9 +1,13 @@
 //! 手机经远程访问登记推送（`ClientMsg::PushRegister`，见 `runode_protocol::push`）：不转给宿主，在这里
-//! 按过了门禁的这台设备办。APNs device token 记进设备表（`devices::set_push`），手机断开后照样推得到，
+//! 按过了门禁的这台设备办。推送的凭据记进设备表（`devices::set_push`），手机断开后照样推得到，
 //! 推送由 `crate::push` 发。办好回 `Done`，办不了回带 `req` 的 `Error`。
 
 use runode_paths::Dirs;
-use runode_protocol::{ClientMsg, HostMsg, push::ApnsEnv, remote::DeviceId};
+use runode_protocol::{
+    ClientMsg, HostMsg,
+    push::{ApnsEnv, MAX_TOKEN_LEN},
+    remote::DeviceId,
+};
 
 use super::frames::LocalRequests;
 use crate::{
@@ -11,8 +15,6 @@ use crate::{
     now_unix,
 };
 
-/// token 最多这么多个十六进制数字。APNs 的 token 现在是 32 字节，留足余地。
-const MAX_TOKEN_LEN: usize = 512;
 /// bundle id、电脑的 UUID 和名字最多这么多字节，免得设备表被撑大。
 const MAX_FIELD_LEN: usize = 256;
 
@@ -76,10 +78,11 @@ impl PushRequests<'_> {
     }
 }
 
-/// token 是 1 到 `MAX_TOKEN_LEN` 个十六进制数字。
+/// token 是 1 到 `MAX_TOKEN_LEN` 个 base64url 字母：device token 的十六进制数字和中转的句柄都在里面。
 fn check_token(token: &str) -> Result<(), String> {
-    if token.is_empty() || token.len() > MAX_TOKEN_LEN || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!("a push token is 1 to {MAX_TOKEN_LEN} hexadecimal digits"));
+    let valid = |b: u8| b.is_ascii_alphanumeric() || b == b'-' || b == b'_';
+    if token.is_empty() || token.len() > MAX_TOKEN_LEN || !token.bytes().all(valid) {
+        return Err(format!("a push token is 1 to {MAX_TOKEN_LEN} base64url characters"));
     }
     Ok(())
 }

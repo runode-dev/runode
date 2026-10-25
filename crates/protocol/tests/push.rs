@@ -7,8 +7,8 @@ use std::path::Path;
 use runode_protocol::{
     SessionId,
     push::{
-        ApnsEnv, BLOCKED_LINES, LINE_LIMIT, MAX_APNS_PAYLOAD, Notification, NotificationKind, PushError, RELAY_NOTIFY,
-        RELAY_NOTIFY_V3, RelayNotify, TEXT_LIMIT, notify_payload, preview_lines,
+        ApnsEnv, BLOCKED_LINES, LINE_LIMIT, MAX_APNS_PAYLOAD, Notification, PushError, RELAY_VERSION, RelayHandle,
+        RelayNotify, RelayRegister, TEXT_LIMIT, notify_payload, preview_lines,
     },
 };
 use runode_types::{
@@ -20,6 +20,7 @@ use serde_json::Value;
 
 const NOW: u64 = 1_760_000_000;
 const TOKEN: &str = "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011";
+const HANDLE: &str = "q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ-aE5uR_oTiBlM";
 const MACHINE: &str = "6F9619FF-8B86-D011-B42D-00C04FC964FF";
 const SESSION: SessionId = SessionId(0x0123_4567_89ab_cdef_0011_2233_4455_6677);
 
@@ -76,24 +77,25 @@ fn unnamed_agents_and_empty_screens_have_their_own_shape() {
 
 #[test]
 fn relay_requests_match_the_fixtures() {
-    let notify = RelayNotify::new(ApnsEnv::Production, TOKEN.into(), &notification(), NOW).unwrap();
+    let notify = RelayNotify::new(HANDLE.into(), &notification(), NOW).unwrap();
     assert_eq!(notify.expiration, NOW + 1800);
     matches("relay_notify.json", &notify);
+    let register =
+        RelayRegister { v: RELAY_VERSION, env: ApnsEnv::Production, token: TOKEN.into(), machine: MACHINE.into() };
+    matches("relay_register.json", &register);
+    matches("relay_handle.json", &RelayHandle { handle: HANDLE.into() });
     matches("push_error.json", &PushError { reason: "BadDeviceToken".into() });
 }
 
-/// 任务做完的通知：标题换成任务做完的键、不带参数，副标题同等回答的；没有正文。中转请求体带 `kind`、
-/// `v` 是 3，发到 v3 的接口；等回答的仍是 v2，请求体里没有 `kind`。
+/// 任务做完的通知：标题换成任务做完的键、不带参数，副标题同等回答的；没有正文。中转请求体带 `kind`，
+/// 等回答的不带。
 #[test]
 fn todo_done_notifications_match_the_fixtures() {
     let done = Notification::todo_done(MACHINE.into(), "Ethan 的 MacBook Pro", SESSION, "给设置页加暗色模式");
     assert_eq!(String::from_utf8(notify_payload(&done).unwrap()).unwrap(), fixture("apns_todo_done.json"));
     assert_eq!(done.collapse_id(), "0123456789abcdef0011223344556677");
-    let notify = RelayNotify::new(ApnsEnv::Production, TOKEN.into(), &done, NOW).unwrap();
+    let notify = RelayNotify::new(HANDLE.into(), &done, NOW).unwrap();
     matches("relay_notify_todo_done.json", &notify);
-    assert_eq!(done.kind.relay(), (3, RELAY_NOTIFY_V3));
-    assert_eq!(NotificationKind::Blocked.relay(), (2, RELAY_NOTIFY));
-    assert_eq!((RELAY_NOTIFY, RELAY_NOTIFY_V3), ("/v2/notify", "/v3/notify"));
 
     let long = Notification::todo_done("m".into(), &"名".repeat(60), SESSION, &"长".repeat(60));
     assert_eq!((long.title.chars().count(), long.machine_name.chars().count()), (TEXT_LIMIT, TEXT_LIMIT));
@@ -104,7 +106,7 @@ fn todo_done_notifications_match_the_fixtures() {
 fn relay_requests_carry_fitted_content() {
     let mut notification = notification();
     notification.lines = (0..3).map(|i| format!("{i}{}", "x".repeat(1500))).collect();
-    let notify = RelayNotify::new(ApnsEnv::Production, TOKEN.into(), &notification, NOW).unwrap();
+    let notify = RelayNotify::new(HANDLE.into(), &notification, NOW).unwrap();
     let payload: Value = serde_json::from_slice(&notify_payload(&notification).unwrap()).unwrap();
     assert_eq!(notify.notification.lines.join("\n"), payload["aps"]["alert"]["body"].as_str().unwrap());
     assert_eq!(notify.notification.lines.len(), 2);

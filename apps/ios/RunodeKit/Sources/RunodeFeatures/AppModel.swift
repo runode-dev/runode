@@ -41,6 +41,8 @@ public struct AppDependencies {
     public var notifications: (any PushNotifications)?
     /// 登记推送时报给电脑的 App 身份，App 入口从 Info.plist 读；为空时不登记推送。
     public var pushIdentity: PushIdentity?
+    /// 官方 App 换推送句柄的中转服务；为空时直接把 device token 交给电脑。
+    public var pushRelay: (any PushRelay)?
     /// 连上一台电脑的远程桌面；为空时没有远程桌面的入口（测试、演示模式）。
     public var openScreen: ScreenOpener?
     /// 远程桌面里解锁电脑用的登录密码存在哪里；为空时每次都要用户输。
@@ -68,6 +70,7 @@ public struct AppDependencies {
         self.themes = themes
         notifications = nil
         pushIdentity = nil
+        pushRelay = nil
         openScreen = nil
         unlockPasswords = nil
         openSpeech = nil
@@ -127,7 +130,7 @@ public final class AppModel {
         let settings = SettingsModel(store: dependencies.preferences, systemDeviceName: dependencies.deviceName)
         self.settings = settings
         push = PushRegistration(
-            system: dependencies.notifications, identity: dependencies.pushIdentity,
+            system: dependencies.notifications, identity: dependencies.pushIdentity, relay: dependencies.pushRelay,
             enabled: settings.preferences.alertsBlockedAgents)
         dictation = DictationModel(
             root: dependencies.speechModels ?? FileManager.default.temporaryDirectory.appending(path: "speech-models"),

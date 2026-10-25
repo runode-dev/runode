@@ -23,5 +23,7 @@
 	</array>
 	<key>RunodeAPSEnvironment</key>
 	<string>$(RUNODE_APS_ENVIRONMENT)</string>
+	<key>RunodePushRelay</key>
+	<string>$(RUNODE_PUSH_RELAY)</string>
 </dict>
 </plist>

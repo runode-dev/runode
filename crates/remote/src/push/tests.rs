@@ -195,10 +195,10 @@ fn notifications_through_the_relay() {
     let before = crate::now_unix();
     sender.notify(vec![target(RELAY_PROD, &["Proceed?"])]);
     let requests = scratch.wait_for(1);
-    assert_eq!(url(&requests[0]), "https://relay.example/v2/notify");
+    assert_eq!(url(&requests[0]), "https://relay.example/v1/notify");
     let notify = body(&requests[0]);
-    assert_eq!((notify["v"].as_u64(), notify["env"].as_str()), (Some(2), Some("production")));
-    assert_eq!(notify["token"], TOKEN);
+    assert_eq!(notify["v"].as_u64(), Some(1));
+    assert_eq!(notify["handle"], TOKEN);
     assert_eq!(notify["notification"]["lines"], serde_json::json!(["Proceed?"]));
     assert_eq!(notify["notification"]["session"], SESSION.to_string());
     let expiration = notify["expiration"].as_u64().unwrap();
@@ -274,26 +274,44 @@ fn a_missing_key_file_is_read_again_later() {
     assert_eq!(body(&requests[1])["aps"]["alert"]["body"], "b");
 }
 
-/// token 不认时换另一个环境再发，成了把登记的环境改过来；两边都不认就删掉登记。
+/// 直连时 token 不认就换另一个环境再发，成了把登记的环境改过来；两边都不认就删掉登记。
 #[test]
 fn bad_tokens_try_the_other_environment() {
     let scratch = Scratch::new("badtoken");
-    scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
+    scratch.register(ApnsEnv::Production, "dev.example.app");
+    let (key_file, _) = test_key(&scratch.root);
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, Some("https://relay.example".into()));
-    scratch.rule("/v2/notify", r#"HTTP/2 400\r\n\r\n{"reason":"BadDeviceToken"}"#);
-    sender.notify(vec![target(RELAY_PROD, &[])]);
+    let key = ApnsKey { key_file, key_id: "K".into(), team_id: "T".into(), bundle: "dev.example.app".into() };
+    sender.settings(Some(key), None);
+    let route = Route { env: ApnsEnv::Production, via: Via::Direct };
+    scratch.rule("/3/device", r#"HTTP/2 400\r\n\r\n{"reason":"BadDeviceToken"}"#);
+    sender.notify(vec![target(route, &[])]);
     let requests = scratch.wait_for(2);
-    assert_eq!(body(&requests[0])["env"], "production");
-    assert_eq!(body(&requests[1])["env"], "development");
+    assert_eq!(url(&requests[0]), format!("https://api.push.apple.com/3/device/{TOKEN}"));
+    assert_eq!(url(&requests[1]), format!("https://api.sandbox.push.apple.com/3/device/{TOKEN}"));
     // 发送线程拿到响应之后才改登记，晚于假 curl 记下请求。
     wait_until("the registration switches to development", || scratch.registrations()[0].env == ApnsEnv::Development);
 
-    scratch.rule("/v2/notify", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
-    scratch.rule("/v2/notify", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
-    sender.notify(vec![target(RELAY_PROD, &[])]);
+    scratch.rule("/3/device", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
+    scratch.rule("/3/device", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
+    sender.notify(vec![target(route, &[])]);
     scratch.wait_for(4);
     wait_until("the registration is dropped", || scratch.registrations().is_empty());
+}
+
+/// 中转不认句柄时不换环境（环境在句柄里），直接删掉登记。
+#[test]
+fn bad_relay_handles_are_dropped() {
+    let scratch = Scratch::new("badhandle");
+    scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
+    let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
+    sender.settings(None, Some("https://relay.example".into()));
+    scratch.rule("/v1/notify", r#"HTTP/2 400\r\n\r\n{"reason":"BadDeviceToken"}"#);
+    sender.notify(vec![target(RELAY_PROD, &[])]);
+    scratch.wait_for(1);
+    wait_until("the registration is dropped", || scratch.registrations().is_empty());
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(scratch.requests().len(), 1);
 }
 
 /// 连不上时退避重试。
@@ -302,7 +320,7 @@ fn failures_are_retried() {
     let scratch = Scratch::new("retry");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     sender.settings(None, Some("https://relay.example".into()));
-    scratch.rule("/v2/notify", "FAIL");
+    scratch.rule("/v1/notify", "FAIL");
     let started = Instant::now();
     sender.notify(vec![target(RELAY_PROD, &[])]);
     let requests = scratch.wait_for(2);
@@ -317,7 +335,7 @@ fn an_absurd_retry_after_gives_up_without_stopping_the_sender() {
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     sender.settings(None, Some("https://relay.example".into()));
     scratch
-        .rule("/v2/notify", r#"HTTP/2 429\r\nretry-after: 18446744073709551615\r\n\r\n{"reason":"TooManyRequests"}"#);
+        .rule("/v1/notify", r#"HTTP/2 429\r\nretry-after: 18446744073709551615\r\n\r\n{"reason":"TooManyRequests"}"#);
     sender.notify(vec![target(RELAY_PROD, &["first"])]);
     scratch.wait_for(1);
     sender.notify(vec![target(RELAY_PROD, &["second"])]);
@@ -331,14 +349,14 @@ fn backing_off_notifications_are_cancelled_or_replaced() {
     let scratch = Scratch::new("cancel");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     sender.settings(None, Some("https://relay.example".into()));
-    scratch.rule("/v2/notify", "FAIL");
+    scratch.rule("/v1/notify", "FAIL");
     sender.notify(vec![target(RELAY_PROD, &["old"])]);
     scratch.wait_for(1);
     sender.cancel(SESSION);
     thread::sleep(Duration::from_secs(3));
     scratch.wait_for(1);
 
-    scratch.rule("/v2/notify", "FAIL");
+    scratch.rule("/v1/notify", "FAIL");
     sender.notify(vec![target(RELAY_PROD, &["old"])]);
     scratch.wait_for(2);
     sender.notify(vec![target(RELAY_PROD, &["new"])]);
@@ -348,28 +366,13 @@ fn backing_off_notifications_are_cancelled_or_replaced() {
     scratch.wait_for(3);
 }
 
-/// 任务做完的通知发到中转的 v3 接口；中转服务没有这个接口、回 404 时算推不了，不重试。
-#[test]
-fn todo_done_needs_the_v3_relay() {
-    let scratch = Scratch::new("v3");
-    let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, Some("https://relay.example".into()));
-    scratch.rule("/v3/notify", r#"HTTP/2 404\r\n\r\n"#);
-    let done = Notification::todo_done(MACHINE.into(), "Mac", SESSION, "加暗色模式");
-    sender.notify(vec![Target { route: RELAY_PROD, device: DEVICE, token: TOKEN.into(), notification: done }]);
-    let requests = scratch.wait_for(1);
-    assert_eq!(url(&requests[0]), "https://relay.example/v3/notify");
-    thread::sleep(Duration::from_secs(3));
-    scratch.wait_for(1);
-}
-
 /// 在退避的通知：那台手机注销了、换了 token 或者关了推送，就不发了。
 #[test]
 fn backing_off_notifications_follow_the_registrations() {
     let scratch = Scratch::new("keep");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     sender.settings(None, Some("https://relay.example".into()));
-    scratch.rule("/v2/notify", "FAIL");
+    scratch.rule("/v1/notify", "FAIL");
     sender.notify(vec![target(RELAY_PROD, &[])]);
     scratch.wait_for(1);
     sender.keep(vec![(DEVICE, "0123".into())]);
@@ -576,7 +579,7 @@ fn a_rolled_back_handoff_keeps_pushing() {
     scratch.wait_for(1);
 }
 
-/// 任务从进行中变成做完：经中转的 v3 接口推一条任务做完的通知，不推等回答的。
+/// 任务从进行中变成做完：经中转推一条任务做完的通知，不推等回答的。
 #[test]
 fn finished_todos_are_pushed() {
     let scratch = Scratch::new("pusher-todo");
@@ -616,9 +619,8 @@ fn finished_todos_are_pushed() {
 
     host.set(AgentState::Idle);
     let requests = scratch.wait_for(1);
-    assert_eq!(url(&requests[0]), "https://relay.example/v3/notify");
+    assert_eq!(url(&requests[0]), "https://relay.example/v1/notify");
     let notify = body(&requests[0]);
-    assert_eq!(notify["v"], 3);
     let notification = &notify["notification"];
     assert_eq!(
         (notification["kind"].as_str(), notification["title"].as_str()),
@@ -669,7 +671,7 @@ fn turning_pushes_off_drops_backing_off_notifications() {
     wait_until("the pusher connects", || host.connections.load(Ordering::SeqCst) == 1);
     thread::sleep(Duration::from_millis(2500));
 
-    scratch.rule("/v2/notify", "FAIL");
+    scratch.rule("/v1/notify", "FAIL");
     host.set(AgentState::Blocked);
     wait_until("the first attempt", || scratch.requests().len() == 1);
     pusher.set_settings(PushSettings { enabled: false, ..settings });
@@ -718,7 +720,11 @@ fn the_official_app_needs_a_relay() {
     };
     let relay = PushSettings { relay: Some("https://relay.example".into()), ..PushSettings::default() };
     assert_eq!(route(&registration, &relay), Some(RELAY_PROD));
-    assert_eq!(route(&registration, &PushSettings { relay: None, ..relay }), None);
+    assert_eq!(route(&registration, &PushSettings { relay: None, ..relay.clone() }), None);
+    // 官方 App 登记的是句柄，配了同一个 bundle 的密钥也不直连。
+    let key =
+        ApnsKey { key_file: "k.p8".into(), key_id: "K".into(), team_id: "T".into(), bundle: OFFICIAL_BUNDLE.into() };
+    assert_eq!(route(&registration, &PushSettings { direct: Some(key), ..relay }), Some(RELAY_PROD));
 }
 
 /// 登记都推不出去（没带中转的构建里只有官方 App 的登记）时不连宿主，单独跑的宿主照常能因空闲退出。

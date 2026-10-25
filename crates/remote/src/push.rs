@@ -10,8 +10,9 @@
 //! `Attach`：只看状态的连接也会让会话的 `SessionInfo::clients` 加一，桌面靠它为零回收后台已退出的会话。
 //! 不满足条件时断开这条连接，单独跑的宿主照常能因空闲退出。
 //!
-//! 推送的路线按登记的 bundle id 定：等于配置的 `ApnsKey::bundle` 时用那把密钥直连 APNs，等于官方 App
-//! 的 `OFFICIAL_BUNDLE` 而这个构建带着中转（`RELAY_URL`）时经中转服务，别的跳过（每个 bundle 记一次日志）。
+//! 推送的路线按登记的 bundle id 定：官方 App 的 `OFFICIAL_BUNDLE` 登记的是中转的句柄，只在这个构建带着
+//! 中转（`RELAY_URL`）时经中转服务推；别的等于配置的 `ApnsKey::bundle` 时用那把密钥直连 APNs；其余跳过
+//! （每个 bundle 记一次日志）。
 //!
 //! 发出去的通知撤不回，答完的由手机自己清掉。宿主交接时会回 `Goodbye`，这边断开后照常重连：交接回滚了
 //! 就接着推；交接成了旧宿主不再接连接，这个进程随即停掉远程访问，推送由新宿主进程里的 `Pusher` 接着办。
@@ -459,10 +460,11 @@ fn route(registration: &PushRegistration, settings: &PushSettings) -> Option<Rou
     if registration.env == ApnsEnv::Unknown {
         return None;
     }
-    let via = if settings.direct.as_ref().is_some_and(|key| key.bundle == registration.bundle) {
-        Via::Direct
-    } else if registration.bundle == OFFICIAL_BUNDLE && settings.relay.is_some() {
+    let via = if registration.bundle == OFFICIAL_BUNDLE {
+        settings.relay.as_ref()?;
         Via::Relay
+    } else if settings.direct.as_ref().is_some_and(|key| key.bundle == registration.bundle) {
+        Via::Direct
     } else {
         return None;
     };

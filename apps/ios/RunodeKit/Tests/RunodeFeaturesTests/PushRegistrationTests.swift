@@ -63,6 +63,20 @@ extension FakeLink {
     }
 }
 
+/// 假的中转服务：句柄是 `h-` 加 device token，`failure` 不为空时换不到。
+actor FakePushRelay: PushRelay {
+    var requests: [RelayRegister] = []
+    var failure: PushRelayError?
+
+    func fail(with error: PushRelayError?) { failure = error }
+
+    func handle(for request: RelayRegister) async throws -> String {
+        requests.append(request)
+        if let failure { throw failure }
+        return "h-\(request.token)"
+    }
+}
+
 let pushIdentity = PushIdentity(environment: .development, bundle: "dev.runode.mobile")
 private let firstToken = Data([0x80, 0xf0, 0x0a])
 private let secondToken = Data([0x01, 0x02])
@@ -74,9 +88,10 @@ private let secondToken = Data([0x01, 0x02])
     let link = FakeLink()
 
     func registration(
-        enabled: Bool = true, identity: PushIdentity? = pushIdentity, timeout: Duration = .seconds(5)
+        enabled: Bool = true, identity: PushIdentity? = pushIdentity, relay: (any PushRelay)? = nil,
+        timeout: Duration = .seconds(5)
     ) -> PushRegistration {
-        PushRegistration(system: system, identity: identity, enabled: enabled, replyTimeout: timeout)
+        PushRegistration(system: system, identity: identity, relay: relay, enabled: enabled, replyTimeout: timeout)
     }
 
     @Test func registersOnceConnectedAndTheTokenIsKnown() async {
@@ -200,6 +215,57 @@ private let secondToken = Data([0x01, 0x02])
         push.renamed(renamed)
         #expect(await eventually { link.registrations.count == 2 })
         #expect(link.registrations.last?.machineName == "客厅的 Mac")
+    }
+
+    /// 有中转服务时电脑只拿到为它换来的句柄；token 没变时不再换，变了再换。
+    @Test func withARelayMachinesGetHandlesInsteadOfTokens() async {
+        let relay = FakePushRelay()
+        let push = registration(relay: relay)
+        system.give(token: firstToken)
+        #expect(await eventually { push.token != nil })
+        push.connected(machine, link: link)
+        #expect(await eventually { link.registrations.count == 1 })
+        #expect(link.registrations.last?.token == "h-80f00a")
+        #expect(
+            await relay.requests
+                == [RelayRegister(env: .development, token: "80f00a", machine: machine.id.uuidString)])
+        var renamed = machine
+        renamed.name = "客厅的 Mac"
+        push.renamed(renamed)
+        #expect(await eventually { link.registrations.count == 2 })
+        #expect(link.registrations.last?.token == "h-80f00a")
+        #expect(await relay.requests.count == 1)
+        system.give(token: secondToken)
+        #expect(await eventually { link.registrations.count == 3 })
+        #expect(link.registrations.last?.token == "h-0102")
+        #expect(await relay.requests.count == 2)
+    }
+
+    /// 断开再连上时重新换句柄：电脑不认句柄时会删掉登记、不告诉手机，交回旧的还是推不到。
+    @Test func reconnectingExchangesTheHandleAgain() async {
+        let relay = FakePushRelay()
+        let push = registration(relay: relay)
+        system.give(token: firstToken)
+        #expect(await eventually { push.token != nil })
+        push.connected(machine, link: link)
+        #expect(await eventually { link.registrations.count == 1 })
+        push.disconnected(machine.id)
+        let again = FakeLink()
+        push.connected(machine, link: again)
+        #expect(await eventually { again.registrations.count == 1 })
+        #expect(await relay.requests.count == 2)
+    }
+
+    /// 换不到句柄时不登记，原因和电脑回错一样记在设置页上。
+    @Test func relayFailuresAreShown() async {
+        let relay = FakePushRelay()
+        await relay.fail(with: PushRelayError(status: 429, reason: "TooManyRequests"))
+        let push = registration(relay: relay)
+        system.give(token: firstToken)
+        #expect(await eventually { push.token != nil })
+        push.connected(machine, link: link)
+        #expect(await eventually { push.statuses[machine.id] == .failed("push relay: HTTP 429 TooManyRequests") })
+        #expect(link.registrations.isEmpty)
     }
 
     @Test func withoutAnIdentityNothingIsSent() async {

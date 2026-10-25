@@ -1,5 +1,6 @@
 import RunodeConnection
 import RunodeFeatures
+import RunodeProtocol
 import SwiftUI
 import UIKit
 
@@ -80,6 +81,9 @@ enum AppComposition {
         dependencies.speechModels = URL.applicationSupportDirectory.appending(path: "speech-models")
         dependencies.pushIdentity = PushIdentity(
             info: Bundle.main.infoDictionary ?? [:], bundle: Bundle.main.bundleIdentifier)
+        if Bundle.main.bundleIdentifier == RelayRegister.officialBundle {
+            dependencies.pushRelay = HTTPPushRelay(info: Bundle.main.infoDictionary ?? [:])
+        }
         return dependencies
     }
 

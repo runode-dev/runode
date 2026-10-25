@@ -41,7 +41,7 @@ pub struct Device {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushRegistration {
     pub device_id: DeviceId,
-    /// APNs device token，十六进制。
+    /// 推送的凭据：APNs device token（十六进制），官方 App 是中转服务给的句柄。
     pub token: String,
     pub env: ApnsEnv,
     /// App 的 bundle id。

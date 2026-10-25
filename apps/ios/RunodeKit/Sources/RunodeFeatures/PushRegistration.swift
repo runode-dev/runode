@@ -62,8 +62,9 @@ public struct PushIdentity: Hashable, Sendable {
     }
 }
 
-/// 向各台电脑登记推送：电脑上有会话的 agent 停下来等回答时，经 APNs 用这里交出的 device token 给手机
-/// 推一条通知，手机不用连着。
+/// 向各台电脑登记推送：电脑上有会话的 agent 停下来等回答时，经 APNs 用这里交出的凭据给手机推一条通知，
+/// 手机不用连着。有中转服务（`relay`）时交的是先为这台电脑换来的句柄，电脑拿不到 device token；换不到时
+/// 和电脑回错一样记下原因。
 ///
 /// 打开着提醒时，每台电脑连上（`ready`）都要一次通知权限，有了结果才登记；允许了才向 APNs 要 device
 /// token，token 变了再登记一次。系统不允许、或设置里关掉提醒时对电脑注销（`token` 为空的同一条消息）：
@@ -104,6 +105,9 @@ public final class PushRegistration {
     @ObservationIgnored let replyTimeout: Duration
     @ObservationIgnored private let system: (any PushNotifications)?
     @ObservationIgnored private let identity: PushIdentity?
+    @ObservationIgnored private let relay: (any PushRelay)?
+    /// 为连着的各台电脑换来的句柄和换时的 device token；token 变了再换。
+    @ObservationIgnored private var handles: [UUID: (token: String, handle: String)] = [:]
     /// 现在的 device token（十六进制）；还没拿到时为空。
     @ObservationIgnored private(set) var token: String?
     /// 连着、能发消息的电脑。
@@ -127,13 +131,15 @@ public final class PushRegistration {
         var task: Task<Void, Never>
     }
 
-    /// `system` 或 `identity` 为空时什么都不登记（测试、演示模式，以及 macOS 上）。
+    /// `system` 或 `identity` 为空时什么都不登记（测试、演示模式，以及 macOS 上）；`relay` 为空时直接交
+    /// device token。
     public init(
-        system: (any PushNotifications)?, identity: PushIdentity?, enabled: Bool,
+        system: (any PushNotifications)?, identity: PushIdentity?, relay: (any PushRelay)? = nil, enabled: Bool,
         replyTimeout: Duration = .seconds(5)
     ) {
         self.system = system
         self.identity = identity
+        self.relay = relay
         self.enabled = enabled
         self.replyTimeout = replyTimeout
         guard let system else { return }
@@ -165,10 +171,12 @@ public final class PushRegistration {
         }
     }
 
-    /// 这台电脑断开了：不再等它的回话。
+    /// 这台电脑断开了：不再等它的回话，也忘掉为它换来的句柄。电脑不认句柄时会删掉登记、不告诉手机，
+    /// 下次连上重新换一个，不再交回同一个。
     func disconnected(_ id: UUID) {
         peers[id] = nil
         pending.removeValue(forKey: id)?.task.cancel()
+        handles[id] = nil
     }
 
     /// 这台电脑在手机上改了名字：连着的话按新名字再登记一次，推送里带的电脑名跟着变。
@@ -266,18 +274,36 @@ public final class PushRegistration {
         let attempt = attempts
         let timeout = timeout ?? replyTimeout
         let task = Task { [weak self] in
+            let credential: String?
+            do {
+                credential = try await self?.credential(for: id, token: token, env: identity.environment)
+            } catch {
+                guard let self, self.pending[id]?.attempt == attempt else { return }
+                self.pending[id] = nil
+                self.statuses[id] = .failed(error.localizedDescription)
+                return
+            }
             let req = await peer.link.nextRequestId()
             guard let self, self.pending[id]?.attempt == attempt else { return }
             self.pending[id]?.req = req
             peer.link.send(
                 .pushRegister(
-                    req: req, token: token, env: identity.environment, bundle: identity.bundle,
+                    req: req, token: credential, env: identity.environment, bundle: identity.bundle,
                     machine: id.uuidString, machineName: peer.name))
             try? await Task.sleep(for: timeout)
             guard !Task.isCancelled, self.pending[id]?.attempt == attempt else { return }
             self.pending[id] = nil
         }
         pending[id] = Pending(attempt: attempt, req: nil, task: task)
+    }
+
+    /// 交给这台电脑的凭据：有中转服务时是换来的句柄，没有时就是 device token；注销（`token` 为空）时为空。
+    private func credential(for id: UUID, token: String?, env: ApnsEnv) async throws -> String? {
+        guard let token, let relay else { return token }
+        if let known = handles[id], known.token == token { return known.handle }
+        let handle = try await relay.handle(for: RelayRegister(env: env, token: token, machine: id.uuidString))
+        handles[id] = (token, handle)
+        return handle
     }
 }
 

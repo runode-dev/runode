@@ -100,9 +100,10 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 在会话 shell 当前所在的仓库里读写 git，回 `GitStatus`、`GitDiff` 或 `GitBranches`；办不了时回
     /// 只带 `req`、不带会话 `id` 的 `Error`。一条连接上的这些请求宿主按先后一件一件办。
     case git(req: UInt32, id: SessionId, request: GitRequest)
-    /// 登记这台电脑推等回答通知用的 APNs device token（十六进制，`token` 为空时注销），回 `Done`，办不了时回
-    /// 带编号的 `Error`。`bundle` 是 App 的 bundle id，`machine` 是给这台电脑编的 UUID、`machineName` 是显示
-    /// 的电脑名，推送时原样带回。由电脑上的远程访问记进配对设备表，不到宿主。
+    /// 登记这台电脑推等回答通知用的凭据（`token` 为空时注销）：官方 App 交中转服务换来的句柄，别的交 APNs
+    /// 的 device token（十六进制）。回 `Done`，办不了时回带编号的 `Error`。`bundle` 是 App 的 bundle id，
+    /// `machine` 是给这台电脑编的 UUID、`machineName` 是显示的电脑名，推送时原样带回。由电脑上的远程访问
+    /// 记进配对设备表，不到宿主。
     case pushRegister(
         req: UInt32, token: String?, env: ApnsEnv, bundle: String, machine: String, machineName: String)
     /// 看着终端时每隔一小会儿发一条，宿主不回：一直有包来回，iPhone 的 Wi-Fi 就不省电，打字不卡。只发给在

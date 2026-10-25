@@ -4,8 +4,8 @@
 //! 出错时：
 //! - 没拿到响应、5xx、429：按 `BACKOFF` 隔着再试（429 带了 `Retry-After` 时至少等那么久），最多试到
 //!   排进队满 `DEADLINE`。
-//! - device token 不认（410、400 `BadDeviceToken`）：可能是登记的环境不对，换另一个环境再发一次；成了
-//!   把登记的环境改过来，还不认就删掉这条登记。
+//! - device token 不认（410、400 `BadDeviceToken`）：直连时可能是登记的环境不对，换另一个环境再发一次，
+//!   成了把登记的环境改过来，还不认就删掉这条登记；经中转时环境在句柄里，直接删掉。
 //! - 直连的密钥不对（403 `InvalidProviderToken`）：记错误，直连的都不发了，直到配置换了密钥。
 //! - 别的错误：记下来，这条不发了。
 
@@ -293,10 +293,10 @@ impl Worker {
         item.not_before = not_before;
     }
 
-    /// device token 不认：第一次换另一个环境再发，换了还不认就删掉登记。
+    /// device token 不认：直连时第一次换另一个环境再发，换了还不认、经中转时就删掉登记。
     fn bad_token(&mut self, index: usize, item: Queued, why: &str) {
         let target = item.target;
-        if item.other_env {
+        if item.other_env || target.route.via == Via::Relay {
             tracing::info!("APNs does not know the push token of remote device {} ({why}), dropping it", target.device);
             if let Err(err) = devices::drop_push_token(&self.dirs, target.device, &target.token) {
                 tracing::warn!("cannot remove a push registration: {err}");

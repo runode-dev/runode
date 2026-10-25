@@ -11,7 +11,7 @@ use ring::{
     signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair},
 };
 use runode_protocol::{
-    push::{ApnsEnv, EXPIRES_AFTER, Notification, PushError, RelayNotify, notify_payload},
+    push::{ApnsEnv, EXPIRES_AFTER, Notification, PushError, RELAY_NOTIFY, RelayNotify, notify_payload},
     remote::{decode_base64url, encode_base64url},
 };
 
@@ -109,8 +109,8 @@ fn pem_body(pem: &str) -> Option<Vec<u8>> {
     decode_base64url(&url).ok().filter(|der| !der.is_empty())
 }
 
-/// 拼出在路线 `route` 上给 device token `token` 发通知 `notification` 的请求，过期时刻按 `now` 算。
-/// 直连时要 `direct`，经中转时要 `relay`（中转服务的基址）。
+/// 拼出在路线 `route` 上给 `token` 发通知 `notification` 的请求，过期时刻按 `now` 算。直连时 `token`
+/// 是 device token、要 `direct`，经中转时是句柄、要 `relay`（中转服务的基址）。
 pub(crate) fn request(
     route: Route,
     token: &str,
@@ -138,12 +138,10 @@ pub(crate) fn request(
         }
         Via::Relay => {
             let relay = relay.ok_or_else(|| "this build has no push relay".to_owned())?;
-            let notify = RelayNotify::new(route.env, token.to_owned(), notification, now).ok_or_else(too_big)?;
+            let notify = RelayNotify::new(token.to_owned(), notification, now).ok_or_else(too_big)?;
             // 只有结构体、字符串和数，编不出来的情况实际不会有。
             let body = serde_json::to_vec(&notify).unwrap_or_default();
-            // 接口按通知的种类分：中转服务没有 v3 的接口时回 404，按 `outcome` 算推不了、不重试。
-            let (_, path) = notification.kind.relay();
-            let url = format!("{}{path}", relay.trim_end_matches('/'));
+            let url = format!("{}{RELAY_NOTIFY}", relay.trim_end_matches('/'));
             Ok(Request { method: "POST", url, headers: Vec::new(), body: Some(body) })
         }
     }
@@ -307,19 +305,19 @@ mod tests {
         let route = Route { env: ApnsEnv::Production, via: Via::Relay };
         let notification = notification();
         let push = request(route, "00ff", &notification, None, Some("https://relay.example/"), 5).unwrap();
-        assert_eq!((push.method, push.url.as_str()), ("POST", "https://relay.example/v2/notify"));
+        assert_eq!((push.method, push.url.as_str()), ("POST", "https://relay.example/v1/notify"));
         assert!(push.headers.is_empty());
         let body: RelayNotify = serde_json::from_slice(push.body.as_deref().unwrap()).unwrap();
-        assert_eq!(body, RelayNotify::new(ApnsEnv::Production, "00ff".into(), &notification, 5).unwrap());
+        assert_eq!(body, RelayNotify::new("00ff".into(), &notification, 5).unwrap());
         // 没带中转的构建发不了。
         assert!(request(route, "00ff", &notification, None, None, 5).is_err());
 
-        // 任务做完的走 v3：v2 的接口不认得 `kind`，发到那里会被拼成等回答。
+        // 任务做完的走同一个接口，靠 `kind` 分。
         let done = Notification::todo_done("M".into(), "Mac", SessionId(1), "t");
         let push = request(route, "00ff", &done, None, Some("https://relay.example"), 5).unwrap();
-        assert_eq!(push.url, "https://relay.example/v3/notify");
+        assert_eq!(push.url, "https://relay.example/v1/notify");
         let body: serde_json::Value = serde_json::from_slice(push.body.as_deref().unwrap()).unwrap();
-        assert_eq!((body["v"].as_u64(), body["notification"]["kind"].as_str()), (Some(3), Some("todo_done")));
+        assert_eq!(body["notification"]["kind"], "todo_done");
     }
 
     fn response(status: u16, headers: &[(&str, &str)], body: &str) -> Result<Response, String> {

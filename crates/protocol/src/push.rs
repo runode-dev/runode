@@ -6,9 +6,10 @@
 //!
 //! # 流程
 //!
-//! 1. 手机在前台连上某台电脑时发 `ClientMsg::PushRegister`，交出 APNs 的 device token；电脑记在配对
-//!    设备表里，手机断开后照样能推。注销是 `token` 为空的同一条消息。这条消息只在手机经远程访问连上来
-//!    时由监听方办，不到宿主那里，见 `remote` 的模块文档。
+//! 1. 手机在前台连上某台电脑时发 `ClientMsg::PushRegister`，交出推送用的凭据：自己签名打包的 App 交
+//!    APNs 的 device token，官方 App 交中转服务给的句柄。电脑记在配对设备表里，手机断开后照样能推。
+//!    注销是 `token` 为空的同一条消息。这条消息只在手机经远程访问连上来时由监听方办，不到宿主那里，
+//!    见 `remote` 的模块文档。
 //! 2. 那台电脑上有会话的 agent 停下来等回答时，电脑给每台登记过的手机发一条通知（`notify_payload`）。
 //!    一次等回答只推一次，等的时候屏幕上的问题变了不再推。通知的 `apns-collapse-id` 是会话标识
 //!    （`Notification::collapse_id`），同一个会话再等时新通知替掉通知中心里的旧的；`thread-id` 是电脑，
@@ -16,8 +17,10 @@
 //! 3. 看板上的任务从进行中变成需要你、又不是在等回答（agent 干完活停下来）时，电脑同样推一条
 //!    （`Notification::todo_done`），一次做完只推一次；`apns-collapse-id` 也是任务的会话标识。
 //!
-//! 官方 App 的推送经中转服务发（它持有签 APNs 请求的密钥），请求体是 `RelayNotify`；自己签名打包的
-//! App 由电脑拿用户配置的密钥直连 APNs。
+//! 官方 App 的推送经中转服务发（它持有签 APNs 请求的密钥）。官方 App 拿到 device token 后为每台电脑向
+//! 中转服务换一个句柄（`RelayRegister`），电脑只拿得到句柄，推送时交回去（`RelayNotify`）：中转服务从
+//! 句柄里解出 device token 和 APNs 环境，句柄只替换它时报的那台电脑（`machine`）推，泄露了也冒充不了
+//! 别的电脑，按句柄限频。自己签名打包的 App 由电脑拿用户配置的密钥直连 APNs。
 //!
 //! # 线上格式
 //!
@@ -25,13 +28,11 @@
 //! 点开通知时据此打开那个会话。时间是 Unix 秒，由调用方传入 `now`。payload 超过 `MAX_APNS_PAYLOAD`
 //! 字节时先从最上面一行起删 `lines`，删完还超就缩短 `title`，见 `notify_payload`。
 //!
-//! 中转请求体的键是 snake_case，都带 `v` 和 `env`。中转服务按请求体拼出和 `notify_payload` 一样的
-//! payload、带上同样的请求头发给 APNs，所以请求体里的内容已经照 payload 的上限删减过。出错时中转服务
-//! 原样带回 APNs 的 HTTP 状态和 `PushError`，限流时回 429 带 `Retry-After`。
-//!
-//! 等回答的通知发到 `RELAY_NOTIFY`、`v` 是 `RELAY_VERSION`，请求体里没有 `kind`；别的种类发到
-//! `RELAY_NOTIFY_V3`、`v` 是 `RELAY_VERSION_V3`，带 `kind`。分开是因为还没升级的中转服务不认得 `kind`，
-//! 发到 v2 会被拼成「在等你回答」；它对 v3 回 404，这边算推不了、不重试。
+//! 中转请求体的键是 snake_case，都带 `v`（`RELAY_VERSION`）。中转服务按请求体拼出和 `notify_payload`
+//! 一样的 payload、带上同样的请求头发给 APNs，所以请求体里的内容已经照 payload 的上限删减过。出错时
+//! 中转服务原样带回 APNs 的 HTTP 状态和 `PushError`；句柄解不开时回 400 `BadDeviceToken`，和 `machine`
+//! 对不上时回 403，限流时回 429 带 `Retry-After`。APNs 不认 device token（410、400 `BadDeviceToken`）时
+//! 中转服务先换另一个 APNs 环境再发一次，两边都不认才回错：电脑收到这两种回话就删掉登记，不再自己换环境。
 //!
 //! 和 `remote` 一样，`tests/fixtures/push` 里存着照规格另外写出来的样例（不由这里的类型生成），手机端
 //! 的测试读同一批文件；改格式要两边一起改。
@@ -52,17 +53,17 @@ pub const BLOCKED_LINES: usize = 3;
 /// 通知在 APNs 那里最多留这么多秒（`apns-expiration`）：手机这段时间一直连不上就不送了，等回答的事
 /// 过时了。
 pub const EXPIRES_AFTER: u64 = 30 * 60;
-/// 等回答的通知的中转请求体版本（`v`），发到 `RELAY_NOTIFY`。
-pub const RELAY_VERSION: u32 = 2;
-/// 别的种类的通知（带 `kind`）的中转请求体版本，发到 `RELAY_NOTIFY_V3`。
-pub const RELAY_VERSION_V3: u32 = 3;
+/// 中转请求体的版本（`v`）。
+pub const RELAY_VERSION: u32 = 1;
 /// 官方中转服务的基址，下面的接口路径接在它后面。只有发布流水线编译时设 `RUNODE_PUSH_RELAY`，
 /// 开发版和自己编译的版本里是 `None`，不经中转推官方 App；本地要测中转时编译前自己设上。
 pub const RELAY_URL: Option<&str> = option_env!("RUNODE_PUSH_RELAY");
-/// 发等回答的通知：`POST`，体是 `v` 为 `RELAY_VERSION` 的 `RelayNotify`，回 200。
-pub const RELAY_NOTIFY: &str = "/v2/notify";
-/// 发别的种类的通知：`POST`，体是 `v` 为 `RELAY_VERSION_V3` 的 `RelayNotify`，回 200。
-pub const RELAY_NOTIFY_V3: &str = "/v3/notify";
+/// 换句柄：`POST`，体是 `RelayRegister`，回 200 和 `RelayHandle`。
+pub const RELAY_REGISTER: &str = "/v1/register";
+/// 发通知：`POST`，体是 `RelayNotify`，回 200。
+pub const RELAY_NOTIFY: &str = "/v1/notify";
+/// `ClientMsg::PushRegister` 的 `token`（device token 或句柄）最多这么多个字符。
+pub const MAX_TOKEN_LEN: usize = 512;
 /// 官方 App 的 bundle id：登记的是它时经中转服务推送。
 pub const OFFICIAL_BUNDLE: &str = "dev.runode.mobile";
 /// 没有标题时 `Notification::title` 用的名字。
@@ -100,14 +101,6 @@ pub enum NotificationKind {
 impl NotificationKind {
     fn is_blocked(&self) -> bool {
         *self == Self::Blocked
-    }
-
-    /// 经中转发时请求体的 `v` 和接口路径，见模块文档。
-    pub fn relay(self) -> (u32, &'static str) {
-        match self {
-            Self::Blocked => (RELAY_VERSION, RELAY_NOTIFY),
-            Self::TodoDone => (RELAY_VERSION_V3, RELAY_NOTIFY_V3),
-        }
     }
 }
 
@@ -231,15 +224,32 @@ pub fn notify_payload(notification: &Notification) -> Option<Vec<u8>> {
     fit(notification).map(|(bytes, _)| bytes)
 }
 
-/// 经中转服务发通知：中转服务照 `notify_payload` 拼 payload，请求头照直连时的写。发到哪个接口、`v` 是几
-/// 看通知的种类（`NotificationKind::relay`）。
+/// 官方 App 为一台电脑向中转服务换句柄（`RELAY_REGISTER`）。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RelayNotify {
-    /// `RELAY_VERSION` 或 `RELAY_VERSION_V3`，见 `NotificationKind::relay`。
+pub struct RelayRegister {
+    /// `RELAY_VERSION`。
     pub v: u32,
     pub env: ApnsEnv,
     /// device token，十六进制。
     pub token: String,
+    /// 手机给这台电脑编的 UUID（`ClientMsg::PushRegister::machine`）。
+    pub machine: String,
+}
+
+/// `RELAY_REGISTER` 的回话。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelayHandle {
+    /// 不透明，由 base64url 字母（`A-Z a-z 0-9 - _`）组成，最多 `MAX_TOKEN_LEN` 个。
+    pub handle: String,
+}
+
+/// 经中转服务发通知（`RELAY_NOTIFY`）：中转服务照 `notify_payload` 拼 payload，请求头照直连时的写。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelayNotify {
+    /// `RELAY_VERSION`。
+    pub v: u32,
+    /// 手机登记时交来的句柄（`RelayHandle`）。
+    pub handle: String,
     /// `apns-expiration`，Unix 秒。
     pub expiration: u64,
     pub notification: Notification,
@@ -247,10 +257,9 @@ pub struct RelayNotify {
 
 impl RelayNotify {
     /// 过期时刻是 `now` 加 `EXPIRES_AFTER`，内容照 `notify_payload` 删减到装得下；装不下时为 `None`。
-    pub fn new(env: ApnsEnv, token: String, notification: &Notification, now: u64) -> Option<Self> {
+    pub fn new(handle: String, notification: &Notification, now: u64) -> Option<Self> {
         let (_, notification) = fit(notification)?;
-        let (v, _) = notification.kind.relay();
-        Some(Self { v, env, token, expiration: now + EXPIRES_AFTER, notification })
+        Some(Self { v: RELAY_VERSION, handle, expiration: now + EXPIRES_AFTER, notification })
     }
 }
 
