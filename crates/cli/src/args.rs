@@ -52,6 +52,17 @@ pub(crate) enum Command {
     Focus {
         session: Option<Selector>,
     },
+    Move {
+        session: Option<Selector>,
+        placement: Placement,
+        near: Option<Selector>,
+        focus: bool,
+    },
+    Swap {
+        a: Selector,
+        b: Selector,
+        focus: bool,
+    },
     /// 给手机配对远程访问。`addrs` 是除了本机地址以外另外放进配对 URI 的地址，排在前面。
     RemotePair {
         addrs: Vec<IpAddr>,
@@ -352,6 +363,20 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
         "focus" => {
             no_more(words, 1, name)?;
             Command::Focus { session: session(words.first())? }
+        }
+        "move" => {
+            no_more(words, 1, name)?;
+            Command::Move {
+                session: session(words.first())?,
+                placement: flags.placement.take().unwrap_or(Placement::Tab),
+                near: flags.near.take(),
+                focus: std::mem::take(&mut flags.focus),
+            }
+        }
+        "swap" => {
+            no_more(words, 2, name)?;
+            let [a, b] = words else { return Err("swap needs two SESSIONs".into()) };
+            Command::Swap { a: Selector::parse(a)?, b: Selector::parse(b)?, focus: std::mem::take(&mut flags.focus) }
         }
         "remote" => {
             let (what, words) = words.split_first().ok_or("remote needs pair, devices or revoke")?;
@@ -797,6 +822,22 @@ mod tests {
         assert!(parse("open --right --down").unwrap_err().contains("only one"));
         assert!(parse("kill").unwrap_err().contains("SESSION"));
         assert!(parse("focus --right").unwrap_err().contains("does not take"));
+        assert_eq!(
+            parse("move"),
+            Ok(Command::Move { session: None, placement: Placement::Tab, near: None, focus: false })
+        );
+        assert_eq!(
+            parse("move ab12 --down --near right --focus"),
+            Ok(Command::Move {
+                session: Some(id("ab12")),
+                placement: Placement::Down,
+                near: Some(Selector::Beside(runode_types::pane::Direction::Right)),
+                focus: true,
+            })
+        );
+        assert!(parse("move ab12 --fold").unwrap_err().contains("--fold"));
+        assert_eq!(parse("swap self ab12"), Ok(Command::Swap { a: Selector::Own, b: id("ab12"), focus: false }));
+        assert!(parse("swap ab12").unwrap_err().contains("two SESSIONs"));
     }
 
     #[test]

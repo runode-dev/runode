@@ -62,6 +62,7 @@ menu:
   next_split: 选择下一个分屏
   zoom_split: 放大分屏
   fold_split: 折叠或展开分屏
+  move_split_to_new_tab: 把分屏挪成新标签
   equalize_splits: 均分分屏
   goto_agent: 前往 agent…
   next_agent: 下一个要处理的 agent
@@ -1126,6 +1127,8 @@ action:
   close_surface: 关闭当前分屏，标签里只剩它时关闭标签
   goto_split: 焦点移到上一个、下一个或某个方向上的分屏
   resize_split: 把最近的分隔线往这个方向挪，步长固定
+  swap_split: 当前分屏和这个方向上相邻的分屏对调位置
+  move_split_to_new_tab: 把当前分屏挪成单独的新标签
   equalize_splits: 均分分屏
   toggle_split_zoom: 放大或还原当前分屏
   toggle_split_fold: 把当前分屏折叠到标签底部，或者展开回原位

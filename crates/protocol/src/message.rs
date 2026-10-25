@@ -230,6 +230,27 @@ pub enum ClientMsg {
     },
     /// 在 app 里切到显示这个会话的分屏，激活它的窗口，回 `Done`。
     Reveal { req: u32, id: SessionId },
+    /// 在 app 里把会话 `id` 的分屏挪到会话 `near` 的分屏旁边，照 `placement` 放，宿主转给
+    /// app 的界面，回 `Done`。`near` 为空时是最前面那个窗口当前的分屏。两个分屏要在同一个窗口里；分屏摆法
+    /// 下 `near` 不能是 `id` 自己。`focus` 为假时不切过去。没有界面连着时回 `Error`。
+    MovePane {
+        req: u32,
+        id: SessionId,
+        placement: Placement,
+        #[serde(default)]
+        near: Option<SessionId>,
+        #[serde(default)]
+        focus: bool,
+    },
+    /// 在 app 里把会话 `a` 和 `b` 的分屏对调位置，宿主转给 app 的界面，回 `Done`。两个分屏要在同一个窗口
+    /// 里，可以在不同的标签里。`focus` 为真时切到 `a`。没有界面连着时回 `Error`。
+    SwapPanes {
+        req: u32,
+        a: SessionId,
+        b: SessionId,
+        #[serde(default)]
+        focus: bool,
+    },
     /// 列出宿主这台电脑上 `path` 这个目录里的子目录，回 `HostMsg::Dirs`；`path` 为空时列家目录。
     /// 手机新建工作区时一级级浏览电脑上的目录用它。宿主自己办，不转给界面。
     ListDirs {

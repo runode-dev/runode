@@ -27,11 +27,12 @@ use crate::{
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath,
         DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal,
-        GotoAgent, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab, NextWorkspace,
-        OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder,
-        RunTaskKey, SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace, SelectNextFile,
-        SelectPreviousFile, SelectTab, SelectWorkspace, TaskKeys, ToggleFiles, ToggleGit, ToggleGitHubActions,
-        ToggleKanban, TogglePaneFold, TogglePaneZoom, ToggleSchedules, ToggleSidebar, ToggleStatusBar, ToggleTasks,
+        GotoAgent, MovePaneToNewTab, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab,
+        NextWorkspace, OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane,
+        RevealInFinder, RunTaskKey, SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace,
+        SelectNextFile, SelectPreviousFile, SelectTab, SelectWorkspace, SwapPane, TaskKeys, ToggleFiles, ToggleGit,
+        ToggleGitHubActions, ToggleKanban, TogglePaneFold, TogglePaneZoom, ToggleSchedules, ToggleSidebar,
+        ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -84,6 +85,8 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::FocusNextSplit => (boxed(FocusNextPane), WINDOW),
         Action::FocusSplit(direction) => (boxed(FocusPane(direction)), WINDOW),
         Action::ResizeSplit(direction) => (boxed(ResizePane(direction)), WINDOW),
+        Action::SwapSplit(direction) => (boxed(SwapPane(direction)), WINDOW),
+        Action::MoveSplitToNewTab => (boxed(MovePaneToNewTab), WINDOW),
         Action::EqualizeSplits => (boxed(EqualizePanes), WINDOW),
         Action::ToggleSplitZoom => (boxed(TogglePaneZoom), WINDOW),
         Action::ToggleSplitFold => (boxed(TogglePaneFold), WINDOW),

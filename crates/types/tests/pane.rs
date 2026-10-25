@@ -18,6 +18,25 @@ fn split_inserts_after_the_target_in_reading_order() {
 }
 
 #[test]
+fn insert_puts_the_new_leaf_on_the_given_side() {
+    let mut root = sample();
+    assert!(root.insert(1, 4, Direction::Left, 12));
+    assert!(root.insert(3, 5, Direction::Up, 13));
+    assert_eq!(root.leaves(), [4, 1, 2, 5, 3]);
+    assert!(!root.insert(9, 6, Direction::Down, 14));
+}
+
+#[test]
+fn swap_exchanges_two_leaves_or_renames_the_one_in_this_tree() {
+    let mut root = sample();
+    root.swap(1, 3);
+    assert_eq!(root.leaves(), [3, 2, 1]);
+    // 另一个在别的标签里：这棵树里只有 2，换成 9。
+    root.swap(2, 9);
+    assert_eq!(root.leaves(), [3, 9, 1]);
+}
+
+#[test]
 fn removing_a_leaf_promotes_its_sibling_and_focuses_the_nearest_leaf() {
     let mut root = sample();
     // 去掉左边的 1，焦点给右侧最靠前的 2，右侧那棵子树顶上来成为根。

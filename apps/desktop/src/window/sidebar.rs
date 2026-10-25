@@ -17,6 +17,7 @@ use super::{
     cards, drag_window,
     inline_edit::InlineEdit,
     model::WorkspaceId,
+    pane_move::DraggedPane,
     titlebar::{drag_chip, drop_marker, shortcut_hint, styled_agent_mark},
 };
 use crate::ui::a11y::A11yPress;
@@ -395,6 +396,11 @@ impl WindowView {
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedWorkspace, window, cx| {
                 this.move_workspace(dragged.id, ix, window, cx);
+            }))
+            // 拖来的分屏：成为这个 workspace 排在最后的新标签。
+            .drag_over::<DraggedPane>(move |style, _, _, cx| style.bg(cx.theme().ring.opacity(0.18)))
+            .on_drop(cx.listener(move |this, dragged: &DraggedPane, window, cx| {
+                this.drop_pane_as_tab(dragged.pane, id, window, cx);
             }))
             // 名字一行和目录一行同高，图标按固定的上边距靠上排，不随字体的行高跳。
             .child(

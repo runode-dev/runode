@@ -1235,7 +1235,9 @@ impl Connection {
             ClientMsg::Open { req, .. }
             | ClientMsg::OpenWorkspace { req, .. }
             | ClientMsg::RenameWorkspace { req, .. }
-            | ClientMsg::Reveal { req, .. } => {
+            | ClientMsg::Reveal { req, .. }
+            | ClientMsg::MovePane { req, .. }
+            | ClientMsg::SwapPanes { req, .. } => {
                 self.to_ui(req, message);
             }
             ClientMsg::Layout { req } => {
@@ -1373,7 +1375,7 @@ impl Connection {
     }
 
     /// 没有界面连着时办要界面办的请求：布局、开终端、新建工作区、改名照宿主手里的布局办，见
-    /// `workspaces`；切到终端没有窗口可切，回一句没办成。开终端要等会话线程、stat 目录，和读文件系统的
+    /// `workspaces`；切到终端、挪分屏没有窗口可办，回一句没办成。开终端要等会话线程、stat 目录，和读文件系统的
     /// 请求一样另起线程办。
     fn headless(&self, req: u32, request: ClientMsg) {
         let shared = self.shared.clone();

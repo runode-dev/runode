@@ -60,8 +60,13 @@ again and again until the panes are too thin to read.
 the user a terminal later, `runode focus SESSION` brings its pane and window to
 the front.
 
+To rearrange panes the user asked about, `runode move SESSION` moves a pane
+into a new tab after yours, `--right` or `--down` beside yours instead, and
+`--near OTHER` beside another pane; `runode swap SESSION OTHER` exchanges two
+panes, even in different tabs. Both stay within one window.
+
 While the app is closed, `open` always makes a new tab at the end of the
-workspace (no split, no `--focus`) and `runode focus` fails.
+workspace (no split, no `--focus`), and `focus`, `move` and `swap` fail.
 
 A split opened from your terminal is folded down to its title bar so it takes
 no room; the program keeps running and the user unfolds it by clicking the bar.

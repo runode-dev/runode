@@ -431,7 +431,7 @@ fn layout(id: SessionId) -> Vec<WindowLayout> {
     vec![WindowLayout { index: 1, front: true, workspaces: vec![workspace] }]
 }
 
-/// `Open`、`OpenWorkspace`、`Reveal`、`Layout` 包成 `UiRequest` 转给界面的连接，原样带着请求方的 `req`；界面的
+/// `Open`、`OpenWorkspace`、`Reveal`、`MovePane`、`Layout` 包成 `UiRequest` 转给界面的连接，原样带着请求方的 `req`；界面的
 /// `UiReply` 原样转回请求方。别的连接冒充界面回话不算。
 #[test]
 fn window_requests_go_to_the_desktop_connection() {
@@ -468,6 +468,12 @@ fn window_requests_go_to_the_desktop_connection() {
     assert_eq!(cli.reply(), HostMsg::Done { req: 5 });
     // 同一个请求回第二次：丢掉。
     desktop.send(&ClientMsg::UiReply { ui, reply: Box::new(HostMsg::Done { req: 5 }) });
+
+    let move_pane =
+        ClientMsg::MovePane { req: 8, id: SessionId(9), placement: Placement::Tab, near: None, focus: false };
+    cli.send(&move_pane);
+    assert_eq!(answer_ui(&mut desktop, |_| HostMsg::Done { req: 8 }), move_pane);
+    assert_eq!(cli.reply(), HostMsg::Done { req: 8 });
 
     cli.send(&ClientMsg::Layout { req: 6 });
     let request = answer_ui(&mut desktop, |_| HostMsg::Layout { req: 6, windows: layout(SessionId(9)) });
@@ -558,8 +564,8 @@ fn workspaces(windows: &[WindowLayout]) -> Vec<(Option<PathBuf>, Option<String>,
 }
 
 /// 没有界面连着时宿主照自己手里的布局办：新建工作区、在工作区里开标签、改名都改这份布局，问过布局的
-/// 连接先收到 `LayoutChanged`；同一个目录的工作区不另建；会话没了工作区还在；切到终端没有窗口可切，回
-/// `Error`。
+/// 连接先收到 `LayoutChanged`；同一个目录的工作区不另建；会话没了工作区还在；切到终端、挪分屏没有窗口
+/// 可办，回 `Error`。
 #[test]
 fn without_a_desktop_the_host_keeps_the_workspaces() {
     let dir = temp_dir("headless");
@@ -606,6 +612,10 @@ fn without_a_desktop_the_host_keeps_the_workspaces() {
     phone.send(&ClientMsg::Reveal { req: 10, id: first });
     assert!(
         matches!(phone.reply(), HostMsg::Error { req: Some(10), message, .. } if message.contains("no runode window"))
+    );
+    phone.send(&ClientMsg::SwapPanes { req: 11, a: first, b: second, focus: false });
+    assert!(
+        matches!(phone.reply(), HostMsg::Error { req: Some(11), message, .. } if message.contains("no runode window"))
     );
 }
 

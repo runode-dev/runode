@@ -24,6 +24,7 @@ mod mobile;
 mod model;
 mod new_workspace;
 mod open;
+mod pane_move;
 mod panes;
 mod persist;
 mod preview;
@@ -61,6 +62,7 @@ pub use background::refresh as watch_background;
 pub use devices::watch as watch_devices;
 pub(crate) use mobile::show_pairing;
 pub(crate) use open::{open_window, open_window_with};
+pub use pane_move::{MovePaneToNewTab, SwapPane};
 pub use persist::saved_window_options;
 pub use quit::{
     close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, quit_to_update, should_close,
@@ -291,6 +293,8 @@ pub struct WindowView {
     next_id: u64,
     layout: Rc<RefCell<PaneLayout>>,
     dragging_divider: Option<Divider>,
+    /// 拖着分屏经过的分屏和落点在它的哪一块，画落点提示用。
+    pane_drop: Option<(EntityId, pane_move::DropZone)>,
     /// 窗口的位置和大小，以及所在屏幕的 UUID，存布局用：窗口关掉以后就问不到了。
     bounds: WindowBounds,
     display: Option<String>,
@@ -460,6 +464,7 @@ impl WindowView {
             next_id: 0,
             layout: Rc::default(),
             dragging_divider: None,
+            pane_drop: None,
             bounds: window.window_bounds(),
             display: Self::display_uuid(window, cx),
             spawned: HashMap::new(),
@@ -775,6 +780,8 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::equalize_panes))
             .on_action(Self::act(cx, Self::toggle_pane_zoom))
             .on_action(Self::act(cx, Self::toggle_pane_fold))
+            .on_action(Self::act(cx, Self::swap_pane))
+            .on_action(Self::act(cx, Self::move_pane_to_new_tab))
             .on_action(Self::act(cx, Self::new_workspace))
             .on_action(Self::act(cx, Self::close_workspace))
             .on_action(Self::act(cx, Self::rename_workspace))
@@ -1093,6 +1100,8 @@ impl WindowView {
         let tab_width =
             px(((viewport - fixed - 2. * (tab_count_f + 1.)) / tab_count_f).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH));
         let track_bg = cx.theme().tab_track;
+        let workspace = self.workspace().id;
+        let drop_bg = cx.theme().ring.opacity(0.12);
         let strip = div()
             .id("tabs")
             .role(Role::TabList)
@@ -1118,6 +1127,11 @@ impl WindowView {
             .pr(px(CARD_GAP + titlebar::WINDOW_CONTROLS_WIDTH))
             .text_size(FontSize::Body)
             .on_mouse_down(MouseButton::Left, drag_window)
+            // 拖来的分屏放到标签以外的地方：成为排在最后的新标签。
+            .drag_over::<pane_move::DraggedPane>(move |style, _, _, _| style.bg(drop_bg))
+            .on_drop(cx.listener(move |this, dragged: &pane_move::DraggedPane, window, cx| {
+                this.drop_pane_as_tab(dragged.pane, workspace, window, cx);
+            }))
             .child(div().flex_none().w(px(left_inset)).h_full().window_control_area(WindowControlArea::Drag))
             .child(strip)
             .child(self.render_new_tab_button_card(cx))

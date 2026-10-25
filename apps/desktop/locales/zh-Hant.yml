@@ -62,6 +62,7 @@ menu:
   next_split: 選擇下一個分割畫面
   zoom_split: 放大分割畫面
   fold_split: 摺疊或展開分割畫面
+  move_split_to_new_tab: 把分割畫面移成新標籤
   equalize_splits: 平均分割畫面
   goto_agent: 前往 agent…
   next_agent: 下一個要處理的 agent
@@ -1126,6 +1127,8 @@ action:
   close_surface: 關閉目前的分割畫面，分頁裡只剩它時關閉分頁
   goto_split: 焦點移到上一個、下一個或某個方向上的分割畫面
   resize_split: 把最近的分隔線往這個方向移，步長固定
+  swap_split: 目前的分割畫面和這個方向上相鄰的分割畫面對調位置
+  move_split_to_new_tab: 把目前的分割畫面移成獨立的新標籤
   equalize_splits: 平均分割畫面
   toggle_split_zoom: 放大或還原目前的分割畫面
   toggle_split_fold: 把目前的分割畫面摺疊到標籤底部，或展開回原位

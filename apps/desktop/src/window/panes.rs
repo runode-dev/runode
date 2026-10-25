@@ -9,9 +9,9 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, App, Context, CursorStyle, Div, EntityId, ExternalPaths, Focusable, FontWeight, MouseButton,
-    MouseDownEvent, MouseMoveEvent, Role, SharedString, Stateful, StyleRefinement, Window, canvas, div, prelude::*, px,
-    relative, svg,
+    Action, AnyElement, App, Context, CursorStyle, Div, DragMoveEvent, EntityId, ExternalPaths, Focusable, FontWeight,
+    MouseButton, MouseDownEvent, MouseMoveEvent, Role, SharedString, Stateful, StyleRefinement, Window, canvas, div,
+    prelude::*, px, relative, svg,
 };
 use runode_protocol::SessionId;
 use runode_types::{
@@ -25,6 +25,7 @@ use super::{
     agents::logo::agent_logo,
     cards,
     model::Tab,
+    pane_move::{DraggedPane, zone_at},
     status_bar,
     titlebar::{pane_label, styled_agent_mark},
 };
@@ -321,6 +322,21 @@ impl WindowView {
                 leaf.child(div().absolute().size_full().bg(cx.theme().background.opacity(UNFOCUSED_DIM)))
             })
             .children(badge)
+            .children(self.pane_drop_overlay(id, cx))
+            // 拖来的分屏：经过时记下落点画提示，放下时挪到这一块或者对调。
+            .on_drag_move(cx.listener(move |this, event: &DragMoveEvent<DraggedPane>, _, cx| {
+                let dragged = event.drag(cx).pane;
+                this.track_pane_drop(dragged, id, event.bounds, event.event.position, cx);
+            }))
+            .on_drop(cx.listener(move |this, dragged: &DraggedPane, window, cx| {
+                this.pane_drop = None;
+                let bounds = this.layout.borrow().panes.get(&id).copied();
+                if let Some(zone) = bounds.and_then(|bounds| zone_at(bounds, window.mouse_position()))
+                    && dragged.pane != id
+                {
+                    this.drop_pane_on_pane(dragged.pane, id, zone, window, cx);
+                }
+            }))
             // 从文件树或访达拖来的文件放到这个终端上：切到它，把路径打进去。
             .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
                 this.drop_paths_on_pane(id, std::slice::from_ref(&dragged.path), window, cx);
@@ -504,8 +520,15 @@ impl WindowView {
             .when(!(current && split) && !folded, |buttons| {
                 buttons.invisible().group_hover(group, |buttons| buttons.visible())
             });
+        let dragged = DraggedPane::new(id, name.clone());
+        let view = cx.weak_entity();
         div()
             .id(("pane-header", id))
+            // 上一次拖动落在别处或取消时没清掉的落点提示，开始拖时清掉。
+            .on_drag(dragged, move |dragged, _, _, cx| {
+                view.update(cx, |this, _| this.pane_drop = None).ok();
+                cx.new(|_| dragged.clone())
+            })
             .flex_none()
             .h(px(PANE_HEADER_HEIGHT))
             .pl(px(10.))

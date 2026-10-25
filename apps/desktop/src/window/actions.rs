@@ -192,9 +192,14 @@ impl WindowView {
     }
 
     pub(super) fn focus_pane(&mut self, action: &FocusPane, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(tab) = self.tab() else {
-            return;
-        };
+        if let Some(target) = self.neighbor_pane(action.0) {
+            self.focus_pane_in_active_tab(target, window, cx);
+        }
+    }
+
+    /// 当前标签里当前分屏在 `direction` 这个方向上相邻的分屏。
+    pub(super) fn neighbor_pane(&self, direction: Direction) -> Option<EntityId> {
+        let tab = self.tab()?;
         let layout = self.layout.borrow();
         let rect = |bounds: &Bounds<Pixels>| pane::Rect {
             x: f32::from(bounds.origin.x),
@@ -202,17 +207,13 @@ impl WindowView {
             width: f32::from(bounds.size.width),
             height: f32::from(bounds.size.height),
         };
-        let Some(from) = layout.panes.get(&tab.focused).map(rect) else {
-            return;
-        };
-        let target = if tab.zoomed {
+        let from = layout.panes.get(&tab.focused).map(rect)?;
+        if tab.zoomed {
             // 放大时只画了这一个，别的分屏记着的还是放大前的位置，全落在它里面：按分屏树的比例在它现在占的
             // 这一块里重新排一遍再找。
             let rects = tab.root.rects(from);
-            let Some(from) = rects.iter().find(|(id, _)| *id == tab.focused).map(|(_, rect)| *rect) else {
-                return;
-            };
-            pane::neighbor(from, action.0, rects.into_iter().filter(|(id, _)| *id != tab.focused))
+            let from = rects.iter().find(|(id, _)| *id == tab.focused).map(|(_, rect)| *rect)?;
+            pane::neighbor(from, direction, rects.into_iter().filter(|(id, _)| *id != tab.focused))
         } else {
             let candidates = tab
                 .root
@@ -220,11 +221,7 @@ impl WindowView {
                 .into_iter()
                 .filter(|id| *id != tab.focused)
                 .filter_map(|id| layout.panes.get(&id).map(|bounds| (id, rect(bounds))));
-            pane::neighbor(from, action.0, candidates)
-        };
-        drop(layout);
-        if let Some(target) = target {
-            self.focus_pane_in_active_tab(target, window, cx);
+            pane::neighbor(from, direction, candidates)
         }
     }
 

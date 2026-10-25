@@ -239,6 +239,27 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             let req = connection.req();
             connection.request_done(&ClientMsg::Reveal { req, id })?;
         }
+        Command::Move { session, placement, near, focus } => {
+            let session = own_or(session, env, "move")?;
+            let connection = Connection::open(env)?;
+            let layout = session.needs_layout() || near.as_ref().is_some_and(Selector::needs_layout);
+            let world = World::load(&connection, env, layout)?;
+            let id = world.find(&session)?.id;
+            let near = match near {
+                Some(near) => Some(world.find(&near)?.id),
+                // 自己的会话已经不在了时交给宿主找最前面的窗口。
+                None => world.own.filter(|own| world.sessions.iter().any(|info| info.id == *own)),
+            };
+            let req = connection.req();
+            connection.request_done(&ClientMsg::MovePane { req, id, placement, near, focus })?;
+        }
+        Command::Swap { a, b, focus } => {
+            let connection = Connection::open(env)?;
+            let world = World::load(&connection, env, a.needs_layout() || b.needs_layout())?;
+            let (a, b) = (world.find(&a)?.id, world.find(&b)?.id);
+            let req = connection.req();
+            connection.request_done(&ClientMsg::SwapPanes { req, a, b, focus })?;
+        }
         Command::RemotePair { addrs } => {
             crate::remote::pair(env, &addrs, out, &mut crate::remote::read_answer, crate::remote::LISTENER_WAIT)
                 .map_err(|error| match error.downcast::<crate::remote::Interrupted>() {

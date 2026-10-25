@@ -12,9 +12,10 @@
 //! VT；改 VT 状态的请求（改尺寸、换主题、清屏）在输出流里插一条标记（`HostMsg::Resized`、
 //! `HostMsg::ThemeApplied`）或者一段输出，前端在同一个位置做同样的事，两份 VT 才不会分叉。
 //!
-//! 宿主不管窗口：要界面办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`Layout`）包成 `HostMsg::UiRequest` 转给
+//! 宿主不管窗口：要界面办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`MovePane`、`SwapPanes`、
+//! `Layout`）包成 `HostMsg::UiRequest` 转给
 //! 登记为界面的那条连接（`Hello` 里说自己是 `ClientKind::Desktop` 的），界面用 `ClientMsg::UiReply`
-//! 回话，宿主再原样转回发请求的一方。没有界面连着时，除 `Reveal` 外宿主照界面上次报来的布局自己办，
+//! 回话，宿主再原样转回发请求的一方。没有界面连着时，除 `Reveal` 和挪分屏外宿主照界面上次报来的布局自己办，
 //! 见 `workspaces`。会话里的程序读写剪贴板（OSC 52）也这样请界面办，回话交回
 //! 会话线程，见 `session` 的 `clipboard`。
 //!

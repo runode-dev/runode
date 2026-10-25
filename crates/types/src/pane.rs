@@ -85,19 +85,44 @@ impl<T: Copy + PartialEq> Node<T> {
     /// 把叶子 `target` 换成一个对半的分屏，`target` 在前（左或上），`new` 在后。
     /// 找不到 `target` 时返回 `false`。
     pub fn split(&mut self, target: T, new: T, axis: Axis, id: SplitId) -> bool {
+        let side = match axis {
+            Axis::Horizontal => Direction::Right,
+            Axis::Vertical => Direction::Down,
+        };
+        self.insert(target, new, side, id)
+    }
+
+    /// 把叶子 `target` 换成一个对半的分屏，`new` 在它 `side` 那一侧。找不到 `target` 时返回 `false`。
+    pub fn insert(&mut self, target: T, new: T, side: Direction, id: SplitId) -> bool {
         match self {
             Node::Leaf(leaf) if *leaf == target => {
+                let (first, second) = if side.sign() > 0. { (target, new) } else { (new, target) };
                 *self = Node::Split(Split {
                     id,
-                    axis,
+                    axis: side.axis(),
                     ratio: 0.5,
-                    first: Box::new(Node::Leaf(target)),
-                    second: Box::new(Node::Leaf(new)),
+                    first: Box::new(Node::Leaf(first)),
+                    second: Box::new(Node::Leaf(second)),
                 });
                 true
             }
             Node::Leaf(_) => false,
-            Node::Split(split) => split.first.split(target, new, axis, id) || split.second.split(target, new, axis, id),
+            Node::Split(split) => {
+                split.first.insert(target, new, side, id) || split.second.insert(target, new, side, id)
+            }
+        }
+    }
+
+    /// 叶子 `a` 和 `b` 对调位置。两个不在同一棵树里时各改各的：这棵树里的 `a` 换成 `b`，或者反过来。
+    pub fn swap(&mut self, a: T, b: T) {
+        match self {
+            Node::Leaf(leaf) if *leaf == a => *leaf = b,
+            Node::Leaf(leaf) if *leaf == b => *leaf = a,
+            Node::Leaf(_) => {}
+            Node::Split(split) => {
+                split.first.swap(a, b);
+                split.second.swap(a, b);
+            }
         }
     }
 

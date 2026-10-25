@@ -24,6 +24,8 @@ Commands:
   open         Open a terminal in the app
   kill         End a session and close its pane
   focus        Show a session's pane and bring its window to the front
+  move         Move a session's pane to another place in its window
+  swap         Swap the panes of two sessions
   todo         Put tasks for agents on the task board and start them
   schedule     Start a task for an agent at set times
   remote       Pair phones for remote access and manage them
@@ -52,6 +54,8 @@ pub(crate) const PAGES: &[(&str, &str)] = &[
     ("open", OPEN),
     ("kill", KILL),
     ("focus", FOCUS),
+    ("move", MOVE),
+    ("swap", SWAP),
     ("todo", TODO),
     ("schedule", SCHEDULE),
     ("remote", REMOTE),
@@ -224,6 +228,44 @@ Arguments:
 
 Options:
   -h, --help  Show this help
+";
+
+const MOVE: &str = "\
+Move a session's pane to another place in the same window: beside another
+pane, or into a new tab.
+
+Usage: runode move [SESSION] [--tab | --right | --down] [--near SESSION]
+                   [--focus]
+
+Arguments:
+  [SESSION]  The session to move; defaults to your own. See `runode help
+             session`
+
+Options:
+      --tab           Move it into a new tab after the one NEAR is in
+                      (default)
+      --right         Put it to the right of NEAR's pane
+      --down          Put it below NEAR's pane
+      --near SESSION  Where to move it; defaults to your own session, else
+                      the front window's pane. Must be in the same window
+      --focus         Switch to the moved terminal; without it the app stays
+                      where it is
+  -h, --help          Show this help
+";
+
+const SWAP: &str = "\
+Swap the panes of two sessions in the same window; they may be in different
+tabs.
+
+Usage: runode swap SESSION OTHER [--focus]
+
+Arguments:
+  SESSION  One session; `self` for your own. See `runode help session`
+  OTHER    The session to swap it with
+
+Options:
+      --focus  Switch to SESSION after the swap
+  -h, --help   Show this help
 ";
 
 const TODO: &str = "\

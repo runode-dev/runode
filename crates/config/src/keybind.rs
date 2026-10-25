@@ -41,6 +41,10 @@ pub enum Action {
     FocusNextSplit,
     FocusSplit(Direction),
     ResizeSplit(Direction),
+    /// 当前分屏和这个方向上相邻的分屏对调位置。
+    SwapSplit(Direction),
+    /// 把当前分屏挪成紧跟当前标签后面的新标签。
+    MoveSplitToNewTab,
     EqualizeSplits,
     ToggleSplitZoom,
     /// 把当前分屏收到终端区底部，只剩标题条；已经折叠过的展开。
@@ -217,6 +221,13 @@ pub static ACTIONS: &[ActionSpec] = &[
             Ok(Action::ResizeSplit(direction(dir)?))
         },
     },
+    ActionSpec {
+        name: "swap_split",
+        doc: "Swap the current split with the adjacent one in a direction",
+        param: Some("left|right|up|down"),
+        parse: |param| Ok(Action::SwapSplit(direction(param)?)),
+    },
+    plain!("move_split_to_new_tab", "Move the current split into a new tab of its own", Action::MoveSplitToNewTab),
     plain!("equalize_splits", "Make all splits the same size", Action::EqualizeSplits),
     plain!("toggle_split_zoom", "Zoom or restore the current split", Action::ToggleSplitZoom),
     plain!(
@@ -408,6 +419,10 @@ pub static MACOS_DEFAULTS: &[&str] = &[
     "ctrl+cmd+right=resize_split:right",
     "ctrl+cmd+up=resize_split:up",
     "ctrl+cmd+down=resize_split:down",
+    "cmd+shift+alt+left=swap_split:left",
+    "cmd+shift+alt+right=swap_split:right",
+    "cmd+shift+alt+up=swap_split:up",
+    "cmd+shift+alt+down=swap_split:down",
     "ctrl+cmd+equal=equalize_splits",
     "cmd+shift+enter=toggle_split_zoom",
     "ctrl+cmd+minus=toggle_split_fold",

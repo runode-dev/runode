@@ -1,4 +1,4 @@
-//! 让 app 开终端、结束终端、切到终端的命令：发给宿主的请求和打印的结果。
+//! 让 app 开终端、结束终端、切到终端、挪动和对调分屏的命令：发给宿主的请求和打印的结果。
 
 mod common;
 
@@ -140,4 +140,38 @@ fn focus_defaults_to_your_own_session() {
     let (code, _, err) = run("focus", &fake.env);
     assert_eq!(code, exit::OK, "{err}");
     assert!(controls(&fake).contains(&ClientMsg::Reveal { req: 1, id: SessionId(MINE) }));
+}
+
+/// `move` 不给会话和 `--near` 时都是自己的会话：挪成自己后面的新标签。`swap` 原样带上两个会话。
+#[test]
+fn move_and_swap_name_the_sessions_to_the_app() {
+    let mut fake = FakeHost::start("move", |message| match message {
+        ClientMsg::ListSessions => vec![HostMsg::SessionList {
+            sessions: vec![session(id(MINE), meta("zsh", None)), session(id(NEW), meta("zsh", None))],
+        }],
+        ClientMsg::MovePane { req, .. } | ClientMsg::SwapPanes { req, .. } => vec![HostMsg::Done { req: *req }],
+        _ => vec![],
+    });
+    fake.env.session = Some(SessionId(MINE).to_string());
+    let (code, _, err) = run("move", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    let (code, _, err) = run("swap self 2222 --focus", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    let sent: Vec<_> = controls(&fake)
+        .into_iter()
+        .filter(|message| matches!(message, ClientMsg::MovePane { .. } | ClientMsg::SwapPanes { .. }))
+        .collect();
+    assert_eq!(
+        sent,
+        [
+            ClientMsg::MovePane {
+                req: 1,
+                id: SessionId(MINE),
+                placement: Placement::Tab,
+                near: Some(SessionId(MINE)),
+                focus: false,
+            },
+            ClientMsg::SwapPanes { req: 1, a: SessionId(MINE), b: SessionId(NEW), focus: true },
+        ]
+    );
 }

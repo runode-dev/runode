@@ -222,6 +222,8 @@ fn client_messages_round_trip() {
             from: Some(ID),
         },
         ClientMsg::Reveal { req: 11, id: ID },
+        ClientMsg::MovePane { req: 17, id: ID, placement: Placement::Tab, near: None, focus: false },
+        ClientMsg::SwapPanes { req: 18, a: ID, b: SessionId(3), focus: true },
         ClientMsg::ListDirs { req: 12, path: None },
         ClientMsg::ListDirs { req: 13, path: Some("/Users/me/中文".into()) },
         ClientMsg::OpenWorkspace { req: 14, dir: "/Users/me/dev".into(), focus: true, name: Some("后端".into()) },

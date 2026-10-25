@@ -19,6 +19,7 @@ use super::{
         logo::{accent, agent_logo, brand_color},
     },
     model::{Tab, TabId},
+    pane_move::DraggedPane,
     panes::now_ms,
 };
 use crate::ui::a11y::A11yPress;
@@ -430,6 +431,11 @@ impl WindowView {
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
                 this.move_tab(dragged.id, ix, window, cx);
+            }))
+            // 拖来的分屏：挪进这个标签。
+            .drag_over::<DraggedPane>(move |style, _, _, cx| style.bg(cx.theme().ring.opacity(0.18)))
+            .on_drop(cx.listener(move |this, dragged: &DraggedPane, window, cx| {
+                this.drop_pane_on_tab(dragged.pane, id, window, cx);
             }))
             .map(|el| match (icons, label) {
                 (Some(icons), Some((name, dir))) => {

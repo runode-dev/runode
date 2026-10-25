@@ -154,6 +154,17 @@ impl Workspace {
     fn pane_count(&self) -> usize {
         self.tabs.iter().map(|tab| tab.panes.len()).sum()
     }
+
+    /// 拿掉第 `ti` 个标签；拿掉的是当前标签时 `active` 指向右边那个（没有就左边），否则仍指着原来那个。
+    pub(super) fn remove_tab(&mut self, ti: usize) -> Tab {
+        let tab = self.tabs.remove(ti);
+        if ti != self.active {
+            self.active = closed_index(self.active, ti);
+        } else if self.active > 0 && self.active == self.tabs.len() {
+            self.active -= 1;
+        }
+        tab
+    }
 }
 
 impl WindowView {
@@ -286,6 +297,11 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Tab {
         let (id, entry) = self.pane_entry(view, window, cx);
+        self.tab_holding(id, entry)
+    }
+
+    /// 只装着终端 `id` 的新标签，`entry` 是它和对它事件的订阅。
+    pub(super) fn tab_holding(&mut self, id: EntityId, entry: (Entity<TerminalView>, Subscription)) -> Tab {
         // 关掉最后一个 workspace 后取消了退出、又开了终端的窗口照常存档。
         self.emptied = false;
         Tab {
@@ -474,7 +490,7 @@ impl WindowView {
     }
 
     /// 启动显示中的标签里还没启动 shell 的终端（恢复布局时看不见的终端都等到这时）。
-    fn start_shown(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn start_shown(&mut self, cx: &mut Context<Self>) {
         let Some(tab) = self.tab() else {
             return;
         };
@@ -557,14 +573,9 @@ impl WindowView {
     pub(super) fn close_tab_at(&mut self, wi: usize, ti: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.end_sessions(Closing::Tab { workspace: wi, tab: ti }, cx);
         let workspace = &mut self.workspaces[wi];
-        let tab = workspace.tabs.remove(ti);
-        super::agents::dismiss_alerts(tab.panes.keys().copied(), cx);
         let was_shown = ti == workspace.active;
-        if !was_shown {
-            workspace.active = closed_index(workspace.active, ti);
-        } else if workspace.active > 0 && workspace.active == workspace.tabs.len() {
-            workspace.active -= 1;
-        }
+        let tab = workspace.remove_tab(ti);
+        super::agents::dismiss_alerts(tab.panes.keys().copied(), cx);
         let active = workspace.active;
         if wi == self.active && was_shown {
             self.activate(active, window, cx);
@@ -591,7 +602,7 @@ impl WindowView {
         });
     }
 
-    fn locate_tab(&self, id: TabId) -> Option<(usize, usize)> {
+    pub(super) fn locate_tab(&self, id: TabId) -> Option<(usize, usize)> {
         self.workspaces
             .iter()
             .enumerate()

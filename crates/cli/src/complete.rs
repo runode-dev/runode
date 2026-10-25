@@ -118,6 +118,15 @@ const OPEN_OPTS: &[Opt] = &[
     opt("--no-fold", "Keep the split unfolded", Value::None),
     HELP,
 ];
+const MOVE_OPTS: &[Opt] = &[
+    opt("--tab", "Move it into a new tab after NEAR's tab (default)", Value::None),
+    opt("--right", "Put it to the right of NEAR's pane", Value::None),
+    opt("--down", "Put it below NEAR's pane", Value::None),
+    opt("--near", "The session to move it next to", Value::Session),
+    opt("--focus", "Switch to the moved terminal", Value::None),
+    HELP,
+];
+const SWAP_OPTS: &[Opt] = &[opt("--focus", "Switch to the first session", Value::None), HELP];
 const TODO_ADD_OPTS: &[Opt] = &[
     PROMPT,
     CWD,
@@ -148,6 +157,8 @@ fn options(command: &str, sub: Option<&str>) -> &'static [Opt] {
         ("send", _) => SEND_OPTS,
         ("wait", _) => WAIT_OPTS,
         ("open", _) => OPEN_OPTS,
+        ("move", _) => MOVE_OPTS,
+        ("swap", _) => SWAP_OPTS,
         ("todo", Some("add")) => TODO_ADD_OPTS,
         ("todo", Some("list" | "show")) | ("schedule", Some("list")) | ("remote", Some("devices")) => &[JSON, HELP],
         ("schedule", Some("add")) => SCHEDULE_ADD_OPTS,
@@ -224,6 +235,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("open", "Open a terminal in the app"),
     ("kill", "End a session and close its pane"),
     ("focus", "Show a session's pane and bring its window to the front"),
+    ("move", "Move a session's pane to another place in its window"),
+    ("swap", "Swap the panes of two sessions"),
     ("todo", "Put tasks for agents on the task board and start them"),
     ("schedule", "Start a task for an agent at set times"),
     ("remote", "Pair phones for remote access and manage them"),
@@ -406,7 +419,9 @@ fn candidates(previous: &[String], current: &str, env: &Env) -> (Also, Vec<(Stri
         ("help", _, 0) => {
             (Also::Nothing, help::PAGES.iter().map(|&(name, _)| (name.to_owned(), String::new())).collect())
         }
-        ("read" | "send" | "wait" | "kill" | "focus", _, 0) => (Also::Nothing, sessions(env)),
+        ("read" | "send" | "wait" | "kill" | "focus" | "move" | "swap", _, 0) | ("swap", _, 1) => {
+            (Also::Nothing, sessions(env))
+        }
         ("open", _, _) if line.literal => (Also::Files, Vec::new()),
         ("todo" | "schedule" | "remote" | "service" | "completions", None, 0) => {
             (Also::Nothing, owned(subcommands(command)))
@@ -530,6 +545,8 @@ mod tests {
             ("open", &[None]),
             ("kill", &[None]),
             ("focus", &[None]),
+            ("move", &[None]),
+            ("swap", &[None]),
             ("todo", &[Some("add"), Some("list"), Some("show"), Some("start"), Some("done"), Some("rm")]),
             ("schedule", &[Some("add"), Some("list"), Some("rm")]),
             ("remote", &[Some("pair"), Some("devices"), Some("revoke")]),

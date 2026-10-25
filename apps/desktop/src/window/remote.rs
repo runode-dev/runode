@@ -1,5 +1,6 @@
-//! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`，命令行问各个终端摆在哪，以及手机
-//! 新建工作区、给工作区改名）：在某个终端旁边开新终端，切到某个终端，回答布局（见 `layout_report`），
+//! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`、`runode move`、`runode swap`，命令行问
+//! 各个终端摆在哪，以及手机新建工作区、给工作区改名）：在某个终端旁边开新终端，切到某个终端，挪动、
+//! 对调分屏，回答布局（见 `layout_report`），
 //! 在最前面那个窗口里开一个某个目录的 workspace（已经有了就用它），按布局里的序号给 workspace 改名。宿主把请求包成 `HostMsg::UiRequest`
 //! 经连接转过来（见 `host_client::serve_ui`），这里在主线程上按会话找到它所在的窗口和分屏再办，
 //! 用 `Link::ui_reply` 回话。终端里的程序读写剪贴板也这样转过来，见 `clipboard`。
@@ -142,6 +143,69 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
             }
             None => fail(req, format!("no runode window shows session {id}")),
         },
+        ClientMsg::MovePane { req, id, placement, near, focus } => {
+            let Some((window, pane)) = find_session(id, cx) else {
+                return fail(req, format!("no runode window shows session {id}"));
+            };
+            let target = match near {
+                Some(near) => find_session(near, cx),
+                None => front_pane(cx).and_then(|(window, pane)| Some((window, pane?))),
+            };
+            let Some((near_window, near_pane)) = target else {
+                return fail(
+                    req,
+                    match near {
+                        Some(near) => format!("no runode window shows session {near}"),
+                        None => "there is no runode window to move it to".into(),
+                    },
+                );
+            };
+            if near_window.window_id() != window.window_id() {
+                let message = match near {
+                    Some(_) => "the two sessions are in different windows".into(),
+                    None => format!("session {id} is not in the front runode window"),
+                };
+                return fail(req, message);
+            }
+            if near_pane == pane && placement != Placement::Tab {
+                return fail(req, "cannot move a session next to itself".into());
+            }
+            let moved = window
+                .update(cx, |view, window, cx| {
+                    let to = view.destination(near_pane, placement)?;
+                    view.move_pane(pane, to, false, window, cx).then_some(())
+                })
+                .ok()
+                .flatten();
+            if moved.is_none() {
+                return fail(req, format!("could not move session {id}"));
+            }
+            if focus {
+                reveal(window, pane, cx);
+            }
+            HostMsg::Done { req }
+        }
+        ClientMsg::SwapPanes { req, a, b, focus } => {
+            let (found_a, found_b) = (find_session(a, cx), find_session(b, cx));
+            let (Some((window, first)), Some((other, second))) = (found_a, found_b) else {
+                let missing = if found_a.is_none() { a } else { b };
+                return fail(req, format!("no runode window shows session {missing}"));
+            };
+            if other.window_id() != window.window_id() {
+                return fail(req, "the two sessions are in different windows".into());
+            }
+            if first == second {
+                return fail(req, "cannot swap a session with itself".into());
+            }
+            let swapped = window.update(cx, |view, window, cx| view.swap_panes(first, second, false, window, cx));
+            if !matches!(swapped, Ok(true)) {
+                return fail(req, format!("could not swap sessions {a} and {b}"));
+            }
+            if focus {
+                reveal(window, first, cx);
+            }
+            HostMsg::Done { req }
+        }
         ClientMsg::Layout { req } => HostMsg::Layout { req, windows: layout_report::current(cx) },
         ClientMsg::WriteClipboard { text, .. } => clipboard::write(text.0, cx),
         other => HostMsg::Error { req: None, id: None, message: format!("the runode app does not handle {other:?}") },
