@@ -45,7 +45,7 @@
             aboveHomeIndicator.priority = .required - 1
             NSLayoutConstraint.activate([
                 scroll.leadingAnchor.constraint(equalTo: safe.leadingAnchor),
-                scroll.trailingAnchor.constraint(equalTo: mic.leadingAnchor, constant: -2),
+                scroll.trailingAnchor.constraint(equalTo: mic.leadingAnchor, constant: -6),
                 mic.trailingAnchor.constraint(equalTo: keyboard.leadingAnchor, constant: -6),
                 mic.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
                 mic.heightAnchor.constraint(equalTo: keyboard.heightAnchor),
