@@ -21,6 +21,10 @@ const SCREEN_NAME: &str = if cfg!(debug_assertions) { "screen-dev" } else { "scr
 /// 看板的库名。调试构建的宿主另用一份：两边的宿主各自在跑，共用一份库时定时会触发两次。
 const TODOS_DB: &str = if cfg!(debug_assertions) { "todos-dev.db" } else { "todos.db" };
 
+/// 窗口布局的存档名。调试构建另用一份：存档记的会话号只在写它的那个宿主里有，读到另一边的
+/// 接不上，就会在原目录新开终端、把同一场 agent 对话再接回一次。
+const WINDOWS_FILE: &str = if cfg!(debug_assertions) { "windows-dev.json" } else { "windows.json" };
+
 /// `sockaddr_un.sun_path` 的长度（各系统里最短的那个），含结尾的 NUL；socket 路径的
 /// 字节数要比它小，否则绑定和连接都会失败。
 const SUN_PATH_LEN: usize = 104;
@@ -169,7 +173,7 @@ impl Dirs {
 
     /// 窗口布局的存档。
     pub fn windows_file(&self) -> Option<PathBuf> {
-        self.data_file("windows.json")
+        self.data_file(WINDOWS_FILE)
     }
 
     /// 用户自己加的命令：通用的，和按项目目录分开的，见 `runode_protocol::TaskSourceKind`。
@@ -368,7 +372,7 @@ mod tests {
     fn everything_lives_under_dot_runode() {
         let dirs = dirs(&[("HOME", "/home/me")]);
         assert_eq!(dirs.config_file(), Some("/home/me/.runode/config.conf".into()));
-        assert_eq!(dirs.windows_file(), Some("/home/me/.runode/windows.json".into()));
+        assert_eq!(dirs.windows_file(), Some(PathBuf::from("/home/me/.runode").join(WINDOWS_FILE)));
         assert_eq!(dirs.todos_db(), Some(PathBuf::from("/home/me/.runode").join(TODOS_DB)));
         assert_eq!(dirs.themes_dir(), Some("/home/me/.runode/themes".into()));
         assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.runode/agent-detection".into()));
