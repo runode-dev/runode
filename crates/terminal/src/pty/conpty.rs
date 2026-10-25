@@ -176,6 +176,7 @@ impl Pty {
         };
         let shell = shell.map_or_else(default_shell, str::to_owned);
         let mut cmd = CommandBuilder::new(&shell);
+        super::drop_outer_session(&mut cmd);
         let dirs = runode_paths::Dirs::from_env();
         let report = shell_integration::prepare(&dirs, integration, &shell, &self.shell_features, &mut cmd);
         cmd.env("TERM", "xterm-256color");

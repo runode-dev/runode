@@ -424,6 +424,51 @@ pub fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into())
 }
 
+/// 拉起 runode 的那个终端和 agent 会话给子进程设的标识，说的不是 runode 的终端，shell 不继承：
+/// Claude Code 带着 `CLAUDE_CODE_CHILD_SESSION` 启动时不在 `~/.claude/sessions` 登记自己的对话，
+/// 重启后接不回；tmux 见到 `TMUX` 当成嵌套。只列这些程序自己设的名字，`CLAUDE_CODE_` 开头的
+/// 还有用户自己的设置。
+const OUTER_SESSION_VARS: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_SESSION_ID",
+    "KITTY_LISTEN_ON",
+    "KITTY_PID",
+    "KITTY_PUBLIC_KEY",
+    "KITTY_WINDOW_ID",
+    "LC_TERMINAL",
+    "LC_TERMINAL_VERSION",
+    "STY",
+    "TERMINAL_EMULATOR",
+    "TERM_SESSION_ID",
+    "TMUX",
+    "TMUX_PANE",
+    "WT_PROFILE_ID",
+    "WT_SESSION",
+];
+
+/// 整组都由终端自己设的变量前缀，同样不继承。
+const OUTER_SESSION_PREFIXES: &[&str] = &["ALACRITTY_", "GHOSTTY_", "HERDR_", "ITERM_", "VSCODE_", "WEZTERM_"];
+
+fn drop_outer_session(cmd: &mut portable_pty::CommandBuilder) {
+    let outer: Vec<String> = cmd
+        .iter_full_env_as_str()
+        .map(|(key, _)| key)
+        .filter(|key| {
+            OUTER_SESSION_VARS.contains(key) || OUTER_SESSION_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
+        })
+        .map(str::to_owned)
+        .collect();
+    for key in outer {
+        cmd.env_remove(key);
+    }
+}
+
 /// PTY 上跑着的 shell。
 #[cfg(unix)]
 enum Shell {
@@ -798,6 +843,7 @@ impl Pty {
         };
         let shell = shell.map_or_else(default_shell, str::to_owned);
         let mut cmd = CommandBuilder::new(&shell);
+        drop_outer_session(&mut cmd);
         // 用登录 shell，这样会执行用户的 profile。
         let dirs = runode_paths::Dirs::from_env();
         let report = shell_integration::prepare(&dirs, integration, &shell, &self.shell_features, &mut cmd);
@@ -1169,6 +1215,20 @@ mod tests {
         // SAFETY: 只读自己的进程组号。
         let group = unsafe { libc::getpgrp() };
         assert!(group_members(group).contains(&pid));
+    }
+
+    /// 外层终端和 Claude Code 的会话标识不传给 shell，用户自己的设置和 runode 的变量照传。
+    #[test]
+    fn the_shell_does_not_inherit_the_outer_session() {
+        let mut cmd = CommandBuilder::new("sh");
+        let dropped = ["CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "ITERM_SESSION_ID", "TMUX", "VSCODE_IPC_HOOK_CLI"];
+        let kept = ["CLAUDE_CODE_USE_BEDROCK", "KITTY_CONFIG_DIRECTORY", "RUNODE_SESSION", "TMUX_TMPDIR"];
+        for key in dropped.iter().chain(&kept) {
+            cmd.env(key, "1");
+        }
+        drop_outer_session(&mut cmd);
+        assert!(dropped.iter().all(|key| cmd.get_env(key).is_none()));
+        assert!(kept.iter().all(|key| cmd.get_env(key).is_some()));
     }
 
     #[test]
