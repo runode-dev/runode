@@ -415,7 +415,7 @@ impl GitPanel {
         };
         let mut items = vec![
             item("git.open_file", FileOp::Open, true),
-            item("files.reveal", FileOp::Reveal, true),
+            item(&crate::i18n::os_key("files.reveal"), FileOp::Reveal, true),
             item("files.insert_path", FileOp::InsertPath, true),
             None,
         ];

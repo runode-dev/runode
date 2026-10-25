@@ -1051,7 +1051,10 @@ files:
   new_file: 新增檔案…
   new_folder: 新增檔案夾…
   collapse_all: 全部收合
-  reveal: 在 Finder 中顯示
+  reveal:
+    macos: "在 Finder 中顯示"
+    windows: "在檔案總管中顯示"
+    linux: "在檔案管理員中顯示"
   open_in_terminal: 在新分頁中打開
   preview: 在預覽中打開
   insert_path: 把路徑打進終端機
@@ -1062,11 +1065,26 @@ files:
   untrack_detail: 只寫進 .gitignore 不會生效。不再追蹤會把它從暫存區移除，檔案留在磁碟上，下次提交時從儲存庫裡刪掉。
   untrack_confirm: 不再追蹤並忽略
   rename: 重新命名…
-  delete: 丟到垃圾桶
-  delete_title: 把「%{name}」丟到垃圾桶？
-  delete_detail: 之後可以從垃圾桶放回原處。
-  delete_dir_detail: 裡面的所有內容會一起移走，之後可以從垃圾桶放回原處。
-  delete_confirm: 丟到垃圾桶
+  delete:
+    macos: "丟到垃圾桶"
+    windows: "移到資源回收筒"
+    linux: "丟到垃圾桶"
+  delete_title:
+    macos: "把「%{name}」丟到垃圾桶？"
+    windows: "把「%{name}」移到資源回收筒？"
+    linux: "把「%{name}」丟到垃圾桶？"
+  delete_detail:
+    macos: "之後可以從垃圾桶放回原處。"
+    windows: "之後可以從資源回收筒還原。"
+    linux: "之後可以從垃圾桶還原。"
+  delete_dir_detail:
+    macos: "裡面的所有內容會一起移走，之後可以從垃圾桶放回原處。"
+    windows: "裡面的所有內容會一起移走，之後可以從資源回收筒還原。"
+    linux: "裡面的所有內容會一起移走，之後可以從垃圾桶還原。"
+  delete_confirm:
+    macos: "丟到垃圾桶"
+    windows: "移到資源回收筒"
+    linux: "丟到垃圾桶"
   move_title: 把「%{name}」移到「%{dir}」裡？
   move_confirm: 移動
   cancel: 取消
@@ -1075,7 +1093,10 @@ files:
   into_itself: 不能把「%{name}」放進它自己裡面。
   newline_in_name: 名字裡有換行，沒法寫進 .gitignore，先改個名再加。
   invalid_name: 「%{name}」不能用作名稱。
-  unsupported: 這個系統上不支援丟到垃圾桶。
+  unsupported:
+    macos: "這個系統上不支援丟到垃圾桶。"
+    windows: "這個系統上還不能移到資源回收筒。"
+    linux: "這個系統上還不能丟到垃圾桶。"
   ok: 好
   search_placeholder: 尋找檔案
   search_name: 名稱
@@ -1103,7 +1124,10 @@ files:
   show_dotfiles: 顯示點檔案
   show_ignored: 顯示 Git 忽略的檔案
   open_in_vscode: 用 VS Code 開啟
-  open_in_finder: 在 Finder 中開啟
+  open_in_finder:
+    macos: "在 Finder 中開啟"
+    windows: "在檔案總管中開啟"
+    linux: "在檔案管理員中開啟"
 action:
   about: 關於 Runode
   quit: 結束

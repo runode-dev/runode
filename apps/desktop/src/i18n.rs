@@ -47,9 +47,21 @@ pub fn set(locale: &str) {
     rust_i18n::set_locale(locale);
 }
 
-/// 当前语言里 `key` 的翻译，菜单和设置页用。
+/// 当前语言里 `key` 的翻译。
 pub fn tr(key: &str) -> String {
     rust_i18n::t!(key).into_owned()
+}
+
+/// `key` 下分系统写的那一条（`<key>.macos`、`.windows`、`.linux`）：文件管理器和回收站各系统叫法不同。
+pub fn os_key(key: &str) -> String {
+    let os = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(windows) {
+        "windows"
+    } else {
+        "linux"
+    };
+    format!("{key}.{os}")
 }
 
 /// 快捷键动作的说明：当前语言里 `action.<name>` 的翻译，英文和缺了翻译的用动作表里的英文。
@@ -146,6 +158,18 @@ mod tests {
             assert!(extra.is_empty(), "{locale} has keys English lacks: {extra:?}");
         }
         assert!(english.iter().all(|k| !k.starts_with("action.")), "English action docs belong in ACTIONS");
+    }
+
+    /// `os_key` 取的键三个系统都要写，漏了的系统上界面会露出键名。
+    #[test]
+    fn os_keys_cover_every_system() {
+        let english = crate::_rust_i18n_backend().messages_for_locale(FALLBACK).unwrap_or_default();
+        let has = |key: String| english.iter().any(|(k, _)| *k == key);
+        let bases: Vec<_> = english.iter().filter_map(|(k, _)| k.strip_suffix(".macos")).collect();
+        assert!(!bases.is_empty());
+        for base in bases {
+            assert!(has(format!("{base}.windows")) && has(format!("{base}.linux")), "{base}");
+        }
     }
 
     /// 每种语言都给动作表里的每个动作翻译了说明，也没有动作表里没有的。

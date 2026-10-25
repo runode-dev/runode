@@ -1051,7 +1051,10 @@ files:
   new_file: 新建文件…
   new_folder: 新建文件夹…
   collapse_all: 全部收起
-  reveal: 在访达中显示
+  reveal:
+    macos: "在访达中显示"
+    windows: "在文件资源管理器中显示"
+    linux: "在文件管理器中显示"
   open_in_terminal: 在新标签页中打开
   preview: 在预览中打开
   insert_path: 把路径打进终端
@@ -1062,11 +1065,26 @@ files:
   untrack_detail: 只写进 .gitignore 不会生效。不再跟踪会把它从暂存区拿掉，文件留在磁盘上，下次提交时从仓库里删掉。
   untrack_confirm: 不再跟踪并忽略
   rename: 重命名…
-  delete: 移到废纸篓
-  delete_title: 把“%{name}”移到废纸篓？
-  delete_detail: 之后可以从废纸篓放回原处。
-  delete_dir_detail: 里面的所有内容会一起移走，之后可以从废纸篓放回原处。
-  delete_confirm: 移到废纸篓
+  delete:
+    macos: "移到废纸篓"
+    windows: "移到回收站"
+    linux: "移到回收站"
+  delete_title:
+    macos: "把“%{name}”移到废纸篓？"
+    windows: "把“%{name}”移到回收站？"
+    linux: "把“%{name}”移到回收站？"
+  delete_detail:
+    macos: "之后可以从废纸篓放回原处。"
+    windows: "之后可以从回收站还原。"
+    linux: "之后可以从回收站还原。"
+  delete_dir_detail:
+    macos: "里面的所有内容会一起移走，之后可以从废纸篓放回原处。"
+    windows: "里面的所有内容会一起移走，之后可以从回收站还原。"
+    linux: "里面的所有内容会一起移走，之后可以从回收站还原。"
+  delete_confirm:
+    macos: "移到废纸篓"
+    windows: "移到回收站"
+    linux: "移到回收站"
   move_title: 把“%{name}”移到“%{dir}”里？
   move_confirm: 移动
   cancel: 取消
@@ -1075,7 +1093,10 @@ files:
   into_itself: 不能把“%{name}”放进它自己里面。
   newline_in_name: 名字里有换行，没法写进 .gitignore，先改个名再加。
   invalid_name: “%{name}”不能用作名字。
-  unsupported: 这个系统上不支持移到废纸篓。
+  unsupported:
+    macos: "这个系统上不支持移到废纸篓。"
+    windows: "这个系统上还不能移到回收站。"
+    linux: "这个系统上还不能移到回收站。"
   ok: 好
   search_placeholder: 查找文件
   search_name: 名称
@@ -1103,7 +1124,10 @@ files:
   show_dotfiles: 显示点文件
   show_ignored: 显示 Git 忽略的文件
   open_in_vscode: 用 VS Code 打开
-  open_in_finder: 在访达中打开
+  open_in_finder:
+    macos: "在访达中打开"
+    windows: "在文件资源管理器中打开"
+    linux: "在文件管理器中打开"
 action:
   about: 关于 Runode
   quit: 退出

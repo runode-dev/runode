@@ -25,7 +25,7 @@ impl FileTree {
             item("files.new_file", Box::new(NewFile)),
             item("files.new_folder", Box::new(NewFolder)),
             None,
-            item("files.reveal", Box::new(RevealInFinder)),
+            item(&crate::i18n::os_key("files.reveal"), Box::new(RevealInFinder)),
             item("files.open_in_terminal", Box::new(OpenInTerminal)),
         ];
         if let Some((_, false)) = selected {
@@ -52,7 +52,7 @@ impl FileTree {
             items.extend([
                 None,
                 item("files.rename", Box::new(RenameFile)),
-                item("files.delete", Box::new(DeleteFile)),
+                item(&crate::i18n::os_key("files.delete"), Box::new(DeleteFile)),
             ]);
         }
         let target = self.focus.clone();

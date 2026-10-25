@@ -46,7 +46,7 @@ fn error_text(err: &OpError, name: &str) -> String {
         OpError::IntoItself => rust_i18n::t!("files.into_itself", name = name).into_owned(),
         OpError::NewlineInName => rust_i18n::t!("files.newline_in_name").into_owned(),
         OpError::Io(err) if err.kind() == std::io::ErrorKind::Unsupported => {
-            rust_i18n::t!("files.unsupported").into_owned()
+            crate::i18n::tr(&crate::i18n::os_key("files.unsupported"))
         }
         OpError::Io(err) => err.to_string(),
     }
@@ -291,14 +291,17 @@ impl FileTree {
             return;
         };
         let name = base_name(&path);
-        let title = rust_i18n::t!("files.delete_title", name = name);
-        let detail =
-            if is_dir { rust_i18n::t!("files.delete_dir_detail") } else { rust_i18n::t!("files.delete_detail") };
+        let title = rust_i18n::t!(&crate::i18n::os_key("files.delete_title"), name = name);
+        let detail = if is_dir {
+            crate::i18n::tr(&crate::i18n::os_key("files.delete_dir_detail"))
+        } else {
+            crate::i18n::tr(&crate::i18n::os_key("files.delete_detail"))
+        };
         let answer = window.prompt(
             PromptLevel::Warning,
             &title,
             Some(&detail),
-            &[&*rust_i18n::t!("files.delete_confirm"), &*rust_i18n::t!("files.cancel")],
+            &[&*crate::i18n::tr(&crate::i18n::os_key("files.delete_confirm")), &*rust_i18n::t!("files.cancel")],
             cx,
         );
         // 完成时可能已经切到了别的 workspace，选中和定位的是发起的那个 workspace 的树（预览和别的树都跟着改）。

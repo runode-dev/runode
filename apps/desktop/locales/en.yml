@@ -1051,7 +1051,10 @@ files:
   new_file: New File…
   new_folder: New Folder…
   collapse_all: Collapse Folders
-  reveal: Reveal in Finder
+  reveal:
+    macos: "Reveal in Finder"
+    windows: "Reveal in File Explorer"
+    linux: "Show in File Manager"
   open_in_terminal: Open in New Tab
   preview: Open in Preview
   insert_path: Insert Path into Terminal
@@ -1062,11 +1065,26 @@ files:
   untrack_detail: Adding a tracked file to .gitignore has no effect. If you stop tracking it, it leaves the index but stays on disk, and the next commit deletes it from the repository.
   untrack_confirm: Stop Tracking and Ignore
   rename: Rename…
-  delete: Move to Trash
-  delete_title: "Move “%{name}” to the Trash?"
-  delete_detail: You can put it back from the Trash.
-  delete_dir_detail: Everything inside goes with it. You can put it back from the Trash.
-  delete_confirm: Move to Trash
+  delete:
+    macos: "Move to Trash"
+    windows: "Move to Recycle Bin"
+    linux: "Move to Trash"
+  delete_title:
+    macos: "Move “%{name}” to the Trash?"
+    windows: "Move “%{name}” to the Recycle Bin?"
+    linux: "Move “%{name}” to the Trash?"
+  delete_detail:
+    macos: "You can put it back from the Trash."
+    windows: "You can restore it from the Recycle Bin."
+    linux: "You can restore it from the Trash."
+  delete_dir_detail:
+    macos: "Everything inside goes with it. You can put it back from the Trash."
+    windows: "Everything inside goes with it. You can restore it from the Recycle Bin."
+    linux: "Everything inside goes with it. You can restore it from the Trash."
+  delete_confirm:
+    macos: "Move to Trash"
+    windows: "Move to Recycle Bin"
+    linux: "Move to Trash"
   move_title: "Move “%{name}” into “%{dir}”?"
   move_confirm: Move
   cancel: Cancel
@@ -1075,7 +1093,10 @@ files:
   into_itself: "Can't put “%{name}” inside itself."
   newline_in_name: The name contains a line break, so it can't be written to .gitignore. Rename it first.
   invalid_name: "“%{name}” isn't a valid name."
-  unsupported: Moving to the Trash isn't supported on this system.
+  unsupported:
+    macos: "Moving to the Trash isn't supported on this system."
+    windows: "Moving to the Recycle Bin isn't supported on this system yet."
+    linux: "Moving to the Trash isn't supported on this system yet."
   ok: OK
   search_placeholder: Find files
   search_name: Name
@@ -1103,4 +1124,7 @@ files:
   show_dotfiles: Show Dotfiles
   show_ignored: Show Git-Ignored Files
   open_in_vscode: Open in VS Code
-  open_in_finder: Open in Finder
+  open_in_finder:
+    macos: "Open in Finder"
+    windows: "Open in File Explorer"
+    linux: "Open in File Manager"

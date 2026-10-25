@@ -426,7 +426,8 @@ impl FileTree {
             check("files.show_ignored", self.show_ignored, Box::new(ToggleShowIgnored)),
             None,
             item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
-            item("files.open_in_finder", Box::new(OpenRootInFinder)).map(|item| item.with_icon(FOLDER_OPEN_ICON)),
+            item(&crate::i18n::os_key("files.open_in_finder"), Box::new(OpenRootInFinder))
+                .map(|item| item.with_icon(FOLDER_OPEN_ICON)),
         ];
         let target = self.focus.clone();
         self.open_context_menu(position, items, target, cx);

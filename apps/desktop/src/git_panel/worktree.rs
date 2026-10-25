@@ -56,7 +56,7 @@ impl GitPanel {
         };
         let mut items = vec![
             item("git.worktree.open_in_new_tab", WorktreeOp::OpenInNewTab, true),
-            item("files.reveal", WorktreeOp::Reveal, true),
+            item(&crate::i18n::os_key("files.reveal"), WorktreeOp::Reveal, true),
         ];
         if removable {
             items.push(item("git.worktree.remove", WorktreeOp::Remove, enabled));
