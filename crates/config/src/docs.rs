@@ -70,6 +70,9 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "task-placement" => {
             "Where the title bar's task menu runs a task: right (default), down or tab. right and down split the current terminal in the current tab and put the new one to its right or below; tab opens a new tab to the right of the current one."
         }
+        "task-files-collapsed" => {
+            "Start the Makefile and package.json groups of the title bar's task menu collapsed: true (default) or false. The group holding the last task run stays expanded. Click a group's title to expand or collapse it."
+        }
         "theme" => {
             "Theme: a theme name listed at the end of this file, or the absolute path of a theme file. It can also\n\
      follow the system appearance, e.g. light:Catppuccin Latte,dark:Catppuccin Mocha. The theme applies first,\n\

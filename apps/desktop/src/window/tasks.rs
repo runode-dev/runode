@@ -58,11 +58,12 @@ pub(super) struct RunTask {
     dir: Option<PathBuf>,
 }
 
-/// 命令菜单里分组的标题：收起或展开一组，`key` 见 `group_key`。
+/// 命令菜单里分组的标题：收起或展开一组，`key` 见 `group_key`，`folded` 是点之前收没收着。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(super) struct ToggleTaskGroup {
     key: PathBuf,
+    folded: bool,
 }
 
 /// 自己加的命令行尾的删除按钮：删掉 `project`（通用的为空）那一份里的 `name`。
@@ -95,6 +96,14 @@ pub(super) struct BindTask {
 /// 记一组收没收起用的键：自己加的命令按项目目录，通用的和各个文件按文件，几份不会撞上。
 fn group_key(source: &TaskSource) -> PathBuf {
     source.project.clone().unwrap_or_else(|| source.file.clone())
+}
+
+/// 没点过标题时这一组收不收着：配置项 `task-files-collapsed` 开着时收起 Makefile 和 package.json，
+/// 上次跑的命令 `last` 在这一组里时不收，打开菜单就选得中它。
+fn task_folded_by_default(source: &TaskSource, collapse_files: bool, last: Option<&String>) -> bool {
+    collapse_files
+        && matches!(source.kind, TaskSourceKind::Makefile | TaskSourceKind::PackageJson)
+        && !source.tasks.iter().any(|task| Some(&task.command) == last)
 }
 
 /// 这一组是自己加的命令（本项目的或通用的）。
@@ -302,10 +311,7 @@ impl WindowView {
 
     /// 命令菜单里点了分组的标题：收起或展开这一组，菜单开着不关。
     pub(super) fn toggle_task_group(&mut self, action: &ToggleTaskGroup, _: &mut Window, cx: &mut Context<Self>) {
-        let folded = &mut self.workspace_mut().project.tasks_folded;
-        if !folded.remove(&action.key) {
-            folded.insert(action.key.clone());
-        }
+        self.workspace_mut().project.tasks_folded.insert(action.key.clone(), !action.folded);
         let (items, _) = self.tasks_menu_items(cx);
         self.replace_menu_items(items, cx);
     }
@@ -352,6 +358,7 @@ impl WindowView {
         let mut items = vec![Some(MenuItem::new(rust_i18n::t!("tasks.add"), Box::new(AddTask), true, cx))];
         let mut last = None;
         let project = &self.workspace().project;
+        let collapse_files = cx.global::<AppConfig>().0.task_files_collapsed;
         let listed = project.tasks.as_ref();
         for (dir, source) in
             listed.into_iter().flat_map(|(dir, sources)| sources.iter().map(move |source| (dir, source)))
@@ -366,14 +373,18 @@ impl WindowView {
                 (_, Ok(rel)) => rel.display().to_string(),
                 (_, Err(_)) => display_dir(&source.file),
             };
-            let folded = project.tasks_folded.contains(&group_key(source));
+            let custom = is_custom(source);
+            let key = group_key(source);
+            let folded = project
+                .tasks_folded
+                .get(&key)
+                .copied()
+                .unwrap_or_else(|| task_folded_by_default(source, collapse_files, project.tasks_last.as_ref()));
             let count = Some(source.tasks.len().to_string().into());
-            let toggle = ToggleTaskGroup { key: group_key(source) };
-            items.push(Some(MenuItem::group(label, count, folded, Box::new(toggle))));
+            items.push(Some(MenuItem::group(label, count, folded, Box::new(ToggleTaskGroup { key, folded }))));
             if folded {
                 continue;
             }
-            let custom = is_custom(source);
             if let Some(ix) = source.tasks.iter().position(|task| project.tasks_last.as_ref() == Some(&task.command))
                 && last.is_none()
             {
@@ -437,5 +448,24 @@ mod tests {
         assert!(is_task_file(Path::new("pnpm-lock.yaml")));
         assert!(!is_task_file(Path::new("/a/Makefile.bak")));
         assert!(!is_task_file(Path::new("/a/src/main.rs")));
+    }
+
+    /// 只收 Makefile 和 package.json，上次跑的命令所在的那组不收，选得中它。
+    #[test]
+    fn folds_only_command_files_without_the_last_task() {
+        let source = |kind| TaskSource {
+            kind,
+            file: "/a/Makefile".into(),
+            project: None,
+            tasks: vec![runode_protocol::TaskEntry { name: "t".into(), command: "make t".into(), description: None }],
+            truncated: false,
+        };
+        let last = "make t".to_owned();
+        assert!(task_folded_by_default(&source(TaskSourceKind::Makefile), true, None));
+        assert!(task_folded_by_default(&source(TaskSourceKind::PackageJson), true, None));
+        assert!(!task_folded_by_default(&source(TaskSourceKind::Makefile), true, Some(&last)));
+        assert!(!task_folded_by_default(&source(TaskSourceKind::Makefile), false, None));
+        assert!(!task_folded_by_default(&source(TaskSourceKind::Custom), true, None));
+        assert!(!task_folded_by_default(&source(TaskSourceKind::Unknown), true, None));
     }
 }

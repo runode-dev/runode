@@ -505,6 +505,7 @@ settings:
     file_tree_preview_click: Open files in the preview with
     preview_font_size: Preview font size
     task_placement: Run tasks in
+    task_files_collapsed: Collapse Makefile and package.json
     dictation_model: Speech model
     dictation_words: Hotwords
     dictation_cloud: Cloud recognition
@@ -571,6 +572,7 @@ settings:
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.
     task_placement: Where a task picked from the title bar's task menu runs.
+    task_files_collapsed: Keep these two groups collapsed when the task menu opens. Click a title to expand it.
     dictation_model: Both run offline on this computer. SenseVoice is fast and adds punctuation; FireRedASR2 is the most accurate for Chinese but larger, slower and without punctuation.
     dictation_words: "Project names and technical terms dictation should get right, separated by commas. The offline models do not use them; cloud recognition and polishing do."
     dictation_cloud: "Used when the offline model is not downloaded or fails. The recording is uploaded to the service you choose."

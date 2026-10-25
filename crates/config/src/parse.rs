@@ -38,7 +38,7 @@ pub const KEYS: &[&[&str]] = &[
         "status-bar-hidden",
     ],
     &["file-tree-preview-click", "preview-font-size"],
-    &["task-placement"],
+    &["task-placement", "task-files-collapsed"],
     &[
         "dictation-model",
         "dictation-words",
@@ -251,6 +251,9 @@ impl Config {
                     "tab" => TaskPlacement::Tab,
                     _ => return Err("expected right, down or tab".into()),
                 };
+            }
+            "task-files-collapsed" => {
+                self.task_files_collapsed = or_default(empty, defaults.task_files_collapsed, || parse_bool(value))?;
             }
             "dictation-model" => {
                 self.dictation_model = match value {
@@ -958,6 +961,12 @@ unknown-key = whatever
         assert_eq!(load(&["task-placement = tab"]).task_placement, TaskPlacement::Tab);
         assert_eq!(load(&["task-placement = down"]).task_placement, TaskPlacement::Down);
         assert_eq!(load(&["task-placement = tab\ntask-placement = left"]).task_placement, TaskPlacement::Tab);
+    }
+
+    #[test]
+    fn task_files_collapsed_defaults_to_true() {
+        assert!(Config::default().task_files_collapsed);
+        assert!(!load(&["task-files-collapsed = false"]).task_files_collapsed);
     }
 
     #[test]

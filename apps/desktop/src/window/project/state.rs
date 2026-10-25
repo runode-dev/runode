@@ -3,7 +3,7 @@
 //! `git_panel` 里。
 
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -49,8 +49,8 @@ pub(in crate::window) struct Project {
     pub tasks: Option<(PathBuf, Vec<TaskSource>)>,
     pub tasks_listing: bool,
     pub tasks_stale: bool,
-    /// 命令菜单里收起来的分组，按列出命令的文件记。
-    pub tasks_folded: HashSet<PathBuf>,
+    /// 命令菜单里点过标题的分组收着（true）还是展开，按 `group_key` 记；没点过的按 `task_folded_by_default`。
+    pub tasks_folded: HashMap<PathBuf, bool>,
     /// 命令菜单里上次跑的命令行，再打开菜单时选中它，回车就再跑一次；记在窗口存档里，重启后还在。
     pub tasks_last: Option<String>,
     /// 交给后台读的时候拿走，读完放回来。
