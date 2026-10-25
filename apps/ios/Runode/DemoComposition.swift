@@ -12,8 +12,8 @@
     enum DemoComposition {
         static let argument = "-runode-demo"
         static let machine = MachineRecord(
-            id: UUID(uuidString: "00000000-0000-0000-0000-00000000DE70")!, name: "Ethan 的 MacBook Pro",
-            hostName: "Ethan 的 MacBook Pro", fingerprint: CertificateFingerprint(bytes: Data(repeating: 7, count: 32))!,
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000DE70")!, name: demoMachineName,
+            hostName: demoMachineName, fingerprint: CertificateFingerprint(bytes: Data(repeating: 7, count: 32))!,
             port: 7866, addresses: ["127.0.0.1"], lastAddress: "192.168.1.20", deviceId: "00000000000000000000000000000000")
         /// 连不上的那台。
         static let offlineMachine = MachineRecord(
@@ -32,7 +32,7 @@
             return AppDependencies(
                 store: store, keyStore: MemoryDeviceKeyStore(), pairing: DemoPairing(),
                 makeLink: { record -> any HostLink in record.id == offlineMachine.id ? DemoOfflineLink() : DemoLink() },
-                deviceName: "演示 iPhone",
+                deviceName: demoText("演示 iPhone", "Demo iPhone"),
                 // 上次打开的终端记在单独的一份设置里，和正式的分开；先带 `shell` 启动一次，再不带参数启动，
                 // 首页就有「上次打开」。
                 recents: DefaultsStore("recentTerminal", defaults: UserDefaults(suiteName: "demo") ?? .standard))
@@ -60,9 +60,16 @@
         }
     }
 
+    private let demoMachineName = demoText("Ethan 的 MacBook Pro", "Ethan’s MacBook Pro")
+
+    /// 演示数据里显示出来的文字：系统语言是中文时用中文，否则用英文，截各语言的商店截图时不中英混杂。
+    private func demoText(_ chinese: String, _ english: String) -> String {
+        Locale.preferredLanguages.first?.hasPrefix("zh") == true ? chinese : english
+    }
+
     private struct DemoPairing: Pairing {
         func pair(with invitation: PairingInvitation, deviceName: String) async throws -> MachineRecord {
-            throw LinkFailure.connectionFailed("演示模式不能配对")
+            throw LinkFailure.connectionFailed(demoText("演示模式不能配对", "Pairing is unavailable in demo mode"))
         }
     }
 
@@ -70,7 +77,7 @@
     private final class DemoOfflineLink: HostLink {
         func events() async -> AsyncStream<HostEvent> {
             let (stream, continuation) = AsyncStream.makeStream(of: HostEvent.self)
-            continuation.yield(.state(.failed(.connectionFailed("找不到这台电脑"))))
+            continuation.yield(.state(.failed(.connectionFailed(demoText("找不到这台电脑", "Can’t find this computer")))))
             return stream
         }
 
@@ -90,14 +97,14 @@
             id: SessionId("0123456789abcdef0011223344556677")!,
             size: GridSize(cols: 64, rows: 20, cellWidthPx: 16, cellHeightPx: 32),
             meta: SessionMeta(
-                title: "重构连接层", agent: Agent(kind: AgentKind("claude"), state: .blocked),
+                title: demoText("重构连接层", "Refactor the connection layer"), agent: Agent(kind: AgentKind("claude"), state: .blocked),
                 cwd: "/Users/ethan/dev/runode"),
-            clients: 1, claimed: true, sizeOwner: "Ethan 的 MacBook Pro")
+            clients: 1, claimed: true, sizeOwner: demoMachineName)
         static let codex = SessionInfo(
             id: SessionId("fedcba98765432100011223344556677")!,
             size: GridSize(cols: 100, rows: 30, cellWidthPx: 16, cellHeightPx: 32),
             meta: SessionMeta(
-                title: "补 iOS 的单元测试", agent: Agent(kind: AgentKind("codex"), state: .working),
+                title: demoText("补 iOS 的单元测试", "Add iOS unit tests"), agent: Agent(kind: AgentKind("codex"), state: .working),
                 cwd: "/Users/ethan/dev/runode/apps/ios"),
             clients: 0, claimed: false, sizeOwner: nil)
         static let shell = SessionInfo(
@@ -113,7 +120,7 @@
 
         func events() async -> AsyncStream<HostEvent> {
             let (stream, continuation) = AsyncStream.makeStream(of: HostEvent.self)
-            continuation.yield(.state(.connected(hostName: "Ethan 的 MacBook Pro", address: "192.168.1.20")))
+            continuation.yield(.state(.connected(hostName: demoMachineName, address: "192.168.1.20")))
             continuation.yield(.ready(generation: 1))
             let id = subscribers.withLock {
                 let id = $0.next
@@ -128,7 +135,7 @@
             if ProcessInfo.processInfo.arguments.contains("offline") {
                 Task {
                     try? await Task.sleep(for: .milliseconds(1500))
-                    self.emit(.state(.waiting(reason: "电脑关闭了连接", retryAt: .now + 9)))
+                    self.emit(.state(.waiting(reason: demoText("电脑关闭了连接", "The computer closed the connection"), retryAt: .now + 9)))
                 }
             }
             return stream
@@ -194,7 +201,7 @@
                 emit(.message(.resized(id: id, size: size)))
             case .focus(let id, true):
                 guard Self.sessions.first(where: { $0.id == id })?.sizeOwner == nil else { return }
-                emit(.message(.sizeOwner(id: id, mine: true, owner: "演示 iPhone")))
+                emit(.message(.sizeOwner(id: id, mine: true, owner: demoText("演示 iPhone", "Demo iPhone"))))
             case .readScreen(let id, _, let command):
                 // 普通 shell 有 shell 集成：读最近一条命令的输出时只给输出；别的会话读屏幕。
                 let text = command != nil && id == Self.shell.id ? Self.shellLastOutput : Self.plain(Self.screen(for: id))
@@ -255,9 +262,9 @@
             case .branches:
                 let current = repo.withLock { $0.branch }
                 let branches = [
-                    GitBranch(name: "main", upstream: "origin/main", subject: "feat: iOS 加设置页", date: "2 hours ago"),
-                    GitBranch(name: "mobile-git", subject: "wip: 手机端 Git", date: "5 minutes ago"),
-                    GitBranch(name: "origin/main", remote: true, subject: "feat: iOS 加设置页", date: "2 hours ago"),
+                    GitBranch(name: "main", upstream: "origin/main", subject: demoText("feat: iOS 加设置页", "feat: add iOS settings"), date: "2 hours ago"),
+                    GitBranch(name: "mobile-git", subject: demoText("wip: 手机端 Git", "wip: Git on mobile"), date: "5 minutes ago"),
+                    GitBranch(name: "origin/main", remote: true, subject: demoText("feat: iOS 加设置页", "feat: add iOS settings"), date: "2 hours ago"),
                     GitBranch(name: "origin/release", remote: true, subject: "chore: 0.4.0", date: "3 days ago"),
                 ].map { branch in
                     var branch = branch
@@ -275,7 +282,9 @@
                     GitLine(kind: .added, new: 943, text: "            ClientMsg::Git { req, id, request } => self.git(req, id, request),"),
                     GitLine(kind: .removed, old: 943, text: "            ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, reply),"),
                     GitLine(kind: .added, new: 944, text: "            ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, *reply),"),
-                    GitLine(kind: .context, old: 944, new: 945, text: "            // 读写剪贴板是宿主替会话里的程序请界面办的，前端不能直接要。"),
+                    GitLine(kind: .context, old: 944, new: 945, text: demoText(
+                        "            // 读写剪贴板是宿主替会话里的程序请界面办的，前端不能直接要。",
+                        "            // Clipboard access is requested by the host on behalf of the session.")),
                 ]
                 return .gitDiff(
                     req: req, id: id,
@@ -327,7 +336,8 @@
         }
 
         static let claudeScreen = [
-            "\u{1b}[38;2;215;119;87m●\u{1b}[0m 先跑一遍协议的测试，确认帧格式没被改坏。",
+            "\u{1b}[38;2;215;119;87m●\u{1b}[0m "
+                + demoText("先跑一遍协议的测试，确认帧格式没被改坏。", "Running the protocol tests first to check the frame format."),
             "",
             "\u{1b}[38;2;215;119;87m●\u{1b}[0m \u{1b}[1mRead\u{1b}[0m(crates/protocol/src/remote.rs)",
             "  ⎿  Read 412 lines",
@@ -345,7 +355,7 @@
         ].joined(separator: "\r\n")
 
         static let codexScreen = [
-            "\u{1b}[1m›\u{1b}[0m 给 SessionListModel 的分组和预览节流补测试",
+            "\u{1b}[1m›\u{1b}[0m " + demoText("给 SessionListModel 的分组和预览节流补测试", "Add tests for SessionListModel grouping and preview throttling"),
             "",
             "• Explored",
             "  └ Read SessionListModel.swift, ListModelTests.swift",
