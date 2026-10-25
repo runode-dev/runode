@@ -69,8 +69,10 @@
                 .toolbarBackground(background.opacity(0.92), for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
                 .toolbarColorScheme(scheme, for: .navigationBar)
+                // 有分屏标签栏时它已标出当前会话，导航栏不再重复一个标题。
+                .toolbar(removing: tabPanes.isEmpty ? nil : .title)
                 .toolbar {
-                    ToolbarItem(placement: .principal) { titleView }
+                    ToolbarItem(placement: .principal) { if tabPanes.isEmpty { titleView } }
                     ToolbarItem(placement: .primaryAction) { sizeMenu }
                     ToolbarItem(placement: .primaryAction) { moreMenu }
                 }
@@ -104,15 +106,15 @@
                 }
         }
 
-        private var paneIds: [SessionId] {
-            sessions?.panes(sharingTabWith: model.sessionId).map(\.id) ?? []
-        }
+        private var paneIds: [SessionId] { tabPanes.map(\.id) }
+
+        private var tabPanes: [SplitPane] { sessions?.panes(sharingTabWith: model.sessionId) ?? [] }
 
         /// 电脑上同一个标签里分了屏时的分屏标签；没分屏时不出现。
         @ViewBuilder
         private var paneTabs: some View {
-            if let panes = sessions?.panes(sharingTabWith: model.sessionId), !panes.isEmpty {
-                PaneTabBar(panes: panes, current: model.sessionId, onSelect: onSelectPane)
+            if !tabPanes.isEmpty {
+                PaneTabBar(panes: tabPanes, current: model.sessionId, onSelect: onSelectPane)
                     .background(background.opacity(0.92))
                     .overlay(alignment: .bottom) { Divider() }
                     .environment(\.colorScheme, scheme)
