@@ -62,7 +62,7 @@ menu:
   next_split: 选择下一个分屏
   zoom_split: 放大分屏
   fold_split: 折叠或展开分屏
-  move_split_to_new_tab: 把分屏挪成新标签
+  move_split_to_new_tab: 把分屏挪成新标签页
   equalize_splits: 均分分屏
   goto_agent: 前往 agent…
   next_agent: 下一个要处理的 agent
@@ -98,7 +98,7 @@ host:
   keep_old: 保留旧会话
   end_old: 结束旧会话
   already_upgraded_title: 终端已经交给这个版本了
-  already_upgraded_detail: 终端宿主已经是这个版本的 Runode，所以什么都没结束：旧终端最后还是交过来了，在那里照常运行。这个窗口仍用自己的终端；退出后重新打开 Runode 就能看到交过来的终端。
+  already_upgraded_detail: "终端宿主已经是这个版本的 Runode，旧终端最后还是交了过来，一个都没结束，照常运行。这个窗口仍用自己的终端；退出后重新打开 Runode 就能看到交过来的终端。"
   build_mismatch_title: 终端宿主和这个 Runode 的版本不一致
   build_mismatch_detail: 终端宿主是 %{host}，这个 app 是 %{app}。终端照常能用，但有些功能可能对不上。退出 Runode 后重新打开，会让这个版本的宿主接手终端。
   degraded_title: Runode 已更新
@@ -161,7 +161,7 @@ update:
   up_to_date_title: Runode 已是最新版本
   up_to_date_detail: "现在用的 %{version} 就是最新版本。"
   manual_title: "Runode %{version} 已发布"
-  manual_detail: "这份 Runode 不能自己更新（%{reason}），请到发布页下载新版本。"
+  manual_detail: "这份 Runode 不能自己更新（%{reason}），请到下载页下载新版本。"
   open_page: 打开下载页
   later: 稍后
   available_title: "Runode %{version} 已发布"
@@ -272,7 +272,7 @@ git:
     command_hint: "开头可以写 NAME=value 设环境变量。参数里的 {prompt} 换成提示词；没写 {prompt} 时提示词经标准输入给。在仓库目录里直接跑，不经 shell。"
     empty_command: 自定义命令是空的。
     var:
-      basePrompt: "runode 内置的提示词：照着最近几条提交说明的写法写，带上分支、改动的文件和改动。示例："
+      basePrompt: "Runode 内置的提示词：照着最近几条提交说明的写法写，带上分支、改动的文件和改动。示例："
       branch: "当前分支名。示例："
       stagedFiles: "要提交的文件，一行一个，前面是状态字母：有暂存的改动时是暂存的，没有时是全部改动。示例："
       stagedPatch: "要提交的改动，太大时截短。示例："
@@ -280,7 +280,7 @@ git:
     via_stdin: 提示词经标准输入传入。
     via_argv: 提示词放在 <prompt> 处。
     nothing: 没有要提交的改动。
-    busy: 仓库正在忙。
+    busy: "仓库正在忙，等当前的 Git 操作做完再试。"
     unknown_agent: "不认识的 agent：%{agent}"
     unclosed_quote: CLI 参数里的引号没有配对。
     missing: "找不到 %{binary} 命令。请先安装，或者确认它在 shell 的 PATH 里。"
@@ -399,7 +399,7 @@ git:
     remove_title: "删除工作树「%{name}」？"
     remove_detail: 它的目录会被删掉，它所在的分支保留。
     remove_dirty_detail: 它还有没提交的改动或未跟踪的文件，会随目录一起删掉，删了找不回来。
-    remove_detached_detail: 它的 HEAD 是游离的，只在这个工作树里做的提交删了以后可能就找不到了。
+    remove_detached_detail: "它的 HEAD 是分离的，只在这个工作树里做的提交删了以后可能就找不到了。"
     remove_confirm: 删除
     remove_force: 仍然删除
   graph:
@@ -418,7 +418,7 @@ git:
     checkout_confirm: 切换
 driver:
   badge: "由 %{who} 操作 · %{action}"
-  outside: runode 以外的程序
+  outside: "Runode 以外的程序"
   tab: 有分屏正被别的终端里的程序操作
   action:
     input: 打字
@@ -451,7 +451,7 @@ settings:
   notifications_denied: "系统设置里没有允许 Runode 发通知，通知不会弹出来。"
   open_notification_settings: 打开通知设置
   test_notification: 发送测试通知
-  no_matches: 没有匹配的
+  no_matches: "没有匹配项"
   fallback_font: 备用字体 %{n}
   add_fallback_font: 添加备用字体…
   other_agents: 其他程序
@@ -505,7 +505,7 @@ settings:
     file_tree_preview_click: 在预览栏打开文件
     preview_font_size: 预览栏字号
     task_placement: 跑命令
-    task_files_collapsed: 收起 Makefile 和 package.json
+    task_files_collapsed: 收起 Makefile 和 package.json 的命令
     dictation_model: 识别模型
     dictation_words: 热词
     dictation_cloud: 云端识别
@@ -567,12 +567,12 @@ settings:
     window_padding_y: 单位是点。一个数表示上下相同，或者写成 上,下。
     window_style: 卡片：每个分屏和右侧面板各是一张圆角卡片；经典：终端铺满窗口。
     ui_font_size: 单位是点，11 到 20。除了终端和预览栏的正文，界面上的字都按它等比缩放。
-    status_bar: 窗口底部显示防止休眠、内存和端口。
+    status_bar: "窗口底部显示防止睡眠、内存和端口。"
     status_bar_hidden: 选中的几块不在状态栏上显示。也可以在状态栏上右键勾选。
-    file_tree_preview_click: 单击开成临时标签，打开别的文件时被换掉；双击固定下来。
+    file_tree_preview_click: 单击开成临时标签页，打开别的文件时被换掉；双击固定下来。
     preview_font_size: 单位是点。
     task_placement: 标题栏命令菜单里点了一条命令时，在哪开终端跑它。
-    task_files_collapsed: 打开命令菜单时这两组先收着，点标题再展开。
+    task_files_collapsed: 命令菜单打开时先收着，点标题展开；有上次跑过的命令的那组不收。
     dictation_model: 两个都在这台电脑上离线运行。SenseVoice 快，带标点；FireRedASR2 中文最准，但更大、更慢，不加标点。
     dictation_words: "要认准的项目名、专业词，用逗号隔开。离线模型用不上，交给云端识别和润色时才用。"
     dictation_cloud: "离线模型没下载或识别出错时用。录音会上传到选的服务。"
@@ -605,10 +605,10 @@ settings:
     shell_integration_features: 提示符上用竖线时，zsh 的 vi 命令模式里用方块，跑命令时恢复成上面的光标形状。对新开的终端生效。
     clipboard_write: 终端里的程序（vim、tmux、经 ssh 连到远端的 shell 等）能把文字放进剪贴板。
     clipboard_read: 终端里的程序能读到你复制过的文字，密码也在内。选“询问”时先说明是哪个程序要读。
-    vt_window_resize_allowed: 终端里的程序能用 CSI 8 t 改窗口尺寸；只在终端独占标签、窗口不是全屏时改。
+    vt_window_resize_allowed: 终端里的程序能用 CSI 8 t 改窗口尺寸；只在终端独占标签页、窗口不是全屏时改。
     terminal_host: 退出 Runode 后会话留在后台进程里照常运行，下次打开接着用。
     auto_update: 在后台查新版本、下载好，退出 Runode 时装上。
-    remote_access: 让配对过的手机经局域网或 Tailscale 连上这台 Mac 的终端。在下面配对，或者用 runode remote pair。
+    remote_access: "让配对过的手机经局域网或 Tailscale 连上这台电脑的终端。在下面配对，或者用 runode remote pair。"
     remote_access_port: TCP 端口，1 到 65535。
     remote_access_name: "配对过的手机上显示的名字，留空时用系统的电脑名。改了以后连着的手机会断开一下再连上。"
     remote_access_push: agent 等你回答时，配对过的手机会收到一条通知，App 没开着也行。
@@ -651,7 +651,7 @@ settings:
     task_placement:
       right: 右边分屏
       down: 下边分屏
-      tab: 新标签
+      tab: 新标签页
     dictation_model:
       sense-voice: SenseVoice
       fire-red-asr2: FireRedASR2
@@ -678,7 +678,7 @@ settings:
   autostart:
     app:
       title: 登录时打开 Runode
-      hint: 登录这台 Mac 时自动打开 Runode 窗口。
+      hint: "登录这台电脑时自动打开 Runode 窗口。"
     host:
       title: 登录时在后台启动宿主
       hint: 不开窗口，只在后台启动终端宿主。远程访问打开、又有配对过的手机时它一直留着，不用开着 Runode 手机也连得上。关掉开关不会停下正在跑的宿主，它托管的会话不受影响。
@@ -689,15 +689,15 @@ settings:
     send: 发送
     sending: 发送中…
     sent: "已推给 %{count} 台手机。"
-    no_phone: 还没有手机登记推送：在手机上打开 Runode，连上这台 Mac。
+    no_phone: "还没有手机登记推送：在手机上打开 Runode，连上这台电脑。"
     failed: "发送失败：%{err}"
     push_title: Runode 测试推送
     push_line: 推送没问题。
   pairing:
     title: 配对手机
-    hint: 用手机上的 Runode 扫码配对。配好的手机在远程访问打开时能连上这台 Mac。
+    hint: "用手机上的 Runode 扫码配对。配好的手机在远程访问打开时能连上这台电脑。"
     start: 配对…
-    background: 退出 Runode 时远程访问跟着停，手机就连不上了。打开后退出时会话和远程访问留在后台。
+    background: "现在退出 Runode 时远程访问会跟着停，手机就连不上了。点「退出后保持连接」，退出时会话和远程访问都留在后台。"
     not_listening: 远程访问没在监听。刚打开的话等几秒再试；一直这样的话，端口可能被占了，宿主的日志里有原因。
     stopped: 等手机时远程访问停了。
     expired: 口令过期了，手机没来配对。
@@ -720,7 +720,7 @@ settings:
     group:
       app: 应用
       window: 窗口
-      tab: 标签
+      tab: 标签页
       split: 分屏
       workspace: 工作区
       panels: 侧栏和 agent
@@ -737,14 +737,14 @@ clipboard:
   deny: 不允许
 machine:
   live: 已连接
-  revoke_title: "撤销「%{device}」？"
+  revoke_title: "撤销和「%{device}」的配对？"
   revoke_detail: 它会马上断开，要重新配对才能再连上。
-  revoke: 撤销
+  revoke: "撤销配对"
   cancel: 取消
-  revoke_failed_title: "没能撤销「%{device}」"
+  revoke_failed_title: "没能撤销和「%{device}」的配对"
   ok: 好
 status:
-  sleep_title: 防止电脑休眠
+  sleep_title: "防止电脑睡眠"
   sleep_on: 开启
   sleep_on_detail: 始终防止这台电脑进入睡眠
   sleep_agent: Agent
@@ -765,7 +765,7 @@ status:
   speech: 语音识别
   screen: 远程桌面
   ports_title: 端口
-  ports_summary: "%{ours} 个终端 · %{external} 个外部"
+  ports_summary: "终端里 %{ours} 个 · 外部 %{external} 个"
   no_ports: 终端里没有程序在监听端口
   external_ports: 外部端口
   open_port: 在浏览器里打开
@@ -773,7 +773,7 @@ mobile:
   entry: "手机端"
   eyebrow: "RUNODE 手机端"
   intro_title: "在 iPhone 上用 Runode。"
-  intro_body: "在 iPhone 上看 agent 在做什么、回答它们的提问，打开任何一个终端接着干活。手机经局域网或 Tailscale 直接连到这台 Mac，不经过别的服务器。"
+  intro_body: "在 iPhone 上看 agent 在做什么、回答它们的提问，打开任何一个终端接着干活。手机经局域网或 Tailscale 直接连到这台电脑，不经过别的服务器。"
   start: "开始使用"
   step: "第 %{n} 步（共 %{total} 步）"
   install_title: "装上 App。"
@@ -782,13 +782,13 @@ mobile:
   copy_link: "复制安装链接"
   next: "继续"
   back: "返回"
-  pair_title: "配对这台 Mac。"
+  pair_title: "配对这台电脑。"
   pair_body: "在手机上打开 Runode，点「配对电脑」，然后扫码。"
   name_label: "电脑名"
   name_hint: "手机上会看到「%{name}」。留空则用这台电脑自己的名字。"
   network_label: "网络"
   network_auto: "自动（按系统顺序试全部地址）"
-  network_hint: "手机先试这个地址，连不上再试别的。要和这台 Mac 连着同一个 Wi-Fi，或者都连着 Tailscale。"
+  network_hint: "手机先试这个地址，连不上再试别的。要和这台电脑连着同一个 Wi-Fi，或者都连着 Tailscale。"
   refresh_networks: "重新读取网络"
   pair_qr: "配对二维码"
   install_qr: "安装二维码"
@@ -797,12 +797,12 @@ mobile:
   copy_code: "复制配对链接"
   expires: "%{time} 后过期"
   regenerate: "重新生成"
-  off: "远程访问还没打开。打开后，配对过的手机能经局域网或 Tailscale 连上这台 Mac 的终端。"
+  off: "远程访问还没打开。打开后，配对过的手机能经局域网或 Tailscale 连上这台电脑的终端。"
   turn_on: "打开远程访问"
   generate: "生成二维码"
   retry: "重试"
   paired_title: "配好了。"
-  paired_body: "已和「%{name}」配对，手机首页会列出这台 Mac。"
+  paired_body: "已和「%{name}」配对，手机首页会列出这台电脑。"
   keep: "退出后保持连接"
   done: "完成"
   again: "再配一台"
@@ -841,7 +841,7 @@ kanban:
   edit_schedule: 编辑定时
   remove_schedule: 删除定时
   remove_schedule_detail: 它的提示词和定时规则会一起删掉，删了找不回来。
-  schedules_need_host: "定时只在终端宿主跑着时生效。退出 app 后也要跑的话，打开 terminal-host，并运行 `runode service install host`。"
+  schedules_need_host: "定时只在终端宿主跑着时生效。要在退出 app 后也跑，在设置里打开「退出后保留会话」，再运行 runode service install host。"
   no_schedules: 还没有定时
   no_next: 不会再跑
   next: "下一次 %{time}"
@@ -924,13 +924,13 @@ kanban:
     every: 分钟
     every_placeholder: "60"
     days_hint: 一天都不选就是每天。
-    unknown_hint: 这个定时是新版本建的，这里看不懂。不选上面的一种，保存时照原样留着。
+    unknown_hint: "这个定时是更新版本的 Runode 建的，这里显示不了。不选上面的方式，保存时会原样保留。"
     need_title: 写个标题或者提示词。
     need_agent: 写上跑哪个 agent。
     bad_dir: 目录不存在。
     bad_once: "时间写成 YYYY-MM-DD HH:MM。"
     bad_daily: "钟点写成 HH:MM。"
-    bad_every: 间隔至少一分钟。
+    bad_every: "间隔至少要一分钟。"
     templates: 模板
     template_blank: 空白
     templates_hint: "把 Markdown 文件放进 %{dir} 就能加自己的模板。"
@@ -969,12 +969,12 @@ github_actions:
   none: 没有
   previous_attempts: 之前的尝试
   attempt: "第 %{n} 次尝试"
-  open_in_browser: 在浏览器中打开
+  open_in_browser: "在浏览器里打开"
   watch: 在终端里盯着
   cancel: 取消运行
   rerun: 重新运行
   logs: 在终端里看日志
-  step_logs: 在浏览器中看这一步的日志
+  step_logs: "在浏览器里看这一步的日志"
   trigger: 运行工作流
   open_workflow: 打开工作流文件
   pin: 固定到状态栏
@@ -984,7 +984,7 @@ github_actions:
   variables: Variables
   org_secrets: 组织的 Secrets
   org_variables: 组织的 Variables
-  manage_in_browser: 在浏览器中管理
+  manage_in_browser: "在浏览器里管理"
   not_org: 这个仓库属于个人账号，不属于组织，没有组织的 Secrets 和 Variables。
   environments: 部署环境
   add_secret: 新建 Secret
@@ -1026,7 +1026,7 @@ preview:
   unsaved_detail: 改过的内容会丢掉。
   discard_edits: 放弃修改
   changed_on_disk_title: 文件在磁盘上被改过了
-  changed_on_disk_detail: 保存会盖掉在 runode 之外做的修改。
+  changed_on_disk_detail: "保存会盖掉在 Runode 之外做的修改。"
   overwrite: 覆盖
   alert:
     note: 备注
@@ -1037,12 +1037,12 @@ preview:
   maximize: 放大预览
   restore: 还原预览
   diff:
-    worktree_tab: "%{name}（工作区）"
+    worktree_tab: "%{name}（工作树）"
     staged_tab: "%{name}（已暂存）"
     no_changes: 没有改动
     previous_change: 上一处改动
     next_change: 下一处改动
-    discard_hunk_title: 丢掉这一块改动？
+    discard_hunk_title: "放弃这一块改动？"
     too_large: 改动太多，不显示
     image_before: 改之前
     image_after: 改之后
@@ -1119,24 +1119,24 @@ action:
   minimize: 最小化窗口
   toggle_maximize: 缩放窗口
   toggle_fullscreen: 切换全屏
-  new_tab: 新建标签
-  close_tab: 关闭标签
-  next_tab: 下一个标签
-  previous_tab: 上一个标签
-  last_tab: 最后一个标签
-  goto_tab: 第 N 个标签，从 1 数
+  new_tab: 新建标签页
+  close_tab: 关闭标签页
+  next_tab: 下一个标签页
+  previous_tab: 上一个标签页
+  last_tab: 最后一个标签页
+  goto_tab: 第 N 个标签页，从 1 数
   new_split: 向右或向下分屏
-  close_surface: 关闭当前分屏，标签里只剩它时关闭标签
+  close_surface: 关闭当前分屏，标签页里只剩它时关闭标签页
   goto_split: 焦点移到上一个、下一个或某个方向上的分屏
   resize_split: 把最近的分隔线往这个方向挪，步长固定
   swap_split: 当前分屏和这个方向上相邻的分屏对调位置
-  move_split_to_new_tab: 把当前分屏挪成单独的新标签
+  move_split_to_new_tab: 把当前分屏挪成单独的新标签页
   equalize_splits: 均分分屏
   toggle_split_zoom: 放大或还原当前分屏
-  toggle_split_fold: 把当前分屏折叠到标签底部，或者展开回原位
+  toggle_split_fold: 把当前分屏折叠到标签页底部，或者展开回原位
   arrange_splits: 在当前分屏旁边一次开出几个新终端，先选方向和个数
   new_workspace: 选一个目录，在里面新建工作区
-  close_workspace: 关闭工作区和里面所有标签
+  close_workspace: 关闭工作区和里面所有标签页
   rename_workspace: 在侧栏里重命名工作区
   next_workspace: 下一个工作区
   previous_workspace: 上一个工作区

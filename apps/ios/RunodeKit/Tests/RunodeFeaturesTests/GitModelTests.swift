@@ -82,7 +82,7 @@ import Testing
         _ = try lastGit(.unstage(paths: ["new.rs", "old.rs"]))
     }
 
-    /// 丢弃按路径请宿主办，占着 `running`。
+    /// 放弃按路径请宿主办，占着 `running`。
     @Test func discards() async throws {
         let model = try await connectedModel(status(unstaged: [changed]))
         await model.discard([changed])

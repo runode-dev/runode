@@ -98,7 +98,7 @@ host:
   keep_old: Keep Old Sessions
   end_old: End Old Sessions
   already_upgraded_title: Your terminals already moved to this version
-  already_upgraded_detail: "The terminal host is already running this version of Runode, so nothing was ended: the old terminals moved over after all and keep running there. This window still runs its own terminals; quit and reopen Runode to see the moved ones."
+  already_upgraded_detail: "The terminal host is already running this version of Runode: the old terminals moved over after all, and none were ended. This window still runs its own terminals; quit and reopen Runode to see the moved ones."
   build_mismatch_title: The terminal host runs a different version of Runode
   build_mismatch_detail: "The terminal host is %{host} and this app is %{app}. Terminals work as usual, but some features may not match. Quit and reopen Runode to let this version take over the terminals."
   degraded_title: Runode was updated
@@ -129,7 +129,7 @@ window_controls:
   restore: Restore Down
   close: Close
 close:
-  unsaved: "%{count} files have unsaved changes, which will be lost."
+  unsaved: "Unsaved changes in %{count} file(s) will be lost."
   pane_title: Close this terminal?
   tab_title: Close this tab?
   running: "Still running: %{programs}. Closing ends whatever is running here."
@@ -161,7 +161,7 @@ update:
   up_to_date_title: Runode is up to date
   up_to_date_detail: "You're running the latest version, %{version}."
   manual_title: "Runode %{version} is available"
-  manual_detail: "This copy of Runode can't update itself (%{reason}). Download the new version from its release page."
+  manual_detail: "This copy of Runode can't update itself (%{reason}). Get the new version from the download page."
   open_page: Open Download Page
   later: Later
   available_title: "Runode %{version} is available"
@@ -272,7 +272,7 @@ git:
     command_hint: "Start with NAME=value to set environment variables. {prompt} in the arguments is replaced with the prompt; without it the prompt goes to standard input. Runs in the repository without a shell."
     empty_command: The custom command is empty.
     var:
-      basePrompt: "runode's built-in prompt: match the style of the recent commit messages, with the branch, changed files and patch below. Example:"
+      basePrompt: "Runode's built-in prompt: match the style of the recent commit messages, with the branch, changed files and patch below. Example:"
       branch: "The current branch name. Example:"
       stagedFiles: "Files to commit, one per line with the status letter: staged files when anything is staged, otherwise every change. Example:"
       stagedPatch: "The patch to commit, cut down when it's too large. Example:"
@@ -280,7 +280,7 @@ git:
     via_stdin: The prompt is passed on standard input.
     via_argv: The prompt goes where <prompt> is.
     nothing: Nothing to commit.
-    busy: The repository is busy.
+    busy: "The repository is busy. Try again when the current Git operation finishes."
     unknown_agent: "Unknown agent: %{agent}"
     unclosed_quote: Unclosed quote in CLI arguments.
     missing: "Couldn't find the %{binary} command. Install it, or make sure it's on the PATH of your shell."
@@ -481,8 +481,8 @@ settings:
     clipboard: Clipboard
     tasks: Tasks
     login: Start at Login
-    dictation_cloud: Cloud recognition
-    dictation_polish: Polish with a model
+    dictation_cloud: "Cloud Recognition"
+    dictation_polish: "Polish with a Model"
     push: Phone Notifications
     push_key: Your Own Phone App
   theme:
@@ -505,7 +505,7 @@ settings:
     file_tree_preview_click: Open files in the preview with
     preview_font_size: Preview font size
     task_placement: Run tasks in
-    task_files_collapsed: Collapse Makefile and package.json
+    task_files_collapsed: Collapse Makefile and package.json tasks
     dictation_model: Speech model
     dictation_words: Hotwords
     dictation_cloud: Cloud recognition
@@ -572,7 +572,7 @@ settings:
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.
     task_placement: Where a task picked from the title bar's task menu runs.
-    task_files_collapsed: Keep these two groups collapsed when the task menu opens. Click a title to expand it.
+    task_files_collapsed: Starts collapsed in the task menu; click a title to expand. The group with your last task stays open.
     dictation_model: Both run offline on this computer. SenseVoice is fast and adds punctuation; FireRedASR2 is the most accurate for Chinese but larger, slower and without punctuation.
     dictation_words: "Project names and technical terms dictation should get right, separated by commas. The offline models do not use them; cloud recognition and polishing do."
     dictation_cloud: "Used when the offline model is not downloaded or fails. The recording is uploaded to the service you choose."
@@ -608,7 +608,7 @@ settings:
     vt_window_resize_allowed: Lets programs in the terminal resize the window with CSI 8 t, only while the terminal has its tab to itself and the window is not full screen.
     terminal_host: Sessions keep running in a background process after Runode quits and come back when it opens again.
     auto_update: Check for new versions in the background, download them and install them when Runode quits.
-    remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair below, or with runode remote pair.
+    remote_access: "Lets a paired phone reach this computer's terminals over the local network or Tailscale. Pair below, or with runode remote pair."
     remote_access_port: TCP port, 1 to 65535.
     remote_access_name: "The name paired phones show. When empty, the system computer name. Connected phones drop briefly when it changes."
     remote_access_push: When an agent waits for your answer, paired phones get a notification, even with the app closed.
@@ -622,7 +622,7 @@ settings:
     agent_notifications_exclude: These agents get neither notifications nor sounds; their status marks still show.
     agent_done_sound: A system sound.
     agent_blocked_sound: A system sound.
-    agent_split_fold: An agent running `runode open --right` or `--down` gets a split folded to its title bar, so it does not take room; click the title bar to unfold. Cards window style only.
+    agent_split_fold: "An agent running runode open --right or --down gets a split folded to its title bar, so it does not take room; click the title bar to unfold. Cards window style only."
     config_file: Other configuration files to read after this one. Relative paths start from this file's folder; a leading ? means the file may be missing.
     keybind: Your shortcuts are added on top of the defaults.
   choice:
@@ -678,7 +678,7 @@ settings:
   autostart:
     app:
       title: Open Runode at login
-      hint: Opens the Runode window when you log in to this Mac.
+      hint: "Opens the Runode window when you log in to this computer."
     host:
       title: Run the host in the background at login
       hint: Starts the terminal host without a window. It stays in the background while remote access is on and a phone is paired, so the phone can connect without Runode open. Turning this off does not stop a host that is already running, so its sessions stay open.
@@ -689,15 +689,15 @@ settings:
     send: Send
     sending: Sending…
     sent: "Sent to %{count} phone(s)."
-    no_phone: No phone has registered for push yet. Open Runode on the phone and connect to this Mac.
+    no_phone: "No phone has registered for push yet. Open Runode on the phone and connect to this computer."
     failed: "Could not send: %{err}"
     push_title: Runode test push
     push_line: Push notifications work.
   pairing:
     title: Pair a phone
-    hint: Scan a code with Runode on your phone. A paired phone can reach this Mac while remote access is on.
+    hint: "Scan a code with Runode on your phone. A paired phone can reach this computer while remote access is on."
     start: Pair…
-    background: Remote access stops when Runode quits, and the phone can no longer connect. With this on, sessions and remote access keep running in the background.
+    background: "Remote access stops when Runode quits, and the phone can no longer connect. Choose Stay Connected After Quitting to keep sessions and remote access running in the background."
     not_listening: Remote access is not listening. If you just turned it on, try again in a few seconds; otherwise the port may be taken, and the host's log says why.
     stopped: Remote access stopped while waiting for the phone.
     expired: The code expired before a phone used it.
@@ -737,11 +737,11 @@ clipboard:
   deny: Don’t Allow
 machine:
   live: Connected
-  revoke_title: "Revoke “%{device}”?"
+  revoke_title: "Unpair “%{device}”?"
   revoke_detail: It's disconnected right away and has to pair again to connect.
-  revoke: Revoke
+  revoke: "Unpair"
   cancel: Cancel
-  revoke_failed_title: "Couldn't revoke “%{device}”"
+  revoke_failed_title: "Couldn't unpair “%{device}”"
   ok: OK
 status:
   sleep_title: Prevent Sleep
@@ -773,7 +773,7 @@ mobile:
   entry: "Mobile"
   eyebrow: "RUNODE MOBILE"
   intro_title: "Runode on your iPhone."
-  intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. The phone connects straight to this Mac over the local network or Tailscale, with no server in between."
+  intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. The phone connects straight to this computer over the local network or Tailscale, with no server in between."
   start: "Get Started"
   step: "Step %{n} of %{total}"
   install_title: "Get the app."
@@ -782,13 +782,13 @@ mobile:
   copy_link: "Copy Install Link"
   next: "Continue"
   back: "Back"
-  pair_title: "Pair this Mac."
+  pair_title: "Pair this computer."
   pair_body: "Open Runode on your phone, tap Pair a Computer, then scan the code."
   name_label: "Computer name"
   name_hint: "Phones will see “%{name}”. Leave empty to use this computer's own name."
   network_label: "Network"
   network_auto: "Automatic (try every address in system order)"
-  network_hint: "The phone tries this address first, then the others. It needs to be on the same Wi-Fi as this Mac, or both on Tailscale."
+  network_hint: "The phone tries this address first, then the others. It needs to be on the same Wi-Fi as this computer, or both on Tailscale."
   refresh_networks: "Refresh Networks"
   pair_qr: "Pairing QR Code"
   install_qr: "Install QR Code"
@@ -796,13 +796,13 @@ mobile:
   cant_scan: "Can't scan?"
   copy_code: "Copy Pairing Link"
   expires: "Expires in %{time}"
-  regenerate: "New code"
-  off: "Remote access is off. With it on, paired phones can reach this Mac's terminals over the local network or Tailscale."
+  regenerate: "New Code"
+  off: "Remote access is off. With it on, paired phones can reach this computer's terminals over the local network or Tailscale."
   turn_on: "Turn On Remote Access"
   generate: "Show Code"
   retry: "Try Again"
   paired_title: "Paired."
-  paired_body: "Paired with %{name}. This Mac now shows on the phone's home screen."
+  paired_body: "Paired with %{name}. This computer now shows on the phone's home screen."
   keep: "Stay Connected After Quitting"
   done: "Done"
   again: "Pair Another"
@@ -819,19 +819,19 @@ kanban:
   new_todo: New Task
   new_schedule: New Schedule
   close: Close the Kanban
-  count: "%{count} tasks"
+  count: "%{count} task(s)"
   empty: Nothing here
   started_at: "started %{time}"
   from_schedule: "from %{name}"
   reorder_hint: Adjust the value to move it up or down
   start: Start
-  open: Open its terminal
-  finish: Mark as done
-  reopen: Mark as not done
+  open: "Open Terminal"
+  finish: "Mark as Done"
+  reopen: "Mark as Not Done"
   edit: Edit Task
   in_review: "In review"
-  create_pr: "Push branch and open PR"
-  remove_todo: Delete task
+  create_pr: "Push Branch and Open PR"
+  remove_todo: "Delete Task"
   remove_title: "Delete “%{title}”?"
   remove_detail: Its terminal keeps running in the background.
   remove: Delete
@@ -839,9 +839,9 @@ kanban:
   save: Save
   save_and_start: Save & Start
   edit_schedule: Edit Schedule
-  remove_schedule: Delete schedule
+  remove_schedule: "Delete Schedule"
   remove_schedule_detail: "Its prompt and schedule are deleted too and can't be recovered."
-  schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit the app, turn on terminal-host and run `runode service install host`."
+  schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit, turn on “Keep sessions after quitting” in Settings, then run runode service install host."
   no_schedules: No schedules yet
   no_next: Will not run again
   next: "next %{time}"
@@ -851,7 +851,7 @@ kanban:
   history: History
   history_of: "History of “%{name}”"
   no_history: No finished tasks yet
-  load_more: Load more
+  load_more: "Load More"
   done_at: "Finished %{time}"
   back: Back
   pr:
@@ -900,7 +900,7 @@ kanban:
     prompt: Prompt for the agent
     prompt_placeholder: What should the agent do? %{key} saves
     workspace: Workspace
-    choose_dir: Choose a directory…
+    choose_dir: "Choose a Directory…"
     agent: Agent
     model: Model
     effort: Effort
@@ -924,13 +924,13 @@ kanban:
     every: Minutes
     every_placeholder: "60"
     days_hint: No days picked means every day.
-    unknown_hint: This schedule was made by a newer version of runode. It stays as it is unless you pick one above.
+    unknown_hint: "This schedule was made by a newer version of Runode. It stays as it is unless you pick one above."
     need_title: Give it a title or a prompt.
     need_agent: Say which agent to run.
     bad_dir: The directory does not exist.
     bad_once: "Write the time as YYYY-MM-DD HH:MM."
     bad_daily: "Write the time of day as HH:MM."
-    bad_every: The interval is at least one minute.
+    bad_every: "The interval must be at least one minute."
     templates: Templates
     template_blank: Blank
     templates_hint: "Add your own templates as Markdown files in %{dir}."
@@ -939,7 +939,7 @@ kanban:
     no_skills: No skills found here.
     subagent: Custom agent
     attachments: Attachments
-    add_attachment: Add files…
+    add_attachment: "Add Files…"
     remove_attachment: "Remove %{name}"
     auto: Run without asking for permission
     need_input: "Fill in %{label}."
@@ -1022,11 +1022,11 @@ preview:
   edit_failed: "Can't edit this file"
   save_failed: "Couldn't save the file"
   modified_tab: "%{name} (modified)"
-  unsaved_title: "Discard unsaved changes in %{count} files?"
+  unsaved_title: "Discard unsaved changes in %{count} file(s)?"
   unsaved_detail: Your edits will be lost.
   discard_edits: Discard Changes
   changed_on_disk_title: The file changed on disk
-  changed_on_disk_detail: Saving will overwrite the changes made outside runode.
+  changed_on_disk_detail: "Saving will overwrite the changes made outside Runode."
   overwrite: Overwrite
   alert:
     note: Note
@@ -1094,8 +1094,8 @@ files:
   include_placeholder: "e.g. *.ts, src/**"
   exclude: Files to exclude
   exclude_placeholder: "e.g. *.min.js, dist/**"
-  search_summary: "%{count} results in %{files} files"
-  search_files: "%{files} files"
+  search_summary: "%{count} result(s) in %{files} file(s)"
+  search_files: "%{files} file(s)"
   search_truncated: " (showing the first %{limit})"
   search_failed: "Search failed: %{error}"
   refresh: Refresh

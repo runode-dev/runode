@@ -141,7 +141,7 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
             "Check for a new version of Runode when it starts and every few hours after that: true, false. With true, a new version is downloaded in the background and installed when you quit Runode; with false, Runode only checks when you choose Check for Updates in the Runode menu. Only a Runode.app signed by its publisher updates itself."
         }
         "remote-access" => {
-            "Let your phone reach this Mac's terminals over the local network or Tailscale: true, false. Pair a phone with `runode remote pair`, list paired phones with `runode remote devices`, and remove one with `runode remote revoke`. Takes effect within a few seconds, without restarting Runode."
+            "Let your phone reach this computer's terminals over the local network or Tailscale: true, false. Pair a phone with `runode remote pair`, list paired phones with `runode remote devices`, and remove one with `runode remote revoke`. Takes effect within a few seconds, without restarting Runode."
         }
         "remote-access-port" => "The TCP port remote access listens on, on all network interfaces: 1 to 65535.",
         "remote-access-name" => {

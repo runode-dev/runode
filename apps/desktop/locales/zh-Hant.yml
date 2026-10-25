@@ -62,7 +62,7 @@ menu:
   next_split: 選擇下一個分割畫面
   zoom_split: 放大分割畫面
   fold_split: 摺疊或展開分割畫面
-  move_split_to_new_tab: 把分割畫面移成新標籤
+  move_split_to_new_tab: 把分割畫面移成新分頁
   equalize_splits: 平均分割畫面
   goto_agent: 前往 agent…
   next_agent: 下一個要處理的 agent
@@ -98,7 +98,7 @@ host:
   keep_old: 保留舊工作階段
   end_old: 終止舊工作階段
   already_upgraded_title: 終端機已經交給這個版本了
-  already_upgraded_detail: 終端機宿主已經是這個版本的 Runode，所以什麼都沒有終止：舊的終端機最後還是交過來了，在那裡照常執行。這個視窗仍用自己的終端機；結束後重新開啟 Runode 就能看到交過來的終端機。
+  already_upgraded_detail: "終端機宿主已經是這個版本的 Runode，舊的終端機最後還是交了過來，一個都沒有終止，照常執行。這個視窗仍用自己的終端機；結束後重新開啟 Runode 就能看到交過來的終端機。"
   build_mismatch_title: 終端機宿主和這個 Runode 的版本不一致
   build_mismatch_detail: 終端機宿主是 %{host}，這個 app 是 %{app}。終端機照常能用，但有些功能可能對不上。結束 Runode 後重新開啟，會讓這個版本的宿主接手終端機。
   degraded_title: Runode 已更新
@@ -161,7 +161,7 @@ update:
   up_to_date_title: Runode 已是最新版本
   up_to_date_detail: "現在用的 %{version} 就是最新版本。"
   manual_title: "Runode %{version} 已發布"
-  manual_detail: "這份 Runode 不能自己更新（%{reason}），請到發布頁下載新版本。"
+  manual_detail: "這份 Runode 不能自己更新（%{reason}），請到下載頁下載新版本。"
   open_page: 打開下載頁
   later: 稍後
   available_title: "Runode %{version} 已發布"
@@ -272,7 +272,7 @@ git:
     command_hint: "開頭可以寫 NAME=value 設定環境變數。參數裡的 {prompt} 換成提示詞；沒寫 {prompt} 時提示詞經標準輸入傳入。在倉庫目錄裡直接執行，不經 shell。"
     empty_command: 自訂指令是空的。
     var:
-      basePrompt: "runode 內建的提示詞：照著最近幾條提交說明的寫法寫，帶上分支、變更的檔案和變更內容。範例："
+      basePrompt: "Runode 內建的提示詞：照著最近幾條提交說明的寫法寫，帶上分支、變更的檔案和變更內容。範例："
       branch: "目前的分支名稱。範例："
       stagedFiles: "要提交的檔案，一行一個，前面是狀態字母：有暫存的變更時是暫存的，沒有時是全部變更。範例："
       stagedPatch: "要提交的變更內容，太大時截短。範例："
@@ -280,7 +280,7 @@ git:
     via_stdin: 提示詞經標準輸入傳入。
     via_argv: 提示詞放在 <prompt> 處。
     nothing: 沒有要提交的變更。
-    busy: 倉庫正在忙。
+    busy: "倉庫正在忙，等目前的 Git 操作做完再試。"
     unknown_agent: "不認識的 agent：%{agent}"
     unclosed_quote: CLI 參數裡的引號沒有配對。
     missing: "找不到 %{binary} 指令。請先安裝，或確認它在 shell 的 PATH 裡。"
@@ -394,7 +394,7 @@ git:
     cherry_pick: 正在揀選：解決衝突並暫存後提交
     revert: 正在還原：解決衝突並暫存後提交
   worktree:
-    open_in_new_tab: 在新的終端機標籤頁中開啟
+    open_in_new_tab: 在新的終端機分頁中開啟
     remove: 刪除工作樹…
     remove_title: "刪除工作樹「%{name}」？"
     remove_detail: 它的目錄會被刪除，它所在的分支保留。
@@ -418,7 +418,7 @@ git:
     checkout_confirm: 切換
 driver:
   badge: "由 %{who} 操作 · %{action}"
-  outside: runode 以外的程式
+  outside: "Runode 以外的程式"
   tab: 有分割畫面正被別的終端機裡的程式操作
   action:
     input: 打字
@@ -451,7 +451,7 @@ settings:
   notifications_denied: "系統設定裡沒有允許 Runode 發通知，通知不會跳出來。"
   open_notification_settings: 打開通知設定
   test_notification: 發送測試通知
-  no_matches: 沒有符合的
+  no_matches: "沒有符合項"
   fallback_font: 備用字體 %{n}
   add_fallback_font: 加入備用字體…
   other_agents: 其他程式
@@ -505,7 +505,7 @@ settings:
     file_tree_preview_click: 在預覽欄打開檔案
     preview_font_size: 預覽欄字級
     task_placement: 執行命令
-    task_files_collapsed: 收起 Makefile 和 package.json
+    task_files_collapsed: 收起 Makefile 和 package.json 的命令
     dictation_model: 辨識模型
     dictation_words: 熱詞
     dictation_cloud: 雲端辨識
@@ -572,7 +572,7 @@ settings:
     file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
     preview_font_size: 單位是點。
     task_placement: 標題列命令選單裡點了一條命令時，在哪開終端執行它。
-    task_files_collapsed: 打開命令選單時這兩組先收著，點標題再展開。
+    task_files_collapsed: 命令選單打開時先收著，點標題展開；有上次執行過的命令的那組不收。
     dictation_model: 兩個都在這台電腦上離線執行。SenseVoice 快，帶標點；FireRedASR2 中文最準，但更大、更慢，不加標點。
     dictation_words: "要認準的專案名、專業詞，用逗號隔開。離線模型用不上，交給雲端辨識和潤飾時才用。"
     dictation_cloud: "離線模型沒下載或辨識出錯時用。錄音會上傳到選的服務。"
@@ -605,10 +605,10 @@ settings:
     shell_integration_features: 提示字元上用直線時，zsh 的 vi 命令模式裡用方塊，執行指令時恢復成上面的游標形狀。對新開的終端機生效。
     clipboard_write: 終端機裡的程式（vim、tmux、經 ssh 連到遠端的 shell 等）能把文字放進剪貼簿。
     clipboard_read: 終端機裡的程式能讀到你複製過的文字，密碼也在內。選「詢問」時先說明是哪個程式要讀。
-    vt_window_resize_allowed: 終端機裡的程式能用 CSI 8 t 改視窗大小；只在終端機獨佔標籤頁、視窗不是全螢幕時改。
+    vt_window_resize_allowed: 終端機裡的程式能用 CSI 8 t 改視窗大小；只在終端機獨佔分頁、視窗不是全螢幕時改。
     terminal_host: 結束 Runode 後工作階段留在背景程序裡照常執行，下次打開接著用。
     auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
-    remote_access: 讓配對過的手機經區域網路或 Tailscale 連上這台 Mac 的終端機。在下面配對，或者用 runode remote pair。
+    remote_access: "讓配對過的手機經區域網路或 Tailscale 連上這台電腦的終端機。在下面配對，或者用 runode remote pair。"
     remote_access_port: TCP 連接埠，1 到 65535。
     remote_access_name: "配對過的手機上顯示的名稱，留空時用系統的電腦名稱。改了以後連著的手機會斷開一下再連上。"
     remote_access_push: agent 等你回答時，配對過的手機會收到一則通知，App 沒開著也行。
@@ -678,7 +678,7 @@ settings:
   autostart:
     app:
       title: 登入時打開 Runode
-      hint: 登入這台 Mac 時自動打開 Runode 視窗。
+      hint: "登入這台電腦時自動打開 Runode 視窗。"
     host:
       title: 登入時在背景啟動宿主
       hint: 不開視窗，只在背景啟動終端宿主。遠端存取打開、又有配對過的手機時它一直留著，不用開著 Runode 手機也連得上。關掉開關不會停下正在跑的宿主，它託管的會話不受影響。
@@ -689,15 +689,15 @@ settings:
     send: 傳送
     sending: 傳送中…
     sent: "已推給 %{count} 台手機。"
-    no_phone: 還沒有手機登記推送：在手機上打開 Runode，連上這台 Mac。
+    no_phone: "還沒有手機登記推送：在手機上打開 Runode，連上這台電腦。"
     failed: "傳送失敗：%{err}"
     push_title: Runode 測試推送
     push_line: 推送沒問題。
   pairing:
     title: 配對手機
-    hint: 用手機上的 Runode 掃碼配對。配好的手機在遠端存取打開時能連上這台 Mac。
+    hint: "用手機上的 Runode 掃碼配對。配好的手機在遠端存取打開時能連上這台電腦。"
     start: 配對…
-    background: 結束 Runode 時遠端存取跟著停，手機就連不上了。打開後結束時工作階段和遠端存取留在背景。
+    background: "現在結束 Runode 時遠端存取會跟著停，手機就連不上了。點「結束後保持連線」，結束時工作階段和遠端存取都留在背景。"
     not_listening: 遠端存取沒在監聽。剛打開的話等幾秒再試；一直這樣的話，連接埠可能被占用了，宿主的日誌裡有原因。
     stopped: 等手機時遠端存取停了。
     expired: 口令過期了，手機沒來配對。
@@ -737,14 +737,14 @@ clipboard:
   deny: 不允許
 machine:
   live: 已連接
-  revoke_title: "撤銷「%{device}」？"
+  revoke_title: "撤銷和「%{device}」的配對？"
   revoke_detail: 它會馬上斷開，要重新配對才能再連上。
-  revoke: 撤銷
+  revoke: "撤銷配對"
   cancel: 取消
-  revoke_failed_title: "沒能撤銷「%{device}」"
+  revoke_failed_title: "沒能撤銷和「%{device}」的配對"
   ok: 好
 status:
-  sleep_title: 防止電腦休眠
+  sleep_title: "防止電腦睡眠"
   sleep_on: 開啟
   sleep_on_detail: 始終防止這台電腦進入睡眠
   sleep_agent: Agent
@@ -765,7 +765,7 @@ status:
   speech: 語音辨識
   screen: 遠端桌面
   ports_title: 連接埠
-  ports_summary: "%{ours} 個終端機 · %{external} 個外部"
+  ports_summary: "終端機裡 %{ours} 個 · 外部 %{external} 個"
   no_ports: 終端機裡沒有程式在監聽連接埠
   external_ports: 外部連接埠
   open_port: 在瀏覽器中開啟
@@ -773,7 +773,7 @@ mobile:
   entry: "手機端"
   eyebrow: "RUNODE 手機端"
   intro_title: "在 iPhone 上用 Runode。"
-  intro_body: "在 iPhone 上看 agent 在做什麼、回答它們的提問，打開任何一個終端機接著工作。手機經區域網路或 Tailscale 直接連到這台 Mac，不經過別的伺服器。"
+  intro_body: "在 iPhone 上看 agent 在做什麼、回答它們的提問，打開任何一個終端機接著工作。手機經區域網路或 Tailscale 直接連到這台電腦，不經過別的伺服器。"
   start: "開始使用"
   step: "第 %{n} 步（共 %{total} 步）"
   install_title: "裝上 App。"
@@ -782,13 +782,13 @@ mobile:
   copy_link: "拷貝安裝連結"
   next: "繼續"
   back: "返回"
-  pair_title: "配對這台 Mac。"
+  pair_title: "配對這台電腦。"
   pair_body: "在手機上打開 Runode，點「配對電腦」，然後掃碼。"
   name_label: "電腦名稱"
   name_hint: "手機上會看到「%{name}」。留空則用這台電腦自己的名稱。"
   network_label: "網路"
   network_auto: "自動（依系統順序試全部位址）"
-  network_hint: "手機先試這個位址，連不上再試別的。要和這台 Mac 連著同一個 Wi-Fi，或者都連著 Tailscale。"
+  network_hint: "手機先試這個位址，連不上再試別的。要和這台電腦連著同一個 Wi-Fi，或者都連著 Tailscale。"
   refresh_networks: "重新讀取網路"
   pair_qr: "配對 QR 碼"
   install_qr: "安裝 QR 碼"
@@ -797,12 +797,12 @@ mobile:
   copy_code: "拷貝配對連結"
   expires: "%{time} 後過期"
   regenerate: "重新產生"
-  off: "遠端存取還沒打開。打開後，配對過的手機能經區域網路或 Tailscale 連上這台 Mac 的終端機。"
+  off: "遠端存取還沒打開。打開後，配對過的手機能經區域網路或 Tailscale 連上這台電腦的終端機。"
   turn_on: "打開遠端存取"
   generate: "產生 QR 碼"
   retry: "重試"
   paired_title: "配好了。"
-  paired_body: "已和「%{name}」配對，手機首頁會列出這台 Mac。"
+  paired_body: "已和「%{name}」配對，手機首頁會列出這台電腦。"
   keep: "結束後保持連線"
   done: "完成"
   again: "再配一台"
@@ -841,7 +841,7 @@ kanban:
   edit_schedule: 編輯定時
   remove_schedule: 刪除定時
   remove_schedule_detail: 它的提示詞和定時規則會一起刪掉，刪了找不回來。
-  schedules_need_host: "定時只在終端機宿主執行時生效。結束 app 後也要跑的話，打開 terminal-host，並執行 `runode service install host`。"
+  schedules_need_host: "定時只在終端機宿主執行時生效。要在結束 app 後也跑，在設定裡打開「結束後保留工作階段」，再執行 runode service install host。"
   no_schedules: 還沒有定時
   no_next: 不會再跑
   next: "下一次 %{time}"
@@ -924,13 +924,13 @@ kanban:
     every: 分鐘
     every_placeholder: "60"
     days_hint: 一天都不選就是每天。
-    unknown_hint: 這個定時是新版本建的，這裡看不懂。不選上面的一種，儲存時照原樣留著。
+    unknown_hint: "這個定時是更新版本的 Runode 建的，這裡顯示不了。不選上面的方式，儲存時會原樣保留。"
     need_title: 寫個標題或者提示詞。
     need_agent: 寫上跑哪個 agent。
     bad_dir: 目錄不存在。
     bad_once: "時間寫成 YYYY-MM-DD HH:MM。"
     bad_daily: "鐘點寫成 HH:MM。"
-    bad_every: 間隔至少一分鐘。
+    bad_every: "間隔至少要一分鐘。"
     templates: 範本
     template_blank: 空白
     templates_hint: "把 Markdown 檔案放進 %{dir} 就能加自己的範本。"
@@ -969,12 +969,12 @@ github_actions:
   none: 沒有
   previous_attempts: 之前的嘗試
   attempt: "第 %{n} 次嘗試"
-  open_in_browser: 在瀏覽器中打開
+  open_in_browser: "在瀏覽器裡打開"
   watch: 在終端機裡盯著
   cancel: 取消執行
   rerun: 重新執行
   logs: 在終端機裡看日誌
-  step_logs: 在瀏覽器中看這一步的日誌
+  step_logs: "在瀏覽器裡看這一步的日誌"
   trigger: 執行工作流程
   open_workflow: 打開工作流程檔案
   pin: 固定到狀態列
@@ -984,7 +984,7 @@ github_actions:
   variables: Variables
   org_secrets: 組織的 Secrets
   org_variables: 組織的 Variables
-  manage_in_browser: 在瀏覽器中管理
+  manage_in_browser: "在瀏覽器裡管理"
   not_org: 這個儲存庫屬於個人帳號，不屬於組織，沒有組織的 Secrets 和 Variables。
   environments: 部署環境
   add_secret: 新增 Secret
@@ -1026,7 +1026,7 @@ preview:
   unsaved_detail: 改過的內容會遺失。
   discard_edits: 捨棄修改
   changed_on_disk_title: 檔案在磁碟上被改過了
-  changed_on_disk_detail: 儲存會蓋掉在 runode 之外做的修改。
+  changed_on_disk_detail: "儲存會蓋掉在 Runode 之外做的修改。"
   overwrite: 覆蓋
   alert:
     note: 備註
@@ -1037,7 +1037,7 @@ preview:
   maximize: 放大預覽
   restore: 還原預覽
   diff:
-    worktree_tab: "%{name}（工作區）"
+    worktree_tab: "%{name}（工作樹）"
     staged_tab: "%{name}（已暫存）"
     no_changes: 沒有改動
     previous_change: 上一處改動
@@ -1130,10 +1130,10 @@ action:
   goto_split: 焦點移到上一個、下一個或某個方向上的分割畫面
   resize_split: 把最近的分隔線往這個方向移，步長固定
   swap_split: 目前的分割畫面和這個方向上相鄰的分割畫面對調位置
-  move_split_to_new_tab: 把目前的分割畫面移成獨立的新標籤
+  move_split_to_new_tab: 把目前的分割畫面移成獨立的新分頁
   equalize_splits: 平均分割畫面
   toggle_split_zoom: 放大或還原目前的分割畫面
-  toggle_split_fold: 把目前的分割畫面摺疊到標籤底部，或展開回原位
+  toggle_split_fold: 把目前的分割畫面摺疊到分頁底部，或展開回原位
   arrange_splits: 在目前的分割畫面旁一次開出幾個新終端機，先選方向和個數
   new_workspace: 選一個目錄，在裡面新增工作區
   close_workspace: 關閉工作區和裡面所有分頁

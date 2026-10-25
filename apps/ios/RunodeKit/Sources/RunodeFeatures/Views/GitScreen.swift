@@ -4,7 +4,7 @@
     import SwiftUI
 
     /// 一个会话所在仓库的 Git 页：分支和同步、提交说明、已暂存和改动两组文件（每组并成一张卡片）。
-    /// 点文件看 diff，暂存、取消暂存、丢弃（先确认）经按钮、左滑或长按菜单，点分支名切分支；文件能按
+    /// 点文件看 diff，暂存、取消暂存、放弃（先确认）经按钮、左滑或长按菜单，点分支名切分支；文件能按
     /// 目录排成树。列表形式和收起的目录记在 `UserDefaults` 里。
     ///
     /// 列表的行间距是 0，一组文件的行才能连成一张卡片；单独的卡片在下面自己留 `cardSpacing` 的空。
@@ -15,7 +15,7 @@
         // shortcut: 改动没了的目录也一直记着，攒多了再在读到状态时清掉不在改动里的
         @AppStorage("gitCollapsedDirectories") private var collapsedData = Data()
         @State private var diffTarget: GitDiffTarget?
-        /// 等用户确认丢弃改动的文件。
+        /// 等用户确认放弃改动的文件。
         @State private var discarding: [GitFile] = []
         /// 等用户确认一起暂存的冲突文件数，0 是没在问。
         @State private var stagingConflicts = 0
@@ -73,7 +73,7 @@
                 discardTitle, isPresented: Binding(get: { !discarding.isEmpty }, set: { if !$0 { discarding = [] } }),
                 titleVisibility: .visible
             ) {
-                Button("丢弃改动", role: .destructive) {
+                Button("放弃改动", role: .destructive) {
                     let files = discarding
                     Task { await model.discard(files) }
                 }
@@ -100,8 +100,8 @@
 
         private var discardTitle: String {
             discarding.count == 1
-                ? String(localized: "丢弃 \(Presentation.gitPathParts(discarding[0].path).name) 的改动？")
-                : String(localized: "丢弃 \(discarding.count) 个文件的改动？")
+                ? String(localized: "放弃 \(Presentation.gitPathParts(discarding[0].path).name) 的改动？")
+                : String(localized: "放弃 \(discarding.count) 个文件的改动？")
         }
 
         private var subtitle: String? {
@@ -379,7 +379,7 @@
             .accessibilityLabel(staged ? "取消暂存" : "暂存")
         }
 
-        /// 左滑和长按菜单里的暂存、取消暂存；未暂存的还有丢弃，排在暂存后面，滑到底只会暂存。
+        /// 左滑和长按菜单里的暂存、取消暂存；未暂存的还有放弃，排在暂存后面，滑到底只会暂存。
         @ViewBuilder
         private func stageSwipe(_ files: [GitFile], staged: Bool) -> some View {
             if staged {
@@ -391,9 +391,9 @@
             }
         }
 
-        /// 丢弃先弹确认。左滑里不给 `destructive`，那样系统会当成删掉了这一行；长按菜单里给，标成红的。
+        /// 放弃先弹确认。左滑里不给 `destructive`，那样系统会当成删掉了这一行；长按菜单里给，标成红的。
         private func discardButton(_ files: [GitFile], role: ButtonRole? = nil) -> some View {
-            Button("丢弃改动", systemImage: "arrow.uturn.backward", role: role) { discarding = files }
+            Button("放弃改动", systemImage: "arrow.uturn.backward", role: role) { discarding = files }
                 .tint(.red)
                 .disabled(model.running != nil || !model.isReady)
         }
@@ -403,7 +403,7 @@
                 Button("刷新", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
                 if model.status?.hasRemote == true {
                     Section {
-                        Button("获取", systemImage: "arrow.down.circle") { Task { await model.fetch() } }
+                        Button("抓取", systemImage: "arrow.down.circle") { Task { await model.fetch() } }
                         Button("拉取", systemImage: "arrow.down") { Task { await model.pull() } }
                         Button("推送", systemImage: "arrow.up") { Task { await model.push() } }
                         Button("同步", systemImage: "arrow.triangle.2.circlepath") { Task { await model.sync() } }

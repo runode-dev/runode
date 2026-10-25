@@ -20,7 +20,7 @@ crate::icons! {
     pub COPY_ICON = "copy",
     pub PIN_ICON = "pin",
     pub CODE_ICON = "code",
-    /// 取消暂存、丢弃改动和打勾。
+    /// 取消暂存、放弃改动和打勾。
     pub MINUS_ICON = "minus",
     pub DISCARD_ICON = "discard",
     pub CHECK_ICON = "check",

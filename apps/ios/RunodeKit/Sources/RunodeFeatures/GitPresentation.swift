@@ -72,9 +72,9 @@ extension Presentation {
         switch action {
         case .stage: String(localized: "暂存")
         case .unstage: String(localized: "取消暂存")
-        case .discard: String(localized: "丢弃改动")
+        case .discard: String(localized: "放弃改动")
         case .commit: String(localized: "提交")
-        case .fetch: String(localized: "获取")
+        case .fetch: String(localized: "抓取")
         case .pull: String(localized: "拉取")
         case .push: String(localized: "推送")
         case .sync: String(localized: "同步")
@@ -87,9 +87,9 @@ extension Presentation {
         switch action {
         case .stage: String(localized: "正在暂存…")
         case .unstage: String(localized: "正在取消暂存…")
-        case .discard: String(localized: "正在丢弃改动…")
+        case .discard: String(localized: "正在放弃改动…")
         case .commit: String(localized: "正在提交…")
-        case .fetch: String(localized: "正在获取…")
+        case .fetch: String(localized: "正在抓取…")
         case .pull: String(localized: "正在拉取…")
         case .push: String(localized: "正在推送…")
         case .sync: String(localized: "正在同步…")

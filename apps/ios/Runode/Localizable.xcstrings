@@ -76,7 +76,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ is in progress. Resolve the conflicts, then continue or abort on your Mac."
+            "value" : "%@ is in progress. Resolve the conflicts, then continue or abort on your computer."
           }
         },
         "zh-Hans" : {
@@ -145,7 +145,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@, will connect when the Mac is back online"
+            "value" : "%@, will connect when the computer is back online"
           }
         },
         "zh-Hans" : {
@@ -525,7 +525,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "When an agent stops to wait for your answer, your Mac sends you a notification through Apple's push service, even with Runode closed. The question on screen is also sent through the push service."
+            "value" : "When an agent stops to wait for your answer, your computer sends you a notification through Apple's push service, even with Runode closed. The question on screen is also sent through the push service."
           }
         },
         "zh-Hans" : {
@@ -1054,7 +1054,7 @@
         }
       }
     },
-    "丢弃 %@ 的改动？" : {
+    "放弃 %@ 的改动？" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -1066,7 +1066,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "丢弃 %@ 的改动？"
+            "value" : "放弃 %@ 的改动？"
           }
         },
         "zh-Hant" : {
@@ -1077,7 +1077,7 @@
         }
       }
     },
-    "丢弃 %lld 个文件的改动？" : {
+    "放弃 %lld 个文件的改动？" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -1101,7 +1101,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "丢弃 %lld 个文件的改动？"
+            "value" : "放弃 %lld 个文件的改动？"
           }
         },
         "zh-Hant" : {
@@ -1112,7 +1112,7 @@
         }
       }
     },
-    "丢弃改动" : {
+    "放弃改动" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -1124,7 +1124,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "丢弃改动"
+            "value" : "放弃改动"
           }
         },
         "zh-Hant" : {
@@ -1210,7 +1210,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The QR code has expired. Generate a new one on your Mac."
+            "value" : "The QR code has expired. Generate a new one on your computer."
           }
         },
         "zh-Hans" : {
@@ -1348,7 +1348,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. This phone isn't connected to the Mac right now, so agents there may still send notifications here when they're waiting for an answer. Run `runode remote revoke %@` on that Mac to revoke the pairing."
+            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. This phone isn't connected to the computer right now, so agents there may still send notifications here when they're waiting for an answer. Run `runode remote revoke %@` on that computer to revoke the pairing."
           }
         },
         "zh-Hans" : {
@@ -1371,7 +1371,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. To revoke the pairing record on the Mac, run `runode remote revoke %@` there."
+            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. To revoke the pairing record on the computer, run `runode remote revoke %@` there."
           }
         },
         "zh-Hans" : {
@@ -1394,7 +1394,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. Revoke the pairing record on the Mac itself."
+            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. Revoke the pairing record on the computer itself."
           }
         },
         "zh-Hans" : {
@@ -1693,7 +1693,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Couldn't delete this Mac: %@"
+            "value" : "Couldn't delete this computer: %@"
           }
         },
         "zh-Hans" : {
@@ -1739,7 +1739,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Delete This Mac"
+            "value" : "Delete This Computer"
           }
         },
         "zh-Hans" : {
@@ -1762,7 +1762,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Delete this Mac?"
+            "value" : "Delete this computer?"
           }
         },
         "zh-Hans" : {
@@ -2107,7 +2107,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Pair with Runode on your Mac to see what your agents are doing, answer their questions, and open any terminal to keep working."
+            "value" : "Pair with Runode on your computer to see what your agents are doing, answer their questions, and open any terminal to keep working."
           }
         },
         "zh-Hans" : {
@@ -2291,7 +2291,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open a new terminal on which Mac?"
+            "value" : "Open a new terminal on which computer?"
           }
         },
         "zh-Hans" : {
@@ -2337,7 +2337,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Run `runode remote pair` in a terminal on your Mac"
+            "value" : "Run `runode remote pair` in a terminal on your computer"
           }
         },
         "zh-Hans" : {
@@ -2360,7 +2360,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Run `runode remote pair` in a terminal on your Mac. A QR code appears on its screen."
+            "value" : "Run `runode remote pair` in a terminal on your computer. A QR code appears on its screen."
           }
         },
         "zh-Hans" : {
@@ -2429,7 +2429,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Switch between fitting the phone and following the Mac"
+            "value" : "Switch between fitting the phone and following the computer"
           }
         },
         "zh-Hans" : {
@@ -2590,7 +2590,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Couldn't save this Mac: %@"
+            "value" : "Couldn't save this computer: %@"
           }
         },
         "zh-Hans" : {
@@ -2659,7 +2659,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The password is sent to your Mac and typed into its lock screen. If you remember it, it stays on this phone only and needs Face ID every time."
+            "value" : "The password is sent to your computer and typed into its lock screen. If you remember it, it stays on this phone only and needs Face ID every time."
           }
         },
         "zh-Hans" : {
@@ -2682,7 +2682,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The password has characters a US keyboard can't type; unlock it at the Mac"
+            "value" : "The password has characters a US keyboard can't type; unlock it at the computer"
           }
         },
         "zh-Hans" : {
@@ -2751,7 +2751,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Too many attempts. The Mac is refusing connections for now; will retry automatically."
+            "value" : "Too many attempts. The computer is refusing connections for now; will retry automatically."
           }
         },
         "zh-Hans" : {
@@ -2866,7 +2866,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Size set by the Mac"
+            "value" : "Size set by the computer"
           }
         },
         "zh-Hans" : {
@@ -3637,7 +3637,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open Sessions on This Mac"
+            "value" : "Open Sessions on This Computer"
           }
         },
         "zh-Hans" : {
@@ -3752,7 +3752,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Can't find this Mac"
+            "value" : "Can't find this computer"
           }
         },
         "zh-Hans" : {
@@ -3775,7 +3775,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The device key for this Mac is missing. Delete it and pair again."
+            "value" : "The device key for this computer is missing. Delete it and pair again."
           }
         },
         "zh-Hans" : {
@@ -3867,7 +3867,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Copy the link below the QR code in the terminal on your Mac."
+            "value" : "Copy the link below the QR code in the terminal on your computer."
           }
         },
         "zh-Hans" : {
@@ -4811,7 +4811,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Untracked files will be deleted from the Mac, and discarded changes can't be recovered. Staged changes are not affected."
+            "value" : "Untracked files will be deleted from the computer, and discarded changes can't be recovered. Staged changes are not affected."
           }
         },
         "zh-Hans" : {
@@ -4943,7 +4943,7 @@
         }
       }
     },
-    "正在丢弃改动…" : {
+    "正在放弃改动…" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -4955,7 +4955,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在丢弃改动…"
+            "value" : "正在放弃改动…"
           }
         },
         "zh-Hant" : {
@@ -5150,7 +5150,7 @@
         }
       }
     },
-    "正在获取…" : {
+    "正在抓取…" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -5162,7 +5162,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在获取…"
+            "value" : "正在抓取…"
           }
         },
         "zh-Hant" : {
@@ -5616,7 +5616,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Tap the button above to scan, and point the camera at the QR code on your Mac's screen. Once paired, your Mac appears here."
+            "value" : "Tap the button above to scan, and point the camera at the QR code on your computer's screen. Once paired, your computer appears here."
           }
         },
         "zh-Hans" : {
@@ -5685,7 +5685,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This phone isn't connected to the Mac right now, so agents there may still send notifications here when they're waiting for an answer. Run `runode remote revoke %@` on that Mac to revoke the pairing."
+            "value" : "This phone isn't connected to the computer right now, so agents there may still send notifications here when they're waiting for an answer. Run `runode remote revoke %@` on that computer to revoke the pairing."
           }
         },
         "zh-Hans" : {
@@ -5731,7 +5731,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mac"
+            "value" : "Computer"
           }
         },
         "zh-Hans" : {
@@ -5754,7 +5754,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This name is used when the Mac refers to this phone, for example to show who sets a terminal's size. It takes effect the next time you connect to the Mac. The name in the Mac's paired devices list is the one from pairing and only updates after you pair again. Leave empty to use the system name."
+            "value" : "This name is used when the computer refers to this phone, for example to show who sets a terminal's size. It takes effect the next time you connect to the computer. The name in the computer's paired devices list is the one from pairing and only updates after you pair again. Leave empty to use the system name."
           }
         },
         "zh-Hans" : {
@@ -5777,7 +5777,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Remote access isn't turned on on the Mac, or the Mac is having trouble right now"
+            "value" : "Remote access isn't turned on on the computer, or the computer is having trouble right now"
           }
         },
         "zh-Hans" : {
@@ -5800,7 +5800,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No window on the Mac is showing these terminals"
+            "value" : "No window on the computer is showing these terminals"
           }
         },
         "zh-Hans" : {
@@ -5823,7 +5823,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Runode on your Mac uses a newer connection method (version %u). Update this app."
+            "value" : "Runode on your computer uses a newer connection method (version %u). Update this app."
           }
         },
         "zh-Hans" : {
@@ -5846,7 +5846,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Runode on your Mac was updated. Reconnecting"
+            "value" : "Runode on your computer was updated. Reconnecting"
           }
         },
         "zh-Hans" : {
@@ -5869,7 +5869,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Runode on your Mac isn't compatible with this app version: %@"
+            "value" : "Runode on your computer isn't compatible with this app version: %@"
           }
         },
         "zh-Hans" : {
@@ -5892,7 +5892,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Runode on the computer doesn't have the \"%@\" permission yet. Turn it on in System Settings › Privacy & Security."
+            "value" : "Runode on the computer doesn't have the “%@” permission yet. Turn it on in System Settings › Privacy & Security."
           }
         },
         "zh-Hans" : {
@@ -5915,7 +5915,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Runode on your Mac quit"
+            "value" : "Runode on your computer quit"
           }
         },
         "zh-Hans" : {
@@ -5938,7 +5938,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "runode on your Mac has no window open, so it can't create a workspace. It will open a background terminal in this folder instead."
+            "value" : "Runode on your computer has no window open, so it can't create a workspace. It will open a background terminal in this folder instead."
           }
         },
         "zh-Hans" : {
@@ -5984,7 +5984,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The Mac closed the connection"
+            "value" : "The computer closed the connection"
           }
         },
         "zh-Hans" : {
@@ -6007,7 +6007,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mac Name"
+            "value" : "Computer Name"
           }
         },
         "zh-Hans" : {
@@ -6076,7 +6076,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The Mac refused the connection (%@)"
+            "value" : "The computer refused the connection (%@)"
           }
         },
         "zh-Hans" : {
@@ -6099,7 +6099,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The Mac closed the connection: %@"
+            "value" : "The computer closed the connection: %@"
           }
         },
         "zh-Hans" : {
@@ -6145,7 +6145,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The Mac's response doesn't follow the protocol: %@"
+            "value" : "The computer's response doesn't follow the protocol: %@"
           }
         },
         "zh-Hans" : {
@@ -6191,7 +6191,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mac offline. Will connect when it is back"
+            "value" : "Computer offline. Will connect when it is back"
           }
         },
         "zh-Hans" : {
@@ -6214,7 +6214,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your Mac is still locked; the password may be wrong"
+            "value" : "Your computer is still locked; the password may be wrong"
           }
         },
         "zh-Hans" : {
@@ -6489,7 +6489,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Signature check failed. Delete this Mac and pair again."
+            "value" : "Signature check failed. Delete this computer and pair again."
           }
         },
         "zh-Hans" : {
@@ -6558,7 +6558,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Notifications are off for Runode in system Settings. Turn them on to get alerts."
+            "value" : "Notifications are off for Runode in Settings. Turn them on to get alerts."
           }
         },
         "zh-Hans" : {
@@ -6805,7 +6805,7 @@
         }
       }
     },
-    "获取" : {
+    "抓取" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -6817,7 +6817,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "获取"
+            "value" : "抓取"
           }
         },
         "zh-Hant" : {
@@ -6834,7 +6834,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Unlock your Mac's lock screen"
+            "value" : "Unlock your computer's lock screen"
           }
         },
         "zh-Hans" : {
@@ -6880,7 +6880,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Unlock Mac"
+            "value" : "Unlock Computer"
           }
         },
         "zh-Hans" : {
@@ -7087,7 +7087,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Follow Mac"
+            "value" : "Follow Computer"
           }
         },
         "zh-Hans" : {
@@ -7559,7 +7559,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No terminals on this Mac"
+            "value" : "No terminals on this computer"
           }
         },
         "zh-Hans" : {
@@ -7582,7 +7582,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This Mac no longer recognizes this phone. The pairing may have been revoked on the Mac. Delete it and pair again."
+            "value" : "This computer no longer recognizes this phone. The pairing may have been revoked on the computer. Delete it and pair again."
           }
         },
         "zh-Hans" : {
@@ -7605,7 +7605,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This Mac has been deleted"
+            "value" : "This computer has been deleted"
           }
         },
         "zh-Hans" : {
@@ -7789,7 +7789,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connect to Your Mac"
+            "value" : "Connect to Your Computer"
           }
         },
         "zh-Hans" : {
@@ -8065,7 +8065,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The pairing code is wrong, expired, or already used. Generate a new QR code on your Mac."
+            "value" : "The pairing code is wrong, expired, or already used. Generate a new QR code on your computer."
           }
         },
         "zh-Hans" : {
@@ -8134,7 +8134,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Pair a New Mac"
+            "value" : "Pair a New Computer"
           }
         },
         "zh-Hans" : {
@@ -8180,7 +8180,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Pair a Mac"
+            "value" : "Pair a Computer"
           }
         },
         "zh-Hans" : {
@@ -8433,7 +8433,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The default size applies to newly opened terminals; you can also change it temporarily from the top right of the terminal screen. Auto fits the phone when no window on the Mac is showing the terminal, and otherwise follows the Mac."
+            "value" : "The default size applies to newly opened terminals; you can also change it temporarily from the top right of the terminal screen. Auto fits the phone when no window on the computer is showing the terminal, and otherwise follows the computer."
           }
         },
         "zh-Hans" : {
@@ -8548,7 +8548,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "On the Mac"
+            "value" : "On the Computer"
           }
         },
         "zh-Hans" : {
@@ -8663,7 +8663,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Neither iPhone nor the Mac has the speech model yet. Download it in Settings."
+            "value" : "Neither iPhone nor the computer has the speech model yet. Download it in Settings."
           }
         },
         "zh-Hans" : {
@@ -8847,7 +8847,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The Mac did not report its speech recognition first"
+            "value" : "The computer did not report its speech recognition first"
           }
         },
         "zh-Hans" : {
@@ -8870,7 +8870,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The Mac could not recognize the speech: %@"
+            "value" : "The computer could not recognize the speech: %@"
           }
         },
         "zh-Hans" : {
@@ -8893,7 +8893,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The Mac's speech recognition is version %u, which differs from this app's"
+            "value" : "The computer's speech recognition is version %u, which differs from this app's"
           }
         },
         "zh-Hans" : {
@@ -8916,7 +8916,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hold the microphone key above the keyboard on a terminal and speak; release it to type the words into the terminal. Tap it instead to keep recording until you tap again. Recognizing on iPhone works offline; until the model is downloaded on iPhone, speech goes to the Mac, which uses the model set in its own settings."
+            "value" : "Hold the microphone key above the keyboard on a terminal and speak; release it to type the words into the terminal. Tap it instead to keep recording until you tap again. Recognizing on iPhone works offline; until the model is downloaded on iPhone, speech goes to the computer, which uses the model set in its own settings."
           }
         },
         "zh-Hans" : {
