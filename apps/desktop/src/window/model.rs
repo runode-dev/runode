@@ -165,6 +165,14 @@ impl Workspace {
         }
         tab
     }
+
+    /// 把 `tab` 放在第 `ix` 个位置，不切过去：`active` 仍指着原来那个标签。
+    pub(super) fn add_tab(&mut self, ix: usize, tab: Tab) {
+        if !self.tabs.is_empty() && ix <= self.active {
+            self.active += 1;
+        }
+        self.tabs.insert(ix, tab);
+    }
 }
 
 impl WindowView {

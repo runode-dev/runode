@@ -693,6 +693,10 @@ impl Render for WindowView {
         // 界面的字号和跟着字号变的长度都按 rem 写（`ui::font_size`），rem 就是配置的界面字号。
         window.set_rem_size(crate::ui::font_size::rem_size(cx));
         self.focus_menu(window, cx);
+        // 拖动一结束 GPUI 就重画窗口；放在别处或取消时没人清的落点在这里清掉。
+        if !cx.has_active_drag() {
+            self.pane_drop = None;
+        }
         let (fg, bg) = self.colors(cx);
         self.follow_colors(fg, bg, cx);
         // 主题刚按这个窗口的配色换上，下面都从它读。

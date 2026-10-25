@@ -13,7 +13,7 @@ use runode_protocol::Placement;
 use runode_types::pane::Direction;
 
 use super::WindowView;
-use super::model::{TabId, WorkspaceId};
+use super::model::{Tab, TabId, WorkspaceId};
 use crate::terminal_view::TerminalView;
 use crate::ui::{panel::PANE_HEADER_HEIGHT, tabs::drag_chip, theme::ActiveTheme as _};
 
@@ -97,6 +97,25 @@ struct Detached {
     collapsed: bool,
 }
 
+impl Tab {
+    /// 拿出终端 `pane` 和跟着它走的标记，不动布局。
+    fn release(&mut self, pane: EntityId) -> Detached {
+        let entry = self.panes.remove(&pane).expect("the pane was located in this tab");
+        Detached { entry, done: self.done.remove(&pane), collapsed: self.collapsed.remove(&pane) }
+    }
+
+    /// 收进 `release` 拿出来的终端 `pane`，不动布局。
+    fn adopt(&mut self, pane: EntityId, detached: Detached) {
+        self.panes.insert(pane, detached.entry);
+        if detached.done {
+            self.done.insert(pane);
+        }
+        if detached.collapsed {
+            self.collapsed.insert(pane);
+        }
+    }
+}
+
 impl WindowView {
     /// 把终端 `pane` 挪到 `to`，返回挪成了没有：`pane` 或目标不在这个窗口里、挪到自己旁边时不挪。
     /// `focus` 为真时切过去；否则显示着的还是原来那个标签。
@@ -136,20 +155,14 @@ impl WindowView {
         match to {
             Destination::Beside(target, side) => {
                 let id = self.next_id();
-                let Some((wi, ti)) = self.locate(target) else {
-                    return false;
-                };
+                let (wi, ti) = self.locate(target).expect("the target was located before detaching");
+                // 有焦点的终端挪到同一个显示着的标签里别处时焦点仍在它上面。
+                let keep = focused == Some(pane) && self.is_shown(wi, ti);
                 let tab = &mut self.workspaces[wi].tabs[ti];
                 tab.root.insert(target, pane, side, id);
-                tab.panes.insert(pane, detached.entry);
-                if detached.done {
-                    tab.done.insert(pane);
-                }
-                if detached.collapsed {
-                    tab.collapsed.insert(pane);
-                }
+                tab.adopt(pane, detached);
                 tab.zoomed = false;
-                if focus {
+                if focus || keep {
                     tab.focused = pane;
                 }
             }
@@ -158,16 +171,15 @@ impl WindowView {
                 if detached.done {
                     tab.done.insert(pane);
                 }
-                let Some(workspace) = self.workspaces.iter_mut().find(|w| w.id == workspace) else {
-                    return false;
-                };
+                let workspace = self
+                    .workspaces
+                    .iter_mut()
+                    .find(|w| w.id == workspace)
+                    .expect("the workspace was found before detaching");
                 let ix = after
                     .and_then(|after| workspace.tabs.iter().position(|tab| tab.id == after))
                     .map_or(workspace.tabs.len(), |ix| ix + 1);
-                if !workspace.tabs.is_empty() && ix <= workspace.active {
-                    workspace.active += 1;
-                }
-                workspace.tabs.insert(ix, tab);
+                workspace.add_tab(ix, tab);
             }
         }
         self.settle(pane, focus, focused, window, cx);
@@ -195,30 +207,13 @@ impl WindowView {
             tab.root.swap(a, b);
             tab.zoomed = false;
         } else {
-            let entry_a = self.workspaces[at_a.0].tabs[at_a.1].panes.remove(&a);
-            let entry_b = self.workspaces[at_b.0].tabs[at_b.1].panes.remove(&b);
-            let (Some(entry_a), Some(entry_b)) = (entry_a, entry_b) else {
-                return false;
-            };
-            // 干完了没看的标记和折叠跟着终端走。
-            let mut marks = |(wi, ti): (usize, usize), id| {
-                let tab = &mut self.workspaces[wi].tabs[ti];
-                (tab.done.remove(&id), tab.collapsed.remove(&id))
-            };
-            let (marks_a, marks_b) = (marks(at_a, a), marks(at_b, b));
+            let detached_a = self.workspaces[at_a.0].tabs[at_a.1].release(a);
+            let detached_b = self.workspaces[at_b.0].tabs[at_b.1].release(b);
             // `b` 搬进 `a` 的位置，`a` 搬进 `b` 的。
-            for ((wi, ti), (gone, came), entry, (done, collapsed)) in
-                [(at_a, (a, b), entry_b, marks_b), (at_b, (b, a), entry_a, marks_a)]
-            {
+            for ((wi, ti), (gone, came), detached) in [(at_a, (a, b), detached_b), (at_b, (b, a), detached_a)] {
                 let tab = &mut self.workspaces[wi].tabs[ti];
                 tab.root.swap(a, b);
-                tab.panes.insert(came, entry);
-                if done {
-                    tab.done.insert(came);
-                }
-                if collapsed {
-                    tab.collapsed.insert(came);
-                }
+                tab.adopt(came, detached);
                 if tab.focused == gone {
                     tab.focused = came;
                 }
@@ -234,9 +229,7 @@ impl WindowView {
     fn detach_pane(&mut self, pane: EntityId, wi: usize, ti: usize) -> Detached {
         let workspace = &mut self.workspaces[wi];
         let tab = &mut workspace.tabs[ti];
-        let entry = tab.panes.remove(&pane).expect("the pane was located in this tab");
-        let done = tab.done.remove(&pane);
-        let collapsed = tab.collapsed.remove(&pane);
+        let detached = tab.release(pane);
         match tab.root.remove(pane) {
             Some(next) if tab.focused == pane => {
                 tab.focused = next;
@@ -245,7 +238,7 @@ impl WindowView {
             Some(_) => {}
             None => _ = workspace.remove_tab(ti),
         }
-        Detached { entry, done, collapsed }
+        detached
     }
 
     /// 挪动、对调之后收尾：`focus` 时切到 `pane`；否则显示着的标签照新样子显示，原来有焦点的终端
@@ -358,7 +351,7 @@ impl WindowView {
 
     /// 拖着分屏时分屏 `pane` 上的落点提示：落在哪一块就盖住哪一块；没在拖、没落在它上面时为 `None`。
     pub(super) fn pane_drop_overlay(&self, pane: EntityId, cx: &Context<Self>) -> Option<gpui::Div> {
-        let (_, zone) = self.pane_drop.filter(|(target, _)| *target == pane && cx.has_active_drag())?;
+        let (_, zone) = self.pane_drop.filter(|(target, _)| *target == pane)?;
         let ring = cx.theme().ring;
         let overlay = gpui::div().absolute().bg(ring.opacity(0.18)).border_2().border_color(ring.opacity(0.7));
         let half = gpui::relative(0.5);

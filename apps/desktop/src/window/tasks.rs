@@ -58,7 +58,7 @@ pub(super) struct RunTask {
     dir: Option<PathBuf>,
 }
 
-/// 命令菜单里分组的标题：收起或展开一组，`key` 见 `group_key`，`folded` 是点之前收没收着。
+/// 命令菜单里分组的标题：收起或展开 `group_key` 为 `key` 的一组，`folded` 是点之前收没收着。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(super) struct ToggleTaskGroup {

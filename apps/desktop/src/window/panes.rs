@@ -521,14 +521,9 @@ impl WindowView {
                 buttons.invisible().group_hover(group, |buttons| buttons.visible())
             });
         let dragged = DraggedPane::new(id, name.clone());
-        let view = cx.weak_entity();
         div()
             .id(("pane-header", id))
-            // 上一次拖动落在别处或取消时没清掉的落点提示，开始拖时清掉。
-            .on_drag(dragged, move |dragged, _, _, cx| {
-                view.update(cx, |this, _| this.pane_drop = None).ok();
-                cx.new(|_| dragged.clone())
-            })
+            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .flex_none()
             .h(px(PANE_HEADER_HEIGHT))
             .pl(px(10.))

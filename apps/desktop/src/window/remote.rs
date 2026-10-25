@@ -1,9 +1,8 @@
 //! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`、`runode move`、`runode swap`，命令行问
 //! 各个终端摆在哪，以及手机新建工作区、给工作区改名）：在某个终端旁边开新终端，切到某个终端，挪动、
-//! 对调分屏，回答布局（见 `layout_report`），
-//! 在最前面那个窗口里开一个某个目录的 workspace（已经有了就用它），按布局里的序号给 workspace 改名。宿主把请求包成 `HostMsg::UiRequest`
-//! 经连接转过来（见 `host_client::serve_ui`），这里在主线程上按会话找到它所在的窗口和分屏再办，
-//! 用 `Link::ui_reply` 回话。终端里的程序读写剪贴板也这样转过来，见 `clipboard`。
+//! 对调分屏，回答布局（`layout_report`），在最前面那个窗口里开一个某个目录的 workspace（已经有了就用
+//! 它），按布局里的序号给 workspace 改名。宿主把请求包成 `HostMsg::UiRequest` 经连接转过来
+//! （`host_client::serve_ui`），这里在主线程上按会话找到它所在的窗口和分屏再办，用 `Link::ui_reply` 回话。终端里的程序读写剪贴板也这样转过来，见 `clipboard`。
 
 use std::path::{Path, PathBuf};
 
@@ -156,7 +155,7 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
                     req,
                     match near {
                         Some(near) => format!("no runode window shows session {near}"),
-                        None => "there is no runode window to move it to".into(),
+                        None => "the front runode window shows no terminal to move it next to".into(),
                     },
                 );
             };
@@ -292,11 +291,7 @@ impl WindowView {
         match placement {
             Placement::Tab => {
                 let tab = self.single_pane_tab(view.clone(), window, cx);
-                let workspace = &mut self.workspaces[wi];
-                workspace.tabs.insert(ti + 1, tab);
-                if workspace.active > ti {
-                    workspace.active += 1;
-                }
+                self.workspaces[wi].add_tab(ti + 1, tab);
             }
             Placement::Right | Placement::Down => {
                 let axis = if placement == Placement::Right { Axis::Horizontal } else { Axis::Vertical };
