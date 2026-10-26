@@ -61,7 +61,7 @@ version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$plist
 arch=$(lipo -archs "$exe" | tr ' ' '-')
 bundle_dir="$root/target/$BUILD_PROFILE/bundle"
 app="$bundle_dir/Runode.app"
-dmg="$bundle_dir/Runode-$version-$arch.dmg"
+dmg="$bundle_dir/Runode-$version-macos-$arch.dmg"
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
@@ -149,7 +149,7 @@ fi
 
 # 自动更新下载的 zip。ditto 打包时保留符号链接（rn）和扩展属性，解压后签名才对得上。公证要交 zip，
 # 通过后把票据钉进 .app 再重新打包，没联网时 Gatekeeper 也认。
-zip="$bundle_dir/Runode-$version-$arch.zip"
+zip="$bundle_dir/Runode-$version-macos-$arch.zip"
 rm -f "$zip"
 ditto -c -k --keepParent --sequesterRsrc "$app" "$zip"
 if $notarizing; then

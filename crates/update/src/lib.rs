@@ -3,6 +3,8 @@
 //! 签名后留着（`Installation::stage`），等 app 退出时和装着的那份原子地对调（`Staged::install`）。
 //! 正在跑的进程不受影响，下次启动就是新版本。
 //!
+//! Windows 上更新包是 setup.exe，签名者证书要和在跑的 runode.exe 一样，见 `windows`。
+//!
 //! 只有用 Developer ID 签过名的 .app 才自己更新：新包也要是 Developer ID Application 证书签的，
 //! 和在跑的这份出自同一个 Team ID、是同一个 bundle id（`codesign --verify -R`），这就认定了是同一个
 //! 发布者的构建，不另做签名。下好时核对一次，退出时装上前再核对一次。
@@ -12,14 +14,22 @@
 //! 下载经 NSURLSession，跟着系统的代理设置和证书。app 自己下载的文件不带隔离属性，换上去以后
 //! Gatekeeper 也不会再拦一次。
 
+#[cfg(any(windows, test))]
+mod authenticode;
 mod fetch;
+#[cfg(not(windows))]
 mod install;
+#[cfg(windows)]
+mod windows;
 
 use std::{cmp::Ordering, collections::BTreeMap, fmt, time::Duration};
 
 use serde::Deserialize;
 
+#[cfg(not(windows))]
 pub use install::{Installation, Staged};
+#[cfg(windows)]
+pub use windows::{Installation, Staged};
 
 /// 最新版本的清单：GitHub 上「最新的 Release」（不含预发布）里的 `latest.json`，由发版的 workflow
 /// 生成。经这个固定的下载地址取，不经 GitHub 的 API，没有未登录时每小时 60 次的限制。
@@ -37,7 +47,7 @@ pub struct Release {
     pub version: String,
     /// Release 的网页：更新说明、手动下载。
     pub page: String,
-    /// 各架构的更新包（zip），按 `lipo -archs` 的架构名（`arm64`、`x86_64`）。
+    /// 各平台的更新包：Mac 的 zip 按 `lipo -archs` 的架构名（`arm64`、`x86_64`），Windows 的安装包是 `windows-x86_64`。
     #[serde(default)]
     pub archives: BTreeMap<String, String>,
 }
@@ -68,8 +78,11 @@ pub fn latest() -> Result<Release, Error> {
     Release::parse(&fetch::get(MANIFEST_URL, MANIFEST_TIMEOUT, &|_, _| {})?)
 }
 
-/// 这台 Mac 的架构，按清单（`lipo -archs`）的叫法。
+/// 这台机器的更新包在清单里的名字：Mac 按架构（`lipo -archs` 的叫法），Windows 是 `windows-x86_64`。
 pub fn arch() -> &'static str {
+    if cfg!(windows) {
+        return "windows-x86_64";
+    }
     match std::env::consts::ARCH {
         "aarch64" => "arm64",
         other => other,

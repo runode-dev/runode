@@ -1,5 +1,5 @@
-//! 经 NSURLSession 取一个网址：小的（清单）读进内存，更新包直接下载成文件。系统的代理设置、证书和
-//! 重定向都照系统的来。
+//! 取一个网址：小的（清单）读进内存，更新包直接下载成文件。macOS 经 NSURLSession，系统的代理设置、
+//! 证书和重定向都照系统的来；Windows 交给系统自带的 curl.exe。
 
 use std::{path::Path, time::Duration};
 
@@ -128,17 +128,72 @@ fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows 上交给系统自带的 curl.exe（Windows 10 起有）；只许 https，代理照环境变量。
+#[cfg(windows)]
+pub(crate) fn get(url: &str, timeout: Duration, _progress: &dyn Fn(u64, u64)) -> Result<Vec<u8>, Error> {
+    let out = curl(timeout).arg(url).output().map_err(|err| Error::Network(format!("curl.exe: {err}")))?;
+    if !out.status.success() {
+        return Err(Error::Network(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
+    }
+    Ok(out.stdout)
+}
+
+/// 下载成文件，每 250 毫秒报一次已收到的字节（总字节未知，报 0）；失败时不留 `to`。
+#[cfg(windows)]
+pub(crate) fn download(url: &str, to: &Path, timeout: Duration, progress: &dyn Fn(u64, u64)) -> Result<(), Error> {
+    use std::{io::Read as _, process::Stdio, thread};
+
+    let mut child = curl(timeout)
+        .arg("-o")
+        .arg(to)
+        .arg(url)
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| Error::Network(format!("curl.exe: {err}")))?;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                progress(std::fs::metadata(to).map_or(0, |meta| meta.len()), 0);
+                thread::sleep(Duration::from_millis(250));
+            }
+            Err(err) => return Err(Error::Network(err.to_string())),
+        }
+    };
+    if !status.success() {
+        let mut reason = String::new();
+        if let Some(mut stderr) = child.stderr.take() {
+            let _ = stderr.read_to_string(&mut reason);
+        }
+        let _ = std::fs::remove_file(to);
+        return Err(Error::Network(reason.trim().to_owned()));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn curl(timeout: Duration) -> std::process::Command {
+    use std::os::windows::process::CommandExt as _;
+
+    let mut command = std::process::Command::new("curl.exe");
+    command
+        .args(["-fsSL", "--retry", "2", "--proto", "=https", "--max-time"])
+        .arg(timeout.as_secs().to_string())
+        .creation_flags(0x0800_0000);
+    command
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 pub(crate) fn get(_url: &str, _timeout: Duration, _progress: &dyn Fn(u64, u64)) -> Result<Vec<u8>, Error> {
     Err(unsupported())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub(crate) fn download(_url: &str, _to: &Path, _timeout: Duration, _progress: &dyn Fn(u64, u64)) -> Result<(), Error> {
     Err(unsupported())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn unsupported() -> Error {
     Error::Network("downloading updates is only supported on macOS".into())
 }

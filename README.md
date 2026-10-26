@@ -53,7 +53,7 @@ Run this in a terminal:
 curl -fsSL https://raw.githubusercontent.com/runode-dev/runode/main/scripts/install.sh | sh
 ```
 
-It installs Runode.app into Applications and links the `runode` command line into the first writable bin directory on your PATH (`~/.local/bin`, `~/bin`, `/opt/homebrew/bin`, `/usr/local/bin`; falls back to `~/.local/bin`). You can also download the dmg for your Mac yourself: [Apple silicon](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg). Open it and drag Runode into Applications. It is signed with a Developer ID, notarized by Apple, and keeps itself up to date.
+It installs Runode.app into Applications and links the `runode` command line into the first writable bin directory on your PATH (`~/.local/bin`, `~/bin`, `/opt/homebrew/bin`, `/usr/local/bin`; falls back to `~/.local/bin`). You can also download the dmg for your Mac yourself from the [latest release](https://github.com/runode-dev/runode/releases/latest). Open it and drag Runode into Applications. It is signed with a Developer ID, notarized by Apple, and keeps itself up to date.
 
 Every version is on [Releases](https://github.com/runode-dev/runode/releases). The iOS app isn't on the App Store yet; [build it from source](CONTRIBUTING.md).
 
@@ -86,7 +86,7 @@ Runode is not a fork of Ghostty. It uses libghostty-vt as a terminal emulation l
 Any agent that runs in a terminal. More than 20 have their state recognized, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode, Amp, GitHub Copilot, Kimi and Qwen Code, and you can add your own detection rules.
 
 **Which platforms are supported?**
-macOS on both Apple silicon and Intel, plus an iOS app for remote access. On Linux (x86_64 and aarch64) the install script sets up the command line and the terminal host without a desktop UI; connect to it from your phone over remote access. The desktop app, terminal host and command line also run on Windows when built from source; there is no Windows release yet.
+macOS on both Apple silicon and Intel, plus an iOS app for remote access. On Linux (x86_64 and aarch64) the install script sets up the command line and the terminal host without a desktop UI; connect to it from your phone over remote access. On Windows (x86_64) download `Runode-<version>-windows-x86_64-setup.exe` from the [latest release](https://github.com/runode-dev/runode/releases/latest); it installs per user and puts the `rn` command line on your PATH. The installer is signed with a self-signed certificate, so SmartScreen warns on the first run.
 
 ## Contributing
 

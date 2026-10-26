@@ -176,10 +176,11 @@ install_linux() {
     trap 'rm -rf "$tmp"' EXIT
 
     pin_version
-    url="$(download_base)/runode-linux-$arch.tar.gz"
+    name="Runode-$RUNODE_VERSION-linux-$arch.tar.gz"
+    url="$(download_base)/$name"
     say "正在下载 $url"
     fetch "$url" "$tmp/runode.tar.gz" progress
-    verify "$tmp/runode.tar.gz" "runode-linux-${arch}.tar.gz"
+    verify "$tmp/runode.tar.gz" "$name"
     tar -xzf "$tmp/runode.tar.gz" -C "$tmp"
     [ -f "$tmp/runode" ] || fail "安装包里没有 runode"
 
