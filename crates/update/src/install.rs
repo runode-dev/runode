@@ -68,11 +68,11 @@ impl Installation {
             fs::remove_dir_all(dir).map_err(|err| io(dir, err))?;
         }
         fs::create_dir(dir).map_err(|err| io(dir, err))?;
-        let zip = dir.join("update.zip");
-        crate::fetch::download(url, &zip, ARCHIVE_TIMEOUT, progress)?;
-        // ditto 解压时保留符号链接（.app 里的 rn）和扩展属性，签名才对得上。
-        run(Command::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(dir))?;
-        fs::remove_file(&zip).map_err(|err| io(&zip, err))?;
+        let dmg = dir.join("update.dmg");
+        crate::fetch::download(url, &dmg, ARCHIVE_TIMEOUT, progress)?;
+        let copied = copy_app_from(&dmg, dir);
+        fs::remove_file(&dmg).map_err(|err| io(&dmg, err))?;
+        copied?;
         let new_app = only_app_in(dir, OsStr::new(ARCHIVE_APP))?;
         verify(&new_app, &self.team, version)?;
         tracing::info!("staged Runode {version} at {}", new_app.display());
@@ -141,6 +141,25 @@ impl Staged {
         tracing::info!("installed Runode {} at {}", self.version, self.target.display());
         Ok(())
     }
+}
+
+/// 把 `dmg` 里的 `ARCHIVE_APP` 拷到 `dir`。挂在 `dir` 里的临时挂载点上，只读、不在访达里露出；
+/// ditto 拷贝时保留符号链接（.app 里的 rn）和扩展属性，签名才对得上。
+fn copy_app_from(dmg: &Path, dir: &Path) -> Result<(), Error> {
+    let mount = dir.join("mnt");
+    fs::create_dir(&mount).map_err(|err| io(&mount, err))?;
+    run(Command::new("/usr/bin/hdiutil")
+        .args(["attach", "-nobrowse", "-readonly", "-noverify", "-noautoopen", "-mountpoint"])
+        .arg(&mount)
+        .arg(dmg))?;
+    let copied = run(Command::new("/usr/bin/ditto").arg(mount.join(ARCHIVE_APP)).arg(dir.join(ARCHIVE_APP)));
+    let detached = run(Command::new("/usr/bin/hdiutil").arg("detach").arg(&mount))
+        .or_else(|_| run(Command::new("/usr/bin/hdiutil").args(["detach", "-force"]).arg(&mount)));
+    // 卸不掉时留着目录会让后面删暂存目录失败，所以两种情况都报出来。
+    copied?;
+    detached?;
+    let _ = fs::remove_dir(&mount);
+    Ok(())
 }
 
 /// 可执行文件 `exe` 所在的 .app：`<名字>.app/Contents/MacOS/<可执行文件>`。

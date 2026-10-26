@@ -115,7 +115,7 @@ install_macos() {
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
 
-    # 自动更新用的 zip 按版本号起名，地址从版本清单里读。
+    # dmg 按版本号起名，地址从版本清单里读。
     say "正在查找 Runode 的 macOS 版（${arch}）……"
     pin_version
     [ -f "$tmp/latest.json" ] || fetch "$(download_base)/latest.json" "$tmp/latest.json"
@@ -123,12 +123,16 @@ install_macos() {
     [ -n "$url" ] || fail "版本清单里没有 $arch 的安装包"
 
     say "正在下载 $url"
-    fetch "$url" "$tmp/Runode.zip" progress
-    verify "$tmp/Runode.zip" "${url##*/}"
-    # ditto 解压才保留符号链接和扩展属性，签名对得上。
-    ditto -x -k "$tmp/Runode.zip" "$tmp"
+    fetch "$url" "$tmp/Runode.dmg" progress
+    verify "$tmp/Runode.dmg" "${url##*/}"
+    # 挂上 dmg 把 .app 拷出来，ditto 才保留符号链接和扩展属性，签名对得上。
+    mkdir "$tmp/mnt"
+    hdiutil attach -nobrowse -readonly -noverify -noautoopen -mountpoint "$tmp/mnt" "$tmp/Runode.dmg" >/dev/null ||
+        fail "挂不上 Runode.dmg"
+    ditto "$tmp/mnt/Runode.app" "$tmp/Runode.app" || { hdiutil detach -force "$tmp/mnt" >/dev/null 2>&1; fail "dmg 里没有 Runode.app"; }
+    hdiutil detach "$tmp/mnt" >/dev/null 2>&1 || hdiutil detach -force "$tmp/mnt" >/dev/null 2>&1 || true
     [ -d "$tmp/Runode.app" ] || fail "安装包里没有 Runode.app"
-    # SHA256SUMS 和 zip 出自同一个发布，整个发布被换掉时挡不住，所以再核对签名：要求和自动更新的
+    # SHA256SUMS 和 dmg 出自同一个发布，整个发布被换掉时挡不住，所以再核对签名：要求和自动更新的
     # `requirement` 一样，是 Runode 的 Team 用 Developer ID Application 证书签的 dev.runode.app。
     /usr/bin/codesign --verify --deep --strict -R "=anchor apple generic and identifier \"$bundle_id\" \
 and certificate 1[field.1.2.840.113635.100.6.2.6] exists \

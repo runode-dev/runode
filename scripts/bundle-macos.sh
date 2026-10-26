@@ -1,6 +1,6 @@
 #!/bin/bash
-# 发布构建 runode，打包成 Runode.app，再做成可拖进「应用程序」安装的 dmg，和 app 自动更新时下载的
-# zip。产物在 target/<profile>/bundle/ 下。
+# 发布构建 runode，打包成 Runode.app，再做成可拖进「应用程序」安装的 dmg（app 自动更新
+# 下载的也是它）。产物在 target/<profile>/bundle/ 下。
 #
 # 用法：bundle-macos.sh [app|dmg]，默认 dmg；app 只打包到 Runode.app 为止。
 #
@@ -16,7 +16,7 @@
 #   NOTARY_PROFILE 公证用的 notarytool 钥匙串配置名（xcrun notarytool store-credentials 存的），或者
 #   NOTARY_KEY、NOTARY_KEY_ID、NOTARY_ISSUER
 #                  App Store Connect API 密钥（.p8 文件的路径、密钥 ID、Issuer ID），CI 里用这个。
-#                  两样都没给时不公证；dmg 模式下给了就公证 zip 和 dmg，并把公证票据钉进 .app 和 dmg。
+#                  两样都没给时不公证；dmg 模式下给了就公证 .app 和 dmg，并把公证票据钉进 .app 和 dmg。
 set -euo pipefail
 
 target=${1:-dmg}
@@ -147,16 +147,15 @@ if [[ -n "${NOTARY_PROFILE:-}" || -n "${NOTARY_KEY:-}" ]]; then
     notarizing=true
 fi
 
-# 自动更新下载的 zip。ditto 打包时保留符号链接（rn）和扩展属性，解压后签名才对得上。公证要交 zip，
-# 通过后把票据钉进 .app 再重新打包，没联网时 Gatekeeper 也认。
-zip="$bundle_dir/Runode-$version-macos-$arch.zip"
-rm -f "$zip"
-ditto -c -k --keepParent --sequesterRsrc "$app" "$zip"
+# 公证要交 zip（ditto 打包时保留符号链接 rn 和扩展属性），通过后把票据钉进 .app，没联网时
+# Gatekeeper 也认；zip 只用来提交，不发布。
 if $notarizing; then
+    zip_dir=$(mktemp -d)
+    zip="$zip_dir/Runode.zip"
+    ditto -c -k --keepParent --sequesterRsrc "$app" "$zip"
     notarize "$zip"
     staple "$app"
-    rm -f "$zip"
-    ditto -c -k --keepParent --sequesterRsrc "$app" "$zip"
+    rm -rf "$zip_dir"
 fi
 
 # dmg 里放 .app 和指向 /Applications 的链接，打开后直接拖拽安装。
@@ -190,4 +189,3 @@ if $notarizing; then
 fi
 
 echo "$dmg"
-echo "$zip"

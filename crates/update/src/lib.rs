@@ -1,5 +1,5 @@
 //! 桌面 app 的自动更新：从 GitHub 上最新的 Release 读版本清单（`latest.json`，见 `Release`），
-//! 比版本号，把这台 Mac 的架构对应的 zip 下载、解压到装着的 Runode.app 旁边的暂存目录里，核对
+//! 比版本号，把这台 Mac 的架构对应的 dmg 下载、把里面的 .app 拷到装着的 Runode.app 旁边的暂存目录里，核对
 //! 签名后留着（`Installation::stage`），等 app 退出时和装着的那份原子地对调（`Staged::install`）。
 //! 正在跑的进程不受影响，下次启动就是新版本。
 //!
@@ -47,7 +47,7 @@ pub struct Release {
     pub version: String,
     /// Release 的网页：更新说明、手动下载。
     pub page: String,
-    /// 各平台的更新包：Mac 的 zip 按 `lipo -archs` 的架构名（`arm64`、`x86_64`），Windows 的安装包是 `windows-x86_64`。
+    /// 各平台的更新包：Mac 的 dmg 按 `lipo -archs` 的架构名（`arm64`、`x86_64`），Windows 的安装包是 `windows-x86_64`。
     #[serde(default)]
     pub archives: BTreeMap<String, String>,
 }

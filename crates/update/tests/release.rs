@@ -6,19 +6,19 @@ const MANIFEST: &str = r#"{
     "version": "0.2.0",
     "page": "https://github.com/runode-dev/runode/releases/tag/v0.2.0",
     "archives": {
-        "arm64": "https://github.com/runode-dev/runode/releases/download/v0.2.0/Runode-0.2.0-arm64.zip"
+        "arm64": "https://github.com/runode-dev/runode/releases/download/v0.2.0/Runode-0.2.0-macos-arm64.dmg"
     }
 }"#;
 
-const ARM64_ZIP: &str = "https://github.com/runode-dev/runode/releases/download/v0.2.0/Runode-0.2.0-arm64.zip";
+const ARM64_DMG: &str = "https://github.com/runode-dev/runode/releases/download/v0.2.0/Runode-0.2.0-macos-arm64.dmg";
 
 #[test]
 fn the_manifest_gives_the_archive_for_this_arch() {
     let release = Release::parse(MANIFEST.as_bytes()).unwrap();
     assert_eq!(release.version, "0.2.0");
     assert_eq!(release.page, "https://github.com/runode-dev/runode/releases/tag/v0.2.0");
-    assert_eq!(release.archives.get("arm64").map(String::as_str), Some(ARM64_ZIP));
-    let expected = (arch() == "arm64").then_some(ARM64_ZIP);
+    assert_eq!(release.archives.get("arm64").map(String::as_str), Some(ARM64_DMG));
+    let expected = (arch() == "arm64").then_some(ARM64_DMG);
     assert_eq!(release.archive(), expected);
 }
 
