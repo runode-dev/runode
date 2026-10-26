@@ -177,6 +177,9 @@ impl WindowView {
         {
             tab.collapsed.insert(view.entity_id());
             self.focus_pane_in_active_tab(before, window, cx);
+            // 折叠的分屏不布局，shell 等不来 `start` 要的那次布局，命令就一直不跑。
+            let size = view.read(cx).size();
+            view.update(cx, |view, cx| view.start_at(size, window, cx));
         }
     }
 
