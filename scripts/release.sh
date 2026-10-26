@@ -17,6 +17,8 @@
 # 这类没有终端可交互的用。问发不发时答了不发，草稿挪成 vX.Y.Z.draft.md，--yes 不会把它发出去，不带
 # --yes 再运行时接着改它。
 #
+# 上个标签以来 apps/ios、protocol、types、remote 有改动时，推完标签顺手触发 TestFlight 工作流。
+#
 # 用法：release.sh [--beta] [--yes] [版本号]，版本号是 x.y.z，不给时补丁号加一。
 set -euo pipefail
 
@@ -153,8 +155,20 @@ rm Cargo.toml.bak
 # 只更新 Cargo.lock 里 workspace 自己的包的版本，不动依赖。
 cargo update --workspace || rollback "更新 Cargo.lock 失败"
 git add Cargo.toml Cargo.lock "$notes" || rollback "暂存发版的改动失败"
+# 手机端要不要跟着传 TestFlight：看上个标签以来手机端和它用到的 crate 动过没有，要在打标签前取。
+prev=$(git describe --tags --abbrev=0 2>/dev/null || true)
+phone_changed=
+[[ -n "$prev" && -n "$(git diff --name-only "$prev" HEAD -- apps/ios crates/protocol crates/types crates/remote)" ]] && phone_changed=1
 git commit -m "chore: 发布 $tag${beta:+ beta}" || rollback "提交失败"
 git tag "$tag" || rollback "打标签失败"
 trap - INT TERM
 git push --atomic origin main "$tag" || rollback "推送失败"
 echo "已推送 ${tag}，release.yml 接着构建和发布：gh run watch" >&2
+# TestFlight 工作流不随标签触发；beta 版也传，TestFlight 本来就是测试通道。失败不回滚发版，提示手动跑。
+if [[ -n "$phone_changed" ]]; then
+  if gh workflow run testflight.yml >/dev/null; then
+    echo "手机端有改动，已触发 testflight.yml：gh run list --workflow testflight.yml" >&2
+  else
+    echo "手机端有改动，但触发 testflight.yml 失败，手动跑：gh workflow run testflight.yml" >&2
+  fi
+fi
