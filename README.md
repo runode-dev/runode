@@ -16,6 +16,10 @@
   <a href="README.zh-CN.md">简体中文</a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Runode with Claude Code waiting for an answer, Pi done, and the tests Pi ran in the pane below" width="900">
+</p>
+
 ## About
 
 Running several Claude Code and Codex sessions at once means constantly switching terminals to see which one finished and which one is waiting for you. Runode recognizes the agent in every terminal and tracks its state with no hooks to configure, and lets you know when one needs you. Agents can drive the terminals next to them too, running tests and reading the output themselves. When you're away from your desk, pick up where you left off on your phone.
@@ -27,9 +31,17 @@ Runode uses [Ghostty](https://ghostty.org)'s libghostty-vt for terminal emulatio
 - **Agent-aware**: recognizes 20+ agents, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode and Amp, and marks each tab and sidebar entry as working, waiting for you, or done but unread.
 - **Notifications and jumping**: notifies you and plays a sound when you're not looking. `⌘⇧A` lists the agents in every window, and `⌘⌥A` jumps straight to the next one that needs you.
 - **Scriptable**: the built-in `runode` CLI lists, reads and drives every terminal. Agents use it to run commands in a neighbouring pane, wait for them, read the output, or direct another agent.
+  <br><img src="docs/agents.gif" alt="Two Claude Code panes: the left one asks a question, the right one runs cargo test in a new pane below and summarizes it" width="900">
 - **Persistent sessions**: with `terminal-host` on, sessions live in a separate host process and survive quitting, relaunching and upgrading the app.
-- **Remote from your phone**: the iOS app pairs with your Mac over the local network through a TLS 1.3 connection. From your phone you can watch terminals, answer agents, run tasks and commit to git.
+- **Remote from your phone**: the iOS app pairs with your Mac over a TLS 1.3 connection. On the same network it connects directly; elsewhere it reaches your Mac through [iroh](https://iroh.computer) by public key, punching a direct path and falling back to a relay. From your phone you can watch terminals, answer agents, run tasks and commit to git.
+  <br><img src="docs/mobile.gif" alt="iOS app: Claude Code waits for an answer while Codex works, then the Git page shows a diff, stages a file and commits" width="300">
+- **Remote desktop**: see and control your Mac's whole screen from your phone over the same connection, with low-latency hardware HEVC. It can switch displays and unlock a locked screen with a password you saved.
+  <br><img src="docs/remote-desktop.gif" alt="iOS app in landscape showing a Mac's screen: taps open Runode's sidebar, a new tab and the task board" width="900">
+- **Voice input**: dictate into the terminal on your Mac or your phone. Speech is recognized offline with a local model; cloud recognition and polishing the text with an LLM are optional.
+- **Task board**: a kanban board for agent work. A schedule opens a terminal and starts an agent on a task at the time you set, and a task whose PR gets merged is marked done. Agents use it too, through `runode todo` and `runode schedule`.
+  <br><img src="docs/kanban.gif" alt="Task board: a new task is added, two tasks start, move to Needs You, and one is marked done" width="900">
 - **Project panels**: a file tree, syntax-highlighted file previews, and a Git panel that can stage hunks, commit, switch branches, and pull or push.
+  <br><img src="docs/panels.gif" alt="File tree, Markdown and Rust previews, and the Git panel staging a hunk and committing" width="900">
 - **Ghostty compatible**: reads your existing Ghostty config and themes.
 - **Native**: written in Rust, not Electron. The UI comes in English, Simplified Chinese and Traditional Chinese, and the app updates itself.
 
@@ -74,7 +86,7 @@ Runode is not a fork of Ghostty. It uses libghostty-vt as a terminal emulation l
 Any agent that runs in a terminal. More than 20 have their state recognized, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode, Amp, GitHub Copilot, Kimi and Qwen Code, and you can add your own detection rules.
 
 **Which platforms are supported?**
-macOS on both Apple silicon and Intel, plus an iOS app for remote access. On Linux (x86_64 and aarch64) the install script sets up the command line and the terminal host without a desktop UI; connect to it from your phone over remote access.
+macOS on both Apple silicon and Intel, plus an iOS app for remote access. On Linux (x86_64 and aarch64) the install script sets up the command line and the terminal host without a desktop UI; connect to it from your phone over remote access. The desktop app, terminal host and command line also run on Windows when built from source; there is no Windows release yet.
 
 ## Contributing
 
