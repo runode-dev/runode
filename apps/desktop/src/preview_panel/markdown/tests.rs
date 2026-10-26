@@ -313,3 +313,14 @@ fn decoded_size_counts_every_gif_frame() {
     gif[6..10].copy_from_slice(&[0xff; 4]);
     assert_eq!(decoded_bytes(ImageFormat::Gif, &gif, 500), Some(65535 * 65535 * 4));
 }
+
+/// Markdown 里的 GIF 只按第一帧算占用，几百帧的录屏也放得进预算。
+#[test]
+fn markdown_gif_keeps_only_first_frame() {
+    let mut gif = Vec::new();
+    let frames = (0..50).map(|_| image::Frame::new(image::RgbaImage::new(10, 10)));
+    image::codecs::gif::GifEncoder::new(&mut gif).encode_frames(frames).unwrap();
+    let Some(Picture::Bitmap(_, decoded)) = first_frame(&gif) else { panic!() };
+    assert_eq!(decoded, 10 * 10 * 4);
+    assert!(first_frame(b"not a gif").is_none());
+}

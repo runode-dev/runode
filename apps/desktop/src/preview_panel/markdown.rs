@@ -813,12 +813,34 @@ fn picture_of(content: Content, svg: &SvgRenderer) -> Option<Picture> {
         return svg.render_single_frame(bytes, 1.).ok().map(Picture::Svg);
     }
     match content {
+        Content::Image { format: runode_preview::ImageFormat::Gif, bytes } => first_frame(&bytes),
         Content::Image { format, bytes } => {
             let decoded = decoded_bytes(format, &bytes, MAX_DECODED_BYTES).filter(|&n| n <= MAX_DECODED_BYTES)?;
             Some(Picture::Bitmap(Arc::new(Image::from_bytes(gpui_format(format), bytes)), decoded))
         }
         _ => None,
     }
+}
+
+/// Markdown 里的 GIF 只留第一帧：几百帧的录屏每帧都解成整张画布，合起来动辄上 GB，放不进
+/// `MAX_LOCAL_IMAGE_BYTES`。重编成 PNG 交给 GPUI，画布超过 `MAX_DECODED_BYTES` 或解不了时为空。
+fn first_frame(bytes: &[u8]) -> Option<Picture> {
+    // 只读头和第一帧的宽高，不解像素：帧可以比画布写得大得多，解码前先按较大的算。
+    let mut options = gif::DecodeOptions::new();
+    options.skip_frame_decoding(true);
+    options.set_memory_limit(gif::MemoryLimit::Unlimited);
+    let mut header = options.read_info(Cursor::new(bytes)).ok()?;
+    let canvas = usize::from(header.width()).saturating_mul(usize::from(header.height()));
+    let first = header.read_next_frame().ok()??;
+    let pixels = canvas.max(usize::from(first.width).saturating_mul(usize::from(first.height)));
+    let decoded = pixels.saturating_mul(4);
+    if decoded > MAX_DECODED_BYTES {
+        return None;
+    }
+    let frame = image::load_from_memory_with_format(bytes, image::ImageFormat::Gif).ok()?;
+    let mut png = Vec::new();
+    frame.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+    Some(Picture::Bitmap(Arc::new(Image::from_bytes(gpui::ImageFormat::Png, png)), decoded))
 }
 
 /// 位图 `bytes` 解码后超过 `MAX_DECODED_BYTES`：预览栏直接打开图片文件、看图片的 diff 时也按太大处理，不交给
