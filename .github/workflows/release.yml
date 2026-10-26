@@ -204,7 +204,13 @@ jobs:
       # 参数和 bundle-macos.sh 里的 cargo build 一样，先在导入证书、写密钥前编完：依赖的构建脚本跑时钥匙串还没解锁、
       # 环境里也没有 NOTARY_KEY 这些，打包时那次 cargo build 基本什么都不用编。
       - name: 编译
-        run: cargo build --profile release --locked
+        run: |
+          for attempt in 1 2 3; do
+            cargo build --profile release --locked && break
+            [[ $attempt -lt 3 ]] || exit 1
+            echo "编译失败（多半是 zig 下载依赖时断了连接），30 秒后重试" >&2
+            sleep 30
+          done
       - name: 导入签名证书
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -289,7 +295,12 @@ jobs:
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          cargo build --release -p runode --locked
+          for attempt in 1 2 3; do
+            cargo build --release -p runode --locked && break
+            [[ $attempt -lt 3 ]] || exit 1
+            echo "编译失败（多半是 zig 下载依赖时断了连接），30 秒后重试" >&2
+            sleep 30
+          done
           bundle=target/release/bundle
           mkdir -p "$bundle"
           tar -czf "$bundle/Runode-$VERSION-linux-${{ matrix.arch }}.tar.gz" -C target/release runode
@@ -325,7 +336,13 @@ jobs:
           key: windows-x86_64
       # 先在写出证书前编完：依赖的构建脚本跑时环境里还没有签名密钥。
       - name: 编译
-        run: cargo build --release -p runode --locked
+        run: |
+          for attempt in 1 2 3; do
+            cargo build --release -p runode --locked && break
+            [[ $attempt -lt 3 ]] || exit 1
+            echo "编译失败（多半是 zig 下载依赖时断了连接），30 秒后重试" >&2
+            sleep 30
+          done
       - name: 写下签名证书
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -342,8 +359,8 @@ jobs:
           sign "$release/runode.exe" "$release/rn.exe"
           bundle=target/release/bundle
           mkdir -p "$bundle"
-          "$iscc" //DAppVersion="$VERSION" //DSourceDir="$(cygpath -w "$release")" \
-            //DOutputDir="$(cygpath -w "$bundle")" scripts/windows/runode.iss
+          "$iscc" //DAppVersion="$VERSION" //DSourceDir="$(cygpath -aw "$release")" \
+            //DOutputDir="$(cygpath -aw "$bundle")" scripts/windows/runode.iss
           sign "$bundle/Runode-$VERSION-windows-x86_64-setup.exe"
       - name: 删掉签名证书
         if: always()
