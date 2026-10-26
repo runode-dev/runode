@@ -63,7 +63,7 @@ command -v gh >/dev/null || die "要装 gh：发版前要查 main 的 CI 和有�
 run=$(gh run list --workflow ci.yml --branch main --limit 1 --json databaseId --jq '.[0].databaseId // empty') \
   || die "没能用 gh 查 main 的 CI"
 [[ -n "$run" ]] || die "main 上还没跑过 CI"
-echo "等 main 的 CI 跑完（gh run view $run）……" >&2
+echo "等 main 的 CI 跑完（gh run view ${run}）……" >&2
 gh run watch "$run" --exit-status >/dev/null 2>&1 || die "main 最近一次 CI 没过（gh run view $run），修好再发"
 # 发版工作流的并发组 `release` 里新来的会顶掉排着队的那次，推了标签却没有 Release，所以有发版在跑或排队时不推。
 busy=$(gh run list --workflow release.yml --limit 20 --json status --jq '[.[] | select(.status != "completed")] | length') \
