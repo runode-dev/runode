@@ -15,6 +15,7 @@ use libghostty_vt::terminal::{ClipboardWrite, ClipboardWriteError};
 use runode_types::clipboard::MAX_CLIPBOARD_BYTES;
 
 use super::effects::Effects;
+use crate::vt::encode_base64;
 
 /// 宿主那份 VT 认出的一个剪贴板请求，由 `HostSession::take_clipboard` 按到达的先后取走。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -211,19 +212,6 @@ fn parse_query(body: &[u8], bel: bool) -> Option<ClipboardQuery> {
         _ => return None,
     };
     Some(ClipboardQuery { target, bel })
-}
-
-/// 标准 base64（带 `=` 补齐）编码，接在 `out` 后面。
-fn encode_base64(data: &[u8], out: &mut Vec<u8>) {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    for chunk in data.chunks(3) {
-        let b = [chunk[0], chunk.get(1).copied().unwrap_or(0), chunk.get(2).copied().unwrap_or(0)];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        let digits = [(n >> 18) & 63, (n >> 12) & 63, (n >> 6) & 63, n & 63];
-        for (k, digit) in digits.iter().enumerate() {
-            out.push(if k <= chunk.len() { ALPHABET[*digit as usize] } else { b'=' });
-        }
-    }
 }
 
 #[cfg(test)]

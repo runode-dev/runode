@@ -58,6 +58,8 @@ fn main() {
         let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));
         std::process::exit(runode_cli::complete(&args, index, &env, &mut std::io::stdout().lock()));
     }
+    // SAFETY: 还没起任何线程，也没建 VT。
+    unsafe { runode_terminal::install_png_decoder() };
     if args == ["--host"] {
         std::process::exit(host_process::run());
     }

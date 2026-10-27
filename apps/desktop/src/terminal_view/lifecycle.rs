@@ -803,6 +803,14 @@ impl TerminalView {
             }),
         ];
 
+        // 关掉的终端不会再画下一帧，画过的图片在这里交还贴图。
+        cx.on_release(|view: &mut Self, cx| {
+            for (_, image) in view.images.drain() {
+                crate::ui::drop_render_image(image, cx);
+            }
+        })
+        .detach();
+
         let settings = config.term_settings();
         let mut view = Self {
             screen,
@@ -823,6 +831,7 @@ impl TerminalView {
             focus_handle,
             metrics: None,
             glyphs: Default::default(),
+            images: HashMap::new(),
             marked_text: None,
             scroll_remainder: 0.,
             cursor_bounds: None,
@@ -845,6 +854,7 @@ impl TerminalView {
             agent_changed_at: Instant::now(),
             _hold_timeout: None,
             _cursor_blink: None,
+            _image_frame: None,
             _autoscroll: None,
             _config_watch: config_watch,
             _activation_watch: activation_watch,
@@ -1041,6 +1051,18 @@ impl TerminalView {
                 }
             }
         }));
+    }
+
+    /// 图片动画在播时，到下一帧该画的时候（`Frame::next_image_frame`）重画一次；没在播时停掉计时器。
+    pub(super) fn schedule_image_frame(&mut self, due: Option<Duration>, cx: &mut Context<Self>) {
+        // 不比 120 Hz 屏幕的一帧更勤。
+        const MIN_INTERVAL: Duration = Duration::from_millis(8);
+        self._image_frame = due.map(|due| {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(due.max(MIN_INTERVAL)).await;
+                let _ = this.update(cx, |_, cx| cx.notify());
+            })
+        });
     }
 
     /// 闪烁计时器到点：切换亮灭，或者空闲到期后停在亮的那一半。返回下次再等多久，停了时为

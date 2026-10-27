@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use super::*;
-use libghostty_vt::terminal::Mode;
+use libghostty_vt::{kitty::graphics::PlacementIterator, terminal::Mode};
 
 /// 测试数据用的伪随机数，固定种子，结果可重现。
 pub(crate) struct Rng(u64);
@@ -325,6 +325,109 @@ fn replay_keeps_the_hyperlinks_of_cells() {
     }
 }
 
+/// 一个放置的图片号、放置号、位置、格数、源区域、z 值、是否虚拟，和图片的 RGBA 像素。
+type Placed = (u32, u32, Option<(i32, i32)>, [u32; 2], [u32; 4], i32, bool, Vec<u8>);
+
+/// 屏幕上的每个放置。
+fn images(t: &Terminal<'static, '_>) -> Vec<Placed> {
+    let graphics = t.kitty_graphics().unwrap();
+    let mut iterator = PlacementIterator::new().unwrap();
+    let mut placements = iterator.update(&graphics).unwrap();
+    let mut out = Vec::new();
+    while let Some(p) = placements.next() {
+        let image = graphics.image(p.image_id().unwrap()).unwrap();
+        let pos = p.viewport_pos(&image, t).unwrap().map(|pos| (pos.col, pos.row));
+        out.push((
+            p.image_id().unwrap(),
+            p.placement_id().unwrap(),
+            pos,
+            [p.columns().unwrap(), p.rows().unwrap()],
+            [p.source_x().unwrap(), p.source_y().unwrap(), p.source_width().unwrap(), p.source_height().unwrap()],
+            p.z().unwrap(),
+            p.is_virtual().unwrap(),
+            image_rgba(&image).unwrap().into_owned(),
+        ));
+    }
+    out.sort_by_key(|image| (image.0, image.1));
+    out
+}
+
+/// 屏幕上的图片照原样放回去：RGB 的像素成了 RGBA，原点模式和光标位置不受放图片影响。
+#[test]
+fn replay_keeps_images_on_the_screen() {
+    let mut a = new_terminal(size(20, 6)).unwrap();
+    a.vt_write(b"ab\x1b_Ga=T,f=32,i=1,p=5,s=2,v=2,c=2,r=1,z=-1,q=2;/wAA/wD/AP8AAP///////w==\x1b\\");
+    a.vt_write(b"\x1b_Ga=t,f=24,i=2,s=1,v=1,q=2;AAD/\x1b\\\x1b_Ga=p,U=1,i=2,c=3,r=1,q=2\x1b\\");
+    a.vt_write(b"\x1b_Ga=p,U=1,i=1,p=7,c=1,r=2,x=1,y=0,w=1,h=2,q=2\x1b\\");
+    a.vt_write(b"\x1b[2;5r\x1b[?6h\x1b[2;3H");
+    let mut b = replayed(&a);
+    assert_eq!(images(&b), images(&a));
+    assert_eq!(images(&b).len(), 3);
+    assert_eq!(images(&b)[0].2, Some((2, 0)));
+    assert_eq!(b.mode(Mode::ORIGIN).unwrap(), a.mode(Mode::ORIGIN).unwrap());
+    assert_eq!((b.cursor_x().unwrap(), b.cursor_y().unwrap()), (a.cursor_x().unwrap(), a.cursor_y().unwrap()));
+    for t in [&mut a, &mut b] {
+        t.vt_write(b"X");
+    }
+    assert_eq!(screen_lines(&a, 0, 5).unwrap(), screen_lines(&b, 0, 5).unwrap());
+}
+
+/// 上半截滚出屏幕的图片只放回露出来的下半截：放在第一行，源图裁掉滚出去的那一截。
+#[test]
+fn replay_keeps_the_visible_part_of_a_half_scrolled_image() {
+    let mut a = new_terminal(size(20, 4)).unwrap();
+    a.vt_write(b"\x1b_Ga=T,f=32,i=1,s=2,v=2,c=2,r=2,q=2;/wAA/wD/AP8AAP///////w==\x1b\\\r\n\r\n\r\n");
+    assert_eq!(images(&a)[0].2, Some((0, -1)));
+    let b = replayed(&a);
+    let graphics = b.kitty_graphics().unwrap();
+    let mut iterator = PlacementIterator::new().unwrap();
+    let mut placements = iterator.update(&graphics).unwrap();
+    let placement = placements.next().unwrap();
+    let image = graphics.image(placement.image_id().unwrap()).unwrap();
+    assert_eq!(placement.viewport_pos(&image, &b).unwrap().map(|pos| (pos.col, pos.row)), Some((0, 0)));
+    assert_eq!(placement.grid_size(&image, &b).unwrap().rows, 1);
+    let source = placement.source_rect(&image).unwrap();
+    assert_eq!((source.y, source.height), (1, 1));
+
+    // 没给格数、按像素定大小的图片按像素裁，宽度不变：2×48 像素占三行，滚出去一行剩 32 像素。
+    let mut a = new_terminal(size(20, 4)).unwrap();
+    let mut pixels = Vec::new();
+    encode_base64(&[0; 2 * 48 * 4], &mut pixels);
+    a.vt_write(b"\x1b_Ga=T,f=32,i=1,s=2,v=48,q=2;");
+    a.vt_write(&pixels);
+    a.vt_write(b"\x1b\\\r\n\r\n");
+    assert_eq!(images(&a)[0].2, Some((0, -1)));
+    let b = replayed(&a);
+    let graphics = b.kitty_graphics().unwrap();
+    let mut iterator = PlacementIterator::new().unwrap();
+    let mut placements = iterator.update(&graphics).unwrap();
+    let placement = placements.next().unwrap();
+    let image = graphics.image(placement.image_id().unwrap()).unwrap();
+    assert_eq!(placement.viewport_pos(&image, &b).unwrap().map(|pos| (pos.col, pos.row)), Some((0, 0)));
+    let source = placement.source_rect(&image).unwrap();
+    assert_eq!((source.y, source.width, source.height), (16, 2, 32));
+    let shown = placement.pixel_size(&image, &b).unwrap();
+    assert_eq!((shown.width, shown.height), (2, 32));
+}
+
+/// 像素超过预算的图片不带，放置也不放，免得接收方收到一半的图。
+#[test]
+fn replay_drops_images_beyond_the_budget() {
+    let mut a = new_terminal(size(20, 4)).unwrap();
+    a.vt_write(b"\x1b_Ga=T,f=32,i=1,s=2,v=2,c=2,r=1,q=2;/wAA/wD/AP8AAP///////w==\x1b\\");
+    a.vt_write(b"\x1b_Ga=T,f=32,i=2,s=1,v=1,q=2;/wAA/w==\x1b\\");
+    let replay = |budget| {
+        let mut out = Vec::new();
+        replay_images(&a, budget, &mut out).unwrap();
+        let mut b = new_terminal(size(20, 4)).unwrap();
+        b.vt_write(&out);
+        images(&b).into_iter().map(|image| image.0).collect::<Vec<_>>()
+    };
+    assert_eq!(replay(20), [1, 2]);
+    assert_eq!(replay(19).len(), 1);
+    assert!(replay(3).is_empty());
+}
+
 /// 重放丢掉的东西：快照都带着，快照用不了、只能重放时界面上会看到这些差别。
 #[test]
 fn replay_loses_what_the_formatter_cannot_express() {
@@ -359,6 +462,12 @@ fn replay_loses_what_the_formatter_cannot_express() {
     theme.0[2] = libghostty_vt::style::RgbColor { r: 1, g: 2, b: 3 };
     b.set_default_color_palette(Some(theme)).unwrap();
     assert_ne!(b.color_palette().unwrap().0[2], theme.0[2]);
+
+    // 整个滚进回滚历史的图片：文字重放进去了，图片没有。
+    let mut a = new_terminal(size(20, 4)).unwrap();
+    a.vt_write(b"\x1b_Ga=T,f=32,i=1,s=2,v=2,c=2,r=2,q=2;/wAA/wD/AP8AAP///////w==\x1b\\\r\n\r\n\r\n\r\n\r\n");
+    assert_eq!(images(&a).len(), 1);
+    assert!(images(&replayed(&a)).is_empty());
 }
 
 /// 测快照编解码的耗时和大小，以及记录没写完的序列对喂输出速度的影响。在 release 下跑才有意义：

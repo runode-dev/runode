@@ -1,4 +1,7 @@
+import CoreGraphics
+import Foundation
 internal import GhosttyVt
+import ImageIO
 import RunodeProtocol
 
 /// 手机这边的一份 libghostty-vt 状态机，只消费宿主转来的字节流（VT 重放和 PTY 输出）。
@@ -17,11 +20,17 @@ public final class VTerminal {
     static let scrollbackBytesCap: UInt64 = 4 << 20
     /// 未知 OSC 最多留多少字节，和宿主的 `UNKNOWN_SEQUENCE_MAX_BYTES` 一致。
     static let unknownSequenceMaxBytes = 256 * 1024
+    /// 每块屏幕最多存多少字节 Kitty 图片的像素，超了先丢最老的。比宿主存得少，因为 iPhone 内存紧；
+    /// 这边丢了的只是画不出来，查询由宿主应答，两份 VT 不会因此分叉。
+    static let kittyImageStorageBytes: UInt64 = 16 << 20
 
     private let handle: GhosttyTerminal
     private let renderState: GhosttyRenderState
     private let rowIterator: GhosttyRenderStateRowIterator
     private let rowCells: GhosttyRenderStateRowCells
+    private let imageIterator: GhosttyRenderStateImageIterator
+    /// 上次读图片列表时的版本（`GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION`）。
+    private var imageList: UInt64?
     private let keyEncoder: GhosttyKeyEncoder
     private let keyEvent: GhosttyKeyEvent
     private let mouseEncoder: GhosttyMouseEncoder
@@ -55,6 +64,7 @@ public final class VTerminal {
 
     /// 按宿主给的尺寸和主题新建一份 VT。
     public init(size: GridSize, settings: TermSettings) throws(VTerminalError) {
+        Self.installPngDecoder
         var terminal: GhosttyTerminal?
         guard ghostty_terminal_new(nil, &terminal, max(size.cols, 1), max(size.rows, 1)) == GHOSTTY_SUCCESS,
             let terminal
@@ -62,6 +72,7 @@ public final class VTerminal {
         var state: GhosttyRenderState?
         var iterator: GhosttyRenderStateRowIterator?
         var cells: GhosttyRenderStateRowCells?
+        var images: GhosttyRenderStateImageIterator?
         var encoder: GhosttyKeyEncoder?
         var event: GhosttyKeyEvent?
         var mouseEncoder: GhosttyMouseEncoder?
@@ -69,6 +80,7 @@ public final class VTerminal {
         guard ghostty_render_state_new(nil, &state) == GHOSTTY_SUCCESS, let state,
             ghostty_render_state_row_iterator_new(nil, &iterator) == GHOSTTY_SUCCESS, let iterator,
             ghostty_render_state_row_cells_new(nil, &cells) == GHOSTTY_SUCCESS, let cells,
+            ghostty_render_state_image_iterator_new(nil, &images) == GHOSTTY_SUCCESS, let images,
             ghostty_key_encoder_new(nil, &encoder) == GHOSTTY_SUCCESS, let encoder,
             ghostty_key_event_new(nil, &event) == GHOSTTY_SUCCESS, let event,
             ghostty_mouse_encoder_new(nil, &mouseEncoder) == GHOSTTY_SUCCESS, let mouseEncoder,
@@ -81,6 +93,7 @@ public final class VTerminal {
         renderState = state
         rowIterator = iterator
         rowCells = cells
+        imageIterator = images
         keyEncoder = encoder
         keyEvent = event
         self.mouseEncoder = mouseEncoder
@@ -114,6 +127,7 @@ public final class VTerminal {
         ghostty_key_event_free(keyEvent)
         ghostty_key_encoder_free(keyEncoder)
         ghostty_render_state_row_cells_free(rowCells)
+        ghostty_render_state_image_iterator_free(imageIterator)
         ghostty_render_state_row_iterator_free(rowIterator)
         ghostty_render_state_free(renderState)
         ghostty_terminal_free(handle)
@@ -195,14 +209,21 @@ public final class VTerminal {
         }
     }
 
-    /// 宿主 `vt::configure_common` 里的选项，回滚的字节上限另按 `scrollbackBytesCap` 封顶。
+    /// 宿主 `vt::configure_common` 里的选项，回滚的字节上限另按 `scrollbackBytesCap` 封顶，图片的
+    /// 按 `kittyImageStorageBytes`。
     private func configureCommon(scrollbackBytes: UInt64) {
         var lines = Self.scrollbackLines
         var bytes = Int(clamping: min(scrollbackBytes, Self.scrollbackBytesCap))
         var unknown = Self.unknownSequenceMaxBytes
+        var imageBytes = Self.kittyImageStorageBytes
+        var no = false
         ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES, &lines)
         ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &bytes)
         ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_UNKNOWN_MAX_BYTES, &unknown)
+        ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &imageBytes)
+        ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_FILE, &no)
+        ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE, nil)
+        ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM, &no)
     }
 
     /// 程序用同步输出（mode 2026）冻结屏幕时记下来，画的一方在冻结期间不刷新，免得画出半帧。
@@ -382,6 +403,7 @@ public final class VTerminal {
 
     /// 按 render state 把变了的行抄进 `frame`，返回改了哪些。没变的行不碰。
     public func refresh(_ frame: inout ScreenFrame) -> FrameChange {
+        let nextImageFrame = advanceAnimations()
         guard ghostty_render_state_update(renderState, handle) == GHOSTTY_SUCCESS else { return .none }
         var dirty = GHOSTTY_RENDER_STATE_DIRTY_FALSE
         ghostty_render_state_get(renderState, GHOSTTY_RENDER_STATE_DATA_DIRTY, &dirty)
@@ -444,9 +466,160 @@ public final class VTerminal {
         let cursor = readCursor()
         let cursorChanged = cursor != frame.cursor
         frame.cursor = cursor
+        var list: UInt64 = 0
+        ghostty_render_state_get(renderState, GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION, &list)
+        // 新的一帧（`full`）里还没有图片，列表没变也要读。
+        let imagesChanged = full || imageList != list
+        if imagesChanged {
+            imageList = list
+            frame.images = readImages()
+        }
+        frame.nextImageFrame = nextImageFrame
         ghostty_render_state_clean(renderState)
         return FrameChange(
-            full: full, rows: full ? [] : changedRows, cursorChanged: cursorChanged, aboveChanged: aboveChanged)
+            full: full, rows: full ? [] : changedRows, cursorChanged: cursorChanged, aboveChanged: aboveChanged,
+            imagesChanged: imagesChanged)
+    }
+
+    /// 让在播的图片动画走到该放的那一帧，返回下一帧离现在多久；没有在播的为空。
+    private func advanceAnimations() -> Duration? {
+        guard let graphics = kittyGraphics else { return nil }
+        let now = UInt64((ContinuousClock.now - Self.animationEpoch) / .milliseconds(1))
+        var next: UInt64 = 0
+        guard ghostty_kitty_graphics_animation_tick(graphics, now, &next) == GHOSTTY_SUCCESS else { return nil }
+        return .milliseconds(next.subtractingReportingOverflow(now).overflow ? 0 : next - now)
+    }
+
+    /// 动画用的时钟的零点：libghostty 要求同一份 VT 一直用同一个零点。
+    private static let animationEpoch = ContinuousClock.now
+
+    private var kittyGraphics: GhosttyKittyGraphics? {
+        var graphics: GhosttyKittyGraphics?
+        guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS, &graphics) == GHOSTTY_SUCCESS
+        else { return nil }
+        return graphics
+    }
+
+    /// render state 里的图片，像素尺寸按单元格的像素尺寸折成格数，排成画的先后。
+    private func readImages() -> [ScreenImage] {
+        var iterator: GhosttyRenderStateImageIterator? = imageIterator
+        guard ghostty_render_state_get(renderState, GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR, &iterator)
+            == GHOSTTY_SUCCESS
+        else { return [] }
+        let cellWidth = Double(max(size.cellWidthPx, 1))
+        let cellHeight = Double(max(size.cellHeightPx, 1))
+        var images: [(z: Int32, image: ScreenImage)] = []
+        while ghostty_render_state_image_iterator_next(imageIterator) {
+            var place = ImagePlacement()
+            let read = withUnsafeMutablePointer(to: &place) { place in
+                var values: [UnsafeMutableRawPointer?] = [
+                    UnsafeMutableRawPointer(place.pointer(to: \.protocol)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.id)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.generation)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.layer)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.z)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.column)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.row)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.offsetX)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.offsetY)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.width)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.height)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.sourceX)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.sourceY)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.sourceWidth)!),
+                    UnsafeMutableRawPointer(place.pointer(to: \.sourceHeight)!),
+                ]
+                return ghostty_render_state_image_get_multi(
+                    imageIterator, Self.imageKeys.count, Self.imageKeys, &values, nil)
+            }
+            // 别的协议的图片和这个版本还不认识的层都跳过。
+            guard read == GHOSTTY_SUCCESS, place.protocol == GHOSTTY_IMAGE_PROTOCOL_KITTY else { continue }
+            let layer: ImageLayer
+            switch place.layer {
+            case GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND: layer = .belowBackground
+            case GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT: layer = .belowText
+            case GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT: layer = .aboveText
+            default: continue
+            }
+            let image = ScreenImage(
+                id: place.id, generation: place.generation,
+                x: Double(place.column) + Double(place.offsetX) / cellWidth,
+                y: Double(place.row) + Double(place.offsetY) / cellHeight,
+                width: Double(place.width) / cellWidth, height: Double(place.height) / cellHeight,
+                sourceX: place.sourceX, sourceY: place.sourceY, sourceWidth: place.sourceWidth,
+                sourceHeight: place.sourceHeight, layer: layer)
+            images.append((place.z, image))
+        }
+        return images.sorted { ($0.image.layer, $0.z) < ($1.image.layer, $1.z) }.map(\.image)
+    }
+
+    /// `readImages` 用 `ghostty_render_state_image_get_multi` 一次取齐的字段，顺序同 `imageKeys`。
+    private struct ImagePlacement {
+        var `protocol` = GHOSTTY_IMAGE_PROTOCOL_KITTY
+        var id: UInt32 = 0
+        var generation: UInt64 = 0
+        var layer = GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT
+        var z: Int32 = 0
+        var column: Int32 = 0
+        var row: Int32 = 0
+        var offsetX: UInt32 = 0
+        var offsetY: UInt32 = 0
+        var width: UInt32 = 0
+        var height: UInt32 = 0
+        var sourceX: UInt32 = 0
+        var sourceY: UInt32 = 0
+        var sourceWidth: UInt32 = 0
+        var sourceHeight: UInt32 = 0
+    }
+
+    private static let imageKeys = [
+        GHOSTTY_RENDER_STATE_IMAGE_DATA_PROTOCOL, GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_ID,
+        GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION, GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER,
+        GHOSTTY_RENDER_STATE_IMAGE_DATA_Z, GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_COL,
+        GHOSTTY_RENDER_STATE_IMAGE_DATA_VIEWPORT_ROW, GHOSTTY_RENDER_STATE_IMAGE_DATA_CELL_OFFSET_X,
+        GHOSTTY_RENDER_STATE_IMAGE_DATA_CELL_OFFSET_Y, GHOSTTY_RENDER_STATE_IMAGE_DATA_PIXEL_WIDTH,
+        GHOSTTY_RENDER_STATE_IMAGE_DATA_PIXEL_HEIGHT, GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_X,
+        GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_Y, GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_WIDTH,
+        GHOSTTY_RENDER_STATE_IMAGE_DATA_SOURCE_HEIGHT,
+    ]
+
+    /// 帧里一块图片（`ScreenImage.id`、`ScreenImage.generation`）现在的像素。图片已经换了版本或删了
+    /// 时为空，下一帧会带上新的。
+    public func image(id: UInt32, generation: UInt64) -> CGImage? {
+        guard let graphics = kittyGraphics, let image = ghostty_kitty_graphics_image(graphics, id) else { return nil }
+        var current: UInt64 = 0
+        var width: UInt32 = 0
+        var height: UInt32 = 0
+        var format = GHOSTTY_KITTY_IMAGE_FORMAT_RGBA
+        var data: UnsafePointer<UInt8>?
+        var length = 0
+        guard ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_GENERATION, &current) == GHOSTTY_SUCCESS,
+            current == generation,
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_WIDTH, &width) == GHOSTTY_SUCCESS,
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_HEIGHT, &height) == GHOSTTY_SUCCESS,
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_FORMAT, &format) == GHOSTTY_SUCCESS,
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR, &data) == GHOSTTY_SUCCESS,
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN, &length) == GHOSTTY_SUCCESS,
+            let data
+        else { return nil }
+        let pixels = UnsafeBufferPointer(start: data, count: length)
+        let rgba: [UInt8]
+        switch format {
+        case GHOSTTY_KITTY_IMAGE_FORMAT_RGBA: rgba = Array(pixels)
+        case GHOSTTY_KITTY_IMAGE_FORMAT_RGB:
+            rgba = stride(from: 0, to: length - 2, by: 3).flatMap { [pixels[$0], pixels[$0 + 1], pixels[$0 + 2], 255] }
+        case GHOSTTY_KITTY_IMAGE_FORMAT_GRAY_ALPHA:
+            rgba = stride(from: 0, to: length - 1, by: 2).flatMap { [pixels[$0], pixels[$0], pixels[$0], pixels[$0 + 1]] }
+        case GHOSTTY_KITTY_IMAGE_FORMAT_GRAY: rgba = pixels.flatMap { [$0, $0, $0, 255] }
+        default: return nil
+        }
+        guard rgba.count == Int(width) * Int(height) * 4,
+            let provider = CGDataProvider(data: Data(rgba) as CFData)
+        else { return nil }
+        return CGImage(
+            width: Int(width), height: Int(height), bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: Int(width) * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
     /// 回滚历史现在的字节上限。测试用。
@@ -669,6 +842,51 @@ public final class VTerminal {
         case .bar: GHOSTTY_TERMINAL_CURSOR_STYLE_BAR
         case .underline: GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE
         }
+    }
+}
+
+extension VTerminal {
+    /// 让 libghostty 收 PNG 格式的 Kitty 图片：用 ImageIO 解码。解码器整个进程共用，第一份 VT 建好
+    /// 之前装上。
+    static let installPngDecoder: Void = {
+        let decode: GhosttySysDecodePngFn = { _, allocator, data, length, out in
+            guard let data, let out else { return false }
+            return decodePng(UnsafeBufferPointer(start: data, count: length), allocator: allocator, into: out)
+        }
+        ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, unsafeBitCast(decode, to: UnsafeRawPointer.self))
+    }()
+
+    /// 把 PNG 解成 libghostty 要的不预乘的 8 位 RGBA，缓冲区用它给的分配器分配（它限着单张图片的大小）。
+    private static func decodePng(
+        _ png: UnsafeBufferPointer<UInt8>, allocator: UnsafePointer<GhosttyAllocator>?,
+        into out: UnsafeMutablePointer<GhosttySysImage>
+    ) -> Bool {
+        guard let source = CGImageSourceCreateWithData(Data(buffer: png) as CFData, nil),
+            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { return false }
+        let (width, height) = (image.width, image.height)
+        let (length, overflow) = (width * 4).multipliedReportingOverflow(by: height)
+        guard width > 0, height > 0, !overflow, let pixels = ghostty_alloc(allocator, length) else { return false }
+        // 位图上下文只画得出预乘的 alpha，画完再除回去。
+        guard let context = CGContext(
+            data: pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else {
+            ghostty_free(allocator, pixels, length)
+            return false
+        }
+        context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        for pixel in stride(from: 0, to: length, by: 4) {
+            let alpha = UInt32(pixels[pixel + 3])
+            guard alpha > 0, alpha < 255 else { continue }
+            for channel in pixel..<pixel + 3 {
+                let straight: UInt32 = (UInt32(pixels[channel]) * 255 + alpha / 2) / alpha
+                pixels[channel] = UInt8(min(straight, 255))
+            }
+        }
+        out.pointee = GhosttySysImage(width: UInt32(width), height: UInt32(height), data: pixels, data_len: length)
+        return true
     }
 }
 

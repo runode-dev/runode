@@ -185,6 +185,7 @@ dictation:
   silent: 麦克风只录到了静音。请在系统的隐私设置里允许 Runode 使用麦克风。
   failed: 语音输入失败
   ok: 好
+terminal_image: "[图片]"
 host_lost:
   message: 和终端会话的连接断开了，现在看到的是断开前的最后一屏。
   reopen: 在原目录重新打开

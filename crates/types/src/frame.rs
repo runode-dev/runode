@@ -1,5 +1,7 @@
 //! 渲染器要画的终端画面。
 
+use std::time::Duration;
+
 use crate::color::Rgb;
 
 /// 影响字形排版或装饰的文字属性。
@@ -66,6 +68,35 @@ pub struct Frame {
     pub background: Rgb,
     pub foreground: Rgb,
     pub cursor: Option<Cursor>,
+    /// 程序用 Kitty 图形协议放在屏幕上的图片，按画的先后排好（先按层，同层按 z 值）。
+    pub images: Vec<FrameImage>,
+    /// 图片动画下一帧离现在多久该画；没有在播的动画时为 `None`。
+    pub next_image_frame: Option<Duration>,
+}
+
+/// 图片画在哪一层，按画的先后排。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ImageLayer {
+    BelowBackground,
+    BelowText,
+    AboveText,
+}
+
+/// 帧里要画的一块图片。位置和大小以单元格计，可以有小数；左上角相对视口，图片上半截滚出了
+/// 视口时为负。
+#[derive(Clone, Debug)]
+pub struct FrameImage {
+    /// 程序给图片的编号，按它和 `generation` 向终端要像素。
+    pub id: u32,
+    /// 像素的版本，同一个值的像素不会变，不同图片、不同终端之间也不重复，可以直接拿来当缓存键。
+    pub generation: u64,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    /// 只画图片的这一块（x、y、宽、高，以图片像素计），缩放到上面的大小。
+    pub source: [u32; 4],
+    pub layer: ImageLayer,
 }
 
 impl Frame {

@@ -65,6 +65,10 @@
         }
         /// 上次刷新以来 `draw` 一共花的时间，`TerminalView.scheduleRefresh` 按它拉开两次刷新、取走后清零。
         var drawTime: Duration = .zero
+        /// 按 `ScreenImage` 的 id 和版本取图片的像素，由持有 VT 的一方给（`VTerminal.image`）。
+        var imageSource: ((UInt32, UInt64) -> CGImage?)?
+        /// 画过的图片，按版本存，`pruneImages` 丢掉帧里没有了的。
+        private var imageCache: [UInt64: CGImage] = [:]
         private var colorCache: [Rgb: CGColor] = [:]
         /// 要找后备字体排版的多码位字素簇（emoji 序列、组合字符）排好的 CTLine 和宽度，按文字和字体缓存：
         /// 整屏重画时（全屏 agent 界面每滚一下都是）不再逐字重新排版。颜色从上下文取，不进缓存键。
@@ -147,15 +151,47 @@
             let first = max(0, Int(rect.minY / font.cellHeight))
             let last = min(screen.rows - 1, Int((rect.maxY - 0.01) / font.cellHeight))
             guard first <= last else { return }
+            drawImages(.belowBackground)
             for row in first...last {
                 drawBackgrounds(row: row, in: context)
             }
+            drawImages(.belowText)
             for row in first...last {
                 drawText(row: row, in: context)
             }
+            drawImages(.aboveText)
             if let cursor = screen.cursor, (first...last).contains(cursor.row) {
                 drawCursor(cursor, in: context)
             }
+        }
+
+        /// 画一层图片。整张画、靠上下文裁到要重画的那几行，跨几行的图片只重画一行时也对得上。
+        private func drawImages(_ layer: ImageLayer) {
+            for image in screen.images where image.layer == layer {
+                guard let pixels = cachedImage(image),
+                    let part = pixels.cropping(
+                        to: CGRect(
+                            x: Int(image.sourceX), y: Int(image.sourceY), width: Int(image.sourceWidth),
+                            height: Int(image.sourceHeight)))
+                else { continue }
+                let shown = CGRect(
+                    x: image.x * font.cellWidth, y: image.y * font.cellHeight, width: image.width * font.cellWidth,
+                    height: image.height * font.cellHeight)
+                UIImage(cgImage: part).draw(in: shown)
+            }
+        }
+
+        private func cachedImage(_ image: ScreenImage) -> CGImage? {
+            if let cached = imageCache[image.generation] { return cached }
+            guard let pixels = imageSource?(image.id, image.generation) else { return nil }
+            imageCache[image.generation] = pixels
+            return pixels
+        }
+
+        /// 丢掉帧里已经没有了的图片。
+        func pruneImages() {
+            let shown = Set(screen.images.map(\.generation))
+            imageCache = imageCache.filter { shown.contains($0.key) }
         }
 
         /// 背景按同色的一段一起填：格子宽度不是整像素，一格一格填时同色的相邻格子之间会露出细缝。

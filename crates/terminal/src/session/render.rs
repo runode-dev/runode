@@ -1,14 +1,24 @@
-//! 帧：把 libghostty 的 render state 复制进 `Frame`，叠上选区、搜索高亮和光标的颜色。
+//! 帧：把 libghostty 的 render state 复制进 `Frame`，叠上选区、搜索高亮和光标的颜色，带上
+//! 屏幕上的 Kitty 图片。
+
+use std::{
+    sync::LazyLock,
+    time::{Duration, Instant},
+};
 
 use libghostty_vt::{
-    render::{CellIterator, CursorVisualStyle, Dirty, Overscan, RenderState, RowIterator, Snapshot},
+    error::Result,
+    render::{
+        CellIterator, CursorVisualStyle, Dirty, ImageIterator, ImageLayer as VtImageLayer, ImageProtocol, Overscan,
+        RenderState, RowIterator, Snapshot,
+    },
     screen::CellWide,
     style::Underline,
     terminal::Terminal,
 };
 use runode_types::{
     color::{Rgb, TerminalColor},
-    frame::{Attrs, Cell, Cursor, CursorShape, Frame},
+    frame::{Attrs, Cell, Cursor, CursorShape, Frame, FrameImage, ImageLayer},
     theme,
 };
 
@@ -20,6 +30,7 @@ pub(super) struct Renderer {
     render_state: RenderState<'static>,
     row_it: RowIterator<'static>,
     cell_it: CellIterator<'static>,
+    images: Images,
     pub(super) frame: Frame,
     /// 配置的选区颜色；没配时选区反色显示。
     pub(super) selection_bg: Option<TerminalColor>,
@@ -80,6 +91,15 @@ impl Session {
         self.renderer.borrow_mut().frame = frame;
     }
 
+    /// 帧里一块图片（`FrameImage::id`、`FrameImage::generation`）的像素：宽、高和逐行存放的
+    /// 8 位 RGBA，每次调用复制一份。图片已经换了版本或删了时为 `None`，下一帧会带上新的。
+    pub fn image_rgba(&self, id: u32, generation: u64) -> Option<(u32, u32, Vec<u8>)> {
+        let graphics = self.terminal.kitty_graphics().ok()?;
+        let image = graphics.image(id).filter(|image| image.generation().ok() == Some(generation))?;
+        let rgba = crate::vt::image_rgba(&image)?.into_owned();
+        Some((image.width().ok()?, image.height().ok()?, rgba))
+    }
+
     pub fn frame(&mut self) -> std::cell::Ref<'_, Frame> {
         self.sync_frame();
         std::cell::Ref::map(self.renderer.borrow(), |r| &r.frame)
@@ -101,6 +121,10 @@ impl Session {
             }
             None => Vec::new(),
         };
+        // 动画按界面这份 VT 自己的钟换帧：换的只是要画的像素，宿主那份 VT 不跟着换。
+        let now = animation_clock();
+        let next_image_frame =
+            log_err("advance image animations", self.terminal.kitty_graphics_animation_tick(now)).flatten();
         let mut renderer = self.renderer.borrow_mut();
         if renderer.highlights != highlights {
             renderer.highlights = highlights;
@@ -111,11 +135,18 @@ impl Session {
         }
         let frame = &mut renderer.frame;
         frame.scroll_offset = if frame.above.is_empty() { 0. } else { self.scroll_offset };
+        frame.next_image_frame = next_image_frame.map(|due| Duration::from_millis(due.saturating_sub(now)));
     }
 }
 
+/// 图片动画用的钟：进程里第一次用到时起算的毫秒数。
+fn animation_clock() -> u64 {
+    static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+    START.elapsed().as_millis() as u64
+}
+
 impl Renderer {
-    pub(super) fn new() -> libghostty_vt::error::Result<Self> {
+    pub(super) fn new() -> Result<Self> {
         let mut render_state = RenderState::new()?;
         // 多取视口上面一行：平滑滚动时画面往下错开，顶上要露出它的一部分。
         render_state.set_overscan(Overscan { above: 1, below: 0 })?;
@@ -123,6 +154,7 @@ impl Renderer {
             render_state,
             row_it: RowIterator::new()?,
             cell_it: CellIterator::new()?,
+            images: Images { it: ImageIterator::new()?, list: None },
             frame: Frame::default(),
             selection_bg: None,
             selection_fg: None,
@@ -141,7 +173,7 @@ impl Renderer {
         })
     }
 
-    pub(super) fn refresh(&mut self, terminal: &Terminal<'static, '_>) -> libghostty_vt::error::Result<()> {
+    pub(super) fn refresh(&mut self, terminal: &Terminal<'static, '_>) -> Result<()> {
         let snapshot = self.render_state.update(terminal)?;
         let dirty = snapshot.dirty()?;
         let cols = snapshot.cols()?;
@@ -160,7 +192,8 @@ impl Renderer {
         if dirty == Dirty::Clean && !reshaped && !recolored && !self.force_full {
             // 只改光标形状或闪烁（DECSCUSR、DEC 模式 12）不会让 render state 变脏，光标要每次都重读。
             frame.cursor = read_cursor(&snapshot, frame, cursor_colors)?;
-            return Ok(());
+            // 动画换帧只换图片的像素，render state 不变脏。
+            return self.images.refresh(&snapshot, terminal, &mut frame.images);
         }
         if reshaped {
             frame.cols = cols;
@@ -264,6 +297,71 @@ impl Renderer {
 
         frame.cursor = read_cursor(&snapshot, frame, cursor_colors)?;
         snapshot.set_dirty(Dirty::Clean)?;
+        self.images.refresh(&snapshot, terminal, &mut frame.images)
+    }
+}
+
+/// 读帧里的图片要的状态。
+struct Images {
+    it: ImageIterator<'static>,
+    /// 上次读好的图片列表的版本（`Snapshot::image_placements_generation`）和当时单元格的像素宽高；
+    /// 没读好过时为空。
+    list: Option<(u64, u16, u16)>,
+}
+
+impl Images {
+    /// 图片列表或单元格的像素尺寸变了时把 `out` 换成新的列表；读到一半出错时 `out` 不动，下次重读。
+    /// 单元格尺寸变了、按像素定大小的放置占的格数却没变时列表的版本不变，换算成格数的大小要重算。
+    fn refresh(
+        &mut self,
+        snapshot: &Snapshot<'static, '_>,
+        terminal: &Terminal<'static, '_>,
+        out: &mut Vec<FrameImage>,
+    ) -> Result<()> {
+        let size = crate::vt::terminal_size(terminal)?;
+        let key = (snapshot.image_placements_generation()?, size.cell_width_px, size.cell_height_px);
+        if self.list == Some(key) {
+            return Ok(());
+        }
+        let (cell_w, cell_h) = (f32::from(size.cell_width_px.max(1)), f32::from(size.cell_height_px.max(1)));
+        let mut order = Vec::new();
+        let mut placements = self.it.update(snapshot)?;
+        while let Some(placement) = placements.next() {
+            // 别的协议的图片和这个版本还不认识的层都跳过。
+            if !matches!(placement.protocol(), Ok(ImageProtocol::Kitty)) {
+                continue;
+            }
+            let layer = match placement.layer() {
+                Ok(VtImageLayer::BelowBackground) => ImageLayer::BelowBackground,
+                Ok(VtImageLayer::BelowText) => ImageLayer::BelowText,
+                Ok(VtImageLayer::AboveText) => ImageLayer::AboveText,
+                _ => continue,
+            };
+            let x = placement.viewport_col()? as f32 + placement.cell_offset_x()? as f32 / cell_w;
+            let y = placement.viewport_row()? as f32 + placement.cell_offset_y()? as f32 / cell_h;
+            order.push((
+                layer,
+                placement.z()?,
+                FrameImage {
+                    id: placement.image_id()?,
+                    generation: placement.image_generation()?,
+                    x,
+                    y,
+                    width: placement.pixel_width()? as f32 / cell_w,
+                    height: placement.pixel_height()? as f32 / cell_h,
+                    source: [
+                        placement.source_x()?,
+                        placement.source_y()?,
+                        placement.source_width()?,
+                        placement.source_height()?,
+                    ],
+                    layer,
+                },
+            ));
+        }
+        order.sort_by_key(|(layer, z, _)| (*layer, *z));
+        *out = order.into_iter().map(|(.., image)| image).collect();
+        self.list = Some(key);
         Ok(())
     }
 }
@@ -291,7 +389,7 @@ fn read_cursor(
     snapshot: &Snapshot<'_, '_>,
     frame: &Frame,
     (color, text): (Option<TerminalColor>, Option<TerminalColor>),
-) -> libghostty_vt::error::Result<Option<Cursor>> {
+) -> Result<Option<Cursor>> {
     if !snapshot.cursor_visible()? {
         return Ok(None);
     }

@@ -72,6 +72,31 @@ public struct ScreenCursor: Sendable, Hashable {
     public var onWideTail: Bool
 }
 
+/// 图片画在哪一层，按画的先后排。
+public enum ImageLayer: Int, Sendable, Hashable, Comparable {
+    case belowBackground, belowText, aboveText
+
+    public static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
+}
+
+/// 程序用 Kitty 图形协议放在屏幕上的一块图片。位置和大小以单元格计，可以有小数；左上角相对视口，
+/// 图片上半截滚出了视口时为负。像素不在这里，画的一方按 `id` 和 `generation` 向 `VTerminal.image`
+/// 要，同一个 `generation` 的像素不会变，可以直接拿来当缓存键。
+public struct ScreenImage: Sendable, Hashable {
+    public var id: UInt32
+    public var generation: UInt64
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+    /// 只画图片的这一块（以图片像素计），缩放到上面的大小。
+    public var sourceX: UInt32
+    public var sourceY: UInt32
+    public var sourceWidth: UInt32
+    public var sourceHeight: UInt32
+    public var layer: ImageLayer
+}
+
 public struct ScreenFrame: Sendable {
     public var columns: Int
     public var rows: Int
@@ -87,6 +112,10 @@ public struct ScreenFrame: Sendable {
     public var cursorColor: Rgb?
     /// 光标可见且在视口里时才有。
     public var cursor: ScreenCursor?
+    /// 屏幕上的图片，按画的先后排好（先按层，同层按 z 值）。
+    public var images: [ScreenImage]
+    /// 图片动画下一帧离现在多久该画；没有在播的动画时为空。
+    public var nextImageFrame: Duration?
 
     public init() {
         columns = 0
@@ -98,6 +127,8 @@ public struct ScreenFrame: Sendable {
         foreground = TermSettings.default.foreground
         cursorColor = nil
         cursor = nil
+        images = []
+        nextImageFrame = nil
     }
 
     /// 屏幕上的文字，一行一个，行尾空白去掉；宽字符的占位格不算。
@@ -124,8 +155,11 @@ public struct FrameChange: Sendable, Hashable {
     public var cursorChanged: Bool
     /// 视口上面那一行（`ScreenFrame.above`）变了。
     public var aboveChanged: Bool
+    /// 图片（`ScreenFrame.images`）变了：放了、删了、挪了，或者动画换了一帧。
+    public var imagesChanged: Bool
 
-    public var isEmpty: Bool { !full && rows.isEmpty && !cursorChanged && !aboveChanged }
+    public var isEmpty: Bool { !full && rows.isEmpty && !cursorChanged && !aboveChanged && !imagesChanged }
 
-    public static let none = FrameChange(full: false, rows: [], cursorChanged: false, aboveChanged: false)
+    public static let none = FrameChange(
+        full: false, rows: [], cursorChanged: false, aboveChanged: false, imagesChanged: false)
 }

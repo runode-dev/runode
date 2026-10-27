@@ -28,6 +28,20 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 编译期拼好。
 const XTVERSION: &str = concat!("runode ", env!("CARGO_PKG_VERSION"));
 
+/// 装上 Kitty 图片的 PNG 解码器，进程里的 VT 才收 PNG 图片；没装时 PNG 图片被拒，原始像素的照收。
+/// 解码器是整个进程共用的，宿主和界面的 VT 在同一个进程里时也只装一次。
+///
+/// # Safety
+///
+/// 调的时候不能有别的线程正在用 libghostty，所以在进程刚启动、还没建任何 VT 时调。
+pub unsafe fn install_png_decoder() {
+    let decoder = libghostty_vt::kitty::graphics::RustPngDecoder::new();
+    // SAFETY: 由调用方保证没有别的线程在用 libghostty。
+    if let Err(err) = unsafe { libghostty_vt::kitty::graphics::set_png_decoder(Some(Box::new(decoder))) } {
+        tracing::warn!("failed to install the PNG decoder for Kitty images: {err}");
+    }
+}
+
 /// 一个字在终端里占几格：零宽的组合字符为 0，宽字符为 2，其余为 1。和终端排版打印出来的
 /// 文字用的是同一张表。
 pub fn cell_width(c: char) -> u8 {

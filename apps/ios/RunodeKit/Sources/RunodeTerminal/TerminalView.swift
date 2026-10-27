@@ -44,6 +44,8 @@
         private var refreshScheduled = false
         /// 下一次刷新最早在这时候，见 `scheduleRefresh`。
         private var nextRefresh = ContinuousClock.now
+        /// 图片动画到点画下一帧的计时，每次刷新按新的到期时间换掉。
+        private var imageFrame: Task<Void, Never>?
         /// 用户自己捏合缩放过：网格尺寸变了也不再自动按屏幕宽度缩放。
         private var userZoomed = false
         private var lastFitSize: GridSize?
@@ -247,9 +249,12 @@
             // 按住的键是给原来那份 VT 的：视图换了会话或者重新连上时不接着连发。
             stopRepeating()
             self.terminal = terminal
+            grid.imageSource = { [weak terminal] id, generation in terminal?.image(id: id, generation: generation) }
+            aboveGrid.imageSource = grid.imageSource
             grid.settings = settings
             aboveGrid.settings = settings
             grid.screen = ScreenFrame()
+            grid.pruneImages()
             backgroundColor = Self.uiColor(settings.background)
             refreshNow()
         }
@@ -315,7 +320,11 @@
             if oldSize != CGSize(width: grid.screen.columns, height: grid.screen.rows) {
                 layoutGrid()
             }
-            if change.full {
+            if change.imagesChanged {
+                grid.pruneImages()
+            }
+            scheduleImageFrame(grid.screen.nextImageFrame)
+            if change.full || change.imagesChanged {
                 grid.setNeedsDisplay()
             } else {
                 for row in change.rows {
@@ -326,7 +335,7 @@
                     grid.invalidateCursor()
                 }
             }
-            if change.full || change.aboveChanged {
+            if change.full || change.aboveChanged || change.imagesChanged {
                 updateAboveRow()
             }
             applyScrollOffset()
@@ -337,6 +346,18 @@
                 delegate?.terminalView(self, didScrollBack: scrolledBack)
             }
             followCursor()
+        }
+
+        /// 有在播的图片动画时到点再刷新一次；动画停了就不再刷。
+        private func scheduleImageFrame(_ due: Duration?) {
+            imageFrame?.cancel()
+            imageFrame = due.map { due in
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: max(due, .milliseconds(8)))
+                    guard !Task.isCancelled else { return }
+                    self?.scheduleRefresh()
+                }
+            }
         }
 
         /// 有输出时视口跟着光标走（网格比屏幕宽、横着拖的时候尤其要）；用户正在拖、刚拖过，或者在看
@@ -438,7 +459,14 @@
             row.background = grid.screen.background
             row.foreground = grid.screen.foreground
             row.cursorColor = grid.screen.cursorColor
+            // 这一行在视口上面一行，图片的纵坐标跟着下移一行；只露出这一行的那部分由视图边界裁掉。
+            row.images = grid.screen.above.isEmpty ? [] : grid.screen.images.map { image in
+                var image = image
+                image.y += 1
+                return image
+            }
             aboveGrid.screen = row
+            aboveGrid.pruneImages()
             aboveGrid.setNeedsDisplay()
         }
 

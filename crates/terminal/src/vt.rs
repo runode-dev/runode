@@ -7,10 +7,13 @@
 #[cfg(test)]
 pub(crate) mod tests;
 
+use std::{borrow::Cow, collections::HashSet};
+
 use libghostty_vt::{
     Terminal,
     error::{Error, Result},
     fmt::{Format, Formatter, FormatterOptions},
+    kitty::graphics::{Image, ImageFormat, PlacementIterator},
     render::{CursorVisualStyle, RenderState},
     screen::{CellSemanticContent, RowSemanticPrompt, Screen},
     selection::Selection,
@@ -37,6 +40,14 @@ pub(crate) const UNKNOWN_SEQUENCE_MAX_BYTES: usize = 256 * 1024;
 /// 编码快照时最多带多少字节没写完的序列（续接）。VT 停在一条更长的序列中间时编不出快照，
 /// 要等它结束，见 `SnapshotError::Unfinished`。解码时也按它限制续接的长度。
 pub(crate) const CONTINUATION_MAX_BYTES: usize = 1024 * 1024;
+
+/// 每块屏幕（主屏和备用屏各一块）最多存多少字节 Kitty 图片的像素，超了先丢最老的。宿主和界面
+/// 各存一份。
+pub(crate) const KITTY_IMAGE_STORAGE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// 重放最多带多少字节图片的像素。取手机那份 VT 的图片存储上限：手机一律经重放连上会话，
+/// 多传的到了也存不下。
+const REPLAY_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 
 /// 按 `size` 新建一个 VT，按默认配置设好 `configure_common` 的选项（之后 `apply_theme` 再按
 /// 实际配置设一遍），并从一开始就记录没写完的序列，随时能编快照。要在喂输入之前开始记录：
@@ -67,11 +78,18 @@ pub(crate) fn terminal_size(terminal: &Terminal<'_, '_>) -> Result<GridSize> {
 ///
 /// `scrollback_bytes` 是回滚历史最多占多少字节，即配置项 `scrollback-limit`；`None` 表示不限，
 /// 只按行数算。调低回滚上限会立刻丢掉超出的历史。默认颜色和光标样式由 `apply_theme` 设，不在这里。
+///
+/// Kitty 图片只收直接写在序列里的：从文件、临时文件、共享内存读的，两份 VT 各读一遍会对不上
+/// （临时文件读完就删）。程序问的时候宿主那份如实回不支持，程序（比如 `kitten icat`）就改用直接传。
 pub(crate) fn configure_common(terminal: &mut Terminal<'_, '_>, scrollback_bytes: Option<usize>) -> Result<()> {
     terminal
         .set_scrollback_max_lines(Some(SCROLLBACK_LINES))?
         .set_scrollback_max_bytes(scrollback_bytes)?
-        .set_unknown_max_bytes(UNKNOWN_SEQUENCE_MAX_BYTES)?;
+        .set_unknown_max_bytes(UNKNOWN_SEQUENCE_MAX_BYTES)?
+        .set_kitty_image_storage_limit(KITTY_IMAGE_STORAGE_BYTES)?
+        .set_kitty_image_from_file_allowed(false)?
+        .set_kitty_image_temp_file_dir(None)?
+        .set_kitty_image_from_shared_mem_allowed(false)?;
     Ok(())
 }
 
@@ -170,11 +188,10 @@ impl From<Error> for SnapshotError {
     }
 }
 
-/// 把 VT 的全部状态编成一份快照：屏幕、回滚历史、光标、各种模式、调色板、标题、没写完的
-/// 序列等，见 `libghostty_vt::snapshot`。快照格式还没有兼容保证，只能交给同一个构建解码。
+/// 把 VT 的全部状态编成一份快照：屏幕、回滚历史、光标、各种模式、调色板、标题、Kitty 图片、
+/// 没写完的序列等，见 `libghostty_vt::snapshot`。快照格式还没有兼容保证，只能交给同一个构建解码。
 ///
-/// 不带的东西：Kitty 图片、选区、视口滚到了哪里、搜索，以及 `configure_common` 设的选项和
-/// 各种回调。
+/// 不带的东西：选区、视口滚到了哪里、搜索，以及 `configure_common` 设的选项和各种回调。
 pub(crate) fn encode_snapshot(terminal: &Terminal<'_, '_>) -> std::result::Result<Vec<u8>, SnapshotError> {
     match terminal.encode_snapshot_alloc(None) {
         Ok(bytes) => Ok(bytes.map(|bytes| bytes.to_vec()).unwrap_or_default()),
@@ -202,9 +219,10 @@ pub(crate) fn decode_snapshot(bytes: &[u8]) -> std::result::Result<Terminal<'sta
 ///
 /// 输出的是活动屏幕（备用屏幕上就只有备用屏幕，没有主屏幕和回滚历史）的内容，加上调色板、
 /// 模式、滚动区域、制表位、目录（OSC 7）、键盘模式、光标位置和 SGR 样式、超链接、保护模式、
-/// Kitty 键盘协议和字符集；格式化本身不带标题和光标形状，这里在末尾补一条 OSC 2，光标形状和
-/// 配置的默认形状 `default_cursor` 不一样（程序用 DECSCUSR 设过，比如 shell 集成在提示符上换成
-/// 竖线）时补一条 DECSCUSR。重放丢掉的东西见测试 `replay_loses_what_the_formatter_cannot_express`。
+/// Kitty 键盘协议和字符集；格式化本身不带标题、光标形状和 Kitty 图片，这里在末尾补一条 OSC 2，
+/// 光标形状和配置的默认形状 `default_cursor` 不一样（程序用 DECSCUSR 设过，比如 shell 集成在
+/// 提示符上换成竖线）时补一条 DECSCUSR，图片由 `replay_images` 补。重放丢掉的东西见测试
+/// `replay_loses_what_the_formatter_cannot_express`。
 pub(crate) fn format_replay(
     terminal: &Terminal<'static, '_>,
     default_cursor: settings::CursorStyle,
@@ -212,6 +230,7 @@ pub(crate) fn format_replay(
     let mut out = Vec::new();
     // SAFETY: 写进 `Vec` 不会回头调用这个格式化器或它的终端。
     unsafe { Formatter::new(terminal, replay_options())?.format_write(&mut out) }?;
+    replay_images(terminal, REPLAY_IMAGE_BYTES, &mut out)?;
     let shape = RenderState::new()?.update(terminal)?.cursor_visual_style()?;
     let decscusr = match shape {
         CursorVisualStyle::Block => Some((1, settings::CursorStyle::Block)),
@@ -234,6 +253,138 @@ pub(crate) fn format_replay(
         out.push(0x07);
     }
     Ok(out)
+}
+
+/// 把活动屏幕上放着的 Kitty 图片重新传一遍、在原处放好，接在格式化的输出后面。没放出来的图片
+/// 不传；上半截滚出了活动区的放置只放露出来的下半截，整个滚出去的不放，那几行文字重放进回滚
+/// 历史，图片却没了。动画只剩当前一帧。像素合计超过 `budget` 字节后，放不下的图片连同它的
+/// 放置都不带。
+///
+/// 放图片要挪光标，所以前后用 DECSC、DECRC 保住格式化写好的光标，代价是程序自己用 DECSC 存的
+/// 光标被换掉（格式化本来也带不过去）。都带 `q=2`，接收的 VT 是宿主那份时也不会应答。
+fn replay_images(terminal: &Terminal<'static, '_>, mut budget: usize, out: &mut Vec<u8>) -> Result<()> {
+    let graphics = terminal.kitty_graphics()?;
+    let mut iterator = PlacementIterator::new()?;
+    let mut placements = iterator.update(&graphics)?;
+    let mut sent = HashSet::new();
+    let mut dropped = HashSet::new();
+    let mut body = Vec::new();
+    while let Some(placement) = placements.next() {
+        let id = placement.image_id()?;
+        if dropped.contains(&id) {
+            continue;
+        }
+        let Some(image) = graphics.image(id) else { continue };
+        let (c, mut r) = (placement.columns()?, placement.rows()?);
+        let id_keys = match placement.placement_id()? {
+            0 => format!("i={id}"),
+            p => format!("i={id},p={p}"),
+        };
+        let place = if placement.is_virtual()? {
+            let (x, y, w, h) =
+                (placement.source_x()?, placement.source_y()?, placement.source_width()?, placement.source_height()?);
+            format!("\x1b_Ga=p,U=1,{id_keys},c={c},r={r},x={x},y={y},w={w},h={h},q=2\x1b\\")
+        } else {
+            let Some(pos) = placement.viewport_pos(&image, terminal)? else { continue };
+            let (mut x, mut y, mut w, mut h) =
+                (placement.source_x()?, placement.source_y()?, placement.source_width()?, placement.source_height()?);
+            let mut y_offset = placement.y_offset()?;
+            if pos.row < 0 {
+                // 滚出去的那几行折成源图的像素裁掉；程序给了行数时同样减掉，没给时按裁剩的像素算。
+                let hidden = pos.row.unsigned_abs();
+                let cell_height = u64::from(terminal_size(terminal)?.cell_height_px);
+                let shown = placement.pixel_size(&image, terminal)?;
+                let source = placement.source_rect(&image)?;
+                let cut_px = (u64::from(hidden) * cell_height).saturating_sub(u64::from(y_offset));
+                let cut = cut_px * u64::from(source.height) / u64::from(shown.height.max(1));
+                let cut = u32::try_from(cut).unwrap_or(u32::MAX).min(source.height);
+                if r != 0 {
+                    r = r.saturating_sub(hidden);
+                    if r == 0 {
+                        continue;
+                    }
+                }
+                y_offset = 0;
+                (x, y, w, h) = (source.x, source.y + cut, source.width, source.height - cut);
+                if h == 0 {
+                    continue;
+                }
+            }
+            format!(
+                "\x1b[{};{}H\x1b_Ga=p,{id_keys},c={c},r={r},X={},Y={y_offset},x={x},y={y},w={w},h={h},z={},C=1,q=2\x1b\\",
+                pos.row.max(0) + 1,
+                pos.col + 1,
+                placement.x_offset()?,
+                placement.z()?,
+            )
+        };
+        if !sent.contains(&id) {
+            let Some(rgba) = image_rgba(&image) else { continue };
+            let Some(left) = budget.checked_sub(rgba.len()) else {
+                dropped.insert(id);
+                continue;
+            };
+            budget = left;
+            transmit_image(id, image.width()?, image.height()?, &rgba, &mut body);
+            sent.insert(id);
+        }
+        body.extend_from_slice(place.as_bytes());
+    }
+    if !body.is_empty() {
+        out.extend_from_slice(b"\x1b7");
+        // DECRC 连原点模式一起恢复；放置用的 CUP 要按整屏算。
+        if terminal.mode(Mode::ORIGIN)? {
+            out.extend_from_slice(b"\x1b[?6l");
+        }
+        out.extend_from_slice(&body);
+        out.extend_from_slice(b"\x1b8");
+    }
+    Ok(())
+}
+
+/// 用 Kitty 图形协议把 `rgba` 当 `id` 号图片传过去（`a=t`，不放出来），按协议的上限分块。
+fn transmit_image(id: u32, width: u32, height: u32, rgba: &[u8], out: &mut Vec<u8>) {
+    const CHUNK: usize = 4096;
+    let mut encoded = Vec::with_capacity(rgba.len().div_ceil(3) * 4);
+    encode_base64(rgba, &mut encoded);
+    let count = encoded.len().div_ceil(CHUNK);
+    for (n, chunk) in encoded.chunks(CHUNK).enumerate() {
+        let more = u8::from(n + 1 < count);
+        if n == 0 {
+            out.extend_from_slice(format!("\x1b_Ga=t,f=32,i={id},s={width},v={height},m={more},q=2;").as_bytes());
+        } else {
+            out.extend_from_slice(format!("\x1b_Gm={more},q=2;").as_bytes());
+        }
+        out.extend_from_slice(chunk);
+        out.extend_from_slice(b"\x1b\\");
+    }
+}
+
+/// 图片当前一帧的 RGBA 像素。libghostty 存的已经解压、解码过；数据和尺寸对不上时是 `None`。
+pub(crate) fn image_rgba<'t>(image: &Image<'t>) -> Option<Cow<'t, [u8]>> {
+    let (width, height) = (image.width().ok()?, image.height().ok()?);
+    let data = image.data().ok()??;
+    let rgba: Cow<'t, [u8]> = match image.format().ok()? {
+        ImageFormat::Rgba => Cow::Borrowed(data),
+        ImageFormat::Rgb => data.as_chunks::<3>().0.iter().flat_map(|&[r, g, b]| [r, g, b, 255]).collect(),
+        ImageFormat::GrayAlpha => data.as_chunks::<2>().0.iter().flat_map(|&[v, a]| [v, v, v, a]).collect(),
+        ImageFormat::Gray => data.iter().flat_map(|&v| [v, v, v, 255]).collect(),
+        _ => return None,
+    };
+    (rgba.len() == width as usize * height as usize * 4).then_some(rgba)
+}
+
+/// 标准 base64（带 `=` 补齐）编码，接在 `out` 后面。
+pub(crate) fn encode_base64(data: &[u8], out: &mut Vec<u8>) {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], chunk.get(1).copied().unwrap_or(0), chunk.get(2).copied().unwrap_or(0)];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        let digits = [(n >> 18) & 63, (n >> 12) & 63, (n >> 6) & 63, n & 63];
+        for (k, digit) in digits.iter().enumerate() {
+            out.push(if k <= chunk.len() { ALPHABET[*digit as usize] } else { b'=' });
+        }
+    }
 }
 
 /// `format_replay` 的格式化选项。软折行的行接起来输出，靠自动折行在原处折回去；分开输出

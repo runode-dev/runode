@@ -185,6 +185,7 @@ dictation:
   silent: The microphone recorded only silence. Check that Runode is allowed to use the microphone in the system privacy settings.
   failed: Dictation failed
   ok: OK
+terminal_image: "[image]"
 host_lost:
   message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.
   reopen: Reopen in This Directory

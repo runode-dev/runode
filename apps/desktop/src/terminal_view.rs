@@ -26,12 +26,17 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc,
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{
     Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Pixels, Point,
-    Render, Role, ShapedLine, SharedString, Subscription, Task, Window, actions, div, prelude::*, px, relative, rgb,
+    Render, RenderImage, Role, ShapedLine, SharedString, Subscription, Task, Window, actions, div, prelude::*, px,
+    relative, rgb,
 };
 use runode_config::Config;
 use runode_protocol::{Conversation, SessionId};
 use runode_terminal::session::{Link, LinkTarget, Session};
-use runode_types::{color::Rgb, frame::Frame, grid::GridSize};
+use runode_types::{
+    color::Rgb,
+    frame::{Frame, FrameImage},
+    grid::GridSize,
+};
 
 use crate::{
     host_client::LinkEvent,
@@ -164,6 +169,8 @@ pub struct TerminalView {
     metrics: Option<Metrics>,
     /// 按文本和样式缓存的字形排版结果；颜色在绘制时再上。
     glyphs: GlyphCache,
+    /// 上一帧画过的图片，按像素的版本（`FrameImage::generation`）存；帧里没有了就交还贴图。
+    images: HashMap<u64, Arc<RenderImage>>,
     /// 输入法尚未上屏的预编辑文本，画在光标处。
     marked_text: Option<String>,
     /// 程序开着鼠标上报时，精确滚动（触控板）不足一行的余量；滚回滚历史时余量由
@@ -213,6 +220,8 @@ pub struct TerminalView {
     _hold_timeout: Option<Task<()>>,
     /// 有焦点、光标在闪时才运行的闪烁计时器，见 `sync_cursor_blink`。
     _cursor_blink: Option<Task<()>>,
+    /// 图片动画到下一帧时重画的计时器。
+    _image_frame: Option<Task<()>>,
     /// 拖选到网格外时运行的自动滚动计时器。
     _autoscroll: Option<Task<()>>,
     _config_watch: Subscription,
@@ -253,7 +262,10 @@ impl Render for TerminalView {
         let (foreground, background) = self.colors();
         // 屏幕上的字只有辅助工具在读时才拼。
         let a11y = window.is_a11y_active();
-        let screen_text = a11y.then(|| self.screen.shown_mut().map(|session| screen_lines(&session.frame())));
+        let screen_text = a11y.then(|| {
+            let image = rust_i18n::t!("terminal_image");
+            self.screen.shown_mut().map(|session| screen_lines(&session.frame(), &image))
+        });
         // 搜索栏和终端是兄弟节点，不在 `Terminal` 按键上下文里：在搜索栏里打字时，
         // ⌘← 之类映射给程序的快捷键不能生效。
         let search_bar = self.search_field.as_ref().map(|(field, _)| self.render_search_bar(field, cx));
@@ -479,7 +491,8 @@ impl TerminalView {
 }
 
 /// 视口里这一屏的字，每行一行：宽字符的后半格跳过，空白格当空格，行尾空白和最后的空行去掉。
-fn screen_lines(frame: &Frame) -> String {
+/// 图片画出来的内容读不到，在它露出来的第一行末尾写一个 `image`，让辅助工具知道那里有图。
+fn screen_lines(frame: &Frame, image: &str) -> String {
     let mut text = String::new();
     for y in 0..frame.rows {
         let start = text.len();
@@ -487,6 +500,13 @@ fn screen_lines(frame: &Frame) -> String {
             text.push_str(if cell.text.is_empty() { " " } else { &cell.text });
         }
         text.truncate(start + text[start..].trim_end().len());
+        let top = |shown: &FrameImage| shown.y.max(0.).floor() as u16;
+        for _ in frame.images.iter().filter(|shown| shown.y + shown.height > 0. && top(shown) == y) {
+            if text.len() > start {
+                text.push(' ');
+            }
+            text.push_str(image);
+        }
         text.push('\n');
     }
     text.truncate(text.trim_end().len());
@@ -495,7 +515,7 @@ fn screen_lines(frame: &Frame) -> String {
 
 #[cfg(test)]
 mod tests {
-    use runode_types::frame::Cell;
+    use runode_types::frame::{Cell, ImageLayer};
 
     use super::*;
 
@@ -515,6 +535,30 @@ mod tests {
             cell("", false),
         ];
         let frame = Frame { cols: 5, rows: 2, cells, ..Frame::default() };
-        assert_eq!(screen_lines(&frame), "a 中");
+        assert_eq!(screen_lines(&frame, "[image]"), "a 中");
+    }
+
+    /// 图片在它露出来的第一行末尾标出来；上半截滚出视口的标在第一行，整个滚出去的不标。
+    #[test]
+    fn screen_lines_mark_where_images_are() {
+        let image = |y: f32, height: f32| FrameImage {
+            id: 1,
+            generation: 1,
+            x: 0.,
+            y,
+            width: 1.,
+            height,
+            source: [0, 0, 1, 1],
+            layer: ImageLayer::AboveText,
+        };
+        let cells = vec![Cell { text: "a".into(), ..Cell::default() }; 3];
+        let frame = Frame {
+            cols: 1,
+            rows: 3,
+            cells,
+            images: vec![image(-1.5, 2.), image(-2., 1.), image(2., 1.)],
+            ..Frame::default()
+        };
+        assert_eq!(screen_lines(&frame, "[image]"), "a [image]\na\na [image]");
     }
 }

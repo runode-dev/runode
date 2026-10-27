@@ -1,15 +1,19 @@
-//! 把一帧画出来：单元格尺寸、字形排版缓存，以及背景、文字、装饰线和光标的绘制。
+//! 把一帧画出来：单元格尺寸、字形排版缓存，以及背景、图片、文字、装饰线和光标的绘制。
 
-use std::{collections::HashMap, rc::Rc, sync::LazyLock};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    sync::{Arc, LazyLock},
+};
 
 use gpui::{
-    Bounds, ContentMask, FontStyle, FontWeight, Hsla, Pixels, Point, ShapedLine, SharedString, TextRun, Window, fill,
-    point, px, size,
+    Bounds, ContentMask, Corners, FontStyle, FontWeight, Hsla, Pixels, Point, RenderImage, ShapedLine, SharedString,
+    TextRun, Window, fill, point, px, size,
 };
 use runode_config::CellHeight;
 use runode_types::{
     color::Rgb,
-    frame::{Attrs, CursorShape, Frame},
+    frame::{Attrs, CursorShape, Frame, ImageLayer},
 };
 
 use super::{Metrics, TerminalView, sprites};
@@ -176,6 +180,7 @@ pub(super) fn paint_frame(
     let mask = ContentMask { bounds: grid };
     window.with_content_mask(Some(mask), |window| {
         window.paint_layer(grid, |window| {
+            paint_images(view, frame, ImageLayer::BelowBackground, origin, metrics, window);
             // 背景：每行把同色的相邻单元格合并成一块画。
             for (y, row) in rows() {
                 let mut x = 0usize;
@@ -203,6 +208,7 @@ pub(super) fn paint_frame(
                 ));
             }
 
+            paint_images(view, frame, ImageLayer::BelowText, origin, metrics, window);
             let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
             for (y, row) in rows() {
                 for (x, cell) in row.iter().enumerate() {
@@ -252,7 +258,17 @@ pub(super) fn paint_frame(
                     paint_glyphs(&line, position + point(px(0.), baseline), hsla(fg), window);
                 }
             }
+            paint_images(view, frame, ImageLayer::AboveText, origin, metrics, window);
         })
+    });
+    // 帧里没有了的图片交还贴图。
+    let shown: HashSet<u64> = frame.images.iter().map(|image| image.generation).collect();
+    view.images.retain(|generation, image| {
+        let shown = shown.contains(generation);
+        if !shown && let Err(err) = window.drop_image(Arc::clone(image)) {
+            tracing::debug!("failed to drop an image texture: {err}");
+        }
+        shown
     });
 
     // 盖在文字上方的光标形状，以及输入法预编辑文本。
@@ -310,6 +326,52 @@ pub(super) fn paint_frame(
         });
     }
     view.cursor_bounds = cursor_bounds;
+}
+
+/// 画帧里 `layer` 这一层的图片，`origin` 是视口第 0 行第 0 列的左上角。
+fn paint_images(
+    view: &mut TerminalView,
+    frame: &Frame,
+    layer: ImageLayer,
+    origin: Point<Pixels>,
+    metrics: Metrics,
+    window: &mut Window,
+) {
+    let (cw, ch) = (metrics.cell.width, metrics.cell.height);
+    for image in frame.images.iter().filter(|image| image.layer == layer) {
+        let [sx, sy, sw, sh] = image.source.map(|v| v as f32);
+        if sw <= 0. || sh <= 0. {
+            continue;
+        }
+        let texture = match view.images.get(&image.generation) {
+            Some(texture) => Arc::clone(texture),
+            None => {
+                let pixels = view.screen.shown().and_then(|session| session.image_rgba(image.id, image.generation));
+                let Some(texture) = pixels.and_then(render_image) else { continue };
+                Arc::clone(view.images.entry(image.generation).or_insert(Arc::new(texture)))
+            }
+        };
+        let full = texture.size(0);
+        let shown = Bounds::new(origin + point(cw * image.x, ch * image.y), size(cw * image.width, ch * image.height));
+        // 只要图片的一块时把整张按同样的比例摆好，再裁到这一块：贴图一张图只传一份。
+        let (scale_x, scale_y) = (shown.size.width / sw, shown.size.height / sh);
+        let whole = Bounds::new(
+            shown.origin - point(scale_x * sx, scale_y * sy),
+            size(scale_x * full.width.0 as f32, scale_y * full.height.0 as f32),
+        );
+        if let Err(err) = window.paint_image(shown, whole, Corners::default(), texture, 0, false) {
+            tracing::debug!("image paint failed: {err}");
+        }
+    }
+}
+
+/// 把 `Session::image_rgba` 给的像素就地换成 GPUI 要的 BGRA 贴图。像素和宽高对不上时为 `None`。
+fn render_image((width, height, mut bgra): (u32, u32, Vec<u8>)) -> Option<RenderImage> {
+    for pixel in bgra.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2);
+    }
+    let frame = image::RgbaImage::from_raw(width, height, bgra)?;
+    Some(RenderImage::new(vec![image::Frame::new(frame)]))
 }
 
 /// 在 `baseline_origin`（x 为单元格左边缘，y 在基线上）绘制一行已排版字形，

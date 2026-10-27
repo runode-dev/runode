@@ -185,6 +185,7 @@ dictation:
   silent: 麥克風只錄到了靜音。請在系統的隱私設定裡允許 Runode 使用麥克風。
   failed: 語音輸入失敗
   ok: 好
+terminal_image: "[圖片]"
 host_lost:
   message: 和終端機工作階段的連線中斷了，現在看到的是中斷前的最後一個畫面。
   reopen: 在原目錄重新開啟

@@ -139,11 +139,13 @@ impl Element for TerminalElement {
             // 这份 VT（只看状态、还在等屏幕、断开时没有屏幕）时只有背景。
             let Some(frame) = view.screen.shown_mut().map(Session::take_frame) else {
                 view.sync_cursor_blink(false, cx);
+                view.schedule_image_frame(None, cx);
                 return;
             };
             // 闪烁计时器按这一帧起停。窗口刚建好时设的焦点不触发 `on_focus`，提前启动的 shell 的
             // 输出也早已喂完，所以要在画的时候起。
             view.sync_cursor_blink(focused && frame.cursor.is_some_and(|c| c.blinking), cx);
+            view.schedule_image_frame(frame.next_image_frame, cx);
             let crop = view.crop_for(&frame);
             match crop {
                 None => {
