@@ -22,6 +22,7 @@ mod redact;
 use std::{
     cell::{Cell as StdCell, RefCell},
     fmt,
+    num::NonZeroU16,
     path::{Path, PathBuf},
     rc::Rc,
     time::Instant,
@@ -33,7 +34,7 @@ use libghostty_vt::{
     terminal::{
         ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode,
         PrimaryDeviceAttributes, ProgramStatusState, ProgressState, ResizeWindow, SecondaryDeviceAttributes,
-        SemanticPrompt, SizeReportSize, Terminal, UnknownSequence,
+        SemanticPromptKind, SizeReportSize, Terminal, UnknownSequence,
     },
 };
 use runode_agent::Tracker;
@@ -432,9 +433,9 @@ impl HostSession {
         // agent 识别：先喂眼下拿得到的信号（VT 里的标题、前台进程），再接着交出时的状态。显示的
         // 标题仍用交出时的。
         let now = Instant::now();
-        let raw = self.terminal.title().ok().unwrap_or_default();
+        let raw = String::from_utf8_lossy(self.terminal.title().ok().unwrap_or_default());
         let pty = &self.pty;
-        self.agent_tracker.title(raw, now, || pty.foreground_is_shell());
+        self.agent_tracker.title(&raw, now, || pty.foreground_is_shell());
         let foreground = self.pty.foreground();
         self.probe_foreground(foreground, now);
         self.agent_tracker.resume(meta.agent, now);
@@ -858,6 +859,7 @@ fn register_callbacks(
             let effects = effects.clone();
             move |_, request| {
                 if let ResizeWindow::Grid { rows, columns } = request {
+                    let (rows, columns) = (rows.map_or(0, NonZeroU16::get), columns.map_or(0, NonZeroU16::get));
                     let merged = merge_window_resize(effects.resize_window.get(), (rows, columns));
                     effects.resize_window.set(Some(merged));
                 }
@@ -883,7 +885,11 @@ fn register_callbacks(
                     Err(_) => return,
                 };
                 if let Ok(mut reports) = effects.program_status.try_borrow_mut() {
-                    reports.push((report.id().to_owned(), report.app().to_owned(), state));
+                    reports.push((
+                        String::from_utf8_lossy(report.id()).into_owned(),
+                        String::from_utf8_lossy(report.app()).into_owned(),
+                        state,
+                    ));
                 }
             }
         })?
@@ -896,22 +902,22 @@ fn register_callbacks(
             move |term, event| {
                 let pending = effects.command_report.try_borrow_mut().ok().and_then(|mut pending| pending.take());
                 let signed_end = effects.end_report.take();
-                let event = match event {
+                let event = match event.kind() {
                     // 报告的目录当场取走：一次喂进来的输出里可能有好几轮提示符，各轮报告各的。
-                    SemanticPrompt::InputStart => {
+                    Ok(SemanticPromptKind::InputStart) => {
                         PromptEvent::InputStart(effects.shell_cwd.try_borrow_mut().ok().and_then(|mut cwd| cwd.take()))
                     }
-                    SemanticPrompt::OutputStart { .. } => PromptEvent::OutputStart(match pending {
+                    Ok(SemanticPromptKind::OutputStart) => PromptEvent::OutputStart(match pending {
                         Some(Some(command)) => Some(command),
                         Some(None) => {
                             log_err("read submitted command", prompt_input::submitted_command(term)).flatten()
                         }
                         None => None,
                     }),
-                    SemanticPrompt::CommandEnd { .. } if effects.signed_ends.get() && !signed_end => return,
-                    SemanticPrompt::CommandEnd { exit_code, .. } => {
+                    Ok(SemanticPromptKind::CommandEnd) if effects.signed_ends.get() && !signed_end => return,
+                    Ok(SemanticPromptKind::CommandEnd) => {
                         effects.signed_ends.set(false);
-                        PromptEvent::CommandEnd(exit_code)
+                        PromptEvent::CommandEnd(event.exit_code())
                     }
                     _ => return,
                 };

@@ -180,9 +180,9 @@ impl HostSession {
         // 不少 shell 每次出提示符都重发一遍同样的标题，agent 工作时每一帧转圈都改一次标题，
         // 只有去掉状态前缀后的标题或状态真变了才算。
         if self.effects.title_changed.take() {
-            let raw = self.terminal.title().ok().unwrap_or_default();
+            let raw = String::from_utf8_lossy(self.terminal.title().ok().unwrap_or_default());
             let pty = &self.pty;
-            let title = self.agent_tracker.title(raw, now, || pty.foreground_is_shell());
+            let title = self.agent_tracker.title(&raw, now, || pty.foreground_is_shell());
             let title = (!title.is_empty()).then(|| title.to_owned());
             changed |= title != self.title;
             self.title = title;

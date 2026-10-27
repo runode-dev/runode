@@ -72,7 +72,7 @@ fn state(terminal: &Terminal<'static, 'static>) -> Vec<(&'static str, String)> {
         ),
         ("modes", MODES.iter().map(|&mode| u8::from(terminal.mode(mode).unwrap()).to_string()).collect()),
         ("screen", format!("{:?}", terminal.active_screen().unwrap())),
-        ("title", terminal.title().unwrap().to_owned()),
+        ("title", String::from_utf8_lossy(terminal.title().unwrap()).into_owned()),
         ("default palette", format!("{:?}", terminal.default_color_palette().unwrap().0)),
         (
             "default colors",

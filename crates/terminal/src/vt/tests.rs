@@ -125,7 +125,7 @@ fn snapshot_round_trips_the_screen() {
     let mut a = new_terminal(size(20, 4)).unwrap();
     a.vt_write("\x1b]0;标题\x07\x1b[31mred\x1b[0m 中文\r\nsecond".as_bytes());
     let mut b = decode_snapshot(&encode_snapshot(&a).unwrap()).unwrap();
-    assert_eq!(b.title().unwrap(), "标题");
+    assert_eq!(b.title().unwrap(), "标题".as_bytes());
     assert_eq!((b.cols().unwrap(), b.rows().unwrap()), (20, 4));
     assert_eq!((b.cursor_x().unwrap(), b.cursor_y().unwrap()), (6, 1));
     assert_eq!(format_replay(&a, Default::default()).unwrap(), format_replay(&b, Default::default()).unwrap());
@@ -268,8 +268,8 @@ fn replay_keeps_modes_title_palette_and_keyboard() {
     for mode in [Mode::BRACKETED_PASTE, Mode::BUTTON_MOUSE, Mode::SGR_MOUSE] {
         assert!(b.mode(mode).unwrap(), "{mode:?}");
     }
-    assert_eq!(b.title().unwrap(), "hello");
-    assert_eq!(b.pwd().unwrap(), "file:///tmp/x");
+    assert_eq!(b.title().unwrap(), b"hello");
+    assert_eq!(b.pwd().unwrap(), b"file:///tmp/x");
     assert_eq!(b.color_palette().unwrap().0[1], a.color_palette().unwrap().0[1]);
     assert_eq!(b.kitty_keyboard_flags().unwrap(), a.kitty_keyboard_flags().unwrap());
     assert_eq!(format_replay(&b, Default::default()).unwrap(), format_replay(&a, Default::default()).unwrap());

@@ -2,7 +2,7 @@
 
 ## 构建
 
-需要 macOS、Xcode（含 Metal 工具链）和 [zig](https://ziglang.org) 0.16.0，Rust 版本由 `rust-toolchain.toml` 指定。新版 Xcode 缺 Metal 编译器时，先跑 `xcodebuild -downloadComponent MetalToolchain`。
+需要 macOS、Xcode（含 Metal 工具链）和 [zig](https://ziglang.org) 0.17.0，Rust 版本由 `rust-toolchain.toml` 指定。新版 Xcode 缺 Metal 编译器时，先跑 `xcodebuild -downloadComponent MetalToolchain`。
 
 ```sh
 git clone --recursive https://github.com/runode-dev/runode.git

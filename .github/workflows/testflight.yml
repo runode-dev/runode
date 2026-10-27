@@ -28,7 +28,7 @@ jobs:
       # vendor/ghostty 的 build.zig.zon 要求的 zig 版本（minimum_zig_version）。
       - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
         with:
-          version: 0.16.0
+          version: 0.17.0
       - name: 编 libghostty-vt 的 xcframework
         run: apps/ios/scripts/build-ghostty-vt.sh
       - uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0

@@ -283,7 +283,7 @@ mod tests {
         t.on_semantic_prompt({
             let seen = seen.clone();
             move |term, event| {
-                if let libghostty_vt::terminal::SemanticPrompt::OutputStart { .. } = event {
+                if let Ok(libghostty_vt::terminal::SemanticPromptKind::OutputStart) = event.kind() {
                     seen.borrow_mut().push(submitted_command(term).unwrap());
                 }
             }

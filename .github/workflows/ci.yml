@@ -70,7 +70,7 @@ jobs:
       # vendor/ghostty 的 build.zig.zon 要求的 zig 版本（minimum_zig_version）。
       - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
         with:
-          version: 0.16.0
+          version: 0.17.0
       - name: 装 Rust 工具链
         # 版本由 rust-toolchain.toml 指定。
         run: |
@@ -120,7 +120,7 @@ jobs:
         run: make submodules
       - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
         with:
-          version: 0.16.0
+          version: 0.17.0
       - name: 装 Rust 工具链
         run: |
           rustup toolchain install

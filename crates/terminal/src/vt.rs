@@ -230,7 +230,7 @@ pub(crate) fn format_replay(
     if !title.is_empty() {
         // 标题本来就是从 OSC 里解出来的，不该有控制字符；万一有，去掉，免得提前结束这条 OSC。
         out.extend_from_slice(b"\x1b]2;");
-        out.extend(title.chars().filter(|c| !c.is_control()).collect::<String>().bytes());
+        out.extend(String::from_utf8_lossy(title).chars().filter(|c| !c.is_control()).collect::<String>().bytes());
         out.push(0x07);
     }
     Ok(out)

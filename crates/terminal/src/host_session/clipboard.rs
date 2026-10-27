@@ -100,8 +100,8 @@ pub(super) fn take_write(write: ClipboardWrite<'_>, effects: &Effects) {
     write.reply(result, false);
 }
 
-fn is_plain_text(mime: &str) -> bool {
-    mime == "text/plain" || mime.starts_with("text/plain;")
+fn is_plain_text(mime: &[u8]) -> bool {
+    mime == b"text/plain" || mime.starts_with(b"text/plain;")
 }
 
 /// 读请求 OSC 的内容最长是 `52;c;?`，再长就不是读请求了。

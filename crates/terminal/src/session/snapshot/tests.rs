@@ -140,8 +140,8 @@ fn state(terminal: &Terminal<'static, '_>, history: usize, detailed: bool) -> Ve
         ("rows", rows),
         ("frame", format!("{:?}", renderer.frame)),
         ("modes", MODES.iter().map(|&mode| u8::from(terminal.mode(mode).unwrap()).to_string()).collect()),
-        ("title", terminal.title().unwrap().to_owned()),
-        ("pwd", terminal.pwd().unwrap().to_owned()),
+        ("title", String::from_utf8_lossy(terminal.title().unwrap()).into_owned()),
+        ("pwd", String::from_utf8_lossy(terminal.pwd().unwrap()).into_owned()),
         ("palette", format!("{:?}", terminal.color_palette().unwrap().0)),
         ("default palette", format!("{:?}", terminal.default_color_palette().unwrap().0)),
         (
