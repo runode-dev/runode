@@ -61,15 +61,20 @@ fn jumping_between_marked_prompts() {
     session.feed(PROMPT);
     // 4 行高的视口最上面一行是 "$ cmd2"，往上跳到它之前的那个提示符。
     assert_eq!(row_text(&session.frame(), 0), "$ cmd2");
-    assert!(session.jump_to_prompt(true));
+    session.jump_to_prompt(-1);
     assert_eq!(row_text(&session.frame(), 0), "$ cmd1");
-    assert!(session.jump_to_prompt(true));
+    session.jump_to_prompt(-1);
     assert_eq!(row_text(&session.frame(), 0), "$ cmd0");
-    // 再往上没有提示符了：不动，说没跳成。
-    assert!(!session.jump_to_prompt(true));
+    // 再往上没有提示符了：不动。
+    session.jump_to_prompt(-1);
     assert_eq!(row_text(&session.frame(), 0), "$ cmd0");
-    assert!(session.jump_to_prompt(false));
+    session.jump_to_prompt(1);
     assert_eq!(row_text(&session.frame(), 0), "$ cmd1");
+    // 一次跳两个；往后越过最后一个提示符回到底部。
+    session.jump_to_prompt(-2);
+    assert_eq!(row_text(&session.frame(), 0), "$ cmd0");
+    session.jump_to_prompt(9);
+    assert!(session.viewport_at_bottom());
 }
 
 /// 录下来的真实会话：隔离了家目录的 zsh 加载 runode 的集成，左提示符两行（`%1~` 换行 `%%`）、
@@ -90,11 +95,11 @@ fn jumping_stops_once_per_two_line_prompt_with_a_right_prompt() {
     };
     // 视口最上面是 `echo three` 的提示符。
     assert_eq!(top(&mut session), ("proj".into(), "% echo three <r>".into()));
-    session.jump_to_prompt(true);
+    session.jump_to_prompt(-1);
     assert_eq!(top(&mut session), ("proj".into(), "% echo two <r>".into()));
-    session.jump_to_prompt(true);
+    session.jump_to_prompt(-1);
     assert_eq!(top(&mut session), ("proj".into(), "% echo one <r>".into()));
-    session.jump_to_prompt(false);
+    session.jump_to_prompt(1);
     assert_eq!(top(&mut session), ("proj".into(), "% echo two <r>".into()));
 }
 

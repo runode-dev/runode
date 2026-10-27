@@ -1,12 +1,9 @@
 //! 视口滚动：按像素平滑滚动、翻页、滚到两端和在提示符之间跳转。
 
-use libghostty_vt::{
-    screen::RowSemanticPrompt,
-    terminal::{Point, PointCoordinate, ScrollViewport, Terminal},
-};
+use libghostty_vt::terminal::{ScrollViewport, Terminal};
 use runode_types::grid::ViewportScroll;
 
-use super::{Session, log_err};
+use super::Session;
 
 impl Session {
     /// 视口停在最底部，没有翻回滚历史，也没有平滑滚动错开的半行。
@@ -51,34 +48,10 @@ impl Session {
         self.terminal.scroll_viewport(scroll);
     }
 
-    /// 视口跳到上一个（`backward`）或下一个提示符所在的行，靠 shell 集成标在提示符上的记号。
-    /// 往后没有提示符时回到底部。返回是不是跳到了一个提示符上：往前没有了、往后回到底部时为假。
-    pub fn jump_to_prompt(&mut self, backward: bool) -> bool {
+    /// 视口顶上跳过 `prompts` 个提示符，负数往回，靠 shell 集成标在提示符上的记号。那个方向上
+    /// 提示符不够时停在最后一个，往后越过最后一个时回到底部。
+    pub fn jump_to_prompt(&mut self, prompts: isize) {
         self.scroll_offset = 0.;
-        let result = self.terminal.scrollbar().map(|scrollbar| {
-            let is_prompt = |y: u64| {
-                self.terminal
-                    .grid_ref(Point::Screen(PointCoordinate { x: 0, y: y as u32 }))
-                    .and_then(|r| r.row())
-                    .and_then(|r| r.semantic_prompt())
-                    .is_ok_and(|p| p == RowSemanticPrompt::Prompt)
-            };
-            if backward {
-                (0..scrollbar.offset).rev().find(|y| is_prompt(*y))
-            } else {
-                (scrollbar.offset + 1..scrollbar.total).find(|y| is_prompt(*y))
-            }
-        });
-        match log_err("jump to prompt", result) {
-            Some(Some(row)) => {
-                self.terminal.scroll_viewport(ScrollViewport::Row(row as usize));
-                true
-            }
-            Some(None) if !backward => {
-                self.terminal.scroll_viewport(ScrollViewport::Bottom);
-                false
-            }
-            _ => false,
-        }
+        self.terminal.scroll_viewport(ScrollViewport::DeltaPrompt(prompts));
     }
 }
