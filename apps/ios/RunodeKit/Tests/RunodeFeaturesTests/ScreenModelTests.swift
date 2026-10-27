@@ -106,6 +106,12 @@ private func encodedKeyframe() throws -> VideoFrame {
 
 @MainActor @Suite struct ScreenTapTests {
     /// 第二次点在第一次附近、隔得不久时落到第一次的位置上，电脑才认成双击。
+    @Test func cursorStopsAtTheEdges() {
+        #expect(ScreenModel.clamped(-0.2) == 0)
+        #expect(ScreenModel.clamped(1.3) == 1)
+        #expect(ScreenModel.clamped(0.4) == 0.4)
+    }
+
     @Test func aQuickNearbySecondTapLandsOnTheFirst() {
         let model = ScreenModel(machine: machineRecord(), open: { _ in throw CancellationError() })
         let start = ContinuousClock.now

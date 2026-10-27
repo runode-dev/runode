@@ -51,6 +51,15 @@ public final class ScreenModel {
     @ObservationIgnored public var onVideo: ((VideoFrame) -> Void)?
     /// 重新开始采集了（切了屏幕）：显示层清掉旧画面，等新的关键帧。
     @ObservationIgnored public var onVideoReset: (() -> Void)?
+    /// 触屏：手指点哪里电脑上就点哪里。触控板：单指挪的是一个虚拟光标，点按、拖动都落在光标上。
+    public enum PointerMode: String, Sendable {
+        case touch, trackpad
+    }
+    public var pointerMode: PointerMode = .touch
+    /// 触控板模式的光标位置，画面上的比例。
+    @ObservationIgnored public private(set) var cursor = (x: 0.5, y: 0.5)
+    /// 光标挪了：显示层把光标画到新位置。
+    @ObservationIgnored public var onCursor: ((Double, Double) -> Void)?
 
     @ObservationIgnored private let openConnection: ScreenOpener
     @ObservationIgnored private let passwords: (any UnlockPasswordStore)?
@@ -305,6 +314,25 @@ public final class ScreenModel {
     public enum DragPhase {
         case began, moved, ended
     }
+
+    /// 触控板模式：光标挪 (`dx`, `dy`)，是画面上的比例；到边为止。
+    public func moveCursor(dx: Double, dy: Double) {
+        cursor = (Self.clamped(cursor.x + dx), Self.clamped(cursor.y + dy))
+        onCursor?(cursor.x, cursor.y)
+        send(.mouseMove(x: cursor.x, y: cursor.y))
+    }
+
+    /// 触控板模式：在光标处点一下。
+    public func clickAtCursor(_ button: ScreenMouseButton) {
+        click(button, x: cursor.x, y: cursor.y)
+    }
+
+    /// 触控板模式：在光标处按下、松开左键；中间用 `moveCursor` 拖。
+    public func dragAtCursor(down: Bool) {
+        send(.mouseButton(.left, down: down, x: cursor.x, y: cursor.y))
+    }
+
+    nonisolated static func clamped(_ fraction: Double) -> Double { min(max(fraction, 0), 1) }
 
     /// 两指滑动，`dx`、`dy` 是手机上的点数，和手指拖动的方向一致；按画面在手机上的宽度（`viewWidth`）
     /// 换成电脑上的点数。

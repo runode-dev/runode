@@ -4,9 +4,10 @@
     import SwiftUI
     import UIKit
 
-    /// 远程桌面页：电脑的整块屏幕，点按是左键，长按是右键，单指拖是按着左键拖，双指滑是滚动，捏合放大，
-    /// 放大后双指拖着看别处。整页全屏，不要导航栏和状态栏，返回按钮浮在左上角，电脑有几块屏幕时右上角能切换。底部一条快捷键（软键盘没有的
-    /// 键，右端开关软键盘），软键盘弹出时这条跟着键盘走（`ScreenKeyBar`）。
+    /// 远程桌面页：电脑的整块屏幕。触屏模式点按是左键，长按是右键，单指拖是按着左键拖；触控板模式单指挪
+    /// 光标，点按是左键，双指点按是右键，长按后拖是按着左键拖。双指滑是滚动，捏合放大，放大后双指拖着看别处。
+    /// 整页全屏，不要导航栏和状态栏，返回按钮浮在左上角，电脑有几块屏幕时右上角能切换。底部一条快捷键
+    /// （软键盘没有的键，右端开关软键盘），软键盘弹出时这条跟着键盘走（`ScreenKeyBar`）。
     struct RemoteDesktopScreen: View {
         @Bindable var model: ScreenModel
         @State private var keyboardVisible = false
@@ -73,6 +74,15 @@
                             .floatingStyle()
                         }
                         .disabled(model.unlocking)
+                    }
+                    Button {
+                        model.pointerMode = model.pointerMode == .touch ? .trackpad : .touch
+                    } label: {
+                        Label(
+                            model.pointerMode == .touch ? "切到触控板模式" : "切到触屏模式",
+                            systemImage: model.pointerMode == .touch ? "hand.tap" : "cursorarrow.motionlines"
+                        )
+                        .labelStyle(.iconOnly).floatingStyle()
                     }
                     if model.displays.count > 1 {
                         Menu {
@@ -199,6 +209,7 @@
             let view = ScreenSurfaceView(model: model)
             model.onVideo = { [weak view] frame in view?.video.show(frame) }
             model.onVideoReset = { [weak view] in view?.video.reset() }
+            model.onCursor = { [weak view] x, y in view?.placeCursor(x: x, y: y) }
             view.keys.onDismiss = { keyboardVisible = false }
             return view
         }
@@ -218,7 +229,13 @@
         let keys: ScreenKeyInput
         private let model: ScreenModel
         private let scrollRecognizer = UIPanGestureRecognizer()
+        private let press = UILongPressGestureRecognizer()
+        /// 只在触控板模式用；触屏模式下关着，单击才不用等它失败。
+        let rightTap = UITapGestureRecognizer()
         private var lastScroll = CGPoint.zero
+        private var lastPoint = CGPoint.zero
+        /// 触控板模式的光标。
+        let cursor = UIImageView(image: UIImage(systemName: "cursorarrow"))
         var videoSize: CGSize? {
             didSet { if videoSize != oldValue { setNeedsLayout() } }
         }
@@ -243,12 +260,23 @@
             video.accessibilityTraits = .image
 
             let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
-            let press = UILongPressGestureRecognizer(target: self, action: #selector(pressed))
+            press.addTarget(self, action: #selector(pressed))
+            rightTap.addTarget(self, action: #selector(rightTapped))
+            rightTap.numberOfTouchesRequired = 2
+            tap.require(toFail: rightTap)
+            cursor.tintColor = .white
+            cursor.isHidden = true
+            cursor.layer.shadowOpacity = 1
+            cursor.layer.shadowRadius = 1
+            cursor.layer.shadowOffset = .zero
+            cursor.isUserInteractionEnabled = false
+            video.addSubview(cursor)
+            placeCursor(x: model.cursor.x, y: model.cursor.y)
             let drag = UIPanGestureRecognizer(target: self, action: #selector(dragged))
             drag.maximumNumberOfTouches = 1
             scrollRecognizer.minimumNumberOfTouches = 2
             scrollRecognizer.addTarget(self, action: #selector(scrolled))
-            for recognizer in [tap, press, drag, scrollRecognizer] {
+            for recognizer in [tap, rightTap, press, drag, scrollRecognizer] {
                 video.addGestureRecognizer(recognizer)
             }
             video.isUserInteractionEnabled = true
@@ -260,6 +288,7 @@
             super.layoutSubviews()
             guard zoomScale == 1 else { return }
             contentSize = bounds.size
+            defer { placeCursor(x: model.cursor.x, y: model.cursor.y) }
             guard let videoSize, videoSize.width > 0, videoSize.height > 0 else {
                 video.frame = bounds
                 return
@@ -276,10 +305,16 @@
             video.frame = AVMakeRect(aspectRatio: videoSize, insideRect: below)
         }
 
+        func placeCursor(x: Double, y: Double) {
+            cursor.sizeToFit()
+            cursor.frame.origin = CGPoint(x: x * video.bounds.width, y: y * video.bounds.height)
+        }
+
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { video }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
             let zoomed = zoomScale > 1.01
+            cursor.transform = CGAffineTransform(scaleX: 1 / zoomScale, y: 1 / zoomScale)
             panGestureRecognizer.isEnabled = zoomed
             scrollRecognizer.isEnabled = !zoomed
         }
@@ -293,17 +328,46 @@
         }
 
         @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
+            guard model.pointerMode == .touch else { return model.clickAtCursor(.left) }
             let (x, y) = fraction(recognizer)
             model.tap(x: x, y: y, view: recognizer.location(in: self))
         }
 
+        @objc private func rightTapped(_ recognizer: UITapGestureRecognizer) {
+            if model.pointerMode == .trackpad { model.clickAtCursor(.right) }
+        }
+
         @objc private func pressed(_ recognizer: UILongPressGestureRecognizer) {
-            guard recognizer.state == .began else { return }
-            let (x, y) = fraction(recognizer)
-            model.rightClick(x: x, y: y)
+            guard model.pointerMode == .trackpad else {
+                guard recognizer.state == .began else { return }
+                let (x, y) = fraction(recognizer)
+                return model.rightClick(x: x, y: y)
+            }
+            let point = recognizer.location(in: video)
+            switch recognizer.state {
+            case .began: model.dragAtCursor(down: true)
+            case .changed:
+                model.moveCursor(
+                    dx: Double((point.x - lastPoint.x) / video.bounds.width),
+                    dy: Double((point.y - lastPoint.y) / video.bounds.height))
+            case .ended, .cancelled, .failed: model.dragAtCursor(down: false)
+            default: break
+            }
+            lastPoint = point
         }
 
         @objc private func dragged(_ recognizer: UIPanGestureRecognizer) {
+            if model.pointerMode == .trackpad {
+                let point = recognizer.location(in: video)
+                // 长按拖着时由 `pressed` 挪光标。
+                if recognizer.state == .changed, ![.began, .changed].contains(press.state), video.bounds.width > 0 {
+                    model.moveCursor(
+                        dx: Double((point.x - lastPoint.x) / video.bounds.width),
+                        dy: Double((point.y - lastPoint.y) / video.bounds.height))
+                }
+                lastPoint = point
+                return
+            }
             let (x, y) = fraction(recognizer)
             switch recognizer.state {
             case .began: model.drag(.began, x: x, y: y)
