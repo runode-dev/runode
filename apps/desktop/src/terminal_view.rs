@@ -267,7 +267,7 @@ impl Render for TerminalView {
             .key_context(if self.search_field.is_some() { "Terminal searching" } else { "Terminal" })
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
-            .on_scroll_wheel(cx.listener(Self::scroll_wheel))
+            .on_scroll(cx.listener(Self::scroll_wheel))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::paste_selection))

@@ -1,17 +1,17 @@
 ---
 name: vendor-upgrade
-description: runode 升级 vendor 依赖的流程：同步 ghostty 上游（vendor/ghostty 的 fork 变基、libghostty-rs 的 GHOSTTY_COMMIT 和绑定一起挪）、跟进 Uzaaft 的 libghostty-rs、升级 gpui-pre 并重放 vendor/gpui-pre-macos 上的改动。核对上游的每个新提交：上游修了 runode 自己修过的问题就删掉我们的提交、改用上游的；上游加了新功能或改了行为要单独醒目地提醒用户。只要用户提到升级/同步/更新 vendor、子模块、ghostty、libghostty、libghostty-rs、gpui、gpui-pre，或者问上游有什么新东西、我们的 fork 补丁还要不要，都用这个 skill，哪怕没说"升级"二字。
+description: runode 升级 vendor 依赖的流程：同步 ghostty 上游（vendor/ghostty 的 fork 变基、libghostty-rs 的 GHOSTTY_COMMIT 和绑定一起挪）、跟进 Uzaaft 的 libghostty-rs、升级 gpui-pre 并核对 desktop 里绕着 GPUI 平台层写的地方。核对上游的每个新提交：上游修了 runode 自己修过的问题就删掉我们的提交、改用上游的；上游加了新功能或改了行为要单独醒目地提醒用户。只要用户提到升级/同步/更新 vendor、子模块、ghostty、libghostty、libghostty-rs、gpui、gpui-pre，或者问上游有什么新东西、我们的 fork 补丁还要不要，都用这个 skill，哪怕没说"升级"二字。
 ---
 
 # 升级 vendor 依赖
 
-runode 的 vendor 下有三样东西，各自的来历和不变量写在根 `AGENTS.md`（"终端仿真用的 libghostty-vt…"、"同步 ghostty 上游时…"、"GPUI 取自…"三段），动手前先读那三段，这里不重复，只讲怎么升、怎么核对。
+runode 的 vendor 下有两个子模块，另外 GPUI 取自 crates.io、原样使用。各自的来历和不变量写在根 `AGENTS.md`（"终端仿真用的 libghostty-vt…"、"同步 ghostty 上游时…"、"GPUI 取自…"三段），动手前先读那三段，这里不重复，只讲怎么升、怎么核对。
 
 | 目录 | 是什么 | 上游 | runode 的改动在哪 |
 | --- | --- | --- | --- |
 | `vendor/ghostty` | 子模块，runode-dev/ghostty 的 fork | `upstream` = ghostty-org/ghostty 的 `main` | fork `main` 上基于上游的几个修复提交，一处一个 |
 | `vendor/libghostty-rs` | 子模块，runode-dev/libghostty-rs 的 fork | `upstream` = Uzaaft/libghostty-rs 的 `master` | fork `main` 上的提交：新接口、修复、`GHOSTTY_COMMIT` 和重新生成的绑定 |
-| `vendor/gpui-pre-macos` | 普通目录，crates.io 上 gpui-pre-macos 某版的原样副本 | crates.io 的 gpui-pre（Zed 的 gpui 快照） | runode 仓库里只动这个目录的提交 |
+| 根 `Cargo.toml` 的 gpui-pre | crates.io 上的包，原样使用 | crates.io 的 gpui-pre（Zed 的 gpui 快照） | 没有改动；`desktop` 里有几处经原生窗口绕着平台层做的事 |
 
 用户没说升哪个时，先跑摸底（下面第一步）看哪边有更新，把结果讲给用户再动手。ghostty 和 libghostty-rs 必须一起动，不能只挪一个：构建编的是 `vendor/ghostty` 的源码，绑定却是照 `GHOSTTY_COMMIT` 那版头文件生成的，两边不一致时编得过，运行时却读写错内存。
 
@@ -36,7 +36,7 @@ runode 的 vendor 下有三样东西，各自的来历和不变量写在根 `AGE
 - 只修了一部分时，不要两套都留：在上游修法之上把我们还需要的那一点重写成一个更小的提交，并在报告里写明上游修了哪部分、我们还补了哪部分。
 - 上游的修法和我们的意图相反（比如上游认定那是对的行为），或者看不出是不是同一件事时，停下来问用户，不要自己挑。
 
-libghostty-rs 也是同一个道理，规矩在 `AGENTS.md`：Uzaaft 上游已经有了同样能力、只是名字或形状不同的，删掉 fork 上我们的提交，**改 runode 去适应上游的接口**，不改 fork 去迁就 runode。gpui 的副本同理，上游做了同样的事就删掉对应的提交。
+libghostty-rs 也是同一个道理，规矩在 `AGENTS.md`：Uzaaft 上游已经有了同样能力、只是名字或形状不同的，删掉 fork 上我们的提交，**改 runode 去适应上游的接口**，不改 fork 去迁就 runode。gpui 同理，上游做了 `desktop` 里绕着平台层做的同一件事，就删掉 `desktop` 里的那段、改用上游的。
 
 还有第三处容易漏的：runode 自己的代码里有些地方跟着 libghostty 的现状写，上游一变它们就该跟着变。有三种：
 

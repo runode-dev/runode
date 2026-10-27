@@ -135,42 +135,57 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
     }
 }
 
+/// 这个构建跑在哪个系统上，解析手边没有 `App` 的按键写法时用。
+pub(crate) const OS: gpui::OperatingSystem = if cfg!(target_os = "macos") {
+    gpui::OperatingSystem::Mac
+} else if cfg!(windows) {
+    gpui::OperatingSystem::Windows
+} else {
+    gpui::OperatingSystem::Linux
+};
+
+/// `KeyBinding::new` 只认写明的修饰键，`secondary` 在这里换成 macOS 上的 Cmd、别处的 Ctrl。
+macro_rules! secondary {
+    ($keys:literal) => {
+        if cfg!(target_os = "macos") { concat!("cmd-", $keys) } else { concat!("ctrl-", $keys) }
+    };
+}
+
 /// 单行、多行输入框自己的编辑键，搜索时在终端里按 Esc 关掉搜索栏，以及文件树里的按键，不开放配置。
-/// `secondary` 在 macOS 上是 Cmd，别处是 Ctrl。
 fn fixed_bindings() -> Vec<KeyBinding> {
     let tree = Some(FILE_TREE);
     let mut bindings = vec![
         KeyBinding::new("enter", SearchNext, Some("TextField")),
         KeyBinding::new("shift-enter", SearchPrevious, Some("TextField")),
         KeyBinding::new("escape", EndSearch, Some("TextField")),
-        KeyBinding::new("secondary-x", Cut, Some("TextField")),
-        KeyBinding::new("secondary-z", Undo, Some("TextField")),
-        KeyBinding::new("secondary-shift-z", Redo, Some("TextField")),
+        KeyBinding::new(secondary!("x"), Cut, Some("TextField")),
+        KeyBinding::new(secondary!("z"), Undo, Some("TextField")),
+        KeyBinding::new(secondary!("shift-z"), Redo, Some("TextField")),
         // 点回终端后搜索栏还开着，Esc 照样关掉它；没在搜索时 Esc 照常发给程序。
         KeyBinding::new("escape", EndSearch, Some("Terminal && searching")),
         // 多行输入框里回车换行（输入框自己处理），secondary-enter 提交。macOS 的默认配置里 cmd-enter 是全局的
         // 切换全屏，GPUI 把全局绑定当作和最深的上下文一样深，同样深时后加的优先，所以这条放在后面就盖过它。
-        KeyBinding::new("secondary-enter", SubmitText, Some("TextArea")),
-        KeyBinding::new("secondary-x", Cut, Some("TextArea")),
-        KeyBinding::new("secondary-z", Undo, Some("TextArea")),
-        KeyBinding::new("secondary-shift-z", Redo, Some("TextArea")),
+        KeyBinding::new(secondary!("enter"), SubmitText, Some("TextArea")),
+        KeyBinding::new(secondary!("x"), Cut, Some("TextArea")),
+        KeyBinding::new(secondary!("z"), Undo, Some("TextArea")),
+        KeyBinding::new(secondary!("shift-z"), Redo, Some("TextArea")),
         KeyBinding::new("up", SelectPreviousFile, tree),
         KeyBinding::new("down", SelectNextFile, tree),
         KeyBinding::new("home", SelectFirstFile, tree),
         KeyBinding::new("end", SelectLastFile, tree),
-        KeyBinding::new("secondary-up", SelectFirstFile, tree),
+        KeyBinding::new(secondary!("up"), SelectFirstFile, tree),
         KeyBinding::new("left", CollapseSelectedFile, tree),
         KeyBinding::new("right", ExpandSelectedFile, tree),
         // 空格在预览栏里打开，回车改名。
         KeyBinding::new("space", OpenSelectedFile, tree),
-        KeyBinding::new("secondary-down", OpenSelectedFile, tree),
+        KeyBinding::new(secondary!("down"), OpenSelectedFile, tree),
         KeyBinding::new("enter", RenameFile, tree),
         KeyBinding::new("f2", RenameFile, tree),
-        KeyBinding::new("secondary-backspace", DeleteFile, tree),
-        KeyBinding::new("secondary-x", Cut, tree),
-        KeyBinding::new("secondary-alt-r", RevealInFinder, tree),
-        KeyBinding::new("secondary-alt-c", CopyPath, tree),
-        KeyBinding::new("secondary-alt-shift-c", CopyRelativePath, tree),
+        KeyBinding::new(secondary!("backspace"), DeleteFile, tree),
+        KeyBinding::new(secondary!("x"), Cut, tree),
+        KeyBinding::new(secondary!("alt-r"), RevealInFinder, tree),
+        KeyBinding::new(secondary!("alt-c"), CopyPath, tree),
+        KeyBinding::new(secondary!("alt-shift-c"), CopyRelativePath, tree),
         KeyBinding::new("escape", FocusTerminal, tree),
     ];
     // 别的平台上终端里单按 Ctrl 的键归 shell，复制、粘贴是 Ctrl+Shift 加字母；终端外照那里的习惯单按 Ctrl。
@@ -211,14 +226,14 @@ fn bind(cx: &mut App) {
     for (keys, action) in &table {
         // 设置页里没有分屏，关分屏的键收起设置页。
         if *action == Action::CloseSurface {
-            bindings.extend(load(keys, Box::new(crate::settings::CloseSettings), Some("Settings")));
+            bindings.extend(load(keys, Box::new(crate::settings::CloseSettings), Some("Settings"), cx));
         }
         let (action, contexts) = gpui_action(action.clone());
         for context in contexts {
-            bindings.extend(load(keys, action.boxed_clone(), *context));
+            bindings.extend(load(keys, action.boxed_clone(), *context, cx));
         }
     }
-    bindings.extend(task_bindings(&table, &bound.1.triggers()));
+    bindings.extend(task_bindings(&table, &bound.1.triggers(), cx));
     // 固定绑定放在后面：同一上下文里后加的优先，搜索时 Esc 照样先关搜索栏；菜单上的快捷键
     // 取的是一个动作最早的绑定，这样「查找下一个」显示 ⌘G 而不是搜索框里的回车。
     bindings.extend(fixed_bindings());
@@ -232,23 +247,23 @@ fn bind(cx: &mut App) {
 /// 命令的快捷键 `triggers`（GPUI 的写法），要放在配置 `table` 的绑定后面，同一上下文里先试它们。这个键原来的
 /// 动作在哪些上下文里生效，它也在那里绑一份，不然更深的上下文里原来的动作先跑。这里没绑这个键时
 /// `RunTaskKey` 往下传，原来的动作照样跑。
-fn task_bindings(table: &[(String, Action)], triggers: &[&str]) -> Vec<KeyBinding> {
+fn task_bindings(table: &[(String, Action)], triggers: &[&str], cx: &App) -> Vec<KeyBinding> {
     let mut bindings = Vec::new();
     for keys in triggers {
         let mut contexts = WINDOW.to_vec();
         let action = table.iter().find(|(bound, _)| bound == keys).map(|(_, action)| gpui_action(action.clone()).1);
         contexts.extend(action.into_iter().flatten().filter(|context| !WINDOW.contains(context)));
         for context in contexts {
-            bindings.extend(load(keys, Box::new(RunTaskKey((*keys).to_owned())), context));
+            bindings.extend(load(keys, Box::new(RunTaskKey((*keys).to_owned())), context, cx));
         }
     }
     bindings
 }
 
 /// 把一条按键写法绑到 `action` 上，只在 `context` 里生效；写法不认得时记一条警告，返回 `None`。
-fn load(keys: &str, action: Box<dyn gpui::Action>, context: Option<&str>) -> Option<KeyBinding> {
+fn load(keys: &str, action: Box<dyn gpui::Action>, context: Option<&str>, cx: &App) -> Option<KeyBinding> {
     let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
-    KeyBinding::load(keys, action, predicate, false, None, &gpui::DummyKeyboardMapper)
+    KeyBinding::load(keys, action, predicate, false, None, cx)
         .inspect_err(|err| tracing::warn!("keybind {keys}: {err}"))
         .ok()
 }
@@ -276,13 +291,9 @@ mod tests {
                 }
             }
         }
-        for (keys, action) in keybind::resolve(&[]) {
-            let (action, contexts) = gpui_action(action);
-            for context in contexts {
-                let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
-                let loaded =
-                    KeyBinding::load(&keys, action.boxed_clone(), predicate, false, None, &gpui::DummyKeyboardMapper);
-                assert!(loaded.is_ok(), "{keys}");
+        for (keys, _) in keybind::resolve(&[]) {
+            for stroke in keys.split_whitespace() {
+                assert!(gpui::Keystroke::parse_with_os(stroke, OS).is_ok(), "{keys}");
             }
         }
     }
@@ -291,23 +302,17 @@ mod tests {
     #[test]
     fn secondary_enter_submits_in_textarea() {
         let mut bindings = Vec::new();
-        for (keys, action) in keybind::resolve(&[]) {
-            let (action, contexts) = gpui_action(action);
-            for context in contexts {
-                let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
-                bindings.extend(KeyBinding::load(
-                    &keys,
-                    action.boxed_clone(),
-                    predicate,
-                    false,
-                    None,
-                    &gpui::DummyKeyboardMapper,
-                ));
+        gpui::TestAppContext::single().update(|cx| {
+            for (keys, action) in keybind::resolve(&[]) {
+                let (action, contexts) = gpui_action(action);
+                for context in contexts {
+                    bindings.extend(load(&keys, action.boxed_clone(), *context, cx));
+                }
             }
-        }
+        });
         bindings.extend(fixed_bindings());
         let keymap = gpui::Keymap::new(bindings);
-        let input = [gpui::Keystroke::parse("secondary-enter").unwrap()];
+        let input = [gpui::Keystroke::parse(secondary!("enter")).unwrap()];
         let first = |contexts: &[&str]| {
             let stack: Vec<_> = contexts.iter().map(|c| gpui::KeyContext::parse(c).unwrap()).collect();
             keymap.bindings_for_input(&input, &stack).0.first().map(|binding| binding.action().name())
@@ -323,18 +328,20 @@ mod tests {
     fn task_keys_come_before_the_bound_action() {
         let table = keybind::resolve(&[]);
         let mut bindings: Vec<KeyBinding> = Vec::new();
-        for (keys, action) in &table {
-            let (action, contexts) = gpui_action(action.clone());
-            for context in contexts {
-                bindings.extend(load(keys, action.boxed_clone(), *context));
-            }
-        }
         let new_tab =
             table.iter().find(|(_, action)| *action == Action::NewTab).map(|(keys, _)| keys.as_str()).unwrap();
-        bindings.extend(task_bindings(&table, &[new_tab, "ctrl-alt-shift-f9"]));
+        gpui::TestAppContext::single().update(|cx| {
+            for (keys, action) in &table {
+                let (action, contexts) = gpui_action(action.clone());
+                for context in contexts {
+                    bindings.extend(load(keys, action.boxed_clone(), *context, cx));
+                }
+            }
+            bindings.extend(task_bindings(&table, &[new_tab, "ctrl-alt-shift-f9"], cx));
+        });
         let keymap = gpui::Keymap::new(bindings);
         let actions = |keys: &str| {
-            let input = [gpui::Keystroke::parse(keys).unwrap()];
+            let input = [gpui::Keystroke::parse_with_os(keys, OS).unwrap()];
             let stack: Vec<_> = ["Window", "Terminal"].iter().map(|c| gpui::KeyContext::parse(c).unwrap()).collect();
             let (found, _) = keymap.bindings_for_input(&input, &stack);
             found.iter().map(|binding| binding.action().name()).collect::<Vec<_>>()
@@ -360,7 +367,10 @@ mod tests {
                 };
                 accepted += 1;
                 for stroke in keys.split(' ') {
-                    assert!(gpui::Keystroke::parse(stroke).is_ok(), "{trigger} gives {stroke}, which GPUI rejects");
+                    assert!(
+                        gpui::Keystroke::parse_with_os(stroke, OS).is_ok(),
+                        "{trigger} gives {stroke}, which GPUI rejects"
+                    );
                 }
             }
         }

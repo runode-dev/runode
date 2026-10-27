@@ -16,7 +16,8 @@ pub fn shortcut_text(action: &dyn Action, cx: &App) -> Option<SharedString> {
     let keymap = cx.key_bindings();
     let keymap = keymap.borrow();
     keymap.bindings_for_action(action).next_back().map(|binding| {
-        let strokes: Vec<_> = binding.keystrokes().iter().map(ToString::to_string).collect();
+        let strokes: Vec<_> =
+            binding.keystrokes().iter().map(|k| k.display(cx.platform_info().os).to_string()).collect();
         SharedString::from(strokes.join(" "))
     })
 }

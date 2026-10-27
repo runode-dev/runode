@@ -6,7 +6,7 @@ use futures::{FutureExt, future::Shared};
 
 use gpui::{
     App, Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, Task, Window,
+    Pixels, Point, ScrollDelta, ScrollEvent, Size, Task, Window,
 };
 use runode_terminal::session::{Link, LinkCandidates, LinkTarget, Session};
 use runode_types::{
@@ -88,7 +88,7 @@ impl TerminalView {
         }
     }
 
-    pub(super) fn scroll_wheel(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn scroll_wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(metrics) = self.metrics else {
             return;
         };
@@ -132,7 +132,7 @@ impl TerminalView {
             return;
         };
         // ⌘（别的平台是 Ctrl）点在链接上：打开它，不选择，程序开着鼠标上报时也不上报。
-        if event.button == MouseButton::Left && event.modifiers.secondary() && self.click_link(at, cx) {
+        if event.button == MouseButton::Left && event.modifiers.secondary(cx) && self.click_link(at, cx) {
             return;
         }
         // 程序开了鼠标上报时按键归程序，按住 Shift 照常选择。
@@ -179,7 +179,7 @@ impl TerminalView {
             cx.notify();
             return;
         }
-        self.hover_link(inside && event.pressed_button.is_none() && event.modifiers.secondary(), at, cx);
+        self.hover_link(inside && event.pressed_button.is_none() && event.modifiers.secondary(cx), at, cx);
         // 没按键的移动只报给指针下的终端；按着键的拖动只报给按下时所在的终端。
         let ours = if event.pressed_button.is_some() { self.reporting_press } else { inside };
         if ours
@@ -230,7 +230,7 @@ impl TerminalView {
     ) {
         let at = pointer.and_then(|pointer| self.grid_point(pointer));
         match at {
-            Some(at) => self.hover_link(modifiers.secondary(), at, cx),
+            Some(at) => self.hover_link(modifiers.secondary(cx), at, cx),
             None => self.clear_hovered_link(cx),
         }
     }

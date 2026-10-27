@@ -3,7 +3,8 @@
 //! `remote`），这里在主线程上写系统剪贴板；读之前按宿主的意思先问用户，问在显示那个终端的窗口上，
 //! 说清是哪个终端、哪个程序要读。日志里不记剪贴板的内容。
 
-use gpui::{App, ClipboardItem, EntityId, PromptButton, PromptLevel, WindowHandle};
+use futures::channel::oneshot;
+use gpui::{App, ClipboardItem, EntityId, Window, WindowHandle};
 use runode_protocol::{HostMsg, SessionId};
 use runode_types::clipboard::MAX_CLIPBOARD_BYTES;
 
@@ -41,14 +42,7 @@ pub(super) fn read(ticket: UiTicket, id: SessionId, ask: bool, program: Option<S
     };
     let detail = read_detail(&terminal_title(window, pane, id, cx), program.as_deref());
     let title = rust_i18n::t!("clipboard.read_title");
-    // 不允许排在前面（`ALLOW` 是第二个），按取消按钮给出：回车按的是它，一开始的键盘焦点也在它上面（空格
-    // 按的是焦点所在的按钮），免得用户正打着字时一个回车或空格就把剪贴板交出去。
-    let answers = [
-        PromptButton::cancel(rust_i18n::t!("clipboard.deny").into_owned()),
-        PromptButton::new(rust_i18n::t!("clipboard.allow").into_owned()),
-    ];
-    let answer =
-        window.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx));
+    let answer = window.update(cx, |_, window, cx| prompt_read(window, &title, &detail, cx));
     let Ok(answer) = answer else {
         reply(None);
         return;
@@ -62,6 +56,63 @@ pub(super) fn read(ticket: UiTicket, id: SessionId, ask: bool, program: Option<S
 
 /// 询问框里「允许」是第几个按钮。
 const ALLOW: usize = 1;
+
+/// 弹框问让不让读，收到的是按下的按钮的序号。「不允许」排在前面：回车按的是它，一开始的键盘焦点也在它
+/// 上面（空格按的是焦点所在的按钮），免得用户正打着字时一个回车或空格就把剪贴板交出去。GPUI 的
+/// `Window::prompt` 在 macOS 上把焦点放在最后一个不是取消的按钮上，所以这里自己弹 NSAlert。
+#[cfg(target_os = "macos")]
+fn prompt_read(window: &mut Window, title: &str, detail: &str, cx: &mut App) -> oneshot::Receiver<usize> {
+    use std::cell::Cell;
+
+    use block2::RcBlock;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSModalResponse, NSView};
+    use objc2_foundation::NSString;
+    use raw_window_handle::RawWindowHandle;
+
+    let (tx, rx) = oneshot::channel();
+    let Some(mtm) = MainThreadMarker::new() else { return rx };
+    let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) else { return rx };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else { return rx };
+    // SAFETY: GPUI 的 AppKit 句柄指着窗口里它画画的视图，窗口开着时一直有效；这里在主线程上。
+    let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
+    let Some(ns_window) = view.window() else { return rx };
+
+    let alert = NSAlert::new(mtm);
+    alert.setAlertStyle(NSAlertStyle::Warning);
+    alert.setMessageText(&NSString::from_str(title));
+    alert.setInformativeText(&NSString::from_str(detail));
+    let deny = alert.addButtonWithTitle(&NSString::from_str(&rust_i18n::t!("clipboard.deny")));
+    alert.addButtonWithTitle(&NSString::from_str(&rust_i18n::t!("clipboard.allow")));
+    alert.window().setInitialFirstResponder(Some(&deny));
+    // 按钮的回答从 `NSAlertFirstButtonReturn` 起排，别的结束码（`NSModalResponseOK` 等）都不算按了按钮。
+    // 没回答框就没了时 `tx` 跟着回调一起丢掉，收的那头当作不允许。
+    let tx = Cell::new(Some(tx));
+    let done = RcBlock::new(move |answer: NSModalResponse| {
+        if let (Some(tx), Ok(answer)) = (tx.take(), usize::try_from(answer - NSAlertFirstButtonReturn)) {
+            let _ = tx.send(answer);
+        }
+    });
+    // 弹 sheet 会当场回调 GPUI 的窗口事件，GPUI 这时正借着窗口，所以放到主线程的下一轮。窗口最小化、
+    // app 被隐藏时照样挂上去，等用户回来再答；只有 GPUI 已经关掉这个窗口时不弹。
+    let id = window.window_handle().window_id();
+    cx.spawn(async move |cx| {
+        if cx.update(|cx| cx.windows().iter().any(|w| w.window_id() == id)) {
+            alert.beginSheetModalForWindow_completionHandler(&ns_window, Some(&done));
+        }
+    })
+    .detach();
+    rx
+}
+
+#[cfg(not(target_os = "macos"))]
+fn prompt_read(window: &mut Window, title: &str, detail: &str, cx: &mut App) -> oneshot::Receiver<usize> {
+    let answers = [
+        gpui::PromptButton::cancel(rust_i18n::t!("clipboard.deny").into_owned()),
+        gpui::PromptButton::new(rust_i18n::t!("clipboard.allow").into_owned()),
+    ];
+    window.prompt(gpui::PromptLevel::Warning, title, Some(detail), &answers, cx)
+}
 
 /// 用户在询问框里的回答让不让读：只有点了「允许」才让，窗口关了、框没了（`None`）时按不允许。
 fn allowed(answer: Option<usize>) -> bool {

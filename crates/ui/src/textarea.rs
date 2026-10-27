@@ -15,9 +15,9 @@ use std::ops::Range;
 
 use gpui::{
     AccessibleAction, App, Bounds, Context, ElementId, Entity, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, HighlightStyle, KeyDownEvent, MouseButton, MouseDownEvent, Pixels, Point, Render, Role,
-    ScrollWheelEvent, SharedString, TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, actions,
-    combine_highlights, div, point, prelude::*, px,
+    Focusable, HighlightStyle, KeyDownEvent, MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollEvent,
+    SharedString, TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, actions, combine_highlights, div, point,
+    prelude::*, px,
 };
 
 use gpui::accesskit::ActionData;
@@ -540,7 +540,7 @@ impl TextareaState {
     }
 
     /// 内容超出框高时滚轮竖着滚动；没超出时交给外层。
-    fn scroll_wheel(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn scroll_wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         let max = self.max_scroll();
         let Some(metrics) = &self.metrics else {
             return;
@@ -645,7 +645,7 @@ impl Render for TextareaState {
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
-            .on_scroll_wheel(cx.listener(Self::scroll_wheel))
+            .on_scroll(cx.listener(Self::scroll_wheel))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))

@@ -395,7 +395,7 @@ pub trait MenuHost: Sized + 'static {
             return;
         };
         let modifiers = event.keystroke.modifiers;
-        if modifiers.secondary() && modifiers.number_of_modifiers() == 1 {
+        if modifiers.secondary(cx) && modifiers.number_of_modifiers() == 1 {
             let key = event.keystroke.key.as_str();
             let pressed = menu.highlighted.and_then(|ix| {
                 let buttons = &menu.items.get(ix)?.as_ref()?.buttons;

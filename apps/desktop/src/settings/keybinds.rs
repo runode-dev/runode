@@ -177,7 +177,8 @@ pub(crate) fn caps(trigger: &str) -> Vec<Vec<String>> {
     keys.split(' ')
         .map(|stroke| {
             let digits = stroke.strip_suffix("digit").map(|prefix| format!("{prefix}1"));
-            let Ok(keystroke) = Keystroke::parse(digits.as_deref().unwrap_or(stroke)) else {
+            let Ok(keystroke) = Keystroke::parse_with_os(digits.as_deref().unwrap_or(stroke), crate::keybinds::OS)
+            else {
                 return vec![stroke.to_owned()];
             };
             let m = keystroke.modifiers;
@@ -383,12 +384,12 @@ impl SettingsView {
         let Some(target) = self.keybinds.target().cloned() else {
             return;
         };
-        if keystroke.unparse() == "escape" {
+        if keystroke.unparse(cx.platform_info().os) == "escape" {
             self.keybinds.stop_recording();
             cx.notify();
             return;
         }
-        let Some(mut trigger) = keybind::format_trigger(&keystroke.unparse()) else {
+        let Some(mut trigger) = keybind::format_trigger(&keystroke.unparse(cx.platform_info().os)) else {
             return;
         };
         if matches!(target.row, RowKey::Digits(_)) {

@@ -181,8 +181,8 @@ impl WindowView {
         let Some(dialog) = &mut self.add_task else {
             return;
         };
-        if keystroke.unparse() != "escape" {
-            let Some(trigger) = keybind::format_trigger(&keystroke.unparse()) else {
+        if keystroke.unparse(cx.platform_info().os) != "escape" {
+            let Some(trigger) = keybind::format_trigger(&keystroke.unparse(cx.platform_info().os)) else {
                 return;
             };
             dialog.shortcut = Some(trigger);
@@ -204,7 +204,7 @@ impl WindowView {
             return;
         };
         if dialog.binding.is_some() {
-            match event.keystroke.unparse().as_str() {
+            match event.keystroke.unparse(cx.platform_info().os).as_str() {
                 "enter" => self.save_task(window, cx),
                 "escape" => self.close_add_task(window, cx),
                 _ => return,

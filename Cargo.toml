@@ -38,8 +38,8 @@ runode-speech = { path = "crates/speech" }
 # libghostty-rs 的 fork 的 main 分支。它自成一个 workspace，不是本 workspace 的成员（见 exclude）。
 # 它的 C 接口绑定 libghostty-vt-sys 只经 libghostty-vt 间接用到，不列在这里。
 libghostty-vt = { path = "vendor/libghostty-rs/crates/libghostty-vt" }
-gpui = { package = "gpui-pre", version = "=0.3.9" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9" }
+gpui = { package = "gpui-pre", version = "=0.3.10" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.10" }
 anyhow = "1"
 portable-pty = "0.9"
 # socket 选项的跨平台写法：keepalive、IPV6_V6ONLY，以及绑定前设选项。
@@ -122,11 +122,6 @@ cpal = "0.18"
 sha2 = "0.11"
 # 配对的二维码：`runode remote pair` 画在终端里，设置页画在界面上；不要默认特性（画成图片、SVG 用不上）。
 qrcode = { version = "0.14", default-features = false }
-
-# gpui-pre 的 macOS 平台层换成 vendor 下的副本（那一版源码原样复制，再加 runode 的改动）。版本要和上面
-# gpui-pre 的 `=` 版本一致，不一致时 cargo 只警告 patch 没用上，照旧用 crates.io 上的那份。
-[patch.crates-io]
-gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
 
 [profile.dev.package."*"]
 opt-level = 2
