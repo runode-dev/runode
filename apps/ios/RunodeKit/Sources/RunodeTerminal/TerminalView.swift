@@ -473,7 +473,9 @@
         /// 平滑滚动的错开量：网格在容器里往下挪不足一行，视口上面那一行跟在它上面。只挪位置，不重画。
         private func applyScrollOffset() {
             let rowHeight = grid.font.cellHeight
-            let shift = CGFloat(grid.screen.scrollOffset) * rowHeight
+            // 取整到屏幕像素：网格和上面那一行在半个像素上各自取整时，中间会漏出一条背景色的缝。
+            let pixels = traitCollection.displayScale * scrollView.zoomScale
+            let shift = (CGFloat(grid.screen.scrollOffset) * rowHeight * pixels).rounded() / pixels
             let width = gridContainer.bounds.width
             if grid.frame.minY != shift {
                 grid.frame.origin.y = shift
