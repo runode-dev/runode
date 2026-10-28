@@ -202,10 +202,15 @@ jobs:
           # 带上目标三元组，不接着用以前在 Intel runner 上存的缓存。
           key: macos-${{ matrix.target }}
       # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
-      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库；库不在时清掉这个包，让构建脚本重新下载。
+      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库。库不在时按名字删掉它各份构建输出和
+      # fingerprint，构建脚本才一定重跑、重新下载；cargo clean -p 只清当前算出的那几份。
       - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
         shell: bash
-        run: compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null || cargo clean -p sherpa-onnx-sys
+        run: |
+          compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null && exit 0
+          [[ -d target ]] || exit 0
+          find target -maxdepth 4 -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/.fingerprint/sherpa-onnx-sys-*' \) \
+            -prune -print -exec rm -rf {} +
       # 参数和 bundle-macos.sh 里的 cargo build 一样，先在导入证书、写密钥前编完：依赖的构建脚本跑时钥匙串还没解锁、
       # 环境里也没有 NOTARY_KEY 这些，打包时那次 cargo build 基本什么都不用编。
       - name: 编译
@@ -297,10 +302,15 @@ jobs:
         with:
           key: linux-${{ matrix.arch }}
       # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
-      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库；库不在时清掉这个包，让构建脚本重新下载。
+      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库。库不在时按名字删掉它各份构建输出和
+      # fingerprint，构建脚本才一定重跑、重新下载；cargo clean -p 只清当前算出的那几份。
       - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
         shell: bash
-        run: compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null || cargo clean -p sherpa-onnx-sys
+        run: |
+          compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null && exit 0
+          [[ -d target ]] || exit 0
+          find target -maxdepth 4 -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/.fingerprint/sherpa-onnx-sys-*' \) \
+            -prune -print -exec rm -rf {} +
       - name: 构建、打包
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -345,10 +355,15 @@ jobs:
         with:
           key: windows-x86_64
       # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
-      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库；库不在时清掉这个包，让构建脚本重新下载。
+      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库。库不在时按名字删掉它各份构建输出和
+      # fingerprint，构建脚本才一定重跑、重新下载；cargo clean -p 只清当前算出的那几份。
       - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
         shell: bash
-        run: compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null || cargo clean -p sherpa-onnx-sys
+        run: |
+          compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null && exit 0
+          [[ -d target ]] || exit 0
+          find target -maxdepth 4 -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/.fingerprint/sherpa-onnx-sys-*' \) \
+            -prune -print -exec rm -rf {} +
       # 先在写出证书前编完：依赖的构建脚本跑时环境里还没有签名密钥。
       - name: 编译
         run: |
