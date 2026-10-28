@@ -165,15 +165,12 @@ impl HostSession {
     /// 由 `take_clipboard` 取走。
     pub fn feed(&mut self, data: &[u8]) -> bool {
         // 读剪贴板的请求在 VT 处理到它的那个位置记下，和回调记下的写请求按真实的先后排。
-        let mut rest = data;
-        while let Some((end, query)) = self.clipboard_queries.scan(rest) {
-            self.terminal.vt_write(&rest[..end]);
-            if let Ok(mut requests) = self.effects.clipboard.try_borrow_mut() {
+        let effects = &self.effects;
+        self.clipboard_queries.write(&mut self.terminal, data, |query| {
+            if let Ok(mut requests) = effects.clipboard.try_borrow_mut() {
                 requests.push(ClipboardRequest::Read(query));
             }
-            rest = &rest[end..];
-        }
-        self.terminal.vt_write(rest);
+        });
         let now = Instant::now();
         self.agent_tracker.output(data, now);
         let mut changed = false;

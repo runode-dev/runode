@@ -131,7 +131,7 @@ fn only_queries_the_vt_also_sees_count() {
         b"\x1b_G]52;c;?\x07\x1b\\",
         b"\x1b^]52;c;?\x07\x1b\\",
         b"\x1bX]52;c;?\x07\x1b\\",
-        // 8 位的 C1 控制字符不认：单个字节的 OSC 开头、ST（在 OSC 里是内容）。
+        // 不在转义序列里的单个字节 OSC 开头，VT 不当控制字符；0x9C 在 OSC 里是内容，不是 ST。
         b"\x9d52;c;?\x07",
         b"\x1b]52;c;?\x9c",
         b"]52;c;?\x07",
@@ -254,17 +254,15 @@ fn vt_answers(bytes: &[u8]) -> Vec<Vec<u8>> {
     written.take().into_iter().filter(|answer| answer.starts_with(b"\x1b]52;")).collect()
 }
 
-/// `QueryScanner` 认出的读请求，按切成的块一块块扫，回空的剪贴板时写的字节。
+/// `QueryScanner` 认出的读请求，按切成的块一块块喂，回空的剪贴板时写的字节。
 fn scanner_answers(bytes: &[u8], cuts: &[usize]) -> Vec<Vec<u8>> {
+    let mut terminal =
+        crate::vt::new_terminal(GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 }).unwrap();
     let mut scanner = QueryScanner::default();
     let mut answers = Vec::new();
     let mut start = 0;
     for end in cuts.iter().copied().chain([bytes.len()]) {
-        let mut rest = &bytes[start..end];
-        while let Some((at, query)) = scanner.scan(rest) {
-            answers.push(query.answer(""));
-            rest = &rest[at..];
-        }
+        scanner.write(&mut terminal, &bytes[start..end], |query| answers.push(query.answer("")));
         start = end;
     }
     answers
@@ -282,9 +280,9 @@ impl Rng {
     }
 }
 
-/// 拿真的 VT 对拍：同一串字节喂给装了读回调的 VT 和 `QueryScanner`（随机切块），扫描器认出的每个
-/// 读请求 VT 也认出了，目标和终止符一样、先后一样。输入由容易拼出各种转义序列的片段随机连成；只有
-/// 7 位字节时两边应当完全一样，加上 8 位的 C1 控制字符和 UTF-8 的字节时扫描器只许漏认。
+/// 拿真的 VT 对拍：同一串字节喂给装了读回调的 VT 和 `QueryScanner`（随机切块），两边认出的读请求
+/// 目标、终止符和先后都一样。输入由容易拼出各种转义序列的片段随机连成，含 8 位的 C1 控制字符和
+/// UTF-8 的字节。
 #[test]
 fn the_scanner_agrees_with_the_vt() {
     let seven_bit: &[&[u8]] = &[
@@ -337,15 +335,6 @@ fn the_scanner_agrees_with_the_vt() {
         cuts.sort_unstable();
         let vt = vt_answers(&bytes);
         let scanned = scanner_answers(&bytes, &cuts);
-        let shown = String::from_utf8_lossy(&bytes).into_owned();
-        if pieces.len() == seven_bit.len() {
-            assert_eq!(scanned, vt, "round {round}: {shown:?} cut at {cuts:?}");
-        } else {
-            // 扫描器认出的按先后是 VT 认出的里的一部分。
-            let mut vt = vt.iter();
-            for answer in &scanned {
-                assert!(vt.any(|seen| seen == answer), "round {round}: {shown:?} cut at {cuts:?}");
-            }
-        }
+        assert_eq!(scanned, vt, "round {round}: {:?} cut at {cuts:?}", String::from_utf8_lossy(&bytes));
     }
 }
