@@ -26,6 +26,8 @@ jobs:
       - name: 拉 ghostty 子模块
         run: git submodule update --init vendor/ghostty
       - uses: ./.github/actions/setup-zig
+        with:
+          cache-key: ios
       - name: 编 libghostty-vt 的 xcframework
         run: apps/ios/scripts/build-ghostty-vt.sh
       - uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
