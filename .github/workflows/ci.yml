@@ -80,11 +80,11 @@ jobs:
         # 新版 Xcode 把 Metal 工具链拆成了单独下载的组件。
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库，
-      # 它构建脚本的输出却留着、不再重跑，链接时找不到库；库不在时清掉这个包，让构建脚本重新下载。
+      # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
+      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库；库不在时清掉这个包，让构建脚本重新下载。
       - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
         shell: bash
-        run: test -d target/sherpa-onnx-prebuilt || cargo clean -p sherpa-onnx-sys
+        run: compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null || cargo clean -p sherpa-onnx-sys
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
