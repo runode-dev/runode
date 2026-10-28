@@ -57,7 +57,7 @@ env:
 jobs:
   check:
     # 发版提交只改版本号，不在 main 上重跑；发版流程对标签另查一遍，那时 ref 是标签，不受这条影响。
-    if: ${{ !(github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore: 发布 v')) }}
+    if: "${{ !(github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore: 发布 v')) }}"
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -108,7 +108,7 @@ jobs:
   # 其中有依赖环境的测试（真 shell、systemd、计时），还没在 Linux 上核对过。
   check-linux:
     # 发版提交只改版本号，不在 main 上重跑；发版流程对标签另查一遍，那时 ref 是标签，不受这条影响。
-    if: ${{ !(github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore: 发布 v')) }}
+    if: "${{ !(github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore: 发布 v')) }}"
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
