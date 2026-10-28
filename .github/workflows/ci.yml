@@ -1,4 +1,4 @@
-# 每次推到 main 和每个 PR：检查格式和 crate 分层（cargo-deny），再跑 clippy（含类型检查）和测试。
+# 每次推到 main 和每个 PR：检查格式和 crate 分层（cargo-deny）、跑 clippy（含类型检查），测试在另一个任务里并行跑。
 # libghostty-vt 从 vendor/ghostty 用 zig 编译，GPUI 要用 Xcode 的 Metal 编译器编着色器，
 # 所以在 macOS 上跑。发版时 release.yml 也调它（workflow_call），对要发的那个标签再查一遍。
 # iOS 端（RunodeKit）的测试由单独的 ios.yml 跑。
@@ -73,7 +73,7 @@ jobs:
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
-          tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
+          tool: cargo-deny@0.20.2
       - name: 检查格式
         run: make fmt-check
       # 后面的 cargo 命令会悄悄补上过期的 Cargo.lock，CI 照样绿，发版的 `--locked` 才失败；在这里先拦下。
@@ -81,9 +81,27 @@ jobs:
         run: cargo metadata --locked --format-version 1 >/dev/null
       - name: 检查 crate 分层
         run: cargo deny check bans
-      # clippy 带着完整的类型检查，放在测试前面，编不过时不用等测试跑完。
       - name: clippy
         run: make clippy CLIPPY_ARGS="-- -D warnings"
+
+  # clippy 只做类型检查、不生成代码，测试的编译用不上它的产物，分开并行跑；各自的构建缓存也分开存。
+  test:
+    # 发版提交只改版本号，不在 main 上重跑；发版流程对标签另查一遍，那时 ref 是标签，不受这条影响。
+    if: "${{ !(github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore: 发布 v')) }}"
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - name: 确认有 Metal 编译器
+        # 新版 Xcode 把 Metal 工具链拆成了单独下载的组件。
+        run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-nextest@0.9.146
       # 终端的集成测试要起这几个 shell，runner 上默认没有；RUNODE_REQUIRE_SHELLS 让缺了的直接失败，不悄悄跳过。
       # 系统自带的 bash 是 3.2，要新版 bash 的测试会跳过，所以另装一个，它在 PATH 里排在 /bin 前面。
       - name: 装测试用的 shell
