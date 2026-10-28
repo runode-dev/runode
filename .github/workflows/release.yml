@@ -201,6 +201,11 @@ jobs:
         with:
           # 带上目标三元组，不接着用以前在 Intel runner 上存的缓存。
           key: macos-${{ matrix.target }}
+      # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库，
+      # 它构建脚本的输出却留着、不再重跑，链接时找不到库；库不在时清掉这个包，让构建脚本重新下载。
+      - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
+        shell: bash
+        run: test -d target/sherpa-onnx-prebuilt || cargo clean -p sherpa-onnx-sys
       # 参数和 bundle-macos.sh 里的 cargo build 一样，先在导入证书、写密钥前编完：依赖的构建脚本跑时钥匙串还没解锁、
       # 环境里也没有 NOTARY_KEY 这些，打包时那次 cargo build 基本什么都不用编。
       - name: 编译
@@ -291,6 +296,11 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: linux-${{ matrix.arch }}
+      # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库，
+      # 它构建脚本的输出却留着、不再重跑，链接时找不到库；库不在时清掉这个包，让构建脚本重新下载。
+      - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
+        shell: bash
+        run: test -d target/sherpa-onnx-prebuilt || cargo clean -p sherpa-onnx-sys
       - name: 构建、打包
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -334,6 +344,11 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-x86_64
+      # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库，
+      # 它构建脚本的输出却留着、不再重跑，链接时找不到库；库不在时清掉这个包，让构建脚本重新下载。
+      - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
+        shell: bash
+        run: test -d target/sherpa-onnx-prebuilt || cargo clean -p sherpa-onnx-sys
       # 先在写出证书前编完：依赖的构建脚本跑时环境里还没有签名密钥。
       - name: 编译
         run: |
