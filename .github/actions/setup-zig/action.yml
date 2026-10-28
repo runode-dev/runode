@@ -2,21 +2,22 @@ name: 装 zig
 description: 装 vendor/ghostty 的 build.zig.zon 要求的 zig 版本（minimum_zig_version），编 libghostty-vt 用；要先拉好 vendor/ghostty
 inputs:
   cache-key:
-    description: 包缓存的附加键；iOS 的 xcframework 和桌面构建要下的包可能不同，各存各的，免得先存的一方让另一方缺包
+    description: 全局缓存的附加键；iOS 的 xcframework 和桌面构建要下的包、要编的库可能不同，各存各的，免得先存的一方让另一方缺包
     default: desktop
 runs:
   using: composite
   steps:
     - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+      id: zig
       with:
         version: 0.17.0
-    # 编 libghostty 时 zig 要从 ghostty 的源站下载依赖包，源站断连会让整轮构建失败；包按内容哈希存在全局
-    # 缓存的 p 目录下，存进 Actions 缓存后不用再下。
+    # 编 libghostty 时 zig 要从 ghostty 的源站下载依赖包，源站断连会让整轮构建失败；compiler_rt、libc++ 这类
+    # 通用库也编在全局缓存里，每轮重编要一分多钟。整个全局缓存存进 Actions 缓存，两样都省掉。
     - name: 定下 zig 全局缓存的位置
       shell: bash
       run: echo "ZIG_GLOBAL_CACHE_DIR=$RUNNER_TEMP/zig-global-cache" >> "$GITHUB_ENV"
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ${{ runner.temp }}/zig-global-cache/p
-        key: zig-packages-${{ inputs.cache-key }}-${{ runner.os }}-${{ hashFiles('vendor/ghostty/build.zig.zon', 'vendor/ghostty/pkg/*/build.zig.zon') }}
-        restore-keys: zig-packages-${{ inputs.cache-key }}-${{ runner.os }}-
+        path: ${{ runner.temp }}/zig-global-cache
+        key: zig-global-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-${{ hashFiles('vendor/ghostty/build.zig.zon', 'vendor/ghostty/pkg/*/build.zig.zon') }}
+        restore-keys: zig-global-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.zig.outputs.version }}-
