@@ -159,8 +159,8 @@ impl Session {
     /// 的同样规则自己编码：剪贴板读取回调没装，程序开了粘贴事件（mode 5522）时它也照样写文本。
     pub fn paste(&mut self, text: &str, allow_unsafe: bool) -> Paste {
         let bracketed = self.terminal.mode(Mode::BRACKETED_PASTE).unwrap_or(false);
-        // 括号包着时换行无妨，只有结束序列能逃出括号；没包时换行（回车也一样是回车键）就会执行命令。
-        let safe = !text.contains("\x1b[201~") && (bracketed || !text.contains(['\n', '\r']));
+        // 括号包着时换行无妨，只有结束序列能逃出括号；没包时按 libghostty 的规则判断。
+        let safe = if bracketed { !text.contains("\x1b[201~") } else { paste::is_safe(text) };
         if !safe && !allow_unsafe {
             return Paste::NeedsConfirmation;
         }
