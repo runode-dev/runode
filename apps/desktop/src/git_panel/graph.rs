@@ -536,8 +536,10 @@ impl GitPanel {
             .child(status_letter(file.status))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |_, event: &MouseDownEvent, _, cx| {
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
+                    // 最后点的不再是改动的文件，`GitInsertFilePath` 不打之前点过的那个。
+                    this.clicked = None;
                     cx.emit(target.open(event.click_count));
                 }),
             )

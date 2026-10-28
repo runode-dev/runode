@@ -67,6 +67,15 @@ fn status_color(status: FileStatus) -> Rgb {
 }
 
 impl GitPanel {
+    /// 记下点过的改动文件。焦点不在面板里时交给面板，接着按的 `GitInsertFilePath` 才派发得到；
+    /// 已在面板里（比如提交说明框）时不动，接着打的字不丢。
+    fn click_file(&mut self, full: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.clicked = Some(full);
+        if !self.focus.contains_focused(window, cx) {
+            window.focus(&self.focus, cx);
+        }
+    }
+
     /// 只有一个仓库时列表里看得见的那些行。
     pub(crate) fn render_git_rows(&self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let panel = self.state();
@@ -283,6 +292,7 @@ impl GitPanel {
         let target = Diff { root: root.clone(), rel: path.clone(), old_rel: file.old_path.clone(), side };
         let open = target.clone();
         let full = root.join(&path);
+        let pressed = full.clone();
         let id = format!("git-file-{shown_in:?}-{}-{}", root.display(), path.display());
         self.git_row(SharedString::from(id), INDENT * (depth + 1.), cx)
             .role(Role::TreeItem)
@@ -310,13 +320,18 @@ impl GitPanel {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
-                    // 面板拿到焦点，接着按的 `GitInsertFilePath` 快捷键才派发得到这里。
-                    this.clicked = Some(full.clone());
-                    window.focus(&this.focus, cx);
+                    this.click_file(full.clone(), window, cx);
                     cx.emit(target.open(event.click_count));
                 }),
             )
-            .on_a11y_action(AccessibleAction::Click, a11y_open_diff(open, cx))
+            .on_a11y_action(AccessibleAction::Click, {
+                let mut open = a11y_open_diff(open, cx);
+                let view = cx.entity().downgrade();
+                move |data, window, cx| {
+                    view.update(cx, |this, cx| this.click_file(pressed.clone(), window, cx)).ok();
+                    open(data, window, cx);
+                }
+            })
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
