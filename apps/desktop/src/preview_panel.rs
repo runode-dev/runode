@@ -59,7 +59,7 @@ use crate::ui::{
 use gpui::{
     App, ClipboardItem, Context, Div, EventEmitter, FocusHandle, Focusable, Image, MouseButton, MouseMoveEvent, Render,
     RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
-    UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
+    UniformListScrollHandle, Window, actions, div, linear_color_stop, linear_gradient, prelude::*, px,
 };
 use runode_git::{self as git, FileStatus, HunkAction, Section};
 use runode_preview::{Content, ImageFormat, Span};
@@ -68,6 +68,14 @@ pub use diff::DiffTarget;
 
 use marks::{Mark, line_marks};
 use tabs::{PreviewTabs, tab_underline};
+
+actions!(
+    runode,
+    [
+        /// 把当前预览标签的文件路径打进终端，选着行时带上行号。
+        InsertPreviewPath
+    ]
+);
 
 /// 行高比字号多出的部分。
 const ROW_EXTRA_HEIGHT: f32 = 8.;
@@ -126,8 +134,9 @@ pub enum PreviewEvent {
     Reveal(PathBuf),
     /// 自动换行或 Markdown 显示源码的开关变了，app 存档；下次经 `set_options` 交回。
     OptionsChanged,
-    /// 把「路径:行号」打进当前终端：双击了工作区 diff 里没删掉的一行。
-    InsertPath { path: PathBuf, line: u32 },
+    /// 把路径打进当前终端，`lines` 是首尾行号（从 1 数）：双击了工作区 diff 里没删掉的一行，
+    /// 或者按了 `InsertPreviewPath`。
+    InsertPath { path: PathBuf, lines: Option<(u32, u32)> },
     /// 把这段文字贴进当前终端、焦点交过去，不回车：diff 块头上按了「交给 agent」，文字是这块改动和它的位置，
     /// 用户接着写要 agent 做什么。
     Quote(String),
@@ -1053,6 +1062,19 @@ impl PreviewPanel {
         }
     }
 
+    /// 把当前标签的文件路径打进终端，源码里选着行时带上这几行的行号。
+    fn insert_preview_path(&mut self, _: &InsertPreviewPath, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(preview) = self.preview() else {
+            return;
+        };
+        let by_line = preview.diff.is_none() && preview.editor.is_none() && !self.markdown_shown(preview);
+        let lines = by_line
+            .then(|| preview.selected_lines())
+            .flatten()
+            .and_then(|range| Some((u32::try_from(range.start + 1).ok()?, u32::try_from(range.end).ok()?)));
+        cx.emit(PreviewEvent::InsertPath { path: preview.path.clone(), lines });
+    }
+
     fn select_all_preview(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         if self.preview().is_some_and(|preview| self.markdown_shown(preview)) {
             self.select_all_markdown(cx);
@@ -1227,6 +1249,7 @@ impl PreviewPanel {
                 .track_focus(&self.focus)
                 .on_action(cx.listener(Self::copy_preview))
                 .on_action(cx.listener(Self::select_all_preview))
+                .on_action(cx.listener(Self::insert_preview_path))
                 // 焦点在预览栏里时，关标签页和关分屏的快捷键关的都是预览标签。
                 .on_action(cx.listener(Self::close_preview_tab))
                 .on_action(cx.listener(Self::close_preview_pane))

@@ -163,10 +163,10 @@ impl WindowView {
             PreviewEvent::ZoomChanged => cx.notify(),
             PreviewEvent::Reveal(path) => self.with_file_tree(cx, |tree, cx| tree.reveal_file(path, cx)),
             PreviewEvent::OptionsChanged => self.save(cx),
-            PreviewEvent::InsertPath { path, line } => {
+            PreviewEvent::InsertPath { path, lines } => {
                 self.restore_preview_zoom(cx);
                 cx.notify();
-                self.insert_paths(vec![path.clone()], Some(*line), window, cx);
+                self.insert_paths(vec![path.clone()], *lines, window, cx);
             }
             PreviewEvent::Quote(text) => {
                 if let Some(view) = self.focused_view().cloned() {

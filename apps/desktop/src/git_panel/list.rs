@@ -282,6 +282,7 @@ impl GitPanel {
         let side = if section == Section::Staged { DiffSide::Index } else { DiffSide::Worktree };
         let target = Diff { root: root.clone(), rel: path.clone(), old_rel: file.old_path.clone(), side };
         let open = target.clone();
+        let full = root.join(&path);
         let id = format!("git-file-{shown_in:?}-{}-{}", root.display(), path.display());
         self.git_row(SharedString::from(id), INDENT * (depth + 1.), cx)
             .role(Role::TreeItem)
@@ -307,8 +308,11 @@ impl GitPanel {
             .child(status_letter(file.status))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |_, event: &MouseDownEvent, _, cx| {
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
+                    // 面板拿到焦点，接着按的 `GitInsertFilePath` 快捷键才派发得到这里。
+                    this.clicked = Some(full.clone());
+                    window.focus(&this.focus, cx);
                     cx.emit(target.open(event.click_count));
                 }),
             )

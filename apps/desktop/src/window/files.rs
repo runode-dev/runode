@@ -138,12 +138,12 @@ impl WindowView {
         self.insert_paths(paths.to_vec(), None, window, cx);
     }
 
-    /// 把 `paths` 一个个打进当前终端，在它的目录下时写相对路径，后面带上行号 `line` 和一个空格，
+    /// 把 `paths` 一个个打进当前终端，在它的目录下时写相对路径，后面带上首尾行号 `lines` 和一个空格，
     /// 再把焦点交回终端。比目录要解符号链接，在单独的线程上算好再打进去（`fs_probe::off_thread`）。
     pub(super) fn insert_paths(
         &mut self,
         paths: Vec<PathBuf>,
-        line: Option<u32>,
+        lines: Option<(u32, u32)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -153,9 +153,9 @@ impl WindowView {
         let cwd = view.read(cx).cwd();
         window.focus(&view.focus_handle(cx), cx);
         // 起不了线程时不比目录，照原样打进去。
-        let fallback = paths.iter().map(|path| path_text(path, line, None)).collect();
+        let fallback = paths.iter().map(|path| path_text(path, lines, None)).collect();
         let job = crate::fs_probe::off_thread(
-            move || paths.iter().map(|path| path_text(path, line, cwd.as_deref())).collect(),
+            move || paths.iter().map(|path| path_text(path, lines, cwd.as_deref())).collect(),
             fallback,
         );
         // 打进算的时候拿着焦点的那个终端；它关掉了就不打。上一次的先算完时等它打完，连点两次不会倒过来。
@@ -179,8 +179,8 @@ impl WindowView {
 
 /// `path` 打进终端时的写法，见 `WindowView::insert_paths`。图片写绝对路径：Claude Code 只把绝对路径认成
 /// 图片附件。
-fn path_text(path: &Path, line: Option<u32>, cwd: Option<&Path>) -> String {
-    if line.is_none() && is_image(path) {
+fn path_text(path: &Path, lines: Option<(u32, u32)>, cwd: Option<&Path>) -> String {
+    if lines.is_none() && is_image(path) {
         let absolute = match cwd {
             Some(cwd) if path.is_relative() => cwd.join(path),
             _ => path.to_path_buf(),
@@ -196,8 +196,10 @@ fn path_text(path: &Path, line: Option<u32>, cwd: Option<&Path>) -> String {
     };
     let rel = cwd.and_then(|cwd| relative(path, cwd)).filter(|rel| !rel.as_os_str().is_empty());
     let mut text = rel.as_deref().unwrap_or(path).display().to_string();
-    if let Some(line) = line {
-        text = format!("{text}:{line}");
+    match lines {
+        Some((first, last)) if first == last => text = format!("{text}:{first}"),
+        Some((first, last)) => text = format!("{text}:{first}-{last}"),
+        None => {}
     }
     shell_quote(&text)
 }
@@ -214,6 +216,14 @@ mod tests {
         assert_eq!(shell_quote("文件.md"), "文件.md");
         assert_eq!(shell_quote("=foo"), "'=foo'");
         assert_eq!(shell_quote("a=b"), "a=b");
+    }
+
+    #[test]
+    fn writes_line_ranges_after_relative_paths() {
+        let cwd = Path::new("/repo");
+        assert_eq!(path_text(Path::new("/repo/src/a.rs"), None, Some(cwd)), "src/a.rs");
+        assert_eq!(path_text(Path::new("/repo/src/a.rs"), Some((3, 3)), Some(cwd)), "src/a.rs:3");
+        assert_eq!(path_text(Path::new("/repo/src/a.rs"), Some((3, 9)), Some(cwd)), "src/a.rs:3-9");
     }
 
     #[test]

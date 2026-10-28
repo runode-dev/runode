@@ -675,7 +675,7 @@ impl PreviewPanel {
                             MouseButton::Left,
                             cx.listener(move |_, event: &MouseDownEvent, _, cx| {
                                 if event.click_count >= 2 {
-                                    cx.emit(PreviewEvent::InsertPath { path: full.clone(), line });
+                                    cx.emit(PreviewEvent::InsertPath { path: full.clone(), lines: Some((line, line)) });
                                 }
                             }),
                         )

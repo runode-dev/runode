@@ -92,7 +92,9 @@ actions!(
         /// 显示或藏起子模块和嵌套仓库。
         GitToggleSubmodules,
         /// 显示或藏起同一个仓库的其他工作树。
-        GitToggleWorktrees
+        GitToggleWorktrees,
+        /// 把最后点过的改动文件的路径打进终端。
+        GitInsertFilePath
     ]
 );
 
@@ -225,6 +227,8 @@ pub struct GitPanel {
     focus: FocusHandle,
     /// 开着的右键菜单和按钮下面的菜单。
     menu: Option<Menu>,
+    /// 最后点过的改动文件的绝对路径。
+    clicked: Option<PathBuf>,
     /// 显示设置和图表，整个窗口一份，见 `Options`。
     tree: bool,
     show_subs: bool,
@@ -261,6 +265,7 @@ impl GitPanel {
             input: Input::default(),
             focus: cx.focus_handle(),
             menu: None,
+            clicked: None,
             tree: options.tree,
             show_subs: options.show_subs,
             show_worktrees: options.show_worktrees,
@@ -276,6 +281,10 @@ impl GitPanel {
 
     /// 之后显示的、操作的都是 workspace `ws` 的面板。只记下来，不重画：app 在画的时候、对页做什么之前调。
     pub fn set_workspace(&mut self, ws: WorkspaceId) {
+        // 点过的文件属于原来那个 workspace，换了就不再打进终端。
+        if self.ws != ws {
+            self.clicked = None;
+        }
         self.ws = ws;
     }
 
@@ -974,6 +983,21 @@ impl GitPanel {
         cx.notify();
     }
 
+    fn git_insert_file_path(&mut self, _: &GitInsertFilePath, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.clicked.clone() else {
+            return;
+        };
+        // 提交或丢弃后列表里没了这个文件，就不再打进终端。
+        let listed = self.state().git.as_deref().is_some_and(|git| {
+            git.iter().any(|repo| path.strip_prefix(&repo.root).is_ok_and(|rel| repo.statuses.contains_key(rel)))
+        });
+        if listed {
+            cx.emit(GitPanelEvent::InsertPath(path));
+        } else {
+            self.clicked = None;
+        }
+    }
+
     /// 菜单里的「生成提交说明」：打开对话框，作用到 `git_target` 选的仓库。
     fn git_generate_commit_message(
         &mut self,
@@ -1157,7 +1181,9 @@ impl Render for GitPanel {
             .flex()
             .flex_col()
             .text_size(FontSize::Body)
+            .key_context("GitPanel")
             .track_focus(&self.focus)
+            .on_action(cx.listener(Self::git_insert_file_path))
             .on_action(cx.listener(Self::git_file_action))
             .on_action(cx.listener(Self::git_dir_action))
             .on_action(cx.listener(Self::git_worktree_action))
