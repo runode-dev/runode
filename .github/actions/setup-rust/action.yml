@@ -30,13 +30,18 @@ runs:
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         key: ${{ inputs.cache-key }}
-    # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
-    # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库。库不在时按名字删掉它各份构建输出和
-    # fingerprint，构建脚本才一定重跑、重新下载；cargo clean -p 只清当前算出的那几份。
+    # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库，它构建脚本的
+    # 输出却留着、不再重跑，链接时找不到库；构建脚本重跑时只要 lib 目录在就当库下好了，不再下载。库不在时
+    # 整个删掉 target/sherpa-onnx-prebuilt，再按名字删掉它各份构建输出和 fingerprint（cargo clean -p 只清当前
+    # 算出的那几份），构建脚本才一定重新下载。
     - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
       shell: bash
       run: |
         compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null && exit 0
         [[ -d target ]] || exit 0
+        if [[ -d target/sherpa-onnx-prebuilt ]]; then
+          find target/sherpa-onnx-prebuilt -maxdepth 3 | head -20 || true
+          rm -rf target/sherpa-onnx-prebuilt
+        fi
         find target -maxdepth 4 -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/.fingerprint/sherpa-onnx-sys-*' \) \
           -prune -print -exec rm -rf {} +
