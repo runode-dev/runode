@@ -29,6 +29,19 @@ runs:
         if [[ -n "$TARGETS" ]]; then rustup target add $TARGETS; fi
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       if: inputs.cache == 'true'
+    # 检出后源码的修改时间都是新的，libghostty-vt-sys 的构建脚本每轮都会重跑，rust-cache 又不存 vendor 下
+    # 路径依赖的构建输出；zig 的缓存在它的 OUT_DIR 里、按内容判断，单独存下来，重跑时就不用从头编
+    # libghostty。这一步排在 rust-cache 后面，存缓存时先于 rust-cache 的清理执行。
+    - name: 定下 libghostty 构建缓存的键
+      id: libghostty
+      if: inputs.cache == 'true'
+      shell: bash
+      run: echo "commits=$(git -C vendor/ghostty rev-parse HEAD)-$(git -C vendor/libghostty-rs rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: inputs.cache == 'true'
+      with:
+        path: target/*/build/libghostty-vt-sys-*
+        key: libghostty-${{ github.job }}-${{ runner.os }}-${{ steps.libghostty.outputs.commits }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
     # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库，它构建脚本的
     # 输出却留着、不再重跑，链接时找不到库；构建脚本重跑时只要 lib 目录在就当库下好了，不再下载。库不在时
     # 整个删掉 target/sherpa-onnx-prebuilt，再按名字删掉它各份构建输出和 fingerprint（cargo clean -p 只清当前
