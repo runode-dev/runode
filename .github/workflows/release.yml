@@ -189,8 +189,8 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
-          # 带上目标三元组，不接着用以前在 Intel runner 上存的缓存。
-          cache-key: macos-${{ matrix.target }}
+          # tag 上存的缓存只有同一个 tag 读得到，下次发版用不上，存了只会挤掉 main 上的缓存。
+          cache: "false"
       - name: 确认有 Metal 编译器
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
       # 参数和 bundle-macos.sh 里的 cargo build 一样，先在导入证书、写密钥前编完：依赖的构建脚本跑时钥匙串还没解锁、
@@ -270,7 +270,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: linux-${{ matrix.arch }}
+          cache: "false"
       - name: 装 GPUI 编译要的库
         run: |
           sudo apt-get update
@@ -311,7 +311,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: windows-x86_64
+          cache: "false"
       # 先在写出证书前编完：依赖的构建脚本跑时环境里还没有签名密钥。
       - name: 编译
         run: |
