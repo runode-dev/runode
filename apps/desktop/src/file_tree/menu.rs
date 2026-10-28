@@ -4,14 +4,14 @@
 use std::path::{Path, PathBuf};
 
 use crate::ui::{
-    actions::{Copy, Cut, Paste},
+    actions::{Copy, Cut, InsertFilePath, Paste},
     menu::{MenuHost, MenuItem},
 };
 use gpui::{Action, ClipboardItem, Context, Pixels, Point, Window};
 
 use crate::file_tree::{
-    AddToGitignore, CopyPath, CopyRelativePath, DeleteFile, FileTree, FileTreeEvent, InsertFilePath, NewFile,
-    NewFolder, OpenInTerminal, OpenSelectedFile, RenameFile, RevealInFinder,
+    AddToGitignore, CopyPath, CopyRelativePath, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder,
+    OpenInTerminal, OpenSelectedFile, RenameFile, RevealInFinder,
 };
 
 impl FileTree {

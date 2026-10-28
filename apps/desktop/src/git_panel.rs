@@ -33,6 +33,7 @@ use std::{
 
 use crate::ui::{
     a11y::{Disable, PressDown},
+    actions::{FocusTerminal, InsertFilePath},
     badge::{Badge, BadgeVariant},
     base_name,
     button::{Button, ButtonSize},
@@ -92,9 +93,7 @@ actions!(
         /// 显示或藏起子模块和嵌套仓库。
         GitToggleSubmodules,
         /// 显示或藏起同一个仓库的其他工作树。
-        GitToggleWorktrees,
-        /// 把最后点过的改动文件的路径打进终端。
-        GitInsertFilePath
+        GitToggleWorktrees
     ]
 );
 
@@ -103,7 +102,6 @@ actions!(
 pub enum FileOp {
     Open,
     Reveal,
-    InsertPath,
     Stage,
     Unstage,
     Discard,
@@ -190,11 +188,18 @@ impl Default for Options {
 pub enum GitPanelEvent {
     /// 在预览栏里打开根目录是 `root` 的仓库里 `rel`（改名的原来是 `old_rel`）在 `side` 那边的 diff；`clicks`
     /// 是点了几下，按 app 的单击打不打开定开成临时标签还是固定标签。
-    OpenDiff { root: PathBuf, rel: PathBuf, old_rel: Option<PathBuf>, side: DiffSide, clicks: usize },
+    OpenDiff {
+        root: PathBuf,
+        rel: PathBuf,
+        old_rel: Option<PathBuf>,
+        side: DiffSide,
+        clicks: usize,
+    },
     /// 在预览栏里把这个文件开成固定标签。
     OpenFile(PathBuf),
     /// 把这个路径打进当前终端，焦点交回终端。
     InsertPath(PathBuf),
+    FocusTerminal,
     /// 在当前 workspace 里开一个新标签页，终端的目录是这个目录（其他工作树）。
     OpenTerminal(PathBuf),
     /// 重读 workspace 的 git 状态：一个操作跑完了，或者按了刷新、改了显不显示其他工作树。app 只在它仍是
@@ -204,10 +209,17 @@ pub enum GitPanelEvent {
     HunkApplied,
     /// 打开根目录是 `root` 的仓库的分支列表（已经开着时关掉）：`create_only` 时只新建分支，`start` 是新建分支
     /// 的起点提交，为空时从当前提交。选好以后 app 调 `checkout` 或 `create_branch`。
-    OpenBranchPicker { root: PathBuf, create_only: bool, start: Option<String> },
+    OpenBranchPicker {
+        root: PathBuf,
+        create_only: bool,
+        start: Option<String>,
+    },
     /// 给根目录是 `root` 的仓库写提交说明：`ask` 时打开对话框选 agent 和提示词；否则按存着的预设直接写，还没
     /// 存过时也打开对话框。app 写的时候经 `write_message` 跑。
-    WriteCommitMessage { root: PathBuf, ask: bool },
+    WriteCommitMessage {
+        root: PathBuf,
+        ask: bool,
+    },
     /// 按下了图表上沿的分隔线：app 接着跟鼠标调 `resize_graph`，松手时存档。
     StartGraphResize,
     /// 显示设置、图表收没收起或者高度变了，app 存档；下次经 `set_options` 交回。
@@ -227,7 +239,7 @@ pub struct GitPanel {
     focus: FocusHandle,
     /// 开着的右键菜单和按钮下面的菜单。
     menu: Option<Menu>,
-    /// 最后点过的改动文件的绝对路径。
+    /// 最后点过或右键点过的改动文件的绝对路径。
     clicked: Option<PathBuf>,
     /// 显示设置和图表，整个窗口一份，见 `Options`。
     tree: bool,
@@ -983,7 +995,7 @@ impl GitPanel {
         cx.notify();
     }
 
-    fn git_insert_file_path(&mut self, _: &GitInsertFilePath, _: &mut Window, cx: &mut Context<Self>) {
+    fn git_insert_file_path(&mut self, _: &InsertFilePath, _: &mut Window, cx: &mut Context<Self>) {
         let Some(path) = self.clicked.clone() else {
             return;
         };
@@ -996,6 +1008,15 @@ impl GitPanel {
         } else {
             self.clicked = None;
         }
+    }
+
+    /// Esc：开着菜单时先关菜单，否则焦点交回终端。
+    fn focus_terminal(&mut self, _: &FocusTerminal, _: &mut Window, cx: &mut Context<Self>) {
+        if self.menu.take().is_some() {
+            cx.notify();
+            return;
+        }
+        cx.emit(GitPanelEvent::FocusTerminal);
     }
 
     /// 菜单里的「生成提交说明」：打开对话框，作用到 `git_target` 选的仓库。
@@ -1184,6 +1205,7 @@ impl Render for GitPanel {
             .key_context("GitPanel")
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::git_insert_file_path))
+            .on_action(cx.listener(Self::focus_terminal))
             .on_action(cx.listener(Self::git_file_action))
             .on_action(cx.listener(Self::git_dir_action))
             .on_action(cx.listener(Self::git_worktree_action))

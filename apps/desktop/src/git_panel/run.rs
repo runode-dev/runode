@@ -106,7 +106,7 @@ impl GitPanel {
         git.files(section).iter().find(|file| &file.path == path).cloned()
     }
 
-    /// 文件的右键菜单和行尾按钮：打开、在访达中显示、打进终端、暂存、取消暂存、丢掉改动。
+    /// 文件的右键菜单和行尾按钮：打开、在访达中显示、暂存、取消暂存、丢掉改动。
     pub(crate) fn git_file_action(&mut self, action: &GitFileAction, window: &mut Window, cx: &mut Context<Self>) {
         let root = action.repo.clone();
         let full = root.join(&action.path);
@@ -114,7 +114,6 @@ impl GitPanel {
         match action.op {
             FileOp::Open => cx.emit(GitPanelEvent::OpenFile(full)),
             FileOp::Reveal => cx.reveal_path(&full),
-            FileOp::InsertPath => cx.emit(GitPanelEvent::InsertPath(full)),
             FileOp::Stage => {
                 self.run_git(&root, Busy::Stage, window, cx, move |repo| repo.stage(&paths), |_, (), _, _| {});
             }

@@ -10,31 +10,29 @@ use runode_config::{
 
 use crate::{
     config::AppConfig,
-    git_panel::GitInsertFilePath,
     menus::{
         About, CloseAllWindows, CloseWindow, Hide, HideOthers, Minimize, NewWindow, OpenConfiguration, OpenSettings,
         Quit, ReloadConfiguration, ShowAll, ToggleFullScreen, Zoom,
     },
-    preview_panel::InsertPreviewPath,
     terminal_view::{
         ClearScreen, DecreaseFontSize, Dictate, IncreaseFontSize, JumpToPrompt, PasteSelection, ReloadShell,
         ResetFontSize, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection, ScrollToTop, SearchSelection,
         SendText, StartSearch, WriteScreenFile,
     },
     ui::{
-        actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
+        actions::{Copy, Cut, FocusTerminal, InsertFilePath, Paste, Redo, SelectAll, Undo},
         input::{EndSearch, SearchNext, SearchPrevious},
         textarea::SubmitText,
     },
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath,
-        DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal,
-        GotoAgent, InsertFilePath, MovePaneToNewTab, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace,
-        NextAgent, NextTab, NextWorkspace, OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile,
-        RenameWorkspace, ResizePane, RevealInFinder, RunTaskKey, SelectFirstFile, SelectLastFile, SelectLastTab,
-        SelectLastWorkspace, SelectNextFile, SelectPreviousFile, SelectTab, SelectWorkspace, SwapPane, TaskKeys,
-        ToggleFiles, ToggleGit, ToggleGitHubActions, ToggleKanban, TogglePaneFold, TogglePaneZoom, ToggleSchedules,
-        ToggleSidebar, ToggleStatusBar, ToggleTasks,
+        DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, GotoAgent,
+        MovePaneToNewTab, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab,
+        NextWorkspace, OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane,
+        RevealInFinder, RunTaskKey, SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace,
+        SelectNextFile, SelectPreviousFile, SelectTab, SelectWorkspace, SwapPane, TaskKeys, ToggleFiles, ToggleGit,
+        ToggleGitHubActions, ToggleKanban, TogglePaneFold, TogglePaneZoom, ToggleSchedules, ToggleSidebar,
+        ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -53,6 +51,8 @@ const COPY: Contexts = &[Some("Terminal"), Some("TextField"), Some("TextArea"), 
 const PASTE: Contexts = &[Some("Terminal"), Some("TextField"), Some("TextArea"), Some("FileTree")];
 /// 文件树有焦点、又不在新建或改名时；改名时方向键这些归输入框。
 const FILE_TREE: &str = "FileTree && !editing";
+const INSERT_PATH: Contexts = &[Some(FILE_TREE), Some("Preview"), Some("GitPanel")];
+const FOCUS_TERMINAL: Contexts = &[Some(FILE_TREE), Some("GitPanel")];
 
 /// 配置里的动作对应的 GPUI 动作，以及它生效的上下文。
 fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
@@ -188,12 +188,10 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         KeyBinding::new(secondary!("alt-r"), RevealInFinder, tree),
         KeyBinding::new(secondary!("alt-c"), CopyPath, tree),
         KeyBinding::new(secondary!("alt-shift-c"), CopyRelativePath, tree),
-        // 和 VS Code 的 Claude Code 扩展把选区交给 agent 的键一样。
-        KeyBinding::new(secondary!("alt-k"), InsertFilePath, tree),
-        KeyBinding::new(secondary!("alt-k"), InsertPreviewPath, Some("Preview")),
-        KeyBinding::new(secondary!("alt-k"), GitInsertFilePath, Some("GitPanel")),
-        KeyBinding::new("escape", FocusTerminal, tree),
     ];
+    // 和 VS Code 的 Claude Code 扩展把选区交给 agent 的键一样。
+    bindings.extend(INSERT_PATH.iter().map(|c| KeyBinding::new(secondary!("alt-k"), InsertFilePath, *c)));
+    bindings.extend(FOCUS_TERMINAL.iter().map(|c| KeyBinding::new("escape", FocusTerminal, *c)));
     // 别的平台上终端里单按 Ctrl 的键归 shell，复制、粘贴是 Ctrl+Shift 加字母；终端外照那里的习惯单按 Ctrl。
     if cfg!(not(target_os = "macos")) {
         let outside_terminal = |contexts: Contexts| contexts.iter().flatten().filter(|c| **c != "Terminal");

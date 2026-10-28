@@ -7,6 +7,7 @@
 use std::{
     cell::RefCell,
     fs, io,
+    ops::Range,
     path::Path,
     sync::{
         Arc,
@@ -16,8 +17,8 @@ use std::{
 };
 
 use gpui::{
-    Context, Entity, Focusable as _, KeyDownEvent, PromptLevel, SharedString, Subscription, Task, Window, prelude::*,
-    px,
+    App, Context, Entity, Focusable as _, KeyDownEvent, PromptLevel, SharedString, Subscription, Task, Window,
+    prelude::*, px,
 };
 use runode_preview::MAX_TEXT_BYTES;
 
@@ -101,6 +102,11 @@ impl Preview {
     /// 能进编辑模式：普通标签里读全了的文本。
     pub(super) fn editable(&self) -> bool {
         self.diff.is_none() && matches!(self.content, Some(Loaded::Text { truncated: false, .. }))
+    }
+
+    /// 编辑器里选区跨过的行，从 0 数；不在编辑或没选东西时是 `None`。
+    pub(super) fn editor_selected_lines(&self, cx: &App) -> Option<Range<usize>> {
+        self.editor.as_ref()?.area.read(cx).selected_lines()
     }
 }
 

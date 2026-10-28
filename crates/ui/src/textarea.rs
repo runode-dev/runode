@@ -174,6 +174,11 @@ impl TextareaState {
         self.version
     }
 
+    /// 选区跨过的硬换行行号（从 0 数，不含 `end`），没选东西时是 `None`。
+    pub fn selected_lines(&self) -> Option<Range<usize>> {
+        lines_spanned(&self.content, self.selected.clone())
+    }
+
     /// 换上按版本 `version` 的文字算的样式段（字节范围，从前到后不重叠）。文字已经又改过、或者正在组字时
     /// 对不上，丢掉。
     pub fn set_highlights(
@@ -780,6 +785,16 @@ fn hard_line_at(text: &str, offset: usize) -> Range<usize> {
     start..end
 }
 
+/// `range` 跨过的硬换行行号；结束在行首时不算那一行，三击选中的一行连同换行符仍是一行。
+fn lines_spanned(text: &str, range: Range<usize>) -> Option<Range<usize>> {
+    if range.is_empty() {
+        return None;
+    }
+    let line = |offset: usize| text[..offset].matches('\n').count();
+    let last = if text[..range.end].ends_with('\n') { range.end - 1 } else { range.end };
+    Some(line(range.start)..line(last) + 1)
+}
+
 /// 三击选中的范围：所在那段硬换行连同行尾的换行符。
 fn line_range_at(text: &str, offset: usize) -> Range<usize> {
     let line = hard_line_at(text, offset);
@@ -831,6 +846,15 @@ fn normalize_newlines(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_lines_skip_the_line_after_a_trailing_newline() {
+        let text = "a\nbb\nc";
+        assert_eq!(lines_spanned(text, 2..2), None);
+        assert_eq!(lines_spanned(text, 2..3), Some(1..2));
+        assert_eq!(lines_spanned(text, line_range_at(text, 2)), Some(1..2));
+        assert_eq!(lines_spanned(text, 0..text.len()), Some(0..3));
+    }
 
     #[test]
     fn word_moves_cross_newlines_and_double_click_stays_in_line() {

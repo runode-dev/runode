@@ -13,7 +13,7 @@ mod ai_message;
 mod branch_picker;
 
 use crate::git_panel::{GitPanel, GitPanelEvent, Input};
-use gpui::{Context, Div, Entity, Stateful, Window, div, prelude::*};
+use gpui::{Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*};
 
 pub(super) use ai_message::CommitMessageDialog;
 pub(super) use branch_picker::BranchPicker;
@@ -74,6 +74,7 @@ impl WindowView {
             }
             GitPanelEvent::OpenFile(path) => self.open_preview(path, true, cx),
             GitPanelEvent::InsertPath(path) => self.insert_paths(vec![path.clone()], None, window, cx),
+            GitPanelEvent::FocusTerminal => window.focus(&self.focus_handle(cx), cx),
             GitPanelEvent::OpenTerminal(dir) => {
                 if let Some(view) = self.spawn_terminal(Some(dir), window, cx) {
                     self.insert_tab(self.workspace().active + 1, view, window, cx);

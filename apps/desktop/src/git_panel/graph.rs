@@ -538,7 +538,7 @@ impl GitPanel {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
-                    // 最后点的不再是改动的文件，`GitInsertFilePath` 不打之前点过的那个。
+                    // 最后点的不再是改动的文件，`InsertFilePath` 不打之前点过的那个。
                     this.clicked = None;
                     cx.emit(target.open(event.click_count));
                 }),

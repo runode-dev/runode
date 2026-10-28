@@ -9,6 +9,7 @@ use std::{
 
 use crate::ui::{
     a11y::PressDown,
+    actions::InsertFilePath,
     badge::{Badge, BadgeVariant},
     base_name,
     file_icons::{file_icon, folder_icon},
@@ -67,7 +68,7 @@ fn status_color(status: FileStatus) -> Rgb {
 }
 
 impl GitPanel {
-    /// 记下点过的改动文件。焦点不在面板里时交给面板，接着按的 `GitInsertFilePath` 才派发得到；
+    /// 记下点过的改动文件。焦点不在面板里时交给面板，接着按的 `InsertFilePath` 才派发得到；
     /// 已在面板里（比如提交说明框）时不动，接着打的字不丢。
     fn click_file(&mut self, full: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.clicked = Some(full);
@@ -336,6 +337,8 @@ impl GitPanel {
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
+                    // 右键菜单的「打进终端」作用在右键点的这个文件上。
+                    this.clicked = Some(root.join(&path));
                     this.open_git_file_menu(event.position, root.clone(), section, shown_in, path.clone(), cx);
                 }),
             )
@@ -435,7 +438,7 @@ impl GitPanel {
         let mut items = vec![
             item("git.open_file", FileOp::Open, true),
             item(&crate::i18n::os_key("files.reveal"), FileOp::Reveal, true),
-            item("files.insert_path", FileOp::InsertPath, true),
+            Some(MenuItem::new(rust_i18n::t!("files.insert_path"), Box::new(InsertFilePath), true, cx)),
             None,
         ];
         match shown_in {

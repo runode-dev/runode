@@ -17,6 +17,10 @@ actions!(
         CloseTab,
         /// 关掉当前分屏；标签里只剩它时关掉整个标签。
         ClosePane,
-        TogglePaneZoom
+        TogglePaneZoom,
+        /// 把面板里选中或最后点过的文件路径打进终端。
+        InsertFilePath,
+        /// 焦点从面板交回终端。
+        FocusTerminal
     ]
 );

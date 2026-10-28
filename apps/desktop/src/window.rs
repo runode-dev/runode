@@ -71,8 +71,8 @@ pub use quit::{
 pub use remote::serve_requests;
 // 文件树的动作在 `file_tree`，这里转出去给快捷键表用。
 pub use crate::file_tree::{
-    CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, InsertFilePath,
-    OpenSelectedFile, RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
+    CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, OpenSelectedFile, RenameFile,
+    RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
 pub use kanban::watch_todos;
 pub(crate) use settings_page::show_settings;

@@ -33,7 +33,7 @@ use std::{
 
 use crate::ui::{
     a11y::A11yPress,
-    actions::{Copy, Cut, Paste},
+    actions::{Copy, Cut, FocusTerminal, Paste},
     button::{Button, ButtonSize},
     file_icons::{file_icon, folder_icon},
     font_size::{self, FontSize},
@@ -79,8 +79,6 @@ actions!(
         ExpandSelectedFile,
         /// 选中的目录展开或收起，文件在预览栏里打开。
         OpenSelectedFile,
-        /// 把选中项的路径打进终端。
-        InsertFilePath,
         /// 在选中的目录或文件所在的目录里新建文件、文件夹。
         NewFile,
         NewFolder,
@@ -103,9 +101,7 @@ actions!(
         ToggleShowIgnored,
         /// 用 VS Code 打开文件树的根目录，在访达里打开它。
         OpenRootInVsCode,
-        OpenRootInFinder,
-        /// 焦点从文件树交回终端。
-        FocusTerminal
+        OpenRootInFinder
     ]
 );
 
