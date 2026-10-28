@@ -1,4 +1,4 @@
-# 每次推到 main 和每个 PR：检查格式和 crate 分层（cargo-deny），再类型检查、跑测试、跑 clippy。
+# 每次推到 main 和每个 PR：检查格式和 crate 分层（cargo-deny），再跑 clippy（含类型检查）和测试。
 # libghostty-vt 从 vendor/ghostty 用 zig 编译，GPUI 要用 Xcode 的 Metal 编译器编着色器，
 # 所以在 macOS 上跑。发版时 release.yml 也调它（workflow_call），对要发的那个标签再查一遍。
 # iOS 端（RunodeKit）的测试由单独的 ios.yml 跑。
@@ -65,31 +65,12 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - name: 拉子模块
-        run: make submodules
-      # vendor/ghostty 的 build.zig.zon 要求的 zig 版本（minimum_zig_version）。
-      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+      - uses: ./.github/actions/setup-rust
         with:
-          version: 0.17.0
-      - name: 装 Rust 工具链
-        # 版本由 rust-toolchain.toml 指定。
-        run: |
-          rustup toolchain install
-          rustup component add clippy rustfmt
+          components: clippy rustfmt
       - name: 确认有 Metal 编译器
         # 新版 Xcode 把 Metal 工具链拆成了单独下载的组件。
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
-      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库。库不在时按名字删掉它各份构建输出和
-      # fingerprint，构建脚本才一定重跑、重新下载；cargo clean -p 只清当前算出的那几份。
-      - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
-        shell: bash
-        run: |
-          compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null && exit 0
-          [[ -d target ]] || exit 0
-          find target -maxdepth 4 -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/.fingerprint/sherpa-onnx-sys-*' \) \
-            -prune -print -exec rm -rf {} +
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
@@ -100,8 +81,9 @@ jobs:
         run: cargo metadata --locked --format-version 1 >/dev/null
       - name: 检查 crate 分层
         run: cargo deny check bans
-      - name: 类型检查
-        run: make check
+      # clippy 带着完整的类型检查，放在测试前面，编不过时不用等测试跑完。
+      - name: clippy
+        run: make clippy CLIPPY_ARGS="-- -D warnings"
       # 终端的集成测试要起这几个 shell，runner 上默认没有；RUNODE_REQUIRE_SHELLS 让缺了的直接失败，不悄悄跳过。
       # 系统自带的 bash 是 3.2，要新版 bash 的测试会跳过，所以另装一个，它在 PATH 里排在 /bin 前面。
       - name: 装测试用的 shell
@@ -110,8 +92,6 @@ jobs:
         run: make test
         env:
           RUNODE_REQUIRE_SHELLS: "1"
-      - name: clippy
-        run: make clippy CLIPPY_ARGS="-- -D warnings"
 
   # 发版时 Linux 也要编出 runode（命令行和宿主），平时就在 Linux 上类型检查并 lint 全部 crate（含测试代码），
   # 免得到打标签时才发现编不过；另外跑只在 Linux 上才走得到的交接和描述符传递测试。整套测试暂时不在 Linux 上跑：
@@ -126,21 +106,14 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - name: 拉子模块
-        run: make submodules
-      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+      - uses: ./.github/actions/setup-rust
         with:
-          version: 0.17.0
-      - name: 装 Rust 工具链
-        run: |
-          rustup toolchain install
-          rustup component add clippy
+          components: clippy
       - name: 装 GPUI 编译要的库
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
             libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # 连 Linux 的窗口后端一起查，发版的无头包不开它。
       - name: clippy
         run: make clippy CLIPPY_ARGS="--features runode/linux-desktop -- -D warnings"

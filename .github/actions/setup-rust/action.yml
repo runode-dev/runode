@@ -1,0 +1,42 @@
+name: 准备 Rust 构建
+description: 拉子模块，装 zig 和 rust-toolchain.toml 指定的工具链，恢复 Rust 的构建缓存
+inputs:
+  components:
+    description: 另装的工具链组件，空格分隔，比如 "clippy rustfmt"
+    default: ""
+  targets:
+    description: 另装的编译目标，空格分隔
+    default: ""
+  cache-key:
+    description: 缓存的附加键，不同目标或架构的构建各用各的缓存
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: 拉子模块
+      shell: bash
+      run: make submodules
+    - uses: ./.github/actions/setup-zig
+    # rust-cache 按 rustc 的版本起缓存的键，工具链要先装好。
+    - name: 装 Rust 工具链
+      shell: bash
+      env:
+        COMPONENTS: ${{ inputs.components }}
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        rustup toolchain install
+        if [[ -n "$COMPONENTS" ]]; then rustup component add $COMPONENTS; fi
+        if [[ -n "$TARGETS" ]]; then rustup target add $TARGETS; fi
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        key: ${{ inputs.cache-key }}
+    # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
+    # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库。库不在时按名字删掉它各份构建输出和
+    # fingerprint，构建脚本才一定重跑、重新下载；cargo clean -p 只清当前算出的那几份。
+    - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
+      shell: bash
+      run: |
+        compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null && exit 0
+        [[ -d target ]] || exit 0
+        find target -maxdepth 4 -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/.fingerprint/sherpa-onnx-sys-*' \) \
+          -prune -print -exec rm -rf {} +

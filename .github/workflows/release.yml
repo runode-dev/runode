@@ -186,31 +186,13 @@ jobs:
           ref: ${{ needs.prepare.outputs.tag }}
           # 子模块是公开仓库，之后不再碰仓库，不把令牌留在 .git/config 里。
           persist-credentials: false
-      - name: 拉子模块
-        run: make submodules
-      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+      - uses: ./.github/actions/setup-rust
         with:
-          version: 0.17.0
-      - name: 装 Rust 工具链
-        run: |
-          rustup toolchain install
-          rustup target add "$CARGO_BUILD_TARGET"
+          targets: ${{ matrix.target }}
+          # 带上目标三元组，不接着用以前在 Intel runner 上存的缓存。
+          cache-key: macos-${{ matrix.target }}
       - name: 确认有 Metal 编译器
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          # 带上目标三元组，不接着用以前在 Intel runner 上存的缓存。
-          key: macos-${{ matrix.target }}
-      # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
-      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库。库不在时按名字删掉它各份构建输出和
-      # fingerprint，构建脚本才一定重跑、重新下载；cargo clean -p 只清当前算出的那几份。
-      - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
-        shell: bash
-        run: |
-          compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null && exit 0
-          [[ -d target ]] || exit 0
-          find target -maxdepth 4 -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/.fingerprint/sherpa-onnx-sys-*' \) \
-            -prune -print -exec rm -rf {} +
       # 参数和 bundle-macos.sh 里的 cargo build 一样，先在导入证书、写密钥前编完：依赖的构建脚本跑时钥匙串还没解锁、
       # 环境里也没有 NOTARY_KEY 这些，打包时那次 cargo build 基本什么都不用编。
       - name: 编译
@@ -286,31 +268,14 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
           persist-credentials: false
-      - name: 拉子模块
-        run: make submodules
-      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+      - uses: ./.github/actions/setup-rust
         with:
-          version: 0.17.0
-      - name: 装 Rust 工具链
-        run: rustup toolchain install
+          cache-key: linux-${{ matrix.arch }}
       - name: 装 GPUI 编译要的库
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
             libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: linux-${{ matrix.arch }}
-      # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
-      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库。库不在时按名字删掉它各份构建输出和
-      # fingerprint，构建脚本才一定重跑、重新下载；cargo clean -p 只清当前算出的那几份。
-      - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
-        shell: bash
-        run: |
-          compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null && exit 0
-          [[ -d target ]] || exit 0
-          find target -maxdepth 4 -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/.fingerprint/sherpa-onnx-sys-*' \) \
-            -prune -print -exec rm -rf {} +
       - name: 构建、打包
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -344,26 +309,9 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
           persist-credentials: false
-      - name: 拉子模块
-        run: make submodules
-      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+      - uses: ./.github/actions/setup-rust
         with:
-          version: 0.17.0
-      - name: 装 Rust 工具链
-        run: rustup toolchain install
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: windows-x86_64
-      # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库（只留下
-      # 空目录），它构建脚本的输出却留着、不再重跑，链接时找不到库。库不在时按名字删掉它各份构建输出和
-      # fingerprint，构建脚本才一定重跑、重新下载；cargo clean -p 只清当前算出的那几份。
-      - name: 缓存里没有 sherpa-onnx 的预编译库时重新下载
-        shell: bash
-        run: |
-          compgen -G 'target/sherpa-onnx-prebuilt/*/lib/*sherpa-onnx-c-api*' >/dev/null && exit 0
-          [[ -d target ]] || exit 0
-          find target -maxdepth 4 -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/.fingerprint/sherpa-onnx-sys-*' \) \
-            -prune -print -exec rm -rf {} +
+          cache-key: windows-x86_64
       # 先在写出证书前编完：依赖的构建脚本跑时环境里还没有签名密钥。
       - name: 编译
         run: |
