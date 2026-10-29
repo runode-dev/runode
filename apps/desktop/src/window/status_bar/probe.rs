@@ -1,8 +1,15 @@
 //! 状态栏要问系统的事：各个进程的父进程和 CPU（`ps`）、内存（`proc_pid_rusage`），有哪些 TCP 端口在监听（`lsof`），
-//! 以及防止电脑休眠（`caffeinate`）。都是 macOS 自带的命令，跑不了时当没有。
+//! 以及防止电脑休眠（`caffeinate`）。都是 macOS 自带的命令，跑不了时当没有。Windows 上这几样由 `windows` 经系统接口问。
 
+#[cfg(windows)]
+mod windows;
+
+#[cfg(windows)]
+pub(super) use windows::{Caffeinate, listening_ports, processes};
+
+use std::collections::{HashMap, HashSet};
+#[cfg(not(windows))]
 use std::{
-    collections::{HashMap, HashSet},
     io::Read as _,
     process::{Child, Command, Stdio},
     thread,
@@ -10,9 +17,10 @@ use std::{
 };
 
 /// `ps`、`lsof` 最多跑这么久，超时当这次没数据：卡住一次不能让状态栏的轮询（连同防休眠）停下。
+#[cfg(not(windows))]
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// 一个进程的父进程、内存（字节，取 phys_footprint）和 CPU 占用（百分比，一个核满载是 100）。
+/// 一个进程的父进程、内存（字节，macOS 上取 phys_footprint，Windows 上取私有工作集）和 CPU 占用（百分比，一个核满载是 100）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Proc {
     pub ppid: u32,
@@ -21,14 +29,25 @@ pub(super) struct Proc {
     pub helper: Option<Helper>,
 }
 
-/// runode 按需拉起的子进程，按命令行认：这个 app 的可执行文件加一个参数。采集进程经 launchd 拉起，
-/// 父进程是 1 号进程，不在 app 和宿主的子孙里。
+/// runode 按需拉起的子进程，按命令行认：这个 app 的可执行文件加一个参数。采集进程和拉起它的进程脱开，
+/// 不一定在 app 和宿主的子孙里，所以在整张进程表里认。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Helper {
     /// `runode --speech`
     Speech,
     /// `runode --screen`
     Screen,
+}
+
+impl Helper {
+    /// 命令行最后一个参数 `flag` 对应的子进程。
+    fn from_flag(flag: &str) -> Option<Self> {
+        match flag {
+            "--speech" => Some(Self::Speech),
+            "--screen" => Some(Self::Screen),
+            _ => None,
+        }
+    }
 }
 
 /// 一组进程的 CPU 和内存加起来。
@@ -62,13 +81,16 @@ impl Procs {
         Self { procs, children }
     }
 
-    /// `pid` 和它所有的子孙进程。
+    /// `pid` 和它所有的子孙进程，父进程排在它的子孙前面。父子关系成了环时每个进程也只列一次。
     fn subtree(&self, pid: u32) -> Vec<u32> {
         let mut all = Vec::new();
+        let mut seen = HashSet::new();
         let mut stack = vec![pid];
         while let Some(pid) = stack.pop() {
-            all.push(pid);
-            stack.extend(self.children.get(&pid).into_iter().flatten().filter(|&&child| child != pid));
+            if seen.insert(pid) {
+                all.push(pid);
+                stack.extend(self.children.get(&pid).into_iter().flatten());
+            }
         }
         all
     }
@@ -135,6 +157,7 @@ pub(super) struct Port {
 
 /// 现在的进程表；`ps` 跑不了时是空的。phys_footprint 只问 `roots` 和它们的子孙：状态栏只算这些进程的内存，
 /// 别的进程只用来认父子关系，`ps` 列出的几百个进程挨个问一遍白白耗时。
+#[cfg(not(windows))]
 pub(super) fn processes(roots: &HashSet<u32>) -> Procs {
     let text = output(Command::new("/bin/ps").args(["-axo", "pid=,ppid=,rss=,%cpu=,args="]), PROBE_TIMEOUT);
     let exe = std::env::current_exe().map(|exe| exe.to_string_lossy().into_owned()).unwrap_or_default();
@@ -164,12 +187,13 @@ fn phys_footprint(pid: u32) -> Option<u64> {
     (status == 0).then(|| unsafe { info.assume_init() }.ri_phys_footprint)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn phys_footprint(_pid: u32) -> Option<u64> {
     None
 }
 
 /// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次（IPv4 和 IPv6 各监听一次的那种）。
+#[cfg(not(windows))]
 pub(super) fn listening_ports() -> Vec<Port> {
     let text = output(Command::new("/usr/sbin/lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]), PROBE_TIMEOUT);
     parse_lsof(&text)
@@ -177,6 +201,7 @@ pub(super) fn listening_ports() -> Vec<Port> {
 
 /// 跑命令拿标准输出；跑不了、`timeout` 内没跑完（这时结束它）时是空字符串。`lsof` 有进程读不了时
 /// 退出码不是 0，输出照样能用。
+#[cfg(not(windows))]
 fn output(command: &mut Command, timeout: Duration) -> String {
     let spawned = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
     let mut child = match spawned {
@@ -218,6 +243,7 @@ fn output(command: &mut Command, timeout: Duration) -> String {
 
 /// `ps -axo pid=,ppid=,rss=,%cpu=,args=` 的输出：每行进程号、父进程号、常驻内存（KB）、CPU 百分比和命令行。
 /// 常驻内存先填进 `memory`，读得到 phys_footprint 时 `processes` 再换掉。`exe` 是这个 app 的可执行文件。
+#[cfg(any(not(windows), test))]
 fn parse_ps(text: &str, exe: &str) -> HashMap<u32, Proc> {
     text.lines()
         .filter_map(|line| {
@@ -229,11 +255,7 @@ fn parse_ps(text: &str, exe: &str) -> HashMap<u32, Proc> {
             let cpu = fields.next()?.replace(',', ".").parse().ok()?;
             let args: Vec<&str> = fields.collect();
             let helper = match args.split_last() {
-                Some((&flag, command)) if command.iter().copied().eq(exe.split_whitespace()) => match flag {
-                    "--speech" => Some(Helper::Speech),
-                    "--screen" => Some(Helper::Screen),
-                    _ => None,
-                },
+                Some((&flag, command)) if command.iter().copied().eq(exe.split_whitespace()) => Helper::from_flag(flag),
                 _ => None,
             };
             Some((pid, Proc { ppid, memory: rss, cpu, helper }))
@@ -243,6 +265,7 @@ fn parse_ps(text: &str, exe: &str) -> HashMap<u32, Proc> {
 
 /// `lsof -F pcn` 的输出：`p` 行开始一个进程，跟着 `c` 行是进程名，再是它的各个文件，`n` 行是地址，
 /// 比如 `*:3000`、`127.0.0.1:5173`、`[::1]:8080`。
+#[cfg(any(not(windows), test))]
 fn parse_lsof(text: &str) -> Vec<Port> {
     let mut ports: Vec<Port> = Vec::new();
     let (mut pid, mut command) = (0, String::new());
@@ -267,8 +290,10 @@ fn parse_lsof(text: &str) -> Vec<Port> {
 
 /// 防止电脑闲置时休眠：拿着期间系统不会因为没人操作而睡眠，放掉（drop）就恢复。`caffeinate -w`
 /// 盯着本进程，app 崩了它也跟着退出，不会一直挡着休眠。
+#[cfg(not(windows))]
 pub(super) struct Caffeinate(Child);
 
+#[cfg(not(windows))]
 impl Caffeinate {
     pub(super) fn start() -> std::io::Result<Self> {
         Command::new("/usr/bin/caffeinate")
@@ -286,6 +311,7 @@ impl Caffeinate {
     }
 }
 
+#[cfg(not(windows))]
 impl Drop for Caffeinate {
     fn drop(&mut self) {
         let _ = self.0.kill();

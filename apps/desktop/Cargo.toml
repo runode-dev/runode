@@ -64,8 +64,19 @@ regex.workspace = true
 [target.'cfg(windows)'.dependencies]
 # Windows 10 起有的 AF_UNIX socket，连宿主用。
 uds_windows.workspace = true
-# 界面程序跑命令行时接上终端的控制台（`AttachConsole`）；远程桌面的采集进程等连接（`WSAPoll`）。
-windows-sys = { workspace = true, features = ["Win32_Networking_WinSock", "Win32_System_Console"] }
+# 界面程序跑命令行时接上终端的控制台（`AttachConsole`）；远程桌面的采集进程等连接（`WSAPoll`）；
+# 状态栏问进程表、各进程的内存、CPU 和命令行，问在监听的 TCP 端口，防止休眠。
+windows-sys = { workspace = true, features = [
+    "Wdk_System_Threading",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Power",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
