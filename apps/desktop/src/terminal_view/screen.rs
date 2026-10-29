@@ -7,8 +7,9 @@
 //! 漏过来的）；快照解出来的 VT 已经套着宿主的主题，
 //! 之后不再另外 `apply_theme`。
 //!
-//! 后台标签、看不见的窗口里的终端不留界面这份 VT：离开显示 `HIDE_GRACE` 后改成只看状态
-//! （`AttachMode::MetaOnly`），回到显示时重新要一份屏幕。只看状态时标题、agent、响铃照常从宿主来。
+//! 后台标签、看不见的窗口里的终端不留界面这份 VT：离开显示 `HIDE_GRACE` 后（刷屏的不等到那时）
+//! 改成只看状态（`AttachMode::MetaOnly`），回到显示时重新要一份屏幕。只看状态时标题、agent、响铃
+//! 照常从宿主来。
 //!
 //! 通知：第一次连上（建视图、断开后重新连上）时宿主给的状态（`Attached` 里带的，包括只看状态时
 //! 第一次给的）是「现在的样子」，不是刚发生的变化，不发 agent 停下来的通知；和宿主断开以后也不发。
@@ -159,7 +160,7 @@ pub(super) struct ScreenState<S> {
     visible: bool,
     /// 从什么时候起不显示，见 `tick`。
     hidden_since: Option<Instant>,
-    /// 这次不显示以来喂给界面这份 VT 的字节数，见 `HIDDEN_FEED_LIMIT`。
+    /// 这次不显示以来要喂给界面这份 VT 的字节数，到了 `HIDDEN_FEED_LIMIT` 就不再喂。
     hidden_fed: usize,
     /// `meta` 是宿主给过的（不是建视图时的空白），`Attached` 带的状态可以和它比，见 `screen_arrived`。
     meta_known: bool,
@@ -343,7 +344,7 @@ impl<S: Vt> ScreenState<S> {
     }
 
     /// 视图开始或不再显示。回到显示时要是已经丢了界面这份 VT，返回要发的 `Attach`（按视图的尺寸
-    /// 要一份屏幕）；不显示时只记下时刻，`HIDE_GRACE` 后由 `tick` 降级。
+    /// 要一份屏幕）；不显示时只记下时刻、从零计输出，由 `tick` 降级。
     pub(super) fn set_visible(&mut self, visible: bool, now: Instant) -> Option<Attach> {
         if visible == self.visible {
             return None;
@@ -432,10 +433,15 @@ impl<S: Vt> ScreenState<S> {
         changes
     }
 
-    /// 把攒着的几块输出一次喂给 VT，返回是否喂了。
+    /// 把攒着的几块输出一次喂给 VT，返回是否喂了。不显示时输出到了 `HIDDEN_FEED_LIMIT` 就不喂：
+    /// 这一批末尾 `apply` 会丢掉这份 VT。
     fn feed(&mut self, pending: &mut Vec<Output>) -> bool {
         if !self.visible {
             self.hidden_fed += pending.iter().map(|data| data.len()).sum::<usize>();
+            if self.hidden_fed >= HIDDEN_FEED_LIMIT {
+                pending.clear();
+                return false;
+            }
         }
         let Some(session) = self.live_mut() else {
             pending.clear();

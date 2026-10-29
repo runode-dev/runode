@@ -519,8 +519,8 @@ impl TerminalView {
     }
 
     /// 视图在不在窗口里显示（窗口当前 workspace 当前标签里的分屏，被放大的分屏挡住的也算）。
-    /// 离开显示 `HIDE_GRACE` 后只看状态、丢掉界面这份 VT；回到显示时要是已经丢了，按视图的尺寸
-    /// 发出要屏幕的 `Attach` 并返回 true，接着用 `wait_for_screen` 等（最多 `SHOW_WAIT`，等不到先画
+    /// 离开显示 `HIDE_GRACE` 后（刷屏的更早）只看状态、丢掉界面这份 VT；回到显示时要是已经丢了，
+    /// 按视图的尺寸发出要屏幕的 `Attach` 并返回 true，接着用 `wait_for_screen` 等（最多 `SHOW_WAIT`，等不到先画
     /// 背景，到了再补上）。一次显示好几个终端时先都发出去再一起等（见 `WindowView::sync_visibility`），
     /// 不必一个等完再要下一个。
     pub fn request_visible(&mut self, visible: bool, cx: &mut Context<Self>) -> bool {
