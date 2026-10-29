@@ -57,9 +57,16 @@ impl TerminalView {
     }
 
     pub(super) fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = self.screen.shown().and_then(Session::selection_text) {
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
-        }
+        self.copy_selection(cx);
+    }
+
+    /// 有选区时复制并返回真；没有选区时保留剪贴板，让按键照常交给程序。
+    pub(super) fn copy_selection(&self, cx: &mut Context<Self>) -> bool {
+        let Some(text) = self.screen.shown().and_then(Session::selection_text) else {
+            return false;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        true
     }
 
     pub(super) fn clear_screen(&mut self, _: &ClearScreen, _: &mut Window, cx: &mut Context<Self>) {
