@@ -47,6 +47,12 @@ impl Session {
         self.terminal.selection().is_ok_and(|s| s.is_some())
     }
 
+    pub fn clear_selection(&mut self) {
+        if self.has_selection() {
+            log_err("selection clear", self.terminal.set_selection(None));
+        }
+    }
+
     /// 左键按下。手势按两次按下的间隔和距离数次数：单击清掉选区、从这里开始拖，
     /// 双击选词，三击选行。`repeat_interval` 是算作连击的最长间隔。
     pub fn select_press(&mut self, at: GridPoint, repeat_interval: Duration) {

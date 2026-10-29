@@ -60,8 +60,25 @@ impl TerminalView {
             cx.stop_propagation();
             return;
         }
-        // 在 shell 提示符上选中了一段命令时，退格和 Delete 删掉选中的文字。
+        // Windows 上 Ctrl+C 有选区时复制并清掉选区，没有选区时照常中断程序；不清的话选区还在时
+        // 再按也只是复制，发不出中断。先复制，免得发送输入时清掉选区。
         let keystroke = &event.keystroke;
+        if cfg!(windows)
+            && keystroke.key == "c"
+            && keystroke.modifiers.control
+            && !keystroke.modifiers.shift
+            && !keystroke.modifiers.alt
+            && !keystroke.modifiers.platform
+            && self.copy_selection(cx)
+        {
+            if let Some(session) = self.screen.shown_mut() {
+                session.clear_selection();
+            }
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        // 在 shell 提示符上选中了一段命令时，退格和 Delete 删掉选中的文字。
         if matches!(keystroke.key.as_str(), "backspace" | "delete")
             && !keystroke.modifiers.modified()
             && self.screen.live_mut().is_some_and(Session::delete_selection)

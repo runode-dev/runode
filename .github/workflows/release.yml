@@ -521,3 +521,10 @@ jobs:
           reported=$("$LOCALAPPDATA/Programs/Runode/rn.exe" --version)
           echo "$reported"
           [[ "$reported" == "runode $VERSION."* ]] || { echo "装上的不是 $VERSION" >&2; exit 1; }
+      - name: 核对 ConPTY 运行库
+        shell: pwsh
+        run: |
+          foreach ($name in 'conpty.dll', 'OpenConsole.exe', 'conpty-LICENSE.txt') {
+            $path = Join-Path "$env:LOCALAPPDATA/Programs/Runode" $name
+            if (!(Test-Path -LiteralPath $path)) { throw "Missing ConPTY runtime: $name" }
+          }

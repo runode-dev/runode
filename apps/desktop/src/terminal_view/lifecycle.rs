@@ -1174,6 +1174,55 @@ mod tests {
 
     use super::*;
 
+    /// Windows 的 Ctrl+C 有选区时复制并清掉选区，再按一次就发 ETX，不改剪贴板。
+    #[cfg(windows)]
+    #[test]
+    fn ctrl_c_copies_selection_or_interrupts() {
+        use gpui::{ClipboardItem, KeyDownEvent, Keystroke};
+
+        let mut app = gpui::TestAppContext::single();
+        app.update(|cx| {
+            let mut config = runode_config::Config::default();
+            config.font_family.clear();
+            cx.set_global(AppConfig(Arc::new(config)));
+        });
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let sent = requests.clone();
+        let mut session = Session::new(
+            PROVISIONAL_SIZE,
+            &TermSettings::default(),
+            Box::new(move |request| sent.borrow_mut().push(request)),
+        )
+        .unwrap();
+        let text = "Windows 复制测试";
+        session.feed(text.as_bytes());
+        session.select_all();
+        let screen = ScreenState::new_live(session, 1, SessionMeta::default(), PROVISIONAL_SIZE);
+        let (_tx, rx) = mpsc::unbounded();
+        let window = app.add_window(|_, _| gpui::Empty);
+        window
+            .update(&mut app, |_, window, cx| {
+                let view = cx.new(|cx| TerminalView::new(None, screen, true, rx, window, cx));
+                view.update(cx, |view, cx| {
+                    let event = KeyDownEvent {
+                        keystroke: Keystroke::parse("ctrl-c").unwrap(),
+                        is_held: false,
+                        prefer_character_input: false,
+                    };
+                    cx.write_to_clipboard(ClipboardItem::new_string("before".into()));
+                    view.key_down(&event, window, cx);
+                    assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some(text));
+                    assert!(requests.borrow().is_empty(), "copy must not send Ctrl+C to the program");
+                    assert!(!view.screen.shown().unwrap().has_selection());
+
+                    view.key_down(&event, window, cx);
+                    assert!(matches!(&requests.borrow()[..], [session::Request::Input(bytes)] if bytes == b"\x03"));
+                    assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some(text));
+                });
+            })
+            .unwrap();
+    }
+
     /// 只排着不带输出的事件（响铃）时，一批也只取 `MAX_EVENT_BATCH` 件，剩下的留到下一轮。
     #[test]
     fn take_batch_bounds_events_without_output() {

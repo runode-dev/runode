@@ -15,6 +15,24 @@ make run-ios-device   # 构建 iOS app，装到连着的 iPhone 上
 
 已经克隆过的话，用 `make submodules` 拉子模块。`make help` 列出所有目标。
 
+Windows 用 Visual Studio 的 C++ 构建工具、同一版 zig 和 Rust。装有 GNU Make 时同样运行 `make run`，
+它会先构建命令行 `rn.exe`，再启动桌面程序 `runode.exe`；发布构建用 `make run-release`。
+没有 Make 时，在 PowerShell 里运行：
+
+```powershell
+cargo build -p runode --bin rn
+cargo run -p runode
+```
+
+桌面构建会下载固定版本、核对 SHA-256，把 Microsoft 的 `conpty.dll`、`OpenConsole.exe` 和许可证放到
+可执行文件旁；打包时三份文件也要一起带上。Windows 10 自带的 ConPTY 不转发鼠标模式，缺了这份运行库，
+Codex、pi 等程序收不到滚轮。单独测试终端 crate 前，先准备测试程序用的运行库：
+
+```powershell
+powershell -NoProfile -File scripts/windows/setup-conpty.ps1 -Destination target/debug -IncludeTests
+cargo test -p runode-terminal
+```
+
 ## 提交 PR 前
 
 ```sh

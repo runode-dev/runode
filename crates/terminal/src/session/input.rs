@@ -189,9 +189,7 @@ impl Session {
     /// 向程序发输入之前：记下时刻，回到最底部，并清掉选区。
     pub(super) fn before_input(&mut self) {
         self.input_at = Some(Instant::now());
-        if self.terminal.selection().is_ok_and(|s| s.is_some()) {
-            log_err("selection clear", self.terminal.set_selection(None));
-        }
+        self.clear_selection();
         if !self.terminal.viewport_active().unwrap_or(true) {
             self.terminal.scroll_viewport(ScrollViewport::Bottom);
         }
