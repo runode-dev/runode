@@ -29,10 +29,6 @@ runs:
         if [[ -n "$TARGETS" ]]; then rustup target add $TARGETS; fi
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       if: inputs.cache == 'true'
-    - name: 准备 Windows ConPTY（终端集成测试也用这份）
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: ./scripts/windows/setup-conpty.ps1 -Destination target/debug -IncludeTests
     # 检出后源码的修改时间都是新的，libghostty-vt-sys 的构建脚本每轮都会重跑，rust-cache 又不存 vendor 下
     # 路径依赖的构建输出；zig 的缓存在它的 OUT_DIR 里、按内容判断，单独存下来，重跑时就不用从头编
     # libghostty。这一步排在 rust-cache 后面，存缓存时先于 rust-cache 的清理执行。

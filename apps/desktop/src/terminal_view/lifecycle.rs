@@ -1174,12 +1174,11 @@ mod tests {
 
     use super::*;
 
-    /// Windows 的 Ctrl+C 先复制选区；取消选区后同一个键仍发 ETX，不改剪贴板。
+    /// Windows 的 Ctrl+C 有选区时复制并清掉选区，再按一次就发 ETX，不改剪贴板。
     #[cfg(windows)]
     #[test]
     fn ctrl_c_copies_selection_or_interrupts() {
         use gpui::{ClipboardItem, KeyDownEvent, Keystroke};
-        use runode_types::grid::GridPoint;
 
         let mut app = gpui::TestAppContext::single();
         app.update(|cx| {
@@ -1214,13 +1213,8 @@ mod tests {
                     view.key_down(&event, window, cx);
                     assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some(text));
                     assert!(requests.borrow().is_empty(), "copy must not send Ctrl+C to the program");
-                    assert!(view.screen.shown().unwrap().has_selection());
+                    assert!(!view.screen.shown().unwrap().has_selection());
 
-                    let at = GridPoint { x: 0.5, y: 0.5 };
-                    let session = view.screen.shown_mut().unwrap();
-                    session.select_press(at, Duration::from_millis(500));
-                    session.select_release(at);
-                    assert!(!session.has_selection());
                     view.key_down(&event, window, cx);
                     assert!(matches!(&requests.borrow()[..], [session::Request::Input(bytes)] if bytes == b"\x03"));
                     assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some(text));
