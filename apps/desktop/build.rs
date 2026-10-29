@@ -48,6 +48,11 @@ fn main() {
 
 /// 开发版和发布版都带新版 ConPTY，免得 Windows 10 自带的版本吞掉程序的鼠标上报开关。
 fn prepare_conpty() {
+    // 准备脚本要 PowerShell；在别的系统上交叉检查 Windows 的代码时不放运行库，编出的程序也跑不了。
+    if !cfg!(windows) {
+        println!("cargo:warning=skipping the bundled ConPTY runtime: it is only prepared on a Windows host");
+        return;
+    }
     let script = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../scripts/windows/setup-conpty.ps1");
     println!("cargo:rerun-if-changed={}", script.display());
     println!("cargo:rerun-if-changed=../../scripts/windows/conpty-LICENSE.txt");

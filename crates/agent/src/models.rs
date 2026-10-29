@@ -323,7 +323,7 @@ pub fn fetch(launcher: &Launcher, dir: &Path, path: Option<OsString>) -> Result<
 /// `PROBE_TIMEOUT`、或者程序退了还没认出来时是 `NoAnswer`。完了杀掉整组。有请求时标准输入一直开着，关了的话
 /// 有的 agent（codex）不回话就退出。
 fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Result<Catalog, Unanswered> {
-    let mut command = probe_command(binary, dir, path.as_deref());
+    let mut command = probe_command(binary, path.as_deref());
     command
         .args(probe.args)
         .current_dir(dir)
@@ -395,14 +395,15 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
 }
 
 /// Windows 的 `Command` 不会替没有后缀的名字找 `.cmd`、`.bat`；npm 和 pi 的安装器用这些启动器。
-/// 按 shell 交来的 PATH 顺序找，交给 `Command` 处理批处理文件的引用和启动，避免自己拼 cmd 命令行。
-fn probe_command(binary: &str, dir: &Path, path: Option<&std::ffi::OsStr>) -> Command {
+/// 按 shell 交来的 PATH 顺序、照系统默认 PATHEXT 的先后找，交给 `Command` 处理批处理文件的引用和启动，
+/// 避免自己拼 cmd 命令行。只找绝对路径的项：空项（PATH 末尾多一个 `;`）和相对项会落进任务目录，
+/// 跑起仓库里放的同名脚本。
+fn probe_command(binary: &str, path: Option<&std::ffi::OsStr>) -> Command {
     #[cfg(windows)]
     {
         let path = path.map(OsString::from).or_else(|| std::env::var_os("PATH")).unwrap_or_default();
-        for entry in std::env::split_paths(&path) {
-            let entry = if entry.is_absolute() { entry } else { dir.join(entry) };
-            for extension in ["exe", "com", "cmd", "bat"] {
+        for entry in std::env::split_paths(&path).filter(|entry| entry.is_absolute()) {
+            for extension in ["com", "exe", "bat", "cmd"] {
                 let program = entry.join(format!("{binary}.{extension}"));
                 if program.is_file() {
                     return Command::new(program);
@@ -411,7 +412,7 @@ fn probe_command(binary: &str, dir: &Path, path: Option<&std::ffi::OsStr>) -> Co
         }
     }
     #[cfg(not(windows))]
-    let _ = (dir, path);
+    let _ = path;
     Command::new(binary)
 }
 

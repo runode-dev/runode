@@ -1,6 +1,5 @@
 //! Windows 上的伪终端：ConPTY，由 portable-pty 打开和启动 shell。读写各一个线程，都阻塞着读写
 //! 管道；不能交接，宿主升级时会话跟着重启。
-//! 运行库由 `runtime` 从可执行文件旁加载；缺失或加载失败时不回退到 Windows 自带的旧版。
 //!
 //! shell 退出后 ConPTY 不会自己关掉输出管道，所以另起一个线程等 shell 退出，退出后关掉伪控制台
 //! （`ClosePseudoConsole`），读线程读完剩下的输出读到 EOF，报告 `PtyEvent::Exited`。关伪控制台

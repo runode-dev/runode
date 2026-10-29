@@ -663,7 +663,7 @@ impl HostSession {
             }
             text => text.unwrap_or_default(),
         };
-        self.writer.write(&query.answer(text));
+        self.writer.write_reply(&query.answer(text));
     }
 
     /// VT 应答查询、宿主主动报告（见 `report_color_scheme`）写回程序的次数。

@@ -199,13 +199,18 @@ impl PtyWriter {
         }
     }
 
-    /// 同 `write`，用来写终端查询的回复：队列里积压超过 `MAX_QUEUED_FOR_REPLY` 时丢掉。用户的
+    /// 同 `write_reply`，用来写终端查询的回复：队列里积压超过 `MAX_QUEUED_FOR_REPLY` 时丢掉。用户的
     /// 按键和粘贴不受这个限制。
     pub fn reply(&self, data: &[u8]) {
         if self.1.load(Ordering::Relaxed) > MAX_QUEUED_FOR_REPLY {
             tracing::debug!("pty write queue is full, terminal query reply dropped");
             return;
         }
+        self.write_reply(data);
+    }
+
+    /// 同 `write`，写的是终端给程序的回话（查询应答、剪贴板读请求的回话），不受积压上限。
+    pub fn write_reply(&self, data: &[u8]) {
         #[cfg(windows)]
         let encoded = conpty::encode_reply(data);
         #[cfg(windows)]
