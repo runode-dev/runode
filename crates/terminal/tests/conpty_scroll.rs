@@ -48,12 +48,12 @@ fn conpty_mouse_child() {
         assert_ne!(GetConsoleMode(output, &mut mode), 0);
         assert_ne!(SetConsoleMode(output, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING), 0);
     }
-    print!("\x1b[?1000h\x1b[?1006hSCROLL_READY\r\n");
+    std::io::stdout().write_all(b"\x1b[?1000h\x1b[?1006hSCROLL_READY\r\n").unwrap();
     std::io::stdout().flush().unwrap();
     let mut bytes = vec![0; WHEEL.len()];
     std::io::stdin().read_exact(&mut bytes).unwrap();
     assert_eq!(bytes, WHEEL);
-    print!("\x1b[?1000l\x1b[?1006lSCROLL_RECEIVED\r\n");
+    std::io::stdout().write_all(b"\x1b[?1000l\x1b[?1006lSCROLL_RECEIVED\r\n").unwrap();
     std::io::stdout().flush().unwrap();
 }
 

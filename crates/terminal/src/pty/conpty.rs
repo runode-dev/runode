@@ -1,11 +1,13 @@
 //! Windows 上的伪终端：ConPTY，由 portable-pty 打开和启动 shell。读写各一个线程，都阻塞着读写
 //! 管道；不能交接，宿主升级时会话跟着重启。
+//! 运行库由 `runtime` 从可执行文件旁加载；缺失或加载失败时不回退到 Windows 自带的旧版。
 //!
 //! shell 退出后 ConPTY 不会自己关掉输出管道，所以另起一个线程等 shell 退出，退出后关掉伪控制台
 //! （`ClosePseudoConsole`），读线程读完剩下的输出读到 EOF，报告 `PtyEvent::Exited`。关伪控制台
 //! 要等输出管道里的读完，读线程一直在读，所以不会卡住。
 
 mod process;
+mod runtime;
 mod vt_io;
 
 use std::{
@@ -124,6 +126,7 @@ impl Pty {
     /// 只打开伪终端，shell 等 `start` 时再启动；在那之前没有子进程，也没有读线程。写线程现在
     /// 就起，写进去的内容等 shell 启动后读。
     pub fn open(size: GridSize, sink: PtySink) -> Result<Self> {
+        runtime::load()?;
         let pair = native_pty_system().openpty(pty_size(size)).context("openpty failed")?;
         let writer = PtyWriter::start(pair.master.take_writer().context("failed to take the pty writer")?)?;
         Ok(Self {
