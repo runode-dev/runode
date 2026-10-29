@@ -367,9 +367,9 @@ impl<S: Vt> ScreenState<S> {
     /// 不显示满了 `HIDE_GRACE`、或者不显示时喂过 `HIDDEN_FEED_LIMIT` 时丢掉界面这份 VT、改成只看
     /// 状态，返回要发的 `Attach`。
     pub(super) fn tick(&mut self, now: Instant) -> Option<Attach> {
-        let due = self.hidden_since.is_some_and(|since| {
-            now.duration_since(since) >= HIDE_GRACE || self.hidden_fed >= HIDDEN_FEED_LIMIT
-        });
+        let due = self
+            .hidden_since
+            .is_some_and(|since| now.duration_since(since) >= HIDE_GRACE || self.hidden_fed >= HIDDEN_FEED_LIMIT);
         if self.visible || !due || !matches!(self.screen, Screen::Live { .. } | Screen::Attaching { .. }) {
             return None;
         }
