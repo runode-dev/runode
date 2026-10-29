@@ -6,6 +6,7 @@
 //! 要等输出管道里的读完，读线程一直在读，所以不会卡住。
 
 mod process;
+mod vt_io;
 
 use std::{
     cell::Cell,
@@ -26,6 +27,7 @@ use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMod
 
 pub use process::process_args;
 pub(crate) use process::{group_members, process_name};
+pub(super) use vt_io::reply_supported;
 
 use super::{PtyEvent, PtySink, PtyWriter, WriterMsg, pty_size, set_current_thread_interactive};
 use crate::shell_integration;
@@ -278,6 +280,7 @@ fn handle_ctrl_c() {
 fn read_loop(mut pipe: Box<dyn Read + Send>, mut sink: PtySink) {
     set_current_thread_interactive();
     let mut buf = vec![0u8; 64 * 1024];
+    let mut output_filter = vt_io::OutputFilter::default();
     // 收的一方不要了也读到 EOF：没人读输出管道时，关伪控制台会一直等下去。
     let mut wanted = true;
     loop {
@@ -285,6 +288,7 @@ fn read_loop(mut pipe: Box<dyn Read + Send>, mut sink: PtySink) {
             Ok(0) => break,
             Ok(n) => {
                 if wanted {
+                    output_filter.filter(&mut buf[..n]);
                     wanted = sink(PtyEvent::Output(buf[..n].into()));
                 }
             }

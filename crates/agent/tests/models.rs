@@ -105,3 +105,35 @@ fn resume_commands_keep_the_other_arguments() {
         assert_eq!(resume_command(command, "S").as_deref(), resumed, "{command}");
     }
 }
+
+#[cfg(windows)]
+#[test]
+fn model_probes_find_windows_batch_launchers_on_the_shell_path() {
+    use runode_agent::models::{LAUNCHERS, fetch};
+
+    let dir = std::env::temp_dir().join(format!("runode agent models & {}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = std::env::join_paths([&dir]).unwrap();
+    let launcher = LAUNCHERS.iter().find(|launcher| launcher.command == "pi").unwrap();
+    for extension in ["cmd", "bat"] {
+        let script = dir.join(format!("pi.{extension}"));
+        std::fs::write(
+            &script,
+            concat!(
+                "@echo off\r\n",
+                "if not \"%~1\"==\"--mode\" exit /b 1\r\n",
+                "if not \"%~2\"==\"rpc\" exit /b 1\r\n",
+                "set /p request=\r\n",
+                "echo {\"id\":\"runode\",\"type\":\"response\",\"success\":true,",
+                "\"data\":{\"models\":[{\"provider\":\"test\",\"id\":\"model\",\"name\":\"Test\"}]}}\r\n",
+            ),
+        )
+        .unwrap();
+        let catalog = fetch(launcher, &dir, Some(path.clone()));
+        std::fs::remove_file(script).unwrap();
+        let catalog = catalog.unwrap();
+        assert_eq!(catalog.models.len(), 1);
+        assert_eq!(catalog.models[0].id, "test/model");
+    }
+    std::fs::remove_dir(dir).unwrap();
+}
