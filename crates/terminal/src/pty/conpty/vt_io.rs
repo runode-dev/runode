@@ -102,10 +102,23 @@ impl OutputFilter {
     }
 }
 
-/// 本机旧版 ConPTY 会把 OSC 回复里的颜色值等内容当成输入。只拦截已确认不安全的 OSC；
-/// DCS（包括 XTVERSION、DECRQSS 的应答）可以传递，不能因为同属字符串协议就一起丢弃。
-pub(crate) fn reply_supported(data: &[u8]) -> bool {
-    !data.windows(2).any(|pair| pair == b"\x1b]")
+/// ConPTY 的输入解析器不认识 OSC 回复，直接写回会丢掉开头、把颜色值当成按键。用它支持的
+/// win32-input-mode 把整条回复编码为 Unicode 按键记录，程序才会收到完整的 ESC、BEL 和 ST。
+/// 其他回复（包括 XTVERSION、DECRQSS）照常传递。
+pub(crate) fn encode_reply(data: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    use std::fmt::Write as _;
+
+    if !data.windows(2).any(|pair| pair == b"\x1b]") {
+        return std::borrow::Cow::Borrowed(data);
+    }
+    let mut encoded = String::new();
+    for unit in String::from_utf8_lossy(data).encode_utf16() {
+        // Vk=0 的合成按键让 ConPTY 原样交出 UnicodeChar，不把 ESC 再解释成输入协议。
+        // 每个字符跟一次松开，防止相邻相同字符合并成带 repeat count 的一条记录；有的 TUI
+        // 读取控制台事件时不展开 repeat count，会把 rgb:1111 等回复读成 rgb:1。
+        let _ = write!(encoded, "\x1b[0;0;{unit};1;0;1_\x1b[0;0;{unit};0;0;1_");
+    }
+    std::borrow::Cow::Owned(encoded.into_bytes())
 }
 
 #[cfg(test)]

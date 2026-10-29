@@ -29,7 +29,7 @@ use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMod
 
 pub use process::process_args;
 pub(crate) use process::{group_members, process_name};
-pub(super) use vt_io::reply_supported;
+pub(super) use vt_io::encode_reply;
 
 use super::{PtyEvent, PtySink, PtyWriter, WriterMsg, pty_size, set_current_thread_interactive};
 use crate::shell_integration;

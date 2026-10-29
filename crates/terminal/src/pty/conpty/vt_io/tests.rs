@@ -1,4 +1,4 @@
-use super::{OutputFilter, reply_supported};
+use super::{OutputFilter, encode_reply};
 
 fn filtered(chunks: &[&[u8]]) -> Vec<u8> {
     let mut filter = OutputFilter::default();
@@ -146,13 +146,22 @@ fn filtered_output_keeps_host_and_frontend_key_encoders_in_legacy_mode() {
 }
 
 #[test]
-fn string_replies_that_conpty_would_type_are_not_written_back() {
+fn osc_replies_use_unicode_input_records() {
     for reply in [
         b"\x1b]11;rgb:ffff/ffff/ffff\x07".as_slice(),
         b"\x1b]4;1;rgb:ffff/0000/0000\x1b\\",
         b"\x1b[?62;22c\x1b]10;rgb:ffff/ffff/ffff\x07",
     ] {
-        assert!(!reply_supported(reply), "{reply:?}");
+        let encoded = encode_reply(reply);
+        assert_ne!(encoded.as_ref(), reply);
+        let decoded: Vec<u8> = std::str::from_utf8(&encoded)
+            .unwrap()
+            .split("\x1b[0;0;")
+            .skip(1)
+            .filter_map(|record| record.strip_suffix(";1;0;1_"))
+            .map(|unit| unit.parse::<u8>().unwrap())
+            .collect();
+        assert_eq!(decoded, reply);
     }
     for reply in [
         b"\x1b[12;34R".as_slice(),
@@ -162,6 +171,6 @@ fn string_replies_that_conpty_would_type_are_not_written_back() {
         b"\x1bP>|runode 0.1\x1b\\",
         b"\x1bP1$r0m\x1b\\",
     ] {
-        assert!(reply_supported(reply), "{reply:?}");
+        assert_eq!(encode_reply(reply).as_ref(), reply);
     }
 }

@@ -202,15 +202,14 @@ impl PtyWriter {
     /// 同 `write`，用来写终端查询的回复：队列里积压超过 `MAX_QUEUED_FOR_REPLY` 时丢掉。用户的
     /// 按键和粘贴不受这个限制。
     pub fn reply(&self, data: &[u8]) {
-        #[cfg(windows)]
-        if !conpty::reply_supported(data) {
-            tracing::debug!("terminal query reply cannot pass through ConPTY, dropped");
-            return;
-        }
         if self.1.load(Ordering::Relaxed) > MAX_QUEUED_FOR_REPLY {
             tracing::debug!("pty write queue is full, terminal query reply dropped");
             return;
         }
+        #[cfg(windows)]
+        let encoded = conpty::encode_reply(data);
+        #[cfg(windows)]
+        let data = encoded.as_ref();
         self.write(data);
     }
 }
@@ -442,6 +441,7 @@ const OUTER_SESSION_VARS: &[&str] = &[
     "CLAUDE_CODE_MESSAGING_TOKEN",
     "CLAUDE_CODE_SESSION_ATTENDED",
     "CLAUDE_CODE_SESSION_ID",
+    "CODEX_CI",
     "KITTY_LISTEN_ON",
     "KITTY_PID",
     "KITTY_PUBLIC_KEY",
@@ -461,6 +461,13 @@ const OUTER_SESSION_VARS: &[&str] = &[
 const OUTER_SESSION_PREFIXES: &[&str] = &["ALACRITTY_", "GHOSTTY_", "HERDR_", "ITERM_", "VSCODE_", "WEZTERM_"];
 
 fn drop_outer_session(cmd: &mut portable_pty::CommandBuilder) {
+    // Codex 的工具命令带着 CODEX_CI=1、NO_COLOR=1；从工具里启动 app 时，禁色只属于那次
+    // 非交互命令，不能传给新终端。普通启动继承的 NO_COLOR 仍是用户的选择。
+    if cmd.get_env("CODEX_CI") == Some(std::ffi::OsStr::new("1"))
+        && cmd.get_env("NO_COLOR") == Some(std::ffi::OsStr::new("1"))
+    {
+        cmd.env_remove("NO_COLOR");
+    }
     let outer: Vec<String> = cmd
         .iter_full_env_as_str()
         .map(|(key, _)| key)
@@ -1365,5 +1372,37 @@ mod tests {
         let text = format!("{handoff:?}");
         assert!(!text.contains("secret-token"), "{text}");
         assert!(text.contains("redacted"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::drop_outer_session;
+    use portable_pty::CommandBuilder;
+
+    #[test]
+    fn automation_color_settings_do_not_disable_new_terminal_colors() {
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.env_clear();
+        cmd.env("CODEX_CI", "1");
+        cmd.env("NO_COLOR", "1");
+        drop_outer_session(&mut cmd);
+        assert!(cmd.get_env("CODEX_CI").is_none());
+        assert!(cmd.get_env("NO_COLOR").is_none());
+    }
+
+    #[test]
+    fn user_color_preferences_survive_normal_startup() {
+        for (marker, color) in [(None, "1"), (Some("0"), "1"), (Some("1"), "custom")] {
+            let mut cmd = CommandBuilder::new("sh");
+            cmd.env_clear();
+            if let Some(marker) = marker {
+                cmd.env("CODEX_CI", marker);
+            }
+            cmd.env("NO_COLOR", color);
+            drop_outer_session(&mut cmd);
+            assert_eq!(cmd.get_env("NO_COLOR"), Some(std::ffi::OsStr::new(color)));
+            assert!(cmd.get_env("CODEX_CI").is_none());
+        }
     }
 }
