@@ -33,6 +33,9 @@ WizardStyle=modern
 [Files]
 Source: "{#SourceDir}\runode.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\rn.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\conpty.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\OpenConsole.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\conpty-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Runode"; Filename: "{app}\runode.exe"

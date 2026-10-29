@@ -38,11 +38,37 @@ fn main() {
         println!("cargo:rustc-link-arg-bins=-Wl,-sectcreate,__TEXT,__info_plist,{}", plist.display());
     }
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        prepare_conpty();
         // GPUI 拿编号为 1 的图标资源当窗口和任务栏的图标，资源管理器里的程序图标也是它。
         println!("cargo:rerun-if-changed=runode.rc");
         println!("cargo:rerun-if-changed=assets/compiled/runode.ico");
         embed_resource::compile("runode.rc", embed_resource::NONE).manifest_required().unwrap();
     }
+}
+
+/// 开发版和发布版都带新版 ConPTY，免得 Windows 10 自带的版本吞掉程序的鼠标上报开关。
+fn prepare_conpty() {
+    let script = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../scripts/windows/setup-conpty.ps1");
+    println!("cargo:rerun-if-changed={}", script.display());
+    println!("cargo:rerun-if-changed=../../scripts/windows/conpty-LICENSE.txt");
+    let architecture = match env::var("CARGO_CFG_TARGET_ARCH").unwrap().as_str() {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        "x86" => "x86",
+        other => panic!("unsupported ConPTY architecture: {other}"),
+    };
+    // OUT_DIR 是 <profile>/build/<package>/out；cargo 的自定义 target-dir 和 profile 也适用。
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let destination = out.ancestors().nth(3).expect("cargo profile directory");
+    let status = Command::new("powershell.exe")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(script)
+        .arg("-Destination")
+        .arg(destination)
+        .args(["-Architecture", architecture, "-IncludeTests"])
+        .status()
+        .expect("prepare the bundled ConPTY runtime");
+    assert!(status.success(), "cannot prepare the bundled ConPTY runtime");
 }
 
 fn git_short_head() -> Option<String> {
