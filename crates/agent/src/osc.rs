@@ -41,7 +41,7 @@ impl ProgressCapture {
         while i < bytes.len() {
             if self.state == State::Ground {
                 // 大部分输出里没有 ESC，直接跳到下一个 ESC。
-                match bytes[i..].iter().position(|&b| b == 0x1b) {
+                match memchr::memchr(0x1b, &bytes[i..]) {
                     Some(at) => {
                         i += at + 1;
                         self.state = State::Escape;

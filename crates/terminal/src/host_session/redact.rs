@@ -77,7 +77,7 @@ impl ReportRedactor {
         while i < data.len() {
             // 不在报告里、也没对上开头时，直接跳到下一个 ESC。
             if !self.inside && self.matched == 0 {
-                let skip = data[i..].iter().position(|&b| b == ESC).unwrap_or(data.len() - i);
+                let skip = memchr::memchr(ESC, &data[i..]).unwrap_or(data.len() - i);
                 if let Some(out) = &mut out {
                     out.extend_from_slice(&data[i..i + skip]);
                 }

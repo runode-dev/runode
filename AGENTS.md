@@ -13,8 +13,8 @@
 | `todo` | 看板的 SQLite 库（`Store`）和定时（`next_fire`），以及本地时间和 Unix 时间的换算（`local_tm`、`mktime`）；宿主在跑时改看板仍经宿主的消息，它才会告诉在看看板的前端 | types、rusqlite、libc |
 | `tasks` | 一个目录里能跑的命令：`tasks.json`、Makefile 目标、package.json scripts | types、paths、serde_json |
 | `preview` | 文件预览不碰界面的部分：读文件、语法高亮、解析 Markdown；界面是 `desktop` 的 `preview_panel` | std、syntect、two-face、pulldown-cmark、regex |
-| `agent` | 认出终端前台跑的 AI 编程 agent，判断它在干活、空闲还是等回答；起 agent 时挑模型和强度、续上次的对话，向 agent 本身问模型清单（`models`） | types、serde、serde_json、regex、toml、libc |
-| `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上（Windows 上是 ConPTY，`pty` 的 `conpty`），shell 集成，认出运行完的命令 | types、paths、agent、libghostty-vt、portable-pty、libc（Unix）、windows-sys（Windows） |
+| `agent` | 认出终端前台跑的 AI 编程 agent，判断它在干活、空闲还是等回答；起 agent 时挑模型和强度、续上次的对话，向 agent 本身问模型清单（`models`） | types、serde、serde_json、regex、toml、memchr、libc |
+| `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上（Windows 上是 ConPTY，`pty` 的 `conpty`），shell 集成，认出运行完的命令 | types、paths、agent、libghostty-vt、portable-pty、memchr、libc（Unix）、windows-sys（Windows） |
 | `config` | Ghostty 兼容的配置文件、主题、快捷键和配置模板，生成 `TermSettings`。模板只有英文，配置项的说明写在 `docs`，动作的说明写在 `ActionSpec::doc`，译文都在 `desktop` 的 locales 里 | types、paths、tracing、objc2-foundation、objc2-app-kit |
 | `host` | 管终端会话的宿主（只有 lib），跑在 app 进程里或单独一个进程（`runode --host`）：持有 PTY 和权威的 VT，升级时新宿主接手旧宿主的会话、会话不断（Windows 上不交接，会话跟着重启）；也替前端读写 git、列目录和命令，持有看板 | terminal、protocol、types、git、paths、todo、tasks、agent、libc（Unix）、uds_windows 和 windows-sys（Windows）、anyhow、tracing |
 | `remote` | 远程访问：TLS 监听、门禁、设备表、Bonjour，给手机推通知；不在同一个网络时经 iroh 按公钥连过来（`tunnel`，打洞直连，打不通走中继），流上照样跑 TLS 和门禁 | protocol、types、paths、rustls、rcgen、ring、iroh、tokio、socket2、libc（Unix）、uds_windows 和 windows-sys（Windows）、serde、serde_json、tracing |

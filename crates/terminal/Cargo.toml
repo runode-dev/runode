@@ -13,6 +13,7 @@ runode-agent.workspace = true
 libghostty-vt = { workspace = true, features = ["png"] }
 portable-pty.workspace = true
 anyhow.workspace = true
+memchr.workspace = true
 # 读终端前台进程的名字和当前目录，作程序没设置标题时的标签名。
 libc.workspace = true
 tracing.workspace = true

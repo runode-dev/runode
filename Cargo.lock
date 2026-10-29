@@ -6744,6 +6744,7 @@ name = "runode-agent"
 version = "0.1.16"
 dependencies = [
  "libc",
+ "memchr",
  "regex",
  "runode-types",
  "serde",
@@ -6925,6 +6926,7 @@ dependencies = [
  "anyhow",
  "libc",
  "libghostty-vt",
+ "memchr",
  "portable-pty",
  "runode-agent",
  "runode-paths",
