@@ -258,6 +258,24 @@ fn hiding_waits_for_the_grace_period_and_showing_cancels_it() {
     assert_eq!(h.alive.get(), 1);
 }
 
+/// 切走后刷屏的终端不等宽限就丢掉界面这份 VT，界面不再跟着宿主再解析一遍。
+#[test]
+fn a_hidden_flood_drops_the_view_vt_before_the_grace_period() {
+    let mut h = Harness::live(b"");
+    h.state.set_visible(false, h.now);
+    let changes = h.apply(vec![output(&vec![b'x'; HIDDEN_FEED_LIMIT - 1])]);
+    assert_eq!(changes.attach, None);
+    let changes = h.apply(vec![output(b"x")]);
+    assert_eq!(changes.attach, META_ONLY);
+    assert!(changes.replaced);
+    assert_eq!(h.alive.get(), 0);
+    // 回来再切走，从零重新计。
+    h.state.set_visible(true, h.now);
+    h.apply(vec![screen(AttachMode::Snapshot, 2, SessionMeta::default(), b"")]);
+    h.state.set_visible(false, h.now);
+    assert_eq!(h.apply(vec![output(b"x")]).attach, None);
+}
+
 #[test]
 fn hiding_while_attaching_goes_back_to_meta_only() {
     let mut h = Harness::live(b"");

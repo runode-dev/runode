@@ -38,6 +38,9 @@ use crate::host_client::{LinkEvent, Output, Screen as HostScreen};
 
 /// 离开显示这么久后丢掉界面这份 VT、只看状态；这期间切回来就什么都不用做。
 pub(super) const HIDE_GRACE: Duration = Duration::from_secs(5);
+/// 不显示时界面这份 VT 喂了这么多字节就不等 `HIDE_GRACE`、马上只看状态：刷屏的终端切走后
+/// 白白解析的输出比回来时要一份屏幕费事。
+const HIDDEN_FEED_LIMIT: usize = 1 << 20;
 /// 回到显示时主线程最多等这么久拿到宿主给的屏幕；等不到先画背景，到了再补上。
 pub(crate) const SHOW_WAIT: Duration = Duration::from_millis(30);
 
@@ -131,7 +134,7 @@ pub(super) struct Changes {
     pub(super) exited: bool,
     /// 和宿主断开了（这一批里刚断开）。
     pub(super) lost: bool,
-    /// 要重新连上会话（收到 `Resync`）。
+    /// 要重新连上会话（收到 `Resync`，或者不显示时输出超过 `HIDDEN_FEED_LIMIT`、改成只看状态）。
     pub(super) attach: Option<Attach>,
     /// 宿主以积压拒了这次 `Attach`（`ERROR_BACKED_UP`），会话还在：过一会儿用 `retry_attach` 再连。
     pub(super) retry_attach: bool,
@@ -156,6 +159,8 @@ pub(super) struct ScreenState<S> {
     visible: bool,
     /// 从什么时候起不显示，见 `tick`。
     hidden_since: Option<Instant>,
+    /// 这次不显示以来喂给界面这份 VT 的字节数，见 `HIDDEN_FEED_LIMIT`。
+    hidden_fed: usize,
     /// `meta` 是宿主给过的（不是建视图时的空白），`Attached` 带的状态可以和它比，见 `screen_arrived`。
     meta_known: bool,
     /// 正在断开后重新连上：这时连不成多半是宿主还没准备好，按断开处理，用户可以再点重开；平常连不成
@@ -199,6 +204,7 @@ impl<S: Vt> ScreenState<S> {
             backed_up: false,
             visible: true,
             hidden_since: None,
+            hidden_fed: 0,
             meta_known: false,
             reconnecting: false,
             size_owner: None,
@@ -345,6 +351,7 @@ impl<S: Vt> ScreenState<S> {
         self.visible = visible;
         if !visible {
             self.hidden_since = Some(now);
+            self.hidden_fed = 0;
             return None;
         }
         self.hidden_since = None;
@@ -356,9 +363,12 @@ impl<S: Vt> ScreenState<S> {
         self.attach(Attach { size: Some(self.last_size), mode: AttachMode::Snapshot })
     }
 
-    /// 不显示满了 `HIDE_GRACE` 时丢掉界面这份 VT、改成只看状态，返回要发的 `Attach`。
+    /// 不显示满了 `HIDE_GRACE`、或者不显示时喂过 `HIDDEN_FEED_LIMIT` 时丢掉界面这份 VT、改成只看
+    /// 状态，返回要发的 `Attach`。
     pub(super) fn tick(&mut self, now: Instant) -> Option<Attach> {
-        let due = self.hidden_since.is_some_and(|since| now.duration_since(since) >= HIDE_GRACE);
+        let due = self.hidden_since.is_some_and(|since| {
+            now.duration_since(since) >= HIDE_GRACE || self.hidden_fed >= HIDDEN_FEED_LIMIT
+        });
         if self.visible || !due || !matches!(self.screen, Screen::Live { .. } | Screen::Attaching { .. }) {
             return None;
         }
@@ -413,11 +423,20 @@ impl<S: Vt> ScreenState<S> {
             }
         }
         changes.fed |= self.feed(&mut pending);
+        if self.hidden_fed >= HIDDEN_FEED_LIMIT
+            && let Some(attach) = self.tick(now)
+        {
+            changes.replaced = true;
+            changes.attach = Some(attach);
+        }
         changes
     }
 
     /// 把攒着的几块输出一次喂给 VT，返回是否喂了。
     fn feed(&mut self, pending: &mut Vec<Output>) -> bool {
+        if !self.visible {
+            self.hidden_fed += pending.iter().map(|data| data.len()).sum::<usize>();
+        }
         let Some(session) = self.live_mut() else {
             pending.clear();
             return false;
