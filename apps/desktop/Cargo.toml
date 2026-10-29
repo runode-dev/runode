@@ -1,5 +1,6 @@
 [package]
 name = "runode"
+default-run = "runode"
 description = "Desktop workspace for AI coding agents, built on libghostty-vt and GPUI"
 version.workspace = true
 edition.workspace = true

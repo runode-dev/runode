@@ -3,9 +3,15 @@ CARGO ?= cargo
 ARGS ?=
 # 追加给 clippy 的参数，例如 CI 里 make clippy CLIPPY_ARGS="-- -D warnings" 让警告算失败。
 CLIPPY_ARGS ?=
-# 命令行的短名字：可执行文件旁边一个叫 rn 的符号链接。app 把可执行文件所在的目录加进终端的
-# PATH，开发版里也能敲 rn；打包时 scripts/bundle-macos.sh 在 Runode.app 里放同样的链接。
+# app 把可执行文件所在的目录加进终端的 PATH，开发版里也要能敲 rn。
+# Windows 用独立的控制台程序 rn.exe；cargo run 只编默认的 runode，要先编好 rn。
+ifeq ($(OS),Windows_NT)
+prepare_run = $(CARGO) build -p runode --bin rn $(if $(filter release,$(1)),--release)
+else
+# Unix 用符号链接；打包时 scripts/bundle-macos.sh 在 Runode.app 里放同样的链接。
 link_rn = @mkdir -p target/$(1) && ln -sfn runode target/$(1)/rn
+prepare_run = $(call link_rn,$(1))
+endif
 
 .DEFAULT_GOAL := help
 .PHONY: help submodules build release run run-release run-ios run-ios-device app install restart dmg check test clippy fmt fmt-check clean
@@ -25,11 +31,11 @@ release: ## 发布构建
 	$(CARGO) build --release
 
 run: ## 调试构建并启动
-	$(call link_rn,debug)
+	$(call prepare_run,debug)
 	$(CARGO) run -p runode -- $(ARGS)
 
 run-release: ## 发布构建并启动
-	$(call link_rn,release)
+	$(call prepare_run,release)
 	$(CARGO) run --release -p runode -- $(ARGS)
 
 # 模拟器用哪台，例如 make run-ios IOS_SIM="iPhone 18 Pro"；不给时用开着的那台。
