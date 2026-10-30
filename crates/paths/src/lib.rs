@@ -225,6 +225,35 @@ impl Dirs {
         Some(self.runtime_dir()?.join("ssh-agent.sock"))
     }
 
+    /// 连远端主机时 OpenSSH 的 ControlMaster socket，在 `runtime_dir` 下的 `ssh` 里，文件名留给 OpenSSH 按
+    /// 连接算（`%C`，展开后 40 个字符）。展开后放不进 `sun_path` 时为 `None`，由调用方不复用连接。
+    pub fn ssh_control_path(&self) -> Option<PathBuf> {
+        let dir = self.runtime_dir()?.join("ssh");
+        fits_sun_path(&dir.join("0".repeat(40))).then(|| dir.join("%C"))
+    }
+
+    /// 建好 `ssh_control_path` 所在的目录，只有自己能进：能连上 ControlMaster 的就能借这条连接在远端跑命令。
+    pub fn create_ssh_control_dir(&self) -> std::io::Result<PathBuf> {
+        create_private_dir(self.runtime_dir().map(|dir| dir.join("ssh")))
+    }
+
+    /// 桌面开着的 askpass socket：ssh 要问密码时调起的 runode 经它问桌面。按进程分开，几个 app 同时开着时
+    /// 各问各的。
+    pub fn askpass_socket_file(&self, pid: u32) -> Option<PathBuf> {
+        let path = self.runtime_dir()?.join(format!("askpass-{pid}.sock"));
+        fits_sun_path(&path).then_some(path)
+    }
+
+    /// 连远端主机时 ssh 写在 stderr 上的话，按连接一个文件，连不上时据此说清原因。
+    pub fn ssh_log_dir(&self) -> Option<PathBuf> {
+        self.cache_file("ssh")
+    }
+
+    /// 下载来、要装到远端主机上的 runode，按版本和平台存，下次连别的主机不用再下。
+    pub fn remote_bin_cache_dir(&self) -> Option<PathBuf> {
+        self.cache_file("remote-bin")
+    }
+
     /// 用户自己的配色主题目录，按名字找主题时最先找这里。
     pub fn themes_dir(&self) -> Option<PathBuf> {
         self.data_file("themes")

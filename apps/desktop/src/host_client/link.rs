@@ -55,7 +55,7 @@ use runode_types::{
 
 use super::UnixStream;
 
-/// 写一帧最多等这么久，超时按连接断开处理。
+/// 写一帧最多等这么久，超时按连接断开处理；经 ssh 连远端时另见 `Timeouts::REMOTE`。
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// 握手（`Hello` 到 `Welcome`）最多等这么久。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -212,8 +212,28 @@ pub struct Link {
     inner: Arc<Inner>,
 }
 
+/// 一条连接上几件事最多等多久。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Timeouts {
+    /// 写一帧，超时按连接断开处理。
+    pub write: Duration,
+    /// 握手时等 `Welcome`。
+    pub handshake: Duration,
+    /// `spawn` 等宿主开好会话。
+    pub spawn: Duration,
+}
+
+impl Timeouts {
+    /// 本机的宿主：对面卡住时要尽快知道。
+    pub const LOCAL: Self = Self { write: WRITE_TIMEOUT, handshake: HANDSHAKE_TIMEOUT, spawn: SPAWN_TIMEOUT };
+    /// 经 ssh 连的远端宿主：慢的链路上一大段粘贴、一次来回都要久得多，断线另靠 ssh 的保活和心跳发现。
+    pub const REMOTE: Self =
+        Self { write: Duration::from_secs(30), handshake: Duration::from_secs(15), spawn: Duration::from_secs(15) };
+}
+
 struct Inner {
     build: BuildId,
+    timeouts: Timeouts,
     state: Mutex<State>,
     /// 现在这条连接的写的一端。锁的先后：拿着 `state` 时可以再拿它，反过来不行。
     writer: Mutex<Option<Writer>>,
@@ -485,10 +505,16 @@ impl Link {
     /// 还没连上宿主的一条连接，接着用 `connect`。`build` 是这次构建的标识，和宿主的一样时宿主
     /// 给快照。
     pub fn new(build: BuildId) -> Self {
+        Self::with_timeouts(build, Timeouts::LOCAL)
+    }
+
+    /// 同 `new`，几件事各等多久按 `timeouts`。
+    pub fn with_timeouts(build: BuildId, timeouts: Timeouts) -> Self {
         let (ui, ui_requests) = unbounded();
         let (todos, todos_changed) = unbounded();
         let inner = Inner {
             build,
+            timeouts,
             state: Mutex::default(),
             writer: Mutex::new(None),
             ui,
@@ -514,8 +540,8 @@ impl Link {
 
     fn connect_to(&self, stream: UnixStream, standalone_only: bool) -> Result<(), ConnectError> {
         runode_host::set_buffers(&stream);
-        stream.set_write_timeout(Some(WRITE_TIMEOUT)).map_err(ConnectError::Io)?;
-        let welcome = handshake(&stream, &self.inner.build)?;
+        stream.set_write_timeout(Some(self.inner.timeouts.write)).map_err(ConnectError::Io)?;
+        let welcome = handshake(&stream, &self.inner.build, self.inner.timeouts.handshake)?;
         if standalone_only && !welcome.standalone {
             let _ = stream.shutdown(Shutdown::Both);
             return Err(ConnectError::NotStandalone);
@@ -647,10 +673,10 @@ impl Link {
         }
     }
 
-    /// 新开一个会话，等宿主回话（最多 `SPAWN_TIMEOUT`），返回它的标识。开好的会话不会自动连上，
+    /// 新开一个会话，等宿主回话（最多 `Timeouts::spawn`），返回它的标识。开好的会话不会自动连上，
     /// 接着 `attach`。
     pub fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
-        self.spawn_within(options, SPAWN_TIMEOUT)
+        self.spawn_within(options, self.inner.timeouts.spawn)
     }
 
     /// 同 `spawn`，最多等 `timeout`。
@@ -935,7 +961,7 @@ struct Welcome {
 }
 
 /// 以桌面界面的身份握手，返回宿主的 `Welcome`。
-fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectError> {
+fn handshake(stream: &UnixStream, build: &BuildId, timeout: Duration) -> Result<Welcome, ConnectError> {
     let hello = ClientMsg::Hello {
         protocol: PROTOCOL_VERSION,
         build: build.clone(),
@@ -947,7 +973,7 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
     let frame = Frame::control(&hello).map_err(|err| ConnectError::Io(io::Error::other(err)))?;
     let mut writer = stream;
     write_frame(&mut writer, frame.kind, 0, &frame.payload).map_err(frame_error)?;
-    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).map_err(ConnectError::Io)?;
+    stream.set_read_timeout(Some(timeout)).map_err(ConnectError::Io)?;
     // 不经缓冲读：缓冲会把握手之后的帧也读走。
     let mut reader = stream;
     let answer = loop {

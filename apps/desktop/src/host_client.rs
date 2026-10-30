@@ -20,6 +20,8 @@ pub(crate) mod bridge;
 mod handoff;
 mod launch;
 mod link;
+#[allow(dead_code)]
+pub mod remote;
 
 use std::{
     path::{Path, PathBuf},
@@ -45,7 +47,7 @@ pub use handoff::{HandoffFailure, HandoffStatus, READY_BY, upgrade};
 use launch::{Choice, Probe};
 #[cfg(test)]
 pub use link::Attached;
-pub use link::{ConnectError, Link, LinkEvent, Output, Screen, SpawnOptions, UiTicket};
+pub use link::{ConnectError, Link, LinkEvent, Output, Screen, SpawnOptions, Timeouts, UiTicket};
 #[cfg(unix)]
 pub(crate) use std::os::unix::net::UnixStream;
 #[cfg(windows)]

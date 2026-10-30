@@ -162,6 +162,14 @@ fn copy_app_from(dmg: &Path, dir: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// 把 `dmg` 里的 `ARCHIVE_APP` 拷进 `dir`，核对它是 `team` 签的、版本号是 `version`。
+pub(crate) fn app_from_dmg(dmg: &Path, dir: &Path, team: &str, version: &str) -> Result<PathBuf, Error> {
+    copy_app_from(dmg, dir)?;
+    let app = only_app_in(dir, OsStr::new(ARCHIVE_APP))?;
+    verify(&app, team, version)?;
+    Ok(app)
+}
+
 /// 可执行文件 `exe` 所在的 .app：`<名字>.app/Contents/MacOS/<可执行文件>`。
 fn bundle_of(exe: &Path) -> Option<PathBuf> {
     let macos = exe.parent()?;

@@ -13,9 +13,12 @@
 //!
 //! 下载经 NSURLSession，跟着系统的代理设置和证书。app 自己下载的文件不带隔离属性，换上去以后
 //! Gatekeeper 也不会再拦一次。
+//!
+//! 装到 SSH 远端的发布包也从这里取，见 `bundle`。
 
 #[cfg(any(windows, test))]
 mod authenticode;
+pub mod bundle;
 mod fetch;
 #[cfg(not(windows))]
 mod install;

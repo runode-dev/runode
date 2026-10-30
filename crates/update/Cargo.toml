@@ -11,6 +11,8 @@ publish.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+# 核对给 SSH 远端下载的发布包。
+sha2.workspace = true
 
 # 下载用系统的 URL Loading System（NSURLSession）：跟系统的代理设置和证书，不另带 TLS 库；换 .app
 # 用 renamex_np 原子地对调两个目录。
