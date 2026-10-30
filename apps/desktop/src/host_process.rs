@@ -164,8 +164,9 @@ pub fn take_over() -> i32 {
             // 关掉管道，app 不必等这个进程退出。
             drop(status);
             // 旧宿主退出前还占着远程访问的端口和锁，这边开不了时隔一会儿再试，见 `runode_remote::Service`。
-            // 服务里的宿主、装了宿主的登录自启时（旧宿主是自启拉起的 `--stay`）不因空闲退出。
-            let stay = service.is_some() || runode_autostart::is_installed(runode_autostart::Kind::Host, &dirs);
+            // 服务里的宿主、旧宿主不因空闲退出时不因空闲退出；旧宿主没说时看装没装宿主的登录自启。
+            let stay = service.is_some()
+                || report.stay.unwrap_or_else(|| runode_autostart::is_installed(runode_autostart::Kind::Host, &dirs));
             serve(&host, if stay { Duration::MAX } else { IDLE_EXIT });
             0
         }

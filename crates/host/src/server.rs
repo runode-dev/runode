@@ -124,6 +124,9 @@ pub(crate) struct Peers {
     pub(crate) stay_up: bool,
     /// 看板上有定时：到点要开任务，没有会话也没有连接时也不算空闲，见 `todos`。
     pub(crate) scheduled: bool,
+    /// `run_until_idle` 不因空闲返回（给的时限是 `Duration::MAX`），交接时告诉新宿主。
+    #[cfg(unix)]
+    pub(crate) stay: bool,
 }
 
 impl Default for Peers {
@@ -142,6 +145,8 @@ impl Default for Peers {
             activity_at: Instant::now(),
             stay_up: false,
             scheduled: false,
+            #[cfg(unix)]
+            stay: false,
         }
     }
 }

@@ -139,7 +139,7 @@ impl Host {
             tracing::debug!("cannot tell the old host the handoff is done: {err}");
         }
         let _ = stream.shutdown(std::net::Shutdown::Both);
-        let report = TakeOverReport { sessions: taken.handles.len(), replayed: taken.replayed };
+        let report = TakeOverReport { sessions: taken.handles.len(), replayed: taken.replayed, stay: taken.stay };
         tracing::info!(
             "took {} sessions over in {} ms ({} rebuilt from a VT replay{}; handshake and the old host getting \
              ready {} ms, receive {} ms, rebuild {} ms, wait for the commit {} ms, open {} ms)",
@@ -278,6 +278,7 @@ struct HostState {
     theme: Option<TermSettings>,
     clipboard: ClipboardAccess,
     layout: Vec<WindowLayout>,
+    stay: Option<bool>,
 }
 
 /// 接手了的会话，PTY 都停在闸门上。
@@ -286,6 +287,7 @@ struct Taken {
     theme: Option<TermSettings>,
     clipboard: ClipboardAccess,
     layout: Vec<WindowLayout>,
+    stay: Option<bool>,
     handles: Vec<(SessionId, Handle)>,
     replayed: Vec<SessionId>,
 }
@@ -316,8 +318,8 @@ impl Received {
             return Err(reason);
         }
         handles.sort_by_key(|(id, _)| *id);
-        let HostState { listener, lock, socket, theme, clipboard, layout } = host;
-        Ok((Taken { socket, theme, clipboard, layout, handles, replayed }, listener, lock))
+        let HostState { listener, lock, socket, theme, clipboard, layout, stay } = host;
+        Ok((Taken { socket, theme, clipboard, layout, stay, handles, replayed }, listener, lock))
     }
 }
 
@@ -326,8 +328,18 @@ impl Received {
 fn receive(shared: &Shared, stream: &UnixStream, sessions: u32, our_format: u16) -> Result<Received, String> {
     let (data, fds) = fd_passing::recv_with_fds(stream).map_err(|err| format!("cannot receive the host: {err}"))?;
     let (part, _) = decode_part(&data).map_err(|err| format!("cannot read the host: {err}"))?;
-    let HandoffPart::Host { format, snapshot_format, sessions: count, theme, socket, build, clipboard, layout, .. } =
-        part
+    let HandoffPart::Host {
+        format,
+        snapshot_format,
+        sessions: count,
+        theme,
+        socket,
+        build,
+        clipboard,
+        layout,
+        stay,
+        ..
+    } = part
     else {
         return Err("the old host did not start with itself".into());
     };
@@ -346,6 +358,7 @@ fn receive(shared: &Shared, stream: &UnixStream, sessions: u32, our_format: u16)
             theme,
             clipboard,
             layout,
+            stay,
         },
         adopting: Vec::new(),
         rebuilt: Vec::new(),

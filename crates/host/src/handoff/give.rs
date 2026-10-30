@@ -298,6 +298,10 @@ fn send_parts<'a>(
         let registry = shared.registry();
         ((registry.theme_generation > 0).then(|| (*registry.settings).clone()), registry.clipboard)
     };
+    let (layout, stay) = {
+        let peers = shared.peers();
+        (peers.layout.clone(), peers.stay)
+    };
     let host = HandoffPart::Host {
         format: HANDOFF_FORMAT,
         build: shared.build.clone(),
@@ -308,7 +312,8 @@ fn send_parts<'a>(
         record_history: false,
         socket: giving.socket.clone(),
         clipboard,
-        layout: shared.peers().layout.clone(),
+        layout,
+        stay: Some(stay),
     };
     send_part(stream, &host, &[], &[giving.listener.as_fd(), giving.lock.as_fd()])?;
     for (id, exported) in handed {

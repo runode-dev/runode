@@ -26,6 +26,7 @@ fn host() -> HandoffPart {
         socket: "/tmp/runode/host.sock".into(),
         clipboard: ClipboardAccess { write: ClipboardWrite::Deny, read: ClipboardRead::Allow },
         layout: vec![WindowLayout { index: 1, front: true, workspaces: Vec::new() }],
+        stay: Some(true),
     }
 }
 
@@ -137,7 +138,16 @@ fn non_utf8_paths_are_handed_over() {
     assert_eq!(meta.prompt_cwd, Some(PathBuf::from("/tmp/\u{fffd}")));
 
     let HandoffPart::Host {
-        format, build, snapshot_format, sessions, theme, record_history, clipboard, layout, ..
+        format,
+        build,
+        snapshot_format,
+        sessions,
+        theme,
+        record_history,
+        clipboard,
+        layout,
+        stay,
+        ..
     } = host()
     else {
         unreachable!()
@@ -152,6 +162,7 @@ fn non_utf8_paths_are_handed_over() {
         socket: odd.join("host.sock"),
         clipboard,
         layout,
+        stay,
     };
     assert_eq!(decode_part(&encode_part(&part, &[]).unwrap()).unwrap().0, part);
 }

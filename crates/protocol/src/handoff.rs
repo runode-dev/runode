@@ -67,6 +67,9 @@ pub enum HandoffPart {
         /// 不能为它放弃交接，所以 `WindowLayout` 不受上面冻结的约束。
         #[serde(default, deserialize_with = "or_default")]
         layout: Vec<WindowLayout>,
+        /// 旧宿主不因空闲退出（比如登录自启拉起的宿主），新宿主接手后照办。为空时由新宿主自己定。
+        #[serde(default)]
+        stay: Option<bool>,
     },
     /// 一个会话。已经启动的会话带一个描述符 `[PTY master]`，还没启动的不带，新宿主重新打开伪终端；
     /// 两个块依次是 `snapshot`（宿主那份 VT 的原始快照，没抹掉报告口令；编不出来时为空）和

@@ -633,6 +633,23 @@ fn the_clipboard_rules_and_the_layout_go_with_the_handoff() {
     desktop.wait_for_output(channel, b"^[[?62;1;6;22c");
 }
 
+/// 旧宿主是不是常驻（`run_until_idle` 给 `Duration::MAX`）跟着交过去。
+#[test]
+fn whether_the_old_host_stays_goes_with_the_handoff() {
+    for (name, idle, stay) in [("stay", Duration::MAX, true), ("idle", ROLE_IDLE, false)] {
+        let dir = temp_dir(name);
+        let (old, socket) = old_here(&dir);
+        let running = thread::spawn(move || old.run_until_idle(idle));
+        // 等它进了 `run_until_idle`，记下时限。
+        thread::sleep(Duration::from_millis(200));
+        let new = Host::new(BuildId(NEW_BUILD.into()));
+        new.mark_standalone();
+        let report = new.take_over(&socket, TakeOverOptions::default()).unwrap();
+        assert_eq!(report.stay, Some(stay));
+        assert_eq!(running.join().unwrap(), Stopped::Handoff);
+    }
+}
+
 /// 交接时程序不读输入，写不进 PTY 的输入跟着交过去，新宿主写进去，程序读到的每一行正好一次。
 #[test]
 fn input_the_old_host_could_not_write_arrives_exactly_once() {

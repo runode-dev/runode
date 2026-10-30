@@ -52,6 +52,10 @@ impl Host {
         let tick = (idle / 4).clamp(Duration::from_millis(5), MAX_TICK);
         let mut peers = shared.peers();
         peers.standalone = true;
+        #[cfg(unix)]
+        {
+            peers.stay = idle == Duration::MAX;
+        }
         let mut quiet_since: Option<Instant> = None;
         let reason = loop {
             if let Some(reason) = peers.stop {

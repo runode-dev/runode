@@ -72,6 +72,8 @@ impl fmt::Debug for TakeOverOptions {
 pub struct TakeOverReport {
     pub sessions: usize,
     pub replayed: Vec<SessionId>,
+    /// 旧宿主不因空闲退出（`Host::run_until_idle` 给的是 `Duration::MAX`），接手后要照办；为空时旧宿主没说。
+    pub stay: Option<bool>,
 }
 
 /// 交接没成。旧宿主照旧跑着、会话都在它手里，这边的 `Host` 也没留下任何状态。
