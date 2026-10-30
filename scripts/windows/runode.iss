@@ -33,6 +33,9 @@ WizardStyle=modern
 [Files]
 Source: "{#SourceDir}\runode.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\rn.exe"; DestDir: "{app}"; Flags: ignoreversion
+; rn.exe 的副本：shell 按 PATHEXT 先找 .com，终端里敲 runode 跑的是控制台程序，输出回到终端；
+; 不带参数时它照样打开窗口。
+Source: "{#SourceDir}\rn.exe"; DestDir: "{app}"; DestName: "runode.com"; Flags: ignoreversion
 Source: "{#SourceDir}\conpty.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\OpenConsole.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\conpty-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
@@ -44,6 +47,9 @@ Name: "{autoprograms}\Runode"; Filename: "{app}\runode.exe"
 ; 命令行 `rn` 要在 PATH 上。
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
   ValueData: "{olddata};{app}"; Check: NeedsPathEntry
+; 登录自启（`runode service install host`，`runode_autostart` 的 `run_key`）登记的值，安装时不写，卸载时删掉。
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; \
+  ValueName: "Runode Host"; Flags: dontcreatekey uninsdeletevalue
 
 [Run]
 ; 交互安装时问一句要不要打开；静默安装（自动更新、脚本）直接打开，/NORUN 不打开。
