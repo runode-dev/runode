@@ -79,6 +79,8 @@ pub struct TextareaState {
     max_lines: usize,
     /// 高度撑满父元素，不随行数伸缩，见 `fill_height`。
     fill: bool,
+    /// 左边画一栏行号。
+    line_numbers: bool,
     /// 按住鼠标拖选中；双击、三击后拖动按词、按行扩展。
     drag: Option<Drag>,
     history: History,
@@ -130,6 +132,7 @@ impl TextareaState {
             min_lines: 1,
             max_lines: 10,
             fill: false,
+            line_numbers: false,
             drag: None,
             history: History::default(),
             version: 0,
@@ -177,6 +180,12 @@ impl TextareaState {
     /// 选区跨过的硬换行行号（从 0 数，不含 `end`），没选东西时是 `None`。
     pub fn selected_lines(&self) -> Option<Range<usize>> {
         lines_spanned(&self.content, self.selected.clone())
+    }
+
+    /// 选中硬换行行号 `lines`（从 0 数，不含 `end`）这几行，不含末行的换行符，下一帧滚到露出光标；超出的行号
+    /// 收到文末。
+    pub fn select_lines(&mut self, lines: Range<usize>, cx: &mut Context<Self>) {
+        self.select_range(lines_range(&self.content, lines), cx);
     }
 
     /// 换上按版本 `version` 的文字算的样式段（字节范围，从前到后不重叠）。文字已经又改过、或者正在组字时
@@ -229,6 +238,13 @@ impl TextareaState {
         self.min_lines = min.max(1);
         self.max_lines = max.max(self.min_lines);
         self.autoscroll = true;
+        cx.notify();
+    }
+
+    /// 左边画一栏行号：每段硬换行的第一个视觉行写上它是第几行（从 1 数），软换行折出来的行不写。栏宽按最大
+    /// 行号的位数定，文字往右让开。
+    pub fn show_line_numbers(&mut self, cx: &mut Context<Self>) {
+        self.line_numbers = true;
         cx.notify();
     }
 
@@ -795,6 +811,17 @@ fn lines_spanned(text: &str, range: Range<usize>) -> Option<Range<usize>> {
     Some(line(range.start)..line(last) + 1)
 }
 
+/// 硬换行行号 `lines` 在 `text` 里的字节范围，不含末行的换行符。
+fn lines_range(text: &str, lines: Range<usize>) -> Range<usize> {
+    let newline = |n: usize| text.match_indices('\n').nth(n).map(|(ix, _)| ix);
+    let start = match lines.start {
+        0 => 0,
+        line => newline(line - 1).map_or(text.len(), |ix| ix + 1),
+    };
+    let end = newline(lines.end.max(lines.start + 1) - 1).unwrap_or(text.len());
+    start..end.max(start)
+}
+
 /// 三击选中的范围：所在那段硬换行连同行尾的换行符。
 fn line_range_at(text: &str, offset: usize) -> Range<usize> {
     let line = hard_line_at(text, offset);
@@ -854,6 +881,23 @@ mod tests {
         assert_eq!(lines_spanned(text, 2..3), Some(1..2));
         assert_eq!(lines_spanned(text, line_range_at(text, 2)), Some(1..2));
         assert_eq!(lines_spanned(text, 0..text.len()), Some(0..3));
+    }
+
+    #[test]
+    fn lines_range_leaves_out_the_last_newline() {
+        let text = "a\nbb\nc";
+        assert_eq!(lines_range(text, 1..2), 2..4);
+        assert_eq!(lines_range(text, 0..3), 0..text.len());
+        assert_eq!(lines_range(text, 2..3), 5..6);
+        // 超出的行号收到文末。
+        assert_eq!(lines_range(text, 7..8), 6..6);
+        assert_eq!(lines_range("a\n\nc", 1..2), 2..2);
+        // 选到文末的空行时连同它前面的换行符。
+        assert_eq!(lines_range("a\n", 0..2), 0..2);
+        assert_eq!(lines_range("\n", 0..2), 0..1);
+        for lines in [0..1, 1..2, 0..3] {
+            assert_eq!(lines_spanned(text, lines_range(text, lines.clone())), Some(lines));
+        }
     }
 
     #[test]

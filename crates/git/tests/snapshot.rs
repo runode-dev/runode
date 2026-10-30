@@ -38,6 +38,7 @@ fn ignored_dirs_cover_their_contents() {
         unstaged: Vec::new(),
         statuses: HashMap::new(),
         ignored: HashSet::from(["target".into(), "out/gen".into()]),
+        head_stats: HashMap::new(),
         info: RepoInfo::default(),
     };
     assert!(snapshot.is_ignored(Path::new("target")));
@@ -45,6 +46,24 @@ fn ignored_dirs_cover_their_contents() {
     assert!(snapshot.is_ignored(Path::new("out/gen/a.rs")));
     assert!(!snapshot.is_ignored(Path::new("out")));
     assert!(!snapshot.is_ignored(Path::new("targets/x")));
+}
+
+/// 暂存后又在工作区改了同一行：相对 HEAD 只改了一行，不是两段相加的两行。
+#[test]
+fn partially_staged_files_count_lines_against_head() {
+    let repo = TestRepo::new("snapshot-head-stat");
+    repo.commit_file("f", "a\nb\nc\n", "init");
+    repo.write("f", "a\nB\nc\n");
+    repo.git(&["add", "f"]);
+    repo.write("f", "a\nBB\nc\nd\n");
+    repo.write("g", "x\n");
+    let snapshot = read(&repo);
+    assert_eq!(snapshot.head_stat(Path::new("f")), Some((2, 1)));
+    assert_eq!(snapshot.head_stat(Path::new("g")), Some((1, 0)));
+    assert_eq!(snapshot.head_stat(Path::new("h")), None);
+    // 工作区改回 HEAD 的样子：两段各有一处改动，相对 HEAD 没有。
+    repo.write("f", "a\nb\nc\n");
+    assert_eq!(read(&repo).head_stat(Path::new("f")), Some((0, 0)));
 }
 
 #[cfg(unix)]

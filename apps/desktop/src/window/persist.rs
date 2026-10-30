@@ -346,7 +346,6 @@ impl WindowView {
             sidebar: self.sidebar_shown,
             sidebar_width: self.sidebar_width,
             panel_width: self.panel_width,
-            preview_width: self.preview_width,
             preview_wrap: self.preview.read(cx).wrap(),
             preview_source: self.preview.read(cx).source(),
             show_ignored: file_tree.show_ignored,
@@ -447,7 +446,6 @@ impl WindowView {
             self.sidebar_shown = saved.sidebar;
             self.sidebar_width = saved.sidebar_width;
             self.panel_width = saved.panel_width;
-            self.preview_width = saved.preview_width;
             self.preview.update(cx, |panel, _| panel.set_options(saved.preview_wrap, saved.preview_source));
             let file_tree = crate::file_tree::Options {
                 show_ignored: saved.show_ignored,

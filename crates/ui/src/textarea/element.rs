@@ -3,8 +3,8 @@
 
 use gpui::{
     App, AvailableSpace, Bounds, ContentMask, DispatchPhase, Element, ElementId, Entity, GlobalElementId, IntoElement,
-    LayoutId, MouseButton, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, SharedString, Style, TextAlign,
-    TextRun, TextStyle, Window, WrappedLine, fill, point, px, relative, size,
+    LayoutId, MouseButton, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ShapedLine, SharedString, Style,
+    TextAlign, TextRun, TextStyle, Window, WrappedLine, fill, point, px, relative, size,
 };
 
 use super::{
@@ -15,6 +15,32 @@ use super::{
 /// 留给光标的宽度之外才是折行宽度，免得行尾的光标被裁掉。
 fn wrap_width(width: Pixels) -> Pixels {
     (width - CARET_WIDTH).max(px(1.))
+}
+
+/// 行号栏里数字和文字之间留的空。
+const GUTTER_GAP: f32 = 12.;
+
+/// 行号栏的宽度：最大行号的位数（至少两位）个数字宽，再加上和文字之间的空；不显示行号时为零。
+fn gutter_width(area: &TextareaState, style: &TextStyle, font_size: Pixels, window: &Window) -> Pixels {
+    if !area.line_numbers {
+        return px(0.);
+    }
+    let digits = (area.content.matches('\n').count() + 1).to_string().len().max(2);
+    let text = SharedString::from("0".repeat(digits));
+    let run = number_run(style, text.len());
+    window.text_system().shape_line(text, font_size, &[run], None).width + px(GUTTER_GAP)
+}
+
+/// 行号的样式段：颜色调淡。
+fn number_run(style: &TextStyle, len: usize) -> TextRun {
+    TextRun {
+        len,
+        font: style.font(),
+        color: style.color.opacity(0.4),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }
 }
 
 /// 提示文字往右让开了光标，折行宽度跟着减。
@@ -55,6 +81,10 @@ pub(super) struct TextareaTextLayout {
     selections: Vec<PaintQuad>,
     /// 有选区时不画光标。
     caret: Option<PaintQuad>,
+    /// 文字占的区域：整个元素除去左边的行号栏。
+    text_bounds: Bounds<Pixels>,
+    /// 看得见的行号：排好的数字和它右边缘的位置。
+    numbers: Vec<(ShapedLine, Point<Pixels>)>,
 }
 
 impl IntoElement for TextareaText {
@@ -132,6 +162,9 @@ impl Element for TextareaText {
             {
                 return size(width.unwrap_or_default(), height);
             }
+            // 折行按除去行号栏的宽度算。
+            let gutter = gutter_width(area, &style, font_size, window);
+            let text_width = width.map(|width| width - gutter);
             // 和 `prepaint` 用一样的折行宽度和样式段，排好的结果在同一帧里能复用。
             let count = |text: SharedString, runs: &[TextRun], wrap: Option<Pixels>, window: &mut Window| match wrap {
                 Some(wrap) => window
@@ -140,11 +173,11 @@ impl Element for TextareaText {
                     .map_or_else(|_| text.split('\n').count(), |lines| row_count(&lines)),
                 None => text.split('\n').count(),
             };
-            let mut rows = count(area.content.clone().into(), &area.runs(&style), width.map(wrap_width), window);
+            let mut rows = count(area.content.clone().into(), &area.runs(&style), text_width.map(wrap_width), window);
             // 空着时提示文字折成几行就撑几行，免得被裁掉。
             if area.content.is_empty() && !area.placeholder.is_empty() {
                 let run = placeholder_run(&style, area.placeholder.len());
-                let wrap = width.map(placeholder_wrap_width);
+                let wrap = text_width.map(placeholder_wrap_width);
                 rows = rows.max(count(area.placeholder.clone(), &[run], wrap, window));
             }
             size(width.unwrap_or_default(), line_height * rows.clamp(area.min_lines, area.max_lines))
@@ -165,6 +198,8 @@ impl Element for TextareaText {
         let style = window.text_style();
         let font_size = style.font_size.to_pixels(window.rem_size());
         let line_height = window.line_height();
+        let gutter = gutter_width(area, &style, font_size, window);
+        let bounds = Bounds::from_corners(point(bounds.left() + gutter, bounds.top()), bounds.bottom_right());
         let wrap_width = wrap_width(bounds.size.width);
         let lines: Vec<WrappedLine> = window
             .text_system()
@@ -231,6 +266,25 @@ impl Element for TextareaText {
                 style.color,
             )
         });
+        // 看得见的视觉行里，各段硬换行的第一行写上行号，右边对齐到行号栏里文字前面那段空的左边。
+        let mut numbers = Vec::new();
+        if area.line_numbers {
+            let first = (scroll_y / line_height).floor() as usize;
+            let last = ((scroll_y + bounds.size.height) / line_height).ceil() as usize;
+            let mut line = rows[..first.min(rows.len())].iter().filter(|row| !row.soft).count() + 1;
+            for (ix, row) in rows.iter().enumerate().take(last + 1).skip(first) {
+                let starts_line = ix == 0 || !rows[ix - 1].soft;
+                if starts_line {
+                    let text = SharedString::from(line.to_string());
+                    let run = number_run(&style, text.len());
+                    let shaped = window.text_system().shape_line(text, font_size, &[run], None);
+                    numbers.push((shaped, point(bounds.left() - px(GUTTER_GAP), row_top(ix))));
+                }
+                if !row.soft {
+                    line += 1;
+                }
+            }
+        }
         TextareaTextLayout {
             lines,
             placeholder,
@@ -243,6 +297,8 @@ impl Element for TextareaText {
             scroll_y,
             selections,
             caret,
+            text_bounds: bounds,
+            numbers,
         }
     }
 
@@ -260,11 +316,16 @@ impl Element for TextareaText {
         let focus_handle = area.focus_handle.clone();
         let focused = focus_handle.is_focused(window);
         let dragging = area.drag.is_some();
-        window.handle_input(&focus_handle, crate::input_handler::ElementInput::new(bounds, self.area.clone()), cx);
+        let text_bounds = layout.text_bounds;
+        window.handle_input(&focus_handle, crate::input_handler::ElementInput::new(text_bounds, self.area.clone()), cx);
 
         let line_height = layout.line_height;
-        let origin = point(bounds.left(), bounds.top() - layout.scroll_y);
+        let origin = point(text_bounds.left(), text_bounds.top() - layout.scroll_y);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            for (number, right) in &layout.numbers {
+                let origin = point(right.x - number.width, right.y);
+                number.paint(origin, line_height, TextAlign::Left, None, window, cx).ok();
+            }
             for selection in layout.selections.drain(..) {
                 window.paint_quad(selection);
             }
@@ -300,7 +361,7 @@ impl Element for TextareaText {
             font_size: layout.font_size,
             line_height,
             wrap_width: layout.wrap_width,
-            bounds,
+            bounds: text_bounds,
         };
         let rows = std::mem::take(&mut layout.rows);
         let (version, scroll_y) = (layout.version, layout.scroll_y);

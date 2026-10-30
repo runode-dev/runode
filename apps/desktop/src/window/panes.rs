@@ -737,17 +737,16 @@ impl WindowView {
                         cx.notify();
                         return;
                     }
-                    Divider::Preview | Divider::Panel => {
+                    Divider::Panel => {
                         let viewport = f32::from(window.viewport_size().width);
                         // 卡片样式下分隔线和窗口右边之间还有卡片的间距，按经典样式算宽度前先扣掉。
-                        let widths = this.right_panel_widths(viewport, cx);
+                        let widths = this.right_panel_widths(viewport);
                         let spacing = if cards(cx) {
-                            this.right_divider_offset(divider, widths, true)
-                                - this.right_divider_offset(divider, widths, false)
+                            this.right_divider_offset(widths, true) - this.right_divider_offset(widths, false)
                         } else {
                             0.
                         };
-                        this.resize_right_panel(divider, f32::from(event.position.x), viewport - spacing, cx);
+                        this.resize_right_panel(f32::from(event.position.x), viewport - spacing);
                         cx.notify();
                         return;
                     }

@@ -1,4 +1,5 @@
-//! 标题栏：窗口的标题栏设置、标签和新建标签按钮、拖动中的标签，以及标题、agent 状态标记和快捷键提示。
+//! 标题栏：窗口的标题栏设置、终端标签、排在它们后面的文件标签（预览栏的标签）和新建标签按钮、拖动中的
+//! 标签，以及标题、agent 状态标记和快捷键提示。
 
 use std::borrow::Cow;
 
@@ -6,7 +7,7 @@ use crate::ui::theme::ActiveTheme as _;
 
 use gpui::{
     Action, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla, MouseButton, MouseDownEvent, Pixels,
-    Render, Role, SharedString, Stateful, TitlebarOptions, Window, WindowControlArea, div, linear_color_stop,
+    Render, Role, SharedString, Stateful, TitlebarOptions, Window, WindowControlArea, div, img, linear_color_stop,
     linear_gradient, point, prelude::*, px, svg,
 };
 use runode_types::agent::AgentKind;
@@ -32,12 +33,17 @@ use crate::ui::{
 pub(super) use crate::ui::tabs::{drag_chip, drop_marker};
 use crate::{
     assets::{PIXEL_QUESTION_ICON, PLUS_ICON, PROMPT_ICON},
+    preview_panel::FileTab,
     terminal_view::{DEFAULT_TITLE, TerminalView},
     ui::{
+        base_name,
         button::{Button, ButtonSize},
         display_dir,
+        file_icons::file_icon,
         font_size::FontSize,
         hsla,
+        icons::DIFF_ICON,
+        panel::{added_label, removed_label},
         tooltip::{shortcut_text, tooltip},
     },
 };
@@ -83,6 +89,43 @@ impl Render for DraggedTab {
         let bg = if super::cards(cx) { cx.theme().tab_active } else { cx.theme().mix(0.08) };
         drag_chip(self.width, px(TITLEBAR_HEIGHT), self.title.clone(), bg, cx).justify_center()
     }
+}
+
+/// 拖动中的文件标签：只能放到别的文件标签上，按 `ix` 挪位置。
+#[derive(Clone)]
+struct DraggedFileTab {
+    /// 开始拖动时是第几个文件标签：挪的是它，落点提示也按它画在目标标签的哪一边。
+    ix: usize,
+    name: SharedString,
+    width: Pixels,
+}
+
+impl Render for DraggedFileTab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let bg = if super::cards(cx) { cx.theme().tab_active } else { cx.theme().mix(0.08) };
+        drag_chip(self.width, px(TITLEBAR_HEIGHT), self.name.clone(), bg, cx).justify_center()
+    }
+}
+
+/// 当前标签的底色和悬停时的底色：卡片样式下当前标签是终端背景色的胶囊，从标签条上浮起来。
+fn tab_backgrounds(cards: bool, cx: &App) -> (Hsla, Hsla) {
+    if cards {
+        let (track, pill) = crate::ui::theme::tab_track_colors(cx.theme().fg_rgb(), cx.theme().bg_rgb());
+        (hsla(pill), hsla(track.mix(pill, 0.5)))
+    } else {
+        (cx.theme().mix(0.08), cx.theme().mix(0.04))
+    }
+}
+
+/// 卡片样式下当前标签底下的一点阴影。
+fn pill_shadow() -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: Hsla::black().opacity(0.08),
+        offset: point(px(0.), px(1.)),
+        blur_radius: px(2.),
+        spread_radius: px(0.),
+        inset: false,
+    }]
 }
 
 /// 居中的标题，有 agent 时前面加上它的状态标记。
@@ -308,20 +351,40 @@ impl WindowView {
         }
     }
 
+    /// 标签条里当前的是第几个：终端标签在前，文件标签接在后面；文件标签在最前时是它。没有终端标签、文件
+    /// 又不在最前时为空。
+    pub(super) fn front_tab(&self, cx: &App) -> Option<usize> {
+        let workspace = self.workspace();
+        match self.preview.read(cx).front_file(workspace.id).filter(|_| self.preview_front(cx)) {
+            Some(file) => Some(workspace.tabs.len() + file),
+            None => (workspace.active < workspace.tabs.len()).then_some(workspace.active),
+        }
+    }
+
+    /// 标题栏里排的标签数：终端标签加文件标签。
+    pub(super) fn titlebar_tab_count(&self, cx: &App) -> usize {
+        self.workspace().tabs.len() + self.preview.read(cx).file_tab_count(self.workspace().id)
+    }
+
+    /// 标签条里的标签：终端标签，后面接着文件标签，一样宽。
+    pub(super) fn render_tabs(&self, width: Pixels, cards: bool, cx: &mut Context<Self>) -> Vec<Stateful<Div>> {
+        let terminals = (0..self.workspace().tabs.len()).map(|ix| self.render_tab(ix, width, cards, cx));
+        let mut tabs: Vec<_> = terminals.collect();
+        let (files, _) = self.preview.read(cx).file_tabs(self.workspace().id);
+        tabs.extend(files.iter().enumerate().map(|(ix, tab)| self.render_file_tab(ix, tab, width, cards, cx)));
+        tabs
+    }
+
     pub(super) fn render_tab(&self, ix: usize, width: Pixels, cards: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = self.workspace();
         let tab = &workspace.tabs[ix];
         let id = tab.id;
         let title = SharedString::from(tab.focused_view().read(cx).title().to_owned());
         let mark = tab.mark(cx);
-        let active = ix == workspace.active;
-        // 卡片样式下当前标签是终端背景色的胶囊，从标签条上浮起来。
-        let (active_bg, hover_bg) = if cards {
-            let (track, pill) = crate::ui::theme::tab_track_colors(cx.theme().fg_rgb(), cx.theme().bg_rgb());
-            (hsla(pill), hsla(track.mix(pill, 0.5)))
-        } else {
-            (cx.theme().mix(0.08), cx.theme().mix(0.04))
-        };
+        let front = self.front_tab(cx);
+        let active = front == Some(ix);
+        let after_front = front.is_some_and(|front| ix == front + 1);
+        let (active_bg, hover_bg) = tab_backgrounds(cards, cx);
         let icons = cards.then(|| tab_icons(tab, cx));
         let label = cards.then(|| pane_label(tab.focused_view().read(cx)));
         // 报给辅助工具的名字是标签上写的标题，agent 的状态和响铃这些只画成图形的写进说明。
@@ -341,7 +404,7 @@ impl WindowView {
         let fg = cx.theme().foreground;
         let group = SharedString::from(format!("tab-{ix}"));
         // 当前标签自己就是一块亮色，和它相邻的分隔线去掉，只是不画颜色，免得宽度跳动。
-        let divider = if active || ix == workspace.active + 1 { fg.opacity(0.) } else { cx.theme().border };
+        let divider = if active || after_front { fg.opacity(0.) } else { cx.theme().border };
         let dragged = DraggedTab { id, ix, title: title.clone(), width };
         let compact = width < px(TAB_COMPACT_WIDTH);
         let bell_dot = || div().size(px(6.)).rounded_full().bg(fg.opacity(0.8));
@@ -354,7 +417,7 @@ impl WindowView {
             }
         };
         // 默认是 ⌘1 到 ⌘8 对应前八个标签，⌘9 对应最后一个。
-        let shortcut = shortcut_hint(&SelectTab(ix), &SelectLastTab, ix + 1 == workspace.tabs.len(), cx);
+        let shortcut = shortcut_hint(&SelectTab(ix), &SelectLastTab, ix + 1 == self.titlebar_tab_count(cx), cx);
         // 紧凑时只在响铃时占一个圆点的宽度。
         let side_slot = if compact {
             tab.bell.then(|| div().flex_none().child(bell_dot()))
@@ -391,15 +454,7 @@ impl WindowView {
             .gap(px(4.))
             .map(|tab| {
                 if active {
-                    tab.bg(active_bg).text_color(fg).when(cards, |tab| {
-                        tab.shadow(vec![BoxShadow {
-                            color: Hsla::black().opacity(0.08),
-                            offset: point(px(0.), px(1.)),
-                            blur_radius: px(2.),
-                            spread_radius: px(0.),
-                            inset: false,
-                        }])
-                    })
+                    tab.bg(active_bg).text_color(fg).when(cards, |tab| tab.shadow(pill_shadow()))
                 } else {
                     tab.text_color(fg.opacity(0.55)).hover(|tab| tab.bg(hover_bg).text_color(fg.opacity(0.8)))
                 }
@@ -442,7 +497,7 @@ impl WindowView {
                     // 卡片样式：图标叠、靠左的名字和目录（放不下时末尾渐隐）、状态标记，悬停时右边出关闭
                     // 按钮。两个不是当前标签的标签之间画一条短竖线。
                     let tab_bg = if active { active_bg } else { cx.theme().tab_track };
-                    let separator = ix > 0 && !active && ix != workspace.active + 1;
+                    let separator = ix > 0 && !active && !after_front;
                     let fade = |color: Hsla| {
                         linear_gradient(90., linear_color_stop(color.opacity(0.), 0.), linear_color_stop(color, 1.))
                     };
@@ -549,6 +604,162 @@ impl WindowView {
                     .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", id), fg).tooltip(driven)))
                     .children(side_slot),
             })
+    }
+
+    /// 第 `ix` 个文件标签，排在终端标签后面，样子跟着终端标签：文件图标（diff 标签是 diff 的图标）、按 git
+    /// 状态上色的名字（临时标签斜体）、增删的行数、改过没存的圆点；右边平时是快捷键提示，当前标签和悬停时
+    /// 换成关闭按钮。单击切过去，双击固定，中键关掉，右键弹菜单，拖动换位置。
+    pub(super) fn render_file_tab(
+        &self,
+        ix: usize,
+        tab: &FileTab,
+        width: Pixels,
+        cards: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let pos = self.workspace().tabs.len() + ix;
+        let front = self.front_tab(cx);
+        let active = front == Some(pos);
+        let after_front = front.is_some_and(|front| pos == front + 1);
+        let (active_bg, hover_bg) = tab_backgrounds(cards, cx);
+        let fg = cx.theme().foreground;
+        let color = tab.color.map_or(fg, hsla);
+        let group = SharedString::from(format!("file-tab-{}", tab.key));
+        let close_text = rust_i18n::t!("tooltip.close_preview");
+        let close_tooltip = tooltip(close_text.clone(), None);
+        // 报给辅助工具的名字带上增删的行数和改过没存，界面上这些画成带色的数和圆点。
+        let label = match tab.stat {
+            Some((added, removed)) => format!("{} +{added} −{removed}", tab.name),
+            None => tab.name.to_string(),
+        };
+        let label = if tab.dirty { rust_i18n::t!("preview.modified_tab", name = label).into_owned() } else { label };
+        let icon = if tab.diff {
+            svg().path(DIFF_ICON).flex_none().size(px(14.)).text_color(fg.opacity(0.8)).into_any_element()
+        } else {
+            img(file_icon(&base_name(&tab.path))).flex_none().size(px(14.)).into_any_element()
+        };
+        let divider = if active || after_front { fg.opacity(0.) } else { cx.theme().border };
+        let separator = cards && pos > 0 && !active && !after_front;
+        let is_last = pos + 1 == self.titlebar_tab_count(cx);
+        let shortcut = (width >= px(TAB_COMPACT_WIDTH))
+            .then(|| shortcut_hint(&SelectTab(pos), &SelectLastTab, is_last, cx))
+            .flatten();
+        let dragged = DraggedFileTab { ix, name: tab.name.clone(), width };
+        let view = cx.entity().downgrade();
+        div()
+            .id(SharedString::from(format!("file-tab:{}", tab.key)))
+            .role(Role::Tab)
+            .aria_label(label)
+            .aria_description(tab.path.display().to_string())
+            .aria_selected(active)
+            .on_a11y_press(view, move |this, window, cx| {
+                this.show_file_tab(ix, window, cx);
+            })
+            .group(group.clone())
+            .map(|el| {
+                if cards {
+                    el.relative().flex_none().w(width).h_full().rounded(px(TAB_TRACK_HEIGHT / 2. - 6.))
+                } else {
+                    el.flex_none().w(width).h_full().border_l_1().border_color(divider)
+                }
+            })
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .px(px(8.))
+            .gap(px(5.))
+            .map(|el| {
+                if active {
+                    el.bg(active_bg).when(cards, |el| el.shadow(pill_shadow()))
+                } else {
+                    el.hover(|el| el.bg(hover_bg))
+                }
+            })
+            .when(separator, |el| {
+                el.child(div().absolute().left_0().top(px(7.)).bottom(px(7.)).w(px(1.)).bg(cx.theme().border))
+            })
+            .child(div().flex_none().flex().when(!active, |icon| icon.opacity(0.6)).child(icon))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(if active { color } else { color.opacity(0.6) })
+                    .when(!tab.pinned, |name| name.italic())
+                    .child(tab.name.clone()),
+            )
+            .when_some(tab.stat, |el, (added, removed)| {
+                el.child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .gap(px(4.))
+                        .when(!active, |stat| stat.opacity(0.6))
+                        .when(added > 0, |stat| stat.child(added_label(added)))
+                        .when(removed > 0, |stat| stat.child(removed_label(removed))),
+                )
+            })
+            .when(tab.dirty, |el| el.child(div().flex_none().size(px(6.)).rounded_full().bg(color)))
+            // 右边的槽位靠右，名字短时也贴着右边：快捷键提示和关闭按钮叠在一起，宽度不跳。
+            .child(div().flex_1())
+            .child(
+                div()
+                    .flex_none()
+                    .relative()
+                    .h_full()
+                    .min_w(px(TAB_CLOSE_SIZE))
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .children(shortcut.filter(|_| !active).map(|shortcut| {
+                        div()
+                            .text_size(FontSize::Small)
+                            .text_color(fg.opacity(0.35))
+                            .group_hover(group.clone(), |hint| hint.invisible())
+                            .child(shortcut)
+                    }))
+                    .child(
+                        div().absolute().inset_0().flex().items_center().justify_end().child(
+                            Button::new(SharedString::from(format!("file-tab-close:{}", tab.key)), close_text)
+                                .with_size(ButtonSize::IconXs)
+                                .text_size(px(14.))
+                                .child("×")
+                                .when(!active, |close| close.invisible().group_hover(group, |close| close.visible()))
+                                .tooltip(close_tooltip)
+                                .on_press_down(cx, move |this, window, cx| this.close_file_tab(ix, window, cx)),
+                        ),
+                    ),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    if event.click_count >= 2 {
+                        this.pin_file_tab(ix, cx);
+                    }
+                    this.show_file_tab(ix, window, cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.close_file_tab(ix, window, cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_file_tab_menu(ix, event.position, window, cx);
+                }),
+            )
+            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            .drag_over::<DraggedFileTab>(move |style, dragged, _, cx| {
+                drop_marker(style, dragged.ix, ix, Axis::Horizontal, cx)
+            })
+            .on_drop(cx.listener(move |this, dragged: &DraggedFileTab, window, cx| {
+                this.move_file_tab(dragged.ix, ix, window, cx);
+            }))
     }
 
     /// 卡片样式下标签条右边的新建标签按钮。

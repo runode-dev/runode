@@ -117,6 +117,9 @@ pub struct Snapshot {
     pub statuses: HashMap<PathBuf, FileStatus>,
     /// 被忽略的文件和目录，相对这个仓库的根；目录被忽略时里面的不再单列。
     pub ignored: HashSet<PathBuf>,
+    /// 两段里都有的文件（部分暂存）相对 HEAD 增删的行数：两段的行数相加会把暂存后又改过的行算两遍。
+    /// git 读不出来（比如还没有提交）时为空。
+    pub head_stats: HashMap<PathBuf, (usize, usize)>,
     /// 这个仓库的分支、上游、进行中的操作和 stash。
     pub info: RepoInfo,
 }
@@ -139,6 +142,18 @@ impl Snapshot {
 
     pub fn removed(&self) -> usize {
         self.all().map(|file| file.removed).sum()
+    }
+
+    /// `rel` 相对 HEAD 增删的行数；没有改动时为空。
+    pub fn head_stat(&self, rel: &Path) -> Option<(usize, usize)> {
+        if let Some(stat) = self.head_stats.get(rel) {
+            return Some(*stat);
+        }
+        let files = self.all().filter(|file| file.path == rel);
+        files.fold(None, |stat, file| {
+            let (added, removed) = stat.unwrap_or_default();
+            Some((added + file.added, removed + file.removed))
+        })
     }
 
     /// 有改动的文件数，部分暂存的只算一个。
@@ -385,6 +400,13 @@ pub(crate) fn read_repo(
     }
     staged.sort_by(|a, b| a.path.cmp(&b.path));
     unstaged.sort_by(|a, b| a.path.cmp(&b.path));
+    // 暂存了改名的不算：`--no-renames` 按新路径和 HEAD 比，整个文件都算成新加的。
+    let partial: Vec<&Path> = staged
+        .iter()
+        .filter(|file| !file.gitlink && file.old_path.is_none() && unstaged.iter().any(|other| other.path == file.path))
+        .map(|file| file.path.as_path())
+        .collect();
+    let head_stats = head_stats(repo, &filters, &partial);
     // 已跟踪、自带 `.git` 的目录是 gitlink：`.gitmodules` 里登记的子模块，或者没登记、直接
     // `git add` 进来的仓库。后者只能从 `git status` 认出来，所以只有它有改动时才读得到。只是
     // 里面有改动、提交号没变的不算这个仓库的改动，状态里也不留。
@@ -421,9 +443,59 @@ pub(crate) fn read_repo(
         unstaged,
         statuses,
         ignored: ignored.into_iter().collect(),
+        head_stats,
         info,
     };
     Some(Found { snapshot, children })
+}
+
+/// `paths` 里的文件相对 HEAD 增删的行数，`filters` 是 `filter_overrides` 给的环境变量；二进制文件
+/// 记成没有增删。git 读不出来时为空。
+fn head_stats(repo: &Path, filters: &[(String, String)], paths: &[&Path]) -> HashMap<PathBuf, (usize, usize)> {
+    if paths.is_empty() {
+        return HashMap::new();
+    }
+    let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
+    let mut args: Vec<&OsStr> = [
+        "--literal-pathspecs",
+        "-c",
+        &threshold,
+        "diff",
+        "--numstat",
+        "-z",
+        "--no-renames",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "HEAD",
+        "--",
+    ]
+    .into_iter()
+    .map(OsStr::new)
+    .collect();
+    args.extend(paths.iter().map(|path| path.as_os_str()));
+    let Some(out) = git_with(repo, filters, &args) else {
+        return HashMap::new();
+    };
+    let mut stats = parse_numstat(&String::from_utf8_lossy(&out));
+    // git 不列的是和 HEAD 一样的：暂存了改动，工作区又改回去了。
+    for path in paths {
+        stats.entry(path.to_path_buf()).or_default();
+    }
+    stats
+}
+
+/// `git diff --numstat -z --no-renames` 的输出：每条是「增\t删\t路径」，以 NUL 结尾；二进制文件的
+/// 增删是 `-`，略过。
+fn parse_numstat(out: &str) -> HashMap<PathBuf, (usize, usize)> {
+    out.split('\0')
+        .filter_map(|record| {
+            let mut fields = record.splitn(3, '\t');
+            let added = fields.next()?.parse().ok()?;
+            let removed = fields.next()?.parse().ok()?;
+            Some((PathBuf::from(fields.next()?), (added, removed)))
+        })
+        .collect()
 }
 
 /// git 记着的 gitlink（模式 160000）和它记的提交号：`tree` 为空时读暂存区，否则读那棵树。读不出来时为空。
@@ -611,6 +683,15 @@ fn open_regular(path: &Path) -> std::io::Result<fs::File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numstat_skips_binary_files() {
+        let out = "3\t1\tsrc/a b.rs\x00-\t-\tlogo.png\x000\t2\tc\x00";
+        let stats = parse_numstat(out);
+        assert_eq!(stats.get(Path::new("src/a b.rs")), Some(&(3, 1)));
+        assert_eq!(stats.get(Path::new("c")), Some(&(0, 2)));
+        assert_eq!(stats.len(), 2);
+    }
 
     #[test]
     fn reads_at_most_one_byte_past_the_limit() {

@@ -117,6 +117,11 @@ impl DiffContent {
         }
     }
 
+    /// 加了几行、删了几行。
+    pub(super) fn stat(&self) -> (usize, usize) {
+        (self.view.file.added, self.view.file.removed)
+    }
+
     /// 后台的高亮还没做完。换上新读的 diff 时挪过来了旧的高亮，那两份不空，`words` 却是空的，
     /// 所以要连它一起看，不然这时被下一次读取取消掉，就再也不重算了。
     fn unhighlighted(&self) -> bool {
@@ -178,7 +183,7 @@ impl PreviewPanel {
     /// 在预览栏里打开 `target` 的 diff 标签：`pin` 时开成固定标签，否则开成临时标签。
     pub fn open_diff(&mut self, target: DiffTarget, pin: bool, cx: &mut Context<Self>) {
         let path = target.root.join(&target.rel);
-        self.open_tab(&path, Some(target), pin, cx);
+        self.open_tab(&path, Some(target), pin, false, cx);
     }
 
     /// 按块操作做完了：当前显示的是 diff 标签时马上重读，不等扫描。
@@ -359,12 +364,12 @@ impl PreviewPanel {
         };
         let view = &content.view;
         let lines = view.new_lines.len().max(view.file.hunks.iter().map(|hunk| hunk.lines.len()).sum());
-        // 行号两栏按位数定宽，等宽字体一个数字大约 0.6 个字号宽。
+        // 行号一栏按位数定宽，等宽字体一个数字大约 0.6 个字号宽。
         let number = (lines.max(1).to_string().len() as f32 * font_size * 0.62 + 10.).ceil();
         let row_height = font_size + ROW_EXTRA_HEIGHT;
-        // 换行时文字能占的宽度：除去左边框、两栏行号、正负号和右边留的空。块头不折。
+        // 换行时文字能占的宽度：除去左边框、行号、正负号和右边留的空。块头不折。
         let wrapped = self.wrap.then(|| {
-            let text_width = width - 1. - 2. * number - SIGN_WIDTH - TEXT_RIGHT_PADDING - WRAP_SLACK;
+            let text_width = width - 1. - number - SIGN_WIDTH - TEXT_RIGHT_PADDING - WRAP_SLACK;
             let text = |ix: usize| match view.rows.get(ix)? {
                 DiffRow::Header(_) => None,
                 row => Some(shown_text(row_text(view, row, &content.removed, content.removed_at[ix]))),
@@ -591,11 +596,11 @@ impl PreviewPanel {
                 if let DiffRow::Header(hunk) = row {
                     return self.render_diff_header(hunk, actionable, target, base, cx);
                 }
-                let (kind, old, new) = match row {
-                    DiffRow::Context { old, new } => (LineKind::Context, Some(old), Some(new)),
+                let (kind, new) = match row {
+                    DiffRow::Context { new, .. } => (LineKind::Context, Some(new)),
                     DiffRow::Hunk { hunk, line } => {
                         let line = &view.file.hunks[hunk].lines[line];
-                        (line.kind, line.old, line.new)
+                        (line.kind, line.new)
                     }
                     DiffRow::Header(_) => unreachable!("块头在上面画了"),
                 };
@@ -652,16 +657,15 @@ impl PreviewPanel {
                 };
                 let jump = (worktree && kind != LineKind::Removed).then_some(new).flatten();
                 let full = full.clone();
-                // 折出来的后几段不写行号和正负号。
-                let (old, new_number, sign) = if first { (old, new, sign) } else { (None, None, "") };
+                // 行号只写新文件里的，删掉的行不写；折出来的后几段不写行号和正负号。
+                let (line_number, sign) = if first { (new, sign) } else { (None, "") };
                 // 每行报成一段文字，前面带着正负号；辅助工具读得到看得见的这些行。
                 let label = if sign.trim().is_empty() { text.clone() } else { format!("{sign} {text}") };
                 base.id(("preview-diff-line", item))
                     .role(Role::Label)
                     .aria_label(label)
                     .when_some(tint, |row, tint| row.bg(hsla(tint)))
-                    .child(number_cell(old))
-                    .child(number_cell(new_number))
+                    .child(number_cell(line_number))
                     .child(div().flex_none().w(px(SIGN_WIDTH)).text_color(dim).child(sign))
                     .child(
                         div()
@@ -880,6 +884,7 @@ mod tests {
                 unstaged: files,
                 statuses: Default::default(),
                 ignored: Default::default(),
+                head_stats: Default::default(),
                 info: Default::default(),
             })
         };

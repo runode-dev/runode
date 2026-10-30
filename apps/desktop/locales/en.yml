@@ -1035,8 +1035,6 @@ preview:
     important: Important
     warning: Warning
     caution: Caution
-  maximize: Maximize Preview
-  restore: Restore Preview
   diff:
     worktree_tab: "%{name} (Working Tree)"
     staged_tab: "%{name} (Staged)"

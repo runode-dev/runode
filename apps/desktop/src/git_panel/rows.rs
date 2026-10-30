@@ -712,6 +712,7 @@ mod tests {
             unstaged: unstaged.iter().map(file).collect(),
             statuses: HashMap::new(),
             ignored: HashSet::new(),
+            head_stats: Default::default(),
             info: RepoInfo::default(),
         }
     }

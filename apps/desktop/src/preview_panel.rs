@@ -1,9 +1,11 @@
-//! 右侧的预览栏：文件树里打开的文件在这里显示，一个文件一个标签。单击打开的是临时标签，标题
-//! 斜体，再打开别的文件时被换掉；双击文件或标签把它固定下来。标签能拖动换位置，中键关掉，右键
-//! 有关闭其他、关闭右侧这些。文本用终端的字体，带行号和相对 HEAD 的改动标记，能按行选中复制，
+//! 预览栏：打开的文件在这里显示，一个文件一个标签。文件标签和终端标签一起排在窗口的标题栏里，由窗口
+//! 照 `file_tabs` 画、按 `show_tab` 这些办；点中文件标签时预览盖满终端区，点回终端标签时退到终端后面，
+//! 标签都还在。单击打开的是临时标签，标题斜体，再打开别的文件时被换掉；双击文件或标签把它固定下来。
+//! 标签能拖动换位置，中键关掉，右键有关闭其他、关闭右侧这些。文本用终端的字体，带行号和相对 HEAD 的改动标记，能按行选中复制，
 //! 语法高亮在后台做完再换上；图片按栏宽等比缩小；二进制、读不了、太大的文件只给一句说明。
 //! 文件在磁盘上变了就重读，没显示的标签等切过去时再看要不要重读。Markdown 文件默认显示排版后的
-//! 样子，在后台解析，见 `markdown`。
+//! 样子，在后台解析，见 `markdown`。按 `open` 的 `edit` 打开的文本文件读完直接进编辑模式，Markdown
+//! 也一样，编辑的是源码，退出编辑才看到排版。
 //!
 //! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开，见 `diff`。
 //!
@@ -11,12 +13,12 @@
 //! 显示的是 app 经 `set_workspace` 说的那个 workspace 的。字体、栏宽和预览字号经 `set_input` 交进来，
 //! 颜色画的时候从主题（`ActiveTheme`）读，git 状态经 `set_git` 交进来；要 app 办的事经 `PreviewEvent` 交出去。
 //!
-//! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画：标签条在 `tabs`，正文的
+//! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画：标签在 `tabs`，正文的
 //! 行和图片在 `body`，行号旁的改动标记在 `marks`，自动换行在 `wrap`，Markdown 的排版视图在 `markdown`，
 //! 编辑模式在 `edit`。
 //!
-//! 标签条右边能打开自动换行、Markdown 文件在排版和源码之间切（这两个整个窗口一份，app 随窗口存档），以及
-//! 把预览栏放大到盖住终端区（每个 workspace 各自的，不进存档）。
+//! 顶上一条写着文件路径，右边能打开自动换行、Markdown 文件在排版和源码之间切（这两个整个窗口一份，app
+//! 随窗口存档）。
 
 mod body;
 mod diff;
@@ -43,13 +45,13 @@ use std::{
 use crate::ui::{
     self as ui,
     a11y::A11yPress,
-    actions::{Copy, InsertFilePath, SelectAll, TogglePaneZoom},
+    actions::{Copy, InsertFilePath, SelectAll},
     base_name,
-    button::{Button, ButtonSize, Toggle},
+    button::Toggle,
     font_size::FontSize,
     icons::{
         ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, ARROW_UP_ICON,
-        CODE_ICON, DIFF_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, PENCIL_ICON, WRAP_ICON,
+        CODE_ICON, PENCIL_ICON, WRAP_ICON,
     },
     menu::{Menu, MenuHost},
     panel::{panel_header, panel_shell},
@@ -67,7 +69,8 @@ use runode_preview::{Content, ImageFormat, Span};
 pub use diff::DiffTarget;
 
 use marks::{Mark, line_marks};
-use tabs::{PreviewTabs, tab_underline};
+pub use tabs::FileTab;
+use tabs::PreviewTabs;
 
 /// 行高比字号多出的部分。
 const ROW_EXTRA_HEIGHT: f32 = 8.;
@@ -85,12 +88,10 @@ pub type WorkspaceId = u64;
 type RealRoot = (PathBuf, PathBuf);
 
 /// app 每次画预览栏之前交进来的东西，见 `PreviewPanel::set_input`。
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Input {
-    /// 预览栏的宽度：在终端区右边占一栏时是那一栏的宽，放大时是终端区的宽。
+    /// 预览栏的宽度，即终端区的宽。
     pub width: f32,
-    /// 标签条右边的按钮再往左让出的宽度：预览栏在窗口最右边时让出右上角面板开关的地方。
-    pub right_inset: f32,
     /// 正文用的终端字体。
     pub font: SharedString,
     /// 配置的预览字号（`preview-font-size`），正文按它排。
@@ -103,25 +104,18 @@ pub struct Input {
 
 impl Default for Input {
     fn default() -> Self {
-        Self {
-            width: 0.,
-            right_inset: 6.,
-            font: SharedString::default(),
-            font_size: 13.,
-            cards: false,
-            status_bar_height: 0.,
-        }
+        Self { width: 0., font: SharedString::default(), font_size: 13., cards: false, status_bar_height: 0. }
     }
 }
 
 /// 要 app 办的事。
 pub enum PreviewEvent {
-    /// 当前 workspace 的预览栏从收着变成显示：app 跟着监听目录、重读文件树，重排窗口。
+    /// 当前 workspace 从没有文件标签变成有了，预览到了最前：app 跟着监听目录、重读文件树，重排窗口。
     Opened,
     /// 当前 workspace 的标签都关掉了，预览栏收起；`focused` 时焦点原来在预览栏上，app 把它交回终端。
     Closed { focused: bool },
-    /// 预览栏放大到盖住终端区，或者还原了：app 重排窗口。
-    ZoomChanged,
+    /// 当前 workspace 的预览到了最前、盖住终端区：app 重排窗口。
+    Fronted,
     /// 在文件树里展开到这个文件，选中它、滚到能看见。
     Reveal(PathBuf),
     /// 自动换行或 Markdown 显示源码的开关变了，app 存档；下次经 `set_options` 交回。
@@ -149,6 +143,9 @@ struct Preview {
     pinned: bool,
     /// 文件的 git 状态，标签名按它上色；和 `marks` 一起重算。
     status: Option<FileStatus>,
+    /// 标签名后面的加了几行、删了几行：普通标签是相对 HEAD 的，diff 标签是它那一段的；和 `marks` 一起重算。
+    /// 提交里的 diff 标签不随扫描变，这里为空。
+    stat: Option<(usize, usize)>,
     /// 解析过符号链接的路径；监听到的事件里是真实路径，按两个都比一下。读的时候在后台解析好填上，
     /// 读完之前就是 `path`。
     real_path: PathBuf,
@@ -173,6 +170,8 @@ struct Preview {
     reveal: Cell<Option<(usize, ScrollStrategy)>>,
     /// 在编辑模式里时正文换成它，见 `edit`。
     editor: Option<edit::Editor>,
+    /// 下次读完是能编辑的文本就进编辑模式，读完即清掉：从文件树打开的。
+    edit_on_load: bool,
 }
 
 enum Loaded {
@@ -233,6 +232,7 @@ impl Preview {
             reload: false,
             pinned,
             status: None,
+            stat: None,
             content: None,
             stamp: None,
             selection: None,
@@ -243,6 +243,7 @@ impl Preview {
             marks: HashMap::new(),
             reveal: Cell::new(None),
             editor: None,
+            edit_on_load: false,
         }
     }
 
@@ -250,16 +251,32 @@ impl Preview {
     /// 仓库算；不在仓库里或文件不在仓库下时都没有。字面上不在仓库根下的按真实路径比，仓库根的真实路径
     /// 是 `real_root`（见 `PreviewTabs::real_root`），还没解析好时它就是字面的根目录。
     fn refresh_marks(&mut self, git: Option<&git::Repos>, real_root: Option<&RealRoot>) {
-        (self.marks, self.status) = git
+        let stat;
+        (self.marks, self.status, stat) = git
             .and_then(|git| {
                 let rel = self.path.strip_prefix(&git.main.root).ok().map(Path::to_path_buf).or_else(|| {
                     let (_, root) = real_root.filter(|(root, _)| *root == git.main.root)?;
                     self.real_path.strip_prefix(root).ok().map(Path::to_path_buf)
                 })?;
                 let (repo, rel) = git.locate(&rel);
-                Some((line_marks(repo, rel), repo.statuses.get(rel).copied()))
+                Some((line_marks(repo, rel), repo.statuses.get(rel).copied(), repo.head_stat(rel)))
             })
             .unwrap_or_default();
+        self.stat = match &self.diff {
+            Some(diff) => diff_file(git, diff).map(|file| (file.added, file.removed)),
+            None => stat,
+        };
+    }
+
+    /// 标签名后面显示的加了几行、删了几行，没有改动时为空。
+    fn line_stat(&self) -> Option<(usize, usize)> {
+        let stat = match (&self.diff, &self.content) {
+            (Some(DiffTarget { side: git::DiffSide::Commit { .. }, .. }), Some(Loaded::Diff(content))) => {
+                Some(content.stat())
+            }
+            _ => self.stat,
+        };
+        stat.filter(|&stat| stat != (0, 0))
     }
 
     /// 扫描到 git 状态从 `old` 变成了 `new`：重算改动标记；工作区和暂存区的 diff 标签在这个文件的
@@ -481,8 +498,9 @@ pub struct PreviewPanel {
 impl EventEmitter<PreviewEvent> for PreviewPanel {}
 
 impl Focusable for PreviewPanel {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus.clone()
+    /// 当前标签在编辑时是输入框的，否则是预览栏自己的。
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.editor_focus(cx).unwrap_or_else(|| self.focus.clone())
     }
 }
 
@@ -511,14 +529,20 @@ impl PreviewPanel {
         }
     }
 
-    /// 之后的操作和画的都是 workspace `ws` 的标签。app 每次对预览栏做什么、画它之前都先调。
-    pub fn set_workspace(&mut self, ws: WorkspaceId) {
-        self.ws = ws;
+    /// 之后的操作和画的都是 workspace `ws` 的标签。app 每次对预览栏做什么、画它之前都先调。换了 workspace
+    /// 时重画：app 缓存着它，栏的位置大小不变时照搬上一帧。
+    pub fn set_workspace(&mut self, ws: WorkspaceId, cx: &mut Context<Self>) {
+        if self.ws != ws {
+            self.ws = ws;
+            cx.notify();
+        }
     }
 
-    /// 换上 app 画预览栏时的配色、字体、栏宽这些，见 `Input`。
-    pub fn set_input(&mut self, input: Input) {
+    /// 换上 app 画预览栏时的字体、栏宽这些，见 `Input`；和上次不同时返回真，app 缓存着它，要叫它重画。
+    pub fn set_input(&mut self, input: Input) -> bool {
+        let changed = self.input != input;
         self.input = input;
+        changed
     }
 
     /// workspace `ws` 最近读到的 git 状态，改动标记和 diff 按它算。和上次交来的不是同一份时，重算各标签的
@@ -603,20 +627,28 @@ impl PreviewPanel {
         }
     }
 
-    /// workspace `ws` 有开着的预览标签，预览栏显示着（放大与否都算）。
+    /// workspace `ws` 有开着的文件标签，在不在最前都算。
     pub fn shown(&self, ws: WorkspaceId) -> bool {
         self.workspaces.get(&ws).is_some_and(|tabs| !tabs.tabs.is_empty())
     }
 
-    /// workspace `ws` 的预览栏放大着，盖在终端区上。
-    pub fn maximized(&self, ws: WorkspaceId) -> bool {
-        self.workspaces.get(&ws).is_some_and(|tabs| !tabs.tabs.is_empty() && tabs.maximized)
+    /// workspace `ws` 的预览在最前，盖在终端区上。
+    pub fn front(&self, ws: WorkspaceId) -> bool {
+        self.workspaces.get(&ws).is_some_and(|tabs| !tabs.tabs.is_empty() && tabs.front)
     }
 
-    /// 还原 workspace `ws` 放大着的预览栏，焦点要交给终端时用。
-    pub fn restore_zoom(&mut self, ws: WorkspaceId) {
+    /// 让 workspace `ws` 的预览退到终端后面，切到终端标签、焦点要交给终端时用；标签都留着。
+    pub fn send_back(&mut self, ws: WorkspaceId) {
         if let Some(tabs) = self.workspaces.get_mut(&ws) {
-            tabs.maximized = false;
+            tabs.front = false;
+        }
+    }
+
+    /// 让当前 workspace 的预览到最前；本来不在最前时告诉 app。
+    fn bring_front(&mut self, cx: &mut Context<Self>) {
+        let previews = self.tabs_mut();
+        if !std::mem::replace(&mut previews.front, true) {
+            cx.emit(PreviewEvent::Fronted);
         }
     }
 
@@ -656,17 +688,6 @@ impl PreviewPanel {
         self.shown(self.ws)
     }
 
-    /// 把预览栏放大到盖住终端区，或者还原。放大时焦点交给预览栏，键盘不再落到被盖住的终端里。
-    fn toggle_preview_maximized(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let previews = self.tabs_mut();
-        previews.maximized = !previews.maximized;
-        if previews.maximized {
-            window.focus(&self.focus, cx);
-        }
-        cx.emit(PreviewEvent::ZoomChanged);
-        cx.notify();
-    }
-
     /// 切换自动换行。换行时列表不能横着滚，横向滚过的先滚回左边，不然文字一直错开着。
     fn toggle_preview_wrap(&mut self, cx: &mut Context<Self>) {
         self.wrap = !self.wrap;
@@ -686,14 +707,15 @@ impl PreviewPanel {
     }
 
     /// 在预览栏里打开 `path` 并切到它的标签：`pin` 时开成固定标签，否则开成临时标签；已经开着
-    /// 时重读一次。文件树跟着定位到它。
-    pub fn open(&mut self, path: &Path, pin: bool, cx: &mut Context<Self>) {
-        self.open_tab(path, None, pin, cx);
+    /// 时重读一次。文件树跟着定位到它。`edit` 时读完是能编辑的文本就进编辑模式，焦点不动；临时标签
+    /// 改了才固定下来。
+    pub fn open(&mut self, path: &Path, pin: bool, edit: bool, cx: &mut Context<Self>) {
+        self.open_tab(path, None, pin, edit, cx);
     }
 
-    /// 和 `open` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间。
-    pub fn open_at(&mut self, path: &Path, line: usize, pin: bool, cx: &mut Context<Self>) {
-        self.open(path, pin, cx);
+    /// 和 `open` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间；进编辑模式时在编辑器里选中它。
+    pub fn open_at(&mut self, path: &Path, line: usize, pin: bool, edit: bool, cx: &mut Context<Self>) {
+        self.open(path, pin, edit, cx);
         // 排版视图不按行定位，显示着排版的 Markdown 先切到源码，选中的那一行才看得到。
         if self.preview().is_some_and(|preview| preview.path == path && self.markdown_shown(preview)) {
             self.toggle_preview_source(cx);
@@ -701,11 +723,14 @@ impl PreviewPanel {
         if let Some(preview) = self.preview_mut().filter(|preview| preview.path == path) {
             preview.selection = Some((line, line));
             preview.reveal.set(Some((line, ScrollStrategy::Center)));
+            if let Some(editor) = &preview.editor {
+                editor.select_lines(line..line + 1, cx);
+            }
         }
     }
 
     /// 打开 `path` 的普通标签（`diff` 为空）或 diff 标签。
-    fn open_tab(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool, cx: &mut Context<Self>) {
+    fn open_tab(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool, edit: bool, cx: &mut Context<Self>) {
         let shown = self.preview_shown();
         if let Some(old) = self.preview().filter(|old| old.path != path || old.diff != diff) {
             old.release_image(cx);
@@ -714,11 +739,16 @@ impl PreviewPanel {
         let reveal = diff.as_ref().is_none_or(|diff| !matches!(diff.side, git::DiffSide::Commit { .. }));
         let previews = self.tabs_mut();
         let replaced = previews.open(path, diff, pin);
-        previews.scroll.scroll_to_item(previews.active);
         if let Some(old) = replaced {
             old.release_image(cx);
         }
-        if !shown {
+        if let Some(tab) = previews.active_mut() {
+            tab.edit_on_load = edit;
+        }
+        if shown {
+            self.bring_front(cx);
+        } else {
+            self.tabs_mut().front = true;
             cx.emit(PreviewEvent::Opened);
         }
         if reveal {
@@ -728,7 +758,7 @@ impl PreviewPanel {
         cx.notify();
     }
 
-    /// 切到第 `ix` 个预览标签：文件树跟着定位到它，还没读过或者磁盘上变过就读。
+    /// 切到第 `ix` 个预览标签：文件树跟着定位到它，还没读过或者磁盘上变过就读。在不在最前不变。
     fn activate_preview(&mut self, ix: usize, cx: &mut Context<Self>) {
         let previews = self.tabs_mut();
         let Some(tab) = previews.tabs.get(ix) else {
@@ -742,7 +772,6 @@ impl PreviewPanel {
             old.release_image(cx);
         }
         previews.active = ix;
-        previews.scroll.scroll_to_item(ix);
         cx.emit(PreviewEvent::Reveal(path));
         self.reload_if(Preview::stale, cx);
         cx.notify();
@@ -787,6 +816,7 @@ impl PreviewPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let focused = self.focus.contains_focused(window, cx);
         let previews = self.tabs_mut();
         let before = previews.active().map(|tab| (tab.path.clone(), tab.diff.clone()));
         let closed = previews.retain(keep);
@@ -797,10 +827,14 @@ impl PreviewPanel {
             tab.release_image(cx);
         }
         if !self.preview_shown() {
-            cx.emit(PreviewEvent::Closed { focused: self.focus.is_focused(window) });
+            cx.emit(PreviewEvent::Closed { focused });
         } else if self.preview().map(|tab| (tab.path.clone(), tab.diff.clone())) != before {
             let active = self.tabs_mut().active;
             self.activate_preview(active, cx);
+            // 关掉的标签带走了输入框的焦点，焦点交给换上来的标签。
+            if focused {
+                window.focus(&self.focus_handle(cx), cx);
+            }
         }
         cx.notify();
     }
@@ -970,6 +1004,11 @@ impl PreviewPanel {
                     };
                     preview.content = Some(content);
                     preview.refresh_marks(git, real_root);
+                    let edit =
+                        std::mem::take(&mut preview.edit_on_load) && preview.editor.is_none() && preview.editable();
+                    if edit {
+                        this.start_editing_quietly(id, path.clone(), cx);
+                    }
                     cx.notify();
                     lines
                 })
@@ -1116,22 +1155,8 @@ impl PreviewPanel {
 
     fn render_preview_panel(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let preview = self.preview()?;
-        let previews = self.tabs()?;
-        let Input { width, right_inset, font_size, cards, .. } = self.input;
+        let Input { width, font_size, cards, .. } = self.input;
         let font = self.input.font.clone();
-        // 标签条后面的空白处和标题栏一样能拖动窗口。
-        let strip = div()
-            .id("preview-tabs")
-            .role(Role::TabList)
-            .flex_initial()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .overflow_x_scroll()
-            .track_scroll(&previews.scroll)
-            .children((0..previews.tabs.len()).map(|ix| self.render_preview_tab(ix, cx)).collect::<Vec<_>>());
-        // 标签下面那条分隔线由各个标签和后面的空白各画一段，当前标签底下空着，和正文连在一起。
-        let maximized = previews.maximized;
         let toggle = |id: &'static str, icon: &'static str, on: bool, text: Cow<'static, str>| {
             Toggle::new(id, icon, SharedString::from(text.clone()))
                 .pressed(on)
@@ -1192,40 +1217,20 @@ impl PreviewPanel {
                         )
                         .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_wrap(cx)),
                 )
-            })
-            .child({
-                let text = if maximized { rust_i18n::t!("preview.restore") } else { rust_i18n::t!("preview.maximize") };
-                Button::new("preview-maximize", SharedString::from(text.clone()))
-                    .icon(if maximized { MINIMIZE_ICON } else { MAXIMIZE_ICON })
-                    .icon_size(13.)
-                    .with_size(ButtonSize::Icon)
-                    .size(px(22.))
-                    .tooltip(tooltip(text, Some(&TogglePaneZoom)))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.toggle_preview_maximized(window, cx);
-                        }),
-                    )
-                    .on_a11y_press(view, Self::toggle_preview_maximized)
             });
-        // 按钮靠右；预览栏在最右边时再让出右上角面板开关的宽度，标签和按钮不钻到开关底下。不设
-        // `min_w_0`：标签多了挤的是标签条（它自己横着滚），这里至少留出按钮的宽度，按钮不叠到标签上。
-        let filler = div()
+        // 按钮至少留出自己的宽度，路径放不下时截断。
+        let path = div()
+            .id("preview-path")
+            .role(Role::Label)
+            .aria_label(preview.path.display().to_string())
             .flex_1()
-            .h_full()
-            .relative()
-            .flex()
-            .items_center()
-            .justify_end()
-            .pl(px(4.))
-            .pr(px(right_inset))
-            .child(tab_underline(cx))
-            .child(buttons);
-        // 标签条是界面，不跟着正文的 `preview-font-size`。
-        let header =
-            panel_header(cards, cx).border_b_0().px_0().gap_0().text_size(FontSize::Medium).child(strip).child(filler);
+            .min_w_0()
+            .truncate()
+            .text_color(cx.theme().foreground.opacity(0.55))
+            .child(ui::display_dir(&preview.path))
+            .tooltip(tooltip(preview.path.display().to_string(), None));
+        // 顶上这条是界面，不跟着正文的 `preview-font-size`；不拖动窗口，标题栏在它上面。
+        let header = panel_header(true, cx).pr(px(6.)).text_size(FontSize::Medium).child(path).child(buttons);
         // 正文整个报成一篇文档，以标签上的名字为名。
         let body = div()
             .id("preview-body")
@@ -1253,7 +1258,6 @@ impl PreviewPanel {
                 .on_action(cx.listener(Self::close_previews_to_right))
                 .on_action(cx.listener(Self::close_all_previews))
                 .on_action(cx.listener(Self::keep_preview_open))
-                .on_action(cx.listener(Self::zoom_preview))
                 .bg(cx.theme().background)
                 .text_size(px(font_size))
                 .child(header)
@@ -1263,16 +1267,19 @@ impl PreviewPanel {
 }
 
 impl Render for PreviewPanel {
-    /// 当前 workspace 的预览栏；没有标签时什么也不画（app 也不会把它摆出来）。放大着时盖满终端区，挡住
-    /// 下面终端的鼠标事件；终端不改尺寸，还原后原样露出来。
+    /// 当前 workspace 的预览；没有标签时什么也不画。app 只在它在最前时摆出来，盖满终端区，挡住下面终端的
+    /// 鼠标事件；终端不改尺寸，退到后面时原样露出来。标签的右键菜单也画在这里。
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.focus_menu(window, cx);
         let Some(panel) = self.render_preview_panel(window, cx) else {
             return div().into_any_element();
         };
-        let maximized = self.maximized(self.ws);
         panel
-            .when(maximized, |panel| panel.absolute().top_0().left_0().size_full().occlude())
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .occlude()
             .children(self.render_context_menu(window, cx))
             .into_any_element()
     }

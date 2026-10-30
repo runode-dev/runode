@@ -1,32 +1,22 @@
-//! 预览栏的标签条：开着的标签（`PreviewTabs`）怎么换、关、挪，拖动标签换位置，标签的样子和
-//! 右键菜单，以及菜单里关标签、固定标签的动作。
+//! 预览栏的标签：开着的标签（`PreviewTabs`）怎么换、关、挪，交给标题栏画的样子（`FileTab`）和标题栏上
+//! 的操作，右键菜单，以及菜单里关标签、固定标签的动作。
 
-use crate::ui::theme::ActiveTheme as _;
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use crate::ui::{
-    a11y::A11yPress,
-    actions::{ClosePane, CloseTab, TogglePaneZoom},
-    base_name,
-    button::{Button, ButtonSize},
-    file_icons::file_icon,
+    actions::{ClosePane, CloseTab},
     follow_move,
-    font_size::{self, scaled},
-    hsla,
     menu::{MenuHost as _, MenuItem},
-    panel::TITLEBAR_HEIGHT,
-    tabs::{drag_chip, drop_marker},
     theme::{ADDED, MODIFIED, REMOVED, RENAMED},
-    tooltip::tooltip,
 };
-use gpui::{
-    Action, App, Axis, Context, Div, MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollHandle,
-    SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
-};
+use gpui::{Action, Context, Focusable, Pixels, Point, SharedString, Window, actions};
 use runode_git::{self as git, FileStatus};
 use runode_types::color::Rgb;
 
-use super::{DIFF_ICON, DiffTarget, Preview, PreviewPanel, RealRoot};
+use super::{DiffTarget, Preview, PreviewPanel, RealRoot, WorkspaceId};
 
 actions!(
     runode,
@@ -40,18 +30,6 @@ actions!(
         KeepPreviewOpen
     ]
 );
-
-/// 预览标签最宽这么宽（基准字号下的点数，跟着界面字号缩放），名字再长就截断。
-const TAB_MAX_WIDTH: f32 = 180.;
-/// 拖动预览标签时跟着鼠标的卡片宽度，基准字号下的点数。
-const DRAG_CHIP_WIDTH: f32 = 140.;
-/// 当前标签顶上那条强调色细线的粗细。
-const TAB_ACCENT_HEIGHT: f32 = 2.;
-
-/// 标签条底下的分隔线，叠在不是当前标签的标签和标签后面的空白底部。
-pub(super) fn tab_underline(cx: &App) -> Div {
-    div().absolute().bottom_0().left_0().w_full().h(px(1.)).bg(cx.theme().border)
-}
 
 /// 标签名按文件的 git 状态上的颜色。
 fn status_color(status: FileStatus) -> Rgb {
@@ -69,10 +47,8 @@ pub(super) struct PreviewTabs {
     pub tabs: Vec<Preview>,
     /// 当前显示的标签。
     pub active: usize,
-    /// 标签条的横向滚动位置。
-    pub scroll: ScrollHandle,
-    /// 预览栏放大到盖住终端区；标签都关掉时还原。
-    pub maximized: bool,
+    /// 预览在最前，盖住终端区；切到终端标签时退到后面，标签都关掉时也是。
+    pub front: bool,
     /// 这个 workspace 最近读到的 git 状态，见 `PreviewPanel::set_git`。
     pub git: Option<Arc<git::Repos>>,
     /// `git` 主仓库的根目录和它解析过符号链接的路径，`Preview::refresh_marks` 比字面上不在根下的文件用；
@@ -123,7 +99,7 @@ impl PreviewTabs {
         }
         self.tabs = kept;
         self.active = kept_before_active.min(self.tabs.len().saturating_sub(1));
-        self.maximized &= !self.tabs.is_empty();
+        self.front &= !self.tabs.is_empty();
         closed
     }
 
@@ -154,25 +130,23 @@ impl PreviewTabs {
     }
 }
 
-/// 拖动中的预览标签：跟着鼠标画出来，放到另一个标签上时挪过去。
-#[derive(Clone)]
-struct DraggedPreviewTab {
-    /// 开始拖动时所在的位置：挪的是这个标签，落点提示也按它画在目标标签的哪一边。
-    ix: usize,
-    name: SharedString,
-}
-
-impl Render for DraggedPreviewTab {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 底色和当前标签一样。
-        drag_chip(
-            px(DRAG_CHIP_WIDTH * font_size::scale(cx)),
-            px(TITLEBAR_HEIGHT),
-            self.name.clone(),
-            cx.theme().mix(0.08),
-            cx,
-        )
-    }
+/// 标题栏里画一个文件标签要的东西。
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileTab {
+    /// 标签元素的 id 用：路径，diff 标签再带上和什么比。
+    pub key: SharedString,
+    pub name: SharedString,
+    pub path: PathBuf,
+    /// diff 标签，图标画成 diff 的样子。
+    pub diff: bool,
+    /// 名字按文件的 git 状态上的颜色；不在仓库里或没改动时为空。
+    pub color: Option<Rgb>,
+    /// 临时标签为假，名字斜体。
+    pub pinned: bool,
+    /// 在编辑，改过还没存。
+    pub dirty: bool,
+    /// 加了几行、删了几行，没有改动时为空。
+    pub stat: Option<(usize, usize)>,
 }
 
 impl PreviewPanel {
@@ -183,11 +157,6 @@ impl PreviewPanel {
     /// 预览栏里没有分屏，关分屏的键（cmd+w）也只关当前的预览标签，不连带关掉终端。
     pub(super) fn close_preview_pane(&mut self, _: &ClosePane, window: &mut Window, cx: &mut Context<Self>) {
         self.close_active_preview(window, cx);
-    }
-
-    /// 预览栏里放大分屏的键放大的是预览栏。
-    pub(super) fn zoom_preview(&mut self, _: &TogglePaneZoom, window: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_preview_maximized(window, cx);
     }
 
     fn close_active_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -234,141 +203,75 @@ impl PreviewPanel {
         previews.active =
             previews.tabs.iter().position(|tab| Some((tab.path.clone(), tab.diff.clone())) == before).unwrap_or(new);
         self.activate_preview(new, cx);
+        self.bring_front(cx);
     }
 
-    /// 第 `ix` 个预览标签：文件图标和名字，名字按 git 状态上色，临时标签用斜体；当前标签和
-    /// 悬停着的标签显示关闭按钮。
-    pub(super) fn render_preview_tab(&self, ix: usize, cx: &mut Context<Self>) -> Stateful<Div> {
-        let Some(previews) = self.tabs() else {
-            return div().id(("preview-tab", ix));
+    /// workspace `ws` 的文件标签，和在最前时当前的是第几个。
+    pub fn file_tabs(&self, ws: WorkspaceId) -> (Vec<FileTab>, Option<usize>) {
+        let Some(previews) = self.workspaces.get(&ws) else {
+            return (Vec::new(), None);
         };
-        let tab = &previews.tabs[ix];
-        let active = ix == previews.active;
-        let name = tab.name();
-        let hover_bg = cx.theme().mix(0.04);
-        let underline = tab_underline(cx);
-        let close_text = rust_i18n::t!("tooltip.close_preview");
-        let close_label = SharedString::from(close_text.clone());
-        let close_tooltip = tooltip(close_text, None);
-        let path = SharedString::from(tab.path.display().to_string());
-        let path_tooltip = tooltip(path.clone(), None);
-        // 标签和关闭按钮只有按下的处理，辅助工具按不到，另外登记：按标签切过去，按关闭按钮关掉。
-        let view = cx.entity().downgrade();
-        let fg = cx.theme().foreground;
-        let color = tab.status.map_or(fg, |status| hsla(status_color(status)));
-        // 元素 id 按路径（加 diff 的哪一边）取，不按下标：关掉、拖动标签后下标整体平移，辅助工具的焦点会跳。
-        let key = match &tab.diff {
-            Some(diff) => format!("{}#{:?}", tab.path.display(), diff.side),
-            None => tab.path.display().to_string(),
-        };
-        let group = SharedString::from(format!("preview-tab-{ix}"));
-        let dragged = DraggedPreviewTab { ix, name: name.clone() };
-        // diff 标签的图标是 diff 的样子，不是文件类型的。
-        let icon = match &tab.diff {
-            Some(_) => svg().path(DIFF_ICON).flex_none().size(px(14.)).text_color(fg.opacity(0.8)).into_any_element(),
-            None => img(file_icon(&base_name(&tab.path))).flex_none().size(px(14.)).into_any_element(),
-        };
-        div()
-            .id(format!("preview-tab:{key}"))
-            .role(Role::Tab)
-            .aria_label(if tab.dirty() {
-                rust_i18n::t!("preview.modified_tab", name = name).into_owned().into()
-            } else {
-                name.clone()
-            })
-            .aria_description(path)
-            .aria_selected(active)
-            .on_a11y_press(view.clone(), move |this, window, cx| {
-                window.focus(&this.focus, cx);
-                this.activate_preview(ix, cx);
-            })
-            .group(group.clone())
-            .flex_none()
-            .max_w(scaled(TAB_MAX_WIDTH))
-            .h_full()
-            .pl(px(10.))
-            .pr(px(4.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .relative()
-            .border_r_1()
-            .border_color(cx.theme().border)
-            // 当前标签顶上一条强调色，底下不画分隔线，和正文连成一块；别的标签悬停时稍亮。
-            .map(|tab| {
-                if active {
-                    tab.child(div().absolute().top_0().left_0().w_full().h(px(TAB_ACCENT_HEIGHT)).bg(hsla(RENAMED)))
-                } else {
-                    tab.hover(|tab| tab.bg(hover_bg)).child(underline)
+        let tabs = previews
+            .tabs
+            .iter()
+            .map(|tab| FileTab {
+                // 按路径（加 diff 的哪一边）取，不按下标：关掉、拖动标签后下标整体平移，辅助工具的焦点会跳。
+                key: match &tab.diff {
+                    Some(diff) => format!("{}#{:?}", tab.path.display(), diff.side),
+                    None => tab.path.display().to_string(),
                 }
+                .into(),
+                name: tab.name(),
+                path: tab.path.clone(),
+                diff: tab.diff.is_some(),
+                color: tab.status.map(status_color),
+                pinned: tab.pinned,
+                dirty: tab.dirty(),
+                stat: tab.line_stat(),
             })
-            .child(div().flex_none().flex().when(!active, |icon| icon.opacity(0.6)).child(icon))
-            .child(
-                div()
-                    .id(format!("preview-tab-name:{key}"))
-                    .min_w_0()
-                    .truncate()
-                    .text_color(if active { color } else { color.opacity(0.6) })
-                    .when(!tab.pinned, |name| name.italic())
-                    .child(name)
-                    .tooltip(path_tooltip),
-            )
-            .when(tab.dirty(), |tab| tab.child(div().flex_none().size(px(6.)).rounded_full().bg(color)))
-            .child(
-                Button::new(format!("preview-tab-close:{key}"), close_label)
-                    .with_size(ButtonSize::IconXs)
-                    .text_size(px(14.))
-                    .child("×")
-                    .on_a11y_press(view, move |this, window, cx| this.retain_previews(|i, _| i != ix, window, cx))
-                    .flex_none()
-                    .when(!active, |close| close.invisible().group_hover(group, |close| close.visible()))
-                    .tooltip(close_tooltip)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.retain_previews(|i, _| i != ix, window, cx);
-                        }),
-                    ),
-            )
-            // 标题栏按下会拖动窗口，标签自己接住。双击把临时标签固定下来。
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    window.focus(&this.focus, cx);
-                    if event.click_count >= 2
-                        && let Some(tab) = this.tabs_mut().tabs.get_mut(ix)
-                    {
-                        tab.pinned = true;
-                    }
-                    this.activate_preview(ix, cx);
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Middle,
-                cx.listener(move |this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.retain_previews(|i, _| i != ix, window, cx);
-                }),
-            )
-            // 右键先切到这个标签，菜单里的操作都对着当前标签。
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    window.focus(&this.focus, cx);
-                    this.activate_preview(ix, cx);
-                    this.open_preview_menu(event.position, cx);
-                }),
-            )
-            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .drag_over::<DraggedPreviewTab>(move |style, dragged, _, cx| {
-                drop_marker(style, dragged.ix, ix, Axis::Horizontal, cx)
-            })
-            .on_drop(cx.listener(move |this, dragged: &DraggedPreviewTab, _, cx| {
-                this.move_preview(dragged.ix, ix, cx);
-            }))
+            .collect();
+        (tabs, self.front_file(ws))
+    }
+
+    /// workspace `ws` 有几个文件标签。
+    pub fn file_tab_count(&self, ws: WorkspaceId) -> usize {
+        self.workspaces.get(&ws).map_or(0, |previews| previews.tabs.len())
+    }
+
+    /// workspace `ws` 的文件标签在最前时，当前的是第几个。
+    pub fn front_file(&self, ws: WorkspaceId) -> Option<usize> {
+        self.front(ws).then(|| self.workspaces[&ws].active)
+    }
+
+    /// 切到当前 workspace 的第 `ix` 个文件标签、带到最前，焦点交给预览栏。
+    pub fn show_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.activate_preview(ix, cx);
+        self.bring_front(cx);
+        window.focus(&self.focus_handle(cx), cx);
+    }
+
+    /// 关掉当前 workspace 的第 `ix` 个文件标签，改过没存的先问。
+    pub fn close_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.retain_previews(|i, _| i != ix, window, cx);
+    }
+
+    /// 把当前 workspace 的第 `ix` 个文件标签固定下来。
+    pub fn pin_tab(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if let Some(tab) = self.tabs_mut().tabs.get_mut(ix) {
+            tab.pinned = true;
+            cx.notify();
+        }
+    }
+
+    /// 把当前 workspace 的第 `from` 个文件标签挪到第 `to` 个位置，切过去、带到最前，焦点交给预览栏。
+    pub fn move_tab(&mut self, from: usize, to: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.move_preview(from, to, cx);
+        window.focus(&self.focus_handle(cx), cx);
+    }
+
+    /// 在 `position` 弹出当前文件标签的右键菜单。
+    pub fn open_tab_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.open_preview_menu(position, cx);
     }
 
     /// 在 `position` 弹出当前预览标签的右键菜单。

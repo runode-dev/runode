@@ -208,6 +208,7 @@ mod tests {
             unstaged: vec![unstaged],
             statuses: HashMap::new(),
             ignored: HashSet::new(),
+            head_stats: Default::default(),
             info: Default::default(),
         };
         let marks = line_marks(&snapshot, Path::new("a.rs"));
@@ -227,6 +228,7 @@ mod tests {
             unstaged: vec![unstaged],
             statuses: HashMap::new(),
             ignored: HashSet::new(),
+            head_stats: Default::default(),
             info: Default::default(),
         }
     }

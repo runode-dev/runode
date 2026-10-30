@@ -156,7 +156,7 @@ actions!(
 #[action(namespace = runode, no_json)]
 pub struct SelectWorkspace(pub usize);
 
-/// 切换到第几个标签（从 0 数）。
+/// 切换到标题栏里的第几个标签（从 0 数）：终端标签在前，文件标签接在后面。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub struct SelectTab(pub usize);
@@ -208,8 +208,7 @@ enum Divider {
     Split(SplitId, Axis),
     /// 侧栏右边的分隔线，拖动改变侧栏宽度。
     Sidebar,
-    /// 预览栏和右侧面板左边的分隔线，拖动改变它们的宽度。
-    Preview,
+    /// 右侧面板左边的分隔线，拖动改变它的宽度。
     Panel,
     /// Git 面板底部图表上沿的分隔线，拖动改变图表的高度。
     GitGraph,
@@ -248,11 +247,11 @@ pub struct WindowView {
     /// 在终端里填 secret、variable 值的那几个终端，按终端记着订阅，gh 跑完时让页重读对应的列表。
     actions_watches: HashMap<EntityId, Subscription>,
     _actions_events: Subscription,
-    /// 预览栏拖动过宽度时是那个宽度；预览栏在打开文件时出现，标签都关掉时收起，不存档。
-    preview_width: Option<f32>,
     /// 预览栏，见 `preview`：各 workspace 的预览标签都在它里面，自动换行和 Markdown 显示源码的开关也是。
     preview: Entity<PreviewPanel>,
     _preview_events: Subscription,
+    /// 预览栏通知时文件标签（`PreviewPanel::file_tabs`）变了就重画标题栏：文件标签画在标题栏里。
+    _preview_watch: Subscription,
     /// 右侧面板的文件树，见 `files`：各 workspace 的树都在它里面，显示哪些文件和搜索的选项也是。
     file_tree: Entity<FileTree>,
     _file_tree_events: Subscription,
@@ -331,7 +330,6 @@ pub struct WindowView {
 struct Slots {
     sidebar: Entity<Slot>,
     titlebar: Entity<Slot>,
-    preview: Entity<Slot>,
     panel: Entity<Slot>,
     status_bar: Entity<Slot>,
 }
@@ -339,8 +337,8 @@ struct Slots {
 impl Slots {
     /// 叫每一块都重画。按字段拆开，加了新的一块时这里编不过，不会漏掉。
     fn notify_all(self, cx: &mut App) {
-        let Self { sidebar, titlebar, preview, panel, status_bar } = self;
-        for slot in [sidebar, titlebar, preview, panel, status_bar] {
+        let Self { sidebar, titlebar, panel, status_bar } = self;
+        for slot in [sidebar, titlebar, panel, status_bar] {
             slot.update(cx, |_, cx| cx.notify());
         }
     }
@@ -422,6 +420,15 @@ impl WindowView {
         let actions_events = cx.subscribe_in(&github_actions, window, Self::on_github_actions_event);
         let preview = cx.new(|cx| PreviewPanel::new(runode_terminal::cell_width, cx));
         let preview_events = cx.subscribe_in(&preview, window, Self::on_preview_event);
+        let mut seen_file_tabs = None;
+        let preview_watch = cx.observe(&preview, move |this, preview, cx| {
+            let file_tabs = Some(preview.read(cx).file_tabs(this.workspace().id));
+            if file_tabs != seen_file_tabs {
+                seen_file_tabs = file_tabs;
+                let titlebar = this.slots(cx).titlebar;
+                titlebar.update(cx, |_, cx| cx.notify());
+            }
+        });
         let file_tree = cx.new(FileTree::new);
         let file_tree_events = cx.subscribe_in(&file_tree, window, Self::on_file_tree_event);
         let git_panel = cx.new(GitPanel::new);
@@ -440,9 +447,9 @@ impl WindowView {
             actions_found: Default::default(),
             actions_watches: HashMap::new(),
             _actions_events: actions_events,
-            preview_width: None,
             preview,
             _preview_events: preview_events,
+            _preview_watch: preview_watch,
             file_tree,
             _file_tree_events: file_tree_events,
             menu: None,
@@ -570,7 +577,6 @@ impl WindowView {
             self.slots = Some(Slots {
                 sidebar: Slot::new(Self::render_sidebar_slot, cx),
                 titlebar: Slot::new(Self::render_titlebar_slot, cx),
-                preview: Slot::new(Self::render_preview_slot, cx),
                 panel: Slot::new(Self::render_panel_slot, cx),
                 status_bar: Slot::new(Self::render_status_bar_slot, cx),
             });
@@ -582,7 +588,7 @@ impl WindowView {
     /// 画的缓存的几块、悬停提示和拖动预览读到的就是这个窗口的。每次画窗口时一开头调。
     ///
     /// 窗口的配色跟着有焦点的终端当前的配色走，程序用 OSC 10/11 改了默认色、配置改了调色板时没有谁
-    /// 通知缓存的几块（连同缓存的看板），它们会停在旧颜色上：主题一变就叫它们重画。这时正在画窗口，
+    /// 通知缓存的几块（连同缓存的看板和预览），它们会停在旧颜色上：主题一变就叫它们重画。这时正在画窗口，
     /// 画的时候发的通知不会再要一帧，所以等这一帧画完再通知。
     fn follow_colors(&mut self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
         let theme = Theme::new(fg, bg, ansi_colors(&cx.global::<AppConfig>().0.palette));
@@ -599,6 +605,8 @@ impl WindowView {
         if let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) {
             cx.defer(move |cx| board.update(cx, |_, cx| cx.notify()));
         }
+        let preview = self.preview.clone();
+        cx.defer(move |cx| preview.update(cx, |_, cx| cx.notify()));
     }
 
     fn render_sidebar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -609,16 +617,8 @@ impl WindowView {
         if cards(cx) { self.render_cards_titlebar(window, cx) } else { self.render_classic_titlebar(window, cx) }
     }
 
-    /// 在终端区右边占一栏的预览栏；放大的预览栏盖在终端上，不经这里。
-    fn render_preview_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let width = self.right_panel_widths(f32::from(window.viewport_size().width), cx).preview;
-        // 经典样式下右侧面板收着时预览栏贴着窗口右边。
-        let rightmost = !cards(cx) && self.workspace().panel.is_none();
-        self.render_preview(width, rightmost, cx)
-    }
-
     fn render_panel_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let width = self.right_panel_widths(f32::from(window.viewport_size().width), cx).panel;
+        let width = self.right_panel_widths(f32::from(window.viewport_size().width)).panel;
         self.render_side_panel(width, cx).unwrap_or_else(|| Empty.into_any_element())
     }
 
@@ -670,7 +670,8 @@ impl MenuHost for WindowView {
 }
 
 impl Focusable for WindowView {
-    /// 开着设置页、手机端引导页、看板时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
+    /// 开着设置页、手机端引导页、看板时是它，文件盖着终端区时是预览；否则是有焦点的终端，当前
+    /// workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         if let Some(page) = &self.settings {
             return page.view.focus_handle(cx);
@@ -680,6 +681,9 @@ impl Focusable for WindowView {
         }
         if let Some(board) = &self.kanban {
             return board.view.focus_handle(cx);
+        }
+        if self.preview_front(cx) {
+            return self.preview.read(cx).focus_handle(cx);
         }
         match self.focused_view() {
             Some(view) => view.focus_handle(cx),
@@ -852,7 +856,7 @@ impl Render for WindowView {
     }
 }
 
-/// 终端区的各个分屏；被放大的预览栏盖住（`covered`）时不报给辅助工具，不然辅助工具照样读得到、按得到
+/// 终端区的各个分屏；被在最前的文件预览盖住（`covered`）时不报给辅助工具，不然辅助工具照样读得到、按得到
 /// 底下的终端。
 fn covered_panes(panes: AnyElement, covered: bool) -> Stateful<Div> {
     div().id("panes").size_full().aria_hidden(covered).child(panes)
@@ -884,14 +888,16 @@ impl WindowView {
     /// 经典样式下标题栏画不画、两头让出多宽。
     fn classic_titlebar(&self, window: &Window, cx: &App) -> ClassicTitlebar {
         let fullscreen = window.is_fullscreen();
-        let show_tabs = self.workspace().tabs.len() > 1;
+        // 有文件标签时总要画标签条，文件标签只在这里显示。
+        let show_tabs =
+            self.workspace().tabs.len() > 1 || self.preview.read(cx).file_tab_count(self.workspace().id) > 0;
         // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。红绿灯和侧栏开关
         // 落在侧栏上时标题栏不用让位；全屏又只有一个标签时不留这一条，侧栏也收着时开关没有地方放，不画。
         let shown = !fullscreen || show_tabs;
         let left_inset = if self.sidebar_visible() { 0. } else { sidebar::sidebar_toggle_inset(fullscreen) };
-        // 右侧面板的开关按钮：右侧都收着时落在标题栏右端，标题栏给它让位；打开着时落在
-        // 面板顶上。全屏又只有一个标签、右侧也都收着时没有地方放，不画。放大的预览栏不在右侧。
-        let right_column = self.workspace().panel.is_some() || self.preview_in_column(cx);
+        // 右侧面板的开关按钮：右侧面板收着时落在标题栏右端，标题栏给它让位；打开着时落在
+        // 面板顶上。全屏又只有一个标签、右侧面板也收着时没有地方放，不画。
+        let right_column = self.workspace().panel.is_some();
         let right_inset = if shown && !right_column { project::PANEL_TOGGLES_INSET } else { 0. };
         ClassicTitlebar { fullscreen, show_tabs, shown, left_inset, right_column, right_inset }
     }
@@ -905,19 +911,15 @@ impl WindowView {
         let sidebar_toggle = (titlebar_shown || sidebar.is_some()).then(|| self.render_sidebar_toggle(fullscreen, cx));
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
-        let widths = self.right_panel_widths(f32::from(window.viewport_size().width), cx);
-        let preview_column = self.preview_in_column(cx);
-        // 放大的预览栏盖在终端区上，宽度是终端区的宽度。它盖着终端，跟着终端一起重画，不缓存。
-        let maximized_preview = self.preview_maximized(cx).then(|| {
+        let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
+        // 在最前的预览盖在终端区上，宽度是终端区的宽度。
+        let front_preview = self.preview_front(cx).then(|| {
             let width = f32::from(window.viewport_size().width) - sidebar_width - widths.panel;
-            self.render_preview(width, false, cx)
+            self.render_preview(width, window, cx)
         });
-        let preview = preview_column.then(|| column_slot(&slots.preview, widths.preview, window));
         let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
-        let right_handles = [
-            preview_column.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.panel, cx)),
-            self.workspace().panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx)),
-        ];
+        let right_handle =
+            self.workspace().panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx));
         let panel_toggles = (titlebar_shown || right_column).then(|| {
             self.render_panel_toggles(window, cx)
                 .absolute()
@@ -925,7 +927,7 @@ impl WindowView {
                 .right(px(project::TOGGLE_MARGIN + titlebar::WINDOW_CONTROLS_WIDTH))
         });
         let titlebar = titlebar_shown.then(|| row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window));
-        let panes = covered_panes(panes, maximized_preview.is_some());
+        let panes = covered_panes(panes, front_preview.is_some());
         let main = div()
             .flex_1()
             .min_w_0()
@@ -933,14 +935,13 @@ impl WindowView {
             .flex()
             .flex_col()
             .children(titlebar)
-            .child(div().relative().flex_1().min_h_0().child(panes).children(maximized_preview));
+            .child(div().relative().flex_1().min_h_0().child(panes).children(front_preview));
         let mut body: Vec<AnyElement> = Vec::new();
         body.extend(sidebar);
         body.push(main.into_any_element());
-        body.extend(preview);
         body.extend(panel);
         body.extend(sidebar_handle.map(IntoElement::into_any_element));
-        body.extend(right_handles.into_iter().flatten().map(IntoElement::into_any_element));
+        body.extend(right_handle.map(IntoElement::into_any_element));
         body.extend(sidebar_toggle.map(IntoElement::into_any_element));
         body.extend(panel_toggles.map(IntoElement::into_any_element));
         body
@@ -949,9 +950,9 @@ impl WindowView {
     /// 经典样式的标题栏：多个标签时是标签条和新建标签按钮，只有一个时居中写标题。
     fn render_classic_titlebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let ClassicTitlebar { show_tabs, left_inset, right_inset, .. } = self.classic_titlebar(window, cx);
-        let tab_count = self.workspace().tabs.len();
+        let tab_count = self.titlebar_tab_count(cx);
         let sidebar_width = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
-        let widths = self.right_panel_widths(f32::from(window.viewport_size().width), cx);
+        let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
         let tabs: Vec<_> = if show_tabs {
             // 标签平分标题栏除去两头的宽度，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，
             // 挤不下就让标签条滚动；拖动时的预览也照这个宽度画。
@@ -969,7 +970,7 @@ impl WindowView {
                 .flex()
                 .overflow_x_scroll()
                 .track_scroll(&self.workspace().tab_scroll)
-                .children((0..tab_count).map(|ix| self.render_tab(ix, tab_width, false, cx)).collect::<Vec<_>>());
+                .children(self.render_tabs(tab_width, false, cx));
             let inset = div()
                 .id("panel-toggles-inset")
                 .flex_none()
@@ -1045,29 +1046,20 @@ impl WindowView {
         let sidebar_toggle = self.render_sidebar_toggle(fullscreen, cx);
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
-        let widths = self.right_panel_widths(viewport, cx);
-        // 放大的预览栏盖在终端区上，宽度是终端区的宽度：除去侧栏、两边的空隙和右侧面板。它盖着终端，
-        // 跟着终端一起重画，不缓存。
-        let maximized_preview = self.preview_maximized(cx).then(|| {
+        let widths = self.right_panel_widths(viewport);
+        // 在最前的预览盖在终端区上，宽度是终端区的宽度：除去侧栏、两边的空隙和右侧面板。
+        let front_preview = self.preview_front(cx).then(|| {
             let panel = if self.workspace().panel.is_some() { widths.panel + CARD_GAP } else { 0. };
             let width = viewport - sidebar_width - 2. * CARD_GAP - panel;
-            self.render_preview(width, false, cx)
+            self.render_preview(width, window, cx)
         });
-        let preview = self.preview_in_column(cx).then(|| column_slot(&slots.preview, widths.preview, window));
         let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
-        let right_handles = [
-            self.preview_in_column(cx).then_some(Divider::Preview),
-            self.workspace().panel.is_some().then_some(Divider::Panel),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|divider| {
-            let right = self.right_divider_offset(divider, widths, true);
-            self.render_right_handle(divider, right, cx)
-        })
-        .collect::<Vec<_>>();
+        let right_handle = self.workspace().panel.is_some().then(|| {
+            let right = self.right_divider_offset(widths, true);
+            self.render_right_handle(Divider::Panel, right, cx)
+        });
         let titlebar = row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window);
-        let panes = covered_panes(panes, maximized_preview.is_some());
+        let panes = covered_panes(panes, front_preview.is_some());
         let content = div()
             .flex_1()
             .min_h_0()
@@ -1076,15 +1068,14 @@ impl WindowView {
             .pl(px(CARD_GAP))
             .pr(px(CARD_GAP))
             .pb(px(CARD_GAP))
-            .child(div().relative().flex_1().min_w_0().h_full().child(panes).children(maximized_preview))
-            .children(preview)
+            .child(div().relative().flex_1().min_w_0().h_full().child(panes).children(front_preview))
             .children(panel);
         let main = div().flex_1().min_w_0().h_full().flex().flex_col().child(titlebar).child(content);
         let mut body: Vec<AnyElement> = Vec::new();
         body.extend(sidebar);
         body.push(main.into_any_element());
         body.extend(sidebar_handle.map(IntoElement::into_any_element));
-        body.extend(right_handles.into_iter().map(IntoElement::into_any_element));
+        body.extend(right_handle.map(IntoElement::into_any_element));
         body.push(sidebar_toggle.into_any_element());
         body
     }
@@ -1092,7 +1083,7 @@ impl WindowView {
     /// 卡片样式的标题栏：左边给侧栏开关让位，中间是胶囊样式的标签条，右边是新建标签和右侧面板的开关。
     fn render_cards_titlebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let viewport = f32::from(window.viewport_size().width);
-        let tab_count = self.workspace().tabs.len();
+        let tab_count = self.titlebar_tab_count(cx);
         let sidebar_visible = self.sidebar_visible();
         let left_inset = if sidebar_visible { CARD_GAP } else { sidebar::sidebar_toggle_inset(window.is_fullscreen()) };
         let sidebar_width = if sidebar_visible { self.sidebar_width() } else { 0. };
@@ -1120,7 +1111,7 @@ impl WindowView {
             .items_center()
             .overflow_x_scroll()
             .track_scroll(&self.workspace().tab_scroll)
-            .children((0..tab_count).map(|ix| self.render_tab(ix, tab_width, true, cx)).collect::<Vec<_>>());
+            .children(self.render_tabs(tab_width, true, cx));
         div()
             .id("titlebar")
             .w_full()

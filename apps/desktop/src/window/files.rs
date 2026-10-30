@@ -109,8 +109,8 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            FileTreeEvent::Open { path, line: None, pin } => self.open_preview(path, *pin, cx),
-            FileTreeEvent::Open { path, line: Some(line), pin } => self.open_preview_at(path, *line, *pin, cx),
+            FileTreeEvent::Open { path, line: None, pin } => self.open_preview(path, *pin, true, cx),
+            FileTreeEvent::Open { path, line: Some(line), pin } => self.open_preview_at(path, *line, *pin, true, cx),
             FileTreeEvent::InsertPath(path) => self.insert_paths(vec![path.clone()], None, window, cx),
             FileTreeEvent::OpenTerminal(dir) => {
                 if let Some(view) = self.spawn_terminal(Some(dir), window, cx) {
@@ -120,7 +120,7 @@ impl WindowView {
             FileTreeEvent::Moved { from, to } => self.move_previews(from, to, cx),
             FileTreeEvent::Removed(path) => self.close_previews_under(path, window, cx),
             FileTreeEvent::Refresh => self.refresh_project(cx),
-            FileTreeEvent::FocusTerminal => window.focus(&self.focus_handle(cx), cx),
+            FileTreeEvent::FocusTerminal => self.focus_terminal(window, cx),
             FileTreeEvent::OptionsChanged => self.save(cx),
         }
     }

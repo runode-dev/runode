@@ -349,6 +349,7 @@ mod tests {
             unstaged: files,
             statuses: Default::default(),
             ignored: Default::default(),
+            head_stats: Default::default(),
             info: Default::default(),
         };
         let status = status(&snapshot);

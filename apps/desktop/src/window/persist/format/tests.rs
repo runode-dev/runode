@@ -46,7 +46,6 @@ fn state() -> State {
         sidebar: None,
         sidebar_width: Some(240.),
         panel_width: Some(200.),
-        preview_width: Some(420.),
         preview_wrap: true,
         preview_source: true,
         show_ignored: true,

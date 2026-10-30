@@ -422,7 +422,12 @@ impl WindowView {
             }
             // 侧栏、标签和状态栏是缓存的视图（见 `Slot`），只在窗口通知时重画，不跟着终端的输出。
             TerminalEvent::MetaChanged => cx.notify(),
+            // 终端拿到焦点时自己露出来，盖着它的文件退到后面，免得打的字进了看不见的 shell。
             TerminalEvent::Focused => {
+                if shown && self.preview_front(cx) {
+                    self.send_preview_back(cx);
+                    cx.notify();
+                }
                 let tab = &mut self.workspaces[wi].tabs[ti];
                 if tab.focused != id {
                     tab.focused = id;
@@ -473,15 +478,16 @@ impl WindowView {
             self.leave_todo_page(window, cx);
             self.leave_mobile(cx);
             self.kanban = None;
-            // 焦点要交给终端，盖着终端的放大预览栏还原。
-            self.restore_preview_zoom(cx);
+            // 焦点要交给终端，盖着终端的预览退到后面。
+            self.send_preview_back(cx);
         }
+        let count = self.titlebar_tab_count(cx);
         let workspace = self.workspace_mut();
         workspace.active = ix;
         if let Some(tab) = workspace.tabs.get_mut(ix) {
             tab.bell = false;
             if reveal_now {
-                reveal_tab(&workspace.tab_scroll, ix, workspace.tabs.len());
+                reveal_tab(&workspace.tab_scroll, ix, count);
             } else {
                 workspace.tab_scroll.scroll_to_item(ix);
             }
@@ -877,7 +883,7 @@ fn closed_index(active: usize, closed: usize) -> usize {
 /// 把第 `ix` 个标签滚进标签条，连同两边各一个邻居一起露出来：点挤在边上的标签，标签条把它滚到
 /// 正中，一次往那边多露出几个，看得到后面还有什么。按上一帧排好的位置算；标签数对不上（刚开、刚关）
 /// 时退回只露出它自己。
-fn reveal_tab(scroll: &ScrollHandle, ix: usize, tab_count: usize) {
+pub(super) fn reveal_tab(scroll: &ScrollHandle, ix: usize, tab_count: usize) {
     let item = |ix: usize| scroll.bounds_for_item(ix).map(|b| (f32::from(b.left()), f32::from(b.right())));
     let (Some(tab), true) = (item(ix), scroll.children_count() == tab_count) else {
         scroll.scroll_to_item(ix);

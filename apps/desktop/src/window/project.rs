@@ -54,8 +54,6 @@ const WATCH_BACKOFF: u32 = 3;
 /// 右侧各栏的默认宽度，以及拖动的下限。
 const PANEL_WIDTH: f32 = 280.;
 const PANEL_MIN_WIDTH: f32 = 220.;
-const PREVIEW_WIDTH: f32 = 480.;
-const PREVIEW_MIN_WIDTH: f32 = 240.;
 /// 右侧面板再宽也给终端区留这么宽。
 const MAIN_MIN_WIDTH: f32 = 240.;
 /// 标题栏右上角开关按钮和右侧面板顶上标签的尺寸和间距。
@@ -76,16 +74,15 @@ pub(super) enum SidePanel {
     GitHubActions,
 }
 
-/// 右侧各栏实际画多宽，收着的为零。从左到右是预览栏、右侧面板。
+/// 右侧实际画多宽，收着的为零。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct PanelWidths {
-    pub preview: f32,
     pub panel: f32,
 }
 
 impl PanelWidths {
     pub fn total(self) -> f32 {
-        self.preview + self.panel
+        self.panel
     }
 }
 
@@ -465,47 +462,29 @@ impl WindowView {
         }
     }
 
-    /// 右侧各栏实际画多宽，收着的为零。窗口窄时先压预览栏，再压右侧面板，尽量给终端区留出
-    /// `MAIN_MIN_WIDTH`，但不窄于各自的下限。
-    pub(super) fn right_panel_widths(&self, viewport: f32, cx: &App) -> PanelWidths {
+    /// 右侧实际画多宽，收着的为零。窗口窄时压右侧面板，尽量给终端区留出 `MAIN_MIN_WIDTH`，但不窄于
+    /// 它的下限。
+    pub(super) fn right_panel_widths(&self, viewport: f32) -> PanelWidths {
         let sidebar = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
-        // 放大的预览栏盖在终端区上，不占右侧的宽度。
-        let preview_shown = self.preview_in_column(cx);
-        let panel_shown = self.workspace().panel.is_some();
-        let panel = if panel_shown { self.panel_width.unwrap_or(PANEL_WIDTH) } else { 0. };
-        let preview = if preview_shown { self.preview_width.unwrap_or(PREVIEW_WIDTH) } else { 0. };
-        let preview = if preview_shown { preview.min(room - panel).max(PREVIEW_MIN_WIDTH) } else { 0. };
-        let panel = if panel_shown { panel.min(room - preview).max(PANEL_MIN_WIDTH) } else { 0. };
-        PanelWidths { preview, panel }
+        let panel = match self.workspace().panel {
+            Some(_) => self.panel_width.unwrap_or(PANEL_WIDTH).min(room).max(PANEL_MIN_WIDTH),
+            None => 0.,
+        };
+        PanelWidths { panel }
     }
 
     /// 拖动右侧面板左边的分隔线，左边跟到窗口里的横坐标 `x`。
-    pub(super) fn resize_right_panel(&mut self, divider: Divider, x: f32, viewport: f32, cx: &App) {
+    pub(super) fn resize_right_panel(&mut self, x: f32, viewport: f32) {
         let sidebar = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
-        let PanelWidths { preview, panel } = self.right_panel_widths(viewport, cx);
-        match divider {
-            Divider::Preview => {
-                let width = (viewport - panel - x).min(room - panel).max(PREVIEW_MIN_WIDTH);
-                self.preview_width = Some(width);
-            }
-            Divider::Panel => {
-                let width = (viewport - x).min(room - preview).max(PANEL_MIN_WIDTH);
-                self.panel_width = Some(width);
-            }
-            Divider::Split(..) | Divider::Sidebar | Divider::GitGraph | Divider::GitHubActions(_) => {}
-        }
+        self.panel_width = Some((viewport - x).min(room).max(PANEL_MIN_WIDTH));
     }
 
     /// 右侧面板左边的分隔线把手，盖在窗口的最上层；`right` 是分隔线离窗口右边的距离。
     pub(super) fn render_right_handle(&self, divider: Divider, right: f32, cx: &mut Context<Self>) -> Stateful<Div> {
-        let id = match divider {
-            Divider::Preview => "preview-divider",
-            _ => "panel-divider",
-        };
         div()
-            .id(id)
+            .id("panel-divider")
             .absolute()
             // 卡片样式下标题栏横跨右侧面板，分隔线从标题栏下面开始，不挡着拖动窗口。
             .top(px(if cards(cx) { TITLEBAR_HEIGHT } else { 0. }))
@@ -519,10 +498,7 @@ impl WindowView {
                     cx.stop_propagation();
                     if event.click_count >= 2 {
                         // 双击恢复默认宽度。
-                        match divider {
-                            Divider::Preview => this.preview_width = None,
-                            _ => this.panel_width = None,
-                        }
+                        this.panel_width = None;
                         this.save(cx);
                     } else {
                         this.dragging_divider = Some(divider);
@@ -537,19 +513,10 @@ impl WindowView {
         self.git_shown() || self.workspace().project.in_repo != Some(false)
     }
 
-    /// 右侧面板左边的分隔线离窗口右边多远：经典样式下是它和右边各栏的宽度；卡片样式下还要加上
-    /// 卡片到窗口右边的间距、右边各张卡片之间的间距，分隔线落在两张卡片中间。
-    pub(super) fn right_divider_offset(&self, divider: Divider, widths: PanelWidths, cards: bool) -> f32 {
-        let panels = match divider {
-            Divider::Preview => [(widths.preview, true), (widths.panel, self.workspace().panel.is_some())],
-            _ => [(0., false), (widths.panel, true)],
-        };
-        let width: f32 = panels.iter().map(|(width, _)| width).sum();
-        if !cards {
-            return width;
-        }
-        let shown = panels.iter().filter(|(_, shown)| *shown).count() as f32;
-        width + CARD_GAP * shown + CARD_GAP / 2.
+    /// 右侧面板左边的分隔线离窗口右边多远：经典样式下是面板的宽度；卡片样式下还要加上卡片到窗口右边的
+    /// 间距，分隔线落在终端区和面板两张卡片中间。
+    pub(super) fn right_divider_offset(&self, widths: PanelWidths, cards: bool) -> f32 {
+        if cards { widths.panel + CARD_GAP * 1.5 } else { widths.panel }
     }
 
     /// 标题栏右上角的按钮：先是命令按钮，然后是开关右侧面板的按钮，展开时底色亮一些，打开的是

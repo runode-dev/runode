@@ -100,29 +100,38 @@ impl WindowView {
     }
 
     pub(super) fn next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
-        let workspace = self.workspace();
-        if !workspace.tabs.is_empty() {
-            self.activate((workspace.active + 1) % workspace.tabs.len(), window, cx);
+        let count = self.titlebar_tab_count(cx);
+        if count > 0 {
+            let next = self.front_tab(cx).map_or(0, |front| (front + 1) % count);
+            self.select_titlebar_tab(next, window, cx);
         }
     }
 
     pub(super) fn previous_tab(&mut self, _: &PreviousTab, window: &mut Window, cx: &mut Context<Self>) {
-        let workspace = self.workspace();
-        let len = workspace.tabs.len();
-        if len > 0 {
-            self.activate((workspace.active + len - 1) % len, window, cx);
+        let count = self.titlebar_tab_count(cx);
+        if count > 0 {
+            let previous = self.front_tab(cx).map_or(count - 1, |front| (front + count - 1) % count);
+            self.select_titlebar_tab(previous, window, cx);
         }
     }
 
     pub(super) fn select_tab(&mut self, action: &SelectTab, window: &mut Window, cx: &mut Context<Self>) {
-        if action.0 < self.workspace().tabs.len() {
-            self.activate(action.0, window, cx);
-        }
+        self.select_titlebar_tab(action.0, window, cx);
     }
 
     pub(super) fn select_last_tab(&mut self, _: &SelectLastTab, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(last) = self.workspace().tabs.len().checked_sub(1) {
-            self.activate(last, window, cx);
+        if let Some(last) = self.titlebar_tab_count(cx).checked_sub(1) {
+            self.select_titlebar_tab(last, window, cx);
+        }
+    }
+
+    /// 切到标题栏里的第 `ix` 个标签：终端标签在前，文件标签接在后面；没有这么多时不动。
+    fn select_titlebar_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let terminals = self.workspace().tabs.len();
+        if ix < terminals {
+            self.activate(ix, window, cx);
+        } else if ix < self.titlebar_tab_count(cx) {
+            self.show_file_tab(ix - terminals, window, cx);
         }
     }
 

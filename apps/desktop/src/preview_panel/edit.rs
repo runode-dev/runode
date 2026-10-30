@@ -8,7 +8,7 @@ use std::{
     cell::RefCell,
     fs, io,
     ops::Range,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -17,12 +17,14 @@ use std::{
 };
 
 use gpui::{
-    App, Context, Entity, Focusable as _, KeyDownEvent, PromptLevel, SharedString, Subscription, Task, Window,
-    prelude::*, px,
+    App, Context, Entity, FocusHandle, Focusable as _, KeyDownEvent, PromptLevel, SharedString, Subscription, Task,
+    Window, prelude::*, px,
 };
 use runode_preview::MAX_TEXT_BYTES;
 
-use super::{BODY_PADDING, Loaded, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, body::highlight_style, file_stamp};
+use super::{
+    BODY_PADDING, Loaded, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, WorkspaceId, body::highlight_style, file_stamp,
+};
 use crate::ui::{
     textarea::{Textarea, TextareaEvent, TextareaState},
     theme::{ActiveTheme as _, Theme},
@@ -87,10 +89,23 @@ fn encode(text: &str, crlf: bool, bom: bool) -> Vec<u8> {
     [if bom { "\u{feff}" } else { "" }, &text].concat().into_bytes()
 }
 
+/// 在后台读 `path` 的原文。
+fn read_in_background(path: &Path, cx: &mut Context<PreviewPanel>) -> Task<io::Result<Source>> {
+    let path = path.to_path_buf();
+    cx.background_spawn(async move { read_source(&path) })
+}
+
 /// 弹框报错，只有一个「好」。
 fn report(title: &str, err: &io::Error, window: &mut Window, cx: &mut Context<PreviewPanel>) {
     // 不等回答：框关掉就完了。
     drop(window.prompt(PromptLevel::Critical, title, Some(&err.to_string()), &[&*rust_i18n::t!("git.ok")], cx));
+}
+
+impl Editor {
+    /// 选中这几行（从 0 数），滚到能看见。
+    pub(super) fn select_lines(&self, lines: Range<usize>, cx: &mut App) {
+        self.area.update(cx, |area, cx| area.select_lines(lines, cx));
+    }
 }
 
 impl Preview {
@@ -111,6 +126,11 @@ impl Preview {
 }
 
 impl PreviewPanel {
+    /// 当前标签在编辑时输入框的焦点。
+    pub(super) fn editor_focus(&self, cx: &App) -> Option<FocusHandle> {
+        Some(self.preview()?.editor.as_ref()?.area.focus_handle(cx))
+    }
+
     /// 当前标签进出编辑模式。进的时候固定标签，免得打开别的文件时被换掉；改过没存时退出先问。
     pub(super) fn toggle_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(preview) = self.preview_mut() else {
@@ -154,69 +174,100 @@ impl PreviewPanel {
             return;
         };
         let (ws, path) = (self.ws, preview.path.clone());
-        let job = cx.background_spawn({
-            let path = path.clone();
-            async move { read_source(&path) }
-        });
+        let job = read_in_background(&path, cx);
         cx.spawn_in(window, async move |this, cx| {
             let source = job.await;
-            this.update_in(cx, |this, window, cx| {
-                let source = match source {
-                    Ok(source) => source,
-                    Err(err) => {
-                        report(&rust_i18n::t!("preview.edit_failed"), &err, window, cx);
-                        return;
-                    }
-                };
-                // 读的期间切走了的不抢焦点。
-                let shown = this.ws == ws && this.preview().is_some_and(|tab| tab.path == path && tab.diff.is_none());
-                // 读的期间标签关了、又进过一次编辑的不管。
-                let tabs = this.workspaces.get_mut(&ws).map_or(&mut [][..], |tabs| &mut tabs.tabs[..]);
-                let Some(preview) =
-                    tabs.iter_mut().find(|tab| tab.path == path && tab.diff.is_none() && tab.editor.is_none())
-                else {
-                    return;
-                };
-                let name = preview.name();
-                let area = cx.new(|cx| {
-                    let mut area = TextareaState::new(cx);
-                    area.load_text(source.text.clone(), cx);
-                    area.fill_height(cx);
-                    area.set_label(name, cx);
-                    area
-                });
-                let changed = cx.subscribe(&area, |this, area, event: &TextareaEvent, cx| {
-                    if let TextareaEvent::Changed = event
-                        && let Some(editor) = this.editor_mut(&area)
+            this.update_in(cx, |this, window, cx| match source {
+                Ok(source) => {
+                    // 读的期间切走了的不抢焦点。
+                    let shown =
+                        this.ws == ws && this.preview().is_some_and(|tab| tab.path == path && tab.diff.is_none());
+                    if let Some(area) = this.install_editor(ws, &path, source, cx)
+                        && shown
                     {
-                        editor.dirty = area.read(cx).text() != editor.saved;
-                        this.rehighlight(&area, Some(REHIGHLIGHT_DELAY), cx);
-                        cx.notify();
+                        window.focus(&area.focus_handle(cx), cx);
                     }
-                });
-                if shown {
-                    window.focus(&area.focus_handle(cx), cx);
                 }
-                // 和输入框里换行统一过的文字比，`\r\n` 的文件刚读进来不算改过。
-                let saved = area.read(cx).text().to_owned();
-                preview.editor = Some(Editor {
-                    area: area.clone(),
-                    saved,
-                    dirty: false,
-                    crlf: source.crlf,
-                    bom: source.bom,
-                    stamp: source.stamp,
-                    saving: false,
-                    highlight: Task::ready(()),
-                    highlight_cancel: Arc::default(),
-                    palette: RefCell::new(None),
-                    _changed: changed,
-                });
-                cx.notify();
+                Err(err) => report(&rust_i18n::t!("preview.edit_failed"), &err, window, cx),
             })
             .ok();
         })
         .detach();
+    }
+
+    /// 在后台读 workspace `ws` 里 `path` 普通标签的原文，读好了换成输入框；焦点不动，读不了时不进编辑也不报错。
+    pub(super) fn start_editing_quietly(&mut self, ws: WorkspaceId, path: PathBuf, cx: &mut Context<Self>) {
+        let job = read_in_background(&path, cx);
+        cx.spawn(async move |this, cx| {
+            if let Ok(source) = job.await {
+                this.update(cx, |this, cx| this.install_editor(ws, &path, source, cx)).ok();
+            }
+        })
+        .detach();
+    }
+
+    /// 把 workspace `ws` 里 `path` 普通标签的正文换成装着 `source` 的输入框，预览里选着的行在输入框里照样
+    /// 选中。读的期间标签关了、又进过一次编辑的不管，返回空。
+    fn install_editor(
+        &mut self,
+        ws: WorkspaceId,
+        path: &Path,
+        source: Source,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<TextareaState>> {
+        let tabs = self.workspaces.get_mut(&ws)?;
+        let preview =
+            tabs.tabs.iter_mut().find(|tab| tab.path == path && tab.diff.is_none() && tab.editor.is_none())?;
+        let name = preview.name();
+        let selected = preview.selected_lines();
+        let area = cx.new(|cx| {
+            let mut area = TextareaState::new(cx);
+            area.load_text(source.text.clone(), cx);
+            if let Some(lines) = selected {
+                area.select_lines(lines, cx);
+            }
+            area.fill_height(cx);
+            area.show_line_numbers(cx);
+            area.set_label(name, cx);
+            area
+        });
+        let changed = cx.subscribe(&area, |this, area, event: &TextareaEvent, cx| {
+            if let TextareaEvent::Changed = event
+                && let Some(preview) = this.editing_tab_mut(&area)
+                && let Some(editor) = &mut preview.editor
+            {
+                editor.dirty = area.read(cx).text() != editor.saved;
+                // 改过的临时标签固定下来，免得打开别的文件时连同没存的修改一起被换掉。
+                preview.pinned |= editor.dirty;
+                this.rehighlight(&area, Some(REHIGHLIGHT_DELAY), cx);
+                cx.notify();
+            }
+        });
+        // 和输入框里换行统一过的文字比，`\r\n` 的文件刚读进来不算改过。
+        let saved = area.read(cx).text().to_owned();
+        preview.editor = Some(Editor {
+            area: area.clone(),
+            saved,
+            dirty: false,
+            crlf: source.crlf,
+            bom: source.bom,
+            stamp: source.stamp,
+            saving: false,
+            highlight: Task::ready(()),
+            highlight_cancel: Arc::default(),
+            palette: RefCell::new(None),
+            _changed: changed,
+        });
+        cx.notify();
+        Some(area)
+    }
+
+    /// 输入框 `area` 所在的标签，在哪个 workspace 都找。
+    fn editing_tab_mut(&mut self, area: &Entity<TextareaState>) -> Option<&mut Preview> {
+        self.workspaces
+            .values_mut()
+            .flat_map(|tabs| &mut tabs.tabs)
+            .find(|tab| tab.editor.as_ref().is_some_and(|editor| editor.area == *area))
     }
 
     fn editor(&self, area: &Entity<TextareaState>) -> Option<&Editor> {
@@ -229,11 +280,7 @@ impl PreviewPanel {
 
     /// 输入框 `area` 所在的编辑器，在哪个 workspace 都找。
     fn editor_mut(&mut self, area: &Entity<TextareaState>) -> Option<&mut Editor> {
-        self.workspaces
-            .values_mut()
-            .flat_map(|tabs| &mut tabs.tabs)
-            .filter_map(|tab| tab.editor.as_mut())
-            .find(|editor| editor.area == *area)
+        self.editing_tab_mut(area)?.editor.as_mut()
     }
 
     /// 等 `delay` 之后在后台给编辑器 `area` 的全文重算语法高亮，算好时文字没再改过就换上；颜色按那时的主题。

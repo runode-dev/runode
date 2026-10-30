@@ -20,6 +20,7 @@ fn snapshot() -> git::Repos {
             ("src/c.rs".into(), FileStatus::Added),
         ]),
         ignored: HashSet::from(["target".into()]),
+        head_stats: Default::default(),
         info: Default::default(),
     })
 }
@@ -68,6 +69,7 @@ fn decorates_paths_inside_sub_repositories() {
         unstaged: Vec::new(),
         statuses: HashMap::from([("src/x.rs".into(), FileStatus::Added)]),
         ignored: HashSet::from(["build".into()]),
+        head_stats: Default::default(),
         info: Default::default(),
     });
     let changes = GitChanges::new(Some(&git));

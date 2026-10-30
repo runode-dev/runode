@@ -42,8 +42,6 @@ pub struct SavedWindow {
     pub sidebar_width: Option<f32>,
     /// 右侧面板拖动过的宽度；没拖过时为空，用默认宽度。
     pub panel_width: Option<f32>,
-    /// 预览栏拖动过的宽度；预览的是哪个文件、开没开着都不存。
-    pub preview_width: Option<f32>,
     /// 预览的文本和 diff 自动换行；默认不换。
     pub preview_wrap: bool,
     /// Markdown 文件显示源码；默认显示排版后的样子。

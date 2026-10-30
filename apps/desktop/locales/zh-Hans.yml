@@ -1035,8 +1035,6 @@ preview:
     important: 重要
     warning: 警告
     caution: 注意
-  maximize: 放大预览
-  restore: 还原预览
   diff:
     worktree_tab: "%{name}（工作树）"
     staged_tab: "%{name}（已暂存）"
