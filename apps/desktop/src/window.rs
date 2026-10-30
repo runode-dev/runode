@@ -22,6 +22,7 @@ mod kanban;
 mod layout_report;
 mod mobile;
 mod model;
+mod new_tab;
 mod new_workspace;
 mod open;
 mod pane_move;
@@ -258,6 +259,10 @@ pub struct WindowView {
     /// 窗口开着的菜单：状态栏、标题栏命令按钮这些的右键菜单和按钮下面的菜单，同一时刻只开一个。
     /// 预览栏、文件树和 Git 面板的菜单存在它们自己身上。
     menu: Option<Menu>,
+    /// 开着的下拉菜单是新建标签按钮的，不是命令按钮的。
+    new_tab_menu: bool,
+    /// 新建标签菜单里列的 agent，上次打开菜单时在后台找到的。
+    installed_agents: Vec<new_tab::Installed>,
     renaming: Option<Renaming>,
     /// 新建 workspace 的对话框。
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
@@ -453,6 +458,8 @@ impl WindowView {
             file_tree,
             _file_tree_events: file_tree_events,
             menu: None,
+            new_tab_menu: false,
+            installed_agents: Vec::new(),
             renaming: None,
             new_workspace: None,
             add_task: None,
@@ -759,6 +766,7 @@ impl Render for WindowView {
                 }
             }))
             .on_action(Self::act(cx, Self::new_tab))
+            .on_action(Self::act(cx, Self::new_agent_tab))
             .on_action(Self::act(cx, Self::close_tab))
             .on_action(Self::act(cx, Self::next_tab))
             .on_action(Self::act(cx, Self::previous_tab))
@@ -905,7 +913,12 @@ impl WindowView {
     /// 经典样式：终端铺满窗口，侧栏、标题栏和右侧面板之间一条细线；只有一个标签时标题栏只写标题。
     fn render_classic_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let slots = self.slots(cx);
-        let ClassicTitlebar { fullscreen, shown: titlebar_shown, right_column, .. } = self.classic_titlebar(window, cx);
+        let ClassicTitlebar { fullscreen, shown: titlebar_shown, right_column, show_tabs, .. } =
+            self.classic_titlebar(window, cx);
+        // 只剩一个标签时不画新建标签按钮，挂在它下面的菜单也关掉，不然菜单看不见却还拿着焦点。
+        if !show_tabs && self.new_tab_menu_open() {
+            cx.defer_in(window, |this, window, cx| this.close_menu(window, cx));
+        }
         let panes = self.render_panes(window, cx);
         let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window));
         let sidebar_toggle = (titlebar_shown || sidebar.is_some()).then(|| self.render_sidebar_toggle(fullscreen, cx));
@@ -980,7 +993,7 @@ impl WindowView {
             let spacer = div().id("tabs-spacer").flex_1().h_full().window_control_area(WindowControlArea::Drag);
             vec![
                 strip.into_any_element(),
-                self.render_new_tab_button(cx).into_any_element(),
+                self.render_new_tab_button(window, cx).into_any_element(),
                 spacer.into_any_element(),
                 inset.into_any_element(),
             ]
@@ -1129,7 +1142,7 @@ impl WindowView {
             }))
             .child(div().flex_none().w(px(left_inset)).h_full().window_control_area(WindowControlArea::Drag))
             .child(strip)
-            .child(self.render_new_tab_button_card(cx))
+            .child(self.render_new_tab_button_card(window, cx))
             // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
             .child(div().flex_1().h_full().window_control_area(WindowControlArea::Drag))
             .child(self.render_panel_toggles(window, cx))

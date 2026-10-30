@@ -250,6 +250,19 @@ fn find_item(items: &[Option<MenuItem>], near: usize, old: &MenuItem) -> Option<
         .map(|(ix, _)| ix)
 }
 
+/// 把按钮下面弹出的菜单 `list` 的 `anchor` 角对着按钮下沿，往下让出一点，放不下时贴着窗口边挪进来，
+/// 盖在窗口最上层。
+fn dropdown_anchor(anchor: Anchor, list: Popover) -> impl IntoElement {
+    deferred(
+        anchored()
+            .anchor(anchor)
+            .offset(point(px(0.), px(DROPDOWN_GAP)))
+            .snap_to_window_with_margin(px(MENU_MARGIN))
+            .child(list),
+    )
+    .with_priority(1)
+}
+
 /// 开菜单的视图：菜单的状态存在它身上（`menu_slot`），这里给它开、关、画菜单的写法。
 pub trait MenuHost: Sized + 'static {
     /// 开着的菜单存在哪。
@@ -446,23 +459,29 @@ pub trait MenuHost: Sized + 'static {
     /// 挂在按钮下面的菜单，按钮把它作为子元素：右上角对着按钮的右下角，往下让出一点；放不下时
     /// 贴着窗口边挪进来。按钮下沿离窗口顶 `button_bottom`，菜单最高到窗口底边。
     fn render_dropdown_menu(&self, button_bottom: f32, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
+        let list = self.render_dropdown_list(button_bottom, window, cx)?;
+        Some(div().absolute().bottom_0().right_0().child(dropdown_anchor(Anchor::TopRight, list)))
+    }
+
+    /// 挂在按钮下面、往右展开的菜单，按钮把它作为子元素：左上角对着按钮的左下角，用在靠窗口左边的按钮上；
+    /// 放不下时贴着窗口边挪进来。按钮下沿离窗口顶 `button_bottom`，菜单最高到窗口底边。
+    fn render_dropdown_menu_rightward(
+        &self,
+        button_bottom: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let list = self.render_dropdown_list(button_bottom, window, cx)?;
+        Some(div().absolute().bottom_0().left_0().child(dropdown_anchor(Anchor::TopLeft, list)))
+    }
+
+    /// 按钮下面弹出的菜单本身，按钮下沿离窗口顶 `button_bottom`；没有开着的下拉菜单时为空。
+    fn render_dropdown_list(&self, button_bottom: f32, window: &Window, cx: &mut Context<Self>) -> Option<Popover> {
         if !self.dropdown_open() {
             return None;
         }
         let max_height = f32::from(window.viewport_size().height) - button_bottom - DROPDOWN_GAP - MENU_MARGIN;
-        let list = self.render_menu_list(max_height, window, cx)?;
-        Some(
-            div().absolute().bottom_0().right_0().child(
-                deferred(
-                    anchored()
-                        .anchor(Anchor::TopRight)
-                        .offset(point(px(0.), px(DROPDOWN_GAP)))
-                        .snap_to_window_with_margin(px(MENU_MARGIN))
-                        .child(list),
-                )
-                .with_priority(1),
-            ),
-        )
+        self.render_menu_list(max_height, window, cx)
     }
 
     /// 菜单本身，最高 `max_height`，超出窗口时才在里面滚动；点到菜单外面就关掉。

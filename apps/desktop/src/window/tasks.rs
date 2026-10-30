@@ -145,7 +145,7 @@ impl WindowView {
                 cx.notify();
                 if this.workspace().id == id {
                     // 开着的命令菜单是打开时按那时列着的命令建的（打开菜单才开始列），换上新列出来的。
-                    if this.dropdown_open() {
+                    if this.tasks_menu_open() {
                         let (items, _) = this.tasks_menu_items(cx);
                         this.replace_menu_items(items, cx);
                     }
@@ -264,7 +264,7 @@ impl WindowView {
 
     /// 按快捷键打开命令菜单、选中第一条；开着时关掉。
     pub(super) fn toggle_tasks(&mut self, _: &ToggleTasks, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dropdown_open() {
+        if self.tasks_menu_open() {
             self.close_menu(window, cx);
         } else {
             self.open_tasks_menu(true, cx);
@@ -274,15 +274,16 @@ impl WindowView {
     /// 标题栏右上角、面板开关左边的命令按钮，菜单挂在它下面，开着时底色亮一些。
     pub(super) fn render_tasks_button(&self, window: &Window, cx: &mut Context<Self>) -> Toggle {
         let view = cx.entity().downgrade();
+        let open = self.tasks_menu_open();
         Toggle::new("tasks", PLAY_ICON, rust_i18n::t!("tooltip.tasks"))
-            .pressed(self.dropdown_open())
-            .aria_expanded(self.dropdown_open())
+            .pressed(open)
+            .aria_expanded(open)
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
             .tooltip(tooltip(rust_i18n::t!("tooltip.tasks"), Some(&ToggleTasks)))
             // 菜单开着时在捕获阶段就关掉、不再往下传：菜单自己的「点到外面就关」和下面再打开的都不跑。
             .capture_any_mouse_down(cx.listener(|this, _, window, cx| {
-                if this.dropdown_open() {
+                if this.tasks_menu_open() {
                     cx.stop_propagation();
                     this.close_menu(window, cx);
                 }
@@ -296,7 +297,12 @@ impl WindowView {
             )
             // 按下鼠标就开，没有 on_click，辅助工具的按下另外登记：和快捷键一样开关菜单、开时选中第一条。
             .on_a11y_press(view, move |this, window, cx| this.toggle_tasks(&ToggleTasks, window, cx))
-            .children(self.render_dropdown_menu(super::TITLEBAR_HEIGHT, window, cx))
+            .when(open, |button| button.children(self.render_dropdown_menu(super::TITLEBAR_HEIGHT, window, cx)))
+    }
+
+    /// 开着的下拉菜单是命令按钮的。
+    fn tasks_menu_open(&self) -> bool {
+        !self.new_tab_menu && self.dropdown_open()
     }
 
     /// 在命令按钮下面弹出命令菜单，各项见 `tasks_menu_items`。上次跑的命令还在菜单里时选中它；不然从键盘
@@ -307,6 +313,7 @@ impl WindowView {
         // `open_dropdown` 选中给的那一项之后能选的第一项；第 2 项是第一组的标题，前面是添加命令和分隔线。
         let select_after = last.map(|ix| ix - 1).or(from_keyboard.then_some(2));
         self.open_dropdown(items, target, select_after, cx);
+        self.new_tab_menu = false;
         // shortcut: 面板收着时不监听目录，Makefile、package.json 改了要到下次打开菜单才看得到；要即时的话
         // 面板收着时也监听这几个文件。
         self.workspace_mut().project.tasks_stale = true;

@@ -762,10 +762,10 @@ impl WindowView {
             }))
     }
 
-    /// 卡片样式下标签条右边的新建标签按钮。
-    pub(super) fn render_new_tab_button_card(&self, cx: &mut Context<Self>) -> Button {
+    /// 卡片样式下标签条右边的新建标签按钮，按下弹出新建标签菜单。
+    pub(super) fn render_new_tab_button_card(&self, window: &Window, cx: &mut Context<Self>) -> Button {
         let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab));
-        Button::new("new-tab", rust_i18n::t!("menu.new_tab"))
+        let button = Button::new("new-tab", rust_i18n::t!("menu.new_tab"))
             .icon(PLUS_ICON)
             .icon_size(16.)
             .with_size(ButtonSize::Icon)
@@ -773,13 +773,13 @@ impl WindowView {
             .mr(px(6.))
             .w(px(NEW_TAB_BUTTON_WIDTH - 8.))
             .h(px(TAB_TRACK_HEIGHT - 4.))
-            .tooltip(tooltip)
-            .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx))
+            .tooltip(tooltip);
+        self.with_new_tab_menu(button, window, cx)
     }
 
-    pub(super) fn render_new_tab_button(&self, cx: &mut Context<Self>) -> Button {
+    pub(super) fn render_new_tab_button(&self, window: &Window, cx: &mut Context<Self>) -> Button {
         let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab));
-        Button::new("new-tab", rust_i18n::t!("menu.new_tab"))
+        let button = Button::new("new-tab", rust_i18n::t!("menu.new_tab"))
             .with_size(ButtonSize::IconSm)
             .w(px(NEW_TAB_BUTTON_WIDTH))
             .h_full()
@@ -788,7 +788,7 @@ impl WindowView {
             .border_color(cx.theme().border)
             .text_size(px(16.))
             .child("+")
-            .tooltip(tooltip)
-            .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx))
+            .tooltip(tooltip);
+        self.with_new_tab_menu(button, window, cx)
     }
 }

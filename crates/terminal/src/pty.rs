@@ -33,7 +33,6 @@ mod reader;
 #[cfg(unix)]
 use std::{
     cell::Cell,
-    ffi::OsString,
     fmt,
     os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
     path::PathBuf,
@@ -42,6 +41,7 @@ use std::{
     time::Duration,
 };
 use std::{
+    ffi::OsString,
     path::Path,
     sync::{
         Arc,
@@ -461,6 +461,12 @@ const OUTER_SESSION_VARS: &[&str] = &[
     "WT_PROFILE_ID",
     "WT_SESSION",
 ];
+
+/// 新起的 shell 启动时拿到的 PATH，它的启动脚本再改的不算。Windows 上每次从注册表重读系统和用户的环境变量，
+/// 装了程序、改了 PATH 以后新开的终端不用重启宿主就能用；别的系统是本进程的。读注册表要时间，不在界面线程上调。
+pub fn spawn_path() -> Option<OsString> {
+    portable_pty::CommandBuilder::new("").get_env("PATH").map(ToOwned::to_owned)
+}
 
 /// 整组都由终端自己设的变量前缀，同样不继承。
 const OUTER_SESSION_PREFIXES: &[&str] = &["ALACRITTY_", "GHOSTTY_", "HERDR_", "ITERM_", "VSCODE_", "WEZTERM_"];
