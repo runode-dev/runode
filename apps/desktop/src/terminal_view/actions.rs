@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use gpui::{App, AppContext as _, ClipboardItem, Context, PromptLevel, Window, px};
+use gpui::{App, AppContext as _, ClipboardEntry, ClipboardItem, Context, PromptLevel, Window, px};
 use runode_terminal::session::{Paste as PasteResult, Session};
 use runode_types::grid::ViewportScroll;
 
@@ -37,8 +37,19 @@ pub(super) fn write_primary(text: String, cx: &App) {
 
 impl TerminalView {
     pub(super) fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+        let Some(item) = cx.read_from_clipboard() else {
+            return;
+        };
+        if let Some(text) = item.text() {
             self.paste_text(text, window, cx);
+            return;
+        }
+        let image = item.entries().iter().find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => Some(image.clone()),
+            _ => None,
+        });
+        if let Some(image) = image.filter(|_| !self.host.is_local()) {
+            cx.emit(super::TerminalEvent::PasteImage(image));
         }
     }
 

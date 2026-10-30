@@ -10,6 +10,7 @@
 
 mod askpass;
 pub(crate) mod deploy;
+pub(crate) mod upload;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -647,7 +648,7 @@ mod tests {
 
     use futures::StreamExt as _;
 
-    use super::{RemoteEvent, Status, events, remote};
+    use super::{RemoteEvent, Status, events, remote, ssh, upload};
 
     fn wait_for(host: &super::RemoteHost, timeout: Duration, done: impl Fn(&Status) -> bool) -> Status {
         let deadline = Instant::now() + timeout;
@@ -690,6 +691,29 @@ mod tests {
         let reconnected = connected();
         assert_eq!(reconnected.map(|(host, _)| host), Some(name));
         assert!(matches!(host.status(), Status::Connected(_)));
+
+        // 两个同名的文件各传到一个子目录里，目录连同里面的一起传。
+        let local = std::env::temp_dir().join(format!("rn-upload-{}", std::process::id()));
+        for dir in ["a", "b", "c/inner"] {
+            std::fs::create_dir_all(local.join(dir)).unwrap();
+        }
+        std::fs::write(local.join("a/same.txt"), "from a").unwrap();
+        std::fs::write(local.join("b/same.txt"), "from b").unwrap();
+        std::fs::write(local.join("c/inner/deep.txt"), "deep").unwrap();
+        let files = vec![local.join("a/same.txt"), local.join("b/same.txt"), local.join("c")];
+        let paths = upload::upload(&host, upload::Upload::Files(files)).expect("upload");
+        assert_ne!(paths[0], paths[1]);
+        let read = |path: &str| {
+            let output = ssh().exec(&host.dest, &format!("cat {path}"), true).output().unwrap();
+            String::from_utf8(output.stdout).unwrap()
+        };
+        assert_eq!((read(&paths[0]), read(&paths[1])), ("from a".into(), "from b".into()));
+        assert_eq!(read(&format!("{}/inner/deep.txt", paths[2])), "deep");
+        let bytes = upload::Upload::Bytes { name: "shot.png".into(), bytes: b"png".to_vec() };
+        let shot = upload::upload(&host, bytes).expect("upload bytes");
+        assert_eq!(read(&shot[0]), "png");
+        let _ = std::fs::remove_dir_all(&local);
+
         host.disconnect();
         host.close_master();
     }

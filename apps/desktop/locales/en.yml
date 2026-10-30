@@ -219,6 +219,8 @@ ssh:
   status_stopped: "Cannot connect: %{error}"
   lost: "%{host}: %{status}"
   reconnect: Reconnect Now
+  upload_failed: "Could not upload to %{host}"
+  ok: OK
 size_owner:
   controlled_by: "Size set by %{device}"
   controlled_elsewhere: Size set by another device

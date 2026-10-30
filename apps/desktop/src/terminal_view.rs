@@ -129,6 +129,8 @@ pub enum TerminalEvent {
     /// 前台 agent 停下来等用户回答（要不要执行命令、选哪一项等）。从工作中直接变成这样时
     /// 紧跟在 `AgentFinished` 之后发。
     AgentBlocked,
+    /// 远端主机上的终端里粘贴、剪贴板里只有图片：那边的程序读不到这台电脑的剪贴板，要先传过去。
+    PasteImage(gpui::Image),
     /// shell 已经退出，这个终端该关掉了。
     Exited,
 }

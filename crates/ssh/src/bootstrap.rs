@@ -71,6 +71,43 @@ pub fn install_command(dir: &str, sha256: &str, archive: bool) -> String {
     ))
 }
 
+/// 上传到远端的文件放在家目录下的这里，每次上传一个子目录。
+pub const UPLOADS_DIR: &str = ".runode/uploads";
+/// 上传的子目录放满这么多天，下次上传时删掉。
+pub const UPLOAD_KEEP_DAYS: u32 = 7;
+/// 上传完打出的那一行以它开头，后面是这次上传放在远端的目录。
+const UPLOADED: &str = "RUNODE-UPLOADED ";
+
+/// 把 stdin 传到远端 `UPLOADS_DIR` 下新建的子目录 `id` 里：给了 `file` 时 stdin 就是这个文件的内容，没给时是
+/// tar 包，原样解开；传完打出这个子目录的绝对路径（`parse_uploaded` 认）。`id` 和 `file` 只能有字母、数字和
+/// `.`、`-`、`_`，不能以 `.` 开头。
+pub fn upload_command(id: &str, file: Option<&str>) -> String {
+    debug_assert!([Some(id), file].into_iter().flatten().all(|name| install_dir_name(name) == name));
+    let receive = match file {
+        Some(file) => format!(r#"cat > "$U/{file}""#),
+        None => r#"tar -xf - -C "$U""#.to_owned(),
+    };
+    wrap(&format!(
+        concat!(
+            r#"D="$HOME/{uploads}"; umask 077; mkdir -p "$D" || exit 1; "#,
+            r#"find "$D" -mindepth 1 -maxdepth 1 -mtime +{keep} -exec rm -rf {{}} + 2>/dev/null; "#,
+            r#"U="$D/{id}"; mkdir "$U" || exit 1; "#,
+            "{receive} || exit 1; ",
+            r#"printf "{uploaded}%s\n" "$U""#
+        ),
+        uploads = UPLOADS_DIR,
+        keep = UPLOAD_KEEP_DAYS,
+        id = id,
+        receive = receive,
+        uploaded = UPLOADED,
+    ))
+}
+
+/// `upload_command` 的输出里这次上传放在远端的目录；登录 shell 的启动文件可能先打出别的行，跳过。
+pub fn parse_uploaded(output: &str) -> Option<&str> {
+    output.lines().find_map(|line| line.strip_prefix(UPLOADED)).filter(|dir| dir.starts_with('/'))
+}
+
 /// 远端的系统。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Os {

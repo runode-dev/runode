@@ -4,13 +4,14 @@
 //! 它要窗口办的事（开预览、把路径打进终端、开新标签、预览跟着改名和删除、重读、焦点交回终端、开关变了要存档）
 //! 经 `FileTreeEvent` 交回来。
 //!
-//! 把路径打进终端（`insert_paths`）和拖到终端上（`drop_paths_on_pane`）也在这里，预览栏、Git 面板和分屏都用。
+//! 把路径打进终端（`insert_paths`）和拖到终端上（`drop_paths_on_pane`）也在这里，预览栏、Git 面板和分屏都用；
+//! 终端在远端主机上时先把文件传过去。
 
 use std::path::{Path, PathBuf};
 
 use crate::file_tree::{FileTree, FileTreeEvent, Input};
 use futures::FutureExt as _;
-use gpui::{Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*, px};
+use gpui::{Context, Div, Entity, Focusable, PromptLevel, Stateful, Window, div, prelude::*, px};
 use runode_config::PreviewClick;
 use runode_types::{session::SessionMeta, shell::Shell};
 
@@ -20,6 +21,8 @@ pub(super) use crate::ui::menu::{MenuButton, MenuItem};
 use super::{WindowView, cards, project::panel_shell};
 use crate::{
     config::AppConfig,
+    host_client::remote::{self, HostId, upload::Upload},
+    terminal_view::TerminalView,
     ui::{
         font_size::{self, FontSize},
         theme::ActiveTheme as _,
@@ -223,8 +226,62 @@ impl WindowView {
         self.insert_paths(paths.to_vec(), None, window, cx);
     }
 
+    /// 远端终端里粘贴的图片传到那台主机上，再把它在远端的路径打进这个终端。
+    pub(super) fn paste_image(
+        &mut self,
+        view: Entity<TerminalView>,
+        image: &gpui::Image,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let secs =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs());
+        let name = format!("clipboard-{secs}.{}", image.format.extension());
+        self.upload_to_view(view, Upload::Bytes { name, bytes: image.bytes.clone() }, window, cx);
+    }
+
+    /// 把本机的文件或一份内容传到 `view` 所在的远端主机，再把它们在远端的绝对路径打进 `view`，后面各带一个
+    /// 空格；传不上去时弹框说原因。
+    fn upload_to_view(
+        &mut self,
+        view: Entity<TerminalView>,
+        upload: Upload,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let HostId::Ssh(name) = view.read(cx).host().clone() else {
+            return;
+        };
+        let Some(host) = remote::remote(&name) else {
+            return;
+        };
+        let quoting = Quoting::of_session(view.read(cx).meta());
+        let job = cx.background_spawn(async move { remote::upload::upload(&host, upload) });
+        let view = view.downgrade();
+        cx.spawn_in(window, async move |_, cx| {
+            let uploaded = job.await;
+            view.update_in(cx, |view, window, cx| match uploaded {
+                Ok(paths) => {
+                    for path in paths {
+                        view.paste_text(format!("{} ", path_text(Path::new(&path), None, None, quoting)), window, cx);
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!("cannot upload to {name}: {err:#}");
+                    let detail = format!("{err:#}");
+                    let title = rust_i18n::t!("ssh.upload_failed", host = name.as_str());
+                    // 只说一声，不等回答。
+                    drop(window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&*rust_i18n::t!("ssh.ok")], cx));
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// 把 `paths` 一个个打进当前终端，在它的目录下时写相对路径，后面带上首尾行号 `lines` 和一个空格，
     /// 再把焦点交回终端。比目录要解符号链接，在单独的线程上算好再打进去（`fs_probe::off_thread`）。
+    /// 远端主机上的终端读不到本机的文件，先传过去，打的是远端的路径。
     pub(super) fn insert_paths(
         &mut self,
         paths: Vec<PathBuf>,
@@ -235,6 +292,11 @@ impl WindowView {
         let Some(view) = self.focused_view().cloned() else {
             return;
         };
+        if !view.read(cx).host().is_local() {
+            window.focus(&view.focus_handle(cx), cx);
+            self.upload_to_view(view, Upload::Files(paths), window, cx);
+            return;
+        }
         let cwd = view.read(cx).cwd();
         let quoting = Quoting::of_session(view.read(cx).meta());
         window.focus(&view.focus_handle(cx), cx);

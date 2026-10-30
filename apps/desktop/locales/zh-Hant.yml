@@ -219,6 +219,8 @@ ssh:
   status_stopped: "連不上：%{error}"
   lost: "%{host}：%{status}"
   reconnect: 立即重連
+  upload_failed: "傳不到 %{host} 上"
+  ok: 好
 size_owner:
   controlled_by: 尺寸由 %{device} 控制
   controlled_elsewhere: 尺寸由另一台裝置控制

@@ -10,7 +10,8 @@ use std::{
 
 use common::TempDir;
 use runode_ssh::bootstrap::{
-    BIN_DIR, Libc, Os, PROBE_EXIT, Platform, Target, Unsupported, connect_command, install_command, install_dir_name,
+    BIN_DIR, Libc, Os, PROBE_EXIT, Platform, Target, UPLOADS_DIR, Unsupported, connect_command, install_command,
+    install_dir_name, parse_uploaded, upload_command,
 };
 
 /// 像 ssh 那样把命令行交给登录 shell（默认 /bin/sh）解释。
@@ -44,7 +45,12 @@ fn sha256_hex(path: &std::path::Path) -> String {
 
 #[test]
 fn scripts_avoid_characters_remote_shells_mangle() {
-    for command in [connect_command("0.1.16.abc"), install_command("0.1.16.abc", &"0".repeat(64), true)] {
+    for command in [
+        connect_command("0.1.16.abc"),
+        install_command("0.1.16.abc", &"0".repeat(64), true),
+        upload_command("1-2", None),
+        upload_command("1-2", Some("a.png")),
+    ] {
         let inner = command.strip_prefix("/bin/sh -c '").and_then(|rest| rest.strip_suffix('\'')).unwrap();
         assert!(!inner.contains(['\'', '!', '\n']), "{inner}");
         assert!(Command::new("/bin/sh").args(["-n", "-c", inner]).status().unwrap().success());
@@ -151,4 +157,33 @@ fn runs_under_other_login_shells() {
         let platform = Platform::parse(&String::from_utf8_lossy(&probe.stdout)).unwrap();
         assert_eq!(platform.home, home.0.to_string_lossy(), "{shell}");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn uploads_a_file_or_a_tar_into_a_fresh_directory() {
+    let home = TempDir::new("upload");
+    let noise = "echo from .bashrc; ";
+    let one = run(&home.0, &format!("{noise}{}", upload_command("1-a", Some("shot.png"))), b"png bytes");
+    assert!(one.status.success(), "{}", String::from_utf8_lossy(&one.stderr));
+    let stdout = String::from_utf8_lossy(&one.stdout);
+    let dir = std::path::PathBuf::from(parse_uploaded(&stdout).unwrap());
+    assert_eq!(dir, home.0.join(UPLOADS_DIR).join("1-a"));
+    assert_eq!(fs::read(dir.join("shot.png")).unwrap(), b"png bytes");
+
+    let src = home.0.join("src");
+    fs::create_dir_all(src.join("folder")).unwrap();
+    fs::write(src.join("folder/inner.txt"), "inner").unwrap();
+    fs::write(src.join("note.txt"), "note").unwrap();
+    let tar =
+        Command::new("tar").arg("-cf").arg("-").arg("-C").arg(&src).args(["folder", "note.txt"]).output().unwrap();
+    let many = run(&home.0, &upload_command("1-b", None), &tar.stdout);
+    assert!(many.status.success(), "{}", String::from_utf8_lossy(&many.stderr));
+    let dir = std::path::PathBuf::from(parse_uploaded(&String::from_utf8_lossy(&many.stdout)).unwrap());
+    assert_eq!(fs::read_to_string(dir.join("folder/inner.txt")).unwrap(), "inner");
+    assert_eq!(fs::read_to_string(dir.join("note.txt")).unwrap(), "note");
+
+    // 同一个子目录不会再用第二次。
+    assert!(!run(&home.0, &upload_command("1-a", Some("shot.png")), b"again").status.success());
+    assert_eq!(parse_uploaded("RUNODE-UPLOADED relative"), None);
 }

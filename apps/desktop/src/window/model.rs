@@ -468,6 +468,7 @@ impl WindowView {
             TerminalEvent::ResizeWindow { rows, columns } => {
                 self.resize_for_program(view, (wi, ti), (*rows, *columns), window, cx);
             }
+            TerminalEvent::PasteImage(image) => self.paste_image(view.clone(), image, window, cx),
             TerminalEvent::Exited => self.close_pane_by_id(id, window, cx),
         }
     }
