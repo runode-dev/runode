@@ -6953,6 +6953,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "runode-ssh"
+version = "0.1.16"
+dependencies = [
+ "uds_windows",
+]
+
+[[package]]
 name = "runode-tasks"
 version = "0.1.16"
 dependencies = [

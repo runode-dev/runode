@@ -46,6 +46,7 @@ deny = [
     { crate = "mdns-sd", wrappers = ["runode-remote"], reason = "远程访问的 mDNS 公布只在 runode-remote 里" },
     { crate = "objc2-screen-capture-kit", wrappers = ["runode-screen"], reason = "远程桌面的屏幕采集只在 runode-screen 里" },
     { crate = "objc2-video-toolbox", wrappers = ["runode-screen"], reason = "远程桌面的视频编码只在 runode-screen 里" },
+    { crate = "runode-ssh", wrappers = ["runode"], reason = "连 SSH 主机只有 app 做：起 ssh、问用户、在远端装 runode 都在桌面这边，远端的宿主不知道自己是经 ssh 连上的" },
     { crate = "rusqlite", wrappers = ["runode-todo"], reason = "看板的库只在 runode-todo 里，别的 crate 经它的 Store 读写" },
     { crate = "sherpa-onnx", wrappers = ["runode-speech"], reason = "语音识别只在 runode-speech 里，别的 crate 经它的 Recognizer 用" },
     { crate = "rcgen", wrappers = ["runode-remote"], reason = "远程访问的自签证书只在 runode-remote 里生成" },

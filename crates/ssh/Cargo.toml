@@ -1,0 +1,16 @@
+[package]
+name = "runode-ssh"
+description = "Connect to SSH hosts with the system OpenSSH, ask for passwords through runode, and deploy runode on the remote"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+# askpass 经 AF_UNIX 的 socket 问桌面。
+uds_windows.workspace = true
+
+[lints]
+workspace = true
