@@ -25,6 +25,7 @@
 
 #[cfg(windows)]
 mod conpty;
+mod fish_marks;
 #[cfg(unix)]
 mod notify;
 #[cfg(unix)]
@@ -427,10 +428,42 @@ impl fmt::Display for AdoptError {
 #[cfg(unix)]
 impl std::error::Error for AdoptError {}
 
-/// 没指定 shell 时 `Pty::start` 起的那个：用户的 `$SHELL`，没有时 zsh。
+/// 没指定 shell 时 `Pty::start` 起的那个：用户的 `$SHELL`，没有时账户记录里的登录 shell，再没有时
+/// 系统一定有的那个（macOS 是 zsh，别的系统是 sh）。
 #[cfg(unix)]
 pub fn default_shell() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into())
+    std::env::var("SHELL")
+        .ok()
+        .filter(|shell| !shell.is_empty())
+        .or_else(|| login_shell().and_then(|shell| shell.into_string().ok()))
+        .unwrap_or_else(|| if cfg!(target_os = "macos") { "/bin/zsh" } else { "/bin/sh" }.into())
+}
+
+/// 账户记录（passwd）里的登录 shell，没有时为 `None`。
+#[cfg(unix)]
+pub fn login_shell() -> Option<std::ffi::OsString> {
+    use std::os::unix::ffi::OsStrExt as _;
+    // SAFETY: `passwd` 只有整数和指针，全零是合法的值。
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut buf = vec![0; 4096];
+    let mut found = std::ptr::null_mut();
+    // 目录服务里的账户记录可能比初始的缓冲长，`ERANGE` 时加倍再查，加到上限还不够才算查不到。
+    loop {
+        // SAFETY: 只往传进去的 `entry` 和 `buf` 里写，`entry` 里的字符串都指向 `buf`。
+        let code =
+            unsafe { libc::getpwuid_r(libc::getuid(), &raw mut entry, buf.as_mut_ptr(), buf.len(), &raw mut found) };
+        match code {
+            0 => break,
+            libc::ERANGE if buf.len() < 1 << 20 => buf.resize(buf.len() * 2, 0),
+            _ => return None,
+        }
+    }
+    if found.is_null() || entry.pw_shell.is_null() {
+        return None;
+    }
+    // SAFETY: 成功时 `pw_shell` 是 `buf` 里以 NUL 结尾的字符串，`buf` 还活着。
+    let shell = unsafe { std::ffi::CStr::from_ptr(entry.pw_shell) }.to_bytes();
+    (!shell.is_empty()).then(|| std::ffi::OsStr::from_bytes(shell).to_owned())
 }
 
 /// 拉起 runode 的那个终端和 agent 会话给子进程设的标识，说的不是 runode 的终端，shell 不继承：

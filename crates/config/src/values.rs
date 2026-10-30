@@ -114,6 +114,8 @@ impl Config {
                     IntegrationMode::Force(Shell::Fish) => "fish",
                     IntegrationMode::Force(Shell::Elvish) => "elvish",
                     IntegrationMode::Force(Shell::Nushell) => "nushell",
+                    IntegrationMode::Force(Shell::PowerShell) => "powershell",
+                    IntegrationMode::Force(Shell::Cmd) => "cmd",
                 }
                 .into(),
             ],

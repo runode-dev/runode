@@ -813,7 +813,15 @@ fn real_fish_reloads_with_the_integration() {
 /// 认得这些报告，把失败的命令记作在报告的目录里跑完、退出码是 1。
 fn reports_functions_and_exit_status(shell: Option<RealShell>, fail: &str) {
     let Some(mut shell) = shell else { return };
-    shell.wait_for_bytes("runode-reload", 0, b"\x1b]6973;0123456789abcdef;functions=runode-reload");
+    // 系统的配置也可能定义函数（Debian 的 /etc/bash.bashrc 定义了 command_not_found_handle），排在前面。
+    let report = b"\x1b]6973;0123456789abcdef;functions=";
+    shell.wait_for("runode-reload", |shell| {
+        shell.raw.windows(report.len()).enumerate().filter(|(_, window)| *window == report).any(|(at, _)| {
+            let list = &shell.raw[at + report.len()..];
+            let list = &list[..list.iter().position(|&byte| byte == 0x07).unwrap_or(list.len())];
+            String::from_utf8_lossy(list).split("%20").any(|name| name == "runode-reload")
+        })
+    });
     // 宿主解码报告的目录，记作提示符所在的目录。
     let dir = shell.home.join("a b;c");
     std::fs::create_dir(&dir).unwrap();
@@ -852,6 +860,19 @@ fn real_zsh_ignores_foreign_command_marks() {
               _other_preexec() { print -n '\\e]133;C\\a' }\n_other_precmd() { print -n '\\e]133;D;0\\a' }\n\
               preexec_functions+=(_other_preexec)\nprecmd_functions+=(_other_precmd)\n";
     foreign_marks_do_not_end_commands(RealShell::start("zsh", "zsh-foreign", rc, "[z]%", &["[z]%"]), FORGED_END);
+}
+
+/// 每条命令都带着原文报告，不只第一条。
+#[test]
+fn real_bash_reports_functions_and_exit_status() {
+    // 4.4 以下没有 PS0，不报告命令开始，也就不记命令。
+    if !bash_at_least(4, 4) {
+        return;
+    }
+    reports_functions_and_exit_status(
+        RealShell::start("bash", "bash-report", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]),
+        "false",
+    );
 }
 
 #[test]

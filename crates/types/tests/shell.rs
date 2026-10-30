@@ -11,4 +11,9 @@ fn shells_are_recognized_by_program_name() {
     assert_eq!(Shell::detect("-nu"), Some(Shell::Nushell));
     assert_eq!(Shell::detect("/bin/nushell"), Some(Shell::Nushell));
     assert_eq!(Shell::detect("/bin/sh"), None);
+    assert_eq!(Shell::detect("pwsh.exe"), Some(Shell::PowerShell));
+    assert_eq!(Shell::detect("PowerShell.EXE"), Some(Shell::PowerShell));
+    assert_eq!(Shell::detect("/usr/local/bin/pwsh"), Some(Shell::PowerShell));
+    assert_eq!(Shell::detect("Bash.exe"), Some(Shell::Bash));
+    assert_eq!(Shell::detect("CMD.EXE"), Some(Shell::Cmd));
 }

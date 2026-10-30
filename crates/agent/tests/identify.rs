@@ -122,6 +122,23 @@ fn scripts_run_by_node_bun_python_and_shells() {
     assert_eq!(alone("node", &["node", "/usr/lib/node_modules/@qwen-code/qwen-code/dist/index.js"]), Some(Qwen));
 }
 
+/// Windows 上 npm 的 `.cmd` 包装把包里的入口文件直接交给 node，按包名认。
+#[test]
+fn npm_packages_are_recognized_by_name() {
+    let npm = r"C:\Users\me\AppData\Roaming\npm\node_modules";
+    let node = |script: &str| alone("node.exe", &["node", &format!(r"{npm}\{script}")]);
+    assert_eq!(node(r"@anthropic-ai\claude-code\cli.js"), Some(Claude));
+    assert_eq!(node(r"@google\gemini-cli\dist\index.js"), Some(Gemini));
+    // amp 撞名，要看得出装在 node_modules 里；用 `/` 分隔，别的平台上也拆得开这个路径。
+    assert_eq!(alone("node", &["node", "C:/npm/node_modules/@sourcegraph/amp/dist/main.js"]), Some(Amp));
+    assert_eq!(node(r"@github\copilot\index.js"), Some(GithubCopilot));
+    assert_eq!(node(r"opencode-ai\bin\opencode"), Some(OpenCode));
+    // 包里装的依赖按最里层的包算，不是 agent 的包和只有包名的路径都不算。
+    assert_eq!(node(r"@google\gemini-cli\node_modules\esbuild\bin\esbuild"), None);
+    assert_eq!(node(r"typescript\bin\tsc"), None);
+    assert_eq!(alone("node", &["node", "/usr/lib/node_modules/@google/gemini-cli"]), None);
+}
+
 #[test]
 fn code_given_inline_is_not_a_script() {
     for argv in [

@@ -53,6 +53,8 @@ pub struct Pty {
     pending: Option<(Box<dyn SlavePty + Send>, PtySink)>,
     /// shell 的进程号和结束它用的句柄；还没启动时为 `None`。
     shell: Option<(u32, Box<dyn ChildKiller + Send + Sync>)>,
+    /// 认出来的真正的 shell（`process::real_shell`），认出来以后不再变。
+    real_shell: Cell<Option<u32>>,
     pub writer: PtyWriter,
     /// 启动 shell 时交给集成脚本的报告口令，见 `shell_integration::prepare`。
     report_token: Option<String>,
@@ -132,6 +134,7 @@ impl Pty {
             master: Arc::new(Mutex::new(Some(pair.master))),
             pending: Some((pair.slave, sink)),
             shell: None,
+            real_shell: Cell::new(None),
             writer,
             report_token: None,
             report_token_file: None,
@@ -257,12 +260,18 @@ impl Pty {
     /// 子进程；shell 没有子进程时是 shell 自己。
     pub(crate) fn foreground(&self) -> Option<(u32, bool)> {
         let shell = self.shell_pid()?;
-        Some(process::newest_child(shell).map_or((shell, true), |child| (child, false)))
+        Some(process::running_command(shell).map_or((shell, true), |command| (command, false)))
     }
 
-    /// shell 的进程号；还没启动时为 `None`。
+    /// shell 的进程号，起的是转发程序时是它起的那个 shell；还没启动时为 `None`。
     pub(crate) fn shell_pid(&self) -> Option<u32> {
-        self.shell.as_ref().map(|(pid, _)| *pid).filter(|&pid| pid != 0)
+        let started = self.shell.as_ref().map(|(pid, _)| *pid).filter(|&pid| pid != 0)?;
+        if let Some(pid) = self.real_shell.get() {
+            return Some(pid);
+        }
+        let real = process::real_shell(started);
+        self.real_shell.set(real);
+        Some(real.unwrap_or(started))
     }
 }
 
@@ -283,6 +292,7 @@ fn read_loop(mut pipe: Box<dyn Read + Send>, mut sink: PtySink) {
     set_current_thread_interactive();
     let mut buf = vec![0u8; 64 * 1024];
     let mut output_filter = vt_io::OutputFilter::default();
+    let mut fish_marks = super::fish_marks::FishMarks::default();
     // 收的一方不要了也读到 EOF：没人读输出管道时，关伪控制台会一直等下去。
     let mut wanted = true;
     loop {
@@ -291,6 +301,7 @@ fn read_loop(mut pipe: Box<dyn Read + Send>, mut sink: PtySink) {
             Ok(n) => {
                 if wanted {
                     output_filter.filter(&mut buf[..n]);
+                    fish_marks.filter(&mut buf[..n]);
                     wanted = sink(PtyEvent::Output(buf[..n].into()));
                 }
             }

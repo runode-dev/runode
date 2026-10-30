@@ -35,6 +35,14 @@ const ENV_TODO_PROMPT: &str = "RUNODE_TODO_PROMPT";
 /// 宿主给新开了工作树的任务会话的 shell 设的环境变量：起 agent 之前先跑的命令（`runode_tasks::worktree_setup`）。
 const ENV_TODO_SETUP: &str = "RUNODE_TODO_SETUP";
 
+/// 宿主给 Windows 上 PowerShell 的任务会话设的环境变量：按 Windows 命令行的规矩引好的提示词
+/// （`windows_quote`），`agent_command` 用 `--%` 原样接在 agent 后面。
+const ENV_TODO_ARG: &str = "RUNODE_TODO_ARG";
+
+/// 宿主给 Windows 上 PowerShell 的任务会话设的另一份提示词，agent 是批处理文件（npm 装的 `.cmd`）时用：
+/// 按 cmd 的规矩引好（`batch_quote`），`agent_command` 认出是批处理时换进 `ENV_TODO_ARG`。
+const ENV_TODO_BATCH_ARG: &str = "RUNODE_TODO_BATCH_ARG";
+
 /// 提示词最长这么多字节：它要放进环境变量，系统给参数和环境变量的空间有限。
 const MAX_PROMPT: usize = 64 * 1024;
 
@@ -544,8 +552,13 @@ impl Shared {
         };
         let instructions = todo.spec.instructions();
         let setup = made.as_ref().and_then(|_| runode_tasks::worktree_setup(&todo.spec.dir));
+        let shell = runode_terminal::pty::default_shell();
+        let quoted = passes_command_line(&shell).then(|| (windows_quote(&instructions), batch_quote(&instructions)));
         let mut env = vec![(ENV_TODO_PROMPT, instructions.as_str())];
         env.extend(setup.as_deref().map(|setup| (ENV_TODO_SETUP, setup)));
+        if let Some((arg, batch)) = &quoted {
+            env.extend([(ENV_TODO_ARG, arg.as_str()), (ENV_TODO_BATCH_ARG, batch.as_str())]);
+        }
         let session = match self.spawn_with(spawn_options(Some(cwd)), &env) {
             Ok(session) => session,
             Err(err) => {
@@ -557,7 +570,7 @@ impl Shared {
         let started = unix_now();
         let agent =
             runode_agent::models::start_command(&agent_with_options(&todo.spec), &agent_session(&todo.id, started));
-        let command = agent_command(&agent, &runode_terminal::pty::default_shell(), setup.is_some());
+        let command = agent_command(&agent, &shell, setup.is_some());
         self.deliver(session, Inbox::TypeAtPrompt(command.into_bytes()));
         let worktree = made.as_ref().map(|(root, branch)| (root.as_path(), branch.as_str()));
         if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, started, session, worktree)) {
@@ -573,16 +586,111 @@ impl Shared {
 /// 在 `shell` 的提示符上打的命令：跑 `agent`，提示词取自环境变量 `ENV_TODO_PROMPT`、整个当一个参数。
 /// `setup` 时先用 `sh -c` 跑环境变量 `ENV_TODO_SETUP` 里的命令，成功了才跑 agent。nushell、elvish 不在
 /// 双引号里展开 `$名字`，取环境变量也各有写法，也没有 `&&`：外部命令失败时它们自己停下后面的命令。
-fn agent_command(agent: &str, shell: &str, setup: bool) -> String {
-    let shell = Shell::detect(shell);
+/// PowerShell 用 `$env:名字`；Windows 上没有 sh，Windows PowerShell 也不认 `&&`，所以初始化命令由
+/// PowerShell 自己跑，出错或者退出码不为零时抛出异常，这一整行就停在那里，不跑 agent。Windows 上的
+/// PowerShell 给原生程序拼命令行时不一定转义参数里的双引号（`passes_command_line`），提示词改从
+/// `ENV_TODO_ARG` 取引好的一份，`--%` 后面的 `%名字%` 原样展开进命令行；agent 先找成程序文件
+/// （`powershell_program`）。
+fn agent_command(agent: &str, shell_program: &str, setup: bool) -> String {
+    let shell = Shell::detect(shell_program);
     let var = |name: &str| match shell {
         Some(Shell::Nushell) => format!("$env.{name}"),
         Some(Shell::Elvish) => format!("$E:{name}"),
+        Some(Shell::PowerShell) => format!("$env:{name}"),
         _ => format!("\"${name}\""),
     };
-    let then = if matches!(shell, Some(Shell::Nushell | Shell::Elvish)) { "; " } else { " && " };
-    let setup = if setup { format!("sh -c {}{then}", var(ENV_TODO_SETUP)) } else { String::new() };
+    let setup = match (setup, shell) {
+        (false, _) => String::new(),
+        (true, Some(Shell::PowerShell)) => format!(
+            "& {{ $ErrorActionPreference = 'Stop'; $global:LASTEXITCODE = 0; Invoke-Expression {}; \
+             if ($global:LASTEXITCODE) {{ throw \"setup exited with $global:LASTEXITCODE\" }} }}; ",
+            var(ENV_TODO_SETUP)
+        ),
+        (true, Some(Shell::Nushell | Shell::Elvish)) => format!("sh -c {}; ", var(ENV_TODO_SETUP)),
+        (true, _) => format!("sh -c {} && ", var(ENV_TODO_SETUP)),
+    };
+    if passes_command_line(shell_program) {
+        return format!("{setup}{} --% %{ENV_TODO_ARG}%\r", powershell_program(agent));
+    }
     format!("{setup}{agent} {}\r", var(ENV_TODO_PROMPT))
+}
+
+/// `shell` 是 Windows 上的 PowerShell：Windows PowerShell 5.1 和 PowerShell 7.3 以前给原生程序拼命令行时
+/// 不转义参数里的双引号，7.3 以后对 `.cmd` 这类批处理（npm 装的 agent 就是）也照旧，提示词里的双引号会被
+/// agent 吞掉、结尾的反斜杠会吃掉收尾的引号。
+fn passes_command_line(shell: &str) -> bool {
+    cfg!(windows) && Shell::detect(shell) == Some(Shell::PowerShell)
+}
+
+/// PowerShell 里起 `agent` 的写法：开头的程序名只在 PATH 上找程序文件。只打名字的话 PowerShell 先跑 npm
+/// 放在 `.cmd` 旁边的 `.ps1`，执行策略不让跑脚本时报错，`--%` 对脚本也不管用。找到的是批处理时提示词换成
+/// `ENV_TODO_BATCH_ARG` 那份；找不到时报错，这一行停在那里。程序名带引号、空格这类字符时原样打。
+fn powershell_program(agent: &str) -> String {
+    let (program, args) = agent.split_once(' ').unwrap_or((agent, ""));
+    if program.is_empty() || !program.chars().all(|ch| ch.is_alphanumeric() || "-_.:\\/".contains(ch)) {
+        return agent.to_owned();
+    }
+    format!(
+        "$__runode_agent = Get-Command -ErrorAction Stop -CommandType Application -TotalCount 1 -Name '{program}'; \
+         if ($__runode_agent.Extension -in '.bat', '.cmd') {{ $env:{ENV_TODO_ARG} = $env:{ENV_TODO_BATCH_ARG} }}; \
+         & $__runode_agent.Path{}{args}",
+        if args.is_empty() { "" } else { " " }
+    )
+}
+
+/// 按 Windows 命令行的规矩（`CommandLineToArgvW`、C 运行库）把 `arg` 引成一个参数：整个包进双引号，
+/// 双引号和紧挨着它、紧挨着收尾引号的反斜杠都转义。
+fn windows_quote(arg: &str) -> String {
+    let mut quoted = String::with_capacity(arg.len() + 2);
+    quoted.push('"');
+    let mut backslashes = 0;
+    for ch in arg.chars() {
+        match ch {
+            '\\' => backslashes += 1,
+            '"' => {
+                quoted.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                quoted.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                quoted.extend(std::iter::repeat_n('\\', backslashes));
+                quoted.push(ch);
+                backslashes = 0;
+            }
+        }
+    }
+    quoted.extend(std::iter::repeat_n('\\', backslashes * 2));
+    quoted.push('"');
+    quoted
+}
+
+/// 把 `arg` 引成批处理文件收得到的一个参数：cmd 先读一遍命令行，双引号里的 `&`、`|` 才不分隔命令，所以
+/// 双引号写成两个（C 运行库在引号里把它读成一个），紧挨着它的反斜杠照 `windows_quote` 加倍；`%` 后面插一段
+/// 展开为空的 `%cd:~,%`，cmd 就不把 `%名字%` 换成环境变量。cmd 读到换行就不往下读了，换行换成空格。
+fn batch_quote(arg: &str) -> String {
+    let mut quoted = String::with_capacity(arg.len() + 2);
+    quoted.push('"');
+    let mut backslashes = 0;
+    for ch in arg.replace("\r\n", " ").chars() {
+        match ch {
+            '\\' => {
+                backslashes += 1;
+                quoted.push(ch);
+                continue;
+            }
+            '"' => {
+                quoted.extend(std::iter::repeat_n('\\', backslashes));
+                quoted.push_str("\"\"");
+            }
+            '%' => quoted.push_str("%%cd:~,%"),
+            '\r' | '\n' => quoted.push(' '),
+            _ => quoted.push(ch),
+        }
+        backslashes = 0;
+    }
+    quoted.extend(std::iter::repeat_n('\\', backslashes));
+    quoted.push('"');
+    quoted
 }
 
 /// 任务要跑的 agent 命令，带上免确认和自定义 agent 的参数（`runode_agent::models::with_options`）。
@@ -781,6 +889,52 @@ mod tests {
             agent_command("claude", "/usr/bin/nu", true),
             "sh -c $env.RUNODE_TODO_SETUP; claude $env.RUNODE_TODO_PROMPT\r"
         );
+        let claude = if cfg!(windows) {
+            "$__runode_agent = Get-Command -ErrorAction Stop -CommandType Application -TotalCount 1 -Name 'claude'; \
+             if ($__runode_agent.Extension -in '.bat', '.cmd') { $env:RUNODE_TODO_ARG = $env:RUNODE_TODO_BATCH_ARG }; \
+             & $__runode_agent.Path --% %RUNODE_TODO_ARG%"
+        } else {
+            "claude $env:RUNODE_TODO_PROMPT"
+        };
+        assert_eq!(agent_command("claude", "pwsh.exe", false), format!("{claude}\r"));
+        assert_eq!(
+            agent_command("claude", "powershell.exe", true),
+            format!(
+                "& {{ $ErrorActionPreference = 'Stop'; $global:LASTEXITCODE = 0; Invoke-Expression $env:RUNODE_TODO_SETUP; \
+                 if ($global:LASTEXITCODE) {{ throw \"setup exited with $global:LASTEXITCODE\" }} }}; \
+                 {claude}\r"
+            )
+        );
+    }
+
+    #[test]
+    fn powershell_runs_the_agent_program_file() {
+        assert_eq!(
+            powershell_program("codex --full-auto"),
+            "$__runode_agent = Get-Command -ErrorAction Stop -CommandType Application -TotalCount 1 -Name 'codex'; \
+             if ($__runode_agent.Extension -in '.bat', '.cmd') { $env:RUNODE_TODO_ARG = $env:RUNODE_TODO_BATCH_ARG }; \
+             & $__runode_agent.Path --full-auto"
+        );
+        assert_eq!(powershell_program("'C:\\my tools\\agent.exe' -x"), "'C:\\my tools\\agent.exe' -x");
+    }
+
+    #[test]
+    fn batch_quotes_keep_cmd_out_of_the_prompt() {
+        assert_eq!(batch_quote("plain"), "\"plain\"");
+        assert_eq!(batch_quote(r#"a" & echo hi & "b"#), r#""a"" & echo hi & ""b""#);
+        assert_eq!(batch_quote(r#"a\"b"#), r#""a\\""b""#);
+        assert_eq!(batch_quote(r#"C:\dir\"#), r#""C:\dir\\""#);
+        assert_eq!(batch_quote("100% %PATH%"), r#""100%%cd:~,% %%cd:~,%PATH%%cd:~,%""#);
+        assert_eq!(batch_quote("one\r\ntwo\nthree"), "\"one two three\"");
+    }
+
+    #[test]
+    fn windows_quotes_survive_the_command_line_rules() {
+        assert_eq!(windows_quote("plain"), "\"plain\"");
+        assert_eq!(windows_quote(r#"say "hi" \ now"#), r#""say \"hi\" \ now""#);
+        assert_eq!(windows_quote(r#"C:\dir\"#), r#""C:\dir\\""#);
+        assert_eq!(windows_quote(r#"a\"b"#), r#""a\\\"b""#);
+        assert_eq!(windows_quote(""), "\"\"");
     }
 
     #[test]

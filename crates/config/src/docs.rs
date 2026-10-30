@@ -120,7 +120,7 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
             "How much scrollback each terminal keeps, in bytes: a whole number; anything below 2 MiB (2097152) counts as 2 MiB. At most 10,000 lines are kept as well; whichever limit is reached first applies. Changes apply to open terminals too."
         }
         "shell-integration" => {
-            "Shell integration: detect (by the shell's program name), none (off), bash, zsh, fish, elvish, nushell. Naming a shell only matters when the program name is not recognized (say a symlink called sh); a program recognized as another shell gets its own integration."
+            "Shell integration: detect (by the shell's program name), none (off), bash, zsh, fish, elvish, nushell, powershell, cmd. Naming a shell only matters when the program name is not recognized (say a symlink called sh); a program recognized as another shell gets its own integration."
         }
         "shell-integration-features" => {
             "What else shell integration does, written as in Ghostty: cursor (the default) turns the cursor into a bar at the prompt, a block in zsh's vi command mode, and back to cursor-style while a command runs; no-cursor leaves the cursor alone. The bar blinks if cursor-style-blink says so. Ghostty's sudo, title, ssh-env, ssh-terminfo and path are accepted but do nothing. Only applies to shells started afterwards."

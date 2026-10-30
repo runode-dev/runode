@@ -110,9 +110,65 @@ fn children(pairs: &[(u32, u32)], parent: u32) -> Vec<(u32, u64)> {
         .collect()
 }
 
-/// `shell` 最新起的那个子进程。
-pub(super) fn newest_child(shell: u32) -> Option<u32> {
-    children(&snapshot(), shell).into_iter().max_by_key(|&(_, at)| at).map(|(pid, _)| pid)
+/// `shell` 正在跑的命令：它最新起的那个子进程。MSYS2、Cygwin 的 shell 跑命令时先 fork 出一个自己，命令由那个
+/// 副本起：起的是 Windows 原生程序时副本一直等到它结束，所以子进程和 shell 是同一个程序、又起了子进程时
+/// 接着往下找；起的是 MSYS2、Cygwin 自己的程序时副本可能先退出，那个程序在进程树上就和 shell 断开了，
+/// 找不到，算 shell 自己。
+pub(super) fn running_command(shell: u32) -> Option<u32> {
+    let pairs = snapshot();
+    let newest = |parent| children(&pairs, parent).into_iter().max_by_key(|&(_, at)| at).map(|(pid, _)| pid);
+    let image = |pid| {
+        Process::open(pid, PROCESS_QUERY_LIMITED_INFORMATION).and_then(|p| image_path(&p)).map(|path| lexical(&path))
+    };
+    let mut command = newest(shell)?;
+    let Some(shell_image) = image(shell) else {
+        return Some(command);
+    };
+    while image(command).is_some_and(|path| path.eq_ignore_ascii_case(&shell_image)) {
+        let Some(next) = newest(command) else { break };
+        command = next;
+    }
+    Some(command)
+}
+
+/// 真正等着输入的 shell。Git for Windows 的 `bin\bash.exe`、`bin\sh.exe` 只是转发程序：它起同一份安装里
+/// `usr\bin\` 下的同名程序，自己一直等到它退出，命令都是那个 shell 起的。`started` 是这样的转发程序时
+/// 返回它起的 shell，还没起时为 `None`；不是转发程序时就是 `started` 自己。读不到 `started` 的程序路径时也为
+/// `None`，认不出它是不是转发程序，调用方下次再认。
+pub(super) fn real_shell(started: u32) -> Option<u32> {
+    let path = Process::open(started, PROCESS_QUERY_LIMITED_INFORMATION).and_then(|p| image_path(&p))?;
+    let path = lexical(&path);
+    let target = path
+        .rsplit_once('\\')
+        .and_then(|(bin, name)| Some((bin.rsplit_once('\\')?, name)))
+        .filter(|((_, bin), name)| {
+            bin.eq_ignore_ascii_case("bin")
+                && ["bash.exe", "sh.exe"].iter().any(|shell| name.eq_ignore_ascii_case(shell))
+        })
+        .map(|((root, _), name)| format!("{root}\\usr\\bin\\{name}"));
+    let Some(target) = target else {
+        return Some(started);
+    };
+    children(&snapshot(), started).into_iter().map(|(pid, _)| pid).find(|&pid| {
+        Process::open(pid, PROCESS_QUERY_LIMITED_INFORMATION)
+            .and_then(|p| image_path(&p))
+            .is_some_and(|path| lexical(&path).eq_ignore_ascii_case(&target))
+    })
+}
+
+/// 按字面去掉路径里的 `.` 和 `..`（转发程序起 shell 时用的路径带着 `bin\..`）。
+fn lexical(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('\\') {
+        match part {
+            "." => {}
+            ".." if parts.len() > 1 => {
+                parts.pop();
+            }
+            _ => parts.push(part),
+        }
+    }
+    parts.join("\\")
 }
 
 /// `leader` 和它所有的子孙进程；组长总在最前面。

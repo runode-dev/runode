@@ -38,6 +38,10 @@ pub enum Shell {
     Fish,
     Elvish,
     Nushell,
+    /// PowerShell 7（`pwsh`）和系统自带的 Windows PowerShell（`powershell`）。
+    PowerShell,
+    /// Windows 的命令提示符 `cmd.exe`。
+    Cmd,
 }
 
 impl Shell {
@@ -48,16 +52,19 @@ impl Shell {
             "fish" => Some(Self::Fish),
             "elvish" => Some(Self::Elvish),
             "nushell" => Some(Self::Nushell),
+            "powershell" => Some(Self::PowerShell),
+            "cmd" => Some(Self::Cmd),
             _ => None,
         }
     }
 
-    /// 按可执行文件的名字认 shell；登录 shell 的 argv[0] 可能带前缀 `-`，Windows 上的带 `.exe`。
-    /// nushell 的程序叫 `nu`。
+    /// 按可执行文件的名字认 shell，不分大小写；登录 shell 的 argv[0] 可能带前缀 `-`，Windows 上的带
+    /// `.exe`。nushell 的程序叫 `nu`，PowerShell 7 的叫 `pwsh`。
     pub fn detect(program: &str) -> Option<Self> {
-        let name = Path::new(program).file_name()?.to_str()?.trim_start_matches('-');
-        match name.strip_suffix(".exe").unwrap_or(name) {
+        let name = Path::new(program).file_name()?.to_str()?.trim_start_matches('-').to_ascii_lowercase();
+        match name.strip_suffix(".exe").unwrap_or(&name) {
             "nu" => Some(Self::Nushell),
+            "pwsh" => Some(Self::PowerShell),
             name => Self::from_name(name),
         }
     }
