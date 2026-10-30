@@ -10,6 +10,8 @@ use std::{
 use runode_files::Listings;
 use serde::{Deserialize, Serialize};
 
+use super::repo::GitOp;
+
 /// 桌面要远端办的事。
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum Call {
@@ -19,6 +21,8 @@ pub(super) enum Call {
     Read { path: PathBuf, max: u64, whole: bool },
     /// 读文件树里 `root` 下的这些目录（`file_tree::list_dirs`），被忽略的按最近一次读 `root` 时的 git 状态算。
     ListDirs { root: PathBuf, dirs: Vec<PathBuf> },
+    /// 对根目录是 `root` 的仓库跑 git。
+    Git { root: PathBuf, op: GitOp },
 }
 
 /// 远端办完的结果。
@@ -30,6 +34,8 @@ pub(super) enum Reply {
         cut: bool,
     },
     Listed(Listings),
+    /// git 操作的结果，形状是 `runode_git::Repo` 同名方法的返回值。
+    Git(serde_json::Value),
     /// 没办成，原因写给人看。
     Failed(String),
 }

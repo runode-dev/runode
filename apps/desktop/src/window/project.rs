@@ -498,7 +498,7 @@ impl WindowView {
     /// 右侧面板显示着的那一页，收着时为空。
     pub(super) fn render_side_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
         let panel = self.workspace().panel?;
-        if self.on_remote() && panel != SidePanel::Files {
+        if self.on_remote() && panel == SidePanel::GitHubActions {
             let shell = panel_shell("remote-panel", width, cards(cx), cx)
                 .bg(cx.theme().mix(0.03))
                 .text_size(FontSize::Body)

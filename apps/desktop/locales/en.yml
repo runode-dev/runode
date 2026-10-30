@@ -234,7 +234,7 @@ panel:
   not_repo: Not a git repository
   no_content: No content changes
   no_changes: No uncommitted changes
-  remote: The file tree and Git panel are not available for SSH hosts yet
+  remote: GitHub Actions only works with repositories on this computer, not in workspaces on SSH hosts
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.

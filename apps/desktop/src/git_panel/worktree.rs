@@ -12,6 +12,7 @@ use crate::ui::{
 };
 
 use super::{GitPanel, GitPanelEvent, rows::Busy, show_git_error};
+use crate::project_host::ProjectRepo;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorktreeOp {
@@ -54,10 +55,11 @@ impl GitPanel {
                 cx,
             ))
         };
-        let mut items = vec![
-            item("git.worktree.open_in_new_tab", WorktreeOp::OpenInNewTab, true),
-            item(&crate::i18n::os_key("files.reveal"), WorktreeOp::Reveal, true),
-        ];
+        let mut items = vec![item("git.worktree.open_in_new_tab", WorktreeOp::OpenInNewTab, true)];
+        // 远端的工作树访达里看不到。
+        if !self.state().project.is_remote() {
+            items.push(item(&crate::i18n::os_key("files.reveal"), WorktreeOp::Reveal, true));
+        }
         if removable {
             items.push(item("git.worktree.remove", WorktreeOp::Remove, enabled));
         }
@@ -132,7 +134,7 @@ impl GitPanel {
                     // 失败也要放开工作树那块，错误带回 `done` 里报，`run_git` 出错时不调 `done`。
                     let op = {
                         let path = path.clone();
-                        move |repo: &git::Repo| Ok(repo.remove_worktree(&path, dirty))
+                        move |repo: &ProjectRepo| Ok(repo.remove_worktree(&path, dirty))
                     };
                     this.run_git(&main, Busy::RemoveWorktree, window, cx, op, move |this, result, window, cx| {
                         if let Some(state) = this.workspaces.get_mut(&ws) {

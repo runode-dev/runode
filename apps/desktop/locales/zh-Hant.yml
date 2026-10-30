@@ -234,7 +234,7 @@ panel:
   not_repo: 不在 git 倉庫裡
   no_content: 內容沒有變化
   no_changes: 沒有未提交的改動
-  remote: SSH 主機上暫時還沒有檔案樹和 Git 面板
+  remote: GitHub Actions 頁只看本機的倉庫，SSH 主機上的工作區裡用不了
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。

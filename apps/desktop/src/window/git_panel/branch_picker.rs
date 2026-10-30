@@ -101,8 +101,11 @@ impl WindowView {
             self.close_branch_picker(window, cx);
             return;
         }
+        let host = crate::project_host::ProjectHost::of(&self.workspace().host);
         let git = self.workspace().project.git.as_ref();
-        let Some(repo) = git.and_then(|git| git.iter().find(|repo| repo.root == root)).map(git::Snapshot::repo) else {
+        let Some(repo) =
+            git.and_then(|git| git.iter().find(|repo| repo.root == root)).map(|repo| host.repo(repo.repo()))
+        else {
             return;
         };
         let placeholder = match &start {

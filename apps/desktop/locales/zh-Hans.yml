@@ -234,7 +234,7 @@ panel:
   not_repo: 不在 git 仓库里
   no_content: 内容没有变化
   no_changes: 没有未提交的改动
-  remote: SSH 主机上暂时还没有文件树和 Git 面板
+  remote: GitHub Actions 页只看本机的仓库，SSH 主机上的工作区里用不了
 paste:
   title: 粘贴的内容可能会直接执行命令
   detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。

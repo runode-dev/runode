@@ -13,6 +13,8 @@ use crate::ui::base_name;
 use gpui::{App, Context, Global, PromptLevel, Window, prelude::*};
 use runode_git::{self as git, CommitOptions, FileDiff, Section};
 
+use crate::project_host::ProjectRepo;
+
 use super::{
     DirOp, FileOp, GitCheckout, GitCommit, GitCommitAmend, GitCommitAndPush, GitCommitAndSync, GitCreateBranch,
     GitDirAction, GitDiscardAll, GitFetch, GitFileAction, GitPanel, GitPanelEvent, GitPull, GitPush, GitRefresh,
@@ -39,21 +41,25 @@ const AUTO_FETCH_INTERVAL: Duration = Duration::from_secs(180);
 /// 几个工作树时只抓一次。`running` 是在跑的，`done` 是跑完不到 `AUTO_FETCH_INTERVAL` 的和跑完的时刻。
 #[derive(Default)]
 struct AutoFetched {
-    running: HashSet<PathBuf>,
-    done: HashMap<PathBuf, Instant>,
+    running: HashSet<FetchKey>,
+    done: HashMap<FetchKey, Instant>,
 }
+
+/// 后台抓取按哪台机器（本机为空）上的哪个共用 git 目录记。
+type FetchKey = (Option<String>, PathBuf);
 
 impl Global for AutoFetched {}
 
 impl GitPanel {
     /// 当前 workspace 里根目录是 `root` 的仓库（主仓库或者子仓库）；不在仓库里、找不到或者这个
     /// 仓库上一个操作还没跑完时为空。
-    fn git_repo(&self, root: &Path) -> Option<git::Repo> {
+    fn git_repo(&self, root: &Path) -> Option<ProjectRepo> {
         let project = self.state();
         if project.busy(root).is_some() {
             return None;
         }
-        project.git.as_ref()?.iter().find(|repo| repo.root == root).map(git::Snapshot::repo)
+        let repo = project.git.as_ref()?.iter().find(|repo| repo.root == root)?;
+        Some(project.project.repo(repo.repo()))
     }
 
     /// 在后台对当前 workspace 里根目录是 `root` 的仓库跑 `op`，跑的时候这个仓库写着 `busy`。
@@ -66,7 +72,7 @@ impl GitPanel {
         busy: Busy,
         window: &mut Window,
         cx: &mut Context<Self>,
-        op: impl FnOnce(&git::Repo) -> git::Result<T> + Send + 'static,
+        op: impl FnOnce(&ProjectRepo) -> git::Result<T> + Send + 'static,
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
     ) {
         let Some(repo) = self.git_repo(root) else {
@@ -112,13 +118,13 @@ impl GitPanel {
         fetched.done.retain(|_, at| now.duration_since(*at) < AUTO_FETCH_INTERVAL);
         let mut repos = Vec::new();
         for repo in std::iter::once(&git.main).chain(&git.subs) {
-            let key = repo.common_git_dir();
+            let key = (state.project.name().map(str::to_owned), repo.common_git_dir().to_path_buf());
             if repo.info.has_remote
                 && state.busy(&repo.root).is_none()
-                && !fetched.done.contains_key(key)
-                && fetched.running.insert(key.to_path_buf())
+                && !fetched.done.contains_key(&key)
+                && fetched.running.insert(key.clone())
             {
-                repos.push((key.to_path_buf(), repo.repo()));
+                repos.push((key, state.project.repo(repo.repo())));
             }
         }
         if repos.is_empty() {
@@ -279,7 +285,7 @@ impl GitPanel {
             PanelState::files(git, section).into_iter().map(|fi| git.files(source)[fi].clone()).collect();
         match (section, stage) {
             (GitSection::Staged, _) => {
-                self.run_git(root, Busy::Stage, window, cx, git::Repo::unstage_all, |_, (), _, _| {});
+                self.run_git(root, Busy::Stage, window, cx, ProjectRepo::unstage_all, |_, (), _, _| {});
             }
             (GitSection::Merge | GitSection::Unstaged, true) => {
                 let paths: Vec<PathBuf> = files.into_iter().map(|file| file.path).collect();
@@ -393,7 +399,7 @@ impl GitPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let op = move |repo: &git::Repo| {
+        let op = move |repo: &ProjectRepo| {
             repo.commit(&message, options)?;
             Ok(match after {
                 AfterCommit::Nothing => None,
@@ -436,8 +442,8 @@ impl GitPanel {
     ) {
         match action {
             PrimaryAction::Commit => self.commit(root.to_path_buf(), false, AfterCommit::Nothing, window, cx),
-            PrimaryAction::Sync => self.run_git(root, Busy::Sync, window, cx, git::Repo::sync, |_, (), _, _| {}),
-            PrimaryAction::Publish => self.run_git(root, Busy::Push, window, cx, git::Repo::push, |_, (), _, _| {}),
+            PrimaryAction::Sync => self.run_git(root, Busy::Sync, window, cx, ProjectRepo::sync, |_, (), _, _| {}),
+            PrimaryAction::Publish => self.run_git(root, Busy::Push, window, cx, ProjectRepo::push, |_, (), _, _| {}),
         }
     }
 
@@ -454,7 +460,7 @@ impl GitPanel {
         busy: Busy,
         window: &mut Window,
         cx: &mut Context<Self>,
-        op: impl FnOnce(&git::Repo) -> git::Result + Send + 'static,
+        op: impl FnOnce(&ProjectRepo) -> git::Result + Send + 'static,
     ) {
         if let Some(root) = self.git_target(window, cx) {
             self.run_git(&root, busy, window, cx, op, |_, (), _, _| {});
@@ -483,7 +489,7 @@ impl GitPanel {
             return;
         };
         let area = self.commit_box(&root);
-        self.run_git(&root, Busy::Commit, window, cx, git::Repo::undo_last_commit, move |_, message, _, cx| {
+        self.run_git(&root, Busy::Commit, window, cx, ProjectRepo::undo_last_commit, move |_, message, _, cx| {
             if let Some(area) = area
                 && area.read(cx).text().trim().is_empty()
             {
@@ -499,20 +505,20 @@ impl GitPanel {
     }
 
     pub(crate) fn git_fetch(&mut self, _: &GitFetch, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_on_target(Busy::Fetch, window, cx, git::Repo::fetch);
+        self.run_on_target(Busy::Fetch, window, cx, ProjectRepo::fetch);
     }
 
     pub(crate) fn git_pull(&mut self, _: &GitPull, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_on_target(Busy::Pull, window, cx, git::Repo::pull);
+        self.run_on_target(Busy::Pull, window, cx, ProjectRepo::pull);
     }
 
     /// 推送；还没有上游分支时顺带发布到远端。
     pub(crate) fn git_push(&mut self, _: &GitPush, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_on_target(Busy::Push, window, cx, git::Repo::push);
+        self.run_on_target(Busy::Push, window, cx, ProjectRepo::push);
     }
 
     pub(crate) fn git_sync(&mut self, _: &GitSync, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_on_target(Busy::Sync, window, cx, git::Repo::sync);
+        self.run_on_target(Busy::Sync, window, cx, ProjectRepo::sync);
     }
 
     /// 暂存全部；还有冲突的文件时先问一句，免得冲突标记被顺手标成已解决、一路提交进去。
@@ -525,7 +531,7 @@ impl GitPanel {
                 repo.unstaged.iter().filter(|file| file.status == git::FileStatus::Conflicted).count()
             });
         if conflicts == 0 {
-            self.run_git(&root, Busy::Stage, window, cx, git::Repo::stage_all, |_, (), _, _| {});
+            self.run_git(&root, Busy::Stage, window, cx, ProjectRepo::stage_all, |_, (), _, _| {});
             return;
         }
         let answer = window.prompt(
@@ -538,7 +544,7 @@ impl GitPanel {
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() == Some(0) {
                 this.update_in(cx, |this, window, cx| {
-                    this.run_git(&root, Busy::Stage, window, cx, git::Repo::stage_all, |_, (), _, _| {});
+                    this.run_git(&root, Busy::Stage, window, cx, ProjectRepo::stage_all, |_, (), _, _| {});
                 })
                 .ok();
             }
@@ -547,7 +553,7 @@ impl GitPanel {
     }
 
     pub(crate) fn git_unstage_all(&mut self, _: &GitUnstageAll, window: &mut Window, cx: &mut Context<Self>) {
-        self.run_on_target(Busy::Stage, window, cx, git::Repo::unstage_all);
+        self.run_on_target(Busy::Stage, window, cx, ProjectRepo::unstage_all);
     }
 
     pub(crate) fn git_discard_all(&mut self, _: &GitDiscardAll, window: &mut Window, cx: &mut Context<Self>) {

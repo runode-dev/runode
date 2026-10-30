@@ -87,6 +87,11 @@ fn handle(call: Call, caches: &Shared) -> (Reply, Vec<u8>) {
             let git = lock().git.get(&root).cloned().flatten();
             (Reply::Listed(crate::file_tree::list_dirs(dirs, git.as_ref())), Vec::new())
         }
+        Call::Git { root, op } => match runode_git::Repo::open(&root).map(|repo| op.run(&repo)) {
+            Some(Ok(value)) => (Reply::Git(value), Vec::new()),
+            Some(Err(err)) => (Reply::Failed(err.to_string()), Vec::new()),
+            None => (Reply::Failed(format!("{} is not in a git repository", root.display())), Vec::new()),
+        },
     }
 }
 
@@ -95,6 +100,7 @@ mod tests {
     use std::{fs, io::Cursor};
 
     use super::*;
+    use crate::project_host::repo::GitOp;
 
     /// 一来一回过一遍线上格式：读文件的内容跟在回话后面，列目录、读项目照本机的结果交回。
     #[test]
@@ -130,6 +136,34 @@ mod tests {
         assert!(entries.iter().any(|entry| entry.name == "main.rs"));
         assert!(matches!(next(), (Reply::Read { cut: true }, blob) if blob == "# 笔".as_bytes()[..4]));
         assert!(matches!(next(), (Reply::Failed(_), blob) if blob.is_empty()));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// git 操作在远端照本机的跑，结果原样带回：暂存后读得出暂存区的 diff，不在仓库里时报原因。
+    #[test]
+    fn git_runs_where_the_project_is() {
+        let dir = std::env::temp_dir().join(format!("runode-project-git-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git").args(args).current_dir(&dir).status().unwrap().success())
+        };
+        git(&["init", "-q"]);
+        fs::write(dir.join("a.txt"), "hello\n").unwrap();
+        let caches = Shared::default();
+        let run = |op| {
+            let mut stream = Vec::new();
+            let (reply, blob) = handle(Call::Git { root: dir.clone(), op }, &caches);
+            wire::write(&mut stream, &Response { id: 0, reply, blob: blob.len() }, &blob).unwrap();
+            wire::read_line::<Response>(&mut Cursor::new(stream)).unwrap().unwrap().reply
+        };
+        let Reply::Git(staged) = run(GitOp::Stage { paths: vec![PathBuf::from("a.txt")] }) else {
+            panic!("暂存没交回结果")
+        };
+        assert_eq!(serde_json::from_value::<runode_git::Result>(staged).unwrap(), Ok(()));
+        let Reply::Git(diff) = run(GitOp::PendingDiff { staged: true }) else { panic!("diff 没交回结果") };
+        assert!(serde_json::from_value::<runode_git::Result<String>>(diff).unwrap().unwrap().contains("+hello"));
+        fs::remove_dir_all(dir.join(".git")).unwrap();
+        assert!(matches!(run(GitOp::StageAll), Reply::Failed(_)));
         fs::remove_dir_all(&dir).ok();
     }
 }

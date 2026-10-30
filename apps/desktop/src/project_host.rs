@@ -3,6 +3,7 @@
 //! 读写，不管项目在哪台机器上。
 
 mod client;
+mod repo;
 mod scan;
 pub(crate) mod serve;
 mod wire;
@@ -16,6 +17,7 @@ use std::{
 use runode_files::{Limited, Listings};
 use runode_git::UntrackedCache;
 
+pub(crate) use repo::ProjectRepo;
 pub(crate) use scan::{Scan, scan};
 use wire::{Call, Reply};
 
@@ -90,6 +92,19 @@ impl ProjectHost {
 
     pub(crate) fn is_remote(&self) -> bool {
         matches!(self, Self::Remote(_))
+    }
+
+    /// SSH 主机的名字，本机为空。
+    pub(crate) fn name(&self) -> Option<&str> {
+        match self {
+            Self::Local => None,
+            Self::Remote(client) => Some(client.name()),
+        }
+    }
+
+    /// 这台机器上的仓库 `repo`。
+    pub(crate) fn repo(&self, repo: runode_git::Repo) -> ProjectRepo {
+        ProjectRepo::new(self.clone(), repo)
     }
 
     /// 在项目所在的机器上读文件树里 `root` 下的这些目录（`file_tree::list_dirs`）；远端按那边最近一次读 `root` 时的 git 状态

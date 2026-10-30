@@ -60,6 +60,8 @@ pub use run::show_git_error;
 
 use rows::{Busy, GitRow, GitSection, PanelState};
 
+use crate::project_host::{ProjectHost, ProjectRepo};
+
 actions!(
     runode,
     [
@@ -291,8 +293,10 @@ impl GitPanel {
         self.input = input;
     }
 
-    /// 之后显示的、操作的都是 workspace `ws` 的面板。只记下来，不重画：app 在画的时候、对页做什么之前调。
-    pub fn set_workspace(&mut self, ws: WorkspaceId) {
+    /// 之后显示的、操作的都是 workspace `ws` 的面板，它的仓库在 `project` 上。只记下来，不重画：app 在画的时候、
+    /// 对页做什么之前调。
+    pub fn set_workspace(&mut self, ws: WorkspaceId, project: ProjectHost) {
+        self.workspaces.entry(ws).or_default().project = project;
         // 点过的文件属于原来那个 workspace，换了就不再打进终端。
         if self.ws != ws {
             self.clicked = None;
@@ -382,7 +386,7 @@ impl GitPanel {
         cx: &mut Context<Self>,
     ) {
         let busy = if action == HunkAction::Discard { Busy::Discard } else { Busy::Stage };
-        let op = move |repo: &git::Repo| repo.apply_hunk(&file, hunk, action);
+        let op = move |repo: &ProjectRepo| repo.apply_hunk(&file, hunk, action);
         self.run_git(root, busy, window, cx, op, |_, (), _, cx| cx.emit(GitPanelEvent::HunkApplied));
     }
 
@@ -392,7 +396,7 @@ impl GitPanel {
     pub fn write_message(
         &mut self,
         root: &Path,
-        op: impl FnOnce(&git::Repo) -> git::Result<String> + Send + 'static,
+        op: impl FnOnce(&ProjectRepo) -> git::Result<String> + Send + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -421,7 +425,7 @@ impl GitPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let op = move |repo: &git::Repo| repo.create_branch(&name, start.as_deref());
+        let op = move |repo: &ProjectRepo| repo.create_branch(&name, start.as_deref());
         self.run_git(root, Busy::Checkout, window, cx, op, |_, (), _, _| {});
     }
 

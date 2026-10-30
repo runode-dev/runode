@@ -208,8 +208,9 @@ impl PreviewPanel {
         let Some(target) = tabs.active().and_then(|preview| preview.diff.clone()) else {
             return;
         };
-        let repo =
-            tabs.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == target.root)).map(git::Snapshot::repo);
+        let repo = tabs.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == target.root));
+        let repo = repo.map(|repo| tabs.project.repo(repo.repo()));
+        let remote = tabs.project.is_remote();
         let Some(preview) = self.preview_mut() else {
             return;
         };
@@ -220,11 +221,11 @@ impl PreviewPanel {
         let path = preview.path.clone();
         // 工作区的 diff 记下文件的大小和修改时间，见 `Preview::stale`。先记再读：读的期间又改了的，下次比出来
         // 不一样，再读一次。
-        let stamp_path = (target.side == git::DiffSide::Worktree).then(|| path.clone());
+        let stamp_path = (target.side == git::DiffSide::Worktree && !remote).then(|| path.clone());
         let file = path.clone();
         let job = cx.background_spawn(async move {
             // 解析符号链接也在这里，见 `Preview::real_path`。
-            let real_path = fs::canonicalize(&file).ok();
+            let real_path = if remote { None } else { fs::canonicalize(&file).ok() };
             let stamp = stamp_path.and_then(|path| file_stamp(&path));
             // 读出错时是 git 的说明，不当成没有改动。
             let read = || -> Result<_, String> {

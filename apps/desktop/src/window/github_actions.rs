@@ -45,7 +45,8 @@ impl WindowView {
         if self.github_actions_shown() {
             return true;
         }
-        if !self.git_button_visible() {
+        // `gh` 要在本机跑，读的是本机的仓库。
+        if !self.git_button_visible() || self.on_remote() {
             return false;
         }
         self.tool_on_path(&self.actions_found, PROGRAM, cx)

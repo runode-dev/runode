@@ -35,11 +35,11 @@ use std::{
 
 use crate::git_panel::show_git_error;
 use gpui::{Context, Window};
-use runode_git::{self as git, GitError, Section};
+use runode_git::{GitError, Section};
 use runode_paths::Dirs;
 use serde::{Deserialize, Serialize};
 
-use crate::window::WindowView;
+use crate::{project_host::ProjectRepo, window::WindowView};
 use agents::Output;
 
 /// 交给 agent 的改动最多这么多字节，多出来的截掉：大改动整份塞进去又慢又贵。
@@ -212,13 +212,13 @@ impl WindowView {
         // 一个终端都没有时在后台问登录 shell。
         let path = self.terminal_path(cx);
         let op =
-            move |repo: &git::Repo| generate(repo, &recipe, &context, path).map_err(|message| GitError { message });
+            move |repo: &ProjectRepo| generate(repo, &recipe, &context, path).map_err(|message| GitError { message });
         self.with_git_panel(cx, |panel, cx| panel.write_message(root, op, window, cx));
     }
 }
 
 fn generate(
-    repo: &git::Repo,
+    repo: &ProjectRepo,
     recipe: &Recipe,
     context: &PromptContext,
     path: Option<OsString>,
@@ -243,7 +243,8 @@ fn generate(
     let path = path
         .or_else(|| login_shell_path(&runode_terminal::pty::default_shell(), &scratch.dir))
         .or_else(|| std::env::var_os("PATH"));
-    let dir = if command.agent.is_some() { &scratch.dir } else { &repo.root };
+    // 远端的仓库目录这台机器上没有，命令同样在空目录里跑。
+    let dir = if command.agent.is_some() || repo.is_remote() { &scratch.dir } else { &repo.root };
     let stdout = run(&command.binary, &args, stdin, dir, path, &command.env, TIMEOUT)?;
     drop(scratch);
     let text = match command.agent.map_or(Output::Text, |agent| agent.output) {

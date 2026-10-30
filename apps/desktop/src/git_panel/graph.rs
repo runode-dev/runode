@@ -34,6 +34,8 @@ use gpui::{
 use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, LaneColor, RefKind};
 use runode_types::color::Rgb;
 
+use crate::project_host::ProjectRepo;
+
 use super::{
     GitPanel, GitPanelEvent,
     list::{Diff, ROW_HEIGHT, a11y_open_diff, chevron, file_description, status_letter},
@@ -123,7 +125,7 @@ impl GitPanel {
             return;
         };
         if panel.repos.get(&repo.root).is_none_or(|state| state.graph.needs_read(&repo.info)) {
-            let (repo, info) = (repo.repo(), repo.info.clone());
+            let (repo, info) = (panel.project.repo(repo.repo()), repo.info.clone());
             self.load_history(repo, info, cx);
         }
     }
@@ -242,7 +244,7 @@ impl GitPanel {
     }
 
     /// 在后台读 `repo` 的历史，读完换上、重排行。
-    fn load_history(&mut self, repo: git::Repo, info: git::RepoInfo, cx: &mut Context<Self>) {
+    fn load_history(&mut self, repo: ProjectRepo, info: git::RepoInfo, cx: &mut Context<Self>) {
         let ws = self.ws;
         let root = repo.root.clone();
         let panel = self.state_mut();

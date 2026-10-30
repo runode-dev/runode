@@ -435,12 +435,15 @@ impl GitPanel {
             let action = GitFileAction { repo: root.clone(), op, section, path: path.clone() };
             Some(MenuItem::new(rust_i18n::t!(key), Box::new(action), enabled, cx))
         };
-        let mut items = vec![
-            item("git.open_file", FileOp::Open, true),
-            item(&crate::i18n::os_key("files.reveal"), FileOp::Reveal, true),
+        let mut items = vec![item("git.open_file", FileOp::Open, true)];
+        // 远端的文件访达里看不到。
+        if !self.state().project.is_remote() {
+            items.push(item(&crate::i18n::os_key("files.reveal"), FileOp::Reveal, true));
+        }
+        items.extend([
             Some(MenuItem::new(rust_i18n::t!("files.insert_path"), Box::new(InsertFilePath), true, cx)),
             None,
-        ];
+        ]);
         match shown_in {
             GitSection::Merge => items.push(item("git.mark_resolved", FileOp::Stage, enabled)),
             GitSection::Staged => items.push(item("git.unstage", FileOp::Unstage, enabled)),

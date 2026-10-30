@@ -13,6 +13,7 @@ mod ai_message;
 mod branch_picker;
 
 use crate::git_panel::{GitPanel, GitPanelEvent, Input};
+use crate::project_host::ProjectHost;
 use gpui::{Context, Div, Entity, Stateful, Window, div, prelude::*};
 
 pub(super) use ai_message::CommitMessageDialog;
@@ -28,9 +29,9 @@ impl WindowView {
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut GitPanel, &mut Context<GitPanel>) -> R,
     ) -> R {
-        let id = self.workspace().id;
+        let (id, project) = (self.workspace().id, ProjectHost::of(&self.workspace().host));
         self.git_panel.update(cx, |panel, cx| {
-            panel.set_workspace(id);
+            panel.set_workspace(id, project);
             f(panel, cx)
         })
     }
@@ -38,9 +39,9 @@ impl WindowView {
     /// 右侧面板的 Git 页：外框和顶上的标签在这里画，里面是页。
     pub(super) fn render_git_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
         let input = Input { width, status_bar_height: status_bar::height(cx) };
-        let id = self.workspace().id;
+        let (id, project) = (self.workspace().id, ProjectHost::of(&self.workspace().host));
         self.git_panel.update(cx, |panel, _| {
-            panel.set_workspace(id);
+            panel.set_workspace(id, project);
             panel.set_input(input);
         });
         panel_shell("git-panel", width, cards(cx), cx)

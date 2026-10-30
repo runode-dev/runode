@@ -12,6 +12,7 @@ use std::{
 use gpui::{Entity, ListAlignment, ListState, Subscription, UniformListScrollHandle, px};
 use runode_git::{self as git, FileStatus, RepoKind, Section};
 
+use crate::project_host::ProjectHost;
 use crate::ui::path_tree::{TreeItem, path_tree};
 use crate::ui::textarea::TextareaState;
 
@@ -265,6 +266,8 @@ impl Out {
 
 /// 一个 workspace 的 Git 面板。
 pub(crate) struct PanelState {
+    /// 这个 workspace 的仓库在哪台机器上，git 到那台机器上跑。
+    pub project: ProjectHost,
     /// app 交来的这个 workspace 最近读到的 git 状态，不在仓库里时为空；`scanned` 是交来过没有，还没有时
     /// 面板空着，不说不在仓库里。
     pub git: Option<Arc<git::Repos>>,
@@ -311,6 +314,7 @@ pub(crate) struct PanelState {
 impl Default for PanelState {
     fn default() -> Self {
         Self {
+            project: ProjectHost::Local,
             git: None,
             scanned: false,
             rows: Vec::new(),
