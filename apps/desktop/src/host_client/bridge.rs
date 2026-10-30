@@ -65,6 +65,8 @@ unsafe fn tidy_env(dirs: &runode_paths::Dirs) {
         // SAFETY: 调用方保证还没有别的线程。
         unsafe { std::env::remove_var(key) };
     }
+    // SAFETY: 调用方保证还没有别的线程。
+    unsafe { drop_missing_locales() };
     let Some(agent) = std::env::var_os("SSH_AUTH_SOCK").map(PathBuf::from) else {
         return;
     };
@@ -80,6 +82,64 @@ unsafe fn tidy_env(dirs: &runode_paths::Dirs) {
     }
     // SAFETY: 调用方保证还没有别的线程。
     unsafe { std::env::set_var("SSH_AUTH_SOCK", &link) };
+}
+
+/// 本机的 ssh 常把自己的 `LANG`、`LC_*` 一起带过来（macOS 默认 `SendEnv LANG LC_*`），这台机器上没装那个
+/// locale 时，宿主起的每个 shell 一开就报 setlocale 的警告。装不上的去掉；连 `LANG` 都去掉了、又没有别的
+/// 设定时用 `C.UTF-8`，终端里照样是 UTF-8。
+///
+/// # Safety
+///
+/// 要改环境变量：调用时进程里不能有别的线程。
+unsafe fn drop_missing_locales() {
+    const KEYS: [&str; 14] = [
+        "LC_ALL",
+        "LC_CTYPE",
+        "LC_COLLATE",
+        "LC_MESSAGES",
+        "LC_MONETARY",
+        "LC_NUMERIC",
+        "LC_TIME",
+        "LC_ADDRESS",
+        "LC_IDENTIFICATION",
+        "LC_MEASUREMENT",
+        "LC_NAME",
+        "LC_PAPER",
+        "LC_TELEPHONE",
+        "LANG",
+    ];
+    let mut dropped = false;
+    for key in KEYS {
+        let Ok(value) = std::env::var(key) else {
+            continue;
+        };
+        if value.is_empty() || locale_exists(&value) {
+            continue;
+        }
+        // SAFETY: 调用方保证还没有别的线程。
+        unsafe { std::env::remove_var(key) };
+        dropped = true;
+    }
+    if dropped && KEYS.iter().all(|key| std::env::var_os(key).is_none()) {
+        // SAFETY: 调用方保证还没有别的线程。
+        unsafe { std::env::set_var("LANG", "C.UTF-8") };
+    }
+}
+
+/// 这台机器上能不能用 locale `name`。
+fn locale_exists(name: &str) -> bool {
+    let Ok(name) = std::ffi::CString::new(name) else {
+        return false;
+    };
+    // SAFETY: `name` 是以 NUL 结尾的字符串；建出来的 locale 马上释放。
+    unsafe {
+        let locale = libc::newlocale(libc::LC_ALL_MASK, name.as_ptr(), std::ptr::null_mut());
+        if locale.is_null() {
+            return false;
+        }
+        libc::freelocale(locale);
+    }
+    true
 }
 
 /// 原子地把符号链接 `link` 改指 `target`。
@@ -267,5 +327,17 @@ fn copy_flushing(mut from: impl Read, to: &mut impl Write) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::locale_exists;
+
+    #[test]
+    fn only_installed_locales_exist() {
+        assert!(locale_exists("C"));
+        assert!(!locale_exists("xx_NOWHERE.UTF-8"));
+        assert!(!locale_exists("bad\0name"));
     }
 }
