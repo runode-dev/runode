@@ -82,6 +82,8 @@ pub(crate) enum Command {
         kind: Kind,
     },
     ServiceStatus,
+    /// 让这个构建的宿主接手正在跑的宿主的会话。
+    ServiceUpgrade,
     /// 往看板上加一张任务；`cwd` 没给时是当前目录，`agent` 没给时是 `runode_protocol::todo::DEFAULT_AGENT`。
     TodoAdd {
         title: String,
@@ -399,7 +401,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             }
         }
         "service" => {
-            let (what, words) = words.split_first().ok_or("service needs install, uninstall or status")?;
+            let (what, words) = words.split_first().ok_or("service needs install, uninstall, status or upgrade")?;
             // 不写拉起什么时是宿主。
             let kind = |words: &[String], name: &str| -> Result<Kind, String> {
                 no_more(words, 1, name)?;
@@ -416,7 +418,11 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     no_more(words, 0, "service status")?;
                     Command::ServiceStatus
                 }
-                other => return Err(format!("service knows install, uninstall and status, not {other}")),
+                "upgrade" => {
+                    no_more(words, 0, "service upgrade")?;
+                    Command::ServiceUpgrade
+                }
+                other => return Err(format!("service knows install, uninstall, status and upgrade, not {other}")),
             }
         }
         "todo" => {
@@ -853,6 +859,8 @@ mod tests {
         assert_eq!(parse("service install app"), Ok(Command::ServiceInstall { kind: Kind::App }));
         assert_eq!(parse("service uninstall host"), Ok(Command::ServiceUninstall { kind: Kind::Host }));
         assert_eq!(parse("service status"), Ok(Command::ServiceStatus));
+        assert_eq!(parse("service upgrade"), Ok(Command::ServiceUpgrade));
+        assert!(parse("service upgrade host").unwrap_err().contains("does not take"));
         assert!(parse("service install both").unwrap_err().contains("host and app"));
         assert!(parse("service status app").unwrap_err().contains("does not take"));
         assert!(parse("service").is_err());

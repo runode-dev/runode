@@ -32,6 +32,8 @@ qrcode.workspace = true
 [target.'cfg(windows)'.dependencies]
 # Windows 10 起有的 AF_UNIX socket，连宿主用。
 uds_windows.workspace = true
+# 给控制台打开 VT 处理（`SetConsoleMode`），`remote pair` 的二维码和颜色才不印成转义码。
+windows-sys = { workspace = true, features = ["Win32_System_Console"] }
 
 [lints]
 workspace = true

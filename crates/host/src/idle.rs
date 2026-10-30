@@ -106,6 +106,13 @@ impl Host {
         reason
     }
 
+    /// 结束所有会话、给各条连接发 `Goodbye`，让单独跑的宿主的 `run_until_idle` 返回 `Stopped::Shutdown`；
+    /// 给宿主进程自己用，比如收到 SIGTERM 时。宿主不是单独跑的时只结束所有会话。
+    pub fn shut_down(&self) {
+        self.shared.kill_all();
+        self.shared.shut_down();
+    }
+
     /// `stay_up` 时没有会话也没有连接也不算空闲，`run_until_idle` 不因为空闲返回（`Shutdown`、交接
     /// 照旧）：比如开着远程访问、有配对过的手机，手机随时可能连上来开新会话。改回 false 时空闲从
     /// 这一刻重新算起。

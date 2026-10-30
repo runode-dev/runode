@@ -1,5 +1,6 @@
 //! 登录时自启：macOS 写 launchd 的 LaunchAgent（`~/Library/LaunchAgents`），Linux 写 systemd 的
-//! 用户服务（用户服务管理器自己查找的 `$XDG_CONFIG_HOME/systemd/user`，见 `systemd_unit_files`）。能拉起两样东西（`Kind`）：无界面的宿主
+//! 用户服务（用户服务管理器自己查找的 `$XDG_CONFIG_HOME/systemd/user`，见 `systemd_unit_files`），Windows
+//! 登记在当前用户的 `Run` 键下（`run_key`）。能拉起两样东西（`Kind`）：无界面的宿主
 //! （`runode --host`，手机远程访问靠它在后台等着）和桌面 app（只有 macOS 有）。app 在 macOS 13 起
 //! 登记成系统的登录项（`SMAppService`），更早的系统上也写 LaunchAgent。
 //! 有没有装就看服务文件在不在、登录项登没登记，不另存状态；命令行（`runode service`）和设置页用的是同一套。
@@ -15,6 +16,12 @@ use runode_paths::Dirs;
 
 #[cfg(target_os = "macos")]
 mod login_item;
+#[cfg(windows)]
+mod run_key;
+
+/// Windows 上登录自启登记在 `HKEY_CURRENT_USER` 下的这个键里，没有服务文件。
+#[cfg(windows)]
+pub use run_key::RUN_KEY;
 
 /// 登录时拉起什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,7 +46,7 @@ impl Kind {
     /// 这个系统上能不能装。
     pub fn supported(self) -> bool {
         match self {
-            Self::Host => cfg!(any(target_os = "macos", target_os = "linux")),
+            Self::Host => cfg!(any(target_os = "macos", target_os = "linux", windows)),
             Self::App => cfg!(target_os = "macos"),
         }
     }
@@ -53,11 +60,11 @@ impl Kind {
     }
 }
 
-/// `kind` 的服务文件放在哪；系统不支持、没有家目录时为 `None`。app 登记成登录项时不写服务文件，
+/// `kind` 的服务文件放在哪；系统不支持、没有家目录时为 `None`，Windows 上没有服务文件，也是 `None`。app 登记成登录项时不写服务文件，
 /// 这里给的是登录项不可用时写的 LaunchAgent。Linux 上是 `systemd_unit_files` 里装着的那份，都没装时
 /// 是第一个候选；真装时写到哪由服务管理器定，见 `install`。
 pub fn service_file(kind: Kind, dirs: &Dirs) -> Option<PathBuf> {
-    if !kind.supported() {
+    if !kind.supported() || cfg!(windows) {
         return None;
     }
     if cfg!(target_os = "macos") {
@@ -197,6 +204,10 @@ fn systemd_unit_file(dirs: &Dirs) -> io::Result<PathBuf> {
 
 /// 装了没有。app 登记成登录项的系统上，已有的 LaunchAgent 也算：它照样在登录时开 app。
 pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
+    #[cfg(windows)]
+    if kind == Kind::Host {
+        return run_key::is_installed();
+    }
     let has_file = service_file(kind, dirs).is_some_and(|path| path.exists());
     #[cfg(target_os = "macos")]
     if kind == Kind::App && login_item::available() {
@@ -205,7 +216,7 @@ pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
     has_file
 }
 
-/// 装上 `kind` 的登录自启，返回写的服务文件；app 登记成登录项时没有服务文件，返回 `None`。`exe` 是
+/// 装上 `kind` 的登录自启，返回写的服务文件；app 登记成登录项时、Windows 上没有服务文件，返回 `None`。`exe` 是
 /// runode 可执行文件；`Kind::App` 时它得在 `Runode.app` 里，登记的就是这个 app。可以重复装，每次整个
 /// 换掉服务文件。
 ///
@@ -213,6 +224,11 @@ pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
 /// 点一下开关就把窗口翻到前面。宿主已经在服务管理器里跑着时不重启它：它托管着会话，一重启会话就丢了，
 /// 新的服务文件等它下次起来时才用上。
 pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf>> {
+    #[cfg(windows)]
+    if kind == Kind::Host {
+        run_key::install(exe)?;
+        return Ok(None);
+    }
     let path = service_file(kind, dirs).ok_or_else(|| unsupported(kind))?;
     let bundle = || {
         app_bundle(exe).ok_or_else(|| {
@@ -228,7 +244,7 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
         return Ok(None);
     }
     let content = match (kind, cfg!(target_os = "macos")) {
-        (Kind::Host, true) => plist(kind.label(), &[&exe.to_string_lossy(), "--host"], true),
+        (Kind::Host, true) => plist(kind.label(), &[&exe.to_string_lossy(), "--host", "--stay"], true),
         (Kind::App, _) => plist(kind.label(), &["/usr/bin/open", "-a", &bundle()?.to_string_lossy()], false),
         (Kind::Host, false) => unit(exe),
     };
@@ -328,6 +344,10 @@ pub fn starts_at_boot() -> bool {
 ///
 /// 正在跑的宿主不停：它托管着会话，停了会话就丢了；它空闲时自己会退出，或者跟着这次登录结束。
 pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
+    #[cfg(windows)]
+    if kind == Kind::Host {
+        return run_key::uninstall();
+    }
     let path = service_file(kind, dirs).ok_or_else(|| unsupported(kind))?;
     #[cfg(target_os = "macos")]
     if kind == Kind::App && login_item::available() {
@@ -400,7 +420,7 @@ fn unsupported(kind: Kind) -> io::Error {
     io::Error::new(
         io::ErrorKind::Unsupported,
         match kind {
-            Kind::Host => "starting at login is only supported on macOS and Linux",
+            Kind::Host => "starting at login is only supported on macOS, Linux and Windows",
             Kind::App => "the app only exists on macOS, so there is no app to start at login",
         },
     )
@@ -411,7 +431,7 @@ fn app_bundle(exe: &Path) -> Option<&Path> {
     exe.ancestors().find(|dir| dir.extension().is_some_and(|ext| ext == "app"))
 }
 
-/// launchd 的 LaunchAgent。`restart_on_crash` 时只在崩溃（被信号杀掉）后重启：宿主空闲了自己退出、
+/// launchd 的 LaunchAgent。`restart_on_crash` 时只在崩溃（被信号杀掉）后重启：宿主收到 `Shutdown` 退出、
 /// 抢不到宿主锁（已经有一个宿主在跑）时返回非零，都不能拉回来，不然 launchd 会每十秒重启一次。
 fn plist(label: &str, args: &[&str], restart_on_crash: bool) -> String {
     let mut out = String::from(
@@ -432,14 +452,39 @@ fn plist(label: &str, args: &[&str], restart_on_crash: bool) -> String {
     out
 }
 
-/// systemd 用户服务。`on-abnormal` 只在被信号杀掉、超时时重启，返回非零（比如抢不到宿主锁）不算。
+/// systemd 用户服务。宿主带 `--stay`，不因空闲退出。`on-abnormal` 只在被信号杀掉、超时时重启，返回非零
+/// （比如抢不到宿主锁）不算。`systemctl --user reload` 跑 `--host --upgrade`：服务文件里那个可执行文件
+/// 拉起的新宿主接手会话，在服务的 cgroup 里经 `NOTIFY_SOCKET` 报告自己是新的主进程（要 `NotifyAccess=all`），
+/// 交出会话的旧宿主等它的 shell 都结束才退出，服务一直算在跑。
 fn unit(exe: &Path) -> String {
     // ExecStart 里的 % 是说明符，$ 会被当成环境变量替换，`"` 和 `\` 要转义。
     let exe = exe.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%").replace('$', "$$");
     format!(
-        "[Unit]\nDescription=runode terminal host\n\n[Service]\nExecStart=\"{exe}\" --host\nRestart=on-abnormal\n\n\
+        "[Unit]\nDescription=runode terminal host\n\n[Service]\nExecStart=\"{exe}\" --host --stay\n\
+         ExecReload=\"{exe}\" --host --upgrade\nNotifyAccess=all\nRestart=on-abnormal\n\n\
          [Install]\nWantedBy=default.target\n"
     )
+}
+
+/// Linux 上宿主的 systemd 用户服务在跑时，它的主进程号；没装、没在跑、没有 systemd 时为 `None`。
+pub fn host_service_pid() -> Option<u32> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let shown = capture("systemctl", &["--user", "show", SYSTEMD_UNIT, "--property=ActiveState,MainPID"]).ok()?;
+    let value = |key: &str| shown.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='));
+    if value("ActiveState") != Some("active") {
+        return None;
+    }
+    value("MainPID")?.parse().ok().filter(|&pid| pid != 0)
+}
+
+/// 让宿主的 systemd 用户服务换上 `exe` 的新宿主，会话交给它（服务文件的 `ExecReload`）。先照 `exe` 重写服务
+/// 文件（`install`）：旧的服务文件可能还没有 `ExecReload`，或者指着别处的可执行文件。交接没成时报错，原因在
+/// 服务的日志里。
+pub fn reload_host_service(dirs: &Dirs, exe: &Path) -> io::Result<()> {
+    install(Kind::Host, dirs, exe)?;
+    systemctl(&["reload", SYSTEMD_UNIT])
 }
 
 fn xml_escape(text: &str) -> String {
@@ -495,11 +540,13 @@ mod tests {
     #[test]
     fn the_unit_quotes_the_path() {
         let unit = unit(Path::new("/home/a b/%u/runode"));
-        assert!(unit.contains("ExecStart=\"/home/a b/%%u/runode\" --host\n"), "{unit}");
+        assert!(unit.contains("ExecStart=\"/home/a b/%%u/runode\" --host --stay\n"), "{unit}");
         let unit = super::unit(Path::new("/opt/$HOME/run\"o\\de"));
-        assert!(unit.contains("ExecStart=\"/opt/$$HOME/run\\\"o\\\\de\" --host\n"), "{unit}");
+        assert!(unit.contains("ExecStart=\"/opt/$$HOME/run\\\"o\\\\de\" --host --stay\n"), "{unit}");
         assert!(unit.contains("WantedBy=default.target"));
         assert!(unit.contains("\nRestart=on-abnormal\n"), "{unit}");
+        assert!(unit.contains("\nExecReload=\"/opt/$$HOME/run\\\"o\\\\de\" --host --upgrade\n"), "{unit}");
+        assert!(unit.contains("\nNotifyAccess=all\n"), "{unit}");
     }
 
     #[test]

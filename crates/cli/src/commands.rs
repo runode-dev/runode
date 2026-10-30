@@ -272,6 +272,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
         Command::ServiceInstall { kind } => crate::service::install(env, kind, out)?,
         Command::ServiceUninstall { kind } => crate::service::uninstall(env, kind, out)?,
         Command::ServiceStatus => crate::service::status(env, out)?,
+        Command::ServiceUpgrade => crate::service::upgrade(env, out)?,
         Command::TodoAdd { title, prompt, cwd, agent, worktree, start } => {
             crate::todo::add(env, crate::todo::Spec { title, prompt, cwd, agent, worktree }, start, out)?
         }

@@ -11,6 +11,7 @@ fn main() {
     if args.is_empty() {
         std::process::exit(open_window());
     }
+    runode_cli::prepare_console();
     let code = runode_cli::run(&args, &env, &mut std::io::stdout().lock(), &mut std::io::stderr().lock());
     std::process::exit(code);
 }

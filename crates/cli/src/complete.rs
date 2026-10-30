@@ -240,7 +240,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("todo", "Put tasks for agents on the task board and start them"),
     ("schedule", "Start a task for an agent at set times"),
     ("remote", "Pair phones for remote access and manage them"),
-    ("service", "Start runode at login"),
+    ("service", "Start runode at login, and upgrade the running host"),
     ("completions", "Print a completion script for your shell"),
     ("help", "Show this help, or the help of a command"),
     ("version", "Show the version"),
@@ -263,6 +263,7 @@ fn subcommands(command: &str) -> &'static [(&'static str, &'static str)] {
             ("install", "Install the login service"),
             ("uninstall", "Remove the login service"),
             ("status", "Show which login services are installed"),
+            ("upgrade", "Hand the running host's sessions to a host of this build"),
         ],
         "completions" => &[("bash", ""), ("fish", ""), ("zsh", "")],
         _ => &[],
@@ -550,7 +551,7 @@ mod tests {
             ("todo", &[Some("add"), Some("list"), Some("show"), Some("start"), Some("done"), Some("rm")]),
             ("schedule", &[Some("add"), Some("list"), Some("rm")]),
             ("remote", &[Some("pair"), Some("devices"), Some("revoke")]),
-            ("service", &[Some("install"), Some("uninstall"), Some("status")]),
+            ("service", &[Some("install"), Some("uninstall"), Some("status"), Some("upgrade")]),
             ("completions", &[Some("bash")]),
         ];
         for &(command, subs) in pages {

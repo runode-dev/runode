@@ -6760,6 +6760,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-service-management",
  "runode-paths",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6780,6 +6781,7 @@ dependencies = [
  "serde_json",
  "uds_windows",
  "unicode-width",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

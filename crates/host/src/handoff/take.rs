@@ -104,8 +104,11 @@ impl Host {
         let late = || options.ready_by.is_some_and(|at| Instant::now() >= at);
         if !late()
             && let Some(on_ready) = &options.on_ready
+            && let Err(reason) = on_ready()
         {
-            on_ready();
+            self.stop_listening(&control);
+            release_all(&taken.handles);
+            return Err(abort(&stream, reason, started));
         }
         if late() {
             self.stop_listening(&control);
@@ -213,7 +216,17 @@ fn handshake(shared: &Shared, stream: &UnixStream) -> Result<(u32, Option<libc::
         other => return Err(TakeOverError::Failed(format!("unexpected answer to hello: {other:?}"))),
     };
     let handoff = ClientMsg::Handoff { min_format: OLDEST_READABLE_HANDOFF_FORMAT, max_format: HANDOFF_FORMAT };
-    send(stream, &handoff).map_err(|err| failed("cannot ask for the handoff", &err))?;
+    if let Err(err) = send(stream, &handoff) {
+        // 旧宿主开始把会话交给别的新宿主时给这条连接发了 `Goodbye { Handoff }` 就关掉它，请求可能写不出去
+        // （`EPIPE`）：收下已经到了的那条再定。
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+        return match receive_message(stream) {
+            Ok(HostMsg::Goodbye { reason: GoodbyeReason::Handoff }) => {
+                Err(TakeOverError::Refused(HandoffRefusal::Busy))
+            }
+            _ => Err(failed("cannot ask for the handoff", &err)),
+        };
+    }
     match receive_message(stream).map_err(|err| failed("no answer to the handoff", &err))? {
         HostMsg::HandoffRefused { reason } => Err(TakeOverError::Refused(reason)),
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff } => Err(TakeOverError::Refused(HandoffRefusal::Busy)),

@@ -57,6 +57,9 @@ pub struct Env {
     pub build: String,
     /// runode 的各个目录，`remote` 在这里找远程访问的文件。其中的家目录：显示目录时缩成 `~`。
     pub dirs: runode_paths::Dirs,
+    /// 连不上宿主时拿它拉起一个（`<它> --host`）再连；为 `None` 时不拉起，报错说宿主没在跑。没有桌面
+    /// app 替命令行拉起宿主的地方（无头的 Linux）才给。
+    pub launch_host: Option<PathBuf>,
 }
 
 impl Env {
@@ -69,6 +72,7 @@ impl Env {
             session: var(runode_protocol::ENV_SESSION).map(|value| value.to_string_lossy().into_owned()),
             build: build.into(),
             dirs,
+            launch_host: None,
         }
     }
 }
@@ -100,6 +104,29 @@ pub fn wants_cli(args: &[OsString]) -> bool {
 }
 
 /// 跑一条命令，返回退出码（见 `exit`）。`args` 不含程序名。
+/// Windows 上让标准输出和标准错误所在的控制台认 VT 转义（`ENABLE_VIRTUAL_TERMINAL_PROCESSING`）：conhost 和
+/// 没打开它的 ConPTY 会话默认把转义码原样印出来。不是控制台（重定向到文件、管道）时什么都不做。命令行程序在
+/// 写输出之前调一次。
+pub fn prepare_console() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Console::{
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+            SetConsoleMode,
+        };
+        for which in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            // SAFETY: 句柄由系统给，只读写控制台的模式字。
+            unsafe {
+                let handle = GetStdHandle(which);
+                let mut mode = 0;
+                if GetConsoleMode(handle, &mut mode) != 0 {
+                    SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+                }
+            }
+        }
+    }
+}
+
 pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let command = match args::parse(args) {
         Ok(command) => command,

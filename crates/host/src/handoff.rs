@@ -52,8 +52,8 @@ pub struct TakeOverOptions {
     /// 时限，过了时限它当作失败；这里保证它放弃以后这边不会再接手成功。`None` 时不限。
     pub ready_by: Option<Instant>,
     /// 回 `HandoffReady` 之前调一次：从这里起交接最多再花 `TAKE_OVER_AFTER_READY` 就有结果，
-    /// 等结果的一方可以据此放宽时限。
-    pub on_ready: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// 等结果的一方可以据此放宽时限。返回 `Err` 时不回 `HandoffReady`，放弃接手（旧宿主回滚），错误是原因。
+    pub on_ready: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
 }
 
 impl fmt::Debug for TakeOverOptions {

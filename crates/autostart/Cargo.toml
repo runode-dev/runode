@@ -1,6 +1,6 @@
 [package]
 name = "runode-autostart"
-description = "Start runode at login: writes and removes the launchd LaunchAgent (macOS) or systemd user service (Linux) that starts the background terminal host, and adds the app to the macOS login items"
+description = "Start runode at login: writes and removes the launchd LaunchAgent (macOS), systemd user service (Linux) or Run registry value (Windows) that starts the background terminal host, and adds the app to the macOS login items"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,10 @@ runode-paths.workspace = true
 objc2.workspace = true
 objc2-foundation = { workspace = true, features = ["std", "NSError", "NSString"] }
 objc2-service-management = { workspace = true, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
+
+[target.'cfg(windows)'.dependencies]
+# 当前用户的 `Run` 键，登录时拉起宿主。
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Registry"] }
 
 [lints]
 workspace = true

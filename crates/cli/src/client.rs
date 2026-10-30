@@ -6,6 +6,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::{HashSet, VecDeque},
+    io::ErrorKind,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -55,6 +56,85 @@ fn goodbye(reason: &GoodbyeReason) -> anyhow::Error {
     }
 }
 
+/// 拉起宿主 `<exe> --host`，等到 `socket` 连得上，最多到 `deadline`。宿主自己一个进程组，这个终端里的
+/// Ctrl+C 不传给它。拉起的宿主退出了（多半是锁在同时拉起的另一个宿主手里）也照等到 `deadline`，
+/// 那一个开了监听就用它，到时还连不上才报退出码。
+fn launch_host(exe: &std::path::Path, socket: &std::path::Path, deadline: Instant) -> Result<UnixStream> {
+    let mut command = std::process::Command::new(exe);
+    command
+        .arg("--host")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn().with_context(|| format!("cannot start the runode host {}", exe.display()))?;
+    let mut exited = None;
+    loop {
+        if let Ok(stream) = UnixStream::connect(socket) {
+            return Ok(stream);
+        }
+        if exited.is_none() {
+            exited = child.try_wait().ok().flatten();
+        }
+        if Instant::now() >= deadline {
+            match exited {
+                Some(status) => {
+                    bail!("the runode host exited ({status}) before listening on {}; see its log", socket.display())
+                }
+                None => bail!("the runode host did not listen on {} in time", socket.display()),
+            }
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// 正在跑的宿主，见 `probe`。
+pub(crate) struct Running {
+    pub(crate) build: BuildId,
+    /// 协议对不上（`Incompatible`）时宿主不报进程号，为 `None`。
+    pub(crate) pid: Option<u32>,
+    /// 单独一个进程跑，不在某个 app 的进程里；协议对不上时不知道，当作是。
+    pub(crate) standalone: bool,
+}
+
+/// 问 socket 上有没有宿主在跑、是哪个构建：握完手就断开，协议对不上也算在跑。socket 不在或连接被拒
+/// （宿主没在听）时为 `None`，别的连不上（比如没有权限）报错。
+pub(crate) fn probe(env: &Env) -> Result<Option<Running>> {
+    let Some(socket) = env.socket.as_deref() else { return Ok(None) };
+    if !socket.exists() {
+        return Ok(None);
+    }
+    let mut stream = match UnixStream::connect(socket) {
+        Ok(stream) => stream,
+        Err(err) if matches!(err.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => return Ok(None),
+        Err(err) => return Err(err).with_context(|| format!("cannot connect to {}", socket.display())),
+    };
+    stream.set_read_timeout(Some(REPLY_TIMEOUT))?;
+    let hello = Frame::control(&ClientMsg::Hello {
+        protocol: PROTOCOL_VERSION,
+        build: BuildId(env.build.clone()),
+        client: ClientKind::Cli,
+        caps: Caps::default(),
+        session: None,
+        device: None,
+    })?;
+    write_frame(&mut stream, hello.kind, hello.channel, &hello.payload)?;
+    loop {
+        let frame = read_frame(&mut stream)?.ok_or_else(|| anyhow!(CLOSED))?;
+        if frame.kind != FrameKind::Control {
+            continue;
+        }
+        return match frame.message::<HostMsg>()? {
+            HostMsg::Welcome { build, host_pid, standalone, .. } => {
+                Ok(Some(Running { build, pid: Some(host_pid), standalone }))
+            }
+            HostMsg::Incompatible { build, .. } => Ok(Some(Running { build, pid: None, standalone: true })),
+            other => bail!("unexpected answer to hello: {}", kind(&other)),
+        };
+    }
+}
+
 pub(crate) struct Connection {
     stream: UnixStream,
     messages: mpsc::Receiver<HostMsg>,
@@ -72,16 +152,31 @@ pub(crate) struct Connection {
 }
 
 impl Connection {
-    /// 连上宿主并握手。
+    /// 连上宿主并握手；连不上、给了 `Env::launch_host` 时先拉起宿主。
     pub(crate) fn open(env: &Env) -> Result<Self> {
-        Self::open_by(env, Instant::now() + REPLY_TIMEOUT)
+        Self::connect(env, Instant::now() + REPLY_TIMEOUT, true)
     }
 
-    /// 同 `open`，但握手最多等到 `deadline`：补全这类不能久等的用它。
+    /// 同 `open`，但握手最多等到 `deadline`，也不拉起宿主：补全这类不能久等的用它。
     pub(crate) fn open_by(env: &Env, deadline: Instant) -> Result<Self> {
+        Self::connect(env, deadline, false)
+    }
+
+    fn connect(env: &Env, mut deadline: Instant, launch: bool) -> Result<Self> {
         let socket = env.socket.as_deref().ok_or_else(|| anyhow!("no place to find the runode app's socket"))?;
-        let stream = UnixStream::connect(socket)
-            .with_context(|| format!("cannot reach the runode app at {}; is it running?", socket.display()))?;
+        let stream = match (UnixStream::connect(socket), env.launch_host.as_deref().filter(|_| launch)) {
+            (Ok(stream), _) => stream,
+            (Err(_), Some(exe)) => {
+                let stream = launch_host(exe, socket, deadline)?;
+                // 拉起花掉的时间不算进握手的期限。
+                deadline = Instant::now() + REPLY_TIMEOUT;
+                stream
+            }
+            (Err(err), None) => {
+                return Err(err)
+                    .with_context(|| format!("cannot reach the runode app at {}; is it running?", socket.display()));
+            }
+        };
         let mut reader = stream.try_clone()?;
         let (tx, messages) = mpsc::channel();
         thread::Builder::new().name("runode-reader".into()).spawn(move || {

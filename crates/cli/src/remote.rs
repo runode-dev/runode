@@ -267,21 +267,28 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
 }
 
 /// 没有监听方时：配置里还没开 `REMOTE_KEY` 就替用户写上，说明改了什么，再等监听方（运行中的 app
-/// 或 `runode --host`）读到配置起来，免得配对前还得自己改配置。已经开着（只是 runode 没在跑）、
-/// 写不了配置或者等到 `wait` 还没起来时报错。
+/// 或 `runode --host`）读到配置起来，免得配对前还得自己改配置；给了 `Env::launch_host` 时自己拉起宿主。
+/// 已经开着又拉不起宿主（只是 runode 没在跑）、写不了配置或者等到 `wait` 还没起来时报错。
 fn turn_on(env: &Env, out: &mut dyn Write, wait: Duration) -> anyhow::Result<ListenerStatus> {
     let Some(path) = env.dirs.config_file() else {
         return Err(not_listening(env));
     };
     let shown = path.display();
     let mut file = ConfigFile::read(&path).with_context(|| format!("cannot read {shown}"))?;
-    if file.values(REMOTE_KEY).last().is_some_and(|value| value == "true") {
+    let on = file.values(REMOTE_KEY).last().is_some_and(|value| value == "true");
+    if on && env.launch_host.is_none() {
         return Err(not_listening(env));
     }
-    file.set(REMOTE_KEY, &["true".to_owned()]);
-    file.write(&path).with_context(|| format!("cannot write {shown}; set `{REMOTE_KEY} = true` there yourself"))?;
-    writeln!(out, "Remote access was off: set `{REMOTE_KEY} = true` in {shown}.")?;
-    out.flush()?;
+    if !on {
+        file.set(REMOTE_KEY, &["true".to_owned()]);
+        file.write(&path).with_context(|| format!("cannot write {shown}; set `{REMOTE_KEY} = true` there yourself"))?;
+        writeln!(out, "Remote access was off: set `{REMOTE_KEY} = true` in {shown}.")?;
+        out.flush()?;
+    }
+    // 给了 `Env::launch_host` 时没有界面可打开：拉起宿主，监听开在它的进程里。
+    if env.launch_host.is_some() {
+        crate::client::Connection::open(env).context("cannot start the runode host")?;
+    }
     let deadline = Instant::now() + wait;
     loop {
         if let Some(status) = listener_status(&env.dirs).context("cannot tell whether remote access is on")? {

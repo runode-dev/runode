@@ -39,7 +39,7 @@ use runode_protocol::HandoffRefusal;
 use runode_protocol::{SessionInfo, TaskSource, WindowLayout};
 
 #[cfg(unix)]
-pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
+pub use handoff::{HandoffFailure, HandoffStatus, READY_BY, upgrade};
 use launch::{Choice, Probe};
 #[cfg(test)]
 pub use link::Attached;
