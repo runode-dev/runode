@@ -46,7 +46,8 @@ impl WindowView {
         self.add_task = None;
         self.commit_message_dialog = None;
         let page = self.settings.get_or_insert_with(|| {
-            let view = cx.new(|cx| SettingsView::new(window, cx));
+            let this = cx.entity().downgrade();
+            let view = cx.new(|cx| SettingsView::new(move |cx| super::ssh::hosts_in_use(&this, cx), window, cx));
             let close =
                 cx.subscribe_in(&view, window, |this, _, _: &Close, window, cx| this.close_settings(window, cx));
             SettingsPage { view, _close: close }

@@ -506,6 +506,7 @@ settings:
     files: 檔案、預覽與 Git
     agents: Agent
     dictation: 語音輸入
+    ssh: SSH 主機
     remote: 遠端存取
     keybinds: 快速鍵
   section:
@@ -519,7 +520,8 @@ settings:
     clipboard: 剪貼簿
     tasks: 命令
     git: Git
-    ssh: SSH 主機
+    ssh: 連線
+    ssh_hosts: 主機
     login: 登入時啟動
     dictation_cloud: 雲端辨識
     dictation_polish: 大模型潤飾
@@ -721,6 +723,14 @@ settings:
     cancel: 取消
     remove: 刪除
     failed: "下載失敗：%{err}"
+  ssh_hosts:
+    empty: 還沒有連過 SSH 主機。新增工作區時選「SSH 主機」連一台。
+    connect: 連線
+    disconnect: 中斷連線
+    forget: 忘掉
+    named: "%{action} %{host}"
+    in_use: 還有工作區或終端機在這台主機上，關掉它們才能忘掉
+    mismatch: "已連線，那邊的 runode 是另一個建置（%{build}）"
   autostart:
     app:
       title: 登入時打開 Runode

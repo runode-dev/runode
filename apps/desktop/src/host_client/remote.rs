@@ -82,6 +82,21 @@ pub fn remote(name: &str) -> Option<Arc<RemoteHost>> {
     Some(host)
 }
 
+/// 已经有的远端主机 `name`；没有时不新建，也不开始连。
+pub fn find(name: &str) -> Option<Arc<RemoteHost>> {
+    HOSTS.lock().unwrap_or_else(PoisonError::into_inner).get(name).cloned()
+}
+
+/// 忘掉主机 `name`：断开，让主连接退出，不再列在 `remotes` 里；之后再用它时从头连。会阻塞。
+pub fn forget(name: &str) {
+    let Some(host) = HOSTS.lock().unwrap_or_else(PoisonError::into_inner).remove(name) else {
+        return;
+    };
+    host.state().forgotten = true;
+    host.disconnect();
+    emit(RemoteEvent::Forgotten(name.to_owned()));
+}
+
 /// 已经连过（或正连着）的远端主机。
 pub fn remotes() -> Vec<Arc<RemoteHost>> {
     let hosts = HOSTS.lock().unwrap_or_else(PoisonError::into_inner);
@@ -142,6 +157,8 @@ pub enum RemoteEvent {
     Connected { host: String, alive: HashSet<SessionId> },
     /// ssh 要问用户。
     Ask(Ask),
+    /// 这台主机被忘掉了（`forget`）。
+    Forgotten(String),
 }
 
 /// 连接的状态。
@@ -244,6 +261,8 @@ struct State {
     hurry: bool,
     /// 连着时的 ssh 子进程，断开（`disconnect`）时结束它。
     child: Option<u32>,
+    /// 被 `forget` 了，supervisor 不再等着要连，退出。
+    forgotten: bool,
 }
 
 impl fmt::Debug for RemoteHost {
@@ -263,7 +282,13 @@ impl RemoteHost {
             name,
             dest,
             link,
-            state: Mutex::new(State { status: Status::Idle, wanted: true, hurry: false, child: None }),
+            state: Mutex::new(State {
+                status: Status::Idle,
+                wanted: true,
+                hurry: false,
+                child: None,
+                forgotten: false,
+            }),
             changed: Condvar::new(),
         }
     }
@@ -302,20 +327,25 @@ impl RemoteHost {
         self.changed.notify_all();
     }
 
-    /// 断开，不再自己重连，直到 `retry_now`。远端的会话照常跑着。
-    #[allow(dead_code)]
+    /// 断开，让主连接退出，不再自己重连，直到 `retry_now`。远端的会话照常跑着。会阻塞。
     pub fn disconnect(&self) {
         let mut state = self.state();
         state.wanted = false;
+        state.hurry = false;
         if let Some(pid) = state.child.take() {
             crate::subprocess::kill(pid);
         }
         self.changed.notify_all();
+        drop(state);
+        // 主连接上开的别的通道也要断。
+        self.close_master();
     }
 
-    /// 让主连接（ControlMaster）退出，app 退出时调。
-    #[allow(dead_code)]
+    /// 让主连接（ControlMaster）退出；不用主连接时什么都不做。会阻塞。
     pub fn close_master(&self) {
+        if ssh().control.is_none() {
+            return;
+        }
         let mut command = ssh().exit(&self.dest);
         command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         crate::subprocess::hide_window(&mut command);
@@ -326,9 +356,15 @@ impl RemoteHost {
     fn supervise(self: Arc<Self>) {
         let mut attempt = 0u32;
         loop {
+            if !self.state().wanted {
+                self.set_status(Status::Idle);
+            }
             let interactive = {
                 let mut state = self.state();
                 while !state.wanted {
+                    if state.forgotten {
+                        return;
+                    }
                     state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
                 }
                 std::mem::take(&mut state.hurry) || attempt == 0
@@ -367,10 +403,10 @@ impl RemoteHost {
         }
     }
 
-    /// 等用户要再试（`retry_now`）。
+    /// 等用户要再试（`retry_now`）或断开（`disconnect`）。
     fn wait_for_retry(&self) {
         let mut state = self.state();
-        while !state.hurry {
+        while state.wanted && !state.hurry {
             state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
         }
     }

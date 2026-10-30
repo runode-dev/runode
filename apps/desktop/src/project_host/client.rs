@@ -43,6 +43,11 @@ impl Client {
             .clone()
     }
 
+    /// 忘掉主机 `name` 的那一个；还在用它的请求照样收到回话或断开。
+    pub(crate) fn forget(name: &str) {
+        CLIENTS.lock().unwrap_or_else(PoisonError::into_inner).remove(name);
+    }
+
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
@@ -85,7 +90,7 @@ impl Client {
         if let Some(conn) = slot.as_ref().filter(|conn| !conn.closed.load(Ordering::Relaxed)) {
             return Ok(conn.clone());
         }
-        let host = remote::remote(&self.name).ok_or_else(|| format!("no such host: {}", self.name))?;
+        let host = remote::find(&self.name).ok_or_else(|| format!("no such host: {}", self.name))?;
         if !matches!(host.status(), Status::Connected(_)) {
             return Err(format!("not connected to {}", self.name));
         }

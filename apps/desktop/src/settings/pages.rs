@@ -30,6 +30,7 @@ pub(super) enum Page {
     Files,
     Agents,
     Dictation,
+    Ssh,
     Remote,
     Keybinds,
 }
@@ -57,6 +58,8 @@ enum Item {
     Autostart,
     /// 语音输入选中的模型下没下，下载、删除它；文件在不在看模型目录，不是配置里的键。
     Dictation,
+    /// 连过的 SSH 主机，不是配置里的键。
+    SshHosts,
 }
 
 #[derive(Clone, Copy)]
@@ -72,7 +75,7 @@ enum Control {
 }
 
 impl Page {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::General,
         Self::Appearance,
         Self::Colors,
@@ -80,6 +83,7 @@ impl Page {
         Self::Files,
         Self::Agents,
         Self::Dictation,
+        Self::Ssh,
         Self::Remote,
         Self::Keybinds,
     ];
@@ -93,6 +97,7 @@ impl Page {
             Self::Files => "files",
             Self::Agents => "agents",
             Self::Dictation => "dictation",
+            Self::Ssh => "ssh",
             Self::Remote => "remote",
             Self::Keybinds => "keybinds",
         }
@@ -104,8 +109,8 @@ impl Page {
 
     pub fn icon(self) -> &'static str {
         use crate::assets::{
-            FILES_ICON, KEYBOARD_ICON, MIC_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON, SPARKLE_ICON,
-            TERMINAL_ICON,
+            FILES_ICON, KEYBOARD_ICON, MIC_ICON, PALETTE_ICON, PHONE_ICON, PLUG_ICON, SETTINGS_ICON, SLIDERS_ICON,
+            SPARKLE_ICON, TERMINAL_ICON,
         };
         match self {
             Self::General => SETTINGS_ICON,
@@ -115,6 +120,7 @@ impl Page {
             Self::Files => FILES_ICON,
             Self::Agents => SPARKLE_ICON,
             Self::Dictation => MIC_ICON,
+            Self::Ssh => PLUG_ICON,
             Self::Remote => PHONE_ICON,
             Self::Keybinds => KEYBOARD_ICON,
         }
@@ -196,6 +202,10 @@ impl Page {
                 Section("tasks"),
                 Row("task-placement", Choice(&["right", "down", "tab"])),
                 Row("task-split-fold", Switch),
+            ],
+            Self::Ssh => &[
+                Section("ssh_hosts"),
+                SshHosts,
                 Section("ssh"),
                 Row("ssh-program", Text(200.)),
                 Row("ssh-control-persist", Text(80.)),
@@ -256,7 +266,8 @@ impl Page {
                 | Item::Firewall
                 | Item::TestPush
                 | Item::Autostart
-                | Item::Dictation => None,
+                | Item::Dictation
+                | Item::SshHosts => None,
             })
             .collect()
     }
@@ -373,6 +384,7 @@ impl SettingsView {
                 Item::TestPush => self.render_test_push(theme, cx).into_any_element(),
                 Item::Autostart => self.render_autostart(theme, cx).into_any_element(),
                 Item::Dictation => self.render_dictation(theme, cx).into_any_element(),
+                Item::SshHosts => self.render_ssh_hosts(theme, cx).into_any_element(),
             };
             cards.push(element);
         }

@@ -7,7 +7,8 @@
 //! 一会儿、按回车或者失去焦点时写回，写之前按读配置时的规矩检查，不对就不写、在那一项下面说原因。
 //!
 //! 哪一页有哪些项在 `pages`，开关、选项这些控件在 `controls`，从长列表里挑一项的浮层在 `picker`，
-//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`、测试推送在 `test_push`，外观页的配色在 `theme`。
+//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`、测试推送在 `test_push`，外观页的配色在 `theme`，
+//! SSH 页的主机列表在 `ssh_hosts`。
 
 mod autostart;
 mod controls;
@@ -18,12 +19,17 @@ pub(crate) use keybinds::{caps_text as keybind_text, secondary_text};
 mod pages;
 mod pairing;
 mod picker;
+mod ssh_hosts;
 mod test_push;
 mod theme;
 
 use crate::ui::theme::ActiveTheme as _;
 use crate::ui::theme::Theme;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton, Render,
@@ -47,6 +53,9 @@ use picker::Picker;
 const NAV_WIDTH: f32 = 200.;
 /// 输入框停手这么久之后写回。
 const COMMIT_DELAY: Duration = Duration::from_millis(700);
+
+/// 问还有工作区、终端用着哪些远端主机。
+type HostsInUse = Box<dyn Fn(&App) -> HashSet<String>>;
 
 /// 点了返回、按了 Esc 或关分屏的键：窗口收起设置页。
 pub struct Close;
@@ -97,12 +106,20 @@ pub struct SettingsView {
     _observe: Subscription,
     /// 语音输入的模型下载有了进度。
     _downloads: Subscription,
+    /// 还有工作区、终端用着的远端主机，由开设置页的窗口给。
+    hosts_in_use: HostsInUse,
+    /// 远端主机的连接状态变了。
+    _hosts: Subscription,
 }
 
 impl EventEmitter<Close> for SettingsView {}
 
 impl SettingsView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        hosts_in_use: impl Fn(&App) -> HashSet<String> + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let observe = cx.observe_global_in::<AppConfig>(window, |this, window, cx| this.config_changed(window, cx));
         let mut view = Self {
             focus_handle: cx.focus_handle(),
@@ -121,6 +138,8 @@ impl SettingsView {
             firewall: firewall::State::default(),
             _observe: observe,
             _downloads: cx.observe_global::<crate::dictation::Downloads>(|_, cx| cx.notify()),
+            hosts_in_use: Box::new(hosts_in_use),
+            _hosts: cx.observe_global::<crate::remote_hosts::HostsChanged>(|_, cx| cx.notify()),
         };
         view.refresh_autostart(cx);
         view.refresh_firewall(cx);

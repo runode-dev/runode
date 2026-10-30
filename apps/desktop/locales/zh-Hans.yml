@@ -506,6 +506,7 @@ settings:
     files: 文件、预览与 Git
     agents: Agent
     dictation: 语音输入
+    ssh: SSH 主机
     remote: 远程访问
     keybinds: 快捷键
   section:
@@ -519,7 +520,8 @@ settings:
     clipboard: 剪贴板
     tasks: 命令
     git: Git
-    ssh: SSH 主机
+    ssh: 连接
+    ssh_hosts: 主机
     login: 登录时启动
     dictation_cloud: 云端识别
     dictation_polish: 大模型润色
@@ -721,6 +723,14 @@ settings:
     cancel: 取消
     remove: 删除
     failed: "下载失败：%{err}"
+  ssh_hosts:
+    empty: 还没有连过 SSH 主机。新建工作区时选「SSH 主机」连一台。
+    connect: 连接
+    disconnect: 断开
+    forget: 忘掉
+    named: "%{action} %{host}"
+    in_use: 还有工作区或终端在这台主机上，关掉它们才能忘掉
+    mismatch: "已连接，那边的 runode 是另一个构建（%{build}）"
   autostart:
     app:
       title: 登录时打开 Runode

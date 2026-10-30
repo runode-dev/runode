@@ -1,14 +1,15 @@
 //! 窗口里和 SSH 主机有关的界面：新建工作区对话框里选主机、连上它、一级级浏览远端的目录，选好在那里开
-//! 工作区；主机的连接状态变了时，让断开着的终端的提示、侧栏和对话框跟着重画。
+//! 工作区；主机的连接状态变了时，让断开着的终端的提示、侧栏和对话框跟着重画；哪些主机还用着（`hosts_in_use`）。
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use gpui::{
-    AnyElement, App, Context, Div, Entity, FocusHandle, Focusable as _, Role, SharedString, Subscription, Window, div,
-    prelude::*, px,
+    AnyElement, App, Context, Div, Entity, FocusHandle, Focusable as _, Role, SharedString, Subscription, WeakEntity,
+    Window, div, prelude::*, px,
 };
 use runode_protocol::{ClientMsg, HostMsg};
 use runode_ssh::Destination;
@@ -57,6 +58,20 @@ struct Browse {
     dirs: Vec<String>,
     loading: bool,
     error: Option<String>,
+}
+
+/// 用着的远端主机：哪个窗口里有工作区、终端在那台机器上，或者新建工作区的对话框正连着它。`this` 是问的
+/// 那个窗口：GPUI 画一个窗口、给它派发事件时，`windows` 里读不到它自己。
+pub(super) fn hosts_in_use(this: &WeakEntity<WindowView>, cx: &App) -> HashSet<String> {
+    let mut hosts = HashSet::new();
+    let current = this.upgrade();
+    let others = super::windows(cx).into_iter().filter_map(|window| window.read(cx).ok());
+    for view in others.chain(current.as_ref().map(|view| view.read(cx))) {
+        hosts.extend(view.workspaces.iter().filter_map(|workspace| workspace.host.label().map(str::to_owned)));
+        hosts.extend(view.terminal_views().filter_map(|terminal| terminal.read(cx).host().label().map(str::to_owned)));
+        hosts.extend(view.new_workspace.as_ref().and_then(|dialog| dialog.ssh.as_ref()?.host.clone()));
+    }
+    hosts
 }
 
 impl WindowView {

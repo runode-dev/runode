@@ -45,6 +45,11 @@ impl std::fmt::Debug for ProjectHost {
     }
 }
 
+/// 忘掉 SSH 主机 `name` 上读写项目的那条连接，再用这台主机时从头起。
+pub(crate) fn forget(name: &str) {
+    client::Client::forget(name);
+}
+
 impl ProjectHost {
     pub(crate) fn of(host: &HostId) -> Self {
         match host {

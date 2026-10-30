@@ -506,6 +506,7 @@ settings:
     files: Files, Preview & Git
     agents: Agents
     dictation: Dictation
+    ssh: SSH Hosts
     remote: Remote Access
     keybinds: Keyboard Shortcuts
   section:
@@ -519,7 +520,8 @@ settings:
     clipboard: Clipboard
     tasks: Tasks
     git: Git
-    ssh: SSH hosts
+    ssh: Connection
+    ssh_hosts: Hosts
     login: Start at Login
     dictation_cloud: "Cloud Recognition"
     dictation_polish: "Polish with a Model"
@@ -721,6 +723,14 @@ settings:
     cancel: Cancel
     remove: Delete
     failed: "Download failed: %{err}"
+  ssh_hosts:
+    empty: No SSH hosts yet. To connect to one, choose SSH Host when you create a workspace.
+    connect: Connect
+    disconnect: Disconnect
+    forget: Forget
+    named: "%{action} %{host}"
+    in_use: Workspaces or terminals are still on this host. Close them first to forget it.
+    mismatch: "Connected. The host runs another build of runode (%{build})."
   autostart:
     app:
       title: Open Runode at login
