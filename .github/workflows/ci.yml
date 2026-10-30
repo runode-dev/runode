@@ -147,8 +147,8 @@ jobs:
           cargo test -p runode-host --test handoff
 
   # Windows 上发的是完整的桌面 app，`cfg(windows)` 的代码（ConPTY、AF_UNIX 的 socket、自动更新换安装包）在别的
-  # 系统上编不到；平时就在 Windows 上 lint 全部 crate（含测试代码），跑不依赖真 shell 和计时的那几个 crate 的测试，
-  # 再把安装包脚本编一遍（不签名），免得到打标签时才发现。
+  # 系统上编不到；平时就在 Windows 上 lint 全部 crate（含测试代码），跑不依赖真 shell 和计时的那几个 crate 的测试。
+  # 推到 main 时再把安装包脚本编一遍（不签名），免得到打标签时才发现；PR 上不编，release 那一遍要从头编依赖，太慢。
   check-windows:
     # 发版提交只改版本号，不在 main 上重跑；发版流程对标签另查一遍，那时 ref 是标签，不受这条影响。
     if: "${{ !(github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore: 发布 v')) }}"
@@ -178,6 +178,7 @@ jobs:
             -p runode-update -p runode-autostart -p runode-todo -p runode-tasks -p runode-config -p runode-cli \
             -p runode-git -p runode-terminal
       - name: 编安装包（不签名）
+        if: github.event_name == 'push'
         run: |
           cargo build --release -p runode --locked
           iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
