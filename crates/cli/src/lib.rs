@@ -103,7 +103,6 @@ pub fn wants_cli(args: &[OsString]) -> bool {
     })
 }
 
-/// 跑一条命令，返回退出码（见 `exit`）。`args` 不含程序名。
 /// Windows 上让标准输出和标准错误所在的控制台认 VT 转义（`ENABLE_VIRTUAL_TERMINAL_PROCESSING`）：conhost 和
 /// 没打开它的 ConPTY 会话默认把转义码原样印出来。不是控制台（重定向到文件、管道）时什么都不做。命令行程序在
 /// 写输出之前调一次。
@@ -127,6 +126,7 @@ pub fn prepare_console() {
     }
 }
 
+/// 跑一条命令，返回退出码（见 `exit`）。`args` 不含程序名。
 pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let command = match args::parse(args) {
         Ok(command) => command,

@@ -275,8 +275,6 @@ pub(crate) fn init_logging(path: Option<std::path::PathBuf>) {
         .init();
 }
 
-/// 宿主进程的信号：SIGTERM、SIGINT 让宿主结束所有会话后退出（`Host::shut_down`），SIGHUP 不理。都装成
-/// 处理函数而不是忽略：exec 时处理函数复位成默认，宿主拉起的 shell 照常收到这些信号；忽略会被 shell 继承。
 /// 在 systemd 的服务里接手时向服务管理器报告主进程（`sd_notify` 的 `MAINPID=`）。
 #[cfg(unix)]
 mod systemd {
@@ -435,6 +433,8 @@ mod systemd {
     }
 }
 
+/// 宿主进程的信号：SIGTERM、SIGINT 让宿主结束所有会话后退出（`Host::shut_down`），SIGHUP 不理。都装成
+/// 处理函数而不是忽略：exec 时处理函数复位成默认，宿主拉起的 shell 照常收到这些信号；忽略会被 shell 继承。
 #[cfg(unix)]
 mod signals {
     use std::{

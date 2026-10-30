@@ -66,6 +66,8 @@ pub(crate) use mobile::show_pairing;
 pub(crate) use open::{open_window, open_window_with};
 pub use pane_move::{MovePaneToNewTab, SwapPane};
 pub use persist::saved_window_options;
+#[cfg(windows)]
+pub use quit::host_outlives_quit;
 pub use quit::{
     close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, quit_to_update, should_close,
     terminal_windows,

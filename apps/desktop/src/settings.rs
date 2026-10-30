@@ -129,9 +129,9 @@ impl SettingsView {
 
     /// 配置重载了：换上新值，没在编辑的输入框跟着更新。
     fn config_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let port = self.config.remote_access_port;
+        let (on, port) = (self.config.remote_access, self.config.remote_access_port);
         self.config = cx.global::<AppConfig>().0.clone();
-        if self.config.remote_access_port != port {
+        if (self.config.remote_access, self.config.remote_access_port) != (on, port) {
             self.refresh_firewall(cx);
         }
         self.file = read_file();

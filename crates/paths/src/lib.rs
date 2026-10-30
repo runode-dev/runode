@@ -381,7 +381,7 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
-/// 建好 `dir`（`None` 时报没有家目录），只让自己、SYSTEM 和管理员能进，见 `acl::restrict`；已经存在的
+/// 建好 `dir`（`None` 时报没有家目录），只让自己、SYSTEM 和管理员能进（`acl::restrict`）；已经存在的
 /// 不是真目录（比如是目录联接）时拒绝。
 #[cfg(windows)]
 fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {

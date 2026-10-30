@@ -89,7 +89,7 @@ fn launch_host(exe: &std::path::Path, socket: &std::path::Path, deadline: Instan
     }
 }
 
-/// 正在跑的宿主，见 `probe`。
+/// `probe` 问到的正在跑的宿主。
 pub(crate) struct Running {
     pub(crate) build: BuildId,
     /// 协议对不上（`Incompatible`）时宿主不报进程号，为 `None`。

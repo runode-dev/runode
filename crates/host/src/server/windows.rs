@@ -5,9 +5,12 @@ use std::{
     ffi::c_void,
     fs, io,
     os::windows::io::AsRawSocket as _,
-    path::Path,
+    path::{Path, PathBuf},
     ptr,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use windows_sys::Win32::{
@@ -41,7 +44,10 @@ pub fn socket_pair() -> io::Result<(UnixStream, UnixStream)> {
         NEXT.fetch_add(1, Ordering::Relaxed),
         RandomState::new().hash_one(NEXT.load(Ordering::Relaxed)),
     );
-    let dirs = [runode_paths::Dirs::from_env().create_runtime_dir().ok(), Some(std::env::temp_dir())];
+    // 建目录、核对它的权限要读令牌和安全描述符，每建一对都做一遍太费：一个进程只做一次。
+    static RUNTIME_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    let runtime = RUNTIME_DIR.get_or_init(|| runode_paths::Dirs::from_env().create_runtime_dir().ok()).clone();
+    let dirs = [runtime, Some(std::env::temp_dir())];
     let mut last = io::Error::other("there is no directory to bind a socket pair in");
     for dir in dirs.into_iter().flatten() {
         match pair_at(&dir.join(&name)) {

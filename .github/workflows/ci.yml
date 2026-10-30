@@ -178,7 +178,8 @@ jobs:
             -p runode-update -p runode-autostart -p runode-todo -p runode-tasks -p runode-config -p runode-cli \
             -p runode-git -p runode-terminal
       - name: 编安装包（不签名）
-        if: github.event_name == 'push'
+        # 发版时 release.yml 经 workflow_call 调这里，event_name 同样是 push，要另看 ref 才排除得掉。
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           cargo build --release -p runode --locked
           iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"

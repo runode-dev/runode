@@ -36,11 +36,11 @@ const ENV_TODO_PROMPT: &str = "RUNODE_TODO_PROMPT";
 const ENV_TODO_SETUP: &str = "RUNODE_TODO_SETUP";
 
 /// 宿主给 Windows 上 PowerShell 的任务会话设的环境变量：按 Windows 命令行的规矩引好的提示词
-/// （`windows_quote`），`agent_command` 用 `--%` 原样接在 agent 后面。
+/// （`windows_quote`），原样放进起 agent 的命令行。
 const ENV_TODO_ARG: &str = "RUNODE_TODO_ARG";
 
-/// 宿主给 Windows 上 PowerShell 的任务会话设的另一份提示词，agent 是批处理文件（npm 装的 `.cmd`）时用：
-/// 按 cmd 的规矩引好（`batch_quote`），`agent_command` 认出是批处理时换进 `ENV_TODO_ARG`。
+/// 宿主给 Windows 上 PowerShell 的任务会话设的另一份提示词，agent 是批处理文件（npm 装的 `.cmd`）时代替
+/// `ENV_TODO_ARG` 用：按 cmd 的规矩引好（`batch_quote`）。
 const ENV_TODO_BATCH_ARG: &str = "RUNODE_TODO_BATCH_ARG";
 
 /// 提示词最长这么多字节：它要放进环境变量，系统给参数和环境变量的空间有限。

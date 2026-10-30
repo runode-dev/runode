@@ -49,11 +49,17 @@ impl SettingsView {
         )
     }
 
-    /// 在后台查防火墙挡没挡着这个程序在远程访问端口上的连接：要起 PowerShell 读规则表，不能卡着界面。开设置页时查一次，放行后再查。
+    /// 在后台查防火墙挡没挡着这个程序在远程访问端口上的连接：要起 PowerShell 读规则表，不能卡着界面。开设置页、
+    /// 打开远程访问、换端口时查一次，放行后再查；远程访问关着时不查，这一行不出现。
     pub(super) fn refresh_firewall(&mut self, cx: &mut Context<Self>) {
         #[cfg(windows)]
         {
             if self.firewall.allowing {
+                return;
+            }
+            if !self.config.remote_access {
+                self.firewall.job = None;
+                self.firewall.blocked = false;
                 return;
             }
             let Ok(exe) = std::env::current_exe() else { return };

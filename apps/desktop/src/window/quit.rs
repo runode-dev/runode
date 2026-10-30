@@ -135,6 +135,15 @@ pub fn end_sessions_in_menu() -> bool {
     offers_end_sessions(host_client::mode(), host_client::quit_keeps_sessions())
 }
 
+/// 这个 app 退出时让单独跑的宿主连会话一起退出了（`shutdown_host`）。
+static HOST_SHUT_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 这次退出以后单独跑的宿主还在跑、托管着会话：宿主跑在 app 里、已经让它连会话一起退出时为假。
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn host_outlives_quit() -> bool {
+    host_client::mode() == Mode::Standalone && !HOST_SHUT_DOWN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// 退出确认框开着（或者正问宿主有几个 agent）；这时再按退出或者关窗口不再弹第二个。
 #[derive(Default)]
 struct Prompting(bool);
@@ -425,6 +434,7 @@ fn keep_from_now_on(cx: &mut App) {
 
 /// 让单独跑的宿主连会话一起退出，等它读完（最多 `SHUTDOWN_FLUSH`）。
 fn shutdown_host() {
+    HOST_SHUT_DOWN.store(true, std::sync::atomic::Ordering::Relaxed);
     let link = host_client::link();
     link.send(ClientMsg::Shutdown { kill_sessions: true });
     if !link.flush(SHUTDOWN_FLUSH) {
