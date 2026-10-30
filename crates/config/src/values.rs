@@ -139,6 +139,7 @@ impl Config {
             ],
             "vt-window-resize-allowed" => bool(self.vt_window_resize_allowed),
             "terminal-host" => bool(self.terminal_host),
+            "git-auto-fetch" => bool(self.git_auto_fetch),
             "auto-update" => bool(self.auto_update),
             "remote-access" => bool(self.remote_access),
             "remote-access-port" => vec![self.remote_access_port.to_string()],

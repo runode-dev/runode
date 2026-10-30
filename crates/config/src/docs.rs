@@ -137,6 +137,9 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "terminal-host" => {
             "Keep terminal sessions running in the background after Runode quits: true, false. With true, quitting Runode leaves the sessions running and the next launch picks them up; with false they end when Runode quits. Takes effect right away. Switching it off while sessions are still running in the background brings them back once more; quitting then ends them."
         }
+        "git-auto-fetch" => {
+            "Fetch from the remotes in the background every few minutes while the Git panel is showing, so the commits behind and the remote branches in the graph keep up: true (default), false. Only the repository in the panel and the submodules and nested repositories inside it are fetched, and only while the window is in front. With false, fetch from the panel's menu or with Sync. Takes effect right away."
+        }
         "auto-update" => {
             "Check for a new version of Runode when it starts and every few hours after that: true, false. With true, a new version is downloaded in the background and installed when you quit Runode; with false, Runode only checks when you choose Check for Updates in the Runode menu. Only a Runode.app signed by its publisher updates itself."
         }

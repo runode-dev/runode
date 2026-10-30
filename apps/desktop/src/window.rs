@@ -396,6 +396,7 @@ impl WindowView {
                 let alive = this.update_in(cx, |this, window, cx| {
                     if window.is_window_active() {
                         this.poll_project(cx);
+                        this.auto_fetch(cx);
                     }
                 });
                 if alive.is_err() {

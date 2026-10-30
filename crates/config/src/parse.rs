@@ -39,6 +39,7 @@ pub const KEYS: &[&[&str]] = &[
     ],
     &["file-tree-preview-click", "preview-font-size"],
     &["task-placement", "task-split-fold"],
+    &["git-auto-fetch"],
     &[
         "dictation-model",
         "dictation-words",
@@ -402,6 +403,9 @@ impl Config {
                     or_default(empty, defaults.vt_window_resize_allowed, || parse_bool(value))?;
             }
             "terminal-host" => self.terminal_host = or_default(empty, defaults.terminal_host, || parse_bool(value))?,
+            "git-auto-fetch" => {
+                self.git_auto_fetch = or_default(empty, defaults.git_auto_fetch, || parse_bool(value))?;
+            }
             "auto-update" => self.auto_update = or_default(empty, defaults.auto_update, || parse_bool(value))?,
             "remote-access" => self.remote_access = or_default(empty, defaults.remote_access, || parse_bool(value))?,
             "remote-access-port" => {
@@ -980,6 +984,13 @@ unknown-key = whatever
     fn task_split_fold_defaults_to_true() {
         assert!(Config::default().task_split_fold);
         assert!(!load(&["task-split-fold = false"]).task_split_fold);
+    }
+
+    #[test]
+    fn git_auto_fetch_defaults_to_true() {
+        assert!(Config::default().git_auto_fetch);
+        assert!(!load(&["git-auto-fetch = false"]).git_auto_fetch);
+        assert!(load(&["git-auto-fetch = false\ngit-auto-fetch ="]).git_auto_fetch);
     }
 
     #[test]

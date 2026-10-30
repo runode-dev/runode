@@ -154,6 +154,8 @@ pub struct Config {
     /// 退出 app 后会话留在单独一个进程的宿主（`runode --host`）里，下次打开接着用；关着时退出 app
     /// 让宿主连会话一起退出。改了马上算数。
     pub terminal_host: bool,
+    /// Git 面板显示着时定时在后台抓取远端，落后数和图表里的远端分支跟得上远端。改了马上算数。
+    pub git_auto_fetch: bool,
     /// 启动后和之后每隔几个小时查一次新版本，有了就在后台下载好、退出时装上；关着时只在菜单里点
     /// 「检查更新」时查。只有用 Developer ID 签过名的 Runode.app 会自己更新。
     pub auto_update: bool,
@@ -249,6 +251,7 @@ impl Default for Config {
             clipboard_write: ClipboardWrite::default(),
             clipboard_read: ClipboardRead::default(),
             terminal_host: false,
+            git_auto_fetch: true,
             auto_update: true,
             vt_window_resize_allowed: false,
             remote_access: false,

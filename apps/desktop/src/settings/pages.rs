@@ -197,9 +197,12 @@ impl Page {
                 Row("task-placement", Choice(&["right", "down", "tab"])),
                 Row("task-split-fold", Switch),
             ],
-            Self::Files => {
-                &[Row("file-tree-preview-click", Choice(&["single", "double"])), Row("preview-font-size", Text(80.))]
-            }
+            Self::Files => &[
+                Row("file-tree-preview-click", Choice(&["single", "double"])),
+                Row("preview-font-size", Text(80.)),
+                Section("git"),
+                Row("git-auto-fetch", Switch),
+            ],
             Self::Agents => &[
                 Row("agent-notifications", Switch),
                 Row("agent-done-sound", Sound),

@@ -88,19 +88,21 @@ pub(crate) fn run<S: AsRef<OsStr>>(
     args: impl IntoIterator<Item = S>,
     input: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
-    run_for(dir, args, input, RUN_TIMEOUT)
+    run_for(dir, args, input, RUN_TIMEOUT, &[])
 }
 
-/// 同 `run`，最多跑 `timeout`。
+/// 同 `run`，最多跑 `timeout`，另外设上 `env` 里的环境变量。
 fn run_for<S: AsRef<OsStr>>(
     dir: &Path,
     args: impl IntoIterator<Item = S>,
     input: Option<&[u8]>,
     timeout: Duration,
+    env: &[(&str, &str)],
 ) -> Result<Vec<u8>> {
     let mut command = git_command(dir);
     command
         .args(args)
+        .envs(env.iter().copied())
         .env("GIT_TERMINAL_PROMPT", "0")
         // 关掉「hint:」建议：本地化后的提示不以「hint:」开头，事后滤不掉。
         .env("GIT_ADVICE", "0")
@@ -637,6 +639,15 @@ impl Repo {
         run(&self.root, ["fetch"], None).map(drop)
     }
 
+    /// 同 `fetch`，给没人看着时用：要凭据时不弹任何要人回答的窗口，直接失败。空的 `GIT_ASKPASS`
+    /// 让 git 不找问密码的程序，`SSH_ASKPASS_REQUIRE` 让 ssh 不弹问口令的窗，`GCM_INTERACTIVE`
+    /// 让 Git Credential Manager 不弹登录窗。ssh agent 自己要的确认（1Password 授权、硬件密钥要碰一下）
+    /// 拦不住。
+    pub fn fetch_unattended(&self) -> Result {
+        let env = [("GIT_ASKPASS", ""), ("SSH_ASKPASS_REQUIRE", "never"), ("GCM_INTERACTIVE", "never")];
+        run_for(&self.root, ["fetch"], None, RUN_TIMEOUT, &env).map(drop)
+    }
+
     /// 从上游拉取并合进当前分支，合并方式按用户的 git 配置。
     pub fn pull(&self) -> Result {
         run(&self.root, ["pull"], None).map(drop)
@@ -748,7 +759,7 @@ mod tests {
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
         let started = Instant::now();
         // 给足时间让钩子跑起来、记下进程号：整套测试一起跑时机器很忙。
-        let err = run_for(&dir, commit, None, Duration::from_secs(3)).unwrap_err();
+        let err = run_for(&dir, commit, None, Duration::from_secs(3), &[]).unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(12), "{:?}", started.elapsed());
         assert!(err.message.contains("超过"), "{}", err.message);
         // 钩子在 git 的进程组里，跟着一起杀掉；死了以后要等被收掉，`kill -0` 才找不到它。
@@ -778,7 +789,7 @@ mod tests {
         fs::create_dir_all(&hooks).unwrap();
         fs::write(hooks.join("pre-commit"), "#!/bin/sh\nexec sleep 30\n").unwrap();
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
-        let err = run_for(&dir, commit, None, Duration::from_secs(3)).unwrap_err();
+        let err = run_for(&dir, commit, None, Duration::from_secs(3), &[]).unwrap_err();
         assert!(err.message.contains("超过") && err.message.contains("index.lock"), "{}", err.message);
         assert!(dir.join(".git/index.lock").exists());
         let _ = fs::remove_dir_all(&dir);
@@ -798,7 +809,7 @@ mod tests {
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
         let started = Instant::now();
         let args = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
-        let result = run_for(&dir, args, None, Duration::from_secs(20));
+        let result = run_for(&dir, args, None, Duration::from_secs(20), &[]);
         let elapsed = started.elapsed();
         let pid = fs::read_to_string(&pid_file).unwrap().trim().to_owned();
         let _ = Command::new("kill").arg(&pid).status();

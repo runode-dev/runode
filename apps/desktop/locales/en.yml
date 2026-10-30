@@ -474,7 +474,7 @@ settings:
     appearance: Appearance
     colors: Colors
     terminal: Terminal
-    files: Files & Preview
+    files: Files, Preview & Git
     agents: Agents
     dictation: Dictation
     remote: Remote Access
@@ -489,6 +489,7 @@ settings:
     scrollback: Scrollback
     clipboard: Clipboard
     tasks: Tasks
+    git: Git
     login: Start at Login
     dictation_cloud: "Cloud Recognition"
     dictation_polish: "Polish with a Model"
@@ -515,6 +516,7 @@ settings:
     preview_font_size: Preview font size
     task_placement: Run tasks in
     task_split_fold: Fold splits that run tasks
+    git_auto_fetch: Fetch automatically
     dictation_model: Speech model
     dictation_words: Hotwords
     dictation_cloud: Cloud recognition
@@ -582,6 +584,7 @@ settings:
     preview_font_size: In points.
     task_placement: Where a task picked from the title bar's task menu runs.
     task_split_fold: A task from the task menu that runs in a right or down split gets the split folded to its title bar, so it does not take room; click the title bar to unfold. Cards window style only.
+    git_auto_fetch: While the Git panel is showing, fetch from the remotes every few minutes so new commits on the remote show up.
     dictation_model: Both run offline on this computer. SenseVoice is fast and adds punctuation; FireRedASR2 is the most accurate for Chinese but larger, slower and without punctuation.
     dictation_words: "Project names and technical terms dictation should get right, separated by commas. The offline models do not use them; cloud recognition and polishing do."
     dictation_cloud: "Used when the offline model is not downloaded or fails. The recording is uploaded to the service you choose."

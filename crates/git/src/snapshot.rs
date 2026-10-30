@@ -176,6 +176,14 @@ impl Snapshot {
         self.git_dir.parent().and_then(Path::file_name).is_some_and(|name| name == "worktrees")
     }
 
+    /// 同一个仓库的各个工作树共用的 git 目录，引用和远端分支都在这里。不是链接工作树时就是 `git_dir`。
+    pub fn common_git_dir(&self) -> &Path {
+        match self.git_dir.parent().and_then(Path::parent) {
+            Some(common) if self.is_linked_worktree() => common,
+            _ => &self.git_dir,
+        }
+    }
+
     /// 这个仓库的句柄，暂存、提交这些写操作挂在它上面。
     pub fn repo(&self) -> Repo {
         Repo::new(self.root.clone())

@@ -474,7 +474,7 @@ settings:
     appearance: 外观
     colors: 颜色
     terminal: 终端
-    files: 文件与预览
+    files: 文件、预览与 Git
     agents: Agent
     dictation: 语音输入
     remote: 远程访问
@@ -489,6 +489,7 @@ settings:
     scrollback: 回滚历史
     clipboard: 剪贴板
     tasks: 命令
+    git: Git
     login: 登录时启动
     dictation_cloud: 云端识别
     dictation_polish: 大模型润色
@@ -515,6 +516,7 @@ settings:
     preview_font_size: 预览栏字号
     task_placement: 跑命令
     task_split_fold: 折叠跑命令的分屏
+    git_auto_fetch: 自动抓取
     dictation_model: 识别模型
     dictation_words: 热词
     dictation_cloud: 云端识别
@@ -582,6 +584,7 @@ settings:
     preview_font_size: 单位是点。
     task_placement: 标题栏命令菜单里点了一条命令时，在哪开终端跑它。
     task_split_fold: 从命令菜单跑的命令在右边或下边分屏时，分屏折叠成标题条，不占地方，点标题条展开。只在卡片样式的窗口里起作用。
+    git_auto_fetch: Git 面板开着时每隔几分钟在后台抓取远端，远端的新提交才看得到。
     dictation_model: 两个都在这台电脑上离线运行。SenseVoice 快，带标点；FireRedASR2 中文最准，但更大、更慢，不加标点。
     dictation_words: "要认准的项目名、专业词，用逗号隔开。离线模型用不上，交给云端识别和润色时才用。"
     dictation_cloud: "离线模型没下载或识别出错时用。录音会上传到选的服务。"

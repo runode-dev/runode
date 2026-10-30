@@ -365,6 +365,14 @@ impl WindowView {
         .detach();
     }
 
+    /// Git 面板显示着、开着 `git_auto_fetch` 时让它在后台抓取远端。只在窗口在前台时调。
+    pub(super) fn auto_fetch(&mut self, cx: &mut Context<Self>) {
+        if self.git_shown() && cx.global::<crate::config::AppConfig>().0.git_auto_fetch {
+            let id = self.workspace().id;
+            self.git_panel.update(cx, |panel, cx| panel.auto_fetch(id, cx));
+        }
+    }
+
     /// 定时检查：终端换了目录时重读；有没读的改动时按 `refresh_if_due` 重读；监听不了时
     /// 退回定时重读，离上次开始读至少隔 `FALLBACK_INTERVAL`，上次读得慢时按耗时拉长。
     pub(super) fn poll_project(&mut self, cx: &mut Context<Self>) {

@@ -3,17 +3,21 @@
 //! 等待；同一个仓库上一个操作没跑完时不接新的。菜单和快捷键派发的动作作用到 `git_target` 选的
 //! 仓库。
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 use crate::ui::base_name;
-use gpui::{App, Context, PromptLevel, Window, prelude::*};
+use gpui::{App, Context, Global, PromptLevel, Window, prelude::*};
 use runode_git::{self as git, CommitOptions, FileDiff, Section};
 
 use super::{
     DirOp, FileOp, GitCheckout, GitCommit, GitCommitAmend, GitCommitAndPush, GitCommitAndSync, GitCreateBranch,
     GitDirAction, GitDiscardAll, GitFetch, GitFileAction, GitPanel, GitPanelEvent, GitPull, GitPush, GitRefresh,
     GitStageAll, GitStash, GitStashIncludeUntracked, GitStashPopLatest, GitSync, GitUndoLastCommit, GitUnstageAll,
-    PrimaryAction,
+    PrimaryAction, WorkspaceId,
     rows::{Busy, GitSection, PanelState},
 };
 
@@ -27,6 +31,19 @@ enum AfterCommit {
 
 /// 弹框里的错误说明最多这么多个字符，git 偶尔会输出很长的一串。
 const MAX_ERROR_CHARS: usize = 2000;
+
+/// 同一个仓库上次后台抓取跑完后至少隔这么久才再抓。
+const AUTO_FETCH_INTERVAL: Duration = Duration::from_secs(180);
+
+/// 后台抓取的进度，按 `git::Snapshot::common_git_dir` 记，全 app 一份：几个窗口开着同一个仓库或者它的
+/// 几个工作树时只抓一次。`running` 是在跑的，`done` 是跑完不到 `AUTO_FETCH_INTERVAL` 的和跑完的时刻。
+#[derive(Default)]
+struct AutoFetched {
+    running: HashSet<PathBuf>,
+    done: HashMap<PathBuf, Instant>,
+}
+
+impl Global for AutoFetched {}
 
 impl GitPanel {
     /// 当前 workspace 里根目录是 `root` 的仓库（主仓库或者子仓库）；不在仓库里、找不到或者这个
@@ -76,6 +93,55 @@ impl GitPanel {
                 cx.notify();
             })
             .ok();
+        })
+        .detach();
+    }
+
+    /// 在后台抓取 workspace `ws` 里配了远端的主仓库和子仓库，远端的新提交才算进落后数、出现在图表里；
+    /// 在抓的、上次抓完不到 `AUTO_FETCH_INTERVAL` 的和正在跑操作的跳过。其他工作树和主仓库共用引用，不另抓。
+    /// 不占 `busy`、不弹框，失败了等下一轮。
+    pub(crate) fn auto_fetch(&mut self, ws: WorkspaceId, cx: &mut Context<Self>) {
+        let Some(state) = self.workspaces.get(&ws) else {
+            return;
+        };
+        let Some(git) = state.git.as_ref() else {
+            return;
+        };
+        let now = Instant::now();
+        let fetched = cx.default_global::<AutoFetched>();
+        fetched.done.retain(|_, at| now.duration_since(*at) < AUTO_FETCH_INTERVAL);
+        let mut repos = Vec::new();
+        for repo in std::iter::once(&git.main).chain(&git.subs) {
+            let key = repo.common_git_dir();
+            if repo.info.has_remote
+                && state.busy(&repo.root).is_none()
+                && !fetched.done.contains_key(key)
+                && fetched.running.insert(key.to_path_buf())
+            {
+                repos.push((key.to_path_buf(), repo.repo()));
+            }
+        }
+        if repos.is_empty() {
+            return;
+        }
+        let (tx, mut rx) = futures::channel::mpsc::unbounded();
+        cx.background_spawn(async move {
+            for (key, repo) in repos {
+                if let Err(err) = repo.fetch_unattended() {
+                    tracing::debug!("background fetch in {} failed: {err}", repo.root.display());
+                }
+                let _ = tx.unbounded_send(key);
+            }
+        })
+        .detach();
+        cx.spawn(async move |_, cx| {
+            while let Some(key) = futures::StreamExt::next(&mut rx).await {
+                cx.update(|cx| {
+                    let fetched = cx.default_global::<AutoFetched>();
+                    fetched.running.remove(&key);
+                    fetched.done.insert(key, Instant::now());
+                });
+            }
         })
         .detach();
     }
