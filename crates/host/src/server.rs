@@ -376,6 +376,12 @@ fn wake_pair() -> io::Result<(WakeReader, WakeWriter)> {
     io::pipe()
 }
 
+/// 一对互相连着的 socket。
+#[cfg(unix)]
+pub fn socket_pair() -> io::Result<(UnixStream, UnixStream)> {
+    UnixStream::pair()
+}
+
 /// 等唤醒管道可读，`accepting` 时也等监听的 socket 来连接；返回两者各自就绪没有。
 #[cfg(unix)]
 fn wait(wake: &WakeReader, listener: &UnixListener, accepting: bool) -> io::Result<(bool, bool)> {
@@ -490,7 +496,7 @@ impl Host {
     /// 另一端。之后按 `runode_protocol` 说话，先发 `Hello`。两端的收发缓冲都设好了。宿主在退出时
     /// 返回错误。
     pub fn connect_pair(&self) -> io::Result<UnixStream> {
-        let (ours, theirs) = UnixStream::pair()?;
+        let (ours, theirs) = socket_pair()?;
         set_buffers(&theirs);
         let Some(id) = register(&self.shared) else {
             return Err(io::Error::other("the host is shutting down"));
@@ -564,7 +570,7 @@ impl Shared {
     ///
     /// 置上 `stop` 和再清一遍登记表在同一把锁里：调用方结束所有会话之后、这里拿到锁之前开好的会话（别的
     /// 连接、没有界面时另起的线程开的）在这里结束；之后 `Shared::spawn_with` 看得到 `stop`，不再登记。
-    fn shut_down(&self) -> bool {
+    pub(crate) fn shut_down(&self) -> bool {
         let mut peers = self.peers();
         if !peers.standalone {
             return false;
@@ -1681,7 +1687,7 @@ mod windows;
 #[cfg(windows)]
 use windows::{WakeReader, WakeWriter, set_buffer, wait, wake_pair};
 #[cfg(windows)]
-pub use windows::{peer_pid, same_user};
+pub use windows::{peer_pid, same_user, socket_pair};
 
 #[cfg(test)]
 mod tests;

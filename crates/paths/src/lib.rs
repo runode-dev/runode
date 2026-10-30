@@ -3,8 +3,8 @@
 //! runode 自己的东西在所有系统上都放在同一个根目录：`~/.runode`，不跟着 `XDG_CONFIG_HOME` 走。
 //! 配置文件和要留着的数据（窗口布局的存档、自己加的命令、看板）直接放在根目录，
 //! 随时能重新生成的缓存（shell 集成脚本、首个终端的尺寸、宿主进程的日志）放在根目录的
-//! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里，远程访问的证书、设备表和配对口令放在
-//! 根目录的 `remote-access/` 里。
+//! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里（Linux 上再按机器分一层），远程访问的
+//! 证书、设备表和配对口令放在根目录的 `remote-access/` 里。
 //! Ghostty 自己的配置和主题在 Ghostty 约定的位置读。
 
 use std::{
@@ -17,6 +17,9 @@ use std::{
 const HOST_NAME: &str = if cfg!(debug_assertions) { "host-dev" } else { "host" };
 /// 远程桌面的采集进程的 socket、锁和日志的名字，开发版和装好的版本分开。
 const SCREEN_NAME: &str = if cfg!(debug_assertions) { "screen-dev" } else { "screen" };
+
+/// runode 的数据目录在家目录下的名字。
+const DATA_DIR: &str = ".runode";
 
 /// 看板的库名。调试构建的宿主另用一份：两边的宿主各自在跑，共用一份库时定时会触发两次。
 const TODOS_DB: &str = if cfg!(debug_assertions) { "todos-dev.db" } else { "todos.db" };
@@ -33,7 +36,9 @@ const SUN_PATH_LEN: usize = 104;
 /// 由它算出的文件也都是 `None`。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Dirs {
-    /// 家目录，即 `HOME`；Windows 上没设时用 `USERPROFILE`。
+    /// 家目录，即 `HOME`；Windows 上是 `USERPROFILE`，没设时才用 `HOME`：MSYS2、Emacs 这类各自改
+    /// `HOME` 的环境里，runode 的目录还是同一处。`HOME` 下已经有 runode 的数据、`USERPROFILE` 下
+    /// 还没有时仍用 `HOME`，配置、看板和配对过的设备不丢。
     pub home: Option<PathBuf>,
     /// 用户配置的根目录：`$XDG_CONFIG_HOME`，没设时 `~/.config`。Ghostty 的配置在这下面。
     pub config: Option<PathBuf>,
@@ -42,6 +47,11 @@ pub struct Dirs {
     /// 可以重新生成的缓存，即 `data` 下的 `cache`。shell 会执行这里的集成脚本，所以放在
     /// 用户自己的目录里，而不是可能多人共用的临时目录。
     pub cache: Option<PathBuf>,
+    /// 这台机器的标识：Linux 上是 machine-id 的前 12 个字符，别的系统和读不到时为空。`runtime_dir` 按它
+    /// 分开：家目录在 NFS 上被几台机器共享时，NFS 把文件锁变成跨机器的锁，不分开的话一台机器上的宿主
+    /// 会让别的机器都起不了宿主。不用主机名：它可以随时改（DHCP、NetworkManager），改了就找不到在跑的
+    /// 宿主。
+    pub machine: Option<String>,
 }
 
 impl Dirs {
@@ -50,14 +60,23 @@ impl Dirs {
         Self::from_vars(|key| std::env::var_os(key))
     }
 
-    /// 按 `var` 给出的环境变量算出各个目录，空值当作没设。
+    /// 按 `var` 给出的环境变量算出各个目录，空值当作没设；`machine` 另从系统读。
     pub fn from_vars(var: impl Fn(&str) -> Option<OsString>) -> Self {
         let var = |key: &str| var(key).filter(|v| !v.is_empty()).map(PathBuf::from);
-        let home = var("HOME").or_else(|| if cfg!(windows) { var("USERPROFILE") } else { None });
+        let home = if cfg!(windows) {
+            match (var("USERPROFILE"), var("HOME")) {
+                (Some(profile), Some(home)) if !profile.join(DATA_DIR).is_dir() && home.join(DATA_DIR).is_dir() => {
+                    Some(home)
+                }
+                (profile, home) => profile.or(home),
+            }
+        } else {
+            var("HOME")
+        };
         let config = var("XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|home| home.join(".config")));
-        let data = home.as_ref().map(|home| home.join(".runode"));
+        let data = home.as_ref().map(|home| home.join(DATA_DIR));
         let cache = data.as_ref().map(|data| data.join("cache"));
-        Self { home, config, data, cache }
+        Self { home, config, data, cache, machine: machine_id() }
     }
 
     /// runode 的配置文件。
@@ -65,16 +84,34 @@ impl Dirs {
         self.data_file("config.conf")
     }
 
-    /// 宿主进程和各个界面之间的 Unix socket，在 `runtime_dir` 里。路径太长、放不进
+    /// 宿主进程和各个界面之间的 Unix socket，在 `host_dir` 里。路径太长、放不进
     /// `sun_path` 时为 `None`。
     pub fn host_socket_file(&self) -> Option<PathBuf> {
-        let path = self.runtime_dir()?.join(format!("{HOST_NAME}.sock"));
-        (path.as_os_str().len() < SUN_PATH_LEN).then_some(path)
+        let path = self.host_dir()?.join(format!("{HOST_NAME}.sock"));
+        fits_sun_path(&path).then_some(path)
     }
 
-    /// 保证只有一个宿主进程的锁文件，和 socket 放在一起。
-    pub fn host_lock_file(&self) -> Option<PathBuf> {
-        Some(self.runtime_dir()?.join(format!("{HOST_NAME}.lock")))
+    /// 宿主自己开监听用的 socket 和保证只有一个宿主进程的锁文件，放在同一个 `host_dir` 里；两个路径一起取，
+    /// 中途老位置的宿主退出也不会一个在老位置、一个在新位置。socket 路径放不进 `sun_path` 时为 `None`。
+    pub fn host_listen_files(&self) -> Option<(PathBuf, PathBuf)> {
+        let dir = self.host_dir()?;
+        let socket = dir.join(format!("{HOST_NAME}.sock"));
+        fits_sun_path(&socket).then(|| (socket, dir.join(format!("{HOST_NAME}.lock"))))
+    }
+
+    /// 宿主的 socket 和锁所在的目录，一般就是 `runtime_dir`。不分机器的老位置（`data` 下的 `run`）的锁有
+    /// 宿主拿着时用老位置：升级前起的宿主还在那里跑，命令行和界面照样连得上它、交接时接得过来，新起的宿主
+    /// 也去拿它那把锁，不会同时跑两个。看的是锁不是 socket：宿主删掉旧 socket、重新绑定的空当里锁一直拿着。
+    /// 那个宿主退出、锁放开之后就都用新位置。新位置的 socket 路径太长、老位置放得下时也用老位置。
+    fn host_dir(&self) -> Option<PathBuf> {
+        let dir = self.runtime_dir()?;
+        if self.machine.is_none() {
+            return Some(dir);
+        }
+        let legacy = self.data_file("run")?;
+        let socket = format!("{HOST_NAME}.sock");
+        let too_long = !fits_sun_path(&dir.join(&socket)) && fits_sun_path(&legacy.join(&socket));
+        Some(if too_long || locked(&legacy.join(format!("{HOST_NAME}.lock"))) { legacy } else { dir })
     }
 
     /// 宿主进程的日志。宿主没有终端可写，出了问题只能看这里。
@@ -86,7 +123,7 @@ impl Dirs {
     /// `sun_path` 时为 `None`。
     pub fn screen_socket_file(&self) -> Option<PathBuf> {
         let path = self.runtime_dir()?.join(format!("{SCREEN_NAME}.sock"));
-        (path.as_os_str().len() < SUN_PATH_LEN).then_some(path)
+        fits_sun_path(&path).then_some(path)
     }
 
     /// 保证只有一个采集进程的锁文件，和 socket 放在一起。
@@ -99,10 +136,14 @@ impl Dirs {
         self.cache_file(&format!("{SCREEN_NAME}.log"))
     }
 
-    /// 放宿主进程的 socket 和锁的目录，即 `data` 下的 `run`。别的用户不能进这个目录，见
-    /// `create_runtime_dir`。
+    /// 放宿主进程的 socket 和锁的目录，即 `data` 下的 `run`；有 `machine` 时是 `run` 下以它为名的子目录。
+    /// 别的用户不能进这个目录，见 `create_runtime_dir`。
     pub fn runtime_dir(&self) -> Option<PathBuf> {
-        self.data_file("run")
+        let run = self.data_file("run")?;
+        Some(match &self.machine {
+            Some(machine) => run.join(machine),
+            None => run,
+        })
     }
 
     /// 建好 `runtime_dir`，并把它的权限设成只有自己能进（0700）；已经存在时也重设一遍权限。
@@ -273,6 +314,39 @@ impl Dirs {
     }
 }
 
+/// `lock` 这个锁文件这时有进程锁着（宿主用 `File::try_lock` 拿锁）。文件不在、打不开时算没有。试的是共享锁：
+/// NFS 上排他锁要文件以写方式打开，只读打开时报错，就看不出有人锁着。
+fn locked(lock: &Path) -> bool {
+    std::fs::File::open(lock).is_ok_and(|file| matches!(file.try_lock_shared(), Err(std::fs::TryLockError::WouldBlock)))
+}
+
+/// socket 路径的字节数小于 `SUN_PATH_LEN`。
+fn fits_sun_path(path: &Path) -> bool {
+    path.as_os_str().len() < SUN_PATH_LEN
+}
+
+/// 这台机器的 machine-id（systemd 装机时生成，重启不变）的前 12 个字符；不是 Linux、读不到或者不像（容器里
+/// 常常是空的）时为空。
+fn machine_id() -> Option<String> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    // machine-id 装机后不变，一个进程只读一次。
+    static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        ["/etc/machine-id", "/var/lib/dbus/machine-id"]
+            .iter()
+            .find_map(|file| parse_machine_id(&std::fs::read_to_string(file).ok()?))
+    })
+    .clone()
+}
+
+fn parse_machine_id(text: &str) -> Option<String> {
+    let id = text.trim();
+    (id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()) && id.bytes().any(|byte| byte != b'0'))
+        .then(|| id[..12].to_ascii_lowercase())
+}
+
 /// 建好 `dir`（`None` 时报没有家目录），权限设成只有自己能进（0700），见 `Dirs::create_runtime_dir`。
 #[cfg(unix)]
 fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
@@ -295,8 +369,8 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
-/// 建好 `dir`（`None` 时报没有家目录）。目录继承用户目录的权限（只有本人、SYSTEM 和管理员能进），
-/// 不另设 ACL；已经存在的不是真目录（比如是目录联接）时拒绝。
+/// 建好 `dir`（`None` 时报没有家目录），只让自己、SYSTEM 和管理员能进，见 `acl::restrict`；已经存在的
+/// 不是真目录（比如是目录联接）时拒绝。
 #[cfg(windows)]
 fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     use std::io::{Error, ErrorKind};
@@ -307,8 +381,12 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     if !meta.file_type().is_dir() || meta.file_type().is_symlink() {
         return Err(Error::new(ErrorKind::InvalidInput, format!("{} is not a directory", dir.display())));
     }
+    acl::restrict(&dir)?;
     Ok(dir)
 }
+
+#[cfg(windows)]
+mod acl;
 
 /// 把 `contents` 整个换进用户的文件 `path`（配置文件这类用户手写过的）：先写到
 /// 同一目录的临时文件再改名换上，写到一半崩溃或磁盘满时原文件原样还在，不会被截成空的。`path` 是
@@ -363,9 +441,38 @@ pub fn replace_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    /// 按 `vars` 算出的目录，不分机器（`machine` 为空），各系统上都一样。
     fn dirs(vars: &[(&str, &str)]) -> Dirs {
         let vars: Vec<(String, OsString)> = vars.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
-        Dirs::from_vars(|key| vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()))
+        Dirs { machine: None, ..Dirs::from_vars(|key| vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())) }
+    }
+
+    /// Windows 上 `USERPROFILE` 优先，别处只认 `HOME`。
+    #[test]
+    fn the_home_directory_comes_from_the_platforms_variable() {
+        let both = dirs(&[("HOME", "/msys/home/me"), ("USERPROFILE", "/users/me")]);
+        let expected = if cfg!(windows) { "/users/me" } else { "/msys/home/me" };
+        assert_eq!(both.home, Some(expected.into()));
+        let profile = dirs(&[("USERPROFILE", "/users/me")]);
+        assert_eq!(profile.home, cfg!(windows).then(|| "/users/me".into()));
+        assert_eq!(dirs(&[("HOME", "/home/me")]).home, Some("/home/me".into()));
+    }
+
+    /// Windows 上 `HOME` 下已有数据、`USERPROFILE` 下没有时，接着用 `HOME`。
+    #[cfg(windows)]
+    #[test]
+    fn existing_data_under_home_is_kept() {
+        let root = std::env::temp_dir().join(format!("runode-paths-home-{}", std::process::id()));
+        let (profile, home) = (root.join("profile"), root.join("home"));
+        std::fs::create_dir_all(home.join(DATA_DIR)).unwrap();
+        std::fs::create_dir_all(&profile).unwrap();
+        let both = |profile: &Path, home: &Path| {
+            dirs(&[("USERPROFILE", profile.to_str().unwrap()), ("HOME", home.to_str().unwrap())]).home
+        };
+        assert_eq!(both(&profile, &home), Some(home.clone()));
+        std::fs::create_dir_all(profile.join(DATA_DIR)).unwrap();
+        assert_eq!(both(&profile, &home), Some(profile.clone()));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -406,10 +513,59 @@ mod tests {
         let dirs = dirs(&[("HOME", "/home/me")]);
         assert_eq!(dirs.runtime_dir(), Some("/home/me/.runode/run".into()));
         assert_eq!(dirs.host_socket_file(), Some(format!("/home/me/.runode/run/{HOST_NAME}.sock").into()));
-        assert_eq!(dirs.host_lock_file(), Some(format!("/home/me/.runode/run/{HOST_NAME}.lock").into()));
+        assert_eq!(
+            dirs.host_listen_files(),
+            Some((
+                format!("/home/me/.runode/run/{HOST_NAME}.sock").into(),
+                format!("/home/me/.runode/run/{HOST_NAME}.lock").into()
+            ))
+        );
         assert_eq!(dirs.host_log_file(), Some(format!("/home/me/.runode/cache/{HOST_NAME}.log").into()));
         assert_eq!(dirs.screen_socket_file(), Some(format!("/home/me/.runode/run/{SCREEN_NAME}.sock").into()));
         assert_eq!(Dirs::default().host_socket_file(), None);
+    }
+
+    #[test]
+    fn machine_ids_are_shortened_and_checked() {
+        assert_eq!(parse_machine_id("13337582D4BD4955A11400D2F91B3FBF\n"), Some("13337582d4bd".into()));
+        assert_eq!(parse_machine_id(""), None);
+        assert_eq!(parse_machine_id("uninitialized\n"), None);
+        assert_eq!(parse_machine_id(&"0".repeat(32)), None);
+        assert_eq!(parse_machine_id(&"g".repeat(32)), None);
+        assert_eq!(Dirs::from_vars(|_| None).machine.is_some(), cfg!(target_os = "linux") && machine_id().is_some());
+    }
+
+    /// 分机器时宿主的文件在 `run/<machine>` 里；老位置的锁有宿主拿着时留在老位置，不管 socket 在不在。
+    #[cfg(unix)]
+    #[test]
+    fn host_files_stay_where_a_running_host_holds_the_lock() {
+        // macOS 的临时目录太长，socket 路径放不进 `sun_path`。
+        let root = Path::new("/tmp").join(format!("runode-paths-machine-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dirs = Dirs { machine: Some("13337582d4bd".into()), ..dirs(&[("HOME", root.to_str().unwrap())]) };
+        let run = root.join(".runode/run");
+        let dir = dirs.create_runtime_dir().unwrap();
+        assert_eq!(dir, run.join("13337582d4bd"));
+        let files = |dir: &Path| Some((dir.join(format!("{HOST_NAME}.sock")), dir.join(format!("{HOST_NAME}.lock"))));
+        assert_eq!(dirs.host_socket_file(), Some(dir.join(format!("{HOST_NAME}.sock"))));
+        assert_eq!(dirs.host_listen_files(), files(&dir));
+        // 老位置只剩崩掉的宿主留下的 socket 和锁文件：没人拿着锁，用新位置。
+        let legacy_socket = std::os::unix::net::UnixListener::bind(run.join(format!("{HOST_NAME}.sock"))).unwrap();
+        let legacy_lock = std::fs::File::create(run.join(format!("{HOST_NAME}.lock"))).unwrap();
+        assert_eq!(dirs.host_listen_files(), files(&dir));
+        // 升级前的宿主在老位置拿着锁；它删掉 socket 重新绑定的空当里也一样。
+        legacy_lock.try_lock().unwrap();
+        assert_eq!(dirs.host_socket_file(), Some(run.join(format!("{HOST_NAME}.sock"))));
+        assert_eq!(dirs.host_listen_files(), files(&run));
+        drop(legacy_socket);
+        std::fs::remove_file(run.join(format!("{HOST_NAME}.sock"))).unwrap();
+        assert_eq!(dirs.host_listen_files(), files(&run));
+        // 它退出、锁放开之后用新位置。
+        drop(legacy_lock);
+        assert_eq!(dirs.host_listen_files(), files(&dir));
+        // 别的东西（集成脚本的口令文件、采集进程的 socket）一直在新位置。
+        assert_eq!(dirs.screen_socket_file(), Some(dir.join(format!("{SCREEN_NAME}.sock"))));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -422,9 +578,13 @@ mod tests {
         let too_long = format!("{fits}x");
         let dirs = dirs(&[("HOME", &too_long)]);
         assert_eq!(dirs.host_socket_file(), None);
-        // 锁文件和日志不受这个限制。
-        assert!(dirs.host_lock_file().is_some());
+        assert_eq!(dirs.host_listen_files(), None);
+        // 日志不受这个限制。
         assert!(dirs.host_log_file().is_some());
+        // 分机器的目录放不下、老位置放得下时用老位置。
+        let shorter = &fits[..fits.len() - 3];
+        let machine = Dirs { machine: Some("13337582d4bd".into()), ..super::tests::dirs(&[("HOME", shorter)]) };
+        assert_eq!(machine.host_socket_file(), Some(PathBuf::from(format!("{shorter}/.runode/run/{HOST_NAME}.sock"))));
     }
 
     #[cfg(unix)]

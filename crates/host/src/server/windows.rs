@@ -1,7 +1,14 @@
 //! 宿主的 socket 在 Windows 上的写法：叫醒接受连接的线程用一对 AF_UNIX socket、等它们用
 //! `WSAPoll`；认对端是不是同一个用户时取它的进程号，比两边的用户 SID。
 
-use std::{ffi::c_void, io, os::windows::io::AsRawSocket as _, ptr};
+use std::{
+    ffi::c_void,
+    fs, io,
+    os::windows::io::AsRawSocket as _,
+    path::Path,
+    ptr,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use windows_sys::Win32::{
     Foundation::{CloseHandle, HANDLE},
@@ -18,7 +25,56 @@ pub(super) type WakeReader = UnixStream;
 pub(super) type WakeWriter = UnixStream;
 
 pub(super) fn wake_pair() -> io::Result<(WakeReader, WakeWriter)> {
-    UnixStream::pair()
+    socket_pair()
+}
+
+/// 一对互相连着的 socket。Windows 没有 `socketpair`，要先绑一个地址、连上再删掉；`UnixStream::pair` 绑在临时
+/// 目录里，绑不上（路径超过 `sockaddr_un` 的长度、临时目录在不支持 AF_UNIX 的卷上）时会 panic。这里先试只有
+/// 自己能进的 `runode_paths::Dirs::runtime_dir`，再试临时目录，出错时返回错误。名字带随机数，别人猜不到。
+pub fn socket_pair() -> io::Result<(UnixStream, UnixStream)> {
+    use std::hash::{BuildHasher as _, RandomState};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let name = format!(
+        "runode-pair-{}-{}-{:016x}.sock",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
+        RandomState::new().hash_one(NEXT.load(Ordering::Relaxed)),
+    );
+    let dirs = [runode_paths::Dirs::from_env().create_runtime_dir().ok(), Some(std::env::temp_dir())];
+    let mut last = io::Error::other("there is no directory to bind a socket pair in");
+    for dir in dirs.into_iter().flatten() {
+        match pair_at(&dir.join(&name)) {
+            Ok(pair) => return Ok(pair),
+            Err(err) => last = err,
+        }
+    }
+    Err(last)
+}
+
+/// `pair_at` 最多接受几个连接来找自己的那个。
+const PAIR_ACCEPTS: usize = 16;
+
+/// 在 `path` 上绑、连、接受：AF_UNIX 的连接进了监听队列 `connect` 就返回，不用另起线程等 `accept`。别的进程
+/// 抢先连上来的不要：两头的对端都得是本进程。
+fn pair_at(path: &Path) -> io::Result<(UnixStream, UnixStream)> {
+    let ours = std::process::id();
+    let listener = UnixListener::bind(path)?;
+    let pair = UnixStream::connect(path).and_then(|theirs| {
+        if peer_pid(&theirs) != Some(ours) {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "another process answered the socket pair"));
+        }
+        // 自己的连接已经在队列里，排在前面的都是抢先连上来的；抢的太多时不等了。
+        for _ in 0..PAIR_ACCEPTS {
+            let (accepted, _) = listener.accept()?;
+            if peer_pid(&accepted) == Some(ours) {
+                return Ok((accepted, theirs));
+            }
+        }
+        Err(io::Error::new(io::ErrorKind::PermissionDenied, "other processes kept connecting to the socket pair"))
+    });
+    let _ = fs::remove_file(path);
+    pair
 }
 
 /// 等唤醒的 socket 可读，`accepting` 时也等监听的 socket 来连接；返回两者各自就绪没有。

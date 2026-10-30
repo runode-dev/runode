@@ -6821,6 +6821,9 @@ dependencies = [
 [[package]]
 name = "runode-paths"
 version = "0.1.16"
+dependencies = [
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "runode-preview"

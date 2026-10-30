@@ -19,7 +19,7 @@ const RECOGNIZE_TIMEOUT: Duration = Duration::from_secs(170);
 
 /// 给远程访问的一条新连接，另一头由后台线程按 `runode_protocol::speech` 应答。
 pub fn connect() -> io::Result<UnixStream> {
-    let (ours, theirs) = UnixStream::pair()?;
+    let (ours, theirs) = runode_host::socket_pair()?;
     thread::Builder::new().name("remote-speech".into()).spawn(move || {
         if let Err(err) = serve(&ours) {
             tracing::debug!("remote speech ended: {err:#}");
