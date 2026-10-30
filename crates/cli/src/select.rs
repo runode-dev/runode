@@ -462,9 +462,22 @@ impl Wanted {
 
     fn matches(&self, cwd: &Path) -> bool {
         match self {
-            Self::Path(path) => normalize(cwd) == *path,
-            Self::Name(name) => cwd.file_name().is_some_and(|last| last == name.as_str()),
+            Self::Path(path) => {
+                let cwd = normalize(cwd);
+                cwd.components().count() == path.components().count()
+                    && cwd.components().zip(path.components()).all(|(a, b)| same_name(a.as_os_str(), b.as_os_str()))
+            }
+            Self::Name(name) => cwd.file_name().is_some_and(|last| same_name(last, name.as_ref())),
         }
+    }
+}
+
+/// 路径里的一段相同：Windows 的文件系统不分大小写，`C:\src\Runode` 和 `c:\src\runode` 是同一个目录。
+fn same_name(a: &std::ffi::OsStr, b: &std::ffi::OsStr) -> bool {
+    if cfg!(windows) {
+        a == b || a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    } else {
+        a == b
     }
 }
 
@@ -516,6 +529,16 @@ mod tests {
             assert!(Selector::parse(bad).is_err(), "{bad}");
         }
         assert!(Selector::parse("agent:claude:asleep").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_directories_match_in_any_case() {
+        let session = Path::new(r"C:\src\Runode");
+        assert!(Wanted::new(r"c:\SRC\runode", None).matches(session));
+        assert!(Wanted::new("c:/src/runode/", None).matches(session));
+        assert!(Wanted::new("runode", None).matches(session));
+        assert!(!Wanted::new(r"C:\src", None).matches(session));
     }
 
     #[cfg(unix)]

@@ -7,7 +7,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use common::{Peer, SIZE, WAIT, contains, host, script, temp_dir};
+use common::{CAT, Peer, SIZE, WAIT, contains, host, script, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::{AttachMode, Conversation, Frame, FrameKind, write_frame};
 use runode_types::{agent::AgentKind, settings::TermSettings, shell::IntegrationMode};
@@ -41,7 +41,7 @@ fn snapshots_held_while_reading_another_session_are_found_later() {
 fn input_reaches_the_program_and_output_comes_back() {
     let host = host();
     let mut peer = Peer::pair(&host);
-    let id = peer.spawn("/bin/cat");
+    let id = peer.spawn(CAT);
     peer.send(&ClientMsg::Attach { id, size: Some(SIZE), mode: AttachMode::Snapshot });
     let HostMsg::Attached { channel, size, mode, settings, .. } = peer.reply() else { panic!("expected attached") };
     assert_eq!((size, mode, settings), (SIZE, AttachMode::Snapshot, Some(TermSettings::default())));
@@ -56,7 +56,7 @@ fn input_reaches_the_program_and_output_comes_back() {
 fn resize_and_theme_changes_are_marked_in_the_stream() {
     let host = host();
     let mut peer = Peer::pair(&host);
-    let id = peer.spawn("/bin/cat");
+    let id = peer.spawn(CAT);
     let (channel, _) = peer.attach(id, AttachMode::Snapshot);
     let size = runode_types::grid::GridSize { cols: 30, ..SIZE };
     peer.send(&ClientMsg::Resize { id, size: SIZE });
@@ -93,7 +93,7 @@ fn spawn_settings_apply_only_before_the_first_theme() {
             fallback_cwd: None,
             integration: IntegrationMode::Off,
             start: true,
-            shell: Some("/bin/cat".into()),
+            shell: Some(CAT.into()),
             settings: Some(early.clone()),
             resume: None,
         });
@@ -136,7 +136,7 @@ fn spawn_types_the_resume_command() {
             fallback_cwd: None,
             integration: IntegrationMode::Off,
             start: true,
-            shell: Some("/bin/cat".into()),
+            shell: Some(CAT.into()),
             settings: None,
             resume: Some(Conversation { kind: AgentKind::Claude, id: id.into() }),
         });
@@ -181,7 +181,7 @@ fn desktop_notifications_follow_their_output() {
 fn clear_screen_comes_back_as_output() {
     let host = host();
     let mut peer = Peer::pair(&host);
-    let id = peer.spawn("/bin/cat");
+    let id = peer.spawn(CAT);
     let (channel, _) = peer.attach(id, AttachMode::Snapshot);
     peer.send(&ClientMsg::ClearScreen { id });
     let output = peer.wait_for_output(channel, b"^L");
@@ -194,7 +194,7 @@ fn clear_screen_comes_back_as_output() {
 fn killed_sessions_go_quiet() {
     let host = host();
     let mut peer = Peer::pair(&host);
-    let id = peer.spawn("/bin/cat");
+    let id = peer.spawn(CAT);
     let (channel, _) = peer.attach(id, AttachMode::Snapshot);
     peer.send(&ClientMsg::Kill { id });
     peer.input(channel, b"after\r");
@@ -211,7 +211,7 @@ fn unstarted_sessions_start_on_request() {
     let host = host();
     let mut peer = Peer::pair(&host);
     let dir = std::env::temp_dir();
-    let id = peer.spawn_with("/bin/cat", false, Some(dir.clone()));
+    let id = peer.spawn_with(CAT, false, Some(dir.clone()));
     peer.send(&ClientMsg::Attach { id, size: Some(SIZE), mode: AttachMode::Snapshot });
     let HostMsg::Attached { channel, mode, meta, .. } = peer.reply() else { panic!("expected attached") };
     peer.screen(id, channel, mode);

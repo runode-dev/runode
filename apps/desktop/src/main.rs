@@ -61,11 +61,18 @@ fn main() {
     // SAFETY: 还没起任何线程，也没建 VT。
     unsafe { runode_terminal::install_png_decoder() };
     if args == ["--host"] {
-        std::process::exit(host_process::run());
+        std::process::exit(host_process::run(false));
+    }
+    if args == ["--host", "--stay"] {
+        std::process::exit(host_process::run(true));
     }
     #[cfg(unix)]
     if args == ["--host", "--take-over"] {
         std::process::exit(host_process::take_over());
+    }
+    #[cfg(unix)]
+    if args == ["--host", "--upgrade"] {
+        std::process::exit(host_client::upgrade());
     }
     if args == ["--speech"] {
         std::process::exit(dictation::worker::run());
@@ -84,7 +91,18 @@ fn main() {
             )
         };
         let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
-        let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));
+        #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+        let mut env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));
+        // 没有桌面 app 替命令行拉起宿主时（无头构建、没有图形会话），命令行自己拉起。
+        #[cfg(target_os = "linux")]
+        if !cfg!(feature = "linux-desktop")
+            || ["DISPLAY", "WAYLAND_DISPLAY"]
+                .iter()
+                .all(|key| std::env::var_os(key).is_none_or(|value| value.is_empty()))
+        {
+            env.launch_host = std::env::current_exe().ok();
+        }
+        runode_cli::prepare_console();
         let code = runode_cli::run(&args, &env, &mut std::io::stdout().lock(), &mut std::io::stderr().lock());
         std::process::exit(code);
     }
@@ -107,6 +125,11 @@ fn main() {
 
     application().with_assets(assets::Assets).run(|cx: &mut App| {
         startup::mark("app_run");
+        // 系统通知认这个身份：Windows 上是 AppUserModelID，Linux 上是通知里的程序名。macOS 上由 .app 的
+        // bundle id 定。
+        if !cfg!(target_os = "macos") {
+            cx.set_app_identity(runode_update::BUNDLE_ID, "Runode");
+        }
         assets::install_fonts(cx);
         startup::mark("fonts_install");
         config::install(cx);

@@ -49,6 +49,8 @@ enum Item {
     ConfigFiles,
     ConfigFileActions,
     Pairing,
+    /// 远程访问页上防火墙挡着局域网连接时的提示和放行按钮。
+    Firewall,
     /// 远程访问页的测试推送按钮。
     TestPush,
     /// 登录时自启的两项（宿主、app），装没装看服务文件，不是配置里的键。
@@ -207,6 +209,7 @@ impl Page {
             ],
             Self::Remote => &[
                 Row("remote-access", Switch),
+                Firewall,
                 Row("remote-access-port", Text(80.)),
                 Row("remote-access-name", Text(200.)),
                 Pairing,
@@ -244,6 +247,7 @@ impl Page {
                 Item::Section(_)
                 | Item::ConfigFileActions
                 | Item::Pairing
+                | Item::Firewall
                 | Item::TestPush
                 | Item::Autostart
                 | Item::Dictation => None,
@@ -312,6 +316,7 @@ impl SettingsView {
         let official = runode_protocol::push::RELAY_URL.is_some();
         let autostart = super::autostart::any_supported();
         let cloud = self.config.dictation_cloud;
+        let firewall_blocked = self.config.remote_access && self.firewall.blocked();
         let shown = |item: &&Item| {
             !(official
                 && matches!(
@@ -320,6 +325,14 @@ impl SettingsView {
                         | Item::Row("apns-key-file" | "apns-key-id" | "apns-team-id" | "apns-bundle-id", _)
                 ))
                 && (autostart || !matches!(item, Item::Section("login") | Item::Autostart))
+                && (firewall_blocked || !matches!(item, Item::Firewall))
+                // Option 当不当 Alt、提示音（`ui::sound`）只有 macOS 上才有。
+                && (cfg!(target_os = "macos")
+                    || !matches!(
+                        item,
+                        Item::Section("keyboard")
+                            | Item::Row("macos-option-as-alt" | "agent-done-sound" | "agent-blocked-sound", _)
+                    ))
                 // 只显示选中的那家云端识别的几项。
                 && match item {
                     Item::Row(key, _) if key.starts_with("dictation-openai-") => cloud == DictationCloud::OpenAi,
@@ -350,6 +363,7 @@ impl SettingsView {
                 Item::ConfigFiles => self.render_config_files(theme, window, cx).into_any_element(),
                 Item::ConfigFileActions => self.render_config_file_actions(theme, cx).into_any_element(),
                 Item::Pairing => self.render_pairing(theme, cx).into_any_element(),
+                Item::Firewall => self.render_firewall(theme, cx).into_any_element(),
                 Item::TestPush => self.render_test_push(theme, cx).into_any_element(),
                 Item::Autostart => self.render_autostart(theme, cx).into_any_element(),
                 Item::Dictation => self.render_dictation(theme, cx).into_any_element(),

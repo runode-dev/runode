@@ -52,6 +52,10 @@ impl Host {
         let tick = (idle / 4).clamp(Duration::from_millis(5), MAX_TICK);
         let mut peers = shared.peers();
         peers.standalone = true;
+        #[cfg(unix)]
+        {
+            peers.stay = idle == Duration::MAX;
+        }
         let mut quiet_since: Option<Instant> = None;
         let reason = loop {
             if let Some(reason) = peers.stop {
@@ -104,6 +108,13 @@ impl Host {
         }
         tracing::info!("the host stops: {reason:?}");
         reason
+    }
+
+    /// 结束所有会话、给各条连接发 `Goodbye`，让单独跑的宿主的 `run_until_idle` 返回 `Stopped::Shutdown`；
+    /// 给宿主进程自己用，比如收到 SIGTERM 时。宿主不是单独跑的时只结束所有会话。
+    pub fn shut_down(&self) {
+        self.shared.kill_all();
+        self.shared.shut_down();
     }
 
     /// `stay_up` 时没有会话也没有连接也不算空闲，`run_until_idle` 不因为空闲返回（`Shutdown`、交接

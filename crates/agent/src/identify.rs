@@ -378,7 +378,34 @@ fn agent_from_package_path(path: &str) -> Option<AgentKind> {
     if has(&["node_modules", "@letta-ai", "letta-code", "letta"]) {
         return Some(AgentKind::Letta);
     }
-    None
+    agent_from_package(&parts)
+}
+
+/// 入口文件名不带 agent 名字的 npm 包，按包名认：Windows 上 npm 的 `.cmd`、`.ps1` 包装直接把包里的
+/// 入口文件（`cli.js`、`dist/index.js`）交给 node，没有带名字的 bin 链接可看。取最里层的
+/// `node_modules` 下的包，包名之后还要有一段，是包里的文件。
+fn agent_from_package(parts: &[&str]) -> Option<AgentKind> {
+    use AgentKind::*;
+    const PACKAGES: [(&str, AgentKind); 10] = [
+        ("@anthropic-ai/claude-code", Claude),
+        ("@openai/codex", Codex),
+        ("@google/gemini-cli", Gemini),
+        ("@github/copilot", GithubCopilot),
+        ("@sourcegraph/amp", Amp),
+        ("@qwen-code/qwen-code", Qwen),
+        ("@letta-ai/letta-code", Letta),
+        ("@iflow-ai/iflow-cli", Iflow),
+        ("@augmentcode/auggie", Auggie),
+        ("opencode-ai", OpenCode),
+    ];
+    let at = parts.iter().rposition(|part| part.eq_ignore_ascii_case("node_modules"))?;
+    let rest = &parts[at + 1..];
+    let len = if rest.first()?.starts_with('@') { 2 } else { 1 };
+    if rest.len() <= len {
+        return None;
+    }
+    let package = rest[..len].join("/").to_lowercase();
+    PACKAGES.iter().find(|(name, _)| *name == package).map(|&(_, kind)| kind)
 }
 
 fn is_runtime_or_shell(name: &str) -> bool {

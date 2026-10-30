@@ -12,8 +12,8 @@
 //! 下好以后菜单里那一项换成「重启以更新到 Runode X」，后台查到的还发一条系统通知，点了弹框问要不要
 //! 重启。不重启也行：app 退出时装上（`on_app_quit`），下次打开就是新版本。重启
 //! （`window::quit_to_update`）按退出走，会话留得下就留在后台，不看配置项 `terminal-host`；退出时
-//! 装上新版本，GPUI 的 `restart` 等 app 退出后把它重新打开。新版本打开时发现宿主是旧的构建，照
-//! 升级的规矩让新宿主接手会话，见 `host_client`。
+//! 装上新版本，GPUI 的 `restart` 等 app 退出后把它重新打开（Windows 上由安装程序装完后打开）。
+//! 新版本打开时发现宿主是旧的构建，照升级的规矩让新宿主接手会话，见 `host_client`。
 
 use std::{
     sync::{
@@ -158,6 +158,9 @@ impl Progress {
 #[derive(Default)]
 struct Updater {
     phase: Phase,
+    /// 这次退出是重启以更新：Windows 上装完由安装程序打开新版本。
+    #[cfg_attr(not(windows), allow(dead_code))]
+    relaunch: bool,
 }
 
 impl Global for Updater {}
@@ -435,7 +438,7 @@ fn post_ready(cx: &mut App) {
 
 /// 在最前面的窗口上弹框，选了第几个按钮交给 `then`；没有窗口时不弹。从菜单派发时窗口正在处理
 /// 动作，弹不了框，推迟到这一轮更新结束。
-fn prompt(
+pub(crate) fn prompt(
     level: PromptLevel,
     title: &str,
     detail: &str,
@@ -461,11 +464,37 @@ fn prompt(
     });
 }
 
-/// app 退出时：下好了就装上。重启以更新时，GPUI 的 `restart` 随后把装上的新版本打开。
+/// 重启以更新：退出，装上以后打开新版本。GPUI 的 `restart` 在 Windows 上等这个进程一退出就打开装着的
+/// 那份，早于安装程序换文件，所以 Windows 上只退出，由安装程序装完后打开（`Staged::install`）。
+pub fn restart(cx: &mut App) {
+    #[cfg(windows)]
+    {
+        if cx.has_global::<Updater>() {
+            cx.global_mut::<Updater>().relaunch = true;
+        }
+        cx.quit();
+    }
+    #[cfg(not(windows))]
+    cx.restart();
+}
+
+/// app 退出时：下好了就装上。重启以更新时随后打开装上的新版本。Windows 上安装程序会强行关掉单独跑的宿主，
+/// 连同里面的会话：这次退出后宿主还托管着会话时（`host_outlives_quit`）先不装，等重启以更新或者下次不留
+/// 会话的退出再装。
 fn on_quit(cx: &mut App) {
-    let Some(staged) = cx.global_mut::<Updater>().phase.take_ready() else { return };
+    #[cfg(windows)]
+    if !cx.global::<Updater>().relaunch && crate::window::host_outlives_quit() {
+        tracing::info!("not installing the update: the host keeps its sessions after this quit");
+        return;
+    }
+    let updater = cx.global_mut::<Updater>();
+    let Some(staged) = updater.phase.take_ready() else { return };
+    #[cfg(windows)]
+    let installed = staged.install(updater.relaunch);
+    #[cfg(not(windows))]
+    let installed = staged.install();
     cx.dismiss_system_notification(NOTIFICATION_TAG);
-    if let Err(err) = staged.install() {
+    if let Err(err) = installed {
         tracing::error!("failed to install the update: {err}");
     }
 }

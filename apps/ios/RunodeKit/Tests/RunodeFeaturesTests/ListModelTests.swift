@@ -1068,4 +1068,14 @@ actor UnwritableMachineStore: MachineStore {
         await picker.enter("Users")
         #expect(link.sent.last.map { if case .listDirs(_, "/Users") = $0 { true } else { false } } == true)
     }
+
+    /// Windows 宿主回 `C:/Users/me` 这种写法：照样按 `/` 拼子目录、往上走，到盘符根为止。
+    @Test func windowsPathsStopAtTheDriveRoot() async {
+        let picker = await listed("C:/Users/me", ["dev"])
+        #expect(picker.parent == "C:/Users")
+        await picker.enter("dev")
+        #expect(link.sent.last.map { if case .listDirs(_, "C:/Users/me/dev") = $0 { true } else { false } } == true)
+        let root = await listed("C:/", ["Users"])
+        #expect(root.parent == nil)
+    }
 }

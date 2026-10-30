@@ -33,7 +33,7 @@ runode-update = { path = "crates/update" }
 runode-autostart = { path = "crates/autostart" }
 runode-ui = { path = "crates/ui" }
 runode-screen = { path = "crates/screen" }
-runode-speech = { path = "crates/speech" }
+runode-speech = { path = "crates/speech", default-features = false }
 # libghostty-vt 的 Rust 绑定（MIT 或 Apache-2.0），取自子模块 vendor/libghostty-rs，即 runode-dev 对
 # libghostty-rs 的 fork 的 main 分支。它自成一个 workspace，不是本 workspace 的成员（见 exclude）。
 # 它的 C 接口绑定 libghostty-vt-sys 只经 libghostty-vt 间接用到，不列在这里。
@@ -107,6 +107,8 @@ rcgen = { version = "0.14", default-features = false, features = ["crypto", "rin
 ring = "0.17"
 # 远程访问跨网络时的连接：iroh 按公钥拨号，先打洞直连，打不通走中继。密码学后端和 rustls 一样用 ring。
 iroh = { version = "1.4", default-features = false, features = ["tls-ring", "portmapper", "fast-apple-datapath"] }
+# 非 macOS 上公布远程访问的 mDNS 服务（macOS 交给系统的 mDNSResponder）。
+mdns-sd = { version = "0.21", default-features = false }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "macros", "time"] }
 # 推送中转的 HTTP 服务和发给 APNs 的 HTTP/2 客户端；TLS 用上面那份 ring 后端的 rustls。
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }

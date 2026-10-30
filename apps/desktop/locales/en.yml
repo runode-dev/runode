@@ -1,6 +1,8 @@
 _version: 1
 menu:
   about: About Runode
+  open_config: Open Configuration File
+  reload_config: Reload Configuration
   install_skill: Install Agent Skill
   settings: Settings…
   services: Services
@@ -240,7 +242,11 @@ tasks:
   bind: "Set Shortcut (%{key})"
   bind_title: "Shortcut for “%{name}”"
   bind_hint: "The shortcut works in this project only; other projects can bind the same key to their own tasks. Shortcuts of tasks for every directory work wherever a project has not bound the key."
+about:
+  detail: "Version %{version} (%{revision})\n%{url}"
+  ok: OK
 tooltip:
+  more: More
   show_sidebar: Show Sidebar
   hide_sidebar: Hide Sidebar
   show_git: Show Git
@@ -686,6 +692,11 @@ settings:
       title: Run the host in the background at login
       hint: Starts the terminal host without a window. It stays in the background while remote access is on and a phone is paired, so the phone can connect without Runode open. Turning this off does not stop a host that is already running, so its sessions stay open.
     failed: "Could not change the login setting: %{err}"
+  firewall:
+    title: Windows Firewall is blocking local connections
+    hint: "Phones on the same network can only connect through the relay, which is slower. Allow Runode on private and domain networks (needs an administrator). If this network is trusted, also set it to Private in Windows settings."
+    allow: Allow
+    failed: "Could not change the firewall: %{err}"
   test_push:
     title: Test push
     hint: Send a notification to registered phones now. Checks the push settings and key.

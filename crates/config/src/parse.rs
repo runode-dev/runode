@@ -371,7 +371,8 @@ impl Config {
                     "" | "detect" => IntegrationMode::Detect,
                     "none" => IntegrationMode::Off,
                     name => IntegrationMode::Force(
-                        Shell::from_name(name).ok_or("expected none, detect, bash, zsh, fish, elvish or nushell")?,
+                        Shell::from_name(name)
+                            .ok_or("expected none, detect, bash, zsh, fish, elvish, nushell, powershell or cmd")?,
                     ),
                 };
             }
@@ -783,6 +784,8 @@ unknown-key = whatever
         let mode = |text: &str| load(&[text]).shell_integration;
         assert_eq!(mode("shell-integration = nushell\n"), IntegrationMode::Force(Shell::Nushell));
         assert_eq!(mode("shell-integration = elvish\n"), IntegrationMode::Force(Shell::Elvish));
+        assert_eq!(mode("shell-integration = powershell\n"), IntegrationMode::Force(Shell::PowerShell));
+        assert_eq!(mode("shell-integration = cmd\n"), IntegrationMode::Force(Shell::Cmd));
         assert_eq!(mode("shell-integration = none\n"), IntegrationMode::Off);
         assert!(Config::default().apply("shell-integration", "nu", true).is_err());
     }

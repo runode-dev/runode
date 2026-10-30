@@ -1,6 +1,7 @@
 //! 用 DXGI 桌面复制采集一块屏幕，在单独的线程上：桌面复制给的画面不带鼠标指针，先拷进一张能用 GDI
-//! 画的纹理、画上指针，再用 D3D11 的视频处理器缩放、转成 NV12 交给 `Encoder`。屏幕和指针都没动时
-//! 桌面复制不出新画面，静止时几乎不占带宽。
+//! 画的纹理、画上指针，再用 D3D11 的视频处理器缩放、转成 NV12 交给 `Encoder`。屏幕转过（竖着放）时
+//! 桌面复制给的是没转的画面，先用另一个视频处理器转成用户看到的方向（`Rotator`）再画指针。屏幕和指针
+//! 都没动时桌面复制不出新画面，静止时几乎不占带宽。
 
 use std::{
     io,
@@ -23,18 +24,25 @@ use windows::{
                 D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                 D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_RESOURCE_MISC_GDI_COMPATIBLE, D3D11_SDK_VERSION,
                 D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
-                D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE, D3D11_VIDEO_PROCESSOR_COLOR_SPACE,
-                D3D11_VIDEO_PROCESSOR_CONTENT_DESC, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC,
+                D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE, D3D11_VIDEO_PROCESSOR_CAPS, D3D11_VIDEO_PROCESSOR_COLOR_SPACE,
+                D3D11_VIDEO_PROCESSOR_CONTENT_DESC, D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION,
+                D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC,
                 D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC,
-                D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_STREAM,
-                D3D11_VIDEO_USAGE_OPTIMAL_SPEED, D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2D,
-                D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Multithread, ID3D11Texture2D,
-                ID3D11VideoContext, ID3D11VideoDevice, ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
-                ID3D11VideoProcessorInputView, ID3D11VideoProcessorOutputView,
+                D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_ROTATION,
+                D3D11_VIDEO_PROCESSOR_ROTATION_90, D3D11_VIDEO_PROCESSOR_ROTATION_180,
+                D3D11_VIDEO_PROCESSOR_ROTATION_270, D3D11_VIDEO_PROCESSOR_STREAM, D3D11_VIDEO_USAGE_OPTIMAL_SPEED,
+                D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2D, D3D11CreateDevice, ID3D11Device,
+                ID3D11DeviceContext, ID3D11Multithread, ID3D11Texture2D, ID3D11VideoContext, ID3D11VideoDevice,
+                ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorInputView,
+                ID3D11VideoProcessorOutputView,
             },
             Dxgi::{
-                Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_NV12, DXGI_RATIONAL, DXGI_SAMPLE_DESC},
-                DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIOutputDuplication,
+                Common::{
+                    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_NV12, DXGI_MODE_ROTATION, DXGI_MODE_ROTATION_ROTATE90,
+                    DXGI_MODE_ROTATION_ROTATE180, DXGI_MODE_ROTATION_ROTATE270, DXGI_RATIONAL, DXGI_SAMPLE_DESC,
+                },
+                DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_NOT_CURRENTLY_AVAILABLE, DXGI_ERROR_SESSION_DISCONNECTED,
+                DXGI_ERROR_UNSUPPORTED, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIOutputDuplication,
                 IDXGIResource, IDXGISurface1,
             },
             Gdi::DeleteObject,
@@ -152,10 +160,16 @@ struct Pipeline {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
     duplication: Option<IDXGIOutputDuplication>,
-    /// 最近一张桌面画面，不带指针。
+    /// 屏幕的方向，开始采集时的。
+    rotation: DXGI_MODE_ROTATION,
+    /// 最近一张桌面画面，不带指针，桌面复制交来的方向：屏幕转了 90° 或 270° 时宽高和屏幕对调。
     desktop: ID3D11Texture2D,
-    /// 画上了指针的那张，能用 GDI 画。
+    /// `desktop` 的宽高。
+    raw: (u32, u32),
+    /// 画上了指针的那张，用户看到的方向，能用 GDI 画。
     composed: ID3D11Texture2D,
+    /// 屏幕转过时把 `desktop` 转进 `composed`；没转时直接拷。
+    rotator: Option<Rotator>,
     video: ID3D11VideoContext,
     processor: ID3D11VideoProcessor,
     input: ID3D11VideoProcessorInputView,
@@ -171,11 +185,14 @@ struct Pipeline {
 impl Pipeline {
     fn open(options: &Options, sink: Arc<Sink>) -> io::Result<Self> {
         let output = display::find(options.display)?;
+        // SAFETY: 读输出的描述。
+        let rotation = unsafe { output.output.GetDesc() }.map_err(other)?.Rotation;
         let (width, height) = (options.width.max(2) & !1, options.height.max(2) & !1);
         let source = (
             (output.rect.right - output.rect.left).max(1) as u32,
             (output.rect.bottom - output.rect.top).max(1) as u32,
         );
+        let raw = unrotated_size(source, rotation);
         // SAFETY: 以下都是 D3D11 的普通调用，对象都由 `Pipeline` 持有。
         unsafe {
             let (mut device, mut context) = (None, None);
@@ -197,51 +214,27 @@ impl Pipeline {
             let _ = device.cast::<ID3D11Multithread>().map_err(other)?.SetMultithreadProtected(true);
             let adapter = output.adapter.GetDesc1().map_err(other)?.AdapterLuid;
             let encoder = Encoder::new(&device, adapter, (width, height), options.fps, options.bitrate, sink)?;
-            let bgra = |misc: u32| -> io::Result<ID3D11Texture2D> {
-                texture(&device, source, DXGI_FORMAT_B8G8R8A8_UNORM, misc)
-            };
-            let desktop = bgra(0)?;
-            let composed = bgra(D3D11_RESOURCE_MISC_GDI_COMPATIBLE.0 as u32)?;
+            let desktop = texture(&device, raw, DXGI_FORMAT_B8G8R8A8_UNORM, 0)?;
+            let composed =
+                texture(&device, source, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_RESOURCE_MISC_GDI_COMPATIBLE.0 as u32)?;
             let video_device = device.cast::<ID3D11VideoDevice>().map_err(other)?;
             let video = context.cast::<ID3D11VideoContext>().map_err(other)?;
             let rate = DXGI_RATIONAL { Numerator: options.fps.max(1), Denominator: 1 };
-            let content = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
-                InputFrameFormat: D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
-                InputFrameRate: rate,
-                InputWidth: source.0,
-                InputHeight: source.1,
-                OutputFrameRate: rate,
-                OutputWidth: width,
-                OutputHeight: height,
-                Usage: D3D11_VIDEO_USAGE_OPTIMAL_SPEED,
+            let rotator = match turn(rotation) {
+                Some(turn) => {
+                    Some(Rotator::new(&video_device, &video, (&desktop, raw), (&composed, source), rate, turn)?)
+                }
+                None => None,
             };
-            let enumerator: ID3D11VideoProcessorEnumerator =
-                video_device.CreateVideoProcessorEnumerator(&content).map_err(other)?;
+            let enumerator =
+                video_device.CreateVideoProcessorEnumerator(&content(source, (width, height), rate)).map_err(other)?;
             let processor = video_device.CreateVideoProcessor(&enumerator, 0).map_err(other)?;
-            let input_desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
-                FourCC: 0,
-                ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
-                Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 {
-                    Texture2D: D3D11_TEX2D_VPIV { MipSlice: 0, ArraySlice: 0 },
-                },
-            };
-            let mut input = None;
-            video_device
-                .CreateVideoProcessorInputView(&composed, &enumerator, &input_desc, Some(&mut input))
-                .map_err(other)?;
-            let input = input.ok_or_else(|| io::Error::other("no video processor input view"))?;
-            let output_desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
-                ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
-                Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 { Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 } },
-            };
+            let input = input_view(&video_device, &enumerator, &composed)?;
             let mut targets = Vec::with_capacity(TARGETS);
             for _ in 0..TARGETS {
                 let target = texture(&device, (width, height), DXGI_FORMAT_NV12, 0)?;
-                let mut view = None;
-                video_device
-                    .CreateVideoProcessorOutputView(&target, &enumerator, &output_desc, Some(&mut view))
-                    .map_err(other)?;
-                targets.push((target, view.ok_or_else(|| io::Error::other("no video processor output view"))?));
+                let view = output_view(&video_device, &enumerator, &target)?;
+                targets.push((target, view));
             }
             let dest = letterbox(source, (width, height));
             video.VideoProcessorSetStreamFrameFormat(&processor, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
@@ -265,8 +258,11 @@ impl Pipeline {
                 device,
                 context,
                 duplication,
+                rotation,
                 desktop,
+                raw,
                 composed,
+                rotator,
                 video,
                 processor,
                 input,
@@ -328,6 +324,14 @@ impl Pipeline {
                 if info.LastPresentTime != 0
                     && let Some(texture) = resource.and_then(|resource| resource.cast::<ID3D11Texture2D>().ok())
                 {
+                    let mut desc = D3D11_TEXTURE2D_DESC::default();
+                    // SAFETY: 读纹理的描述，输出指向本地变量。
+                    unsafe { texture.GetDesc(&mut desc) };
+                    if (desc.Width, desc.Height) != self.raw {
+                        // SAFETY: 拿到的画面放掉。
+                        let _ = unsafe { duplication.ReleaseFrame() };
+                        return Err(io::Error::other("the display changed its resolution or orientation"));
+                    }
                     // SAFETY: 两张纹理尺寸和格式一样，都在这个设备上。
                     unsafe { self.context.CopyResource(&self.desktop, &texture) };
                 }
@@ -347,22 +351,36 @@ impl Pipeline {
         }
     }
 
-    /// 重连桌面复制，连不上时先不管，过一会儿再试。屏幕的尺寸变了（改了分辨率、转了屏）时报错：
-    /// 纹理和视频处理器是按原来的尺寸建的。
+    /// 重连桌面复制。暂时连不上（锁屏、UAC 提示这类安全桌面，会话断开，切换显示模式途中）时先不管，
+    /// 过一会儿再试；屏幕不在桌面上了、别的原因连不上时报错，不然手机一直停在最后一帧。屏幕的尺寸或方向
+    /// 变了（改了分辨率、转了屏）时也报错：纹理和视频处理器是按原来的尺寸建的。
     fn reopen(&mut self) -> io::Result<()> {
+        // SAFETY: 读输出的描述。
+        let desc = unsafe { self.output.output.GetDesc() }.map_err(other)?;
+        if !desc.AttachedToDesktop.as_bool() {
+            return Err(io::Error::other("the display was disconnected"));
+        }
         // SAFETY: 输出和设备都活着。
         let duplication = match unsafe { self.output.output.DuplicateOutput(&self.device) } {
             Ok(duplication) => duplication,
-            Err(err) => {
+            Err(err)
+                if [
+                    E_ACCESSDENIED,
+                    DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
+                    DXGI_ERROR_SESSION_DISCONNECTED,
+                    DXGI_ERROR_UNSUPPORTED,
+                ]
+                .contains(&err.code()) =>
+            {
                 tracing::debug!("cannot capture the screen yet: {err}");
                 return Ok(());
             }
+            Err(err) => return Err(other(err)),
         };
-        // SAFETY: 读输出的描述。
-        let rect = unsafe { self.output.output.GetDesc() }.map_err(other)?.DesktopCoordinates;
+        let rect = desc.DesktopCoordinates;
         let size = |rect: RECT| (rect.right - rect.left, rect.bottom - rect.top);
-        if size(rect) != size(self.output.rect) {
-            return Err(io::Error::other("the display changed its resolution"));
+        if size(rect) != size(self.output.rect) || desc.Rotation != self.rotation {
+            return Err(io::Error::other("the display changed its resolution or orientation"));
         }
         self.output.rect = rect;
         self.duplication = Some(duplication);
@@ -373,18 +391,19 @@ impl Pipeline {
     /// 画上指针、转成 NV12 交给编码器；编码器没收下时返回 false。
     fn encode(&mut self) -> bool {
         let (target, view) = self.targets[self.next_target].clone();
-        // SAFETY: 纹理和视图都在这个设备上；流的输入视图引用用完放掉。
+        // SAFETY: 纹理和视图都在这个设备上。
         unsafe {
-            self.context.CopyResource(&self.composed, &self.desktop);
+            match &self.rotator {
+                Some(rotator) => {
+                    if let Err(err) = rotator.run(&self.video) {
+                        tracing::warn!("cannot turn a screen frame: {err}");
+                        return true;
+                    }
+                }
+                None => self.context.CopyResource(&self.composed, &self.desktop),
+            }
             self.draw_cursor();
-            let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
-                Enable: true.into(),
-                pInputSurface: ManuallyDrop::new(Some(self.input.clone())),
-                ..Default::default()
-            };
-            let blitted = self.video.VideoProcessorBlt(&self.processor, &view, 0, std::slice::from_ref(&stream));
-            ManuallyDrop::drop(&mut stream.pInputSurface);
-            if let Err(err) = blitted {
+            if let Err(err) = blit(&self.video, &self.processor, &self.input, &view) {
                 tracing::warn!("cannot convert a screen frame: {err}");
                 return true;
             }
@@ -435,6 +454,155 @@ impl Pipeline {
     }
 }
 
+/// 把屏幕转过的画面转回用户看到的方向：一个只做旋转的视频处理器，BGRA 进、BGRA 出。
+struct Rotator {
+    processor: ID3D11VideoProcessor,
+    input: ID3D11VideoProcessorInputView,
+    output: ID3D11VideoProcessorOutputView,
+}
+
+impl Rotator {
+    /// 把 `raw`（纹理和宽高）按 `turn` 转进 `visible`。显卡的视频处理器不会转或者不能输出 BGRA 时返回错误。
+    ///
+    /// # Safety
+    ///
+    /// 纹理都在 `video_device` 这个设备上。
+    unsafe fn new(
+        video_device: &ID3D11VideoDevice,
+        video: &ID3D11VideoContext,
+        (raw, raw_size): (&ID3D11Texture2D, (u32, u32)),
+        (visible, visible_size): (&ID3D11Texture2D, (u32, u32)),
+        rate: DXGI_RATIONAL,
+        turn: D3D11_VIDEO_PROCESSOR_ROTATION,
+    ) -> io::Result<Self> {
+        // SAFETY: 都是 D3D11 的普通调用，输出参数指向本地变量。
+        unsafe {
+            let enumerator =
+                video_device.CreateVideoProcessorEnumerator(&content(raw_size, visible_size, rate)).map_err(other)?;
+            let mut caps = D3D11_VIDEO_PROCESSOR_CAPS::default();
+            enumerator.GetVideoProcessorCaps(&mut caps).map_err(other)?;
+            let bgra = enumerator.CheckVideoProcessorFormat(DXGI_FORMAT_B8G8R8A8_UNORM).map_err(other)?;
+            if caps.FeatureCaps & D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ROTATION.0 as u32 == 0
+                || bgra & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT.0 as u32 == 0
+            {
+                return Err(io::Error::other("the graphics card cannot turn the picture of a rotated display"));
+            }
+            let processor = video_device.CreateVideoProcessor(&enumerator, 0).map_err(other)?;
+            let input = input_view(video_device, &enumerator, raw)?;
+            let output = output_view(video_device, &enumerator, visible)?;
+            let full = RECT { left: 0, top: 0, right: visible_size.0 as i32, bottom: visible_size.1 as i32 };
+            video.VideoProcessorSetStreamFrameFormat(&processor, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+            video.VideoProcessorSetStreamRotation(&processor, 0, true, turn);
+            video.VideoProcessorSetStreamDestRect(&processor, 0, true, Some(&full));
+            video.VideoProcessorSetOutputTargetRect(&processor, true, Some(&full));
+            let rgb = D3D11_VIDEO_PROCESSOR_COLOR_SPACE { _bitfield: 0 };
+            video.VideoProcessorSetStreamColorSpace(&processor, 0, &rgb);
+            video.VideoProcessorSetOutputColorSpace(&processor, &rgb);
+            Ok(Self { processor, input, output })
+        }
+    }
+
+    /// # Safety
+    ///
+    /// `video` 是建它的那个设备的。
+    unsafe fn run(&self, video: &ID3D11VideoContext) -> windows::core::Result<()> {
+        // SAFETY: 两个视图和处理器都建在 `video` 的设备上。
+        unsafe { blit(video, &self.processor, &self.input, &self.output) }
+    }
+}
+
+/// 桌面复制交来的画面要怎么转才是用户看到的方向；没转过时为空。屏幕转了多少，视频处理器就照同样的角度转。
+fn turn(rotation: DXGI_MODE_ROTATION) -> Option<D3D11_VIDEO_PROCESSOR_ROTATION> {
+    match rotation {
+        DXGI_MODE_ROTATION_ROTATE90 => Some(D3D11_VIDEO_PROCESSOR_ROTATION_90),
+        DXGI_MODE_ROTATION_ROTATE180 => Some(D3D11_VIDEO_PROCESSOR_ROTATION_180),
+        DXGI_MODE_ROTATION_ROTATE270 => Some(D3D11_VIDEO_PROCESSOR_ROTATION_270),
+        _ => None,
+    }
+}
+
+/// 用户看到的宽高是 `visible` 的屏幕，桌面复制交来的画面的宽高：转了 90° 或 270° 时对调。
+fn unrotated_size(visible: (u32, u32), rotation: DXGI_MODE_ROTATION) -> (u32, u32) {
+    if [DXGI_MODE_ROTATION_ROTATE90, DXGI_MODE_ROTATION_ROTATE270].contains(&rotation) {
+        (visible.1, visible.0)
+    } else {
+        visible
+    }
+}
+
+/// 视频处理器的内容描述：逐行的画面，`input` 进、`output` 出，按 `rate` 的帧率。
+fn content(input: (u32, u32), output: (u32, u32), rate: DXGI_RATIONAL) -> D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
+    D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
+        InputFrameFormat: D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
+        InputFrameRate: rate,
+        InputWidth: input.0,
+        InputHeight: input.1,
+        OutputFrameRate: rate,
+        OutputWidth: output.0,
+        OutputHeight: output.1,
+        Usage: D3D11_VIDEO_USAGE_OPTIMAL_SPEED,
+    }
+}
+
+fn input_view(
+    video_device: &ID3D11VideoDevice,
+    enumerator: &ID3D11VideoProcessorEnumerator,
+    texture: &ID3D11Texture2D,
+) -> io::Result<ID3D11VideoProcessorInputView> {
+    let desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
+        FourCC: 0,
+        ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
+        Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 {
+            Texture2D: D3D11_TEX2D_VPIV { MipSlice: 0, ArraySlice: 0 },
+        },
+    };
+    let mut view = None;
+    // SAFETY: 描述是本地变量，输出参数指向本地变量。
+    unsafe { video_device.CreateVideoProcessorInputView(texture, enumerator, &desc, Some(&mut view)) }
+        .map_err(other)?;
+    view.ok_or_else(|| io::Error::other("no video processor input view"))
+}
+
+fn output_view(
+    video_device: &ID3D11VideoDevice,
+    enumerator: &ID3D11VideoProcessorEnumerator,
+    texture: &ID3D11Texture2D,
+) -> io::Result<ID3D11VideoProcessorOutputView> {
+    let desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
+        ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
+        Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 { Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 } },
+    };
+    let mut view = None;
+    // SAFETY: 同上。
+    unsafe { video_device.CreateVideoProcessorOutputView(texture, enumerator, &desc, Some(&mut view)) }
+        .map_err(other)?;
+    view.ok_or_else(|| io::Error::other("no video processor output view"))
+}
+
+/// 让 `processor` 把 `input` 处理进 `output`。
+///
+/// # Safety
+///
+/// 视图和处理器都是 `video` 那个设备上的。
+unsafe fn blit(
+    video: &ID3D11VideoContext,
+    processor: &ID3D11VideoProcessor,
+    input: &ID3D11VideoProcessorInputView,
+    output: &ID3D11VideoProcessorOutputView,
+) -> windows::core::Result<()> {
+    let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
+        Enable: true.into(),
+        pInputSurface: ManuallyDrop::new(Some(input.clone())),
+        ..Default::default()
+    };
+    // SAFETY: 见上；流的输入视图引用用完放掉。
+    unsafe {
+        let blitted = video.VideoProcessorBlt(processor, output, 0, std::slice::from_ref(&stream));
+        ManuallyDrop::drop(&mut stream.pInputSurface);
+        blitted
+    }
+}
+
 /// 一张 `size` 大小、`format` 格式的纹理，能当视频处理器的输入输出。
 fn texture(
     device: &ID3D11Device,
@@ -472,7 +640,225 @@ fn letterbox(source: (u32, u32), target: (u32, u32)) -> RECT {
 
 #[cfg(test)]
 mod tests {
+    use windows::Win32::Graphics::{
+        Direct3D11::{D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_USAGE_STAGING},
+        Gdi::{
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, CreateCompatibleDC, CreateDIBSection,
+            DIB_RGB_COLORS, DeleteDC, GetDC, ReleaseDC, SRCCOPY, SelectObject,
+        },
+    };
+
     use super::*;
+
+    /// 主屏当前的方向下，桌面复制交来的画面宽高是 `unrotated_size`，按 `turn` 转过以后和屏幕上看到的
+    /// （GDI 截的图）一样，转反了就对不上。要在登录着的桌面上跑，把屏幕转到各个方向各跑一次：
+    /// `cargo test -p runode-screen rotated_frames -- --ignored --nocapture`。
+    #[test]
+    #[ignore = "needs a logged-in desktop"]
+    #[expect(clippy::print_stderr, reason = "手动跑的核对，各个转法的差距打出来看")]
+    fn rotated_frames_match_the_screen() {
+        let output = display::find(crate::Display::main().id).unwrap();
+        // SAFETY: 都是 D3D11 和 DXGI 的普通调用，对象都在这个函数里。
+        unsafe {
+            let rotation = output.output.GetDesc().unwrap().Rotation;
+            let rect = output.rect;
+            let visible = ((rect.right - rect.left) as u32, (rect.bottom - rect.top) as u32);
+            let (mut device, mut context) = (None, None);
+            D3D11CreateDevice(
+                &output.adapter,
+                D3D_DRIVER_TYPE_UNKNOWN,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut context),
+            )
+            .unwrap();
+            let (device, context) = (device.unwrap(), context.unwrap());
+            let duplication = output.output.DuplicateOutput(&device).unwrap();
+            let raw = unrotated_size(visible, rotation);
+            let desktop = texture(&device, raw, DXGI_FORMAT_B8G8R8A8_UNORM, 0).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
+                let mut resource: Option<IDXGIResource> = None;
+                if duplication.AcquireNextFrame(500, &mut info, &mut resource).is_ok() {
+                    let texture = resource.unwrap().cast::<ID3D11Texture2D>().unwrap();
+                    let mut desc = D3D11_TEXTURE2D_DESC::default();
+                    texture.GetDesc(&mut desc);
+                    let fresh = info.LastPresentTime != 0;
+                    if fresh {
+                        assert_eq!((desc.Width, desc.Height), raw, "the duplicated frame's size");
+                        context.CopyResource(&desktop, &texture);
+                    }
+                    duplication.ReleaseFrame().unwrap();
+                    if fresh {
+                        break;
+                    }
+                }
+                assert!(Instant::now() < deadline, "no frame from the desktop duplication");
+            }
+            let screen = screen_pixels(rect, visible);
+            if let Some(dir) = std::env::var_os("RUNODE_ROTATION_SHOTS") {
+                save_bmp(&std::path::Path::new(&dir).join(format!("screen-{}.bmp", rotation.0)), &screen, visible);
+            }
+            let video_device = device.cast::<ID3D11VideoDevice>().unwrap();
+            let video = context.cast::<ID3D11VideoContext>().unwrap();
+            let rate = DXGI_RATIONAL { Numerator: 60, Denominator: 1 };
+            let candidates: &[D3D11_VIDEO_PROCESSOR_ROTATION] = if raw == visible && visible.0 != visible.1 {
+                &[D3D11_VIDEO_PROCESSOR_ROTATION(0), D3D11_VIDEO_PROCESSOR_ROTATION_180]
+            } else {
+                &[D3D11_VIDEO_PROCESSOR_ROTATION_90, D3D11_VIDEO_PROCESSOR_ROTATION_270]
+            };
+            let mut scores = Vec::new();
+            for &candidate in candidates {
+                let composed = texture(&device, visible, DXGI_FORMAT_B8G8R8A8_UNORM, 0).unwrap();
+                let rotator =
+                    Rotator::new(&video_device, &video, (&desktop, raw), (&composed, visible), rate, candidate)
+                        .unwrap();
+                rotator.run(&video).unwrap();
+                let turned = texture_pixels(&device, &context, &composed, visible);
+                if let Some(dir) = std::env::var_os("RUNODE_ROTATION_SHOTS") {
+                    let name = format!("turned-{}-{}.bmp", rotation.0, candidate.0);
+                    save_bmp(&std::path::Path::new(&dir).join(name), &turned, visible);
+                }
+                let score = difference(&turned, &screen, visible);
+                eprintln!("rotation {}, processor rotation {}: difference {score:.1}", rotation.0, candidate.0);
+                scores.push((candidate, score));
+            }
+            let (best, best_score) = scores.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+            let worst = scores.iter().map(|score| score.1).fold(0.0, f64::max);
+            assert!(best_score * 3.0 < worst, "the candidates are too close to tell apart: {scores:?}");
+            let wanted = turn(rotation).unwrap_or(D3D11_VIDEO_PROCESSOR_ROTATION(0));
+            assert_eq!(best, wanted, "rotation {}: {scores:?}", rotation.0);
+        }
+    }
+
+    /// 屏幕上 `rect` 那一块，BGRA，自上而下。
+    unsafe fn screen_pixels(rect: RECT, (width, height): (u32, u32)) -> Vec<u8> {
+        // SAFETY: GDI 的普通调用，建的对象都在这里删掉。
+        unsafe {
+            let screen = GetDC(None);
+            let memory = CreateCompatibleDC(Some(screen));
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: width as i32,
+                    biHeight: -(height as i32),
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut bits = std::ptr::null_mut();
+            let bitmap = CreateDIBSection(Some(memory), &info, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
+            let old = SelectObject(memory, bitmap.into());
+            BitBlt(memory, 0, 0, width as i32, height as i32, Some(screen), rect.left, rect.top, SRCCOPY | CAPTUREBLT)
+                .unwrap();
+            let pixels = std::slice::from_raw_parts(bits.cast::<u8>(), (width * height * 4) as usize).to_vec();
+            SelectObject(memory, old);
+            let _ = DeleteObject(bitmap.into());
+            let _ = DeleteDC(memory);
+            ReleaseDC(None, screen);
+            pixels
+        }
+    }
+
+    /// 读回 `texture` 的像素，BGRA，自上而下。
+    unsafe fn texture_pixels(
+        device: &ID3D11Device,
+        context: &ID3D11DeviceContext,
+        texture: &ID3D11Texture2D,
+        (width, height): (u32, u32),
+    ) -> Vec<u8> {
+        // SAFETY: D3D11 的普通调用；映射的内存按行距读完就解除映射。
+        unsafe {
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: width,
+                Height: height,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                Usage: D3D11_USAGE_STAGING,
+                BindFlags: 0,
+                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                MiscFlags: 0,
+            };
+            let mut staging = None;
+            device.CreateTexture2D(&desc, None, Some(&mut staging)).unwrap();
+            let staging = staging.unwrap();
+            context.CopyResource(&staging, texture);
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).unwrap();
+            let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+            for row in 0..height as usize {
+                let start = mapped.pData.cast::<u8>().add(row * mapped.RowPitch as usize);
+                pixels.extend_from_slice(std::slice::from_raw_parts(start, width as usize * 4));
+            }
+            context.Unmap(&staging, 0);
+            pixels
+        }
+    }
+
+    /// 把 BGRA 图缩成四分之一存成 BMP，看转得对不对。
+    fn save_bmp(path: &std::path::Path, pixels: &[u8], (width, height): (u32, u32)) {
+        let (w, h) = (width / 4, height / 4);
+        let mut rows = Vec::with_capacity((w * h * 4) as usize);
+        // BMP 的行自下而上。
+        for y in (0..h).rev() {
+            for x in 0..w {
+                let at = ((y * 4 * width + x * 4) * 4) as usize;
+                rows.extend_from_slice(&pixels[at..at + 4]);
+            }
+        }
+        let mut file = Vec::new();
+        file.extend_from_slice(b"BM");
+        file.extend_from_slice(&(54 + rows.len() as u32).to_le_bytes());
+        file.extend_from_slice(&[0; 4]);
+        file.extend_from_slice(&54u32.to_le_bytes());
+        file.extend_from_slice(&40u32.to_le_bytes());
+        file.extend_from_slice(&(w as i32).to_le_bytes());
+        file.extend_from_slice(&(h as i32).to_le_bytes());
+        file.extend_from_slice(&1u16.to_le_bytes());
+        file.extend_from_slice(&32u16.to_le_bytes());
+        file.extend_from_slice(&[0; 24]);
+        file.extend_from_slice(&rows);
+        std::fs::write(path, file).unwrap();
+    }
+
+    /// 两张同样大小的 BGRA 图分成 32×32 格，各格平均亮度差的平均。
+    fn difference(a: &[u8], b: &[u8], (width, height): (u32, u32)) -> f64 {
+        const CELLS: usize = 32;
+        let (width, height) = (width as usize, height as usize);
+        let cells = |pixels: &[u8]| {
+            let mut sums = vec![(0.0f64, 0u32); CELLS * CELLS];
+            for y in 0..height {
+                for x in 0..width {
+                    let at = (y * width + x) * 4;
+                    let light = f64::from(pixels[at]) + f64::from(pixels[at + 1]) + f64::from(pixels[at + 2]);
+                    let cell = &mut sums[(y * CELLS / height) * CELLS + x * CELLS / width];
+                    cell.0 += light;
+                    cell.1 += 1;
+                }
+            }
+            sums.into_iter().map(|(sum, count)| sum / f64::from(count.max(1))).collect::<Vec<_>>()
+        };
+        let (a, b) = (cells(a), cells(b));
+        a.iter().zip(&b).map(|(a, b)| (a - b).abs()).sum::<f64>() / a.len() as f64
+    }
+
+    #[test]
+    fn rotated_displays_swap_the_duplicated_size() {
+        assert_eq!(unrotated_size((1080, 1920), DXGI_MODE_ROTATION_ROTATE90), (1920, 1080));
+        assert_eq!(unrotated_size((1080, 1920), DXGI_MODE_ROTATION_ROTATE270), (1920, 1080));
+        assert_eq!(unrotated_size((1920, 1080), DXGI_MODE_ROTATION_ROTATE180), (1920, 1080));
+        assert_eq!(unrotated_size((1920, 1080), DXGI_MODE_ROTATION(1)), (1920, 1080));
+    }
 
     #[test]
     fn letterbox_keeps_the_aspect_ratio() {

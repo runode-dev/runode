@@ -252,8 +252,11 @@ jobs:
 
   build-linux:
     needs: prepare
-    # 在较老的 Ubuntu 上编，glibc 版本低，新一些的发行版都能跑。不开 runode 的 linux-desktop 特性，
-    # 可执行文件只依赖 libc，没有图形界面的服务器上也能跑命令行和宿主。
+    # 在 manylinux_2_28 的容器（AlmaLinux 8，glibc 2.28）里用它的 gcc-toolset 编：libstdc++ 里比系统 GCC 8 新的部分
+    # 经 gcc-toolset 的链接脚本静态链进来，可执行文件只要 glibc 2.28 和 GCC 8 的 libstdc++，RHEL 8、Debian 10、
+    # Ubuntu 20.04 以后的发行版都能跑。链接只能用 gcc：sherpa-onnx 的预编译静态库按 libstdc++ 编，zig 只带 libc++。
+    # 工具链、zig 和它的全局缓存装在 runner 上，挂进容器用；容器里以 runner 的用户跑，git 才认工作区、读得出提交号。
+    # 不开 runode 的 linux-desktop 特性，可执行文件只依赖 libc 和 libstdc++，没有图形界面的服务器上也能跑命令行和宿主。
     strategy:
       matrix:
         include:
@@ -271,17 +274,23 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache: "false"
-      - name: 装 GPUI 编译要的库
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
-            libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
       - name: 构建、打包
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
+          IMAGE: quay.io/pypa/manylinux_2_28_${{ matrix.arch }}
         run: |
+          cargo_home=${CARGO_HOME:-$HOME/.cargo}
+          rustup_home=${RUSTUP_HOME:-$HOME/.rustup}
+          zig_dir=$(dirname "$(command -v zig)")
+          # 挂载点不存在时 docker 以 root 建它，容器里的用户就写不进去。
+          mkdir -p "$ZIG_GLOBAL_CACHE_DIR"
           for attempt in 1 2 3; do
-            cargo build --release -p runode --locked && break
+            docker run --rm --user "$(id -u):$(id -g)" \
+              -v "$PWD:$PWD" -w "$PWD" -v "$cargo_home:$cargo_home" -v "$rustup_home:$rustup_home" \
+              -v "$zig_dir:$zig_dir:ro" -v "$ZIG_GLOBAL_CACHE_DIR:$ZIG_GLOBAL_CACHE_DIR" \
+              -e HOME=/tmp -e CARGO_HOME="$cargo_home" -e RUSTUP_HOME="$rustup_home" -e ZIG_GLOBAL_CACHE_DIR -e RUNODE_PUSH_RELAY \
+              -e PREPEND_PATH="$cargo_home/bin:$zig_dir" \
+              "$IMAGE" bash -c 'export PATH=$PREPEND_PATH:$PATH; cargo build --release -p runode --locked' && break
             [[ $attempt -lt 3 ]] || exit 1
             echo "编译失败（多半是 zig 下载依赖时断了连接），30 秒后重试" >&2
             sleep 30
@@ -289,6 +298,25 @@ jobs:
           bundle=target/release/bundle
           mkdir -p "$bundle"
           tar -czf "$bundle/Runode-$VERSION-linux-${{ matrix.arch }}.tar.gz" -C target/release runode
+      # 发布前在最老的几个目标发行版上跑一遍：哪个依赖要了更新的 glibc 或 libstdc++，在这里就拦下。
+      - name: 在老发行版上起宿主、开会话
+        run: |
+          for image in rockylinux:8 debian:bullseye-slim; do
+            echo "== $image"
+            docker run --rm -v "$PWD/target/release/runode:/usr/local/bin/runode:ro" "$image" sh -ec '
+              runode --version
+              runode --host --stay >/tmp/host.log 2>&1 &
+              tries=0
+              until runode list >/dev/null 2>&1; do
+                tries=$((tries + 1))
+                [ "$tries" -lt 50 ] || { cat /tmp/host.log; exit 1; }
+                sleep 0.2
+              done
+              runode todo add "old distro check" --agent "sh -c true" --no-worktree --start
+              runode list
+              [ "$(runode list | wc -l)" -ge 2 ] || { echo "宿主没开出会话" >&2; exit 1; }
+            '
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bundle-linux-${{ matrix.arch }}

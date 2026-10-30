@@ -467,11 +467,22 @@ mod tests {
     fn another_process_started_with_host_is_recognised() {
         // 后面的 `:` 让 sh 不直接 exec 成 sleep，参数留在 sh 身上。
         let mut child = std::process::Command::new("/bin/sh").args(["-c", "sleep 5; :", "--host"]).spawn().unwrap();
-        let args = process_args(child.id());
+        // Linux 上 spawn 返回时子进程可能还没换上新的地址空间，`/proc/<pid>/cmdline` 读到的是这个测试程序的
+        // 参数，换的当中还可能只读到一截：读到想要的、或者到期限为止。
+        let expected = owned(&["/bin/sh", "-c", "sleep 5; :", "--host"]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let args = loop {
+            let args = process_args(child.id());
+            if !args.as_ref().is_ok_and(|args| *args == expected) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            }
+            break args;
+        };
         let _ = child.kill();
         let _ = child.wait();
         let args = args.unwrap();
-        assert_eq!(args, owned(&["/bin/sh", "-c", "sleep 5; :", "--host"]));
+        assert_eq!(args, expected);
         assert!(launched_as_host(&args));
     }
 

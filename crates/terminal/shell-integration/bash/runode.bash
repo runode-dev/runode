@@ -82,6 +82,13 @@ if [ -z "${_runode_integrated-}" ]; then
     _runode_ps2=
     # 上一次报告给 runode 的 PATH。
     _runode_path=
+    # Git Bash、MSYS2 和 Cygwin 里的路径写成 /c/Users/…，PATH 用冒号隔开，Windows 上的 runode 用不了：报告
+    # 前用 cygpath 换成 Windows 的写法。cygpath 是外部程序，只在目录或 PATH 变了时调；换过的目录记在
+    # _runode_cwd（原样）和 _runode_cwd_native（换好的）里。
+    _runode_windows=
+    case ${OSTYPE-} in msys* | cygwin*) _runode_windows=1 ;; esac
+    _runode_cwd=
+    _runode_cwd_native=
     # 上一次报告给 runode 的函数名。
     _runode_names=
     # bash 5.3 起 compgen -V 能把结果直接放进数组，每次显示提示符都能重新收集而不起子进程。更老
@@ -122,9 +129,13 @@ if [ -z "${_runode_integrated-}" ]; then
             _runode_command_end "$_runode_last_status"
         fi
         _runode_prompted=1
-        # ${var@P} 也是 4.4 才有，和 PS0 一起判断。
+        # PROMPT_COMMAND 里的 HISTCMD 就是接下来输入的命令的编号；这时展开的 \! 常常还是上一条命令的。用户
+        # unset 过 HISTCMD 时它只是个普通变量，才退回 \!。${var@P} 也是 4.4 才有，和 PS0 一起判断。
         if [ -n "$_runode_ps0" ]; then
-            _runode_histnext=${_runode_bang@P}
+            case ${HISTCMD-} in
+                '' | *[!0-9]*) _runode_histnext=${_runode_bang@P} ;;
+                *) _runode_histnext=$HISTCMD ;;
+            esac
         fi
         if [ "$PS1" != "$_runode_ps1" ]; then
             _runode_ps1='\[\033]133;A;cl=line;redraw=last\007\]'"$PS1$_runode_cursor"'\[\033]133;'$_runode_input_mark'\007\]'
@@ -135,12 +146,24 @@ if [ -z "${_runode_integrated-}" ]; then
             PS2=$_runode_ps2
         fi
         if [ -n "${_runode_report_token-}" ]; then
-            _runode_urlencode "$PWD"
+            if [ -z "$_runode_windows" ]; then
+                _runode_cwd_native=$PWD
+            elif [ "$PWD" != "$_runode_cwd" ]; then
+                _runode_cwd=$PWD
+                _runode_cwd_native=$(command cygpath -w -- "$PWD") || _runode_cwd_native=$PWD
+            fi
+            _runode_urlencode "$_runode_cwd_native"
             printf '\033]6973;%s;cwd=%s\007' "$_runode_report_token" "$_runode_encoded"
         fi
         if [ -n "${_runode_report_token-}" ] && [ "$PATH" != "$_runode_path" ]; then
             _runode_path=$PATH
-            _runode_urlencode "$PATH"
+            if [ -n "$_runode_windows" ]; then
+                local native
+                native=$(command cygpath -w -p -- "$PATH") || native=$PATH
+                _runode_urlencode "$native"
+            else
+                _runode_urlencode "$PATH"
+            fi
             printf '\033]6973;%s;path=%s\007' "$_runode_report_token" "$_runode_encoded"
         fi
         _runode_report_names

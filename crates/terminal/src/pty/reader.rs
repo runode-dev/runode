@@ -167,6 +167,7 @@ fn read_once(master: &OwnedFd, buf: &mut [u8]) -> io::Result<Option<usize>> {
 fn read_loop(master: &OwnedFd, notifier: &Notifier, state: &Mutex<State>, mut sink: PtySink) -> Option<PtySink> {
     set_current_thread_interactive();
     let mut buf = vec![0u8; 64 * 1024];
+    let mut fish_marks = super::fish_marks::FishMarks::default();
     let mut fds = [poll_entry(master.as_raw_fd()), poll_entry(notifier.fd().as_raw_fd())];
     // 拿不到退出通知时定时问一次。
     let exit_poll = notifier.polls_exit();
@@ -223,6 +224,7 @@ fn read_loop(master: &OwnedFd, notifier: &Notifier, state: &Mutex<State>, mut si
             Ok(Some(0)) => {}
             Ok(Some(n)) => {
                 drop(guard);
+                fish_marks.filter(&mut buf[..n]);
                 if !sink(PtyEvent::Output(buf[..n].into())) {
                     return None;
                 }

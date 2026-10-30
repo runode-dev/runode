@@ -37,13 +37,17 @@ pub(crate) fn post(
     timeout: Duration,
 ) -> anyhow::Result<Response> {
     let dir = TempDir::new()?;
-    let mut command = Command::new("curl");
+    let headers_file = dir.0.join("headers.txt");
+    let mut command = curl();
     command
         // 不跟重定向：curl 只在换主机时去掉 `Authorization`，别的密钥头会跟着发过去。
         .args(["--silent", "--show-error", "--config", "-"])
         .args(["--connect-timeout", "10", "--max-time"])
         .arg(timeout.as_secs().to_string())
-        .args(["--write-out", "\n%{http_code} %header{x-api-status-code}"]);
+        // 响应头另写进文件自己找：`--write-out` 的 `%header{}` 要 curl 7.84，Windows 10 自带的是 7.55。
+        .arg("--dump-header")
+        .arg(&headers_file)
+        .args(["--write-out", "\n%{http_code}"]);
     for header in headers {
         command.arg("--header").arg(header);
     }
@@ -64,8 +68,6 @@ pub(crate) fn post(
         }
     }
     command.arg("--url").arg(url).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
     let mut child = command.spawn().context("cannot run curl")?;
     let config: String = secret_headers.iter().map(|header| format!("header = \"{}\"\n", quote(header))).collect();
     child.stdin.take().context("no stdin for curl")?.write_all(config.as_bytes())?;
@@ -73,14 +75,38 @@ pub(crate) fn post(
     if !output.status.success() {
         bail!("curl {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim());
     }
-    parse(&String::from_utf8_lossy(&output.stdout))
+    let headers = fs::read(&headers_file).context("cannot read curl response headers")?;
+    parse(&String::from_utf8_lossy(&output.stdout), &String::from_utf8_lossy(&headers))
 }
 
-/// 拆开 curl 的输出：响应体，最后一行是 `--write-out` 写的状态码和 `X-Api-Status-Code`。
-fn parse(stdout: &str) -> anyhow::Result<Response> {
-    let (body, trailer) = stdout.rsplit_once('\n').context("curl printed no status")?;
-    let (status, api_status) = trailer.split_once(' ').unwrap_or((trailer, ""));
-    Ok(Response { status: status.parse()?, api_status: api_status.trim().to_owned(), body: body.to_owned() })
+/// 跑 curl 的命令。Windows 上 `Command` 先找 System32 再找 PATH，所以先按 PATH 找 `curl.exe`，
+/// 用户自己装的新版排在系统自带的前面；也不给它开控制台窗口。
+pub(crate) fn curl() -> Command {
+    #[cfg(windows)]
+    {
+        let program = std::env::var_os("PATH")
+            .and_then(|path| std::env::split_paths(&path).map(|dir| dir.join("curl.exe")).find(|exe| exe.is_file()))
+            .unwrap_or_else(|| PathBuf::from("curl"));
+        let mut command = Command::new(program);
+        std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+        command
+    }
+    #[cfg(not(windows))]
+    Command::new("curl")
+}
+
+/// 拆开 curl 的输出：响应体，最后一行是 `--write-out` 写的状态码；`headers` 是 `--dump-header`
+/// 写下的响应头，有 `100 Continue` 这类中间响应时取最后一段。
+fn parse(stdout: &str, headers: &str) -> anyhow::Result<Response> {
+    let (body, status) = stdout.rsplit_once('\n').context("curl printed no status")?;
+    let lines: Vec<&str> = headers.lines().collect();
+    let last = lines.iter().rposition(|line| line.starts_with("HTTP/")).unwrap_or(0);
+    let api_status = lines[last..]
+        .iter()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("x-api-status-code"))
+        .map_or("", |(_, value)| value.trim());
+    Ok(Response { status: status.trim().parse()?, api_status: api_status.to_owned(), body: body.to_owned() })
 }
 
 /// curl 配置文件里双引号内的写法：反斜杠和双引号前面加反斜杠，换行写成 `\n`。
@@ -173,10 +199,21 @@ mod tests {
 
     #[test]
     fn the_status_line_is_split_off_the_body() {
-        let response = parse("{\"a\":\"x\ny\"}\n200 20000003").unwrap();
+        let headers = "HTTP/1.1 200 OK\r\nX-Api-Status-Code: 20000003\r\n\r\n";
+        let response = parse("{\"a\":\"x\ny\"}\n200", headers).unwrap();
         assert_eq!((response.status, response.api_status.as_str()), (200, "20000003"));
         assert_eq!(response.body, "{\"a\":\"x\ny\"}");
-        assert_eq!(parse("{}\n401 ").unwrap().api_status, "");
+        assert_eq!(parse("{}\n401", "HTTP/1.1 401 Unauthorized\r\n\r\n").unwrap().api_status, "");
+        assert_eq!(parse("{}\n401", "").unwrap().api_status, "");
+    }
+
+    #[test]
+    fn the_api_status_comes_from_the_final_response() {
+        let headers = "HTTP/1.1 100 Continue\r\nx-api-status-code: 1\r\n\r\n\
+                       HTTP/1.1 200 OK\r\nx-api-status-code: 20000000\r\n\r\n";
+        assert_eq!(parse("{}\n200", headers).unwrap().api_status, "20000000");
+        let headers = "HTTP/1.1 200 OK\r\nX-Api-Status-Code: 20000000\r\nX-Debug: HTTP/1.1\r\n\r\n";
+        assert_eq!(parse("{}\n200", headers).unwrap().api_status, "20000000");
     }
 
     #[test]

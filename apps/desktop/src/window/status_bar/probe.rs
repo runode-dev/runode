@@ -1,5 +1,6 @@
 //! 状态栏要问系统的事：各个进程的父进程和 CPU（`ps`）、内存（`proc_pid_rusage`），有哪些 TCP 端口在监听（`lsof`），
-//! 以及防止电脑休眠（`caffeinate`）。都是 macOS 自带的命令，跑不了时当没有。Windows 上这几样由 `windows` 经系统接口问。
+//! 以及防止电脑休眠（`caffeinate`）。都是 macOS 自带的命令，跑不了时当没有。Linux 上端口读 `/proc`，防休眠经
+//! `systemd-inhibit`；Windows 上这几样由 `windows` 经系统接口问。
 
 #[cfg(windows)]
 mod windows;
@@ -193,7 +194,7 @@ fn phys_footprint(_pid: u32) -> Option<u64> {
 }
 
 /// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次（IPv4 和 IPv6 各监听一次的那种）。
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 pub(super) fn listening_ports() -> Vec<Port> {
     let text = output(Command::new("/usr/sbin/lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]), PROBE_TIMEOUT);
     parse_lsof(&text)
@@ -263,9 +264,73 @@ fn parse_ps(text: &str, exe: &str) -> HashMap<u32, Proc> {
         .collect()
 }
 
+/// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次。只认得出本用户进程的端口：别人的进程的
+/// 描述符读不了，和不带 sudo 的 `lsof` 一样。
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(super) fn listening_ports() -> Vec<Port> {
+    let mut inodes = HashMap::new();
+    for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        if let Ok(text) = std::fs::read_to_string(table) {
+            inodes.extend(parse_proc_net_tcp(&text));
+        }
+    }
+    let mut ports: Vec<Port> = Vec::new();
+    if inodes.is_empty() {
+        return ports;
+    }
+    let Ok(procs) = std::fs::read_dir("/proc") else { return ports };
+    for entry in procs.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else { continue };
+        let Ok(fds) = std::fs::read_dir(entry.path().join("fd")) else { continue };
+        let mut command = None;
+        for fd in fds.flatten() {
+            let Ok(target) = std::fs::read_link(fd.path()) else { continue };
+            let Some(inode) = target
+                .to_str()
+                .and_then(|target| target.strip_prefix("socket:["))
+                .and_then(|rest| rest.strip_suffix(']'))
+                .and_then(|inode| inode.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            let Some(&port) = inodes.get(&inode) else { continue };
+            if ports.iter().any(|known| known.port == port) {
+                continue;
+            }
+            let command = command
+                .get_or_insert_with(|| {
+                    std::fs::read_to_string(entry.path().join("comm"))
+                        .map(|comm| comm.trim().to_owned())
+                        .unwrap_or_default()
+                })
+                .clone();
+            ports.push(Port { port, pid, command });
+        }
+    }
+    ports.sort_by_key(|port| port.port);
+    ports
+}
+
+/// `/proc/net/tcp` 和 `tcp6` 里在监听（状态 `0A`）的套接字：inode 对端口号。
+#[cfg(any(all(unix, not(target_os = "macos")), test))]
+fn parse_proc_net_tcp(text: &str) -> HashMap<u64, u16> {
+    text.lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.get(3) != Some(&"0A") {
+                return None;
+            }
+            let port = u16::from_str_radix(fields.get(1)?.rsplit_once(':')?.1, 16).ok()?;
+            let inode = fields.get(9)?.parse().ok().filter(|&inode| inode != 0)?;
+            Some((inode, port))
+        })
+        .collect()
+}
+
 /// `lsof -F pcn` 的输出：`p` 行开始一个进程，跟着 `c` 行是进程名，再是它的各个文件，`n` 行是地址，
 /// 比如 `*:3000`、`127.0.0.1:5173`、`[::1]:8080`。
-#[cfg(any(not(windows), test))]
+#[cfg(any(target_os = "macos", test))]
 fn parse_lsof(text: &str) -> Vec<Port> {
     let mut ports: Vec<Port> = Vec::new();
     let (mut pid, mut command) = (0, String::new());
@@ -288,26 +353,42 @@ fn parse_lsof(text: &str) -> Vec<Port> {
     ports
 }
 
-/// 防止电脑闲置时休眠：拿着期间系统不会因为没人操作而睡眠，放掉（drop）就恢复。`caffeinate -w`
-/// 盯着本进程，app 崩了它也跟着退出，不会一直挡着休眠。
+/// 防止电脑闲置时休眠：拿着期间系统不会因为没人操作而睡眠，放掉（drop）就恢复。拉起的命令盯着本进程
+/// （macOS 上 `caffeinate -w`，Linux 上 `systemd-inhibit` 拿着锁跑 `tail --pid`），app 崩了它也跟着退出，
+/// 不会一直挡着休眠。
 #[cfg(not(windows))]
 pub(super) struct Caffeinate(Child);
 
 #[cfg(not(windows))]
 impl Caffeinate {
     pub(super) fn start() -> std::io::Result<Self> {
-        Command::new("/usr/bin/caffeinate")
-            .args(["-i", "-w", &std::process::id().to_string()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map(Self)
+        let pid = std::process::id().to_string();
+        let mut command = if cfg!(target_os = "macos") {
+            let mut command = Command::new("/usr/bin/caffeinate");
+            command.args(["-i", "-w", &pid]);
+            command
+        } else {
+            let mut command = Command::new("systemd-inhibit");
+            command.args([
+                "--what=idle:sleep",
+                "--who=Runode",
+                "--why=Runode keeps the computer awake",
+                "--mode=block",
+            ]);
+            command.args(["tail", "-f", "/dev/null", &format!("--pid={pid}")]);
+            command
+        };
+        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(Self)
     }
 
-    /// 被别人结束了或者自己崩了；问不出来时也算退出了，宁可重拉也不假装还拦着休眠。
-    pub(super) fn exited(&mut self) -> bool {
-        !matches!(self.0.try_wait(), Ok(None))
+    /// 还在跑时为 `None`。被别人结束了（被信号结束、正常退出）或者问不出来时为 `Ok`，宁可重拉也不假装还拦着
+    /// 休眠；以非零退出码退出是没拿到锁（比如 logind 不在、没有权限），为 `Err`，带着退出状态。
+    pub(super) fn exit(&mut self) -> Option<Result<(), String>> {
+        match self.0.try_wait() {
+            Ok(None) => None,
+            Ok(Some(status)) if status.code().is_some_and(|code| code != 0) => Some(Err(status.to_string())),
+            Ok(Some(_)) | Err(_) => Some(Ok(())),
+        }
     }
 }
 
@@ -347,10 +428,20 @@ mod tests {
     #[test]
     fn a_killed_caffeinate_counts_as_exited() {
         let mut caffeinate = Caffeinate::start().unwrap();
-        assert!(!caffeinate.exited());
+        assert_eq!(caffeinate.exit(), None);
         caffeinate.0.kill().unwrap();
         caffeinate.0.wait().unwrap();
-        assert!(caffeinate.exited());
+        assert_eq!(caffeinate.exit(), Some(Ok(())));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_inhibitor_is_an_error() {
+        let mut refused = Caffeinate(Command::new("/bin/sh").args(["-c", "exit 1"]).spawn().unwrap());
+        while refused.exit().is_none() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(matches!(refused.exit(), Some(Err(_))));
     }
 
     #[cfg(target_os = "macos")]
@@ -378,6 +469,17 @@ mod tests {
         assert_eq!(output(Command::new("/bin/sleep").arg("30"), Duration::from_millis(200)), "");
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
         assert_eq!(output(Command::new("/bin/echo").arg("hi"), PROBE_TIMEOUT), "hi\n");
+    }
+
+    #[test]
+    fn proc_net_tcp_keeps_listening_sockets() {
+        let text = concat!(
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n",
+            "   0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1\n",
+            "   1: 0100007F:1435 0100007F:A2B4 01 00000000:00000000 00:00000000 00000000  1000        0 4243 1\n",
+            "   2: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 0 1\n",
+        );
+        assert_eq!(parse_proc_net_tcp(text), HashMap::from([(4242, 3000)]));
     }
 
     #[test]

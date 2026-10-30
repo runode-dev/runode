@@ -29,7 +29,7 @@ Commands:
   todo         Put tasks for agents on the task board and start them
   schedule     Start a task for an agent at set times
   remote       Pair phones for remote access and manage them
-  service      Start runode at login
+  service      Start runode at login, and upgrade the running host
   completions  Print a completion script for your shell
   help         Show this help, or the help of a command
   version      Show the version
@@ -390,7 +390,8 @@ Options:
 
 const SERVICE: &str = "\
 Start runode at login: a launchd LaunchAgent on macOS, a systemd user service
-on Linux; the app is added to the login items on macOS 13 and later.
+on Linux, a value under HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run on
+Windows; the app is added to the login items on macOS 13 and later.
 Installing a service you already have replaces its file. Neither
 install nor uninstall stops a host that is already running, so its sessions
 stay open.
@@ -398,19 +399,23 @@ stay open.
 Usage: runode service install [host|app]
        runode service uninstall [host|app]
        runode service status
+       runode service upgrade
 
 Commands:
   install    Install the login service and, for the host, start it now if it
              is not running
   uninstall  Remove the login service; a running host keeps running
   status     Show which login services are installed
+  upgrade    After installing a new runode, hand the sessions of the running
+             host to a host of this build, so they stay open. A host run by
+             the systemd service is replaced through the service, which keeps
+             running. Not on Windows, and not while the app is open
 
 Arguments:
   host  The terminal host without a window (`runode --host`), the default.
-        It keeps running in the background while remote-access = true and a
-        phone is paired, so the phone can connect without the app open,
-        and while the task board has schedules, so they start on time;
-        otherwise it exits when idle
+        Started this way it keeps running in the background even with no
+        sessions, so a phone with remote-access = true can connect without
+        the app open and task board schedules start on time
   app   The Runode app, opened at the next login (macOS only)
 
 Options:

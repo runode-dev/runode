@@ -471,11 +471,29 @@ fn limit(mut text: String, max: usize) -> String {
 }
 
 /// 用户的登录 shell `shell` 配好以后的 PATH，问不到时为空。交互加登录地起，`.zshrc` 这类只在交互时
-/// 读的配置里加的目录也算上；配置里打印的别的东西在 `PATH=` 那行之前，取最后一行。
+/// 读的配置里加的目录也算上；配置里打印的别的东西在 `PATH=` 那行之前，取最后一行。Windows 上的 shell
+/// 不从配置里改 PATH，不问。
 fn login_shell_path(shell: &str, dir: &Path) -> Option<OsString> {
+    if cfg!(windows) {
+        return None;
+    }
     let args = ["-i", "-l", "-c", "/usr/bin/env"].map(str::to_owned);
     let env = run(shell, &args, None, dir, None, &[], LOGIN_SHELL_TIMEOUT).ok()?;
     env.lines().rev().find_map(|line| line.strip_prefix("PATH=")).map(OsString::from)
+}
+
+/// 起 `binary` 时交给 `Command` 的程序：Windows 上不带目录的程序名在 `path` 里找，npm 装的 agent 是
+/// `.cmd`，`Command` 自己只补 `.exe`；找不到时原样交出去，由拉起时报错。
+fn program_file(binary: &str, path: Option<&std::ffi::OsStr>) -> std::ffi::OsString {
+    if !cfg!(windows) || binary.contains(['/', '\\']) {
+        return binary.into();
+    }
+    let inherited = std::env::var_os("PATH");
+    let dirs: Vec<_> = path
+        .or(inherited.as_deref())
+        .map(|path| std::env::split_paths(path).filter(|dir| dir.is_absolute()).collect())
+        .unwrap_or_default();
+    crate::subprocess::find_command(&dirs, binary).map_or_else(|| binary.into(), PathBuf::into_os_string)
 }
 
 /// 在 `dir` 里跑 `binary`，`stdin` 不为空时从标准输入交给它，返回标准输出；过了 `timeout` 杀掉。
@@ -489,7 +507,13 @@ fn run(
     env: &[(String, String)],
     timeout: Duration,
 ) -> Result<String, String> {
-    let mut command = Command::new(binary);
+    // 照最后起作用的 PATH 找程序：`env` 里写的压过 `path`；Windows 上环境变量名不分大小写。
+    let env_path = env
+        .iter()
+        .rev()
+        .find(|(name, _)| if cfg!(windows) { name.eq_ignore_ascii_case("PATH") } else { name == "PATH" })
+        .map(|(_, value)| std::ffi::OsStr::new(value));
+    let mut command = Command::new(program_file(binary, env_path.or(path.as_deref())));
     command
         .args(args)
         .current_dir(dir)

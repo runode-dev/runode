@@ -140,6 +140,37 @@ pub fn hand_over(exe: &Path, timing: Timing) -> Outcome {
     }
 }
 
+/// `runode --host --upgrade`：让这个构建的新宿主接手正在跑的单独宿主的会话（`runode service upgrade` 和
+/// systemd 服务的重载拉起它），结果写到标准输出、原因写到标准错误。返回进程的退出码。
+pub fn upgrade() -> i32 {
+    use std::io::Write as _;
+    let outcome = match std::env::current_exe() {
+        Ok(exe) => hand_over(&exe, Timing::default()),
+        Err(err) => Outcome::Failed(format!("cannot tell where runode is: {err}")),
+    };
+    let reason = match outcome {
+        Outcome::TookOver { sessions, replayed } => {
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "A host of this build took over {sessions} sessions.");
+            if replayed > 0 {
+                let _ = writeln!(out, "{replayed} of them lost their scrollback on the way.");
+            }
+            return 0;
+        }
+        Outcome::Refused(HandoffRefusal::DesktopConnected) => {
+            "the runode app is connected to the host; quit it and open the new one instead".to_owned()
+        }
+        Outcome::Refused(HandoffRefusal::Busy) => "the host is already handing its sessions over".to_owned(),
+        Outcome::Refused(HandoffRefusal::NotStandalone) => {
+            "the host runs inside the runode app; quit the app and open the new one instead".to_owned()
+        }
+        Outcome::Refused(reason) => format!("the host refused to hand its sessions over: {reason:?}"),
+        Outcome::Failed(message) => message,
+    };
+    let _ = writeln!(std::io::stderr(), "runode: {reason}; the sessions stay with the running host");
+    1
+}
+
 /// 拉起一个新宿主，等它报告结果，两段期限见 `Timing`。超时时不杀它：它要是在旧宿主提交之后才
 /// 卡住，会话已经在它手里，杀掉会连会话一起结束；提交之前卡住的，旧宿主到期限会自己杀掉它、回滚。
 fn attempt(exe: &Path, timing: Timing) -> Outcome {

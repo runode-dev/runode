@@ -6,7 +6,7 @@ mod common;
 
 use std::{path::Path, process::Command};
 
-use common::{Peer, listen, temp_dir};
+use common::{CAT, Peer, listen, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::git::{GitFileStatus, GitRequest};
 
@@ -36,7 +36,7 @@ fn git_requests_run_in_the_session_directory() {
 
     let mut peer = Peer::hello(&socket, false);
     // 不启动 shell：会话的目录就是开它时给的目录。
-    let id = peer.spawn_with("/bin/cat", false, Some(repo));
+    let id = peer.spawn_with(CAT, false, Some(repo));
 
     peer.send(&ClientMsg::Git { req: 1, id, request: GitRequest::Status });
     peer.send(&ClientMsg::Git { req: 2, id, request: GitRequest::Stage { paths: vec!["a.txt".into()] } });
@@ -55,7 +55,7 @@ fn git_requests_run_in_the_session_directory() {
     peer.send(&ClientMsg::Git { req: 3, id: SessionId(1), request: GitRequest::Status });
     assert!(matches!(peer.reply(), HostMsg::Error { req: Some(3), id: None, .. }));
 
-    let elsewhere = peer.spawn_with("/bin/cat", false, Some(dir));
+    let elsewhere = peer.spawn_with(CAT, false, Some(dir));
     peer.send(&ClientMsg::Git { req: 4, id: elsewhere, request: GitRequest::Status });
     match peer.reply() {
         // 临时目录本身落在某个仓库里时读得到那个仓库，这里只管回的是这条请求。

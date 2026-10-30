@@ -25,8 +25,8 @@ const POSIX_SPAWN_SETSID: libc::c_int = 0x0400;
 #[cfg(all(unix, not(target_os = "macos")))]
 const POSIX_SPAWN_SETSID: libc::c_int = 0x80;
 
-/// 除了显式接上的，子进程不继承任何描述符。只有 macOS 有这个标志；别的系统上靠各处打开描述符时
-/// 都设了 close-on-exec（Rust 标准库默认如此）。
+/// 除了显式接上的，子进程不继承任何描述符。只有 macOS 有这个标志；Linux 上另由 `close_from`
+/// 关描述符。
 #[cfg(target_os = "macos")]
 const CLOEXEC_DEFAULT: libc::c_int = libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -223,6 +223,8 @@ fn detach(exe: &Path, extra_args: &[&CStr], status: Option<&OwnedFd>) -> io::Res
         // SAFETY: `actions` 已经初始化；`status` 在 posix_spawn 返回前一直开着。
         check(unsafe { libc::posix_spawn_file_actions_adddup2(actions.as_mut_ptr(), status.as_raw_fd(), STATUS_FD) })?;
     }
+    #[cfg(target_os = "linux")]
+    close_from(&mut actions, if status.is_some() { STATUS_FD + 1 } else { STATUS_FD })?;
     let mut attr = SpawnAttr::new()?;
     let flags = POSIX_SPAWN_SETSID | CLOEXEC_DEFAULT | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
     // SAFETY: `attr` 已经初始化；两个信号集是本地变量，初始化后才交出去。
@@ -290,6 +292,24 @@ impl FileActions {
     fn as_mut_ptr(&mut self) -> *mut libc::posix_spawn_file_actions_t {
         &raw mut self.0
     }
+}
+
+/// 子进程里关掉 `from` 起的所有描述符，接在 `actions` 已有的动作后面：app 从别的程序继承来的、C 库没设
+/// close-on-exec 打开的描述符不跟着宿主活下去，比如拉起 app 的进程等着结尾的管道写端。用 glibc 2.34 起有的
+/// `posix_spawn_file_actions_addclosefrom_np`，运行时找；找不到（更老的 glibc、musl）时不关，只靠各处打开描述符
+/// 时设的 close-on-exec。
+#[cfg(target_os = "linux")]
+fn close_from(actions: &mut FileActions, from: libc::c_int) -> io::Result<()> {
+    type AddCloseFrom = unsafe extern "C" fn(*mut libc::posix_spawn_file_actions_t, libc::c_int) -> libc::c_int;
+    // SAFETY: 名字是以 NUL 结尾的常量；`RTLD_DEFAULT` 在已经载入的库里找。
+    let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"posix_spawn_file_actions_addclosefrom_np".as_ptr()) };
+    if symbol.is_null() {
+        return Ok(());
+    }
+    // SAFETY: glibc 里这个名字的函数就是这个签名。
+    let add = unsafe { std::mem::transmute::<*mut libc::c_void, AddCloseFrom>(symbol) };
+    // SAFETY: `actions` 已经初始化。
+    check(unsafe { add(actions.as_mut_ptr(), from) })
 }
 
 #[cfg(unix)]

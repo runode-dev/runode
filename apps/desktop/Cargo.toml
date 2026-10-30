@@ -61,14 +61,20 @@ notify.workspace = true
 # 文件树按内容搜时标出结果里命中的那一段。
 regex.workspace = true
 
+# macOS 和 Windows 上总是录音。
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+runode-speech = { workspace = true, features = ["recording"] }
+
 # 标准「关于」面板、系统偏好的语言和窗口菜单只有 AppKit 提供，GPUI 没有封装。
 [target.'cfg(windows)'.dependencies]
 # Windows 10 起有的 AF_UNIX socket，连宿主用。
 uds_windows.workspace = true
 # 界面程序跑命令行时接上终端的控制台（`AttachConsole`）；远程桌面的采集进程等连接（`WSAPoll`）；
-# 状态栏问进程表、各进程的内存、CPU 和命令行，问在监听的 TCP 端口，防止休眠。
+# 状态栏问进程表、各进程的内存、CPU 和命令行，问在监听的 TCP 端口，防止休眠；远程访问页要管理员确认后
+# 改防火墙规则（`ShellExecuteExW`）。
 windows-sys = { workspace = true, features = [
     "Wdk_System_Threading",
+    "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
     "Win32_Networking_WinSock",
     "Win32_System_Console",
@@ -77,6 +83,8 @@ windows-sys = { workspace = true, features = [
     "Win32_System_ProcessStatus",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -93,7 +101,8 @@ raw-window-handle.workspace = true
 [features]
 # Linux 的窗口后端。不开时 gpui_linux 只有无头平台，开不出窗口，可执行文件只依赖 libc，没有图形库的服务器上
 # 也能跑命令行和宿主；开了启动时就要 libxcb、libxkbcommon、libxkbcommon-x11 和 libfreetype。
-linux-desktop = ["gpui_platform/x11", "gpui_platform/wayland"]
+# 录音（`runode-speech` 的 `recording`）也只在这时开：它要 ALSA 的 libasound。
+linux-desktop = ["gpui_platform/x11", "gpui_platform/wayland", "runode-speech/recording"]
 
 [dev-dependencies]
 # 键位测试要一个 `App` 来载入绑定（`KeyBinding::load`）。

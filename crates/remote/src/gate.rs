@@ -125,9 +125,8 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     let mut push = PushRequests { dirs: &shared.dirs, device: device_id };
     bridge(&mut conn, tcp, &host, cut, &mut push);
     let _ = host.shutdown(Shutdown::Both);
-    // Windows 上关了读的一边（`serve` 收尾时）以后对面再发来什么，连接马上被重置，已经交给系统、手机
-    // 还没读走的输出跟着丢掉：先只关写的一边，等手机读完、自己关了再收尾。
-    #[cfg(windows)]
+    // 关了连接以后（Windows 上 `serve` 收尾时只关读的一边也一样）对面再发来什么，连接马上被重置，已经交给
+    // 系统、手机还没读走的输出跟着丢掉：先只关写的一边，等手机读完、自己关了再收尾。
     if !cut.load(Ordering::Relaxed) && tcp.set_nonblocking(false).is_ok() {
         linger(tcp);
     }

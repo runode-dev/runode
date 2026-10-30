@@ -176,6 +176,10 @@ install_linux() {
         aarch64 | arm64) arch=aarch64 ;;
         *) fail "不支持这个架构：$(uname -m)" ;;
     esac
+    # 发布的可执行文件按 glibc 链接，Alpine 这类 musl 的系统上起不来。
+    if ldd --version 2>&1 | grep -qi musl; then
+        fail "这个系统用 musl libc（比如 Alpine），runode 只发布了 glibc 的版本"
+    fi
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
 
@@ -196,11 +200,27 @@ install_linux() {
     staged=$lib_dir/.runode.new.$$
     trap 'rm -rf "$tmp" "$staged"' EXIT
     install -m 755 "$tmp/runode" "$staged"
+    # 换上之前先在装去的位置跑一次（临时目录可能挂成 noexec）：glibc 太旧、缺共享库时在这里报出来，
+    # 装着的旧版本不动。
+    if ! "$staged" --version >"$tmp/version.txt" 2>&1; then
+        detail=$(cat "$tmp/version.txt")
+        case $detail in
+            *GLIBC_*) fail "这个系统的 glibc 太旧，runode 起不来：$detail" ;;
+            *) fail "runode 在这个系统上起不来：$detail" ;;
+        esac
+    fi
     mv -f "$staged" "$lib_dir/runode"
 
     link_cli "$lib_dir/runode"
-    say "已装好 $bin_dir/runode。Linux 版没有桌面界面，用手机连上来：后台跑起 runode --host，"
-    say "再用 runode remote pair 和手机配对（会自己在配置里打开 remote-access）。"
+    say "已装好 $bin_dir/runode。Linux 版没有桌面界面，用手机连上来：先用 runode service install host"
+    say "让宿主登录时自己起来、一直跑着，再用 runode remote pair 和手机配对（会自己在配置里打开 remote-access）。"
+    # 旧宿主还在跑时让新版本的宿主接手它的会话，终端不断。
+    if pgrep -f '(^|/)(runode|rn) --host' >/dev/null 2>&1; then
+        say "旧版本的 runode 宿主还在跑，让新版本接手它的会话。"
+        if ! "$lib_dir/runode" service upgrade; then
+            say "没换成，旧宿主照旧跑着、退出前用的还是旧版本；之后可以再跑一次 runode service upgrade。"
+        fi
+    fi
 }
 
 case $(uname -s) in

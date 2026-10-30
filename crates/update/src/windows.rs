@@ -1,6 +1,7 @@
 //! Windows 的更新：把 setup.exe 下载到装着的 runode.exe 旁边的暂存目录，核对签名后留着
 //! （`Installation::stage`），app 退出时静默运行它（`Staged::install`），由安装程序关掉还在跑的
-//! 进程、换上新文件。宿主在 Windows 上不交接会话，所以换上新版本时终端会话随之结束。
+//! 进程、换上新文件。宿主在 Windows 上不交接会话，所以换上新版本时终端会话随之结束。重启以更新时
+//! 由安装程序装完后打开新版本，不由 app 自己重启：自己重启会赶在安装程序换文件之前把旧版本打开。
 //!
 //! 签名核对：新包要有 Authenticode 签名，签名者证书的指纹和在跑的 runode.exe 一样，版本号和
 //! 清单一致；在跑的 runode.exe 自己没签名、不是安装程序装的（旁边没有 unins000.exe）时不更新。
@@ -63,7 +64,13 @@ impl Installation {
         crate::fetch::download(url, &setup, ARCHIVE_TIMEOUT, progress)?;
         verify(&setup, &self.thumbprint, version)?;
         tracing::info!("staged Runode {version} at {}", setup.display());
-        Ok(Staged { dir: dir.to_owned(), setup, thumbprint: self.thumbprint.clone(), version: version.to_owned() })
+        Ok(Staged {
+            dir: dir.to_owned(),
+            exe: self.exe.clone(),
+            setup,
+            thumbprint: self.thumbprint.clone(),
+            version: version.to_owned(),
+        })
     }
 }
 
@@ -71,6 +78,8 @@ impl Installation {
 #[derive(Debug)]
 pub struct Staged {
     dir: PathBuf,
+    /// 装着的 runode.exe，没起安装程序又要重新打开时用。
+    exe: PathBuf,
     setup: PathBuf,
     thumbprint: String,
     version: String,
@@ -85,22 +94,53 @@ impl Staged {
     /// 退出可能隔了几个小时，暂存目录又是用户写得了的，所以装上前再核对。已经装着不比它旧的版本时
     /// 删掉暂存目录就算办完。没装上时暂存目录照样删掉，下次重新下载；装上时安装程序还在用这个目录，
     /// 留到下次下载前清理。
-    pub fn install(self) -> Result<(), Error> {
+    ///
+    /// `relaunch` 时装完由安装程序打开新版本；没起安装程序（不用装、核对不过、起不来）时打开装着的
+    /// 这份，用户要的重启照样办到。不 `relaunch` 时安装程序装完不打开。还在跑的 runode.exe（包括单独跑的
+    /// 宿主）由安装程序强行关掉：无窗口的进程 Restart Manager 礼貌地关不掉，关不掉就换不了文件。
+    pub fn install(self, relaunch: bool) -> Result<(), Error> {
+        let started = self.start_installer(relaunch);
+        if relaunch && !matches!(started, Ok(true)) {
+            reopen(&self.exe);
+        }
+        started.map(|_| ())
+    }
+
+    /// 起了安装程序时为 `true`；不用装时为 `false`。
+    fn start_installer(&self, relaunch: bool) -> Result<bool, Error> {
         if !crate::is_newer(&self.version, env!("CARGO_PKG_VERSION")) {
             let _ = fs::remove_dir_all(&self.dir);
-            return Ok(());
+            return Ok(false);
         }
         if let Err(err) = verify(&self.setup, &self.thumbprint, &self.version) {
             let _ = fs::remove_dir_all(&self.dir);
             return Err(err);
         }
         Command::new(&self.setup)
-            .args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
+            .args(installer_args(relaunch))
             .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
             .spawn()
             .map_err(|err| io(&self.setup, err))?;
         tracing::info!("started the installer for Runode {}", self.version);
-        Ok(())
+        Ok(true)
+    }
+}
+
+/// 静默运行安装程序的参数：总是强行关掉还在跑的 runode.exe；`relaunch` 时不带 `/NORUN`，安装脚本的
+/// `LaunchAfterSilentInstall` 装完打开新版本。
+fn installer_args(relaunch: bool) -> Vec<&'static str> {
+    let mut args = vec!["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/FORCECLOSEAPPLICATIONS"];
+    if !relaunch {
+        args.push("/NORUN");
+    }
+    args
+}
+
+/// 打开 `exe`，不等它。
+fn reopen(exe: &Path) {
+    match Command::new(exe).creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP).spawn() {
+        Ok(_) => tracing::info!("reopened {}", exe.display()),
+        Err(err) => tracing::error!("failed to reopen {}: {err}", exe.display()),
     }
 }
 
@@ -134,4 +174,21 @@ fn signature(file: &Path) -> Result<authenticode::Signed, String> {
 
 fn io(path: &Path, err: std::io::Error) -> Error {
     Error::Io(format!("{}: {err}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 安装程序总是静默地强行关掉还在跑的 runode.exe；只有重启以更新时装完打开新版本。
+    #[test]
+    fn the_installer_opens_the_app_only_when_relaunching() {
+        let quit = installer_args(false);
+        let restart = installer_args(true);
+        for args in [&quit, &restart] {
+            assert!(args.contains(&"/VERYSILENT") && args.contains(&"/FORCECLOSEAPPLICATIONS"), "{args:?}");
+        }
+        assert!(quit.contains(&"/NORUN"));
+        assert!(!restart.contains(&"/NORUN"));
+    }
 }

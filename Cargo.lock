@@ -3510,6 +3510,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "igd-next"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4347,6 +4357,20 @@ checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
 dependencies = [
  "cfg-if",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "mdns-sd"
+version = "0.21.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8562654710f72a9cbce4b0d5b7c366a2f94330ba1ce3740f15e932ea2d37b161"
+dependencies = [
+ "fastrand",
+ "flume",
+ "if-addrs",
+ "mio",
+ "socket-pktinfo",
+ "socket2",
 ]
 
 [[package]]
@@ -6760,6 +6784,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-service-management",
  "runode-paths",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6780,6 +6805,7 @@ dependencies = [
  "serde_json",
  "uds_windows",
  "unicode-width",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6821,6 +6847,9 @@ dependencies = [
 [[package]]
 name = "runode-paths"
 version = "0.1.16"
+dependencies = [
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "runode-preview"
@@ -6863,6 +6892,7 @@ version = "0.1.16"
 dependencies = [
  "iroh",
  "libc",
+ "mdns-sd",
  "rcgen",
  "ring",
  "runode-paths",
@@ -6959,10 +6989,12 @@ dependencies = [
  "gpui-pre",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "raw-window-handle",
  "runode-paths",
  "runode-types",
  "tracing",
  "unicode-segmentation",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7729,6 +7761,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4aaa7368fcf4852a4c2dd92df0cace6a71f2091ca0a23391ce7f3a31833f1523"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "socket-pktinfo"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "612942246d0cc239cfd83af1dfd39be47f649208a3524e5e9da651910128e0ac"
+dependencies = [
+ "libc",
+ "socket2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

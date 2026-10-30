@@ -350,7 +350,8 @@ mod tests {
         .unwrap();
         let mut host = HostSession::new(size, pty, None, &TermSettings::default()).unwrap();
         let (mut session, requests) = capturing_session_sized(size);
-        let script = "printf '\\033[31mred\\033[0m \\344\\270\\255\\346\\226\\207 ok\\n'; exit\r";
+        // 先换一行：输入在 shell 打出提示符之前就写过去了，输出可能接在提示符后面（Linux 的 dash）。
+        let script = "printf '\\n\\033[31mred\\033[0m \\344\\270\\255\\346\\226\\207 ok\\n'; exit\r";
         for c in script.chars() {
             let (key, unshifted) = if c == '\r' { (Key::Enter, '\r') } else { (Key::Unidentified, c) };
             let input = KeyInput {

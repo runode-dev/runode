@@ -22,9 +22,20 @@
 # 口令是 runode 启动这个 shell 时随机生成、经 RUNODE_REPORT_TOKEN_FILE 指着的文件给的。runode 只认带着
 # 这个口令的 6973 报告，屏幕上的别的输出伪造不了。
 #
-# runode 把这个文件所在的数据目录加进 XDG_DATA_DIRS，nushell 读完用户的 config.nu 以后自动加载
-# vendor/autoload 里的脚本。先把加进去的那一项去掉，免得在这个 shell 里启动的程序继承它。
+# runode 把这个文件所在的数据目录加进 XDG_DATA_DIRS（Windows 上的 nushell 不看它，改设 NU_VENDOR_AUTOLOAD_DIR，
+# 用户自己设过的值放在 RUNODE_NU_VENDOR_AUTOLOAD_DIR），nushell 读完用户的 config.nu 以后自动加载
+# vendor/autoload 里的脚本。先把加进去的那一项去掉、设过的换回去，免得在这个 shell 里启动的程序继承它。
+# shortcut: nushell 只认一个 NU_VENDOR_AUTOLOAD_DIR，用户自己设的那个目录里的脚本这个 shell 不加载；有人
+# 用到再由 runode 把它们一起放进数据目录。
 
+if ($env.RUNODE_NU_DATA_DIR? | default "") != "" and ($env.NU_VENDOR_AUTOLOAD_DIR? | default "") == ($env.RUNODE_NU_DATA_DIR | path join nushell vendor autoload) {
+    if ($env.RUNODE_NU_VENDOR_AUTOLOAD_DIR? | default "") != "" {
+        $env.NU_VENDOR_AUTOLOAD_DIR = $env.RUNODE_NU_VENDOR_AUTOLOAD_DIR
+    } else {
+        hide-env NU_VENDOR_AUTOLOAD_DIR
+    }
+}
+hide-env -i RUNODE_NU_VENDOR_AUTOLOAD_DIR
 if ($env.RUNODE_NU_DATA_DIR? | default "") != "" and 'XDG_DATA_DIRS' in $env {
     let dirs = $env.XDG_DATA_DIRS | split row (char esep) | where $it != $env.RUNODE_NU_DATA_DIR
     if ($dirs | is-empty) {
@@ -42,10 +53,17 @@ $env.__runode = {
     token: (if ($env.RUNODE_REPORT_TOKEN_FILE? | default "") != "" {
         let file = $env.RUNODE_REPORT_TOKEN_FILE
         # 用外部命令：这个脚本在用户的 config.nu 之后加载，用户的 alias、def（比如 `alias open = ^open`）
-        # 会盖住同名的内建命令。
-        let token = try { ^cat $file | str trim } catch { "" }
-        ^rm -f -- $file
-        $token
+        # 会盖住同名的内建命令，参数对不上时整个脚本解析不过，没走到的分支也一样。Windows 上没有 cat、rm，
+        # 用 cmd 的（`/d` 不跑它的 AutoRun）。
+        if $nu.os-info.name == "windows" {
+            let token = try { ^cmd /d /c type $file | str trim } catch { "" }
+            try { ^cmd /d /c del /f /q $file }
+            $token
+        } else {
+            let token = try { ^cat $file | str trim } catch { "" }
+            try { ^rm -f -- $file }
+            $token
+        }
     } else {
         $env.RUNODE_REPORT_TOKEN? | default ""
     })
@@ -129,7 +147,13 @@ $env.config.hooks.pre_execution = ($env.config.hooks.pre_execution? | default []
 # shell 的报告。换之前报告这条命令执行完了：exec 之后不会再有它的 133;D。
 def --env runode-reload [] {
     let state = $env.__runode? | default {}
-    if ($state.data_dir? | default "") != "" {
+    if ($state.data_dir? | default "") != "" and $nu.os-info.name == "windows" {
+        if ($env.NU_VENDOR_AUTOLOAD_DIR? | default "") != "" {
+            $env.RUNODE_NU_VENDOR_AUTOLOAD_DIR = $env.NU_VENDOR_AUTOLOAD_DIR
+        }
+        $env.NU_VENDOR_AUTOLOAD_DIR = $state.data_dir | path join nushell vendor autoload
+        $env.RUNODE_NU_DATA_DIR = $state.data_dir
+    } else if ($state.data_dir? | default "") != "" {
         # XDG_DATA_DIRS 没设时 nushell 用这两个默认目录，加了我们的之后要显式带上。
         let dirs = $env.XDG_DATA_DIRS? | default "/usr/local/share:/usr/share" | split row (char esep)
         $env.XDG_DATA_DIRS = [$state.data_dir] ++ $dirs | str join (char esep)

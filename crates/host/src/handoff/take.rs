@@ -104,8 +104,11 @@ impl Host {
         let late = || options.ready_by.is_some_and(|at| Instant::now() >= at);
         if !late()
             && let Some(on_ready) = &options.on_ready
+            && let Err(reason) = on_ready()
         {
-            on_ready();
+            self.stop_listening(&control);
+            release_all(&taken.handles);
+            return Err(abort(&stream, reason, started));
         }
         if late() {
             self.stop_listening(&control);
@@ -136,7 +139,7 @@ impl Host {
             tracing::debug!("cannot tell the old host the handoff is done: {err}");
         }
         let _ = stream.shutdown(std::net::Shutdown::Both);
-        let report = TakeOverReport { sessions: taken.handles.len(), replayed: taken.replayed };
+        let report = TakeOverReport { sessions: taken.handles.len(), replayed: taken.replayed, stay: taken.stay };
         tracing::info!(
             "took {} sessions over in {} ms ({} rebuilt from a VT replay{}; handshake and the old host getting \
              ready {} ms, receive {} ms, rebuild {} ms, wait for the commit {} ms, open {} ms)",
@@ -213,7 +216,17 @@ fn handshake(shared: &Shared, stream: &UnixStream) -> Result<(u32, Option<libc::
         other => return Err(TakeOverError::Failed(format!("unexpected answer to hello: {other:?}"))),
     };
     let handoff = ClientMsg::Handoff { min_format: OLDEST_READABLE_HANDOFF_FORMAT, max_format: HANDOFF_FORMAT };
-    send(stream, &handoff).map_err(|err| failed("cannot ask for the handoff", &err))?;
+    if let Err(err) = send(stream, &handoff) {
+        // 旧宿主开始把会话交给别的新宿主时给这条连接发了 `Goodbye { Handoff }` 就关掉它，请求可能写不出去
+        // （`EPIPE`）：收下已经到了的那条再定。
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+        return match receive_message(stream) {
+            Ok(HostMsg::Goodbye { reason: GoodbyeReason::Handoff }) => {
+                Err(TakeOverError::Refused(HandoffRefusal::Busy))
+            }
+            _ => Err(failed("cannot ask for the handoff", &err)),
+        };
+    }
     match receive_message(stream).map_err(|err| failed("no answer to the handoff", &err))? {
         HostMsg::HandoffRefused { reason } => Err(TakeOverError::Refused(reason)),
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff } => Err(TakeOverError::Refused(HandoffRefusal::Busy)),
@@ -265,6 +278,7 @@ struct HostState {
     theme: Option<TermSettings>,
     clipboard: ClipboardAccess,
     layout: Vec<WindowLayout>,
+    stay: Option<bool>,
 }
 
 /// 接手了的会话，PTY 都停在闸门上。
@@ -273,6 +287,7 @@ struct Taken {
     theme: Option<TermSettings>,
     clipboard: ClipboardAccess,
     layout: Vec<WindowLayout>,
+    stay: Option<bool>,
     handles: Vec<(SessionId, Handle)>,
     replayed: Vec<SessionId>,
 }
@@ -303,8 +318,8 @@ impl Received {
             return Err(reason);
         }
         handles.sort_by_key(|(id, _)| *id);
-        let HostState { listener, lock, socket, theme, clipboard, layout } = host;
-        Ok((Taken { socket, theme, clipboard, layout, handles, replayed }, listener, lock))
+        let HostState { listener, lock, socket, theme, clipboard, layout, stay } = host;
+        Ok((Taken { socket, theme, clipboard, layout, stay, handles, replayed }, listener, lock))
     }
 }
 
@@ -313,8 +328,18 @@ impl Received {
 fn receive(shared: &Shared, stream: &UnixStream, sessions: u32, our_format: u16) -> Result<Received, String> {
     let (data, fds) = fd_passing::recv_with_fds(stream).map_err(|err| format!("cannot receive the host: {err}"))?;
     let (part, _) = decode_part(&data).map_err(|err| format!("cannot read the host: {err}"))?;
-    let HandoffPart::Host { format, snapshot_format, sessions: count, theme, socket, build, clipboard, layout, .. } =
-        part
+    let HandoffPart::Host {
+        format,
+        snapshot_format,
+        sessions: count,
+        theme,
+        socket,
+        build,
+        clipboard,
+        layout,
+        stay,
+        ..
+    } = part
     else {
         return Err("the old host did not start with itself".into());
     };
@@ -333,6 +358,7 @@ fn receive(shared: &Shared, stream: &UnixStream, sessions: u32, our_format: u16)
             theme,
             clipboard,
             layout,
+            stay,
         },
         adopting: Vec::new(),
         rebuilt: Vec::new(),

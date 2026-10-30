@@ -137,6 +137,10 @@ struct Status {
     working: bool,
     sleep: SleepMode,
     caffeinate: Option<Caffeinate>,
+    /// 拉不起防休眠的命令，已经记过日志。
+    sleep_failed: bool,
+    /// 防休眠的命令没拿到锁就退出了；不再要挡或者换了模式时清掉，再试。
+    sleep_refused: bool,
 }
 
 impl Global for Status {}
@@ -166,22 +170,40 @@ impl Status {
 
     /// 照现在的模式和 agent 的状态拿起或放下 `Caffeinate`。
     fn apply_sleep(&mut self) {
-        // 被外面结束了的（比如 `killall caffeinate`）放掉，下面照要不要重拉，免得一直显示生效中。
-        if self.caffeinate.as_mut().is_some_and(Caffeinate::exited) {
-            self.caffeinate = None;
+        match self.caffeinate.as_mut().and_then(Caffeinate::exit) {
+            None => {}
+            // 被外面结束了的（比如 `killall caffeinate`）放掉，下面照要不要重拉，免得一直显示生效中。
+            Some(Ok(())) => self.caffeinate = None,
+            // 没拿到锁：放掉，要挡的理由不变时不再重拉，免得每次轮询都拉起一个、显示生效中、再退出。
+            Some(Err(err)) => {
+                self.caffeinate = None;
+                self.sleep_refused = true;
+                self.sleep_error(&err);
+            }
         }
         let want = match self.sleep {
             SleepMode::On => true,
             SleepMode::Agent => self.working,
             SleepMode::Off => false,
         };
-        if want && self.caffeinate.is_none() {
+        if want && self.caffeinate.is_none() && !self.sleep_refused {
             match Caffeinate::start() {
                 Ok(caffeinate) => self.caffeinate = Some(caffeinate),
-                Err(err) => tracing::warn!("cannot prevent sleep: {err}"),
+                Err(err) => self.sleep_error(&err.to_string()),
             }
         } else if !want {
             self.caffeinate = None;
+            self.sleep_refused = false;
+        }
+    }
+
+    /// 拉不起防休眠的命令时每次轮询都会再试一遍，只把第一回记成警告。
+    fn sleep_error(&mut self, err: &str) {
+        if self.sleep_failed {
+            tracing::debug!("cannot prevent sleep: {err}");
+        } else {
+            self.sleep_failed = true;
+            tracing::warn!("cannot prevent sleep: {err}");
         }
     }
 }
@@ -286,6 +308,7 @@ fn tick(probed: Option<(Procs, Option<Vec<Port>>, Option<u32>)>, cx: &mut App) {
 fn set_sleep(mode: SleepMode, cx: &mut App) {
     let status = cx.default_global::<Status>();
     status.sleep = mode;
+    status.sleep_refused = false;
     status.apply_sleep();
     cx.refresh_windows();
 }

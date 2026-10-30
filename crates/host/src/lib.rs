@@ -50,6 +50,7 @@ use std::{
 };
 
 use anyhow::Result;
+pub use browse::canonicalize;
 #[cfg(unix)]
 pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeOverOptions, TakeOverReport, peer_pid};
 pub use idle::Stopped;
@@ -60,7 +61,7 @@ pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement
 use runode_types::{clipboard::ClipboardAccess, grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 #[cfg(windows)]
 pub use server::peer_pid;
-pub use server::{same_user, set_buffers};
+pub use server::{same_user, set_buffers, socket_pair};
 
 /// 新开一个会话。
 #[derive(Clone, Debug)]

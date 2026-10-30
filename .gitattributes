@@ -1,0 +1,3 @@
+# 文本文件在各平台的工作区里都是 LF。Windows 上 git 默认 `core.autocrlf=true`，会把检出的文件改成 CRLF：
+# 编进程序的 shell 集成脚本（bash 读到 `\r` 就报错）、skill 和许可证清单，以及和手机端对照的协议样例都会跟着变。
+* text=auto eol=lf

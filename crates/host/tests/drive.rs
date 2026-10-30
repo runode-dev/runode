@@ -7,7 +7,7 @@ mod common;
 
 use std::{thread, time::Duration, time::Instant};
 
-use common::{Peer, WAIT, listen, script, temp_dir};
+use common::{CAT, Peer, WAIT, listen, script, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::{AttachMode, ClientKind, FrameKind};
 use runode_types::{
@@ -109,7 +109,7 @@ fn command_output_needs_prompt_marks() {
 
     // 没有标记的会话；换一条连接问，免得混进刚才那个会话结束的消息。
     let mut peer = Peer::hello(&socket, false);
-    let id = peer.spawn("/bin/cat");
+    let id = peer.spawn(CAT);
     peer.send(&ClientMsg::ReadScreen { id, lines: None, command: Some(1) });
     let reply = peer.reply();
     let HostMsg::Error { id: Some(errored), message, .. } = reply else { panic!("expected an error: {reply:?}") };
@@ -141,7 +141,7 @@ fn drivers_are_recorded_and_cleared_by_the_desktop() {
     let (host, socket) = listen(&dir);
     let me = SessionId(0x2a);
     let mut agent = Peer::connect(&socket).greet_from(ClientKind::Cli, false, Some(me));
-    let id = agent.spawn("/bin/cat");
+    let id = agent.spawn(CAT);
     let (channel, _) = agent.attach(id, AttachMode::MetaOnly);
     agent.input(channel, b"hi");
     let meta = wait_for_meta(&agent, id, |meta| meta.driver.is_some());

@@ -64,9 +64,10 @@ pub(super) fn home_dir() -> Option<PathBuf> {
     runode_paths::Dirs::from_env().home
 }
 
-/// `path` 解开符号链接后的写法，比两个目录是不是同一个用；解不开（目录没了）时照原样。
+/// `path` 解开符号链接后的写法，比两个目录是不是同一个用，也拿去开终端、记进工作区（`runode_host::canonicalize`）；
+/// 解不开（目录没了）时照原样。
 pub(super) fn canonical_dir(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    runode_host::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// 在单独的线程上算 `dir` 的 `canonical_dir`，算好之前为空：目录在挂死的网络卷、autofs 上时会一直卡着，
@@ -258,8 +259,10 @@ impl WindowView {
         match &*found {
             Some((seen, installed)) if *seen == path => *installed,
             _ => {
-                let on_path =
-                    |path: &std::ffi::OsString| std::env::split_paths(path).any(|dir| dir.join(program).is_file());
+                let on_path = |path: &std::ffi::OsString| {
+                    let dirs: Vec<_> = std::env::split_paths(path).filter(|dir| dir.is_absolute()).collect();
+                    crate::subprocess::find_command(&dirs, program).is_some()
+                };
                 let installed = path.as_ref().is_some_and(on_path);
                 *found = Some((path, installed));
                 installed

@@ -319,16 +319,24 @@ pub fn open(cx: &App) {
         tracing::warn!("failed to create {}: {err}", path.display());
         return;
     }
-    // `.conf` 常常没有默认程序，或者关联到别的应用；macOS 上用 `open -t` 指定文本编辑器。
-    // 等它退出要在别的线程里，免得卡住界面，也免得留下僵尸进程。
-    if cfg!(target_os = "macos") {
-        std::thread::spawn(move || {
-            if let Err(err) = std::process::Command::new("open").arg("-t").arg(&path).status() {
-                tracing::warn!("failed to open {}: {err}", path.display());
-            }
-        });
+    // `.conf` 常常没有默认程序，或者关联到别的应用：macOS 上用 `open -t` 指定文本编辑器，Windows 上
+    // 用系统自带的记事本。等它退出要在别的线程里，免得卡住界面，也免得留下僵尸进程。
+    let editor: Option<(&str, &[&str])> = if cfg!(target_os = "macos") {
+        Some(("open", &["-t"]))
+    } else if cfg!(windows) {
+        Some(("notepad.exe", &[]))
     } else {
-        cx.open_with_system(&path);
+        None
+    };
+    match editor {
+        Some((program, args)) => {
+            std::thread::spawn(move || {
+                if let Err(err) = std::process::Command::new(program).args(args).arg(&path).status() {
+                    tracing::warn!("failed to open {}: {err}", path.display());
+                }
+            });
+        }
+        None => cx.open_with_system(&path),
     }
 }
 

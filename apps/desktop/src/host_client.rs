@@ -39,7 +39,7 @@ use runode_protocol::HandoffRefusal;
 use runode_protocol::{SessionInfo, TaskSource, WindowLayout};
 
 #[cfg(unix)]
-pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
+pub use handoff::{HandoffFailure, HandoffStatus, READY_BY, upgrade};
 use launch::{Choice, Probe};
 #[cfg(test)]
 pub use link::Attached;
@@ -652,8 +652,7 @@ fn listen_in_app(host: &Host) {
 /// 路径。跑在 app 里的宿主（`listen_in_app`）和单独跑的宿主（`host_process::run`）都这样开。
 pub fn listen(host: &Host, dirs: &runode_paths::Dirs) -> Result<PathBuf> {
     dirs.create_runtime_dir()?;
-    let socket = dirs.host_socket_file().ok_or_else(|| anyhow!("the socket path is too long"))?;
-    let lock = dirs.host_lock_file().ok_or_else(|| anyhow!("no place for the host lock"))?;
+    let (socket, lock) = dirs.host_listen_files().ok_or_else(|| anyhow!("the socket path is too long"))?;
     host.listen(&socket, &lock)?;
     // 拿着锁的宿主只有一个，看板和定时也只由它办。
     if let Some(db) = dirs.todos_db() {

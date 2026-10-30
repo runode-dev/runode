@@ -55,8 +55,13 @@ fn unreadable_versions_are_never_newer() {
     assert!(!is_newer("0.2.0", "dev"));
 }
 
+/// Mac 按 `lipo -archs` 的叫法，Windows 是发版的 workflow 写进清单的 `windows-x86_64`。
 #[test]
-fn the_arch_uses_the_lipo_names() {
-    let expected = if cfg!(target_arch = "aarch64") { "arm64" } else { std::env::consts::ARCH };
+fn the_arch_uses_the_manifest_names() {
+    let expected = match std::env::consts::ARCH {
+        _ if cfg!(windows) => "windows-x86_64",
+        "aarch64" => "arm64",
+        other => other,
+    };
     assert_eq!(arch(), expected);
 }

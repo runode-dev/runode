@@ -11,6 +11,8 @@
 //!
 //! 窗口里的手机端引导页在界面上给手机配对，见 `pairing`。
 
+#[cfg(windows)]
+pub mod firewall;
 pub mod pairing;
 
 use std::{

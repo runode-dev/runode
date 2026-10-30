@@ -364,9 +364,12 @@ fn clients_still_attaching_when_a_session_is_killed_get_an_answer() {
     let dir = temp_dir("killq");
     let (_host, socket) = listen(&dir);
     let mut desktop = Peer::desktop(&socket);
-    let id = desktop.spawn(&script(&dir, "flood.sh", "exec yes runode-kill-queued"));
+    // 连上了再让它刷屏：输出来得比 VT 处理得快时（Linux 的伪终端、调试构建的 VT），排在积压后面的 `Attach`
+    // 要等上十来秒。
+    let id = desktop.spawn(&script(&dir, "flood.sh", "read go\nexec yes runode-kill-queued"));
     let (channel, _) = desktop.attach(id, AttachMode::VtReplay);
-    // 等它刷起屏来，读线程那边积压一大堆输出（调试构建里宿主的 VT 处理得慢得多）。
+    desktop.input(channel, b"go\n");
+    // 等它刷起屏来，读线程那边积压一大堆输出。
     desktop.wait(channel, |_, output| output.len() >= 64 * 1024);
     let mut peer = Peer::hello(&socket, false);
     // 同一条连接上先连再结束：`Attach` 一定先送到会话线程，排在积压的输出后面。
@@ -569,7 +572,10 @@ fn workspaces(windows: &[WindowLayout]) -> Vec<(Option<PathBuf>, Option<String>,
 #[test]
 fn without_a_desktop_the_host_keeps_the_workspaces() {
     let dir = temp_dir("headless");
+    // 工作区记的是规范化的写法，Windows 上不带 `\\?\` 前缀：shell 拿它当目录。
     let canonical = std::fs::canonicalize(&dir).unwrap();
+    #[cfg(windows)]
+    let canonical = PathBuf::from(canonical.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
     let (_host, socket) = listen(&dir);
     let mut phone = Peer::connect(&socket).greet(ClientKind::Mobile, false);
     phone.send(&ClientMsg::Layout { req: 1 });

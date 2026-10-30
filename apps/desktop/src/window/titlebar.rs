@@ -6,9 +6,9 @@ use std::borrow::Cow;
 use crate::ui::theme::ActiveTheme as _;
 
 use gpui::{
-    Action, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla, MouseButton, MouseDownEvent, Pixels,
-    Render, Role, SharedString, Stateful, TitlebarOptions, Window, WindowControlArea, div, img, linear_color_stop,
-    linear_gradient, point, prelude::*, px, svg,
+    Action, AnyElement, App, Axis, BoxShadow, Context, CursorStyle, Decorations, Div, ElementId, Hsla, MouseButton,
+    MouseDownEvent, Pixels, Render, ResizeEdge, Role, SharedString, Stateful, TitlebarOptions, Window,
+    WindowControlArea, div, img, linear_color_stop, linear_gradient, point, prelude::*, px, svg,
 };
 use runode_types::agent::AgentKind;
 
@@ -42,7 +42,7 @@ use crate::{
         file_icons::file_icon,
         font_size::FontSize,
         hsla,
-        icons::DIFF_ICON,
+        icons::{CLOSE_ICON, DIFF_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON},
         panel::{added_label, removed_label},
         tooltip::{shortcut_text, tooltip},
     },
@@ -53,14 +53,26 @@ const TAB_SIDE_SLOT: f32 = 20.;
 /// 比这窄的标签只留标题：快捷键提示收起，关闭按钮悬停时浮在标题左边。
 const TAB_COMPACT_WIDTH: f32 = 120.;
 
-/// Windows 上标题栏右上角一个窗口按钮的宽度，和系统画的一样。
+/// 标题栏右上角一个窗口按钮的宽度，和 Windows 系统画的一样。
 const WINDOW_CONTROL_WIDTH: f32 = 46.;
-/// 标题栏右上角给窗口按钮（`render_window_controls`）让出的宽度，只有 Windows 上不为零。
-pub(super) const WINDOW_CONTROLS_WIDTH: f32 = if cfg!(windows) { 3. * WINDOW_CONTROL_WIDTH } else { 0. };
+/// 合成器不画边框的窗口四边能拖着改尺寸的宽度。
+const RESIZE_EDGE: f32 = 5.;
 /// 窗口按钮的图标字体，Windows 10 起自带，系统自己的标题栏也用它。
 const WINDOW_CONTROL_FONT: &str = "Segoe MDL2 Assets";
 /// 鼠标停在关闭按钮上时的底色，和系统的一样。
 const WINDOW_CLOSE_HOVER: u32 = 0xC42B1C;
+
+/// 窗口按钮（最小化、最大化、关闭）由 app 自己画：Windows 上总是；Linux 上合成器不画边框（GNOME 的
+/// Wayland 不支持 xdg-decoration）、GPUI 退成客户端装饰时。
+pub(super) fn draws_window_controls(window: &Window) -> bool {
+    cfg!(windows)
+        || (cfg!(not(target_os = "macos")) && matches!(window.window_decorations(), Decorations::Client { .. }))
+}
+
+/// 标题栏右上角给窗口按钮（`render_window_controls`）让出的宽度，app 不画窗口按钮时为零。
+pub(super) fn window_controls_width(window: &Window) -> f32 {
+    if draws_window_controls(window) { 3. * WINDOW_CONTROL_WIDTH } else { 0. }
+}
 
 /// 窗口的标题栏设置：macOS 和 Windows 上透明，终端背景一直铺到窗口顶部，macOS 上标签栏画在红绿灯
 /// 或侧栏右边，Windows 上右上角自己画窗口按钮；别的系统上用系统自己的标题栏和边框，标签栏在它下面。
@@ -272,16 +284,27 @@ pub(super) fn shortcut_hint(select: &dyn Action, last: &dyn Action, is_last: boo
 }
 
 impl WindowView {
-    /// Windows 上标题栏右上角的最小化、最大化（最大化着时是还原）和关闭按钮，盖在窗口最上层，全屏时不画。
-    /// 鼠标按下由系统照命中测试的结果（`WindowControlArea`）办，这里只画样子；辅助工具的按下另外登记。
+    /// 标题栏右上角的最小化、最大化（最大化着时是还原）和关闭按钮（`draws_window_controls`），盖在窗口最上层，
+    /// 全屏时不画。Windows 上鼠标按下由系统照命中测试的结果（`WindowControlArea`）办，这里只画样子；Linux 上
+    /// 没有这套命中测试，点击自己办。辅助工具的按下另外登记。
     pub(super) fn render_window_controls(&self, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
-        if !cfg!(windows) || window.is_fullscreen() {
+        if !draws_window_controls(window) || window.is_fullscreen() {
             return None;
         }
         let fg = cx.theme().foreground;
         let hover = cx.theme().mix(0.08);
         let view = cx.entity().downgrade();
-        let button = |id: &'static str, area: WindowControlArea, glyph: &'static str, label: Cow<'_, str>| {
+        // Windows 上用系统标题栏的图标字体，Linux 上没有这个字体，用图标。
+        let button = |id: &'static str,
+                      area: WindowControlArea,
+                      (glyph, icon): (&'static str, &'static str),
+                      label: Cow<'_, str>,
+                      press: fn(&mut Window, &mut App)| {
+            let face = if cfg!(windows) {
+                div().font_family(WINDOW_CONTROL_FONT).text_size(px(10.)).child(glyph).into_any_element()
+            } else {
+                svg().path(icon).size(px(12.)).text_color(fg).into_any_element()
+            };
             div()
                 .id(id)
                 .role(Role::Button)
@@ -294,15 +317,15 @@ impl WindowView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .font_family(WINDOW_CONTROL_FONT)
-                .text_size(px(10.))
                 .text_color(fg)
-                .child(glyph)
+                .child(face)
+                .when(!cfg!(windows), |button| button.on_click(move |_, window, cx| press(window, cx)))
+                .on_a11y_press(view.clone(), move |_, window, cx| press(window, cx))
         };
-        let (max_glyph, max_label) = if window.is_maximized() {
-            ("\u{E923}", rust_i18n::t!("window_controls.restore"))
+        let (max_face, max_label) = if window.is_maximized() {
+            (("\u{E923}", MINIMIZE_ICON), rust_i18n::t!("window_controls.restore"))
         } else {
-            ("\u{E922}", rust_i18n::t!("window_controls.maximize"))
+            (("\u{E922}", MAXIMIZE_ICON), rust_i18n::t!("window_controls.maximize"))
         };
         Some(
             div()
@@ -315,29 +338,118 @@ impl WindowView {
                     button(
                         "window-minimize",
                         WindowControlArea::Min,
-                        "\u{E921}",
+                        ("\u{E921}", MINUS_ICON),
                         rust_i18n::t!("window_controls.minimize"),
+                        |window, _| window.minimize_window(),
                     )
-                    .hover(|el| el.bg(hover))
-                    .on_a11y_press(view.clone(), |_, window, _| window.minimize_window()),
+                    .hover(|el| el.bg(hover)),
                 )
                 .child(
-                    button("window-maximize", WindowControlArea::Max, max_glyph, max_label)
-                        .hover(|el| el.bg(hover))
-                        .on_a11y_press(view.clone(), |_, window, _| window.zoom_window()),
+                    button("window-maximize", WindowControlArea::Max, max_face, max_label, |window, _| {
+                        crate::ui::toggle_maximize(window)
+                    })
+                    .hover(|el| el.bg(hover)),
                 )
                 .child(
                     button(
                         "window-close",
                         WindowControlArea::Close,
-                        "\u{E8BB}",
+                        ("\u{E8BB}", CLOSE_ICON),
                         rust_i18n::t!("window_controls.close"),
+                        |window, cx| window.dispatch_action(Box::new(crate::menus::CloseWindow), cx),
                     )
-                    .hover(|el| el.bg(gpui::rgb(WINDOW_CLOSE_HOVER)).text_color(gpui::white()))
-                    .on_a11y_press(view, |_, window, cx| {
-                        window.dispatch_action(Box::new(crate::menus::CloseWindow), cx);
-                    }),
+                    .hover(|el| el.bg(gpui::rgb(WINDOW_CLOSE_HOVER)).text_color(gpui::white())),
                 ),
+        )
+    }
+
+    /// 合成器不画边框（`Decorations::Client`）时窗口四边和四角能拖着改尺寸的一圈；铺满屏幕、最大化、贴着
+    /// 屏幕边的那几边不画。
+    pub(super) fn render_resize_edges(&self, window: &Window) -> Option<Div> {
+        let Decorations::Client { tiling } = window.window_decorations() else { return None };
+        if cfg!(target_os = "macos") || window.is_fullscreen() || window.is_maximized() {
+            return None;
+        }
+        let edge = px(RESIZE_EDGE);
+        let handle = |id: &'static str, edge: ResizeEdge, cursor: CursorStyle| {
+            div().id(id).absolute().occlude().cursor(cursor).on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                cx.stop_propagation();
+                window.start_window_resize(edge);
+            })
+        };
+        let (top, bottom, left, right) = (!tiling.top, !tiling.bottom, !tiling.left, !tiling.right);
+        Some(
+            div()
+                .absolute()
+                .size_full()
+                .when(top, |el| {
+                    el.child(
+                        handle("resize-top", ResizeEdge::Top, CursorStyle::ResizeUpDown)
+                            .top_0()
+                            .left_0()
+                            .w_full()
+                            .h(edge),
+                    )
+                })
+                .when(bottom, |el| {
+                    el.child(
+                        handle("resize-bottom", ResizeEdge::Bottom, CursorStyle::ResizeUpDown)
+                            .bottom_0()
+                            .left_0()
+                            .w_full()
+                            .h(edge),
+                    )
+                })
+                .when(left, |el| {
+                    el.child(
+                        handle("resize-left", ResizeEdge::Left, CursorStyle::ResizeLeftRight)
+                            .top_0()
+                            .left_0()
+                            .h_full()
+                            .w(edge),
+                    )
+                })
+                .when(right, |el| {
+                    el.child(
+                        handle("resize-right", ResizeEdge::Right, CursorStyle::ResizeLeftRight)
+                            .top_0()
+                            .right_0()
+                            .h_full()
+                            .w(edge),
+                    )
+                })
+                .when(top && left, |el| {
+                    el.child(
+                        handle("resize-top-left", ResizeEdge::TopLeft, CursorStyle::ResizeUpLeftDownRight)
+                            .top_0()
+                            .left_0()
+                            .size(edge * 2.),
+                    )
+                })
+                .when(top && right, |el| {
+                    el.child(
+                        handle("resize-top-right", ResizeEdge::TopRight, CursorStyle::ResizeUpRightDownLeft)
+                            .top_0()
+                            .right_0()
+                            .size(edge * 2.),
+                    )
+                })
+                .when(bottom && left, |el| {
+                    el.child(
+                        handle("resize-bottom-left", ResizeEdge::BottomLeft, CursorStyle::ResizeUpRightDownLeft)
+                            .bottom_0()
+                            .left_0()
+                            .size(edge * 2.),
+                    )
+                })
+                .when(bottom && right, |el| {
+                    el.child(
+                        handle("resize-bottom-right", ResizeEdge::BottomRight, CursorStyle::ResizeUpLeftDownRight)
+                            .bottom_0()
+                            .right_0()
+                            .size(edge * 2.),
+                    )
+                }),
         )
     }
 
@@ -465,7 +577,7 @@ impl WindowView {
                     cx.stop_propagation();
                     // 标签铺满了标题栏，双击标签和双击空白标题栏一样缩放窗口。
                     if event.click_count >= 2 {
-                        window.titlebar_double_click();
+                        crate::ui::titlebar_double_click(window);
                     } else {
                         this.activate_tab_id(id, window, cx);
                     }

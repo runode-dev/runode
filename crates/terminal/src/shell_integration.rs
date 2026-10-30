@@ -1,6 +1,6 @@
-//! shell 集成：启动 zsh、bash、fish、elvish、nushell 时自动加载一段脚本，让 shell 在提示符前后
-//! 发 OSC 133 标记（nushell 自己会发，脚本只补报告）。终端据此分清提示符、用户输入和命令输出，
-//! 单击挪光标、删除选区和按命令跳转都靠它。
+//! shell 集成：启动 zsh、bash、fish、elvish、nushell、PowerShell 时自动加载一段脚本，让 shell 在提示符前后
+//! 发 OSC 133 标记（nushell 自己会发，脚本只补报告）；cmd 加载不了脚本，只在提示符里标（`mark_cmd_prompt`）。
+//! 终端据此分清提示符、用户输入和命令输出，单击挪光标、删除选区和按命令跳转都靠它。
 //!
 //! 脚本编进二进制，每次起 shell 前写到用户自己的缓存目录里（和二进制里一样的不重写）；用户的
 //! shell 配置照常加载，不需要改动。
@@ -32,6 +32,7 @@ const BASH_RC: &str = include_str!("../shell-integration/bash/runode.bash");
 const FISH_CONF: &str = include_str!("../shell-integration/fish/runode.fish");
 const ELVISH_RC: &str = include_str!("../shell-integration/elvish/runode.elv");
 const NUSHELL_CONF: &str = include_str!("../shell-integration/nushell/runode.nu");
+const POWERSHELL_PROFILE: &str = include_str!("../shell-integration/powershell/runode.ps1");
 
 /// 按 `mode` 给启动 `program` 的命令加上集成，并补上登录 shell 的参数；集成脚本开哪些功能
 /// 按 `features`（见 `features`）。集成脚本写不出来或认不出 shell 时照常以登录 shell 启动，不注入。
@@ -42,7 +43,8 @@ const NUSHELL_CONF: &str = include_str!("../shell-integration/nushell/runode.nu"
 /// 别的输出伪造的。口令本身不放进环境变量：macOS 的 `ps -E`、Linux 的 `/proc/<pid>/environ` 读的
 /// 是进程启动时的环境，脚本事后删掉变量也改不掉，同一用户的任何程序都读得到。环境里只给文件的
 /// 路径（`RUNODE_REPORT_TOKEN_FILE`），集成脚本读出口令后马上删掉文件和这个变量；shell 没读就退出
-/// 时由 `Pty` 删。没注入、生成不了口令或者写不出文件时为 `None`，这时脚本不发报告。
+/// 时由 `Pty` 删。没注入、生成不了口令或者写不出文件时为 `None`，这时脚本不发报告；cmd 不发报告，也是
+/// `None`。
 pub fn prepare(
     dirs: &runode_paths::Dirs,
     mode: IntegrationMode,
@@ -50,7 +52,11 @@ pub fn prepare(
     features: &str,
     cmd: &mut CommandBuilder,
 ) -> Option<(String, PathBuf)> {
-    let shell = resolve(mode, program);
+    let shell = resolve(mode, program).filter(|&shell| shell != Shell::Bash || !runs_in_wsl(program, cmd));
+    if shell == Some(Shell::Cmd) {
+        mark_cmd_prompt(cmd);
+        return None;
+    }
     let dir = shell.and_then(|_| match install(dirs) {
         Ok(dir) => Some(dir),
         Err(err) => {
@@ -81,9 +87,21 @@ pub fn prepare(
             prepend_data_dir(cmd, dir.join("fish-data"), "RUNODE_FISH_DATA_DIR")
         }
         Some((Shell::Nushell, dir)) => {
-            // nushell 读完用户的 config.nu 以后加载数据目录里 nushell/vendor/autoload 下的脚本。
+            // nushell 读完用户的 config.nu 以后加载数据目录里 nushell/vendor/autoload 下的脚本。Windows 上的
+            // nushell 不看 XDG_DATA_DIRS，只看 NU_VENDOR_AUTOLOAD_DIR 指着的目录。
             cmd.arg("-l");
-            prepend_data_dir(cmd, dir.join("nushell-data"), "RUNODE_NU_DATA_DIR")
+            let data = dir.join("nushell-data");
+            if cfg!(windows) {
+                if let Some(original) = cmd.get_env("NU_VENDOR_AUTOLOAD_DIR").map(ToOwned::to_owned) {
+                    cmd.env("RUNODE_NU_VENDOR_AUTOLOAD_DIR", original);
+                }
+                // 逐段拼，分隔符和 nushell 的 `path join` 一样：集成脚本按字面比这个值认出是自己设的。
+                cmd.env("NU_VENDOR_AUTOLOAD_DIR", data.join("nushell").join("vendor").join("autoload"));
+                cmd.env("RUNODE_NU_DATA_DIR", data);
+                true
+            } else {
+                prepend_data_dir(cmd, data, "RUNODE_NU_DATA_DIR")
+            }
         }
         Some((Shell::Elvish, dir)) => {
             // elvish 不自动加载别的脚本：换成集成的 rc，它先加载用户自己的 rc.elv。elvish 没有
@@ -92,7 +110,18 @@ pub fn prepare(
             cmd.arg(dir.join("elvish/runode.elv"));
             true
         }
-        // Windows 上的 shell（PowerShell、cmd）没有登录 shell 一说，有的不认 `-l`。
+        Some((Shell::PowerShell, dir)) => {
+            // 读完用户的 profile 再执行集成，之后照常等输入。pwsh 的 `-l` 只在 Unix 上有，而且要是第一个参数。
+            if cfg!(unix) {
+                cmd.arg("-l");
+            }
+            let script = dir.join("powershell/runode.ps1").display().to_string().replace('\'', "''");
+            cmd.args(["-NoExit", "-Command"]);
+            cmd.arg(format!("Invoke-Expression ([IO.File]::ReadAllText('{script}'))"));
+            true
+        }
+        Some((Shell::Cmd, _)) => false,
+        // Windows 上的 shell 没有登录 shell 一说，有的不认 `-l`。
         None => {
             if cfg!(unix) {
                 cmd.arg("-l");
@@ -174,6 +203,52 @@ fn resolve(mode: IntegrationMode, program: &str) -> Option<Shell> {
     }
 }
 
+/// 让 cmd 在 PROMPT 里标出提示符（OSC 133;A）和输入的起点。cmd 没法在命令开始运行时再标，所以输入用
+/// 133;I 标：到行尾为止，回车以后就是输出。用户自己的 PROMPT（没设时是 cmd 默认的 `$P$G`）画在两个标记
+/// 之间，已经带着 133 标记的不再加。PROMPT 会传给 cmd 里跑的每个程序，所以不能放报告口令，cmd 也就不发
+/// 报告。
+fn mark_cmd_prompt(cmd: &mut CommandBuilder) {
+    let user = cmd.get_env("PROMPT").filter(|prompt| !prompt.is_empty()).map(ToOwned::to_owned);
+    let user = user.unwrap_or_else(|| "$P$G".into());
+    if user.to_string_lossy().contains("]133;") {
+        return;
+    }
+    let mut prompt = std::ffi::OsString::from("$E]133;A$E\\");
+    prompt.push(user);
+    prompt.push("$E]133;I$E\\");
+    cmd.env("PROMPT", prompt);
+}
+
+/// Windows 上 System32 里的 bash.exe 是 WSL 的入口，起的是 Linux 里的 bash：Windows 的集成脚本路径它读不到，
+/// `--rcfile` 却照样让它不读用户的 ~/.bashrc。`program` 不带目录时按 `cmd` 的 PATH 找，和起 shell 时一样。
+#[cfg(windows)]
+fn runs_in_wsl(program: &str, cmd: &CommandBuilder) -> bool {
+    let program = Path::new(program);
+    let found = if program.parent().is_some_and(|dir| !dir.as_os_str().is_empty()) {
+        Some(program.to_path_buf())
+    } else {
+        let name = if program.extension().is_some() { program.to_path_buf() } else { program.with_extension("exe") };
+        cmd.get_env("PATH")
+            .into_iter()
+            .flat_map(std::env::split_paths)
+            .map(|dir| dir.join(&name))
+            .find(|path| path.is_file())
+    };
+    let (Some(found), Some(root)) = (found, std::env::var_os("SystemRoot")) else {
+        return false;
+    };
+    let dir = found.parent().map(|dir| dir.to_string_lossy().to_lowercase());
+    let root = Path::new(&root);
+    ["System32", "Sysnative", "SysWOW64"]
+        .iter()
+        .any(|system| dir.as_deref() == Some(&*root.join(system).to_string_lossy().to_lowercase()))
+}
+
+#[cfg(not(windows))]
+fn runs_in_wsl(_program: &str, _cmd: &CommandBuilder) -> bool {
+    false
+}
+
 /// 把 `data` 排到 `XDG_DATA_DIRS` 最前面，fish、nushell 启动时从那里自动加载集成；`var` 告诉
 /// 集成脚本加的是哪一项，脚本加载后把它去掉。拼不出来时不注入，返回 false。
 fn prepend_data_dir(cmd: &mut CommandBuilder, data: PathBuf, var: &str) -> bool {
@@ -240,6 +315,7 @@ fn install_into(dir: &Path) -> io::Result<()> {
         ("fish-data/fish/vendor_conf.d/runode-integration.fish", FISH_CONF),
         ("elvish/runode.elv", ELVISH_RC),
         ("nushell-data/nushell/vendor/autoload/runode.nu", NUSHELL_CONF),
+        ("powershell/runode.ps1", POWERSHELL_PROFILE),
     ] {
         let path = dir.join(path);
         if std::fs::read_to_string(&path).is_ok_and(|existing| existing == contents) {
@@ -359,6 +435,65 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("zsh/runode-integration.zsh")).unwrap(), ZSH_INTEGRATION);
         assert_eq!(std::fs::read_to_string(dir.join("bash/runode.bash")).unwrap(), BASH_RC);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// PowerShell 读完用户的 profile 再经 Invoke-Expression 执行集成脚本，路径里的单引号写成两个。
+    #[test]
+    fn powershell_runs_the_integration_after_its_profile() {
+        let home = std::env::temp_dir().join(format!("runode-shell-integration-ps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let quoted = home.join("o'brien");
+        let dirs = runode_paths::Dirs::from_vars(|key| (key == "HOME").then(|| quoted.clone().into()));
+        let mut cmd = CommandBuilder::new("pwsh");
+        cmd.env_clear();
+        assert!(prepare(&dirs, IntegrationMode::Detect, "pwsh", "", &mut cmd).is_some());
+        let script = dirs.shell_integration_dir().unwrap().join("powershell/runode.ps1");
+        assert_eq!(std::fs::read_to_string(&script).unwrap(), POWERSHELL_PROFILE);
+        let argv: Vec<_> = cmd.get_argv().iter().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
+        let command = format!(
+            "Invoke-Expression ([IO.File]::ReadAllText('{}'))",
+            script.display().to_string().replace('\'', "''")
+        );
+        let login = if cfg!(unix) { vec!["-l".to_owned()] } else { Vec::new() };
+        assert_eq!(argv, [login, vec!["-NoExit".into(), "-Command".into(), command]].concat());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn cmd_marks_its_prompt_around_the_users() {
+        let dirs = runode_paths::Dirs::from_vars(|_| None);
+        let prompt = |user: Option<&str>| {
+            let mut cmd = CommandBuilder::new("cmd.exe");
+            cmd.env_clear();
+            if let Some(user) = user {
+                cmd.env("PROMPT", user);
+            }
+            assert_eq!(prepare(&dirs, IntegrationMode::Detect, "cmd.exe", "", &mut cmd), None);
+            assert_eq!(cmd.get_argv().len(), 1);
+            cmd.get_env("PROMPT").map(|prompt| prompt.to_string_lossy().into_owned())
+        };
+        assert_eq!(prompt(None).as_deref(), Some(r"$E]133;A$E\$P$G$E]133;I$E\"));
+        assert_eq!(prompt(Some("$N$G")).as_deref(), Some(r"$E]133;A$E\$N$G$E]133;I$E\"));
+        let marked = r"$E]133;A$E\$P$G$E]133;B$E\";
+        assert_eq!(prompt(Some(marked)).as_deref(), Some(marked));
+        let mut off = CommandBuilder::new("cmd.exe");
+        off.env_clear();
+        assert_eq!(prepare(&dirs, IntegrationMode::Off, "cmd.exe", "", &mut off), None);
+        assert_eq!(off.get_env("PROMPT"), None);
+    }
+
+    /// System32 里的 bash.exe 是 WSL 的入口，不注入 Windows 上的 bash 集成。
+    #[cfg(windows)]
+    #[test]
+    fn wsl_bash_gets_no_integration() {
+        let root = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap());
+        let cmd = CommandBuilder::new("bash");
+        assert!(runs_in_wsl(&root.join("System32").join("bash.exe").to_string_lossy(), &cmd));
+        assert!(runs_in_wsl(&root.join("system32").join("BASH.EXE").to_string_lossy(), &cmd));
+        assert!(!runs_in_wsl(r"C:\Program Files\Git\bin\bash.exe", &cmd));
+        let mut path_only = CommandBuilder::new("bash");
+        path_only.env("PATH", root.join("System32"));
+        assert_eq!(runs_in_wsl("bash", &path_only), root.join("System32").join("bash.exe").is_file());
     }
 
     #[test]

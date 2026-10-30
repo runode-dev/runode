@@ -12,6 +12,7 @@
 mod autostart;
 mod controls;
 mod dictation;
+mod firewall;
 mod keybinds;
 pub(crate) use keybinds::{caps_text as keybind_text, secondary_text};
 mod pages;
@@ -25,9 +26,8 @@ use crate::ui::theme::Theme;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton,
-    MouseDownEvent, Render, Role, ScrollHandle, SharedString, Subscription, Task, Window, div, point, prelude::*, px,
-    svg,
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton, Render,
+    Role, ScrollHandle, SharedString, Subscription, Task, Window, div, point, prelude::*, px, svg,
 };
 use runode_config::{Config, ConfigFile};
 
@@ -93,6 +93,7 @@ pub struct SettingsView {
     autostart_jobs: HashMap<&'static str, Task<()>>,
     /// 各自启装没装，按 `Kind::name`，在后台查（`refresh_autostart`）；还没查到的不在里面。
     autostart: HashMap<&'static str, bool>,
+    firewall: firewall::State,
     _observe: Subscription,
     /// 语音输入的模型下载有了进度。
     _downloads: Subscription,
@@ -117,16 +118,22 @@ impl SettingsView {
             test_push: test_push::State::default(),
             autostart_jobs: HashMap::new(),
             autostart: HashMap::new(),
+            firewall: firewall::State::default(),
             _observe: observe,
             _downloads: cx.observe_global::<crate::dictation::Downloads>(|_, cx| cx.notify()),
         };
         view.refresh_autostart(cx);
+        view.refresh_firewall(cx);
         view
     }
 
     /// 配置重载了：换上新值，没在编辑的输入框跟着更新。
     fn config_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (on, port) = (self.config.remote_access, self.config.remote_access_port);
         self.config = cx.global::<AppConfig>().0.clone();
+        if (self.config.remote_access, self.config.remote_access_port) != (on, port) {
+            self.refresh_firewall(cx);
+        }
         self.file = read_file();
         for field in self.fields.values() {
             if field.input.focus_handle(cx).is_focused(window) {
@@ -415,13 +422,7 @@ fn titlebar_strip() -> gpui::Div {
         .h(px(crate::window::TITLEBAR_HEIGHT))
         .w_full()
         .window_control_area(gpui::WindowControlArea::Drag)
-        .on_mouse_down(MouseButton::Left, |event: &MouseDownEvent, window: &mut Window, _: &mut App| {
-            if event.click_count >= 2 {
-                window.titlebar_double_click();
-            } else {
-                window.start_window_move();
-            }
-        })
+        .on_mouse_down(MouseButton::Left, crate::ui::drag_window)
 }
 
 /// `palette` 一行的序号。

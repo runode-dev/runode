@@ -3,15 +3,12 @@
 //! 时（没有集成的 PowerShell、cmd）按新开的 shell 会拿到的 PATH 找；每次打开菜单都在后台重找一遍，找完之前
 //! 菜单里是上次找到的。
 
-use std::{
-    ffi::OsStr,
-    path::{Path, PathBuf},
-};
+use std::{ffi::OsStr, path::PathBuf};
 
 use gpui::{Action, App, Context, Focusable, MouseButton, Window, prelude::*};
 use runode_agent::models::{LAUNCHERS, Launcher, listed, same_kind};
 
-use super::{NewTab, TITLEBAR_HEIGHT, WindowView, agents::logo::logo_path};
+use super::{Dropdown, NewTab, TITLEBAR_HEIGHT, WindowView, agents::logo::logo_path};
 use crate::ui::{
     a11y::A11yPress as _,
     button::Button,
@@ -34,26 +31,6 @@ pub(super) struct Installed {
     command: String,
 }
 
-/// 命令文件名在程序名后面接的扩展名。Windows 上只认程序和批处理（npm 装的 agent 是 `.cmd`），不照搬
-/// `PATHEXT`：那里还有 `.js`、`.vbs` 这类交给脚本宿主打开的，同名的脚本不是 agent。
-const COMMAND_EXTENSIONS: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ".bat"] } else { &[""] };
-
-/// `file` 是 shell 能跑的命令：Unix 上是有可执行位的文件（符号链接按它指向的算），Windows 上扩展名已经说明了。
-fn is_command(file: &Path) -> bool {
-    let Ok(meta) = std::fs::metadata(file) else {
-        return false;
-    };
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        meta.is_file() && meta.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        meta.is_file()
-    }
-}
-
 /// 起 `launcher` 的程序名，不带子命令：`opencode2 mini` 是挑模型用的小界面，从这里开的是它的全屏界面。
 fn program(launcher: &Launcher) -> &'static str {
     launcher.command.split_whitespace().next().unwrap_or(launcher.command)
@@ -62,10 +39,8 @@ fn program(launcher: &Launcher) -> &'static str {
 /// `dirs` 里找得到 `program` 时起它要打的命令：带上找到的那个扩展名。Windows 上 npm 在 `.cmd` 旁边还放了
 /// `.ps1`，PowerShell 只打程序名时先跑 `.ps1`，执行策略不让跑脚本时就报错；写全了 PowerShell 和 cmd 都认。
 fn on_path(dirs: &[PathBuf], program: &str) -> Option<String> {
-    dirs.iter().find_map(|dir| {
-        let ext = COMMAND_EXTENSIONS.iter().find(|ext| is_command(&dir.join(format!("{program}{ext}"))))?;
-        Some(format!("{program}{ext}"))
-    })
+    let file = crate::subprocess::find_command(dirs, program)?;
+    Some(file.file_name()?.to_string_lossy().into_owned())
 }
 
 /// `path` 里找得到命令的各家 agent，每家一个：菜单里列的那个版本（`listed`）找不到时换同一家的下一个
@@ -88,7 +63,7 @@ fn installed_agents(path: Option<&OsStr>) -> Vec<Installed> {
 impl WindowView {
     /// 开着的下拉菜单是新建标签的。
     pub(super) fn new_tab_menu_open(&self) -> bool {
-        self.new_tab_menu && self.dropdown_open()
+        self.dropdown == Dropdown::NewTab && self.dropdown_open()
     }
 
     /// 菜单里点了一家 agent：在当前终端的目录开新标签，在它的 shell 里起这家 agent。
@@ -139,7 +114,7 @@ impl WindowView {
         // `open_dropdown` 选中给的那一项之后能选的第一项，从最后一项往后绕回第一项。
         let select_after = from_keyboard.then(|| items.len() - 1);
         self.open_dropdown(items, target, select_after, cx);
-        self.new_tab_menu = true;
+        self.dropdown = Dropdown::NewTab;
         self.find_installed_agents(cx);
     }
 
@@ -191,6 +166,8 @@ impl WindowView {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     /// 临时目录里放着 `programs` 这几个命令，当作 PATH 里的一个目录：Unix 上带可执行位，Windows 上是 npm

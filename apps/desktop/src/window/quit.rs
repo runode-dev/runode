@@ -78,19 +78,32 @@ pub(super) struct Plan {
     pub(super) offer_keep: bool,
 }
 
+/// 重启以更新时会话留得下：Windows 上不交接会话，安装程序还要换掉单独跑的宿主正用着的 runode.exe，
+/// 所以宿主连会话一起退出。
+const UPDATE_KEEPS_SESSIONS: bool = cfg!(not(windows));
+
+/// `action` 会结束宿主里所有的会话，连别的桌面的也算：「退出并结束所有会话」，以及留不下会话的重启以更新。
+fn ends_all(action: QuitAction) -> bool {
+    match action {
+        QuitAction::QuitAndEndSessions => true,
+        QuitAction::Update => !UPDATE_KEEPS_SESSIONS,
+        QuitAction::Quit | QuitAction::CloseLastWindow | QuitAction::CloseAllWindows => false,
+    }
+}
+
 /// `action` 让 app 退出时会话怎么办；`keeping` 是配置项 `terminal-host` 开着，见
 /// `host_client::quit_keeps_sessions`；`shared` 是宿主还连着别的桌面，见 `host_client::other_desktops`。
-/// 「退出并结束所有会话」照样让宿主连所有会话一起退出。
+/// `ends_all` 的那些照样让宿主连所有会话一起退出。
 pub(super) fn ending(mode: Mode, keeping: bool, action: QuitAction, shared: bool) -> Ending {
     let keep = match action {
         QuitAction::QuitAndEndSessions => false,
-        QuitAction::Update => true,
+        QuitAction::Update => UPDATE_KEEPS_SESSIONS,
         QuitAction::Quit | QuitAction::CloseLastWindow | QuitAction::CloseAllWindows => keeping,
     };
     match mode {
         Mode::InProcess => Ending::WithApp,
         Mode::Standalone if keep => Ending::Keep,
-        Mode::Standalone if shared && action != QuitAction::QuitAndEndSessions => Ending::EndOwn,
+        Mode::Standalone if shared && !ends_all(action) => Ending::EndOwn,
         Mode::Standalone => Ending::ShutdownHost,
     }
 }
@@ -107,9 +120,8 @@ pub(super) fn quit_plan(mode: Mode, keeping: bool, action: QuitAction, shared: b
         Ending::ShutdownHost if action == QuitAction::QuitAndEndSessions => Some(Prompt::EndAll),
         Ending::ShutdownHost => Some(Prompt::QuitEndingAll),
     };
-    let offer_keep = matches!(prompt, Some(Prompt::Quit | Prompt::QuitEndingAll))
-        && action != QuitAction::QuitAndEndSessions
-        && mode == Mode::Standalone;
+    let offer_keep =
+        matches!(prompt, Some(Prompt::Quit | Prompt::QuitEndingAll)) && !ends_all(action) && mode == Mode::Standalone;
     Plan { ending, prompt, offer_keep }
 }
 
@@ -121,6 +133,15 @@ pub(super) fn offers_end_sessions(mode: Mode, keeping: bool) -> bool {
 /// 菜单里要不要放「退出并结束所有会话」，见 `offers_end_sessions`。
 pub fn end_sessions_in_menu() -> bool {
     offers_end_sessions(host_client::mode(), host_client::quit_keeps_sessions())
+}
+
+/// 这个 app 退出时让单独跑的宿主连会话一起退出了（`shutdown_host`）。
+static HOST_SHUT_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 这次退出以后单独跑的宿主还在跑、托管着会话：宿主跑在 app 里、已经让它连会话一起退出时为假。
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn host_outlives_quit() -> bool {
+    host_client::mode() == Mode::Standalone && !HOST_SHUT_DOWN.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// 退出确认框开着（或者正问宿主有几个 agent）；这时再按退出或者关窗口不再弹第二个。
@@ -202,13 +223,13 @@ pub fn quit_and_end_sessions(cx: &mut App) {
     });
 }
 
-/// 退出应用，装上下好的新版本后重新打开（GPUI 的 `restart`，装上见 `crate::update`）。会话留得下就留在后台，
+/// 退出应用，装上下好的新版本后重新打开（`crate::update::restart`）。会话留得下就留在后台，
 /// 不看配置项 `terminal-host`；留不下又有 agent 在跑时先确认，取消了就不重启。
 pub fn quit_to_update(cx: &mut App) {
     cx.defer(|cx| {
         let window = front_window(cx);
         run(QuitAction::Update, window, cx, |cx| {
-            cx.restart();
+            crate::update::restart(cx);
             // 退出已经排进主线程的队列，这个任务排在它后面；轮到了就是没退成（GPUI 拉不起重启的
             // 脚本），复位 `Settled` 让之后从 Dock 退出照常收尾。冻结了的存档不解冻：会话已经交出或
             // 结束，解冻会拿缺了终端的布局盖掉要用的那份。
@@ -413,6 +434,7 @@ fn keep_from_now_on(cx: &mut App) {
 
 /// 让单独跑的宿主连会话一起退出，等它读完（最多 `SHUTDOWN_FLUSH`）。
 fn shutdown_host() {
+    HOST_SHUT_DOWN.store(true, std::sync::atomic::Ordering::Relaxed);
     let link = host_client::link();
     link.send(ClientMsg::Shutdown { kill_sessions: true });
     if !link.flush(SHUTDOWN_FLUSH) {
@@ -686,7 +708,9 @@ mod tests {
         }
         let all = QuitAction::QuitAndEndSessions;
         assert_eq!(quit_plan(STANDALONE, END, all, true, 1), plan(Ending::ShutdownHost, Some(Prompt::EndAll), false));
-        assert_eq!(quit_plan(STANDALONE, END, QuitAction::Update, true, 1), plan(Ending::Keep, None, false));
+        if UPDATE_KEEPS_SESSIONS {
+            assert_eq!(quit_plan(STANDALONE, END, QuitAction::Update, true, 1), plan(Ending::Keep, None, false));
+        }
     }
 
     /// 宿主跑在 app 里：不管开关，会话都随 app 退出结束，有 agent 时先问，不给留下的选项。
@@ -709,6 +733,7 @@ mod tests {
 
     /// 重启以更新不看开关：宿主单独跑就留下，不问；跑在 app 里时随 app 结束，有 agent 才问，不给留下
     /// 的选项。
+    #[cfg(not(windows))]
     #[test]
     fn updating_keeps_sessions_whenever_it_can() {
         let action = QuitAction::Update;
@@ -716,6 +741,24 @@ mod tests {
         assert_eq!(quit_plan(STANDALONE, KEEP, action, false, 2), plan(Ending::Keep, None, false));
         assert_eq!(quit_plan(IN_PROCESS, KEEP, action, false, 0), plan(Ending::WithApp, None, false));
         assert_eq!(quit_plan(IN_PROCESS, END, action, false, 1), plan(Ending::WithApp, Some(Prompt::Quit), false));
+    }
+
+    /// Windows 上重启以更新留不下会话：不看开关，宿主连所有会话一起退出（连着别的桌面也一样），有 agent
+    /// 时先问，不给留下的选项。
+    #[cfg(windows)]
+    #[test]
+    fn updating_on_windows_ends_every_session() {
+        let action = QuitAction::Update;
+        for keeping in [KEEP, END] {
+            for shared in [false, true] {
+                assert_eq!(quit_plan(STANDALONE, keeping, action, shared, 0), plan(Ending::ShutdownHost, None, false));
+                assert_eq!(
+                    quit_plan(STANDALONE, keeping, action, shared, 2),
+                    plan(Ending::ShutdownHost, Some(Prompt::QuitEndingAll), false)
+                );
+            }
+        }
+        assert_eq!(quit_plan(IN_PROCESS, KEEP, action, false, 0), plan(Ending::WithApp, None, false));
     }
 
     /// 系统发起的退出弹不了框：单独跑的宿主不留会话时照样让它退出（还连着别的桌面时只结束窗口里的），

@@ -72,10 +72,40 @@ pub fn follow_move(path: &Path, from: &Path, to: &Path) -> Option<PathBuf> {
 /// 在标题栏这类能拖动窗口的地方按下鼠标：双击缩放窗口，否则开始拖动窗口。
 pub fn drag_window(event: &MouseDownEvent, window: &mut Window, _: &mut App) {
     if event.click_count >= 2 {
-        window.titlebar_double_click();
+        titlebar_double_click(window);
     } else {
         window.start_window_move();
     }
+}
+
+/// 双击标题栏：macOS 上照系统设置里双击标题栏的动作办，别的系统上切换最大化。
+pub fn titlebar_double_click(window: &Window) {
+    if cfg!(target_os = "macos") {
+        window.titlebar_double_click();
+    } else {
+        toggle_maximize(window);
+    }
+}
+
+/// 最大化着就还原，否则最大化（macOS 上是缩放）。
+pub fn toggle_maximize(window: &Window) {
+    #[cfg(windows)]
+    if window.is_maximized() {
+        restore_window(window);
+        return;
+    }
+    window.zoom_window();
+}
+
+#[cfg(windows)]
+fn restore_window(window: &Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SW_RESTORE, ShowWindowAsync};
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else { return };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return };
+    // SAFETY: 窗口开着时句柄一直有效；`ShowWindowAsync` 只往窗口的消息队列里放一条消息，不当场回调 GPUI。
+    unsafe { ShowWindowAsync(handle.hwnd.get() as _, SW_RESTORE) };
 }
 
 /// 把画过的图从各窗口的图集里删掉。`App::drop_image` 不传窗口时只删留在 `App` 里的窗口，而处理某个窗口的

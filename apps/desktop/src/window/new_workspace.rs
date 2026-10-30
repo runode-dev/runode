@@ -11,7 +11,7 @@ use gpui::{
     PathPromptOptions, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 
-use super::{NewWorkspace, TITLEBAR_HEIGHT, WindowView, files::shell_quote, model::home_dir};
+use super::{NewWorkspace, TITLEBAR_HEIGHT, WindowView, files::Quoting, model::home_dir};
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::{
     assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
@@ -118,8 +118,10 @@ impl WindowView {
         if url.is_empty() {
             return;
         }
-        // `--` 把地址和选项隔开：粘贴进来的文本以 `-` 开头时不能被 git 当成选项。
-        let command = format!("git clone -- {} .", shell_quote(&url));
+        // `--` 把地址和选项隔开：粘贴进来的文本以 `-` 开头时不能被 git 当成选项。新开的终端跑的是
+        // `default_shell`，照它的写法加引号。
+        let quoting = Quoting::of_program(&runode_terminal::pty::default_shell());
+        let command = format!("git clone -- {} .", quoting.quote(&url));
         self.new_workspace_dir(repo_name(&url), Some(command), window, cx);
     }
 
