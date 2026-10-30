@@ -10,7 +10,10 @@ use std::{thread, time::Duration, time::Instant};
 use common::{Peer, WAIT, listen, script, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::{AttachMode, ClientKind, FrameKind};
-use runode_types::session::{DriveAction, SessionMeta};
+use runode_types::{
+    session::{DriveAction, SessionMeta},
+    shell::IntegrationMode,
+};
 
 /// 关掉回显、不按行等、不认 Ctrl-C 的 `cat -v`：程序收到的每个字节原样显示出来（ESC 是 `^[`），
 /// 回车时一起输出。`setup` 是之前给终端的序列（比如打开应用光标键）；设好终端后打印 `ready`，
@@ -19,14 +22,22 @@ fn visible_cat(dir: &std::path::Path, setup: &str) -> String {
     script(dir, "cat.sh", &format!("printf '{setup}'\nstty -echo -icanon -isig\nprintf 'ready\\n'\nexec /bin/cat -v"))
 }
 
+/// 开一个跑 `shell` 的会话，以 `VtReplay` 连上之后才启动，返回会话和通道：程序的全部输出都在
+/// 这个通道的输出帧里，连上时的重放是空的。
+fn spawn_attached(peer: &mut Peer, shell: &str) -> (SessionId, u32) {
+    let id = peer.spawn_with(shell, false, None);
+    let (channel, _) = peer.attach(id, AttachMode::VtReplay);
+    peer.send(&ClientMsg::Start { id, integration: IntegrationMode::Off });
+    (id, channel)
+}
+
 /// 控制键按宿主 VT 当前的模式编好写给程序：应用光标键开着时方向键是 `ESC O A`。
 #[test]
 fn keys_reach_the_program_encoded_for_its_modes() {
     let dir = temp_dir("keys");
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    let id = peer.spawn(&visible_cat(&dir, ""));
-    let (channel, _) = peer.attach(id, AttachMode::VtReplay);
+    let (id, channel) = spawn_attached(&mut peer, &visible_cat(&dir, ""));
     peer.wait_for_output(channel, b"ready");
     let keys = vec!["up".into(), "ctrl-c".into(), "x*2".into(), "enter".into()];
     peer.send(&ClientMsg::SendKeys { req: 1, id, keys });
@@ -42,8 +53,7 @@ fn keys_reach_the_program_encoded_for_its_modes() {
     let dir = temp_dir("keysapp");
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    let id = peer.spawn(&visible_cat(&dir, "\\033[?1h"));
-    let (channel, _) = peer.attach(id, AttachMode::VtReplay);
+    let (id, channel) = spawn_attached(&mut peer, &visible_cat(&dir, "\\033[?1h"));
     // 程序打开应用光标键的序列在 `ready` 之前，宿主的 VT 已经处理过它。
     peer.wait_for_output(channel, b"ready");
     peer.send(&ClientMsg::SendKeys { req: 1, id, keys: vec!["up".into(), "enter".into()] });
@@ -58,8 +68,7 @@ fn pastes_are_bracketed_when_the_program_asks() {
     let dir = temp_dir("paste");
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    let id = peer.spawn(&visible_cat(&dir, "\\033[?2004h"));
-    let (channel, _) = peer.attach(id, AttachMode::VtReplay);
+    let (id, channel) = spawn_attached(&mut peer, &visible_cat(&dir, "\\033[?2004h"));
     peer.wait_for_output(channel, b"ready");
     peer.send(&ClientMsg::Paste { req: 4, id, text: "pasted".into() });
     assert!(matches!(peer.reply(), HostMsg::Done { req: 4 }));
@@ -81,8 +90,7 @@ fn command_output_needs_prompt_marks() {
         "printf '\\033]133;A\\007$ \\033]133;B\\007ls\\r\\n\\033]133;C\\007one\\r\\ntwo\\r\\n'\n\
          printf '\\033]133;D;0\\007\\033]133;A\\007$ \\033]133;B\\007'\nexec /bin/cat",
     );
-    let id = peer.spawn(&marked);
-    let (channel, _) = peer.attach(id, AttachMode::VtReplay);
+    let (id, channel) = spawn_attached(&mut peer, &marked);
     peer.wait_for_output(channel, b"two");
     // 输出到了宿主那份 VT 才读得到。
     let deadline = Instant::now() + WAIT;

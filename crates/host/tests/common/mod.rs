@@ -184,7 +184,9 @@ impl Peer {
         let deadline = Instant::now() + WAIT;
         let mut output = Vec::new();
         loop {
-            let frame = self.next_frame(deadline.saturating_duration_since(Instant::now())).expect("timed out");
+            let Ok(frame) = self.next_frame(deadline.saturating_duration_since(Instant::now())) else {
+                panic!("timed out; output so far: {:?}", String::from_utf8_lossy(&output));
+            };
             let message = match frame.kind {
                 FrameKind::Output if frame.channel == channel => {
                     output.extend_from_slice(&frame.payload);
