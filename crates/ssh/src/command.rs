@@ -24,8 +24,7 @@ pub struct Ssh {
 }
 
 impl Ssh {
-    /// 所有调用都带的选项：命令行上的 `-o` 压过配置文件，用户自己的 ControlPath 不受影响。用户配置里的
-    /// `LocalForward` 这类转发不在 runode 的连接上重复绑定（`ClearAllForwardings`）。
+    /// 所有调用都带的选项：命令行上的 `-o` 压过配置文件，用户自己的 ControlPath 不受影响。
     fn base(&self) -> Command {
         let mut command = Command::new(&self.program);
         match &self.control {
@@ -39,8 +38,6 @@ impl Ssh {
             "ServerAliveCountMax=3",
             "-o",
             "ConnectTimeout=15",
-            "-o",
-            "ClearAllForwardings=yes",
             "-o",
             "LogLevel=ERROR",
         ]);
@@ -56,13 +53,21 @@ impl Ssh {
 
     /// 起主连接：认证完就转到后台（`-f`），之后的调用经 `control` 复用它。`batch` 时不问用户，要认证就失败。
     pub fn master(&self, dest: &Destination, batch: bool) -> Command {
-        let mut command = self.base();
+        let mut command = self.connecting();
         command.args(["-M", "-N", "-f", "-T", "-o", "ControlMaster=yes"]);
         command.arg("-o").arg(format!("ControlPersist={}", self.persist_secs));
         if batch {
             command.args(["-o", "BatchMode=yes"]);
         }
         command.args(dest.args());
+        command
+    }
+
+    /// 自己可能建连接的调用：用户配置里的 `LocalForward` 这类转发不在 runode 的连接上重复绑定。`forward`
+    /// 不能带它，带了连要加的那条转发也一起清掉。
+    fn connecting(&self) -> Command {
+        let mut command = self.base();
+        command.args(["-o", "ClearAllForwardings=yes"]);
         command
     }
 
@@ -85,7 +90,7 @@ impl Ssh {
     /// 在远端跑一条命令，stdin 和 stdout 原样是二进制数据（`-e none` 关掉转义字符，`-T` 不分配终端）。
     /// 有主连接时复用它（`batch` 时不问用户）；`remote` 交给远端的登录 shell 解释。
     pub fn exec(&self, dest: &Destination, remote: &str, batch: bool) -> Command {
-        let mut command = self.base();
+        let mut command = self.connecting();
         command.args(["-T", "-e", "none", "-o", "ControlMaster=no"]);
         if batch {
             command.args(["-o", "BatchMode=yes"]);

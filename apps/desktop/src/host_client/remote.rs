@@ -10,6 +10,7 @@
 
 mod askpass;
 pub(crate) mod deploy;
+pub(crate) mod forward;
 pub(crate) mod upload;
 
 use std::{
@@ -648,7 +649,7 @@ mod tests {
 
     use futures::StreamExt as _;
 
-    use super::{RemoteEvent, Status, events, remote, ssh, upload};
+    use super::{RemoteEvent, Status, events, forward, remote, ssh, upload};
 
     fn wait_for(host: &super::RemoteHost, timeout: Duration, done: impl Fn(&Status) -> bool) -> Status {
         let deadline = Instant::now() + timeout;
@@ -713,6 +714,21 @@ mod tests {
         let shot = upload::upload(&host, bytes).expect("upload bytes");
         assert_eq!(read(&shot[0]), "png");
         let _ = std::fs::remove_dir_all(&local);
+
+        // 远端只在自己那里听的端口，经转发在本机打得开。
+        let serve = "cd /tmp && (python3 -m http.server 18765 --bind 127.0.0.1 > /dev/null 2>&1 & echo $!)";
+        let output = ssh().exec(&host.dest, serve, true).output().unwrap();
+        let server = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+        std::thread::sleep(Duration::from_secs(1));
+        let url = forward::local_url(&host, "http://localhost:18765/").expect("forward");
+        assert_eq!(forward::local_url(&host, "http://localhost:18765/").unwrap(), url);
+        let port: u16 = url.trim_start_matches("http://localhost:").trim_end_matches('/').parse().unwrap();
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        std::io::Write::write_all(&mut stream, b"GET / HTTP/1.0\r\n\r\n").unwrap();
+        let mut answer = String::new();
+        std::io::Read::read_to_string(&mut stream, &mut answer).unwrap();
+        assert!(answer.starts_with("HTTP/1.0 200"), "{answer}");
+        let _ = ssh().exec(&host.dest, &format!("kill {server}"), true).output();
 
         host.disconnect();
         host.close_master();

@@ -5,8 +5,8 @@ use std::time::Duration;
 use futures::{FutureExt, future::Shared};
 
 use gpui::{
-    App, Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point, ScrollDelta, ScrollEvent, Size, Task, Window,
+    App, AppContext as _, Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent, Size, Task, Window,
 };
 use runode_terminal::session::{Link, LinkCandidates, LinkTarget, Session};
 use runode_types::{
@@ -19,6 +19,7 @@ use super::{
     actions::{HAS_PRIMARY, write_primary},
     keys,
 };
+use crate::host_client::remote::{self, HostId};
 
 /// 按着 ⌘ 时指针下的候选链接。路径要查存在与否，路径在断开的网络卷或 autofs 下时 stat 能卡几十秒，
 /// 所以放到后台去查，查完再把结果记进 `hovered_link`；指针挪到别的候选上时换掉这一份，丢掉任务，
@@ -285,16 +286,17 @@ impl TerminalView {
                 // 松开 ⌘、指针挪开都不撤回这一下：后台查完是链接就打开。查完不是时这一下什么都不做，
                 // 选择已经错过了：只有按下 ⌘ 的同一瞬间点在不存在的路径上才会这样，不为它记下按的位置。
                 let check = check.clone();
+                let host = self.host.clone();
                 cx.spawn(async move |_, cx| {
                     if let Some(link) = check.await {
-                        cx.update(|cx| open_link(&link.target, cx));
+                        cx.update(|cx| open_link(&link.target, &host, cx));
                     }
                 })
                 .detach();
                 true
             }
             Some(_) if let Some(link) = &self.hovered_link => {
-                open_link(&link.target, cx);
+                open_link(&link.target, &self.host, cx);
                 true
             }
             _ => false,
@@ -381,12 +383,33 @@ impl TerminalView {
     }
 }
 
-/// 网址交给系统按协议打开，文件和目录用系统默认的程序打开（目录进 Finder）。
-fn open_link(target: &LinkTarget, cx: &App) {
-    match target {
-        LinkTarget::Url(url) => cx.open_url(url),
-        LinkTarget::Path(path) => cx.open_with_system(path),
+/// 网址交给系统按协议打开，文件和目录用系统默认的程序打开（目录进 Finder）。远端终端里指向那台机器自己的
+/// 网址先把端口转到本机再打开；远端的文件本机打不开，不管。
+fn open_link(target: &LinkTarget, host: &HostId, cx: &App) {
+    match (target, host) {
+        (LinkTarget::Url(url), HostId::Local) => cx.open_url(url),
+        (LinkTarget::Url(url), HostId::Ssh(name)) => open_remote_url(name, url.clone(), cx),
+        (LinkTarget::Path(path), HostId::Local) => cx.open_with_system(path),
+        (LinkTarget::Path(_), HostId::Ssh(_)) => {}
     }
+}
+
+fn open_remote_url(name: &str, url: String, cx: &App) {
+    let Some(host) = remote::remote(name) else {
+        return;
+    };
+    let job = cx.background_spawn(async move {
+        // 转发不了时照原样打开：本机恰好也在听那个端口时还能看到点什么，不至于点了没反应。
+        remote::forward::local_url(&host, &url).unwrap_or_else(|err| {
+            tracing::warn!("cannot forward {url} from {}: {err:#}", host.name);
+            url
+        })
+    });
+    cx.spawn(async move |cx| {
+        let url = job.await;
+        cx.update(|cx| cx.open_url(&url));
+    })
+    .detach();
 }
 
 fn mouse_mods(modifiers: &Modifiers) -> Mods {
