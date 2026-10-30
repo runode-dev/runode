@@ -288,8 +288,8 @@ impl Caffeinate {
     }
 
     /// 电源请求别人结束不了，一直拦着。
-    pub(in crate::window::status_bar) fn exited(&mut self) -> bool {
-        false
+    pub(in crate::window::status_bar) fn exit(&mut self) -> Option<Result<(), String>> {
+        None
     }
 }
 
@@ -335,6 +335,6 @@ mod tests {
     #[test]
     fn sleep_can_be_prevented() {
         let mut caffeinate = Caffeinate::start().unwrap();
-        assert!(!caffeinate.exited());
+        assert_eq!(caffeinate.exit(), None);
     }
 }

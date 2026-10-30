@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use gpui::{AppContext as _, ClipboardItem, Context, PromptLevel, Window, px};
+use gpui::{App, AppContext as _, ClipboardItem, Context, PromptLevel, Window, px};
 use runode_terminal::session::{Paste as PasteResult, Session};
 use runode_types::grid::ViewportScroll;
 
@@ -13,6 +13,28 @@ use super::{
 };
 use crate::ui::actions::{Copy, Paste, SelectAll};
 
+/// 系统有 primary selection（选中即放进去、中键粘贴）：X11 和 Wayland。
+pub(super) const HAS_PRIMARY: bool = cfg!(any(target_os = "linux", target_os = "freebsd"));
+
+/// primary selection 里的文字，没有 primary selection 的系统上为空。
+fn read_primary(cx: &App) -> Option<String> {
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    return cx.read_from_primary().and_then(|item| item.text());
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    {
+        let _ = cx;
+        None
+    }
+}
+
+/// 把选中的文字放进 primary selection，没有它的系统上什么都不做。
+pub(super) fn write_primary(text: String, cx: &App) {
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    cx.write_to_primary(ClipboardItem::new_string(text));
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    let _ = (text, cx);
+}
+
 impl TerminalView {
     pub(super) fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
@@ -20,8 +42,10 @@ impl TerminalView {
         }
     }
 
+    /// 粘贴选区：X11 和 Wayland 上是 primary selection（别的程序里选中的也算），别的系统上和读不到时是这个
+    /// 终端里选中的。
     pub(super) fn paste_selection(&mut self, _: &PasteSelection, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = self.screen.shown().and_then(Session::selection_text) {
+        if let Some(text) = read_primary(cx).or_else(|| self.screen.shown().and_then(Session::selection_text)) {
             self.paste_text(text, window, cx);
         }
     }

@@ -6989,10 +6989,12 @@ dependencies = [
  "gpui-pre",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "raw-window-handle",
  "runode-paths",
  "runode-types",
  "tracing",
  "unicode-segmentation",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

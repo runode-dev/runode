@@ -1,6 +1,8 @@
 _version: 1
 menu:
   about: 关于 Runode
+  open_config: 打开配置文件
+  reload_config: 重新加载配置
   install_skill: 安装 Agent Skill
   settings: 设置…
   services: 服务
@@ -240,7 +242,11 @@ tasks:
   bind: "设快捷键（%{key}）"
   bind_title: "「%{name}」的快捷键"
   bind_hint: "快捷键只在这个项目里有效，别的项目可以把同一个键绑给自己的命令；通用命令的快捷键在没绑这个键的项目里都能用。"
+about:
+  detail: "版本 %{version}（%{revision}）\n%{url}"
+  ok: 好
 tooltip:
+  more: 更多
   show_sidebar: 显示侧栏
   hide_sidebar: 隐藏侧栏
   show_git: 显示 Git
@@ -686,6 +692,11 @@ settings:
       title: 登录时在后台启动宿主
       hint: 不开窗口，只在后台启动终端宿主。远程访问打开、又有配对过的手机时它一直留着，不用开着 Runode 手机也连得上。关掉开关不会停下正在跑的宿主，它托管的会话不受影响。
     failed: "没能修改登录时启动的设置：%{err}"
+  firewall:
+    title: Windows 防火墙挡着局域网连接
+    hint: "同一个网络里的手机也只能经中继连过来，会慢一些。放行后 Runode 在专用和域网络里能直接连（要管理员确认）；信得过这个网络的话，也在 Windows 设置里把它设成专用网络。"
+    allow: 放行
+    failed: "改防火墙失败：%{err}"
   test_push:
     title: 测试推送
     hint: 马上给登记过的手机推一条通知，看推送设置和密钥对不对。

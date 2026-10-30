@@ -15,6 +15,8 @@ pub(crate) fn window_options(cx: &App) -> WindowOptions {
         // 标题栏的拖动和双击由 `WindowView` 自己处理；否则 AppKit 会抢先处理标题栏区域的双击，
         // 在标签或新建按钮上双击也会缩放窗口。
         app_owns_titlebar_drag: true,
+        // Wayland 和 X11 按它把窗口对上 .desktop 文件，任务栏的图标和窗口分组靠它。
+        app_id: Some(runode_update::BUNDLE_ID.into()),
         ..Default::default()
     }
 }

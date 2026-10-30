@@ -19,28 +19,10 @@ fn use_login_shell() {
     if unsafe { libc::getppid() } != 1 {
         return;
     }
-    if let Some(shell) = login_shell() {
+    if let Some(shell) = runode_terminal::pty::login_shell() {
         // SAFETY: 由 `fix` 在 `main` 最开头调用，还没有别的线程读写环境变量。
         unsafe { std::env::set_var("SHELL", shell) };
     }
-}
-
-/// 账户记录（passwd）里的登录 shell，没有时为 `None`。
-#[cfg(unix)]
-fn login_shell() -> Option<std::ffi::OsString> {
-    use std::os::unix::ffi::OsStrExt as _;
-    // SAFETY: `passwd` 只有整数和指针，全零是合法的值。
-    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut buf = vec![0; 4096];
-    let mut found = std::ptr::null_mut();
-    // SAFETY: 只往传进去的 `entry` 和 `buf` 里写，`entry` 里的字符串都指向 `buf`。
-    let code = unsafe { libc::getpwuid_r(libc::getuid(), &raw mut entry, buf.as_mut_ptr(), buf.len(), &raw mut found) };
-    if code != 0 || found.is_null() || entry.pw_shell.is_null() {
-        return None;
-    }
-    // SAFETY: 成功时 `pw_shell` 是 `buf` 里以 NUL 结尾的字符串，`buf` 还活着。
-    let shell = unsafe { std::ffi::CStr::from_ptr(entry.pw_shell) }.to_bytes();
-    (!shell.is_empty()).then(|| std::ffi::OsStr::from_bytes(shell).to_owned())
 }
 
 /// 从程序坞、Finder 打开的 app 环境里没有 `LANG`，终端里就成了 C 语言环境：zsh 把中文当成一个个字节，

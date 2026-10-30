@@ -1,4 +1,4 @@
-//! 应用图标与「关于 Runode」面板。
+//! 应用图标与「关于 Runode」面板（macOS 上是系统的关于面板，别的系统上是一个弹框）。
 
 /// 应用图标，由矢量源图渲染成 256×256 的 PNG 后编进二进制，只给未打包运行时用。
 /// 不用 1024 的大图：Dock 图标最大也就 128 点（Retina 下 256 像素），而设成应用图标时
@@ -47,7 +47,7 @@ pub(crate) fn in_app_bundle() -> bool {
 /// 打开 macOS 标准关于面板。名称、版本、版权来自构建脚本嵌进可执行文件的应用信息表，
 /// 图标来自 bundle 或 `install_icon`；括号里默认显示的构建号重复了版本号，换成只有提交号的 `RUNODE_REVISION`。
 #[cfg(target_os = "macos")]
-pub fn show() {
+pub fn show(_: &mut gpui::App) {
     use objc2::{MainThreadMarker, runtime::AnyObject};
     use objc2_app_kit::{NSAboutPanelOptionVersion, NSApplication};
     use objc2_foundation::{NSDictionary, NSString};
@@ -71,5 +71,15 @@ pub fn show() {
 #[cfg(not(target_os = "macos"))]
 pub fn install_icon() {}
 
+/// 在最前面的窗口上弹框写出版本号和括号里的提交号（`RUNODE_REVISION`）。
 #[cfg(not(target_os = "macos"))]
-pub fn show() {}
+pub fn show(cx: &mut gpui::App) {
+    let detail = rust_i18n::t!(
+        "about.detail",
+        version = env!("CARGO_PKG_VERSION"),
+        revision = env!("RUNODE_REVISION"),
+        url = "https://github.com/runode-dev/runode"
+    );
+    let ok = rust_i18n::t!("about.ok");
+    crate::update::prompt(gpui::PromptLevel::Info, "Runode", &detail, &[&ok], cx, |_, _| {});
+}

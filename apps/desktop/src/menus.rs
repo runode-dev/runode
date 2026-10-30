@@ -48,7 +48,7 @@ actions!(
 );
 
 pub fn install(cx: &mut App) {
-    cx.on_action(|_: &About, _| crate::about::show());
+    cx.on_action(|_: &About, cx| crate::about::show(cx));
     cx.on_action(|_: &CheckForUpdates, cx| crate::update::menu_clicked(cx));
     cx.on_action(|_: &OpenSettings, cx| crate::window::show_settings(cx));
     cx.on_action(|_: &OpenConfiguration, cx| crate::config::open(cx));
@@ -66,7 +66,7 @@ pub fn install(cx: &mut App) {
     });
     cx.on_action(|_: &CloseAllWindows, cx| crate::window::close_all_windows(cx));
     cx.on_action(|_: &Minimize, cx| with_active_window(cx, |w| w.minimize_window()));
-    cx.on_action(|_: &Zoom, cx| with_active_window(cx, |w| w.zoom_window()));
+    cx.on_action(|_: &Zoom, cx| with_active_window(cx, |w| crate::ui::toggle_maximize(w)));
     cx.on_action(|_: &ToggleFullScreen, cx| with_active_window(cx, |w| w.toggle_fullscreen()));
 
     // 装快捷键时会顺带设置菜单。

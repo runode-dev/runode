@@ -44,8 +44,8 @@ use crate::{
     prespawn::Prespawned,
 };
 
-/// 配置的字体都不可用时使用的等宽字体，macOS 自带。
-const FALLBACK_FONT_FAMILY: &str = "Menlo";
+/// 配置的字体都不可用时使用的等宽字体：macOS 自带的 Menlo，别的系统上用随 app 带的那个（`assets::install_fonts`）。
+const FALLBACK_FONT_FAMILY: &str = if cfg!(target_os = "macos") { "Menlo" } else { "Hack Nerd Font Mono" };
 /// 视图建好时伪终端的临时尺寸；第一次布局时会按实际大小重设，shell 等到那之后才启动。窗口里没有
 /// 终端可参照尺寸时，开在看不见的地方的新终端也先按它启动。
 pub(crate) const PROVISIONAL_SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };

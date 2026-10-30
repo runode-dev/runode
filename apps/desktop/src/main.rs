@@ -125,6 +125,11 @@ fn main() {
 
     application().with_assets(assets::Assets).run(|cx: &mut App| {
         startup::mark("app_run");
+        // 系统通知认这个身份：Windows 上是 AppUserModelID，Linux 上是通知里的程序名。macOS 上由 .app 的
+        // bundle id 定。
+        if !cfg!(target_os = "macos") {
+            cx.set_app_identity(runode_update::BUNDLE_ID, "Runode");
+        }
         assets::install_fonts(cx);
         startup::mark("fonts_install");
         config::install(cx);

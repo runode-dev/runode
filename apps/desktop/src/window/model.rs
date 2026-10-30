@@ -258,8 +258,10 @@ impl WindowView {
         match &*found {
             Some((seen, installed)) if *seen == path => *installed,
             _ => {
-                let on_path =
-                    |path: &std::ffi::OsString| std::env::split_paths(path).any(|dir| dir.join(program).is_file());
+                let on_path = |path: &std::ffi::OsString| {
+                    let dirs: Vec<_> = std::env::split_paths(path).filter(|dir| dir.is_absolute()).collect();
+                    crate::subprocess::find_command(&dirs, program).is_some()
+                };
                 let installed = path.as_ref().is_some_and(on_path);
                 *found = Some((path, installed));
                 installed

@@ -197,13 +197,40 @@ fn status_color(status: FileStatus) -> Rgb {
 }
 
 /// 用 VS Code 打开 `dir`，按 bundle id 找它，不管装在哪里。没装时只记一条日志。
-fn open_in_vscode(dir: PathBuf) {
+#[cfg(target_os = "macos")]
+fn open_in_vscode(dir: PathBuf, _: &mut App) {
     std::thread::spawn(move || {
         let status = std::process::Command::new("open").args(["-b", "com.microsoft.VSCode"]).arg(&dir).status();
         if !status.is_ok_and(|status| status.success()) {
             tracing::warn!("failed to open {} in VS Code", dir.display());
         }
     });
+}
+
+/// 用 VS Code 打开 `dir`：经它装时向系统登记的 `vscode://` 链接，不管装在哪里。
+#[cfg(not(target_os = "macos"))]
+fn open_in_vscode(dir: PathBuf, cx: &mut App) {
+    cx.open_url(&vscode_url(&dir));
+}
+
+/// VS Code 打开 `dir` 的链接：路径用 `/` 分隔，Windows 的盘符前也加 `/`，非 ASCII 和保留字符按 UTF-8 转义；
+/// Unix 上 `\` 是文件名里的普通字符，也转义。
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn vscode_url(dir: &Path) -> String {
+    let path = dir.to_string_lossy();
+    let path = if cfg!(windows) { path.replace('\\', "/") } else { path.into_owned() };
+    let mut url = String::from("vscode://file");
+    if !path.starts_with('/') {
+        url.push('/');
+    }
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || b"/:-._~".contains(&byte) {
+            url.push(char::from(byte));
+        } else {
+            url.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    url
 }
 
 /// 从文件树拖出来的一项：放到终端上把路径打进去（由 app 接），放到文件树的目录上挪进那个目录。
@@ -958,7 +985,7 @@ impl Render for FileTree {
             .on_action(cx.listener(Self::collapse_all_files))
             .on_action(cx.listener(|this, _: &ToggleShowDotfiles, _, cx| this.toggle_show_dotfiles(cx)))
             .on_action(cx.listener(|this, _: &ToggleShowIgnored, _, cx| this.toggle_show_ignored(cx)))
-            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, _| open_in_vscode(this.files_root())))
+            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, cx| open_in_vscode(this.files_root(), cx)))
             .on_action(cx.listener(|this, _: &OpenRootInFinder, _, cx| cx.open_with_system(&this.files_root())))
             .on_action(cx.listener(Self::focus_terminal))
             .on_action(cx.listener(Self::new_file))
@@ -990,5 +1017,30 @@ impl Render for FileTree {
             .child(search_box)
             .child(tree)
             .children(self.render_context_menu(window, cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::vscode_url;
+
+    #[test]
+    fn vscode_url_escapes_the_path() {
+        assert_eq!(vscode_url(Path::new("/home/me/my project")), "vscode://file/home/me/my%20project");
+        assert_eq!(vscode_url(Path::new("/tmp/日志")), "vscode://file/tmp/%E6%97%A5%E5%BF%97");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vscode_url_keeps_backslashes_in_unix_names() {
+        assert_eq!(vscode_url(Path::new(r"/home/me/a\b")), "vscode://file/home/me/a%5Cb");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn vscode_url_turns_windows_paths_into_url_paths() {
+        assert_eq!(vscode_url(Path::new(r"C:\Users\me\proj")), "vscode://file/C:/Users/me/proj");
     }
 }

@@ -12,6 +12,7 @@ use crate::file_tree::{FileTree, FileTreeEvent, Input};
 use futures::FutureExt as _;
 use gpui::{Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*, px};
 use runode_config::PreviewClick;
+use runode_types::{session::SessionMeta, shell::Shell};
 
 // 菜单部件在 `runode_ui::menu`，窗口里各处从这里引。
 pub(super) use crate::ui::menu::{MenuButton, MenuItem};
@@ -25,16 +26,115 @@ use crate::{
     },
 };
 
-/// 打进 shell 不用引号也不用转义的常见字符。
-fn is_shell_plain(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '=')
+/// 往终端里打路径、地址时照哪种 shell 的写法加引号。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Quoting {
+    /// sh、bash（包括 Windows 上的 Git Bash）、zsh、fish：单引号，里面的单引号写成 `'\''`。
+    Posix,
+    /// PowerShell：单引号里什么都不展开，单引号写两遍；它把 `‘’‚‛` 也当单引号。
+    PowerShell,
+    /// elvish：单引号里什么都不展开，单引号写两遍。
+    Elvish,
+    /// cmd：双引号。Windows 的文件名里没有双引号。
+    /// shortcut: cmd 在双引号里照样展开定义过的 `%名字%`，交互的 cmd 没有转义写法；有人撞上再拆开引号插 `^`。
+    Cmd,
+    /// nushell：单引号里不转义，本身带单引号时用 raw string `r#'…'#`。
+    Nushell,
 }
 
-/// 打进 shell 的路径：只含常见字符时原样，否则用单引号括起来。开头是 `=` 或 `%` 时也括起来，
-/// zsh 会把 `=foo` 展开成命令的路径。
-pub(super) fn shell_quote(text: &str) -> String {
-    let plain = !text.is_empty() && !text.starts_with(['=', '%']) && text.chars().all(is_shell_plain);
-    if plain { text.to_owned() } else { format!("'{}'", text.replace('\'', r"'\''")) }
+impl Quoting {
+    /// 终端前台的 shell 的写法；前台不是 shell 或者认不出时按 `Quoting::platform`。
+    pub(super) fn of_session(meta: &SessionMeta) -> Self {
+        let shell = meta.foreground.as_deref().filter(|_| meta.foreground_is_shell).and_then(Shell::detect);
+        shell.map_or_else(Self::platform, Self::of_shell)
+    }
+
+    /// 程序名是 `program` 的 shell 的写法，认不出时按 `Quoting::platform`。
+    pub(super) fn of_program(program: &str) -> Self {
+        Shell::detect(program).map_or_else(Self::platform, Self::of_shell)
+    }
+
+    fn of_shell(shell: Shell) -> Self {
+        match shell {
+            Shell::Zsh | Shell::Bash | Shell::Fish => Self::Posix,
+            Shell::PowerShell => Self::PowerShell,
+            Shell::Elvish => Self::Elvish,
+            Shell::Cmd => Self::Cmd,
+            Shell::Nushell => Self::Nushell,
+        }
+    }
+
+    /// 不知道是哪种 shell 时（前台是 agent 这类程序）：Unix 上照 sh 的写法；Windows 上用双引号，
+    /// agent 和各种 shell 都认，只是 PowerShell 和 Git Bash 在双引号里还会展开 `$`。
+    fn platform() -> Self {
+        if cfg!(windows) { Self::Cmd } else { Self::Posix }
+    }
+
+    /// 不用引号也不用转义的常见字符。
+    fn is_plain(self, c: char) -> bool {
+        c.is_alphanumeric()
+            || match self {
+                Self::Posix => matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '='),
+                // PowerShell 把 `,` 当数组、`@` 当展开，elvish 和 nushell 的裸字也不全认它们；`\` 在这几种里不是转义。
+                Self::PowerShell | Self::Elvish | Self::Nushell => {
+                    matches!(c, '/' | '\\' | '.' | '_' | '-' | '+' | ':')
+                }
+                // cmd 把 `,`、`=`、`;` 当参数之间的分隔。
+                Self::Cmd => matches!(c, '/' | '\\' | '.' | '_' | '-' | '+' | '@' | ':'),
+            }
+    }
+
+    /// `text` 只含常见字符时原样，否则括起来。开头是 `=` 或 `%` 时也括起来，zsh 会把 `=foo` 展开成命令的路径。
+    pub(super) fn quote(self, text: &str) -> String {
+        let plain = !text.is_empty() && !text.starts_with(['=', '%']) && text.chars().all(|c| self.is_plain(c));
+        if plain {
+            return text.to_owned();
+        }
+        match self {
+            Self::Posix => format!("'{}'", text.replace('\'', r"'\''")),
+            Self::PowerShell => {
+                let mut quoted = String::with_capacity(text.len() + 2);
+                quoted.push('\'');
+                for c in text.chars() {
+                    if matches!(c, '\'' | '‘' | '’' | '‚' | '‛') {
+                        quoted.push(c);
+                    }
+                    quoted.push(c);
+                }
+                quoted.push('\'');
+                quoted
+            }
+            Self::Elvish => format!("'{}'", text.replace('\'', "''")),
+            Self::Cmd => format!("\"{text}\""),
+            Self::Nushell if !text.contains('\'') => format!("'{text}'"),
+            Self::Nushell => {
+                let mut hashes = "#".to_owned();
+                while text.contains(&format!("'{hashes}")) {
+                    hashes.push('#');
+                }
+                format!("r{hashes}'{text}'{hashes}")
+            }
+        }
+    }
+
+    /// 和 `quote` 一样只放过常见字符；sh 的写法里其余字符前面加反斜杠，像访达把文件拖进终端时那样，
+    /// 别的写法里反斜杠不是转义，照 `quote` 括起来。
+    /// 图片路径用这种写法：Claude Code 按「空格后跟 `/`」拆开几个路径，引号只在整段两头时才去掉，
+    /// 几个带引号的路径连在一起它就认不出来了；反斜杠转义它和 Codex 都能还原。
+    fn escape(self, text: &str) -> String {
+        if self != Self::Posix {
+            return self.quote(text);
+        }
+        let mut escaped = String::with_capacity(text.len());
+        for (i, c) in text.chars().enumerate() {
+            let plain = self.is_plain(c) && !(i == 0 && matches!(c, '=' | '%'));
+            if !plain {
+                escaped.push('\\');
+            }
+            escaped.push(c);
+        }
+        escaped
+    }
 }
 
 /// Claude Code、Codex 会把粘贴进来的图片路径换成图片附件，这几种扩展名两边都认。
@@ -44,21 +144,6 @@ fn is_image(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| IMAGE_EXTENSIONS.iter().any(|image| ext.eq_ignore_ascii_case(image)))
-}
-
-/// 和 `shell_quote` 一样只放过常见字符，其余字符前面加反斜杠，像访达把文件拖进终端时那样。
-/// 图片路径用这种写法：Claude Code 按「空格后跟 `/`」拆开几个路径，引号只在整段两头时才去掉，
-/// 几个带引号的路径连在一起它就认不出来了；反斜杠转义它和 Codex 都能还原。
-fn shell_escape(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
-    for (i, c) in text.chars().enumerate() {
-        let plain = is_shell_plain(c) && !(i == 0 && matches!(c, '=' | '%'));
-        if !plain {
-            escaped.push('\\');
-        }
-        escaped.push(c);
-    }
-    escaped
 }
 
 impl WindowView {
@@ -151,11 +236,12 @@ impl WindowView {
             return;
         };
         let cwd = view.read(cx).cwd();
+        let quoting = Quoting::of_session(view.read(cx).meta());
         window.focus(&view.focus_handle(cx), cx);
         // 起不了线程时不比目录，照原样打进去。
-        let fallback = paths.iter().map(|path| path_text(path, lines, None)).collect();
+        let fallback = paths.iter().map(|path| path_text(path, lines, None, quoting)).collect();
         let job = crate::fs_probe::off_thread(
-            move || paths.iter().map(|path| path_text(path, lines, cwd.as_deref())).collect(),
+            move || paths.iter().map(|path| path_text(path, lines, cwd.as_deref(), quoting)).collect(),
             fallback,
         );
         // 打进算的时候拿着焦点的那个终端；它关掉了就不打。上一次的先算完时等它打完，连点两次不会倒过来。
@@ -177,15 +263,15 @@ impl WindowView {
     }
 }
 
-/// `path` 打进终端时的写法，见 `WindowView::insert_paths`。图片写绝对路径：Claude Code 只把绝对路径认成
-/// 图片附件。
-fn path_text(path: &Path, lines: Option<(u32, u32)>, cwd: Option<&Path>) -> String {
+/// `path` 照 `quoting` 打进终端时的写法，见 `WindowView::insert_paths`。图片写绝对路径：Claude Code 只把
+/// 绝对路径认成图片附件。
+fn path_text(path: &Path, lines: Option<(u32, u32)>, cwd: Option<&Path>, quoting: Quoting) -> String {
     if lines.is_none() && is_image(path) {
         let absolute = match cwd {
             Some(cwd) if path.is_relative() => cwd.join(path),
             _ => path.to_path_buf(),
         };
-        return shell_escape(&absolute.display().to_string());
+        return quoting.escape(&absolute.display().to_string());
     }
     // 终端报的目录和面板里的路径可能一个经过符号链接、一个没有，对不上时都换成真实路径再比。
     let relative = |path: &Path, cwd: &Path| {
@@ -201,7 +287,7 @@ fn path_text(path: &Path, lines: Option<(u32, u32)>, cwd: Option<&Path>) -> Stri
         Some((first, last)) => text = format!("{text}:{first}-{last}"),
         None => {}
     }
-    shell_quote(&text)
+    quoting.quote(&text)
 }
 
 #[cfg(test)]
@@ -209,30 +295,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn quotes_paths_for_the_shell() {
-        assert_eq!(shell_quote("src/main.rs:12"), "src/main.rs:12");
-        assert_eq!(shell_quote("my file.txt"), "'my file.txt'");
-        assert_eq!(shell_quote("it's"), r"'it'\''s'");
-        assert_eq!(shell_quote("文件.md"), "文件.md");
-        assert_eq!(shell_quote("=foo"), "'=foo'");
-        assert_eq!(shell_quote("a=b"), "a=b");
+    fn quotes_paths_for_posix_shells() {
+        let quote = |text| Quoting::Posix.quote(text);
+        assert_eq!(quote("src/main.rs:12"), "src/main.rs:12");
+        assert_eq!(quote("my file.txt"), "'my file.txt'");
+        assert_eq!(quote("it's"), r"'it'\''s'");
+        assert_eq!(quote("文件.md"), "文件.md");
+        assert_eq!(quote("=foo"), "'=foo'");
+        assert_eq!(quote("a=b"), "a=b");
+        assert_eq!(quote(r"C:\src\a.rs"), r"'C:\src\a.rs'");
+    }
+
+    #[test]
+    fn quotes_paths_for_windows_shells() {
+        assert_eq!(Quoting::PowerShell.quote(r"C:\src\main.rs:12"), r"C:\src\main.rs:12");
+        assert_eq!(Quoting::PowerShell.quote(r"C:\me\$(whoami).txt"), r"'C:\me\$(whoami).txt'");
+        assert_eq!(Quoting::PowerShell.quote("Bob's ’file’"), "'Bob''s ’’file’’'");
+        assert_eq!(Quoting::PowerShell.quote("a,b"), "'a,b'");
+        assert_eq!(Quoting::Elvish.quote("it's"), "'it''s'");
+        assert_eq!(Quoting::Cmd.quote(r"C:\Users\me\Screen Shot.png"), r#""C:\Users\me\Screen Shot.png""#);
+        assert_eq!(Quoting::Cmd.quote("a=b"), r#""a=b""#);
+        assert_eq!(Quoting::Nushell.quote(r"C:\my dir"), r"'C:\my dir'");
+        assert_eq!(Quoting::Nushell.quote("it's"), "r#'it's'#");
+        assert_eq!(Quoting::Nushell.quote("a'#b"), "r##'a'#b'##");
+    }
+
+    #[test]
+    fn picks_the_quoting_of_the_foreground_shell() {
+        let meta = |foreground: &str, foreground_is_shell| SessionMeta {
+            foreground: Some(foreground.to_owned()),
+            foreground_is_shell,
+            ..SessionMeta::default()
+        };
+        assert_eq!(Quoting::of_session(&meta("pwsh.exe", true)), Quoting::PowerShell);
+        assert_eq!(Quoting::of_session(&meta("bash.exe", true)), Quoting::Posix);
+        assert_eq!(Quoting::of_session(&meta("nu", true)), Quoting::Nushell);
+        assert_eq!(Quoting::of_session(&meta("cmd.exe", true)), Quoting::Cmd);
+        assert_eq!(Quoting::of_session(&meta("pwsh.exe", false)), Quoting::platform());
+        assert_eq!(Quoting::of_program("powershell.exe"), Quoting::PowerShell);
     }
 
     #[test]
     fn writes_line_ranges_after_relative_paths() {
         let cwd = Path::new("/repo");
-        assert_eq!(path_text(Path::new("/repo/src/a.rs"), None, Some(cwd)), "src/a.rs");
-        assert_eq!(path_text(Path::new("/repo/src/a.rs"), Some((3, 3)), Some(cwd)), "src/a.rs:3");
-        assert_eq!(path_text(Path::new("/repo/src/a.rs"), Some((3, 9)), Some(cwd)), "src/a.rs:3-9");
+        let text = |path, lines| path_text(Path::new(path), lines, Some(cwd), Quoting::Posix);
+        assert_eq!(text("/repo/src/a.rs", None), "src/a.rs");
+        assert_eq!(text("/repo/src/a.rs", Some((3, 3))), "src/a.rs:3");
+        assert_eq!(text("/repo/src/a.rs", Some((3, 9))), "src/a.rs:3-9");
     }
 
     #[test]
     fn escapes_image_paths_with_backslashes() {
-        assert_eq!(shell_escape("/tmp/shot.png"), "/tmp/shot.png");
-        assert_eq!(shell_escape("/tmp/Screen Shot (1).png"), r"/tmp/Screen\ Shot\ \(1\).png");
-        assert_eq!(shell_escape("/tmp/it's.png"), r"/tmp/it\'s.png");
-        assert_eq!(shell_escape("/tmp/截图.png"), "/tmp/截图.png");
-        assert_eq!(shell_escape("=a=b"), r"\=a=b");
+        let escape = |text| Quoting::Posix.escape(text);
+        assert_eq!(escape("/tmp/shot.png"), "/tmp/shot.png");
+        assert_eq!(escape("/tmp/Screen Shot (1).png"), r"/tmp/Screen\ Shot\ \(1\).png");
+        assert_eq!(escape("/tmp/it's.png"), r"/tmp/it\'s.png");
+        assert_eq!(escape("/tmp/截图.png"), "/tmp/截图.png");
+        assert_eq!(escape("=a=b"), r"\=a=b");
+        assert_eq!(Quoting::PowerShell.escape(r"C:\tmp\shot.png"), r"C:\tmp\shot.png");
+        assert_eq!(Quoting::Cmd.escape(r"C:\Users\me\it's.png"), r#""C:\Users\me\it's.png""#);
     }
 
     #[test]

@@ -1,6 +1,8 @@
 _version: 1
 menu:
   about: 關於 Runode
+  open_config: 打開設定檔
+  reload_config: 重新載入設定
   install_skill: 安裝 Agent Skill
   settings: 設定…
   services: 服務
@@ -240,7 +242,11 @@ tasks:
   bind: "設快捷鍵（%{key}）"
   bind_title: "「%{name}」的快捷鍵"
   bind_hint: "快捷鍵只在這個專案裡有效，別的專案可以把同一個鍵綁給自己的命令；通用命令的快捷鍵在沒綁這個鍵的專案裡都能用。"
+about:
+  detail: "版本 %{version}（%{revision}）\n%{url}"
+  ok: 好
 tooltip:
+  more: 更多
   show_sidebar: 顯示側欄
   hide_sidebar: 隱藏側欄
   show_git: 顯示 Git
@@ -686,6 +692,11 @@ settings:
       title: 登入時在背景啟動宿主
       hint: 不開視窗，只在背景啟動終端宿主。遠端存取打開、又有配對過的手機時它一直留著，不用開著 Runode 手機也連得上。關掉開關不會停下正在跑的宿主，它託管的會話不受影響。
     failed: "沒能修改登入時啟動的設定：%{err}"
+  firewall:
+    title: Windows 防火牆擋著區域網路連線
+    hint: "同一個網路裡的手機也只能經中繼連過來，會慢一些。放行後 Runode 在私人和網域網路裡能直接連（要管理員確認）；信得過這個網路的話，也在 Windows 設定裡把它設成私人網路。"
+    allow: 放行
+    failed: "變更防火牆失敗：%{err}"
   test_push:
     title: 測試推送
     hint: 馬上給登記過的手機推送一則通知，看推送設定和金鑰對不對。

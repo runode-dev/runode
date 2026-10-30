@@ -14,8 +14,11 @@ use runode_types::{
     input::{self, Mods, SelectionAdjust},
 };
 
-use super::TerminalView;
-use super::keys;
+use super::{
+    PasteSelection, TerminalView,
+    actions::{HAS_PRIMARY, write_primary},
+    keys,
+};
 
 /// 按着 ⌘ 时指针下的候选链接。路径要查存在与否，路径在断开的网络卷或 autofs 下时 stat 能卡几十秒，
 /// 所以放到后台去查，查完再把结果记进 `hovered_link`；指针挪到别的候选上时换掉这一份，丢掉任务，
@@ -54,6 +57,11 @@ impl TerminalView {
         self.reset_cursor_blink(cx);
         // 输入法正在组字时，按键归输入法处理。
         if self.marked_text.is_some() {
+            return;
+        }
+        // Windows 上 AltGr 和死键打出的字符（`prefer_character_input`）要等系统发来的字符消息，经
+        // `replace_text_in_range` 交给终端；这里编成 Ctrl+Alt 组合键并拦下，系统就不再产出字符。
+        if cfg!(windows) && event.prefer_character_input {
             return;
         }
         if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() && self.cancel_dictation(cx) {
@@ -162,6 +170,10 @@ impl TerminalView {
                 session.mouse_report(input::MouseAction::Press, Some(button), at, mods);
                 self.reporting_press = true;
             }
+            return;
+        }
+        if HAS_PRIMARY && event.button == MouseButton::Middle {
+            self.paste_selection(&PasteSelection, window, cx);
             return;
         }
         if event.button != MouseButton::Left {
@@ -341,6 +353,9 @@ impl TerminalView {
         self._autoscroll = None;
         if let Some(session) = self.screen.shown_mut() {
             session.select_release(at);
+            if HAS_PRIMARY && let Some(text) = session.selection_text() {
+                write_primary(text, cx);
+            }
         }
         cx.notify();
     }

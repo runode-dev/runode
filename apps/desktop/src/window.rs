@@ -22,6 +22,7 @@ mod kanban;
 mod layout_report;
 mod mobile;
 mod model;
+mod more_menu;
 mod new_tab;
 mod new_workspace;
 mod open;
@@ -152,6 +153,17 @@ actions!(
     ]
 );
 
+/// 窗口的下拉菜单（`WindowView::menu`）挂在哪个按钮下面。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Dropdown {
+    /// 标题栏右上角的命令按钮。
+    Tasks,
+    /// 新建标签按钮。
+    NewTab,
+    /// 没有菜单栏的系统上标题栏右上角的「更多」按钮。
+    More,
+}
+
 /// 切换到第几个 workspace（从 0 数）。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
@@ -259,8 +271,8 @@ pub struct WindowView {
     /// 窗口开着的菜单：状态栏、标题栏命令按钮这些的右键菜单和按钮下面的菜单，同一时刻只开一个。
     /// 预览栏、文件树和 Git 面板的菜单存在它们自己身上。
     menu: Option<Menu>,
-    /// 开着的下拉菜单是新建标签按钮的，不是命令按钮的。
-    new_tab_menu: bool,
+    /// 开着的下拉菜单挂在哪个按钮下面。
+    dropdown: Dropdown,
     /// 新建标签菜单里列的 agent，上次打开菜单时在后台找到的。
     installed_agents: Vec<new_tab::Installed>,
     renaming: Option<Renaming>,
@@ -458,7 +470,7 @@ impl WindowView {
             file_tree,
             _file_tree_events: file_tree_events,
             menu: None,
-            new_tab_menu: false,
+            dropdown: Dropdown::Tasks,
             installed_agents: Vec::new(),
             renaming: None,
             new_workspace: None,
@@ -724,6 +736,7 @@ impl Render for WindowView {
             (theme.background, self.render_classic_body(window, cx))
         };
         let window_controls = self.render_window_controls(window, cx);
+        let resize_edges = self.render_resize_edges(window);
         let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
         let menu = self.render_context_menu(window, cx);
         let agent_picker = self.render_agent_picker(window, cx);
@@ -852,6 +865,7 @@ impl Render for WindowView {
                     .children(status_bar),
             )
             .children(window_controls)
+            .children(resize_edges)
             .children(drag)
             .children(menu)
             .children(agent_picker)
@@ -906,7 +920,11 @@ impl WindowView {
         // 右侧面板的开关按钮：右侧面板收着时落在标题栏右端，标题栏给它让位；打开着时落在
         // 面板顶上。全屏又只有一个标签、右侧面板也收着时没有地方放，不画。
         let right_column = self.workspace().panel.is_some();
-        let right_inset = if shown && !right_column { project::PANEL_TOGGLES_INSET } else { 0. };
+        let right_inset = if shown && !right_column {
+            project::PANEL_TOGGLES_INSET + titlebar::window_controls_width(window)
+        } else {
+            0.
+        };
         ClassicTitlebar { fullscreen, show_tabs, shown, left_inset, right_column, right_inset }
     }
 
@@ -937,7 +955,7 @@ impl WindowView {
             self.render_panel_toggles(window, cx)
                 .absolute()
                 .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
-                .right(px(project::TOGGLE_MARGIN + titlebar::WINDOW_CONTROLS_WIDTH))
+                .right(px(project::TOGGLE_MARGIN + titlebar::window_controls_width(window)))
         });
         let titlebar = titlebar_shown.then(|| row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window));
         let panes = covered_panes(panes, front_preview.is_some());
@@ -1103,7 +1121,11 @@ impl WindowView {
         // 标签平分标题栏除去两头的宽度（右侧面板在标题栏下面，不占它的宽度），连同标签条的内边距和
         // 标签间的空隙一起扣掉，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，挤不下就让标签条
         // 滚动；拖动时的预览也照这个宽度画。
-        let fixed = sidebar_width + left_inset + NEW_TAB_BUTTON_WIDTH + project::PANEL_TOGGLES_INSET;
+        let fixed = sidebar_width
+            + left_inset
+            + NEW_TAB_BUTTON_WIDTH
+            + project::PANEL_TOGGLES_INSET
+            + titlebar::window_controls_width(window);
         let tab_count_f = tab_count.max(1) as f32;
         let tab_width =
             px(((viewport - fixed - 2. * (tab_count_f + 1.)) / tab_count_f).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH));
@@ -1132,7 +1154,7 @@ impl WindowView {
             .flex_none()
             .flex()
             .items_center()
-            .pr(px(CARD_GAP + titlebar::WINDOW_CONTROLS_WIDTH))
+            .pr(px(CARD_GAP + titlebar::window_controls_width(window)))
             .text_size(FontSize::Body)
             .on_mouse_down(MouseButton::Left, drag_window)
             // 拖来的分屏放到标签以外的地方：成为排在最后的新标签。
