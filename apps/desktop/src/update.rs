@@ -478,8 +478,15 @@ pub fn restart(cx: &mut App) {
     cx.restart();
 }
 
-/// app 退出时：下好了就装上。重启以更新时随后打开装上的新版本。
+/// app 退出时：下好了就装上。重启以更新时随后打开装上的新版本。Windows 上安装程序会强行关掉单独跑的宿主，
+/// 连同里面的会话：普通退出把会话留在后台时（`end_sessions_in_menu`）先不装，等重启以更新或者下次不留会话的
+/// 退出再装。
 fn on_quit(cx: &mut App) {
+    #[cfg(windows)]
+    if !cx.global::<Updater>().relaunch && crate::window::end_sessions_in_menu() {
+        tracing::info!("not installing the update: the host keeps its sessions after this quit");
+        return;
+    }
     let updater = cx.global_mut::<Updater>();
     let Some(staged) = updater.phase.take_ready() else { return };
     #[cfg(windows)]

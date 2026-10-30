@@ -50,6 +50,7 @@ use std::{
 };
 
 use anyhow::Result;
+pub use browse::canonicalize;
 #[cfg(unix)]
 pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeOverOptions, TakeOverReport, peer_pid};
 pub use idle::Stopped;

@@ -177,7 +177,7 @@ install_linux() {
         *) fail "不支持这个架构：$(uname -m)" ;;
     esac
     # 发布的可执行文件按 glibc 链接，Alpine 这类 musl 的系统上起不来。
-    if ldd --version 2>&1 | grep -qi musl || ls /lib/ld-musl-* >/dev/null 2>&1; then
+    if ldd --version 2>&1 | grep -qi musl; then
         fail "这个系统用 musl libc（比如 Alpine），runode 只发布了 glibc 的版本"
     fi
     tmp=$(mktemp -d)

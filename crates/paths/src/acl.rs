@@ -33,8 +33,8 @@ use windows_sys::Win32::{
 /// 上一级的。家目录被改到别处（比如 `D:\home`，`D:\` 根目录默认让所有登录用户都能改）时，继承来的权限会让
 /// 别的用户读到私钥和配对口令。
 ///
-/// 属主不是当前用户、也不是它新建对象时的默认属主（管理员提权后是 Administrators 组）时拒绝，不去改：
-/// 那多半是别人布下的。DACL 已经受保护、允许访问的项都只给这三方时不再改，免得每次都把权限往下传一遍。
+/// 属主不是当前用户、它新建对象时的默认属主、SYSTEM 或 Administrators 组时拒绝，不去改：那多半是别人
+/// 布下的。提权跑过一次的 runode 建的目录属主是 Administrators 组，之后不提权时照样要能用。DACL 已经受保护、允许访问的项都只给这三方时不再改，免得每次都把权限往下传一遍。
 pub(crate) fn restrict(dir: &Path) -> Result<()> {
     let token = Token::current()?;
     let user = token.info::<TOKEN_USER>(TokenUser)?;
@@ -44,8 +44,11 @@ pub(crate) fn restrict(dir: &Path) -> Result<()> {
 
     let wide: Vec<u16> = dir.as_os_str().encode_wide().chain([0]).collect();
     let (owner, dacl, descriptor) = security_info(&wide)?;
-    // SAFETY: 属主指针指在 `descriptor` 里，它这时还活着。
-    let ours = unsafe { EqualSid(owner, user_sid) != 0 || EqualSid(owner, owner_sid) != 0 };
+    let system = well_known(WinLocalSystemSid)?;
+    let admins = well_known(WinBuiltinAdministratorsSid)?;
+    let trusted = [user_sid, system.as_ptr().cast_mut().cast(), admins.as_ptr().cast_mut().cast()];
+    // SAFETY: 属主指针指在 `descriptor` 里，它这时还活着；比较的 SID 也都活着。
+    let ours = unsafe { trusted.iter().chain([&owner_sid]).any(|&sid| EqualSid(owner, sid) != 0) };
     if !ours {
         return Err(Error::new(ErrorKind::PermissionDenied, format!("{} belongs to another user", dir.display())));
     }
@@ -54,9 +57,6 @@ pub(crate) fn restrict(dir: &Path) -> Result<()> {
     if unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) } == 0 {
         return Err(Error::last_os_error());
     }
-    let system = well_known(WinLocalSystemSid)?;
-    let admins = well_known(WinBuiltinAdministratorsSid)?;
-    let trusted = [user_sid, system.as_ptr().cast_mut().cast(), admins.as_ptr().cast_mut().cast()];
     // SAFETY: `dacl` 指在 `descriptor` 里，它这时还活着；三个 SID 也都活着。
     if control & SE_DACL_PROTECTED != 0 && unsafe { only_allows(dacl, &trusted) }? {
         return Ok(());

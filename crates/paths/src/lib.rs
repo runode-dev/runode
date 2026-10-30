@@ -37,8 +37,8 @@ const SUN_PATH_LEN: usize = 104;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Dirs {
     /// 家目录，即 `HOME`；Windows 上是 `USERPROFILE`，没设时才用 `HOME`：MSYS2、Emacs 这类各自改
-    /// `HOME` 的环境里，runode 的目录还是同一处。`HOME` 下已经有 runode 的数据、`USERPROFILE` 下
-    /// 还没有时仍用 `HOME`，配置、看板和配对过的设备不丢。
+    /// `HOME` 的环境里，runode 的目录还是同一处。`HOME` 下已经有 runode 的数据时仍用 `HOME`，
+    /// 配置、看板和配对过的设备不丢；别的进程在 `USERPROFILE` 下建了目录也不改。
     pub home: Option<PathBuf>,
     /// 用户配置的根目录：`$XDG_CONFIG_HOME`，没设时 `~/.config`。Ghostty 的配置在这下面。
     pub config: Option<PathBuf>,
@@ -65,9 +65,7 @@ impl Dirs {
         let var = |key: &str| var(key).filter(|v| !v.is_empty()).map(PathBuf::from);
         let home = if cfg!(windows) {
             match (var("USERPROFILE"), var("HOME")) {
-                (Some(profile), Some(home)) if !profile.join(DATA_DIR).is_dir() && home.join(DATA_DIR).is_dir() => {
-                    Some(home)
-                }
+                (_, Some(home)) if home.join(DATA_DIR).is_dir() => Some(home),
                 (profile, home) => profile.or(home),
             }
         } else {
@@ -102,7 +100,9 @@ impl Dirs {
     /// 宿主的 socket 和锁所在的目录，一般就是 `runtime_dir`。不分机器的老位置（`data` 下的 `run`）的锁有
     /// 宿主拿着时用老位置：升级前起的宿主还在那里跑，命令行和界面照样连得上它、交接时接得过来，新起的宿主
     /// 也去拿它那把锁，不会同时跑两个。看的是锁不是 socket：宿主删掉旧 socket、重新绑定的空当里锁一直拿着。
-    /// 那个宿主退出、锁放开之后就都用新位置。新位置的 socket 路径太长、老位置放得下时也用老位置。
+    /// 家目录在 NFS 上共享时锁也跨机器，老位置的 socket 在却连不上（`refused`）说明拿锁的宿主在别的机器上，
+    /// 这台机器照样用新位置。那个宿主退出、锁放开之后就都用新位置。新位置的 socket 路径太长、老位置放得下时
+    /// 也用老位置。
     fn host_dir(&self) -> Option<PathBuf> {
         let dir = self.runtime_dir()?;
         if self.machine.is_none() {
@@ -111,7 +111,8 @@ impl Dirs {
         let legacy = self.data_file("run")?;
         let socket = format!("{HOST_NAME}.sock");
         let too_long = !fits_sun_path(&dir.join(&socket)) && fits_sun_path(&legacy.join(&socket));
-        Some(if too_long || locked(&legacy.join(format!("{HOST_NAME}.lock"))) { legacy } else { dir })
+        let here = || locked(&legacy.join(format!("{HOST_NAME}.lock"))) && !refused(&legacy.join(&socket));
+        Some(if too_long || here() { legacy } else { dir })
     }
 
     /// 宿主进程的日志。宿主没有终端可写，出了问题只能看这里。
@@ -320,6 +321,17 @@ fn locked(lock: &Path) -> bool {
     std::fs::File::open(lock).is_ok_and(|file| matches!(file.try_lock_shared(), Err(std::fs::TryLockError::WouldBlock)))
 }
 
+/// `socket` 在，连上去却被拒：没有进程在这台机器上听它。
+#[cfg(unix)]
+fn refused(socket: &Path) -> bool {
+    matches!(std::os::unix::net::UnixStream::connect(socket), Err(err) if err.kind() == std::io::ErrorKind::ConnectionRefused)
+}
+
+#[cfg(not(unix))]
+fn refused(_: &Path) -> bool {
+    false
+}
+
 /// socket 路径的字节数小于 `SUN_PATH_LEN`。
 fn fits_sun_path(path: &Path) -> bool {
     path.as_os_str().len() < SUN_PATH_LEN
@@ -458,7 +470,7 @@ mod tests {
         assert_eq!(dirs(&[("HOME", "/home/me")]).home, Some("/home/me".into()));
     }
 
-    /// Windows 上 `HOME` 下已有数据、`USERPROFILE` 下没有时，接着用 `HOME`。
+    /// Windows 上 `HOME` 下已有数据时接着用 `HOME`，`USERPROFILE` 下后来有了目录也一样。
     #[cfg(windows)]
     #[test]
     fn existing_data_under_home_is_kept() {
@@ -471,6 +483,8 @@ mod tests {
         };
         assert_eq!(both(&profile, &home), Some(home.clone()));
         std::fs::create_dir_all(profile.join(DATA_DIR)).unwrap();
+        assert_eq!(both(&profile, &home), Some(home.clone()));
+        std::fs::remove_dir_all(home.join(DATA_DIR)).unwrap();
         assert_eq!(both(&profile, &home), Some(profile.clone()));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -553,11 +567,13 @@ mod tests {
         let legacy_socket = std::os::unix::net::UnixListener::bind(run.join(format!("{HOST_NAME}.sock"))).unwrap();
         let legacy_lock = std::fs::File::create(run.join(format!("{HOST_NAME}.lock"))).unwrap();
         assert_eq!(dirs.host_listen_files(), files(&dir));
-        // 升级前的宿主在老位置拿着锁；它删掉 socket 重新绑定的空当里也一样。
+        // 升级前的宿主在老位置拿着锁、听着 socket；它删掉 socket 重新绑定的空当里也一样。
         legacy_lock.try_lock().unwrap();
         assert_eq!(dirs.host_socket_file(), Some(run.join(format!("{HOST_NAME}.sock"))));
         assert_eq!(dirs.host_listen_files(), files(&run));
+        // socket 在却没人听：拿锁的宿主在共享家目录的别的机器上，这台机器用新位置。
         drop(legacy_socket);
+        assert_eq!(dirs.host_listen_files(), files(&dir));
         std::fs::remove_file(run.join(format!("{HOST_NAME}.sock"))).unwrap();
         assert_eq!(dirs.host_listen_files(), files(&run));
         // 它退出、锁放开之后用新位置。

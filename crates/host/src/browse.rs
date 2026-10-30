@@ -52,7 +52,7 @@ pub(crate) fn list_dirs(path: Option<PathBuf>) -> Result<Listing, String> {
 /// `fs::canonicalize`，Windows 上去掉它加的 `\\?\` 前缀：结果要给 shell 当目录、和界面记的写法比、回给前端，
 /// cmd 不认带前缀的目录，PowerShell 的提示符会带上它。去掉后不再是同一个路径的（超长、带 `NUL` 这类保留名）
 /// 照原样留着。
-pub(crate) fn canonicalize(path: &Path) -> io::Result<PathBuf> {
+pub fn canonicalize(path: &Path) -> io::Result<PathBuf> {
     let path = fs::canonicalize(path)?;
     #[cfg(windows)]
     if let Some(plain) = path.to_str().and_then(strip_verbatim) {
@@ -83,7 +83,7 @@ fn strip_verbatim(path: &str) -> Option<PathBuf> {
         };
         matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") || numbered("COM") || numbered("LPT")
     };
-    let changes_meaning = plain.len() >= MAX_PATH
+    let changes_meaning = plain.encode_utf16().count() >= MAX_PATH
         || plain.split('\\').skip(1).any(|part| part.ends_with(['.', ' ']) || reserved(part) || part.contains('/'));
     (!changes_meaning).then(|| PathBuf::from(plain))
 }
@@ -98,7 +98,8 @@ fn drive_root(path: PathBuf) -> PathBuf {
 }
 
 /// 前端交来的路径：`//?/…`（`Listing::path` 里带 `\\?\` 前缀的写法，后面可能拼了 `/子目录`）换回
-/// `\\?\…`，带前缀的路径只认 `\` 当分隔符。别的照原样，Windows 自己认 `/`。
+/// `\\?\…`，带前缀的路径只认 `\` 当分隔符；iOS 的 `NSString` 拼路径时把开头的 `//` 并成 `/`，`/?/…` 也认。
+/// 别的照原样，Windows 自己认 `/`。
 pub(crate) fn from_client(path: PathBuf) -> PathBuf {
     #[cfg(windows)]
     if let Some(verbatim) = path.to_str().and_then(verbatim_from_client) {
@@ -109,7 +110,8 @@ pub(crate) fn from_client(path: PathBuf) -> PathBuf {
 
 #[cfg(any(windows, test))]
 fn verbatim_from_client(path: &str) -> Option<PathBuf> {
-    path.starts_with("//?/").then(|| PathBuf::from(path.replace('/', "\\")))
+    let rest = path.strip_prefix("//?/").or_else(|| path.strip_prefix("/?/"))?;
+    Some(PathBuf::from(format!(r"\\?\{}", rest.replace('/', "\\"))))
 }
 
 fn forward_slashes(path: PathBuf) -> PathBuf {
@@ -143,6 +145,7 @@ mod tests {
     #[test]
     fn verbatim_listings_come_back_verbatim() {
         assert_eq!(verbatim_from_client("//?/C:/dir/nul/child"), Some(PathBuf::from(r"\\?\C:\dir\nul\child")));
+        assert_eq!(verbatim_from_client("/?/C:/dir/nul/child"), Some(PathBuf::from(r"\\?\C:\dir\nul\child")));
         assert_eq!(verbatim_from_client("C:/dir"), None);
         assert_eq!(verbatim_from_client("//server/share"), None);
     }

@@ -45,6 +45,10 @@ const ENV_TODO_BATCH_ARG: &str = "RUNODE_TODO_BATCH_ARG";
 
 /// 提示词最长这么多字节：它要放进环境变量，系统给参数和环境变量的空间有限。
 const MAX_PROMPT: usize = 64 * 1024;
+/// Windows 上一条命令行最多这么多个 UTF-16 码元（`CreateProcess`），提示词要整个放进去。
+const WINDOWS_COMMAND_LINE: usize = 32767;
+/// cmd 读的一行最多这么多个字符，起批处理写的 agent（npm 装的 `.cmd`）时程序路径和提示词都算在里面。
+const BATCH_COMMAND_LINE: usize = 8191;
 
 /// 新交来的任务和定时的标题最长这么多字节（`check_title`）：看板每张卡片都带着它，列看板（`ListTodos`）
 /// 一次回所有未完成的任务。
@@ -554,6 +558,10 @@ impl Shared {
         let setup = made.as_ref().and_then(|_| runode_tasks::worktree_setup(&todo.spec.dir));
         let shell = runode_terminal::pty::default_shell();
         let quoted = passes_command_line(&shell).then(|| (windows_quote(&instructions), batch_quote(&instructions)));
+        if quoted.as_ref().is_some_and(|(arg, _)| arg.encode_utf16().count() >= WINDOWS_COMMAND_LINE) {
+            undo_worktree();
+            return Err("the prompt is too long for a Windows command line".into());
+        }
         let mut env = vec![(ENV_TODO_PROMPT, instructions.as_str())];
         env.extend(setup.as_deref().map(|setup| (ENV_TODO_SETUP, setup)));
         if let Some((arg, batch)) = &quoted {
@@ -586,8 +594,8 @@ impl Shared {
 /// 在 `shell` 的提示符上打的命令：跑 `agent`，提示词取自环境变量 `ENV_TODO_PROMPT`、整个当一个参数。
 /// `setup` 时先用 `sh -c` 跑环境变量 `ENV_TODO_SETUP` 里的命令，成功了才跑 agent。nushell、elvish 不在
 /// 双引号里展开 `$名字`，取环境变量也各有写法，也没有 `&&`：外部命令失败时它们自己停下后面的命令。
-/// PowerShell 用 `$env:名字`；Windows 上没有 sh，Windows PowerShell 也不认 `&&`，所以初始化命令由
-/// PowerShell 自己跑，出错或者退出码不为零时抛出异常，这一整行就停在那里，不跑 agent。Windows 上的
+/// PowerShell 用 `$env:名字`；Windows 上没有 sh，Windows PowerShell 也不认 `&&`，所以 Windows 上初始化命令由
+/// PowerShell 自己跑（别处的 pwsh 照样交给 sh，`tasks.json` 的初始化命令按 sh 的写法写），出错或者退出码不为零时抛出异常，这一整行就停在那里，不跑 agent。Windows 上的
 /// PowerShell 给原生程序拼命令行时不一定转义参数里的双引号（`passes_command_line`），提示词改从
 /// `ENV_TODO_ARG` 取引好的一份，`--%` 后面的 `%名字%` 原样展开进命令行；agent 先找成程序文件
 /// （`powershell_program`）。
@@ -601,7 +609,7 @@ fn agent_command(agent: &str, shell_program: &str, setup: bool) -> String {
     };
     let setup = match (setup, shell) {
         (false, _) => String::new(),
-        (true, Some(Shell::PowerShell)) => format!(
+        (true, Some(Shell::PowerShell)) if cfg!(windows) => format!(
             "& {{ $ErrorActionPreference = 'Stop'; $global:LASTEXITCODE = 0; Invoke-Expression {}; \
              if ($global:LASTEXITCODE) {{ throw \"setup exited with $global:LASTEXITCODE\" }} }}; ",
             var(ENV_TODO_SETUP)
@@ -624,7 +632,8 @@ fn passes_command_line(shell: &str) -> bool {
 
 /// PowerShell 里起 `agent` 的写法：开头的程序名只在 PATH 上找程序文件。只打名字的话 PowerShell 先跑 npm
 /// 放在 `.cmd` 旁边的 `.ps1`，执行策略不让跑脚本时报错，`--%` 对脚本也不管用。找到的是批处理时提示词换成
-/// `ENV_TODO_BATCH_ARG` 那份；找不到时报错，这一行停在那里。程序名带引号、空格这类字符时原样打。
+/// `ENV_TODO_BATCH_ARG` 那份，放不进 cmd 的一行（`BATCH_COMMAND_LINE`）时报错；找不到时也报错，这一行停在
+/// 那里。程序名带引号、空格这类字符时原样打。
 fn powershell_program(agent: &str) -> String {
     let (program, args) = agent.split_once(' ').unwrap_or((agent, ""));
     if program.is_empty() || !program.chars().all(|ch| ch.is_alphanumeric() || "-_.:\\/".contains(ch)) {
@@ -632,7 +641,10 @@ fn powershell_program(agent: &str) -> String {
     }
     format!(
         "$__runode_agent = Get-Command -ErrorAction Stop -CommandType Application -TotalCount 1 -Name '{program}'; \
-         if ($__runode_agent.Extension -in '.bat', '.cmd') {{ $env:{ENV_TODO_ARG} = $env:{ENV_TODO_BATCH_ARG} }}; \
+         if ($__runode_agent.Extension -in '.bat', '.cmd') {{ \
+         if ($__runode_agent.Path.Length + $env:{ENV_TODO_BATCH_ARG}.Length -ge {BATCH_COMMAND_LINE}) {{ \
+         throw 'the prompt is too long for {program}, a batch file' }}; \
+         $env:{ENV_TODO_ARG} = $env:{ENV_TODO_BATCH_ARG} }}; \
          & $__runode_agent.Path{}{args}",
         if args.is_empty() { "" } else { " " }
     )
@@ -891,20 +903,22 @@ mod tests {
         );
         let claude = if cfg!(windows) {
             "$__runode_agent = Get-Command -ErrorAction Stop -CommandType Application -TotalCount 1 -Name 'claude'; \
-             if ($__runode_agent.Extension -in '.bat', '.cmd') { $env:RUNODE_TODO_ARG = $env:RUNODE_TODO_BATCH_ARG }; \
+             if ($__runode_agent.Extension -in '.bat', '.cmd') { \
+             if ($__runode_agent.Path.Length + $env:RUNODE_TODO_BATCH_ARG.Length -ge 8191) { \
+             throw 'the prompt is too long for claude, a batch file' }; \
+             $env:RUNODE_TODO_ARG = $env:RUNODE_TODO_BATCH_ARG }; \
              & $__runode_agent.Path --% %RUNODE_TODO_ARG%"
         } else {
             "claude $env:RUNODE_TODO_PROMPT"
         };
         assert_eq!(agent_command("claude", "pwsh.exe", false), format!("{claude}\r"));
-        assert_eq!(
-            agent_command("claude", "powershell.exe", true),
-            format!(
-                "& {{ $ErrorActionPreference = 'Stop'; $global:LASTEXITCODE = 0; Invoke-Expression $env:RUNODE_TODO_SETUP; \
-                 if ($global:LASTEXITCODE) {{ throw \"setup exited with $global:LASTEXITCODE\" }} }}; \
-                 {claude}\r"
-            )
-        );
+        let setup = if cfg!(windows) {
+            "& { $ErrorActionPreference = 'Stop'; $global:LASTEXITCODE = 0; Invoke-Expression $env:RUNODE_TODO_SETUP; \
+             if ($global:LASTEXITCODE) { throw \"setup exited with $global:LASTEXITCODE\" } }; "
+        } else {
+            "sh -c $env:RUNODE_TODO_SETUP && "
+        };
+        assert_eq!(agent_command("claude", "powershell.exe", true), format!("{setup}{claude}\r"));
     }
 
     #[test]
@@ -912,7 +926,10 @@ mod tests {
         assert_eq!(
             powershell_program("codex --full-auto"),
             "$__runode_agent = Get-Command -ErrorAction Stop -CommandType Application -TotalCount 1 -Name 'codex'; \
-             if ($__runode_agent.Extension -in '.bat', '.cmd') { $env:RUNODE_TODO_ARG = $env:RUNODE_TODO_BATCH_ARG }; \
+             if ($__runode_agent.Extension -in '.bat', '.cmd') { \
+             if ($__runode_agent.Path.Length + $env:RUNODE_TODO_BATCH_ARG.Length -ge 8191) { \
+             throw 'the prompt is too long for codex, a batch file' }; \
+             $env:RUNODE_TODO_ARG = $env:RUNODE_TODO_BATCH_ARG }; \
              & $__runode_agent.Path --full-auto"
         );
         assert_eq!(powershell_program("'C:\\my tools\\agent.exe' -x"), "'C:\\my tools\\agent.exe' -x");

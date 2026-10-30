@@ -101,7 +101,7 @@ function __runode_wrap_prompt --on-event fish_prompt
         functions -c fish_prompt __runode_original_prompt
         function fish_prompt
             set -l prompt (__runode_original_prompt $argv | string collect --no-trim-newlines)
-            printf '\e]133;A;cl=line;redraw=1\a%s\e]133;B\a' "$prompt"
+            printf '\e]133;A;runode=fish;cl=line;redraw=1\a%s\e]133;B\a' "$prompt"
         end
     end
 end
