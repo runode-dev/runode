@@ -9,11 +9,17 @@ publish.workspace = true
 [dependencies]
 runode-types.workspace = true
 anyhow.workspace = true
-cpal.workspace = true
+# 录麦克风；无头的 Linux 构建不开 `recording`，不链 ALSA 的 libasound。
+cpal = { workspace = true, optional = true }
 serde_json.workspace = true
 sha2.workspace = true
 sherpa-onnx.workspace = true
 tracing.workspace = true
+
+[features]
+default = ["recording"]
+# 录麦克风（`Recorder`）。不开时 `Recorder::start` 报错，可执行文件不依赖声卡的库。
+recording = ["dep:cpal"]
 
 [lints]
 workspace = true

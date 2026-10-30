@@ -5,7 +5,7 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::atomic::{AtomicBool, Ordering},
     thread,
     time::Duration,
@@ -171,9 +171,33 @@ pub fn download(
 }
 
 /// 用系统的 curl 把 `url` 下到 `part`，接着上次没下完的部分下。curl 跟环境变量里的代理；macOS、
-/// Windows 10 起和常见的 Linux 发行版都自带它，不必为下载另带 HTTP 和 TLS 库。
+/// Windows 10 起和常见的 Linux 发行版都自带它，不必为下载另带 HTTP 和 TLS 库。Windows 上的 curl 用
+/// Schannel，查不到证书吊销状态（代理或网络拦了吊销列表）时整个握手失败，这时不查吊销重下一次：
+/// 下完的文件照样按 SHA-256 核对。
 fn fetch(url: &str, part: &Path, cancel: &AtomicBool, progress: &dyn Fn(u64)) -> anyhow::Result<()> {
-    let mut command = Command::new("curl");
+    match fetch_once(url, part, cancel, progress, false) {
+        Err(err) if cfg!(windows) && revocation_unchecked(&format!("{err:#}")) => {
+            tracing::info!("retrying {url} without the certificate revocation check: {err:#}");
+            fetch_once(url, part, cancel, progress, true)
+        }
+        result => result,
+    }
+}
+
+/// Schannel 查不到吊销状态的报错：`CRYPT_E_NO_REVOCATION_CHECK`、`CRYPT_E_REVOCATION_OFFLINE`。
+fn revocation_unchecked(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    ["0x80092012", "0x80092013"].iter().any(|code| error.contains(code))
+}
+
+fn fetch_once(
+    url: &str,
+    part: &Path,
+    cancel: &AtomicBool,
+    progress: &dyn Fn(u64),
+    no_revoke: bool,
+) -> anyhow::Result<()> {
+    let mut command = crate::http::curl();
     command
         .args(["--fail", "--location", "--silent", "--show-error", "--continue-at", "-"])
         // 连不上的源（比如国内连 HuggingFace）早点放弃、换下一个；连上了但一直没数据也算失败。
@@ -184,8 +208,9 @@ fn fetch(url: &str, part: &Path, cancel: &AtomicBool, progress: &dyn Fn(u64)) ->
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+    if no_revoke {
+        command.arg("--ssl-no-revoke");
+    }
     let mut child = command.spawn().context("cannot run curl")?;
     let status = loop {
         if let Some(status) = child.try_wait()? {
@@ -242,6 +267,15 @@ fn check(asset: &Asset, part: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schannel_revocation_failures_are_recognized() {
+        let err = "curl exit code: 35: schannel: next InitializeSecurityContext failed: Unknown error \
+                   (0x80092012) - The revocation function was unable to check revocation for the certificate.";
+        assert!(revocation_unchecked(err));
+        assert!(revocation_unchecked("schannel: ... (0x80092013) - The revocation server was offline"));
+        assert!(!revocation_unchecked("curl exit status: 22: The requested URL returned error: 404"));
+    }
 
     #[test]
     fn remove_keeps_shared_vad() {

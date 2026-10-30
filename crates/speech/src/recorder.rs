@@ -1,5 +1,5 @@
 //! 录系统默认的麦克风。cpal 的流在 macOS 上不能跨线程，所以放在自己的线程里开着，`Recorder`
-//! 只拿着叫它停下的通道，可以交给任何线程。
+//! 只拿着叫它停下的通道，可以交给任何线程。没开 `recording` 特性时 `Recorder::start` 报错。
 
 use std::{
     sync::{Arc, Mutex, mpsc},
@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, anyhow};
+#[cfg(feature = "recording")]
 use cpal::{
     FromSample, SampleFormat, SizedSample,
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -75,6 +76,23 @@ impl std::error::Error for Silent {}
 
 type Samples = Arc<Mutex<Vec<f32>>>;
 
+/// 没有录音时开不出来的流。
+#[cfg(not(feature = "recording"))]
+enum NoStream {}
+
+#[cfg(not(feature = "recording"))]
+impl Drop for NoStream {
+    fn drop(&mut self) {
+        match *self {}
+    }
+}
+
+#[cfg(not(feature = "recording"))]
+fn open() -> anyhow::Result<(NoStream, Samples, u32)> {
+    anyhow::bail!("this build of runode cannot record audio")
+}
+
+#[cfg(feature = "recording")]
 fn open() -> anyhow::Result<(cpal::Stream, Samples, u32)> {
     let device = cpal::default_host().default_input_device().context("no microphone")?;
     let config = device.default_input_config()?;
@@ -93,6 +111,7 @@ fn open() -> anyhow::Result<(cpal::Stream, Samples, u32)> {
     Ok((stream, samples, rate))
 }
 
+#[cfg(feature = "recording")]
 fn build<T: SizedSample>(
     device: &cpal::Device,
     config: cpal::StreamConfig,

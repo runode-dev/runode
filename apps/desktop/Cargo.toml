@@ -61,6 +61,10 @@ notify.workspace = true
 # 文件树按内容搜时标出结果里命中的那一段。
 regex.workspace = true
 
+# macOS 和 Windows 上总是录音。
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+runode-speech = { workspace = true, features = ["recording"] }
+
 # 标准「关于」面板、系统偏好的语言和窗口菜单只有 AppKit 提供，GPUI 没有封装。
 [target.'cfg(windows)'.dependencies]
 # Windows 10 起有的 AF_UNIX socket，连宿主用。
@@ -93,7 +97,8 @@ raw-window-handle.workspace = true
 [features]
 # Linux 的窗口后端。不开时 gpui_linux 只有无头平台，开不出窗口，可执行文件只依赖 libc，没有图形库的服务器上
 # 也能跑命令行和宿主；开了启动时就要 libxcb、libxkbcommon、libxkbcommon-x11 和 libfreetype。
-linux-desktop = ["gpui_platform/x11", "gpui_platform/wayland"]
+# 录音（`runode-speech` 的 `recording`）也只在这时开：它要 ALSA 的 libasound。
+linux-desktop = ["gpui_platform/x11", "gpui_platform/wayland", "runode-speech/recording"]
 
 [dev-dependencies]
 # 键位测试要一个 `App` 来载入绑定（`KeyBinding::load`）。
