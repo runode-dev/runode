@@ -37,9 +37,15 @@ pub(crate) fn screen_row(terminal: &Terminal<'static, 'static>, y: u32) -> Strin
 
 const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
 
-/// 测试里当 shell 用的程序：一直开着读输入，不起子进程，所以前台总是它自己。Windows 上没有
-/// `cat`，用 cmd。
-pub(crate) const CAT: &str = if cfg!(windows) { "cmd.exe" } else { "/bin/cat" };
+/// 测试里当 shell 用的程序：一直开着读输入，不起子进程，所以前台总是它自己。认不出的 shell 会被加上
+/// `-l`，macOS 的 cat 认它，GNU cat 不认，别的 Unix 上用 `tests/fixtures/cat`。Windows 上没有 `cat`，用 cmd。
+pub(crate) const CAT: &str = if cfg!(windows) {
+    "cmd.exe"
+} else if cfg!(target_os = "macos") {
+    "/bin/cat"
+} else {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/cat")
+};
 
 /// 宿主这边的会话：`CAT` 当 shell，它的输出不进 VT，VT 只会收到测试喂进去的内容。
 pub(crate) fn idle_host() -> HostSession {

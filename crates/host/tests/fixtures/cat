@@ -1,0 +1,3 @@
+#!/bin/sh
+# 测试里当 shell 用的 cat：会话给认不出的 shell 加上 `-l`，GNU cat 不认它，这里丢掉参数再换成 cat。
+exec cat
