@@ -37,6 +37,8 @@ use gpui::{
 };
 use regex::{Regex, RegexBuilder};
 use runode_git::GrepQuery;
+
+use crate::project_host::ProjectHost;
 use serde::{Deserialize, Serialize};
 
 use crate::file_tree::{FILTER_ICON, FileTree, FileTreeEvent};
@@ -180,6 +182,8 @@ struct SearchKey {
 /// `root` 下按名称找的文件，相对 `root`，第一次搜时在后台列出；同时在跑的几次搜索等同一次列完。
 struct NameList {
     root: PathBuf,
+    /// `root` 在哪台机器上，列文件、按内容找都到那里去。
+    project: ProjectHost,
     files: OnceLock<Vec<PathBuf>>,
 }
 
@@ -283,7 +287,7 @@ fn ignore_case(query: &str) -> bool {
 
 /// 不在仓库里时按名称找的文件：从 `root` 往下走，不跟符号链接，跳过 `.git`，最多 `MAX_WALK` 个，
 /// 相对 `root`。
-fn walk_files(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn walk_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut dirs = vec![PathBuf::new()];
     while let Some(dir) = dirs.pop() {
@@ -436,10 +440,12 @@ fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Result<
     let SearchKey { root, query, options, .. } = key;
     match key.mode {
         SearchMode::Name => {
-            let files = names.files.get_or_init(|| runode_git::list_files(root).unwrap_or_else(|| walk_files(root)));
-            // 列表可能是一会儿前列的，git 也列出工作区里删掉了的已跟踪文件，只查要显示的这些在不在。
+            let files = names.files.get_or_init(|| names.project.list_files(root));
+            // 列表可能是一会儿前列的，git 也列出工作区里删掉了的已跟踪文件，只查要显示的这些在不在；远端的
+            // 列的时候在那边查过了。
             let hits = match_names(files, query, cancel).into_iter();
-            let hits = hits.filter(|rel| root.join(rel).symlink_metadata().is_ok()).take(MAX_FILES);
+            let remote = names.project.is_remote();
+            let hits = hits.filter(|rel| remote || root.join(rel).symlink_metadata().is_ok()).take(MAX_FILES);
             Ok(hits.map(|rel| found(root, rel.clone(), Vec::new())).collect())
         }
         SearchMode::Content => {
@@ -452,7 +458,7 @@ fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Result<
                 regex: options.regex,
                 pathspecs: &pathspecs,
             };
-            let matches = runode_git::grep(root, &grep, MAX_LINES, cancel).map_err(|err| err.message)?;
+            let matches = names.project.grep(root, &grep, MAX_LINES, cancel)?;
             // git grep 按文件一段段地输出，同一个文件的行连在一起。
             let groups = matches.chunk_by(|a, b| a.path == b.path);
             let found = groups
@@ -485,9 +491,7 @@ impl FileTree {
 
     /// 同 `sync_file_search`；`force` 时条件没变也重搜（文件树重读过），新结果到之前旧结果照旧显示。
     fn search_files(&mut self, force: bool, cx: &mut Context<Self>) {
-        if self.remote() {
-            return;
-        }
+        let project = self.state().project.clone();
         let search = &self.search;
         let options = match search.mode {
             SearchMode::Name => SearchOptions::default(),
@@ -503,7 +507,12 @@ impl FileTree {
             return;
         }
         // 文件树重读过，文件可能变了。
-        if force || search.names.as_ref().is_some_and(|names| names.root != key.root) {
+        if force
+            || search
+                .names
+                .as_ref()
+                .is_some_and(|names| names.root != key.root || names.project.name() != project.name())
+        {
             search.names = None;
         }
         let current = search.pending.as_ref().map(|(key, _)| key).or(search.searched.as_ref());
@@ -527,7 +536,7 @@ impl FileTree {
         search.pending = Some((key.clone(), cancel.clone()));
         let names = search
             .names
-            .get_or_insert_with(|| Arc::new(NameList { root: key.root.clone(), files: OnceLock::new() }))
+            .get_or_insert_with(|| Arc::new(NameList { root: key.root.clone(), project, files: OnceLock::new() }))
             .clone();
         cx.spawn(async move |this, cx| {
             // 按内容找每次都要 git grep 走一遍整个目录，等打字停一下再起；按名称找只在内存里匹配，不用等。
@@ -1073,7 +1082,7 @@ mod tests {
             mode: SearchMode::Name,
             options: SearchOptions::default(),
         };
-        let names = NameList { root: root.clone(), files: OnceLock::new() };
+        let names = NameList { root: root.clone(), project: ProjectHost::Local, files: OnceLock::new() };
         let search = |names: &NameList| {
             let found = run_search(&key, names, &AtomicBool::new(false)).unwrap();
             let mut rels: Vec<_> = found.into_iter().map(|found| found.rel).collect();
@@ -1084,7 +1093,7 @@ mod tests {
         fs::remove_file(root.join("src/ab.rs")).unwrap();
         fs::write(root.join("src/abc.rs"), "").unwrap();
         assert_eq!(search(&names), [PathBuf::from("src/a.rs")]);
-        let fresh = NameList { root: root.clone(), files: OnceLock::new() };
+        let fresh = NameList { root: root.clone(), project: ProjectHost::Local, files: OnceLock::new() };
         assert_eq!(search(&fresh), [PathBuf::from("src/a.rs"), PathBuf::from("src/abc.rs")]);
         // 取消了的不找。
         assert!(run_search(&key, &fresh, &AtomicBool::new(true)).unwrap().is_empty());

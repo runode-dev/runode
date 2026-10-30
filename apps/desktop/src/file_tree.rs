@@ -59,6 +59,7 @@ use runode_types::color::Rgb;
 
 pub use listing::{Listings, list_dirs};
 pub use search::SearchOptions;
+pub(crate) use search::walk_files;
 
 use edit::{FileClipboard, FileEdit};
 use listing::Decoration;
@@ -315,7 +316,7 @@ impl FileTree {
         self.input = input;
     }
 
-    /// 文件在 SSH 主机上：访达和别的程序看不到，也还不能搜索。
+    /// 文件在 SSH 主机上：访达和别的程序看不到。
     fn remote(&self) -> bool {
         self.input.project.is_remote()
     }
@@ -975,7 +976,7 @@ impl Render for FileTree {
         self.focus_menu(window, cx);
         let font_size = FontSize::Medium.points() * font_size::scale(cx);
         let header = self.render_header(cx);
-        let search_box = (!self.remote()).then(|| self.render_file_search_box(cx));
+        let search_box = self.render_file_search_box(cx);
         let content = match self.render_file_search_results(font_size, cx) {
             Some(results) => results,
             None => self.render_file_tree(font_size, cx).into_any_element(),
@@ -1036,7 +1037,7 @@ impl Render for FileTree {
             .flex_col()
             .text_size(px(font_size))
             .child(header)
-            .children(search_box)
+            .child(search_box)
             .child(tree)
             .children(self.render_context_menu(window, cx))
     }

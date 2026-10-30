@@ -120,6 +120,47 @@ impl ProjectHost {
         }
     }
 
+    /// 列 `root` 下按名称找的文件，相对 `root`：在仓库里时是 git 列的，不在时走一遍目录。远端读不到时为空。
+    /// 会阻塞。
+    pub(crate) fn list_files(&self, root: &Path) -> Vec<PathBuf> {
+        let client = match self {
+            Self::Local => return runode_git::list_files(root).unwrap_or_else(|| crate::file_tree::walk_files(root)),
+            Self::Remote(client) => client,
+        };
+        match client.call(Call::ListFiles { root: root.to_path_buf() }, SCAN_TIMEOUT) {
+            Ok((Reply::Files(files), _)) => files,
+            _ => Vec::new(),
+        }
+    }
+
+    /// 在 `root` 下按内容找（`runode_git::grep`），出错时是 git 的报错。会阻塞。
+    /// shortcut: 远端的搜索停不下来，`cancel` 只在本机生效；远端大目录里搜得慢时，再加一个取消的请求。
+    pub(crate) fn grep(
+        &self,
+        root: &Path,
+        query: &runode_git::GrepQuery,
+        limit: usize,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<Vec<runode_git::GrepMatch>, String> {
+        let client = match self {
+            Self::Local => return runode_git::grep(root, query, limit, cancel).map_err(|err| err.message),
+            Self::Remote(client) => client,
+        };
+        let call = Call::Grep {
+            root: root.to_path_buf(),
+            pattern: query.pattern.to_owned(),
+            ignore_case: query.ignore_case,
+            whole_word: query.whole_word,
+            regex: query.regex,
+            pathspecs: query.pathspecs.to_vec(),
+            limit,
+        };
+        match client.call(call, SCAN_TIMEOUT)? {
+            (Reply::Found(found), _) => Ok(found),
+            (other, _) => Err(unexpected(&other)),
+        }
+    }
+
     /// SSH 主机的名字，本机为空。
     pub(crate) fn name(&self) -> Option<&str> {
         match self {

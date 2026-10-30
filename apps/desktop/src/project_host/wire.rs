@@ -28,6 +28,18 @@ pub(super) enum Call {
     Git { root: PathBuf, op: GitOp },
     /// 改文件。
     Edit(FileOp),
+    /// 列 `root` 下按名称找的文件，相对 `root`，只列还在的。
+    ListFiles { root: PathBuf },
+    /// 在 `root` 下按内容找（`runode_git::grep`），字段是 `GrepQuery` 的。
+    Grep {
+        root: PathBuf,
+        pattern: String,
+        ignore_case: bool,
+        whole_word: bool,
+        regex: bool,
+        pathspecs: Vec<String>,
+        limit: usize,
+    },
     /// 文件现在的版本戳（`runode_files::stamp`）。
     Stamp { path: PathBuf },
     /// 把请求后面跟着的字节写成 `path`（`runode_paths::replace_file`），交回写完后的版本戳。
@@ -48,6 +60,8 @@ pub(super) enum Reply {
     /// 改完了；挪进、复制进目录的是落到了哪里。
     Edited(Result<Option<PathBuf>, OpFailure>),
     Stamp(Option<Stamp>),
+    Files(Vec<PathBuf>),
+    Found(Vec<runode_git::GrepMatch>),
     /// 没办成，原因写给人看。
     Failed(String),
 }

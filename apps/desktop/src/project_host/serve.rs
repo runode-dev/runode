@@ -92,6 +92,19 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared) -> (Reply, Vec<u8>) {
             (Reply::Listed(crate::file_tree::list_dirs(dirs, git.as_ref())), Vec::new())
         }
         Call::Edit(op) => (Reply::Edited(op.run()), Vec::new()),
+        Call::ListFiles { root } => {
+            let files = runode_git::list_files(&root).unwrap_or_else(|| crate::file_tree::walk_files(&root));
+            let files = files.into_iter().filter(|rel| root.join(rel).symlink_metadata().is_ok()).collect();
+            (Reply::Files(files), Vec::new())
+        }
+        Call::Grep { root, pattern, ignore_case, whole_word, regex, pathspecs, limit } => {
+            let query =
+                runode_git::GrepQuery { pattern: &pattern, ignore_case, whole_word, regex, pathspecs: &pathspecs };
+            match runode_git::grep(&root, &query, limit, &std::sync::atomic::AtomicBool::new(false)) {
+                Ok(found) => (Reply::Found(found), Vec::new()),
+                Err(err) => (Reply::Failed(err.message), Vec::new()),
+            }
+        }
         Call::Stamp { path } => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
         Call::Write { path } => match runode_paths::replace_file(&path, &content) {
             Ok(()) => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
