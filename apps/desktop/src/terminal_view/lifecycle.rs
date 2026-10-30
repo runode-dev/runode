@@ -2,7 +2,7 @@
 //! 和不显示之间切换，和宿主断开后重开，以及光标闪烁和同步输出的计时器。前台进程的轮询和 agent
 //! 状态的判断在宿主里，结果随 `HostMsg::Meta` 到达。
 //!
-//! 和宿主之间经 `host_client::link()` 说话：连上会话时宿主给一份当时的屏幕（同一个构建时是
+//! 和视图所在主机（`HostId`）的宿主之间经那台主机的 `Link` 说话：连上会话时宿主给一份当时的屏幕（同一个构建时是
 //! 快照，否则是 VT 重放），之后的输出和标记按先后到达；事件按界面这份 VT 现在的样子怎么处理见
 //! `ScreenState`。响铃只认宿主的 `HostMsg::Bell`，不看界面这份 VT 的 `on_bell`：两边认的是同一个
 //! BEL，都认会响两次；宿主那份在视图只看状态时也认得到，VT 重放出来的屏幕也不会再响一遍。
@@ -18,7 +18,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, task::ArcWake};
+use futures::{
+    StreamExt as _,
+    channel::{mpsc::UnboundedReceiver, oneshot},
+    task::ArcWake,
+};
 use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
 use runode_protocol::{AttachMode, ClientMsg, Conversation, ERROR_BACKED_UP, HostMsg, SessionId};
 use runode_terminal::{
@@ -40,7 +44,7 @@ use super::{
 };
 use crate::{
     config::AppConfig,
-    host_client::{self, LinkEvent, Screen, SpawnOptions},
+    host_client::{self, Link as HostLink, LinkEvent, Screen, SpawnOptions, remote::HostId},
     prespawn::Prespawned,
 };
 
@@ -64,37 +68,41 @@ const ATTACH_RETRY: Duration = Duration::from_millis(100);
 /// `run_command` 最多等 shell 出提示符这么久。
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// 和宿主断开后有个终端点了「在原目录重开」、重新连上了宿主：第几次重连，以及那时宿主里还活着
-/// 的会话。断开着的视图见了，会话还在的就重新连上，见 `TerminalView::host_reconnected`。
-#[derive(Default)]
+/// 和主机 `host` 的宿主断开后又连上了（本机的是有个终端点了「在原目录重开」，远端的是自己重连上）：
+/// 第几次重连，以及那时宿主里还活着的会话。同一台主机上断开着的视图见了，会话还在的就重新连上，见
+/// `TerminalView::host_reconnected`。
 struct HostReconnected {
     generation: u64,
+    host: HostId,
     alive: Rc<HashSet<SessionId>>,
 }
 
 impl Global for HostReconnected {}
 
+/// 远端主机 `host` 断开后又连上了，那时它的宿主里还活着的会话是 `alive`。
+pub fn remote_reconnected(host: HostId, alive: HashSet<SessionId>, cx: &mut App) {
+    let generation = cx.try_global::<HostReconnected>().map_or(0, |reconnected| reconnected.generation) + 1;
+    cx.set_global(HostReconnected { generation, host, alive: Rc::new(alive) });
+}
+
 /// 界面这边的 `Session` 要宿主做的事，经连接发给会话 `id`。
-fn sender(id: SessionId) -> session::Sender {
-    Box::new(move |request| {
-        let link = host_client::link();
-        match request {
-            Request::Input(data) => link.input(id, &data),
-            Request::Resize(size) => link.send(ClientMsg::Resize { id, size }),
-            Request::ClearScreen => link.send(ClientMsg::ClearScreen { id }),
-        }
+fn sender(link: HostLink, id: SessionId) -> session::Sender {
+    Box::new(move |request| match request {
+        Request::Input(data) => link.input(id, &data),
+        Request::Resize(size) => link.send(ClientMsg::Resize { id, size }),
+        Request::ClearScreen => link.send(ClientMsg::ClearScreen { id }),
     })
 }
 
 /// 按宿主给的屏幕建界面这边的 `Session`：快照直接解出来（已经套着宿主的主题）；VT 重放按宿主
 /// 给的尺寸和主题（没给时用 `settings`）新建一份 VT 再喂。界面自己的那部分配置按 `settings` 套上。
-fn build_session(id: SessionId, screen: Screen, settings: &TermSettings) -> anyhow::Result<Session> {
+fn build_session(link: &HostLink, id: SessionId, screen: Screen, settings: &TermSettings) -> anyhow::Result<Session> {
     let Screen { attached, data } = screen;
     let mut session = match attached.mode {
-        AttachMode::Snapshot => Session::from_snapshot(&data, sender(id))?,
+        AttachMode::Snapshot => Session::from_snapshot(&data, sender(link.clone(), id))?,
         AttachMode::VtReplay | AttachMode::MetaOnly => {
             let theme = attached.settings.as_ref().unwrap_or(settings);
-            let mut session = Session::new(attached.size, theme, sender(id))?;
+            let mut session = Session::new(attached.size, theme, sender(link.clone(), id))?;
             session.feed(&data);
             session
         }
@@ -104,9 +112,14 @@ fn build_session(id: SessionId, screen: Screen, settings: &TermSettings) -> anyh
 }
 
 /// 已经连上、拿到第一份屏幕：建好界面这份 VT，正看着。
-fn live(id: SessionId, screen: Screen, settings: &TermSettings) -> anyhow::Result<ScreenState<Session>> {
+fn live(
+    link: &HostLink,
+    id: SessionId,
+    screen: Screen,
+    settings: &TermSettings,
+) -> anyhow::Result<ScreenState<Session>> {
     let (channel, meta, size) = (screen.attached.channel, screen.attached.meta.clone(), screen.attached.size);
-    let session = build_session(id, screen, settings)?;
+    let session = build_session(link, id, screen, settings)?;
     Ok(ScreenState::new_live(session, channel, meta, size))
 }
 
@@ -117,27 +130,37 @@ fn backed_up(err: &anyhow::Error) -> bool {
 
 /// 第一次连会话 `id` 被宿主以积压拒了：重新登记、再要一次屏幕，视图先显示着等它（画背景）；又被拒
 /// 的话照 `Changes::retry_attach` 过一会儿再连。
-fn attach_later(id: SessionId) -> (ScreenState<Session>, UnboundedReceiver<LinkEvent>) {
+fn attach_later(link: &HostLink, id: SessionId) -> (ScreenState<Session>, UnboundedReceiver<LinkEvent>) {
     tracing::info!("the host is backed up, attaching session {id} again");
-    let rx = host_client::link().attach(id, None, AttachMode::Snapshot);
+    let rx = link.attach(id, None, AttachMode::Snapshot);
     (ScreenState::new_attaching(AttachMode::Snapshot, PROVISIONAL_SIZE, Instant::now()), rx)
 }
 
 /// 连上宿主里的会话 `id`，等它给第一份屏幕，建好界面这边的 VT，返回它和收之后的事件的一端。
 /// 连不上时结束这个会话（用于刚开的会话）；宿主积压着时不结束，见 `attach_later`。
 fn connect(
+    link: &HostLink,
     id: SessionId,
     settings: &TermSettings,
 ) -> anyhow::Result<(ScreenState<Session>, UnboundedReceiver<LinkEvent>)> {
-    let link = host_client::link();
     let connected = match link.attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT) {
-        Err(err) if backed_up(&err) => return Ok(attach_later(id)),
-        attached => attached.and_then(|(screen, rx)| Ok((live(id, screen, settings)?, rx))),
+        Err(err) if backed_up(&err) => return Ok(attach_later(link, id)),
+        attached => attached.and_then(|(screen, rx)| Ok((live(link, id, screen, settings)?, rx))),
     };
     if connected.is_err() {
         link.kill(id);
     }
     connected
+}
+
+/// 远端主机上在后台开着的会话：开好以后要不要启动 shell、按哪个 `Attach` 连上（等的时候视图的
+/// 显示变了就换成新的）。
+pub(super) struct Opening {
+    start: bool,
+    attach: Attach,
+    /// 等着会话开好的，见 `TerminalView::opened`。
+    waiting: Vec<oneshot::Sender<Option<SessionId>>>,
+    _task: Task<()>,
 }
 
 /// 唤醒时叫醒等着的线程，主线程上等宿主给屏幕时用，见 `TerminalView::wait_for_screen`。
@@ -150,31 +173,38 @@ impl ArcWake for Unpark {
 }
 
 impl TerminalView {
-    /// 建好视图，在 `cwd` 下启动 shell，`cwd` 为 `None` 时从家目录开始；shell 等第一次布局后
-    /// 才启动，见 `start`。伪终端开不了时返回错误，不建视图。
+    /// 建好视图，在主机 `host` 的 `cwd` 下启动 shell，`cwd` 为 `None` 时从家目录开始；shell 等第一次
+    /// 布局后才启动，见 `start`。伪终端开不了时返回错误，不建视图。
     pub fn spawn(
+        host: &HostId,
         cwd: Option<&Path>,
         fallback: Option<&Path>,
         window: &mut Window,
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
-        let view = Self::unstarted(cwd, fallback, None, window, cx)?;
+        let view = Self::unstarted(host, cwd, fallback, None, window, cx)?;
         view.update(cx, |view, cx| view.start(cx));
         Ok(view)
     }
 
     /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时显示出来的终端用它，
     /// 等第一次布局量出尺寸再启动；看不见的连会话都不开，见 `deferred`。`cwd` 不是目录时从 `fallback` 开。
-    /// `resume` 是出了提示符后接回的 agent 对话。
+    /// `resume` 是出了提示符后接回的 agent 对话。远端主机上的会话不在主线程上等宿主回话，先建成
+    /// `deferred` 的视图，显示出来时在后台开，见 `open_session`。
     pub fn unstarted(
+        host: &HostId,
         cwd: Option<&Path>,
         fallback: Option<&Path>,
         resume: Option<Conversation>,
         window: &mut Window,
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
+        if !host.is_local() {
+            return Ok(Self::deferred(host, cwd, fallback, resume, window, cx));
+        }
         let config = cx.global::<AppConfig>().0.clone();
-        let id = host_client::link().spawn(SpawnOptions {
+        let link = host_client::remote::link_of(host);
+        let id = link.spawn(SpawnOptions {
             size: PROVISIONAL_SIZE,
             cwd: cwd.map(Into::into),
             fallback_cwd: fallback.map(Into::into),
@@ -184,9 +214,9 @@ impl TerminalView {
             settings: None,
             resume: resume.clone(),
         })?;
-        let (screen, rx) = connect(id, &config.term_settings())?;
+        let (screen, rx) = connect(&link, id, &config.term_settings())?;
         Ok(cx.new(|cx| {
-            let mut view = Self::new(Some(id), screen, false, rx, window, cx);
+            let mut view = Self::new(host, Some(id), screen, false, rx, window, cx);
             view.start_resume = resume;
             view
         }))
@@ -197,13 +227,15 @@ impl TerminalView {
     /// 恢复布局时看不见、又从没启动过的终端用它，恢复很多标签时只有显示出来的那几个马上开。
     /// 开之前标题和目录按起始目录给，和宿主给还没启动的会话的一样。
     pub fn deferred(
+        host: &HostId,
         cwd: Option<&Path>,
         fallback: Option<&Path>,
         resume: Option<Conversation>,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        let dir = cwd.map(Path::to_path_buf).or_else(|| runode_paths::Dirs::from_env().home);
+        let home = || if host.is_local() { runode_paths::Dirs::from_env().home } else { None };
+        let dir = cwd.map(Path::to_path_buf).or_else(home);
         let meta = SessionMeta { fallback_title: dir.as_deref().map(dir_label), cwd: dir, ..SessionMeta::default() };
         let screen = ScreenState::new_unopened(meta, PROVISIONAL_SIZE, Instant::now());
         // 还没有会话也就没有事件：发的一端直接丢掉，读事件的任务一开始就结束，开了会话再起。
@@ -211,7 +243,7 @@ impl TerminalView {
         let start_dir = cwd.map(Path::to_path_buf);
         let start_fallback = fallback.map(Path::to_path_buf);
         cx.new(|cx| {
-            let mut view = Self::new(None, screen, false, rx, window, cx);
+            let mut view = Self::new(host, None, screen, false, rx, window, cx);
             view.start_dir = start_dir;
             view.start_fallback = start_fallback;
             view.start_resume = resume;
@@ -221,14 +253,19 @@ impl TerminalView {
 
     /// 给 `deferred` 建的视图在宿主里开会话（`start` 时连 shell 一起启动），按 `attach` 连上它，之后
     /// 的事件由调用方起读事件的任务（或者等屏幕）来收。开不了时当作和宿主断开了：断开交给那个任务
-    /// 处理，视图显示断开的提示，点「在原目录重开」再开。
-    fn open_session(&mut self, start: bool, attach: Attach) {
+    /// 处理，视图显示断开的提示，点「在原目录重开」再开。远端主机上在后台等宿主回话（`opening`），开好
+    /// 以后按那时最近一次要的 `Attach` 连上、自己起读事件的任务。
+    fn open_session(&mut self, start: bool, attach: Attach, window: &mut Window, cx: &mut Context<Self>) {
         // 已经结束了的（所在的 workspace 关掉了）不再开：开出来的会话关标签时没人结束它。
         if self.ended {
             return;
         }
-        let link = host_client::link();
-        let spawned = link.spawn(SpawnOptions {
+        if let Some(opening) = &mut self.opening {
+            opening.start |= start;
+            opening.attach = attach;
+            return;
+        }
+        let options = SpawnOptions {
             size: self.screen.last_size(),
             cwd: self.start_dir.clone(),
             fallback_cwd: self.start_fallback.clone(),
@@ -237,13 +274,46 @@ impl TerminalView {
             shell: None,
             settings: None,
             resume: self.start_resume.clone(),
+        };
+        let link = self.host_link.clone();
+        if self.host.is_local() {
+            let spawned = link.spawn(options);
+            self.session_opened(spawned, start, attach);
+            return;
+        }
+        let task = cx.spawn_in(window, async move |this, cx| {
+            let spawned = cx.background_executor().spawn(async move { link.spawn(options) }).await;
+            this.update_in(cx, |view, window, cx| {
+                let Some(opening) = view.opening.take() else {
+                    return;
+                };
+                view.session_opened(spawned, start, opening.attach);
+                for waiting in opening.waiting {
+                    let _ = waiting.send(view.id);
+                }
+                if opening.start
+                    && let Some(id) = view.id.filter(|_| !start)
+                {
+                    view.started = true;
+                    view.host_link.send(ClientMsg::Start { id, integration: view.config.shell_integration });
+                }
+                view._reader = Self::read_events(view.events.clone(), window, cx);
+                cx.notify();
+            })
+            .ok();
         });
+        self.opening = Some(Opening { start, attach, waiting: Vec::new(), _task: task });
+    }
+
+    /// `open_session` 等到了宿主的回话。
+    fn session_opened(&mut self, spawned: anyhow::Result<SessionId>, start: bool, attach: Attach) {
         match spawned {
+            Ok(id) if self.ended => self.host_link.kill(id),
             Ok(id) => {
                 tracing::debug!("session {id} opened for a terminal that was put off");
                 self.id = Some(id);
                 self.started |= start;
-                self.events = Rc::new(RefCell::new(link.attach(id, attach.size, attach.mode)));
+                self.events = Rc::new(RefCell::new(self.host_link.attach(id, attach.size, attach.mode)));
             }
             Err(err) => {
                 tracing::warn!("failed to open the session of a terminal that was put off: {err:#}");
@@ -252,11 +322,42 @@ impl TerminalView {
         }
     }
 
+    /// 远端主机还没连上时恢复存档里的终端：先按断开显示，主机连上后会话 `id` 还在就接回，不在了就在
+    /// `cwd`（为空时 `fallback`）新开、接回 `resume` 这个 agent 对话，见 `host_reconnected`。
+    pub fn awaiting(
+        host: &HostId,
+        id: Option<SessionId>,
+        cwd: Option<&Path>,
+        fallback: Option<&Path>,
+        resume: Option<Conversation>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        let dir = cwd.or(fallback).map(Path::to_path_buf);
+        let meta =
+            SessionMeta { fallback_title: dir.as_deref().map(dir_label), cwd: dir.clone(), ..SessionMeta::default() };
+        let screen = ScreenState::new_lost(meta, PROVISIONAL_SIZE, Instant::now());
+        let (_, rx) = futures::channel::mpsc::unbounded();
+        let view = cx.new(|cx| {
+            let mut view = Self::new(host, id, screen, true, rx, window, cx);
+            view.start_dir = dir;
+            view.start_fallback = fallback.map(Path::to_path_buf);
+            view.start_resume = resume;
+            view
+        });
+        // 主机已经连上了的话等不来 `host_reconnected`，现在就接。
+        if view.read(cx).host_link.connected() {
+            view.update(cx, |view, cx| view.reopen(window, cx));
+        }
+        view
+    }
+
     /// 用宿主里已有的会话 `id` 建视图（存档恢复、接上后台会话）。`cwd` 是调用方记着的目录，宿主
     /// 还没报告目录时当作它的目录。`visible` 为假时视图只看状态（`AttachMode::MetaOnly`），等
     /// `request_visible` 再看屏幕。会话已经启动过，不再 `start`。连不上时返回错误，不结束会话；宿主
     /// 积压着时不算连不上，见 `attach_later`。
     pub fn reattach(
+        host: &HostId,
         id: SessionId,
         cwd: Option<&Path>,
         visible: bool,
@@ -264,16 +365,20 @@ impl TerminalView {
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
         let config = cx.global::<AppConfig>().0.clone();
-        let link = host_client::link();
+        let link = host_client::remote::link_of(host);
         if !link.connected() {
             anyhow::bail!("not connected to the host");
         }
-        let (screen, rx) = if visible {
+        let (screen, rx) = if visible && !host.is_local() {
+            // 远端的不在主线程上等屏幕，先画背景，屏幕到了由读事件的任务补上。
+            let rx = link.attach(id, None, AttachMode::Snapshot);
+            (ScreenState::new_attaching(AttachMode::Snapshot, PROVISIONAL_SIZE, Instant::now()), rx)
+        } else if visible {
             match link.attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT) {
-                Err(err) if backed_up(&err) => attach_later(id),
+                Err(err) if backed_up(&err) => attach_later(&link, id),
                 attached => {
                     let (screen, rx) = attached?;
-                    match live(id, screen, &config.term_settings()) {
+                    match live(&link, id, screen, &config.term_settings()) {
                         Ok(screen) => (screen, rx),
                         Err(err) => {
                             // 不留着订阅：不然宿主一直当它有窗口在看，进不了后台会话。
@@ -289,7 +394,7 @@ impl TerminalView {
         };
         let start_dir = cwd.map(Path::to_path_buf);
         Ok(cx.new(|cx| {
-            let mut view = Self::new(Some(id), screen, true, rx, window, cx);
+            let mut view = Self::new(host, Some(id), screen, true, rx, window, cx);
             view.start_dir = start_dir;
             view
         }))
@@ -314,7 +419,7 @@ impl TerminalView {
         let Some(id) = self.id else {
             return;
         };
-        host_client::link().send(ClientMsg::Focus { id, focused });
+        self.host_link.send(ClientMsg::Focus { id, focused });
     }
 
     /// 按已经设好的实际尺寸启动 shell。启动不了时宿主发 `HostMsg::Exited`，按 shell 已退出
@@ -326,7 +431,7 @@ impl TerminalView {
         if std::mem::replace(&mut self.started, true) {
             return;
         }
-        host_client::link().send(ClientMsg::Start { id, integration: self.config.shell_integration });
+        self.host_link.send(ClientMsg::Start { id, integration: self.config.shell_integration });
     }
 
     /// 收宿主发来的事件的任务：把排队的事件合并成一批处理，再重绘。收事件的一端在视图里，
@@ -375,7 +480,8 @@ impl TerminalView {
     /// 见 `new`；这一批里有退出时在退出之前转发。
     fn handle_link_events(&mut self, events: Vec<LinkEvent>, window: &mut Window, cx: &mut Context<Self>) {
         let settings = self.config.term_settings();
-        let mut build = |screen: Screen| build_session(screen.attached.id, screen, &settings);
+        let link = self.host_link.clone();
+        let mut build = |screen: Screen| build_session(&link, screen.attached.id, screen, &settings);
         let changes = self.screen.apply(events, &mut build, Instant::now());
         self.apply_changes(changes, window, cx);
         self.flush_pending_command(false);
@@ -399,7 +505,7 @@ impl TerminalView {
         let (Some(id), Some(command)) = (self.id, self.pending_command.take()) else {
             return;
         };
-        host_client::link().input(id, format!("{command}\r").as_bytes());
+        self.host_link.input(id, format!("{command}\r").as_bytes());
     }
 
     fn apply_changes(&mut self, changes: Changes, window: &mut Window, cx: &mut Context<Self>) {
@@ -479,11 +585,14 @@ impl TerminalView {
     }
 
     /// 经连接重新连上会话（沿用原来的登记和收事件的一端）。
-    fn send_attach(&self, attach: Attach) {
+    fn send_attach(&mut self, attach: Attach) {
         let Some(id) = self.id else {
+            if let Some(opening) = &mut self.opening {
+                opening.attach = attach;
+            }
             return;
         };
-        if !host_client::link().reattach(id, attach.size, attach.mode) {
+        if !self.host_link.reattach(id, attach.size, attach.mode) {
             // 连接已经断了：断开的消息已经排在收事件的一端里，处理到时按断开显示。
             tracing::debug!("session {id} cannot attach again: not connected");
         }
@@ -523,7 +632,7 @@ impl TerminalView {
     /// 按视图的尺寸发出要屏幕的 `Attach` 并返回 true，接着用 `wait_for_screen` 等（最多 `SHOW_WAIT`，等不到先画
     /// 背景，到了再补上）。一次显示好几个终端时先都发出去再一起等（见 `WindowView::sync_visibility`），
     /// 不必一个等完再要下一个。
-    pub fn request_visible(&mut self, visible: bool, cx: &mut Context<Self>) -> bool {
+    pub fn request_visible(&mut self, visible: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let attach = self.screen.set_visible(visible, Instant::now());
         if visible {
             self._hide_timer = None;
@@ -531,7 +640,7 @@ impl TerminalView {
                 match self.id {
                     Some(_) => self.send_attach(attach),
                     // `deferred` 建的视图第一次显示：这时才开会话。
-                    None => self.open_session(false, attach),
+                    None => self.open_session(false, attach, window, cx),
                 }
                 cx.notify();
                 return true;
@@ -573,6 +682,10 @@ impl TerminalView {
     /// 在主线程上等宿主给屏幕，最多等到 `deadline`，期间到的事件照常处理。等的时候直接从收事件
     /// 的一端取，用的是自己的唤醒方，所以之后要重新起读事件的任务。
     pub fn wait_for_screen(&mut self, deadline: Instant, window: &mut Window, cx: &mut Context<Self>) {
+        // 远端主机上还在后台开会话：开好了自己起读事件的任务。
+        if self.opening.is_some() {
+            return;
+        }
         let started = Instant::now();
         // 建视图时已经到了的结束先处理：屏幕不会再来了，不用等。
         let ended = self.handle_pending_end(window, cx);
@@ -623,6 +736,10 @@ impl TerminalView {
         if !self.screen.is_lost() {
             return;
         }
+        if let HostId::Ssh(name) = &self.host {
+            self.reopen_remote(name.clone(), window, cx);
+            return;
+        }
         if let Err(err) = host_client::reconnect() {
             tracing::warn!("failed to reconnect to the host: {err:#}");
             return;
@@ -652,18 +769,75 @@ impl TerminalView {
         // 列不出会话时不知道别的终端的会话还在不在，不替它们决定，各自点重开时再看。
         if let Some(alive) = alive {
             let generation = cx.try_global::<HostReconnected>().map_or(0, |reconnected| reconnected.generation) + 1;
-            cx.set_global(HostReconnected { generation, alive: Rc::new(alive) });
+            cx.set_global(HostReconnected { generation, host: HostId::Local, alive: Rc::new(alive) });
         }
     }
 
-    /// 别的终端重新连上了宿主：自己也断开着、会话还在的话重新连上。
-    fn host_reconnected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// 远端主机上的「在原目录重开」：没连着时马上重连，连上后会话还在的经 `remote_reconnected` 接回；
+    /// 连着、会话却不在了时在原来的目录开一个新的。
+    fn reopen_remote(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.host_link.connected() {
+            if let Some(remote) = host_client::remote::remote(&name) {
+                remote.retry_now();
+            }
+            return;
+        }
+        let link = self.host_link.clone();
+        let id = self.id;
+        cx.spawn_in(window, async move |this, cx| {
+            let sessions =
+                cx.background_executor().spawn(async move { link.list_sessions(Duration::from_secs(10)) }).await;
+            let alive: Option<HashSet<SessionId>> = sessions
+                .inspect_err(|err| tracing::warn!("failed to list the sessions on {name}: {err:#}"))
+                .ok()
+                .map(|sessions| {
+                    sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect()
+                });
+            this.update_in(cx, |view, window, cx| {
+                match id.map_or(Reopen::Replace, |id| reopen_plan(id, alive.as_ref())) {
+                    Reopen::Resume => view.resume(window, cx),
+                    Reopen::Replace => view.replace_remote(window, cx),
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 远端主机上换一个新会话：结束现在的，按 `deferred` 那样在原来的目录后台开一个已经启动的。
+    fn replace_remote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.screen.is_lost() {
             return;
         }
-        let alive = cx.global::<HostReconnected>().alive.clone();
+        let (size, cwd, visible) = (self.screen.last_size(), self.cwd(), self.screen.visible());
+        if let Some(old) = self.id.take() {
+            self.host_link.kill(old);
+        }
+        self.start_resume = self.conversation();
+        let meta =
+            SessionMeta { fallback_title: cwd.as_deref().map(dir_label), cwd: cwd.clone(), ..SessionMeta::default() };
+        self.screen = ScreenState::new_unopened(meta, size, Instant::now());
+        self.start_dir = cwd;
+        self.pending_end = None;
+        self.vt_replaced(cx);
+        let attach = if visible { self.screen.set_visible(true, Instant::now()) } else { None };
+        self.open_session(true, attach.unwrap_or(Attach { size: None, mode: AttachMode::MetaOnly }), window, cx);
+        cx.emit(TerminalEvent::TitleChanged);
+        cx.notify();
+    }
+
+    /// 自己所在的主机重新连上了：自己也断开着、会话还在的话重新连上。
+    fn host_reconnected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let reconnected = cx.global::<HostReconnected>();
+        if !self.screen.is_lost() || reconnected.host != self.host {
+            return;
+        }
+        let alive = reconnected.alive.clone();
         if self.id.is_some_and(|id| alive.contains(&id)) {
             self.resume(window, cx);
+        } else if !self.host.is_local() {
+            // 远端主机重启过之类，会话没了：不等用户点，在原来的目录新开。
+            self.replace_remote(window, cx);
         }
     }
 
@@ -676,9 +850,9 @@ impl TerminalView {
             return;
         };
         tracing::info!("session {id} attaches again after reconnecting");
-        let rx = host_client::link().attach(id, attach.size, attach.mode);
+        let rx = self.host_link.attach(id, attach.size, attach.mode);
         self.events = Rc::new(RefCell::new(rx));
-        if attach.mode == AttachMode::MetaOnly {
+        if attach.mode == AttachMode::MetaOnly || !self.host.is_local() {
             self._reader = Self::read_events(self.events.clone(), window, cx);
         } else {
             self.wait_for_screen(Instant::now() + SHOW_WAIT, window, cx);
@@ -695,7 +869,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
-        let link = host_client::link();
+        let link = self.host_link.clone();
         let id = link.spawn(SpawnOptions {
             size,
             cwd,
@@ -706,7 +880,7 @@ impl TerminalView {
             settings: None,
             resume: None,
         })?;
-        let (mut screen, rx) = connect(id, &self.config.term_settings())?;
+        let (mut screen, rx) = connect(&link, id, &self.config.term_settings())?;
         if let Some(old) = self.id.replace(id) {
             link.kill(old);
         }
@@ -737,15 +911,17 @@ impl TerminalView {
     pub fn adopt(shell: Prespawned, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
         let size = shell.size;
         let id = shell.into_id();
-        let (screen, rx) = connect(id, &cx.global::<AppConfig>().0.term_settings())?;
+        let link = host_client::link().clone();
+        let (screen, rx) = connect(&link, id, &cx.global::<AppConfig>().0.term_settings())?;
         Ok(cx.new(|cx| {
-            let mut view = Self::new(Some(id), screen, true, rx, window, cx);
+            let mut view = Self::new(&HostId::Local, Some(id), screen, true, rx, window, cx);
             view.adopted_size = Some(size);
             view
         }))
     }
 
     fn new(
+        host: &HostId,
         id: Option<SessionId>,
         screen: ScreenState<Session>,
         started: bool,
@@ -821,6 +997,9 @@ impl TerminalView {
             start_dir: None,
             start_fallback: None,
             start_resume: None,
+            host: host.clone(),
+            host_link: host_client::remote::link_of(host),
+            opening: None,
             id,
             ended: false,
             bell_pending: false,
@@ -895,6 +1074,28 @@ impl TerminalView {
         view
     }
 
+    /// 会话开好以后交回它，开不成时交回空；已经开好或者没在后台开时当场交回。
+    pub fn opened(&mut self) -> oneshot::Receiver<Option<SessionId>> {
+        let (tx, rx) = oneshot::channel();
+        match &mut self.opening {
+            Some(opening) => opening.waiting.push(tx),
+            None => {
+                let _ = tx.send(self.id);
+            }
+        }
+        rx
+    }
+
+    /// 本机上的会话的 shell 的进程号；远端主机上的进程号在那台机器上，这里为空。
+    pub fn local_pid(&self) -> Option<u32> {
+        self.screen.meta().pid.filter(|_| self.host.is_local())
+    }
+
+    /// 会话所在的主机。
+    pub fn host(&self) -> &HostId {
+        &self.host
+    }
+
     /// 宿主里这个终端的会话；`deferred` 建的视图还没开会话时为 `None`。
     pub fn session_id(&self) -> Option<SessionId> {
         self.id
@@ -916,7 +1117,7 @@ impl TerminalView {
         if !std::mem::replace(&mut self.ended, true)
             && let Some(id) = self.id
         {
-            host_client::link().kill(id);
+            self.host_link.kill(id);
         }
     }
 
@@ -937,13 +1138,13 @@ impl TerminalView {
         let Some(id) = self.id else {
             // `deferred` 建的视图走到这里时，界面这份状态没标成正在附着（`request_visible` 经 `set_visible`
             // 才标上），附着失败时宿主回的错误不会被认成会话没了。
-            self.open_session(true, Attach { size: None, mode: AttachMode::MetaOnly });
+            self.open_session(true, Attach { size: None, mode: AttachMode::MetaOnly }, window, cx);
             self._reader = Self::read_events(self.events.clone(), window, cx);
             return;
         };
         if self.screen.live().is_none() {
             // 没有界面这份 VT 替它请宿主改尺寸，直接请。
-            host_client::link().send(ClientMsg::Resize { id, size });
+            self.host_link.send(ClientMsg::Resize { id, size });
         }
         self.start_now();
     }

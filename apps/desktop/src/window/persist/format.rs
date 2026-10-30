@@ -94,6 +94,9 @@ pub enum WindowMode {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedWorkspace {
     pub name: String,
+    /// 经 SSH 连的主机（`HostId::Ssh` 的连接目标）；本机的为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
     pub dir: PathBuf,
     pub tabs: Vec<SavedTab>,
     /// 当前的标签。
@@ -191,9 +194,11 @@ pub struct RestorePlan {
 pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> RestorePlan {
     let mut seen = HashSet::new();
     let mut end = Vec::new();
+    // 远端主机上的会话在那台主机的宿主里，`live` 里没有，连上那台主机后再定。
     let leaves = windows
         .iter_mut()
         .flat_map(|window| &mut window.workspaces)
+        .filter(|workspace| workspace.host.is_none())
         .flat_map(|workspace| &mut workspace.tabs)
         .flat_map(|tab| tab.root.leaves_mut());
     for leaf in leaves {
@@ -233,6 +238,7 @@ pub fn adopt(
     let mut known: HashSet<SessionId> = windows
         .iter_mut()
         .flat_map(|window| &mut window.workspaces)
+        .filter(|workspace| workspace.host.is_none())
         .flat_map(|workspace| &mut workspace.tabs)
         .flat_map(|tab| tab.root.leaves_mut())
         .filter_map(|leaf| match leaf {
@@ -265,9 +271,10 @@ pub fn adopt(
                 .collect();
             let saved = windows.get_mut(wi).and_then(|window| {
                 let workspaces = &mut window.workspaces;
+                let here = |workspace: &SavedWorkspace| workspace.host.is_none() && workspace.dir == *dir;
                 let ix = Some(si)
-                    .filter(|&si| workspaces.get(si).is_some_and(|workspace| workspace.dir == *dir))
-                    .or_else(|| workspaces.iter().position(|workspace| workspace.dir == *dir))?;
+                    .filter(|&si| workspaces.get(si).is_some_and(here))
+                    .or_else(|| workspaces.iter().position(here))?;
                 workspaces.get_mut(ix)
             });
             if let Some(workspace) = saved {

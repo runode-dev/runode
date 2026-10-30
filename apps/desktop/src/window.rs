@@ -72,7 +72,7 @@ pub use quit::{
     close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, quit_to_update, should_close,
     terminal_windows,
 };
-pub use remote::serve_requests;
+pub use remote::{serve, serve_requests};
 // 文件树的动作在 `file_tree`，这里转出去给快捷键表用。
 pub use crate::file_tree::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, OpenSelectedFile, RenameFile,
@@ -85,6 +85,7 @@ pub use status_bar::watch as watch_status;
 pub use tasks::{RunTaskKey, TaskKeys};
 pub use titlebar::titlebar_options;
 
+use crate::host_client::remote::HostId;
 use crate::ui::a11y::{Hide, PressDown};
 // 关标签、关分屏和放大分屏这几个动作在 `runode_ui::actions`，焦点在预览栏里时由预览栏接住；
 // 标题栏的高度、拖动窗口和标签的关闭按钮也在 `runode_ui`。
@@ -540,7 +541,7 @@ impl WindowView {
     fn push_default_workspace(&mut self, shell: Option<Prespawned>, window: &mut Window, cx: &mut Context<Self>) {
         let started = match shell {
             Some(shell) => TerminalView::adopt(shell, window, cx),
-            None => TerminalView::spawn(None, None, window, cx),
+            None => TerminalView::spawn(&HostId::Local, None, None, window, cx),
         };
         let ix = self.workspaces.len();
         match started {
@@ -555,6 +556,7 @@ impl WindowView {
                 let id = self.next_id();
                 self.workspaces.push(Workspace {
                     id,
+                    host: HostId::Local,
                     name: model::workspace_name(&dir).into(),
                     repo: Default::default(),
                     canonical: model::canonical_dir_later(&dir),

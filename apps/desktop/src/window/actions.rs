@@ -10,6 +10,7 @@ use super::{
     NewSplitRight, NewTab, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace, ResizePane, SelectLastTab,
     SelectLastWorkspace, SelectTab, SelectWorkspace, TogglePaneZoom, ToggleSidebar, WindowView,
 };
+use crate::host_client::remote::HostId;
 use crate::terminal_view::TerminalView;
 
 /// 键盘调整分屏大小时每次挪动的像素。
@@ -48,7 +49,7 @@ impl WindowView {
             self.activate_workspace(ix, window, cx);
             return;
         }
-        if let Some(view) = self.spawn_terminal(Some(&dir), window, cx) {
+        if let Some(view) = self.spawn_terminal_on(&HostId::Local, Some(&dir), None, window, cx) {
             self.insert_workspace(self.active + 1, dir, name, view, window, cx);
         }
     }

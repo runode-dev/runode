@@ -39,7 +39,7 @@ use runode_types::{
 };
 
 use crate::{
-    host_client::LinkEvent,
+    host_client::{self, LinkEvent, remote::HostId},
     ui::{a11y::Press, font_size::FontSize, hsla, input::InputState},
 };
 use crop::Crop;
@@ -81,7 +81,8 @@ pub struct JumpToPrompt(pub isize);
 #[action(namespace = runode, no_json)]
 pub struct WriteScreenFile(pub ScreenFile);
 
-pub(crate) use lifecycle::PROVISIONAL_SIZE;
+use lifecycle::Opening;
+pub(crate) use lifecycle::{PROVISIONAL_SIZE, remote_reconnected};
 /// 写好的文件怎么处理：复制路径（`CopyPath`）、把路径粘贴进终端（`PastePath`）或者用系统默认
 /// 程序打开（`Open`）。和快捷键配置里解析出来的是同一个类型，不用再转换。
 pub use runode_config::keybind::ScreenFile;
@@ -153,6 +154,11 @@ pub struct TerminalView {
     /// 恢复时要接回的 agent 对话：`deferred` 建的视图开会话时交给宿主。会话报出对话之前
     /// `SessionMeta::conversation` 还是空的，写存档时用它代替（`conversation`）。
     start_resume: Option<Conversation>,
+    /// 会话在哪台主机上，和到那台主机的连接。
+    host: HostId,
+    host_link: host_client::Link,
+    /// 远端主机上正在后台开会话，见 `open_session`。
+    opening: Option<Opening>,
     /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。`deferred` 建的视图开会话
     /// 之前为 `None`。
     id: Option<SessionId>,
@@ -246,7 +252,7 @@ impl Drop for TerminalView {
         if !self.ended
             && let Some(id) = self.id
         {
-            crate::host_client::link().detach(id);
+            self.host_link.detach(id);
         }
     }
 }

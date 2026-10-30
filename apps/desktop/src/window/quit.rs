@@ -588,10 +588,13 @@ fn for_each_view(cx: &App, skip_emptied: bool, mut f: impl FnMut(&TerminalView, 
 }
 
 /// 各窗口里前台在跑 agent 的终端，每个一项。关掉了最后一个 workspace 的窗口不算：那些终端关的时候问过、
-/// 已经结束了，等着退出的这会儿视图还在。
+/// 已经结束了，等着退出的这会儿视图还在。远端主机上的 agent 退出后照常跑着，不算。
 fn window_agents(cx: &App) -> Vec<ShownAgent> {
     let mut agents = Vec::new();
     for_each_view(cx, true, |view, workspace| {
+        if !view.host().is_local() {
+            return;
+        }
         if let Some(kind) = view.agent().map(|agent| agent.kind).filter(|kind| kind.is_known()) {
             agents.push(ShownAgent { kind, workspace: workspace.to_owned() });
         }
@@ -599,12 +602,14 @@ fn window_agents(cx: &App) -> Vec<ShownAgent> {
     agents
 }
 
-/// 各窗口里的终端占着的会话。
+/// 各窗口里本机的终端占着的会话。远端主机上的会话退出时照常留在那台机器上，不在其列。
 pub(super) fn held_sessions(cx: &App) -> HashSet<SessionId> {
     let mut held = HashSet::new();
     // 结束了的会话宿主可能还没收掉，照样算占着，免得当成后台会话再问一遍。
     for_each_view(cx, false, |view, _| {
-        held.extend(view.session_id());
+        if view.host().is_local() {
+            held.extend(view.session_id());
+        }
     });
     held
 }

@@ -29,6 +29,7 @@ use super::{
     model::{Tab, Workspace, home_dir, workspace_name},
     project::{Project, SidePanel},
 };
+use crate::host_client::remote::HostId;
 use crate::{
     host_client::{self, Mode},
     prespawn::Prespawned,
@@ -377,6 +378,7 @@ impl WindowView {
         // 有终端起不来时后面的标签和 workspace 会往前挪，当前的那个按原来的位置找。
         let mut active = 0;
         for (wi, saved_workspace) in saved.workspaces.into_iter().enumerate() {
+            let host = saved_workspace.host.clone().map_or(HostId::Local, HostId::Ssh);
             let mut tabs = Vec::new();
             let mut active_tab = 0;
             for (ti, saved_tab) in saved_workspace.tabs.iter().enumerate() {
@@ -385,6 +387,7 @@ impl WindowView {
                 let shown = wi == saved.active && ti == saved_workspace.active;
                 let restored = self.restore_node(
                     &saved_tab.root,
+                    &host,
                     &saved_workspace.dir,
                     home.as_deref(),
                     shown,
@@ -429,6 +432,7 @@ impl WindowView {
             let id = self.next_id();
             self.workspaces.push(Workspace {
                 id,
+                host,
                 name: name.into(),
                 repo: Default::default(),
                 canonical: super::model::canonical_dir_later(&saved_workspace.dir),
@@ -475,6 +479,7 @@ impl WindowView {
     fn restore_node(
         &mut self,
         saved: &SavedNode,
+        host: &HostId,
         dir: &Path,
         home: Option<&Path>,
         shown: bool,
@@ -484,9 +489,17 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<Node<EntityId>> {
         match saved {
+            SavedNode::Leaf { cwd, session, conversation, .. } if !host.is_local() => {
+                let view =
+                    TerminalView::awaiting(host, *session, cwd.as_deref(), Some(dir), conversation.clone(), window, cx);
+                let (id, entry) = self.pane_entry(view, window, cx);
+                panes.insert(id, entry);
+                leaves.push(Some(id));
+                Some(Node::Leaf(id))
+            }
             SavedNode::Leaf { cwd, session, conversation, .. } => {
                 let reattached = (*session).and_then(|id| {
-                    TerminalView::reattach(id, cwd.as_deref(), shown, window, cx)
+                    TerminalView::reattach(host, id, cwd.as_deref(), shown, window, cx)
                         .inspect_err(|err| {
                             tracing::warn!("failed to reattach session {id}, starting over in its directory: {err:#}");
                         })
@@ -500,11 +513,17 @@ impl WindowView {
                         let in_home = start.as_deref() == home && conversation.is_none();
                         let view = match shell.and_then(|shell| shell.take_if(|_| in_home)) {
                             Some(shell) => TerminalView::adopt(shell, window, cx),
-                            None if shown => {
-                                TerminalView::unstarted(start.as_deref(), Some(dir), conversation.clone(), window, cx)
-                            }
+                            None if shown => TerminalView::unstarted(
+                                host,
+                                start.as_deref(),
+                                Some(dir),
+                                conversation.clone(),
+                                window,
+                                cx,
+                            ),
                             // 看不见的标签切过去时才在宿主里开会话。
                             None => Ok(TerminalView::deferred(
+                                host,
                                 start.as_deref(),
                                 Some(dir),
                                 conversation.clone(),
@@ -531,8 +550,8 @@ impl WindowView {
             }
             SavedNode::Split { axis, ratio, first, second } => {
                 let first =
-                    self.restore_node(first, dir, home, shown, shell.as_deref_mut(), (panes, leaves), window, cx);
-                let second = self.restore_node(second, dir, home, shown, shell, (panes, leaves), window, cx);
+                    self.restore_node(first, host, dir, home, shown, shell.as_deref_mut(), (panes, leaves), window, cx);
+                let second = self.restore_node(second, host, dir, home, shown, shell, (panes, leaves), window, cx);
                 match (first, second) {
                     (Some(first), Some(second)) => {
                         let id = self.next_id();
@@ -571,6 +590,7 @@ impl WindowView {
     fn save_workspace(&self, workspace: &Workspace, cx: &App) -> SavedWorkspace {
         SavedWorkspace {
             name: workspace.name.to_string(),
+            host: workspace.host.label().map(str::to_owned),
             dir: workspace.dir.clone(),
             tabs: workspace.tabs.iter().map(|tab| self.save_tab(tab, cx)).collect(),
             active: workspace.active,

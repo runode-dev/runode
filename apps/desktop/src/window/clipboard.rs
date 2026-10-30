@@ -12,7 +12,7 @@ use super::{
     WindowView,
     remote::{find_session, front_window},
 };
-use crate::host_client::{self, UiTicket};
+use crate::host_client::{Link, UiTicket, remote::HostId};
 
 /// 程序要写剪贴板：照写，回 `Done`（`req` 为 0，见 `ClientMsg::WriteClipboard`）。
 pub(super) fn write(text: String, cx: &mut App) -> HostMsg {
@@ -20,18 +20,26 @@ pub(super) fn write(text: String, cx: &mut App) -> HostMsg {
     HostMsg::Done { req: 0 }
 }
 
-/// 程序要读剪贴板，`ticket` 是宿主转来的请求的回执。不用问时当场读；要问时在显示这个会话的窗口上
+/// 主机 `host` 上的程序要读剪贴板，`ticket` 是宿主经 `link` 转来的请求的回执。不用问时当场读；要问时在显示这个会话的窗口上
 /// （没有时在最前面的窗口上）弹框，用户点了允许才读。都用 `Link::ui_reply` 回 `ClipboardText`，
 /// 不让读、没有窗口可问、剪贴板里没有文字时 `text` 为空。
-pub(super) fn read(ticket: UiTicket, id: SessionId, ask: bool, program: Option<String>, cx: &mut App) {
+pub(super) fn read(
+    host: &HostId,
+    link: Link,
+    ticket: UiTicket,
+    id: SessionId,
+    ask: bool,
+    program: Option<String>,
+    cx: &mut App,
+) {
     let reply = move |text: Option<String>| {
-        host_client::link().ui_reply(ticket, HostMsg::ClipboardText { id, text: text.map(Into::into) });
+        link.ui_reply(ticket, HostMsg::ClipboardText { id, text: text.map(Into::into) });
     };
     if !ask {
         reply(clipboard_text(cx));
         return;
     }
-    let (target, pane) = match find_session(id, cx) {
+    let (target, pane) = match find_session(host, id, cx) {
         Some((window, pane)) => (Some(window), Some(pane)),
         None => (front_window(cx), None),
     };

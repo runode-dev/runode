@@ -238,6 +238,12 @@ impl<S: Vt> ScreenState<S> {
         Self { visible: false, hidden_since: Some(now), ..Self::base(Screen::Hidden, meta, size) }
     }
 
+    /// 主机还没连上、会话要等连上再接（远端主机上恢复的终端）：按断开处理，不显示，连上后经
+    /// `reconnect` 接回。
+    pub(super) fn new_lost(meta: SessionMeta, size: GridSize, now: Instant) -> Self {
+        Self { visible: false, hidden_since: Some(now), ..Self::base(Screen::Lost { session: None }, meta, size) }
+    }
+
     #[cfg(test)]
     pub(super) fn screen(&self) -> &Screen<S> {
         &self.screen

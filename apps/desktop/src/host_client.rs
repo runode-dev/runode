@@ -20,7 +20,6 @@ pub(crate) mod bridge;
 mod handoff;
 mod launch;
 mod link;
-#[allow(dead_code)]
 pub mod remote;
 
 use std::{
@@ -205,9 +204,15 @@ pub fn take_notice() -> Vec<Notice> {
 /// 宿主跑在 app 里时，远程访问的监听也开在 app 里，在这里按配置开关；单独跑的宿主自己读配置，
 /// 见 `remote_access`。
 pub fn configure(config: &Config) {
+    let messages = vec![
+        ClientMsg::SetTheme { settings: config.term_settings() },
+        ClientMsg::SetOptions { record_history: false, clipboard: config.clipboard_access() },
+    ];
     let link = link();
-    link.send(ClientMsg::SetTheme { settings: config.term_settings() });
-    link.send(ClientMsg::SetOptions { record_history: false, clipboard: config.clipboard_access() });
+    for message in &messages {
+        link.send(message.clone());
+    }
+    remote::configure(messages);
     KEEP_SESSIONS.store(config.terminal_host, Ordering::Relaxed);
     let in_app = mode() == Mode::InProcess;
     let port = if in_app { crate::remote_access::wanted_port(config) } else { None };
@@ -222,12 +227,6 @@ pub fn configure(config: &Config) {
         service.set(port, config.remote_access_name.clone());
         service.set_push(crate::remote_access::push_settings(config));
     }
-}
-
-/// 宿主转给界面去办的请求（`runode open`、`runode focus` 这类），带着回话用的编号，办完了用
-/// `Link::ui_reply` 回话。只能取一次。
-pub fn serve_ui() -> Option<UnboundedReceiver<(UiTicket, ClientMsg)>> {
-    link().ui_requests()
 }
 
 /// 看板变了、或者换了一条连接要重新问看板，见 `Link::todos_changed`。只能取一次。

@@ -22,6 +22,7 @@ use super::{
     sidebar::RepoBadge,
 };
 use crate::{
+    host_client::remote::HostId,
     terminal_view::{PROVISIONAL_SIZE, SHOW_WAIT, TerminalEvent, TerminalView},
     ui::menu::MenuHost as _,
 };
@@ -113,6 +114,8 @@ pub(super) type ToolCache = std::cell::RefCell<Option<(Option<std::ffi::OsString
 /// 一个项目目录，以及在其中打开的一组标签。
 pub(super) struct Workspace {
     pub(super) id: WorkspaceId,
+    /// 项目和终端在哪台主机上，跟着第一个终端定。
+    pub(super) host: HostId,
     /// 侧栏里显示的名字，新建时按目录取，可以改。
     pub(super) name: SharedString,
     /// 项目目录：新终端取不到当前终端的目录时从这里开始。
@@ -270,25 +273,27 @@ impl WindowView {
         }
     }
 
-    /// 在 `cwd` 里启动一个终端，为空时在家目录；启动失败时记日志，返回 `None`。
+    /// 在当前 workspace 的主机的 `cwd` 里启动一个终端，为空时在家目录；启动失败时记日志，返回 `None`。
     pub(super) fn spawn_terminal(
         &mut self,
         cwd: Option<&Path>,
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Entity<TerminalView>> {
-        self.spawn_terminal_or(cwd, None, window, cx)
+        let host = self.workspaces.get(self.active).map_or(HostId::Local, |workspace| workspace.host.clone());
+        self.spawn_terminal_on(&host, cwd, None, window, cx)
     }
 
-    /// 同 `spawn_terminal`，`cwd` 不是目录时从 `fallback` 开。
-    pub(super) fn spawn_terminal_or(
+    /// 在主机 `host` 的 `cwd` 里启动一个终端，`cwd` 不是目录时从 `fallback` 开。
+    pub(super) fn spawn_terminal_on(
         &mut self,
+        host: &HostId,
         cwd: Option<&Path>,
         fallback: Option<&Path>,
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Entity<TerminalView>> {
-        match TerminalView::spawn(cwd, fallback, window, cx) {
+        match TerminalView::spawn(host, cwd, fallback, window, cx) {
             Ok(view) => {
                 self.record_spawn(&view, cwd);
                 Some(view)
@@ -368,9 +373,11 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let host = view.read(cx).host().clone();
         let tab = self.single_pane_tab(view, window, cx);
         let workspace = Workspace {
             id: self.next_id(),
+            host,
             name: name.unwrap_or_else(|| workspace_name(&dir)).into(),
             repo: RepoBadge::default(),
             canonical: canonical_dir_later(&dir),
@@ -537,7 +544,9 @@ impl WindowView {
                 let selected = self.is_shown(wi, ti);
                 for (view, _) in tab.panes.values() {
                     let shown = draws_screen(window_visible, selected, || view.read(cx).holds_view_state());
-                    if view.read(cx).visible() != shown && view.update(cx, |view, cx| view.request_visible(shown, cx)) {
+                    if view.read(cx).visible() != shown
+                        && view.update(cx, |view, cx| view.request_visible(shown, window, cx))
+                    {
                         waiting.push(view.clone());
                     }
                 }
@@ -821,10 +830,10 @@ impl WindowView {
     ) -> Option<Entity<TerminalView>> {
         // 目录已经被删掉时宿主退回 workspace 的目录，再退回家目录；workspace 里没有终端时从它的目录开始。
         // 不在界面线程上看目录还在不在，见 `format::start_dir`。
-        let fallback = self.workspace().dir.clone();
+        let (host, fallback) = (self.workspace().host.clone(), self.workspace().dir.clone());
         let cwd = self.focused_view().and_then(|view| view.read(cx).cwd());
         let cwd = format::start_dir(cwd.as_deref(), &fallback);
-        self.spawn_terminal_or(Some(&cwd), Some(&fallback), window, cx)
+        self.spawn_terminal_on(&host, Some(&cwd), Some(&fallback), window, cx)
     }
 }
 

@@ -28,6 +28,7 @@ mod prespawn;
 mod preview_panel;
 mod process_env;
 mod remote_access;
+mod remote_hosts;
 #[cfg(any(target_os = "macos", windows))]
 mod screen_process;
 mod settings;
@@ -149,6 +150,7 @@ fn main() {
         window::install(cx);
         startup::mark("workspace_install");
         window::serve_requests(cx);
+        remote_hosts::install(cx);
         cx.on_window_closed(|cx, _| {
             if window::terminal_windows(cx) == 0 {
                 cx.quit();

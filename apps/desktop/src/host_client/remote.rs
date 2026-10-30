@@ -6,7 +6,7 @@
 //! stdout 和一对本地 socket 互搬，`Link` 接在这对 socket 的一头上。断了按退避阶梯（`RETRY_DELAYS`）重连，
 //! 认证没过、主机密钥对不上这类要用户来办的不自己重试，等 `retry_now`。
 //!
-//! 连接的状态（`Status`）变了、重连上了、要问用户，都经 `events` 告诉界面。
+//! 连接的状态（`Status`）变了、连上了、要问用户，都经 `events` 告诉界面。
 
 mod askpass;
 pub(crate) mod deploy;
@@ -25,7 +25,7 @@ use std::{
 };
 
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
-use runode_protocol::SessionId;
+use runode_protocol::{ClientMsg, SessionId};
 use runode_ssh::{
     Destination, Ssh,
     bridge::{Start, read_start},
@@ -93,6 +93,16 @@ pub fn events() -> Option<UnboundedReceiver<RemoteEvent>> {
     EVENTS.1.lock().unwrap_or_else(PoisonError::into_inner).take()
 }
 
+/// 把配置里宿主关心的部分（`messages`）告诉各台远端主机的宿主，之后新连的主机也照它。
+pub fn configure(messages: Vec<ClientMsg>) {
+    for host in remotes() {
+        for message in &messages {
+            host.link.send(message.clone());
+        }
+    }
+    *HOST_OPTIONS.lock().unwrap_or_else(PoisonError::into_inner) = messages;
+}
+
 /// 怎么调 ssh，跟着配置走。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SshSettings {
@@ -109,6 +119,7 @@ impl Default for SshSettings {
 }
 
 /// 换上配置里 ssh 的设置，之后的连接按它。
+#[allow(dead_code)]
 pub fn set_ssh_settings(settings: SshSettings) {
     *SETTINGS.lock().unwrap_or_else(PoisonError::into_inner) = settings;
 }
@@ -123,11 +134,12 @@ fn ssh() -> Ssh {
 
 /// 界面要知道的事。
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum RemoteEvent {
     /// 这台主机的连接状态变了，见 `RemoteHost::status`。
     Status(String),
-    /// 断开后又连上了这台主机，`alive` 是那时它的宿主里还活着的会话。
-    Reconnected { host: String, alive: HashSet<SessionId> },
+    /// 连上了这台主机（第一次或断开后又连上），`alive` 是那时它的宿主里还活着的会话。
+    Connected { host: String, alive: HashSet<SessionId> },
     /// ssh 要问用户。
     Ask(Ask),
 }
@@ -200,6 +212,8 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
 const LIST_TIMEOUT: Duration = Duration::from_secs(10);
 
 static HOSTS: LazyLock<Mutex<HashMap<String, Arc<RemoteHost>>>> = LazyLock::new(Mutex::default);
+/// 配置里宿主关心的部分（`SetTheme`、`SetOptions`），见 `configure`。
+static HOST_OPTIONS: Mutex<Vec<ClientMsg>> = Mutex::new(Vec::new());
 static SETTINGS: LazyLock<Mutex<SshSettings>> = LazyLock::new(Mutex::default);
 #[allow(clippy::type_complexity)]
 static EVENTS: LazyLock<(UnboundedSender<RemoteEvent>, Mutex<Option<UnboundedReceiver<RemoteEvent>>>)> =
@@ -230,8 +244,6 @@ struct State {
     hurry: bool,
     /// 连着时的 ssh 子进程，断开（`disconnect`）时结束它。
     child: Option<u32>,
-    /// 这次连接起来以前是不是连上过：连上过的再连上算重连。
-    was_connected: bool,
 }
 
 impl fmt::Debug for RemoteHost {
@@ -242,17 +254,16 @@ impl fmt::Debug for RemoteHost {
 
 impl RemoteHost {
     fn new(name: String, dest: Destination) -> Self {
+        let link = Link::with_timeouts(build(), Timeouts::REMOTE);
+        // `Link` 记着最近一次的，连上时补发。
+        for message in HOST_OPTIONS.lock().unwrap_or_else(PoisonError::into_inner).iter() {
+            link.send(message.clone());
+        }
         Self {
             name,
             dest,
-            link: Link::with_timeouts(build(), Timeouts::REMOTE),
-            state: Mutex::new(State {
-                status: Status::Idle,
-                wanted: true,
-                hurry: false,
-                child: None,
-                was_connected: false,
-            }),
+            link,
+            state: Mutex::new(State { status: Status::Idle, wanted: true, hurry: false, child: None }),
             changed: Condvar::new(),
         }
     }
@@ -261,6 +272,7 @@ impl RemoteHost {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    #[allow(dead_code)]
     pub fn status(&self) -> Status {
         self.state().status.clone()
     }
@@ -292,6 +304,7 @@ impl RemoteHost {
     }
 
     /// 断开，不再自己重连，直到 `retry_now`。远端的会话照常跑着。
+    #[allow(dead_code)]
     pub fn disconnect(&self) {
         let mut state = self.state();
         state.wanted = false;
@@ -302,6 +315,7 @@ impl RemoteHost {
     }
 
     /// 让主连接（ControlMaster）退出，app 退出时调。
+    #[allow(dead_code)]
     pub fn close_master(&self) {
         let mut command = ssh().exit(&self.dest);
         command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
@@ -437,20 +451,17 @@ impl RemoteHost {
         }
     }
 
-    /// 连上了：记下状态；以前连上过的告诉界面重连上了，那边活着的会话接回来。
+    /// 连上了：记下状态，告诉界面那边还活着的会话，断开着的终端接回来。
     fn connected(&self, connected: Connected) {
-        let reconnected = std::mem::replace(&mut self.state().was_connected, true);
         self.set_status(Status::Connected(connected));
-        if reconnected {
-            let alive = match self.link.list_sessions(LIST_TIMEOUT) {
-                Ok(sessions) => sessions.into_iter().map(|session| session.id).collect(),
-                Err(err) => {
-                    tracing::warn!("cannot list the sessions on {}: {err}", self.name);
-                    HashSet::new()
-                }
-            };
-            emit(RemoteEvent::Reconnected { host: self.name.clone(), alive });
-        }
+        let alive = match self.link.list_sessions(LIST_TIMEOUT) {
+            Ok(sessions) => sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect(),
+            Err(err) => {
+                tracing::warn!("cannot list the sessions on {}: {err}", self.name);
+                HashSet::new()
+            }
+        };
+        emit(RemoteEvent::Connected { host: self.name.clone(), alive });
     }
 
     /// 连着时一直等到断开：ssh 退出、桥接断了，或者心跳等不到回话。
@@ -666,16 +677,20 @@ mod tests {
         assert!(matches!(status, Status::Connected(_)), "not connected: {status:?}");
         host.link.list_sessions(Duration::from_secs(10)).expect("list sessions");
 
+        let mut connected = || {
+            futures::executor::block_on(async {
+                while let Some(event) = events.next().await {
+                    if let RemoteEvent::Connected { host, alive } = event {
+                        return Some((host, alive));
+                    }
+                }
+                None
+            })
+        };
+        assert!(connected().is_some());
         let pid = host.state().child.expect("ssh is running");
         crate::subprocess::kill(pid);
-        let reconnected = futures::executor::block_on(async {
-            while let Some(event) = events.next().await {
-                if let RemoteEvent::Reconnected { host, alive } = event {
-                    return Some((host, alive));
-                }
-            }
-            None
-        });
+        let reconnected = connected();
         assert_eq!(reconnected.map(|(host, _)| host), Some(name));
         assert!(matches!(host.status(), Status::Connected(_)));
         host.disconnect();

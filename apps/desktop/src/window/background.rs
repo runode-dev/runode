@@ -9,6 +9,7 @@
 //! 会话自己退出了）顺手结束，免得它一直留在宿主里、挡着宿主空闲退出；任务的会话不结束，要不要结束
 //! 现问宿主的看板，问不到时这一轮一个都不结束。
 
+use crate::host_client::remote::HostId;
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::theme::ActiveTheme as _;
 use std::{
@@ -233,7 +234,7 @@ impl WindowView {
             .try_global::<BackgroundSessions>()
             .and_then(|state| state.sessions.iter().find(|session| session.id == id))
             .and_then(|session| session.meta.cwd.clone());
-        match TerminalView::reattach(id, cwd.as_deref(), true, window, cx) {
+        match TerminalView::reattach(&HostId::Local, id, cwd.as_deref(), true, window, cx) {
             Ok(view) => {
                 forget(&[id], cx);
                 self.insert_tab(self.workspace().active + 1, view, window, cx);

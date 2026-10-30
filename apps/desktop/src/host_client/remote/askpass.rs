@@ -17,6 +17,7 @@ use super::{RemoteEvent, emit};
 
 /// 一次询问，交给界面；答了（或者丢掉，算取消）时回给 ssh。
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Ask {
     /// 哪台主机在问。
     pub host: String,
@@ -27,6 +28,7 @@ pub struct Ask {
     pub dismissed: Option<oneshot::Receiver<()>>,
 }
 
+#[allow(dead_code)]
 impl Ask {
     /// 回答；`None` 是取消。
     pub fn answer(mut self, reply: Reply) {

@@ -263,7 +263,7 @@ fn terminals(windows: &[WindowHandle<WindowView>], cx: &App) -> (HashSet<u32>, u
         for view in window.terminal_views() {
             let view = view.read(cx);
             terminals += 1;
-            shells.extend(view.meta().pid);
+            shells.extend(view.local_pid());
             working |=
                 view.agent().is_some_and(|agent| agent.kind != AgentKind::Other && agent.state == AgentState::Working);
         }
@@ -658,7 +658,7 @@ impl WindowView {
                 .flat_map(|tab| tab.panes.values())
                 .map(|(view, _)| {
                     let view = view.read(cx);
-                    let usage = view.meta().pid.map_or(Usage::default(), |pid| procs.tree(pid));
+                    let usage = view.local_pid().map_or(Usage::default(), |pid| procs.tree(pid));
                     (SharedString::from(view.title().to_owned()), usage)
                 })
                 .collect();
@@ -733,7 +733,7 @@ impl WindowView {
             .flat_map(|workspace| {
                 workspace.tabs.iter().flat_map(|tab| tab.panes.values()).map(move |(view, _)| (view, workspace))
             })
-            .filter_map(|(view, workspace)| Some((view.read(cx).meta().pid?, workspace.name.clone())))
+            .filter_map(|(view, workspace)| Some((view.read(cx).local_pid()?, workspace.name.clone())))
             .collect();
         let (ours, external): (Vec<_>, Vec<_>) =
             status.ports.iter().map(|port| (port, status.port_owner(port))).partition(|(_, owner)| owner.is_some());

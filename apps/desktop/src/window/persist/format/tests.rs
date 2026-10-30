@@ -34,6 +34,7 @@ fn state() -> State {
         bounds: SavedBounds { display: None, mode: WindowMode::Windowed, x: 10., y: 20., width: 960., height: 620. },
         workspaces: vec![SavedWorkspace {
             name: "tmp".into(),
+            host: None,
             dir: "/tmp".into(),
             tabs: vec![tab],
             active: 0,
@@ -169,6 +170,29 @@ fn live_sessions_are_reattached_and_the_rest_start_over() {
     let plan = plan_restore(windows, &live);
     assert_eq!(sessions(&plan.windows), [Some(1), None, Some(3), None, None]);
     assert!(plan.end.is_empty());
+}
+
+/// 远端主机上的会话不在本机的宿主里，恢复时原样留着，等连上那台主机再定；同号的本机会话照常接。
+#[test]
+fn sessions_on_ssh_hosts_are_left_for_their_host() {
+    let mut remote = window(vec![session_leaf(1, false), session_leaf(2, true)]);
+    remote.workspaces[0].host = Some("dev@box".into());
+    let windows = vec![remote, window(vec![session_leaf(1, false)])];
+    let plan = plan_restore(windows, &[info(1, false, false)]);
+    assert_eq!(sessions(&plan.windows), [Some(1), Some(2), Some(1)]);
+    assert!(plan.end.is_empty());
+}
+
+/// 宿主手里的布局只对本机的工作区：目录一样的远端工作区不是同一个，里面的会话号也不挡本机的会话。
+#[test]
+fn held_layouts_do_not_match_workspaces_on_ssh_hosts() {
+    let mut windows = vec![window(vec![session_leaf(1, false)])];
+    windows[0].workspaces[0].host = Some("dev@box".into());
+    let dir = windows[0].workspaces[0].dir.to_string_lossy().into_owned();
+    adopt(&mut windows, &held(vec![(&dir, Some("local"), vec![1])]), &[info(1, false, false)], |_| unreachable!());
+    let hosts: Vec<_> = windows[0].workspaces.iter().map(|workspace| workspace.host.clone()).collect();
+    assert_eq!(hosts, [Some("dev@box".to_owned()), None]);
+    assert_eq!(sessions(&windows), [Some(1), Some(1)]);
 }
 
 #[test]

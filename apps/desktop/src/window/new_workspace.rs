@@ -3,6 +3,7 @@
 //! 它上面开 workspace；克隆是在新 workspace 的第一个终端里跑 `git clone`，进度、要密码和出错都在终端
 //! 里看得见。名字一律按目录取，之后可以重命名。
 
+use crate::host_client::remote::HostId;
 use crate::ui::theme::ActiveTheme as _;
 use std::path::PathBuf;
 
@@ -150,7 +151,7 @@ impl WindowView {
                     return;
                 };
                 this.new_workspace = None;
-                if let Some(view) = this.spawn_terminal(Some(&dir), window, cx) {
+                if let Some(view) = this.spawn_terminal_on(&HostId::Local, Some(&dir), None, window, cx) {
                     view.update(cx, |view, cx| view.run_command(command, cx));
                     this.insert_workspace(this.active + 1, dir, None, view, window, cx);
                 }

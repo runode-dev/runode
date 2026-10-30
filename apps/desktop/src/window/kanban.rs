@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::host_client::remote::HostId;
 use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
 use gpui::{
     Action, AnyElement, App, Context, Div, Entity, Focusable as _, Modifiers, Stateful, StyleRefinement, Subscription,
@@ -206,13 +207,13 @@ impl WindowView {
             return;
         }
         // 当前窗口正在更新，`find_session` 读不到它，找到的是别的窗口。
-        if let Some((target, pane)) = remote::find_session(id, cx) {
+        if let Some((target, pane)) = remote::find_session(&HostId::Local, id, cx) {
             self.close_kanban(window, cx);
             agents::reveal(target, pane, cx);
             return;
         }
         let cwd = todo.worktree_dir.as_deref().unwrap_or(&todo.spec.dir).to_owned();
-        let view = match TerminalView::reattach(id, Some(&cwd), true, window, cx) {
+        let view = match TerminalView::reattach(&HostId::Local, id, Some(&cwd), true, window, cx) {
             Ok(view) => view,
             Err(err) => {
                 tracing::warn!("failed to open the session of todo {}: {err:#}", todo.id);

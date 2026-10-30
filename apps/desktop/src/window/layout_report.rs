@@ -17,6 +17,7 @@ use runode_protocol::{ClientMsg, PaneLayout, PaneRect, SessionId, TabLayout, Win
 use runode_types::pane::{Node, Rect};
 
 use super::WindowView;
+use crate::host_client::remote::{HostId, link_of};
 
 /// 回话里的一个窗口，从 `WindowView` 摘出来的、算布局要的部分。
 pub(super) struct WindowInput<'a, P> {
@@ -28,6 +29,8 @@ pub(super) struct WindowInput<'a, P> {
 }
 
 pub(super) struct WorkspaceInput<'a, P> {
+    /// 在要回话的主机上；不在的不列出，序号仍按它在窗口里的位置。
+    pub(super) here: bool,
     pub(super) name: String,
     pub(super) dir: &'a Path,
     pub(super) active: usize,
@@ -57,6 +60,7 @@ pub(super) fn report<P: Copy + PartialEq>(
                 .iter()
                 .enumerate()
                 .zip(1..)
+                .filter(|((_, workspace), _)| workspace.here)
                 .map(|((wi, workspace), index)| WorkspaceLayout {
                     index,
                     name: Some(workspace.name.clone()),
@@ -143,10 +147,10 @@ pub(super) fn window_at(index: u32, cx: &mut App) -> Option<WindowHandle<WindowV
 /// 布局可能变了以后等这么久再比：拖分隔线、连着开几个分屏时攒成一次。
 const REPORT_DELAY: Duration = Duration::from_millis(100);
 
-/// 上次告诉宿主时的布局，和等着比较的任务。
+/// 上次告诉各台主机的宿主时的布局，和等着比较的任务。
 #[derive(Default)]
 struct Reported {
-    layout: Option<Vec<WindowLayout>>,
+    layouts: HashMap<HostId, Vec<WindowLayout>>,
     pending: Option<Task<()>>,
 }
 
@@ -164,24 +168,42 @@ pub(super) fn changed(cx: &mut App) {
     cx.global_mut::<Reported>().pending = Some(task);
 }
 
-/// 现在的布局和上次告诉宿主的不同时发 `LayoutChanged`，取代还在等的那次。
+/// 现在的布局和上次告诉宿主的不同时发 `LayoutChanged`，取代还在等的那次。每台主机的宿主只收在它上面的
+/// 工作区；报过的远端主机上的工作区都关了时报一次没有工作区的布局。
 pub(super) fn report_change(cx: &mut App) {
-    let layout = current(cx);
-    // 窗口一个不剩、存档却还留着它们，是关窗口退出：宿主留着退出前的布局。存档也没留（最后一个工作区
-    // 被关掉了）时照实报空的，免得下次启动又把关掉的工作区接回来。
-    let quitting = super::persist::frozen(cx) || (layout.is_empty() && super::persist::keeps_windows(cx));
     // `freeze` 在退出时直接调到这里，那时 `changed` 可能一次都没调过。
-    let reported = cx.default_global::<Reported>();
-    reported.pending = None;
-    if quitting || reported.layout.as_ref() == Some(&layout) {
-        return;
+    cx.default_global::<Reported>().pending = None;
+    let mut hosts: Vec<HostId> = cx.global::<Reported>().layouts.keys().cloned().collect();
+    hosts.push(HostId::Local);
+    for window in super::remote::windows(cx) {
+        if let Ok(view) = window.read(cx) {
+            hosts.extend(view.workspaces.iter().map(|workspace| workspace.host.clone()));
+        }
     }
-    reported.layout = Some(layout.clone());
-    crate::host_client::link().send(ClientMsg::LayoutChanged { windows: Some(layout) });
+    hosts.sort();
+    hosts.dedup();
+    let frozen = super::persist::frozen(cx);
+    for host in hosts {
+        let layout = current(&host, cx);
+        let empty = layout.iter().all(|window| window.workspaces.is_empty());
+        // 窗口一个不剩、存档却还留着它们，是关窗口退出：宿主留着退出前的布局。存档也没留（最后一个工作区
+        // 被关掉了）时照实报空的，免得下次启动又把关掉的工作区接回来。
+        let quitting = frozen || (layout.is_empty() && super::persist::keeps_windows(cx));
+        let reported = cx.global_mut::<Reported>();
+        if quitting || reported.layouts.get(&host) == Some(&layout) {
+            continue;
+        }
+        if empty && !host.is_local() {
+            reported.layouts.remove(&host);
+        } else {
+            reported.layouts.insert(host.clone(), layout.clone());
+        }
+        link_of(&host).send(ClientMsg::LayoutChanged { windows: Some(layout) });
+    }
 }
 
-/// app 里所有窗口现在的布局。
-pub(super) fn current(cx: &mut App) -> Vec<WindowLayout> {
+/// app 里所有窗口现在的布局，只列主机 `host` 上的工作区。
+pub(super) fn current(host: &HostId, cx: &mut App) -> Vec<WindowLayout> {
     let front = super::remote::front_window(cx);
     let handles = super::remote::windows(cx);
     let mut views = Vec::new();
@@ -203,6 +225,7 @@ pub(super) fn current(cx: &mut App) -> Vec<WindowLayout> {
                 .workspaces
                 .iter()
                 .map(|workspace| WorkspaceInput {
+                    here: workspace.host == *host,
                     name: workspace.name.to_string(),
                     dir: &workspace.dir,
                     active: workspace.active,
@@ -253,6 +276,7 @@ mod tests {
             front: true,
             active: 0,
             workspaces: vec![WorkspaceInput {
+                here: true,
                 name: "app".into(),
                 dir: Path::new("/Users/me/app"),
                 active: 0,
@@ -291,8 +315,13 @@ mod tests {
     fn windows_are_numbered_by_opening_order_and_mark_the_front() {
         let a = Node::Leaf(1);
         let b = Node::Leaf(2);
-        let one_tab =
-            |name: &str, root| WorkspaceInput { name: name.into(), dir: Path::new("/"), active: 0, tabs: vec![root] };
+        let one_tab = |name: &str, root| WorkspaceInput {
+            here: true,
+            name: name.into(),
+            dir: Path::new("/"),
+            active: 0,
+            tabs: vec![root],
+        };
         // 后开的窗口排在前面给，序号仍按打开的先后。
         let windows = vec![
             WindowInput {
@@ -327,12 +356,14 @@ mod tests {
             active: 1,
             workspaces: vec![
                 WorkspaceInput {
+                    here: true,
                     name: "a".into(),
                     dir: Path::new("/Users/me/a"),
                     active: 0,
                     tabs: vec![TabInput { root: &other, focused: 9 }],
                 },
                 WorkspaceInput {
+                    here: true,
                     name: "b".into(),
                     dir: Path::new("/Users/me/b"),
                     active: 0,
