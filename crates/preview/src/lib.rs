@@ -1,4 +1,4 @@
-//! 文件预览不碰界面的部分：读文件并判断能怎么显示（文本、图片，或者只能给一句说明），
+//! 文件预览不碰界面的部分：判断读到的文件能怎么显示（文本、图片，或者只能给一句说明），
 //! 给文本做语法高亮，把一行文字换成画在屏幕上的样子（制表符展开、过长截断），以及把 Markdown
 //! 解析成块结构。
 //!
@@ -12,5 +12,5 @@ mod markdown;
 
 pub use highlight::{Color, Span, Style, highlight};
 pub use line::{DisplayLine, TAB_WIDTH, display_line, display_width};
-pub use load::{Content, ImageFormat, MAX_IMAGE_BYTES, MAX_LINES, MAX_TEXT_BYTES, Text, image_format, load};
+pub use load::{Content, ImageFormat, MAX_IMAGE_BYTES, MAX_LINES, MAX_TEXT_BYTES, Text, decode, image_format, limit};
 pub use markdown::{Alert, Align, Block, Footnote, Image, Inline, InlineStyle, ListItem, is_markdown, parse_markdown};

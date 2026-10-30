@@ -6,26 +6,9 @@ use std::{
 };
 
 use futures::channel::mpsc::UnboundedSender;
-use notify::Watcher as _;
 use runode_git as git;
 
-/// 监听到的一批改动，见 `changed_paths`。
-#[derive(Debug, Default, PartialEq)]
-pub(in crate::window) struct ProjectChanges {
-    /// 变了的路径。
-    pub(in crate::window) paths: Vec<PathBuf>,
-    /// 监听出了错、要求整个重扫：说不准哪里变了，按路径筛的（预览的文件、分支和 tag、命令文件）都要当作
-    /// 变了，不能只看 `paths`。
-    pub(in crate::window) everything: bool,
-}
-
-impl ProjectChanges {
-    /// 并上后到的一批。
-    pub(in crate::window) fn merge(&mut self, more: Self) {
-        self.paths.extend(more.paths);
-        self.everything |= more.everything;
-    }
-}
+pub(in crate::window) use runode_files::Changes as ProjectChanges;
 
 /// 右侧面板在看的仓库或目录的监听。
 pub(in crate::window) struct ProjectWatch {
@@ -35,29 +18,19 @@ pub(in crate::window) struct ProjectWatch {
     /// 事件里的路径解析过符号链接，按这两个的真实路径比。
     real_root: PathBuf,
     real_git_dirs: Vec<PathBuf>,
-    _watcher: notify::RecommendedWatcher,
+    _watch: runode_files::Watch,
 }
 
 impl ProjectWatch {
-    /// 开始监听，事件里的路径交给 `events`（见 `changed_paths`）；监听不了时为空，由调用方退回定时重读。
+    /// 开始监听，事件里的路径交给 `events`；监听不了时为空，由调用方退回定时重读。
     pub(super) fn new(root: PathBuf, git_dirs: Vec<PathBuf>, events: UnboundedSender<ProjectChanges>) -> Option<Self> {
-        let everything: Vec<PathBuf> = std::iter::once(&root).chain(&git_dirs).cloned().collect();
-        let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            if let Some(changes) = changed_paths(event, &everything) {
-                events.unbounded_send(changes).ok();
-            }
-        })
-        .inspect_err(|err| tracing::warn!("监听 {} 失败：{err}", root.display()))
-        .ok()?;
-        for dir in std::iter::once(&root).chain(&git_dirs) {
-            if let Err(err) = watcher.watch(dir, notify::RecursiveMode::Recursive) {
-                tracing::warn!("监听 {} 失败：{err}", dir.display());
-                return None;
-            }
-        }
+        let dirs: Vec<PathBuf> = std::iter::once(&root).chain(&git_dirs).cloned().collect();
+        let watch = runode_files::watch(dirs, move |changes| {
+            events.unbounded_send(changes).ok();
+        })?;
         let real_root = fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         let real_git_dirs = git_dirs.iter().map(|dir| fs::canonicalize(dir).unwrap_or_else(|_| dir.clone())).collect();
-        Some(Self { root, git_dirs, real_root, real_git_dirs, _watcher: watcher })
+        Some(Self { root, git_dirs, real_root, real_git_dirs, _watch: watch })
     }
 
     /// `path` 变了要不要重读。git 目录里只看暂存区、引用这些（写对象和锁文件之后总跟着改它们）；
@@ -84,45 +57,9 @@ impl ProjectWatch {
     }
 }
 
-/// 监听到的事件里变了的路径；只是读了文件的为空。出错（比如事件太多丢了一些）或者要求整个重扫时，
-/// 说不准哪里变了，标上 `ProjectChanges::everything`，路径是 `everything`（根目录和要听的 git 目录），重读一遍。
-fn changed_paths(event: notify::Result<notify::Event>, everything: &[PathBuf]) -> Option<ProjectChanges> {
-    let all = || ProjectChanges { paths: everything.to_vec(), everything: true };
-    match event {
-        Ok(event) if event.need_rescan() => Some(all()),
-        Ok(event) if event.kind.is_access() => None,
-        Ok(event) => Some(ProjectChanges { paths: event.paths, everything: false }),
-        Err(err) => {
-            tracing::debug!("监听出错，整个重读：{err}");
-            Some(all())
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use notify::{
-        Event, EventKind,
-        event::{AccessKind, Flag, ModifyKind},
-    };
-
     use super::*;
-
-    /// 丢了事件、要求重扫时不会因为没有路径就什么都不读。
-    #[test]
-    fn errors_and_rescans_count_as_everything_changed() {
-        let everything = [PathBuf::from("/repo"), PathBuf::from("/main/.git/worktrees/repo")];
-        let modified = Event::new(EventKind::Modify(ModifyKind::Any)).add_path("/repo/a.rs".into());
-        let file = ProjectChanges { paths: vec![PathBuf::from("/repo/a.rs")], everything: false };
-        assert_eq!(changed_paths(Ok(modified), &everything), Some(file));
-        let read = Event::new(EventKind::Access(AccessKind::Any)).add_path("/repo/a.rs".into());
-        assert_eq!(changed_paths(Ok(read), &everything), None);
-        let all = ProjectChanges { paths: everything.to_vec(), everything: true };
-        let rescan = Event::new(EventKind::Other).set_flag(Flag::Rescan);
-        assert_eq!(changed_paths(Ok(rescan), &everything).as_ref(), Some(&all));
-        let failed = Err(notify::Error::generic("dropped events"));
-        assert_eq!(changed_paths(failed, &everything).as_ref(), Some(&all));
-    }
 
     /// 不在仓库里时只有文件树正显示着的目录里的改动才算，`.git` 照旧不看文件树。
     #[test]

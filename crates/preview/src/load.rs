@@ -1,10 +1,6 @@
-//! 读要预览的文件，判断它是文本、图片还是二进制。
+//! 判断要预览的文件是文本、图片还是二进制。读文件不在这里，调用方按 `limit` 读好交给 `decode`。
 
-use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Read as _},
-    path::Path,
-};
+use std::path::Path;
 
 /// 文本最多读这么多字节，再多的截掉，`Text::truncated` 记下来。
 pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
@@ -67,87 +63,25 @@ pub fn image_format(path: &Path) -> Option<ImageFormat> {
     })
 }
 
-/// 读 `path`：图片读出全部字节，其余当文本读，最多读 `MAX_TEXT_BYTES`。
-pub fn load(path: &Path) -> Content {
-    if let Some(format) = image_format(path) {
-        return match fs::metadata(path) {
-            Err(err) => Content::Unreadable(err.to_string()),
-            // 设备文件、管道的大小是 0，读起来却没有尽头（指向 /dev/zero 的 logo.png），只读普通文件。
-            Ok(meta) if !meta.is_file() => Content::Unreadable("not a regular file".to_owned()),
-            Ok(meta) if meta.len() > MAX_IMAGE_BYTES => Content::TooLarge,
-            Ok(_) => {
-                // 看过大小后文件还可能变大，读的时候照样设上限，多读一个字节看超没超。
-                let mut bytes = Vec::new();
-                match open_regular(path).and_then(|file| file.take(MAX_IMAGE_BYTES + 1).read_to_end(&mut bytes)) {
-                    Err(err) => Content::Unreadable(err.to_string()),
-                    Ok(_) if bytes.len() as u64 > MAX_IMAGE_BYTES => Content::TooLarge,
-                    Ok(_) => Content::Image { format, bytes },
-                }
-            }
-        };
-    }
-    // 文本同样只读普通文件：打开没有写端的命名管道会一直阻塞，读的上限救不了。
-    match fs::metadata(path) {
-        Err(err) => return Content::Unreadable(err.to_string()),
-        Ok(meta) if !meta.is_file() => return Content::Unreadable("not a regular file".to_owned()),
-        Ok(_) => {}
-    }
-    let mut bytes = Vec::new();
-    // 多读一个字节，读满了就说明后面还有。
-    let read = open_regular(path).and_then(|file| file.take(MAX_TEXT_BYTES as u64 + 1).read_to_end(&mut bytes));
-    if let Err(err) = read {
-        return Content::Unreadable(err.to_string());
-    }
-    let cut = bytes.len() > MAX_TEXT_BYTES;
-    bytes.truncate(MAX_TEXT_BYTES);
-    decode(bytes, cut)
+/// 读 `path` 来预览时最多读多少字节，以及是不是只要整个文件：图片要整个读出来，比 `MAX_IMAGE_BYTES`
+/// 大就不读；其余当文本读前 `MAX_TEXT_BYTES`。
+pub fn limit(path: &Path) -> (u64, bool) {
+    if image_format(path).is_some() { (MAX_IMAGE_BYTES, true) } else { (MAX_TEXT_BYTES as u64, false) }
 }
 
-/// `O_NONBLOCK` 的值，和 libc 里的一样（标准库没有这个常量）；没列出的平台为空，照旧阻塞地打开。
-#[cfg(unix)]
-const O_NONBLOCK: Option<i32> = if cfg!(target_vendor = "apple") {
-    Some(0x0004)
-} else if cfg!(all(
-    target_os = "linux",
-    any(
-        target_arch = "x86",
-        target_arch = "x86_64",
-        target_arch = "arm",
-        target_arch = "aarch64",
-        target_arch = "riscv64",
-        target_arch = "powerpc64",
-        target_arch = "s390x",
-        target_arch = "loongarch64"
-    )
-)) {
-    Some(0o4000)
-} else {
-    None
-};
-
-/// 打开 `path`，打开的不是普通文件时报错。调用方先看过路径是普通文件，可看过以后路径还可能被换成
-/// 别的（指向设备的符号链接、命名管道），所以打开以后对着打开的这个再看一次，读的才一定是普通文件。
-/// 不阻塞地打开：换成了没有写端的命名管道时阻塞式的打开一直等，走不到这次检查；对普通文件这个标志
-/// 不起作用。
-fn open_regular(path: &Path) -> io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    if let Some(flag) = O_NONBLOCK {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.custom_flags(flag);
+/// 把按 `limit` 读到的 `path` 的字节判断成能怎么预览；`cut` 表示文件在这之后还有内容。
+pub fn decode(path: &Path, bytes: Vec<u8>, cut: bool) -> Content {
+    match image_format(path) {
+        Some(_) if cut => Content::TooLarge,
+        Some(format) => Content::Image { format, bytes },
+        None => decode_text(bytes, cut),
     }
-    let file = options.open(path)?;
-    if !file.metadata()?.is_file() {
-        return Err(io::Error::other("not a regular file"));
-    }
-    Ok(file)
 }
 
 /// 把读到的字节解成文本；`cut` 表示文件在这之后还有内容。带 UTF-16 的 BOM 的按 UTF-16 解（Windows
 /// PowerShell 5.1 的 `>` 默认这样写），其余的含 NUL 或者不是 UTF-8 的当二进制。截断处正好切开一个
 /// 多字节字符时只去掉那半个字符。
-fn decode(mut bytes: Vec<u8>, cut: bool) -> Content {
+fn decode_text(mut bytes: Vec<u8>, cut: bool) -> Content {
     let text = if let Some(big_endian) = utf16_bom(&bytes) {
         match decode_utf16(&bytes[2..], big_endian, cut) {
             Some(text) if !text.contains('\0') => text,
@@ -223,11 +157,11 @@ mod tests {
 
     #[test]
     fn splits_lines() {
-        assert_eq!(decode(b"a\nb\n".to_vec(), false), text(&["a", "b"], false));
-        assert_eq!(decode(b"a\r\nb".to_vec(), false), text(&["a", "b"], false));
-        assert_eq!(decode(b"a\n\n".to_vec(), false), text(&["a", ""], false));
-        assert_eq!(decode(Vec::new(), false), text(&[""], false));
-        assert_eq!(decode(b"\xEF\xBB\xBFbom".to_vec(), false), text(&["bom"], false));
+        assert_eq!(decode_text(b"a\nb\n".to_vec(), false), text(&["a", "b"], false));
+        assert_eq!(decode_text(b"a\r\nb".to_vec(), false), text(&["a", "b"], false));
+        assert_eq!(decode_text(b"a\n\n".to_vec(), false), text(&["a", ""], false));
+        assert_eq!(decode_text(Vec::new(), false), text(&[""], false));
+        assert_eq!(decode_text(b"\xEF\xBB\xBFbom".to_vec(), false), text(&["bom"], false));
     }
 
     fn utf16(bom: [u8; 2], text: &str, big_endian: bool) -> Vec<u8> {
@@ -240,61 +174,43 @@ mod tests {
 
     #[test]
     fn reads_utf16_with_a_bom() {
-        assert_eq!(decode(utf16([0xFF, 0xFE], "a\r\n中文\n", false), false), text(&["a", "中文"], false));
-        assert_eq!(decode(utf16([0xFE, 0xFF], "a\nb", true), false), text(&["a", "b"], false));
+        assert_eq!(decode_text(utf16([0xFF, 0xFE], "a\r\n中文\n", false), false), text(&["a", "中文"], false));
+        assert_eq!(decode_text(utf16([0xFE, 0xFF], "a\nb", true), false), text(&["a", "b"], false));
         // 截断处切开代理对和一个码元时只去掉那半个字符。
         let mut bytes = utf16([0xFF, 0xFE], "a😀", false);
         bytes.truncate(bytes.len() - 3);
-        assert_eq!(decode(bytes.clone(), true), text(&["a"], true));
-        assert_eq!(decode(bytes, false), Content::Binary);
-        assert_eq!(decode(utf16([0xFF, 0xFE], "a\0b", false), false), Content::Binary);
+        assert_eq!(decode_text(bytes.clone(), true), text(&["a"], true));
+        assert_eq!(decode_text(bytes, false), Content::Binary);
+        assert_eq!(decode_text(utf16([0xFF, 0xFE], "a\0b", false), false), Content::Binary);
     }
 
     #[test]
     fn nul_or_invalid_utf8_is_binary() {
-        assert_eq!(decode(b"abc\0def".to_vec(), false), Content::Binary);
-        assert_eq!(decode(b"caf\xE9".to_vec(), false), Content::Binary);
-        assert_eq!(decode(vec![0x89, b'P', b'N', b'G'], false), Content::Binary);
+        assert_eq!(decode_text(b"abc\0def".to_vec(), false), Content::Binary);
+        assert_eq!(decode_text(b"caf\xE9".to_vec(), false), Content::Binary);
+        assert_eq!(decode_text(vec![0x89, b'P', b'N', b'G'], false), Content::Binary);
     }
 
     /// 行数正好到上限、以换行结尾的不算截断，多一行（哪怕没有换行）就算。
     #[test]
     fn line_limit() {
         let full = "a\n".repeat(MAX_LINES);
-        let Content::Text(read) = decode(full.clone().into_bytes(), false) else { panic!("not text") };
+        let Content::Text(read) = decode_text(full.clone().into_bytes(), false) else { panic!("not text") };
         assert_eq!((read.lines.len(), read.truncated), (MAX_LINES, false));
-        let Content::Text(read) = decode(format!("{full}b").into_bytes(), false) else { panic!("not text") };
+        let Content::Text(read) = decode_text(format!("{full}b").into_bytes(), false) else { panic!("not text") };
         assert_eq!((read.lines.len(), read.truncated), (MAX_LINES, true));
-        let Content::Text(read) = decode(format!("{full}\n").into_bytes(), false) else { panic!("not text") };
+        let Content::Text(read) = decode_text(format!("{full}\n").into_bytes(), false) else { panic!("not text") };
         assert_eq!((read.lines.len(), read.truncated), (MAX_LINES, true));
         // 截在字节上限处时最后的空串也算后面还有。
-        let Content::Text(read) = decode(full.into_bytes(), true) else { panic!("not text") };
+        let Content::Text(read) = decode_text(full.into_bytes(), true) else { panic!("not text") };
         assert_eq!((read.lines.len(), read.truncated), (MAX_LINES, true));
-    }
-
-    /// 看过是普通文件以后路径被换成没有写端的命名管道：打开不阻塞，对着打开的这个看出不是普通文件。
-    #[cfg(unix)]
-    #[test]
-    fn fifo_swapped_in_after_the_check_does_not_block() {
-        use std::{process::Command, sync::mpsc, thread, time::Duration};
-
-        let dir = std::env::temp_dir().join(format!("runode-preview-fifo-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let fifo = dir.join("notes.txt");
-        fs::remove_file(&fifo).ok();
-        assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || tx.send(open_regular(&fifo).map(drop)).ok());
-        let opened = rx.recv_timeout(Duration::from_secs(5)).expect("打开命名管道阻塞了");
-        assert!(opened.is_err());
-        fs::remove_dir_all(&dir).ok();
     }
 
     /// 截断处切开的半个字符去掉，不当二进制；没截断时同样的字节是坏的 UTF-8。
     #[test]
     fn cut_inside_a_character() {
         let bytes = "ab\n中".as_bytes()[..4].to_vec();
-        assert_eq!(decode(bytes.clone(), true), text(&["ab", ""], true));
-        assert_eq!(decode(bytes, false), Content::Binary);
+        assert_eq!(decode_text(bytes.clone(), true), text(&["ab", ""], true));
+        assert_eq!(decode_text(bytes, false), Content::Binary);
     }
 }

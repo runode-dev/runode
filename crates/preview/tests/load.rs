@@ -1,8 +1,8 @@
-//! 读文件判断能怎么显示：按扩展名认图片，大文件和行数过多的文件截断，二进制和读不了的文件。
+//! 判断读到的文件能怎么显示：按扩展名认图片，截断的文本和太大的图片，行数过多的文件，二进制。
 
-use std::{fs, path::Path};
+use std::path::Path;
 
-use runode_preview::{Content, ImageFormat, MAX_LINES, MAX_TEXT_BYTES, Text, image_format, load};
+use runode_preview::{Content, ImageFormat, MAX_LINES, MAX_TEXT_BYTES, Text, decode, image_format, limit};
 
 fn text(lines: &[&str], truncated: bool) -> Content {
     Content::Text(Text { lines: lines.iter().map(|line| (*line).to_owned()).collect(), truncated })
@@ -23,49 +23,31 @@ fn recognizes_images_by_extension() {
 }
 
 #[test]
-fn truncates_large_files() {
-    let dir = std::env::temp_dir().join(format!("runode-preview-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
+fn reads_images_whole_and_text_up_to_the_limit() {
+    assert_eq!(limit(Path::new("a/logo.png")), (runode_preview::MAX_IMAGE_BYTES, true));
+    assert_eq!(limit(Path::new("main.rs")), (MAX_TEXT_BYTES as u64, false));
+}
 
-    let big = dir.join("big.txt");
+#[test]
+fn truncates_large_files() {
     let line = "x".repeat(99) + "\n";
-    fs::write(&big, line.repeat(MAX_TEXT_BYTES / 100 + 10)).unwrap();
-    let Content::Text(read) = load(&big) else { panic!("not text") };
+    let mut big = line.repeat(MAX_TEXT_BYTES / 100 + 10).into_bytes();
+    big.truncate(MAX_TEXT_BYTES);
+    let Content::Text(read) = decode(Path::new("big.txt"), big, true) else { panic!("not text") };
     assert!(read.truncated);
     assert!(read.lines.len() <= MAX_TEXT_BYTES / 100 + 1);
     assert_eq!(read.lines[0].len(), 99);
 
-    let many = dir.join("many.txt");
-    fs::write(&many, "a\n".repeat(MAX_LINES + 5)).unwrap();
-    let Content::Text(read) = load(&many) else { panic!("not text") };
+    let many = "a\n".repeat(MAX_LINES + 5).into_bytes();
+    let Content::Text(read) = decode(Path::new("many.txt"), many, false) else { panic!("not text") };
     assert!(read.truncated);
     assert_eq!(read.lines.len(), MAX_LINES);
 
-    let small = dir.join("small.rs");
-    fs::write(&small, "fn main() {}\n").unwrap();
-    assert_eq!(load(&small), text(&["fn main() {}"], false));
+    assert_eq!(decode(Path::new("small.rs"), b"fn main() {}\n".to_vec(), false), text(&["fn main() {}"], false));
 
-    let image = dir.join("dot.png");
-    fs::write(&image, b"\x89PNG\r\n\x1a\n").unwrap();
-    assert!(matches!(load(&image), Content::Image { format: ImageFormat::Png, .. }));
+    let png = b"\x89PNG\r\n\x1a\n".to_vec();
+    assert!(matches!(decode(Path::new("dot.png"), png, false), Content::Image { format: ImageFormat::Png, .. }));
+    assert_eq!(decode(Path::new("huge.png"), Vec::new(), true), Content::TooLarge);
 
-    let binary = dir.join("blob.bin");
-    fs::write(&binary, [1, 2, 0, 3]).unwrap();
-    assert_eq!(load(&binary), Content::Binary);
-
-    assert!(matches!(load(&dir.join("missing.txt")), Content::Unreadable(_)));
-    fs::remove_dir_all(&dir).ok();
-}
-
-/// 指向 /dev/zero 的图片：大小是 0 却读不完，不能一直读下去。
-#[cfg(unix)]
-#[test]
-fn image_symlink_to_a_device_is_not_read() {
-    let dir = std::env::temp_dir().join(format!("runode-preview-dev-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    let logo = dir.join("logo.png");
-    fs::remove_file(&logo).ok();
-    std::os::unix::fs::symlink("/dev/zero", &logo).unwrap();
-    assert!(matches!(load(&logo), Content::Unreadable(_)));
-    fs::remove_dir_all(&dir).ok();
+    assert_eq!(decode(Path::new("blob.bin"), vec![1, 2, 0, 3], false), Content::Binary);
 }

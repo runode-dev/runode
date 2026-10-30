@@ -39,7 +39,6 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::SystemTime,
 };
 
 use crate::ui::{
@@ -152,7 +151,7 @@ struct Preview {
     /// 读完之前为空；重读时先留着旧的，读完再换。
     content: Option<Loaded>,
     /// 上次读时文件的大小和修改时间，窗口切回前台时据此判断要不要重读；工作区的 diff 标签也记。
-    stamp: Option<(u64, SystemTime)>,
+    stamp: Option<Stamp>,
     /// 选中的行：按下的那行和现在拖到的那行，从 0 数。
     selection: Option<(usize, usize)>,
     /// 按着鼠标在拖选。
@@ -318,13 +317,13 @@ impl Preview {
     /// 标签也比文件：窗口在后台、切到了别的 workspace 时听不到文件事件，二进制、改动太多的文件扫描结果
     /// 又看不出再改过一次（见 `affected_by`）。`stamp` 是文件现在的大小和修改时间，由调用方在后台取，
     /// 见 `PreviewPanel::reload_if`。
-    fn stale(&self, stamp: Option<(u64, SystemTime)>) -> bool {
+    fn stale(&self, stamp: Option<Stamp>) -> bool {
         self.content.is_none() || self.reload || (self.follows_file() && stamp != self.stamp)
     }
 
     /// 切回来时要不要重读：`stale` 里没读过的那种只算记下要重读的（比如后台 workspace 里跟着改名换上的
     /// 标签），没记下的是第一次读还在路上，不打断它。
-    fn needs_refresh(&self, stamp: Option<(u64, SystemTime)>) -> bool {
+    fn needs_refresh(&self, stamp: Option<Stamp>) -> bool {
         self.stale(stamp) && (self.content.is_some() || self.reload)
     }
 
@@ -403,9 +402,15 @@ fn right_fade(handle: &ScrollHandle, cx: &App) -> Option<Div> {
     })
 }
 
-fn file_stamp(path: &Path) -> Option<(u64, SystemTime)> {
-    let meta = fs::metadata(path).ok()?;
-    Some((meta.len(), meta.modified().ok()?))
+use runode_files::{Stamp, stamp as file_stamp};
+
+/// 读 `path` 来预览，读多少按 `runode_preview::limit`。
+pub(crate) fn load(path: &Path) -> runode_preview::Content {
+    let (max, whole) = runode_preview::limit(path);
+    match runode_files::read_limited(path, max, whole) {
+        Ok(read) => runode_preview::decode(path, read.bytes, read.cut),
+        Err(err) => runode_preview::Content::Unreadable(err.to_string()),
+    }
 }
 
 fn gpui_format(format: ImageFormat) -> gpui::ImageFormat {
@@ -873,7 +878,7 @@ impl PreviewPanel {
     /// 当前预览标签按 `check`（`Preview::stale` 或 `needs_refresh`）要重读就读。不看文件就定了的当场读；
     /// 跟着文件变的标签要比文件的大小和修改时间，在单独的线程上取（`fs_probe::off_thread`）。取回来时
     /// 换了 workspace、换了标签或已经又读过一次（`cancel` 换了）就不管，切回来时会再比。
-    fn reload_if(&mut self, check: fn(&Preview, Option<(u64, SystemTime)>) -> bool, cx: &mut Context<Self>) {
+    fn reload_if(&mut self, check: fn(&Preview, Option<Stamp>) -> bool, cx: &mut Context<Self>) {
         let Some(preview) = self.preview() else {
             return;
         };
@@ -954,7 +959,7 @@ impl PreviewPanel {
             async move {
                 let real_path = fs::canonicalize(&path).ok();
                 let stamp = file_stamp(&path);
-                (loaded(runode_preview::load(&path), &svg, cell_width), stamp, real_path)
+                (loaded(load(&path), &svg, cell_width), stamp, real_path)
             }
         });
         cx.spawn(async move |this, cx| {

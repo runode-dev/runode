@@ -1,5 +1,4 @@
-//! 文件树里改文件的操作：新建、改名、移动、复制和移到废纸篓。只碰文件系统，不碰界面；
-//! 出错时交回 `OpError`，由界面换成提示。
+//! 改项目里文件的操作：新建、改名、移动、复制和移到废纸篓。出错时交回 `OpError`，由调用方换成提示。
 
 use std::{
     fs, io,
@@ -8,7 +7,7 @@ use std::{
 
 /// 改文件失败的原因。
 #[derive(Debug)]
-pub(super) enum OpError {
+pub enum OpError {
     /// 目标位置已经有同名的了。
     Exists,
     /// 要把目录挪进或复制进它自己下面。
@@ -28,7 +27,7 @@ type Result<T = ()> = std::result::Result<T, OpError>;
 
 /// 在 `dir` 下新建时输入的名字换成路径。可以带 `/` 一次建出几层，但不能是绝对路径，
 /// 也不能有 `.`、`..` 跳出 `dir`；空的或者不合规时为空。
-pub(super) fn child_path(dir: &Path, name: &str) -> Option<PathBuf> {
+pub fn child_path(dir: &Path, name: &str) -> Option<PathBuf> {
     let name = Path::new(name.trim());
     let mut parts = name.components().peekable();
     parts.peek()?;
@@ -36,18 +35,18 @@ pub(super) fn child_path(dir: &Path, name: &str) -> Option<PathBuf> {
 }
 
 /// 改名时输入的名字换成 `dir` 下的路径：和 `child_path` 一样，但只能是一段，不能挪到别的目录。
-pub(super) fn child_name(dir: &Path, name: &str) -> Option<PathBuf> {
+pub fn child_name(dir: &Path, name: &str) -> Option<PathBuf> {
     child_path(dir, name).filter(|_| Path::new(name.trim()).components().count() == 1)
 }
 
 /// 改名框里的 `name` 和打开时填进去的一样（都去掉首尾空白比）。框里填的是有损的名字：非 UTF-8 的字节
 /// 换成了 `�`，读回来又去了首尾空白，原样拿去改名会把这样的名字悄悄改掉。
-pub(super) fn unchanged_name(path: &Path, name: &str) -> bool {
+pub fn unchanged_name(path: &Path, name: &str) -> bool {
     path.file_name().is_some_and(|old| old.to_string_lossy().trim() == name.trim())
 }
 
 /// 新建空文件或目录，中间缺的目录一并建出来；已经有了时报 `Exists`。
-pub(super) fn create(path: &Path, is_dir: bool) -> Result {
+pub fn create(path: &Path, is_dir: bool) -> Result {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -61,7 +60,7 @@ pub(super) fn create(path: &Path, is_dir: bool) -> Result {
 
 /// 把 `from` 改名成 `to`。`to` 已经有了时报 `Exists`，只改大小写除外：不分大小写的文件系统上
 /// `to` 查到的就是 `from` 自己。
-pub(super) fn rename(from: &Path, to: &Path) -> Result {
+pub fn rename(from: &Path, to: &Path) -> Result {
     if fs::symlink_metadata(to).is_ok() {
         if !same_file(from, to)? {
             return Err(OpError::Exists);
@@ -129,7 +128,7 @@ fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
 
 /// 把 `src` 挪进目录 `dir`，返回挪过去的路径；本来就在 `dir` 里时不动。不能挪进它自己或者
 /// 它下面的目录，`dir` 里已经有同名的时报 `Exists`。
-pub(super) fn move_into(src: &Path, dir: &Path) -> Result<PathBuf> {
+pub fn move_into(src: &Path, dir: &Path) -> Result<PathBuf> {
     let name = src.file_name().ok_or(OpError::IntoItself)?;
     let dest = dir.join(name);
     if dest == src {
@@ -145,7 +144,7 @@ pub(super) fn move_into(src: &Path, dir: &Path) -> Result<PathBuf> {
 /// 把 `src` 复制进目录 `dir`，返回副本的路径。重名时副本叫「名字 copy」「名字 copy 2」，
 /// 扩展名留在最后。目录连同里面的东西一起复制，符号链接复制成链接本身。不能复制进它自己
 /// 或它下面的目录，复制的过程中会一直读到新复制出来的东西。
-pub(super) fn copy_into(src: &Path, dir: &Path) -> Result<PathBuf> {
+pub fn copy_into(src: &Path, dir: &Path) -> Result<PathBuf> {
     let name = src.file_name().ok_or(OpError::IntoItself)?;
     if inside(src, dir) {
         return Err(OpError::IntoItself);
@@ -245,7 +244,7 @@ fn copy_file(src: &Path, dest: &Path) -> io::Result<()> {
 /// 把仓库里的 `rel`（相对仓库根 `root`）写进根目录的 `.gitignore`：只匹配这一个路径，开头的 `/`
 /// 钉在根目录上，目录结尾加 `/`，`*?[\` 和结尾的空格转义。已经有同样的一行时不再写。名字里有换行或回车时
 /// 报 `NewlineInName`：写进去会拆成几行，成了别的规则。
-pub(super) fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result {
+pub fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result {
     if rel.as_os_str().as_encoded_bytes().iter().any(|b| matches!(b, b'\n' | b'\r')) {
         return Err(OpError::NewlineInName);
     }
@@ -288,7 +287,7 @@ pub(super) fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result 
 
 /// 把 `path` 移到废纸篓，在访达里能放回原处。
 #[cfg(target_os = "macos")]
-pub(super) fn trash(path: &Path) -> Result {
+pub fn trash(path: &Path) -> Result {
     use objc2_foundation::NSFileManager;
 
     let url = file_url(path).map_err(OpError::Io)?;
@@ -313,7 +312,7 @@ fn file_url(path: &Path) -> io::Result<objc2::rc::Retained<objc2_foundation::NSU
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn trash(_: &Path) -> Result {
+pub fn trash(_: &Path) -> Result {
     Err(OpError::Io(io::ErrorKind::Unsupported.into()))
 }
 
@@ -332,170 +331,20 @@ mod tests {
         assert_eq!(back.to_bytes(), b"/tmp/a\xff");
     }
 
-    /// 每个测试一个空的临时目录，结束时删掉。
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("runode-files-{name}-{}", std::process::id()));
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).unwrap();
-            Self(dir)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    #[test]
-    fn validates_new_names() {
-        let dir = Path::new("/p");
-        assert_eq!(child_path(dir, " a.txt "), Some(PathBuf::from("/p/a.txt")));
-        assert_eq!(child_path(dir, "a/b/c.rs"), Some(PathBuf::from("/p/a/b/c.rs")));
-        assert_eq!(child_path(dir, ""), None);
-        assert_eq!(child_path(dir, "  "), None);
-        assert_eq!(child_path(dir, "/etc/x"), None);
-        assert_eq!(child_path(dir, "../x"), None);
-        assert_eq!(child_path(dir, "a/../../x"), None);
-        assert_eq!(child_name(dir, "b.rs"), Some(PathBuf::from("/p/b.rs")));
-        assert_eq!(child_name(dir, "a/b.rs"), None);
-    }
-
-    /// 开关一下改名框不改名：非 UTF-8 的名字、首尾带空白的名字填进框里再读回来都不一样了。
-    #[cfg(unix)]
-    #[test]
-    fn untouched_rename_keeps_lossy_names() {
-        use std::os::unix::ffi::OsStrExt as _;
-        let path = Path::new(std::ffi::OsStr::from_bytes(b"/p/a\xff.txt"));
-        assert!(unchanged_name(path, &crate::ui::base_name(path)));
-        assert!(unchanged_name(Path::new("/p/ b.txt "), "b.txt"));
-        assert!(!unchanged_name(path, "a.txt"));
-    }
-
-    #[test]
-    fn creates_nested_entries_once() {
-        let tmp = TempDir::new("create");
-        let file = tmp.0.join("a/b/c.txt");
-        create(&file, false).unwrap();
-        assert!(file.is_file());
-        assert!(matches!(create(&file, false), Err(OpError::Exists)));
-        create(&tmp.0.join("d"), true).unwrap();
-        assert!(tmp.0.join("d").is_dir());
-    }
-
-    #[test]
-    fn renames_without_overwriting() {
-        let tmp = TempDir::new("rename");
-        let (a, b) = (tmp.0.join("a"), tmp.0.join("b"));
-        fs::write(&a, "a").unwrap();
-        fs::write(&b, "b").unwrap();
-        assert!(matches!(rename(&a, &b), Err(OpError::Exists)));
-        rename(&a, &tmp.0.join("A")).unwrap();
-        assert_eq!(fs::read_to_string(tmp.0.join("A")).unwrap(), "a");
-    }
-
-    #[test]
-    fn moves_into_dirs() {
-        let tmp = TempDir::new("move");
-        let (src, dir) = (tmp.0.join("src"), tmp.0.join("dir"));
-        fs::create_dir_all(src.join("inner")).unwrap();
-        fs::create_dir(&dir).unwrap();
-        assert!(matches!(move_into(&src, &src.join("inner")), Err(OpError::IntoItself)));
-        assert_eq!(move_into(&src, &tmp.0).unwrap(), src);
-        let moved = move_into(&src, &dir).unwrap();
-        assert_eq!(moved, dir.join("src"));
-        assert!(moved.join("inner").is_dir());
-        assert!(!src.exists());
-    }
-
-    #[test]
-    fn appends_to_gitignore_once() {
-        let tmp = TempDir::new("gitignore");
-        let file = tmp.0.join(".gitignore");
-        fs::write(&file, "target").unwrap();
-        add_to_gitignore(&tmp.0, Path::new("a/b*.log"), false).unwrap();
-        add_to_gitignore(&tmp.0, Path::new("dist"), true).unwrap();
-        add_to_gitignore(&tmp.0, Path::new("dist"), true).unwrap();
-        add_to_gitignore(&tmp.0, Path::new("x "), false).unwrap();
-        assert_eq!(fs::read_to_string(&file).unwrap(), "target\n/a/b\\*.log\n/dist/\n/x\\ \n");
-        assert!(matches!(add_to_gitignore(&tmp.0, Path::new("x\n*"), false), Err(OpError::NewlineInName)));
-        assert!(matches!(add_to_gitignore(&tmp.0, Path::new("a\r/b"), false), Err(OpError::NewlineInName)));
-        assert_eq!(fs::read_to_string(&file).unwrap(), "target\n/a/b\\*.log\n/dist/\n/x\\ \n");
-    }
-
-    /// 指向目录的符号链接按文件写（不加结尾的 `/`）：git 的 `dir/` 规则只匹配真正的目录。
-    #[cfg(unix)]
-    #[test]
-    fn gitignore_treats_directory_symlinks_as_files() {
-        let tmp = TempDir::new("gitignore-symlink");
-        fs::create_dir(tmp.0.join("real")).unwrap();
-        std::os::unix::fs::symlink("real", tmp.0.join("link")).unwrap();
-        add_to_gitignore(&tmp.0, Path::new("link"), true).unwrap();
-        add_to_gitignore(&tmp.0, Path::new("real"), true).unwrap();
-        assert_eq!(fs::read(tmp.0.join(".gitignore")).unwrap(), b"/link\n/real/\n");
-    }
-
-    /// 名字不是合法 UTF-8 时规则照原样的字节写，git 读 .gitignore 也按字节，才匹配得到那个文件。
-    #[cfg(unix)]
-    #[test]
-    fn gitignore_keeps_raw_bytes_in_names() {
-        use std::os::unix::ffi::OsStrExt as _;
-        let tmp = TempDir::new("gitignore-raw");
-        let raw = Path::new(std::ffi::OsStr::from_bytes(b"caf\xe9*"));
-        add_to_gitignore(&tmp.0, raw, false).unwrap();
-        add_to_gitignore(&tmp.0, raw, false).unwrap();
-        assert_eq!(fs::read(tmp.0.join(".gitignore")).unwrap(), b"/caf\xe9\\*\n");
-    }
-
-    #[test]
-    fn copies_with_free_names() {
-        let tmp = TempDir::new("copy");
-        let file = tmp.0.join("a.txt");
-        fs::write(&file, "x").unwrap();
-        assert_eq!(copy_into(&file, &tmp.0).unwrap(), tmp.0.join("a copy.txt"));
-        assert_eq!(copy_into(&file, &tmp.0).unwrap(), tmp.0.join("a copy 2.txt"));
-        let dir = tmp.0.join("d");
-        fs::create_dir_all(dir.join("e")).unwrap();
-        fs::write(dir.join("e/f"), "y").unwrap();
-        // 复制到自己所在的目录可以，复制进自己下面不行。
-        let copy = copy_into(&dir, &tmp.0).unwrap();
-        assert_eq!(copy, tmp.0.join("d copy"));
-        assert_eq!(fs::read_to_string(copy.join("e/f")).unwrap(), "y");
-        assert!(matches!(copy_into(&dir, &dir.join("e")), Err(OpError::IntoItself)));
-        assert!(matches!(copy_into(&dir, &dir), Err(OpError::IntoItself)));
-    }
-
-    /// 目录里有管道时整个复制报错、不留半个副本，不会卡在打开管道上等人来写。
-    #[cfg(unix)]
-    #[test]
-    fn refuses_to_copy_fifos() {
-        let tmp = TempDir::new("copy-fifo");
-        let dir = tmp.0.join("d");
-        fs::create_dir(&dir).unwrap();
-        fs::write(dir.join("a"), "a").unwrap();
-        let fifo = std::ffi::CString::new(dir.join("pipe").into_os_string().into_encoded_bytes()).unwrap();
-        // SAFETY: 以 NUL 结尾的路径。
-        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
-        let err = copy_into(&dir, &tmp.0).unwrap_err();
-        assert!(matches!(&err, OpError::Io(err) if err.kind() == io::ErrorKind::InvalidInput), "{err:?}");
-        assert!(!tmp.0.join("d copy").exists());
-    }
-
     /// 复制和改名都不覆盖已有的：同时粘贴同一个文件时各得一个副本，改名不盖掉别的文件。
     #[test]
     fn copies_and_renames_never_overwrite() {
-        let tmp = TempDir::new("no-overwrite");
-        let (a, b) = (tmp.0.join("a"), tmp.0.join("b"));
+        let tmp = std::env::temp_dir().join(format!("runode-files-no-overwrite-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let (a, b) = (tmp.join("a"), tmp.join("b"));
         fs::write(&a, "a").unwrap();
         fs::write(&b, "b").unwrap();
         assert_eq!(copy_file(&a, &b).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(rename_noreplace(&a, &b).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read_to_string(&b).unwrap(), "b");
 
-        let dir = tmp.0.join("out");
+        let dir = tmp.join("out");
         fs::create_dir(&dir).unwrap();
         let copies: std::collections::HashSet<_> = std::thread::scope(|scope| {
             let jobs: Vec<_> = (0..6).map(|_| scope.spawn(|| copy_into(&a, &dir).unwrap())).collect();
@@ -504,25 +353,6 @@ mod tests {
         assert_eq!(copies.len(), 6);
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 6);
         assert!(copies.iter().all(|copy| fs::read_to_string(copy).unwrap() == "a"));
-    }
-
-    /// 经符号链接指进自己下面的目录也算放进自己，挪动、复制都拦；源本身是符号链接时照旧只动链接。
-    #[cfg(unix)]
-    #[test]
-    fn refuses_targets_inside_the_source_through_symlinks() {
-        let tmp = TempDir::new("symlink-into");
-        let src = tmp.0.join("src");
-        fs::create_dir_all(src.join("inner")).unwrap();
-        let alias = tmp.0.join("alias");
-        std::os::unix::fs::symlink(src.join("inner"), &alias).unwrap();
-        assert!(matches!(copy_into(&src, &alias), Err(OpError::IntoItself)));
-        assert!(matches!(move_into(&src, &alias), Err(OpError::IntoItself)));
-        assert!(!src.join("inner/src").exists());
-
-        let link = tmp.0.join("link");
-        std::os::unix::fs::symlink(&src, &link).unwrap();
-        let copy = copy_into(&link, &src.join("inner")).unwrap();
-        assert!(fs::symlink_metadata(&copy).unwrap().is_symlink());
-        assert_eq!(move_into(&link, &src).unwrap(), src.join("link"));
+        fs::remove_dir_all(&tmp).ok();
     }
 }

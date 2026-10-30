@@ -803,7 +803,7 @@ fn image_path(dir: &Path, url: &str) -> Option<PathBuf> {
 /// 读出 Markdown 引用的本地图片文件 `path`，和预览栏打开图片文件一样读、画 SVG；读不了、画不了时
 /// 为空。在后台调用。
 pub(super) fn picture(path: &Path, svg: &SvgRenderer) -> Option<Picture> {
-    picture_of(runode_preview::load(path), svg)
+    picture_of(super::load(path), svg)
 }
 
 /// 读到的图片换成能画的样子；不是图片、画不了、解码后超过 `MAX_DECODED_BYTES` 时为空。SVG 按自身尺寸画

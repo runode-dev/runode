@@ -16,7 +16,6 @@
 mod edit;
 mod listing;
 mod menu;
-mod ops;
 mod search;
 mod state;
 

@@ -1,6 +1,6 @@
 [package]
 name = "runode-preview"
-description = "Read a file for preview, classify it, highlight its syntax and parse Markdown"
+description = "Classify a file for preview, highlight its syntax and parse Markdown"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

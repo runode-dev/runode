@@ -6741,6 +6741,7 @@ dependencies = [
  "runode-autostart",
  "runode-cli",
  "runode-config",
+ "runode-files",
  "runode-git",
  "runode-host",
  "runode-paths",
@@ -6816,6 +6817,17 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "runode-paths",
  "runode-types",
+ "tracing",
+]
+
+[[package]]
+name = "runode-files"
+version = "0.1.16"
+dependencies = [
+ "libc",
+ "notify",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
  "tracing",
 ]
 

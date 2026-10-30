@@ -12,7 +12,8 @@
 | `git` | 用 git 命令行读仓库，做暂存、提交、分支、stash、工作树和同步 | 只有 std |
 | `todo` | 看板的 SQLite 库（`Store`）和定时（`next_fire`），以及本地时间和 Unix 时间的换算（`local_tm`、`mktime`）；宿主在跑时改看板仍经宿主的消息，它才会告诉在看看板的前端 | types、rusqlite、libc |
 | `tasks` | 一个目录里能跑的命令：`tasks.json`、Makefile 目标、package.json scripts | types、paths、serde_json |
-| `preview` | 文件预览不碰界面的部分：读文件、语法高亮、解析 Markdown；界面是 `desktop` 的 `preview_panel` | std、syntect、two-face、pulldown-cmark、regex |
+| `files` | 项目目录里不碰界面的文件操作：读文件树的目录（`list_dirs`）、新建改名移动复制和移到废纸篓（`ops`）、有上限地读文件（`read_limited`）、监听改动（`watch`）；桌面在本机直接用 | notify、tracing、libc（Unix）、objc2、objc2-foundation（macOS） |
+| `preview` | 文件预览不碰界面的部分：判断读到的文件能怎么显示（`decode`）、语法高亮、解析 Markdown；读文件经 `files`，界面是 `desktop` 的 `preview_panel` | std、syntect、two-face、pulldown-cmark、regex |
 | `agent` | 认出终端前台跑的 AI 编程 agent，判断它在干活、空闲还是等回答；起 agent 时挑模型和强度、续上次的对话，向 agent 本身问模型清单（`models`） | types、serde、serde_json、regex、toml、memchr、libc |
 | `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上（Windows 上是 ConPTY，`pty` 的 `conpty`），shell 集成，认出运行完的命令 | types、paths、agent、libghostty-vt、portable-pty、memchr、libc（Unix）、windows-sys（Windows） |
 | `config` | Ghostty 兼容的配置文件、主题、快捷键和配置模板，生成 `TermSettings`。模板只有英文，配置项的说明写在 `docs`，动作的说明写在 `ActionSpec::doc`，译文都在 `desktop` 的 locales 里 | types、paths、tracing、objc2-foundation、objc2-app-kit |
@@ -36,7 +37,7 @@ GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），原样使用
 不变量：
 
 - 只有 `desktop` 和它的部件库 `ui` 能依赖 GPUI（`gpui-pre`；`gpui-pre-platform` 只有 `desktop`）；`libghostty-vt` 和 portable-pty 只有 `terminal` 能直接依赖，`libghostty-vt-sys` 只有 `libghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen、ring、iroh 和 mdns-sd 只有 `remote` 能直接依赖（iroh 自己的 crate 用 rustls、ring 不算），推送中转 `push-relay` 自己连 APNs、封句柄，也直接用 rustls 和 ring；rusqlite 只有 `todo` 能直接依赖；sherpa-onnx 只有 `speech` 能直接依赖；ScreenCaptureKit 和 VideoToolbox 的绑定只有 `screen` 能直接依赖；只有 `desktop` 能直接依赖 `host`，只有 `desktop` 和 `host` 能直接依赖 `terminal`。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`；加 crate 时相应地更新它的 `wrappers` 和上面这张表。
-- `types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git`、`preview`、`update` 不依赖任何 runode crate。
+- `types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git`、`files`、`preview`、`update` 不依赖任何 runode crate。
 - `protocol` 只依赖 `types`，不碰终端仿真、PTY 和界面。消息里用到的类型，别的 crate 也要用的放 `types`，只在协议里用的（帧、连接方式等）放 `protocol` 自己；`protocol` 把消息里用到的 `types` 类型转出去，前端照旧从 `protocol` 引。
 - `agent` 只依赖 `types`，不碰终端仿真、PTY 和界面：屏幕文字、前台进程组由 `terminal` 读好了交给它，用户规则目录由调用方从 `paths` 取来传进去。
 - `host` 不依赖 GPUI，VT 和 PTY 经 `terminal` 的 `HostSession` 用。一个终端有两份 VT，宿主那份（`HostSession`）是权威的，只有它应答终端查询；界面那份（`Session`）只消费同样的字节流，改 VT 状态的操作（改尺寸、清屏、换主题）一律经宿主在输出流里标出位置后两边一起做。前端（桌面也一样）和宿主说话只经 `protocol`，不碰宿主的内部：桌面在同一个进程里时用 `Host::connect_pair` 的一对 socket，别的前端连 `paths` 的 `host_socket_file`。

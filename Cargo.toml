@@ -27,6 +27,7 @@ runode-host = { path = "crates/host" }
 runode-cli = { path = "crates/cli" }
 runode-config = { path = "crates/config" }
 runode-preview = { path = "crates/preview" }
+runode-files = { path = "crates/files" }
 runode-agent = { path = "crates/agent" }
 runode-remote = { path = "crates/remote" }
 runode-update = { path = "crates/update" }

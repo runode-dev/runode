@@ -13,13 +13,14 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable as _, KeyDownEvent, PromptLevel, SharedString, Subscription, Task,
     Window, prelude::*, px,
 };
+use runode_files::Stamp;
 use runode_preview::MAX_TEXT_BYTES;
 
 use super::{
@@ -42,7 +43,7 @@ pub(super) struct Editor {
     crlf: bool,
     bom: bool,
     /// 读进来或上次存下时文件的大小和修改时间，存之前和磁盘上的比。
-    stamp: Option<(u64, SystemTime)>,
+    stamp: Option<Stamp>,
     /// 正在存：这时再按 ⌘S 不管，免得两次写的先后乱了，旧的盖掉新的。
     saving: bool,
     /// 正在算的语法高亮：换上新的任务时旧的随之丢掉，`highlight_cancel` 让后台已经开始的那次停下。
@@ -65,7 +66,7 @@ struct Source {
     text: String,
     crlf: bool,
     bom: bool,
-    stamp: Option<(u64, SystemTime)>,
+    stamp: Option<Stamp>,
 }
 
 /// 读 `path` 的原文；太大、含 NUL 或不是 UTF-8 的不能编辑。

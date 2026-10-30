@@ -1,0 +1,23 @@
+[package]
+name = "runode-files"
+description = "File tree listings, file operations, bounded reads and directory watching for runode projects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+notify.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# 不覆盖的改名（`renamex_np`、`renameat2`）和 macOS 的 `copyfile`。
+libc.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# 移到废纸篓用 NSFileManager。
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
+
+[lints]
+workspace = true

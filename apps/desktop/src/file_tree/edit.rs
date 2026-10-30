@@ -10,12 +10,11 @@ use crate::ui::{
     inline_edit::InlineEdit,
 };
 use gpui::{AnyElement, Context, PromptLevel, Role, ScrollStrategy, Window, div, img, prelude::*, px};
+use runode_files::ops::{self, OpError};
 use runode_git::Repo;
 
 use crate::file_tree::{
-    AddToGitignore, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder, RenameFile, WorkspaceId,
-    ops::{self, OpError},
-    state::TreeState,
+    AddToGitignore, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder, RenameFile, WorkspaceId, state::TreeState,
 };
 
 /// 剪切或复制下来等着粘贴的文件或目录。
