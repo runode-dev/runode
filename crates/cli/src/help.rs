@@ -10,7 +10,9 @@ Usage: runode [COMMAND]
 Without a command, runode opens its window. `rn` is a short name for runode:
 `rn list` is `runode list`. Except remote and service, commands talk to the
 running runode app; inside a runode terminal they find it through
-RUNODE_SOCKET, and RUNODE_SESSION names the terminal they run in.
+RUNODE_SOCKET, and RUNODE_SESSION names the terminal they run in. In a
+terminal runode opened on an SSH host, they talk to the runode on that host
+and see only the terminals running there.
 
 To teach your agents to use runode, install its skill:
   npx skills add runode-dev/runode --skill runode -g
