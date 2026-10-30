@@ -107,6 +107,8 @@ rcgen = { version = "0.14", default-features = false, features = ["crypto", "rin
 ring = "0.17"
 # 远程访问跨网络时的连接：iroh 按公钥拨号，先打洞直连，打不通走中继。密码学后端和 rustls 一样用 ring。
 iroh = { version = "1.4", default-features = false, features = ["tls-ring", "portmapper", "fast-apple-datapath"] }
+# 非 macOS 上公布远程访问的 mDNS 服务（macOS 交给系统的 mDNSResponder）。
+mdns-sd = { version = "0.21", default-features = false }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "macros", "time"] }
 # 推送中转的 HTTP 服务和发给 APNs 的 HTTP/2 客户端；TLS 用上面那份 ring 后端的 rustls。
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }

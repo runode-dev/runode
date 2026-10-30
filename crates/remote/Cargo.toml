@@ -27,6 +27,10 @@ tokio = { workspace = true, features = ["sync"] }
 # 枚举本机地址（getifaddrs）、主机名、poll，以及 socket2 没有的 TCP 选项。
 libc.workspace = true
 
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# Linux 和 Windows 上自己应答 mDNS，公布 Bonjour 服务。
+mdns-sd.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 uds_windows.workspace = true
 # 枚举本机地址（GetAdaptersAddresses）、主机名、WSAPoll，以及 socket2 没有的 TCP 选项。

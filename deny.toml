@@ -43,6 +43,7 @@ deny = [
     # ureq 是 sherpa-onnx-sys 的构建脚本下载预编译库用的，只在构建时跑，不进 app。
     { crate = "rustls", wrappers = ["runode-remote", "runode-push", "iroh", "iroh-dns", "iroh-relay", "n0-dns-resolver", "noq", "noq-proto", "hyper-rustls", "reqwest", "rustls-platform-verifier", "tokio-rustls", "ureq"], reason = "远程访问的 TLS 只在 runode-remote 里（连同它用的 iroh），推送中转 runode-push 自己连 APNs；别的 crate 经它们的接口用" },
     { crate = "iroh", wrappers = ["runode-remote"], reason = "远程访问跨网络的连接只在 runode-remote 里" },
+    { crate = "mdns-sd", wrappers = ["runode-remote"], reason = "远程访问的 mDNS 公布只在 runode-remote 里" },
     { crate = "objc2-screen-capture-kit", wrappers = ["runode-screen"], reason = "远程桌面的屏幕采集只在 runode-screen 里" },
     { crate = "objc2-video-toolbox", wrappers = ["runode-screen"], reason = "远程桌面的视频编码只在 runode-screen 里" },
     { crate = "rusqlite", wrappers = ["runode-todo"], reason = "看板的库只在 runode-todo 里，别的 crate 经它的 Store 读写" },
