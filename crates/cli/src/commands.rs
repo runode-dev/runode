@@ -786,14 +786,21 @@ fn attach_before(
     }
 }
 
-/// 从标准输入读要打的字，去掉末尾的一个换行（`echo` 带的那个）。
+/// 从标准输入读要打的字，去掉末尾的一个换行（`echo` 带的那个，Windows 上的 cmd 和 PowerShell 给的是 `\r\n`）。
 fn stdin_text() -> anyhow::Result<String> {
     let mut text = Vec::new();
     std::io::stdin().read_to_end(&mut text)?;
+    String::from_utf8(trim_line_end(text)).map_err(|_| anyhow!("standard input is not UTF-8 text"))
+}
+
+fn trim_line_end(mut text: Vec<u8>) -> Vec<u8> {
     if text.ends_with(b"\n") {
         text.pop();
+        if text.ends_with(b"\r") {
+            text.pop();
+        }
     }
-    String::from_utf8(text).map_err(|_| anyhow!("standard input is not UTF-8 text"))
+    text
 }
 
 fn unexpected(message: &HostMsg) -> Failure {
@@ -860,5 +867,19 @@ pub(crate) fn tilde(path: &Path, home: Option<&Path>) -> String {
         Some(rest) if rest.as_os_str().is_empty() => "~".into(),
         Some(rest) => format!("~/{}", rest.display()),
         None => path.display().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_trailing_line_end_is_dropped() {
+        assert_eq!(trim_line_end(b"ls\n".to_vec()), b"ls");
+        assert_eq!(trim_line_end(b"ls\r\n".to_vec()), b"ls");
+        assert_eq!(trim_line_end(b"ls\n\n".to_vec()), b"ls\n");
+        assert_eq!(trim_line_end(b"ls\r".to_vec()), b"ls\r");
+        assert_eq!(trim_line_end(b"ls".to_vec()), b"ls");
     }
 }

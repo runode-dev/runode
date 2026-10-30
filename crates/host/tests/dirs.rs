@@ -56,7 +56,54 @@ fn no_path_lists_the_home_directory() {
     let mut peer = Peer::hello(&socket, false);
     let home = runode_paths::Dirs::from_env().home.expect("tests run with a home directory");
     match list(&mut peer, 3, None) {
-        HostMsg::Dirs { req: 3, path, .. } => assert_eq!(path, fs::canonicalize(home).unwrap()),
+        HostMsg::Dirs { req: 3, path, .. } => {
+            assert_eq!(fs::canonicalize(&path).unwrap(), fs::canonicalize(home).unwrap());
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Windows 上回的路径是 `C:/Users/me` 这种写法，不带 `\\?\` 前缀：手机照着用 `/` 拼子目录、往上算到只剩
+/// 盘符时也列得出来。
+#[cfg(windows)]
+#[test]
+fn windows_paths_come_back_with_forward_slashes() {
+    let dir = temp_dir("dirsslash");
+    let (_host, socket) = listen(&dir);
+    fs::create_dir_all(dir.join("tree").join("sub")).unwrap();
+    let mut peer = Peer::hello(&socket, false);
+    let HostMsg::Dirs { path, .. } = list(&mut peer, 5, Some(dir.join("tree"))) else { panic!("not a listing") };
+    let text = path.to_str().unwrap().to_owned();
+    assert!(!text.contains('\\') && !text.starts_with("//?/"), "{text}");
+    match list(&mut peer, 6, Some(PathBuf::from(format!("{text}/sub")))) {
+        HostMsg::Dirs { req: 6, path, .. } => assert_eq!(path.to_str().unwrap(), format!("{text}/sub")),
+        other => panic!("{other:?}"),
+    }
+    let drive = PathBuf::from(&text[..2]);
+    match list(&mut peer, 7, Some(drive)) {
+        HostMsg::Dirs { req: 7, path, .. } => assert_eq!(path.to_str().unwrap(), format!("{}/", &text[..2])),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// 路径超过 `MAX_PATH`、去不掉 `\\?\` 前缀的目录写成 `//?/C:/…` 回给前端；前端在后面拼上 `/子目录` 交回来照样列得出。
+#[cfg(windows)]
+#[test]
+fn windows_long_paths_survive_the_round_trip() {
+    let dir = temp_dir("dirslong");
+    let (_host, socket) = listen(&dir);
+    let mut long = PathBuf::from(format!(r"\\?\{}", dir.display()));
+    for _ in 0..6 {
+        long.push("d".repeat(50));
+    }
+    fs::create_dir_all(long.join("sub")).unwrap();
+    let mut peer = Peer::hello(&socket, false);
+    let HostMsg::Dirs { path, dirs, .. } = list(&mut peer, 5, Some(long)) else { panic!("not a listing") };
+    let text = path.to_str().unwrap().to_owned();
+    assert!(text.starts_with("//?/") && !text.contains('\\'), "{text}");
+    assert_eq!(dirs, ["sub"]);
+    match list(&mut peer, 6, Some(PathBuf::from(format!("{text}/sub")))) {
+        HostMsg::Dirs { req: 6, path, .. } => assert_eq!(path.to_str().unwrap(), format!("{text}/sub")),
         other => panic!("{other:?}"),
     }
 }

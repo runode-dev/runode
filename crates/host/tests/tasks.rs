@@ -40,21 +40,22 @@ fn nearest_makefile_and_package_json_are_listed() {
 
     let mut peer = Peer::hello(&socket, false);
     let reply = list(&mut peer, 1, src.clone());
+    let makefile = make().map(|make| TaskSource {
+        kind: TaskSourceKind::Makefile,
+        file: root.join("Makefile"),
+        project: None,
+        tasks: vec![
+            task("build", &format!("{make} -C ../.. build"), Some("编译全部")),
+            task("test", &format!("{make} -C ../.. test"), None),
+        ],
+        truncated: false,
+    });
     let expected = HostMsg::Tasks {
         req: 1,
         dir: src,
-        sources: vec![
-            TaskSource {
-                kind: TaskSourceKind::Makefile,
-                file: root.join("Makefile"),
-                project: None,
-                tasks: vec![
-                    task("build", "make -C ../.. build", Some("编译全部")),
-                    task("test", "make -C ../.. test", None),
-                ],
-                truncated: false,
-            },
-            TaskSource {
+        sources: makefile
+            .into_iter()
+            .chain([TaskSource {
                 kind: TaskSourceKind::PackageJson,
                 file: root.join("web").join("package.json"),
                 project: None,
@@ -63,8 +64,8 @@ fn nearest_makefile_and_package_json_are_listed() {
                     task("build:prod", "pnpm run build:prod", Some("vite build")),
                 ],
                 truncated: false,
-            },
-        ],
+            }])
+            .collect(),
     };
     assert_eq!(reply, expected);
 }
@@ -118,8 +119,20 @@ fn bad_directories_are_errors() {
     assert!(matches!(list(&mut peer, 3, "relative".into()), HostMsg::Error { req: Some(3), .. }));
     assert!(matches!(list(&mut peer, 4, dir.join("missing")), HostMsg::Error { req: Some(4), .. }));
     fs::write(dir.join("Makefile"), "all:\n").unwrap();
-    match list(&mut peer, 5, dir) {
-        HostMsg::Tasks { req: 5, sources, .. } => assert_eq!(sources[0].tasks, [task("all", "make all", None)]),
-        other => panic!("expected tasks, got {other:?}"),
+    match (list(&mut peer, 5, dir), make()) {
+        (HostMsg::Tasks { req: 5, sources, .. }, Some(make)) => {
+            assert_eq!(sources[0].tasks, [task("all", &format!("{make} all"), None)]);
+        }
+        (HostMsg::Tasks { req: 5, sources, .. }, None) => assert!(sources.is_empty(), "{sources:?}"),
+        (other, _) => panic!("expected tasks, got {other:?}"),
     }
+}
+
+/// 跑 Makefile 的命令名：Windows 上要 PATH 里有 `make.exe` 或 `mingw32-make.exe`，没有时不列 Makefile。
+fn make() -> Option<&'static str> {
+    if !cfg!(windows) {
+        return Some("make");
+    }
+    let dirs: Vec<_> = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+    ["make", "mingw32-make"].into_iter().find(|name| dirs.iter().any(|dir| dir.join(format!("{name}.exe")).is_file()))
 }

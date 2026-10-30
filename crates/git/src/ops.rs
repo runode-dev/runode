@@ -111,6 +111,8 @@ fn run_for<S: AsRef<OsStr>>(
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     batch_ssh(&mut command, dir);
+    #[cfg(windows)]
+    let started = std::time::SystemTime::now();
     let mut child = command.spawn().map_err(|err| GitError::new(format!("没能运行 git：{err}")))?;
     // 一边写输入一边读输出，输入输出都大时谁也不会等着谁。不用作用域线程：超时杀掉以后，脱离了
     // 进程组的子孙进程可能还拿着管道，读的线程就留在那里，不等它们。
@@ -130,7 +132,13 @@ fn run_for<S: AsRef<OsStr>>(
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(None) => {
                 kill_group(&mut child);
-                return Err(GitError::new(format!("git 超过 {} 秒没跑完，停下了", timeout.as_secs())));
+                let message = format!("git 超过 {} 秒没跑完，停下了", timeout.as_secs());
+                #[cfg(windows)]
+                let message = match left_lock(dir, started) {
+                    Some(lock) => format!("{message}；它可能留下了 {}，确认没有别的 git 在跑后删掉", lock.display()),
+                    None => message,
+                };
+                return Err(GitError::new(message));
             }
             Err(err) => {
                 kill_group(&mut child);
@@ -199,10 +207,12 @@ fn batch_ssh(command: &mut Command, dir: &Path) {
 /// 再退出；直接 KILL 会把 `index.lock` 留下，之后的 git 命令都说有别的 git 在跑。等 `TERM_GRACE` 还没
 /// 退的（不理 TERM 的钩子）再 KILL。
 fn kill_group(child: &mut Child) {
-    signal_group(child, "-TERM");
-    let deadline = Instant::now() + TERM_GRACE;
-    while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
+    if cfg!(unix) {
+        signal_group(child, "-TERM");
+        let deadline = Instant::now() + TERM_GRACE;
+        while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
     }
     signal_group(child, "-KILL");
     let _ = child.kill();
@@ -219,6 +229,18 @@ fn signal_group(child: &Child, signal: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+/// Windows 上强杀的 git 来不及删自己拿着的 `index.lock`，之后的写操作都说有别的 git 在跑。`started`（拉起
+/// git 时）之后写的锁文件多半是被杀的这次留下的，但也可能是同时在跑的别的 git 的，那时删了会让两边同时写
+/// 索引，所以只找出来告诉用户，不删。看修改时间不看创建时间：NTFS 的隧道效应让删掉后十几秒内重建的同名
+/// 文件沿用旧文件的创建时间。
+#[cfg(windows)]
+fn left_lock(dir: &Path, started: std::time::SystemTime) -> Option<std::path::PathBuf> {
+    let path = git(dir, &["rev-parse", "--git-path", "index.lock"])?;
+    let lock = dir.join(crate::os_str(path.trim_ascii()));
+    let modified = fs::metadata(&lock).and_then(|meta| meta.modified()).ok()?;
+    (modified >= started).then_some(lock)
 }
 
 /// Windows 没有 TERM，只在 `-KILL` 时连同子孙进程一起强杀（`taskkill /T /F`）。
@@ -740,6 +762,26 @@ mod tests {
         // 先发的 TERM 让 git 删掉了自己拿着的锁，后面的 git 命令不会说有别的 git 在跑。
         assert!(!dir.join(".git/index.lock").exists());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Windows 上强杀的 git 留下的 `index.lock` 不删（可能是别的 git 的），在报错里指给用户。
+    #[cfg(windows)]
+    #[test]
+    fn points_at_the_lock_left_by_a_killed_git() {
+        let dir = temp_repo("timeout-lock");
+        let commit = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-a", "-m", "x"];
+        fs::write(dir.join("f"), "a").unwrap();
+        assert!(git(&dir, &["add", "f"]).is_some());
+        assert!(git(&dir, &commit).is_some());
+        fs::write(dir.join("f"), "b").unwrap();
+        let hooks = dir.join(".git/test-hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(hooks.join("pre-commit"), "#!/bin/sh\nexec sleep 30\n").unwrap();
+        assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
+        let err = run_for(&dir, commit, None, Duration::from_secs(3)).unwrap_err();
+        assert!(err.message.contains("超过") && err.message.contains("index.lock"), "{}", err.message);
+        assert!(dir.join(".git/index.lock").exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// 钩子把进程留在后台、拿着 git 的输出管道：git 退出了就算跑完，不等那个进程。

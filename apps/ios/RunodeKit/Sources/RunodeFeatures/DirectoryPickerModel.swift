@@ -36,11 +36,17 @@ public final class DirectoryPickerModel {
         showsHidden ? dirs : dirs.filter { !$0.hasPrefix(".") }
     }
 
-    /// 上一级目录；已经在根目录或者还没列好时为空。
+    /// 上一级目录；已经在根目录（Windows 上是 `C:/` 这样的盘符根）或者还没列好时为空。
     public var parent: String? {
-        guard let path, path != "/" else { return nil }
+        guard let path, path != "/", !Self.isDriveRoot(path) else { return nil }
         let parent = (path as NSString).deletingLastPathComponent
         return parent.isEmpty ? "/" : parent
+    }
+
+    /// Windows 宿主回的盘符根：`C:/`。
+    static func isDriveRoot(_ path: String) -> Bool {
+        let chars = Array(path)
+        return chars.count == 3 && chars[0].isASCII && chars[0].isLetter && chars[1] == ":" && chars[2] == "/"
     }
 
     /// 能在 `path` 里新建：列好了、没在等回话、连着，也没有出错的提示盖着。进不去的子目录报错时 `path`

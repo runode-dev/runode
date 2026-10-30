@@ -44,7 +44,8 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     let ancestors = search_path(dir, dirs.home.as_deref());
     let makefile = ancestors.iter().find_map(|at| named_file(at, &MAKEFILE_NAMES));
     if let Some(file) = makefile
-        && let Some(prefix) = make_prefix(dir, file.parent().unwrap_or(dir))
+        && let Some(make) = make_program()
+        && let Some(prefix) = make_prefix(make, dir, file.parent().unwrap_or(dir))
         && let Some(text) = read_small(&file)
     {
         let targets = makefile_targets(&text);
@@ -175,14 +176,25 @@ fn relative(from: &Path, to: &Path) -> Option<String> {
 /// 目录平常是相对路径（`..`、`../..`）；`..` 由 make 从进程真实的目录算，`dir` 经过符号链接时到不了
 /// `at`，这时用 `at` 的绝对路径。绝对路径 `quote` 拼不了时为空：相对路径跑的是另一个目录里的 Makefile，
 /// 不如不列。
-fn make_prefix(dir: &Path, at: &Path) -> Option<String> {
+fn make_prefix(make: &str, dir: &Path, at: &Path) -> Option<String> {
     let Some(rel) = relative(dir, at) else {
-        return Some("make".to_owned());
+        return Some(make.to_owned());
     };
     let real = |path: &Path| fs::canonicalize(path).ok();
     let reaches = real(&dir.join(&rel)).is_some_and(|target| Some(target) == real(at));
     let target = if reaches { Some(rel.as_str()) } else { at.to_str().filter(|absolute| quotable(absolute)) };
-    target.map(|target| format!("make -C {}", quote(target)))
+    target.map(|target| format!("{make} -C {}", quote(target)))
+}
+
+/// 跑 Makefile 的命令名。Windows 上通常没装 make，在 PATH 里找 `make.exe`，没有再找 MinGW 的
+/// `mingw32-make.exe`，都没有时为 `None`，不列 Makefile 的目标。
+fn make_program() -> Option<&'static str> {
+    if cfg!(windows) { windows_make(std::env::var_os("PATH").as_deref()) } else { Some("make") }
+}
+
+fn windows_make(path: Option<&std::ffi::OsStr>) -> Option<&'static str> {
+    let dirs: Vec<PathBuf> = path.map(|path| std::env::split_paths(path).collect()).unwrap_or_default();
+    ["make", "mingw32-make"].into_iter().find(|name| dirs.iter().any(|dir| dir.join(format!("{name}.exe")).is_file()))
 }
 
 /// 读整个文件；比 `MAX_FILE_BYTES` 大的返回 None，不截断着读。
@@ -262,6 +274,23 @@ fn quote(word: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Windows 上先认 make，没有再认 mingw32-make，都没有时不列。
+    #[test]
+    fn windows_make_is_looked_up_on_path() {
+        let root = std::env::temp_dir().join(format!("runode-tasks-make-{}", std::process::id()));
+        let (mingw, gnu) = (root.join("mingw"), root.join("gnu"));
+        fs::create_dir_all(&mingw).unwrap();
+        fs::create_dir_all(&gnu).unwrap();
+        fs::write(mingw.join("mingw32-make.exe"), b"").unwrap();
+        let path = |dirs: &[&PathBuf]| std::env::join_paths(dirs).unwrap();
+        assert_eq!(windows_make(Some(&path(&[&mingw]))), Some("mingw32-make"));
+        assert_eq!(windows_make(Some(&path(&[&gnu]))), None);
+        assert_eq!(windows_make(None), None);
+        fs::write(gnu.join("make.exe"), b"").unwrap();
+        assert_eq!(windows_make(Some(&path(&[&mingw, &gnu]))), Some("make"));
+        fs::remove_dir_all(&root).unwrap();
+    }
 
     /// setup 取最深的那个项目；空的和不是字符串的当没配。
     #[test]

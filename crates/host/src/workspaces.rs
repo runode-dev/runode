@@ -7,7 +7,7 @@
 //! 没有窗口可显示：开终端一律开成工作区里排在最后的新标签（要分屏的也是），不切过去；切到终端
 //! （`Reveal`）回 `Error`。已经不在宿主里的会话每次用这份布局前去掉，见 `tidy`。
 
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
 use runode_protocol::{HostMsg, PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
 use runode_types::{grid::GridSize, shell::IntegrationMode};
@@ -28,10 +28,11 @@ impl Shared {
     /// 没有界面时办 `OpenWorkspace`：最前面的窗口里已经有 `dir` 这个目录的工作区时回它当前标签里有焦点
     /// 的分屏，它一个标签都没有时在里面开一个；没有时在 `dir` 开一个会话，放进排在最后的新工作区。
     pub(crate) fn open_workspace(&self, req: u32, dir: PathBuf, name: Option<String>) -> Result<HostMsg, String> {
+        let dir = crate::browse::from_client(dir);
         if !dir.is_absolute() || !dir.is_dir() {
             return Err(format!("{} is not a directory", dir.display()));
         }
-        let canonical = fs::canonicalize(&dir).unwrap_or(dir);
+        let canonical = crate::browse::canonicalize(&dir).unwrap_or(dir);
         // 布局里的目录照界面记的写法，可能经过软链接：和界面一样两边都规范化了再比。规范化要 stat，在锁外
         // 做，卡住的网络挂载不能占着锁；回到锁里时那个工作区的目录没变才算，布局这期间换过时按规范化的写法
         // 再找一遍。
@@ -42,7 +43,9 @@ impl Shared {
             peers.layout[front].workspaces.iter().map(|workspace| (workspace.dir.clone(), anchor(workspace))).collect()
         };
         let wanted = known.iter().position(|(known, _)| {
-            known.as_ref().is_some_and(|known| fs::canonicalize(known).unwrap_or_else(|_| known.clone()) == canonical)
+            known
+                .as_ref()
+                .is_some_and(|known| crate::browse::canonicalize(known).unwrap_or_else(|_| known.clone()) == canonical)
         });
         let find = |workspaces: &[WorkspaceLayout]| {
             wanted
