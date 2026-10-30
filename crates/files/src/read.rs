@@ -9,6 +9,7 @@ use std::{
 
 /// 文件的大小和修改时间。两个相等就当文件没变过。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Stamp {
     pub len: u64,
     pub modified: SystemTime,
@@ -22,6 +23,7 @@ pub fn stamp(path: &Path) -> Option<Stamp> {
 
 /// 有上限地读到的内容。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Limited {
     /// 至多上限那么多字节。
     pub bytes: Vec<u8>,

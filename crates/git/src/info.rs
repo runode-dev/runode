@@ -6,6 +6,7 @@ use crate::git;
 
 /// 仓库此刻在哪个分支上、和上游差几个提交、有没有做到一半的合并，以及 stash 列表。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RepoInfo {
     /// 当前分支名；分离头指针时为空。
     pub branch: Option<String>,
@@ -26,6 +27,7 @@ pub struct RepoInfo {
 
 /// 做到一半的操作，通常是停在冲突上等用户解决。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Operation {
     Merge,
     Rebase,
@@ -35,6 +37,7 @@ pub enum Operation {
 
 /// stash 列表里的一项。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Stash {
     /// `stash@{index}` 里的序号，给 `Repo::stash_apply` 这些用。
     pub index: usize,

@@ -53,6 +53,9 @@ fn error_text(err: &OpError, name: &str) -> String {
 
 impl FileTree {
     pub(super) fn new_file(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only() {
+            return;
+        }
         let dir = self.target_dir(cx);
         if self.shown_for_edit(&dir, cx) {
             self.start_file_edit(EditTarget::New { dir, is_dir: false }, window, cx);
@@ -60,6 +63,9 @@ impl FileTree {
     }
 
     pub(super) fn new_folder(&mut self, _: &NewFolder, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only() {
+            return;
+        }
         let dir = self.target_dir(cx);
         if self.shown_for_edit(&dir, cx) {
             self.start_file_edit(EditTarget::New { dir, is_dir: true }, window, cx);
@@ -67,6 +73,9 @@ impl FileTree {
     }
 
     pub(super) fn rename_file(&mut self, _: &RenameFile, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only() {
+            return;
+        }
         if let Some((path, is_dir)) = self.selected_entry(cx)
             && self.shown_for_edit(&path, cx)
         {
@@ -285,6 +294,9 @@ impl FileTree {
 
     /// 选中的那一项先问一下，再在后台移到废纸篓：外置卷上可能要复制一遍。
     pub(super) fn delete_file(&mut self, _: &DeleteFile, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only() {
+            return;
+        }
         self.menu = None;
         let Some((path, is_dir)) = self.selected_entry(cx) else {
             return;
@@ -364,6 +376,9 @@ impl FileTree {
     /// 写进 `.gitignore` 后当场重读，选中的那一项马上标成被忽略。git 跟踪着的写进去也不生效，先问要不要
     /// 不再跟踪它（文件留在磁盘上）。
     pub(super) fn add_to_gitignore(&mut self, _: &AddToGitignore, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only() {
+            return;
+        }
         self.menu = None;
         let Some((repo, rel, is_dir)) = self.gitignore_target(cx) else {
             return;
@@ -410,6 +425,9 @@ impl FileTree {
 
     /// 剪切（`cut`）或复制选中的那一项，等着粘贴。
     pub(super) fn copy_file(&mut self, cut: bool, cx: &mut Context<Self>) {
+        if self.read_only() {
+            return;
+        }
         self.menu = None;
         if let Some((path, _)) = self.selected_entry(cx) {
             self.clipboard = Some(FileClipboard { path, cut });
@@ -419,6 +437,9 @@ impl FileTree {
 
     /// 粘贴到 `target_dir`。
     pub(super) fn paste_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only() {
+            return;
+        }
         self.menu = None;
         if let Some(clip) = self.clipboard.clone() {
             let mut dir = self.target_dir(cx);
@@ -435,6 +456,9 @@ impl FileTree {
     /// 从文件树拖出来的 `src` 放到了目录 `dir` 上：问一下再挪过去。放回原来的目录或者放进
     /// 它自己下面时什么都不做。
     pub(super) fn drop_file(&mut self, src: &Path, dir: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only() {
+            return;
+        }
         if src.parent() == Some(dir.as_path()) || dir.starts_with(src) {
             return;
         }

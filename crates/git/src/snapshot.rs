@@ -27,12 +27,14 @@ pub(crate) const MAX_DIFF_BYTES: u64 = 1024 * 1024;
 /// 改动分的两段：已经 `git add` 的改动（暂存区相对 HEAD），以及还没暂存的改动
 /// （工作区相对暂存区，含未跟踪的文件）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Section {
     Staged,
     Unstaged,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FileStatus {
     Modified,
     Added,
@@ -57,6 +59,7 @@ impl FileStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LineKind {
     Context,
     Added,
@@ -64,6 +67,7 @@ pub enum LineKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Line {
     pub kind: LineKind,
     /// 在旧文件和新文件里的行号；新增的行没有旧行号，删掉的行没有新行号。
@@ -74,6 +78,7 @@ pub struct Line {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Hunk {
     /// `@@ -a,b +c,d @@` 以及后面的函数名之类。
     pub header: String,
@@ -81,6 +86,7 @@ pub struct Hunk {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FileDiff {
     /// 相对仓库根的路径；删掉的文件是原来的路径。
     pub path: PathBuf,
@@ -102,6 +108,7 @@ pub struct FileDiff {
 /// 一个仓库的状态。只管这一个仓库：里面的子模块只是一个记着提交号的条目，嵌套的仓库是一个
 /// 不往里看的未跟踪目录，它们各自另有一份，见 `Repos`。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Snapshot {
     /// 仓库根目录。
     pub root: PathBuf,

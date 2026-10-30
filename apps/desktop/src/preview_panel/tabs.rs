@@ -17,6 +17,7 @@ use runode_git::{self as git, FileStatus};
 use runode_types::color::Rgb;
 
 use super::{DiffTarget, Preview, PreviewPanel, RealRoot, WorkspaceId};
+use crate::project_host::ProjectHost;
 
 actions!(
     runode,
@@ -54,6 +55,8 @@ pub(super) struct PreviewTabs {
     /// `git` 主仓库的根目录和它解析过符号链接的路径，`Preview::refresh_marks` 比字面上不在根下的文件用；
     /// 由 `PreviewPanel::set_git` 在单独的线程上解析，解析好之前（或解析不了时）两个都是字面的根目录。
     pub real_root: Option<RealRoot>,
+    /// 这个 workspace 的文件在哪台机器上。
+    pub project: ProjectHost,
 }
 
 impl PreviewTabs {

@@ -337,12 +337,13 @@ impl WindowView {
                     this.drop_pane_on_pane(dragged.pane, id, zone, window, cx);
                 }
             }))
-            // 从文件树或访达拖来的文件放到这个终端上：切到它，把路径打进去。
+            // 从文件树或访达拖来的文件放到这个终端上：切到它，把路径打进去。文件树里的和终端在同一台机器上，
+            // 访达里的在这台电脑上。
             .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
-                this.drop_paths_on_pane(id, std::slice::from_ref(&dragged.path), window, cx);
+                this.drop_paths_on_pane(id, std::slice::from_ref(&dragged.path), false, window, cx);
             }))
             .on_drop(cx.listener(move |this, dropped: &ExternalPaths, window, cx| {
-                this.drop_paths_on_pane(id, dropped.paths(), window, cx);
+                this.drop_paths_on_pane(id, dropped.paths(), true, window, cx);
             }));
         if !cards {
             return pane_group(terminal.id(("pane", id)), label, split, focused).into_any_element();

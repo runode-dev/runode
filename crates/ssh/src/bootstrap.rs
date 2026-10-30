@@ -48,6 +48,14 @@ pub fn connect_command(dir: &str) -> String {
     ))
 }
 
+/// 起远端装着的 `dir` 这个构建的项目服务（`runode --ssh-project`），stdin、stdout 交给它；没装时以
+/// `PROBE_EXIT` 退出，先经 `connect_command` 装好。
+pub fn project_command(dir: &str) -> String {
+    wrap(&format!(
+        r#"X="$HOME/{BIN_DIR}/{dir}/runode"; if [ -x "$X" ]; then exec "$X" --ssh-project; fi; exit {PROBE_EXIT}"#
+    ))
+}
+
 /// 把 stdin 上的可执行文件装成 `dir` 这个构建：先写成临时文件，核对 SHA-256（`sha256`，十六进制）、试跑一下
 /// （拦住挂成 noexec 的家目录、太旧的 glibc），都过了才原子地换上，再把 `runode` 链接指过去。`archive` 时
 /// stdin 是只装着 `runode` 的 tar.gz，核对的是包。

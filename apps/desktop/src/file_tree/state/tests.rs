@@ -403,7 +403,14 @@ fn older_listings_do_not_overwrite_newer_scans() {
     let mut state = TreeState::default();
     let root = Path::new("/p");
     let listing = |dir: &str, entries| (PathBuf::from(dir), Some(entries));
-    let scan = |listings, started| TreeScan { root: root.into(), git: None, listings, reveal: None, started };
+    let scan = |listings, started| TreeScan {
+        root: root.into(),
+        git: None,
+        listings,
+        reveal: None,
+        started,
+        project: Default::default(),
+    };
     state.apply_scan(scan(vec![listing("/p", vec![dir("a")])], 1), ALL);
     state.toggle_dir(Path::new("/p/a"), root, ALL);
     state.apply_scan(scan(vec![listing("/p/a", vec![dir("sub"), file("c")])], 3), ALL);
@@ -422,7 +429,14 @@ fn older_scans_do_not_overwrite_newer_listings() {
     let mut state = TreeState::default();
     let root = Path::new("/p");
     let listing = |dir: &str, entries| (PathBuf::from(dir), Some(entries));
-    let scan = |listings, started| TreeScan { root: root.into(), git: None, listings, reveal: None, started };
+    let scan = |listings, started| TreeScan {
+        root: root.into(),
+        git: None,
+        listings,
+        reveal: None,
+        started,
+        project: Default::default(),
+    };
     state.apply_scan(scan(vec![listing("/p", vec![dir("a"), file("z")])], 1), ALL);
     // 扫描 2 发起后新建了 /p/new，重读 /p（列目录 3）并定位它；列目录先读回来。
     state.relist(vec![root.into()], root, ALL);
@@ -449,6 +463,7 @@ fn applies_scans() {
         listings,
         reveal: reveal.map(PathBuf::from),
         started: 0,
+        project: Default::default(),
     };
     assert!(state.apply_scan(scan(vec![listing("/p", vec![dir("a"), file("b")])], None), ALL));
     assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 0)]);
@@ -460,7 +475,14 @@ fn applies_scans() {
     assert!(!state.expanded.contains(Path::new("/p/a")));
     // 换了根目录时上一处选中的路径不留着，免得删除、改名作用在看不见的旧路径上。
     state.selected = Some(PathBuf::from("/p/b"));
-    let moved = TreeScan { root: "/q".into(), git: None, listings: Vec::new(), reveal: None, started: 0 };
+    let moved = TreeScan {
+        root: "/q".into(),
+        git: None,
+        listings: Vec::new(),
+        reveal: None,
+        started: 0,
+        project: Default::default(),
+    };
     assert!(state.apply_scan(moved, ALL));
     assert!(state.listings.is_empty());
     assert_eq!(state.selected, None);
@@ -484,6 +506,7 @@ fn scans_move_a_selection_that_lost_its_row() {
             ],
             reveal: None,
             started: 0,
+            project: Default::default(),
         };
         assert!(state.apply_scan(scan, ALL));
         state.expanded.extend([PathBuf::from("/p/a"), PathBuf::from("/p/a/b")]);
@@ -493,7 +516,8 @@ fn scans_move_a_selection_that_lost_its_row() {
         state
     };
     let rescan = |state: &mut TreeState, listings| {
-        let scan = TreeScan { root: root.into(), git: None, listings, reveal: None, started: 0 };
+        let scan =
+            TreeScan { root: root.into(), git: None, listings, reveal: None, started: 0, project: Default::default() };
         assert!(state.apply_scan(scan, ALL));
     };
 

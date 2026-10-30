@@ -12,10 +12,40 @@ pub const MAX_COMPACT: usize = 16;
 
 /// 目录里的一项。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DirEntry {
     /// 原样的文件名：拼操作用的路径要用它，显示时才换成 `to_string_lossy`，免得非法 UTF-8 的名字指到别的文件上。
+    #[cfg_attr(feature = "serde", serde(with = "name_bytes"))]
     pub name: OsString,
     pub is_dir: bool,
+}
+
+/// 文件名按字节序列化，哪个系统上都读得回：Unix 上是原样的字节；Windows 上读写都按 UTF-8，读到不合法的
+/// 字节时换成替换字符。
+#[cfg(feature = "serde")]
+mod name_bytes {
+    use std::ffi::OsString;
+
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(name: &OsString, serializer: S) -> Result<S::Ok, S::Error> {
+        #[cfg(unix)]
+        let bytes = std::os::unix::ffi::OsStrExt::as_bytes(name.as_os_str());
+        #[cfg(not(unix))]
+        let text = name.to_string_lossy();
+        #[cfg(not(unix))]
+        let bytes = text.as_bytes();
+        serializer.serialize_bytes(bytes)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<OsString, D::Error> {
+        let bytes = Vec::<u8>::deserialize(deserializer)?;
+        #[cfg(unix)]
+        let name = std::os::unix::ffi::OsStringExt::from_vec(bytes);
+        #[cfg(not(unix))]
+        let name = OsString::from(String::from_utf8_lossy(&bytes).into_owned());
+        Ok(name)
+    }
 }
 
 /// 读到的一组目录：每个目录的内容，读不了的（删掉了、改了名）为 `None`。

@@ -41,6 +41,7 @@ use runode_preview::{Alert, Align, Block, Content, Image as MdImage, Inline, Inl
 use select::{MdPos, TextKey};
 use text::{MdText, TextBox, Texts};
 
+use crate::project_host::ProjectHost;
 use crate::ui::{
     self as ui,
     a11y::Press,
@@ -800,10 +801,10 @@ fn image_path(dir: &Path, url: &str) -> Option<PathBuf> {
     runode_preview::image_format(&path).map(|_| path)
 }
 
-/// 读出 Markdown 引用的本地图片文件 `path`，和预览栏打开图片文件一样读、画 SVG；读不了、画不了时
+/// 经 `project` 读出 Markdown 引用的图片文件 `path`，和预览栏打开图片文件一样读、画 SVG；读不了、画不了时
 /// 为空。在后台调用。
-pub(super) fn picture(path: &Path, svg: &SvgRenderer) -> Option<Picture> {
-    picture_of(super::load(path), svg)
+pub(super) fn picture(project: &ProjectHost, path: &Path, svg: &SvgRenderer) -> Option<Picture> {
+    picture_of(super::load_from(project, path), svg)
 }
 
 /// 读到的图片换成能画的样子；不是图片、画不了、解码后超过 `MAX_DECODED_BYTES` 时为空。SVG 按自身尺寸画

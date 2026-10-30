@@ -22,6 +22,7 @@ use super::{WindowView, cards, project::panel_shell};
 use crate::{
     config::AppConfig,
     host_client::remote::{self, HostId, upload::Upload},
+    project_host::ProjectHost,
     terminal_view::TerminalView,
     ui::{
         font_size::{self, FontSize},
@@ -157,6 +158,7 @@ impl WindowView {
             name: workspace.name.clone(),
             dir: workspace.dir.clone(),
             single_click: cx.global::<AppConfig>().0.file_tree_preview_click == PreviewClick::Single,
+            project: ProjectHost::of(&workspace.host),
         }
     }
 
@@ -214,15 +216,24 @@ impl WindowView {
     }
 
     /// 把从文件树或访达拖来的 `paths` 放到终端 `pane` 上：切到那个终端，把路径一个个打进去。
-    /// 一个路径粘贴一次，因为 Codex 只在一次粘贴里正好是一个路径时才把它当图片。
+    /// 一个路径粘贴一次，因为 Codex 只在一次粘贴里正好是一个路径时才把它当图片。`local` 的是这台电脑上的
+    /// 文件，终端在远端主机上时先传过去，打的是远端的路径。
     pub(super) fn drop_paths_on_pane(
         &mut self,
         pane: gpui::EntityId,
         paths: &[PathBuf],
+        local: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.focus_pane_in_active_tab(pane, window, cx);
+        if local
+            && let Some(view) = self.focused_view().cloned()
+            && !view.read(cx).host().is_local()
+        {
+            self.upload_to_view(view, Upload::Files(paths.to_vec()), window, cx);
+            return;
+        }
         self.insert_paths(paths.to_vec(), None, window, cx);
     }
 
@@ -281,7 +292,6 @@ impl WindowView {
 
     /// 把 `paths` 一个个打进当前终端，在它的目录下时写相对路径，后面带上首尾行号 `lines` 和一个空格，
     /// 再把焦点交回终端。比目录要解符号链接，在单独的线程上算好再打进去（`fs_probe::off_thread`）。
-    /// 远端主机上的终端读不到本机的文件，先传过去，打的是远端的路径。
     pub(super) fn insert_paths(
         &mut self,
         paths: Vec<PathBuf>,
@@ -292,11 +302,6 @@ impl WindowView {
         let Some(view) = self.focused_view().cloned() else {
             return;
         };
-        if !view.read(cx).host().is_local() {
-            window.focus(&view.focus_handle(cx), cx);
-            self.upload_to_view(view, Upload::Files(paths), window, cx);
-            return;
-        }
         let cwd = view.read(cx).cwd();
         let quoting = Quoting::of_session(view.read(cx).meta());
         window.focus(&view.focus_handle(cx), cx);

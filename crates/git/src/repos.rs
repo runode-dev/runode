@@ -33,6 +33,7 @@ const MAX_WORKTREES: usize = 16;
 
 /// 仓库是怎么来的。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RepoKind {
     /// 读的起点所在的仓库。
     Main,
@@ -46,6 +47,7 @@ pub enum RepoKind {
 
 /// 主仓库、它里面的子仓库，以及同一个仓库的其他工作树各自的状态。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Repos {
     pub main: Snapshot,
     /// 按 `Snapshot::prefix` 排，外层的总在它里面的子仓库前面。

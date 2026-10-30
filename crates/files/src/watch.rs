@@ -6,6 +6,7 @@ use notify::Watcher as _;
 
 /// 监听到的一批改动。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Changes {
     /// 变了的路径。
     pub paths: Vec<PathBuf>,

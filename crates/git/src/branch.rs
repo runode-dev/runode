@@ -6,6 +6,7 @@ use crate::{GitError, Repo, Result, git, git_command, ops::run};
 
 /// 分支列表里的一项。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Branch {
     /// 本地分支是 `main` 这样的名字，远端分支带上远端名，如 `origin/main`。
     pub name: String,

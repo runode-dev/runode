@@ -125,7 +125,7 @@ pub fn set_ssh_settings(settings: SshSettings) {
     *SETTINGS.lock().unwrap_or_else(PoisonError::into_inner) = settings;
 }
 
-fn ssh() -> Ssh {
+pub(crate) fn ssh() -> Ssh {
     let settings = SETTINGS.lock().unwrap_or_else(PoisonError::into_inner).clone();
     let dirs = runode_paths::Dirs::from_env();
     // Windows 自带的 OpenSSH 不支持 ControlMaster。

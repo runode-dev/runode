@@ -7,6 +7,7 @@ use crate::{FileDiff, GitError, Repo, Result, git, ops::run, parse::parse_diff, 
 
 /// 历史里的一个提交。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Commit {
     /// 完整的提交号。
     pub id: String,
@@ -30,6 +31,7 @@ impl Commit {
 
 /// 指向提交的一个引用。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CommitRef {
     /// 分支名、带远端名的远端分支（如 `origin/main`）或者 tag 名；分离的 HEAD 是 `HEAD`。
     pub name: String,
@@ -37,6 +39,7 @@ pub struct CommitRef {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RefKind {
     /// 分离头指针时的 HEAD。
     Head,
@@ -49,6 +52,7 @@ pub enum RefKind {
 
 /// 读到的一段历史和排好的图。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct History {
     /// 新的在前，父提交总在它的子提交后面，同等条件下按提交时间。
     pub commits: Vec<Commit>,
@@ -60,6 +64,7 @@ pub struct History {
 
 /// 图里一行：提交的点在第几条 lane，以及这一行里要画的线段。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GraphRow {
     pub column: usize,
     /// 点的颜色。
@@ -72,6 +77,7 @@ pub struct GraphRow {
 /// 一行里的一条线段。上半段从行顶的 `from` 列连到点所在高度的 `to` 列；下半段从点所在高度的
 /// `from` 列连到行底的 `to` 列。两列相同是竖线，不同是斜着连过去。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GraphLine {
     pub half: Half,
     pub from: usize,
@@ -84,6 +90,7 @@ pub struct GraphLine {
 /// 整条都是 `Current`。别的 lane 是 `Other`，第几种颜色（从 0 数，界面按自己的调色板轮换，
 /// 不和前两种撞色）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LaneColor {
     Current,
     Remote,
@@ -91,6 +98,7 @@ pub enum LaneColor {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Half {
     Top,
     Bottom,

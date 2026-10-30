@@ -37,6 +37,7 @@ pub struct Repo {
 
 /// git 命令失败：`message` 是 git 自己的报错，去掉了 `hint:` 开头的提示。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GitError {
     pub message: String,
 }
@@ -72,6 +73,7 @@ pub type Result<T = (), E = GitError> = std::result::Result<T, E>;
 
 /// `Repo::commit` 的选项。
 #[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CommitOptions {
     /// 改写上一次提交；说明为空时沿用原来的说明。
     pub amend: bool,

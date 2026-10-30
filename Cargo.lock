@@ -6829,12 +6829,16 @@ dependencies = [
  "notify",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
+ "serde",
  "tracing",
 ]
 
 [[package]]
 name = "runode-git"
 version = "0.1.16"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "runode-host"

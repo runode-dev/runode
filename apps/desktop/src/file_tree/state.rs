@@ -9,9 +9,12 @@ use std::{
 use gpui::{ScrollStrategy, SharedString, UniformListScrollHandle};
 use runode_git as git;
 
-use crate::file_tree::{
-    TreeScan,
-    listing::{Decoration, Decorator, DirEntry, GitChanges, Listings, MAX_COMPACT, single_dir},
+use crate::{
+    file_tree::{
+        TreeScan,
+        listing::{Decoration, Decorator, DirEntry, GitChanges, Listings, MAX_COMPACT, single_dir},
+    },
+    project_host::ProjectHost,
 };
 
 /// 文件树里显示哪些：被 git 忽略的、名字以 `.` 开头的。整个窗口一个设置，见 `FileTree::filter`。
@@ -39,6 +42,8 @@ pub(crate) struct FileRow {
 pub(crate) struct TreeState {
     /// 文件树的根目录，跟着当前终端的目录变；还没读过时为空，读到过一次之后就一直有。
     pub root: Option<PathBuf>,
+    /// 这棵树的文件在哪台机器上，展开的目录去那里读。
+    pub project: ProjectHost,
     /// 最近一次读到的 git 状态，由 app 交进来，行按它着色；不在 git 仓库里时为空。
     pub git: Option<Arc<git::Repos>>,
     /// 按 `git` 那一份快照算好的改动表，git 换了才重算，免得每次重排都在主线程上把所有改动过一遍。
@@ -379,7 +384,8 @@ impl TreeState {
 
     /// 换上 app 在后台读到的结果，有变化时返回真。
     pub(crate) fn apply_scan(&mut self, scan: TreeScan, filter: TreeFilter) -> bool {
-        let TreeScan { root, git, listings, reveal, started } = scan;
+        let TreeScan { root, git, listings, reveal, started, project } = scan;
+        self.project = project;
         // 第一次读时 `root` 还是空的，下面换上根目录时一定算作有变化。
         let mut changed = false;
         // 终端换到了别的仓库或目录：上一处的目录列表和选中的行不再相干，选中项留着的话删除、改名

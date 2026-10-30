@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 runode-paths.workspace = true
-runode-git.workspace = true
+runode-git = { workspace = true, features = ["serde"] }
 runode-types.workspace = true
 runode-terminal.workspace = true
 # 看板新建任务时挑 agent 的模型和强度，向 agent 问模型清单。
@@ -33,7 +33,7 @@ runode-autostart.workspace = true
 runode-ui.workspace = true
 # 预览栏读文件、判断类型、语法高亮和 Markdown 解析，不碰界面。
 runode-preview.workspace = true
-runode-files.workspace = true
+runode-files = { workspace = true, features = ["serde"] }
 runode-ssh.workspace = true
 # 语音输入：下载识别模型、录音、在本机转文字。
 runode-speech.workspace = true

@@ -7,6 +7,11 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde = { workspace = true, optional = true }
+
+[features]
+# 桌面经 ssh 在远端读项目时，两边按 JSON 收发这些类型。
+serde = ["dep:serde"]
 
 [lints]
 workspace = true

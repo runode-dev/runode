@@ -8,6 +8,7 @@ use crate::{
 
 /// 对一块改动做什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum HunkAction {
     /// 把未暂存段里的这块放进暂存区。
     Stage,

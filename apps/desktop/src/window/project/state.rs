@@ -13,7 +13,7 @@ use crate::file_tree::TreeScan;
 use runode_git as git;
 use runode_protocol::TaskSource;
 
-use super::scan::Scan;
+use crate::project_host::{ProjectHost, Scan};
 use crate::window::model::Workspace;
 
 /// 一个 workspace 的改动和读项目的调度。
@@ -81,7 +81,14 @@ impl Workspace {
             project.dir = Some(scan.dir);
             changed = true;
         }
-        let tree = TreeScan { root: scan.root, git: project.git.clone(), listings: scan.listings, reveal, started };
+        let tree = TreeScan {
+            root: scan.root,
+            git: project.git.clone(),
+            listings: scan.listings,
+            reveal,
+            started,
+            project: ProjectHost::of(&self.host),
+        };
         (changed, tree)
     }
 }

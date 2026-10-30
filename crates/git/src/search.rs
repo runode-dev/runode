@@ -20,6 +20,7 @@ const MAX_GREP_LINE_BYTES: u64 = 64 * 1024;
 
 /// 按内容找到的一行。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GrepMatch {
     /// 相对搜索的目录。
     pub path: PathBuf,

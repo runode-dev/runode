@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde = { workspace = true, optional = true }
 notify.workspace = true
 tracing.workspace = true
 
@@ -18,6 +19,10 @@ libc.workspace = true
 # 移到废纸篓用 NSFileManager。
 objc2.workspace = true
 objc2-foundation = { workspace = true, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
+
+[features]
+# 桌面经 ssh 在远端读项目时，两边按 JSON 收发这些类型。
+serde = ["dep:serde"]
 
 [lints]
 workspace = true

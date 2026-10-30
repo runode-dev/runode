@@ -19,6 +19,7 @@ const MAX_VIEW_LINES: usize = 50_000;
 
 /// 和什么比：工作区比暂存区，暂存区比 HEAD，或者一个提交比它的第一个父提交（第一个提交和空的树比）。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DiffSide {
     Worktree,
     Index,
@@ -27,6 +28,7 @@ pub enum DiffSide {
 
 /// 整篇 diff 里的一行。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DiffRow {
     /// 第几块（`FileDiff::hunks` 的下标）的块头。
     Header(usize),
@@ -38,6 +40,7 @@ pub enum DiffRow {
 
 /// `Repo::new_bytes` 的选项。
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReadOptions {
     /// 内容比这么多字节大时不要，为 `TooLarge`。
     pub max_bytes: u64,
@@ -45,10 +48,12 @@ pub struct ReadOptions {
 
 /// 内容比 `ReadOptions::max_bytes` 大，没给。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TooLarge;
 
 /// 一个文件的整篇 diff。
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DiffView {
     pub file: FileDiff,
     /// 新的那一边的全文，原样（制表符没展开），给按文件类型高亮；删掉的文件、二进制、太大或者和

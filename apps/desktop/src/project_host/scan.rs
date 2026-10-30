@@ -10,23 +10,23 @@ use crate::file_tree::{Listings, list_dirs};
 use runode_git as git;
 
 /// 后台读到的一份结果：git 状态，以及文件树根目录和展开的目录的内容，读不了的目录为 `None`。
-pub(super) struct Scan {
+pub(crate) struct Scan {
     /// 读的是哪个目录：当前终端的目录，取不到时是 workspace 的目录。
-    pub(super) dir: PathBuf,
+    pub(crate) dir: PathBuf,
     /// 文件树的根目录：`dir` 所在仓库的根，不在仓库里时是 `dir` 本身。
-    pub(super) root: PathBuf,
+    pub(crate) root: PathBuf,
     /// 这个仓库以及它里面的子模块和嵌套仓库。
-    pub(super) git: Option<git::Repos>,
-    pub(super) listings: Listings,
+    pub(crate) git: Option<git::Repos>,
+    pub(crate) listings: Listings,
     /// 监听 `root` 时还要另外听的 git 目录，见 `watch_git_dirs`。
-    pub(super) watch_git_dirs: Vec<PathBuf>,
-    pub(super) untracked: git::UntrackedCache,
+    pub(crate) watch_git_dirs: Vec<PathBuf>,
+    pub(crate) untracked: git::UntrackedCache,
     /// 读这一份花的时间。
-    pub(super) cost: Duration,
+    pub(crate) cost: Duration,
 }
 
 /// 读一遍项目；`expanded` 是文件树里展开着的目录，`worktrees` 说读不读其他工作树（Git 面板没开时不读）。
-pub(super) fn scan(dir: PathBuf, expanded: Vec<PathBuf>, mut untracked: git::UntrackedCache, worktrees: bool) -> Scan {
+pub(crate) fn scan(dir: PathBuf, expanded: Vec<PathBuf>, mut untracked: git::UntrackedCache, worktrees: bool) -> Scan {
     let started = Instant::now();
     let git = git::snapshot_repos(&dir, &mut untracked, worktrees);
     let root = git.as_ref().map_or_else(|| dir.clone(), |git| git.main.root.clone());

@@ -17,7 +17,7 @@ use runode_config::PreviewClick;
 pub(in crate::window) use crate::preview_panel::DiffTarget;
 
 use super::{WindowView, cards, model::WorkspaceId, status_bar};
-use crate::config::AppConfig;
+use crate::{config::AppConfig, project_host::ProjectHost};
 
 impl WindowView {
     /// 对当前 workspace 的预览栏做 `f`：先告诉它是哪个 workspace，交给它这个 workspace 最近读到的 git 状态。
@@ -27,9 +27,9 @@ impl WindowView {
         f: impl FnOnce(&mut PreviewPanel, &mut Context<PreviewPanel>) -> R,
     ) -> R {
         let workspace = self.workspace();
-        let (id, git) = (workspace.id, workspace.project.git.clone());
+        let (id, git, project) = (workspace.id, workspace.project.git.clone(), ProjectHost::of(&workspace.host));
         self.preview.update(cx, |panel, cx| {
-            panel.set_workspace(id, cx);
+            panel.set_workspace(id, project, cx);
             panel.set_git(id, git, cx);
             f(panel, cx)
         })

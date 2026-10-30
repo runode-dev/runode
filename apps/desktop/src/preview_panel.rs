@@ -404,12 +404,19 @@ fn right_fade(handle: &ScrollHandle, cx: &App) -> Option<Div> {
 
 use runode_files::{Stamp, stamp as file_stamp};
 
-/// 读 `path` 来预览，读多少按 `runode_preview::limit`。
+use crate::project_host::ProjectHost;
+
+/// 读本机的 `path` 来预览，读多少按 `runode_preview::limit`。
 pub(crate) fn load(path: &Path) -> runode_preview::Content {
+    load_from(&ProjectHost::Local, path)
+}
+
+/// 经 `project` 读 `path` 来预览。会阻塞。
+fn load_from(project: &ProjectHost, path: &Path) -> runode_preview::Content {
     let (max, whole) = runode_preview::limit(path);
-    match runode_files::read_limited(path, max, whole) {
+    match project.read_limited(path, max, whole) {
         Ok(read) => runode_preview::decode(path, read.bytes, read.cut),
-        Err(err) => runode_preview::Content::Unreadable(err.to_string()),
+        Err(err) => runode_preview::Content::Unreadable(err),
     }
 }
 
@@ -534,9 +541,11 @@ impl PreviewPanel {
         }
     }
 
-    /// 之后的操作和画的都是 workspace `ws` 的标签。app 每次对预览栏做什么、画它之前都先调。换了 workspace
-    /// 时重画：app 缓存着它，栏的位置大小不变时照搬上一帧。
-    pub fn set_workspace(&mut self, ws: WorkspaceId, cx: &mut Context<Self>) {
+    /// 之后的操作和画的都是 workspace `ws` 的标签，它的文件经 `project` 读。app 每次对预览栏做什么、画它之前
+    /// 都先调。换了 workspace 时重画：app 缓存着它，栏的位置大小不变时照搬上一帧。远端的文件只能看：不进编辑，
+    /// 也不比文件的大小和修改时间，切回来时不自己重读。
+    pub fn set_workspace(&mut self, ws: WorkspaceId, project: ProjectHost, cx: &mut Context<Self>) {
+        self.workspaces.entry(ws).or_default().project = project;
         if self.ws != ws {
             self.ws = ws;
             cx.notify();
@@ -683,6 +692,16 @@ impl PreviewPanel {
     /// 当前预览标签的文件。
     fn preview(&self) -> Option<&Preview> {
         self.tabs()?.active()
+    }
+
+    /// 当前 workspace 的文件在哪台机器上。
+    fn project(&self) -> ProjectHost {
+        self.tabs().map(|tabs| tabs.project.clone()).unwrap_or_default()
+    }
+
+    /// 当前标签能进编辑模式。
+    fn can_edit(&self, preview: &Preview) -> bool {
+        preview.editable() && !self.project().is_remote()
     }
 
     fn preview_mut(&mut self) -> Option<&mut Preview> {
@@ -888,7 +907,7 @@ impl PreviewPanel {
             return;
         }
         // 没读过的上面已经定了（第一次读还在路上的不打断），不随文件变的不用比。
-        if preview.content.is_none() || !preview.follows_file() {
+        if preview.content.is_none() || !preview.follows_file() || self.project().is_remote() {
             return;
         }
         let (id, path, cancel) = (self.ws, preview.path.clone(), preview.cancel.clone());
@@ -953,10 +972,14 @@ impl PreviewPanel {
         let is_markdown = runode_preview::is_markdown(&path);
         let svg = cx.svg_renderer();
         let cell_width = self.cell_width;
+        let project = self.project();
+        let remote = project.is_remote();
         let job = cx.background_spawn({
-            let path = path.clone();
-            let svg = svg.clone();
+            let (path, svg, project) = (path.clone(), svg.clone(), project.clone());
             async move {
+                if remote {
+                    return (loaded(load_from(&project, &path), &svg, cell_width), None, None);
+                }
                 let real_path = fs::canonicalize(&path).ok();
                 let stamp = file_stamp(&path);
                 (loaded(load(&path), &svg, cell_width), stamp, real_path)
@@ -1009,8 +1032,10 @@ impl PreviewPanel {
                     };
                     preview.content = Some(content);
                     preview.refresh_marks(git, real_root);
-                    let edit =
-                        std::mem::take(&mut preview.edit_on_load) && preview.editor.is_none() && preview.editable();
+                    let edit = std::mem::take(&mut preview.edit_on_load)
+                        && preview.editor.is_none()
+                        && preview.editable()
+                        && !remote;
                     if edit {
                         this.start_editing_quietly(id, path.clone(), cx);
                     }
@@ -1025,11 +1050,14 @@ impl PreviewPanel {
             if is_markdown && !truncated {
                 let doc = cx
                     .background_spawn({
-                        let (cancel, lines, path) = (cancel.clone(), lines.clone(), path.clone());
+                        let (cancel, lines, path, project) =
+                            (cancel.clone(), lines.clone(), path.clone(), project.clone());
                         async move {
                             let blocks = runode_preview::parse_markdown(&lines.join("\n"), &cancel)?;
                             let dir = path.parent().unwrap_or(Path::new("/"));
-                            Some(markdown::Doc::new(blocks, dir, cell_width, |path| markdown::picture(path, &svg)))
+                            Some(markdown::Doc::new(blocks, dir, cell_width, |path| {
+                                markdown::picture(&project, path, &svg)
+                            }))
                         }
                     })
                     .await;
@@ -1179,7 +1207,7 @@ impl PreviewPanel {
             .flex()
             .items_center()
             .gap(px(2.))
-            .when(editing || preview.editable(), |buttons| {
+            .when(editing || self.can_edit(preview), |buttons| {
                 buttons.child(
                     toggle("preview-edit", PENCIL_ICON, editing, rust_i18n::t!("preview.edit"))
                         .on_mouse_down(

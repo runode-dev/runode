@@ -30,6 +30,7 @@ use std::{
     },
 };
 
+use crate::project_host::ProjectHost;
 use crate::ui::{
     a11y::A11yPress,
     actions::{Copy, Cut, FocusTerminal, Paste},
@@ -127,6 +128,8 @@ pub struct Input {
     pub dir: PathBuf,
     /// 单击文件就在预览栏里开成临时标签（配置的 `PreviewClick::Single`）；否则双击才打开。
     pub single_click: bool,
+    /// 当前 workspace 的文件在哪台机器上。远端的只能看，不能新建、改名、删除和搜索。
+    pub project: ProjectHost,
 }
 
 /// app 在后台读到的一份结果，经 `FileTree::apply_scan` 交进来。
@@ -141,6 +144,8 @@ pub struct TreeScan {
     pub reveal: Option<PathBuf>,
     /// 发起这次读时取的 `read_ticket`。
     pub started: u64,
+    /// 这些目录在哪台机器上，之后展开的目录也去那里读。
+    pub project: ProjectHost,
 }
 
 /// 发起一次后台读目录（项目扫描或 `list_queued`）时取的序号，越晚发起越大。读回来的目录按它比先后：
@@ -310,6 +315,11 @@ impl FileTree {
         self.input = input;
     }
 
+    /// 文件在远端主机上：只能看。
+    fn read_only(&self) -> bool {
+        self.input.project.is_remote()
+    }
+
     /// 之后显示的、操作的都是 workspace `ws` 的树：框里的搜索词存回原来那个 workspace，换上这个 workspace 的
     /// 词重搜。和上次是同一个时什么也不做。会重画，不能在画的时候调。
     pub fn switch_workspace(&mut self, ws: WorkspaceId, cx: &mut Context<Self>) {
@@ -439,18 +449,24 @@ impl FileTree {
         let check = |key: &str, checked: bool, action: Box<dyn Action>| {
             Some(MenuItem::checkbox(rust_i18n::t!(key).into_owned(), None, checked, action))
         };
-        let items = vec![
-            item("files.new_file", Box::new(NewFile)),
-            item("files.new_folder", Box::new(NewFolder)),
+        let mut items = Vec::new();
+        if !self.read_only() {
+            items.extend([item("files.new_file", Box::new(NewFile)), item("files.new_folder", Box::new(NewFolder))]);
+        }
+        items.extend([
             item("files.collapse_all", Box::new(CollapseAllFiles)),
             None,
             check("files.show_dotfiles", self.show_dotfiles, Box::new(ToggleShowDotfiles)),
             check("files.show_ignored", self.show_ignored, Box::new(ToggleShowIgnored)),
-            None,
-            item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
-            item(&crate::i18n::os_key("files.open_in_finder"), Box::new(OpenRootInFinder))
-                .map(|item| item.with_icon(FOLDER_OPEN_ICON)),
-        ];
+        ]);
+        if !self.read_only() {
+            items.extend([
+                None,
+                item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
+                item(&crate::i18n::os_key("files.open_in_finder"), Box::new(OpenRootInFinder))
+                    .map(|item| item.with_icon(FOLDER_OPEN_ICON)),
+            ]);
+        }
         let target = self.focus.clone();
         self.open_context_menu(position, items, target, cx);
     }
@@ -841,7 +857,8 @@ impl FileTree {
             return;
         }
         let (dirs, git, since) = (std::mem::take(&mut state.to_list), state.git.clone(), read_ticket());
-        let job = cx.background_spawn(async move { list_dirs(dirs, git.as_deref()) });
+        let (project, root) = (state.project.clone(), state.root.clone().unwrap_or_default());
+        let job = cx.background_spawn(async move { project.list_dirs(&root, dirs, git.as_deref()) });
         cx.spawn(async move |this, cx| {
             let listings = job.await;
             this.update(cx, |this, cx| {
@@ -960,7 +977,7 @@ impl Render for FileTree {
         self.focus_menu(window, cx);
         let font_size = FontSize::Medium.points() * font_size::scale(cx);
         let header = self.render_header(cx);
-        let search_box = self.render_file_search_box(cx);
+        let search_box = (!self.read_only()).then(|| self.render_file_search_box(cx));
         let content = match self.render_file_search_results(font_size, cx) {
             Some(results) => results,
             None => self.render_file_tree(font_size, cx).into_any_element(),
@@ -984,8 +1001,16 @@ impl Render for FileTree {
             .on_action(cx.listener(Self::collapse_all_files))
             .on_action(cx.listener(|this, _: &ToggleShowDotfiles, _, cx| this.toggle_show_dotfiles(cx)))
             .on_action(cx.listener(|this, _: &ToggleShowIgnored, _, cx| this.toggle_show_ignored(cx)))
-            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, cx| open_in_vscode(this.files_root(), cx)))
-            .on_action(cx.listener(|this, _: &OpenRootInFinder, _, cx| cx.open_with_system(&this.files_root())))
+            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, cx| {
+                if !this.read_only() {
+                    open_in_vscode(this.files_root(), cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenRootInFinder, _, cx| {
+                if !this.read_only() {
+                    cx.open_with_system(&this.files_root());
+                }
+            }))
             .on_action(cx.listener(Self::focus_terminal))
             .on_action(cx.listener(Self::new_file))
             .on_action(cx.listener(Self::new_folder))
@@ -1013,7 +1038,7 @@ impl Render for FileTree {
             .flex_col()
             .text_size(px(font_size))
             .child(header)
-            .child(search_box)
+            .children(search_box)
             .child(tree)
             .children(self.render_context_menu(window, cx))
     }

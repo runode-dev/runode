@@ -134,11 +134,12 @@ impl PreviewPanel {
 
     /// 当前标签进出编辑模式。进的时候固定标签，免得打开别的文件时被换掉；改过没存时退出先问。
     pub(super) fn toggle_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let remote = self.project().is_remote();
         let Some(preview) = self.preview_mut() else {
             return;
         };
         if preview.editor.is_none() {
-            if preview.editable() {
+            if preview.editable() && !remote {
                 preview.pinned = true;
                 self.start_editing(window, cx);
             }

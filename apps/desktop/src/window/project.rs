@@ -2,10 +2,9 @@
 //! 有文件变了才在后台重读，监听不了时定时重读。文件树、Git 面板和 GitHub Actions 页合在右侧面板里，顶上一排
 //! 标签切换；面板的开关，右侧各栏的宽度、分隔线，以及开关按钮也在这里。
 //!
-//! 在后台读 git 状态和文件树要显示的目录在 `scan`，每个 workspace 记着的状态和换上读到的结果在 `state`，
-//! 监听目录在 `watch`；这三处不碰界面。文件树本身在 `file_tree`，读到的目录交给它，见 `files`。
+//! 每个 workspace 记着的状态和换上读到的结果在 `state`，监听目录在 `watch`，都不碰界面；读项目经
+//! `ProjectHost`，SSH 主机上的项目由那台机器读，监听不到，定时重读。文件树本身在 `file_tree`。
 
-mod scan;
 mod state;
 mod watch;
 
@@ -25,13 +24,13 @@ use gpui::{
     div, prelude::*, px,
 };
 // 面板外框在 `runode_ui::panel`，窗口里各面板从这里引。
+use crate::project_host::ProjectHost;
 use crate::ui::a11y::A11yPress;
 pub(super) use crate::ui::panel::{panel_message, panel_shell};
 use crate::{
     assets::{ACTIONS_WORKFLOW_ICON, FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
     ui::{font_size::FontSize, theme::ActiveTheme as _, tooltip::tooltip},
 };
-use scan::scan;
 
 pub(super) use state::Project;
 pub(super) use watch::{ProjectChanges, ProjectWatch};
@@ -47,6 +46,8 @@ const POLL_BACKOFF: u32 = 10;
 /// 有其他工作树时至少隔这么久重读一次：它们的工作目录不在监听的范围里，只有 git 目录（暂存、
 /// 提交、切分支）在。上次读得慢时按 `POLL_BACKOFF` 拉长。
 const WORKTREE_INTERVAL: Duration = Duration::from_secs(10);
+/// SSH 主机上的项目监听不到，至少隔这么久重读一次；上次读得慢时按 `POLL_BACKOFF` 拉长。
+const REMOTE_INTERVAL: Duration = Duration::from_secs(5);
 /// 监听到改动后先攒这么久再读：保存文件、提交这类操作会连着来一串事件。
 pub(super) const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
 /// 监听到改动时，离上次开始读至少隔上次耗时的这么多倍。
@@ -123,13 +124,18 @@ impl WindowView {
 
     /// 在单独的线程上（`fs_probe::off_thread`，不占后台线程池）看当前终端的目录是不是目录，记下来；
     /// `project_dir` 因此变了时按新目录再检查一遍。
+    /// 远端的目录这台机器上看不了，照终端报的读，读不了时 `refresh_project` 退回 workspace 的目录。
     fn check_cwd(&mut self, cx: &mut Context<Self>) {
-        if self.on_remote() {
-            return;
-        }
         let Some(cwd) = self.focused_view().and_then(|view| view.read(cx).cwd()) else {
             return;
         };
+        if self.on_remote() {
+            let project = &mut self.workspaces[self.active].project;
+            if project.cwd.as_ref().is_none_or(|(dir, _)| *dir != cwd) {
+                project.cwd = Some((cwd, true));
+            }
+            return;
+        }
         let workspace = &mut self.workspaces[self.active];
         if workspace.project.cwd_checking.as_ref() == Some(&cwd) {
             return;
@@ -177,7 +183,7 @@ impl WindowView {
     /// `canonical_dir_later`），建好之前照旧的监听或定时重读。
     pub(super) fn sync_project_watch(&mut self, cx: &mut Context<Self>) {
         let project = &self.workspace().project;
-        let root = project.root.clone().filter(|_| self.project_visible(cx));
+        let root = project.root.clone().filter(|_| self.project_visible(cx) && !self.on_remote());
         let Some(root) = root else {
             self.project_watch = None;
             self.building_watch = None;
@@ -271,15 +277,12 @@ impl WindowView {
     pub(super) fn refresh_project(&mut self, cx: &mut Context<Self>) {
         // 终端换了目录时，看过它在不在之后 `check_cwd` 再按新目录读。
         self.check_cwd(cx);
-        // 远端的目录这台机器上读不到，右侧面板只显示 `panel.remote`；没读过就没有 `project.root`，监听跟着放掉。
-        if self.on_remote() {
-            self.sync_project_watch(cx);
-            return;
-        }
         if !self.project_visible(cx) {
             // 切到右侧什么都不显示的 workspace 时，放掉上一个 workspace 的目录监听。
             self.sync_project_watch(cx);
-            self.probe_repo(cx);
+            if !self.on_remote() {
+                self.probe_repo(cx);
+            }
             return;
         }
         let dir = self.project_dir(cx);
@@ -287,6 +290,7 @@ impl WindowView {
         // 其他工作树只在 Git 面板里显示，面板没开或者藏起来了时不读；打开面板时 `toggle_git` 会重读一次。
         let worktrees = self.git_shown() && self.git_panel.read(cx).options().show_worktrees;
         let workspace = &mut self.workspaces[self.active];
+        let host = ProjectHost::of(&workspace.host);
         let project = &mut workspace.project;
         if project.refreshing {
             project.stale = true;
@@ -298,7 +302,7 @@ impl WindowView {
         let id = workspace.id;
         let untracked = std::mem::take(&mut project.untracked);
         let started = crate::file_tree::read_ticket();
-        let job = cx.background_spawn(async move { scan(dir, expanded, untracked, worktrees) });
+        let job = cx.background_spawn(async move { host.scan(dir, expanded, untracked, worktrees) });
         cx.spawn(async move |this, cx| {
             let scan = job.await;
             this.update(cx, |this, cx| {
@@ -307,6 +311,14 @@ impl WindowView {
                     return;
                 };
                 workspace.project.refreshing = false;
+                // 远端读不了（还没连上、断线）：等下一轮定时检查再试。
+                let scan = match scan {
+                    Ok(scan) => scan,
+                    Err(err) => {
+                        tracing::debug!("cannot read the project: {err}");
+                        return;
+                    }
+                };
                 workspace.project.scan_cost = scan.cost;
                 let (changed, tree) = workspace.apply_scan(scan, started);
                 let git = workspace.project.git.clone();
@@ -390,14 +402,16 @@ impl WindowView {
     /// 退回定时重读，离上次开始读至少隔 `FALLBACK_INTERVAL`，上次读得慢时按耗时拉长。
     pub(super) fn poll_project(&mut self, cx: &mut Context<Self>) {
         self.refresh_repo_badges(cx);
-        if self.on_remote() {
-            return;
-        }
         self.check_cwd(cx);
-        self.list_tasks(cx);
-        self.poll_github_actions(cx);
+        let remote = self.on_remote();
+        if !remote {
+            self.list_tasks(cx);
+            self.poll_github_actions(cx);
+        }
         if !self.project_visible(cx) {
-            self.probe_repo(cx);
+            if !remote {
+                self.probe_repo(cx);
+            }
             return;
         }
         let dir = self.project_dir(cx);
@@ -408,7 +422,9 @@ impl WindowView {
             self.refresh_if_due(cx);
         } else {
             // 监听不了目录，或者有其他工作树（它们的工作目录监听不到）时定时重读。
-            let interval = if !self.watching() {
+            let interval = if remote {
+                Some(REMOTE_INTERVAL)
+            } else if !self.watching() {
                 Some(FALLBACK_INTERVAL)
             } else if self.git_shown() && project.git.as_ref().is_some_and(|git| !git.worktrees.is_empty()) {
                 Some(WORKTREE_INTERVAL)
@@ -482,7 +498,7 @@ impl WindowView {
     /// 右侧面板显示着的那一页，收着时为空。
     pub(super) fn render_side_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
         let panel = self.workspace().panel?;
-        if self.on_remote() {
+        if self.on_remote() && panel != SidePanel::Files {
             let shell = panel_shell("remote-panel", width, cards(cx), cx)
                 .bg(cx.theme().mix(0.03))
                 .text_size(FontSize::Body)
