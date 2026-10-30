@@ -49,12 +49,20 @@ impl Client {
 
     /// 发一个请求，等回话，最多等 `timeout`。会阻塞。
     pub(super) fn call(&self, call: Call, timeout: Duration) -> Result<(Reply, Vec<u8>), String> {
+        self.call_with(call, &[], timeout)
+    }
+
+    /// 发一个后面跟着 `content` 的请求，等回话。会阻塞。
+    pub(super) fn call_with(&self, call: Call, content: &[u8], timeout: Duration) -> Result<(Reply, Vec<u8>), String> {
         let conn = self.conn()?;
         let id = conn.next.fetch_add(1, Ordering::Relaxed);
         let (sender, answer) = mpsc::channel();
         conn.pending.lock().unwrap_or_else(PoisonError::into_inner).insert(id, sender);
-        let written =
-            wire::write(&mut *conn.input.lock().unwrap_or_else(PoisonError::into_inner), &Request { id, call }, &[]);
+        let written = wire::write(
+            &mut *conn.input.lock().unwrap_or_else(PoisonError::into_inner),
+            &Request { id, call, blob: content.len() },
+            content,
+        );
         if let Err(err) = written {
             conn.closed.store(true, Ordering::Relaxed);
             conn.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);

@@ -7,10 +7,13 @@ use std::{
     path::PathBuf,
 };
 
-use runode_files::Listings;
+use runode_files::{Listings, Stamp};
 use serde::{Deserialize, Serialize};
 
-use super::repo::GitOp;
+use super::{
+    edit::{FileOp, OpFailure},
+    repo::GitOp,
+};
 
 /// 桌面要远端办的事。
 #[derive(Debug, Serialize, Deserialize)]
@@ -23,6 +26,12 @@ pub(super) enum Call {
     ListDirs { root: PathBuf, dirs: Vec<PathBuf> },
     /// 对根目录是 `root` 的仓库跑 git。
     Git { root: PathBuf, op: GitOp },
+    /// 改文件。
+    Edit(FileOp),
+    /// 文件现在的版本戳（`runode_files::stamp`）。
+    Stamp { path: PathBuf },
+    /// 把请求后面跟着的字节写成 `path`（`runode_paths::replace_file`），交回写完后的版本戳。
+    Write { path: PathBuf },
 }
 
 /// 远端办完的结果。
@@ -36,6 +45,9 @@ pub(super) enum Reply {
     Listed(Listings),
     /// git 操作的结果，形状是 `runode_git::Repo` 同名方法的返回值。
     Git(serde_json::Value),
+    /// 改完了；挪进、复制进目录的是落到了哪里。
+    Edited(Result<Option<PathBuf>, OpFailure>),
+    Stamp(Option<Stamp>),
     /// 没办成，原因写给人看。
     Failed(String),
 }
@@ -54,6 +66,9 @@ pub(super) struct RemoteScan {
 pub(super) struct Request {
     pub id: u64,
     pub call: Call,
+    /// 紧跟在这一行后面的字节数。
+    #[serde(default)]
+    pub blob: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

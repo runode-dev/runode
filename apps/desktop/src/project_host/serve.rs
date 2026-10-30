@@ -41,9 +41,12 @@ pub(crate) fn run() -> i32 {
                 return 1;
             }
         };
+        let Ok(content) = wire::read_blob(&mut input, request.blob) else {
+            return 0;
+        };
         let (output, caches) = (output.clone(), caches.clone());
         let spawned = thread::Builder::new().name("project-call".into()).spawn(move || {
-            let (reply, blob) = handle(request.call, &caches);
+            let (reply, blob) = handle(request.call, content, &caches);
             let response = Response { id: request.id, reply, blob: blob.len() };
             let mut output = output.lock().unwrap_or_else(PoisonError::into_inner);
             // 编不了的结果改回一句原因；还写不出去说明桌面已经断开，stdin 随后也会关，在那里退出。
@@ -59,7 +62,8 @@ pub(crate) fn run() -> i32 {
     }
 }
 
-fn handle(call: Call, caches: &Shared) -> (Reply, Vec<u8>) {
+/// 办一个请求，`content` 是请求后面跟着的字节。
+fn handle(call: Call, content: Vec<u8>, caches: &Shared) -> (Reply, Vec<u8>) {
     let lock = || caches.lock().unwrap_or_else(PoisonError::into_inner);
     match call {
         Call::Scan { dir, expanded, worktrees } => {
@@ -87,6 +91,12 @@ fn handle(call: Call, caches: &Shared) -> (Reply, Vec<u8>) {
             let git = lock().git.get(&root).cloned().flatten();
             (Reply::Listed(crate::file_tree::list_dirs(dirs, git.as_ref())), Vec::new())
         }
+        Call::Edit(op) => (Reply::Edited(op.run()), Vec::new()),
+        Call::Stamp { path } => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
+        Call::Write { path } => match runode_paths::replace_file(&path, &content) {
+            Ok(()) => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
+            Err(err) => (Reply::Failed(err.to_string()), Vec::new()),
+        },
         Call::Git { root, op } => match runode_git::Repo::open(&root).map(|repo| op.run(&repo)) {
             Some(Ok(value)) => (Reply::Git(value), Vec::new()),
             Some(Err(err)) => (Reply::Failed(err.to_string()), Vec::new()),
@@ -118,7 +128,7 @@ mod tests {
         ];
         let mut stream = Vec::new();
         for (id, call) in calls.into_iter().enumerate() {
-            let (reply, blob) = handle(call, &caches);
+            let (reply, blob) = handle(call, Vec::new(), &caches);
             wire::write(&mut stream, &Response { id: id as u64, reply, blob: blob.len() }, &blob).unwrap();
         }
         let mut input = Cursor::new(stream);
@@ -139,6 +149,32 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
+    /// 改文件和写回在远端照本机的做：写进去的字节读得回、版本戳跟着变；不覆盖已有的，原因带回来。
+    #[test]
+    fn edits_happen_where_the_project_is() {
+        use crate::project_host::edit::{FileOp, OpFailure};
+
+        let dir = std::env::temp_dir().join(format!("runode-project-edit-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let caches = Shared::default();
+        let file = dir.join("a/b.txt");
+        let created = handle(Call::Edit(FileOp::Create { path: file.clone(), is_dir: false }), Vec::new(), &caches);
+        assert!(matches!(created, (Reply::Edited(Ok(None)), _)));
+        let again = handle(Call::Edit(FileOp::Create { path: file.clone(), is_dir: false }), Vec::new(), &caches);
+        assert!(matches!(again, (Reply::Edited(Err(OpFailure::Exists)), _)));
+        let (Reply::Stamp(Some(written)), _) = handle(Call::Write { path: file.clone() }, b"hello".to_vec(), &caches)
+        else {
+            panic!("写回没交回版本戳")
+        };
+        assert_eq!(fs::read(&file).unwrap(), b"hello");
+        assert!(
+            matches!(handle(Call::Stamp { path: file.clone() }, Vec::new(), &caches), (Reply::Stamp(Some(stamp)), _) if stamp == written)
+        );
+        let removed = handle(Call::Edit(FileOp::Remove { path: dir.join("a") }), Vec::new(), &caches);
+        assert!(matches!(removed, (Reply::Edited(Ok(None)), _)) && !file.exists());
+        fs::remove_dir_all(&dir).ok();
+    }
+
     /// git 操作在远端照本机的跑，结果原样带回：暂存后读得出暂存区的 diff，不在仓库里时报原因。
     #[test]
     fn git_runs_where_the_project_is() {
@@ -152,7 +188,7 @@ mod tests {
         let caches = Shared::default();
         let run = |op| {
             let mut stream = Vec::new();
-            let (reply, blob) = handle(Call::Git { root: dir.clone(), op }, &caches);
+            let (reply, blob) = handle(Call::Git { root: dir.clone(), op }, Vec::new(), &caches);
             wire::write(&mut stream, &Response { id: 0, reply, blob: blob.len() }, &blob).unwrap();
             wire::read_line::<Response>(&mut Cursor::new(stream)).unwrap().unwrap().reply
         };

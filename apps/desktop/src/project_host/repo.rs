@@ -36,6 +36,8 @@ pub(super) enum GitOp {
     CheckoutDetached { id: String },
     Stage { paths: Vec<PathBuf> },
     Unstage { paths: Vec<PathBuf> },
+    IsTracked { path: PathBuf },
+    Untrack { paths: Vec<PathBuf> },
     Discard { files: Vec<FileDiff> },
     StageAll,
     UnstageAll,
@@ -71,6 +73,8 @@ impl GitOp {
             Self::CheckoutDetached { id } => json(repo.checkout_detached(&id)),
             Self::Stage { paths } => json(repo.stage(&paths)),
             Self::Unstage { paths } => json(repo.unstage(&paths)),
+            Self::IsTracked { path } => json(repo.is_tracked(&path)),
+            Self::Untrack { paths } => json(repo.untrack(&paths)),
             Self::Discard { files } => json(repo.discard(&files)),
             Self::StageAll => json(repo.stage_all()),
             Self::UnstageAll => json(repo.unstage_all()),
@@ -161,6 +165,15 @@ impl ProjectRepo {
 
     pub(crate) fn unstage(&self, paths: &[PathBuf]) -> git::Result {
         dispatch!(self, self.repo.unstage(paths), GitOp::Unstage { paths: paths.to_vec() }, git_failed)
+    }
+
+    /// 问不到时当作没跟踪。
+    pub(crate) fn is_tracked(&self, path: &Path) -> bool {
+        dispatch!(self, self.repo.is_tracked(path), GitOp::IsTracked { path: path.to_path_buf() }, |_| false)
+    }
+
+    pub(crate) fn untrack(&self, paths: &[PathBuf]) -> git::Result {
+        dispatch!(self, self.repo.untrack(paths), GitOp::Untrack { paths: paths.to_vec() }, git_failed)
     }
 
     pub(crate) fn discard(&self, files: &[FileDiff]) -> git::Result {

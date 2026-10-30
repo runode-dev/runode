@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    fs, io,
+    io,
     ops::Range,
     path::{Path, PathBuf},
     sync::{
@@ -23,9 +23,9 @@ use gpui::{
 use runode_files::Stamp;
 use runode_preview::MAX_TEXT_BYTES;
 
-use super::{
-    BODY_PADDING, Loaded, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, WorkspaceId, body::highlight_style, file_stamp,
-};
+use crate::project_host::ProjectHost;
+
+use super::{BODY_PADDING, Loaded, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, WorkspaceId, body::highlight_style};
 use crate::ui::{
     textarea::{Textarea, TextareaEvent, TextareaState},
     theme::{ActiveTheme as _, Theme},
@@ -69,14 +69,14 @@ struct Source {
     stamp: Option<Stamp>,
 }
 
-/// 读 `path` 的原文；太大、含 NUL 或不是 UTF-8 的不能编辑。
-fn read_source(path: &Path) -> io::Result<Source> {
-    let stamp = file_stamp(path);
-    let bytes = fs::read(path)?;
-    if bytes.len() > MAX_TEXT_BYTES || bytes.contains(&0) {
+/// 经 `project` 读 `path` 的原文；太大、含 NUL 或不是 UTF-8 的不能编辑。
+fn read_source(project: &ProjectHost, path: &Path) -> io::Result<Source> {
+    let stamp = project.stamp(path);
+    let read = project.read_limited(path, MAX_TEXT_BYTES as u64, true).map_err(io::Error::other)?;
+    if read.cut || read.bytes.contains(&0) {
         return Err(io::Error::other("not an editable text file"));
     }
-    let text = String::from_utf8(bytes).map_err(io::Error::other)?;
+    let text = String::from_utf8(read.bytes).map_err(io::Error::other)?;
     let (bom, text) = match text.strip_prefix('\u{feff}') {
         Some(rest) => (true, rest.to_owned()),
         None => (false, text),
@@ -90,10 +90,10 @@ fn encode(text: &str, crlf: bool, bom: bool) -> Vec<u8> {
     [if bom { "\u{feff}" } else { "" }, &text].concat().into_bytes()
 }
 
-/// 在后台读 `path` 的原文。
-fn read_in_background(path: &Path, cx: &mut Context<PreviewPanel>) -> Task<io::Result<Source>> {
+/// 在后台经 `project` 读 `path` 的原文。
+fn read_in_background(project: ProjectHost, path: &Path, cx: &mut Context<PreviewPanel>) -> Task<io::Result<Source>> {
     let path = path.to_path_buf();
-    cx.background_spawn(async move { read_source(&path) })
+    cx.background_spawn(async move { read_source(&project, &path) })
 }
 
 /// 弹框报错，只有一个「好」。
@@ -134,12 +134,11 @@ impl PreviewPanel {
 
     /// 当前标签进出编辑模式。进的时候固定标签，免得打开别的文件时被换掉；改过没存时退出先问。
     pub(super) fn toggle_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let remote = self.project().is_remote();
         let Some(preview) = self.preview_mut() else {
             return;
         };
         if preview.editor.is_none() {
-            if preview.editable() && !remote {
+            if preview.editable() {
                 preview.pinned = true;
                 self.start_editing(window, cx);
             }
@@ -176,7 +175,7 @@ impl PreviewPanel {
             return;
         };
         let (ws, path) = (self.ws, preview.path.clone());
-        let job = read_in_background(&path, cx);
+        let job = read_in_background(self.project(), &path, cx);
         cx.spawn_in(window, async move |this, cx| {
             let source = job.await;
             this.update_in(cx, |this, window, cx| match source {
@@ -199,7 +198,8 @@ impl PreviewPanel {
 
     /// 在后台读 workspace `ws` 里 `path` 普通标签的原文，读好了换成输入框；焦点不动，读不了时不进编辑也不报错。
     pub(super) fn start_editing_quietly(&mut self, ws: WorkspaceId, path: PathBuf, cx: &mut Context<Self>) {
-        let job = read_in_background(&path, cx);
+        let project = self.workspaces.get(&ws).map(|tabs| tabs.project.clone()).unwrap_or_default();
+        let job = read_in_background(project, &path, cx);
         cx.spawn(async move |this, cx| {
             if let Ok(source) = job.await {
                 this.update(cx, |this, cx| this.install_editor(ws, &path, source, cx)).ok();
@@ -361,13 +361,10 @@ impl PreviewPanel {
     /// 把编辑器 `area` 里的文字存回它的文件。文件在磁盘上比读进来、上次存下时变过（别人改了、删了）先问
     /// 要不要覆盖；写是先写临时文件再换上（`replace_file`），写不成时原文件不动、报错。
     fn save(&mut self, area: Entity<TextareaState>, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = self
-            .workspaces
-            .values()
-            .flat_map(|tabs| &tabs.tabs)
-            .find(|tab| tab.editor.as_ref().is_some_and(|editor| editor.area == area))
-            .map(|tab| tab.path.clone())
-        else {
+        let Some((project, path)) = self.workspaces.values().find_map(|tabs| {
+            let tab = tabs.tabs.iter().find(|tab| tab.editor.as_ref().is_some_and(|editor| editor.area == area))?;
+            Some((tabs.project.clone(), tab.path.clone()))
+        }) else {
             return;
         };
         let Some(editor) = self.editor_mut(&area).filter(|editor| !editor.saving) else {
@@ -378,8 +375,8 @@ impl PreviewPanel {
         let (bytes, known) = (encode(&text, editor.crlf, editor.bom), editor.stamp);
         cx.spawn_in(window, async move |this, cx| {
             let current = {
-                let path = path.clone();
-                crate::fs_probe::off_thread(move || file_stamp(&path), None).await
+                let (project, path) = (project.clone(), path.clone());
+                crate::fs_probe::off_thread(move || project.stamp(&path), None).await
             };
             let overwrite = current == known || {
                 let answer = this.update_in(cx, |_, window, cx| {
@@ -397,12 +394,7 @@ impl PreviewPanel {
                 }
             };
             let written = match overwrite {
-                true => Some(
-                    cx.background_spawn(async move {
-                        runode_paths::replace_file(&path, &bytes).map(|()| file_stamp(&path))
-                    })
-                    .await,
-                ),
+                true => Some(cx.background_spawn(async move { project.replace_file(&path, &bytes) }).await),
                 false => None,
             };
             this.update_in(cx, |this, window, cx| {
@@ -470,6 +462,8 @@ impl PreviewPanel {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     /// 存回去的字节保留文件原来的换行和 BOM，只改了一处的文件不会整篇都变。
@@ -480,13 +474,13 @@ mod tests {
         let path = dir.join("a.txt");
         for original in ["\u{feff}one\r\ntwo\r\n", "one\ntwo", ""] {
             fs::write(&path, original).unwrap();
-            let source = read_source(&path).unwrap();
+            let source = read_source(&ProjectHost::Local, &path).unwrap();
             // 输入框里的换行一律是 `\n`。
             let shown = source.text.replace("\r\n", "\n");
             assert_eq!(encode(&shown, source.crlf, source.bom), original.as_bytes());
         }
         fs::write(&path, b"a\0b").unwrap();
-        assert!(read_source(&path).is_err());
+        assert!(read_source(&ProjectHost::Local, &path).is_err());
         fs::remove_dir_all(&dir).ok();
     }
 }

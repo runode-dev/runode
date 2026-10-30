@@ -128,7 +128,7 @@ pub struct Input {
     pub dir: PathBuf,
     /// 单击文件就在预览栏里开成临时标签（配置的 `PreviewClick::Single`）；否则双击才打开。
     pub single_click: bool,
-    /// 当前 workspace 的文件在哪台机器上。远端的只能看，不能新建、改名、删除和搜索。
+    /// 当前 workspace 的文件在哪台机器上。
     pub project: ProjectHost,
 }
 
@@ -315,8 +315,8 @@ impl FileTree {
         self.input = input;
     }
 
-    /// 文件在远端主机上：只能看。
-    fn read_only(&self) -> bool {
+    /// 文件在 SSH 主机上：访达和别的程序看不到，也还不能搜索。
+    fn remote(&self) -> bool {
         self.input.project.is_remote()
     }
 
@@ -449,17 +449,15 @@ impl FileTree {
         let check = |key: &str, checked: bool, action: Box<dyn Action>| {
             Some(MenuItem::checkbox(rust_i18n::t!(key).into_owned(), None, checked, action))
         };
-        let mut items = Vec::new();
-        if !self.read_only() {
-            items.extend([item("files.new_file", Box::new(NewFile)), item("files.new_folder", Box::new(NewFolder))]);
-        }
-        items.extend([
+        let mut items = vec![
+            item("files.new_file", Box::new(NewFile)),
+            item("files.new_folder", Box::new(NewFolder)),
             item("files.collapse_all", Box::new(CollapseAllFiles)),
             None,
             check("files.show_dotfiles", self.show_dotfiles, Box::new(ToggleShowDotfiles)),
             check("files.show_ignored", self.show_ignored, Box::new(ToggleShowIgnored)),
-        ]);
-        if !self.read_only() {
+        ];
+        if !self.remote() {
             items.extend([
                 None,
                 item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
@@ -977,7 +975,7 @@ impl Render for FileTree {
         self.focus_menu(window, cx);
         let font_size = FontSize::Medium.points() * font_size::scale(cx);
         let header = self.render_header(cx);
-        let search_box = (!self.read_only()).then(|| self.render_file_search_box(cx));
+        let search_box = (!self.remote()).then(|| self.render_file_search_box(cx));
         let content = match self.render_file_search_results(font_size, cx) {
             Some(results) => results,
             None => self.render_file_tree(font_size, cx).into_any_element(),
@@ -1002,12 +1000,12 @@ impl Render for FileTree {
             .on_action(cx.listener(|this, _: &ToggleShowDotfiles, _, cx| this.toggle_show_dotfiles(cx)))
             .on_action(cx.listener(|this, _: &ToggleShowIgnored, _, cx| this.toggle_show_ignored(cx)))
             .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, cx| {
-                if !this.read_only() {
+                if !this.remote() {
                     open_in_vscode(this.files_root(), cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &OpenRootInFinder, _, cx| {
-                if !this.read_only() {
+                if !this.remote() {
                     cx.open_with_system(&this.files_root());
                 }
             }))

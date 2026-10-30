@@ -19,32 +19,14 @@ impl FileTree {
     /// 空白处各有不同。
     pub(super) fn open_file_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let selected = self.selected_entry(cx);
-        let can_paste = self.clipboard.is_some();
+        let can_paste = self.can_paste();
         let item = |key: &str, action: Box<dyn Action>| Some(MenuItem::new(rust_i18n::t!(key), action, true, cx));
-        if self.read_only() {
-            let mut items = vec![item("files.open_in_terminal", Box::new(OpenInTerminal))];
-            if let Some((_, false)) = selected {
-                items.extend([
-                    item("files.preview", Box::new(OpenSelectedFile)),
-                    item("files.insert_path", Box::new(InsertFilePath)),
-                ]);
-            }
-            items.extend([
-                None,
-                item("files.copy_path", Box::new(CopyPath)),
-                item("files.copy_relative_path", Box::new(CopyRelativePath)),
-            ]);
-            let target = self.focus.clone();
-            self.open_context_menu(position, items, target, cx);
-            return;
+        let mut items =
+            vec![item("files.new_file", Box::new(NewFile)), item("files.new_folder", Box::new(NewFolder)), None];
+        if !self.remote() {
+            items.push(item(&crate::i18n::os_key("files.reveal"), Box::new(RevealInFinder)));
         }
-        let mut items = vec![
-            item("files.new_file", Box::new(NewFile)),
-            item("files.new_folder", Box::new(NewFolder)),
-            None,
-            item(&crate::i18n::os_key("files.reveal"), Box::new(RevealInFinder)),
-            item("files.open_in_terminal", Box::new(OpenInTerminal)),
-        ];
+        items.push(item("files.open_in_terminal", Box::new(OpenInTerminal)));
         if let Some((_, false)) = selected {
             items.extend([
                 None,
@@ -69,7 +51,11 @@ impl FileTree {
             items.extend([
                 None,
                 item("files.rename", Box::new(RenameFile)),
-                item(&crate::i18n::os_key("files.delete"), Box::new(DeleteFile)),
+                if self.remote() {
+                    item("files.remove", Box::new(DeleteFile))
+                } else {
+                    item(&crate::i18n::os_key("files.delete"), Box::new(DeleteFile))
+                },
             ]);
         }
         let target = self.focus.clone();
@@ -82,7 +68,7 @@ impl FileTree {
     }
 
     pub(super) fn reveal_in_finder(&mut self, _: &RevealInFinder, _: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only() {
+        if self.remote() {
             return;
         }
         cx.reveal_path(&self.selected_or_root(cx));

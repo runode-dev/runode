@@ -3,6 +3,7 @@
 //! 读写，不管项目在哪台机器上。
 
 mod client;
+mod edit;
 mod repo;
 mod scan;
 pub(crate) mod serve;
@@ -14,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-use runode_files::{Limited, Listings};
+use runode_files::{Limited, Listings, Stamp};
 use runode_git::UntrackedCache;
 
 pub(crate) use repo::ProjectRepo;
@@ -92,6 +93,31 @@ impl ProjectHost {
 
     pub(crate) fn is_remote(&self) -> bool {
         matches!(self, Self::Remote(_))
+    }
+
+    /// 文件现在的版本戳（`runode_files::stamp`）；远端问不到时为空。会阻塞。
+    pub(crate) fn stamp(&self, path: &Path) -> Option<Stamp> {
+        let client = match self {
+            Self::Local => return runode_files::stamp(path),
+            Self::Remote(client) => client,
+        };
+        match client.call(Call::Stamp { path: path.to_path_buf() }, READ_TIMEOUT) {
+            Ok((Reply::Stamp(stamp), _)) => stamp,
+            _ => None,
+        }
+    }
+
+    /// 把 `bytes` 写成 `path`（`runode_paths::replace_file`），交回写完后的版本戳。会阻塞。
+    pub(crate) fn replace_file(&self, path: &Path, bytes: &[u8]) -> std::io::Result<Option<Stamp>> {
+        let client = match self {
+            Self::Local => return runode_paths::replace_file(path, bytes).map(|()| runode_files::stamp(path)),
+            Self::Remote(client) => client,
+        };
+        match client.call_with(Call::Write { path: path.to_path_buf() }, bytes, READ_TIMEOUT) {
+            Ok((Reply::Stamp(stamp), _)) => Ok(stamp),
+            Ok((other, _)) => Err(std::io::Error::other(unexpected(&other))),
+            Err(err) => Err(std::io::Error::other(err)),
+        }
     }
 
     /// SSH 主机的名字，本机为空。

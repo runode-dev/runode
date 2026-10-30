@@ -6,7 +6,7 @@ use std::{
 };
 
 use runode_files::ops::{
-    OpError, add_to_gitignore, child_name, child_path, copy_into, create, move_into, rename, unchanged_name,
+    OpError, add_to_gitignore, child_name, child_path, copy_into, create, move_into, remove, rename, unchanged_name,
 };
 
 /// 每个测试一个空的临时目录，结束时删掉。
@@ -177,4 +177,21 @@ fn refuses_targets_inside_the_source_through_symlinks() {
     let copy = copy_into(&link, &src.join("inner")).unwrap();
     assert!(fs::symlink_metadata(&copy).unwrap().is_symlink());
     assert_eq!(move_into(&link, &src).unwrap(), src.join("link"));
+}
+
+#[cfg(unix)]
+#[test]
+fn removes_links_without_following_them() {
+    let dir = TempDir::new("remove");
+    let (target, link, nested) = (dir.0.join("target"), dir.0.join("link"), dir.0.join("tree/a/b"));
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("keep.txt"), "x").unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    remove(&link).unwrap();
+    assert!(!link.exists() && target.join("keep.txt").exists());
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("f.txt"), "x").unwrap();
+    remove(&dir.0.join("tree")).unwrap();
+    assert!(!dir.0.join("tree").exists());
+    assert!(matches!(remove(&dir.0.join("tree")), Err(OpError::Io(err)) if err.kind() == io::ErrorKind::NotFound));
 }

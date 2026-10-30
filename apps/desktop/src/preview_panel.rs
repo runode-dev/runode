@@ -541,9 +541,9 @@ impl PreviewPanel {
         }
     }
 
-    /// 之后的操作和画的都是 workspace `ws` 的标签，它的文件经 `project` 读。app 每次对预览栏做什么、画它之前
-    /// 都先调。换了 workspace 时重画：app 缓存着它，栏的位置大小不变时照搬上一帧。远端的文件只能看：不进编辑，
-    /// 也不比文件的大小和修改时间，切回来时不自己重读。
+    /// 之后的操作和画的都是 workspace `ws` 的标签，它的文件经 `project` 读写。app 每次对预览栏做什么、画它之前
+    /// 都先调。换了 workspace 时重画：app 缓存着它，栏的位置大小不变时照搬上一帧。远端的文件监听不到，切回来时
+    /// 不比大小和修改时间，不自己重读。
     pub fn set_workspace(&mut self, ws: WorkspaceId, project: ProjectHost, cx: &mut Context<Self>) {
         self.workspaces.entry(ws).or_default().project = project;
         if self.ws != ws {
@@ -697,11 +697,6 @@ impl PreviewPanel {
     /// 当前 workspace 的文件在哪台机器上。
     fn project(&self) -> ProjectHost {
         self.tabs().map(|tabs| tabs.project.clone()).unwrap_or_default()
-    }
-
-    /// 当前标签能进编辑模式。
-    fn can_edit(&self, preview: &Preview) -> bool {
-        preview.editable() && !self.project().is_remote()
     }
 
     fn preview_mut(&mut self) -> Option<&mut Preview> {
@@ -1032,10 +1027,8 @@ impl PreviewPanel {
                     };
                     preview.content = Some(content);
                     preview.refresh_marks(git, real_root);
-                    let edit = std::mem::take(&mut preview.edit_on_load)
-                        && preview.editor.is_none()
-                        && preview.editable()
-                        && !remote;
+                    let edit =
+                        std::mem::take(&mut preview.edit_on_load) && preview.editor.is_none() && preview.editable();
                     if edit {
                         this.start_editing_quietly(id, path.clone(), cx);
                     }
@@ -1207,7 +1200,7 @@ impl PreviewPanel {
             .flex()
             .items_center()
             .gap(px(2.))
-            .when(editing || self.can_edit(preview), |buttons| {
+            .when(editing || preview.editable(), |buttons| {
                 buttons.child(
                     toggle("preview-edit", PENCIL_ICON, editing, rust_i18n::t!("preview.edit"))
                         .on_mouse_down(

@@ -285,6 +285,16 @@ pub fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result {
     Ok(())
 }
 
+/// 删掉 `path`，不进废纸篓、不能恢复：是目录时连同里面的一起删，是符号链接时只删链接本身。
+pub fn remove(path: &Path) -> Result {
+    if fs::symlink_metadata(path)?.is_dir() {
+        fs::remove_dir_all(path)?;
+    } else {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
 /// 把 `path` 移到废纸篓，在访达里能放回原处。
 #[cfg(target_os = "macos")]
 pub fn trash(path: &Path) -> Result {

@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::project_host::{ProjectHost, ProjectRepo};
 use crate::ui::{
     base_name,
     file_icons::{file_icon, folder_icon},
@@ -11,7 +12,6 @@ use crate::ui::{
 };
 use gpui::{AnyElement, Context, PromptLevel, Role, ScrollStrategy, Window, div, img, prelude::*, px};
 use runode_files::ops::{self, OpError};
-use runode_git::Repo;
 
 use crate::file_tree::{
     AddToGitignore, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder, RenameFile, WorkspaceId, state::TreeState,
@@ -20,6 +20,8 @@ use crate::file_tree::{
 /// 剪切或复制下来等着粘贴的文件或目录。
 #[derive(Clone)]
 pub(crate) struct FileClipboard {
+    /// 复制的是哪台机器上的（本机为空）：只能粘贴到同一台机器上的树里。
+    pub host: Option<String>,
     pub path: PathBuf,
     /// 剪切的粘贴时挪过去，粘贴一次就清掉；复制的可以一直粘贴。
     pub cut: bool,
@@ -52,10 +54,17 @@ fn error_text(err: &OpError, name: &str) -> String {
 }
 
 impl FileTree {
+    /// 当前 workspace 的文件在哪台机器上。
+    fn project(&self) -> ProjectHost {
+        self.state().project.clone()
+    }
+
+    /// 剪贴板里有能粘贴到当前树里的：同一台机器上的。
+    pub(super) fn can_paste(&self) -> bool {
+        self.clipboard.as_ref().is_some_and(|clip| clip.host.as_deref() == self.state().project.name())
+    }
+
     pub(super) fn new_file(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only() {
-            return;
-        }
         let dir = self.target_dir(cx);
         if self.shown_for_edit(&dir, cx) {
             self.start_file_edit(EditTarget::New { dir, is_dir: false }, window, cx);
@@ -63,9 +72,6 @@ impl FileTree {
     }
 
     pub(super) fn new_folder(&mut self, _: &NewFolder, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only() {
-            return;
-        }
         let dir = self.target_dir(cx);
         if self.shown_for_edit(&dir, cx) {
             self.start_file_edit(EditTarget::New { dir, is_dir: true }, window, cx);
@@ -73,9 +79,6 @@ impl FileTree {
     }
 
     pub(super) fn rename_file(&mut self, _: &RenameFile, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only() {
-            return;
-        }
         if let Some((path, is_dir)) = self.selected_entry(cx)
             && self.shown_for_edit(&path, cx)
         {
@@ -201,9 +204,10 @@ impl FileTree {
         };
         // 同 `transfer`：在后台建，网络卷挂住时不卡界面；完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树。
         let (ws, dir, name) = (self.ws, dir.to_path_buf(), name.to_owned());
+        let project = self.project();
         let job = cx.background_spawn({
             let path = path.clone();
-            async move { ops::create(&path, is_dir) }
+            async move { project.create(&path, is_dir) }
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
@@ -234,9 +238,10 @@ impl FileTree {
         };
         // 同 `create_entry`，在后台改。
         let (ws, from, name) = (self.ws, path.to_path_buf(), name.to_owned());
+        let project = self.project();
         let job = cx.background_spawn({
             let (from, to) = (from.clone(), to.clone());
-            async move { ops::rename(&from, &to) }
+            async move { project.rename(&from, &to) }
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
@@ -273,8 +278,8 @@ impl FileTree {
         cx.emit(FileTreeEvent::Moved { from: from.to_path_buf(), to: to.to_path_buf() });
     }
 
-    /// 除了 `ws` 以外各 workspace 的树做 `f`，再重读 `dirs` 里那棵树读过的目录：剪贴板整个窗口一份，可以
-    /// 跨 workspace 挪、删，几个 workspace 也可能开在同一个目录下。不动它们选中的行。
+    /// 除了 `ws` 以外、文件和它在同一台机器上的各 workspace 的树做 `f`，再重读 `dirs` 里那棵树读过的目录：
+    /// 剪贴板整个窗口一份，可以跨 workspace 挪、删，几个 workspace 也可能开在同一个目录下。不动它们选中的行。
     fn update_other_trees(
         &mut self,
         ws: Option<WorkspaceId>,
@@ -282,7 +287,15 @@ impl FileTree {
         cx: &mut Context<Self>,
         f: impl Fn(&mut TreeState),
     ) {
-        let others: Vec<_> = self.workspaces.keys().copied().map(Some).filter(|&id| id != ws).collect();
+        let host = ws.and_then(|ws| self.workspaces.get(&ws)).map(|state| state.project.name().map(str::to_owned));
+        let others: Vec<_> = self
+            .workspaces
+            .iter()
+            .filter(|(id, state)| {
+                Some(**id) != ws && host.as_ref().is_none_or(|host| state.project.name() == host.as_deref())
+            })
+            .map(|(id, _)| Some(*id))
+            .collect();
         for id in others {
             self.with_tree_of(id, cx, |state, root, filter| {
                 f(state);
@@ -294,25 +307,29 @@ impl FileTree {
 
     /// 选中的那一项先问一下，再在后台移到废纸篓：外置卷上可能要复制一遍。
     pub(super) fn delete_file(&mut self, _: &DeleteFile, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only() {
-            return;
-        }
         self.menu = None;
         let Some((path, is_dir)) = self.selected_entry(cx) else {
             return;
         };
         let name = base_name(&path);
-        let title = rust_i18n::t!(&crate::i18n::os_key("files.delete_title"), name = name);
-        let detail = if is_dir {
-            crate::i18n::tr(&crate::i18n::os_key("files.delete_dir_detail"))
+        let project = self.project();
+        // SSH 主机上没有废纸篓，问的是要不要永久删除。
+        let (title, detail, confirm) = if project.is_remote() {
+            let detail = if is_dir { "files.remove_dir_detail" } else { "files.remove_detail" };
+            (rust_i18n::t!("files.remove_title", name = name), rust_i18n::t!(detail), rust_i18n::t!("files.remove"))
         } else {
-            crate::i18n::tr(&crate::i18n::os_key("files.delete_detail"))
+            let detail = if is_dir { "files.delete_dir_detail" } else { "files.delete_detail" };
+            (
+                rust_i18n::t!(&crate::i18n::os_key("files.delete_title"), name = name),
+                crate::i18n::tr(&crate::i18n::os_key(detail)).into(),
+                crate::i18n::tr(&crate::i18n::os_key("files.delete_confirm")).into(),
+            )
         };
         let answer = window.prompt(
             PromptLevel::Warning,
             &title,
             Some(&detail),
-            &[&*crate::i18n::tr(&crate::i18n::os_key("files.delete_confirm")), &*rust_i18n::t!("files.cancel")],
+            &[&*confirm, &*rust_i18n::t!("files.cancel")],
             cx,
         );
         // 完成时可能已经切到了别的 workspace，选中和定位的是发起的那个 workspace 的树（预览和别的树都跟着改）。
@@ -323,7 +340,7 @@ impl FileTree {
             }
             let result = cx.background_spawn({
                 let path = path.clone();
-                async move { ops::trash(&path) }
+                async move { project.delete(&path) }
             });
             let result = result.await;
             this.update_in(cx, |this, window, cx| match result {
@@ -362,7 +379,7 @@ impl FileTree {
 
     /// 选中项所在的仓库（子仓库里的算子仓库）的根目录、相对它的路径和是不是目录；不在仓库里、
     /// 已经被忽略、或者选中的就是仓库根目录时为空。
-    pub(super) fn gitignore_target(&self, cx: &gpui::App) -> Option<(Repo, PathBuf, bool)> {
+    pub(super) fn gitignore_target(&self, cx: &gpui::App) -> Option<(ProjectRepo, PathBuf, bool)> {
         let (path, is_dir) = self.selected_entry(cx)?;
         let git = self.state().git.as_ref()?;
         let rel = path.strip_prefix(&git.main.root).ok()?;
@@ -370,19 +387,17 @@ impl FileTree {
             return None;
         }
         let (repo, rel) = git.locate(rel);
-        (!rel.as_os_str().is_empty()).then(|| (repo.repo(), rel.to_path_buf(), is_dir))
+        (!rel.as_os_str().is_empty()).then(|| (self.state().project.repo(repo.repo()), rel.to_path_buf(), is_dir))
     }
 
     /// 写进 `.gitignore` 后当场重读，选中的那一项马上标成被忽略。git 跟踪着的写进去也不生效，先问要不要
     /// 不再跟踪它（文件留在磁盘上）。
     pub(super) fn add_to_gitignore(&mut self, _: &AddToGitignore, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only() {
-            return;
-        }
         self.menu = None;
         let Some((repo, rel, is_dir)) = self.gitignore_target(cx) else {
             return;
         };
+        let project = self.project();
         let tracked = cx.background_spawn({
             let (repo, rel) = (repo.clone(), rel.clone());
             async move { repo.is_tracked(&rel) }
@@ -407,7 +422,7 @@ impl FileTree {
             }
             let result = cx
                 .background_spawn(async move {
-                    ops::add_to_gitignore(&repo.root, &rel, is_dir)?;
+                    project.add_to_gitignore(&repo.root, &rel, is_dir)?;
                     if untrack {
                         repo.untrack(&[rel]).map_err(|err| OpError::Io(std::io::Error::other(err.message)))?;
                     }
@@ -425,22 +440,19 @@ impl FileTree {
 
     /// 剪切（`cut`）或复制选中的那一项，等着粘贴。
     pub(super) fn copy_file(&mut self, cut: bool, cx: &mut Context<Self>) {
-        if self.read_only() {
-            return;
-        }
         self.menu = None;
         if let Some((path, _)) = self.selected_entry(cx) {
-            self.clipboard = Some(FileClipboard { path, cut });
+            self.clipboard = Some(FileClipboard { host: self.state().project.name().map(str::to_owned), path, cut });
             cx.notify();
         }
     }
 
     /// 粘贴到 `target_dir`。
     pub(super) fn paste_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only() {
+        self.menu = None;
+        if !self.can_paste() {
             return;
         }
-        self.menu = None;
         if let Some(clip) = self.clipboard.clone() {
             let mut dir = self.target_dir(cx);
             // 选中的就是复制下来的目录时，副本放在它旁边，不然成了放进它自己里面。
@@ -456,9 +468,6 @@ impl FileTree {
     /// 从文件树拖出来的 `src` 放到了目录 `dir` 上：问一下再挪过去。放回原来的目录或者放进
     /// 它自己下面时什么都不做。
     pub(super) fn drop_file(&mut self, src: &Path, dir: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only() {
-            return;
-        }
         if src.parent() == Some(dir.as_path()) || dir.starts_with(src) {
             return;
         }
@@ -483,10 +492,10 @@ impl FileTree {
     /// 在后台把 `src` 挪进（`cut`）或复制进 `dir`，目录可能很大；完了选中挪过去或复制出来的那一项。
     fn transfer(&mut self, src: PathBuf, dir: PathBuf, cut: bool, window: &mut Window, cx: &mut Context<Self>) {
         // 同 `delete_file`：完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树，失败时也只重读它的目录。
-        let ws = self.ws;
+        let (ws, project) = (self.ws, self.project());
         let job = cx.background_spawn({
             let (src, dir) = (src.clone(), dir.clone());
-            async move { if cut { ops::move_into(&src, &dir) } else { ops::copy_into(&src, &dir) } }
+            async move { if cut { project.move_into(&src, &dir) } else { project.copy_into(&src, &dir) } }
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
