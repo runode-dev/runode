@@ -22,8 +22,10 @@ use super::{
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
-    assets::{BRANCH_ICON, GIT_ICON, SETTINGS_ICON, SIDEBAR_ICON},
+    assets::{BRANCH_ICON, GIT_ICON, SETTINGS_ICON, SIDEBAR_ICON, TERMINAL_ICON},
+    host_client::remote::{self, Status},
     menus::OpenSettings,
+    remote_hosts::status_text,
     ui::{
         display_dir,
         font_size::{self, FontSize, scaled},
@@ -272,8 +274,14 @@ impl WindowView {
                 (None, false) => slot,
             });
         let mark = workspace.mark(cx);
-        // 名字之外报给辅助工具的：分支、目录，以及只画成图形的 agent 状态和响铃。
+        // 在 SSH 主机上的写出主机名，没连上时淡下去，辅助工具另外读到连接状态。
+        let host = workspace.host.label().map(|name| {
+            let status = remote::remote(name).map_or(Status::Idle, |host| host.status());
+            (name.to_owned(), matches!(status, Status::Connected(_)), status_text(&status))
+        });
+        // 名字之外报给辅助工具的：主机、分支、目录，以及只画成图形的 agent 状态和响铃。
         let a11y_description = [
+            host.as_ref().map(|(name, _, status)| format!("{name} {status}")),
             repo.branch.as_ref().map(ToString::to_string),
             Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name),
             mark.map(|mark| mark.describe()),
@@ -324,13 +332,26 @@ impl WindowView {
                 .child(svg().flex_none().path(BRANCH_ICON).size(px(10.)).text_color(fg.opacity(0.6)))
                 .child(div().min_w_0().truncate().child(branch))
         });
-        let details = (branch.is_some() || dir.is_some()).then(|| {
+        let host = host.map(|(name, connected, _)| {
+            let color = fg.opacity(if connected { 0.6 } else { 0.3 });
+            div()
+                .flex_none()
+                .max_w(relative(0.6))
+                .flex()
+                .items_center()
+                .gap(px(3.))
+                .text_color(color)
+                .child(svg().flex_none().path(TERMINAL_ICON).size(px(10.)).text_color(color))
+                .child(div().min_w_0().truncate().child(name))
+        });
+        let details = (host.is_some() || branch.is_some() || dir.is_some()).then(|| {
             div()
                 .flex()
                 .items_center()
                 .gap(px(6.))
                 .text_size(FontSize::Small)
                 .text_color(fg.opacity(0.45))
+                .children(host)
                 .children(branch)
                 // 路径长时留下结尾：最后几级目录最能区分。
                 .children(dir.map(|dir| div().flex_1().min_w_0().child(path_line(dir))))

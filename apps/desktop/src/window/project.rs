@@ -29,7 +29,7 @@ use crate::ui::a11y::A11yPress;
 pub(super) use crate::ui::panel::{panel_message, panel_shell};
 use crate::{
     assets::{ACTIONS_WORKFLOW_ICON, FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
-    ui::tooltip::tooltip,
+    ui::{font_size::FontSize, theme::ActiveTheme as _, tooltip::tooltip},
 };
 use scan::scan;
 
@@ -97,6 +97,11 @@ impl WindowView {
         self.workspace().panel == Some(SidePanel::Files)
     }
 
+    /// 当前 workspace 在 SSH 主机上。
+    pub(super) fn on_remote(&self) -> bool {
+        !self.workspace().host.is_local()
+    }
+
     pub(super) fn git_shown(&self) -> bool {
         self.workspace().panel == Some(SidePanel::Git)
     }
@@ -119,6 +124,9 @@ impl WindowView {
     /// 在单独的线程上（`fs_probe::off_thread`，不占后台线程池）看当前终端的目录是不是目录，记下来；
     /// `project_dir` 因此变了时按新目录再检查一遍。
     fn check_cwd(&mut self, cx: &mut Context<Self>) {
+        if self.on_remote() {
+            return;
+        }
         let Some(cwd) = self.focused_view().and_then(|view| view.read(cx).cwd()) else {
             return;
         };
@@ -263,6 +271,11 @@ impl WindowView {
     pub(super) fn refresh_project(&mut self, cx: &mut Context<Self>) {
         // 终端换了目录时，看过它在不在之后 `check_cwd` 再按新目录读。
         self.check_cwd(cx);
+        // 远端的目录这台机器上读不到，右侧面板只显示 `panel.remote`；没读过就没有 `project.root`，监听跟着放掉。
+        if self.on_remote() {
+            self.sync_project_watch(cx);
+            return;
+        }
         if !self.project_visible(cx) {
             // 切到右侧什么都不显示的 workspace 时，放掉上一个 workspace 的目录监听。
             self.sync_project_watch(cx);
@@ -376,10 +389,13 @@ impl WindowView {
     /// 定时检查：终端换了目录时重读；有没读的改动时按 `refresh_if_due` 重读；监听不了时
     /// 退回定时重读，离上次开始读至少隔 `FALLBACK_INTERVAL`，上次读得慢时按耗时拉长。
     pub(super) fn poll_project(&mut self, cx: &mut Context<Self>) {
+        self.refresh_repo_badges(cx);
+        if self.on_remote() {
+            return;
+        }
         self.check_cwd(cx);
         self.list_tasks(cx);
         self.poll_github_actions(cx);
-        self.refresh_repo_badges(cx);
         if !self.project_visible(cx) {
             self.probe_repo(cx);
             return;
@@ -465,7 +481,16 @@ impl WindowView {
 
     /// 右侧面板显示着的那一页，收着时为空。
     pub(super) fn render_side_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
-        match self.workspace().panel? {
+        let panel = self.workspace().panel?;
+        if self.on_remote() {
+            let shell = panel_shell("remote-panel", width, cards(cx), cx)
+                .bg(cx.theme().mix(0.03))
+                .text_size(FontSize::Body)
+                .child(self.render_panel_tabs(cx))
+                .child(panel_message(rust_i18n::t!("panel.remote").into_owned(), cx));
+            return Some(shell.into_any_element());
+        }
+        match panel {
             SidePanel::Files => Some(self.render_files_panel(width, cx).into_any_element()),
             SidePanel::Git => Some(self.render_git_panel(width, cx).into_any_element()),
             SidePanel::GitHubActions => Some(self.render_github_actions_panel(width, cx).into_any_element()),

@@ -12,6 +12,7 @@ mod actions;
 mod agent_picker;
 mod agents;
 mod arrange;
+mod askpass;
 mod background;
 mod clipboard;
 mod devices;
@@ -37,6 +38,7 @@ mod resize_request;
 mod settings_page;
 mod sidebar;
 mod slot;
+mod ssh;
 mod status_bar;
 mod tasks;
 mod titlebar;
@@ -72,6 +74,7 @@ pub use quit::{
     close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, quit_to_update, should_close,
     terminal_windows,
 };
+pub(crate) use remote::{front_window, windows};
 pub use remote::{serve, serve_requests};
 // 文件树的动作在 `file_tree`，这里转出去给快捷键表用。
 pub use crate::file_tree::{
@@ -281,6 +284,8 @@ pub struct WindowView {
     renaming: Option<Renaming>,
     /// 新建 workspace 的对话框。
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
+    /// ssh 要问用户的，排着队，见 `askpass`。
+    asks: askpass::Asks,
     /// 添加命令的对话框。
     add_task: Option<tasks::AddTaskDialog>,
     /// Git 面板里 AI 写提交说明的对话框。
@@ -478,6 +483,7 @@ impl WindowView {
             installed_agents: Vec::new(),
             renaming: None,
             new_workspace: None,
+            asks: Default::default(),
             add_task: None,
             commit_message_dialog: None,
             mobile: None,
@@ -748,6 +754,7 @@ impl Render for WindowView {
         let arrange_picker = self.render_arrange_picker(cx);
         let branch_picker = self.render_branch_picker(cx);
         let new_workspace = self.render_new_workspace(cx);
+        let ask = self.render_ask(cx);
         let add_task = self.render_add_task(cx);
         let commit_message_dialog = self.render_commit_message_dialog(cx);
         let todo_dialog = self.todo_dialog(cx);
@@ -758,6 +765,7 @@ impl Render for WindowView {
             || arrange_picker.is_some()
             || branch_picker.is_some()
             || new_workspace.is_some()
+            || ask.is_some()
             || add_task.is_some()
             || commit_message_dialog.is_some()
             || todo_dialog.is_some();
@@ -880,6 +888,7 @@ impl Render for WindowView {
             .children(add_task)
             .children(commit_message_dialog)
             .children(todo_dialog)
+            .children(ask)
     }
 }
 

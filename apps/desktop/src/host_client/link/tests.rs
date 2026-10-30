@@ -1046,6 +1046,18 @@ fn todo_requests_get_their_answers_and_changes_are_announced() {
     assert!(link.connected());
 }
 
+/// 列目录的回话交回给等着的请求：新建 SSH 工作区时就是这样浏览远端的目录。
+#[test]
+fn a_directory_listing_gets_its_answer() {
+    let dir = temp_dir("dirs");
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    let host = Host::new(BuildId(BUILD.into()));
+    let link = connected(&host);
+    let path = Some(dir);
+    let listed = link.request(|req| ClientMsg::ListDirs { req, path }, WAIT).unwrap();
+    assert!(matches!(listed, HostMsg::Dirs { ref dirs, .. } if *dirs == ["sub"]), "{listed:?}");
+}
+
 /// 超过 `MAX_PAYLOAD` 的一帧写不出去，连接却照用；一大段输入拆成几帧，宿主收到的连起来一字不差。
 #[test]
 fn an_oversized_frame_keeps_the_connection_and_long_input_goes_in_chunks() {

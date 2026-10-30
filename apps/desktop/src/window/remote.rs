@@ -298,7 +298,7 @@ fn front_pane(host: &HostId, cx: &App) -> Option<(WindowHandle<WindowView>, Opti
 }
 
 /// 最前面那个窗口。app 不在前台时没有活动窗口，按窗口的前后顺序取最前面的。
-pub(super) fn front_window(cx: &App) -> Option<WindowHandle<WindowView>> {
+pub(crate) fn front_window(cx: &App) -> Option<WindowHandle<WindowView>> {
     let front = cx
         .active_window()
         .and_then(|window| window.downcast::<WindowView>())
@@ -306,7 +306,7 @@ pub(super) fn front_window(cx: &App) -> Option<WindowHandle<WindowView>> {
     front.or_else(|| windows(cx).into_iter().next())
 }
 
-pub(super) fn windows(cx: &App) -> Vec<WindowHandle<WindowView>> {
+pub(crate) fn windows(cx: &App) -> Vec<WindowHandle<WindowView>> {
     cx.windows().into_iter().filter_map(|window| window.downcast::<WindowView>()).collect()
 }
 

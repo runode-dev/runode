@@ -114,6 +114,9 @@ pub(in crate::window) fn is_task_file(path: &Path) -> bool {
 impl WindowView {
     /// 终端目录换了或者命令文件变了时，在后台请宿主重列命令。
     pub(in crate::window) fn list_tasks(&mut self, cx: &mut Context<Self>) {
+        if self.on_remote() {
+            return;
+        }
         let root = self.project_dir(cx);
         let workspace = &mut self.workspaces[self.active];
         let id = workspace.id;

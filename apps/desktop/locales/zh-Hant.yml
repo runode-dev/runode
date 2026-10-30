@@ -127,6 +127,15 @@ workspace:
   empty: 這個工作區裡還沒有終端機
   list: 工作區
   bell: 響過鈴
+  ssh: SSH 主機
+  ssh_hint: 在經 SSH 連的機器上工作，runode 會自動裝到那台機器上
+  ssh_host: user@host，或 ~/.ssh/config 裡的主機
+  ssh_connect: 連線
+  ssh_hosts: 主機
+  ssh_dir: 遠端的資料夾
+  ssh_open: 開啟
+  ssh_up: 上一層
+  ssh_retry: 重試
 window_controls:
   minimize: 最小化
   maximize: 最大化
@@ -193,6 +202,23 @@ terminal_image: "[圖片]"
 host_lost:
   message: 和終端機工作階段的連線中斷了，現在看到的是中斷前的最後一個畫面。
   reopen: 在原目錄重新開啟
+ssh:
+  ask_title: "SSH：%{host}"
+  ask_continue: 繼續
+  ask_cancel: 取消
+  ask_yes: 是
+  ask_no: 否
+  status_idle: 未連線
+  status_authenticating: 正在連線…
+  status_probing: 正在檢查遠端…
+  status_downloading: "正在下載 runode %{percent}…"
+  status_uploading: "正在把 runode 裝到遠端 %{percent}…"
+  status_starting: 正在啟動…
+  status_connected: 已連線
+  status_waiting: "正在重連（第 %{attempt} 次）：%{error}"
+  status_stopped: "連不上：%{error}"
+  lost: "%{host}：%{status}"
+  reconnect: 立即重連
 size_owner:
   controlled_by: 尺寸由 %{device} 控制
   controlled_elsewhere: 尺寸由另一台裝置控制
@@ -206,6 +232,7 @@ panel:
   not_repo: 不在 git 倉庫裡
   no_content: 內容沒有變化
   no_changes: 沒有未提交的改動
+  remote: SSH 主機上暫時還沒有檔案樹和 Git 面板
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。

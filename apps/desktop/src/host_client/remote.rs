@@ -134,7 +134,6 @@ fn ssh() -> Ssh {
 
 /// 界面要知道的事。
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum RemoteEvent {
     /// 这台主机的连接状态变了，见 `RemoteHost::status`。
     Status(String),
@@ -272,7 +271,6 @@ impl RemoteHost {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    #[allow(dead_code)]
     pub fn status(&self) -> Status {
         self.state().status.clone()
     }

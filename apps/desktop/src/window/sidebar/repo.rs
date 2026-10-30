@@ -48,6 +48,9 @@ impl WindowView {
     pub(in crate::window) fn refresh_repo_badges(&mut self, cx: &mut Context<Self>) {
         let active = self.active;
         for (ix, workspace) in self.workspaces.iter_mut().enumerate() {
+            if !workspace.host.is_local() {
+                continue;
+            }
             let badge = &mut workspace.repo;
             let interval = if ix == active { BRANCH_INTERVAL } else { BACKGROUND_BRANCH_INTERVAL };
             if badge.checking || badge.checked.is_some_and(|at| at.elapsed() < interval) {

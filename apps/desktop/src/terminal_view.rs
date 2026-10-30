@@ -39,7 +39,10 @@ use runode_types::{
 };
 
 use crate::{
-    host_client::{self, LinkEvent, remote::HostId},
+    host_client::{
+        self, LinkEvent,
+        remote::{HostId, Status},
+    },
     ui::{a11y::Press, font_size::FontSize, hsla, input::InputState},
 };
 use crop::Crop;
@@ -451,11 +454,21 @@ impl TerminalView {
         )
     }
 
-    /// 和宿主断开后盖在底部的提示：画面停在最后一屏，以及「在原目录重开」。
+    /// 和宿主断开后盖在底部的提示：画面停在最后一屏，以及「在原目录重开」；远端主机的显示连接状态和
+    /// 「立即重连」，连上后自动接回。
     fn render_lost_bar(&self, foreground: Rgb, background: Rgb, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let fg = hsla(foreground);
-        let message = rust_i18n::t!("host_lost.message").into_owned();
-        let reopen = rust_i18n::t!("host_lost.reopen").into_owned();
+        let (message, reopen) = match &self.host {
+            HostId::Local => {
+                (rust_i18n::t!("host_lost.message").into_owned(), rust_i18n::t!("host_lost.reopen").into_owned())
+            }
+            HostId::Ssh(name) => {
+                let status = host_client::remote::remote(name).map_or(Status::Idle, |host| host.status());
+                let status = crate::remote_hosts::status_text(&status);
+                let message = rust_i18n::t!("ssh.lost", host = name.as_str(), status = status).into_owned();
+                (message, rust_i18n::t!("ssh.reconnect").into_owned())
+            }
+        };
         div()
             .id("host-lost")
             .role(Role::Alert)

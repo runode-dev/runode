@@ -127,6 +127,15 @@ workspace:
   empty: No terminals in this workspace
   list: Workspaces
   bell: Bell rang
+  ssh: SSH Host
+  ssh_hint: Work on a machine you reach over SSH; runode is installed there for you
+  ssh_host: user@host, or a host from ~/.ssh/config
+  ssh_connect: Connect
+  ssh_hosts: Hosts
+  ssh_dir: Folder on the host
+  ssh_open: Open
+  ssh_up: Parent Folder
+  ssh_retry: Retry
 window_controls:
   minimize: Minimize
   maximize: Maximize
@@ -193,6 +202,23 @@ terminal_image: "[image]"
 host_lost:
   message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.
   reopen: Reopen in This Directory
+ssh:
+  ask_title: "SSH: %{host}"
+  ask_continue: Continue
+  ask_cancel: Cancel
+  ask_yes: "Yes"
+  ask_no: "No"
+  status_idle: Not connected
+  status_authenticating: Connecting…
+  status_probing: Checking the host…
+  status_downloading: "Downloading runode %{percent}…"
+  status_uploading: "Installing runode on the host %{percent}…"
+  status_starting: Starting…
+  status_connected: Connected
+  status_waiting: "Reconnecting (attempt %{attempt}): %{error}"
+  status_stopped: "Cannot connect: %{error}"
+  lost: "%{host}: %{status}"
+  reconnect: Reconnect Now
 size_owner:
   controlled_by: "Size set by %{device}"
   controlled_elsewhere: Size set by another device
@@ -206,6 +232,7 @@ panel:
   not_repo: Not a git repository
   no_content: No content changes
   no_changes: No uncommitted changes
+  remote: The file tree and Git panel are not available for SSH hosts yet
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.

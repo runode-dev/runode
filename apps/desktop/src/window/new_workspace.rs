@@ -15,7 +15,7 @@ use gpui::{
 use super::{NewWorkspace, TITLEBAR_HEIGHT, WindowView, files::Quoting, model::home_dir};
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::{
-    assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
+    assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON, TERMINAL_ICON},
     ui::{
         a11y::Press,
         card::Card,
@@ -29,6 +29,8 @@ pub(super) struct NewWorkspaceDialog {
     focus: FocusHandle,
     /// 点了「从 URL 克隆」后展开的地址框。
     url: Option<(Entity<InputState>, Subscription)>,
+    /// 点了「SSH 主机」后展开的一栏。
+    pub(super) ssh: Option<super::ssh::SshStep>,
 }
 
 impl WindowView {
@@ -38,16 +40,20 @@ impl WindowView {
         if !self.leave_todo_page(window, cx) {
             return;
         }
-        let dialog =
-            self.new_workspace.get_or_insert_with(|| NewWorkspaceDialog { focus: cx.focus_handle(), url: None });
-        match &dialog.url {
-            Some((url, _)) => window.focus(&url.focus_handle(cx), cx),
-            None => window.focus(&dialog.focus, cx),
+        let dialog = self.new_workspace.get_or_insert_with(|| NewWorkspaceDialog {
+            focus: cx.focus_handle(),
+            url: None,
+            ssh: None,
+        });
+        match (&dialog.url, &dialog.ssh) {
+            (Some((url, _)), _) => window.focus(&url.focus_handle(cx), cx),
+            (None, Some(ssh)) => window.focus(&ssh.focus_handle(cx), cx),
+            (None, None) => window.focus(&dialog.focus, cx),
         }
         cx.notify();
     }
 
-    fn close_new_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_new_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.new_workspace.take().is_some() {
             window.focus(&self.focus_handle(cx), cx);
             cx.notify();
@@ -167,7 +173,8 @@ impl WindowView {
         let hover_bg = cx.theme().mix(0.06);
         let fg = cx.theme().foreground;
         let border = fg.opacity(0.12);
-        let card = || Card::new().flex().flex_col().overflow_hidden();
+        // 内容比窗口高时整个对话框滚动，各块不压扁。
+        let card = || Card::new().flex_none().flex().flex_col().overflow_hidden();
         // 一个来源一行：左边图标，右边标题和一行说明，整行可点。
         let option = |id: &'static str, icon: &'static str, title: SharedString, hint: SharedString| {
             div()
@@ -235,6 +242,15 @@ impl WindowView {
             rust_i18n::t!("workspace.create_hint").into_owned().into(),
         )
         .on_press(cx, |this, window, cx| this.new_workspace_dir(None, None, window, cx));
+        let ssh = option(
+            "new-workspace-ssh",
+            TERMINAL_ICON,
+            rust_i18n::t!("workspace.ssh").into_owned().into(),
+            rust_i18n::t!("workspace.ssh_hint").into_owned().into(),
+        )
+        .aria_expanded(dialog.ssh.is_some())
+        .on_press(cx, |this, window, cx| this.show_ssh(window, cx));
+        let ssh_step = dialog.ssh.as_ref().map(|step| self.render_ssh_step(step, cx));
         let close = Button::new("new-workspace-close", rust_i18n::t!("workspace.close"))
             .icon(CLOSE_ICON)
             .icon_size(16.)
@@ -249,12 +265,15 @@ impl WindowView {
             .on_key_down(cx.listener(Self::new_workspace_key))
             .w(px(480.))
             .max_w_full()
+            .max_h_full()
+            .overflow_y_scroll()
             .p(px(24.))
             .flex()
             .flex_col()
             .gap(px(12.))
             .child(
                 div()
+                    .flex_none()
                     .pb(px(8.))
                     .flex()
                     .items_center()
@@ -278,12 +297,18 @@ impl WindowView {
                     .role(Role::Heading)
                     .aria_level(2)
                     .aria_label(other.clone())
+                    .flex_none()
                     .pt(px(4.))
                     .text_color(fg.opacity(0.6))
                     .child(other),
             )
             .child(
-                card().child(div().child(clone).children(clone_url)).child(div().h(px(1.)).bg(border)).child(create),
+                card()
+                    .child(div().child(clone).children(clone_url))
+                    .child(div().h(px(1.)).bg(border))
+                    .child(create)
+                    .child(div().h(px(1.)).bg(border))
+                    .child(div().child(ssh).children(ssh_step)),
             );
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消；从访达拖来的文件夹放在窗口哪里都直接开。
         Some(
@@ -293,6 +318,7 @@ impl WindowView {
                 .size_full()
                 .pt(px(TITLEBAR_HEIGHT + 48.))
                 .px(px(16.))
+                .pb(px(16.))
                 .flex()
                 .justify_center()
                 .items_start()

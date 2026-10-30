@@ -127,6 +127,15 @@ workspace:
   empty: 这个工作区里还没有终端
   list: 工作区
   bell: 响过铃
+  ssh: SSH 主机
+  ssh_hint: 在经 SSH 连的机器上工作，runode 会自动装到那台机器上
+  ssh_host: user@host，或 ~/.ssh/config 里的主机
+  ssh_connect: 连接
+  ssh_hosts: 主机
+  ssh_dir: 远端的文件夹
+  ssh_open: 打开
+  ssh_up: 上一级
+  ssh_retry: 重试
 window_controls:
   minimize: 最小化
   maximize: 最大化
@@ -193,6 +202,23 @@ terminal_image: "[图片]"
 host_lost:
   message: 和终端会话的连接断开了，现在看到的是断开前的最后一屏。
   reopen: 在原目录重新打开
+ssh:
+  ask_title: "SSH：%{host}"
+  ask_continue: 继续
+  ask_cancel: 取消
+  ask_yes: 是
+  ask_no: 否
+  status_idle: 未连接
+  status_authenticating: 正在连接…
+  status_probing: 正在检查远端…
+  status_downloading: "正在下载 runode %{percent}…"
+  status_uploading: "正在把 runode 装到远端 %{percent}…"
+  status_starting: 正在启动…
+  status_connected: 已连接
+  status_waiting: "正在重连（第 %{attempt} 次）：%{error}"
+  status_stopped: "连不上：%{error}"
+  lost: "%{host}：%{status}"
+  reconnect: 立即重连
 size_owner:
   controlled_by: 尺寸由 %{device} 控制
   controlled_elsewhere: 尺寸由另一台设备控制
@@ -206,6 +232,7 @@ panel:
   not_repo: 不在 git 仓库里
   no_content: 内容没有变化
   no_changes: 没有未提交的改动
+  remote: SSH 主机上暂时还没有文件树和 Git 面板
 paste:
   title: 粘贴的内容可能会直接执行命令
   detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。

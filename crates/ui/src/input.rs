@@ -30,6 +30,8 @@ use crate::{
 actions!(runode, [SearchNext, SearchPrevious, EndSearch]);
 
 const CARET_WIDTH: Pixels = px(1.5);
+/// 遮着的输入框里每个字画成的符号。
+const MASK: char = '•';
 /// 撤销最多能退回的步数。
 const UNDO_LIMIT: usize = 100;
 
@@ -61,6 +63,8 @@ pub struct InputState {
     placeholder: Option<SharedString>,
     /// 报给辅助工具的名字，比如设置项的标题；界面上不画。
     label: Option<SharedString>,
+    /// 输密码用：每个字画成 `MASK`，不能复制、剪切，辅助工具读不到内容。
+    masked: bool,
     /// 上一帧排好的文字、输入框位置和横向滚动量，鼠标点选、输入法摆候选窗都靠它们换算。
     layout: Option<ShapedLine>,
     bounds: Option<Bounds<Pixels>>,
@@ -148,6 +152,7 @@ impl InputState {
             history: History::default(),
             placeholder: None,
             label: None,
+            masked: false,
             layout: None,
             bounds: None,
             scroll_x: px(0.),
@@ -171,6 +176,12 @@ impl InputState {
     /// 报给辅助工具的名字换成 `label`。
     pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// 输密码用的输入框，见 `masked`。
+    pub fn with_masked(mut self) -> Self {
+        self.masked = true;
         self
     }
 
@@ -299,14 +310,29 @@ impl InputState {
     /// 上一帧排好的文字，排完以后文字又改过（打字、`set_query`、输入法组字后还没画）时为空：拿旧的排版
     /// 换算出的位置可能超出现在的文字或落在一个字中间，拿去切字符串就崩了。
     fn fresh_layout(&self) -> Option<&ShapedLine> {
-        self.layout.as_ref().filter(|layout| layout.text.as_ref() == self.text)
+        self.layout.as_ref().filter(|layout| layout.text.as_ref() == self.shown_text())
+    }
+
+    /// 画出来的文字：遮着时每个字换成 `MASK`。排版里的位置都按它算，用 `shown_index`、`text_index` 换算。
+    fn shown_text(&self) -> std::borrow::Cow<'_, str> {
+        if self.masked { MASK.to_string().repeat(self.text.chars().count()).into() } else { self.text.as_str().into() }
+    }
+
+    /// `text` 里的字节偏移换成 `shown_text` 里的。
+    fn shown_index(&self, index: usize) -> usize {
+        if self.masked { masked_offset(&self.text, index) } else { index }
+    }
+
+    /// `shown_text` 里的字节偏移换回 `text` 里的。
+    fn text_index(&self, index: usize) -> usize {
+        if self.masked { unmasked_offset(&self.text, index) } else { index }
     }
 
     fn index_for_x(&self, x: Pixels) -> usize {
         let (Some(layout), Some(bounds)) = (self.fresh_layout(), self.bounds) else {
             return self.text.len();
         };
-        layout.closest_index_for_x(x - bounds.left() + self.scroll_x)
+        self.text_index(layout.closest_index_for_x(x - bounds.left() + self.scroll_x))
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -412,11 +438,13 @@ impl InputState {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        copy_selection(&self.text, &self.selected, cx);
+        if !self.masked {
+            copy_selection(&self.text, &self.selected, cx);
+        }
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
-        if self.selected.is_empty() || self.marked.is_some() {
+        if self.masked || self.selected.is_empty() || self.marked.is_some() {
             return;
         }
         self.copy(&Copy, window, cx);
@@ -530,10 +558,10 @@ impl Render for InputState {
         let field = cx.entity().downgrade();
         div()
             .id("text-field")
-            .role(Role::TextInput)
+            .role(if self.masked { Role::PasswordInput } else { Role::TextInput })
             .when_some(self.label.clone(), |el, label| el.aria_label(label))
             .when_some(self.placeholder.clone(), |el, placeholder| el.aria_placeholder(placeholder))
-            .aria_value(SharedString::from(self.query.clone()))
+            .when(!self.masked, |el| el.aria_value(SharedString::from(self.query.clone())))
             .on_a11y_action(AccessibleAction::SetValue, move |data, _, cx| {
                 if let Some(ActionData::Value(value)) = data {
                     let value = value.to_string();
@@ -649,7 +677,7 @@ impl EntityInputHandler for InputState {
     ) -> Option<Bounds<Pixels>> {
         let layout = self.fresh_layout()?;
         let range = range_from_utf16(&self.text, &range);
-        let x = |index| bounds.left() + layout.x_for_index(index) - self.scroll_x;
+        let x = |index| bounds.left() + layout.x_for_index(self.shown_index(index)) - self.scroll_x;
         Some(Bounds::from_corners(point(x(range.start), bounds.top()), point(x(range.end), bounds.bottom())))
     }
 
@@ -661,7 +689,7 @@ impl EntityInputHandler for InputState {
     ) -> Option<usize> {
         let bounds = self.bounds?;
         let index = self.fresh_layout()?.index_for_x(point.x - bounds.left() + self.scroll_x)?;
-        Some(offset_to_utf16(&self.text, index))
+        Some(offset_to_utf16(&self.text, self.text_index(index)))
     }
 }
 
@@ -847,21 +875,25 @@ impl Element for InputText {
             underline: None,
             strikethrough: None,
         };
+        let shown = field.shown_text().into_owned();
         let runs: Vec<TextRun> = match &field.marked {
-            Some(marked) => [
-                run(marked.start, style.color),
-                TextRun {
-                    underline: Some(UnderlineStyle { color: Some(style.color), thickness: px(1.), wavy: false }),
-                    ..run(marked.len(), style.color)
-                },
-                run(field.text.len() - marked.end, style.color),
-            ]
-            .into_iter()
-            .filter(|run| run.len > 0)
-            .collect(),
-            None => vec![run(field.text.len(), style.color)],
+            Some(marked) => {
+                let (start, end) = (field.shown_index(marked.start), field.shown_index(marked.end));
+                [
+                    run(start, style.color),
+                    TextRun {
+                        underline: Some(UnderlineStyle { color: Some(style.color), thickness: px(1.), wavy: false }),
+                        ..run(end - start, style.color)
+                    },
+                    run(shown.len() - end, style.color),
+                ]
+                .into_iter()
+                .filter(|run| run.len > 0)
+                .collect()
+            }
+            None => vec![run(shown.len(), style.color)],
         };
-        let line = window.text_system().shape_line(field.text.clone().into(), font_size, &runs, None);
+        let line = window.text_system().shape_line(shown.into(), font_size, &runs, None);
         let placeholder = field.placeholder.clone().filter(|_| field.text.is_empty()).map(|text| {
             let len = text.len();
             window.text_system().shape_line(text, font_size, &[run(len, style.color.opacity(0.4))], None)
@@ -869,7 +901,7 @@ impl Element for InputText {
 
         // 横向滚动到光标露出来为止，文字缩短时也别在右边留空。
         let width = bounds.size.width - CARET_WIDTH;
-        let caret_x = line.x_for_index(field.cursor());
+        let caret_x = line.x_for_index(field.shown_index(field.cursor()));
         let mut scroll_x = field.scroll_x;
         if caret_x - scroll_x > width {
             scroll_x = caret_x - width;
@@ -885,7 +917,7 @@ impl Element for InputText {
             scroll_x = px(0.);
         }
 
-        let x = |index| bounds.left() + line.x_for_index(index) - scroll_x;
+        let x = |index| bounds.left() + line.x_for_index(field.shown_index(index)) - scroll_x;
         let selection = (!field.selected.is_empty()).then(|| {
             fill(
                 Bounds::from_corners(
@@ -966,6 +998,16 @@ impl Element for InputText {
     }
 }
 
+/// `text` 里第 `index` 个字节在遮成 `MASK` 后的偏移。
+fn masked_offset(text: &str, index: usize) -> usize {
+    text[..index].chars().count() * MASK.len_utf8()
+}
+
+/// 遮成 `MASK` 后的偏移 `index` 换回 `text` 里的字节偏移，落在一个符号中间时取它前面那个字的开头。
+fn unmasked_offset(text: &str, index: usize) -> usize {
+    text.char_indices().nth(index / MASK.len_utf8()).map_or(text.len(), |(at, _)| at)
+}
+
 /// 去掉回车、换行、制表符这些控制字符：输入框只有一行，写进去的文字不带它们。
 fn without_controls(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
@@ -980,6 +1022,18 @@ fn pasted_line(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 遮着时排版按字数算位置，和文字里的字节偏移来回换得回来。
+    #[test]
+    fn masked_offsets_count_characters() {
+        let text = "a密码b";
+        let ends: Vec<_> = (0..=text.len()).filter(|&i| text.is_char_boundary(i)).collect();
+        for (n, &end) in ends.iter().enumerate() {
+            assert_eq!(masked_offset(text, end), n * MASK.len_utf8());
+            assert_eq!(unmasked_offset(text, n * MASK.len_utf8()), end);
+        }
+        assert_eq!(unmasked_offset(text, 1), 0);
+    }
 
     /// 粘贴取第一个有字的行：开头的空行、只有控制字符的行跳过，整段没字时不粘。
     #[test]

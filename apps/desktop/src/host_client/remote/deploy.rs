@@ -73,8 +73,12 @@ pub(super) fn install(host: &RemoteHost, ssh: &Ssh, platform: &Platform, dir: &s
                 return stdin.flush();
             }
             stdin.write_all(&buffer[..n])?;
+            let before = percent(done, total);
             done += n as u64;
-            host.set_status(Status::Connecting(Phase::Uploading { done, total }));
+            // 界面只显示百分比，变了才报。
+            if percent(done, total) != before {
+                host.set_status(Status::Connecting(Phase::Uploading { done, total }));
+            }
         }
     });
     let status = child.wait().map_err(|err| Failure::Retry(err.to_string()))?;
@@ -118,7 +122,14 @@ fn download(host: &RemoteHost, target: Target) -> Result<Source, Failure> {
     let version = env!("CARGO_PKG_VERSION");
     let dirs = runode_paths::Dirs::from_env();
     let cache = dirs.remote_bin_cache_dir().ok_or_else(|| Failure::Retry("no cache directory".into()))?;
-    let progress = |done, total| host.set_status(Status::Connecting(Phase::Downloading { done, total }));
+    let reported = Mutex::new(None);
+    let progress = |done, total| {
+        // 界面只显示百分比，变了才报。
+        let mut reported = reported.lock().unwrap_or_else(PoisonError::into_inner);
+        if reported.replace(percent(done, total)) != Some(percent(done, total)) {
+            host.set_status(Status::Connecting(Phase::Downloading { done, total }));
+        }
+    };
     let fetched = if target.is_mac() {
         runode_update::bundle::mac_binary(version, target.arch(), &cache, &progress).map(|path| (path, false))
     } else {
@@ -131,6 +142,11 @@ fn download(host: &RemoteHost, target: Target) -> Result<Source, Failure> {
             auth: false,
         }),
     }
+}
+
+/// 传了百分之几；总数不知道时按已收到的兆字节算。
+fn percent(done: u64, total: u64) -> u64 {
+    (done * 100).checked_div(total).unwrap_or(done >> 20)
 }
 
 /// 文件的 SHA-256，十六进制；同一个文件（大小、修改时间不变）只算一次。

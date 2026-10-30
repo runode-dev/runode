@@ -1096,6 +1096,11 @@ impl TerminalView {
         &self.host
     }
 
+    /// 和宿主断开了，画面停在最后一屏。
+    pub fn lost(&self) -> bool {
+        self.screen.is_lost()
+    }
+
     /// 宿主里这个终端的会话；`deferred` 建的视图还没开会话时为 `None`。
     pub fn session_id(&self) -> Option<SessionId> {
         self.id
