@@ -2,7 +2,8 @@
 //! 带子命令启动时是命令行（`runode list` 等），不开窗口，见 `runode_cli`；`runode --host` 是单独
 //! 一个进程跑的终端宿主，`runode --host --take-over` 是升级时接手旧宿主会话的新宿主，见
 //! `host_process`；`runode --screen` 是远程桌面的采集进程，见 `screen_process`；`runode --speech` 是
-//! 语音输入的识别子进程，见 `dictation::worker`。
+//! 语音输入的识别子进程，见 `dictation::worker`；`runode --ssh-bridge` 是桌面经 ssh 连过来时在远端跑的桥接，
+//! 见 `host_client::bridge`。ssh 要问用户时也调这个程序当 askpass，见 `runode_ssh::askpass`。
 //!
 //! Windows 上这个程序是界面程序，打开时不带控制台窗口；在终端里跑命令行用同一个包里的控制台程序
 //! `rn`。
@@ -48,6 +49,10 @@ use gpui_platform::application;
 use crate::window::{open_window, open_window_with};
 
 fn main() {
+    // ssh 调 askpass 时只给一句提示当参数，先于一切参数认出来，免得被当成子命令。
+    if let Some(code) = runode_ssh::askpass::run_if_requested() {
+        std::process::exit(code);
+    }
     startup::begin();
     process_env::fix();
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
@@ -73,6 +78,10 @@ fn main() {
     #[cfg(unix)]
     if args == ["--host", "--upgrade"] {
         std::process::exit(host_client::upgrade());
+    }
+    #[cfg(unix)]
+    if args == ["--ssh-bridge"] {
+        std::process::exit(host_client::bridge::run());
     }
     if args == ["--speech"] {
         std::process::exit(dictation::worker::run());

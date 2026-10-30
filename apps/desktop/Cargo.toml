@@ -34,6 +34,7 @@ runode-ui.workspace = true
 # 预览栏读文件、判断类型、语法高亮和 Markdown 解析，不碰界面。
 runode-preview.workspace = true
 runode-files.workspace = true
+runode-ssh.workspace = true
 # 语音输入：下载识别模型、录音、在本机转文字。
 runode-speech.workspace = true
 # 看板的定时对话框和手机设置页按本地时间写钟点。

@@ -15,6 +15,8 @@
 //! 连接断了以后用 `reconnect` 重新连上。
 
 #[cfg(unix)]
+pub(crate) mod bridge;
+#[cfg(unix)]
 mod handoff;
 mod launch;
 mod link;
@@ -586,6 +588,8 @@ pub(crate) fn expose_cli(host: &Host) {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
+    #[cfg(unix)]
+    let exe = bridge::stable_exe(&runode_paths::Dirs::from_env(), &exe);
     if let Some(path) = exe.parent().and_then(|dir| path_with(std::env::var_os("PATH"), dir)) {
         host.set_env("PATH", path);
     }

@@ -6750,6 +6750,7 @@ dependencies = [
  "runode-remote",
  "runode-screen",
  "runode-speech",
+ "runode-ssh",
  "runode-terminal",
  "runode-todo",
  "runode-types",

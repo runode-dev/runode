@@ -287,7 +287,7 @@ fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
 /// `socket` 上宿主进程的 pid：打个招呼，等它回话（`Welcome` 或 `Incompatible`）后再读连接对端
 /// （`peer_pid`），因为交接过的 socket 在对方 accept 之前读到的是最早建它的那个进程。
 /// `Welcome` 里有 `host_pid` 时以它为准，没有时用对端的。不回话的返回错误。
-fn host_pid(socket: &Path) -> io::Result<u32> {
+pub(super) fn host_pid(socket: &Path) -> io::Result<u32> {
     let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(&super::build(), ClientKind::Cli))?;
     let reported = match receive(&mut stream)? {

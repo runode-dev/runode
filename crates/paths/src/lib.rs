@@ -208,6 +208,23 @@ impl Dirs {
         self.remote_access_file("listener.json")
     }
 
+    /// 经 SSH 装到这台机器上的 runode，即 `data` 下的 `bin`：每个构建一个子目录，旁边的 `runode` 是指向当前
+    /// 那个的链接，远端会话里的 shell 经它找到命令行。目录的写法由连过来的桌面定（`runode_ssh::bootstrap`）。
+    pub fn deployed_bin_dir(&self) -> Option<PathBuf> {
+        self.data_file("bin")
+    }
+
+    /// 远端的桥接（`runode --ssh-bridge`）的日志：它的标准输出是协议，出了问题只能看这里。
+    pub fn ssh_bridge_log_file(&self) -> Option<PathBuf> {
+        self.cache_file("ssh-bridge.log")
+    }
+
+    /// 指向最近一次经 SSH 连进来时转发的 ssh-agent 的链接，在 `runtime_dir` 里。宿主和它起的 shell 一直用这个
+    /// 路径：每次连接转发来的 agent socket 都不一样，连接一断就失效。
+    pub fn ssh_agent_link(&self) -> Option<PathBuf> {
+        Some(self.runtime_dir()?.join("ssh-agent.sock"))
+    }
+
     /// 用户自己的配色主题目录，按名字找主题时最先找这里。
     pub fn themes_dir(&self) -> Option<PathBuf> {
         self.data_file("themes")
