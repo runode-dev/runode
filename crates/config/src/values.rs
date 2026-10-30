@@ -139,6 +139,8 @@ impl Config {
             ],
             "vt-window-resize-allowed" => bool(self.vt_window_resize_allowed),
             "terminal-host" => bool(self.terminal_host),
+            "ssh-program" => self.ssh_program.iter().cloned().collect(),
+            "ssh-control-persist" => self.ssh_control_persist.iter().map(ToString::to_string).collect(),
             "git-auto-fetch" => bool(self.git_auto_fetch),
             "auto-update" => bool(self.auto_update),
             "remote-access" => bool(self.remote_access),

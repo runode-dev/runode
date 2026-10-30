@@ -196,6 +196,9 @@ impl Page {
                 Section("tasks"),
                 Row("task-placement", Choice(&["right", "down", "tab"])),
                 Row("task-split-fold", Switch),
+                Section("ssh"),
+                Row("ssh-program", Text(200.)),
+                Row("ssh-control-persist", Text(80.)),
             ],
             Self::Files => &[
                 Row("file-tree-preview-click", Choice(&["single", "double"])),
@@ -733,6 +736,8 @@ fn key_placeholder(key: &str) -> SharedString {
         "dictation-words" => return "runode, Ghostty, GPUI".into(),
         "dictation-polish-url" => return "https://api.deepseek.com/v1".into(),
         "dictation-polish-model" => return "deepseek-chat".into(),
+        "ssh-program" => return "ssh".into(),
+        "ssh-control-persist" => return runode_ssh::DEFAULT_PERSIST_SECS.to_string().into(),
         _ => {}
     }
     match runode_config::Config::default().values(key).into_iter().next() {

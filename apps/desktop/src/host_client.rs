@@ -213,6 +213,11 @@ pub fn configure(config: &Config) {
         link.send(message.clone());
     }
     remote::configure(messages);
+    let defaults = remote::SshSettings::default();
+    remote::set_ssh_settings(remote::SshSettings {
+        program: config.ssh_program.as_ref().map_or(defaults.program, PathBuf::from),
+        persist_secs: config.ssh_control_persist.unwrap_or(defaults.persist_secs),
+    });
     KEEP_SESSIONS.store(config.terminal_host, Ordering::Relaxed);
     let in_app = mode() == Mode::InProcess;
     let port = if in_app { crate::remote_access::wanted_port(config) } else { None };

@@ -119,7 +119,6 @@ impl Default for SshSettings {
 }
 
 /// 换上配置里 ssh 的设置，之后的连接按它。
-#[allow(dead_code)]
 pub fn set_ssh_settings(settings: SshSettings) {
     *SETTINGS.lock().unwrap_or_else(PoisonError::into_inner) = settings;
 }

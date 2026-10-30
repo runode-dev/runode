@@ -517,6 +517,7 @@ settings:
     clipboard: 剪貼簿
     tasks: 命令
     git: Git
+    ssh: SSH 主機
     login: 登入時啟動
     dictation_cloud: 雲端辨識
     dictation_polish: 大模型潤飾
@@ -578,6 +579,8 @@ settings:
     clipboard_read: 程式讀剪貼簿
     vt_window_resize_allowed: 程式改視窗大小
     terminal_host: 結束後保留工作階段
+    ssh_program: ssh 程式
+    ssh_control_persist: 閒置連線保留
     auto_update: 自動更新
     remote_access: 遠端存取
     remote_access_port: 連接埠
@@ -646,6 +649,8 @@ settings:
     clipboard_read: 終端機裡的程式能讀到你複製過的文字，密碼也在內。選「詢問」時先說明是哪個程式要讀。
     vt_window_resize_allowed: 終端機裡的程式能用 CSI 8 t 改視窗大小；只在終端機獨佔分頁、視窗不是全螢幕時改。
     terminal_host: 結束 Runode 後工作階段留在背景程序裡照常執行，下次打開接著用。
+    ssh_program: 連 SSH 主機時呼叫的 ssh，留空用 PATH 裡的 ssh。照樣讀 ~/.ssh/config，ProxyJump、ssh-agent、1Password 都能用。
+    ssh_control_persist: 最後一個終端機關掉後，到這台主機的連線再留多少秒，這期間重連不用再輸入密碼。0 是一直留著。
     auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
     remote_access: "讓配對過的手機經區域網路或 Tailscale 連上這台電腦的終端機。在下面配對，或者用 runode remote pair。"
     remote_access_port: TCP 連接埠，1 到 65535。

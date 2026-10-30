@@ -517,6 +517,7 @@ settings:
     clipboard: Clipboard
     tasks: Tasks
     git: Git
+    ssh: SSH hosts
     login: Start at Login
     dictation_cloud: "Cloud Recognition"
     dictation_polish: "Polish with a Model"
@@ -578,6 +579,8 @@ settings:
     clipboard_read: Programs can read the clipboard
     vt_window_resize_allowed: Programs can resize the window
     terminal_host: Keep sessions after quitting
+    ssh_program: ssh program
+    ssh_control_persist: Keep idle connections
     auto_update: Update automatically
     remote_access: Remote access
     remote_access_port: Port
@@ -646,6 +649,8 @@ settings:
     clipboard_read: Lets programs in the terminal read the text you copied, passwords included. Ask shows which program wants it first.
     vt_window_resize_allowed: Lets programs in the terminal resize the window with CSI 8 t, only while the terminal has its tab to itself and the window is not full screen.
     terminal_host: Sessions keep running in a background process after Runode quits and come back when it opens again.
+    ssh_program: The ssh Runode runs to connect to SSH hosts; leave it empty for ssh in PATH. It still reads ~/.ssh/config, so ProxyJump, ssh-agent and 1Password work.
+    ssh_control_persist: Seconds the connection to a host stays open after its last terminal closes, so reconnecting meanwhile asks for no password. 0 keeps it open.
     auto_update: Check for new versions in the background, download them and install them when Runode quits.
     remote_access: "Lets a paired phone reach this computer's terminals over the local network or Tailscale. Pair below, or with runode remote pair."
     remote_access_port: TCP port, 1 to 65535.

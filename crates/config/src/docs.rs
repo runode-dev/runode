@@ -137,6 +137,12 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "terminal-host" => {
             "Keep terminal sessions running in the background after Runode quits: true, false. With true, quitting Runode leaves the sessions running and the next launch picks them up; with false they end when Runode quits. Takes effect right away. Switching it off while sessions are still running in the background brings them back once more; quitting then ends them."
         }
+        "ssh-program" => {
+            "The ssh program Runode runs to connect to SSH hosts: a command name looked up in PATH or a full path. Leave it empty to use ssh. Runode reads ~/.ssh/config through it, so ProxyJump, ssh-agent, 1Password and security keys work as they do in a terminal. Takes effect from the next connection."
+        }
+        "ssh-control-persist" => {
+            "How many seconds the shared connection to an SSH host stays open after the last terminal using it closes, so that reconnecting does not ask for a password again: a whole number of seconds, 0 to keep it open indefinitely. Leave it empty for 10 minutes. Takes effect from the next connection."
+        }
         "git-auto-fetch" => {
             "Fetch from the remotes in the background every few minutes while the Git panel is showing, so the commits behind and the remote branches in the graph keep up: true (default), false. Only the repository in the panel and the submodules and nested repositories inside it are fetched, and only while the window is in front. With false, fetch from the panel's menu or with Sync. Takes effect right away."
         }

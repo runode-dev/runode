@@ -79,6 +79,7 @@ pub const KEYS: &[&[&str]] = &[
     ],
     &["clipboard-write", "clipboard-read", "vt-window-resize-allowed"],
     &["terminal-host"],
+    &["ssh-program", "ssh-control-persist"],
     &["auto-update"],
     &[
         "remote-access",
@@ -403,6 +404,12 @@ impl Config {
                     or_default(empty, defaults.vt_window_resize_allowed, || parse_bool(value))?;
             }
             "terminal-host" => self.terminal_host = or_default(empty, defaults.terminal_host, || parse_bool(value))?,
+            "ssh-program" => self.ssh_program = text(value),
+            "ssh-control-persist" => {
+                self.ssh_control_persist = (!empty)
+                    .then(|| value.trim().parse().map_err(|_| "expected a whole number of seconds"))
+                    .transpose()?;
+            }
             "git-auto-fetch" => {
                 self.git_auto_fetch = or_default(empty, defaults.git_auto_fetch, || parse_bool(value))?;
             }
@@ -984,6 +991,16 @@ unknown-key = whatever
     fn task_split_fold_defaults_to_true() {
         assert!(Config::default().task_split_fold);
         assert!(!load(&["task-split-fold = false"]).task_split_fold);
+    }
+
+    #[test]
+    fn ssh_settings_default_to_none() {
+        let d = Config::default();
+        assert_eq!((d.ssh_program, d.ssh_control_persist), (None, None));
+        let set = load(&["ssh-program = /opt/homebrew/bin/ssh", "ssh-control-persist = 0"]);
+        assert_eq!(set.ssh_program.as_deref(), Some("/opt/homebrew/bin/ssh"));
+        assert_eq!(set.ssh_control_persist, Some(0));
+        assert_eq!(load(&["ssh-control-persist = 60\nssh-control-persist ="]).ssh_control_persist, None);
     }
 
     #[test]
