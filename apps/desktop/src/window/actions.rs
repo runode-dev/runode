@@ -42,7 +42,9 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(ix) = self.workspaces.iter().position(|workspace| workspace.real_dir() == target) {
+        if let Some(ix) =
+            self.workspaces.iter().position(|workspace| workspace.host.is_local() && workspace.real_dir() == target)
+        {
             if let Some(name) = name {
                 self.set_workspace_name(ix, name.into(), window, cx);
             }
