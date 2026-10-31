@@ -249,6 +249,7 @@ fn handle(event: RemoteEvent, seen: &mut Seen, cx: &mut App) {
             for front in window::windows(cx) {
                 front.update(cx, |view, _, cx| view.remote_status_changed(&host, cx)).ok();
             }
+            window::status_bar::redraw_status_bars(cx);
             hosts_changed(cx);
         }
         // 再用这个名字时是新的一条 `Link`，连上时要重新办它转来的请求。
@@ -260,6 +261,7 @@ fn handle(event: RemoteEvent, seen: &mut Seen, cx: &mut App) {
             if cx.has_global::<PruneJobs>() {
                 cx.global_mut::<PruneJobs>().0.remove(&host);
             }
+            window::status_bar::redraw_status_bars(cx);
             hosts_changed(cx);
         }
         // 问在最前面的窗口上；一个窗口都没有时丢掉，算取消。

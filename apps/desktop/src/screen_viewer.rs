@@ -23,6 +23,7 @@ use gpui::{
 };
 use gpui::{Role, SharedString};
 use runode_protocol::screen::{ScreenClientMsg, ScreenDisplay, ScreenHostMsg, ScreenInput};
+use runode_ssh::bootstrap::Family;
 use runode_types::input::MouseButton as RemoteButton;
 
 use crate::{
@@ -60,6 +61,10 @@ const KEYFRAME_INTERVAL: Duration = Duration::from_millis(500);
 const HOST_TIMEOUT: Duration = Duration::from_secs(120);
 /// 等主机连上时隔多久看一次它的状态。
 const HOST_POLL: Duration = Duration::from_millis(200);
+/// 连接意外断开后第几次重连前等多久；用完了按 `RECONNECT_LAST`，一直试到连上或者页面关掉。
+const RECONNECT_DELAYS: [Duration; 4] =
+    [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(5), Duration::from_secs(10)];
+const RECONNECT_LAST: Duration = Duration::from_secs(30);
 
 /// 这一页要窗口办的事。
 pub enum ScreenViewerEvent {
@@ -74,7 +79,9 @@ enum Phase {
     Opening,
     /// 有画面了。
     Live,
-    /// 断了或者开不起来，带给人看的原因。
+    /// 连接意外断开或者远端屏幕上没人登录，等着第几次重连。
+    Reconnecting(u32),
+    /// 远端停了或者开不起来，带给人看的原因；不自己重连，等用户点「重新连接」。
     Stopped(String),
 }
 
@@ -111,6 +118,8 @@ pub struct ScreenViewer {
     picture: Option<Picture>,
     locked: bool,
     unlock_failed: bool,
+    /// 远端说过屏幕上没人登录，到再出画面为止一直重连。
+    signed_out: bool,
     password: Entity<InputState>,
     /// 上一帧画面区域的位置，由画的时候记下。
     bounds: Rc<Cell<Option<Placement>>>,
@@ -119,6 +128,10 @@ pub struct ScreenViewer {
     scroll: Point<f32>,
     resize: Option<Task<()>>,
     connection: Option<Task<()>>,
+    /// 上回有画面以后连着断了几次。
+    retries: u32,
+    /// 等着重连的计时。
+    retry: Option<Task<()>>,
     _intercept: Subscription,
     _password: Subscription,
 }
@@ -172,12 +185,15 @@ impl ScreenViewer {
             picture: None,
             locked: false,
             unlock_failed: false,
+            signed_out: false,
             password,
             bounds: Rc::default(),
             pressed: Vec::new(),
             scroll: Point::default(),
             resize: None,
             connection: None,
+            retries: 0,
+            retry: None,
             _intercept: intercept,
             _password: password_events,
         };
@@ -245,9 +261,15 @@ impl ScreenViewer {
                         return;
                     }
                 }
+                // 自己重连时连不上（主机还没连回来、远端还没起来）接着重连。
                 Err(err) => {
-                    this.update(cx, |this, cx| {
-                        this.phase = Phase::Stopped(err);
+                    this.update_in(cx, |this, window, cx| {
+                        if this.retries > 0 {
+                            tracing::info!("cannot reopen the remote desktop of {}: {err}", this.host);
+                            this.reconnect_later(window, cx);
+                        } else {
+                            this.phase = Phase::Stopped(err);
+                        }
                         cx.notify();
                     })
                     .ok();
@@ -272,6 +294,8 @@ impl ScreenViewer {
                     return;
                 }
                 self.phase = Phase::Live;
+                self.retries = 0;
+                self.signed_out = false;
                 self.drop_picture(window);
                 self.picture = Some(picture);
             }
@@ -284,7 +308,11 @@ impl ScreenViewer {
                 self.phase = Phase::Stopped(rust_i18n::t!("screen_viewer.incompatible").into_owned());
             }
             UiEvent::Message(ScreenHostMsg::Started { display, .. }) => self.display = Some(display),
-            UiEvent::Message(ScreenHostMsg::Stopped { reason }) => {
+            UiEvent::Message(ScreenHostMsg::Stopped { signed_out: true, .. }) => {
+                self.signed_out = true;
+                self.drop_picture(window);
+            }
+            UiEvent::Message(ScreenHostMsg::Stopped { reason, .. }) => {
                 // 缺屏幕录制授权时系统报的原因看不懂，换成去哪里打开的指引。
                 let unauthorized = self.remote.as_ref().is_some_and(|remote| !remote.screen_capture);
                 self.phase = Phase::Stopped(if unauthorized {
@@ -307,15 +335,41 @@ impl ScreenViewer {
                 self.phase = Phase::Stopped(reason);
                 self.drop_picture(window);
             }
+            // 远端说了为什么停的，等用户来办；屏幕上没人登录的等有人登录，一直重连。别的断开（ssh 断了、
+            // 远端进程没了）在出过画面以后自己重连；还没出过画面就断了的，多半重连也一样，停下等用户点
+            // 「重新连接」。
             UiEvent::Closed => {
                 self.link = None;
-                if !matches!(self.phase, Phase::Stopped(_)) {
-                    self.phase = Phase::Stopped(rust_i18n::t!("screen_viewer.closed").into_owned());
-                }
                 self.drop_picture(window);
+                match self.phase {
+                    Phase::Stopped(_) => {}
+                    Phase::Live => self.reconnect_later(window, cx),
+                    _ if self.retries > 0 || self.signed_out => self.reconnect_later(window, cx),
+                    _ => self.phase = Phase::Stopped(rust_i18n::t!("screen_viewer.closed").into_owned()),
+                }
             }
         }
         cx.notify();
+    }
+
+    /// 过一会儿重连，等得一次比一次久（`RECONNECT_DELAYS`）。
+    fn reconnect_later(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.retries += 1;
+        let attempt = self.retries;
+        self.phase = Phase::Reconnecting(attempt);
+        let delay = RECONNECT_DELAYS.get(attempt as usize - 1).copied().unwrap_or(RECONNECT_LAST);
+        tracing::info!("reconnecting to the remote desktop of {} in {delay:?} (attempt {attempt})", self.host);
+        self.retry = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            this.update_in(cx, |this, window, cx| this.connect(window, cx)).ok();
+        }));
+    }
+
+    /// 用户点了「重新连接」：不等计时，从头连。
+    fn reconnect_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.retry = None;
+        self.retries = 0;
+        self.connect(window, cx);
     }
 
     /// 丢掉显示着的那帧。Windows 上它占着窗口的图片缓存，要从窗口里拿掉。
@@ -479,8 +533,8 @@ impl ScreenViewer {
                     .collect()
             })
             .unwrap_or_default();
-        // 断了，或者远端缺授权、等用户去那台电脑上打开以后重连。
-        let stuck = matches!(self.phase, Phase::Stopped(_))
+        // 断了、等着重连，或者远端缺授权、等用户去那台电脑上打开以后重连。
+        let stuck = matches!(self.phase, Phase::Stopped(_) | Phase::Reconnecting(_))
             || self.remote.as_ref().is_some_and(|remote| !remote.screen_capture || !remote.post_event);
         let reconnect = stuck.then(|| {
             let label = rust_i18n::t!("screen_viewer.reconnect").into_owned();
@@ -488,7 +542,7 @@ impl ScreenViewer {
                 .icon(REFRESH_ICON)
                 .with_size(ButtonSize::IconSm)
                 .tooltip(tooltip(label, None))
-                .on_press(cx, |this, window, cx| this.connect(window, cx))
+                .on_press(cx, |this, window, cx| this.reconnect_now(window, cx))
         });
         let close = rust_i18n::t!("screen_viewer.close").into_owned();
         div()
@@ -522,25 +576,43 @@ impl ScreenViewer {
         let notice = match &self.phase {
             Phase::Connecting => rust_i18n::t!("screen_viewer.connecting", host = self.host.as_str()),
             Phase::Stopped(reason) => return Some(reason.clone()),
+            Phase::Reconnecting(_) if self.signed_out => rust_i18n::t!("screen_viewer.signed_out"),
+            Phase::Reconnecting(attempt) => rust_i18n::t!("screen_viewer.reconnecting", attempt = attempt),
             Phase::Opening if self.remote.as_ref().is_some_and(|remote| !remote.screen_capture) => {
                 rust_i18n::t!("screen_viewer.no_screen_capture")
             }
+            // 锁着屏的 Windows 不出画面，由锁屏的那块说明。
+            Phase::Opening if self.locked => return None,
             Phase::Opening => rust_i18n::t!("screen_viewer.opening"),
             Phase::Live => return None,
         };
         Some(notice.into_owned())
     }
 
+    /// 锁屏时盖在画面中间的一块：能代敲密码的远端给密码框和「解锁」；Windows 的锁屏在安全桌面上，注入不了按键，
+    /// 只说要在那台电脑前解锁。
     fn render_lock(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let unlock = rust_i18n::t!("screen_viewer.unlock").into_owned();
-        div()
+        let typed = !remote::find(&self.host).is_some_and(|host| host.family() == Family::Windows);
+        let label = if !typed {
+            rust_i18n::t!("screen_viewer.locked_elsewhere")
+        } else if self.unlock_failed {
+            rust_i18n::t!("screen_viewer.unlock_failed")
+        } else {
+            rust_i18n::t!("screen_viewer.locked")
+        };
+        let form = typed.then(|| {
+            div().flex().flex_col().gap(px(8.)).child(Input::new(&self.password)).child(
+                Button::new("screen-unlock", unlock)
+                    .variant(ButtonVariant::Default)
+                    .on_press(cx, |this, window, cx| this.unlock(window, cx)),
+            )
+        });
+        let panel = div()
             .id("screen-lock")
             .role(Role::Group)
-            .aria_label(rust_i18n::t!("screen_viewer.locked").into_owned())
-            .absolute()
-            .bottom(px(16.))
-            .left(px(16.))
+            .aria_label(label.clone().into_owned())
             .w(scaled(260.))
             .p(px(12.))
             .rounded(px(8.))
@@ -556,19 +628,10 @@ impl ScreenViewer {
                     .role(Role::Label)
                     .text_size(FontSize::Small)
                     .text_color(theme.muted_foreground)
-                    .child(if self.unlock_failed {
-                        rust_i18n::t!("screen_viewer.unlock_failed")
-                    } else {
-                        rust_i18n::t!("screen_viewer.locked")
-                    }),
+                    .child(label),
             )
-            .child(Input::new(&self.password))
-            .child(
-                Button::new("screen-unlock", unlock)
-                    .variant(ButtonVariant::Default)
-                    .on_press(cx, |this, window, cx| this.unlock(window, cx)),
-            )
-            .into_any_element()
+            .children(form);
+        div().absolute().inset_0().flex().items_center().justify_center().p(px(24.)).child(panel).into_any_element()
     }
 }
 
@@ -622,7 +685,7 @@ impl Render for ScreenViewer {
                 .text_color(theme.foreground)
                 .child(rust_i18n::t!("screen_viewer.no_post_event"))
         });
-        let lock = if self.locked && matches!(self.phase, Phase::Live) { Some(self.render_lock(cx)) } else { None };
+        let lock = (self.locked && matches!(self.phase, Phase::Live | Phase::Opening)).then(|| self.render_lock(cx));
         // 记下画面区域，按它换算鼠标的位置、算要多大的画面；变了时等这一帧画完再处理。
         let tracker = {
             let (cell, view) = (self.bounds.clone(), cx.entity().downgrade());

@@ -36,12 +36,14 @@ pub fn connect() -> io::Result<UnixStream> {
         .ok_or_else(|| io::Error::other("no place for the screen socket"))?;
     // 从拉起采集进程时才开始算期限：之前把它复制到固定路径可能要好几秒。
     let mut deadline: Option<Instant> = None;
+    // 拉起采集进程时交回的，拿到连上它或者放弃（`launch`）。
+    let mut _launched = None;
     loop {
         match UnixStream::connect(&socket) {
             Ok(stream) => return Ok(stream),
             Err(err) if deadline.is_none() => {
                 tracing::info!("starting the screen process: {err}");
-                runode_host::launch_screen(&screen_exe()?)?;
+                _launched = Some(launch(&screen_exe()?)?);
                 deadline = Some(Instant::now() + START_TIMEOUT);
             }
             Err(_) if deadline.is_some_and(|deadline| Instant::now() >= deadline) => {
@@ -50,6 +52,30 @@ pub fn connect() -> io::Result<UnixStream> {
             Err(_) => {}
         }
         thread::sleep(RETRY);
+    }
+}
+
+/// 拉起采集进程。
+#[cfg(not(windows))]
+fn launch(exe: &Path) -> io::Result<()> {
+    runode_host::launch_screen(exe).map(drop)
+}
+
+/// 拉起采集进程。经 ssh 起在没有屏幕的会话里的采集不到屏幕，起到屏幕上的会话里（`desktop_session`），交回的
+/// 任务要拿到连上采集进程以后再放；那里登录的不是同一个用户时任务计划不肯以他的身份起，报错。
+#[cfg(windows)]
+fn launch(exe: &Path) -> io::Result<Option<crate::desktop_session::Scheduled>> {
+    use crate::desktop_session::{Desktop, desktop, schedule};
+    match desktop() {
+        Desktop::Here => runode_host::launch_screen(exe).map(|_| None),
+        Desktop::Mine => schedule(exe, "--screen").map(Some),
+        Desktop::Nobody => {
+            Err(io::Error::new(io::ErrorKind::NotConnected, "nobody is signed in on this computer's screen"))
+        }
+        Desktop::Other(user) => Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{user} is signed in on this computer's screen, not this user"),
+        )),
     }
 }
 
@@ -92,11 +118,14 @@ fn copy_if_changed(from: &Path, to: &Path) -> io::Result<()> {
 /// `runode --ssh-screen`：把 stdin、stdout 接到采集进程上，任一头断开就退出，返回退出码。连不上时往
 /// stdout 写一条 `ScreenHostMsg::Stopped` 带上原因再退出，观看端照常显示。
 pub fn run() -> i32 {
+    // stdout 是协议，出了问题只能看日志。
+    crate::host_process::init_logging(runode_paths::Dirs::from_env().ssh_screen_log_file());
     let stream = match connect() {
         Ok(stream) => stream,
         Err(err) => {
+            tracing::warn!("cannot reach the screen process: {err}");
             let reason = format!("cannot start remote desktop on this computer: {err}");
-            if let Ok(frame) = Frame::control(&ScreenHostMsg::Stopped { reason }) {
+            if let Ok(frame) = Frame::control(&ScreenHostMsg::Stopped { reason, signed_out: signed_out() }) {
                 let mut out = io::stdout().lock();
                 let _ = write_frame(&mut out, FrameKind::Control, 0, &frame.payload);
                 let _ = out.flush();
@@ -119,6 +148,14 @@ pub fn run() -> i32 {
     // stdin 那头可能一直阻塞着（ssh 还开着）：采集进程断开就整个退出，不等它。
     drop(upstream);
     0
+}
+
+/// 屏幕上没人登录：Windows 上经 ssh 跑在没有屏幕的会话里时，没有可以起采集进程的桌面。
+fn signed_out() -> bool {
+    #[cfg(windows)]
+    return matches!(crate::desktop_session::desktop(), crate::desktop_session::Desktop::Nobody);
+    #[cfg(not(windows))]
+    false
 }
 
 /// 每读到一块就写出去并 flush：画面要尽快到，攒着不发就是延迟。

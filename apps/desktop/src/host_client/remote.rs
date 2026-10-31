@@ -34,6 +34,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use runode_protocol::{ClientMsg, SessionId};
 use runode_ssh::{
     Destination, Ssh,
+    bootstrap::{self, Family},
     bridge::{self, Start, read_service, read_start},
     process::{Piped, Pipes},
 };
@@ -257,8 +258,10 @@ pub struct Connected {
     pub mismatch: bool,
     /// 远端宿主跟着 ssh 的登录会话走，最后一个连接断开时可能被系统结束（`Opening::session_bound`）。
     pub session_bound: bool,
-    /// 远端的家目录，不知道时为空。
+    /// 远端的家目录，不知道时为空。Windows 远端的路径也用 `/` 分隔（`C:/Users/me`）。
     pub home: Option<PathBuf>,
+    /// 远端的系统，`runode_ssh::bridge::Opening::os` 的写法；不知道时为空。
+    pub os: String,
 }
 
 /// 连接做到了哪一步。
@@ -335,6 +338,8 @@ struct State {
     child: Option<u32>,
     /// 被 `forget` 了，supervisor 不再等着要连，退出。
     forgotten: bool,
+    /// 远端命令的写法，认出是 Windows 以后记着，再连时不用先按 Unix 试。
+    family: Family,
 }
 
 impl fmt::Debug for RemoteHost {
@@ -360,6 +365,7 @@ impl RemoteHost {
                 hurry: false,
                 child: None,
                 forgotten: false,
+                family: Family::Unix,
             }),
             changed: Condvar::new(),
             latency: Mutex::new(None),
@@ -431,6 +437,11 @@ impl RemoteHost {
         forward::forget(&self.name);
     }
 
+    /// 远端命令按哪种系统写，没认出是 Windows 时按 Unix。
+    pub fn family(&self) -> Family {
+        self.state().family
+    }
+
     /// 在远端把宿主装成登录服务（`runode --ssh-service`）。连着时才办，会阻塞。
     pub fn install_service(&self) -> Result<bridge::Service, bridge::Failure> {
         let fail = |code: &str, message: String| bridge::Failure { code: code.into(), message };
@@ -438,7 +449,7 @@ impl RemoteHost {
             return Err(fail("disconnected", format!("not connected to {}", self.name)));
         }
         let ssh = ssh();
-        let script = runode_ssh::bootstrap::service_command(&deploy::install_dir());
+        let script = bootstrap::service_command(&deploy::install_dir());
         let mut command = self.exec(&ssh, &script, true, false);
         command.stdin(Stdio::null());
         crate::subprocess::hide_window(&mut command);
@@ -455,7 +466,10 @@ impl RemoteHost {
             return Err(format!("not connected to {}", self.name));
         }
         let ssh = ssh();
-        let script = runode_ssh::bootstrap::prune_command(&deploy::install_dir());
+        let script = match self.family() {
+            Family::Unix => bootstrap::prune_command(&deploy::install_dir()),
+            Family::Windows => bootstrap::windows::prune_command(&deploy::install_dir()),
+        };
         let mut command = self.exec(&ssh, &script, true, false);
         command.stdin(Stdio::null());
         crate::subprocess::hide_window(&mut command);
@@ -463,7 +477,7 @@ impl RemoteHost {
         if !output.status.success() {
             return Err(format!("ssh exited with {:?}", output.status.code()));
         }
-        let pruned = runode_ssh::bootstrap::parse_pruned(&String::from_utf8_lossy(&output.stdout));
+        let pruned = bootstrap::parse_pruned(&String::from_utf8_lossy(&output.stdout));
         Ok((pruned.len(), pruned.iter().map(|(_, kib)| kib).sum()))
     }
 
@@ -555,9 +569,16 @@ impl RemoteHost {
         }
         let dir = deploy::install_dir();
         let mut deployed = false;
+        let mut family = self.family();
+        // 按 Unix 没连上、改按 Windows 试时，Unix 那次的 ssh 日志和退出码：Windows 也不是时按它报错。
+        let mut unix_failure: Option<(Vec<u8>, Option<i32>)> = None;
         loop {
             self.set_status(Status::Connecting(if deployed { Phase::Starting } else { Phase::Probing }));
-            let mut command = self.exec(&ssh, &runode_ssh::bootstrap::connect_command(&dir), interactive, false);
+            let script = match family {
+                Family::Unix => bootstrap::connect_command(&dir),
+                Family::Windows => bootstrap::windows::connect_command(&dir),
+            };
+            let mut command = self.exec(&ssh, &script, interactive, false);
             let piped = spawn_piped(&mut command, &log)?;
             let (mut child, stdin) = (piped.child, piped.stdin);
             let stdout = piped.stdout.ok_or_else(|| Failure::Retry("ssh gave no output".into()))?;
@@ -576,15 +597,22 @@ impl RemoteHost {
                         return Err(Failure::Retry(format!("disconnected from {} while connecting", self.name)));
                     }
                     state.child = Some(pid);
+                    state.family = family;
                     drop(state);
+                    self.link.set_windows_paths(family == Family::Windows);
                     let running = Running::start(child, stdin, stdout, &self.link).map_err(|err| {
                         self.state().child = None;
                         Failure::Retry(format!("cannot talk to the host on {}: {err}", self.name))
                     })?;
                     let mismatch = opening.build != build().0;
                     let home = (!opening.home.is_empty()).then(|| PathBuf::from(&opening.home));
-                    let connected =
-                        Connected { build: opening.build, mismatch, session_bound: opening.session_bound, home };
+                    let connected = Connected {
+                        build: opening.build,
+                        mismatch,
+                        session_bound: opening.session_bound,
+                        home,
+                        os: opening.os,
+                    };
                     self.connected(connected);
                     return Ok(running);
                 }
@@ -594,8 +622,23 @@ impl RemoteHost {
                 }
                 Ok(Start::Probe(platform)) => {
                     let status = child.wait().map_err(|err| Failure::Retry(err.to_string()))?;
-                    let Some(platform) = platform.filter(|_| status.code() == Some(runode_ssh::bootstrap::PROBE_EXIT))
-                    else {
+                    let Some(platform) = platform.filter(|_| status.code() == Some(bootstrap::PROBE_EXIT)) else {
+                        // 没打出平台信息、ssh 也没报连接或认证的错，多半是 Windows：cmd 把 Unix 脚本里的 `|`、`>`
+                        // 当成管道和重定向，退出码也可能是 255，不能按退出码认。
+                        let unix_log = std::fs::read(&log).unwrap_or_default();
+                        let ssh_failed = !matches!(
+                            runode_ssh::Failure::of(&String::from_utf8_lossy(&unix_log)),
+                            runode_ssh::Failure::Other(_)
+                        );
+                        if family == Family::Unix && !deployed && !ssh_failed {
+                            unix_failure = Some((unix_log, status.code()));
+                            family = Family::Windows;
+                            continue;
+                        }
+                        if let Some((unix_log, code)) = unix_failure {
+                            let _ = std::fs::write(&log, unix_log);
+                            return Err(classify(&log, code));
+                        }
                         return Err(classify(&log, status.code()));
                     };
                     if deployed {

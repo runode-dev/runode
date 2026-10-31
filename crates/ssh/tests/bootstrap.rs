@@ -1,6 +1,7 @@
-//! 远端脚本：在本机用 /bin/sh 真跑一遍，探测、安装、换链接都按约定来。
+//! 远端脚本：在本机用 /bin/sh 真跑一遍，探测、安装、换链接都按约定来；Windows 的脚本在 Windows 上像
+//! Windows 的 OpenSSH 那样交给 cmd 跑。
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod common;
 
 use std::process::Command;
@@ -13,7 +14,7 @@ use common::TempDir;
 use runode_ssh::bootstrap::{BIN_DIR, PROBE_EXIT, UPLOADS_DIR, parse_pruned, parse_uploaded};
 use runode_ssh::bootstrap::{
     Libc, Os, Platform, Target, Unsupported, connect_command, install_command, install_dir_name, project_command,
-    prune_command, screen_command, service_command, upload_command,
+    prune_command, screen_command, service_command, upload_command, windows,
 };
 
 /// 像 ssh 那样把命令行交给登录 shell（默认 /bin/sh）解释。
@@ -66,6 +67,21 @@ fn scripts_avoid_characters_remote_shells_mangle() {
             assert!(Command::new("/bin/sh").args(["-n", "-c", inner]).status().unwrap().success());
         }
     }
+    for command in [
+        windows::connect_command("0.1.16.abc"),
+        windows::install_command("0.1.16.abc", ".part-1"),
+        windows::upload_command("1-2"),
+        windows::project_command("0.1.16.abc"),
+        windows::screen_command("0.1.16.abc"),
+    ] {
+        let inner = command.strip_prefix("cmd /d /c \"").and_then(|rest| rest.strip_suffix('"')).unwrap();
+        assert!(!inner.contains(['"', '$', '`', '\n']), "{inner}");
+    }
+    assert!(
+        windows::prune_command("0.1.16.abc")
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b" -+/=".contains(&byte))
+    );
     assert_eq!(install_dir_name("0.1.16.abc-dirty.x/y"), "0.1.16.abc-dirty.x_y");
     assert_eq!(install_dir_name(".."), "_..");
 }
@@ -202,6 +218,20 @@ fn picks_targets_and_refuses_unsupported_platforms() {
     let alpine = Platform::parse("RUNODE-PROBE os=Linux\nRUNODE-PROBE glibc=\nRUNODE-PROBE musl=1\n").unwrap();
     assert_eq!(alpine.libc, Libc::Musl);
     assert_eq!(Platform::parse("hello"), None);
+
+    let windows = Platform::parse("RUNODE-PROBE os=Windows\r\nRUNODE-PROBE arch=AMD64\r\n").unwrap();
+    assert_eq!(windows.os, Os::Windows);
+    assert_eq!(windows.target(), Ok(Target::WindowsX86_64));
+    assert_eq!(platform(Os::Windows, "ARM64", Libc::Unknown).target(), Err(Unsupported::Arch("ARM64".into())));
+}
+
+#[test]
+fn reads_windows_upload_directories() {
+    let output = "noise\r\nRUNODE-UPLOADED C:\\Users\\Jo Do\\.runode\\uploads\\1-a\r\n";
+    assert_eq!(windows::parse_uploaded(output).as_deref(), Some("C:/Users/Jo Do/.runode/uploads/1-a"));
+    assert_eq!(windows::parse_uploaded("RUNODE-UPLOADED .runode\\uploads\\1-a"), None);
+    assert!(windows::is_absolute("c:/"));
+    assert!(!windows::is_absolute("/home/me"));
 }
 
 /// 登录 shell 是 fish、tcsh、csh、dash 时脚本照样跑得通（机器上没装的跳过）。
@@ -249,4 +279,106 @@ fn uploads_a_file_or_a_tar_into_a_fresh_directory() {
     // 同一个子目录不会再用第二次。
     assert!(!run(&home.0, &upload_command("1-a", Some("shot.png")), b"again").status.success());
     assert_eq!(parse_uploaded("RUNODE-UPLOADED relative"), None);
+}
+
+/// 像 Windows 的 OpenSSH 那样把命令行原样交给 cmd 解释，家目录设成 `home`。stdin 先写进文件再交过去：
+/// tar.exe 从匿名管道读 zip 时报错，sshd 交来的 stdin 不是匿名管道。
+#[cfg(windows)]
+fn run_cmd(home: &std::path::Path, command: &str, stdin: &[u8]) -> std::process::Output {
+    use std::{os::windows::process::CommandExt as _, process::Stdio};
+    let input = home.join(format!("stdin-{}", std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap().as_nanos()));
+    std::fs::write(&input, stdin).unwrap();
+    let output = Command::new("cmd.exe")
+        .raw_arg(format!("/c {command}"))
+        .env("USERPROFILE", home)
+        .stdin(Stdio::from(std::fs::File::open(&input).unwrap()))
+        .output()
+        .unwrap();
+    std::fs::remove_file(&input).unwrap();
+    output
+}
+
+/// 用系统的 tar.exe 把 `dir` 里的 `files` 打成 zip。
+#[cfg(windows)]
+fn zip(dir: &std::path::Path, files: &[&str], out: &std::path::Path) {
+    let status = Command::new("tar").arg("-a").arg("-cf").arg(out).arg("-C").arg(dir).args(files).status().unwrap();
+    assert!(status.success());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_probes_installs_and_prunes() {
+    use std::fs;
+    // 家目录名里带空格：脚本靠 `cd` 进家目录，路径都相对它写。
+    let home = common::TempDir::new("boot strap");
+    let dir = "0.1.16.test";
+    let probe = run_cmd(&home.0, &windows::connect_command(dir), b"");
+    assert_eq!(probe.status.code(), Some(runode_ssh::bootstrap::PROBE_EXIT));
+    let platform = Platform::parse(&String::from_utf8_lossy(&probe.stdout)).unwrap();
+    assert_eq!(platform.target(), Ok(Target::WindowsX86_64));
+
+    // 假的 rn.exe 是系统的 tar.exe：`--version` 时成功退出。
+    let staging = home.0.join("staging");
+    fs::create_dir(&staging).unwrap();
+    fs::copy(r"C:\Windows\System32\tar.exe", staging.join("rn.exe")).unwrap();
+    fs::write(staging.join("conpty.dll"), b"dll").unwrap();
+    // 只有 rn.exe、没有 runode.exe 的包不装。
+    let launcher_only = home.0.join("launcher.zip");
+    zip(&staging, &["rn.exe", "conpty.dll"], &launcher_only);
+    let refused = run_cmd(&home.0, &windows::install_command(dir, ".part-0"), &fs::read(&launcher_only).unwrap());
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("RUNODE-INSTALL exec"));
+
+    fs::write(staging.join("runode.exe"), b"app").unwrap();
+    let archive = home.0.join("runode.zip");
+    zip(&staging, &["rn.exe", "runode.exe", "conpty.dll"], &archive);
+    let bytes = fs::read(&archive).unwrap();
+    let cut = run_cmd(&home.0, &windows::install_command(dir, ".part-1"), &bytes[..bytes.len() / 2]);
+    assert!(!cut.status.success());
+    assert!(String::from_utf8_lossy(&cut.stderr).contains("RUNODE-INSTALL checksum"));
+
+    let bin = home.0.join(runode_ssh::bootstrap::BIN_DIR);
+    fs::create_dir_all(bin.join("stale")).unwrap();
+    fs::write(bin.join("stale/rn.exe"), b"old").unwrap();
+    let installed = run_cmd(&home.0, &windows::install_command(dir, ".part-2"), &bytes);
+    assert!(installed.status.success(), "{}", String::from_utf8_lossy(&installed.stderr));
+    assert!(bin.join(dir).join("rn.exe").is_file());
+    assert!(bin.join(dir).join("conpty.dll").is_file());
+    assert!(!bin.join(".part-0").exists());
+    // 别的连接已经装好了同一个构建：用它的，丢掉这次解出来的。
+    let again = run_cmd(&home.0, &windows::install_command(dir, ".part-3"), &bytes);
+    assert!(again.status.success(), "{}", String::from_utf8_lossy(&again.stderr));
+    assert!(!bin.join(".part-3").exists());
+    // `stale` 刚放进去，没满 `BUILD_KEEP_DAYS` 天，留着。
+    let mut left: Vec<_> = fs::read_dir(&bin).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+    left.sort();
+    assert_eq!(left, [dir, "stale"]);
+
+    let output = run_cmd(&home.0, &windows::prune_command(dir), b"");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let pruned = runode_ssh::bootstrap::parse_pruned(&String::from_utf8_lossy(&output.stdout));
+    assert_eq!(pruned.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["stale"]);
+    let left: Vec<_> = fs::read_dir(&bin).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+    assert_eq!(left, [dir]);
+
+    let missing = run_cmd(&home.0, &windows::project_command("0.1.17.next"), b"");
+    assert_eq!(missing.status.code(), Some(runode_ssh::bootstrap::PROBE_EXIT));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_uploads_a_tar_into_a_fresh_directory() {
+    use std::fs;
+    let home = common::TempDir::new("up load");
+    let src = home.0.join("src");
+    fs::create_dir_all(src.join("folder")).unwrap();
+    fs::write(src.join("folder/inner.txt"), "inner").unwrap();
+    let tar = Command::new("tar").arg("-cf").arg("-").arg("-C").arg(&src).arg("folder").output().unwrap();
+    let output = run_cmd(&home.0, &windows::upload_command("1-a"), &tar.stdout);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let dir = windows::parse_uploaded(&String::from_utf8_lossy(&output.stdout)).unwrap();
+    let expected = home.0.join(runode_ssh::bootstrap::UPLOADS_DIR).join("1-a");
+    assert_eq!(dir, expected.to_string_lossy().replace('\\', "/"));
+    assert_eq!(fs::read_to_string(std::path::Path::new(&dir).join("folder/inner.txt")).unwrap(), "inner");
+    assert!(!run_cmd(&home.0, &windows::upload_command("1-a"), &tar.stdout).status.success());
 }

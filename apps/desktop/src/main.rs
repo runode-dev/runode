@@ -15,6 +15,8 @@
 mod about;
 mod assets;
 mod config;
+#[cfg(windows)]
+mod desktop_session;
 mod dictation;
 mod file_tree;
 mod fs_probe;
@@ -85,7 +87,6 @@ fn main() {
     if args == ["--host", "--upgrade"] {
         std::process::exit(host_client::upgrade());
     }
-    #[cfg(unix)]
     if args == ["--ssh-bridge"] {
         std::process::exit(host_client::bridge::run());
     }

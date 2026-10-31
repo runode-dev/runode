@@ -4,7 +4,9 @@
 
 use std::io;
 
-use gpui::{AnyElement, IntoElement as _, ObjectFit, Styled as _};
+use gpui::{AnyElement, IntoElement as _};
+#[cfg(any(target_os = "macos", windows))]
+use gpui::{ObjectFit, Styled as _};
 use runode_types::screen::VideoFrame;
 
 /// 解出来、能直接画的一帧。

@@ -32,7 +32,7 @@ pub use decoder::{Decoded, Decoder, PixelBuffer};
 pub use input::Injector;
 pub use keys::key_strokes;
 #[cfg(windows)]
-pub use win::{Capture, Decoded, Decoder, Injector, KeepAwake, Keyframes};
+pub use win::{Capture, Decoded, Decoder, Injector, KeepAwake, Keyframes, console_user, in_service_session};
 
 pub use runode_types::screen::VideoFrame;
 

@@ -1,15 +1,20 @@
 //! 把远程桌面页（`screen_viewer::ScreenViewer`）接到窗口上：盖住标签和分屏、留着侧栏，一个窗口
-//! 一次看一台主机。从菜单的「远程桌面」打开当前 workspace 所在的 SSH 主机，或从设置页的 SSH 主机列表打开
-//! 那一台（`show_remote_desktop`）；切到任何一个标签或 workspace、打开别的整页、点页面上的关闭时收起，
-//! 收起就断开。
+//! 一次看一台主机。从菜单的「远程桌面」或标题栏右上角的远程桌面按钮打开当前 workspace 所在的 SSH 主机，
+//! 或从设置页的 SSH 主机列表打开那一台（`show_remote_desktop`）；切到任何一个标签或 workspace、打开别的
+//! 整页、点页面上的关闭时收起，收起就断开。
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, Focusable as _, StyleRefinement, Subscription, Window,
-    prelude::*,
+    prelude::*, px,
 };
 
-use super::{ToggleRemoteDesktop, WindowView};
-use crate::screen_viewer::{ScreenViewer, ScreenViewerEvent};
+use super::{
+    ToggleRemoteDesktop, WindowView,
+    project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
+};
+use crate::assets::MONITOR_ICON;
+use crate::screen_viewer::{SUPPORTED, ScreenViewer, ScreenViewerEvent};
+use crate::ui::{a11y::PressDown as _, button::Toggle, tooltip::tooltip};
 
 pub(super) struct OpenScreenViewer {
     pub(super) view: Entity<ScreenViewer>,
@@ -47,6 +52,22 @@ impl WindowView {
         } else if let Some(host) = self.workspace().host.label() {
             self.show_screen_viewer(host.to_owned(), window, cx);
         }
+    }
+
+    /// 标题栏右上角有远程桌面按钮：当前 workspace 在 SSH 主机上，本机也能解远程桌面的画面。
+    pub(super) fn remote_desktop_button_shown(&self) -> bool {
+        SUPPORTED && self.on_remote()
+    }
+
+    /// 标题栏右上角、命令按钮左边的远程桌面按钮，打开当前 workspace 所在主机的远程桌面。
+    pub(super) fn render_remote_desktop_button(&self, cx: &mut Context<Self>) -> Toggle {
+        let text = rust_i18n::t!("tooltip.remote_desktop");
+        Toggle::new("remote-desktop", MONITOR_ICON, text.clone().into_owned())
+            .pressed(self.screen_viewer.is_some())
+            .w(px(TOGGLE_WIDTH))
+            .h(px(TOGGLE_HEIGHT))
+            .tooltip(tooltip(text, Some(&ToggleRemoteDesktop)))
+            .on_press_down(cx, |this, window, cx| this.toggle_remote_desktop(&ToggleRemoteDesktop, window, cx))
     }
 
     /// 打开主机 `host` 的远程桌面，焦点给它；开着的是别的主机时换成这一台。

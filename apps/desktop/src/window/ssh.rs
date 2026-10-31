@@ -21,6 +21,7 @@ use super::{
     Dropdown, TITLEBAR_HEIGHT, WindowView,
     files::Quoting,
     new_workspace::{Source, clone_command, repo_name},
+    status_bar::host_list::dot_color,
 };
 use crate::{
     host_client::remote::{self, HostId, Status},
@@ -429,9 +430,9 @@ impl WindowView {
         let Some(dialog) = &mut self.new_workspace else {
             return;
         };
-        if dialog.host.is_local() {
+        let HostId::Ssh(name) = &dialog.host else {
             return;
-        }
+        };
         let Some(parent) = dialog.browse.as_ref().and_then(|browse| browse.path.clone()) else {
             return;
         };
@@ -447,8 +448,13 @@ impl WindowView {
         if ops::child_path(Path::new("/"), &dir_name).is_none() {
             return;
         }
-        // 远端是 Linux 或 macOS，新开的终端照 sh 的写法加引号。
-        let command = clone.then(|| clone_command(&url, Quoting::Posix));
+        let command = clone.then(|| {
+            let os = match status_of(name) {
+                Status::Connected(connected) => connected.os,
+                _ => String::new(),
+            };
+            clone_command(&url, Quoting::of_os(&os))
+        });
         let host = dialog.host.clone();
         let dir = remote_child(&parent, &dir_name);
         dialog.error = None;
@@ -536,6 +542,7 @@ impl WindowView {
                 .flex()
                 .items_center()
                 .gap(px(8.))
+                .child(div().flex_none().size(px(7.)).rounded_full().bg(dot_color(&status, fg)))
                 .child(
                     div()
                         .id("new-workspace-host-status")

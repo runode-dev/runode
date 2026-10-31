@@ -11,6 +11,7 @@ fn skips_noise_before_the_opening_line() {
         pid: 42,
         via: "took".into(),
         session_bound: true,
+        os: "macos".into(),
         home: "/Users/me with space".into(),
     };
     let wire = format!("Welcome to Ubuntu\n\n{}\u{0}\u{1}protocol", opening.line());

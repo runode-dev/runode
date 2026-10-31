@@ -1,4 +1,4 @@
-//! 窗口底部的状态栏，右边三块，点了在上面弹出各自的浮层：
+//! 窗口底部的状态栏，右边四块，点了在上面弹出各自的浮层：
 //!
 //! - 防止休眠：开启、agent 在干活时、关闭三种（`SleepMode`），要挡时拿着一个 `probe::Caffeinate`；
 //! - 内存和终端数：runode 自己（app、单独跑的宿主和各个终端里的进程）一共占多少内存，所有窗口里有
@@ -6,6 +6,8 @@
 //! - 端口：终端里跑的程序在监听几个 TCP 端口；浮层里列出来，点了在浏览器里打开，别的程序监听的收在
 //!   「外部端口」里。当前工作区在 SSH 主机上时另列那台机器上在监听的端口，点了经主连接转到本机再打开，
 //!   转着的能停掉（`host_client::remote::forward`）。
+//! - 远程主机：连过几台 SSH 主机，没有时不显示；浮层里列出各台的连接状态，能连上、断开，或者去设置页管理
+//!   （`host_list`）。
 //!
 //! 左边是 GitHub Actions 页里固定到状态栏上的工作流，见 `render_pinned_workflows`；当前工作区在 SSH 主机上时
 //! 后面跟着那台主机的连接状态，连着时写出心跳测的延迟（`RemoteHost::latency`）。
@@ -17,6 +19,7 @@
 //! 在不在干活，好决定挡不挡休眠。终端靠 `SessionMeta::pid`（shell 的进程号）认领它的子孙进程和这些
 //! 进程监听的端口。
 
+pub(super) mod host_list;
 mod probe;
 
 use crate::ui::popover::Popover;
@@ -45,7 +48,9 @@ use crate::ui::button::{Button, ButtonSize};
 use crate::ui::menu::MenuHost as _;
 use crate::ui::panel::sync_icon;
 use crate::{
-    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SHELL_ICON},
+    assets::{
+        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SERVER_ICON, SHELL_ICON,
+    },
     config::AppConfig,
     ui::{
         font_size::{FontSize, scaled},
@@ -94,6 +99,7 @@ pub(crate) fn item_icon_and_title(item: StatusItem) -> (&'static str, String) {
         StatusItem::Sleep => (COFFEE_ICON, "status.sleep_title"),
         StatusItem::Resources => (MEMORY_ICON, "status.resources_title"),
         StatusItem::Ports => (PLUG_ICON, "status.ports_title"),
+        StatusItem::Hosts => (SERVER_ICON, "status.hosts_title"),
     };
     (icon, rust_i18n::t!(key).into_owned())
 }
@@ -114,6 +120,7 @@ pub(super) enum StatusPopover {
     Sleep,
     Resources,
     Ports { external: bool },
+    Hosts,
 }
 
 impl StatusPopover {
@@ -127,6 +134,7 @@ impl StatusPopover {
             Self::Sleep => StatusItem::Sleep,
             Self::Resources => StatusItem::Resources,
             Self::Ports { .. } => StatusItem::Ports,
+            Self::Hosts => StatusItem::Hosts,
         };
         item_icon_and_title(item).1
     }
@@ -367,7 +375,7 @@ fn tick(probed: Option<Probed>, cx: &mut App) {
 }
 
 /// 只叫各窗口的状态栏那一块重画（浮层也画在它里面），窗口里别的缓存的几块照搬上一帧。
-fn redraw_status_bars(cx: &mut App) {
+pub(crate) fn redraw_status_bars(cx: &mut App) {
     for handle in remote::windows(cx) {
         let _ = handle.update(cx, |view, _, cx| {
             if let Some(slots) = &view.slots {
@@ -512,24 +520,18 @@ impl WindowView {
         let host_item = host.map(|name| {
             let status = hosts::find(name).map_or(hosts::Status::Idle, |host| host.status());
             let latency = cx.try_global::<Status>().and_then(|status| status.latencies.get(name).copied());
-            let (color, state) = match &status {
-                hosts::Status::Connected(_) => (
-                    hsla(ACTIVE_DOT),
-                    latency.map_or_else(
-                        || rust_i18n::t!("status.host_connected").into_owned(),
-                        |ms| {
-                            let ms = if ms == 0 { "<1".to_owned() } else { ms.to_string() };
-                            rust_i18n::t!("status.host_latency", ms = ms).into_owned()
-                        },
-                    ),
-                ),
+            let state = match &status {
+                hosts::Status::Connected(_) => {
+                    latency.map_or_else(|| rust_i18n::t!("status.host_connected").into_owned(), host_list::latency_text)
+                }
                 hosts::Status::Connecting(_) | hosts::Status::Waiting { .. } => {
-                    (hsla(PENDING_DOT), rust_i18n::t!("status.host_connecting").into_owned())
+                    rust_i18n::t!("status.host_connecting").into_owned()
                 }
                 hosts::Status::Idle | hosts::Status::Stopped { .. } => {
-                    (fg_h.opacity(0.3), rust_i18n::t!("status.host_offline").into_owned())
+                    rust_i18n::t!("status.host_offline").into_owned()
                 }
             };
+            let color = host_list::dot_color(&status, fg_h);
             div()
                 .id("status-host")
                 .role(Role::Label)
@@ -545,6 +547,8 @@ impl WindowView {
                 .child(name.to_owned())
                 .child(div().text_color(fg_h.opacity(0.5)).child(state))
         });
+        let hosts_item = (!cx.global::<AppConfig>().0.status_bar_hidden.contains(&StatusItem::Hosts))
+            .then(|| self.render_hosts_item(cx));
         let hidden = &cx.global::<AppConfig>().0.status_bar_hidden;
         let shown = |item| !hidden.contains(&item);
         div()
@@ -577,6 +581,7 @@ impl WindowView {
             .when(shown(StatusItem::Sleep), |bar| bar.child(sleep_item))
             .when(shown(StatusItem::Resources), |bar| bar.child(resources_item))
             .when(shown(StatusItem::Ports), |bar| bar.child(ports_item))
+            .children(hosts_item.flatten())
     }
 
     /// 在 `position` 弹出状态栏的右键菜单，勾着的是显示着的几块。
@@ -625,6 +630,7 @@ impl WindowView {
             StatusPopover::Sleep => self.render_sleep_popover(cx),
             StatusPopover::Resources => self.render_resources_popover(cx),
             StatusPopover::Ports { external } => self.render_ports_popover(external, cx),
+            StatusPopover::Hosts => self.render_hosts_popover(cx),
         });
         let title = popover.title();
         // 浮层的左下角对着这一块的左上角，往上让出一点；放不下时贴着窗口边挪进来。

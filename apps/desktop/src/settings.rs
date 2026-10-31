@@ -168,6 +168,11 @@ impl SettingsView {
         cx.notify();
     }
 
+    /// 换到 SSH 页的主机列表。
+    pub fn show_ssh_hosts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.select_page(Page::Ssh, window, cx);
+    }
+
     fn select_page(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
         if self.page == page {
             return;

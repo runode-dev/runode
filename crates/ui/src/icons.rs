@@ -64,11 +64,12 @@ crate::icons! {
     /// 深色底上的提示符。
     pub PROMPT_ICON = "prompt",
     pub PIXEL_QUESTION_ICON = "pixel-question",
-    /// 防止休眠、内存、终端数和端口。
+    /// 防止休眠、内存、终端数、端口和远程主机。
     pub COFFEE_ICON = "coffee",
     pub MEMORY_ICON = "memory",
     pub SHELL_ICON = "shell",
     pub PLUG_ICON = "plug",
+    pub SERVER_ICON = "server",
     pub PHONE_ICON = "phone",
     /// 定时和看板。
     pub CLOCK_ICON = "clock",

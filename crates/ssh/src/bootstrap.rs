@@ -1,8 +1,19 @@
 //! 远端要跑的脚本：探测平台、把 runode 装上去、起桥接。脚本经 ssh 交给远端的登录 shell，那可能是 fish、
 //! tcsh 这类不按 sh 的规矩解释的 shell，所以一律写成一行、整个包在单引号里交给 `/bin/sh -c`，脚本里
-//! 不出现单引号（结束引号）、`!`（csh 的历史展开）和换行（csh 的引号里不能有）。
+//! 不出现单引号（结束引号）、`!`（csh 的历史展开）和换行（csh 的引号里不能有）。Windows 远端的脚本另在
+//! `windows` 里。
+
+pub mod windows;
 
 use std::fmt;
+
+/// 远端命令按哪种系统的写法：`Unix` 交给登录 shell 里的 `/bin/sh`，`Windows` 交给 cmd（`windows`）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Family {
+    #[default]
+    Unix,
+    Windows,
+}
 
 /// runode 在远端装在家目录下的这里，每个构建一个子目录，旁边的 `runode` 是指向当前那个的链接。
 pub const BIN_DIR: &str = ".runode/bin";
@@ -179,6 +190,7 @@ pub fn parse_uploaded(output: &str) -> Option<&str> {
 pub enum Os {
     Linux,
     MacOs,
+    Windows,
     Other(String),
 }
 
@@ -194,7 +206,8 @@ pub enum Libc {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Platform {
     pub os: Os,
-    /// `uname -m`；Apple 芯片的 Mac 上在 Rosetta 下的 shell 里也报 `x86_64`，所以另看 `arm64`。
+    /// `uname -m`，Windows 上是 `PROCESSOR_ARCHITECTURE`；Apple 芯片的 Mac 上在 Rosetta 下的 shell 里也报
+    /// `x86_64`，所以另看 `arm64`。
     pub arch: String,
     /// Mac 的硬件是 Apple 芯片。
     pub arm64: bool,
@@ -211,13 +224,14 @@ pub enum Target {
     LinuxAarch64,
     MacArm64,
     MacX86_64,
+    WindowsX86_64,
 }
 
 impl Target {
     /// 发布页上这个平台的包名里的架构名。
     pub fn arch(self) -> &'static str {
         match self {
-            Self::LinuxX86_64 | Self::MacX86_64 => "x86_64",
+            Self::LinuxX86_64 | Self::MacX86_64 | Self::WindowsX86_64 => "x86_64",
             Self::LinuxAarch64 => "aarch64",
             Self::MacArm64 => "arm64",
         }
@@ -227,6 +241,10 @@ impl Target {
         matches!(self, Self::MacArm64 | Self::MacX86_64)
     }
 
+    pub fn is_windows(self) -> bool {
+        self == Self::WindowsX86_64
+    }
+
     /// 环境变量名里用的写法，比如 `LINUX_X86_64`。
     pub fn env_name(self) -> &'static str {
         match self {
@@ -234,6 +252,7 @@ impl Target {
             Self::LinuxAarch64 => "LINUX_AARCH64",
             Self::MacArm64 => "MACOS_ARM64",
             Self::MacX86_64 => "MACOS_X86_64",
+            Self::WindowsX86_64 => "WINDOWS_X86_64",
         }
     }
 
@@ -244,6 +263,7 @@ impl Target {
             ("linux", "aarch64") => Self::LinuxAarch64,
             ("macos", "aarch64") => Self::MacArm64,
             ("macos", "x86_64") => Self::MacX86_64,
+            ("windows", "x86_64") => Self::WindowsX86_64,
             _ => return None,
         })
     }
@@ -294,6 +314,7 @@ impl Platform {
                     os = Some(match value {
                         "Linux" => Os::Linux,
                         "Darwin" => Os::MacOs,
+                        "Windows" => Os::Windows,
                         other => Os::Other(other.to_owned()),
                     })
                 }
@@ -335,6 +356,8 @@ impl Platform {
                     other => Err(Unsupported::Arch(other.to_owned())),
                 }
             }
+            Os::Windows if self.arch.eq_ignore_ascii_case("AMD64") => Ok(Target::WindowsX86_64),
+            Os::Windows => Err(Unsupported::Arch(self.arch.clone())),
             Os::Other(os) => Err(Unsupported::Os(os.clone())),
         }
     }

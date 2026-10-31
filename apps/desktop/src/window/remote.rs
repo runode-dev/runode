@@ -123,7 +123,9 @@ fn open_workspace(
     let Some(window) = front_window(cx) else {
         return fail("there is no runode window to open it in".into());
     };
-    if !dir.is_absolute() || !is_dir {
+    // Windows 远端的目录到这里已经是 `C:/…`，在别的系统上 `Path` 不认它是绝对路径。
+    let absolute = dir.is_absolute() || dir.to_str().is_some_and(runode_ssh::bootstrap::windows::is_absolute);
+    if !absolute || !is_dir {
         return fail(format!("{} is not a directory", dir.display()));
     }
     let name = name.map(|name| name.trim().to_owned()).filter(|name| !name.is_empty());

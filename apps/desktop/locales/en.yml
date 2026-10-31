@@ -319,6 +319,7 @@ tooltip:
   show_panel: Show Panel
   hide_panel: Hide Panel
   tasks: Tasks
+  remote_desktop: Remote Desktop
   close_search: Close Search
   close_split: Close Split
   restore_split: Restore Split
@@ -879,6 +880,13 @@ status:
   host_latency: "%{ms} ms"
   host_connecting: connecting…
   host_offline: not connected
+  hosts_title: Remote hosts
+  hosts_count: "%{count} hosts"
+  hosts_count_one: 1 host
+  hosts_summary: "%{connected}/%{total} connected"
+  hosts_manage: Manage remote hosts
+  host_connect: Connect
+  host_disconnect: Disconnect
 mobile:
   entry: "Mobile"
   eyebrow: "RUNODE MOBILE"
@@ -1253,11 +1261,14 @@ screen_viewer:
   no_screen_capture: "That Mac has no Screen Recording permission for Runode yet. A prompt has been shown on that Mac: turn on runode in System Settings › Privacy & Security › Screen & System Audio Recording there, then reconnect."
   no_post_event: "View only: Runode on that Mac has no Accessibility permission yet. Turn on runode in System Settings › Privacy & Security › Accessibility on that Mac, then reconnect."
   closed: The connection to the remote desktop closed.
+  reconnecting: "The connection to the remote desktop was lost. Reconnecting (attempt %{attempt})…"
+  signed_out: "Nobody is signed in on that computer. This connects on its own once someone signs in."
   incompatible: "The remote desktop on that computer is a different version. Try again in a few seconds, after it exits on its own."
   no_decoder: "This computer cannot decode the remote screen (HEVC): %{error}. On Windows, install HEVC Video Extensions from the Microsoft Store."
   unsupported: Remote desktop is not available on this system.
   bad_host: Not a valid SSH host.
   locked: The remote screen is locked. Enter the login password to unlock it.
+  locked_elsewhere: "The remote screen is locked. Windows does not take remote keystrokes on its lock screen, so unlock it at that computer."
   unlock_failed: "Could not type the password: it has characters a US keyboard cannot type."
   password: Login password
   unlock: Unlock

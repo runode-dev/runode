@@ -243,6 +243,8 @@ struct Inner {
     todos: UnboundedSender<()>,
     todos_changed: Mutex<Option<UnboundedReceiver<()>>>,
     next_req: AtomicU32,
+    /// 对面是 Windows 远端（`Link::set_windows_paths`）。
+    windows_paths: AtomicBool,
 }
 
 /// 宿主转来的一条请求（`HostMsg::UiRequest`）的回执，回话时交回 `Link::ui_reply`：请求的编号，和它
@@ -522,8 +524,15 @@ impl Link {
             todos,
             todos_changed: Mutex::new(Some(todos_changed)),
             next_req: AtomicU32::new(1),
+            windows_paths: AtomicBool::new(false),
         };
         Self { inner: Arc::new(inner) }
+    }
+
+    /// 对面的宿主在 Windows 远端上：桌面按 `/` 拆远端的路径，在别的系统上 `\` 不是分隔符，它报的会话目录
+    /// （`SessionMeta` 的 `cwd`、`prompt_cwd`）和那边的命令行要开的目录收到时换成 `/`。
+    pub fn set_windows_paths(&self, windows: bool) {
+        self.inner.windows_paths.store(windows, Ordering::Relaxed);
     }
 
     /// 在 `stream` 上和宿主握手（以桌面界面的身份），成了就换上这条连接，起读线程，补发记着的

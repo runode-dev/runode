@@ -960,7 +960,7 @@ impl WindowView {
         // 面板顶上。全屏又只有一个标签、右侧面板也收着时没有地方放，不画。
         let right_column = self.workspace().panel.is_some();
         let right_inset = if shown && !right_column {
-            project::PANEL_TOGGLES_INSET + titlebar::window_controls_width(window)
+            self.panel_toggles_inset() + titlebar::window_controls_width(window)
         } else {
             0.
         };
@@ -1163,7 +1163,7 @@ impl WindowView {
         let fixed = sidebar_width
             + left_inset
             + NEW_TAB_BUTTON_WIDTH
-            + project::PANEL_TOGGLES_INSET
+            + self.panel_toggles_inset()
             + titlebar::window_controls_width(window);
         let tab_count_f = tab_count.max(1) as f32;
         let tab_width =

@@ -62,11 +62,9 @@ pub(super) const TOGGLE_WIDTH: f32 = 28.;
 pub(super) const TOGGLE_HEIGHT: f32 = 24.;
 const TOGGLE_GAP: f32 = 4.;
 pub(super) const TOGGLE_MARGIN: f32 = 10.;
-/// 标题栏右上角那组按钮的个数：「更多」（没有菜单栏的系统上才有）、命令和面板开关。
+/// 标题栏右上角那组按钮里总有的个数：「更多」（没有菜单栏的系统上才有）、命令和面板开关；远程桌面
+/// 按钮另算（`remote_desktop_button_shown`）。
 const TOGGLE_COUNT: f32 = if super::more_menu::SHOWN { 3. } else { 2. };
-/// 右侧面板都收着时标题栏右边给右上角那组按钮让出的宽度，窗口按钮另算。
-pub(super) const PANEL_TOGGLES_INSET: f32 =
-    TOGGLE_WIDTH * TOGGLE_COUNT + TOGGLE_GAP * (TOGGLE_COUNT - 1.) + TOGGLE_MARGIN + 6.;
 
 /// 右侧面板显示的那一页。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -573,8 +571,15 @@ impl WindowView {
         if cards { widths.panel + CARD_GAP * 1.5 } else { widths.panel }
     }
 
-    /// 标题栏右上角的按钮：没有菜单栏的系统上先是「更多」按钮，然后是命令按钮和开关右侧面板的按钮，
-    /// 展开时底色亮一些，打开的是上次显示的那一页。位置由调用方接着写。
+    /// 右侧面板都收着时标题栏右边给右上角那组按钮让出的宽度，窗口按钮另算。
+    pub(super) fn panel_toggles_inset(&self) -> f32 {
+        let count = TOGGLE_COUNT + if self.remote_desktop_button_shown() { 1. } else { 0. };
+        TOGGLE_WIDTH * count + TOGGLE_GAP * (count - 1.) + TOGGLE_MARGIN + 6.
+    }
+
+    /// 标题栏右上角的按钮：没有菜单栏的系统上先是「更多」按钮，workspace 在 SSH 主机上时接着是远程桌面
+    /// 按钮，然后是命令按钮和开关右侧面板的按钮，展开时底色亮一些，打开的是上次显示的那一页。位置由调用方
+    /// 接着写。
     pub(super) fn render_panel_toggles(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let shown = self.workspace().panel.is_some();
         let text = if shown { rust_i18n::t!("tooltip.hide_panel") } else { rust_i18n::t!("tooltip.show_panel") };
@@ -604,6 +609,7 @@ impl WindowView {
             .items_center()
             .gap(px(TOGGLE_GAP))
             .when(super::more_menu::SHOWN, |toggles| toggles.child(self.render_more_button(window, cx)))
+            .when(self.remote_desktop_button_shown(), |toggles| toggles.child(self.render_remote_desktop_button(cx)))
             .child(self.render_tasks_button(window, cx))
             .child(toggle)
     }

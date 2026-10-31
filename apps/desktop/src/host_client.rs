@@ -14,7 +14,6 @@
 //! 主题和剪贴板的规矩跟着配置走，见 `configure`；别的进程经宿主请界面办的事见 `serve_ui`；
 //! 连接断了以后用 `reconnect` 重新连上。
 
-#[cfg(unix)]
 pub(crate) mod bridge;
 #[cfg(unix)]
 mod handoff;

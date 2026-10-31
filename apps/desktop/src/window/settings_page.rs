@@ -57,6 +57,14 @@ impl WindowView {
         cx.notify();
     }
 
+    /// 打开设置页的 SSH 主机列表。
+    pub(super) fn open_ssh_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(window, cx);
+        if let Some(page) = &self.settings {
+            page.view.update(cx, |view, cx| view.show_ssh_hosts(window, cx));
+        }
+    }
+
     /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板开着新建任务那一页以外的对话框时不理。
     pub(super) fn act<A: Action>(
         cx: &mut Context<Self>,

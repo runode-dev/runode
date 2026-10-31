@@ -84,7 +84,10 @@ pub(super) fn drop_route(state: &mut State, id: SessionId) {
 
 /// 第 `generation` 条连接上的一条控制消息：回话交给等着的调用方，会话的消息交给那个会话；连接已经
 /// 换过时丢掉。
-pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
+pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
+    if inner.windows_paths.load(std::sync::atomic::Ordering::Relaxed) {
+        slash_paths(&mut message);
+    }
     let mut state = inner.state();
     if state.generation != generation {
         tracing::debug!("dropped a message from an earlier host connection: {message:?}");
@@ -226,6 +229,28 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
                 drop_route(&mut state, id);
             }
         }
+    }
+}
+
+/// 消息里的会话目录和转来的界面请求里的目录，`\` 换成 `/`（`Link::set_windows_paths`）。
+fn slash_paths(message: &mut HostMsg) {
+    fn slash(path: &mut std::path::PathBuf) {
+        if path.as_os_str().as_encoded_bytes().contains(&b'\\') {
+            *path = path.to_string_lossy().replace('\\', "/").into();
+        }
+    }
+    let slash_meta = |meta: &mut runode_types::session::SessionMeta| {
+        [&mut meta.cwd, &mut meta.prompt_cwd].into_iter().flatten().for_each(slash);
+    };
+    match message {
+        HostMsg::Attached { meta, .. } | HostMsg::Meta { meta, .. } => slash_meta(meta),
+        HostMsg::SessionList { sessions } => sessions.iter_mut().for_each(|session| slash_meta(&mut session.meta)),
+        HostMsg::UiRequest { request, .. } => match request.as_mut() {
+            ClientMsg::OpenWorkspace { dir, .. } => slash(dir),
+            ClientMsg::Open { cwd: Some(cwd), .. } => slash(cwd),
+            _ => {}
+        },
+        _ => {}
     }
 }
 

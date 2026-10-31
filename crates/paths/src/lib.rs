@@ -225,6 +225,11 @@ impl Dirs {
         self.cache_file("ssh-bridge.log")
     }
 
+    /// 远端的远程桌面桥接（`runode --ssh-screen`）的日志：它的标准输出是协议，出了问题只能看这里。
+    pub fn ssh_screen_log_file(&self) -> Option<PathBuf> {
+        self.cache_file("ssh-screen.log")
+    }
+
     /// 指向最近一次经 SSH 连进来时转发的 ssh-agent 的链接，在 `runtime_dir` 里。宿主和它起的 shell 一直用这个
     /// 路径：每次连接转发来的 agent socket 都不一样，连接一断就失效。
     pub fn ssh_agent_link(&self) -> Option<PathBuf> {

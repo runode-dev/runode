@@ -1,7 +1,7 @@
 //! 装到 SSH 远端用的发布包：从 GitHub 上某个版本的 Release 下载给某个平台的包，按同一个 Release 里的
 //! `SHA256SUMS` 核对，下过的按版本留在调用方给的缓存目录里，下次直接用。Linux 的包是只装着 `runode` 的
-//! tar.gz，原样交出去；mac 的 dmg 挂上后核对 .app 的签名（`TEAM_ID` 的 Developer ID），再取出里面的
-//! 可执行文件。
+//! tar.gz，Windows 的是装着 `runode.exe`、`rn.exe` 和终端要的文件的 zip，都原样交出去；mac 的 dmg 挂上后
+//! 核对 .app 的签名（`TEAM_ID` 的 Developer ID），再取出里面的可执行文件。
 
 use std::{
     fs::{self, File},
@@ -31,6 +31,14 @@ static FETCHING: Mutex<()> = Mutex::new(());
 /// `progress(已收到的字节, 总字节)`，总字节未知时是 0。
 pub fn linux_archive(version: &str, arch: &str, cache: &Path, progress: &dyn Fn(u64, u64)) -> Result<PathBuf, Error> {
     let name = format!("Runode-{version}-linux-{arch}.tar.gz");
+    let _fetching = FETCHING.lock().unwrap_or_else(PoisonError::into_inner);
+    fetch_checked(version, &name, cache, progress)
+}
+
+/// `version` 给 Windows `arch`（`x86_64`）的 zip，核对过的。会阻塞到下完，下载时不断调
+/// `progress(已收到的字节, 总字节)`，总字节未知时是 0。
+pub fn windows_archive(version: &str, arch: &str, cache: &Path, progress: &dyn Fn(u64, u64)) -> Result<PathBuf, Error> {
+    let name = format!("Runode-{version}-windows-{arch}.zip");
     let _fetching = FETCHING.lock().unwrap_or_else(PoisonError::into_inner);
     fetch_checked(version, &name, cache, progress)
 }

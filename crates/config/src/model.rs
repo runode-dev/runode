@@ -55,17 +55,20 @@ pub enum StatusItem {
     Resources,
     /// 终端里的程序在监听的端口。
     Ports,
+    /// 连过的 SSH 主机和它们的连接状态，没有连过的主机时不显示。
+    Hosts,
 }
 
 impl StatusItem {
     /// 按状态栏上从左到右的顺序。
-    pub const ALL: [Self; 3] = [Self::Sleep, Self::Resources, Self::Ports];
+    pub const ALL: [Self; 4] = [Self::Sleep, Self::Resources, Self::Ports, Self::Hosts];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Sleep => "sleep",
             Self::Resources => "resources",
             Self::Ports => "ports",
+            Self::Hosts => "hosts",
         }
     }
 }

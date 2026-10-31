@@ -319,6 +319,7 @@ tooltip:
   show_panel: 顯示面板
   hide_panel: 隱藏面板
   tasks: 命令
+  remote_desktop: 遠端桌面
   close_search: 關閉搜尋
   close_split: 關閉分割畫面
   restore_split: 還原分割畫面
@@ -879,6 +880,13 @@ status:
   host_latency: "%{ms} 毫秒"
   host_connecting: 正在連線…
   host_offline: 未連線
+  hosts_title: 遠端主機
+  hosts_count: "%{count} 台主機"
+  hosts_count_one: 1 台主機
+  hosts_summary: "%{connected}/%{total} 已連線"
+  hosts_manage: 管理遠端主機
+  host_connect: 連線
+  host_disconnect: 中斷連線
 mobile:
   entry: "手機端"
   eyebrow: "RUNODE 手機端"
@@ -1326,11 +1334,14 @@ screen_viewer:
   no_screen_capture: "那台 Mac 還沒給 Runode 螢幕錄製權限，已經在它螢幕上跳出授權視窗：請在那台 Mac 的「系統設定 › 隱私權與安全性 › 螢幕與系統錄音」裡打開 runode 的開關，再重新連線。"
   no_post_event: "只能看：那台 Mac 還沒給 Runode 輔助使用權限。請在那台 Mac 的「系統設定 › 隱私權與安全性 › 輔助使用」裡打開 runode 的開關，再重新連線。"
   closed: 和遠端桌面的連線中斷了。
+  reconnecting: "和遠端桌面的連線中斷了，正在重新連線（第 %{attempt} 次）…"
+  signed_out: 那台電腦上沒有人登入，有人登入後這裡會自動連上。
   incompatible: 那台電腦上的遠端桌面是別的版本，等它自己結束後過幾秒再試。
   no_decoder: "這台電腦無法解碼遠端的畫面（HEVC）：%{error}。Windows 上請到 Microsoft Store 安裝「HEVC 視訊延伸模組」。"
   unsupported: 這個系統上無法使用遠端桌面。
   bad_host: 不是有效的 SSH 主機。
   locked: 遠端鎖定了螢幕，輸入登入密碼解鎖。
+  locked_elsewhere: 遠端鎖定了螢幕，這裡解不開：Windows 的鎖定畫面不接受遠端按鍵，要在那台電腦前解鎖。
   unlock_failed: 無法輸入這個密碼：裡面有美式鍵盤打不出的字元。
   password: 登入密碼
   unlock: 解鎖

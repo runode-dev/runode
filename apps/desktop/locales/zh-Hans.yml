@@ -319,6 +319,7 @@ tooltip:
   show_panel: 显示面板
   hide_panel: 隐藏面板
   tasks: 命令
+  remote_desktop: 远程桌面
   close_search: 关闭搜索
   close_split: 关闭分屏
   restore_split: 还原分屏
@@ -879,6 +880,13 @@ status:
   host_latency: "%{ms} 毫秒"
   host_connecting: 正在连接…
   host_offline: 未连接
+  hosts_title: 远程主机
+  hosts_count: "%{count} 个主机"
+  hosts_count_one: 1 个主机
+  hosts_summary: "%{connected}/%{total} 已连接"
+  hosts_manage: 管理远程主机
+  host_connect: 连接
+  host_disconnect: 断开连接
 mobile:
   entry: "手机端"
   eyebrow: "RUNODE 手机端"
@@ -1326,11 +1334,14 @@ screen_viewer:
   no_screen_capture: "那台 Mac 还没给 Runode 屏幕录制权限，已经在它屏幕上弹出授权框：请在那台 Mac 的「系统设置 › 隐私与安全性 › 屏幕与系统录音」里打开 runode 的开关，再重新连接。"
   no_post_event: "只能看：那台 Mac 还没给 Runode 辅助功能权限。请在那台 Mac 的「系统设置 › 隐私与安全性 › 辅助功能」里打开 runode 的开关，再重新连接。"
   closed: 和远程桌面的连接断开了。
+  reconnecting: "和远程桌面的连接断开了，正在重连（第 %{attempt} 次）…"
+  signed_out: 那台电脑上没人登录，有人登录后这里自动连上。
   incompatible: 那台电脑上的远程桌面是别的版本，等它自己退出后过几秒再试。
   no_decoder: "这台电脑解不了远端的画面（HEVC）：%{error}。Windows 上请到 Microsoft Store 安装「HEVC 视频扩展」。"
   unsupported: 这个系统上用不了远程桌面。
   bad_host: 不是有效的 SSH 主机。
   locked: 远端锁屏了，输入登录密码解锁。
+  locked_elsewhere: 远端锁屏了，这里解不开：Windows 的锁屏不收远程按键，要在那台电脑前解锁。
   unlock_failed: 敲不了这个密码：里面有美式键盘打不出的字符。
   password: 登录密码
   unlock: 解锁

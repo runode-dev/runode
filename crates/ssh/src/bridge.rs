@@ -25,6 +25,8 @@ pub struct Opening {
     /// 远端宿主会跟着 ssh 的登录被系统结束：Linux 上它在 logind 的会话 scope 里、logind 又结束登录会话里的
     /// 进程，或者它在用户服务管理器里、这个用户没开 linger。
     pub session_bound: bool,
+    /// 远端的系统，`std::env::consts::OS` 的写法（`macos`、`linux`、`windows`）；开场白里没有时为空。
+    pub os: String,
     /// 远端的家目录；可能有空格，放在这一行最后。
     pub home: String,
 }
@@ -32,11 +34,12 @@ pub struct Opening {
 impl Opening {
     pub fn line(&self) -> String {
         format!(
-            "{PREFIX}ok build={} pid={} via={} session={} home={}\n",
+            "{PREFIX}ok build={} pid={} via={} session={} os={} home={}\n",
             self.build,
             self.pid,
             self.via,
             u8::from(self.session_bound),
+            self.os,
             self.home.replace('\n', " "),
         )
     }
@@ -92,14 +95,21 @@ fn parse(rest: &str) -> Start {
     }
     let rest = rest.strip_prefix("ok").unwrap_or(rest);
     let (fields, home) = rest.split_once(" home=").unwrap_or((rest, ""));
-    let mut opening =
-        Opening { build: String::new(), pid: 0, via: String::new(), session_bound: false, home: home.to_owned() };
+    let mut opening = Opening {
+        build: String::new(),
+        pid: 0,
+        via: String::new(),
+        session_bound: false,
+        os: String::new(),
+        home: home.to_owned(),
+    };
     for field in fields.split_whitespace() {
         match field.split_once('=') {
             Some(("build", value)) => opening.build = value.to_owned(),
             Some(("pid", value)) => opening.pid = value.parse().unwrap_or(0),
             Some(("via", value)) => opening.via = value.to_owned(),
             Some(("session", value)) => opening.session_bound = value == "1",
+            Some(("os", value)) => opening.os = value.to_owned(),
             _ => {}
         }
     }

@@ -61,6 +61,12 @@ impl Quoting {
         Shell::detect(program).map_or_else(Self::platform, Self::of_shell)
     }
 
+    /// 还不知道是哪种 shell、只知道系统时（远端新开的终端，`os` 是 `remote::Connected::os` 的写法）：
+    /// Windows 上用双引号，cmd 和 PowerShell 都认；别的照 sh 的写法。
+    pub(super) fn of_os(os: &str) -> Self {
+        if os == "windows" { Self::Cmd } else { Self::Posix }
+    }
+
     fn of_shell(shell: Shell) -> Self {
         match shell {
             Shell::Zsh | Shell::Bash | Shell::Fish => Self::Posix,

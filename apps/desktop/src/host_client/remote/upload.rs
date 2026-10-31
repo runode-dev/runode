@@ -12,7 +12,7 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use runode_ssh::{
-    bootstrap::{parse_uploaded, upload_command},
+    bootstrap::{Family, parse_uploaded, upload_command, windows},
     process::{Piped, Pipes},
 };
 
@@ -29,6 +29,18 @@ pub enum Upload {
 /// 传到 `host` 上，回各自在远端的绝对路径，顺序同 `Upload::Files`。会阻塞，在后台线程上调。
 pub fn upload(host: &RemoteHost, upload: Upload) -> Result<Vec<String>> {
     match upload {
+        // Windows 远端只收 tar 包：先落成本机的临时文件，再按文件传。临时目录新建、只给自己进：Linux 的
+        // 临时目录别的用户也能进，截图和屏幕上的文字不能让他们读到。
+        Upload::Bytes { name, bytes } if host.family() == Family::Windows => {
+            let dir = std::env::temp_dir().join(format!("runode-upload-{}", upload_id()));
+            private_dir(&dir).context("cannot stage the upload")?;
+            let file = dir.join(&name);
+            let sent = std::fs::write(&file, bytes)
+                .context("cannot stage the upload")
+                .and_then(|()| self::upload(host, Upload::Files(vec![file])));
+            let _ = std::fs::remove_dir_all(&dir);
+            sent
+        }
         Upload::Bytes { name, bytes } => {
             let dir = send(host, Some(&name), &mut bytes.as_slice())?;
             Ok(vec![format!("{dir}/{name}")])
@@ -61,6 +73,14 @@ pub fn upload(host: &RemoteHost, upload: Upload) -> Result<Vec<String>> {
     }
 }
 
+/// 新建只有自己能进的目录 `dir`；已经有了（包括同名的链接）就失败。
+fn private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    return std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(dir);
+    #[cfg(not(unix))]
+    std::fs::create_dir(dir)
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name().map_or_else(|| "upload".into(), |name| name.to_string_lossy().into_owned())
 }
@@ -83,9 +103,14 @@ fn tar<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<std::process::Child>
     command.spawn().context("cannot run tar")
 }
 
-/// 跑一次 `upload_command`，把 `input` 读到头写给它，回远端放上传的目录。
+/// 跑一次 `upload_command`，把 `input` 读到头写给它，回远端放上传的目录。Windows 远端的 `input` 只能是 tar 包。
 fn send(host: &RemoteHost, file: Option<&str>, input: &mut dyn Read) -> Result<String> {
-    let mut command = host.exec(&ssh(), &upload_command(&upload_id(), file), true, false);
+    let family = host.family();
+    let script = match family {
+        Family::Unix => upload_command(&upload_id(), file),
+        Family::Windows => windows::upload_command(&upload_id()),
+    };
+    let mut command = host.exec(&ssh(), &script, true, false);
     crate::subprocess::hide_window(&mut command);
     let piped = runode_ssh::process::spawn(&mut command, Pipes { stdin: true, stdout: true, stderr: true })
         .context("cannot run ssh")?;
@@ -107,8 +132,12 @@ fn send(host: &RemoteHost, file: Option<&str>, input: &mut dyn Read) -> Result<S
     }
     let err = err.and_then(|reader| reader.join().ok()).unwrap_or_default();
     let status = child.wait().context("ssh failed")?;
-    match parse_uploaded(&out) {
-        Some(dir) if status.success() && sent.is_ok() => Ok(dir.to_owned()),
+    let dir = match family {
+        Family::Unix => parse_uploaded(&out).map(str::to_owned),
+        Family::Windows => windows::parse_uploaded(&out),
+    };
+    match dir {
+        Some(dir) if status.success() && sent.is_ok() => Ok(dir),
         _ => match runode_ssh::last_line(&err) {
             "" => Err(sent.err().unwrap_or_else(|| anyhow!("ssh failed"))),
             line => bail!("{line}"),

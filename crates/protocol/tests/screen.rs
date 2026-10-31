@@ -76,7 +76,9 @@ fn host_messages_match_the_fixtures() {
     matches("ready.json", &ScreenHostMsg::Ready { displays, screen_capture: true, post_event: false });
     matches("incompatible.json", &ScreenHostMsg::Incompatible { version: 2 });
     matches("started.json", &ScreenHostMsg::Started { display: 2, width: 2556, height: 1652 });
-    matches("stopped.json", &ScreenHostMsg::Stopped { reason: "display unplugged".into() });
+    matches("stopped.json", &ScreenHostMsg::Stopped { reason: "display unplugged".into(), signed_out: false });
+    let reason = "nobody is signed in on this computer's screen".into();
+    matches("stopped_signed_out.json", &ScreenHostMsg::Stopped { reason, signed_out: true });
     matches("lock.json", &ScreenHostMsg::Lock { locked: true });
     let reason = "the password has keys a US keyboard cannot type".into();
     matches("unlock_failed.json", &ScreenHostMsg::UnlockFailed { reason });

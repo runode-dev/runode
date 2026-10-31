@@ -69,7 +69,12 @@ pub fn open(
     if !matches!(host.status(), Status::Connected(_)) {
         return Err(format!("not connected to {}", host.name));
     }
-    let script = runode_ssh::bootstrap::screen_command(&deploy::install_dir());
+    let script = match host.family() {
+        runode_ssh::bootstrap::Family::Unix => runode_ssh::bootstrap::screen_command(&deploy::install_dir()),
+        runode_ssh::bootstrap::Family::Windows => {
+            runode_ssh::bootstrap::windows::screen_command(&deploy::install_dir())
+        }
+    };
     let mut command = host.exec(&ssh(), &script, true, false);
     command.stderr(Stdio::null());
     crate::subprocess::hide_window(&mut command);

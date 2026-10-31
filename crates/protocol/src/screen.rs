@@ -68,8 +68,13 @@ pub enum ScreenHostMsg {
     /// 按 `Start` 开始采集了，在这之后的画面都是新的，第一帧是关键帧（开不起来时随后是 `Stopped`）；
     /// `display` 是采的那块屏幕，之后的输入落在它上面。
     Started { display: u32, width: u32, height: u32 },
-    /// 采集停了或者开不起来，带原因；可以再发 `Start`。
-    Stopped { reason: String },
+    /// 采集停了或者开不起来，带原因；可以再发 `Start`。`signed_out` 说电脑的屏幕上没人登录，有人登录后
+    /// 重新连上就能看。
+    Stopped {
+        reason: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        signed_out: bool,
+    },
     /// 电脑锁没锁屏：`Ready` 之后马上报一次，之后变了再报。
     Lock { locked: bool },
     /// `Unlock` 没敲成，带原因（给日志看）。

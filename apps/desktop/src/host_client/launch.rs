@@ -107,7 +107,6 @@ fn probe_once(socket: &Path, build: &BuildId) -> io::Result<Probe> {
 
 /// 让 `socket` 上在跑的宿主结束所有会话后退出，等它断开，最多 `CONNECT_TIMEOUT`。宿主跑在另一个
 /// app 里时不碰它，返回错误。
-#[cfg(unix)]
 pub fn retire(socket: &Path, build: &BuildId) -> io::Result<()> {
     let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(build, ClientKind::Cli))?;
