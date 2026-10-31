@@ -63,6 +63,11 @@ pub(super) fn register(host: &str) -> Option<(PathBuf, String)> {
 
 /// ssh 当 askpass 调的程序：这个可执行文件；Windows 上它是界面程序，stdout 不可靠，用旁边的控制台程序 `rn`。
 pub(super) fn program() -> io::Result<PathBuf> {
+    // 测试程序自己不认 askpass 的模式，测试指一个编好的 runode 或 `rn`。
+    #[cfg(test)]
+    if let Some(exe) = std::env::var_os("RUNODE_TEST_ASKPASS") {
+        return Ok(exe.into());
+    }
     let exe = std::env::current_exe()?;
     #[cfg(windows)]
     let exe = Some(exe.with_file_name("rn.exe")).filter(|rn| rn.is_file()).unwrap_or(exe);

@@ -838,25 +838,59 @@ mod tests {
 
     use futures::StreamExt as _;
 
-    use super::{RemoteEvent, SshSettings, Status, deploy, events, forward, remote, set_ssh_settings, ssh, upload};
+    use super::{RemoteEvent, Status, events, forward, remote, ssh, upload};
+    #[cfg(unix)]
+    use super::{SshSettings, deploy, set_ssh_settings};
 
-    /// 这个进程里的 `RemoteEvent`：只能取一次，几个测试共用。
-    static EVENTS: std::sync::LazyLock<std::sync::Mutex<futures::channel::mpsc::UnboundedReceiver<RemoteEvent>>> =
-        std::sync::LazyLock::new(|| std::sync::Mutex::new(events().expect("events")));
+    type Alive = std::collections::HashSet<runode_protocol::SessionId>;
+
+    /// 连上的主机和那时还活着的会话。`RemoteEvent` 一个进程只能取一次，由一个线程收着，几个测试共用；ssh 经
+    /// askpass 问的当场代答（`answer`）。
+    static CONNECTED: std::sync::LazyLock<std::sync::Mutex<std::sync::mpsc::Receiver<(String, Alive)>>> =
+        std::sync::LazyLock::new(|| {
+            let mut events = events().expect("events");
+            let (connected, receiver) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                futures::executor::block_on(async {
+                    while let Some(event) = events.next().await {
+                        match event {
+                            RemoteEvent::Connected { host, alive } => {
+                                let _ = connected.send((host, alive));
+                            }
+                            RemoteEvent::Ask(ask) => answer(ask),
+                            _ => {}
+                        }
+                    }
+                })
+            });
+            std::sync::Mutex::new(receiver)
+        });
+    /// ssh 经 askpass 问过的。
+    static ASKED: std::sync::Mutex<Vec<runode_ssh::askpass::Kind>> = std::sync::Mutex::new(Vec::new());
+
+    /// 认主机指纹答是，要口令时答 `RUNODE_TEST_SSH_SECRET`（没设时取消）。
+    fn answer(ask: super::askpass::Ask) {
+        use runode_ssh::askpass::Kind;
+
+        ASKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(ask.kind);
+        let reply = match ask.kind {
+            Kind::Confirm => Some("yes".to_owned()),
+            Kind::Secret => std::env::var("RUNODE_TEST_SSH_SECRET").ok(),
+            Kind::Notice => return,
+        };
+        ask.answer(reply);
+    }
 
     /// 等到连上主机 `name` 的下一次 `RemoteEvent::Connected`，交回那时还活着的会话。
-    fn next_connected(name: &str) -> Option<std::collections::HashSet<runode_protocol::SessionId>> {
-        let mut events = EVENTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        futures::executor::block_on(async {
-            while let Some(event) = events.next().await {
-                if let RemoteEvent::Connected { host, alive } = event
-                    && host == name
-                {
-                    return Some(alive);
-                }
+    fn next_connected(name: &str) -> Option<Alive> {
+        let connected = CONNECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let deadline = Instant::now() + Duration::from_secs(600);
+        loop {
+            let (host, alive) = connected.recv_timeout(deadline.saturating_duration_since(Instant::now())).ok()?;
+            if host == name {
+                return Some(alive);
             }
-            None
-        })
+        }
     }
 
     /// 经假的 ssh 连的「远端」：假的 ssh 把要在远端跑的命令换成在本机、以一个临时目录为家目录跑，主连接相关的
@@ -1018,12 +1052,16 @@ mod tests {
         }
     }
 
-    /// 对着真的 SSH 主机连：`RUNODE_TEST_SSH_HOST` 是连接目标（要免密），`RUNODE_SSH_BINARY` 指向那台机器上
-    /// 跑得起来的 runode。连上、列会话，掐断 ssh 后自己重连上。
+    /// 对着真的 SSH 主机连：`RUNODE_TEST_SSH_HOST` 是连接目标，`RUNODE_SSH_BINARY`（或按平台的那个）指向那台
+    /// 机器上跑得起来的 runode。ssh 要问（认主机指纹、要口令）时经 `RUNODE_TEST_ASKPASS` 指的本机 runode 问，
+    /// 指纹答 yes，口令答 `RUNODE_TEST_SSH_SECRET`。连上、列会话，掐断 ssh
+    /// 后自己重连上，经项目服务读远端，传文件，有主连接时再试端口转发。
     #[test]
     #[ignore = "needs an ssh host"]
     fn connects_and_reconnects_to_a_real_host() {
         let name = std::env::var("RUNODE_TEST_SSH_HOST").expect("RUNODE_TEST_SSH_HOST");
+        // 连的时候 ssh 就可能问，开始连之前先有人收着。
+        std::sync::LazyLock::force(&CONNECTED);
         let host = remote(&name).expect("a destination");
         let status = wait_for(&host, Duration::from_secs(600), |status| {
             matches!(status, Status::Connected(_) | Status::Stopped { .. })
@@ -1034,8 +1072,28 @@ mod tests {
         assert!(next_connected(&name).is_some());
         let pid = host.state().child.expect("ssh is running");
         crate::subprocess::kill(pid);
+        // 没有主连接时自己重连要重新认证，不问用户，要口令的就停下来；这时像用户那样点重试。
+        if ssh().control.is_none() {
+            let status = wait_for(&host, Duration::from_secs(120), |status| match status {
+                Status::Connected(_) => host.state().child.is_some_and(|now| now != pid),
+                Status::Stopped { auth, .. } => *auth,
+                _ => false,
+            });
+            if matches!(status, Status::Stopped { .. }) {
+                host.retry_now();
+            }
+        }
         assert!(next_connected(&name).is_some(), "did not reconnect");
         assert!(matches!(host.status(), Status::Connected(_)));
+
+        // 文件树、Git 面板经项目服务读远端，没有主连接时它自己认证。
+        let project = crate::project_host::ProjectHost::of(&super::HostId::Ssh(name));
+        let root = std::path::PathBuf::from("/");
+        let listed = project.scan(root.clone(), Vec::new(), runode_git::UntrackedCache::default(), false);
+        assert!(
+            listed.is_ok_and(|scan| scan.listings.iter().any(|(dir, entries)| *dir == root && entries.is_some())),
+            "the project service did not answer"
+        );
 
         // 两个同名的文件各传到一个子目录里，目录连同里面的一起传。
         let local = std::env::temp_dir().join(format!("rn-upload-{}", std::process::id()));
@@ -1049,7 +1107,7 @@ mod tests {
         let paths = upload::upload(&host, upload::Upload::Files(files)).expect("upload");
         assert_ne!(paths[0], paths[1]);
         let read = |path: &str| {
-            let mut command = ssh().exec(&host.dest, &format!("cat {path}"), true);
+            let mut command = host.exec(&ssh(), &format!("cat {path}"), true, false);
             let output = runode_ssh::process::output(command.stdin(std::process::Stdio::null())).unwrap();
             String::from_utf8(output.stdout).unwrap()
         };
@@ -1060,7 +1118,15 @@ mod tests {
         assert_eq!(read(&shot[0]), "png");
         let _ = std::fs::remove_dir_all(&local);
 
-        // 远端只在自己那里听的端口，经转发在本机打得开。
+        if std::env::var_os("RUNODE_TEST_SSH_SECRET").is_some() {
+            let asked = ASKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            assert!(asked.contains(&runode_ssh::askpass::Kind::Secret), "ssh never asked through askpass: {asked:?}");
+        }
+        // 远端只在自己那里听的端口，经转发在本机打得开；转发挂在主连接上，没有主连接时不试。
+        if ssh().control.is_none() {
+            host.disconnect();
+            return;
+        }
         let serve = "cd /tmp && (python3 -m http.server 18765 --bind 127.0.0.1 > /dev/null 2>&1 & echo $!)";
         let output = ssh().exec(&host.dest, serve, true).output().unwrap();
         let server = String::from_utf8(output.stdout).unwrap().trim().to_owned();
