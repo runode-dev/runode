@@ -24,6 +24,8 @@ fn parses_destinations() {
     assert!(!with_port.is_alias());
     assert!(Destination::parse("devbox").unwrap().is_alias());
     assert_eq!(Destination::parse("[::1]:22").unwrap().to_string(), "[::1]:22");
+    let v6 = Destination::parse("me@[2001:db8::1]:22").unwrap();
+    assert_eq!(Destination::parse(&v6.to_string()), Some(v6));
 }
 
 #[test]

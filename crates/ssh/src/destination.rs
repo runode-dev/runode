@@ -70,7 +70,10 @@ impl Destination {
 impl fmt::Display for Destination {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.port {
-            Some(port) if self.target.contains(':') => write!(f, "[{}]:{port}", self.target),
+            Some(port) if self.target.contains(':') => match self.target.rsplit_once('@') {
+                Some((user, addr)) => write!(f, "{user}@[{addr}]:{port}"),
+                None => write!(f, "[{}]:{port}", self.target),
+            },
             Some(port) => write!(f, "{}:{port}", self.target),
             None => f.write_str(&self.target),
         }
