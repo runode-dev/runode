@@ -124,6 +124,18 @@ fn source(host: &RemoteHost, target: Target) -> Result<Source, Failure> {
         let exe = std::env::current_exe().map_err(|err| Failure::Retry(err.to_string()))?;
         return Ok(Source { path: exe, archive: false });
     }
+    // 发布页上同版本号的包是另一份代码，认不得这个构建的桥接参数，装上去只会一直重连。
+    // shortcut: 只拦调试构建，本地打的发布构建照样下载；发布包能报出提交号、装前核对时再改成按构建号拦。
+    if cfg!(debug_assertions) {
+        return Err(Failure::Stop {
+            error: format!(
+                "a development build cannot download runode for {}: set {ENV_BINARY}_{} to a build for it",
+                target.env_name().to_lowercase(),
+                target.env_name()
+            ),
+            auth: false,
+        });
+    }
     download(host, target)
 }
 
