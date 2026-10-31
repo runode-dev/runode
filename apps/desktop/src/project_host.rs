@@ -80,7 +80,7 @@ impl ProjectHost {
                 root: remote.root,
                 git: remote.git,
                 listings: remote.listings,
-                watch_git_dirs: Vec::new(),
+                watch_git_dirs: remote.watch_git_dirs,
                 untracked: UntrackedCache::default(),
                 cost: Duration::from_millis(remote.cost_ms),
             }),

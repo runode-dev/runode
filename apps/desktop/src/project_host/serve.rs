@@ -126,7 +126,14 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
             caches.git.insert(scan.root.clone(), scan.git.clone());
             drop(caches);
             let cost_ms = u64::try_from(scan.cost.as_millis()).unwrap_or(u64::MAX);
-            let scan = RemoteScan { dir: scan.dir, root: scan.root, git: scan.git, listings: scan.listings, cost_ms };
+            let scan = RemoteScan {
+                dir: scan.dir,
+                root: scan.root,
+                git: scan.git,
+                listings: scan.listings,
+                watch_git_dirs: scan.watch_git_dirs,
+                cost_ms,
+            };
             (Reply::Scan(Box::new(scan)), Vec::new())
         }
         Call::Read { path, max, whole } => match runode_files::read_limited(&path, max, whole) {

@@ -83,13 +83,16 @@ pub(super) enum Reply {
     Failed(String),
 }
 
-/// 远端读到的一份项目，`Scan` 里只在本机有意义的（未跟踪文件的缓存、要另外监听的 git 目录）不传。
+/// 远端读到的一份项目，`Scan` 里只在本机有意义的未跟踪文件缓存不传。
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct RemoteScan {
     pub dir: PathBuf,
     pub root: PathBuf,
     pub git: Option<runode_git::Repos>,
     pub listings: Listings,
+    /// 监听项目时还要另外听的 git 目录（`Scan::watch_git_dirs`），在那台机器上算。
+    #[serde(default)]
+    pub watch_git_dirs: Vec<PathBuf>,
     pub cost_ms: u64,
 }
 
