@@ -133,14 +133,21 @@ impl WindowView {
         cx.notify();
     }
 
-    /// 关掉各 workspace 里 `path` 和它下面的文件的预览标签：文件删掉了。
-    pub(super) fn close_previews_under(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        self.with_preview(cx, |panel, cx| panel.close_under(path, window, cx));
+    /// 关掉各 workspace 里 `path` 和它下面的文件的预览标签：主机 `host` 上的这个文件删掉了。
+    pub(super) fn close_previews_under(
+        &mut self,
+        path: &Path,
+        host: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_preview(cx, |panel, cx| panel.close_under(path, host, window, cx));
     }
 
-    /// `from` 改了名或挪到了 `to`：各 workspace 里它和它下面的文件的预览标签跟过去，当前标签换了就重读。
-    pub(super) fn move_previews(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
-        self.with_preview(cx, |panel, cx| panel.moved(from, to, cx));
+    /// 主机 `host` 上的 `from` 改了名或挪到了 `to`：各 workspace 里那台主机上它和它下面的文件的预览标签跟过去，
+    /// 当前标签换了就重读。
+    pub(super) fn move_previews(&mut self, from: &Path, to: &Path, host: Option<&str>, cx: &mut Context<Self>) {
+        self.with_preview(cx, |panel, cx| panel.moved(from, to, host, cx));
     }
 
     /// 窗口切回前台、切回这个 workspace 时，当前预览的文件变过就重读；在后台时监听到的改动只等到这时。

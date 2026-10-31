@@ -54,6 +54,12 @@ fn error_text(err: &OpError, name: &str) -> String {
 }
 
 impl FileTree {
+    /// workspace `ws`（为空时是当前的）的文件在哪台机器上，写法同 `ProjectHost::name`。
+    fn host_of(&self, ws: Option<WorkspaceId>) -> Option<String> {
+        let state = ws.and_then(|ws| self.workspaces.get(&ws));
+        state.map_or(self.input.project.name(), |state| state.project.name()).map(str::to_owned)
+    }
+
     /// 当前 workspace 的文件在哪台机器上。按 `Input` 取：还没读到目录时 `state` 是空的，那里记着的是本机。
     fn project(&self) -> ProjectHost {
         self.input.project.clone()
@@ -267,7 +273,9 @@ impl FileTree {
     /// 选中挪过去的那一项。剪贴板整个窗口一份，别的 workspace 的树和预览也跟过去。
     fn after_move(&mut self, ws: Option<WorkspaceId>, from: &Path, to: &Path, cx: &mut Context<Self>) {
         self.with_tree_of(ws, cx, |state, _, _| state.moved(from, to));
+        let host = self.host_of(ws);
         if let Some(clip) = &mut self.clipboard
+            && clip.host == host
             && let Some(path) = follow_move(&clip.path, from, to)
         {
             clip.path = path;
@@ -275,7 +283,7 @@ impl FileTree {
         let dirs: Vec<PathBuf> = [from.parent(), to.parent()].into_iter().flatten().map(Path::to_path_buf).collect();
         self.update_other_trees(ws, &dirs, cx, |state| state.moved(from, to));
         self.relist_and_reveal(ws, dirs, to, cx);
-        cx.emit(FileTreeEvent::Moved { from: from.to_path_buf(), to: to.to_path_buf() });
+        cx.emit(FileTreeEvent::Moved { from: from.to_path_buf(), to: to.to_path_buf(), host });
     }
 
     /// 除了 `ws` 以外、文件和它在同一台机器上的各 workspace 的树做 `f`，再重读 `dirs` 里那棵树读过的目录：
@@ -356,10 +364,11 @@ impl FileTree {
     /// 的行，接着按删除键可以一路删下去；别的 workspace 的树也去掉它。剪贴板整个窗口一份，不管是哪个 workspace
     /// 都清掉。
     fn after_delete(&mut self, ws: Option<WorkspaceId>, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(FileTreeEvent::Removed(path.to_path_buf()));
-        if self.clipboard.as_ref().is_some_and(|clip| clip.path.starts_with(path)) {
+        let host = self.host_of(ws);
+        if self.clipboard.as_ref().is_some_and(|clip| clip.host == host && clip.path.starts_with(path)) {
             self.clipboard = None;
         }
+        cx.emit(FileTreeEvent::Removed { path: path.to_path_buf(), host });
         self.update_other_trees(ws, &[], cx, |state| state.removed(path));
         self.with_tree_of(ws, cx, |state, root, filter| {
             let ix = state.selected_row();

@@ -210,8 +210,8 @@ impl WindowView {
                     self.insert_tab(self.workspace().active + 1, view, window, cx);
                 }
             }
-            FileTreeEvent::Moved { from, to } => self.move_previews(from, to, cx),
-            FileTreeEvent::Removed(path) => self.close_previews_under(path, window, cx),
+            FileTreeEvent::Moved { from, to, host } => self.move_previews(from, to, host.as_deref(), cx),
+            FileTreeEvent::Removed { path, host } => self.close_previews_under(path, host.as_deref(), window, cx),
             FileTreeEvent::Refresh => self.refresh_project(cx),
             FileTreeEvent::FocusTerminal => self.focus_terminal(window, cx),
             FileTreeEvent::OptionsChanged => self.save(cx),

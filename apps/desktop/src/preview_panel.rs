@@ -858,23 +858,29 @@ impl PreviewPanel {
         cx.notify();
     }
 
-    /// 关掉各 workspace 里 `path` 和它下面的文件的标签（连同它们的 diff 标签）：文件删掉了。文件在哪个
-    /// workspace 里删的都一样，几个 workspace 可能开在同一个目录下。只有当前 workspace 关完了发事件，
-    /// 别的 workspace 换上的当前标签切回去时由 `refresh_if_changed` 读。改过没存的标签留着，存的时候再建出文件。
-    pub fn close_under(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    /// 关掉各 workspace 里 `path` 和它下面的文件的标签（连同它们的 diff 标签）：主机 `host`（`ProjectHost::name`）
+    /// 上的这个文件删掉了。文件在哪个 workspace 里删的都一样，几个 workspace 可能开在同一个目录下；别的主机上
+    /// 同一个路径是另一个文件，不动。只有当前 workspace 关完了发事件，别的 workspace 换上的当前标签切回去时由
+    /// `refresh_if_changed` 读。改过没存的标签留着，存的时候再建出文件。
+    pub fn close_under(&mut self, path: &Path, host: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
         let keep = |_: usize, preview: &Preview| !preview.path.starts_with(path) || preview.dirty();
-        for (_, tabs) in self.workspaces.iter_mut().filter(|(ws, _)| **ws != self.ws) {
+        let current = self.ws;
+        let others = self.workspaces.iter_mut().filter(|(ws, tabs)| **ws != current && tabs.project.name() == host);
+        for (_, tabs) in others {
             for tab in tabs.retain(keep) {
                 tab.release_image(cx);
             }
         }
-        self.retain_previews(keep, window, cx);
+        if self.project().name() == host {
+            self.retain_previews(keep, window, cx);
+        }
     }
 
-    /// `from` 改了名或挪到了 `to`：各 workspace 里它和它下面的文件的预览标签都跟过去（剪贴板整个窗口一份，
-    /// 可以跨 workspace 挪）。当前 workspace 的当前标签换了就重读，别的等切过去时再读。
-    pub fn moved(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
-        for old in self.workspaces.values_mut().flat_map(|tabs| tabs.moved(from, to)) {
+    /// 主机 `host` 上的 `from` 改了名或挪到了 `to`：各 workspace 里那台主机上它和它下面的文件的预览标签都
+    /// 跟过去（剪贴板整个窗口一份，可以跨 workspace 挪）。当前 workspace 的当前标签换了就重读，别的等切过去时再读。
+    pub fn moved(&mut self, from: &Path, to: &Path, host: Option<&str>, cx: &mut Context<Self>) {
+        let same_host = self.workspaces.values_mut().filter(|tabs| tabs.project.name() == host);
+        for old in same_host.flat_map(|tabs| tabs.moved(from, to)) {
             old.release_image(cx);
         }
         if self.preview().is_some_and(|tab| tab.content.is_none()) {

@@ -181,11 +181,11 @@ pub enum FileTreeEvent {
     InsertPath(PathBuf),
     /// 在当前 workspace 里开一个新标签页，终端的目录是这个目录。
     OpenTerminal(PathBuf),
-    /// `from` 改了名或挪到了 `to`：各 workspace 里它和它下面的文件的预览标签跟过去。剪贴板整个窗口一份，
-    /// 在哪个 workspace 里挪的都一样。
-    Moved { from: PathBuf, to: PathBuf },
-    /// `path` 移到了废纸篓：关掉各 workspace 里它和它下面的文件的预览标签。
-    Removed(PathBuf),
+    /// 主机 `host`（`ProjectHost::name`）上的 `from` 改了名或挪到了 `to`：各 workspace 里那台主机上它和它下面的
+    /// 文件的预览标签跟过去。剪贴板整个窗口一份，在哪个 workspace 里挪的都一样。
+    Moved { from: PathBuf, to: PathBuf, host: Option<String> },
+    /// 主机 `host` 上的 `path` 移到了废纸篓：关掉各 workspace 里那台主机上它和它下面的文件的预览标签。
+    Removed { path: PathBuf, host: Option<String> },
     /// 重读当前 workspace 的 git 状态和目录：按了刷新，或者改了 `.gitignore`。
     Refresh,
     /// 焦点交回终端。
