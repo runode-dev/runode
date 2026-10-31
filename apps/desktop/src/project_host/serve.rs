@@ -1,11 +1,14 @@
 //! 远端的 `runode --ssh-project`：从 stdin 一条条读桌面的请求，每条起一个线程办，结果写回 stdout；stdin
-//! 关了（桌面断开）就退出。
+//! 关了（桌面断开）就退出。`Call::Cancel` 不起线程，当场让在办的那条停下。
 
 use std::{
     collections::HashMap,
     io::{self, BufReader},
     path::PathBuf,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
 };
 
@@ -31,6 +34,8 @@ type Shared = Arc<Mutex<Caches>>;
 pub(crate) fn run() -> i32 {
     let output = Arc::new(Mutex::new(io::stdout()));
     let caches = Shared::default();
+    // 在办的请求各自的停止标记，按编号记。
+    let running = Arc::new(Mutex::new(HashMap::<u64, Arc<AtomicBool>>::new()));
     let mut input = BufReader::new(io::stdin().lock());
     loop {
         let request = match wire::read_line::<Request>(&mut input) {
@@ -44,9 +49,18 @@ pub(crate) fn run() -> i32 {
         let Ok(content) = wire::read_blob(&mut input, request.blob) else {
             return 0;
         };
-        let (output, caches) = (output.clone(), caches.clone());
+        if let Call::Cancel { id } = request.call {
+            if let Some(stop) = running.lock().unwrap_or_else(PoisonError::into_inner).get(&id) {
+                stop.store(true, Ordering::Relaxed);
+            }
+            continue;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        running.lock().unwrap_or_else(PoisonError::into_inner).insert(request.id, stop.clone());
+        let (output, caches, running) = (output.clone(), caches.clone(), running.clone());
         let spawned = thread::Builder::new().name("project-call".into()).spawn(move || {
-            let (reply, blob) = handle(request.call, content, &caches);
+            let (reply, blob) = handle(request.call, content, &caches, &stop);
+            running.lock().unwrap_or_else(PoisonError::into_inner).remove(&request.id);
             let response = Response { id: request.id, reply, blob: blob.len() };
             let mut output = output.lock().unwrap_or_else(PoisonError::into_inner);
             // 编不了的结果改回一句原因；还写不出去说明桌面已经断开，stdin 随后也会关，在那里退出。
@@ -62,8 +76,8 @@ pub(crate) fn run() -> i32 {
     }
 }
 
-/// 办一个请求，`content` 是请求后面跟着的字节。
-fn handle(call: Call, content: Vec<u8>, caches: &Shared) -> (Reply, Vec<u8>) {
+/// 办一个请求，`content` 是请求后面跟着的字节；`stop` 置位时停得下的停下，交回已经找到的。
+fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (Reply, Vec<u8>) {
     let lock = || caches.lock().unwrap_or_else(PoisonError::into_inner);
     match call {
         Call::Scan { dir, expanded, worktrees } => {
@@ -100,7 +114,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared) -> (Reply, Vec<u8>) {
         Call::Grep { root, pattern, ignore_case, whole_word, regex, pathspecs, limit } => {
             let query =
                 runode_git::GrepQuery { pattern: &pattern, ignore_case, whole_word, regex, pathspecs: &pathspecs };
-            match runode_git::grep(&root, &query, limit, &std::sync::atomic::AtomicBool::new(false)) {
+            match runode_git::grep(&root, &query, limit, stop) {
                 Ok(found) => (Reply::Found(found), Vec::new()),
                 Err(err) => (Reply::Failed(err.message), Vec::new()),
             }
@@ -110,6 +124,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared) -> (Reply, Vec<u8>) {
             Ok(()) => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
             Err(err) => (Reply::Failed(err.to_string()), Vec::new()),
         },
+        Call::Cancel { .. } => (Reply::Failed("nothing to cancel".into()), Vec::new()),
         Call::Git { root, op } => match runode_git::Repo::open(&root).map(|repo| op.run(&repo)) {
             Some(Ok(value)) => (Reply::Git(value), Vec::new()),
             Some(Err(err)) => (Reply::Failed(err.to_string()), Vec::new()),
@@ -124,6 +139,9 @@ mod tests {
 
     use super::*;
     use crate::project_host::repo::GitOp;
+
+    /// 不停下的请求用的停止标记。
+    static GO: AtomicBool = AtomicBool::new(false);
 
     /// 一来一回过一遍线上格式：读文件的内容跟在回话后面，列目录、读项目照本机的结果交回。
     #[test]
@@ -141,7 +159,7 @@ mod tests {
         ];
         let mut stream = Vec::new();
         for (id, call) in calls.into_iter().enumerate() {
-            let (reply, blob) = handle(call, Vec::new(), &caches);
+            let (reply, blob) = handle(call, Vec::new(), &caches, &GO);
             wire::write(&mut stream, &Response { id: id as u64, reply, blob: blob.len() }, &blob).unwrap();
         }
         let mut input = Cursor::new(stream);
@@ -171,19 +189,20 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let caches = Shared::default();
         let file = dir.join("a/b.txt");
-        let created = handle(Call::Edit(FileOp::Create { path: file.clone(), is_dir: false }), Vec::new(), &caches);
+        let created =
+            handle(Call::Edit(FileOp::Create { path: file.clone(), is_dir: false }), Vec::new(), &caches, &GO);
         assert!(matches!(created, (Reply::Edited(Ok(None)), _)));
-        let again = handle(Call::Edit(FileOp::Create { path: file.clone(), is_dir: false }), Vec::new(), &caches);
+        let again = handle(Call::Edit(FileOp::Create { path: file.clone(), is_dir: false }), Vec::new(), &caches, &GO);
         assert!(matches!(again, (Reply::Edited(Err(OpFailure::Exists)), _)));
-        let (Reply::Stamp(Some(written)), _) = handle(Call::Write { path: file.clone() }, b"hello".to_vec(), &caches)
+        let (Reply::Stamp(Some(written)), _) =
+            handle(Call::Write { path: file.clone() }, b"hello".to_vec(), &caches, &GO)
         else {
             panic!("写回没交回版本戳")
         };
         assert_eq!(fs::read(&file).unwrap(), b"hello");
-        assert!(
-            matches!(handle(Call::Stamp { path: file.clone() }, Vec::new(), &caches), (Reply::Stamp(Some(stamp)), _) if stamp == written)
-        );
-        let removed = handle(Call::Edit(FileOp::Remove { path: dir.join("a") }), Vec::new(), &caches);
+        let stamped = handle(Call::Stamp { path: file.clone() }, Vec::new(), &caches, &GO);
+        assert!(matches!(stamped, (Reply::Stamp(Some(stamp)), _) if stamp == written));
+        let removed = handle(Call::Edit(FileOp::Remove { path: dir.join("a") }), Vec::new(), &caches, &GO);
         assert!(matches!(removed, (Reply::Edited(Ok(None)), _)) && !file.exists());
         fs::remove_dir_all(&dir).ok();
     }
@@ -201,7 +220,7 @@ mod tests {
         let caches = Shared::default();
         let run = |op| {
             let mut stream = Vec::new();
-            let (reply, blob) = handle(Call::Git { root: dir.clone(), op }, Vec::new(), &caches);
+            let (reply, blob) = handle(Call::Git { root: dir.clone(), op }, Vec::new(), &caches, &GO);
             wire::write(&mut stream, &Response { id: 0, reply, blob: blob.len() }, &blob).unwrap();
             wire::read_line::<Response>(&mut Cursor::new(stream)).unwrap().unwrap().reply
         };
@@ -213,6 +232,29 @@ mod tests {
         assert!(serde_json::from_value::<runode_git::Result<String>>(diff).unwrap().unwrap().contains("+hello"));
         fs::remove_dir_all(dir.join(".git")).unwrap();
         assert!(matches!(run(GitOp::StageAll), Reply::Failed(_)));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 停下的按内容找交回已经找到的，不把整个仓库找完。
+    #[test]
+    fn a_stopped_grep_gives_up() {
+        let dir = std::env::temp_dir().join(format!("runode-project-grep-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "-q"]).current_dir(&dir).status().unwrap().success());
+        fs::write(dir.join("a.txt"), "needle\n").unwrap();
+        let grep = || Call::Grep {
+            root: dir.clone(),
+            pattern: "needle".into(),
+            ignore_case: false,
+            whole_word: false,
+            regex: false,
+            pathspecs: Vec::new(),
+            limit: 10,
+        };
+        let caches = Shared::default();
+        assert!(matches!(handle(grep(), Vec::new(), &caches, &GO), (Reply::Found(found), _) if found.len() == 1));
+        let stopped = AtomicBool::new(true);
+        assert!(matches!(handle(grep(), Vec::new(), &caches, &stopped), (Reply::Found(found), _) if found.is_empty()));
         fs::remove_dir_all(&dir).ok();
     }
 }

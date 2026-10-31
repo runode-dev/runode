@@ -11,11 +11,14 @@ use std::{
         mpsc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use super::wire::{self, Call, Reply, Request, Response};
 use crate::host_client::remote::{self, Status, deploy};
+
+/// 等回话时每隔这么久看一次要不要停。
+const CANCEL_POLL: Duration = Duration::from_millis(50);
 
 static CLIENTS: LazyLock<Mutex<HashMap<String, Arc<Client>>>> = LazyLock::new(Default::default);
 
@@ -54,11 +57,28 @@ impl Client {
 
     /// 发一个请求，等回话，最多等 `timeout`。会阻塞。
     pub(super) fn call(&self, call: Call, timeout: Duration) -> Result<(Reply, Vec<u8>), String> {
-        self.call_with(call, &[], timeout)
+        self.call_with(call, &[], timeout, None)
     }
 
-    /// 发一个后面跟着 `content` 的请求，等回话。会阻塞。
-    pub(super) fn call_with(&self, call: Call, content: &[u8], timeout: Duration) -> Result<(Reply, Vec<u8>), String> {
+    /// 发一个请求，等回话，`cancel` 置位时不再等。会阻塞。
+    pub(super) fn call_cancellable(
+        &self,
+        call: Call,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<(Reply, Vec<u8>), String> {
+        self.call_with(call, &[], timeout, Some(cancel))
+    }
+
+    /// 发一个后面跟着 `content` 的请求，等回话，最多等 `timeout`；给了 `cancel` 时它一置位就不再等，并让远端
+    /// 也停下（`Call::Cancel`），远端随后交回的结果丢掉。会阻塞。
+    pub(super) fn call_with(
+        &self,
+        call: Call,
+        content: &[u8],
+        timeout: Duration,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<(Reply, Vec<u8>), String> {
         let conn = self.conn()?;
         let id = conn.next.fetch_add(1, Ordering::Relaxed);
         let (sender, answer) = mpsc::channel();
@@ -73,14 +93,31 @@ impl Client {
             conn.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);
             return Err(format!("lost the connection to {}: {err}", self.name));
         }
-        match answer.recv_timeout(timeout) {
-            Ok((Reply::Failed(error), _)) => Err(error),
-            Ok(reply) => Ok(reply),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                conn.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);
-                Err(format!("{} did not answer in time", self.name))
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let wait = if cancel.is_some() { left.min(CANCEL_POLL) } else { left };
+            match answer.recv_timeout(wait) {
+                Ok((Reply::Failed(error), _)) => return Err(error),
+                Ok(reply) => return Ok(reply),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(format!("lost the connection to {}", self.name));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(format!("lost the connection to {}", self.name)),
+            let cancelled = cancel.is_some_and(|cancel| cancel.load(Ordering::Relaxed));
+            if !cancelled && !left.is_zero() {
+                continue;
+            }
+            conn.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);
+            if !cancelled {
+                return Err(format!("{} did not answer in time", self.name));
+            }
+            let stop = Request { id: conn.next.fetch_add(1, Ordering::Relaxed), call: Call::Cancel { id }, blob: 0 };
+            if wire::write(&mut *conn.input.lock().unwrap_or_else(PoisonError::into_inner), &stop, &[]).is_err() {
+                conn.closed.store(true, Ordering::Relaxed);
+            }
+            return Err("cancelled".into());
         }
     }
 

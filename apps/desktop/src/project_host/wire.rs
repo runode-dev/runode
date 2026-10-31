@@ -44,6 +44,8 @@ pub(super) enum Call {
     Stamp { path: PathBuf },
     /// 把请求后面跟着的字节写成 `path`（`runode_paths::replace_file`），交回写完后的版本戳。
     Write { path: PathBuf },
+    /// 让编号为 `id` 的请求停下，停得下的只有 `Grep`；这条本身不回话，停下的那条照样回话。
+    Cancel { id: u64 },
 }
 
 /// 远端办完的结果。

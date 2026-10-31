@@ -118,7 +118,7 @@ impl ProjectHost {
             Self::Local => return runode_paths::replace_file(path, bytes).map(|()| runode_files::stamp(path)),
             Self::Remote(client) => client,
         };
-        match client.call_with(Call::Write { path: path.to_path_buf() }, bytes, READ_TIMEOUT) {
+        match client.call_with(Call::Write { path: path.to_path_buf() }, bytes, READ_TIMEOUT, None) {
             Ok((Reply::Stamp(stamp), _)) => Ok(stamp),
             Ok((other, _)) => Err(std::io::Error::other(unexpected(&other))),
             Err(err) => Err(std::io::Error::other(err)),
@@ -138,8 +138,7 @@ impl ProjectHost {
         }
     }
 
-    /// 在 `root` 下按内容找（`runode_git::grep`），出错时是 git 的报错。会阻塞。
-    /// shortcut: 远端的搜索停不下来，`cancel` 只在本机生效；远端大目录里搜得慢时，再加一个取消的请求。
+    /// 在 `root` 下按内容找（`runode_git::grep`），出错时是 git 的报错；`cancel` 置位时停下，远端的也一起停。会阻塞。
     pub(crate) fn grep(
         &self,
         root: &Path,
@@ -160,7 +159,7 @@ impl ProjectHost {
             pathspecs: query.pathspecs.to_vec(),
             limit,
         };
-        match client.call(call, SCAN_TIMEOUT)? {
+        match client.call_cancellable(call, SCAN_TIMEOUT, cancel)? {
             (Reply::Found(found), _) => Ok(found),
             (other, _) => Err(unexpected(&other)),
         }
