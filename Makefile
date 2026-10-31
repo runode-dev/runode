@@ -92,10 +92,15 @@ test: ## 运行测试（装了 cargo-nextest 时并行跑）
 		$(CARGO) test --workspace; \
 	fi
 
-# 假的 ssh 把要在远端跑的命令换成在本机、以临时目录为家目录跑，测试装上的是刚编好的 runode。
-test-ssh: ## 经假的 ssh 测连 SSH 主机：部署、桥接、断线重连
+# 假的 ssh 把要在远端跑的命令换成在本机、以临时目录为家目录跑，测试装上的是刚编好的 runode；另编一份构建号
+# 不同的当作远端在跑的旧版，测升级后新宿主接手会话。几个测试共用 ssh 的设置和环境变量，一个个跑。
+test-ssh: ## 经假的 ssh 测连 SSH 主机：部署、桥接、断线重连、换构建后接手会话
+	RUNODE_BUILD_TAG=test-old $(CARGO) build -p runode
+	cp "$${CARGO_TARGET_DIR:-$(CURDIR)/target}/debug/runode" "$${CARGO_TARGET_DIR:-$(CURDIR)/target}/debug/runode-test-old"
 	$(CARGO) build -p runode
-	RUNODE_SSH_BINARY="$${CARGO_TARGET_DIR:-$(CURDIR)/target}/debug/runode" $(CARGO) test -p runode -- --ignored fake_ssh
+	RUNODE_SSH_BINARY="$${CARGO_TARGET_DIR:-$(CURDIR)/target}/debug/runode" \
+	RUNODE_TEST_OLD_BINARY="$${CARGO_TARGET_DIR:-$(CURDIR)/target}/debug/runode-test-old" \
+		$(CARGO) test -p runode -- --ignored --test-threads=1 fake_ssh
 
 clippy: ## 运行 clippy
 	$(CARGO) clippy --workspace --all-targets $(CLIPPY_ARGS)
