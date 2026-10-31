@@ -547,7 +547,7 @@ impl RemoteHost {
                     let pid = child.id();
                     self.state().child = Some(pid);
                     let running = Running::start(child, stdout, &self.link).map_err(|err| {
-                        crate::subprocess::kill(pid);
+                        self.state().child = None;
                         Failure::Retry(format!("cannot talk to the host on {}: {err}", self.name))
                     })?;
                     let mismatch = opening.build != build().0;
@@ -577,6 +577,8 @@ impl RemoteHost {
                     deployed = true;
                 }
                 Err(failure) => {
+                    // 读不到开场白时远端可能还在跑、等着 stdin，不结束它就一直等不到退出。
+                    crate::subprocess::kill(child.id());
                     let _ = child.wait();
                     return Err(failure);
                 }
@@ -715,8 +717,20 @@ struct Running {
 }
 
 impl Running {
-    /// 起两个搬字节的线程，把 `Link` 接在另一头上。
+    /// 起两个搬字节的线程，把 `Link` 接在另一头上；出错时结束并收掉 ssh 子进程。
     fn start(mut child: Child, stdout: BufReader<impl Read + Send + 'static>, link: &Link) -> io::Result<Self> {
+        let started = Self::pump(&mut child, stdout, link);
+        match started {
+            Ok(theirs) => Ok(Self { child, theirs, since_beat: Instant::now() }),
+            Err(err) => {
+                crate::subprocess::kill(child.id());
+                let _ = child.wait();
+                Err(err)
+            }
+        }
+    }
+
+    fn pump(child: &mut Child, stdout: BufReader<impl Read + Send + 'static>, link: &Link) -> io::Result<UnixStream> {
         let stdin = child.stdin.take().ok_or_else(|| io::Error::other("ssh has no stdin"))?;
         let (ours, theirs) = runode_host::socket_pair()?;
         let to_link = theirs.try_clone()?;
@@ -727,7 +741,7 @@ impl Running {
         })?;
         thread::Builder::new().name("ssh-pump-in".into()).spawn(move || pump_in(&from_link, stdin))?;
         link.connect(ours).map_err(|err| io::Error::other(err.to_string()))?;
-        Ok(Self { child, theirs, since_beat: Instant::now() })
+        Ok(theirs)
     }
 
     /// 断开：关掉 socket（`Link` 读到结尾，各会话收到 `Lost`），结束 ssh。
