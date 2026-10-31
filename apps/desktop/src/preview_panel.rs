@@ -583,6 +583,10 @@ impl PreviewPanel {
         }
         // 解析好之前先按字面路径占上，扫描接连换来新的 git 状态时不再起线程；按它比和不比一样。
         tabs.real_root = Some((root.clone(), root.clone()));
+        // 别的主机上的仓库在本机解析不了，按字面路径比。
+        if tabs.project.is_remote() {
+            return;
+        }
         let job = crate::fs_probe::off_thread(
             {
                 let root = root.clone();
