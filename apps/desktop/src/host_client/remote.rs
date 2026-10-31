@@ -30,7 +30,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use runode_protocol::{ClientMsg, SessionId};
 use runode_ssh::{
     Destination, Ssh,
-    bridge::{Start, read_start},
+    bridge::{self, Start, read_service, read_start},
 };
 
 use super::{Link, Timeouts, UnixStream, build};
@@ -372,6 +372,25 @@ impl RemoteHost {
         let mut command = exit_command(&ssh, &self.dest);
         crate::subprocess::hide_window(&mut command);
         let _ = command.status();
+    }
+
+    /// 在远端把宿主装成登录服务（`runode --ssh-service`）。连着时才办，会阻塞。
+    pub fn install_service(&self) -> Result<bridge::Service, bridge::Failure> {
+        let fail = |code: &str, message: String| bridge::Failure { code: code.into(), message };
+        if !matches!(self.status(), Status::Connected(_)) {
+            return Err(fail("disconnected", format!("not connected to {}", self.name)));
+        }
+        let ssh = ssh();
+        let script = runode_ssh::bootstrap::service_command(&deploy::install_dir());
+        let mut command = ssh.exec(&self.dest, &script, ssh.control.is_some());
+        if ssh.control.is_none() {
+            self.ask_through(&mut command, true);
+        }
+        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        crate::subprocess::hide_window(&mut command);
+        let output = command.output().map_err(|err| fail("ssh", format!("cannot run ssh: {err}")))?;
+        let read = read_service(&mut output.stdout.as_slice());
+        read.map_err(|_| fail("ssh", format!("ssh exited with {:?}", output.status.code())))?
     }
 
     /// 管这台主机的连接，见模块说明。

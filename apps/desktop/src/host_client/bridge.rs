@@ -4,6 +4,10 @@
 //!
 //! 宿主没在跑就拉起来；在跑的是别的构建（桌面升级后装上了新版本）时让这个构建的新宿主接手它的会话，
 //! 远端的终端和 agent 不断。接不了手时（远端还连着装旧版本的桌面）协议对得上就照样连旧的。
+//! 宿主装成了登录服务时经服务管理器拉起（`service`）。
+
+mod logind;
+pub mod service;
 
 use std::{
     io::{self, BufWriter, Read, Write},
@@ -162,6 +166,7 @@ fn connect(dirs: &runode_paths::Dirs) -> Result<(UnixStream, Opening), Failure> 
         let probe = launch::probe(&socket, &ours);
         tracing::info!("host on {}: {probe:?}", socket.display());
         let via = match &probe {
+            Probe::Absent if start_service(dirs, &exe) => "service",
             Probe::Absent => {
                 runode_host::launch(&exe).map_err(|err| fail("launch", format!("cannot start the host: {err}")))?;
                 "launched"
@@ -187,6 +192,21 @@ fn connect(dirs: &runode_paths::Dirs) -> Result<(UnixStream, Opening), Failure> 
         };
         let via = if via == "kept" || host == ours.0 || via == "in_app" { via } else { "mismatch" };
         return Ok((stream, Opening { build: host, pid, via: via.into(), session_bound: session_bound(pid) }));
+    }
+}
+
+/// 宿主装成了 Linux 的登录服务时经服务管理器起它；没装、没起成时返回假。
+fn start_service(dirs: &runode_paths::Dirs, exe: &Path) -> bool {
+    if !cfg!(target_os = "linux") || !runode_autostart::is_installed(runode_autostart::Kind::Host, dirs) {
+        return false;
+    }
+    service::offer_agent(dirs);
+    match runode_autostart::install(runode_autostart::Kind::Host, dirs, &stable_exe(dirs, exe)) {
+        Ok(_) => true,
+        Err(err) => {
+            tracing::warn!("cannot start the host service, starting the host directly: {err}");
+            false
+        }
     }
 }
 
@@ -267,16 +287,22 @@ fn connect_raw(socket: &Path) -> io::Result<UnixStream> {
     }
 }
 
-/// 宿主 `pid` 跟着 ssh 的登录会话走：Linux 上它在 logind 的会话 scope 里、这个用户又没开 linger 时，最后一个
-/// ssh 连接断开后系统可能连它一起结束（`KillUserProcesses`）。
+/// 宿主 `pid` 会跟着 ssh 的登录被系统结束（`logind`）。
 fn session_bound(pid: u32) -> bool {
     if !cfg!(target_os = "linux") || pid == 0 {
         return false;
     }
-    let in_session = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
-        .is_ok_and(|cgroup| cgroup.lines().any(|line| line.contains("/session-") && line.contains(".scope")));
-    let user = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
-    in_session && !Path::new("/var/lib/systemd/linger").join(user).exists()
+    let Ok(cgroup) = std::fs::read_to_string(format!("/proc/{pid}/cgroup")) else {
+        return false;
+    };
+    match logind::placement(&cgroup) {
+        logind::Placement::Session => {
+            let user = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
+            logind::KillRules::ask().kills(&user)
+        }
+        logind::Placement::UserManager => !runode_autostart::starts_at_boot(),
+        logind::Placement::Other => false,
+    }
 }
 
 /// 两头互搬，任一头读到结尾就关掉另一头。

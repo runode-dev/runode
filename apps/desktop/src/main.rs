@@ -3,7 +3,8 @@
 //! 一个进程跑的终端宿主，`runode --host --take-over` 是升级时接手旧宿主会话的新宿主，见
 //! `host_process`；`runode --screen` 是远程桌面的采集进程，见 `screen_process`；`runode --speech` 是
 //! 语音输入的识别子进程，见 `dictation::worker`；`runode --ssh-bridge` 是桌面经 ssh 连过来时在远端跑的桥接，
-//! 见 `host_client::bridge`；`runode --ssh-project` 替桌面读远端的项目（`project_host::serve`）。ssh 要问用户时也调这个程序当 askpass，见 `runode_ssh::askpass`。
+//! 见 `host_client::bridge`；`runode --ssh-service` 把远端的宿主装成登录服务（`host_client::bridge::service`）；
+//! `runode --ssh-project` 替桌面读远端的项目（`project_host::serve`）。ssh 要问用户时也调这个程序当 askpass，见 `runode_ssh::askpass`。
 //!
 //! Windows 上这个程序是界面程序，打开时不带控制台窗口；在终端里跑命令行用同一个包里的控制台程序
 //! `rn`。
@@ -84,6 +85,10 @@ fn main() {
     #[cfg(unix)]
     if args == ["--ssh-bridge"] {
         std::process::exit(host_client::bridge::run());
+    }
+    #[cfg(unix)]
+    if args == ["--ssh-service"] {
+        std::process::exit(host_client::bridge::service::run());
     }
     if args == ["--ssh-project"] {
         std::process::exit(project_host::serve::run());

@@ -221,6 +221,16 @@ ssh:
   reconnect: 立即重连
   upload_failed: "传不到 %{host} 上"
   ok: 好
+  bound_title: "%{host} 上的终端会跟着 SSH 登录一起结束"
+  bound_detail: 这台机器会在 SSH 登录断开后结束留下的进程，远端的终端和 agent 也就没了。把 runode 的宿主装成 systemd 用户服务并开启 linger，断开后它们就能留下来。以后也可以在设置的「SSH 主机」页里装。
+  bound_install: 装成登录服务
+  bound_later: 以后再说
+  service_title: 登录服务
+  service_running: 正在装成登录服务…
+  service_done: 已装成登录服务，断开 SSH 后终端也会留着。
+  service_later: 已装成登录服务。现在的宿主还有终端在跑，系统仍会在 SSH 登录断开后结束它们；等它退出，下次连接时就改由登录服务启动。
+  service_linger: 这个用户没有权限开启 linger。请在那台机器上运行 sudo loginctl enable-linger $USER，再装一次。
+  service_failed: "没能装成登录服务：%{error}"
 size_owner:
   controlled_by: 尺寸由 %{device} 控制
   controlled_elsewhere: 尺寸由另一台设备控制
@@ -731,6 +741,8 @@ settings:
     named: "%{action} %{host}"
     in_use: 还有工作区或终端在这台主机上，关掉它们才能忘掉
     mismatch: "已连接，那边的 runode 是另一个构建（%{build}）"
+    bound: 断开 SSH 后，这台机器会结束远端的终端
+    install_service: 装成登录服务
   autostart:
     app:
       title: 登录时打开 Runode

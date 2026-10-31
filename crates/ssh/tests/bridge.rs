@@ -2,7 +2,7 @@
 
 use std::io::{BufRead as _, BufReader, Read as _};
 
-use runode_ssh::bridge::{Failure, Opening, Start, read_start};
+use runode_ssh::bridge::{Failure, Opening, Service, Start, read_service, read_start};
 
 #[test]
 fn skips_noise_before_the_opening_line() {
@@ -28,6 +28,18 @@ fn reports_failures_and_probes() {
     assert_eq!(platform.arch, "arm64");
     assert!(probe.fill_buf().unwrap().is_empty());
     assert_eq!(read_start(&mut BufReader::new("".as_bytes())).unwrap(), Start::Probe(None));
+}
+
+#[test]
+fn reads_the_service_result_after_noise() {
+    let wire = format!("Welcome\n{}", Service { moved: true }.line());
+    assert_eq!(read_service(&mut BufReader::new(wire.as_bytes())).unwrap(), Ok(Service { moved: true }));
+    let failure = Failure { code: "linger".into(), message: "not allowed".into() };
+    let line = failure.service_line();
+    assert_eq!(read_service(&mut BufReader::new(line.as_bytes())).unwrap(), Err(failure));
+    // 桥接的开场白不算装服务的结果。
+    let bridge = Failure { code: "x".into(), message: String::new() }.line();
+    assert!(read_service(&mut BufReader::new(bridge.as_bytes())).is_err());
 }
 
 #[test]

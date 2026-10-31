@@ -1,5 +1,6 @@
 //! SSH 页的主机列表：连过的每台主机一行，写着连接状态，可以连接、断开、忘掉。主机是这次运行里连过的
-//! （`host_client::remote::remotes`），不进配置文件；还有工作区、终端用着的主机不能忘掉。
+//! （`host_client::remote::remotes`），不进配置文件；还有工作区、终端用着的主机不能忘掉。宿主会跟着 ssh 的
+//! 登录被结束的主机，行里另有一句提示和「装成登录服务」。
 
 use crate::ui::theme::Theme;
 use gpui::{Context, Div, Role, SharedString, div, prelude::*, px};
@@ -7,7 +8,7 @@ use gpui::{Context, Div, Role, SharedString, div, prelude::*, px};
 use super::{SettingsView, controls::Press as _};
 use crate::{
     host_client::remote::{self, RemoteHost, Status},
-    remote_hosts,
+    remote_hosts::{self, ServiceJob},
     ui::{
         button::{Button, ButtonVariant},
         font_size::FontSize,
@@ -67,6 +68,20 @@ impl SettingsView {
                 button("settings.ssh_hosts.disconnect", "disconnect")
                     .on_press(cx, move |_, _, cx| remote_hosts::disconnect(&name, cx))
             });
+        let bound = matches!(&status, Status::Connected(connected) if connected.session_bound);
+        let job = remote_hosts::service_job(&name, cx);
+        let notice = match &job {
+            Some(job) => Some(remote_hosts::service_job_text(job)),
+            None => bound.then(|| rust_i18n::t!("settings.ssh_hosts.bound").into_owned()),
+        };
+        let install = (bound && !matches!(job, Some(ServiceJob::Done { .. }))).then(|| {
+            let button = button("settings.ssh_hosts.install_service", "install-service");
+            if matches!(job, Some(ServiceJob::Running)) {
+                return button.disabled(true);
+            }
+            let name = name.clone();
+            button.on_press(cx, move |_, _, cx| remote_hosts::install_service(&name, false, cx))
+        });
         let forget = button("settings.ssh_hosts.forget", "forget");
         let forget = if in_use {
             let why = rust_i18n::t!("settings.ssh_hosts.in_use").into_owned();
@@ -108,7 +123,16 @@ impl SettingsView {
                             .text_size(FontSize::Body)
                             .text_color(theme.foreground.opacity(0.55))
                             .child(text),
-                    ),
+                    )
+                    .children(notice.map(|notice| {
+                        div()
+                            .id("notice")
+                            .role(Role::Label)
+                            .aria_label(notice.clone())
+                            .text_size(FontSize::Body)
+                            .text_color(theme.destructive)
+                            .child(notice)
+                    })),
             )
             .child(
                 div()
@@ -116,6 +140,7 @@ impl SettingsView {
                     .flex()
                     .items_center()
                     .gap(px(6.))
+                    .children(install)
                     .children(reconnect)
                     .children(disconnect)
                     .child(forget),

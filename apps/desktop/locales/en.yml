@@ -221,6 +221,16 @@ ssh:
   reconnect: Reconnect Now
   upload_failed: "Could not upload to %{host}"
   ok: OK
+  bound_title: "Terminals on %{host} end when you log out of SSH"
+  bound_detail: This machine ends the processes left behind when an SSH login closes, so the remote terminals and agents go with it. Install the runode host as a systemd user service with linger enabled to keep them running after you disconnect. You can also do this later on the SSH Hosts page in Settings.
+  bound_install: Install as Login Service
+  bound_later: Not Now
+  service_title: Login Service
+  service_running: Installing as a login service…
+  service_done: Installed as a login service. Terminals keep running after SSH disconnects.
+  service_later: Installed as a login service. The current host still has terminals running, and the system still ends them when the SSH login closes; once it exits, the next connection starts the host through the login service.
+  service_linger: This user is not allowed to enable linger. Run sudo loginctl enable-linger $USER on that machine, then install again.
+  service_failed: "Could not install the login service: %{error}"
 size_owner:
   controlled_by: "Size set by %{device}"
   controlled_elsewhere: Size set by another device
@@ -731,6 +741,8 @@ settings:
     named: "%{action} %{host}"
     in_use: Workspaces or terminals are still on this host. Close them first to forget it.
     mismatch: "Connected. The host runs another build of runode (%{build})."
+    bound: This machine ends the remote terminals when SSH disconnects
+    install_service: Install as Login Service
   autostart:
     app:
       title: Open Runode at login

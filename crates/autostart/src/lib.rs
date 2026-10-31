@@ -167,7 +167,7 @@ fn manager_unit_file(manager_env: &str, home: Option<&Path>) -> Option<PathBuf> 
 fn systemd_unit_file(dirs: &Dirs) -> io::Result<PathBuf> {
     // 用户服务默认只在有人登录时才起；开 linger 才能开机就起，没有登录会话时也得先开它，
     // systemd 才会给这个用户起一个服务管理器。没有权限就算了，调用方用 `starts_at_boot` 看结果。
-    let _ = run("loginctl", &["enable-linger"]);
+    let _ = enable_linger();
     let ask = || capture("systemctl", &["--user", "show-environment"]);
     // 刚开 linger 时服务管理器还在起来，头几次连不上它的总线，隔一会儿再试。
     let mut env = ask();
@@ -338,6 +338,12 @@ pub fn starts_at_boot() -> bool {
         .args(["show-user", &user, "--property=Linger", "--value"])
         .output()
         .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "yes")
+}
+
+/// Linux 上给这个用户开 linger：没人登录时 systemd 也给他留着用户服务管理器。普通用户有没有权限开看系统的
+/// polkit 规则，没有时报错，要管理员 `loginctl enable-linger <用户>`。
+pub fn enable_linger() -> io::Result<()> {
+    run("loginctl", &["enable-linger"])
 }
 
 /// 去掉 `kind` 的登录自启：删掉服务文件、取消开机启用，app 还从登录项里去掉。原来就没装时返回 `false`。

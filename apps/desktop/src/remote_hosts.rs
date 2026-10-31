@@ -1,10 +1,11 @@
 //! 经 SSH 连的远端主机在界面这边要办的事：连上一台主机后开始办那台机器上的命令行转来的请求，把那台
 //! 主机上断开着的终端接回来；ssh 要问用户时交给最前面的窗口弹框；连接状态一变就更新全局的 `HostsChanged`。
+//! 连上的宿主会跟着 ssh 的登录被结束时，这次运行里每台主机问一次要不要把它装成登录服务（`install_service`）。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use futures::StreamExt as _;
-use gpui::{App, AppContext as _, Global};
+use gpui::{App, AppContext as _, Global, PromptLevel};
 
 use crate::{
     host_client::remote::{self, HostId, Phase, RemoteEvent, Status},
@@ -20,6 +21,110 @@ impl Global for HostsChanged {}
 fn hosts_changed(cx: &mut App) {
     let next = cx.default_global::<HostsChanged>().0 + 1;
     cx.set_global(HostsChanged(next));
+}
+
+/// 把远端宿主装成登录服务办到了哪一步，按主机名记。
+#[derive(Clone, Debug)]
+pub enum ServiceJob {
+    Running,
+    /// 装好了；`moved` 为假时原来的宿主还有会话、接着跑，它退出后才由服务起。
+    Done {
+        moved: bool,
+    },
+    /// 没装上；`linger` 为真时是这个用户开不了 linger，要管理员开。
+    Failed {
+        linger: bool,
+        message: String,
+    },
+}
+
+#[derive(Default)]
+struct ServiceJobs(HashMap<String, ServiceJob>);
+
+impl Global for ServiceJobs {}
+
+pub fn service_job(name: &str, cx: &App) -> Option<ServiceJob> {
+    cx.try_global::<ServiceJobs>()?.0.get(name).cloned()
+}
+
+fn set_service_job(name: &str, job: ServiceJob, cx: &mut App) {
+    cx.default_global::<ServiceJobs>().0.insert(name.to_owned(), job);
+    hosts_changed(cx);
+}
+
+/// 在后台把主机 `name` 上的宿主装成登录服务；`report` 时没办成（或还要等）在最前面的窗口上说。
+pub fn install_service(name: &str, report: bool, cx: &mut App) {
+    let Some(host) = remote::find(name) else {
+        return;
+    };
+    if matches!(service_job(name, cx), Some(ServiceJob::Running)) {
+        return;
+    }
+    set_service_job(name, ServiceJob::Running, cx);
+    let name = name.to_owned();
+    let task = cx.background_spawn(async move { host.install_service() });
+    cx.spawn(async move |cx| {
+        let job = match task.await {
+            Ok(service) => ServiceJob::Done { moved: service.moved },
+            Err(failure) => {
+                tracing::warn!("cannot make the host on {name} a login service: {failure:?}");
+                ServiceJob::Failed { linger: failure.code == "linger", message: failure.message }
+            }
+        };
+        cx.update(|cx| {
+            if report && !matches!(job, ServiceJob::Done { moved: true }) {
+                tell(&service_job_text(&job), cx);
+            }
+            set_service_job(&name, job, cx);
+        });
+    })
+    .detach();
+}
+
+/// 装登录服务的结果在界面上的说法。
+pub fn service_job_text(job: &ServiceJob) -> String {
+    match job {
+        ServiceJob::Running => rust_i18n::t!("ssh.service_running").into_owned(),
+        ServiceJob::Done { moved: true } => rust_i18n::t!("ssh.service_done").into_owned(),
+        ServiceJob::Done { moved: false } => rust_i18n::t!("ssh.service_later").into_owned(),
+        ServiceJob::Failed { linger: true, .. } => rust_i18n::t!("ssh.service_linger").into_owned(),
+        ServiceJob::Failed { message, .. } => {
+            rust_i18n::t!("ssh.service_failed", error = message.as_str()).into_owned()
+        }
+    }
+}
+
+/// 在最前面的窗口上说一句，只有「好」一个按钮。
+fn tell(detail: &str, cx: &mut App) {
+    let Some(front) = window::front_window(cx) else {
+        return;
+    };
+    let (title, ok) = (rust_i18n::t!("ssh.service_title"), rust_i18n::t!("ssh.ok"));
+    let _ =
+        front.update(cx, |_, window, cx| window.prompt(PromptLevel::Info, &title, Some(detail), &[ok.as_ref()], cx));
+}
+
+/// 主机 `name` 的宿主会跟着 ssh 的登录被结束：问用户要不要装成登录服务。
+fn offer_service(name: &str, cx: &mut App) {
+    let Some(front) = window::front_window(cx) else {
+        return;
+    };
+    let title = rust_i18n::t!("ssh.bound_title", host = name);
+    let detail = rust_i18n::t!("ssh.bound_detail");
+    let (install, later) = (rust_i18n::t!("ssh.bound_install"), rust_i18n::t!("ssh.bound_later"));
+    let answers: [&str; 2] = [&install, &later];
+    let Ok(answer) =
+        front.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx))
+    else {
+        return;
+    };
+    let name = name.to_owned();
+    cx.spawn(async move |cx| {
+        if answer.await == Ok(0) {
+            cx.update(|cx| install_service(&name, true, cx));
+        }
+    })
+    .detach();
 }
 
 /// 在后台断开主机 `name`。
@@ -48,18 +153,33 @@ pub fn install(cx: &mut App) {
         return;
     };
     cx.spawn(async move |cx| {
-        let mut served = HashSet::new();
+        let mut seen = Seen::default();
         while let Some(event) = events.next().await {
-            cx.update(|cx| handle(event, &mut served, cx));
+            cx.update(|cx| handle(event, &mut seen, cx));
         }
     })
     .detach();
 }
 
-fn handle(event: RemoteEvent, served: &mut HashSet<String>, cx: &mut App) {
+/// 收事件时记着的主机名。
+#[derive(Default)]
+struct Seen {
+    /// 在办它的 `Link` 转来的请求。
+    served: HashSet<String>,
+    /// 问过要不要装成登录服务。
+    offered: HashSet<String>,
+}
+
+fn handle(event: RemoteEvent, seen: &mut Seen, cx: &mut App) {
     match event {
         RemoteEvent::Connected { host, alive } => {
-            if served.insert(host.clone())
+            let bound = remote::find(&host).is_some_and(
+                |remote| matches!(remote.status(), Status::Connected(connected) if connected.session_bound),
+            );
+            if bound && service_job(&host, cx).is_none() && seen.offered.insert(host.clone()) {
+                offer_service(&host, cx);
+            }
+            if seen.served.insert(host.clone())
                 && let Some(remote) = remote::remote(&host)
             {
                 window::serve(HostId::Ssh(host.clone()), remote.link.clone(), cx);
@@ -74,7 +194,10 @@ fn handle(event: RemoteEvent, served: &mut HashSet<String>, cx: &mut App) {
         }
         // 再用这个名字时是新的一条 `Link`，连上时要重新办它转来的请求。
         RemoteEvent::Forgotten(host) => {
-            served.remove(&host);
+            seen.served.remove(&host);
+            if cx.has_global::<ServiceJobs>() {
+                cx.global_mut::<ServiceJobs>().0.remove(&host);
+            }
             hosts_changed(cx);
         }
         // 问在最前面的窗口上；一个窗口都没有时丢掉，算取消。

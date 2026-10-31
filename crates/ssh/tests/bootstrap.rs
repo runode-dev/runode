@@ -11,7 +11,7 @@ use std::{
 use common::TempDir;
 use runode_ssh::bootstrap::{
     BIN_DIR, Libc, Os, PROBE_EXIT, Platform, Target, UPLOADS_DIR, Unsupported, connect_command, install_command,
-    install_dir_name, parse_uploaded, project_command, upload_command,
+    install_dir_name, parse_uploaded, project_command, service_command, upload_command,
 };
 
 /// 像 ssh 那样把命令行交给登录 shell（默认 /bin/sh）解释。
@@ -51,6 +51,7 @@ fn scripts_avoid_characters_remote_shells_mangle() {
         upload_command("1-2", None),
         upload_command("1-2", Some("a.png")),
         project_command("0.1.16.abc"),
+        service_command("0.1.16.abc"),
     ] {
         let inner = command.strip_prefix("/bin/sh -c '").and_then(|rest| rest.strip_suffix('\'')).unwrap();
         assert!(!inner.contains(['\'', '!', '\n']), "{inner}");

@@ -221,6 +221,16 @@ ssh:
   reconnect: 立即重連
   upload_failed: "傳不到 %{host} 上"
   ok: 好
+  bound_title: "%{host} 上的終端機會跟著 SSH 登入一起結束"
+  bound_detail: 這台機器會在 SSH 登入中斷後結束留下的程序，遠端的終端機和 agent 也就沒了。把 runode 的主機程序裝成 systemd 使用者服務並開啟 linger，中斷後它們就能留下來。之後也可以在設定的「SSH 主機」頁裡安裝。
+  bound_install: 裝成登入服務
+  bound_later: 以後再說
+  service_title: 登入服務
+  service_running: 正在裝成登入服務…
+  service_done: 已裝成登入服務，中斷 SSH 後終端機也會留著。
+  service_later: 已裝成登入服務。現在的主機程序還有終端機在跑，系統仍會在 SSH 登入中斷後結束它們；等它退出，下次連線時就改由登入服務啟動。
+  service_linger: 這個使用者沒有權限開啟 linger。請在那台機器上執行 sudo loginctl enable-linger $USER，再裝一次。
+  service_failed: "沒能裝成登入服務：%{error}"
 size_owner:
   controlled_by: 尺寸由 %{device} 控制
   controlled_elsewhere: 尺寸由另一台裝置控制
@@ -731,6 +741,8 @@ settings:
     named: "%{action} %{host}"
     in_use: 還有工作區或終端機在這台主機上，關掉它們才能忘掉
     mismatch: "已連線，那邊的 runode 是另一個建置（%{build}）"
+    bound: 中斷 SSH 後，這台機器會結束遠端的終端機
+    install_service: 裝成登入服務
   autostart:
     app:
       title: 登入時打開 Runode
