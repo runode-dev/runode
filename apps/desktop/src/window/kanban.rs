@@ -232,8 +232,14 @@ impl WindowView {
             let worktree = real(worktree).await;
             let home = real(super::model::home_dir()).await;
             this.update_in(cx, |this, window, cx| {
-                let dirs: Vec<&Path> = this.workspaces.iter().map(|workspace| workspace.real_dir()).collect();
-                match best_workspace(&dirs, &todo_dir, worktree.as_deref(), home.as_deref()) {
+                // 任务会话在本机，只接进本机的 workspace。
+                let local: Vec<(usize, &Path)> = (this.workspaces.iter().enumerate())
+                    .filter(|(_, workspace)| workspace.host.is_local())
+                    .map(|(ix, workspace)| (ix, workspace.real_dir()))
+                    .collect();
+                let dirs: Vec<&Path> = local.iter().map(|&(_, dir)| dir).collect();
+                let found = best_workspace(&dirs, &todo_dir, worktree.as_deref(), home.as_deref());
+                match found.map(|found| local[found].0) {
                     Some(ix) => {
                         this.activate_workspace(ix, window, cx);
                         this.insert_tab(this.workspace().active + 1, view, window, cx);
