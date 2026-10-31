@@ -1,5 +1,6 @@
 //! 桌面这头：每台 SSH 主机一个 `runode --ssh-project`，经主连接起，按需重起。请求带编号，回话由读线程按
-//! 编号交给等着的一方，几个请求可以同时在路上。主机还没连上时不起，免得在这里另外问用户要密码。
+//! 编号交给等着的一方，几个请求可以同时在路上。主机连上以后才起：经主连接时不用再认证，没有主连接
+//! （Windows）时这条 ssh 自己认证，要问用户时经 askpass 问。
 
 use std::{
     collections::HashMap,
@@ -142,9 +143,8 @@ impl Client {
         if !matches!(host.status(), Status::Connected(_)) {
             return Err(format!("not connected to {}", self.name));
         }
-        let ssh = remote::ssh();
         let script = runode_ssh::bootstrap::project_command(&deploy::install_dir());
-        let mut command = ssh.exec(&host.dest, &script, true);
+        let mut command = host.exec(&remote::ssh(), &script, true, false);
         command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
         crate::subprocess::hide_window(&mut command);
         let mut child = command.spawn().map_err(|err| format!("cannot run ssh: {err}"))?;
