@@ -1611,11 +1611,12 @@ impl PreviewPanel {
             Some(LinkTarget::Web(url)) => cx.open_url(&url),
             // 是不是文件在单独的线程上看（`fs_probe::off_thread`）；看完时已经换了 workspace 或标签的不开。
             Some(LinkTarget::File(path)) => {
-                let id = self.ws;
+                let (id, project) = (self.ws, self.project());
                 let job = crate::fs_probe::off_thread(
                     {
                         let path = path.clone();
-                        move || path.is_file()
+                        // 经文件所在的主机看，远端工作区的文件在本机查不到。
+                        move || project.kinds(vec![path]).first() == Some(&Some(false))
                     },
                     false,
                 );
