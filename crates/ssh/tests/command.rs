@@ -20,3 +20,15 @@ fn only_connecting_commands_clear_forwardings() {
     assert!(!clears(&forward));
     assert!(args(&forward).windows(2).any(|pair| pair == ["-L", "127.0.0.1:4000:localhost:3000"]));
 }
+
+/// 远端命令是最后一个参数，选项都在目标之前：目标之后的参数会被算进远端命令。
+#[test]
+fn options_come_before_the_destination() {
+    let ssh = Ssh { program: PathBuf::from("ssh"), control: None, persist_secs: 60 };
+    let dest = Destination::parse("me@box:2222").unwrap();
+    let args = args(&ssh.exec_compressed(&dest, "uptime", true));
+    assert_eq!(args.last().map(String::as_str), Some("uptime"));
+    let target = args.iter().position(|arg| arg == "me@box").unwrap();
+    let compression = args.iter().position(|arg| arg == "Compression=yes").unwrap();
+    assert!(compression < target, "{args:?}");
+}

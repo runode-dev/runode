@@ -90,12 +90,22 @@ impl Ssh {
     /// 在远端跑一条命令，stdin 和 stdout 原样是二进制数据（`-e none` 关掉转义字符，`-T` 不分配终端）。
     /// 有主连接时复用它（`batch` 时不问用户）；`remote` 交给远端的登录 shell 解释。
     pub fn exec(&self, dest: &Destination, remote: &str, batch: bool) -> Command {
+        self.exec_with(dest, remote, batch, &[])
+    }
+
+    /// 同 `exec`，传的数据压缩：传 runode 本身这类大文件时用。复用主连接时压不压由主连接定，这里的选项不起作用。
+    pub fn exec_compressed(&self, dest: &Destination, remote: &str, batch: bool) -> Command {
+        self.exec_with(dest, remote, batch, &["-o", "Compression=yes"])
+    }
+
+    /// 选项要在目标之前：之后的参数都算进远端命令。
+    fn exec_with(&self, dest: &Destination, remote: &str, batch: bool, options: &[&str]) -> Command {
         let mut command = self.connecting();
         command.args(["-T", "-e", "none", "-o", "ControlMaster=no"]);
         if batch {
             command.args(["-o", "BatchMode=yes"]);
         }
-        command.args(dest.args()).arg(remote);
+        command.args(options).args(dest.args()).arg(remote);
         command
     }
 

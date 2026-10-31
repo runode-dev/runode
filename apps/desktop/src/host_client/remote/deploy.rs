@@ -57,8 +57,8 @@ pub(super) fn install(host: &RemoteHost, ssh: &Ssh, platform: &Platform, dir: &s
     let total = std::fs::metadata(&source.path).map(|meta| meta.len()).unwrap_or(0);
     tracing::info!("installing {} on {} as {dir} ({total} bytes)", source.path.display(), host.name);
     host.set_status(Status::Connecting(Phase::Uploading { done: 0, total }));
-    let mut command = ssh.exec(&host.dest, &install_command(dir, &sha, source.archive), ssh.control.is_some());
-    command.args(["-o", "Compression=yes"]);
+    let mut command =
+        ssh.exec_compressed(&host.dest, &install_command(dir, &sha, source.archive), ssh.control.is_some());
     let stderr = File::create(log).map_err(|err| Failure::Retry(format!("cannot write the ssh log: {err}")))?;
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(stderr);
     crate::subprocess::isolate(&mut command);
