@@ -35,7 +35,8 @@ const CLOEXEC_DEFAULT: libc::c_int = 0;
 // libSystem 导出、没有公开头文件的接口：子进程不再把拉起它的 app 当作「责任进程」，自己担着。
 // macOS 按责任进程判断本地网络这类隐私权限；宿主比 app 活得久，挂在 app 名下的话，app 一退出，
 // 宿主和它拉起的 shell 都查不到授权，连局域网报 `No route to host`。宿主是同一个 .app 里的可执行
-// 文件，自己担着时照样按这个 app 的授权算。
+// 文件，自己担着时照样按这个 app 的授权算。经 ssh 在远端拉起时也一样：ssh 里跑的程序免授权，凭的是
+// 那次连接的 sshd 进程，连接一断就没了；自己担着时按它自己的授权算，那台 Mac 上允许过一次就一直有效。
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn responsibility_spawnattrs_setdisclaim(attr: *mut libc::posix_spawnattr_t, disclaim: bool) -> libc::c_int;
