@@ -55,6 +55,7 @@ use gpui::{
     actions, div, img, prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, FileStatus};
+use runode_ssh::Destination;
 use runode_types::color::Rgb;
 
 pub use listing::{Listings, list_dirs};
@@ -100,7 +101,7 @@ actions!(
         /// 文件树里显示、隐藏名字以 `.` 开头的文件和被 git 忽略的文件。
         ToggleShowDotfiles,
         ToggleShowIgnored,
-        /// 用 VS Code 打开文件树的根目录，在访达里打开它。
+        /// 用 VS Code 打开文件树的根目录（SSH 主机上的经 Remote-SSH），在访达里打开它。
         OpenRootInVsCode,
         OpenRootInFinder
     ]
@@ -218,13 +219,39 @@ fn open_in_vscode(dir: PathBuf, cx: &mut App) {
     cx.open_url(&vscode_url(&dir));
 }
 
-/// VS Code 打开 `dir` 的链接：路径用 `/` 分隔，Windows 的盘符前也加 `/`，非 ASCII 和保留字符按 UTF-8 转义；
-/// Unix 上 `\` 是文件名里的普通字符，也转义。
+/// VS Code 打开 `dir` 的链接：路径用 `/` 分隔，Windows 的盘符前也加 `/`。
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn vscode_url(dir: &Path) -> String {
     let path = dir.to_string_lossy();
     let path = if cfg!(windows) { path.replace('\\', "/") } else { path.into_owned() };
     let mut url = String::from("vscode://file");
+    push_url_path(&mut url, &path);
+    url
+}
+
+/// VS Code 经 Remote-SSH 打开 SSH 主机 `host` 上的 `dir` 的链接，由 VS Code 自己连过去。主机照 ssh 命令行写
+/// （`user@host -p 端口`），除了别名和 `user@host` 这类只有字母、数字和 `.-_@` 的，都按 Remote-SSH 的规矩编成
+/// 十六进制的 `{"hostName": …}`。
+fn vscode_remote_url(host: &Destination, dir: &Path) -> String {
+    let spec = match host.port {
+        Some(port) => format!("{} -p {port}", host.target),
+        None => host.target.clone(),
+    };
+    let plain = !spec.is_empty() && spec.bytes().all(|byte| byte.is_ascii_alphanumeric() || b".-_@".contains(&byte));
+    let authority = if plain {
+        spec
+    } else {
+        let json = serde_json::json!({ "hostName": spec }).to_string();
+        json.bytes().map(|byte| format!("{byte:02x}")).collect()
+    };
+    let mut url = format!("vscode://vscode-remote/ssh-remote+{authority}");
+    push_url_path(&mut url, &dir.to_string_lossy());
+    url
+}
+
+/// 把路径接到链接后面：前面补上 `/`，非 ASCII 和保留字符按 UTF-8 转义；Unix 上 `\` 是文件名里的普通字符，
+/// 也转义。
+fn push_url_path(url: &mut String, path: &str) {
     if !path.starts_with('/') {
         url.push('/');
     }
@@ -235,7 +262,6 @@ fn vscode_url(dir: &Path) -> String {
             url.push_str(&format!("%{byte:02X}"));
         }
     }
-    url
 }
 
 /// 从文件树拖出来的一项：放到终端上把路径打进去（由 app 接），放到文件树的目录上挪进那个目录。
@@ -458,13 +484,15 @@ impl FileTree {
             check("files.show_dotfiles", self.show_dotfiles, Box::new(ToggleShowDotfiles)),
             check("files.show_ignored", self.show_ignored, Box::new(ToggleShowIgnored)),
         ];
+        items.extend([
+            None,
+            item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
+        ]);
         if !self.remote() {
-            items.extend([
-                None,
-                item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
+            items.push(
                 item(&crate::i18n::os_key("files.open_in_finder"), Box::new(OpenRootInFinder))
                     .map(|item| item.with_icon(FOLDER_OPEN_ICON)),
-            ]);
+            );
         }
         let target = self.focus.clone();
         self.open_context_menu(position, items, target, cx);
@@ -1000,10 +1028,12 @@ impl Render for FileTree {
             .on_action(cx.listener(Self::collapse_all_files))
             .on_action(cx.listener(|this, _: &ToggleShowDotfiles, _, cx| this.toggle_show_dotfiles(cx)))
             .on_action(cx.listener(|this, _: &ToggleShowIgnored, _, cx| this.toggle_show_ignored(cx)))
-            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, cx| {
-                if !this.remote() {
-                    open_in_vscode(this.files_root(), cx);
-                }
+            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, cx| match this.input.project.name() {
+                None => open_in_vscode(this.files_root(), cx),
+                Some(name) => match Destination::parse(name) {
+                    Some(host) => cx.open_url(&vscode_remote_url(&host, &this.files_root())),
+                    None => tracing::warn!("cannot open {name} in VS Code: not an ssh destination"),
+                },
             }))
             .on_action(cx.listener(|this, _: &OpenRootInFinder, _, cx| {
                 if !this.remote() {
@@ -1047,7 +1077,9 @@ impl Render for FileTree {
 mod tests {
     use std::path::Path;
 
-    use super::vscode_url;
+    use runode_ssh::Destination;
+
+    use super::{vscode_remote_url, vscode_url};
 
     #[test]
     fn vscode_url_escapes_the_path() {
@@ -1065,5 +1097,18 @@ mod tests {
     #[test]
     fn vscode_url_turns_windows_paths_into_url_paths() {
         assert_eq!(vscode_url(Path::new(r"C:\Users\me\proj")), "vscode://file/C:/Users/me/proj");
+    }
+
+    #[test]
+    fn vscode_remote_url_names_the_host_like_ssh() {
+        let url = |host: &str, dir: &str| vscode_remote_url(&Destination::parse(host).unwrap(), Path::new(dir));
+        assert_eq!(
+            url("me@box", "/home/me/my project"),
+            "vscode://vscode-remote/ssh-remote+me@box/home/me/my%20project"
+        );
+        assert_eq!(url("dev-box", "/srv"), "vscode://vscode-remote/ssh-remote+dev-box/srv");
+        // {"hostName":"me@box -p 2222"}
+        let hex = "7b22686f73744e616d65223a226d6540626f78202d702032323232227d";
+        assert_eq!(url("me@box:2222", "/srv"), format!("vscode://vscode-remote/ssh-remote+{hex}/srv"));
     }
 }
