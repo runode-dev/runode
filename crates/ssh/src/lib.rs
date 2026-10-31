@@ -10,10 +10,8 @@ mod command;
 mod config;
 mod destination;
 mod error;
-mod resolve;
 
 pub use command::{DEFAULT_PERSIST_SECS, Ssh, parse_version, supports_askpass};
 pub use config::list_hosts;
 pub use destination::Destination;
 pub use error::{Failure, last_line};
-pub use resolve::{Resolved, parse_settings};

@@ -79,11 +79,7 @@ fn tar<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<std::process::Child>
 
 /// 跑一次 `upload_command`，stdin 是 `stdin`（`bytes` 给了时写进去），回远端放上传的目录。
 fn send(host: &RemoteHost, file: Option<&str>, stdin: Stdio, bytes: Option<&[u8]>) -> Result<String> {
-    let ssh = ssh();
-    let mut command = ssh.exec(&host.dest, &upload_command(&upload_id(), file), ssh.control.is_some());
-    if ssh.control.is_none() {
-        host.ask_through(&mut command);
-    }
+    let mut command = host.exec(&ssh(), &upload_command(&upload_id(), file), true, false);
     command.stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped());
     crate::subprocess::hide_window(&mut command);
     let mut child = command.spawn().context("cannot run ssh")?;

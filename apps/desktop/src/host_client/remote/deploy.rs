@@ -48,7 +48,7 @@ fn identity(path: &Path) -> Option<(u64, u64)> {
     Some((meta.len(), modified))
 }
 
-/// 把 runode 装到 `platform` 上，装成 `dir`。不经主连接时 `interactive` 才经 askpass 问用户。
+/// 把 runode 装到 `platform` 上，装成 `dir`；`interactive` 是要认证时能不能问用户（`RemoteHost::exec`）。
 pub(super) fn install(
     host: &RemoteHost,
     ssh: &Ssh,
@@ -64,11 +64,7 @@ pub(super) fn install(
     let total = std::fs::metadata(&source.path).map(|meta| meta.len()).unwrap_or(0);
     tracing::info!("installing {} on {} as {dir} ({total} bytes)", source.path.display(), host.name);
     host.set_status(Status::Connecting(Phase::Uploading { done: 0, total }));
-    let batch = ssh.control.is_some() || !interactive;
-    let mut command = ssh.exec_compressed(&host.dest, &install_command(dir, &sha, source.archive), batch);
-    if !batch {
-        host.ask_through(&mut command);
-    }
+    let mut command = host.exec(ssh, &install_command(dir, &sha, source.archive), interactive, true);
     let stderr = File::create(log).map_err(|err| Failure::Retry(format!("cannot write the ssh log: {err}")))?;
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(stderr);
     crate::subprocess::isolate(&mut command);

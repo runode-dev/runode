@@ -60,11 +60,6 @@ impl Destination {
         args.extend(["--".to_owned(), self.target.clone()]);
         args
     }
-
-    /// 这是 `~/.ssh/config` 里的一个别名那样的写法：没写用户和端口。VS Code 的 Remote-SSH 只认这样的。
-    pub fn is_alias(&self) -> bool {
-        self.port.is_none() && !self.target.contains('@')
-    }
 }
 
 impl fmt::Display for Destination {

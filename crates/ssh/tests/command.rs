@@ -2,7 +2,7 @@
 
 use std::{path::PathBuf, process::Command};
 
-use runode_ssh::{Destination, Ssh};
+use runode_ssh::{Destination, Ssh, parse_version, supports_askpass};
 
 fn args(command: &Command) -> Vec<String> {
     command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect()
@@ -31,4 +31,16 @@ fn options_come_before_the_destination() {
     let target = args.iter().position(|arg| arg == "me@box").unwrap();
     let compression = args.iter().position(|arg| arg == "Compression=yes").unwrap();
     assert!(compression < target, "{args:?}");
+}
+
+/// 认得出 macOS、Linux 和 Windows 自带的 ssh 的版本，强制走 askpass 要 OpenSSH 8.4 起。
+#[test]
+fn reads_the_version_ssh_prints() {
+    assert_eq!(parse_version("OpenSSH_9.6p1, LibreSSL 3.3.6\n"), Some((9, 6)));
+    assert_eq!(parse_version("OpenSSH_10.0p2 Debian-7, OpenSSL 3.5.1 1 Jul 2025\n"), Some((10, 0)));
+    assert_eq!(parse_version("OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2\r\n"), Some((8, 1)));
+    assert_eq!(parse_version("Dropbear v2022.83\n"), None);
+    assert!(!supports_askpass((8, 1)));
+    assert!(supports_askpass((8, 4)));
+    assert!(supports_askpass((10, 0)));
 }

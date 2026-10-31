@@ -44,10 +44,10 @@ impl Ssh {
         command
     }
 
-    /// `ssh -G`：按配置文件解析目标最后连到哪，不真的连。
-    pub fn resolve(&self, dest: &Destination) -> Command {
+    /// `ssh -V`：版本打在 stderr 上，由 `parse_version` 读。
+    pub fn version(&self) -> Command {
         let mut command = Command::new(&self.program);
-        command.arg("-G").args(dest.args());
+        command.arg("-V");
         command
     }
 
@@ -125,9 +125,11 @@ fn control_path_option(path: &Path) -> String {
     format!("ControlPath={text}")
 }
 
-/// 读 `ssh -V` 的输出（它写在 stderr 上），比如 `OpenSSH_9.6p1, LibreSSL 3.3.6` 是 (9, 6)。
+/// 读 `ssh -V` 的输出（它写在 stderr 上），比如 `OpenSSH_9.6p1, LibreSSL 3.3.6` 是 (9, 6)；Windows 自带的写成
+/// `OpenSSH_for_Windows_8.1p1`。
 pub fn parse_version(text: &str) -> Option<(u32, u32)> {
     let rest = &text[text.find("OpenSSH_")? + "OpenSSH_".len()..];
+    let rest = rest.strip_prefix("for_Windows_").unwrap_or(rest);
     let (major, rest) = rest.split_once('.')?;
     let minor: String = rest.chars().take_while(char::is_ascii_digit).collect();
     Some((major.parse().ok()?, minor.parse().ok()?))

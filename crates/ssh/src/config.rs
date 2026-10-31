@@ -1,4 +1,4 @@
-//! 读 `~/.ssh/config` 里写着的主机别名，给用户挑。连接时怎么解析交给 OpenSSH 自己（`ssh -G`）。
+//! 读 `~/.ssh/config` 里写着的主机别名，给用户挑。连接时怎么解析交给 OpenSSH 自己。
 
 use std::{
     collections::HashSet,

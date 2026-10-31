@@ -182,6 +182,26 @@ pub fn set_ssh_settings(settings: SshSettings) {
     *SETTINGS.lock().unwrap_or_else(PoisonError::into_inner) = settings;
 }
 
+/// 这个 ssh 能不能经 askpass 问用户（`runode_ssh::supports_askpass`），每个程序只看一次版本；认不出版本（不是
+/// OpenSSH）时当作能。
+pub(crate) fn can_ask(ssh: &Ssh) -> bool {
+    static KNOWN: LazyLock<Mutex<HashMap<PathBuf, bool>>> = LazyLock::new(Mutex::default);
+    if let Some(&known) = KNOWN.lock().unwrap_or_else(PoisonError::into_inner).get(&ssh.program) {
+        return known;
+    }
+    let mut command = ssh.version();
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    crate::subprocess::hide_window(&mut command);
+    let version =
+        command.output().ok().and_then(|out| runode_ssh::parse_version(&String::from_utf8_lossy(&out.stderr)));
+    let can = version.is_none_or(runode_ssh::supports_askpass);
+    if !can {
+        tracing::warn!("{} is OpenSSH {version:?}, which cannot ask for passwords", ssh.program.display());
+    }
+    KNOWN.lock().unwrap_or_else(PoisonError::into_inner).insert(ssh.program.clone(), can);
+    can
+}
+
 pub(crate) fn ssh() -> Ssh {
     let settings = SETTINGS.lock().unwrap_or_else(PoisonError::into_inner).clone();
     let dirs = runode_paths::Dirs::from_env();
@@ -414,10 +434,7 @@ impl RemoteHost {
         }
         let ssh = ssh();
         let script = runode_ssh::bootstrap::service_command(&deploy::install_dir());
-        let mut command = ssh.exec(&self.dest, &script, ssh.control.is_some());
-        if ssh.control.is_none() {
-            self.ask_through(&mut command);
-        }
+        let mut command = self.exec(&ssh, &script, true, false);
         command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
         crate::subprocess::hide_window(&mut command);
         let output = command.output().map_err(|err| fail("ssh", format!("cannot run ssh: {err}")))?;
@@ -433,10 +450,7 @@ impl RemoteHost {
         }
         let ssh = ssh();
         let script = runode_ssh::bootstrap::prune_command(&deploy::install_dir());
-        let mut command = ssh.exec(&self.dest, &script, ssh.control.is_some());
-        if ssh.control.is_none() {
-            self.ask_through(&mut command);
-        }
+        let mut command = self.exec(&ssh, &script, true, false);
         command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
         crate::subprocess::hide_window(&mut command);
         let output = command.output().map_err(|err| format!("cannot run ssh: {err}"))?;
@@ -480,7 +494,12 @@ impl RemoteHost {
                 continue;
             }
             let error = match failure {
-                Some(Failure::Stop { error, auth }) => {
+                Some(Failure::Stop { mut error, auth }) => {
+                    if auth && !can_ask(&ssh()) {
+                        error.push_str(
+                            " (this ssh cannot ask for passwords, which needs OpenSSH 8.4 or later: use a key or ssh-agent)",
+                        );
+                    }
                     tracing::warn!("connecting to {} needs the user: {error}", self.name);
                     self.set_status(Status::Stopped { error, auth });
                     self.wait_for_retry();
@@ -523,6 +542,7 @@ impl RemoteHost {
     fn connect_once(self: &Arc<Self>, interactive: bool) -> Result<Running, Failure> {
         self.set_status(Status::Connecting(Phase::Authenticating));
         let ssh = ssh();
+        let interactive = interactive && can_ask(&ssh);
         let log = self.log_file();
         if ssh.control.is_some() {
             self.open_master(&ssh, interactive, &log)?;
@@ -531,12 +551,7 @@ impl RemoteHost {
         let mut deployed = false;
         loop {
             self.set_status(Status::Connecting(if deployed { Phase::Starting } else { Phase::Probing }));
-            // 不经主连接时这条 ssh 自己认证：`interactive` 时经 askpass 问用户，否则不问。
-            let batch = ssh.control.is_some() || !interactive;
-            let mut command = ssh.exec(&self.dest, &runode_ssh::bootstrap::connect_command(&dir), batch);
-            if !batch {
-                self.ask_through(&mut command);
-            }
+            let mut command = self.exec(&ssh, &runode_ssh::bootstrap::connect_command(&dir), interactive, false);
             let mut child = spawn_piped(&mut command, &log)?;
             let stdout = child.stdout.take().ok_or_else(|| Failure::Retry("ssh gave no output".into()))?;
             let mut stdout = BufReader::with_capacity(256 << 10, stdout);
@@ -654,9 +669,23 @@ impl RemoteHost {
         if status.success() { Ok(()) } else { Err(classify(log, status.code())) }
     }
 
-    /// 让 `command` 起的 ssh 要问用户时经 askpass 问桌面。不问用户的调用在拼命令时就带上 `BatchMode`
-    /// （`Ssh::exec` 的 `batch`）：选项要写在目标之前，拼好以后再加的会被当成远端命令的一部分。
-    pub(crate) fn ask_through(&self, command: &mut Command) {
+    /// 在这台主机上跑 `script` 的 ssh，`compressed` 时传的数据压缩。经主连接时不用认证；不经主连接时自己
+    /// 认证，`interactive` 而且这个 ssh 能问用户（`can_ask`）时经 askpass 问，否则不问，要认证就失败。
+    pub(crate) fn exec(&self, ssh: &Ssh, script: &str, interactive: bool, compressed: bool) -> Command {
+        let batch = ssh.control.is_some() || !interactive || !can_ask(ssh);
+        let mut command = if compressed {
+            ssh.exec_compressed(&self.dest, script, batch)
+        } else {
+            ssh.exec(&self.dest, script, batch)
+        };
+        if !batch {
+            self.ask_through(&mut command);
+        }
+        command
+    }
+
+    /// 让 `command` 起的 ssh 要问用户时经 askpass 问桌面。
+    fn ask_through(&self, command: &mut Command) {
         if let Some((socket, token)) = askpass::register(&self.name)
             && let Ok(exe) = askpass::program()
         {
