@@ -119,10 +119,11 @@ impl Ssh {
     }
 }
 
-/// `ControlPath=…`：路径里的 `%` 除了 `%C` 都要写成 `%%`，免得被 OpenSSH 当成别的占位符。
+/// `ControlPath=…`：路径里的 `%` 除了 `%C` 都要写成 `%%`，免得被 OpenSSH 当成别的占位符；带空白时加上
+/// 引号，OpenSSH 按空白切开 `-o` 的值。
 fn control_path_option(path: &Path) -> String {
     let text = path.to_string_lossy().replace('%', "%%").replace("%%C", "%C");
-    format!("ControlPath={text}")
+    if text.contains(char::is_whitespace) { format!("ControlPath=\"{text}\"") } else { format!("ControlPath={text}") }
 }
 
 /// 读 `ssh -V` 的输出（它写在 stderr 上），比如 `OpenSSH_9.6p1, LibreSSL 3.3.6` 是 (9, 6)；Windows 自带的写成
@@ -147,5 +148,10 @@ mod tests {
     #[test]
     fn escapes_percent_signs_except_the_hash() {
         assert_eq!(control_path_option(Path::new("/a%b/ssh-%C")), "ControlPath=/a%%b/ssh-%C");
+    }
+
+    #[test]
+    fn quotes_paths_with_spaces() {
+        assert_eq!(control_path_option(Path::new("/Users/J Smith/%C")), "ControlPath=\"/Users/J Smith/%C\"");
     }
 }
