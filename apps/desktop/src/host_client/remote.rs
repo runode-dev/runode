@@ -75,11 +75,13 @@ impl HostId {
     }
 }
 
-/// 到 `host` 的那条连接；远端的头一回用时开始连。
+/// 到 `host` 的那条连接；远端的头一回用时开始连。认不出主机的写法时是一条从不连上的连接，请求都失败：
+/// 不能退回本机，不然远端工作区的布局、开的终端落到本机宿主上。
 pub fn link_of(host: &HostId) -> Link {
+    static NOWHERE: LazyLock<Link> = LazyLock::new(|| Link::with_timeouts(build(), Timeouts::REMOTE));
     match host {
         HostId::Local => super::link().clone(),
-        HostId::Ssh(name) => remote(name).map_or_else(|| super::link().clone(), |remote| remote.link.clone()),
+        HostId::Ssh(name) => remote(name).map_or_else(|| NOWHERE.clone(), |remote| remote.link.clone()),
     }
 }
 
