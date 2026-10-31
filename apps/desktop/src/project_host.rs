@@ -49,6 +49,17 @@ impl std::fmt::Debug for ProjectHost {
     }
 }
 
+/// 发给远端（Linux、macOS）的路径：Windows 上 `Path::join` 拼进去的 `\` 换成 `/`，那边只认 `/`。带盘符或
+/// `\\?\` 前缀的是 Windows 自己的路径，和别的系统上的一样原样交回。
+pub(crate) fn remote_path(path: &Path) -> PathBuf {
+    let windows_own = matches!(path.components().next(), Some(std::path::Component::Prefix(_)));
+    if cfg!(windows) && !windows_own {
+        PathBuf::from(path.to_string_lossy().replace('\\', "/"))
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// 忘掉 SSH 主机 `name` 上读写项目的那条连接，再用这台主机时从头起。
 pub(crate) fn forget(name: &str) {
     client::Client::forget(name);

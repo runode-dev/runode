@@ -244,13 +244,15 @@ impl TerminalView {
         cx: &mut App,
     ) -> Entity<Self> {
         let home = || if host.is_local() { runode_paths::Dirs::from_env().home } else { None };
-        let dir = cwd.map(Path::to_path_buf).or_else(home);
+        let on_host =
+            |path: &Path| if host.is_local() { path.to_path_buf() } else { crate::project_host::remote_path(path) };
+        let dir = cwd.map(on_host).or_else(home);
         let meta = SessionMeta { fallback_title: dir.as_deref().map(dir_label), cwd: dir, ..SessionMeta::default() };
         let screen = ScreenState::new_unopened(meta, PROVISIONAL_SIZE, Instant::now());
         // 还没有会话也就没有事件：发的一端直接丢掉，读事件的任务一开始就结束，开了会话再起。
         let (_, rx) = futures::channel::mpsc::unbounded();
-        let start_dir = cwd.map(Path::to_path_buf);
-        let start_fallback = fallback.map(Path::to_path_buf);
+        let start_dir = cwd.map(on_host);
+        let start_fallback = fallback.map(on_host);
         cx.new(|cx| {
             let mut view = Self::new(host, None, screen, false, rx, window, cx);
             view.start_dir = start_dir;
@@ -896,6 +898,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
         let link = self.host_link.clone();
+        let cwd = if self.host.is_local() { cwd } else { cwd.as_deref().map(crate::project_host::remote_path) };
         let id = link.spawn(SpawnOptions {
             size,
             cwd,

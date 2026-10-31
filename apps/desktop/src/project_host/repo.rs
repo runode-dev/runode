@@ -104,6 +104,47 @@ impl GitOp {
     }
 }
 
+impl GitOp {
+    /// 对操作里的每个路径调一次 `f`，`FileDiff` 里的也算。
+    pub(super) fn for_each_path(&mut self, f: &mut dyn FnMut(&mut PathBuf)) {
+        let file = |file: &mut FileDiff, f: &mut dyn FnMut(&mut PathBuf)| {
+            f(&mut file.path);
+            file.old_path.iter_mut().for_each(&mut *f);
+        };
+        match self {
+            Self::Stage { paths } | Self::Unstage { paths } | Self::Untrack { paths } => paths.iter_mut().for_each(f),
+            Self::IsTracked { path } | Self::NewBytes { path, .. } => f(path),
+            Self::RemoveWorktree { worktree, .. } => f(worktree),
+            Self::FileView { path, old_path, .. } | Self::OldBytes { path, old_path, .. } => {
+                f(path);
+                old_path.iter_mut().for_each(f);
+            }
+            Self::Discard { files } => files.iter_mut().for_each(|one| file(one, f)),
+            Self::ApplyHunk { file: one, .. } => file(one, f),
+            Self::Branches
+            | Self::Checkout { .. }
+            | Self::CreateBranch { .. }
+            | Self::History { .. }
+            | Self::CheckoutDetached { .. }
+            | Self::StageAll
+            | Self::UnstageAll
+            | Self::Commit { .. }
+            | Self::PendingDiff { .. }
+            | Self::RecentMessages { .. }
+            | Self::UndoLastCommit
+            | Self::Fetch
+            | Self::FetchUnattended
+            | Self::Pull
+            | Self::Push
+            | Self::Sync
+            | Self::Stash { .. }
+            | Self::StashApply { .. }
+            | Self::StashPop { .. }
+            | Self::StashDrop { .. } => {}
+        }
+    }
+}
+
 /// 读到的内容放进回话后面的字节，JSON 里只说读没读到（`true` 是读到了）：内容按 JSON 数组编又大又慢。
 fn bytes(read: Result<Option<Vec<u8>>, TooLarge>) -> serde_json::Result<(serde_json::Value, Vec<u8>)> {
     let (shape, blob): (Result<bool, TooLarge>, _) = match read {

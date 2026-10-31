@@ -29,6 +29,22 @@ pub(super) enum FileOp {
     Remove { path: PathBuf },
 }
 
+impl FileOp {
+    /// 对操作里的每个路径调一次 `f`。
+    pub(super) fn for_each_path(&mut self, f: &mut dyn FnMut(&mut PathBuf)) {
+        match self {
+            Self::Create { path, .. } | Self::Remove { path } => f(path),
+            Self::Rename { from: a, to: b }
+            | Self::MoveInto { src: a, dir: b }
+            | Self::CopyInto { src: a, dir: b }
+            | Self::AddToGitignore { root: a, rel: b, .. } => {
+                f(a);
+                f(b);
+            }
+        }
+    }
+}
+
 /// `OpError` 在线上的样子：io 的错误只带说明。
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum OpFailure {

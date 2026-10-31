@@ -344,6 +344,11 @@ impl WindowView {
         };
         let cwd = view.read(cx).cwd();
         let quoting = Quoting::of_session(view.read(cx).meta());
+        let paths = if view.read(cx).host().is_local() {
+            paths
+        } else {
+            paths.iter().map(|path| crate::project_host::remote_path(path)).collect()
+        };
         window.focus(&view.focus_handle(cx), cx);
         // 起不了线程时不比目录，照原样打进去。
         let fallback = paths.iter().map(|path| path_text(path, lines, None, quoting)).collect();

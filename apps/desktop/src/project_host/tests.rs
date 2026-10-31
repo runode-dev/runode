@@ -158,3 +158,23 @@ fn a_non_utf8_name_does_not_break_the_remote_scan() {
     assert!(!git.main.statuses.keys().any(|path| path.to_str().is_none()));
     fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn every_path_in_a_request_is_visited() {
+    use super::{repo::GitOp, wire::Call};
+
+    let op = GitOp::FileView { path: "a".into(), old_path: Some("b".into()), side: DiffSide::Worktree };
+    let mut call = Call::Git { root: "/r".into(), op };
+    let mut seen = Vec::new();
+    call.for_each_path(&mut |path| seen.push(path.clone()));
+    assert_eq!(seen, [Path::new("/r"), Path::new("a"), Path::new("b")]);
+}
+
+#[cfg(windows)]
+#[test]
+fn remote_paths_use_forward_slashes() {
+    let joined = Path::new("/home/me").join("src").join("a.rs");
+    assert_eq!(super::remote_path(&joined).to_str(), Some("/home/me/src/a.rs"));
+    let own = Path::new(r"\\?\C:\Users\me").join("a.rs");
+    assert_eq!(super::remote_path(&own), own);
+}

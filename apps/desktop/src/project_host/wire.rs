@@ -83,6 +83,31 @@ pub(super) enum Reply {
     Failed(String),
 }
 
+impl Call {
+    /// 对请求里的每个路径调一次 `f`。
+    pub(super) fn for_each_path(&mut self, f: &mut dyn FnMut(&mut PathBuf)) {
+        match self {
+            Self::Scan { dir, expanded, .. } => {
+                f(dir);
+                expanded.iter_mut().for_each(f);
+            }
+            Self::ListDirs { root, dirs } => {
+                f(root);
+                dirs.iter_mut().for_each(f);
+            }
+            Self::Watch { dirs, .. } | Self::Kinds { paths: dirs } => dirs.iter_mut().for_each(f),
+            Self::Git { root, op } => {
+                f(root);
+                op.for_each_path(f);
+            }
+            Self::Edit(op) => op.for_each_path(f),
+            Self::Read { path, .. } | Self::Stamp { path } | Self::Write { path } => f(path),
+            Self::ListFiles { root } | Self::Grep { root, .. } => f(root),
+            Self::Ports | Self::Cancel { .. } => {}
+        }
+    }
+}
+
 impl Reply {
     /// 去掉 JSON 写不出的路径（不是 UTF-8 的），免得一个这样的文件名让整份回话都编不了：被监听到改动的
     /// 改成整个重扫，仓库自己的目录写不出时整个仓库不要。文件树里各项的名字按字节传，不受影响。

@@ -86,7 +86,8 @@ impl FileTree {
     }
 
     pub(super) fn copy_path(&mut self, _: &CopyPath, _: &mut Window, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(self.selected_or_root(cx).display().to_string()));
+        let path = self.on_host(&self.selected_or_root(cx));
+        cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
     }
 
     /// 相对文件树根目录的路径；根目录本身是 `.`。
@@ -94,6 +95,11 @@ impl FileTree {
         let (root, path) = (self.files_root(), self.selected_or_root(cx));
         let rel = path.strip_prefix(&root).unwrap_or(&path);
         let text = if rel.as_os_str().is_empty() { Path::new(".") } else { rel };
-        cx.write_to_clipboard(ClipboardItem::new_string(text.display().to_string()));
+        cx.write_to_clipboard(ClipboardItem::new_string(self.on_host(text).display().to_string()));
+    }
+
+    /// `path` 在项目所在的机器上的写法。
+    fn on_host(&self, path: &Path) -> PathBuf {
+        if self.remote() { crate::project_host::remote_path(path) } else { path.to_path_buf() }
     }
 }

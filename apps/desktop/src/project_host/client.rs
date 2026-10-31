@@ -91,6 +91,8 @@ impl Client {
         timeout: Duration,
         cancel: Option<&AtomicBool>,
     ) -> Result<(Reply, Vec<u8>), String> {
+        let mut call = call;
+        call.for_each_path(&mut |path| *path = super::remote_path(path));
         let conn = self.conn()?;
         let id = conn.next.fetch_add(1, Ordering::Relaxed);
         let (sender, answer) = mpsc::channel();
