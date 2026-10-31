@@ -226,10 +226,11 @@ impl Dirs {
     }
 
     /// 连远端主机时 OpenSSH 的 ControlMaster socket，在 `runtime_dir` 下的 `ssh` 里，文件名留给 OpenSSH 按
-    /// 连接算（`%C`，展开后 40 个字符）。展开后放不进 `sun_path` 时为 `None`，由调用方不复用连接。
+    /// 连接算（`%C`，展开后 40 个字符）。OpenSSH 先在这个路径加 `.` 和 16 个随机字符上建 socket 再改名，
+    /// 那个路径放不进 `sun_path` 时为 `None`，由调用方不复用连接。
     pub fn ssh_control_path(&self) -> Option<PathBuf> {
         let dir = self.runtime_dir()?.join("ssh");
-        fits_sun_path(&dir.join("0".repeat(40))).then(|| dir.join("%C"))
+        fits_sun_path(&dir.join(format!("{}.{}", "0".repeat(40), "0".repeat(16)))).then(|| dir.join("%C"))
     }
 
     /// 建好 `ssh_control_path` 所在的目录，只有自己能进：能连上 ControlMaster 的就能借这条连接在远端跑命令。
