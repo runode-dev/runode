@@ -203,7 +203,12 @@ fn start_service(dirs: &runode_paths::Dirs, exe: &Path) -> bool {
         return false;
     }
     service::offer_agent(dirs);
-    match runode_autostart::install(runode_autostart::Kind::Host, dirs, &stable_exe(dirs, exe)) {
+    match runode_autostart::install(
+        runode_autostart::Kind::Host,
+        dirs,
+        &stable_exe(dirs, exe),
+        runode_autostart::Start::Now,
+    ) {
         Ok(_) => true,
         Err(err) => {
             tracing::warn!("cannot start the host service, starting the host directly: {err}");

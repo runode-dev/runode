@@ -216,17 +216,26 @@ pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
     has_file
 }
 
+/// 装好登录自启后宿主什么时候起。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+    /// 马上起，不用等下次登录。
+    Now,
+    /// 这次不起：还有别的宿主占着，服务起的宿主抢不到锁、马上退出，Linux 上还会把服务记成失败。
+    Later,
+}
+
 /// 装上 `kind` 的登录自启，返回写的服务文件；app 登记成登录项时、Windows 上没有服务文件，返回 `None`。`exe` 是
 /// runode 可执行文件；`Kind::App` 时它得在 `Runode.app` 里，登记的就是这个 app。可以重复装，每次整个
 /// 换掉服务文件。
 ///
-/// 宿主马上就起（不用等下次登录），而且崩了会被拉起来；app 下次登录才开，免得在设置里
-/// 点一下开关就把窗口翻到前面。宿主已经在服务管理器里跑着时不重启它：它托管着会话，一重启会话就丢了，
-/// 新的服务文件等它下次起来时才用上。
-pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf>> {
+/// 宿主按 `start` 决定马上起还是等下次登录，经服务管理器起的崩了会被拉起来；app 不管 `start`，下次登录
+/// 才开，免得在设置里点一下开关就把窗口翻到前面。宿主已经在服务管理器里跑着时不重启它：它托管着会话，
+/// 一重启会话就丢了，新的服务文件等它下次起来时才用上。
+pub fn install(kind: Kind, dirs: &Dirs, exe: &Path, start: Start) -> io::Result<Option<PathBuf>> {
     #[cfg(windows)]
     if kind == Kind::Host {
-        run_key::install(exe)?;
+        run_key::install(exe, start)?;
         return Ok(None);
     }
     let path = service_file(kind, dirs).ok_or_else(|| unsupported(kind))?;
@@ -262,6 +271,7 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
     // 先写临时文件再换上：写到一半失败时原来的服务文件还在，回滚有东西可换。
     runode_paths::replace_file(&path, content.as_bytes())?;
     match (kind, cfg!(target_os = "macos")) {
+        (Kind::Host, true) if start == Start::Later => {}
         (Kind::Host, true) => {
             // 已经加载过时 bootstrap 会报错；也不先 bootout，那会把托管着会话的宿主停掉。不带 `-k` 的
             // kickstart 只在它没在跑时拉起来；它已经在跑时可能报错，不碍事。
@@ -295,7 +305,10 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
                     .and_then(|output| Enablement::parse(&String::from_utf8_lossy(&output.stdout)));
                 // 不用 `enable --now`、`restart`：`start` 对跑着的服务什么也不做，不会打断它托管的会话。
                 systemctl(&["enable", SYSTEMD_UNIT])?;
-                systemctl(&["start", SYSTEMD_UNIT])
+                match start {
+                    Start::Now => systemctl(&["start", SYSTEMD_UNIT]),
+                    Start::Later => Ok(()),
+                }
             };
             enable().inspect_err(|_| {
                 match &previous {
@@ -489,7 +502,7 @@ pub fn host_service_pid() -> Option<u32> {
 /// 文件（`install`）：旧的服务文件可能还没有 `ExecReload`，或者指着别处的可执行文件。交接没成时报错，原因在
 /// 服务的日志里。
 pub fn reload_host_service(dirs: &Dirs, exe: &Path) -> io::Result<()> {
-    install(Kind::Host, dirs, exe)?;
+    install(Kind::Host, dirs, exe, Start::Now)?;
     systemctl(&["reload", SYSTEMD_UNIT])
 }
 

@@ -9,7 +9,7 @@ use std::{
     process::Command,
 };
 
-use runode_autostart::Kind;
+use runode_autostart::{Kind, Start};
 use runode_ssh::bridge::{Failure, Service};
 
 use super::{
@@ -69,7 +69,8 @@ fn install(dirs: &runode_paths::Dirs) -> Result<Service, Failure> {
         _ => false,
     };
     offer_agent(dirs);
-    runode_autostart::install(Kind::Host, dirs, &stable_exe(dirs, &exe))
+    let start = if moved { Start::Now } else { Start::Later };
+    runode_autostart::install(Kind::Host, dirs, &stable_exe(dirs, &exe), start)
         .map_err(|err| fail("install", err.to_string()))?;
     Ok(Service { moved })
 }

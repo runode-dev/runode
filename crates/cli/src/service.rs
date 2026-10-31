@@ -4,7 +4,7 @@ use std::io::Write;
 
 use anyhow::{Context as _, bail};
 use runode_autostart::{
-    Kind, install as write_service, is_installed, service_file, starts_at_boot, uninstall as remove_service,
+    Kind, Start, install as write_service, is_installed, service_file, starts_at_boot, uninstall as remove_service,
 };
 
 use crate::Env;
@@ -15,7 +15,7 @@ pub(crate) fn install(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::Res
     }
     // 服务文件里写的是可执行文件的真实位置：`rn`、`runode` 这些链接以后可能指到别处。
     let exe = std::env::current_exe().and_then(std::fs::canonicalize).context("cannot find the runode executable")?;
-    match write_service(kind, &env.dirs, &exe)? {
+    match write_service(kind, &env.dirs, &exe, Start::Now)? {
         Some(path) => writeln!(out, "Installed {}: runode {} starts at login.", path.display(), kind.name())?,
         None if cfg!(windows) => writeln!(out, "Registered the host under HKCU\\{}: it starts at login.", run_key())?,
         None => writeln!(out, "Added Runode to the login items: the app opens at login.")?,

@@ -75,7 +75,7 @@ impl SettingsView {
             } else {
                 std::env::current_exe()
                     .and_then(std::fs::canonicalize)
-                    .and_then(|exe| runode_autostart::install(kind, &dirs, &exe))
+                    .and_then(|exe| runode_autostart::install(kind, &dirs, &exe, runode_autostart::Start::Now))
                     .map(drop)
             };
             (result, runode_autostart::is_installed(kind, &dirs))

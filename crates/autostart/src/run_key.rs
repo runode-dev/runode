@@ -13,6 +13,8 @@ use windows_sys::Win32::{
     System::Registry::{HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW},
 };
 
+use crate::Start;
+
 /// 当前用户登录时拉起的程序都登记在这个键下（`HKEY_CURRENT_USER` 之下）。
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 /// 宿主在 `RUN_KEY` 下的值名；安装包卸载时按这个名字删，改名要和安装脚本一起改。
@@ -80,11 +82,14 @@ pub(crate) fn is_installed() -> bool {
     get().is_some()
 }
 
-/// 登记宿主，再在后台拉起一个，不用等下次登录；已经有宿主在跑时新拉起的抢不到锁、自己退出。拉不起来时
-/// 登记恢复成原样，免得报了失败却留着一个登录时会跑的登记。
-pub(crate) fn install(exe: &Path) -> io::Result<()> {
+/// 登记宿主，`Start::Now` 时再在后台拉起一个，不用等下次登录；已经有宿主在跑时新拉起的抢不到锁、自己退出。
+/// 拉不起来时登记恢复成原样，免得报了失败却留着一个登录时会跑的登记。
+pub(crate) fn install(exe: &Path, start: Start) -> io::Result<()> {
     let previous = get();
     set(&command(exe))?;
+    if start == Start::Later {
+        return Ok(());
+    }
     let spawned = Command::new(exe.with_file_name("runode.exe"))
         .args(["--host", "--stay"])
         .stdin(Stdio::null())
