@@ -476,6 +476,7 @@ impl WindowView {
                 self.resize_for_program(view, (wi, ti), (*rows, *columns), window, cx);
             }
             TerminalEvent::PasteImage(image) => self.paste_image(view.clone(), image, window, cx),
+            TerminalEvent::PasteScreen(text) => self.paste_screen(view.clone(), text, window, cx),
             TerminalEvent::OpenRemotePath { path, dir } => {
                 let host = view.read(cx).host().clone();
                 self.open_remote_path(wi, &host, path, *dir, window, cx);

@@ -166,6 +166,10 @@ impl TerminalView {
         let Some(text) = self.screen.shown().and_then(Session::screen_text) else {
             return;
         };
+        if action.0 == ScreenFile::PastePath && !self.host.is_local() {
+            cx.emit(super::TerminalEvent::PasteScreen(text));
+            return;
+        }
         // 屏幕内容在这里取好，清旧文件和写文件放到后台：缓存目录在挂住的网络卷上时会一直卡着。
         let job = cx.background_spawn(async move { write_screen_file(&text) });
         let what = action.0;

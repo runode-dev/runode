@@ -254,6 +254,20 @@ impl WindowView {
         self.upload_to_view(view, Upload::Bytes { name, bytes: image.bytes.clone() }, window, cx);
     }
 
+    /// 远端终端里粘贴的屏幕内容存成文件传到那台主机上，再把它在远端的路径打进这个终端。
+    pub(super) fn paste_screen(
+        &mut self,
+        view: Entity<TerminalView>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let millis =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_millis());
+        let name = format!("screen-{millis}.txt");
+        self.upload_to_view(view, Upload::Bytes { name, bytes: text.as_bytes().to_vec() }, window, cx);
+    }
+
     /// 第 `wi` 个工作区里在 `host` 上的终端点开了那台机器上的 `path`：工作区就在那台机器上时，文件在预览栏里
     /// 开，目录在文件树里找到；工作区在别的机器上时那边的面板读不到它，不管。
     pub(super) fn open_remote_path(
