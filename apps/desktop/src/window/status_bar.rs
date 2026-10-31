@@ -4,7 +4,8 @@
 //! - 内存和终端数：runode 自己（app、单独跑的宿主和各个终端里的进程）一共占多少内存，所有窗口里有
 //!   几个终端；浮层里按 workspace 列出这个窗口里各终端的 CPU 和内存；
 //! - 端口：终端里跑的程序在监听几个 TCP 端口；浮层里列出来，点了在浏览器里打开，别的程序监听的收在
-//!   「外部端口」里。
+//!   「外部端口」里。当前工作区在 SSH 主机上时另列那台机器上在监听的端口，点了经主连接转到本机再打开，
+//!   转着的能停掉（`host_client::remote::forward`）。
 //!
 //! 左边是 GitHub Actions 页里固定到状态栏上的工作流，见 `render_pinned_workflows`。
 //!
@@ -26,8 +27,8 @@ use std::{
 
 use gpui::{
     AccessibleAction, Action, Anchor, AnyElement, App, Context, Div, Focusable, FontWeight, Global, Hsla, MouseButton,
-    MouseDownEvent, Pixels, Point, Role, SharedString, Stateful, Window, WindowHandle, anchored, deferred, div, point,
-    prelude::*, px, svg,
+    MouseDownEvent, Pixels, Point, PromptLevel, Role, SharedString, Stateful, Window, WindowHandle, anchored, deferred,
+    div, point, prelude::*, px, svg,
 };
 use runode_config::{ConfigFile, StatusItem};
 use runode_types::{
@@ -36,11 +37,15 @@ use runode_types::{
 };
 
 use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, remote};
+use crate::host_client::remote::{self as hosts, HostId};
+use crate::project_host::ProjectHost;
 use crate::ui::a11y::A11yPress;
+use crate::ui::a11y::Press as _;
+use crate::ui::button::{Button, ButtonSize};
 use crate::ui::menu::MenuHost as _;
 use crate::ui::panel::sync_icon;
 use crate::{
-    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SHELL_ICON},
+    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SHELL_ICON},
     config::AppConfig,
     ui::{
         font_size::{FontSize, scaled},
@@ -48,7 +53,8 @@ use crate::{
         tooltip::tooltip,
     },
 };
-use probe::{Caffeinate, Helper, Port, Procs, Usage};
+use probe::{Caffeinate, Helper, Procs, Usage};
+pub(crate) use probe::{Port, listening_ports};
 
 /// 隔多久重新问一次系统。
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -128,6 +134,8 @@ impl StatusPopover {
 struct Status {
     procs: Procs,
     ports: Vec<Port>,
+    /// 各窗口当前工作区所在的 SSH 主机上在监听的端口，按主机名记；问不到的主机不在里面。
+    remote_ports: HashMap<String, Vec<Port>>,
     /// 所有窗口里各个终端的 shell 的进程号。
     shells: HashSet<u32>,
     /// 宿主在 `Welcome` 里报的进程号，见 `host`。
@@ -216,7 +224,7 @@ pub fn watch(cx: &mut App) {
         loop {
             // 状态栏没显示、上面藏起来的几块不问：内存和端口都要进程树（端口靠它认是哪个终端的），端口还要
             // `lsof`；只剩防止休眠时什么都不问，agent 在不在干活从各窗口里看。
-            let (active, procs, ports, shells) = cx.update(|cx| {
+            let (active, procs, ports, shells, hosts) = cx.update(|cx| {
                 let config = &cx.global::<AppConfig>().0;
                 let windows = remote::windows(cx);
                 let ports = config.status_bar && !config.status_bar_hidden.contains(&StatusItem::Ports);
@@ -228,7 +236,8 @@ pub fn watch(cx: &mut App) {
                 });
                 let ports =
                     ports && (ports_open || ports_probed.is_none_or(|probed| probed.elapsed() >= PORTS_INTERVAL));
-                (cx.active_window().is_some(), procs, ports, terminals(&windows, cx).0)
+                let hosts = if ports { remote_hosts(&windows, cx) } else { Vec::new() };
+                (cx.active_window().is_some(), procs, ports, terminals(&windows, cx).0, hosts)
             });
             let probed = if active && procs {
                 if ports {
@@ -239,9 +248,13 @@ pub fn watch(cx: &mut App) {
                         .spawn(async move {
                             // 等宿主连好要阻塞，放在后台问。
                             let host = crate::host_client::link().host_pid();
-                            let ports = ports.then(probe::listening_ports);
                             let roots = shells.into_iter().chain([std::process::id()]).chain(host).collect();
-                            (probe::processes(&roots), ports, host)
+                            Probed {
+                                procs: probe::processes(&roots),
+                                ports: ports.then(probe::listening_ports),
+                                host,
+                                remote: ports.then(|| probe_remote(hosts)),
+                            }
                         })
                         .await,
                 )
@@ -271,21 +284,62 @@ fn terminals(windows: &[WindowHandle<WindowView>], cx: &App) -> (HashSet<u32>, u
     (shells, terminals, working)
 }
 
-/// 收下问到的进程和端口（这次没问端口时为 `None`，沿用上次的），从各窗口里数终端、看 agent，再决定挡不挡
-/// 休眠；状态栏上的东西变了时重画各窗口的状态栏。
-fn tick(probed: Option<(Procs, Option<Vec<Port>>, Option<u32>)>, cx: &mut App) {
+/// 各窗口当前工作区所在、连着的 SSH 主机。
+fn remote_hosts(windows: &[WindowHandle<WindowView>], cx: &App) -> Vec<String> {
+    let mut names = Vec::new();
+    for handle in windows {
+        let Ok(window) = handle.read(cx) else { continue };
+        if let HostId::Ssh(name) = &window.workspace().host
+            && !names.contains(name)
+            && hosts::find(name).is_some_and(|host| matches!(host.status(), hosts::Status::Connected(_)))
+        {
+            names.push(name.clone());
+        }
+    }
+    names
+}
+
+/// 问 `names` 这几台主机上在监听的端口；问不到的不算进来。会阻塞。
+fn probe_remote(names: Vec<String>) -> HashMap<String, Vec<Port>> {
+    names
+        .into_iter()
+        .filter_map(|name| match ProjectHost::of(&HostId::Ssh(name.clone())).listening_ports() {
+            Ok(ports) => Some((name, ports)),
+            Err(err) => {
+                tracing::debug!("cannot list the ports on {name}: {err}");
+                None
+            }
+        })
+        .collect()
+}
+
+/// 后台问到的；这次没问端口时 `ports` 和 `remote` 为 `None`，沿用上次的。
+struct Probed {
+    procs: Procs,
+    ports: Option<Vec<Port>>,
+    host: Option<u32>,
+    remote: Option<HashMap<String, Vec<Port>>>,
+}
+
+/// 收下问到的进程和端口，从各窗口里数终端、看 agent，再决定挡不挡休眠；状态栏上的东西变了时重画各窗口的
+/// 状态栏。
+fn tick(probed: Option<Probed>, cx: &mut App) {
     let windows = remote::windows(cx);
     let (shells, terminals, working) = terminals(&windows, cx);
     let status = cx.default_global::<Status>();
     let before = (status.terminals, status.caffeinate.is_some());
     let mut changed = shells != status.shells;
-    if let Some((procs, ports, host)) = probed {
-        changed |= procs != status.procs || host != status.host;
-        status.procs = procs;
-        status.host = host;
-        if let Some(ports) = ports {
+    if let Some(probed) = probed {
+        changed |= probed.procs != status.procs || probed.host != status.host;
+        status.procs = probed.procs;
+        status.host = probed.host;
+        if let Some(ports) = probed.ports {
             changed |= ports != status.ports;
             status.ports = ports;
+        }
+        if let Some(remote) = probed.remote {
+            changed |= remote != status.remote_ports;
+            status.remote_ports = remote;
         }
     }
     status.shells = shells;
@@ -294,15 +348,63 @@ fn tick(probed: Option<(Procs, Option<Vec<Port>>, Option<u32>)>, cx: &mut App) {
     status.apply_sleep();
     changed |= before != (status.terminals, status.caffeinate.is_some());
     if changed {
-        // 只叫状态栏那一块重画（浮层也画在它里面），窗口里别的缓存的几块照搬上一帧。
-        for handle in windows {
-            let _ = handle.update(cx, |view, _, cx| {
-                if let Some(slots) = &view.slots {
-                    slots.status_bar.update(cx, |_, cx| cx.notify());
-                }
-            });
-        }
+        redraw_status_bars(cx);
     }
+}
+
+/// 只叫各窗口的状态栏那一块重画（浮层也画在它里面），窗口里别的缓存的几块照搬上一帧。
+fn redraw_status_bars(cx: &mut App) {
+    for handle in remote::windows(cx) {
+        let _ = handle.update(cx, |view, _, cx| {
+            if let Some(slots) = &view.slots {
+                slots.status_bar.update(cx, |_, cx| cx.notify());
+            }
+        });
+    }
+}
+
+/// 把主机 `name` 上的 `port` 转到本机，在浏览器里打开；转不了时在最前面的窗口上说。
+fn open_remote_port(name: String, port: u16, cx: &mut App) {
+    let Some(host) = hosts::find(&name) else { return };
+    let job = cx.background_spawn(async move { hosts::forward::forward(&host, port) });
+    cx.spawn(async move |cx| {
+        let forwarded = job.await;
+        cx.update(|cx| {
+            match forwarded {
+                Ok(local) => cx.open_url(&format!("http://localhost:{local}")),
+                Err(err) => {
+                    tracing::warn!("cannot forward port {port} from {name}: {err:#}");
+                    tell_forward_failed(&err.to_string(), cx);
+                }
+            }
+            redraw_status_bars(cx);
+        });
+    })
+    .detach();
+}
+
+/// 停掉主机 `name` 上 `port` 到本机的转发。
+fn stop_remote_port(name: String, port: u16, cx: &mut App) {
+    let Some(host) = hosts::find(&name) else { return };
+    let job = cx.background_spawn(async move { hosts::forward::stop(&host, port) });
+    cx.spawn(async move |cx| {
+        let stopped = job.await;
+        cx.update(|cx| {
+            if let Err(err) = stopped {
+                tracing::warn!("cannot stop forwarding port {port} from {name}: {err:#}");
+                tell_forward_failed(&err.to_string(), cx);
+            }
+            redraw_status_bars(cx);
+        });
+    })
+    .detach();
+}
+
+fn tell_forward_failed(detail: &str, cx: &mut App) {
+    let Some(front) = remote::front_window(cx) else { return };
+    let (title, ok) = (rust_i18n::t!("status.forward_failed"), rust_i18n::t!("ssh.ok"));
+    let _ =
+        front.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(detail), &[ok.as_ref()], cx));
 }
 
 fn set_sleep(mode: SleepMode, cx: &mut App) {
@@ -334,13 +436,15 @@ impl WindowView {
 
     pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let fg_h = cx.theme().foreground;
+        let host = self.workspace().host.label();
         let (sleep, effective, total, terminals, ours) = match cx.try_global::<Status>() {
             Some(status) => (
                 status.sleep,
                 status.caffeinate.is_some(),
                 status.total(),
                 status.terminals,
-                status.ports.iter().filter(|port| status.port_owner(port).is_some()).count(),
+                status.ports.iter().filter(|port| status.port_owner(port).is_some()).count()
+                    + host.and_then(|name| status.remote_ports.get(name)).map_or(0, Vec::len),
             ),
             None => (SleepMode::Off, false, Usage::default(), 0, 0),
         };
@@ -723,8 +827,96 @@ impl WindowView {
             .into_any_element()
     }
 
+    /// 端口浮层里当前工作区所在的 SSH 主机 `name` 那一节：标题和那台机器上在监听的端口，点了转到本机再打开，
+    /// 转着的写出本机的端口、能停掉。
+    fn render_remote_ports(&self, name: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let fg_h = cx.theme().foreground;
+        let hover_bg = cx.theme().mix(0.10);
+        let ports = cx.try_global::<Status>().and_then(|status| status.remote_ports.get(name).cloned());
+        let forwarded = hosts::forward::forwarded(name);
+        let title = rust_i18n::t!("status.remote_ports", host = name).into_owned();
+        let mut rows = vec![
+            div()
+                .id("remote-ports")
+                .role(Role::Heading)
+                .aria_level(3)
+                .aria_label(title.clone())
+                .h(scaled(26.))
+                .mx(px(6.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .text_color(fg_h.opacity(0.55))
+                .child(title)
+                .into_any_element(),
+        ];
+        let ports = ports.unwrap_or_default();
+        if ports.is_empty() {
+            rows.push(empty_note(rust_i18n::t!("status.no_remote_ports").into_owned(), fg_h).into_any_element());
+        }
+        for port in ports {
+            let local = forwarded.iter().find(|(remote, _)| *remote == port.port).map(|&(_, local)| local);
+            let to = local.map(|local| rust_i18n::t!("status.forwarded", port = local).into_owned());
+            let label = [Some(format!(":{}", port.port)), Some(port.command.clone()), to.clone()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let (open_name, a11y_name) = (name.to_owned(), name.to_owned());
+            let stop = local.map(|_| {
+                let (name, stop_label) = (name.to_owned(), rust_i18n::t!("status.stop_forward").into_owned());
+                Button::new(("stop-forward", usize::from(port.port)), format!("{stop_label} :{}", port.port))
+                    .icon(CLOSE_ICON)
+                    .with_size(ButtonSize::IconXs)
+                    .tooltip(tooltip(stop_label, None))
+                    .on_press(cx, move |_, _, cx| stop_remote_port(name.clone(), port.port, cx))
+            });
+            rows.push(
+                div()
+                    .id(("remote-port", usize::from(port.port)))
+                    .role(Role::Link)
+                    .aria_label(label)
+                    .aria_description(rust_i18n::t!("status.open_port"))
+                    .h(scaled(26.))
+                    .mx(px(6.))
+                    .px(px(8.))
+                    .rounded(px(6.))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .cursor_pointer()
+                    .hover(|row| row.bg(hover_bg))
+                    .tooltip(tooltip(rust_i18n::t!("status.open_port"), None))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(scaled(52.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(format!(":{}", port.port)),
+                    )
+                    .child(div().flex_1().min_w_0().truncate().text_color(fg_h.opacity(0.7)).child(port.command))
+                    .children(to.map(|to| div().flex_none().text_color(fg_h.opacity(0.5)).child(to)))
+                    .children(stop)
+                    .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        cx.stop_propagation();
+                        open_remote_port(open_name.clone(), port.port, cx);
+                    })
+                    .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                        open_remote_port(a11y_name.clone(), port.port, cx)
+                    })
+                    .into_any_element(),
+            );
+        }
+        rows.push(div().h(px(1.)).my(px(4.)).bg(cx.theme().border).into_any_element());
+        rows
+    }
+
     fn render_ports_popover(&self, external_open: bool, cx: &mut Context<Self>) -> AnyElement {
         let fg_h = cx.theme().foreground;
+        let remote = match &self.workspace().host {
+            HostId::Ssh(name) => self.render_remote_ports(name, cx),
+            HostId::Local => Vec::new(),
+        };
         let Some(status) = cx.try_global::<Status>() else { return div().into_any_element() };
         // 这个窗口里的终端在哪个 workspace；别的窗口里的终端监听的端口不写 workspace。
         let names: HashMap<u32, SharedString> = self
@@ -845,6 +1037,7 @@ impl WindowView {
                     .max_h(px(420.))
                     .py(px(4.))
                     .overflow_y_scroll()
+                    .children(remote)
                     .children(body)
                     .child(div().h(px(1.)).my(px(4.)).bg(cx.theme().border))
                     .child(external_header)

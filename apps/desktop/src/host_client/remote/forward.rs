@@ -1,7 +1,5 @@
-//! 远端终端里点开 `localhost:<端口>` 这样的网址时，把远端的端口经主连接转到本机，再在本机打开：agent 在远端
-//! 起的开发服务器在本机的浏览器里就能看。转发挂在主连接上，主连接退出时跟着没了。
-//!
-//! shortcut: 只在点链接时转发，没有列出远端在监听的端口、也没有界面管理已有的转发，要时再加。
+//! 把远端的端口经主连接转到本机：远端终端里点开 `localhost:<端口>` 这样的网址时、状态栏的端口浮层里点了远端
+//! 的端口时转，agent 在远端起的开发服务器在本机的浏览器里就能看。转发挂在主连接上，主连接退出时跟着没了。
 
 use std::{
     collections::HashMap,
@@ -31,8 +29,39 @@ pub fn local_url(host: &RemoteHost, url: &str) -> Result<String> {
     Ok(target.rewrite(local))
 }
 
-/// 把远端的 `port` 转到本机，回本机的端口；已经转着、本机那头还在听时直接用它。
-fn forward(host: &RemoteHost, port: u16) -> Result<u16> {
+/// 主机 `name` 上转着的端口：远端端口到本机端口，按远端端口排好。
+pub fn forwarded(name: &str) -> Vec<(u16, u16)> {
+    let forwards = FORWARDS.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut ports: Vec<_> =
+        forwards.iter().filter(|((host, _), _)| host == name).map(|((_, remote), &local)| (*remote, local)).collect();
+    ports.sort_unstable();
+    ports
+}
+
+/// 停掉远端 `port` 到本机的转发；没转着时什么都不做。会阻塞，在后台线程上调。
+pub fn stop(host: &RemoteHost, port: u16) -> Result<()> {
+    let Some(local) = FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).remove(&(host.name.clone(), port)) else {
+        return Ok(());
+    };
+    let mut command = ssh().forward(&host.dest, local, port, true);
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    crate::subprocess::hide_window(&mut command);
+    let output = command.output()?;
+    // 主连接已经退出时转发本来就没了。
+    if !output.status.success() && listening(local) {
+        bail!("{}", last_line(&output.stderr, "ssh refused to stop forwarding"));
+    }
+    tracing::info!("stopped forwarding localhost:{local} to {}:{port}", host.name);
+    Ok(())
+}
+
+fn last_line(stderr: &[u8], otherwise: &str) -> String {
+    let error = String::from_utf8_lossy(stderr);
+    error.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or(otherwise).to_owned()
+}
+
+/// 把远端的 `port` 转到本机，回本机的端口；已经转着、本机那头还在听时直接用它。会阻塞，在后台线程上调。
+pub fn forward(host: &RemoteHost, port: u16) -> Result<u16> {
     let key = (host.name.clone(), port);
     let known = FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).get(&key).copied();
     if let Some(local) = known.filter(|&local| listening(local)) {
@@ -50,8 +79,7 @@ fn forward(host: &RemoteHost, port: u16) -> Result<u16> {
     crate::subprocess::hide_window(&mut command);
     let output = command.output()?;
     if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr);
-        bail!("{}", error.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("ssh refused to forward"));
+        bail!("{}", last_line(&output.stderr, "ssh refused to forward"));
     }
     tracing::info!("forwarding localhost:{local} to {}:{port}", host.name);
     FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).insert(key, local);

@@ -125,6 +125,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
             }
         }
         Call::Stamp { path } => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
+        Call::Ports => (Reply::Ports(crate::window::status_bar::listening_ports()), Vec::new()),
         Call::Kinds { paths } => (Reply::Kinds(paths.iter().map(|path| kind(path)).collect()), Vec::new()),
         Call::Write { path } => match runode_paths::replace_file(&path, &content) {
             Ok(()) => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),

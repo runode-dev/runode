@@ -28,8 +28,8 @@ use crate::host_client::remote::HostId;
 const SCAN_TIMEOUT: Duration = Duration::from_secs(120);
 /// 读远端的文件最多等这么久。
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
-/// 问远端的路径在不在最多等这么久：终端里按着 ⌘ 悬停时在等它。
-const KINDS_TIMEOUT: Duration = Duration::from_secs(5);
+/// 问远端的路径在不在、在监听哪些端口最多等这么久：终端里按着 ⌘ 悬停、状态栏轮询时在等它。
+const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Default)]
 pub(crate) enum ProjectHost {
@@ -121,9 +121,21 @@ impl ProjectHost {
             Self::Remote(client) => client,
         };
         let count = paths.len();
-        match client.call(Call::Kinds { paths }, KINDS_TIMEOUT) {
+        match client.call(Call::Kinds { paths }, QUERY_TIMEOUT) {
             Ok((Reply::Kinds(kinds), _)) if kinds.len() == count => kinds,
             _ => vec![None; count],
+        }
+    }
+
+    /// 这台机器上在监听的 TCP 端口。会阻塞。
+    pub(crate) fn listening_ports(&self) -> Result<Vec<crate::window::status_bar::Port>, String> {
+        let client = match self {
+            Self::Local => return Ok(crate::window::status_bar::listening_ports()),
+            Self::Remote(client) => client,
+        };
+        match client.call(Call::Ports, QUERY_TIMEOUT)? {
+            (Reply::Ports(ports), _) => Ok(ports),
+            (other, _) => Err(unexpected(&other)),
         }
     }
 

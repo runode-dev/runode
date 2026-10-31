@@ -847,6 +847,11 @@ status:
   no_ports: No program in a terminal is listening on a port
   external_ports: External Ports
   open_port: Open in Browser
+  remote_ports: "Ports on %{host}"
+  no_remote_ports: No program on this host is listening on a port
+  forwarded: "to localhost:%{port}"
+  stop_forward: Stop Forwarding
+  forward_failed: Could not forward the port
 mobile:
   entry: "Mobile"
   eyebrow: "RUNODE MOBILE"

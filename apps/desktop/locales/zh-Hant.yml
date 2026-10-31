@@ -847,6 +847,11 @@ status:
   no_ports: 終端機裡沒有程式在監聽連接埠
   external_ports: 外部連接埠
   open_port: 在瀏覽器中開啟
+  remote_ports: "%{host} 上的連接埠"
+  no_remote_ports: 這台主機上沒有程式在監聽連接埠
+  forwarded: "轉到本機 %{port}"
+  stop_forward: 停止轉發
+  forward_failed: 沒能轉發連接埠
 mobile:
   entry: "手機端"
   eyebrow: "RUNODE 手機端"

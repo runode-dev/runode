@@ -39,7 +39,7 @@ mod settings_page;
 mod sidebar;
 mod slot;
 mod ssh;
-mod status_bar;
+pub(crate) mod status_bar;
 mod tasks;
 mod titlebar;
 

@@ -6,7 +6,9 @@
 mod windows;
 
 #[cfg(windows)]
-pub(super) use windows::{Caffeinate, listening_ports, processes};
+pub(crate) use windows::listening_ports;
+#[cfg(windows)]
+pub(super) use windows::{Caffeinate, processes};
 
 use std::collections::{HashMap, HashSet};
 #[cfg(not(windows))]
@@ -149,8 +151,8 @@ impl PartialEq for Procs {
 }
 
 /// 一个在监听的 TCP 端口，和监听它的进程。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Port {
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Port {
     pub port: u16,
     pub pid: u32,
     pub command: String,
@@ -195,7 +197,7 @@ fn phys_footprint(_pid: u32) -> Option<u64> {
 
 /// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次（IPv4 和 IPv6 各监听一次的那种）。
 #[cfg(target_os = "macos")]
-pub(super) fn listening_ports() -> Vec<Port> {
+pub(crate) fn listening_ports() -> Vec<Port> {
     let text = output(Command::new("/usr/sbin/lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]), PROBE_TIMEOUT);
     parse_lsof(&text)
 }
@@ -267,7 +269,7 @@ fn parse_ps(text: &str, exe: &str) -> HashMap<u32, Proc> {
 /// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次。只认得出本用户进程的端口：别人的进程的
 /// 描述符读不了，和不带 sudo 的 `lsof` 一样。
 #[cfg(all(unix, not(target_os = "macos")))]
-pub(super) fn listening_ports() -> Vec<Port> {
+pub(crate) fn listening_ports() -> Vec<Port> {
     let mut inodes = HashMap::new();
     for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
         if let Ok(text) = std::fs::read_to_string(table) {

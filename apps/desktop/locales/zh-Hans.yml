@@ -847,6 +847,11 @@ status:
   no_ports: 终端里没有程序在监听端口
   external_ports: 外部端口
   open_port: 在浏览器里打开
+  remote_ports: "%{host} 上的端口"
+  no_remote_ports: 这台主机上没有程序在监听端口
+  forwarded: "转到本机 %{port}"
+  stop_forward: 停止转发
+  forward_failed: 没能转发端口
 mobile:
   entry: "手机端"
   eyebrow: "RUNODE 手机端"
