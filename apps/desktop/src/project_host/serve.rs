@@ -168,7 +168,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
         Call::Watch { token, dirs } => (wait_for_changes(token, dirs, caches, stop), Vec::new()),
         Call::Cancel { .. } => (Reply::Failed("nothing to cancel".into()), Vec::new()),
         Call::Git { root, op } => match runode_git::Repo::open(&root).map(|repo| op.run(&repo)) {
-            Some(Ok(value)) => (Reply::Git(value), Vec::new()),
+            Some(Ok((value, blob))) => (Reply::Git(value), blob),
             Some(Err(err)) => (Reply::Failed(err.to_string()), Vec::new()),
             None => (Reply::Failed(format!("{} is not in a git repository", root.display())), Vec::new()),
         },

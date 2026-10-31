@@ -1,5 +1,5 @@
 //! 对项目里一个仓库跑 git：`ProjectRepo` 的方法和 `runode_git::Repo` 的同名同参，本机的直接调；远端的编成
-//! `GitOp` 交给那边的 `runode --ssh-project` 跑，结果按 JSON 带回来。
+//! `GitOp` 交给那边的 `runode --ssh-project` 跑，结果按 JSON 带回来，读到的文件内容跟在回话后面。
 
 use std::path::{Path, PathBuf};
 
@@ -62,9 +62,11 @@ pub(super) enum GitOp {
 }
 
 impl GitOp {
-    /// 在远端对 `repo` 跑，结果编成 JSON。
-    pub(super) fn run(self, repo: &git::Repo) -> serde_json::Result<serde_json::Value> {
-        use serde_json::to_value as json;
+    /// 在远端对 `repo` 跑，结果编成 JSON；`NewBytes`、`OldBytes` 读到的内容不进 JSON，另外交回（`bytes`）。
+    pub(super) fn run(self, repo: &git::Repo) -> serde_json::Result<(serde_json::Value, Vec<u8>)> {
+        fn json(value: impl Serialize) -> serde_json::Result<(serde_json::Value, Vec<u8>)> {
+            Ok((serde_json::to_value(value)?, Vec::new()))
+        }
         match self {
             Self::Branches => json(repo.branches()),
             Self::Checkout { branch } => json(repo.checkout(&branch)),
@@ -94,12 +96,22 @@ impl GitOp {
             Self::ApplyHunk { file, hunk, action } => json(repo.apply_hunk(&file, hunk, action)),
             Self::RemoveWorktree { worktree, force } => json(repo.remove_worktree(&worktree, force)),
             Self::FileView { path, old_path, side } => json(repo.file_view(&path, old_path.as_deref(), &side)),
-            Self::NewBytes { path, side, options } => json(repo.new_bytes(&path, &side, options)),
+            Self::NewBytes { path, side, options } => bytes(repo.new_bytes(&path, &side, options)),
             Self::OldBytes { path, old_path, side, options } => {
-                json(repo.old_bytes(&path, old_path.as_deref(), &side, options))
+                bytes(repo.old_bytes(&path, old_path.as_deref(), &side, options))
             }
         }
     }
+}
+
+/// 读到的内容放进回话后面的字节，JSON 里只说读没读到（`true` 是读到了）：内容按 JSON 数组编又大又慢。
+fn bytes(read: Result<Option<Vec<u8>>, TooLarge>) -> serde_json::Result<(serde_json::Value, Vec<u8>)> {
+    let (shape, blob): (Result<bool, TooLarge>, _) = match read {
+        Ok(Some(blob)) => (Ok(true), blob),
+        Ok(None) => (Ok(false), Vec::new()),
+        Err(err) => (Err(err), Vec::new()),
+    };
+    Ok((serde_json::to_value(shape)?, blob))
 }
 
 /// 本机直接调 `$local`；远端发 `$op`，没办成时交回 `$failed(原因)`。
@@ -122,6 +134,21 @@ fn remote<T: DeserializeOwned>(client: &client::Client, root: &Path, op: GitOp) 
         (Reply::Git(value), _) => serde_json::from_value(value).map_err(|err| err.to_string()),
         (other, _) => Err(super::unexpected(&other)),
     }
+}
+
+/// 远端跑 `NewBytes`、`OldBytes`，读到的内容从回话后面的字节里取（`bytes`）；没办成时当作太大，不显示。
+fn remote_bytes(client: &client::Client, root: &Path, op: GitOp) -> Result<Option<Vec<u8>>, TooLarge> {
+    let read = match client.call(Call::Git { root: root.to_path_buf(), op }, GIT_TIMEOUT) {
+        Ok((Reply::Git(value), blob)) => serde_json::from_value::<Result<bool, TooLarge>>(value)
+            .map(|read| read.map(|found| found.then_some(blob)))
+            .map_err(|err| err.to_string()),
+        Ok((other, _)) => Err(super::unexpected(&other)),
+        Err(err) => Err(err),
+    };
+    read.unwrap_or_else(|err| {
+        tracing::warn!("cannot read a file from the remote repository: {err}");
+        Err(TooLarge)
+    })
 }
 
 impl ProjectRepo {
@@ -263,7 +290,6 @@ impl ProjectRepo {
         dispatch!(self, self.repo.file_view(path, old_path, side), op, git_failed)
     }
 
-    /// 远端读不到时当作太大，不显示。
     pub(crate) fn new_bytes(
         &self,
         path: &Path,
@@ -271,10 +297,12 @@ impl ProjectRepo {
         options: ReadOptions,
     ) -> Result<Option<Vec<u8>>, TooLarge> {
         let op = GitOp::NewBytes { path: path.to_path_buf(), side: side.clone(), options };
-        dispatch!(self, self.repo.new_bytes(path, side, options), op, |_| Err(TooLarge))
+        match &self.host {
+            ProjectHost::Local => self.repo.new_bytes(path, side, options),
+            ProjectHost::Remote(client) => remote_bytes(client, &self.root, op),
+        }
     }
 
-    /// 远端读不到时当作太大，不显示。
     pub(crate) fn old_bytes(
         &self,
         path: &Path,
@@ -288,6 +316,9 @@ impl ProjectRepo {
             side: side.clone(),
             options,
         };
-        dispatch!(self, self.repo.old_bytes(path, old_path, side, options), op, |_| Err(TooLarge))
+        match &self.host {
+            ProjectHost::Local => self.repo.old_bytes(path, old_path, side, options),
+            ProjectHost::Remote(client) => remote_bytes(client, &self.root, op),
+        }
     }
 }

@@ -85,6 +85,14 @@ fn reads_the_same_on_both_sides() {
     let view =
         |repo: &super::ProjectRepo| format!("{:?}", repo.file_view(Path::new("a.txt"), None, &DiffSide::Worktree));
     assert_eq!(view(&here), view(&there));
+    let options = |max_bytes| runode_git::ReadOptions { max_bytes };
+    let a = Path::new("a.txt");
+    for max in [100, 2] {
+        let new = |repo: &super::ProjectRepo| repo.new_bytes(a, &DiffSide::Worktree, options(max));
+        let old = |repo: &super::ProjectRepo| repo.old_bytes(a, None, &DiffSide::Worktree, options(max));
+        assert_eq!((new(&here), old(&here)), (new(&there), old(&there)));
+    }
+    assert_eq!(there.new_bytes(a, &DiffSide::Worktree, options(100)), Ok(Some(b"one\n2\nneedle\n".to_vec())));
     fs::remove_dir_all(&dir).ok();
 }
 
