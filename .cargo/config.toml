@@ -3,3 +3,6 @@
 # 它的绑定照它构建脚本里 `GHOSTTY_COMMIT` 那版头文件生成，那个 commit 要等于这个 fork 所基于的
 # 上游 commit：挪这个子模块时要一起改它、重新生成绑定，不然结构体布局可能对不上。
 GHOSTTY_SOURCE_DIR = { value = "vendor/ghostty", relative = true }
+# macOS 上程序要求的最低系统版本。ScreenCaptureKit 是强链接的，更低的系统上本来就载不起来；没设时 x86_64
+# 按 rustc 的默认值编，新 SDK 会把 swift 的库按 `@rpath` 链进来，到 Intel Mac 上找不到库，一启动就崩。
+MACOSX_DEPLOYMENT_TARGET = "12.3"
