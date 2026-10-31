@@ -21,7 +21,10 @@ use std::{
     net::Shutdown,
     path::PathBuf,
     process::{Child, ChildStdin, Command, Stdio},
-    sync::{Arc, Condvar, LazyLock, Mutex, PoisonError},
+    sync::{
+        Arc, Condvar, LazyLock, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -91,6 +94,12 @@ pub fn remote(name: &str) -> Option<Arc<RemoteHost>> {
     drop(hosts);
     host.start();
     Some(host)
+}
+
+/// `hold` 时之后新建的主机先不连，停在 `Status::Idle`，等用户 `retry_now`：启动时恢复窗口期间按配置的
+/// `ssh-restore-on-launch` 设。
+pub fn hold_new_hosts(hold: bool) {
+    HOLD_NEW.store(hold, Ordering::Relaxed);
 }
 
 /// 已经有的远端主机 `name`；没有时不新建，也不开始连。
@@ -267,6 +276,8 @@ static HOSTS: LazyLock<Mutex<HashMap<String, Arc<RemoteHost>>>> = LazyLock::new(
 /// 配置里宿主关心的部分（`SetTheme`、`SetOptions`），见 `configure`。
 static HOST_OPTIONS: Mutex<Vec<ClientMsg>> = Mutex::new(Vec::new());
 static SETTINGS: LazyLock<Mutex<SshSettings>> = LazyLock::new(Mutex::default);
+/// 为真时新建的主机先不连，等 `retry_now`，见 `hold_new_hosts`。
+static HOLD_NEW: AtomicBool = AtomicBool::new(false);
 #[allow(clippy::type_complexity)]
 static EVENTS: LazyLock<(UnboundedSender<RemoteEvent>, Mutex<Option<UnboundedReceiver<RemoteEvent>>>)> =
     LazyLock::new(|| {
@@ -319,7 +330,7 @@ impl RemoteHost {
             link,
             state: Mutex::new(State {
                 status: Status::Idle,
-                wanted: true,
+                wanted: !HOLD_NEW.load(Ordering::Relaxed),
                 hurry: false,
                 child: None,
                 forgotten: false,

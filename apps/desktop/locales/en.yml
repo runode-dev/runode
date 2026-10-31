@@ -599,6 +599,7 @@ settings:
     terminal_host: Keep sessions after quitting
     ssh_program: ssh program
     ssh_control_persist: Keep idle connections
+    ssh_restore_on_launch: Reconnect at launch
     auto_update: Update automatically
     remote_access: Remote access
     remote_access_port: Port
@@ -669,6 +670,7 @@ settings:
     terminal_host: Sessions keep running in a background process after Runode quits and come back when it opens again.
     ssh_program: The ssh Runode runs to connect to SSH hosts; leave it empty for ssh in PATH. It still reads ~/.ssh/config, so ProxyJump, ssh-agent and 1Password work.
     ssh_control_persist: Seconds the connection to a host stays open after its last terminal closes, so reconnecting meanwhile asks for no password. 0 keeps it open. Quitting runode always closes it.
+    ssh_restore_on_launch: Connects to SSH hosts right away when Runode reopens workspaces and terminals that are on them. Turn it off to connect only when you click Reconnect, so launching Runode does not ask for passwords. Takes effect from the next launch.
     auto_update: Check for new versions in the background, download them and install them when Runode quits.
     remote_access: "Lets a paired phone reach this computer's terminals over the local network or Tailscale. Pair below, or with runode remote pair."
     remote_access_port: TCP port, 1 to 65535.

@@ -141,6 +141,7 @@ impl Config {
             "terminal-host" => bool(self.terminal_host),
             "ssh-program" => self.ssh_program.iter().cloned().collect(),
             "ssh-control-persist" => self.ssh_control_persist.iter().map(ToString::to_string).collect(),
+            "ssh-restore-on-launch" => bool(self.ssh_restore_on_launch),
             "git-auto-fetch" => bool(self.git_auto_fetch),
             "auto-update" => bool(self.auto_update),
             "remote-access" => bool(self.remote_access),

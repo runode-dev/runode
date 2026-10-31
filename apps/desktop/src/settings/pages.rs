@@ -209,6 +209,7 @@ impl Page {
                 Section("ssh"),
                 Row("ssh-program", Text(200.)),
                 Row("ssh-control-persist", Text(80.)),
+                Row("ssh-restore-on-launch", Switch),
             ],
             Self::Files => &[
                 Row("file-tree-preview-click", Choice(&["single", "double"])),

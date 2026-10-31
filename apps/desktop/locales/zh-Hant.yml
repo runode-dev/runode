@@ -599,6 +599,7 @@ settings:
     terminal_host: 結束後保留工作階段
     ssh_program: ssh 程式
     ssh_control_persist: 閒置連線保留
+    ssh_restore_on_launch: 啟動時重連
     auto_update: 自動更新
     remote_access: 遠端存取
     remote_access_port: 連接埠
@@ -669,6 +670,7 @@ settings:
     terminal_host: 結束 Runode 後工作階段留在背景程序裡照常執行，下次打開接著用。
     ssh_program: 連 SSH 主機時呼叫的 ssh，留空用 PATH 裡的 ssh。照樣讀 ~/.ssh/config，ProxyJump、ssh-agent、1Password 都能用。
     ssh_control_persist: 最後一個終端機關掉後，到這台主機的連線再留多少秒，這期間重連不用再輸入密碼。0 是一直留著。結束 runode 時總會中斷。
+    ssh_restore_on_launch: 打開 Runode、恢復 SSH 主機上的工作區和終端機時馬上連那台主機。關掉後等你點「立即重連」才連，打開 Runode 時不會先問密碼。下次啟動起生效。
     auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
     remote_access: "讓配對過的手機經區域網路或 Tailscale 連上這台電腦的終端機。在下面配對，或者用 runode remote pair。"
     remote_access_port: TCP 連接埠，1 到 65535。

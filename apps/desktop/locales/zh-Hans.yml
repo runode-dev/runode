@@ -599,6 +599,7 @@ settings:
     terminal_host: 退出后保留会话
     ssh_program: ssh 程序
     ssh_control_persist: 空闲连接保留
+    ssh_restore_on_launch: 启动时重连
     auto_update: 自动更新
     remote_access: 远程访问
     remote_access_port: 端口
@@ -669,6 +670,7 @@ settings:
     terminal_host: 退出 Runode 后会话留在后台进程里照常运行，下次打开接着用。
     ssh_program: 连 SSH 主机时调的 ssh，留空用 PATH 里的 ssh。照样读 ~/.ssh/config，ProxyJump、ssh-agent、1Password 都能用。
     ssh_control_persist: 最后一个终端关掉后，到这台主机的连接再留多少秒，这期间重连不用再输密码。0 是一直留着。退出 runode 时总会断开。
+    ssh_restore_on_launch: 打开 Runode、恢复 SSH 主机上的工作区和终端时马上连那台主机。关掉后等你点「立即重连」才连，打开 Runode 时不会先问密码。下次启动起生效。
     auto_update: 在后台查新版本、下载好，退出 Runode 时装上。
     remote_access: "让配对过的手机经局域网或 Tailscale 连上这台电脑的终端。在下面配对，或者用 runode remote pair。"
     remote_access_port: TCP 端口，1 到 65535。

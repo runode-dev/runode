@@ -143,6 +143,9 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "ssh-control-persist" => {
             "How many seconds the shared connection to an SSH host stays open after the last terminal using it closes, so that reconnecting does not ask for a password again: a whole number of seconds, 0 to keep it open while runode runs. Quitting runode always closes it. Leave it empty for 10 minutes. Takes effect from the next connection."
         }
+        "ssh-restore-on-launch" => {
+            "Connect to SSH hosts right away when Runode reopens workspaces and terminals that are on them: true (default), false. With false, they wait until you click Reconnect, so launching Runode does not ask for passwords or security keys. Takes effect from the next launch."
+        }
         "git-auto-fetch" => {
             "Fetch from the remotes in the background every few minutes while the Git panel is showing, so the commits behind and the remote branches in the graph keep up: true (default), false. Only the repository in the panel and the submodules and nested repositories inside it are fetched, and only while the window is in front. With false, fetch from the panel's menu or with Sync. Takes effect right away."
         }

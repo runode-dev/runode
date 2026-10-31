@@ -79,7 +79,7 @@ pub const KEYS: &[&[&str]] = &[
     ],
     &["clipboard-write", "clipboard-read", "vt-window-resize-allowed"],
     &["terminal-host"],
-    &["ssh-program", "ssh-control-persist"],
+    &["ssh-program", "ssh-control-persist", "ssh-restore-on-launch"],
     &["auto-update"],
     &[
         "remote-access",
@@ -409,6 +409,9 @@ impl Config {
                 self.ssh_control_persist = (!empty)
                     .then(|| value.trim().parse().map_err(|_| "expected a whole number of seconds"))
                     .transpose()?;
+            }
+            "ssh-restore-on-launch" => {
+                self.ssh_restore_on_launch = or_default(empty, defaults.ssh_restore_on_launch, || parse_bool(value))?;
             }
             "git-auto-fetch" => {
                 self.git_auto_fetch = or_default(empty, defaults.git_auto_fetch, || parse_bool(value))?;
@@ -1001,6 +1004,8 @@ unknown-key = whatever
         assert_eq!(set.ssh_program.as_deref(), Some("/opt/homebrew/bin/ssh"));
         assert_eq!(set.ssh_control_persist, Some(0));
         assert_eq!(load(&["ssh-control-persist = 60\nssh-control-persist ="]).ssh_control_persist, None);
+        assert!(d.ssh_restore_on_launch);
+        assert!(!load(&["ssh-restore-on-launch = false"]).ssh_restore_on_launch);
     }
 
     #[test]
