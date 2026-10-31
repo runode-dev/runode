@@ -131,14 +131,16 @@ impl WindowView {
             return false;
         };
         let source = &self.workspaces[wi].tabs[ti];
+        // 终端不挪到别的主机的 workspace 里：存档按 workspace 记主机，挪过去的会话下次按那台主机接回。
+        let host = &self.workspaces[wi].host;
         match to {
             Destination::Beside(target, _) => {
-                if target == pane || self.locate(target).is_none() {
+                if target == pane || self.locate(target).is_none_or(|(twi, _)| self.workspaces[twi].host != *host) {
                     return false;
                 }
             }
             Destination::NewTab { workspace, after } => {
-                let Some(dest) = self.workspaces.iter().find(|w| w.id == workspace) else {
+                let Some(dest) = self.workspaces.iter().find(|w| w.id == workspace && w.host == *host) else {
                     return false;
                 };
                 if after.is_some_and(|after| dest.tabs.iter().all(|tab| tab.id != after)) {
@@ -198,7 +200,7 @@ impl WindowView {
         let (Some(at_a), Some(at_b)) = (self.locate(a), self.locate(b)) else {
             return false;
         };
-        if a == b {
+        if a == b || self.workspaces[at_a.0].host != self.workspaces[at_b.0].host {
             return false;
         }
         let focused = self.focused_view().map(Entity::entity_id);
