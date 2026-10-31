@@ -41,7 +41,6 @@ use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, remo
 use crate::host_client::remote::{self as hosts, HostId};
 use crate::project_host::ProjectHost;
 use crate::ui::a11y::A11yPress;
-use crate::ui::a11y::Press as _;
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::menu::MenuHost as _;
 use crate::ui::panel::sync_icon;
@@ -921,7 +920,8 @@ impl WindowView {
                     .icon(CLOSE_ICON)
                     .with_size(ButtonSize::IconXs)
                     .tooltip(tooltip(stop_label, None))
-                    .on_press(cx, move |_, _, cx| stop_remote_port(name.clone(), port.port, cx))
+                    // 按下就办、不往外传：外面的端口行按下就转发并打开。
+                    .on_press_down(cx, move |_, _, cx| stop_remote_port(name.clone(), port.port, cx))
             });
             rows.push(
                 div()
