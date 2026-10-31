@@ -232,15 +232,15 @@ struct Seen {
 fn handle(event: RemoteEvent, seen: &mut Seen, cx: &mut App) {
     match event {
         RemoteEvent::Connected { host, alive } => {
-            let bound = remote::find(&host).is_some_and(
-                |remote| matches!(remote.status(), Status::Connected(connected) if connected.session_bound),
-            );
+            // 连上前刚被忘掉的主机不再建出来（`remote::remote` 会新建）。
+            let Some(remote) = remote::find(&host) else {
+                return;
+            };
+            let bound = matches!(remote.status(), Status::Connected(connected) if connected.session_bound);
             if bound && service_job(&host, cx).is_none() && seen.offered.insert(host.clone()) {
                 offer_service(&host, cx);
             }
-            if seen.served.insert(host.clone())
-                && let Some(remote) = remote::remote(&host)
-            {
+            if seen.served.insert(host.clone()) {
                 window::serve(HostId::Ssh(host.clone()), remote.link.clone(), cx);
             }
             terminal_view::remote_reconnected(HostId::Ssh(host), alive, cx);

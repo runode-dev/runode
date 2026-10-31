@@ -563,7 +563,16 @@ impl RemoteHost {
                 Ok(Start::Bridge(opening)) => {
                     tracing::info!("bridged to {}: {opening:?}", self.name);
                     let pid = child.id();
-                    self.state().child = Some(pid);
+                    let mut state = self.state();
+                    // 连的时候用户断开或忘掉了这台主机：不接上，不然它连上后照样报 `RemoteEvent::Connected`。
+                    if !state.wanted {
+                        drop(state);
+                        crate::subprocess::kill(pid);
+                        let _ = child.wait();
+                        return Err(Failure::Retry(format!("disconnected from {} while connecting", self.name)));
+                    }
+                    state.child = Some(pid);
+                    drop(state);
                     let running = Running::start(child, stdin, stdout, &self.link).map_err(|err| {
                         self.state().child = None;
                         Failure::Retry(format!("cannot talk to the host on {}: {err}", self.name))
