@@ -10,7 +10,7 @@ use std::{
 
 use gpui::{
     AnyElement, App, Context, Div, Entity, FocusHandle, Focusable as _, Role, SharedString, Subscription, WeakEntity,
-    Window, div, prelude::*, px,
+    Window, div, img, prelude::*, px, svg,
 };
 use runode_protocol::{ClientMsg, HostMsg};
 use runode_ssh::Destination;
@@ -22,7 +22,9 @@ use crate::{
     ui::{
         a11y::Press,
         button::{Button, ButtonVariant},
+        file_icons::folder_icon,
         font_size::{FontSize, scaled},
+        icons::ARROW_UP_ICON,
         input::{Input, InputEvent, InputState},
         theme::ActiveTheme as _,
     },
@@ -291,22 +293,32 @@ impl WindowView {
         let fg = cx.theme().foreground;
         let field_bg = cx.theme().mix(0.03);
         let hover_bg = cx.theme().mix(0.06);
-        let row = |id: SharedString, label: String| {
+        // 列表限了高，行不收缩，多出来的滚动。
+        let row = |id: SharedString, label: String, icon: Option<AnyElement>, dim: bool| {
             div()
                 .id(id)
                 .role(Role::Button)
                 .aria_label(label.clone())
+                .flex_none()
                 .h(scaled(26.))
                 .px(px(8.))
                 .flex()
                 .items_center()
+                .gap(px(8.))
                 .rounded(px(4.))
                 .cursor_pointer()
                 .hover(move |row| row.bg(hover_bg))
-                .whitespace_nowrap()
-                .overflow_hidden()
-                .text_ellipsis()
-                .child(label)
+                .children(icon)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .when(dim, |text| text.text_color(fg.opacity(0.55)))
+                        .child(label),
+                )
         };
         let small = |text: String| div().text_size(FontSize::Small).text_color(fg.opacity(0.55)).child(text);
         let connect = Button::new("ssh-connect", rust_i18n::t!("workspace.ssh_connect"))
@@ -336,7 +348,7 @@ impl WindowView {
                 .take(MAX_HOSTS)
                 .map(|host| {
                     let host = host.clone();
-                    row(format!("ssh-host-{host}").into(), host.clone())
+                    row(format!("ssh-host-{host}").into(), host.clone(), None, false)
                         .on_press(cx, move |this, _, cx| this.connect_ssh(host.clone(), cx))
                         .into_any_element()
                 })
@@ -356,13 +368,25 @@ impl WindowView {
             return body.child(
                 div()
                     .flex()
-                    .items_center()
+                    .items_start()
                     .gap(px(8.))
-                    .child(div().id("ssh-status").role(Role::Label).aria_label(text.clone()).flex_1().child(text))
+                    // 报错可能很长，折行显示，不把重试按钮挤出去。
+                    .child(
+                        div()
+                            .id("ssh-status")
+                            .role(Role::Label)
+                            .aria_label(text.clone())
+                            .flex_1()
+                            .min_w_0()
+                            .pt(px(5.))
+                            .text_color(fg.opacity(if stopped { 0.75 } else { 0.55 }))
+                            .child(text),
+                    )
                     .when(stopped, |line| {
                         line.child(
                             Button::new("ssh-retry", rust_i18n::t!("workspace.ssh_retry"))
                                 .variant(ButtonVariant::Secondary)
+                                .flex_none()
                                 .h_auto()
                                 .py(px(5.))
                                 .cursor_pointer()
@@ -373,13 +397,21 @@ impl WindowView {
         };
         let up = browse.path.as_deref().and_then(Path::parent).map(Path::to_path_buf);
         let up_row = up.map(|parent| {
-            row("ssh-parent-dir".into(), rust_i18n::t!("workspace.ssh_up").into_owned())
-                .on_press(cx, move |this, _, cx| this.list_remote(Some(parent.clone()), cx))
-                .into_any_element()
+            let icon = svg().flex_none().path(ARROW_UP_ICON).size(px(14.)).text_color(fg.opacity(0.6));
+            row(
+                "ssh-parent-dir".into(),
+                rust_i18n::t!("workspace.ssh_up").into_owned(),
+                Some(icon.into_any_element()),
+                false,
+            )
+            .on_press(cx, move |this, _, cx| this.list_remote(Some(parent.clone()), cx))
+            .into_any_element()
         });
         let dirs = browse.dirs.iter().map(|dir| {
             let next = browse.path.as_deref().map(|path| remote_child(path, dir));
-            row(format!("ssh-subdir-{dir}").into(), format!("{dir}/"))
+            let icon = img(folder_icon(dir, false)).flex_none().size(px(16.));
+            // 点开头的隐藏目录淡一些，常用的目录好找。
+            row(format!("ssh-subdir-{dir}").into(), dir.clone(), Some(icon.into_any_element()), dir.starts_with('.'))
                 .on_press(cx, move |this, _, cx| this.list_remote(next.clone(), cx))
                 .into_any_element()
         });
@@ -411,7 +443,12 @@ impl WindowView {
                 div()
                     .id("ssh-dirs")
                     .role(Role::List)
-                    .max_h(scaled(200.))
+                    .max_h(scaled(240.))
+                    .p(px(4.))
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(fg.opacity(0.12))
+                    .bg(field_bg)
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
