@@ -75,7 +75,8 @@ fn tar<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<std::process::Child>
     }
     for path in paths {
         let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        command.arg("-C").arg(parent).arg(path.file_name().context("no file name")?);
+        // 写成 `./名字`：以 `-` 开头的名字不被当成 tar 的选项。
+        command.arg("-C").arg(parent).arg(Path::new(".").join(path.file_name().context("no file name")?));
     }
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     crate::subprocess::hide_window(&mut command);
@@ -89,6 +90,14 @@ fn send(host: &RemoteHost, file: Option<&str>, input: &mut dyn Read) -> Result<S
     let piped = runode_ssh::process::spawn(&mut command, Pipes { stdin: true, stdout: true, stderr: true })
         .context("cannot run ssh")?;
     let Piped { mut child, stdin, stdout, stderr } = piped;
+    // stderr 另起线程读：远端报的字写满管道时 ssh 就不再读 stdin，下面的写会一直卡着。
+    let err = stderr.map(|mut stderr| {
+        std::thread::spawn(move || {
+            let mut err = String::new();
+            let _ = stderr.read_to_string(&mut err);
+            err
+        })
+    });
     let sent = stdin
         .context("no ssh input")
         .and_then(|mut stdin| std::io::copy(input, &mut stdin).context("the upload was cut off"));
@@ -96,10 +105,7 @@ fn send(host: &RemoteHost, file: Option<&str>, input: &mut dyn Read) -> Result<S
     if let Some(mut stdout) = stdout {
         let _ = stdout.read_to_string(&mut out);
     }
-    let mut err = String::new();
-    if let Some(mut stderr) = stderr {
-        let _ = stderr.read_to_string(&mut err);
-    }
+    let err = err.and_then(|reader| reader.join().ok()).unwrap_or_default();
     let status = child.wait().context("ssh failed")?;
     match parse_uploaded(&out) {
         Some(dir) if status.success() && sent.is_ok() => Ok(dir.to_owned()),
