@@ -101,8 +101,9 @@ actions!(
         /// 文件树里显示、隐藏名字以 `.` 开头的文件和被 git 忽略的文件。
         ToggleShowDotfiles,
         ToggleShowIgnored,
-        /// 用 VS Code 打开文件树的根目录（SSH 主机上的经 Remote-SSH），在访达里打开它。
+        /// 用 VS Code、Zed 打开文件树的根目录（SSH 主机上的经它们各自的远程连接），在访达里打开它。
         OpenRootInVsCode,
+        OpenRootInZed,
         OpenRootInFinder
     ]
 );
@@ -216,15 +217,14 @@ fn open_in_vscode(dir: PathBuf, _: &mut App) {
 /// 用 VS Code 打开 `dir`：经它装时向系统登记的 `vscode://` 链接，不管装在哪里。
 #[cfg(not(target_os = "macos"))]
 fn open_in_vscode(dir: PathBuf, cx: &mut App) {
-    cx.open_url(&vscode_url(&dir));
+    cx.open_url(&file_url("vscode://file", &dir));
 }
 
-/// VS Code 打开 `dir` 的链接：路径用 `/` 分隔，Windows 的盘符前也加 `/`。
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-fn vscode_url(dir: &Path) -> String {
+/// 编辑器打开本机 `dir` 的链接，`scheme` 是 `vscode://file` 这样的前缀：路径用 `/` 分隔，Windows 的盘符前也加 `/`。
+fn file_url(scheme: &str, dir: &Path) -> String {
     let path = dir.to_string_lossy();
     let path = if cfg!(windows) { path.replace('\\', "/") } else { path.into_owned() };
-    let mut url = String::from("vscode://file");
+    let mut url = String::from(scheme);
     push_url_path(&mut url, &path);
     url
 }
@@ -249,14 +249,46 @@ fn vscode_remote_url(host: &Destination, dir: &Path) -> String {
     url
 }
 
+/// Zed 经它的远程连接打开 SSH 主机 `host` 上的 `dir` 的链接（`zed://ssh/user@host:端口/路径`），由 Zed 自己连
+/// 过去；它照主机名去连，`~/.ssh/config` 里的别名照样用。IPv6 地址加方括号，用户名和主机名里 URL 不认的字符
+/// 转义。
+fn zed_remote_url(host: &Destination, dir: &Path) -> String {
+    let (user, name) = match host.target.rsplit_once('@') {
+        Some((user, name)) => (Some(user), name),
+        None => (None, host.target.as_str()),
+    };
+    let mut url = String::from("zed://ssh/");
+    if let Some(user) = user {
+        push_escaped(&mut url, user, b"-._~");
+        url.push('@');
+    }
+    if name.contains(':') {
+        url.push('[');
+        url.push_str(name);
+        url.push(']');
+    } else {
+        push_escaped(&mut url, name, b"-._~");
+    }
+    if let Some(port) = host.port {
+        url.push_str(&format!(":{port}"));
+    }
+    push_url_path(&mut url, &dir.to_string_lossy());
+    url
+}
+
 /// 把路径接到链接后面：前面补上 `/`，非 ASCII 和保留字符按 UTF-8 转义；Unix 上 `\` 是文件名里的普通字符，
 /// 也转义。
 fn push_url_path(url: &mut String, path: &str) {
     if !path.starts_with('/') {
         url.push('/');
     }
-    for byte in path.bytes() {
-        if byte.is_ascii_alphanumeric() || b"/:-._~".contains(&byte) {
+    push_escaped(url, path, b"/:-._~");
+}
+
+/// 把 `text` 接到链接后面：字母、数字和 `keep` 里的字符原样，别的按 UTF-8 转义。
+fn push_escaped(url: &mut String, text: &str, keep: &[u8]) {
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || keep.contains(&byte) {
             url.push(char::from(byte));
         } else {
             url.push_str(&format!("%{byte:02X}"));
@@ -487,6 +519,7 @@ impl FileTree {
         items.extend([
             None,
             item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
+            item("files.open_in_zed", Box::new(OpenRootInZed)).map(|item| item.with_icon(CODE_ICON)),
         ]);
         if !self.remote() {
             items.push(
@@ -1035,6 +1068,13 @@ impl Render for FileTree {
                     None => tracing::warn!("cannot open {name} in VS Code: not an ssh destination"),
                 },
             }))
+            .on_action(cx.listener(|this, _: &OpenRootInZed, _, cx| match this.input.project.name() {
+                None => cx.open_url(&file_url("zed://file", &this.files_root())),
+                Some(name) => match Destination::parse(name) {
+                    Some(host) => cx.open_url(&zed_remote_url(&host, &this.files_root())),
+                    None => tracing::warn!("cannot open {name} in Zed: not an ssh destination"),
+                },
+            }))
             .on_action(cx.listener(|this, _: &OpenRootInFinder, _, cx| {
                 if !this.remote() {
                     cx.open_with_system(&this.files_root());
@@ -1079,24 +1119,24 @@ mod tests {
 
     use runode_ssh::Destination;
 
-    use super::{vscode_remote_url, vscode_url};
+    use super::{file_url, vscode_remote_url, zed_remote_url};
 
     #[test]
-    fn vscode_url_escapes_the_path() {
-        assert_eq!(vscode_url(Path::new("/home/me/my project")), "vscode://file/home/me/my%20project");
-        assert_eq!(vscode_url(Path::new("/tmp/日志")), "vscode://file/tmp/%E6%97%A5%E5%BF%97");
+    fn file_url_escapes_the_path() {
+        assert_eq!(file_url("vscode://file", Path::new("/home/me/my project")), "vscode://file/home/me/my%20project");
+        assert_eq!(file_url("vscode://file", Path::new("/tmp/日志")), "vscode://file/tmp/%E6%97%A5%E5%BF%97");
     }
 
     #[cfg(unix)]
     #[test]
-    fn vscode_url_keeps_backslashes_in_unix_names() {
-        assert_eq!(vscode_url(Path::new(r"/home/me/a\b")), "vscode://file/home/me/a%5Cb");
+    fn file_url_keeps_backslashes_in_unix_names() {
+        assert_eq!(file_url("vscode://file", Path::new(r"/home/me/a\b")), "vscode://file/home/me/a%5Cb");
     }
 
     #[cfg(windows)]
     #[test]
-    fn vscode_url_turns_windows_paths_into_url_paths() {
-        assert_eq!(vscode_url(Path::new(r"C:\Users\me\proj")), "vscode://file/C:/Users/me/proj");
+    fn file_url_turns_windows_paths_into_url_paths() {
+        assert_eq!(file_url("vscode://file", Path::new(r"C:\Users\me\proj")), "vscode://file/C:/Users/me/proj");
     }
 
     #[test]
@@ -1110,5 +1150,15 @@ mod tests {
         // {"hostName":"me@box -p 2222"}
         let hex = "7b22686f73744e616d65223a226d6540626f78202d702032323232227d";
         assert_eq!(url("me@box:2222", "/srv"), format!("vscode://vscode-remote/ssh-remote+{hex}/srv"));
+    }
+
+    #[test]
+    fn zed_remote_url_names_user_host_and_port() {
+        let url = |host: &str, dir: &str| zed_remote_url(&Destination::parse(host).unwrap(), Path::new(dir));
+        assert_eq!(url("me@box", "/home/me/my project"), "zed://ssh/me@box/home/me/my%20project");
+        assert_eq!(url("dev-box", "/srv"), "zed://ssh/dev-box/srv");
+        assert_eq!(url("me@box:2222", "/srv/日志"), "zed://ssh/me@box:2222/srv/%E6%97%A5%E5%BF%97");
+        assert_eq!(url("me@[2001:db8::1]:22", "/srv"), "zed://ssh/me@[2001:db8::1]:22/srv");
+        assert_eq!(url(r"corp\me@box", "/srv"), "zed://ssh/corp%5Cme@box/srv");
     }
 }

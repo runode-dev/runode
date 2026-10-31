@@ -1215,6 +1215,7 @@ files:
   show_dotfiles: 顯示點檔案
   show_ignored: 顯示 Git 忽略的檔案
   open_in_vscode: 用 VS Code 開啟
+  open_in_zed: 用 Zed 開啟
   open_in_finder:
     macos: "在 Finder 中開啟"
     windows: "在檔案總管中開啟"
