@@ -491,7 +491,7 @@ impl FileTree {
 
     /// 同 `sync_file_search`；`force` 时条件没变也重搜（文件树重读过），新结果到之前旧结果照旧显示。
     fn search_files(&mut self, force: bool, cx: &mut Context<Self>) {
-        let project = self.state().project.clone();
+        let project = self.input.project.clone();
         let search = &self.search;
         let options = match search.mode {
             SearchMode::Name => SearchOptions::default(),

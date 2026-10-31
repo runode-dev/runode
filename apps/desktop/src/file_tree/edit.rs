@@ -54,14 +54,14 @@ fn error_text(err: &OpError, name: &str) -> String {
 }
 
 impl FileTree {
-    /// 当前 workspace 的文件在哪台机器上。
+    /// 当前 workspace 的文件在哪台机器上。按 `Input` 取：还没读到目录时 `state` 是空的，那里记着的是本机。
     fn project(&self) -> ProjectHost {
-        self.state().project.clone()
+        self.input.project.clone()
     }
 
     /// 剪贴板里有能粘贴到当前树里的：同一台机器上的。
     pub(super) fn can_paste(&self) -> bool {
-        self.clipboard.as_ref().is_some_and(|clip| clip.host.as_deref() == self.state().project.name())
+        self.clipboard.as_ref().is_some_and(|clip| clip.host.as_deref() == self.input.project.name())
     }
 
     pub(super) fn new_file(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
@@ -387,7 +387,7 @@ impl FileTree {
             return None;
         }
         let (repo, rel) = git.locate(rel);
-        (!rel.as_os_str().is_empty()).then(|| (self.state().project.repo(repo.repo()), rel.to_path_buf(), is_dir))
+        (!rel.as_os_str().is_empty()).then(|| (self.input.project.repo(repo.repo()), rel.to_path_buf(), is_dir))
     }
 
     /// 写进 `.gitignore` 后当场重读，选中的那一项马上标成被忽略。git 跟踪着的写进去也不生效，先问要不要
@@ -442,7 +442,7 @@ impl FileTree {
     pub(super) fn copy_file(&mut self, cut: bool, cx: &mut Context<Self>) {
         self.menu = None;
         if let Some((path, _)) = self.selected_entry(cx) {
-            self.clipboard = Some(FileClipboard { host: self.state().project.name().map(str::to_owned), path, cut });
+            self.clipboard = Some(FileClipboard { host: self.input.project.name().map(str::to_owned), path, cut });
             cx.notify();
         }
     }
