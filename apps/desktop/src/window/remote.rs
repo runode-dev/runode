@@ -57,8 +57,14 @@ pub fn serve(host: HostId, link: Link, cx: &mut App) {
                 });
                 continue;
             }
-            let reply = cx.update(|cx| handle(&host, request, cx));
-            link.ui_reply(ticket, reply.wait().await);
+            // 要等远端主机上的会话开好的回话自己等，不挡住后面的请求。
+            match cx.update(|cx| handle(&host, request, cx)) {
+                Reply::Now(reply) => link.ui_reply(ticket, reply),
+                Reply::Later(task) => {
+                    let link = link.clone();
+                    cx.spawn(async move |_| link.ui_reply(ticket, task.await)).detach();
+                }
+            }
         }
     })
     .detach();
