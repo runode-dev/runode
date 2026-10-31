@@ -93,7 +93,7 @@ impl Ssh {
         self.exec_with(dest, remote, batch, &[])
     }
 
-    /// 同 `exec`，传的数据压缩：传 runode 本身这类大文件时用。复用主连接时压不压由主连接定，这里的选项不起作用。
+    /// 在远端跑一条命令，传的数据压缩：传 runode 本身这类大文件时用。复用主连接时压不压由主连接定，这里的选项不起作用。
     pub fn exec_compressed(&self, dest: &Destination, remote: &str, batch: bool) -> Command {
         self.exec_with(dest, remote, batch, &["-o", "Compression=yes"])
     }

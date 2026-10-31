@@ -1,4 +1,4 @@
-//! 经 SSH 连的远端主机：每台一条 `Link`，接到那台机器上的宿主（`runode --ssh-bridge`，见 `bridge`）。
+//! 经 SSH 连的远端主机：每台一条 `Link`，接到那台机器上的宿主（`runode --ssh-bridge`）。
 //! 本机那条（`host_client::link`）照旧，这里另管远端的。
 //!
 //! 每台主机一个 `remote-host` 线程（`supervise`）管连接：要用时连上；主连接（ControlMaster）没开着就先开，
@@ -193,7 +193,7 @@ pub(crate) fn ssh() -> Ssh {
 /// 界面要知道的事。
 #[derive(Debug)]
 pub enum RemoteEvent {
-    /// 这台主机的连接状态变了，见 `RemoteHost::status`。
+    /// 这台主机的连接状态变了。
     Status(String),
     /// 连上了这台主机（第一次或断开后又连上），`alive` 是那时它的宿主里还活着的会话。
     Connected { host: String, alive: HashSet<SessionId> },
@@ -231,7 +231,7 @@ pub struct Connected {
     pub build: String,
     /// 远端宿主不是这个构建（升级时那边还连着装旧版本的桌面）。
     pub mismatch: bool,
-    /// 远端宿主跟着 ssh 的登录会话走，最后一个连接断开时可能被系统结束，见 `runode_ssh::bridge::Opening`。
+    /// 远端宿主跟着 ssh 的登录会话走，最后一个连接断开时可能被系统结束（`Opening::session_bound`）。
     pub session_bound: bool,
     /// 远端的家目录，不知道时为空。
     pub home: Option<PathBuf>,
@@ -273,10 +273,10 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
 const LIST_TIMEOUT: Duration = Duration::from_secs(10);
 
 static HOSTS: LazyLock<Mutex<HashMap<String, Arc<RemoteHost>>>> = LazyLock::new(Mutex::default);
-/// 配置里宿主关心的部分（`SetTheme`、`SetOptions`），见 `configure`。
+/// 配置里宿主关心的部分（`SetTheme`、`SetOptions`），连上新主机时照发。
 static HOST_OPTIONS: Mutex<Vec<ClientMsg>> = Mutex::new(Vec::new());
 static SETTINGS: LazyLock<Mutex<SshSettings>> = LazyLock::new(Mutex::default);
-/// 为真时新建的主机先不连，等 `retry_now`，见 `hold_new_hosts`。
+/// 为真时新建的主机先不连，等 `retry_now`。
 static HOLD_NEW: AtomicBool = AtomicBool::new(false);
 #[allow(clippy::type_complexity)]
 static EVENTS: LazyLock<(UnboundedSender<RemoteEvent>, Mutex<Option<UnboundedReceiver<RemoteEvent>>>)> =
@@ -447,7 +447,7 @@ impl RemoteHost {
         Ok((pruned.len(), pruned.iter().map(|(_, kib)| kib).sum()))
     }
 
-    /// 管这台主机的连接，见模块说明。
+    /// 管这台主机的连接：要用时连，断了按 `RETRY_DELAYS` 退避重连，要用户来办的停下等 `retry_now`。
     fn supervise(self: Arc<Self>) {
         let mut attempt = 0u32;
         loop {
@@ -693,9 +693,7 @@ fn classify(log: &std::path::Path, code: Option<i32>) -> Failure {
     let error = match &failure {
         runode_ssh::Failure::Other(last) if last.is_empty() => format!("ssh exited with {code:?}"),
         runode_ssh::Failure::Other(last) => last.clone(),
-        other => {
-            format!("{other:?}: {}", stderr.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("").trim())
-        }
+        other => format!("{other:?}: {}", runode_ssh::last_line(&stderr)),
     };
     if failure.retryable() { Failure::Retry(error) } else { Failure::Stop { error, auth: true } }
 }

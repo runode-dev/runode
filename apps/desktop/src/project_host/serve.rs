@@ -80,12 +80,12 @@ pub(super) fn serve(mut input: impl BufRead, output: impl Write + Send + 'static
     }
 }
 
-/// 办一个请求，`content` 是请求后面跟着的字节；`stop` 置位时停得下的停下，交回已经找到的。
 /// `path` 在不在、是不是目录（`Reply::Kinds`），跟着符号链接走。
 pub(super) fn kind(path: &std::path::Path) -> Option<bool> {
     std::fs::metadata(path).ok().map(|meta| meta.is_dir())
 }
 
+/// 办一个请求，`content` 是请求后面跟着的字节；`stop` 置位时停得下的停下，交回已经找到的。
 fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (Reply, Vec<u8>) {
     let lock = || caches.lock().unwrap_or_else(PoisonError::into_inner);
     match call {

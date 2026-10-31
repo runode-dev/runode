@@ -57,7 +57,8 @@ pub fn stop(host: &RemoteHost, port: u16) -> Result<()> {
 
 fn last_line(stderr: &[u8], otherwise: &str) -> String {
     let error = String::from_utf8_lossy(stderr);
-    error.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or(otherwise).to_owned()
+    let line = runode_ssh::last_line(&error);
+    if line.is_empty() { otherwise } else { line }.to_owned()
 }
 
 /// 把远端的 `port` 转到本机，回本机的端口；已经转着、本机那头还在听时直接用它。会阻塞，在后台线程上调。

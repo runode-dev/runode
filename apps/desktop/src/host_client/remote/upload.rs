@@ -99,7 +99,10 @@ fn send(host: &RemoteHost, file: Option<&str>, stdin: Stdio, bytes: Option<&[u8]
     let stdout = String::from_utf8_lossy(&output.stdout);
     match parse_uploaded(&stdout) {
         Some(dir) if output.status.success() => Ok(dir.to_owned()),
-        _ => Err(anyhow!(stderr.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("ssh failed").to_owned())),
+        _ => {
+            let line = runode_ssh::last_line(&stderr);
+            Err(anyhow!("{}", if line.is_empty() { "ssh failed" } else { line }))
+        }
     }
 }
 

@@ -36,8 +36,7 @@ impl Failure {
         {
             Self::Unreachable
         } else {
-            let last = stderr.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("").trim();
-            Self::Other(last.to_owned())
+            Self::Other(last_line(stderr).to_owned())
         }
     }
 
@@ -45,4 +44,9 @@ impl Failure {
     pub fn retryable(&self) -> bool {
         !matches!(self, Self::Auth | Self::HostKey)
     }
+}
+
+/// ssh 打在 stderr 上的最后一句话，去掉首尾空白；什么都没说时为空串。
+pub fn last_line(stderr: &str) -> &str {
+    stderr.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("").trim()
 }

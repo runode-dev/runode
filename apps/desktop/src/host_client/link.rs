@@ -55,7 +55,7 @@ use runode_types::{
 
 use super::UnixStream;
 
-/// 写一帧最多等这么久，超时按连接断开处理；经 ssh 连远端时另见 `Timeouts::REMOTE`。
+/// 本机的宿主上写一帧最多等这么久，超时按连接断开处理。
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// 握手（`Hello` 到 `Welcome`）最多等这么久。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -508,7 +508,7 @@ impl Link {
         Self::with_timeouts(build, Timeouts::LOCAL)
     }
 
-    /// 同 `new`，几件事各等多久按 `timeouts`。
+    /// 还没连上宿主的一条连接，几件事各等多久按 `timeouts`。
     pub fn with_timeouts(build: BuildId, timeouts: Timeouts) -> Self {
         let (ui, ui_requests) = unbounded();
         let (todos, todos_changed) = unbounded();
