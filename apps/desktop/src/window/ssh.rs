@@ -58,6 +58,8 @@ struct Browse {
     dirs: Vec<String>,
     loading: bool,
     error: Option<String>,
+    /// 最近一次列目录的序号：先发的回来得晚时不盖掉后发的。
+    request: u64,
 }
 
 /// 用着的远端主机：哪个窗口里有工作区、终端在那台机器上，或者新建工作区的对话框正连着它。`this` 是问的
@@ -202,8 +204,15 @@ impl WindowView {
                 this.list_remote(Some(path), cx);
             }
         });
-        step.browse =
-            Some(Browse { field, _events: events, path: None, dirs: Vec::new(), loading: false, error: None });
+        step.browse = Some(Browse {
+            field,
+            _events: events,
+            path: None,
+            dirs: Vec::new(),
+            loading: false,
+            error: None,
+            request: 0,
+        });
         self.list_remote(None, cx);
     }
 
@@ -219,6 +228,8 @@ impl WindowView {
             return;
         };
         browse.loading = true;
+        browse.request += 1;
+        let request = browse.request;
         let link = host.link.clone();
         let job = cx.background_spawn(async move {
             link.request(|req| ClientMsg::ListDirs { req, path }, LIST_TIMEOUT).map_err(|err| err.to_string())
@@ -229,7 +240,11 @@ impl WindowView {
                 let Some(step) = this.new_workspace.as_mut().and_then(|dialog| dialog.ssh.as_mut()) else {
                     return;
                 };
-                let Some(browse) = step.browse.as_mut().filter(|_| step.host.as_deref() == Some(name.as_str())) else {
+                let Some(browse) = step
+                    .browse
+                    .as_mut()
+                    .filter(|browse| step.host.as_deref() == Some(name.as_str()) && browse.request == request)
+                else {
                     return;
                 };
                 browse.loading = false;
