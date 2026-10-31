@@ -1,8 +1,13 @@
 //! `rn`：只跑命令行的控制台程序。Windows 上 `runode.exe` 是界面程序，在终端里跑它时输出不到终端，
 //! shell 也不等它跑完，命令行由这个程序跑，宿主给 shell 设的 `RUNODE_BIN` 指向它。别的系统上的 `rn`
-//! 是指向 `runode` 的符号链接，用不着它。不带命令时拉起旁边的 `runode` 打开窗口。
+//! 是指向 `runode` 的符号链接，用不着它。不带命令时拉起旁边的 `runode` 打开窗口。ssh 要问用户时调它当
+//! askpass（`runode_ssh::askpass`）：askpass 的回答写在 stdout 上，界面程序的 stdout 交不回去。
 
 fn main() {
+    // ssh 调 askpass 时只给一句提示当参数，先于一切参数认出来，免得被当成子命令。
+    if let Some(code) = runode_ssh::askpass::run_if_requested() {
+        std::process::exit(code);
+    }
     let args: Vec<String> = std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
     let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));
     if let Some(index) = runode_cli::completion_index() {
