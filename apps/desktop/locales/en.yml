@@ -1215,6 +1215,7 @@ files:
   show_dotfiles: Show Dotfiles
   show_ignored: Show Git-Ignored Files
   open_in_vscode: Open in VS Code
+  open_in_cursor: Open in Cursor
   open_in_zed: Open in Zed
   open_in_finder:
     macos: "Open in Finder"

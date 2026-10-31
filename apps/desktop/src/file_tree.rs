@@ -101,8 +101,9 @@ actions!(
         /// 文件树里显示、隐藏名字以 `.` 开头的文件和被 git 忽略的文件。
         ToggleShowDotfiles,
         ToggleShowIgnored,
-        /// 用 VS Code、Zed 打开文件树的根目录（SSH 主机上的经它们各自的远程连接），在访达里打开它。
+        /// 用 VS Code、Cursor、Zed 打开文件树的根目录（SSH 主机上的经它们各自的远程连接），在访达里打开它。
         OpenRootInVsCode,
+        OpenRootInCursor,
         OpenRootInZed,
         OpenRootInFinder
     ]
@@ -203,6 +204,44 @@ fn status_color(status: FileStatus) -> Rgb {
     }
 }
 
+/// VS Code 一系、认 Remote-SSH 链接的编辑器。
+#[derive(Clone, Copy)]
+enum VsCodeLike {
+    VsCode,
+    Cursor,
+}
+
+impl VsCodeLike {
+    /// 它装时向系统登记的链接前缀。
+    fn scheme(self) -> &'static str {
+        match self {
+            Self::VsCode => "vscode",
+            Self::Cursor => "cursor",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::VsCode => "VS Code",
+            Self::Cursor => "Cursor",
+        }
+    }
+}
+
+/// 用 VS Code 一系的编辑器打开文件树的根目录，SSH 主机上的经 Remote-SSH 由编辑器自己连过去。
+fn open_root_in(editor: VsCodeLike, name: Option<&str>, root: PathBuf, cx: &mut App) {
+    match name {
+        None => match editor {
+            VsCodeLike::VsCode => open_in_vscode(root, cx),
+            VsCodeLike::Cursor => cx.open_url(&file_url("cursor://file", &root)),
+        },
+        Some(name) => match Destination::parse(name) {
+            Some(host) => cx.open_url(&vscode_remote_url(editor, &host, &root)),
+            None => tracing::warn!("cannot open {name} in {}: not an ssh destination", editor.name()),
+        },
+    }
+}
+
 /// 用 VS Code 打开 `dir`，按 bundle id 找它，不管装在哪里。没装时只记一条日志。
 #[cfg(target_os = "macos")]
 fn open_in_vscode(dir: PathBuf, _: &mut App) {
@@ -229,10 +268,10 @@ fn file_url(scheme: &str, dir: &Path) -> String {
     url
 }
 
-/// VS Code 经 Remote-SSH 打开 SSH 主机 `host` 上的 `dir` 的链接，由 VS Code 自己连过去。主机照 ssh 命令行写
+/// `editor` 经 Remote-SSH 打开 SSH 主机 `host` 上的 `dir` 的链接。主机照 ssh 命令行写
 /// （`user@host -p 端口`），除了别名和 `user@host` 这类只有字母、数字和 `.-_@` 的，都按 Remote-SSH 的规矩编成
 /// 十六进制的 `{"hostName": …}`。
-fn vscode_remote_url(host: &Destination, dir: &Path) -> String {
+fn vscode_remote_url(editor: VsCodeLike, host: &Destination, dir: &Path) -> String {
     let spec = match host.port {
         Some(port) => format!("{} -p {port}", host.target),
         None => host.target.clone(),
@@ -244,7 +283,7 @@ fn vscode_remote_url(host: &Destination, dir: &Path) -> String {
         let json = serde_json::json!({ "hostName": spec }).to_string();
         json.bytes().map(|byte| format!("{byte:02x}")).collect()
     };
-    let mut url = format!("vscode://vscode-remote/ssh-remote+{authority}");
+    let mut url = format!("{}://vscode-remote/ssh-remote+{authority}", editor.scheme());
     push_url_path(&mut url, &dir.to_string_lossy());
     url
 }
@@ -519,6 +558,7 @@ impl FileTree {
         items.extend([
             None,
             item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
+            item("files.open_in_cursor", Box::new(OpenRootInCursor)).map(|item| item.with_icon(CODE_ICON)),
             item("files.open_in_zed", Box::new(OpenRootInZed)).map(|item| item.with_icon(CODE_ICON)),
         ]);
         if !self.remote() {
@@ -1061,12 +1101,11 @@ impl Render for FileTree {
             .on_action(cx.listener(Self::collapse_all_files))
             .on_action(cx.listener(|this, _: &ToggleShowDotfiles, _, cx| this.toggle_show_dotfiles(cx)))
             .on_action(cx.listener(|this, _: &ToggleShowIgnored, _, cx| this.toggle_show_ignored(cx)))
-            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, cx| match this.input.project.name() {
-                None => open_in_vscode(this.files_root(), cx),
-                Some(name) => match Destination::parse(name) {
-                    Some(host) => cx.open_url(&vscode_remote_url(&host, &this.files_root())),
-                    None => tracing::warn!("cannot open {name} in VS Code: not an ssh destination"),
-                },
+            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, cx| {
+                open_root_in(VsCodeLike::VsCode, this.input.project.name(), this.files_root(), cx)
+            }))
+            .on_action(cx.listener(|this, _: &OpenRootInCursor, _, cx| {
+                open_root_in(VsCodeLike::Cursor, this.input.project.name(), this.files_root(), cx)
             }))
             .on_action(cx.listener(|this, _: &OpenRootInZed, _, cx| match this.input.project.name() {
                 None => cx.open_url(&file_url("zed://file", &this.files_root())),
@@ -1119,7 +1158,7 @@ mod tests {
 
     use runode_ssh::Destination;
 
-    use super::{file_url, vscode_remote_url, zed_remote_url};
+    use super::{VsCodeLike, file_url, vscode_remote_url, zed_remote_url};
 
     #[test]
     fn file_url_escapes_the_path() {
@@ -1141,7 +1180,9 @@ mod tests {
 
     #[test]
     fn vscode_remote_url_names_the_host_like_ssh() {
-        let url = |host: &str, dir: &str| vscode_remote_url(&Destination::parse(host).unwrap(), Path::new(dir));
+        let url = |host: &str, dir: &str| {
+            vscode_remote_url(VsCodeLike::VsCode, &Destination::parse(host).unwrap(), Path::new(dir))
+        };
         assert_eq!(
             url("me@box", "/home/me/my project"),
             "vscode://vscode-remote/ssh-remote+me@box/home/me/my%20project"
@@ -1150,6 +1191,15 @@ mod tests {
         // {"hostName":"me@box -p 2222"}
         let hex = "7b22686f73744e616d65223a226d6540626f78202d702032323232227d";
         assert_eq!(url("me@box:2222", "/srv"), format!("vscode://vscode-remote/ssh-remote+{hex}/srv"));
+    }
+
+    #[test]
+    fn cursor_remote_url_uses_its_own_scheme() {
+        let host = Destination::parse("me@box").unwrap();
+        assert_eq!(
+            vscode_remote_url(VsCodeLike::Cursor, &host, Path::new("/srv")),
+            "cursor://vscode-remote/ssh-remote+me@box/srv"
+        );
     }
 
     #[test]
