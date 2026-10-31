@@ -72,8 +72,11 @@ pub(super) fn canonical_dir(path: &Path) -> PathBuf {
 }
 
 /// 在单独的线程上算 `dir` 的 `canonical_dir`，算好之前为空：目录在挂死的网络卷、autofs 上时会一直卡着，
-/// 不能在界面线程上算，也不占后台线程池。
-pub(super) fn canonical_dir_later(dir: &Path) -> Arc<OnceLock<PathBuf>> {
+/// 不能在界面线程上算，也不占后台线程池。别的主机上的目录在本机查不到，照原样。
+pub(super) fn canonical_dir_later(host: &HostId, dir: &Path) -> Arc<OnceLock<PathBuf>> {
+    if !host.is_local() {
+        return Arc::new(OnceLock::from(dir.to_path_buf()));
+    }
     let cell = Arc::new(OnceLock::new());
     let (out, dir) = (cell.clone(), dir.to_path_buf());
     // 起不了线程时一直为空，比的时候照 `dir` 原样比。
@@ -95,8 +98,12 @@ pub(super) async fn dropped_dirs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 }
 
 /// 新 workspace 的名字：家目录叫 `~`；在 git 仓库里取仓库根的目录名，其余取目录名。
-/// 往上找仓库根时不看家目录本身，免得家目录是个管配置文件的仓库时个个都叫用户名。
-pub(super) fn workspace_name(dir: &Path) -> String {
+/// 往上找仓库根时不看家目录本身，免得家目录是个管配置文件的仓库时个个都叫用户名。别的主机上的目录在本机
+/// 查不到，只取目录名。
+pub(super) fn workspace_name(host: &HostId, dir: &Path) -> String {
+    if !host.is_local() {
+        return dir.file_name().map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned());
+    }
     let home = home_dir();
     if home.as_deref() == Some(dir) {
         return "~".into();
@@ -377,10 +384,10 @@ impl WindowView {
         let tab = self.single_pane_tab(view, window, cx);
         let workspace = Workspace {
             id: self.next_id(),
-            host,
-            name: name.unwrap_or_else(|| workspace_name(&dir)).into(),
+            host: host.clone(),
+            name: name.unwrap_or_else(|| workspace_name(&host, &dir)).into(),
             repo: RepoBadge::default(),
-            canonical: canonical_dir_later(&dir),
+            canonical: canonical_dir_later(&host, &dir),
             dir,
             tabs: vec![tab],
             active: 0,
@@ -948,7 +955,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("real")).unwrap();
         std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
-        let cell = canonical_dir_later(&root.join("link"));
+        let cell = canonical_dir_later(&HostId::Local, &root.join("link"));
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         while cell.get().is_none() && Instant::now() < deadline {
             std::thread::yield_now();
@@ -1010,9 +1017,9 @@ mod tests {
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::create_dir_all(base.join("repo/.git")).unwrap();
         std::fs::create_dir_all(base.join("plain")).unwrap();
-        assert_eq!(workspace_name(&sub), "repo");
-        assert_eq!(workspace_name(&base.join("repo")), "repo");
-        assert_eq!(workspace_name(&base.join("plain")), "plain");
+        assert_eq!(workspace_name(&HostId::Local, &sub), "repo");
+        assert_eq!(workspace_name(&HostId::Local, &base.join("repo")), "repo");
+        assert_eq!(workspace_name(&HostId::Local, &base.join("plain")), "plain");
         std::fs::remove_dir_all(&base).unwrap();
     }
 

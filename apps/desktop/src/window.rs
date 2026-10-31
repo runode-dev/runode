@@ -563,9 +563,9 @@ impl WindowView {
                 self.workspaces.push(Workspace {
                     id,
                     host: HostId::Local,
-                    name: model::workspace_name(&dir).into(),
+                    name: model::workspace_name(&HostId::Local, &dir).into(),
                     repo: Default::default(),
-                    canonical: model::canonical_dir_later(&dir),
+                    canonical: model::canonical_dir_later(&HostId::Local, &dir),
                     dir,
                     tabs: Vec::new(),
                     active: 0,

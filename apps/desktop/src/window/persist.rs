@@ -143,7 +143,7 @@ pub(super) fn keeps_windows(cx: &App) -> bool {
 pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
     let mut windows = format::load().map(|state| state.windows).unwrap_or_default();
     let live = live_sessions();
-    format::adopt(&mut windows, &held_layout(), &live, workspace_name);
+    format::adopt(&mut windows, &held_layout(), &live, |dir| workspace_name(&HostId::Local, dir));
     let windows: Vec<_> = windows.into_iter().filter(|window| !window.workspaces.is_empty()).collect();
     let plan = format::plan_restore(windows, &live);
     let link = host_client::link();
@@ -418,7 +418,7 @@ impl WindowView {
             }
             let name = Some(saved_workspace.name)
                 .filter(|name| !name.trim().is_empty())
-                .unwrap_or_else(|| workspace_name(&saved_workspace.dir));
+                .unwrap_or_else(|| workspace_name(&host, &saved_workspace.dir));
             if wi <= saved.active {
                 active = self.workspaces.len();
             }
@@ -432,10 +432,10 @@ impl WindowView {
             let id = self.next_id();
             self.workspaces.push(Workspace {
                 id,
-                host,
+                host: host.clone(),
                 name: name.into(),
                 repo: Default::default(),
-                canonical: super::model::canonical_dir_later(&saved_workspace.dir),
+                canonical: super::model::canonical_dir_later(&host, &saved_workspace.dir),
                 dir: saved_workspace.dir,
                 active: active_tab,
                 tabs,
