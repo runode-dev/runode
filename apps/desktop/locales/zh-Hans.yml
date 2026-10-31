@@ -231,6 +231,10 @@ ssh:
   service_later: 已装成登录服务。现在的宿主还有终端在跑，系统仍会在 SSH 登录断开后结束它们；等它退出，下次连接时就改由登录服务启动。
   service_linger: 这个用户没有权限开启 linger。请在那台机器上运行 sudo loginctl enable-linger $USER，再装一次。
   service_failed: "没能装成登录服务：%{error}"
+  prune_running: 正在清理旧版本的 runode…
+  prune_none: 没有可以清理的旧版本。
+  prune_done: "删掉了 %{count} 个旧版本的 runode，腾出 %{size}。"
+  prune_failed: "没能清理旧版本：%{error}"
 size_owner:
   controlled_by: 尺寸由 %{device} 控制
   controlled_elsewhere: 尺寸由另一台设备控制
@@ -743,6 +747,7 @@ settings:
     mismatch: "已连接，那边的 runode 是另一个构建（%{build}）"
     bound: 断开 SSH 后，这台机器会结束远端的终端
     install_service: 装成登录服务
+    prune: 清理旧版本
   autostart:
     app:
       title: 登录时打开 Runode

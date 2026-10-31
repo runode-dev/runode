@@ -94,6 +94,65 @@ pub fn service_job_text(job: &ServiceJob) -> String {
     }
 }
 
+/// 清理远端旧构建办到了哪一步，按主机名记。
+#[derive(Clone, Debug)]
+pub enum PruneJob {
+    Running,
+    Done { count: usize, kib: u64 },
+    Failed(String),
+}
+
+#[derive(Default)]
+struct PruneJobs(HashMap<String, PruneJob>);
+
+impl Global for PruneJobs {}
+
+pub fn prune_job(name: &str, cx: &App) -> Option<PruneJob> {
+    cx.try_global::<PruneJobs>()?.0.get(name).cloned()
+}
+
+fn set_prune_job(name: &str, job: PruneJob, cx: &mut App) {
+    cx.default_global::<PruneJobs>().0.insert(name.to_owned(), job);
+    hosts_changed(cx);
+}
+
+/// 在后台删掉主机 `name` 上用不着的 runode 构建（`RemoteHost::prune_builds`）。
+pub fn prune_builds(name: &str, cx: &mut App) {
+    let Some(host) = remote::find(name) else {
+        return;
+    };
+    if matches!(prune_job(name, cx), Some(PruneJob::Running)) {
+        return;
+    }
+    set_prune_job(name, PruneJob::Running, cx);
+    let name = name.to_owned();
+    let task = cx.background_spawn(async move { host.prune_builds() });
+    cx.spawn(async move |cx| {
+        let job = match task.await {
+            Ok((count, kib)) => PruneJob::Done { count, kib },
+            Err(error) => {
+                tracing::warn!("cannot remove old builds on {name}: {error}");
+                PruneJob::Failed(error)
+            }
+        };
+        cx.update(|cx| set_prune_job(&name, job, cx));
+    })
+    .detach();
+}
+
+/// 清理旧构建的结果在界面上的说法。
+pub fn prune_job_text(job: &PruneJob) -> String {
+    match job {
+        PruneJob::Running => rust_i18n::t!("ssh.prune_running").into_owned(),
+        PruneJob::Done { count: 0, .. } => rust_i18n::t!("ssh.prune_none").into_owned(),
+        PruneJob::Done { count, kib } => {
+            let size = crate::dictation::format_size(kib * 1024);
+            rust_i18n::t!("ssh.prune_done", count = count, size = size.as_str()).into_owned()
+        }
+        PruneJob::Failed(error) => rust_i18n::t!("ssh.prune_failed", error = error.as_str()).into_owned(),
+    }
+}
+
 /// 在最前面的窗口上说一句，只有「好」一个按钮。
 fn tell(detail: &str, cx: &mut App) {
     let Some(front) = window::front_window(cx) else {
@@ -197,6 +256,9 @@ fn handle(event: RemoteEvent, seen: &mut Seen, cx: &mut App) {
             seen.served.remove(&host);
             if cx.has_global::<ServiceJobs>() {
                 cx.global_mut::<ServiceJobs>().0.remove(&host);
+            }
+            if cx.has_global::<PruneJobs>() {
+                cx.global_mut::<PruneJobs>().0.remove(&host);
             }
             hosts_changed(cx);
         }

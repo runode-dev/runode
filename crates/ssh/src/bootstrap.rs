@@ -65,7 +65,8 @@ pub fn service_command(dir: &str) -> String {
 
 /// 把 stdin 上的可执行文件装成 `dir` 这个构建：先写成临时文件，核对 SHA-256（`sha256`，十六进制）、试跑一下
 /// （拦住挂成 noexec 的家目录、太旧的 glibc），都过了才原子地换上，再把 `runode` 链接指过去。`archive` 时
-/// stdin 是只装着 `runode` 的 tar.gz，核对的是包。
+/// stdin 是只装着 `runode` 的 tar.gz，核对的是包。换上以后删掉放了超过 `BUILD_KEEP_DAYS` 天的旧构建
+/// （`prune_script`），链接原先指着的那个留着。
 pub fn install_command(dir: &str, sha256: &str, archive: bool) -> String {
     let unpack = if archive { r#"tar -xzOf "$T.in" runode > "$T" && rm -f "$T.in""# } else { r#"mv -f "$T.in" "$T""# };
     wrap(&format!(
@@ -77,13 +78,54 @@ pub fn install_command(dir: &str, sha256: &str, archive: bool) -> String {
             "{unpack} || exit 1; ",
             r#"chmod 755 "$T" || exit 1; "#,
             r#"if "$T" --version > /dev/null 2>&1; then :; else rm -f "$T"; echo "RUNODE-INSTALL exec" >&2; exit 1; fi; "#,
-            r#"mv -f "$T" "$D/{dir}/runode" && ln -sf "{dir}/runode" "$D/.link-$$" && mv -f "$D/.link-$$" "$D/runode""#
+            r#"mv -f "$T" "$D/{dir}/runode" || exit 1; P=$(readlink "$D/runode" 2>/dev/null); P="${{P%%/*}}"; "#,
+            r#"ln -sf "{dir}/runode" "$D/.link-$$" && mv -f "$D/.link-$$" "$D/runode" || exit 1; "#,
+            "{prune} > /dev/null; :"
         ),
         bin = BIN_DIR,
         dir = dir,
         sha = sha256,
         unpack = unpack,
+        prune = prune_script(dir, Some(BUILD_KEEP_DAYS)),
     ))
+}
+
+/// 装上新构建时，别的构建放满这么多天才删。
+pub const BUILD_KEEP_DAYS: u32 = 7;
+/// 删掉一个旧构建打出的一行以它开头，后面是目录名和它占的 KiB。
+const PRUNED: &str = "RUNODE-PRUNED ";
+
+/// 删掉远端除 `keep` 和 `runode` 链接指着的以外的所有构建，打出删掉了哪些（`parse_pruned` 认）。
+pub fn prune_command(keep: &str) -> String {
+    wrap(&format!(
+        r#"D="$HOME/{BIN_DIR}"; P=$(readlink "$D/runode" 2>/dev/null); P="${{P%%/*}}"; {}"#,
+        prune_script(keep, None)
+    ))
+}
+
+/// 删掉 `$D` 下的构建目录，跳过 `keep`、`$P` 和还有进程在跑着里面的 `runode` 的；给了 `days` 时只删放满这么多天的。
+fn prune_script(keep: &str, days: Option<u32>) -> String {
+    let age = days.map(|days| format!(" -mtime +{days}")).unwrap_or_default();
+    format!(
+        concat!(
+            r#"R=$( {{ ps -A -o args=; ls -l /proc/[0-9]*/exe; }} 2>/dev/null ); "#,
+            r#"find "$D" -mindepth 1 -maxdepth 1 -type d{age} | while read -r E; do N="${{E##*/}}"; "#,
+            r#"case "$N" in "{keep}"|"$P") continue;; esac; case "$R" in *"$E/runode"*) continue;; esac; "#,
+            r#"K=$(du -sk "$E" 2>/dev/null | cut -f1); rm -rf "$E" && printf "{pruned}%s %s\n" "$N" "${{K:-0}}"; done"#
+        ),
+        age = age,
+        keep = keep,
+        pruned = PRUNED,
+    )
+}
+
+/// `prune_command` 的输出里删掉的构建，各是目录名和它占的 KiB；登录 shell 的启动文件可能先打出别的行，跳过。
+pub fn parse_pruned(output: &str) -> Vec<(String, u64)> {
+    output
+        .lines()
+        .filter_map(|line| line.strip_prefix(PRUNED)?.split_once(' '))
+        .map(|(name, kib)| (name.to_owned(), kib.trim().parse().unwrap_or(0)))
+        .collect()
 }
 
 /// 上传到远端的文件放在家目录下的这里，每次上传一个子目录。

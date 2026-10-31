@@ -393,6 +393,28 @@ impl RemoteHost {
         read.map_err(|_| fail("ssh", format!("ssh exited with {:?}", output.status.code())))?
     }
 
+    /// 删掉远端除了这个构建、`runode` 链接指着的和还在跑的以外的构建，交回删掉的个数和腾出的 KiB。连着时才办，
+    /// 会阻塞。
+    pub fn prune_builds(&self) -> Result<(usize, u64), String> {
+        if !matches!(self.status(), Status::Connected(_)) {
+            return Err(format!("not connected to {}", self.name));
+        }
+        let ssh = ssh();
+        let script = runode_ssh::bootstrap::prune_command(&deploy::install_dir());
+        let mut command = ssh.exec(&self.dest, &script, ssh.control.is_some());
+        if ssh.control.is_none() {
+            self.ask_through(&mut command, true);
+        }
+        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        crate::subprocess::hide_window(&mut command);
+        let output = command.output().map_err(|err| format!("cannot run ssh: {err}"))?;
+        if !output.status.success() {
+            return Err(format!("ssh exited with {:?}", output.status.code()));
+        }
+        let pruned = runode_ssh::bootstrap::parse_pruned(&String::from_utf8_lossy(&output.stdout));
+        Ok((pruned.len(), pruned.iter().map(|(_, kib)| kib).sum()))
+    }
+
     /// 管这台主机的连接，见模块说明。
     fn supervise(self: Arc<Self>) {
         let mut attempt = 0u32;

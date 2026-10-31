@@ -231,6 +231,10 @@ ssh:
   service_later: Installed as a login service. The current host still has terminals running, and the system still ends them when the SSH login closes; once it exits, the next connection starts the host through the login service.
   service_linger: This user is not allowed to enable linger. Run sudo loginctl enable-linger $USER on that machine, then install again.
   service_failed: "Could not install the login service: %{error}"
+  prune_running: Removing old versions of runode…
+  prune_none: No old versions of runode to remove.
+  prune_done: "Removed %{count} old version(s) of runode, freeing %{size}."
+  prune_failed: "Could not remove old versions: %{error}"
 size_owner:
   controlled_by: "Size set by %{device}"
   controlled_elsewhere: Size set by another device
@@ -743,6 +747,7 @@ settings:
     mismatch: "Connected. The host runs another build of runode (%{build})."
     bound: This machine ends the remote terminals when SSH disconnects
     install_service: Install as Login Service
+    prune: Remove Old Versions
   autostart:
     app:
       title: Open Runode at login

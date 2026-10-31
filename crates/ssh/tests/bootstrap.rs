@@ -11,7 +11,7 @@ use std::{
 use common::TempDir;
 use runode_ssh::bootstrap::{
     BIN_DIR, Libc, Os, PROBE_EXIT, Platform, Target, UPLOADS_DIR, Unsupported, connect_command, install_command,
-    install_dir_name, parse_uploaded, project_command, service_command, upload_command,
+    install_dir_name, parse_pruned, parse_uploaded, project_command, prune_command, service_command, upload_command,
 };
 
 /// 像 ssh 那样把命令行交给登录 shell（默认 /bin/sh）解释。
@@ -52,6 +52,7 @@ fn scripts_avoid_characters_remote_shells_mangle() {
         upload_command("1-2", Some("a.png")),
         project_command("0.1.16.abc"),
         service_command("0.1.16.abc"),
+        prune_command("0.1.16.abc"),
     ] {
         let inner = command.strip_prefix("/bin/sh -c '").and_then(|rest| rest.strip_suffix('\'')).unwrap();
         assert!(!inner.contains(['\'', '!', '\n']), "{inner}");
@@ -91,6 +92,58 @@ fn probes_then_installs_then_bridges() {
     let other = run(&home.0, &connect_command("0.1.17.next"), b"");
     let platform = Platform::parse(&String::from_utf8_lossy(&other.stdout)).unwrap();
     assert_eq!(platform.installed, [dir, "runode"]);
+}
+
+/// 在 `BIN_DIR` 下摆一个假的构建 `name`，`old` 时把目录的修改时间挪到很久以前。
+#[cfg(unix)]
+fn fake_build(home: &std::path::Path, name: &str, old: bool) {
+    let dir = home.join(BIN_DIR).join(name);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("runode"), "#!/bin/sh\nexit 0\n").unwrap();
+    if old {
+        assert!(Command::new("touch").args(["-t", "202001010000"]).arg(&dir).status().unwrap().success());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn installing_drops_builds_left_long_ago() {
+    let home = TempDir::new("bootstrap-prune");
+    let bin = home.0.join(BIN_DIR);
+    for (name, old) in [("old", true), ("previous", true), ("young", false)] {
+        fake_build(&home.0, name, old);
+    }
+    std::os::unix::fs::symlink("previous/runode", bin.join("runode")).unwrap();
+    let fake = home.0.join("fake");
+    fs::write(&fake, "#!/bin/sh\nexit 0\n").unwrap();
+    let installed = run(&home.0, &install_command("new", &sha256_hex(&fake), false), &fs::read(&fake).unwrap());
+    assert!(installed.status.success(), "{}", String::from_utf8_lossy(&installed.stderr));
+    let mut left: Vec<_> = fs::read_dir(&bin).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+    left.sort();
+    assert_eq!(left, ["new", "previous", "runode", "young"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn pruning_keeps_the_current_linked_and_running_builds() {
+    let home = TempDir::new("bootstrap-prune-all");
+    let bin = home.0.join(BIN_DIR);
+    for name in ["current", "linked", "running", "stale"] {
+        fake_build(&home.0, name, false);
+    }
+    std::os::unix::fs::symlink("linked/runode", bin.join("runode")).unwrap();
+    // 命令行里带着 `running` 的可执行文件路径，`ps` 列得出来；`; :` 免得 sh 直接换成 sleep。
+    let mut busy = Command::new("/bin/sh").args(["-c", "sleep 30; :"]).arg(bin.join("running/runode")).spawn().unwrap();
+    let output = run(&home.0, &format!("echo from .bashrc; {}", prune_command("current")), b"");
+    busy.kill().unwrap();
+    busy.wait().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let pruned = parse_pruned(&String::from_utf8_lossy(&output.stdout));
+    assert_eq!(pruned.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["stale"]);
+    assert!(pruned[0].1 > 0);
+    let mut left: Vec<_> = fs::read_dir(&bin).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+    left.sort();
+    assert_eq!(left, ["current", "linked", "running", "runode"]);
 }
 
 #[cfg(unix)]
