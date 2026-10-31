@@ -56,6 +56,14 @@ pub fn project_command(dir: &str) -> String {
     ))
 }
 
+/// 起远端装着的 `dir` 这个构建的远程桌面桥接（`runode --ssh-screen`），stdin、stdout 交给它；没装时以
+/// `PROBE_EXIT` 退出，先经 `connect_command` 装好。
+pub fn screen_command(dir: &str) -> String {
+    wrap(&format!(
+        r#"X="$HOME/{BIN_DIR}/{dir}/runode"; if [ -x "$X" ]; then exec "$X" --ssh-screen; fi; exit {PROBE_EXIT}"#
+    ))
+}
+
 /// 把远端的宿主装成登录服务：装着 `dir` 这个构建就换成它的 `runode --ssh-service`，没装时以 `PROBE_EXIT` 退出。
 pub fn service_command(dir: &str) -> String {
     wrap(&format!(

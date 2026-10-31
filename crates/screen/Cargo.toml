@@ -1,6 +1,6 @@
 [package]
 name = "runode-screen"
-description = "Remote desktop on the computer side: captures a display, encodes it as low-latency hardware HEVC, and injects the mouse and keyboard input sent from the phone"
+description = "Remote desktop pieces outside the UI: captures a display, encodes it as low-latency hardware HEVC, injects the mouse and keyboard input sent from the viewer, and decodes the HEVC on the viewer side"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,10 +17,14 @@ objc2-core-foundation = { workspace = true, features = ["std", "CFBase", "CFDict
 objc2-core-graphics = { workspace = true, features = ["std", "CGDirectDisplay", "CGDisplayConfiguration", "CGError", "CGEvent", "CGEventTypes", "CGRemoteOperation", "CGSession", "CGWindow", "libc"] }
 objc2-core-media = { workspace = true, features = ["std", "objc2-core-video", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime"] }
 objc2-core-video = { workspace = true, features = ["std", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
-objc2-video-toolbox = { workspace = true, features = ["std", "objc2-core-media", "objc2-core-video", "VTBase", "VTCompressionProperties", "VTCompressionSession", "VTErrors", "VTSession"] }
+objc2-video-toolbox = { workspace = true, features = ["std", "objc2-core-media", "objc2-core-video", "VTBase", "VTCompressionProperties", "VTCompressionSession", "VTDecompressionSession", "VTErrors", "VTSession"] }
 objc2-screen-capture-kit = { workspace = true, features = ["std", "block2", "dispatch2", "objc2-core-media", "objc2-core-graphics", "SCShareableContent", "SCStream"] }
 block2.workspace = true
 dispatch2 = { workspace = true, features = ["std", "alloc", "objc2"] }
+
+# 往返测试要自己建、填 `CVPixelBuffer`。
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-core-video = { workspace = true, features = ["CVBase", "CVReturn"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

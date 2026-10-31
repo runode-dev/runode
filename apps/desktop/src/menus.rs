@@ -19,7 +19,8 @@ use crate::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
         InstallSkill, MovePaneToNewTab, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab,
         NextWorkspace, PreviousTab, PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions,
-        ToggleKanban, TogglePaneFold, TogglePaneZoom, ToggleSchedules, ToggleSidebar, ToggleStatusBar, ToggleTasks,
+        ToggleKanban, TogglePaneFold, TogglePaneZoom, ToggleRemoteDesktop, ToggleSchedules, ToggleSidebar,
+        ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -152,6 +153,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.toggle_kanban"), ToggleKanban),
             MenuItem::action(tr("menu.toggle_schedules"), ToggleSchedules),
             MenuItem::action(tr("menu.new_todo"), NewTodo),
+            MenuItem::action(tr("menu.toggle_remote_desktop"), ToggleRemoteDesktop),
             MenuItem::action(tr("menu.toggle_full_screen"), ToggleFullScreen),
         ]),
         Menu::new(tr("menu.window")).items([

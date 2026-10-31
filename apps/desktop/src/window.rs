@@ -35,6 +35,7 @@ mod project;
 mod quit;
 mod remote;
 mod resize_request;
+mod screen_viewer;
 mod settings_page;
 mod sidebar;
 mod slot;
@@ -82,6 +83,7 @@ pub use crate::file_tree::{
     RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
 pub use kanban::watch_todos;
+pub(crate) use screen_viewer::show_remote_desktop;
 pub(crate) use settings_page::show_settings;
 pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
 pub use status_bar::watch as watch_status;
@@ -154,6 +156,8 @@ actions!(
         ToggleSchedules,
         /// 打开看板和新建任务的对话框。
         NewTodo,
+        /// 打开或收起当前 workspace 所在 SSH 主机的远程桌面。
+        ToggleRemoteDesktop,
         /// 开一个终端，用 `npx skills` 把教 agent 用 runode 的 skill 装到全局。
         InstallSkill
     ]
@@ -296,6 +300,8 @@ pub struct WindowView {
     settings: Option<settings_page::SettingsPage>,
     /// 开着的看板，和手机端引导页一样盖住标签和分屏；新建、编辑任务和定时的对话框。
     kanban: Option<kanban::OpenKanban>,
+    /// 开着的远程桌面，和看板一样盖住标签和分屏。
+    screen_viewer: Option<screen_viewer::OpenScreenViewer>,
     /// 离开时收起来的写到一半的新建任务那一页，下回新建任务时接着写。
     todo_draft: Option<Entity<crate::kanban::TodoDialog>>,
     /// 正在办用户按的窗口动作（`act`）：这时换标签算用户要离开新建任务那一页。
@@ -428,9 +434,12 @@ impl WindowView {
         let config_watch = cx.observe_global::<AppConfig>(|this, cx| {
             // 界面跟着 `ui-font-size` 缩放，Git 面板有多个仓库时的列表记着量过的行高，要重新量。
             this.git_panel.read(cx).remeasure();
-            // 看板是缓存的视图，不跟着窗口重画：字号、语言、卡片样式变了要叫它重画。
+            // 看板和远程桌面是缓存的视图，不跟着窗口重画：字号、语言、卡片样式变了要叫它重画。
             if let Some(board) = &this.kanban {
                 board.view.update(cx, |_, cx| cx.notify());
+            }
+            if let Some(open) = &this.screen_viewer {
+                open.view.update(cx, |_, cx| cx.notify());
             }
             cx.notify();
         });
@@ -489,6 +498,7 @@ impl WindowView {
             mobile: None,
             settings: None,
             kanban: None,
+            screen_viewer: None,
             todo_draft: None,
             acting: false,
             empty_focus: cx.focus_handle(),
@@ -635,6 +645,9 @@ impl WindowView {
         if let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) {
             cx.defer(move |cx| board.update(cx, |_, cx| cx.notify()));
         }
+        if let Some(view) = self.screen_viewer.as_ref().map(|open| open.view.clone()) {
+            cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()));
+        }
         let preview = self.preview.clone();
         cx.defer(move |cx| preview.update(cx, |_, cx| cx.notify()));
     }
@@ -712,6 +725,9 @@ impl Focusable for WindowView {
         if let Some(board) = &self.kanban {
             return board.view.focus_handle(cx);
         }
+        if let Some(open) = &self.screen_viewer {
+            return open.view.focus_handle(cx);
+        }
         if self.preview_front(cx) {
             return self.preview.read(cx).focus_handle(cx);
         }
@@ -741,6 +757,8 @@ impl Render for WindowView {
             (if cards(cx) { theme.frame } else { theme.background }, self.render_mobile_body(window, cx))
         } else if self.kanban.is_some() {
             (if cards(cx) { theme.frame } else { theme.background }, self.render_todo_body(window, cx))
+        } else if self.screen_viewer.is_some() {
+            (if cards(cx) { theme.frame } else { theme.background }, self.render_screen_body(window, cx))
         } else if cards(cx) {
             (theme.frame, self.render_cards_body(window, cx))
         } else {
@@ -812,6 +830,8 @@ impl Render for WindowView {
                     }
                 } else if this.mobile.is_some() {
                     this.close_mobile(window, cx);
+                } else if this.screen_viewer.is_some() {
+                    this.close_screen_viewer(window, cx);
                 } else {
                     this.close_pane(action, window, cx);
                 }
@@ -855,6 +875,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::next_agent))
             // 新建任务那一页开着时也接（不经 `act` 挡掉）：侧栏的入口露在外面，按了要回到看板、定时页。
             .on_action(cx.listener(Self::toggle_kanban))
+            .on_action(Self::act(cx, Self::toggle_remote_desktop))
             .on_action(cx.listener(Self::toggle_schedules))
             .on_action(Self::act(cx, Self::new_todo))
             .on_action(Self::act(cx, Self::arrange_panes))

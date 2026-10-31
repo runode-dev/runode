@@ -501,6 +501,7 @@ impl WindowView {
             self.leave_todo_page(window, cx);
             self.leave_mobile(cx);
             self.kanban = None;
+            self.screen_viewer = None;
             // 焦点要交给终端，盖着终端的预览退到后面。
             self.send_preview_back(cx);
         }

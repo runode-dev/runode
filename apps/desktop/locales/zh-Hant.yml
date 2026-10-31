@@ -51,6 +51,7 @@ menu:
   toggle_kanban: 看板
   toggle_schedules: 定時
   new_todo: 新增任務
+  toggle_remote_desktop: 遠端桌面
   toggle_full_screen: 切換全螢幕
   window: 視窗
   minimize: 縮到最小
@@ -219,6 +220,7 @@ ssh:
   status_stopped: "連不上：%{error}"
   lost: "%{host}：%{status}"
   reconnect: 立即重連
+  remote_desktop: 遠端桌面
   upload_failed: "傳不到 %{host} 上"
   ok: 好
   bound_title: "%{host} 上的終端機會跟著 SSH 登入一起結束"
@@ -1294,3 +1296,22 @@ action:
   decrease_font_size: 縮小字體，步長固定，N 可省略
   reset_font_size: 重設字體大小
   dictate: 語音輸入：按住說話、放開打進終端，或者點一下開始、再點一下結束
+screen_viewer:
+  title: "%{host} 的遠端桌面"
+  screen: "%{host} 的螢幕"
+  display: "螢幕 %{number}"
+  reconnect: 重新連線
+  close: 關閉遠端桌面
+  connecting: "正在連線 %{host}…"
+  opening: 正在打開螢幕…
+  no_screen_capture: "那台 Mac 還沒給 Runode 螢幕錄製權限，已經在它螢幕上跳出授權視窗：請在那台 Mac 的「系統設定 › 隱私權與安全性 › 螢幕與系統錄音」裡打開 runode 的開關，再重新連線。"
+  no_post_event: "只能看：那台 Mac 還沒給 Runode 輔助使用權限。請在那台 Mac 的「系統設定 › 隱私權與安全性 › 輔助使用」裡打開 runode 的開關，再重新連線。"
+  closed: 和遠端桌面的連線中斷了。
+  incompatible: 那台電腦上的遠端桌面是別的版本，等它自己結束後過幾秒再試。
+  no_decoder: "這台電腦無法解碼遠端的畫面（HEVC）：%{error}。Windows 上請到 Microsoft Store 安裝「HEVC 視訊延伸模組」。"
+  unsupported: 這個系統上無法使用遠端桌面。
+  bad_host: 不是有效的 SSH 主機。
+  locked: 遠端鎖定了螢幕，輸入登入密碼解鎖。
+  unlock_failed: 無法輸入這個密碼：裡面有美式鍵盤打不出的字元。
+  password: 登入密碼
+  unlock: 解鎖

@@ -152,6 +152,7 @@ impl WindowView {
     pub(super) fn show_kanban(&mut self, schedules: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.leave_mobile(cx);
         self.drop_settings(cx);
+        self.screen_viewer = None;
         match &self.kanban {
             Some(board) => board.view.update(cx, |board, cx| board.show_schedules(schedules, cx)),
             None => {

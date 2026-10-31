@@ -51,6 +51,7 @@ menu:
   toggle_kanban: 看板
   toggle_schedules: 定时
   new_todo: 新建任务
+  toggle_remote_desktop: 远程桌面
   toggle_full_screen: 切换全屏
   window: 窗口
   minimize: 最小化
@@ -219,6 +220,7 @@ ssh:
   status_stopped: "连不上：%{error}"
   lost: "%{host}：%{status}"
   reconnect: 立即重连
+  remote_desktop: 远程桌面
   upload_failed: "传不到 %{host} 上"
   ok: 好
   bound_title: "%{host} 上的终端会跟着 SSH 登录一起结束"
@@ -1294,3 +1296,22 @@ action:
   decrease_font_size: 缩小字号，步长固定，N 可省略
   reset_font_size: 恢复默认字号
   dictate: 语音输入：按住说话、松开打进终端，或者点一下开始、再点一下结束
+screen_viewer:
+  title: "%{host} 的远程桌面"
+  screen: "%{host} 的屏幕"
+  display: "屏幕 %{number}"
+  reconnect: 重新连接
+  close: 关闭远程桌面
+  connecting: "正在连接 %{host}…"
+  opening: 正在打开屏幕…
+  no_screen_capture: "那台 Mac 还没给 Runode 屏幕录制权限，已经在它屏幕上弹出授权框：请在那台 Mac 的「系统设置 › 隐私与安全性 › 屏幕与系统录音」里打开 runode 的开关，再重新连接。"
+  no_post_event: "只能看：那台 Mac 还没给 Runode 辅助功能权限。请在那台 Mac 的「系统设置 › 隐私与安全性 › 辅助功能」里打开 runode 的开关，再重新连接。"
+  closed: 和远程桌面的连接断开了。
+  incompatible: 那台电脑上的远程桌面是别的版本，等它自己退出后过几秒再试。
+  no_decoder: "这台电脑解不了远端的画面（HEVC）：%{error}。Windows 上请到 Microsoft Store 安装「HEVC 视频扩展」。"
+  unsupported: 这个系统上用不了远程桌面。
+  bad_host: 不是有效的 SSH 主机。
+  locked: 远端锁屏了，输入登录密码解锁。
+  unlock_failed: 敲不了这个密码：里面有美式键盘打不出的字符。
+  password: 登录密码
+  unlock: 解锁

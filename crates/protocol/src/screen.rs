@@ -36,6 +36,9 @@ pub enum ScreenClientMsg {
         fps: u32,
         /// 平均码率，单位 bit/s。
         bitrate: u32,
+        /// 画面里不画电脑的鼠标指针：客户端自己有指针、点哪儿就是哪儿时（桌面 app）不要画面里再出一个跟不上的。
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        hide_cursor: bool,
     },
     /// 下一帧要关键帧。
     Keyframe,

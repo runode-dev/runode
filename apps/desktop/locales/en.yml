@@ -51,6 +51,7 @@ menu:
   toggle_kanban: Kanban
   toggle_schedules: Schedules
   new_todo: New Task
+  toggle_remote_desktop: Remote Desktop
   toggle_full_screen: Toggle Full Screen
   window: Window
   minimize: Minimize
@@ -219,6 +220,7 @@ ssh:
   status_stopped: "Cannot connect: %{error}"
   lost: "%{host}: %{status}"
   reconnect: Reconnect Now
+  remote_desktop: Remote Desktop
   upload_failed: "Could not upload to %{host}"
   ok: OK
   bound_title: "Terminals on %{host} end when you log out of SSH"
@@ -1221,3 +1223,22 @@ files:
     macos: "Open in Finder"
     windows: "Open in File Explorer"
     linux: "Open in File Manager"
+screen_viewer:
+  title: "Remote desktop of %{host}"
+  screen: "Screen of %{host}"
+  display: "Display %{number}"
+  reconnect: Reconnect
+  close: Close remote desktop
+  connecting: "Connecting to %{host}…"
+  opening: Opening the screen…
+  no_screen_capture: "That Mac has no Screen Recording permission for Runode yet. A prompt has been shown on that Mac: turn on runode in System Settings › Privacy & Security › Screen & System Audio Recording there, then reconnect."
+  no_post_event: "View only: Runode on that Mac has no Accessibility permission yet. Turn on runode in System Settings › Privacy & Security › Accessibility on that Mac, then reconnect."
+  closed: The connection to the remote desktop closed.
+  incompatible: "The remote desktop on that computer is a different version. Try again in a few seconds, after it exits on its own."
+  no_decoder: "This computer cannot decode the remote screen (HEVC): %{error}. On Windows, install HEVC Video Extensions from the Microsoft Store."
+  unsupported: Remote desktop is not available on this system.
+  bad_host: Not a valid SSH host.
+  locked: The remote screen is locked. Enter the login password to unlock it.
+  unlock_failed: "Could not type the password: it has characters a US keyboard cannot type."
+  password: Login password
+  unlock: Unlock

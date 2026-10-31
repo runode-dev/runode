@@ -137,6 +137,12 @@ impl Dirs {
         self.cache_file(&format!("{SCREEN_NAME}.log"))
     }
 
+    /// 不在 .app 里的 runode 拉起采集进程时用的那一份可执行文件，在 `data` 下以 `SCREEN_NAME` 为名的目录里。
+    /// 它的路径不随版本变：macOS 按路径记命令行程序的屏幕录制和辅助功能授权。
+    pub fn screen_exe_file(&self) -> Option<PathBuf> {
+        Some(self.data_file(SCREEN_NAME)?.join("runode"))
+    }
+
     /// 放宿主进程的 socket 和锁的目录，即 `data` 下的 `run`；有 `machine` 时是 `run` 下以它为名的子目录。
     /// 别的用户不能进这个目录，见 `create_runtime_dir`。
     pub fn runtime_dir(&self) -> Option<PathBuf> {
@@ -583,6 +589,7 @@ mod tests {
         );
         assert_eq!(dirs.host_log_file(), Some(format!("/home/me/.runode/cache/{HOST_NAME}.log").into()));
         assert_eq!(dirs.screen_socket_file(), Some(format!("/home/me/.runode/run/{SCREEN_NAME}.sock").into()));
+        assert_eq!(dirs.screen_exe_file(), Some(format!("/home/me/.runode/{SCREEN_NAME}/runode").into()));
         assert_eq!(Dirs::default().host_socket_file(), None);
     }
 

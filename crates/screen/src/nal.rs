@@ -69,6 +69,19 @@ pub(crate) fn from_annex_b(data: &[u8]) -> (Vec<u8>, Vec<Vec<u8>>) {
     (out, parameter_sets)
 }
 
+/// 把 `VideoFrame` 的一帧换回 Annex B 码流（解码器要的写法）：每个 NAL 单元前换成四字节起始码，关键帧
+/// 先放参数集。
+#[cfg(any(windows, test))]
+pub(crate) fn to_annex_b(data: &[u8], parameter_sets: &[Vec<u8>]) -> Vec<u8> {
+    const START: [u8; 4] = [0, 0, 0, 1];
+    let mut out = Vec::with_capacity(data.len() + parameter_sets.iter().map(|set| set.len() + 4).sum::<usize>());
+    for unit in parameter_sets.iter().map(Vec::as_slice).chain(units(data)) {
+        out.extend(START);
+        out.extend_from_slice(unit);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +136,15 @@ mod tests {
         let (data, parameter_sets) = from_annex_b(&[&[0, 0, 1][..], &nal(1, b"p\0")].concat());
         assert!(parameter_sets.is_empty());
         assert!(!is_keyframe(&data));
+    }
+
+    /// 换回 Annex B 再换过来是原样。
+    #[test]
+    fn round_trips_through_annex_b() {
+        let nal = |kind: u8, body: &[u8]| [&[kind << 1, 1][..], body].concat();
+        let sets = vec![nal(VPS, b"v"), nal(33, b"s"), nal(PPS, b"p")];
+        let data = [unit(19, b"idr"), unit(1, b"more")].concat();
+        let (back, back_sets) = from_annex_b(&to_annex_b(&data, &sets));
+        assert_eq!((back, back_sets), (data, sets));
     }
 }

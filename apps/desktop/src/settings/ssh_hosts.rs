@@ -68,6 +68,11 @@ impl SettingsView {
                 button("settings.ssh_hosts.disconnect", "disconnect")
                     .on_press(cx, move |_, _, cx| remote_hosts::disconnect(&name, cx))
             });
+        let remote_desktop = (crate::screen_viewer::SUPPORTED && matches!(status, Status::Connected(_))).then(|| {
+            let name = name.clone();
+            button("ssh.remote_desktop", "remote-desktop")
+                .on_press(cx, move |_, _, cx| crate::window::show_remote_desktop(name.clone(), cx))
+        });
         let bound = matches!(&status, Status::Connected(connected) if connected.session_bound);
         let job = remote_hosts::service_job(&name, cx);
         let prune_job = remote_hosts::prune_job(&name, cx);
@@ -157,6 +162,7 @@ impl SettingsView {
                     .gap(px(6.))
                     .children(install)
                     .children(prune)
+                    .children(remote_desktop)
                     .children(reconnect)
                     .children(disconnect)
                     .child(forget),

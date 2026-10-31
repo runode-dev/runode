@@ -1,14 +1,17 @@
-//! 远程桌面在电脑这边的部分：采集一块屏幕、编成低延迟的硬件 HEVC（`Capture`），把手机发来的
-//! 鼠标和键盘输入注入系统（`Injector`）。传输和协议不在这里。
+//! 远程桌面不碰界面的部分：被看的电脑上采集一块屏幕、编成低延迟的硬件 HEVC（`Capture`），把观看端
+//! （手机或桌面 app）发来的鼠标和键盘输入注入系统（`Injector`）；桌面 app 当观看端时把画面解回来
+//! （`Decoder`）。传输和协议不在这里。
 //!
-//! macOS 上 ScreenCaptureKit 采集，VideoToolbox 编码，CoreGraphics 注入；采集要「屏幕录制」的授权，
+//! macOS 上 ScreenCaptureKit 采集，VideoToolbox 编解码，CoreGraphics 注入；采集要「屏幕录制」的授权，
 //! 注入要「辅助功能」的授权，都按调用进程的责任进程记（`permissions`）。Windows 上 DXGI 桌面复制
-//! 采集，Media Foundation 编码，`SendInput` 注入，不用授权。
+//! 采集，Media Foundation 编解码，`SendInput` 注入，不用授权。
 
 #[cfg(target_os = "macos")]
 mod awake;
 #[cfg(target_os = "macos")]
 mod capture;
+#[cfg(target_os = "macos")]
+mod decoder;
 #[cfg(target_os = "macos")]
 mod encoder;
 #[cfg(target_os = "macos")]
@@ -24,10 +27,12 @@ pub use awake::KeepAwake;
 #[cfg(target_os = "macos")]
 pub use capture::{Capture, Keyframes};
 #[cfg(target_os = "macos")]
+pub use decoder::{Decoded, Decoder, PixelBuffer};
+#[cfg(target_os = "macos")]
 pub use input::Injector;
 pub use keys::key_strokes;
 #[cfg(windows)]
-pub use win::{Capture, Injector, KeepAwake, Keyframes};
+pub use win::{Capture, Decoded, Decoder, Injector, KeepAwake, Keyframes};
 
 pub use runode_types::screen::VideoFrame;
 
@@ -51,6 +56,8 @@ pub struct Options {
     pub fps: u32,
     /// 平均码率，单位 bit/s。
     pub bitrate: u32,
+    /// 画面里画上鼠标指针。
+    pub cursor: bool,
 }
 
 /// 一块屏幕。

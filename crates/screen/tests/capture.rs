@@ -15,7 +15,7 @@ use runode_screen::{Capture, Display, Event, Options};
 #[ignore = "needs the screen recording permission"]
 fn first_frame_and_requested_frames_are_keyframes() {
     let display = Display::main();
-    let options = Options { display: display.id, width: 1280, height: 720, fps: 60, bitrate: 8_000_000 };
+    let options = Options { display: display.id, width: 1280, height: 720, fps: 60, bitrate: 8_000_000, cursor: true };
     let (tx, rx) = mpsc::channel();
     let capture = Capture::start(&options, move |event| {
         let _ = tx.send(event);

@@ -5,6 +5,7 @@
 
 mod awake;
 mod capture;
+mod decoder;
 mod display;
 mod encoder;
 mod input;
@@ -12,6 +13,7 @@ mod input;
 use std::{io, sync::Once};
 
 use windows::Win32::{
+    Media::MediaFoundation::{MF_VERSION, MFSTARTUP_FULL, MFStartup},
     System::RemoteDesktop::{
         WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTS_SESSIONSTATE_LOCK, WTSFreeMemory, WTSINFOEXW,
         WTSQuerySessionInformationW, WTSSessionInfoEx,
@@ -21,6 +23,7 @@ use windows::Win32::{
 
 pub use awake::KeepAwake;
 pub use capture::{Capture, Keyframes};
+pub use decoder::{Decoded, Decoder};
 pub(crate) use display::displays;
 pub use input::Injector;
 
@@ -59,6 +62,17 @@ pub(crate) fn screen_locked() -> bool {
     // SAFETY: 缓冲是上面查询时系统分配的，只放一次。
     unsafe { WTSFreeMemory(buffer.0.cast()) };
     locked
+}
+
+/// 启动 Media Foundation；进程里只启动一次，之后一直开着。
+fn start_media_foundation() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: 进程里只启动一次。
+        if let Err(err) = unsafe { MFStartup(MF_VERSION, MFSTARTUP_FULL) } {
+            tracing::warn!("cannot start Media Foundation: {err}");
+        }
+    });
 }
 
 fn other(err: windows::core::Error) -> io::Error {

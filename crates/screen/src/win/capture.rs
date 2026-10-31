@@ -177,6 +177,8 @@ struct Pipeline {
     next_target: usize,
     /// 拿到过桌面复制交来的真画面（`LastPresentTime` 不为零）。
     have_image: bool,
+    /// 在画面上画指针（`Options::cursor`）。
+    cursor: bool,
     state: Arc<State>,
     started: Instant,
     last_pts: i64,
@@ -269,6 +271,7 @@ impl Pipeline {
                 targets,
                 next_target: 0,
                 have_image: false,
+                cursor: options.cursor,
                 state,
                 started: Instant::now(),
                 last_pts: -1,
@@ -402,7 +405,9 @@ impl Pipeline {
                 }
                 None => self.context.CopyResource(&self.composed, &self.desktop),
             }
-            self.draw_cursor();
+            if self.cursor {
+                self.draw_cursor();
+            }
             if let Err(err) = blit(&self.video, &self.processor, &self.input, &view) {
                 tracing::warn!("cannot convert a screen frame: {err}");
                 return true;

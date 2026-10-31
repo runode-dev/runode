@@ -33,7 +33,25 @@ fn client_messages_match_the_fixtures() {
     matches("screen_hello.json", &ScreenClientMsg::ScreenHello { version: 2 });
     matches(
         "start.json",
-        &ScreenClientMsg::Start { display: Some(2), width: 2556, height: 1179, fps: 60, bitrate: 8_000_000 },
+        &ScreenClientMsg::Start {
+            display: Some(2),
+            width: 2556,
+            height: 1179,
+            fps: 60,
+            bitrate: 8_000_000,
+            hide_cursor: false,
+        },
+    );
+    matches(
+        "start_hide_cursor.json",
+        &ScreenClientMsg::Start {
+            display: None,
+            width: 1280,
+            height: 720,
+            fps: 60,
+            bitrate: 4_000_000,
+            hide_cursor: true,
+        },
     );
     matches("keyframe.json", &ScreenClientMsg::Keyframe);
     matches("bitrate.json", &ScreenClientMsg::Bitrate { bitrate: 2_000_000 });

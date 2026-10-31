@@ -14,7 +14,7 @@ mod dictation;
 mod element;
 mod ime;
 mod input;
-mod keys;
+pub(crate) mod keys;
 mod lifecycle;
 mod paint;
 mod screen;

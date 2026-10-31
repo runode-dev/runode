@@ -5,7 +5,7 @@
 use std::{
     io, ptr,
     sync::{
-        Arc, Condvar, Mutex, Once, PoisonError, Weak,
+        Arc, Condvar, Mutex, PoisonError, Weak,
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
@@ -24,13 +24,13 @@ use windows::{
             METransformNeedInput, MF_E_NOTACCEPTING, MF_E_TRANSFORM_STREAM_CHANGE, MF_EVENT_FLAG_NONE,
             MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE,
             MF_MT_MPEG_SEQUENCE_HEADER, MF_MT_MPEG2_PROFILE, MF_MT_SUBTYPE, MF_MT_VIDEO_NOMINAL_RANGE,
-            MF_MT_YUV_MATRIX, MF_TRANSFORM_ASYNC, MF_TRANSFORM_ASYNC_UNLOCK, MF_VERSION, MFCreateDXGIDeviceManager,
+            MF_MT_YUV_MATRIX, MF_TRANSFORM_ASYNC, MF_TRANSFORM_ASYNC_UNLOCK, MFCreateDXGIDeviceManager,
             MFCreateDXGISurfaceBuffer, MFCreateMediaType, MFCreateSample, MFMediaType_Video, MFNominalRange_16_235,
-            MFSTARTUP_FULL, MFStartup, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_ADAPTER_LUID, MFT_ENUM_FLAG_HARDWARE,
-            MFT_ENUM_FLAG_SORTANDFILTER, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM,
-            MFT_MESSAGE_SET_D3D_MANAGER, MFT_OUTPUT_DATA_BUFFER, MFT_OUTPUT_STREAM_PROVIDES_SAMPLES,
-            MFT_REGISTER_TYPE_INFO, MFTEnumEx, MFVideoFormat_HEVC, MFVideoFormat_NV12, MFVideoInterlace_Progressive,
-            MFVideoTransferMatrix_BT709, eAVEncCommonRateControlMode_CBR, eAVEncH265VProfile_Main_420_8,
+            MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_ADAPTER_LUID, MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER,
+            MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_MESSAGE_SET_D3D_MANAGER,
+            MFT_OUTPUT_DATA_BUFFER, MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MFT_REGISTER_TYPE_INFO, MFTEnumEx,
+            MFVideoFormat_HEVC, MFVideoFormat_NV12, MFVideoInterlace_Progressive, MFVideoTransferMatrix_BT709,
+            eAVEncCommonRateControlMode_CBR, eAVEncH265VProfile_Main_420_8,
         },
         System::{
             Com::{COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree},
@@ -97,7 +97,7 @@ impl Encoder {
         bitrate: u32,
         sink: Arc<Sink>,
     ) -> io::Result<Self> {
-        startup();
+        super::start_media_foundation();
         let mft = hardware_encoder(adapter)?;
         // SAFETY: 以下都是 Media Foundation 的普通调用，对象由返回的 `Encoder` 持有。
         unsafe {
@@ -382,16 +382,6 @@ impl Worker {
             nal::from_annex_b(&blob).1
         }
     }
-}
-
-fn startup() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        // SAFETY: 进程里只启动一次，之后一直开着。
-        if let Err(err) = unsafe { MFStartup(MF_VERSION, MFSTARTUP_FULL) } {
-            tracing::warn!("cannot start Media Foundation: {err}");
-        }
-    });
 }
 
 /// `adapter` 那块显卡上的硬件 HEVC 编码器：编码器读的是采集设备上的纹理，得在同一块显卡上。

@@ -157,7 +157,12 @@ fn connection(stream: UnixStream) -> io::Result<()> {
     }
     // 连着时屏幕一直亮着：熄着的屏幕列不出来，也采不到。
     let _awake = KeepAwake::acquire();
-    let permissions = runode_screen::permissions();
+    // 缺的授权当场请求：每个程序第一次请求时系统在这台电脑上弹框，并把它列进系统设置的「屏幕与系统录音」
+    // 和「辅助功能」，用户打开开关就行，不用自己找程序加进去。
+    let mut permissions = runode_screen::permissions();
+    if !permissions.screen_capture || !permissions.post_event {
+        permissions = runode_screen::request_permissions();
+    }
     let displays = Display::all();
     outbox.control(&ScreenHostMsg::Ready {
         displays: displays.iter().map(screen_display).collect(),
@@ -170,7 +175,7 @@ fn connection(stream: UnixStream) -> io::Result<()> {
     while let Some(message) = read_message(&mut reader)? {
         match message {
             ScreenClientMsg::ScreenHello { .. } => return Err(io::Error::other("a second screen hello")),
-            ScreenClientMsg::Start { display, width, height, fps, bitrate } => {
+            ScreenClientMsg::Start { display, width, height, fps, bitrate, hide_cursor } => {
                 // 先停旧的，同一块屏幕不同时采两份。
                 drop(capture.take());
                 // 屏幕可能插拔过，按现在开着的找；要的那块不在了就采主屏。
@@ -183,6 +188,7 @@ fn connection(stream: UnixStream) -> io::Result<()> {
                     height: even(height.clamp(16, display.pixel_height.max(16))),
                     fps: fps.clamp(1, 120),
                     bitrate: bitrate.clamp(100_000, 100_000_000),
+                    cursor: !hide_cursor,
                 };
                 capture = start(&options, &outbox);
             }
@@ -442,7 +448,14 @@ mod tests {
         write_frame(&mut &ours, hello.kind, 0, &hello.payload).unwrap();
         let ready: ScreenHostMsg = read_frame(&mut reader).unwrap().unwrap().message().unwrap();
         assert!(matches!(ready, ScreenHostMsg::Ready { screen_capture: true, .. }), "{ready:?}");
-        let start = ScreenClientMsg::Start { display: None, width: 1280, height: 720, fps: 30, bitrate: 4_000_000 };
+        let start = ScreenClientMsg::Start {
+            display: None,
+            width: 1280,
+            height: 720,
+            fps: 30,
+            bitrate: 4_000_000,
+            hide_cursor: false,
+        };
         let frame = Frame::control(&start).unwrap();
         write_frame(&mut &ours, frame.kind, 0, &frame.payload).unwrap();
         // 锁屏状态的报告随时会插进来，跳过。

@@ -76,7 +76,7 @@ impl Capture {
             config.setHeight(options.height as usize);
             config.setMinimumFrameInterval(CMTime::new(1, options.fps.max(1) as i32));
             config.setPixelFormat(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
-            config.setShowsCursor(true);
+            config.setShowsCursor(options.cursor);
             // `Latest` 一直留着一张，多要一张免得 ScreenCaptureKit 没有空的缓冲可写，但不过它的上限。
             config.setQueueDepth((config.queueDepth() + 1).min(MAX_QUEUE_DEPTH));
             let delegate = ProtocolObject::<dyn SCStreamDelegate>::from_ref(&*output);

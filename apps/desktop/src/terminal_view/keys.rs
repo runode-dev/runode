@@ -112,7 +112,7 @@ fn right_option_down() -> bool {
 
 /// GPUI 键名对应的按键及其未按 Shift 时的字符：键名按 `KeyChord` 的写法认，不打字的键的字符是
 /// `'\0'`。美式布局下需要 Shift 的符号，映射回产生它的那个键。
-fn key_code(name: &str) -> Option<(Key, char)> {
+pub(crate) fn key_code(name: &str) -> Option<(Key, char)> {
     // 回车和 Tab 交给编码器的是它们打出的控制字符。
     match name {
         "enter" => return Some((Key::Enter, '\r')),

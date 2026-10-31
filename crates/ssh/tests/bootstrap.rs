@@ -13,7 +13,7 @@ use common::TempDir;
 use runode_ssh::bootstrap::{BIN_DIR, PROBE_EXIT, UPLOADS_DIR, parse_pruned, parse_uploaded};
 use runode_ssh::bootstrap::{
     Libc, Os, Platform, Target, Unsupported, connect_command, install_command, install_dir_name, project_command,
-    prune_command, service_command, upload_command,
+    prune_command, screen_command, service_command, upload_command,
 };
 
 /// 像 ssh 那样把命令行交给登录 shell（默认 /bin/sh）解释。
@@ -56,6 +56,7 @@ fn scripts_avoid_characters_remote_shells_mangle() {
         upload_command("1-2", None),
         upload_command("1-2", Some("a.png")),
         project_command("0.1.16.abc"),
+        screen_command("0.1.16.abc"),
         service_command("0.1.16.abc"),
         prune_command("0.1.16.abc"),
     ] {
