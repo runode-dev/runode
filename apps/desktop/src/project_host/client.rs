@@ -145,10 +145,12 @@ impl Client {
         }
         let script = runode_ssh::bootstrap::project_command(&deploy::install_dir());
         let mut command = host.exec(&remote::ssh(), &script, true, false);
-        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+        command.stderr(Stdio::null());
         crate::subprocess::hide_window(&mut command);
-        let mut child = command.spawn().map_err(|err| format!("cannot run ssh: {err}"))?;
-        let (Some(input), Some(output)) = (child.stdin.take(), child.stdout.take()) else {
+        let pipes = runode_ssh::process::Pipes { stdin: true, stdout: true, stderr: false };
+        let piped = runode_ssh::process::spawn(&mut command, pipes).map_err(|err| format!("cannot run ssh: {err}"))?;
+        let mut child = piped.child;
+        let (Some(input), Some(output)) = (piped.stdin, piped.stdout) else {
             return Err("ssh gave no pipes".into());
         };
         let conn = Conn::start(&self.name, Box::new(input), output, move || {

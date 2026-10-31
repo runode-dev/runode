@@ -6962,6 +6962,7 @@ name = "runode-ssh"
 version = "0.1.16"
 dependencies = [
  "uds_windows",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

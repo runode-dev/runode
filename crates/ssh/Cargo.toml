@@ -11,6 +11,13 @@ publish.workspace = true
 [target.'cfg(windows)'.dependencies]
 # askpass 经 AF_UNIX 的 socket 问桌面。
 uds_windows.workspace = true
+# 给 ssh 接 overlapped 的管道（`process`）。
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+] }
 
 [lints]
 workspace = true

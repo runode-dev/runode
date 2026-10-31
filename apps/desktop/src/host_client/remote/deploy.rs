@@ -16,6 +16,7 @@ use std::{
 use runode_ssh::{
     Ssh,
     bootstrap::{Platform, Target, install_command, install_dir_name},
+    process::Pipes,
 };
 
 use super::{Failure, Phase, RemoteHost, Status};
@@ -66,10 +67,13 @@ pub(super) fn install(
     host.set_status(Status::Connecting(Phase::Uploading { done: 0, total }));
     let mut command = host.exec(ssh, &install_command(dir, &sha, source.archive), interactive, true);
     let stderr = File::create(log).map_err(|err| Failure::Retry(format!("cannot write the ssh log: {err}")))?;
-    command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(stderr);
+    command.stdout(Stdio::null()).stderr(stderr);
     crate::subprocess::isolate(&mut command);
-    let mut child = command.spawn().map_err(|err| Failure::Retry(format!("cannot run ssh: {err}")))?;
-    let sent = child.stdin.take().ok_or_else(|| io::Error::other("ssh has no stdin")).and_then(|mut stdin| {
+    let pipes = Pipes { stdin: true, ..Pipes::default() };
+    let piped = runode_ssh::process::spawn(&mut command, pipes)
+        .map_err(|err| Failure::Retry(format!("cannot run ssh: {err}")))?;
+    let mut child = piped.child;
+    let sent = piped.stdin.ok_or_else(|| io::Error::other("ssh has no stdin")).and_then(|mut stdin| {
         let mut file = File::open(&source.path)?;
         let mut buffer = vec![0; 1 << 20];
         let mut done = 0;

@@ -17,10 +17,10 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     fs::File,
-    io::{self, BufRead as _, BufReader, Read, Write},
+    io::{self, BufRead as _, BufReader, PipeWriter, Read, Write},
     net::Shutdown,
     path::PathBuf,
-    process::{Child, ChildStdin, Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{
         Arc, Condvar, LazyLock, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
@@ -34,6 +34,7 @@ use runode_protocol::{ClientMsg, SessionId};
 use runode_ssh::{
     Destination, Ssh,
     bridge::{self, Start, read_service, read_start},
+    process::{Piped, Pipes},
 };
 
 use super::{Link, Timeouts, UnixStream, build};
@@ -435,9 +436,10 @@ impl RemoteHost {
         let ssh = ssh();
         let script = runode_ssh::bootstrap::service_command(&deploy::install_dir());
         let mut command = self.exec(&ssh, &script, true, false);
-        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        command.stdin(Stdio::null());
         crate::subprocess::hide_window(&mut command);
-        let output = command.output().map_err(|err| fail("ssh", format!("cannot run ssh: {err}")))?;
+        let output =
+            runode_ssh::process::output(&mut command).map_err(|err| fail("ssh", format!("cannot run ssh: {err}")))?;
         let read = read_service(&mut output.stdout.as_slice());
         read.map_err(|_| fail("ssh", format!("ssh exited with {:?}", output.status.code())))?
     }
@@ -451,9 +453,9 @@ impl RemoteHost {
         let ssh = ssh();
         let script = runode_ssh::bootstrap::prune_command(&deploy::install_dir());
         let mut command = self.exec(&ssh, &script, true, false);
-        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        command.stdin(Stdio::null());
         crate::subprocess::hide_window(&mut command);
-        let output = command.output().map_err(|err| format!("cannot run ssh: {err}"))?;
+        let output = runode_ssh::process::output(&mut command).map_err(|err| format!("cannot run ssh: {err}"))?;
         if !output.status.success() {
             return Err(format!("ssh exited with {:?}", output.status.code()));
         }
@@ -552,8 +554,9 @@ impl RemoteHost {
         loop {
             self.set_status(Status::Connecting(if deployed { Phase::Starting } else { Phase::Probing }));
             let mut command = self.exec(&ssh, &runode_ssh::bootstrap::connect_command(&dir), interactive, false);
-            let mut child = spawn_piped(&mut command, &log)?;
-            let stdout = child.stdout.take().ok_or_else(|| Failure::Retry("ssh gave no output".into()))?;
+            let piped = spawn_piped(&mut command, &log)?;
+            let (mut child, stdin) = (piped.child, piped.stdin);
+            let stdout = piped.stdout.ok_or_else(|| Failure::Retry("ssh gave no output".into()))?;
             let mut stdout = BufReader::with_capacity(256 << 10, stdout);
             let start = read_start(&mut stdout).map_err(|err| Failure::Retry(format!("cannot read from ssh: {err}")));
             match start {
@@ -561,7 +564,7 @@ impl RemoteHost {
                     tracing::info!("bridged to {}: {opening:?}", self.name);
                     let pid = child.id();
                     self.state().child = Some(pid);
-                    let running = Running::start(child, stdout, &self.link).map_err(|err| {
+                    let running = Running::start(child, stdin, stdout, &self.link).map_err(|err| {
                         self.state().child = None;
                         Failure::Retry(format!("cannot talk to the host on {}: {err}", self.name))
                     })?;
@@ -728,11 +731,13 @@ fn classify(log: &std::path::Path, code: Option<i32>) -> Failure {
 }
 
 /// 起 `command`：stdin、stdout 接管道，stderr 写进 `log`，自成一个进程组。
-fn spawn_piped(command: &mut Command, log: &std::path::Path) -> Result<Child, Failure> {
+fn spawn_piped(command: &mut Command, log: &std::path::Path) -> Result<Piped, Failure> {
     let stderr = File::create(log).map_err(|err| Failure::Retry(format!("cannot write the ssh log: {err}")))?;
-    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(stderr);
+    command.stderr(stderr);
     crate::subprocess::isolate(command);
-    command.spawn().map_err(|err| Failure::Stop { error: format!("cannot run ssh: {err}"), auth: false })
+    let pipes = Pipes { stdin: true, stdout: true, stderr: false };
+    runode_ssh::process::spawn(command, pipes)
+        .map_err(|err| Failure::Stop { error: format!("cannot run ssh: {err}"), auth: false })
 }
 
 /// 连着的一次：ssh 子进程，和接在它与 `Link` 之间的一对 socket。
@@ -745,8 +750,13 @@ struct Running {
 
 impl Running {
     /// 起两个搬字节的线程，把 `Link` 接在另一头上；出错时结束并收掉 ssh 子进程。
-    fn start(mut child: Child, stdout: BufReader<impl Read + Send + 'static>, link: &Link) -> io::Result<Self> {
-        let started = Self::pump(&mut child, stdout, link);
+    fn start(
+        mut child: Child,
+        stdin: Option<PipeWriter>,
+        stdout: BufReader<impl Read + Send + 'static>,
+        link: &Link,
+    ) -> io::Result<Self> {
+        let started = Self::pump(stdin, stdout, link);
         match started {
             Ok(theirs) => Ok(Self { child, theirs, since_beat: Instant::now() }),
             Err(err) => {
@@ -757,8 +767,12 @@ impl Running {
         }
     }
 
-    fn pump(child: &mut Child, stdout: BufReader<impl Read + Send + 'static>, link: &Link) -> io::Result<UnixStream> {
-        let stdin = child.stdin.take().ok_or_else(|| io::Error::other("ssh has no stdin"))?;
+    fn pump(
+        stdin: Option<PipeWriter>,
+        stdout: BufReader<impl Read + Send + 'static>,
+        link: &Link,
+    ) -> io::Result<UnixStream> {
+        let stdin = stdin.ok_or_else(|| io::Error::other("ssh has no stdin"))?;
         let (ours, theirs) = runode_host::socket_pair()?;
         let to_link = theirs.try_clone()?;
         let from_link = theirs.try_clone()?;
@@ -804,7 +818,7 @@ fn pump_out(mut from: BufReader<impl Read>, mut to: &UnixStream) {
 }
 
 /// socket 搬到 ssh 的 stdin，每块都 flush 出去；读到结尾就关掉 stdin，远端的桥接随之退出。
-fn pump_in(mut from: &UnixStream, mut to: ChildStdin) {
+fn pump_in(mut from: &UnixStream, mut to: PipeWriter) {
     let mut buffer = vec![0; 256 << 10];
     loop {
         match from.read(&mut buffer) {
@@ -1035,7 +1049,8 @@ mod tests {
         let paths = upload::upload(&host, upload::Upload::Files(files)).expect("upload");
         assert_ne!(paths[0], paths[1]);
         let read = |path: &str| {
-            let output = ssh().exec(&host.dest, &format!("cat {path}"), true).output().unwrap();
+            let mut command = ssh().exec(&host.dest, &format!("cat {path}"), true);
+            let output = runode_ssh::process::output(command.stdin(std::process::Stdio::null())).unwrap();
             String::from_utf8(output.stdout).unwrap()
         };
         assert_eq!((read(&paths[0]), read(&paths[1])), ("from a".into(), "from b".into()));

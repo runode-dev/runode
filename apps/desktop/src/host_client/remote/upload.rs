@@ -3,7 +3,7 @@
 
 use std::{
     collections::HashSet,
-    io::Read as _,
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicU32, Ordering},
@@ -11,7 +11,10 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, anyhow, bail};
-use runode_ssh::bootstrap::{parse_uploaded, upload_command};
+use runode_ssh::{
+    bootstrap::{parse_uploaded, upload_command},
+    process::{Piped, Pipes},
+};
 
 use super::{RemoteHost, ssh};
 
@@ -27,7 +30,7 @@ pub enum Upload {
 pub fn upload(host: &RemoteHost, upload: Upload) -> Result<Vec<String>> {
     match upload {
         Upload::Bytes { name, bytes } => {
-            let dir = send(host, Some(&name), Stdio::piped(), Some(&bytes))?;
+            let dir = send(host, Some(&name), &mut bytes.as_slice())?;
             Ok(vec![format!("{dir}/{name}")])
         }
         Upload::Files(paths) => {
@@ -39,8 +42,10 @@ pub fn upload(host: &RemoteHost, upload: Upload) -> Result<Vec<String>> {
                 let (batch, rest): (Vec<usize>, Vec<usize>) =
                     left.into_iter().partition(|&ix| names.insert(file_name(&paths[ix])));
                 let mut tar = tar(batch.iter().map(|&ix| paths[ix].as_path()))?;
-                let stdout = tar.stdout.take().context("no tar output")?;
-                let dir = send(host, None, Stdio::from(stdout), None);
+                let mut stdout = tar.stdout.take().context("no tar output")?;
+                let dir = send(host, None, &mut stdout);
+                // 没读完就关掉，tar 才不会一直卡在写上。
+                drop(stdout);
                 let packed = tar.wait();
                 let dir = dir?;
                 if !packed.is_ok_and(|status| status.success()) {
@@ -77,28 +82,31 @@ fn tar<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<std::process::Child>
     command.spawn().context("cannot run tar")
 }
 
-/// 跑一次 `upload_command`，stdin 是 `stdin`（`bytes` 给了时写进去），回远端放上传的目录。
-fn send(host: &RemoteHost, file: Option<&str>, stdin: Stdio, bytes: Option<&[u8]>) -> Result<String> {
+/// 跑一次 `upload_command`，把 `input` 读到头写给它，回远端放上传的目录。
+fn send(host: &RemoteHost, file: Option<&str>, input: &mut dyn Read) -> Result<String> {
     let mut command = host.exec(&ssh(), &upload_command(&upload_id(), file), true, false);
-    command.stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped());
     crate::subprocess::hide_window(&mut command);
-    let mut child = command.spawn().context("cannot run ssh")?;
-    if let Some(bytes) = bytes {
-        let mut input = child.stdin.take().context("no ssh input")?;
-        std::io::Write::write_all(&mut input, bytes).context("the upload was cut off")?;
+    let piped = runode_ssh::process::spawn(&mut command, Pipes { stdin: true, stdout: true, stderr: true })
+        .context("cannot run ssh")?;
+    let Piped { mut child, stdin, stdout, stderr } = piped;
+    let sent = stdin
+        .context("no ssh input")
+        .and_then(|mut stdin| std::io::copy(input, &mut stdin).context("the upload was cut off"));
+    let mut out = String::new();
+    if let Some(mut stdout) = stdout {
+        let _ = stdout.read_to_string(&mut out);
     }
-    let mut stderr = String::new();
-    if let Some(mut err) = child.stderr.take() {
-        let _ = err.read_to_string(&mut stderr);
+    let mut err = String::new();
+    if let Some(mut stderr) = stderr {
+        let _ = stderr.read_to_string(&mut err);
     }
-    let output = child.wait_with_output().context("ssh failed")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    match parse_uploaded(&stdout) {
-        Some(dir) if output.status.success() => Ok(dir.to_owned()),
-        _ => {
-            let line = runode_ssh::last_line(&stderr);
-            Err(anyhow!("{}", if line.is_empty() { "ssh failed" } else { line }))
-        }
+    let status = child.wait().context("ssh failed")?;
+    match parse_uploaded(&out) {
+        Some(dir) if status.success() && sent.is_ok() => Ok(dir.to_owned()),
+        _ => match runode_ssh::last_line(&err) {
+            "" => Err(sent.err().unwrap_or_else(|| anyhow!("ssh failed"))),
+            line => bail!("{line}"),
+        },
     }
 }
 
