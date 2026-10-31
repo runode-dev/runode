@@ -732,9 +732,19 @@ pub(crate) enum Failure {
     Stop { error: String, auth: bool },
 }
 
-/// 按 ssh 的 stderr（写在 `log` 里）和退出码说清为什么没连上。
+/// ssh 自己出错时的退出码；别的退出码是远端命令的。
+const SSH_ERROR_EXIT: i32 = 255;
+
+/// 按 ssh 的 stderr（写在 `log` 里）和退出码说清为什么没连上。不是 ssh 自己出错时 stderr 里是远端脚本的话，
+/// 不按 ssh 的话认：远端 `mkdir` 报的 `Permission denied` 不是认证没过。
 fn classify(log: &std::path::Path, code: Option<i32>) -> Failure {
     let stderr = std::fs::read_to_string(log).unwrap_or_default();
+    if code.is_some_and(|code| code != SSH_ERROR_EXIT) {
+        return Failure::Retry(match runode_ssh::last_line(&stderr) {
+            "" => format!("ssh exited with {code:?}"),
+            line => line.to_owned(),
+        });
+    }
     let failure = runode_ssh::Failure::of(&stderr);
     let error = match &failure {
         runode_ssh::Failure::Other(last) if last.is_empty() => format!("ssh exited with {code:?}"),
