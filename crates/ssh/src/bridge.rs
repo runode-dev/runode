@@ -25,16 +25,19 @@ pub struct Opening {
     /// 远端宿主会跟着 ssh 的登录被系统结束：Linux 上它在 logind 的会话 scope 里、logind 又结束登录会话里的
     /// 进程，或者它在用户服务管理器里、这个用户没开 linger。
     pub session_bound: bool,
+    /// 远端的家目录；可能有空格，放在这一行最后。
+    pub home: String,
 }
 
 impl Opening {
     pub fn line(&self) -> String {
         format!(
-            "{PREFIX}ok build={} pid={} via={} session={}\n",
+            "{PREFIX}ok build={} pid={} via={} session={} home={}\n",
             self.build,
             self.pid,
             self.via,
-            u8::from(self.session_bound)
+            u8::from(self.session_bound),
+            self.home.replace('\n', " "),
         )
     }
 }
@@ -87,8 +90,11 @@ fn parse(rest: &str) -> Start {
         let (code, message) = error.split_once(' ').unwrap_or((error, ""));
         return Start::Failed(Failure { code: code.to_owned(), message: message.to_owned() });
     }
-    let mut opening = Opening { build: String::new(), pid: 0, via: String::new(), session_bound: false };
-    for field in rest.strip_prefix("ok").unwrap_or(rest).split_whitespace() {
+    let rest = rest.strip_prefix("ok").unwrap_or(rest);
+    let (fields, home) = rest.split_once(" home=").unwrap_or((rest, ""));
+    let mut opening =
+        Opening { build: String::new(), pid: 0, via: String::new(), session_bound: false, home: home.to_owned() };
+    for field in fields.split_whitespace() {
         match field.split_once('=') {
             Some(("build", value)) => opening.build = value.to_owned(),
             Some(("pid", value)) => opening.pid = value.parse().unwrap_or(0),

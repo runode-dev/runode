@@ -42,6 +42,8 @@ pub(super) enum Call {
     },
     /// 文件现在的版本戳（`runode_files::stamp`）。
     Stamp { path: PathBuf },
+    /// 这些路径在不在、是不是目录，回 `Reply::Kinds`。
+    Kinds { paths: Vec<PathBuf> },
     /// 把请求后面跟着的字节写成 `path`（`runode_paths::replace_file`），交回写完后的版本戳。
     Write { path: PathBuf },
     /// 让编号为 `id` 的请求停下，停得下的只有 `Grep`；这条本身不回话，停下的那条照样回话。
@@ -64,6 +66,8 @@ pub(super) enum Reply {
     Stamp(Option<Stamp>),
     Files(Vec<PathBuf>),
     Found(Vec<runode_git::GrepMatch>),
+    /// 按请求的顺序，不在时为空，在时是不是目录。
+    Kinds(Vec<Option<bool>>),
     /// 没办成，原因写给人看。
     Failed(String),
 }

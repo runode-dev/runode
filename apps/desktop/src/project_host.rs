@@ -28,6 +28,8 @@ use crate::host_client::remote::HostId;
 const SCAN_TIMEOUT: Duration = Duration::from_secs(120);
 /// 读远端的文件最多等这么久。
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
+/// 问远端的路径在不在最多等这么久：终端里按着 ⌘ 悬停时在等它。
+const KINDS_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Default)]
 pub(crate) enum ProjectHost {
@@ -109,6 +111,19 @@ impl ProjectHost {
         match client.call(Call::Stamp { path: path.to_path_buf() }, READ_TIMEOUT) {
             Ok((Reply::Stamp(stamp), _)) => stamp,
             _ => None,
+        }
+    }
+
+    /// 这些路径在不在、是不是目录，按 `paths` 的顺序：不在（远端问不到）时为空，在时是不是目录。会阻塞。
+    pub(crate) fn kinds(&self, paths: Vec<PathBuf>) -> Vec<Option<bool>> {
+        let client = match self {
+            Self::Local => return paths.iter().map(|path| serve::kind(path)).collect(),
+            Self::Remote(client) => client,
+        };
+        let count = paths.len();
+        match client.call(Call::Kinds { paths }, KINDS_TIMEOUT) {
+            Ok((Reply::Kinds(kinds), _)) if kinds.len() == count => kinds,
+            _ => vec![None; count],
         }
     }
 

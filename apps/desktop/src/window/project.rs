@@ -463,7 +463,7 @@ impl WindowView {
     }
 
     /// 右侧面板切到 `panel` 这一页，为空时收起。
-    fn set_panel(&mut self, panel: Option<SidePanel>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn set_panel(&mut self, panel: Option<SidePanel>, window: &mut Window, cx: &mut Context<Self>) {
         let (git_was_shown, files_were_shown) = (self.git_shown(), self.files_shown());
         let workspace = self.workspace_mut();
         workspace.panel = panel;

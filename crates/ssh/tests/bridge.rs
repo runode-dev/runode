@@ -6,7 +6,13 @@ use runode_ssh::bridge::{Failure, Opening, Service, Start, read_service, read_st
 
 #[test]
 fn skips_noise_before_the_opening_line() {
-    let opening = Opening { build: "0.1.16.abc".into(), pid: 42, via: "took".into(), session_bound: true };
+    let opening = Opening {
+        build: "0.1.16.abc".into(),
+        pid: 42,
+        via: "took".into(),
+        session_bound: true,
+        home: "/Users/me with space".into(),
+    };
     let wire = format!("Welcome to Ubuntu\n\n{}\u{0}\u{1}protocol", opening.line());
     let mut input = BufReader::new(wire.as_bytes());
     assert_eq!(read_start(&mut input).unwrap(), Start::Bridge(opening));

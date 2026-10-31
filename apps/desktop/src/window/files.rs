@@ -18,7 +18,10 @@ use runode_types::{session::SessionMeta, shell::Shell};
 // 菜单部件在 `runode_ui::menu`，窗口里各处从这里引。
 pub(super) use crate::ui::menu::{MenuButton, MenuItem};
 
-use super::{WindowView, cards, project::panel_shell};
+use super::{
+    WindowView, cards,
+    project::{SidePanel, panel_shell},
+};
 use crate::{
     config::AppConfig,
     host_client::remote::{self, HostId, upload::Upload},
@@ -249,6 +252,29 @@ impl WindowView {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs());
         let name = format!("clipboard-{secs}.{}", image.format.extension());
         self.upload_to_view(view, Upload::Bytes { name, bytes: image.bytes.clone() }, window, cx);
+    }
+
+    /// 第 `wi` 个工作区里在 `host` 上的终端点开了那台机器上的 `path`：工作区就在那台机器上时，文件在预览栏里
+    /// 开，目录在文件树里找到；工作区在别的机器上时那边的面板读不到它，不管。
+    pub(super) fn open_remote_path(
+        &mut self,
+        wi: usize,
+        host: &HostId,
+        path: &Path,
+        dir: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if wi != self.active || self.workspaces[wi].host != *host {
+            tracing::info!("not opening {} from {host:?}: the workspace is elsewhere", path.display());
+            return;
+        }
+        if dir {
+            self.set_panel(Some(SidePanel::Files), window, cx);
+            self.with_file_tree(cx, |tree, cx| tree.reveal_file(path, cx));
+        } else {
+            self.open_preview(path, false, false, cx);
+        }
     }
 
     /// 把本机的文件或一份内容传到 `view` 所在的远端主机，再把它们在远端的绝对路径打进 `view`，后面各带一个

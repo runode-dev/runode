@@ -58,6 +58,17 @@ impl HostId {
             Self::Ssh(name) => Some(name),
         }
     }
+
+    /// 这台机器上的家目录；远端的是连上时那边报的，没连着时为空。
+    pub fn home(&self) -> Option<PathBuf> {
+        match self {
+            Self::Local => runode_paths::Dirs::from_env().home,
+            Self::Ssh(name) => match find(name)?.status() {
+                Status::Connected(connected) => connected.home,
+                _ => None,
+            },
+        }
+    }
 }
 
 /// 到 `host` 的那条连接；远端的头一回用时开始连。
@@ -213,6 +224,8 @@ pub struct Connected {
     pub mismatch: bool,
     /// 远端宿主跟着 ssh 的登录会话走，最后一个连接断开时可能被系统结束，见 `runode_ssh::bridge::Opening`。
     pub session_bound: bool,
+    /// 远端的家目录，不知道时为空。
+    pub home: Option<PathBuf>,
 }
 
 /// 连接做到了哪一步。
@@ -518,7 +531,9 @@ impl RemoteHost {
                         Failure::Retry(format!("cannot talk to the host on {}: {err}", self.name))
                     })?;
                     let mismatch = opening.build != build().0;
-                    let connected = Connected { build: opening.build, mismatch, session_bound: opening.session_bound };
+                    let home = (!opening.home.is_empty()).then(|| PathBuf::from(&opening.home));
+                    let connected =
+                        Connected { build: opening.build, mismatch, session_bound: opening.session_bound, home };
                     self.connected(connected);
                     return Ok(running);
                 }

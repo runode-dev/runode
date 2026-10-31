@@ -10,7 +10,7 @@ use runode_types::{grid::GridPoint, session::SessionMeta};
 
 /// 指针下能打开的链接：排出候选，再查路径在不在。
 fn link_at(session: &Session, at: GridPoint) -> Option<Link> {
-    session.links_at(at)?.resolve()
+    session.links_at(at, None)?.resolve()
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn a_url_in_the_text_is_a_link() {
     let mut session = idle_session();
     session.feed(b"at http://a.io/b.");
     // 网址不用查文件系统，当场就有结果。
-    assert!(!session.links_at(at(8.5, 0.5)).unwrap().checks_paths());
+    assert!(!session.links_at(at(8.5, 0.5), None).unwrap().checks_paths());
     let link = link_at(&session, at(8.5, 0.5)).unwrap();
     assert_eq!(link.target, LinkTarget::Url("http://a.io/b".into()));
     assert_eq!(link.spans, [LinkSpan { y: 0, x: 3..16 }]);
@@ -53,7 +53,7 @@ fn a_wrapped_relative_path_resolves_against_the_cwd() {
     }
     // 不存在的路径不算链接：候选照样给出，留给调用方去查，查过才知道不算。
     session.feed(b"\r\nsrc/nope.rs");
-    let candidates = session.links_at(at(3.5, 2.5)).unwrap();
+    let candidates = session.links_at(at(3.5, 2.5), None).unwrap();
     assert!(candidates.checks_paths());
     assert_eq!(candidates.resolve(), None);
 }
@@ -81,4 +81,18 @@ fn a_path_hard_wrapped_with_an_indent_is_joined() {
     let link = link_at(&session, at(10.5, 0.5)).unwrap();
     assert_eq!(link.target, LinkTarget::Path(crate_dir.join("tests/link.rs")));
     assert_eq!(link.spans, [LinkSpan { y: 0, x: 7..20 }]);
+}
+
+/// 别的机器上的 shell：`~/` 按调用方给的家目录展开，在不在由调用方判断，不查这台机器的文件系统。
+#[test]
+fn a_home_path_on_another_machine_resolves_with_the_given_check() {
+    let mut session = idle_session();
+    session.feed(b"see ~/proj/a.rs:3");
+    let candidates = session.links_at(at(6.5, 0.5), Some(Path::new("/home/far"))).unwrap();
+    let expected = Path::new("/home/far/proj/a.rs");
+    assert_eq!(candidates.paths(), [expected]);
+    assert_eq!(candidates.clone().resolve_with(|_| false), None);
+    let link = candidates.resolve_with(|path| path == expected).unwrap();
+    assert_eq!(link.target, LinkTarget::Path(expected.into()));
+    assert_eq!(link.spans, [LinkSpan { y: 0, x: 4..17 }]);
 }

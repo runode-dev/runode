@@ -191,7 +191,9 @@ fn connect(dirs: &runode_paths::Dirs) -> Result<(UnixStream, Opening), Failure> 
             _ => String::new(),
         };
         let via = if via == "kept" || host == ours.0 || via == "in_app" { via } else { "mismatch" };
-        return Ok((stream, Opening { build: host, pid, via: via.into(), session_bound: session_bound(pid) }));
+        let home = dirs.home.as_deref().map(|home| home.to_string_lossy().into_owned()).unwrap_or_default();
+        let opening = Opening { build: host, pid, via: via.into(), session_bound: session_bound(pid), home };
+        return Ok((stream, opening));
     }
 }
 

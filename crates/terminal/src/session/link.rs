@@ -54,10 +54,26 @@ impl LinkCandidates {
     /// 第一个能打开的候选。会对路径做 stat，路径在断开的网络卷或 autofs 下时可能阻塞几十秒，
     /// `checks_paths` 为真时别在界面线程上调。
     pub fn resolve(self) -> Option<Link> {
+        self.resolve_with(|path| path.exists())
+    }
+
+    /// 第一个能打开的候选，路径在不在由 `exists` 判断：路径在别的机器上时用。
+    pub fn resolve_with(self, exists: impl Fn(&Path) -> bool) -> Option<Link> {
         self.0.into_iter().find(|link| match &link.target {
             LinkTarget::Url(_) => true,
-            LinkTarget::Path(path) => path.exists(),
+            LinkTarget::Path(path) => exists(path),
         })
+    }
+
+    /// 要查在不在的路径，按先后。
+    pub fn paths(&self) -> Vec<PathBuf> {
+        self.0
+            .iter()
+            .filter_map(|link| match &link.target {
+                LinkTarget::Path(path) => Some(path.clone()),
+                LinkTarget::Url(_) => None,
+            })
+            .collect()
     }
 }
 
@@ -82,9 +98,9 @@ struct LineCell {
 impl Session {
     /// 视口里 `at` 这一格上可能的链接：程序用 OSC 8 标了超链接的就是它；没标的在这一行（连同软换行接着的
     /// 上下几行，以及 `join_hard_wraps` 认出的硬换行续行）的文字里找指针所在的网址或路径。路径只认存在的
-    /// （由 `LinkCandidates::resolve` 查），相对路径按 shell 当前所在的目录解析，不知道目录时只认绝对路径
-    /// 和 `~/` 开头的。一个候选也没有时为 `None`。
-    pub fn links_at(&self, at: GridPoint) -> Option<LinkCandidates> {
+    /// （由 `LinkCandidates::resolve` 查），相对路径按 shell 当前所在的目录解析，`~/` 开头的按 shell 所在
+    /// 机器的家目录 `home`；不知道目录时只认绝对路径和 `~/` 开头的。一个候选也没有时为 `None`。
+    pub fn links_at(&self, at: GridPoint, home: Option<&Path>) -> Option<LinkCandidates> {
         let size = self.size.get();
         if at.x < 0. || at.y < 0. || at.x >= f32::from(size.cols) || at.y >= f32::from(size.rows) {
             return None;
@@ -100,7 +116,6 @@ impl Session {
             return Some(LinkCandidates(vec![link]));
         }
         let cwd = self.cwd();
-        let home = runode_paths::Dirs::from_env().home;
         let find_in = |cells: &[LineCell]| {
             let Some(index) = cells.iter().position(|cell| cell.y == y && (cell.x..cell.x + cell.width).contains(&x))
             else {
@@ -117,7 +132,7 @@ impl Session {
             let Some(pointer) = owners.iter().position(|&owner| owner == index) else {
                 return Vec::new();
             };
-            find(&chars, pointer, |text| path_of(text, cwd.as_deref(), home.as_deref()))
+            find(&chars, pointer, |text| path_of(text, cwd.as_deref(), home))
                 .into_iter()
                 .map(|(range, target)| Link {
                     target,

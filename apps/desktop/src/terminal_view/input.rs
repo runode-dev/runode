@@ -14,12 +14,16 @@ use runode_types::{
     input::{self, Mods, SelectionAdjust},
 };
 
+use super::TerminalEvent;
 use super::{
     PasteSelection, TerminalView,
     actions::{HAS_PRIMARY, write_primary},
     keys,
 };
-use crate::host_client::remote::{self, HostId};
+use crate::{
+    host_client::remote::{self, HostId},
+    project_host::ProjectHost,
+};
 
 /// 按着 ⌘ 时指针下的候选链接。路径要查存在与否，路径在断开的网络卷或 autofs 下时 stat 能卡几十秒，
 /// 所以放到后台去查，查完再把结果记进 `hovered_link`；指针挪到别的候选上时换掉这一份，丢掉任务，
@@ -268,7 +272,7 @@ impl TerminalView {
     /// 按着 ⌘ 悬停时记下指针下的链接，画下划线、指针换成手形，网址在左下角显示真实目标；
     /// `active` 为假时清掉。
     fn hover_link(&mut self, active: bool, at: GridPoint, cx: &mut Context<Self>) {
-        let candidates = if active { self.screen.shown().and_then(|session| session.links_at(at)) } else { None };
+        let candidates = if active { self.links_at(at) } else { None };
         self.look_up_link(candidates, cx);
     }
 
@@ -279,24 +283,23 @@ impl TerminalView {
     /// ⌘ 点在 `at` 上：是链接就打开，还在查就等查完再打开，这两种都算点中了链接，返回真；
     /// 查过不是链接时返回假，照常选择或上报。
     fn click_link(&mut self, at: GridPoint, cx: &mut Context<Self>) -> bool {
-        let candidates = self.screen.shown().and_then(|session| session.links_at(at));
+        let candidates = self.links_at(at);
         self.look_up_link(candidates, cx);
         match &self.link_lookup {
             Some(LinkLookup { check: Some(check), .. }) => {
                 // 松开 ⌘、指针挪开都不撤回这一下：后台查完是链接就打开。查完不是时这一下什么都不做，
                 // 选择已经错过了：只有按下 ⌘ 的同一瞬间点在不存在的路径上才会这样，不为它记下按的位置。
                 let check = check.clone();
-                let host = self.host.clone();
-                cx.spawn(async move |_, cx| {
+                cx.spawn(async move |this, cx| {
                     if let Some(link) = check.await {
-                        cx.update(|cx| open_link(&link.target, &host, cx));
+                        this.update(cx, |view, cx| view.open_link(link.target, cx)).ok();
                     }
                 })
                 .detach();
                 true
             }
             Some(_) if let Some(link) = &self.hovered_link => {
-                open_link(&link.target, &self.host, cx);
+                self.open_link(link.target.clone(), cx);
                 true
             }
             _ => false,
@@ -324,7 +327,17 @@ impl TerminalView {
             .background_executor()
             .spawn({
                 let candidates = candidates.clone();
-                async move { candidates.resolve() }
+                let host = self.host.clone();
+                async move {
+                    if host.is_local() {
+                        return candidates.resolve();
+                    }
+                    let paths = candidates.paths();
+                    let kinds = ProjectHost::of(&host).kinds(paths.clone());
+                    candidates.resolve_with(|path| {
+                        paths.iter().zip(&kinds).any(|(known, kind)| known == path && kind.is_some())
+                    })
+                }
             })
             .shared();
         let task = cx.spawn({
@@ -383,14 +396,34 @@ impl TerminalView {
     }
 }
 
-/// 网址交给系统按协议打开，文件和目录用系统默认的程序打开（目录进 Finder）。远端终端里指向那台机器自己的
-/// 网址先把端口转到本机再打开；远端的文件本机打不开，不管。
-fn open_link(target: &LinkTarget, host: &HostId, cx: &App) {
-    match (target, host) {
-        (LinkTarget::Url(url), HostId::Local) => cx.open_url(url),
-        (LinkTarget::Url(url), HostId::Ssh(name)) => open_remote_url(name, url.clone(), cx),
-        (LinkTarget::Path(path), HostId::Local) => cx.open_with_system(path),
-        (LinkTarget::Path(_), HostId::Ssh(_)) => {}
+impl TerminalView {
+    /// 视口里 `at` 这一格上可能的链接，`~/` 按 shell 所在机器的家目录展开。
+    fn links_at(&self, at: GridPoint) -> Option<LinkCandidates> {
+        let home = self.host.home();
+        self.screen.shown().and_then(|session| session.links_at(at, home.as_deref()))
+    }
+
+    /// 网址交给系统按协议打开，文件和目录用系统默认的程序打开（目录进 Finder）。远端终端里指向那台机器自己的
+    /// 网址先把端口转到本机再打开；远端的文件和目录交给窗口在预览栏、文件树里打开（`TerminalEvent::OpenRemotePath`）。
+    fn open_link(&mut self, target: LinkTarget, cx: &mut Context<Self>) {
+        match (target, &self.host) {
+            (LinkTarget::Url(url), HostId::Local) => cx.open_url(&url),
+            (LinkTarget::Url(url), HostId::Ssh(name)) => open_remote_url(name, url, cx),
+            (LinkTarget::Path(path), HostId::Local) => cx.open_with_system(&path),
+            (LinkTarget::Path(path), HostId::Ssh(_)) => {
+                let project = ProjectHost::of(&self.host);
+                let kind = cx.background_spawn({
+                    let path = path.clone();
+                    async move { project.kinds(vec![path]).pop().flatten() }
+                });
+                cx.spawn(async move |this, cx| {
+                    if let Some(dir) = kind.await {
+                        this.update(cx, |_, cx| cx.emit(TerminalEvent::OpenRemotePath { path, dir })).ok();
+                    }
+                })
+                .detach();
+            }
+        }
     }
 }
 

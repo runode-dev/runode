@@ -77,6 +77,11 @@ pub(crate) fn run() -> i32 {
 }
 
 /// 办一个请求，`content` 是请求后面跟着的字节；`stop` 置位时停得下的停下，交回已经找到的。
+/// `path` 在不在、是不是目录（`Reply::Kinds`），跟着符号链接走。
+pub(super) fn kind(path: &std::path::Path) -> Option<bool> {
+    std::fs::metadata(path).ok().map(|meta| meta.is_dir())
+}
+
 fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (Reply, Vec<u8>) {
     let lock = || caches.lock().unwrap_or_else(PoisonError::into_inner);
     match call {
@@ -120,6 +125,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
             }
         }
         Call::Stamp { path } => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
+        Call::Kinds { paths } => (Reply::Kinds(paths.iter().map(|path| kind(path)).collect()), Vec::new()),
         Call::Write { path } => match runode_paths::replace_file(&path, &content) {
             Ok(()) => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
             Err(err) => (Reply::Failed(err.to_string()), Vec::new()),
@@ -255,6 +261,18 @@ mod tests {
         assert!(matches!(handle(grep(), Vec::new(), &caches, &GO), (Reply::Found(found), _) if found.len() == 1));
         let stopped = AtomicBool::new(true);
         assert!(matches!(handle(grep(), Vec::new(), &caches, &stopped), (Reply::Found(found), _) if found.is_empty()));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 问路径在不在时按请求的顺序回，目录和文件分得开。
+    #[test]
+    fn kinds_tell_files_dirs_and_missing_paths_apart() {
+        let dir = std::env::temp_dir().join(format!("runode-project-kinds-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        let paths = vec![dir.join("a.txt"), dir.join("nope"), dir.clone()];
+        let (reply, _) = handle(Call::Kinds { paths }, Vec::new(), &Shared::default(), &GO);
+        assert!(matches!(reply, Reply::Kinds(kinds) if kinds == [Some(false), None, Some(true)]));
         fs::remove_dir_all(&dir).ok();
     }
 }
