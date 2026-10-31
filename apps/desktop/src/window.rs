@@ -201,8 +201,10 @@ const TRAFFIC_LIGHT_SIZE: f32 = 14.;
 /// 红绿灯按钮的位置，竖直方向在标题栏里居中，和标签文字对齐；以及标题栏左侧给它们留出的宽度。
 const TRAFFIC_LIGHTS_ORIGIN: (f32, f32) = (14., (TITLEBAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.);
 const TRAFFIC_LIGHTS_WIDTH: f32 = 84.;
-/// 标签栏最右边新建标签按钮的宽度。
-const NEW_TAB_BUTTON_WIDTH: f32 = TITLEBAR_HEIGHT;
+/// 标签栏最右边新建标签按钮的宽度，连同它右边弹出菜单的箭头。
+const NEW_TAB_BUTTON_WIDTH: f32 = TITLEBAR_HEIGHT + NEW_TAB_MENU_BUTTON_WIDTH;
+/// 新建标签按钮右边弹出菜单的箭头的宽度。
+const NEW_TAB_MENU_BUTTON_WIDTH: f32 = 18.;
 /// 标签最窄的宽度；标签多到挤不下时标签条改为横向滚动。
 const TAB_MIN_WIDTH: f32 = 64.;
 /// 标签最宽的宽度；标签少时不再拉宽，靠左排开，后面紧跟新建标签按钮。
@@ -287,6 +289,8 @@ pub struct WindowView {
     dropdown: Dropdown,
     /// 新建标签菜单里列的 agent，上次打开菜单时在后台找到的。
     installed_agents: Vec<new_tab::Installed>,
+    /// 新建标签菜单里列的 shell 和它们所在的主机，上次打开菜单时问那台主机的宿主得来的。
+    shells: Option<(HostId, Vec<runode_protocol::ShellProfile>)>,
     renaming: Option<Renaming>,
     /// 新建 workspace 的对话框。
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
@@ -492,6 +496,7 @@ impl WindowView {
             menu: None,
             dropdown: Dropdown::Tasks,
             installed_agents: Vec::new(),
+            shells: None,
             renaming: None,
             new_workspace: None,
             asks: Default::default(),
@@ -559,7 +564,7 @@ impl WindowView {
     fn push_default_workspace(&mut self, shell: Option<Prespawned>, window: &mut Window, cx: &mut Context<Self>) {
         let started = match shell {
             Some(shell) => TerminalView::adopt(shell, window, cx),
-            None => TerminalView::spawn(&HostId::Local, None, None, window, cx),
+            None => TerminalView::spawn(&HostId::Local, None, None, None, window, cx),
         };
         let ix = self.workspaces.len();
         match started {
@@ -814,6 +819,7 @@ impl Render for WindowView {
             }))
             .on_action(Self::act(cx, Self::new_tab))
             .on_action(Self::act(cx, Self::new_agent_tab))
+            .on_action(Self::act(cx, Self::new_shell_tab))
             .on_action(Self::act(cx, Self::close_tab))
             .on_action(Self::act(cx, Self::next_tab))
             .on_action(Self::act(cx, Self::previous_tab))

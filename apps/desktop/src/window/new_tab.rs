@@ -1,21 +1,36 @@
-//! 标题栏上的新建标签按钮：按下弹出菜单，第一项开普通终端（`NewTab`），下面是本机装着的各家 agent，
-//! 点了在当前终端的目录开一个新标签、在 shell 里起它。装没装按终端里 shell 报告的 PATH 找命令，shell 没报告
-//! 时（没有集成的 PowerShell、cmd）按新开的 shell 会拿到的 PATH 找；每次打开菜单都在后台重找一遍，找完之前
-//! 菜单里是上次找到的。
+//! 标题栏上的新建标签按钮：「+」用默认 shell 开新标签（`NewTab`），旁边的箭头弹出菜单。菜单上面是能开的
+//! shell：工作区所在主机的宿主列出了可挑的 shell（Windows 上）时每个一项（`NewShellTab`），没列出时只有
+//! 一项普通终端；下面是本机装着的各家 agent，点了在当前终端的目录开一个新标签、在 shell 里起它。agent 装没装
+//! 按终端里 shell 报告的 PATH 找命令，shell 没报告时（没有集成的 PowerShell、cmd）按新开的 shell 会拿到的
+//! PATH 找。每次打开菜单都在后台重新问一遍 shell、找一遍 agent，问到、找到之前菜单里是上次的。
 
-use std::{ffi::OsStr, path::PathBuf};
+use std::{ffi::OsStr, path::PathBuf, time::Duration};
 
 use gpui::{Action, App, Context, Focusable, MouseButton, Window, prelude::*};
 use runode_agent::models::{LAUNCHERS, Launcher, listed, same_kind};
+use runode_protocol::ShellProfileKind;
 
 use super::{Dropdown, NewTab, TITLEBAR_HEIGHT, WindowView, agents::logo::logo_path};
-use crate::ui::{
-    a11y::A11yPress as _,
-    button::Button,
-    icons::TERMINAL_ICON,
-    menu::{MenuHost as _, MenuItem},
-    theme::ActiveTheme as _,
+use crate::{
+    host_client::remote::link_of,
+    ui::{
+        a11y::A11yPress as _,
+        button::Button,
+        icons::{GIT_ICON, POWERSHELL_ICON, TERMINAL_ICON},
+        menu::{MenuHost as _, MenuItem},
+        theme::ActiveTheme as _,
+    },
 };
+
+/// 问宿主有哪些 shell 最多等这么久；等不到时菜单里只有普通终端。
+const LIST_SHELLS_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// 新建标签菜单里的一个 shell：在当前终端的目录开新标签，起 `program`。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(super) struct NewShellTab {
+    program: String,
+}
 
 /// 新建标签菜单里的一家 agent：在新标签的 shell 里打 `command` 起它。
 #[derive(Clone, PartialEq, Action)]
@@ -75,7 +90,14 @@ impl WindowView {
         }
     }
 
-    /// 给新建标签按钮挂上菜单：按下弹出、再按收起，菜单画在按钮下面往右展开。
+    /// 菜单里点了一个 shell：在当前终端的目录开新标签起它。
+    pub(super) fn new_shell_tab(&mut self, action: &NewShellTab, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(view) = self.spawn_shell_beside_focused(Some(action.program.clone()), window, cx) {
+            self.insert_tab(self.workspace().active + 1, view, window, cx);
+        }
+    }
+
+    /// 给弹出新建标签菜单的按钮挂上菜单：按下弹出、再按收起，菜单画在按钮下面往右展开。
     pub(super) fn with_new_tab_menu(&self, button: Button, window: &Window, cx: &mut Context<Self>) -> Button {
         let view = cx.entity().downgrade();
         let open = self.new_tab_menu_open();
@@ -116,12 +138,26 @@ impl WindowView {
         self.open_dropdown(items, target, select_after, cx);
         self.dropdown = Dropdown::NewTab;
         self.find_installed_agents(cx);
+        self.list_shells(cx);
     }
 
-    /// 菜单的各项：普通终端，分隔线，装着的各家 agent，前面是它的 logo。
+    /// 菜单的各项：当前工作区的主机上能挑的 shell（没有时是普通终端），分隔线，装着的各家 agent，前面是它的
+    /// logo。
     fn new_tab_menu_items(&self, cx: &App) -> Vec<Option<MenuItem>> {
-        let terminal = MenuItem::new(rust_i18n::t!("agent.launch.terminal"), Box::new(NewTab), true, cx);
-        let mut items = vec![Some(terminal.with_icon(TERMINAL_ICON))];
+        let host = &self.workspace().host;
+        let shells = self.shells.as_ref().filter(|(listed, _)| listed == host).map_or(&[][..], |(_, shells)| shells);
+        let mut items: Vec<Option<MenuItem>> = shells
+            .iter()
+            .filter_map(|shell| {
+                let (label, icon) = shell_item(shell.kind)?;
+                let action = NewShellTab { program: shell.program.clone() };
+                Some(Some(MenuItem::new(label, Box::new(action), true, cx).with_icon(icon)))
+            })
+            .collect();
+        if items.is_empty() {
+            let terminal = MenuItem::new(rust_i18n::t!("agent.launch.terminal"), Box::new(NewTab), true, cx);
+            items.push(Some(terminal.with_icon(TERMINAL_ICON)));
+        }
         if !self.installed_agents.is_empty() {
             items.push(None);
         }
@@ -136,6 +172,38 @@ impl WindowView {
             })
         }));
         items
+    }
+
+    /// 在后台问当前工作区的主机能挑哪些 shell；和上次问到的不一样时换上，菜单开着就换掉它的各项。宿主答不上来
+    /// （旧版本的宿主不认这个请求、连不上、超时）时当作没有可挑的。
+    fn list_shells(&mut self, cx: &mut Context<Self>) {
+        let host = self.workspace().host.clone();
+        let link = link_of(&host);
+        let job = cx.background_spawn(async move {
+            link.list_shells(LIST_SHELLS_TIMEOUT)
+                .inspect_err(|err| tracing::debug!("the host did not list its shells: {err:#}"))
+                .unwrap_or_default()
+        });
+        cx.spawn(async move |this, cx| {
+            let shells = job.await;
+            this.update(cx, |this, cx| {
+                // 问的时候所在的工作区已经换到别的主机上了：那边的回话可能先到，不拿这个晚到的盖掉它。
+                if host != this.workspace().host {
+                    return;
+                }
+                let found = Some((host, shells));
+                if this.shells == found {
+                    return;
+                }
+                this.shells = found;
+                if this.new_tab_menu_open() {
+                    let items = this.new_tab_menu_items(cx);
+                    this.replace_menu_items(items, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 在后台按 shell 报告的 PATH 找装着的 agent，没报告时按新起的 shell 会拿到的 PATH（`spawn_path`）；
@@ -162,6 +230,17 @@ impl WindowView {
         })
         .detach();
     }
+}
+
+/// 菜单里一个 shell 显示的名字和图标；前端不认识的种类不列。
+fn shell_item(kind: ShellProfileKind) -> Option<(std::borrow::Cow<'static, str>, &'static str)> {
+    Some(match kind {
+        ShellProfileKind::PowerShell => (rust_i18n::t!("agent.launch.powershell"), POWERSHELL_ICON),
+        ShellProfileKind::WindowsPowerShell => (rust_i18n::t!("agent.launch.windows_powershell"), POWERSHELL_ICON),
+        ShellProfileKind::Cmd => (rust_i18n::t!("agent.launch.cmd"), TERMINAL_ICON),
+        ShellProfileKind::GitBash => (rust_i18n::t!("agent.launch.git_bash"), GIT_ICON),
+        ShellProfileKind::Other => return None,
+    })
 }
 
 #[cfg(test)]

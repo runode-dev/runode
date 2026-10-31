@@ -68,6 +68,7 @@ crate::icons! {
     pub COFFEE_ICON = "coffee",
     pub MEMORY_ICON = "memory",
     pub SHELL_ICON = "shell",
+    pub POWERSHELL_ICON = "powershell",
     pub PLUG_ICON = "plug",
     pub SERVER_ICON = "server",
     pub PHONE_ICON = "phone",

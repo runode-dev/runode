@@ -13,6 +13,7 @@ menu:
   quit_end_sessions: 結束 Runode 並終止所有工作階段
   file: 檔案
   new_tab: 新增分頁
+  new_tab_options: 新增分頁選項
   new_workspace: 新增工作區…
   new_window: 新增視窗
   split_right: 向右分割
@@ -87,6 +88,10 @@ agent:
     filter: 篩選 agent
   launch:
     terminal: 終端機
+    powershell: PowerShell
+    windows_powershell: Windows PowerShell
+    cmd: 命令提示字元
+    git_bash: Git Bash
 host:
   incompatible_title: 舊版 Runode 的終端機宿主還在執行
   incompatible_detail: 這次終端機跑在 app 裡，runode list 這類指令列連不上它們。結束另一個 Runode 或者它的宿主程序後，重新開啟 Runode。（%{reason}）

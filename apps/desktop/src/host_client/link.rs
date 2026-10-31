@@ -47,7 +47,8 @@ use anyhow::{Result, anyhow};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, Conversation, Frame, FrameError, FrameKind, HostMsg,
-    PROTOCOL_VERSION, SessionId, SessionInfo, ShellReport, TaskSource, WindowLayout, read_frame, write_frame,
+    PROTOCOL_VERSION, SessionId, SessionInfo, ShellProfile, ShellReport, TaskSource, WindowLayout, read_frame,
+    write_frame,
 };
 use runode_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
@@ -858,6 +859,14 @@ impl Link {
     pub fn list_tasks(&self, dir: PathBuf, timeout: Duration) -> Result<Vec<TaskSource>> {
         match self.request_on(|req| ClientMsg::ListTasks { req, dir }, timeout, OnTimeout::Wait)? {
             HostMsg::Tasks { sources, .. } => Ok(sources),
+            other => Err(anyhow!("unexpected answer from the host: {other:?}")),
+        }
+    }
+
+    /// 宿主那台机器上新建终端时可以挑的 shell，最多等 `timeout`。只是查一下 PATH 和几个目录，超时不当成连接断了。
+    pub fn list_shells(&self, timeout: Duration) -> Result<Vec<ShellProfile>> {
+        match self.request_on(|req| ClientMsg::ListShells { req }, timeout, OnTimeout::Wait)? {
+            HostMsg::Shells { shells, .. } => Ok(shells),
             other => Err(anyhow!("unexpected answer from the host: {other:?}")),
         }
     }

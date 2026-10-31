@@ -14,6 +14,7 @@ mod prompt_input;
 pub mod pty;
 pub mod session;
 mod shell_integration;
+pub mod shells;
 #[cfg(test)]
 mod testing;
 mod vt;

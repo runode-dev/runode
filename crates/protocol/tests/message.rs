@@ -2,8 +2,8 @@
 
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, Frame, FrameKind, GoodbyeReason, HandoffRefusal,
-    HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, ShellReport, TabLayout, TaskEntry, TaskSource,
-    TaskSourceKind, WindowLayout, WorkspaceLayout,
+    HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, ShellProfile, ShellProfileKind, ShellReport,
+    TabLayout, TaskEntry, TaskSource, TaskSourceKind, WindowLayout, WorkspaceLayout,
     message::InvalidSessionId,
     push::ApnsEnv,
     read_frame,
@@ -229,6 +229,7 @@ fn client_messages_round_trip() {
         ClientMsg::OpenWorkspace { req: 14, dir: "/Users/me/dev".into(), focus: true, name: Some("后端".into()) },
         ClientMsg::RenameWorkspace { req: 16, window: 1, workspace: 2, name: "前端".into() },
         ClientMsg::ListTasks { req: 15, dir: "/Users/me/中文".into() },
+        ClientMsg::ListShells { req: 19 },
         ClientMsg::Handoff { min_format: 1, max_format: 3 },
         ClientMsg::HandoffReady,
         ClientMsg::HandoffAbort { reason: "cannot adopt the pty".into() },
@@ -390,6 +391,14 @@ fn host_messages_round_trip() {
         HostMsg::Dirs { req: 6, path: "/".into(), dirs: Vec::new(), truncated: true },
         HostMsg::Tasks { req: 7, dir: "/Users/me/dev".into(), sources: tasks() },
         HostMsg::Tasks { req: 8, dir: "/".into(), sources: Vec::new() },
+        HostMsg::Shells {
+            req: 9,
+            shells: vec![
+                ShellProfile { kind: ShellProfileKind::WindowsPowerShell, program: "powershell.exe".into() },
+                ShellProfile { kind: ShellProfileKind::GitBash, program: r"C:\Program Files\Git\bin\bash.exe".into() },
+            ],
+        },
+        HostMsg::Shells { req: 10, shells: Vec::new() },
         HostMsg::Error { req: Some(3), id: None, message: "no such directory".into() },
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff },
         HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "boom".into() } },
@@ -930,4 +939,13 @@ fn the_req_of_an_encoded_reply() {
     assert_eq!(req_in(&HostMsg::Bell { id: ID }), None);
     let ui = HostMsg::UiRequest { ui: 1, request: Box::new(ClientMsg::ListTodos { req: 9 }) };
     assert_eq!(req_in(&ui), None);
+}
+
+/// 新宿主报了旧前端不认识的 shell 种类时，整条回话照样读得出来，那一项是 `Other`。
+#[test]
+fn unknown_shell_kinds_read_as_other() {
+    let json = r#"{"type":"shells","req":3,"shells":[{"kind":"nushell","program":"nu.exe"},{"kind":"cmd","program":"cmd.exe"}]}"#;
+    let HostMsg::Shells { shells, .. } = serde_json::from_str(json).unwrap() else { panic!("expected shells") };
+    let kinds: Vec<_> = shells.iter().map(|shell| shell.kind).collect();
+    assert_eq!(kinds, [ShellProfileKind::Other, ShellProfileKind::Cmd]);
 }

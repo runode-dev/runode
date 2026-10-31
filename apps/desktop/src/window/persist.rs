@@ -489,17 +489,17 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<Node<EntityId>> {
         match saved {
-            SavedNode::Leaf { cwd, session, conversation, .. } if !host.is_local() => {
-                let view =
-                    TerminalView::awaiting(host, *session, cwd.as_deref(), Some(dir), conversation.clone(), window, cx);
+            SavedNode::Leaf { cwd, session, conversation, shell: program, .. } if !host.is_local() => {
+                let (cwd, resume) = (cwd.as_deref(), conversation.clone());
+                let view = TerminalView::awaiting(host, *session, cwd, Some(dir), resume, program.clone(), window, cx);
                 let (id, entry) = self.pane_entry(view, window, cx);
                 panes.insert(id, entry);
                 leaves.push(Some(id));
                 Some(Node::Leaf(id))
             }
-            SavedNode::Leaf { cwd, session, conversation, .. } => {
+            SavedNode::Leaf { cwd, session, conversation, shell: program, .. } => {
                 let reattached = (*session).and_then(|id| {
-                    TerminalView::reattach(host, id, cwd.as_deref(), shown, window, cx)
+                    TerminalView::reattach(host, id, cwd.as_deref(), program.clone(), shown, window, cx)
                         .inspect_err(|err| {
                             tracing::warn!("failed to reattach session {id}, starting over in its directory: {err:#}");
                         })
@@ -509,8 +509,8 @@ impl WindowView {
                     Some(view) => view,
                     None => {
                         let start = Some(format::start_dir(cwd.as_deref(), dir));
-                        // 提前拉起的 shell 在家目录里，只交给同样从家目录开始、不用接回对话的终端。
-                        let in_home = start.as_deref() == home && conversation.is_none();
+                        // 提前拉起的是家目录里的默认 shell，只交给同样从家目录开始、不用接回对话、没挑别的 shell 的终端。
+                        let in_home = start.as_deref() == home && conversation.is_none() && program.is_none();
                         let view = match shell.and_then(|shell| shell.take_if(|_| in_home)) {
                             Some(shell) => TerminalView::adopt(shell, window, cx),
                             None if shown => TerminalView::unstarted(
@@ -518,6 +518,7 @@ impl WindowView {
                                 start.as_deref(),
                                 Some(dir),
                                 conversation.clone(),
+                                program.clone(),
                                 window,
                                 cx,
                             ),
@@ -527,6 +528,7 @@ impl WindowView {
                                 start.as_deref(),
                                 Some(dir),
                                 conversation.clone(),
+                                program.clone(),
                                 window,
                                 cx,
                             )),
@@ -631,6 +633,7 @@ impl WindowView {
                     session: view.session_id(),
                     unstarted: !view.started(),
                     conversation: view.conversation(),
+                    shell: view.shell().map(str::to_owned),
                 }
             }
             Node::Split(split) => SavedNode::Split {

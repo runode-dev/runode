@@ -1,11 +1,17 @@
 use super::*;
 
 fn leaf(cwd: &str) -> SavedNode {
-    SavedNode::Leaf { cwd: Some(cwd.into()), session: None, unstarted: false, conversation: None }
+    SavedNode::Leaf { cwd: Some(cwd.into()), session: None, unstarted: false, conversation: None, shell: None }
 }
 
 fn session_leaf(id: u128, unstarted: bool) -> SavedNode {
-    SavedNode::Leaf { cwd: Some("/tmp".into()), session: Some(SessionId(id)), unstarted, conversation: None }
+    SavedNode::Leaf {
+        cwd: Some("/tmp".into()),
+        session: Some(SessionId(id)),
+        unstarted,
+        conversation: None,
+        shell: None,
+    }
 }
 
 fn state() -> State {
@@ -22,6 +28,7 @@ fn state() -> State {
                     session: Some(SessionId(7)),
                     unstarted: true,
                     conversation: None,
+                    shell: Some("cmd.exe".into()),
                 }),
                 second: Box::new(leaf("/")),
             }),
@@ -118,6 +125,7 @@ fn leaves_keep_their_sessions_through_json() {
     let state = state();
     let text = serde_json::to_string(&state).unwrap();
     assert!(text.contains(r#""session":"00000000000000000000000000000007","unstarted":true"#), "{text}");
+    assert!(text.contains(r#""shell":"cmd.exe""#), "{text}");
     // 没有会话、启动过的叶子不写这两项。
     assert!(text.contains(r#"{"type":"leaf","cwd":"/tmp"}"#), "{text}");
     assert_eq!(serde_json::from_str::<State>(&text).unwrap(), state);

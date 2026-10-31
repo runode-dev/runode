@@ -291,7 +291,7 @@ impl WindowView {
         self.spawn_terminal_on(&host, cwd, None, window, cx)
     }
 
-    /// 在主机 `host` 的 `cwd` 里启动一个终端，`cwd` 不是目录时从 `fallback` 开。
+    /// 在主机 `host` 的 `cwd` 里启动默认 shell 的终端，`cwd` 不是目录时从 `fallback` 开。
     pub(super) fn spawn_terminal_on(
         &mut self,
         host: &HostId,
@@ -300,7 +300,20 @@ impl WindowView {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Entity<TerminalView>> {
-        match TerminalView::spawn(host, cwd, fallback, window, cx) {
+        self.spawn_shell_on(host, cwd, fallback, None, window, cx)
+    }
+
+    /// 在主机 `host` 的 `cwd` 里起 `shell`（为空时宿主的默认 shell），`cwd` 不是目录时从 `fallback` 开。
+    pub(super) fn spawn_shell_on(
+        &mut self,
+        host: &HostId,
+        cwd: Option<&Path>,
+        fallback: Option<&Path>,
+        shell: Option<String>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Entity<TerminalView>> {
+        match TerminalView::spawn(host, cwd, fallback, shell, window, cx) {
             Ok(view) => {
                 self.record_spawn(&view, cwd);
                 Some(view)
@@ -842,12 +855,22 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<TerminalView>> {
+        self.spawn_shell_beside_focused(None, window, cx)
+    }
+
+    /// 在当前终端的 shell 所在目录起 `shell`，为空时宿主的默认 shell。
+    pub(super) fn spawn_shell_beside_focused(
+        &mut self,
+        shell: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<TerminalView>> {
         // 目录已经被删掉时宿主退回 workspace 的目录，再退回家目录；workspace 里没有终端时从它的目录开始。
         // 不在界面线程上看目录还在不在，见 `format::start_dir`。
         let (host, fallback) = (self.workspace().host.clone(), self.workspace().dir.clone());
         let cwd = self.focused_view().and_then(|view| view.read(cx).cwd());
         let cwd = format::start_dir(cwd.as_deref(), &fallback);
-        self.spawn_terminal_on(&host, Some(&cwd), Some(&fallback), window, cx)
+        self.spawn_shell_on(&host, Some(&cwd), Some(&fallback), shell, window, cx)
     }
 }
 

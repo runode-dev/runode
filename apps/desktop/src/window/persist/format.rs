@@ -145,6 +145,9 @@ pub enum SavedNode {
         /// 前台 agent 在进行的对话：会话接不上、要在原目录新开时接着它。
         #[serde(default, skip_serializing_if = "Option::is_none")]
         conversation: Option<Conversation>,
+        /// 新建时挑的 shell，为空时用宿主的默认 shell。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shell: Option<String>,
     },
     Split {
         axis: Axis,
@@ -263,6 +266,7 @@ pub fn adopt(
                         session: Some(info.id),
                         unstarted: false,
                         conversation: info.meta.conversation.clone(),
+                        shell: None,
                     },
                     focused: 0,
                     zoomed: false,

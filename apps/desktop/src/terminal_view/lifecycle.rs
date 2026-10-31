@@ -182,16 +182,17 @@ impl ArcWake for Unpark {
 }
 
 impl TerminalView {
-    /// 建好视图，在主机 `host` 的 `cwd` 下启动 shell，`cwd` 为 `None` 时从家目录开始；shell 等第一次
-    /// 布局后才启动，见 `start`。伪终端开不了时返回错误，不建视图。
+    /// 建好视图，在主机 `host` 的 `cwd` 下启动 `shell`（为空时宿主的默认 shell），`cwd` 为 `None` 时从家目录
+    /// 开始；shell 等第一次布局后才启动，见 `start`。伪终端开不了时返回错误，不建视图。
     pub fn spawn(
         host: &HostId,
         cwd: Option<&Path>,
         fallback: Option<&Path>,
+        shell: Option<String>,
         window: &mut Window,
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
-        let view = Self::unstarted(host, cwd, fallback, None, window, cx)?;
+        let view = Self::unstarted(host, cwd, fallback, None, shell, window, cx)?;
         view.update(cx, |view, cx| view.start(cx));
         Ok(view)
     }
@@ -205,11 +206,12 @@ impl TerminalView {
         cwd: Option<&Path>,
         fallback: Option<&Path>,
         resume: Option<Conversation>,
+        shell: Option<String>,
         window: &mut Window,
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
         if !host.is_local() {
-            return Ok(Self::deferred(host, cwd, fallback, resume, window, cx));
+            return Ok(Self::deferred(host, cwd, fallback, resume, shell, window, cx));
         }
         let config = cx.global::<AppConfig>().0.clone();
         let link = host_client::remote::link_of(host);
@@ -219,7 +221,7 @@ impl TerminalView {
             fallback_cwd: fallback.map(Into::into),
             integration: config.shell_integration,
             start: false,
-            shell: None,
+            shell: shell.clone(),
             settings: None,
             resume: resume.clone(),
         })?;
@@ -227,6 +229,7 @@ impl TerminalView {
         Ok(cx.new(|cx| {
             let mut view = Self::new(host, Some(id), screen, false, rx, window, cx);
             view.start_resume = resume;
+            view.start_shell = shell;
             view
         }))
     }
@@ -240,6 +243,7 @@ impl TerminalView {
         cwd: Option<&Path>,
         fallback: Option<&Path>,
         resume: Option<Conversation>,
+        shell: Option<String>,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
@@ -258,6 +262,7 @@ impl TerminalView {
             view.start_dir = start_dir;
             view.start_fallback = start_fallback;
             view.start_resume = resume;
+            view.start_shell = shell;
             view
         })
     }
@@ -282,7 +287,7 @@ impl TerminalView {
             fallback_cwd: self.start_fallback.clone(),
             integration: self.config.shell_integration,
             start,
-            shell: None,
+            shell: self.start_shell.clone(),
             settings: None,
             resume: self.start_resume.clone(),
         };
@@ -352,12 +357,14 @@ impl TerminalView {
 
     /// 远端主机还没连上时恢复存档里的终端：先按断开显示，主机连上后会话 `id` 还在就接回，不在了就在
     /// `cwd`（为空时 `fallback`）新开、接回 `resume` 这个 agent 对话，见 `host_reconnected`。
+    #[allow(clippy::too_many_arguments)]
     pub fn awaiting(
         host: &HostId,
         id: Option<SessionId>,
         cwd: Option<&Path>,
         fallback: Option<&Path>,
         resume: Option<Conversation>,
+        shell: Option<String>,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
@@ -371,6 +378,7 @@ impl TerminalView {
             view.start_dir = dir;
             view.start_fallback = fallback.map(Path::to_path_buf);
             view.start_resume = resume;
+            view.start_shell = shell;
             view
         });
         // 主机已经连上了的话等不来 `host_reconnected`，现在就接。
@@ -383,11 +391,12 @@ impl TerminalView {
     /// 用宿主里已有的会话 `id` 建视图（存档恢复、接上后台会话）。`cwd` 是调用方记着的目录，宿主
     /// 还没报告目录时当作它的目录。`visible` 为假时视图只看状态（`AttachMode::MetaOnly`），等
     /// `request_visible` 再看屏幕。会话已经启动过，不再 `start`。连不上时返回错误，不结束会话；宿主
-    /// 积压着时不算连不上，见 `attach_later`。
+    /// 积压着时不算连不上，见 `attach_later`。`shell` 是建这个会话时挑的，会话没了在原目录重开时用。
     pub fn reattach(
         host: &HostId,
         id: SessionId,
         cwd: Option<&Path>,
+        shell: Option<String>,
         visible: bool,
         window: &mut Window,
         cx: &mut App,
@@ -424,6 +433,7 @@ impl TerminalView {
         Ok(cx.new(|cx| {
             let mut view = Self::new(host, Some(id), screen, true, rx, window, cx);
             view.start_dir = start_dir;
+            view.start_shell = shell;
             view
         }))
     }
@@ -905,7 +915,7 @@ impl TerminalView {
             fallback_cwd: self.start_fallback.clone(),
             integration: self.config.shell_integration,
             start: true,
-            shell: None,
+            shell: self.start_shell.clone(),
             settings: None,
             resume: None,
         })?;
@@ -1026,6 +1036,7 @@ impl TerminalView {
             start_dir: None,
             start_fallback: None,
             start_resume: None,
+            start_shell: None,
             host: host.clone(),
             host_link: host_client::remote::link_of(host),
             opening: None,
@@ -1208,6 +1219,11 @@ impl TerminalView {
     /// 前台 agent 在进行的对话，写进窗口存档；恢复出来、agent 还没起来的终端是要接回的那场。
     pub fn conversation(&self) -> Option<Conversation> {
         self.screen.meta().conversation.clone().or_else(|| self.start_resume.clone())
+    }
+
+    /// 新建时挑的 shell，写进窗口存档；用宿主默认 shell 的为 `None`。
+    pub fn shell(&self) -> Option<&str> {
+        self.start_shell.as_deref()
     }
 
     /// 前台 agent 在标题里报告的状态；不是 agent 在前台时为 `None`。

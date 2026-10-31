@@ -1281,6 +1281,9 @@ impl Connection {
                 let sources = runode_tasks::list(&dir)?;
                 Ok(HostMsg::Tasks { req, dir, sources })
             }),
+            ClientMsg::ListShells { req } => self.read_files(req, "host-list-shells", move || {
+                Ok(HostMsg::Shells { req, shells: runode_terminal::shells::available() })
+            }),
             ClientMsg::Git { req, id, request } => self.git(req, id, request),
             ClientMsg::ListTodos { req } => {
                 if let Some(peer) = self.shared.peers().connections.get_mut(&self.id) {

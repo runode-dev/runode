@@ -106,6 +106,7 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
             }
         },
         message @ (HostMsg::Tasks { req, .. }
+        | HostMsg::Shells { req, .. }
         | HostMsg::Dirs { req, .. }
         | HostMsg::Layout { req, .. }
         | HostMsg::Todos { req, .. }

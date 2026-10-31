@@ -34,7 +34,7 @@ use std::{ffi::OsString, fmt, path::PathBuf, sync::Arc};
 pub use runode_types::{
     agent::Conversation,
     session::{InvalidSessionId, SessionId},
-    shell::FinishedCommand,
+    shell::{FinishedCommand, ShellProfile, ShellProfileKind},
 };
 use runode_types::{
     clipboard::ClipboardAccess,
@@ -278,6 +278,8 @@ pub enum ClientMsg {
     /// `HostMsg::Tasks`，见 `tasks` 模块；`dir` 不是绝对路径、不是目录时回 `Error`。
     /// 宿主自己办，不转给界面。
     ListTasks { req: u32, dir: PathBuf },
+    /// 列宿主这台机器上新建终端时可以挑的 shell，回 `HostMsg::Shells`。宿主自己办，不转给界面。
+    ListShells { req: u32 },
     /// 在会话 `id` 的 shell 当前所在的仓库里读写 git，见 `git` 模块。一条连接上的这些请求按到达的
     /// 先后一件一件办，推送、拉取这类要等网络的会排着后面的。办不了时回的 `Error` 只带 `req`、不带
     /// `id`：错是这件请求的（git 的报错、没有这个会话），不是会话出了事。
@@ -593,6 +595,11 @@ pub enum HostMsg {
         #[serde(serialize_with = "runode_types::lossy_path::serialize")]
         dir: PathBuf,
         sources: Vec<TaskSource>,
+    },
+    /// 回 `ClientMsg::ListShells`。只有 Windows 上的宿主列出 shell，别的系统上为空。
+    Shells {
+        req: u32,
+        shells: Vec<ShellProfile>,
     },
     /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`Layout`；没有界面
     /// 连着时除 `Reveal` 外宿主自己办），只发给登记为界面的

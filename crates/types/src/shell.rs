@@ -70,6 +70,31 @@ impl Shell {
     }
 }
 
+/// 主机上装着、新建终端时可以挑的一个 shell。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ShellProfile {
+    pub kind: ShellProfileKind,
+    /// 起它时交给 PTY 的程序：PATH 上找得到的写程序名，否则写全路径。
+    pub program: String,
+}
+
+/// 可挑的 shell 是哪一种；显示的名字由前端按种类翻译。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShellProfileKind {
+    /// PowerShell 7（`pwsh.exe`）。
+    PowerShell,
+    /// 系统自带的 Windows PowerShell（`powershell.exe`）。
+    WindowsPowerShell,
+    /// 命令提示符（`cmd.exe`）。
+    Cmd,
+    /// Git for Windows 带的 bash。
+    GitBash,
+    /// 前端不认识的种类，前端不列出。
+    #[serde(other)]
+    Other,
+}
+
 /// shell 集成报告的名字。
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]

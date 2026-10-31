@@ -163,6 +163,8 @@ pub struct TerminalView {
     /// 恢复时要接回的 agent 对话：`deferred` 建的视图开会话时交给宿主。会话报出对话之前
     /// `SessionMeta::conversation` 还是空的，写存档时用它代替（`conversation`）。
     start_resume: Option<Conversation>,
+    /// 新建时挑的 shell，为空时用宿主的默认 shell；会话断了在原目录重开时还用它，写存档时也记下。
+    start_shell: Option<String>,
     /// 会话在哪台主机上，和到那台主机的连接。
     host: HostId,
     host_link: host_client::Link,

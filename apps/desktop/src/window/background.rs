@@ -234,7 +234,7 @@ impl WindowView {
             .try_global::<BackgroundSessions>()
             .and_then(|state| state.sessions.iter().find(|session| session.id == id))
             .and_then(|session| session.meta.cwd.clone());
-        match TerminalView::reattach(&HostId::Local, id, cwd.as_deref(), true, window, cx) {
+        match TerminalView::reattach(&HostId::Local, id, cwd.as_deref(), None, true, window, cx) {
             Ok(view) => {
                 forget(&[id], cx);
                 self.insert_tab(self.workspace().active + 1, view, window, cx);

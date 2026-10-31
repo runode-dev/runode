@@ -214,7 +214,7 @@ impl WindowView {
             return;
         }
         let cwd = todo.worktree_dir.as_deref().unwrap_or(&todo.spec.dir).to_owned();
-        let view = match TerminalView::reattach(&HostId::Local, id, Some(&cwd), true, window, cx) {
+        let view = match TerminalView::reattach(&HostId::Local, id, Some(&cwd), None, true, window, cx) {
             Ok(view) => view,
             Err(err) => {
                 tracing::warn!("failed to open the session of todo {}: {err:#}", todo.id);

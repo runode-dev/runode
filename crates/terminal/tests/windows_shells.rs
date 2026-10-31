@@ -238,3 +238,18 @@ fn cmd_marks_its_prompts() {
     drop(shell);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 新建终端时可挑的 shell：Windows PowerShell 和 cmd 总有，装了 Git for Windows 时有它的 bash，起出来是真的 shell。
+#[test]
+fn available_shells_include_the_builtin_ones_and_git_bash() {
+    use runode_types::shell::ShellProfileKind;
+    let shells = runode_terminal::shells::available();
+    let kinds: Vec<_> = shells.iter().map(|shell| shell.kind).collect();
+    assert!(kinds.contains(&ShellProfileKind::WindowsPowerShell), "{shells:?}");
+    assert!(kinds.contains(&ShellProfileKind::Cmd), "{shells:?}");
+    if Path::new(r"C:\Program Files\Git\bin\bash.exe").is_file() {
+        let bash = shells.iter().find(|shell| shell.kind == ShellProfileKind::GitBash).expect("Git Bash");
+        assert!(bash.program.to_ascii_lowercase().ends_with(r"\bin\bash.exe"), "{bash:?}");
+        integrated(&bash.program, &BASH);
+    }
+}

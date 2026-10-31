@@ -31,7 +31,7 @@ pub use layout::{PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout}
 pub use message::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, ClipboardContent, Conversation, ERROR_BACKED_UP,
     ERROR_NO_SESSION, FinishedCommand, GoodbyeReason, HandoffRefusal, HostMsg, Placement, SessionId, SessionInfo,
-    ShellReport,
+    ShellProfile, ShellProfileKind, ShellReport,
 };
 pub use runode_types::tasks::{self, MAX_TASKS, TaskEntry, TaskSource, TaskSourceKind};
 

@@ -13,6 +13,7 @@ menu:
   quit_end_sessions: Quit Runode and End All Sessions
   file: File
   new_tab: New Tab
+  new_tab_options: New Tab Options
   new_workspace: New Workspace…
   new_window: New Window
   split_right: Split Right
@@ -87,6 +88,10 @@ agent:
     filter: Filter Agents
   launch:
     terminal: Terminal
+    powershell: PowerShell
+    windows_powershell: Windows PowerShell
+    cmd: Command Prompt
+    git_bash: Git Bash
 host:
   incompatible_title: An older Runode terminal host is still running
   incompatible_detail: "Terminals run inside this window for now, and command-line tools such as runode list cannot reach them. Quit the other Runode, or end its host process, then reopen Runode. (%{reason})"

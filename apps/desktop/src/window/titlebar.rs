@@ -13,8 +13,8 @@ use gpui::{
 use runode_types::agent::AgentKind;
 
 use super::{
-    AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, PressDown, SelectLastTab, SelectTab, TAB_CLOSE_SIZE,
-    TAB_TRACK_HEIGHT, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_ORIGIN, WindowView,
+    AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NEW_TAB_MENU_BUTTON_WIDTH, NewTab, PressDown, SelectLastTab, SelectTab,
+    TAB_CLOSE_SIZE, TAB_TRACK_HEIGHT, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_ORIGIN, WindowView,
     agents::{
         Mark, Status,
         logo::{accent, agent_logo, brand_color},
@@ -42,7 +42,7 @@ use crate::{
         file_icons::file_icon,
         font_size::FontSize,
         hsla,
-        icons::{CLOSE_ICON, DIFF_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON},
+        icons::{CHEVRON_DOWN_ICON, CLOSE_ICON, DIFF_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON},
         panel::{added_label, removed_label},
         tooltip::{shortcut_text, tooltip},
     },
@@ -874,33 +874,68 @@ impl WindowView {
             }))
     }
 
-    /// 卡片样式下标签条右边的新建标签按钮，按下弹出新建标签菜单。
-    pub(super) fn render_new_tab_button_card(&self, window: &Window, cx: &mut Context<Self>) -> Button {
-        let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab));
-        let button = Button::new("new-tab", rust_i18n::t!("menu.new_tab"))
-            .icon(PLUS_ICON)
-            .icon_size(16.)
-            .with_size(ButtonSize::Icon)
+    /// 卡片样式下标签条右边的新建标签按钮：「+」用默认 shell 开新标签，旁边的箭头弹出新建标签菜单。
+    pub(super) fn render_new_tab_button_card(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let height = px(TAB_TRACK_HEIGHT - 4.);
+        // 两个按钮挨着、底下垫一块和标签条同色的圆角底，只圆外侧的角，看着是一个按钮分成两半。
+        let new_tab = new_tab_button(ButtonSize::Icon, cx)
+            .w(px(NEW_TAB_BUTTON_WIDTH - NEW_TAB_MENU_BUTTON_WIDTH - 8.))
+            .h(height)
+            .rounded(px(0.))
+            .rounded_l(px(4.));
+        let options = new_tab_options_button(ButtonSize::Icon)
+            .w(px(NEW_TAB_MENU_BUTTON_WIDTH))
+            .h(height)
+            .rounded(px(0.))
+            .rounded_r(px(4.));
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
             .ml(px(4.))
-            .mr(px(6.))
-            .w(px(NEW_TAB_BUTTON_WIDTH - 8.))
-            .h(px(TAB_TRACK_HEIGHT - 4.))
-            .tooltip(tooltip);
-        self.with_new_tab_menu(button, window, cx)
+            .mr(px(4.))
+            .rounded(px(4.))
+            .bg(cx.theme().tab_track)
+            .child(new_tab)
+            .child(self.with_new_tab_menu(options, window, cx))
     }
 
-    pub(super) fn render_new_tab_button(&self, window: &Window, cx: &mut Context<Self>) -> Button {
-        let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab));
-        let button = Button::new("new-tab", rust_i18n::t!("menu.new_tab"))
-            .with_size(ButtonSize::IconSm)
-            .w(px(NEW_TAB_BUTTON_WIDTH))
+    /// 经典样式下标签条右边的新建标签按钮，和卡片样式的一样分成「+」和弹出菜单的箭头。
+    pub(super) fn render_new_tab_button(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let new_tab = new_tab_button(ButtonSize::IconSm, cx)
+            .w(px(NEW_TAB_BUTTON_WIDTH - NEW_TAB_MENU_BUTTON_WIDTH))
             .h_full()
-            .rounded(px(0.))
+            .rounded(px(0.));
+        let options =
+            new_tab_options_button(ButtonSize::IconSm).w(px(NEW_TAB_MENU_BUTTON_WIDTH)).h_full().rounded(px(0.));
+        div()
+            .flex_none()
+            .flex()
+            .h_full()
             .border_l_1()
             .border_color(cx.theme().border)
-            .text_size(px(16.))
-            .child("+")
-            .tooltip(tooltip);
-        self.with_new_tab_menu(button, window, cx)
+            .child(new_tab)
+            .child(self.with_new_tab_menu(options, window, cx))
     }
+}
+
+/// 「+」：按下就用默认 shell 开新标签。图标平时也不调暗，和别的只有图标的按钮不同。
+fn new_tab_button(size: ButtonSize, cx: &mut Context<WindowView>) -> Button {
+    Button::new("new-tab", rust_i18n::t!("menu.new_tab"))
+        .icon(PLUS_ICON)
+        .icon_size(16.)
+        .with_size(size)
+        .text_color(cx.theme().foreground)
+        .tooltip(tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab)))
+        .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx))
+}
+
+/// 「+」旁边弹出新建标签菜单的箭头。
+fn new_tab_options_button(size: ButtonSize) -> Button {
+    let label = rust_i18n::t!("menu.new_tab_options");
+    Button::new("new-tab-menu", label.clone())
+        .icon(CHEVRON_DOWN_ICON)
+        .icon_size(12.)
+        .with_size(size)
+        .tooltip(tooltip(label, None))
 }
