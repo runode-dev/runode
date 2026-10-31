@@ -128,15 +128,34 @@ workspace:
   empty: 这个工作区里还没有终端
   list: 工作区
   bell: 响过铃
-  ssh: SSH 主机
-  ssh_hint: 在经 SSH 连的机器上工作，runode 会自动装到那台机器上
   ssh_host: user@host，或 ~/.ssh/config 里的主机
   ssh_connect: 连接
-  ssh_hosts: 主机
+  host_add_config: ~/.ssh/config 里的主机
   ssh_dir: 远端的文件夹
   ssh_open: 打开
   ssh_up: 上一级
   ssh_retry: 重试
+  host: 主机
+  host_button: 主机：%{host}
+  host_local: 本机
+  host_local_hint: 这台电脑
+  host_remote_hint: "%{status} · SSH"
+  host_add: 添加 SSH 主机
+  host_add_hint: 经 SSH 使用一台现有的机器。
+  host_add_remote: 添加远程主机
+  host_add_remote_hint: SSH 主机
+  host_add_detail: 连上时 runode 会自动装到那台机器上。
+  host_add_cancel: 取消
+  browse_hint_remote: 在这台主机上选一个文件夹
+  clone_url_remote: 仓库地址
+  remote_waiting: 主机连上后在这里选文件夹。%{status}
+  remote_parent: 建在
+  remote_name: 文件夹名
+  remote_clone_name: 文件夹名，空着时用仓库名
+  remote_clone: 克隆
+  remote_create: 创建
+  host_state_waiting: 正在重连
+  host_state_stopped: 连不上
 window_controls:
   minimize: 最小化
   maximize: 最大化

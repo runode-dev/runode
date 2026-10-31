@@ -1,18 +1,22 @@
 //! 菜单：右键菜单（ContextMenu，`MenuHost::open_context_menu` 打开、`render_context_menu` 画）和按钮下面
 //! 弹出的菜单（DropdownMenu，`open_dropdown` 打开、按钮用 `render_dropdown_menu` 画在自己下面）共用的菜单项
 //! （`MenuItem`）、键盘和鼠标的操作、画法。菜单存在哪个视图里由 `MenuHost` 说，同一时刻只开一个。
+//!
+//! 一项可以带子菜单（`MenuItem::submenu`），只有一层：鼠标指到那一行、或者按回车、右方向键时在它右边
+//! 展开；键盘进了子菜单后上下键在子菜单里选，左方向键、Esc 收起子菜单回到上一层。
 
 use std::collections::HashMap;
 
 use gpui::{
-    Action, Anchor, AnyElement, App, Context, Div, ElementId, FocusHandle, KeyDownEvent, MouseButton, Pixels, Point,
-    Role, ScrollHandle, SharedString, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
+    Action, Anchor, AnyElement, App, Context, Div, ElementId, FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent,
+    Pixels, Point, Role, ScrollHandle, SharedString, Window, anchored, deferred, div, point, prelude::*, px, relative,
+    svg,
 };
 
 use crate::{
     a11y::{A11yPress, Disable},
     button::{Button, ButtonSize},
-    font_size::scaled,
+    font_size::{FontSize, scaled},
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
     popover::Popover,
     theme::ActiveTheme as _,
@@ -23,7 +27,7 @@ use crate::{
 const MENU_MARGIN: f32 = 8.;
 /// 按钮下面弹出的菜单离按钮这么远。
 const DROPDOWN_GAP: f32 = 4.;
-/// 菜单的宽度，按基准字号下的点数写，跟界面字号一起缩放。
+/// 菜单默认的宽度，按基准字号下的点数写，跟界面字号一起缩放。
 const MENU_WIDTH: f32 = 240.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
@@ -43,6 +47,10 @@ pub struct MenuItem {
     keep_open: bool,
     /// 鼠标停在这一行上时显示的完整说明，行里的字截断了也看得全。
     tooltip: Option<SharedString>,
+    /// 淡淡地写在字下面的第二行。
+    description: Option<SharedString>,
+    /// 指过去在右边展开的子菜单，子菜单里的项不再带子菜单。
+    submenu: Option<Vec<Option<MenuItem>>>,
 }
 
 /// 菜单项右边的图标按钮：图标和悬停时的说明；`keep_open` 时按了菜单不关、焦点不动；选中这一行时按
@@ -68,6 +76,8 @@ impl MenuItem {
             checked: None,
             keep_open: false,
             tooltip: None,
+            description: None,
+            submenu: None,
         }
     }
 
@@ -83,6 +93,8 @@ impl MenuItem {
             checked: Some(checked),
             keep_open: false,
             tooltip: None,
+            description: None,
+            submenu: None,
         }
     }
 
@@ -99,6 +111,8 @@ impl MenuItem {
             checked: None,
             keep_open: false,
             tooltip: None,
+            description: None,
+            submenu: None,
         }
     }
 
@@ -115,12 +129,37 @@ impl MenuItem {
             checked: None,
             keep_open: true,
             tooltip: None,
+            description: None,
+            submenu: None,
         }
     }
 
     /// 鼠标停在这一行上时显示 `text`。
     pub fn with_tooltip(mut self, text: impl Into<SharedString>) -> Self {
         self.tooltip = Some(text.into());
+        self
+    }
+
+    /// 写着 `label`、指过去在右边展开 `items` 的一项；`items` 里的项不能再带子菜单。
+    pub fn submenu(label: String, items: Vec<Option<MenuItem>>) -> Self {
+        Self {
+            label,
+            action: None,
+            shortcut: None,
+            enabled: true,
+            buttons: Vec::new(),
+            icon: None,
+            checked: None,
+            keep_open: false,
+            tooltip: None,
+            description: None,
+            submenu: Some(items),
+        }
+    }
+
+    /// 字下面另起一行淡淡地写 `text`。
+    pub fn with_description(mut self, text: impl Into<SharedString>) -> Self {
+        self.description = Some(text.into());
         self
     }
 
@@ -151,12 +190,51 @@ pub struct Menu {
     /// 选中的那一项，鼠标悬停和上下键都改它。
     highlighted: Option<usize>,
     scroll: ScrollHandle,
+    /// 宽度，按基准字号下的点数写。
+    width: f32,
+    /// 展开着的子菜单。
+    submenu: Option<Submenu>,
+    /// 子菜单画在哪：点在子菜单里不算点到菜单外面。
+    submenu_scroll: ScrollHandle,
+}
+
+/// 展开着的子菜单：第 `parent` 项的；`highlighted` 是子菜单里选中的项，键盘进了子菜单、或者鼠标指着
+/// 子菜单里的一项时才有，有它时上下键和回车都在子菜单里办。
+struct Submenu {
+    parent: usize,
+    highlighted: Option<usize>,
 }
 
 impl Menu {
     fn new(position: Option<Point<Pixels>>, items: Vec<Option<MenuItem>>, target: FocusHandle, cx: &mut App) -> Self {
         let focus = cx.focus_handle();
-        Self { position, items, target, focus, focus_pending: true, highlighted: None, scroll: ScrollHandle::new() }
+        Self {
+            position,
+            items,
+            target,
+            focus,
+            focus_pending: true,
+            highlighted: None,
+            scroll: ScrollHandle::new(),
+            width: MENU_WIDTH,
+            submenu: None,
+            submenu_scroll: ScrollHandle::new(),
+        }
+    }
+
+    /// 第 `ix` 项的子菜单。
+    fn submenu_items(&self, ix: usize) -> Option<&[Option<MenuItem>]> {
+        self.items.get(ix)?.as_ref()?.submenu.as_deref()
+    }
+
+    /// 展开第 `ix` 项的子菜单；`keyboard` 时选中子菜单的第一项，接着的上下键和回车都在子菜单里办。
+    fn open_submenu(&mut self, ix: usize, keyboard: bool) {
+        let Some(items) = self.submenu_items(ix) else {
+            return;
+        };
+        let highlighted = if keyboard { next_selectable(items, None, true) } else { None };
+        self.highlighted = Some(ix);
+        self.submenu = Some(Submenu { parent: ix, highlighted });
     }
 
     /// 选中往下（`down`）或往上数的下一个能选的项，到头了绕回来。
@@ -164,15 +242,21 @@ impl Menu {
         // 一项能选的都没有（比如换成了空的）时不选，回车、Cmd 加键才不会按到不在了的项。
         let next = next_selectable(&self.items, self.highlighted, down);
         self.highlighted = next;
+        if self.submenu.as_ref().is_some_and(|submenu| Some(submenu.parent) != next) {
+            self.submenu = None;
+        }
         if let Some(ix) = next {
             self.scroll.scroll_to_item(ix);
         }
     }
 }
 
-/// 第 `ix` 项能选：整行点了有动作。
+/// 第 `ix` 项能选：整行点了有动作，或者带着子菜单。
 fn selectable(items: &[Option<MenuItem>], ix: usize) -> bool {
-    items.get(ix).and_then(Option::as_ref).is_some_and(|item| item.enabled && item.action.is_some())
+    items
+        .get(ix)
+        .and_then(Option::as_ref)
+        .is_some_and(|item| item.enabled && (item.action.is_some() || item.submenu.is_some()))
 }
 
 /// 从第 `from` 项往下（`down`）或往上数的下一个能选的项，到头了绕回来；没有 `from` 时从头或尾数起。
@@ -227,6 +311,37 @@ fn row_ids(items: &[Option<MenuItem>]) -> Vec<ElementId> {
         .collect()
 }
 
+/// 菜单项的字，有说明时在下面另起一行淡淡地写。
+fn item_text(item: &MenuItem, fg: gpui::Hsla) -> Div {
+    match item.description.clone() {
+        Some(description) => {
+            div().flex_1().min_w_0().flex().flex_col().child(div().truncate().child(item.label.clone())).child(
+                div()
+                    .truncate()
+                    .text_size(FontSize::Small)
+                    .text_color(fg.opacity(if item.enabled { 0.55 } else { 0.3 }))
+                    .child(description),
+            )
+        }
+        None => div().flex_1().min_w_0().truncate().child(item.label.clone()),
+    }
+}
+
+/// 子菜单各行的元素 id：按字取，同名的按第几次出现区分；和上一层的行 id 分开。
+fn submenu_row_ids(items: &[Option<MenuItem>]) -> Vec<ElementId> {
+    let mut seen = HashMap::<String, usize>::new();
+    items
+        .iter()
+        .map(|item| {
+            let label = item.as_ref().map_or("\u{1f}separator", |item| item.label.as_str());
+            let count = seen.entry(label.to_owned()).or_default();
+            let key = if *count > 0 { format!("{label}\u{1f}{count}") } else { label.to_owned() };
+            *count += 1;
+            ElementId::Name(format!("file-submenu-{key}").into())
+        })
+        .collect()
+}
+
 /// 上一帧画出的行 `id`（`row_ids`）现在是第几项；那一项没了时为 `None`。点击和辅助工具的按下按行 id 找，
 /// 因为各项可能已被 `replace_menu_items` 换过。
 fn row_of(items: &[Option<MenuItem>], id: &ElementId) -> Option<usize> {
@@ -234,9 +349,17 @@ fn row_of(items: &[Option<MenuItem>], id: &ElementId) -> Option<usize> {
 }
 
 /// `items` 里和原来第 `near` 项 `old` 是同一项的那一项：整行动作一样，按钮的动作和字也一样的优先；
-/// 一样像的有几项时取离 `near` 最近的。
+/// 一样像的有几项时取离 `near` 最近的。带子菜单的项没有动作，按字认。
 fn find_item(items: &[Option<MenuItem>], near: usize, old: &MenuItem) -> Option<usize> {
-    let action = old.action.as_deref()?;
+    let Some(action) = old.action.as_deref() else {
+        old.submenu.as_ref()?;
+        return items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.as_ref().is_some_and(|item| item.submenu.is_some() && item.label == old.label))
+            .min_by_key(|(ix, _)| ix.abs_diff(near))
+            .map(|(ix, _)| ix);
+    };
     let same_buttons = |item: &MenuItem| {
         item.buttons.len() == old.buttons.len()
             && item.buttons.iter().zip(&old.buttons).all(|((_, a), (_, b))| a.partial_eq(b.as_ref()))
@@ -252,7 +375,7 @@ fn find_item(items: &[Option<MenuItem>], near: usize, old: &MenuItem) -> Option<
 
 /// 把按钮下面弹出的菜单 `list` 的 `anchor` 角对着按钮下沿，往下让出一点，放不下时贴着窗口边挪进来，
 /// 盖在窗口最上层。
-fn dropdown_anchor(anchor: Anchor, list: Popover) -> impl IntoElement {
+fn dropdown_anchor(anchor: Anchor, list: Div) -> impl IntoElement {
     deferred(
         anchored()
             .anchor(anchor)
@@ -301,6 +424,13 @@ pub trait MenuHost: Sized + 'static {
         cx.notify();
     }
 
+    /// 开着的菜单改成 `width` 宽，按基准字号下的点数写：各项写得长、默认的宽度装不下时用。
+    fn set_menu_width(&mut self, width: f32) {
+        if let Some(menu) = self.menu_slot() {
+            menu.width = width;
+        }
+    }
+
     /// 刚打开的菜单拿到焦点。每次画窗口时调。
     fn focus_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(menu) = self.menu_slot()
@@ -331,6 +461,19 @@ pub trait MenuHost: Sized + 'static {
                 menu.highlighted = Some(ix);
                 menu.scroll.scroll_to_item(ix);
             }
+            // 展开着的子菜单跟着它的那一项走，那一项没了就收起；子菜单里选中的项越界了就不选。
+            let parent = menu.submenu.as_ref().and_then(|submenu| {
+                let old = old_items.get(submenu.parent)?.as_ref()?;
+                find_item(&menu.items, submenu.parent, old)
+            });
+            menu.submenu = match (menu.submenu.take(), parent) {
+                (Some(submenu), Some(parent)) => {
+                    let items = menu.submenu_items(parent).unwrap_or_default();
+                    let highlighted = submenu.highlighted.filter(|&ix| selectable(items, ix));
+                    Some(Submenu { parent, highlighted })
+                }
+                _ => None,
+            };
             // 选中的那一项没了（删掉了一条）时，选中它后面能选的那一项，删的是最后一项时选新的最后一项。
             if let Some(ix) = menu.highlighted {
                 menu.highlighted = highlight_after_replace(&menu.items, ix);
@@ -364,6 +507,11 @@ pub trait MenuHost: Sized + 'static {
         if ix >= menu.items.len() {
             return;
         }
+        if menu.items[ix].as_ref().is_some_and(|item| item.enabled && item.submenu.is_some()) {
+            menu.open_submenu(ix, true);
+            cx.notify();
+            return;
+        }
         menu.highlighted = Some(ix);
         let item = menu.items[ix].as_ref().filter(|item| item.enabled);
         let Some((action, keep_open)) =
@@ -376,6 +524,27 @@ pub trait MenuHost: Sized + 'static {
             cx.notify();
         } else {
             self.run_menu_action(action.as_ref(), window, cx);
+        }
+    }
+
+    /// 点了或回车子菜单里的第 `ix` 项：关掉菜单再派发。
+    fn activate_submenu_item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = self.menu() else {
+            return;
+        };
+        let items = menu.submenu.as_ref().and_then(|submenu| menu.submenu_items(submenu.parent));
+        let item = items.and_then(|items| items.get(ix)?.as_ref()).filter(|item| item.enabled);
+        if let Some(action) = item.and_then(|item| Some(item.action.as_ref()?.boxed_clone())) {
+            self.run_menu_action(action.as_ref(), window, cx);
+        }
+    }
+
+    /// 点了上一帧画出的子菜单的行 `id`：按它现在的位置办。
+    fn activate_submenu_row(&mut self, id: &ElementId, window: &mut Window, cx: &mut Context<Self>) {
+        let menu = self.menu();
+        let items = menu.and_then(|menu| menu.submenu_items(menu.submenu.as_ref()?.parent));
+        if let Some(ix) = items.and_then(|items| submenu_row_ids(items).iter().position(|row| row == id)) {
+            self.activate_submenu_item(ix, window, cx);
         }
     }
 
@@ -423,15 +592,48 @@ pub trait MenuHost: Sized + 'static {
         if modifiers.modified() {
             return;
         }
-        match event.keystroke.key.as_str() {
+        let key = event.keystroke.key.as_str();
+        // 键盘进了子菜单：上下键在子菜单里选，回车按选中的项，左方向键、Esc 回到上一层。
+        if let Some(submenu) = menu.submenu.as_ref().filter(|submenu| submenu.highlighted.is_some()) {
+            let parent = submenu.parent;
+            let highlighted = submenu.highlighted;
+            match key {
+                "up" | "down" => {
+                    let items = menu.submenu_items(parent).unwrap_or_default();
+                    let next = next_selectable(items, highlighted, key == "down");
+                    menu.submenu = Some(Submenu { parent, highlighted: next });
+                    cx.notify();
+                }
+                "enter" => {
+                    if let Some(ix) = highlighted {
+                        self.activate_submenu_item(ix, window, cx);
+                    }
+                }
+                "left" | "escape" => {
+                    menu.submenu = None;
+                    cx.notify();
+                }
+                _ => return,
+            }
+            cx.stop_propagation();
+            return;
+        }
+        match key {
             "up" | "down" => {
-                menu.move_highlight(event.keystroke.key == "down");
+                menu.move_highlight(key == "down");
                 cx.notify();
             }
             "enter" => {
                 if let Some(ix) = menu.highlighted {
                     self.activate_menu_item(ix, window, cx);
                 }
+            }
+            "right" => {
+                let Some(ix) = menu.highlighted.filter(|&ix| menu.submenu_items(ix).is_some()) else {
+                    return;
+                };
+                menu.open_submenu(ix, true);
+                cx.notify();
             }
             "escape" => self.close_menu(window, cx),
             _ => return,
@@ -476,7 +678,7 @@ pub trait MenuHost: Sized + 'static {
     }
 
     /// 按钮下面弹出的菜单本身，按钮下沿离窗口顶 `button_bottom`；没有开着的下拉菜单时为空。
-    fn render_dropdown_list(&self, button_bottom: f32, window: &Window, cx: &mut Context<Self>) -> Option<Popover> {
+    fn render_dropdown_list(&self, button_bottom: f32, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
         if !self.dropdown_open() {
             return None;
         }
@@ -484,8 +686,9 @@ pub trait MenuHost: Sized + 'static {
         self.render_menu_list(max_height, window, cx)
     }
 
-    /// 菜单本身，最高 `max_height`，超出窗口时才在里面滚动；点到菜单外面就关掉。
-    fn render_menu_list(&self, max_height: f32, window: &Window, cx: &mut Context<Self>) -> Option<Popover> {
+    /// 菜单本身，最高 `max_height`，超出窗口时才在里面滚动；点到菜单外面就关掉。展开着的子菜单画在旁边，
+    /// 不在会滚动、会裁剪的列表里面。
+    fn render_menu_list(&self, max_height: f32, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
         let menu = self.menu()?;
         // 辅助工具悬停不了，行里的按钮在它读着时一直露出来，不然按不到。
         let a11y = window.is_a11y_active();
@@ -497,11 +700,13 @@ pub trait MenuHost: Sized + 'static {
         // 有勾选项时每一行左边都留出打勾的那一列，字对齐。
         let check_column = menu.items.iter().flatten().any(|item| item.checked.is_some());
         let ids = row_ids(&menu.items);
+        let in_submenu = menu.submenu.as_ref().is_some_and(|submenu| submenu.highlighted.is_some());
         let items = menu.items.iter().enumerate().map(|(ix, item)| {
             let Some(item) = item else {
                 return div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(fg.opacity(0.12)).into_any_element();
             };
-            let row_action = item.enabled && item.action.is_some();
+            let row_action = item.enabled && (item.action.is_some() || item.submenu.is_some());
+            let expanded = menu.submenu.as_ref().is_some_and(|submenu| submenu.parent == ix);
             let highlighted = menu.highlighted == Some(ix);
             // 整行能点的只在选中时露出按钮，不然每行行尾都摆一个；整行没有动作的（灰着的小标题）一直露出，
             // 有动作却不可用的不露。
@@ -513,17 +718,23 @@ pub trait MenuHost: Sized + 'static {
                 .id(id.clone())
                 // 没有动作的一行是小标题；灰着的项报成不可用。
                 .map(|row| match item.checked {
+                    _ if item.submenu.is_some() => row.role(Role::MenuItem).aria_expanded(expanded),
                     _ if item.action.is_none() => row.role(Role::Label),
                     Some(checked) => row.role(Role::MenuItemCheckBox).aria_toggled(checked.into()),
                     None => row.role(Role::MenuItem),
                 })
                 .aria_label(item.label.clone())
                 .aria_disabled(disabled)
-                .when_some(item.shortcut.clone(), |row, shortcut| row.aria_description(shortcut))
-                // 菜单拿着焦点，选中的那一项报成辅助工具眼里的焦点。
-                .when(highlighted, |row| row.aria_active_descendant())
+                .when_some(item.description.clone().or_else(|| item.shortcut.clone()), |row, text| {
+                    row.aria_description(text)
+                })
+                // 菜单拿着焦点，选中的那一项报成辅助工具眼里的焦点；键盘进了子菜单时是子菜单里选中的那一项。
+                .when(highlighted && !in_submenu, |row| row.aria_active_descendant())
                 .flex_none()
-                .h(scaled(24.))
+                .map(|row| match item.description {
+                    Some(_) => row.py(px(4.)),
+                    None => row.h(scaled(24.)),
+                })
                 .px(px(10.))
                 .mx(px(4.))
                 .rounded(px(4.))
@@ -540,6 +751,13 @@ pub trait MenuHost: Sized + 'static {
                         let menu = this.menu_slot().as_mut().filter(|menu| *hovered && ix < menu.items.len());
                         if let Some(menu) = menu {
                             menu.highlighted = Some(ix);
+                            // 指到带子菜单的行就展开它，指到别的行收起。
+                            let open = menu.submenu.as_ref().is_some_and(|submenu| submenu.parent == ix);
+                            if menu.submenu_items(ix).is_none() {
+                                menu.submenu = None;
+                            } else if !open {
+                                menu.open_submenu(ix, false);
+                            }
                             cx.notify();
                         }
                     }))
@@ -562,7 +780,7 @@ pub trait MenuHost: Sized + 'static {
                     item.icon
                         .map(|icon| svg().flex_none().path(icon).size(px(13.)).mr(px(-8.)).text_color(fg.opacity(0.7))),
                 )
-                .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
+                .child(item_text(item, fg))
                 .children(
                     item.shortcut
                         .clone()
@@ -576,6 +794,9 @@ pub trait MenuHost: Sized + 'static {
                                 .child(shortcut)
                         }),
                 )
+                .when(item.submenu.is_some(), |row| {
+                    row.child(svg().flex_none().path(CHEVRON_RIGHT_ICON).size(px(12.)).text_color(fg.opacity(0.6)))
+                })
                 .children(buttons.filter(|buttons| !buttons.is_empty()).map(|buttons| {
                     div().flex_none().mr(px(-6.)).flex().gap(px(2.)).children(buttons.iter().enumerate().map(
                         |(b, (button, _))| {
@@ -609,7 +830,7 @@ pub trait MenuHost: Sized + 'static {
             .track_focus(&menu.focus)
             .on_key_down(cx.listener(Self::menu_key))
             .track_scroll(&menu.scroll)
-            .w(scaled(MENU_WIDTH))
+            .w(scaled(menu.width))
             .max_h(px(max_height))
             .overflow_y_scroll()
             .py(px(4.))
@@ -618,8 +839,117 @@ pub trait MenuHost: Sized + 'static {
             .rounded(px(6.))
             .shadow_lg()
             .children(items)
-            .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menu(window, cx)));
-        Some(list)
+            // GPUI 在捕获阶段就办「点到外面」，子菜单里的行还没收到按下，所以点在子菜单里的要在这里放过。
+            .on_mouse_down_out(cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                let in_submenu = this.menu().is_some_and(|menu| {
+                    menu.submenu.is_some() && menu.submenu_scroll.bounds().contains(&event.position)
+                });
+                if !in_submenu {
+                    this.close_menu(window, cx);
+                }
+            }));
+        // 子菜单的上沿对着它那一行，左边贴着菜单的右边；行的位置是上一帧量的，刚展开的头一帧还没有就不画。
+        let submenu = menu.submenu.as_ref().and_then(|submenu| {
+            let row = menu.scroll.bounds_for_item(submenu.parent)?;
+            let list = self.render_submenu(window, cx)?;
+            let position = point(row.right() + px(4.), row.top() - px(5.));
+            Some(anchored().position(position).snap_to_window_with_margin(px(MENU_MARGIN)).child(list))
+        });
+        Some(div().child(list).children(submenu))
+    }
+
+    /// 展开着的子菜单。焦点留在上一层的菜单上，键盘操作由它的 `menu_key` 转过来。
+    fn render_submenu(&self, window: &Window, cx: &mut Context<Self>) -> Option<Popover> {
+        let menu = self.menu()?;
+        let submenu = menu.submenu.as_ref()?;
+        let items = menu.submenu_items(submenu.parent)?;
+        let parent_label = menu.items.get(submenu.parent)?.as_ref()?.label.clone();
+        let theme = cx.theme();
+        let hover_bg = theme.mix(0.12);
+        let fg = theme.popover_foreground;
+        let check_column = items.iter().flatten().any(|item| item.checked.is_some());
+        let ids = submenu_row_ids(items);
+        let rows = items.iter().enumerate().map(|(ix, item)| {
+            let Some(item) = item else {
+                return div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(fg.opacity(0.12)).into_any_element();
+            };
+            let row_action = item.enabled && item.action.is_some();
+            let highlighted = submenu.highlighted == Some(ix);
+            let view = cx.entity().downgrade();
+            let id = ids[ix].clone();
+            let pressed = id.clone();
+            div()
+                .id(id.clone())
+                .map(|row| match item.checked {
+                    _ if item.action.is_none() => row.role(Role::Label),
+                    Some(checked) => row.role(Role::MenuItemCheckBox).aria_toggled(checked.into()),
+                    None => row.role(Role::MenuItem),
+                })
+                .aria_label(item.label.clone())
+                .aria_disabled(item.action.is_some() && !item.enabled)
+                .when_some(item.description.clone().or_else(|| item.shortcut.clone()), |row, text| {
+                    row.aria_description(text)
+                })
+                .when(highlighted, |row| row.aria_active_descendant())
+                .flex_none()
+                .map(|row| match item.description {
+                    Some(_) => row.py(px(4.)),
+                    None => row.h(scaled(24.)),
+                })
+                .px(px(10.))
+                .mx(px(4.))
+                .rounded(px(4.))
+                .flex()
+                .items_center()
+                .gap(px(16.))
+                .text_color(if item.enabled { fg } else { fg.opacity(0.35) })
+                .when(highlighted, |row| row.bg(hover_bg))
+                .when_some(item.tooltip.clone(), |row, text| row.tooltip(tooltip(text, None)))
+                .when(row_action, |row| {
+                    row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                        let submenu = this.menu_slot().as_mut().and_then(|menu| menu.submenu.as_mut());
+                        if let Some(submenu) = submenu.filter(|_| *hovered) {
+                            submenu.highlighted = Some(ix);
+                            cx.notify();
+                        }
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.activate_submenu_row(&pressed, window, cx);
+                        }),
+                    )
+                    .on_a11y_press(view, move |this, window, cx| this.activate_submenu_row(&id, window, cx))
+                })
+                .when(check_column, |row| {
+                    row.child(
+                        div().flex_none().w(px(10.)).mr(px(-8.)).children(item.checked.filter(|c| *c).map(|_| "✓")),
+                    )
+                })
+                .children(
+                    item.icon
+                        .map(|icon| svg().flex_none().path(icon).size(px(13.)).mr(px(-8.)).text_color(fg.opacity(0.7))),
+                )
+                .child(item_text(item, fg))
+                .into_any_element()
+        });
+        Some(
+            Popover::new("file-submenu")
+                .role(Role::Menu)
+                .aria_label(parent_label)
+                .track_scroll(&menu.submenu_scroll)
+                .w(scaled(menu.width))
+                .max_h(window.viewport_size().height - px(MENU_MARGIN * 2.))
+                .overflow_y_scroll()
+                .py(px(4.))
+                .flex()
+                .flex_col()
+                .rounded(px(6.))
+                .shadow_lg()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .children(rows),
+        )
     }
 }
 
@@ -688,6 +1018,28 @@ mod tests {
         let old = row_ids(&[group(), task("a"), task("b")]);
         assert_eq!(row_of(&[group(), task("new"), task("a"), task("b")], &old[2]), Some(3));
         assert_eq!(row_of(&[group(), task("a"), task("c")], &old[2]), None);
+    }
+
+    /// 带子菜单的项没有动作也能选，回车和右方向键靠它展开子菜单；换了各项后按字找回它。
+    #[test]
+    fn submenu_items_are_selectable_and_found_by_label() {
+        let sub = |name: &str| Some(MenuItem::submenu(name.to_owned(), vec![item(Box::new(Third))]));
+        let items = [sub("add"), None, item(Box::new(First))];
+        assert_eq!(next_selectable(&items, None, true), Some(0));
+        assert_eq!(next_selectable(&items, Some(0), true), Some(2));
+        let old = sub("add").unwrap();
+        assert_eq!(find_item(&[item(Box::new(First)), None, sub("add")], 0, &old), Some(2));
+        assert_eq!(find_item(&[item(Box::new(First)), sub("other")], 0, &old), None);
+    }
+
+    /// 子菜单的行 id 和上一层的分开，同名的按第几次出现区分。
+    #[test]
+    fn submenu_rows_have_their_own_ids() {
+        let named = |name: &str| Some(MenuItem::label(name.to_owned(), None, Some(Box::new(First))));
+        let ids = submenu_row_ids(&[named("a"), None, named("a")]);
+        assert_eq!(ids.len(), 3);
+        assert_ne!(ids[0], ids[2]);
+        assert!(!row_ids(&[named("a")]).contains(&ids[0]));
     }
 
     /// 菜单行的 id 按所在的组和字取：不同组里同名的项不撞，前面插进一组后原来各项的 id 不变，同一组里

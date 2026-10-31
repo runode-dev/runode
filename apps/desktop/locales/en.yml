@@ -128,15 +128,34 @@ workspace:
   empty: No terminals in this workspace
   list: Workspaces
   bell: Bell rang
-  ssh: SSH Host
-  ssh_hint: Work on a machine you reach over SSH; runode is installed there for you
   ssh_host: user@host, or a host from ~/.ssh/config
   ssh_connect: Connect
-  ssh_hosts: Hosts
+  host_add_config: Hosts in ~/.ssh/config
   ssh_dir: Folder on the host
   ssh_open: Open
   ssh_up: Parent Folder
   ssh_retry: Retry
+  host: Host
+  host_button: "Host: %{host}"
+  host_local: Local
+  host_local_hint: This computer
+  host_remote_hint: "%{status} · SSH"
+  host_add: Add SSH Host
+  host_add_hint: Use an existing machine over SSH.
+  host_add_remote: Add Remote Host
+  host_add_remote_hint: SSH host
+  host_add_detail: runode installs itself on the host when it connects.
+  host_add_cancel: Cancel
+  browse_hint_remote: Pick a folder on this host
+  clone_url_remote: Repository URL
+  remote_waiting: "Choose a folder once the host is connected. %{status}"
+  remote_parent: Create in
+  remote_name: Folder name
+  remote_clone_name: Folder name, the repository name if empty
+  remote_clone: Clone
+  remote_create: Create
+  host_state_waiting: Reconnecting
+  host_state_stopped: Can't connect
 window_controls:
   minimize: Minimize
   maximize: Maximize

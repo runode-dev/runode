@@ -172,6 +172,8 @@ enum Dropdown {
     NewTab,
     /// 没有菜单栏的系统上标题栏右上角的「更多」按钮。
     More,
+    /// 新建工作区对话框里的主机按钮。
+    WorkspaceHost,
 }
 
 /// 切换到第几个 workspace（从 0 数）。
@@ -771,7 +773,7 @@ impl Render for WindowView {
         let agent_picker = self.render_agent_picker(window, cx);
         let arrange_picker = self.render_arrange_picker(cx);
         let branch_picker = self.render_branch_picker(cx);
-        let new_workspace = self.render_new_workspace(cx);
+        let new_workspace = self.render_new_workspace(window, cx);
         let ask = self.render_ask(cx);
         let add_task = self.render_add_task(cx);
         let commit_message_dialog = self.render_commit_message_dialog(cx);

@@ -174,6 +174,11 @@ impl InputState {
     }
 
     /// 报给辅助工具的名字换成 `label`。
+    /// 换掉框空着时显示的提示。
+    pub fn set_placeholder(&mut self, text: impl Into<SharedString>) {
+        self.placeholder = Some(text.into());
+    }
+
     pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
         self
