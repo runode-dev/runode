@@ -23,3 +23,16 @@ fn lists_concrete_hosts_through_includes() {
     assert_eq!(list_hosts(&home.0), ["alpha", "beta", "devbox", "with space"]);
     assert!(list_hosts(&home.0.join("nowhere")).is_empty());
 }
+
+#[test]
+fn includes_expand_wildcards_in_every_segment() {
+    let home = TempDir::new("config-dirs");
+    let ssh = home.0.join(".ssh");
+    for dir in ["hosts/work", "hosts/home", "hosts/.hidden"] {
+        fs::create_dir_all(ssh.join(dir)).unwrap();
+        let name = dir.rsplit('/').next().unwrap().trim_start_matches('.');
+        fs::write(ssh.join(dir).join("config"), format!("Host {name}\n")).unwrap();
+    }
+    fs::write(ssh.join("config"), "Include hosts/*/config ~/.ssh/h?sts/w*/config\n").unwrap();
+    assert_eq!(list_hosts(&home.0), ["home", "work"]);
+}

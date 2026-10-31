@@ -96,32 +96,40 @@ fn split_words(value: &str) -> Vec<String> {
     words
 }
 
-/// `Include` 的一个参数指的文件：`~` 换成家目录，相对路径按 `~/.ssh` 算；最后一段可以带 `*` 和 `?`，
-/// 匹配到的文件按名字排。
+/// `Include` 的一个参数指的文件：`~` 换成家目录，相对路径按 `~/.ssh` 算；每一段都可以带 `*` 和 `?`，
+/// 和 glob(3) 一样不配开头的 `.`，匹配到的按路径排。
 fn include_paths(pattern: &str, home: &Path, ssh_dir: &Path) -> Vec<PathBuf> {
     let path = match pattern.strip_prefix("~/") {
         Some(rest) => home.join(rest),
         None if Path::new(pattern).is_absolute() => PathBuf::from(pattern),
         None => ssh_dir.join(pattern),
     };
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return vec![path];
-    };
-    if !name.contains(['*', '?']) {
-        return vec![path];
+    let mut found = vec![PathBuf::new()];
+    for component in path.components() {
+        let name = component.as_os_str();
+        match name.to_str().filter(|name| name.contains(['*', '?'])) {
+            Some(pattern) => found = found.iter().flat_map(|dir| matching(dir, pattern)).collect(),
+            None => found.iter_mut().for_each(|dir| dir.push(name)),
+        }
     }
-    let Some(dir) = path.parent() else {
-        return Vec::new();
-    };
-    let mut files: Vec<PathBuf> = fs::read_dir(dir)
+    found.sort();
+    found
+}
+
+/// `dir` 里名字配得上 `pattern` 的各项。
+fn matching(dir: &Path, pattern: &str) -> Vec<PathBuf> {
+    fs::read_dir(dir)
         .into_iter()
         .flatten()
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_str().is_some_and(|file| glob(name, file)))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| (pattern.starts_with('.') || !name.starts_with('.')) && glob(pattern, name))
+        })
         .map(|entry| entry.path())
-        .collect();
-    files.sort();
-    files
+        .collect()
 }
 
 /// `*` 配任意多个字符、`?` 配一个字符的通配。
