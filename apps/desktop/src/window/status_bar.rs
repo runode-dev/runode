@@ -7,7 +7,8 @@
 //!   「外部端口」里。当前工作区在 SSH 主机上时另列那台机器上在监听的端口，点了经主连接转到本机再打开，
 //!   转着的能停掉（`host_client::remote::forward`）。
 //!
-//! 左边是 GitHub Actions 页里固定到状态栏上的工作流，见 `render_pinned_workflows`。
+//! 左边是 GitHub Actions 页里固定到状态栏上的工作流，见 `render_pinned_workflows`；当前工作区在 SSH 主机上时
+//! 后面跟着那台主机的连接状态，连着时写出心跳测的延迟（`RemoteHost::latency`）。
 //!
 //! 用户点了「检查更新…」以后，查和下载期间最左边还有一块转着圈的「正在检查更新…」，见 `update::status_label`。
 //!
@@ -78,6 +79,8 @@ pub(super) fn height(cx: &App) -> f32 {
 
 /// 生效中的绿点。
 const ACTIVE_DOT: Rgb = Rgb(0x34, 0xc7, 0x59);
+/// 正在连、等着重连的黄点。
+const PENDING_DOT: Rgb = Rgb(0xff, 0xb3, 0x40);
 
 /// 状态栏右键菜单里的一项：显示或隐藏 `item`，记在配置的 `status-bar-hidden` 里。
 #[derive(Clone, PartialEq, Action)]
@@ -136,6 +139,8 @@ struct Status {
     ports: Vec<Port>,
     /// 各窗口当前工作区所在的 SSH 主机上在监听的端口，按主机名记；问不到的主机不在里面。
     remote_ports: HashMap<String, Vec<Port>>,
+    /// 各窗口当前工作区所在的 SSH 主机的延迟，毫秒；变了才重画状态栏。
+    latencies: HashMap<String, u128>,
     /// 所有窗口里各个终端的 shell 的进程号。
     shells: HashSet<u32>,
     /// 宿主在 `Welcome` 里报的进程号，见 `host`。
@@ -342,6 +347,16 @@ fn tick(probed: Option<Probed>, cx: &mut App) {
             status.remote_ports = remote;
         }
     }
+    let latencies: HashMap<String, u128> = remote_hosts(&windows, cx)
+        .into_iter()
+        .filter_map(|name| {
+            let latency = hosts::find(&name)?.latency()?;
+            Some((name, latency.as_millis()))
+        })
+        .collect();
+    let status = cx.default_global::<Status>();
+    changed |= latencies != status.latencies;
+    status.latencies = latencies;
     status.shells = shells;
     status.terminals = terminals;
     status.working = working;
@@ -495,6 +510,42 @@ impl WindowView {
                 .child(label)
         });
         let pinned = self.render_pinned_workflows(cx);
+        let host_item = host.map(|name| {
+            let status = hosts::find(name).map_or(hosts::Status::Idle, |host| host.status());
+            let latency = cx.try_global::<Status>().and_then(|status| status.latencies.get(name).copied());
+            let (color, state) = match &status {
+                hosts::Status::Connected(_) => (
+                    hsla(ACTIVE_DOT),
+                    latency.map_or_else(
+                        || rust_i18n::t!("status.host_connected").into_owned(),
+                        |ms| {
+                            let ms = if ms == 0 { "<1".to_owned() } else { ms.to_string() };
+                            rust_i18n::t!("status.host_latency", ms = ms).into_owned()
+                        },
+                    ),
+                ),
+                hosts::Status::Connecting(_) | hosts::Status::Waiting { .. } => {
+                    (hsla(PENDING_DOT), rust_i18n::t!("status.host_connecting").into_owned())
+                }
+                hosts::Status::Idle | hosts::Status::Stopped { .. } => {
+                    (fg_h.opacity(0.3), rust_i18n::t!("status.host_offline").into_owned())
+                }
+            };
+            div()
+                .id("status-host")
+                .role(Role::Label)
+                .aria_label(format!("{name} · {state}"))
+                .flex_none()
+                .h(px(STATUS_BAR_HEIGHT - 6.))
+                .px(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(5.))
+                .tooltip(tooltip(crate::remote_hosts::status_text(&status), None))
+                .child(div().flex_none().size(px(6.)).rounded_full().bg(color))
+                .child(name.to_owned())
+                .child(div().text_color(fg_h.opacity(0.5)).child(state))
+        });
         let hidden = &cx.global::<AppConfig>().0.status_bar_hidden;
         let shown = |item| !hidden.contains(&item);
         div()
@@ -521,6 +572,7 @@ impl WindowView {
             )
             // 左边是 GitHub Actions 页里固定的工作流，其余几块靠右。
             .children(pinned)
+            .children(host_item)
             .child(div().flex_1())
             .children(update)
             .when(shown(StatusItem::Sleep), |bar| bar.child(sleep_item))

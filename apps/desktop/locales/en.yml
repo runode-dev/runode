@@ -854,6 +854,10 @@ status:
   forwarded: "to localhost:%{port}"
   stop_forward: Stop Forwarding
   forward_failed: Could not forward the port
+  host_connected: connected
+  host_latency: "%{ms} ms"
+  host_connecting: connecting…
+  host_offline: not connected
 mobile:
   entry: "Mobile"
   eyebrow: "RUNODE MOBILE"

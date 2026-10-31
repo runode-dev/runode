@@ -854,6 +854,10 @@ status:
   forwarded: "轉到本機 %{port}"
   stop_forward: 停止轉發
   forward_failed: 沒能轉發連接埠
+  host_connected: 已連線
+  host_latency: "%{ms} 毫秒"
+  host_connecting: 正在連線…
+  host_offline: 未連線
 mobile:
   entry: "手機端"
   eyebrow: "RUNODE 手機端"

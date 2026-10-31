@@ -297,6 +297,8 @@ pub struct RemoteHost {
     pub link: Link,
     state: Mutex<State>,
     changed: Condvar,
+    /// 连着时最近一次心跳来回花的时间。
+    latency: Mutex<Option<Duration>>,
 }
 
 struct State {
@@ -336,6 +338,7 @@ impl RemoteHost {
                 forgotten: false,
             }),
             changed: Condvar::new(),
+            latency: Mutex::new(None),
         }
     }
 
@@ -345,6 +348,11 @@ impl RemoteHost {
 
     pub fn status(&self) -> Status {
         self.state().status.clone()
+    }
+
+    /// 连着时最近一次心跳经 ssh 到远端宿主来回花的时间；没连着、还没测过时为空。
+    pub fn latency(&self) -> Option<Duration> {
+        *self.latency.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn set_status(&self, status: Status) {
@@ -605,15 +613,18 @@ impl RemoteHost {
             if !self.state().wanted || !self.link.connected() {
                 break;
             }
-            if running.since_beat.elapsed() >= HEARTBEAT {
+            // 连上后马上测一次延迟，之后每隔 `HEARTBEAT` 一次。
+            if running.since_beat.elapsed() >= HEARTBEAT || self.latency().is_none() {
                 running.since_beat = Instant::now();
                 if !self.link.flush(HEARTBEAT_TIMEOUT) {
                     tracing::warn!("{} did not answer the heartbeat", self.name);
                     break;
                 }
+                *self.latency.lock().unwrap_or_else(PoisonError::into_inner) = Some(running.since_beat.elapsed());
             }
             thread::sleep(Duration::from_millis(250));
         }
+        *self.latency.lock().unwrap_or_else(PoisonError::into_inner) = None;
         running.stop();
         self.state().child = None;
     }
