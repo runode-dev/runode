@@ -14,7 +14,7 @@ prepare_run = $(call link_rn,$(1))
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help submodules build release run run-release run-ios run-ios-device app install restart dmg check test clippy fmt fmt-check clean
+.PHONY: help submodules build release run run-release run-ios run-ios-device app install restart dmg check test test-ssh clippy fmt fmt-check clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -91,6 +91,11 @@ test: ## 运行测试（装了 cargo-nextest 时并行跑）
 	else \
 		$(CARGO) test --workspace; \
 	fi
+
+# 假的 ssh 把要在远端跑的命令换成在本机、以临时目录为家目录跑，测试装上的是刚编好的 runode。
+test-ssh: ## 经假的 ssh 测连 SSH 主机：部署、桥接、断线重连
+	$(CARGO) build -p runode
+	RUNODE_SSH_BINARY="$${CARGO_TARGET_DIR:-$(CURDIR)/target}/debug/runode" $(CARGO) test -p runode -- --ignored fake_ssh
 
 clippy: ## 运行 clippy
 	$(CARGO) clippy --workspace --all-targets $(CLIPPY_ARGS)

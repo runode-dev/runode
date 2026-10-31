@@ -785,7 +785,107 @@ mod tests {
 
     use futures::StreamExt as _;
 
-    use super::{RemoteEvent, Status, events, forward, remote, ssh, upload};
+    use super::{RemoteEvent, SshSettings, Status, deploy, events, forward, remote, set_ssh_settings, ssh, upload};
+
+    /// 等到连上这台主机的下一次 `RemoteEvent::Connected`，交回那时还活着的会话。
+    fn next_connected(
+        events: &mut futures::channel::mpsc::UnboundedReceiver<RemoteEvent>,
+    ) -> Option<std::collections::HashSet<runode_protocol::SessionId>> {
+        futures::executor::block_on(async {
+            while let Some(event) = events.next().await {
+                if let RemoteEvent::Connected { alive, .. } = event {
+                    return Some(alive);
+                }
+            }
+            None
+        })
+    }
+
+    /// 经假的 ssh 连「远端」：它把要在远端跑的命令换成在本机、以一个临时目录为家目录跑，主连接相关的直接成功。
+    /// 第一次连上时装上 `RUNODE_SSH_BINARY` 指的 runode、起桥接和宿主；掐断 ssh 后自己重连，会话还在；断开再连时
+    /// 直接进桥接，不再装一遍。`make test-ssh` 编好 runode 再跑它。
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "runs a built runode over a fake ssh; make test-ssh"]
+    fn deploys_reconnects_and_keeps_sessions_over_a_fake_ssh() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        assert!(std::env::var_os("RUNODE_SSH_BINARY").is_some(), "RUNODE_SSH_BINARY points at a built runode");
+        // 放在 /tmp 下：远端宿主的 socket 在这个家目录里，路径要放得进 `sun_path`。
+        let root = std::path::PathBuf::from(format!("/tmp/rn-fake-ssh-{}", std::process::id()));
+        let home = root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let fake = root.join("ssh");
+        let script = format!(
+            concat!(
+                "#!/bin/sh\n",
+                "for arg in \"$@\"; do case \"$arg\" in\n",
+                "  -V) echo OpenSSH_9.6p1 >&2; exit 0;;\n",
+                "  -M|-N|-O) exit 0;;\n",
+                "  -G) printf \"hostname fake\\nuser me\\nport 22\\n\"; exit 0;;\n",
+                "esac; done\n",
+                "eval \"remote=\\${{$#}}\"\n",
+                "HOME='{home}' exec /bin/sh -c \"$remote\"\n",
+            ),
+            home = home.display()
+        );
+        std::fs::write(&fake, script).unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        set_ssh_settings(SshSettings { program: fake, persist_secs: 60 });
+
+        let mut events = events().expect("events");
+        let host = remote("me@fake").expect("a destination");
+        // 中途失败也结束「远端」的宿主、删掉临时目录。
+        struct Cleanup(std::sync::Arc<super::RemoteHost>, std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                if let Some(pid) = self.0.link.host_pid() {
+                    crate::subprocess::kill(pid);
+                }
+                self.0.disconnect();
+                let _ = std::fs::remove_dir_all(&self.1);
+            }
+        }
+        let _cleanup = Cleanup(host.clone(), root);
+        let connected = |host: &super::RemoteHost| {
+            wait_for(host, Duration::from_secs(120), |status| {
+                matches!(status, Status::Connected(_) | Status::Stopped { .. })
+            })
+        };
+        let status = connected(&host);
+        assert!(matches!(status, Status::Connected(_)), "not connected: {status:?}");
+        assert!(next_connected(&mut events).is_some());
+        let installed = home.join(runode_ssh::bootstrap::BIN_DIR).join(deploy::install_dir()).join("runode");
+        let modified = || std::fs::metadata(&installed).and_then(|meta| meta.modified()).expect("installed runode");
+        let first = modified();
+
+        let options = crate::host_client::SpawnOptions {
+            size: runode_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 },
+            cwd: None,
+            fallback_cwd: None,
+            integration: runode_types::shell::IntegrationMode::Off,
+            start: true,
+            shell: Some("/bin/sh".into()),
+            settings: None,
+            resume: None,
+        };
+        let session = host.link.spawn(options).expect("a session on the remote host");
+
+        // 掐断 ssh：自己重连上，会话还在。
+        crate::subprocess::kill(host.state().child.expect("ssh is running"));
+        let alive = next_connected(&mut events).expect("reconnected");
+        assert!(alive.contains(&session), "{session} is gone after reconnecting: {alive:?}");
+
+        // 断开再连：装过的不再装，直接进桥接，会话还在。
+        host.disconnect();
+        wait_for(&host, Duration::from_secs(10), |status| matches!(status, Status::Idle));
+        host.retry_now();
+        let alive = next_connected(&mut events).expect("connected again");
+        assert!(alive.contains(&session));
+        assert_eq!(modified(), first);
+
+        host.link.kill(session);
+    }
 
     fn wait_for(host: &super::RemoteHost, timeout: Duration, done: impl Fn(&Status) -> bool) -> Status {
         let deadline = Instant::now() + timeout;
