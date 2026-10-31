@@ -7,6 +7,7 @@ use std::{
     fs::{self, File},
     io::Read as _,
     path::{Path, PathBuf},
+    sync::{Mutex, PoisonError},
     time::Duration,
 };
 
@@ -22,10 +23,15 @@ const RELEASES: &str = "https://github.com/runode-dev/runode/releases/download";
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const SUMS_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// 同一时间只取一个包：几台主机一起部署时，下载中的 `.part`、mac 的解包目录和 dmg 都在同一个路径上，
+/// 一起取会互相踩坏；排在后面的等前面的取完，直接用缓存。
+static FETCHING: Mutex<()> = Mutex::new(());
+
 /// `version` 给 Linux `arch`（`x86_64`、`aarch64`）的 tar.gz，核对过的。会阻塞到下完，下载时不断调
 /// `progress(已收到的字节, 总字节)`，总字节未知时是 0。
 pub fn linux_archive(version: &str, arch: &str, cache: &Path, progress: &dyn Fn(u64, u64)) -> Result<PathBuf, Error> {
     let name = format!("Runode-{version}-linux-{arch}.tar.gz");
+    let _fetching = FETCHING.lock().unwrap_or_else(PoisonError::into_inner);
     fetch_checked(version, &name, cache, progress)
 }
 
@@ -33,6 +39,7 @@ pub fn linux_archive(version: &str, arch: &str, cache: &Path, progress: &dyn Fn(
 /// macOS 上做得到（要挂 dmg、跑 codesign）。
 pub fn mac_binary(version: &str, arch: &str, cache: &Path, progress: &dyn Fn(u64, u64)) -> Result<PathBuf, Error> {
     let binary = cache.join(version).join(format!("runode-macos-{arch}"));
+    let _fetching = FETCHING.lock().unwrap_or_else(PoisonError::into_inner);
     if binary.is_file() {
         return Ok(binary);
     }
