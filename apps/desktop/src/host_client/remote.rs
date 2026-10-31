@@ -841,19 +841,61 @@ fn pump_out(mut from: BufReader<impl Read>, mut to: &UnixStream) {
     }
 }
 
-/// socket 搬到 ssh 的 stdin，每块都 flush 出去；读到结尾就关掉 stdin，远端的桥接随之退出。
-fn pump_in(mut from: &UnixStream, mut to: PipeWriter) {
+/// 还没写进 ssh 的 stdin 的输入最多攒这么多字节，再多就当作断线。
+const MAX_UNSENT: usize = 64 << 20;
+
+/// socket 搬到 ssh 的 stdin，每块都 flush 出去；读到结尾就关掉 stdin，远端的桥接随之退出。socket 一直读空，
+/// 读到的先攒在内存里，另一个线程往 ssh 写：链路慢时 `Link` 写帧不会卡住调它的界面线程。攒的超过
+/// `MAX_UNSENT`，或者写不进 ssh 时关掉 socket，`Link` 按断开处理。
+fn pump_in(from: &UnixStream, to: PipeWriter) {
+    let unsent = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (chunks, pending) = std::sync::mpsc::channel::<Vec<u8>>();
+    let writer = {
+        let (unsent, socket) = (unsent.clone(), from.try_clone());
+        thread::Builder::new().name("ssh-pump-write".into()).spawn(move || {
+            if !write_chunks(pending, to, &unsent)
+                && let Ok(socket) = socket
+            {
+                let _ = socket.shutdown(Shutdown::Both);
+            }
+        })
+    };
+    if writer.is_err() {
+        return;
+    }
+    let mut from = from;
     let mut buffer = vec![0; 256 << 10];
     loop {
         match from.read(&mut buffer) {
             Ok(0) | Err(_) => return,
             Ok(n) => {
-                if to.write_all(&buffer[..n]).and_then(|()| to.flush()).is_err() {
+                if unsent.fetch_add(n, Ordering::Relaxed) + n > MAX_UNSENT {
+                    tracing::warn!("ssh is not taking input; dropping the connection");
+                    let _ = from.shutdown(Shutdown::Both);
+                    return;
+                }
+                if chunks.send(buffer[..n].to_vec()).is_err() {
                     return;
                 }
             }
         }
     }
+}
+
+/// 把 `pending` 里的一块块写进 ssh 的 stdin，写完一块从 `unsent` 里减掉；`pending` 关了（socket 读到结尾）
+/// 时写完剩下的、关掉 stdin，返回 `true`，写不进去时返回 `false`。
+fn write_chunks(
+    pending: std::sync::mpsc::Receiver<Vec<u8>>,
+    mut to: PipeWriter,
+    unsent: &std::sync::atomic::AtomicUsize,
+) -> bool {
+    for chunk in pending {
+        if to.write_all(&chunk).and_then(|()| to.flush()).is_err() {
+            return false;
+        }
+        unsent.fetch_sub(chunk.len(), Ordering::Relaxed);
+    }
+    true
 }
 
 #[cfg(test)]
@@ -993,6 +1035,25 @@ mod tests {
             self.host.disconnect();
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+
+    /// ssh 一时不收输入时，写进 socket 的照样马上写完，等 ssh 收了再按原样、按先后交给它。
+    #[test]
+    fn input_is_taken_while_ssh_is_not_reading() {
+        use std::io::{Read as _, Write as _};
+
+        let (mut ours, theirs) = runode_host::socket_pair().unwrap();
+        let (mut stdout, stdin) = std::io::pipe().unwrap();
+        std::thread::spawn(move || super::pump_in(&theirs, stdin));
+        ours.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+        let data: Vec<u8> = (0..4 << 20).map(|n: u32| n as u8).collect();
+        let started = Instant::now();
+        ours.write_all(&data).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2), "writing waited for ssh");
+        drop(ours);
+        let mut got = Vec::new();
+        stdout.read_to_end(&mut got).unwrap();
+        assert!(got == data, "ssh got {} bytes out of order or short", got.len());
     }
 
     /// 第一次连上时装上 `RUNODE_SSH_BINARY` 指的 runode、起桥接和宿主；掐断 ssh 后自己重连，会话还在；断开再连时
