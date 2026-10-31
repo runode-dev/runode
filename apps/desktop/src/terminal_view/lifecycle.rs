@@ -12,7 +12,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, Mutex, PoisonError},
     task::Poll,
     thread,
     time::{Duration, Instant},
@@ -160,7 +160,16 @@ pub(super) struct Opening {
     attach: Attach,
     /// 等着会话开好的，见 `TerminalView::opened`。
     waiting: Vec<oneshot::Sender<Option<SessionId>>>,
+    /// 开会话的后台线程和 `TerminalView::end` 在这里碰头，谁后到谁结束会话：视图结束后可能马上被丢掉，
+    /// 等不到回话，开出来的会话没人结束。
+    claim: Arc<Mutex<Claim>>,
     _task: Task<()>,
+}
+
+#[derive(Default)]
+struct Claim {
+    ended: bool,
+    opened: Option<SessionId>,
 }
 
 /// 唤醒时叫醒等着的线程，主线程上等宿主给屏幕时用，见 `TerminalView::wait_for_screen`。
@@ -281,8 +290,24 @@ impl TerminalView {
             self.session_opened(spawned, start, attach);
             return;
         }
+        let claim = Arc::new(Mutex::new(Claim::default()));
+        let opened = claim.clone();
         let task = cx.spawn_in(window, async move |this, cx| {
-            let spawned = cx.background_executor().spawn(async move { link.spawn(options) }).await;
+            let spawned = cx
+                .background_executor()
+                .spawn(async move {
+                    let spawned = link.spawn(options);
+                    if let Ok(id) = &spawned {
+                        let mut opened = opened.lock().unwrap_or_else(PoisonError::into_inner);
+                        if opened.ended {
+                            link.kill(*id);
+                        } else {
+                            opened.opened = Some(*id);
+                        }
+                    }
+                    spawned
+                })
+                .await;
             this.update_in(cx, |view, window, cx| {
                 let Some(opening) = view.opening.take() else {
                     return;
@@ -302,13 +327,14 @@ impl TerminalView {
             })
             .ok();
         });
-        self.opening = Some(Opening { start, attach, waiting: Vec::new(), _task: task });
+        self.opening = Some(Opening { start, attach, waiting: Vec::new(), claim, _task: task });
     }
 
     /// `open_session` 等到了宿主的回话。
     fn session_opened(&mut self, spawned: anyhow::Result<SessionId>, start: bool, attach: Attach) {
         match spawned {
-            Ok(id) if self.ended => self.host_link.kill(id),
+            // `end` 经 `Opening::claim` 结束了它。
+            Ok(_) if self.ended => {}
             Ok(id) => {
                 tracing::debug!("session {id} opened for a terminal that was put off");
                 self.id = Some(id);
@@ -1119,10 +1145,17 @@ impl TerminalView {
     /// 结束宿主里的会话（关标签、关分屏这类用户明确要关掉终端的时候）。之后丢掉视图时不再
     /// 另外发什么；没调过它就丢掉视图时见 `Drop`。
     pub fn end(&mut self) {
-        if !std::mem::replace(&mut self.ended, true)
-            && let Some(id) = self.id
-        {
+        if std::mem::replace(&mut self.ended, true) {
+            return;
+        }
+        if let Some(id) = self.id {
             self.host_link.kill(id);
+        } else if let Some(opening) = &self.opening {
+            let mut claim = opening.claim.lock().unwrap_or_else(PoisonError::into_inner);
+            claim.ended = true;
+            if let Some(id) = claim.opened.take() {
+                self.host_link.kill(id);
+            }
         }
     }
 
