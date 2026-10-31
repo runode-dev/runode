@@ -3,8 +3,8 @@
 
 use std::{
     collections::HashMap,
-    io::BufReader,
-    process::{ChildStdin, Stdio},
+    io::{BufReader, Read, Write},
+    process::Stdio,
     sync::{
         Arc, LazyLock, Mutex, PoisonError,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -30,7 +30,7 @@ pub(crate) struct Client {
 }
 
 struct Conn {
-    input: Mutex<ChildStdin>,
+    input: Mutex<Box<dyn Write + Send>>,
     pending: Arc<Pending>,
     next: AtomicU64,
     closed: Arc<AtomicBool>,
@@ -53,6 +53,17 @@ impl Client {
 
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    /// 经 `input`、`output` 和同一个进程里的项目服务说话的一个，不经 ssh，测试用。
+    #[cfg(test)]
+    pub(super) fn over(
+        name: &str,
+        input: impl Write + Send + 'static,
+        output: impl Read + Send + 'static,
+    ) -> Arc<Self> {
+        let conn = Conn::start(name, Box::new(input), output, || {}).expect("start the reader");
+        Arc::new(Self { name: name.to_owned(), conn: Mutex::new(Some(conn)) })
     }
 
     /// 发一个请求，等回话，最多等 `timeout`。会阻塞。
@@ -140,10 +151,26 @@ impl Client {
         let (Some(input), Some(output)) = (child.stdin.take(), child.stdout.take()) else {
             return Err("ssh gave no pipes".into());
         };
+        let conn = Conn::start(&self.name, Box::new(input), output, move || {
+            let _ = child.wait();
+        })?;
+        *slot = Some(conn.clone());
+        Ok(conn)
+    }
+}
+
+impl Conn {
+    /// 经 `input` 发请求，起读线程从 `output` 读回话、按编号交给等着的一方；读到结尾时调 `finished`。
+    fn start(
+        name: &str,
+        input: Box<dyn Write + Send>,
+        output: impl Read + Send + 'static,
+        finished: impl FnOnce() + Send + 'static,
+    ) -> Result<Arc<Self>, String> {
         let pending = Arc::<Pending>::default();
         let closed = Arc::new(AtomicBool::new(false));
         let reader = {
-            let (pending, closed, name) = (pending.clone(), closed.clone(), self.name.clone());
+            let (pending, closed, name) = (pending.clone(), closed.clone(), name.to_owned());
             move || {
                 let mut output = BufReader::new(output);
                 loop {
@@ -166,15 +193,13 @@ impl Client {
                 // 丢掉等着的一方，它们马上收到断开。
                 closed.store(true, Ordering::Relaxed);
                 pending.lock().unwrap_or_else(PoisonError::into_inner).clear();
-                let _ = child.wait();
+                finished();
             }
         };
         thread::Builder::new()
             .name("project-client".into())
             .spawn(reader)
             .map_err(|err| format!("cannot start a thread: {err}"))?;
-        let conn = Arc::new(Conn { input: Mutex::new(input), pending, next: AtomicU64::new(0), closed });
-        *slot = Some(conn.clone());
-        Ok(conn)
+        Ok(Arc::new(Self { input: Mutex::new(input), pending, next: AtomicU64::new(0), closed }))
     }
 }

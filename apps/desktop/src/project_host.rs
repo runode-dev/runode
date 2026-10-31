@@ -7,6 +7,8 @@ mod edit;
 mod repo;
 mod scan;
 pub(crate) mod serve;
+#[cfg(test)]
+mod tests;
 mod wire;
 
 use std::{

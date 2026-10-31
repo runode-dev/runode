@@ -1,0 +1,111 @@
+//! 契约测试：同一个进程里起一份项目服务（`serve::serve`），经一对管道接成 `ProjectHost::Remote`，同样的读写
+//! 分别交给它和 `ProjectHost::Local`，结果要一样。线上格式、远端那边的分派和桌面这头的转换一起守住。
+
+use std::{
+    fs,
+    io::BufReader,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::atomic::AtomicBool,
+    thread,
+};
+
+use runode_git::{CommitOptions, DiffSide, GrepQuery, UntrackedCache};
+
+use super::{ProjectHost, client::Client, serve};
+
+/// 同一个进程里的项目服务，桌面这头经管道和它说话。
+fn remote() -> ProjectHost {
+    let (requests, to_service) = std::io::pipe().unwrap();
+    let (from_service, responses) = std::io::pipe().unwrap();
+    thread::spawn(move || serve::serve(BufReader::new(requests), responses));
+    ProjectHost::Remote(Client::over("contract", to_service, from_service))
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+        .args(args)
+        // 历史里写的是「多久以前」，提交时间钉在很久以前，两边先后读到的才一样。
+        .env("GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z")
+        .env("GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z")
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// 一个有提交、有改动、有未跟踪和被忽略的文件的仓库。
+fn fixture(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("runode-contract-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("target")).unwrap();
+    git(&dir, &["init", "-q"]);
+    fs::write(dir.join(".gitignore"), "target/\n").unwrap();
+    fs::write(dir.join("a.txt"), "one\ntwo\nneedle\n").unwrap();
+    fs::write(dir.join("src/lib.rs"), "fn needle() {}\n").unwrap();
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-q", "-m", "first"]);
+    fs::write(dir.join("a.txt"), "one\n2\nneedle\n").unwrap();
+    fs::write(dir.join("notes.md"), "# needle\n").unwrap();
+    fs::write(dir.join("target/out"), "built").unwrap();
+    fs::canonicalize(&dir).unwrap()
+}
+
+#[test]
+fn reads_the_same_on_both_sides() {
+    let dir = fixture("read");
+    let (local, remote) = (ProjectHost::Local, remote());
+    let scan = |host: &ProjectHost| host.scan(dir.clone(), vec![dir.join("src")], UntrackedCache::default(), true);
+    let (here, there) = (scan(&local).unwrap(), scan(&remote).unwrap());
+    assert_eq!((&here.root, &here.git, &here.listings), (&there.root, &there.git, &there.listings));
+    let main = here.git.as_ref().unwrap().main.repo();
+
+    let dirs = vec![dir.clone(), dir.join("src")];
+    assert_eq!(local.list_dirs(&dir, dirs.clone(), here.git.as_ref()), remote.list_dirs(&dir, dirs, None),);
+    let file = dir.join("a.txt");
+    assert_eq!(local.read_limited(&file, 4, false).unwrap(), remote.read_limited(&file, 4, false).unwrap());
+    assert_eq!(local.stamp(&file), remote.stamp(&file));
+    let paths = vec![file, dir.join("src"), dir.join("nope")];
+    assert_eq!(local.kinds(paths.clone()), remote.kinds(paths));
+    assert_eq!(local.list_files(&dir), remote.list_files(&dir));
+    let query = GrepQuery { pattern: "needle", ignore_case: false, whole_word: true, regex: false, pathspecs: &[] };
+    let go = AtomicBool::new(false);
+    assert_eq!(local.grep(&dir, &query, 10, &go).unwrap(), remote.grep(&dir, &query, 10, &go).unwrap());
+
+    let (here, there) = (local.repo(main.clone()), remote.repo(main));
+    assert_eq!(here.branches(), there.branches());
+    assert_eq!(here.history(10).unwrap(), there.history(10).unwrap());
+    assert_eq!(here.pending_diff(false).unwrap(), there.pending_diff(false).unwrap());
+    let view =
+        |repo: &super::ProjectRepo| format!("{:?}", repo.file_view(Path::new("a.txt"), None, &DiffSide::Worktree));
+    assert_eq!(view(&here), view(&there));
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// 两份一样的仓库，一份经本机、一份经项目服务做同样的改动，改完的文件和 git 状态一样。
+#[test]
+fn writes_the_same_on_both_sides() {
+    let dirs = [fixture("write-local"), fixture("write-remote")];
+    let hosts = [ProjectHost::Local, remote()];
+    for (host, dir) in hosts.iter().zip(&dirs) {
+        let scan = host.scan(dir.clone(), Vec::new(), UntrackedCache::default(), false).unwrap();
+        let repo = host.repo(scan.git.unwrap().main.repo());
+        host.replace_file(&dir.join("notes.md"), b"# written\n").unwrap();
+        host.create(&dir.join("docs"), true).unwrap();
+        host.rename(&dir.join("notes.md"), &dir.join("docs/notes.md")).unwrap();
+        repo.stage(&[PathBuf::from("a.txt")]).unwrap();
+        repo.commit("second", CommitOptions::default()).unwrap();
+    }
+    let state = |dir: &Path| {
+        let log = git(dir, &["log", "--format=%s"]);
+        (git(dir, &["status", "--porcelain"]), log, fs::read_to_string(dir.join("docs/notes.md")).unwrap())
+    };
+    assert_eq!(state(&dirs[0]), state(&dirs[1]));
+    assert_eq!(state(&dirs[0]).1, "second\nfirst\n");
+    for dir in dirs {
+        fs::remove_dir_all(dir).ok();
+    }
+}

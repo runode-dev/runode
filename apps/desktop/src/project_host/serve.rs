@@ -3,7 +3,7 @@
 
 use std::{
     collections::HashMap,
-    io::{self, BufReader},
+    io::{self, BufRead, Write},
     path::PathBuf,
     sync::{
         Arc, Mutex, PoisonError,
@@ -32,11 +32,15 @@ struct Caches {
 type Shared = Arc<Mutex<Caches>>;
 
 pub(crate) fn run() -> i32 {
-    let output = Arc::new(Mutex::new(io::stdout()));
+    serve(io::stdin().lock(), io::stdout())
+}
+
+/// 从 `input` 一条条读请求，回话写进 `output`；`input` 读完（桌面断开）时返回退出码。
+pub(super) fn serve(mut input: impl BufRead, output: impl Write + Send + 'static) -> i32 {
+    let output = Arc::new(Mutex::new(output));
     let caches = Shared::default();
     // 在办的请求各自的停止标记，按编号记。
     let running = Arc::new(Mutex::new(HashMap::<u64, Arc<AtomicBool>>::new()));
-    let mut input = BufReader::new(io::stdin().lock());
     loop {
         let request = match wire::read_line::<Request>(&mut input) {
             Ok(Some(request)) => request,
