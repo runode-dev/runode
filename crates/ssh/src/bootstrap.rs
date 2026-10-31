@@ -64,7 +64,8 @@ pub fn service_command(dir: &str) -> String {
 }
 
 /// 把 stdin 上的可执行文件装成 `dir` 这个构建：先写成临时文件，核对 SHA-256（`sha256`，十六进制）、试跑一下
-/// （拦住挂成 noexec 的家目录、太旧的 glibc），都过了才原子地换上，再把 `runode` 链接指过去。`archive` 时
+/// （拦住挂成 noexec 的家目录、太旧的 glibc），都过了才原子地换上，再把 `runode` 链接指过去；哪一步没成都删掉
+/// 临时文件，临时文件名每次不同，留下的没人清。`archive` 时
 /// stdin 是只装着 `runode` 的 tar.gz，核对的是包。换上以后删掉放了超过 `BUILD_KEEP_DAYS` 天的旧构建
 /// （`prune_script`），链接原先指着的那个留着。
 pub fn install_command(dir: &str, sha256: &str, archive: bool) -> String {
@@ -72,13 +73,13 @@ pub fn install_command(dir: &str, sha256: &str, archive: bool) -> String {
     wrap(&format!(
         concat!(
             r#"D="$HOME/{bin}"; umask 077; mkdir -p "$D/{dir}" || exit 1; T="$D/{dir}/.part-$$"; "#,
-            r#"cat > "$T.in" || exit 1; "#,
+            r#"cat > "$T.in" || {{ rm -f "$T.in"; exit 1; }}; "#,
             r#"S=$( (sha256sum "$T.in" 2>/dev/null || shasum -a 256 "$T.in") | cut -d" " -f1); "#,
             r#"if [ "$S" = "{sha}" ]; then :; else rm -f "$T.in"; echo "RUNODE-INSTALL checksum" >&2; exit 1; fi; "#,
-            "{unpack} || exit 1; ",
-            r#"chmod 755 "$T" || exit 1; "#,
+            r#"{unpack} || {{ rm -f "$T" "$T.in"; exit 1; }}; "#,
+            r#"chmod 755 "$T" || {{ rm -f "$T"; exit 1; }}; "#,
             r#"if "$T" --version > /dev/null 2>&1; then :; else rm -f "$T"; echo "RUNODE-INSTALL exec" >&2; exit 1; fi; "#,
-            r#"mv -f "$T" "$D/{dir}/runode" || exit 1; P=$(readlink "$D/runode" 2>/dev/null); P="${{P%%/*}}"; "#,
+            r#"mv -f "$T" "$D/{dir}/runode" || {{ rm -f "$T"; exit 1; }}; P=$(readlink "$D/runode" 2>/dev/null); P="${{P%%/*}}"; "#,
             r#"ln -sf "{dir}/runode" "$D/.link-$$" && mv -f "$D/.link-$$" "$D/runode" || exit 1; "#,
             "{prune} > /dev/null; :"
         ),
