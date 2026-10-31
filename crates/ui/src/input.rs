@@ -597,6 +597,10 @@ impl EntityInputHandler for InputState {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
+        // 密码不交给输入法和系统服务读。
+        if self.masked {
+            return None;
+        }
         let range = range_from_utf16(&self.text, &range);
         actual_range.replace(range_to_utf16(&self.text, &range));
         Some(self.text[range].to_owned())
@@ -647,6 +651,10 @@ impl EntityInputHandler for InputState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 密码框不组字：组字中的文字不进框，确认上屏的文字经 `replace_text_in_range` 进来。
+        if self.masked {
+            return;
+        }
         let range = range
             .map(|range| range_from_utf16(&self.text, &range))
             .or(self.marked.clone())
