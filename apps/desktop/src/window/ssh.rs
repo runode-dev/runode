@@ -4,6 +4,7 @@
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
@@ -31,6 +32,8 @@ use crate::{
 const LIST_TIMEOUT: Duration = Duration::from_secs(10);
 /// 主机清单最多列这么多个。
 const MAX_HOSTS: usize = 8;
+/// 列目录的请求序号，整个进程递增：重新浏览后，先前发出的回话也对不上新的序号。
+static LIST_REQUEST: AtomicU64 = AtomicU64::new(0);
 
 /// 对话框里展开的「SSH 主机」一栏。
 pub(super) struct SshStep {
@@ -228,7 +231,7 @@ impl WindowView {
             return;
         };
         browse.loading = true;
-        browse.request += 1;
+        browse.request = LIST_REQUEST.fetch_add(1, Ordering::Relaxed) + 1;
         let request = browse.request;
         let link = host.link.clone();
         let job = cx.background_spawn(async move {
@@ -375,7 +378,7 @@ impl WindowView {
                 .into_any_element()
         });
         let dirs = browse.dirs.iter().map(|dir| {
-            let next = browse.path.as_ref().map(|path| path.join(dir));
+            let next = browse.path.as_deref().map(|path| remote_child(path, dir));
             row(format!("ssh-subdir-{dir}").into(), format!("{dir}/"))
                 .on_press(cx, move |this, _, cx| this.list_remote(next.clone(), cx))
                 .into_any_element()
@@ -416,5 +419,28 @@ impl WindowView {
                     .children(up_row)
                     .children(dirs),
             )
+    }
+}
+
+/// 远端目录 `dir` 下的 `name`。远端是 Linux 或 macOS，按 `/` 拼：Windows 上 `Path::join` 插的是 `\`。
+fn remote_child(dir: &Path, name: &str) -> PathBuf {
+    let mut path = dir.as_os_str().to_owned();
+    if !dir.as_os_str().as_encoded_bytes().ends_with(b"/") {
+        path.push("/");
+    }
+    path.push(name);
+    path.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::remote_child;
+
+    #[test]
+    fn joins_remote_dirs_with_slashes() {
+        assert_eq!(remote_child(Path::new("/home/u"), "src"), PathBuf::from("/home/u/src"));
+        assert_eq!(remote_child(Path::new("/"), "etc"), PathBuf::from("/etc"));
     }
 }
