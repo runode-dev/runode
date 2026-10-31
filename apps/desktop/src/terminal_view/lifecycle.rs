@@ -1386,6 +1386,7 @@ mod tests {
     fn ctrl_c_copies_selection_or_interrupts() {
         use gpui::{ClipboardItem, KeyDownEvent, Keystroke};
 
+        host_client::skip_start();
         let mut app = gpui::TestAppContext::single();
         app.update(|cx| {
             let mut config = runode_config::Config::default();
@@ -1408,7 +1409,7 @@ mod tests {
         let window = app.add_window(|_, _| gpui::Empty);
         window
             .update(&mut app, |_, window, cx| {
-                let view = cx.new(|cx| TerminalView::new(None, screen, true, rx, window, cx));
+                let view = cx.new(|cx| TerminalView::new(&HostId::Local, None, screen, true, rx, window, cx));
                 view.update(cx, |view, cx| {
                     let event = KeyDownEvent {
                         keystroke: Keystroke::parse("ctrl-c").unwrap(),

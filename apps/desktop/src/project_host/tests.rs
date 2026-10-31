@@ -24,7 +24,7 @@ fn remote() -> ProjectHost {
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+        .args(["-c", "init.defaultBranch=main"])
         .args(args)
         // 历史里写的是「多久以前」，提交时间钉在很久以前，两边先后读到的才一样。
         .env("GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z")
@@ -43,6 +43,9 @@ fn fixture(name: &str) -> PathBuf {
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::create_dir_all(dir.join("target")).unwrap();
     git(&dir, &["init", "-q"]);
+    // 两边的 `ProjectRepo::commit` 都按仓库的配置署名，机器上可能没配全局的身份。
+    git(&dir, &["config", "user.name", "t"]);
+    git(&dir, &["config", "user.email", "t@t"]);
     fs::write(dir.join(".gitignore"), "target/\n").unwrap();
     fs::write(dir.join("a.txt"), "one\ntwo\nneedle\n").unwrap();
     fs::write(dir.join("src/lib.rs"), "fn needle() {}\n").unwrap();

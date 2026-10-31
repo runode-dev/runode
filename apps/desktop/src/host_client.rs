@@ -155,6 +155,12 @@ pub fn start(then: impl FnOnce(&Config) + Send + 'static) {
     }
 }
 
+/// 测试里不连宿主：`link` 不再等 `start`，给的是没连着的连接。
+#[cfg(all(test, windows))]
+pub fn skip_start() {
+    drop(MarkReady);
+}
+
 /// 丢掉时（包括后台线程 panic 时）放行等着 `link` 的主线程。
 struct MarkReady;
 

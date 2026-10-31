@@ -98,12 +98,11 @@ fn open_regular(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     /// 看过是普通文件以后路径被换成没有写端的命名管道：打开不阻塞，对着打开的这个看出不是普通文件。
-    #[cfg(unix)]
     #[test]
     fn fifo_swapped_in_after_the_check_does_not_block() {
         use std::{process::Command, sync::mpsc, thread, time::Duration};

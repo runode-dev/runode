@@ -1,24 +1,28 @@
 //! 远端脚本：在本机用 /bin/sh 真跑一遍，探测、安装、换链接都按约定来。
 
+#[cfg(unix)]
 mod common;
 
-use std::{
-    fs,
-    io::Write as _,
-    process::{Command, Stdio},
-};
+use std::process::Command;
+#[cfg(unix)]
+use std::{fs, io::Write as _, process::Stdio};
 
+#[cfg(unix)]
 use common::TempDir;
+#[cfg(unix)]
+use runode_ssh::bootstrap::{BIN_DIR, PROBE_EXIT, UPLOADS_DIR, parse_pruned, parse_uploaded};
 use runode_ssh::bootstrap::{
-    BIN_DIR, Libc, Os, PROBE_EXIT, Platform, Target, UPLOADS_DIR, Unsupported, connect_command, install_command,
-    install_dir_name, parse_pruned, parse_uploaded, project_command, prune_command, service_command, upload_command,
+    Libc, Os, Platform, Target, Unsupported, connect_command, install_command, install_dir_name, project_command,
+    prune_command, service_command, upload_command,
 };
 
 /// 像 ssh 那样把命令行交给登录 shell（默认 /bin/sh）解释。
+#[cfg(unix)]
 fn run(home: &std::path::Path, command: &str, stdin: &[u8]) -> std::process::Output {
     run_in("/bin/sh", home, command, stdin)
 }
 
+#[cfg(unix)]
 fn run_in(shell: &str, home: &std::path::Path, command: &str, stdin: &[u8]) -> std::process::Output {
     let mut child = Command::new(shell)
         .arg("-c")
@@ -33,6 +37,7 @@ fn run_in(shell: &str, home: &std::path::Path, command: &str, stdin: &[u8]) -> s
     child.wait_with_output().unwrap()
 }
 
+#[cfg(unix)]
 fn sha256_hex(path: &std::path::Path) -> String {
     let output = Command::new("shasum")
         .args(["-a", "256"])
@@ -56,7 +61,9 @@ fn scripts_avoid_characters_remote_shells_mangle() {
     ] {
         let inner = command.strip_prefix("/bin/sh -c '").and_then(|rest| rest.strip_suffix('\'')).unwrap();
         assert!(!inner.contains(['\'', '!', '\n']), "{inner}");
-        assert!(Command::new("/bin/sh").args(["-n", "-c", inner]).status().unwrap().success());
+        if cfg!(unix) {
+            assert!(Command::new("/bin/sh").args(["-n", "-c", inner]).status().unwrap().success());
+        }
     }
     assert_eq!(install_dir_name("0.1.16.abc-dirty.x/y"), "0.1.16.abc-dirty.x_y");
     assert_eq!(install_dir_name(".."), "_..");

@@ -1,13 +1,15 @@
 //! 改文件的操作：不覆盖已有的、不挪进自己下面，名字按原样的字节处理。
 
+#[cfg(unix)]
+use std::io;
 use std::{
-    fs, io,
+    fs,
     path::{Path, PathBuf},
 };
 
-use runode_files::ops::{
-    OpError, add_to_gitignore, child_name, child_path, copy_into, create, move_into, remove, rename, unchanged_name,
-};
+use runode_files::ops::{OpError, add_to_gitignore, child_name, child_path, copy_into, create, move_into, rename};
+#[cfg(unix)]
+use runode_files::ops::{remove, unchanged_name};
 
 /// 每个测试一个空的临时目录，结束时删掉。
 struct TempDir(PathBuf);
