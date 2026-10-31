@@ -109,3 +109,23 @@ fn writes_the_same_on_both_sides() {
         fs::remove_dir_all(dir).ok();
     }
 }
+
+/// 远端的监听：第一次问时开始听，改了文件再问交回改的路径，按开始听时给的写法；取消时不再等。
+#[test]
+fn watches_over_the_wire() {
+    let dir = fixture("watch");
+    let remote = remote();
+    let go = AtomicBool::new(false);
+    assert_eq!(remote.wait_for_changes(7, vec![dir.clone()], &go), Ok(None));
+    // 监听开起来要一会儿，一直改到听到为止。
+    let changes = (0..20)
+        .find_map(|n| {
+            fs::write(dir.join("a.txt"), format!("{n}\n")).unwrap();
+            remote.wait_for_changes(7, vec![dir.clone()], &go).unwrap().filter(|changes| !changes.paths.is_empty())
+        })
+        .expect("heard the change");
+    assert!(changes.everything || changes.paths.iter().any(|path| path == &dir.join("a.txt")), "{changes:?}");
+    let stop = AtomicBool::new(true);
+    assert!(remote.wait_for_changes(7, vec![dir.clone()], &stop).is_err());
+    assert!(ProjectHost::Local.wait_for_changes(0, vec![dir], &go).is_err());
+}

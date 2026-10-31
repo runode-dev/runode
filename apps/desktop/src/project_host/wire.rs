@@ -48,7 +48,10 @@ pub(super) enum Call {
     Ports,
     /// 把请求后面跟着的字节写成 `path`（`runode_paths::replace_file`），交回写完后的版本戳。
     Write { path: PathBuf },
-    /// 让编号为 `id` 的请求停下，停得下的只有 `Grep`；这条本身不回话，停下的那条照样回话。
+    /// 监听 `dirs`（项目目录和不在它下面的 git 目录）：桌面每个监听一个 `token`。还没有这个监听时开始听，
+    /// 马上回 `Reply::Changed` 的 `started`；已经在听时等到攒下改动，或者等够 `serve::WATCH_HOLD` 交回空的。
+    Watch { token: u64, dirs: Vec<PathBuf> },
+    /// 让编号为 `id` 的请求停下，停得下的只有 `Grep` 和 `Watch`；这条本身不回话，停下的那条照样回话。
     Cancel { id: u64 },
 }
 
@@ -71,6 +74,11 @@ pub(super) enum Reply {
     /// 按请求的顺序，不在时为空，在时是不是目录。
     Kinds(Vec<Option<bool>>),
     Ports(Vec<crate::window::status_bar::Port>),
+    /// 监听到的改动；`started` 时是刚开始听，之前的改动听不到。
+    Changed {
+        started: bool,
+        changes: runode_files::Changes,
+    },
     /// 没办成，原因写给人看。
     Failed(String),
 }

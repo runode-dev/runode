@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use runode_files::{Limited, Listings, Stamp};
+use runode_files::{Changes, Limited, Listings, Stamp};
 use runode_git::UntrackedCache;
 
 pub(crate) use repo::ProjectRepo;
@@ -137,6 +137,25 @@ impl ProjectHost {
         };
         match client.call(Call::Ports, QUERY_TIMEOUT)? {
             (Reply::Ports(ports), _) => Ok(ports),
+            (other, _) => Err(unexpected(&other)),
+        }
+    }
+
+    /// 远端项目的监听（`Call::Watch`）：等编号 `token` 的那个监听攒下改动交回。第一次问时开始听、马上交回
+    /// `None`，连接断了又连上后再问也是这样，期间的改动听不到。`cancel` 置位时不再等。本机的项目直接用
+    /// `runode_files::watch`，这里只办远端的。会阻塞。
+    pub(crate) fn wait_for_changes(
+        &self,
+        token: u64,
+        dirs: Vec<PathBuf>,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<Option<Changes>, String> {
+        let Self::Remote(client) = self else {
+            return Err("local projects are watched directly".into());
+        };
+        match client.call_cancellable(Call::Watch { token, dirs }, serve::WATCH_HOLD + QUERY_TIMEOUT, cancel)? {
+            (Reply::Changed { started: true, .. }, _) => Ok(None),
+            (Reply::Changed { started: false, changes }, _) => Ok(Some(changes)),
             (other, _) => Err(unexpected(&other)),
         }
     }

@@ -341,7 +341,7 @@ pub struct WindowView {
     /// 监听右侧面板在看的目录，事件发到 `project_events`，由 `_project_events` 收。
     project_watch: Option<project::ProjectWatch>,
     /// 正在单独的线程上建的监听的根目录和 git 目录，见 `sync_project_watch`。
-    building_watch: Option<(PathBuf, Vec<PathBuf>)>,
+    building_watch: Option<(HostId, PathBuf, Vec<PathBuf>)>,
     project_events: futures::channel::mpsc::UnboundedSender<project::ProjectChanges>,
     _project_events: Task<()>,
     /// 包成缓存视图的几块界面，见 `Slot`。第一次画窗口时才建：建 `WindowView` 时它还没有实体。

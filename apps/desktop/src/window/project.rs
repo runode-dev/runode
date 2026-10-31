@@ -46,7 +46,7 @@ const POLL_BACKOFF: u32 = 10;
 /// 有其他工作树时至少隔这么久重读一次：它们的工作目录不在监听的范围里，只有 git 目录（暂存、
 /// 提交、切分支）在。上次读得慢时按 `POLL_BACKOFF` 拉长。
 const WORKTREE_INTERVAL: Duration = Duration::from_secs(10);
-/// SSH 主机上的项目监听不到，至少隔这么久重读一次；上次读得慢时按 `POLL_BACKOFF` 拉长。
+/// SSH 主机上的项目听不了时退回定时重读，至少隔这么久；上次读得慢时按 `POLL_BACKOFF` 拉长。
 const REMOTE_INTERVAL: Duration = Duration::from_secs(5);
 /// 监听到改动后先攒这么久再读：保存文件、提交这类操作会连着来一串事件。
 pub(super) const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -174,8 +174,11 @@ impl WindowView {
 
     /// 正在监听当前 workspace 的文件树根目录。
     fn watching(&self) -> bool {
-        let root = self.workspace().project.root.as_ref();
-        self.project_watch.as_ref().is_some_and(|watch| Some(&watch.root) == root)
+        let workspace = self.workspace();
+        let root = workspace.project.root.as_ref();
+        self.project_watch
+            .as_ref()
+            .is_some_and(|watch| watch.host == workspace.host && Some(&watch.root) == root && watch.alive())
     }
 
     /// 让监听跟上当前 workspace 的文件树根目录；右侧面板都收着时不听。
@@ -183,25 +186,27 @@ impl WindowView {
     /// `canonical_dir_later`），建好之前照旧的监听或定时重读。
     pub(super) fn sync_project_watch(&mut self, cx: &mut Context<Self>) {
         let project = &self.workspace().project;
-        let root = project.root.clone().filter(|_| self.project_visible(cx) && !self.on_remote());
+        let root = project.root.clone().filter(|_| self.project_visible(cx));
         let Some(root) = root else {
             self.project_watch = None;
             self.building_watch = None;
             return;
         };
-        let target = (root, project.watch_git_dirs.clone());
-        let built =
-            self.project_watch.as_ref().is_some_and(|watch| (&watch.root, &watch.git_dirs) == (&target.0, &target.1));
+        let target = (self.workspace().host.clone(), root, project.watch_git_dirs.clone());
+        let built = self.project_watch.as_ref().is_some_and(|watch| {
+            (&watch.host, &watch.root, &watch.git_dirs) == (&target.0, &target.1, &target.2) && watch.alive()
+        });
         if built || self.building_watch.as_ref() == Some(&target) {
             return;
         }
         self.building_watch = Some(target.clone());
         let (done, watch) = futures::channel::oneshot::channel();
-        let (root, git_dirs, events) = (target.0.clone(), target.1.clone(), self.project_events.clone());
+        let (host, root, git_dirs) = target.clone();
+        let events = self.project_events.clone();
         // 起不了线程时 `done` 跟着丢掉，下面收到的是空的。
         let _ = std::thread::Builder::new()
             .name("project-watch".into())
-            .spawn(move || done.send(ProjectWatch::new(root, git_dirs, events)).ok());
+            .spawn(move || done.send(ProjectWatch::new(host, root, git_dirs, events)).ok());
         cx.spawn(async move |this, cx| {
             let watch = watch.await.ok().flatten();
             this.update(cx, |this, cx| {
@@ -212,7 +217,7 @@ impl WindowView {
                 this.building_watch = None;
                 this.project_watch = watch;
                 // 监听建好之前那次读的期间改了什么听不到，按有改动再读一次。
-                if this.project_watch.is_some() && this.workspace().project.root.as_ref() == Some(&target.0) {
+                if this.project_watch.is_some() && this.workspace().project.root.as_ref() == Some(&target.1) {
                     this.workspace_mut().project.stale = true;
                     this.refresh_if_due(cx);
                 }
@@ -422,10 +427,8 @@ impl WindowView {
             self.refresh_if_due(cx);
         } else {
             // 监听不了目录，或者有其他工作树（它们的工作目录监听不到）时定时重读。
-            let interval = if remote {
-                Some(REMOTE_INTERVAL)
-            } else if !self.watching() {
-                Some(FALLBACK_INTERVAL)
+            let interval = if !self.watching() {
+                Some(if remote { REMOTE_INTERVAL } else { FALLBACK_INTERVAL })
             } else if self.git_shown() && project.git.as_ref().is_some_and(|git| !git.worktrees.is_empty()) {
                 Some(WORKTREE_INTERVAL)
             } else {

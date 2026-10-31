@@ -6,11 +6,14 @@ use std::{
     io::{self, BufRead, Write},
     path::PathBuf,
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Condvar, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::{Duration, Instant},
 };
+
+use runode_files::Changes;
 
 use runode_git::{Repos, UntrackedCache};
 
@@ -21,12 +24,32 @@ use super::{
 
 /// 两样缓存各最多按这么多个目录留着，多了全部丢掉重算。
 const MAX_CACHES: usize = 16;
+/// `Call::Watch` 没有改动时最多等这么久就交回空的，桌面接着再问。
+pub(super) const WATCH_HOLD: Duration = Duration::from_secs(25);
+/// 监听这么久没人来取就停掉：桌面那边的监听已经不要了。
+const WATCH_IDLE: Duration = Duration::from_secs(120);
+/// 等到第一个改动后再攒这么久才交回：保存文件、提交这类操作会连着来一串事件。
+const WATCH_BATCH: Duration = Duration::from_millis(100);
+/// 攒着的路径多过这么多时改成整个重读，桌面一直不来取时不至于越攒越多。
+const MAX_PENDING: usize = 4096;
+/// 等改动时每隔这么久看一次要不要停。
+const STOP_POLL: Duration = Duration::from_millis(200);
 
-/// 按读的目录留着的未跟踪文件缓存，和按文件树根留着的最近一次 git 状态（列目录时判断忽略）。
+/// 按读的目录留着的未跟踪文件缓存，按文件树根留着的最近一次 git 状态（列目录时判断忽略），和桌面的各个监听。
 #[derive(Default)]
 struct Caches {
     untracked: HashMap<PathBuf, UntrackedCache>,
     git: HashMap<PathBuf, Option<Repos>>,
+    watches: HashMap<u64, Watched>,
+}
+
+/// 攒着还没交给桌面的改动，来了改动时叫醒等着的那条 `Call::Watch`。
+type Pending = Arc<(Mutex<Option<Changes>>, Condvar)>;
+
+struct Watched {
+    pending: Pending,
+    polled: Instant,
+    _watch: runode_files::Watch,
 }
 
 type Shared = Arc<Mutex<Caches>>;
@@ -135,6 +158,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
             Ok(()) => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
             Err(err) => (Reply::Failed(err.to_string()), Vec::new()),
         },
+        Call::Watch { token, dirs } => (wait_for_changes(token, dirs, caches, stop), Vec::new()),
         Call::Cancel { .. } => (Reply::Failed("nothing to cancel".into()), Vec::new()),
         Call::Git { root, op } => match runode_git::Repo::open(&root).map(|repo| op.run(&repo)) {
             Some(Ok(value)) => (Reply::Git(value), Vec::new()),
@@ -142,6 +166,64 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
             None => (Reply::Failed(format!("{} is not in a git repository", root.display())), Vec::new()),
         },
     }
+}
+
+/// 办 `Call::Watch`。
+fn wait_for_changes(token: u64, dirs: Vec<PathBuf>, caches: &Shared, stop: &AtomicBool) -> Reply {
+    let lock = || caches.lock().unwrap_or_else(PoisonError::into_inner);
+    let known = {
+        let mut caches = lock();
+        caches.watches.retain(|_, watched| watched.polled.elapsed() < WATCH_IDLE);
+        caches.watches.get_mut(&token).map(|watched| {
+            watched.polled = Instant::now();
+            watched.pending.clone()
+        })
+    };
+    let Some(pending) = known else {
+        // 开始听要走一遍目录，不占着缓存的锁。
+        let pending = Pending::default();
+        let Some(watch) = start_watch(dirs, pending.clone()) else {
+            return Reply::Failed("cannot watch the project".into());
+        };
+        lock().watches.insert(token, Watched { pending, polled: Instant::now(), _watch: watch });
+        return Reply::Changed { started: true, changes: Changes::default() };
+    };
+    let (changes, ready) = &*pending;
+    let deadline = Instant::now() + WATCH_HOLD;
+    let mut waiting = changes.lock().unwrap_or_else(PoisonError::into_inner);
+    while waiting.is_none() && !stop.load(Ordering::Relaxed) && Instant::now() < deadline {
+        waiting = ready.wait_timeout(waiting, STOP_POLL).unwrap_or_else(PoisonError::into_inner).0;
+    }
+    if waiting.is_some() {
+        drop(waiting);
+        thread::sleep(WATCH_BATCH);
+        waiting = changes.lock().unwrap_or_else(PoisonError::into_inner);
+    }
+    Reply::Changed { started: false, changes: waiting.take().unwrap_or_default() }
+}
+
+/// 递归地听 `dirs`，改动并进 `pending`。事件里的路径按 `dirs` 原来的写法交回：桌面按它给的路径比。
+fn start_watch(dirs: Vec<PathBuf>, pending: Pending) -> Option<runode_files::Watch> {
+    let real: Vec<(PathBuf, PathBuf)> =
+        dirs.iter().map(|dir| (std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone()), dir.clone())).collect();
+    let everything = dirs.clone();
+    runode_files::watch(dirs, move |mut batch| {
+        for path in &mut batch.paths {
+            if let Some((real, given)) = real.iter().find(|(real, given)| real != given && path.starts_with(real))
+                && let Ok(rel) = path.strip_prefix(real)
+            {
+                *path = given.join(rel);
+            }
+        }
+        let (changes, ready) = &*pending;
+        let mut changes = changes.lock().unwrap_or_else(PoisonError::into_inner);
+        let changes = changes.get_or_insert_default();
+        changes.merge(batch);
+        if changes.paths.len() > MAX_PENDING {
+            *changes = Changes { paths: everything.clone(), everything: true };
+        }
+        ready.notify_all();
+    })
 }
 
 #[cfg(test)]
