@@ -81,6 +81,9 @@ fn tar<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<std::process::Child>
 fn send(host: &RemoteHost, file: Option<&str>, stdin: Stdio, bytes: Option<&[u8]>) -> Result<String> {
     let ssh = ssh();
     let mut command = ssh.exec(&host.dest, &upload_command(&upload_id(), file), ssh.control.is_some());
+    if ssh.control.is_none() {
+        host.ask_through(&mut command);
+    }
     command.stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped());
     crate::subprocess::hide_window(&mut command);
     let mut child = command.spawn().context("cannot run ssh")?;

@@ -416,7 +416,7 @@ impl RemoteHost {
         let script = runode_ssh::bootstrap::service_command(&deploy::install_dir());
         let mut command = ssh.exec(&self.dest, &script, ssh.control.is_some());
         if ssh.control.is_none() {
-            self.ask_through(&mut command, true);
+            self.ask_through(&mut command);
         }
         command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
         crate::subprocess::hide_window(&mut command);
@@ -435,7 +435,7 @@ impl RemoteHost {
         let script = runode_ssh::bootstrap::prune_command(&deploy::install_dir());
         let mut command = ssh.exec(&self.dest, &script, ssh.control.is_some());
         if ssh.control.is_none() {
-            self.ask_through(&mut command, true);
+            self.ask_through(&mut command);
         }
         command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
         crate::subprocess::hide_window(&mut command);
@@ -531,10 +531,11 @@ impl RemoteHost {
         let mut deployed = false;
         loop {
             self.set_status(Status::Connecting(if deployed { Phase::Starting } else { Phase::Probing }));
-            let mut command =
-                ssh.exec(&self.dest, &runode_ssh::bootstrap::connect_command(&dir), ssh.control.is_some());
-            if ssh.control.is_none() {
-                self.ask_through(&mut command, interactive);
+            // 不经主连接时这条 ssh 自己认证：`interactive` 时经 askpass 问用户，否则不问。
+            let batch = ssh.control.is_some() || !interactive;
+            let mut command = ssh.exec(&self.dest, &runode_ssh::bootstrap::connect_command(&dir), batch);
+            if !batch {
+                self.ask_through(&mut command);
             }
             let mut child = spawn_piped(&mut command, &log)?;
             let stdout = child.stdout.take().ok_or_else(|| Failure::Retry("ssh gave no output".into()))?;
@@ -572,7 +573,7 @@ impl RemoteHost {
                             auth: false,
                         });
                     }
-                    deploy::install(self, &ssh, &platform, &dir, &log)?;
+                    deploy::install(self, &ssh, &platform, &dir, &log, interactive)?;
                     deployed = true;
                 }
                 Err(failure) => {
@@ -639,7 +640,7 @@ impl RemoteHost {
         }
         let mut master = ssh.master(&self.dest, !interactive);
         if interactive {
-            self.ask_through(&mut master, true);
+            self.ask_through(&mut master);
         }
         let stderr = File::create(log).map_err(|err| Failure::Retry(format!("cannot write the ssh log: {err}")))?;
         master.stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr);
@@ -651,12 +652,9 @@ impl RemoteHost {
         if status.success() { Ok(()) } else { Err(classify(log, status.code())) }
     }
 
-    /// 让 `command` 起的 ssh 要问用户时经 askpass 问桌面；`interactive` 为假时不问。
-    fn ask_through(&self, command: &mut Command, interactive: bool) {
-        if !interactive {
-            command.args(["-o", "BatchMode=yes"]);
-            return;
-        }
+    /// 让 `command` 起的 ssh 要问用户时经 askpass 问桌面。不问用户的调用在拼命令时就带上 `BatchMode`
+    /// （`Ssh::exec` 的 `batch`）：选项要写在目标之前，拼好以后再加的会被当成远端命令的一部分。
+    pub(crate) fn ask_through(&self, command: &mut Command) {
         if let Some((socket, token)) = askpass::register(&self.name)
             && let Ok(exe) = askpass::program()
         {
