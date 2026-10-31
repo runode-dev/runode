@@ -3,7 +3,7 @@
 
 use std::{
     collections::HashMap,
-    net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream},
     process::Stdio,
     sync::{LazyLock, Mutex, PoisonError},
     time::Duration,
@@ -43,12 +43,13 @@ pub fn stop(host: &RemoteHost, port: u16) -> Result<()> {
     let Some(local) = FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).remove(&(host.name.clone(), port)) else {
         return Ok(());
     };
-    let mut command = ssh().forward(&host.dest, local, port, true);
+    let ssh = ssh();
+    let mut command = ssh.forward(&host.dest, local, port, true);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     crate::subprocess::hide_window(&mut command);
     let output = command.output()?;
     // 主连接已经退出时转发本来就没了。
-    if !output.status.success() && listening(local) {
+    if !output.status.success() && master_alive(&ssh, host) {
         bail!("{}", last_line(&output.stderr, "ssh refused to stop forwarding"));
     }
     tracing::info!("stopped forwarding localhost:{local} to {}:{port}", host.name);
@@ -65,12 +66,14 @@ fn last_line(stderr: &[u8], otherwise: &str) -> String {
 pub fn forward(host: &RemoteHost, port: u16) -> Result<u16> {
     let key = (host.name.clone(), port);
     let known = FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).get(&key).copied();
-    if let Some(local) = known.filter(|&local| listening(local)) {
-        return Ok(local);
-    }
     let ssh = ssh();
     if ssh.control.is_none() {
         bail!("forwarding needs a shared ssh connection, which this system's ssh does not offer");
+    }
+    // 转发挂在主连接上：本机那头在听、主连接也还开着，才是这条转发还在；主连接重开过时那个端口可能已经是别的程序的。
+    if let Some(local) = known.filter(|&local| listening(Ipv4Addr::LOCALHOST.into(), local) && master_alive(&ssh, host))
+    {
+        return Ok(local);
     }
     // 尽量用同一个端口号，网址里写死了端口的页面也能用；占着了、或者是要特权的端口时让系统挑一个。
     let local =
@@ -87,16 +90,34 @@ pub fn forward(host: &RemoteHost, port: u16) -> Result<u16> {
     Ok(local)
 }
 
-fn listening(port: u16) -> bool {
-    TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), CHECK_TIMEOUT).is_ok()
+fn listening(addr: IpAddr, port: u16) -> bool {
+    TcpStream::connect_timeout(&SocketAddr::new(addr, port), CHECK_TIMEOUT).is_ok()
 }
 
+fn master_alive(ssh: &runode_ssh::Ssh, host: &RemoteHost) -> bool {
+    let mut check = ssh.check(&host.dest);
+    check.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    crate::subprocess::hide_window(&mut check);
+    check.status().is_ok_and(|status| status.success())
+}
+
+/// 本机的 `port` 没被占：转发只绑 127.0.0.1，打开的网址写的是 `localhost`，浏览器可能先连 `::1`，所以那边有
+/// 程序在听也不行。只试着绑一下不够：别的程序绑的是 `0.0.0.0` 时，有的系统照样让这里绑上 127.0.0.1。
 fn free(port: u16) -> bool {
-    TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok()
+    !listening(Ipv4Addr::LOCALHOST.into(), port)
+        && !listening(Ipv6Addr::LOCALHOST.into(), port)
+        && TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok()
 }
 
+/// 让系统挑一个空着的端口，挑中的在 `::1` 上被占着时再挑。
 fn any_free() -> Result<u16> {
-    Ok(TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?.local_addr()?.port())
+    for _ in 0..8 {
+        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?.local_addr()?.port();
+        if !listening(Ipv6Addr::LOCALHOST.into(), port) {
+            return Ok(port);
+        }
+    }
+    bail!("no free local port")
 }
 
 /// 指向本机（远端那台）的网址：`scheme://` 之后、端口之后的部分原样留着。
@@ -143,7 +164,21 @@ impl<'a> Loopback<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::Loopback;
+    use std::net::{Ipv4Addr, Ipv6Addr, TcpListener};
+
+    use super::{Loopback, free};
+
+    /// 本机别的程序在 `0.0.0.0` 或 `::1` 上听着的端口不算空着。
+    #[test]
+    fn ports_taken_on_any_loopback_are_not_free() {
+        let wildcard = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+        assert!(!free(wildcard.local_addr().unwrap().port()));
+        if let Ok(v6) = TcpListener::bind((Ipv6Addr::LOCALHOST, 0)) {
+            assert!(!free(v6.local_addr().unwrap().port()));
+        }
+        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap().local_addr().unwrap().port();
+        assert!(free(port));
+    }
 
     #[test]
     fn finds_urls_on_the_remote_machine_itself() {
