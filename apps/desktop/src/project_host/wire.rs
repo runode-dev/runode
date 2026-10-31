@@ -4,7 +4,7 @@
 
 use std::{
     io::{self, BufRead, Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use runode_files::{Listings, Stamp};
@@ -83,6 +83,56 @@ pub(super) enum Reply {
     Failed(String),
 }
 
+impl Reply {
+    /// 去掉 JSON 写不出的路径（不是 UTF-8 的），免得一个这样的文件名让整份回话都编不了：被监听到改动的
+    /// 改成整个重扫，仓库自己的目录写不出时整个仓库不要。文件树里各项的名字按字节传，不受影响。
+    pub(super) fn drop_unsendable(&mut self) {
+        match self {
+            Self::Scan(scan) => {
+                scan.listings.retain(|(dir, _)| sendable(dir));
+                scan.watch_git_dirs.retain(|dir| sendable(dir));
+                if scan.git.as_mut().is_some_and(|git| !drop_unsendable_repos(git)) {
+                    scan.git = None;
+                }
+            }
+            Self::Listed(listings) => listings.retain(|(dir, _)| sendable(dir)),
+            Self::Files(files) => files.retain(|path| sendable(path)),
+            Self::Found(found) => found.retain(|found| sendable(&found.path)),
+            Self::Changed { changes, .. } => {
+                let heard = changes.paths.len();
+                changes.paths.retain(|path| sendable(path));
+                changes.everything |= changes.paths.len() < heard;
+            }
+            _ => {}
+        }
+    }
+}
+
+fn sendable(path: &Path) -> bool {
+    path.to_str().is_some()
+}
+
+/// 主仓库自己的目录写不出时返回 `false`。
+fn drop_unsendable_repos(repos: &mut runode_git::Repos) -> bool {
+    repos.subs.retain_mut(drop_unsendable_snapshot);
+    repos.worktrees.retain_mut(drop_unsendable_snapshot);
+    drop_unsendable_snapshot(&mut repos.main)
+}
+
+/// 仓库自己的目录写不出时返回 `false`。
+fn drop_unsendable_snapshot(snapshot: &mut runode_git::Snapshot) -> bool {
+    if ![&snapshot.root, &snapshot.git_dir, &snapshot.prefix].into_iter().all(|dir| sendable(dir)) {
+        return false;
+    }
+    let file = |file: &runode_git::FileDiff| sendable(&file.path) && file.old_path.as_deref().is_none_or(sendable);
+    snapshot.staged.retain(file);
+    snapshot.unstaged.retain(file);
+    snapshot.statuses.retain(|path, _| sendable(path));
+    snapshot.ignored.retain(|path| sendable(path));
+    snapshot.head_stats.retain(|path, _| sendable(path));
+    true
+}
+
 /// 远端读到的一份项目，`Scan` 里只在本机有意义的未跟踪文件缓存不传。
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct RemoteScan {
@@ -114,9 +164,10 @@ pub(super) struct Response {
     pub blob: usize,
 }
 
-/// 写一条消息，`blob` 跟在后面。消息先整个编好再写，编不了（路径不是 UTF-8）时什么都没写出去。
+/// 写一条消息，`blob` 跟在后面。消息先整个编好再写，编不了（路径不是 UTF-8）时什么都没写出去，报
+/// `InvalidData`，连接照样能用。
 pub(super) fn write(out: &mut impl Write, message: &impl Serialize, blob: &[u8]) -> io::Result<()> {
-    let mut line = serde_json::to_vec(message).map_err(io::Error::other)?;
+    let mut line = serde_json::to_vec(message).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     line.push(b'\n');
     out.write_all(&line)?;
     out.write_all(blob)?;
@@ -137,4 +188,25 @@ pub(super) fn read_blob(input: &mut impl Read, len: usize) -> io::Result<Vec<u8>
     let mut blob = vec![0; len];
     input.read_exact(&mut blob)?;
     Ok(blob)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+    use super::*;
+
+    #[test]
+    fn unsendable_paths_are_dropped_instead_of_failing_the_reply() {
+        let bad = PathBuf::from(OsStr::from_bytes(b"caf\xe9.txt"));
+        let mut files = Reply::Files(vec![PathBuf::from("a.txt"), bad.clone()]);
+        files.drop_unsendable();
+        assert!(matches!(&files, Reply::Files(files) if files == &[PathBuf::from("a.txt")]));
+        let changes = runode_files::Changes { paths: vec![bad], everything: false };
+        let mut changed = Reply::Changed { started: false, changes };
+        assert!(write(&mut Vec::new(), &changed, &[]).is_err_and(|err| err.kind() == io::ErrorKind::InvalidData));
+        changed.drop_unsendable();
+        assert!(matches!(&changed, Reply::Changed { changes, .. } if changes.paths.is_empty() && changes.everything));
+        write(&mut Vec::new(), &changed, &[]).unwrap();
+    }
 }

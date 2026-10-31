@@ -101,8 +101,11 @@ impl Client {
             content,
         );
         if let Err(err) = written {
-            conn.closed.store(true, Ordering::Relaxed);
             conn.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);
+            if err.kind() == std::io::ErrorKind::InvalidData {
+                return Err(format!("cannot send the request to {}: {err}", self.name));
+            }
+            conn.closed.store(true, Ordering::Relaxed);
             return Err(format!("lost the connection to {}: {err}", self.name));
         }
         let deadline = Instant::now() + timeout;

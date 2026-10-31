@@ -86,7 +86,8 @@ pub(super) fn serve(mut input: impl BufRead, output: impl Write + Send + 'static
         running.lock().unwrap_or_else(PoisonError::into_inner).insert(request.id, stop.clone());
         let (output, caches, running) = (output.clone(), caches.clone(), running.clone());
         let spawned = thread::Builder::new().name("project-call".into()).spawn(move || {
-            let (reply, blob) = handle(request.call, content, &caches, &stop);
+            let (mut reply, blob) = handle(request.call, content, &caches, &stop);
+            reply.drop_unsendable();
             running.lock().unwrap_or_else(PoisonError::into_inner).remove(&request.id);
             let response = Response { id: request.id, reply, blob: blob.len() };
             let mut output = output.lock().unwrap_or_else(PoisonError::into_inner);

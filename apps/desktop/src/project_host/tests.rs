@@ -140,3 +140,21 @@ fn watches_over_the_wire() {
     assert!(remote.wait_for_changes(7, vec![dir.clone()], &stop).is_err());
     assert!(ProjectHost::Local.wait_for_changes(0, vec![dir], &go).is_err());
 }
+
+/// 不是 UTF-8 的文件名（Linux 上建得出来）不让远端的整份扫描失败：文件树里照样有它，git 状态里没有。
+#[cfg(target_os = "linux")]
+#[test]
+fn a_non_utf8_name_does_not_break_the_remote_scan() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+    let dir = fixture("non-utf8");
+    let name = OsStr::from_bytes(b"caf\xe9.txt");
+    fs::write(dir.join(name), "x").unwrap();
+    let scan = remote().scan(dir.clone(), Vec::new(), UntrackedCache::default(), false).unwrap();
+    let (_, entries) = scan.listings.iter().find(|(listed, _)| listed == &dir).unwrap();
+    assert!(entries.as_ref().unwrap().iter().any(|entry| entry.name == name));
+    let git = scan.git.unwrap();
+    assert!(git.main.statuses.contains_key(Path::new("a.txt")));
+    assert!(!git.main.statuses.keys().any(|path| path.to_str().is_none()));
+    fs::remove_dir_all(&dir).ok();
+}
