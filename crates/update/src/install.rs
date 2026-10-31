@@ -163,6 +163,7 @@ fn copy_app_from(dmg: &Path, dir: &Path) -> Result<(), Error> {
 }
 
 /// 把 `dmg` 里的 `ARCHIVE_APP` 拷进 `dir`，核对它是 `team` 签的、版本号是 `version`。
+#[cfg(target_os = "macos")]
 pub(crate) fn app_from_dmg(dmg: &Path, dir: &Path, team: &str, version: &str) -> Result<PathBuf, Error> {
     copy_app_from(dmg, dir)?;
     let app = only_app_in(dir, OsStr::new(ARCHIVE_APP))?;
