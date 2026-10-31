@@ -174,7 +174,10 @@ fn handle(host: &HostId, request: ClientMsg, cx: &mut App) -> Reply {
             let renamed = layout_report::window_at(window, cx).and_then(|handle| {
                 handle
                     .update(cx, |view, window, cx| {
-                        let ix = (workspace as usize).checked_sub(1).filter(|ix| *ix < view.workspaces.len())?;
+                        // 那台机器的命令行只改那台机器上的 workspace。
+                        let ix = (workspace as usize)
+                            .checked_sub(1)
+                            .filter(|ix| view.workspaces.get(*ix).is_some_and(|it| it.host == *host))?;
                         view.set_workspace_name(ix, name.into(), window, cx);
                         Some(())
                     })
