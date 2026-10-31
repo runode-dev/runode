@@ -758,6 +758,7 @@ impl Render for WindowView {
         let add_task = self.render_add_task(cx);
         let commit_message_dialog = self.render_commit_message_dialog(cx);
         let todo_dialog = self.todo_dialog(cx);
+        let asking = ask.is_some();
         let status_bar = (self.settings.is_none() && status_bar::shown(cx))
             .then(|| row_slot(&self.slots(cx).status_bar, status_bar::STATUS_BAR_HEIGHT, window));
         // 这几个浮层挡住了后面的界面，开着时后面的不报给辅助工具。
@@ -884,9 +885,10 @@ impl Render for WindowView {
             .children(agent_picker)
             .children(arrange_picker)
             .children(branch_picker)
-            .children(new_workspace)
-            .children(add_task)
-            .children(commit_message_dialog)
+            // 询问框叠在别的对话框上时（新建工作区连主机要口令），下面的对话框不报给辅助工具。
+            .children(new_workspace.map(|dialog| dialog.aria_hidden(asking)))
+            .children(add_task.map(|dialog| dialog.aria_hidden(asking)))
+            .children(commit_message_dialog.map(|dialog| dialog.aria_hidden(asking)))
             .children(todo_dialog)
             .children(ask)
     }
