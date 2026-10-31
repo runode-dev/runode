@@ -38,9 +38,16 @@ pub fn forwarded(name: &str) -> Vec<(u16, u16)> {
     ports
 }
 
+/// 主机 `name` 的主连接退出了，挂在上面的转发都没了：不再记着，不然本机同一个端口换成别的程序在听时，
+/// 再点那个远端端口会打开本机的那个程序。
+pub(super) fn forget(name: &str) {
+    FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).retain(|(host, _), _| host != name);
+}
+
 /// 停掉远端 `port` 到本机的转发；没转着时什么都不做。会阻塞，在后台线程上调。
 pub fn stop(host: &RemoteHost, port: u16) -> Result<()> {
-    let Some(local) = FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).remove(&(host.name.clone(), port)) else {
+    let key = (host.name.clone(), port);
+    let Some(local) = FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).get(&key).copied() else {
         return Ok(());
     };
     let ssh = ssh();
@@ -52,6 +59,7 @@ pub fn stop(host: &RemoteHost, port: u16) -> Result<()> {
     if !output.status.success() && master_alive(&ssh, host) {
         bail!("{}", last_line(&output.stderr, "ssh refused to stop forwarding"));
     }
+    FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).remove(&key);
     tracing::info!("stopped forwarding localhost:{local} to {}:{port}", host.name);
     Ok(())
 }

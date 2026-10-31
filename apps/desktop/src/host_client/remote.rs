@@ -425,6 +425,7 @@ impl RemoteHost {
         let mut command = exit_command(&ssh, &self.dest);
         crate::subprocess::hide_window(&mut command);
         let _ = command.status();
+        forward::forget(&self.name);
     }
 
     /// 在远端把宿主装成登录服务（`runode --ssh-service`）。连着时才办，会阻塞。
@@ -667,6 +668,8 @@ impl RemoteHost {
         if check.status().is_ok_and(|status| status.success()) {
             return Ok(());
         }
+        // 挂在上一条主连接上的转发跟着它没了。
+        forward::forget(&self.name);
         let mut master = ssh.master(&self.dest, !interactive);
         if interactive {
             self.ask_through(&mut master);
