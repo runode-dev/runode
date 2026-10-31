@@ -156,8 +156,8 @@ pub struct Config {
     pub terminal_host: bool,
     /// 连 SSH 主机用的 ssh 程序，不设时是 PATH 里的 `ssh`。下一次连接起算数。
     pub ssh_program: Option<String>,
-    /// 连 SSH 主机的主连接在最后一个用它的连接断开后再留多少秒，不设时用 `runode_ssh::DEFAULT_PERSIST_SECS`。
-    /// 下一次连接起算数。
+    /// 连 SSH 主机的主连接在最后一个用它的连接断开后再留多少秒，不设时用 `runode_ssh::DEFAULT_PERSIST_SECS`；
+    /// app 退出时不管它，主连接都退出。下一次连接起算数。
     pub ssh_control_persist: Option<u32>,
     /// Git 面板显示着时定时在后台抓取远端，落后数和图表里的远端分支跟得上远端。改了马上算数。
     pub git_auto_fetch: bool,

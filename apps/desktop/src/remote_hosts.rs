@@ -37,8 +37,13 @@ pub fn forget(name: &str, cx: &mut App) {
     cx.background_spawn(async move { remote::forget(&name) }).detach();
 }
 
-/// 开始收远端主机的事件，要在恢复窗口之前调。
+/// 开始收远端主机的事件，app 退出时让各台主机的主连接退出。要在恢复窗口之前调。
 pub fn install(cx: &mut App) {
+    cx.on_app_quit(|_| {
+        remote::close_masters();
+        async {}
+    })
+    .detach();
     let Some(mut events) = remote::events() else {
         return;
     };

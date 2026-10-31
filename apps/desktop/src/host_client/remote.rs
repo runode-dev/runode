@@ -97,6 +97,28 @@ pub fn forget(name: &str) {
     emit(RemoteEvent::Forgotten(name.to_owned()));
 }
 
+/// 让各台主机的主连接退出，不等它们办完：app 退出时调，退出的收尾等不了多久。
+pub fn close_masters() {
+    let ssh = ssh();
+    if ssh.control.is_none() {
+        return;
+    }
+    for host in remotes() {
+        let mut command = exit_command(&ssh, &host.dest);
+        // 自成一个进程组，app 退出时不连带结束它。
+        crate::subprocess::isolate(&mut command);
+        if let Err(err) = command.spawn() {
+            tracing::warn!("cannot close the connection to {}: {err}", host.name);
+        }
+    }
+}
+
+fn exit_command(ssh: &Ssh, dest: &Destination) -> Command {
+    let mut command = ssh.exit(dest);
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    command
+}
+
 /// 已经连过（或正连着）的远端主机。
 pub fn remotes() -> Vec<Arc<RemoteHost>> {
     let hosts = HOSTS.lock().unwrap_or_else(PoisonError::into_inner);
@@ -343,11 +365,11 @@ impl RemoteHost {
 
     /// 让主连接（ControlMaster）退出；不用主连接时什么都不做。会阻塞。
     pub fn close_master(&self) {
-        if ssh().control.is_none() {
+        let ssh = ssh();
+        if ssh.control.is_none() {
             return;
         }
-        let mut command = ssh().exit(&self.dest);
-        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        let mut command = exit_command(&ssh, &self.dest);
         crate::subprocess::hide_window(&mut command);
         let _ = command.status();
     }

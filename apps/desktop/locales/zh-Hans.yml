@@ -654,7 +654,7 @@ settings:
     vt_window_resize_allowed: 终端里的程序能用 CSI 8 t 改窗口尺寸；只在终端独占标签页、窗口不是全屏时改。
     terminal_host: 退出 Runode 后会话留在后台进程里照常运行，下次打开接着用。
     ssh_program: 连 SSH 主机时调的 ssh，留空用 PATH 里的 ssh。照样读 ~/.ssh/config，ProxyJump、ssh-agent、1Password 都能用。
-    ssh_control_persist: 最后一个终端关掉后，到这台主机的连接再留多少秒，这期间重连不用再输密码。0 是一直留着。
+    ssh_control_persist: 最后一个终端关掉后，到这台主机的连接再留多少秒，这期间重连不用再输密码。0 是一直留着。退出 runode 时总会断开。
     auto_update: 在后台查新版本、下载好，退出 Runode 时装上。
     remote_access: "让配对过的手机经局域网或 Tailscale 连上这台电脑的终端。在下面配对，或者用 runode remote pair。"
     remote_access_port: TCP 端口，1 到 65535。
