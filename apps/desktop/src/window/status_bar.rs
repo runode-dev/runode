@@ -1,6 +1,6 @@
 //! 窗口底部的状态栏，右边四块，点了在上面弹出各自的浮层：
 //!
-//! - 防止休眠：开启、agent 在干活时、关闭三种，记在配置的 `prevent-sleep` 里，要挡时拿着一个 `probe::Caffeinate`；
+//! - 防止休眠：开启、agent 在干活时、关闭三种，记在配置的 `prevent-sleep` 里，要挡时拿着一个 `system_probe::Caffeinate`；
 //! - 内存和终端数：runode 自己（app、单独跑的宿主和各个终端里的进程）一共占多少内存，所有窗口里有
 //!   几个终端；浮层里按 workspace 列出这个窗口里各终端的 CPU 和内存；
 //! - 端口：终端里跑的程序在监听几个 TCP 端口；浮层里列出来，点了在浏览器里打开，别的程序监听的收在
@@ -20,7 +20,6 @@
 //! 进程监听的端口。
 
 pub(super) mod host_list;
-mod probe;
 
 use crate::ui::popover::Popover;
 use crate::ui::theme::ActiveTheme as _;
@@ -43,6 +42,7 @@ use runode_types::{
 use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, remote};
 use crate::host_client::remote::{self as hosts, HostId};
 use crate::project_host::ProjectHost;
+use crate::system_probe::{self as probe, Caffeinate, Helper, Port, Procs, Usage};
 use crate::ui::a11y::A11yPress;
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::menu::MenuHost as _;
@@ -58,8 +58,6 @@ use crate::{
         tooltip::tooltip,
     },
 };
-use probe::{Caffeinate, Helper, Procs, Usage};
-pub(crate) use probe::{Port, listening_ports};
 
 /// 隔多久重新问一次系统。
 const POLL_INTERVAL: Duration = Duration::from_secs(3);

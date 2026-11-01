@@ -41,6 +41,7 @@ mod screen_viewer;
 mod settings;
 mod startup;
 mod subprocess;
+mod system_probe;
 mod terminal_view;
 mod update;
 mod window;

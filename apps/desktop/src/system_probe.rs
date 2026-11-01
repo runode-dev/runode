@@ -1,4 +1,4 @@
-//! 状态栏要问系统的事：各个进程的父进程和 CPU（`ps`）、内存（`proc_pid_rusage`），有哪些 TCP 端口在监听（`lsof`），
+//! 状态栏和远端的项目服务（`project_host::serve`）要问系统的事：各个进程的父进程和 CPU（`ps`）、内存（`proc_pid_rusage`），有哪些 TCP 端口在监听（`lsof`），
 //! 以及防止电脑休眠（`caffeinate`）。都是 macOS 自带的命令，跑不了时当没有。Linux 上端口读 `/proc`，防休眠经
 //! `systemd-inhibit`；Windows 上这几样由 `windows` 经系统接口问。
 
@@ -8,7 +8,7 @@ mod windows;
 #[cfg(windows)]
 pub(crate) use windows::listening_ports;
 #[cfg(windows)]
-pub(super) use windows::{Caffeinate, processes};
+pub(crate) use windows::{Caffeinate, processes};
 
 use std::collections::{HashMap, HashSet};
 #[cfg(not(windows))]
@@ -25,7 +25,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 一个进程的父进程、内存（字节，macOS 上取 phys_footprint，Windows 上取私有工作集）和 CPU 占用（百分比，一个核满载是 100）。
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct Proc {
+pub(crate) struct Proc {
     pub ppid: u32,
     pub memory: u64,
     pub cpu: f32,
@@ -35,7 +35,7 @@ pub(super) struct Proc {
 /// runode 按需拉起的子进程，按命令行认：这个 app 的可执行文件加一个参数。采集进程和拉起它的进程脱开，
 /// 不一定在 app 和宿主的子孙里，所以在整张进程表里认。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum Helper {
+pub(crate) enum Helper {
     /// `runode --speech`
     Speech,
     /// `runode --screen`
@@ -55,7 +55,7 @@ impl Helper {
 
 /// 一组进程的 CPU 和内存加起来。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct Usage {
+pub(crate) struct Usage {
     pub cpu: f32,
     pub memory: u64,
 }
@@ -70,7 +70,7 @@ impl std::ops::Add for Usage {
 
 /// 这一刻的进程表。
 #[derive(Default)]
-pub(super) struct Procs {
+pub(crate) struct Procs {
     procs: HashMap<u32, Proc>,
     children: HashMap<u32, Vec<u32>>,
 }
@@ -99,24 +99,24 @@ impl Procs {
     }
 
     /// 在跑的子进程，按种类和进程号排好。
-    pub(super) fn helpers(&self) -> Vec<(Helper, u32)> {
+    pub(crate) fn helpers(&self) -> Vec<(Helper, u32)> {
         let mut helpers: Vec<_> = self.procs.iter().filter_map(|(&pid, proc)| Some((proc.helper?, pid))).collect();
         helpers.sort_unstable();
         helpers
     }
 
     /// 只算 `pid` 这一个进程。
-    pub(super) fn one(&self, pid: u32) -> Usage {
+    pub(crate) fn one(&self, pid: u32) -> Usage {
         self.procs.get(&pid).map_or(Usage::default(), |proc| Usage { cpu: proc.cpu, memory: proc.memory })
     }
 
     /// `pid` 和它所有的子孙进程加起来。
-    pub(super) fn tree(&self, pid: u32) -> Usage {
+    pub(crate) fn tree(&self, pid: u32) -> Usage {
         self.subtree(pid).into_iter().fold(Usage::default(), |total, pid| total + self.one(pid))
     }
 
     /// `roots` 里各个进程连同子孙加起来；一个进程在另一个的子孙里时只算一次。
-    pub(super) fn forest(&self, roots: &HashSet<u32>) -> Usage {
+    pub(crate) fn forest(&self, roots: &HashSet<u32>) -> Usage {
         roots
             .iter()
             .filter(|&&pid| {
@@ -127,7 +127,7 @@ impl Procs {
     }
 
     /// 沿父进程往上找，`pid` 自己或者最近的一个让 `is_root` 成立的祖先；找到 1 号进程还没有时为 `None`。
-    pub(super) fn owner(&self, pid: u32, is_root: impl Fn(u32) -> bool) -> Option<u32> {
+    pub(crate) fn owner(&self, pid: u32, is_root: impl Fn(u32) -> bool) -> Option<u32> {
         let mut pid = pid;
         // 进程表是一刻的快照，父子关系理应成树；限一个深度，万一成了环也不会卡住。
         for _ in 0..64 {
@@ -161,7 +161,7 @@ pub(crate) struct Port {
 /// 现在的进程表；`ps` 跑不了时是空的。phys_footprint 只问 `roots` 和它们的子孙：状态栏只算这些进程的内存，
 /// 别的进程只用来认父子关系，`ps` 列出的几百个进程挨个问一遍白白耗时。
 #[cfg(not(windows))]
-pub(super) fn processes(roots: &HashSet<u32>) -> Procs {
+pub(crate) fn processes(roots: &HashSet<u32>) -> Procs {
     let text = output(Command::new("/bin/ps").args(["-axo", "pid=,ppid=,rss=,%cpu=,args="]), PROBE_TIMEOUT);
     let exe = std::env::current_exe().map(|exe| exe.to_string_lossy().into_owned()).unwrap_or_default();
     let mut procs = Procs::new(parse_ps(&text, &exe));
@@ -359,11 +359,11 @@ fn parse_lsof(text: &str) -> Vec<Port> {
 /// （macOS 上 `caffeinate -w`，Linux 上 `systemd-inhibit` 拿着锁跑 `tail --pid`），app 崩了它也跟着退出，
 /// 不会一直挡着休眠。
 #[cfg(not(windows))]
-pub(super) struct Caffeinate(Child);
+pub(crate) struct Caffeinate(Child);
 
 #[cfg(not(windows))]
 impl Caffeinate {
-    pub(super) fn start() -> std::io::Result<Self> {
+    pub(crate) fn start() -> std::io::Result<Self> {
         let pid = std::process::id().to_string();
         let mut command = if cfg!(target_os = "macos") {
             let mut command = Command::new("/usr/bin/caffeinate");
@@ -385,7 +385,7 @@ impl Caffeinate {
 
     /// 还在跑时为 `None`。被别人结束了（被信号结束、正常退出）或者问不出来时为 `Ok`，宁可重拉也不假装还拦着
     /// 休眠；以非零退出码退出是没拿到锁（比如 logind 不在、没有权限），为 `Err`，带着退出状态。
-    pub(super) fn exit(&mut self) -> Option<Result<(), String>> {
+    pub(crate) fn exit(&mut self) -> Option<Result<(), String>> {
         match self.0.try_wait() {
             Ok(None) => None,
             Ok(Some(status)) if status.code().is_some_and(|code| code != 0) => Some(Err(status.to_string())),

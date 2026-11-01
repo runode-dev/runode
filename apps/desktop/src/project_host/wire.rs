@@ -75,7 +75,7 @@ pub(super) enum Reply {
     Found(Vec<runode_git::GrepMatch>),
     /// 按请求的顺序，不在时为空，在时是不是目录。
     Kinds(Vec<Option<bool>>),
-    Ports(Vec<crate::window::status_bar::Port>),
+    Ports(Vec<crate::system_probe::Port>),
     /// `runode_git::current_branch` 和 `runode_git::origin_url`；不在仓库里时都为空。
     RepoBadge {
         branch: Option<String>,

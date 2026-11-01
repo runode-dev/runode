@@ -154,9 +154,9 @@ impl ProjectHost {
     }
 
     /// 这台机器上在监听的 TCP 端口。会阻塞。
-    pub(crate) fn listening_ports(&self) -> Result<Vec<crate::window::status_bar::Port>, String> {
+    pub(crate) fn listening_ports(&self) -> Result<Vec<crate::system_probe::Port>, String> {
         let client = match self {
-            Self::Local => return Ok(crate::window::status_bar::listening_ports()),
+            Self::Local => return Ok(crate::system_probe::listening_ports()),
             Self::Remote(client) => client,
         };
         match client.call(Call::Ports, QUERY_TIMEOUT)? {
