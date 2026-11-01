@@ -238,7 +238,6 @@ pub(crate) fn can_ask(ssh: &Ssh) -> bool {
     }
     let mut command = ssh.version();
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
-    crate::subprocess::hide_window(&mut command);
     let version =
         command.output().ok().and_then(|out| runode_ssh::parse_version(&String::from_utf8_lossy(&out.stderr)));
     let can = version.is_none_or(runode_ssh::supports_askpass);
@@ -510,7 +509,6 @@ impl RemoteHost {
             return;
         }
         let mut command = exit_command(&ssh, &self.dest);
-        crate::subprocess::hide_window(&mut command);
         let _ = command.status();
         forward::forget(&self.name);
     }
@@ -530,7 +528,6 @@ impl RemoteHost {
         let script = bootstrap::service_command(&deploy::install_dir());
         let mut command = self.exec(&ssh, &script, true, false);
         command.stdin(Stdio::null());
-        crate::subprocess::hide_window(&mut command);
         let output =
             runode_ssh::process::output(&mut command).map_err(|err| fail("ssh", format!("cannot run ssh: {err}")))?;
         let read = read_service(&mut output.stdout.as_slice());
@@ -550,7 +547,6 @@ impl RemoteHost {
         };
         let mut command = self.exec(&ssh, &script, true, false);
         command.stdin(Stdio::null());
-        crate::subprocess::hide_window(&mut command);
         let output = runode_ssh::process::output(&mut command).map_err(|err| format!("cannot run ssh: {err}"))?;
         if !output.status.success() {
             return Err(format!("ssh exited with {:?}", output.status.code()));

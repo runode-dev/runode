@@ -138,7 +138,6 @@ pub fn open(
     };
     let mut command = host.exec(&ssh(), &script, true, false);
     command.stderr(Stdio::null());
-    crate::subprocess::hide_window(&mut command);
     let pipes = runode_ssh::process::Pipes { stdin: true, stdout: true, stderr: false };
     let piped = runode_ssh::process::spawn(&mut command, pipes).map_err(|err| format!("cannot run ssh: {err}"))?;
     let (Some(input), Some(output)) = (piped.stdin, piped.stdout) else {

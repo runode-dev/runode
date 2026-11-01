@@ -53,7 +53,6 @@ pub fn stop(host: &RemoteHost, port: u16) -> Result<()> {
     let ssh = ssh();
     let mut command = ssh.forward(&host.dest, local, port, true);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
-    crate::subprocess::hide_window(&mut command);
     let output = command.output()?;
     // 主连接已经退出时转发本来就没了。
     if !output.status.success() && master_alive(&ssh, host) {
@@ -88,7 +87,6 @@ pub fn forward(host: &RemoteHost, port: u16) -> Result<u16> {
         known.into_iter().chain([port]).find(|&local| local >= 1024 && free(local)).map_or_else(any_free, Ok)?;
     let mut command = ssh.forward(&host.dest, local, port, false);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
-    crate::subprocess::hide_window(&mut command);
     let output = command.output()?;
     if !output.status.success() {
         bail!("{}", last_line(&output.stderr, "ssh refused to forward"));
@@ -105,7 +103,6 @@ fn listening(addr: IpAddr, port: u16) -> bool {
 fn master_alive(ssh: &runode_ssh::Ssh, host: &RemoteHost) -> bool {
     let mut check = ssh.check(&host.dest);
     check.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    crate::subprocess::hide_window(&mut check);
     check.status().is_ok_and(|status| status.success())
 }
 

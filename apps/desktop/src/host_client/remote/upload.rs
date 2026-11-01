@@ -111,7 +111,6 @@ fn send(host: &RemoteHost, file: Option<&str>, input: &mut dyn Read) -> Result<S
         Family::Windows => windows::upload_command(&upload_id()),
     };
     let mut command = host.exec(&ssh(), &script, true, false);
-    crate::subprocess::hide_window(&mut command);
     let piped = runode_ssh::process::spawn(&mut command, Pipes { stdin: true, stdout: true, stderr: true })
         .context("cannot run ssh")?;
     let Piped { mut child, stdin, stdout, stderr } = piped;

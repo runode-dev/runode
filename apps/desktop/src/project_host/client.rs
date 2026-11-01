@@ -156,7 +156,6 @@ impl Client {
         };
         let mut command = host.exec(&remote::ssh(), &script, true, false);
         command.stderr(Stdio::null());
-        crate::subprocess::hide_window(&mut command);
         let pipes = runode_ssh::process::Pipes { stdin: true, stdout: true, stderr: false };
         let piped = runode_ssh::process::spawn(&mut command, pipes).map_err(|err| format!("cannot run ssh: {err}"))?;
         let mut child = piped.child;
