@@ -41,7 +41,7 @@ use std::{
 /// 关掉 `core.fsmonitor` 和 `log.showSignature`：仓库自己的配置能把前者、以及校验签名用的
 /// `gpg.*.program` 设成任意命令，进一个别人给的目录不能因此跑了里面的脚本。
 /// 命令行上的 `-c` 压过仓库的配置，也传给 git 自己拉起的 git。其余会执行命令的配置：
-/// `diff.external` 和 textconv 由 `diff_args` 关掉，过滤器见 `filter_overrides`。
+/// `diff.external` 和 textconv 由 `snapshot::DIFF` 关掉，过滤器见 `filter_overrides`。
 pub(crate) fn git_command(dir: &Path) -> Command {
     let mut command = Command::new("git");
     hide_window(&mut command);

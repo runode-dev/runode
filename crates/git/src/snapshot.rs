@@ -211,6 +211,10 @@ pub fn snapshot(dir: &Path, cache: &mut UntrackedCache) -> Option<Snapshot> {
     Some(found.snapshot)
 }
 
+/// 跑 `git diff` 时子命令连同总要加的选项：不调用户配的外部 diff 工具（`diff.external`）和 textconv，
+/// 别人仓库里的配置不能因此跑了任意命令，转出来的文字也不是改动本身；不带颜色码。每处 `git diff` 都从这里开始拼。
+pub(crate) const DIFF: [&str; 4] = ["diff", "--no-ext-diff", "--no-textconv", "--no-color"];
+
 /// 读 `FileDiff` 用的 `git diff` 命令行（不含 `git`），再加上 `extra`。前缀写明，免得用户配置了
 /// `diff.noprefix` 之类改掉 `a/`、`b/`。子模块只在记着的提交号变了时算改动，里面改了文件不算：
 /// 那些改动在子模块自己的那份里，在这里既暂存不了也丢不掉；子模块的改动钉成 `diff --git` 的格式，
@@ -226,12 +230,9 @@ pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
         // 用户配了 `diff.suppressBlankEmpty` 时空的上下文行前面没有空格，`parse_diff` 认不出，后面的行号全错。
         "-c",
         "diff.suppressBlankEmpty=false",
-        "diff",
-        "-M",
-        "--no-color",
-        "--no-ext-diff",
-        "--no-textconv",
     ];
+    args.extend(DIFF);
+    args.push("-M");
     // 上下文钉成三行：仓库配了 `diff.context=0` 时块里没有上下文，`git apply` 不收按块暂存拼出的补丁。
     args.extend([
         "--unified=3",
@@ -471,23 +472,12 @@ fn head_stats(repo: &Path, filters: &[(String, String)], paths: &[&Path]) -> Has
         return HashMap::new();
     }
     let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
-    let mut args: Vec<&OsStr> = [
-        "--literal-pathspecs",
-        "-c",
-        &threshold,
-        "diff",
-        "--numstat",
-        "-z",
-        "--no-renames",
-        "--no-color",
-        "--no-ext-diff",
-        "--no-textconv",
-        "HEAD",
-        "--",
-    ]
-    .into_iter()
-    .map(OsStr::new)
-    .collect();
+    let mut args: Vec<&OsStr> = ["--literal-pathspecs", "-c", &threshold]
+        .into_iter()
+        .chain(DIFF)
+        .chain(["--numstat", "-z", "--no-renames", "HEAD", "--"])
+        .map(OsStr::new)
+        .collect();
     args.extend(paths.iter().map(|path| path.as_os_str()));
     let Some(out) = git_with(repo, filters, &args) else {
         return HashMap::new();
