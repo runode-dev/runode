@@ -590,6 +590,7 @@ settings:
     ui_font_size: Interface font size
     status_bar: Status bar
     status_bar_hidden: Hidden in the status bar
+    prevent_sleep: Prevent sleep
     file_tree_preview_click: Open files in the preview with
     preview_font_size: Preview font size
     task_placement: Run tasks in
@@ -661,6 +662,7 @@ settings:
     ui_font_size: In points, 11 to 20. All text scales with it except the terminal and the body of the preview pane.
     status_bar: Shows sleep prevention, memory and ports at the bottom of the window.
     status_bar_hidden: "The parts left out of the status bar. You can also right-click the status bar."
+    prevent_sleep: "With Agent, only while an agent is working. You can also switch it from the coffee cup in the status bar."
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.
     task_placement: Where a task picked from the title bar's task menu runs.
@@ -741,6 +743,10 @@ settings:
     shell_integration_features:
       cursor: Bar
       no-cursor: Follow cursor shape
+    prevent_sleep:
+      "on": "On"
+      agent: Agent
+      "off": "Off"
     file_tree_preview_click:
       single: Single click
       double: Double click

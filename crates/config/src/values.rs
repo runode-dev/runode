@@ -32,6 +32,7 @@ impl Config {
             "ui-font-size" => vec![self.ui_font_size.to_string()],
             "status-bar" => bool(self.status_bar),
             "status-bar-hidden" => self.status_bar_hidden.iter().map(|item| item.name().to_owned()).collect(),
+            "prevent-sleep" => vec![self.prevent_sleep.name().into()],
             "window-style" => vec![
                 match self.window_style {
                     WindowStyle::Cards => "cards",
@@ -191,7 +192,7 @@ mod tests {
              cursor-style-blink-timeout = 0\nmacos-option-as-alt = left\nshell-integration = fish\n\
              shell-integration-features = no-cursor\n\
              agent-notifications-exclude = codex,claude\nagent-done-sound = none\nlanguage = en\n\
-             file-tree-preview-click = double\npalette = 3=#010203\nremote-access = true\n\
+             file-tree-preview-click = double\nprevent-sleep = agent\npalette = 3=#010203\nremote-access = true\n\
              remote-access-push = false\nremote-access-push-delay = 30\napns-key-file = ~/AuthKey_X.p8\n\
              apns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\n\
              clipboard-write = deny\nclipboard-read = allow"]);

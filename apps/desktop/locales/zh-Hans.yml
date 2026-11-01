@@ -590,6 +590,7 @@ settings:
     ui_font_size: 界面字号
     status_bar: 状态栏
     status_bar_hidden: 状态栏上隐藏
+    prevent_sleep: 防止电脑睡眠
     file_tree_preview_click: 在预览栏打开文件
     preview_font_size: 预览栏字号
     task_placement: 跑命令
@@ -661,6 +662,7 @@ settings:
     ui_font_size: 单位是点，11 到 20。除了终端和预览栏的正文，界面上的字都按它等比缩放。
     status_bar: "窗口底部显示防止睡眠、内存和端口。"
     status_bar_hidden: 选中的几块不在状态栏上显示。也可以在状态栏上右键勾选。
+    prevent_sleep: "选「Agent」时有 agent 在干活才防止。也可以点状态栏上的咖啡杯切换。"
     file_tree_preview_click: 单击开成临时标签页，打开别的文件时被换掉；双击固定下来。
     preview_font_size: 单位是点。
     task_placement: 标题栏命令菜单里点了一条命令时，在哪开终端跑它。
@@ -741,6 +743,10 @@ settings:
     shell_integration_features:
       cursor: 竖线
       no-cursor: 跟随光标形状
+    prevent_sleep:
+      "on": 开启
+      agent: Agent
+      "off": 关闭
     file_tree_preview_click:
       single: 单击
       double: 双击

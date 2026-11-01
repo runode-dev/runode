@@ -46,6 +46,27 @@ pub enum WindowStyle {
     Classic,
 }
 
+/// 什么时候防止电脑睡眠。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PreventSleep {
+    /// 一直防止。
+    On,
+    /// 有 agent 在干活时。
+    Agent,
+    #[default]
+    Off,
+}
+
+impl PreventSleep {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Agent => "agent",
+            Self::Off => "off",
+        }
+    }
+}
+
 /// 窗口底部状态栏上的一块，`status-bar-hidden` 里写它的名字（`name`）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusItem {
@@ -90,6 +111,7 @@ pub struct Config {
     pub status_bar: bool,
     /// 状态栏上不显示的几块。
     pub status_bar_hidden: Vec<StatusItem>,
+    pub prevent_sleep: PreventSleep,
     pub file_tree_preview_click: PreviewClick,
     /// 预览栏的字号。
     pub preview_font_size: f32,
@@ -223,6 +245,7 @@ impl Default for Config {
             ui_font_size: 12.,
             status_bar: true,
             status_bar_hidden: Vec::new(),
+            prevent_sleep: PreventSleep::Off,
             file_tree_preview_click: PreviewClick::Single,
             preview_font_size: 13.,
             task_placement: TaskPlacement::Right,

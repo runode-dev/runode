@@ -1,6 +1,6 @@
 //! 窗口底部的状态栏，右边四块，点了在上面弹出各自的浮层：
 //!
-//! - 防止休眠：开启、agent 在干活时、关闭三种（`SleepMode`），要挡时拿着一个 `probe::Caffeinate`；
+//! - 防止休眠：开启、agent 在干活时、关闭三种，记在配置的 `prevent-sleep` 里，要挡时拿着一个 `probe::Caffeinate`；
 //! - 内存和终端数：runode 自己（app、单独跑的宿主和各个终端里的进程）一共占多少内存，所有窗口里有
 //!   几个终端；浮层里按 workspace 列出这个窗口里各终端的 CPU 和内存；
 //! - 端口：终端里跑的程序在监听几个 TCP 端口；浮层里列出来，点了在浏览器里打开，别的程序监听的收在
@@ -34,7 +34,7 @@ use gpui::{
     MouseDownEvent, Pixels, Point, PromptLevel, Role, SharedString, Stateful, Window, WindowHandle, anchored, deferred,
     div, point, prelude::*, px, svg,
 };
-use runode_config::{ConfigFile, StatusItem};
+use runode_config::{ConfigFile, PreventSleep, StatusItem};
 use runode_types::{
     agent::{AgentKind, AgentState},
     color::Rgb,
@@ -104,16 +104,6 @@ pub(crate) fn item_icon_and_title(item: StatusItem) -> (&'static str, String) {
     (icon, rust_i18n::t!(key).into_owned())
 }
 
-/// 什么时候防止电脑休眠。不存档，每次启动都是关闭。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum SleepMode {
-    On,
-    /// 有 agent 在干活时。
-    Agent,
-    #[default]
-    Off,
-}
-
 /// 状态栏上开着的浮层；端口的浮层记着「外部端口」展开没有。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum StatusPopover {
@@ -155,7 +145,8 @@ struct Status {
     terminals: usize,
     /// 有 agent 在干活。
     working: bool,
-    sleep: SleepMode,
+    /// 照着拿放 `caffeinate` 的模式，从配置同步过来（`sync_sleep`）。
+    sleep: PreventSleep,
     caffeinate: Option<Caffeinate>,
     /// 拉不起防休眠的命令，已经记过日志。
     sleep_failed: bool,
@@ -202,9 +193,9 @@ impl Status {
             }
         }
         let want = match self.sleep {
-            SleepMode::On => true,
-            SleepMode::Agent => self.working,
-            SleepMode::Off => false,
+            PreventSleep::On => true,
+            PreventSleep::Agent => self.working,
+            PreventSleep::Off => false,
         };
         if want && self.caffeinate.is_none() && !self.sleep_refused {
             match Caffeinate::start() {
@@ -231,6 +222,8 @@ impl Status {
 /// 开始定时更新状态栏的数据，app 启动时调一次。
 pub fn watch(cx: &mut App) {
     cx.default_global::<Status>();
+    sync_sleep(cx);
+    cx.observe_global::<AppConfig>(sync_sleep).detach();
     cx.spawn(async move |cx| {
         let mut ports_probed: Option<Instant> = None;
         loop {
@@ -429,12 +422,24 @@ fn tell_forward_failed(detail: &str, cx: &mut App) {
         front.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(detail), &[ok.as_ref()], cx));
 }
 
-fn set_sleep(mode: SleepMode, cx: &mut App) {
+/// 改写配置文件的 `prevent-sleep`，重载的配置经 `sync_sleep` 生效。
+fn set_sleep(mode: PreventSleep, cx: &mut App) {
+    if let Err(err) = crate::config::set("prevent-sleep", mode.name(), cx) {
+        tracing::warn!("could not write prevent-sleep: {err}");
+    }
+}
+
+/// 配置的 `prevent-sleep` 变了就照新的模式拿起或放下 `Caffeinate`。
+fn sync_sleep(cx: &mut App) {
+    let mode = cx.global::<AppConfig>().0.prevent_sleep;
     let status = cx.default_global::<Status>();
+    if status.sleep == mode {
+        return;
+    }
     status.sleep = mode;
     status.sleep_refused = false;
     status.apply_sleep();
-    cx.refresh_windows();
+    redraw_status_bars(cx);
 }
 
 /// 内存写成「875.4 MB」「1.25 GB」。
@@ -468,7 +473,7 @@ impl WindowView {
                 status.ports.iter().filter(|port| status.port_owner(port).is_some()).count()
                     + host.and_then(|name| status.remote_ports.get(name)).map_or(0, Vec::len),
             ),
-            None => (SleepMode::Off, false, Usage::default(), 0, 0),
+            None => (PreventSleep::Off, false, Usage::default(), 0, 0),
         };
         let icon = |path: &'static str| svg().flex_none().path(path).size(px(13.)).text_color(fg_h.opacity(0.6));
         let dot = div().flex_none().size(px(6.)).rounded_full().bg(if effective {
@@ -703,7 +708,7 @@ impl WindowView {
         let fg_h = cx.theme().foreground;
         let (current, effective) = cx
             .try_global::<Status>()
-            .map_or((SleepMode::Off, false), |status| (status.sleep, status.caffeinate.is_some()));
+            .map_or((PreventSleep::Off, false), |status| (status.sleep, status.caffeinate.is_some()));
         let state =
             if effective { rust_i18n::t!("status.sleep_active") } else { rust_i18n::t!("status.sleep_inactive") };
         // 先画好标题：下面各项的闭包要借着 `cx`。
@@ -715,9 +720,9 @@ impl WindowView {
             cx,
         );
         let options = [
-            (SleepMode::On, "status.sleep_on_detail"),
-            (SleepMode::Agent, "status.sleep_agent_detail"),
-            (SleepMode::Off, "status.sleep_off_detail"),
+            (PreventSleep::On, "status.sleep_on_detail"),
+            (PreventSleep::Agent, "status.sleep_agent_detail"),
+            (PreventSleep::Off, "status.sleep_off_detail"),
         ]
         .into_iter()
         .enumerate()
@@ -761,6 +766,7 @@ impl WindowView {
                 )
                 .on_press_down(cx, move |this, _, cx| {
                     this.status_popover = None;
+                    cx.notify();
                     set_sleep(mode, cx);
                 })
         });
@@ -1107,11 +1113,11 @@ impl WindowView {
     }
 }
 
-fn sleep_label(mode: SleepMode) -> String {
+fn sleep_label(mode: PreventSleep) -> String {
     let key = match mode {
-        SleepMode::On => "status.sleep_on",
-        SleepMode::Agent => "status.sleep_agent",
-        SleepMode::Off => "status.sleep_off",
+        PreventSleep::On => "status.sleep_on",
+        PreventSleep::Agent => "status.sleep_agent",
+        PreventSleep::Off => "status.sleep_off",
     };
     rust_i18n::t!(key).into_owned()
 }

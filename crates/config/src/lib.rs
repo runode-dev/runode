@@ -18,7 +18,7 @@ mod theme;
 mod values;
 
 pub use edit::{ConfigFile, check_value};
-pub use model::{CellHeight, Config, Keybind, PreviewClick, StatusItem, TaskPlacement, WindowStyle};
+pub use model::{CellHeight, Config, Keybind, PreventSleep, PreviewClick, StatusItem, TaskPlacement, WindowStyle};
 pub use parse::{KEYS, config_path, theme_config};
 pub use template::create_config_file;
 pub use theme::{DEFAULT_THEME, theme_names};

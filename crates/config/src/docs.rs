@@ -40,6 +40,9 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "status-bar-hidden" => {
             "Parts of the status bar at the bottom of the window to hide: sleep (prevent sleep), resources (memory and terminals), ports, hosts (SSH hosts, shown once one is connected); separated by commas, can be repeated, empty shows them all. Right-click the status bar to pick them."
         }
+        "prevent-sleep" => {
+            "When to keep this computer from going to sleep: off (default), agent (while an agent is working) or on (always). Pick it from the status bar too."
+        }
         "file-tree-preview-click" => {
             "How to open a file from the file tree in the preview pane: single (default) or double. With single, a click opens a temporary tab that the next opened file replaces, and a double-click keeps it open. With double, a double-click opens a tab that stays."
         }

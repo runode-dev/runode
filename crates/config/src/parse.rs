@@ -16,7 +16,7 @@ use runode_types::{
 };
 
 use crate::{
-    CellHeight, Config, PreviewClick, StatusItem, TaskPlacement, WindowStyle, color,
+    CellHeight, Config, PreventSleep, PreviewClick, StatusItem, TaskPlacement, WindowStyle, color,
     theme::{Theme, find_theme, pick_theme},
 };
 
@@ -37,6 +37,7 @@ pub const KEYS: &[&[&str]] = &[
         "status-bar",
         "status-bar-hidden",
     ],
+    &["prevent-sleep"],
     &["file-tree-preview-click", "preview-font-size"],
     &["task-placement", "task-split-fold"],
     &["git-auto-fetch"],
@@ -242,6 +243,14 @@ impl Config {
                         }
                     }
                 }
+            }
+            "prevent-sleep" => {
+                self.prevent_sleep = match value {
+                    "on" => PreventSleep::On,
+                    "agent" => PreventSleep::Agent,
+                    "" | "off" => PreventSleep::Off,
+                    _ => return Err("expected on, agent or off".into()),
+                };
             }
             "ui-font-size" => {
                 self.ui_font_size = or_default(empty, defaults.ui_font_size, || parse_positive(value))?;
@@ -1037,6 +1046,14 @@ unknown-key = whatever
         assert_eq!(load(&["window-style = classic\nwindow-style ="]).window_style, WindowStyle::Cards);
         // 认不出的值跳过，保留前面的值。
         assert_eq!(load(&["window-style = classic\nwindow-style = glass"]).window_style, WindowStyle::Classic);
+    }
+
+    #[test]
+    fn prevent_sleep_defaults_to_off() {
+        assert_eq!(Config::default().prevent_sleep, PreventSleep::Off);
+        assert_eq!(load(&["prevent-sleep = agent"]).prevent_sleep, PreventSleep::Agent);
+        assert_eq!(load(&["prevent-sleep = on\nprevent-sleep ="]).prevent_sleep, PreventSleep::Off);
+        assert_eq!(load(&["prevent-sleep = on\nprevent-sleep = sometimes"]).prevent_sleep, PreventSleep::On);
     }
 
     #[test]

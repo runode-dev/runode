@@ -134,6 +134,7 @@ impl Page {
                 Row("language", Language),
                 Row("terminal-host", Switch),
                 Row("auto-update", Switch),
+                Row("prevent-sleep", Choice(&["on", "agent", "off"])),
                 Section("login"),
                 Autostart,
                 Section("config_file"),

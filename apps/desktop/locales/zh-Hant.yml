@@ -590,6 +590,7 @@ settings:
     ui_font_size: 介面字級
     status_bar: 狀態列
     status_bar_hidden: 狀態列上隱藏
+    prevent_sleep: 防止電腦睡眠
     file_tree_preview_click: 在預覽欄打開檔案
     preview_font_size: 預覽欄字級
     task_placement: 執行命令
@@ -661,6 +662,7 @@ settings:
     ui_font_size: 單位是點，11 到 20。除了終端和預覽欄的內文，介面上的字都按它等比縮放。
     status_bar: 視窗底部顯示防止睡眠、記憶體和連接埠。
     status_bar_hidden: 選中的幾塊不在狀態列上顯示。也可以在狀態列上按右鍵勾選。
+    prevent_sleep: "選「Agent」時有 agent 在幹活才防止。也可以點狀態列上的咖啡杯切換。"
     file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
     preview_font_size: 單位是點。
     task_placement: 標題列命令選單裡點了一條命令時，在哪開終端執行它。
@@ -741,6 +743,10 @@ settings:
     shell_integration_features:
       cursor: 直線
       no-cursor: 跟隨游標形狀
+    prevent_sleep:
+      "on": 開啟
+      agent: Agent
+      "off": 關閉
     file_tree_preview_click:
       single: 單擊
       double: 雙擊
