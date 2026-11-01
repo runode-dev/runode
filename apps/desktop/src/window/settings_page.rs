@@ -65,13 +65,23 @@ impl WindowView {
         }
     }
 
-    /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板开着新建任务那一页以外的对话框时不理。
+    /// 盖在窗口上的模态对话框（新建工作区、SSH 的提问、加命令、写提交说明）开着：焦点在对话框里时
+    /// 窗口的快捷键照样冒泡上来，这时不办，免得焦点换走、对话框却还开着，或者两个对话框叠在一起。
+    pub(super) fn modal_dialog_open(&self) -> bool {
+        self.new_workspace.is_some()
+            || !self.asks.is_empty()
+            || self.add_task.is_some()
+            || self.commit_message_dialog.is_some()
+    }
+
+    /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板开着新建任务那一页以外的对话框，或者
+    /// `modal_dialog_open` 时不理。
     pub(super) fn act<A: Action>(
         cx: &mut Context<Self>,
         f: fn(&mut Self, &A, &mut Window, &mut Context<Self>),
     ) -> impl Fn(&A, &mut Window, &mut App) + 'static {
         cx.listener(move |this, action, window, cx| {
-            if this.dialog_open(cx) && !this.drafting(cx) {
+            if (this.dialog_open(cx) && !this.drafting(cx)) || this.modal_dialog_open() {
                 return;
             }
             this.close_settings(window, cx);
