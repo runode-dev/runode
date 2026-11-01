@@ -318,75 +318,12 @@ public actor HostConnection: HostLink {
         var keepAwake: Bool
     }
 
-    /// Bonjour 找到的地址、记着的地址（上次成功的、二维码里的，按顺序试）和跨网络的 iroh 同时连，谁先过
-    /// 门禁用谁：组播不通的 Wi-Fi 上 Bonjour 要等满超时，记着的地址不跟着等；iroh 晚 `tunnelDelay` 才拨，
-    /// 在同一个局域网里时直连先到。晚到的那条也连上了就关掉。不能重试的失败直接报；都失败时报先到的那个
-    /// 不是「没有地址」的错，有限速的拒绝时报它。
+    /// 经 `dial` 连上这台电脑，在连上的那条连接上走门禁、`Hello` 和 `Welcome`。
     private func establish() async throws -> Session {
-        guard let key = try keyStore.key(for: machine.id) else { throw LinkFailure.missingKey }
-        let discovery = discovery
-        let fingerprint = machine.fingerprint
-        let fallback = machine.fallbackTargets
-        let node = machine.node
-        let open = open
-        let tunnel = tunnel
-        return try await withThrowingTaskGroup(of: Session.self) { group in
-            group.addTask {
-                try await firstSuccess(of: fallback) { target in
-                    try await self.handshake(key: key) { try await open(target, fingerprint) }
-                }
-            }
-            group.addTask {
-                guard let found = await discovery.locate(fingerprint, timeout: .seconds(2)) else {
-                    throw LinkFailure.noAddress
-                }
-                return try await self.handshake(key: key) { try await open(found, fingerprint) }
-            }
-            if let node {
-                group.addTask {
-                    try await Task.sleep(for: tunnelDelay)
-                    return try await self.handshake(key: key) { try await tunnel(node, fingerprint) }
-                }
-            }
-            var winner: Session?
-            var failure: (any Error)?
-            var fatal: LinkFailure?
-            // 有了结果也把另一条等完：它可能已经连上了，要关掉，不能留着一条没人读的连接。
-            while let result = await group.nextResult() {
-                switch result {
-                case .success(let session) where winner == nil && fatal == nil:
-                    winner = session
-                    group.cancelAll()
-                case .success(let session):
-                    session.transport.close()
-                case .failure(let error as LinkFailure) where error.isFatal && winner == nil:
-                    fatal = fatal ?? error
-                    group.cancelAll()
-                case .failure(let error):
-                    // 限速的拒绝要传上去，`run` 才会等最长的退避。
-                    if failure == nil || (failure as? LinkFailure) == .noAddress
-                        || (error as? LinkFailure) == .rejected(.rateLimited)
-                    {
-                        failure = error
-                    }
-                }
-            }
-            if let fatal { throw fatal }
-            if let winner { return winner }
-            throw failure ?? LinkFailure.noAddress
-        }
-    }
-
-    private func handshake(
-        key: StoredDeviceKey, connect: @Sendable () async throws -> any FrameTransport
-    ) async throws -> Session {
-        let transport = try await connect()
-        // 握手中途 `stop`：超时任务跟着取消、不会关连接，卡着的读不响应取消，这里关掉连接让它报错。
-        return try await withTaskCancellationHandler {
-            try await admit(over: transport, key: key)
-        } onCancel: {
-            transport.close()
-        }
+        try await dial(
+            machine, keyStore: keyStore, discovery: discovery, open: open, tunnel: tunnel,
+            handshake: { transport, key in try await self.admit(over: transport, key: key) },
+            close: { $0.transport.close() })
     }
 
     /// 在开好的连接上走门禁、`Hello` 和 `Welcome`。
