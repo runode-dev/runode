@@ -155,6 +155,9 @@ public enum ScreenHostMsg: Hashable, Sendable, Decodable {
     case stopped(reason: String)
     /// 电脑锁没锁屏：`ready` 之后马上报一次，之后变了再报。
     case lock(locked: Bool)
+    /// 用户在电脑上打开或关掉了输入授权，`postEvent` 的含义和 `ready` 里的一样。`screenCapture` 是 `ready` 时的值，
+    /// 屏幕录制的授权要重新连接才认。
+    case permissions(screenCapture: Bool, postEvent: Bool)
     /// `unlock` 没敲成（有美式键盘打不出的字符），`reason` 给日志看。
     case unlockFailed(reason: String)
     /// 这个 app 不认识的消息，忽略。
@@ -184,6 +187,10 @@ public enum ScreenHostMsg: Hashable, Sendable, Decodable {
             self = .stopped(reason: try c.decode(String.self, forKey: .reason))
         case "lock":
             self = .lock(locked: try c.decode(Bool.self, forKey: .locked))
+        case "permissions":
+            self = .permissions(
+                screenCapture: try c.decode(Bool.self, forKey: .screenCapture),
+                postEvent: try c.decode(Bool.self, forKey: .postEvent))
         case "unlock_failed":
             self = .unlockFailed(reason: try c.decode(String.self, forKey: .reason))
         default:

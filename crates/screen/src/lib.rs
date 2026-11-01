@@ -243,25 +243,53 @@ pub fn screen_locked() -> bool {
 pub struct Permissions {
     /// 「屏幕录制」，`Capture` 要它。
     pub screen_capture: bool,
-    /// 「辅助功能」，`Injector` 要它。
+    /// 「辅助功能」或「发送事件」，`Injector` 要其中一项。
     pub post_event: bool,
 }
 
 #[cfg(target_os = "macos")]
 pub fn permissions() -> Permissions {
     use objc2_core_graphics::{CGPreflightPostEventAccess, CGPreflightScreenCaptureAccess};
-    Permissions { screen_capture: CGPreflightScreenCaptureAccess(), post_event: CGPreflightPostEventAccess() }
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXIsProcessTrusted() -> u8;
+    }
+
+    // 「辅助功能」和「发送事件」（`CGRequestPostEventAccess` 要的）是 TCC 里的两项，有哪项都能注入键鼠。
+    // `AXIsProcessTrusted` 每次现查，`CGPreflightPostEventAccess` 在进程里缓存结果、用户改了开关也不更新。
+    // SAFETY: 无参数，只读系统的授权状态。
+    let post_event = unsafe { AXIsProcessTrusted() } != 0 || CGPreflightPostEventAccess();
+    Permissions { screen_capture: CGPreflightScreenCaptureAccess(), post_event }
 }
 
 /// 没拿到的授权各请求一次，返回请求后的状态：第一次请求时系统弹框，之后只能用户到系统设置里开。
+/// 「辅助功能」用带提示的 `AXIsProcessTrustedWithOptions` 请求，它弹的对话框带「打开系统设置」，也会把程序
+/// 列进辅助功能的列表；`CGRequestPostEventAccess` 在新系统上不弹框，只记一条被拒的授权。
+/// `AXIsProcessTrustedWithOptions` 每调一次都弹框，一个进程里只带提示调一次。
 #[cfg(target_os = "macos")]
 pub fn request_permissions() -> Permissions {
-    use objc2_core_graphics::{CGRequestPostEventAccess, CGRequestScreenCaptureAccess};
-    let now = permissions();
-    Permissions {
-        screen_capture: now.screen_capture || CGRequestScreenCaptureAccess(),
-        post_event: now.post_event || CGRequestPostEventAccess(),
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use objc2_core_foundation::{CFBoolean, CFDictionary, CFString, CFType};
+    use objc2_core_graphics::CGRequestScreenCaptureAccess;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: &CFDictionary) -> u8;
     }
+
+    static PROMPTED: AtomicBool = AtomicBool::new(false);
+    let now = permissions();
+    let post_event = now.post_event
+        || (!PROMPTED.swap(true, Ordering::Relaxed) && {
+            let key = CFString::from_static_str("AXTrustedCheckOptionPrompt");
+            let value: &CFType = CFBoolean::new(true);
+            let options = CFDictionary::<CFString, CFType>::from_slices(&[&*key], &[value]);
+            // SAFETY: 选项字典的键值是这个函数认的类型。
+            unsafe { AXIsProcessTrustedWithOptions(options.as_opaque()) != 0 }
+        });
+    Permissions { screen_capture: now.screen_capture || CGRequestScreenCaptureAccess(), post_event }
 }
 
 /// Windows 上采集和注入都不用授权。

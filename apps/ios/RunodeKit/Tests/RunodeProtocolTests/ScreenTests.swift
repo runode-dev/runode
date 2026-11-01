@@ -54,6 +54,7 @@ enum ScreenSamples {
         #expect(try read("started.json") == .started(display: 2, width: 2556, height: 1652))
         #expect(try read("stopped.json") == .stopped(reason: "display unplugged"))
         #expect(try read("lock.json") == .lock(locked: true))
+        #expect(try read("permissions.json") == .permissions(screenCapture: true, postEvent: true))
         #expect(
             try read("unlock_failed.json") == .unlockFailed(reason: "the password has keys a US keyboard cannot type"))
     }

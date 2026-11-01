@@ -119,6 +119,7 @@ fn host_messages_match_the_fixtures() {
     let reason = "nobody is signed in on this computer's screen".into();
     matches("stopped_signed_out.json", &ScreenHostMsg::Stopped { reason, signed_out: true });
     matches("lock.json", &ScreenHostMsg::Lock { locked: true });
+    matches("permissions.json", &ScreenHostMsg::Permissions { screen_capture: true, post_event: true });
     let reason = "the password has keys a US keyboard cannot type".into();
     matches("unlock_failed.json", &ScreenHostMsg::UnlockFailed { reason });
     let modes = vec![

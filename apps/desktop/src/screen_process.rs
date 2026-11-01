@@ -213,7 +213,7 @@ fn connection(stream: UnixStream) -> io::Result<()> {
         post_event: permissions.post_event,
         datagram: true,
     });
-    let _watch = watch_lock(&outbox);
+    let _watch = watch(&outbox, permissions);
     let mut injector = Injector::new(displays[0].id);
     let mut capture: Option<Capture> = None;
     while let Some(message) = read_message(&mut reader)? {
@@ -421,12 +421,12 @@ fn restore_left(dirs: &runode_paths::Dirs, owner: Option<u32>) {
     let _ = std::fs::remove_file(&path);
 }
 
-/// 隔多久看一次锁没锁屏。
+/// 隔多久看一次锁没锁屏和输入授权。
 const LOCK_POLL: Duration = Duration::from_secs(1);
 /// 敲密码时两个键之间隔这么久，登录窗口来得及一个个收下。
 const KEYSTROKE_GAP: Duration = Duration::from_millis(15);
 
-/// 丢掉时停下 `watch_lock` 的线程。
+/// 丢掉时停下 `watch` 的线程。
 struct StopFlag(Arc<AtomicBool>);
 
 impl Drop for StopFlag {
@@ -435,23 +435,30 @@ impl Drop for StopFlag {
     }
 }
 
-/// 一个线程每 `LOCK_POLL` 看一次锁没锁屏，先报一次，之后变了再报。
-fn watch_lock(outbox: &Outbox) -> StopFlag {
+/// 一个线程每 `LOCK_POLL` 看一次锁没锁屏和输入授权：锁屏先报一次，之后变了再报；用户在电脑上打开或关掉了
+/// 输入授权时报一次，观看端不用重连。`permissions` 是 `Ready` 里报的。
+fn watch(outbox: &Outbox, permissions: runode_screen::Permissions) -> StopFlag {
     let stop = Arc::new(AtomicBool::new(false));
     let (outbox, stopped) = (outbox.clone(), stop.clone());
-    let spawned = thread::Builder::new().name("screen-lock".into()).spawn(move || {
-        let mut last = None;
+    let spawned = thread::Builder::new().name("screen-watch".into()).spawn(move || {
+        let mut locked_before = None;
+        let mut post_event_before = permissions.post_event;
         while !stopped.load(Ordering::Relaxed) {
             let locked = runode_screen::screen_locked();
-            if last != Some(locked) {
+            if locked_before != Some(locked) {
                 outbox.control(&ScreenHostMsg::Lock { locked });
-                last = Some(locked);
+                locked_before = Some(locked);
+            }
+            let post_event = runode_screen::permissions().post_event;
+            if post_event != post_event_before {
+                outbox.control(&ScreenHostMsg::Permissions { screen_capture: permissions.screen_capture, post_event });
+                post_event_before = post_event;
             }
             thread::sleep(LOCK_POLL);
         }
     });
     if let Err(err) = spawned {
-        tracing::warn!("cannot watch the screen lock: {err}");
+        tracing::warn!("cannot watch the screen lock and the input permission: {err}");
     }
     StopFlag(stop)
 }

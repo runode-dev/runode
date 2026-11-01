@@ -127,6 +127,9 @@ pub enum ScreenHostMsg {
     },
     /// 电脑锁没锁屏：`Ready` 之后马上报一次，之后变了再报。
     Lock { locked: bool },
+    /// 用户在电脑上打开或关掉了输入授权：不用重连就能操作，关掉后操作不了；`post_event` 的含义和 `Ready`
+    /// 里的一样。`screen_capture` 是 `Ready` 时的值，屏幕录制的授权要重新连接才认。
+    Permissions { screen_capture: bool, post_event: bool },
     /// `Unlock` 没敲成，带原因（给日志看）。
     UnlockFailed { reason: String },
     /// 回 `SetMode`：现在的各块屏幕，和 `Ready` 里的一样。这条连接的采集已经停了，要按新的尺寸再发 `Start`。

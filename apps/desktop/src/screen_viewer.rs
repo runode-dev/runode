@@ -634,6 +634,13 @@ impl ScreenViewer {
                 });
                 self.drop_picture();
             }
+            UiEvent::Message(ScreenHostMsg::Permissions { screen_capture, post_event }) => {
+                if let Some(remote) = &mut self.remote {
+                    remote.screen_capture = screen_capture;
+                    remote.post_event = post_event;
+                }
+                cx.notify();
+            }
             UiEvent::Message(ScreenHostMsg::Lock { locked }) => {
                 // 刚锁上屏时密码框拿焦点（焦点在这一页上时），直接就能敲密码；记着密码时先拿它解锁。
                 if locked && !self.locked && self.types_password() {

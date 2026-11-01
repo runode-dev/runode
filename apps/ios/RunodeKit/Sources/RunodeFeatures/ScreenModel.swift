@@ -133,6 +133,8 @@ public final class ScreenModel {
             phase = .live
         case .message(.stopped(let reason)):
             phase = .failed(reason)
+        case .message(.permissions(let screenCapture, let postEvent)):
+            missingPermissions = Self.missing(screenCapture: screenCapture, postEvent: postEvent)
         case .message(.lock(let isLocked)):
             locked = isLocked
             if !isLocked {
