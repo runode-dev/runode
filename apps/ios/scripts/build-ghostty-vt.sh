@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 从仓库里的 vendor/ghostty 子模块编出 libghostty-vt 的 xcframework，放到 apps/ios/Frameworks/。
+# 从仓库里的 vendor/ghostty 子模块编出 libghostty-vt 的 xcframework，放到 apps/ios/Frameworks/；它的头文件和
+# module map 放到 RunodeKit/Sources/GhosttyVt/include/。
 #
 # 走 ghostty 自己的 -Demit-xcframework=true：它在 macOS 上按各个 Apple 平台分别配置目标、
 # 编出静态库再用 xcodebuild 打包，iOS 切片（ios-arm64、ios-arm64-simulator）只在检测到 iOS SDK
@@ -62,15 +63,17 @@ for slice in ios-arm64 ios-arm64-simulator; do
   fi
 done
 
+# Xcode 链静态库的 xcframework 时把各家的 Headers 都拷进同一个 include 目录，iroh 的 module map 在那里的
+# 根上、umbrella 管着整个目录，ghostty 的头文件进去就招来一串 incomplete-umbrella 警告。所以 xcframework
+# 只装库，头文件和 module map 放进 RunodeKit 里只有头文件的 C target（SwiftPM 要它在包目录里），由它把
+# include 目录交给依赖它的 target；各切片的头文件相同，取一份。
+headers_dir="$ios_dir/RunodeKit/Sources/GhosttyVt/include"
 mkdir -p "$out_dir"
-rm -rf "$out_dir/ghostty-vt.xcframework"
-cp -R "$xcframework" "$out_dir/ghostty-vt.xcframework"
-# 静态库的 xcframework 链进来时各自的 Headers 都拷进同一个 include 目录，iroh 的 xcframework 根上也有
-# module.modulemap，两份撞在一起编不过；挪进以模块名命名的子目录，clang 照样找得到。
-for headers in "$out_dir"/ghostty-vt.xcframework/*/Headers; do
-  mkdir -p "$headers/GhosttyVt"
-  sed 's|umbrella header "ghostty/vt.h"|umbrella header "../ghostty/vt.h"|' "$headers/module.modulemap" \
-    >"$headers/GhosttyVt/module.modulemap"
-  rm "$headers/module.modulemap"
+rm -rf "$out_dir/ghostty-vt.xcframework" "$headers_dir"
+cp -R "$xcframework/ios-arm64/Headers" "$headers_dir"
+libraries=()
+for lib in "$xcframework"/*/*.a; do
+  libraries+=(-library "$lib")
 done
-echo "已生成 $out_dir/ghostty-vt.xcframework（ghostty $(git -C "$ghostty_dir" rev-parse --short HEAD)，${optimize}）"
+xcodebuild -create-xcframework "${libraries[@]}" -output "$out_dir/ghostty-vt.xcframework" >/dev/null
+echo "已生成 $out_dir/ghostty-vt.xcframework 和 ${headers_dir}（ghostty $(git -C "$ghostty_dir" rev-parse --short HEAD)，${optimize}）"

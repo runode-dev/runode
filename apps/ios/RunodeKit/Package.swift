@@ -25,8 +25,10 @@ let package = Package(
         .package(url: "https://github.com/n0-computer/iroh-ffi", exact: "1.1.0")
     ],
     targets: [
-        // libghostty-vt 的 xcframework，由 iOS 端自带的构建脚本从 ghostty 子模块编出来，不进 git。
-        .binaryTarget(name: "GhosttyVt", path: "../Frameworks/ghostty-vt.xcframework"),
+        // libghostty-vt：GhosttyVtLib 是只装库的 xcframework，GhosttyVt 只交出头文件和 module map，都由 iOS 端
+        // 自带的构建脚本从 ghostty 子模块编出来，不进 git。
+        .binaryTarget(name: "GhosttyVtLib", path: "../Frameworks/ghostty-vt.xcframework"),
+        .target(name: "GhosttyVt"),
         // sherpa-onnx 和它用的 onnxruntime 的 iOS 静态 xcframework，和 sherpa-onnx 官方 SwiftPM 包里的是同一份；
         // 直接按地址取，不用把将近 1 GB 的 sherpa-onnx 仓库整个克隆下来。升级时两个一起换，版本要和官方包
         // 里配的一致。
@@ -50,7 +52,7 @@ let package = Package(
         ),
         .target(
             name: "RunodeTerminal",
-            dependencies: ["RunodeProtocol", "GhosttyVt"],
+            dependencies: ["RunodeProtocol", "GhosttyVt", "GhosttyVtLib"],
             // Nerd Fonts 的 Symbols Only 字体和它的许可文件；libghostty-vt 和编进它的 simdutf、highway、uucode
             // 的许可随 app 分发，界面上不显示。highway 是 Apache-2.0 和 BSD-3 二选一，取 BSD-3。
             resources: [.copy("Resources/NerdFontsSymbolsOnly"), .copy("Resources/Licenses")],

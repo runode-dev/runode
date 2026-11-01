@@ -12,7 +12,7 @@ ios_dir="$(cd "$script_dir/.." && pwd)"
 derived="$ios_dir/build/dd"
 bundle_id=dev.runode.mobile
 
-if [[ ! -d "$ios_dir/Frameworks/ghostty-vt.xcframework" ]]; then
+if [[ ! -d "$ios_dir/Frameworks/ghostty-vt.xcframework" || ! -d "$ios_dir/RunodeKit/Sources/GhosttyVt/include" ]]; then
   "$script_dir/build-ghostty-vt.sh"
 fi
 
