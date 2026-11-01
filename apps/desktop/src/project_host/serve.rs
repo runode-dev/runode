@@ -109,6 +109,13 @@ pub(super) fn kind(path: &std::path::Path) -> Option<bool> {
     std::fs::metadata(path).ok().map(|meta| meta.is_dir())
 }
 
+/// `dir` 所在仓库的当前分支和 `origin` 的地址（`Reply::RepoBadge`）；不在仓库里时不再问地址。
+pub(super) fn repo_badge(dir: &std::path::Path) -> (Option<String>, Option<String>) {
+    let branch = runode_git::current_branch(dir);
+    let origin = branch.as_ref().and_then(|_| runode_git::origin_url(dir));
+    (branch, origin)
+}
+
 /// 办一个请求，`content` 是请求后面跟着的字节；`stop` 置位时停得下的停下，交回已经找到的。
 fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (Reply, Vec<u8>) {
     let lock = || caches.lock().unwrap_or_else(PoisonError::into_inner);
@@ -161,6 +168,10 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
         }
         Call::Stamp { path } => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
         Call::Ports => (Reply::Ports(crate::window::status_bar::listening_ports()), Vec::new()),
+        Call::RepoBadge { dir } => {
+            let (branch, origin) = repo_badge(&dir);
+            (Reply::RepoBadge { branch, origin }, Vec::new())
+        }
         Call::Kinds { paths } => (Reply::Kinds(paths.iter().map(|path| kind(path)).collect()), Vec::new()),
         Call::Write { path } => match runode_paths::replace_file(&path, &content) {
             Ok(()) => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
@@ -368,6 +379,26 @@ mod tests {
         let paths = vec![dir.join("a.txt"), dir.join("nope"), dir.clone()];
         let (reply, _) = handle(Call::Kinds { paths }, Vec::new(), &Shared::default(), &GO);
         assert!(matches!(reply, Reply::Kinds(kinds) if kinds == [Some(false), None, Some(true)]));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 侧栏要的分支和 `origin`：仓库里两样都回，不在仓库里时都为空。
+    #[test]
+    fn repo_badge_reports_branch_and_origin() {
+        let dir = std::env::temp_dir().join(format!("runode-project-badge-{}", std::process::id()));
+        let repo = dir.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&repo).args(args).status().unwrap();
+        git(&["init", "-q", "-b", "topic"]);
+        git(&["remote", "add", "origin", "git@github.com:runode-dev/runode.git"]);
+        let (reply, _) = handle(Call::RepoBadge { dir: repo.clone() }, Vec::new(), &Shared::default(), &GO);
+        assert!(matches!(
+            reply,
+            Reply::RepoBadge { branch: Some(branch), origin: Some(origin) }
+                if branch == "topic" && origin == "git@github.com:runode-dev/runode.git"
+        ));
+        let (reply, _) = handle(Call::RepoBadge { dir: dir.clone() }, Vec::new(), &Shared::default(), &GO);
+        assert!(matches!(reply, Reply::RepoBadge { branch: None, origin: None }));
         fs::remove_dir_all(&dir).ok();
     }
 }

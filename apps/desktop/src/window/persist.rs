@@ -346,6 +346,7 @@ impl WindowView {
             active: self.active,
             sidebar: self.sidebar_shown,
             sidebar_width: self.sidebar_width,
+            collapsed_hosts: self.collapsed_hosts.iter().map(|host| host.label().map(str::to_owned)).collect(),
             panel_width: self.panel_width,
             preview_wrap: self.preview.read(cx).wrap(),
             preview_source: self.preview.read(cx).source(),
@@ -446,9 +447,17 @@ impl WindowView {
                 pinned_workflows: saved_workspace.pinned_workflows,
             });
         }
+        let active = self.group_workspaces_by_host(active);
         if !self.workspaces.is_empty() {
             self.sidebar_shown = saved.sidebar;
             self.sidebar_width = saved.sidebar_width;
+            let workspaces = &self.workspaces;
+            self.collapsed_hosts = saved
+                .collapsed_hosts
+                .into_iter()
+                .map(|host| host.map_or(HostId::Local, HostId::Ssh))
+                .filter(|host| workspaces.iter().any(|workspace| workspace.host == *host))
+                .collect();
             self.panel_width = saved.panel_width;
             self.preview.update(cx, |panel, _| panel.set_options(saved.preview_wrap, saved.preview_source));
             let file_tree = crate::file_tree::Options {

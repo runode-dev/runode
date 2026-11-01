@@ -97,6 +97,18 @@ pub(super) async fn dropped_dirs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     crate::fs_probe::off_thread(move || paths.into_iter().filter(|path| path.is_dir()).collect(), Vec::new()).await
 }
 
+/// 主机是 `host` 的 workspace 放进列表（各 workspace 的主机依次是 `hosts`）时落在第几个：侧栏按主机分组，
+/// 同一台主机的要挨在一起。已经有这台主机的组时，`ix` 在组里（含紧跟组尾）就照 `ix`，否则挪到离它近的组头
+/// 或组尾；还没有时 `ix` 落在两组之间就照 `ix`，落在别的组中间就接在最后。
+pub(super) fn group_slot(hosts: &[&HostId], host: &HostId, ix: usize) -> usize {
+    let ix = ix.min(hosts.len());
+    match (hosts.iter().position(|h| *h == host), hosts.iter().rposition(|h| *h == host)) {
+        (Some(first), Some(last)) => ix.clamp(first, last + 1),
+        _ if ix == 0 || ix == hosts.len() || hosts[ix - 1] != hosts[ix] => ix,
+        _ => hosts.len(),
+    }
+}
+
 /// 新 workspace 的名字：家目录叫 `~`；在 git 仓库里取仓库根的目录名，其余取目录名。
 /// 往上找仓库根时不看家目录本身，免得家目录是个管配置文件的仓库时个个都叫用户名。别的主机上的目录在本机
 /// 查不到，只取目录名。
@@ -380,12 +392,13 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.add_workspace(ix, dir, name, view, window, cx);
+        let ix = self.add_workspace(ix, dir, name, view, window, cx);
         self.activate_workspace(ix, window, cx);
     }
 
-    /// 在第 `ix` 个位置放一个目录是 `dir` 的新 workspace，`view` 是它的第一个终端，不切过去：当前的
-    /// workspace 还是原来那个。`name` 为空时按目录取名。
+    /// 在第 `ix` 个位置附近放一个目录是 `dir` 的新 workspace（位置按 `group_slot` 挪进它主机的那一组），
+    /// `view` 是它的第一个终端，不切过去：当前的 workspace 还是原来那个。`name` 为空时按目录取名。返回放在
+    /// 了第几个。
     pub(super) fn add_workspace(
         &mut self,
         ix: usize,
@@ -394,8 +407,9 @@ impl WindowView {
         view: Entity<TerminalView>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> usize {
         let host = view.read(cx).host().clone();
+        let ix = group_slot(&self.workspace_hosts(), &host, ix);
         let tab = self.single_pane_tab(view, window, cx);
         let workspace = Workspace {
             id: self.next_id(),
@@ -417,6 +431,26 @@ impl WindowView {
         if self.workspaces.len() > 1 && ix <= self.active {
             self.active += 1;
         }
+        ix
+    }
+
+    /// 各 workspace 所在的主机，按列表的顺序。
+    pub(super) fn workspace_hosts(&self) -> Vec<&HostId> {
+        self.workspaces.iter().map(|workspace| &workspace.host).collect()
+    }
+
+    /// 把同一台主机的 workspace 排到一起，各组按主机第一次出现的先后、组里照原来的先后；返回原来第
+    /// `active` 个排到了第几个。
+    pub(super) fn group_workspaces_by_host(&mut self, active: usize) -> usize {
+        let active = self.workspaces.get(active).map(|workspace| workspace.id);
+        let mut order: Vec<HostId> = Vec::new();
+        for workspace in &self.workspaces {
+            if !order.contains(&workspace.host) {
+                order.push(workspace.host.clone());
+            }
+        }
+        self.workspaces.sort_by_key(|workspace| order.iter().position(|host| *host == workspace.host));
+        self.workspaces.iter().position(|workspace| Some(workspace.id) == active).unwrap_or(0)
     }
 
     /// 装着这个终端的 workspace 和标签。
@@ -788,6 +822,9 @@ impl WindowView {
             return;
         }
         let id = self.workspaces.remove(ix).id;
+        // 主机上的 workspace 关完了，这组就没了，不再记着它收没收起。
+        let workspaces = &self.workspaces;
+        self.collapsed_hosts.retain(|host| workspaces.iter().any(|workspace| workspace.host == *host));
         self.forget_previews(id, cx);
         self.file_tree.update(cx, |tree, _| tree.forget_workspace(id));
         self.git_panel.update(cx, |panel, _| panel.forget_workspace(id));
@@ -846,7 +883,7 @@ impl WindowView {
             return;
         };
         let workspace = self.workspaces.remove(from);
-        let to = to.min(self.workspaces.len());
+        let to = group_slot(&self.workspace_hosts(), &workspace.host, to.min(self.workspaces.len()));
         self.workspaces.insert(to, workspace);
         self.activate_workspace(to, window, cx);
     }
@@ -973,6 +1010,25 @@ mod tests {
     use super::*;
 
     const NONE: [u32; 0] = [];
+
+    #[test]
+    fn new_workspaces_join_their_host_group() {
+        let (local, a, b) = (HostId::Local, HostId::Ssh("a".into()), HostId::Ssh("b".into()));
+        let hosts = [&local, &local, &a, &a, &b];
+        // 组里和紧跟组尾的位置照给的放，组外的挪到最近的组头或组尾。
+        assert_eq!(group_slot(&hosts, &a, 3), 3);
+        assert_eq!(group_slot(&hosts, &a, 4), 4);
+        assert_eq!(group_slot(&hosts, &a, 1), 2);
+        assert_eq!(group_slot(&hosts, &a, 5), 4);
+        assert_eq!(group_slot(&hosts, &local, 4), 2);
+        // 新主机：落在两组之间照放，落在组中间接在最后。
+        let c = HostId::Ssh("c".into());
+        assert_eq!(group_slot(&hosts, &c, 2), 2);
+        assert_eq!(group_slot(&hosts, &c, 0), 0);
+        assert_eq!(group_slot(&hosts, &c, 1), 5);
+        assert_eq!(group_slot(&hosts, &c, 9), 5);
+        assert_eq!(group_slot(&[], &c, 3), 0);
+    }
 
     /// 目录解开符号链接的写法在别的线程上算好后交回来。
     #[cfg(unix)]

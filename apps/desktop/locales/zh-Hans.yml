@@ -144,6 +144,8 @@ workspace:
   host_button: 主机：%{host}
   host_local: 本机
   host_local_hint: 这台电脑
+  new_on_host: "在 %{host} 上新建工作区"
+  host_attention: 有工作区等你处理
   host_remote_hint: "%{status} · SSH"
   host_add: 添加 SSH 主机
   host_add_hint: 经 SSH 使用一台现有的机器。

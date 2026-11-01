@@ -40,6 +40,9 @@ pub struct SavedWindow {
     pub sidebar: Option<bool>,
     /// 用户拖动过侧栏宽度时是那个宽度；没拖过时为空，用默认宽度。
     pub sidebar_width: Option<f32>,
+    /// 侧栏里收起来的主机组，写法同 `SavedWorkspace::host`：本机为空。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collapsed_hosts: Vec<Option<String>>,
     /// 右侧面板拖动过的宽度；没拖过时为空，用默认宽度。
     pub panel_width: Option<f32>,
     /// 预览的文本和 diff 自动换行；默认不换。

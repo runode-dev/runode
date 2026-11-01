@@ -20,7 +20,7 @@ use super::{
     CARD_GAP, TITLEBAR_HEIGHT, WindowView, cards,
     devices::{Paired, devices},
     drag_window,
-    sidebar::ROW_ICON_SIZE,
+    sidebar::{ROW_HEIGHT, ROW_ICON_SIZE, ROW_TEXT_OPACITY},
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
@@ -277,9 +277,9 @@ pub(super) fn page_entry(
         .aria_label(label.clone())
         .aria_selected(active)
         .flex_none()
-        .h(scaled(30.))
+        .h(scaled(ROW_HEIGHT))
         .mx(px(6.))
-        .mb(px(4.))
+        .mb(px(2.))
         .px(px(8.))
         .rounded(px(6.))
         .flex()
@@ -289,7 +289,7 @@ pub(super) fn page_entry(
             if active {
                 row.bg(active_bg).text_color(fg)
             } else {
-                row.text_color(fg.opacity(0.7)).hover(|row| row.bg(hover_bg).text_color(fg))
+                row.text_color(fg.opacity(ROW_TEXT_OPACITY)).hover(|row| row.bg(hover_bg).text_color(fg))
             }
         })
         .child(

@@ -1,4 +1,5 @@
-//! 侧栏每个 workspace 行上的仓库信息：当前分支，以及 `origin` 在 GitHub 上时 owner 的头像。
+//! 侧栏每个 workspace 行上的仓库信息：当前分支，以及 `origin` 在 GitHub 上时 owner 的头像。远端的分支和
+//! `origin` 经 `ProjectHost` 在那台机器上问，头像在本机下载。
 
 use std::{
     path::{Path, PathBuf},
@@ -10,6 +11,10 @@ use std::{
 use gpui::{AppContext, Context, SharedString};
 
 use super::super::WindowView;
+use crate::{
+    host_client::remote::{self, Status},
+    project_host::ProjectHost,
+};
 
 /// 隔多久重新问一次当前 workspace 的分支。
 const BRANCH_INTERVAL: Duration = Duration::from_secs(5);
@@ -44,11 +49,13 @@ impl RepoBadge {
 
 impl WindowView {
     /// 在后台问各 workspace 的分支，当前的隔 `BRANCH_INTERVAL`、别的隔 `BACKGROUND_BRANCH_INTERVAL`；
-    /// 头像每次运行只找一次。
+    /// 头像每次运行只找一次。远端没连上时不问，连上后的下一轮再问；问不到时留着上次的。
     pub(in crate::window) fn refresh_repo_badges(&mut self, cx: &mut Context<Self>) {
         let active = self.active;
         for (ix, workspace) in self.workspaces.iter_mut().enumerate() {
-            if !workspace.host.is_local() {
+            if let Some(name) = workspace.host.label()
+                && !remote::remote(name).is_some_and(|host| matches!(host.status(), Status::Connected(_)))
+            {
                 continue;
             }
             let badge = &mut workspace.repo;
@@ -58,13 +65,14 @@ impl WindowView {
             }
             badge.checking = true;
             let (id, dir, find_avatar) = (workspace.id, workspace.dir.clone(), !badge.avatar_looked);
+            let host = ProjectHost::of(&workspace.host);
             let job = cx.background_spawn(async move {
-                let branch = runode_git::current_branch(&dir);
-                let avatar = (find_avatar && branch.is_some()).then(|| avatar_for(&dir)).flatten();
-                (branch, avatar)
+                let (branch, origin) = host.repo_badge(&dir).ok()?;
+                let avatar = find_avatar.then(|| origin.as_deref().and_then(avatar_for)).flatten();
+                Some((branch, avatar))
             });
             cx.spawn(async move |this, cx| {
-                let (branch, avatar) = job.await;
+                let answer = job.await;
                 this.update(cx, |this, cx| {
                     // 问的时候 workspace 可能已经关掉了。
                     let Some(workspace) = this.workspaces.iter_mut().find(|workspace| workspace.id == id) else {
@@ -73,6 +81,9 @@ impl WindowView {
                     let badge = &mut workspace.repo;
                     badge.checking = false;
                     badge.checked = Some(Instant::now());
+                    let Some((branch, avatar)) = answer else {
+                        return;
+                    };
                     let branch = branch.map(SharedString::from);
                     let changed = badge.branch != branch || (find_avatar && badge.avatar != avatar);
                     badge.branch = branch;
@@ -91,11 +102,10 @@ impl WindowView {
     }
 }
 
-/// `dir` 所在仓库的 `origin` 在 GitHub 上时，owner 头像的缓存文件；没缓存或缓存旧了先下载。下载失败时
+/// 仓库的 `origin` 是 GitHub 上的 `url` 时，owner 头像的缓存文件；没缓存或缓存旧了先下载。下载失败时
 /// 用旧的缓存。
-fn avatar_for(dir: &Path) -> Option<PathBuf> {
-    let url = runode_git::origin_url(dir)?;
-    let owner = github_owner(&url)?;
+fn avatar_for(url: &str) -> Option<PathBuf> {
+    let owner = github_owner(url)?;
     let file = runode_paths::Dirs::from_env().github_avatar_file(owner)?;
     let age =
         file.metadata().and_then(|meta| meta.modified()).ok().and_then(|at| SystemTime::now().duration_since(at).ok());

@@ -197,7 +197,7 @@ impl WindowView {
     }
 
     /// 改在 `host` 上开：远端的开始连（之前停下的再试一次），换了主机时之前浏览的目录作废。
-    fn set_workspace_host(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn set_workspace_host(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
         if let HostId::Ssh(name) = &host
             && let Some(remote) = remote::remote(name)
             && matches!(remote.status(), Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle)

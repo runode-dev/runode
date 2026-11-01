@@ -46,6 +46,8 @@ pub(super) enum Call {
     Kinds { paths: Vec<PathBuf> },
     /// 这台机器上在监听的 TCP 端口（`status_bar::listening_ports`），回 `Reply::Ports`。
     Ports,
+    /// `dir` 所在仓库的当前分支和 `origin` 的地址，回 `Reply::RepoBadge`。
+    RepoBadge { dir: PathBuf },
     /// 把请求后面跟着的字节写成 `path`（`runode_paths::replace_file`），交回写完后的版本戳。
     Write { path: PathBuf },
     /// 监听 `dirs`（项目目录和不在它下面的 git 目录）：桌面每个监听一个 `token`。还没有这个监听时开始听，
@@ -74,6 +76,11 @@ pub(super) enum Reply {
     /// 按请求的顺序，不在时为空，在时是不是目录。
     Kinds(Vec<Option<bool>>),
     Ports(Vec<crate::window::status_bar::Port>),
+    /// `runode_git::current_branch` 和 `runode_git::origin_url`；不在仓库里时都为空。
+    RepoBadge {
+        branch: Option<String>,
+        origin: Option<String>,
+    },
     /// 监听到的改动；`started` 时是刚开始听，之前的改动听不到。
     Changed {
         started: bool,
@@ -101,7 +108,9 @@ impl Call {
                 op.for_each_path(f);
             }
             Self::Edit(op) => op.for_each_path(f),
-            Self::Read { path, .. } | Self::Stamp { path } | Self::Write { path } => f(path),
+            Self::Read { path, .. } | Self::Stamp { path } | Self::Write { path } | Self::RepoBadge { dir: path } => {
+                f(path)
+            }
             Self::ListFiles { root } | Self::Grep { root, .. } => f(root),
             Self::Ports | Self::Cancel { .. } => {}
         }

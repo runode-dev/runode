@@ -140,6 +140,19 @@ impl ProjectHost {
         }
     }
 
+    /// `dir` 所在仓库的当前分支（HEAD 分离时是短哈希）和 `origin` 的地址，不在仓库里时都为空；远端问不到
+    /// 时为 `Err`。会阻塞。
+    pub(crate) fn repo_badge(&self, dir: &Path) -> Result<(Option<String>, Option<String>), String> {
+        let client = match self {
+            Self::Local => return Ok(serve::repo_badge(dir)),
+            Self::Remote(client) => client,
+        };
+        match client.call(Call::RepoBadge { dir: dir.to_path_buf() }, QUERY_TIMEOUT)? {
+            (Reply::RepoBadge { branch, origin }, _) => Ok((branch, origin)),
+            (other, _) => Err(unexpected(&other)),
+        }
+    }
+
     /// 这台机器上在监听的 TCP 端口。会阻塞。
     pub(crate) fn listening_ports(&self) -> Result<Vec<crate::window::status_bar::Port>, String> {
         let client = match self {

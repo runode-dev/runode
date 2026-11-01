@@ -53,6 +53,7 @@ fn state() -> State {
         active: 0,
         sidebar: None,
         sidebar_width: Some(240.),
+        collapsed_hosts: vec![None, Some("vps".into())],
         panel_width: Some(200.),
         preview_wrap: true,
         preview_source: true,

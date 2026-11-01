@@ -265,6 +265,8 @@ pub struct WindowView {
     sidebar_width: Option<f32>,
     /// 侧栏里 workspace 列表的滚动位置。
     sidebar_scroll: ScrollHandle,
+    /// 侧栏按主机分组时收起来的组，按收起的先后。
+    collapsed_hosts: Vec<HostId>,
     /// 右侧面板拖动过宽度时是那个宽度，没拖过时用默认宽度；显示哪一页每个 workspace 各记一份（`Workspace::panel`）。
     panel_width: Option<f32>,
     /// 右侧面板的 Git 页，见 `git_panel`：各 workspace 的面板都在它里面，显示设置和图表的高度也是。
@@ -485,6 +487,7 @@ impl WindowView {
             sidebar_shown: None,
             sidebar_width: None,
             sidebar_scroll: ScrollHandle::new(),
+            collapsed_hosts: Vec::new(),
             panel_width: None,
             git_panel,
             _git_panel_events: git_panel_events,

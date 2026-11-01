@@ -1,20 +1,23 @@
 //! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是手机端入口（`mobile`），下面是
-//! 后台会话（`background`）。每行名字前是 GitHub 头像或 git 图标，下面是当前分支（`repo`）。
+//! 后台会话（`background`）。有 workspace 在别的主机上时按主机分组，每组一个组头，能收起、在那台主机上新建。
+//! 每行名字前是 GitHub 头像，没有头像时是名字首字母的色块，右边是当前分支（`repo`）。
 
 mod repo;
 
 use crate::ui::button::{Button, ButtonSize, Toggle};
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
-    Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Modifiers, MouseButton,
-    MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, TextAlign, Window, WindowControlArea, canvas,
-    div, img, prelude::*, px, relative, svg,
+    AccessibleAction, Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, FontWeight,
+    Hsla, Modifiers, MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, Window,
+    WindowControlArea, div, img, prelude::*, px, relative, svg,
 };
+use runode_types::color::Rgb;
 
 use super::{
     CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, PressDown, RenameWorkspace, Renaming, SelectLastWorkspace,
-    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, background,
-    cards, drag_window,
+    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView,
+    agents::Status as AgentStatus,
+    background, cards, drag_window,
     inline_edit::InlineEdit,
     model::WorkspaceId,
     pane_move::DraggedPane,
@@ -22,13 +25,17 @@ use super::{
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
-    assets::{BRANCH_ICON, GIT_ICON, SETTINGS_ICON, SIDEBAR_ICON, TERMINAL_ICON},
-    host_client::remote::{self, Status},
+    assets::{
+        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, MONITOR_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON, SIDEBAR_ICON,
+    },
+    host_client::remote::{self, HostId, Status},
     menus::OpenSettings,
     remote_hosts::status_text,
     ui::{
         display_dir,
         font_size::{self, FontSize, scaled},
+        hsla,
+        theme::{ADDED, AGENT_BLOCKED_COLOR, MODIFIED, REMOVED},
         tooltip::tooltip,
     },
 };
@@ -51,13 +58,40 @@ fn sidebar_toggle_left(fullscreen: bool) -> f32 {
 pub(super) fn sidebar_toggle_inset(fullscreen: bool) -> f32 {
     sidebar_toggle_left(fullscreen) + SIDEBAR_TOGGLE_WIDTH + 8.
 }
-/// 每个 workspace 一行：名字和目录各占一行。
-const ROW_HEIGHT: f32 = 40.;
-/// 侧栏每行名字前的图标那一格：workspace 的 GitHub 头像或 git 图标，手机端入口和新建按钮的图标也占这么宽，
+/// 每个 workspace 一行：首字母或头像、名字和 agent 标记，右边是分支。顶上手机端、看板这些入口也是这么高，
+/// 整列行距一致。
+pub(super) const ROW_HEIGHT: f32 = 30.;
+/// 没选中的行的字色，入口和 workspace 行一样。
+pub(super) const ROW_TEXT_OPACITY: f32 = 0.78;
+/// 侧栏每行名字前的图标那一格：workspace 的 GitHub 头像或首字母色块，手机端入口和新建按钮的图标也占这么宽，
 /// 几处的文字才对齐。
 pub(super) const ROW_ICON_SIZE: f32 = 16.;
 /// 改名输入框的高度。
 const RENAME_FIELD_HEIGHT: f32 = 18.;
+/// 按主机分组时每组顶上的组头。
+const HOST_HEADER_HEIGHT: f32 = 22.;
+/// 组头上连接状态的圆点。
+const HOST_STATUS_DOT: f32 = 6.;
+
+/// 没有 GitHub 头像的 workspace 行首画名字首字母的色块，颜色按名字从这里挑；字是白的，深浅背景上都看得清。
+const LETTER_COLORS: [Rgb; 8] = [
+    Rgb(0x2B, 0x9E, 0x8F),
+    Rgb(0xE0, 0x7A, 0x3C),
+    Rgb(0x4C, 0x7D, 0xE8),
+    Rgb(0x4F, 0xA3, 0x5B),
+    Rgb(0x8E, 0x63, 0xD8),
+    Rgb(0xD1, 0x55, 0x8F),
+    Rgb(0xC4, 0x93, 0x1F),
+    Rgb(0x5B, 0x8A, 0xA6),
+];
+
+/// 名字首字母的色块：字取名字里第一个字母或数字（没有就取第一个字），颜色按整个名字定，改名前后同名的颜色
+/// 一样。
+fn letter_avatar(name: &str) -> (String, Rgb) {
+    let letter = name.chars().find(|c| c.is_alphanumeric()).or_else(|| name.chars().next()).unwrap_or(' ');
+    let hash = name.bytes().fold(0x811c_9dc5_u32, |hash, byte| (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193));
+    (letter.to_uppercase().collect(), LETTER_COLORS[hash as usize % LETTER_COLORS.len()])
+}
 
 /// 快捷键要按着的修饰键，查法和 `shortcut_hint` 一样：先找 `select` 的绑定，`is_last` 时再找 `last` 的，
 /// 都取最后一个绑定的第一键。
@@ -70,51 +104,6 @@ pub(super) fn shortcut_modifiers(select: &dyn Action, last: &dyn Action, is_last
     modifiers(select).or_else(|| if is_last { modifiers(last) } else { None })
 }
 
-/// 目录那一行的行高。
-const PATH_LINE_HEIGHT: f32 = 16.;
-
-/// 一行路径，按排好版后的宽度用 `fit_path` 截短再画；字体、字号、颜色跟着外面的文字样式。GPUI 只会按字
-/// 截断，量文字要等知道宽度，所以画在 canvas 上。
-fn path_line(path: String) -> impl IntoElement {
-    canvas(
-        move |bounds, window, _| {
-            let style = window.text_style();
-            let font_size = style.font_size.to_pixels(window.rem_size());
-            let shape = |text: &str| {
-                let text = SharedString::from(text.to_owned());
-                let run = style.to_run(text.len());
-                window.text_system().shape_line(text, font_size, &[run], None)
-            };
-            shape(&fit_path(&path, |text| shape(text).width <= bounds.size.width))
-        },
-        |bounds, line, window, cx| {
-            line.paint(bounds.origin, bounds.size.height, TextAlign::Left, None, window, cx).ok();
-        },
-    )
-    .w_full()
-    .h(scaled(PATH_LINE_HEIGHT))
-}
-
-/// 路径放不下时整级整级地从开头删，前面写 `…`：`…/barey.cn/runode`；最后一级也放不下时再从它的开头按字删。
-fn fit_path(path: &str, fits: impl Fn(&str) -> bool) -> String {
-    if fits(path) {
-        return path.to_owned();
-    }
-    let mut tail = path;
-    for (i, _) in path.match_indices('/').filter(|&(i, _)| i > 0) {
-        tail = &path[i..];
-        let candidate = format!("…{tail}");
-        if fits(&candidate) {
-            return candidate;
-        }
-    }
-    tail.char_indices()
-        .skip(1)
-        .map(|(i, _)| format!("…{}", &tail[i..]))
-        .find(|candidate| fits(candidate))
-        .unwrap_or_else(|| "…".to_owned())
-}
-
 /// 拖动中的 workspace：拖动时跟着鼠标画出来，放到另一行上时按 `id` 挪位置。
 #[derive(Clone)]
 struct DraggedWorkspace {
@@ -122,6 +111,8 @@ struct DraggedWorkspace {
     /// 开始拖动时所在的位置，用来决定落点提示画在目标行的上边还是下边。
     ix: usize,
     name: SharedString,
+    /// 只能挪到同一台主机的组里。
+    host: HostId,
     /// 侧栏当前的宽度，预览照这个宽度画。
     width: f32,
 }
@@ -203,7 +194,7 @@ impl WindowView {
 
     pub(super) fn render_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let modifiers = window.modifiers();
-        let rows: Vec<_> = (0..self.workspaces.len()).map(|ix| self.render_row(ix, modifiers, cx)).collect();
+        let rows = self.render_workspace_rows(modifiers, cx);
         let drop_bg = cx.theme().mix(0.08);
         div()
             .id("sidebar")
@@ -252,6 +243,182 @@ impl WindowView {
             .child(self.render_sidebar_footer(cx))
     }
 
+    /// 列表里的各行。都在本机上时一行一个 workspace；有在别的主机上的就按主机分组，每组前面是组头，
+    /// 收起的组只留当前 workspace 那一行。同一台主机的 workspace 在列表里挨着，见 `model::group_slot`。
+    fn render_workspace_rows(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let grouped = self.workspaces.iter().any(|workspace| !workspace.host.is_local());
+        let mut rows = Vec::new();
+        let mut start = 0;
+        for group in self.workspaces.chunk_by(|a, b| a.host == b.host) {
+            let range = start..start + group.len();
+            start = range.end;
+            if !grouped {
+                rows.extend(range.map(|ix| self.render_row(ix, modifiers, cx).into_any_element()));
+                continue;
+            }
+            let host = &group[0].host;
+            let collapsed = self.collapsed_hosts.contains(host);
+            let shown = |ix: &usize| !collapsed || *ix == self.active;
+            // 收起时藏起来的 workspace 里有要用户处理的，组头上提示一下。
+            let attention = range.clone().filter(|ix| !shown(ix)).any(|ix| {
+                let workspace = &self.workspaces[ix];
+                workspace.bell() || workspace.mark(cx).is_some_and(|mark| mark.status.needs_attention())
+            });
+            rows.push(self.render_host_header(host, range.start == 0, collapsed, attention, cx).into_any_element());
+            rows.extend(range.filter(shown).map(|ix| self.render_row(ix, modifiers, cx).into_any_element()));
+        }
+        rows
+    }
+
+    /// 一组的组头：主机的图标、名字和远端的连接状态，悬停时露出在这台主机上新建和收起的按钮；按下收起、展开。
+    fn render_host_header(
+        &self,
+        host: &HostId,
+        first: bool,
+        collapsed: bool,
+        attention: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let fg = cx.theme().foreground;
+        let name = match host.label() {
+            Some(name) => name.to_owned(),
+            None => rust_i18n::t!("workspace.host_local_hint").into_owned(),
+        };
+        let status = host.label().map(|name| remote::remote(name).map_or(Status::Idle, |host| host.status()));
+        let status_color = status.as_ref().map(|status| match status {
+            Status::Connected(_) => hsla(ADDED),
+            Status::Connecting(_) | Status::Waiting { .. } => hsla(MODIFIED),
+            Status::Stopped { .. } => hsla(REMOVED),
+            Status::Idle => fg.opacity(0.3),
+        });
+        let status_text = status.as_ref().map(status_text);
+        let a11y_description =
+            [status_text.clone(), attention.then(|| rust_i18n::t!("workspace.host_attention").into_owned())]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
+        let key = SharedString::from(match host.label() {
+            Some(name) => format!("host-ssh-{name}"),
+            None => "host-local".to_owned(),
+        });
+        let new_label = rust_i18n::t!("workspace.new_on_host", host = name.as_str()).into_owned();
+        let group = SharedString::from(format!("{key}-group"));
+        let toggle = {
+            let host = host.clone();
+            move |this: &mut Self, expand: Option<bool>, cx: &mut Context<Self>| {
+                let collapsed = this.collapsed_hosts.contains(&host);
+                if expand.is_some_and(|expand| expand != collapsed) {
+                    return;
+                }
+                if collapsed {
+                    this.collapsed_hosts.retain(|collapsed| *collapsed != host);
+                } else {
+                    this.collapsed_hosts.push(host.clone());
+                }
+                this.save(cx);
+                cx.notify();
+            }
+        };
+        let a11y = |expand: bool, cx: &mut Context<Self>| {
+            let toggle = toggle.clone();
+            let view = cx.entity().downgrade();
+            move |_: Option<&gpui::accesskit::ActionData>, _: &mut Window, cx: &mut App| {
+                view.update(cx, |this, cx| toggle(this, Some(expand), cx)).ok();
+            }
+        };
+        let expand = a11y(true, cx);
+        let collapse = a11y(false, cx);
+        let press = toggle.clone();
+        let new_on = host.clone();
+        div()
+            .id(key.clone())
+            .role(Role::Button)
+            .aria_label(name.clone())
+            .aria_expanded(!collapsed)
+            .when(!a11y_description.is_empty(), |header| header.aria_description(a11y_description))
+            .on_a11y_action(AccessibleAction::Expand, expand)
+            .on_a11y_action(AccessibleAction::Collapse, collapse)
+            .flex_none()
+            .h(scaled(HOST_HEADER_HEIGHT))
+            .group(group.clone())
+            // 组和组之间多空一些，组头和自己的第一行挨近，一眼看出谁归谁。
+            .mt(px(if first { 2. } else { 10. }))
+            .mb(px(2.))
+            .pl(px(8.))
+            .pr(px(6.))
+            .rounded(px(6.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .text_size(FontSize::Small)
+            .text_color(fg.opacity(0.45))
+            .hover(|header| header.text_color(fg.opacity(0.75)))
+            .when_some(status_text, |header, text| header.tooltip(tooltip(text, None)))
+            .on_press_down(cx, move |this, _, cx| press(this, None, cx))
+            .child(
+                div().flex_none().w(px(ROW_ICON_SIZE)).flex().justify_center().child(
+                    svg()
+                        .path(if host.is_local() { MONITOR_ICON } else { SERVER_ICON })
+                        .size(px(12.))
+                        .text_color(fg.opacity(0.4)),
+                ),
+            )
+            // 连接状态的圆点紧跟在主机名后面，名字长时名字先截短。
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().min_w_0().truncate().child(name))
+                    .children(
+                        status_color.map(|color| div().flex_none().size(px(HOST_STATUS_DOT)).rounded_full().bg(color)),
+                    ),
+            )
+            .when(attention, |header| {
+                header.child(
+                    div().flex_none().size(px(HOST_STATUS_DOT)).rounded_full().bg(gpui::rgb(AGENT_BLOCKED_COLOR)),
+                )
+            })
+            .child(
+                Button::new(SharedString::from(format!("{key}-new")), new_label.clone())
+                    .with_size(ButtonSize::IconXs)
+                    .icon(PLUS_ICON)
+                    .icon_size(12.)
+                    .tooltip(tooltip(new_label, None))
+                    // 悬停在组头上才显出来，几个组头不一排排都是按钮；用透明度藏，辅助工具照样按得到。
+                    .opacity(0.)
+                    .group_hover(group.clone(), |button| button.opacity(1.))
+                    .on_press_down(cx, move |this, window, cx| this.new_workspace_on(new_on.clone(), window, cx)),
+            )
+            // 收起时箭头一直显示，提醒这组里还有藏着的行。
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(16.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(!collapsed, |chevron| chevron.opacity(0.).group_hover(group, |chevron| chevron.opacity(1.)))
+                    .child(
+                        svg()
+                            .path(if collapsed { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON })
+                            .size(px(12.))
+                            .text_color(fg.opacity(0.35)),
+                    ),
+            )
+    }
+
+    /// 打开新建工作区的对话框，选好在 `host` 上开。
+    fn new_workspace_on(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
+        self.new_workspace(&NewWorkspace, window, cx);
+        if self.new_workspace.is_some() {
+            self.set_workspace_host(host, window, cx);
+        }
+    }
+
     fn render_row(&self, ix: usize, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
@@ -264,26 +431,39 @@ impl WindowView {
         let fg = cx.theme().foreground;
         let group = SharedString::from(format!("workspace-{ix}"));
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
-        // 名字前是 GitHub 头像，不在 GitHub 上的仓库画 git 图标；agent 的标记跟在名字后面。
+        // 名字前是 GitHub 头像，没有头像时是名字首字母的色块；agent 的标记跟在名字后面。
         let repo = &workspace.repo;
-        // 靠上对着名字那一行，不在两行中间。
-        let icon =
-            div().flex_none().w(px(ROW_ICON_SIZE)).mt(px(3.)).map(|slot| match (&repo.avatar, repo.branch.is_some()) {
-                (Some(avatar), _) => slot.child(img(avatar.clone()).size(px(ROW_ICON_SIZE)).rounded(px(3.))),
-                (None, true) => slot.child(svg().path(GIT_ICON).size(px(ROW_ICON_SIZE)).text_color(fg.opacity(0.6))),
-                (None, false) => slot,
-            });
+        let icon = div().flex_none().w(px(ROW_ICON_SIZE)).flex().map(|slot| match &repo.avatar {
+            Some(avatar) => slot.child(img(avatar.clone()).size(px(ROW_ICON_SIZE)).rounded(px(4.))),
+            None => {
+                let (letter, color) = letter_avatar(&workspace.name);
+                slot.child(
+                    div()
+                        .size(px(ROW_ICON_SIZE))
+                        .rounded(px(4.))
+                        .bg(hsla(color))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(FontSize::Tiny)
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(gpui::white())
+                        .child(letter),
+                )
+            }
+        });
         let mark = workspace.mark(cx);
-        // 在 SSH 主机上的写出主机名，没连上时淡下去，辅助工具另外读到连接状态。
         let host = workspace.host.label().map(|name| {
             let status = remote::remote(name).map_or(Status::Idle, |host| host.status());
-            (name.to_owned(), matches!(status, Status::Connected(_)), status_text(&status))
+            format!("{name} {}", status_text(&status))
         });
+        // 目录不画出来，悬停时看提示；和名字一样（比如家目录的 `~`）时不提示。
+        let dir = Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
         // 名字之外报给辅助工具的：主机、分支、目录，以及只画成图形的 agent 状态和响铃。
         let a11y_description = [
-            host.as_ref().map(|(name, _, status)| format!("{name} {status}")),
+            host,
             repo.branch.as_ref().map(ToString::to_string),
-            Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name),
+            dir.clone(),
             mark.map(|mark| mark.describe()),
             workspace.bell().then(|| rust_i18n::t!("workspace.bell").into_owned()),
         ]
@@ -291,7 +471,10 @@ impl WindowView {
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
-        let mark = mark.map(|mark| styled_agent_mark(mark, ("workspace-agent", id), fg, cards(cx)));
+        // 等用户回答的不在名字后面画标记，在右边写成显眼的标签。
+        let blocked = mark.is_some_and(|mark| mark.status == AgentStatus::Blocked);
+        let mark =
+            mark.filter(|_| !blocked).map(|mark| styled_agent_mark(mark, ("workspace-agent", id), fg, cards(cx)));
         let name: AnyElement = match renaming {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx))).into_any_element(),
             None => div()
@@ -302,61 +485,54 @@ impl WindowView {
                 .children(mark)
                 .into_any_element(),
         };
-        // 右侧：响铃标记优先，其次快捷键提示，提示只在按着它的修饰键或者单按 ⌘ 时显示，平时不和名字抢眼；
-        // 悬停时换成关闭按钮。按 ⌘ 是找快捷键时最先按的键，也让它看得到。
+        // 右侧靠边写分支，按着快捷键的修饰键或者单按 ⌘ 时换成快捷键提示（按 ⌘ 是找快捷键时最先按的键）；
+        // 后面是等回答的标签和响铃的圆点。悬停时这些都让给关闭按钮。
         let is_last = ix + 1 == self.workspaces.len();
-        let hint = if workspace.bell() {
-            div().size(px(6.)).rounded_full().bg(fg.opacity(0.8)).into_any_element()
-        } else {
-            let held = modifiers == Modifiers::command()
-                || shortcut_modifiers(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx) == Some(modifiers);
-            div()
-                .text_size(FontSize::Small)
-                .text_color(fg.opacity(0.5))
-                // 不按时只是看不见、位置照留，按下时名字一栏不变窄，截断的地方不跳。
-                .when(!held, |hint| hint.invisible())
-                .children(shortcut_hint(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx))
-                .into_any_element()
+        let held = modifiers == Modifiers::command()
+            || shortcut_modifiers(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx) == Some(modifiers);
+        let trailing = div()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .text_size(FontSize::Small)
+            .text_color(fg.opacity(if active { 0.55 } else { 0.4 }))
+            .group_hover(group.clone(), |trailing| trailing.invisible())
+            .map(|trailing| {
+                if held {
+                    trailing.children(shortcut_hint(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx))
+                } else {
+                    trailing.children(repo.branch.clone().map(|branch| div().min_w_0().truncate().child(branch)))
+                }
+            })
+            .when(blocked, |trailing| {
+                let amber = Hsla::from(gpui::rgb(AGENT_BLOCKED_COLOR));
+                trailing.child(
+                    div()
+                        .flex_none()
+                        .h(scaled(16.))
+                        .px(px(6.))
+                        .rounded(px(4.))
+                        .flex()
+                        .items_center()
+                        .bg(amber.opacity(0.16))
+                        .text_color(amber)
+                        .text_size(FontSize::Tiny)
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(AgentStatus::Blocked.label()),
+                )
+            })
+            .when(workspace.bell(), |trailing| {
+                trailing.child(div().flex_none().size(px(6.)).rounded_full().bg(fg.opacity(0.8)))
+            });
+        let dragged = DraggedWorkspace {
+            id,
+            ix,
+            name: workspace.name.clone(),
+            host: workspace.host.clone(),
+            width: self.sidebar_width(),
         };
-        // 目录和名字一样（比如家目录的 `~`）时不再写一遍。
-        let dir = Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
-        // 第二行先写分支再写目录，分支名长时最多占一半多，目录还留着结尾。
-        let branch = repo.branch.clone().map(|branch| {
-            div()
-                .flex_none()
-                .max_w(relative(0.6))
-                .flex()
-                .items_center()
-                .gap(px(3.))
-                .text_color(fg.opacity(0.6))
-                .child(svg().flex_none().path(BRANCH_ICON).size(px(10.)).text_color(fg.opacity(0.6)))
-                .child(div().min_w_0().truncate().child(branch))
-        });
-        let host = host.map(|(name, connected, _)| {
-            let color = fg.opacity(if connected { 0.6 } else { 0.3 });
-            div()
-                .flex_none()
-                .max_w(relative(0.6))
-                .flex()
-                .items_center()
-                .gap(px(3.))
-                .text_color(color)
-                .child(svg().flex_none().path(TERMINAL_ICON).size(px(10.)).text_color(color))
-                .child(div().min_w_0().truncate().child(name))
-        });
-        let details = (host.is_some() || branch.is_some() || dir.is_some()).then(|| {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .text_size(FontSize::Small)
-                .text_color(fg.opacity(0.45))
-                .children(host)
-                .children(branch)
-                // 路径长时留下结尾：最后几级目录最能区分。
-                .children(dir.map(|dir| div().flex_1().min_w_0().child(path_line(dir))))
-        });
-        let dragged = DraggedWorkspace { id, ix, name: workspace.name.clone(), width: self.sidebar_width() };
+        let (drag_host, drop_host) = (workspace.host.clone(), workspace.host.clone());
         let view = cx.entity().downgrade();
         div()
             // 改名时换一个 id：双击那次按下被 GPUI 记作待拖动，改名期间不挂 `on_drag`，松开时也就没人清它，
@@ -378,7 +554,7 @@ impl WindowView {
                 if active {
                     row.bg(active_bg).text_color(fg)
                 } else {
-                    row.text_color(fg.opacity(0.7)).hover(|row| row.bg(hover_bg).text_color(fg))
+                    row.text_color(fg.opacity(ROW_TEXT_OPACITY)).hover(|row| row.bg(hover_bg).text_color(fg))
                 }
             })
             .on_mouse_down(
@@ -412,39 +588,34 @@ impl WindowView {
             })
             // 改名时在输入框里拖选文字，不能把整行拖走。
             .when(renaming.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
+            // 只能在同一台主机的组里挪。
             .drag_over::<DraggedWorkspace>(move |style, dragged, _, cx| {
-                drop_marker(style, dragged.ix, ix, Axis::Vertical, cx)
+                if dragged.host == drag_host { drop_marker(style, dragged.ix, ix, Axis::Vertical, cx) } else { style }
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedWorkspace, window, cx| {
-                this.move_workspace(dragged.id, ix, window, cx);
+                if dragged.host == drop_host {
+                    this.move_workspace(dragged.id, ix, window, cx);
+                }
             }))
             // 拖来的分屏：成为这个 workspace 排在最后的新标签。
             .drag_over::<DraggedPane>(move |style, _, _, cx| style.bg(cx.theme().ring.opacity(0.18)))
             .on_drop(cx.listener(move |this, dragged: &DraggedPane, window, cx| {
                 this.drop_pane_as_tab(dragged.pane, id, window, cx);
             }))
-            // 名字一行和目录一行同高，图标按固定的上边距靠上排，不随字体的行高跳。
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_start()
-                    .gap(px(6.))
-                    .line_height(scaled(PATH_LINE_HEIGHT))
-                    .child(icon)
-                    .child(div().flex_1().min_w_0().flex().flex_col().gap(px(1.)).child(name).children(details)),
-            )
+            .when_some(dir, |row, dir| row.tooltip(tooltip(dir, None)))
+            .child(icon)
+            .child(div().flex_1().min_w_0().child(name))
             .child(
                 div()
                     .flex_none()
                     .relative()
                     .h_full()
                     .min_w(px(TAB_CLOSE_SIZE))
+                    .max_w(relative(0.5))
                     .flex()
                     .items_center()
                     .justify_end()
-                    .child(div().group_hover(group.clone(), |hint| hint.invisible()).child(hint))
+                    .child(trailing)
                     .child(
                         Button::new(("workspace-close", id), close_label)
                             .with_size(ButtonSize::IconXs)
@@ -559,20 +730,14 @@ impl WindowView {
 
 #[cfg(test)]
 mod tests {
-    use super::fit_path;
+    use super::letter_avatar;
 
     #[test]
-    fn fit_path_drops_whole_directories_first() {
-        let fit = |path, width| fit_path(path, |text| text.chars().count() <= width);
-        let path = "/Volumes/dev/barey.cn/runode";
-        assert_eq!(fit(path, 40), path);
-        // 放得下几级就留几级，不截在一级目录的中间。
-        assert_eq!(fit(path, 26), "…/dev/barey.cn/runode");
-        assert_eq!(fit(path, 20), "…/barey.cn/runode");
-        assert_eq!(fit(path, 10), "…/runode");
-        assert_eq!(fit("~/src/app", 7), "…/app");
-        // 最后一级也放不下时才按字截。
-        assert_eq!(fit(path, 5), "…node");
-        assert_eq!(fit(path, 0), "…");
+    fn letter_avatars_use_the_first_letter_and_a_stable_color() {
+        assert_eq!(letter_avatar("website").0, "W");
+        assert_eq!(letter_avatar("~/.dotfiles").0, "D");
+        assert_eq!(letter_avatar("~").0, "~");
+        assert_eq!(letter_avatar("项目").0, "项");
+        assert_eq!(letter_avatar("core").1, letter_avatar("core").1);
     }
 }
