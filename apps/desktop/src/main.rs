@@ -21,6 +21,7 @@ mod dictation;
 mod file_tree;
 mod fs_probe;
 mod git_panel;
+mod git_view;
 mod github_actions;
 mod host_client;
 mod host_process;

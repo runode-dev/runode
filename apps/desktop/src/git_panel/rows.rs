@@ -469,10 +469,7 @@ impl PanelState {
     /// 换上 app 交来的 git 状态，要重排时返回真。和上次交来的是同一份时不用换；只是头一回交来时即使不在
     /// 仓库里也要重画：交来之前面板空着，交来以后说不在仓库里。
     pub fn replace_git(&mut self, git: Option<Arc<git::Repos>>) -> bool {
-        let same = match (&self.git, &git) {
-            (Some(old), Some(new)) => Arc::ptr_eq(old, new),
-            (old, new) => old.is_none() && new.is_none(),
-        };
+        let same = crate::git_view::same_repos(&self.git, &git);
         if same && self.scanned {
             return false;
         }

@@ -19,7 +19,7 @@ use crate::ui::{
     menu::{MenuHost as _, MenuItem},
     panel::{added_label, removed_label},
     row_buttons::{RowButton, button, row_buttons},
-    theme::{ADDED, ActiveTheme as _, MODIFIED, REMOVED, RENAMED},
+    theme::ActiveTheme as _,
 };
 use gpui::SharedString;
 use gpui::{
@@ -27,7 +27,8 @@ use gpui::{
     accesskit::ActionData, div, img, prelude::*, px,
 };
 use runode_git::{self as git, DiffSide, FileStatus, Section};
-use runode_types::color::Rgb;
+
+use crate::git_view::status_color;
 
 use super::{
     DirOp, FileOp, GitDirAction, GitFileAction, GitPanel, GitPanelEvent, STASH_APPLY_ICON, STASH_POP_ICON, repo_id,
@@ -54,16 +55,6 @@ impl Diff {
     pub fn open(&self, clicks: usize) -> GitPanelEvent {
         let Self { root, rel, old_rel, side } = self.clone();
         GitPanelEvent::OpenDiff { root, rel, old_rel, side, clicks }
-    }
-}
-
-/// 文件名和状态字母按 git 状态上的颜色。
-fn status_color(status: FileStatus) -> Rgb {
-    match status {
-        FileStatus::Modified => MODIFIED,
-        FileStatus::Added | FileStatus::Untracked => ADDED,
-        FileStatus::Deleted | FileStatus::Conflicted => REMOVED,
-        FileStatus::Renamed => RENAMED,
     }
 }
 

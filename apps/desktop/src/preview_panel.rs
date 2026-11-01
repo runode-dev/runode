@@ -564,10 +564,7 @@ impl PreviewPanel {
     /// 解析好了再重算一遍，见 `PreviewTabs::real_root`。
     pub fn set_git(&mut self, ws: WorkspaceId, git: Option<Arc<git::Repos>>, cx: &mut Context<Self>) {
         let tabs = self.workspaces.entry(ws).or_default();
-        let same = match (&tabs.git, &git) {
-            (Some(old), Some(new)) => Arc::ptr_eq(old, new),
-            (old, new) => old.is_none() && new.is_none(),
-        };
+        let same = crate::git_view::same_repos(&tabs.git, &git);
         if same {
             return;
         }

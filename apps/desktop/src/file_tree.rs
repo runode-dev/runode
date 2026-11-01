@@ -46,7 +46,7 @@ use crate::ui::{
     panel::panel_title,
     scrollbar::scrollbar,
     tabs::drag_chip,
-    theme::{ADDED, ActiveTheme as _, MODIFIED, REMOVED, RENAMED},
+    theme::ActiveTheme as _,
     tooltip::tooltip,
 };
 use gpui::{
@@ -54,9 +54,10 @@ use gpui::{
     Focusable, Hsla, MouseButton, MouseDownEvent, Pixels, Render, Role, ScrollStrategy, SharedString, Stateful, Window,
     actions, div, img, prelude::*, px, svg, uniform_list,
 };
-use runode_git::{self as git, FileStatus};
+use runode_git as git;
 use runode_ssh::Destination;
-use runode_types::color::Rgb;
+
+use crate::git_view::status_color;
 
 pub use listing::{Listings, list_dirs};
 pub use search::SearchOptions;
@@ -192,16 +193,6 @@ pub enum FileTreeEvent {
     FocusTerminal,
     /// 显示哪些文件、搜索结果的排法或者按内容搜的选项变了，app 存档；下次经 `set_options` 交回。
     OptionsChanged,
-}
-
-/// 文件名按 git 状态上的颜色。
-fn status_color(status: FileStatus) -> Rgb {
-    match status {
-        FileStatus::Modified => MODIFIED,
-        FileStatus::Added | FileStatus::Untracked => ADDED,
-        FileStatus::Deleted | FileStatus::Conflicted => REMOVED,
-        FileStatus::Renamed => RENAMED,
-    }
 }
 
 /// VS Code 一系、认 Remote-SSH 链接的编辑器。

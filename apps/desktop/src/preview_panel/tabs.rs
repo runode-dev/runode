@@ -10,11 +10,12 @@ use crate::ui::{
     actions::{ClosePane, CloseTab},
     follow_move,
     menu::{MenuHost as _, MenuItem},
-    theme::{ADDED, MODIFIED, REMOVED, RENAMED},
 };
 use gpui::{Action, Context, Focusable, Pixels, Point, SharedString, Window, actions};
-use runode_git::{self as git, FileStatus};
+use runode_git as git;
 use runode_types::color::Rgb;
+
+use crate::git_view::status_color;
 
 use super::{DiffTarget, Preview, PreviewPanel, RealRoot, WorkspaceId};
 use crate::project_host::ProjectHost;
@@ -31,16 +32,6 @@ actions!(
         KeepPreviewOpen
     ]
 );
-
-/// 标签名按文件的 git 状态上的颜色。
-fn status_color(status: FileStatus) -> Rgb {
-    match status {
-        FileStatus::Modified => MODIFIED,
-        FileStatus::Added | FileStatus::Untracked => ADDED,
-        FileStatus::Deleted | FileStatus::Conflicted => REMOVED,
-        FileStatus::Renamed => RENAMED,
-    }
-}
 
 /// 一个 workspace 的预览标签：一个文件一个，没固定的临时标签最多一个。没有标签时预览栏不显示。不进存档。
 #[derive(Default)]

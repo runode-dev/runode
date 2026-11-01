@@ -398,11 +398,7 @@ impl TreeState {
             self.scroll.scroll_to_item(0, ScrollStrategy::Top);
             changed = true;
         }
-        // app 只在 git 状态变了时才换一份新的，按是不是同一份比。
-        let same_git = match (&self.git, &git) {
-            (Some(old), Some(new)) => Arc::ptr_eq(old, new),
-            (old, new) => old.is_none() && new.is_none(),
-        };
+        let same_git = crate::git_view::same_repos(&self.git, &git);
         if !same_git {
             self.git = git;
             changed = true;
