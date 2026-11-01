@@ -131,19 +131,32 @@ fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
 /// 交给系统的 curl；只许 https，代理照环境变量。
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn get(url: &str, timeout: Duration, _progress: &dyn Fn(u64, u64)) -> Result<Vec<u8>, Error> {
-    let out = curl(timeout).arg(url).output().map_err(|err| Error::Network(format!("curl: {err}")))?;
-    if !out.status.success() {
-        return Err(Error::Network(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
-    }
-    Ok(out.stdout)
+    retry_unrevoked(url, |no_revoke| {
+        let out = curl(timeout, no_revoke).arg(url).output().map_err(|err| Error::Network(format!("curl: {err}")))?;
+        if !out.status.success() {
+            return Err(Error::Network(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
+        }
+        Ok(out.stdout)
+    })
 }
 
 /// 下载成文件，每 250 毫秒报一次已收到的字节（总字节未知，报 0）；失败时不留 `to`。
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn download(url: &str, to: &Path, timeout: Duration, progress: &dyn Fn(u64, u64)) -> Result<(), Error> {
+    retry_unrevoked(url, |no_revoke| download_once(url, to, timeout, progress, no_revoke))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn download_once(
+    url: &str,
+    to: &Path,
+    timeout: Duration,
+    progress: &dyn Fn(u64, u64),
+    no_revoke: bool,
+) -> Result<(), Error> {
     use std::{io::Read as _, process::Stdio, thread};
 
-    let mut child = curl(timeout)
+    let mut child = curl(timeout, no_revoke)
         .arg("-o")
         .arg(to)
         .arg(url)
@@ -171,10 +184,41 @@ pub(crate) fn download(url: &str, to: &Path, timeout: Duration, progress: &dyn F
     Ok(())
 }
 
+/// Windows 上的 curl 用 Schannel，查不到证书吊销状态（代理或网络拦了吊销列表）时整个握手失败，
+/// 这时不查吊销再试一次：下到的东西照样核对签名和 `SHA256SUMS`。
 #[cfg(not(target_os = "macos"))]
-fn curl(timeout: Duration) -> std::process::Command {
-    let mut command = std::process::Command::new(if cfg!(windows) { "curl.exe" } else { "curl" });
+fn retry_unrevoked<T>(url: &str, mut run: impl FnMut(bool) -> Result<T, Error>) -> Result<T, Error> {
+    match run(false) {
+        Err(Error::Network(reason)) if cfg!(windows) && revocation_unchecked(&reason) => {
+            tracing::info!("retrying {url} without the certificate revocation check: {reason}");
+            run(true)
+        }
+        result => result,
+    }
+}
+
+/// Schannel 查不到吊销状态的报错：`CRYPT_E_NO_REVOCATION_CHECK`、`CRYPT_E_REVOCATION_OFFLINE`。
+#[cfg(not(target_os = "macos"))]
+fn revocation_unchecked(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    ["0x80092012", "0x80092013"].iter().any(|code| error.contains(code))
+}
+
+/// 不加 `-q`：照用户 `~/.curlrc` 里的代理走。Windows 上 `Command` 先找 System32 再找 PATH，所以先按
+/// PATH 找 `curl.exe`，用户自己装的新版排在系统自带的前面。
+#[cfg(not(target_os = "macos"))]
+fn curl(timeout: Duration, no_revoke: bool) -> std::process::Command {
+    #[cfg(windows)]
+    let program = std::env::var_os("PATH")
+        .and_then(|path| std::env::split_paths(&path).map(|dir| dir.join("curl.exe")).find(|exe| exe.is_file()))
+        .unwrap_or_else(|| "curl.exe".into());
+    #[cfg(not(windows))]
+    let program = "curl";
+    let mut command = std::process::Command::new(program);
     command.args(["-fsSL", "--retry", "2", "--proto", "=https", "--max-time"]).arg(timeout.as_secs().to_string());
+    if no_revoke {
+        command.arg("--ssl-no-revoke");
+    }
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
     command
