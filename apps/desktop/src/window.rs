@@ -456,12 +456,9 @@ impl WindowView {
         let config_watch = cx.observe_global::<AppConfig>(|this, cx| {
             // 界面跟着 `ui-font-size` 缩放，Git 面板有多个仓库时的列表记着量过的行高，要重新量。
             this.git_panel.read(cx).remeasure();
-            // 看板和远程桌面是缓存的视图，不跟着窗口重画：字号、语言、卡片样式变了要叫它重画。
-            if let Some(board) = &this.kanban {
-                board.view.update(cx, |_, cx| cx.notify());
-            }
-            for view in this.screen_viewers.views().cloned().collect::<Vec<_>>() {
-                view.update(cx, |_, cx| cx.notify());
+            // 字号、语言、卡片样式变了，自己缓存的视图也要重画。
+            for id in this.cached_views() {
+                App::notify(cx, id);
             }
             cx.notify();
         });
@@ -652,7 +649,7 @@ impl WindowView {
     /// 画的缓存的几块、悬停提示和拖动预览读到的就是这个窗口的。每次画窗口时一开头调。
     ///
     /// 窗口的配色跟着有焦点的终端当前的配色走，程序用 OSC 10/11 改了默认色、配置改了调色板时没有谁
-    /// 通知缓存的几块（连同缓存的看板和预览），它们会停在旧颜色上：主题一变就叫它们重画。这时正在画窗口，
+    /// 通知缓存的几块（连同 `cached_views`），它们会停在旧颜色上：主题一变就叫它们重画。这时正在画窗口，
     /// 画的时候发的通知不会再要一帧，所以等这一帧画完再通知。
     fn follow_colors(&mut self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
         let theme = Theme::new(fg, bg, ansi_colors(&cx.global::<AppConfig>().0.palette));
@@ -666,14 +663,19 @@ impl WindowView {
         if let Some(slots) = self.slots.clone() {
             cx.defer(move |cx| slots.notify_all(cx));
         }
-        if let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) {
-            cx.defer(move |cx| board.update(cx, |_, cx| cx.notify()));
-        }
-        for view in self.screen_viewers.views().cloned().collect::<Vec<_>>() {
-            cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()));
-        }
-        let preview = self.preview.clone();
-        cx.defer(move |cx| preview.update(cx, |_, cx| cx.notify()));
+        let views = self.cached_views();
+        cx.defer(move |cx| {
+            for id in views {
+                cx.notify(id);
+            }
+        });
+    }
+
+    /// 自己缓存、不跟着窗口重画的整页和浮层视图（`Slot` 之外）：配色或界面配置变了要逐个叫它们重画。
+    fn cached_views(&self) -> Vec<EntityId> {
+        let board = self.kanban.as_ref().map(|board| board.view.entity_id());
+        let screens = self.screen_viewers.views().map(Entity::entity_id);
+        board.into_iter().chain(screens).chain([self.preview.entity_id()]).collect()
     }
 
     fn render_sidebar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
