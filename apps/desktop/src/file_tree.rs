@@ -61,7 +61,6 @@ use crate::git_view::status_color;
 
 pub use listing::{Listings, list_dirs};
 pub use search::SearchOptions;
-pub(crate) use search::walk_files;
 
 use edit::{FileClipboard, FileEdit};
 use listing::Decoration;

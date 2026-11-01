@@ -201,7 +201,7 @@ impl ProjectHost {
     /// 会阻塞。
     pub(crate) fn list_files(&self, root: &Path) -> Vec<PathBuf> {
         let client = match self {
-            Self::Local => return runode_git::list_files(root).unwrap_or_else(|| crate::file_tree::walk_files(root)),
+            Self::Local => return runode_git::list_files(root).unwrap_or_else(|| runode_files::walk_files(root)),
             Self::Remote(client) => client,
         };
         match client.call(Call::ListFiles { root: root.to_path_buf() }, SCAN_TIMEOUT) {

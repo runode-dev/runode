@@ -10,7 +10,6 @@
 
 use std::{
     collections::HashSet,
-    fs,
     ops::Range,
     path::{Path, PathBuf},
     sync::{
@@ -49,8 +48,6 @@ const MAX_FILES: usize = 500;
 const MAX_LINES: usize = 2000;
 /// 按内容找时停止打字这么久才搜。
 const CONTENT_DEBOUNCE: Duration = Duration::from_millis(200);
-/// 不在仓库里时从根目录往下最多看这么多个文件，免得在家目录这种地方走个没完。
-const MAX_WALK: usize = 50_000;
 /// 内容结果里命中处前面最多留的字节数，再多就从前面截掉，命中的词才露得出来。
 const SNIPPET_LEAD: usize = 24;
 /// 内容结果一行最多留的字节数，压缩过的长行不整行排版。
@@ -283,34 +280,6 @@ impl FileSearch {
 /// 搜索词全小写时不分大小写。
 fn ignore_case(query: &str) -> bool {
     !query.chars().any(char::is_uppercase)
-}
-
-/// 不在仓库里时按名称找的文件：从 `root` 往下走，不跟符号链接，跳过 `.git`，最多 `MAX_WALK` 个，
-/// 相对 `root`。
-pub(crate) fn walk_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let mut dirs = vec![PathBuf::new()];
-    while let Some(dir) = dirs.pop() {
-        let Ok(entries) = fs::read_dir(root.join(&dir)) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            if name == ".git" || name == ".DS_Store" {
-                continue;
-            }
-            let path = dir.join(name);
-            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                dirs.push(path);
-            } else {
-                files.push(path);
-                if files.len() >= MAX_WALK {
-                    return files;
-                }
-            }
-        }
-    }
-    files
 }
 
 /// `files` 里名字含有 `query` 的，搜索词带 `/` 时比整个相对路径。名字以它开头的排在前面，
@@ -1054,6 +1023,8 @@ impl FileSearch {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]

@@ -51,14 +51,50 @@ mod name_bytes {
 /// 读到的一组目录：每个目录的内容，读不了的（删掉了、改了名）为 `None`。
 pub type Listings = Vec<(PathBuf, Option<Vec<DirEntry>>)>;
 
-/// 读一个目录，目录在前，各自按名字排，不分大小写；读不了时为空。`.git` 和 `.DS_Store` 不列。
+/// `walk_files` 最多列这么多个文件，免得在家目录这种地方走个没完。
+const MAX_WALK: usize = 50_000;
+
+/// `root` 下的所有文件，相对 `root`：往下走，不跟符号链接，和 `read_dir` 一样跳过 `.git`、`.DS_Store`，最多
+/// `MAX_WALK` 个。不在 git 仓库里时按名称找文件用它。
+pub fn walk_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut dirs = vec![PathBuf::new()];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = fs::read_dir(root.join(&dir)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if skipped(&name) {
+                continue;
+            }
+            let path = dir.join(name);
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                dirs.push(path);
+            } else {
+                files.push(path);
+                if files.len() >= MAX_WALK {
+                    return files;
+                }
+            }
+        }
+    }
+    files
+}
+
+/// 列目录时不列的：git 的数据目录和访达的 `.DS_Store`。
+fn skipped(name: &OsStr) -> bool {
+    name == ".git" || name == ".DS_Store"
+}
+
+/// 读一个目录，目录在前，各自按名字排，不分大小写；读不了时为空。`skipped` 的不列。
 pub fn read_dir(dir: &Path) -> Option<Vec<DirEntry>> {
     let mut entries: Vec<_> = fs::read_dir(dir)
         .ok()?
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let name = entry.file_name();
-            if name == ".git" || name == ".DS_Store" {
+            if skipped(&name) {
                 return None;
             }
             // 指向目录的符号链接也当目录；只有符号链接才要再查一次。

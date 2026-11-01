@@ -154,7 +154,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
         }
         Call::Edit(op) => (Reply::Edited(op.run()), Vec::new()),
         Call::ListFiles { root } => {
-            let files = runode_git::list_files(&root).unwrap_or_else(|| crate::file_tree::walk_files(&root));
+            let files = runode_git::list_files(&root).unwrap_or_else(|| runode_files::walk_files(&root));
             let files = files.into_iter().filter(|rel| root.join(rel).symlink_metadata().is_ok()).collect();
             (Reply::Files(files), Vec::new())
         }
