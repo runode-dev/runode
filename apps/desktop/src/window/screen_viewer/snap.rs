@@ -369,10 +369,24 @@ impl WindowView {
             SnapSide::Top => (y - half_gap - f32::from(bounds.origin.y)) / height,
             SnapSide::Bottom => (f32::from(bounds.bottom()) - y - half_gap) / height,
         };
-        let others: Vec<EntityId> =
-            viewers.shown_snaps.iter().map(|shown| shown.id).filter(|other| *other != id).collect();
+        let here: Vec<EntityId> = viewers.shown_snaps.iter().map(|shown| shown.id).collect();
+        // 加起来超过 `SNAP_RATIO_MAX` 时画的是缩过的高度：先把这个缩放记进各台的比例，画出来的样子不变，拖的这台
+        // 才能按画出来的高度改。
+        let total: f32 = self.ratios(&here).sum();
+        if total > SNAP_RATIO_MAX {
+            let scale = SNAP_RATIO_MAX / total;
+            for open in &mut self.screen_viewers.open {
+                if let Placement::Snapped(snap) = &mut open.placement
+                    && here.contains(&open.view.entity_id())
+                {
+                    snap.ratio *= scale;
+                }
+            }
+        }
+        let others: Vec<EntityId> = here.into_iter().filter(|other| *other != id).collect();
         let room = SNAP_RATIO_MAX - self.ratios(&others).sum::<f32>();
-        let ratio = ratio.min(room).max(SNAP_RATIO_MIN);
+        // 别的几台缩到让不出 `SNAP_RATIO_MIN` 时以总和不超过上限为准，不然画的时候又要缩。
+        let ratio = ratio.max(SNAP_RATIO_MIN).min(room);
         if let Some(ix) = self.screen_viewers.position(id)
             && let Placement::Snapped(snap) = &mut self.screen_viewers.open[ix].placement
         {
