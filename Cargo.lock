@@ -6869,6 +6869,7 @@ dependencies = [
 name = "runode-git"
 version = "0.1.16"
 dependencies = [
+ "libc",
  "serde",
 ]
 

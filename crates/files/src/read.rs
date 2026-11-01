@@ -57,28 +57,6 @@ fn not_regular() -> io::Error {
     io::Error::other("not a regular file")
 }
 
-/// `O_NONBLOCK` 的值，和 libc 里的一样（标准库没有这个常量）；没列出的平台为空，照旧阻塞地打开。
-#[cfg(unix)]
-const O_NONBLOCK: Option<i32> = if cfg!(target_vendor = "apple") {
-    Some(0x0004)
-} else if cfg!(all(
-    target_os = "linux",
-    any(
-        target_arch = "x86",
-        target_arch = "x86_64",
-        target_arch = "arm",
-        target_arch = "aarch64",
-        target_arch = "riscv64",
-        target_arch = "powerpc64",
-        target_arch = "s390x",
-        target_arch = "loongarch64"
-    )
-)) {
-    Some(0o4000)
-} else {
-    None
-};
-
 /// 打开 `path`，打开的不是普通文件时报错。调用方先看过路径是普通文件，可看过以后路径还可能被换成
 /// 别的（指向设备的符号链接、命名管道），所以打开以后对着打开的这个再看一次，读的才一定是普通文件。
 /// 不阻塞地打开：换成了没有写端的命名管道时阻塞式的打开一直等，走不到这次检查；对普通文件这个标志
@@ -87,10 +65,7 @@ fn open_regular(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
-    if let Some(flag) = O_NONBLOCK {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.custom_flags(flag);
-    }
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NONBLOCK);
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
         return Err(not_regular());

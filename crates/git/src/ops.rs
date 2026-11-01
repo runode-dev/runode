@@ -24,6 +24,7 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 const PIPE_GRACE: Duration = Duration::from_secs(1);
 
 /// 超时时先让 git 自己收拾（删掉 `index.lock` 这类锁文件）最多这么久，再强杀。
+#[cfg(unix)]
 const TERM_GRACE: Duration = Duration::from_secs(2);
 
 /// 能在后台线程里用的仓库句柄，写操作都挂在它上面；由 `Snapshot::repo` 取得。git 命令
@@ -211,28 +212,27 @@ fn batch_ssh(command: &mut Command, dir: &Path) {
 /// 再退出；直接 KILL 会把 `index.lock` 留下，之后的 git 命令都说有别的 git 在跑。等 `TERM_GRACE` 还没
 /// 退的（不理 TERM 的钩子）再 KILL。
 fn kill_group(child: &mut Child) {
-    if cfg!(unix) {
-        signal_group(child, "-TERM");
+    #[cfg(unix)]
+    {
+        signal_group(child, libc::SIGTERM);
         let deadline = Instant::now() + TERM_GRACE;
         while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
+        signal_group(child, libc::SIGKILL);
     }
-    signal_group(child, "-KILL");
+    #[cfg(windows)]
+    kill_tree(child);
     let _ = child.kill();
     let _ = child.wait();
 }
 
-/// 给 git 所在的进程组发 `signal`。进程组号就是 git 的进程号（`process_group(0)`）；std 里没有给进程组
-/// 发信号的接口，借 `kill`。
+/// 给 git 所在的进程组发 `signal`。进程组号就是 git 的进程号（`process_group(0)`）。
 #[cfg(unix)]
-fn signal_group(child: &Child, signal: &str) {
-    let _ = Command::new("kill")
-        .args([signal, "--", &format!("-{}", child.id())])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+fn signal_group(child: &Child, signal: libc::c_int) {
+    let Ok(group) = libc::pid_t::try_from(child.id()) else { return };
+    // SAFETY: 只发信号，不碰内存；组已经没了时返回错误，不管它。
+    unsafe { libc::killpg(group, signal) };
 }
 
 /// Windows 上强杀的 git 来不及删自己拿着的 `index.lock`，之后的写操作都说有别的 git 在跑。`started`（拉起
@@ -247,12 +247,9 @@ fn left_lock(dir: &Path, started: std::time::SystemTime) -> Option<std::path::Pa
     (modified >= started).then_some(lock)
 }
 
-/// Windows 没有 TERM，只在 `-KILL` 时连同子孙进程一起强杀（`taskkill /T /F`）。
+/// Windows 没有 TERM，连同子孙进程一起强杀（`taskkill /T /F`）。
 #[cfg(windows)]
-fn signal_group(child: &Child, signal: &str) {
-    if signal != "-KILL" {
-        return;
-    }
+fn kill_tree(child: &Child) {
     let mut command = Command::new("taskkill");
     command.args(["/T", "/F", "/PID", &child.id().to_string()]).stdin(Stdio::null()).stdout(Stdio::null());
     crate::hide_window(&mut command);

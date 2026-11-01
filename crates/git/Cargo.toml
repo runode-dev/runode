@@ -9,6 +9,10 @@ publish.workspace = true
 [dependencies]
 serde = { workspace = true, optional = true }
 
+[target.'cfg(unix)'.dependencies]
+# 打开文件的 `O_NONBLOCK`、`O_NOFOLLOW`，给 git 的进程组发信号。
+libc.workspace = true
+
 [features]
 # 桌面经 ssh 在远端读项目时，两边按 JSON 收发这些类型。
 serde = ["dep:serde"]
