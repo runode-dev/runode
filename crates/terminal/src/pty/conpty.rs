@@ -11,7 +11,7 @@ mod vt_io;
 
 use std::{
     cell::Cell,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     io::{ErrorKind, Read, Write},
     path::PathBuf,
     sync::{
@@ -36,11 +36,15 @@ use crate::shell_integration;
 /// 伪控制台，shell 退出后由等它的线程取走关掉；之后改尺寸什么都不做。
 type SharedMaster = Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>;
 
-/// 没指定 shell 时 `Pty::start` 起的那个：PATH 里有 PowerShell 7 时用 `pwsh.exe`，否则用系统自带的
-/// `powershell.exe`。
+/// 没指定 shell 时 `Pty::start` 起的那个：新起的 shell 会拿到的 PATH（`spawn_path`）里有 PowerShell 7 时
+/// 用 `pwsh.exe`，否则用系统自带的 `powershell.exe`。读注册表要时间，不在界面线程上反复调。
 pub fn default_shell() -> String {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    if std::env::split_paths(&path).any(|dir| dir.join("pwsh.exe").is_file()) {
+    default_shell_in(super::spawn_path().as_deref())
+}
+
+/// PATH 是 `path` 时的 `default_shell`。
+pub(crate) fn default_shell_in(path: Option<&OsStr>) -> String {
+    if crate::shells::search_dirs(path).iter().any(|dir| dir.join("pwsh.exe").is_file()) {
         "pwsh.exe".into()
     } else {
         "powershell.exe".into()

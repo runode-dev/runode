@@ -64,6 +64,8 @@ use runode_types::{settings::TermSettings, shell::IntegrationMode};
 #[cfg(unix)]
 use crate::shell_integration;
 #[cfg(windows)]
+pub(crate) use conpty::default_shell_in;
+#[cfg(windows)]
 use conpty::group_members;
 #[cfg(windows)]
 pub use conpty::process_args;

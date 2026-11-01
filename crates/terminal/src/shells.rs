@@ -21,16 +21,21 @@ pub fn find_command(dirs: &[PathBuf], program: &str) -> Option<PathBuf> {
 }
 
 /// `programs` 里每个在 `path` 上找得到时它的文件名（带着找到的扩展名），找不到时为 `None`，和 `programs`
-/// 一一对应。`path` 为空时按新起的 shell 会拿到的 PATH（`pty::spawn_path`）找。只搜绝对路径的项：空项和相对
-/// 路径落在调用方的当前目录，那里的同名文件不是装着的命令。
+/// 一一对应。`path` 为空时按新起的 shell 会拿到的 PATH（`pty::spawn_path`）找，只搜
+/// `search_dirs`。
 pub fn find_commands(path: Option<&OsStr>, programs: &[String]) -> Vec<Option<String>> {
     let path = path.map(OsStr::to_os_string).or_else(crate::pty::spawn_path);
-    let dirs: Vec<PathBuf> =
-        path.map(|path| std::env::split_paths(&path).filter(|dir| dir.is_absolute()).collect()).unwrap_or_default();
+    let dirs = search_dirs(path.as_deref());
     programs
         .iter()
         .map(|program| Some(find_command(&dirs, program)?.file_name()?.to_string_lossy().into_owned()))
         .collect()
+}
+
+/// PATH 是 `path` 时找命令的目录：只要绝对路径的项，空项和相对路径落在调用方的当前目录，那里的同名文件
+/// 不是装着的命令。
+pub(crate) fn search_dirs(path: Option<&OsStr>) -> Vec<PathBuf> {
+    path.map(|path| std::env::split_paths(path).filter(|dir| dir.is_absolute()).collect()).unwrap_or_default()
 }
 
 /// `file` 是 shell 能跑的命令：Unix 上是有可执行位的文件（符号链接按它指向的算），Windows 上扩展名已经说明了。
@@ -58,7 +63,7 @@ pub fn available() -> Vec<ShellProfile> {
         let programs = ["ProgramW6432", "ProgramFiles"].into_iter().filter_map(std::env::var_os).map(PathBuf::from);
         let user = std::env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join("Programs"));
         let mut shells = listed(path.as_deref(), programs.chain(user).map(|dir| dir.join("Git")));
-        mark_default(&mut shells, &crate::pty::default_shell());
+        mark_default(&mut shells, &crate::pty::default_shell_in(path.as_deref()));
         shells
     }
     #[cfg(not(windows))]
@@ -68,9 +73,7 @@ pub fn available() -> Vec<ShellProfile> {
 /// `path` 是 PATH，`installs` 是 PATH 上没有 `git.exe` 时 Git for Windows 可能装在的目录。
 #[cfg_attr(not(any(windows, test)), expect(dead_code, reason = "只在 Windows 上列"))]
 fn listed(path: Option<&OsStr>, installs: impl IntoIterator<Item = PathBuf>) -> Vec<ShellProfile> {
-    // 只搜绝对路径的项：空项和相对路径落在宿主的当前目录，那里的同名文件不是装着的程序。
-    let dirs: Vec<PathBuf> =
-        path.map(|path| std::env::split_paths(path).filter(|dir| dir.is_absolute()).collect()).unwrap_or_default();
+    let dirs = search_dirs(path);
     let profile = |kind, program: &str| ShellProfile { kind, program: program.to_owned(), default: false };
     let mut shells = Vec::new();
     if dirs.iter().any(|dir| dir.join("pwsh.exe").is_file()) {
