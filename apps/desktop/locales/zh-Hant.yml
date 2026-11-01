@@ -1350,6 +1350,7 @@ screen_viewer:
   signed_out: 那台電腦上沒有人登入，有人登入後這裡會自動連上。
   incompatible: 那台電腦上的遠端桌面是別的版本，等它自己結束後過幾秒再試。
   no_decoder: "這台電腦無法解碼遠端的畫面（HEVC）：%{error}。Windows 上請到 Microsoft Store 安裝「HEVC 視訊延伸模組」。"
+  no_encoder: 那台電腦上沒有可用的影片編碼器（例如沒裝媒體功能套件的 Windows N 版），無法查看它的螢幕。
   unsupported: 這個系統上無法使用遠端桌面。
   bad_host: 不是有效的 SSH 主機。
   locked: 遠端鎖定了螢幕，輸入登入密碼解鎖。

@@ -21,6 +21,8 @@ mod keys;
 mod mode;
 #[cfg(any(target_os = "macos", windows))]
 mod nal;
+#[cfg(any(windows, test))]
+mod nv12;
 #[cfg(any(target_os = "macos", windows))]
 mod refine;
 #[cfg(windows)]

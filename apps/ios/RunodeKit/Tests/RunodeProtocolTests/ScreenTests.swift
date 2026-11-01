@@ -52,7 +52,10 @@ enum ScreenSamples {
         #expect(try read("ready.json") == .ready(displays: displays, screenCapture: true, postEvent: false))
         #expect(try read("incompatible.json") == .incompatible(version: 2))
         #expect(try read("started.json") == .started(display: 2, width: 2556, height: 1652))
-        #expect(try read("stopped.json") == .stopped(reason: "display unplugged"))
+        #expect(try read("stopped.json") == .stopped(reason: "display unplugged", noEncoder: false))
+        #expect(
+            try read("stopped_no_encoder.json")
+                == .stopped(reason: "no hardware encoder on the display's GPU", noEncoder: true))
         #expect(try read("lock.json") == .lock(locked: true))
         #expect(try read("permissions.json") == .permissions(screenCapture: true, postEvent: true))
         #expect(

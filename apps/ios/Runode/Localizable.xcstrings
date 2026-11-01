@@ -8013,6 +8013,29 @@
         }
       }
     },
+    "那台电脑上没有能用的视频编码器（比如没装媒体功能包的 Windows N 版），看不了它的屏幕" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That computer has no usable video encoder (Windows N without the Media Feature Pack, for example), so its screen cannot be shown"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台电脑上没有能用的视频编码器（比如没装媒体功能包的 Windows N 版），看不了它的屏幕"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台電腦上沒有可用的影片編碼器（例如沒裝媒體功能套件的 Windows N 版），無法查看它的螢幕"
+          }
+        }
+      }
+    },
     "配对" : {
       "extractionState" : "manual",
       "localizations" : {

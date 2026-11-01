@@ -151,8 +151,8 @@ public enum ScreenHostMsg: Hashable, Sendable, Decodable {
     case incompatible(version: UInt32)
     /// 开始采集了，接下来第一帧是关键帧；`display` 是采的那块屏幕，之后的输入落在它上面。
     case started(display: UInt32, width: UInt32, height: UInt32)
-    /// 采集停了或者开不起来。
-    case stopped(reason: String)
+    /// 采集停了或者开不起来。`noEncoder` 说电脑上建不出能编这个 app 解得了的格式的编码器，重连也看不了。
+    case stopped(reason: String, noEncoder: Bool)
     /// 电脑锁没锁屏：`ready` 之后马上报一次，之后变了再报。
     case lock(locked: Bool)
     /// 用户在电脑上打开或关掉了输入授权，`postEvent` 的含义和 `ready` 里的一样。`screenCapture` 是 `ready` 时的值，
@@ -167,6 +167,7 @@ public enum ScreenHostMsg: Hashable, Sendable, Decodable {
         case type, displays, display, version, width, height, reason, locked
         case screenCapture = "screen_capture"
         case postEvent = "post_event"
+        case noEncoder = "no_encoder"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -184,7 +185,9 @@ public enum ScreenHostMsg: Hashable, Sendable, Decodable {
                 display: try c.decode(UInt32.self, forKey: .display), width: try c.decode(UInt32.self, forKey: .width),
                 height: try c.decode(UInt32.self, forKey: .height))
         case "stopped":
-            self = .stopped(reason: try c.decode(String.self, forKey: .reason))
+            self = .stopped(
+                reason: try c.decode(String.self, forKey: .reason),
+                noEncoder: try c.decodeIfPresent(Bool.self, forKey: .noEncoder) ?? false)
         case "lock":
             self = .lock(locked: try c.decode(Bool.self, forKey: .locked))
         case "permissions":

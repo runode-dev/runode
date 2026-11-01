@@ -1276,6 +1276,7 @@ screen_viewer:
   signed_out: "Nobody is signed in on that computer. This connects on its own once someone signs in."
   incompatible: "The remote desktop on that computer is a different version. Try again in a few seconds, after it exits on its own."
   no_decoder: "This computer cannot decode the remote screen (HEVC): %{error}. On Windows, install HEVC Video Extensions from the Microsoft Store."
+  no_encoder: That computer has no usable video encoder (Windows N without the Media Feature Pack, for example), so its screen cannot be shown.
   unsupported: Remote desktop is not available on this system.
   bad_host: Not a valid SSH host.
   locked: The remote screen is locked. Enter the login password to unlock it.

@@ -557,7 +557,9 @@ fn start(options: &Options, outbox: &Outbox) -> Option<Capture> {
                 }
             }
         }
-        Event::Stopped(reason) => sink.control(&ScreenHostMsg::Stopped { reason, signed_out: false }),
+        Event::Stopped(reason) => {
+            sink.control(&ScreenHostMsg::Stopped { reason, signed_out: false, no_encoder: false });
+        }
     });
     match started {
         Ok(capture) => {
@@ -576,7 +578,11 @@ fn start(options: &Options, outbox: &Outbox) -> Option<Capture> {
         }
         Err(err) => {
             tracing::warn!("cannot start capturing: {err}");
-            outbox.control(&ScreenHostMsg::Stopped { reason: err.to_string(), signed_out: false });
+            outbox.control(&ScreenHostMsg::Stopped {
+                reason: err.to_string(),
+                signed_out: false,
+                no_encoder: err.kind() == io::ErrorKind::Unsupported,
+            });
             None
         }
     }

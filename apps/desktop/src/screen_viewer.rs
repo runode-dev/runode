@@ -624,6 +624,10 @@ impl ScreenViewer {
                 self.signed_out = true;
                 self.drop_picture();
             }
+            UiEvent::Message(ScreenHostMsg::Stopped { no_encoder: true, .. }) => {
+                self.phase = Phase::Stopped(rust_i18n::t!("screen_viewer.no_encoder").into_owned());
+                self.drop_picture();
+            }
             UiEvent::Message(ScreenHostMsg::Stopped { reason, .. }) => {
                 // 缺屏幕录制授权时系统报的原因看不懂，换成去哪里打开的指引。
                 let unauthorized = self.remote.as_ref().is_some_and(|remote| !remote.screen_capture);

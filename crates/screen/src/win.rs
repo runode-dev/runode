@@ -1,5 +1,6 @@
 //! Windows 上的远程桌面：DXGI 桌面复制采集一块屏幕，D3D11 的视频处理器缩放、转成 NV12，Media
-//! Foundation 调显卡的硬件 HEVC 或 H.264 编码器编码（`Capture`）；`SendInput` 注入键鼠（`Injector`）。不用授权，
+//! Foundation 调显卡的硬件 HEVC 或 H.264 编码器编码，没有能用的显卡时在 CPU 上转换、用系统的软件编码器
+//! （`Capture`）；`SendInput` 注入键鼠（`Injector`）。不用授权，
 //! 但普通权限的进程注入不了以管理员身份跑的窗口，也采不到、注入不了锁屏和 UAC 提示所在的安全桌面。
 //! 坐标都按物理像素，进程要先设成按显示器感知缩放（`dpi_aware`）。
 

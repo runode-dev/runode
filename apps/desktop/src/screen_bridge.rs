@@ -125,7 +125,9 @@ pub fn run() -> i32 {
         Err(err) => {
             tracing::warn!("cannot reach the screen process: {err}");
             let reason = format!("cannot start remote desktop on this computer: {err}");
-            if let Ok(frame) = Frame::control(&ScreenHostMsg::Stopped { reason, signed_out: signed_out() }) {
+            if let Ok(frame) =
+                Frame::control(&ScreenHostMsg::Stopped { reason, signed_out: signed_out(), no_encoder: false })
+            {
                 let mut out = io::stdout().lock();
                 let _ = write_frame(&mut out, FrameKind::Control, 0, &frame.payload);
                 let _ = out.flush();

@@ -1,5 +1,7 @@
-//! 真采一块屏幕、真编 HEVC：macOS 上要屏幕录制的授权，Windows 上要在登录着的桌面上跑、要有能编 HEVC
-//! 的显卡，CI 上都没有，所以 `#[ignore]`，在桌面的终端里用 `cargo test -p runode-screen -- --ignored` 跑。
+//! 真采一块屏幕、真编 HEVC 和 H.264：macOS 上要屏幕录制的授权，Windows 上要在登录着的桌面上跑（没有能用的显卡时
+//! 走 CPU 和软件编码器），CI 上都没有，所以 `#[ignore]`，在桌面的终端里用
+//! `cargo test -p runode-screen --test capture -- --ignored --test-threads=1` 跑：Windows 上一个进程不能同时复制
+//! 同一块屏幕两次。
 #![cfg(any(target_os = "macos", windows))]
 
 use std::{
@@ -7,13 +9,24 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_screen::{Capture, Display, Event, Options};
+use runode_screen::{Capture, Codec, Display, Event, Options};
 
 /// 锁定第一帧是带三个参数集（VPS、SPS、PPS）的关键帧，手机才能从头解；要了关键帧，屏幕静止时也很快
 /// 来一个。
 #[test]
 #[ignore = "needs the screen recording permission"]
 fn first_frame_and_requested_frames_are_keyframes() {
+    keyframes(Codec::Hevc, 3);
+}
+
+/// H.264 的关键帧带 SPS、PPS 两个参数集。
+#[test]
+#[ignore = "needs the screen recording permission"]
+fn h264_keyframes_carry_their_parameter_sets() {
+    keyframes(Codec::H264, 2);
+}
+
+fn keyframes(codec: Codec, parameter_sets: usize) {
     let display = Display::main();
     let options = Options {
         display: display.id,
@@ -22,7 +35,7 @@ fn first_frame_and_requested_frames_are_keyframes() {
         fps: 60,
         bitrate: 8_000_000,
         cursor: true,
-        codecs: vec![runode_screen::Codec::Hevc],
+        codecs: vec![codec],
     };
     let (tx, rx) = mpsc::channel();
     let capture = Capture::start(&options, move |event| {
@@ -30,9 +43,10 @@ fn first_frame_and_requested_frames_are_keyframes() {
     })
     .expect("start capturing");
 
+    assert_eq!(capture.codec(), codec);
     let first = next_frame(&rx);
     assert!(first.keyframe);
-    assert_eq!(first.parameter_sets.len(), 3);
+    assert_eq!(first.parameter_sets.len(), parameter_sets);
 
     // 要之前已经在编的帧可能先到，跳过。
     capture.request_keyframe();
@@ -40,7 +54,7 @@ fn first_frame_and_requested_frames_are_keyframes() {
     loop {
         let frame = next_frame(&rx);
         if frame.keyframe {
-            assert_eq!(frame.parameter_sets.len(), 3);
+            assert_eq!(frame.parameter_sets.len(), parameter_sets);
             break;
         }
         assert!(Instant::now() < deadline, "no keyframe after asking for one");

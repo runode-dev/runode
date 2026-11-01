@@ -115,9 +115,14 @@ fn host_messages_match_the_fixtures() {
     matches("ready_datagram.json", &ready(true));
     matches("incompatible.json", &ScreenHostMsg::Incompatible { version: 2 });
     matches("started.json", &ScreenHostMsg::Started { display: 2, width: 2556, height: 1652 });
-    matches("stopped.json", &ScreenHostMsg::Stopped { reason: "display unplugged".into(), signed_out: false });
+    matches(
+        "stopped.json",
+        &ScreenHostMsg::Stopped { reason: "display unplugged".into(), signed_out: false, no_encoder: false },
+    );
     let reason = "nobody is signed in on this computer's screen".into();
-    matches("stopped_signed_out.json", &ScreenHostMsg::Stopped { reason, signed_out: true });
+    matches("stopped_signed_out.json", &ScreenHostMsg::Stopped { reason, signed_out: true, no_encoder: false });
+    let reason = "no hardware encoder on the display's GPU".into();
+    matches("stopped_no_encoder.json", &ScreenHostMsg::Stopped { reason, signed_out: false, no_encoder: true });
     matches("lock.json", &ScreenHostMsg::Lock { locked: true });
     matches("permissions.json", &ScreenHostMsg::Permissions { screen_capture: true, post_event: true });
     let reason = "the password has keys a US keyboard cannot type".into();

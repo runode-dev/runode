@@ -131,8 +131,10 @@ public final class ScreenModel {
             videoSize = CGSize(width: Int(width), height: Int(height))
             onVideoReset?()
             phase = .live
-        case .message(.stopped(let reason)):
-            phase = .failed(reason)
+        case .message(.stopped(let reason, let noEncoder)):
+            let noEncoderReason = String(
+                localized: "那台电脑上没有能用的视频编码器（比如没装媒体功能包的 Windows N 版），看不了它的屏幕")
+            phase = .failed(noEncoder ? noEncoderReason : reason)
         case .message(.permissions(let screenCapture, let postEvent)):
             missingPermissions = Self.missing(screenCapture: screenCapture, postEvent: postEvent)
         case .message(.lock(let isLocked)):

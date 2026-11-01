@@ -119,11 +119,13 @@ pub enum ScreenHostMsg {
     /// `display` 是采的那块屏幕，之后的输入落在它上面。
     Started { display: u32, width: u32, height: u32 },
     /// 采集停了或者开不起来，带原因；可以再发 `Start`。`signed_out` 说电脑的屏幕上没人登录，有人登录后
-    /// 重新连上就能看。
+    /// 重新连上就能看。`no_encoder` 说电脑上建不出能编客户端解得了的格式的编码器，重连也看不了。
     Stopped {
         reason: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         signed_out: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        no_encoder: bool,
     },
     /// 电脑锁没锁屏：`Ready` 之后马上报一次，之后变了再报。
     Lock { locked: bool },
