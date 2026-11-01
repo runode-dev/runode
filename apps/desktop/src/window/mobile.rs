@@ -252,7 +252,7 @@ impl WindowView {
     /// 引导页开着时窗口的内容。
     pub(super) fn render_mobile_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let page = self.render_mobile_page(cx).into_any_element();
-        self.render_page_body(page, window, cx)
+        self.render_page_body(page, true, window, cx)
     }
 }
 
@@ -312,11 +312,12 @@ pub(super) fn page_entry(
 }
 
 impl WindowView {
-    /// 铺满窗口的一页（手机端引导页、看板）开着时窗口的内容：侧栏（收着时没有），右边整块是 `page`，
-    /// 顶上留一条拖动窗口、放红绿灯。
+    /// 铺满窗口的一页（手机端引导页、看板、远程桌面）开着时窗口的内容：侧栏（收着时没有），右边整块是 `page`，
+    /// 顶上留一条拖动窗口、放红绿灯。`rounded_bottom` 为假时卡片样式下那块的底下两个角是直的。
     pub(super) fn render_page_body(
         &mut self,
         page: AnyElement,
+        rounded_bottom: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
@@ -340,6 +341,7 @@ impl WindowView {
             )
             .child(if cards {
                 Card::new()
+                    .when(!rounded_bottom, |card| card.rounded_b(px(0.)))
                     .flex_1()
                     .min_h_0()
                     .mr(px(CARD_GAP))

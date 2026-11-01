@@ -488,7 +488,7 @@ impl WindowView {
     pub(super) fn render_screen_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(view) = self.screen_viewers.docked().map(|open| open.view.clone()) else { return Vec::new() };
         let page = cached_page(view, window);
-        self.render_page_body(page, window, cx)
+        self.render_page_body(page, false, window, cx)
     }
 
     /// 浮着的远程桌面：窗口内容上面的几块，盖住的终端收不到鼠标；按下哪块哪块提到最上面，四边和四角拖着改大小。
@@ -539,7 +539,7 @@ impl WindowView {
                 .w(frame.size.width)
                 .h(frame.size.height)
                 .occlude()
-                .rounded(px(8.))
+                .rounded_t(px(8.))
                 .overflow_hidden()
                 .border_1()
                 .border_color(border)
@@ -644,7 +644,7 @@ impl WindowView {
 }
 
 /// 远程桌面页：缓存，来一帧画面只通知这一页，窗口跟着终端输出重画时照搬上一帧。辅助工具开着时不缓存：照搬上一帧
-/// 时跳过 prepaint，报给辅助工具的节点就丢了。
+/// 时跳过 prepaint，报给辅助工具的节点就丢了。画面铺到页面底边，视频帧又画不出圆角，放它的那块底下两个角要是直的。
 fn cached_page(view: Entity<ScreenViewer>, window: &Window) -> AnyElement {
     if window.is_a11y_active() {
         view.into_any_element()

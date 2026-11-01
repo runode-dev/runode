@@ -329,7 +329,7 @@ impl WindowView {
         } else {
             board.cached(StyleRefinement::default().size_full()).into_any_element()
         };
-        self.render_page_body(page, window, cx)
+        self.render_page_body(page, true, window, cx)
     }
 
     /// 看板开着的新建、编辑对话框，画在窗口最上层。

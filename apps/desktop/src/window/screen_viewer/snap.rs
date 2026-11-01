@@ -302,6 +302,7 @@ impl WindowView {
             let height = relative(snap.ratio * scale);
             if cards {
                 Card::new()
+                    .rounded_b(px(0.))
                     .relative()
                     .flex_none()
                     .h(height)
