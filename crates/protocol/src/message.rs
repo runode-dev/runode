@@ -280,6 +280,15 @@ pub enum ClientMsg {
     ListTasks { req: u32, dir: PathBuf },
     /// 列宿主这台机器上新建终端时可以挑的 shell，回 `HostMsg::Shells`。宿主自己办，不转给界面。
     ListShells { req: u32 },
+    /// 在宿主这台机器上按 PATH 找 `programs` 这几个命令，回 `HostMsg::Commands`；`path` 是 shell 报告的
+    /// PATH，为空时用新起的 shell 会拿到的。`programs` 多于 `MAX_FIND_COMMANDS` 个时回 `Error`。宿主自己办，
+    /// 不转给界面。
+    FindCommands {
+        req: u32,
+        #[serde(default, with = "os_text")]
+        path: Option<OsString>,
+        programs: Vec<String>,
+    },
     /// 在会话 `id` 的 shell 当前所在的仓库里读写 git，见 `git` 模块。一条连接上的这些请求按到达的
     /// 先后一件一件办，推送、拉取这类要等网络的会排着后面的。办不了时回的 `Error` 只带 `req`、不带
     /// `id`：错是这件请求的（git 的报错、没有这个会话），不是会话出了事。
@@ -422,7 +431,8 @@ pub enum HostMsg {
     /// 为假时宿主跑在某个 app 的进程里，那个 app 才是它的界面，别的 app 不该接手它的会话、也不该
     /// 让它退出。`handoff` 是宿主交出会话时写的交接格式（`handoff::HANDOFF_FORMAT`），0 是这个
     /// 宿主不会交接。`keep_awake` 是宿主认得 `ClientMsg::KeepAwake`，`todos` 是认得看板的几条
-    /// 消息（`ClientMsg::ListTodos` 等）。`desktops` 是有几个桌面的界面连着（回桌面的 `Hello` 时不
+    /// 消息（`ClientMsg::ListTodos` 等），`shells` 是认得 `ClientMsg::ListShells` 和 `ClientMsg::FindCommands`（不认得的
+    /// 宿主回的 `Error` 不带请求编号，前端只能干等到超时，所以不认得时不发）。`desktops` 是有几个桌面的界面连着（回桌面的 `Hello` 时不
     /// 算它自己）：退出时不留会话的桌面看到还有别的桌面，只结束自己的会话，不让宿主退出。
     Welcome {
         protocol: u32,
@@ -437,6 +447,8 @@ pub enum HostMsg {
         keep_awake: bool,
         #[serde(default)]
         todos: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        shells: bool,
         #[serde(default, skip_serializing_if = "is_zero")]
         desktops: u32,
     },
@@ -601,6 +613,12 @@ pub enum HostMsg {
         req: u32,
         shells: Vec<ShellProfile>,
     },
+    /// 回 `ClientMsg::FindCommands`：和请求里的 `programs` 一一对应，找到的是命令的文件名（Windows 上带着
+    /// 扩展名，比如 `claude.cmd`），找不到的为 `None`。
+    Commands {
+        req: u32,
+        found: Vec<Option<String>>,
+    },
     /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`Layout`；没有界面
     /// 连着时除 `Reveal` 外宿主自己办），只发给登记为界面的
     /// 连接（`Hello` 里 `client` 是 `Desktop` 的，有几个时是最近连上的那个）。`request` 原样带着
@@ -720,6 +738,9 @@ impl From<&str> for ClipboardContent {
 
 /// `HostMsg::Dirs` 一次最多给这么多个子目录。
 pub const MAX_DIRS: usize = 1000;
+
+/// `ClientMsg::FindCommands` 一次最多找这么多个命令。
+pub const MAX_FIND_COMMANDS: usize = 64;
 
 /// `Open` 的新终端放在哪里。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

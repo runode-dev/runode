@@ -186,6 +186,11 @@ pub struct SelectWorkspace(pub usize);
 #[action(namespace = runode, no_json)]
 pub struct SelectTab(pub usize);
 
+/// 用新建标签菜单里第几个 shell（从 0 数）开新标签；主机没列出可挑的 shell 时第一个是默认 shell。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub struct NewShellTab(pub usize);
+
 /// 焦点移到这个方向上相邻的分屏。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
@@ -202,9 +207,9 @@ const TRAFFIC_LIGHT_SIZE: f32 = 14.;
 const TRAFFIC_LIGHTS_ORIGIN: (f32, f32) = (14., (TITLEBAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.);
 const TRAFFIC_LIGHTS_WIDTH: f32 = 84.;
 /// 标签栏最右边新建标签按钮的宽度，连同它右边弹出菜单的箭头。
-const NEW_TAB_BUTTON_WIDTH: f32 = TITLEBAR_HEIGHT + NEW_TAB_MENU_BUTTON_WIDTH;
+const NEW_TAB_BUTTON_WIDTH: f32 = 64.;
 /// 新建标签按钮右边弹出菜单的箭头的宽度。
-const NEW_TAB_MENU_BUTTON_WIDTH: f32 = 18.;
+const NEW_TAB_MENU_BUTTON_WIDTH: f32 = 24.;
 /// 标签最窄的宽度；标签多到挤不下时标签条改为横向滚动。
 const TAB_MIN_WIDTH: f32 = 64.;
 /// 标签最宽的宽度；标签少时不再拉宽，靠左排开，后面紧跟新建标签按钮。
@@ -287,8 +292,8 @@ pub struct WindowView {
     menu: Option<Menu>,
     /// 开着的下拉菜单挂在哪个按钮下面。
     dropdown: Dropdown,
-    /// 新建标签菜单里列的 agent，上次打开菜单时在后台找到的。
-    installed_agents: Vec<new_tab::Installed>,
+    /// 新建标签菜单里列的 agent 和它们所在的主机，上次打开菜单时请那台主机的宿主找到的。
+    installed_agents: Option<(HostId, Vec<new_tab::Installed>)>,
     /// 新建标签菜单里列的 shell 和它们所在的主机，上次打开菜单时问那台主机的宿主得来的。
     shells: Option<(HostId, Vec<runode_protocol::ShellProfile>)>,
     renaming: Option<Renaming>,
@@ -495,7 +500,7 @@ impl WindowView {
             _file_tree_events: file_tree_events,
             menu: None,
             dropdown: Dropdown::Tasks,
-            installed_agents: Vec::new(),
+            installed_agents: None,
             shells: None,
             renaming: None,
             new_workspace: None,
@@ -1208,7 +1213,8 @@ impl WindowView {
                 this.drop_pane_as_tab(dragged.pane, workspace, window, cx);
             }))
             .child(div().flex_none().w(px(left_inset)).h_full().window_control_area(WindowControlArea::Drag))
-            .child(strip)
+            // 没有标签时标签条是空的，只剩带底色的内边距，不画。
+            .when(tab_count > 0, |titlebar| titlebar.child(strip))
             .child(self.render_new_tab_button_card(window, cx))
             // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
             .child(div().flex_1().h_full().window_control_area(WindowControlArea::Drag))

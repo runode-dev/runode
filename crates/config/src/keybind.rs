@@ -28,6 +28,8 @@ pub enum Action {
     ToggleMaximize,
     ToggleFullscreen,
     NewTab,
+    /// 用新建标签菜单里第几个 shell 开新标签，从 0 数。
+    NewShellTab(usize),
     CloseTab,
     NextTab,
     PreviousTab,
@@ -173,6 +175,15 @@ pub static ACTIONS: &[ActionSpec] = &[
     plain!("toggle_maximize", "Zoom the window", Action::ToggleMaximize),
     plain!("toggle_fullscreen", "Toggle full screen", Action::ToggleFullscreen),
     plain!("new_tab", "New tab", Action::NewTab),
+    ActionSpec {
+        name: "new_tab_shell",
+        doc: "New tab with the Nth shell in the new tab menu, counting from 1",
+        param: Some("N"),
+        parse: |param| match required(param)?.parse::<usize>() {
+            Ok(n) if n >= 1 => Ok(Action::NewShellTab(n - 1)),
+            _ => Err("expected a shell number starting from 1".into()),
+        },
+    },
     plain!("close_tab", "Close the tab", Action::CloseTab),
     plain!("next_tab", "Next tab", Action::NextTab),
     plain!("previous_tab", "Previous tab", Action::PreviousTab),
@@ -384,7 +395,13 @@ pub static ACTIONS: &[ActionSpec] = &[
 ];
 
 /// 本平台的默认绑定，写法与配置文件里 `keybind =` 的值相同。
-pub static DEFAULTS: &[&str] = if cfg!(target_os = "macos") { MACOS_DEFAULTS } else { OTHER_DEFAULTS };
+pub static DEFAULTS: &[&str] = if cfg!(target_os = "macos") {
+    MACOS_DEFAULTS
+} else if cfg!(windows) {
+    WINDOWS_DEFAULTS
+} else {
+    OTHER_DEFAULTS
+};
 
 /// macOS 上的默认绑定。
 pub static MACOS_DEFAULTS: &[&str] = &[
@@ -477,11 +494,20 @@ pub static MACOS_DEFAULTS: &[&str] = &[
     "cmd+shift+space=dictate",
 ];
 
-/// Windows 和 Linux 上的默认绑定：`cmd` 在那里是 Win（Super）键，组合键多半被系统占着，所以不用它。
-/// 终端里常用的照 Ghostty 在 Linux 上的默认，以 `ctrl+shift` 开头，单按 `ctrl` 的留给 shell；
+/// Linux 上的默认绑定，Windows 上也都有（`WINDOWS_DEFAULTS` 另加几条）：`cmd` 在那里是 Win（Super）键，组合键
+/// 多半被系统占着，所以不用它。终端里常用的照 Ghostty 在 Linux 上的默认，以 `ctrl+shift` 开头，单按 `ctrl` 的留给 shell；
 /// 程序自己常用的 Alt、Shift 加方向键、Home、End 也不占。runode 自己的面板沿用 macOS 上的字母，撞了的
 /// 再加 `alt`。macOS 上管应用和窗口的几个动作这里没有。
-pub static OTHER_DEFAULTS: &[&str] = &[
+pub static OTHER_DEFAULTS: &[&str] = other_defaults!();
+
+/// Windows 上的默认绑定：`OTHER_DEFAULTS` 加上按序号挑 shell 开新标签。只有 Windows 上的宿主列得出可挑的 shell，在别的
+/// 系统上默认占着这几个组合键，多半只是从终端里的程序那里拿走它们；连 Windows 远端时可以自己绑。
+pub static WINDOWS_DEFAULTS: &[&str] = other_defaults!("ctrl+shift+digit=new_tab_shell");
+
+/// `OTHER_DEFAULTS` 那张表，后面另加 `extra` 里的几条。
+macro_rules! other_defaults {
+    ($($extra:literal),* $(,)?) => {
+        &[
     "ctrl+shift+q=quit",
     "ctrl+,=open_settings",
     "ctrl+shift+,=reload_config",
@@ -541,15 +567,19 @@ pub static OTHER_DEFAULTS: &[&str] = &[
     "ctrl+minus=decrease_font_size:1",
     "ctrl+0=reset_font_size",
     "ctrl+shift+space=dictate",
-];
+            $($extra,)*
+        ]
+    };
+}
+use other_defaults;
 
 /// 触发键里代表数字 1 到 9 的键名，配置和 GPUI 的写法相同。
 const DIGIT: &str = "digit";
 
 /// 解析一条 `keybind` 的值。触发键转成 GPUI 的写法，动作解析成 `Action`。
 ///
-/// 最后一个键写 `digit` 时一条顶九条，数字 1 到 9 各绑一次：`goto_tab`、`goto_workspace` 不带
-/// 参数时按的数字就是第几个，9 是最后一个；别的动作九个数字都绑同一个。
+/// 最后一个键写 `digit` 时一条顶九条，数字 1 到 9 各绑一次：`goto_tab`、`goto_workspace`、`new_tab_shell`
+/// 不带参数时按的数字就是第几个，前两个的 9 是最后一个；别的动作九个数字都绑同一个。
 pub fn parse(value: &str) -> Result<Vec<Keybind>, String> {
     if value == "clear" {
         return Ok(vec![Keybind::Clear]);
@@ -570,7 +600,7 @@ pub fn parse(value: &str) -> Result<Vec<Keybind>, String> {
             let action = match (action, n) {
                 ("goto_tab", 9) => "last_tab".to_owned(),
                 ("goto_workspace", 9) => "last_workspace".to_owned(),
-                ("goto_tab" | "goto_workspace", n) => format!("{action}:{n}"),
+                ("goto_tab" | "goto_workspace" | "new_tab_shell", n) => format!("{action}:{n}"),
                 _ => action.to_owned(),
             };
             bind(format!("{prefix}{n}"), &action)

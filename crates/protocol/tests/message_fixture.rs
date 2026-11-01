@@ -262,6 +262,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 handoff: 1,
                 keep_awake: true,
                 todos: false,
+                shells: false,
                 desktops: 0,
             },
         ),

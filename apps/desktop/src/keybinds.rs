@@ -27,7 +27,7 @@ use crate::{
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath,
         DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, GotoAgent,
-        MovePaneToNewTab, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab,
+        MovePaneToNewTab, NewShellTab, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab,
         NextWorkspace, OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane,
         RevealInFinder, RunTaskKey, SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace,
         SelectNextFile, SelectPreviousFile, SelectTab, SelectWorkspace, SwapPane, TaskKeys, ToggleFiles, ToggleGit,
@@ -75,6 +75,7 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::ToggleMaximize => (boxed(Zoom), GLOBAL),
         Action::ToggleFullscreen => (boxed(ToggleFullScreen), GLOBAL),
         Action::NewTab => (boxed(NewTab), WINDOW),
+        Action::NewShellTab(n) => (boxed(NewShellTab(n)), WINDOW),
         Action::CloseTab => (boxed(CloseTab), WINDOW),
         Action::NextTab => (boxed(NextTab), WINDOW),
         Action::PreviousTab => (boxed(PreviousTab), WINDOW),

@@ -91,6 +91,7 @@ fn welcome_with_handoff_is_readable() {
             handoff: 1,
             keep_awake: false,
             todos: false,
+            shells: false,
             desktops: 0,
         }
     );

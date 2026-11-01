@@ -1,18 +1,20 @@
 //! 标题栏上的新建标签按钮：「+」用默认 shell 开新标签（`NewTab`），旁边的箭头弹出菜单。菜单上面是能开的
-//! shell：工作区所在主机的宿主列出了可挑的 shell（Windows 上）时每个一项（`NewShellTab`），没列出时只有
-//! 一项普通终端；下面是本机装着的各家 agent，点了在当前终端的目录开一个新标签、在 shell 里起它。agent 装没装
-//! 按终端里 shell 报告的 PATH 找命令，shell 没报告时（没有集成的 PowerShell、cmd）按新开的 shell 会拿到的
-//! PATH 找。每次打开菜单都在后台重新问一遍 shell、找一遍 agent，问到、找到之前菜单里是上次的。
+//! shell：工作区所在主机的宿主列出了可挑的 shell（Windows 上）时每个一项（`NewShellTab`，快捷键按序号），
+//! 没列出时只有一项普通终端，默认 shell 那一项加粗；下面是那台主机上装着的各家 agent，点了在当前终端的目录
+//! 开一个新标签、在 shell 里起它。shell 和 agent 都由那台主机的宿主找：agent 按那台主机上的终端里 shell
+//! 报告的 PATH 找命令，都没报告时（没有集成的 cmd）按新开的 shell 会拿到的 PATH 找。每次打开菜单都在后台
+//! 重新问一遍，问到之前菜单里是上次的。
 
-use std::{ffi::OsStr, path::PathBuf, time::Duration};
+use std::time::Duration;
 
+use gpui::Task;
 use gpui::{Action, App, Context, Focusable, MouseButton, Window, prelude::*};
 use runode_agent::models::{LAUNCHERS, Launcher, listed, same_kind};
-use runode_protocol::ShellProfileKind;
+use runode_protocol::{ShellProfile, ShellProfileKind};
 
-use super::{Dropdown, NewTab, TITLEBAR_HEIGHT, WindowView, agents::logo::logo_path};
+use super::{Dropdown, NewShellTab, NewTab, TITLEBAR_HEIGHT, WindowView, agents::logo::logo_path};
 use crate::{
-    host_client::remote::link_of,
+    host_client::remote::{HostId, link_of},
     ui::{
         a11y::A11yPress as _,
         button::Button,
@@ -22,15 +24,8 @@ use crate::{
     },
 };
 
-/// 问宿主有哪些 shell 最多等这么久；等不到时菜单里只有普通终端。
-const LIST_SHELLS_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// 新建标签菜单里的一个 shell：在当前终端的目录开新标签，起 `program`。
-#[derive(Clone, PartialEq, Action)]
-#[action(namespace = runode, no_json)]
-pub(super) struct NewShellTab {
-    program: String,
-}
+/// 问宿主有哪些 shell、装了哪些 agent 最多等这么久；等不到时菜单里只有普通终端，没有 agent。
+const ASK_HOST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 新建标签菜单里的一家 agent：在新标签的 shell 里打 `command` 起它。
 #[derive(Clone, PartialEq, Action)]
@@ -51,24 +46,31 @@ fn program(launcher: &Launcher) -> &'static str {
     launcher.command.split_whitespace().next().unwrap_or(launcher.command)
 }
 
-/// `dirs` 里找得到 `program` 时起它要打的命令：带上找到的那个扩展名。Windows 上 npm 在 `.cmd` 旁边还放了
-/// `.ps1`，PowerShell 只打程序名时先跑 `.ps1`，执行策略不让跑脚本时就报错；写全了 PowerShell 和 cmd 都认。
-fn on_path(dirs: &[PathBuf], program: &str) -> Option<String> {
-    let file = crate::subprocess::find_command(dirs, program)?;
-    Some(file.file_name()?.to_string_lossy().into_owned())
+/// 要宿主找的命令：各家 agent 的程序名，每个一次。
+fn agent_programs() -> Vec<String> {
+    let mut programs: Vec<String> = Vec::new();
+    for launcher in LAUNCHERS {
+        if !programs.iter().any(|known| known == program(launcher)) {
+            programs.push(program(launcher).to_owned());
+        }
+    }
+    programs
 }
 
-/// `path` 里找得到命令的各家 agent，每家一个：菜单里列的那个版本（`listed`）找不到时换同一家的下一个
-/// （`same_kind`）。
-fn installed_agents(path: Option<&OsStr>) -> Vec<Installed> {
-    // 只搜绝对路径的项：空项和相对路径落在 app 的当前目录，那里的同名文件不是装着的 agent。
-    let dirs: Vec<PathBuf> =
-        path.map(|path| std::env::split_paths(path).filter(|dir| dir.is_absolute()).collect()).unwrap_or_default();
+/// 宿主找到了命令的各家 agent，每家一个：菜单里列的那个版本（`listed`）找不到时换同一家的下一个
+/// （`same_kind`）。`found` 和 `programs` 一一对应，是宿主找到的命令文件名；起 agent 时打这个带扩展名的
+/// 文件名：Windows 上 npm 在 `.cmd` 旁边还放了 `.ps1`，PowerShell 只打程序名时先跑 `.ps1`，执行策略不让跑
+/// 脚本时就报错，写全了 PowerShell 和 cmd 都认。
+fn installed_agents(programs: &[String], found: &[Option<String>]) -> Vec<Installed> {
+    let command = |name: &str| {
+        let at = programs.iter().position(|program| program == name)?;
+        found.get(at)?.clone()
+    };
     (0..LAUNCHERS.len())
         .filter(|agent| listed(*agent))
         .filter_map(|first| {
             std::iter::successors(Some(first), |agent| same_kind(*agent)).find_map(|agent| {
-                let command = on_path(&dirs, program(&LAUNCHERS[agent]))?;
+                let command = command(program(&LAUNCHERS[agent]))?;
                 Some(Installed { agent, command })
             })
         })
@@ -90,11 +92,54 @@ impl WindowView {
         }
     }
 
-    /// 菜单里点了一个 shell：在当前终端的目录开新标签起它。
+    /// 菜单里点了第几个 shell、或者按了它的快捷键：在当前终端的目录开新标签起它。还没问过当前工作区的主机
+    /// 有哪些 shell 时先在后台问，问到了再开。
     pub(super) fn new_shell_tab(&mut self, action: &NewShellTab, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(view) = self.spawn_shell_beside_focused(Some(action.program.clone()), window, cx) {
+        let index = action.0;
+        if let Some(shells) = self.listed_shells() {
+            let program = shells.get(index).map(|shell| shell.program.clone());
+            self.open_shell(index, shells.is_empty(), program, window, cx);
+            return;
+        }
+        let (host, job) = self.ask_shells(cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let shells = job.await;
+            this.update_in(cx, |this, window, cx| {
+                if !this.store_shells(host, shells, cx) {
+                    return;
+                }
+                let shells = this.listed_shells().unwrap_or_default();
+                let program = shells.get(index).map(|shell| shell.program.clone());
+                this.open_shell(index, shells.is_empty(), program, window, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 开第 `index` 个 shell：主机没列出可挑的（`none_listed`）时第一个是默认 shell，序号超出了什么都不做。
+    fn open_shell(
+        &mut self,
+        index: usize,
+        none_listed: bool,
+        program: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if none_listed && index == 0 {
+            self.new_tab(&NewTab, window, cx);
+        } else if let Some(program) = program
+            && let Some(view) = self.spawn_shell_beside_focused(Some(program), window, cx)
+        {
             self.insert_tab(self.workspace().active + 1, view, window, cx);
         }
+    }
+
+    /// 上次问到的当前工作区的主机上能挑的 shell，去掉不认识的种类；还没问到时为 `None`。
+    fn listed_shells(&self) -> Option<Vec<&ShellProfile>> {
+        let (host, shells) = self.shells.as_ref()?;
+        (*host == self.workspace().host)
+            .then(|| shells.iter().filter(|shell| shell.kind != ShellProfileKind::Other).collect())
     }
 
     /// 给弹出新建标签菜单的按钮挂上菜单：按下弹出、再按收起，菜单画在按钮下面往右展开。
@@ -144,24 +189,25 @@ impl WindowView {
     /// 菜单的各项：当前工作区的主机上能挑的 shell（没有时是普通终端），分隔线，装着的各家 agent，前面是它的
     /// logo。
     fn new_tab_menu_items(&self, cx: &App) -> Vec<Option<MenuItem>> {
-        let host = &self.workspace().host;
-        let shells = self.shells.as_ref().filter(|(listed, _)| listed == host).map_or(&[][..], |(_, shells)| shells);
+        let shells = self.listed_shells().unwrap_or_default();
         let mut items: Vec<Option<MenuItem>> = shells
             .iter()
-            .filter_map(|shell| {
-                let (label, icon) = shell_item(shell.kind)?;
-                let action = NewShellTab { program: shell.program.clone() };
-                Some(Some(MenuItem::new(label, Box::new(action), true, cx).with_icon(icon)))
+            .enumerate()
+            .map(|(index, shell)| {
+                let (label, icon) = shell_item(shell.kind);
+                let item = MenuItem::new(label, Box::new(NewShellTab(index)), true, cx).with_icon(icon);
+                Some(if shell.default { item.bold() } else { item })
             })
             .collect();
         if items.is_empty() {
             let terminal = MenuItem::new(rust_i18n::t!("agent.launch.terminal"), Box::new(NewTab), true, cx);
-            items.push(Some(terminal.with_icon(TERMINAL_ICON)));
+            items.push(Some(terminal.with_icon(TERMINAL_ICON).bold()));
         }
-        if !self.installed_agents.is_empty() {
+        let agents = self.listed_agents();
+        if !agents.is_empty() {
             items.push(None);
         }
-        items.extend(self.installed_agents.iter().map(|installed| {
+        items.extend(agents.iter().map(|installed| {
             let launcher = &LAUNCHERS[installed.agent];
             let action = NewAgentTab { command: installed.command.clone() };
             let item = MenuItem::new(launcher.label, Box::new(action), true, cx);
@@ -177,46 +223,73 @@ impl WindowView {
     /// 在后台问当前工作区的主机能挑哪些 shell；和上次问到的不一样时换上，菜单开着就换掉它的各项。宿主答不上来
     /// （旧版本的宿主不认这个请求、连不上、超时）时当作没有可挑的。
     fn list_shells(&mut self, cx: &mut Context<Self>) {
-        let host = self.workspace().host.clone();
-        let link = link_of(&host);
-        let job = cx.background_spawn(async move {
-            link.list_shells(LIST_SHELLS_TIMEOUT)
-                .inspect_err(|err| tracing::debug!("the host did not list its shells: {err:#}"))
-                .unwrap_or_default()
-        });
+        let (host, job) = self.ask_shells(cx);
         cx.spawn(async move |this, cx| {
             let shells = job.await;
-            this.update(cx, |this, cx| {
-                // 问的时候所在的工作区已经换到别的主机上了：那边的回话可能先到，不拿这个晚到的盖掉它。
-                if host != this.workspace().host {
-                    return;
-                }
-                let found = Some((host, shells));
-                if this.shells == found {
-                    return;
-                }
-                this.shells = found;
-                if this.new_tab_menu_open() {
-                    let items = this.new_tab_menu_items(cx);
-                    this.replace_menu_items(items, cx);
-                }
-            })
-            .ok();
+            this.update(cx, |this, cx| this.store_shells(host, shells, cx)).ok();
         })
         .detach();
     }
 
-    /// 在后台按 shell 报告的 PATH 找装着的 agent，没报告时按新起的 shell 会拿到的 PATH（`spawn_path`）；
-    /// 和上次找到的不一样时换上，菜单开着就换掉它的各项。
-    fn find_installed_agents(&mut self, cx: &mut Context<Self>) {
-        let reported = self.terminal_path(cx);
+    /// 在后台问当前工作区的主机能挑哪些 shell，返回问的是哪台主机和等回话的任务。
+    fn ask_shells(&self, cx: &mut Context<Self>) -> (HostId, Task<Vec<ShellProfile>>) {
+        let host = self.workspace().host.clone();
+        let link = link_of(&host);
         let job = cx.background_spawn(async move {
-            let path = reported.or_else(runode_terminal::pty::spawn_path);
-            installed_agents(path.as_deref())
+            link.list_shells(ASK_HOST_TIMEOUT)
+                .inspect_err(|err| tracing::debug!("the host did not list its shells: {err:#}"))
+                .unwrap_or_default()
+        });
+        (host, job)
+    }
+
+    /// 记下 `host` 回的 shell，菜单开着且有变化时换掉它的各项。问的时候所在的工作区已经换到别的主机上时
+    /// 不记、返回假：那边的回话可能先到，不拿这个晚到的盖掉它。
+    fn store_shells(&mut self, host: HostId, shells: Vec<ShellProfile>, cx: &mut Context<Self>) -> bool {
+        if host != self.workspace().host {
+            return false;
+        }
+        let found = Some((host, shells));
+        if self.shells != found {
+            self.shells = found;
+            if self.new_tab_menu_open() {
+                let items = self.new_tab_menu_items(cx);
+                self.replace_menu_items(items, cx);
+            }
+        }
+        true
+    }
+
+    /// 上次问到的当前工作区的主机上装着的 agent；还没问到时为空。
+    fn listed_agents(&self) -> &[Installed] {
+        match &self.installed_agents {
+            Some((host, agents)) if *host == self.workspace().host => agents,
+            _ => &[],
+        }
+    }
+
+    /// 在后台请当前工作区的主机找装着的 agent：按那台主机上的终端里 shell 报告的 PATH 找，都没报告时宿主按
+    /// 新起的 shell 会拿到的 PATH 找。和上次找到的不一样时换上，菜单开着就换掉它的各项；宿主答不上来时当作
+    /// 一家都没装。问的时候所在的工作区已经换到别的主机上时不记：那边的回话可能先到，不拿这个晚到的盖掉它。
+    fn find_installed_agents(&mut self, cx: &mut Context<Self>) {
+        let host = self.workspace().host.clone();
+        let reported = self.terminal_path(Some(&host), cx);
+        let link = link_of(&host);
+        let job = cx.background_spawn(async move {
+            let programs = agent_programs();
+            let found = link
+                .find_commands(reported, programs.clone(), ASK_HOST_TIMEOUT)
+                .inspect_err(|err| tracing::debug!("the host did not look for the agents: {err:#}"))
+                .unwrap_or_default();
+            installed_agents(&programs, &found)
         });
         cx.spawn(async move |this, cx| {
-            let found = job.await;
+            let agents = job.await;
             this.update(cx, |this, cx| {
+                if host != this.workspace().host {
+                    return;
+                }
+                let found = Some((host, agents));
                 if this.installed_agents == found {
                     return;
                 }
@@ -232,22 +305,31 @@ impl WindowView {
     }
 }
 
-/// 菜单里一个 shell 显示的名字和图标；前端不认识的种类不列。
-fn shell_item(kind: ShellProfileKind) -> Option<(std::borrow::Cow<'static, str>, &'static str)> {
-    Some(match kind {
+/// 菜单里一个 shell 显示的名字和图标。
+fn shell_item(kind: ShellProfileKind) -> (std::borrow::Cow<'static, str>, &'static str) {
+    match kind {
         ShellProfileKind::PowerShell => (rust_i18n::t!("agent.launch.powershell"), POWERSHELL_ICON),
         ShellProfileKind::WindowsPowerShell => (rust_i18n::t!("agent.launch.windows_powershell"), POWERSHELL_ICON),
         ShellProfileKind::Cmd => (rust_i18n::t!("agent.launch.cmd"), TERMINAL_ICON),
         ShellProfileKind::GitBash => (rust_i18n::t!("agent.launch.git_bash"), GIT_ICON),
-        ShellProfileKind::Other => return None,
-    })
+        ShellProfileKind::Other => (rust_i18n::t!("agent.launch.terminal"), TERMINAL_ICON),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{
+        ffi::OsStr,
+        path::{Path, PathBuf},
+    };
 
     use super::*;
+
+    /// 按 `path` 找到的各家 agent，和宿主找的一样。
+    fn found_in(path: &OsStr) -> Vec<Installed> {
+        let programs = agent_programs();
+        installed_agents(&programs, &runode_terminal::shells::find_commands(Some(path), &programs))
+    }
 
     /// 临时目录里放着 `programs` 这几个命令，当作 PATH 里的一个目录：Unix 上带可执行位，Windows 上是 npm
     /// 装出来的 `.cmd`。
@@ -268,14 +350,15 @@ mod tests {
     }
 
     fn commands(dir: &Path) -> Vec<&'static str> {
-        installed_agents(Some(dir.as_os_str())).into_iter().map(|found| LAUNCHERS[found.agent].command).collect()
+        found_in(dir.as_os_str()).into_iter().map(|found| LAUNCHERS[found.agent].command).collect()
     }
 
     #[test]
     fn lists_only_agents_whose_command_is_on_the_path() {
         let dir = dir_with("listed", &["claude", "pi", "unrelated"]);
         assert_eq!(commands(&dir), ["claude", "pi"]);
-        assert!(installed_agents(None).is_empty());
+        assert!(found_in(OsStr::new("")).is_empty());
+        assert!(installed_agents(&agent_programs(), &[]).is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -283,7 +366,7 @@ mod tests {
     fn looks_through_every_directory_on_the_path() {
         let (first, second) = (dir_with("first", &["codex"]), dir_with("second", &["claude"]));
         let path = std::env::join_paths([&first, &second]).unwrap();
-        let found = installed_agents(Some(&path)).into_iter().map(|found| LAUNCHERS[found.agent].command);
+        let found = found_in(&path).into_iter().map(|found| LAUNCHERS[found.agent].command);
         assert_eq!(found.collect::<Vec<_>>(), ["claude", "codex"]);
         std::fs::remove_dir_all(first).unwrap();
         std::fs::remove_dir_all(second).unwrap();
@@ -315,7 +398,7 @@ mod tests {
     #[test]
     fn launches_the_program_found_without_its_subcommand() {
         let dir = dir_with("launch", &["opencode2"]);
-        let found = installed_agents(Some(dir.as_os_str()));
+        let found = found_in(dir.as_os_str());
         let command: Vec<_> = found.iter().map(|found| found.command.as_str()).collect();
         assert_eq!(command, [if cfg!(windows) { "opencode2.cmd" } else { "opencode2" }]);
         std::fs::remove_dir_all(dir).unwrap();

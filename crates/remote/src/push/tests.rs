@@ -437,6 +437,7 @@ impl FakeHost {
                         handoff: 0,
                         keep_awake: false,
                         todos: self.todos.lock().unwrap().is_some(),
+                        shells: false,
                         desktops: 0,
                     }
                 }

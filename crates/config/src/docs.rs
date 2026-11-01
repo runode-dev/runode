@@ -202,9 +202,9 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
      is the Command key on macOS and the Windows or Super key elsewhere. Separate a key\n\
      sequence with >, e.g. ctrl+a>n. A key is the character itself or a name such as left, right, up,\n\
      down, page_up, page_down, home, end, enter, escape, tab, backspace, delete, space, equal, plus,\n\
-     minus, f1 to f24. The key digit stands for 1 through 9 and binds all nine at once; goto_tab and\n\
-     goto_workspace without a parameter then go to the pressed number, 9 to the last one, e.g.\n\
-     ctrl+digit=goto_tab.\n\
+     minus, f1 to f24. The key digit stands for 1 through 9 and binds all nine at once; goto_tab,\n\
+     goto_workspace and new_tab_shell without a parameter then use the pressed number (for the first\n\
+     two 9 is the last one), e.g. ctrl+digit=goto_tab.\n\
      TRIGGER=unbind removes a binding; keybind = clear removes every earlier binding, including the\n\
      defaults below.\n\
      Only Runode's own configuration file is read for keybind; keybind in the Ghostty configuration has\n\

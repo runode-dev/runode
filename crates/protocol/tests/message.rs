@@ -230,6 +230,12 @@ fn client_messages_round_trip() {
         ClientMsg::RenameWorkspace { req: 16, window: 1, workspace: 2, name: "前端".into() },
         ClientMsg::ListTasks { req: 15, dir: "/Users/me/中文".into() },
         ClientMsg::ListShells { req: 19 },
+        ClientMsg::FindCommands { req: 20, path: None, programs: vec!["claude".into(), "codex".into()] },
+        ClientMsg::FindCommands {
+            req: 21,
+            path: Some(r"C:\Windows\System32;C:\Users\me\AppData\Roaming\npm".into()),
+            programs: vec!["claude".into()],
+        },
         ClientMsg::Handoff { min_format: 1, max_format: 3 },
         ClientMsg::HandoffReady,
         ClientMsg::HandoffAbort { reason: "cannot adopt the pty".into() },
@@ -288,6 +294,7 @@ fn host_messages_round_trip() {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            shells: false,
             desktops: 0,
         },
         HostMsg::Welcome {
@@ -299,6 +306,7 @@ fn host_messages_round_trip() {
             handoff: 1,
             keep_awake: true,
             todos: false,
+            shells: true,
             desktops: 0,
         },
         HostMsg::Incompatible { protocol: 2, build: BuildId("b".into()), reason: "too new".into() },
@@ -394,11 +402,20 @@ fn host_messages_round_trip() {
         HostMsg::Shells {
             req: 9,
             shells: vec![
-                ShellProfile { kind: ShellProfileKind::WindowsPowerShell, program: "powershell.exe".into() },
-                ShellProfile { kind: ShellProfileKind::GitBash, program: r"C:\Program Files\Git\bin\bash.exe".into() },
+                ShellProfile {
+                    kind: ShellProfileKind::WindowsPowerShell,
+                    program: "powershell.exe".into(),
+                    default: true,
+                },
+                ShellProfile {
+                    kind: ShellProfileKind::GitBash,
+                    program: r"C:\Program Files\Git\bin\bash.exe".into(),
+                    default: false,
+                },
             ],
         },
         HostMsg::Shells { req: 10, shells: Vec::new() },
+        HostMsg::Commands { req: 11, found: vec![Some("claude.cmd".into()), None] },
         HostMsg::Error { req: Some(3), id: None, message: "no such directory".into() },
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff },
         HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "boom".into() } },
@@ -430,7 +447,7 @@ fn host_messages_round_trip() {
     }
 }
 
-/// 改任务时没给的部分缺省，旧宿主的 `Welcome` 没有 `todos`。
+/// 改任务时没给的部分缺省，旧宿主的 `Welcome` 没有 `todos`、`shells`。
 #[test]
 fn todo_messages_fill_in_defaults() {
     let update: ClientMsg = serde_json::from_str(r#"{"type":"update_todo","req":1,"id":"0000abcd"}"#).unwrap();
@@ -440,7 +457,7 @@ fn todo_messages_fill_in_defaults() {
     let welcome: HostMsg =
         serde_json::from_str(r#"{"type":"welcome","protocol":4,"build":"b","host_pid":9,"snapshot_format":1}"#)
             .unwrap();
-    assert!(matches!(welcome, HostMsg::Welcome { todos: false, .. }));
+    assert!(matches!(welcome, HostMsg::Welcome { todos: false, shells: false, .. }));
     let changed: HostMsg = serde_json::from_str(r#"{"type":"todos_changed"}"#).unwrap();
     assert_eq!(changed, HostMsg::TodosChanged);
 }

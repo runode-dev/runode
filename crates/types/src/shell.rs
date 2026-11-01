@@ -76,6 +76,9 @@ pub struct ShellProfile {
     pub kind: ShellProfileKind,
     /// 起它时交给 PTY 的程序：PATH 上找得到的写程序名，否则写全路径。
     pub program: String,
+    /// 没指定 shell 时宿主起的就是它。
+    #[serde(default)]
+    pub default: bool,
 }
 
 /// 可挑的 shell 是哪一种；显示的名字由前端按种类翻译。

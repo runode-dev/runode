@@ -162,6 +162,7 @@ fn role_fake_old() {
             handoff: HANDOFF_FORMAT,
             keep_awake: false,
             todos: false,
+            shells: false,
             desktops: 0,
         },
     );
@@ -906,6 +907,7 @@ fn a_goodbye_for_a_handoff_means_busy() {
         handoff: HANDOFF_FORMAT,
         keep_awake: false,
         todos: false,
+        shells: false,
         desktops: 0,
     };
     let goodbye = HostMsg::Goodbye { reason: GoodbyeReason::Handoff };

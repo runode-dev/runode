@@ -249,16 +249,18 @@ impl WindowView {
     /// 找用户自己装的命令行工具（gh）用的 PATH：从访达打开时 app 自己的 PATH 里没有
     /// brew 装的目录，用终端里 shell 报告的 PATH（`terminal_path`），没有时才用 app 自己的。
     pub(super) fn shell_path(&self, cx: &App) -> Option<std::ffi::OsString> {
-        self.terminal_path(cx).or_else(|| std::env::var_os("PATH"))
+        self.terminal_path(None, cx).or_else(|| std::env::var_os("PATH"))
     }
 
-    /// 终端里 shell 报告的 PATH：先看有焦点的终端，当前 workspace 没有标签时看窗口里别的终端；
-    /// 窗口里一个终端都没有时为空。
-    pub(super) fn terminal_path(&self, cx: &App) -> Option<std::ffi::OsString> {
+    /// 终端里 shell 报告的 PATH：先看有焦点的终端，当前 workspace 没有标签时看窗口里别的终端；给了 `host` 时
+    /// 只看那台主机上的终端。没有这样的终端时为空。
+    pub(super) fn terminal_path(&self, host: Option<&HostId>, cx: &App) -> Option<std::ffi::OsString> {
         self.focused_view()
             .into_iter()
             .chain(self.terminal_views())
-            .find_map(|view| view.read(cx).meta().shell_path.clone())
+            .map(|view| view.read(cx))
+            .filter(|view| host.is_none_or(|host| view.host() == host))
+            .find_map(|view| view.meta().shell_path.clone())
     }
 
     /// shell 报告的 PATH 里有没有叫 `program` 的命令行工具（gh）。结果记在 `cache` 里，PATH 没变
@@ -271,7 +273,7 @@ impl WindowView {
             _ => {
                 let on_path = |path: &std::ffi::OsString| {
                     let dirs: Vec<_> = std::env::split_paths(path).filter(|dir| dir.is_absolute()).collect();
-                    crate::subprocess::find_command(&dirs, program).is_some()
+                    runode_terminal::shells::find_command(&dirs, program).is_some()
                 };
                 let installed = path.as_ref().is_some_and(on_path);
                 *found = Some((path, installed));

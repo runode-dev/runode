@@ -1271,6 +1271,7 @@ action:
   toggle_maximize: 缩放窗口
   toggle_fullscreen: 切换全屏
   new_tab: 新建标签页
+  new_tab_shell: 用新建标签菜单里第 N 个 shell 新建标签页，从 1 数
   close_tab: 关闭标签页
   next_tab: 下一个标签页
   previous_tab: 上一个标签页

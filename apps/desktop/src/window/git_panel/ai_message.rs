@@ -210,7 +210,7 @@ impl WindowView {
         };
         // 从访达打开的 app 自己的 PATH 里没有 agent 装的目录，用终端里 shell 报告的 PATH；窗口里
         // 一个终端都没有时在后台问登录 shell。
-        let path = self.terminal_path(cx);
+        let path = self.terminal_path(None, cx);
         let op =
             move |repo: &ProjectRepo| generate(repo, &recipe, &context, path).map_err(|message| GitError { message });
         self.with_git_panel(cx, |panel, cx| panel.write_message(root, op, window, cx));
@@ -494,7 +494,7 @@ fn program_file(binary: &str, path: Option<&std::ffi::OsStr>) -> std::ffi::OsStr
         .or(inherited.as_deref())
         .map(|path| std::env::split_paths(path).filter(|dir| dir.is_absolute()).collect())
         .unwrap_or_default();
-    crate::subprocess::find_command(&dirs, binary).map_or_else(|| binary.into(), PathBuf::into_os_string)
+    runode_terminal::shells::find_command(&dirs, binary).map_or_else(|| binary.into(), PathBuf::into_os_string)
 }
 
 /// 在 `dir` 里跑 `binary`，`stdin` 不为空时从标准输入交给它，返回标准输出；过了 `timeout` 杀掉。

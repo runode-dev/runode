@@ -239,6 +239,7 @@ fn answers_to_requests_from_an_earlier_connection_are_dropped() {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            shells: false,
             desktops: 0,
         };
         let frame = Frame::control(&welcome).unwrap();
@@ -537,6 +538,7 @@ fn a_host_with_another_snapshot_format_gets_asked_for_replays() {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            shells: false,
             desktops: 0,
         };
         let frame = Frame::control(&welcome).unwrap();
@@ -571,6 +573,7 @@ fn fake_host(then: impl FnOnce(UnixStream) + Send + 'static) -> Link {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            shells: false,
             desktops: 0,
         };
         let frame = Frame::control(&welcome).unwrap();
@@ -580,6 +583,33 @@ fn fake_host(then: impl FnOnce(UnixStream) + Send + 'static) -> Link {
     let link = Link::new(BuildId(BUILD.into()));
     link.connect(ours).unwrap();
     link
+}
+
+/// 宿主没说认得 `ListShells`、`FindCommands`（更早的宿主）时这两条不发、马上报错，不干等到超时；认得的宿主照常回。
+#[test]
+fn shell_requests_only_go_to_hosts_that_know_them() {
+    let (sent, sent_rx) = mpsc::channel();
+    let link = fake_host(move |mut stream| {
+        while let Ok(Some(frame)) = read_frame(&mut stream) {
+            let _ = sent.send(frame.message::<ClientMsg>().ok());
+        }
+    });
+    let started = Instant::now();
+    assert!(link.find_commands(None, vec!["claude".into()], WAIT).is_err());
+    assert!(link.list_shells(WAIT).is_err());
+    assert!(started.elapsed() < Duration::from_secs(1), "waited for an old host");
+    assert!(
+        sent_rx
+            .try_iter()
+            .flatten()
+            .all(|message| !matches!(message, ClientMsg::FindCommands { .. } | ClientMsg::ListShells { .. })),
+        "sent a request the host does not know"
+    );
+
+    let host = Host::new(BuildId(BUILD.into()));
+    let link = Link::new(BuildId(BUILD.into()));
+    link.connect(host.connect_pair().unwrap()).unwrap();
+    assert_eq!(link.find_commands(None, vec!["no-such-program-runode".into()], WAIT).unwrap(), vec![None]);
 }
 
 /// 读到 `Attach` 为止。
@@ -797,6 +827,7 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            shells: false,
             desktops: 0,
         };
         let frame = Frame::control(&welcome).unwrap();

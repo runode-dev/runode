@@ -8,9 +8,9 @@
 use std::collections::HashMap;
 
 use gpui::{
-    Action, Anchor, AnyElement, App, Context, Div, ElementId, FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent,
-    Pixels, Point, Role, ScrollHandle, SharedString, Window, anchored, deferred, div, point, prelude::*, px, relative,
-    svg,
+    Action, Anchor, AnyElement, App, Context, Div, ElementId, FocusHandle, FontWeight, KeyDownEvent, MouseButton,
+    MouseDownEvent, Pixels, Point, Role, ScrollHandle, SharedString, Window, anchored, deferred, div, point,
+    prelude::*, px, relative, svg,
 };
 
 use crate::{
@@ -49,6 +49,8 @@ pub struct MenuItem {
     tooltip: Option<SharedString>,
     /// 淡淡地写在字下面的第二行。
     description: Option<SharedString>,
+    /// 字加粗：一组同类的项里默认的那一个。
+    bold: bool,
     /// 指过去在右边展开的子菜单，子菜单里的项不再带子菜单。
     submenu: Option<Vec<Option<MenuItem>>>,
 }
@@ -77,6 +79,7 @@ impl MenuItem {
             keep_open: false,
             tooltip: None,
             description: None,
+            bold: false,
             submenu: None,
         }
     }
@@ -94,6 +97,7 @@ impl MenuItem {
             keep_open: false,
             tooltip: None,
             description: None,
+            bold: false,
             submenu: None,
         }
     }
@@ -112,6 +116,7 @@ impl MenuItem {
             keep_open: false,
             tooltip: None,
             description: None,
+            bold: false,
             submenu: None,
         }
     }
@@ -130,6 +135,7 @@ impl MenuItem {
             keep_open: true,
             tooltip: None,
             description: None,
+            bold: false,
             submenu: None,
         }
     }
@@ -153,6 +159,7 @@ impl MenuItem {
             keep_open: false,
             tooltip: None,
             description: None,
+            bold: false,
             submenu: Some(items),
         }
     }
@@ -160,6 +167,12 @@ impl MenuItem {
     /// 字下面另起一行淡淡地写 `text`。
     pub fn with_description(mut self, text: impl Into<SharedString>) -> Self {
         self.description = Some(text.into());
+        self
+    }
+
+    /// 字加粗。
+    pub fn bold(mut self) -> Self {
+        self.bold = true;
         self
     }
 
@@ -313,7 +326,7 @@ fn row_ids(items: &[Option<MenuItem>]) -> Vec<ElementId> {
 
 /// 菜单项的字，有说明时在下面另起一行淡淡地写。
 fn item_text(item: &MenuItem, fg: gpui::Hsla) -> Div {
-    match item.description.clone() {
+    let text = match item.description.clone() {
         Some(description) => {
             div().flex_1().min_w_0().flex().flex_col().child(div().truncate().child(item.label.clone())).child(
                 div()
@@ -324,7 +337,8 @@ fn item_text(item: &MenuItem, fg: gpui::Hsla) -> Div {
             )
         }
         None => div().flex_1().min_w_0().truncate().child(item.label.clone()),
-    }
+    };
+    text.when(item.bold, |text| text.font_weight(FontWeight::SEMIBOLD))
 }
 
 /// 子菜单各行的元素 id：按字取，同名的按第几次出现区分；和上一层的行 id 分开。

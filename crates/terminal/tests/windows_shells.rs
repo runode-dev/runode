@@ -247,6 +247,7 @@ fn available_shells_include_the_builtin_ones_and_git_bash() {
     let kinds: Vec<_> = shells.iter().map(|shell| shell.kind).collect();
     assert!(kinds.contains(&ShellProfileKind::WindowsPowerShell), "{shells:?}");
     assert!(kinds.contains(&ShellProfileKind::Cmd), "{shells:?}");
+    assert_eq!(shells.iter().filter(|shell| shell.default).count(), 1, "{shells:?}");
     if Path::new(r"C:\Program Files\Git\bin\bash.exe").is_file() {
         let bash = shells.iter().find(|shell| shell.kind == ShellProfileKind::GitBash).expect("Git Bash");
         assert!(bash.program.to_ascii_lowercase().ends_with(r"\bin\bash.exe"), "{bash:?}");

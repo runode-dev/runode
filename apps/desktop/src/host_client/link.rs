@@ -31,6 +31,7 @@ mod reader;
 
 use std::{
     collections::{HashMap, VecDeque},
+    ffi::OsString,
     io::{self, BufWriter, Write as _},
     net::Shutdown,
     path::PathBuf,
@@ -294,6 +295,8 @@ struct State {
     host_pid: Option<u32>,
     /// 现在这条连接上的宿主认得看板的消息，见 `Link::host_knows_todos`。
     todos: bool,
+    /// 现在这条连接上的宿主认得 `ListShells`、`FindCommands`，不认得时这两条不发。
+    shells: bool,
 }
 
 /// 一个连着（或正连着）的会话。
@@ -577,6 +580,7 @@ impl Link {
             state.host_build = Some(welcome.build);
             state.host_pid = Some(host_pid);
             state.todos = welcome.todos;
+            state.shells = welcome.shells;
             *self.inner.writer() =
                 Some(Writer { generation: state.generation, stream: BufWriter::with_capacity(WRITE_BUFFER, stream) });
             state.generation
@@ -631,6 +635,15 @@ impl Link {
     pub fn host_knows_todos(&self) -> bool {
         let state = self.inner.state();
         state.connected && state.todos
+    }
+
+    /// 现在连着的宿主认得 `ClientMsg::ListShells` 和 `ClientMsg::FindCommands`；不认得时报错。
+    fn host_knows_shells(&self) -> Result<()> {
+        let state = self.inner.state();
+        if state.connected && !state.shells {
+            return Err(anyhow!("the host is too old to look for shells and commands"));
+        }
+        Ok(())
     }
 
     /// 看板变了（`HostMsg::TodosChanged`，只给问过 `ListTodos` 的连接发），或者换了一条连接、要重新问。
@@ -864,9 +877,26 @@ impl Link {
     }
 
     /// 宿主那台机器上新建终端时可以挑的 shell，最多等 `timeout`。只是查一下 PATH 和几个目录，超时不当成连接断了。
+    /// 宿主不认得这条请求（`HostMsg::Welcome` 的 `shells`）时马上报错，不发。
     pub fn list_shells(&self, timeout: Duration) -> Result<Vec<ShellProfile>> {
+        self.host_knows_shells()?;
         match self.request_on(|req| ClientMsg::ListShells { req }, timeout, OnTimeout::Wait)? {
             HostMsg::Shells { shells, .. } => Ok(shells),
+            other => Err(anyhow!("unexpected answer from the host: {other:?}")),
+        }
+    }
+
+    /// 在宿主那台机器上按 `path`（为空时新起的 shell 会拿到的 PATH）找 `programs`，和它们一一对应：找到的是
+    /// 命令的文件名，找不到的为 `None`。最多等 `timeout`，超时不当成连接断了。
+    pub fn find_commands(
+        &self,
+        path: Option<OsString>,
+        programs: Vec<String>,
+        timeout: Duration,
+    ) -> Result<Vec<Option<String>>> {
+        self.host_knows_shells()?;
+        match self.request_on(|req| ClientMsg::FindCommands { req, path, programs }, timeout, OnTimeout::Wait)? {
+            HostMsg::Commands { found, .. } => Ok(found),
             other => Err(anyhow!("unexpected answer from the host: {other:?}")),
         }
     }
@@ -976,6 +1006,7 @@ struct Welcome {
     standalone: bool,
     build: BuildId,
     todos: bool,
+    shells: bool,
 }
 
 /// 以桌面界面的身份握手，返回宿主的 `Welcome`。
@@ -998,8 +1029,8 @@ fn handshake(stream: &UnixStream, build: &BuildId, timeout: Duration) -> Result<
         match read_frame(&mut reader).map_err(frame_error)? {
             None => return Err(ConnectError::Closed),
             Some(frame) if frame.kind == FrameKind::Control => match frame.message::<HostMsg>() {
-                Ok(HostMsg::Welcome { host_pid, snapshot_format, standalone, build, todos, .. }) => {
-                    break Ok(Welcome { host_pid, snapshot_format, standalone, build, todos });
+                Ok(HostMsg::Welcome { host_pid, snapshot_format, standalone, build, todos, shells, .. }) => {
+                    break Ok(Welcome { host_pid, snapshot_format, standalone, build, todos, shells });
                 }
                 Ok(HostMsg::Incompatible { reason, .. }) => break Err(ConnectError::Incompatible(reason)),
                 Ok(HostMsg::Goodbye { .. }) => break Err(ConnectError::Closed),

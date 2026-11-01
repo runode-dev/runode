@@ -4,15 +4,15 @@
 use runode_config::{
     Keybind,
     keybind::{
-        ACTIONS, Action, MACOS_DEFAULTS, OTHER_DEFAULTS, ScreenFile, format_trigger, parse, parse_action,
-        parse_trigger, resolve,
+        ACTIONS, Action, MACOS_DEFAULTS, OTHER_DEFAULTS, ScreenFile, WINDOWS_DEFAULTS, format_trigger, parse,
+        parse_action, parse_trigger, resolve,
     },
 };
 use runode_types::pane::Direction;
 
 #[test]
 fn defaults_parse_and_action_names_are_unique() {
-    for defaults in [MACOS_DEFAULTS, OTHER_DEFAULTS] {
+    for defaults in [MACOS_DEFAULTS, OTHER_DEFAULTS, WINDOWS_DEFAULTS] {
         let mut triggers = Vec::new();
         for default in defaults {
             let binds = parse(default).unwrap_or_else(|err| panic!("{default}: {err}"));
@@ -37,9 +37,19 @@ fn defaults_parse_and_action_names_are_unique() {
 /// Windows 的 Win 键加字母多半是系统的快捷键，按下去到不了 runode。
 #[test]
 fn defaults_off_macos_leave_the_super_key_alone() {
-    for default in OTHER_DEFAULTS {
+    for default in WINDOWS_DEFAULTS {
         assert!(!parse_trigger(default.split_once('=').unwrap().0).unwrap().contains("cmd"), "{default}");
     }
+}
+
+/// 按序号挑 shell 开新标签只在 Windows 上默认绑着：只有 Windows 上的宿主列得出可挑的 shell。
+#[test]
+fn new_tab_shell_is_a_windows_default() {
+    let shell = |defaults: &[&str]| defaults.iter().any(|d| d.ends_with("=new_tab_shell"));
+    assert!(shell(WINDOWS_DEFAULTS));
+    assert!(!shell(OTHER_DEFAULTS));
+    assert!(!shell(MACOS_DEFAULTS));
+    assert!(OTHER_DEFAULTS.iter().all(|d| WINDOWS_DEFAULTS.contains(d)), "Windows has every Linux default");
 }
 
 #[test]
@@ -78,7 +88,7 @@ fn recorded_keystrokes_format_back() {
         let normalized = parse_trigger(config).unwrap();
         assert_eq!(format_trigger(&normalized).as_deref(), Some(config));
     }
-    for default in MACOS_DEFAULTS.iter().chain(OTHER_DEFAULTS).filter(|d| !d.contains("digit")) {
+    for default in MACOS_DEFAULTS.iter().chain(WINDOWS_DEFAULTS).filter(|d| !d.contains("digit")) {
         let keys = parse_trigger(default.split_once('=').unwrap().0).unwrap();
         let formatted = format_trigger(&keys).unwrap_or_else(|| panic!("{default}"));
         assert_eq!(parse_trigger(&formatted).unwrap(), keys);

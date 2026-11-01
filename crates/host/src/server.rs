@@ -49,8 +49,8 @@ use anyhow::{Context as _, Result, anyhow};
 use libc::{SO_RCVBUF, SO_SNDBUF};
 use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, Frame, FrameError, FrameKind, GoodbyeReason,
-    HANDOFF_FORMAT, HostMsg, MAX_PAYLOAD, PROTOCOL_VERSION, SessionId, SessionInfo, ShellReport, WindowLayout,
-    git::GitRequest, read_frame, write_frame,
+    HANDOFF_FORMAT, HostMsg, MAX_FIND_COMMANDS, MAX_PAYLOAD, PROTOCOL_VERSION, SessionId, SessionInfo, ShellReport,
+    WindowLayout, git::GitRequest, read_frame, write_frame,
 };
 use runode_terminal::pty;
 use runode_types::{grid::GridSize, input::parse_key_list, session::DriveAction};
@@ -1131,6 +1131,7 @@ impl Connection {
             handoff: HANDOFF_FORMAT,
             keep_awake: true,
             todos: true,
+            shells: true,
             desktops,
         }
     }
@@ -1284,6 +1285,18 @@ impl Connection {
             ClientMsg::ListShells { req } => self.read_files(req, "host-list-shells", move || {
                 Ok(HostMsg::Shells { req, shells: runode_terminal::shells::available() })
             }),
+            ClientMsg::FindCommands { req, path, programs } => {
+                if programs.len() > MAX_FIND_COMMANDS {
+                    self.error(Some(req), None, format!("at most {MAX_FIND_COMMANDS} commands at a time"));
+                    return;
+                }
+                self.read_files(req, "host-find-commands", move || {
+                    Ok(HostMsg::Commands {
+                        req,
+                        found: runode_terminal::shells::find_commands(path.as_deref(), &programs),
+                    })
+                });
+            }
             ClientMsg::Git { req, id, request } => self.git(req, id, request),
             ClientMsg::ListTodos { req } => {
                 if let Some(peer) = self.shared.peers().connections.get_mut(&self.id) {
