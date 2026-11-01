@@ -580,12 +580,14 @@
         }
 
         /// 按住的修饰键按下去的样子跟着 `stickyMods` 走：用掉以后自己松开。
+        /// 按住的修饰键反色，黑白为主。不用 `tintColor`：跟在软键盘上面时这条栏在键盘的窗口里，接不到 app 设的
+        /// 强调色，会是系统的蓝色。
         func refreshMods() {
             for (button, mod) in modButtons {
                 let on = model.stickyMods[keyPath: mod]
                 var config = button.configuration
-                config?.baseBackgroundColor = on ? .tintColor : nil
-                config?.baseForegroundColor = on ? .white : nil
+                config?.baseBackgroundColor = on ? .label : nil
+                config?.baseForegroundColor = on ? .systemBackground : nil
                 button.configuration = config
                 button.accessibilityTraits = on ? [.button, .selected] : .button
             }
