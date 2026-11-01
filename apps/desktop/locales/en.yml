@@ -491,6 +491,7 @@ git:
     failed: Couldn't read the commit history
     more: Load More…
     refresh: Refresh Graph
+    resize: Resize Graph
     loading_changes: Loading changes…
     changes_failed: Couldn't read this commit's changes
     no_files: No file changes

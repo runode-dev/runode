@@ -99,6 +99,9 @@ pub struct GitCommitAction {
     pub op: CommitOp,
 }
 
+/// 辅助工具加减一下，图表高这么多。
+const GRAPH_STEP: f32 = ROW_HEIGHT * 3.;
+
 /// 图表展开着时多高：`saved` 是拖过的高度，`room` 是面板标题以下的高度。
 fn graph_height(saved: Option<f32>, room: f32) -> f32 {
     saved.unwrap_or(room * GRAPH_SHARE).min(room - CHANGES_MIN_HEIGHT).max(GRAPH_MIN_HEIGHT)
@@ -201,8 +204,24 @@ impl GitPanel {
             .track_scroll(&panel.graph_scroll)
             .flex_1(),
         );
+        let height = graph_height(self.graph_height, room);
+        let view = cx.entity().downgrade();
+        let nudge = move |delta: f32| {
+            let view = view.clone();
+            move |_: Option<&gpui::accesskit::ActionData>, _: &mut Window, cx: &mut gpui::App| {
+                view.update(cx, |this, cx| {
+                    this.graph_height = Some(graph_height(Some(height + delta), room));
+                    cx.emit(GitPanelEvent::OptionsChanged);
+                    cx.notify();
+                })
+                .ok();
+            }
+        };
+        // 辅助工具报成分隔条，加减一下改三行高。
         let handle = div()
             .id("git-graph-divider")
+            .role(Role::Splitter)
+            .aria_label(rust_i18n::t!("git.graph.resize").into_owned())
             .absolute()
             .left_0()
             .top(px(-DIVIDER_GRAB_WIDTH / 2.))
@@ -221,8 +240,10 @@ impl GitPanel {
                     }
                     cx.notify();
                 }),
-            );
-        pane.h(px(graph_height(self.graph_height, room))).child(list).child(handle)
+            )
+            .on_a11y_action(AccessibleAction::Increment, nudge(GRAPH_STEP))
+            .on_a11y_action(AccessibleAction::Decrement, nudge(-GRAPH_STEP));
+        pane.h(px(height)).child(list).child(handle)
     }
 
     /// 拖动图表上沿的分隔线，上沿跟到窗口里的纵坐标 `y`；`viewport` 是面板底边在窗口里的纵坐标，面板从窗口

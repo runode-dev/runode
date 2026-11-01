@@ -491,6 +491,7 @@ git:
     failed: 读不出提交历史
     more: 加载更多…
     refresh: 刷新图表
+    resize: 调整图表的高度
     loading_changes: 正在读取改动…
     changes_failed: 读不出这个提交的改动
     no_files: 没有改动文件
