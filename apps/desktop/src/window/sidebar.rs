@@ -507,6 +507,8 @@ impl WindowView {
             })
             .when(blocked, |trailing| {
                 let amber = Hsla::from(gpui::rgb(AGENT_BLOCKED_COLOR));
+                // 浅色底上琥珀色的字太浅，压暗了才读得清；底色照旧是淡淡的琥珀色。
+                let text = if cx.theme().is_light { Hsla { l: 0.32, ..amber } } else { amber };
                 trailing.child(
                     div()
                         .flex_none()
@@ -516,7 +518,7 @@ impl WindowView {
                         .flex()
                         .items_center()
                         .bg(amber.opacity(0.16))
-                        .text_color(amber)
+                        .text_color(text)
                         .text_size(FontSize::Tiny)
                         .font_weight(FontWeight::MEDIUM)
                         .child(AgentStatus::Blocked.label()),
