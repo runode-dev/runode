@@ -27,10 +27,7 @@ use super::{
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
-    assets::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, MONITOR_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON,
-        SIDEBAR_ICON,
-    },
+    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON, SIDEBAR_ICON},
     host_client::remote::{self, HostId, Status},
     menus::OpenSettings,
     remote_hosts::{self, status_text},
@@ -301,10 +298,12 @@ impl WindowView {
             Status::Idle => fg.opacity(0.3),
         });
         let status_text = status.as_ref().map(status_text);
-        // 远端主机按上次连上时报的系统画 logo，没连上过的画成服务器。
-        let system = host.label().and_then(|name| remote_hosts::system(name, cx));
+        // 按系统画 logo：本机看自己的，远端主机看上次连上时报的，没连上过的画成服务器。
+        let system = match host.label() {
+            Some(name) => remote_hosts::system(name, cx),
+            None => Some(std::env::consts::OS),
+        };
         let icon = match system {
-            None if host.is_local() => MONITOR_ICON,
             Some("macos") => system_logos::APPLE,
             Some("linux") => system_logos::LINUX,
             Some("windows") => system_logos::WINDOWS,
