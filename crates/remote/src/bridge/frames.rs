@@ -94,7 +94,7 @@ impl FromPhone {
     fn decide(&mut self, to_host: &mut Vec<u8>, replies: &mut Vec<u8>, local: &mut dyn LocalRequests) {
         let Some(frame) = self.held.take() else { return };
         let reply = serde_json::from_slice::<ClientMsg>(&frame[HEADER_LEN..]).ok().and_then(|message| {
-            if let Some(what) = refusal(&message) {
+            if let Some(what) = message.remote_refusal() {
                 tracing::info!("refused a remote device's request to {what}");
                 return Some(HostMsg::Error { req: None, id: None, message: format!("a remote device cannot {what}") });
             }
@@ -112,23 +112,6 @@ impl FromPhone {
             Err(err) => tracing::warn!("cannot encode a reply to a remote device: {err}"),
         }
     }
-}
-
-/// 手机连接不能做的事，返回给它的说明里「不能做什么」那半句；能做的为 `None`。这些都是管宿主本身、
-/// 或者只有本机的 app 才该做的：让宿主退出（`Shutdown`）、升级交接、替界面回话（`UiReply`）、改
-/// 宿主的选项和主题。几种都不带 `req` 和会话，回的 `Error` 也就不带。
-pub(crate) fn refusal(message: &ClientMsg) -> Option<&'static str> {
-    Some(match message {
-        ClientMsg::Shutdown { .. } => "shut the host down",
-        ClientMsg::Handoff { .. }
-        | ClientMsg::HandoffReady
-        | ClientMsg::HandoffAbort { .. }
-        | ClientMsg::HandoffDone => "hand the host over",
-        ClientMsg::UiReply { .. } => "answer for the runode window",
-        ClientMsg::SetOptions { .. } => "change the host's options",
-        ClientMsg::SetTheme { .. } => "change the terminal theme",
-        _ => return None,
-    })
 }
 
 /// 宿主发给手机的字节流现在走到哪一帧的哪里，见模块文档。

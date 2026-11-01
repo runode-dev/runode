@@ -39,12 +39,11 @@
 //!    新分配的标识），或者 `GateHostMsg::RemoteRejected`
 //!    （`{"type":"remote_rejected","reason":{"kind":"unknown_device"}}`，原因见 `RejectReason`），
 //!    拒绝后宿主关闭连接。
-//! 5. 通过以后，客户端发的第一帧必须是 `ClientMsg::Hello`，`client` 是 `ClientKind::Mobile`，否则
-//!    宿主直接断开。之后整条连接就是普通的连接，和本机 Unix socket 上的一样，只有一个例外：管宿主
-//!    本身、或者只有本机的 app 才该做的请求（`ClientMsg::Shutdown`、交接用的 `Handoff`、
-//!    `HandoffReady`、`HandoffAbort`、`HandoffDone`，以及 `UiReply`、`SetOptions`、`SetTheme`）不转给
-//!    宿主，宿主在发往客户端的方向、两帧之间回一条 `HostMsg::Error`（这几种都不带 `req` 和会话，
-//!    `Error` 也就不带），连接照旧。关单个会话（`Kill`）、开会话、输入、改尺寸这些照常。登记推送的
+//! 5. 通过以后，客户端发的第一帧必须是 `client` 为 `ClientKind::Mobile` 的 `ClientMsg::Hello`（终端）、
+//!    `ScreenClientMsg::ScreenHello`（远程桌面）或 `SpeechClientMsg::SpeechHello`（语音识别），否则
+//!    宿主直接断开。终端的连接之后就是普通的连接，和本机 Unix socket 上的一样，只有一个例外：
+//!    `ClientMsg::remote_refusal` 挡下的请求不转给宿主，宿主在发往客户端的方向、两帧之间回一条
+//!    `HostMsg::Error`（挡下的都不带 `req` 和会话，`Error` 也就不带），连接照旧。登记推送的
 //!    `ClientMsg::PushRegister`（见 `push`）也不转给宿主，由监听方按这台设备记下，
 //!    同样在两帧之间回 `HostMsg::Done`（办不了时回带 `req` 的 `Error`）。
 //!
@@ -110,6 +109,65 @@ pub const PAIRING_TTL: Duration = Duration::from_secs(5 * 60);
 pub const BONJOUR_SERVICE: &str = "_runode._tcp";
 /// 配对 URI 的开头，见 `PairingUri`。
 pub const PAIRING_URI_PREFIX: &str = "runode://pair?";
+
+impl crate::ClientMsg {
+    /// 经远程访问连来的设备不能发的请求：管宿主本身、或者只有本机的 app 才该做的。返回「不能做什么」那半句，
+    /// 宿主回的 `HostMsg::Error` 写成 `a remote device cannot <这半句>`；能发的为 `None`。挡下的几种都不带
+    /// `req` 和会话。每种消息都列出来、不用通配：新加的消息在这里定下手机能不能发。
+    pub fn remote_refusal(&self) -> Option<&'static str> {
+        use crate::ClientMsg::*;
+        match self {
+            Shutdown { .. } => Some("shut the host down"),
+            Handoff { .. } | HandoffReady | HandoffAbort { .. } | HandoffDone => Some("hand the host over"),
+            UiReply { .. } => Some("answer for the runode window"),
+            SetOptions { .. } => Some("change the host's options"),
+            SetTheme { .. } => Some("change the terminal theme"),
+            Hello { .. }
+            | ListSessions
+            | Spawn { .. }
+            | Start { .. }
+            | Attach { .. }
+            | Detach { .. }
+            | Resize { .. }
+            | Focus { .. }
+            | ClearScreen { .. }
+            | Kill { .. }
+            | ReadScreen { .. }
+            | SendKeys { .. }
+            | Paste { .. }
+            | Layout { .. }
+            | LayoutChanged { .. }
+            | Open { .. }
+            | Reveal { .. }
+            | MovePane { .. }
+            | SwapPanes { .. }
+            | ListDirs { .. }
+            | OpenWorkspace { .. }
+            | RenameWorkspace { .. }
+            | ListTasks { .. }
+            | ListShells { .. }
+            | FindCommands { .. }
+            | Git { .. }
+            | WriteClipboard { .. }
+            | ReadClipboard { .. }
+            | PushRegister { .. }
+            | KeepAwake
+            | ListTodos { .. }
+            | AddTodo { .. }
+            | UpdateTodo { .. }
+            | RemoveTodo { .. }
+            | StartTodo { .. }
+            | ResumeTodo { .. }
+            | ListDoneTodos { .. }
+            | GetTodo { .. }
+            | MoveTodo { .. }
+            | AddSchedule { .. }
+            | UpdateSchedule { .. }
+            | RemoveSchedule { .. }
+            | Unknown => None,
+        }
+    }
+}
 
 /// 读一帧门禁消息：载荷上限是 `GATE_MAX_PAYLOAD`，其余同 `read_frame`。
 pub fn read_gate_frame(reader: &mut impl std::io::Read) -> Result<Option<Frame>, FrameError> {
