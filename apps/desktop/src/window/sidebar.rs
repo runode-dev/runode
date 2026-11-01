@@ -72,6 +72,8 @@ const RENAME_FIELD_HEIGHT: f32 = 18.;
 const HOST_HEADER_HEIGHT: f32 = 22.;
 /// 组头上连接状态的圆点。
 const HOST_STATUS_DOT: f32 = 6.;
+/// 叠在系统图标右上角的连接状态圆点，连同和图标隔开的那圈描边。
+const HOST_STATUS_BADGE: f32 = 7.;
 
 /// 没有 GitHub 头像的 workspace 行首画名字首字母的色块，颜色按名字从这里挑；字是白的，深浅背景上都看得清。
 const LETTER_COLORS: [Rgb; 8] = [
@@ -281,6 +283,8 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let fg = cx.theme().foreground;
+        // 状态圆点的描边和侧栏同色。
+        let background = if cards(cx) { cx.theme().frame } else { cx.theme().mix(0.03) };
         let name = match host.label() {
             Some(name) => remote_hosts::display_name(name, cx).to_owned(),
             None => rust_i18n::t!("workspace.host_local_group").into_owned(),
@@ -400,35 +404,40 @@ impl WindowView {
                     press(this, None, cx);
                 }
             })
+            // 连接状态的圆点叠在系统图标的右上角，描一圈背景色和图标隔开。
             .child(
                 div()
                     .flex_none()
-                    .w(px(ROW_ICON_SIZE))
-                    .flex()
-                    .justify_center()
-                    .child(svg().path(icon).size(px(12.)).text_color(fg.opacity(0.4))),
-            )
-            // 连接状态的圆点紧跟在主机名后面，名字长时名字先截短。
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
+                    .relative()
+                    .size(px(ROW_ICON_SIZE))
                     .flex()
                     .items_center()
-                    .gap(px(6.))
-                    .map(|line| match renaming {
-                        Some(renaming) => line.child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(renaming.edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx)))),
-                        ),
-                        None => line.child(div().min_w_0().truncate().child(name)),
-                    })
-                    .children(
-                        status_color.map(|color| div().flex_none().size(px(HOST_STATUS_DOT)).rounded_full().bg(color)),
-                    ),
+                    .justify_center()
+                    .child(svg().path(icon).size(px(12.)).text_color(fg.opacity(0.4)))
+                    .children(status_color.map(|color| {
+                        div()
+                            .absolute()
+                            .right(px(0.))
+                            .top(px(0.))
+                            .size(px(HOST_STATUS_BADGE))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(background)
+                            .bg(color)
+                    })),
             )
+            // 名字长时截短。
+            .child(div().flex_1().min_w_0().flex().items_center().gap(px(6.)).map(|line| {
+                match renaming {
+                    Some(renaming) => line.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(renaming.edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx)))),
+                    ),
+                    None => line.child(div().min_w_0().truncate().child(name)),
+                }
+            }))
             .when(attention, |header| {
                 header.child(
                     div().flex_none().size(px(HOST_STATUS_DOT)).rounded_full().bg(gpui::rgb(AGENT_BLOCKED_COLOR)),
