@@ -883,10 +883,7 @@ fn device_row(device: &Paired, theme: &Theme, cx: &mut Context<WindowView>) -> S
 
 /// Unix 秒在本地时区里是哪年哪月哪天。
 fn local_date(secs: u64) -> (i32, i32, i32) {
-    let time = libc::time_t::try_from(secs).unwrap_or(libc::time_t::MAX);
-    // SAFETY: `tm` 是纯数据，全零是合法的值；读不出时就用它。
-    let tm = runode_todo::local_tm(time).unwrap_or(unsafe { std::mem::zeroed() });
-    (tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday)
+    runode_todo::LocalTime::from_unix(secs).map_or((1970, 1, 1), |at| (at.year, at.month.into(), at.day.into()))
 }
 
 /// 下拉框里一个网络的名字：地址加网卡名；Tailscale 分到的地址写 Tailscale，比 `utun3` 好认。

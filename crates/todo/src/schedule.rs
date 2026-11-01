@@ -36,7 +36,7 @@ fn daily(base: u64, hour: u8, minute: u8, days: u8) -> Option<u64> {
 }
 
 /// `at`（Unix 时间）在本地是几点（C 库的 `localtime_r`，Windows 上是 `localtime_s`）。
-pub fn local_tm(at: libc::time_t) -> Option<libc::tm> {
+pub(crate) fn local_tm(at: libc::time_t) -> Option<libc::tm> {
     // SAFETY: `tm` 是纯数据，全零是合法的值。
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: 两个指针都指向这里的局部变量，调用期间有效；函数只写 `tm`。
@@ -49,7 +49,7 @@ pub fn local_tm(at: libc::time_t) -> Option<libc::tm> {
 }
 
 /// 规范化 `tm` 并填好星期几，返回它的 Unix 时间（C 库的 `mktime`）。
-pub fn mktime(tm: &mut libc::tm) -> libc::time_t {
+pub(crate) fn mktime(tm: &mut libc::tm) -> libc::time_t {
     #[cfg(windows)]
     unsafe extern "C" {
         // UCRT 只导出带位宽的名字，C 头文件里的 `mktime` 是它的内联别名。

@@ -16,7 +16,6 @@ mod client;
 mod commands;
 mod complete;
 mod help;
-mod local_time;
 mod remote;
 mod select;
 mod service;

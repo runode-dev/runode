@@ -4,9 +4,10 @@ use std::{net::IpAddr, path::PathBuf, time::Duration};
 
 use runode_autostart::Kind;
 use runode_protocol::{Placement, todo::When};
+use runode_todo::LocalTime;
 use runode_types::input::parse_key_list;
 
-use crate::{help, local_time::LocalTime, select::Selector};
+use crate::{help, select::Selector};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Command {
@@ -241,7 +242,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             "--daily" => {
                 let at = value(&mut rest, arg)?;
                 flags.daily =
-                    Some(crate::local_time::clock(at).ok_or_else(|| format!("--daily takes HH:MM, not {at}"))?);
+                    Some(runode_todo::parse_clock(at).ok_or_else(|| format!("--daily takes HH:MM, not {at}"))?);
             }
             "--days" => flags.days = Some(days(value(&mut rest, arg)?)?),
             "--every" => {

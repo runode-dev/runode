@@ -1,7 +1,6 @@
 //! 新建、编辑任务和定时的对话框：标题、提示词、在哪个工作区或目录里做、agent 和它的模型、强度（见 `runode_agent::models`），
 //! 要用的 skill、以哪个自定义 agent 的身份跑（`skills`）、附上的文件，免不免确认，要不要独立的工作树；定时多一组什么时候跑
-//! （一次、每天某时可选星期几、每隔几分钟）。时间都按本机的本地时间填、显示，换算用 libc 的
-//! `localtime_r` 和 `mktime`。填得不对时在对话框里说，不发请求；宿主那边还会再查一遍。
+//! （一次、每天某时可选星期几、每隔几分钟）。时间都按本机的本地时间填、显示（`runode_todo::LocalTime`）。填得不对时在对话框里说，不发请求；宿主那边还会再查一遍。
 //!
 //! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，关掉、存好了经 `DialogEvent` 告诉看板。定时的
 //! 盖住整个窗口，由 app 画在窗口的最上层（`Kanban::dialog`）；任务的是看板里的一页（`TodoDialog::page`），由看板
@@ -48,6 +47,7 @@ use runode_protocol::{
 
 use crate::kanban::store;
 use runode_agent::models::{Catalog, LAUNCHERS, Launcher, Pick, Unanswered};
+use runode_todo::LocalTime;
 
 /// 问到的各家 agent 的模型清单：下次打开对话框先用着，同时再问一遍。
 static CATALOGS: LazyLock<Mutex<HashMap<&'static str, Arc<Catalog>>>> = LazyLock::new(Mutex::default);
@@ -190,67 +190,10 @@ impl MenuHost for TodoDialog {
     }
 }
 
-/// 本地时间的年月日时分。
-pub(crate) struct Local {
-    pub(crate) year: i32,
-    pub(crate) month: u32,
-    pub(crate) day: u32,
-    pub(crate) hour: u32,
-    pub(crate) minute: u32,
-}
-
-/// `at`（Unix 秒）的本地时间。
-pub(crate) fn local(at: u64) -> Option<Local> {
-    let tm = runode_todo::local_tm(libc::time_t::try_from(at).ok()?)?;
-    Some(Local {
-        year: tm.tm_year + 1900,
-        month: u32::try_from(tm.tm_mon + 1).ok()?,
-        day: u32::try_from(tm.tm_mday).ok()?,
-        hour: u32::try_from(tm.tm_hour).ok()?,
-        minute: u32::try_from(tm.tm_min).ok()?,
-    })
-}
-
-/// 本地时间的这一刻（Unix 秒）；日子不存在（2 月 30 日）时为空。
-fn from_local(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> Option<u64> {
-    // SAFETY: `tm` 是纯数据，全零是合法的值。
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    tm.tm_year = year - 1900;
-    tm.tm_mon = i32::try_from(month).ok()? - 1;
-    tm.tm_mday = i32::try_from(day).ok()?;
-    tm.tm_hour = i32::try_from(hour).ok()?;
-    tm.tm_min = i32::try_from(minute).ok()?;
-    tm.tm_isdst = -1;
-    let at = runode_todo::mktime(&mut tm);
-    // 规范化挪了日子（2 月 30 日成了 3 月 2 日）就是填错了；春天跳过的钟点只挪时，照收。
-    (tm.tm_mday == i32::try_from(day).ok()? && tm.tm_mon == i32::try_from(month).ok()? - 1)
-        .then(|| u64::try_from(at).ok())
-        .flatten()
-}
-
-/// `9:05`、`09:05` 这样的钟点。
-fn parse_clock(text: &str) -> Option<(u8, u8)> {
-    let (hour, minute) = text.trim().split_once(':')?;
-    let (hour, minute): (u8, u8) = (hour.trim().parse().ok()?, minute.trim().parse().ok()?);
-    (hour < 24 && minute < 60).then_some((hour, minute))
-}
-
-/// `YYYY-MM-DD HH:MM`，本地时间。
-fn parse_date_time(text: &str) -> Option<u64> {
-    let (date, clock) = text.trim().split_once(char::is_whitespace)?;
-    let mut parts = date.split('-').map(|part| part.parse::<u32>().ok());
-    let (year, month, day) = (parts.next()??, parts.next()??, parts.next()??);
-    if parts.next().is_some() || !(1..=12).contains(&month) {
-        return None;
-    }
-    let (hour, minute) = parse_clock(clock)?;
-    from_local(i32::try_from(year).ok()?, month, day, hour.into(), minute.into())
-}
-
 /// 一次性定时的时间栏 `text` 是哪一刻。和编辑前的 `original` 显示得一样（没改）时照原样，不重新解析：
 /// `full_time` 不带秒，夏令时回拨那个钟点也可能换成另一刻。
 fn once_at(text: &str, original: Option<u64>) -> Option<u64> {
-    original.filter(|at| full_time(*at) == text.trim()).or_else(|| parse_date_time(text))
+    original.filter(|at| full_time(*at) == text.trim()).or_else(|| LocalTime::parse(text)?.unix())
 }
 
 /// 至少一分钟的分钟数。
@@ -1489,7 +1432,7 @@ impl TodoDialog {
                 }
             }
             Some(Kind::Daily) => {
-                let (hour, minute) = parse_clock(self.clock.read(cx).query())
+                let (hour, minute) = runode_todo::parse_clock(self.clock.read(cx).query())
                     .ok_or_else(|| rust_i18n::t!("kanban.dialog.bad_daily").into_owned())?;
                 When::Daily { hour, minute, days: self.days }
             }
@@ -1525,15 +1468,13 @@ fn next_hour() -> String {
 /// `now` 之后本地时间的下一个整点。按本地的分钟数补齐，不按 UTC 的整点：UTC+5:30 这类时区的 UTC 整点在本地
 /// 是半点。
 fn next_local_hour(now: u64) -> u64 {
-    let minute = local(now).map_or(0, |at| at.minute);
+    let minute = LocalTime::from_unix(now).map_or(0, |at| at.minute);
     now - now % 60 + u64::from(60 - minute) * 60
 }
 
 /// `YYYY-MM-DD HH:MM`，按本地时间。
 pub(crate) fn full_time(at: u64) -> String {
-    local(at).map_or_else(String::new, |at| {
-        format!("{:04}-{:02}-{:02} {:02}:{:02}", at.year, at.month, at.day, at.hour, at.minute)
-    })
+    LocalTime::from_unix(at).map_or_else(String::new, |at| at.to_string())
 }
 
 #[cfg(test)]
@@ -1542,26 +1483,16 @@ mod tests {
 
     #[test]
     fn parses_clocks_minutes_and_dates() {
-        assert_eq!(parse_clock("9:05"), Some((9, 5)));
-        assert_eq!(parse_clock(" 23:59 "), Some((23, 59)));
-        assert_eq!(parse_clock("24:00"), None);
-        assert_eq!(parse_clock("9:5x"), None);
-        assert_eq!(parse_clock("905"), None);
         assert_eq!(parse_minutes("15"), Some(15));
         assert_eq!(parse_minutes("0"), None);
         assert_eq!(parse_minutes("x"), None);
-        assert_eq!(parse_date_time("2026-02-30 09:00"), None);
-        assert_eq!(parse_date_time("2026-13-01 09:00"), None);
-        assert_eq!(parse_date_time("2026-10-13"), None);
         assert_eq!(first_line("\n  fix it \nmore"), "fix it");
     }
 
     // 不改 `TZ`：本地时间来回一趟原样回来，和时区无关。
     #[test]
     fn local_times_round_trip() {
-        let at = parse_date_time("2026-10-13 14:30").unwrap();
-        let local = local(at).unwrap();
-        assert_eq!((local.year, local.month, local.day, local.hour, local.minute), (2026, 10, 13, 14, 30));
+        let at = LocalTime::parse("2026-10-13 14:30").and_then(LocalTime::unix).unwrap();
         assert_eq!(full_time(at), "2026-10-13 14:30");
         assert!(next_hour().ends_with(":00"));
         // 时间栏没改时带秒的原值照旧，改了才按填的算。
@@ -1571,7 +1502,7 @@ mod tests {
         for now in [at, at + 59, at + 30 * 60, at + 89 * 60 + 59] {
             let next = next_local_hour(now);
             assert!(next > now && next - now <= 3600, "{now} -> {next}");
-            assert_eq!(super::local(next).unwrap().minute, 0, "{now} -> {next}");
+            assert_eq!(LocalTime::from_unix(next).unwrap().minute, 0, "{now} -> {next}");
         }
     }
 }

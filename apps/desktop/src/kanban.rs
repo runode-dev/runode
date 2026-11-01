@@ -59,6 +59,7 @@ use runode_protocol::{
     ClientMsg, HostMsg, SessionId,
     todo::{Column, DropAction, Schedule, Todo, When, column, drop_action},
 };
+use runode_todo::LocalTime;
 use runode_types::agent::Agent;
 
 pub use dialog::TodoDialog;
@@ -1827,7 +1828,7 @@ fn run_label(column: String, when: &str) -> String {
 
 /// 今天的写 `HH:MM`，别的日子写 `MM-DD HH:MM`，按本地时间。
 fn short_time(at: u64, now: u64) -> String {
-    let (Some(at), Some(today)) = (dialog::local(at), dialog::local(now)) else { return String::new() };
+    let (Some(at), Some(today)) = (LocalTime::from_unix(at), LocalTime::from_unix(now)) else { return String::new() };
     if (at.year, at.month, at.day) == (today.year, today.month, today.day) {
         format!("{:02}:{:02}", at.hour, at.minute)
     } else {

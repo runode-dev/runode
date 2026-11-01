@@ -5,8 +5,10 @@
 //! 也可以直接开库读写，SQLite 管得住几个进程同时开着；但宿主不知道库被改了，不会告诉在看看板的前端，
 //! 定时的线程也要到下一轮（最多半分钟）才看到，所以宿主在跑时改看板仍经它的消息。
 
+mod local_time;
 mod schedule;
 mod store;
 
-pub use schedule::{local_tm, mktime, next_fire};
+pub use local_time::{LocalTime, parse_clock};
+pub use schedule::next_fire;
 pub use store::{DONE_KEPT, Result, Store};
