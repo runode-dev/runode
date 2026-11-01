@@ -26,7 +26,7 @@ use super::{
 use crate::{
     host_client::remote::{self, HostId, Status},
     project_host::ProjectHost,
-    remote_hosts::status_text,
+    remote_hosts::{display_name, has_display_name, status_text},
     ui::{
         a11y::{A11yPress as _, Press},
         button::{Button, ButtonSize, ButtonVariant},
@@ -165,10 +165,21 @@ impl WindowView {
             let host = HostId::Ssh(name.clone());
             let checked = dialog.host == host;
             let state = rust_i18n::t!("workspace.host_remote_hint", status = short_status(&status)).into_owned();
+            // 起了显示名的主机，悬停时另写上连接目标。
+            let tooltip = if has_display_name(&name, cx) {
+                format!("{name} · {}", status_text(&status))
+            } else {
+                status_text(&status)
+            };
             Some(
-                MenuItem::checkbox(name, None, checked, Box::new(PickWorkspaceHost(host)))
-                    .with_description(state)
-                    .with_tooltip(status_text(&status)),
+                MenuItem::checkbox(
+                    display_name(&name, cx).to_owned(),
+                    None,
+                    checked,
+                    Box::new(PickWorkspaceHost(host)),
+                )
+                .with_description(state)
+                .with_tooltip(tooltip),
             )
         });
         [Some(add), None, Some(local)].into_iter().chain(remotes).collect()
@@ -493,8 +504,10 @@ impl WindowView {
         let dialog = self.new_workspace.as_ref()?;
         let fg = cx.theme().foreground;
         let open = self.host_menu_open();
-        let name =
-            dialog.host.label().map_or_else(|| rust_i18n::t!("workspace.host_local").into_owned(), str::to_owned);
+        let name = dialog.host.label().map_or_else(
+            || rust_i18n::t!("workspace.host_local").into_owned(),
+            |name| display_name(name, cx).to_owned(),
+        );
         let view = cx.entity().downgrade();
         let picker = Button::new(
             "new-workspace-host",

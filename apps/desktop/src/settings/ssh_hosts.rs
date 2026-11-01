@@ -44,12 +44,15 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<Div> {
         let name = host.name.clone();
+        let title = remote_hosts::display_name(&name, cx).to_owned();
+        // 起了显示名的主机，名字下面另写连接目标。
+        let destination = remote_hosts::has_display_name(&name, cx).then(|| name.clone());
         let status = host.status();
         let text = status_line(&status);
         // 各行的元素 id 挂在这一行带主机名的 id 下面，主机名拼不出别的行的 id。
         let button = |key: &str, op: &'static str| {
             let label = rust_i18n::t!(key).into_owned();
-            let named = rust_i18n::t!("settings.ssh_hosts.named", action = label.as_str(), host = name.as_str());
+            let named = rust_i18n::t!("settings.ssh_hosts.named", action = label.as_str(), host = title.as_str());
             Button::new(op, named.into_owned()).variant(ButtonVariant::Secondary).child(label)
         };
         let reconnect = matches!(status, Status::Idle | Status::Stopped { .. } | Status::Waiting { .. }).then(|| {
@@ -130,11 +133,20 @@ impl SettingsView {
                             .id("name")
                             .role(Role::Heading)
                             .aria_level(3)
-                            .aria_label(name.clone())
+                            .aria_label(title.clone())
                             .text_size(FontSize::Medium)
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(name.clone()),
+                            .child(title.clone()),
                     )
+                    .children(destination.map(|destination| {
+                        div()
+                            .id("destination")
+                            .role(Role::Label)
+                            .aria_label(destination.clone())
+                            .text_size(FontSize::Body)
+                            .text_color(theme.foreground.opacity(0.55))
+                            .child(destination)
+                    }))
                     .child(
                         div()
                             .id("status")

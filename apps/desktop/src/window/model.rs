@@ -805,7 +805,13 @@ impl WindowView {
     /// （没有就上面），关的是别的时当前的照旧显示。最后一个关掉时关窗口。
     fn close_workspace_at(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.end_sessions(Closing::Workspace(ix), cx);
-        if self.renaming.as_ref().is_some_and(|renaming| renaming.id == self.workspaces[ix].id) {
+        // 关的是正在改名的 workspace，或者正在改名的主机组里的最后一个时，输入框跟着没了。
+        let closing = &self.workspaces[ix];
+        let last_on_host = self.workspaces.iter().filter(|workspace| workspace.host == closing.host).count() == 1;
+        if self.renaming.as_ref().is_some_and(|renaming| match &renaming.target {
+            super::RenameTarget::Workspace(id) => *id == closing.id,
+            super::RenameTarget::Host(name) => last_on_host && closing.host.label() == Some(name.as_str()),
+        }) {
             self.renaming = None;
         }
         super::agents::dismiss_alerts(self.workspaces[ix].tabs.iter().flat_map(|tab| tab.panes.keys().copied()), cx);

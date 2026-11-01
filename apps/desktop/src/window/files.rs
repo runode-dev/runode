@@ -326,7 +326,8 @@ impl WindowView {
                 Err(err) => {
                     tracing::warn!("cannot upload to {name}: {err:#}");
                     let detail = format!("{err:#}");
-                    let title = rust_i18n::t!("ssh.upload_failed", host = name.as_str());
+                    let title = rust_i18n::t!("ssh.upload_failed", host = crate::remote_hosts::display_name(&name, cx))
+                        .into_owned();
                     // 只说一声，不等回答。
                     drop(window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&*rust_i18n::t!("ssh.ok")], cx));
                 }

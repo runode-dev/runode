@@ -105,6 +105,7 @@ impl WindowView {
     fn render_host_row(&self, host: &RemoteHost, cx: &mut Context<Self>) -> Stateful<Div> {
         let fg = cx.theme().foreground;
         let name = host.name.clone();
+        let title = crate::remote_hosts::display_name(&name, cx).to_owned();
         let status = host.status();
         let state = state_text(host, &status);
         // 连着、正在连、等着重连的能断开（断开后不再自己重连）；别的能马上连。
@@ -112,7 +113,7 @@ impl WindowView {
         let (key, op) =
             if live { ("status.host_disconnect", "disconnect") } else { ("status.host_connect", "connect") };
         let action = rust_i18n::t!(key).into_owned();
-        let named = rust_i18n::t!("settings.ssh_hosts.named", action = action.as_str(), host = name.as_str());
+        let named = rust_i18n::t!("settings.ssh_hosts.named", action = action.as_str(), host = title.as_str());
         let button = {
             let name = name.clone();
             Button::new(op, named.into_owned())
@@ -131,7 +132,7 @@ impl WindowView {
         div()
             .id(SharedString::from(format!("host:{name}")))
             .role(Role::ListItem)
-            .aria_label(name.clone())
+            .aria_label(title.clone())
             .aria_description(state.clone())
             .mx(px(6.))
             .px(px(8.))
@@ -145,13 +146,13 @@ impl WindowView {
                 div()
                     .id("info")
                     .role(Role::Label)
-                    .aria_label(format!("{name} · {state}"))
+                    .aria_label(format!("{title} · {state}"))
                     .flex_1()
                     .min_w_0()
                     .flex()
                     .flex_col()
                     .gap(px(2.))
-                    .child(div().truncate().font_weight(FontWeight::MEDIUM).child(name))
+                    .child(div().truncate().font_weight(FontWeight::MEDIUM).child(title))
                     .child(
                         div()
                             .id("state")

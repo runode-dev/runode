@@ -144,7 +144,10 @@ workspace:
   host_button: 主机：%{host}
   host_local: 本机
   host_local_hint: 这台电脑
+  host_local_group: 本机
   new_on_host: "在 %{host} 上新建工作区"
+  rename_host: "给 %{host} 改名"
+  edit_host_name: 主机名
   host_attention: 有工作区等你处理
   host_remote_hint: "%{status} · SSH"
   host_add: 添加 SSH 主机

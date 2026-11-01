@@ -248,10 +248,17 @@ enum Divider {
     GitHubActions(usize),
 }
 
-/// 侧栏里正在改名的 workspace，以及改名用的输入框。
+/// 侧栏里正在改名的 workspace 或主机组，以及改名用的输入框。
 struct Renaming {
-    id: WorkspaceId,
+    target: RenameTarget,
     edit: inline_edit::InlineEdit,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum RenameTarget {
+    Workspace(WorkspaceId),
+    /// 按连接目标认的远端主机，改的是它的显示名（`remote_hosts::set_display_name`）。
+    Host(String),
 }
 
 /// 窗口的根视图。

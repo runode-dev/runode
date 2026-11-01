@@ -1,8 +1,12 @@
 //! 经 SSH 连的远端主机在界面这边要办的事：连上一台主机后开始办那台机器上的命令行转来的请求，把那台
 //! 主机上断开着的终端接回来；ssh 要问用户时交给最前面的窗口弹框；连接状态一变就更新全局的 `HostsChanged`。
 //! 连上的宿主会跟着 ssh 的登录被结束时，这次运行里每台主机问一次要不要把它装成登录服务（`install_service`）。
+//! 用户可以给主机另起一个显示名（`set_display_name`），连接仍按连接目标认。
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    fs, io,
+};
 
 use futures::StreamExt as _;
 use gpui::{App, AppContext as _, Global, PromptLevel};
@@ -21,6 +25,74 @@ impl Global for HostsChanged {}
 fn hosts_changed(cx: &mut App) {
     let next = cx.default_global::<HostsChanged>().0 + 1;
     cx.set_global(HostsChanged(next));
+}
+
+/// 用户给远端主机起的显示名，按连接目标记，各窗口共用；存在 `Dirs::host_names_file` 里，忘掉主机时留着。
+#[derive(Default)]
+struct HostNames(BTreeMap<String, String>);
+
+impl Global for HostNames {}
+
+/// 读不懂的文件挪到一边再从空的开始，下次改名保存时不把用户起过的名字盖掉。
+fn load_names() -> BTreeMap<String, String> {
+    let Some(path) = runode_paths::Dirs::from_env().host_names_file() else {
+        return BTreeMap::new();
+    };
+    match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|err| {
+            let bad = path.with_extension("json.bad");
+            tracing::warn!("cannot parse {}, moving it to {}: {err}", path.display(), bad.display());
+            if let Err(err) = fs::rename(&path, &bad) {
+                tracing::warn!("cannot move {} aside: {err}", path.display());
+            }
+            BTreeMap::new()
+        }),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
+        Err(err) => {
+            tracing::warn!("cannot read {}: {err}", path.display());
+            BTreeMap::new()
+        }
+    }
+}
+
+fn save_names(names: &BTreeMap<String, String>) -> io::Result<()> {
+    let path = runode_paths::Dirs::from_env()
+        .host_names_file()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home directory"))?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    runode_paths::replace_file(&path, &serde_json::to_vec_pretty(names)?)
+}
+
+/// 主机 `name`（连接目标）在界面上显示的名字：用户起过名字时是那个名字，否则就是连接目标。
+pub fn display_name<'a>(name: &'a str, cx: &'a App) -> &'a str {
+    cx.try_global::<HostNames>().and_then(|names| names.0.get(name)).map_or(name, String::as_str)
+}
+
+/// 用户给主机 `name` 起过名字。
+pub fn has_display_name(name: &str, cx: &App) -> bool {
+    cx.try_global::<HostNames>().is_some_and(|names| names.0.contains_key(name))
+}
+
+/// 把主机 `name` 的显示名改成 `display`；空的或者和连接目标一样时不再另起名字，显示连接目标。
+pub fn set_display_name(name: &str, display: &str, cx: &mut App) {
+    let display = display.trim();
+    let names = &mut cx.default_global::<HostNames>().0;
+    let changed = if display.is_empty() || display == name {
+        names.remove(name).is_some()
+    } else {
+        names.insert(name.to_owned(), display.to_owned()).is_none_or(|old| old != display)
+    };
+    if !changed {
+        return;
+    }
+    if let Err(err) = save_names(names) {
+        tracing::warn!("cannot save the host names: {err}");
+    }
+    // 显示名画在各窗口缓存的视图里，只通知窗口的根视图换不全，要整个刷新。
+    cx.refresh_windows();
+    hosts_changed(cx);
 }
 
 /// 把远端宿主装成登录服务办到了哪一步，按主机名记。
@@ -168,7 +240,7 @@ fn offer_service(name: &str, cx: &mut App) {
     let Some(front) = window::front_window(cx) else {
         return;
     };
-    let title = rust_i18n::t!("ssh.bound_title", host = name);
+    let title = rust_i18n::t!("ssh.bound_title", host = display_name(name, cx)).into_owned();
     let detail = rust_i18n::t!("ssh.bound_detail");
     let (install, later) = (rust_i18n::t!("ssh.bound_install"), rust_i18n::t!("ssh.bound_later"));
     let answers: [&str; 2] = [&install, &later];
@@ -203,6 +275,7 @@ pub fn forget(name: &str, cx: &mut App) {
 
 /// 开始收远端主机的事件，app 退出时让各台主机的主连接退出。要在恢复窗口之前调。
 pub fn install(cx: &mut App) {
+    cx.set_global(HostNames(load_names()));
     cx.on_app_quit(|_| {
         remote::close_masters();
         async {}

@@ -281,6 +281,11 @@ impl Dirs {
         self.data_file(WINDOWS_FILE)
     }
 
+    /// 用户给经 SSH 连的主机起的显示名，按连接目标记。
+    pub fn host_names_file(&self) -> Option<PathBuf> {
+        self.data_file("host-names.json")
+    }
+
     /// 用户自己加的命令：通用的，和按项目目录分开的，见 `runode_protocol::TaskSourceKind`。
     pub fn tasks_file(&self) -> Option<PathBuf> {
         self.data_file("tasks.json")

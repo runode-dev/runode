@@ -14,8 +14,9 @@ use gpui::{
 use runode_types::color::Rgb;
 
 use super::{
-    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, PressDown, RenameWorkspace, Renaming, SelectLastWorkspace,
-    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView,
+    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, PressDown, RenameTarget, RenameWorkspace, Renaming,
+    SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar,
+    WindowView,
     agents::Status as AgentStatus,
     background, cards, drag_window,
     inline_edit::InlineEdit,
@@ -26,11 +27,12 @@ use super::{
 use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, MONITOR_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON, SIDEBAR_ICON,
+        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, MONITOR_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON,
+        SIDEBAR_ICON,
     },
     host_client::remote::{self, HostId, Status},
     menus::OpenSettings,
-    remote_hosts::status_text,
+    remote_hosts::{self, status_text},
     ui::{
         display_dir,
         font_size::{self, FontSize, scaled},
@@ -270,7 +272,8 @@ impl WindowView {
         rows
     }
 
-    /// 一组的组头：主机的图标、名字和远端的连接状态，悬停时露出在这台主机上新建和收起的按钮；按下收起、展开。
+    /// 一组的组头：主机的图标、名字和远端的连接状态，悬停时露出在这台主机上新建、给远端主机改名和收起的
+    /// 按钮；按下收起、展开。
     fn render_host_header(
         &self,
         host: &HostId,
@@ -281,9 +284,14 @@ impl WindowView {
     ) -> Stateful<Div> {
         let fg = cx.theme().foreground;
         let name = match host.label() {
-            Some(name) => name.to_owned(),
-            None => rust_i18n::t!("workspace.host_local_hint").into_owned(),
+            Some(name) => remote_hosts::display_name(name, cx).to_owned(),
+            None => rust_i18n::t!("workspace.host_local_group").into_owned(),
         };
+        // 起了显示名的主机，提示和辅助工具里另写上连接目标。
+        let destination = host.label().filter(|name| remote_hosts::has_display_name(name, cx)).map(str::to_owned);
+        let renaming = self.renaming.as_ref().filter(|renaming| {
+            matches!(&renaming.target, RenameTarget::Host(renaming) if host.label() == Some(renaming.as_str()))
+        });
         let status = host.label().map(|name| remote::remote(name).map_or(Status::Idle, |host| host.status()));
         let status_color = status.as_ref().map(|status| match status {
             Status::Connected(_) => hsla(ADDED),
@@ -292,18 +300,37 @@ impl WindowView {
             Status::Idle => fg.opacity(0.3),
         });
         let status_text = status.as_ref().map(status_text);
-        let a11y_description =
-            [status_text.clone(), attention.then(|| rust_i18n::t!("workspace.host_attention").into_owned())]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · ");
+        let a11y_description = [
+            destination.clone(),
+            status_text.clone(),
+            attention.then(|| rust_i18n::t!("workspace.host_attention").into_owned()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let tooltip_text = match (&destination, status_text) {
+            (Some(destination), Some(status)) => Some(format!("{destination} · {status}")),
+            (destination, status) => status.or_else(|| destination.clone()),
+        };
         let key = SharedString::from(match host.label() {
             Some(name) => format!("host-ssh-{name}"),
             None => "host-local".to_owned(),
         });
         let new_label = rust_i18n::t!("workspace.new_on_host", host = name.as_str()).into_owned();
         let group = SharedString::from(format!("{key}-group"));
+        let rename = host.label().filter(|_| renaming.is_none()).map(|label| {
+            let rename_label = rust_i18n::t!("workspace.rename_host", host = name.as_str()).into_owned();
+            let label = label.to_owned();
+            Button::new(SharedString::from(format!("{key}-rename")), rename_label.clone())
+                .with_size(ButtonSize::IconXs)
+                .icon(PENCIL_ICON)
+                .icon_size(12.)
+                .tooltip(tooltip(rename_label, None))
+                .opacity(0.)
+                .group_hover(group.clone(), |button| button.opacity(1.))
+                .on_press_down(cx, move |this, window, cx| this.start_rename_host(label.clone(), window, cx))
+        });
         let toggle = {
             let host = host.clone();
             move |this: &mut Self, expand: Option<bool>, cx: &mut Context<Self>| {
@@ -331,6 +358,7 @@ impl WindowView {
         let collapse = a11y(false, cx);
         let press = toggle.clone();
         let new_on = host.clone();
+        let editing = renaming.is_some();
         div()
             .id(key.clone())
             .role(Role::Button)
@@ -354,8 +382,13 @@ impl WindowView {
             .text_size(FontSize::Small)
             .text_color(fg.opacity(0.45))
             .hover(|header| header.text_color(fg.opacity(0.75)))
-            .when_some(status_text, |header, text| header.tooltip(tooltip(text, None)))
-            .on_press_down(cx, move |this, _, cx| press(this, None, cx))
+            .when(!editing, |header| header.when_some(tooltip_text, |header, text| header.tooltip(tooltip(text, None))))
+            // 改名时按在输入框里是挪光标、选字，不收起。
+            .on_press_down(cx, move |this, _, cx| {
+                if !editing {
+                    press(this, None, cx);
+                }
+            })
             .child(
                 div().flex_none().w(px(ROW_ICON_SIZE)).flex().justify_center().child(
                     svg()
@@ -372,7 +405,15 @@ impl WindowView {
                     .flex()
                     .items_center()
                     .gap(px(6.))
-                    .child(div().min_w_0().truncate().child(name))
+                    .map(|line| match renaming {
+                        Some(renaming) => line.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(renaming.edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx)))),
+                        ),
+                        None => line.child(div().min_w_0().truncate().child(name)),
+                    })
                     .children(
                         status_color.map(|color| div().flex_none().size(px(HOST_STATUS_DOT)).rounded_full().bg(color)),
                     ),
@@ -382,17 +423,20 @@ impl WindowView {
                     div().flex_none().size(px(HOST_STATUS_DOT)).rounded_full().bg(gpui::rgb(AGENT_BLOCKED_COLOR)),
                 )
             })
-            .child(
-                Button::new(SharedString::from(format!("{key}-new")), new_label.clone())
-                    .with_size(ButtonSize::IconXs)
-                    .icon(PLUS_ICON)
-                    .icon_size(12.)
-                    .tooltip(tooltip(new_label, None))
-                    // 悬停在组头上才显出来，几个组头不一排排都是按钮；用透明度藏，辅助工具照样按得到。
-                    .opacity(0.)
-                    .group_hover(group.clone(), |button| button.opacity(1.))
-                    .on_press_down(cx, move |this, window, cx| this.new_workspace_on(new_on.clone(), window, cx)),
-            )
+            .children(rename)
+            .when(!editing, |header| {
+                header.child(
+                    Button::new(SharedString::from(format!("{key}-new")), new_label.clone())
+                        .with_size(ButtonSize::IconXs)
+                        .icon(PLUS_ICON)
+                        .icon_size(12.)
+                        .tooltip(tooltip(new_label, None))
+                        // 悬停在组头上才显出来，几个组头不一排排都是按钮；用透明度藏，辅助工具照样按得到。
+                        .opacity(0.)
+                        .group_hover(group.clone(), |button| button.opacity(1.))
+                        .on_press_down(cx, move |this, window, cx| this.new_workspace_on(new_on.clone(), window, cx)),
+                )
+            })
             // 收起时箭头一直显示，提醒这组里还有藏着的行。
             .child(
                 div()
@@ -430,7 +474,7 @@ impl WindowView {
         let close_tooltip = tooltip(close_label.clone(), None);
         let fg = cx.theme().foreground;
         let group = SharedString::from(format!("workspace-{ix}"));
-        let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
+        let renaming = self.renaming.as_ref().filter(|renaming| renaming.target == RenameTarget::Workspace(id));
         // 名字前是 GitHub 头像，没有头像时是名字首字母的色块；agent 的标记跟在名字后面。
         let repo = &workspace.repo;
         let icon = div().flex_none().w(px(ROW_ICON_SIZE)).flex().map(|slot| match &repo.avatar {
@@ -455,7 +499,7 @@ impl WindowView {
         let mark = workspace.mark(cx);
         let host = workspace.host.label().map(|name| {
             let status = remote::remote(name).map_or(Status::Idle, |host| host.status());
-            format!("{name} {}", status_text(&status))
+            format!("{} {}", remote_hosts::display_name(name, cx), status_text(&status))
         });
         // 目录不画出来，悬停时看提示；和名字一样（比如家目录的 `~`）时不提示。
         let dir = Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
@@ -563,7 +607,7 @@ impl WindowView {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     // 点在改名输入框里时交给输入框挪光标、选字。
-                    if this.renaming.as_ref().is_some_and(|renaming| renaming.id == id) {
+                    if this.renaming.as_ref().is_some_and(|renaming| renaming.target == RenameTarget::Workspace(id)) {
                         return;
                     }
                     cx.stop_propagation();
@@ -692,22 +736,48 @@ impl WindowView {
             window,
             cx,
         );
-        self.renaming = Some(Renaming { id, edit });
+        self.renaming = Some(Renaming { target: RenameTarget::Workspace(id), edit });
         self.sidebar_scroll.scroll_to_item(ix);
         cx.notify();
     }
 
-    /// 结束改名；`commit` 时用输入框里的名字，空的不算。
+    /// 在侧栏里把远端主机 `name` 组头上的名字换成输入框，现在的显示名全选。
+    fn start_rename_host(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.finish_rename(true, window, cx);
+        let text = remote_hosts::display_name(&name, cx).to_owned();
+        let select = text.len();
+        let edit = InlineEdit::new(
+            text,
+            select,
+            rust_i18n::t!("workspace.edit_host_name").into_owned(),
+            Self::finish_rename,
+            window,
+            cx,
+        );
+        self.renaming = Some(Renaming { target: RenameTarget::Host(name), edit });
+        cx.notify();
+    }
+
+    /// 结束改名；`commit` 时用输入框里的名字。workspace 的名字空的不算；主机的显示名清空时改回连接目标。
     fn finish_rename(&mut self, commit: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(renaming) = self.renaming.take() else {
             return;
         };
         let name = renaming.edit.text(cx);
-        if commit
-            && !name.is_empty()
-            && let Some(ix) = self.workspaces.iter().position(|w| w.id == renaming.id)
-        {
-            self.set_workspace_name(ix, name.into(), window, cx);
+        match &renaming.target {
+            RenameTarget::Workspace(id) => {
+                if commit
+                    && !name.is_empty()
+                    && let Some(ix) = self.workspaces.iter().position(|w| w.id == *id)
+                {
+                    self.set_workspace_name(ix, name.into(), window, cx);
+                }
+            }
+            RenameTarget::Host(host) => {
+                if commit {
+                    remote_hosts::set_display_name(host, &name, cx);
+                }
+            }
         }
         renaming.edit.release_focus(&self.focus_handle(cx), window, cx);
         cx.notify();

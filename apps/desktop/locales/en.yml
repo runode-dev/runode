@@ -144,7 +144,10 @@ workspace:
   host_button: "Host: %{host}"
   host_local: Local
   host_local_hint: This computer
+  host_local_group: This computer
   new_on_host: "New Workspace on %{host}"
+  rename_host: "Rename %{host}"
+  edit_host_name: Host name
   host_attention: Has workspaces that need you
   host_remote_hint: "%{status} · SSH"
   host_add: Add SSH Host

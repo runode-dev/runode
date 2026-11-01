@@ -1190,7 +1190,8 @@ impl ScreenViewer {
 
     fn render_toolbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let (border, fg) = (cx.theme().border, cx.theme().foreground);
-        let title = rust_i18n::t!("screen_viewer.title", host = self.host.as_str()).into_owned();
+        let host = crate::remote_hosts::display_name(&self.host, cx);
+        let title = rust_i18n::t!("screen_viewer.title", host = host).into_owned();
         let displays: Vec<AnyElement> = self
             .remote
             .as_ref()
@@ -1307,9 +1308,11 @@ impl ScreenViewer {
     }
 
     /// 盖在画面上的提示：连接中、开不起来、缺授权；没有要提示的为空。
-    fn notice(&self) -> Option<String> {
+    fn notice(&self, cx: &App) -> Option<String> {
         let notice = match &self.phase {
-            Phase::Connecting => rust_i18n::t!("screen_viewer.connecting", host = self.host.as_str()),
+            Phase::Connecting => {
+                rust_i18n::t!("screen_viewer.connecting", host = crate::remote_hosts::display_name(&self.host, cx))
+            }
             Phase::Stopped(reason) => return Some(reason.clone()),
             Phase::Reconnecting(_) if self.signed_out => rust_i18n::t!("screen_viewer.signed_out"),
             Phase::Reconnecting(attempt) => rust_i18n::t!("screen_viewer.reconnecting", attempt = attempt),
@@ -1424,7 +1427,8 @@ impl Render for ScreenViewer {
             window.focus(&self.focus, cx);
         }
         let theme = cx.theme().clone();
-        let label = rust_i18n::t!("screen_viewer.screen", host = self.host.as_str()).into_owned();
+        let label = rust_i18n::t!("screen_viewer.screen", host = crate::remote_hosts::display_name(&self.host, cx))
+            .into_owned();
         // 画面是自己画的，另报一个图像节点给辅助工具，名字说是哪台的屏幕。
         let picture = self.picture.as_ref().map(|picture| {
             div()
@@ -1436,7 +1440,7 @@ impl Render for ScreenViewer {
                 .child(picture.render())
         });
         // 提示可能很长，限宽、折行、居中，不在一行里两头截断。
-        let notice = self.notice().map(|notice| {
+        let notice = self.notice(cx).map(|notice| {
             div().absolute().inset_0().flex().items_center().justify_center().p(px(24.)).child(
                 div()
                     .id("screen-notice")

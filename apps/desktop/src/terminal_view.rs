@@ -473,7 +473,8 @@ impl TerminalView {
             HostId::Ssh(name) => {
                 let status = host_client::remote::remote(name).map_or(Status::Idle, |host| host.status());
                 let status = crate::remote_hosts::status_text(&status);
-                let message = rust_i18n::t!("ssh.lost", host = name.as_str(), status = status).into_owned();
+                let host = crate::remote_hosts::display_name(name, cx);
+                let message = rust_i18n::t!("ssh.lost", host = host, status = status).into_owned();
                 (message, rust_i18n::t!("ssh.reconnect").into_owned())
             }
         };
