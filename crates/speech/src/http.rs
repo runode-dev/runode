@@ -40,8 +40,9 @@ pub(crate) fn post(
     let headers_file = dir.0.join("headers.txt");
     let mut command = curl();
     command
-        // 不跟重定向：curl 只在换主机时去掉 `Authorization`，别的密钥头会跟着发过去。
-        .args(["--silent", "--show-error", "--config", "-"])
+        // 不跟重定向：curl 只在换主机时去掉 `Authorization`，别的密钥头会跟着发过去。`-q` 必须在最前面：
+        // 不读 `~/.curlrc`，里面的 `location` 会让它跟重定向，`fail` 会丢掉报错的响应体。
+        .args(["-q", "--silent", "--show-error", "--config", "-"])
         .args(["--connect-timeout", "10", "--max-time"])
         .arg(timeout.as_secs().to_string())
         // 响应头另写进文件自己找：`--write-out` 的 `%header{}` 要 curl 7.84，Windows 10 自带的是 7.55。
