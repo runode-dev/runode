@@ -143,7 +143,7 @@ fn source(host: &RemoteHost, target: Target) -> Result<Source, Failure> {
         return Err(Failure::Stop {
             error: format!(
                 "a development build cannot download runode for {}: set {ENV_BINARY}_{} to {kind} for it \
-                 (`make run REMOTE=1` cross-compiles the macOS and Windows ones)",
+                 (`make run REMOTE=1` cross-compiles the macOS, Windows and Linux ones)",
                 target.env_name().to_lowercase(),
                 target.env_name()
             ),

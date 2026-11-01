@@ -5,6 +5,7 @@
 use std::io;
 
 /// 钥匙串里的服务名、凭据管理器里目标名的前缀。
+#[cfg(any(target_os = "macos", windows))]
 const SERVICE: &str = "dev.runode.screen-unlock";
 
 /// `host` 记住的密码；没记过、读不到时为空。

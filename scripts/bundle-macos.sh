@@ -13,8 +13,8 @@
 #                  ad-hoc 签名的系统按 cdhash 认，每次重新打包都是另一个 app，隐私与安全里给过的
 #                  权限就不算了；app 也只在新包和自己出自同一个 Team ID 时才自己更新，ad-hoc 签名的
 #                  不更新。要强制 ad-hoc 就给 -。
-#   REMOTE         app 模式下默认把 build-remote.sh 交叉编译的另一种架构的 Mac 版和 Windows 版放进
-#                  Contents/Resources/remote，本机打的包连这两种 SSH 远端时装它们（发布页上没有这个构建的包）；
+#   REMOTE         app 模式下默认把 build-remote.sh 交叉编译的另一种架构的 Mac 版、Windows 版和 Linux 版放进
+#                  Contents/Resources/remote，本机打的包连这几种 SSH 远端时装它们（发布页上没有这个构建的包）；
 #                  给 0 时不放。缺交叉编译的工具时跳过并提示。dmg 模式发的是发布构建，远端从发布页下载，不放。
 #   NOTARY_PROFILE 公证用的 notarytool 钥匙串配置名（xcrun notarytool store-credentials 存的），或者
 #   NOTARY_KEY、NOTARY_KEY_ID、NOTARY_ISSUER
@@ -88,7 +88,7 @@ if [[ "$target" == app && "${REMOTE:-1}" != 0 ]]; then
     status=0
     CARGO_PROFILE=$remote_profile scripts/build-remote.sh "$app/Contents/Resources/remote" >/dev/null || status=$?
     if [[ $status == 2 ]]; then
-        echo "Runode.app 里不带远端用的构建：本机打的包连 Windows 和另一种架构的 Mac 时会装上发布页上的旧版" >&2
+        echo "Runode.app 里不带远端用的构建：本机打的包连 Windows、Linux 和另一种架构的 Mac 时会装上发布页上的旧版" >&2
     elif [[ $status != 0 ]]; then
         exit "$status"
     fi

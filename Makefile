@@ -15,17 +15,11 @@ endif
 
 .DEFAULT_GOAL := help
 
-# SSH 远端是 Windows 或另一种架构的 Mac 时，开发构建在发布页上没有对应的包，要另外交叉编译一份装上去
-# （scripts/build-remote.sh）。make run REMOTE=1 编好后经环境变量交给桌面；make install 默认打进 app，
-# REMOTE=0 时不打。
+# SSH 远端是 Windows、Linux 或另一种架构的 Mac 时，开发构建在发布页上没有对应的包，要另外交叉编译一份装上去
+# （scripts/build-remote.sh，Linux 版要 docker）。make run REMOTE=1 编好后经环境变量交给桌面；make install
+# 默认打进 app，REMOTE=0 时不打。
 REMOTE ?=
 REMOTE_OUT = target/remote/out
-ifeq ($(shell uname -m),arm64)
-remote_env = RUNODE_SSH_BINARY_MACOS_X86_64=$(CURDIR)/$(REMOTE_OUT)/runode-macos-x86_64
-else
-remote_env = RUNODE_SSH_BINARY_MACOS_ARM64=$(CURDIR)/$(REMOTE_OUT)/runode-macos-arm64
-endif
-remote_env += RUNODE_SSH_BINARY_WINDOWS_X86_64=$(CURDIR)/$(REMOTE_OUT)/runode-windows-x86_64.zip
 .PHONY: help submodules build release run run-release run-ios run-ios-device app install restart dmg check test test-ssh clippy fmt fmt-check clean
 
 help: ## 列出所有目标
@@ -42,10 +36,9 @@ release: ## 发布构建
 	$(call link_rn,release)
 	$(CARGO) build --release
 
-run: ## 调试构建并启动（REMOTE=1 时先交叉编译 SSH 远端用的 Windows 版和另一种架构的 Mac 版）
+run: ## 调试构建并启动（REMOTE=1 时先交叉编译 SSH 远端用的 Windows、Linux 版和另一种架构的 Mac 版）
 	$(call prepare_run,debug)
-	$(if $(filter 1,$(REMOTE)),scripts/build-remote.sh $(REMOTE_OUT))
-	$(if $(filter 1,$(REMOTE)),$(remote_env)) $(CARGO) run -p runode -- $(ARGS)
+	$(if $(filter 1,$(REMOTE)),set -e; remote=$$(scripts/build-remote.sh $(REMOTE_OUT)); env $$remote) $(CARGO) run -p runode -- $(ARGS)
 
 run-release: ## 发布构建并启动
 	$(call prepare_run,release)

@@ -1,2 +1,4 @@
 [toolchain]
 channel = "1.99.0"
+# 发布构建去调试信息时 rustc 调 rust-objcopy，它要的 libLLVM 只随这个组件装进 rustlib 下。
+components = ["llvm-tools"]
