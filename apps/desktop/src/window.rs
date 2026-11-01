@@ -710,7 +710,10 @@ fn row_slot(slot: &Entity<Slot>, height: f32, window: &Window) -> AnyElement {
 /// 标题栏和侧栏就拖不动窗口；GPUI 重放它以后去掉
 fn cached_slot(slot: &Entity<Slot>, style: StyleRefinement, window: &Window) -> AnyElement {
     if window.is_a11y_active() || cfg!(windows) {
-        slot.clone().into_any_element()
+        // 不缓存时也按 `style` 在父元素里占地方。
+        let mut wrapper = div();
+        wrapper.style().refine(&style);
+        wrapper.child(slot.clone()).into_any_element()
     } else {
         slot.clone().cached(style).into_any_element()
     }
