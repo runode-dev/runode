@@ -640,6 +640,7 @@ impl WindowView {
         // 目录监听只跟着当前 workspace，切走期间这个 workspace 预览的文件可能变过。
         self.refresh_preview_if_changed(cx);
         self.show_tab(self.workspaces[ix].active, shown, window, cx);
+        self.follow_pinned_screen(window, cx);
     }
 
     /// 窗口标题跟着有焦点的终端；没有终端时用 workspace 的名字。

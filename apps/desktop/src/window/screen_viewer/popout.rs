@@ -104,7 +104,8 @@ impl Render for ScreenWindow {
             reveal_top: if cfg!(target_os = "macos") { TITLEBAR_HEIGHT } else { 0. },
         };
         let viewer = self.viewer.clone();
-        let changed = viewer.update(cx, |viewer, _| viewer.set_input(Input { floating: false, titlebar: Some(bar) }));
+        let changed = viewer
+            .update(cx, |viewer, _| viewer.set_input(Input { floating: false, titlebar: Some(bar), pinned: None }));
         // 这一页是单独的视图，换了样子要它自己重画；画的时候发的通知要等这一帧画完再发。
         if changed {
             cx.defer(move |cx| viewer.update(cx, |_, cx| cx.notify()));

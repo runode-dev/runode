@@ -33,7 +33,9 @@ use runode_ssh::bootstrap::Family;
 use runode_types::{input::MouseButton as RemoteButton, screen::Codec};
 
 use crate::{
-    assets::{CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MONITOR_ICON, POP_IN_ICON, POP_OUT_ICON, REFRESH_ICON},
+    assets::{
+        CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MONITOR_ICON, PIN_ICON, POP_IN_ICON, POP_OUT_ICON, REFRESH_ICON,
+    },
     host_client::remote::{
         self, Status,
         screen::{self, ScreenEvent, ScreenLink, ScreenSender},
@@ -90,6 +92,8 @@ pub enum ScreenViewerEvent {
     PopOut,
     /// 在单独的窗口里时，搬回主窗口。
     PopIn,
+    /// 吸附在右侧面板上时，钉住或取消钉住。
+    TogglePin,
 }
 
 /// 窗口交给这一页的。
@@ -99,6 +103,8 @@ pub struct Input {
     pub floating: bool,
     /// 这一页在单独的窗口里，工具条兼当窗口的标题栏：拖它移动窗口，不给浮动、单独窗口和关闭的按钮，给「放回主窗口」。
     pub titlebar: Option<Titlebar>,
+    /// 吸附在右侧面板上时是钉没钉住，工具条上给钉住的按钮；没吸附时为空。
+    pub pinned: Option<bool>,
 }
 
 /// 工具条当标题栏时的样子。
@@ -167,6 +173,8 @@ enum Phase {
     Reconnecting(u32),
     /// 远端停了或者开不起来，带给人看的原因；不自己重连，等用户点「重新连接」。
     Stopped(String),
+    /// 窗口把这一页藏起来了，连接断开着（`suspend`），再显示时由窗口叫它重连（`resume`）。
+    Suspended,
 }
 
 /// 画面区域在窗口里的位置，和窗口的缩放比例（一点几个物理像素）。
@@ -280,6 +288,19 @@ impl Focusable for ScreenViewer {
 impl ScreenViewer {
     /// 不跟哪个窗口绑着：放在哪个窗口里，焦点在这一页上时那个窗口里按的键就交给远端。
     pub fn new(host: String, cx: &mut Context<Self>) -> Self {
+        let mut viewer = Self::create(host, cx);
+        viewer.connect(cx);
+        viewer
+    }
+
+    /// 先不连的一页，等窗口显示它时 `resume`。
+    pub fn new_suspended(host: String, cx: &mut Context<Self>) -> Self {
+        let mut viewer = Self::create(host, cx);
+        viewer.phase = Phase::Suspended;
+        viewer
+    }
+
+    fn create(host: String, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         let intercept = {
             let (focus, view) = (focus.clone(), cx.entity().downgrade());
@@ -359,7 +380,6 @@ impl ScreenViewer {
             _intercept: intercept,
             _password: password_events,
         };
-        viewer.connect(cx);
         viewer.adapt_later(cx);
         viewer.load_remember(cx);
         viewer
@@ -724,6 +744,32 @@ impl ScreenViewer {
         }));
     }
 
+    /// 窗口把这一页藏起来了：断开连接，远端不再采集、编码；停着等用户点「重新连接」的不动。
+    pub fn suspend(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.phase, Phase::Stopped(_) | Phase::Suspended) {
+            return;
+        }
+        tracing::info!("suspending the hidden remote desktop of {}", self.host);
+        self.connection = None;
+        self.retry = None;
+        self.retries = 0;
+        self.link = None;
+        self.drop_picture();
+        self.phase = Phase::Suspended;
+        cx.notify();
+    }
+
+    pub fn suspended(&self) -> bool {
+        matches!(self.phase, Phase::Suspended)
+    }
+
+    /// 窗口又显示这一页了：断开着的话重连。
+    pub fn resume(&mut self, cx: &mut Context<Self>) {
+        if self.suspended() {
+            self.connect(cx);
+        }
+    }
+
     /// 用户点了「重新连接」：不等计时，从头连。
     fn reconnect_now(&mut self, cx: &mut Context<Self>) {
         self.retry = None;
@@ -837,7 +883,7 @@ impl ScreenViewer {
     /// 也要：采集开不起来，但那台 Mac 由此弹框、把这个程序列进系统设置，用户才有地方打开。
     fn request_size(&mut self, cx: &mut Context<Self>) {
         let Some((display, width, height, bitrate)) = self.wanted() else { return };
-        if matches!(self.phase, Phase::Stopped(_) | Phase::Connecting) {
+        if matches!(self.phase, Phase::Stopped(_) | Phase::Connecting | Phase::Suspended) {
             return;
         }
         if Some((display, width, height)) != self.requested {
@@ -1042,9 +1088,12 @@ impl ScreenViewer {
         items
     }
 
-    /// 工具条上的清晰度按钮：写着现在挑的那档（自动时带上自动挑到的档）。
+    /// 工具条上的清晰度按钮：写着现在挑的那档；自动时带上自动挑到的档，页面小到自动挑的几档画面一样大时只写自动。
     fn render_quality_button(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let same_size =
+            self.level_size(Level::Ultra).is_some_and(|ultra| self.level_size(Level::Smooth) == Some(ultra));
         let current = match self.quality {
+            Quality::Auto if same_size => rust_i18n::t!("screen_viewer.quality_auto").into_owned(),
             Quality::Auto => {
                 rust_i18n::t!("screen_viewer.quality_auto_short", level = level_label(self.adapter.level()))
                     .into_owned()
@@ -1245,10 +1294,17 @@ impl ScreenViewer {
                 (MINIMIZE_ICON, rust_i18n::t!("screen_viewer.float").into_owned())
             };
             let pop_out = rust_i18n::t!("screen_viewer.pop_out").into_owned();
-            vec![
-                icon_button("screen-float", icon, label, || ScreenViewerEvent::ToggleFloating),
-                icon_button("screen-pop-out", POP_OUT_ICON, pop_out, || ScreenViewerEvent::PopOut),
-            ]
+            let pin = self.input.pinned.map(|pinned| {
+                let key = if pinned { "screen_viewer.unpin" } else { "screen_viewer.pin" };
+                icon_button("screen-pin", PIN_ICON, rust_i18n::t!(key).into_owned(), || ScreenViewerEvent::TogglePin)
+                    .toggled(Some(pinned))
+            });
+            pin.into_iter()
+                .chain([
+                    icon_button("screen-float", icon, label, || ScreenViewerEvent::ToggleFloating),
+                    icon_button("screen-pop-out", POP_OUT_ICON, pop_out, || ScreenViewerEvent::PopOut),
+                ])
+                .collect()
         };
         // 标题这一段：浮动时按下就开始拖动这一页，当标题栏时拖动窗口；按钮在它外面，按按钮不会拖。
         let (floating, titlebar) = (self.input.floating, self.input.titlebar);
@@ -1310,7 +1366,7 @@ impl ScreenViewer {
     /// 盖在画面上的提示：连接中、开不起来、缺授权；没有要提示的为空。
     fn notice(&self, cx: &App) -> Option<String> {
         let notice = match &self.phase {
-            Phase::Connecting => {
+            Phase::Connecting | Phase::Suspended => {
                 rust_i18n::t!("screen_viewer.connecting", host = crate::remote_hosts::display_name(&self.host, cx))
             }
             Phase::Stopped(reason) => return Some(reason.clone()),

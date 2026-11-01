@@ -709,8 +709,13 @@ impl WindowView {
 
     /// 拖动分隔线期间盖在整个窗口上的一层：接住所有鼠标移动和松开，免得落进终端或侧栏。
     pub(super) fn render_divider_drag(&self, divider: Divider, cx: &mut Context<Self>) -> Div {
-        let vertical =
-            matches!(divider, Divider::Split(_, Axis::Vertical) | Divider::GitGraph | Divider::GitHubActions(_));
+        let vertical = matches!(
+            divider,
+            Divider::Split(_, Axis::Vertical)
+                | Divider::GitGraph
+                | Divider::GitHubActions(_)
+                | Divider::SnappedScreen(_)
+        );
         div()
             .absolute()
             .size_full()
@@ -756,10 +761,17 @@ impl WindowView {
                         cx.notify();
                         return;
                     }
+                    Divider::SnappedScreen(id) => {
+                        this.resize_snapped_screen(id, f32::from(event.position.y), cx);
+                        cx.notify();
+                        return;
+                    }
                     Divider::GitGraph => {
                         // 卡片样式下面板的卡片底下离窗口底边还有一段间距。
                         let spacing = if cards(cx) { CARD_GAP } else { 0. };
-                        let viewport = f32::from(window.viewport_size().height) - spacing - status_bar::height(cx);
+                        let viewport = this.snapped_panel_bottom(cx).unwrap_or_else(|| {
+                            f32::from(window.viewport_size().height) - spacing - status_bar::height(cx)
+                        });
                         this.resize_git_graph(f32::from(event.position.y), viewport, cx);
                         cx.notify();
                         return;

@@ -73,6 +73,13 @@ fn state() -> State {
         git_graph_collapsed: true,
         git_graph_height: Some(260.),
         github_actions_heights: [Some(300.), None, None],
+        snapped_screens: vec![SavedSnappedScreen {
+            host: "vps".into(),
+            bottom: true,
+            pinned: false,
+            workspace: Some(0),
+            ratio: Some(0.3),
+        }],
     }])
 }
 

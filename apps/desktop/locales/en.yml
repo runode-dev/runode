@@ -1276,6 +1276,8 @@ screen_viewer:
   dock: Fill the window
   pop_out: Open in its own window
   pop_in: Put back in the main window
+  pin: "Pin: Show in Every Workspace on This Host"
+  unpin: Unpin
   connecting: "Connecting to %{host}…"
   opening: Opening the screen…
   no_screen_capture: "That Mac has no Screen Recording permission for Runode yet. A prompt has been shown on that Mac: turn on runode in System Settings › Privacy & Security › Screen & System Audio Recording there, then reconnect."

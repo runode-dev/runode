@@ -360,6 +360,7 @@ impl WindowView {
             git_graph_collapsed: git.graph_collapsed,
             git_graph_height: git.graph_height,
             github_actions_heights: self.github_actions.read(cx).heights(),
+            snapped_screens: self.save_snapped_screens(cx),
         }
     }
 
@@ -378,6 +379,8 @@ impl WindowView {
         let home = home_dir();
         // 有终端起不来时后面的标签和 workspace 会往前挪，当前的那个按原来的位置找。
         let mut active = 0;
+        // 存档里第几个 workspace 建出来的编号，吸附着的远程桌面按它找回所属的 workspace。
+        let mut ids = Vec::new();
         for (wi, saved_workspace) in saved.workspaces.into_iter().enumerate() {
             let host = saved_workspace.host.clone().map_or(HostId::Local, HostId::Ssh);
             let mut tabs = Vec::new();
@@ -431,6 +434,7 @@ impl WindowView {
             let mut project = Project::default();
             project.tasks_last = saved_workspace.last_task;
             let id = self.next_id();
+            ids.push(id);
             self.workspaces.push(Workspace {
                 id,
                 host: host.clone(),
@@ -477,6 +481,7 @@ impl WindowView {
             self.git_panel.update(cx, |panel, _| panel.set_options(git));
             self.github_actions.update(cx, |page, _| page.set_heights(saved.github_actions_heights));
             self.activate_workspace(active, window, cx);
+            self.restore_snapped_screens(saved.snapped_screens, &ids, window, cx);
         }
         shell
     }

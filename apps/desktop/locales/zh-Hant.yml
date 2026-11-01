@@ -1350,6 +1350,8 @@ screen_viewer:
   dock: 填滿視窗
   pop_out: 在獨立視窗中開啟
   pop_in: 放回主視窗
+  pin: 釘住：在這台主機的各個工作區都顯示
+  unpin: 取消釘住
   connecting: "正在連線 %{host}…"
   opening: 正在打開螢幕…
   no_screen_capture: "那台 Mac 還沒給 Runode 螢幕錄製權限，已經在它螢幕上跳出授權視窗：請在那台 Mac 的「系統設定 › 隱私權與安全性 › 螢幕與系統錄音」裡打開 runode 的開關，再重新連線。"

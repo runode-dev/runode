@@ -246,6 +246,8 @@ enum Divider {
     GitGraph,
     /// GitHub Actions 页第几段上沿的分隔线，拖动改变上面那段的高度。
     GitHubActions(usize),
+    /// 吸附在右侧面板上的这台远程桌面挨着面板的分隔线，拖动改变它的高度。
+    SnappedScreen(EntityId),
 }
 
 /// 侧栏里正在改名的 workspace 或主机组，以及改名用的输入框。
@@ -771,6 +773,7 @@ impl Render for WindowView {
         }
         let (fg, bg) = self.colors(cx);
         self.follow_colors(fg, bg, cx);
+        self.begin_screen_frame();
         // 主题刚按这个窗口的配色换上，下面都从它读。
         let theme = cx.theme().clone();
         let (base, body) = if let Some(page) = &self.settings {
@@ -1020,7 +1023,8 @@ impl WindowView {
             let width = f32::from(window.viewport_size().width) - sidebar_width - widths.panel;
             self.render_preview(width, window, cx)
         });
-        let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
+        let panel =
+            self.workspace().panel.is_some().then(|| self.render_right_column(&slots.panel, widths.panel, window, cx));
         let right_handle =
             self.workspace().panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx));
         let panel_toggles = (titlebar_shown || right_column).then(|| {
@@ -1156,7 +1160,8 @@ impl WindowView {
             let width = viewport - sidebar_width - 2. * CARD_GAP - panel;
             self.render_preview(width, window, cx)
         });
-        let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
+        let panel =
+            self.workspace().panel.is_some().then(|| self.render_right_column(&slots.panel, widths.panel, window, cx));
         let right_handle = self.workspace().panel.is_some().then(|| {
             let right = self.right_divider_offset(widths, true);
             self.render_right_handle(Divider::Panel, right, cx)

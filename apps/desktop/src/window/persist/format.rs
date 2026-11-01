@@ -67,6 +67,29 @@ pub struct SavedWindow {
     pub git_graph_height: Option<f32>,
     /// GitHub Actions 页三段拖过分隔线后的高度（`ActionsPage::heights`），没拖过的为空。
     pub github_actions_heights: [Option<f32>; 3],
+    /// 吸附在右侧面板上的远程桌面，从上到下。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub snapped_screens: Vec<SavedSnappedScreen>,
+}
+
+/// 吸附在右侧面板上的远程桌面，恢复时重新连上。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedSnappedScreen {
+    /// 看的是哪台 SSH 主机（`HostId::Ssh` 的连接目标）。
+    pub host: String,
+    /// 吸附在面板下方；为假时在上方。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub bottom: bool,
+    /// 钉住了：在这台主机的各个 workspace 都显示。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pinned: bool,
+    /// 没钉住时显示它的 workspace 在 `SavedWindow::workspaces` 里的位置；那个 workspace 已经关了时为空，恢复到
+    /// 当前的 workspace。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<usize>,
+    /// 占右侧那一栏的比例；为空时用默认比例。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ratio: Option<f32>,
 }
 
 /// 文件树按内容搜索时的选项，定义跟着文件树。
