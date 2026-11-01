@@ -315,8 +315,8 @@ public final class SessionListModel {
     public func spawn(near: SessionId? = nil) async {
         guard connected, !isSpawning else { return }
         isSpawning = true
-        let req = await link.nextRequestId()
-        let fallback = await link.nextRequestId()
+        let req = link.nextRequestId()
+        let fallback = link.nextRequestId()
         pendingSpawn = PendingSpawn(req: req, fallback: fallback, failure: String(localized: "开不了新终端"))
         link.send(.open(req: req, placement: .tab, near: near, cwd: nil, focus: false))
     }
@@ -341,7 +341,7 @@ public final class SessionListModel {
         directoryPicker = nil
         guard connected, !isSpawning else { return }
         isSpawning = true
-        let req = await link.nextRequestId()
+        let req = link.nextRequestId()
         if hasDesktopWindow {
             let name = name?.trimmingCharacters(in: .whitespacesAndNewlines)
             pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: String(localized: "建不了工作区"))
@@ -361,7 +361,7 @@ public final class SessionListModel {
         }
         guard case .workspace = section.id, let dir = section.dir, connected, !isSpawning else { return }
         isSpawning = true
-        let req = await link.nextRequestId()
+        let req = link.nextRequestId()
         pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: String(localized: "开不了新终端"))
         link.send(.openWorkspace(req: req, dir: dir, focus: false))
     }
@@ -384,7 +384,7 @@ public final class SessionListModel {
     public func rename(_ section: SessionSection, to name: String) async {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard connected, !name.isEmpty, case .workspace(let window, let index) = section.id else { return }
-        let req = await link.nextRequestId()
+        let req = link.nextRequestId()
         pendingRenames.insert(req)
         link.send(.renameWorkspace(req: req, window: window, workspace: index, name: name))
     }
@@ -471,18 +471,18 @@ public final class SessionListModel {
         guard let session = session(id), canRunTask(in: session) else { return false }
         let cwd = project ?? session.meta.cwd
         if session.meta.foregroundIsShell, cwd == session.meta.cwd {
-            let paste = await link.nextRequestId()
-            let enter = await link.nextRequestId()
+            let paste = link.nextRequestId()
+            let enter = link.nextRequestId()
             link.send(.paste(req: paste, id: id, text: task.command))
             link.send(.sendKeys(req: enter, id: id, keys: ["enter"]))
             return true
         }
         guard !isSpawning else { return false }
         isSpawning = true
-        let req = await link.nextRequestId()
-        let fallback = await link.nextRequestId()
-        let paste = await link.nextRequestId()
-        let enter = await link.nextRequestId()
+        let req = link.nextRequestId()
+        let fallback = link.nextRequestId()
+        let paste = link.nextRequestId()
+        let enter = link.nextRequestId()
         pendingSpawn = PendingSpawn(
             req: req, fallback: fallback, failure: String(localized: "开不了新终端"), cwd: cwd,
             command: (task.command, paste, enter))
@@ -496,7 +496,7 @@ public final class SessionListModel {
             refreshing || tasks[dir] == nil
         else { return }
         listingDirs.insert(dir)
-        let req = await link.nextRequestId()
+        let req = link.nextRequestId()
         pendingTasks[req] = dir
         link.send(.listTasks(req: req, dir: dir))
     }

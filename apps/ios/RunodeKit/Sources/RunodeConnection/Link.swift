@@ -124,8 +124,9 @@ public protocol HostLink: AnyObject, Sendable {
     func setFocused(_ focused: Bool)
     /// 用户改了设备名：以后每次连上时在 `Hello` 里报这个名字。
     func setDeviceName(_ name: String) async
-    /// `Spawn` 这类请求的编号，一条连接上不重复。
-    func nextRequestId() async -> UInt32
+    /// `Spawn` 这类请求的编号，一条连接上不重复，不发 0。同步给出：取编号和发请求之间没有挂起点，连接状态
+    /// 不会在中间变。
+    func nextRequestId() -> UInt32
 }
 
 /// 前端报给宿主的身份。

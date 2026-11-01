@@ -283,7 +283,7 @@ public final class PushRegistration {
                 self.statuses[id] = .failed(error.localizedDescription)
                 return
             }
-            let req = await peer.link.nextRequestId()
+            let req = peer.link.nextRequestId()
             guard let self, self.pending[id]?.attempt == attempt else { return }
             self.pending[id]?.req = req
             peer.link.send(

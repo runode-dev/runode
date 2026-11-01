@@ -66,7 +66,7 @@ final class FakeLink: HostLink {
     func setDeviceName(_ name: String) async { state.withLock { $0.deviceNames.append(name) } }
     func setFocused(_ focused: Bool) { state.withLock { $0.focused.append(focused) } }
 
-    func nextRequestId() async -> UInt32 {
+    func nextRequestId() -> UInt32 {
         state.withLock {
             $0.request += 1
             return $0.request
@@ -74,54 +74,6 @@ final class FakeLink: HostLink {
     }
 }
 
-/// 取请求编号时停住、等测试 `release` 才给的连接，用来测取编号的那段时间里连接断了的情形。别的都交给
-/// 里面的 `FakeLink`。
-final class HeldRequestLink: HostLink {
-    let inner = FakeLink()
-    private let held = Mutex<(released: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
-
-    /// 正停在取编号上的调用有几个。
-    var waiting: Int { held.withLock { $0.waiters.count } }
-
-    /// 放行停着的，以后取编号不再停。
-    func release() {
-        let waiters = held.withLock {
-            $0.released = true
-            defer { $0.waiters = [] }
-            return $0.waiters
-        }
-        for waiter in waiters {
-            waiter.resume()
-        }
-    }
-
-    /// 以后取编号又停住，直到再 `release`。
-    func hold() {
-        held.withLock { $0.released = false }
-    }
-
-    func nextRequestId() async -> UInt32 {
-        await withCheckedContinuation { continuation in
-            let released = held.withLock {
-                if !$0.released { $0.waiters.append(continuation) }
-                return $0.released
-            }
-            if released { continuation.resume() }
-        }
-        return await inner.nextRequestId()
-    }
-
-    func events() async -> AsyncStream<HostEvent> { await inner.events() }
-    func send(_ message: ClientMsg) { inner.send(message) }
-    func sendInput(_ data: Data, channel: UInt32, generation: UInt64) {
-        inner.sendInput(data, channel: channel, generation: generation)
-    }
-    func start() async { await inner.start() }
-    func stop() async { await inner.stop() }
-    func reconnectNow() async { await inner.reconnectNow() }
-    func setDeviceName(_ name: String) async { await inner.setDeviceName(name) }
-    func setFocused(_ focused: Bool) { inner.setFocused(focused) }
-}
 
 /// 记下视图模型让它做的事的假显示。
 @MainActor

@@ -51,8 +51,6 @@ public final class QuickReplyModel {
     /// 上次放回文本框的字：文本框还是它时，再有没送到的接在后面，几条都失败时不只剩第一条。
     @ObservationIgnored private var restored: String?
     @ObservationIgnored private var batchFailed = false
-    /// 断开过几次。取请求编号要等 `HostConnection`，等的时候连接可能断了（又连上）：前后对不上就不发。
-    @ObservationIgnored private var disconnects = 0
     @ObservationIgnored private let onDelivered: @MainActor (SessionId) -> Void
 
     /// `onDelivered` 在一批请求都送到后调，比如刷新这个会话的预览。
@@ -73,9 +71,7 @@ public final class QuickReplyModel {
     /// 按一个键。
     public func press(_ key: QuickKey) async {
         guard ensureConnected() else { return }
-        let epoch = disconnects
-        let req = await link.nextRequestId()
-        guard stillConnected(since: epoch) else { return }
+        let req = link.nextRequestId()
         begin([req])
         link.send(.sendKeys(req: req, id: sessionId, keys: [key.key]))
     }
@@ -86,14 +82,8 @@ public final class QuickReplyModel {
         guard canSendDraft, fits(text), ensureConnected() else { return }
         draft = ""
         restored = nil
-        let epoch = disconnects
-        let paste = await link.nextRequestId()
-        let enter = await link.nextRequestId()
-        guard stillConnected(since: epoch) else {
-            // 断开时 `connectionLost` 可能已把之前没送到的放回文本框，这段接在它后面，不丢。
-            restoreDraft(text)
-            return
-        }
+        let paste = link.nextRequestId()
+        let enter = link.nextRequestId()
         begin([paste, enter])
         unsent[paste] = text
         link.send(.paste(req: paste, id: sessionId, text: text))
@@ -114,14 +104,6 @@ public final class QuickReplyModel {
     /// 断着时 `HostConnection` 会把消息丢掉：不发，按失败报出来，草稿留着。
     private func ensureConnected() -> Bool {
         guard !isConnected else { return true }
-        failedCount += 1
-        errorMessage = String(localized: "未连接")
-        return false
-    }
-
-    /// 取编号的这段时间里连接没断过；断过时按没连上报失败。
-    private func stillConnected(since epoch: Int) -> Bool {
-        guard epoch != disconnects else { return true }
         failedCount += 1
         errorMessage = String(localized: "未连接")
         return false
@@ -175,7 +157,6 @@ public final class QuickReplyModel {
     /// 连接断了：还没回话的请求不会再有回音，算失败。
     public func connectionLost() {
         isConnected = false
-        disconnects += 1
         guard !pending.isEmpty else { return }
         pending.removeAll()
         // 连着发了几条都没回话时按发出的先后拼回去，只放回一段的话别的就丢了。

@@ -58,7 +58,7 @@ public actor HostConnection: HostLink {
     private var runTask: Task<Void, Never>?
     private var backoffTask: Task<Void, any Error>?
     private var writerTask: Task<Void, Never>?
-    private var requestCounter: UInt32 = 0
+    private nonisolated let requestCounter = Mutex<UInt32>(0)
     /// 用户在看这台电脑，见 `setFocused`。不经 actor，`AppModel` 在主线程上按导航栈同步设。
     private nonisolated let focused = Mutex(true)
 
@@ -200,10 +200,12 @@ public actor HostConnection: HostLink {
         identity.deviceName = name
     }
 
-    public func nextRequestId() -> UInt32 {
-        requestCounter &+= 1
-        if requestCounter == 0 { requestCounter = 1 }
-        return requestCounter
+    public nonisolated func nextRequestId() -> UInt32 {
+        requestCounter.withLock { counter in
+            counter &+= 1
+            if counter == 0 { counter = 1 }
+            return counter
+        }
     }
 
     // MARK: 连接

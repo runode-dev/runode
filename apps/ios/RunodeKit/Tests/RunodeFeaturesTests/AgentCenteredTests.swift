@@ -386,42 +386,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(reply.draft == "用方案 2\n用方案 3")
     }
 
-    /// 取请求编号时连接断了又连上：不发到新连接上去（断开时已经清过在等的请求），草稿还回来。
-    @Test func aDisconnectWhileNumberingKeepsTheDraft() async {
-        let held = HeldRequestLink()
-        let reply = QuickReplyModel(sessionId: waiting, link: held)
-        reply.draft = "用方案 2"
-        let sending = Task { await reply.sendDraft() }
-        #expect(await eventually { held.waiting == 1 })
-        reply.connectionLost()
-        reply.isConnected = true
-        held.release()
-        await sending.value
-        #expect(held.inner.sent.isEmpty)
-        #expect(reply.draft == "用方案 2")
-        #expect(reply.failedCount == 1)
 
-        let pressing = Task { await reply.press(QuickKey.standard[0]) }
-        await pressing.value
-        #expect(held.inner.sent.count == 1, "connected since the press began")
-    }
-
-    /// 第一条发出去了还没回话，第二条取编号时连接断了：两段字都放回文本框，第二段不被第一段挤掉。
-    @Test func aDisconnectWhileNumberingKeepsEveryDraft() async {
-        let held = HeldRequestLink()
-        held.release()
-        let reply = QuickReplyModel(sessionId: waiting, link: held)
-        reply.draft = "用方案 2"
-        await reply.sendDraft()
-        held.hold()
-        reply.draft = "用方案 3"
-        let sending = Task { await reply.sendDraft() }
-        #expect(await eventually { held.waiting == 1 })
-        reply.connectionLost()
-        held.release()
-        await sending.value
-        #expect(reply.draft == "用方案 2\n用方案 3")
-    }
 
     /// 断着时不发：按失败报出来，草稿留着；列表重新连上后照常发。
     @Test func nothingIsSentWhileDisconnected() async {

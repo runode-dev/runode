@@ -88,7 +88,7 @@
         func reconnectNow() async {}
         func setFocused(_ focused: Bool) {}
         func setDeviceName(_ name: String) async {}
-        func nextRequestId() async -> UInt32 { 0 }
+        func nextRequestId() -> UInt32 { 0 }
     }
 
     /// 假的宿主：收到什么就照协议回什么。
@@ -305,7 +305,7 @@
         func setDeviceName(_ name: String) async {}
 
         private let request = Mutex<UInt32>(0)
-        func nextRequestId() async -> UInt32 {
+        func nextRequestId() -> UInt32 {
             request.withLock {
                 $0 += 1
                 return $0

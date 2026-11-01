@@ -1033,19 +1033,6 @@ actor UnwritableMachineStore: MachineStore {
         #expect(picker.errorMessage == nil)
     }
 
-    /// 取请求编号时连接断了：不再发、不转圈，报未连接。
-    @Test func aDisconnectWhileNumberingDoesNotSpin() async {
-        let held = HeldRequestLink()
-        let picker = DirectoryPickerModel(link: held)
-        let loading = Task { await picker.load(nil) }
-        #expect(await eventually { held.waiting == 1 })
-        picker.connectionLost()
-        held.release()
-        await loading.value
-        #expect(held.inner.sent.isEmpty)
-        #expect(!picker.isLoading)
-        #expect(picker.errorMessage == "未连接")
-    }
 
     /// 不带编号的 `Error` 是同一条连接上别的请求的，不当成列目录的回话，接着等。
     @Test func unnumberedErrorsAreNotClaimed() async {
