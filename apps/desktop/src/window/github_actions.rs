@@ -10,6 +10,7 @@ use gpui::{AnyElement, App, Context, Div, Entity, Focusable, Stateful, Window, d
 
 use super::{
     Divider, WindowView, cards,
+    files::Quoting,
     project::{SidePanel, panel_message, panel_shell},
     status_bar,
 };
@@ -103,9 +104,12 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            ActionsEvent::RunInTerminal { command, refetch } => {
+            ActionsEvent::RunInTerminal { argv, refetch } => {
                 let dir = self.actions_dir(cx);
-                let Some(view) = self.run_in_terminal(&dir, command.clone(), window, cx) else {
+                // 页只在本机的 workspace 上开，新开的终端跑的是 `default_shell`。
+                let quoting = Quoting::of_program(&runode_terminal::pty::default_shell());
+                let command = argv.iter().map(|arg| quoting.quote(arg)).collect::<Vec<_>>().join(" ");
+                let Some(view) = self.run_in_terminal(&dir, command, window, cx) else {
                     return;
                 };
                 let Some(refetch) = refetch.clone() else {

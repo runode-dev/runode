@@ -89,9 +89,9 @@ pub struct Input {
 
 /// 要 app 办的事。
 pub enum ActionsEvent {
-    /// 在仓库目录里分出一个终端跑 `command`。`refetch` 不为空时，等 gh 跑起来又回到 shell（或者终端关了）
+    /// 在仓库目录里分出一个终端跑 `argv`，app 照那个终端的 shell 给各个参数加引号。`refetch` 不为空时，等 gh 跑起来又回到 shell（或者终端关了）
     /// 再交回 `ActionsPanel::refetch`：值在终端里填，页上不知道什么时候填完。
-    RunInTerminal { command: String, refetch: Option<Refetch> },
+    RunInTerminal { argv: Vec<String>, refetch: Option<Refetch> },
     /// 固定到状态栏上的工作流变了，app 存下来，下次照样交回 `Input::pinned`。
     PinsChanged(Vec<PinnedWorkflow>),
     /// 固定的工作流读到了新的运行，`pinned_items` 变了：app 的状态栏不跟着页重画，要自己重画。
@@ -428,10 +428,10 @@ impl ActionsPanel {
         cx.notify();
     }
 
-    /// 请 app 在仓库目录里分出一个终端跑 `command`，见 `ActionsEvent::RunInTerminal`。
-    fn run_in_terminal(&mut self, command: String, refetch: Option<Query>, cx: &mut Context<Self>) {
+    /// 请 app 在仓库目录里分出一个终端跑 `argv`。
+    fn run_in_terminal(&mut self, argv: Vec<String>, refetch: Option<Query>, cx: &mut Context<Self>) {
         let generation = self.generation;
-        cx.emit(ActionsEvent::RunInTerminal { command, refetch: refetch.map(|query| Refetch(query, generation)) });
+        cx.emit(ActionsEvent::RunInTerminal { argv, refetch: refetch.map(|query| Refetch(query, generation)) });
     }
 
     /// 在终端里交给 gh 设 `scope` 那一级叫 `name` 的 secret（`secret` 为真）或 variable 的值，gh 跑完时重读那份列表。
@@ -715,7 +715,7 @@ impl ActionsPanel {
     fn render_actions_login(&self, cx: &mut Context<Self>) -> Div {
         let text = rust_i18n::t!("github_actions.login_needed").into_owned();
         let login = |this: &mut Self, _: &mut Window, cx: &mut Context<Self>| {
-            this.run_in_terminal(gh::LOGIN_COMMAND.to_owned(), None, cx);
+            this.run_in_terminal(gh::LOGIN_COMMAND.map(str::to_owned).to_vec(), None, cx);
         };
         div()
             .flex_1()

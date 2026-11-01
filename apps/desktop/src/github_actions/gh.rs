@@ -25,7 +25,7 @@ pub(super) const LOGIN: &str = "gh auth required";
 /// 仓库属于个人、不属于组织时 `Gh::org_settings_url` 返回的错。
 pub(super) const NOT_ORG: &str = "repository is not owned by an organization";
 /// 在终端里登录 GitHub：gh 一步步问登哪个主机、用浏览器还是令牌。
-pub(super) const LOGIN_COMMAND: &str = "gh auth login";
+pub(super) const LOGIN_COMMAND: [&str; 3] = [PROGRAM, "auth", "login"];
 /// gh 一次最多跑多久，到点连同它拉起的进程一起结束：gh 或凭据 helper 卡住时查询报错，不会一直在读。
 const TIMEOUT: Duration = Duration::from_secs(60);
 /// 本地的工作流文件最多读这么多，多出来的不看。
@@ -508,32 +508,38 @@ pub(super) fn due(data: Option<&Result<Data, String>>, fetched: Option<Instant>,
     fetched.is_none_or(|at| now.duration_since(at) + Duration::from_secs(1) >= every)
 }
 
-/// 在终端里看一个跑完的 job 的整份日志，gh 交给分页器显示。
-pub(super) fn logs_command(job: u64) -> String {
-    format!("{PROGRAM} run view --log --job {job}")
+/// 在终端里看一个跑完的 job 的整份日志，gh 交给分页器显示。在终端里跑的命令都是一个个参数，由 app
+/// 照那个终端的 shell 加引号。
+pub(super) fn logs_command(job: u64) -> Vec<String> {
+    argv([PROGRAM, "run", "view", "--log", "--job", &job.to_string()])
 }
 
 /// 在终端里盯着一次运行，跑完为止。
-pub(super) fn watch_command(run: u64) -> String {
-    format!("{PROGRAM} run watch {run}")
+pub(super) fn watch_command(run: u64) -> Vec<String> {
+    argv([PROGRAM, "run", "watch", &run.to_string()])
 }
 
 /// 在终端里触发工作流：有输入参数时 gh 一个个问。
-pub(super) fn trigger_command(workflow: u64, git_ref: Option<&str>) -> String {
-    match git_ref {
-        Some(git_ref) => format!("{PROGRAM} workflow run {workflow} --ref {}", shell_quote(git_ref)),
-        None => format!("{PROGRAM} workflow run {workflow}"),
+pub(super) fn trigger_command(workflow: u64, git_ref: Option<&str>) -> Vec<String> {
+    let mut command = argv([PROGRAM, "workflow", "run", &workflow.to_string()]);
+    if let Some(git_ref) = git_ref {
+        command.extend(argv(["--ref", git_ref]));
     }
+    command
 }
 
 /// 在终端里设 secret（`secret` 为真）或 variable 的值：gh 提示粘贴，secret 的值不回显，也不进命令行和历史。
-pub(super) fn set_command(secret: bool, scope: &Scope, name: &str) -> String {
+pub(super) fn set_command(secret: bool, scope: &Scope, name: &str) -> Vec<String> {
     let kind = if secret { "secret" } else { "variable" };
-    let mut command = format!("{PROGRAM} {kind} set {}", shell_quote(name));
+    let mut command = argv([PROGRAM, kind, "set", name]);
     if let Scope::Env(env) = scope {
-        command.push_str(&format!(" --env {}", shell_quote(env)));
+        command.extend(argv(["--env", env]));
     }
     command
+}
+
+fn argv<const N: usize>(args: [&str; N]) -> Vec<String> {
+    args.into_iter().map(str::to_owned).collect()
 }
 
 /// 本地工作流文件 `path` 的内容，最多读 `MAX_WORKFLOW_BYTES`。不是普通文件或读不了时为空：仓库是别人的，
@@ -565,17 +571,6 @@ pub(super) fn dispatchable(source: &str) -> bool {
 /// 一个 step 在网页上的位置：job 页加上 step 的编号。
 pub(super) fn step_url(job: &Job, step: &Step) -> String {
     format!("{}#step:{}:1", job.url, step.number)
-}
-
-/// 打进 shell 的参数：只含常见字符时原样，否则用单引号括起来；开头是 `=` 或 `%` 时也括起来，zsh 会把
-/// `=foo` 展开成命令的路径。
-fn shell_quote(text: &str) -> String {
-    let plain = |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '=');
-    if !text.is_empty() && !text.starts_with(['=', '%']) && text.chars().all(plain) {
-        text.to_owned()
-    } else {
-        format!("'{}'", text.replace('\'', r"'\''"))
-    }
 }
 
 #[cfg(test)]
@@ -710,12 +705,15 @@ mod tests {
     }
 
     #[test]
-    fn terminal_commands_quote_what_the_user_named() {
-        assert_eq!(trigger_command(5, Some("feat/x y")), "gh workflow run 5 --ref 'feat/x y'");
-        assert_eq!(trigger_command(5, None), "gh workflow run 5");
-        assert_eq!(set_command(true, &Scope::Repo, "TOKEN"), "gh secret set TOKEN");
-        assert_eq!(set_command(false, &Scope::Env("prod env".into()), "URL"), "gh variable set URL --env 'prod env'");
-        assert_eq!(logs_command(9), "gh run view --log --job 9");
+    fn terminal_commands_keep_what_the_user_named_as_one_argument() {
+        assert_eq!(trigger_command(5, Some("feat/x y")).join("|"), "gh|workflow|run|5|--ref|feat/x y");
+        assert_eq!(trigger_command(5, None).join("|"), "gh|workflow|run|5");
+        assert_eq!(set_command(true, &Scope::Repo, "TOKEN").join("|"), "gh|secret|set|TOKEN");
+        assert_eq!(
+            set_command(false, &Scope::Env("prod env".into()), "URL").join("|"),
+            "gh|variable|set|URL|--env|prod env"
+        );
+        assert_eq!(logs_command(9).join("|"), "gh|run|view|--log|--job|9");
     }
 
     #[cfg(unix)]
