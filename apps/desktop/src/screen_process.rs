@@ -56,6 +56,10 @@ static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(0);
 pub fn run() -> i32 {
     // SAFETY: `main` 直接交到这里，还没开别的线程。
     let disclaimed = unsafe { runode_host::disclaim_responsibility() };
+    // 宿主可能跑在 ssh 的登录或用户服务里，没有图形会话的环境，采集前接过来。
+    // SAFETY: 同上，还没开别的线程。
+    #[cfg(target_os = "linux")]
+    let desktop = unsafe { runode_screen::adopt_session() };
     let dirs = runode_paths::Dirs::from_env();
     crate::host_process::init_logging(dirs.screen_log_file());
     if let Err(err) = disclaimed {
@@ -65,6 +69,11 @@ pub fn run() -> i32 {
     #[cfg(windows)]
     if runode_screen::in_service_session() {
         tracing::warn!("the screen process does not start in the service session, which has no screen");
+        return 1;
+    }
+    #[cfg(target_os = "linux")]
+    if !desktop {
+        tracing::warn!("the screen process does not start: nobody is signed in to a desktop on this screen");
         return 1;
     }
     let (listener, socket, _lock) = match listen(&dirs) {
@@ -197,6 +206,8 @@ fn connection(stream: UnixStream) -> io::Result<()> {
         }
         _ => return Err(io::Error::other("the first frame is not a screen hello")),
     }
+    // 一条连接里屏幕上的授权框只弹一次，没被允许就停在那里，等观看端重新连接再问。
+    runode_screen::ask_again();
     // 连着时屏幕一直亮着：熄着的屏幕列不出来，也采不到。
     let _awake = KeepAwake::acquire();
     // 缺的授权当场请求：每个程序第一次请求时系统在这台电脑上弹框，并把它列进系统设置的「屏幕与系统录音」
@@ -580,7 +591,7 @@ fn start(options: &Options, outbox: &Outbox) -> Option<Capture> {
             tracing::warn!("cannot start capturing: {err}");
             outbox.control(&ScreenHostMsg::Stopped {
                 reason: err.to_string(),
-                signed_out: false,
+                signed_out: err.kind() == io::ErrorKind::NotConnected,
                 no_encoder: err.kind() == io::ErrorKind::Unsupported,
             });
             None

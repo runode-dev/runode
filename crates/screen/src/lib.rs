@@ -4,7 +4,8 @@
 //!
 //! macOS 上 ScreenCaptureKit 采集，VideoToolbox 编解码，CoreGraphics 注入；采集要「屏幕录制」的授权，
 //! 注入要「辅助功能」的授权，都按调用进程的责任进程记（`permissions`）。Windows 上 DXGI 桌面复制
-//! 采集，Media Foundation 编解码，`SendInput` 注入，不用授权。
+//! 采集，Media Foundation 编解码，`SendInput` 注入，不用授权。Linux 上只采集和注入，不解码，按屏幕上的图形会话
+//! 挑 X11、Mutter 或 portal（`linux`）。
 
 #[cfg(target_os = "macos")]
 mod awake;
@@ -17,13 +18,15 @@ mod encoder;
 #[cfg(target_os = "macos")]
 mod input;
 mod keys;
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod mode;
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 mod nal;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 mod nv12;
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 mod refine;
 #[cfg(windows)]
 mod win;
@@ -37,6 +40,8 @@ pub use decoder::{Decoded, Decoder, PixelBuffer};
 #[cfg(target_os = "macos")]
 pub use input::Injector;
 pub use keys::key_strokes;
+#[cfg(target_os = "linux")]
+pub use linux::{Capture, Injector, KeepAwake, Keyframes, adopt_session};
 #[cfg(windows)]
 pub use win::{Capture, Decoded, Decoder, Injector, KeepAwake, Keyframes, console_user, in_service_session};
 
@@ -49,12 +54,12 @@ use std::{
 
 /// 单帧的上限按这么长一段时间算：任意这么长的一段里编出的字节数不超过平均码率的 `BURST_HEADROOM` 倍。关键帧和
 /// 画面大变时的帧因此摊到后面几帧，不会一帧就把网络堵上几百毫秒。
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 const BURST_WINDOW: std::time::Duration = std::time::Duration::from_millis(150);
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 const BURST_HEADROOM: f64 = 1.5;
 /// 画面静止后补清楚（`Refiner`）时码率放大的倍数。
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 const REFINE_BOOST: f64 = 4.;
 
 /// `Capture` 交出的事件。
@@ -87,7 +92,8 @@ pub struct Options {
 /// 一块屏幕。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Display {
-    /// macOS 上是 `CGDirectDisplayID`，Windows 上是显卡和它的输出的序号（`win::display`）。
+    /// macOS 上是 `CGDirectDisplayID`，Windows 上是显卡和它的输出的序号（`win::display`），Linux 上由后端定（RandR
+    /// 的屏幕名、接口名的散列或 PipeWire 节点）。
     pub id: u32,
     /// 点数，`ScreenInput` 的坐标按它换算。
     pub width: u32,
@@ -142,6 +148,22 @@ impl Display {
         win::displays()
     }
 
+    /// 主屏。
+    #[cfg(target_os = "linux")]
+    pub fn main() -> Self {
+        Self::all().swap_remove(0)
+    }
+
+    /// 开着的各块屏幕，主屏排第一；列不出时是凑的一块 1920×1080，开始采集时再报错。
+    #[cfg(target_os = "linux")]
+    pub fn all() -> Vec<Self> {
+        let mut displays = linux::displays();
+        if displays.is_empty() {
+            displays.push(Self { id: 0, width: 1920, height: 1080, pixel_width: 1920, pixel_height: 1080 });
+        }
+        displays
+    }
+
     #[cfg(target_os = "macos")]
     fn with_id(id: u32) -> Self {
         use objc2_core_graphics::{CGDisplayBounds, CGDisplayCopyDisplayMode, CGDisplayMode};
@@ -167,7 +189,21 @@ pub struct DisplayMode {
 /// 被 `set_display_mode` 换过的屏幕和它们第一次被换之前的模式。
 static ORIGINAL_MODES: Mutex<Option<HashMap<u32, DisplayMode>>> = Mutex::new(None);
 
-/// 屏幕 `id` 能换成的显示模式：一种排版尺寸一个，同样尺寸有 HiDPI 的取它，从大到小。
+/// 屏幕 `id` 能换成的显示模式：一种排版尺寸一个，同样尺寸有 HiDPI 的取它，从大到小。Linux 上不换模式，是空的。
+#[cfg(target_os = "linux")]
+pub fn display_modes(_id: u32) -> Vec<DisplayMode> {
+    Vec::new()
+}
+
+/// Linux 上不换显示模式：换回去（`mode` 为空）什么都不做，换成别的报 `Unsupported`。
+#[cfg(target_os = "linux")]
+pub fn set_display_mode(_id: u32, mode: Option<&DisplayMode>) -> std::io::Result<()> {
+    match mode {
+        Some(_) => Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "display modes cannot change on Linux")),
+        None => Ok(()),
+    }
+}
+
 #[cfg(any(target_os = "macos", windows))]
 pub fn display_modes(id: u32) -> Vec<DisplayMode> {
     #[cfg(target_os = "macos")]
@@ -240,6 +276,28 @@ pub fn screen_locked() -> bool {
     win::screen_locked()
 }
 
+/// 图形会话是不是锁着屏（logind 的 `LockedHint`）。查不到时当成没锁。
+#[cfg(target_os = "linux")]
+pub fn screen_locked() -> bool {
+    linux::screen_locked()
+}
+
+/// 这台电脑的屏幕上有本用户登录着的图形桌面，远程桌面看得了：macOS 和 Windows 上总是有，Linux 上要有本用户的
+/// X11 或 Wayland 会话，没装桌面的服务器上没有。
+pub fn desktop_available() -> bool {
+    #[cfg(target_os = "linux")]
+    return linux::session::exists();
+    #[cfg(not(target_os = "linux"))]
+    cfg!(any(target_os = "macos", windows))
+}
+
+/// 之后要授权时可以再在这台电脑的屏幕上问一次。Linux 上走 xdg-desktop-portal 时，屏幕上的人拒绝了或没理会，
+/// 在下次调这个之前列屏幕、采集、注入都不再弹框，直接报上次的错；别的系统上什么都不做。
+pub fn ask_again() {
+    #[cfg(target_os = "linux")]
+    linux::ask_again();
+}
+
 /// 这个进程的责任进程有没有拿到授权。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Permissions {
@@ -294,13 +352,13 @@ pub fn request_permissions() -> Permissions {
     Permissions { screen_capture: now.screen_capture || CGRequestScreenCaptureAccess(), post_event }
 }
 
-/// Windows 上采集和注入都不用授权。
-#[cfg(windows)]
+/// Windows 和 Linux 上采集和注入都不用系统设置里的授权；Wayland 的 portal 在开始采集时自己问用户。
+#[cfg(any(windows, target_os = "linux"))]
 pub fn permissions() -> Permissions {
     Permissions { screen_capture: true, post_event: true }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub fn request_permissions() -> Permissions {
     permissions()
 }

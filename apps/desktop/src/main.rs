@@ -35,7 +35,6 @@ mod project_host;
 mod remote_access;
 mod remote_hosts;
 mod screen_bridge;
-#[cfg(any(target_os = "macos", windows))]
 mod screen_process;
 mod screen_viewer;
 mod settings;
@@ -103,7 +102,6 @@ fn main() {
     if args == ["--ssh-screen"] {
         std::process::exit(screen_bridge::run());
     }
-    #[cfg(any(target_os = "macos", windows))]
     if args == ["--screen"] {
         std::process::exit(screen_process::run());
     }

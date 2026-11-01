@@ -572,12 +572,12 @@ impl WindowView {
     }
 
     /// 右侧面板都收着时标题栏右边给右上角那组按钮让出的宽度，窗口按钮另算。
-    pub(super) fn panel_toggles_inset(&self) -> f32 {
-        let count = TOGGLE_COUNT + if self.remote_desktop_button_shown() { 1. } else { 0. };
+    pub(super) fn panel_toggles_inset(&self, cx: &App) -> f32 {
+        let count = TOGGLE_COUNT + if self.remote_desktop_button_shown(cx) { 1. } else { 0. };
         TOGGLE_WIDTH * count + TOGGLE_GAP * (count - 1.) + TOGGLE_MARGIN + 6.
     }
 
-    /// 标题栏右上角的按钮：没有菜单栏的系统上先是「更多」按钮，workspace 在 SSH 主机上时接着是远程桌面
+    /// 标题栏右上角的按钮：没有菜单栏的系统上先是「更多」按钮，workspace 所在的 SSH 主机看得了远程桌面时接着是远程桌面
     /// 按钮，然后是命令按钮和开关右侧面板的按钮，展开时底色亮一些，打开的是上次显示的那一页。位置由调用方
     /// 接着写。
     pub(super) fn render_panel_toggles(&self, window: &Window, cx: &mut Context<Self>) -> Div {
@@ -609,7 +609,7 @@ impl WindowView {
             .items_center()
             .gap(px(TOGGLE_GAP))
             .when(super::more_menu::SHOWN, |toggles| toggles.child(self.render_more_button(window, cx)))
-            .when(self.remote_desktop_button_shown(), |toggles| toggles.child(self.render_remote_desktop_button(cx)))
+            .when(self.remote_desktop_button_shown(cx), |toggles| toggles.child(self.render_remote_desktop_button(cx)))
             .child(self.render_tasks_button(window, cx))
             .child(toggle)
     }

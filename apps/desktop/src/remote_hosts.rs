@@ -117,7 +117,13 @@ pub fn system_name(os: &str) -> Option<&'static str> {
     }
 }
 
-/// 记下主机 `name` 报的系统 `os`；变了才存，并刷新画着系统图标的各窗口。
+/// 主机 `name` 的远程桌面能不能看：系统是 macOS、Windows 或 Linux 就算能，Linux 屏幕上有没有人登录桌面
+/// 等打开时由那边的采集进程报；没连上过、系统不明时算不能。
+pub fn screen_capturable(name: &str, cx: &App) -> bool {
+    system(name, cx).and_then(system_name).is_some()
+}
+
+/// 记下主机 `name` 报的系统 `os`；变了才存，并刷新画着系统图标、远程桌面按钮的各窗口。
 fn remember_system(name: &str, os: &str, cx: &mut App) {
     if os.is_empty() || system(name, cx) == Some(os) {
         return;

@@ -129,6 +129,18 @@ cpal = "0.18"
 sha2 = "0.11"
 # 配对的二维码：`runode remote pair` 画在终端里，设置页画在界面上；不要默认特性（画成图片、SVG 用不上）。
 qrcode = { version = "0.14", default-features = false }
+# Linux 上远程桌面采集 X11 的屏幕、注入键鼠（MIT 或 Apache-2.0）：纯 Rust 的 X 协议，不开 `allow-unsafe-code`，
+# 不链 libxcb，没装图形库的服务器上可执行文件照样跑。
+x11rb = { version = "0.13", features = ["shm", "xtest", "randr", "xfixes"] }
+# Linux 上远程桌面经会话总线找 GNOME 的 Mutter 和 logind（MIT）。
+zbus = "5"
+# Linux 上远程桌面经 xdg-desktop-portal 采集 Wayland 的屏幕、注入键鼠（MIT）；PipeWire 不经它的 `pipewire`
+# 特性链，由 runode-screen 运行时 dlopen。
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "screencast", "remote_desktop"] }
+# 运行时载入系统的 libpipewire 和 libva，没装它们的 Linux 上可执行文件照样跑（ISC）。
+libloading = "0.8"
+# Linux 上没有能用的硬件编码器时的软件 H.264 编码器（BSD-2-Clause）：编进 OpenH264 的源码，不依赖系统的库。
+openh264 = "0.9"
 
 [profile.dev.package."*"]
 opt-level = 2

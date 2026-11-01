@@ -71,7 +71,10 @@ impl SettingsView {
                 button("settings.ssh_hosts.disconnect", "disconnect")
                     .on_press(cx, move |_, _, cx| remote_hosts::disconnect(&name, cx))
             });
-        let remote_desktop = (crate::screen_viewer::SUPPORTED && matches!(status, Status::Connected(_))).then(|| {
+        let remote_desktop = (crate::screen_viewer::SUPPORTED
+            && matches!(status, Status::Connected(_))
+            && remote_hosts::screen_capturable(&name, cx))
+        .then(|| {
             let name = name.clone();
             button("ssh.remote_desktop", "remote-desktop")
                 .on_press(cx, move |_, _, cx| crate::window::show_remote_desktop(name.clone(), cx))

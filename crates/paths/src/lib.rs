@@ -291,6 +291,11 @@ impl Dirs {
         self.data_file("host-systems.json")
     }
 
+    /// Linux 上 xdg-desktop-portal 交来的远程桌面恢复令牌：用户在屏幕上允许过一次，之后再开就不再问。
+    pub fn screen_restore_token_file(&self) -> Option<PathBuf> {
+        self.data_file("screen-restore-token")
+    }
+
     /// 用户自己加的命令：通用的，和按项目目录分开的，见 `runode_protocol::TaskSourceKind`。
     pub fn tasks_file(&self) -> Option<PathBuf> {
         self.data_file("tasks.json")

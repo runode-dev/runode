@@ -73,6 +73,7 @@ pub(crate) fn from_bgra(
 
 /// 把 `source`（`size` 大小的 BGRA，每行 `stride` 字节）顺时针转 `quarters` 个直角，写进 `out`：转后的宽高，
 /// 行与行紧挨着。`out` 的长度至少是 `size` 的像素数乘 4。
+#[cfg(any(windows, test))]
 pub(crate) fn rotate_bgra(source: &[u8], stride: usize, size: (u32, u32), quarters: u32, out: &mut [u8]) {
     let (width, height) = (size.0 as usize, size.1 as usize);
     let turned_width = if quarters % 2 == 1 { height } else { width };

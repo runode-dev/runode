@@ -19,16 +19,16 @@ const START_TIMEOUT: Duration = Duration::from_secs(15);
 /// 等采集进程开好监听时隔多久试连一次。
 const RETRY: Duration = Duration::from_millis(20);
 
-/// 连上远程桌面的采集进程，没有在跑的就拉起一个。只有 macOS 和 Windows 采得了屏幕，别的系统报
-/// `Unsupported`。
+/// 连上远程桌面的采集进程，没有在跑的就拉起一个。屏幕上没人登录时报 `NotConnected`：Windows 上经 ssh 跑在没有屏幕
+/// 的会话里、屏幕上也没人登录，Linux 上屏幕没有本用户的图形会话。
 ///
 /// shortcut: 连上的正好是因空闲正要退出的采集进程时这条连接随即断开，由观看端重连；常见了再在采集进程
 /// 里加握手确认
 pub fn connect() -> io::Result<UnixStream> {
-    if !cfg!(any(target_os = "macos", windows)) {
+    if !runode_screen::desktop_available() {
         return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "remote desktop is only available on macOS and Windows",
+            io::ErrorKind::NotConnected,
+            "nobody is signed in to a desktop on this computer's screen",
         ));
     }
     let socket = runode_paths::Dirs::from_env()
@@ -125,9 +125,11 @@ pub fn run() -> i32 {
         Err(err) => {
             tracing::warn!("cannot reach the screen process: {err}");
             let reason = format!("cannot start remote desktop on this computer: {err}");
-            if let Ok(frame) =
-                Frame::control(&ScreenHostMsg::Stopped { reason, signed_out: signed_out(), no_encoder: false })
-            {
+            if let Ok(frame) = Frame::control(&ScreenHostMsg::Stopped {
+                reason,
+                signed_out: err.kind() == io::ErrorKind::NotConnected,
+                no_encoder: false,
+            }) {
                 let mut out = io::stdout().lock();
                 let _ = write_frame(&mut out, FrameKind::Control, 0, &frame.payload);
                 let _ = out.flush();
@@ -150,14 +152,6 @@ pub fn run() -> i32 {
     // stdin 那头可能一直阻塞着（ssh 还开着）：采集进程断开就整个退出，不等它。
     drop(upstream);
     0
-}
-
-/// 屏幕上没人登录：Windows 上经 ssh 跑在没有屏幕的会话里时，没有可以起采集进程的桌面。
-fn signed_out() -> bool {
-    #[cfg(windows)]
-    return matches!(crate::desktop_session::desktop(), crate::desktop_session::Desktop::Nobody);
-    #[cfg(not(windows))]
-    false
 }
 
 /// 每读到一块就写出去并 flush：画面要尽快到，攒着不发就是延迟。

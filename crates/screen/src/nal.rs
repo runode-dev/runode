@@ -54,7 +54,7 @@ fn kind(codec: Codec, unit: &[u8]) -> Unit {
 
 /// Annex B 码流里依次的 NAL 单元：`00 00 01` 起始码之间的字节，去掉结尾补的 0（四字节起始码多出的那个
 /// 0 也在里面）。
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 fn annex_b_units(data: &[u8]) -> Vec<&[u8]> {
     let starts: Vec<usize> =
         data.windows(3).enumerate().filter(|(_, w)| *w == [0, 0, 1]).map(|(at, _)| at + 3).collect();
@@ -73,7 +73,7 @@ fn annex_b_units(data: &[u8]) -> Vec<&[u8]> {
 
 /// 把 Annex B 的一帧换成 `VideoFrame` 的写法：参数集单拿出来（不带长度字段），访问单元分隔符丢掉，
 /// 其余的 NAL 单元前面换成长度字段。
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 pub(crate) fn from_annex_b(codec: Codec, data: &[u8]) -> (Vec<u8>, Vec<Vec<u8>>) {
     let mut out = Vec::with_capacity(data.len() + 16);
     let mut parameter_sets = Vec::new();

@@ -114,13 +114,16 @@ fn with_front_window(cx: &mut App, f: impl FnOnce(&mut WindowView, &mut Window, 
 }
 
 impl WindowView {
-    /// 打开或收起当前 workspace 所在主机的远程桌面；workspace 在本机时不理。
+    /// 打开或收起当前 workspace 所在主机的远程桌面；workspace 在本机或那台主机看不了远程桌面时不理。
     pub(super) fn toggle_remote_desktop(
         &mut self,
         _: &ToggleRemoteDesktop,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.remote_desktop_button_shown(cx) {
+            return;
+        }
         let Some(host) = self.workspace().host.label().map(str::to_owned) else { return };
         match self.screen_of(&host, cx) {
             Some(id) => self.close_screen_viewer(id, window, cx),
@@ -133,9 +136,9 @@ impl WindowView {
         self.screen_viewers.views().find(|view| view.read(cx).host() == host).map(|view| view.entity_id())
     }
 
-    /// 标题栏右上角有远程桌面按钮：当前 workspace 在 SSH 主机上，本机也能解远程桌面的画面。
-    pub(super) fn remote_desktop_button_shown(&self) -> bool {
-        SUPPORTED && self.on_remote()
+    /// 标题栏右上角有远程桌面按钮：当前 workspace 在 SSH 主机上，那台主机能采集画面，本机也能解远程桌面的画面。
+    pub(super) fn remote_desktop_button_shown(&self, cx: &App) -> bool {
+        SUPPORTED && self.workspace().host.label().is_some_and(|host| crate::remote_hosts::screen_capturable(host, cx))
     }
 
     /// 标题栏右上角、命令按钮左边的远程桌面按钮，打开当前 workspace 所在主机的远程桌面；它开着时按下着。
