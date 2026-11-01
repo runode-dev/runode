@@ -215,72 +215,16 @@ fn end_process(pid: u32) -> io::Result<()> {
 
 /// 启动参数（不含程序名）里有没有 `--host`：有的是单独跑的宿主进程（`runode --host`，以及
 /// `--host --take-over`），没有的是 app 本身。
-fn launched_as_host(args: &[Vec<u8>]) -> bool {
-    args.iter().skip(1).any(|arg| arg == b"--host")
+fn launched_as_host(args: &[String]) -> bool {
+    args.iter().skip(1).any(|arg| arg == "--host")
 }
 
-/// 进程 `pid` 的启动参数（含程序名），读 `/proc/<pid>/cmdline`：各个参数以 NUL 结尾接在一起。
-#[cfg(target_os = "linux")]
-fn process_args(pid: u32) -> io::Result<Vec<Vec<u8>>> {
-    let data = std::fs::read(format!("/proc/{pid}/cmdline"))?;
-    Ok(data.split(|&byte| byte == 0).filter(|arg| !arg.is_empty()).map(<[u8]>::to_vec).collect())
-}
-
-/// 进程 `pid` 的启动参数（含程序名），用 `sysctl(KERN_PROCARGS2)` 读，见 `parse_procargs`。
-#[cfg(all(unix, not(target_os = "linux")))]
-fn process_args(pid: u32) -> io::Result<Vec<Vec<u8>>> {
-    let pid = libc::pid_t::try_from(pid).map_err(io::Error::other)?;
-    let mut max: libc::c_int = 0;
-    let mut size = std::mem::size_of::<libc::c_int>();
-    let mut mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
-    // SAFETY: mib 和输出参数都指向本地变量，长度是它们的大小；不写入新值。
-    let result =
-        unsafe { libc::sysctl(mib.as_mut_ptr(), 2, (&raw mut max).cast(), &mut size, std::ptr::null_mut(), 0) };
-    if result != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let mut buffer = vec![0u8; usize::try_from(max).unwrap_or(0).max(4)];
-    let mut size = buffer.len();
-    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
-    // SAFETY: 输出缓冲区长 `size` 字节，内核最多写这么多并把实际长度写回 `size`；不写入新值。
-    let result =
-        unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buffer.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) };
-    if result != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    buffer.truncate(size);
-    parse_procargs(&buffer).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("cannot read the arguments of process {pid}"))
-    })
-}
-
-/// 进程 `pid` 的启动参数（含程序名），按 `CommandLineToArgvW` 的规矩拆开命令行。
-#[cfg(windows)]
-fn process_args(pid: u32) -> io::Result<Vec<Vec<u8>>> {
+/// 进程 `pid` 的启动参数（含程序名）。
+fn process_args(pid: u32) -> io::Result<Vec<String>> {
     let (_, args) = runode_terminal::pty::process_args(pid).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, format!("cannot read the arguments of process {pid}"))
     })?;
-    Ok(args.into_iter().map(String::into_bytes).collect())
-}
-
-/// 解 `KERN_PROCARGS2` 的结果：本机字节序的 `int argc`，可执行文件的路径（以 NUL 结尾，后面可能
-/// 补几个 NUL 对齐），接着 `argc` 个以 NUL 结尾的参数（第一个是程序名），再往后是环境变量，不要。
-/// 格式不对时为 `None`。
-#[cfg_attr(any(target_os = "linux", windows), allow(dead_code))]
-fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
-    let argc = usize::try_from(i32::from_ne_bytes(data.get(..4)?.try_into().ok()?)).ok()?;
-    let rest = &data[4..];
-    let path_end = rest.iter().position(|&byte| byte == 0)?;
-    let mut rest = &rest[path_end..];
-    let start = rest.iter().position(|&byte| byte != 0)?;
-    rest = &rest[start..];
-    let mut args = Vec::with_capacity(argc.min(64));
-    for _ in 0..argc {
-        let end = rest.iter().position(|&byte| byte == 0)?;
-        args.push(rest[..end].to_vec());
-        rest = &rest[end + 1..];
-    }
-    Some(args)
+    Ok(args)
 }
 
 /// `socket` 上宿主进程的 pid：打个招呼，等它回话（`Welcome` 或 `Incompatible`）后再读连接对端
@@ -401,42 +345,8 @@ mod tests {
         Probe::Incompatible { protocol, reason: format!("protocol {protocol}") }
     }
 
-    /// `KERN_PROCARGS2` 的布局：argc、可执行文件路径、补齐的 NUL、参数、环境变量。
-    fn procargs(path: &str, padding: usize, args: &[&str], env: &[&str]) -> Vec<u8> {
-        let mut data = i32::try_from(args.len()).unwrap().to_ne_bytes().to_vec();
-        data.extend_from_slice(path.as_bytes());
-        data.extend(std::iter::repeat_n(0, 1 + padding));
-        for item in args.iter().chain(env) {
-            data.extend_from_slice(item.as_bytes());
-            data.push(0);
-        }
-        data
-    }
-
-    fn owned(args: &[&str]) -> Vec<Vec<u8>> {
-        args.iter().map(|arg| arg.as_bytes().to_vec()).collect()
-    }
-
-    #[test]
-    fn process_arguments_are_read_from_the_kernel_layout() {
-        let exe = "/Applications/Runode.app/Contents/MacOS/runode";
-        let data = procargs(exe, 3, &[exe, "--host"], &["HOME=/Users/me", "TERM=xterm"]);
-        assert_eq!(parse_procargs(&data), Some(owned(&[exe, "--host"])));
-        // 没有补齐的 NUL，只有程序名。
-        assert_eq!(parse_procargs(&procargs(exe, 0, &[exe], &[])), Some(owned(&[exe])));
-        // 环境变量不要，没有也行。
-        let env = "HOME=/Users/me\0TERM=xterm\0".len();
-        assert_eq!(parse_procargs(&data[..data.len() - env]), Some(owned(&[exe, "--host"])));
-        // 参数被截断、argc 比实际多、负数、太短：读不出来。
-        assert_eq!(parse_procargs(&data[..data.len() - env - 3]), None);
-        assert_eq!(parse_procargs(&procargs(exe, 1, &[exe, "--host"], &[])[..60]), None);
-        let mut lying = procargs(exe, 1, &[exe], &[]);
-        lying[..4].copy_from_slice(&5i32.to_ne_bytes());
-        assert_eq!(parse_procargs(&lying), None);
-        let mut negative = procargs(exe, 1, &[exe], &[]);
-        negative[..4].copy_from_slice(&(-1i32).to_ne_bytes());
-        assert_eq!(parse_procargs(&negative), None);
-        assert_eq!(parse_procargs(&[1, 0]), None);
+    fn owned(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| (*arg).to_owned()).collect()
     }
 
     /// 只有以 `--host` 启动的才算单独的宿主；程序名本身不算，app 带的别的参数也不算。
@@ -455,7 +365,7 @@ mod tests {
     #[test]
     fn this_process_reads_its_own_arguments() {
         let args = process_args(std::process::id()).unwrap();
-        let expected: Vec<Vec<u8>> = std::env::args_os().map(|arg| arg.into_encoded_bytes()).collect();
+        let expected: Vec<String> = std::env::args().collect();
         assert_eq!(args, expected);
         assert!(!launched_as_host(&args));
     }

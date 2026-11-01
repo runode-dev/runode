@@ -1011,7 +1011,7 @@ pub(crate) fn process_group(leader: Pid) -> Option<ForegroundJob> {
     let processes: Vec<ForegroundProcess> = group_members(leader)
         .into_iter()
         .filter_map(|pid| {
-            let (exe, argv) = process_args(pid).unzip();
+            let (exe, argv) = args_of(pid).unzip();
             Some(ForegroundProcess {
                 pid: pid_u32(pid)?,
                 name: process_name(pid)?,
@@ -1097,31 +1097,53 @@ fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
     vec![leader]
 }
 
-/// 进程启动时的可执行文件路径和全部参数，用 `sysctl(KERN_PROCARGS2)` 读：开头是参数个数，接着是
-/// 可执行文件路径和补齐用的 NUL，然后是各个参数，每个以 NUL 结尾。程序运行中改了 argv[0]（比如
-/// node 的 `process.title`）时读到的是改过的。
+/// 进程启动时的可执行文件路径和全部参数，用 `sysctl(KERN_PROCARGS2)` 读，见 `parse_procargs`。程序运行中
+/// 改了 argv[0]（比如 node 的 `process.title`）时读到的是改过的。
 #[cfg(target_os = "macos")]
-fn process_args(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
+fn args_of(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
     let mut size: libc::size_t = 0;
+    // SAFETY: 只问要多大的缓冲，不写入新值。
     let ok = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, std::ptr::null_mut(), &mut size, std::ptr::null_mut(), 0) };
     if ok != 0 || size < 4 {
         return None;
     }
     let mut buf = vec![0u8; size];
+    // SAFETY: 输出缓冲区长 `size` 字节，内核最多写这么多并把实际长度写回 `size`；不写入新值。
     let ok = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) };
     if ok != 0 {
         return None;
     }
     buf.truncate(size);
-    let argc = usize::try_from(i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?)).ok()?;
-    let rest = &buf[4..];
-    let exec_end = rest.iter().position(|&b| b == 0)?;
-    let start = exec_end + rest[exec_end..].iter().position(|&b| b != 0)?;
-    let argv: Vec<String> =
-        rest[start..].split(|&b| b == 0).take(argc).map(|arg| String::from_utf8_lossy(arg).into_owned()).collect();
-    let exe = String::from_utf8_lossy(&rest[..exec_end]).into_owned();
-    (!argv.is_empty()).then_some((exe, argv))
+    let (exe, argv) = parse_procargs(&buf)?;
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    (!argv.is_empty()).then(|| (text(exe), argv.into_iter().map(text).collect()))
+}
+
+/// 解 `KERN_PROCARGS2` 的结果：本机字节序的 `int argc`，可执行文件的路径（以 NUL 结尾，后面可能补几个 NUL
+/// 对齐），接着 `argc` 个以 NUL 结尾的参数（第一个是程序名），再往后是环境变量，不要。返回路径和参数；格式
+/// 不对（截断了、`argc` 比实际多或是负数）时为 `None`。
+#[cfg(any(target_os = "macos", test))]
+fn parse_procargs(data: &[u8]) -> Option<(&[u8], Vec<&[u8]>)> {
+    let argc = usize::try_from(i32::from_ne_bytes(data.get(..4)?.try_into().ok()?)).ok()?;
+    let rest = &data[4..];
+    let path_end = rest.iter().position(|&byte| byte == 0)?;
+    let exe = &rest[..path_end];
+    let mut rest = &rest[path_end..];
+    rest = &rest[rest.iter().position(|&byte| byte != 0)?..];
+    let mut args = Vec::with_capacity(argc.min(64));
+    for _ in 0..argc {
+        let end = rest.iter().position(|&byte| byte == 0)?;
+        args.push(&rest[..end]);
+        rest = &rest[end + 1..];
+    }
+    Some((exe, args))
+}
+
+/// 进程 `pid` 启动时的可执行文件路径和全部参数（第一个是程序名）；读不到时为空。
+#[cfg(unix)]
+pub fn process_args(pid: u32) -> Option<(String, Vec<String>)> {
+    args_of(libc::pid_t::try_from(pid).ok()?)
 }
 
 /// 进程名：`/proc/<pid>/comm`，内核截到 15 字节。
@@ -1165,7 +1187,7 @@ fn stat_group(stat: &[u8]) -> Option<libc::pid_t> {
 /// 进程的可执行文件路径（`/proc/<pid>/exe`）和全部参数（`/proc/<pid>/cmdline`，各个参数以 NUL 结尾）。
 /// 程序运行中改了 argv[0]（比如 node 的 `process.title`）时读到的是改过的。
 #[cfg(target_os = "linux")]
-fn process_args(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
+fn args_of(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
     let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
     let argv: Vec<String> = cmdline
         .strip_suffix(b"\0")
@@ -1183,7 +1205,7 @@ fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
 }
 
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
-fn process_args(_pid: libc::pid_t) -> Option<(String, Vec<String>)> {
+fn args_of(_pid: libc::pid_t) -> Option<(String, Vec<String>)> {
     None
 }
 
@@ -1260,12 +1282,53 @@ mod tests {
         assert_eq!(stat_group(b"42 (no end"), None);
     }
 
+    /// `KERN_PROCARGS2` 的布局：argc、可执行文件路径、补齐的 NUL、参数、环境变量。
+    fn procargs(path: &str, padding: usize, args: &[&str], env: &[&str]) -> Vec<u8> {
+        let mut data = i32::try_from(args.len()).unwrap().to_ne_bytes().to_vec();
+        data.extend_from_slice(path.as_bytes());
+        data.extend(std::iter::repeat_n(0, 1 + padding));
+        for item in args.iter().chain(env) {
+            data.extend_from_slice(item.as_bytes());
+            data.push(0);
+        }
+        data
+    }
+
+    #[test]
+    fn process_arguments_are_read_from_the_kernel_layout() {
+        let exe = "/Applications/Runode.app/Contents/MacOS/runode";
+        let parsed = |data: &[u8]| {
+            parse_procargs(data).map(|(path, args)| {
+                let text = |bytes: &[u8]| String::from_utf8(bytes.to_vec()).unwrap();
+                (text(path), args.into_iter().map(text).collect::<Vec<_>>())
+            })
+        };
+        let wanted = |args: &[&str]| Some((exe.to_owned(), args.iter().map(|arg| (*arg).to_owned()).collect()));
+        let data = procargs(exe, 3, &[exe, "--host"], &["HOME=/Users/me", "TERM=xterm"]);
+        assert_eq!(parsed(&data), wanted(&[exe, "--host"]));
+        // 没有补齐的 NUL，只有程序名。
+        assert_eq!(parsed(&procargs(exe, 0, &[exe], &[])), wanted(&[exe]));
+        // 环境变量不要，没有也行。
+        let env = "HOME=/Users/me\0TERM=xterm\0".len();
+        assert_eq!(parsed(&data[..data.len() - env]), wanted(&[exe, "--host"]));
+        // 参数被截断、argc 比实际多、负数、太短：读不出来。
+        assert_eq!(parsed(&data[..data.len() - env - 3]), None);
+        assert_eq!(parsed(&procargs(exe, 1, &[exe, "--host"], &[])[..60]), None);
+        let mut lying = procargs(exe, 1, &[exe], &[]);
+        lying[..4].copy_from_slice(&5i32.to_ne_bytes());
+        assert_eq!(parsed(&lying), None);
+        let mut negative = procargs(exe, 1, &[exe], &[]);
+        negative[..4].copy_from_slice(&(-1i32).to_ne_bytes());
+        assert_eq!(parsed(&negative), None);
+        assert_eq!(parsed(&[1, 0]), None);
+    }
+
     /// 读得出自己的名字、参数、当前目录和进程组。
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_reads_a_process_from_proc() {
         let pid = libc::pid_t::try_from(std::process::id()).unwrap();
-        let (exe, argv) = process_args(pid).unwrap();
+        let (exe, argv) = args_of(pid).unwrap();
         assert_eq!(exe, std::env::current_exe().unwrap().to_string_lossy());
         assert_eq!(argv, std::env::args().collect::<Vec<_>>());
         assert!(!process_name(pid).unwrap().is_empty());
