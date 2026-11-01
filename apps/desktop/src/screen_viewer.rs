@@ -799,15 +799,11 @@ impl ScreenViewer {
 
     /// 丢掉显示着的那帧。Windows 上它占着窗口的图片缓存，留到画的时候从窗口里拿掉。
     fn drop_picture(&mut self) {
-        let picture = self.picture.take();
         #[cfg(windows)]
-        {
-            if std::mem::take(&mut self.painted) {
-                self.retired.extend(picture);
-            }
+        if std::mem::take(&mut self.painted) {
+            self.retired.extend(self.picture.take());
         }
-        #[cfg(not(windows))]
-        drop(picture);
+        self.picture = None;
     }
 
     /// 页面占的地方变了：按新的尺寸要画面，第一次立即要，之后等尺寸停下来再要。
