@@ -169,6 +169,16 @@ lto = false
 codegen-units = 16
 incremental = true
 
+# 在 Mac 上交叉编译给 Windows 远端装的构建。GPUI 关了 debug-assertions 时要在构建时用 Windows 上的
+# fxc.exe 预编译着色器，交叉编译时没有这个工具；开着时在运行时编。所以从 dev 继承、留着
+# debug-assertions，只把 runode 自己的 crate 也优化上（依赖在 dev 里已经优化），关掉溢出检查、
+# 去掉调试信息，跑远程桌面这类热路径时接近发布构建，exe 也小得多。
+[profile.cross-windows]
+inherits = "dev"
+opt-level = 2
+overflow-checks = false
+debug = false
+
 # 只开现有代码已经满足的规则，防着以后倒退；新加规则时先把代码改干净。
 [workspace.lints.rust]
 unused_lifetimes = "warn"

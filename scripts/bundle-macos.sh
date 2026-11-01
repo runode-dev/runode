@@ -13,6 +13,9 @@
 #                  ad-hoc 签名的系统按 cdhash 认，每次重新打包都是另一个 app，隐私与安全里给过的
 #                  权限就不算了；app 也只在新包和自己出自同一个 Team ID 时才自己更新，ad-hoc 签名的
 #                  不更新。要强制 ad-hoc 就给 -。
+#   REMOTE         app 模式下默认把 build-remote.sh 交叉编译的另一种架构的 Mac 版和 Windows 版放进
+#                  Contents/Resources/remote，本机打的包连这两种 SSH 远端时装它们（发布页上没有这个构建的包）；
+#                  给 0 时不放。缺交叉编译的工具时跳过并提示。dmg 模式发的是发布构建，远端从发布页下载，不放。
 #   NOTARY_PROFILE 公证用的 notarytool 钥匙串配置名（xcrun notarytool store-credentials 存的），或者
 #   NOTARY_KEY、NOTARY_KEY_ID、NOTARY_ISSUER
 #                  App Store Connect API 密钥（.p8 文件的路径、密钥 ID、Issuer ID），CI 里用这个。
@@ -66,28 +69,8 @@ dmg="$bundle_dir/Runode-$version-macos-$arch.dmg"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$exe" "$app/Contents/MacOS/runode"
-# macOS 的本地网络权限按责任进程程序里的 Mach-O UUID 认它是不是这个 app。shell 的责任进程是拉起它的
-# 宿主，升级后宿主还是旧版的程序，UUID 换了的话，接手过来的终端连局域网一律被拦（No route to host），
-# 放到新位置还会再弹权限框。所以每个版本都写同一个 UUID（按架构定），旧宿主照样被认作这个 app。
-# 发布构建去掉了调试信息、不出 dSYM，崩溃报告不靠 UUID 找符号。
-python3 -I - "$app/Contents/MacOS/runode" "$arch" <<'PY'
-import struct, sys, uuid
-
-path, arch = sys.argv[1:]
-data = bytearray(open(path, "rb").read())
-if struct.unpack_from("<I", data)[0] != 0xFEEDFACF:
-    sys.exit(f"{path}: 不是单一架构的 64 位 Mach-O")
-offset = 32
-for _ in range(struct.unpack_from("<I", data, 16)[0]):
-    command, size = struct.unpack_from("<II", data, offset)
-    if command == 0x1B:  # LC_UUID
-        data[offset + 8 : offset + 24] = uuid.uuid5(uuid.NAMESPACE_DNS, f"{arch}.runode.dev").bytes
-        open(path, "wb").write(data)
-        break
-    offset += size
-else:
-    sys.exit(f"{path}: 没有 LC_UUID")
-PY
+# 每个版本写同一个 Mach-O UUID，升级后接手过来的终端照样连得上局域网。
+python3 -I scripts/set-macho-uuid.py "$app/Contents/MacOS/runode" "$arch"
 # 命令行的短名字：app 把这个目录加进终端的 PATH，敲 rn 和敲 runode 一样。
 ln -s runode "$app/Contents/MacOS/rn"
 cp "$plist" "$app/Contents/Info.plist"
@@ -98,6 +81,18 @@ cp "$plist" "$app/Contents/Info.plist"
 cp apps/desktop/assets/compiled/Assets.car apps/desktop/assets/compiled/runode.icns "$app/Contents/Resources/"
 # 终端字体 Hack Nerd Font Mono 编进了二进制，它的许可（MIT、Bitstream Vera）要求分发时带上许可证。
 cp apps/desktop/assets/fonts/HackNerdFontMono/LICENSE.md "$app/Contents/Resources/HackNerdFontMono-LICENSE.md"
+
+if [[ "$target" == app && "${REMOTE:-1}" != 0 ]]; then
+    remote_profile=$BUILD_PROFILE
+    [[ "$remote_profile" != debug ]] || remote_profile=dev
+    status=0
+    CARGO_PROFILE=$remote_profile scripts/build-remote.sh "$app/Contents/Resources/remote" >/dev/null || status=$?
+    if [[ $status == 2 ]]; then
+        echo "Runode.app 里不带远端用的构建：本机打的包连 Windows 和另一种架构的 Mac 时会装上发布页上的旧版" >&2
+    elif [[ $status != 0 ]]; then
+        exit "$status"
+    fi
+fi
 
 # 公证要带安全时间戳；ad-hoc 签名没有时间戳可带。
 sign_options=(--force --sign "$SIGN_IDENTITY")

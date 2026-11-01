@@ -14,6 +14,18 @@ prepare_run = $(call link_rn,$(1))
 endif
 
 .DEFAULT_GOAL := help
+
+# SSH 远端是 Windows 或另一种架构的 Mac 时，开发构建在发布页上没有对应的包，要另外交叉编译一份装上去
+# （scripts/build-remote.sh）。make run REMOTE=1 编好后经环境变量交给桌面；make install 默认打进 app，
+# REMOTE=0 时不打。
+REMOTE ?=
+REMOTE_OUT = target/remote/out
+ifeq ($(shell uname -m),arm64)
+remote_env = RUNODE_SSH_BINARY_MACOS_X86_64=$(CURDIR)/$(REMOTE_OUT)/runode-macos-x86_64
+else
+remote_env = RUNODE_SSH_BINARY_MACOS_ARM64=$(CURDIR)/$(REMOTE_OUT)/runode-macos-arm64
+endif
+remote_env += RUNODE_SSH_BINARY_WINDOWS_X86_64=$(CURDIR)/$(REMOTE_OUT)/runode-windows-x86_64.zip
 .PHONY: help submodules build release run run-release run-ios run-ios-device app install restart dmg check test test-ssh clippy fmt fmt-check clean
 
 help: ## 列出所有目标
@@ -30,9 +42,10 @@ release: ## 发布构建
 	$(call link_rn,release)
 	$(CARGO) build --release
 
-run: ## 调试构建并启动
+run: ## 调试构建并启动（REMOTE=1 时先交叉编译 SSH 远端用的 Windows 版和另一种架构的 Mac 版）
 	$(call prepare_run,debug)
-	$(CARGO) run -p runode -- $(ARGS)
+	$(if $(filter 1,$(REMOTE)),scripts/build-remote.sh $(REMOTE_OUT))
+	$(if $(filter 1,$(REMOTE)),$(remote_env)) $(CARGO) run -p runode -- $(ARGS)
 
 run-release: ## 发布构建并启动
 	$(call prepare_run,release)
@@ -51,7 +64,7 @@ run-ios-device: ## Release 构建 iOS app，装到连着的真机上启动
 APP_PROFILE ?= local
 
 app: ## 构建并打包 Runode.app（local profile，编得快），产物在 target/local/bundle
-	CARGO=$(CARGO) BUILD_PROFILE=$(APP_PROFILE) scripts/bundle-macos.sh app
+	CARGO=$(CARGO) BUILD_PROFILE=$(APP_PROFILE) REMOTE=$(REMOTE) scripts/bundle-macos.sh app
 
 # 先拷到 /Applications 里的临时名，拷成了再和旧的换：拷到一半失败（磁盘满、被打断）时旧的还在。
 # 上次在两次 mv 之间断了时只剩 .Runode.app.old，先把它挪回去再删临时名；换新的没换成时也挪回去。

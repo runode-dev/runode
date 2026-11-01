@@ -238,7 +238,7 @@ jobs:
           exe=target/release/bundle/Runode.app/Contents/MacOS/runode
           dwarfdump --uuid "$exe"
           dwarfdump --uuid "$exe" | grep -q "UUID: ${{ matrix.uuid }} " ||
-            { echo "程序 UUID 不是固定的 ${{ matrix.uuid }}，见 scripts/bundle-macos.sh" >&2; exit 1; }
+            { echo "程序 UUID 不是固定的 ${{ matrix.uuid }}，见 scripts/set-macho-uuid.py" >&2; exit 1; }
       - name: 删掉签名用的钥匙串和密钥
         if: always()
         run: |
