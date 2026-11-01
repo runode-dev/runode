@@ -4,7 +4,8 @@
 //! 每台主机一个 `remote-host` 线程（`supervise`）管连接：要用时连上；主连接（ControlMaster）没开着就先开，
 //! 要认证时经 askpass 问桌面（`askpass`）；远端没装这个构建就装上（`deploy`）；连上后 ssh 子进程的 stdin、
 //! stdout 和一对本地 socket 互搬，`Link` 接在这对 socket 的一头上。断了按退避阶梯（`RETRY_DELAYS`）重连，
-//! 认证没过、主机密钥对不上这类要用户来办的不自己重试，等 `retry_now`。
+//! 阶梯走完还连不上（比如那台机器关了）就停下，这台电脑睡醒或网络变了时再试（`watch_network`）；认证没过、
+//! 主机密钥对不上这类要用户来办的不自己重试。停下的都等 `retry_now`。
 //!
 //! 连接的状态（`Status`）变了、连上了、要问用户，都经 `events` 告诉界面。
 
@@ -23,11 +24,11 @@ use std::{
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
-        Arc, Condvar, LazyLock, Mutex, PoisonError,
+        Arc, Condvar, LazyLock, Mutex, Once, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -98,7 +99,48 @@ pub fn remote(name: &str) -> Option<Arc<RemoteHost>> {
     hosts.insert(name.to_owned(), host.clone());
     drop(hosts);
     host.start();
+    static WATCH_NETWORK: Once = Once::new();
+    WATCH_NETWORK.call_once(|| {
+        if let Err(err) = thread::Builder::new().name("remote-network".into()).spawn(watch_network) {
+            tracing::error!("cannot start watching the network: {err}");
+        }
+    });
     Some(host)
+}
+
+/// 每隔 `NETWORK_POLL` 看一眼：这台电脑睡过一觉，或本机的地址变了（换了网络、连上 VPN），就叫正在重连和重连
+/// 放弃了的主机马上再试（`RemoteHost::nudge`）。
+///
+/// 睡没睡过按墙上时钟比 `Instant` 多走了 `SLEPT_AFTER` 以上认：macOS 和 Linux 的 `Instant` 不算睡着的时间，
+/// App Nap 推迟定时器时两边一起慢，不算睡过。Windows 的 `Instant` 算睡着的时间，那里按比 `NETWORK_POLL` 多等了
+/// `SLEPT_AFTER` 以上认。
+fn watch_network() {
+    let addresses = || {
+        let mut addresses = runode_remote::local_addresses();
+        addresses.sort_unstable();
+        addresses
+    };
+    let mut seen = addresses();
+    let mut last = (SystemTime::now(), Instant::now());
+    loop {
+        thread::sleep(NETWORK_POLL);
+        let now = (SystemTime::now(), Instant::now());
+        let waited = now.1 - last.1;
+        let slept = now.0.duration_since(last.0).is_ok_and(|wall| wall > waited + SLEPT_AFTER)
+            || cfg!(windows) && waited > NETWORK_POLL + SLEPT_AFTER;
+        last = now;
+        let current = addresses();
+        let changed = current != seen;
+        seen = current;
+        if !slept && !changed {
+            continue;
+        }
+        tracing::info!("woke up or the network changed (slept {slept}, addresses changed {changed}): reconnecting");
+        let hosts: Vec<_> = HOSTS.lock().unwrap_or_else(PoisonError::into_inner).values().cloned().collect();
+        for host in hosts {
+            host.nudge();
+        }
+    }
 }
 
 /// `hold` 时之后新建的主机先不连，停在 `Status::Idle`，等用户 `retry_now`：启动时恢复窗口期间按配置的
@@ -242,7 +284,8 @@ pub enum Status {
         retry_at: Instant,
         error: String,
     },
-    /// 要用户来办才能再连（认证没过、主机密钥变了、平台不支持、装不上），等 `retry_now`。
+    /// 不再自己重连，等 `retry_now`：要用户来办才能再连（认证没过、主机密钥变了、平台不支持、装不上），
+    /// 或者重连的退避走完了还连不上。
     Stopped {
         error: String,
         auth: bool,
@@ -279,7 +322,7 @@ pub enum Phase {
     Starting,
 }
 
-/// 第几次重连前等多久；用完了按最后一个。
+/// 第几次重连前等多久；走完了还连不上就停下。
 const RETRY_DELAYS: [Duration; 6] = [
     Duration::ZERO,
     Duration::from_secs(1),
@@ -288,8 +331,10 @@ const RETRY_DELAYS: [Duration; 6] = [
     Duration::from_secs(10),
     Duration::from_secs(30),
 ];
-/// 重连的退避用完以后每隔这么久试一次。
-const RETRY_LAST: Duration = Duration::from_secs(60);
+/// 多久看一次睡没睡过、本机地址变没变（`watch_network`）。
+const NETWORK_POLL: Duration = Duration::from_secs(5);
+/// 两次看之间多走了这么久以上，算这台电脑睡过一觉（`watch_network`）。
+const SLEPT_AFTER: Duration = Duration::from_secs(30);
 /// 连上撑过这么久算稳了，下次断开从头退避。
 const STABLE_AFTER: Duration = Duration::from_secs(60);
 /// 连着时每隔这么久问一次宿主还在不在。
@@ -332,8 +377,12 @@ struct State {
     status: Status,
     /// 要连着；`disconnect` 后为假，supervisor 等到再要连。
     wanted: bool,
-    /// 不等退避，马上再试。
+    /// 不等退避，马上再试，可以问用户。
     hurry: bool,
+    /// 睡醒或网络变了，不等退避马上再试，不问用户（`nudge`）。
+    nudged: bool,
+    /// 重连的退避走完了停在 `Status::Stopped`，网络变了可以再试。
+    gave_up: bool,
     /// 连着时的 ssh 子进程，断开（`disconnect`）时结束它。
     child: Option<u32>,
     /// 被 `forget` 了，supervisor 不再等着要连，退出。
@@ -363,6 +412,8 @@ impl RemoteHost {
                 status: Status::Idle,
                 wanted: !HOLD_NEW.load(Ordering::Relaxed),
                 hurry: false,
+                nudged: false,
+                gave_up: false,
                 child: None,
                 forgotten: false,
                 family: Family::Unix,
@@ -403,12 +454,38 @@ impl RemoteHost {
         }
     }
 
-    /// 不等退避马上再连；停着的（要用户来办的）也再试一次，这次可以问用户。
+    /// 不等退避马上再连；停着的（要用户来办的）也再试一次，这次可以问用户。停着、没在连的当场改成在连，
+    /// 调用方紧接着读到的不是上回停下的状态。
     pub fn retry_now(&self) {
         let mut state = self.state();
         state.wanted = true;
         state.hurry = true;
+        let woken = !state.forgotten && matches!(state.status, Status::Stopped { .. } | Status::Idle);
+        self.wake(state, woken);
+    }
+
+    /// 睡醒或网络变了：正在等着重连的、重连放弃了的不等退避马上再试，退避从头算，这次不问用户。要用户来办的、
+    /// 断开了的不动。
+    fn nudge(&self) {
+        let mut state = self.state();
+        let stopped = matches!(state.status, Status::Stopped { .. });
+        if !state.wanted || state.forgotten || !matches!(state.status, Status::Waiting { .. }) && !state.gave_up {
+            return;
+        }
+        state.nudged = true;
+        self.wake(state, stopped);
+    }
+
+    /// 叫醒 supervisor；`show` 时当场把状态改成在连，调用方紧接着读到的不是上回停下的状态。
+    fn wake(&self, mut state: std::sync::MutexGuard<'_, State>, show: bool) {
+        if show {
+            state.status = Status::Connecting(Phase::Authenticating);
+        }
         self.changed.notify_all();
+        drop(state);
+        if show {
+            emit(RemoteEvent::Status(self.name.clone()));
+        }
     }
 
     /// 断开，让主连接退出，不再自己重连，直到 `retry_now`。远端的会话照常跑着。会阻塞。
@@ -416,6 +493,7 @@ impl RemoteHost {
         let mut state = self.state();
         state.wanted = false;
         state.hurry = false;
+        state.nudged = false;
         if let Some(pid) = state.child.take() {
             crate::subprocess::kill(pid);
         }
@@ -481,7 +559,7 @@ impl RemoteHost {
         Ok((pruned.len(), pruned.iter().map(|(_, kib)| kib).sum()))
     }
 
-    /// 管这台主机的连接：要用时连，断了按 `RETRY_DELAYS` 退避重连，要用户来办的停下等 `retry_now`。
+    /// 管这台主机的连接：要用时连，断了按 `RETRY_DELAYS` 退避重连，走完了或要用户来办的停下等 `retry_now`。
     fn supervise(self: Arc<Self>) {
         let mut attempt = 0u32;
         loop {
@@ -496,7 +574,13 @@ impl RemoteHost {
                     }
                     state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
                 }
-                std::mem::take(&mut state.hurry) || attempt == 0
+                let hurry = std::mem::take(&mut state.hurry);
+                let nudged = std::mem::take(&mut state.nudged);
+                let interactive = hurry || attempt == 0 && !nudged;
+                if nudged {
+                    attempt = 0;
+                }
+                interactive
             };
             let started = Instant::now();
             let failure = match self.connect_once(interactive) {
@@ -529,7 +613,15 @@ impl RemoteHost {
                 Some(Failure::Retry(error)) => error,
                 None => "lost the connection".to_owned(),
             };
-            let delay = RETRY_DELAYS.get(attempt as usize).copied().unwrap_or(RETRY_LAST);
+            let Some(&delay) = RETRY_DELAYS.get(attempt as usize) else {
+                tracing::warn!("gave up reconnecting to {} after {attempt} attempts: {error}", self.name);
+                self.state().gave_up = true;
+                self.set_status(Status::Stopped { error, auth: false });
+                self.wait_for_retry();
+                self.state().gave_up = false;
+                attempt = 0;
+                continue;
+            };
             attempt += 1;
             tracing::info!("reconnecting to {} in {delay:?} (attempt {attempt}): {error}", self.name);
             self.set_status(Status::Waiting { attempt, retry_at: Instant::now() + delay, error });
@@ -537,19 +629,19 @@ impl RemoteHost {
         }
     }
 
-    /// 等用户要再试（`retry_now`）或断开（`disconnect`）。
+    /// 等用户要再试（`retry_now`）、睡醒或网络变了（`nudge`），或断开（`disconnect`）。
     fn wait_for_retry(&self) {
         let mut state = self.state();
-        while state.wanted && !state.hurry {
+        while state.wanted && !state.hurry && !state.nudged {
             state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
         }
     }
 
-    /// 等 `delay`，被 `retry_now`、`disconnect` 叫醒时提前回来。
+    /// 等 `delay`，被 `retry_now`、`nudge`、`disconnect` 叫醒时提前回来。
     fn sleep(&self, delay: Duration) {
         let deadline = Instant::now() + delay;
         let mut state = self.state();
-        while state.wanted && !state.hurry {
+        while state.wanted && !state.hurry && !state.nudged {
             let now = Instant::now();
             if now >= deadline {
                 return;
@@ -1079,6 +1171,30 @@ mod tests {
             self.host.disconnect();
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+
+    /// 睡醒、网络变了只叫醒在等重连和重连放弃了的主机，要用户来办的、断开了的不动；放弃了的当场显示在连。
+    #[test]
+    fn nudge_wakes_only_hosts_waiting_to_reconnect() {
+        let nudged = |status: Status, gave_up: bool, wanted: bool| {
+            let host = super::RemoteHost::new("me@nudge".into(), runode_ssh::Destination::parse("me@nudge").unwrap());
+            {
+                let mut state = host.state();
+                state.status = status;
+                state.gave_up = gave_up;
+                state.wanted = wanted;
+            }
+            host.nudge();
+            let state = host.state();
+            (state.nudged, state.status.clone())
+        };
+        let waiting = Status::Waiting { attempt: 3, retry_at: Instant::now(), error: "timed out".into() };
+        assert!(nudged(waiting.clone(), false, true).0);
+        assert!(!nudged(waiting, false, false).0);
+        let stopped = || Status::Stopped { error: "timed out".into(), auth: false };
+        assert_eq!(nudged(stopped(), true, true), (true, Status::Connecting(super::Phase::Authenticating)));
+        assert_eq!(nudged(stopped(), false, true), (false, stopped()));
+        assert!(!nudged(Status::Idle, false, true).0);
     }
 
     /// ssh 一时不收输入时，写进 socket 的照样马上写完，等 ssh 收了再按原样、按先后交给它。
