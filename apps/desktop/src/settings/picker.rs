@@ -1,6 +1,7 @@
 //! 从长列表里挑一项的浮层：主题、字体、语言、提示音、快捷键的动作都用它。上面一个输入框按名字
 //! 筛，上下键挪、回车选、Esc 或点外面关掉。
 
+use crate::ui::icons::CHECK_ICON;
 use crate::ui::theme::Theme;
 use std::ops::Range;
 
@@ -236,7 +237,7 @@ impl SettingsView {
                         // 用 on_click 而不是按下就选：辅助工具点它时走的也是这个。
                         .on_click(cx.listener(move |this, _, window, cx| this.pick(ix, window, cx)))
                         .child(div().w(px(12.)).flex_none().text_color(theme.ring).children(
-                            current.then(|| gpui::svg().path("icons/check.svg").size(px(11.)).text_color(theme.ring)),
+                            current.then(|| gpui::svg().path(CHECK_ICON).size(px(11.)).text_color(theme.ring)),
                         ))
                         .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
                         .children(item.detail.clone().map(|detail| {

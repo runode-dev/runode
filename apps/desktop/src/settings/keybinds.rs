@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 
+use crate::ui::icons::{BAN_ICON, MINUS_ICON, PLUS_ICON};
 use crate::ui::theme::Theme;
 use gpui::{App, Context, Div, Keystroke, SharedString, Subscription, Window, div, prelude::*, px};
 use runode_config::{
@@ -504,7 +505,7 @@ impl SettingsView {
             *nth += 1;
             let id = SharedString::from(format!("remove-bad-keybind-{line}-{nth}"));
             let remove = Button::new(id, rust_i18n::t!("settings.remove"))
-                .icon("icons/minus.svg")
+                .icon(MINUS_ICON)
                 .icon_size(12.)
                 .with_size(ButtonSize::IconSm)
                 .on_press(cx, move |this, _, cx| {
@@ -592,7 +593,7 @@ impl SettingsView {
         let adding = recording.as_ref() == Some(&add_target);
         let add_label = rust_i18n::t!("settings.keybind.add").into_owned();
         let add = Button::new(SharedString::from(format!("keybind-add-{usage}")), add_label.clone())
-            .icon("icons/plus.svg")
+            .icon(PLUS_ICON)
             .icon_size(12.)
             .with_size(ButtonSize::IconSm)
             .flex_none()
@@ -620,7 +621,7 @@ impl SettingsView {
                     SharedString::from(format!("keybind-remove-{usage}-{}", bound.trigger)),
                     remove_label.clone(),
                 )
-                .icon("icons/ban.svg")
+                .icon(BAN_ICON)
                 .icon_size(12.)
                 .with_size(ButtonSize::IconSm)
                 .tooltip(crate::ui::tooltip::tooltip(remove_label, None))

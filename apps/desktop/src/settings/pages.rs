@@ -1,5 +1,6 @@
 //! 设置页的各页：每页有哪些项、各用什么控件，以及主题、字体、调色板这些不止一个控件的项。
 
+use crate::ui::icons::{MINUS_ICON, REFRESH_ICON};
 use crate::ui::theme::Theme;
 use gpui::{AnyElement, Context, Div, ElementId, Role, SharedString, Window, div, prelude::*, px};
 use runode_config::StatusItem;
@@ -398,7 +399,7 @@ impl SettingsView {
         self.file.has(key).then(|| {
             let label = rust_i18n::t!("settings.reset").into_owned();
             Button::new(id("reset", key), label.clone())
-                .icon("icons/refresh.svg")
+                .icon(REFRESH_ICON)
                 .icon_size(12.)
                 .with_size(ButtonSize::IconSm)
                 .tooltip(crate::ui::tooltip::tooltip(label, None))
@@ -538,7 +539,7 @@ impl SettingsView {
                 .on_press(cx, move |this, window, cx| this.open_font_picker(ix, Some(current.clone()), window, cx));
             let remove = (count > 1).then(|| {
                 Button::new(format!("remove-font-{key}"), rust_i18n::t!("settings.remove"))
-                    .icon("icons/minus.svg")
+                    .icon(MINUS_ICON)
                     .icon_size(12.)
                     .with_size(ButtonSize::IconSm)
                     .on_press(cx, move |this, _, cx| {
@@ -688,7 +689,7 @@ impl SettingsView {
             let remove = files.get(ix).map(|file| {
                 let key = unique_key(&files[..ix], file);
                 Button::new(format!("remove-config-file-{key}"), rust_i18n::t!("settings.remove"))
-                    .icon("icons/minus.svg")
+                    .icon(MINUS_ICON)
                     .icon_size(12.)
                     .with_size(ButtonSize::IconSm)
                     .on_press(cx, move |this, _, cx| {

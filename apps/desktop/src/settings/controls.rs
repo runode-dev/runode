@@ -1,6 +1,7 @@
 //! 设置页里的控件：一行设置的排版，分段选项、下拉按钮、输入框和色块（按钮用 `Button`，开关用 `Switch`）。颜色在 render
 //! 里从窗口的主题（`Theme`）读，和终端窗口的界面一个色调。
 
+use crate::ui::icons::{CHECK_ICON, CHEVRON_DOWN_ICON};
 use crate::ui::theme::Theme;
 use gpui::{
     AnyElement, Context, Div, ElementId, Entity, Hsla, Role, SharedString, Stateful, Window, div, prelude::*, px, svg,
@@ -206,7 +207,7 @@ pub(super) fn dropdown(
         .hover(|button| button.bg(theme.mix(0.07)))
         .children(leading)
         .child(div().flex_1().min_w_0().truncate().child(label))
-        .child(svg().flex_none().path("icons/chevron-down.svg").size(px(12.)).text_color(theme.foreground.opacity(0.6)))
+        .child(svg().flex_none().path(CHEVRON_DOWN_ICON).size(px(12.)).text_color(theme.foreground.opacity(0.6)))
 }
 
 /// 设置页的输入框：比别处的 `Input` 矮一些，底色和别的控件一样；`width` 是基准字号下的点数，跟着界面
@@ -248,7 +249,7 @@ pub(super) fn chip(
         .text_size(FontSize::Body)
         .when(on, |chip| chip.bg(theme.ring.opacity(0.15)))
         .hover(|chip| chip.bg(theme.mix(0.07)))
-        .children(on.then(|| svg().path("icons/check.svg").size(px(11.)).text_color(theme.ring)))
+        .children(on.then(|| svg().path(CHECK_ICON).size(px(11.)).text_color(theme.ring)))
         .children(icon.map(|icon| svg().path(icon).size(px(12.)).text_color(theme.foreground.opacity(0.7))))
         .child(label)
 }
