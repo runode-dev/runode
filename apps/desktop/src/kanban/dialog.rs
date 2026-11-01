@@ -259,7 +259,7 @@ impl TodoDialog {
             area.set_line_limits(3, 10, cx);
             area.set_label(rust_i18n::t!("kanban.dialog.prompt"), cx);
             area.set_placeholder(
-                rust_i18n::t!("kanban.dialog.prompt_placeholder", key = crate::settings::secondary_text("enter"))
+                rust_i18n::t!("kanban.dialog.prompt_placeholder", key = crate::keybinds::secondary_text("enter"))
                     .into_owned()
                     .into(),
                 cx,

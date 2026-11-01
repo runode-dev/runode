@@ -478,7 +478,7 @@ impl WindowView {
             .child(
                 div()
                     .text_color(cx.theme().primary_foreground.opacity(0.6))
-                    .child(crate::settings::secondary_text("enter")),
+                    .child(crate::keybinds::secondary_text("enter")),
             )
             .map(|button| match blocker {
                 Some(reason) => button

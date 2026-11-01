@@ -15,7 +15,6 @@ mod controls;
 mod dictation;
 mod firewall;
 mod keybinds;
-pub(crate) use keybinds::{caps_text as keybind_text, secondary_text};
 mod pages;
 mod pairing;
 mod picker;

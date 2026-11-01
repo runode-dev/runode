@@ -9,6 +9,8 @@
 
 use std::collections::HashMap;
 
+use crate::keybinds::{caps, caps_text};
+
 use crate::ui::icons::{BAN_ICON, MINUS_ICON, PLUS_ICON};
 use crate::ui::theme::Theme;
 use gpui::{App, Context, Div, Keystroke, SharedString, Subscription, Window, div, prelude::*, px};
@@ -159,90 +161,6 @@ fn row_key(spec: &ActionSpec, usage: &str, digits: bool) -> Option<RowKey> {
         return Some(RowKey::Digits(spec.name));
     }
     keybind::parse_action(usage).ok().map(RowKey::Action)
-}
-
-/// Ctrl、Alt、Shift 和 Cmd（Windows 上是 Win 键，Linux 上是 Super 键）的键帽。
-const MODIFIER_CAPS: [&str; 4] = if cfg!(target_os = "macos") {
-    ["⌃", "⌥", "⇧", "⌘"]
-} else if cfg!(windows) {
-    ["Ctrl", "Alt", "Shift", "Win"]
-} else {
-    ["Ctrl", "Alt", "Shift", "Super"]
-};
-
-/// 触发键一个键一个键帽，连按的几个键各一组；`digit` 显示成 1…9，认不出的原样一个键帽。
-pub(crate) fn caps(trigger: &str) -> Vec<Vec<String>> {
-    let Ok(keys) = keybind::parse_trigger(trigger) else {
-        return vec![vec![trigger.to_owned()]];
-    };
-    keys.split(' ')
-        .map(|stroke| {
-            let digits = stroke.strip_suffix("digit").map(|prefix| format!("{prefix}1"));
-            let Ok(keystroke) = Keystroke::parse_with_os(digits.as_deref().unwrap_or(stroke), crate::keybinds::OS)
-            else {
-                return vec![stroke.to_owned()];
-            };
-            let m = keystroke.modifiers;
-            let [control, alt, shift, platform] = MODIFIER_CAPS;
-            let mut caps: Vec<String> = [(m.control, control), (m.alt, alt), (m.shift, shift), (m.platform, platform)]
-                .into_iter()
-                .filter(|(on, _)| *on)
-                .map(|(_, symbol)| symbol.to_owned())
-                .collect();
-            caps.push(if digits.is_some() { "1…9".to_owned() } else { key_symbol(&keystroke.key) });
-            caps
-        })
-        .collect()
-}
-
-/// 触发键写成一段字：macOS 上键帽连写（⌃⇧T），别处用加号连起来（Ctrl+Shift+T），连按的几个键用空格隔开。
-pub(crate) fn caps_text(trigger: &str) -> String {
-    let joiner = if cfg!(target_os = "macos") { "" } else { "+" };
-    caps(trigger).iter().map(|stroke| stroke.join(joiner)).collect::<Vec<_>>().join(" ")
-}
-
-/// Cmd（别的平台是 Ctrl）加 `key` 写成一段字，给界面文字里提到这类快捷键的地方用。
-pub(crate) fn secondary_text(key: &str) -> String {
-    caps_text(&format!("{}+{key}", if cfg!(target_os = "macos") { "cmd" } else { "ctrl" }))
-}
-
-fn key_symbol(key: &str) -> String {
-    if !cfg!(target_os = "macos") {
-        let name = match key {
-            "enter" => "Enter",
-            "escape" => "Esc",
-            "tab" => "Tab",
-            "backspace" => "Backspace",
-            "delete" => "Delete",
-            "pageup" => "PgUp",
-            "pagedown" => "PgDn",
-            "home" => "Home",
-            "end" => "End",
-            "space" => "Space",
-            _ => "",
-        };
-        if !name.is_empty() {
-            return name.to_owned();
-        }
-    }
-    let symbol = match key {
-        "enter" => "↩",
-        "escape" => "⎋",
-        "tab" => "⇥",
-        "backspace" => "⌫",
-        "delete" => "⌦",
-        "up" => "↑",
-        "down" => "↓",
-        "left" => "←",
-        "right" => "→",
-        "pageup" => "⇞",
-        "pagedown" => "⇟",
-        "home" => "↖",
-        "end" => "↘",
-        "space" => "␣",
-        key => return key.to_uppercase(),
-    };
-    symbol.to_owned()
 }
 
 /// `line` 里的绑定在 `keybinds` 叠出来的表里还有一个生效。
@@ -760,15 +678,6 @@ mod tests {
         let trigger = line.split_once('=').unwrap().0.to_owned();
         let keys = keybind::parse_trigger(&trigger).unwrap();
         (trigger, keys)
-    }
-
-    #[test]
-    fn triggers_show_as_keycaps() {
-        let [control, _, shift, platform] = MODIFIER_CAPS;
-        assert_eq!(caps("shift+cmd+t"), [[shift, platform, "T"]]);
-        assert_eq!(caps("cmd+digit"), [[platform, "1…9"]]);
-        assert_eq!(caps("ctrl+a>left"), [vec![control, "A"], vec!["←"]]);
-        assert_eq!(caps("nope+t"), [["nope+t"]]);
     }
 
     /// 换掉自己写的一行：新的接在最后，盖过后面绑着同一个键的行；原来那行盖着默认绑定时，再写一行解绑，

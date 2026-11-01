@@ -463,9 +463,9 @@ impl GitPanel {
                 Some(branch) => rust_i18n::t!(
                     "git.message_placeholder_branch",
                     branch = branch,
-                    key = crate::settings::secondary_text("enter")
+                    key = crate::keybinds::secondary_text("enter")
                 ),
-                None => rust_i18n::t!("git.message_placeholder", key = crate::settings::secondary_text("enter")),
+                None => rust_i18n::t!("git.message_placeholder", key = crate::keybinds::secondary_text("enter")),
             };
             if let Some(area) = &panel.commit_box {
                 area.update(cx, |area, cx| area.set_placeholder(text.into_owned().into(), cx));

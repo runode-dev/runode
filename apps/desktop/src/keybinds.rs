@@ -273,9 +273,51 @@ fn load(keys: &str, action: Box<dyn gpui::Action>, context: Option<&str>, cx: &A
         .ok()
 }
 
+/// 触发键（`keybind` 的写法）一个键一个键帽（`ui::keys`），连按的几个键各一组；`digit` 显示成 1…9，认不出的
+/// 原样一个键帽。
+pub(crate) fn caps(trigger: &str) -> Vec<Vec<String>> {
+    let Ok(keys) = keybind::parse_trigger(trigger) else {
+        return vec![vec![trigger.to_owned()]];
+    };
+    keys.split(' ')
+        .map(|stroke| {
+            let digits = stroke.strip_suffix("digit").map(|prefix| format!("{prefix}1"));
+            let Ok(keystroke) = gpui::Keystroke::parse_with_os(digits.as_deref().unwrap_or(stroke), OS) else {
+                return vec![stroke.to_owned()];
+            };
+            let mut caps = crate::ui::keys::caps(keystroke.modifiers, &keystroke.key);
+            if digits.is_some()
+                && let Some(key) = caps.last_mut()
+            {
+                *key = "1…9".to_owned();
+            }
+            caps
+        })
+        .collect()
+}
+
+/// 触发键写成一段字。
+pub(crate) fn caps_text(trigger: &str) -> String {
+    caps(trigger).iter().map(|stroke| crate::ui::keys::join(stroke)).collect::<Vec<_>>().join(" ")
+}
+
+/// Cmd（别的平台是 Ctrl）加 `key` 写成一段字，给界面文字里提到这类快捷键的地方用。
+pub(crate) fn secondary_text(key: &str) -> String {
+    caps_text(&format!("{}+{key}", if cfg!(target_os = "macos") { "cmd" } else { "ctrl" }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn triggers_show_as_keycaps() {
+        let [control, _, shift, platform] = crate::ui::keys::MODIFIER_CAPS;
+        assert_eq!(caps("shift+cmd+t"), [[shift, platform, "T"]]);
+        assert_eq!(caps("cmd+digit"), [[platform, "1…9"]]);
+        assert_eq!(caps("ctrl+a>left"), [vec![control, "A"], vec!["←"]]);
+        assert_eq!(caps("nope+t"), [["nope+t"]]);
+    }
 
     /// 配置里的每个动作名都能换成 GPUI 动作，生效的上下文都是 GPUI 认的写法。默认绑定之外，
     /// 带参数的动作再按参数的写法各试一个值。

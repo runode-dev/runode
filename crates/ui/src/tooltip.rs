@@ -15,11 +15,10 @@ const CODE_TOOLTIP_MAX_HEIGHT: f32 = 420.;
 pub fn shortcut_text(action: &dyn Action, cx: &App) -> Option<SharedString> {
     let keymap = cx.key_bindings();
     let keymap = keymap.borrow();
-    keymap.bindings_for_action(action).next_back().map(|binding| {
-        let strokes: Vec<_> =
-            binding.keystrokes().iter().map(|k| k.display(cx.platform_info().os).to_string()).collect();
-        SharedString::from(strokes.join(" "))
-    })
+    keymap
+        .bindings_for_action(action)
+        .next_back()
+        .map(|binding| SharedString::from(crate::keys::text(binding.keystrokes())))
 }
 
 /// 交给 `.tooltip()` 的构造函数：`text` 说明作用，`action` 绑了快捷键时在后面写上。

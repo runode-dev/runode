@@ -16,6 +16,7 @@ pub mod icons;
 pub mod inline_edit;
 pub mod input;
 pub mod input_handler;
+pub mod keys;
 pub mod menu;
 pub mod panel;
 pub mod path_tree;

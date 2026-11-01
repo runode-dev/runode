@@ -417,7 +417,7 @@ impl WindowView {
                     let bind = BindTask { name: task.name.clone(), command: task.command.clone() };
                     let bind_button = MenuButton {
                         icon: KEYBOARD_ICON,
-                        tooltip: rust_i18n::t!("tasks.bind", key = crate::settings::secondary_text("k")).into(),
+                        tooltip: rust_i18n::t!("tasks.bind", key = crate::keybinds::secondary_text("k")).into(),
                         keep_open: false,
                         secondary_key: Some("k"),
                     };
@@ -432,13 +432,13 @@ impl WindowView {
                 let delete = DeleteTask { project: source.project.clone(), name: task.name.clone() };
                 let edit_button = MenuButton {
                     icon: PENCIL_ICON,
-                    tooltip: rust_i18n::t!("tasks.edit", key = crate::settings::secondary_text("e")).into(),
+                    tooltip: rust_i18n::t!("tasks.edit", key = crate::keybinds::secondary_text("e")).into(),
                     keep_open: false,
                     secondary_key: Some("e"),
                 };
                 let delete_button = MenuButton {
                     icon: TRASH_ICON,
-                    tooltip: rust_i18n::t!("tasks.delete", key = crate::settings::secondary_text("backspace")).into(),
+                    tooltip: rust_i18n::t!("tasks.delete", key = crate::keybinds::secondary_text("backspace")).into(),
                     keep_open: true,
                     secondary_key: Some("backspace"),
                 };
