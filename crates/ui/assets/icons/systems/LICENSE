@@ -1,0 +1,5 @@
+apple.svg and linux.svg come from Simple Icons (https://simpleicons.org, package
+simple-icons 16.34.0, released under CC0 1.0) with the width, height and fill set.
+windows.svg is a plain four-pane window drawn for runode. The logos are trademarks
+of their respective owners and are used only to tell which operating system an SSH
+host runs.

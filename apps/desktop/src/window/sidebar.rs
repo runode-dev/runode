@@ -5,6 +5,7 @@
 mod repo;
 
 use crate::ui::button::{Button, ButtonSize, Toggle};
+use crate::ui::icons::system_logos;
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
     AccessibleAction, Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, FontWeight,
@@ -300,7 +301,18 @@ impl WindowView {
             Status::Idle => fg.opacity(0.3),
         });
         let status_text = status.as_ref().map(status_text);
+        // 远端主机按上次连上时报的系统画 logo，没连上过的画成服务器。
+        let system = host.label().and_then(|name| remote_hosts::system(name, cx));
+        let icon = match system {
+            None if host.is_local() => MONITOR_ICON,
+            Some("macos") => system_logos::APPLE,
+            Some("linux") => system_logos::LINUX,
+            Some("windows") => system_logos::WINDOWS,
+            _ => SERVER_ICON,
+        };
+        let system_name = system.and_then(remote_hosts::system_name).map(str::to_owned);
         let a11y_description = [
+            system_name,
             destination.clone(),
             status_text.clone(),
             attention.then(|| rust_i18n::t!("workspace.host_attention").into_owned()),
@@ -390,12 +402,12 @@ impl WindowView {
                 }
             })
             .child(
-                div().flex_none().w(px(ROW_ICON_SIZE)).flex().justify_center().child(
-                    svg()
-                        .path(if host.is_local() { MONITOR_ICON } else { SERVER_ICON })
-                        .size(px(12.))
-                        .text_color(fg.opacity(0.4)),
-                ),
+                div()
+                    .flex_none()
+                    .w(px(ROW_ICON_SIZE))
+                    .flex()
+                    .justify_center()
+                    .child(svg().path(icon).size(px(12.)).text_color(fg.opacity(0.4))),
             )
             // 连接状态的圆点紧跟在主机名后面，名字长时名字先截短。
             .child(

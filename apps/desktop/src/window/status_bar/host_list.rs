@@ -179,12 +179,7 @@ fn state_text(host: &RemoteHost, status: &Status) -> String {
         return crate::remote_hosts::status_text(status);
     };
     let latency = host.latency().map(|latency| latency_text(latency.as_millis()));
-    let system = match connected.os.as_str() {
-        "macos" => Some("macOS"),
-        "linux" => Some("Linux"),
-        "windows" => Some("Windows"),
-        _ => None,
-    };
+    let system = crate::remote_hosts::system_name(&connected.os);
     [system.map(str::to_owned), Some(rust_i18n::t!("status.host_connected").into_owned()), latency]
         .into_iter()
         .flatten()

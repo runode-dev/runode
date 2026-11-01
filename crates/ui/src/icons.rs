@@ -141,7 +141,22 @@ pub mod agent_logos {
     }
 }
 
+/// SSH 主机上跑的系统的 logo，出处和许可写在图标目录的 `LICENSE` 里。
+pub mod system_logos {
+    crate::icons! {
+        pub FILES, "icons/systems/", "../assets/icons/systems/";
+        pub APPLE = "apple",
+        pub LINUX = "linux",
+        pub WINDOWS = "windows",
+    }
+}
+
 /// 所有图标的资源路径和内容，app 的 `AssetSource` 按路径从这里取。
 pub fn all() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
-    FILES.iter().chain(github_actions::FILES).chain(agent_logos::FILES).chain(crate::file_icons::FILES)
+    FILES
+        .iter()
+        .chain(github_actions::FILES)
+        .chain(agent_logos::FILES)
+        .chain(system_logos::FILES)
+        .chain(crate::file_icons::FILES)
 }

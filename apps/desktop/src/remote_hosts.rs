@@ -1,11 +1,13 @@
 //! 经 SSH 连的远端主机在界面这边要办的事：连上一台主机后开始办那台机器上的命令行转来的请求，把那台
 //! 主机上断开着的终端接回来；ssh 要问用户时交给最前面的窗口弹框；连接状态一变就更新全局的 `HostsChanged`。
 //! 连上的宿主会跟着 ssh 的登录被结束时，这次运行里每台主机问一次要不要把它装成登录服务（`install_service`）。
-//! 用户可以给主机另起一个显示名（`set_display_name`），连接仍按连接目标认。
+//! 用户可以给主机另起一个显示名（`set_display_name`），连接仍按连接目标认。主机上次连上时报的系统记下来
+//! （`system`），没连着时界面也认得出是什么系统。
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs, io,
+    path::PathBuf,
 };
 
 use futures::StreamExt as _;
@@ -33,9 +35,16 @@ struct HostNames(BTreeMap<String, String>);
 
 impl Global for HostNames {}
 
-/// 读不懂的文件挪到一边再从空的开始，下次改名保存时不把用户起过的名字盖掉。
-fn load_names() -> BTreeMap<String, String> {
-    let Some(path) = runode_paths::Dirs::from_env().host_names_file() else {
+/// 各主机上次连上时报的系统（`Connected::os` 的写法），按连接目标记；存在 `Dirs::host_systems_file` 里，
+/// 忘掉主机时留着。
+#[derive(Default)]
+struct HostSystems(BTreeMap<String, String>);
+
+impl Global for HostSystems {}
+
+/// 读出按连接目标记的一张表。读不懂的文件挪到一边再从空的开始，下次保存时不把记过的盖掉。
+fn load_map(path: Option<PathBuf>) -> BTreeMap<String, String> {
+    let Some(path) = path else {
         return BTreeMap::new();
     };
     match fs::read(&path) {
@@ -55,14 +64,12 @@ fn load_names() -> BTreeMap<String, String> {
     }
 }
 
-fn save_names(names: &BTreeMap<String, String>) -> io::Result<()> {
-    let path = runode_paths::Dirs::from_env()
-        .host_names_file()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home directory"))?;
+fn save_map(path: Option<PathBuf>, map: &BTreeMap<String, String>) -> io::Result<()> {
+    let path = path.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home directory"))?;
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    runode_paths::replace_file(&path, &serde_json::to_vec_pretty(names)?)
+    runode_paths::replace_file(&path, &serde_json::to_vec_pretty(map)?)
 }
 
 /// 主机 `name`（连接目标）在界面上显示的名字：用户起过名字时是那个名字，否则就是连接目标。
@@ -87,12 +94,40 @@ pub fn set_display_name(name: &str, display: &str, cx: &mut App) {
     if !changed {
         return;
     }
-    if let Err(err) = save_names(names) {
+    if let Err(err) = save_map(runode_paths::Dirs::from_env().host_names_file(), names) {
         tracing::warn!("cannot save the host names: {err}");
     }
     // 显示名画在各窗口缓存的视图里，只通知窗口的根视图换不全，要整个刷新。
     cx.refresh_windows();
     hosts_changed(cx);
+}
+
+/// 主机 `name` 上次连上时报的系统，`Connected::os` 的写法；没连上过时为 `None`。
+pub fn system<'a>(name: &str, cx: &'a App) -> Option<&'a str> {
+    cx.try_global::<HostSystems>().and_then(|systems| systems.0.get(name)).map(String::as_str)
+}
+
+/// 系统 `os`（`Connected::os` 的写法）给人看的名字，认不出时为 `None`。
+pub fn system_name(os: &str) -> Option<&'static str> {
+    match os {
+        "macos" => Some("macOS"),
+        "linux" => Some("Linux"),
+        "windows" => Some("Windows"),
+        _ => None,
+    }
+}
+
+/// 记下主机 `name` 报的系统 `os`；变了才存，并刷新画着系统图标的各窗口。
+fn remember_system(name: &str, os: &str, cx: &mut App) {
+    if os.is_empty() || system(name, cx) == Some(os) {
+        return;
+    }
+    let systems = &mut cx.default_global::<HostSystems>().0;
+    systems.insert(name.to_owned(), os.to_owned());
+    if let Err(err) = save_map(runode_paths::Dirs::from_env().host_systems_file(), systems) {
+        tracing::warn!("cannot save the host systems: {err}");
+    }
+    cx.refresh_windows();
 }
 
 /// 把远端宿主装成登录服务办到了哪一步，按主机名记。
@@ -275,7 +310,9 @@ pub fn forget(name: &str, cx: &mut App) {
 
 /// 开始收远端主机的事件，app 退出时让各台主机的主连接退出。要在恢复窗口之前调。
 pub fn install(cx: &mut App) {
-    cx.set_global(HostNames(load_names()));
+    let dirs = runode_paths::Dirs::from_env();
+    cx.set_global(HostNames(load_map(dirs.host_names_file())));
+    cx.set_global(HostSystems(load_map(dirs.host_systems_file())));
     cx.on_app_quit(|_| {
         remote::close_masters();
         async {}
@@ -309,7 +346,11 @@ fn handle(event: RemoteEvent, seen: &mut Seen, cx: &mut App) {
             let Some(remote) = remote::find(&host) else {
                 return;
             };
-            let bound = matches!(remote.status(), Status::Connected(connected) if connected.session_bound);
+            let status = remote.status();
+            if let Status::Connected(connected) = &status {
+                remember_system(&host, &connected.os, cx);
+            }
+            let bound = matches!(status, Status::Connected(connected) if connected.session_bound);
             if bound && service_job(&host, cx).is_none() && seen.offered.insert(host.clone()) {
                 offer_service(&host, cx);
             }
