@@ -4,7 +4,8 @@
 use std::path::Path;
 
 use runode_protocol::screen::{
-    ScreenClientMsg, ScreenDisplay, ScreenHostMsg, ScreenInput, ScreenMods, VideoFrame, decode_video, encode_video,
+    Codec, ScreenClientMsg, ScreenDisplay, ScreenHostMsg, ScreenInput, ScreenMode, ScreenMods, VideoFrame,
+    decode_video, encode_video,
 };
 use runode_types::input::{Key, MouseButton};
 use serde::{Serialize, de::DeserializeOwned};
@@ -40,6 +41,7 @@ fn client_messages_match_the_fixtures() {
             fps: 60,
             bitrate: 8_000_000,
             hide_cursor: false,
+            codecs: Vec::new(),
         },
     );
     matches(
@@ -51,6 +53,27 @@ fn client_messages_match_the_fixtures() {
             fps: 60,
             bitrate: 4_000_000,
             hide_cursor: true,
+            codecs: Vec::new(),
+        },
+    );
+    matches(
+        "start_codecs.json",
+        &ScreenClientMsg::Start {
+            display: None,
+            width: 1920,
+            height: 1080,
+            fps: 60,
+            bitrate: 6_000_000,
+            hide_cursor: true,
+            codecs: vec![Codec::Hevc, Codec::H264],
+        },
+    );
+    matches(
+        "datagram_offer.json",
+        &ScreenClientMsg::Datagram {
+            key: "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff".into(),
+            port: 50123,
+            addrs: vec!["10.0.0.5".parse().unwrap(), "fd00::5".parse().unwrap()],
         },
     );
     matches("keyframe.json", &ScreenClientMsg::Keyframe);
@@ -65,15 +88,31 @@ fn client_messages_match_the_fixtures() {
     matches("input_key.json", &input(ScreenInput::Key { key: Key::ArrowUp, mods: shift }));
     matches("input_text.json", &input(ScreenInput::Text { text: "你好 ok".into() }));
     matches("unlock.json", &ScreenClientMsg::Unlock { password: "p@ss word".into() });
+    let mode = ScreenMode { width: 1440, height: 900, pixel_width: 2880, pixel_height: 1800 };
+    matches("set_mode.json", &ScreenClientMsg::SetMode { display: 1, mode: Some(mode) });
+    matches("set_mode_default.json", &ScreenClientMsg::SetMode { display: 1, mode: None });
 }
 
 #[test]
 fn host_messages_match_the_fixtures() {
-    let displays = vec![
-        ScreenDisplay { id: 1, width: 1728, height: 1117, pixel_width: 3456, pixel_height: 2234 },
-        ScreenDisplay { id: 2, width: 2560, height: 1440, pixel_width: 2560, pixel_height: 1440 },
-    ];
-    matches("ready.json", &ScreenHostMsg::Ready { displays, screen_capture: true, post_event: false });
+    let display = |id, width, height, pixel_width, pixel_height| ScreenDisplay {
+        id,
+        width,
+        height,
+        pixel_width,
+        pixel_height,
+        modes: Vec::new(),
+        changed: false,
+    };
+    let displays = vec![display(1, 1728, 1117, 3456, 2234), display(2, 2560, 1440, 2560, 1440)];
+    let ready = |datagram| ScreenHostMsg::Ready {
+        displays: displays.clone(),
+        screen_capture: true,
+        post_event: false,
+        datagram,
+    };
+    matches("ready.json", &ready(false));
+    matches("ready_datagram.json", &ready(true));
     matches("incompatible.json", &ScreenHostMsg::Incompatible { version: 2 });
     matches("started.json", &ScreenHostMsg::Started { display: 2, width: 2556, height: 1652 });
     matches("stopped.json", &ScreenHostMsg::Stopped { reason: "display unplugged".into(), signed_out: false });
@@ -82,19 +121,52 @@ fn host_messages_match_the_fixtures() {
     matches("lock.json", &ScreenHostMsg::Lock { locked: true });
     let reason = "the password has keys a US keyboard cannot type".into();
     matches("unlock_failed.json", &ScreenHostMsg::UnlockFailed { reason });
+    let modes = vec![
+        ScreenMode { width: 2560, height: 1440, pixel_width: 2560, pixel_height: 1440 },
+        ScreenMode { width: 1920, height: 1080, pixel_width: 1920, pixel_height: 1080 },
+    ];
+    let changed = ScreenDisplay { modes, changed: true, ..display(2, 1920, 1080, 1920, 1080) };
+    matches("displays.json", &ScreenHostMsg::Displays { displays: vec![changed] });
+    matches("mode_failed.json", &ScreenHostMsg::ModeFailed { reason: "the display refused the mode".into() });
+    matches(
+        "datagram_accept.json",
+        &ScreenHostMsg::Datagram { port: 61000, addrs: vec!["10.0.0.20".parse().unwrap()] },
+    );
+    matches("datagram_lost.json", &ScreenHostMsg::DatagramLost);
+}
+
+/// 更新的客户端多列的编码跳过，认得的照收。
+#[test]
+fn unknown_codecs_are_skipped() {
+    let text = r#"{"type":"start","width":8,"height":8,"fps":60,"bitrate":1,"codecs":["av1","h264"]}"#;
+    let start: ScreenClientMsg = serde_json::from_str(text).unwrap();
+    assert!(matches!(start, ScreenClientMsg::Start { codecs, .. } if codecs == [Codec::H264]));
 }
 
 #[test]
 fn video_payloads_match_the_fixtures() {
     let keyframe = VideoFrame {
+        codec: Codec::Hevc,
         data: vec![0, 0, 0, 2, 0x26, 1],
         keyframe: true,
         parameter_sets: vec![vec![0x40, 1], vec![0x42], vec![0x44, 1, 2]],
         pts_us: -5,
     };
-    let delta =
-        VideoFrame { data: vec![0, 0, 0, 2, 2, 0x0a], keyframe: false, parameter_sets: Vec::new(), pts_us: 1000 };
-    for (name, frame) in [("video_keyframe.hex", keyframe), ("video_delta.hex", delta)] {
+    let delta = VideoFrame {
+        codec: Codec::Hevc,
+        data: vec![0, 0, 0, 2, 2, 0x0a],
+        keyframe: false,
+        parameter_sets: Vec::new(),
+        pts_us: 1000,
+    };
+    let h264 = VideoFrame {
+        codec: Codec::H264,
+        data: vec![0, 0, 0, 2, 0x65, 0x88],
+        keyframe: true,
+        parameter_sets: vec![vec![0x67, 0x64], vec![0x68, 0xee]],
+        pts_us: 7,
+    };
+    for (name, frame) in [("video_keyframe.hex", keyframe), ("video_delta.hex", delta), ("video_h264.hex", h264)] {
         assert_eq!(encode_video(&frame), hex(name), "{name}");
         assert_eq!(decode_video(&hex(name)), Some(frame), "{name}");
     }

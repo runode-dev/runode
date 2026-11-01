@@ -1,45 +1,69 @@
-//! VideoToolbox 的硬件 HEVC 编码，按远程桌面的需要配成低延迟：不重排帧（没有 B 帧），不定期插
-//! 关键帧，只在 `request_keyframe` 时出一帧。编出的帧经 `Sink` 交出去，在 VideoToolbox 的线程上。
+//! VideoToolbox 的硬件编码，按远程桌面的需要配成低延迟：不重排帧（没有 B 帧），不定期插关键帧，只在
+//! `request_keyframe` 时出一帧，单帧的大小有上限（`BURST_WINDOW`）。编码按观看端给的先后挑：先找能开低延迟码率
+//! 控制的，都开不了时再用普通的码率控制，因为普通的码率控制要攒几帧才出，延迟比换成 H.264 的画质损失更明显。
+//! 编出的帧经 `Sink` 交出去，在 VideoToolbox 的线程上。
 
 use std::{
     ffi::c_void,
     io,
     ptr::{self, NonNull},
     sync::{
-        Arc,
+        Arc, Condvar, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
-use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType};
+use objc2_core_foundation::{CFArray, CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType};
 use objc2_core_media::{
-    CMFormatDescription, CMSampleBuffer, CMTime, CMVideoFormatDescriptionGetHEVCParameterSetAtIndex, kCMTimeInvalid,
-    kCMVideoCodecType_HEVC,
+    CMFormatDescription, CMSampleBuffer, CMTime, CMVideoCodecType, CMVideoFormatDescriptionGetH264ParameterSetAtIndex,
+    CMVideoFormatDescriptionGetHEVCParameterSetAtIndex, kCMTimeInvalid, kCMVideoCodecType_H264, kCMVideoCodecType_HEVC,
 };
 use objc2_core_video::CVImageBuffer;
 use objc2_video_toolbox::{
     VTCompressionSession, VTEncodeInfoFlags, VTSessionSetProperty, kVTCompressionPropertyKey_AllowFrameReordering,
-    kVTCompressionPropertyKey_AverageBitRate, kVTCompressionPropertyKey_ExpectedFrameRate,
-    kVTCompressionPropertyKey_ProfileLevel, kVTCompressionPropertyKey_RealTime, kVTEncodeFrameOptionKey_ForceKeyFrame,
+    kVTCompressionPropertyKey_AverageBitRate, kVTCompressionPropertyKey_DataRateLimits,
+    kVTCompressionPropertyKey_ExpectedFrameRate, kVTCompressionPropertyKey_ProfileLevel,
+    kVTCompressionPropertyKey_RealTime, kVTEncodeFrameOptionKey_ForceKeyFrame,
+    kVTProfileLevel_H264_ConstrainedHigh_AutoLevel, kVTProfileLevel_H264_High_AutoLevel,
     kVTProfileLevel_HEVC_Main_AutoLevel, kVTVideoEncoderSpecification_EnableLowLatencyRateControl,
     kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder,
 };
 
-use crate::{Event, VideoFrame, nal};
+use crate::{BURST_HEADROOM, BURST_WINDOW, Codec, Event, REFINE_BOOST, VideoFrame, nal};
 
 pub(crate) type Sink = dyn Fn(Event) + Send + Sync;
 
+/// 低延迟码率控制下交给编码器、还没编出来的帧最多这么多：有的机器交得多就在编码器里排得久，攒到几百毫秒。普通码率
+/// 控制要攒几帧才出，不限，限了就一直等不到。
+const MAX_IN_FLIGHT: u32 = 1;
+/// 等编码器交出上一帧最多这么久，等不到也接着交，不至于卡死。
+const IN_FLIGHT_WAIT: Duration = Duration::from_millis(250);
+
 pub(crate) struct Encoder {
     session: CFRetained<VTCompressionSession>,
+    /// 观看端要的平均码率和放没放大；改它和交给编码器在同一把锁里，两个线程同时改时编码器不会停在过时的码率上。
+    rate: Mutex<Rate>,
     /// 编码回调的 refcon 指着它，所以装箱、比会话活得久（`Drop` 里先关会话）。
     shared: Box<Shared>,
+}
+
+/// 观看端要的平均码率（bit/s）和是不是按 `REFINE_BOOST` 倍放大着。
+struct Rate {
+    base: u32,
+    boosted: bool,
 }
 
 /// 编码回调也要用的。
 struct Shared {
     sink: Arc<Sink>,
+    codec: Codec,
     /// 下一帧编成关键帧；硬要的那帧被编码器丢掉或编坏时回调再置上，免得要的关键帧一直不来。
     force_keyframe: AtomicBool,
+    /// 交给编码器、还没经回调交回来的帧数，和最多能有几帧。
+    in_flight: Mutex<u32>,
+    max_in_flight: u32,
+    returned: Condvar,
 }
 
 // SAFETY: VideoToolbox 的编码会话可以在任意线程上调用；`Shared` 本身是 Send + Sync。
@@ -48,26 +72,74 @@ unsafe impl Send for Encoder {}
 unsafe impl Sync for Encoder {}
 
 impl Encoder {
-    pub(crate) fn new(width: u32, height: u32, fps: u32, bitrate: u32, sink: Arc<Sink>) -> io::Result<Self> {
-        let shared = Box::new(Shared { sink, force_keyframe: AtomicBool::new(false) });
-        let refcon = ptr::from_ref::<Shared>(&shared).cast_mut().cast::<c_void>();
-        // 低延迟码率控制不是每种编码器都支持，建不了就退回普通的码率控制，仍然要硬件编码。
-        let session = create(width, height, refcon, true).or_else(|status| {
-            tracing::warn!("low-latency HEVC encoding is unavailable ({status}), using the normal rate control");
-            create(width, height, refcon, false)
-        });
-        let session =
-            session.map_err(|status| io::Error::other(format!("cannot create the HEVC encoder ({status})")))?;
-        let encoder = Self { session, shared };
+    /// 按 `codecs` 的先后挑编码建编码器，见模块的说明。
+    pub(crate) fn new(
+        width: u32,
+        height: u32,
+        fps: u32,
+        bitrate: u32,
+        codecs: &[Codec],
+        sink: Arc<Sink>,
+    ) -> io::Result<Self> {
+        let mut failures = Vec::new();
+        for low_latency in [true, false] {
+            for &codec in codecs {
+                // 回调的 refcon 指着 `Shared`，编码确定了才建得出；建不成的会话没交出过帧，换一份没关系。
+                let shared = Box::new(Shared {
+                    sink: sink.clone(),
+                    codec,
+                    force_keyframe: AtomicBool::new(false),
+                    in_flight: Mutex::new(0),
+                    max_in_flight: if low_latency { MAX_IN_FLIGHT } else { u32::MAX },
+                    returned: Condvar::new(),
+                });
+                let refcon = ptr::from_ref::<Shared>(&shared).cast_mut().cast::<c_void>();
+                let session = match create(codec, width, height, refcon, low_latency) {
+                    Ok(session) => session,
+                    Err(status) => {
+                        failures.push(format!("{codec:?} (low latency: {low_latency}, {status})"));
+                        continue;
+                    }
+                };
+                let encoder = Self { session, rate: Mutex::new(Rate { base: bitrate, boosted: false }), shared };
+                // 建得出会话、配不上参数的也换下一种。
+                if let Err(err) = encoder.configure(fps) {
+                    failures.push(format!("{codec:?} (low latency: {low_latency}, {err})"));
+                    continue;
+                }
+                if !failures.is_empty() {
+                    tracing::info!(
+                        "encoding the screen as {codec:?} (low latency: {low_latency}); unavailable: {}",
+                        failures.join(", ")
+                    );
+                }
+                return Ok(encoder);
+            }
+        }
+        Err(io::Error::other(format!("cannot create a hardware encoder: {}", failures.join(", "))))
+    }
+
+    fn configure(&self, fps: u32) -> io::Result<()> {
         // SAFETY: 读 VideoToolbox 导出的常量。
         unsafe {
-            encoder.set(kVTCompressionPropertyKey_RealTime, CFBoolean::new(true))?;
-            encoder.set(kVTCompressionPropertyKey_AllowFrameReordering, CFBoolean::new(false))?;
-            encoder.set(kVTCompressionPropertyKey_ProfileLevel, kVTProfileLevel_HEVC_Main_AutoLevel)?;
-            encoder.set(kVTCompressionPropertyKey_ExpectedFrameRate, &CFNumber::new_i32(fps as i32))?;
+            self.set(kVTCompressionPropertyKey_RealTime, CFBoolean::new(true))?;
+            self.set(kVTCompressionPropertyKey_AllowFrameReordering, CFBoolean::new(false))?;
+            let profiles: &[&CFString] = match self.shared.codec {
+                Codec::Hevc => &[kVTProfileLevel_HEVC_Main_AutoLevel],
+                // 低延迟码率控制只认受限的 High，普通码率控制时退到 High。
+                Codec::H264 => &[kVTProfileLevel_H264_ConstrainedHigh_AutoLevel, kVTProfileLevel_H264_High_AutoLevel],
+            };
+            if !profiles.iter().any(|profile| self.set(kVTCompressionPropertyKey_ProfileLevel, profile).is_ok()) {
+                tracing::debug!("the encoder takes none of its profiles, using its default");
+            }
+            self.set(kVTCompressionPropertyKey_ExpectedFrameRate, &CFNumber::new_i32(fps as i32))?;
         }
-        encoder.set_bitrate(bitrate)?;
-        Ok(encoder)
+        self.apply_bitrate(&self.rate.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// 编码器选中的编码。
+    pub(crate) fn codec(&self) -> Codec {
+        self.shared.codec
     }
 
     fn set(&self, key: &CFString, value: &CFType) -> io::Result<()> {
@@ -78,9 +150,38 @@ impl Encoder {
 
     /// 平均码率，单位 bit/s；编码中途可以改。
     pub(crate) fn set_bitrate(&self, bitrate: u32) -> io::Result<()> {
-        let bitrate = CFNumber::new_i32(bitrate.min(i32::MAX as u32) as i32);
+        let mut rate = self.rate.lock().unwrap_or_else(PoisonError::into_inner);
+        rate.base = bitrate;
+        self.apply_bitrate(&rate)
+    }
+
+    /// 按 `REFINE_BOOST` 倍的码率编，画面静止时把最后一张补清楚（`Refiner`）；`false` 时回到原来的码率。
+    pub(crate) fn boost(&self, on: bool) {
+        let mut rate = self.rate.lock().unwrap_or_else(PoisonError::into_inner);
+        if std::mem::replace(&mut rate.boosted, on) != on
+            && let Err(err) = self.apply_bitrate(&rate)
+        {
+            tracing::debug!("cannot change the bitrate for refining: {err}");
+        }
+    }
+
+    /// 把码率和单帧的上限交给编码器。
+    fn apply_bitrate(&self, rate: &Rate) -> io::Result<()> {
+        let base = f64::from(rate.base);
+        let bitrate = if rate.boosted { base * REFINE_BOOST } else { base };
+        let average = CFNumber::new_i32(bitrate.min(f64::from(i32::MAX)) as i32);
         // SAFETY: 读 VideoToolbox 导出的常量。
-        self.set(unsafe { kVTCompressionPropertyKey_AverageBitRate }, &bitrate)
+        self.set(unsafe { kVTCompressionPropertyKey_AverageBitRate }, &average)?;
+        let window = BURST_WINDOW.as_secs_f64();
+        let bytes = CFNumber::new_f64(bitrate / 8. * window * BURST_HEADROOM);
+        let seconds = CFNumber::new_f64(window);
+        let limits = CFArray::<CFNumber>::from_objects(&[&bytes, &seconds]);
+        // 不是每种编码器都认单帧的上限，认不了的照平均码率编。
+        // SAFETY: 读 VideoToolbox 导出的常量；值是字节数和秒数交替的数组。
+        if let Err(err) = self.set(unsafe { kVTCompressionPropertyKey_DataRateLimits }, limits.as_opaque()) {
+            tracing::debug!("the encoder takes no data rate limit: {err}");
+        }
+        Ok(())
     }
 
     /// 下一帧编成关键帧，并带上参数集。
@@ -93,7 +194,18 @@ impl Encoder {
         self.shared.force_keyframe.load(Ordering::Relaxed)
     }
 
+    /// 交一帧给编码器。编码器手里的帧到了上限（`MAX_IN_FLIGHT`）时先等它交出一帧，所以要在不怕阻塞的线程上调。
     pub(crate) fn encode(&self, image: &CVImageBuffer, pts: CMTime) {
+        {
+            let in_flight = self.shared.in_flight.lock().unwrap_or_else(PoisonError::into_inner);
+            let (mut in_flight, waited) = self
+                .shared
+                .returned
+                .wait_timeout_while(in_flight, IN_FLIGHT_WAIT, |count| *count >= self.shared.max_in_flight)
+                .unwrap_or_else(PoisonError::into_inner);
+            // 等不到就当编码器把手里的帧弄丢了、不会再交回来，从这一帧重新数，不让少掉的回调把以后每帧都卡住。
+            *in_flight = if waited.timed_out() { 1 } else { *in_flight + 1 };
+        }
         let force = self.shared.force_keyframe.swap(false, Ordering::Relaxed);
         let options = force.then(|| {
             CFDictionary::<CFString, CFBoolean>::from_slices(
@@ -117,6 +229,7 @@ impl Encoder {
         };
         if status != 0 {
             tracing::warn!("cannot encode a screen frame ({status})");
+            self.shared.returned_one();
             if force {
                 self.shared.force_keyframe.store(true, Ordering::Relaxed);
             }
@@ -130,6 +243,15 @@ impl Encoder {
     }
 }
 
+impl Shared {
+    /// 编码器交回了一帧（编好、丢掉或编坏）。
+    fn returned_one(&self) {
+        let mut in_flight = self.in_flight.lock().unwrap_or_else(PoisonError::into_inner);
+        *in_flight = in_flight.saturating_sub(1);
+        self.returned.notify_all();
+    }
+}
+
 impl Drop for Encoder {
     fn drop(&mut self) {
         self.complete();
@@ -139,11 +261,16 @@ impl Drop for Encoder {
 }
 
 fn create(
+    codec: Codec,
     width: u32,
     height: u32,
     refcon: *mut c_void,
     low_latency: bool,
 ) -> Result<CFRetained<VTCompressionSession>, i32> {
+    let codec_type: CMVideoCodecType = match codec {
+        Codec::Hevc => kCMVideoCodecType_HEVC,
+        Codec::H264 => kCMVideoCodecType_H264,
+    };
     // SAFETY: 读 VideoToolbox 导出的常量。
     let spec_keys = unsafe {
         [
@@ -161,7 +288,7 @@ fn create(
             None,
             width as i32,
             height as i32,
-            kCMVideoCodecType_HEVC,
+            codec_type,
             Some(spec.as_ref()),
             None,
             None,
@@ -186,9 +313,10 @@ unsafe extern "C-unwind" fn on_encoded(
 ) {
     // SAFETY: refcon 是 `Encoder::new` 给的，指着 `Encoder::shared`，会话关掉之前一直有效。
     let shared = unsafe { &*refcon.cast_const().cast::<Shared>() };
+    shared.returned_one();
     if status != 0 || flags.contains(VTEncodeInfoFlags::FrameDropped) {
         if status != 0 {
-            tracing::warn!("the HEVC encoder failed on a frame ({status})");
+            tracing::warn!("the encoder failed on a frame ({status})");
         }
         if !frame.is_null() {
             shared.force_keyframe.store(true, Ordering::Relaxed);
@@ -197,12 +325,12 @@ unsafe extern "C-unwind" fn on_encoded(
     }
     // SAFETY: 回调期间样本有效。
     let Some(sample) = (unsafe { sample.as_ref() }) else { return };
-    if let Some(frame) = video_frame(sample) {
+    if let Some(frame) = video_frame(shared.codec, sample) {
         (shared.sink)(Event::Frame(frame));
     }
 }
 
-fn video_frame(sample: &CMSampleBuffer) -> Option<VideoFrame> {
+fn video_frame(codec: Codec, sample: &CMSampleBuffer) -> Option<VideoFrame> {
     // SAFETY: 读样本的数据和时间戳，复制到自己的缓冲里。
     unsafe {
         let block = sample.data_buffer()?;
@@ -211,45 +339,31 @@ fn video_frame(sample: &CMSampleBuffer) -> Option<VideoFrame> {
         if status != 0 {
             return None;
         }
-        let keyframe = nal::is_keyframe(&data);
-        let parameter_sets = if keyframe { parameter_sets(&*sample.format_description()?)? } else { Vec::new() };
+        let keyframe = nal::is_keyframe(codec, &data);
+        let parameter_sets = if keyframe { parameter_sets(codec, &*sample.format_description()?)? } else { Vec::new() };
         let pts_us = (sample.presentation_time_stamp().seconds() * 1e6) as i64;
-        Some(VideoFrame { data, keyframe, parameter_sets, pts_us })
+        Some(VideoFrame { codec, data, keyframe, parameter_sets, pts_us })
     }
 }
 
-/// 关键帧的 VPS、SPS、PPS，解码器要先拿它们建格式。
-fn parameter_sets(format: &CMFormatDescription) -> Option<Vec<Vec<u8>>> {
+/// 关键帧的参数集，解码器要先拿它们建格式。
+fn parameter_sets(codec: Codec, format: &CMFormatDescription) -> Option<Vec<Vec<u8>>> {
+    let get = match codec {
+        Codec::Hevc => CMVideoFormatDescriptionGetHEVCParameterSetAtIndex,
+        Codec::H264 => CMVideoFormatDescriptionGetH264ParameterSetAtIndex,
+    };
     let (mut count, mut length_size) = (0usize, 0i32);
     // SAFETY: 只取个数和长度字段的字节数，输出参数指向本地变量。
-    let status = unsafe {
-        CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-            format,
-            0,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            &mut count,
-            &mut length_size,
-        )
-    };
+    let status = unsafe { get(format, 0, ptr::null_mut(), ptr::null_mut(), &mut count, &mut length_size) };
     if status != 0 || length_size as usize != nal::LENGTH_SIZE {
-        tracing::warn!("unexpected HEVC format (status {status}, length size {length_size})");
+        tracing::warn!("unexpected {codec:?} format (status {status}, length size {length_size})");
         return None;
     }
     (0..count)
         .map(|index| {
             let (mut bytes, mut len) = (ptr::null(), 0usize);
             // SAFETY: 返回的指针指着格式描述里的数据，在 `format` 活着时有效，这里马上复制。
-            let status = unsafe {
-                CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                    format,
-                    index,
-                    &mut bytes,
-                    &mut len,
-                    ptr::null_mut(),
-                    ptr::null_mut(),
-                )
-            };
+            let status = unsafe { get(format, index, &mut bytes, &mut len, ptr::null_mut(), ptr::null_mut()) };
             (status == 0 && !bytes.is_null()).then(|| unsafe { std::slice::from_raw_parts(bytes, len) }.to_vec())
         })
         .collect()

@@ -311,8 +311,8 @@ pub struct WindowView {
     settings: Option<settings_page::SettingsPage>,
     /// 开着的看板，和手机端引导页一样盖住标签和分屏；新建、编辑任务和定时的对话框。
     kanban: Option<kanban::OpenKanban>,
-    /// 开着的远程桌面，和看板一样盖住标签和分屏。
-    screen_viewer: Option<screen_viewer::OpenScreenViewer>,
+    /// 开着的远程桌面：占满内容区的那台和看板一样盖住标签和分屏，浮动的浮在上面。
+    screen_viewers: screen_viewer::ScreenViewers,
     /// 离开时收起来的写到一半的新建任务那一页，下回新建任务时接着写。
     todo_draft: Option<Entity<crate::kanban::TodoDialog>>,
     /// 正在办用户按的窗口动作（`act`）：这时换标签算用户要离开新建任务那一页。
@@ -449,8 +449,8 @@ impl WindowView {
             if let Some(board) = &this.kanban {
                 board.view.update(cx, |_, cx| cx.notify());
             }
-            if let Some(open) = &this.screen_viewer {
-                open.view.update(cx, |_, cx| cx.notify());
+            for view in this.screen_viewers.views().cloned().collect::<Vec<_>>() {
+                view.update(cx, |_, cx| cx.notify());
             }
             cx.notify();
         });
@@ -510,7 +510,7 @@ impl WindowView {
             mobile: None,
             settings: None,
             kanban: None,
-            screen_viewer: None,
+            screen_viewers: screen_viewer::ScreenViewers::default(),
             todo_draft: None,
             acting: false,
             empty_focus: cx.focus_handle(),
@@ -657,7 +657,7 @@ impl WindowView {
         if let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) {
             cx.defer(move |cx| board.update(cx, |_, cx| cx.notify()));
         }
-        if let Some(view) = self.screen_viewer.as_ref().map(|open| open.view.clone()) {
+        for view in self.screen_viewers.views().cloned().collect::<Vec<_>>() {
             cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()));
         }
         let preview = self.preview.clone();
@@ -737,8 +737,8 @@ impl Focusable for WindowView {
         if let Some(board) = &self.kanban {
             return board.view.focus_handle(cx);
         }
-        if let Some(open) = &self.screen_viewer {
-            return open.view.focus_handle(cx);
+        if let Some(focus) = self.docked_screen_focus(cx) {
+            return focus;
         }
         if self.preview_front(cx) {
             return self.preview.read(cx).focus_handle(cx);
@@ -769,15 +769,15 @@ impl Render for WindowView {
             (if cards(cx) { theme.frame } else { theme.background }, self.render_mobile_body(window, cx))
         } else if self.kanban.is_some() {
             (if cards(cx) { theme.frame } else { theme.background }, self.render_todo_body(window, cx))
-        } else if self.screen_viewer.is_some() {
+        } else if self.screen_docked() {
             (if cards(cx) { theme.frame } else { theme.background }, self.render_screen_body(window, cx))
         } else if cards(cx) {
             (theme.frame, self.render_cards_body(window, cx))
         } else {
             (theme.background, self.render_classic_body(window, cx))
         };
-        let window_controls = self.render_window_controls(window, cx);
-        let resize_edges = self.render_resize_edges(window);
+        let window_controls = titlebar::window_controls(window, cx);
+        let resize_edges = titlebar::resize_edges(window);
         let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
         let menu = self.render_context_menu(window, cx);
         let agent_picker = self.render_agent_picker(window, cx);
@@ -800,6 +800,18 @@ impl Render for WindowView {
             || add_task.is_some()
             || commit_message_dialog.is_some()
             || todo_dialog.is_some();
+        let floating_screens = self.render_floating_screens(window, cx);
+        let floating_screens = (!floating_screens.is_empty()).then(|| {
+            div()
+                .id("screen-float-layer")
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .aria_hidden(modal)
+                .children(floating_screens)
+        });
+        let screen_drag = self.render_screen_drag(cx);
         // 状态栏的浮层不拿焦点，挡住后面的对话框一开就收起，免得叠在对话框上面。状态栏是缓存的视图，等这一帧
         // 画完再通知。
         if modal && self.status_popover.take().is_some() {
@@ -843,9 +855,7 @@ impl Render for WindowView {
                     }
                 } else if this.mobile.is_some() {
                     this.close_mobile(window, cx);
-                } else if this.screen_viewer.is_some() {
-                    this.close_screen_viewer(window, cx);
-                } else {
+                } else if !this.close_screen_for_pane(window, cx) {
                     this.close_pane(action, window, cx);
                 }
             }))
@@ -912,6 +922,8 @@ impl Render for WindowView {
                     .child(div().relative().flex_1().min_h_0().flex().children(body))
                     .children(status_bar),
             )
+            .children(floating_screens)
+            .children(screen_drag)
             .children(window_controls)
             .children(resize_edges)
             .children(drag)

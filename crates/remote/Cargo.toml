@@ -1,6 +1,6 @@
 [package]
 name = "runode-remote"
-description = "runode's remote access: a TLS 1.3 listener with a pairing and signature gate that bridges phones to the terminal host, plus pairing codes, the paired device table and Bonjour discovery"
+description = "runode's remote access: a TLS 1.3 listener with a pairing and signature gate that bridges phones to the terminal host, plus pairing codes, the paired device table, Bonjour discovery and the encrypted UDP path for remote desktop video"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ runode-paths.workspace = true
 runode-protocol.workspace = true
 # 推送时看会话的 agent 是不是在等回答（`SessionMeta`、`AgentState`）。
 runode-types.workspace = true
-# keepalive 和 IPv6 的监听（绑定前设 IPV6_V6ONLY）。
+# keepalive、IPv6 的监听（绑定前设 IPV6_V6ONLY），远程桌面 UDP 的双栈套接字和收发缓冲。
 socket2.workspace = true
 serde.workspace = true
 # 设备表、配对口令和监听方状态的文件是 JSON。

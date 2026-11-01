@@ -1,5 +1,6 @@
-//! 用 ScreenCaptureKit 采集一块屏幕，每帧交给 `Encoder`。屏幕没变时 ScreenCaptureKit 不出带画面的
-//! 帧，静止时几乎不占带宽。
+//! 用 ScreenCaptureKit 采集一块屏幕，交给 `Encoder`。屏幕没变时 ScreenCaptureKit 不出带画面的帧，静止时几乎不占
+//! 带宽；停下以后把最后一张补清楚（`Refiner`）。编码在自己的队列上，只编最新的一张：有的机器（Intel 的 Mac）交一帧
+//! 给编码器要等几十毫秒，编不过来时中间的帧丢掉，帧率降下来，不让画面在采集的队列里越排越久。
 
 use std::{
     io,
@@ -8,7 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use block2::RcBlock;
@@ -19,7 +20,7 @@ use objc2::{
     runtime::{NSObject, NSObjectProtocol, ProtocolObject},
 };
 use objc2_core_foundation::CFRetained;
-use objc2_core_media::{CMSampleBuffer, CMTime};
+use objc2_core_media::{CMClock, CMSampleBuffer, CMTime};
 use objc2_core_video::{CVImageBuffer, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange};
 use objc2_foundation::{NSArray, NSError};
 use objc2_screen_capture_kit::{
@@ -28,9 +29,10 @@ use objc2_screen_capture_kit::{
 };
 
 use crate::{
-    Event, Options,
+    Codec, Event, Options,
     awake::KeepAwake,
     encoder::{Encoder, Sink},
+    refine::Refiner,
 };
 
 /// 等 ScreenCaptureKit 的完成回调最多这么久。
@@ -46,7 +48,9 @@ pub struct Capture {
     stream: Retained<SCStream>,
     latest: Arc<Latest>,
     _output: Retained<Output>,
+    /// 编码的队列（`Latest::queue`）；ScreenCaptureKit 交帧在 `_capture_queue` 上。
     queue: DispatchRetained<DispatchQueue>,
+    _capture_queue: DispatchRetained<DispatchQueue>,
     _awake: KeepAwake,
 }
 
@@ -62,11 +66,22 @@ impl Capture {
         let sink: Arc<Sink> = Arc::new(on_event);
         let awake = KeepAwake::acquire();
         let display = display(options.display)?;
-        let encoder = Encoder::new(options.width, options.height, options.fps, options.bitrate, sink.clone())?;
+        let encoder =
+            Encoder::new(options.width, options.height, options.fps, options.bitrate, &options.codecs, sink.clone())?;
         encoder.request_keyframe();
-        let latest = Arc::new(Latest { encoder, last: Mutex::new(None), stopped: AtomicBool::new(false) });
+        let queue = DispatchQueue::new("dev.runode.screen.encode", None);
+        let capture_queue = DispatchQueue::new("dev.runode.screen", None);
+        let latest = Arc::new(Latest {
+            encoder,
+            last: Mutex::new(None),
+            stopped: AtomicBool::new(false),
+            refiner: Mutex::new(Refiner::default()),
+            refine_scheduled: AtomicBool::new(false),
+            queue: queue.clone(),
+            pending: Mutex::new(None),
+            draining: AtomicBool::new(false),
+        });
         let output = Output::new(Ivars { latest: latest.clone(), sink });
-        let queue = DispatchQueue::new("dev.runode.screen", None);
         // SAFETY: 以下都是 ScreenCaptureKit 的普通调用，对象都由 Retained 持有到 `Capture` 丢掉。
         unsafe {
             let filter =
@@ -86,7 +101,7 @@ impl Capture {
                 .addStreamOutput_type_sampleHandlerQueue_error(
                     ProtocolObject::from_ref(&*output),
                     SCStreamOutputType::Screen,
-                    Some(&queue),
+                    Some(&capture_queue),
                 )
                 .map_err(|error| io::Error::other(error.localizedDescription().to_string()))?;
             let (tx, rx) = mpsc::channel();
@@ -95,7 +110,7 @@ impl Capture {
             });
             stream.startCaptureWithCompletionHandler(Some(&done));
             wait(&rx, "start the screen capture")?;
-            Ok(Self { stream, latest, _output: output, queue, _awake: awake })
+            Ok(Self { stream, latest, _output: output, queue, _capture_queue: capture_queue, _awake: awake })
         }
     }
 
@@ -112,6 +127,11 @@ impl Capture {
     /// 改平均码率，单位 bit/s。
     pub fn set_bitrate(&self, bitrate: u32) -> io::Result<()> {
         self.latest.encoder.set_bitrate(bitrate)
+    }
+
+    /// 编码器选中的编码。
+    pub fn codec(&self) -> Codec {
+        self.latest.encoder.codec()
     }
 }
 
@@ -135,7 +155,7 @@ impl Drop for Capture {
 }
 
 /// 向采集要关键帧，编码回调里也能用：编码器最后一份要是在编码回调里丢掉，就在回调里等它交完帧，
-/// 等不到，所以回调只持有弱引用，到采集的队列上才升成强引用。
+/// 等不到，所以回调只持有弱引用，到编码的队列上才升成强引用。
 #[derive(Clone)]
 pub struct Keyframes {
     latest: Weak<Latest>,
@@ -154,11 +174,19 @@ impl Keyframes {
     }
 }
 
-/// 编码器和最近交给它的画面、时间戳；画面只在采集的队列上编。
+/// 编码器和最近交给它的画面、时间戳；画面只在编码的队列（`queue`）上编。
 struct Latest {
     encoder: Encoder,
     last: Mutex<Option<(CFRetained<CVImageBuffer>, CMTime)>>,
     stopped: AtomicBool,
+    refiner: Mutex<Refiner>,
+    /// 排着一次 `refine`，同时只排一次。
+    refine_scheduled: AtomicBool,
+    queue: DispatchRetained<DispatchQueue>,
+    /// 采到了、还没编的最新一张；编码器忙时新来的顶掉它。
+    pending: Mutex<Option<(CFRetained<CVImageBuffer>, CMTime)>>,
+    /// 编码的队列上排着或正在跑 `drain`。
+    draining: AtomicBool,
 }
 
 // SAFETY: CVPixelBuffer 可以在任意线程上读，这里只在锁里碰它；`Encoder` 本身是 Send + Sync。
@@ -175,26 +203,124 @@ impl Latest {
         let _ = queue.after(when, move || latest.encode_again());
     }
 
-    fn encode(&self, image: CFRetained<CVImageBuffer>, pts: CMTime) {
-        let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
-        let pts = match &*last {
-            // SAFETY: 时间戳的算术。
-            Some((_, previous)) => unsafe { pts.maximum(after(*previous)) },
-            None => pts,
+    /// ScreenCaptureKit 交来一张新画面：记成最新的一张，编码的队列闲着时叫它来编。
+    fn offer(self: &Arc<Self>, image: CFRetained<CVImageBuffer>, pts: CMTime) {
+        *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = Some((image, pts));
+        if !self.draining.swap(true, Ordering::AcqRel) {
+            let latest = self.clone();
+            self.queue.exec_async(move || latest.drain());
+        }
+    }
+
+    /// 在编码的队列上把最新的一张编掉，编的时候又来了就接着编，直到没有新的。
+    fn drain(self: &Arc<Self>) {
+        loop {
+            let next = self.pending.lock().unwrap_or_else(PoisonError::into_inner).take();
+            match next {
+                Some((image, pts)) => {
+                    if !self.stopped.load(Ordering::Relaxed) {
+                        self.encode(image, pts);
+                    }
+                }
+                None => {
+                    self.draining.store(false, Ordering::Release);
+                    // 放下标志之前刚到的那张没人叫来编，这里接着编；别人已经又叫了就交给它。
+                    let more = self.pending.lock().unwrap_or_else(PoisonError::into_inner).is_some();
+                    if !more || self.draining.swap(true, Ordering::AcqRel) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    /// 编一张新画面，停下以后补清楚。
+    fn encode(self: &Arc<Self>, image: CFRetained<CVImageBuffer>, pts: CMTime) {
+        {
+            let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
+            let pts = match &*last {
+                // SAFETY: 时间戳的算术。
+                Some((_, previous)) => unsafe { pts.maximum(after(*previous)) },
+                None => pts,
+            };
+            self.encoder.boost(false);
+            self.encoder.encode(&image, pts);
+            *last = Some((image, pts));
+        }
+        let now = Instant::now();
+        let wait = {
+            let mut refiner = self.refiner.lock().unwrap_or_else(PoisonError::into_inner);
+            refiner.changed(now);
+            refiner.wait(now)
         };
-        self.encoder.encode(&image, pts);
-        *last = Some((image, pts));
+        if let Some(wait) = wait {
+            self.schedule_refine(wait);
+        }
     }
 
     /// 屏幕静止时 ScreenCaptureKit 不出新帧，要的关键帧还没出时把最近一张再编一次。
-    fn encode_again(&self) {
+    fn encode_again(self: &Arc<Self>) {
         if self.stopped.load(Ordering::Relaxed) || !self.encoder.keyframe_requested() {
             return;
         }
+        // 要关键帧多半是观看端丢了帧、网络不好，不按补清楚时放大的码率编。
+        self.encoder.boost(false);
+        self.encode_last();
+        // 这一帧按原来的码率编，补清楚的画面又糊了，和新画面一样停下以后重新补。
+        let now = Instant::now();
+        let wait = {
+            let mut refiner = self.refiner.lock().unwrap_or_else(PoisonError::into_inner);
+            refiner.changed(now);
+            refiner.wait(now)
+        };
+        if let Some(wait) = wait {
+            self.schedule_refine(wait);
+        }
+    }
+
+    /// 把最近一张再编一次，时间戳是现在：观看端按时间戳和到达的时刻估网络排队，重编的帧不能显得晚到了。
+    fn encode_last(&self) {
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((image, pts)) = &mut *last {
-            *pts = after(*pts);
+            // SAFETY: 读主机时钟（ScreenCaptureKit 的时间戳也按它），时间戳的算术。
+            *pts = unsafe { CMClock::host_time_clock().time().maximum(after(*pts)) };
             self.encoder.encode(image, *pts);
+        }
+    }
+
+    /// 过 `wait` 在编码的队列上看要不要补一帧；已经排着一次时不再排，到时它自己按最新的情况再排。
+    fn schedule_refine(self: &Arc<Self>, wait: Duration) {
+        if self.refine_scheduled.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let latest = self.clone();
+        let when = DispatchTime::try_from(wait).unwrap_or(DispatchTime::NOW);
+        let _ = self.queue.after(when, move || {
+            latest.refine_scheduled.store(false, Ordering::Relaxed);
+            latest.refine();
+        });
+    }
+
+    /// 到了该补的时候按放大的码率把最近一张再编一次，再排下一次。
+    fn refine(self: &Arc<Self>) {
+        if self.stopped.load(Ordering::Relaxed) {
+            return;
+        }
+        let now = Instant::now();
+        let mut refiner = self.refiner.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(wait) = refiner.wait(now) else { return };
+        if wait.is_zero() {
+            self.encoder.boost(true);
+            self.encode_last();
+            refiner.refined(now);
+        }
+        match refiner.wait(now) {
+            Some(wait) => {
+                drop(refiner);
+                self.schedule_refine(wait);
+            }
+            // 补够了，回到原来的码率。
+            None => self.encoder.boost(false),
         }
     }
 }
@@ -269,7 +395,7 @@ define_class!(
             // SAFETY: 回调期间样本有效；屏幕没变时样本不带画面，跳过。
             unsafe {
                 if let Some(image) = sample.image_buffer() {
-                    self.ivars().latest.encode(image, sample.presentation_time_stamp());
+                    self.ivars().latest.offer(image, sample.presentation_time_stamp());
                 }
             }
         }

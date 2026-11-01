@@ -1,4 +1,4 @@
-//! 远程桌面不碰界面的部分：被看的电脑上采集一块屏幕、编成低延迟的硬件 HEVC（`Capture`），把观看端
+//! 远程桌面不碰界面的部分：被看的电脑上采集一块屏幕、编成低延迟的硬件 HEVC 或 H.264（`Capture`），把观看端
 //! （手机或桌面 app）发来的鼠标和键盘输入注入系统（`Injector`）；桌面 app 当观看端时把画面解回来
 //! （`Decoder`）。传输和协议不在这里。
 //!
@@ -17,8 +17,12 @@ mod encoder;
 #[cfg(target_os = "macos")]
 mod input;
 mod keys;
+#[cfg(target_os = "macos")]
+mod mode;
 #[cfg(any(target_os = "macos", windows))]
 mod nal;
+#[cfg(any(target_os = "macos", windows))]
+mod refine;
 #[cfg(windows)]
 mod win;
 
@@ -34,7 +38,22 @@ pub use keys::key_strokes;
 #[cfg(windows)]
 pub use win::{Capture, Decoded, Decoder, Injector, KeepAwake, Keyframes, console_user, in_service_session};
 
-pub use runode_types::screen::VideoFrame;
+pub use runode_types::screen::{Codec, VideoFrame};
+
+use std::{
+    collections::HashMap,
+    sync::{Mutex, PoisonError},
+};
+
+/// 单帧的上限按这么长一段时间算：任意这么长的一段里编出的字节数不超过平均码率的 `BURST_HEADROOM` 倍。关键帧和
+/// 画面大变时的帧因此摊到后面几帧，不会一帧就把网络堵上几百毫秒。
+#[cfg(any(target_os = "macos", windows))]
+const BURST_WINDOW: std::time::Duration = std::time::Duration::from_millis(150);
+#[cfg(any(target_os = "macos", windows))]
+const BURST_HEADROOM: f64 = 1.5;
+/// 画面静止后补清楚（`Refiner`）时码率放大的倍数。
+#[cfg(any(target_os = "macos", windows))]
+const REFINE_BOOST: f64 = 4.;
 
 /// `Capture` 交出的事件。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,7 +64,7 @@ pub enum Event {
 }
 
 /// 怎么采集。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     /// 采哪块屏幕，见 `Display`。
     pub display: u32,
@@ -58,6 +77,9 @@ pub struct Options {
     pub bitrate: u32,
     /// 画面里画上鼠标指针。
     pub cursor: bool,
+    /// 观看端解得了的编码，想要的排前面，不能为空。用排在前面、又能低延迟编的那种；都做不到低延迟时用排在前面、
+    /// 编得了的那种。
+    pub codecs: Vec<Codec>,
 }
 
 /// 一块屏幕。
@@ -128,6 +150,73 @@ impl Display {
         let pixel_height = CGDisplayMode::pixel_height(mode.as_deref()) as u32;
         Self { id, width, height, pixel_width: pixel_width.max(width), pixel_height: pixel_height.max(height) }
     }
+}
+
+/// 屏幕的一种显示模式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DisplayMode {
+    /// 按它排版的尺寸：macOS 上是点数，Windows 上是像素数。
+    pub width: u32,
+    pub height: u32,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+}
+
+/// 被 `set_display_mode` 换过的屏幕和它们第一次被换之前的模式。
+static ORIGINAL_MODES: Mutex<Option<HashMap<u32, DisplayMode>>> = Mutex::new(None);
+
+/// 屏幕 `id` 能换成的显示模式：一种排版尺寸一个，同样尺寸有 HiDPI 的取它，从大到小。
+#[cfg(any(target_os = "macos", windows))]
+pub fn display_modes(id: u32) -> Vec<DisplayMode> {
+    #[cfg(target_os = "macos")]
+    let mut modes = mode::modes(id);
+    #[cfg(windows)]
+    let mut modes = win::modes(id);
+    modes.sort_by_key(|mode| std::cmp::Reverse((mode.width, mode.height, mode.pixel_width)));
+    modes
+}
+
+/// 把屏幕 `id` 换成 `mode`，为空时换回第一次换之前的模式。换的模式不写进系统设置；macOS 上进程退出（崩了也
+/// 算）系统就换回原来的，Windows 上不会，要别的进程调 `reset_display_mode`。
+#[cfg(any(target_os = "macos", windows))]
+pub fn set_display_mode(id: u32, mode: Option<&DisplayMode>) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    use crate::mode as platform;
+    #[cfg(windows)]
+    use crate::win as platform;
+    let mut originals = ORIGINAL_MODES.lock().unwrap_or_else(PoisonError::into_inner);
+    let originals = originals.get_or_insert_default();
+    match mode {
+        Some(mode) => {
+            // 读不到现在的模式就不换：换了以后没法换回去。
+            let current = match originals.get(&id) {
+                Some(original) => *original,
+                None => platform::current(id)
+                    .ok_or_else(|| std::io::Error::other(format!("cannot read the current mode of display {id}")))?,
+            };
+            platform::apply(id, mode)?;
+            originals.entry(id).or_insert(current);
+        }
+        None => {
+            if let Some(original) = originals.get(&id).copied() {
+                platform::reset(id, &original)?;
+                originals.remove(&id);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 把屏幕 `id` 换回系统设置里的模式，不管是哪个进程换的：Windows 上进程退出时系统不会自己换回去，换过模式的
+/// 进程没换回去就退出时由别的进程调它。
+#[cfg(windows)]
+pub fn reset_display_mode(id: u32) -> std::io::Result<()> {
+    win::reset_to_registry(id)
+}
+
+/// 屏幕 `id` 的模式被 `set_display_mode` 换过、还没换回去。
+pub fn display_mode_changed(id: u32) -> bool {
+    ORIGINAL_MODES.lock().unwrap_or_else(PoisonError::into_inner).as_ref().is_some_and(|map| map.contains_key(&id))
 }
 
 /// 电脑现在是不是锁着屏（登录窗口挡着桌面）。拿不到会话信息时当成没锁：这时也注入不了按键。

@@ -1335,6 +1335,10 @@ screen_viewer:
   display: "螢幕 %{number}"
   reconnect: 重新連線
   close: 關閉遠端桌面
+  float: 浮動顯示
+  dock: 填滿視窗
+  pop_out: 在獨立視窗中開啟
+  pop_in: 放回主視窗
   connecting: "正在連線 %{host}…"
   opening: 正在打開螢幕…
   no_screen_capture: "那台 Mac 還沒給 Runode 螢幕錄製權限，已經在它螢幕上跳出授權視窗：請在那台 Mac 的「系統設定 › 隱私權與安全性 › 螢幕與系統錄音」裡打開 runode 的開關，再重新連線。"
@@ -1351,3 +1355,23 @@ screen_viewer:
   unlock_failed: 無法輸入這個密碼：裡面有美式鍵盤打不出的字元。
   password: 登入密碼
   unlock: 解鎖
+  remember_password: 記住密碼，鎖定時自動解鎖
+  auto_unlocking: 正在用記住的密碼解鎖…
+  auto_unlock_failed: 記住的密碼沒能解鎖，請重新輸入。
+  quality: "清晰度：%{current}"
+  quality_tooltip: 畫面的清晰度（不改遠端螢幕本身的解析度）
+  quality_auto: 自動
+  quality_auto_short: "自動 · %{level}"
+  quality_auto_detail: 依網路調整
+  quality_auto_now: "依網路調整，現在 %{level} · %{bitrate}"
+  level_original: 原畫
+  level_ultra: 超清
+  level_high: 高清
+  level_standard: 標清
+  level_smooth: 流暢
+  resolution: "解析度：%{current}"
+  resolution_tooltip: 遠端螢幕的解析度，中斷連線後換回原來的
+  resolution_default: 預設
+  resolution_default_detail: 那台電腦自己的設定
+  resolution_hidpi: "HiDPI，%{pixels} 像素"
+  mode_failed: "無法變更解析度：%{reason}"

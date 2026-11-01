@@ -132,6 +132,11 @@ impl Dirs {
         Some(self.runtime_dir()?.join(format!("{SCREEN_NAME}.lock")))
     }
 
+    /// 采集进程换过显示模式、还没换回去的屏幕，和 socket 放在一起；采集进程没换回去就退出时由别的进程照着换回去。
+    pub fn screen_modes_file(&self) -> Option<PathBuf> {
+        Some(self.runtime_dir()?.join(format!("{SCREEN_NAME}-modes")))
+    }
+
     /// 采集进程的日志。
     pub fn screen_log_file(&self) -> Option<PathBuf> {
         self.cache_file(&format!("{SCREEN_NAME}.log"))

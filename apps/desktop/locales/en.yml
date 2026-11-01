@@ -1261,6 +1261,10 @@ screen_viewer:
   display: "Display %{number}"
   reconnect: Reconnect
   close: Close remote desktop
+  float: Float over the terminals
+  dock: Fill the window
+  pop_out: Open in its own window
+  pop_in: Put back in the main window
   connecting: "Connecting to %{host}…"
   opening: Opening the screen…
   no_screen_capture: "That Mac has no Screen Recording permission for Runode yet. A prompt has been shown on that Mac: turn on runode in System Settings › Privacy & Security › Screen & System Audio Recording there, then reconnect."
@@ -1277,3 +1281,23 @@ screen_viewer:
   unlock_failed: "Could not type the password: it has characters a US keyboard cannot type."
   password: Login password
   unlock: Unlock
+  remember_password: Remember the password and unlock automatically
+  auto_unlocking: Unlocking with the saved password…
+  auto_unlock_failed: "The saved password didn't unlock the remote. Type the password again."
+  quality: "Quality: %{current}"
+  quality_tooltip: Picture quality (the remote screen keeps its own resolution)
+  quality_auto: Auto
+  quality_auto_short: "Auto · %{level}"
+  quality_auto_detail: Follows the network
+  quality_auto_now: "Follows the network, now %{level} · %{bitrate}"
+  level_original: Original
+  level_ultra: Ultra
+  level_high: High
+  level_standard: Standard
+  level_smooth: Smooth
+  resolution: "Resolution: %{current}"
+  resolution_tooltip: Resolution of the remote screen, restored when you disconnect
+  resolution_default: Default
+  resolution_default_detail: The remote computer's own setting
+  resolution_hidpi: "HiDPI, %{pixels} pixels"
+  mode_failed: "Cannot change the resolution: %{reason}"

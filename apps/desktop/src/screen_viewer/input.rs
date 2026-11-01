@@ -72,8 +72,21 @@ pub fn ratio(picture: Bounds<Pixels>, position: Point<Pixels>) -> (f64, f64) {
 pub fn capture_size(available: (f32, f32), display: (u32, u32), max_side: u32) -> (u32, u32) {
     let (pw, ph) = (display.0.max(2) as f32, display.1.max(2) as f32);
     let scale = (available.0 / pw).min(available.1 / ph).min(max_side as f32 / pw.max(ph)).min(1.);
-    let even = |value: f32| ((value as u32).max(16) / 2) * 2;
     (even(pw * scale), even(ph * scale))
+}
+
+/// 短边要 `lines` 个像素时向远端要多大的画面：照屏幕的宽高比缩，不放大，宽高取偶数。
+pub fn lines_size(display: (u32, u32), lines: u32) -> (u32, u32) {
+    let (pw, ph) = (display.0.max(2), display.1.max(2));
+    let short = pw.min(ph);
+    let lines = lines.min(short);
+    let along = |side: u32| (u64::from(side) * u64::from(lines) / u64::from(short)) as f32;
+    (even(along(pw)), even(along(ph)))
+}
+
+/// 编码器要的宽高：偶数，至少 16。
+fn even(value: f32) -> u32 {
+    ((value as u32).max(16) / 2) * 2
 }
 
 #[cfg(test)]
@@ -138,5 +151,14 @@ mod tests {
         assert_eq!(capture_size((1600., 1000.), (3024, 1964), 2560), (1538, 1000));
         assert_eq!(capture_size((8000., 6000.), (1920, 1080), 2560), (1920, 1080));
         assert_eq!(capture_size((8000., 6000.), (5120, 2880), 2560), (2560, 1440));
+    }
+
+    /// 按短边的像素数要，竖着的屏幕也按短边，比屏幕大时照屏幕原样。
+    #[test]
+    fn asks_for_a_fixed_number_of_lines() {
+        assert_eq!(lines_size((2560, 1440), 1080), (1920, 1080));
+        assert_eq!(lines_size((3024, 1964), 720), (1108, 720));
+        assert_eq!(lines_size((1080, 1920), 720), (720, 1280));
+        assert_eq!(lines_size((1920, 1080), 1440), (1920, 1080));
     }
 }

@@ -92,7 +92,7 @@ impl WindowView {
         }
         self.drop_settings(cx);
         self.kanban = None;
-        self.screen_viewer = None;
+        self.leave_screen_page(window, cx);
         if self.mobile.is_none() {
             let system_name = host_name();
             let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();

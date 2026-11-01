@@ -1,5 +1,6 @@
 //! 列出接在桌面上的屏幕：DXGI 按显卡和它的输出枚举，`Display::id` 是两者的序号拼成的数，同一套硬件
-//! 上不变。
+//! 上不变。换显示模式按输出的设备名（`\\.\DISPLAY1` 这样的）调 `ChangeDisplaySettingsExW`，带
+//! `CDS_FULLSCREEN` 是临时的，不写进注册表；进程退出时系统不会换回去。
 
 use std::io;
 
@@ -8,17 +9,21 @@ use windows::{
         Foundation::RECT,
         Graphics::{
             Dxgi::{CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput1},
-            Gdi::{GetMonitorInfoW, MONITORINFO},
+            Gdi::{
+                CDS_FULLSCREEN, CDS_TYPE, ChangeDisplaySettingsExW, DEVMODEW, DISP_CHANGE_SUCCESSFUL, DM_PELSHEIGHT,
+                DM_PELSWIDTH, ENUM_CURRENT_SETTINGS, ENUM_DISPLAY_SETTINGS_FLAGS, ENUM_DISPLAY_SETTINGS_MODE,
+                EnumDisplaySettingsExW, GetMonitorInfoW, MONITORINFO,
+            },
         },
         UI::{
             HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
             WindowsAndMessaging::{GetSystemMetrics, MONITORINFOF_PRIMARY, SM_CXSCREEN, SM_CYSCREEN},
         },
     },
-    core::Interface as _,
+    core::{Interface as _, PCWSTR},
 };
 
-use crate::Display;
+use crate::{Display, DisplayMode};
 
 /// 系统缩放 100% 时的 DPI。
 const BASE_DPI: u32 = 96;
@@ -96,4 +101,78 @@ pub(crate) fn outputs() -> Vec<Output> {
         }
     }
     outputs
+}
+
+/// 屏幕 `id` 的设备名，以 0 结尾。
+fn device_name(id: u32) -> io::Result<[u16; 32]> {
+    let output = find(id)?;
+    // SAFETY: 读输出的描述。
+    let desc = unsafe { output.output.GetDesc() }.map_err(io::Error::other)?;
+    Ok(desc.DeviceName)
+}
+
+/// 设备 `name` 的第 `index` 种模式（`ENUM_CURRENT_SETTINGS` 是现在的），没有了时为空。
+fn setting(name: &[u16; 32], index: ENUM_DISPLAY_SETTINGS_MODE) -> Option<DEVMODEW> {
+    let mut mode = DEVMODEW { dmSize: size_of::<DEVMODEW>() as u16, ..Default::default() };
+    // SAFETY: 设备名以 0 结尾，`mode` 是填好了大小的本地变量。
+    unsafe { EnumDisplaySettingsExW(PCWSTR(name.as_ptr()), index, &mut mode, ENUM_DISPLAY_SETTINGS_FLAGS(0)) }
+        .as_bool()
+        .then_some(mode)
+}
+
+fn describe(mode: &DEVMODEW) -> DisplayMode {
+    let (width, height) = (mode.dmPelsWidth, mode.dmPelsHeight);
+    DisplayMode { width, height, pixel_width: width, pixel_height: height }
+}
+
+pub(crate) fn modes(id: u32) -> Vec<DisplayMode> {
+    let Ok(name) = device_name(id) else { return Vec::new() };
+    let mut modes = Vec::new();
+    for index in 0.. {
+        let Some(mode) = setting(&name, ENUM_DISPLAY_SETTINGS_MODE(index)) else { break };
+        let mode_bits = mode.dmBitsPerPel;
+        let mode = describe(&mode);
+        if mode_bits >= 24 && !modes.contains(&mode) {
+            modes.push(mode);
+        }
+    }
+    modes
+}
+
+pub(crate) fn current(id: u32) -> Option<DisplayMode> {
+    setting(&device_name(id).ok()?, ENUM_CURRENT_SETTINGS).map(|mode| describe(&mode))
+}
+
+pub(crate) fn apply(id: u32, wanted: &DisplayMode) -> io::Result<()> {
+    let name = device_name(id)?;
+    let mode = DEVMODEW {
+        dmSize: size_of::<DEVMODEW>() as u16,
+        dmFields: DM_PELSWIDTH | DM_PELSHEIGHT,
+        dmPelsWidth: wanted.pixel_width,
+        dmPelsHeight: wanted.pixel_height,
+        ..Default::default()
+    };
+    // SAFETY: 设备名以 0 结尾，`mode` 是填好了的本地变量。
+    let result = unsafe { ChangeDisplaySettingsExW(PCWSTR(name.as_ptr()), Some(&mode), None, CDS_FULLSCREEN, None) };
+    if result == DISP_CHANGE_SUCCESSFUL {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("cannot change the display mode ({})", result.0)))
+    }
+}
+
+/// 换回原来的模式：Windows 上就是注册表里的那个。
+pub(crate) fn reset(id: u32, _original: &DisplayMode) -> io::Result<()> {
+    reset_to_registry(id)
+}
+
+pub(crate) fn reset_to_registry(id: u32) -> io::Result<()> {
+    let name = device_name(id)?;
+    // SAFETY: 设备名以 0 结尾；不给模式就是换回注册表里的。
+    let result = unsafe { ChangeDisplaySettingsExW(PCWSTR(name.as_ptr()), None, None, CDS_TYPE(0), None) };
+    if result == DISP_CHANGE_SUCCESSFUL {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("cannot restore the display mode ({})", result.0)))
+    }
 }

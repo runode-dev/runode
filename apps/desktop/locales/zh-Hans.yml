@@ -1335,6 +1335,10 @@ screen_viewer:
   display: "屏幕 %{number}"
   reconnect: 重新连接
   close: 关闭远程桌面
+  float: 浮动显示
+  dock: 占满窗口
+  pop_out: 在单独的窗口中打开
+  pop_in: 放回主窗口
   connecting: "正在连接 %{host}…"
   opening: 正在打开屏幕…
   no_screen_capture: "那台 Mac 还没给 Runode 屏幕录制权限，已经在它屏幕上弹出授权框：请在那台 Mac 的「系统设置 › 隐私与安全性 › 屏幕与系统录音」里打开 runode 的开关，再重新连接。"
@@ -1351,3 +1355,23 @@ screen_viewer:
   unlock_failed: 敲不了这个密码：里面有美式键盘打不出的字符。
   password: 登录密码
   unlock: 解锁
+  remember_password: 记住密码，锁屏时自动解锁
+  auto_unlocking: 正在用记住的密码解锁…
+  auto_unlock_failed: 记住的密码没能解锁，请重新输入。
+  quality: "清晰度：%{current}"
+  quality_tooltip: 画面的清晰度（不改远端屏幕本身的分辨率）
+  quality_auto: 自动
+  quality_auto_short: "自动 · %{level}"
+  quality_auto_detail: 按网络调整
+  quality_auto_now: "按网络调整，现在 %{level} · %{bitrate}"
+  level_original: 原画
+  level_ultra: 超清
+  level_high: 高清
+  level_standard: 标清
+  level_smooth: 流畅
+  resolution: "分辨率：%{current}"
+  resolution_tooltip: 远端屏幕的分辨率，断开后换回原来的
+  resolution_default: 默认
+  resolution_default_detail: 那台电脑自己的设置
+  resolution_hidpi: "HiDPI，%{pixels} 像素"
+  mode_failed: "换不了分辨率：%{reason}"

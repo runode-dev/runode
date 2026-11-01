@@ -3,7 +3,7 @@
 //! `#[ignore]`，在装了的机器上用 `cargo test -p runode-screen --test decode -- --ignored` 跑。
 #![cfg(any(target_os = "macos", windows))]
 
-use runode_screen::{Decoder, VideoFrame};
+use runode_screen::{Codec, Decoder, VideoFrame};
 
 /// 测试数据的写法：每帧 `u8 关键帧 | u8 参数集个数 | 每个参数集 u32 LE 长度 + 字节 | u32 LE 长度 + 帧数据`。
 fn frames() -> Vec<VideoFrame> {
@@ -28,7 +28,7 @@ fn frames() -> Vec<VideoFrame> {
             .collect();
         let len = length(&mut data);
         let pts_us = frames.len() as i64 * 33_333;
-        frames.push(VideoFrame { data: take(&mut data, len), keyframe, parameter_sets, pts_us });
+        frames.push(VideoFrame { codec: Codec::Hevc, data: take(&mut data, len), keyframe, parameter_sets, pts_us });
     }
     frames
 }

@@ -1,6 +1,6 @@
-//! Media Foundation 的硬件 HEVC 编码器（显卡的 MFT，异步工作），按远程桌面的需要配成低延迟：没有
-//! B 帧，几乎不定期插关键帧，只在 `request_keyframe` 时出一帧。输入是采集设备上的 NV12 纹理；编出的帧
-//! 在事件线程上经 `Sink` 交出去。
+//! Media Foundation 的硬件编码器（显卡的 MFT，异步工作），按远程桌面的需要配成低延迟：没有 B 帧，几乎不定期
+//! 插关键帧，只在 `request_keyframe` 时出一帧，码率缓冲限在 `BURST_WINDOW` 那么长，单帧不会太大。编码按观看端
+//! 给的先后挑显卡编得了的第一种。输入是采集设备上的 NV12 纹理；编出的帧在事件线程上经 `Sink` 交出去。
 
 use std::{
     io, ptr,
@@ -17,7 +17,7 @@ use windows::{
         Foundation::{LUID, VARIANT_TRUE},
         Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D},
         Media::MediaFoundation::{
-            CODECAPI_AVEncCommonMeanBitRate, CODECAPI_AVEncCommonRateControlMode,
+            CODECAPI_AVEncCommonBufferSize, CODECAPI_AVEncCommonMeanBitRate, CODECAPI_AVEncCommonRateControlMode,
             CODECAPI_AVEncMPVDefaultBPictureCount, CODECAPI_AVEncMPVGOPSize, CODECAPI_AVEncVideoForceKeyFrame,
             CODECAPI_AVLowLatencyMode, ICodecAPI, IMF2DBuffer, IMFActivate, IMFDXGIDeviceManager,
             IMFMediaEventGenerator, IMFMediaType, IMFShutdown, IMFTransform, METransformHaveOutput,
@@ -29,8 +29,9 @@ use windows::{
             MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_ADAPTER_LUID, MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER,
             MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_MESSAGE_SET_D3D_MANAGER,
             MFT_OUTPUT_DATA_BUFFER, MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MFT_REGISTER_TYPE_INFO, MFTEnumEx,
-            MFVideoFormat_HEVC, MFVideoFormat_NV12, MFVideoInterlace_Progressive, MFVideoTransferMatrix_BT709,
-            eAVEncCommonRateControlMode_CBR, eAVEncH265VProfile_Main_420_8,
+            MFVideoFormat_H264, MFVideoFormat_HEVC, MFVideoFormat_NV12, MFVideoInterlace_Progressive,
+            MFVideoTransferMatrix_BT709, eAVEncCommonRateControlMode_CBR, eAVEncH264VProfile_High,
+            eAVEncH265VProfile_Main_420_8,
         },
         System::{
             Com::{COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree},
@@ -41,7 +42,7 @@ use windows::{
 };
 
 use super::other;
-use crate::{Event, VideoFrame, nal};
+use crate::{BURST_HEADROOM, BURST_WINDOW, Codec, Event, REFINE_BOOST, VideoFrame, nal};
 
 pub(crate) type Sink = dyn Fn(Event) + Send + Sync;
 
@@ -50,13 +51,16 @@ const INPUT_WAIT: Duration = Duration::from_millis(50);
 
 pub(crate) struct Encoder {
     mft: IMFTransform,
-    codec: ICodecAPI,
+    api: ICodecAPI,
     /// 编码器用着采集的设备，要比编码器活得久。
     _manager: IMFDXGIDeviceManager,
     shared: Arc<Shared>,
     events: Option<JoinHandle<()>>,
     /// 一帧的时长，100 纳秒。
     duration: i64,
+    /// 观看端要的平均码率（bit/s）和放没放大（按 `REFINE_BOOST` 倍）；改它和交给编码器在同一把锁里，两个线程同时
+    /// 改时编码器不会停在过时的码率上。
+    rate: Mutex<(u32, bool)>,
 }
 
 // SAFETY: 异步 MFT 和 ICodecAPI 可以在任意线程上调用（多线程套间），其余字段本身是 Send + Sync。
@@ -67,6 +71,7 @@ unsafe impl Sync for Encoder {}
 /// 事件线程也要用的。
 struct Shared {
     sink: Arc<Sink>,
+    codec: Codec,
     /// 编码器还要几帧输入（`METransformNeedInput` 来一次加一）。
     need_input: Mutex<u32>,
     need_changed: Condvar,
@@ -88,57 +93,57 @@ struct Worker {
 unsafe impl Send for Worker {}
 
 impl Encoder {
-    /// 在 `adapter` 那块显卡上建编码器，用采集的 `device` 读输入的纹理。
+    /// 在 `adapter` 那块显卡上建编码器，用采集的 `device` 读输入的纹理；编码是 `codecs` 里显卡编得了的第一种。
     pub(crate) fn new(
         device: &ID3D11Device,
         adapter: LUID,
         size: (u32, u32),
         fps: u32,
         bitrate: u32,
+        codecs: &[Codec],
         sink: Arc<Sink>,
     ) -> io::Result<Self> {
         super::start_media_foundation();
-        let mft = hardware_encoder(adapter)?;
-        // SAFETY: 以下都是 Media Foundation 的普通调用，对象由返回的 `Encoder` 持有。
-        unsafe {
-            let attributes = mft.GetAttributes().map_err(other)?;
-            if attributes.GetUINT32(&MF_TRANSFORM_ASYNC).unwrap_or(0) == 0 {
-                return Err(io::Error::other("the HEVC encoder is not asynchronous"));
-            }
-            attributes.SetUINT32(&MF_TRANSFORM_ASYNC_UNLOCK, 1).map_err(other)?;
-            let mut token = 0;
-            let mut manager = None;
-            MFCreateDXGIDeviceManager(&mut token, &mut manager).map_err(other)?;
-            let manager = manager.ok_or_else(|| io::Error::other("no DXGI device manager"))?;
-            manager.ResetDevice(device, token).map_err(other)?;
-            mft.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, manager.as_raw() as usize).map_err(other)?;
-            let codec = mft.cast::<ICodecAPI>().map_err(other)?;
-            // 不是每个编码器都认这些设置，认不了的照默认的编。
-            let gop = fps.max(1).saturating_mul(3600);
-            for (api, value, what) in [
-                (CODECAPI_AVEncCommonRateControlMode, uint(eAVEncCommonRateControlMode_CBR.0 as u32), "rate control"),
-                (CODECAPI_AVEncCommonMeanBitRate, uint(bitrate), "bitrate"),
-                (CODECAPI_AVLowLatencyMode, boolean(), "low latency"),
-                (CODECAPI_AVEncMPVGOPSize, uint(gop), "GOP size"),
-                (CODECAPI_AVEncMPVDefaultBPictureCount, uint(0), "B frames"),
-            ] {
-                if let Err(err) = codec.SetValue(&api, &value) {
-                    tracing::debug!("the HEVC encoder does not take its {what} setting: {err}");
+        // 激活得了、配不上参数（这个尺寸、这个档次不收）的也换下一种。
+        let mut failures = Vec::new();
+        let mut chosen = None;
+        for &codec in codecs {
+            let mft = match hardware_encoder(adapter, codec) {
+                Ok(mft) => mft,
+                Err(err) => {
+                    failures.push(format!("{codec:?}: {err}"));
+                    continue;
+                }
+            };
+            match configure(&mft, device, codec, size, fps, bitrate) {
+                Ok(parts) => {
+                    chosen = Some((codec, (mft, parts)));
+                    break;
+                }
+                Err(err) => {
+                    shut_down(&mft);
+                    failures.push(format!("{codec:?}: {err}"));
                 }
             }
-            mft.SetOutputType(0, &media_type(MFVideoFormat_HEVC, size, fps, Some(bitrate))?, 0).map_err(other)?;
-            mft.SetInputType(0, &media_type(MFVideoFormat_NV12, size, fps, None)?, 0).map_err(other)?;
-            let provides_samples = mft
-                .GetOutputStreamInfo(0)
-                .is_ok_and(|info| info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32 != 0);
-            if !provides_samples {
-                return Err(io::Error::other("the HEVC encoder does not allocate its output"));
+        }
+        let Some((codec, (mft, (manager, api, generator)))) = chosen else {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, failures.join(", ")));
+        };
+        if !failures.is_empty() {
+            tracing::info!("encoding the screen as {codec:?}; unavailable: {}", failures.join(", "));
+        }
+        // SAFETY: 以下都是 Media Foundation 的普通调用，对象由返回的 `Encoder` 持有。
+        unsafe {
+            let started = mft
+                .ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0)
+                .and_then(|()| mft.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0));
+            if let Err(err) = started {
+                shut_down(&mft);
+                return Err(other(err));
             }
-            let generator = mft.cast::<IMFMediaEventGenerator>().map_err(other)?;
-            mft.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0).map_err(other)?;
-            mft.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0).map_err(other)?;
             let shared = Arc::new(Shared {
                 sink,
+                codec,
                 need_input: Mutex::new(0),
                 need_changed: Condvar::new(),
                 stopping: AtomicBool::new(false),
@@ -149,19 +154,47 @@ impl Encoder {
             let events = thread::Builder::new().name("screen-encoder".into()).spawn(move || worker.run())?;
             Ok(Self {
                 mft,
-                codec,
+                api,
                 _manager: manager,
                 shared,
                 events: Some(events),
                 duration: 10_000_000 / i64::from(fps.max(1)),
+                rate: Mutex::new((bitrate, false)),
             })
         }
     }
 
     /// 平均码率，单位 bit/s；编码中途可以改。
     pub(crate) fn set_bitrate(&self, bitrate: u32) -> io::Result<()> {
+        let mut rate = self.rate.lock().unwrap_or_else(PoisonError::into_inner);
+        rate.0 = bitrate;
+        self.apply_bitrate(*rate)
+    }
+
+    /// 按 `REFINE_BOOST` 倍的码率编，画面静止时把最后一张补清楚（`Refiner`）；`false` 时回到原来的码率。
+    pub(crate) fn boost(&self, on: bool) {
+        let mut rate = self.rate.lock().unwrap_or_else(PoisonError::into_inner);
+        if std::mem::replace(&mut rate.1, on) != on
+            && let Err(err) = self.apply_bitrate(*rate)
+        {
+            tracing::debug!("cannot change the bitrate for refining: {err}");
+        }
+    }
+
+    /// 编码器选中的编码。
+    pub(crate) fn codec(&self) -> Codec {
+        self.shared.codec
+    }
+
+    fn apply_bitrate(&self, (base, boosted): (u32, bool)) -> io::Result<()> {
+        let bitrate = if boosted { (f64::from(base) * REFINE_BOOST) as u32 } else { base };
         // SAFETY: 键是编码器的设置，值是它要的类型。
-        unsafe { self.codec.SetValue(&CODECAPI_AVEncCommonMeanBitRate, &uint(bitrate)) }.map_err(other)
+        unsafe {
+            if let Err(err) = self.api.SetValue(&CODECAPI_AVEncCommonBufferSize, &uint(buffer_size(bitrate))) {
+                tracing::debug!("the encoder does not take a new buffer size: {err}");
+            }
+            self.api.SetValue(&CODECAPI_AVEncCommonMeanBitRate, &uint(bitrate)).map_err(other)
+        }
     }
 
     /// 下一帧编成关键帧，并带上参数集。
@@ -219,8 +252,8 @@ impl Encoder {
     fn feed(&self, texture: &ID3D11Texture2D, pts: i64, force: bool) -> windows::core::Result<()> {
         // SAFETY: 纹理在调用期间有效，样本拿着它的引用，编码器用完才放。
         unsafe {
-            if force && let Err(err) = self.codec.SetValue(&CODECAPI_AVEncVideoForceKeyFrame, &uint(1)) {
-                tracing::warn!("cannot ask the HEVC encoder for a keyframe: {err}");
+            if force && let Err(err) = self.api.SetValue(&CODECAPI_AVEncVideoForceKeyFrame, &uint(1)) {
+                tracing::warn!("cannot ask the encoder for a keyframe: {err}");
             }
             let buffer = MFCreateDXGISurfaceBuffer(&ID3D11Texture2D::IID, texture, 0, false)?;
             if let Ok(planar) = buffer.cast::<IMF2DBuffer>() {
@@ -240,12 +273,7 @@ impl Drop for Encoder {
         self.shared.stopping.store(true, Ordering::Relaxed);
         self.shared.need_changed.notify_all();
         // 关掉编码器，事件线程等着的 `GetEvent` 随即返回错误、结束。
-        // SAFETY: 之后不再用 `mft`。
-        if let Ok(shutdown) = self.mft.cast::<IMFShutdown>()
-            && let Err(err) = unsafe { shutdown.Shutdown() }
-        {
-            tracing::debug!("cannot shut the HEVC encoder down: {err}");
-        }
+        shut_down(&self.mft);
         if let Some(events) = self.events.take() {
             let _ = events.join();
         }
@@ -283,7 +311,7 @@ impl Worker {
                     // 采集那边不再等编码器要输入，告诉手机停了。
                     if !self.shared.stopping.swap(true, Ordering::Relaxed) {
                         self.shared.need_changed.notify_all();
-                        (self.shared.sink)(Event::Stopped(format!("the HEVC encoder stopped: {err}")));
+                        (self.shared.sink)(Event::Stopped(format!("the encoder stopped: {err}")));
                     }
                     return;
                 }
@@ -317,7 +345,7 @@ impl Worker {
                         self.mft.GetOutputAvailableType(0, 0).and_then(|kind| self.mft.SetOutputType(0, &kind, 0))
                     };
                     if let Err(err) = changed {
-                        tracing::warn!("cannot follow the HEVC encoder's new output format: {err}");
+                        tracing::warn!("cannot follow the encoder's new output format: {err}");
                         return;
                     }
                     // 新格式的参数集可能不同，关键帧没带时改从新格式里取。
@@ -347,8 +375,9 @@ impl Worker {
             let _ = buffer.Unlock();
             (bytes, sample.GetSampleTime().unwrap_or(0))
         };
-        let (data, mut parameter_sets) = nal::from_annex_b(&bytes);
-        let keyframe = nal::is_keyframe(&data);
+        let codec = self.shared.codec;
+        let (data, mut parameter_sets) = nal::from_annex_b(codec, &bytes);
+        let keyframe = nal::is_keyframe(codec, &data);
         let mut known = self.shared.parameter_sets.lock().unwrap_or_else(PoisonError::into_inner);
         if !parameter_sets.is_empty() {
             *known = parameter_sets.clone();
@@ -359,14 +388,14 @@ impl Worker {
             parameter_sets = known.clone();
         }
         if keyframe && parameter_sets.is_empty() {
-            tracing::warn!("the HEVC encoder gave a keyframe without parameter sets");
+            tracing::warn!("the encoder gave a keyframe without parameter sets");
             self.shared.force_keyframe.store(true, Ordering::Relaxed);
             return None;
         }
         if !keyframe {
             parameter_sets.clear();
         }
-        Some(VideoFrame { data, keyframe, parameter_sets, pts_us: pts / 10 })
+        Some(VideoFrame { codec, data, keyframe, parameter_sets, pts_us: pts / 10 })
     }
 
     /// 输出格式里的参数集（`MF_MT_MPEG_SEQUENCE_HEADER`，Annex B 写法）。
@@ -379,15 +408,88 @@ impl Worker {
             if kind.GetBlob(&MF_MT_MPEG_SEQUENCE_HEADER, &mut blob, None).is_err() {
                 return Vec::new();
             }
-            nal::from_annex_b(&blob).1
+            nal::from_annex_b(self.shared.codec, &blob).1
         }
     }
 }
 
-/// `adapter` 那块显卡上的硬件 HEVC 编码器：编码器读的是采集设备上的纹理，得在同一块显卡上。
-fn hardware_encoder(adapter: LUID) -> io::Result<IMFTransform> {
+/// 配好刚激活的编码器：异步解锁、交给它采集的设备、码率和低延迟这些设置、输入输出格式。返回要一直留着的设备管理器、
+/// 设置接口和事件源。
+fn configure(
+    mft: &IMFTransform,
+    device: &ID3D11Device,
+    codec: Codec,
+    size: (u32, u32),
+    fps: u32,
+    bitrate: u32,
+) -> io::Result<(IMFDXGIDeviceManager, ICodecAPI, IMFMediaEventGenerator)> {
+    // SAFETY: 以下都是 Media Foundation 的普通调用，建出的对象交给调用方持有。
+    unsafe {
+        let attributes = mft.GetAttributes().map_err(other)?;
+        if attributes.GetUINT32(&MF_TRANSFORM_ASYNC).unwrap_or(0) == 0 {
+            return Err(io::Error::other("the encoder is not asynchronous"));
+        }
+        attributes.SetUINT32(&MF_TRANSFORM_ASYNC_UNLOCK, 1).map_err(other)?;
+        let mut token = 0;
+        let mut manager = None;
+        MFCreateDXGIDeviceManager(&mut token, &mut manager).map_err(other)?;
+        let manager = manager.ok_or_else(|| io::Error::other("no DXGI device manager"))?;
+        manager.ResetDevice(device, token).map_err(other)?;
+        mft.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, manager.as_raw() as usize).map_err(other)?;
+        // 不是每个编码器都认这些设置，认不了的照默认的编。
+        let gop = fps.max(1).saturating_mul(3600);
+        let api = mft.cast::<ICodecAPI>().map_err(other)?;
+        for (key, value, what) in [
+            (CODECAPI_AVEncCommonRateControlMode, uint(eAVEncCommonRateControlMode_CBR.0 as u32), "rate control"),
+            (CODECAPI_AVEncCommonMeanBitRate, uint(bitrate), "bitrate"),
+            (CODECAPI_AVEncCommonBufferSize, uint(buffer_size(bitrate)), "buffer size"),
+            (CODECAPI_AVLowLatencyMode, boolean(), "low latency"),
+            (CODECAPI_AVEncMPVGOPSize, uint(gop), "GOP size"),
+            (CODECAPI_AVEncMPVDefaultBPictureCount, uint(0), "B frames"),
+        ] {
+            if let Err(err) = api.SetValue(&key, &value) {
+                tracing::debug!("the {codec:?} encoder does not take its {what} setting: {err}");
+            }
+        }
+        mft.SetOutputType(0, &media_type(subtype(codec), size, fps, Some((codec, bitrate)))?, 0).map_err(other)?;
+        mft.SetInputType(0, &media_type(MFVideoFormat_NV12, size, fps, None)?, 0).map_err(other)?;
+        let provides_samples = mft
+            .GetOutputStreamInfo(0)
+            .is_ok_and(|info| info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32 != 0);
+        if !provides_samples {
+            return Err(io::Error::other("the encoder does not allocate its output"));
+        }
+        let generator = mft.cast::<IMFMediaEventGenerator>().map_err(other)?;
+        Ok((manager, api, generator))
+    }
+}
+
+/// 关掉不用了的异步编码器：不关的话它的事件队列和拿着的显卡设备一直不放。
+fn shut_down(mft: &IMFTransform) {
+    // SAFETY: 之后不再用 `mft`。
+    if let Ok(shutdown) = mft.cast::<IMFShutdown>()
+        && let Err(err) = unsafe { shutdown.Shutdown() }
+    {
+        tracing::debug!("cannot shut the encoder down: {err}");
+    }
+}
+
+/// 码率缓冲的大小，bit：`BURST_WINDOW` 那么长时间按 `BURST_HEADROOM` 倍的码率能发的量，单帧大不过它。
+fn buffer_size(bitrate: u32) -> u32 {
+    (f64::from(bitrate) * BURST_WINDOW.as_secs_f64() * BURST_HEADROOM) as u32
+}
+
+fn subtype(codec: Codec) -> GUID {
+    match codec {
+        Codec::Hevc => MFVideoFormat_HEVC,
+        Codec::H264 => MFVideoFormat_H264,
+    }
+}
+
+/// `adapter` 那块显卡上编 `codec` 的硬件编码器：编码器读的是采集设备上的纹理，得在同一块显卡上。
+fn hardware_encoder(adapter: LUID, codec: Codec) -> io::Result<IMFTransform> {
     let input = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: MFVideoFormat_NV12 };
-    let output = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: MFVideoFormat_HEVC };
+    let output = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: subtype(codec) };
     let mut list: *mut Option<IMFActivate> = ptr::null_mut();
     let mut count = 0u32;
     // SAFETY: 输出参数指向本地变量；返回的数组下面逐个接过引用后放掉。
@@ -416,7 +518,7 @@ fn hardware_encoder(adapter: LUID) -> io::Result<IMFTransform> {
     let activate = activates
         .iter()
         .find(|activate| on_adapter(activate))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Unsupported, "no hardware HEVC encoder on the display's GPU"))?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Unsupported, "no hardware encoder on the display's GPU"))?;
     // SAFETY: 建出编码器。
     unsafe { activate.ActivateObject::<IMFTransform>() }.map_err(other)
 }
@@ -428,8 +530,13 @@ fn luid_bytes(luid: LUID) -> [u8; 8] {
     bytes
 }
 
-/// 视频格式：`subtype`、像素尺寸、帧率，逐行扫描，BT.709 的有限范围；编出的格式另带平均码率。
-fn media_type(subtype: GUID, (width, height): (u32, u32), fps: u32, bitrate: Option<u32>) -> io::Result<IMFMediaType> {
+/// 视频格式：`subtype`、像素尺寸、帧率，逐行扫描，BT.709 的有限范围；编出的格式另带编码的档次和平均码率。
+fn media_type(
+    subtype: GUID,
+    (width, height): (u32, u32),
+    fps: u32,
+    encoded: Option<(Codec, u32)>,
+) -> io::Result<IMFMediaType> {
     // SAFETY: 新建的格式只在这里写。
     unsafe {
         let kind = MFCreateMediaType().map_err(other)?;
@@ -440,9 +547,13 @@ fn media_type(subtype: GUID, (width, height): (u32, u32), fps: u32, bitrate: Opt
         kind.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32).map_err(other)?;
         kind.SetUINT32(&MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709.0 as u32).map_err(other)?;
         kind.SetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235.0 as u32).map_err(other)?;
-        if let Some(bitrate) = bitrate {
+        if let Some((codec, bitrate)) = encoded {
             kind.SetUINT32(&MF_MT_AVG_BITRATE, bitrate).map_err(other)?;
-            kind.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH265VProfile_Main_420_8.0 as u32).map_err(other)?;
+            let profile = match codec {
+                Codec::Hevc => eAVEncH265VProfile_Main_420_8.0,
+                Codec::H264 => eAVEncH264VProfile_High.0,
+            };
+            kind.SetUINT32(&MF_MT_MPEG2_PROFILE, profile as u32).map_err(other)?;
         }
         Ok(kind)
     }

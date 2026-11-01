@@ -42,7 +42,7 @@ impl WindowView {
         }
         self.leave_mobile(cx);
         self.kanban = None;
-        self.screen_viewer = None;
+        self.leave_screen_page(window, cx);
         self.new_workspace = None;
         self.add_task = None;
         self.commit_message_dialog = None;

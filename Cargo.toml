@@ -99,6 +99,7 @@ objc2-core-media = { version = "0.3", default-features = false }
 objc2-core-video = { version = "0.3", default-features = false }
 objc2-core-graphics = { version = "0.3", default-features = false }
 objc2-core-foundation = { version = "0.3", default-features = false }
+objc2-security = { version = "0.3", default-features = false }
 dispatch2 = { version = "0.3", default-features = false }
 # 从 GPUI 的窗口拿到 NSWindow：程序要求改窗口尺寸时直接设 frame，保持左上角不动。
 raw-window-handle = "0.6"

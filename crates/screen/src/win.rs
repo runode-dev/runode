@@ -1,5 +1,5 @@
 //! Windows 上的远程桌面：DXGI 桌面复制采集一块屏幕，D3D11 的视频处理器缩放、转成 NV12，Media
-//! Foundation 调显卡的硬件 HEVC 编码器编码（`Capture`）；`SendInput` 注入键鼠（`Injector`）。不用授权，
+//! Foundation 调显卡的硬件 HEVC 或 H.264 编码器编码（`Capture`）；`SendInput` 注入键鼠（`Injector`）。不用授权，
 //! 但普通权限的进程注入不了以管理员身份跑的窗口，也采不到、注入不了锁屏和 UAC 提示所在的安全桌面。
 //! 坐标都按物理像素，进程要先设成按显示器感知缩放（`dpi_aware`）。
 
@@ -28,7 +28,7 @@ use windows::Win32::{
 pub use awake::KeepAwake;
 pub use capture::{Capture, Keyframes};
 pub use decoder::{Decoded, Decoder};
-pub(crate) use display::displays;
+pub(crate) use display::{apply, current, displays, modes, reset, reset_to_registry};
 pub use input::Injector;
 
 /// 把进程设成按显示器感知缩放，屏幕的坐标和尺寸都按物理像素报；设过了（比如界面进程里）不再设。

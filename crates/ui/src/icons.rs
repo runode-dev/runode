@@ -28,6 +28,9 @@ crate::icons! {
     pub ARROW_UP_ICON = "arrow-up",
     pub MAXIMIZE_ICON = "maximize",
     pub MINIMIZE_ICON = "minimize",
+    /// 搬到单独的窗口里、搬回来。
+    pub POP_OUT_ICON = "pop-out",
+    pub POP_IN_ICON = "pop-in",
     /// 「更多」菜单。
     pub MORE_ICON = "more",
     /// 切换树形式、列表形式的按钮，画的是切过去以后的样子。

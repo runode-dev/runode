@@ -1,4 +1,4 @@
-//! 远端的画面：在读连接的线程上把 HEVC 解成能直接画的一帧（`Picture`）。macOS 上
+//! 远端的画面：在读连接的线程上把 HEVC 或 H.264 解成能直接画的一帧（`Picture`）。macOS 上
 //! 解成 IOSurface 支持的像素缓冲，交给 GPUI 的 `surface` 元素、不拷像素；Windows 上解成 BGRA，包成
 //! `RenderImage`。别的系统没有解码器，远程桌面不可用。
 
@@ -7,7 +7,7 @@ use std::io;
 use gpui::{AnyElement, IntoElement as _};
 #[cfg(any(target_os = "macos", windows))]
 use gpui::{ObjectFit, Styled as _};
-use runode_types::screen::VideoFrame;
+use runode_types::screen::{Codec, VideoFrame};
 
 /// 解出来、能直接画的一帧。
 pub struct Picture {
@@ -47,6 +47,26 @@ impl Picture {
 
 /// 这个系统能不能当远程桌面的观看端。
 pub const SUPPORTED: bool = cfg!(any(target_os = "macos", windows));
+
+/// 这里解得了的编码，想要的排前面：同样的码率下 HEVC 清楚些。Windows 10 上 HEVC 的解码器要另装，没有时只要 H.264。
+pub fn codecs() -> Vec<Codec> {
+    #[cfg(windows)]
+    {
+        static CODECS: std::sync::OnceLock<Vec<Codec>> = std::sync::OnceLock::new();
+        CODECS
+            .get_or_init(|| {
+                [Codec::Hevc, Codec::H264]
+                    .into_iter()
+                    .filter(|&codec| runode_screen::Decoder::supports(codec))
+                    .collect()
+            })
+            .clone()
+    }
+    #[cfg(not(windows))]
+    {
+        vec![Codec::Hevc, Codec::H264]
+    }
+}
 
 /// 一路画面的解码器，只在读连接的线程上用。
 pub struct VideoDecoder {

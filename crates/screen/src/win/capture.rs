@@ -60,7 +60,7 @@ use super::{
     encoder::{Encoder, KeyframeRequest, Sink},
     other,
 };
-use crate::{Event, Options};
+use crate::{Codec, Event, Options, refine::Refiner};
 
 /// 等新画面最多这么久就回来看一眼要不要停、要不要重编。
 const FRAME_WAIT: Duration = Duration::from_millis(100);
@@ -90,10 +90,10 @@ struct State {
 
 impl Capture {
     /// 开始采集，`on_event` 在采集线程和编码器的线程上收到编好的帧和停下的原因。第一帧是带参数集的
-    /// 关键帧。屏幕不存在、显卡上没有硬件 HEVC 编码器时返回错误。
+    /// 关键帧。屏幕不存在、显卡上没有观看端解得了的硬件编码器时返回错误。
     pub fn start(options: &Options, on_event: impl Fn(Event) + Send + Sync + 'static) -> io::Result<Self> {
         let sink: Arc<Sink> = Arc::new(on_event);
-        let options = *options;
+        let options = options.clone();
         let (tx, rx) = mpsc::channel();
         let thread = thread::Builder::new().name("screen-capture".into()).spawn(move || {
             // SAFETY: 本线程进多线程套间，D3D11 和 MFT 的调用都在多线程套间里。
@@ -131,6 +131,11 @@ impl Capture {
     /// 改平均码率，单位 bit/s。
     pub fn set_bitrate(&self, bitrate: u32) -> io::Result<()> {
         self.state.encoder.set_bitrate(bitrate)
+    }
+
+    /// 编码器选中的编码。
+    pub fn codec(&self) -> Codec {
+        self.state.encoder.codec()
     }
 }
 
@@ -215,7 +220,8 @@ impl Pipeline {
             // 编码器在它自己的线程上也用这个设备。
             let _ = device.cast::<ID3D11Multithread>().map_err(other)?.SetMultithreadProtected(true);
             let adapter = output.adapter.GetDesc1().map_err(other)?.AdapterLuid;
-            let encoder = Encoder::new(&device, adapter, (width, height), options.fps, options.bitrate, sink)?;
+            let encoder =
+                Encoder::new(&device, adapter, (width, height), options.fps, options.bitrate, &options.codecs, sink)?;
             let desktop = texture(&device, raw, DXGI_FORMAT_B8G8R8A8_UNORM, 0)?;
             let composed =
                 texture(&device, source, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_RESOURCE_MISC_GDI_COMPATIBLE.0 as u32)?;
@@ -283,9 +289,11 @@ impl Pipeline {
         // 有没有拿到过画面、有没有还没交给编码器的画面、上次交出去的时刻。
         let (mut have_frame, mut pending) = (false, false);
         let mut last_encoded = Instant::now();
+        let mut refiner = Refiner::default();
         // 编码器出错停了时它自己报过 `Event::Stopped`。
         while !self.state.stop.load(Ordering::Relaxed) && !self.state.encoder.stopped() {
-            let wait = if pending { RETRY_WAIT } else { FRAME_WAIT };
+            let refine_in = refiner.wait(Instant::now());
+            let wait = if pending { RETRY_WAIT } else { refine_in.map_or(FRAME_WAIT, |wait| wait.min(FRAME_WAIT)) };
             match self.next_frame(wait) {
                 Ok(true) => {
                     have_frame = true;
@@ -300,12 +308,27 @@ impl Pipeline {
             }
             let repeat =
                 have_frame && self.state.encoder.keyframe_requested() && last_encoded.elapsed() >= REPEAT_DELAY;
-            if pending || repeat {
-                if self.encode() {
+            let refine = have_frame && !pending && refiner.wait(Instant::now()).is_some_and(|wait| wait.is_zero());
+            if pending || repeat || refine {
+                // 新画面回到原来的码率；屏幕停下以后补清楚时放大码率。
+                self.state.encoder.boost(refine && !pending && !repeat);
+                let encoded = self.encode();
+                let now = Instant::now();
+                if encoded {
+                    // 重编的关键帧按原来的码率编，补清楚的画面又糊了，和新画面一样停下以后重新补。
+                    if pending || repeat {
+                        refiner.changed(now);
+                    } else if refine {
+                        refiner.refined(now);
+                    }
                     pending = false;
-                    last_encoded = Instant::now();
-                } else {
+                    last_encoded = now;
+                } else if pending || repeat {
+                    // 没收下的新画面和重编的关键帧过一会儿再交。
                     pending = true;
+                } else {
+                    // 补清楚的那帧交不进去也算补过，不然到点了一直重试、空转。
+                    refiner.refined(now);
                 }
             }
         }

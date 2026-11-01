@@ -1,4 +1,4 @@
-//! VideoToolbox 的 HEVC 解码：把 `VideoFrame` 解成 IOSurface 支持的 `CVPixelBuffer`，像素格式是 NV12 全范围
+//! VideoToolbox 的 HEVC 和 H.264 解码：把 `VideoFrame` 解成 IOSurface 支持的 `CVPixelBuffer`，像素格式是 NV12 全范围
 //! （`kCVPixelFormatType_420YpCbCr8BiPlanarFullRange`），GPUI 的 `surface` 元素只认这一种，能直接交给它画、
 //! 不用拷像素。
 
@@ -10,8 +10,8 @@ use std::{
 
 use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType};
 use objc2_core_media::{
-    CMBlockBuffer, CMFormatDescription, CMSampleBuffer, CMVideoFormatDescriptionCreateFromHEVCParameterSets,
-    kCMBlockBufferAssureMemoryNowFlag,
+    CMBlockBuffer, CMFormatDescription, CMSampleBuffer, CMVideoFormatDescriptionCreateFromH264ParameterSets,
+    CMVideoFormatDescriptionCreateFromHEVCParameterSets, kCMBlockBufferAssureMemoryNowFlag,
 };
 use objc2_core_video::{
     CVImageBuffer, CVPixelBuffer, CVPixelBufferGetHeight, CVPixelBufferGetWidth, kCVPixelBufferIOSurfacePropertiesKey,
@@ -22,7 +22,7 @@ use objc2_video_toolbox::{
     VTDecodeFrameFlags, VTDecodeInfoFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession,
 };
 
-use crate::{VideoFrame, nal};
+use crate::{Codec, VideoFrame, nal};
 
 /// 解出来的画面，GPUI 的 `surface` 元素直接收它。
 pub type PixelBuffer = CFRetained<CVPixelBuffer>;
@@ -34,7 +34,7 @@ pub struct Decoded {
     pub image: PixelBuffer,
 }
 
-/// 一路 HEVC 画面的解码器，只在一个线程上用。
+/// 一路画面的解码器，只在一个线程上用；编码可以中途换，换了以后从关键帧开始解。
 ///
 /// 从关键帧开始解：刚建好、`reset` 之后和解错一帧之后，关键帧以前的帧都丢掉，`decode` 返回 `Ok(None)`、
 /// `needs_keyframe` 为真，调用方这时向采集端要关键帧。
@@ -47,7 +47,8 @@ pub struct Decoder {
 struct Session {
     decompression: CFRetained<VTDecompressionSession>,
     format: CFRetained<CMFormatDescription>,
-    /// 建 `format` 用的参数集；关键帧带来的不一样（采集端改了分辨率、切了屏）时重建会话。
+    /// 建 `format` 用的编码和参数集；关键帧带来的不一样（采集端换了编码、改了分辨率、切了屏）时重建会话。
+    codec: Codec,
     parameter_sets: Vec<Vec<u8>>,
 }
 
@@ -87,13 +88,17 @@ impl Decoder {
 
     fn decode_frame(&mut self, frame: &VideoFrame) -> io::Result<Decoded> {
         if frame.keyframe && !frame.parameter_sets.is_empty() {
-            let current = self.session.as_ref().map(|session| &session.parameter_sets);
-            if current != Some(&frame.parameter_sets) {
+            let current = self.session.as_ref().map(|session| (session.codec, &session.parameter_sets));
+            if current != Some((frame.codec, &frame.parameter_sets)) {
                 self.session = None;
-                self.session = Some(Session::new(frame.parameter_sets.clone())?);
+                self.session = Some(Session::new(frame.codec, frame.parameter_sets.clone())?);
             }
         }
-        let session = self.session.as_ref().ok_or_else(|| io::Error::other("no HEVC parameter sets yet"))?;
+        let session = self
+            .session
+            .as_ref()
+            .filter(|session| session.codec == frame.codec)
+            .ok_or_else(|| io::Error::other("no parameter sets for this codec yet"))?;
         let sample = sample(&frame.data, &session.format)?;
         let mut output = Output { status: 0, image: None };
         let mut info = VTDecodeInfoFlags::empty();
@@ -107,12 +112,12 @@ impl Decoder {
             )
         };
         if status != 0 {
-            return Err(io::Error::other(format!("cannot decode an HEVC frame ({status})")));
+            return Err(io::Error::other(format!("cannot decode a frame ({status})")));
         }
         if output.status != 0 {
-            return Err(io::Error::other(format!("the HEVC decoder failed on a frame ({})", output.status)));
+            return Err(io::Error::other(format!("the decoder failed on a frame ({})", output.status)));
         }
-        let image = output.image.ok_or_else(|| io::Error::other("the HEVC decoder dropped a frame"))?;
+        let image = output.image.ok_or_else(|| io::Error::other("the decoder dropped a frame"))?;
         let width = CVPixelBufferGetWidth(&image) as u32;
         let height = CVPixelBufferGetHeight(&image) as u32;
         Ok(Decoded { width, height, image })
@@ -127,8 +132,8 @@ impl Drop for Session {
 }
 
 impl Session {
-    fn new(parameter_sets: Vec<Vec<u8>>) -> io::Result<Self> {
-        let format = format(&parameter_sets)?;
+    fn new(codec: Codec, parameter_sets: Vec<Vec<u8>>) -> io::Result<Self> {
+        let format = format(codec, &parameter_sets)?;
         // SAFETY: 读 CoreVideo 导出的常量。
         let (pixel_format, io_surface, metal) = unsafe {
             (
@@ -162,9 +167,9 @@ impl Session {
         let decompression = match NonNull::new(session) {
             // SAFETY: Create 规则，返回的会话归调用方。
             Some(session) if status == 0 => unsafe { CFRetained::from_raw(session) },
-            _ => return Err(io::Error::other(format!("cannot create the HEVC decoder ({status})"))),
+            _ => return Err(io::Error::other(format!("cannot create the {codec:?} decoder ({status})"))),
         };
-        Ok(Self { decompression, format, parameter_sets })
+        Ok(Self { decompression, format, codec, parameter_sets })
     }
 }
 
@@ -190,37 +195,52 @@ unsafe extern "C-unwind" fn on_decoded(
     output.image = NonNull::new(image).map(|image| unsafe { CFRetained::retain(image) });
 }
 
-/// 按参数集（VPS、SPS、PPS）建格式描述。
-fn format(parameter_sets: &[Vec<u8>]) -> io::Result<CFRetained<CMFormatDescription>> {
+/// 按参数集（HEVC 的 VPS、SPS、PPS，H.264 的 SPS、PPS）建格式描述。
+fn format(codec: Codec, parameter_sets: &[Vec<u8>]) -> io::Result<CFRetained<CMFormatDescription>> {
     let pointers: Vec<NonNull<u8>> = parameter_sets
         .iter()
         .map(|set| NonNull::new(set.as_ptr().cast_mut()))
         .collect::<Option<_>>()
-        .ok_or_else(|| io::Error::other("an empty HEVC parameter set"))?;
+        .ok_or_else(|| io::Error::other("an empty parameter set"))?;
     let sizes: Vec<usize> = parameter_sets.iter().map(Vec::len).collect();
+    let pointer_list =
+        NonNull::new(pointers.as_ptr().cast_mut()).ok_or_else(|| io::Error::other("no parameter sets"))?;
+    let size_list = NonNull::new(sizes.as_ptr().cast_mut()).ok_or_else(|| io::Error::other("no parameter sets"))?;
     let mut format = ptr::null();
+    let out = NonNull::from(&mut format);
+    let length_size = nal::LENGTH_SIZE as i32;
     // SAFETY: 指针和长度一一对应、在调用期间有效；输出参数指向本地变量。
     let status = unsafe {
-        CMVideoFormatDescriptionCreateFromHEVCParameterSets(
-            None,
-            pointers.len(),
-            NonNull::new(pointers.as_ptr().cast_mut()).ok_or_else(|| io::Error::other("no HEVC parameter sets"))?,
-            NonNull::new(sizes.as_ptr().cast_mut()).ok_or_else(|| io::Error::other("no HEVC parameter sets"))?,
-            nal::LENGTH_SIZE as i32,
-            None,
-            NonNull::from(&mut format),
-        )
+        match codec {
+            Codec::Hevc => CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                None,
+                pointers.len(),
+                pointer_list,
+                size_list,
+                length_size,
+                None,
+                out,
+            ),
+            Codec::H264 => CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                None,
+                pointers.len(),
+                pointer_list,
+                size_list,
+                length_size,
+                out,
+            ),
+        }
     };
     match NonNull::new(format.cast_mut()) {
         // SAFETY: Create 规则，返回的格式描述归调用方。
         Some(format) if status == 0 => Ok(unsafe { CFRetained::from_raw(format) }),
-        _ => Err(io::Error::other(format!("bad HEVC parameter sets ({status})"))),
+        _ => Err(io::Error::other(format!("bad {codec:?} parameter sets ({status})"))),
     }
 }
 
 /// 把一帧的数据复制进 `CMBlockBuffer`，包成解码器要的样本。
 fn sample(data: &[u8], format: &CMFormatDescription) -> io::Result<CFRetained<CMSampleBuffer>> {
-    let source = NonNull::new(data.as_ptr().cast_mut()).ok_or_else(|| io::Error::other("an empty HEVC frame"))?;
+    let source = NonNull::new(data.as_ptr().cast_mut()).ok_or_else(|| io::Error::other("an empty frame"))?;
     let mut block = ptr::null_mut();
     // SAFETY: 让 CoreMedia 自己分配 `data.len()` 字节；输出参数指向本地变量。
     let status = unsafe {
@@ -239,12 +259,12 @@ fn sample(data: &[u8], format: &CMFormatDescription) -> io::Result<CFRetained<CM
     let block = match NonNull::new(block) {
         // SAFETY: Create 规则，返回的块归调用方。
         Some(block) if status == 0 => unsafe { CFRetained::from_raw(block) },
-        _ => return Err(io::Error::other(format!("cannot allocate an HEVC frame ({status})"))),
+        _ => return Err(io::Error::other(format!("cannot allocate a frame ({status})"))),
     };
     // SAFETY: 块刚分配了 `data.len()` 字节，源数据同样长。
     let status = unsafe { CMBlockBuffer::replace_data_bytes(source.cast(), &block, 0, data.len()) };
     if status != 0 {
-        return Err(io::Error::other(format!("cannot copy an HEVC frame ({status})")));
+        return Err(io::Error::other(format!("cannot copy a frame ({status})")));
     }
     let size = data.len();
     let mut sample = ptr::null_mut();
@@ -265,7 +285,7 @@ fn sample(data: &[u8], format: &CMFormatDescription) -> io::Result<CFRetained<CM
     match NonNull::new(sample) {
         // SAFETY: Create 规则，返回的样本归调用方。
         Some(sample) if status == 0 => Ok(unsafe { CFRetained::from_raw(sample) }),
-        _ => Err(io::Error::other(format!("cannot wrap an HEVC frame ({status})"))),
+        _ => Err(io::Error::other(format!("cannot wrap a frame ({status})"))),
     }
 }
 
@@ -332,6 +352,10 @@ mod tests {
 
     /// 编 `count` 帧同一张灰图，第一帧和要了关键帧的那帧是关键帧。
     fn encode(width: u32, height: u32, luma: u8, count: i64) -> Vec<VideoFrame> {
+        encode_as(Codec::Hevc, width, height, luma, count)
+    }
+
+    fn encode_as(codec: Codec, width: u32, height: u32, luma: u8, count: i64) -> Vec<VideoFrame> {
         let frames = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&frames);
         let encoder = Encoder::new(
@@ -339,6 +363,7 @@ mod tests {
             height,
             30,
             4_000_000,
+            &[codec],
             Arc::new(move |event| {
                 if let Event::Frame(frame) = event {
                     sink.lock().unwrap().push(frame);
@@ -378,6 +403,23 @@ mod tests {
         let resized = encode(320, 240, 60, 1);
         let decoded = decoder.decode(&resized[0]).unwrap().expect("a decoded frame");
         assert_eq!((decoded.width, decoded.height), (320, 240));
+    }
+
+    /// H.264 编出来的也解得回来，同一个解码器从 HEVC 换到 H.264 时重建会话。
+    #[test]
+    #[ignore = "needs a hardware encoder"]
+    fn decodes_h264_after_hevc() {
+        let mut decoder = Decoder::new();
+        let hevc = encode(320, 240, 100, 2);
+        decoder.decode(&hevc[0]).unwrap().expect("a decoded HEVC frame");
+        let h264 = encode_as(Codec::H264, 640, 360, 180, 3);
+        assert_eq!(h264[0].codec, Codec::H264);
+        assert!(h264[0].keyframe);
+        assert_eq!(h264[0].parameter_sets.len(), 2, "SPS and PPS");
+        for frame in &h264 {
+            let decoded = decoder.decode(frame).unwrap().expect("a decoded H.264 frame");
+            assert_eq!((decoded.width, decoded.height), (640, 360));
+        }
     }
 
     /// 坏数据报错，之后要等关键帧。

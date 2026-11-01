@@ -1,5 +1,5 @@
-//! Media Foundation 的 HEVC 解码：系统登记的同步解码器 MFT（Windows 10 上要装「HEVC 视频扩展」才有），
-//! 开低延迟模式，来一帧出一帧；解出的 NV12 在内存里按 BT.709 有限范围换成 BGRA。
+//! Media Foundation 的 HEVC 和 H.264 解码：系统登记的同步解码器 MFT（H.264 的系统自带，HEVC 的在 Windows 10 上
+//! 要装「HEVC 视频扩展」才有），开低延迟模式，来一帧出一帧；解出的 NV12 在内存里按 BT.709 有限范围换成 BGRA。
 
 use std::{io, mem::ManuallyDrop, ptr};
 
@@ -12,19 +12,19 @@ use windows::{
             MFCreateMemoryBuffer, MFCreateSample, MFMediaType_Video, MFT_CATEGORY_VIDEO_DECODER,
             MFT_ENUM_FLAG_LOCALMFT, MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT,
             MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER,
-            MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MFT_REGISTER_TYPE_INFO, MFTEnumEx, MFVideoArea, MFVideoFormat_HEVC,
-            MFVideoFormat_NV12,
+            MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MFT_REGISTER_TYPE_INFO, MFTEnumEx, MFVideoArea, MFVideoFormat_H264,
+            MFVideoFormat_HEVC, MFVideoFormat_NV12,
         },
         System::{
             Com::{COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree},
             Variant::{VARIANT, VT_BOOL},
         },
     },
-    core::Interface as _,
+    core::{GUID, Interface as _},
 };
 
 use super::other;
-use crate::{VideoFrame, nal};
+use crate::{Codec, VideoFrame, nal};
 
 /// 建解码器时先填的画面尺寸（宽在高 32 位，高在低 32 位）。
 const PLACEHOLDER_SIZE: u64 = (1920 << 32) | 1080;
@@ -36,17 +36,23 @@ pub struct Decoded {
     pub bgra: Vec<u8>,
 }
 
-/// 一路 HEVC 画面的解码器，只在建它的线程上用（多线程套间）。
+/// 一路画面的解码器，只在建它的线程上用（多线程套间）；编码可以中途换，换了以后从关键帧开始解。
 ///
 /// 从关键帧开始解：刚建好、`reset` 之后和解错一帧之后，关键帧以前的帧都丢掉，`decode` 返回 `Ok(None)`、
 /// `needs_keyframe` 为真，调用方这时向采集端要关键帧。解码器攒着一帧、下一帧交进去时才出，所以 `decode`
 /// 返回的是上一帧，第一个关键帧交进去时是 `Ok(None)`，这时 `needs_keyframe` 为假。
 pub struct Decoder {
+    /// 解着的编码和它的解码器，第一个关键帧来了才建。
+    session: Option<(Codec, Session)>,
+    need_keyframe: bool,
+}
+
+/// 一种编码的系统解码器。
+struct Session {
     mft: IMFTransform,
     /// 解码器自己不给输出样本时，每次取输出要备这么大的缓冲。
     output_size: Option<u32>,
     format: Option<Format>,
-    need_keyframe: bool,
 }
 
 /// 输出的格式。
@@ -62,38 +68,19 @@ struct Format {
 unsafe impl Send for Decoder {}
 
 impl Decoder {
-    /// 建解码器；系统没有 HEVC 解码器时报 `Unsupported`。
     pub fn new() -> io::Result<Self> {
         // SAFETY: 本线程进多线程套间，之后解码器的调用都在这个线程上。
         let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         super::start_media_foundation();
-        let mft = find_decoder()?;
-        // SAFETY: 以下都是 Media Foundation 的普通调用，对象由返回的 `Decoder` 持有。
-        unsafe {
-            if let Ok(attributes) = mft.GetAttributes() {
-                let _ = attributes.SetUINT32(&MF_LOW_LATENCY, 1);
-            }
-            if let Ok(codec) = mft.cast::<ICodecAPI>()
-                && let Err(err) = codec.SetValue(&CODECAPI_AVLowLatencyMode, &boolean())
-            {
-                tracing::debug!("the HEVC decoder does not take the low latency setting: {err}");
-            }
-            let input = MFCreateMediaType().map_err(other)?;
-            input.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(other)?;
-            input.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_HEVC).map_err(other)?;
-            // 不给尺寸时解码器定不出输出格式、不肯开始收数据。先填一个占位的，第一帧来了它按参数集里的实际尺寸
-            // 报格式变了（`drain` 跟着换）。
-            input.SetUINT64(&MF_MT_FRAME_SIZE, PLACEHOLDER_SIZE).map_err(other)?;
-            mft.SetInputType(0, &input, 0).map_err(failed("set the input type"))?;
-        }
-        let mut decoder = Self { mft, output_size: None, format: None, need_keyframe: true };
-        decoder.choose_output()?;
-        // SAFETY: 通知解码器开始收数据。
-        unsafe {
-            decoder.mft.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0).map_err(failed("begin streaming"))?;
-            decoder.mft.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0).map_err(failed("start the stream"))?;
-        }
-        Ok(decoder)
+        Ok(Self { session: None, need_keyframe: true })
+    }
+
+    /// 系统有没有 `codec` 的解码器：HEVC 的在 Windows 10 上要另装。
+    pub fn supports(codec: Codec) -> bool {
+        // SAFETY: 本线程进多线程套间，建出的解码器马上放掉。
+        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        super::start_media_foundation();
+        find_decoder(codec).is_ok()
     }
 
     /// 丢掉解到一半的状态，从下一个关键帧重新开始。
@@ -112,11 +99,52 @@ impl Decoder {
             return Ok(None);
         }
         let result = self.decode_frame(frame);
-        match &result {
-            Ok(_) => self.need_keyframe = false,
-            Err(_) => self.need_keyframe = true,
-        }
+        self.need_keyframe = result.is_err();
         result
+    }
+
+    fn decode_frame(&mut self, frame: &VideoFrame) -> io::Result<Option<Decoded>> {
+        if frame.keyframe && self.session.as_ref().is_none_or(|(codec, _)| *codec != frame.codec) {
+            self.session = None;
+            self.session = Some((frame.codec, Session::new(frame.codec)?));
+        }
+        match &mut self.session {
+            Some((codec, session)) if *codec == frame.codec => session.decode_frame(frame),
+            _ => Err(io::Error::other("no decoder for this codec yet")),
+        }
+    }
+}
+
+impl Session {
+    /// 建 `codec` 的解码器；系统没有时报 `Unsupported`。
+    fn new(codec: Codec) -> io::Result<Self> {
+        let mft = find_decoder(codec)?;
+        // SAFETY: 以下都是 Media Foundation 的普通调用，对象由返回的 `Session` 持有。
+        unsafe {
+            if let Ok(attributes) = mft.GetAttributes() {
+                let _ = attributes.SetUINT32(&MF_LOW_LATENCY, 1);
+            }
+            if let Ok(api) = mft.cast::<ICodecAPI>()
+                && let Err(err) = api.SetValue(&CODECAPI_AVLowLatencyMode, &boolean())
+            {
+                tracing::debug!("the {codec:?} decoder does not take the low latency setting: {err}");
+            }
+            let input = MFCreateMediaType().map_err(other)?;
+            input.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(other)?;
+            input.SetGUID(&MF_MT_SUBTYPE, &subtype(codec)).map_err(other)?;
+            // 不给尺寸时解码器定不出输出格式、不肯开始收数据。先填一个占位的，第一帧来了它按参数集里的实际尺寸
+            // 报格式变了（`drain` 跟着换）。
+            input.SetUINT64(&MF_MT_FRAME_SIZE, PLACEHOLDER_SIZE).map_err(other)?;
+            mft.SetInputType(0, &input, 0).map_err(failed("set the input type"))?;
+        }
+        let mut session = Self { mft, output_size: None, format: None };
+        session.choose_output()?;
+        // SAFETY: 通知解码器开始收数据。
+        unsafe {
+            session.mft.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0).map_err(failed("begin streaming"))?;
+            session.mft.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0).map_err(failed("start the stream"))?;
+        }
+        Ok(session)
     }
 
     fn decode_frame(&mut self, frame: &VideoFrame) -> io::Result<Option<Decoded>> {
@@ -174,7 +202,7 @@ impl Decoder {
                 let kind = self
                     .mft
                     .GetOutputAvailableType(0, index)
-                    .map_err(|err| io::Error::other(format!("the HEVC decoder cannot output NV12: {err}")))?;
+                    .map_err(|err| io::Error::other(format!("the decoder cannot output NV12: {err}")))?;
                 if kind.GetGUID(&MF_MT_SUBTYPE).is_ok_and(|subtype| subtype == MFVideoFormat_NV12) {
                     break kind;
                 }
@@ -191,7 +219,7 @@ impl Decoder {
 
     /// 把解出的 NV12 样本换成 BGRA。
     fn picture(&self, sample: &IMFSample) -> io::Result<Decoded> {
-        let format = self.format.ok_or_else(|| io::Error::other("the HEVC decoder gave no frame size"))?;
+        let format = self.format.ok_or_else(|| io::Error::other("the decoder gave no frame size"))?;
         // SAFETY: 锁住缓冲期间按它报的行宽读，读完解锁。
         unsafe {
             let buffer = sample.ConvertToContiguousBuffer().map_err(other)?;
@@ -217,12 +245,19 @@ impl Decoder {
 
 /// 报错时带上是哪一步。
 fn failed(what: &'static str) -> impl Fn(windows::core::Error) -> io::Error {
-    move |err| io::Error::other(format!("the HEVC decoder cannot {what}: {err}"))
+    move |err| io::Error::other(format!("the decoder cannot {what}: {err}"))
 }
 
-/// 找系统里能解 HEVC 的同步解码器。
-fn find_decoder() -> io::Result<IMFTransform> {
-    let input = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: MFVideoFormat_HEVC };
+fn subtype(codec: Codec) -> GUID {
+    match codec {
+        Codec::Hevc => MFVideoFormat_HEVC,
+        Codec::H264 => MFVideoFormat_H264,
+    }
+}
+
+/// 找系统里能解 `codec` 的同步解码器。
+fn find_decoder(codec: Codec) -> io::Result<IMFTransform> {
+    let input = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: subtype(codec) };
     let mut list: *mut Option<IMFActivate> = ptr::null_mut();
     let mut count = 0u32;
     // SAFETY: 输出参数指向本地变量；返回的数组下面逐个接过引用后放掉。
@@ -242,7 +277,7 @@ fn find_decoder() -> io::Result<IMFTransform> {
         unsafe { (0..count as usize).filter_map(|index| ptr::read(list.add(index))).collect() };
     // SAFETY: 同上。
     unsafe { CoTaskMemFree(Some(list.cast())) };
-    let unsupported = || io::Error::new(io::ErrorKind::Unsupported, "no HEVC decoder on this system");
+    let unsupported = || io::Error::new(io::ErrorKind::Unsupported, format!("no {codec:?} decoder on this system"));
     activates
         .iter()
         // SAFETY: 建出解码器。

@@ -64,7 +64,7 @@ impl WindowView {
         }
         self.leave_mobile(cx);
         self.kanban = None;
-        self.screen_viewer = None;
+        self.leave_screen_page(window, cx);
         true
     }
 
