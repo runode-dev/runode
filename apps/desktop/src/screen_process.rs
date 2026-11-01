@@ -45,8 +45,6 @@ const MAX_QUEUED: usize = 3;
 const MAX_QUEUED_CONTROL: usize = 64;
 /// 客户端这么久一点都不收就断开它，写的线程不一直卡着。
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
-/// 绑 socket 时文件名还在（删掉了但别的进程还开着它）最多再试这么久。
-const BIND_PATIENCE: Duration = Duration::from_secs(5);
 
 /// 显示模式被换过的屏幕 → 换过它、还没断开也没换回去的连接（`NEXT_CONNECTION` 发的号）。
 static MODE_OWNERS: Mutex<Option<HashMap<u32, HashSet<u64>>>> = Mutex::new(None);
@@ -106,34 +104,11 @@ fn listen(dirs: &runode_paths::Dirs) -> io::Result<(UnixListener, std::path::Pat
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let lock = options.open(lock)?;
     lock.try_lock().map_err(io::Error::from)?;
-    let listener = bind_fresh(&socket)?;
+    let listener = runode_host::bind_fresh(&socket)?;
     // Windows 上 socket 文件不单独设权限，谁能连由所在的运行目录的权限决定。
     #[cfg(unix)]
     std::fs::set_permissions(&socket, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     Ok((listener, socket, lock))
-}
-
-/// 删掉 `socket` 上留下的文件再在上面开监听。Windows 上删掉的文件在别的进程（比如来试连的）放手之前还占着
-/// 名字，绑定报地址已占用，隔一会儿再删再绑，最多 `BIND_PATIENCE`。
-fn bind_fresh(socket: &std::path::Path) -> io::Result<UnixListener> {
-    let deadline = Instant::now() + BIND_PATIENCE;
-    let mut waited = false;
-    loop {
-        match std::fs::remove_file(socket) {
-            Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err),
-            _ => {}
-        }
-        match UnixListener::bind(socket) {
-            Err(err) if cfg!(windows) && err.kind() == io::ErrorKind::AddrInUse && Instant::now() < deadline => {
-                if !waited {
-                    tracing::info!("{} is still taken, binding again: {err}", socket.display());
-                    waited = true;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-            bound => return bound,
-        }
-    }
 }
 
 /// 接连接，每条一个线程，没有连接持续 `IDLE_EXIT` 时返回。

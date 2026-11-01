@@ -65,6 +65,9 @@ use crate::{
     session::{Drive, Event, EventSink, Inbox, Screen, Subscribe},
 };
 
+/// 绑 socket 时文件名还在（删掉了但别的进程还开着它）最多再试这么久。
+const BIND_PATIENCE: Duration = Duration::from_secs(5);
+
 /// 快照分成这么大的帧发，不必一帧装下整份（上限见 `runode_protocol::MAX_PAYLOAD`）。
 const SNAPSHOT_CHUNK: usize = 1 << 20;
 /// 一条连接最多积压这么多字节还没写出去，再多就让输出最多的会话改发 `Resync`。
@@ -438,18 +441,11 @@ impl Host {
             return Err(anyhow!("the host is already listening"));
         }
         let lock = lock_exclusively(lock)?;
-        match std::fs::remove_file(socket) {
-            Err(err) if err.kind() != io::ErrorKind::NotFound => {
-                return Err(err).with_context(|| format!("failed to remove the stale socket {}", socket.display()));
-            }
-            _ => {}
-        }
         // 起不来时要删掉刚建的 socket 文件，删的时候还得锁着：`start_listening` 出错时丢掉交给它的锁，放开以后
         // 别的宿主就能拿到锁、在同一个路径上建好它的 socket，这时再删删掉的是它的。`flock` 锁的是打开的文件，
         // 复制的这份描述符留着就一直锁着。
         let held = lock.try_clone().context("failed to hold the lock")?;
-        let listener =
-            UnixListener::bind(socket).with_context(|| format!("failed to listen on {}", socket.display()))?;
+        let listener = bind_fresh(socket).with_context(|| format!("failed to listen on {}", socket.display()))?;
         let started = restrict(socket).and_then(|()| self.start_listening(listener, lock, socket, false));
         if let Err(err) = started {
             let _ = std::fs::remove_file(socket);
@@ -671,6 +667,29 @@ fn answer_later(name: &str, answer: impl FnOnce() + Send + 'static) {
         tracing::warn!("failed to start a reply thread, answering in place: {err}");
         if let Some(answer) = answer.lock().ok().and_then(|mut answer| answer.take()) {
             answer();
+        }
+    }
+}
+
+/// 删掉 `socket` 上留下的文件再在上面开监听，调用方拿着这个路径的锁。Windows 上删掉的文件在别的进程（比如
+/// 来试连的）放手之前还占着名字，绑定报地址已占用，隔一会儿再删再绑，最多 `BIND_PATIENCE`。
+pub fn bind_fresh(socket: &Path) -> io::Result<UnixListener> {
+    let deadline = Instant::now() + BIND_PATIENCE;
+    let mut waited = false;
+    loop {
+        match std::fs::remove_file(socket) {
+            Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err),
+            _ => {}
+        }
+        match UnixListener::bind(socket) {
+            Err(err) if cfg!(windows) && err.kind() == io::ErrorKind::AddrInUse && Instant::now() < deadline => {
+                if !waited {
+                    tracing::info!("{} is still taken, binding again: {err}", socket.display());
+                    waited = true;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            bound => return bound,
         }
     }
 }
