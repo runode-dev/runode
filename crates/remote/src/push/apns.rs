@@ -134,7 +134,7 @@ pub(crate) fn request(
             ];
             let body = notify_payload(notification).ok_or_else(too_big)?;
             let url = format!("https://api{sandbox}.push.apple.com/3/device/{token}");
-            Ok(Request { method: "POST", url, headers, body: Some(body) })
+            Ok(Request { method: "POST", url, headers, body: Some(body), http2: true })
         }
         Via::Relay => {
             let relay = relay.ok_or_else(|| "this build has no push relay".to_owned())?;
@@ -142,7 +142,7 @@ pub(crate) fn request(
             // 只有结构体、字符串和数，编不出来的情况实际不会有。
             let body = serde_json::to_vec(&notify).unwrap_or_default();
             let url = format!("{}{RELAY_NOTIFY}", relay.trim_end_matches('/'));
-            Ok(Request { method: "POST", url, headers: Vec::new(), body: Some(body) })
+            Ok(Request { method: "POST", url, headers: Vec::new(), body: Some(body), http2: false })
         }
     }
 }

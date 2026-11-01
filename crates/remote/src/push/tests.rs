@@ -63,7 +63,17 @@ impl Scratch {
         let program = root.join("curl.sh");
         std::fs::write(&program, FAKE_CURL.replace("@LOG@", &log.display().to_string())).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
-        Self { root, dirs, log, curl: Curl { program } }
+        Self { root, dirs, log, curl: Curl::new(program) }
+    }
+
+    /// 换成没编进 HTTP/2 的假 curl，像 Windows 自带的那个。
+    fn without_http2(mut self) -> Self {
+        let program = self.root.join("curl-http1.sh");
+        let script = FAKE_CURL.replace("@LOG@", &self.log.display().to_string()).replace(" HTTP2", "");
+        std::fs::write(&program, script).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        self.curl = Curl::new(program);
+        self
     }
 
     /// 下一个配置里含 `pattern` 的请求回 `response`（`\r\n` 照写，`FAIL` 是连不上），只用一次。
@@ -203,6 +213,20 @@ fn notifications_through_the_relay() {
     assert_eq!(notify["notification"]["session"], SESSION.to_string());
     let expiration = notify["expiration"].as_u64().unwrap();
     assert!((before + EXPIRES_AFTER..=crate::now_unix() + EXPIRES_AFTER).contains(&expiration));
+}
+
+/// curl 没编进 HTTP/2：经中转的照样发，直连 APNs 的不发。
+#[test]
+fn a_curl_without_http2_still_reaches_the_relay() {
+    let scratch = Scratch::new("http1").without_http2();
+    let (key_file, _) = test_key(&scratch.root);
+    let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
+    let key = ApnsKey { key_file, key_id: "K".into(), team_id: "T".into(), bundle: "dev.example.app".into() };
+    sender.settings(Some(key), Some("https://relay.example".into()));
+    sender.notify(vec![target(Route { env: ApnsEnv::Development, via: Via::Direct }, &["direct"])]);
+    sender.notify(vec![target(RELAY_PROD, &["relay"])]);
+    let requests = scratch.wait_for(1);
+    assert_eq!(url(&requests[0]), "https://relay.example/v1/notify");
 }
 
 /// 直连：JWT 只在 stdin 的配置里，不在命令行参数里；请求头带上 topic、提醒类型、过期时刻和

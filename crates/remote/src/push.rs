@@ -387,11 +387,17 @@ impl Poller {
         if !settings.enabled || listening != Listening::On || !routable {
             return false;
         }
-        *self.curl_ok.get_or_insert_with(|| {
-            self.curl
-                .check()
-                .map_err(|err| tracing::warn!("push notifications are off: curl is needed to reach APNs ({err})"))
-                .is_ok()
+        *self.curl_ok.get_or_insert_with(|| match self.curl.check() {
+            Ok(http2) => {
+                if !http2 && settings.direct.is_some() {
+                    tracing::warn!("pushes straight to APNs are off: this curl has no HTTP/2 support");
+                }
+                true
+            }
+            Err(err) => {
+                tracing::warn!("push notifications are off: curl is needed to reach APNs ({err})");
+                false
+            }
         })
     }
 

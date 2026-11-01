@@ -35,7 +35,7 @@ pub(super) fn probe(dirs: &Dirs, settings: &PushSettings, content: &TestPush, cu
     if registrations.is_empty() {
         return Ok(0);
     }
-    curl.check()?;
+    let http2 = curl.check()?;
     // 密钥读不了只算直连那几条推不到，经中转的照样测。
     let (mut direct, key_error) = match settings
         .direct
@@ -55,11 +55,15 @@ pub(super) fn probe(dirs: &Dirs, settings: &PushSettings, content: &TestPush, cu
             errors.push(format!("nowhere to push the app {} ({:?})", registration.bundle, registration.env));
             continue;
         };
-        if route.via == Via::Direct
-            && let Some(why) = &key_error
-        {
-            errors.push(why.clone());
-            continue;
+        if route.via == Via::Direct {
+            if let Some(why) = &key_error {
+                errors.push(why.clone());
+                continue;
+            }
+            if !http2 {
+                errors.push("pushing straight to APNs needs a curl with HTTP/2 support".to_owned());
+                continue;
+            }
         }
         let notification =
             Notification::new(registration.machine.clone(), &registration.machine_name, session, &meta, &content.lines);

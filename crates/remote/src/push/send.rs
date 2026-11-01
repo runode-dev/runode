@@ -220,8 +220,8 @@ impl Worker {
             return;
         }
         let target = &item.target;
-        if route.via == Via::Direct && (self.direct.is_none() || self.direct_broken) {
-            tracing::debug!("not pushing for session {session}: no usable APNs key");
+        if route.via == Via::Direct && (self.direct.is_none() || self.direct_broken || self.curl.check() != Ok(true)) {
+            tracing::debug!("not pushing for session {session}: no usable APNs key, or curl has no HTTP/2");
             self.queue.remove(index);
             return;
         }

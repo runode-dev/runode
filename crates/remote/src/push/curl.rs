@@ -7,6 +7,7 @@ use std::{
     io::Write as _,
     path::PathBuf,
     process::{Command, Stdio},
+    sync::{Arc, OnceLock},
 };
 
 /// 一个请求最多等这么多秒（curl 的 `--max-time`）。
@@ -21,6 +22,8 @@ pub(crate) struct Request {
     pub(crate) headers: Vec<(&'static str, String)>,
     /// JSON 请求体；没有时不发体。
     pub(crate) body: Option<Vec<u8>>,
+    /// 要 HTTP/2：APNs 只说 HTTP/2，中转服务 HTTP/1.1 也行。
+    pub(crate) http2: bool,
 }
 
 /// 收到的响应。
@@ -42,16 +45,30 @@ impl Response {
 /// 怎么运行 curl：平常是 PATH 上的 `curl`，测试换成假的。
 #[derive(Clone, Debug)]
 pub(crate) struct Curl {
-    pub(crate) program: PathBuf,
+    program: PathBuf,
+    /// `check` 的结果，问一次就记住。
+    checked: Arc<OnceLock<Result<bool, String>>>,
 }
 
 impl Default for Curl {
+    /// Windows 上 `Command` 先找 System32 再找 PATH，所以先按 PATH 找 `curl.exe`：系统自带的没编进
+    /// HTTP/2，用户自己装的新版要排在它前面。
     fn default() -> Self {
-        Self { program: "curl".into() }
+        #[cfg(windows)]
+        let program = std::env::var_os("PATH")
+            .and_then(|path| std::env::split_paths(&path).map(|dir| dir.join("curl.exe")).find(|exe| exe.is_file()))
+            .unwrap_or_else(|| "curl.exe".into());
+        #[cfg(not(windows))]
+        let program = "curl".into();
+        Self::new(program)
     }
 }
 
 impl Curl {
+    pub(crate) fn new(program: PathBuf) -> Self {
+        Self { program, checked: Arc::default() }
+    }
+
     /// 拉起 curl 的命令。Windows 上不开控制台窗口（`CREATE_NO_WINDOW`）：宿主没有控制台，不然每推一次
     /// 就闪一个黑窗。
     fn command(&self) -> Command {
@@ -62,8 +79,13 @@ impl Curl {
         command
     }
 
-    /// 看 curl 能不能用：运行得了，而且编进了 HTTP/2（`curl --version` 的 Features 里有 `HTTP2`）。
-    pub(crate) fn check(&self) -> Result<(), String> {
+    /// 看 curl 能不能用（运行得了），能用时回它编没编进 HTTP/2（`curl --version` 的 Features 里有
+    /// `HTTP2`）。只真问一次。
+    pub(crate) fn check(&self) -> Result<bool, String> {
+        self.checked.get_or_init(|| self.ask_version()).clone()
+    }
+
+    fn ask_version(&self) -> Result<bool, String> {
         let output = self
             .command()
             .arg("--version")
@@ -75,24 +97,23 @@ impl Curl {
         if !output.status.success() {
             return Err(format!("{} --version failed: {}", self.program.display(), output.status));
         }
-        let http2 = text
+        Ok(text
             .lines()
             .filter_map(|line| line.strip_prefix("Features:"))
-            .any(|features| features.split_whitespace().any(|feature| feature == "HTTP2"));
-        if !http2 {
-            return Err(format!("{} has no HTTP/2 support", self.program.display()));
-        }
-        Ok(())
+            .any(|features| features.split_whitespace().any(|feature| feature == "HTTP2")))
     }
 
     /// 发 `request`，等到响应。curl 运行不了、连不上、超时这类没有拿到响应的情况是 `Err`。
     pub(crate) fn send(&self, request: &Request) -> Result<Response, String> {
-        let mut child = self
-            .command()
-            // `-q` 必须在最前面：不读 `~/.curlrc`，免得里面的 `fail`、`location` 改了行为。走代理时
-            // `--include` 会先输出代理 CONNECT 的应答，`--suppress-connect-headers` 去掉它，解析看到的
-            // 头一块才是 APNs 的响应。
-            .args(["-q", "--http2", "--silent", "--show-error", "--max-time", MAX_TIME_SECS, "--proto", "=https"])
+        let mut command = self.command();
+        // `-q` 必须在最前面：不读 `~/.curlrc`，免得里面的 `fail`、`location` 改了行为。走代理时
+        // `--include` 会先输出代理 CONNECT 的应答，`--suppress-connect-headers` 去掉它，解析看到的
+        // 头一块才是 APNs 的响应。
+        command.args(["-q", "--silent", "--show-error", "--max-time", MAX_TIME_SECS, "--proto", "=https"]);
+        if request.http2 {
+            command.arg("--http2");
+        }
+        let mut child = command
             .args(["--suppress-connect-headers", "--include", "--config", "-"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -194,6 +215,7 @@ mod tests {
             url: "https://api.push.apple.com/4/broadcasts/apps/dev.runode.mobile".into(),
             headers: vec![("apns-channel-id", "ab+/c==".into()), ("authorization", "bearer x.y.z".into())],
             body: Some(br#"{"a":"q\"uo\\te"}"#.to_vec()),
+            http2: true,
         };
         assert_eq!(
             config(&request),
@@ -201,7 +223,8 @@ mod tests {
              header = \"apns-channel-id: ab+/c==\"\nheader = \"authorization: bearer x.y.z\"\n\
              header = \"content-type: application/json\"\ndata-raw = \"{\\\"a\\\":\\\"q\\\\\\\"uo\\\\\\\\te\\\"}\"\n"
         );
-        let delete = Request { method: "DELETE", url: "https://x".into(), headers: Vec::new(), body: None };
+        let delete =
+            Request { method: "DELETE", url: "https://x".into(), headers: Vec::new(), body: None, http2: false };
         assert_eq!(config(&delete), "url = \"https://x\"\nrequest = \"DELETE\"\n");
     }
 
