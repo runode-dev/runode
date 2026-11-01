@@ -10,10 +10,12 @@ use ring::{
     rand::SystemRandom,
     signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair},
 };
-use runode_protocol::{
-    push::{ApnsEnv, EXPIRES_AFTER, Notification, PushError, RELAY_NOTIFY, RelayNotify, notify_payload},
-    remote::{decode_base64url, encode_base64url},
+use runode_protocol::push::{
+    ApnsEnv, EXPIRES_AFTER, Notification, PushError, RELAY_NOTIFY, RelayNotify, apns_headers, apns_jwt, apns_url,
+    is_bad_token, notify_payload, pem_der,
 };
+#[cfg(test)]
+use runode_protocol::remote::{decode_base64url, encode_base64url};
 
 use super::curl::{Request, Response};
 
@@ -30,8 +32,7 @@ pub(crate) struct Route {
 impl Route {
     /// 同一种发法、另一个 APNs 环境。
     pub(crate) fn other_env(self) -> Self {
-        let env = if self.env == ApnsEnv::Production { ApnsEnv::Development } else { ApnsEnv::Production };
-        Self { env, ..self }
+        Self { env: self.env.other(), ..self }
     }
 }
 
@@ -58,7 +59,7 @@ impl DirectKey {
     pub(crate) fn load(key_file: &Path, key_id: &str, team_id: &str, bundle: &str) -> Result<Self, String> {
         let pem = std::fs::read_to_string(key_file)
             .map_err(|err| format!("cannot read the APNs key {}: {err}", key_file.display()))?;
-        let der = pem_body(&pem).ok_or_else(|| format!("{} is not a PEM file", key_file.display()))?;
+        let der = pem_der(&pem).ok_or_else(|| format!("{} is not a PEM file", key_file.display()))?;
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &der, &SystemRandom::new())
             .map_err(|err| format!("{} is not a P-256 private key: {err}", key_file.display()))?;
         Ok(Self { key, key_id: key_id.to_owned(), team_id: team_id.to_owned(), bundle: bundle.to_owned(), jwt: None })
@@ -71,18 +72,10 @@ impl DirectKey {
         {
             return Ok(jwt.clone());
         }
-        let header = serde_json::json!({ "alg": "ES256", "kid": self.key_id });
-        let claims = serde_json::json!({ "iss": self.team_id, "iat": crate::now_unix() });
-        let signing_input = format!(
-            "{}.{}",
-            encode_base64url(header.to_string().as_bytes()),
-            encode_base64url(claims.to_string().as_bytes())
-        );
-        let signature = self
-            .key
-            .sign(&SystemRandom::new(), signing_input.as_bytes())
-            .map_err(|_| "cannot sign the APNs token".to_owned())?;
-        let jwt = format!("{signing_input}.{}", encode_base64url(signature.as_ref()));
+        let jwt = apns_jwt(&self.key_id, &self.team_id, crate::now_unix(), |input| {
+            let signature = self.key.sign(&SystemRandom::new(), input);
+            signature.map(|signature| signature.as_ref().to_vec()).map_err(|_| "cannot sign the APNs token".to_owned())
+        })?;
         self.jwt = Some((jwt.clone(), Instant::now()));
         Ok(jwt)
     }
@@ -91,22 +84,6 @@ impl DirectKey {
     pub(crate) fn forget_jwt(&mut self) {
         self.jwt = None;
     }
-}
-
-/// PEM 里 `-----` 行之间的 base64（标准字母表，带填充）解出来的字节。
-fn pem_body(pem: &str) -> Option<Vec<u8>> {
-    let text: String = pem.lines().map(str::trim).filter(|line| !line.starts_with("-----")).collect();
-    // 换成 base64url 的字母表、去掉填充，借 `decode_base64url` 解。
-    let url: String = text
-        .trim_end_matches('=')
-        .chars()
-        .map(|c| match c {
-            '+' => '-',
-            '/' => '_',
-            c => c,
-        })
-        .collect();
-    decode_base64url(&url).ok().filter(|der| !der.is_empty())
 }
 
 /// 拼出在路线 `route` 上给 `token` 发通知 `notification` 的请求，过期时刻按 `now` 算。直连时 `token`
@@ -123,17 +100,10 @@ pub(crate) fn request(
     match route.via {
         Via::Direct => {
             let key = direct.ok_or_else(|| "no APNs key is configured".to_owned())?;
-            let sandbox = if route.env == ApnsEnv::Production { "" } else { ".sandbox" };
-            let headers = vec![
-                ("authorization", format!("bearer {}", key.jwt()?)),
-                ("apns-topic", key.bundle.clone()),
-                ("apns-push-type", "alert".to_owned()),
-                ("apns-priority", "10".to_owned()),
-                ("apns-expiration", (now + EXPIRES_AFTER).to_string()),
-                ("apns-collapse-id", notification.collapse_id()),
-            ];
+            let mut headers = vec![("authorization", format!("bearer {}", key.jwt()?))];
+            headers.extend(apns_headers(&key.bundle, now + EXPIRES_AFTER, &notification.collapse_id()));
             let body = notify_payload(notification).ok_or_else(too_big)?;
-            let url = format!("https://api{sandbox}.push.apple.com/3/device/{token}");
+            let url = apns_url(route.env, token);
             Ok(Request { method: "POST", url, headers, body: Some(body), http2: true })
         }
         Via::Relay => {
@@ -182,8 +152,7 @@ pub(crate) fn outcome(via: Via, response: Result<Response, String>) -> Outcome {
             Outcome::Retry { after, why }
         }
         500..=599 => Outcome::Retry { after: None, why },
-        410 => Outcome::BadToken(why),
-        400 if reason == "BadDeviceToken" => Outcome::BadToken(why),
+        status if is_bad_token(status, &reason) => Outcome::BadToken(why),
         403 if via == Via::Direct && reason == "InvalidProviderToken" => Outcome::BadKey(why),
         403 if via == Via::Direct && reason == "ExpiredProviderToken" => Outcome::ExpiredJwt,
         _ => Outcome::Failed(why),

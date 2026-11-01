@@ -12,9 +12,8 @@ use ring::{
     rand::SystemRandom,
     signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair},
 };
-use runode_protocol::{
-    push::{ApnsEnv, OFFICIAL_BUNDLE, PushError},
-    remote::{decode_base64url, encode_base64url},
+use runode_protocol::push::{
+    ApnsEnv, OFFICIAL_BUNDLE, PushError, apns_headers, apns_jwt, apns_url, is_bad_token, pem_der,
 };
 
 use crate::handle::encode_hex;
@@ -47,7 +46,7 @@ pub struct Reply {
 impl Reply {
     /// APNs 不认这个 device token：可能是封进句柄的环境不对。
     pub fn bad_token(&self) -> bool {
-        self.status == 410 || (self.status == 400 && self.reason == "BadDeviceToken")
+        is_bad_token(self.status, &self.reason)
     }
 }
 
@@ -76,7 +75,7 @@ impl Client {
     pub fn new(key_file: &Path, key_id: &str, team_id: &str) -> Result<Self, String> {
         let pem = std::fs::read_to_string(key_file)
             .map_err(|err| format!("cannot read the APNs key {}: {err}", key_file.display()))?;
-        let der = pem_body(&pem).ok_or_else(|| format!("{} is not a PEM file", key_file.display()))?;
+        let der = pem_der(&pem).ok_or_else(|| format!("{} is not a PEM file", key_file.display()))?;
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &der, &SystemRandom::new())
             .map_err(|err| format!("{} is not a P-256 private key: {err}", key_file.display()))?;
         // reqwest 用进程默认的 TLS 后端，装过了就不再装。
@@ -99,32 +98,23 @@ impl Client {
         {
             return Ok(jwt.clone());
         }
-        let header = serde_json::json!({ "alg": "ES256", "kid": self.key_id });
-        let claims = serde_json::json!({ "iss": self.team_id, "iat": now_unix() });
-        let input = format!(
-            "{}.{}",
-            encode_base64url(header.to_string().as_bytes()),
-            encode_base64url(claims.to_string().as_bytes())
-        );
-        let signature =
-            self.key.sign(&SystemRandom::new(), input.as_bytes()).map_err(|_| "cannot sign the APNs token")?;
-        let jwt = format!("{input}.{}", encode_base64url(signature.as_ref()));
+        let jwt = apns_jwt(&self.key_id, &self.team_id, now_unix(), |input| {
+            let signature = self.key.sign(&SystemRandom::new(), input);
+            signature.map(|signature| signature.as_ref().to_vec()).map_err(|_| "cannot sign the APNs token".to_owned())
+        })?;
         *cached = Some((jwt.clone(), Instant::now()));
         Ok(jwt)
     }
 
     async fn post(&self, push: &Push, jwt: &str) -> Result<Reply, String> {
-        let sandbox = if push.env == ApnsEnv::Production { "" } else { ".sandbox" };
-        let url = format!("https://api{sandbox}.push.apple.com/3/device/{}", encode_hex(&push.token));
-        let response = self
+        let mut request = self
             .http
-            .post(url)
-            .header("authorization", format!("bearer {jwt}"))
-            .header("apns-topic", OFFICIAL_BUNDLE)
-            .header("apns-push-type", "alert")
-            .header("apns-priority", "10")
-            .header("apns-expiration", push.expiration.to_string())
-            .header("apns-collapse-id", &push.collapse_id)
+            .post(apns_url(push.env, &encode_hex(&push.token)))
+            .header("authorization", format!("bearer {jwt}"));
+        for (name, value) in apns_headers(OFFICIAL_BUNDLE, push.expiration, &push.collapse_id) {
+            request = request.header(name, value);
+        }
+        let response = request
             .body(push.payload.clone())
             .send()
             .await
@@ -153,25 +143,10 @@ pub fn now_unix() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-/// PEM 里 `-----` 行之间的 base64（标准字母表，带填充）解出来的字节。
-fn pem_body(pem: &str) -> Option<Vec<u8>> {
-    let text: String = pem.lines().map(str::trim).filter(|line| !line.starts_with("-----")).collect();
-    // 换成 base64url 的字母表、去掉填充，借 `decode_base64url` 解。
-    let url: String = text
-        .trim_end_matches('=')
-        .chars()
-        .map(|c| match c {
-            '+' => '-',
-            '/' => '_',
-            c => c,
-        })
-        .collect();
-    decode_base64url(&url).ok().filter(|der| !der.is_empty())
-}
-
 #[cfg(test)]
 mod tests {
     use ring::signature::{ECDSA_P256_SHA256_FIXED, KeyPair as _, UnparsedPublicKey};
+    use runode_protocol::remote::{decode_base64url, encode_base64url};
 
     use super::*;
 

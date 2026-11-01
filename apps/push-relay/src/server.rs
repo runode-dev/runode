@@ -174,8 +174,7 @@ async fn deliver(apns: &impl Apns, push: Push) -> Result<Reply, String> {
     if !reply.bad_token() {
         return Ok(reply);
     }
-    let env = if push.env == ApnsEnv::Production { ApnsEnv::Development } else { ApnsEnv::Production };
-    Ok(apns.send(&Push { env, ..push }).await.unwrap_or(reply))
+    Ok(apns.send(&Push { env: push.env.other(), ..push }).await.unwrap_or(reply))
 }
 
 fn relay_reply(reply: Reply) -> Response {

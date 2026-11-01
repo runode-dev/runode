@@ -29,7 +29,7 @@
 //! 字节时先从最上面一行起删 `lines`，删完还超就缩短 `title`，见 `notify_payload`。
 //!
 //! 中转请求体的键是 snake_case，都带 `v`（`RELAY_VERSION`）。中转服务按请求体拼出和 `notify_payload`
-//! 一样的 payload、带上同样的请求头发给 APNs，所以请求体里的内容已经照 payload 的上限删减过。出错时
+//! 一样的 payload、带上同样的请求头（`apns_headers`）发给 APNs，所以请求体里的内容已经照 payload 的上限删减过。出错时
 //! 中转服务原样带回 APNs 的 HTTP 状态和 `PushError`；句柄解不开时回 400 `BadDeviceToken`，和 `machine`
 //! 对不上时回 403，限流时回 429 带 `Retry-After`。APNs 不认 device token（410、400 `BadDeviceToken`）时
 //! 中转服务先换另一个 APNs 环境再发一次，两边都不认才回错：电脑收到这两种回话就删掉登记，不再自己换环境。
@@ -84,6 +84,72 @@ pub enum ApnsEnv {
     /// 比自己新的一方才有的环境，推不了。
     #[serde(other)]
     Unknown,
+}
+
+impl ApnsEnv {
+    /// 另一个环境：登记的环境可能不对，一边不认 device token 时换这个再推一次。
+    pub fn other(self) -> Self {
+        if self == Self::Production { Self::Development } else { Self::Production }
+    }
+}
+
+/// 直连 APNs 给 device token `token`（十六进制）发通知的网址：走 HTTP/2，开发环境的主机名多一段 `.sandbox`。
+pub fn apns_url(env: ApnsEnv, token: &str) -> String {
+    let sandbox = if env == ApnsEnv::Production { "" } else { ".sandbox" };
+    format!("https://api{sandbox}.push.apple.com/3/device/{token}")
+}
+
+/// 给 App `topic`（bundle id）发一条提醒的请求头，`authorization` 之外的；`expiration` 是 Unix 秒。电脑直连和
+/// 中转服务发的都是这几个。
+pub fn apns_headers(topic: &str, expiration: u64, collapse_id: &str) -> [(&'static str, String); 5] {
+    [
+        ("apns-topic", topic.to_owned()),
+        ("apns-push-type", "alert".to_owned()),
+        ("apns-priority", "10".to_owned()),
+        ("apns-expiration", expiration.to_string()),
+        ("apns-collapse-id", collapse_id.to_owned()),
+    ]
+}
+
+/// APNs 的回话说不认这个 device token（410，或 400 `BadDeviceToken`）：可能是登记的环境不对。
+pub fn is_bad_token(status: u16, reason: &str) -> bool {
+    status == 410 || (status == 400 && reason == "BadDeviceToken")
+}
+
+/// 签给 APNs 的 JWT（ES256）：`header.claims` 交给 `sign` 签（P-256、SHA-256，签名是定长的 r‖s），再拼上
+/// 签名。`iat` 是签的时刻，Unix 秒。
+pub fn apns_jwt<E>(
+    key_id: &str,
+    team_id: &str,
+    iat: u64,
+    sign: impl FnOnce(&[u8]) -> Result<Vec<u8>, E>,
+) -> Result<String, E> {
+    use crate::remote::encode_base64url;
+    let header = serde_json::json!({ "alg": "ES256", "kid": key_id });
+    let claims = serde_json::json!({ "iss": team_id, "iat": iat });
+    let input = format!(
+        "{}.{}",
+        encode_base64url(header.to_string().as_bytes()),
+        encode_base64url(claims.to_string().as_bytes())
+    );
+    let signature = sign(input.as_bytes())?;
+    Ok(format!("{input}.{}", encode_base64url(&signature)))
+}
+
+/// Apple 给的 .p8 密钥文件（PEM）里 `-----` 行之间的 base64（标准字母表，带填充）解出来的 DER；不是 PEM 时为空。
+pub fn pem_der(pem: &str) -> Option<Vec<u8>> {
+    let text: String = pem.lines().map(str::trim).filter(|line| !line.starts_with("-----")).collect();
+    // 换成 base64url 的字母表、去掉填充，借 `decode_base64url` 解。
+    let url: String = text
+        .trim_end_matches('=')
+        .chars()
+        .map(|c| match c {
+            '+' => '-',
+            '/' => '_',
+            c => c,
+        })
+        .collect();
+    crate::remote::decode_base64url(&url).ok().filter(|der| !der.is_empty())
 }
 
 /// 通知是哪一种。
