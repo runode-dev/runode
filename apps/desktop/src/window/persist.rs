@@ -35,7 +35,7 @@ use crate::{
     prespawn::Prespawned,
     terminal_view::TerminalView,
 };
-use format::{SavedBounds, SavedNode, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode};
+use format::{SavedBounds, SavedNode, SavedPanel, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode};
 
 /// 布局变化后等这么久再写文件，拖动窗口、连续切标签时只写一次。
 const WRITE_DELAY: Duration = Duration::from_millis(500);
@@ -420,17 +420,17 @@ impl WindowView {
                     done: Default::default(),
                 });
             }
+            let panel = saved_workspace.shown_panel().map(|panel| match panel {
+                SavedPanel::Files => SidePanel::Files,
+                SavedPanel::Git => SidePanel::Git,
+                SavedPanel::Actions => SidePanel::GitHubActions,
+            });
             let name = Some(saved_workspace.name)
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or_else(|| workspace_name(&host, &saved_workspace.dir));
             if wi <= saved.active {
                 active = self.workspaces.len();
             }
-            let panel = if saved_workspace.files {
-                Some(SidePanel::Files)
-            } else {
-                saved_workspace.git.then_some(SidePanel::Git)
-            };
             let mut project = Project::default();
             project.tasks_last = saved_workspace.last_task;
             let id = self.next_id();
@@ -604,17 +604,22 @@ fn saved_leaves<T: Copy>(restored: &[Option<T>], focused: usize, collapsed: &[us
 
 impl WindowView {
     fn save_workspace(&self, workspace: &Workspace, cx: &App) -> SavedWorkspace {
-        SavedWorkspace {
+        let mut saved = SavedWorkspace {
             name: workspace.name.to_string(),
             host: workspace.host.label().map(str::to_owned),
             dir: workspace.dir.clone(),
             tabs: workspace.tabs.iter().map(|tab| self.save_tab(tab, cx)).collect(),
             active: workspace.active,
             last_task: workspace.project.tasks_last.clone(),
-            git: workspace.panel == Some(SidePanel::Git),
-            files: workspace.panel == Some(SidePanel::Files),
             pinned_workflows: workspace.pinned_workflows.clone(),
-        }
+            ..SavedWorkspace::default()
+        };
+        saved.set_panel(workspace.panel.map(|panel| match panel {
+            SidePanel::Files => SavedPanel::Files,
+            SidePanel::Git => SavedPanel::Git,
+            SidePanel::GitHubActions => SavedPanel::Actions,
+        }));
+        saved
     }
 
     fn save_tab(&self, tab: &Tab, cx: &App) -> SavedTab {

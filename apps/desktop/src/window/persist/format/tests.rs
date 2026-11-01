@@ -46,6 +46,7 @@ fn state() -> State {
             tabs: vec![tab],
             active: 0,
             last_task: None,
+            panel: Some(SavedPanel::Git),
             git: true,
             files: false,
             pinned_workflows: vec![PinnedWorkflow { id: 375441921, name: "CI".into() }],
@@ -126,6 +127,28 @@ fn round_trips_through_json() {
     let text = serde_json::to_string(&state).unwrap();
     assert_eq!(serde_json::from_str::<State>(&text).unwrap(), state);
     assert!(text.contains(r#""type":"split","axis":"horizontal""#), "{text}");
+}
+
+/// 右侧面板的页记在 `panel` 里，Git 面板和文件树另照旧写进 `git`、`files`；没有 `panel` 的存档按
+/// 这两个字段恢复。
+#[test]
+fn the_side_panel_reads_back_from_new_and_old_saves() {
+    let mut workspace = SavedWorkspace::default();
+    workspace.set_panel(Some(SavedPanel::Actions));
+    let text = serde_json::to_string(&workspace).unwrap();
+    assert!(text.contains(r#""panel":"actions""#) && !text.contains(r#""git""#), "{text}");
+    let back: SavedWorkspace = serde_json::from_str(&text).unwrap();
+    assert_eq!(back.shown_panel(), Some(SavedPanel::Actions));
+
+    workspace.set_panel(Some(SavedPanel::Git));
+    let text = serde_json::to_string(&workspace).unwrap();
+    assert!(text.contains(r#""git":true"#), "{text}");
+
+    let old = |text: &str| serde_json::from_str::<SavedWorkspace>(text).unwrap().shown_panel();
+    let base = r#""name":"x","dir":"/tmp","tabs":[],"active":0"#;
+    assert_eq!(old(&format!("{{{base},\"files\":true}}")), Some(SavedPanel::Files));
+    assert_eq!(old(&format!("{{{base},\"git\":true}}")), Some(SavedPanel::Git));
+    assert_eq!(old(&format!("{{{base}}}")), None);
 }
 
 #[test]

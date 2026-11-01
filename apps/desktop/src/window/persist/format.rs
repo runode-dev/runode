@@ -130,7 +130,11 @@ pub struct SavedWorkspace {
     /// 标题栏命令菜单里上次跑的命令行（`Project::tasks_last`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_task: Option<String>,
-    /// 这个 workspace 的右侧面板显示的是 Git 面板还是文件树，至多一个为真；收着时都为假。
+    /// 这个 workspace 的右侧面板显示着的那一页，收着时为空。读存档时用 `shown_panel`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<SavedPanel>,
+    /// 右侧面板显示的是 Git 面板还是文件树，至多一个为真，别的页和收着时都为假：只认这两个字段的
+    /// 版本读同一份存档时照旧恢复这两页。
     #[serde(default, skip_serializing_if = "is_false")]
     pub git: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -138,6 +142,35 @@ pub struct SavedWorkspace {
     /// GitHub Actions 页里固定到状态栏上的工作流（`Workspace::pinned_workflows`）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_workflows: Vec<PinnedWorkflow>,
+}
+
+impl SavedWorkspace {
+    /// 右侧面板显示着的那一页：没有 `panel` 的存档按 `git`、`files` 算。
+    pub fn shown_panel(&self) -> Option<SavedPanel> {
+        self.panel.or(if self.files {
+            Some(SavedPanel::Files)
+        } else if self.git {
+            Some(SavedPanel::Git)
+        } else {
+            None
+        })
+    }
+
+    /// 记下右侧面板显示着的那一页，`git`、`files` 跟着写。
+    pub fn set_panel(&mut self, panel: Option<SavedPanel>) {
+        self.panel = panel;
+        self.git = panel == Some(SavedPanel::Git);
+        self.files = panel == Some(SavedPanel::Files);
+    }
+}
+
+/// 右侧面板的一页。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SavedPanel {
+    Files,
+    Git,
+    Actions,
 }
 
 /// 固定到状态栏上的一个工作流，定义跟着 GitHub Actions 页。
