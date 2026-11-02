@@ -381,7 +381,8 @@ impl WindowView {
         self.open_remote_dir(&host, path, None, window, cx);
     }
 
-    /// 在远端主机 `host` 的目录 `path` 上开工作区，名字按目录取；`command` 给了就在第一个终端里跑它。
+    /// 在远端主机 `host` 的目录 `path` 上开工作区，名字按目录取；`command` 给了就在第一个终端里跑它。不跑命令、
+    /// 那台主机上已经有这个目录的工作区时切过去，不另开一个。
     fn open_remote_dir(
         &mut self,
         host: &HostId,
@@ -390,6 +391,14 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if command.is_none()
+            && let Some(ix) = self.workspaces.iter().position(|workspace| {
+                workspace.host == *host && (workspace.dir == path || workspace.real_dir() == path)
+            })
+        {
+            self.activate_workspace(ix, window, cx);
+            return;
+        }
         let Some(view) = self.spawn_terminal_on(host, Some(&path), None, window, cx) else {
             return;
         };
