@@ -18,8 +18,8 @@ use crate::{
     Env,
     args::Shell,
     client::Connection,
-    commands::{SHORT_ID, plain, state_name, title},
     help,
+    output::{SHORT_ID, plain, state_name, title},
     spec::{COMMANDS, UNTIL, is_command_count, service_kinds, subcommands, until_takes_value},
 };
 

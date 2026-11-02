@@ -20,7 +20,7 @@ use runode_remote::{
 
 use crate::{
     Env,
-    commands::{plain, table},
+    output::{plain, table},
 };
 
 /// 等配对时隔多久看一眼口令文件。

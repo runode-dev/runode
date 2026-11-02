@@ -21,7 +21,7 @@ use runode_types::{
 use crate::{
     Env,
     client::{Connection, kind},
-    commands::{state_name, tilde, title},
+    output::{state_name, tilde, title},
 };
 
 /// 一种找会话的写法。
@@ -267,7 +267,7 @@ impl World {
 
     /// 候选的一行：短标识、标题、目录、位置。
     fn describe(&self, info: &SessionInfo) -> String {
-        let mut line = info.id.to_string()[..crate::commands::SHORT_ID].to_owned();
+        let mut line = info.id.to_string()[..crate::output::SHORT_ID].to_owned();
         for part in [
             title(&info.meta),
             info.meta.cwd.as_deref().map(|cwd| tilde(cwd, self.home.as_deref())),
@@ -277,7 +277,7 @@ impl World {
         .flatten()
         {
             line.push_str("  ");
-            line.push_str(&crate::commands::plain(&part));
+            line.push_str(&crate::output::plain(&part));
         }
         line
     }

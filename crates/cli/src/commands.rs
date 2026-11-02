@@ -3,7 +3,6 @@
 use std::{
     collections::HashMap,
     io::{Read as _, Write},
-    path::Path,
     thread,
     time::{Duration, Instant},
 };
@@ -21,9 +20,9 @@ use crate::{
     args::{Command, Text, Until},
     client::{Connection, is_upgrading, kind},
     help,
+    output::{SHORT_ID, state_name, table, tilde, title},
     select::{Place, Selector, World, place_name},
 };
-use unicode_width::UnicodeWidthStr as _;
 
 /// `send --enter` 打完字等这么久再按回车。很多 agent 的界面把同一次读到的文字和回车当成一次
 /// 粘贴，回车只换行不提交。发控制键之前也等这么久，道理一样。
@@ -43,8 +42,6 @@ const SEND_STALL: Duration = Duration::from_secs(10);
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// 重连之间隔这么久。
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(100);
-/// `list` 显示的标识的长度，够区分几十个会话，命令里也能直接用。
-pub(crate) const SHORT_ID: usize = 8;
 
 /// `send` 正在发输入（`Paste`、`SendKeys` 这类请求还没回话）时宿主升级了：宿主冻结期间收下的
 /// 请求会交给新宿主或者在回滚后照常办，输入可能已经送到。
@@ -806,69 +803,6 @@ fn trim_line_end(mut text: Vec<u8>) -> Vec<u8> {
 
 fn unexpected(message: &HostMsg) -> Failure {
     anyhow!("unexpected answer: {}", kind(message)).into()
-}
-
-pub(crate) fn title(meta: &SessionMeta) -> Option<String> {
-    meta.title.clone().or_else(|| meta.fallback_title.clone())
-}
-
-pub(crate) fn state_name(state: AgentState) -> &'static str {
-    match state {
-        AgentState::Working => "working",
-        AgentState::Idle => "idle",
-        AgentState::Blocked => "blocked",
-    }
-}
-
-/// 要打到终端上的、别的程序给的文字（标题、路径、提示词、设备名）：控制字符换成 `?`、tab 换成空格，
-/// 免得里面的转义序列清屏、改终端标题，或者把表格的一行拆成几行。
-pub(crate) fn plain(text: &str) -> String {
-    text.chars()
-        .map(|c| {
-            if c == '\t' {
-                ' '
-            } else if c.is_control() {
-                '?'
-            } else {
-                c
-            }
-        })
-        .collect()
-}
-
-/// 打印表格：各列按最宽的格子的显示宽度补齐，列间两个空格。
-pub(crate) fn table(
-    header: &[&str],
-    rows: impl Iterator<Item = Vec<String>>,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
-    let header: Vec<String> = header.iter().map(|&cell| cell.to_owned()).collect();
-    let rows = rows.map(|row| row.iter().map(|cell| plain(cell)).collect());
-    let rows: Vec<Vec<String>> = std::iter::once(header).chain(rows).collect();
-    let mut widths = vec![0; rows[0].len()];
-    for row in &rows {
-        for (width, cell) in widths.iter_mut().zip(row) {
-            *width = (*width).max(cell.width());
-        }
-    }
-    for row in &rows {
-        let cells: Vec<String> = row
-            .iter()
-            .zip(&widths)
-            .map(|(cell, width)| format!("{cell}{}", " ".repeat(width - cell.width())))
-            .collect();
-        writeln!(out, "{}", cells.join("  ").trim_end())?;
-    }
-    Ok(())
-}
-
-/// 家目录下的路径写成 `~/…`。
-pub(crate) fn tilde(path: &Path, home: Option<&Path>) -> String {
-    match home.and_then(|home| path.strip_prefix(home).ok()) {
-        Some(rest) if rest.as_os_str().is_empty() => "~".into(),
-        Some(rest) => format!("~/{}", rest.display()),
-        None => path.display().to_string(),
-    }
 }
 
 #[cfg(test)]

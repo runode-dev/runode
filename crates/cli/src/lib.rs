@@ -16,6 +16,7 @@ mod client;
 mod commands;
 mod complete;
 mod help;
+mod output;
 mod remote;
 mod select;
 mod service;
