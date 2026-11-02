@@ -35,7 +35,7 @@ pub fn linux_archive(version: &str, arch: &str, cache: &Path, progress: &dyn Fn(
     fetch_checked(version, &name, cache, progress)
 }
 
-/// `version` 给 Windows `arch`（`x86_64`）的 zip，核对过的。会阻塞到下完，下载时不断调
+/// `version` 给 Windows `arch`（`x86_64`、`aarch64`）的 zip，核对过的。会阻塞到下完，下载时不断调
 /// `progress(已收到的字节, 总字节)`，总字节未知时是 0。
 pub fn windows_archive(version: &str, arch: &str, cache: &Path, progress: &dyn Fn(u64, u64)) -> Result<PathBuf, Error> {
     let name = format!("Runode-{version}-windows-{arch}.zip");

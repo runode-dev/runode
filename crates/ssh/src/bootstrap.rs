@@ -225,6 +225,7 @@ pub enum Target {
     MacArm64,
     MacX86_64,
     WindowsX86_64,
+    WindowsAarch64,
 }
 
 impl Target {
@@ -232,7 +233,7 @@ impl Target {
     pub fn arch(self) -> &'static str {
         match self {
             Self::LinuxX86_64 | Self::MacX86_64 | Self::WindowsX86_64 => "x86_64",
-            Self::LinuxAarch64 => "aarch64",
+            Self::LinuxAarch64 | Self::WindowsAarch64 => "aarch64",
             Self::MacArm64 => "arm64",
         }
     }
@@ -242,7 +243,7 @@ impl Target {
     }
 
     pub fn is_windows(self) -> bool {
-        self == Self::WindowsX86_64
+        matches!(self, Self::WindowsX86_64 | Self::WindowsAarch64)
     }
 
     /// 环境变量名里用的写法，比如 `LINUX_X86_64`。
@@ -253,6 +254,7 @@ impl Target {
             Self::MacArm64 => "MACOS_ARM64",
             Self::MacX86_64 => "MACOS_X86_64",
             Self::WindowsX86_64 => "WINDOWS_X86_64",
+            Self::WindowsAarch64 => "WINDOWS_AARCH64",
         }
     }
 
@@ -264,6 +266,7 @@ impl Target {
             ("macos", "aarch64") => Self::MacArm64,
             ("macos", "x86_64") => Self::MacX86_64,
             ("windows", "x86_64") => Self::WindowsX86_64,
+            ("windows", "aarch64") => Self::WindowsAarch64,
             _ => return None,
         })
     }
@@ -357,6 +360,7 @@ impl Platform {
                 }
             }
             Os::Windows if self.arch.eq_ignore_ascii_case("AMD64") => Ok(Target::WindowsX86_64),
+            Os::Windows if self.arch.eq_ignore_ascii_case("ARM64") => Ok(Target::WindowsAarch64),
             Os::Windows => Err(Unsupported::Arch(self.arch.clone())),
             Os::Other(os) => Err(Unsupported::Os(os.clone())),
         }

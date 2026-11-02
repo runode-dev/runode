@@ -222,7 +222,8 @@ fn picks_targets_and_refuses_unsupported_platforms() {
     let windows = Platform::parse("RUNODE-PROBE os=Windows\r\nRUNODE-PROBE arch=AMD64\r\n").unwrap();
     assert_eq!(windows.os, Os::Windows);
     assert_eq!(windows.target(), Ok(Target::WindowsX86_64));
-    assert_eq!(platform(Os::Windows, "ARM64", Libc::Unknown).target(), Err(Unsupported::Arch("ARM64".into())));
+    assert_eq!(platform(Os::Windows, "ARM64", Libc::Unknown).target(), Ok(Target::WindowsAarch64));
+    assert_eq!(platform(Os::Windows, "x86", Libc::Unknown).target(), Err(Unsupported::Arch("x86".into())));
 }
 
 #[test]
@@ -315,7 +316,7 @@ fn windows_probes_installs_and_prunes() {
     let probe = run_cmd(&home.0, &windows::connect_command(dir), b"");
     assert_eq!(probe.status.code(), Some(runode_ssh::bootstrap::PROBE_EXIT));
     let platform = Platform::parse(&String::from_utf8_lossy(&probe.stdout)).unwrap();
-    assert_eq!(platform.target(), Ok(Target::WindowsX86_64));
+    assert_eq!(platform.target().ok(), Target::current());
 
     // 假的 rn.exe 是系统的 tar.exe：`--version` 时成功退出。
     let staging = home.0.join("staging");
