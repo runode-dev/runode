@@ -30,7 +30,7 @@ use self::{
     h264::H264,
     hevc::Hevc,
 };
-use super::encoder::{VideoEncoder, video_frame};
+use super::encoder::VideoEncoder;
 use crate::{BURST_HEADROOM, Codec, VideoFrame, nal, nv12};
 
 /// 依次试的 DRM 渲染节点的编号（`/dev/dri/renderD128` 起）。
@@ -340,7 +340,7 @@ impl Vaapi {
     fn probe(&mut self) -> io::Result<()> {
         let gray = vec![128; nv12::frame_len(self.size)];
         let (annex_b, _) = self.encode_frame(&gray, true)?;
-        let frame = video_frame(self.codec, &annex_b, &mut self.parameter_sets, 0);
+        let frame = nal::video_frame(self.codec, &annex_b, &mut self.parameter_sets, Vec::new, 0);
         if !frame.is_some_and(|frame| frame.keyframe && !frame.parameter_sets.is_empty()) {
             return Err(io::Error::other("the VA-API encoder gave no usable keyframe"));
         }
@@ -552,7 +552,7 @@ impl VideoEncoder for Vaapi {
             self.next_index = None;
             return Ok(None);
         }
-        let frame = video_frame(self.codec, &annex_b, &mut self.parameter_sets, pts_us);
+        let frame = nal::video_frame(self.codec, &annex_b, &mut self.parameter_sets, Vec::new, pts_us);
         if frame.is_none() {
             self.next_index = None;
         }

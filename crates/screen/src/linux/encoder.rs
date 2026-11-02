@@ -3,7 +3,7 @@
 
 use std::io;
 
-use crate::{Codec, VideoFrame, nal};
+use crate::{Codec, VideoFrame};
 
 use super::{software::Software, vaapi::Vaapi};
 
@@ -40,27 +40,4 @@ pub(crate) fn open(
         tracing::info!("OpenH264 cannot encode {size:?}, encoding {fitted:?}");
     }
     Ok((Box::new(Software::open(fitted, fps, bitrate)?), fitted))
-}
-
-/// 一帧 Annex B 码流换成 `VideoFrame`。关键帧里没带参数集时补上 `known` 里记着的，带了就记下来；关键帧怎么也
-/// 拿不到参数集时为 `None`，调用方要再要一帧关键帧。
-pub(crate) fn video_frame(codec: Codec, annex_b: &[u8], known: &mut Vec<Vec<u8>>, pts_us: i64) -> Option<VideoFrame> {
-    let (data, mut parameter_sets) = nal::from_annex_b(codec, annex_b);
-    if data.is_empty() {
-        return None;
-    }
-    let keyframe = nal::is_keyframe(codec, &data);
-    if !parameter_sets.is_empty() {
-        known.clone_from(&parameter_sets);
-    } else if keyframe {
-        parameter_sets.clone_from(known);
-    }
-    if keyframe && parameter_sets.is_empty() {
-        tracing::warn!("the encoder gave a keyframe without parameter sets");
-        return None;
-    }
-    if !keyframe {
-        parameter_sets.clear();
-    }
-    Some(VideoFrame { codec, data, keyframe, parameter_sets, pts_us })
 }

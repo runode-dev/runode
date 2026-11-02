@@ -544,27 +544,13 @@ impl Shared {
             let _ = buffer.Unlock();
             (bytes, sample.GetSampleTime().unwrap_or(0))
         };
-        let codec = self.codec;
-        let (data, mut parameter_sets) = nal::from_annex_b(codec, &bytes);
-        let keyframe = nal::is_keyframe(codec, &data);
         let mut known = self.parameter_sets.lock().unwrap_or_else(PoisonError::into_inner);
-        if !parameter_sets.is_empty() {
-            *known = parameter_sets.clone();
-        } else if keyframe {
-            if known.is_empty() {
-                *known = self.sequence_header(mft);
-            }
-            parameter_sets = known.clone();
-        }
-        if keyframe && parameter_sets.is_empty() {
-            tracing::warn!("the encoder gave a keyframe without parameter sets");
+        let frame = nal::video_frame(self.codec, &bytes, &mut known, || self.sequence_header(mft), pts / 10);
+        // 关键帧拿不到参数集：再要一帧。
+        if frame.is_none() && known.is_empty() {
             self.force_keyframe.store(true, Ordering::Relaxed);
-            return None;
         }
-        if !keyframe {
-            parameter_sets.clear();
-        }
-        Some(VideoFrame { codec, data, keyframe, parameter_sets, pts_us: pts / 10 })
+        frame
     }
 
     /// 输出格式里的参数集（`MF_MT_MPEG_SEQUENCE_HEADER`，Annex B 写法）。

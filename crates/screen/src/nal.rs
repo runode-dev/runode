@@ -103,6 +103,40 @@ pub(crate) fn to_annex_b(data: &[u8], parameter_sets: &[Vec<u8>]) -> Vec<u8> {
     out
 }
 
+/// 一帧 Annex B 码流换成 `VideoFrame`。关键帧里带了参数集就记进 `known`；没带时补上 `known` 里记着的，`known`
+/// 也空着时先记下 `fallback` 给的。关键帧怎么也拿不到参数集、或者码流里没有画面时为 `None`，前者调用方要再要
+/// 一帧关键帧。
+#[cfg(any(windows, target_os = "linux", test))]
+pub(crate) fn video_frame(
+    codec: Codec,
+    annex_b: &[u8],
+    known: &mut Vec<Vec<u8>>,
+    fallback: impl FnOnce() -> Vec<Vec<u8>>,
+    pts_us: i64,
+) -> Option<crate::VideoFrame> {
+    let (data, mut parameter_sets) = from_annex_b(codec, annex_b);
+    if data.is_empty() {
+        return None;
+    }
+    let keyframe = is_keyframe(codec, &data);
+    if !parameter_sets.is_empty() {
+        known.clone_from(&parameter_sets);
+    } else if keyframe {
+        if known.is_empty() {
+            *known = fallback();
+        }
+        parameter_sets.clone_from(known);
+    }
+    if keyframe && parameter_sets.is_empty() {
+        tracing::warn!("the encoder gave a keyframe without parameter sets");
+        return None;
+    }
+    if !keyframe {
+        parameter_sets.clear();
+    }
+    Some(crate::VideoFrame { codec, data, keyframe, parameter_sets, pts_us })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,6 +169,20 @@ mod tests {
         data.push(19 << 1);
         assert_eq!(units(&data).count(), 1);
         assert!(!is_keyframe(Codec::Hevc, &data));
+    }
+
+    /// 关键帧没带参数集时补上记着的，记着的也没有时先取 `fallback` 给的；还是没有时不出帧。
+    #[test]
+    fn keyframes_get_the_known_parameter_sets() {
+        let nal = |kind: u8, body: &[u8]| [&[0, 0, 0, 1, kind << 1, 1][..], body].concat();
+        let idr = nal(19, b"idr");
+        let mut known = Vec::new();
+        let frame = video_frame(Codec::Hevc, &idr, &mut known, || vec![b"vps".to_vec()], 0).unwrap();
+        assert_eq!(frame.parameter_sets, [b"vps".to_vec()]);
+        assert_eq!(known, [b"vps".to_vec()]);
+        let frame = video_frame(Codec::Hevc, &nal(1, b"p"), &mut known, Vec::new, 0).unwrap();
+        assert!(!frame.keyframe && frame.parameter_sets.is_empty());
+        assert!(video_frame(Codec::Hevc, &idr, &mut Vec::new(), Vec::new, 0).is_none());
     }
 
     /// 参数集单拿出来、分隔符丢掉，三字节和四字节的起始码都认，换出来的帧认得出是关键帧。

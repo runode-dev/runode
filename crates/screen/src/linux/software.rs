@@ -10,8 +10,8 @@ use openh264::{
     formats::YUVSource,
 };
 
-use super::encoder::{VideoEncoder, video_frame};
-use crate::{BURST_HEADROOM, Codec, VideoFrame};
+use super::encoder::VideoEncoder;
+use crate::{BURST_HEADROOM, Codec, VideoFrame, nal};
 
 /// OpenH264 编得了的最大画面：横着的长边、短边，竖着的反过来。
 const MAX_SIZE: (u32, u32) = (3840, 2160);
@@ -115,7 +115,7 @@ impl VideoEncoder for Software {
         if first {
             self.apply_rate();
         }
-        Ok(video_frame(Codec::H264, &bytes, &mut self.parameter_sets, pts_us))
+        Ok(nal::video_frame(Codec::H264, &bytes, &mut self.parameter_sets, Vec::new, pts_us))
     }
 
     fn set_bitrate(&mut self, bitrate: u32) -> io::Result<()> {
