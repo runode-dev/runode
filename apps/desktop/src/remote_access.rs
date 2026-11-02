@@ -1,6 +1,7 @@
-//! 远程访问（手机经网络连上宿主，见 `runode_remote`）跟着宿主活：宿主跑在哪个进程里，监听
-//! 就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上，要远程桌面的接到采集进程上
-//! （`screen_process::client::connect`），要电脑识别录音的接到 `dictation::remote`。开关（配置项
+//! 远程访问（手机或配对过的别的电脑经网络连上宿主，见 `runode_remote`）跟着宿主活：宿主跑在哪个进程里，
+//! 监听就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上，要远程桌面的接到采集进程上
+//! （`screen_process::client::connect`），要电脑识别录音的接到 `dictation::remote`，别的电脑要读写项目的
+//! 接到本进程里起的项目服务上（`connect_project`）。开关（配置项
 //! `remote-access`）、端口（`remote-access-port`）和给手机看的名字（`remote-access-name`）随配置变，
 //! 几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
 //! 这几项和 `apns-*`）同样随配置变，见 `push_settings`。
@@ -24,7 +25,10 @@ use std::{
 
 use runode_config::Config;
 use runode_host::Host;
+use runode_protocol::remote::ChannelRefusal;
 use runode_remote::{ApnsKey, Bind, Connect, Options, PushSettings, Service};
+
+use crate::host_client::UnixStream;
 
 /// 盯不了文件时，单独跑的宿主隔多久看一次配置文件、设备表和配对口令；有配对口令在等时也按它看过期没有。
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
@@ -83,9 +87,26 @@ pub fn service(host: &Host) -> Option<Service> {
         connect,
         connect_screen: Arc::new(crate::screen_process::client::connect),
         connect_speech: Arc::new(crate::dictation::remote::connect),
-        connect_project: None,
+        connect_project: Some(Arc::new(connect_project)),
     };
     Service::start(options).map_err(|err| tracing::warn!("cannot start remote access: {err}")).ok()
+}
+
+/// 配对过的电脑要读写这台电脑上的项目：对面的构建 `build` 和这边的相同时开一对 socket，另一头起线程跑
+/// 项目服务（`project_host::serve`），对面断开时线程结束；构建不同时回这边的构建，项目那套协议不管兼容。
+fn connect_project(build: &str) -> Result<UnixStream, ChannelRefusal> {
+    let ours = env!("RUNODE_BUILD");
+    if build != ours {
+        return Err(ChannelRefusal::BuildMismatch { build: ours.into() });
+    }
+    let unavailable = |err: std::io::Error| ChannelRefusal::Unavailable { message: err.to_string() };
+    let (ours, theirs) = UnixStream::pair().map_err(unavailable)?;
+    let output = theirs.try_clone().map_err(unavailable)?;
+    thread::Builder::new()
+        .name("remote-project".into())
+        .spawn(move || crate::project_host::serve::serve_on(theirs, output))
+        .map_err(unavailable)?;
+    Ok(ours)
 }
 
 /// 单独跑的宿主的远程访问：读一遍配置定下开不开，之后在后台线程里盯着配置文件，变了就重读。返回的
@@ -253,6 +274,17 @@ impl StayUp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projects_are_served_only_to_the_same_build() {
+        let ours = env!("RUNODE_BUILD");
+        assert_eq!(connect_project("别的构建").err(), Some(ChannelRefusal::BuildMismatch { build: ours.into() }));
+        let stream = connect_project(ours).unwrap();
+        // 对面一断开，项目服务读到结尾就结束，这头随之读到结尾。
+        stream.shutdown(std::net::Shutdown::Write).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        assert_eq!(std::io::Read::read(&mut &stream, &mut [0u8; 16]).unwrap(), 0);
+    }
 
     #[test]
     fn the_default_port_is_the_protocol_default() {

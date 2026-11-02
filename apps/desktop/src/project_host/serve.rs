@@ -1,9 +1,10 @@
 //! 远端的 `runode --ssh-project`：从 stdin 一条条读桌面的请求，每条起一个线程办，结果写回 stdout；stdin
-//! 关了（桌面断开）就退出。`Call::Cancel` 不起线程，当场让在办的那条停下。
+//! 关了（桌面断开）就退出。`Call::Cancel` 不起线程，当场让在办的那条停下。经远程访问配对的电脑要读写这台
+//! 电脑上的项目时，同一套服务跑在它那条连接上（`serve_on`）。
 
 use std::{
     collections::HashMap,
-    io::{self, BufRead, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::PathBuf,
     sync::{
         Arc, Condvar, Mutex, PoisonError,
@@ -56,6 +57,11 @@ type Shared = Arc<Mutex<Caches>>;
 
 pub(crate) fn run() -> i32 {
     serve(io::stdin().lock(), io::stdout())
+}
+
+/// 在任意一对读写流上跑项目服务，`input` 读完（对面断开）时返回退出码。
+pub(crate) fn serve_on(input: impl Read, output: impl Write + Send + 'static) -> i32 {
+    serve(BufReader::new(input), output)
 }
 
 /// 从 `input` 一条条读请求，回话写进 `output`；`input` 读完（桌面断开）时返回退出码。
