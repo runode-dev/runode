@@ -64,32 +64,14 @@ impl Injector {
                 post(CGEvent::new_scroll_wheel_event2(None, CGScrollEventUnit::Pixel, 2, *dy, *dx, 0));
             }
             ScreenInput::Key { key, mods } => {
-                let Some(code) = key_code(*key) else { return };
-                // 像真的键盘一样先按下修饰键、最后松开：有的程序（锁屏的密码框也是）看修饰键本身有没有按着，
-                // 不只看事件上的标志。
-                let held = modifier_keys(*mods);
-                let mut flags = CGEventFlags::empty();
-                for &(modifier, flag) in &held {
-                    flags |= flag;
-                    post_key(modifier, true, flags);
-                }
-                post_key(code, true, flags);
-                post_key(code, false, flags);
-                for &(modifier, flag) in held.iter().rev() {
-                    flags.remove(flag);
-                    post_key(modifier, false, flags);
+                if let Some(code) = key_code(*key) {
+                    tap(code, *mods, &[]);
                 }
             }
             ScreenInput::Text { text } => {
                 for chunk in text_chunks(text) {
-                    for down in [true, false] {
-                        let event = CGEvent::new_keyboard_event(None, 0, down);
-                        // SAFETY: 指针和长度来自同一个切片，调用期间有效。
-                        unsafe {
-                            CGEvent::keyboard_set_unicode_string(event.as_deref(), chunk.len() as _, chunk.as_ptr())
-                        };
-                        post(event);
-                    }
+                    let (code, shift) = chunk.key.unwrap_or((0, false));
+                    tap(code, ScreenMods { shift, ..ScreenMods::default() }, &chunk.units);
                 }
             }
         }
@@ -126,18 +108,63 @@ fn button_event(button: MouseButton, down: bool) -> CGEventType {
     }
 }
 
-/// 按 `TEXT_CHUNK` 分块，不把一个字符的代理对拆到两块里。
-fn text_chunks(text: &str) -> Vec<Vec<u16>> {
-    let mut chunks: Vec<Vec<u16>> = Vec::new();
+/// 一次按键带的文字。`key` 是敲出它的键码和要不要按 Shift，美式键盘敲不出时为 `None`。
+#[derive(Debug, PartialEq)]
+struct TextChunk {
+    key: Option<(u16, bool)>,
+    units: Vec<u16>,
+}
+
+/// 普通输入框读事件上的文字，密码框（安全输入）和虚拟机、游戏这类程序却只认键码，所以美式键盘敲得出的
+/// 字符一个一个发、带上键码，跟实体键盘一样会经过输入法。键码按美式布局取，被看的电脑用别的布局时，
+/// 只认键码的地方个别字符会对不上。换行（`\r\n` 算一个）和制表符按回车键和 Tab 键发、不带文字，由系统按键码
+/// 生成。其余字符攒成最多 `TEXT_CHUNK` 个码元一块，不把一个字符的代理对拆到两块里。
+fn text_chunks(text: &str) -> Vec<TextChunk> {
+    let mut chunks: Vec<TextChunk> = Vec::new();
+    let mut after_cr = false;
     for c in text.chars() {
+        let skip = c == '\n' && after_cr;
+        after_cr = c == '\r';
+        if skip {
+            continue;
+        }
+        let control = match c {
+            '\r' | '\n' => Some(Key::Enter),
+            '\t' => Some(Key::Tab),
+            _ => None,
+        };
+        if let Some(code) = control.and_then(key_code) {
+            chunks.push(TextChunk { key: Some((code, false)), units: Vec::new() });
+            continue;
+        }
         let mut buf = [0; 2];
         let units = c.encode_utf16(&mut buf);
+        let key = crate::keys::key_stroke(c).and_then(|(key, shift)| key_code(key).map(|code| (code, shift)));
         match chunks.last_mut() {
-            Some(chunk) if chunk.len() + units.len() <= TEXT_CHUNK => chunk.extend_from_slice(units),
-            _ => chunks.push(units.to_vec()),
+            Some(chunk) if key.is_none() && chunk.key.is_none() && chunk.units.len() + units.len() <= TEXT_CHUNK => {
+                chunk.units.extend_from_slice(units)
+            }
+            _ => chunks.push(TextChunk { key, units: units.to_vec() }),
         }
     }
     chunks
+}
+
+/// 按一下 `code` 再松开，`text` 不空时事件带着这些文字。像真的键盘一样先按下修饰键、最后松开：有的程序
+/// （锁屏的密码框也是）看修饰键本身有没有按着，不只看事件上的标志。
+fn tap(code: u16, mods: ScreenMods, text: &[u16]) {
+    let held = modifier_keys(mods);
+    let mut flags = CGEventFlags::empty();
+    for &(modifier, flag) in &held {
+        flags |= flag;
+        post_key(modifier, true, flags, &[]);
+    }
+    post_key(code, true, flags, text);
+    post_key(code, false, flags, text);
+    for &(modifier, flag) in held.iter().rev() {
+        flags.remove(flag);
+        post_key(modifier, false, flags, &[]);
+    }
 }
 
 fn post(event: Option<objc2_core_foundation::CFRetained<CGEvent>>) {
@@ -152,9 +179,13 @@ fn to_screen(bounds: CGRect, x: f64, y: f64) -> CGPoint {
     }
 }
 
-fn post_key(code: u16, down: bool, flags: CGEventFlags) {
+fn post_key(code: u16, down: bool, flags: CGEventFlags, text: &[u16]) {
     let event = CGEvent::new_keyboard_event(None, code, down);
     CGEvent::set_flags(event.as_deref(), flags);
+    if !text.is_empty() {
+        // SAFETY: 指针和长度来自同一个切片，调用期间有效。
+        unsafe { CGEvent::keyboard_set_unicode_string(event.as_deref(), text.len() as _, text.as_ptr()) };
+    }
     post(event);
 }
 
@@ -332,13 +363,38 @@ mod tests {
 
     #[test]
     fn text_chunks_keep_surrogate_pairs_together() {
-        let text = format!("{}😀a", "x".repeat(TEXT_CHUNK - 1));
+        let text = format!("{}😀é", "你".repeat(TEXT_CHUNK - 1));
         let chunks = text_chunks(&text);
         assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].len(), TEXT_CHUNK - 1);
-        assert_eq!(String::from_utf16(&chunks[1]).unwrap(), "😀a");
-        assert_eq!(text_chunks(&"y".repeat(TEXT_CHUNK)).len(), 1);
+        assert_eq!(chunks[0].units.len(), TEXT_CHUNK - 1);
+        assert_eq!(String::from_utf16(&chunks[1].units).unwrap(), "😀é");
+        assert!(chunks.iter().all(|chunk| chunk.key.is_none()));
+        assert_eq!(text_chunks(&"好".repeat(TEXT_CHUNK)).len(), 1);
         assert!(text_chunks("").is_empty());
+    }
+
+    /// 美式键盘敲得出的字符各自带着键码和 Shift，不攒进敲不出的块里。
+    #[test]
+    fn typable_characters_carry_their_key_codes() {
+        let utf16 = |s: &str| s.encode_utf16().collect::<Vec<_>>();
+        assert_eq!(
+            text_chunks("aB!你好"),
+            [
+                TextChunk { key: Some((0x00, false)), units: utf16("a") },
+                TextChunk { key: Some((0x0B, true)), units: utf16("B") },
+                TextChunk { key: Some((0x12, true)), units: utf16("!") },
+                TextChunk { key: None, units: utf16("你好") },
+            ]
+        );
+        let keys = |text: &str| text_chunks(text).into_iter().map(|chunk| chunk.key).collect::<Vec<_>>();
+        assert_eq!(keys("a\r\nb\n\tc"), keys("a\nb\n\tc"));
+        assert_eq!(
+            text_chunks("\r\n\t"),
+            [
+                TextChunk { key: Some((0x24, false)), units: vec![] },
+                TextChunk { key: Some((0x30, false)), units: vec![] }
+            ]
+        );
     }
 
     #[test]
