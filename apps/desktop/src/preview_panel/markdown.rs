@@ -19,6 +19,7 @@ mod select;
 mod tests;
 mod text;
 
+use crate::ui::a11y::RevealOnHover;
 use std::{
     cell::Cell,
     collections::{HashMap, HashSet},
@@ -1084,8 +1085,7 @@ impl PreviewPanel {
                             .border_color(colors.border)
                             .text_color(colors.muted)
                             .cursor_pointer()
-                            .invisible()
-                            .group_hover("md-code", |button| button.visible())
+                            .reveal_on_hover("md-code")
                             .hover(|button| button.text_color(colors.fg))
                             .child(rust_i18n::t!("menu.copy").into_owned())
                             // 按下就复制，也不让正文的拖选接着开始。

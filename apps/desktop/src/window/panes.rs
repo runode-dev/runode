@@ -1,6 +1,7 @@
 //! 标签里的终端区：分屏树、分隔线、拖动分隔线时的遮罩，以及别的终端里的程序（经命令行）正在
 //! 操作某个分屏时右上角的驱动标记。
 
+use crate::ui::a11y::RevealOnHover;
 use crate::ui::panel::split_handle;
 use crate::ui::theme::ActiveTheme as _;
 use std::{
@@ -515,9 +516,7 @@ impl WindowView {
                 },
             ))
             // 不能用 display 切换，见 `render_tab` 里关闭按钮的说明。
-            .when(!(current && split) && !folded, |buttons| {
-                buttons.invisible().group_hover(group, |buttons| buttons.visible())
-            });
+            .when(!(current && split) && !folded, |buttons| buttons.reveal_on_hover(group));
         let dragged = DraggedPane::new(id, name.clone());
         div()
             .id(("pane-header", id))

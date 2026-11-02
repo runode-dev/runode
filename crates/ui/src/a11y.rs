@@ -6,9 +6,19 @@
 use std::rc::Rc;
 
 use gpui::{
-    AccessibleAction, ClickEvent, Context, MouseButton, MouseDownEvent, Role, SharedString, StatefulInteractiveElement,
-    WeakEntity, Window,
+    AccessibleAction, ClickEvent, Context, InteractiveElement, MouseButton, MouseDownEvent, Role, SharedString,
+    StatefulInteractiveElement, Styled, WeakEntity, Window,
 };
+
+/// 鼠标移到 `group` 上才露出来的按钮：平时完全透明，不用 `invisible`。GPUI 不画隐藏的元素，鼠标事件和辅助工具的
+/// 按下动作都在画的时候登记，隐藏的按钮在辅助树里有、按了却没反应。
+pub trait RevealOnHover: InteractiveElement + Styled + Sized {
+    fn reveal_on_hover(self, group: impl Into<SharedString>) -> Self {
+        self.opacity(0.).group_hover(group, |style| style.opacity(1.))
+    }
+}
+
+impl<E: InteractiveElement + Styled> RevealOnHover for E {}
 
 /// 点击或辅助工具按下时调 `f`。
 ///

@@ -5,6 +5,7 @@
 mod repo;
 
 use crate::WorkspaceId;
+use crate::ui::a11y::RevealOnHover;
 use crate::ui::button::{Button, ButtonSize, Toggle};
 use crate::ui::icons::system_logos;
 use crate::ui::panel::split_handle;
@@ -702,8 +703,7 @@ impl WindowView {
                             .right_0()
                             .top(relative(0.5))
                             .mt(px(-TAB_CLOSE_SIZE / 2.))
-                            .invisible()
-                            .group_hover(group, |close| close.visible())
+                            .reveal_on_hover(group)
                             .tooltip(close_tooltip)
                             .on_press_down(cx, move |this, window, cx| {
                                 if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {

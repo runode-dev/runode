@@ -1,6 +1,7 @@
 //! 标题栏：窗口的标题栏设置、终端标签、排在它们后面的文件标签（预览栏的标签）和新建标签按钮、拖动中的
 //! 标签，以及标题、agent 状态标记和快捷键提示。
 
+use crate::ui::a11y::RevealOnHover;
 use std::borrow::Cow;
 
 use crate::ui::theme::ActiveTheme as _;
@@ -519,7 +520,7 @@ impl WindowView {
                                             .flex()
                                             .items_center()
                                             .justify_end()
-                                            .child(close.invisible().group_hover(group, |close| close.visible())),
+                                            .child(close.reveal_on_hover(group)),
                                     ),
                             )
                         }
@@ -541,7 +542,7 @@ impl WindowView {
                                         .overflow_hidden()
                                         .group_hover(group, |close| close.w(px(TAB_CLOSE_SIZE)))
                                 } else {
-                                    close.invisible().group_hover(group, |close| close.visible())
+                                    close.reveal_on_hover(group)
                                 }
                             })
                             .tooltip(close_tooltip)
@@ -670,7 +671,7 @@ impl WindowView {
                                 .with_size(ButtonSize::IconXs)
                                 .text_size(px(14.))
                                 .child("×")
-                                .when(!active, |close| close.invisible().group_hover(group, |close| close.visible()))
+                                .when(!active, |close| close.reveal_on_hover(group))
                                 .tooltip(close_tooltip)
                                 .on_press_down(cx, move |this, window, cx| this.close_file_tab(ix, window, cx)),
                         ),

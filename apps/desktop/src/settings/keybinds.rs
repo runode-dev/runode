@@ -7,6 +7,7 @@
 //! 录键时拦下这个窗口里按的键（`App::intercept_keystrokes`），不让它当快捷键或者菜单命令生效；
 //! 一次只录一个按键，连按几个键的写法（`ctrl+a>n`）要在配置文件里写。
 
+use crate::ui::a11y::RevealOnHover;
 use std::collections::HashMap;
 
 use crate::keybinds::{caps, caps_text};
@@ -516,9 +517,7 @@ impl SettingsView {
             .with_size(ButtonSize::IconSm)
             .flex_none()
             .mt(px((CONTROL_HEIGHT * font_size::scale(cx) - 20.) / 2.))
-            .when(!row.bound.is_empty() && !adding, |add| {
-                add.invisible().group_hover(group.clone(), |add| add.visible())
-            })
+            .when(!row.bound.is_empty() && !adding, |add| add.reveal_on_hover(group.clone()))
             .tooltip(crate::ui::tooltip::tooltip(add_label, None))
             .on_press(cx, move |this, window, cx| {
                 if this.keybinds.target() == Some(&add_target) {
