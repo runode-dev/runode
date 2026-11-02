@@ -24,10 +24,15 @@
                     case .connecting:
                         ProgressView("正在连接远程桌面…").tint(.white).foregroundStyle(.white)
                     case .failed(let reason):
+                        // 缺权限时连不上是意料中的，说清缺什么、去哪里开，不摆电脑那边的原话。
                         ContentUnavailableView {
-                            Label("远程桌面断开了", systemImage: "display.trianglebadge.exclamationmark")
+                            if permissionMessage != nil {
+                                Label("电脑上的 Runode 缺少权限", systemImage: "lock.display")
+                            } else {
+                                Label("远程桌面断开了", systemImage: "display.trianglebadge.exclamationmark")
+                            }
                         } description: {
-                            Text(reason)
+                            Text(permissionMessage ?? reason)
                         } actions: {
                             Button("重新连接") { model.retry() }
                         }
@@ -46,13 +51,17 @@
             }
             .background(Color.black.ignoresSafeArea())
             .overlay(alignment: .top) {
-                if !model.missingPermissions.isEmpty {
-                    Text("电脑上的 Runode 还没有「\(model.missingPermissions.joined(separator: "、"))」的权限，到系统设置的隐私与安全性里打开")
+                // 连不上时中间已经说了，不再重复；排在浮动按钮下面，不被它们盖住。
+                if let permissionMessage, !failed {
+                    Text(permissionMessage)
                         .font(.footnote)
-                        .padding(8)
-                        .frame(maxWidth: .infinity)
-                        .background(.yellow.opacity(0.9))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.yellow.opacity(0.9), in: .rect(cornerRadius: 12))
                         .foregroundStyle(.black)
+                        .padding(.horizontal, FloatingButton.margin)
+                        .padding(.top, FloatingButton.size + 2 * FloatingButton.margin)
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -112,6 +121,17 @@
             // 离开页面时由 `AppModel` 断开；不在 onDisappear 里断，页面一时消失又出现（弹出解锁框这类）时会
             // 反复断开重连。
             .onAppear { model.start() }
+        }
+
+        private var failed: Bool {
+            if case .failed = model.phase { true } else { false }
+        }
+
+        /// 电脑上缺的权限和去哪里开；不缺时为空。
+        private var permissionMessage: String? {
+            guard !model.missingPermissions.isEmpty else { return nil }
+            return String(
+                localized: "电脑上的 Runode 还没有「\(model.missingPermissions.joined(separator: "、"))」的权限，到系统设置的隐私与安全性里打开")
         }
 
         private func floatingButton(

@@ -6024,6 +6024,29 @@
         }
       }
     },
+    "电脑上的 Runode 缺少权限" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Runode on the Computer Needs Permission"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑上的 Runode 缺少权限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電腦上的 Runode 缺少權限"
+          }
+        }
+      }
+    },
     "电脑上的 Runode 还没有「%@」的权限，到系统设置的隐私与安全性里打开" : {
       "extractionState" : "manual",
       "localizations" : {
