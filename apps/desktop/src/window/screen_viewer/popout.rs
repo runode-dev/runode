@@ -37,7 +37,6 @@ pub(super) fn open(viewer: Entity<ScreenViewer>, bounds: Bounds<Pixels>, display
         display_id: display,
         window_min_size: Some(size(px(MIN_SIZE.0), px(MIN_SIZE.1))),
         titlebar: Some(gpui::TitlebarOptions { title: Some(title.into()), ..titlebar::titlebar_options() }),
-        window_decorations: titlebar::window_decorations(),
         // 拖动和双击由工具条自己办，和主窗口一样。
         app_owns_titlebar_drag: true,
         app_id: Some(runode_update::BUNDLE_ID.into()),
