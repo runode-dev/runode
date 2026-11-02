@@ -10,7 +10,8 @@ use runode_types::{
     input::{Mods, MouseAction, MouseButton},
 };
 
-use super::{Session, convert::ghostty_mods};
+use super::Session;
+use crate::convert::ghostty_mods;
 
 impl Session {
     /// 滚轮输入：程序开启鼠标上报时发给程序；备用屏上开着模式 1007 时当上下方向键发给程序；否则在

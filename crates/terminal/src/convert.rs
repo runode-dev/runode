@@ -7,7 +7,7 @@ use runode_types::{
     settings,
 };
 
-pub(super) fn rgb(color: RgbColor) -> Rgb {
+pub(crate) fn rgb(color: RgbColor) -> Rgb {
     Rgb(color.r, color.g, color.b)
 }
 

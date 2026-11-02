@@ -7,7 +7,7 @@ use libghostty_vt::{key, paste, terminal::Mode};
 use runode_types::input::{KeyChord, Mods};
 
 use super::HostSession;
-use crate::session::convert::{ghostty_key, ghostty_mods};
+use crate::convert::{ghostty_key, ghostty_mods};
 
 impl HostSession {
     /// 依次按下 `keys` 时程序该收到的字节，按 VT 当前的键盘模式编码。Alt 一律当 Meta（加 ESC

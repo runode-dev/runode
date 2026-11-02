@@ -8,6 +8,7 @@
 //! 对外只用 `runode_types` 里的数据类型；libghostty 和 PTY 的类型不出这个 crate。
 
 #[cfg(unix)]
+mod convert;
 pub mod fd_passing;
 pub mod host_session;
 mod prompt_input;

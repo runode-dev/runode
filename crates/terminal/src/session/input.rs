@@ -11,12 +11,12 @@ use libghostty_vt::{
 };
 use runode_types::{input::KeyInput, settings};
 
-use super::{
-    Session,
+use super::Session;
+use crate::{
     convert::{ghostty_key, ghostty_mods},
-    log_err,
+    shell_integration,
+    vt::log_err,
 };
-use crate::shell_integration;
 
 impl Session {
     /// 最近一次向程序发输入（按键、文本、粘贴等）的时刻；从没发过时为 `None`。

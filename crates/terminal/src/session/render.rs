@@ -22,7 +22,8 @@ use runode_types::{
     theme,
 };
 
-use super::{SYNC_OUTPUT_TIMEOUT, Session, convert::rgb, log_err, search::search_highlights};
+use super::{SYNC_OUTPUT_TIMEOUT, Session, search::search_highlights};
+use crate::{convert::rgb, vt::log_err};
 
 /// 把 libghostty 的 render state 复制进 `Frame`。和 render-hold 回调共用，
 /// 因为同步更新一开始，回调就要立即截下当前帧。

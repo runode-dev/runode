@@ -49,6 +49,7 @@ use runode_types::{
 use crate::{
     prompt_input,
     pty::{Pty, PtyWriter},
+    vt::log_err,
     vt::{self, CommandOutput, SnapshotError},
 };
 pub use clipboard::{ClipboardQuery, ClipboardRequest};
@@ -978,11 +979,6 @@ fn notification_text(bytes: &[u8]) -> String {
 /// 变了、格式号没变时那个测试失败。
 pub fn snapshot_format() -> Result<u16, SnapshotError> {
     vt::snapshot_format()
-}
-
-/// 记日志并吞掉错误：读屏幕这类失败只影响这一下。
-fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> {
-    result.inspect_err(|err| tracing::warn!("{what} failed: {err}")).ok()
 }
 
 #[cfg(test)]

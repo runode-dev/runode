@@ -14,7 +14,6 @@
 //! 鼠标（`pointer`）、指针下能打开的链接（`link`）、视口滚动（`scroll`）、选区（`selection`）、搜索（`search`）、
 //! 快照（`snapshot`），以及和 libghostty 类型之间的转换（`convert`）。
 
-pub(crate) mod convert;
 mod input;
 mod input_line;
 mod link;
@@ -49,6 +48,7 @@ use runode_types::{
 use crate::{
     prompt_input::{self, PromptInput},
     vt,
+    vt::log_err,
 };
 pub use input::Paste;
 pub use link::{Link, LinkCandidates, LinkSpan, LinkTarget};
@@ -288,11 +288,6 @@ impl Session {
             y: u32::from((at.y.max(0.) as u16).min(size.rows.saturating_sub(1))),
         }
     }
-}
-
-/// 记日志并吞掉错误：鼠标和选区操作失败时只影响这一下，不该打断输入。
-fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> {
-    result.inspect_err(|err| tracing::warn!("{what} failed: {err}")).ok()
 }
 
 #[cfg(test)]
