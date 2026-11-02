@@ -132,6 +132,20 @@ pub fn system<'a>(host: &HostId, cx: &'a App) -> Option<&'a str> {
     cx.try_global::<HostSystems>().and_then(|systems| systems.0.get(&key)).map(String::as_str)
 }
 
+/// 远端主机 `host` 上的文件和 git 读不了时给人看的原因：配对的电脑装的是别的构建，读写项目的那套协议不管兼容，
+/// 开不了（`ChannelRefusal::BuildMismatch`）。读得了、还没连上时为空。
+pub fn project_unavailable(host: &HostId) -> Option<String> {
+    if !matches!(host, HostId::Paired(_)) {
+        return None;
+    }
+    match hosts::status_of(host) {
+        Status::Connected(connected) if connected.mismatch => {
+            Some(rust_i18n::t!("paired.build_mismatch", build = connected.build).into_owned())
+        }
+        _ => None,
+    }
+}
+
 /// 系统 `os`（`Connected::os` 的写法）给人看的名字，认不出时为 `None`。
 pub fn system_name(os: &str) -> Option<&'static str> {
     match os {

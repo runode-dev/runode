@@ -279,7 +279,7 @@ panel:
   not_repo: 不在 git 仓库里
   no_content: 内容没有变化
   no_changes: 没有未提交的改动
-  remote: GitHub Actions 页只看本机的仓库，SSH 主机上的工作区里用不了
+  remote: GitHub Actions 页只看本机的仓库，远程主机上的工作区里用不了
 paste:
   title: 粘贴的内容可能会直接执行命令
   detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。
@@ -1453,3 +1453,4 @@ paired:
   forget_title: 解除配对
   not_revoked: "这台已经忘掉了 %{host}，但那边没撤销这台（%{error}）。请到 %{host} 的「手机端」页里把这台删掉。"
   forget_failed: "没能忘掉 %{host}：%{error}"
+  build_mismatch: "两台电脑上的 Runode 版本不同（那台是 %{build}），升级到同一版本后才能看文件和 Git。"

@@ -5,6 +5,9 @@
 //! 每台一个 `paired-host` 线程（`supervise`）管连接，和 SSH 主机一样：要用时连，断了按 `RETRY_DELAYS` 退避重连，
 //! 走完了还连不上就停下，这台电脑睡醒或网络变了时再试；那台电脑撤销了配对、证书变了这类要用户来办的不自己重试。
 //! 停下的都等 `retry_now`。连接的状态变了、连上了，经 `hosts::events` 告诉界面。
+//!
+//! 读写项目、端口转发和远程桌面各自另拨一条连接（`PairedHost::open_channel`、`PairedHost::dial`），过了门禁后
+//! 说各自的协议。断开这台（`disconnect`）或终端那条连接断了时，登记过的（`PairedHost::hold`）跟着关掉。
 
 use std::{
     collections::{HashMap, HashSet},
@@ -15,7 +18,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_protocol::{ClientMsg, HostMsg, remote::RejectReason};
+use runode_protocol::{
+    ClientMsg, Frame, FrameKind, HostMsg, read_frame,
+    remote::{ChannelHello, ChannelRefusal, ChannelReply, RejectReason},
+    write_frame,
+};
 use runode_remote::client::{self, DialError, Dialed, PairedMachine};
 
 use super::{
@@ -30,6 +37,8 @@ use super::{
 const MACOS_ONLY_DIR: &str = "/System/Library/CoreServices";
 /// 让那台电脑撤销这台设备（`ClientMsg::Unpair`）最多等这么久。
 const UNPAIR_TIMEOUT: Duration = Duration::from_secs(10);
+/// 开专用连接时等那边回 `ChannelReply` 最多这么久。
+const CHANNEL_TIMEOUT: Duration = Duration::from_secs(10);
 
 static HOSTS: LazyLock<Mutex<HashMap<String, Arc<PairedHost>>>> = LazyLock::new(Mutex::default);
 /// 配对过的电脑，头一回要用时读 `client::list_machines`，之后配对、忘掉、连上时跟着改。
@@ -147,6 +156,34 @@ pub struct PairedHost {
     latency: Mutex<Option<Duration>>,
     /// 刚配对时 `pair` 交来的连接，supervisor 第一次连时直接用它。
     handed: Mutex<Option<Dialed>>,
+    /// 登记过的专用连接（`hold`），断开时一起关掉。
+    channels: Mutex<Vec<UnixStream>>,
+}
+
+/// 专用连接开不了。
+#[derive(Debug)]
+pub enum ChannelError {
+    Dial(DialError),
+    /// 那边拒绝了，见 `ChannelRefusal`。
+    Refused(ChannelRefusal),
+    /// 连接断了，或者那边回的读不懂。
+    Broken(String),
+}
+
+impl std::fmt::Display for ChannelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dial(err) => match classify(err) {
+                Failure::Retry(text) | Failure::Stop(text) => f.write_str(&text),
+            },
+            Self::Refused(ChannelRefusal::BuildMismatch { build }) => {
+                f.write_str(&rust_i18n::t!("paired.build_mismatch", build = build))
+            }
+            Self::Refused(ChannelRefusal::Unavailable { message }) => f.write_str(message),
+            Self::Refused(other) => write!(f, "the other computer refused: {other:?}"),
+            Self::Broken(reason) => f.write_str(reason),
+        }
+    }
 }
 
 struct State {
@@ -202,6 +239,48 @@ impl PairedHost {
             changed: Condvar::new(),
             latency: Mutex::new(None),
             handed: Mutex::new(None),
+            channels: Mutex::default(),
+        }
+    }
+
+    /// 另拨一条过了门禁的连接，调用方在上面发第一帧（`ScreenHello` 这类）。连着时才拨。会阻塞。
+    pub fn dial(&self) -> Result<UnixStream, ChannelError> {
+        if !matches!(self.status(), Status::Connected(_)) {
+            return Err(ChannelError::Broken(format!("not connected to the paired computer {}", self.id)));
+        }
+        client::dial(&dirs(), &self.id).map(|dialed| dialed.stream).map_err(ChannelError::Dial)
+    }
+
+    /// 开一条专用连接：拨号过门禁后发 `hello`、等那边回话，`ChannelReady` 后交回两边原样搬字节的 socket。会阻塞。
+    pub fn open_channel(&self, hello: &ChannelHello) -> Result<UnixStream, ChannelError> {
+        let broken = |err: &dyn std::fmt::Display| ChannelError::Broken(err.to_string());
+        let mut stream = self.dial()?;
+        let frame = Frame::control(hello).map_err(|err| broken(&err))?;
+        write_frame(&mut stream, FrameKind::Control, 0, &frame.payload).map_err(|err| broken(&err))?;
+        stream.set_read_timeout(Some(CHANNEL_TIMEOUT)).map_err(|err| broken(&err))?;
+        // 只读这一帧，不能多读：`ChannelReady` 之后的字节是专用连接自己的。
+        let reply = read_frame(&mut stream).map_err(|err| broken(&err))?;
+        stream.set_read_timeout(None).map_err(|err| broken(&err))?;
+        match reply.map(|frame| frame.message::<ChannelReply>()) {
+            Some(Ok(ChannelReply::ChannelReady)) => Ok(stream),
+            Some(Ok(ChannelReply::ChannelRefused { reason })) => Err(ChannelError::Refused(reason)),
+            Some(Ok(ChannelReply::Unknown)) => Err(ChannelError::Refused(ChannelRefusal::Unknown)),
+            Some(Err(err)) => Err(broken(&err)),
+            None => Err(ChannelError::Broken("the other computer closed the connection".into())),
+        }
+    }
+
+    /// 登记专用连接 `stream`：断开这台或终端那条连接断了时关掉它。
+    pub fn hold(&self, stream: &UnixStream) {
+        match stream.try_clone() {
+            Ok(stream) => self.channels.lock().unwrap_or_else(PoisonError::into_inner).push(stream),
+            Err(err) => tracing::warn!("cannot keep track of a connection to the paired computer {}: {err}", self.id),
+        }
+    }
+
+    fn close_channels(&self) {
+        for stream in self.channels.lock().unwrap_or_else(PoisonError::into_inner).drain(..) {
+            let _ = stream.shutdown(Shutdown::Both);
         }
     }
 
@@ -288,6 +367,8 @@ impl PairedHost {
             let _ = stream.shutdown(Shutdown::Both);
         }
         self.changed.notify_all();
+        drop(state);
+        self.close_channels();
     }
 
     /// 管这台电脑的连接：要用时连，断了按 `RETRY_DELAYS` 退避重连，走完了或要用户来办的停下等 `retry_now`。
@@ -471,6 +552,7 @@ impl PairedHost {
         }
         *self.latency.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.drop_stream();
+        self.close_channels();
     }
 
     /// 关掉 `Link` 用的 socket：`Link` 读到结尾，各会话收到 `Lost`。

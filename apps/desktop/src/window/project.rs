@@ -549,12 +549,16 @@ impl WindowView {
     /// 右侧面板显示着的那一页，收着时为空。
     pub(super) fn render_side_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
         let panel = self.workspace().panel?;
-        if self.on_remote() && panel == SidePanel::GitHubActions {
+        let unavailable = match panel {
+            SidePanel::GitHubActions => self.on_remote().then(|| rust_i18n::t!("panel.remote").into_owned()),
+            SidePanel::Files | SidePanel::Git => crate::remote_hosts::project_unavailable(&self.workspace().host),
+        };
+        if let Some(message) = unavailable {
             let shell = panel_shell("remote-panel", width, cards(cx), cx)
                 .bg(cx.theme().mix(0.03))
                 .text_size(FontSize::Body)
                 .child(self.render_panel_tabs(cx))
-                .child(panel_message(rust_i18n::t!("panel.remote").into_owned(), cx));
+                .child(panel_message(message, cx));
             return Some(shell.into_any_element());
         }
         match panel {

@@ -279,7 +279,7 @@ panel:
   not_repo: Not a git repository
   no_content: No content changes
   no_changes: No uncommitted changes
-  remote: GitHub Actions only works with repositories on this computer, not in workspaces on SSH hosts
+  remote: GitHub Actions only works with repositories on this computer, not in workspaces on remote hosts
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.
@@ -1379,3 +1379,4 @@ paired:
   forget_title: Unpair
   not_revoked: "This computer forgot %{host}, but %{host} did not revoke it (%{error}). Remove this computer on %{host}'s Mobile page."
   forget_failed: "Cannot forget %{host}: %{error}"
+  build_mismatch: "The two computers run different versions of Runode (the other one is %{build}). Update them to the same version to see files and Git."

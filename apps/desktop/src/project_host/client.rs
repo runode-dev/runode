@@ -1,6 +1,7 @@
 //! 桌面这头：每台远端主机一条读写项目的连接，按需重起。请求带编号，回话由读线程按编号交给等着的一方，几个
 //! 请求可以同时在路上。主机连上以后才起。SSH 主机上是一个 `runode --ssh-project`，经主连接起：经主连接时不用
-//! 再认证，没有主连接（Windows）时这条 ssh 自己认证，要问用户时经 askpass 问。
+//! 再认证，没有主连接（Windows）时这条 ssh 自己认证，要问用户时经 askpass 问。配对的电脑上是另拨一条专用连接
+//! （`ChannelHello::ProjectHello`），那边接到它的 `runode --ssh-project` 那套服务上；两边构建不同时开不了。
 
 use std::{
     collections::HashMap,
@@ -18,8 +19,10 @@ use std::{
 use super::wire::{self, Call, Reply, Request, Response};
 use crate::host_client::{
     hosts::{HostId, Status},
+    paired::{self, ChannelError},
     ssh::{self, deploy},
 };
+use runode_protocol::remote::{ChannelHello, ChannelRefusal};
 
 /// 等回话时每隔这么久看一次要不要停。
 const CANCEL_POLL: Duration = Duration::from_millis(50);
@@ -153,10 +156,28 @@ impl Client {
         }
         let conn = match &self.host {
             HostId::Ssh(name) => self.open_ssh(name)?,
-            HostId::Local | HostId::Paired(_) => return Err(format!("not connected to {}", self.name)),
+            HostId::Paired(id) => self.open_paired(id)?,
+            HostId::Local => return Err(format!("not connected to {}", self.name)),
         };
         *slot = Some(conn.clone());
         Ok(conn)
+    }
+
+    /// 到配对的电脑 `id` 另开一条读写项目的专用连接。那边的构建和这边不同时不拨号，直接交回给人看的原因。
+    fn open_paired(&self, id: &str) -> Result<Arc<Conn>, String> {
+        let host = paired::find(id).ok_or_else(|| format!("no such host: {}", self.name))?;
+        match host.status() {
+            Status::Connected(connected) if connected.mismatch => {
+                return Err(ChannelError::Refused(ChannelRefusal::BuildMismatch { build: connected.build }).to_string());
+            }
+            Status::Connected(_) => {}
+            _ => return Err(format!("not connected to {}", self.name)),
+        }
+        let hello = ChannelHello::ProjectHello { build: crate::host_client::build().0 };
+        let stream = host.open_channel(&hello).map_err(|err| err.to_string())?;
+        host.hold(&stream);
+        let input = stream.try_clone().map_err(|err| format!("cannot use the connection to {}: {err}", self.name))?;
+        Conn::start(&self.name, Box::new(input), stream, || {})
     }
 
     /// 经 SSH 主机 `name` 的主连接起 `runode --ssh-project`。

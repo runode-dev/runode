@@ -279,7 +279,7 @@ panel:
   not_repo: 不在 git 倉庫裡
   no_content: 內容沒有變化
   no_changes: 沒有未提交的改動
-  remote: GitHub Actions 頁只看本機的倉庫，SSH 主機上的工作區裡用不了
+  remote: GitHub Actions 頁只看本機的倉庫，遠端主機上的工作區裡用不了
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。
@@ -1453,3 +1453,4 @@ paired:
   forget_title: 解除配對
   not_revoked: "這台已經忘掉了 %{host}，但那邊沒撤銷這台（%{error}）。請到 %{host} 的「手機端」頁裡把這台刪掉。"
   forget_failed: "沒能忘掉 %{host}：%{error}"
+  build_mismatch: "兩台電腦上的 Runode 版本不同（那台是 %{build}），升級到同一版本後才能看檔案和 Git。"

@@ -78,7 +78,7 @@ const BUSY_TRIES: u32 = 5;
 /// 交接后有终端的回滚历史没带过来时发的通知的标识。
 const DEGRADED_TAG: &str = "runode-handoff-degraded";
 
-fn build() -> BuildId {
+pub(crate) fn build() -> BuildId {
     BuildId(env!("RUNODE_BUILD").into())
 }
 
