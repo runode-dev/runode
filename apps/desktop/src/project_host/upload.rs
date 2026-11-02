@@ -81,7 +81,7 @@ impl UploadOp {
 /// 删掉 `root` 下放久了的上传：一个子目录连同里面的东西（不跟着链接）都已经 `UPLOAD_KEEP_DAYS` 天没改过才删。
 /// 只看子目录本身的时间不够：往已有的文件里接着写块不改子目录的时间，别的会话还在传的大文件会被删掉。
 /// 读不到时间的不删。
-fn prune(root: &Path) {
+pub(crate) fn prune(root: &Path) {
     let keep = Duration::from_secs(u64::from(runode_ssh::bootstrap::UPLOAD_KEEP_DAYS) * 24 * 60 * 60);
     let Some(cutoff) = SystemTime::now().checked_sub(keep) else {
         return;

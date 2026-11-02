@@ -282,6 +282,28 @@ fn uploads_a_file_or_a_tar_into_a_fresh_directory() {
     assert_eq!(parse_uploaded("RUNODE-UPLOADED relative"), None);
 }
 
+/// 放上传的目录只让自己进，原来别人进得去的也收紧；传过去的目录和文件也只给自己。
+#[cfg(unix)]
+#[test]
+fn uploads_are_private() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let home = TempDir::new("upload-private");
+    let uploads = home.0.join(UPLOADS_DIR);
+    fs::create_dir_all(&uploads).unwrap();
+    fs::set_permissions(&uploads, fs::Permissions::from_mode(0o755)).unwrap();
+    let src = home.0.join("src");
+    fs::create_dir_all(src.join("folder")).unwrap();
+    fs::write(src.join("folder/inner.txt"), "inner").unwrap();
+    let tar = Command::new("tar").arg("-cf").arg("-").arg("-C").arg(&src).arg("folder").output().unwrap();
+    let sent = run(&home.0, &upload_command("1-a", None), &tar.stdout);
+    assert!(sent.status.success(), "{}", String::from_utf8_lossy(&sent.stderr));
+    let dir = std::path::PathBuf::from(parse_uploaded(&String::from_utf8_lossy(&sent.stdout)).unwrap());
+    let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!([mode(&uploads), mode(&dir), mode(&dir.join("folder"))], [0o700; 3]);
+    assert_eq!(mode(&dir.join("folder/inner.txt")), 0o600);
+}
+
 /// 像 Windows 的 OpenSSH 那样把命令行原样交给 cmd 解释，家目录设成 `home`。stdin 先写进文件再交过去：
 /// tar.exe 从匿名管道读 zip 时报错，sshd 交来的 stdin 不是匿名管道。
 #[cfg(windows)]

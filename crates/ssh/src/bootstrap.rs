@@ -189,8 +189,8 @@ pub const UPLOAD_KEEP_DAYS: u32 = 7;
 const UPLOADED: &str = "RUNODE-UPLOADED ";
 
 /// 把 stdin 传到远端 `UPLOADS_DIR` 下新建的子目录 `id` 里：给了 `file` 时 stdin 就是这个文件的内容，没给时是
-/// tar 包，原样解开；传完打出这个子目录的绝对路径（`parse_uploaded` 认）。`id` 和 `file` 只能有字母、数字和
-/// `.`、`-`、`_`，不能以 `.` 开头。
+/// tar 包，原样解开；传完打出这个子目录的绝对路径（`parse_uploaded` 认）。`UPLOADS_DIR` 只让自己进，已经有了
+/// 的也收紧，里面新建的目录和文件也只给自己。`id` 和 `file` 只能有字母、数字和 `.`、`-`、`_`，不能以 `.` 开头。
 pub fn upload_command(id: &str, file: Option<&str>) -> String {
     debug_assert!([Some(id), file].into_iter().flatten().all(|name| install_dir_name(name) == name));
     let receive = match file {
@@ -199,7 +199,7 @@ pub fn upload_command(id: &str, file: Option<&str>) -> String {
     };
     wrap(&format!(
         concat!(
-            r#"D="$HOME/{uploads}"; umask 077; mkdir -p "$D" || exit 1; "#,
+            r#"D="$HOME/{uploads}"; umask 077; mkdir -p "$D" && chmod 700 "$D" || exit 1; "#,
             r#"find "$D" -mindepth 1 -maxdepth 1 -mtime +{keep} -exec rm -rf {{}} + 2>/dev/null; "#,
             r#"U="$D/{id}"; mkdir "$U" || exit 1; "#,
             "{receive} || exit 1; ",

@@ -103,7 +103,7 @@ fn prune_script(keep: &str, days: Option<u32>) -> String {
 }
 
 /// 把 stdin 上的 tar 包解到 `UPLOADS_DIR` 下新建的子目录 `id` 里，打出这个子目录（`parse_uploaded` 认）。
-/// 放久了的上传由远端的桥接清掉。
+/// 放上传的目录由远端的桥接收紧访问控制、删掉放久了的。
 pub fn upload_command(id: &str) -> String {
     debug_assert_eq!(super::install_dir_name(id), id);
     let uploads = local(UPLOADS_DIR);

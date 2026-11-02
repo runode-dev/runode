@@ -44,7 +44,7 @@ pub fn run() -> i32 {
     // SAFETY: 还没起任何线程。
     unsafe { tidy_env(&dirs) };
     #[cfg(windows)]
-    prune_uploads(&dirs);
+    tidy_uploads(&dirs);
     let mut stdout = io::stdout().lock();
     match connect(&dirs) {
         Ok((stream, opening)) => {
@@ -451,28 +451,18 @@ fn session_bound(pid: u32) -> bool {
     }
 }
 
-/// 删掉 `runode_ssh::bootstrap::UPLOADS_DIR` 下放满 `UPLOAD_KEEP_DAYS` 天的上传：Windows 远端的上传脚本是 cmd，
-/// 不好按日期删。在后台删，不耽误连上。
+/// 把 `runode_ssh::bootstrap::UPLOADS_DIR` 收成只让自己进，删掉放久了的上传（`project_host::upload::prune`）：
+/// Windows 远端的上传脚本是 cmd，设不了访问控制，也不好按日期删。在后台做，不耽误连上。
 #[cfg(windows)]
-fn prune_uploads(dirs: &runode_paths::Dirs) {
-    use runode_ssh::bootstrap::{UPLOAD_KEEP_DAYS, UPLOADS_DIR};
-    let Some(uploads) = dirs.home.as_ref().map(|home| home.join(UPLOADS_DIR)) else {
+fn tidy_uploads(dirs: &runode_paths::Dirs) {
+    let Some(uploads) = dirs.home.as_ref().map(|home| home.join(runode_ssh::bootstrap::UPLOADS_DIR)) else {
         return;
     };
-    let keep = Duration::from_secs(u64::from(UPLOAD_KEEP_DAYS) * 24 * 60 * 60);
-    let _ = thread::Builder::new().name("prune-uploads".into()).spawn(move || {
-        let Ok(entries) = std::fs::read_dir(&uploads) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let old = entry
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age > keep));
-            if old {
-                let _ = std::fs::remove_dir_all(entry.path());
-            }
+    let _ = thread::Builder::new().name("tidy-uploads".into()).spawn(move || {
+        if let Err(err) = runode_paths::create_private(&uploads) {
+            tracing::warn!("cannot make {} private: {err}", uploads.display());
         }
+        crate::project_host::upload::prune(&uploads);
     });
 }
 
