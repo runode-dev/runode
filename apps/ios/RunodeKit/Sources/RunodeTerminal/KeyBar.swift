@@ -4,10 +4,13 @@
     /// 一条快捷键栏的底座：左边一排横着能拖的键（`keys`），右端几个不跟着滚走的键（`pinTrailing`）。
     /// `resting` 为假时跟在软键盘上面，为真时是软键盘收着时页面底部的那条，背景透明。按钮的样子、按键音和
     /// 让开安全区都在这里，各条栏只管摆哪些键。
-    open class KeyBar: UIInputView, UIInputViewAudioFeedback {
+    open class KeyBar: UIInputView, UIInputViewAudioFeedback, UIScrollViewDelegate {
         /// 横着能拖的那排键。
         public let keys = UIStackView()
-        private let scroll = UIScrollView()
+        private let scroll = LayoutReportingScrollView()
+        /// 那排键还能往哪边拖，哪边就渐隐下去，看得出后面还有键；放得下时不遮。
+        private let fade = CAGradientLayer()
+        private static let fadeWidth: CGFloat = 28
 
         public init(resting: Bool) {
             super.init(
@@ -15,6 +18,10 @@
             if resting { backgroundColor = .clear }
             allowsSelfSizing = true
             scroll.showsHorizontalScrollIndicator = false
+            scroll.delegate = self
+            scroll.didLayout = { [weak self] in self?.updateFade() }
+            fade.startPoint = CGPoint(x: 0, y: 0.5)
+            fade.endPoint = CGPoint(x: 1, y: 0.5)
             scroll.translatesAutoresizingMaskIntoConstraints = false
             addSubview(scroll)
             keys.axis = .horizontal
@@ -43,6 +50,31 @@
         @available(*, unavailable)
         public required init?(coder: NSCoder) {
             fatalError("init(coder:) is not supported")
+        }
+
+        public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            updateFade()
+        }
+
+        private func updateFade() {
+            let width = scroll.bounds.width
+            let overflow = scroll.contentSize.width - width
+            guard width > 0, overflow > 1 else {
+                scroll.layer.mask = nil
+                return
+            }
+            let offset = scroll.contentOffset.x
+            let shown = UIColor.black.cgColor
+            let hidden = UIColor.clear.cgColor
+            let edge = min(Self.fadeWidth / width, 0.5)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            // 遮罩在滚动视图的图层坐标里，要跟着拖动的偏移走。
+            fade.frame = scroll.bounds
+            fade.colors = [offset > 1 ? hidden : shown, shown, shown, offset < overflow - 1 ? hidden : shown]
+            fade.locations = [0, NSNumber(value: edge), NSNumber(value: 1 - edge), 1]
+            CATransaction.commit()
+            scroll.layer.mask = fade
         }
 
         /// 把 `buttons` 从左到右固定在右端，能拖的那排键排到它们左边为止。只调一次。
@@ -108,5 +140,15 @@
         }
 
         public var enableInputClicksWhenVisible: Bool { true }
+    }
+
+    /// 排完版告诉外面一声：内容宽度要等它自己排版时才按约束算出来。
+    private final class LayoutReportingScrollView: UIScrollView {
+        var didLayout: (() -> Void)?
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            didLayout?()
+        }
     }
 #endif
