@@ -2,7 +2,7 @@
 //! 窗口谁也看不见；从那里起的采集进程采不到屏幕。显示在屏幕上的会话里登录着同一个用户时，经任务计划把
 //! 进程起在那里（`schedule`），和他自己在那台电脑上开 runode 时一样。
 
-use std::{io, os::windows::process::CommandExt as _, path::Path, process::Command};
+use std::{io, path::Path, process::Command};
 
 /// 本进程和显示在屏幕上的那个会话的关系。
 pub(crate) enum Desktop {
@@ -63,12 +63,10 @@ impl Drop for Scheduled {
 
 /// 跑 `schtasks args`，不弹控制台窗口；失败时带上它说的原因。
 fn schtasks(args: &[&std::ffi::OsStr]) -> io::Result<()> {
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let output = Command::new("schtasks")
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()?;
+    let mut command = Command::new("schtasks");
+    command.args(args).stdin(std::process::Stdio::null());
+    crate::subprocess::hide_window(&mut command);
+    let output = command.output()?;
     if output.status.success() {
         return Ok(());
     }
