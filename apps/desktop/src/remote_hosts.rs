@@ -501,8 +501,8 @@ pub fn status_text(status: &Status) -> String {
         Status::Connecting(Phase::Starting) => rust_i18n::t!("ssh.status_starting").into_owned(),
         Status::Connected(_) => rust_i18n::t!("ssh.status_connected").into_owned(),
         Status::Waiting { attempt, error, .. } => {
-            rust_i18n::t!("ssh.status_waiting", attempt = attempt, error = error.as_str()).into_owned()
+            rust_i18n::t!("ssh.status_waiting", attempt = attempt, error = error.text()).into_owned()
         }
-        Status::Stopped { error, .. } => rust_i18n::t!("ssh.status_stopped", error = error.as_str()).into_owned(),
+        Status::Stopped { error, .. } => rust_i18n::t!("ssh.status_stopped", error = error.text()).into_owned(),
     }
 }

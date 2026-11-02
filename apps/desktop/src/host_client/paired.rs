@@ -32,8 +32,8 @@ use runode_remote::client::{self, Cancel, DialError, Dialed, PairedMachine};
 use super::{
     ConnectError, Link, Timeouts, UnixStream, build,
     hosts::{
-        self, Connected, HEARTBEAT, HEARTBEAT_TIMEOUT, HostId, LIST_TIMEOUT, Phase, RETRY_DELAYS, RemoteEvent,
-        STABLE_AFTER, Status, emit,
+        self, Connected, HEARTBEAT, HEARTBEAT_TIMEOUT, HostError, HostId, LIST_TIMEOUT, Phase, RETRY_DELAYS,
+        RemoteEvent, STABLE_AFTER, Status, emit,
     },
 };
 
@@ -220,7 +220,7 @@ impl std::fmt::Display for ChannelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Dial(err) => match classify(err) {
-                Failure::Retry(text) | Failure::Stop(text) => f.write_str(&text),
+                Failure::Retry(error) | Failure::Stop(error) => f.write_str(&error.text()),
             },
             Self::Refused(ChannelRefusal::BuildMismatch { build }) => {
                 f.write_str(&rust_i18n::t!("paired.build_mismatch", build = build))
@@ -254,9 +254,51 @@ struct State {
 #[derive(Debug, PartialEq, Eq)]
 enum Failure {
     /// 过一会儿再试可能就好了。
-    Retry(String),
+    Retry(HostError),
     /// 要用户来办（重新配对、升级）。
-    Stop(String),
+    Stop(HostError),
+}
+
+/// 和配对的电脑连不上、断了的几种原因，`text` 按当前的语言写给人看。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PairedError {
+    /// 连着的连接断了。
+    Lost,
+    /// 那台电脑撤销了这台设备。
+    Revoked,
+    /// 那台电脑不认这台设备的签名。
+    BadSignature,
+    /// 失败太多次，那台电脑暂时不让连。
+    RateLimited,
+    /// 那台电脑的远程访问正在关、或者一时办不了。
+    Disabled,
+    /// 那台电脑拒绝了，没说原因。
+    Rejected,
+    /// 那台电脑的证书不是配对时那张。
+    Fingerprint,
+    /// 配对链接过期了。
+    Expired,
+    /// 那台电脑说的协议这边不认识，带着原因。
+    Protocol(String),
+    /// 哪个地址都连不上，带着最后一个地址的错误。
+    Unreachable(String),
+}
+
+impl PairedError {
+    pub fn text(&self) -> String {
+        match self {
+            Self::Lost => rust_i18n::t!("paired.lost").into_owned(),
+            Self::Revoked => rust_i18n::t!("paired.revoked").into_owned(),
+            Self::BadSignature => rust_i18n::t!("paired.bad_signature").into_owned(),
+            Self::RateLimited => rust_i18n::t!("paired.rate_limited").into_owned(),
+            Self::Disabled => rust_i18n::t!("paired.disabled").into_owned(),
+            Self::Rejected => rust_i18n::t!("paired.rejected").into_owned(),
+            Self::Fingerprint => rust_i18n::t!("paired.fingerprint").into_owned(),
+            Self::Expired => rust_i18n::t!("paired.expired").into_owned(),
+            Self::Protocol(reason) => rust_i18n::t!("paired.protocol", reason = reason).into_owned(),
+            Self::Unreachable(reason) => rust_i18n::t!("paired.unreachable", reason = reason).into_owned(),
+        }
+    }
 }
 
 impl std::fmt::Debug for PairedHost {
@@ -470,14 +512,14 @@ impl PairedHost {
             }
             let error = match failure {
                 Some(Failure::Stop(error)) => {
-                    tracing::warn!("connecting to the paired computer {} needs the user: {error}", self.id);
+                    tracing::warn!("connecting to the paired computer {} needs the user: {error:?}", self.id);
                     self.set_status(Status::Stopped { error, auth: false });
                     self.wait_for_retry();
                     attempt = 0;
                     continue;
                 }
                 Some(Failure::Retry(error)) => error,
-                None => rust_i18n::t!("paired.lost").into_owned(),
+                None => HostError::Paired(PairedError::Lost),
             };
             let Some(&delay) = RETRY_DELAYS.get(attempt as usize) else {
                 tracing::warn!("gave up reconnecting to the paired computer {} after {attempt} attempts", self.id);
@@ -489,7 +531,10 @@ impl PairedHost {
                 continue;
             };
             attempt += 1;
-            tracing::info!("reconnecting to the paired computer {} in {delay:?} (attempt {attempt}): {error}", self.id);
+            tracing::info!(
+                "reconnecting to the paired computer {} in {delay:?} (attempt {attempt}): {error:?}",
+                self.id
+            );
             self.set_status(Status::Waiting { attempt, retry_at: Instant::now() + delay, error });
             self.sleep(delay);
         }
@@ -529,13 +574,13 @@ impl PairedHost {
         *self.addr.lock().unwrap_or_else(PoisonError::into_inner) = dialed.addr;
         self.set_status(Status::Connecting(Phase::Starting));
         let stream = dialed.stream;
-        let theirs = stream.try_clone().map_err(|err| Failure::Retry(err.to_string()))?;
+        let theirs = stream.try_clone().map_err(|err| Failure::Retry(HostError::Plain(err.to_string())))?;
         {
             let mut state = self.state();
             // 拨号的时候用户断开或忘掉了这台：不接上，不然它连上后照样报 `RemoteEvent::Connected`。
             if !state.wanted {
                 let _ = theirs.shutdown(Shutdown::Both);
-                return Err(Failure::Retry("disconnected while connecting".into()));
+                return Err(Failure::Retry(HostError::Plain("disconnected while connecting".into())));
             }
             state.stream = Some(theirs);
             self.link.set_windows_paths(state.windows);
@@ -544,10 +589,8 @@ impl PairedHost {
             self.drop_stream();
             // 宿主的协议版本对不上时再连也一样，要两边升级到同一版本。
             return Err(match err {
-                ConnectError::Incompatible(reason) => {
-                    Failure::Stop(rust_i18n::t!("paired.protocol", reason = reason).into_owned())
-                }
-                err => Failure::Retry(err.to_string()),
+                ConnectError::Incompatible(reason) => Failure::Stop(HostError::Paired(PairedError::Protocol(reason))),
+                err => Failure::Retry(HostError::Plain(err.to_string())),
             });
         }
         let build = self.link.host_build().map(|build| build.0).unwrap_or_default();
@@ -652,25 +695,22 @@ fn has_drive(path: &Path) -> bool {
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
-/// 按拨号的失败定下要不要自己再试，原因写给人看。
+/// 按拨号的失败定下要不要自己再试和是哪种原因。
 fn classify(err: &DialError) -> Failure {
-    let text = |key: &str| rust_i18n::t!(key).into_owned();
+    let paired = HostError::Paired;
     match err {
-        DialError::Rejected(RejectReason::UnknownDevice) => Failure::Stop(text("paired.revoked")),
-        DialError::Rejected(RejectReason::BadSignature) => Failure::Stop(text("paired.bad_signature")),
-        DialError::Rejected(RejectReason::RateLimited) => Failure::Retry(text("paired.rate_limited")),
-        DialError::Rejected(RejectReason::Disabled) => Failure::Retry(text("paired.disabled")),
+        DialError::Rejected(RejectReason::UnknownDevice) => Failure::Stop(paired(PairedError::Revoked)),
+        DialError::Rejected(RejectReason::BadSignature) => Failure::Stop(paired(PairedError::BadSignature)),
+        DialError::Rejected(RejectReason::RateLimited) => Failure::Retry(paired(PairedError::RateLimited)),
+        DialError::Rejected(RejectReason::Disabled) => Failure::Retry(paired(PairedError::Disabled)),
         DialError::Rejected(RejectReason::PairingInvalid | RejectReason::Unknown) => {
-            Failure::Retry(text("paired.rejected"))
+            Failure::Retry(paired(PairedError::Rejected))
         }
-        DialError::FingerprintMismatch => Failure::Stop(text("paired.fingerprint")),
-        DialError::Expired => Failure::Stop(text("paired.expired")),
-        DialError::Protocol(reason) => Failure::Stop(rust_i18n::t!("paired.protocol", reason = reason).into_owned()),
-        DialError::Unreachable { last } => {
-            Failure::Retry(rust_i18n::t!("paired.unreachable", reason = last.as_str()).into_owned())
-        }
-        DialError::Io(err) => Failure::Retry(err.to_string()),
-        DialError::Cancelled => Failure::Retry(err.to_string()),
+        DialError::FingerprintMismatch => Failure::Stop(paired(PairedError::Fingerprint)),
+        DialError::Expired => Failure::Stop(paired(PairedError::Expired)),
+        DialError::Protocol(reason) => Failure::Stop(paired(PairedError::Protocol(reason.clone()))),
+        DialError::Unreachable { last } => Failure::Retry(paired(PairedError::Unreachable(last.clone()))),
+        DialError::Io(_) | DialError::Cancelled => Failure::Retry(HostError::Plain(err.to_string())),
     }
 }
 
@@ -684,7 +724,7 @@ mod tests {
     use runode_protocol::remote::RejectReason;
     use runode_remote::client::DialError;
 
-    use super::{Failure, MACOS_ONLY_DIR, classify, has_drive, system};
+    use super::{Failure, HostError, MACOS_ONLY_DIR, PairedError, classify, has_drive, system};
 
     /// 撤销了配对、证书变了、协议不认识的要用户来办，停下；连不上、限速、一时办不了的自己再试。
     #[test]
@@ -699,6 +739,21 @@ mod tests {
         assert!(!stops(DialError::Rejected(RejectReason::Disabled)));
         assert!(!stops(DialError::Rejected(RejectReason::Unknown)));
         assert!(!stops(DialError::Io(std::io::Error::other("reset"))));
+    }
+
+    /// 存下的是原因的种类和要插进文案的参数，不是翻译好的文字。
+    #[test]
+    fn dial_failures_keep_the_kind_not_the_text() {
+        assert_eq!(
+            classify(&DialError::Rejected(RejectReason::UnknownDevice)),
+            Failure::Stop(HostError::Paired(PairedError::Revoked))
+        );
+        assert_eq!(
+            classify(&DialError::Unreachable { last: "10.0.0.2:7419: timed out".into() }),
+            Failure::Retry(HostError::Paired(PairedError::Unreachable("10.0.0.2:7419: timed out".into())))
+        );
+        let text = HostError::Paired(PairedError::Unreachable("timed out".into())).text();
+        assert!(text.contains("timed out"), "{text}");
     }
 
     /// 宿主报了系统就照用它报的，一个目录也不列；家目录没报时就是不知道，也不去问。

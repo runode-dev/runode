@@ -37,8 +37,8 @@ use runode_ssh::{
 use super::{
     Link, Timeouts, UnixStream, build,
     hosts::{
-        self, Connected, HEARTBEAT, HEARTBEAT_TIMEOUT, HostId, LIST_TIMEOUT, Phase, RETRY_DELAYS, RemoteEvent,
-        STABLE_AFTER, Status, emit,
+        self, Connected, HEARTBEAT, HEARTBEAT_TIMEOUT, HostError, HostId, LIST_TIMEOUT, Phase, RETRY_DELAYS,
+        RemoteEvent, STABLE_AFTER, Status, emit,
     },
 };
 
@@ -401,7 +401,7 @@ impl RemoteHost {
                         );
                     }
                     tracing::warn!("connecting to {} needs the user: {error}", self.name);
-                    self.set_status(Status::Stopped { error, auth });
+                    self.set_status(Status::Stopped { error: HostError::Plain(error), auth });
                     self.wait_for_retry();
                     attempt = 0;
                     continue;
@@ -412,7 +412,7 @@ impl RemoteHost {
             let Some(&delay) = RETRY_DELAYS.get(attempt as usize) else {
                 tracing::warn!("gave up reconnecting to {} after {attempt} attempts: {error}", self.name);
                 self.state().gave_up = true;
-                self.set_status(Status::Stopped { error, auth: false });
+                self.set_status(Status::Stopped { error: HostError::Plain(error), auth: false });
                 self.wait_for_retry();
                 self.state().gave_up = false;
                 attempt = 0;
@@ -420,7 +420,11 @@ impl RemoteHost {
             };
             attempt += 1;
             tracing::info!("reconnecting to {} in {delay:?} (attempt {attempt}): {error}", self.name);
-            self.set_status(Status::Waiting { attempt, retry_at: Instant::now() + delay, error });
+            self.set_status(Status::Waiting {
+                attempt,
+                retry_at: Instant::now() + delay,
+                error: HostError::Plain(error),
+            });
             self.sleep(delay);
         }
     }
@@ -987,10 +991,11 @@ mod tests {
             let state = host.state();
             (state.nudged, state.status.clone())
         };
-        let waiting = Status::Waiting { attempt: 3, retry_at: Instant::now(), error: "timed out".into() };
+        let timed_out = || super::HostError::Plain("timed out".into());
+        let waiting = Status::Waiting { attempt: 3, retry_at: Instant::now(), error: timed_out() };
         assert!(nudged(waiting.clone(), false, true).0);
         assert!(!nudged(waiting, false, false).0);
-        let stopped = || Status::Stopped { error: "timed out".into(), auth: false };
+        let stopped = || Status::Stopped { error: timed_out(), auth: false };
         assert_eq!(nudged(stopped(), true, true), (true, Status::Connecting(super::Phase::Authenticating)));
         assert_eq!(nudged(stopped(), false, true), (false, stopped()));
         assert!(!nudged(Status::Idle, false, true).0);

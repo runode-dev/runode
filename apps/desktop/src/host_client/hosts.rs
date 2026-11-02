@@ -265,14 +265,32 @@ pub enum Status {
     Waiting {
         attempt: u32,
         retry_at: Instant,
-        error: String,
+        error: HostError,
     },
     /// 不再自己重连，等 `retry_now`：要用户来办才能再连（认证没过、主机密钥变了、平台不支持、装不上，配对被
     /// 撤销），或者重连的退避走完了还连不上。
     Stopped {
-        error: String,
+        error: HostError,
         auth: bool,
     },
+}
+
+/// 没连上、断了的原因。存的是种类，画界面时才写成当时语言的文字（`text`），切换语言后跟着变。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostError {
+    /// 照原样显示的文字：ssh 和系统报的错误，没有译文。
+    Plain(String),
+    Paired(paired::PairedError),
+}
+
+impl HostError {
+    /// 写给人看的原因，按当前的语言。
+    pub fn text(&self) -> String {
+        match self {
+            Self::Plain(text) => text.clone(),
+            Self::Paired(error) => error.text(),
+        }
+    }
 }
 
 /// 连上了的远端宿主。
