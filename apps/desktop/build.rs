@@ -39,11 +39,47 @@ fn main() {
     }
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         prepare_conpty();
-        // GPUI 拿编号为 1 的图标资源当窗口和任务栏的图标，资源管理器里的程序图标也是它。
-        println!("cargo:rerun-if-changed=runode.rc");
         println!("cargo:rerun-if-changed=assets/compiled/runode.ico");
-        embed_resource::compile("runode.rc", embed_resource::NONE).manifest_required().unwrap();
+        let rc = PathBuf::from(env::var("OUT_DIR").unwrap()).join("runode.rc");
+        fs::write(&rc, windows_resource(&version, &build)).unwrap();
+        embed_resource::compile(&rc, embed_resource::NONE).manifest_required().unwrap();
     }
+}
+
+/// Windows 的资源：GPUI 拿编号为 1 的图标资源当窗口和任务栏的图标，资源管理器里的程序图标也是它；版本信息里的
+/// 文件说明是系统给人看的程序名（防火墙、任务管理器、「打开方式」），没有它时系统写文件名 `runode`。
+fn windows_resource(version: &str, build: &str) -> String {
+    let icon = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("assets/compiled/runode.ico");
+    let icon = icon.display().to_string().replace('\\', "\\\\");
+    let mut numbers: Vec<u16> = version.split(['.', '-']).map_while(|part| part.parse().ok()).collect();
+    numbers.resize(4, 0);
+    let numbers = numbers.iter().map(u16::to_string).collect::<Vec<_>>().join(",");
+    format!(
+        r#"1 ICON "{icon}"
+1 VERSIONINFO
+FILEVERSION {numbers}
+PRODUCTVERSION {numbers}
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Runode"
+      VALUE "FileDescription", "Runode"
+      VALUE "ProductName", "Runode"
+      VALUE "FileVersion", "{version}"
+      VALUE "ProductVersion", "{build}"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
+"#
+    )
 }
 
 /// 开发版和发布版都带新版 ConPTY，免得 Windows 10 自带的版本吞掉程序的鼠标上报开关。
