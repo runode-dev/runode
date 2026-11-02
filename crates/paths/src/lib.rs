@@ -478,6 +478,13 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
 #[cfg(windows)]
 mod acl;
 
+/// `path` 在 `home` 下时写成 `~`，或者 `~` 加 `separator` 再接家目录下的那段；不在 `home` 下时为空。分隔符由调用方
+/// 定：要能原样交回给认 `~/` 的地方（命令行的选择器）就写 `/`，只给人看的用本机的。
+pub fn home_relative(path: &Path, home: &Path, separator: char) -> Option<String> {
+    let rest = path.strip_prefix(home).ok()?;
+    Some(if rest.as_os_str().is_empty() { "~".into() } else { format!("~{separator}{}", rest.display()) })
+}
+
 /// 把 `contents` 整个换进用户的文件 `path`（配置文件这类用户手写过的）：先写到
 /// 同一目录的临时文件再改名换上，写到一半崩溃或磁盘满时原文件原样还在，不会被截成空的。`path` 是
 /// 符号链接时换的是它最终指向的文件，链接留着，dotfiles 管理器靠它；原文件的权限照旧，新建的文件只有自己能读。目录要已经有了。

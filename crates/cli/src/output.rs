@@ -64,9 +64,6 @@ pub(crate) fn table(
 
 /// 家目录下的路径写成 `~/…`。
 pub(crate) fn tilde(path: &Path, home: Option<&Path>) -> String {
-    match home.and_then(|home| path.strip_prefix(home).ok()) {
-        Some(rest) if rest.as_os_str().is_empty() => "~".into(),
-        Some(rest) => format!("~/{}", rest.display()),
-        None => path.display().to_string(),
-    }
+    // `/`：选择器和 `expand_home` 只认 `~/`。
+    home.and_then(|home| runode_paths::home_relative(path, home, '/')).unwrap_or_else(|| path.display().to_string())
 }

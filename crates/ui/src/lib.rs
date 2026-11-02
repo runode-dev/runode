@@ -50,15 +50,9 @@ pub fn hsla(color: Rgb) -> Hsla {
 
 /// 给人看的路径，家目录写成 `~`。
 pub fn display_dir(dir: &Path) -> String {
-    if let Some(home) = runode_paths::Dirs::from_env().home
-        && let Ok(rest) = dir.strip_prefix(&home)
-    {
-        if rest.as_os_str().is_empty() {
-            return "~".into();
-        }
-        return format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display());
-    }
-    dir.display().to_string()
+    let home = runode_paths::Dirs::from_env().home;
+    home.and_then(|home| runode_paths::home_relative(dir, &home, std::path::MAIN_SEPARATOR))
+        .unwrap_or_else(|| dir.display().to_string())
 }
 
 /// 路径的最后一段，用在标签、提示和列表里；没有最后一段（比如 `/`）时写整个路径。
