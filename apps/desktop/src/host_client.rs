@@ -20,6 +20,7 @@ mod handoff;
 pub mod hosts;
 mod launch;
 mod link;
+pub mod paired;
 pub mod ssh;
 
 use std::{

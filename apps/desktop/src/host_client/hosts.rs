@@ -17,7 +17,7 @@ use std::{
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use runode_protocol::{ClientMsg, SessionId};
 
-use super::{Link, Timeouts, build, ssh};
+use super::{Link, Timeouts, build, paired, ssh};
 
 /// 一个终端、一个工作区在哪台机器上。
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -92,32 +92,39 @@ pub fn link_of(host: &HostId) -> Link {
     match host {
         HostId::Local => super::link().clone(),
         HostId::Ssh(name) => ssh::remote(name).map_or_else(|| NOWHERE.clone(), |remote| remote.link.clone()),
-        HostId::Paired(_) => NOWHERE.clone(),
+        HostId::Paired(id) => paired::remote(id).map_or_else(|| NOWHERE.clone(), |remote| remote.link.clone()),
     }
 }
 
 /// 远端主机 `host` 现在的连接状态；还没有这台主机时是没在连，也不新建它。本机不经这里，算没在连。
 pub fn status_of(host: &HostId) -> Status {
     match host {
-        HostId::Local | HostId::Paired(_) => Status::Idle,
+        HostId::Local => Status::Idle,
         HostId::Ssh(name) => ssh::find(name).map_or(Status::Idle, |host| host.status()),
+        HostId::Paired(id) => paired::find(id).map_or(Status::Idle, |host| host.status()),
     }
 }
 
 /// 连着时最近一次心跳到远端宿主来回花的时间；没连着、还没测过时为空。
 pub fn latency(host: &HostId) -> Option<Duration> {
     match host {
-        HostId::Local | HostId::Paired(_) => None,
+        HostId::Local => None,
         HostId::Ssh(name) => ssh::find(name)?.latency(),
+        HostId::Paired(id) => paired::find(id)?.latency(),
     }
 }
 
 /// 远端主机 `host` 不等退避马上再连，停着的（要用户来办的）也再试一次；还没有这台主机时新建、开始连。
 pub fn retry_now(host: &HostId) {
     match host {
-        HostId::Local | HostId::Paired(_) => {}
+        HostId::Local => {}
         HostId::Ssh(name) => {
             if let Some(remote) = ssh::remote(name) {
+                remote.retry_now();
+            }
+        }
+        HostId::Paired(id) => {
+            if let Some(remote) = paired::remote(id) {
                 remote.retry_now();
             }
         }
@@ -126,11 +133,19 @@ pub fn retry_now(host: &HostId) {
 
 /// 要用远端主机 `host`：还没有时新建、开始连，停着、等着重连、没在连的马上再试；连着、正在连的不动。
 pub fn ensure_connecting(host: &HostId) {
+    let idle = |status: Status| matches!(status, Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle);
     match host {
-        HostId::Local | HostId::Paired(_) => {}
+        HostId::Local => {}
         HostId::Ssh(name) => {
             if let Some(remote) = ssh::remote(name)
-                && matches!(remote.status(), Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle)
+                && idle(remote.status())
+            {
+                remote.retry_now();
+            }
+        }
+        HostId::Paired(id) => {
+            if let Some(remote) = paired::remote(id)
+                && idle(remote.status())
             {
                 remote.retry_now();
             }
@@ -142,35 +157,44 @@ pub fn ensure_connecting(host: &HostId) {
 /// 会阻塞。
 pub fn disconnect(host: &HostId) {
     match host {
-        HostId::Local | HostId::Paired(_) => {}
+        HostId::Local => {}
         HostId::Ssh(name) => {
             if let Some(remote) = ssh::find(name) {
+                remote.disconnect();
+            }
+        }
+        HostId::Paired(id) => {
+            if let Some(remote) = paired::find(id) {
                 remote.disconnect();
             }
         }
     }
 }
 
-/// 忘掉远端主机 `host`：断开，不再列在 `remotes` 里；之后再用它时从头连。会阻塞。
+/// 忘掉远端主机 `host`：断开，不再列在 `remotes` 里；之后再用它时从头连。配对的电脑的配对记录留着，要解除配对
+/// 用 `paired::unpair`。会阻塞。
 pub fn forget(host: &HostId) {
     match host {
-        HostId::Local | HostId::Paired(_) => {}
+        HostId::Local => {}
         HostId::Ssh(name) => ssh::forget(name),
+        HostId::Paired(id) => paired::forget(id),
     }
 }
 
-/// 这次运行里连过（或正连着）的远端主机：先是 SSH 主机，再是配对的电脑，各自按名字排好。
+/// 这次运行里连过（或正连着）的远端主机：先是 SSH 主机，再是配对的电脑，各自按名字、标识排好。
 pub fn remotes() -> Vec<HostId> {
-    ssh::remotes().into_iter().map(|host| HostId::Ssh(host.name.clone())).collect()
+    let ssh = ssh::remotes().into_iter().map(|host| HostId::Ssh(host.name.clone()));
+    ssh.chain(paired::remotes().into_iter().map(|host| HostId::Paired(host.id.clone()))).collect()
 }
 
 /// 远端主机 `host` 是 Windows（路径和命令按那边的规矩写）；还没认出来时、本机都不算。
 pub fn is_windows(host: &HostId) -> bool {
     match host {
-        HostId::Local | HostId::Paired(_) => false,
+        HostId::Local => false,
         HostId::Ssh(name) => {
             ssh::find(name).is_some_and(|host| host.family() == runode_ssh::bootstrap::Family::Windows)
         }
+        HostId::Paired(id) => paired::find(id).is_some_and(|host| host.is_windows()),
     }
 }
 
@@ -349,6 +373,7 @@ fn watch_network() {
         }
         tracing::info!("woke up or the network changed (slept {slept}, addresses changed {changed}): reconnecting");
         ssh::nudge_all();
+        paired::nudge_all();
     }
 }
 

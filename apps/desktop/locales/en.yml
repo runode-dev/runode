@@ -1365,3 +1365,17 @@ divider:
   panel: Resize Side Panel
   split: Resize Split
   snapped_screen: Resize Remote Desktop
+paired:
+  lost: lost the connection
+  revoked: The other computer revoked the pairing. Pair with it again.
+  bad_signature: The other computer does not recognize this one any more. Pair with it again.
+  rate_limited: Too many failed attempts; trying again in a moment.
+  disabled: Remote access on the other computer is turning off or busy.
+  rejected: The other computer turned the connection down.
+  fingerprint: The other computer's certificate changed, so it may not be the one you paired with. Pair with it again.
+  expired: The pairing link has expired.
+  protocol: "The other computer runs a Runode this one cannot talk to (%{reason}). Update both to the same version."
+  unreachable: "Cannot reach the other computer: %{reason}"
+  forget_title: Unpair
+  not_revoked: "This computer forgot %{host}, but %{host} did not revoke it (%{error}). Remove this computer on %{host}'s Mobile page."
+  forget_failed: "Cannot forget %{host}: %{error}"

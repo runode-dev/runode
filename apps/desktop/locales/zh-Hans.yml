@@ -1439,3 +1439,17 @@ divider:
   panel: 调整右侧面板的宽度
   split: 调整分屏的大小
   snapped_screen: 调整远程桌面的高度
+paired:
+  lost: 连接断了
+  revoked: 那台电脑已撤销配对，请重新配对。
+  bad_signature: 那台电脑认不出这台了，请重新配对。
+  rate_limited: 失败次数太多，过一会儿再试。
+  disabled: 那台电脑的远程访问正在关闭或一时办不了。
+  rejected: 那台电脑拒绝了连接。
+  fingerprint: 那台电脑的证书变了，可能不是配对时那台，请重新配对。
+  expired: 配对链接已过期。
+  protocol: "那台电脑上的 Runode 和这台说不上话（%{reason}），请把两台升级到同一版本。"
+  unreachable: "连不上那台电脑：%{reason}"
+  forget_title: 解除配对
+  not_revoked: "这台已经忘掉了 %{host}，但那边没撤销这台（%{error}）。请到 %{host} 的「手机端」页里把这台删掉。"
+  forget_failed: "没能忘掉 %{host}：%{error}"

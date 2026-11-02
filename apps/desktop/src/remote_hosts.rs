@@ -16,7 +16,7 @@ use gpui::{App, AppContext as _, Global, PromptLevel};
 use crate::{
     host_client::{
         hosts::{self, HostId, Phase, RemoteEvent, Status},
-        ssh,
+        paired, ssh,
     },
     terminal_view, window,
 };
@@ -80,7 +80,7 @@ pub fn default_name(host: &HostId) -> String {
     match host {
         HostId::Local => String::new(),
         HostId::Ssh(name) => name.clone(),
-        HostId::Paired(id) => id.clone(),
+        HostId::Paired(id) => paired::machine(id).map_or_else(|| id.clone(), |machine| machine.host_name),
     }
 }
 
@@ -214,7 +214,7 @@ pub fn install_service(name: &str, report: bool, cx: &mut App) {
         };
         cx.update(|cx| {
             if report && !matches!(job, ServiceJob::Done { moved: true }) {
-                tell(&service_job_text(&job), cx);
+                tell(&rust_i18n::t!("ssh.service_title"), &service_job_text(&job), cx);
             }
             set_service_job(&name, job, cx);
         });
@@ -295,13 +295,12 @@ pub fn prune_job_text(job: &PruneJob) -> String {
 }
 
 /// 在最前面的窗口上说一句，只有「好」一个按钮。
-fn tell(detail: &str, cx: &mut App) {
+fn tell(title: &str, detail: &str, cx: &mut App) {
     let Some(front) = window::front_window(cx) else {
         return;
     };
-    let (title, ok) = (rust_i18n::t!("ssh.service_title"), rust_i18n::t!("ssh.ok"));
-    let _ =
-        front.update(cx, |_, window, cx| window.prompt(PromptLevel::Info, &title, Some(detail), &[ok.as_ref()], cx));
+    let ok = rust_i18n::t!("ssh.ok");
+    let _ = front.update(cx, |_, window, cx| window.prompt(PromptLevel::Info, title, Some(detail), &[ok.as_ref()], cx));
 }
 
 /// SSH 主机 `name` 的宿主会跟着 ssh 的登录被结束：问用户要不要装成登录服务。
@@ -335,10 +334,38 @@ pub fn disconnect(host: &HostId, cx: &mut App) {
 }
 
 /// 在后台忘掉远端主机 `host`；只该在没有工作区、终端用着它时调。
+/// 配对的电脑是解除配对（`paired::unpair`）：那边没撤销成时在最前面的窗口上说一声，请用户到那台电脑上撤销。
 pub fn forget(host: &HostId, cx: &mut App) {
     crate::project_host::forget(host);
-    let host = host.clone();
-    cx.background_spawn(async move { hosts::forget(&host) }).detach();
+    let HostId::Paired(id) = host else {
+        let host = host.clone();
+        cx.background_spawn(async move { hosts::forget(&host) }).detach();
+        return;
+    };
+    let name = display_name(host, cx);
+    let id = id.clone();
+    let task = cx.background_spawn(async move { paired::unpair(&id) });
+    cx.spawn(async move |cx| {
+        let unpaired = task.await;
+        cx.update(|cx| {
+            let detail = match unpaired {
+                Ok(()) => None,
+                Err(paired::UnpairError::NotRevoked(error)) => {
+                    tracing::warn!("{name} did not revoke this computer: {error}");
+                    Some(rust_i18n::t!("paired.not_revoked", host = name.as_str(), error = error).into_owned())
+                }
+                Err(paired::UnpairError::Local(error)) => {
+                    tracing::warn!("cannot forget {name}: {error}");
+                    Some(rust_i18n::t!("paired.forget_failed", host = name.as_str(), error = error).into_owned())
+                }
+            };
+            if let Some(detail) = detail {
+                tell(&rust_i18n::t!("paired.forget_title"), &detail, cx);
+            }
+            hosts_changed(cx);
+        });
+    })
+    .detach();
 }
 
 /// 开始收远端主机的事件，app 退出时让各台主机的主连接退出。要在恢复窗口之前调。
