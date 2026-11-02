@@ -49,12 +49,11 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
         && let Some(text) = read_small(&file)
     {
         let targets = makefile_targets(&text);
-        let truncated = targets.len() > MAX_TASKS;
-        let tasks = targets
-            .into_iter()
-            .take(MAX_TASKS)
-            .map(|(name, description)| TaskEntry { command: format!("{prefix} {}", quote(&name)), name, description })
-            .collect();
+        let (tasks, truncated) = first_tasks(targets, |(name, description)| TaskEntry {
+            command: format!("{prefix} {}", quote(&name)),
+            name,
+            description,
+        });
         sources.push(TaskSource { kind: TaskSourceKind::Makefile, file, project: None, tasks, truncated });
     }
     let package = ancestors.iter().find_map(|at| named_file(at, &["package.json"]));
@@ -71,19 +70,20 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
             .filter(|(k, _)| quotable(k))
             .filter_map(|(k, v)| Some((k, v.as_str()?)))
             .collect();
-        let truncated = scripts.len() > MAX_TASKS;
-        let tasks = scripts
-            .into_iter()
-            .take(MAX_TASKS)
-            .map(|(name, body)| TaskEntry {
-                command: format!("{manager} run {}", quote(name)),
-                name: name.clone(),
-                description: Some(body.to_owned()),
-            })
-            .collect();
+        let (tasks, truncated) = first_tasks(scripts, |(name, body)| TaskEntry {
+            command: format!("{manager} run {}", quote(name)),
+            name: name.clone(),
+            description: Some(body.to_owned()),
+        });
         sources.push(TaskSource { kind: TaskSourceKind::PackageJson, file, project: None, tasks, truncated });
     }
     Ok(sources)
+}
+
+/// `items` 的前 `MAX_TASKS` 个换成命令，和有没有多出来没给的。
+fn first_tasks<T>(items: Vec<T>, task: impl FnMut(T) -> TaskEntry) -> (Vec<TaskEntry>, bool) {
+    let truncated = items.len() > MAX_TASKS;
+    (items.into_iter().take(MAX_TASKS).map(task).collect(), truncated)
 }
 
 /// 自己加的命令文件 `file`（内容是 `text`）里给 `dir` 的两份：`dir` 所在项目的（`projects` 里是 `dir`
@@ -96,16 +96,11 @@ fn custom_sources(text: &str, file: &Path, dir: &Path) -> Vec<TaskSource> {
     };
     let source = |kind, project: Option<PathBuf>, entries: Option<&serde_json::Map<String, serde_json::Value>>| {
         let entries: Vec<_> = entries.into_iter().flatten().filter_map(|(k, v)| Some((k, v.as_str()?))).collect();
-        let truncated = entries.len() > MAX_TASKS;
-        let tasks: Vec<_> = entries
-            .into_iter()
-            .take(MAX_TASKS)
-            .map(|(name, line)| TaskEntry {
-                command: line.to_owned(),
-                name: name.clone(),
-                description: Some(line.to_owned()),
-            })
-            .collect();
+        let (tasks, truncated) = first_tasks(entries, |(name, line)| TaskEntry {
+            command: line.to_owned(),
+            name: name.clone(),
+            description: Some(line.to_owned()),
+        });
         (!tasks.is_empty()).then(|| TaskSource { kind, file: file.to_path_buf(), project, tasks, truncated })
     };
     let project = deepest(json.get("projects"), dir);
