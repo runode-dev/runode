@@ -19,6 +19,7 @@ mod help;
 mod remote;
 mod select;
 mod service;
+mod spec;
 mod todo;
 
 use std::{ffi::OsString, io::Write, path::PathBuf};

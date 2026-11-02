@@ -7,7 +7,11 @@ use runode_protocol::{Placement, todo::When};
 use runode_todo::LocalTime;
 use runode_types::input::parse_key_list;
 
-use crate::{help, select::Selector};
+use crate::{
+    help,
+    select::Selector,
+    spec::{UNTIL, is_command_count, list, subcommand_list},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Command {
@@ -203,8 +207,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             "--key" => flags.keys.push(value(&mut rest, arg)?.to_owned()),
             "--lines" => flags.lines = Some(value(&mut rest, arg)?.parse().map_err(|_| "--lines takes a count")?),
             "--command" => {
-                // 次数可以不给。会话标识也可能全是数字，所以只把短的数字当次数，长的留给会话。
-                let count = rest.next_if(|next| next.len() <= 4 && next.bytes().all(|b| b.is_ascii_digit()));
+                let count = rest.next_if(|next| is_command_count(next));
                 flags.command = Some(count.map_or(Ok(1), |count| command_count(count))?);
             }
             option if option.starts_with("--command=") => {
@@ -382,7 +385,8 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             Command::Swap { a: Selector::parse(a)?, b: Selector::parse(b)?, focus: std::mem::take(&mut flags.focus) }
         }
         "remote" => {
-            let (what, words) = words.split_first().ok_or("remote needs pair, devices or revoke")?;
+            let (what, words) =
+                words.split_first().ok_or_else(|| format!("remote needs {}", subcommand_list("remote", "or")))?;
             match what.as_str() {
                 "pair" => {
                     no_more(words, 0, "remote pair")?;
@@ -398,19 +402,20 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     let device = words.first().filter(|device| !device.is_empty());
                     Command::RemoteRevoke { device: device.ok_or("remote revoke needs a DEVICE")?.clone() }
                 }
-                other => return Err(format!("remote knows pair, devices and revoke, not {other}")),
+                other => return Err(format!("remote knows {}, not {other}", subcommand_list("remote", "and"))),
             }
         }
         "service" => {
-            let (what, words) = words.split_first().ok_or("service needs install, uninstall, status or upgrade")?;
+            let (what, words) =
+                words.split_first().ok_or_else(|| format!("service needs {}", subcommand_list("service", "or")))?;
             // 不写拉起什么时是宿主。
             let kind = |words: &[String], name: &str| -> Result<Kind, String> {
                 no_more(words, 1, name)?;
-                match words.first().map(String::as_str) {
-                    None | Some("host") => Ok(Kind::Host),
-                    Some("app") => Ok(Kind::App),
-                    Some(other) => Err(format!("{name} knows host and app, not {other}")),
-                }
+                let Some(word) = words.first() else { return Ok(Kind::Host) };
+                Kind::ALL
+                    .into_iter()
+                    .find(|kind| kind.name() == word)
+                    .ok_or_else(|| format!("{name} knows {}, not {word}", list(Kind::ALL.map(Kind::name), "and")))
             };
             match what.as_str() {
                 "install" => Command::ServiceInstall { kind: kind(words, "service install")? },
@@ -423,11 +428,12 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     no_more(words, 0, "service upgrade")?;
                     Command::ServiceUpgrade
                 }
-                other => return Err(format!("service knows install, uninstall, status and upgrade, not {other}")),
+                other => return Err(format!("service knows {}, not {other}", subcommand_list("service", "and"))),
             }
         }
         "todo" => {
-            let (what, words) = words.split_first().ok_or("todo needs add, list, show, start, done or rm")?;
+            let (what, words) =
+                words.split_first().ok_or_else(|| format!("todo needs {}", subcommand_list("todo", "or")))?;
             match what.as_str() {
                 "add" => {
                     if words.is_empty() {
@@ -461,11 +467,12 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                         _ => Command::TodoRemove { id },
                     }
                 }
-                other => return Err(format!("todo knows add, list, show, start, done and rm, not {other}")),
+                other => return Err(format!("todo knows {}, not {other}", subcommand_list("todo", "and"))),
             }
         }
         "schedule" => {
-            let (what, words) = words.split_first().ok_or("schedule needs add, list or rm")?;
+            let (what, words) =
+                words.split_first().ok_or_else(|| format!("schedule needs {}", subcommand_list("schedule", "or")))?;
             match what.as_str() {
                 "add" => {
                     if words.is_empty() {
@@ -499,7 +506,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     no_more(words, 1, "schedule rm")?;
                     Command::ScheduleRemove { id: words.first().ok_or("schedule rm needs an ID")?.clone() }
                 }
-                other => return Err(format!("schedule knows add, list and rm, not {other}")),
+                other => return Err(format!("schedule knows {}, not {other}", subcommand_list("schedule", "and"))),
             }
         }
         "completions" => {
@@ -508,8 +515,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                 Some("bash") => Shell::Bash,
                 Some("fish") => Shell::Fish,
                 Some("zsh") => Shell::Zsh,
-                Some(other) => return Err(format!("completions knows bash, fish and zsh, not {other}")),
-                None => return Err("completions needs a shell: bash, fish or zsh".into()),
+                Some(other) => {
+                    return Err(format!("completions knows {}, not {other}", subcommand_list("completions", "and")));
+                }
+                None => return Err(format!("completions needs a shell: {}", subcommand_list("completions", "or"))),
             };
             Command::Completions { shell }
         }
@@ -616,9 +625,12 @@ fn until<'a>(rest: &mut impl Iterator<Item = &'a String>) -> Result<Until, Strin
         }
         "quiet" => Until::Quiet(seconds(value(rest, "--for quiet")?, "--for quiet")?),
         other => {
-            return Err(format!(
-                "--for takes stopped, done, working, idle, blocked, command, text REGEX or quiet SECS, not {other}"
-            ));
+            let kinds = UNTIL.iter().map(|&(kind, _)| match kind {
+                "text" => "text REGEX",
+                "quiet" => "quiet SECS",
+                kind => kind,
+            });
+            return Err(format!("--for takes {}, not {other}", list(kinds, "or")));
         }
     })
 }

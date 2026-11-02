@@ -20,6 +20,7 @@ use crate::{
     client::Connection,
     commands::{SHORT_ID, plain, state_name, title},
     help,
+    spec::{COMMANDS, UNTIL, is_command_count, service_kinds, subcommands, until_takes_value},
 };
 
 /// 给 `shell` 装的补全脚本：`RUNODE_GET_COMPLETIONS` 问候选，`runode` 和 `rn` 都补。
@@ -62,7 +63,9 @@ enum Value {
     Choice(&'static [(&'static str, &'static str)]),
     /// `--key`：键名。
     Key,
-    /// `--for`：`text`、`quiet` 后面还跟一个词。
+    /// `--command`：后面可以跟一个次数，见 `is_command_count`。
+    OptionalCount,
+    /// `--for`：有的写法后面还跟一个词，见 `until_takes_value`。
     Until,
     /// 带值，但没有候选（数字、时间、文字）。
     Free,
@@ -91,7 +94,7 @@ const LINES: Opt = opt("--lines", "Only the last N lines", Value::Free);
 const AGENTS: &[(&str, &str)] = &[("claude", "Claude Code"), ("codex", "Codex")];
 
 const READ_OPTS: &[Opt] =
-    &[LINES, opt("--command", "The output of the last (or the Nth last) command", Value::None), HELP];
+    &[LINES, opt("--command", "The output of the last (or the Nth last) command", Value::OptionalCount), HELP];
 const SEND_OPTS: &[Opt] = &[
     opt("--paste", "Paste the text instead of typing it", Value::None),
     Opt { flag: "--key", doc: "Press a key after the text", value: Value::Key, repeatable: true },
@@ -179,17 +182,6 @@ const DAY_CHOICES: &[(&str, &str)] = &[
     ("sat", "Saturday"),
 ];
 
-const UNTIL: &[(&str, &str)] = &[
-    ("stopped", "the agent is not working: idle, asking you, or no agent"),
-    ("done", "the agent worked, then stopped"),
-    ("working", "the agent is working"),
-    ("idle", "the agent is idle"),
-    ("blocked", "the agent is asking you"),
-    ("command", "the next command at the shell prompt finished"),
-    ("text", "a line on the screen matches a regex"),
-    ("quiet", "the screen did not change for some seconds"),
-];
-
 /// `--key` 提示的键名，同 `runode_types::input::parse_keys` 认的写法。
 const KEYS: &[(&str, &str)] = &[
     ("enter", ""),
@@ -225,53 +217,6 @@ const KEYS: &[(&str, &str)] = &[
     ("f11", ""),
     ("f12", ""),
 ];
-
-/// 命令和它们的一句话说明，同 `help::OVERVIEW`。
-const COMMANDS: &[(&str, &str)] = &[
-    ("list", "List the terminal sessions"),
-    ("read", "Print the text on a session's screen"),
-    ("send", "Type text and keys into a session"),
-    ("wait", "Wait for an agent, a command or some text on the screen"),
-    ("open", "Open a terminal in the app"),
-    ("kill", "End a session and close its pane"),
-    ("focus", "Show a session's pane and bring its window to the front"),
-    ("move", "Move a session's pane to another place in its window"),
-    ("swap", "Swap the panes of two sessions"),
-    ("todo", "Put tasks for agents on the task board and start them"),
-    ("schedule", "Start a task for an agent at set times"),
-    ("remote", "Pair phones for remote access and manage them"),
-    ("service", "Start runode at login, and upgrade the running host"),
-    ("completions", "Print a completion script for your shell"),
-    ("help", "Show this help, or the help of a command"),
-    ("version", "Show the version"),
-];
-
-/// 各条命令的子命令。
-fn subcommands(command: &str) -> &'static [(&'static str, &'static str)] {
-    match command {
-        "todo" => &[
-            ("add", "Add a task"),
-            ("list", "List the tasks"),
-            ("show", "Print everything about one task"),
-            ("start", "Start a task"),
-            ("done", "Mark a task done"),
-            ("rm", "Remove a task"),
-        ],
-        "schedule" => &[("add", "Add a schedule"), ("list", "List the schedules"), ("rm", "Remove a schedule")],
-        "remote" => &[("pair", "Pair a phone"), ("devices", "List the paired phones"), ("revoke", "Unpair a phone")],
-        "service" => &[
-            ("install", "Install the login service"),
-            ("uninstall", "Remove the login service"),
-            ("status", "Show which login services are installed"),
-            ("upgrade", "Hand the running host's sessions to a host of this build"),
-        ],
-        "completions" => &[("bash", ""), ("fish", ""), ("zsh", "")],
-        _ => &[],
-    }
-}
-
-const SERVICE_KINDS: &[(&str, &str)] =
-    &[("host", "The terminal host without a window (default)"), ("app", "The Runode app (macOS only)")];
 
 /// 在 runode 的终端里才有意义的会话写法。
 const RELATIVE_SESSIONS: &[(&str, &str)] = &[
@@ -340,19 +285,16 @@ fn read(previous: &[String]) -> Line<'_> {
         };
         let Some(opt) = opt else { continue };
         match opt.value {
-            Value::None => {
-                // `--command [N]` 的次数可以不给，短的数字才算，见 `args::parse`。
-                if word == "--command"
-                    && previous.get(i).is_some_and(|next| next.len() <= 4 && next.bytes().all(|b| b.is_ascii_digit()))
-                {
+            Value::None => {}
+            Value::OptionalCount => {
+                if previous.get(i).is_some_and(|next| is_command_count(next)) {
                     i += 1;
                 }
             }
             Value::Until => {
-                // `--for text REGEX`、`--for quiet SECS` 各多吃一个词。
                 let next = previous.get(i).map(String::as_str);
                 i += 1;
-                if next.is_some_and(|next| next == "text" || next == "quiet") {
+                if next.is_some_and(until_takes_value) {
                     i += 1;
                 }
             }
@@ -396,7 +338,7 @@ fn candidates(previous: &[String], current: &str, env: &Env) -> (Also, Vec<(Stri
                 Also::Nothing,
                 if previous.last().is_some_and(|last| last == "--for") { owned(UNTIL) } else { Vec::new() },
             ),
-            Value::None | Value::Free => (Also::Nothing, Vec::new()),
+            Value::None | Value::OptionalCount | Value::Free => (Also::Nothing, Vec::new()),
         };
     }
     let Some(command) = line.command else {
@@ -430,7 +372,7 @@ fn candidates(previous: &[String], current: &str, env: &Env) -> (Also, Vec<(Stri
         ("todo", Some(sub @ ("show" | "start" | "done" | "rm")), 1) => (Also::Nothing, todos(env, sub)),
         ("schedule", Some("rm"), 1) => (Also::Nothing, schedules(env)),
         ("remote", Some("revoke"), 1) => (Also::Nothing, devices(env)),
-        ("service", Some("install" | "uninstall"), 1) => (Also::Nothing, owned(SERVICE_KINDS)),
+        ("service", Some("install" | "uninstall"), 1) => (Also::Nothing, owned(&service_kinds())),
         _ => (Also::Nothing, Vec::new()),
     }
 }
