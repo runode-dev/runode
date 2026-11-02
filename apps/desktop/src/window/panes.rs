@@ -218,22 +218,16 @@ impl WindowView {
     /// 找；这个窗口正在更新、从窗口表里读不到，直接用 `self`。
     fn session_label(&self, id: SessionId, window: &Window, cx: &App) -> Option<String> {
         let title_in = |view: &WindowView| {
-            view.workspaces
-                .iter()
-                .flat_map(|workspace| &workspace.tabs)
-                .flat_map(|tab| tab.panes.values())
-                .map(|(terminal, _)| terminal.read(cx))
-                .find(|terminal| terminal.session_id() == Some(id))
-                .map(|terminal| {
-                    if let Some(agent) = terminal.agent().filter(|agent| agent.kind.is_known()) {
-                        return agent.kind.display_name().to_owned();
-                    }
-                    let meta = terminal.meta();
-                    match &meta.foreground {
-                        Some(program) if !meta.foreground_is_shell => program.clone(),
-                        _ => terminal.title().to_owned(),
-                    }
-                })
+            view.pane_with_session(id, cx).map(|(_, terminal)| terminal.read(cx)).map(|terminal| {
+                if let Some(agent) = terminal.agent().filter(|agent| agent.kind.is_known()) {
+                    return agent.kind.display_name().to_owned();
+                }
+                let meta = terminal.meta();
+                match &meta.foreground {
+                    Some(program) if !meta.foreground_is_shell => program.clone(),
+                    _ => terminal.title().to_owned(),
+                }
+            })
         };
         if let Some(title) = title_in(self) {
             return Some(title);

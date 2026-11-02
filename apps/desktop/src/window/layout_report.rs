@@ -237,10 +237,8 @@ pub(super) fn current(host: &HostId, cx: &mut App) -> Vec<WindowLayout> {
     // 分屏到会话：每个窗口的每个标签里各自查。
     let sessions: HashMap<EntityId, SessionId> = views
         .iter()
-        .flat_map(|(_, root)| root.read(cx).workspaces.iter())
-        .flat_map(|workspace| &workspace.tabs)
-        .flat_map(|tab| &tab.panes)
-        .filter_map(|(pane, (view, _))| Some((*pane, view.read(cx).session_id()?)))
+        .flat_map(|(_, root)| root.read(cx).panes())
+        .filter_map(|(pane, view)| Some((pane, view.read(cx).session_id()?)))
         .collect();
     report(inputs, |pane| sessions.get(&pane).copied())
 }

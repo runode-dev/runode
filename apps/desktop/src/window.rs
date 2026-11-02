@@ -466,9 +466,7 @@ impl WindowView {
         persist::track(cx);
         // 窗口关掉后它的分屏都没了，发过的通知点了也跳不过去，一并收回。
         cx.on_release(|view, cx| {
-            let panes =
-                view.workspaces.iter().flat_map(|workspace| &workspace.tabs).flat_map(|tab| tab.panes.keys().copied());
-            agents::dismiss_alerts(panes.collect::<Vec<_>>(), cx);
+            agents::dismiss_alerts(view.panes().map(|(pane, _)| pane).collect::<Vec<_>>(), cx);
         })
         .detach();
         let github_actions = cx.new(|_| ActionsPanel::default());

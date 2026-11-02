@@ -10,6 +10,7 @@ use std::{
 use gpui::{
     App, Bounds, Context, Entity, EntityId, Focusable, Pixels, ScrollHandle, SharedString, Subscription, Window,
 };
+use runode_protocol::SessionId;
 use runode_types::{
     grid::GridSize,
     pane::{Node, SplitId},
@@ -201,6 +202,20 @@ impl WindowView {
     pub(super) fn next_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
+    }
+
+    /// 各个 workspace 各个标签里的分屏和它的终端。
+    pub(super) fn panes(&self) -> impl Iterator<Item = (EntityId, &Entity<TerminalView>)> {
+        self.workspaces
+            .iter()
+            .flat_map(|workspace| &workspace.tabs)
+            .flat_map(|tab| &tab.panes)
+            .map(|(pane, (view, _))| (*pane, view))
+    }
+
+    /// 接着会话 `id` 的分屏和它的终端。
+    pub(super) fn pane_with_session(&self, id: SessionId, cx: &App) -> Option<(EntityId, &Entity<TerminalView>)> {
+        self.panes().find(|(_, view)| view.read(cx).session_id() == Some(id))
     }
 
     pub(super) fn workspace(&self) -> &Workspace {
@@ -756,11 +771,9 @@ impl WindowView {
             .map(|workspace| workspace.tabs.iter().map(|tab| tab.root.leaves()).collect())
             .collect();
         let ending = sessions_to_end(&layout, closing);
-        for tab in self.workspaces.iter().flat_map(|workspace| &workspace.tabs) {
-            for (id, (view, _)) in &tab.panes {
-                if ending.contains(id) {
-                    view.update(cx, |view, _| view.end());
-                }
+        for (id, view) in self.panes() {
+            if ending.contains(&id) {
+                view.update(cx, |view, _| view.end());
             }
         }
     }

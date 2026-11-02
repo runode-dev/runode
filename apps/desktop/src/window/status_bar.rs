@@ -450,11 +450,7 @@ fn format_cpu(cpu: f32) -> String {
 
 impl WindowView {
     pub(super) fn terminal_views(&self) -> impl Iterator<Item = &gpui::Entity<crate::terminal_view::TerminalView>> {
-        self.workspaces
-            .iter()
-            .flat_map(|workspace| &workspace.tabs)
-            .flat_map(|tab| tab.panes.values())
-            .map(|(view, _)| view)
+        self.panes().map(|(_, view)| view)
     }
 
     pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {

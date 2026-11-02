@@ -276,25 +276,21 @@ pub(super) fn find_session(host: &HostId, id: SessionId, cx: &App) -> Option<(Wi
 /// 主机 `host` 上这个会话的前台跑着认得出的 agent。
 fn runs_agent(host: &HostId, id: SessionId, cx: &App) -> bool {
     windows(cx).into_iter().filter_map(|window| window.read(cx).ok()).any(|view| {
-        view.workspaces.iter().flat_map(|workspace| &workspace.tabs).flat_map(|tab| &tab.panes).any(
-            |(_, (terminal, _))| {
-                let terminal = terminal.read(cx);
-                terminal.host() == host
-                    && terminal.session_id() == Some(id)
-                    && terminal.agent().is_some_and(|agent| agent.kind.is_known())
-            },
-        )
+        view.panes().any(|(_, terminal)| {
+            let terminal = terminal.read(cx);
+            terminal.host() == host
+                && terminal.session_id() == Some(id)
+                && terminal.agent().is_some_and(|agent| agent.kind.is_known())
+        })
     })
 }
 
 fn pane_of(window: WindowHandle<WindowView>, host: &HostId, id: SessionId, cx: &App) -> Option<EntityId> {
     let view = window.read(cx).ok()?;
-    view.workspaces.iter().flat_map(|workspace| &workspace.tabs).flat_map(|tab| &tab.panes).find_map(
-        |(pane, (terminal, _))| {
-            let terminal = terminal.read(cx);
-            (terminal.host() == host && terminal.session_id() == Some(id)).then_some(*pane)
-        },
-    )
+    view.panes().find_map(|(pane, terminal)| {
+        let terminal = terminal.read(cx);
+        (terminal.host() == host && terminal.session_id() == Some(id)).then_some(pane)
+    })
 }
 
 /// 最前面那个窗口，以及它当前的分屏；当前 workspace 里没有标签时没有分屏。当前 workspace 不在主机

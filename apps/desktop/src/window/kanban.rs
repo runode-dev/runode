@@ -196,12 +196,7 @@ impl WindowView {
     /// 切到任务会话：已经在哪个分屏里就切过去，否则接进它目录所在 workspace 的一个新标签（没有这样的
     /// workspace 时新开一个），看板随之收起。
     fn open_todo_session(&mut self, id: SessionId, todo: &Todo, window: &mut Window, cx: &mut Context<Self>) {
-        let own = self
-            .workspaces
-            .iter()
-            .flat_map(|workspace| &workspace.tabs)
-            .flat_map(|tab| &tab.panes)
-            .find_map(|(pane, (terminal, _))| (terminal.read(cx).session_id() == Some(id)).then_some(*pane));
+        let own = self.pane_with_session(id, cx).map(|(pane, _)| pane);
         if let Some(pane) = own {
             self.drop_kanban();
             self.show_pane(pane, window, cx);
