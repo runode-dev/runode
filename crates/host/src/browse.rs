@@ -39,8 +39,13 @@ pub(crate) fn list_dirs(path: Option<PathBuf>) -> Result<Listing, String> {
     // 读不了的目录项（读到一半被删了之类）跳过，不让整个目录列不出来。
     let mut dirs: Vec<String> = entries
         .filter_map(Result::ok)
-        // 符号链接看它指向的东西，指向的东西不在了的不算。
-        .filter(|entry| entry.path().is_dir())
+        // 目录项自带类型，不用再 stat：卡住的网络挂载上每 stat 一次都可能要等很久。只有符号链接才看它指向的
+        // 东西，指向的东西不在了的不算。
+        .filter(|entry| match entry.file_type() {
+            Ok(kind) if kind.is_symlink() => entry.path().is_dir(),
+            Ok(kind) => kind.is_dir(),
+            Err(_) => entry.path().is_dir(),
+        })
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect();
     dirs.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
