@@ -6,15 +6,15 @@
 //! 走完了还连不上就停下，这台电脑睡醒或网络变了时再试；那台电脑撤销了配对、证书变了这类要用户来办的不自己重试。
 //! 停下的都等 `retry_now`。连接的状态变了、连上了，经 `hosts::events` 告诉界面。
 //!
-//! 读写项目、端口转发和远程桌面各自另拨一条连接（`PairedHost::open_channel`、`PairedHost::dial`），过了门禁后
-//! 说各自的协议。断开这台（`disconnect`）或终端那条连接断了时，登记过的（`PairedHost::hold`）跟着关掉；端口转发
+//! 读写项目、端口转发和远程桌面各自另拨一条连接（`PairedHost::open_channel`、`PairedHost::dial`），先试终端那条
+//! 连接连上的地址，过了门禁后说各自的协议。断开这台（`disconnect`）或终端那条连接断了时，登记过的（`PairedHost::hold`）跟着关掉；端口转发
 //! 的监听（`forward`）在断开这台时关。
 
 pub(crate) mod forward;
 
 use std::{
     collections::{HashMap, HashSet},
-    net::Shutdown,
+    net::{Shutdown, SocketAddr},
     path::{Path, PathBuf},
     sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard, PoisonError},
     thread,
@@ -186,6 +186,8 @@ pub struct PairedHost {
     latency: Mutex<Option<Duration>>,
     /// 刚配对时 `pair` 交来的连接，supervisor 第一次连时直接用它。
     handed: Mutex<Option<Dialed>>,
+    /// 终端那条连接最近一次直连上的地址（`Dialed::addr`），另拨的连接先试它；经跨网络连接连上时为空。
+    addr: Mutex<Option<SocketAddr>>,
     /// 登记过的专用连接（`hold`），断开时一起关掉。
     channels: Mutex<Vec<UnixStream>>,
 }
@@ -268,6 +270,7 @@ impl PairedHost {
             changed: Condvar::new(),
             latency: Mutex::new(None),
             handed: Mutex::new(None),
+            addr: Mutex::new(None),
             channels: Mutex::default(),
         }
     }
@@ -277,7 +280,8 @@ impl PairedHost {
         if !matches!(self.status(), Status::Connected(_)) {
             return Err(ChannelError::Broken(format!("not connected to the paired computer {}", self.id)));
         }
-        client::dial(&dirs(), &self.id).map(|dialed| dialed.stream).map_err(ChannelError::Dial)
+        let prefer = *self.addr.lock().unwrap_or_else(PoisonError::into_inner);
+        client::dial_via(&dirs(), &self.id, prefer).map(|dialed| dialed.stream).map_err(ChannelError::Dial)
     }
 
     /// 开一条专用连接：拨号过门禁后发 `hello`、等那边回话，`ChannelReady` 后交回两边原样搬字节的 socket。会阻塞。
@@ -494,6 +498,7 @@ impl PairedHost {
         };
         remember(&dialed.machine);
         tracing::info!("dialed the paired computer {} at {:?}", self.id, dialed.addr);
+        *self.addr.lock().unwrap_or_else(PoisonError::into_inner) = dialed.addr;
         self.set_status(Status::Connecting(Phase::Starting));
         let stream = dialed.stream;
         let theirs = stream.try_clone().map_err(|err| Failure::Retry(err.to_string()))?;

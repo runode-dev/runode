@@ -287,6 +287,43 @@ fn dead_addresses_do_not_hold_up_live_ones() {
     assert_eq!(client::find_machine(&client.dirs, &paired.machine.id).unwrap().last_addr, Some(harness.addr));
 }
 
+/// 给了首选的地址时先单独连它：存下的地址全是死的、首选的那个别处都没记着，照样马上连上。
+#[test]
+fn a_preferred_address_is_dialed_first() {
+    let harness = Harness::start("client-prefer");
+    let client = Client::new("prefer");
+    let paired = pair(&harness, &client);
+    drop(paired.stream);
+    let mut file = client.machines_file();
+    file["machines"][0]["addrs"] = serde_json::json!([DEAD.to_string()]);
+    file["machines"][0]["last_addr"] = SocketAddr::new(DEAD, harness.addr.port()).to_string().into();
+    client.write_machines_file(&file);
+
+    let started = Instant::now();
+    let dialed = client::dial_via(&client.dirs, &paired.machine.id, Some(harness.addr)).unwrap();
+    assert!(started.elapsed() < Duration::from_millis(500), "dialing took {:?}", started.elapsed());
+    assert_eq!(dialed.addr, Some(harness.addr));
+    let screen = open_screen(&harness, &dialed);
+    drop(dialed);
+    assert!(reads_to_end(&screen));
+}
+
+/// 首选的地址收了 TCP 却一声不吭（换了别的程序、那边卡住了）时不等它超时，过一会儿就和别的地址一起试，
+/// 从通的那个连上。
+#[test]
+fn a_silent_preferred_address_does_not_hold_up_the_rest() {
+    let harness = Harness::start("client-silent");
+    let client = Client::new("silent");
+    let paired = pair(&harness, &client);
+    drop(paired.stream);
+    let silent = std::net::TcpListener::bind((LOOPBACK, 0)).unwrap();
+
+    let started = Instant::now();
+    let dialed = client::dial_via(&client.dirs, &paired.machine.id, Some(silent.local_addr().unwrap())).unwrap();
+    assert!(started.elapsed() < Duration::from_secs(1), "dialing took {:?}", started.elapsed());
+    assert_eq!(dialed.addr, Some(harness.addr));
+}
+
 /// 哪个地址都不通时报连不上，不等满 `DIAL_TIMEOUT`。
 #[test]
 fn unreachable_machines_fail_quickly() {

@@ -5,9 +5,11 @@
 //! 门禁后交回一条本机的 socket：TLS 由这里的线程在另一头搬，调用方在 socket 上发第一帧（终端的 `Hello`、
 //! `ScreenHello` 或 `ChannelHello`），之后照普通连接说话。
 //!
-//! 连一台电脑时几条路同时走（`race`）：直连的地址错开一点先后一个个开（前一个失败了马上开下一个），死
-//! 地址不拖着后面的；Bonjour 按指纹找到的地址找到了再加进来；有跨网络的地址时稍等一下再开 iroh，局域网
-//! 通的时候用不上它。先过门禁的那条胜出，之后才开、才到的关掉。
+//! 连配对过的电脑时先单独试一个首选的地址（上次连上的，或调用方给的），它在 `PREFERRED_HEAD_START` 里过了
+//! 门禁就用它，Bonjour、iroh 都不开。它失败了或者没来得及，几条路同时走（`race`）：直连的地址错开一点先后
+//! 一个个开（前一个失败了马上开下一个），死地址不拖着后面的；Bonjour 按指纹找到的地址找到了再加进来；有跨
+//! 网络的地址时稍等一下再开 iroh，局域网通的时候用不上它。先过门禁的那条胜出（还没完的首选地址也算一条），
+//! 之后才开、才到的关掉。
 
 mod handshake;
 mod pump;
@@ -150,7 +152,7 @@ pub fn pair(dirs: &Dirs, uri: &PairingUri, device_name: &str) -> Result<Dialed, 
         Gate::Pair { secret: uri.secret, name: device_name.into(), claimed: AtomicBool::new(false) },
     ));
     let direct = uri.addrs.iter().map(|ip| SocketAddr::new(*ip, uri.port)).collect();
-    let won = race.run(direct, uri.node.clone()).map_err(|err| match err {
+    let won = race.run(None, direct, uri.node.clone()).map_err(|err| match err {
         DialError::Rejected(RejectReason::PairingInvalid) if now_unix() >= uri.expires_at => DialError::Expired,
         err => err,
     })?;
@@ -171,9 +173,16 @@ pub fn pair(dirs: &Dirs, uri: &PairingUri, device_name: &str) -> Result<Dialed, 
     won.hand_over(machine)
 }
 
-/// 连配对过的 `id` 那台：上次的地址和配对链接里的地址、Bonjour 找到的地址、跨网络连接同时试，先过门禁的
-/// 那条胜出，别的关掉。整个过程最长约 `DIAL_TIMEOUT`。
+/// 连配对过的 `id` 那台，先单独试上次连上的地址（`PairedMachine::last_addr`）。
 pub fn dial(dirs: &Dirs, id: &str) -> Result<Dialed, DialError> {
+    dial_via(dirs, id, None)
+}
+
+/// 连配对过的 `id` 那台：先单独试 `prefer`（为空时是上次连上的地址），通常一次 TCP、TLS 和门禁的来回就连上；
+/// 它在 `PREFERRED_HEAD_START` 里没过门禁时，上次的地址和配对链接里的地址、Bonjour 找到的地址、跨网络连接同时
+/// 试，先过门禁的那条胜出，别的关掉，首选的地址不通最多多花 `PREFERRED_HEAD_START`。整个过程最长约
+/// `DIAL_TIMEOUT`。已经有一条连接连着那台电脑时把它连上的地址（`Dialed::addr`）给 `prefer`，另开的连接走同一处。
+pub fn dial_via(dirs: &Dirs, id: &str, prefer: Option<SocketAddr>) -> Result<Dialed, DialError> {
     let Entry { machine, key } = store::find(dirs, id)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no paired computer {id}")))?;
     let race = Arc::new(Race::new(machine.fingerprint, handshake::load_key(&key)?, Gate::Auth(machine.device_id)));
@@ -183,7 +192,7 @@ pub fn dial(dirs: &Dirs, id: &str) -> Result<Dialed, DialError> {
             direct.push(addr);
         }
     }
-    let won = race.run(direct, machine.node.clone())?;
+    let won = race.run(prefer.or(machine.last_addr), direct, machine.node.clone())?;
     let recorded = store::connected(dirs, id, &won.host_name, won.node.as_deref(), won.addr).unwrap_or_else(|err| {
         tracing::warn!("cannot record how {id} was reached: {err}");
         None
@@ -204,6 +213,8 @@ pub const DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
 /// 直连的地址前一个开了这么久还没结果就开下一个。
 const STAGGER: Duration = Duration::from_millis(250);
+/// 首选的地址单独连这么久还没过门禁，就把别的路也开起来。局域网里一次 TCP、TLS 和门禁的来回远短于它。
+const PREFERRED_HEAD_START: Duration = Duration::from_millis(250);
 /// Bonjour 最多找这么久。
 const BROWSE_WAIT: Duration = Duration::from_secs(2);
 /// 跨网络连接晚这么久再开：局域网通的时候先过门禁，用不上它。
@@ -299,11 +310,44 @@ impl Race {
         }
     }
 
-    /// 直连 `direct`、Bonjour 和（有 `node` 时）跨网络连接一起走，返回先过门禁的那条。被拒（限速除外：
-    /// 按来源算，别的路未必被限）马上结束；都失败时按限速、指纹不对、协议不对、连不上的先后报一个。
-    fn run(self: &Arc<Self>, direct: Vec<SocketAddr>, node: Option<String>) -> Result<Won, DialError> {
+    /// 有 `prefer` 时先单独连它，`PREFERRED_HEAD_START` 里过了门禁就用它；它失败了或没来得及，直连 `direct`、
+    /// Bonjour 和（有 `node` 时）跨网络连接一起走，返回先过门禁的那条。被拒（限速除外：按来源算，别的路未必被限）
+    /// 马上结束；都失败时按限速、指纹不对、协议不对、连不上的先后报一个。
+    fn run(
+        self: &Arc<Self>,
+        prefer: Option<SocketAddr>,
+        direct: Vec<SocketAddr>,
+        node: Option<String>,
+    ) -> Result<Won, DialError> {
+        let result = self.run_inner(prefer, direct, node);
+        self.over.store(true, Ordering::Relaxed);
+        result
+    }
+
+    fn run_inner(
+        self: &Arc<Self>,
+        prefer: Option<SocketAddr>,
+        direct: Vec<SocketAddr>,
+        node: Option<String>,
+    ) -> Result<Won, DialError> {
         let (tx, rx) = mpsc::channel();
         let mut pending = 0;
+        let mut failures = Failures::default();
+        if let Some(addr) = prefer {
+            self.tried.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(addr);
+            let (race, events) = (self.clone(), tx.clone());
+            let spawned = thread::Builder::new().name("remote-dial-preferred".into()).spawn(move || {
+                let _ = events.send(Event::Finished(race.attempt(&Route::Direct(addr))));
+            });
+            match spawned {
+                Ok(_) => pending += 1,
+                Err(err) => tracing::warn!("cannot start dialing {addr}: {err}"),
+            }
+            let head_start = (Instant::now() + PREFERRED_HEAD_START).min(self.deadline);
+            if let Some(result) = self.collect(&rx, &mut pending, &mut failures, head_start) {
+                return result;
+            }
+        }
         let mut source = |name: &str, body: Source| {
             let (race, tx) = (self.clone(), tx.clone());
             let spawned = thread::Builder::new().name(format!("remote-dial-{name}")).spawn(move || {
@@ -331,32 +375,38 @@ impl Race {
             );
         }
         drop(tx);
-        let result = self.collect(&rx, pending);
-        self.over.store(true, Ordering::Relaxed);
-        result
+        let deadline = self.deadline;
+        self.collect(&rx, &mut pending, &mut failures, deadline).unwrap_or_else(|| Err(failures.worst()))
     }
 
-    fn collect(&self, rx: &mpsc::Receiver<Event>, mut pending: usize) -> Result<Won, DialError> {
-        let mut failures = Failures::default();
-        while pending > 0 {
-            let left = self.deadline.saturating_duration_since(Instant::now());
+    /// 收各条路的结果，直到有了定论（胜出的、被拒的）、`pending` 条都结束了或到了 `until`；后两种为 `None`，没
+    /// 胜出的失败记在 `failures` 里。
+    fn collect(
+        &self,
+        rx: &mpsc::Receiver<Event>,
+        pending: &mut usize,
+        failures: &mut Failures,
+        until: Instant,
+    ) -> Option<Result<Won, DialError>> {
+        while *pending > 0 {
+            let left = until.saturating_duration_since(Instant::now());
             let Ok(event) = rx.recv_timeout(left) else { break };
             match event {
-                Event::Started => pending += 1,
-                Event::SourceDone | Event::Finished(None) => pending -= 1,
-                Event::Finished(Some(Ok(won))) => return Ok(*won),
+                Event::Started => *pending += 1,
+                Event::SourceDone | Event::Finished(None) => *pending -= 1,
+                Event::Finished(Some(Ok(won))) => return Some(Ok(*won)),
                 Event::Finished(Some(Err(err))) => {
-                    pending -= 1;
+                    *pending -= 1;
                     if let DialError::Rejected(reason) = err
                         && reason != RejectReason::RateLimited
                     {
-                        return Err(err);
+                        return Some(Err(err));
                     }
                     failures.note(err);
                 }
             }
         }
-        Err(failures.worst())
+        None
     }
 
     /// 按先后一个个开 `routes`：前一个失败了，或者开了 `STAGGER` 还没结果，就开下一个。
