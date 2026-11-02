@@ -979,6 +979,30 @@ fn welcome_tells_whether_the_host_runs_on_its_own() {
     assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
 }
 
+/// `Welcome` 报宿主跑在什么系统上、宿主所在用户的家目录在哪。
+#[test]
+fn welcome_reports_the_system_and_home() {
+    let dir = temp_dir("system");
+    let (_host, socket) = listen(&dir);
+    let mut peer = Peer::connect(&socket);
+    peer.send(&ClientMsg::Hello {
+        protocol: PROTOCOL_VERSION,
+        build: BuildId(BUILD.into()),
+        client: ClientKind::Desktop,
+        caps: Caps::default(),
+        session: None,
+        device: None,
+    });
+    match peer.message() {
+        HostMsg::Welcome { os, home, .. } => {
+            assert_eq!(os, std::env::consts::OS);
+            assert_eq!(home, runode_paths::Dirs::from_env().home);
+            assert!(home.is_some());
+        }
+        other => panic!("expected welcome, got {other:?}"),
+    }
+}
+
 /// 界面读不懂转来的请求时回的 `Error` 不带 `req`，宿主转回去时补上原请求的。
 #[test]
 fn ui_errors_without_req_get_the_request_s() {

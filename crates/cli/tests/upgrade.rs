@@ -176,6 +176,8 @@ fn an_unknown_goodbye_reason_closes_the_connection() {
                             todos: false,
                             shells: false,
                             desktops: 0,
+                            os: String::new(),
+                            home: None,
                         };
                         Frame::control(&welcome).unwrap().payload
                     }

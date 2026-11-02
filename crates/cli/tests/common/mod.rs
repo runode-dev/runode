@@ -113,6 +113,8 @@ pub fn welcome(todos: bool) -> HostMsg {
         todos,
         shells: false,
         desktops: 0,
+        os: String::new(),
+        home: None,
     }
 }
 

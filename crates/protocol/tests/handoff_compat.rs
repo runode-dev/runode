@@ -93,6 +93,8 @@ fn welcome_with_handoff_is_readable() {
             todos: false,
             shells: false,
             desktops: 0,
+            os: String::new(),
+            home: None,
         }
     );
     let incompatible: HostMsg =

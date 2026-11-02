@@ -296,6 +296,8 @@ fn host_messages_round_trip() {
             todos: false,
             shells: false,
             desktops: 0,
+            os: String::new(),
+            home: None,
         },
         HostMsg::Welcome {
             protocol: 4,
@@ -308,6 +310,8 @@ fn host_messages_round_trip() {
             todos: false,
             shells: true,
             desktops: 0,
+            os: "linux".into(),
+            home: Some("/home/me".into()),
         },
         HostMsg::Incompatible { protocol: 2, build: BuildId("b".into()), reason: "too new".into() },
         HostMsg::SessionList {
@@ -651,6 +655,34 @@ fn welcome_without_standalone_reads_as_in_app() {
         serde_json::from_str(r#"{"type":"welcome","protocol":3,"build":"x","host_pid":9,"snapshot_format":1}"#)
             .unwrap();
     assert!(matches!(welcome, HostMsg::Welcome { standalone: false, host_pid: 9, .. }));
+}
+
+/// `Welcome` 报了系统和家目录时照写，没报时这两个字段不出现；读不带它们的 `Welcome` 时系统为空、家目录为 `None`。
+#[test]
+fn welcome_reports_the_system_and_home_only_when_known() {
+    let welcome = |os: &str, home: Option<&str>| HostMsg::Welcome {
+        protocol: 4,
+        build: BuildId("b".into()),
+        host_pid: 9,
+        snapshot_format: 1,
+        standalone: true,
+        handoff: 1,
+        keep_awake: true,
+        todos: true,
+        shells: true,
+        desktops: 0,
+        os: os.into(),
+        home: home.map(Into::into),
+    };
+    let json = serde_json::to_value(welcome("windows", Some(r"C:\Users\me"))).unwrap();
+    assert_eq!((json["os"].as_str(), json["home"].as_str()), (Some("windows"), Some(r"C:\Users\me")));
+    let json = serde_json::to_value(welcome("", None)).unwrap();
+    assert!(json.get("os").is_none() && json.get("home").is_none(), "{json}");
+    let old: HostMsg = serde_json::from_str(
+        r#"{"type":"welcome","protocol":4,"build":"b","host_pid":9,"snapshot_format":1,"standalone":true,"handoff":1,"keep_awake":true,"todos":true,"shells":true}"#,
+    )
+    .unwrap();
+    assert_eq!(old, welcome("", None));
 }
 
 /// 转给界面的请求和界面的回话里套着另一种消息，JSON 里就是嵌着的一条消息。

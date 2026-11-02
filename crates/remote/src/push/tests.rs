@@ -469,6 +469,8 @@ impl FakeHost {
                         todos: self.todos.lock().unwrap().is_some(),
                         shells: false,
                         desktops: 0,
+                        os: String::new(),
+                        home: None,
                     }
                 }
                 ClientMsg::ListSessions if self.goodbye.swap(false, Ordering::SeqCst) => {

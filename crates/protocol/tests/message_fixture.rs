@@ -266,6 +266,8 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 todos: false,
                 shells: false,
                 desktops: 0,
+                os: "macos".into(),
+                home: Some("/Users/ethan".into()),
             },
         ),
         ("incompatible", HostMsg::Incompatible { protocol: 5, build: BuildId("x".into()), reason: "old".into() }),

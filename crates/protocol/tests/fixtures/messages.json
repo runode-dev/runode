@@ -1906,8 +1906,10 @@
     "welcome": {
       "build": "0.1.0+abc",
       "handoff": 1,
+      "home": "/Users/ethan",
       "host_pid": 123,
       "keep_awake": true,
+      "os": "macos",
       "protocol": 4,
       "snapshot_format": 1,
       "standalone": true,

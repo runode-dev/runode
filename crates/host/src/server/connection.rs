@@ -378,6 +378,8 @@ impl Connection {
             todos: true,
             shells: true,
             desktops,
+            os: std::env::consts::OS.to_owned(),
+            home: runode_paths::Dirs::from_env().home,
         }
     }
 
