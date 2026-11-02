@@ -43,7 +43,9 @@ mod outbox;
 mod windows;
 
 pub(crate) use connection::WaitSlot;
-pub(crate) use listen::{ListenControl, Listening};
+pub(crate) use listen::Listening;
+#[cfg(unix)]
+pub(crate) use listen::ListenControl;
 pub use listen::{bind_fresh, set_buffers};
 #[cfg(unix)]
 pub use listen::{same_user, socket_pair};
