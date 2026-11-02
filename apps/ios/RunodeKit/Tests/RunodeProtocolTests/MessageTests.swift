@@ -192,6 +192,18 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     func decode(_ name: String) throws -> HostMsg {
         try JSONDecoder().decode(HostMsg.self, from: RustSamples.data(name))
     }
+
+    /// 宿主发来的各条样例都认得，不会读成 `unknown`：宿主改了消息的类型名时这里先发现。
+    @Test(arguments: [
+        "welcome", "incompatible", "session_list", "spawned", "attached", "snapshot_end", "resized", "theme_applied",
+        "meta", "command_finished", "resync", "exited", "exited_none", "bell", "opened", "done", "screen_text",
+        "layout", "layout_changed", "dirs", "tasks", "git_status", "git_status_none", "git_diff", "git_branches",
+        "error", "error_backed_up", "error_no_session", "goodbye", "goodbye_handoff", "size_owner",
+    ])
+    func knowsEveryHostMessage(_ name: String) throws {
+        if case .unknown(let type) = try decode(name) {
+            Issue.record("\(name) decoded as unknown \(type)")
+        }
     }
 
     @Test func welcomeAndIncompatible() throws {
