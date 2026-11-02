@@ -573,7 +573,7 @@ impl GitPanel {
             .gap(px(6.))
             .when(ri > 0, |title| title.border_t_1().border_color(cx.theme().border))
             .when(active, |title| title.bg(cx.theme().mix(0.04)))
-            .hover(|title| title.bg(cx.theme().mix(0.06)))
+            .hover(|title| title.bg(cx.theme().accent))
             .text_color(fg_hsla)
             .tooltip(tooltip(format!("{kind} · {}", repo.root.display()), None))
             .child(list::chevron(expanded, cx))

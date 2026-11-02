@@ -51,7 +51,7 @@ impl RenderOnce for Chip {
             .gap(px(5.))
             .rounded(px(6.))
             .border_1()
-            .border_color(if on { theme.ring } else { theme.foreground.opacity(0.13) })
+            .border_color(if on { theme.ring } else { theme.control_border })
             .text_size(FontSize::Body)
             .cursor_pointer()
             .when(on, |chip| chip.bg(theme.ring.opacity(0.15)))

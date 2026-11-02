@@ -114,8 +114,8 @@ pub(super) fn page_entry(
     cx: &mut Context<WindowView>,
     open: impl Fn(&mut WindowView, &mut Window, &mut Context<WindowView>) + 'static,
 ) -> Stateful<Div> {
-    let active_bg = cx.theme().mix(0.10);
-    let hover_bg = cx.theme().mix(0.06);
+    let active_bg = cx.theme().accent_selected;
+    let hover_bg = cx.theme().accent;
     let fg = cx.theme().foreground;
     let open = Rc::new(open);
     let press = open.clone();

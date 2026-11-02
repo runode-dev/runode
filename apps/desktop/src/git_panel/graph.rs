@@ -159,7 +159,7 @@ impl GitPanel {
             .border_t_1()
             .border_color(cx.theme().border)
             .text_color(fg_hsla)
-            .hover(|header| header.bg(cx.theme().mix(0.06)))
+            .hover(|header| header.bg(cx.theme().accent))
             .child(chevron(open, cx))
             .child(
                 div()

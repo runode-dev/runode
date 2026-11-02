@@ -424,7 +424,7 @@ impl WindowView {
                 .into_any_element(),
         };
         type Handler = fn(&mut WindowView, EntityId, &mut Window, &mut Context<WindowView>);
-        let hover_bg = cx.theme().mix(0.06);
+        let hover_bg = cx.theme().accent;
         let mut button = |key: &'static str,
                           icon: &'static str,
                           text: Cow<'static, str>,

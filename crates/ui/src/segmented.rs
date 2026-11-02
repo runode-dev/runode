@@ -85,7 +85,7 @@ impl RenderOnce for Segmented {
             .rounded(px(7.))
             .bg(theme.mix(0.06))
             .border_1()
-            .border_color(theme.foreground.opacity(0.13))
+            .border_color(theme.control_border)
             .text_size(FontSize::Body)
             .children(items.into_iter().map(|item| -> AnyElement {
                 if fill { item.flex_1().justify_center().into_any_element() } else { item.into_any_element() }

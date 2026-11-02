@@ -1334,7 +1334,7 @@ impl Kanban {
 
     fn render_schedule(&self, schedule: &Schedule, data: &TodoData, now: u64, cx: &mut Context<Self>) -> Stateful<Div> {
         let fg = cx.theme().foreground;
-        let hover_bg = cx.theme().mix(0.06);
+        let hover_bg = cx.theme().accent;
         let rule = describe_when(&schedule.when);
         let next = schedule.next_fire.map_or_else(
             || rust_i18n::t!("kanban.no_next").into_owned(),

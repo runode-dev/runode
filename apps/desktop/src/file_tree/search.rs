@@ -841,7 +841,8 @@ impl FileTree {
         let search = &self.search;
         let row = &search.rows[ix];
         let theme = cx.theme();
-        let (fg, hit_bg, selected_bg, hover_bg) = (theme.foreground, theme.mix(0.25), theme.mix(0.12), theme.mix(0.06));
+        let (fg, hit_bg, selected_bg, hover_bg) =
+            (theme.foreground, theme.mix(0.25), theme.accent_selected, theme.accent);
         let dim = fg.opacity(0.5);
         // 树形式时文件和目录前面留出箭头的位置，名字对齐。
         let chevron = |expanded: Option<bool>| {

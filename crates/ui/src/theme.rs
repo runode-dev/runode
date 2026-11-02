@@ -34,6 +34,10 @@ pub struct Theme {
     /// 菜单、悬停提示这类浮层的底色和字色。
     pub popover: Hsla,
     pub popover_foreground: Hsla,
+    /// 浮层里的行悬停、选中（键盘挪到的、当前挑着的）时的底色：浮层底色本身比 `background` 深，
+    /// 要比 `accent`、`accent_selected` 再深一档才看得出。
+    pub popover_hover: Hsla,
+    pub popover_selected: Hsla,
     /// 主按钮：反色，前景色的底、背景色的字。
     pub primary: Hsla,
     pub primary_foreground: Hsla,
@@ -43,14 +47,17 @@ pub struct Theme {
     /// 不起眼的底色和淡下去的字。
     pub muted: Hsla,
     pub muted_foreground: Hsla,
-    /// 悬停、选中时的底色；字用 `foreground`。
+    /// `background` 底面上的行悬停时的底色，和选中（当前的、打开着的）那行的底色；字用 `foreground`。
     pub accent: Hsla,
+    pub accent_selected: Hsla,
     /// 出错：调色板里的红色。
     pub destructive: Hsla,
     /// 分隔线和卡片之间的淡线。
     pub border: Hsla,
     /// 输入框、菜单、提示这类浮层的描边。
     pub input: Hsla,
+    /// 设置页这类表单里控件（分段、下拉、小标签、色块）的描边，比 `input` 淡一些。
+    pub control_border: Hsla,
     /// 焦点、打开着的开关这类强调：调色板里的蓝色。
     pub ring: Hsla,
     /// 卡片样式下窗口的底色，衬在卡片后面，见 `frame_color`。
@@ -80,6 +87,8 @@ impl Theme {
             card: hsla(bg),
             popover: mix(0.06),
             popover_foreground: hsla(fg),
+            popover_hover: mix(0.09),
+            popover_selected: mix(0.14),
             primary: hsla(fg),
             primary_foreground: hsla(bg),
             secondary: mix(0.16),
@@ -87,9 +96,11 @@ impl Theme {
             muted: mix(0.04),
             muted_foreground: hsla(fg).opacity(0.5),
             accent: mix(0.06),
+            accent_selected: mix(0.10),
             destructive: hsla(ansi[1]),
             border: hsla(fg).opacity(0.09),
             input: hsla(fg).opacity(0.15),
+            control_border: hsla(fg).opacity(0.13),
             ring: hsla(ansi[4]),
             frame: hsla(frame_color(fg, bg)),
             tab_track: hsla(track),

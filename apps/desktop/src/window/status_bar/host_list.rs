@@ -74,7 +74,7 @@ impl WindowView {
             .items_center()
             .gap(px(8.))
             .cursor_pointer()
-            .hover(|row| row.bg(cx.theme().mix(0.10)))
+            .hover(|row| row.bg(cx.theme().popover_hover))
             .child(div().flex_1().child(manage))
             .child(svg().flex_none().path(CHEVRON_RIGHT_ICON).size(px(12.)).text_color(fg.opacity(0.5)))
             .on_press_down(cx, |this, window, cx| {

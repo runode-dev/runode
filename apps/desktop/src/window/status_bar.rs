@@ -736,8 +736,8 @@ impl WindowView {
                 .rounded(px(6.))
                 .flex()
                 .gap(px(8.))
-                .when(selected, |row| row.bg(cx.theme().mix(0.12)))
-                .hover(|row| row.bg(cx.theme().mix(0.10)))
+                .when(selected, |row| row.bg(cx.theme().popover_selected))
+                .hover(|row| row.bg(cx.theme().popover_hover))
                 .child(
                     div()
                         .flex_none()
@@ -891,7 +891,7 @@ impl WindowView {
     /// 转着的写出本机的端口、能停掉。
     fn render_remote_ports(&self, name: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let fg_h = cx.theme().foreground;
-        let hover_bg = cx.theme().mix(0.10);
+        let hover_bg = cx.theme().popover_hover;
         let ports = cx.try_global::<Status>().and_then(|status| status.remote_ports.get(name).cloned());
         let forwarded = hosts::forward::forwarded(name);
         let title =
@@ -991,7 +991,7 @@ impl WindowView {
             .collect();
         let (ours, external): (Vec<_>, Vec<_>) =
             status.ports.iter().map(|port| (port, status.port_owner(port))).partition(|(_, owner)| owner.is_some());
-        let hover_bg = cx.theme().mix(0.10);
+        let hover_bg = cx.theme().popover_hover;
         let view = cx.entity().downgrade();
         let port_row = |id: &'static str, port: &Port, workspace: Option<SharedString>| {
             let url = format!("http://localhost:{}", port.port);

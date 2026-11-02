@@ -166,8 +166,8 @@ impl WindowView {
         let rows = self.picker_rows(window, cx);
         let selected = self.picker_selected(&rows);
         let picker = self.agent_picker.as_ref()?;
-        let selected_bg = cx.theme().mix(0.14);
-        let hover_bg = cx.theme().mix(0.09);
+        let selected_bg = cx.theme().popover_selected;
+        let hover_bg = cx.theme().popover_hover;
         let fg = cx.theme().foreground;
         let empty = rows.is_empty().then(|| {
             let text = if picker.field.read(cx).query().is_empty() {

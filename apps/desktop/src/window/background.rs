@@ -348,7 +348,7 @@ fn end_sessions(ids: &[SessionId], cx: &mut App) {
 /// 标签接上它。
 fn background_row(ix: usize, session: &SessionInfo, cx: &mut Context<WindowView>) -> Stateful<Div> {
     let id = session.id;
-    let hover_bg = cx.theme().mix(0.06);
+    let hover_bg = cx.theme().accent;
     let fg = cx.theme().foreground;
     let mark = match session.meta.agent {
         Some(agent) => styled_agent_mark(Mark::new(agent, false), ("background-agent", ix), fg, cards(cx)),

@@ -748,7 +748,7 @@ impl FileTree {
         let row = self.state().rows.get(ix)?;
         let theme = cx.theme();
         let selected_bg = theme.mix(if focused { 0.16 } else { 0.10 });
-        let hover_bg = theme.mix(0.06);
+        let hover_bg = theme.accent;
         let drop_bg = theme.mix(0.20);
         let fg = theme.foreground;
         let color = match row.decoration {

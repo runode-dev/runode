@@ -1215,7 +1215,7 @@ impl ActionsPanel {
     /// 用行号的话 VoiceOver 的焦点会跳、按下会按到别的行上。悬停只管这一帧，仍按行号 `ix` 记。
     #[allow(clippy::too_many_arguments)]
     fn actions_row(&self, key: String, ix: usize, depth: usize, cx: &mut Context<Self>) -> Stateful<Div> {
-        let hover = cx.theme().mix(0.06);
+        let hover = cx.theme().accent;
         div()
             .id(SharedString::from(key))
             .role(Role::TreeItem)

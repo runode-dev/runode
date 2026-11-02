@@ -268,7 +268,7 @@ impl WindowView {
         let dialog = self.new_workspace.as_ref()?;
         let local = dialog.host.is_local();
         let panel_bg = cx.theme().mix(0.03);
-        let hover_bg = cx.theme().mix(0.06);
+        let hover_bg = cx.theme().accent;
         let fg = cx.theme().foreground;
         let border = fg.opacity(0.12);
         // 内容比窗口高时整个对话框滚动，各块不压扁。

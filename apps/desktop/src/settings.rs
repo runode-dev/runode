@@ -410,7 +410,7 @@ impl SettingsView {
             .flex_col()
             .bg(theme.mix(0.035))
             .border_r_1()
-            .border_color(theme.foreground.opacity(0.13))
+            .border_color(theme.control_border)
             .id("settings-nav")
             .child(titlebar_strip())
             .child(div().flex().flex_col().gap(px(2.)).px(px(10.)).child(back).child(

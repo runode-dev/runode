@@ -260,8 +260,8 @@ impl WindowView {
         let picker = self.branch_picker.as_ref()?;
         let rows = picker.rows(cx);
         let selected = picker.selected.min(rows.len().saturating_sub(1));
-        let selected_bg = cx.theme().mix(0.14);
-        let hover_bg = cx.theme().mix(0.09);
+        let selected_bg = cx.theme().popover_selected;
+        let hover_bg = cx.theme().popover_hover;
         let fg = cx.theme().foreground;
         let dim = fg.opacity(0.5);
         let empty = rows.is_empty().then(|| {

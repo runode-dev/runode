@@ -172,7 +172,7 @@ impl SettingsView {
                             .rounded(px(10.))
                             .overflow_hidden()
                             .border_2()
-                            .border_color(if on { theme.ring } else { theme.foreground.opacity(0.13) })
+                            .border_color(if on { theme.ring } else { theme.control_border })
                             .children(looks.into_iter().map(preview)),
                     )
                     .child(
@@ -294,7 +294,7 @@ fn chips(look: Look, theme: &Theme) -> Div {
         .rounded(px(3.))
         .overflow_hidden()
         .border_1()
-        .border_color(theme.foreground.opacity(0.13))
+        .border_color(theme.control_border)
         .children([look.bg, look.fg, look.accent].map(|color| div().w(px(7.)).h_full().bg(hsla(color))))
 }
 

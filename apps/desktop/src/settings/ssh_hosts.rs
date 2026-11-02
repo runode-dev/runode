@@ -123,7 +123,7 @@ impl SettingsView {
             .items_center()
             .gap(px(16.))
             .border_b_1()
-            .border_color(theme.foreground.opacity(0.13).opacity(0.6))
+            .border_color(theme.control_border.opacity(0.6))
             .child(
                 div()
                     .flex_1()

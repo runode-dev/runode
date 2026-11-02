@@ -707,7 +707,7 @@ pub trait MenuHost: Sized + 'static {
         // 辅助工具悬停不了，行里的按钮在它读着时一直露出来，不然按不到。
         let a11y = window.is_a11y_active();
         let theme = cx.theme();
-        let hover_bg = theme.mix(0.12);
+        let hover_bg = theme.popover_selected;
         // 选中的行底色已经是 `hover_bg`，行里按钮悬停时再深一些。
         let button_hover_bg = theme.mix(0.22);
         let fg = theme.popover_foreground;
@@ -879,7 +879,7 @@ pub trait MenuHost: Sized + 'static {
         let items = menu.submenu_items(submenu.parent)?;
         let parent_label = menu.items.get(submenu.parent)?.as_ref()?.label.clone();
         let theme = cx.theme();
-        let hover_bg = theme.mix(0.12);
+        let hover_bg = theme.popover_selected;
         let fg = theme.popover_foreground;
         let check_column = items.iter().flatten().any(|item| item.checked.is_some());
         let ids = submenu_row_ids(items);

@@ -600,7 +600,7 @@ impl WindowView {
     pub(super) fn render_add_host(&self, adding: &AddHost, cx: &mut Context<Self>) -> Div {
         let fg = cx.theme().foreground;
         let field_bg = cx.theme().mix(0.03);
-        let hover_bg = cx.theme().mix(0.06);
+        let hover_bg = cx.theme().accent;
         let connect = Button::new("ssh-connect", rust_i18n::t!("workspace.ssh_connect"))
             .variant(ButtonVariant::Default)
             .h_auto()
@@ -681,7 +681,7 @@ impl WindowView {
         let name = dialog.host.label()?;
         let fg = cx.theme().foreground;
         let field_bg = cx.theme().mix(0.03);
-        let hover_bg = cx.theme().mix(0.06);
+        let hover_bg = cx.theme().accent;
         let body = div().flex().flex_col().gap(px(8.)).pl(px(48.)).pr(px(16.)).pb(px(12.));
         let Some(browse) = dialog.browse.as_ref() else {
             let text = rust_i18n::t!("workspace.remote_waiting", status = status_text(&status_of(name))).into_owned();

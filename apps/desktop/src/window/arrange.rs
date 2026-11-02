@@ -210,8 +210,8 @@ impl WindowView {
     /// 浮在标题栏下方正中的排列浮层：方向、个数、排出来的样子和打开按钮。
     pub(super) fn render_arrange_picker(&self, cx: &mut Context<Self>) -> Option<Div> {
         let picker = self.arrange_picker.as_ref()?;
-        let selected_bg = cx.theme().mix(0.16);
-        let hover_bg = cx.theme().mix(0.09);
+        let selected_bg = cx.theme().popover_selected;
+        let hover_bg = cx.theme().popover_hover;
         let fg = cx.theme().foreground;
         let choice = |id: (&'static str, usize), label: SharedString, selected: bool| -> Stateful<Div> {
             div()

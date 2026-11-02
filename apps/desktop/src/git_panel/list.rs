@@ -127,7 +127,7 @@ impl GitPanel {
     /// 一行的外框：定高、横着排、鼠标移上去时底色变亮，按钮跟着露出来。提交图里的行也用它，
     /// 图紧贴左边（`pl` 给 0）。
     pub(crate) fn git_row(&self, id: impl Into<ElementId>, pl: f32, cx: &App) -> Stateful<Div> {
-        let hover_bg = cx.theme().mix(0.06);
+        let hover_bg = cx.theme().accent;
         div()
             .id(id)
             .flex_none()

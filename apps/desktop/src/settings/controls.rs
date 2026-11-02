@@ -69,7 +69,7 @@ impl Cards {
             .rounded(px(10.))
             .bg(self.theme.mix(0.045))
             .border_1()
-            .border_color(self.theme.foreground.opacity(0.13).opacity(0.5))
+            .border_color(self.theme.control_border.opacity(0.5))
             .overflow_hidden()
             .child(div().mb(px(-1.)).flex().flex_col().children(items));
         self.page = std::mem::replace(&mut self.page, div()).child(card);
@@ -94,7 +94,7 @@ pub(super) fn row(
         .items_center()
         .gap(px(16.))
         .border_b_1()
-        .border_color(theme.foreground.opacity(0.13).opacity(0.6))
+        .border_color(theme.control_border.opacity(0.6))
         .child(
             div()
                 .flex_1()
@@ -145,7 +145,7 @@ pub(super) fn dropdown(
         .rounded(px(6.))
         .bg(theme.mix(0.06))
         .border_1()
-        .border_color(theme.foreground.opacity(0.13))
+        .border_color(theme.control_border)
         .text_size(FontSize::Body)
         .hover(|button| button.bg(theme.mix(0.07)))
 }
@@ -166,8 +166,7 @@ pub(super) fn input_box(input: &Entity<InputState>, width: Option<f32>, error: b
 
 /// 色块；`color` 为 `None` 时画一条斜线，表示没设、跟随别的颜色。
 pub(super) fn swatch(color: Option<Hsla>, size: f32, theme: &Theme) -> Div {
-    let block =
-        div().flex_none().size(px(size)).rounded(px(4.)).border_1().border_color(theme.foreground.opacity(0.13));
+    let block = div().flex_none().size(px(size)).rounded(px(4.)).border_1().border_color(theme.control_border);
     match color {
         Some(color) => block.bg(color),
         None => block

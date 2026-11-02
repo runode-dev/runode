@@ -207,8 +207,7 @@ impl SettingsView {
             return Vec::new();
         };
         let visible = picker.visible(cx);
-        // 浮层底色是 `Theme::popover`，悬停要比它深一档才看得出。
-        let row_hover = cx.theme().mix(0.10);
+        let row_hover = cx.theme().popover_hover;
         range
             .filter_map(|row| {
                 let ix = *visible.get(row)?;
@@ -229,7 +228,7 @@ impl SettingsView {
                         .rounded(px(5.))
                         .map(|el| {
                             if row == picker.highlighted {
-                                el.bg(theme.mix(0.12))
+                                el.bg(theme.popover_selected)
                             } else {
                                 el.hover(|el| el.bg(row_hover))
                             }
