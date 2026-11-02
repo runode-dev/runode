@@ -54,7 +54,7 @@ impl WindowView {
         let active = self.active;
         for (ix, workspace) in self.workspaces.iter_mut().enumerate() {
             if let Some(name) = workspace.host.label()
-                && !remote::remote(name).is_some_and(|host| matches!(host.status(), Status::Connected(_)))
+                && !matches!(remote::status_of(name), Status::Connected(_))
             {
                 continue;
             }

@@ -154,6 +154,11 @@ pub fn find(name: &str) -> Option<Arc<RemoteHost>> {
     HOSTS.lock().unwrap_or_else(PoisonError::into_inner).get(name).cloned()
 }
 
+/// 主机 `name` 现在的连接状态；还没有这台主机时是没在连，也不新建它。
+pub fn status_of(name: &str) -> Status {
+    find(name).map_or(Status::Idle, |host| host.status())
+}
+
 /// 忘掉主机 `name`：断开，让主连接退出，不再列在 `remotes` 里；之后再用它时从头连。会阻塞。
 pub fn forget(name: &str) {
     let Some(host) = HOSTS.lock().unwrap_or_else(PoisonError::into_inner).remove(name) else {

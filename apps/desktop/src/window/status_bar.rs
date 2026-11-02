@@ -292,7 +292,7 @@ fn remote_hosts(windows: &[WindowHandle<WindowView>], cx: &App) -> Vec<String> {
         let Ok(window) = handle.read(cx) else { continue };
         if let HostId::Ssh(name) = &window.workspace().host
             && !names.contains(name)
-            && hosts::find(name).is_some_and(|host| matches!(host.status(), hosts::Status::Connected(_)))
+            && matches!(hosts::status_of(name), hosts::Status::Connected(_))
         {
             names.push(name.clone());
         }
@@ -515,7 +515,7 @@ impl WindowView {
         });
         let pinned = self.render_pinned_workflows(cx);
         let host_item = host.map(|name| {
-            let status = hosts::find(name).map_or(hosts::Status::Idle, |host| host.status());
+            let status = hosts::status_of(name);
             let latency = cx.try_global::<Status>().and_then(|status| status.latencies.get(name).copied());
             let state = match &status {
                 hosts::Status::Connected(_) => {

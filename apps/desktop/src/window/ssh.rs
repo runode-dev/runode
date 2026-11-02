@@ -102,11 +102,6 @@ pub(super) fn hosts_in_use(this: &WeakEntity<WindowView>, cx: &App) -> HashSet<S
     hosts
 }
 
-/// 主机 `name` 现在的连接状态；没有这台主机时是没在连。
-fn status_of(name: &str) -> Status {
-    remote::find(name).map_or(Status::Idle, |host| host.status())
-}
-
 /// 菜单里一行写得下的连接状态：重连、连不上时不带原因。
 fn short_status(status: &Status) -> String {
     match status {
@@ -163,7 +158,7 @@ impl WindowView {
             names.push(name.to_owned());
         }
         let remotes = names.into_iter().map(|name| {
-            let status = status_of(&name);
+            let status = remote::status_of(&name);
             let host = HostId::Ssh(name.clone());
             let checked = dialog.host == host;
             let state = rust_i18n::t!("workspace.host_remote_hint", status = short_status(&status)).into_owned();
@@ -332,7 +327,7 @@ impl WindowView {
         let HostId::Ssh(name) = &dialog.host else {
             return;
         };
-        if dialog.source.is_none() || dialog.browse.is_some() || !matches!(status_of(name), Status::Connected(_)) {
+        if dialog.source.is_none() || dialog.browse.is_some() || !matches!(remote::status_of(name), Status::Connected(_)) {
             return;
         }
         let field =
@@ -462,7 +457,7 @@ impl WindowView {
             return;
         }
         let command = clone.then(|| {
-            let os = match status_of(name) {
+            let os = match remote::status_of(name) {
                 Status::Connected(connected) => connected.os,
                 _ => String::new(),
             };
@@ -547,7 +542,7 @@ impl WindowView {
         // 菜单最高到窗口底边，按钮的下沿取对话框顶上这一行大致的位置。
         .when(open, |button| button.children(self.render_dropdown_menu_rightward(TITLEBAR_HEIGHT + 150., window, cx)));
         let status = dialog.host.label().map(|name| {
-            let status = status_of(name);
+            let status = remote::status_of(name);
             let text = status_text(&status);
             let stopped = matches!(status, Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle);
             let name = name.to_owned();
@@ -684,7 +679,7 @@ impl WindowView {
         let hover_bg = cx.theme().accent;
         let body = div().flex().flex_col().gap(px(8.)).pl(px(48.)).pr(px(16.)).pb(px(12.));
         let Some(browse) = dialog.browse.as_ref() else {
-            let text = rust_i18n::t!("workspace.remote_waiting", status = status_text(&status_of(name))).into_owned();
+            let text = rust_i18n::t!("workspace.remote_waiting", status = status_text(&remote::status_of(name))).into_owned();
             return Some(
                 body.child(
                     div()
