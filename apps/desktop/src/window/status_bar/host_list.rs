@@ -1,4 +1,4 @@
-//! 状态栏上的「远程主机」：这次运行里连过几台 SSH 主机（`host_client::remote::remotes`），一台都没有时不显示。
+//! 状态栏上的「远程主机」：这次运行里连过几台 SSH 主机（`host_client::ssh::remotes`），一台都没有时不显示。
 //! 浮层里一台一行，写着连接状态，没连着的能连上、连着的能断开；最下面一行去设置页的 SSH 主机列表，在那里
 //! 忘掉主机、装登录服务、清理旧构建。
 
@@ -6,7 +6,7 @@ use gpui::{AnyElement, Context, Div, FontWeight, Hsla, Role, SharedString, State
 
 use super::{ACTIVE_DOT, PENDING_DOT, PressDown as _, StatusPopover, popover_header};
 use crate::{
-    host_client::remote::{self as hosts, RemoteHost, Status},
+    host_client::ssh::{self as hosts, RemoteHost, Status},
     ui::icons::{CHEVRON_RIGHT_ICON, SERVER_ICON},
     ui::{
         button::{Button, ButtonSize, ButtonVariant},

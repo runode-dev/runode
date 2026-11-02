@@ -14,7 +14,7 @@ use futures::StreamExt as _;
 use gpui::{App, AppContext as _, Global, PromptLevel};
 
 use crate::{
-    host_client::remote::{self, HostId, Phase, RemoteEvent, Status},
+    host_client::ssh::{self, HostId, Phase, RemoteEvent, Status},
     terminal_view, window,
 };
 
@@ -167,7 +167,7 @@ fn set_service_job(name: &str, job: ServiceJob, cx: &mut App) {
 
 /// 在后台把主机 `name` 上的宿主装成登录服务；`report` 时没办成（或还要等）在最前面的窗口上说。
 pub fn install_service(name: &str, report: bool, cx: &mut App) {
-    let Some(host) = remote::find(name) else {
+    let Some(host) = ssh::find(name) else {
         return;
     };
     if matches!(service_job(name, cx), Some(ServiceJob::Running)) {
@@ -231,7 +231,7 @@ fn set_prune_job(name: &str, job: PruneJob, cx: &mut App) {
 
 /// 在后台删掉主机 `name` 上用不着的 runode 构建（`RemoteHost::prune_builds`）。
 pub fn prune_builds(name: &str, cx: &mut App) {
-    let Some(host) = remote::find(name) else {
+    let Some(host) = ssh::find(name) else {
         return;
     };
     if matches!(prune_job(name, cx), Some(PruneJob::Running)) {
@@ -301,7 +301,7 @@ fn offer_service(name: &str, cx: &mut App) {
 
 /// 在后台断开主机 `name`。
 pub fn disconnect(name: &str, cx: &mut App) {
-    let Some(host) = remote::find(name) else {
+    let Some(host) = ssh::find(name) else {
         return;
     };
     cx.background_spawn(async move { host.disconnect() }).detach();
@@ -311,7 +311,7 @@ pub fn disconnect(name: &str, cx: &mut App) {
 pub fn forget(name: &str, cx: &mut App) {
     let name = name.to_owned();
     crate::project_host::forget(&name);
-    cx.background_spawn(async move { remote::forget(&name) }).detach();
+    cx.background_spawn(async move { ssh::forget(&name) }).detach();
 }
 
 /// 开始收远端主机的事件，app 退出时让各台主机的主连接退出。要在恢复窗口之前调。
@@ -320,11 +320,11 @@ pub fn install(cx: &mut App) {
     cx.set_global(HostNames(load_map(dirs.host_names_file())));
     cx.set_global(HostSystems(load_map(dirs.host_systems_file())));
     cx.on_app_quit(|_| {
-        remote::close_masters();
+        ssh::close_masters();
         async {}
     })
     .detach();
-    let Some(mut events) = remote::events() else {
+    let Some(mut events) = ssh::events() else {
         return;
     };
     cx.spawn(async move |cx| {
@@ -348,8 +348,8 @@ struct Seen {
 fn handle(event: RemoteEvent, seen: &mut Seen, cx: &mut App) {
     match event {
         RemoteEvent::Connected { host, alive } => {
-            // 连上前刚被忘掉的主机不再建出来（`remote::remote` 会新建）。
-            let Some(remote) = remote::find(&host) else {
+            // 连上前刚被忘掉的主机不再建出来（`ssh::remote` 会新建）。
+            let Some(remote) = ssh::find(&host) else {
                 return;
             };
             let status = remote.status();

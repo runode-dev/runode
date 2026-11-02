@@ -1,4 +1,4 @@
-//! 远程桌面页：看一台 SSH 主机的屏幕，用本机的键鼠操作它。经 `host_client::remote::screen` 连上那边的
+//! 远程桌面页：看一台 SSH 主机的屏幕，用本机的键鼠操作它。经 `host_client::ssh::screen` 连上那边的
 //! 采集进程，说的和手机一样（`runode_protocol::screen`）。
 //!
 //! 画面在读连接的线程上解好（`video`），界面只留最新的一帧，来一帧只通知这一页。要多大的画面、多高的码率由
@@ -33,7 +33,7 @@ use runode_ssh::bootstrap::Family;
 use runode_types::{input::MouseButton as RemoteButton, screen::Codec};
 
 use crate::{
-    host_client::remote::{
+    host_client::ssh::{
         self, Status,
         screen::{self, ScreenEvent, ScreenLink, ScreenSender},
     },
@@ -1381,7 +1381,7 @@ impl ScreenViewer {
 
     /// 远端锁屏时能代敲密码：Windows 的锁屏在安全桌面上，注入不了按键。
     fn types_password(&self) -> bool {
-        !remote::find(&self.host).is_some_and(|host| host.family() == Family::Windows)
+        !ssh::find(&self.host).is_some_and(|host| host.family() == Family::Windows)
     }
 
     /// 锁屏时盖在画面中间的一块：能代敲密码的远端给密码框和「解锁」；Windows 的锁屏在安全桌面上，注入不了按键，
@@ -1743,8 +1743,8 @@ fn reader(
 }
 
 /// 等主机连上（没在连时叫它连），连不上时带上给人看的原因。
-async fn wait_for_host(name: &str, executor: &gpui::BackgroundExecutor) -> Result<Arc<remote::RemoteHost>, String> {
-    let host = remote::remote(name).ok_or_else(|| rust_i18n::t!("screen_viewer.bad_host").into_owned())?;
+async fn wait_for_host(name: &str, executor: &gpui::BackgroundExecutor) -> Result<Arc<ssh::RemoteHost>, String> {
+    let host = ssh::remote(name).ok_or_else(|| rust_i18n::t!("screen_viewer.bad_host").into_owned())?;
     if matches!(host.status(), Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle) {
         host.retry_now();
     }

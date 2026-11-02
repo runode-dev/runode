@@ -24,7 +24,7 @@ use super::{
 };
 use crate::{
     config::AppConfig,
-    host_client::remote::{self, HostId, upload::Upload},
+    host_client::ssh::{self, HostId, upload::Upload},
     project_host::ProjectHost,
     terminal_view::TerminalView,
     ui::{
@@ -61,7 +61,7 @@ impl Quoting {
         Shell::detect(program).map_or_else(Self::platform, Self::of_shell)
     }
 
-    /// 还不知道是哪种 shell、只知道系统时（远端新开的终端，`os` 是 `remote::Connected::os` 的写法）：
+    /// 还不知道是哪种 shell、只知道系统时（远端新开的终端，`os` 是 `ssh::Connected::os` 的写法）：
     /// Windows 上用双引号，cmd 和 PowerShell 都认；别的照 sh 的写法。
     pub(super) fn of_os(os: &str) -> Self {
         if os == "windows" { Self::Cmd } else { Self::Posix }
@@ -309,11 +309,11 @@ impl WindowView {
         let HostId::Ssh(name) = view.read(cx).host().clone() else {
             return;
         };
-        let Some(host) = remote::remote(&name) else {
+        let Some(host) = ssh::remote(&name) else {
             return;
         };
         let quoting = Quoting::of_session(view.read(cx).meta());
-        let job = cx.background_spawn(async move { remote::upload::upload(&host, upload) });
+        let job = cx.background_spawn(async move { ssh::upload::upload(&host, upload) });
         let view = view.downgrade();
         cx.spawn_in(window, async move |_, cx| {
             let uploaded = job.await;

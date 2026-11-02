@@ -12,7 +12,7 @@ use std::{
 use futures::channel::mpsc::UnboundedSender;
 use runode_git as git;
 
-use crate::{host_client::remote::HostId, project_host::ProjectHost};
+use crate::{host_client::ssh::HostId, project_host::ProjectHost};
 
 pub(in crate::window) use runode_files::Changes as ProjectChanges;
 

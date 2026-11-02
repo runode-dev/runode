@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use gpui::{App, Context, WeakEntity};
 
 use super::WindowView;
-use crate::host_client::remote::HostId;
+use crate::host_client::ssh::HostId;
 
 /// 用着的远端主机：哪个窗口里有工作区、终端在那台机器上，或者新建工作区的对话框选着它。`this` 是问的
 /// 那个窗口：GPUI 画一个窗口、给它派发事件时，`windows` 里读不到它自己。

@@ -12,7 +12,7 @@ use gpui::{AppContext, Context, SharedString};
 
 use super::super::WindowView;
 use crate::{
-    host_client::remote::{self, Status},
+    host_client::ssh::{self, Status},
     project_host::ProjectHost,
 };
 
@@ -54,7 +54,7 @@ impl WindowView {
         let active = self.active;
         for (ix, workspace) in self.workspaces.iter_mut().enumerate() {
             if let Some(name) = workspace.host.label()
-                && !matches!(remote::status_of(name), Status::Connected(_))
+                && !matches!(ssh::status_of(name), Status::Connected(_))
             {
                 continue;
             }

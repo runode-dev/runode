@@ -24,7 +24,7 @@ use super::{
 };
 use crate::WorkspaceId;
 use crate::{
-    host_client::remote::HostId,
+    host_client::ssh::HostId,
     terminal_view::{PROVISIONAL_SIZE, SHOW_WAIT, TerminalEvent, TerminalView},
     ui::menu::MenuHost as _,
 };

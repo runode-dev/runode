@@ -29,7 +29,7 @@ use super::{
     model::{Tab, Workspace, home_dir, workspace_name},
     project::{Project, SidePanel},
 };
-use crate::host_client::remote::HostId;
+use crate::host_client::ssh::HostId;
 use crate::{
     host_client::{self, Mode},
     prespawn::Prespawned,

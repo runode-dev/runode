@@ -21,7 +21,7 @@ use super::{
     keys,
 };
 use crate::{
-    host_client::remote::{self, HostId},
+    host_client::ssh::{self, HostId},
     project_host::ProjectHost,
 };
 
@@ -428,12 +428,12 @@ impl TerminalView {
 }
 
 fn open_remote_url(name: &str, url: String, cx: &App) {
-    let Some(host) = remote::remote(name) else {
+    let Some(host) = ssh::remote(name) else {
         return;
     };
     let job = cx.background_spawn(async move {
         // 转发不了时照原样打开：本机恰好也在听那个端口时还能看到点什么，不至于点了没反应。
-        remote::forward::local_url(&host, &url).unwrap_or_else(|err| {
+        ssh::forward::local_url(&host, &url).unwrap_or_else(|err| {
             tracing::warn!("cannot forward {url} from {}: {err:#}", host.name);
             url
         })

@@ -24,7 +24,7 @@ pub(crate) use repo::ProjectRepo;
 pub(crate) use scan::{Scan, scan};
 use wire::{Call, Reply};
 
-use crate::host_client::remote::HostId;
+use crate::host_client::ssh::HostId;
 
 /// 读一遍远端的项目最多等这么久：大仓库第一次读 git 状态要一阵。
 const SCAN_TIMEOUT: Duration = Duration::from_secs(120);

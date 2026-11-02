@@ -5,7 +5,7 @@
 //!   几个终端；浮层里按 workspace 列出这个窗口里各终端的 CPU 和内存；
 //! - 端口：终端里跑的程序在监听几个 TCP 端口；浮层里列出来，点了在浏览器里打开，别的程序监听的收在
 //!   「外部端口」里。当前工作区在 SSH 主机上时另列那台机器上在监听的端口，点了经主连接转到本机再打开，
-//!   转着的能停掉（`host_client::remote::forward`）。
+//!   转着的能停掉（`host_client::ssh::forward`）。
 //! - 远程主机：连过几台 SSH 主机，没有时不显示；浮层里列出各台的连接状态，能连上、断开，或者去设置页管理
 //!   （`host_list`）。
 //!
@@ -40,7 +40,7 @@ use runode_types::{
 };
 
 use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, remote};
-use crate::host_client::remote::{self as hosts, HostId};
+use crate::host_client::ssh::{self as hosts, HostId};
 use crate::project_host::ProjectHost;
 use crate::system_probe::{self as probe, Caffeinate, Helper, POLL_INTERVAL, Port, Procs, Usage};
 use crate::ui::a11y::A11yPress;

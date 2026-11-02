@@ -16,7 +16,7 @@ use std::{
 };
 
 use super::wire::{self, Call, Reply, Request, Response};
-use crate::host_client::remote::{self, Status, deploy};
+use crate::host_client::ssh::{self, Status, deploy};
 
 /// 等回话时每隔这么久看一次要不要停。
 const CANCEL_POLL: Duration = Duration::from_millis(50);
@@ -144,12 +144,12 @@ impl Client {
         if let Some(conn) = slot.as_ref().filter(|conn| !conn.closed.load(Ordering::Relaxed)) {
             return Ok(conn.clone());
         }
-        let host = remote::find(&self.name).ok_or_else(|| format!("no such host: {}", self.name))?;
+        let host = ssh::find(&self.name).ok_or_else(|| format!("no such host: {}", self.name))?;
         if !matches!(host.status(), Status::Connected(_)) {
             return Err(format!("not connected to {}", self.name));
         }
         let script = host.family().run_command(&deploy::install_dir(), runode_ssh::bootstrap::Entry::Project);
-        let mut command = host.exec(&remote::ssh(), &script, true, false);
+        let mut command = host.exec(&ssh::ssh(), &script, true, false);
         command.stderr(Stdio::null());
         let pipes = runode_ssh::process::Pipes { stdin: true, stdout: true, stderr: false };
         let piped = runode_ssh::process::spawn(&mut command, pipes).map_err(|err| format!("cannot run ssh: {err}"))?;

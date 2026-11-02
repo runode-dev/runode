@@ -14,7 +14,7 @@ use runode_protocol::{ShellProfile, ShellProfileKind};
 
 use super::{Dropdown, NewShellTab, NewTab, TITLEBAR_HEIGHT, WindowView, agents::logo::logo_path};
 use crate::{
-    host_client::remote::{HostId, link_of},
+    host_client::ssh::{HostId, link_of},
     ui::{
         a11y::A11yPress as _,
         button::Button,

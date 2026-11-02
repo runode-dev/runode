@@ -17,7 +17,7 @@ use runode_protocol::{ClientMsg, PaneLayout, PaneRect, SessionId, TabLayout, Win
 use runode_types::pane::{Node, Rect};
 
 use super::WindowView;
-use crate::host_client::remote::{HostId, link_of};
+use crate::host_client::ssh::{HostId, link_of};
 
 /// 回话里的一个窗口，从 `WindowView` 摘出来的、算布局要的部分。
 pub(super) struct WindowInput<'a, P> {

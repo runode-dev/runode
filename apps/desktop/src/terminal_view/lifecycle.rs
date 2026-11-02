@@ -44,7 +44,7 @@ use super::{
 };
 use crate::{
     config::AppConfig,
-    host_client::{self, Link as HostLink, LinkEvent, Screen, SpawnOptions, remote::HostId},
+    host_client::{self, Link as HostLink, LinkEvent, Screen, SpawnOptions, ssh::HostId},
     prespawn::Prespawned,
 };
 
@@ -214,7 +214,7 @@ impl TerminalView {
             return Ok(Self::deferred(host, cwd, fallback, resume, shell, window, cx));
         }
         let config = cx.global::<AppConfig>().0.clone();
-        let link = host_client::remote::link_of(host);
+        let link = host_client::ssh::link_of(host);
         let id = link.spawn(SpawnOptions {
             size: PROVISIONAL_SIZE,
             cwd: cwd.map(Into::into),
@@ -402,7 +402,7 @@ impl TerminalView {
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
         let config = cx.global::<AppConfig>().0.clone();
-        let link = host_client::remote::link_of(host);
+        let link = host_client::ssh::link_of(host);
         if !link.connected() {
             anyhow::bail!("not connected to the host");
         }
@@ -815,7 +815,7 @@ impl TerminalView {
     /// 连着、会话却不在了时在原来的目录开一个新的。
     fn reopen_remote(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
         if !self.host_link.connected() {
-            if let Some(remote) = host_client::remote::remote(&name) {
+            if let Some(remote) = host_client::ssh::remote(&name) {
                 remote.retry_now();
             }
             return;
@@ -1038,7 +1038,7 @@ impl TerminalView {
             start_resume: None,
             start_shell: None,
             host: host.clone(),
-            host_link: host_client::remote::link_of(host),
+            host_link: host_client::ssh::link_of(host),
             opening: None,
             id,
             ended: false,

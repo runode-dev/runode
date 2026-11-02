@@ -28,7 +28,7 @@ use super::{
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
-    host_client::remote::{self, HostId, Status},
+    host_client::ssh::{self, HostId, Status},
     menus::OpenSettings,
     ssh_hosts::{self, status_text},
     ui::icons::{
@@ -295,7 +295,7 @@ impl WindowView {
         let renaming = self.renaming.as_ref().filter(|renaming| {
             matches!(&renaming.target, RenameTarget::Host(renaming) if host.label() == Some(renaming.as_str()))
         });
-        let status = host.label().map(remote::status_of);
+        let status = host.label().map(ssh::status_of);
         let status_color = status.as_ref().map(|status| match status {
             Status::Connected(_) => hsla(ADDED),
             Status::Connecting(_) | Status::Waiting { .. } => hsla(MODIFIED),
@@ -519,7 +519,7 @@ impl WindowView {
         });
         let mark = workspace.mark(cx);
         let host = workspace.host.label().map(|name| {
-            let status = remote::status_of(name);
+            let status = ssh::status_of(name);
             format!("{} {}", ssh_hosts::display_name(name, cx), status_text(&status))
         });
         // 目录不画出来，悬停时看提示；和名字一样（比如家目录的 `~`）时不提示。

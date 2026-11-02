@@ -1,5 +1,5 @@
 //! SSH 页的主机列表：连过的每台主机一行，写着连接状态，可以连接、断开、忘掉。主机是这次运行里连过的
-//! （`host_client::remote::remotes`），不进配置文件；还有工作区、终端用着的主机不能忘掉。宿主会跟着 ssh 的
+//! （`host_client::ssh::remotes`），不进配置文件；还有工作区、终端用着的主机不能忘掉。宿主会跟着 ssh 的
 //! 登录被结束的主机，行里另有一句提示和「装成登录服务」；连着的主机能清理远端用不着的 runode 构建。
 
 use crate::ui::theme::Theme;
@@ -7,7 +7,7 @@ use gpui::{Context, Div, Role, SharedString, div, prelude::*, px};
 
 use super::{SettingsView, controls::Press as _};
 use crate::{
-    host_client::remote::{self, RemoteHost, Status},
+    host_client::ssh::{self, RemoteHost, Status},
     ssh_hosts::{self, PruneJob, ServiceJob},
     ui::{
         button::{Button, ButtonVariant},
@@ -17,7 +17,7 @@ use crate::{
 
 impl SettingsView {
     pub(super) fn render_ssh_hosts(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        let hosts = remote::remotes();
+        let hosts = ssh::remotes();
         let rows = div().flex().flex_col();
         if hosts.is_empty() {
             let text = rust_i18n::t!("settings.ssh_hosts.empty").into_owned();
@@ -60,7 +60,7 @@ impl SettingsView {
                 if matches!(status, Status::Waiting { .. }) { "ssh.reconnect" } else { "settings.ssh_hosts.connect" };
             let name = name.clone();
             button(key, "connect").on_press(cx, move |_, _, _| {
-                if let Some(host) = remote::find(&name) {
+                if let Some(host) = ssh::find(&name) {
                     host.retry_now();
                 }
             })

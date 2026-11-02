@@ -20,7 +20,7 @@ use crate::ui::picker::matches_query;
 use super::{Source, clone_command, repo_name};
 use crate::window::{Dropdown, TITLEBAR_HEIGHT, WindowView, files::Quoting, status_bar::host_list::dot_color};
 use crate::{
-    host_client::remote::{self, HostId, Status},
+    host_client::ssh::{self, HostId, Status},
     project_host::ProjectHost,
     ssh_hosts::{display_name, has_display_name, status_text},
     ui::{
@@ -106,7 +106,7 @@ impl WindowView {
             .iter()
             .filter_map(|workspace| workspace.host.label().map(str::to_owned))
             .chain(others.flat_map(|view| view.workspaces.iter().filter_map(|w| w.host.label().map(str::to_owned))))
-            .chain(remote::remotes().into_iter().map(|host| host.name.clone()));
+            .chain(ssh::remotes().into_iter().map(|host| host.name.clone()));
         for name in names {
             if !hosts.contains(&name) {
                 hosts.push(name);
@@ -138,7 +138,7 @@ impl WindowView {
             names.push(name.to_owned());
         }
         let remotes = names.into_iter().map(|name| {
-            let status = remote::status_of(&name);
+            let status = ssh::status_of(&name);
             let host = HostId::Ssh(name.clone());
             let checked = dialog.host == host;
             let state = rust_i18n::t!("workspace.host_remote_hint", status = short_status(&status)).into_owned();
@@ -186,7 +186,7 @@ impl WindowView {
     /// 改在 `host` 上开：远端的开始连（之前停下的再试一次），换了主机时之前浏览的目录作废。
     pub(in crate::window) fn set_workspace_host(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
         if let HostId::Ssh(name) = &host
-            && let Some(remote) = remote::remote(name)
+            && let Some(remote) = ssh::remote(name)
             && matches!(remote.status(), Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle)
         {
             remote.retry_now();
@@ -296,10 +296,7 @@ impl WindowView {
         let HostId::Ssh(name) = &dialog.host else {
             return;
         };
-        if dialog.source.is_none()
-            || dialog.browse.is_some()
-            || !matches!(remote::status_of(name), Status::Connected(_))
-        {
+        if dialog.source.is_none() || dialog.browse.is_some() || !matches!(ssh::status_of(name), Status::Connected(_)) {
             return;
         }
         let field =
@@ -330,7 +327,7 @@ impl WindowView {
         let (HostId::Ssh(name), Some(browse)) = (&dialog.host, dialog.browse.as_mut()) else {
             return;
         };
-        let Some(host) = remote::find(name) else {
+        let Some(host) = ssh::find(name) else {
             return;
         };
         let host_id = dialog.host.clone();
@@ -429,7 +426,7 @@ impl WindowView {
             return;
         }
         let command = clone.then(|| {
-            let os = match remote::status_of(name) {
+            let os = match ssh::status_of(name) {
                 Status::Connected(connected) => connected.os,
                 _ => String::new(),
             };
@@ -514,7 +511,7 @@ impl WindowView {
         // 菜单最高到窗口底边，按钮的下沿取对话框顶上这一行大致的位置。
         .when(open, |button| button.children(self.render_dropdown_menu_rightward(TITLEBAR_HEIGHT + 150., window, cx)));
         let status = dialog.host.label().map(|name| {
-            let status = remote::status_of(name);
+            let status = ssh::status_of(name);
             let text = status_text(&status);
             let stopped = matches!(status, Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle);
             let name = name.to_owned();
@@ -652,7 +649,7 @@ impl WindowView {
         let body = div().flex().flex_col().gap(px(8.)).pl(px(48.)).pr(px(16.)).pb(px(12.));
         let Some(browse) = dialog.browse.as_ref() else {
             let text =
-                rust_i18n::t!("workspace.remote_waiting", status = status_text(&remote::status_of(name))).into_owned();
+                rust_i18n::t!("workspace.remote_waiting", status = status_text(&ssh::status_of(name))).into_owned();
             return Some(
                 body.child(
                     div()

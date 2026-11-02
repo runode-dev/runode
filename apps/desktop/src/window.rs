@@ -86,7 +86,7 @@ pub use status_bar::watch as watch_status;
 pub use tasks::{RunTaskKey, TaskKeys};
 pub use titlebar::titlebar_options;
 
-use crate::host_client::remote::HostId;
+use crate::host_client::ssh::HostId;
 use crate::ui::a11y::{Hide, PressDown};
 // 关标签、关分屏和放大分屏这几个动作在 `runode_ui::actions`，焦点在预览栏里时由预览栏接住；
 // 标题栏的高度、拖动窗口和标签的关闭按钮也在 `runode_ui`。

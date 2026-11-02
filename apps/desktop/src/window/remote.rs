@@ -13,7 +13,7 @@ use runode_types::pane::Axis;
 
 use super::persist::format;
 use super::{WindowView, agents::reveal, cards, clipboard, layout_report};
-use crate::host_client::remote::HostId;
+use crate::host_client::ssh::HostId;
 use crate::{
     config::AppConfig,
     host_client::{self, Link},

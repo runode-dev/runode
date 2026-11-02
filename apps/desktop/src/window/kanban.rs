@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::host_client::remote::HostId;
+use crate::host_client::ssh::HostId;
 use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
 use gpui::{
     Action, AnyElement, App, Context, Div, Entity, Focusable as _, Modifiers, Stateful, StyleRefinement, Subscription,

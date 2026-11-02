@@ -19,7 +19,7 @@ pub(crate) mod bridge;
 mod handoff;
 mod launch;
 mod link;
-pub mod remote;
+pub mod ssh;
 
 use std::{
     path::{Path, PathBuf},
@@ -217,9 +217,9 @@ pub fn configure(config: &Config) {
     for message in &messages {
         link.send(message.clone());
     }
-    remote::configure(messages);
-    let defaults = remote::SshSettings::default();
-    remote::set_ssh_settings(remote::SshSettings {
+    ssh::configure(messages);
+    let defaults = ssh::SshSettings::default();
+    ssh::set_ssh_settings(ssh::SshSettings {
         program: config.ssh_program.as_ref().map_or(defaults.program, PathBuf::from),
         persist_secs: config.ssh_control_persist.unwrap_or(defaults.persist_secs),
     });

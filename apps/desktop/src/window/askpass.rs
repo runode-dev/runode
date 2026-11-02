@@ -13,7 +13,7 @@ use runode_ssh::askpass::Kind;
 
 use super::WindowView;
 use crate::{
-    host_client::remote::Ask,
+    host_client::ssh::Ask,
     ui::{
         a11y::Press,
         button::{Button, ButtonVariant},
