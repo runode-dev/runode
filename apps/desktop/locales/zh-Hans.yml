@@ -153,7 +153,7 @@ workspace:
   host_add: 添加 SSH 主机
   host_add_hint: 经 SSH 使用一台现有的机器。
   host_add_remote: 添加远程主机
-  host_add_remote_hint: SSH 主机
+  host_add_remote_hint: SSH 主机或另一台 Runode
   host_add_detail: 连上时 runode 会自动装到那台机器上。
   host_add_cancel: 取消
   browse_hint_remote: 在这台主机上选一个文件夹
@@ -166,6 +166,17 @@ workspace:
   remote_create: 创建
   host_state_waiting: 正在重连
   host_state_stopped: 连不上
+  host_pair: Runode 配对
+  host_pair_hint: 另一台开着远程访问的电脑
+  host_paired: 配对的电脑
+  pair_link: 配对链接
+  pair_link_placeholder: "runode://pair?…"
+  pair_connect: 配对
+  pair_detail: 在另一台电脑上打开 Runode 的「手机端」页，在配对那里点「复制配对链接」，粘贴到这里。那台电脑要开着远程访问。
+  pairing: "正在和 %{host} 配对…"
+  pair_found: 局域网里开着远程访问的电脑：
+  pair_found_hint: 到这台电脑上复制配对链接
+  pair_found_picked: "在 %{host} 上打开 Runode 的「手机端」页，点「复制配对链接」，粘贴到上面。"
 window_controls:
   minimize: 最小化
   maximize: 最大化
@@ -593,7 +604,7 @@ settings:
     files: 文件、预览与 Git
     agents: Agent
     dictation: 语音输入
-    ssh: SSH 主机
+    ssh: 远程主机
     remote: 远程访问
     keybinds: 快捷键
   section:
@@ -608,7 +619,8 @@ settings:
     tasks: 命令
     git: Git
     ssh: 连接
-    ssh_hosts: 主机
+    ssh_hosts: SSH 主机
+    paired_machines: 配对的电脑
     login: 登录时启动
     dictation_cloud: 云端识别
     dictation_polish: 大模型润色
@@ -1454,3 +1466,15 @@ paired:
   not_revoked: "这台已经忘掉了 %{host}，但那边没撤销这台（%{error}）。请到 %{host} 的「手机端」页里把这台删掉。"
   forget_failed: "没能忘掉 %{host}：%{error}"
   build_mismatch: "两台电脑上的 Runode 版本不同（那台是 %{build}），升级到同一版本后才能看文件和 Git。"
+  link_invalid: 这不是配对链接。配对链接以 runode://pair? 开头。
+  link_broken: 配对链接不完整，到那台电脑上重新复制。
+  link_expired: 配对链接已过期，到那台电脑上重新复制一个。
+  link_used: 这个配对链接已经用过或过期了，到那台电脑上重新复制一个。
+  pair_unreachable: "连不上 %{host}：%{reason}。确认两台电脑在同一个网络里，或者 %{host} 允许从别的网络连过去。"
+  pair_fingerprint: "%{host} 的证书指纹和链接里的对不上，连到的可能不是那台电脑。到那台电脑上重新复制链接再试。"
+  pair_disabled: "%{host} 的远程访问没开着，或者一时办不了。"
+  pair_failed: "没配上：%{reason}"
+  settings_empty: 还没有配对过别的电脑。新建工作区时在「添加远程主机」里选「Runode 配对」。
+  rename: 改名
+  forget: 解除配对
+  in_use: 先关掉这台电脑上的工作区和终端。

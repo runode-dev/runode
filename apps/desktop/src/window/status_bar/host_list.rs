@@ -1,13 +1,13 @@
-//! 状态栏上的「远程主机」：这次运行里连过几台远端主机（`host_client::hosts::remotes`），一台都没有时不显示。
-//! 浮层里一台一行，写着连接状态，没连着的能连上、连着的能断开；最下面一行去设置页的 SSH 主机列表，在那里
-//! 忘掉主机、装登录服务、清理旧构建。
+//! 状态栏上的「远程主机」：这次运行里连过几台远端主机（`host_client::hosts::remotes`，SSH 主机和配对的电脑），
+//! 一台都没有时不显示。浮层里一台一行，图标分出是哪种，写着连接状态，没连着的能连上、连着的能断开；最下面一行去
+//! 设置页的远程主机列表，在那里忘掉主机、解除配对、装登录服务、清理旧构建。
 
 use gpui::{AnyElement, Context, Div, FontWeight, Hsla, Role, SharedString, Stateful, div, prelude::*, px, svg};
 
 use super::{ACTIVE_DOT, PENDING_DOT, PressDown as _, StatusPopover, popover_header};
 use crate::{
     host_client::hosts::{self, HostId, Status},
-    ui::icons::{CHEVRON_RIGHT_ICON, SERVER_ICON},
+    ui::icons::{CHEVRON_RIGHT_ICON, MONITOR_ICON, SERVER_ICON},
     ui::{
         button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
@@ -106,6 +106,7 @@ impl WindowView {
         let fg = cx.theme().foreground;
         let title = crate::remote_hosts::display_name(host, cx);
         let status = hosts::status_of(host);
+        let icon = if matches!(host, HostId::Paired(_)) { MONITOR_ICON } else { SERVER_ICON };
         let state = state_text(host, &status);
         // 连着、正在连、等着重连的能断开（断开后不再自己重连）；别的能马上连。
         let live = matches!(status, Status::Connected(_) | Status::Connecting(_) | Status::Waiting { .. });
@@ -141,6 +142,7 @@ impl WindowView {
             .items_center()
             .gap(px(10.))
             .child(div().flex_none().size(px(7.)).rounded_full().bg(dot_color(&status, fg)))
+            .child(svg().flex_none().path(icon).size(px(13.)).text_color(fg.opacity(0.55)))
             .child(
                 div()
                     .id("info")

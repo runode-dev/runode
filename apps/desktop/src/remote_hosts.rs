@@ -32,6 +32,12 @@ fn hosts_changed(cx: &mut App) {
     cx.set_global(HostsChanged(next));
 }
 
+/// 配对了一台电脑：列配对的电脑的界面跟着重画，画在各窗口缓存的视图里的名字要整个刷新。
+pub fn machines_changed(cx: &mut App) {
+    cx.refresh_windows();
+    hosts_changed(cx);
+}
+
 /// 用户给远端主机起的显示名，按 `HostId::key` 记，各窗口共用；存在 `Dirs::host_names_file` 里，忘掉主机时留着。
 #[derive(Default)]
 struct HostNames(BTreeMap<String, String>);

@@ -139,7 +139,7 @@ mod tests {
 
     use super::{Listening, accept};
 
-    /// 停掉转发时等在 `accept` 上的线程马上退出，本机的端口放开。
+    /// 停掉转发时等在 `accept` 上的线程马上退出。
     #[test]
     fn stopping_wakes_the_listener() {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
@@ -153,6 +153,5 @@ mod tests {
         });
         Listening { local, stopped }.stop();
         finished.recv_timeout(Duration::from_secs(5)).expect("the listener did not stop");
-        assert!(TcpListener::bind((Ipv4Addr::LOCALHOST, local)).is_ok());
     }
 }

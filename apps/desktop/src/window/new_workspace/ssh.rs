@@ -1,5 +1,6 @@
-//! 新建工作区对话框里和 SSH 主机有关的部分：上面的主机选择（本机、连过的主机，或者新加一台）、选了远端
-//! 主机后连上它、一级级浏览那台机器的目录，在选好的目录里开工作区，或者在它下面建出新目录再开。
+//! 新建工作区对话框里和远端主机有关的部分：上面的主机选择（本机、连过的主机和配对的电脑，或者新加一台）、选了
+//! 远端主机后连上它、一级级浏览那台机器的目录，在选好的目录里开工作区，或者在它下面建出新目录再开。新加 SSH 主机
+//! 在这里，配对别的电脑在 `paired`。
 
 use std::{
     path::{Path, PathBuf},
@@ -17,10 +18,13 @@ use runode_ssh::Destination;
 
 use crate::ui::picker::matches_query;
 
-use super::{Source, clone_command, repo_name};
+use super::{Source, clone_command, paired::AddPairedMachine, repo_name};
 use crate::window::{Dropdown, TITLEBAR_HEIGHT, WindowView, files::Quoting, status_bar::host_list::dot_color};
 use crate::{
-    host_client::hosts::{self, HostId, Status},
+    host_client::{
+        hosts::{self, HostId, Status},
+        paired,
+    },
     project_host::ProjectHost,
     remote_hosts::{default_name, display_name, has_display_name, status_text},
     ui::{
@@ -28,7 +32,7 @@ use crate::{
         button::{Button, ButtonSize, ButtonVariant},
         file_icons::folder_icon,
         font_size::{FontSize, scaled},
-        icons::{ARROW_UP_ICON, CHEVRON_DOWN_ICON, PLUS_ICON},
+        icons::{ARROW_UP_ICON, CHEVRON_DOWN_ICON, MONITOR_ICON, PLUS_ICON, SERVER_ICON},
         input::{Input, InputEvent, InputState},
         menu::{MenuHost as _, MenuItem},
         theme::ActiveTheme as _,
@@ -97,7 +101,7 @@ impl WindowView {
         self.dropdown_shown(Dropdown::WorkspaceHost)
     }
 
-    /// 各窗口里远端工作区的主机和这次运行里连过的主机，当前窗口的在前。
+    /// 各窗口里远端工作区的主机、这次运行里连过的主机和配对过的电脑，当前窗口的在前。
     fn known_hosts(&self, cx: &App) -> Vec<HostId> {
         let mut known: Vec<HostId> = Vec::new();
         let others = crate::window::windows(cx).into_iter().filter_map(|window| window.read(cx).ok());
@@ -106,7 +110,8 @@ impl WindowView {
             .iter()
             .map(|workspace| workspace.host.clone())
             .chain(others.flat_map(|view| view.workspaces.iter().map(|w| w.host.clone()).collect::<Vec<_>>()))
-            .chain(hosts::remotes());
+            .chain(hosts::remotes())
+            .chain(paired::machines().into_iter().map(|machine| HostId::Paired(machine.id)));
         for host in found {
             if !host.is_local() && !known.contains(&host) {
                 known.push(host);
@@ -115,7 +120,7 @@ impl WindowView {
         known
     }
 
-    /// 主机菜单的各项：添加远程主机（子菜单里是各种连法，现在只有 SSH），分隔线，本机和认识的各台主机，
+    /// 主机菜单的各项：添加远程主机（子菜单里是各种连法：SSH、Runode 配对），分隔线，本机和认识的各台主机，
     /// 选着的那台打勾。
     fn host_menu_items(&self, cx: &App) -> Vec<Option<MenuItem>> {
         let Some(dialog) = &self.new_workspace else {
@@ -123,9 +128,13 @@ impl WindowView {
         };
         let ssh = MenuItem::label(rust_i18n::t!("workspace.host_add").into_owned(), None, Some(Box::new(AddSshHost)))
             .with_description(rust_i18n::t!("workspace.host_add_hint").into_owned());
-        let add = MenuItem::submenu(rust_i18n::t!("workspace.host_add_remote").into_owned(), vec![Some(ssh)])
-            .with_icon(PLUS_ICON)
-            .with_description(rust_i18n::t!("workspace.host_add_remote_hint").into_owned());
+        let pair =
+            MenuItem::label(rust_i18n::t!("workspace.host_pair").into_owned(), None, Some(Box::new(AddPairedMachine)))
+                .with_description(rust_i18n::t!("workspace.host_pair_hint").into_owned());
+        let add =
+            MenuItem::submenu(rust_i18n::t!("workspace.host_add_remote").into_owned(), vec![Some(ssh), Some(pair)])
+                .with_icon(PLUS_ICON)
+                .with_description(rust_i18n::t!("workspace.host_add_remote_hint").into_owned());
         let local = MenuItem::checkbox(
             rust_i18n::t!("workspace.host_local").into_owned(),
             None,
@@ -147,8 +156,9 @@ impl WindowView {
             } else {
                 status_text(&status)
             };
+            let icon = if matches!(host, HostId::Paired(_)) { MONITOR_ICON } else { SERVER_ICON };
             Some(
-                MenuItem::checkbox(display_name(&host, cx), None, checked, Box::new(PickWorkspaceHost(host)))
+                MenuItem::checkbox(display_name(&host, cx), Some(icon), checked, Box::new(PickWorkspaceHost(host)))
                     .with_description(state)
                     .with_tooltip(tooltip),
             )
@@ -184,6 +194,7 @@ impl WindowView {
             return;
         };
         dialog.adding = None;
+        dialog.pairing = None;
         if dialog.host != host {
             dialog.host = host;
             dialog.browse = None;
@@ -206,6 +217,7 @@ impl WindowView {
         let Some(dialog) = &mut self.new_workspace else {
             return;
         };
+        dialog.pairing = None;
         if dialog.adding.is_none() {
             let field = cx.new(|cx| {
                 InputState::new(String::new(), cx)
@@ -518,7 +530,7 @@ impl WindowView {
                 .child(
                     div()
                         .id("new-workspace-host-status")
-                        .role(Role::Label)
+                        .role(Role::Status)
                         .aria_label(text.clone())
                         .flex_1()
                         .min_w_0()

@@ -8,7 +8,7 @@
 //!
 //! 哪一页有哪些项在 `pages`，开关、选项这些控件在 `controls`，从长列表里挑一项的浮层在 `picker`，
 //! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`、测试推送在 `test_push`，外观页的配色在 `theme`，
-//! SSH 页的主机列表在 `ssh_hosts`。
+//! 远程主机页的 SSH 主机列表在 `ssh_hosts`、配对的电脑在 `paired_machines`。
 
 mod autostart;
 mod controls;
@@ -16,6 +16,7 @@ mod dictation;
 mod firewall;
 mod keybinds;
 mod pages;
+mod paired_machines;
 mod pairing;
 mod picker;
 mod ssh_hosts;
@@ -109,6 +110,8 @@ pub struct SettingsView {
     hosts_in_use: HostsInUse,
     /// 远端主机的连接状态变了。
     _hosts: Subscription,
+    /// 正在改显示名的配对的电脑。
+    renaming_machine: Option<paired_machines::Renaming>,
 }
 
 impl EventEmitter<Close> for SettingsView {}
@@ -139,6 +142,7 @@ impl SettingsView {
             _downloads: cx.observe_global::<crate::dictation::Downloads>(|_, cx| cx.notify()),
             hosts_in_use: Box::new(hosts_in_use),
             _hosts: cx.observe_global::<crate::remote_hosts::HostsChanged>(|_, cx| cx.notify()),
+            renaming_machine: None,
         };
         view.refresh_autostart(cx);
         view.refresh_firewall(cx);
@@ -167,7 +171,7 @@ impl SettingsView {
         cx.notify();
     }
 
-    /// 换到 SSH 页的主机列表。
+    /// 换到远程主机页的主机列表。
     pub fn show_ssh_hosts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.select_page(Page::Ssh, window, cx);
     }

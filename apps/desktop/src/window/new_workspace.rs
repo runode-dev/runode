@@ -1,4 +1,4 @@
-//! 新建 workspace 的对话框：上面选在哪台机器上开（本机、连过的 SSH 主机，或者新加一台），下面三种来源：
+//! 新建 workspace 的对话框：上面选在哪台机器上开（本机、连过的 SSH 主机和配对的电脑，或者新加一台），下面三种来源：
 //! 打开一个已有的文件夹、从 URL 克隆一个 Git 仓库、新建一个空文件夹。本机上用系统的目录选择框和存储面板
 //! 选位置和名字，也可以从访达把文件夹拖到窗口上；远端上在对话框里一级级浏览那台机器的目录，名字填在框里。
 //! 克隆和新建都先建好目录再在它上面开 workspace；克隆是在新 workspace 的第一个终端里跑 `git clone`，进度、
@@ -27,6 +27,7 @@ use crate::{
     },
 };
 
+mod paired;
 mod ssh;
 
 /// 对话框里的一种来源。
@@ -51,6 +52,8 @@ pub(super) struct NewWorkspaceDialog {
     browse: Option<ssh::Browse>,
     /// 点了「添加 SSH 主机」后展开的一栏。
     adding: Option<ssh::AddHost>,
+    /// 点了「Runode 配对」后展开的一栏。
+    pairing: Option<paired::Pairing>,
     /// 在远端建目录没建成的原因。
     pub(super) error: Option<String>,
 }
@@ -92,9 +95,11 @@ impl WindowView {
             name: None,
             browse: None,
             adding: None,
+            pairing: None,
             error: None,
         });
         let field = match (&dialog.adding, &dialog.url, &dialog.name) {
+            _ if dialog.pairing.is_some() => dialog.pairing.as_ref().map(|pairing| pairing.focus_handle(cx)),
             (Some(adding), _, _) => Some(adding.focus_handle(cx)),
             (None, Some((url, _)), _) if dialog.source == Some(Source::Clone) => Some(url.focus_handle(cx)),
             (None, _, Some((name, _))) if dialog.source == Some(Source::Create) => Some(name.focus_handle(cx)),
@@ -364,6 +369,7 @@ impl WindowView {
             (!local && expanded(Source::Create)).then(|| self.render_remote_source(Source::Create, cx)).flatten();
         let host_row = self.render_host_picker(window, cx);
         let add_host = dialog.adding.as_ref().map(|adding| card().child(self.render_add_host(adding, cx)));
+        let pairing = dialog.pairing.as_ref().map(|pairing| card().child(self.render_pairing(pairing, cx)));
         let close = Button::new("new-workspace-close", rust_i18n::t!("workspace.close"))
             .icon(CLOSE_ICON)
             .icon_size(16.)
@@ -379,6 +385,7 @@ impl WindowView {
             // 主机菜单的各项派发到对话框上：窗口上的动作在对话框开着时不办。
             .on_action(cx.listener(Self::pick_workspace_host))
             .on_action(cx.listener(Self::add_ssh_host))
+            .on_action(cx.listener(Self::add_paired_machine))
             .w(px(480.))
             .max_w_full()
             .max_h_full()
@@ -408,6 +415,7 @@ impl WindowView {
             )
             .children(host_row)
             .children(add_host)
+            .children(pairing)
             .child(card().child(div().child(browse).children(browse_body)))
             .child(
                 div()

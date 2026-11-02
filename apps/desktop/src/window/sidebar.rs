@@ -32,7 +32,8 @@ use crate::{
     menus::OpenSettings,
     remote_hosts::{self, status_text},
     ui::icons::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON, SIDEBAR_ICON,
+        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, MONITOR_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON,
+        SIDEBAR_ICON,
     },
     ui::{
         font_size::{self, FontSize, scaled},
@@ -303,9 +304,12 @@ impl WindowView {
             Status::Idle => fg.opacity(0.3),
         });
         let status_text = status.as_ref().map(status_text);
-        // 按系统画 logo：本机看自己的，远端主机看上次连上时报的，没连上过的画成服务器。
+        // 按系统画 logo：本机看自己的，SSH 主机看上次连上时报的，没连上过的画成服务器；配对的电脑一律画成显示器，
+        // 和 SSH 主机分得开，系统写在说明里。
         let system = remote_hosts::system(host, cx);
+        let paired = matches!(host, HostId::Paired(_));
         let icon = match system {
+            _ if paired => MONITOR_ICON,
             Some("macos") => system_logos::APPLE,
             Some("linux") => system_logos::LINUX,
             Some("windows") => system_logos::WINDOWS,
@@ -313,6 +317,7 @@ impl WindowView {
         };
         let system_name = system.and_then(remote_hosts::system_name).map(str::to_owned);
         let a11y_description = [
+            paired.then(|| rust_i18n::t!("workspace.host_paired").into_owned()),
             system_name,
             destination.clone(),
             status_text.clone(),

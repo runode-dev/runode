@@ -153,7 +153,7 @@ workspace:
   host_add: 新增 SSH 主機
   host_add_hint: 經 SSH 使用一台現有的機器。
   host_add_remote: 新增遠端主機
-  host_add_remote_hint: SSH 主機
+  host_add_remote_hint: SSH 主機或另一台 Runode
   host_add_detail: 連上時 runode 會自動裝到那台機器上。
   host_add_cancel: 取消
   browse_hint_remote: 在這台主機上選一個資料夾
@@ -166,6 +166,17 @@ workspace:
   remote_create: 建立
   host_state_waiting: 正在重新連線
   host_state_stopped: 連不上
+  host_pair: Runode 配對
+  host_pair_hint: 另一台開著遠端存取的電腦
+  host_paired: 配對的電腦
+  pair_link: 配對連結
+  pair_link_placeholder: "runode://pair?…"
+  pair_connect: 配對
+  pair_detail: 在另一台電腦上打開 Runode 的「手機端」頁，在配對那裡點「拷貝配對連結」，貼上到這裡。那台電腦要開著遠端存取。
+  pairing: "正在和 %{host} 配對…"
+  pair_found: 區域網路裡開著遠端存取的電腦：
+  pair_found_hint: 到這台電腦上拷貝配對連結
+  pair_found_picked: "在 %{host} 上打開 Runode 的「手機端」頁，點「拷貝配對連結」，貼上到上面。"
 window_controls:
   minimize: 最小化
   maximize: 最大化
@@ -593,7 +604,7 @@ settings:
     files: 檔案、預覽與 Git
     agents: Agent
     dictation: 語音輸入
-    ssh: SSH 主機
+    ssh: 遠端主機
     remote: 遠端存取
     keybinds: 快速鍵
   section:
@@ -608,7 +619,8 @@ settings:
     tasks: 命令
     git: Git
     ssh: 連線
-    ssh_hosts: 主機
+    ssh_hosts: SSH 主機
+    paired_machines: 配對的電腦
     login: 登入時啟動
     dictation_cloud: 雲端辨識
     dictation_polish: 大模型潤飾
@@ -1454,3 +1466,15 @@ paired:
   not_revoked: "這台已經忘掉了 %{host}，但那邊沒撤銷這台（%{error}）。請到 %{host} 的「手機端」頁裡把這台刪掉。"
   forget_failed: "沒能忘掉 %{host}：%{error}"
   build_mismatch: "兩台電腦上的 Runode 版本不同（那台是 %{build}），升級到同一版本後才能看檔案和 Git。"
+  link_invalid: 這不是配對連結。配對連結以 runode://pair? 開頭。
+  link_broken: 配對連結不完整，到那台電腦上重新拷貝。
+  link_expired: 配對連結已過期，到那台電腦上重新拷貝一個。
+  link_used: 這個配對連結已經用過或過期了，到那台電腦上重新拷貝一個。
+  pair_unreachable: "連不上 %{host}：%{reason}。確認兩台電腦在同一個網路裡，或者 %{host} 允許從別的網路連過去。"
+  pair_fingerprint: "%{host} 的憑證指紋和連結裡的對不上，連到的可能不是那台電腦。到那台電腦上重新拷貝連結再試。"
+  pair_disabled: "%{host} 的遠端存取沒開著，或者一時無法處理。"
+  pair_failed: "沒配上：%{reason}"
+  settings_empty: 還沒有配對過別的電腦。新增工作區時在「新增遠端主機」裡選「Runode 配對」。
+  rename: 改名
+  forget: 解除配對
+  in_use: 先關掉這台電腦上的工作區和終端。

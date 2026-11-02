@@ -153,7 +153,7 @@ workspace:
   host_add: Add SSH Host
   host_add_hint: Use an existing machine over SSH.
   host_add_remote: Add Remote Host
-  host_add_remote_hint: SSH host
+  host_add_remote_hint: An SSH host or another Runode
   host_add_detail: runode installs itself on the host when it connects.
   host_add_cancel: Cancel
   browse_hint_remote: Pick a folder on this host
@@ -166,6 +166,17 @@ workspace:
   remote_create: Create
   host_state_waiting: Reconnecting
   host_state_stopped: Can't connect
+  host_pair: Runode Pairing
+  host_pair_hint: Another computer with remote access turned on
+  host_paired: Paired computer
+  pair_link: Pairing link
+  pair_link_placeholder: "runode://pair?…"
+  pair_connect: Pair
+  pair_detail: On the other computer, open Runode's Mobile page, click "Copy Pairing Link" under pairing, and paste it here. That computer needs remote access turned on.
+  pairing: "Pairing with %{host}…"
+  pair_found: "Computers with remote access on this network:"
+  pair_found_hint: Copy the pairing link on this computer
+  pair_found_picked: "On %{host}, open Runode's Mobile page, click \"Copy Pairing Link\", and paste it above."
 window_controls:
   minimize: Minimize
   maximize: Maximize
@@ -593,7 +604,7 @@ settings:
     files: Files, Preview & Git
     agents: Agents
     dictation: Dictation
-    ssh: SSH Hosts
+    ssh: Remote Hosts
     remote: Remote Access
     keybinds: Keyboard Shortcuts
   section:
@@ -608,7 +619,8 @@ settings:
     tasks: Tasks
     git: Git
     ssh: Connection
-    ssh_hosts: Hosts
+    ssh_hosts: SSH Hosts
+    paired_machines: Paired Computers
     login: Start at Login
     dictation_cloud: "Cloud Recognition"
     dictation_polish: "Polish with a Model"
@@ -1380,3 +1392,15 @@ paired:
   not_revoked: "This computer forgot %{host}, but %{host} did not revoke it (%{error}). Remove this computer on %{host}'s Mobile page."
   forget_failed: "Cannot forget %{host}: %{error}"
   build_mismatch: "The two computers run different versions of Runode (the other one is %{build}). Update them to the same version to see files and Git."
+  link_invalid: This is not a pairing link. Pairing links start with runode://pair?
+  link_broken: The pairing link is incomplete. Copy it again on the other computer.
+  link_expired: The pairing link has expired. Copy a new one on the other computer.
+  link_used: This pairing link has already been used or has expired. Copy a new one on the other computer.
+  pair_unreachable: "Cannot reach %{host}: %{reason}. Make sure both computers are on the same network, or that %{host} allows connections from other networks."
+  pair_fingerprint: "%{host}'s certificate does not match the link, so this may not be that computer. Copy the link again on it and retry."
+  pair_disabled: "Remote access on %{host} is off or busy."
+  pair_failed: "Pairing failed: %{reason}"
+  settings_empty: No computers paired yet. When creating a workspace, choose Runode Pairing under Add Remote Host.
+  rename: Rename
+  forget: Unpair
+  in_use: Close the workspaces and terminals on this computer first.

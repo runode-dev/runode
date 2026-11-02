@@ -61,6 +61,8 @@ enum Item {
     Dictation,
     /// 连过的 SSH 主机，不是配置里的键。
     SshHosts,
+    /// 配对过的电脑，不是配置里的键。
+    PairedMachines,
 }
 
 #[derive(Clone, Copy)]
@@ -210,6 +212,8 @@ impl Page {
             Self::Ssh => &[
                 Section("ssh_hosts"),
                 SshHosts,
+                Section("paired_machines"),
+                PairedMachines,
                 Section("ssh"),
                 Row("ssh-program", Text(200.)),
                 Row("ssh-control-persist", Text(80.)),
@@ -272,7 +276,8 @@ impl Page {
                 | Item::TestPush
                 | Item::Autostart
                 | Item::Dictation
-                | Item::SshHosts => None,
+                | Item::SshHosts
+                | Item::PairedMachines => None,
             })
             .collect()
     }
@@ -398,6 +403,7 @@ impl SettingsView {
                 Item::Autostart => self.render_autostart(theme, cx).into_any_element(),
                 Item::Dictation => self.render_dictation(theme, cx).into_any_element(),
                 Item::SshHosts => self.render_ssh_hosts(theme, cx).into_any_element(),
+                Item::PairedMachines => self.render_paired_machines(theme, cx).into_any_element(),
             };
             cards.push(element);
         }

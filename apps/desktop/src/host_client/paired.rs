@@ -141,6 +141,33 @@ pub enum UnpairError {
     Local(std::io::Error),
 }
 
+/// 用配对链接 `uri` 配对，这边叫 `device_name`，成了就记下这台电脑、把这条连接接到它的 `Link` 上。交回它的标识。
+/// 会阻塞。
+pub fn pair(uri: &runode_protocol::remote::PairingUri, device_name: &str) -> Result<String, DialError> {
+    let dialed = client::pair(&dirs(), uri, device_name)?;
+    let id = dialed.machine.id.clone();
+    remember(&dialed.machine);
+    // 刚配对的连接交给 supervisor 下一次连时用，省一次拨号。
+    let (host, new) = {
+        let mut hosts = HOSTS.lock().unwrap_or_else(PoisonError::into_inner);
+        match hosts.get(&id) {
+            Some(host) => (host.clone(), false),
+            None => {
+                let host = Arc::new(PairedHost::new(id.clone()));
+                hosts.insert(id.clone(), host.clone());
+                (host, true)
+            }
+        }
+    };
+    *host.handed.lock().unwrap_or_else(PoisonError::into_inner) = Some(dialed);
+    host.retry_now();
+    if new {
+        host.start();
+        hosts::watch_network_once();
+    }
+    Ok(id)
+}
+
 /// 睡醒或网络变了：叫正在重连和重连放弃了的电脑马上再试（`PairedHost::nudge`）。
 pub(super) fn nudge_all() {
     for host in remotes() {
@@ -167,7 +194,7 @@ pub struct PairedHost {
 #[derive(Debug)]
 pub enum ChannelError {
     Dial(DialError),
-    /// 那边拒绝了，见 `ChannelRefusal`。
+    /// 那边拒绝了，带着它说的原因。
     Refused(ChannelRefusal),
     /// 连接断了，或者那边回的读不懂。
     Broken(String),
