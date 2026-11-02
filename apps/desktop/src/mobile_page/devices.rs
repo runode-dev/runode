@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use gpui::{App, Context, Global, PromptLevel, SharedString, Task, Window};
-use runode_protocol::remote::DeviceId;
+use runode_protocol::remote::{DeviceId, DeviceKind};
 
 use super::MobilePage;
 
@@ -22,6 +22,8 @@ impl Global for Devices {}
 pub(crate) struct Paired {
     pub(crate) id: DeviceId,
     pub(crate) name: SharedString,
+    /// 手机还是别的电脑。
+    pub(crate) kind: DeviceKind,
     /// 配对的时刻，Unix 秒。
     pub(crate) paired_at: u64,
     /// 现在连着。
@@ -67,6 +69,7 @@ fn read_devices() -> Devices {
                 id: device.device_id,
                 live: connected.as_ref().is_some_and(|ids| ids.contains(&device.device_id)),
                 name: device.name.into(),
+                kind: device.kind,
                 paired_at: device.paired_at,
             })
             .collect(),

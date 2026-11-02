@@ -9,18 +9,19 @@
 
 pub(crate) mod devices;
 
-use std::{net::IpAddr, rc::Rc};
+use std::{net::IpAddr, rc::Rc, time::Duration};
 
 use gpui::{
     App, ClipboardItem, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
-    Render, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
+    Render, Role, SharedString, Stateful, Subscription, Task, Window, div, prelude::*, px, svg,
 };
+use runode_protocol::remote::DeviceKind;
 use runode_remote::{host_name, local_interfaces};
 
 use crate::{
     config::AppConfig,
     remote_access::pairing::{Pairing, Qr, qr_code},
-    ui::icons::{PHONE_ICON, REFRESH_ICON, TRASH_ICON},
+    ui::icons::{MONITOR_ICON, PHONE_ICON, REFRESH_ICON, TRASH_ICON},
     ui::{
         a11y::Press,
         button::{Button, ButtonSize, ButtonVariant},
@@ -41,6 +42,8 @@ const IOS_APP_URL: Option<&str> = None;
 const MODULE_SIZE: f32 = 5.;
 /// 二维码那一栏的宽度：版本 10 上下的二维码加留白放得下。
 const QR_COLUMN_WIDTH: f32 = 300.;
+/// 复制了配对链接后，按钮上的「已复制」留这么久。
+const COPIED_FOR: Duration = Duration::from_secs(2);
 
 /// 这一页要窗口办的事。
 pub(crate) enum MobileEvent {
@@ -71,6 +74,8 @@ pub(crate) struct MobilePage {
     network: Option<IpAddr>,
     /// 网络的下拉列表展开着。
     network_open: bool,
+    /// 刚复制了配对链接：按钮上写「已复制」，任务到点后换回来。
+    copied: Option<Task<()>>,
 }
 
 impl EventEmitter<MobileEvent> for MobilePage {}
@@ -121,6 +126,7 @@ impl MobilePage {
             interfaces: Vec::new(),
             network: None,
             network_open: false,
+            copied: None,
         }
     }
 
@@ -257,7 +263,7 @@ impl MobilePage {
                 .flex_col()
                 .gap(px(18.))
                 .child(eyebrow)
-                .child(headline(rust_i18n::t!("mobile.paired_intro_title").into_owned(), 40.))
+                .child(headline(paired_title(&paired), 40.))
                 .child(lead(rust_i18n::t!("mobile.paired_intro_body").into_owned(), theme))
                 .child(
                     div()
@@ -447,49 +453,31 @@ impl MobilePage {
         let right = match &self.pairing {
             Pairing::Waiting(waiting) => {
                 let uri = waiting.uri();
-                left = left.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(10.))
-                        .child(text_label(
-                            "mobile-cant-scan",
-                            rust_i18n::t!("mobile.cant_scan").into_owned(),
-                            theme.foreground.opacity(0.5),
-                        ))
-                        .child({
-                            let uri = uri.clone();
-                            Button::new("mobile-copy-code", rust_i18n::t!("mobile.copy_code").into_owned())
-                                .variant(ButtonVariant::Link)
-                                .with_size(ButtonSize::Lg)
-                                .cursor_pointer()
-                                .on_press(cx, move |_, _, cx| {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(uri.to_string()))
-                                })
-                        }),
-                );
                 // 二维码里就是配对链接，写进说明里，读屏和自动化工具不用扫码也拿得到。
                 let qr = qr_image("mobile-pair-qr", rust_i18n::t!("mobile.pair_qr").into_owned(), uri.to_string())
                     .child(qr_code(waiting.qr(), MODULE_SIZE));
-                right.child(qr).child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(10.))
-                        .text_size(FontSize::Body)
-                        .child(text_label(
-                            "mobile-expires",
-                            rust_i18n::t!("mobile.expires", time = waiting.remaining()).into_owned(),
-                            theme.foreground.opacity(0.5),
-                        ))
-                        .child(
-                            Button::new("mobile-regenerate", rust_i18n::t!("mobile.regenerate").into_owned())
-                                .variant(ButtonVariant::Link)
-                                .with_size(ButtonSize::Lg)
-                                .cursor_pointer()
-                                .on_press(cx, |this, _, cx| this.start_pairing(cx)),
-                        ),
-                )
+                right
+                    .child(qr)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(10.))
+                            .text_size(FontSize::Body)
+                            .child(text_label(
+                                "mobile-expires",
+                                rust_i18n::t!("mobile.expires", time = waiting.remaining()).into_owned(),
+                                theme.foreground.opacity(0.5),
+                            ))
+                            .child(
+                                Button::new("mobile-regenerate", rust_i18n::t!("mobile.regenerate").into_owned())
+                                    .variant(ButtonVariant::Link)
+                                    .with_size(ButtonSize::Lg)
+                                    .cursor_pointer()
+                                    .on_press(cx, |this, _, cx| this.start_pairing(cx)),
+                            ),
+                    )
+                    .child(self.render_copy_link(uri, theme, cx))
             }
             Pairing::Starting { .. } => {
                 right.child(placeholder(rust_i18n::t!("settings.pairing.starting").into_owned(), theme))
@@ -527,6 +515,39 @@ impl MobilePage {
             Pairing::Paired { .. } => unreachable!("handled above"),
         };
         columns(left, right).child(footer(back, None))
+    }
+
+    /// 二维码下面复制配对链接的按钮和说明：别的电脑没法扫码，粘贴链接配对；扫不了码的手机也能用。复制后
+    /// 按钮上的字换成「已复制」，留 `COPIED_FOR`。
+    fn render_copy_link(&self, uri: SharedString, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let label = if self.copied.is_some() { "mobile.copied" } else { "mobile.copy_code" };
+        let copy = Button::new("mobile-copy-code", rust_i18n::t!(label).into_owned())
+            .variant(ButtonVariant::Outline)
+            .with_size(ButtonSize::Lg)
+            .rounded_full()
+            .font_weight(FontWeight::MEDIUM)
+            .cursor_pointer()
+            .on_press(cx, move |this, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(uri.to_string()));
+                this.copied = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(COPIED_FOR).await;
+                    this.update(cx, |this, cx| {
+                        this.copied = None;
+                        cx.notify();
+                    })
+                    .ok();
+                }));
+                cx.notify();
+            });
+        div().pt(px(8.)).flex().flex_col().items_center().gap(px(8.)).child(copy).child(
+            text_label(
+                "mobile-copy-hint",
+                rust_i18n::t!("mobile.copy_hint").into_owned(),
+                theme.foreground.opacity(0.5),
+            )
+            .text_size(FontSize::Body)
+            .text_center(),
+        )
     }
 
     /// 电脑名：输入框，空着时浮着系统的电脑名，下面说手机上会看到什么。
@@ -639,16 +660,33 @@ impl MobilePage {
     }
 }
 
-/// 配对过的一台设备：图标，名字，连着没有和哪天配的，右边撤销（先问一句，见 `revoke_device`）。
+/// 已经配过设备时第一页的标题：配过手机时说手机，只配过别的电脑时说电脑。
+fn paired_title(paired: &[Paired]) -> String {
+    if paired.iter().any(|device| device.kind == DeviceKind::Mobile) {
+        rust_i18n::t!("mobile.paired_intro_title").into_owned()
+    } else {
+        rust_i18n::t!("mobile.computers_paired_title").into_owned()
+    }
+}
+
+/// 配对过的一台设备：手机或电脑的图标，名字，是哪种、连着没有和哪天配的，右边撤销（先问一句，见 `revoke_device`）。
 fn device_row(device: &Paired, theme: &Theme, cx: &mut Context<MobilePage>) -> Stateful<Div> {
     let id = device.id;
     let (year, month, day) = local_date(device.paired_at);
     let date = rust_i18n::t!("mobile.date", y = year, m = month, d = day);
     let paired_on = rust_i18n::t!("mobile.paired_on", date = date).into_owned();
-    let summary =
-        if device.live { format!("{} · {paired_on}", rust_i18n::t!("machine.live")) } else { paired_on.clone() };
+    let (icon, kind) = match device.kind {
+        DeviceKind::Mobile => (PHONE_ICON, rust_i18n::t!("mobile.kind_mobile").into_owned()),
+        DeviceKind::Desktop => (MONITOR_ICON, rust_i18n::t!("mobile.kind_desktop").into_owned()),
+    };
+    let summary = if device.live {
+        format!("{kind} · {} · {paired_on}", rust_i18n::t!("machine.live"))
+    } else {
+        format!("{kind} · {paired_on}")
+    };
     let status =
         div().flex().items_center().gap(px(6.)).text_size(FontSize::Body).text_color(theme.foreground.opacity(0.5));
+    let status = status.child(kind).child("·");
     let status = if device.live {
         status
             .child(div().size(px(7.)).rounded_full().bg(gpui::green()))
@@ -680,7 +718,7 @@ fn device_row(device: &Paired, theme: &Theme, cx: &mut Context<MobilePage>) -> S
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(svg().path(PHONE_ICON).size(px(16.)).text_color(theme.foreground.opacity(0.8))),
+                .child(svg().path(icon).size(px(16.)).text_color(theme.foreground.opacity(0.8))),
         )
         .child(
             div()
