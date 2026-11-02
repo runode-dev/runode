@@ -1,9 +1,7 @@
 //! 新建工作区对话框里和 SSH 主机有关的部分：上面的主机选择（本机、连过的主机，或者新加一台）、选了远端
-//! 主机后连上它、一级级浏览那台机器的目录，在选好的目录里开工作区，或者在它下面建出新目录再开；主机的
-//! 连接状态变了时，让断开着的终端的提示、侧栏和对话框跟着重画；哪些主机还用着（`hosts_in_use`）。
+//! 主机后连上它、一级级浏览那台机器的目录，在选好的目录里开工作区，或者在它下面建出新目录再开。
 
 use std::{
-    collections::HashSet,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
@@ -11,7 +9,7 @@ use std::{
 
 use gpui::{
     Action, AnyElement, App, Context, Div, Entity, FocusHandle, Focusable as _, MouseButton, Role, SharedString,
-    Subscription, WeakEntity, Window, div, img, prelude::*, px, svg,
+    Subscription, Window, div, img, prelude::*, px, svg,
 };
 use runode_files::ops::{self, OpError};
 use runode_protocol::{ClientMsg, HostMsg};
@@ -19,12 +17,8 @@ use runode_ssh::Destination;
 
 use crate::ui::picker::matches_query;
 
-use super::{
-    Dropdown, TITLEBAR_HEIGHT, WindowView,
-    files::Quoting,
-    new_workspace::{Source, clone_command, repo_name},
-    status_bar::host_list::dot_color,
-};
+use super::{Source, clone_command, repo_name};
+use crate::window::{Dropdown, TITLEBAR_HEIGHT, WindowView, files::Quoting, status_bar::host_list::dot_color};
 use crate::{
     host_client::remote::{self, HostId, Status},
     project_host::ProjectHost,
@@ -88,20 +82,6 @@ pub(super) struct Browse {
     request: u64,
 }
 
-/// 用着的远端主机：哪个窗口里有工作区、终端在那台机器上，或者新建工作区的对话框选着它。`this` 是问的
-/// 那个窗口：GPUI 画一个窗口、给它派发事件时，`windows` 里读不到它自己。
-pub(super) fn hosts_in_use(this: &WeakEntity<WindowView>, cx: &App) -> HashSet<String> {
-    let mut hosts = HashSet::new();
-    let current = this.upgrade();
-    let others = super::windows(cx).into_iter().filter_map(|window| window.read(cx).ok());
-    for view in others.chain(current.as_ref().map(|view| view.read(cx))) {
-        hosts.extend(view.workspaces.iter().filter_map(|workspace| workspace.host.label().map(str::to_owned)));
-        hosts.extend(view.terminal_views().filter_map(|terminal| terminal.read(cx).host().label().map(str::to_owned)));
-        hosts.extend(view.new_workspace.as_ref().and_then(|dialog| dialog.host.label().map(str::to_owned)));
-    }
-    hosts
-}
-
 /// 菜单里一行写得下的连接状态：重连、连不上时不带原因。
 fn short_status(status: &Status) -> String {
     match status {
@@ -120,7 +100,7 @@ impl WindowView {
     /// 各窗口里远端工作区的主机和这次运行里连过的主机，当前窗口的在前。
     fn known_hosts(&self, cx: &App) -> Vec<String> {
         let mut hosts: Vec<String> = Vec::new();
-        let others = super::windows(cx).into_iter().filter_map(|window| window.read(cx).ok());
+        let others = crate::window::windows(cx).into_iter().filter_map(|window| window.read(cx).ok());
         let names = self
             .workspaces
             .iter()
@@ -204,7 +184,7 @@ impl WindowView {
     }
 
     /// 改在 `host` 上开：远端的开始连（之前停下的再试一次），换了主机时之前浏览的目录作废。
-    pub(super) fn set_workspace_host(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::window) fn set_workspace_host(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
         if let HostId::Ssh(name) = &host
             && let Some(remote) = remote::remote(name)
             && matches!(remote.status(), Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle)
@@ -253,7 +233,7 @@ impl WindowView {
                 InputEvent::Previous => {}
             });
             dialog.adding = Some(AddHost { field, _events: events, hosts: Vec::new() });
-            let home = super::model::home_dir();
+            let home = crate::window::model::home_dir();
             let job =
                 cx.background_spawn(async move { home.map(|home| runode_ssh::list_hosts(&home)).unwrap_or_default() });
             cx.spawn(async move |this, cx| {
@@ -292,22 +272,12 @@ impl WindowView {
         self.set_workspace_host(HostId::Ssh(name), window, cx);
     }
 
-    /// 主机 `name` 的连接状态变了：它上面断开着的终端重画提示；对话框选着它、等它连上的话开始浏览目录。
-    pub(crate) fn remote_status_changed(&mut self, name: &str, cx: &mut Context<Self>) {
-        let host = HostId::Ssh(name.to_owned());
-        for view in self.terminal_views() {
-            if view.read(cx).host() == &host && view.read(cx).lost() {
-                view.update(cx, |_, cx| cx.notify());
-            }
-        }
-        // 侧栏的主机标识跟着连接状态变淡变亮。
-        if self.workspaces.iter().any(|workspace| workspace.host == host) {
-            cx.notify();
-        }
+    /// 主机 `host` 的连接状态变了：主机菜单开着时重列；对话框选着它、等它连上的话开始浏览目录。
+    pub(in crate::window) fn new_workspace_host_changed(&mut self, host: &HostId, cx: &mut Context<Self>) {
         let Some(dialog) = &self.new_workspace else {
             return;
         };
-        let selected = dialog.host == host;
+        let selected = &dialog.host == host;
         if self.host_menu_open() {
             let items = self.host_menu_items(cx);
             self.replace_menu_items(items, cx);

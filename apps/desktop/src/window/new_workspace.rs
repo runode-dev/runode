@@ -27,6 +27,8 @@ use crate::{
     },
 };
 
+mod ssh;
+
 /// 对话框里的一种来源。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Source {
@@ -46,9 +48,9 @@ pub(super) struct NewWorkspaceDialog {
     /// 远端上新建、克隆出的目录名的框。
     pub(super) name: Option<(Entity<InputState>, Subscription)>,
     /// 远端的目录浏览：选着的主机连上了、展开了一种来源才有。
-    pub(super) browse: Option<super::ssh::Browse>,
+    browse: Option<ssh::Browse>,
     /// 点了「添加 SSH 主机」后展开的一栏。
-    pub(super) adding: Option<super::ssh::AddHost>,
+    adding: Option<ssh::AddHost>,
     /// 在远端建目录没建成的原因。
     pub(super) error: Option<String>,
 }

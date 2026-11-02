@@ -48,7 +48,7 @@ impl WindowView {
         self.commit_message_dialog = None;
         if self.settings_page().is_none() {
             let this = cx.entity().downgrade();
-            let view = cx.new(|cx| SettingsView::new(move |cx| super::ssh::hosts_in_use(&this, cx), window, cx));
+            let view = cx.new(|cx| SettingsView::new(move |cx| super::hosts::hosts_in_use(&this, cx), window, cx));
             let close =
                 cx.subscribe_in(&view, window, |this, _, _: &Close, window, cx| this.close_settings(window, cx));
             self.page = Some(super::Page::Settings(SettingsPage { view, _close: close }));
