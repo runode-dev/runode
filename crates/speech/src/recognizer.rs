@@ -10,7 +10,7 @@ use sherpa_onnx::{
 
 use crate::{
     SAMPLE_RATE, SpeechModel,
-    models::{VAD, assets},
+    models::{Role, asset},
 };
 
 /// Silero VAD 一次要的样本数（16 kHz 时 32 毫秒）。
@@ -25,35 +25,34 @@ pub struct Recognizer {
 impl Recognizer {
     /// 从 `root` 下加载 `model`，文件要已经下载好（`is_installed`）。
     pub fn load(model: SpeechModel, root: &Path) -> anyhow::Result<Self> {
-        let path = |name: &str| {
-            let asset = assets(model).iter().find(|a| a.name == name).expect("model has the asset");
+        // 各模型要的文件都在清单里，有测试核对。
+        let path = |role: Role| {
+            let asset = asset(model, role).expect("the model lists the file");
             Some(asset.path(root).to_string_lossy().into_owned())
         };
         let mut config = OfflineRecognizerConfig::default();
         let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(4));
         config.model_config.num_threads = threads as i32;
-        config.model_config.tokens = path("tokens.txt");
+        config.model_config.tokens = path(Role::Tokens);
         match model {
             SpeechModel::SenseVoice => {
                 config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
-                    model: path("model.int8.onnx"),
+                    model: path(Role::Model),
                     language: Some("auto".into()),
                     // 把「一百二十三」写成「123」，加标点。
                     use_itn: true,
                 };
             }
             SpeechModel::FireRedAsr2 => {
-                config.model_config.fire_red_asr = OfflineFireRedAsrModelConfig {
-                    encoder: path("encoder.int8.onnx"),
-                    decoder: path("decoder.int8.onnx"),
-                };
+                config.model_config.fire_red_asr =
+                    OfflineFireRedAsrModelConfig { encoder: path(Role::Encoder), decoder: path(Role::Decoder) };
             }
         }
         let asr = OfflineRecognizer::create(&config).context("cannot load the model")?;
 
         let vad = VadModelConfig {
             silero_vad: SileroVadModelConfig {
-                model: Some(VAD.path(root).to_string_lossy().into_owned()),
+                model: path(Role::Vad),
                 threshold: 0.5,
                 min_silence_duration: 0.5,
                 min_speech_duration: 0.25,

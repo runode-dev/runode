@@ -19,16 +19,30 @@ use sha2::{Digest, Sha256};
 pub(crate) struct Asset {
     pub(crate) dir: &'static str,
     pub(crate) name: &'static str,
+    pub(crate) role: Role,
     /// HuggingFace 上原作者的仓库。
     hf_repo: &'static str,
     size: u64,
     sha256: &'static str,
 }
 
+/// 一个文件在识别时交给 sherpa-onnx 的哪一项。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Role {
+    /// 只有一个文件的模型（SenseVoice）。
+    Model,
+    Encoder,
+    Decoder,
+    Tokens,
+    /// 切句用的 VAD 模型。
+    Vad,
+}
+
 /// 切句用的 Silero VAD。
 pub(crate) const VAD: Asset = Asset {
     dir: "silero-vad",
     name: "silero_vad.onnx",
+    role: Role::Vad,
     hf_repo: "csukuangfj/vad",
     size: 1_807_522,
     sha256: "a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28",
@@ -38,6 +52,7 @@ const SENSE_VOICE: &[Asset] = &[
     Asset {
         dir: "sense-voice-int8-2024-07-17",
         name: "model.int8.onnx",
+        role: Role::Model,
         hf_repo: "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
         size: 239_233_841,
         sha256: "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
@@ -45,6 +60,7 @@ const SENSE_VOICE: &[Asset] = &[
     Asset {
         dir: "sense-voice-int8-2024-07-17",
         name: "tokens.txt",
+        role: Role::Tokens,
         hf_repo: "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
         size: 315_894,
         sha256: "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc",
@@ -56,6 +72,7 @@ const FIRE_RED_ASR2: &[Asset] = &[
     Asset {
         dir: "fire-red-asr2-int8-2026-02-26",
         name: "encoder.int8.onnx",
+        role: Role::Encoder,
         hf_repo: "csukuangfj2/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26",
         size: 817_286_833,
         sha256: "54048d66b6e8f3c80ea7ce95efe794587b0fd81d7271651d0decd3803852ae82",
@@ -63,6 +80,7 @@ const FIRE_RED_ASR2: &[Asset] = &[
     Asset {
         dir: "fire-red-asr2-int8-2026-02-26",
         name: "decoder.int8.onnx",
+        role: Role::Decoder,
         hf_repo: "csukuangfj2/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26",
         size: 417_291_928,
         sha256: "b840ce7196ae4a14d05ae84bbf56082b6b61ccec5610fda907dddbcea37354ff",
@@ -70,6 +88,7 @@ const FIRE_RED_ASR2: &[Asset] = &[
     Asset {
         dir: "fire-red-asr2-int8-2026-02-26",
         name: "tokens.txt",
+        role: Role::Tokens,
         hf_repo: "csukuangfj2/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26",
         size: 79_172,
         sha256: "1bc613de2112d257e61a349c3e72d1b1a9cf19c33d3ca954197ad2171e5ea07b",
@@ -85,6 +104,11 @@ pub(crate) fn assets(model: SpeechModel) -> &'static [Asset] {
         SpeechModel::SenseVoice => SENSE_VOICE,
         SpeechModel::FireRedAsr2 => FIRE_RED_ASR2,
     }
+}
+
+/// `model` 交给 sherpa-onnx 当 `role` 的文件。
+pub(crate) fn asset(model: SpeechModel, role: Role) -> Option<&'static Asset> {
+    assets(model).iter().find(|asset| asset.role == role)
 }
 
 /// `model` 全部文件的字节数。
@@ -267,6 +291,25 @@ fn check(asset: &Asset, part: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Recognizer::load` 加载各模型时要的各项文件。
+    fn roles(model: SpeechModel) -> &'static [Role] {
+        match model {
+            SpeechModel::SenseVoice => &[Role::Model, Role::Tokens, Role::Vad],
+            SpeechModel::FireRedAsr2 => &[Role::Encoder, Role::Decoder, Role::Tokens, Role::Vad],
+        }
+    }
+
+    #[test]
+    fn every_model_lists_each_file_it_loads_once() {
+        for model in SpeechModel::ALL {
+            for &role in roles(model) {
+                let count = assets(model).iter().filter(|asset| asset.role == role).count();
+                assert_eq!(count, 1, "{model:?} {role:?}");
+            }
+            assert_eq!(assets(model).len(), roles(model).len(), "{model:?} has a file it does not load");
+        }
+    }
 
     #[test]
     fn schannel_revocation_failures_are_recognized() {
