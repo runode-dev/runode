@@ -449,11 +449,19 @@ public struct SessionMeta: Hashable, Sendable, Decodable {
         foreground = try c.decodeIfPresent(String.self, forKey: .foreground)
     }
 
-    /// 标签上显示的名字：程序设置的标题，没有时用前台程序名或目录名。
+    /// 标签上显示的名字：shell 在前台时是 shell 的程序名（目录另有一行，shell 设的标题多半是缩写的路径），
+    /// 否则是程序设置的标题，没有时用前台程序名或目录名。
     public var displayTitle: String? {
+        if foregroundIsShell, let program = foreground.map(Self.programLabel), !program.isEmpty { return program }
         if let title, !title.isEmpty { return title }
         if let fallbackTitle, !fallbackTitle.isEmpty { return fallbackTitle }
         return nil
+    }
+
+    /// 界面上写的程序名：进程名去掉 Windows 可执行文件的 `.exe`。
+    static func programLabel(_ name: String) -> String {
+        guard name.count > 4, name.lowercased().hasSuffix(".exe") else { return name }
+        return String(name.dropLast(4))
     }
 }
 

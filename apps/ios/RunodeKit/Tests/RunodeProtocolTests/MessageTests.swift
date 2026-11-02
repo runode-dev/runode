@@ -242,6 +242,15 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(attached.meta.displayTitle == "修 bug")
     }
 
+    @Test func shellsAreTitledByTheirProgramName() {
+        let fish = SessionMeta(title: "/p/t/proj", foregroundIsShell: true, foreground: "fish")
+        #expect(fish.displayTitle == "fish")
+        let pwsh = SessionMeta(title: "C:\\src", foregroundIsShell: true, foreground: "pwsh.EXE")
+        #expect(pwsh.displayTitle == "pwsh")
+        let vim = SessionMeta(title: "a.txt - VIM", foregroundIsShell: false, foreground: "vim")
+        #expect(vim.displayTitle == "a.txt - VIM")
+    }
+
     @Test func streamMarkers() throws {
         let size = GridSize(cols: 80, rows: 24, cellWidthPx: 16, cellHeightPx: 32)
         #expect(try decode("snapshot_end") == .snapshotEnd(id: id))
