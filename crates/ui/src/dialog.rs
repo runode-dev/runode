@@ -2,16 +2,39 @@
 //! 名字，按下鼠标不往外传（点在对话框里不算点到外面）。颜色在 render 里从主题读；调用方接着写的样式盖在
 //! 组件自己的上面，写法同 `Button`。
 //!
-//! 只管面板本身：铺满窗口、点到外面就关的遮罩，和对话框开着时把下面的界面藏起来不给辅助工具读
-//! （`a11y` 的 `Hide`），由调用方管；焦点也由调用方管，面板要拿焦点时自己 `track_focus`。
+//! 铺满窗口的遮罩是 `backdrop`，点到外面关不关由调用方接着写；对话框开着时把下面的界面藏起来不给辅助工具读
+//! （`a11y` 的 `Hide`）由调用方管；焦点也由调用方管，面板要拿焦点时自己 `track_focus`。按什么键关掉见
+//! `is_dismiss_key`。
 
 use gpui::{
-    AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, MouseButton, ParentElement,
-    RenderOnce, SharedString, Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::*,
-    px,
+    AnyElement, App, Div, ElementId, Hsla, InteractiveElement, Interactivity, IntoElement, Keystroke, MouseButton,
+    ParentElement, RenderOnce, SharedString, Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window,
+    div, prelude::*, px,
 };
 
-use crate::{font_size::FontSize, theme::ActiveTheme as _};
+use crate::{font_size::FontSize, panel::TITLEBAR_HEIGHT, theme::ActiveTheme as _};
+
+/// 对话框开着时铺满窗口的底子：压暗下面的界面，挡住下面的点击和悬停，对话框放进来时在标题栏下面一点、
+/// 横向居中。调用方的样式盖在这些上面，点到外面就关时接着写 `on_mouse_down`。
+pub fn backdrop(id: impl Into<ElementId>) -> Stateful<Div> {
+    div()
+        .id(id)
+        .absolute()
+        .size_full()
+        .pt(px(TITLEBAR_HEIGHT + 48.))
+        .px(px(16.))
+        .pb(px(16.))
+        .flex()
+        .justify_center()
+        .items_start()
+        .bg(Hsla::black().opacity(0.15))
+        .occlude()
+}
+
+/// 关掉对话框的键：不带修饰键的 Esc。
+pub fn is_dismiss_key(keystroke: &Keystroke) -> bool {
+    keystroke.key == "escape" && !keystroke.modifiers.modified()
+}
 
 #[derive(IntoElement)]
 pub struct Dialog {

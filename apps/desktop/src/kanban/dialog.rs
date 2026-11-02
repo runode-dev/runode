@@ -6,6 +6,7 @@
 //! 盖住整个窗口，由 app 画在窗口的最上层（`Kanban::dialog`）；任务的是看板里的一页（`TodoDialog::page`），由看板
 //! 画，新建时左边列出模板（`templates`），点一个就照它填好，带 `{{input}}` 的另要填一项（issue、PR 号），保存时换进去。
 
+use crate::ui::dialog::{backdrop, is_dismiss_key};
 use std::{
     cell::Cell,
     collections::{HashMap, HashSet},
@@ -36,9 +37,8 @@ use crate::ui::{
     theme::ActiveTheme as _,
 };
 use gpui::{
-    Action, App, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
-    MouseButton, PathPromptOptions, Render, Role, SharedString, Stateful, Subscription, Window, canvas, div,
-    prelude::*, px, svg,
+    Action, App, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, MouseButton,
+    PathPromptOptions, Render, Role, SharedString, Stateful, Subscription, Window, canvas, div, prelude::*, px, svg,
 };
 use runode_protocol::{
     ClientMsg, HostMsg,
@@ -1282,7 +1282,7 @@ impl Render for TodoDialog {
             .on_action(cx.listener(Self::pick_skill))
             .on_action(cx.listener(Self::pick_subagent))
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
+                if is_dismiss_key(&event.keystroke) {
                     cx.stop_propagation();
                     cx.emit(DialogEvent::Dismissed);
                 }
@@ -1356,18 +1356,8 @@ impl Render for TodoDialog {
                 .child(panel)
                 .into_any_element();
         }
-        div()
-            .id("todo-dialog-backdrop")
-            .absolute()
-            .size_full()
+        backdrop("todo-dialog-backdrop")
             .pt(px(TITLEBAR_HEIGHT + 32.))
-            .pb(px(16.))
-            .px(px(16.))
-            .flex()
-            .justify_center()
-            .items_start()
-            .bg(Hsla::black().opacity(0.15))
-            .occlude()
             .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| cx.emit(DialogEvent::Dismissed)))
             .child(panel)
             .into_any_element()

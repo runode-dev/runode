@@ -2,15 +2,16 @@
 //! 指纹这类是否的问题给两个按钮，请触碰安全密钥这类只是告知的提示等 ssh 办完自己收起。一次只显示一个，
 //! 后来的排着队。
 
+use crate::ui::dialog::{backdrop, is_dismiss_key};
 use std::collections::VecDeque;
 
 use gpui::{
-    Context, Div, Entity, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent, Role, Stateful, Subscription, Window,
-    div, prelude::*, px,
+    Context, Div, Entity, FocusHandle, Focusable, FontWeight, KeyDownEvent, Role, Stateful, Subscription, Window, div,
+    prelude::*, px,
 };
 use runode_ssh::askpass::Kind;
 
-use super::{TITLEBAR_HEIGHT, WindowView};
+use super::WindowView;
 use crate::{
     host_client::remote::Ask,
     ui::{
@@ -97,7 +98,7 @@ impl WindowView {
     }
 
     fn ask_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
+        if is_dismiss_key(&event.keystroke) {
             cx.stop_propagation();
             if let Some(id) = self.asks.front().map(|dialog| dialog.id) {
                 self.answer_ask(id, None, window, cx);
@@ -171,19 +172,6 @@ impl WindowView {
             .children(dialog.field.as_ref().map(|(field, _)| Input::new(field).bg(cx.theme().background)))
             .child(div().flex().justify_end().gap(px(8.)).children(buttons));
         // 铺满窗口的底子挡住下面的点击；点到外面不算取消，免得误点掉一次输密码。
-        Some(
-            div()
-                .id("ssh-ask-backdrop")
-                .absolute()
-                .size_full()
-                .pt(px(TITLEBAR_HEIGHT + 48.))
-                .px(px(16.))
-                .flex()
-                .justify_center()
-                .items_start()
-                .bg(Hsla::black().opacity(0.15))
-                .occlude()
-                .child(panel),
-        )
+        Some(backdrop("ssh-ask-backdrop").child(panel))
     }
 }

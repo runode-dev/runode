@@ -3,6 +3,7 @@
 //! 里还能录一个快捷键，存在同一个文件的 `keys` 里（见 `keys`），按名字找命令，改名、换份、删除时
 //! 跟着改。Makefile、package.json 的命令不能改，同一个对话框只录快捷键（`bind_task`）。
 
+use crate::ui::dialog::backdrop;
 use crate::ui::theme::ActiveTheme as _;
 use std::{
     fs, io,
@@ -11,8 +12,8 @@ use std::{
 };
 
 use gpui::{
-    App, Context, Div, Entity, EntityId, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent, Keystroke,
-    MouseButton, Role, Stateful, Subscription, Task, Window, div, prelude::*, px,
+    App, Context, Div, Entity, EntityId, FocusHandle, Focusable, FontWeight, KeyDownEvent, Keystroke, MouseButton,
+    Role, Stateful, Subscription, Task, Window, div, prelude::*, px,
 };
 use runode_config::{
     Keybind,
@@ -31,7 +32,7 @@ use crate::{
         font_size::{FontSize, scaled},
         input::{Input, InputEvent, InputState},
     },
-    window::{TITLEBAR_HEIGHT, WindowView},
+    window::WindowView,
 };
 
 pub(in crate::window) struct AddTaskDialog {
@@ -525,17 +526,7 @@ impl WindowView {
             .child(div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save));
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消。
         Some(
-            div()
-                .id("add-task-backdrop")
-                .absolute()
-                .size_full()
-                .pt(px(TITLEBAR_HEIGHT + 48.))
-                .px(px(16.))
-                .flex()
-                .justify_center()
-                .items_start()
-                .bg(Hsla::black().opacity(0.15))
-                .occlude()
+            backdrop("add-task-backdrop")
                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| this.close_add_task(window, cx)))
                 .child(panel),
         )

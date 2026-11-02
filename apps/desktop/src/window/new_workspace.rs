@@ -5,6 +5,7 @@
 //! 要密码和出错都在终端里看得见。名字一律按目录取，之后可以重命名。
 
 use crate::host_client::remote::HostId;
+use crate::ui::dialog::{backdrop, is_dismiss_key};
 use crate::ui::theme::ActiveTheme as _;
 use std::path::PathBuf;
 
@@ -13,7 +14,7 @@ use gpui::{
     PathPromptOptions, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 
-use super::{NewWorkspace, TITLEBAR_HEIGHT, WindowView, files::Quoting, model::home_dir};
+use super::{NewWorkspace, WindowView, files::Quoting, model::home_dir};
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::{
     assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
@@ -109,7 +110,7 @@ impl WindowView {
     }
 
     fn new_workspace_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
+        if is_dismiss_key(&event.keystroke) {
             cx.stop_propagation();
             self.close_new_workspace(window, cx);
         }
@@ -426,17 +427,7 @@ impl WindowView {
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消；在本机上开时，从访达拖来的文件夹放在窗口哪里
         // 都直接开。
         Some(
-            div()
-                .id("new-workspace-backdrop")
-                .absolute()
-                .size_full()
-                .pt(px(TITLEBAR_HEIGHT + 48.))
-                .px(px(16.))
-                .pb(px(16.))
-                .flex()
-                .justify_center()
-                .items_start()
-                .bg(Hsla::black().opacity(0.15))
+            backdrop("new-workspace-backdrop")
                 .when(local, |backdrop| {
                     backdrop.drag_over::<ExternalPaths>(|style, _, _, _| style.bg(Hsla::black().opacity(0.25))).on_drop(
                         cx.listener(|_, dropped: &ExternalPaths, window, cx| {
@@ -457,7 +448,6 @@ impl WindowView {
                         }),
                     )
                 })
-                .occlude()
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, window, cx| this.close_new_workspace(window, cx)),

@@ -2,6 +2,7 @@
 //! 按「生成」用这些写一次；按「保存」存成这个仓库自己的预设或所有仓库的默认值，之后说明框里的 ✨ 按钮
 //! 直接按它写。打开时填好存着的预设。
 
+use crate::ui::dialog::{backdrop, is_dismiss_key};
 use std::path::{Path, PathBuf};
 
 use gpui::{
@@ -226,7 +227,7 @@ impl WindowView {
     }
 
     fn commit_message_dialog_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.key == "escape" {
+        if is_dismiss_key(&event.keystroke) {
             cx.stop_propagation();
             self.close_commit_message_dialog(window, cx);
         }
@@ -549,17 +550,9 @@ impl WindowView {
             .child(footer);
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消。
         Some(
-            div()
-                .id("commit-message-backdrop")
-                .absolute()
-                .size_full()
+            backdrop("commit-message-backdrop")
                 .pt(px(TITLEBAR_HEIGHT + 32.))
-                .px(px(16.))
-                .flex()
-                .justify_center()
-                .items_start()
                 .bg(Hsla::black().opacity(0.25))
-                .occlude()
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, window, cx| this.close_commit_message_dialog(window, cx)),
