@@ -24,7 +24,7 @@ use windows::{
 };
 
 use super::other;
-use crate::{Codec, VideoFrame, nal};
+use crate::{Codec, VideoFrame, nal, nv12};
 
 /// 建解码器时先填的画面尺寸（宽在高 32 位，高在低 32 位）。
 const PLACEHOLDER_SIZE: u64 = (1920 << 32) | 1080;
@@ -229,13 +229,14 @@ impl Session {
                 planar.Lock2D(&mut scan0, &mut pitch).map_err(other)?;
                 let pitch = pitch.unsigned_abs() as usize;
                 let len = pitch * coded_h * 3 / 2;
-                let bgra = nv12_to_bgra(std::slice::from_raw_parts(scan0, len), pitch, coded_h, format.shown);
+                let bgra = nv12::to_bgra(std::slice::from_raw_parts(scan0, len), pitch, coded_h, format.shown);
                 let _ = planar.Unlock2D();
                 bgra.map(|bgra| Decoded { width: format.shown.0, height: format.shown.1, bgra })
             } else {
                 let (mut data, mut len) = (ptr::null_mut(), 0u32);
                 buffer.Lock(&mut data, None, Some(&mut len)).map_err(other)?;
-                let bgra = nv12_to_bgra(std::slice::from_raw_parts(data, len as usize), coded_w, coded_h, format.shown);
+                let bgra =
+                    nv12::to_bgra(std::slice::from_raw_parts(data, len as usize), coded_w, coded_h, format.shown);
                 let _ = buffer.Unlock();
                 bgra.map(|bgra| Decoded { width: format.shown.0, height: format.shown.1, bgra })
             }
@@ -330,32 +331,6 @@ fn output_sample(size: u32) -> io::Result<IMFSample> {
     }
 }
 
-/// NV12（Y 平面 `rows` 行、每行 `pitch` 字节，后面紧跟交错的 UV 平面）左上角 `shown` 那块换成 BGRA，按
-/// BT.709 有限范围。数据不够长时报错。
-fn nv12_to_bgra(nv12: &[u8], pitch: usize, rows: usize, shown: (u32, u32)) -> io::Result<Vec<u8>> {
-    let (width, height) = (shown.0 as usize, shown.1 as usize);
-    let uv_start = pitch * rows;
-    if width > pitch || height > rows || nv12.len() < uv_start + pitch * height.div_ceil(2) {
-        return Err(io::Error::other("a decoded frame of the wrong size"));
-    }
-    let mut out = vec![0u8; width * height * 4];
-    for (y, row) in out.chunks_exact_mut(width * 4).enumerate() {
-        let luma = &nv12[y * pitch..][..width];
-        let chroma = &nv12[uv_start + (y / 2) * pitch..][..width.next_multiple_of(2).min(pitch)];
-        for (x, pixel) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let c = 298 * (i32::from(luma[x]) - 16);
-            let u = i32::from(chroma[x & !1]) - 128;
-            let v = i32::from(chroma[(x & !1) + 1]) - 128;
-            let clamp = |value: i32| ((value + 128) >> 8).clamp(0, 255) as u8;
-            pixel[0] = clamp(c + 541 * u);
-            pixel[1] = clamp(c - 55 * u - 136 * v);
-            pixel[2] = clamp(c + 459 * v);
-            pixel[3] = 255;
-        }
-    }
-    Ok(out)
-}
-
 /// 真（`VARIANT_TRUE`）。
 fn boolean() -> VARIANT {
     let mut variant = VARIANT::default();
@@ -366,31 +341,4 @@ fn boolean() -> VARIANT {
         inner.Anonymous.boolVal = windows::Win32::Foundation::VARIANT_TRUE;
     }
     variant
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 灰的、纯红的像素换出来对得上；画面比解码器给的整幅小时只换左上角那块。
-    #[test]
-    fn converts_nv12_to_bgra() {
-        // 2x2 的画面放在每行 4 字节、4 行的缓冲里：亮度 16..235 映到 0..255，色度 128 是灰。
-        let (pitch, rows) = (4, 4);
-        let mut nv12 = vec![0u8; pitch * rows * 3 / 2];
-        nv12[..pitch * rows].fill(235);
-        nv12[pitch * rows..].fill(128);
-        let bgra = nv12_to_bgra(&nv12, pitch, rows, (2, 2)).unwrap();
-        assert_eq!(bgra.len(), 2 * 2 * 4);
-        assert!(bgra.chunks(4).all(|pixel| pixel == [255, 255, 255, 255]));
-        // BT.709 有限范围的纯红：Y 63，U 102，V 240。
-        nv12[..pitch * rows].fill(63);
-        for pair in nv12[pitch * rows..].chunks_mut(2) {
-            pair.copy_from_slice(&[102, 240]);
-        }
-        let bgra = nv12_to_bgra(&nv12, pitch, rows, (2, 2)).unwrap();
-        let [b, g, r, _] = bgra[..4] else { unreachable!() };
-        assert!(r > 250 && g < 5 && b < 5, "{b} {g} {r}");
-        assert!(nv12_to_bgra(&nv12[..10], pitch, rows, (2, 2)).is_err());
-    }
 }
