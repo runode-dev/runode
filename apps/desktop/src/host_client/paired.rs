@@ -36,7 +36,7 @@ use super::{
     },
 };
 
-/// 认系统时问的、只有 macOS 上才有的目录。
+/// 猜系统时问的、只有 macOS 上才有的目录。
 const MACOS_ONLY_DIR: &str = "/System/Library/CoreServices";
 /// 让那台电脑撤销这台设备（`ClientMsg::Unpair`）最多等这么久。
 const UNPAIR_TIMEOUT: Duration = Duration::from_secs(10);
@@ -527,26 +527,18 @@ impl PairedHost {
         Ok(())
     }
 
-    /// 那台电脑的家目录和系统（`Connected::os` 的写法）：家目录按 `ClientMsg::ListDirs` 不给目录时列的那个认，带
-    /// 盘符的是 Windows；别的看有没有只有 macOS 上才有的目录。问不到时家目录为空、系统不明。
+    /// 那台电脑的家目录和系统（`Connected::os` 的写法）；问不到家目录时记一笔日志。
     fn probe_system(&self) -> (Option<PathBuf>, String) {
         let list =
             |path: Option<PathBuf>| match self.link.request(|req| ClientMsg::ListDirs { req, path }, LIST_TIMEOUT) {
                 Ok(HostMsg::Dirs { path, .. }) => Some(path),
                 _ => None,
             };
-        let Some(home) = list(None) else {
+        let (home, os) = system(self.link.host_os(), self.link.host_home(), list);
+        if home.is_none() {
             tracing::warn!("cannot find the home directory on the paired computer {}", self.id);
-            return (None, String::new());
-        };
-        let os = if has_drive(&home) {
-            "windows"
-        } else if list(Some(PathBuf::from(MACOS_ONLY_DIR))).is_some() {
-            "macos"
-        } else {
-            "linux"
-        };
-        (Some(home), os.to_owned())
+        }
+        (home, os)
     }
 
     /// 连上了：记下状态，告诉界面那边还活着的会话，断开着的终端接回来。
@@ -593,6 +585,34 @@ impl PairedHost {
     }
 }
 
+/// 那台电脑的家目录和系统。宿主在 `Welcome` 里报了系统（`reported_os` 不为空）时两样都照它报的用；没报时才
+/// 用 `list` 去问（列一个目录，列不了时为 `None`）：家目录按 `ClientMsg::ListDirs` 不给目录时列的那个认，系统由
+/// `guess_os` 猜。问不到家目录时家目录为空、系统不明。
+fn system(
+    reported_os: String,
+    reported_home: Option<PathBuf>,
+    list: impl Fn(Option<PathBuf>) -> Option<PathBuf>,
+) -> (Option<PathBuf>, String) {
+    if !reported_os.is_empty() {
+        return (reported_home, reported_os);
+    }
+    let Some(home) = list(None) else { return (None, String::new()) };
+    let os = guess_os(&home, || list(Some(PathBuf::from(MACOS_ONLY_DIR))).is_some());
+    (Some(home), os.to_owned())
+}
+
+/// 宿主没报系统时按家目录猜：带盘符的是 Windows；别的看有没有只有 macOS 上才有的目录（`has_macos_dir`），没有就
+/// 当 Linux。
+fn guess_os(home: &Path, has_macos_dir: impl FnOnce() -> bool) -> &'static str {
+    if has_drive(home) {
+        "windows"
+    } else if has_macos_dir() {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
 /// 路径以盘符开头（`C:/Users/me`），是 Windows 上的。
 fn has_drive(path: &Path) -> bool {
     let bytes = path.as_os_str().as_encoded_bytes();
@@ -622,12 +642,15 @@ fn classify(err: &DialError) -> Failure {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{
+        cell::RefCell,
+        path::{Path, PathBuf},
+    };
 
     use runode_protocol::remote::RejectReason;
     use runode_remote::client::DialError;
 
-    use super::{Failure, classify, has_drive};
+    use super::{Failure, MACOS_ONLY_DIR, classify, has_drive, system};
 
     /// 撤销了配对、证书变了、协议不认识的要用户来办，停下；连不上、限速、一时办不了的自己再试。
     #[test]
@@ -642,6 +665,40 @@ mod tests {
         assert!(!stops(DialError::Rejected(RejectReason::Disabled)));
         assert!(!stops(DialError::Rejected(RejectReason::Unknown)));
         assert!(!stops(DialError::Io(std::io::Error::other("reset"))));
+    }
+
+    /// 宿主报了系统就照用它报的，一个目录也不列；家目录没报时就是不知道，也不去问。
+    #[test]
+    fn a_reported_system_is_taken_as_is() {
+        let never = |path: Option<PathBuf>| -> Option<PathBuf> { panic!("listed {path:?}") };
+        assert_eq!(
+            system("linux".into(), Some("/home/me".into()), never),
+            (Some(PathBuf::from("/home/me")), "linux".into())
+        );
+        assert_eq!(system("windows".into(), None, never), (None, "windows".into()));
+    }
+
+    /// 宿主没报系统时问家目录、再按它猜：带盘符的是 Windows，列得了 `MACOS_ONLY_DIR` 的是 macOS，别的是 Linux；
+    /// 问不到家目录时系统不明。
+    #[test]
+    fn an_unreported_system_is_probed_and_guessed() {
+        let probe = |home: Option<&str>, macos: bool| {
+            let listed = RefCell::new(Vec::new());
+            let list = |path: Option<PathBuf>| {
+                listed.borrow_mut().push(path.clone());
+                match path {
+                    None => home.map(PathBuf::from),
+                    Some(dir) => (macos && dir == Path::new(MACOS_ONLY_DIR)).then_some(dir),
+                }
+            };
+            let found = system(String::new(), None, list);
+            (found, listed.into_inner().len())
+        };
+        let found = |home: &str, os: &str| (Some(PathBuf::from(home)), os.to_owned());
+        assert_eq!(probe(Some("C:/Users/me"), false), (found("C:/Users/me", "windows"), 1));
+        assert_eq!(probe(Some("/Users/me"), true), (found("/Users/me", "macos"), 2));
+        assert_eq!(probe(Some("/home/me"), false), (found("/home/me", "linux"), 2));
+        assert_eq!(probe(None, true), ((None, String::new()), 1));
     }
 
     #[test]
