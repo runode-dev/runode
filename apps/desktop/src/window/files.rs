@@ -320,11 +320,8 @@ impl WindowView {
             }
             // 配对的电脑没有 ssh，经读写项目的连接传。
             HostId::Paired(_) => {
-                let (project, home) = (ProjectHost::of(&id), id.home());
-                cx.background_spawn(async move {
-                    let home = home.ok_or_else(|| anyhow::anyhow!("the home directory there is not known yet"))?;
-                    crate::project_host::upload::upload(&project, &home, upload)
-                })
+                let project = ProjectHost::of(&id);
+                cx.background_spawn(async move { crate::project_host::upload::upload(&project, upload) })
             }
         };
         let quoting = Quoting::of_session(view.read(cx).meta());

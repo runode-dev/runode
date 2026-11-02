@@ -74,7 +74,7 @@ pub fn upload(host: &RemoteHost, upload: Upload) -> Result<Vec<String>> {
 }
 
 /// 新建只有自己能进的目录 `dir`；已经有了（包括同名的链接）就失败。
-fn private_dir(dir: &Path) -> std::io::Result<()> {
+pub(crate) fn private_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     return std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(dir);
     #[cfg(not(unix))]

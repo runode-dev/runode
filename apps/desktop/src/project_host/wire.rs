@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     edit::{FileOp, OpFailure},
     repo::GitOp,
+    upload::UploadOp,
 };
 
 /// 桌面要远端办的事。
@@ -50,6 +51,8 @@ pub(super) enum Call {
     RepoBadge { dir: PathBuf },
     /// 把请求后面跟着的字节写成 `path`（`runode_paths::replace_file`），交回写完后的版本戳。
     Write { path: PathBuf },
+    /// 传文件（`upload`），回 `Reply::Upload`。
+    Upload(UploadOp),
     /// 监听 `dirs`（项目目录和不在它下面的 git 目录）：桌面每个监听一个 `token`。还没有这个监听时开始听，
     /// 马上回 `Reply::Changed` 的 `started`；已经在听时等到攒下改动，或者等够 `serve::WATCH_HOLD` 交回空的。
     Watch { token: u64, dirs: Vec<PathBuf> },
@@ -86,6 +89,8 @@ pub(super) enum Reply {
         started: bool,
         changes: runode_files::Changes,
     },
+    /// 传文件的这一步办完了，`UploadOp::Begin` 带着新建的子目录。
+    Upload(Option<PathBuf>),
     /// 没办成，原因写给人看。
     Failed(String),
 }
@@ -108,6 +113,7 @@ impl Call {
                 op.for_each_path(f);
             }
             Self::Edit(op) => op.for_each_path(f),
+            Self::Upload(op) => op.for_each_path(f),
             Self::Read { path, .. } | Self::Stamp { path } | Self::Write { path } | Self::RepoBadge { dir: path } => {
                 f(path)
             }

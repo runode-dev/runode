@@ -16,9 +16,18 @@ use super::{ProjectHost, client::Client, serve};
 
 /// 同一个进程里的项目服务，桌面这头经管道和它说话。
 pub(super) fn remote() -> ProjectHost {
+    serving(None)
+}
+
+/// `remote`，传来的文件放在 `uploads` 下。
+pub(super) fn remote_uploading_to(uploads: PathBuf) -> ProjectHost {
+    serving(Some(uploads))
+}
+
+fn serving(uploads: Option<PathBuf>) -> ProjectHost {
     let (requests, to_service) = std::io::pipe().unwrap();
     let (from_service, responses) = std::io::pipe().unwrap();
-    thread::spawn(move || serve::serve(BufReader::new(requests), responses));
+    thread::spawn(move || serve::serve_with(BufReader::new(requests), responses, uploads));
     ProjectHost::Remote(Client::over("contract", to_service, from_service))
 }
 

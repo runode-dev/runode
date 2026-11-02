@@ -42,6 +42,8 @@ struct Caches {
     untracked: HashMap<PathBuf, UntrackedCache>,
     git: HashMap<PathBuf, Option<Repos>>,
     watches: HashMap<u64, Watched>,
+    /// 放上传的目录，没有 home 目录时为空。
+    uploads: Option<PathBuf>,
 }
 
 /// 攒着还没交给桌面的改动，来了改动时叫醒等着的那条 `Call::Watch`。
@@ -64,10 +66,21 @@ pub(crate) fn serve_on(input: impl Read, output: impl Write + Send + 'static) ->
     serve(BufReader::new(input), output)
 }
 
-/// 从 `input` 一条条读请求，回话写进 `output`；`input` 读完（桌面断开）时返回退出码。
-pub(super) fn serve(mut input: impl BufRead, output: impl Write + Send + 'static) -> i32 {
+/// 从 `input` 一条条读请求，回话写进 `output`；`input` 读完（桌面断开）时返回退出码。传来的文件放在 home
+/// 目录下的 `UPLOADS_DIR`。
+pub(super) fn serve(input: impl BufRead, output: impl Write + Send + 'static) -> i32 {
+    let uploads = runode_paths::Dirs::from_env().home.map(|home| home.join(runode_ssh::bootstrap::UPLOADS_DIR));
+    serve_with(input, output, uploads)
+}
+
+/// `serve`，传来的文件放在 `uploads` 下。
+pub(super) fn serve_with(
+    mut input: impl BufRead,
+    output: impl Write + Send + 'static,
+    uploads: Option<PathBuf>,
+) -> i32 {
     let output = Arc::new(Mutex::new(output));
-    let caches = Shared::default();
+    let caches = Shared::new(Mutex::new(Caches { uploads, ..Caches::default() }));
     // 在办的请求各自的停止标记，按编号记。
     let running = Arc::new(Mutex::new(HashMap::<u64, Arc<AtomicBool>>::new()));
     loop {
@@ -183,6 +196,13 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
             Ok(()) => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
             Err(err) => (Reply::Failed(err.to_string()), Vec::new()),
         },
+        Call::Upload(op) => {
+            let uploads = lock().uploads.clone();
+            match op.run(uploads.as_deref(), &content) {
+                Ok(path) => (Reply::Upload(path), Vec::new()),
+                Err(err) => (Reply::Failed(err.to_string()), Vec::new()),
+            }
+        }
         Call::Watch { token, dirs } => (wait_for_changes(token, dirs, caches, stop), Vec::new()),
         Call::Cancel { .. } => (Reply::Failed("nothing to cancel".into()), Vec::new()),
         Call::Git { root, op } => match runode_git::Repo::open(&root).map(|repo| op.run(&repo)) {
