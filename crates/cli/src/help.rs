@@ -30,7 +30,7 @@ Commands:
   swap         Swap the panes of two sessions
   todo         Put tasks for agents on the task board and start them
   schedule     Start a task for an agent at set times
-  remote       Pair phones for remote access and manage them
+  remote       Pair phones and computers for remote access and manage them
   service      Start runode at login, and upgrade the running host
   completions  Print a completion script for your shell
   help         Show this help, or the help of a command
@@ -364,20 +364,22 @@ Options:
 ";
 
 const REMOTE: &str = "\
-Pair phones for remote access and manage them.
+Pair phones and computers for remote access and manage them.
 
 Usage: runode remote pair [--addr ADDR]...
        runode remote devices [--json]
        runode remote revoke DEVICE
 
 Commands:
-  pair     Pair a phone: shows a QR code and its link, valid for 5 minutes,
-           and waits for the phone. Sets remote-access = true in the config
-           if it is off (runode must be running to pick it up); once paired,
-           offers to set terminal-host = true so remote access keeps running
-           after you quit runode
-  devices  List the paired phones
-  revoke   Unpair a phone; it is disconnected within seconds
+  pair     Pair a phone or another computer: shows a QR code and its link,
+           valid for 5 minutes, and waits for the device. Scan the code with
+           the phone, or paste the link into runode on the other computer.
+           Sets remote-access = true in the config if it is off (runode must
+           be running to pick it up); once paired, offers to set
+           terminal-host = true so remote access keeps running after you
+           quit runode
+  devices  List the paired devices, phones and computers
+  revoke   Unpair a device; it is disconnected within seconds
 
 Arguments:
   DEVICE  With `revoke`: a device id or a unique prefix of it, as `runode

@@ -14,7 +14,7 @@ use std::{io, net::IpAddr, path::PathBuf};
 use runode_paths::Dirs;
 use runode_protocol::{
     push::ApnsEnv,
-    remote::{Bytes, DeviceId},
+    remote::{Bytes, DeviceId, DeviceKind},
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,9 @@ pub struct Device {
     pub device_id: DeviceId,
     /// 设备配对时报的名字。
     pub name: String,
+    /// 配对时报的设备种类，定下它过了门禁之后能开哪些连接、发哪些请求。
+    #[serde(default)]
+    pub kind: DeviceKind,
     /// 设备的 P-256 公钥，X9.63 未压缩格式，登录时用它验签。
     pub public_key: Bytes,
     /// 配对的时刻，Unix 秒。
@@ -235,6 +238,7 @@ mod tests {
                     let device = Device {
                         device_id: DeviceId([n; 16]),
                         name: format!("phone {n}"),
+                        kind: DeviceKind::Mobile,
                         public_key: Bytes(vec![4; 65]),
                         paired_at: 0,
                         last_seen: 0,
@@ -272,6 +276,7 @@ mod tests {
                 Device {
                     device_id: DeviceId([n; 16]),
                     name: format!("phone {n}"),
+                    kind: DeviceKind::Mobile,
                     public_key: Bytes(vec![4; 65]),
                     paired_at: 0,
                     last_seen: 0,
@@ -296,6 +301,7 @@ mod tests {
         let device = |n: u8| Device {
             device_id: DeviceId([n; 16]),
             name: format!("phone {n}"),
+            kind: DeviceKind::Mobile,
             public_key: Bytes(vec![4; 65]),
             paired_at: 0,
             last_seen: 0,

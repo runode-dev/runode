@@ -1,4 +1,4 @@
-//! `runode remote …`：给手机配对远程访问（`pair`）、列出（`devices`）和撤销（`revoke`）配对过的设备。
+//! `runode remote …`：给手机或别的电脑配对远程访问（`pair`）、列出（`devices`）和撤销（`revoke`）配对过的设备。
 //! 不经宿主，读写 `runode_remote` 管的文件：监听方（宿主所在的进程）开着时才能配对，列和
 //! 撤销不用它开着。配对前见 `turn_on`，配对后见 `offer_background`。
 
@@ -13,7 +13,7 @@ use std::{
 use anyhow::{Context as _, anyhow, bail};
 use qrcode::{Color, EcLevel, QrCode};
 use runode_config::{ConfigFile, REMOTE_ACCESS, TERMINAL_HOST};
-use runode_protocol::remote::PAIRING_TTL;
+use runode_protocol::remote::{DeviceKind, PAIRING_TTL};
 use runode_remote::{
     Device, ListenerStatus, PairingProgress, PairingTicket, list_devices, listener_status, now_unix, revoke_device,
 };
@@ -52,8 +52,9 @@ pub(crate) fn pair(
     writeln!(out, "\n{uri}\n")?;
     writeln!(
         out,
-        "Scan the code with runode on your phone, or open the link there, within {} minutes. \
-         Waiting for the phone; Ctrl-C stops waiting.",
+        "Scan the code with runode on your phone, or open the link there, within {} minutes. To pair another \
+         computer, paste the link into runode there (Add Remote Host, then Runode Pairing). Waiting for the \
+         device; Ctrl-C stops waiting.",
         PAIRING_TTL.as_secs() / 60
     )?;
     out.flush()?;
@@ -67,7 +68,7 @@ pub(crate) fn pair(
                 writeln!(out, "Paired with {name} ({device_id}).")?;
                 return offer_background(env, out, answer);
             }
-            PairingProgress::Expired => bail!("the pairing code expired before a phone used it"),
+            PairingProgress::Expired => bail!("the pairing code expired before a device used it"),
             PairingProgress::Replaced => bail!("another `runode remote pair` replaced this pairing code"),
         }
         if let Some(signal) = signals.caught() {
@@ -75,7 +76,7 @@ pub(crate) fn pair(
         }
         polls += 1;
         if polls.is_multiple_of(STATUS_EVERY) && listener_status(&env.dirs).ok().flatten().is_none() {
-            bail!("remote access stopped while waiting for the phone");
+            bail!("remote access stopped while waiting for the device");
         }
         thread::sleep(POLL_INTERVAL);
     }
@@ -153,11 +154,19 @@ pub(crate) fn devices(env: &Env, json: bool, out: &mut dyn Write) -> anyhow::Res
     }
     let now = now_unix();
     // 设备名是手机报上来的，`table` 替它换掉控制字符。
-    let rows = devices.iter().map(|Device { device_id, name, paired_at, last_seen, .. }| {
-        vec![device_id.to_string(), name.clone(), ago(now, *paired_at), ago(now, *last_seen)]
+    let rows = devices.iter().map(|Device { device_id, name, kind, paired_at, last_seen, .. }| {
+        vec![device_id.to_string(), name.clone(), kind_name(*kind).into(), ago(now, *paired_at), ago(now, *last_seen)]
     });
-    // `PAIRED` 补到 10 格：短的「just now」也占这么宽，`LAST SEEN` 不随内容左右挪。
-    table(&["ID", "NAME", "PAIRED    ", "LAST SEEN"], rows, out)
+    // `KIND` 补到 `computer` 那么宽、`PAIRED` 补到 10 格：内容短时后面几栏也不左右挪。
+    table(&["ID", "NAME", "KIND    ", "PAIRED    ", "LAST SEEN"], rows, out)
+}
+
+/// 列设备时的种类。
+fn kind_name(kind: DeviceKind) -> &'static str {
+    match kind {
+        DeviceKind::Mobile => "phone",
+        DeviceKind::Desktop => "computer",
+    }
 }
 
 pub(crate) fn revoke(env: &Env, device: &str, out: &mut dyn Write) -> anyhow::Result<()> {

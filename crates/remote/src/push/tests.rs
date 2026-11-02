@@ -108,8 +108,14 @@ impl Scratch {
 
     /// 配对一台设备，登记 `bundle` 的 device token。
     fn register(&self, env: ApnsEnv, bundle: &str) {
-        let device =
-            Device { device_id: DEVICE, name: "手机".into(), public_key: Bytes(vec![4]), paired_at: 1, last_seen: 1 };
+        let device = Device {
+            device_id: DEVICE,
+            name: "手机".into(),
+            kind: runode_protocol::remote::DeviceKind::Mobile,
+            public_key: Bytes(vec![4]),
+            paired_at: 1,
+            last_seen: 1,
+        };
         devices::add(&self.dirs, device).unwrap();
         let registration = PushRegistration {
             device_id: DEVICE,

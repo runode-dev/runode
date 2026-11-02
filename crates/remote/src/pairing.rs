@@ -241,6 +241,7 @@ mod tests {
         let device = |n: u8| Device {
             device_id: DeviceId([n; 16]),
             name: format!("phone {n}"),
+            kind: runode_protocol::remote::DeviceKind::Mobile,
             public_key: Bytes(vec![4; 65]),
             paired_at: 0,
             last_seen: 0,
@@ -277,6 +278,7 @@ mod tests {
             Ok(Device {
                 device_id: DeviceId([1; 16]),
                 name: "phone".into(),
+                kind: runode_protocol::remote::DeviceKind::Mobile,
                 public_key: Bytes(vec![4; 65]),
                 paired_at: 0,
                 last_seen: 0,

@@ -13,8 +13,8 @@ use ring::signature::{ECDSA_P256_SHA256_ASN1, UnparsedPublicKey};
 use runode_protocol::{
     ClientKind, ClientMsg, FrameKind,
     remote::{
-        Bytes, DeviceId, EXPORTER_LABEL, EXPORTER_LEN, GATE_TIMEOUT, GATE_VERSION, GateClientMsg, GateHostMsg,
-        NONCE_LEN, PUBLIC_KEY_LEN, Purpose, RejectReason, SECRET_LEN, read_gate_frame, signed_bytes,
+        Bytes, DeviceId, DeviceKind, EXPORTER_LABEL, EXPORTER_LEN, GATE_TIMEOUT, GATE_VERSION, GateClientMsg,
+        GateHostMsg, NONCE_LEN, PUBLIC_KEY_LEN, Purpose, RejectReason, SECRET_LEN, read_gate_frame, signed_bytes,
     },
     screen::ScreenClientMsg,
     speech::SpeechClientMsg,
@@ -65,9 +65,10 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
             GateClientMsg::RemoteAuth { device_id, signature } => {
                 auth(shared, device_id, &signature, &signed_bytes(&nonce, &exporter, Purpose::Auth), peer)
             }
-            GateClientMsg::RemotePair { secret, device_name, public_key, signature, .. } => {
+            GateClientMsg::RemotePair { secret, device_name, public_key, signature, device_kind } => {
                 let signed = signed_bytes(&nonce, &exporter, Purpose::Pair);
-                pair(shared, &secret, &device_name, public_key, &signature, &signed, peer)
+                let device = Claimed { name: &device_name, kind: device_kind, public_key };
+                pair(shared, &secret, device, &signature, &signed, peer)
             }
             // `challenge` 已经拒掉了。
             GateClientMsg::Unknown => return Err(io::Error::other("an unknown gate message")),
@@ -195,12 +196,18 @@ fn auth(
     Ok(id)
 }
 
+/// 来配对的设备报的自己：名字、种类和以后登录用的公钥。
+struct Claimed<'a> {
+    name: &'a str,
+    kind: DeviceKind,
+    public_key: Bytes,
+}
+
 /// 第一次配对：口令对得上（见 `pairing::Desk`），签名用设备给的公钥验得过，就登记这台设备。
 fn pair(
     shared: &Shared,
     secret: &Bytes,
-    name: &str,
-    public_key: Bytes,
+    claimed: Claimed<'_>,
     signature: &Bytes,
     signed: &[u8],
     peer: IpAddr,
@@ -208,6 +215,7 @@ fn pair(
     if secret.0.len() != SECRET_LEN {
         return Err(RejectReason::PairingInvalid);
     }
+    let Claimed { name, kind, public_key } = claimed;
     let name = device_name(name);
     let device = shared.desk().redeem(&shared.dirs, &secret.0, || {
         let key = &public_key.0;
@@ -216,9 +224,16 @@ fn pair(
         }
         let device_id = DeviceId(random().map_err(|_| RejectReason::Disabled)?);
         let now = now_unix();
-        Ok(Device { device_id, name: name.clone(), public_key: public_key.clone(), paired_at: now, last_seen: now })
+        Ok(Device {
+            device_id,
+            name: name.clone(),
+            kind,
+            public_key: public_key.clone(),
+            paired_at: now,
+            last_seen: now,
+        })
     })?;
-    tracing::info!("paired remote device {} ({})", device.device_id, device.name);
+    tracing::info!("paired remote {:?} device {} ({})", device.kind, device.device_id, device.name);
     // 配对用的这条连接接着用，下一次登录可能隔很久：地址现在就记下，见 `auth`。
     if let Err(err) = devices::touch(&shared.dirs, device.device_id, device.last_seen, peer) {
         tracing::warn!("cannot record where {} paired from: {err}", device.device_id);

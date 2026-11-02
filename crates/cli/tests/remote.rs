@@ -36,6 +36,11 @@ impl Root {
     /// 照设备表的格式写两台设备。
     fn write_devices(&self) {
         self.write_device_list(&[(PHONE, "Ethan 的 iPhone", 1, 2), (TABLET, "iPad", 3, 4)]);
+        // 第二台记成电脑；第一台照旧表的样子不写种类，读出来是手机。
+        let path = self.dirs().remote_access_devices_file().unwrap();
+        let json = std::fs::read_to_string(&path).unwrap();
+        let json = json.replacen(r#""name":"iPad","#, r#""name":"iPad","kind":"desktop","#, 1);
+        std::fs::write(path, json).unwrap();
     }
 
     /// 照设备表的格式写下这些设备：标识、名字、配对时刻、最后一次连上的时刻。
@@ -77,15 +82,16 @@ fn devices_are_listed_and_revoked_by_prefix() {
     assert_eq!(
         out,
         format!(
-            "ID                                NAME             PAIRED      LAST SEEN\n\
-             {PHONE}  Ethan 的 iPhone  {ago}  {ago}\n\
-             {TABLET}  iPad             {ago}  {ago}\n"
+            "ID                                NAME             KIND      PAIRED      LAST SEEN\n\
+             {PHONE}  Ethan 的 iPhone  phone     {ago}  {ago}\n\
+             {TABLET}  iPad             computer  {ago}  {ago}\n"
         )
     );
     assert!(out.contains(PHONE) && out.contains("Ethan 的 iPhone") && out.contains("iPad"), "{out}");
     let (_, json, _) = run("remote devices --json", &env);
     let json: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(json[1]["device_id"], TABLET);
+    assert_eq!((json[0]["kind"].as_str(), json[1]["kind"].as_str()), (Some("mobile"), Some("desktop")));
     // 前缀对上两台时列出来，不撤销。
     let (code, _, err) = run("remote revoke 0011", &env);
     assert_eq!(code, exit::FAILED);
@@ -110,8 +116,8 @@ fn the_paired_column_is_ten_wide_even_when_short() {
     assert_eq!(
         out,
         format!(
-            "ID                                NAME  PAIRED      LAST SEEN\n\
-             {TABLET}  iPad  just now    just now\n"
+            "ID                                NAME  KIND      PAIRED      LAST SEEN\n\
+             {TABLET}  iPad  phone     just now    just now\n"
         )
     );
 }

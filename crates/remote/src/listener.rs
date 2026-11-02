@@ -550,6 +550,7 @@ mod tests {
         let device = devices::Device {
             device_id: id,
             name: "phone".into(),
+            kind: runode_protocol::remote::DeviceKind::Mobile,
             public_key: Bytes(vec![4; 65]),
             paired_at: 0,
             last_seen: 0,

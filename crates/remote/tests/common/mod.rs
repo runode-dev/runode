@@ -97,11 +97,16 @@ impl Harness {
         PairingTicket::begin(&self.dirs, runode_protocol::remote::PAIRING_TTL).unwrap()
     }
 
-    /// 用 `key` 配对一台设备，返回它的标识。
+    /// 用 `key` 配对一台手机，返回它的标识。
     pub fn pair(&self, key: &Key) -> DeviceId {
+        self.pair_as(key, DeviceKind::Mobile)
+    }
+
+    /// 用 `key` 配对一台 `kind` 的设备，返回它的标识。
+    pub fn pair_as(&self, key: &Key, kind: DeviceKind) -> DeviceId {
         let ticket = self.ticket();
         let mut phone = self.phone();
-        let pair = phone.pair_message(&ticket.secret(), "测试手机", key);
+        let pair = phone.pair_message_as(&ticket.secret(), "测试设备", key, kind);
         match phone.ask(&pair) {
             Some(GateHostMsg::RemoteAccepted { device_id }) => device_id,
             other => panic!("pairing failed: {other:?}"),
@@ -222,12 +227,16 @@ impl Phone {
     }
 
     pub fn pair_message(&self, secret: &[u8], name: &str, key: &Key) -> GateClientMsg {
+        self.pair_message_as(secret, name, key, DeviceKind::Mobile)
+    }
+
+    pub fn pair_message_as(&self, secret: &[u8], name: &str, key: &Key, kind: DeviceKind) -> GateClientMsg {
         GateClientMsg::RemotePair {
             secret: Bytes(secret.to_vec()),
             device_name: name.into(),
             public_key: Bytes(key.public()),
             signature: Bytes(key.sign(&self.signed(Purpose::Pair))),
-            device_kind: DeviceKind::Mobile,
+            device_kind: kind,
         }
     }
 
