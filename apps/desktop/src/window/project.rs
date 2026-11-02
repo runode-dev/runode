@@ -9,6 +9,7 @@ mod state;
 mod watch;
 
 use crate::ui::panel::split_handle;
+use futures::{StreamExt as _, channel::mpsc::UnboundedSender};
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -21,9 +22,10 @@ use super::{
 use crate::ui::button::Toggle;
 use crate::ui::menu::MenuHost as _;
 use gpui::{
-    Action, AnyElement, App, Context, Div, Focusable, MouseButton, Role, Stateful, Window, div, prelude::*, px,
+    Action, AnyElement, App, Context, Div, Focusable, MouseButton, Role, Stateful, Task, Window, div, prelude::*, px,
 };
 // 面板外框在 `runode_ui::panel`，窗口里各面板从这里引。
+use crate::host_client::remote::HostId;
 use crate::project_host::ProjectHost;
 use crate::ui::a11y::A11yPress;
 pub(super) use crate::ui::panel::{panel_message, panel_shell};
@@ -33,10 +35,57 @@ use crate::{
 };
 
 pub(super) use state::Project;
-pub(super) use watch::{ProjectChanges, ProjectWatch};
+use watch::{ProjectChanges, ProjectWatch};
+
+/// 右侧面板在看的目录怎么跟上改动：定时看终端换没换目录、监听不了时定时重读，监听目录、把攒好的改动交给
+/// 窗口（`WindowView::project_changed`）。
+pub(super) struct Watcher {
+    _poll: Task<()>,
+    /// 在听的目录，事件发到 `events`。
+    watch: Option<ProjectWatch>,
+    /// 正在单独的线程上建的监听的根目录和 git 目录。
+    building: Option<(HostId, PathBuf, Vec<PathBuf>)>,
+    events: UnboundedSender<ProjectChanges>,
+    _events: Task<()>,
+}
+
+impl Watcher {
+    pub(super) fn new(window: &mut Window, cx: &mut Context<WindowView>) -> Self {
+        let poll = cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(POLL_INTERVAL).await;
+                let alive = this.update_in(cx, |this, window, cx| {
+                    if window.is_window_active() {
+                        this.poll_project(cx);
+                        this.auto_fetch(cx);
+                    }
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        });
+        let (events, mut received) = futures::channel::mpsc::unbounded::<ProjectChanges>();
+        let events_task = cx.spawn_in(window, async move |this, cx| {
+            while let Some(mut changes) = received.next().await {
+                cx.background_executor().timer(WATCH_DEBOUNCE).await;
+                while let Ok(more) = received.try_recv() {
+                    changes.merge(more);
+                }
+                let alive = this.update_in(cx, |this, window, cx| {
+                    this.project_changed(changes, window.is_window_active(), cx);
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        });
+        Self { _poll: poll, watch: None, building: None, events, _events: events_task }
+    }
+}
 
 /// 显示右侧面板时隔这么久看一次终端换没换目录。
-pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(1);
+const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// 面板都收着时，隔多久再问一次当前目录在不在 git 仓库里（`git init` 之后按钮才出得来）。
 const REPO_PROBE_INTERVAL: Duration = Duration::from_secs(5);
 /// 监听不了目录时退回定时重读，至少隔这么久；上次读得慢时，至少隔上次耗时的
@@ -49,7 +98,7 @@ const WORKTREE_INTERVAL: Duration = Duration::from_secs(10);
 /// SSH 主机上的项目听不了时退回定时重读，至少隔这么久；上次读得慢时按 `POLL_BACKOFF` 拉长。
 const REMOTE_INTERVAL: Duration = Duration::from_secs(5);
 /// 监听到改动后先攒这么久再读：保存文件、提交这类操作会连着来一串事件。
-pub(super) const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
+const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
 /// 监听到改动时，离上次开始读至少隔上次耗时的这么多倍。
 const WATCH_BACKOFF: u32 = 3;
 /// 右侧各栏的默认宽度，以及拖动的下限。
@@ -174,7 +223,8 @@ impl WindowView {
     fn watching(&self) -> bool {
         let workspace = self.workspace();
         let root = workspace.project.root.as_ref();
-        self.project_watch
+        self.project_watcher
+            .watch
             .as_ref()
             .is_some_and(|watch| watch.host == workspace.host && Some(&watch.root) == root && watch.alive())
     }
@@ -186,21 +236,21 @@ impl WindowView {
         let project = &self.workspace().project;
         let root = project.root.clone().filter(|_| self.project_visible(cx));
         let Some(root) = root else {
-            self.project_watch = None;
-            self.building_watch = None;
+            self.project_watcher.watch = None;
+            self.project_watcher.building = None;
             return;
         };
         let target = (self.workspace().host.clone(), root, project.watch_git_dirs.clone());
-        let built = self.project_watch.as_ref().is_some_and(|watch| {
+        let built = self.project_watcher.watch.as_ref().is_some_and(|watch| {
             (&watch.host, &watch.root, &watch.git_dirs) == (&target.0, &target.1, &target.2) && watch.alive()
         });
-        if built || self.building_watch.as_ref() == Some(&target) {
+        if built || self.project_watcher.building.as_ref() == Some(&target) {
             return;
         }
-        self.building_watch = Some(target.clone());
+        self.project_watcher.building = Some(target.clone());
         let (done, watch) = futures::channel::oneshot::channel();
         let (host, root, git_dirs) = target.clone();
-        let events = self.project_events.clone();
+        let events = self.project_watcher.events.clone();
         // 起不了线程时 `done` 跟着丢掉，下面收到的是空的。
         let _ = std::thread::Builder::new()
             .name("project-watch".into())
@@ -209,13 +259,13 @@ impl WindowView {
             let watch = watch.await.ok().flatten();
             this.update(cx, |this, cx| {
                 // 建的时候又换了要听的目录：这个不要了。
-                if this.building_watch.as_ref() != Some(&target) {
+                if this.project_watcher.building.as_ref() != Some(&target) {
                     return;
                 }
-                this.building_watch = None;
-                this.project_watch = watch;
+                this.project_watcher.building = None;
+                this.project_watcher.watch = watch;
                 // 监听建好之前那次读的期间改了什么听不到，按有改动再读一次。
-                if this.project_watch.is_some() && this.workspace().project.root.as_ref() == Some(&target.1) {
+                if this.project_watcher.watch.is_some() && this.workspace().project.root.as_ref() == Some(&target.1) {
                     this.workspace_mut().project.stale = true;
                     this.refresh_if_due(cx);
                 }
@@ -246,7 +296,7 @@ impl WindowView {
         } else {
             self.with_git_panel(cx, |panel, cx| panel.refs_changed(id, &paths, cx));
         }
-        let Some(watch) = &self.project_watch else {
+        let Some(watch) = &self.project_watcher.watch else {
             return;
         };
         let (id, git) = (self.workspace().id, self.workspace().project.git.as_deref());

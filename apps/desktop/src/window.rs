@@ -45,7 +45,7 @@ mod titlebar;
 
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Instant};
 
-use futures::{StreamExt as _, future::Shared};
+use futures::future::Shared;
 use gpui::{
     Action, AnyElement, App, Context, Div, Empty, Entity, EntityId, ExternalPaths, FocusHandle, Focusable,
     KeyDownEvent, MouseButton, Render, Role, ScrollHandle, SharedString, Stateful, StyleRefinement, Subscription, Task,
@@ -365,14 +365,7 @@ pub struct WindowView {
     _visibility_watch: Subscription,
     /// 配置重载后重画，文件树的字号等跟着变。
     _config_watch: Subscription,
-    /// 右侧面板显示时定时看终端换没换目录，监听不了目录时定时重读。
-    _project_poll: Task<()>,
-    /// 监听右侧面板在看的目录，事件发到 `project_events`，由 `_project_events` 收。
-    project_watch: Option<project::ProjectWatch>,
-    /// 正在单独的线程上建的监听的根目录和 git 目录，见 `sync_project_watch`。
-    building_watch: Option<(HostId, PathBuf, Vec<PathBuf>)>,
-    project_events: futures::channel::mpsc::UnboundedSender<project::ProjectChanges>,
-    _project_events: Task<()>,
+    project_watcher: project::Watcher,
     /// 包成缓存视图的几块界面，见 `Slot`。第一次画窗口时才建：建 `WindowView` 时它还没有实体。
     slots: Option<Slots>,
     /// 缓存的几块上次是按哪个主题画的，见 `follow_colors`。
@@ -425,35 +418,7 @@ impl WindowView {
             // 没算数，到这时才算看到了当前分屏。
             this.mark_seen(window, cx);
         });
-        let project_poll = cx.spawn_in(window, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(project::POLL_INTERVAL).await;
-                let alive = this.update_in(cx, |this, window, cx| {
-                    if window.is_window_active() {
-                        this.poll_project(cx);
-                        this.auto_fetch(cx);
-                    }
-                });
-                if alive.is_err() {
-                    break;
-                }
-            }
-        });
-        let (project_events, mut events) = futures::channel::mpsc::unbounded::<project::ProjectChanges>();
-        let project_events_task = cx.spawn_in(window, async move |this, cx| {
-            while let Some(mut changes) = events.next().await {
-                cx.background_executor().timer(project::WATCH_DEBOUNCE).await;
-                while let Ok(more) = events.try_recv() {
-                    changes.merge(more);
-                }
-                let alive = this.update_in(cx, |this, window, cx| {
-                    this.project_changed(changes, window.is_window_active(), cx);
-                });
-                if alive.is_err() {
-                    break;
-                }
-            }
-        });
+        let project_watcher = project::Watcher::new(window, cx);
         let config_watch = cx.observe_global::<AppConfig>(|this, cx| {
             // 界面跟着 `ui-font-size` 缩放，Git 面板有多个仓库时的列表记着量过的行高，要重新量。
             this.git_panel.read(cx).remeasure();
@@ -538,11 +503,7 @@ impl WindowView {
             _activation_watch: activation_watch,
             _visibility_watch: visibility_watch,
             _config_watch: config_watch,
-            _project_poll: project_poll,
-            project_watch: None,
-            building_watch: None,
-            project_events,
-            _project_events: project_events_task,
+            project_watcher,
             slots: None,
             slot_theme: None,
         }
