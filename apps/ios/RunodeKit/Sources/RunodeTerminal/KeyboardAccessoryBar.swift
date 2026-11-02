@@ -6,82 +6,38 @@
     /// `TerminalView.makeRestingKeyBar`）。语音输入的麦克风键和开关软键盘的键固定在右端，不跟着别的键
     /// 滚走；麦克风键按下、松开都报给代理，录音时显示成按下去的样子。开关软键盘的键两条都用键盘图标：
     /// 底部那条是「打开键盘」，跟着软键盘的那条是「收起键盘」，按下去的样子表示键盘开着。
-    final class KeyboardAccessoryBar: UIInputView {
+    final class KeyboardAccessoryBar: KeyBar {
         private weak var owner: TerminalView?
         private var controlButton: UIButton?
         private var micButton: UIButton?
 
         init(owner: TerminalView, resting: Bool = false) {
             self.owner = owner
-            super.init(
-                frame: CGRect(x: 0, y: 0, width: 320, height: 44), inputViewStyle: resting ? .default : .keyboard)
-            if resting { backgroundColor = .clear }
-            allowsSelfSizing = true
-            let scroll = UIScrollView()
-            scroll.showsHorizontalScrollIndicator = false
-            scroll.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(scroll)
-            let stack = UIStackView()
-            stack.axis = .horizontal
-            stack.spacing = 6
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            scroll.addSubview(stack)
+            super.init(resting: resting)
             let keyboard =
                 resting
                 ? button("keyboard", symbol: true, label: String(localized: "打开键盘")) { $0.showKeyboard() }
                 : button("keyboard", symbol: true, label: String(localized: "收起键盘")) { $0.resignFirstResponder() }
             if !resting { highlight(keyboard, true) }
-            keyboard.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(keyboard)
             let mic = microphone()
             micButton = mic
-            mic.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(mic)
-            // 软键盘不弹出时（接了硬件键盘）这条栏贴在屏幕最底下，按钮要排在安全区里，避开 Home 条和圆角；
-            // 栏自己的背景照样铺到底。横屏时左右也让开刘海。
-            let safe = safeAreaLayoutGuide
-            // 系统有时把栏高钉在 44，底部安全区却还没归零，这时让开安全区的这条让步，免得和高度冲突。
-            let aboveHomeIndicator = scroll.bottomAnchor.constraint(equalTo: safe.bottomAnchor)
-            aboveHomeIndicator.priority = .required - 1
-            NSLayoutConstraint.activate([
-                scroll.leadingAnchor.constraint(equalTo: safe.leadingAnchor),
-                scroll.trailingAnchor.constraint(equalTo: mic.leadingAnchor, constant: -6),
-                mic.trailingAnchor.constraint(equalTo: keyboard.leadingAnchor, constant: -6),
-                mic.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
-                mic.heightAnchor.constraint(equalTo: keyboard.heightAnchor),
-                keyboard.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -8),
-                keyboard.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
-                keyboard.heightAnchor.constraint(equalTo: scroll.heightAnchor, constant: -12),
-                scroll.topAnchor.constraint(equalTo: topAnchor),
-                aboveHomeIndicator,
-                scroll.heightAnchor.constraint(equalToConstant: 44),
-                stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
-                stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -8),
-                stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 6),
-                stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -6),
-                stack.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor, constant: -12),
-            ])
+            pinTrailing([mic, keyboard])
 
-            stack.addArrangedSubview(button("escape", symbol: true, label: "Esc") { $0.press(.escape) })
+            keys.addArrangedSubview(button("escape", symbol: true, label: "Esc") { $0.press(.escape) })
             // 不用 `control` 符号：它照 ⌃ 的样子画在字框的上半截，放在按钮里偏上；`chevron.up` 形状一样、上下居中。
             let control = button("chevron.up", symbol: true, label: String(localized: "Ctrl（粘住）")) { $0.controlLatched.toggle() }
             controlButton = control
-            stack.addArrangedSubview(control)
-            stack.addArrangedSubview(button("arrow.right.to.line", symbol: true, label: "Tab") { $0.press(.tab) })
-            stack.addArrangedSubview(button("return", symbol: true, label: String(localized: "回车")) { $0.press(.enter) })
-            stack.addArrangedSubview(button("arrowtriangle.left.fill", symbol: true, label: String(localized: "左")) { $0.press(.left) })
-            stack.addArrangedSubview(button("arrowtriangle.down.fill", symbol: true, label: String(localized: "下")) { $0.press(.down) })
-            stack.addArrangedSubview(button("arrowtriangle.up.fill", symbol: true, label: String(localized: "上")) { $0.press(.up) })
-            stack.addArrangedSubview(button("arrowtriangle.right.fill", symbol: true, label: String(localized: "右")) { $0.press(.right) })
+            keys.addArrangedSubview(control)
+            keys.addArrangedSubview(button("arrow.right.to.line", symbol: true, label: "Tab") { $0.press(.tab) })
+            keys.addArrangedSubview(button("return", symbol: true, label: String(localized: "回车")) { $0.press(.enter) })
+            keys.addArrangedSubview(button("arrowtriangle.left.fill", symbol: true, label: String(localized: "左")) { $0.press(.left) })
+            keys.addArrangedSubview(button("arrowtriangle.down.fill", symbol: true, label: String(localized: "下")) { $0.press(.down) })
+            keys.addArrangedSubview(button("arrowtriangle.up.fill", symbol: true, label: String(localized: "上")) { $0.press(.up) })
+            keys.addArrangedSubview(button("arrowtriangle.right.fill", symbol: true, label: String(localized: "右")) { $0.press(.right) })
             for symbol in ["|", "~", "/", "-", "_", "`"] {
-                stack.addArrangedSubview(button(symbol, label: symbol) { $0.typeText(symbol) })
+                keys.addArrangedSubview(button(symbol, label: symbol) { $0.typeText(symbol) })
             }
-            stack.addArrangedSubview(button("doc.on.clipboard", symbol: true, label: String(localized: "粘贴")) { $0.paste(nil) })
-        }
-
-        @available(*, unavailable)
-        required init?(coder: NSCoder) {
-            fatalError("init(coder:) is not supported")
+            keys.addArrangedSubview(button("doc.on.clipboard", symbol: true, label: String(localized: "粘贴")) { $0.paste(nil) })
         }
 
         func setControlLatched(_ latched: Bool) {
@@ -111,50 +67,13 @@
             return mic
         }
 
-        /// 按下去的样子（粘住的 Ctrl、开着的键盘）：反色，和 app 里的实心按钮一样黑白为主。不用 `tintColor`：
-        /// 这条栏在键盘的窗口里，接不到 app 设的强调色，会是系统的蓝色。
-        private func highlight(_ button: UIButton, _ on: Bool) {
-            button.isSelected = on
-            button.configuration?.baseBackgroundColor = on ? .label : .secondarySystemFill
-            button.configuration?.baseForegroundColor = on ? .systemBackground : .label
-        }
-
-        private func styled(_ title: String, symbol: Bool = false, label: String) -> UIButton {
-            var configuration = UIButton.Configuration.filled()
-            configuration.baseBackgroundColor = .secondarySystemFill
-            configuration.baseForegroundColor = .label
-            configuration.cornerStyle = .medium
-            configuration.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10)
-            if symbol {
-                configuration.image = UIImage(systemName: title)
-                // 比旁边 15 点的字小两号：图标比字显得满，小一号时方向键的实心三角还是太重。
-                configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
-                    pointSize: 11, weight: .medium)
-            } else {
-                var attributed = AttributedString(title)
-                attributed.font = .monospacedSystemFont(ofSize: 15, weight: .medium)
-                configuration.attributedTitle = attributed
-            }
-            let button = UIButton(configuration: configuration)
-            button.accessibilityLabel = label
-            return button
-        }
-
         private func button(
             _ title: String, symbol: Bool = false, label: String, action: @escaping @MainActor (TerminalView) -> Void
         ) -> UIButton {
-            let button = styled(title, symbol: symbol, label: label)
-            button.addAction(
-                UIAction { [weak self] _ in
-                    guard let owner = self?.owner else { return }
-                    UIDevice.current.playInputClick()
-                    action(owner)
-                }, for: .primaryActionTriggered)
-            return button
+            key(title, symbol: symbol, label: label) { [weak self] in
+                guard let owner = self?.owner else { return }
+                action(owner)
+            }
         }
-    }
-
-    extension KeyboardAccessoryBar: UIInputViewAudioFeedback {
-        var enableInputClicksWhenVisible: Bool { true }
     }
 #endif

@@ -1,6 +1,7 @@
 #if os(iOS)
     import AVFoundation
     import RunodeProtocol
+    import RunodeTerminal
     import SwiftUI
     import UIKit
 
@@ -494,48 +495,21 @@
 
     /// 一条快捷键：Esc、Tab、按住的 ⌘ ⌃ ⌥ ⇧、方向键，右端开关软键盘。`resting` 时是软键盘收着时页面底部
     /// 那条，否则跟在软键盘上面。
-    final class ScreenKeyBar: UIInputView {
+    final class ScreenKeyBar: KeyBar {
         private let model: ScreenModel
         private var modButtons: [(UIButton, WritableKeyPath<ScreenMods, Bool>)] = []
 
         init(model: ScreenModel, resting: Bool, onKeyboard: @escaping () -> Void) {
             self.model = model
-            super.init(
-                frame: CGRect(x: 0, y: 0, width: 320, height: 44), inputViewStyle: resting ? .default : .keyboard)
-            allowsSelfSizing = true
-            if resting { backgroundColor = .clear }
-            let scroll = UIScrollView()
-            scroll.showsHorizontalScrollIndicator = false
-            scroll.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(scroll)
-            let stack = UIStackView()
-            stack.axis = .horizontal
-            stack.spacing = 6
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            scroll.addSubview(stack)
-            let keyboard = button(
+            super.init(resting: resting)
+            let keyboard = key(
                 resting ? "keyboard" : "keyboard.chevron.compact.down", symbol: true,
-                label: resting ? String(localized: "打开键盘") : String(localized: "收起键盘")
-            ) { _ in onKeyboard() }
-            keyboard.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(keyboard)
-            NSLayoutConstraint.activate([
-                scroll.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
-                scroll.trailingAnchor.constraint(equalTo: keyboard.leadingAnchor, constant: -4),
-                scroll.topAnchor.constraint(equalTo: topAnchor),
-                scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
-                keyboard.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -8),
-                keyboard.centerYAnchor.constraint(equalTo: centerYAnchor),
-                keyboard.heightAnchor.constraint(equalToConstant: 34),
-                stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
-                stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -8),
-                stack.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
-                stack.heightAnchor.constraint(equalToConstant: 34),
-            ])
+                label: resting ? String(localized: "打开键盘") : String(localized: "收起键盘"), action: onKeyboard)
+            pinTrailing([keyboard])
             for (title, key, label) in [
                 ("esc", "Escape", String(localized: "Esc 键")), ("tab", "Tab", String(localized: "Tab 键")),
             ] {
-                stack.addArrangedSubview(button(title, label: label) { $0.model.press(key) })
+                keys.addArrangedSubview(button(title, label: label) { $0.model.press(key) })
             }
             for (title, mod, label) in [
                 ("⌘", \ScreenMods.cmd, String(localized: "按住 Command")),
@@ -545,10 +519,9 @@
             ] {
                 let modButton = button(title, label: label) { bar in
                     bar.model.stickyMods[keyPath: mod].toggle()
-                    bar.refreshMods()
                 }
                 modButtons.append((modButton, mod))
-                stack.addArrangedSubview(modButton)
+                keys.addArrangedSubview(modButton)
             }
             for (symbol, key, label) in [
                 ("arrow.left", "ArrowLeft", String(localized: "左方向键")),
@@ -556,40 +529,27 @@
                 ("arrow.down", "ArrowDown", String(localized: "下方向键")),
                 ("arrow.right", "ArrowRight", String(localized: "右方向键")),
             ] {
-                stack.addArrangedSubview(button(symbol, symbol: true, label: label) { $0.model.press(key) })
+                keys.addArrangedSubview(button(symbol, symbol: true, label: label) { $0.model.press(key) })
             }
         }
 
-        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
+        /// 一个键，按下后修饰键按下去的样子跟着刷新：用掉了的自己松开。
         private func button(
             _ title: String, symbol: Bool = false, label: String, action: @escaping (ScreenKeyBar) -> Void
         ) -> UIButton {
-            var config = UIButton.Configuration.gray()
-            if symbol { config.image = UIImage(systemName: title) } else { config.title = title }
-            let button = UIButton(
-                configuration: config,
-                primaryAction: UIAction { [weak self] _ in
-                    guard let self else { return }
-                    action(self)
-                    self.refreshMods()
-                })
-            button.accessibilityLabel = label
+            let button = key(title, symbol: symbol, label: label) { [weak self] in
+                guard let self else { return }
+                action(self)
+                self.refreshMods()
+            }
             button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
             return button
         }
 
         /// 按住的修饰键按下去的样子跟着 `stickyMods` 走：用掉以后自己松开。
-        /// 按住的修饰键反色，黑白为主。不用 `tintColor`：跟在软键盘上面时这条栏在键盘的窗口里，接不到 app 设的
-        /// 强调色，会是系统的蓝色。
         func refreshMods() {
             for (button, mod) in modButtons {
-                let on = model.stickyMods[keyPath: mod]
-                var config = button.configuration
-                config?.baseBackgroundColor = on ? .label : nil
-                config?.baseForegroundColor = on ? .systemBackground : nil
-                button.configuration = config
-                button.accessibilityTraits = on ? [.button, .selected] : .button
+                highlight(button, model.stickyMods[keyPath: mod])
             }
         }
     }
