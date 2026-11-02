@@ -45,14 +45,14 @@ static CPU_TIMES: LazyLock<Mutex<HashMap<u32, CpuSample>>> = LazyLock::new(Mutex
 
 /// 比这更早的采样不拿来算 CPU，这一轮当作没有上一次：隔得太久的两次采样做差，算出的是那整段时间的平均值，
 /// 不是现在的占用。
-const CPU_SAMPLE_MAX_AGE: Duration = super::super::POLL_INTERVAL.saturating_mul(2);
+const CPU_SAMPLE_MAX_AGE: Duration = super::POLL_INTERVAL.saturating_mul(2);
 
 /// 现在的进程表；快照拿不到时是空的。内存、CPU 和命令行只问 `roots` 和它们的子孙，以及这个 app 的
 /// 可执行文件跑的进程（认 `Helper`）。
 ///
 /// Windows 不改孤儿进程记着的父进程号，进程号又回收得快，记着的父进程可能早退出了、号被后来的进程占了，
 /// 所以子进程比父进程创建得早时当作没有父进程。
-pub(in crate::window::status_bar) fn processes(roots: &HashSet<u32>) -> Procs {
+pub(crate) fn processes(roots: &HashSet<u32>) -> Procs {
     let snapshot = snapshot();
     let mut procs = Procs::new(
         snapshot.iter().map(|(&pid, &(ppid, _))| (pid, Proc { ppid, memory: 0, cpu: 0., helper: None })).collect(),
@@ -263,10 +263,10 @@ fn tcp_listeners<Row>(family: u16, fields: impl Fn(&Row) -> (u32, u32)) -> Vec<(
 }
 
 /// 防止电脑闲置时休眠的电源请求：拿着期间系统不会因为没人操作而睡眠，放掉（drop）就恢复；app 退出时系统收回。
-pub(in crate::window::status_bar) struct Caffeinate(HANDLE);
+pub(crate) struct Caffeinate(HANDLE);
 
 impl Caffeinate {
-    pub(in crate::window::status_bar) fn start() -> std::io::Result<Self> {
+    pub(crate) fn start() -> std::io::Result<Self> {
         // `powercfg /requests` 里列出的原因。
         let mut reason: Vec<u16> = "Runode".encode_utf16().chain([0]).collect();
         let context = REASON_CONTEXT {
@@ -288,7 +288,7 @@ impl Caffeinate {
     }
 
     /// 电源请求别人结束不了，一直拦着。
-    pub(in crate::window::status_bar) fn exit(&mut self) -> Option<Result<(), String>> {
+    pub(crate) fn exit(&mut self) -> Option<Result<(), String>> {
         None
     }
 }

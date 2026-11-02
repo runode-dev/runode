@@ -42,7 +42,7 @@ use runode_types::{
 use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, remote};
 use crate::host_client::remote::{self as hosts, HostId};
 use crate::project_host::ProjectHost;
-use crate::system_probe::{self as probe, Caffeinate, Helper, Port, Procs, Usage};
+use crate::system_probe::{self as probe, Caffeinate, Helper, POLL_INTERVAL, Port, Procs, Usage};
 use crate::ui::a11y::A11yPress;
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::menu::MenuHost as _;
@@ -59,8 +59,6 @@ use crate::{
     },
 };
 
-/// 隔多久重新问一次系统。
-const POLL_INTERVAL: Duration = Duration::from_secs(3);
 /// 隔多久重新问一次在监听的端口：状态栏上只是个小数字，`lsof` 又比 `ps` 慢得多；开着端口浮层时每次都问。
 const PORTS_INTERVAL: Duration = Duration::from_secs(15);
 pub(super) const STATUS_BAR_HEIGHT: f32 = 26.;

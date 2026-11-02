@@ -17,6 +17,9 @@ use std::{
     time::Duration,
 };
 
+/// 状态栏隔多久重新问一次系统；Windows 上算 CPU 时据此认出太旧的采样。
+pub(crate) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// `ps`、`lsof` 最多跑这么久，超时当这次没数据：卡住一次不能让状态栏的轮询（连同防休眠）停下。
 #[cfg(not(windows))]
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -377,6 +380,7 @@ impl Drop for Caffeinate {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::time::Instant;
 
     use super::*;
