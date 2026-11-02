@@ -13,10 +13,8 @@ pub(crate) use windows::{Caffeinate, processes};
 use std::collections::{HashMap, HashSet};
 #[cfg(not(windows))]
 use std::{
-    io::Read as _,
     process::{Child, Command, Stdio},
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// `ps`、`lsof` 最多跑这么久，超时当这次没数据：卡住一次不能让状态栏的轮询（连同防休眠）停下。
@@ -202,46 +200,21 @@ pub(crate) fn listening_ports() -> Vec<Port> {
     parse_lsof(&text)
 }
 
-/// 跑命令拿标准输出；跑不了、`timeout` 内没跑完（这时结束它）时是空字符串。`lsof` 有进程读不了时
+/// 跑命令拿标准输出（`subprocess::output_within`）；跑不了、`timeout` 内没跑完时是空字符串。`lsof` 有进程读不了时
 /// 退出码不是 0，输出照样能用。
 #[cfg(not(windows))]
 fn output(command: &mut Command, timeout: Duration) -> String {
-    let spawned = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
-    let mut child = match spawned {
-        Ok(child) => child,
+    match crate::subprocess::output_within(command, timeout) {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
+        Err(crate::subprocess::RunError::Timeout) => {
+            tracing::warn!("{command:?} did not finish in {timeout:?}, ended it");
+            String::new()
+        }
         Err(err) => {
-            tracing::debug!("cannot run {command:?}: {err}");
-            return String::new();
-        }
-    };
-    // 输出放在别的线程里读：一边等它退出一边不读的话，输出多过管道的缓冲时它会卡在写上。
-    let mut stdout = child.stdout.take();
-    let reader = thread::spawn(move || {
-        let mut data = Vec::new();
-        if let Some(stdout) = &mut stdout {
-            let _ = stdout.read_to_end(&mut data);
-        }
-        data
-    });
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            waited => {
-                if let Err(err) = waited {
-                    tracing::debug!("cannot wait for {command:?}: {err}");
-                } else {
-                    tracing::warn!("{command:?} did not finish in {timeout:?}, killing it");
-                }
-                // 结束后管道关上，读的线程随之退出。
-                let _ = child.kill();
-                let _ = child.wait();
-                return String::new();
-            }
+            tracing::debug!("cannot run {command:?}: {err:?}");
+            String::new()
         }
     }
-    reader.join().map(|data| String::from_utf8_lossy(&data).into_owned()).unwrap_or_default()
 }
 
 /// `ps -axo pid=,ppid=,rss=,%cpu=,args=` 的输出：每行进程号、父进程号、常驻内存（KB）、CPU 百分比和命令行。
@@ -404,6 +377,8 @@ impl Drop for Caffeinate {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use super::*;
 
     #[test]

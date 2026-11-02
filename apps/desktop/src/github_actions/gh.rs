@@ -10,12 +10,13 @@ use std::{
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
-    thread::{self, JoinHandle},
+    process::{Command, Output},
     time::{Duration, Instant},
 };
 
 use serde::{Deserialize, de::DeserializeOwned};
+
+use crate::subprocess::RunError;
 
 pub const PROGRAM: &str = "gh";
 /// 找不到 gh 时 `Gh` 返回的错，页上据此显示怎么装。
@@ -409,46 +410,12 @@ impl Gh {
     }
 }
 
-/// 跑完 `command` 拿输出；`timeout` 内没跑完时杀掉它的整个进程组，返回错误。
+/// 跑完 `command` 拿输出（`subprocess::output_within`），没拿到时是给用户看的原因。
 fn output_within(command: &mut Command, timeout: Duration) -> Result<Output, String> {
-    // 自成一个进程组，到点时连同拉起的凭据 helper 一起杀掉，它们可能拿着输出的管道。
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    crate::subprocess::isolate(command);
-    let spawned = command.spawn();
-    let mut child = spawned.map_err(spawn_error)?;
-    // 输出另起线程读，多过管道的缓冲时 gh 不会卡在写上。到点时不等这两个线程：脱离了进程组的子孙进程
-    // 可能还拿着管道。
-    let (stdout, stderr) = (read_all(child.stdout.take()), read_all(child.stderr.take()));
-    let deadline = Instant::now() + timeout;
-    loop {
-        // 两个管道都读到头了才收尸：收了尸它的进程号就可能给了别的进程，到点时会杀到别人。
-        let waited = if stdout.is_finished() && stderr.is_finished() { child.try_wait() } else { Ok(None) };
-        match waited {
-            Ok(Some(status)) => {
-                let (stdout, stderr) = (stdout.join().unwrap_or_default(), stderr.join().unwrap_or_default());
-                return Ok(Output { status, stdout, stderr });
-            }
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            waited => {
-                crate::subprocess::kill(child.id());
-                let _ = child.wait();
-                return Err(match waited {
-                    Err(err) => format!("{PROGRAM}: {err}"),
-                    Ok(_) => format!("{PROGRAM} did not finish in {} s", timeout.as_secs()),
-                });
-            }
-        }
-    }
-}
-
-/// 在另一个线程里读完 `pipe`。
-fn read_all(pipe: Option<impl Read + Send + 'static>) -> JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let mut out = Vec::new();
-        if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut out);
-        }
-        out
+    crate::subprocess::output_within(command, timeout).map_err(|err| match err {
+        RunError::Spawn(err) => spawn_error(err),
+        RunError::Wait(err) => format!("{PROGRAM}: {err}"),
+        RunError::Timeout => format!("{PROGRAM} did not finish in {} s", timeout.as_secs()),
     })
 }
 
