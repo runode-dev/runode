@@ -245,6 +245,9 @@
         let subtitle: String?
         let showsMark: Bool
 
+        /// 375 点宽的手机上，返回按钮和右边两个按钮之外剩下的宽度。
+        private static let maxWidth: CGFloat = 180
+
         var body: some ToolbarContent {
             // iOS 26 起导航栏上的按钮都有一块玻璃底，标题不要。
             if #available(iOS 26, *) {
@@ -269,10 +272,14 @@
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                                // 副标题多是目录，末尾那段最要紧。
+                                .truncationMode(.head)
                         }
                     }
                 }
                 .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                // 宽过导航栏的项会被系统整个藏掉，连带挤走右边的按钮，所以限宽，长了截断。
+                .frame(idealWidth: Self.maxWidth, maxWidth: Self.maxWidth, alignment: .leading)
                 // 不固定尺寸时导航栏按占位的宽度排它，字会被截掉。
                 .fixedSize()
                 .accessibilityElement(children: .combine)

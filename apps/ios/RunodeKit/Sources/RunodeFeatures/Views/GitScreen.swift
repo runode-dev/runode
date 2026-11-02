@@ -54,12 +54,6 @@
             .overlay { placeholder }
             .leadingNavigationTitle(model.repositoryName ?? "Git", subtitle: subtitle)
             .toolbar {
-                if model.status != nil, !model.isClean {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button(asTree ? "以列表形式查看" : "以树形式查看",
-                               systemImage: asTree ? "list.bullet" : "list.bullet.indent") { asTree.toggle() }
-                    }
-                }
                 ToolbarItem(placement: .primaryAction) { moreMenu }
             }
             .refreshable { await model.refreshAndWait() }
@@ -401,6 +395,10 @@
         private var moreMenu: some View {
             Menu {
                 Button("刷新", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
+                if model.status != nil, !model.isClean {
+                    Button(asTree ? "以列表形式查看" : "以树形式查看",
+                           systemImage: asTree ? "list.bullet" : "list.bullet.indent") { asTree.toggle() }
+                }
                 if model.status?.hasRemote == true {
                     Section {
                         Button("抓取", systemImage: "arrow.down.circle") { Task { await model.fetch() } }
