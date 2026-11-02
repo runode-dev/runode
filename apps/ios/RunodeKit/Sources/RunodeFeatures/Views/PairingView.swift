@@ -10,6 +10,8 @@
         /// 关掉配对页；配对成功时带着那台电脑。
         let onFinish: (MachineRecord?) -> Void
         @State private var showingPaste: Bool
+        /// 配对成功的提示停留多久再自己关掉配对页。
+        private static let pairedPause: Duration = .milliseconds(800)
 
         init(model: PairingModel, onFinish: @escaping (MachineRecord?) -> Void) {
             self.model = model
@@ -69,6 +71,16 @@
             .tint(.white)
             .preferredColorScheme(.dark)
             .animation(.default, value: model.phase)
+            .sensoryFeedback(.success, trigger: model.phase) { _, phase in
+                if case .paired = phase { true } else { false }
+            }
+            // 配对好了停一下让人看到成功，然后自己关掉、进这台电脑的页，不用再点「完成」。
+            .task(id: model.phase) {
+                guard case .paired(let machine) = model.phase else { return }
+                try? await Task.sleep(for: Self.pairedPause)
+                guard !Task.isCancelled else { return }
+                onFinish(machine)
+            }
             .sheet(isPresented: $showingPaste) {
                 PasteLinkSheet(model: model)
             }
@@ -125,18 +137,9 @@
                     Text("正在和 \(hostName) 配对…")
                 }
             case .paired(let machine):
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("已和 \(machine.name) 配对", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.headline)
-                    Button {
-                        onFinish(machine)
-                    } label: {
-                        Text("完成").frame(maxWidth: .infinity)
-                    }
-                    .prominentButtonStyle()
-                    .controlSize(.large)
-                }
+                Label("已和 \(machine.name) 配对", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.headline)
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 12) {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
