@@ -158,7 +158,7 @@ impl SettingsView {
         match picker.target {
             PickTarget::Value(key) => {
                 if key.ends_with("-sound") && value != "none" {
-                    crate::ui::sound::play(&value);
+                    crate::sound::play(&value);
                 }
                 let values = if value.is_empty() { Vec::new() } else { vec![value] };
                 self.write_or_report(key, values, cx);

@@ -57,7 +57,7 @@ pub fn alert(alert: AgentAlert, cx: &mut App) {
         Alert::Blocked => &config.agent_blocked_sound,
     };
     if let Some(sound) = sound {
-        crate::ui::sound::play(sound);
+        crate::sound::play(sound);
     }
     if config.agent_notifications && notifications_available() {
         post(alert, cx);
@@ -83,7 +83,7 @@ pub fn program(tag: String, title: String, body: String, cx: &mut App) {
 /// 系统会弹出授权框。点它时标识认不出分屏，什么都不做。
 pub fn test(cx: &mut App) {
     if let Some(sound) = &cx.global::<AppConfig>().0.agent_done_sound {
-        crate::ui::sound::play(sound);
+        crate::sound::play(sound);
     }
     if notifications_available() {
         cx.show_system_notification(SystemNotification {

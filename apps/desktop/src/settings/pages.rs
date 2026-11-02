@@ -356,7 +356,7 @@ impl SettingsView {
                 ))
                 && (autostart || !matches!(item, Item::Section("login") | Item::Autostart))
                 && (firewall_blocked || !matches!(item, Item::Firewall))
-                // Option 当不当 Alt、提示音（`ui::sound`）只有 macOS 上才有。
+                // Option 当不当 Alt、提示音（`sound`）只有 macOS 上才有。
                 && (cfg!(target_os = "macos")
                     || !matches!(
                         item,
@@ -527,7 +527,7 @@ impl SettingsView {
 
     fn open_sound_picker(&mut self, key: &'static str, window: &mut Window, cx: &mut Context<Self>) {
         let items = std::iter::once(PickItem::new("none", rust_i18n::t!("settings.no_sound").into_owned()))
-            .chain(crate::ui::sound::names().into_iter().map(|name| PickItem::new(name.clone(), name)))
+            .chain(crate::sound::names().into_iter().map(|name| PickItem::new(name.clone(), name)))
             .collect();
         let current = self.config.values(key).into_iter().next();
         self.open_picker(key_title(key), items, current, PickTarget::Value(key), window, cx);

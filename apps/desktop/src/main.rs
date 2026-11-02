@@ -40,6 +40,7 @@ mod screen_bridge;
 mod screen_process;
 mod screen_viewer;
 mod settings;
+mod sound;
 mod startup;
 mod subprocess;
 mod system_probe;
