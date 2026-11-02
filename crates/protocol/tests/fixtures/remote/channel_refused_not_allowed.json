@@ -1,0 +1,6 @@
+{
+  "type": "channel_refused",
+  "reason": {
+    "kind": "not_allowed"
+  }
+}

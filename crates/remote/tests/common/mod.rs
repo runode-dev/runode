@@ -19,8 +19,8 @@ use runode_paths::Dirs;
 use runode_protocol::{
     ClientMsg, FrameKind, HostMsg, read_frame,
     remote::{
-        Bytes, DeviceId, EXPORTER_LABEL, GateClientMsg, GateHostMsg, Purpose, decode_base64url, read_gate_frame,
-        signed_bytes,
+        Bytes, DeviceId, DeviceKind, EXPORTER_LABEL, GateClientMsg, GateHostMsg, Purpose, decode_base64url,
+        read_gate_frame, signed_bytes,
     },
     write_frame,
 };
@@ -227,6 +227,7 @@ impl Phone {
             device_name: name.into(),
             public_key: Bytes(key.public()),
             signature: Bytes(key.sign(&self.signed(Purpose::Pair))),
+            device_kind: DeviceKind::Mobile,
         }
     }
 

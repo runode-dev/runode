@@ -1,0 +1,7 @@
+{
+  "type": "channel_refused",
+  "reason": {
+    "kind": "build_mismatch",
+    "build": "0.1.15-8e0d4b2"
+  }
+}

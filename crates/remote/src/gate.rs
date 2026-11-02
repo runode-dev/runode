@@ -65,7 +65,7 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
             GateClientMsg::RemoteAuth { device_id, signature } => {
                 auth(shared, device_id, &signature, &signed_bytes(&nonce, &exporter, Purpose::Auth), peer)
             }
-            GateClientMsg::RemotePair { secret, device_name, public_key, signature } => {
+            GateClientMsg::RemotePair { secret, device_name, public_key, signature, .. } => {
                 let signed = signed_bytes(&nonce, &exporter, Purpose::Pair);
                 pair(shared, &secret, &device_name, public_key, &signature, &signed, peer)
             }

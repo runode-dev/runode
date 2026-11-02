@@ -9,6 +9,7 @@
 use runode_protocol::{
     ClientMsg, FrameKind, HostMsg, MAX_PAYLOAD,
     frame::{FrameError, HEADER_LEN},
+    remote::DeviceKind,
     write_frame,
 };
 
@@ -112,7 +113,7 @@ impl FromPhone {
             return;
         }
         let reply = serde_json::from_slice::<ClientMsg>(&frame[HEADER_LEN..]).ok().and_then(|message| {
-            if let Some(what) = message.remote_refusal() {
+            if let Some(what) = message.remote_refusal(DeviceKind::Mobile) {
                 tracing::info!("refused a remote device's request to {what}");
                 return Some(HostMsg::Error { req: None, id: None, message: format!("a remote device cannot {what}") });
             }

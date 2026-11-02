@@ -1,0 +1,7 @@
+{
+  "type": "channel_refused",
+  "reason": {
+    "kind": "unavailable",
+    "message": "nothing is listening on port 5173"
+  }
+}

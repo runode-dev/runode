@@ -7,7 +7,7 @@ use std::{path::Path, time::Duration};
 use common::*;
 use runode_protocol::{
     ClientMsg, FrameKind, HostMsg,
-    remote::{Bytes, DeviceId, GateClientMsg, GateHostMsg, Purpose, RejectReason, signed_bytes},
+    remote::{Bytes, DeviceId, DeviceKind, GateClientMsg, GateHostMsg, Purpose, RejectReason, signed_bytes},
     write_frame,
 };
 use runode_remote::{PairingProgress, PairingTicket, list_devices, pairing_pending, revoke_device};
@@ -159,6 +159,7 @@ fn unknown_devices_and_bad_signatures_are_refused() {
         device_name,
         public_key,
         signature: Bytes(Key::generate().sign(&phone.signed(Purpose::Pair))),
+        device_kind: DeviceKind::Mobile,
     };
     assert_eq!(phone.ask(&forged), rejected(RejectReason::BadSignature));
     drop(phone);

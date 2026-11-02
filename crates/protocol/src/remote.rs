@@ -39,14 +39,25 @@
 //!    新分配的标识），或者 `GateHostMsg::RemoteRejected`
 //!    （`{"type":"remote_rejected","reason":{"kind":"unknown_device"}}`，原因见 `RejectReason`），
 //!    拒绝后宿主关闭连接。
-//! 5. 通过以后，客户端发的第一帧必须是 `client` 为 `ClientKind::Mobile` 的 `ClientMsg::Hello`（终端）、
-//!    `ScreenClientMsg::ScreenHello`（远程桌面）或 `SpeechClientMsg::SpeechHello`（语音识别），否则
-//!    宿主直接断开。终端的连接之后就是普通的连接，和本机 Unix socket 上的一样，只有一个例外：
+//! 5. 通过以后，客户端发的第一帧必须是 `ClientMsg::Hello`（终端）、`ScreenClientMsg::ScreenHello`（远程
+//!    桌面）或 `SpeechClientMsg::SpeechHello`（语音识别），桌面设备还可以是 `ChannelHello`（见「桌面设备」），
+//!    否则宿主直接断开。`Hello` 的 `client` 要和配对时报的 `DeviceKind` 对得上：手机是 `ClientKind::Mobile`，
+//!    桌面是 `ClientKind::Desktop`。终端的连接之后就是普通的连接，和本机 Unix socket 上的一样，只有一个例外：
 //!    `ClientMsg::remote_refusal` 挡下的请求不转给宿主，宿主在发往客户端的方向、两帧之间回一条
 //!    `HostMsg::Error`（挡下的都不带 `req` 和会话，`Error` 也就不带），连接照旧。登记推送的
 //!    `ClientMsg::PushRegister`（见 `push`）也不转给宿主，由监听方按这台设备记下，
 //!    同样在两帧之间回 `HostMsg::Done`（办不了时回带 `req` 的 `Error`）。解除配对的 `ClientMsg::Unpair`
 //!    也一样由监听方办，回 `Done` 后撤掉这台设备。
+//!
+//! # 桌面设备
+//!
+//! 别的电脑上的 Runode 也能像手机一样配对（`RemotePair` 的 `device_kind` 是 `DeviceKind::Desktop`），
+//! 连上后当一台远程主机用。它的终端连接和本机的桌面一样是 `ClientKind::Desktop`，`remote_refusal`
+//! 按设备种类挡。另外它可以在门禁之后发 `ChannelHello` 开两种专用连接：读写项目的文件和 git
+//! （`ChannelHello::ProjectHello`），转到电脑本机的端口（`ChannelHello::ForwardHello`）。宿主回
+//! `ChannelReply`（同样是通道 0 的控制帧），回 `ChannelReply::ChannelReady` 之后这条连接上不再有帧，
+//! 两边原样搬字节；回 `ChannelReply::ChannelRefused` 后宿主关闭连接。手机发 `ChannelHello` 时宿主回
+//! `ChannelRefusal::NotAllowed`。
 //!
 //! # 配对
 //!
@@ -121,17 +132,20 @@ pub fn bonjour_txt(fingerprint: &[u8; FINGERPRINT_LEN]) -> [(&'static str, Strin
 pub const PAIRING_URI_PREFIX: &str = "runode://pair?";
 
 impl crate::ClientMsg {
-    /// 经远程访问连来的设备不能发的请求：管宿主本身、或者只有本机的 app 才该做的。返回「不能做什么」那半句，
-    /// 宿主回的 `HostMsg::Error` 写成 `a remote device cannot <这半句>`；能发的为 `None`。挡下的几种都不带
-    /// `req` 和会话。每种消息都列出来、不用通配：新加的消息在这里定下手机能不能发。
-    pub fn remote_refusal(&self) -> Option<&'static str> {
+    /// 经远程访问连来的 `kind` 设备不能发的请求：管宿主本身的谁都不能发，只有桌面才该做的（替窗口回话、
+    /// 改宿主的选项和终端主题）手机不能发。返回「不能做什么」那半句，宿主回的 `HostMsg::Error` 写成
+    /// `a remote device cannot <这半句>`；能发的为 `None`。挡下的几种都不带 `req` 和会话。每种消息都列出来、
+    /// 不用通配：新加的消息在这里定下远程设备能不能发。
+    pub fn remote_refusal(&self, kind: DeviceKind) -> Option<&'static str> {
         use crate::ClientMsg::*;
+        let mobile = kind == DeviceKind::Mobile;
         match self {
             Shutdown { .. } => Some("shut the host down"),
             Handoff { .. } | HandoffReady | HandoffAbort { .. } | HandoffDone => Some("hand the host over"),
-            UiReply { .. } => Some("answer for the runode window"),
-            SetOptions { .. } => Some("change the host's options"),
-            SetTheme { .. } => Some("change the terminal theme"),
+            UiReply { .. } if mobile => Some("answer for the runode window"),
+            SetOptions { .. } if mobile => Some("change the host's options"),
+            SetTheme { .. } if mobile => Some("change the terminal theme"),
+            UiReply { .. } | SetOptions { .. } | SetTheme { .. } => None,
             Hello { .. }
             | ListSessions
             | Spawn { .. }
@@ -215,8 +229,72 @@ pub enum GateClientMsg {
     RemoteAuth { device_id: DeviceId, signature: Bytes },
     /// 第一次配对：`secret` 是二维码里的配对口令，`public_key` 是设备以后登录用的公钥，
     /// `signature` 用这把公钥对应的私钥签 `signed_bytes(…, Purpose::Pair)`，证明设备拿着私钥。
-    RemotePair { secret: Bytes, device_name: String, public_key: Bytes, signature: Bytes },
+    /// `device_kind` 是手机时不带。
+    RemotePair {
+        secret: Bytes,
+        device_name: String,
+        public_key: Bytes,
+        signature: Bytes,
+        #[serde(default, skip_serializing_if = "DeviceKind::is_mobile")]
+        device_kind: DeviceKind,
+    },
     /// 比自己新的客户端才有的消息，宿主断开。
+    #[serde(other)]
+    Unknown,
+}
+
+/// 配对的是哪种设备，配对时定下、记在设备表里，决定它过了门禁之后能开哪些连接、发哪些请求。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceKind {
+    /// 手机上的 Runode。
+    #[default]
+    Mobile,
+    /// 别的电脑上的 Runode，把这台电脑当远程主机用。
+    Desktop,
+}
+
+impl DeviceKind {
+    pub fn is_mobile(&self) -> bool {
+        *self == Self::Mobile
+    }
+}
+
+/// 桌面设备过了门禁后可以发的第一帧，各开一条专用的连接，见模块文档的「桌面设备」。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChannelHello {
+    /// 读写项目的文件和 git：`ChannelReady` 之后跑的是桌面和 `runode --ssh-project` 之间的那套协议。
+    /// 那套协议不管兼容，`build` 是桌面的构建，和电脑这边的不同时回 `ChannelRefusal::BuildMismatch`。
+    ProjectHello { build: String },
+    /// 转到电脑本机回环地址上的 TCP 端口 `port`：`ChannelReady` 之后两边原样搬字节，哪边关了就断开。
+    ForwardHello { port: u16 },
+}
+
+/// 宿主回 `ChannelHello` 的那一帧。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChannelReply {
+    /// 连接开好了，之后不再有帧。
+    ChannelReady,
+    /// 开不了，宿主接着关闭连接。
+    ChannelRefused { reason: ChannelRefusal },
+    /// 比自己新的宿主才有的消息，客户端按通用失败处理。
+    #[serde(other)]
+    Unknown,
+}
+
+/// 为什么开不了专用连接，见 `ChannelReply::ChannelRefused`。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChannelRefusal {
+    /// 两边的构建不同，`build` 是电脑这边的。
+    BuildMismatch { build: String },
+    /// 这台设备不是桌面。
+    NotAllowed,
+    /// 电脑这边办不了：读不了项目、端口上没有在听的程序。`message` 给人看，不分种类。
+    Unavailable { message: String },
+    /// 比自己新的宿主才有的原因，客户端按通用失败处理。
     #[serde(other)]
     Unknown,
 }

@@ -7,8 +7,9 @@ use std::{net::IpAddr, path::Path};
 use runode_protocol::{
     ClientKind, ClientMsg, Frame, FrameError, FrameKind,
     remote::{
-        Bytes, DeviceId, GATE_MAX_PAYLOAD, GateClientMsg, GateHostMsg, PairingUri, Purpose, RejectReason, bonjour_txt,
-        decode_base64url, encode_base64url, read_gate_frame, signed_bytes,
+        Bytes, ChannelHello, ChannelRefusal, ChannelReply, DeviceId, DeviceKind, GATE_MAX_PAYLOAD, GateClientMsg,
+        GateHostMsg, PairingUri, Purpose, RejectReason, bonjour_txt, decode_base64url, encode_base64url,
+        read_gate_frame, signed_bytes,
     },
     write_frame,
 };
@@ -102,10 +103,48 @@ fn client_messages_match_the_fixtures() {
         &GateClientMsg::RemotePair {
             secret: Bytes(secret().to_vec()),
             device_name: "Ethan 的 iPhone".into(),
-            public_key: Bytes(public_key),
+            public_key: Bytes(public_key.clone()),
             signature: signature(),
+            device_kind: DeviceKind::Mobile,
         },
     );
+    matches(
+        "desktop_remote_pair.json",
+        &GateClientMsg::RemotePair {
+            secret: Bytes(secret().to_vec()),
+            device_name: "Ethan 的 MacBook Pro".into(),
+            public_key: Bytes(public_key),
+            signature: signature(),
+            device_kind: DeviceKind::Desktop,
+        },
+    );
+}
+
+#[test]
+fn channel_messages_match_the_fixtures() {
+    matches("channel_project_hello.json", &ChannelHello::ProjectHello { build: "0.1.16-3f2a9c1".into() });
+    matches("channel_forward_hello.json", &ChannelHello::ForwardHello { port: 5173 });
+    matches("channel_ready.json", &ChannelReply::ChannelReady);
+    matches(
+        "channel_refused_build_mismatch.json",
+        &ChannelReply::ChannelRefused { reason: ChannelRefusal::BuildMismatch { build: "0.1.15-8e0d4b2".into() } },
+    );
+    matches("channel_refused_not_allowed.json", &ChannelReply::ChannelRefused { reason: ChannelRefusal::NotAllowed });
+    matches(
+        "channel_refused_unavailable.json",
+        &ChannelReply::ChannelRefused {
+            reason: ChannelRefusal::Unavailable { message: "nothing is listening on port 5173".into() },
+        },
+    );
+}
+
+#[test]
+fn mobile_devices_cannot_answer_for_the_window_but_desktops_can() {
+    let theme = ClientMsg::SetTheme { settings: Default::default() };
+    assert!(theme.remote_refusal(DeviceKind::Mobile).is_some());
+    assert_eq!(theme.remote_refusal(DeviceKind::Desktop), None);
+    let shutdown = ClientMsg::Shutdown { kill_sessions: false };
+    assert!(shutdown.remote_refusal(DeviceKind::Desktop).is_some());
 }
 
 #[test]
