@@ -3,8 +3,8 @@
 
 use crate::ui::theme::Theme;
 use gpui::{
-    AppContext as _, Context, Div, Entity, Focusable as _, Role, SharedString, Subscription, Window, div, prelude::*,
-    px, svg,
+    AppContext as _, Context, Div, Entity, Focusable as _, PromptLevel, Role, SharedString, Subscription, Window, div,
+    prelude::*, px, svg,
 };
 use runode_remote::client::PairedMachine;
 
@@ -105,7 +105,7 @@ impl SettingsView {
             // 悬停提示辅助工具读不到，按钮为什么按不了另写进说明。
             forget.disabled(true).aria_description(why.clone()).tooltip(crate::ui::tooltip::tooltip(why, None))
         } else {
-            forget.on_press(cx, move |_, _, cx| remote_hosts::forget(&id, cx))
+            forget.on_press(cx, move |_, window, cx| confirm_forget(id.clone(), window, cx))
         };
         let name = match renaming {
             Some(renaming) => Input::new(&renaming.field).w(px(240.)).into_any_element(),
@@ -210,4 +210,20 @@ fn status_line(status: &Status) -> String {
         }
         status => remote_hosts::status_text(status),
     }
+}
+
+/// 解除配对前问一句：解除后两边都忘掉对方，要到那台电脑上重新复制配对链接才能再配。
+fn confirm_forget(host: HostId, window: &mut Window, cx: &mut Context<SettingsView>) {
+    let name = remote_hosts::display_name(&host, cx);
+    let title = rust_i18n::t!("paired.forget_confirm_title", host = name);
+    let detail = rust_i18n::t!("paired.forget_confirm_detail", host = name);
+    let answers = [rust_i18n::t!("paired.forget"), rust_i18n::t!("machine.cancel")];
+    let answers: Vec<&str> = answers.iter().map(AsRef::as_ref).collect();
+    let answer = window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx);
+    cx.spawn(async move |_, cx| {
+        if answer.await == Ok(0) {
+            cx.update(|cx| remote_hosts::forget(&host, cx));
+        }
+    })
+    .detach();
 }

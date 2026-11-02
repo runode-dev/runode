@@ -1390,6 +1390,8 @@ paired:
   protocol: "The other computer runs a Runode this one cannot talk to (%{reason}). Update both to the same version."
   unreachable: "Cannot reach the other computer: %{reason}"
   forget_title: Unpair
+  forget_confirm_title: "Unpair %{host}?"
+  forget_confirm_detail: "Both computers forget each other. To connect again, copy a new pairing link on %{host}."
   not_revoked: "This computer forgot %{host}, but %{host} did not revoke it (%{error}). Remove this computer on %{host}'s Mobile page."
   forget_failed: "Cannot forget %{host}: %{error}"
   build_mismatch: "The two computers run different versions of Runode (the other one is %{build}). Update them to the same version to see files and Git."

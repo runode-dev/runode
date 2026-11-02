@@ -1464,6 +1464,8 @@ paired:
   protocol: "那台電腦上的 Runode 和這台無法溝通（%{reason}），請把兩台升級到同一版本。"
   unreachable: "連不上那台電腦：%{reason}"
   forget_title: 解除配對
+  forget_confirm_title: "解除和 %{host} 的配對？"
+  forget_confirm_detail: "兩台電腦都會忘掉對方。之後要再連，得到 %{host} 上重新複製配對連結。"
   not_revoked: "這台已經忘掉了 %{host}，但那邊沒撤銷這台（%{error}）。請到 %{host} 的「手機端」頁裡把這台刪掉。"
   forget_failed: "沒能忘掉 %{host}：%{error}"
   build_mismatch: "兩台電腦上的 Runode 版本不同（那台是 %{build}），升級到同一版本後才能看檔案和 Git。"
