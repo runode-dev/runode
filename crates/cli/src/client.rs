@@ -29,7 +29,7 @@ use crate::Env;
 /// 等宿主回话的最长时间；`wait` 等 agent 不受它限制。
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 /// 宿主断开了连接（`Goodbye`，或者连接直接断了）。
-const CLOSED: &str = "the runode app closed the connection";
+const CLOSED: &str = "the Runode app closed the connection";
 
 /// 宿主正把会话交给新版本的宿主（`Goodbye { reason: GoodbyeReason::Handoff }`），这条连接断了。
 /// 过一会儿重新连上就是新宿主，见 `is_upgrading`。
@@ -38,7 +38,7 @@ pub(crate) struct Upgrading;
 
 impl std::fmt::Display for Upgrading {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("the runode host is being upgraded; run the command again")
+        f.write_str("the Runode host is being upgraded; run the command again")
     }
 }
 
@@ -69,7 +69,7 @@ fn launch_host(exe: &std::path::Path, socket: &std::path::Path, deadline: Instan
         .stderr(std::process::Stdio::null());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let mut child = command.spawn().with_context(|| format!("cannot start the runode host {}", exe.display()))?;
+    let mut child = command.spawn().with_context(|| format!("cannot start the Runode host {}", exe.display()))?;
     let mut exited = None;
     loop {
         if let Ok(stream) = UnixStream::connect(socket) {
@@ -81,9 +81,9 @@ fn launch_host(exe: &std::path::Path, socket: &std::path::Path, deadline: Instan
         if Instant::now() >= deadline {
             match exited {
                 Some(status) => {
-                    bail!("the runode host exited ({status}) before listening on {}; see its log", socket.display())
+                    bail!("the Runode host exited ({status}) before listening on {}; see its log", socket.display())
                 }
-                None => bail!("the runode host did not listen on {} in time", socket.display()),
+                None => bail!("the Runode host did not listen on {} in time", socket.display()),
             }
         }
         thread::sleep(Duration::from_millis(20));
@@ -160,7 +160,7 @@ impl Connection {
     }
 
     fn connect(env: &Env, mut deadline: Instant, launch: bool) -> Result<Self> {
-        let socket = env.socket.as_deref().ok_or_else(|| anyhow!("no place to find the runode app's socket"))?;
+        let socket = env.socket.as_deref().ok_or_else(|| anyhow!("no place to find the Runode app's socket"))?;
         let stream = match (UnixStream::connect(socket), env.launch_host.as_deref().filter(|_| launch)) {
             (Ok(stream), _) => stream,
             (Err(_), Some(exe)) => {
@@ -171,7 +171,7 @@ impl Connection {
             }
             (Err(err), None) => {
                 return Err(err)
-                    .with_context(|| format!("cannot reach the runode app at {}; is it running?", socket.display()));
+                    .with_context(|| format!("cannot reach the Runode app at {}; is it running?", socket.display()));
             }
         };
         let messages = spawn_control_reader(stream.try_clone()?, "runode-reader")?;
@@ -200,18 +200,18 @@ impl Connection {
                 connection.todos = todos;
                 Ok(connection)
             }
-            HostMsg::Incompatible { reason, .. } => bail!("the runode app speaks another protocol: {reason}"),
+            HostMsg::Incompatible { reason, .. } => bail!("the Runode app speaks another protocol: {reason}"),
             other => bail!("unexpected answer to hello: {}", kind(&other)),
         }
     }
 
     pub(crate) fn send(&self, message: &ClientMsg) -> Result<()> {
-        write_control(&mut &self.stream, message).map_err(|err| anyhow!("lost the runode app: {err}"))
+        write_control(&mut &self.stream, message).map_err(|err| anyhow!("lost the Runode app: {err}"))
     }
 
     pub(crate) fn input(&self, channel: u32, data: &[u8]) -> Result<()> {
         write_frame(&mut &self.stream, FrameKind::Input, channel, data)
-            .map_err(|err| anyhow!("lost the runode app: {err}"))
+            .map_err(|err| anyhow!("lost the Runode app: {err}"))
     }
 
     /// 下一条消息，到 `deadline` 还没有时为 `None`；为 `None` 的 `deadline` 一直等。宿主说
@@ -259,7 +259,7 @@ impl Connection {
             // 不从 `pending` 取：那里的都是已经跳过的事件。
             let message = match self.messages.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
                 Ok(message) => message,
-                Err(mpsc::RecvTimeoutError::Timeout) => bail!("the runode app did not answer"),
+                Err(mpsc::RecvTimeoutError::Timeout) => bail!("the Runode app did not answer"),
                 Err(mpsc::RecvTimeoutError::Disconnected) => bail!(CLOSED),
             };
             match message {

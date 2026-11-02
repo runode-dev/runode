@@ -57,7 +57,7 @@ impl Spec {
 fn open(env: &Env) -> Result<Connection> {
     let connection = Connection::open(env)?;
     if !connection.todos {
-        bail!("the running runode host is too old for the task board; quit runode and open it again");
+        bail!("the running Runode host is too old for the task board; quit Runode and open it again");
     }
     Ok(connection)
 }

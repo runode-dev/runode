@@ -154,7 +154,7 @@ workspace:
   host_add_hint: 经 SSH 使用一台现有的机器。
   host_add_remote: 添加远程主机
   host_add_remote_hint: SSH 主机或另一台 Runode
-  host_add_detail: 连上时 runode 会自动装到那台机器上。
+  host_add_detail: 连上时 Runode 会自动装到那台机器上。
   host_add_cancel: 取消
   browse_hint_remote: 在这台主机上选一个文件夹
   clone_url_remote: 仓库地址
@@ -253,8 +253,8 @@ ssh:
   status_idle: 未连接
   status_authenticating: 正在连接…
   status_probing: 正在检查远端…
-  status_downloading: "正在下载 runode %{percent}…"
-  status_uploading: "正在把 runode 装到远端 %{percent}…"
+  status_downloading: "正在下载 Runode %{percent}…"
+  status_uploading: "正在把 Runode 装到远端 %{percent}…"
   status_starting: 正在启动…
   status_connected: 已连接
   status_waiting: "正在重连（第 %{attempt} 次）：%{error}"
@@ -265,7 +265,7 @@ ssh:
   upload_failed: "传不到 %{host} 上"
   ok: 好
   bound_title: "%{host} 上的终端会跟着 SSH 登录一起结束"
-  bound_detail: 这台机器会在 SSH 登录断开后结束留下的进程，远端的终端和 agent 也就没了。把 runode 的宿主装成 systemd 用户服务并开启 linger，断开后它们就能留下来。以后也可以在设置的「SSH 主机」页里装。
+  bound_detail: 这台机器会在 SSH 登录断开后结束留下的进程，远端的终端和 agent 也就没了。把 Runode 的宿主装成 systemd 用户服务并开启 linger，断开后它们就能留下来。以后也可以在设置的「SSH 主机」页里装。
   bound_install: 装成登录服务
   bound_later: 以后再说
   service_title: 登录服务
@@ -274,9 +274,9 @@ ssh:
   service_later: 已装成登录服务。现在的宿主还有终端在跑，系统仍会在 SSH 登录断开后结束它们；等它退出，下次连接时就改由登录服务启动。
   service_linger: 这个用户没有权限开启 linger。请在那台机器上运行 sudo loginctl enable-linger $USER，再装一次。
   service_failed: "没能装成登录服务：%{error}"
-  prune_running: 正在清理旧版本的 runode…
+  prune_running: 正在清理旧版本的 Runode…
   prune_none: 没有可以清理的旧版本。
-  prune_done: "删掉了 %{count} 个旧版本的 runode，腾出 %{size}。"
+  prune_done: "删掉了 %{count} 个旧版本的 Runode，腾出 %{size}。"
   prune_failed: "没能清理旧版本：%{error}"
 size_owner:
   controlled_by: 尺寸由 %{device} 控制
@@ -757,7 +757,7 @@ settings:
     vt_window_resize_allowed: 终端里的程序能用 CSI 8 t 改窗口尺寸；只在终端独占标签页、窗口不是全屏时改。
     terminal_host: 退出 Runode 后会话留在后台进程里照常运行，下次打开接着用。
     ssh_program: 连 SSH 主机时调的 ssh，留空用 PATH 里的 ssh。照样读 ~/.ssh/config，ProxyJump、ssh-agent、1Password 都能用。
-    ssh_control_persist: 最后一个终端关掉后，到这台主机的连接再留多少秒，这期间重连不用再输密码。0 是一直留着。退出 runode 时总会断开。
+    ssh_control_persist: 最后一个终端关掉后，到这台主机的连接再留多少秒，这期间重连不用再输密码。0 是一直留着。退出 Runode 时总会断开。
     ssh_restore_on_launch: 打开 Runode、恢复 SSH 主机上的工作区和终端时马上连那台主机。关掉后等你点「立即重连」才连，打开 Runode 时不会先问密码。下次启动起生效。
     auto_update: 在后台查新版本、下载好，退出 Runode 时装上。
     remote_access: "让配对过的手机经局域网或 Tailscale 连上这台电脑的终端。在下面配对，或者用 runode remote pair。"
@@ -838,7 +838,7 @@ settings:
     forget: 忘掉
     named: "%{action} %{host}"
     in_use: 还有工作区或终端在这台主机上，关掉它们才能忘掉
-    mismatch: "已连接，那边的 runode 是另一个构建（%{build}）"
+    mismatch: "已连接，那边的 Runode 是另一个构建（%{build}）"
     bound: 断开 SSH 后，这台机器会结束远端的终端
     install_service: 装成登录服务
     prune: 清理旧版本
@@ -1412,8 +1412,8 @@ screen_viewer:
   unpin: 取消钉住
   connecting: "正在连接 %{host}…"
   opening: 正在打开屏幕…
-  no_screen_capture: "那台 Mac 还没给 Runode 屏幕录制权限，已经在它屏幕上弹出授权框：请在那台 Mac 的「系统设置 › 隐私与安全性 › 屏幕与系统录音」里打开 runode 的开关，再重新连接。"
-  no_post_event: "只能看：那台 Mac 还没给 Runode 辅助功能权限。请在那台 Mac 的「系统设置 › 隐私与安全性 › 辅助功能」里打开 runode 的开关，再重新连接。"
+  no_screen_capture: "那台 Mac 还没给 Runode 屏幕录制权限，已经在它屏幕上弹出授权框：请在那台 Mac 的「系统设置 › 隐私与安全性 › 屏幕与系统录音」里打开 Runode 的开关，再重新连接。"
+  no_post_event: "只能看：那台 Mac 还没给 Runode 辅助功能权限。请在那台 Mac 的「系统设置 › 隐私与安全性 › 辅助功能」里打开 Runode 的开关，再重新连接。"
   closed: 和远程桌面的连接断开了。
   reconnecting: "和远程桌面的连接断开了，正在重连（第 %{attempt} 次）…"
   signed_out: 那台电脑上没人登录，有人登录后这里自动连上。

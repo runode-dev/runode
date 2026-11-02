@@ -154,7 +154,7 @@ workspace:
   host_add_hint: Use an existing machine over SSH.
   host_add_remote: Add Remote Host
   host_add_remote_hint: An SSH host or another Runode
-  host_add_detail: runode installs itself on the host when it connects.
+  host_add_detail: Runode installs itself on the host when it connects.
   host_add_cancel: Cancel
   browse_hint_remote: Pick a folder on this host
   clone_url_remote: Repository URL
@@ -253,8 +253,8 @@ ssh:
   status_idle: Not connected
   status_authenticating: Connecting…
   status_probing: Checking the host…
-  status_downloading: "Downloading runode %{percent}…"
-  status_uploading: "Installing runode on the host %{percent}…"
+  status_downloading: "Downloading Runode %{percent}…"
+  status_uploading: "Installing Runode on the host %{percent}…"
   status_starting: Starting…
   status_connected: Connected
   status_waiting: "Reconnecting (attempt %{attempt}): %{error}"
@@ -265,7 +265,7 @@ ssh:
   upload_failed: "Could not upload to %{host}"
   ok: OK
   bound_title: "Terminals on %{host} end when you log out of SSH"
-  bound_detail: This machine ends the processes left behind when an SSH login closes, so the remote terminals and agents go with it. Install the runode host as a systemd user service with linger enabled to keep them running after you disconnect. You can also do this later on the SSH Hosts page in Settings.
+  bound_detail: This machine ends the processes left behind when an SSH login closes, so the remote terminals and agents go with it. Install the Runode host as a systemd user service with linger enabled to keep them running after you disconnect. You can also do this later on the SSH Hosts page in Settings.
   bound_install: Install as Login Service
   bound_later: Not Now
   service_title: Login Service
@@ -274,9 +274,9 @@ ssh:
   service_later: Installed as a login service. The current host still has terminals running, and the system still ends them when the SSH login closes; once it exits, the next connection starts the host through the login service.
   service_linger: This user is not allowed to enable linger. Run sudo loginctl enable-linger $USER on that machine, then install again.
   service_failed: "Could not install the login service: %{error}"
-  prune_running: Removing old versions of runode…
-  prune_none: No old versions of runode to remove.
-  prune_done: "Removed %{count} old version(s) of runode, freeing %{size}."
+  prune_running: Removing old versions of Runode…
+  prune_none: No old versions of Runode to remove.
+  prune_done: "Removed %{count} old version(s) of Runode, freeing %{size}."
   prune_failed: "Could not remove old versions: %{error}"
 size_owner:
   controlled_by: "Size set by %{device}"
@@ -757,7 +757,7 @@ settings:
     vt_window_resize_allowed: Lets programs in the terminal resize the window with CSI 8 t, only while the terminal has its tab to itself and the window is not full screen.
     terminal_host: Sessions keep running in a background process after Runode quits and come back when it opens again.
     ssh_program: The ssh Runode runs to connect to SSH hosts; leave it empty for ssh in PATH. It still reads ~/.ssh/config, so ProxyJump, ssh-agent and 1Password work.
-    ssh_control_persist: Seconds the connection to a host stays open after its last terminal closes, so reconnecting meanwhile asks for no password. 0 keeps it open. Quitting runode always closes it.
+    ssh_control_persist: Seconds the connection to a host stays open after its last terminal closes, so reconnecting meanwhile asks for no password. 0 keeps it open. Quitting Runode always closes it.
     ssh_restore_on_launch: Connects to SSH hosts right away when Runode reopens workspaces and terminals that are on them. Turn it off to connect only when you click Reconnect, so launching Runode does not ask for passwords. Takes effect from the next launch.
     auto_update: Check for new versions in the background, download them and install them when Runode quits.
     remote_access: "Lets a paired phone reach this computer's terminals over the local network or Tailscale. Pair below, or with runode remote pair."
@@ -838,7 +838,7 @@ settings:
     forget: Forget
     named: "%{action} %{host}"
     in_use: Workspaces or terminals are still on this host. Close them first to forget it.
-    mismatch: "Connected. The host runs another build of runode (%{build})."
+    mismatch: "Connected. The host runs another build of Runode (%{build})."
     bound: This machine ends the remote terminals when SSH disconnects
     install_service: Install as Login Service
     prune: Remove Old Versions
@@ -1338,8 +1338,8 @@ screen_viewer:
   unpin: Unpin
   connecting: "Connecting to %{host}…"
   opening: Opening the screen…
-  no_screen_capture: "That Mac has no Screen Recording permission for Runode yet. A prompt has been shown on that Mac: turn on runode in System Settings › Privacy & Security › Screen & System Audio Recording there, then reconnect."
-  no_post_event: "View only: Runode on that Mac has no Accessibility permission yet. Turn on runode in System Settings › Privacy & Security › Accessibility on that Mac, then reconnect."
+  no_screen_capture: "That Mac has no Screen Recording permission for Runode yet. A prompt has been shown on that Mac: turn on Runode in System Settings › Privacy & Security › Screen & System Audio Recording there, then reconnect."
+  no_post_event: "View only: Runode on that Mac has no Accessibility permission yet. Turn on Runode in System Settings › Privacy & Security › Accessibility on that Mac, then reconnect."
   closed: The connection to the remote desktop closed.
   reconnecting: "The connection to the remote desktop was lost. Reconnecting (attempt %{attempt})…"
   signed_out: "Nobody is signed in on that computer. This connects on its own once someone signs in."

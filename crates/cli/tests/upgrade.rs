@@ -23,10 +23,10 @@ use runode_types::{
 };
 
 const S: u128 = 0x5e55_0000_0000_0000_0000_0000_0000_0001;
-const UPGRADING: &str = "the runode host is being upgraded; run the command again";
-const CLOSED: &str = "the runode app closed the connection";
+const UPGRADING: &str = "the Runode host is being upgraded; run the command again";
+const CLOSED: &str = "the Runode app closed the connection";
 const MAY_HAVE_BEEN_DELIVERED: &str = "upgraded while the input was being sent; it may have been delivered";
-const SENT_WHILE_WAITING: &str = "the input was sent, but the runode host was upgraded while waiting";
+const SENT_WHILE_WAITING: &str = "the input was sent, but the Runode host was upgraded while waiting";
 
 /// 旧宿主的 socket 路径，假宿主起好以后才填上，给它自己的脚本用。
 type Slot = Arc<Mutex<Option<PathBuf>>>;

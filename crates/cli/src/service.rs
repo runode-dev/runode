@@ -63,10 +63,10 @@ pub(crate) fn status(env: &Env, out: &mut dyn Write) -> anyhow::Result<()> {
 /// `runode --host --upgrade` 交接。
 pub(crate) fn upgrade(env: &Env, out: &mut dyn Write) -> anyhow::Result<()> {
     if cfg!(windows) {
-        bail!("on Windows the host cannot hand its sessions over; quit runode and open it again");
+        bail!("on Windows the host cannot hand its sessions over; quit Runode and open it again");
     }
     let Some(running) = crate::client::probe(env)? else {
-        writeln!(out, "No runode host is running; the next one to start runs this build.")?;
+        writeln!(out, "No Runode host is running; the next one to start runs this build.")?;
         return Ok(());
     };
     if running.build.0 == env.build {
@@ -74,7 +74,7 @@ pub(crate) fn upgrade(env: &Env, out: &mut dyn Write) -> anyhow::Result<()> {
         return Ok(());
     }
     if !running.standalone {
-        bail!("the host runs inside the runode app; quit the app and open the new one");
+        bail!("the host runs inside the Runode app; quit the app and open the new one");
     }
     let exe = std::env::current_exe().and_then(std::fs::canonicalize).context("cannot find the runode executable")?;
     let service = runode_autostart::host_service_pid();

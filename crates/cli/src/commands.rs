@@ -45,10 +45,10 @@ const RECONNECT_INTERVAL: Duration = Duration::from_millis(100);
 
 /// `send` 正在发输入（`Paste`、`SendKeys` 这类请求还没回话）时宿主升级了：宿主冻结期间收下的
 /// 请求会交给新宿主或者在回滚后照常办，输入可能已经送到。
-const UPGRADED_WHILE_SENDING: &str = "the runode host was upgraded while the input was being sent; it may have \
+const UPGRADED_WHILE_SENDING: &str = "the Runode host was upgraded while the input was being sent; it may have \
      been delivered, so check with `runode read` before sending it again";
 /// `send --wait` 发完输入、在等结果时宿主升级了，而且没能接着等（比如等的是命令运行完）。
-const UPGRADED_WHILE_WAITING: &str = "the input was sent, but the runode host was upgraded while waiting for the \
+const UPGRADED_WHILE_WAITING: &str = "the input was sent, but the Runode host was upgraded while waiting for the \
      result; check with `runode read` or `runode wait` instead of sending it again";
 
 /// 命令没做成的原因，各自对应一个退出码。
@@ -205,7 +205,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                     && is_upgrading(err)
                 {
                     return Err(anyhow!(
-                        "opened session {id}, but the runode host was upgraded before the command was typed; \
+                        "opened session {id}, but the Runode host was upgraded before the command was typed; \
                          check it with `runode read {id}` instead of opening another"
                     )
                     .into());
@@ -441,7 +441,7 @@ impl Watch<'_> {
                         return Err(Failure::Timeout);
                     }
                     if now >= give_up {
-                        return Err(err.context("the runode host was being upgraded and did not come back").into());
+                        return Err(err.context("the Runode host was being upgraded and did not come back").into());
                     }
                 }
             }

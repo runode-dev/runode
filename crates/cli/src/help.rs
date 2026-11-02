@@ -3,15 +3,15 @@
 
 /// `runode help` 打印的总览：只列命令，细节在各命令的页里。
 pub(crate) const OVERVIEW: &str = "\
-Drive the terminals of the running runode app from the command line.
+Drive the terminals of the running Runode app from the command line.
 
 Usage: runode [COMMAND]
 
 Without a command, runode opens its window. `rn` is a short name for runode:
 `rn list` is `runode list`. Except remote and service, commands talk to the
-running runode app; inside a runode terminal they find it through
+running Runode app; inside a Runode terminal they find it through
 RUNODE_SOCKET, and RUNODE_SESSION names the terminal they run in. In a
-terminal runode opened on an SSH host, they talk to the runode on that host
+terminal runode opened on an SSH host, they talk to the Runode on that host
 and see only the terminals running there.
 
 To teach your agents to use runode, install its skill:
@@ -271,7 +271,7 @@ Options:
 ";
 
 const TODO: &str = "\
-Put tasks for agents on runode's task board. Starting a task opens a terminal
+Put tasks for agents on Runode's task board. Starting a task opens a terminal
 of its own (not in any window until you open it from the board) and runs the
 agent there with the prompt; by default in a new git worktree and branch, so
 it does not touch your checkout.
@@ -377,7 +377,7 @@ Commands:
            Sets remote-access = true in the config if it is off (runode must
            be running to pick it up); once paired, offers to set
            terminal-host = true so remote access keeps running after you
-           quit runode
+           quit Runode
   devices  List the paired devices, phones and computers
   revoke   Unpair a device; it is disconnected within seconds
 

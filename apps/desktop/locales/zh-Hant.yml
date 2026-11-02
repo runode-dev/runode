@@ -154,7 +154,7 @@ workspace:
   host_add_hint: 經 SSH 使用一台現有的機器。
   host_add_remote: 新增遠端主機
   host_add_remote_hint: SSH 主機或另一台 Runode
-  host_add_detail: 連上時 runode 會自動裝到那台機器上。
+  host_add_detail: 連上時 Runode 會自動裝到那台機器上。
   host_add_cancel: 取消
   browse_hint_remote: 在這台主機上選一個資料夾
   clone_url_remote: 儲存庫網址
@@ -253,8 +253,8 @@ ssh:
   status_idle: 未連線
   status_authenticating: 正在連線…
   status_probing: 正在檢查遠端…
-  status_downloading: "正在下載 runode %{percent}…"
-  status_uploading: "正在把 runode 裝到遠端 %{percent}…"
+  status_downloading: "正在下載 Runode %{percent}…"
+  status_uploading: "正在把 Runode 裝到遠端 %{percent}…"
   status_starting: 正在啟動…
   status_connected: 已連線
   status_waiting: "正在重連（第 %{attempt} 次）：%{error}"
@@ -265,7 +265,7 @@ ssh:
   upload_failed: "傳不到 %{host} 上"
   ok: 好
   bound_title: "%{host} 上的終端機會跟著 SSH 登入一起結束"
-  bound_detail: 這台機器會在 SSH 登入中斷後結束留下的程序，遠端的終端機和 agent 也就沒了。把 runode 的主機程序裝成 systemd 使用者服務並開啟 linger，中斷後它們就能留下來。之後也可以在設定的「SSH 主機」頁裡安裝。
+  bound_detail: 這台機器會在 SSH 登入中斷後結束留下的程序，遠端的終端機和 agent 也就沒了。把 Runode 的主機程序裝成 systemd 使用者服務並開啟 linger，中斷後它們就能留下來。之後也可以在設定的「SSH 主機」頁裡安裝。
   bound_install: 裝成登入服務
   bound_later: 以後再說
   service_title: 登入服務
@@ -274,9 +274,9 @@ ssh:
   service_later: 已裝成登入服務。現在的主機程序還有終端機在跑，系統仍會在 SSH 登入中斷後結束它們；等它退出，下次連線時就改由登入服務啟動。
   service_linger: 這個使用者沒有權限開啟 linger。請在那台機器上執行 sudo loginctl enable-linger $USER，再裝一次。
   service_failed: "沒能裝成登入服務：%{error}"
-  prune_running: 正在清理舊版本的 runode…
+  prune_running: 正在清理舊版本的 Runode…
   prune_none: 沒有可以清理的舊版本。
-  prune_done: "刪掉了 %{count} 個舊版本的 runode，騰出 %{size}。"
+  prune_done: "刪掉了 %{count} 個舊版本的 Runode，騰出 %{size}。"
   prune_failed: "沒能清理舊版本：%{error}"
 size_owner:
   controlled_by: 尺寸由 %{device} 控制
@@ -757,7 +757,7 @@ settings:
     vt_window_resize_allowed: 終端機裡的程式能用 CSI 8 t 改視窗大小；只在終端機獨佔分頁、視窗不是全螢幕時改。
     terminal_host: 結束 Runode 後工作階段留在背景程序裡照常執行，下次打開接著用。
     ssh_program: 連 SSH 主機時呼叫的 ssh，留空用 PATH 裡的 ssh。照樣讀 ~/.ssh/config，ProxyJump、ssh-agent、1Password 都能用。
-    ssh_control_persist: 最後一個終端機關掉後，到這台主機的連線再留多少秒，這期間重連不用再輸入密碼。0 是一直留著。結束 runode 時總會中斷。
+    ssh_control_persist: 最後一個終端機關掉後，到這台主機的連線再留多少秒，這期間重連不用再輸入密碼。0 是一直留著。結束 Runode 時總會中斷。
     ssh_restore_on_launch: 打開 Runode、恢復 SSH 主機上的工作區和終端機時馬上連那台主機。關掉後等你點「立即重連」才連，打開 Runode 時不會先問密碼。下次啟動起生效。
     auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
     remote_access: "讓配對過的手機經區域網路或 Tailscale 連上這台電腦的終端機。在下面配對，或者用 runode remote pair。"
@@ -838,7 +838,7 @@ settings:
     forget: 忘掉
     named: "%{action} %{host}"
     in_use: 還有工作區或終端機在這台主機上，關掉它們才能忘掉
-    mismatch: "已連線，那邊的 runode 是另一個建置（%{build}）"
+    mismatch: "已連線，那邊的 Runode 是另一個建置（%{build}）"
     bound: 中斷 SSH 後，這台機器會結束遠端的終端機
     install_service: 裝成登入服務
     prune: 清理舊版本
@@ -1412,8 +1412,8 @@ screen_viewer:
   unpin: 取消釘住
   connecting: "正在連線 %{host}…"
   opening: 正在打開螢幕…
-  no_screen_capture: "那台 Mac 還沒給 Runode 螢幕錄製權限，已經在它螢幕上跳出授權視窗：請在那台 Mac 的「系統設定 › 隱私權與安全性 › 螢幕與系統錄音」裡打開 runode 的開關，再重新連線。"
-  no_post_event: "只能看：那台 Mac 還沒給 Runode 輔助使用權限。請在那台 Mac 的「系統設定 › 隱私權與安全性 › 輔助使用」裡打開 runode 的開關，再重新連線。"
+  no_screen_capture: "那台 Mac 還沒給 Runode 螢幕錄製權限，已經在它螢幕上跳出授權視窗：請在那台 Mac 的「系統設定 › 隱私權與安全性 › 螢幕與系統錄音」裡打開 Runode 的開關，再重新連線。"
+  no_post_event: "只能看：那台 Mac 還沒給 Runode 輔助使用權限。請在那台 Mac 的「系統設定 › 隱私權與安全性 › 輔助使用」裡打開 Runode 的開關，再重新連線。"
   closed: 和遠端桌面的連線中斷了。
   reconnecting: "和遠端桌面的連線中斷了，正在重新連線（第 %{attempt} 次）…"
   signed_out: 那台電腦上沒有人登入，有人登入後這裡會自動連上。

@@ -52,8 +52,8 @@ pub(crate) fn pair(
     writeln!(out, "\n{uri}\n")?;
     writeln!(
         out,
-        "Scan the code with runode on your phone, or open the link there, within {} minutes. To pair another \
-         computer, paste the link into runode there (Add Remote Host, then Runode Pairing). Waiting for the \
+        "Scan the code with Runode on your phone, or open the link there, within {} minutes. To pair another \
+         computer, paste the link into Runode there (Add Remote Host, then Runode Pairing). Waiting for the \
          device; Ctrl-C stops waiting.",
         PAIRING_TTL.as_secs() / 60
     )?;
@@ -222,7 +222,7 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
         Ok(file) if on(&file) => return Ok(()),
         Ok(_) => {}
         Err(err) => {
-            writeln!(out, "Cannot read {shown} ({err}), so remote access may stop when you quit runode.")?;
+            writeln!(out, "Cannot read {shown} ({err}), so remote access may stop when you quit Runode.")?;
             return Ok(());
         }
     }
@@ -239,7 +239,7 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
     if !yes {
         writeln!(
             out,
-            "Remote access stops when you quit runode. To keep it running, set `{TERMINAL_HOST} = true` in {shown}."
+            "Remote access stops when you quit Runode. To keep it running, set `{TERMINAL_HOST} = true` in {shown}."
         )?;
         return Ok(());
     }
@@ -249,7 +249,7 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
         Err(err) => {
             writeln!(
                 out,
-                "Cannot read {shown} ({err}). To keep remote access running after you quit runode, set \
+                "Cannot read {shown} ({err}). To keep remote access running after you quit Runode, set \
                  `{TERMINAL_HOST} = true` there yourself."
             )?;
             return Ok(());
@@ -264,7 +264,7 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
         )?,
         Err(err) => writeln!(
             out,
-            "Cannot write {shown} ({err}). To keep remote access running after you quit runode, set \
+            "Cannot write {shown} ({err}). To keep remote access running after you quit Runode, set \
              `{TERMINAL_HOST} = true` there yourself."
         )?,
     }
@@ -293,7 +293,7 @@ fn turn_on(env: &Env, out: &mut dyn Write, wait: Duration) -> anyhow::Result<Lis
     }
     // 给了 `Env::launch_host` 时没有界面可打开：拉起宿主，监听开在它的进程里。
     if env.launch_host.is_some() {
-        crate::client::Connection::open(env).context("cannot start the runode host")?;
+        crate::client::Connection::open(env).context("cannot start the Runode host")?;
     }
     let deadline = Instant::now() + wait;
     loop {
@@ -302,7 +302,7 @@ fn turn_on(env: &Env, out: &mut dyn Write, wait: Duration) -> anyhow::Result<Lis
         }
         if Instant::now() >= deadline {
             bail!(
-                "remote access is on in {shown} now, but runode is not running to pick it up. Open runode (or start \
+                "remote access is on in {shown} now, but Runode is not running to pick it up. Open Runode (or start \
                  `runode --host`), then run `runode remote pair` again"
             )
         }
@@ -315,8 +315,8 @@ fn not_listening(env: &Env) -> anyhow::Error {
     let config =
         env.dirs.config_file().map_or_else(|| "runode's config file".into(), |path| path.display().to_string());
     anyhow!(
-        "remote access is not running. Turn it on with `remote-access = true` in {config}; runode picks the change \
-         up within seconds while it runs. If it is on already, open runode: remote access runs alongside its \
+        "remote access is not running. Turn it on with `remote-access = true` in {config}; Runode picks the change \
+         up within seconds while it runs. If it is on already, open Runode: remote access runs alongside its \
          terminal host, and the host's log says why it cannot listen"
     )
 }
