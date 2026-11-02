@@ -63,7 +63,7 @@ impl Global for NeedsYou {}
 /// 按现在的数据和时间重算需要你的数，变了就重画各窗口。
 fn count_needs_you(cx: &mut App) {
     let data = data(cx);
-    let now = crate::kanban::unix_now();
+    let now = crate::kanban::when::unix_now();
     let count = data
         .todos
         .iter()
@@ -232,7 +232,7 @@ impl Global for GraceTimer {}
 /// 刚开始的任务过了宽限期（`START_GRACE`）时列可能变（干完了的从进行中落进需要你），会话的样子却没变，
 /// 宿主不会说：等到最早过期的那张，到时重画看板、重算需要你的数，再等下一张。
 fn wait_for_grace(cx: &mut App) {
-    let now = crate::kanban::unix_now();
+    let now = crate::kanban::when::unix_now();
     let next = grace_ends(&data(cx).todos).filter(|&end| end > now).min();
     let timer = next.map(|end| {
         cx.spawn(async move |cx| {
