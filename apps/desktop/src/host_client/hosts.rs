@@ -131,24 +131,25 @@ pub fn retry_now(host: &HostId) {
     }
 }
 
-/// 要用远端主机 `host`：还没有时新建、开始连，停着、等着重连、没在连的马上再试；连着、正在连的不动。
-pub fn ensure_connecting(host: &HostId) {
+/// 要用远端主机 `host`：还没有时新建、开始连，停着、等着重连、没在连的马上再试；连着、正在连的不动。交回认不认得
+/// 这台主机：本机、认不出写法的 SSH 主机、没配对过的电脑都不认得。
+pub fn ensure_connecting(host: &HostId) -> bool {
     let idle = |status: Status| matches!(status, Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle);
     match host {
-        HostId::Local => {}
+        HostId::Local => false,
         HostId::Ssh(name) => {
-            if let Some(remote) = ssh::remote(name)
-                && idle(remote.status())
-            {
+            let Some(remote) = ssh::remote(name) else { return false };
+            if idle(remote.status()) {
                 remote.retry_now();
             }
+            true
         }
         HostId::Paired(id) => {
-            if let Some(remote) = paired::remote(id)
-                && idle(remote.status())
-            {
+            let Some(remote) = paired::remote(id) else { return false };
+            if idle(remote.status()) {
                 remote.retry_now();
             }
+            true
         }
     }
 }

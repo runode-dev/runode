@@ -1,4 +1,4 @@
-//! 远程桌面页：看一台远端主机的屏幕，用本机的键鼠操作它。经 `host_client::ssh::screen` 连上那边的
+//! 远程桌面页：看一台远端主机的屏幕，用本机的键鼠操作它。经 `host_client::remote_screen` 连上那边的
 //! 采集进程，说的和手机一样（`runode_protocol::screen`）。
 //!
 //! 画面在读连接的线程上解好（`video`），界面只留最新的一帧，来一帧只通知这一页。要多大的画面、多高的码率由
@@ -34,10 +34,7 @@ use runode_types::{input::MouseButton as RemoteButton, screen::Codec};
 use crate::{
     host_client::{
         hosts::{self, HostId, Status},
-        ssh::{
-            self,
-            screen::{self, ScreenEvent, ScreenLink, ScreenSender},
-        },
+        remote_screen::{self as screen, ScreenEvent, ScreenLink, ScreenSender},
     },
     remote_hosts::status_text,
     ui::icons::{
@@ -553,9 +550,9 @@ impl ScreenViewer {
         let executor = cx.background_executor().clone();
         self.connection = Some(cx.spawn(async move |this, cx| {
             let opened = async {
-                let host = wait_for_host(&id, &executor).await?;
+                wait_for_host(&id, &executor).await?;
                 let on_event = reader(tx, reader_latest, network);
-                executor.spawn(async move { screen::open(&host, on_event) }).await
+                executor.spawn(async move { screen::open(&id, on_event) }).await
             };
             match opened.await {
                 Ok(link) => {
@@ -1750,18 +1747,15 @@ fn reader(
 }
 
 /// 等主机连上（没在连时叫它连），连不上时带上给人看的原因。
-async fn wait_for_host(id: &HostId, executor: &gpui::BackgroundExecutor) -> Result<Arc<ssh::RemoteHost>, String> {
-    let bad_host = || rust_i18n::t!("screen_viewer.bad_host").into_owned();
-    let HostId::Ssh(name) = id else { return Err(bad_host()) };
-    let host = ssh::remote(name).ok_or_else(bad_host)?;
-    if matches!(host.status(), Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle) {
-        host.retry_now();
+async fn wait_for_host(host: &HostId, executor: &gpui::BackgroundExecutor) -> Result<(), String> {
+    if !hosts::ensure_connecting(host) {
+        return Err(rust_i18n::t!("screen_viewer.bad_host").into_owned());
     }
     let deadline = Instant::now() + HOST_TIMEOUT;
     loop {
-        let status = host.status();
+        let status = hosts::status_of(host);
         match status {
-            Status::Connected(_) => return Ok(host),
+            Status::Connected(_) => return Ok(()),
             Status::Stopped { .. } => return Err(status_text(&status)),
             _ if Instant::now() >= deadline => return Err(status_text(&status)),
             _ => executor.timer(HOST_POLL).await,

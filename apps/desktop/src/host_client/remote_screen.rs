@@ -1,14 +1,14 @@
-//! 看一台 SSH 主机的远程桌面：经主连接起那边的 `runode --ssh-screen`，ssh 的 stdin、stdout 上说
-//! `runode_protocol::screen`，和手机经远程访问说的一样。主机连上以后才起：远端已经装好这个构建；没有
-//! 主连接（Windows）时这条 ssh 自己认证，要问用户时经 askpass 问。
+//! 看一台远端主机的远程桌面，说 `runode_protocol::screen`，和手机经远程访问说的一样。主机连上以后才起。SSH
+//! 主机经主连接起那边的 `runode --ssh-screen`，在 ssh 的 stdin、stdout 上说：远端已经装好这个构建；没有主连接
+//! （Windows）时这条 ssh 自己认证，要问用户时经 askpass 问。配对的电脑另拨一条过了门禁的连接，在上面说。
 //!
 //! 连上就提出画面改走 UDP（`Datagram`）：远端答应以后开 `runode_remote::datagram::Receiver` 收，UDP 上来了画面
-//! 以后 ssh 上还在路上的旧画面都丢掉，直到远端说 UDP 断了（`DatagramLost`）。两边交来的都排进一个线程按到的
+//! 以后连接上还在路上的旧画面都丢掉，直到远端说 UDP 断了（`DatagramLost`）。两边交来的都排进一个线程按到的
 //! 先后交出去，解码器只在那个线程上用。
 
 use std::{
-    io::{BufReader, BufWriter, Write as _},
-    net::SocketAddr,
+    io::{BufReader, BufWriter, Read, Write},
+    net::{Shutdown, SocketAddr},
     process::{Child, Stdio},
     sync::{Arc, Condvar, Mutex, PoisonError, atomic::Ordering, mpsc},
     thread,
@@ -22,7 +22,12 @@ use runode_protocol::{
 use runode_remote::datagram;
 use runode_types::screen::VideoFrame;
 
-use super::{RemoteHost, Status, deploy, ssh};
+use super::{
+    UnixStream,
+    hosts::{HostId, Status},
+    paired,
+    ssh::{self, deploy},
+};
 
 /// 远端交来的东西，在读线程上交出。
 pub enum ScreenEvent {
@@ -42,10 +47,10 @@ impl ScreenSender {
     }
 }
 
-/// 一条远程桌面的连接。丢掉时结束远端的桥接和 ssh。
+/// 一条远程桌面的连接。丢掉时断开：结束远端的桥接和 ssh，或者关掉到配对的电脑的那条连接。
 pub struct ScreenLink {
     sender: ScreenSender,
-    child: Arc<Mutex<Option<Child>>>,
+    transport: Option<Transport>,
     /// 画面走 UDP 以后它的统计。
     datagram: Arc<Mutex<Option<Arc<datagram::Stats>>>>,
 }
@@ -109,36 +114,65 @@ enum Arrival {
     Closed,
 }
 
+/// 远程桌面的消息走在什么上面，断开时怎么关。
+enum Transport {
+    /// SSH 主机：起着 `runode --ssh-screen` 的 ssh。
+    Ssh(Child),
+    /// 配对的电脑：拨过去的那条连接。
+    Socket(UnixStream),
+}
+
 impl Drop for ScreenLink {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.lock().unwrap_or_else(PoisonError::into_inner).take() {
-            let _ = child.kill();
-            thread::spawn(move || {
-                let _ = child.wait();
-            });
+        match self.transport.take() {
+            Some(Transport::Ssh(mut child)) => {
+                let _ = child.kill();
+                thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            Some(Transport::Socket(stream)) => {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+            None => {}
         }
     }
 }
 
 /// 连上 `host` 的远程桌面，先发 `ScreenHello`；远端交来的消息和画面经 `on_event` 在同一个后台线程上按到的先后
 /// 交出，最后一个是 `ScreenEvent::Closed`，同时交给它往远端发消息的一头（解不了的画面当场要关键帧）。会阻塞着起
-/// ssh，在后台线程上调。
+/// ssh 或拨号，在后台线程上调。
 pub fn open(
-    host: &RemoteHost,
+    host: &HostId,
     on_event: impl FnMut(ScreenEvent, &ScreenSender) + Send + 'static,
 ) -> Result<ScreenLink, String> {
-    if !matches!(host.status(), Status::Connected(_)) {
-        return Err(format!("not connected to {}", host.name));
-    }
-    let script = host.family().run_command(&deploy::install_dir(), runode_ssh::bootstrap::Entry::Screen);
-    let mut command = host.exec(&ssh(), &script, true, false);
-    command.stderr(Stdio::null());
-    let pipes = runode_ssh::process::Pipes { stdin: true, stdout: true, stderr: false };
-    let piped = runode_ssh::process::spawn(&mut command, pipes).map_err(|err| format!("cannot run ssh: {err}"))?;
-    let (Some(input), Some(output)) = (piped.stdin, piped.stdout) else {
-        return Err("ssh gave no pipes".into());
+    let name = host.key().unwrap_or_default();
+    let (input, output, transport): (Box<dyn Write + Send>, Box<dyn Read + Send>, Transport) = match host {
+        HostId::Ssh(name) => {
+            let host = ssh::find(name).ok_or_else(|| format!("no such host: {name}"))?;
+            if !matches!(host.status(), Status::Connected(_)) {
+                return Err(format!("not connected to {}", host.name));
+            }
+            let script = host.family().run_command(&deploy::install_dir(), runode_ssh::bootstrap::Entry::Screen);
+            let mut command = host.exec(&ssh::ssh(), &script, true, false);
+            command.stderr(Stdio::null());
+            let pipes = runode_ssh::process::Pipes { stdin: true, stdout: true, stderr: false };
+            let piped =
+                runode_ssh::process::spawn(&mut command, pipes).map_err(|err| format!("cannot run ssh: {err}"))?;
+            let (Some(input), Some(output)) = (piped.stdin, piped.stdout) else {
+                return Err("ssh gave no pipes".into());
+            };
+            (Box::new(input), Box::new(output), Transport::Ssh(piped.child))
+        }
+        HostId::Paired(id) => {
+            let host = paired::find(id).ok_or_else(|| format!("no such host: {name}"))?;
+            let stream = host.dial().map_err(|err| err.to_string())?;
+            host.hold(&stream);
+            let clone = || stream.try_clone().map_err(|err| format!("cannot use the connection to {name}: {err}"));
+            (Box::new(clone()?), Box::new(clone()?), Transport::Socket(stream))
+        }
+        HostId::Local => return Err("the remote desktop is for other computers".into()),
     };
-    let child = Arc::new(Mutex::new(Some(piped.child)));
 
     let (tx, rx) = mpsc::channel::<ScreenClientMsg>();
     let _ = tx.send(ScreenClientMsg::ScreenHello { version: SCREEN_VERSION });
@@ -146,7 +180,7 @@ pub fn open(
     let receiver = match datagram::Receiver::bind() {
         Ok(receiver) => Some(receiver),
         Err(err) => {
-            tracing::info!("the remote desktop of {} stays on ssh: {err}", host.name);
+            tracing::info!("the remote desktop of {name} stays on the stream: {err}");
             None
         }
     };
@@ -166,7 +200,7 @@ pub fn open(
     let sender = ScreenSender(tx);
     let (arrivals, arrived) = mpsc::channel::<Arrival>();
     let stats: Arc<Mutex<Option<Arc<datagram::Stats>>>> = Arc::default();
-    let name = host.name.clone();
+    let dispatch_name = name.clone();
     let dispatch_sender = sender.clone();
     let dispatch_stats = stats.clone();
     let udp_arrivals = arrivals.clone();
@@ -176,7 +210,7 @@ pub fn open(
         .name("screen-events".into())
         .spawn(move || {
             let link = Dispatch {
-                name,
+                name: dispatch_name,
                 sender: dispatch_sender,
                 arrivals: udp_arrivals,
                 stats: dispatch_stats,
@@ -185,7 +219,6 @@ pub fn open(
             link.run(&arrived, receiver, on_event);
         })
         .map_err(|err| format!("cannot start a thread: {err}"))?;
-    let name = host.name.clone();
     thread::Builder::new()
         .name("screen-reader".into())
         .spawn(move || {
@@ -208,7 +241,7 @@ pub fn open(
         })
         .map_err(|err| format!("cannot start a thread: {err}"))?;
 
-    Ok(ScreenLink { sender, child, datagram: stats })
+    Ok(ScreenLink { sender, transport: Some(transport), datagram: stats })
 }
 
 /// 交出线程手里的东西。

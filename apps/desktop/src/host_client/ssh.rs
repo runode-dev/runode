@@ -12,7 +12,6 @@
 mod askpass;
 pub(crate) mod deploy;
 pub(crate) mod forward;
-pub(crate) mod screen;
 pub(crate) mod upload;
 
 use std::{

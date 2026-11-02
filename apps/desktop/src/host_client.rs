@@ -21,6 +21,7 @@ pub mod hosts;
 mod launch;
 mod link;
 pub mod paired;
+pub mod remote_screen;
 pub mod ssh;
 
 use std::{
