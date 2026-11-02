@@ -23,10 +23,12 @@ use std::{
 
 use runode_protocol::{
     SessionId, SessionInfo,
-    push::{BLOCKED_LINES, preview_lines},
+    push::BLOCKED_LINES,
     todo::{Column, Todo, column},
 };
 use runode_types::{agent::AgentState, session::SessionMeta};
+
+use super::preview::preview_lines;
 
 /// 要做的事。
 #[derive(Clone, Debug, PartialEq, Eq)]

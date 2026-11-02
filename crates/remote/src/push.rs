@@ -19,6 +19,7 @@
 
 mod apns;
 mod curl;
+mod preview;
 mod probe;
 mod rounds;
 mod send;
