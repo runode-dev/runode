@@ -34,6 +34,12 @@ pub fn wanted_port(config: &Config) -> Option<u16> {
     config.remote_access.then_some(config.remote_access_port)
 }
 
+/// 远程访问照配置 `config` 开在 `port` 上（为空时关着）、用配置里的名字，推送也照配置设。
+pub fn apply(service: &Service, port: Option<u16>, config: &Config) {
+    service.set(port, config.remote_access_name.clone());
+    service.set_push(push_settings(config));
+}
+
 /// 配置里推送的设置。直连 APNs 要 `apns-key-file`、`apns-key-id`、`apns-team-id`、`apns-bundle-id`
 /// 四项都配了，缺几项时不直连，记一条警告。
 pub fn push_settings(config: &Config) -> PushSettings {
@@ -62,7 +68,7 @@ pub fn push_settings(config: &Config) -> PushSettings {
     }
 }
 
-/// 门禁过了的连接接到 `host` 上的远程访问，先关着，由调用方按配置 `set`。起不了后台线程时
+/// 门禁过了的连接接到 `host` 上的远程访问，先关着，由调用方按配置 `apply`。起不了后台线程时
 /// 记日志，返回 `None`。
 pub fn service(host: &Host) -> Option<Service> {
     let host = host.clone();
@@ -94,8 +100,7 @@ pub fn follow_config(host: &Host) -> Option<Following> {
     let config = Config::load(true);
     let seen = crate::config::seen_after(&before, &config);
     let dirs = runode_paths::Dirs::from_env();
-    service.set(wanted_port(&config), config.remote_access_name.clone());
-    service.set_push(push_settings(&config));
+    apply(&service, wanted_port(&config), &config);
     let mut stay = StayUp::default();
     host.set_stay_up(stay.check(&config, &dirs));
     let weak = Arc::downgrade(&service);
@@ -178,8 +183,7 @@ fn watch(
             // 重读可能引入新的文件（比如换了主题），按新配置重新记录；读之前就盯着的用读之前取的
             // 时间，读的时候有人写进来下一轮照样重读。
             seen = crate::config::seen_after(&stamp, &config);
-            service.set(wanted_port(&config), config.remote_access_name.clone());
-            service.set_push(push_settings(&config));
+            apply(&service, wanted_port(&config), &config);
         }
         host.set_stay_up(stay.check(&config, dirs));
     }
