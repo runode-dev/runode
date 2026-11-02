@@ -84,6 +84,10 @@ pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求、列目录和列命令的
 /// 请求各另有这么多，见 `Waiting`。
 const MAX_WAITING: usize = 16;
+/// 等回话的请求已经有 `MAX_WAITING` 条时回的错误。
+const ERROR_TOO_MANY_WAITING: &str = "too many requests are waiting for an answer";
+/// 转给界面的请求还没回话、界面的连接就断了时回的错误。
+const ERROR_WINDOW_GONE: &str = "the runode window went away before answering";
 /// 前端给的终端行列数最多这么大，再大的开会话、连上、改尺寸都回 `Error`：几万见方的网格会让
 /// 会话线程卡住、内存涨到 GB 级。
 const MAX_GRID: u16 = 2000;
@@ -236,6 +240,16 @@ enum Asker {
     },
     /// 会话自己的请求（读写剪贴板），回话交给会话线程（`Inbox::UiAnswer`）。
     Session(SessionId),
+}
+
+/// `Shared::send_to_ui` 办得怎样。
+enum ToUi {
+    /// 交出去了，登记的编号。
+    Sent(u64),
+    /// 没有界面连着，请求交回来。
+    NoDesktop(ClientMsg),
+    /// 界面的连接刚断开，撤掉的登记；读线程已经撤掉、替它回过话时为空。
+    Gone(Option<Asker>),
 }
 
 /// 会话线程请界面办事、报状态变了的一头，见 `Shared::ask_ui`、`Shared::todo_session_changed`。拿着宿主的弱引用：
@@ -552,7 +566,7 @@ fn unregister(shared: &Shared, id: u64) {
     peers.pending.retain(|_, pending| !matches!(pending.asker, Asker::Client { from, .. } if from == id));
     let orphaned: Vec<u64> =
         peers.pending.iter().filter(|(_, pending)| pending.desktop == id).map(|(&ui, _)| ui).collect();
-    let gone = || "the runode window went away before answering".to_owned();
+    let gone = || ERROR_WINDOW_GONE.to_owned();
     let mut sessions = Vec::new();
     for ui in orphaned {
         match peers.pending.remove(&ui).map(|pending| pending.asker) {
@@ -601,23 +615,34 @@ impl Shared {
 
     /// 会话 `session` 请界面办一件事（`request`），返回这条请求的编号，界面的回话经
     /// `Inbox::UiAnswer` 带着它交回会话线程。交给 `preferred` 这条界面的连接，它不是（或者不再是）
-    /// 界面时交给最近连上的界面；没有界面连着时返回 `None`。
+    /// 界面时交给最近连上的界面；没有界面连着、或者刚断开时返回 `None`。
     fn ask_ui(&self, session: SessionId, preferred: Option<u64>, request: ClientMsg) -> Option<u64> {
+        match self.send_to_ui(preferred, Asker::Session(session), request) {
+            ToUi::Sent(ui) => Some(ui),
+            ToUi::NoDesktop(_) | ToUi::Gone(_) => None,
+        }
+    }
+
+    /// 把 `request` 登记成 `asker` 请界面办的事，交给 `preferred` 这条界面的连接，它不是（或者不再是）界面时
+    /// 交给最近连上的界面。界面的连接刚断开时撤掉登记：它的读线程撤掉登记时已经替还在等的请求回过话的话，
+    /// `ToUi::Gone` 里是空的。
+    fn send_to_ui(&self, preferred: Option<u64>, asker: Asker, request: ClientMsg) -> ToUi {
         let mut peers = self.peers();
         let desktop =
-            preferred.filter(|connection| peers.desktops.contains(connection)).or(peers.desktops.last().copied())?;
-        let out = peers.connections.get(&desktop).and_then(|peer| peer.out.clone())?;
+            preferred.filter(|connection| peers.desktops.contains(connection)).or(peers.desktops.last().copied());
+        let Some((desktop, out)) =
+            desktop.and_then(|desktop| Some((desktop, peers.connections.get(&desktop)?.out.clone()?)))
+        else {
+            return ToUi::NoDesktop(request);
+        };
         let ui = peers.next_ui;
         peers.next_ui += 1;
-        peers.pending.insert(ui, Pending { desktop, asker: Asker::Session(session) });
+        peers.pending.insert(ui, Pending { desktop, asker });
         drop(peers);
         if out.control(&HostMsg::UiRequest { ui, request: Box::new(request) }) {
-            return Some(ui);
+            return ToUi::Sent(ui);
         }
-        // 界面的连接刚断开：撤掉这条请求（读线程撤掉登记时已经替它回过话的话，那条回话会话线程
-        // 认不出，丢掉）。
-        self.peers().pending.remove(&ui);
-        None
+        ToUi::Gone(self.peers().pending.remove(&ui).map(|pending| pending.asker))
     }
 
     /// 所有会话在 `SessionList` 里的样子：在调用的线程里把请求按先后送到各个会话线程，返回等
@@ -1195,7 +1220,7 @@ impl Connection {
                     return;
                 }
                 let Some(slot) = self.waiting.enter() else {
-                    self.error(None, None, "too many requests are waiting for an answer".into());
+                    self.error(None, None, ERROR_TOO_MANY_WAITING.into());
                     return;
                 };
                 let replies = self.shared.ask_sessions();
@@ -1403,31 +1428,15 @@ impl Connection {
     /// 把要界面办的请求转给现在的界面（最近连上的 `ClientKind::Desktop` 连接）。没有界面连接
     /// 时宿主自己办，见 `headless`。
     fn to_ui(&self, req: u32, request: ClientMsg) {
-        let mut peers = self.shared.peers();
-        if let Some(&desktop) = peers.desktops.last()
-            && let Some(out) = peers.connections.get(&desktop).and_then(|peer| peer.out.clone())
-        {
-            let ui = peers.next_ui;
-            peers.next_ui += 1;
-            let asker = Asker::Client { from: self.id, origin: self.out.clone(), req };
-            peers.pending.insert(ui, Pending { desktop, asker });
-            drop(peers);
-            if !out.control(&HostMsg::UiRequest { ui, request: Box::new(request) }) {
-                // 界面的连接刚断开：它的读线程撤掉登记时会替还在等的请求回话；已经撤掉了的话
-                // 这条请求是登记之后才加的，在这里回。
-                let pending = self.shared.peers().pending.remove(&ui);
-                if let Some(Pending { asker: Asker::Client { origin, req, .. }, .. }) = pending {
-                    origin.control(&HostMsg::Error {
-                        req: Some(req),
-                        id: None,
-                        message: "the runode window went away before answering".into(),
-                    });
-                }
+        let asker = Asker::Client { from: self.id, origin: self.out.clone(), req };
+        match self.shared.send_to_ui(None, asker, request) {
+            ToUi::Sent(_) => {}
+            ToUi::NoDesktop(request) => self.headless(req, request),
+            ToUi::Gone(Some(Asker::Client { origin, req, .. })) => {
+                origin.control(&HostMsg::Error { req: Some(req), id: None, message: ERROR_WINDOW_GONE.into() });
             }
-            return;
+            ToUi::Gone(_) => {}
         }
-        drop(peers);
-        self.headless(req, request);
     }
 
     /// 没有界面连着时办要界面办的请求：布局、开终端、新建工作区、改名照宿主手里的布局办，见
@@ -1544,7 +1553,7 @@ impl Connection {
             return;
         }
         let Some(slot) = self.waiting.enter() else {
-            self.error(None, Some(id), "too many requests are waiting for an answer".into());
+            self.error(None, Some(id), ERROR_TOO_MANY_WAITING.into());
             return;
         };
         let (reply, text) = mpsc::channel();
@@ -1586,7 +1595,7 @@ impl Connection {
         answer: impl FnOnce() -> Result<HostMsg, String> + Send + 'static,
     ) {
         let Some(slot) = slots.enter() else {
-            self.error(Some(req), None, "too many requests are waiting for an answer".into());
+            self.error(Some(req), None, ERROR_TOO_MANY_WAITING.into());
             return;
         };
         let out = self.out.clone();
@@ -1611,7 +1620,7 @@ impl Connection {
             return;
         }
         let Some(slot) = self.git_waiting.enter() else {
-            self.error(Some(req), None, "too many requests are waiting for an answer".into());
+            self.error(Some(req), None, ERROR_TOO_MANY_WAITING.into());
             return;
         };
         let (reply, info) = mpsc::channel();
