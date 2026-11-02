@@ -134,10 +134,15 @@ pub fn is_absolute(path: &str) -> bool {
     bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
 }
 
-/// 跑 PowerShell 脚本 `script` 的一行命令，脚本按 UTF-16LE 编成 base64 交给 `-EncodedCommand`。
+/// 跑 PowerShell 脚本 `script` 的一行命令。
 fn powershell(script: &str) -> String {
+    format!("powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}", encoded_command(script))
+}
+
+/// PowerShell 的 `-EncodedCommand` 的参数：`script` 按 UTF-16LE 编成 base64，不经任何 shell 的引号和展开。
+pub fn encoded_command(script: &str) -> String {
     let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    format!("powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}", base64(&bytes))
+    base64(&bytes)
 }
 
 fn base64(bytes: &[u8]) -> String {

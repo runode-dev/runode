@@ -143,41 +143,14 @@ pub fn allow(exe: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// `-EncodedCommand` 的参数：开头给 `$exe` 赋上 `exe`，接着是 `ALLOW`，整段按 UTF-16LE 编成 Base64。
+/// `-EncodedCommand` 的参数：开头给 `$exe` 赋上 `exe`，接着是 `ALLOW`。
 fn encode_script(exe: &str) -> String {
-    let script = format!("$exe = '{}'\n{ALLOW}", exe.replace('\'', "''"));
-    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    base64(&bytes)
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut text = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                text.push(char::from(TABLE[(n >> (18 - 6 * i) & 63) as usize]));
-            } else {
-                text.push('=');
-            }
-        }
-    }
-    text
+    runode_ssh::bootstrap::windows::encoded_command(&format!("$exe = '{}'\n{ALLOW}", exe.replace('\'', "''")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn base64_pads_the_last_group() {
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64(b"foob"), "Zm9vYg==");
-    }
 
     #[test]
     fn the_program_path_stays_literal() {
