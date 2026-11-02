@@ -4437,6 +4437,29 @@
         }
       }
     },
+    "标签页 %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tab %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签页 %lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分頁 %lld"
+          }
+        }
+      }
+    },
     "分屏" : {
       "extractionState" : "manual",
       "localizations" : {

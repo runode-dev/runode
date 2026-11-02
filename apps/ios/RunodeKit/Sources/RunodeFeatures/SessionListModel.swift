@@ -445,6 +445,15 @@ public final class SessionListModel {
         return panes.count > 1 ? panes : []
     }
 
+    /// 电脑上 `id` 在所在工作区里是第几个标签页（从 1 数）；工作区只有一个标签页、或它不在任何窗口里时为空。
+    public func tabNumber(of id: SessionId) -> Int? {
+        for workspace in windows.flatMap(\.workspaces) {
+            guard let i = workspace.tabs.firstIndex(where: { $0.panes.contains { $0.id == id } }) else { continue }
+            return workspace.tabs.count > 1 ? i + 1 : nil
+        }
+        return nil
+    }
+
     /// 只重新要一次布局：电脑推来 `LayoutChanged`、终端页打开时要，列表自己的刷新那时不一定在跑。
     public func refreshLayout() {
         guard connected else { return }

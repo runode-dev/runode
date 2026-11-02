@@ -176,7 +176,8 @@
         private func card(_ session: SessionInfo, in section: SessionSection) -> some View {
             let summary = SessionRow(
                 session: session, workspaceDir: section.dir, preview: model.previews[session.id] ?? [],
-                split: model.panes(sharingTabWith: session.id).first { $0.id == session.id })
+                split: model.panes(sharingTabWith: session.id).first { $0.id == session.id },
+                tab: model.tabNumber(of: session.id))
             if SessionGroup.of(session) == .waiting {
                 VStack(alignment: .leading, spacing: 10) {
                     Button { onOpen(session.id) } label: { summary.contentShape(Rectangle()) }
@@ -393,6 +394,8 @@
         let preview: [String]
         /// 电脑上它所在的标签分了屏时是它那个分屏，卡片上标出它在标签里的位置。
         var split: SplitPane?
+        /// 电脑上它在工作区里是第几个标签页，同一个工作区的几张卡片靠它分得开。
+        var tab: Int?
         /// 标题前图标的边长，跟着标题的字号缩放。
         @ScaledMetric(relativeTo: .headline) private var iconSize: CGFloat = 22
         /// 状态图标定宽，转圈和月亮宽窄不一，定了宽各张卡片的标题才对齐。
@@ -422,10 +425,14 @@
                             .padding(.horizontal, 6)
                             .background(.quaternary, in: Capsule())
                     }
-                    if let split {
+                    if split != nil || tab != nil {
                         HStack(spacing: 4) {
-                            PaneGlyph(rect: split.rect)
-                            Text("分屏")
+                            if let split { PaneGlyph(rect: split.rect) }
+                            if let tab {
+                                Text("标签页 \(tab)")
+                            } else {
+                                Text("分屏")
+                            }
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)

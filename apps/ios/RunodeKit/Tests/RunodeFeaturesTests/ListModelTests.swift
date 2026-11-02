@@ -341,6 +341,32 @@ import Testing
         #expect(model.spawnChoices.isEmpty)
     }
 
+    /// 工作区有几个标签页时卡片标出第几个；只有一个标签页、不在窗口里的不标。
+    @Test func tabNumberCountsWithinTheWorkspace() {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
+        #expect(model.tabNumber(of: sessionA) == nil)
+        let first = TabLayout(index: 1, active: true, panes: [PaneLayout(index: 1, id: sessionA, focused: true)])
+        let second = TabLayout(index: 2, active: false, panes: [PaneLayout(index: 1, id: sessionB)])
+        model.handle(
+            .message(
+                .layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [WorkspaceLayout(index: 1, tabs: [first, second])])])))
+        #expect(model.tabNumber(of: sessionA) == 1)
+        #expect(model.tabNumber(of: sessionB) == 2)
+        model.handle(
+            .message(
+                .layout(
+                    req: 0,
+                    windows: [
+                        WindowLayout(
+                            index: 1,
+                            workspaces: [WorkspaceLayout(index: 1, tabs: [first]), WorkspaceLayout(index: 2, tabs: [second])])
+                    ])))
+        #expect(model.tabNumber(of: sessionA) == nil)
+        #expect(model.tabNumber(of: sessionB) == nil)
+    }
+
     /// 同一个标签里分了屏的会话互为兄弟；独自一个标签、不在窗口里的没有。
     @Test func panesSharingATabListEachOther() {
         let model = SessionListModel(machine: machineRecord(), link: link)
