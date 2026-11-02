@@ -91,7 +91,8 @@ pub fn panel_message(text: String, cx: &App) -> Stateful<Div> {
         .justify_center()
         .px(px(16.))
         .text_color(cx.theme().muted_foreground)
-        .child(text)
+        // 文字直接放在横排的容器里时按整行的宽度排、缩不下去，长的提示两头被切掉；包一层能缩的才按面板宽度折行。
+        .child(div().min_w_0().text_center().child(text))
 }
 
 /// 预览栏和右侧面板顶上的一条。经典样式下和标题栏等高，能拖动窗口、双击缩放；卡片样式（`cards`）下是
