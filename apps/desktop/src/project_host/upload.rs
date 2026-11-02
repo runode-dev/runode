@@ -1,14 +1,15 @@
 //! 经读写项目的连接把本机的文件传到远端，好交给那里的 agent：配对的电脑没有 ssh，截图粘贴、把文件拖进那边的终端
 //! 时走这里。放在那边 home 目录下的 `UPLOADS_DIR` 里，每次一个新的子目录，同名的分进不同的子目录。目录由那边
 //! 定、由那边建（`UploadOp`），只让自己进：截图和屏幕上的文字不能让那台机器上别的用户读到。文件一块块地读、
-//! 一块块地传，多大的文件都不整个读进内存，等回话也按块算；传不完时删掉这次上传的子目录。
+//! 一块块地传，多大的文件都不整个读进内存，等回话也按块算；传不完时删掉这次上传的子目录。每次上传前那边删掉
+//! 放久了的旧上传（`prune`）。
 
 use std::{
     collections::HashSet,
     fs,
     io::{self, Read, Seek as _, SeekFrom, Write as _},
     path::{Component, Path, PathBuf},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -29,7 +30,7 @@ const CHUNK: usize = 4 << 20;
 /// 远端为上传做的一步。路径都要在放上传的目录里。
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum UploadOp {
-    /// 新建这次上传的子目录，交回它（用 `/` 分隔）。
+    /// 新建这次上传的子目录，交回它（用 `/` 分隔）；另起线程删掉放久了的旧上传。
     Begin,
     /// 在这次上传里新建目录。
     Dir { path: PathBuf },
@@ -57,6 +58,8 @@ impl UploadOp {
                 runode_paths::create_private(root)?;
                 let dir = root.join(upload_id());
                 private_dir(&dir)?;
+                let root = root.to_owned();
+                let _ = std::thread::Builder::new().name("prune-uploads".into()).spawn(move || prune(&root));
                 Ok(Some(slashed(dir)))
             }
             Self::Dir { path } => {
@@ -73,6 +76,46 @@ impl UploadOp {
             }
         }
     }
+}
+
+/// 删掉 `root` 下放久了的上传：一个子目录连同里面的东西（不跟着链接）都已经 `UPLOAD_KEEP_DAYS` 天没改过才删。
+/// 只看子目录本身的时间不够：往已有的文件里接着写块不改子目录的时间，别的会话还在传的大文件会被删掉。
+/// 读不到时间的不删。
+fn prune(root: &Path) {
+    let keep = Duration::from_secs(u64::from(runode_ssh::bootstrap::UPLOAD_KEEP_DAYS) * 24 * 60 * 60);
+    let Some(cutoff) = SystemTime::now().checked_sub(keep) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        if is_dir && !changed_since(&path, cutoff) {
+            let _ = fs::remove_dir_all(&path);
+        }
+    }
+}
+
+/// `path` 或它下面（不跟着链接）有没有在 `cutoff` 以后改过的；读不到时间的算改过。
+fn changed_since(path: &Path, cutoff: SystemTime) -> bool {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return true;
+    };
+    if !meta.modified().is_ok_and(|modified| modified < cutoff) {
+        return true;
+    }
+    if !meta.is_dir() {
+        return false;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return true;
+    };
+    entries.into_iter().any(|entry| match entry {
+        Ok(entry) => changed_since(&entry.path(), cutoff),
+        Err(_) => true,
+    })
 }
 
 /// `top` 时 `path` 是 `root` 下的一个子目录，否则在某个子目录里；中间没有 `..` 这类跳出去的。
@@ -356,6 +399,38 @@ mod tests {
         let err = upload(&remote_uploading_to(uploads.clone()), Upload::Files(files)).unwrap_err();
         assert!(format!("{err:#}").contains("gone.txt"), "{err:#}");
         assert_eq!(fs::read_dir(&uploads).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 上传前删掉放久了的旧上传；子目录本身放久了、里面还有刚写过的文件的（别的会话还在传）留着，刚传的留着。
+    #[cfg(unix)]
+    #[test]
+    fn old_uploads_are_pruned_before_the_next_one() {
+        let root = scratch("prune");
+        let uploads = root.join("uploads");
+        let keep = std::time::Duration::from_secs(u64::from(runode_ssh::bootstrap::UPLOAD_KEEP_DAYS) * 24 * 60 * 60);
+        let old = std::time::SystemTime::now() - keep - std::time::Duration::from_secs(3600);
+        let age = |path: &Path| fs::File::open(path).unwrap().set_modified(old).unwrap();
+        for name in ["stale/inner", "busy/inner"] {
+            fs::create_dir_all(uploads.join(name)).unwrap();
+            fs::write(uploads.join(name).join("file.txt"), "x").unwrap();
+        }
+        for path in ["stale/inner/file.txt", "stale/inner", "stale", "busy/inner", "busy"] {
+            age(&uploads.join(path));
+        }
+        fs::write(uploads.join("loose.txt"), "x").unwrap();
+        age(&uploads.join("loose.txt"));
+
+        let project = remote_uploading_to(uploads.clone());
+        let shot = upload(&project, Upload::Bytes { name: "shot.png".into(), bytes: b"png".to_vec() }).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while uploads.join("stale").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!uploads.join("stale").exists());
+        assert!(uploads.join("busy/inner/file.txt").exists());
+        assert!(uploads.join("loose.txt").exists());
+        assert!(Path::new(&shot[0]).exists());
         let _ = fs::remove_dir_all(&root);
     }
 
