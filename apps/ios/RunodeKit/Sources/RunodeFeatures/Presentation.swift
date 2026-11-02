@@ -29,6 +29,14 @@ public enum Presentation {
         return path
     }
 
+    /// 配对时列出的电脑地址：IPv4 在前，只写前两个，其余的只说还有几个；电脑的网卡多时整串地址又长又难认。
+    static func pairingAddresses(_ addresses: [String], port: UInt16) -> String {
+        let ordered = addresses.filter { !$0.contains(":") } + addresses.filter { $0.contains(":") }
+        let shown = ordered.prefix(2).map { $0.contains(":") ? "[\($0)]:\(port)" : "\($0):\(port)" }
+            .joined(separator: ", ")
+        return ordered.count > 2 ? String(localized: "\(shown) 等 \(ordered.count) 个地址") : shown
+    }
+
     /// 会话卡片上的目录：和所在工作区的目录一样时不写（节头已经写了），在它下面时写成 `./…`，
     /// 别处的照 `directory` 写。
     public static func sessionDirectory(_ cwd: String?, in workspaceDir: String?) -> String? {

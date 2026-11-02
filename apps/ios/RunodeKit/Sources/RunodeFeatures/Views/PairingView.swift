@@ -200,30 +200,40 @@
         @FocusState private var focused: Bool
         /// 面板按内容的高度停，字号调大了也不裁掉按钮。
         @State private var height: CGFloat = 200
+        /// 链接是从别处打开时带进来的：面板只是让用户确认，不用再粘贴，也不弹键盘。
+        @State private var opened: Bool
+
+        init(model: PairingModel) {
+            self.model = model
+            _opened = State(initialValue: !model.linkText.isEmpty)
+        }
+
+        /// 带进来的链接认得出时不再显示输入框；认不出时照常显示，用户看得到它错在哪、能改。
+        private var confirmsOnly: Bool { opened && model.invitation != nil }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("粘贴配对链接").font(.headline)
-                    Text("拷贝电脑终端里二维码下面那行链接。")
+                    Text(confirmsOnly ? "和这台电脑配对？" : "粘贴配对链接").font(.headline)
+                    Text(confirmsOnly ? "打开的配对链接要连这台电脑。" : "拷贝电脑终端里二维码下面那行链接。")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                TextField("runode://pair?…", text: $model.linkText, axis: .vertical)
-                    .font(.footnote.monospaced())
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .lineLimit(1...3)
-                    .focused($focused)
-                    .padding(12)
-                    .background(Color(.tertiarySystemFill), in: .inner)
+                if !confirmsOnly {
+                    TextField("runode://pair?…", text: $model.linkText, axis: .vertical)
+                        .font(.footnote.monospaced())
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .lineLimit(1...3)
+                        .focused($focused)
+                        .padding(12)
+                        .background(Color(.tertiarySystemFill), in: .inner)
+                }
                 if let invitation = model.invitation {
                     VStack(alignment: .leading, spacing: 4) {
                         Label(invitation.hostName, systemImage: "desktopcomputer")
                             .font(.subheadline.weight(.semibold))
-                        Text(verbatim: invitation.addresses.map { address in
-                            address.contains(":") ? "[\(address)]:\(invitation.port)" : "\(address):\(invitation.port)"
-                        }.joined(separator: ", "))
+                        Text(verbatim: Presentation.pairingAddresses(invitation.addresses, port: invitation.port))
                             .font(.footnote.monospaced())
                             .foregroundStyle(.secondary)
                         Text("确认这是你自己的电脑再配对。")
@@ -233,12 +243,14 @@
                     .accessibilityElement(children: .combine)
                 }
                 HStack(spacing: 12) {
-                    PasteButton(payloadType: String.self) { strings in
-                        guard let link = strings.first else { return }
-                        Task { @MainActor in model.linkText = link }
+                    if !confirmsOnly {
+                        PasteButton(payloadType: String.self) { strings in
+                            guard let link = strings.first else { return }
+                            Task { @MainActor in model.linkText = link }
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonBorderShape(.capsule)
                     }
-                    .labelStyle(.iconOnly)
-                    .buttonBorderShape(.capsule)
                     Spacer()
                     Button("取消") { dismiss() }
                     Button("配对") { submit() }
@@ -254,7 +266,7 @@
             .presentationDragIndicator(.visible)
             .tint(.white)
             .preferredColorScheme(.dark)
-            .onAppear { focused = true }
+            .onAppear { focused = !opened }
         }
 
         private func submit() {

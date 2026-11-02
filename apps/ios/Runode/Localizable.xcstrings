@@ -70,6 +70,29 @@
         }
       }
     },
+    "%@ 等 %lld 个地址" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ and more (%2$lld addresses)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 等 %lld 个地址"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 等 %2$lld 個位址"
+          }
+        }
+      }
+    },
     "%@做到一半，解决冲突后在电脑上继续或放弃" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1096,6 +1119,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切到觸控板模式"
+          }
+        }
+      }
+    },
+    "和这台电脑配对？" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair with This Computer?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和这台电脑配对？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和這台電腦配對？"
+          }
+        }
+      }
+    },
+    "打开的配对链接要连这台电脑。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The pairing link you opened connects to this computer."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开的配对链接要连这台电脑。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開的配對連結要連這台電腦。"
           }
         }
       }

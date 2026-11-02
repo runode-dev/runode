@@ -889,6 +889,14 @@ actor UnwritableMachineStore: MachineStore {
         #expect(Presentation.directory(nil) == nil)
     }
 
+    @Test func pairingListsTwoAddressesIPv4First() {
+        #expect(Presentation.pairingAddresses(["10.0.0.2"], port: 7866) == "10.0.0.2:7866")
+        #expect(
+            Presentation.pairingAddresses(["fd00::1", "10.0.0.2", "192.168.1.5"], port: 7866)
+                == "10.0.0.2:7866, 192.168.1.5:7866 等 3 个地址")
+        #expect(Presentation.pairingAddresses(["fd00::1", "10.0.0.2"], port: 7866) == "10.0.0.2:7866, [fd00::1]:7866")
+    }
+
     @Test func agentLogosMatchTheBundledImages() throws {
         let catalog = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
