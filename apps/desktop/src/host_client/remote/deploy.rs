@@ -1,7 +1,6 @@
 //! 把这个构建的 runode 装到远端：远端的平台由连接脚本探出来（`runode_ssh::bootstrap::Platform`），要装的
 //! 可执行文件按先后从这几处取：环境变量 `RUNODE_SSH_BINARY_<平台>` 或 `RUNODE_SSH_BINARY` 指的文件（开发构建
-//! 没有发布包时用），远端和本机平台一样时用这个可执行文件本身，本机打的包里带着的（`bundled`），别的从发布页
-//! 下载（`runode_update::bundle`）。
+//! 没有发布包时用），远端和本机平台一样时用这个可执行文件本身，别的从发布页下载（`runode_update::bundle`）。
 //! 经 ssh 的 stdin 传上去，远端核对过、试跑过才换上。Windows 远端装的是 zip（`runode.exe` 要带着 `rn.exe` 和
 //! 终端要的文件），环境变量指的也得是这样的 zip。
 
@@ -133,17 +132,13 @@ fn source(host: &RemoteHost, target: Target) -> Result<Source, Failure> {
         let exe = std::env::current_exe().map_err(|err| Failure::Retry(err.to_string()))?;
         return Ok(Source { path: exe, archive: false });
     }
-    if let Some(path) = bundled(target) {
-        return Ok(Source { path, archive: false });
-    }
     // 发布页上同版本号的包是另一份代码，认不得这个构建的桥接参数，装上去只会一直重连。
     // shortcut: 只拦调试构建，本地打的发布构建照样下载；发布包能报出提交号、装前核对时再改成按构建号拦。
     if cfg!(debug_assertions) {
         let kind = if target.is_windows() { "a zip of a build" } else { "a build" };
         return Err(Failure::Stop {
             error: format!(
-                "a development build cannot download runode for {}: set {ENV_BINARY}_{} to {kind} for it \
-                 (`make run REMOTE=1` cross-compiles the macOS, Windows and Linux ones)",
+                "a development build cannot download runode for {}: set {ENV_BINARY}_{} to {kind} for it",
                 target.env_name().to_lowercase(),
                 target.env_name()
             ),
@@ -151,18 +146,6 @@ fn source(host: &RemoteHost, target: Target) -> Result<Source, Failure> {
         });
     }
     download(host, target)
-}
-
-/// 本机打包时一起交叉编译、放进 `Runode.app/Contents/Resources/remote` 的给 `target` 的构建，发布包里没有。
-fn bundled(target: Target) -> Option<PathBuf> {
-    if !cfg!(target_os = "macos") {
-        return None;
-    }
-    let exe = std::env::current_exe().ok()?;
-    let name = format!("runode-{}", target.env_name().to_lowercase().replacen('_', "-", 1));
-    let name = if target.is_windows() { format!("{name}.zip") } else { name };
-    let path = exe.parent()?.parent()?.join("Resources/remote").join(name);
-    path.is_file().then_some(path)
 }
 
 /// 从发布页下载这个版本给 `target` 的包，核对过才用，下过的留在 `Dirs::remote_bin_cache_dir`。
