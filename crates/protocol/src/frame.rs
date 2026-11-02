@@ -145,6 +145,19 @@ pub fn read_frame_limited(reader: &mut impl Read, limit: u32) -> Result<Option<F
     Ok(Some(Frame { kind, channel, payload }))
 }
 
+/// 读到下一个控制帧为止，别的帧跳过，返回它解成 `T` 的结果；解不出时交给调用方决定跳过还是报错。读到
+/// 结尾时为空。
+pub fn read_control<T: serde::de::DeserializeOwned>(
+    reader: &mut impl Read,
+) -> Result<Option<serde_json::Result<T>>, FrameError> {
+    while let Some(frame) = read_frame(reader)? {
+        if frame.kind == FrameKind::Control {
+            return Ok(Some(frame.message()));
+        }
+    }
+    Ok(None)
+}
+
 /// 在名叫 `name` 的线程上一直读 `reader` 里的帧，控制帧解成 `T` 交给返回的通道；别的帧和解不出的控制消息
 /// 跳过。读到结尾、读出错或者通道的收端丢了就停。
 pub fn spawn_control_reader<T: serde::de::DeserializeOwned + Send + 'static>(
@@ -153,11 +166,8 @@ pub fn spawn_control_reader<T: serde::de::DeserializeOwned + Send + 'static>(
 ) -> io::Result<std::sync::mpsc::Receiver<T>> {
     let (tx, messages) = std::sync::mpsc::channel();
     std::thread::Builder::new().name(name.into()).spawn(move || {
-        while let Ok(Some(frame)) = read_frame(&mut reader) {
-            if frame.kind != FrameKind::Control {
-                continue;
-            }
-            let Ok(message) = frame.message::<T>() else { continue };
+        while let Ok(Some(message)) = read_control::<T>(&mut reader) {
+            let Ok(message) = message else { continue };
             if tx.send(message).is_err() {
                 break;
             }

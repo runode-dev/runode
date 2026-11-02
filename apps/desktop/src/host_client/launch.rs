@@ -9,7 +9,7 @@ use std::{
 };
 
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, FrameKind, HostMsg, PROTOCOL_VERSION, read_frame, write_control,
+    BuildId, Caps, ClientKind, ClientMsg, HostMsg, PROTOCOL_VERSION, read_control, read_frame, write_control,
 };
 
 use super::{
@@ -320,14 +320,10 @@ fn send(stream: &mut UnixStream, message: &ClientMsg) -> io::Result<()> {
 
 /// 下一条控制消息；连接断了时返回错误。
 fn receive(stream: &mut UnixStream) -> io::Result<HostMsg> {
-    loop {
-        let frame = read_frame(stream)
-            .map_err(|err| io::Error::other(err.to_string()))?
-            .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "the host closed the connection"))?;
-        if frame.kind == FrameKind::Control {
-            return frame.message().map_err(io::Error::other);
-        }
-    }
+    read_control(stream)
+        .map_err(|err| io::Error::other(err.to_string()))?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "the host closed the connection"))?
+        .map_err(io::Error::other)
 }
 
 #[cfg(test)]

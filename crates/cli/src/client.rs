@@ -18,7 +18,7 @@ use std::os::unix::net::UnixStream;
 use anyhow::{Context as _, Result, anyhow, bail};
 use runode_protocol::{
     BuildId, Caps, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo,
-    WindowLayout, read_frame, spawn_control_reader, write_control, write_frame,
+    WindowLayout, read_control, spawn_control_reader, write_control, write_frame,
 };
 use runode_types::todo::{Schedule, Todo};
 #[cfg(windows)]
@@ -123,18 +123,12 @@ pub(crate) fn probe(env: &Env) -> Result<Option<Running>> {
             device: None,
         },
     )?;
-    loop {
-        let frame = read_frame(&mut stream)?.ok_or_else(|| anyhow!(CLOSED))?;
-        if frame.kind != FrameKind::Control {
-            continue;
+    match read_control::<HostMsg>(&mut stream)?.ok_or_else(|| anyhow!(CLOSED))?? {
+        HostMsg::Welcome { build, host_pid, standalone, .. } => {
+            Ok(Some(Running { build, pid: Some(host_pid), standalone }))
         }
-        return match frame.message::<HostMsg>()? {
-            HostMsg::Welcome { build, host_pid, standalone, .. } => {
-                Ok(Some(Running { build, pid: Some(host_pid), standalone }))
-            }
-            HostMsg::Incompatible { build, .. } => Ok(Some(Running { build, pid: None, standalone: true })),
-            other => bail!("unexpected answer to hello: {}", kind(&other)),
-        };
+        HostMsg::Incompatible { build, .. } => Ok(Some(Running { build, pid: None, standalone: true })),
+        other => bail!("unexpected answer to hello: {}", kind(&other)),
     }
 }
 

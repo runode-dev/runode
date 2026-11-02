@@ -23,8 +23,8 @@ pub mod speech;
 pub mod todo;
 
 pub use frame::{
-    Frame, FrameError, FrameKind, MAX_PAYLOAD, read_frame, read_frame_limited, spawn_control_reader, write_control,
-    write_frame,
+    Frame, FrameError, FrameKind, MAX_PAYLOAD, read_control, read_frame, read_frame_limited, spawn_control_reader,
+    write_control, write_frame,
 };
 pub use handoff::{
     AtPrompt, HANDOFF_FORMAT, HandoffPart, HandoffPartError, OLDEST_READABLE_HANDOFF_FORMAT, RedactorState,
