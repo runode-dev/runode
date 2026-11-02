@@ -60,15 +60,25 @@ impl<E: StatefulInteractiveElement> PressDown for E {}
 ///
 /// 给 `Press`、`PressDown` 套不上的元素另外登记按下动作：鼠标的处理要看点了几下、分在捕获和冒泡两段，
 /// 或者 `cx` 正被借着。
+///
+/// 报了展开状态（`aria_expanded`）的按钮，Windows 的 UI 自动化只给「展开、收起」，不给按下，所以这两个
+/// 动作也调 `f`。自己另外登记展开、收起的元素（目录树的行这类）不能用它，不然一次展开会办两回。
 pub trait A11yPress: StatefulInteractiveElement + Sized {
     fn on_a11y_press<T: 'static>(
         self,
         view: WeakEntity<T>,
         f: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
     ) -> Self {
-        self.on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-            view.update(cx, |this, cx| f(this, window, cx)).ok();
-        })
+        let f = Rc::new(f);
+        [AccessibleAction::Click, AccessibleAction::Expand, AccessibleAction::Collapse].into_iter().fold(
+            self,
+            |element, action| {
+                let (view, f) = (view.clone(), f.clone());
+                element.on_a11y_action(action, move |_, window, cx| {
+                    view.update(cx, |this, cx| f(this, window, cx)).ok();
+                })
+            },
+        )
     }
 }
 

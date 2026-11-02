@@ -363,15 +363,16 @@ impl WindowView {
                 cx.notify();
             }
         };
-        let a11y = |expand: bool, cx: &mut Context<Self>| {
+        let a11y = |expand: Option<bool>, cx: &mut Context<Self>| {
             let toggle = toggle.clone();
             let view = cx.entity().downgrade();
             move |_: Option<&gpui::accesskit::ActionData>, _: &mut Window, cx: &mut App| {
-                view.update(cx, |this, cx| toggle(this, Some(expand), cx)).ok();
+                view.update(cx, |this, cx| toggle(this, expand, cx)).ok();
             }
         };
-        let expand = a11y(true, cx);
-        let collapse = a11y(false, cx);
+        let expand = a11y(Some(true), cx);
+        let collapse = a11y(Some(false), cx);
+        let flip = a11y(None, cx);
         let press = toggle.clone();
         let new_on = host.clone();
         let editing = renaming.is_some();
@@ -399,12 +400,18 @@ impl WindowView {
             .text_color(fg.opacity(0.45))
             .hover(|header| header.text_color(fg.opacity(0.75)))
             .when(!editing, |header| header.when_some(tooltip_text, |header, text| header.tooltip(tooltip(text, None))))
-            // 改名时按在输入框里是挪光标、选字，不收起。
-            .on_press_down(cx, move |this, _, cx| {
-                if !editing {
-                    press(this, None, cx);
-                }
-            })
+            // 改名时按在输入框里是挪光标、选字，不收起。辅助工具的按下、展开、收起各自登记：用通用的按下
+            // 会把展开、收起也当成按下再切一次。
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if !editing {
+                        press(this, None, cx);
+                    }
+                }),
+            )
+            .on_a11y_action(AccessibleAction::Click, flip)
             // 连接状态的圆点叠在系统图标的右上角，描一圈背景色和图标隔开。
             .child(
                 div()
