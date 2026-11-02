@@ -36,13 +36,13 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, anyhow, bail};
-use portable_pty::{Child, CommandBuilder, SlavePty, native_pty_system};
+use portable_pty::{Child, SlavePty, native_pty_system};
 use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 use notify::Notifier;
 use reader::Reader;
 
-use super::{PtySink, PtyWriter, WriterMsg, drop_outer_session, pty_size, set_current_thread_interactive};
+use super::{PtySink, PtyWriter, WriterMsg, pty_size, set_current_thread_interactive};
 use crate::shell_integration;
 
 /// 写线程写不进去（程序不读输入）时，隔这么久看一眼是不是要交接了。
@@ -680,26 +680,7 @@ impl Pty {
             bail!("the pty has been handed off");
         };
         let shell = shell.map_or_else(default_shell, str::to_owned);
-        let mut cmd = CommandBuilder::new(&shell);
-        drop_outer_session(&mut cmd);
-        // 用登录 shell，这样会执行用户的 profile。
-        let dirs = runode_paths::Dirs::from_env();
-        let report = shell_integration::prepare(&dirs, integration, &shell, &self.shell_features, &mut cmd);
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("TERM_PROGRAM", "runode");
-        cmd.env("TERM_PROGRAM_VERSION", crate::VERSION);
-        // macOS 自带的 BSD ls 只在设置了 CLICOLOR 时才着色；用户已有设置就不覆盖。
-        if std::env::var_os("CLICOLOR").is_none() {
-            cmd.env("CLICOLOR", "1");
-        }
-        for (key, value) in &self.env {
-            cmd.env(key, value);
-        }
-        let cwd = cwd.map(Into::into).or(dirs.home);
-        if let Some(cwd) = cwd {
-            cmd.cwd::<std::path::PathBuf>(cwd);
-        }
+        let (cmd, report) = super::shell_command(&shell, cwd, integration, &self.shell_features, &self.env);
 
         let child = match slave.spawn_command(cmd) {
             Ok(child) => child,

@@ -174,6 +174,37 @@ pub fn spawn_path() -> Option<OsString> {
     portable_pty::CommandBuilder::new("").get_env("PATH").map(ToOwned::to_owned)
 }
 
+/// 拼起 shell 的命令：在 `cwd`（为空时家目录）下跑 `shell`，去掉外层终端会话留下的变量，按 `integration` 接上
+/// shell 集成，设上 runode 的终端变量，最后是调用方给的 `env`。第二项是 shell 集成报告用的口令和放它的文件，
+/// shell 起不来时调用方删掉那个文件。
+fn shell_command(
+    shell: &str,
+    cwd: Option<&std::path::Path>,
+    integration: runode_types::shell::IntegrationMode,
+    features: &str,
+    env: &[(OsString, OsString)],
+) -> (portable_pty::CommandBuilder, Option<(String, std::path::PathBuf)>) {
+    let mut cmd = portable_pty::CommandBuilder::new(shell);
+    drop_outer_session(&mut cmd);
+    let dirs = runode_paths::Dirs::from_env();
+    let report = crate::shell_integration::prepare(&dirs, integration, shell, features, &mut cmd);
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM_PROGRAM", "runode");
+    cmd.env("TERM_PROGRAM_VERSION", crate::VERSION);
+    // macOS 自带的 BSD ls 只在设置了 CLICOLOR 时才着色；用户已有设置就不覆盖。
+    if cfg!(unix) && std::env::var_os("CLICOLOR").is_none() {
+        cmd.env("CLICOLOR", "1");
+    }
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    if let Some(cwd) = cwd.map(Into::into).or(dirs.home) {
+        cmd.cwd::<std::path::PathBuf>(cwd);
+    }
+    (cmd, report)
+}
+
 /// 整组都由终端自己设的变量前缀，同样不继承。
 const OUTER_SESSION_PREFIXES: &[&str] = &["ALACRITTY_", "GHOSTTY_", "HERDR_", "ITERM_", "VSCODE_", "WEZTERM_"];
 

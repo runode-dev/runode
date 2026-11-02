@@ -23,7 +23,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, bail};
-use portable_pty::{ChildKiller, CommandBuilder, MasterPty, SlavePty, native_pty_system};
+use portable_pty::{ChildKiller, MasterPty, SlavePty, native_pty_system};
 use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 pub use process::process_args;
@@ -186,20 +186,7 @@ impl Pty {
             master.try_clone_reader().context("failed to clone the pty reader")?
         };
         let shell = shell.map_or_else(default_shell, str::to_owned);
-        let mut cmd = CommandBuilder::new(&shell);
-        super::drop_outer_session(&mut cmd);
-        let dirs = runode_paths::Dirs::from_env();
-        let report = shell_integration::prepare(&dirs, integration, &shell, &self.shell_features, &mut cmd);
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("TERM_PROGRAM", "runode");
-        cmd.env("TERM_PROGRAM_VERSION", crate::VERSION);
-        for (key, value) in &self.env {
-            cmd.env(key, value);
-        }
-        if let Some(cwd) = cwd.map(Into::into).or(dirs.home) {
-            cmd.cwd::<PathBuf>(cwd);
-        }
+        let (cmd, report) = super::shell_command(&shell, cwd, integration, &self.shell_features, &self.env);
         handle_ctrl_c();
         let mut child = match slave.spawn_command(cmd) {
             Ok(child) => child,
