@@ -19,12 +19,12 @@ use std::{
     io::Write as _,
     os::fd::FromRawFd as _,
     sync::{
-        Arc, PoisonError,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     time::Instant,
 };
-use std::{fs::OpenOptions, sync::Mutex, time::Duration};
+use std::time::Duration;
 
 use runode_host::{BuildId, Host};
 #[cfg(unix)]
@@ -35,8 +35,6 @@ use crate::host_client::{HandoffFailure, HandoffStatus};
 
 /// 没有会话也没有连接，持续这么久就退出。
 const IDLE_EXIT: Duration = Duration::from_secs(30);
-/// 日志超过这么大时，启动时清空重写。
-const LOG_LIMIT: u64 = 8 << 20;
 
 /// 跑宿主，返回进程的退出码。`stay` 时不因空闲退出。
 pub fn run(stay: bool) -> i32 {
@@ -50,7 +48,7 @@ pub fn run(stay: bool) -> i32 {
         std::env::remove_var("NOTIFY_SOCKET");
     }
     let dirs = runode_paths::Dirs::from_env();
-    init_logging(dirs.host_log_file());
+    crate::logging::init_file(dirs.host_log_file());
     warn_if_not_disclaimed(disclaimed);
     let host = prepare(&dirs);
     match crate::host_client::listen(&host, &dirs) {
@@ -111,7 +109,7 @@ pub fn take_over() -> i32 {
     // 先于打开任何文件：没有状态管道时 `STATUS_FD` 这个号会被日志文件这类占去。
     let mut status = StatusPipe::take();
     let dirs = runode_paths::Dirs::from_env();
-    init_logging(dirs.host_log_file());
+    crate::logging::init_file(dirs.host_log_file());
     warn_if_not_disclaimed(disclaimed);
     if status.0.is_none() {
         tracing::warn!("no status pipe on fd {STATUS_FD}; nobody will hear how the takeover went");
@@ -255,26 +253,6 @@ fn warn_if_not_disclaimed(result: std::io::Result<()>) {
     if let Err(err) = result {
         tracing::warn!("the host stays under its launcher's responsible process: {err}");
     }
-}
-
-/// 日志追加写到 `path`，超过 `LOG_LIMIT` 时清空重写；写不了时不记日志。
-pub(crate) fn init_logging(path: Option<std::path::PathBuf>) {
-    let Some(path) = path else { return };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let too_big = std::fs::metadata(&path).is_ok_and(|meta| meta.len() > LOG_LIMIT);
-    let file = OpenOptions::new().create(true).append(!too_big).write(true).truncate(too_big).open(&path);
-    let Ok(file) = file else { return };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            // portal 的请求和会话对象在 zbus 建好代理之后才出现，它每次都为读不到属性报一条警告，不当回事。
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,zbus::proxy=error")),
-        )
-        .with_ansi(false)
-        .with_writer(Mutex::new(file))
-        .init();
 }
 
 /// 在 systemd 的服务里接手时向服务管理器报告主进程（`sd_notify` 的 `MAINPID=`）。

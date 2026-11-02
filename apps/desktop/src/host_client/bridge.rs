@@ -40,7 +40,7 @@ const BUSY_TRIES: u32 = 10;
 /// 跑桥接，返回进程的退出码。
 pub fn run() -> i32 {
     let dirs = runode_paths::Dirs::from_env();
-    crate::host_process::init_logging(dirs.ssh_bridge_log_file());
+    crate::logging::init_file(dirs.ssh_bridge_log_file());
     // SAFETY: 还没起任何线程。
     unsafe { tidy_env(&dirs) };
     #[cfg(windows)]

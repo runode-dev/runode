@@ -59,7 +59,7 @@ pub fn run() -> i32 {
     #[cfg(target_os = "linux")]
     let desktop = unsafe { runode_screen::adopt_session() };
     let dirs = runode_paths::Dirs::from_env();
-    crate::host_process::init_logging(dirs.screen_log_file());
+    crate::logging::init_file(dirs.screen_log_file());
     if let Err(err) = disclaimed {
         tracing::warn!("the screen process stays under its launcher's responsible process: {err}");
     }

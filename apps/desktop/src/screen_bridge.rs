@@ -118,7 +118,7 @@ fn copy_if_changed(from: &Path, to: &Path) -> io::Result<()> {
 /// stdout 写一条 `ScreenHostMsg::Stopped` 带上原因再退出，观看端照常显示。
 pub fn run() -> i32 {
     // stdout 是协议，出了问题只能看日志。
-    crate::host_process::init_logging(runode_paths::Dirs::from_env().ssh_screen_log_file());
+    crate::logging::init_file(runode_paths::Dirs::from_env().ssh_screen_log_file());
     let stream = match connect() {
         Ok(stream) => stream,
         Err(err) => {

@@ -29,6 +29,7 @@ mod host_process;
 mod i18n;
 mod kanban;
 mod keybinds;
+mod logging;
 mod menus;
 mod mobile_page;
 mod prespawn;
@@ -145,13 +146,7 @@ fn main() {
         let code = runode_cli::run(&args, &env, &mut std::io::stdout().lock(), &mut std::io::stderr().lock());
         std::process::exit(code);
     }
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                // 启动计时点默认不打，要看时设 `RUST_LOG=runode::startup=info`，见 `startup`。
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(format!("info,{}=off", startup::TARGET))),
-        )
-        .init();
+    logging::init_stderr();
     startup::mark_main();
     // 每个终端占两个描述符，从 Finder 启动时软上限只有 256。
     #[cfg(unix)]
