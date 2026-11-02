@@ -15,7 +15,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help submodules build release run run-release run-ios run-ios-device app install restart dmg check test test-ssh clippy layers fmt fmt-check clean
+.PHONY: help submodules build release run run-release windows-zip run-ios run-ios-device app install restart dmg check test test-ssh clippy layers fmt fmt-check clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -38,6 +38,13 @@ run: ## 调试构建并启动
 run-release: ## 发布构建并启动
 	$(call prepare_run,release)
 	$(CARGO) run --release -p runode -- $(ARGS)
+
+# ssh 的主机名和编哪种构建，例如 make windows-zip WINDOWS_HOST=win WINDOWS_PROFILE=release。
+WINDOWS_HOST ?= windows
+WINDOWS_PROFILE ?= debug
+
+windows-zip: ## 经 ssh 在 Windows 机器上编出装到 SSH 远端用的 zip，取回到 target/windows
+	WINDOWS_HOST=$(WINDOWS_HOST) WINDOWS_PROFILE=$(WINDOWS_PROFILE) scripts/windows-zip.sh
 
 # 模拟器用哪台，例如 make run-ios IOS_SIM="iPhone 18 Pro"；不给时用开着的那台。
 run-ios: ## 调试构建 iOS app，装到模拟器上启动
