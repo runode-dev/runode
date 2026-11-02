@@ -144,7 +144,7 @@ import Testing
             return
         }
         link.clearSent()
-        model.handle(.message(.error(req: openReq, id: nil, message: "there is no runode window to do this in")))
+        model.handle(.message(.error(req: openReq, id: nil, message: "there is no Runode window to do this in")))
         #expect(model.errorMessage == nil)
         #expect(model.isSpawning)
         guard case .spawn(let req, let size, nil, .detect, true)? = link.sent.first else {

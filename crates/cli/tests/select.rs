@@ -70,7 +70,7 @@ fn app(name: &str, windows: Option<Vec<WindowLayout>>, own: Option<u128>) -> Fak
         ClientMsg::ListSessions => vec![HostMsg::SessionList { sessions: sessions() }],
         ClientMsg::Layout { req } => match &windows {
             Some(windows) => vec![HostMsg::Layout { req: *req, windows: windows.clone() }],
-            None => vec![HostMsg::Error { req: Some(*req), id: None, message: "there is no runode window".into() }],
+            None => vec![HostMsg::Error { req: Some(*req), id: None, message: "there is no Runode window".into() }],
         },
         ClientMsg::ReadScreen { id, .. } => {
             vec![HostMsg::ScreenText { id: *id, text: format!("{id}\n"), truncated: false }]
@@ -128,7 +128,7 @@ fn positions_outside_runode_start_at_the_front_window() {
     assert_eq!(read(&fake, "win:2/pane:1"), Ok(E));
     let (code, err) = read(&fake, "left").unwrap_err();
     assert_eq!(code, exit::FAILED);
-    assert!(err.contains("inside a runode terminal"), "{err}");
+    assert!(err.contains("inside a Runode terminal"), "{err}");
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn missing_places_are_reported() {
     // 后台会话不在窗口里，按位置找不到它自己旁边的。
     let fake = app("bgself", Some(layout()), Some(F));
     let (_, err) = read(&fake, "down").unwrap_err();
-    assert!(err.contains("in a runode window"), "{err}");
+    assert!(err.contains("in a Runode window"), "{err}");
 }
 
 #[test]
@@ -172,8 +172,8 @@ fn without_a_window_only_positions_fail() {
     let fake = app("nowindow", None, Some(A));
     let (code, err) = read(&fake, "right").unwrap_err();
     assert_eq!(code, exit::FAILED);
-    assert!(err.contains("needs a runode window"), "{err}");
-    assert!(read(&fake, "tab:1").unwrap_err().1.contains("needs a runode window"));
+    assert!(err.contains("needs a Runode window"), "{err}");
+    assert!(read(&fake, "tab:1").unwrap_err().1.contains("needs a Runode window"));
     assert_eq!(read(&fake, "self"), Ok(A));
     assert_eq!(read(&fake, "title:logs"), Ok(D));
 

@@ -617,11 +617,11 @@ fn without_a_desktop_the_host_keeps_the_workspaces() {
     assert_eq!(workspaces(&windows), [(Some(canonical), Some("renamed".into()), vec![])]);
     phone.send(&ClientMsg::Reveal { req: 10, id: first });
     assert!(
-        matches!(phone.reply(), HostMsg::Error { req: Some(10), message, .. } if message.contains("no runode window"))
+        matches!(phone.reply(), HostMsg::Error { req: Some(10), message, .. } if message.contains("no Runode window"))
     );
     phone.send(&ClientMsg::SwapPanes { req: 11, a: first, b: second, focus: false });
     assert!(
-        matches!(phone.reply(), HostMsg::Error { req: Some(11), message, .. } if message.contains("no runode window"))
+        matches!(phone.reply(), HostMsg::Error { req: Some(11), message, .. } if message.contains("no Runode window"))
     );
 }
 

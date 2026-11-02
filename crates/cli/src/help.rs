@@ -14,7 +14,7 @@ RUNODE_SOCKET, and RUNODE_SESSION names the terminal they run in. In a
 terminal runode opened on an SSH host, they talk to the Runode on that host
 and see only the terminals running there.
 
-To teach your agents to use runode, install its skill:
+To teach your agents to use Runode, install its skill:
   npx skills add runode-dev/runode --skill runode -g
 and update it with `npx skills update runode -g`.
 
@@ -31,7 +31,7 @@ Commands:
   todo         Put tasks for agents on the task board and start them
   schedule     Start a task for an agent at set times
   remote       Pair phones and computers for remote access and manage them
-  service      Start runode at login, and upgrade the running host
+  service      Start Runode at login, and upgrade the running host
   completions  Print a completion script for your shell
   help         Show this help, or the help of a command
   version      Show the version
@@ -170,7 +170,7 @@ Options:
       --timeout SECS  Give up after SECS
   -h, --help          Show this help
 
-Agent states print the state they reached. If runode is upgraded meanwhile, the
+Agent states print the state they reached. If Runode is upgraded meanwhile, the
 wait goes on (except `--for command`, which fails).
 ";
 
@@ -324,9 +324,9 @@ count up as tasks are added and are never given to another task.
 ";
 
 const SCHEDULE: &str = "\
-Start a task for an agent at set times: when a schedule is due, runode adds a
+Start a task for an agent at set times: when a schedule is due, Runode adds a
 task to the task board (see `runode help todo`) and starts it. Times are this
-computer's local time. A schedule missed while the computer slept or runode was
+computer's local time. A schedule missed while the computer slept or Runode was
 not running fires once when it is back; one whose last task is still working,
 or could not start, is skipped.
 
@@ -373,8 +373,8 @@ Usage: runode remote pair [--addr ADDR]...
 Commands:
   pair     Pair a phone or another computer: shows a QR code and its link,
            valid for 5 minutes, and waits for the device. Scan the code with
-           the phone, or paste the link into runode on the other computer.
-           Sets remote-access = true in the config if it is off (runode must
+           the phone, or paste the link into Runode on the other computer.
+           Sets remote-access = true in the config if it is off (Runode must
            be running to pick it up); once paired, offers to set
            terminal-host = true so remote access keeps running after you
            quit Runode
@@ -393,7 +393,7 @@ Options:
 ";
 
 const SERVICE: &str = "\
-Start runode at login: a launchd LaunchAgent on macOS, a systemd user service
+Start Runode at login: a launchd LaunchAgent on macOS, a systemd user service
 on Linux, a value under HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run on
 Windows; the app is added to the login items on macOS 13 and later.
 Installing a service you already have replaces its file. Neither
@@ -410,7 +410,7 @@ Commands:
              is not running
   uninstall  Remove the login service; a running host keeps running
   status     Show which login services are installed
-  upgrade    After installing a new runode, hand the sessions of the running
+  upgrade    After installing a new Runode, hand the sessions of the running
              host to a host of this build, so they stay open. A host run by
              the systemd service is replaced through the service, which keeps
              running. Not on Windows, and not while the app is open
@@ -454,7 +454,7 @@ candidates. It is one of
   left, right, up, down
                 the pane next to yours in that direction
   next, prev    the next or previous pane in your tab, wrapping around
-  pane:N        pane N of your tab (of the front window's tab outside runode)
+  pane:N        pane N of your tab (of the front window's tab outside Runode)
   tab:N, tab:N.M
                 the focused pane of tab N in your workspace, or its pane M
   win:W/..., ws:K/...

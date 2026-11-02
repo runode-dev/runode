@@ -115,13 +115,13 @@ fn open_types_the_command_into_the_new_terminal() {
 fn the_app_can_refuse_to_open() {
     let fake = FakeHost::start("refuse", |message| match message {
         ClientMsg::Open { req, .. } => {
-            vec![HostMsg::Error { req: Some(*req), id: None, message: "there is no runode window".into() }]
+            vec![HostMsg::Error { req: Some(*req), id: None, message: "there is no Runode window".into() }]
         }
         _ => vec![],
     });
     let (code, _, err) = run("open", &fake.env);
     assert_eq!(code, exit::FAILED);
-    assert!(err.contains("no runode window"), "{err}");
+    assert!(err.contains("no Runode window"), "{err}");
 }
 
 /// `kill` 等到会话真的结束才返回。

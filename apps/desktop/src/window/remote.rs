@@ -121,7 +121,7 @@ fn open_workspace(
 ) -> Reply {
     let fail = |message: String| Reply::Now(HostMsg::Error { req: Some(req), id: None, message });
     let Some(window) = front_window(cx) else {
-        return fail("there is no runode window to open it in".into());
+        return fail("there is no Runode window to open it in".into());
     };
     // Windows 远端的目录到这里已经是 `C:/…`，在别的系统上 `Path` 不认它是绝对路径。
     let absolute = dir.is_absolute() || dir.to_str().is_some_and(runode_ssh::bootstrap::windows::is_absolute);
@@ -133,7 +133,7 @@ fn open_workspace(
     match opened_view {
         Ok(Ok(view)) => opened(req, window, &view, focus, cx),
         Ok(Err(message)) => fail(message.into()),
-        Err(_) => fail("the runode window went away".into()),
+        Err(_) => fail("the Runode window went away".into()),
     }
 }
 
@@ -151,7 +151,7 @@ fn handle(host: &HostId, request: ClientMsg, cx: &mut App) -> Reply {
                     req,
                     match near {
                         Some(id) => format!("no runode window shows session {id}"),
-                        None => "there is no runode window to open it in".into(),
+                        None => "there is no Runode window to open it in".into(),
                     },
                 ));
             };

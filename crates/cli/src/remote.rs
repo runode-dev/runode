@@ -313,7 +313,7 @@ fn turn_on(env: &Env, out: &mut dyn Write, wait: Duration) -> anyhow::Result<Lis
 /// 远程访问没开时的说明。
 fn not_listening(env: &Env) -> anyhow::Error {
     let config =
-        env.dirs.config_file().map_or_else(|| "runode's config file".into(), |path| path.display().to_string());
+        env.dirs.config_file().map_or_else(|| "Runode's config file".into(), |path| path.display().to_string());
     anyhow!(
         "remote access is not running. Turn it on with `remote-access = true` in {config}; Runode picks the change \
          up within seconds while it runs. If it is on already, open Runode: remote access runs alongside its \

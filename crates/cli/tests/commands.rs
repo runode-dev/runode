@@ -42,7 +42,7 @@ fn host(name: &str, state: Option<AgentState>, then: Vec<AgentState>) -> FakeHos
 
 /// app 没开窗口时宿主对 `Layout` 的回话。
 fn no_window(req: u32) -> Vec<HostMsg> {
-    vec![HostMsg::Error { req: Some(req), id: None, message: "there is no runode window to do this in".into() }]
+    vec![HostMsg::Error { req: Some(req), id: None, message: "there is no Runode window to do this in".into() }]
 }
 
 fn full(n: u128) -> String {
@@ -153,7 +153,7 @@ fn read_defaults_to_your_own_session() {
 
     let (code, _, err) = run("read", &Env::default());
     assert_eq!(code, exit::FAILED);
-    assert!(err.contains("outside a runode terminal"), "{err}");
+    assert!(err.contains("outside a Runode terminal"), "{err}");
 }
 
 #[test]

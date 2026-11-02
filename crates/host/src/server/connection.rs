@@ -48,7 +48,7 @@ pub(super) const MAX_WAITING: usize = 16;
 /// 等回话的请求已经有 `MAX_WAITING` 条时回的错误。
 const ERROR_TOO_MANY_WAITING: &str = "too many requests are waiting for an answer";
 /// 转给界面的请求还没回话、界面的连接就断了时回的错误。
-const ERROR_WINDOW_GONE: &str = "the runode window went away before answering";
+const ERROR_WINDOW_GONE: &str = "the Runode window went away before answering";
 /// 前端给的终端行列数最多这么大，再大的开会话、连上、改尺寸都回 `Error`：几万见方的网格会让
 /// 会话线程卡住、内存涨到 GB 级。
 const MAX_GRID: u16 = 2000;
@@ -656,7 +656,7 @@ impl Connection {
             ClientMsg::Open { req, near, cwd, .. } => {
                 self.read_files(req, "host-open", move || shared.open_tab(req, near, cwd));
             }
-            _ => self.error(Some(req), None, "there is no runode window to do this in".into()),
+            _ => self.error(Some(req), None, "there is no Runode window to do this in".into()),
         }
     }
 

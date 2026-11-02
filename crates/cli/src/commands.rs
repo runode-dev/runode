@@ -293,7 +293,7 @@ fn own_or(session: Option<Selector>, env: &Env, command: &str) -> anyhow::Result
     match session {
         Some(session) => Ok(session),
         None if env.session.is_some() => Ok(Selector::Own),
-        None => Err(anyhow!("{command} needs a SESSION outside a runode terminal")),
+        None => Err(anyhow!("{command} needs a SESSION outside a Runode terminal")),
     }
 }
 

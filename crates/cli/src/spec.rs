@@ -17,7 +17,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("todo", "Put tasks for agents on the task board and start them"),
     ("schedule", "Start a task for an agent at set times"),
     ("remote", "Pair phones and computers for remote access and manage them"),
-    ("service", "Start runode at login, and upgrade the running host"),
+    ("service", "Start Runode at login, and upgrade the running host"),
     ("completions", "Print a completion script for your shell"),
     ("help", "Show this help, or the help of a command"),
     ("version", "Show the version"),

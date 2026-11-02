@@ -91,7 +91,7 @@ fn sessions_come_from_the_host_with_their_agent_and_title() {
     assert!(words.contains(&"agent:claude"), "{words:?}");
     assert!(words.contains(&"cwd:project"), "{words:?}");
     assert!(!words.iter().any(|word| word.contains("odd")), "{words:?}");
-    assert!(!words.contains(&"self"), "outside a runode terminal there is no own session: {words:?}");
+    assert!(!words.contains(&"self"), "outside a Runode terminal there is no own session: {words:?}");
     // 在 runode 的终端里先是相对的写法。
     let inside = Env { session: Some(full(A)), ..fake.env.clone() };
     let (_, items) = complete("kill ", &inside);

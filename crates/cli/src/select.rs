@@ -256,7 +256,7 @@ impl World {
     }
 
     fn own_id(&self, selector: &Selector) -> Result<SessionId> {
-        self.own.ok_or_else(|| anyhow!("{selector} only works inside a runode terminal"))
+        self.own.ok_or_else(|| anyhow!("{selector} only works inside a Runode terminal"))
     }
 
     /// 候选的一行：短标识、标题、目录、位置。
@@ -295,14 +295,14 @@ impl World {
     fn windows(&self, selector: &Selector) -> Result<&[WindowLayout]> {
         match self.layout.as_deref() {
             Some(windows) if !windows.is_empty() => Ok(windows),
-            _ => bail!("{selector} needs a runode window, and the app has none open"),
+            _ => bail!("{selector} needs a Runode window, and the app has none open"),
         }
     }
 
     /// 自己的位置，按位置找时要用。
     fn own_place(&self, selector: &Selector) -> Result<Place<'_>> {
         let own = self.own_id(selector)?;
-        self.place(own).ok_or_else(|| anyhow!("{selector} needs your terminal to be in a runode window"))
+        self.place(own).ok_or_else(|| anyhow!("{selector} needs your terminal to be in a Runode window"))
     }
 
     /// 按位置的写法找到的分屏里的会话。

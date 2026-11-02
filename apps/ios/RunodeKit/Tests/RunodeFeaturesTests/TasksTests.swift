@@ -167,7 +167,7 @@ import Testing
             return
         }
         link.clearSent()
-        model.handle(.message(.error(req: openReq, id: nil, message: "there is no runode window to do this in")))
+        model.handle(.message(.error(req: openReq, id: nil, message: "there is no Runode window to do this in")))
         guard case .spawn(let req, _, dir, _, true)? = link.sent.first else {
             Issue.record("expected a spawn in the session's directory, got \(link.sent)")
             return

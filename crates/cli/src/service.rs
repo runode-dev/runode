@@ -17,7 +17,7 @@ pub(crate) fn install(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::Res
     let exe = std::env::current_exe().and_then(std::fs::canonicalize).context("cannot find the runode executable")?;
     match write_service(kind, &env.dirs, &exe, Start::Now)? {
         Registration::File(path) => {
-            writeln!(out, "Installed {}: runode {} starts at login.", path.display(), kind.name())?;
+            writeln!(out, "Installed {}: Runode {} starts at login.", path.display(), kind.name())?;
         }
         place @ Registration::RunKey => writeln!(out, "Registered the host under {place}: it starts at login.")?,
         Registration::LoginItem => writeln!(out, "Added Runode to the login items: the app opens at login.")?,

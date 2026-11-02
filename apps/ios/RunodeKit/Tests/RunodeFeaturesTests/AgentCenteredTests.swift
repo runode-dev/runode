@@ -110,7 +110,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         let model = model([info(plain, nil), info(working, .working)])
         let window = WindowLayout(index: 1, workspaces: [workspace(1, "a", tabs: [[plain]])])
         model.handle(.message(.layout(req: 0, windows: [window])))
-        model.handle(.message(.error(req: 0, id: nil, message: "there is no runode window")))
+        model.handle(.message(.error(req: 0, id: nil, message: "there is no Runode window")))
         #expect(model.sections.map(\.id) == [.background])
         #expect(model.sections[0].sessions.map(\.id) == [plain, working])
         #expect(!model.hasDesktopWindow)
