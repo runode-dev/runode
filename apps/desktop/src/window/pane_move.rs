@@ -13,7 +13,8 @@ use runode_protocol::Placement;
 use runode_types::pane::Direction;
 
 use super::WindowView;
-use super::model::{Tab, TabId, WorkspaceId};
+use super::model::{Tab, TabId};
+use crate::WorkspaceId;
 use crate::terminal_view::TerminalView;
 use crate::ui::{panel::PANE_HEADER_HEIGHT, tabs::drag_chip, theme::ActiveTheme as _};
 

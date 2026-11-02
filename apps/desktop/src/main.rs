@@ -60,6 +60,9 @@ use gpui_platform::application;
 
 use crate::window::{open_window, open_window_with};
 
+/// 窗口里一个 workspace 的标识，由窗口给，挪动位置后不变；各页按它分开记每个 workspace 的状态。
+pub type WorkspaceId = u64;
+
 fn main() {
     // ssh 调 askpass 时只给一句提示当参数，先于一切参数认出来，免得被当成子命令。
     if let Some(code) = runode_ssh::askpass::run_if_requested() {

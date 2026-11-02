@@ -93,6 +93,7 @@ use crate::host_client::remote::HostId;
 use crate::ui::a11y::{Hide, PressDown};
 // 关标签、关分屏和放大分屏这几个动作在 `runode_ui::actions`，焦点在预览栏里时由预览栏接住；
 // 标题栏的高度、拖动窗口和标签的关闭按钮也在 `runode_ui`。
+use crate::WorkspaceId;
 use crate::file_tree::FileTree;
 use crate::git_panel::GitPanel;
 use crate::github_actions::ActionsPanel;
@@ -107,7 +108,7 @@ use crate::ui::{
     theme::{ActiveTheme as _, Theme, ansi_colors},
 };
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize};
-use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
+use model::{PaneLayout, Workspace, home_dir};
 use persist::format::SavedWindow;
 use slot::Slot;
 use titlebar::titled;

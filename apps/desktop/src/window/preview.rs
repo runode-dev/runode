@@ -16,7 +16,8 @@ use runode_config::PreviewClick;
 
 pub(in crate::window) use crate::preview_panel::DiffTarget;
 
-use super::{WindowView, cards, model::WorkspaceId, status_bar};
+use super::{WindowView, cards, status_bar};
+use crate::WorkspaceId;
 use crate::{config::AppConfig, project_host::ProjectHost};
 
 impl WindowView {
@@ -186,7 +187,7 @@ impl WindowView {
 
     /// workspace `id` 关掉了，预览栏丢掉它的标签。
     pub(super) fn forget_previews(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
-        self.preview.update(cx, |panel, cx| panel.remove_workspace(id, cx));
+        self.preview.update(cx, |panel, cx| panel.forget_workspace(id, cx));
     }
 
     /// 当前 workspace 的预览，宽 `width`，盖满终端区。没有标签时什么也不画。

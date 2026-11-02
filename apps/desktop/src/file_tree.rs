@@ -30,6 +30,7 @@ use std::{
     },
 };
 
+use crate::WorkspaceId;
 use crate::project_host::ProjectHost;
 use crate::ui::{
     a11y::A11yPress,
@@ -119,9 +120,6 @@ const ROW_PADDING: f32 = 4.;
 const TOOLBAR_BUTTON_SIZE: f32 = 24.;
 /// 剪切下来等着粘贴的行画得淡一些。
 const CUT_OPACITY: f32 = 0.5;
-
-/// workspace 的标识，由 app 给，挪动位置后不变。
-pub type WorkspaceId = u64;
 
 /// app 每次画文件树、对它做什么之前交进来的东西，见 `FileTree::set_input`。
 #[derive(Clone, Debug, Default)]

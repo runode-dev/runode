@@ -41,6 +41,7 @@ use std::{
     },
 };
 
+use crate::WorkspaceId;
 use crate::ui::{
     self as ui,
     a11y::A11yPress,
@@ -79,9 +80,6 @@ const MAX_COLUMNS: usize = 2000;
 const BODY_PADDING: f32 = 6.;
 /// 长行右边缘渐隐的宽度。
 const FADE_WIDTH: f32 = 24.;
-
-/// workspace 的标识，由 app 给，挪动位置后不变。
-pub type WorkspaceId = u64;
 
 /// 仓库根目录和它解析过符号链接的路径，见 `PreviewTabs::real_root`。
 type RealRoot = (PathBuf, PathBuf);
@@ -636,7 +634,7 @@ impl PreviewPanel {
     }
 
     /// workspace `ws` 关掉了，丢掉它的标签，连同 GPUI 里解码的图片，和关标签时一样。
-    pub fn remove_workspace(&mut self, ws: WorkspaceId, cx: &mut App) {
+    pub fn forget_workspace(&mut self, ws: WorkspaceId, cx: &mut App) {
         for tab in self.workspaces.remove(&ws).iter().flat_map(|tabs| &tabs.tabs) {
             tab.release_image(cx);
         }

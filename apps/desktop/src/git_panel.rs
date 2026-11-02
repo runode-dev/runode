@@ -32,6 +32,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::WorkspaceId;
 use crate::ui::{
     a11y::{Disable, PressDown},
     actions::{FocusTerminal, InsertFilePath},
@@ -155,9 +156,6 @@ enum PrimaryAction {
     Sync,
     Publish,
 }
-
-/// workspace 的标识，由 app 给，挪动位置后不变。
-pub type WorkspaceId = u64;
 
 /// app 每次画面板之前交进来的东西，见 `GitPanel::set_input`。
 #[derive(Clone, Copy, Debug, Default)]

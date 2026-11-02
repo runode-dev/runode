@@ -4,6 +4,7 @@
 
 mod repo;
 
+use crate::WorkspaceId;
 use crate::ui::button::{Button, ButtonSize, Toggle};
 use crate::ui::icons::system_logos;
 use crate::ui::panel::split_handle;
@@ -22,7 +23,6 @@ use super::{
     agents::Status as AgentStatus,
     background, cards, drag_window,
     inline_edit::InlineEdit,
-    model::WorkspaceId,
     pane_move::DraggedPane,
     titlebar::{drag_chip, drop_marker, shortcut_hint, styled_agent_mark},
 };

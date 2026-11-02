@@ -21,6 +21,7 @@ use super::{
     project::{Project, SidePanel},
     sidebar::RepoBadge,
 };
+use crate::WorkspaceId;
 use crate::{
     host_client::remote::HostId,
     terminal_view::{PROVISIONAL_SIZE, SHOW_WAIT, TerminalEvent, TerminalView},
@@ -125,8 +126,6 @@ pub(super) fn workspace_name(host: &HostId, dir: &Path) -> String {
     root.file_name().map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
-/// workspace 的标识，挪动位置后不变。
-pub(super) type WorkspaceId = u64;
 /// 上次看 PATH 里有没有某个命令行工具时的 PATH 和结果，见 `WindowView::tool_on_path`。
 pub(super) type ToolCache = std::cell::RefCell<Option<(Option<std::ffi::OsString>, bool)>>;
 
