@@ -35,14 +35,12 @@ pub(super) fn wake_pair() -> io::Result<(WakeReader, WakeWriter)> {
 /// 目录里，绑不上（路径超过 `sockaddr_un` 的长度、临时目录在不支持 AF_UNIX 的卷上）时会 panic。这里先试只有
 /// 自己能进的 `runode_paths::Dirs::runtime_dir`，再试临时目录，出错时返回错误。名字带随机数，别人猜不到。
 pub fn socket_pair() -> io::Result<(UnixStream, UnixStream)> {
-    use std::hash::{BuildHasher as _, RandomState};
-
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let name = format!(
-        "runode-pair-{}-{}-{:016x}.sock",
+        "runode-pair-{}-{}-{}.sock",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed),
-        RandomState::new().hash_one(NEXT.load(Ordering::Relaxed)),
+        runode_types::random::random_hex::<8>()?,
     );
     // 建目录、核对它的权限要读令牌和安全描述符，每建一对都做一遍太费：一个进程只做一次。
     static RUNTIME_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();

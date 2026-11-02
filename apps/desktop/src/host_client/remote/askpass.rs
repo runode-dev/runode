@@ -3,12 +3,13 @@
 
 use std::{
     collections::HashMap,
-    hash::{BuildHasher as _, RandomState},
     io::{self, BufReader, Read as _},
     path::PathBuf,
     sync::{LazyLock, Mutex, OnceLock, PoisonError},
     thread,
 };
+
+use runode_types::random::random_hex;
 
 use futures::channel::oneshot;
 use runode_ssh::askpass::{Kind, Reply, Request, read_request, write_reply};
@@ -55,8 +56,7 @@ static TOKENS: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(Mutex::d
 /// 给 `host` 的一次连接要一个口令，返回 socket 的路径和口令；开不了 socket 时为空，ssh 只能不问用户。
 pub(super) fn register(host: &str) -> Option<(PathBuf, String)> {
     let server = SERVER.get_or_init(start).as_ref()?;
-    let token =
-        format!("{:016x}{:016x}", RandomState::new().hash_one(host), RandomState::new().hash_one(std::process::id()));
+    let token = random_hex::<16>().inspect_err(|err| tracing::warn!("cannot pick an askpass token: {err}")).ok()?;
     TOKENS.lock().unwrap_or_else(PoisonError::into_inner).insert(token.clone(), host.to_owned());
     Some((server.socket.clone(), token))
 }

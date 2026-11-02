@@ -8,6 +8,7 @@ use std::{
 };
 
 use runode_types::{
+    random::random_hex,
     session::SessionId,
     todo::{Schedule, Todo, TodoSpec, When},
 };
@@ -173,8 +174,7 @@ fn schedule(row: &Row<'_>) -> rusqlite::Result<Schedule> {
 /// 新的标识：8 个小写十六进制数字，和两张表里已有的都不重。
 fn new_id(tx: &Transaction<'_>) -> Result<String> {
     for _ in 0..16 {
-        let random = SessionId::random().map_err(|err| format!("cannot pick an id: {err}"))?;
-        let id = format!("{:08x}", random.0 as u32);
+        let id = random_hex::<4>().map_err(|err| format!("cannot pick an id: {err}"))?;
         let taken: bool = tx
             .query_row(
                 "SELECT EXISTS (SELECT 1 FROM todos WHERE id = ?1) OR EXISTS (SELECT 1 FROM schedules WHERE id = ?1)",
