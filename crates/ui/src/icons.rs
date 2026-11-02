@@ -151,7 +151,20 @@ pub mod system_logos {
     }
 }
 
-/// 所有图标的资源路径和内容，app 的 `AssetSource` 按路径从这里取。
+/// 编进二进制的图标：`svg()`、`img()` 这类元素按路径向 GPUI 要文件，GPUI 再来这里取。app 建应用时交给 GPUI。
+pub struct Assets;
+
+impl gpui::AssetSource for Assets {
+    fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        Ok(all().find(|(name, _)| *name == path).map(|(_, data)| std::borrow::Cow::Borrowed(*data)))
+    }
+
+    fn list(&self, path: &str) -> gpui::Result<Vec<gpui::SharedString>> {
+        Ok(all().filter(|(name, _)| name.starts_with(path)).map(|(name, _)| (*name).into()).collect())
+    }
+}
+
+/// 所有图标的资源路径和内容，`Assets` 按路径从这里取。
 pub fn all() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
     FILES
         .iter()

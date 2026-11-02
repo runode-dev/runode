@@ -32,9 +32,9 @@ use crate::ui::{
 // 标签共用的拖动卡片和落点提示在 `runode_ui::tabs`，侧栏从这里引。
 pub(super) use crate::ui::tabs::{drag_chip, drop_marker};
 use crate::{
-    assets::{PIXEL_QUESTION_ICON, PLUS_ICON, PROMPT_ICON},
     preview_panel::FileTab,
     terminal_view::{DEFAULT_TITLE, TerminalView},
+    ui::icons::{PIXEL_QUESTION_ICON, PLUS_ICON, PROMPT_ICON},
     ui::{
         base_name,
         button::{Button, ButtonSize},

@@ -111,7 +111,7 @@ impl Page {
     }
 
     pub fn icon(self) -> &'static str {
-        use crate::assets::{
+        use crate::ui::icons::{
             FILES_ICON, KEYBOARD_ICON, MIC_ICON, PALETTE_ICON, PHONE_ICON, PLUG_ICON, SETTINGS_ICON, SLIDERS_ICON,
             SPARKLE_ICON, TERMINAL_ICON,
         };

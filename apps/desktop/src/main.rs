@@ -158,7 +158,7 @@ fn main() {
     // 初始化同时进行；主线程第一次用到宿主时等它连好。
     host_client::start(prespawn::start());
 
-    application().with_assets(assets::Assets).run(|cx: &mut App| {
+    application().with_assets(ui::icons::Assets).run(|cx: &mut App| {
         startup::mark("app_run");
         // 系统通知认这个身份：Windows 上是 AppUserModelID，Linux 上是通知里的程序名。macOS 上由 .app 的
         // bundle id 定。

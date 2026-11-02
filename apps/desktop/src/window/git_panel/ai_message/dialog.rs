@@ -22,7 +22,7 @@ use crate::ui::menu::MenuHost as _;
 use crate::ui::select::SelectTrigger;
 use crate::ui::theme::ActiveTheme as _;
 use crate::{
-    assets::{CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
+    ui::icons::{CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
     ui::{
         a11y::Press,
         font_size::{FontSize, scaled},

@@ -16,7 +16,7 @@ use super::super::WindowView;
 use crate::ui::a11y::A11yPress;
 use crate::ui::popover::Popover;
 use crate::{
-    assets::{BRANCH_ICON, CHECK_ICON, PLUS_ICON},
+    ui::icons::{BRANCH_ICON, CHECK_ICON, PLUS_ICON},
     ui::{
         font_size::{FontSize, scaled},
         input::{InputEvent, InputState},

@@ -6,8 +6,8 @@ use gpui::{AnyElement, Context, Div, FontWeight, Hsla, Role, SharedString, State
 
 use super::{ACTIVE_DOT, PENDING_DOT, PressDown as _, StatusPopover, popover_header};
 use crate::{
-    assets::{CHEVRON_RIGHT_ICON, SERVER_ICON},
     host_client::remote::{self as hosts, RemoteHost, Status},
+    ui::icons::{CHEVRON_RIGHT_ICON, SERVER_ICON},
     ui::{
         button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},

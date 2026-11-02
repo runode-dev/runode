@@ -18,9 +18,9 @@ use gpui::{
 use runode_remote::{host_name, local_interfaces};
 
 use crate::{
-    assets::{PHONE_ICON, REFRESH_ICON, TRASH_ICON},
     config::AppConfig,
     remote_access::pairing::{Pairing, Qr, qr_code},
+    ui::icons::{PHONE_ICON, REFRESH_ICON, TRASH_ICON},
     ui::{
         a11y::Press,
         button::{Button, ButtonSize, ButtonVariant},

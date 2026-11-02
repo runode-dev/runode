@@ -17,7 +17,7 @@ use gpui::{
 use super::{NewWorkspace, WindowView, files::Quoting, model::home_dir};
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::{
-    assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
+    ui::icons::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
     ui::{
         a11y::Press,
         card::Card,

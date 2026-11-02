@@ -13,10 +13,10 @@ use super::{
     picker::{PickItem, PickTarget, ThemeSlot},
 };
 use crate::{
-    assets::{MONITOR_ICON, PALETTE_ICON},
     i18n::tr,
     ui::font_size::FontSize,
     ui::hsla,
+    ui::icons::{MONITOR_ICON, PALETTE_ICON},
 };
 
 /// `theme` 的值拆开：一个主题，或者浅色、深色外观各一个。没设时就是 runode 自己的配色那个主题。

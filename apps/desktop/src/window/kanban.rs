@@ -25,10 +25,10 @@ use super::{
     titlebar::styled_agent_mark,
 };
 use crate::{
-    assets::{CLOCK_ICON, KANBAN_ICON, PLUS_ICON},
     config::AppConfig,
     host_client,
     terminal_view::TerminalView,
+    ui::icons::{CLOCK_ICON, KANBAN_ICON, PLUS_ICON},
     ui::{
         font_size::FontSize,
         theme::ActiveTheme as _,

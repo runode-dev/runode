@@ -48,10 +48,10 @@ use crate::ui::button::{Button, ButtonSize};
 use crate::ui::menu::MenuHost as _;
 use crate::ui::panel::sync_icon;
 use crate::{
-    assets::{
+    config::AppConfig,
+    ui::icons::{
         CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SERVER_ICON, SHELL_ICON,
     },
-    config::AppConfig,
     ui::{
         font_size::{FontSize, scaled},
         hsla,

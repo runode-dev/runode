@@ -30,7 +30,7 @@ use crate::project_host::ProjectHost;
 use crate::ui::a11y::A11yPress;
 pub(super) use crate::ui::panel::{panel_message, panel_shell};
 use crate::{
-    assets::{ACTIONS_WORKFLOW_ICON, FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
+    ui::icons::{FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON, github_actions::WORKFLOW_ICON as ACTIONS_WORKFLOW_ICON},
     ui::{font_size::FontSize, theme::ActiveTheme as _, tooltip::tooltip},
 };
 

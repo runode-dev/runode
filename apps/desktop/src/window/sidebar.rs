@@ -28,10 +28,12 @@ use super::{
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
-    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON, SIDEBAR_ICON},
     host_client::remote::{self, HostId, Status},
     menus::OpenSettings,
     remote_hosts::{self, status_text},
+    ui::icons::{
+        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON, SIDEBAR_ICON,
+    },
     ui::{
         display_dir,
         font_size::{self, FontSize, scaled},

@@ -37,7 +37,7 @@ use crate::ui::{
     card::Card,
 };
 use crate::{
-    assets::{
+    ui::icons::{
         CHEVRON_UP_ICON, CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON,
         TERMINAL_ICON,
     },

@@ -25,8 +25,8 @@ use super::{
     ToggleRemoteDesktop, WindowView,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
 };
-use crate::assets::MONITOR_ICON;
 use crate::screen_viewer::{Input, SUPPORTED, ScreenViewer, ScreenViewerEvent};
+use crate::ui::icons::MONITOR_ICON;
 use crate::ui::{a11y::PressDown as _, button::Toggle, theme::ActiveTheme as _, tooltip::tooltip};
 use snap::{ShownSnap, Snap, SnapTarget};
 

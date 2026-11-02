@@ -30,10 +30,10 @@ use crate::ui::a11y::A11yPress;
 use crate::ui::button::Toggle;
 use crate::ui::menu::MenuHost as _;
 use crate::{
-    assets::{KEYBOARD_ICON, PENCIL_ICON, PLAY_ICON, TRASH_ICON},
     config::AppConfig,
     host_client,
     terminal_view::TerminalView,
+    ui::icons::{KEYBOARD_ICON, PENCIL_ICON, PLAY_ICON, TRASH_ICON},
     ui::{display_dir, tooltip::tooltip},
     window::WindowView,
 };

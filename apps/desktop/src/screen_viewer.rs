@@ -33,14 +33,14 @@ use runode_ssh::bootstrap::Family;
 use runode_types::{input::MouseButton as RemoteButton, screen::Codec};
 
 use crate::{
-    assets::{
-        CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MONITOR_ICON, PIN_ICON, POP_IN_ICON, POP_OUT_ICON, REFRESH_ICON,
-    },
     host_client::remote::{
         self, Status,
         screen::{self, ScreenEvent, ScreenLink, ScreenSender},
     },
     remote_hosts::status_text,
+    ui::icons::{
+        CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MONITOR_ICON, PIN_ICON, POP_IN_ICON, POP_OUT_ICON, REFRESH_ICON,
+    },
     ui::{
         a11y::{A11yPress as _, Press as _},
         button::{Button, ButtonSize, ButtonVariant},

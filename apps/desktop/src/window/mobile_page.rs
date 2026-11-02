@@ -13,8 +13,8 @@ use super::{
     sidebar::{ROW_HEIGHT, ROW_ICON_SIZE, ROW_TEXT_OPACITY},
 };
 use crate::{
-    assets::PHONE_ICON,
     mobile_page::{MobileEvent, MobilePage, Step},
+    ui::icons::PHONE_ICON,
     ui::{a11y::A11yPress, card::Card, font_size::scaled, theme::ActiveTheme as _},
 };
 

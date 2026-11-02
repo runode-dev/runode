@@ -37,8 +37,8 @@ use gpui::{
 use runode_config::{Config, ConfigFile};
 
 use crate::{
-    assets::ARROW_LEFT_ICON,
     config::AppConfig,
+    ui::icons::ARROW_LEFT_ICON,
     ui::{
         a11y::{Hide, Press},
         font_size::{FontSize, scaled},
