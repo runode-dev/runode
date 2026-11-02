@@ -23,6 +23,7 @@ pub mod path_tree;
 pub mod popover;
 pub mod row_buttons;
 pub mod scrollbar;
+pub mod segmented;
 pub mod sound;
 pub mod spinner;
 pub mod switch;

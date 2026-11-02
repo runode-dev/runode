@@ -3,11 +3,8 @@
 
 use crate::ui::icons::{CHECK_ICON, CHEVRON_DOWN_ICON};
 use crate::ui::theme::Theme;
-use gpui::{
-    AnyElement, Context, Div, ElementId, Entity, Hsla, Role, SharedString, Stateful, Window, div, prelude::*, px, svg,
-};
+use gpui::{AnyElement, Div, ElementId, Entity, Hsla, Role, SharedString, Stateful, div, prelude::*, px, svg};
 
-use super::SettingsView;
 pub(super) use crate::ui::a11y::Press;
 use crate::ui::{
     font_size::{FontSize, scaled},
@@ -127,53 +124,6 @@ pub(super) fn error_text(id: impl Into<ElementId>, err: String, theme: &Theme) -
         .text_size(FontSize::Small)
         .text_color(theme.destructive)
         .child(err)
-}
-
-/// 分段选项：几个挨在一起的按钮，选中的那个高亮。`options` 是 (值, 显示的文字)，`label` 是这一组的名字。
-pub(super) fn segmented(
-    id: &'static str,
-    label: impl Into<SharedString>,
-    options: Vec<(String, SharedString)>,
-    selected: Option<&str>,
-    theme: &Theme,
-    cx: &mut Context<SettingsView>,
-    pick: impl Fn(&mut SettingsView, &str, &mut Window, &mut Context<SettingsView>) + Clone + 'static,
-) -> Stateful<Div> {
-    div()
-        .id(id)
-        .role(Role::RadioGroup)
-        .aria_label(label)
-        .flex()
-        .h(scaled(CONTROL_HEIGHT))
-        .p(px(2.))
-        .gap(px(2.))
-        .rounded(px(7.))
-        .bg(theme.mix(0.06))
-        .border_1()
-        .border_color(theme.foreground.opacity(0.13))
-        .children(options.into_iter().enumerate().map(|(ix, (value, label))| {
-            let on = selected == Some(value.as_str());
-            let pick = pick.clone();
-            div()
-                .id((id, ix))
-                .role(Role::RadioButton)
-                .aria_label(label.clone())
-                .aria_toggled(on.into())
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .rounded(px(5.))
-                .text_size(FontSize::Body)
-                .map(|item| {
-                    if on {
-                        item.bg(theme.mix(0.12)).text_color(theme.foreground)
-                    } else {
-                        item.text_color(theme.foreground.opacity(0.7)).hover(|item| item.bg(theme.mix(0.07)))
-                    }
-                })
-                .on_press(cx, move |this, window, cx| pick(this, &value, window, cx))
-                .child(label)
-        }))
 }
 
 /// 点开一个列表从里面挑的按钮：显示当前选的，`leading` 放在它左边（比如主题的色块），右边一个

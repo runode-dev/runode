@@ -1,14 +1,14 @@
 //! 设置页的各页：每页有哪些项、各用什么控件，以及主题、字体、调色板这些不止一个控件的项。
 
 use crate::ui::icons::{MINUS_ICON, REFRESH_ICON};
-use crate::ui::theme::Theme;
+use crate::ui::{segmented::Segmented, theme::Theme};
 use gpui::{AnyElement, Context, Div, ElementId, Role, SharedString, Window, div, prelude::*, px};
 use runode_config::StatusItem;
 use runode_types::{agent::AgentKind, speech::DictationCloud};
 
 use super::{
     Commit, SettingsView,
-    controls::{Cards, Press, chip, dropdown, error_text, input_box, row, segmented, swatch},
+    controls::{Cards, Press, chip, dropdown, error_text, input_box, row, swatch},
     picker::{PickItem, PickTarget},
 };
 use crate::{
@@ -451,12 +451,18 @@ impl SettingsView {
                 div().flex().items_center().gap(px(8.)).children(open).children(test).child(switch).into_any_element()
             }
             Control::Choice(values) => {
-                let options = values.iter().map(|value| (value.to_string(), choice_label(key, value))).collect();
                 let selected = current.first().map_or("", String::as_str);
-                segmented(key, key_title(key), options, Some(selected), theme, cx, move |this, value, _, cx| {
-                    this.write_or_report(key, this.single(key, value.to_owned()), cx);
-                })
-                .into_any_element()
+                let group = Segmented::new(key, key_title(key));
+                values
+                    .iter()
+                    .enumerate()
+                    .fold(group, |group, (ix, value)| {
+                        let (label, on, value) = (choice_label(key, value), *value == selected, value.to_string());
+                        group.option((key, ix), label, on, cx, move |this, _, cx| {
+                            this.write_or_report(key, this.single(key, value.clone()), cx);
+                        })
+                    })
+                    .into_any_element()
             }
             Control::Text(width) => {
                 let input = self.field(key, Commit::Value(key), Some(key_placeholder(key)), window, cx);

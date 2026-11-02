@@ -25,6 +25,7 @@ use serde_json::{Map, Value};
 use super::{AddTask, BindTask, EditTask, TaskKeys};
 use crate::ui::button::{Button, ButtonVariant};
 use crate::ui::dialog::Dialog;
+use crate::ui::segmented::Segmented;
 use crate::{
     config::AppConfig,
     ui::{
@@ -191,6 +192,13 @@ impl WindowView {
         self.focus_add_task_field(true, window, cx);
     }
 
+    fn set_add_task_global(&mut self, global: bool, cx: &mut Context<Self>) {
+        if let Some(dialog) = &mut self.add_task {
+            dialog.global = global;
+            cx.notify();
+        }
+    }
+
     fn close_add_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.add_task.take().is_some() {
             window.focus(&self.focus_handle(cx), cx);
@@ -321,8 +329,6 @@ impl WindowView {
 
     pub(in crate::window) fn render_add_task(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let dialog = self.add_task.as_ref()?;
-        let hover_bg = cx.theme().mix(0.06);
-        let primary_bg = cx.theme().mix(0.16);
         let fg = cx.theme().foreground;
         let field = |label: String, input: &Entity<InputState>| {
             div()
@@ -335,27 +341,6 @@ impl WindowView {
         // 对话框底下的按钮：比 `ButtonSize::Default` 高一些，高度由上下留白撑开。
         let button = |id: &'static str, label: String, variant: ButtonVariant| {
             Button::new(id, label).variant(variant).h_auto().py(px(5.)).cursor_pointer()
-        };
-        // 本项目还是所有目录：两段按钮，选中的那段底色亮一些。
-        let scope = |id: &'static str, global: bool, label: String, cx: &mut Context<Self>| {
-            div()
-                .id(id)
-                .role(Role::RadioButton)
-                .aria_label(label.clone())
-                .aria_toggled((dialog.global == global).into())
-                .px(px(10.))
-                .py(px(3.))
-                .rounded(px(4.))
-                .cursor_pointer()
-                .when(dialog.global == global, |pill| pill.bg(primary_bg))
-                .when(dialog.global != global, |pill| pill.hover(move |pill| pill.bg(hover_bg)))
-                .child(label)
-                .on_press(cx, move |this, _, cx| {
-                    if let Some(dialog) = &mut this.add_task {
-                        dialog.global = global;
-                        cx.notify();
-                    }
-                })
         };
         let shortcut_label = match (&dialog.recording, &dialog.shortcut) {
             (Some(_), _) => rust_i18n::t!("tasks.shortcut_press").into_owned(),
@@ -465,27 +450,21 @@ impl WindowView {
                             .gap(px(8.))
                             .child(div().text_color(fg.opacity(0.7)).child(scope_label.clone()))
                             .child(
-                                div()
-                                    .id("add-task-scope")
-                                    .role(Role::RadioGroup)
-                                    .aria_label(scope_label)
-                                    .flex()
-                                    .p(px(2.))
-                                    .gap(px(2.))
-                                    .rounded(px(6.))
-                                    .bg(cx.theme().background)
-                                    .child(scope(
+                                Segmented::new("add-task-scope", scope_label)
+                                    .option(
                                         "add-task-project",
-                                        false,
                                         rust_i18n::t!("tasks.scope_project").into_owned(),
+                                        !dialog.global,
                                         cx,
-                                    ))
-                                    .child(scope(
+                                        |this, _, cx| this.set_add_task_global(false, cx),
+                                    )
+                                    .option(
                                         "add-task-global",
-                                        true,
                                         rust_i18n::t!("tasks.scope_global").into_owned(),
+                                        dialog.global,
                                         cx,
-                                    )),
+                                        |this, _, cx| this.set_add_task_global(true, cx),
+                                    ),
                             ),
                     )
             })

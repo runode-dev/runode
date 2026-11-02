@@ -27,6 +27,7 @@ use crate::ui::{
     input::{Input, InputEvent, InputState},
     panel::panel_message,
     path_tree::{TreeItem, path_tree},
+    segmented::Segmented,
     theme::ActiveTheme as _,
     tooltip::tooltip,
 };
@@ -651,8 +652,7 @@ impl FileTree {
         let search = &self.search;
         let content = search.mode == SearchMode::Content;
         let theme = cx.theme();
-        let (fg, bg, input_bg, on_bg, track_bg) =
-            (theme.foreground, theme.background, theme.mix(0.06), theme.mix(0.18), theme.mix(0.08));
+        let (fg, input_bg, on_bg) = (theme.foreground, theme.mix(0.06), theme.mix(0.18));
         // 输入框，比文件树的底色浅一档。
         let input_box = |field: &Entity<InputState>| Input::new(field).gap(px(4.)).bg(input_bg);
         // 搜索框里的小按钮：开着的开关垫一层底色。
@@ -712,46 +712,22 @@ impl FileTree {
         let field =
             input_box(&search.field).prefix(filter_icon).children(clear).children(options.into_iter().flatten());
         let mode = search.mode;
-        let segment = |id, label: SharedString, value: SearchMode, cx: &mut Context<Self>| {
-            let on = mode == value;
-            div()
-                .id(id)
-                .role(Role::RadioButton)
-                .aria_label(label.clone())
-                .aria_toggled(on.into())
-                .flex_1()
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(5.))
-                .text_size(FontSize::Body)
-                .map(|item| {
-                    if on {
-                        item.bg(bg).text_color(fg)
-                    } else {
-                        item.text_color(fg.opacity(0.6)).hover(|item| item.text_color(fg))
-                    }
-                })
-                .child(label)
-                .on_press(cx, move |this, _, cx| this.set_search_mode(value, cx))
-        };
-        let segments = div()
-            .id("search-mode")
-            .role(Role::RadioGroup)
-            .aria_label(rust_i18n::t!("files.search_mode").into_owned())
-            .h(scaled(26.))
-            .p(px(2.))
-            .flex()
-            .rounded(px(7.))
-            .bg(track_bg)
-            .child(segment("search-name", rust_i18n::t!("files.search_name").into_owned().into(), SearchMode::Name, cx))
-            .child(segment(
-                "search-content",
-                rust_i18n::t!("files.search_content").into_owned().into(),
-                SearchMode::Content,
+        let segments = Segmented::new("search-mode", rust_i18n::t!("files.search_mode").into_owned())
+            .fill()
+            .option(
+                "search-name",
+                rust_i18n::t!("files.search_name").into_owned(),
+                mode == SearchMode::Name,
                 cx,
-            ));
+                |this, _, cx| this.set_search_mode(SearchMode::Name, cx),
+            )
+            .option(
+                "search-content",
+                rust_i18n::t!("files.search_content").into_owned(),
+                mode == SearchMode::Content,
+                cx,
+                |this, _, cx| this.set_search_mode(SearchMode::Content, cx),
+            );
         let labeled = |label: &str, field: &Entity<InputState>| {
             div()
                 .flex()
