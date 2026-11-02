@@ -227,6 +227,16 @@ public final class DictationModel {
         let take = Take(recorder: recorder, remote: remote, insert: insert)
         self.take = take
         phase = .recording
+        // 电脑一连上就知道它有没有模型，没有时当场停下，不让用户说完一整段才知道白说了。
+        if let remote {
+            Task { [weak self, weak take] in
+                guard let connection = try? await remote.value, !connection.installed,
+                    let self, let take, self.take === take
+                else { return }
+                cancel()
+                errorMessage = Self.message(for: DictationFailure.noModelAnywhere)
+            }
+        }
         // 录音器开起来之前就可能松手或取消，所以开不起来时只在这段还是当前这段时才复位。
         let previous = stopping
         take.starting = Task { [weak self] in
