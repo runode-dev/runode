@@ -57,6 +57,8 @@ public final class DictationModel {
     @ObservationIgnored private let openSpeech: SpeechOpener?
     @ObservationIgnored private let makeRecorder: (@escaping @Sendable ([Float]) -> Void) -> any DictationRecorder
     @ObservationIgnored private let transcribe: @Sendable ([Float]) async throws -> String
+    /// 麦克风权限现在怎样；测试里不碰系统的授权。
+    @ObservationIgnored private let permission: () -> SpeechRecorder.Permission
     @ObservationIgnored private var downloading: Task<Void, Never>?
     @ObservationIgnored private var take: Take?
     /// 上一段录音器的停用。`start`、`stop` 不在主线程上进录音器的队列，先后要在这里排好：
@@ -98,12 +100,14 @@ public final class DictationModel {
     init(
         root: URL, openSpeech: SpeechOpener?,
         makeRecorder: @escaping (@escaping @Sendable ([Float]) -> Void) -> any DictationRecorder,
-        transcribe: @escaping @Sendable ([Float]) async throws -> String
+        transcribe: @escaping @Sendable ([Float]) async throws -> String,
+        permission: @escaping () -> SpeechRecorder.Permission = { SpeechRecorder.permission }
     ) {
         self.root = root
         self.openSpeech = openSpeech
         self.makeRecorder = makeRecorder
         self.transcribe = transcribe
+        self.permission = permission
         installed = SpeechModels.isInstalled(in: root)
     }
 
@@ -193,7 +197,7 @@ public final class DictationModel {
     }
 
     private func start(machine: MachineRecord?, source: DictationSource, insert: @escaping (String) -> Void) {
-        switch SpeechRecorder.permission {
+        switch permission() {
         case .granted:
             break
         case .undetermined:

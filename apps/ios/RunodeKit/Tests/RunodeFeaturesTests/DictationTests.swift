@@ -32,16 +32,24 @@ import Testing
     func model() -> DictationModel {
         let recorder = recorder
         return DictationModel(
-            root: root, openSpeech: nil, makeRecorder: { _ in recorder }, transcribe: { "第\($0.count)段" })
+            root: root, openSpeech: nil, makeRecorder: { _ in recorder }, transcribe: { "第\($0.count)段" },
+            permission: { .granted })
     }
 
-    /// 录音器的启停在别的线程上，轮询到它做完为止。
-    func until(_ done: () -> Bool) async {
-        while !done() { await Task.yield() }
+    /// 录音器的启停在别的线程上，轮询到它做完为止；等太久记一条失败，不让整组测试卡住。
+    func until(_ done: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !done() {
+            guard ContinuousClock.now < deadline else {
+                Issue.record("timed out", sourceLocation: sourceLocation)
+                return
+            }
+            await Task.yield()
+        }
     }
 
-    func settle(_ model: DictationModel) async {
-        while model.phase == .transcribing { await Task.yield() }
+    func settle(_ model: DictationModel, sourceLocation: SourceLocation = #_sourceLocation) async {
+        await until({ model.phase != .transcribing }, sourceLocation: sourceLocation)
     }
 
     @Test func holdingThenReleasingTranscribes() async throws {
