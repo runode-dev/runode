@@ -114,7 +114,7 @@ fn short_status(status: &Status) -> String {
 impl WindowView {
     /// 开着的下拉菜单是新建工作区对话框的主机菜单。
     fn host_menu_open(&self) -> bool {
-        self.dropdown == Dropdown::WorkspaceHost && self.dropdown_open()
+        self.dropdown_shown(Dropdown::WorkspaceHost)
     }
 
     /// 各窗口里远端工作区的主机和这次运行里连过的主机，当前窗口的在前。
@@ -190,9 +190,8 @@ impl WindowView {
         let target = dialog.focus_handle();
         let items = self.host_menu_items(cx);
         let select_after = from_keyboard.then(|| items.len() - 1);
-        self.open_dropdown(items, target, select_after, cx);
+        self.show_dropdown(Dropdown::WorkspaceHost, items, target, select_after, cx);
         self.set_menu_width(HOST_MENU_WIDTH);
-        self.dropdown = Dropdown::WorkspaceHost;
     }
 
     pub(super) fn pick_workspace_host(
@@ -327,7 +326,10 @@ impl WindowView {
         let HostId::Ssh(name) = &dialog.host else {
             return;
         };
-        if dialog.source.is_none() || dialog.browse.is_some() || !matches!(remote::status_of(name), Status::Connected(_)) {
+        if dialog.source.is_none()
+            || dialog.browse.is_some()
+            || !matches!(remote::status_of(name), Status::Connected(_))
+        {
             return;
         }
         let field =
@@ -679,7 +681,8 @@ impl WindowView {
         let hover_bg = cx.theme().accent;
         let body = div().flex().flex_col().gap(px(8.)).pl(px(48.)).pr(px(16.)).pb(px(12.));
         let Some(browse) = dialog.browse.as_ref() else {
-            let text = rust_i18n::t!("workspace.remote_waiting", status = status_text(&remote::status_of(name))).into_owned();
+            let text =
+                rust_i18n::t!("workspace.remote_waiting", status = status_text(&remote::status_of(name))).into_owned();
             return Some(
                 body.child(
                     div()

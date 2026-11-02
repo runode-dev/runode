@@ -703,6 +703,26 @@ impl MenuHost for WindowView {
     }
 }
 
+impl WindowView {
+    /// 挂在按钮 `under` 下面的菜单开着。
+    fn dropdown_shown(&self, under: Dropdown) -> bool {
+        self.dropdown == under && self.dropdown_open()
+    }
+
+    /// 在按钮 `under` 下面弹出菜单，记下挂在哪个按钮下面，按钮据此画成开着的样子、把菜单画在自己下面。
+    fn show_dropdown(
+        &mut self,
+        under: Dropdown,
+        items: Vec<Option<crate::ui::menu::MenuItem>>,
+        target: FocusHandle,
+        select_after: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_dropdown(items, target, select_after, cx);
+        self.dropdown = under;
+    }
+}
+
 /// 盖在终端区上的整页，同一时刻至多开着一个；换成别的页之前先按各自的规矩收起（`drop_settings`、
 /// `leave_mobile`、`leave_todo_page`）。占满内容区的远程桌面另由 `ScreenViewers` 记着。
 enum Page {

@@ -50,17 +50,16 @@ fn items(cx: &App) -> Vec<Option<MenuItem>> {
 impl WindowView {
     /// 开着的下拉菜单是「更多」按钮的。
     fn more_menu_open(&self) -> bool {
-        self.dropdown == Dropdown::More && self.dropdown_open()
+        self.dropdown_shown(Dropdown::More)
     }
 
     /// 在「更多」按钮下面弹出菜单；从辅助工具按下时选中第一项。
     fn open_more_menu(&mut self, select_first: bool, cx: &mut Context<Self>) {
         let items = items(cx);
         let target = self.focus_handle(cx);
-        // `open_dropdown` 选中给的那一项之后能选的第一项，从最后一项往后绕回第一项。
+        // `show_dropdown` 选中给的那一项之后能选的第一项，从最后一项往后绕回第一项。
         let select_after = select_first.then(|| items.len() - 1);
-        self.open_dropdown(items, target, select_after, cx);
-        self.dropdown = Dropdown::More;
+        self.show_dropdown(Dropdown::More, items, target, select_after, cx);
     }
 
     /// 标题栏右上角、命令按钮左边的「更多」按钮，菜单挂在它下面，开着时底色亮一些。

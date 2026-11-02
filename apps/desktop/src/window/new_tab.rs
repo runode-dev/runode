@@ -80,7 +80,7 @@ fn installed_agents(programs: &[String], found: &[Option<String>]) -> Vec<Instal
 impl WindowView {
     /// 开着的下拉菜单是新建标签的。
     pub(super) fn new_tab_menu_open(&self) -> bool {
-        self.dropdown == Dropdown::NewTab && self.dropdown_open()
+        self.dropdown_shown(Dropdown::NewTab)
     }
 
     /// 菜单里点了一家 agent：在当前终端的目录开新标签，在它的 shell 里起这家 agent。
@@ -178,10 +178,9 @@ impl WindowView {
     fn open_new_tab_menu(&mut self, from_keyboard: bool, cx: &mut Context<Self>) {
         let items = self.new_tab_menu_items(cx);
         let target = self.focus_handle(cx);
-        // `open_dropdown` 选中给的那一项之后能选的第一项，从最后一项往后绕回第一项。
+        // `show_dropdown` 选中给的那一项之后能选的第一项，从最后一项往后绕回第一项。
         let select_after = from_keyboard.then(|| items.len() - 1);
-        self.open_dropdown(items, target, select_after, cx);
-        self.dropdown = Dropdown::NewTab;
+        self.show_dropdown(Dropdown::NewTab, items, target, select_after, cx);
         self.find_installed_agents(cx);
         self.list_shells(cx);
     }
