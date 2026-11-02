@@ -210,7 +210,7 @@ fn unprompted(mode: Mode, keeping: bool, shared: bool) -> Option<Ending> {
 /// 退出应用，会话怎么办见 `quit_plan`。
 pub fn quit(cx: &mut App) {
     cx.defer(|cx| {
-        let window = front_window(cx);
+        let window = super::front_any_window(cx);
         run(QuitAction::Quit, window, cx, |cx| cx.quit());
     });
 }
@@ -218,7 +218,7 @@ pub fn quit(cx: &mut App) {
 /// 退出应用并结束宿主里所有的会话，包括没在窗口里显示的；有 agent 在跑时先确认。
 pub fn quit_and_end_sessions(cx: &mut App) {
     cx.defer(|cx| {
-        let window = front_window(cx);
+        let window = super::front_any_window(cx);
         run(QuitAction::QuitAndEndSessions, window, cx, |cx| cx.quit());
     });
 }
@@ -227,7 +227,7 @@ pub fn quit_and_end_sessions(cx: &mut App) {
 /// 不看配置项 `terminal-host`；留不下又有 agent 在跑时先确认，取消了就不重启。
 pub fn quit_to_update(cx: &mut App) {
     cx.defer(|cx| {
-        let window = front_window(cx);
+        let window = super::front_any_window(cx);
         run(QuitAction::Update, window, cx, |cx| {
             crate::update::restart(cx);
             // 退出已经排进主线程的队列，这个任务排在它后面；轮到了就是没退成（GPUI 拉不起重启的
@@ -265,7 +265,7 @@ pub fn close_window(window: AnyWindowHandle, cx: &mut App) {
 /// 关掉所有窗口，应用跟着退出，会话怎么办和退出一样。
 pub fn close_all_windows(cx: &mut App) {
     cx.defer(|cx| {
-        let window = front_window(cx);
+        let window = super::front_any_window(cx);
         run(QuitAction::CloseAllWindows, window, cx, |cx| {
             for window in cx.windows() {
                 window.update(cx, |_, window, _| window.remove_window()).ok();
@@ -292,11 +292,6 @@ pub fn should_close(window: &mut Window, cx: &mut App) -> bool {
 /// 开着的终端窗口有几个。
 pub fn terminal_windows(cx: &App) -> usize {
     remote::windows(cx).len()
-}
-
-/// 确认框弹在当前窗口上；当前没有窗口在前台时弹在第一个窗口上。
-fn front_window(cx: &App) -> Option<AnyWindowHandle> {
-    cx.active_window().or_else(|| cx.windows().into_iter().next())
 }
 
 /// 预览栏里有没存的修改时先问要不要放弃（`discard_unsaved`），再按 `quit_plan` 做 `action`：该问就在 `window`

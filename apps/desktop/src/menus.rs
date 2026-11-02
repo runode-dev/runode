@@ -61,14 +61,14 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(|_: &NewWindow, cx| crate::window::open_window(cx, None));
     cx.on_action(|_: &CloseWindow, cx| {
-        if let Some(window) = cx.active_window() {
+        if let Some(window) = crate::window::front_any_window(cx) {
             crate::window::close_window(window, cx);
         }
     });
     cx.on_action(|_: &CloseAllWindows, cx| crate::window::close_all_windows(cx));
-    cx.on_action(|_: &Minimize, cx| with_active_window(cx, |w| w.minimize_window()));
-    cx.on_action(|_: &Zoom, cx| with_active_window(cx, |w| crate::ui::toggle_maximize(w)));
-    cx.on_action(|_: &ToggleFullScreen, cx| with_active_window(cx, |w| w.toggle_fullscreen()));
+    cx.on_action(|_: &Minimize, cx| with_front_window(cx, |w| w.minimize_window()));
+    cx.on_action(|_: &Zoom, cx| with_front_window(cx, |w| crate::ui::toggle_maximize(w)));
+    cx.on_action(|_: &ToggleFullScreen, cx| with_front_window(cx, |w| w.toggle_fullscreen()));
 
     // 装快捷键时会顺带设置菜单。
     crate::keybinds::install(cx);
@@ -224,8 +224,14 @@ fn fix_key_equivalents(menu: &objc2_app_kit::NSMenu) {
     }
 }
 
-fn with_active_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window)) {
-    if let Some(window) = cx.active_window() {
-        window.update(cx, |_, window, _| f(window)).ok();
-    }
+/// 对最前面的窗口办 `f`。按快捷键或点菜单时 GPUI 可能正在那个窗口里派发这个动作，窗口被借走，这时
+/// `update` 会失败；等这一轮派发结束再办。
+fn with_front_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window) + 'static) {
+    cx.defer(move |cx| {
+        if let Some(window) = crate::window::front_any_window(cx)
+            && let Err(err) = window.update(cx, |_, window, _| f(window))
+        {
+            tracing::warn!("cannot reach the front window: {err:#}");
+        }
+    });
 }

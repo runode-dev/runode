@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use futures::StreamExt as _;
-use gpui::{App, Context, Entity, EntityId, Task, Window, WindowHandle};
+use gpui::{AnyWindowHandle, App, Context, Entity, EntityId, Task, Window, WindowHandle};
 use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
 use runode_types::pane::Axis;
 
@@ -311,6 +311,12 @@ pub(crate) fn front_window(cx: &App) -> Option<WindowHandle<WindowView>> {
         .and_then(|window| window.downcast::<WindowView>())
         .or_else(|| cx.window_stack()?.into_iter().find_map(|window| window.downcast::<WindowView>()));
     front.or_else(|| windows(cx).into_iter().next())
+}
+
+/// 最前面那个窗口，终端窗口和单独的远程桌面窗口都算。app 不在前台时（辅助工具、自动化按菜单）没有活动窗口，
+/// 按窗口的前后顺序取最前面的。
+pub(crate) fn front_any_window(cx: &App) -> Option<AnyWindowHandle> {
+    cx.active_window().or_else(|| cx.window_stack()?.into_iter().next()).or_else(|| cx.windows().into_iter().next())
 }
 
 pub(crate) fn windows(cx: &App) -> Vec<WindowHandle<WindowView>> {

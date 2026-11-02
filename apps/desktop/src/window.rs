@@ -71,7 +71,7 @@ pub use quit::{
     close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, quit_to_update, should_close,
     terminal_windows,
 };
-pub(crate) use remote::{front_window, windows};
+pub(crate) use remote::{front_any_window, front_window, windows};
 pub use remote::{serve, serve_requests};
 // 文件树的动作在 `file_tree`，这里转出去给快捷键表用。
 pub use crate::file_tree::{
