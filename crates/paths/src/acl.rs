@@ -36,29 +36,13 @@ use windows_sys::Win32::{
 /// 属主不是当前用户、它新建对象时的默认属主、SYSTEM 或 Administrators 组时拒绝，不去改：那多半是别人
 /// 布下的。提权跑过一次的 runode 建的目录属主是 Administrators 组，之后不提权时照样要能用。DACL 已经受保护、允许访问的项都只给这三方时不再改，免得每次都把权限往下传一遍。
 pub(crate) fn restrict(dir: &Path) -> Result<()> {
-    let token = Token::current()?;
-    let user = token.info::<TOKEN_USER>(TokenUser)?;
-    let default_owner = token.info::<TOKEN_OWNER>(TokenOwner)?;
-    // SAFETY: 两份信息都由 `GetTokenInformation` 填好，SID 指针指在各自的缓冲里，缓冲活到函数结束。
-    let (user_sid, owner_sid) = unsafe { ((*user.as_ptr()).User.Sid, (*default_owner.as_ptr()).Owner) };
-
+    let trusted = Trusted::current()?;
     let wide: Vec<u16> = dir.as_os_str().encode_wide().chain([0]).collect();
-    let (owner, dacl, descriptor) = security_info(&wide)?;
-    let system = well_known(WinLocalSystemSid)?;
-    let admins = well_known(WinBuiltinAdministratorsSid)?;
-    let trusted = [user_sid, system.as_ptr().cast_mut().cast(), admins.as_ptr().cast_mut().cast()];
-    // SAFETY: 属主指针指在 `descriptor` 里，它这时还活着；比较的 SID 也都活着。
-    let ours = unsafe { trusted.iter().chain([&owner_sid]).any(|&sid| EqualSid(owner, sid) != 0) };
+    let (ours, private) = examine(&wide, &trusted)?;
     if !ours {
         return Err(Error::new(ErrorKind::PermissionDenied, format!("{} belongs to another user", dir.display())));
     }
-    let (mut control, mut revision) = (0u16, 0u32);
-    // SAFETY: `descriptor` 由 `GetNamedSecurityInfoW` 给出。
-    if unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) } == 0 {
-        return Err(Error::last_os_error());
-    }
-    // SAFETY: `dacl` 指在 `descriptor` 里，它这时还活着；三个 SID 也都活着。
-    if control & SE_DACL_PROTECTED != 0 && unsafe { only_allows(dacl, &trusted) }? {
+    if private {
         return Ok(());
     }
 
@@ -74,7 +58,7 @@ pub(crate) fn restrict(dir: &Path) -> Result<()> {
             ptstrName: sid.cast(),
         },
     };
-    let entries = trusted.map(grant);
+    let entries = trusted.sids().map(grant);
     let mut acl: *mut ACL = ptr::null_mut();
     // SAFETY: 三项都指向这时还活着的 SID；没有旧的 ACL 要并进来。
     check(unsafe { SetEntriesInAclW(entries.len() as u32, entries.as_ptr(), ptr::null(), &mut acl) })?;
@@ -91,6 +75,63 @@ pub(crate) fn restrict(dir: &Path) -> Result<()> {
             ptr::null(),
         )
     })
+}
+
+/// `dir` 的属主是当前用户、它新建对象时的默认属主、SYSTEM 或 Administrators 组，DACL 也已经受保护、允许访问的
+/// 项都只给当前用户、SYSTEM 和 Administrators。
+pub(crate) fn is_private(dir: &Path) -> Result<bool> {
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain([0]).collect();
+    let (ours, private) = examine(&wide, &Trusted::current()?)?;
+    Ok(ours && private)
+}
+
+/// 当前用户、SYSTEM 和 Administrators 的 SID，以及当前用户新建对象时的默认属主。
+struct Trusted {
+    user: Aligned<TOKEN_USER>,
+    default_owner: Aligned<TOKEN_OWNER>,
+    system: Vec<u8>,
+    admins: Vec<u8>,
+}
+
+impl Trusted {
+    fn current() -> Result<Self> {
+        let token = Token::current()?;
+        Ok(Self {
+            user: token.info::<TOKEN_USER>(TokenUser)?,
+            default_owner: token.info::<TOKEN_OWNER>(TokenOwner)?,
+            system: well_known(WinLocalSystemSid)?,
+            admins: well_known(WinBuiltinAdministratorsSid)?,
+        })
+    }
+
+    /// 能完全控制私有目录的三方，指针指在 `self` 里。
+    fn sids(&self) -> [PSID; 3] {
+        // SAFETY: 这份信息由 `GetTokenInformation` 填好，SID 指针指在它自己的缓冲里。
+        let user = unsafe { (*self.user.as_ptr()).User.Sid };
+        [user, self.system.as_ptr().cast_mut().cast(), self.admins.as_ptr().cast_mut().cast()]
+    }
+
+    fn default_owner(&self) -> PSID {
+        // SAFETY: 这份信息由 `GetTokenInformation` 填好，SID 指针指在它自己的缓冲里。
+        unsafe { (*self.default_owner.as_ptr()).Owner }
+    }
+}
+
+/// `wide` 这个目录的属主是不是 `trusted` 里的一方或默认属主，DACL 是不是已经受保护、允许访问的项都只给
+/// `trusted` 的三方。
+fn examine(wide: &[u16], trusted: &Trusted) -> Result<(bool, bool)> {
+    let (owner, dacl, descriptor) = security_info(wide)?;
+    let sids = trusted.sids();
+    // SAFETY: 属主指针指在 `descriptor` 里，它这时还活着；比较的 SID 都指在 `trusted` 里。
+    let ours = unsafe { sids.iter().chain([&trusted.default_owner()]).any(|&sid| EqualSid(owner, sid) != 0) };
+    let (mut control, mut revision) = (0u16, 0u32);
+    // SAFETY: `descriptor` 由 `GetNamedSecurityInfoW` 给出。
+    if unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) } == 0 {
+        return Err(Error::last_os_error());
+    }
+    // SAFETY: `dacl` 指在 `descriptor` 里，它这时还活着；三个 SID 也都活着。
+    let private = control & SE_DACL_PROTECTED != 0 && unsafe { only_allows(dacl, &sids) }?;
+    Ok((ours, private))
 }
 
 /// `wide` 这个文件的属主、DACL 和装着它们的安全描述符（两个指针都指在描述符里，描述符丢掉时一起释放）。

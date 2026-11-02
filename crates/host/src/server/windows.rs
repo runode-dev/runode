@@ -110,23 +110,41 @@ pub(super) fn set_buffer(stream: &UnixStream, option: i32, size: i32) {
     }
 }
 
-/// 连上来的进程是不是和自己同一个用户。对端的进程号取不到、或者它的令牌读不了（别的用户的
-/// 进程多半如此）时算不是。
+/// 连上来的进程是不是和自己同一个用户。对端的进程号取不到、或者认得出它的用户却不是自己时算不是。
+///
+/// 提升过的进程（开着 UAC 的管理员经 ssh 登录后起的都是）对没提升的同一个用户不透明，进程都打不开、认不出
+/// 用户。这时本端的 socket 在只让自己、SYSTEM 和管理员进的目录里（`runode_paths::is_private_dir`）才接：
+/// 连得上来的只有这三方，后两者本来就管得了这个账户。
 pub fn same_user(stream: &UnixStream) -> bool {
     let Some(pid) = peer_pid(stream) else {
         return false;
     };
-    // SAFETY: 只是按进程号打开句柄，失败时返回空。
-    let peer = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if peer.is_null() {
-        return false;
+    match process_user_sid(pid) {
+        // SAFETY: 当前进程的伪句柄，不用关。
+        Some(theirs) => user_sid(unsafe { GetCurrentProcess() }).is_some_and(|ours| ours == theirs),
+        None => in_private_dir(stream),
     }
-    let theirs = user_sid(peer);
+}
+
+/// 进程 `pid` 的用户 SID；打不开进程或它的令牌时为空。
+fn process_user_sid(pid: u32) -> Option<Vec<u8>> {
+    // SAFETY: 只是按进程号打开句柄，失败时返回空。
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return None;
+    }
+    let sid = user_sid(process);
     // SAFETY: 句柄是上面 `OpenProcess` 给的，只关这一次。
-    unsafe { CloseHandle(peer) };
-    // SAFETY: 当前进程的伪句柄，不用关。
-    let ours = user_sid(unsafe { GetCurrentProcess() });
-    theirs.is_some() && theirs == ours
+    unsafe { CloseHandle(process) };
+    sid
+}
+
+/// 本端的 socket 文件在只让自己、SYSTEM 和管理员进的目录里。
+fn in_private_dir(stream: &UnixStream) -> bool {
+    let Ok(addr) = stream.local_addr() else {
+        return false;
+    };
+    addr.as_pathname().and_then(Path::parent).is_some_and(runode_paths::is_private_dir)
 }
 
 /// 连接对端进程的进程号（`SIO_AF_UNIX_GETPEERPID`）。

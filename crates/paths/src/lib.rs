@@ -478,6 +478,13 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
 #[cfg(windows)]
 mod acl;
 
+/// `dir` 只让自己、SYSTEM 和管理员进：属主是这几方之一，DACL 受保护、允许访问的项只给这三方。读不了它的
+/// 安全信息时算不是。
+#[cfg(windows)]
+pub fn is_private_dir(dir: &Path) -> bool {
+    acl::is_private(dir).unwrap_or(false)
+}
+
 /// `path` 在 `home` 下时写成 `~`，或者 `~` 加 `separator` 再接家目录下的那段；不在 `home` 下时为空。分隔符由调用方
 /// 定：要能原样交回给认 `~/` 的地方（命令行的选择器）就写 `/`，只给人看的用本机的。
 pub fn home_relative(path: &Path, home: &Path, separator: char) -> Option<String> {
