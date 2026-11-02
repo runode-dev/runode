@@ -337,6 +337,38 @@ tooltip:
   expand_split: 展開分割畫面
   close_preview: 關閉預覽
 git:
+  error:
+    exited: "git 失敗了（%{status}）"
+    spawn: "沒能執行 git：%{error}"
+    timeout: "git 超過 %{secs} 秒沒跑完，停下了"
+    timeout_lock: "git 超過 %{secs} 秒沒跑完，停下了；它可能留下了 %{lock}，確認沒有別的 git 在跑後刪掉"
+    io: "%{path}：%{error}"
+    not_branch: "不是分支名稱：%{name}"
+    unknown_remote: "找不到 %{branch} 所屬的遠端"
+    not_commit: "不是提交編號：%{id}"
+    outside_repo: "不是儲存庫裡的路徑：%{path}"
+    not_hunkable: "%{path} 不能按區塊操作"
+    no_such_hunk: "沒有這一塊改動"
+    hunk_truncated: "%{path} 這一塊太長，沒有讀全，不能按區塊操作"
+    hunk_changed: "%{path} 已經變了，重新整理後再試"
+    diff_unreadable: "沒能讀出 %{path} 的 diff"
+    status_unreadable: "沒能讀到儲存庫現在的狀態，什麼也沒丟"
+    status_changed: "%{path} 的狀態變了，什麼也沒丟，看過最新的改動再來"
+    conflicted: "%{path} 有沒解決的衝突，先解決或者用 git 處理"
+    unresolved_conflicts: "還有沒解決的衝突，沒有暫存全部再提交"
+    newline_in_path: "%{path} 裡有換行，沒法寫進 info/exclude"
+    no_exclude_file: "沒能找到 info/exclude"
+    branch_not_utf8: "分支名稱不是 UTF-8，沒有復原"
+    no_commits: "還沒有提交，沒有可復原的"
+    merging: "合併做到一半，沒有復原"
+    sequencing: "cherry-pick 或 revert 做到一半，沒有復原"
+    squash_pending: "squash 合併了還沒提交，沒有復原"
+    parent_missing: "上一個提交不在本機（淺層複製），沒有復原"
+    detached_first_commit: "HEAD 沒在分支上，第一個提交無法復原"
+    head_moved: "看過以後 HEAD 換了分支，沒有復原"
+    head_moved_restored: "復原時 HEAD 換了分支，已經恢復，沒有復原"
+    no_remote: "還沒有設定遠端"
+    stash_changed: "%{rev} 已經變了，什麼也沒做，看過最新的儲藏列表再來"
   ai_message:
     title: 產生提交說明
     close: 關閉

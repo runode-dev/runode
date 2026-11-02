@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    FileDiff, FileStatus, GitError, LineKind, Repo, Result, filter_overrides, git,
+    FileDiff, FileStatus, LineKind, Refusal, Repo, Result, filter_overrides, git,
     snapshot::{MAX_DIFF_BYTES, diff, read_untracked, worktree_bytes},
 };
 
@@ -175,7 +175,7 @@ impl Repo {
         args.extend(specs);
         // 和改动列表一样覆盖掉仓库自己的过滤器，块才和列表里的一样。
         let files = diff(&self.root, &filter_overrides(&self.root), &args)
-            .ok_or_else(|| GitError::new(format!("没能读出 {} 的 diff", path.display())))?;
+            .ok_or_else(|| Refusal::DiffUnreadable(path.to_path_buf()))?;
         let mut file = files.into_iter().find(|file| file.path == path);
         if file.is_none() && *side == DiffSide::Worktree && self.untracked(path) {
             let full = self.root.join(path);

@@ -219,7 +219,10 @@ impl ProjectHost {
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<Vec<runode_git::GrepMatch>, String> {
         let client = match self {
-            Self::Local => return runode_git::grep(root, query, limit, cancel).map_err(|err| err.message),
+            Self::Local => {
+                return runode_git::grep(root, query, limit, cancel)
+                    .map_err(|err| crate::git_view::git_error_text(&err));
+            }
             Self::Remote(client) => client,
         };
         let call = Call::Grep {

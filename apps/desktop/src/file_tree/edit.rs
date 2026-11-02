@@ -433,7 +433,8 @@ impl FileTree {
                 .background_spawn(async move {
                     project.add_to_gitignore(&repo.root, &rel, is_dir)?;
                     if untrack {
-                        repo.untrack(&[rel]).map_err(|err| OpError::Io(std::io::Error::other(err.message)))?;
+                        repo.untrack(&[rel])
+                            .map_err(|err| OpError::Io(std::io::Error::other(crate::git_view::git_error_text(&err))))?;
                     }
                     Ok(())
                 })

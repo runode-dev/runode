@@ -2,7 +2,7 @@
 
 use std::{ffi::OsString, path::Path};
 
-use crate::{FileDiff, FileStatus, GitError, Hunk, LineKind, Repo, Result, ops::run, snapshot::diff_args};
+use crate::{FileDiff, FileStatus, Hunk, LineKind, Refusal, Repo, Result, ops::run, snapshot::diff_args};
 
 /// 对一块改动做什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,12 +97,12 @@ impl Repo {
     /// 文件头加这一块交给 `git apply`。找不到（文件在这之后又改过）时报错，刷新后重试即可。
     pub fn apply_hunk(&self, file: &FileDiff, hunk: usize, action: HunkAction) -> Result {
         if !hunk_actionable(file) {
-            return Err(GitError::new(format!("{} 不能按块操作", file.path.display())));
+            return Err(Refusal::NotHunkable(file.path.clone()).into());
         }
-        let target = file.hunks.get(hunk).ok_or_else(|| GitError::new("没有这一块改动"))?;
+        let target = file.hunks.get(hunk).ok_or(Refusal::NoSuchHunk)?;
         // 没记全的块核对不了没记下的那些行，读完后那里又改过也看不出来，丢弃时会连带丢掉没看过的改动。
         if file.truncated && !complete(target) {
-            return Err(GitError::new(format!("{} 这一块太长，没有读全，不能按块操作", file.path.display())));
+            return Err(Refusal::HunkTruncated(file.path.clone()).into());
         }
         let (dir, rel) = self.locate(&file.path)?;
         // 和 `diff` 读 `FileDiff` 时的参数一样，块才切得一样。
@@ -116,7 +116,7 @@ impl Repo {
             .hunks
             .iter()
             .find(|raw| same_hunk(raw, target))
-            .ok_or_else(|| GitError::new(format!("{} 已经变了，刷新后再试", file.path.display())))?;
+            .ok_or_else(|| Refusal::HunkChanged(file.path.clone()))?;
         // 文件头里的 `old mode`、`new mode` 是整个文件的权限改动，不属于这一块：留着的话按块暂存、丢弃会连它一起打。
         let header =
             raw.header.iter().filter(|line| !line.starts_with(b"old mode ") && !line.starts_with(b"new mode "));

@@ -167,7 +167,7 @@ macro_rules! dispatch {
 
 /// git 操作没办成：原因当作 git 的报错。
 fn git_failed<T>(message: String) -> git::Result<T> {
-    Err(GitError { message })
+    Err(GitError::Other(message))
 }
 
 fn remote<T: DeserializeOwned>(client: &client::Client, root: &Path, op: GitOp) -> Result<T, String> {

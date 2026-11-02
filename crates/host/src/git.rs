@@ -83,7 +83,7 @@ fn run(
     cache: &mut UntrackedCache,
 ) -> Result<HostMsg, String> {
     let repo = || Repo::open(dir).ok_or_else(|| format!("{} is not in a git repository", dir.display()));
-    let done = |result: runode_git::Result| result.map_err(|err| err.message);
+    let done = |result: runode_git::Result| result.map_err(|err| err.to_string());
     match request {
         GitRequest::Status => {}
         GitRequest::Diff { path, staged } => {

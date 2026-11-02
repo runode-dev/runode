@@ -268,7 +268,7 @@ impl GitPanel {
                 graph.read_for = Some(info);
                 graph.lanes =
                     history.as_ref().map_or(0, |history| history.rows.iter().map(|row| row.width).max().unwrap_or(0));
-                graph.history = Some(history.map_err(|err| err.message));
+                graph.history = Some(history.map_err(|err| crate::git_view::git_error_text(&err)));
                 panel.relayout();
                 cx.notify();
             })

@@ -5,6 +5,7 @@
 //! 一律调 `git` 命令行，不直接读写 git 目录里的对象。
 
 mod branch;
+mod error;
 mod graph;
 mod info;
 mod ops;
@@ -17,11 +18,12 @@ mod view;
 mod words;
 
 pub use branch::{Branch, valid_branch_name};
+pub use error::{GitError, Refusal};
 pub use graph::{
     Commit, CommitRef, GraphLine, GraphRow, Half, History, LaneColor, RefKind, graph_layout, refs_changed,
 };
 pub use info::{Operation, RepoInfo, Stash};
-pub use ops::{CommitOptions, GitError, Repo, Result};
+pub use ops::{CommitOptions, Repo, Result};
 pub use patch::{HunkAction, hunk_actionable};
 pub use repos::{RepoKind, Repos, snapshot_repos};
 pub use search::{GrepMatch, GrepQuery, grep, list_files};

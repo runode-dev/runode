@@ -2,7 +2,7 @@
 
 use std::{path::Path, process::Stdio};
 
-use crate::{GitError, Repo, Result, git, git_command, ops::run};
+use crate::{Refusal, Repo, Result, git, git_command, ops::run};
 
 /// 分支列表里的一项。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,7 +85,7 @@ impl Repo {
     pub fn checkout(&self, branch: &Branch) -> Result {
         // 名字原样交给 `git switch`，`-` 开头的会被当成选项。
         if branch.name.starts_with('-') {
-            return Err(GitError::new(format!("不是分支名：{}", branch.name)));
+            return Err(Refusal::NotBranch(branch.name.clone()).into());
         }
         if !branch.remote {
             return run(&self.root, ["switch", &branch.name], None).map(drop);
@@ -96,10 +96,10 @@ impl Repo {
             .lines()
             .filter_map(|remote| branch.name.strip_prefix(remote.trim())?.strip_prefix('/'))
             .min_by_key(|local| local.len())
-            .ok_or_else(|| GitError::new(format!("找不到 {} 所属的远端", branch.name)))?;
+            .ok_or_else(|| Refusal::UnknownRemote(branch.name.clone()))?;
         // 远端上的分支名 git 不查（`update-ref` 建得出 `-d`），切掉远端名以后也会原样交给 `git switch`。
         if local.starts_with('-') {
-            return Err(GitError::new(format!("不是分支名：{local}")));
+            return Err(Refusal::NotBranch(local.to_string()).into());
         }
         let local_ref = format!("refs/heads/{local}");
         if git(&self.root, &["rev-parse", "--verify", "--quiet", &local_ref]).is_some() {
@@ -113,7 +113,7 @@ impl Repo {
     /// 从提交 `start`（为空时是当前提交）新建分支 `name` 并切过去。
     pub fn create_branch(&self, name: &str, start: Option<&str>) -> Result {
         if let Some(start) = start.filter(|start| start.starts_with('-')) {
-            return Err(GitError::new(format!("不是提交号：{start}")));
+            return Err(Refusal::NotCommit(start.to_string()).into());
         }
         run(&self.root, ["switch", "-c", name].into_iter().chain(start), None).map(drop)
     }
@@ -122,7 +122,7 @@ impl Repo {
     /// 它正检出在哪个工作树里时 git 拒绝，报它的错。
     pub fn delete_merged_branch(&self, name: &str) -> Result {
         if name.starts_with('-') {
-            return Err(GitError::new(format!("不是分支名：{name}")));
+            return Err(Refusal::NotBranch(name.to_string()).into());
         }
         run(&self.root, ["branch", "-d", name], None).map(drop)
     }

@@ -605,8 +605,9 @@ pub(super) enum StashOp {
 
 /// git 报的错：只有一个按钮，不用等回答。app 写提交说明时读不了预设也用它报。
 pub fn show_git_error(err: &git::GitError, window: &mut Window, cx: &mut App) {
-    let mut detail: String = err.message.chars().take(MAX_ERROR_CHARS).collect();
-    if detail.len() < err.message.len() {
+    let message = crate::git_view::git_error_text(err);
+    let mut detail: String = message.chars().take(MAX_ERROR_CHARS).collect();
+    if detail.len() < message.len() {
         detail.push('…');
     }
     drop(window.prompt(

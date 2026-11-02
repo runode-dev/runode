@@ -9,7 +9,7 @@ use std::{
 };
 
 use common::{TestRepo, read, read_all};
-use runode_git::{CommitOptions, Section};
+use runode_git::{CommitOptions, GitError, Section};
 
 fn paths(names: &[&str]) -> Vec<PathBuf> {
     names.iter().map(PathBuf::from).collect()
@@ -265,8 +265,9 @@ fn commits_and_amends() {
 
     // 没有暂存的改动时报 git 的错。
     let error = handle.commit("nothing", CommitOptions::default()).unwrap_err();
-    assert!(!error.message.is_empty());
-    assert!(!error.message.lines().any(|line| line.starts_with("hint:")), "{error}");
+    let GitError::Git(said) = &error else { panic!("{error:?}") };
+    assert!(!said.is_empty());
+    assert!(!said.lines().any(|line| line.starts_with("hint:")), "{error}");
 
     // 说明为空的 amend 沿用原来的说明，只把新暂存的改动并进去。
     repo.write("b.txt", "b\n");

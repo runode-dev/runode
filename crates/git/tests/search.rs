@@ -74,7 +74,9 @@ fn greps_whole_words_regexes_and_pathspecs() {
     assert_eq!(lines(&regex), ["src/a.ts:2"]);
     // 正则按 git 的写法不对时是 git 的报错，不当成没找到。
     let bad = GrepQuery { pattern: "(foo", regex: true, ..GrepQuery::default() };
-    assert!(!grep(repo.path(), &bad, 10, &never).unwrap_err().message.is_empty());
+    assert!(
+        matches!(grep(repo.path(), &bad, 10, &never).unwrap_err(), runode_git::GitError::Git(message) if !message.is_empty())
+    );
     let specs = [":(glob)**/*.ts".to_owned()];
     assert_eq!(lines(&GrepQuery { pathspecs: &specs, ..word }), ["src/a.ts:1"]);
     let specs = [":(exclude,glob)**/*.min.js".to_owned()];

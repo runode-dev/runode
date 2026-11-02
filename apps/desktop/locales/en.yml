@@ -337,6 +337,38 @@ tooltip:
   expand_split: Expand Split
   close_preview: Close Preview
 git:
+  error:
+    exited: "Git failed (%{status})"
+    spawn: "Couldn't run git: %{error}"
+    timeout: "Git didn't finish within %{secs} seconds and was stopped"
+    timeout_lock: "Git didn't finish within %{secs} seconds and was stopped. It may have left %{lock}; delete it once no other git is running."
+    io: "%{path}: %{error}"
+    not_branch: "Not a branch name: %{name}"
+    unknown_remote: "Couldn't find the remote of %{branch}"
+    not_commit: "Not a commit: %{id}"
+    outside_repo: "Not a path in the repository: %{path}"
+    not_hunkable: "%{path} can't be changed hunk by hunk"
+    no_such_hunk: "That hunk no longer exists"
+    hunk_truncated: "This hunk of %{path} is too long to be read in full, so it can't be changed on its own"
+    hunk_changed: "%{path} has changed. Refresh and try again."
+    diff_unreadable: "Couldn't read the diff of %{path}"
+    status_unreadable: "Couldn't read the repository's current status. Nothing was discarded."
+    status_changed: "%{path} has changed. Nothing was discarded; review the latest changes first."
+    conflicted: "%{path} has unresolved conflicts. Resolve them first or use git."
+    unresolved_conflicts: "There are unresolved conflicts, so nothing was staged or committed"
+    newline_in_path: "%{path} contains a line break and can't be written to info/exclude"
+    no_exclude_file: "Couldn't find info/exclude"
+    branch_not_utf8: "The branch name isn't UTF-8. Nothing was undone."
+    no_commits: "There are no commits to undo"
+    merging: "A merge is in progress. Nothing was undone."
+    sequencing: "A cherry-pick or revert is in progress. Nothing was undone."
+    squash_pending: "A squash merge hasn't been committed yet. Nothing was undone."
+    parent_missing: "The previous commit isn't available locally (shallow clone). Nothing was undone."
+    detached_first_commit: "HEAD isn't on a branch, so the first commit can't be undone"
+    head_moved: "HEAD moved to another branch. Nothing was undone."
+    head_moved_restored: "HEAD moved to another branch while undoing. It was restored and nothing was undone."
+    no_remote: "No remote is configured"
+    stash_changed: "%{rev} has changed. Nothing was done; review the latest stashes first."
   ai_message:
     title: Generate Commit Message
     close: Close

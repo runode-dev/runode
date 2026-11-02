@@ -163,7 +163,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
                 runode_git::GrepQuery { pattern: &pattern, ignore_case, whole_word, regex, pathspecs: &pathspecs };
             match runode_git::grep(&root, &query, limit, stop) {
                 Ok(found) => (Reply::Found(found), Vec::new()),
-                Err(err) => (Reply::Failed(err.message), Vec::new()),
+                Err(err) => (Reply::Failed(err.to_string()), Vec::new()),
             }
         }
         Call::Stamp { path } => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),

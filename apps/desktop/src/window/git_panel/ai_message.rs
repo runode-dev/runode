@@ -36,6 +36,8 @@ use std::{
 use crate::git_panel::show_git_error;
 use gpui::{Context, Window};
 use runode_git::{GitError, Section};
+
+use crate::git_view::git_error_text;
 use runode_paths::Dirs;
 use serde::{Deserialize, Serialize};
 
@@ -176,7 +178,7 @@ impl WindowView {
         match saved_recipe(root) {
             Ok(Some((recipe, _))) => self.write_commit_message(root, recipe, window, cx),
             Ok(None) => self.open_commit_message_dialog(root.to_path_buf(), window, cx),
-            Err(message) => show_git_error(&GitError { message }, window, cx),
+            Err(message) => show_git_error(&GitError::Other(message), window, cx),
         }
     }
 
@@ -211,8 +213,7 @@ impl WindowView {
         // 从访达打开的 app 自己的 PATH 里没有 agent 装的目录，用终端里 shell 报告的 PATH；窗口里
         // 一个终端都没有时在后台问登录 shell。
         let path = self.terminal_path(None, cx);
-        let op =
-            move |repo: &ProjectRepo| generate(repo, &recipe, &context, path).map_err(|message| GitError { message });
+        let op = move |repo: &ProjectRepo| generate(repo, &recipe, &context, path).map_err(GitError::Other);
         self.with_git_panel(cx, |panel, cx| panel.write_message(root, op, window, cx));
     }
 }
@@ -225,8 +226,8 @@ fn generate(
 ) -> Result<String, String> {
     // 先看命令写得对不对，再去读改动。
     let command = Invocation::of(recipe)?;
-    let patch = limit(repo.pending_diff(context.staged).map_err(|err| err.message)?, MAX_PATCH_BYTES);
-    let recent = repo.recent_messages(EXAMPLES).map_err(|err| err.message)?;
+    let patch = limit(repo.pending_diff(context.staged).map_err(|err| git_error_text(&err))?, MAX_PATCH_BYTES);
+    let recent = repo.recent_messages(EXAMPLES).map_err(|err| git_error_text(&err))?;
     let base = base_prompt(context, &recent, &patch);
     let prompt = render_template(
         &recipe.template,

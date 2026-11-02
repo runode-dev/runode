@@ -337,6 +337,38 @@ tooltip:
   expand_split: 展开分屏
   close_preview: 关闭预览
 git:
+  error:
+    exited: "git 失败了（%{status}）"
+    spawn: "没能运行 git：%{error}"
+    timeout: "git 超过 %{secs} 秒没跑完，停下了"
+    timeout_lock: "git 超过 %{secs} 秒没跑完，停下了；它可能留下了 %{lock}，确认没有别的 git 在跑后删掉"
+    io: "%{path}：%{error}"
+    not_branch: "不是分支名：%{name}"
+    unknown_remote: "找不到 %{branch} 所属的远端"
+    not_commit: "不是提交号：%{id}"
+    outside_repo: "不是仓库里的路径：%{path}"
+    not_hunkable: "%{path} 不能按块操作"
+    no_such_hunk: "没有这一块改动"
+    hunk_truncated: "%{path} 这一块太长，没有读全，不能按块操作"
+    hunk_changed: "%{path} 已经变了，刷新后再试"
+    diff_unreadable: "没能读出 %{path} 的 diff"
+    status_unreadable: "没能读到仓库现在的状态，什么也没丢"
+    status_changed: "%{path} 的状态变了，什么也没丢，看过最新的改动再来"
+    conflicted: "%{path} 有没解决的冲突，先解决或者用 git 处理"
+    unresolved_conflicts: "还有没解决的冲突，没有暂存全部再提交"
+    newline_in_path: "%{path} 里有换行，没法写进 info/exclude"
+    no_exclude_file: "没能找到 info/exclude"
+    branch_not_utf8: "分支名不是 UTF-8，没有撤销"
+    no_commits: "还没有提交，没有可撤销的"
+    merging: "合并做到一半，没有撤销"
+    sequencing: "cherry-pick 或 revert 做到一半，没有撤销"
+    squash_pending: "squash 合并了还没提交，没有撤销"
+    parent_missing: "上一个提交不在本地（浅克隆），没有撤销"
+    detached_first_commit: "HEAD 没在分支上，第一个提交撤销不了"
+    head_moved: "看过以后 HEAD 换了分支，没有撤销"
+    head_moved_restored: "撤销时 HEAD 换了分支，已经恢复，没有撤销"
+    no_remote: "还没有配置远端"
+    stash_changed: "%{rev} 已经变了，什么也没做，看过最新的储藏列表再来"
   ai_message:
     title: 生成提交说明
     close: 关闭

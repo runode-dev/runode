@@ -230,8 +230,9 @@ impl PreviewPanel {
             // 读出错时是 git 的说明，不当成没有改动。
             let read = || -> Result<_, String> {
                 let Some(repo) = repo else { return Ok(None) };
-                let Some(view) =
-                    repo.file_view(&target.rel, target.old_rel.as_deref(), &target.side).map_err(|err| err.message)?
+                let Some(view) = repo
+                    .file_view(&target.rel, target.old_rel.as_deref(), &target.side)
+                    .map_err(|err| crate::git_view::git_error_text(&err))?
                 else {
                     return Ok(None);
                 };

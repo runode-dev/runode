@@ -205,11 +205,11 @@ impl Repo {
         }
         // 忽略规则一行一条，换行写不进去。
         if top.as_encoded_bytes().iter().any(|b| matches!(b, b'\n' | b'\r')) {
-            return Err(crate::GitError::new(format!("{top:?} 里有换行，没法写进 info/exclude")));
+            return Err(crate::Refusal::NewlineInPath(PathBuf::from(top)).into());
         }
         let pattern = [&b"/"[..], &ignore_literal(top.as_encoded_bytes()), b"/\n"].concat();
-        let exclude = git(&self.root, &["rev-parse", "--git-path", "info/exclude"])
-            .ok_or_else(|| crate::GitError::new("没能找到 info/exclude"))?;
+        let exclude =
+            git(&self.root, &["rev-parse", "--git-path", "info/exclude"]).ok_or(crate::Refusal::NoExcludeFile)?;
         let exclude = self.root.join(crate::os_str(exclude.trim_ascii_end()));
         let write = || -> std::io::Result<()> {
             if let Some(dir) = exclude.parent() {
@@ -220,7 +220,7 @@ impl Repo {
             let newline: &[u8] = if old.is_empty() || old.ends_with(b"\n") { b"" } else { b"\n" };
             std::io::Write::write_all(&mut file, &[newline, &pattern[..]].concat())
         };
-        write().map_err(|err| crate::GitError::new(format!("没能写 {}：{err}", exclude.display())))
+        write().map_err(|err| crate::GitError::Io { path: exclude, error: err.to_string() })
     }
 }
 

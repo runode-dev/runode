@@ -3,7 +3,7 @@
 
 use std::{collections::HashSet, ffi::OsStr, fs, path::Path};
 
-use crate::{FileDiff, GitError, Repo, Result, git, ops::run, parse::parse_diff, snapshot::diff_args};
+use crate::{FileDiff, Refusal, Repo, Result, git, ops::run, parse::parse_diff, snapshot::diff_args};
 
 /// 历史里的一个提交。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -352,7 +352,7 @@ impl Repo {
     /// 切到提交 `id`，成为分离头指针。工作区的改动和它冲突时报 git 的错。
     pub fn checkout_detached(&self, id: &str) -> Result {
         if id.starts_with('-') {
-            return Err(GitError::new(format!("不是提交号：{id}")));
+            return Err(Refusal::NotCommit(id.to_string()).into());
         }
         run(&self.root, ["switch", "--detach", id], None).map(drop)
     }

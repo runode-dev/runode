@@ -74,7 +74,7 @@ pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -
         .stderr(Stdio::piped())
         .env("GIT_OPTIONAL_LOCKS", "0")
         .spawn();
-    let mut child = child.map_err(|err| GitError::new(format!("没能运行 git：{err}")))?;
+    let mut child = child.map_err(|err| GitError::Spawn(err.to_string()))?;
     let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
     let child = Mutex::new(child);
     let done = AtomicBool::new(false);

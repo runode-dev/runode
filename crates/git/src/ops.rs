@@ -3,7 +3,7 @@
 use std::{
     collections::HashMap,
     ffi::{OsStr, OsString},
-    fmt, fs,
+    fs,
     io::{ErrorKind, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
@@ -13,7 +13,7 @@ use std::{
 };
 
 use crate::{
-    FileDiff, FileStatus, Stash, UntrackedCache, find_repo, git, git_command,
+    FileDiff, FileStatus, GitError, Refusal, Stash, UntrackedCache, find_repo, git, git_command,
     snapshot::{DIFF, MAX_DIFF_BYTES},
     view::literal,
 };
@@ -37,27 +37,6 @@ pub struct Repo {
     /// 仓库的根目录，和 `Snapshot::root` 一样。
     pub root: PathBuf,
 }
-
-/// git 命令失败：`message` 是 git 自己的报错，去掉了 `hint:` 开头的提示。
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GitError {
-    pub message: String,
-}
-
-impl GitError {
-    pub(crate) fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
-    }
-}
-
-impl fmt::Display for GitError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for GitError {}
 
 /// `Repo::undo_last_commit` 撤销前看到的 HEAD。
 struct HeadCommit {
@@ -120,7 +99,7 @@ fn run_for<S: AsRef<OsStr>>(
     batch_ssh(&mut command, dir);
     #[cfg(windows)]
     let started = std::time::SystemTime::now();
-    let mut child = command.spawn().map_err(|err| GitError::new(format!("没能运行 git：{err}")))?;
+    let mut child = command.spawn().map_err(|err| GitError::Spawn(err.to_string()))?;
     // 一边写输入一边读输出，输入输出都大时谁也不会等着谁。不用作用域线程：超时杀掉以后，脱离了
     // 进程组的子孙进程可能还拿着管道，读的线程就留在那里，不等它们。
     if let (Some(mut stdin), Some(input)) = (child.stdin.take(), input) {
@@ -139,17 +118,15 @@ fn run_for<S: AsRef<OsStr>>(
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             Ok(None) => {
                 kill_group(&mut child);
-                let message = format!("git 超过 {} 秒没跑完，停下了", timeout.as_secs());
                 #[cfg(windows)]
-                let message = match left_lock(dir, started) {
-                    Some(lock) => format!("{message}；它可能留下了 {}，确认没有别的 git 在跑后删掉", lock.display()),
-                    None => message,
-                };
-                return Err(GitError::new(message));
+                let lock = left_lock(dir, started);
+                #[cfg(not(windows))]
+                let lock = None;
+                return Err(GitError::Timeout { secs: timeout.as_secs(), lock });
             }
             Err(err) => {
                 kill_group(&mut child);
-                return Err(GitError::new(format!("没能运行 git：{err}")));
+                return Err(GitError::Spawn(err.to_string()));
             }
         }
     };
@@ -268,9 +245,9 @@ pub(crate) fn output_result(status: ExitStatus, stdout: Vec<u8>, stderr: &[u8]) 
     let message = message.join("\n").trim().to_owned();
     let message = if message.is_empty() { String::from_utf8_lossy(&stdout).trim().to_owned() } else { message };
     if message.is_empty() {
-        return Err(GitError::new(format!("git 失败了（{status}）")));
+        return Err(GitError::Exited(status.to_string()));
     }
-    Err(GitError::new(message))
+    Err(GitError::Git(message))
 }
 
 /// 未跟踪的嵌套仓库，相对 `dir`，不带结尾的 `/`。git 把它们当成一个未跟踪的目录，不往里看。
@@ -319,7 +296,7 @@ impl Repo {
     /// 某一层目录有自己的 `.git` 就是嵌套的仓库，取最深的那个。
     pub(crate) fn locate(&self, path: &Path) -> Result<(PathBuf, PathBuf)> {
         if path.as_os_str().is_empty() || !path.components().all(|part| matches!(part, Component::Normal(_))) {
-            return Err(GitError::new(format!("不是仓库里的路径：{}", path.display())));
+            return Err(Refusal::OutsideRepo(path.to_path_buf()).into());
         }
         for dir in path.ancestors().skip(1).take_while(|dir| !dir.as_os_str().is_empty()) {
             let repo = self.root.join(dir);
@@ -392,7 +369,7 @@ impl Repo {
     pub fn discard(&self, files: &[FileDiff]) -> Result {
         // shortcut: 重读整个仓库的状态和 diff，大仓库里丢一个文件也多读一遍；嫌慢了再改成只对这些路径跑 git status。
         let Some(now) = crate::snapshot(&self.root, &mut UntrackedCache::default()).map(|s| s.unstaged) else {
-            return Err(GitError::new("没能读到仓库现在的状态，什么也没丢"));
+            return Err(Refusal::StatusUnreadable.into());
         };
         // 按路径建表再比：丢整个目录时文件和未暂存的条目都可能有几万个（未跟踪的文件一个个列），逐个扫要几秒。
         let now: HashMap<&Path, &FileDiff> = now.iter().map(|n| (n.path.as_path(), n)).collect();
@@ -400,7 +377,7 @@ impl Repo {
             now.get(file.path.as_path()).is_some_and(|n| n.status == file.status && n.old_path == file.old_path)
         };
         if let Some(file) = files.iter().find(|file| !file.gitlink && !same(file)) {
-            return Err(GitError::new(format!("{} 的状态变了，什么也没丢，看过最新的改动再来", file.path.display())));
+            return Err(Refusal::StatusChanged(file.path.clone()).into());
         }
         let mut results = Vec::new();
         let mut restore = Vec::new();
@@ -411,10 +388,7 @@ impl Repo {
                 // `git restore --worktree` 碰到没解决的冲突整条命令失败，同批的别的文件一个都恢复不了，
                 // 所以冲突的（连同它的原路径）不进批量命令，单独报错。
                 FileStatus::Conflicted => {
-                    results.push(Err(GitError::new(format!(
-                        "{} 有没解决的冲突，先解决或者用 git 处理",
-                        file.path.display()
-                    ))));
+                    results.push(Err(Refusal::Conflicted(file.path.clone()).into()));
                     continue;
                 }
                 // 未暂存段里的新增和改名都是 `git add -N` 的文件，暂存区里只有个占位。
@@ -438,11 +412,12 @@ impl Repo {
         // 只是为了拒绝 `..` 和绝对路径；删文件不用 git。
         self.locate(path)?;
         let full = self.root.join(path);
-        let meta = fs::symlink_metadata(&full).map_err(|err| GitError::new(format!("{}：{err}", path.display())))?;
+        let io = |err: std::io::Error| GitError::Io { path: path.to_path_buf(), error: err.to_string() };
+        let meta = fs::symlink_metadata(&full).map_err(io)?;
         if meta.is_dir() {
             return Ok(());
         }
-        fs::remove_file(&full).map_err(|err| GitError::new(format!("没能删掉 {}：{err}", path.display())))?;
+        fs::remove_file(&full).map_err(io)?;
         for dir in path.ancestors().skip(1).take_while(|dir| !dir.as_os_str().is_empty()) {
             if fs::remove_dir(self.root.join(dir)).is_err() {
                 break;
@@ -473,7 +448,7 @@ impl Repo {
     pub fn commit(&self, message: &str, options: CommitOptions) -> Result {
         if options.stage_all {
             if !run(&self.root, ["ls-files", "--unmerged"], None)?.is_empty() {
-                return Err(GitError::new("还有没解决的冲突，没有暂存全部再提交"));
+                return Err(Refusal::UnresolvedConflicts.into());
             }
             add_all(&self.root)?;
         }
@@ -549,14 +524,14 @@ impl Repo {
                 if name.ends_with(b"\n") {
                     name.pop();
                 }
-                String::from_utf8(name).map_err(|_| GitError::new("分支名不是 UTF-8，没有撤销"))
+                String::from_utf8(name).map_err(|_| GitError::from(Refusal::BranchNotUtf8))
             })
             .transpose()?;
         // 按分支名解析，不再读一次 HEAD：两次之间切了分支的话，分支和提交就对不上了。
         let target = format!("{}^{{commit}}", branch.as_deref().unwrap_or("HEAD"));
         let id = git(&self.root, &["rev-parse", "--verify", "--quiet", &target])
             .map(|id| String::from_utf8_lossy(&id).trim().to_owned())
-            .ok_or_else(|| GitError::new("还没有提交，没有可撤销的"))?;
+            .ok_or(Refusal::NoCommits)?;
         let message = run(&self.root, ["log", "-1", "--format=%B", &id], None)?;
         let message = String::from_utf8_lossy(&message).trim_end().to_owned();
         // 看提交对象里记的父提交，不看 `HEAD~1` 解不解析得出来：浅克隆里父提交不在本地，那不是第一个提交。
@@ -577,7 +552,7 @@ impl Repo {
         // 冲突了也没有 `MERGE_HEAD`。
         let unmerged = run(&self.root, ["ls-files", "--unmerged"], None)?;
         if git(&self.root, &["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]).is_some() || !unmerged.is_empty() {
-            return Err(GitError::new("合并做到一半，没有撤销"));
+            return Err(Refusal::Merging.into());
         }
         // cherry-pick、revert 冲突解决了还没提交，或者 `merge --squash` 了还没提交时，`reset` 会顺手清掉
         // 它们的状态，`update-ref` 不会：留着的话下一次提交还当成那次操作的接续，用它备好的说明。不替用户
@@ -586,18 +561,18 @@ impl Repo {
             .iter()
             .any(|name| git(&self.root, &["rev-parse", "--verify", "--quiet", name]).is_some())
         {
-            return Err(GitError::new("cherry-pick 或 revert 做到一半，没有撤销"));
+            return Err(Refusal::Sequencing.into());
         }
         // `--git-path` 给的是相对仓库根目录的路径（git 目录在别处时是绝对路径），接在根目录后面。
         let squash = git(&self.root, &["rev-parse", "--git-path", "SQUASH_MSG"]);
         if squash.is_some_and(|path| self.root.join(crate::os_str(path.trim_ascii_end())).exists()) {
-            return Err(GitError::new("squash 合并了还没提交，没有撤销"));
+            return Err(Refusal::SquashPending.into());
         }
         let id = head.id.as_str();
         match head.parent.as_deref() {
             Some(parent) => {
                 if git(&self.root, &["cat-file", "-e", &format!("{parent}^{{commit}}")]).is_none() {
-                    return Err(GitError::new("上一个提交不在本地（浅克隆），没有撤销"));
+                    return Err(Refusal::ParentMissing.into());
                 }
                 // 改 HEAD 跟着它指到的分支走：期间切到了别的分支，那个分支不在这个提交上就不动它；
                 // 恰好也在这个提交上时撤的正是现在检出的这一个，暂存区里留下的改动照样对得上。
@@ -608,7 +583,7 @@ impl Repo {
                 // 游离的 HEAD 没有分支可删。按名字删分支、不经 HEAD 删：期间 HEAD 游离到这个提交上时，
                 // 经 HEAD 删的就是 HEAD 本身，仓库就坏了。
                 let Some(branch) = head.branch.as_deref() else {
-                    return Err(GitError::new("HEAD 没在分支上，第一个提交撤销不了"));
+                    return Err(Refusal::DetachedFirstCommit.into());
                 };
                 let on_branch = || {
                     git(&self.root, &["symbolic-ref", "-q", "HEAD"])
@@ -616,13 +591,13 @@ impl Repo {
                 };
                 // 看过以后切走了（切到同一个提交上的新分支，或者游离了）就不删：删的不再是检出的那一个。
                 if !on_branch() {
-                    return Err(GitError::new("看过以后 HEAD 换了分支，没有撤销"));
+                    return Err(Refusal::HeadMoved.into());
                 }
                 run(&self.root, ["update-ref", "-d", branch, id], None)?;
                 // 上面的检查和删除之间也可能切走，删完再看一次，切走了就照原样建回来（只在它还不存在时建）。
                 if !on_branch() {
                     let _ = run(&self.root, ["update-ref", branch, id, ""], None);
-                    return Err(GitError::new("撤销时 HEAD 换了分支，已经恢复，没有撤销"));
+                    return Err(Refusal::HeadMovedRestored.into());
                 }
             }
         }
@@ -659,7 +634,7 @@ impl Repo {
         let remotes = String::from_utf8_lossy(&run(&self.root, ["remote"], None)?).into_owned();
         let remotes: Vec<_> = remotes.lines().map(str::trim).filter(|name| !name.is_empty()).collect();
         let remote = match remotes.as_slice() {
-            [] => return Err(GitError::new("还没有配置远端")),
+            [] => return Err(Refusal::NoRemote.into()),
             [only] => only,
             _ => remotes.iter().find(|name| **name == "origin").unwrap_or(&remotes[0]),
         };
@@ -714,7 +689,7 @@ impl Repo {
         let rev = format!("stash@{{{}}}", stash.index);
         let now = git(&self.root, &["rev-parse", "--verify", "--quiet", &rev]).unwrap_or_default();
         if String::from_utf8_lossy(&now).trim() != stash.id {
-            return Err(GitError::new(format!("{rev} 已经变了，什么也没做，看过最新的储藏列表再来")));
+            return Err(Refusal::StashChanged(rev).into());
         }
         // shortcut: 核对和动手之间还有几毫秒的窗口（git 只认序号），真撞上过再改成拿 refs/stash 的锁。
         run(&self.root, ["stash", command, &rev], None).map(drop)
@@ -758,7 +733,7 @@ mod tests {
         // 给足时间让钩子跑起来、记下进程号：整套测试一起跑时机器很忙。
         let err = run_for(&dir, commit, None, Duration::from_secs(3), &[]).unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(12), "{:?}", started.elapsed());
-        assert!(err.message.contains("超过"), "{}", err.message);
+        assert!(matches!(err, GitError::Timeout { lock: None, .. }), "{err}");
         // 钩子在 git 的进程组里，跟着一起杀掉；死了以后要等被收掉，`kill -0` 才找不到它。
         let pid = fs::read_to_string(&pid_file).unwrap().trim().to_owned();
         let alive = || Command::new("kill").args(["-0", &pid]).stderr(Stdio::null()).status().unwrap().success();
@@ -787,7 +762,7 @@ mod tests {
         fs::write(hooks.join("pre-commit"), "#!/bin/sh\nexec sleep 30\n").unwrap();
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
         let err = run_for(&dir, commit, None, Duration::from_secs(3), &[]).unwrap_err();
-        assert!(err.message.contains("超过") && err.message.contains("index.lock"), "{}", err.message);
+        assert!(matches!(&err, GitError::Timeout { lock: Some(lock), .. } if lock.ends_with("index.lock")), "{err}");
         assert!(dir.join(".git/index.lock").exists());
         let _ = fs::remove_dir_all(&dir);
     }
