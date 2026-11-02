@@ -15,19 +15,19 @@ mod schedule;
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use runode_git::Repo;
 use runode_protocol::{
-    HostMsg, SessionId, SessionInfo,
+    HostMsg, SessionId,
     todo::{DONE_TODOS_PAGE, Todo, TodoSpec, When},
 };
 use runode_todo::Store;
 use runode_types::shell::Shell;
 
-use crate::{Host, Shared, server::REPLY_TIMEOUT, session::Inbox, workspaces::spawn_options};
+use crate::{Host, Shared, SpawnOptions, session::Inbox};
 
 /// 宿主给任务会话的 shell 设的环境变量：交给 agent 的提示词。
 const ENV_TODO_PROMPT: &str = "RUNODE_TODO_PROMPT";
@@ -218,15 +218,6 @@ impl Shared {
             drop(peers);
             self.peers_changed.notify_all();
         }
-    }
-
-    /// 会话 `id` 现在的状态；没有这个会话、或者它没及时回话时为空。
-    pub(crate) fn session_info(&self, id: SessionId) -> Option<SessionInfo> {
-        let (reply, info) = mpsc::channel();
-        if !self.deliver(id, Inbox::Info(reply)) {
-            return None;
-        }
-        info.recv_timeout(REPLY_TIMEOUT).ok()
     }
 
     /// 回 `ClientMsg::ListTodos`。
@@ -514,7 +505,7 @@ impl Shared {
         if !cwd.is_dir() {
             return Err(format!("{} is not a directory", cwd.display()));
         }
-        let session = self.spawn_with(spawn_options(Some(cwd)), &[]).map_err(|err| format!("{err:#}"))?;
+        let session = self.spawn_with(SpawnOptions::headless(Some(cwd)), &[]).map_err(|err| format!("{err:#}"))?;
         if let Some(command) = command {
             self.deliver(session, Inbox::TypeAtPrompt(format!("{command}\r").into_bytes()));
         }
@@ -563,7 +554,7 @@ impl Shared {
         if let Some((arg, batch)) = &quoted {
             env.extend([(ENV_TODO_ARG, arg.as_str()), (ENV_TODO_BATCH_ARG, batch.as_str())]);
         }
-        let session = match self.spawn_with(spawn_options(Some(cwd)), &env) {
+        let session = match self.spawn_with(SpawnOptions::headless(Some(cwd)), &env) {
             Ok(session) => session,
             Err(err) => {
                 undo_worktree();

@@ -10,12 +10,8 @@
 use std::path::PathBuf;
 
 use runode_protocol::{HostMsg, PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
-use runode_types::{grid::GridSize, shell::IntegrationMode};
 
 use crate::{Shared, SpawnOptions};
-
-/// 宿主自己开的会话一开始的尺寸：没有窗口，等有前端带着尺寸连上来时再改。
-const SPAWN_SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };
 
 impl Shared {
     /// 宿主手里的布局，去掉了已经不在的会话。
@@ -62,7 +58,7 @@ impl Shared {
                 return Ok(HostMsg::Opened { req, id });
             }
         }
-        let id = self.spawn(spawn_options(Some(canonical.clone()))).map_err(|err| format!("{err:#}"))?;
+        let id = self.spawn(SpawnOptions::headless(Some(canonical.clone()))).map_err(|err| format!("{err:#}"))?;
         let mut peers = self.peers();
         self.tidy(&mut peers.layout);
         let front = front(&peers.layout);
@@ -101,7 +97,7 @@ impl Shared {
             ((window, workspace), peers.layout[window].workspaces[workspace].dir.clone())
         };
         let cwd = cwd.or_else(|| near.and_then(|id| self.session_info(id)?.meta.cwd)).or(dir);
-        let id = self.spawn(spawn_options(cwd)).map_err(|err| format!("{err:#}"))?;
+        let id = self.spawn(SpawnOptions::headless(cwd)).map_err(|err| format!("{err:#}"))?;
         let mut peers = self.peers();
         self.tidy(&mut peers.layout);
         // 开会话的这一会儿 `near` 没了的话放进先前找到的那个工作区（宿主自己不删工作区）；布局整个换过、
@@ -143,18 +139,6 @@ impl Shared {
     fn tidy(&self, layout: &mut Vec<WindowLayout>) {
         let registry = self.registry();
         tidy(layout, |id| registry.sessions.contains_key(&id));
-    }
-}
-
-/// 宿主自己开会话（没有界面时开终端、开始任务）用的选项：从 `cwd` 开始，尺寸是 `SPAWN_SIZE`。
-pub(crate) fn spawn_options(cwd: Option<PathBuf>) -> SpawnOptions {
-    SpawnOptions {
-        size: SPAWN_SIZE,
-        cwd,
-        integration: IntegrationMode::Detect,
-        start: true,
-        shell: None,
-        settings: None,
     }
 }
 

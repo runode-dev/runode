@@ -80,6 +80,16 @@ pub struct SpawnOptions {
     pub settings: Option<TermSettings>,
 }
 
+/// 宿主自己开的会话一开始的尺寸：没有窗口，等有前端带着尺寸连上来时再改。
+const SPAWN_SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };
+
+impl SpawnOptions {
+    /// 宿主自己开会话（没有界面时开终端、开始任务）用的选项：从 `cwd` 开始，尺寸是 `SPAWN_SIZE`。
+    pub(crate) fn headless(cwd: Option<PathBuf>) -> Self {
+        Self { size: SPAWN_SIZE, cwd, integration: IntegrationMode::Detect, start: true, shell: None, settings: None }
+    }
+}
+
 /// 宿主本身。可以随意克隆，各份是同一个宿主。
 #[derive(Clone)]
 pub struct Host {
@@ -139,6 +149,15 @@ impl Shared {
     /// 往会话线程发消息；没有这个会话、或者它的线程已经结束时返回 false。
     fn deliver(&self, id: SessionId, message: session::Inbox) -> bool {
         self.registry().sessions.get(&id).is_some_and(|handle| handle.send(message))
+    }
+
+    /// 会话 `id` 现在的状态；没有这个会话、或者它没及时回话时为空。
+    pub(crate) fn session_info(&self, id: SessionId) -> Option<runode_protocol::SessionInfo> {
+        let (reply, info) = std::sync::mpsc::channel();
+        if !self.deliver(id, session::Inbox::Info(reply)) {
+            return None;
+        }
+        info.recv_timeout(server::REPLY_TIMEOUT).ok()
     }
 
     /// 所有会话，按标识排好。
