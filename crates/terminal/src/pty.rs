@@ -70,6 +70,8 @@ use conpty::group_members;
 #[cfg(windows)]
 pub use conpty::process_args;
 #[cfg(windows)]
+use conpty::process_args as args_of;
+#[cfg(windows)]
 pub(crate) use conpty::process_name;
 #[cfg(windows)]
 pub use conpty::{Pty, default_shell};
