@@ -483,6 +483,12 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
 #[cfg(windows)]
 mod acl;
 
+/// 建好 runode 自己放私密东西的目录 `dir`（连同还没有的上一级），只让自己进：Unix 上 0700，Windows 上只给
+/// 自己、SYSTEM 和管理员；已经有了时也收紧一遍。已有的不是真目录、Unix 上属主和上一级目录不一样时拒绝。
+pub fn create_private(dir: &Path) -> std::io::Result<()> {
+    create_private_dir(Some(dir.to_owned())).map(drop)
+}
+
 /// `dir` 只让自己、SYSTEM 和管理员进：属主是这几方之一，DACL 受保护、允许访问的项只给这三方。读不了它的
 /// 安全信息时算不是。
 #[cfg(windows)]
