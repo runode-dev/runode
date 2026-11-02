@@ -261,7 +261,7 @@ struct Renaming {
 #[derive(Clone, PartialEq, Eq)]
 enum RenameTarget {
     Workspace(WorkspaceId),
-    /// 按连接目标认的远端主机，改的是它的显示名（`remote_hosts::set_display_name`）。
+    /// 按连接目标认的远端主机，改的是它的显示名（`ssh_hosts::set_display_name`）。
     Host(String),
 }
 

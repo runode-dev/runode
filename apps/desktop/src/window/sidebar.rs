@@ -30,7 +30,7 @@ use crate::ui::a11y::A11yPress;
 use crate::{
     host_client::remote::{self, HostId, Status},
     menus::OpenSettings,
-    remote_hosts::{self, status_text},
+    ssh_hosts::{self, status_text},
     ui::icons::{
         CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON, SIDEBAR_ICON,
     },
@@ -287,11 +287,11 @@ impl WindowView {
         // 状态圆点的描边和侧栏同色。
         let background = if cards(cx) { cx.theme().frame } else { cx.theme().mix(0.03) };
         let name = match host.label() {
-            Some(name) => remote_hosts::display_name(name, cx).to_owned(),
+            Some(name) => ssh_hosts::display_name(name, cx).to_owned(),
             None => rust_i18n::t!("workspace.host_local_group").into_owned(),
         };
         // 起了显示名的主机，提示和辅助工具里另写上连接目标。
-        let destination = host.label().filter(|name| remote_hosts::has_display_name(name, cx)).map(str::to_owned);
+        let destination = host.label().filter(|name| ssh_hosts::has_display_name(name, cx)).map(str::to_owned);
         let renaming = self.renaming.as_ref().filter(|renaming| {
             matches!(&renaming.target, RenameTarget::Host(renaming) if host.label() == Some(renaming.as_str()))
         });
@@ -305,7 +305,7 @@ impl WindowView {
         let status_text = status.as_ref().map(status_text);
         // 按系统画 logo：本机看自己的，远端主机看上次连上时报的，没连上过的画成服务器。
         let system = match host.label() {
-            Some(name) => remote_hosts::system(name, cx),
+            Some(name) => ssh_hosts::system(name, cx),
             None => Some(std::env::consts::OS),
         };
         let icon = match system {
@@ -314,7 +314,7 @@ impl WindowView {
             Some("windows") => system_logos::WINDOWS,
             _ => SERVER_ICON,
         };
-        let system_name = system.and_then(remote_hosts::system_name).map(str::to_owned);
+        let system_name = system.and_then(ssh_hosts::system_name).map(str::to_owned);
         let a11y_description = [
             system_name,
             destination.clone(),
@@ -520,7 +520,7 @@ impl WindowView {
         let mark = workspace.mark(cx);
         let host = workspace.host.label().map(|name| {
             let status = remote::status_of(name);
-            format!("{} {}", remote_hosts::display_name(name, cx), status_text(&status))
+            format!("{} {}", ssh_hosts::display_name(name, cx), status_text(&status))
         });
         // 目录不画出来，悬停时看提示；和名字一样（比如家目录的 `~`）时不提示。
         let dir = Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
@@ -765,7 +765,7 @@ impl WindowView {
     /// 在侧栏里把远端主机 `name` 组头上的名字换成输入框，现在的显示名全选。
     fn start_rename_host(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
         self.finish_rename(true, window, cx);
-        let text = remote_hosts::display_name(&name, cx).to_owned();
+        let text = ssh_hosts::display_name(&name, cx).to_owned();
         let select = text.len();
         let edit = InlineEdit::new(
             text,
@@ -796,7 +796,7 @@ impl WindowView {
             }
             RenameTarget::Host(host) => {
                 if commit {
-                    remote_hosts::set_display_name(host, &name, cx);
+                    ssh_hosts::set_display_name(host, &name, cx);
                 }
             }
         }

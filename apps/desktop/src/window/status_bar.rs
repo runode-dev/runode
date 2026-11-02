@@ -529,7 +529,7 @@ impl WindowView {
                 }
             };
             let color = host_list::dot_color(&status, fg_h);
-            let name = crate::remote_hosts::display_name(name, cx).to_owned();
+            let name = crate::ssh_hosts::display_name(name, cx).to_owned();
             div()
                 .id("status-host")
                 .role(Role::Label)
@@ -540,7 +540,7 @@ impl WindowView {
                 .flex()
                 .items_center()
                 .gap(px(5.))
-                .tooltip(tooltip(crate::remote_hosts::status_text(&status), None))
+                .tooltip(tooltip(crate::ssh_hosts::status_text(&status), None))
                 .child(div().flex_none().size(px(6.)).rounded_full().bg(color))
                 .child(name)
                 .child(div().text_color(fg_h.opacity(0.5)).child(state))
@@ -890,8 +890,7 @@ impl WindowView {
         let hover_bg = cx.theme().popover_hover;
         let ports = cx.try_global::<Status>().and_then(|status| status.remote_ports.get(name).cloned());
         let forwarded = hosts::forward::forwarded(name);
-        let title =
-            rust_i18n::t!("status.remote_ports", host = crate::remote_hosts::display_name(name, cx)).into_owned();
+        let title = rust_i18n::t!("status.remote_ports", host = crate::ssh_hosts::display_name(name, cx)).into_owned();
         let mut rows = vec![
             div()
                 .id("remote-ports")

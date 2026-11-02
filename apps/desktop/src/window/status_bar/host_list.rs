@@ -105,7 +105,7 @@ impl WindowView {
     fn render_host_row(&self, host: &RemoteHost, cx: &mut Context<Self>) -> Stateful<Div> {
         let fg = cx.theme().foreground;
         let name = host.name.clone();
-        let title = crate::remote_hosts::display_name(&name, cx).to_owned();
+        let title = crate::ssh_hosts::display_name(&name, cx).to_owned();
         let status = host.status();
         let state = state_text(host, &status);
         // 连着、正在连、等着重连的能断开（断开后不再自己重连）；别的能马上连。
@@ -122,7 +122,7 @@ impl WindowView {
                 .child(action)
                 .on_press_down(cx, move |_, _, cx| {
                     if live {
-                        crate::remote_hosts::disconnect(&name, cx);
+                        crate::ssh_hosts::disconnect(&name, cx);
                     } else if let Some(host) = hosts::find(&name) {
                         host.retry_now();
                     }
@@ -176,10 +176,10 @@ pub(super) fn latency_text(ms: u128) -> String {
 /// 一台主机的状态写成一行：连着时写明远端的系统、带上心跳测的延迟，没连上时是原因。
 fn state_text(host: &RemoteHost, status: &Status) -> String {
     let Status::Connected(connected) = status else {
-        return crate::remote_hosts::status_text(status);
+        return crate::ssh_hosts::status_text(status);
     };
     let latency = host.latency().map(|latency| latency_text(latency.as_millis()));
-    let system = crate::remote_hosts::system_name(&connected.os);
+    let system = crate::ssh_hosts::system_name(&connected.os);
     [system.map(str::to_owned), Some(rust_i18n::t!("status.host_connected").into_owned()), latency]
         .into_iter()
         .flatten()

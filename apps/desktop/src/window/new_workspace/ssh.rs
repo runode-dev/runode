@@ -22,7 +22,7 @@ use crate::window::{Dropdown, TITLEBAR_HEIGHT, WindowView, files::Quoting, statu
 use crate::{
     host_client::remote::{self, HostId, Status},
     project_host::ProjectHost,
-    remote_hosts::{display_name, has_display_name, status_text},
+    ssh_hosts::{display_name, has_display_name, status_text},
     ui::{
         a11y::{A11yPress as _, Press},
         button::{Button, ButtonSize, ButtonVariant},

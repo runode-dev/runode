@@ -201,7 +201,7 @@ impl WindowView {
 
     /// 标题栏右上角有远程桌面按钮：当前 workspace 在 SSH 主机上，那台主机能采集画面，本机也能解远程桌面的画面。
     pub(super) fn remote_desktop_button_shown(&self, cx: &App) -> bool {
-        SUPPORTED && self.workspace().host.label().is_some_and(|host| crate::remote_hosts::screen_capturable(host, cx))
+        SUPPORTED && self.workspace().host.label().is_some_and(|host| crate::ssh_hosts::screen_capturable(host, cx))
     }
 
     /// 标题栏右上角、命令按钮左边的远程桌面按钮，打开当前 workspace 所在主机的远程桌面；它开着、看得见时按下着。

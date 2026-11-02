@@ -30,7 +30,7 @@ struct ScreenWindow {
 /// 开一个单独的窗口，放在显示器 `display` 上的 `bounds` 处（位置相对这块显示器），把远程桌面页 `viewer` 放进去，
 /// 焦点给它。
 pub(super) fn open(viewer: Entity<ScreenViewer>, bounds: Bounds<Pixels>, display: Option<DisplayId>, cx: &mut App) {
-    let host = crate::remote_hosts::display_name(viewer.read(cx).host(), cx);
+    let host = crate::ssh_hosts::display_name(viewer.read(cx).host(), cx);
     let title = rust_i18n::t!("screen_viewer.title", host = host).into_owned();
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),

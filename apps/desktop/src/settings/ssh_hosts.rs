@@ -8,7 +8,7 @@ use gpui::{Context, Div, Role, SharedString, div, prelude::*, px};
 use super::{SettingsView, controls::Press as _};
 use crate::{
     host_client::remote::{self, RemoteHost, Status},
-    remote_hosts::{self, PruneJob, ServiceJob},
+    ssh_hosts::{self, PruneJob, ServiceJob},
     ui::{
         button::{Button, ButtonVariant},
         font_size::FontSize,
@@ -44,9 +44,9 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<Div> {
         let name = host.name.clone();
-        let title = remote_hosts::display_name(&name, cx).to_owned();
+        let title = ssh_hosts::display_name(&name, cx).to_owned();
         // 起了显示名的主机，名字下面另写连接目标。
-        let destination = remote_hosts::has_display_name(&name, cx).then(|| name.clone());
+        let destination = ssh_hosts::has_display_name(&name, cx).then(|| name.clone());
         let status = host.status();
         let text = status_line(&status);
         // 各行的元素 id 挂在这一行带主机名的 id 下面，主机名拼不出别的行的 id。
@@ -69,26 +69,26 @@ impl SettingsView {
             matches!(status, Status::Connecting(_) | Status::Connected(_) | Status::Waiting { .. }).then(|| {
                 let name = name.clone();
                 button("settings.ssh_hosts.disconnect", "disconnect")
-                    .on_press(cx, move |_, _, cx| remote_hosts::disconnect(&name, cx))
+                    .on_press(cx, move |_, _, cx| ssh_hosts::disconnect(&name, cx))
             });
         let remote_desktop = (crate::screen_viewer::SUPPORTED
             && matches!(status, Status::Connected(_))
-            && remote_hosts::screen_capturable(&name, cx))
+            && ssh_hosts::screen_capturable(&name, cx))
         .then(|| {
             let name = name.clone();
             button("ssh.remote_desktop", "remote-desktop")
                 .on_press(cx, move |_, _, cx| crate::window::show_remote_desktop(name.clone(), cx))
         });
         let bound = matches!(&status, Status::Connected(connected) if connected.session_bound);
-        let job = remote_hosts::service_job(&name, cx);
-        let prune_job = remote_hosts::prune_job(&name, cx);
+        let job = ssh_hosts::service_job(&name, cx);
+        let prune_job = ssh_hosts::prune_job(&name, cx);
         // 提示和它要不要用醒目的颜色。
         let notice = match (&job, &prune_job) {
             (Some(job), _) => {
-                Some((remote_hosts::service_job_text(job), !matches!(job, ServiceJob::Done { moved: true })))
+                Some((ssh_hosts::service_job_text(job), !matches!(job, ServiceJob::Done { moved: true })))
             }
             (None, Some(prune_job)) => {
-                Some((remote_hosts::prune_job_text(prune_job), matches!(prune_job, PruneJob::Failed(_))))
+                Some((ssh_hosts::prune_job_text(prune_job), matches!(prune_job, PruneJob::Failed(_))))
             }
             (None, None) => bound.then(|| (rust_i18n::t!("settings.ssh_hosts.bound").into_owned(), true)),
         };
@@ -98,7 +98,7 @@ impl SettingsView {
                 return button.disabled(true);
             }
             let name = name.clone();
-            button.on_press(cx, move |_, _, cx| remote_hosts::prune_builds(&name, cx))
+            button.on_press(cx, move |_, _, cx| ssh_hosts::prune_builds(&name, cx))
         });
         let install = (bound && !matches!(job, Some(ServiceJob::Done { .. }))).then(|| {
             let button = button("settings.ssh_hosts.install_service", "install-service");
@@ -106,7 +106,7 @@ impl SettingsView {
                 return button.disabled(true);
             }
             let name = name.clone();
-            button.on_press(cx, move |_, _, cx| remote_hosts::install_service(&name, false, cx))
+            button.on_press(cx, move |_, _, cx| ssh_hosts::install_service(&name, false, cx))
         });
         let forget = button("settings.ssh_hosts.forget", "forget");
         let forget = if in_use {
@@ -114,7 +114,7 @@ impl SettingsView {
             forget.disabled(true).tooltip(crate::ui::tooltip::tooltip(why, None))
         } else {
             let name = name.clone();
-            forget.on_press(cx, move |_, _, cx| remote_hosts::forget(&name, cx))
+            forget.on_press(cx, move |_, _, cx| ssh_hosts::forget(&name, cx))
         };
         div()
             .id(SharedString::from(format!("ssh-host:{name}")))
@@ -191,6 +191,6 @@ fn status_line(status: &Status) -> String {
         Status::Connected(connected) if connected.mismatch => {
             rust_i18n::t!("settings.ssh_hosts.mismatch", build = connected.build.as_str()).into_owned()
         }
-        status => remote_hosts::status_text(status),
+        status => ssh_hosts::status_text(status),
     }
 }

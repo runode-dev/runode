@@ -37,7 +37,7 @@ use crate::{
         self, Status,
         screen::{self, ScreenEvent, ScreenLink, ScreenSender},
     },
-    remote_hosts::status_text,
+    ssh_hosts::status_text,
     ui::icons::{
         CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MONITOR_ICON, PIN_ICON, POP_IN_ICON, POP_OUT_ICON, REFRESH_ICON,
     },
@@ -1235,7 +1235,7 @@ impl ScreenViewer {
 
     fn render_toolbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let (border, fg) = (cx.theme().border, cx.theme().foreground);
-        let host = crate::remote_hosts::display_name(&self.host, cx);
+        let host = crate::ssh_hosts::display_name(&self.host, cx);
         let title = rust_i18n::t!("screen_viewer.title", host = host).into_owned();
         let displays: Vec<AnyElement> = self
             .remote
@@ -1363,7 +1363,7 @@ impl ScreenViewer {
     fn notice(&self, cx: &App) -> Option<String> {
         let notice = match &self.phase {
             Phase::Connecting | Phase::Suspended => {
-                rust_i18n::t!("screen_viewer.connecting", host = crate::remote_hosts::display_name(&self.host, cx))
+                rust_i18n::t!("screen_viewer.connecting", host = crate::ssh_hosts::display_name(&self.host, cx))
             }
             Phase::Stopped(reason) => return Some(reason.clone()),
             Phase::Reconnecting(_) if self.signed_out => rust_i18n::t!("screen_viewer.signed_out"),
@@ -1479,8 +1479,8 @@ impl Render for ScreenViewer {
             window.focus(&self.focus, cx);
         }
         let theme = cx.theme().clone();
-        let label = rust_i18n::t!("screen_viewer.screen", host = crate::remote_hosts::display_name(&self.host, cx))
-            .into_owned();
+        let label =
+            rust_i18n::t!("screen_viewer.screen", host = crate::ssh_hosts::display_name(&self.host, cx)).into_owned();
         // 画面是自己画的，另报一个图像节点给辅助工具，名字说是哪台的屏幕。
         let picture = self.picture.as_ref().map(|picture| {
             div()

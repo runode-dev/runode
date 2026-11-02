@@ -38,11 +38,11 @@ mod preview_panel;
 mod process_env;
 mod project_host;
 mod remote_access;
-mod remote_hosts;
 mod screen_process;
 mod screen_viewer;
 mod settings;
 mod sound;
+mod ssh_hosts;
 mod startup;
 mod subprocess;
 mod system_probe;
@@ -174,7 +174,7 @@ fn main() {
         window::install(cx);
         startup::mark("workspace_install");
         window::serve_requests(cx);
-        remote_hosts::install(cx);
+        ssh_hosts::install(cx);
         cx.on_window_closed(|cx, _| {
             if window::terminal_windows(cx) == 0 {
                 cx.quit();

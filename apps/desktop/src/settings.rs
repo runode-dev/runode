@@ -138,7 +138,7 @@ impl SettingsView {
             _observe: observe,
             _downloads: cx.observe_global::<crate::dictation::Downloads>(|_, cx| cx.notify()),
             hosts_in_use: Box::new(hosts_in_use),
-            _hosts: cx.observe_global::<crate::remote_hosts::HostsChanged>(|_, cx| cx.notify()),
+            _hosts: cx.observe_global::<crate::ssh_hosts::HostsChanged>(|_, cx| cx.notify()),
         };
         view.refresh_autostart(cx);
         view.refresh_firewall(cx);
