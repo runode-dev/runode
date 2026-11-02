@@ -19,7 +19,7 @@ use iroh::{
 use runode_protocol::remote::TUNNEL_ALPN;
 use tokio::{io::AsyncWriteExt as _, runtime::Handle, time::timeout};
 
-use super::DialError;
+use super::{Cancel, DialError};
 
 /// 两边都说完以后，最多等这么久让对面读完最后的字节再关 iroh 连接。
 const LINGER: Duration = Duration::from_secs(5);
@@ -61,15 +61,22 @@ fn shared() -> io::Result<Shared> {
     Ok(built)
 }
 
-/// 经 iroh 连到 `node`，开一条双向流，返回接在它上面的本机 TCP 连接。最晚到 `until`。
-pub(super) fn open(node: &str, until: Instant) -> Result<TcpStream, DialError> {
+/// 经 iroh 连到 `node`，开一条双向流，返回接在它上面的本机 TCP 连接。最晚到 `until`；`stop` 取消了时停下正在
+/// 进行的 iroh 连接，返回 `DialError::Cancelled`。
+pub(super) fn open(node: &str, until: Instant, stop: &Cancel) -> Result<TcpStream, DialError> {
     let id: EndpointId = node.parse().map_err(|_| DialError::Protocol(format!("{node} is not an iroh address")))?;
     let shared = shared().map_err(|err| DialError::Unreachable { last: format!("cannot start iroh: {err}") })?;
-    connect(&shared.handle, &shared.endpoint, id.into(), until)
+    connect(&shared.handle, &shared.endpoint, id.into(), until, stop)
 }
 
 /// `open` 的主体：端点和对方的地址由调用方给。
-fn connect(handle: &Handle, endpoint: &Endpoint, addr: EndpointAddr, until: Instant) -> Result<TcpStream, DialError> {
+fn connect(
+    handle: &Handle,
+    endpoint: &Endpoint,
+    addr: EndpointAddr,
+    until: Instant,
+    stop: &Cancel,
+) -> Result<TcpStream, DialError> {
     let unreachable = |err: io::Error| DialError::Unreachable { last: format!("across networks: {err}") };
     let (ours, theirs) = loopback_pair().map_err(unreachable)?;
     let theirs = {
@@ -79,8 +86,9 @@ fn connect(handle: &Handle, endpoint: &Endpoint, addr: EndpointAddr, until: Inst
     };
     let left = until.saturating_duration_since(Instant::now());
     let (opened, result) = mpsc::channel();
+    let woken = opened.clone();
     let endpoint = endpoint.clone();
-    handle.spawn(async move {
+    let task = handle.spawn(async move {
         let streams = timeout(left, async {
             let connection = endpoint.connect(addr, TUNNEL_ALPN).await.map_err(io::Error::other)?;
             let (send, recv) = connection.open_bi().await.map_err(io::Error::other)?;
@@ -95,11 +103,20 @@ fn connect(handle: &Handle, endpoint: &Endpoint, addr: EndpointAddr, until: Inst
             Err(_) => drop(opened.send(Err(io::Error::new(io::ErrorKind::TimedOut, "timed out")))),
         }
     });
+    // 连上以前取消了才停下任务；连上以后撤销，接着搬字节的任务由 `ours` 关掉时收尾。
+    let _stopped = {
+        let abort = task.abort_handle();
+        stop.on_cancel(move || {
+            abort.abort();
+            let _ = woken.send(Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled")));
+        })
+    };
     match result.recv_timeout(left + Duration::from_secs(1)) {
         Ok(Ok(())) => {
             ours.set_nodelay(true).map_err(unreachable)?;
             Ok(ours)
         }
+        Ok(Err(_)) if stop.is_cancelled() => Err(DialError::Cancelled),
         Ok(Err(err)) => Err(unreachable(err)),
         Err(_) => Err(unreachable(io::Error::new(io::ErrorKind::TimedOut, "timed out"))),
     }
@@ -179,7 +196,8 @@ mod tests {
         });
         let (handle, client, addr) = started.recv().unwrap();
 
-        let mut tcp = connect(&handle, &client, addr, Instant::now() + Duration::from_secs(10)).unwrap();
+        let mut tcp =
+            connect(&handle, &client, addr, Instant::now() + Duration::from_secs(10), &Cancel::new()).unwrap();
         tcp.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
         tcp.write_all(b"hello").unwrap();
         tcp.shutdown(Shutdown::Write).unwrap();
@@ -188,5 +206,36 @@ mod tests {
         assert_eq!(reply, b"hello back");
         drop(tcp);
         server.join().unwrap();
+    }
+
+    /// 对面一声不吭（UDP 收了不回）时 iroh 一直在重发；取消后马上放手，不等到截止时刻。只走本机。
+    #[test]
+    fn cancelling_stops_a_tunnel_that_hangs() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let handle = runtime.handle().clone();
+        let (client, server) = runtime.block_on(async {
+            let client = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+            let server = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+            (client, server)
+        });
+        thread::spawn(move || runtime.block_on(std::future::pending::<()>()));
+        let silent = std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let addr = EndpointAddr::new(server.id()).with_ip_addr(silent.local_addr().unwrap());
+
+        let stop = Cancel::new();
+        let canceller = {
+            let stop = stop.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(300));
+                let cancelled = Instant::now();
+                stop.cancel();
+                cancelled
+            })
+        };
+        let result = connect(&handle, &client, addr, Instant::now() + Duration::from_secs(20), &stop);
+        let returned = Instant::now();
+        let cancelled = canceller.join().unwrap();
+        assert!(matches!(result, Err(DialError::Cancelled)), "{:?}", result.err());
+        assert!(returned - cancelled < Duration::from_millis(100), "took {:?} after cancelling", returned - cancelled);
     }
 }

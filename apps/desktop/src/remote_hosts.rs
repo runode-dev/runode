@@ -398,13 +398,14 @@ pub fn forget(host: &HostId, cx: &mut App) {
     .detach();
 }
 
-/// 开始收远端主机的事件，app 退出时让各台主机的主连接退出。要在恢复窗口之前调。
+/// 开始收远端主机的事件，app 退出时让各台主机的主连接退出、取消正在拨的配对的电脑。要在恢复窗口之前调。
 pub fn install(cx: &mut App) {
     let dirs = runode_paths::Dirs::from_env();
     cx.set_global(HostNames(load_map(dirs.host_names_file())));
     cx.set_global(HostSystems(load_map(dirs.host_systems_file())));
     cx.on_app_quit(|_| {
         ssh::close_masters();
+        paired::stop_dialing();
         async {}
     })
     .detach();

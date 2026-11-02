@@ -9,7 +9,7 @@ use gpui::{
     Window, div, prelude::*, px, svg,
 };
 use runode_protocol::remote::{PAIRING_URI_PREFIX, PairingUri, RejectReason};
-use runode_remote::client::{self, Browser, DialError, Found};
+use runode_remote::client::{self, Browser, Cancel, DialError, Found};
 
 use super::Source;
 use crate::window::WindowView;
@@ -43,6 +43,14 @@ pub(super) struct Pairing {
     picked: Option<String>,
     /// 第几次配对：收起再展开、换了链接以后，先前那次的结果不再算数。
     attempt: u64,
+    /// 正在进行的配对，这一栏收起时取消。
+    cancel: Cancel,
+}
+
+impl Drop for Pairing {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
 }
 
 impl Pairing {
@@ -103,6 +111,7 @@ impl WindowView {
                 _browser: browser,
                 picked: None,
                 attempt: 0,
+                cancel: Cancel::new(),
             });
         }
         if let Some(pairing) = self.new_workspace.as_ref().and_then(|dialog| dialog.pairing.as_ref()) {
@@ -186,7 +195,8 @@ impl WindowView {
         pairing.state = PairState::Pairing { host: host.clone() };
         cx.notify();
         let device = runode_remote::host_name();
-        let job = cx.background_spawn(async move { paired::pair(&uri, &device) });
+        let cancel = pairing.cancel.clone();
+        let job = cx.background_spawn(async move { paired::pair(&uri, &device, &cancel) });
         cx.spawn_in(window, async move |this, cx| {
             let paired = job.await;
             this.update_in(cx, |this, window, cx| {
@@ -344,7 +354,9 @@ fn pair_error_text(err: &DialError, host: &str) -> String {
         DialError::Rejected(RejectReason::Disabled) => rust_i18n::t!("paired.pair_disabled", host = host).into_owned(),
         DialError::Rejected(_) => rust_i18n::t!("paired.rejected").into_owned(),
         DialError::Protocol(reason) => rust_i18n::t!("paired.protocol", reason = reason).into_owned(),
-        DialError::Io(err) => rust_i18n::t!("paired.pair_failed", reason = err.to_string()).into_owned(),
+        DialError::Io(_) | DialError::Cancelled => {
+            rust_i18n::t!("paired.pair_failed", reason = err.to_string()).into_owned()
+        }
     }
 }
 

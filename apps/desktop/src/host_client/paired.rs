@@ -4,7 +4,8 @@
 //!
 //! 每台一个 `paired-host` 线程（`supervise`）管连接，和 SSH 主机一样：要用时连，断了按 `RETRY_DELAYS` 退避重连，
 //! 走完了还连不上就停下，这台电脑睡醒或网络变了时再试；那台电脑撤销了配对、证书变了这类要用户来办的不自己重试。
-//! 停下的都等 `retry_now`。连接的状态变了、连上了，经 `hosts::events` 告诉界面。
+//! 停下的都等 `retry_now`。连接的状态变了、连上了，经 `hosts::events` 告诉界面。断开、忘掉这台和 app 退出时，正在
+//! 拨的连接当场取消（`PairedHost::stop_dialing`）。
 //!
 //! 读写项目、端口转发和远程桌面各自另拨一条连接（`PairedHost::open_channel`、`PairedHost::dial`），先试终端那条
 //! 连接连上的地址，过了门禁后说各自的协议。断开这台（`disconnect`）或终端那条连接断了时，登记过的（`PairedHost::hold`）跟着关掉；端口转发
@@ -26,7 +27,7 @@ use runode_protocol::{
     remote::{ChannelHello, ChannelRefusal, ChannelReply, RejectReason},
     write_frame,
 };
-use runode_remote::client::{self, DialError, Dialed, PairedMachine};
+use runode_remote::client::{self, Cancel, DialError, Dialed, PairedMachine};
 
 use super::{
     ConnectError, Link, Timeouts, UnixStream, build,
@@ -142,9 +143,13 @@ pub enum UnpairError {
 }
 
 /// 用配对链接 `uri` 配对，这边叫 `device_name`，成了就记下这台电脑、把这条连接接到它的 `Link` 上。交回它的标识。
-/// 会阻塞。
-pub fn pair(uri: &runode_protocol::remote::PairingUri, device_name: &str) -> Result<String, DialError> {
-    let dialed = client::pair(&dirs(), uri, device_name)?;
+/// 会阻塞，`cancel` 取消了时马上返回。
+pub fn pair(
+    uri: &runode_protocol::remote::PairingUri,
+    device_name: &str,
+    cancel: &Cancel,
+) -> Result<String, DialError> {
+    let dialed = client::pair(&dirs(), uri, device_name, cancel)?;
     let id = dialed.machine.id.clone();
     remember(&dialed.machine);
     // 刚配对的连接交给 supervisor 下一次连时用，省一次拨号。
@@ -168,6 +173,13 @@ pub fn pair(uri: &runode_protocol::remote::PairingUri, device_name: &str) -> Res
     Ok(id)
 }
 
+/// app 要退出了：各台正在拨的连接当场取消。
+pub fn stop_dialing() {
+    for host in remotes() {
+        host.stop_dialing();
+    }
+}
+
 /// 睡醒或网络变了：叫正在重连和重连放弃了的电脑马上再试（`PairedHost::nudge`）。
 pub(super) fn nudge_all() {
     for host in remotes() {
@@ -188,6 +200,8 @@ pub struct PairedHost {
     handed: Mutex<Option<Dialed>>,
     /// 终端那条连接最近一次直连上的地址（`Dialed::addr`），另拨的连接先试它；经跨网络连接连上时为空。
     addr: Mutex<Option<SocketAddr>>,
+    /// 这台眼下各次拨号共用的取消句柄，`stop_dialing` 时取消、换一个新的。
+    dialing: Mutex<Cancel>,
     /// 登记过的专用连接（`hold`），断开时一起关掉。
     channels: Mutex<Vec<UnixStream>>,
 }
@@ -271,6 +285,7 @@ impl PairedHost {
             latency: Mutex::new(None),
             handed: Mutex::new(None),
             addr: Mutex::new(None),
+            dialing: Mutex::default(),
             channels: Mutex::default(),
         }
     }
@@ -281,7 +296,9 @@ impl PairedHost {
             return Err(ChannelError::Broken(format!("not connected to the paired computer {}", self.id)));
         }
         let prefer = *self.addr.lock().unwrap_or_else(PoisonError::into_inner);
-        client::dial_via(&dirs(), &self.id, prefer).map(|dialed| dialed.stream).map_err(ChannelError::Dial)
+        client::dial_via(&dirs(), &self.id, prefer, &self.dialing())
+            .map(|dialed| dialed.stream)
+            .map_err(ChannelError::Dial)
     }
 
     /// 开一条专用连接：拨号过门禁后发 `hello`、等那边回话，`ChannelReady` 后交回两边原样搬字节的 socket。会阻塞。
@@ -309,6 +326,16 @@ impl PairedHost {
             Ok(stream) => self.channels.lock().unwrap_or_else(PoisonError::into_inner).push(stream),
             Err(err) => tracing::warn!("cannot keep track of a connection to the paired computer {}: {err}", self.id),
         }
+    }
+
+    fn dialing(&self) -> Cancel {
+        self.dialing.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// 取消正在拨的连接（终端那条和另拨的），之后的拨号用新的句柄。
+    fn stop_dialing(&self) {
+        let cancel = std::mem::take(&mut *self.dialing.lock().unwrap_or_else(PoisonError::into_inner));
+        cancel.cancel();
     }
 
     fn close_channels(&self) {
@@ -401,6 +428,7 @@ impl PairedHost {
         }
         self.changed.notify_all();
         drop(state);
+        self.stop_dialing();
         self.close_channels();
         forward::forget(&self.id);
     }
@@ -494,7 +522,7 @@ impl PairedHost {
         let handed = self.handed.lock().unwrap_or_else(PoisonError::into_inner).take();
         let dialed = match handed {
             Some(dialed) => dialed,
-            None => client::dial(&dirs(), &self.id).map_err(|err| classify(&err))?,
+            None => client::dial(&dirs(), &self.id, &self.dialing()).map_err(|err| classify(&err))?,
         };
         remember(&dialed.machine);
         tracing::info!("dialed the paired computer {} at {:?}", self.id, dialed.addr);
@@ -642,6 +670,7 @@ fn classify(err: &DialError) -> Failure {
             Failure::Retry(rust_i18n::t!("paired.unreachable", reason = last.as_str()).into_owned())
         }
         DialError::Io(err) => Failure::Retry(err.to_string()),
+        DialError::Cancelled => Failure::Retry(err.to_string()),
     }
 }
 

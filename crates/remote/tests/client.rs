@@ -21,7 +21,7 @@ use runode_protocol::{
 };
 use runode_remote::{
     PairingProgress, PairingTicket,
-    client::{self, DialError, Dialed},
+    client::{self, Cancel, DialError, Dialed},
     list_devices, now_unix, revoke_device,
 };
 
@@ -74,7 +74,7 @@ fn uri(harness: &Harness, ticket: &PairingTicket, addrs: &[IpAddr]) -> PairingUr
 
 fn pair(harness: &Harness, client: &Client) -> Dialed {
     let ticket = harness.ticket();
-    client::pair(&client.dirs, &uri(harness, &ticket, &[LOOPBACK]), "测试的电脑").unwrap()
+    client::pair(&client.dirs, &uri(harness, &ticket, &[LOOPBACK]), "测试的电脑", &Cancel::new()).unwrap()
 }
 
 /// 在交回的 socket 上开远程桌面：发 `ScreenHello`，对面的采集进程收到；它回的字节这边原样读到。返回采集进程
@@ -107,7 +107,8 @@ fn pairing_remembers_the_machine() {
     let harness = Harness::start("client-pair");
     let client = Client::new("pair");
     let ticket = harness.ticket();
-    let dialed = client::pair(&client.dirs, &uri(&harness, &ticket, &[LOOPBACK]), "测试的电脑").unwrap();
+    let dialed =
+        client::pair(&client.dirs, &uri(&harness, &ticket, &[LOOPBACK]), "测试的电脑", &Cancel::new()).unwrap();
 
     let devices = list_devices(&harness.dirs).unwrap();
     assert_eq!(devices.len(), 1);
@@ -152,7 +153,7 @@ fn dialing_connects_to_a_paired_machine() {
     let paired = pair(&harness, &client);
     drop(paired.stream);
 
-    let dialed = client::dial(&client.dirs, &paired.machine.id).unwrap();
+    let dialed = client::dial(&client.dirs, &paired.machine.id, &Cancel::new()).unwrap();
     assert_eq!(dialed.machine, paired.machine);
     assert_eq!(dialed.addr, Some(harness.addr));
     // 这边关了，对面的采集进程读到结尾。
@@ -196,7 +197,7 @@ fn a_revoked_device_is_rejected() {
     drop(paired.stream);
     assert!(revoke_device(&harness.dirs, paired.machine.device_id).unwrap());
 
-    match client::dial(&client.dirs, &paired.machine.id) {
+    match client::dial(&client.dirs, &paired.machine.id, &Cancel::new()) {
         Err(DialError::Rejected(RejectReason::UnknownDevice)) => {}
         other => panic!("expected UnknownDevice, got {:?}", other.map(|dialed| dialed.machine)),
     }
@@ -209,10 +210,14 @@ fn a_wrong_fingerprint_is_refused() {
     let ticket = harness.ticket();
     let mut wrong = uri(&harness, &ticket, &[LOOPBACK]);
     wrong.fingerprint[0] ^= 1;
-    assert!(matches!(client::pair(&client.dirs, &wrong, "测试的电脑"), Err(DialError::FingerprintMismatch)));
+    assert!(matches!(
+        client::pair(&client.dirs, &wrong, "测试的电脑", &Cancel::new()),
+        Err(DialError::FingerprintMismatch)
+    ));
     // 口令没交出去，还能用。
     assert_eq!(ticket.poll().unwrap(), PairingProgress::Waiting);
-    let paired = client::pair(&client.dirs, &uri(&harness, &ticket, &[LOOPBACK]), "测试的电脑").unwrap();
+    let paired =
+        client::pair(&client.dirs, &uri(&harness, &ticket, &[LOOPBACK]), "测试的电脑", &Cancel::new()).unwrap();
     drop(paired.stream);
 
     // 存下的指纹和那边的证书对不上时，连也一样报。
@@ -221,7 +226,10 @@ fn a_wrong_fingerprint_is_refused() {
     let flipped = if fingerprint.starts_with('A') { "B" } else { "A" };
     file["machines"][0]["fingerprint"] = format!("{flipped}{}", &fingerprint[1..]).into();
     client.write_machines_file(&file);
-    assert!(matches!(client::dial(&client.dirs, &paired.machine.id), Err(DialError::FingerprintMismatch)));
+    assert!(matches!(
+        client::dial(&client.dirs, &paired.machine.id, &Cancel::new()),
+        Err(DialError::FingerprintMismatch)
+    ));
 }
 
 #[test]
@@ -231,14 +239,14 @@ fn expired_links_and_wrong_codes_are_reported() {
     let ticket = harness.ticket();
     let mut expired = uri(&harness, &ticket, &[LOOPBACK]);
     expired.expires_at = now_unix() - 1;
-    assert!(matches!(client::pair(&client.dirs, &expired, "测试的电脑"), Err(DialError::Expired)));
+    assert!(matches!(client::pair(&client.dirs, &expired, "测试的电脑", &Cancel::new()), Err(DialError::Expired)));
 
     // 那边已经过期、链接上写的还没到：按那边的拒绝报。
     let stale = PairingTicket::begin(&harness.dirs, Duration::ZERO).unwrap();
     let mut early = uri(&harness, &stale, &[LOOPBACK]);
     early.expires_at = now_unix() + PAIRING_TTL.as_secs();
     assert!(matches!(
-        client::pair(&client.dirs, &early, "测试的电脑"),
+        client::pair(&client.dirs, &early, "测试的电脑", &Cancel::new()),
         Err(DialError::Rejected(RejectReason::PairingInvalid))
     ));
     assert!(client::list_machines(&client.dirs).is_empty());
@@ -256,10 +264,10 @@ fn forgetting_drops_the_machine() {
     client::forget_machine(&client.dirs, &first.machine.id).unwrap();
     assert_eq!(client::list_machines(&client.dirs), std::slice::from_ref(&second.machine));
     assert_eq!(client::find_machine(&client.dirs, &first.machine.id), None);
-    assert!(matches!(client::dial(&client.dirs, &first.machine.id), Err(DialError::Io(_))));
+    assert!(matches!(client::dial(&client.dirs, &first.machine.id, &Cancel::new()), Err(DialError::Io(_))));
     // 忘掉一台不认识的不算错。
     client::forget_machine(&client.dirs, &first.machine.id).unwrap();
-    client::dial(&client.dirs, &second.machine.id).unwrap();
+    client::dial(&client.dirs, &second.machine.id, &Cancel::new()).unwrap();
 }
 
 /// 排在前面的死地址不拖着后面通的那个：配对时链接里的、连的时候上次的地址死了都一样，连上以后上次的地址
@@ -270,7 +278,8 @@ fn dead_addresses_do_not_hold_up_live_ones() {
     let client = Client::new("dead");
     let ticket = harness.ticket();
     let started = Instant::now();
-    let paired = client::pair(&client.dirs, &uri(&harness, &ticket, &[DEAD, LOOPBACK]), "测试的电脑").unwrap();
+    let paired =
+        client::pair(&client.dirs, &uri(&harness, &ticket, &[DEAD, LOOPBACK]), "测试的电脑", &Cancel::new()).unwrap();
     assert!(started.elapsed() < Duration::from_secs(2), "pairing took {:?}", started.elapsed());
     assert_eq!(paired.addr, Some(harness.addr));
     drop(paired.stream);
@@ -281,7 +290,7 @@ fn dead_addresses_do_not_hold_up_live_ones() {
     client.write_machines_file(&file);
     assert_eq!(client::find_machine(&client.dirs, &paired.machine.id).unwrap().last_addr, Some(dead));
     let started = Instant::now();
-    let dialed = client::dial(&client.dirs, &paired.machine.id).unwrap();
+    let dialed = client::dial(&client.dirs, &paired.machine.id, &Cancel::new()).unwrap();
     assert!(started.elapsed() < Duration::from_secs(2), "dialing took {:?}", started.elapsed());
     assert_eq!(dialed.addr, Some(harness.addr));
     assert_eq!(client::find_machine(&client.dirs, &paired.machine.id).unwrap().last_addr, Some(harness.addr));
@@ -300,7 +309,7 @@ fn a_preferred_address_is_dialed_first() {
     client.write_machines_file(&file);
 
     let started = Instant::now();
-    let dialed = client::dial_via(&client.dirs, &paired.machine.id, Some(harness.addr)).unwrap();
+    let dialed = client::dial_via(&client.dirs, &paired.machine.id, Some(harness.addr), &Cancel::new()).unwrap();
     assert!(started.elapsed() < Duration::from_millis(500), "dialing took {:?}", started.elapsed());
     assert_eq!(dialed.addr, Some(harness.addr));
     let screen = open_screen(&harness, &dialed);
@@ -319,9 +328,50 @@ fn a_silent_preferred_address_does_not_hold_up_the_rest() {
     let silent = std::net::TcpListener::bind((LOOPBACK, 0)).unwrap();
 
     let started = Instant::now();
-    let dialed = client::dial_via(&client.dirs, &paired.machine.id, Some(silent.local_addr().unwrap())).unwrap();
+    let dialed =
+        client::dial_via(&client.dirs, &paired.machine.id, Some(silent.local_addr().unwrap()), &Cancel::new()).unwrap();
     assert!(started.elapsed() < Duration::from_secs(1), "dialing took {:?}", started.elapsed());
     assert_eq!(dialed.addr, Some(harness.addr));
+}
+
+/// 取消了就马上放手：几个地址都收了 TCP 却一声不吭、要等到超时的时候，取消后 `dial` 不到 100ms 就返回
+/// `Cancelled`；取消过的句柄再拿去拨号当场返回。
+#[test]
+fn cancelling_stops_dialing_at_once() {
+    let harness = Harness::start("client-cancel");
+    let client = Client::new("cancel");
+    let paired = pair(&harness, &client);
+    drop(paired.stream);
+    let silent = std::net::TcpListener::bind((LOOPBACK, 0)).unwrap();
+    let mut file = client.machines_file();
+    file["machines"][0]["port"] = silent.local_addr().unwrap().port().into();
+    file["machines"][0]["last_addr"] = silent.local_addr().unwrap().to_string().into();
+    client.write_machines_file(&file);
+
+    let cancel = Cancel::new();
+    let canceller = {
+        let cancel = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            let cancelled = Instant::now();
+            cancel.cancel();
+            cancelled
+        })
+    };
+    let dialed = client::dial(&client.dirs, &paired.machine.id, &cancel);
+    let returned = Instant::now();
+    let cancelled = canceller.join().unwrap();
+    assert!(matches!(dialed, Err(DialError::Cancelled)), "{:?}", dialed.map(|dialed| dialed.machine));
+    assert!(returned - cancelled < Duration::from_millis(100), "took {:?} after cancelling", returned - cancelled);
+
+    let started = Instant::now();
+    assert!(matches!(client::dial(&client.dirs, &paired.machine.id, &cancel), Err(DialError::Cancelled)));
+    let ticket = harness.ticket();
+    let link = uri(&harness, &ticket, &[LOOPBACK]);
+    assert!(matches!(client::pair(&client.dirs, &link, "测试的电脑", &cancel), Err(DialError::Cancelled)));
+    assert!(started.elapsed() < Duration::from_millis(100), "took {:?}", started.elapsed());
+    // 取消了的配对没把口令交出去。
+    assert_eq!(ticket.poll().unwrap(), PairingProgress::Waiting);
 }
 
 /// 哪个地址都不通时报连不上，不等满 `DIAL_TIMEOUT`。
@@ -334,7 +384,7 @@ fn unreachable_machines_fail_quickly() {
     drop(harness);
 
     let started = Instant::now();
-    match client::dial(&client.dirs, &paired.machine.id) {
+    match client::dial(&client.dirs, &paired.machine.id, &Cancel::new()) {
         Err(DialError::Unreachable { last }) => assert!(last.contains("127.0.0.1"), "{last}"),
         other => panic!("expected Unreachable, got {:?}", other.map(|dialed| dialed.machine)),
     }
@@ -377,7 +427,7 @@ fn pairs_and_dials_across_networks() {
     // 刚开的端点要过一会儿才把地址发布到 n0 的 DNS 上，在那之前查不到它。
     let started = Instant::now();
     let paired = loop {
-        match client::pair(&client.dirs, &link, "测试的电脑") {
+        match client::pair(&client.dirs, &link, "测试的电脑", &Cancel::new()) {
             Err(DialError::Unreachable { .. }) if started.elapsed() < Duration::from_secs(60) => {
                 std::thread::sleep(Duration::from_secs(2));
             }
@@ -388,7 +438,7 @@ fn pairs_and_dials_across_networks() {
     assert_eq!(paired.machine.node, status.node);
     drop(paired.stream);
 
-    let dialed = client::dial(&client.dirs, &paired.machine.id).unwrap();
+    let dialed = client::dial(&client.dirs, &paired.machine.id, &Cancel::new()).unwrap();
     assert_eq!(dialed.addr, None);
     let hello = serde_json::to_vec(&ScreenClientMsg::ScreenHello { version: SCREEN_VERSION }).unwrap();
     write_frame(&mut &dialed.stream, FrameKind::Control, 0, &hello).unwrap();
