@@ -274,13 +274,15 @@ public struct GitBranch: Hashable, Sendable, Decodable {
     public var remote: Bool
     public var current: Bool
     public var upstream: String?
-    /// 最近一次提交的标题和相对时间（如 `2 days ago`）。
+    /// 最近一次提交的标题和相对时间（git 按英文写，如 `2 days ago`）。
     public var subject: String
     public var date: String
+    /// 最近一次提交的提交时间，Unix 秒；按本机语言写相对时间用它，宿主没给时退回 `date`。
+    public var time: Int64?
 
     public init(
         name: String, remote: Bool = false, current: Bool = false, upstream: String? = nil, subject: String = "",
-        date: String = ""
+        date: String = "", time: Int64? = nil
     ) {
         self.name = name
         self.remote = remote
@@ -288,9 +290,10 @@ public struct GitBranch: Hashable, Sendable, Decodable {
         self.upstream = upstream
         self.subject = subject
         self.date = date
+        self.time = time
     }
 
-    enum CodingKeys: String, CodingKey { case name, remote, current, upstream, subject, date }
+    enum CodingKeys: String, CodingKey { case name, remote, current, upstream, subject, date, time }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -300,5 +303,6 @@ public struct GitBranch: Hashable, Sendable, Decodable {
         upstream = try c.decodeIfPresent(String.self, forKey: .upstream)
         subject = try c.decodeIfPresent(String.self, forKey: .subject) ?? ""
         date = try c.decodeIfPresent(String.self, forKey: .date) ?? ""
+        time = try c.decodeIfPresent(Int64.self, forKey: .time)
     }
 }

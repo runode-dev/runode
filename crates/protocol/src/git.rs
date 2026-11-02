@@ -187,9 +187,12 @@ pub struct GitBranch {
     pub current: bool,
     #[serde(default)]
     pub upstream: Option<String>,
-    /// 最近一次提交的标题和相对时间（如 `2 days ago`）。
+    /// 最近一次提交的标题和相对时间（git 按英文写，如 `2 days ago`）。
     #[serde(default)]
     pub subject: String,
     #[serde(default)]
     pub date: String,
+    /// 最近一次提交的提交时间，Unix 秒：前端按自己的界面语言写相对时间，没有时退回 `date`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<i64>,
 }

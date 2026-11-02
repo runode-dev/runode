@@ -337,6 +337,14 @@ tooltip:
   expand_split: 展開分割畫面
   close_preview: 關閉預覽
 git:
+  ago:
+    now: 剛剛
+    minutes: "%{n} 分鐘前"
+    hours: "%{n} 小時前"
+    days: "%{n} 天前"
+    weeks: "%{n} 週前"
+    months: "%{n} 個月前"
+    years: "%{n} 年前"
   error:
     exited: "git 失敗了（%{status}）"
     spawn: "沒能執行 git：%{error}"

@@ -35,6 +35,22 @@ extension Presentation {
         return (String(path[path.index(after: slash)...]), String(path[..<slash]))
     }
 
+    /// 分支列表里一个分支的小字：最近一次提交的标题和多久以前。宿主给了时间戳时按界面的语言写，没给时用
+    /// git 的英文原话。
+    static func gitBranchDetail(_ branch: GitBranch, now: Date = .now, locale: Locale = interfaceLocale) -> String {
+        let when = branch.time.map { time in
+            let formatter = RelativeDateTimeFormatter()
+            formatter.locale = locale
+            return formatter.localizedString(for: Date(timeIntervalSince1970: TimeInterval(time)), relativeTo: now)
+        } ?? branch.date
+        return [branch.subject, when].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// 界面文字实际用的语言：系统语言 app 没有译文时界面退回中文，日期也跟着界面写，不按系统的地区设置。
+    static var interfaceLocale: Locale {
+        Locale(identifier: Bundle.main.preferredLocalizations.first ?? "zh-Hans")
+    }
+
     /// 分支那一行：分支名，分离头指针时写短哈希，还没有提交时写「还没有提交」。
     public static func gitBranch(_ status: GitStatus) -> String {
         if let branch = status.branch { return branch }

@@ -45,6 +45,7 @@ fn creates_and_switches_branches() {
     let feat = branches.iter().find(|branch| branch.name == "feat").unwrap();
     assert_eq!(feat.subject, "on feat");
     assert!(!feat.date.is_empty());
+    assert!(feat.time.is_some_and(|time| time > 0));
 
     let main = branches.iter().find(|branch| branch.name == "main").unwrap();
     handle.checkout(main).unwrap();

@@ -128,6 +128,7 @@ fn run(
                 upstream: None,
                 subject: String::new(),
                 date: String::new(),
+                time: None,
             };
             done(repo()?.checkout(&target))?;
         }
@@ -210,6 +211,7 @@ fn branch(branch: Branch) -> GitBranch {
         upstream: branch.upstream,
         subject: branch.subject,
         date: branch.date,
+        time: branch.time,
     }
 }
 

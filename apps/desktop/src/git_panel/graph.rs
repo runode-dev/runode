@@ -436,7 +436,12 @@ impl GitPanel {
         let (lane, width) = lane_geometry(graph.lanes);
         let dim = cx.theme().foreground.opacity(0.5);
         let head = commit.refs.iter().any(|r| matches!(r.kind, RefKind::Head | RefKind::CurrentBranch));
-        let mut detail = format!("{} · {} · {}", commit.author, commit.date, commit.short_id());
+        let when = commit.time.map(super::ago::ago);
+        let mut detail = [Some(commit.author.as_str()), when.as_deref(), Some(commit.short_id())]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
         if !commit.refs.is_empty() {
             let names: Vec<_> = commit.refs.iter().map(|r| r.name.as_str()).collect();
             detail.push_str(&format!("\n{}", names.join(", ")));
@@ -466,7 +471,7 @@ impl GitPanel {
                     .when(head, |subject| subject.font_weight(gpui::FontWeight::SEMIBOLD))
                     .child(commit.subject.clone()),
             )
-            .when(fit.date, |row| {
+            .when_some(when.filter(|_| fit.date), |row, when| {
                 row.child(
                     div()
                         .flex_none()
@@ -474,7 +479,7 @@ impl GitPanel {
                         .truncate()
                         .text_size(FontSize::Small)
                         .text_color(dim)
-                        .child(short_date(&commit.date)),
+                        .child(when),
                 )
             })
             .on_press_down(cx, {
@@ -707,10 +712,6 @@ fn fit_commit_row(panel: f32, graph: f32, commit: &Commit) -> Fit {
 }
 
 /// `2 days ago` 这样的相对时间缩成 `2 days`，行尾放得下；tooltip 里是完整的。
-fn short_date(date: &str) -> String {
-    date.strip_suffix(" ago").unwrap_or(date).to_owned()
-}
-
 /// 指向提交的引用的前 `shown` 个小标签：HEAD 所在的分支（或分离的 HEAD）实心突出，本地分支描边，
 /// 远端分支淡一些、描 lane 推上去那段的紫色，tag 带黄色；太长的截断。其余的合成「+N」。
 fn ref_labels(commit: &Commit, shown: usize, cx: &gpui::App) -> Vec<gpui::Div> {
@@ -856,7 +857,7 @@ mod tests {
             parents: Vec::new(),
             subject: "subject".into(),
             author: String::new(),
-            date: "2 days ago".into(),
+            time: None,
             refs: refs.iter().map(|&name| CommitRef { name: name.into(), kind: RefKind::Branch }).collect(),
         }
     }
@@ -873,7 +874,6 @@ mod tests {
         let long = commit(&[&"x".repeat(60)]);
         assert_eq!(label_width(&long.refs[0].name), MAX_LABEL_WIDTH);
         assert_eq!(fit_commit_row(0., 20., &long), Fit { labels: 1, date: true });
-        assert_eq!(short_date("2 days ago"), "2 days");
     }
 
     #[test]

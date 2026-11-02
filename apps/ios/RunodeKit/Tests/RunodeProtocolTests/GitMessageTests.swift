@@ -92,7 +92,8 @@ import Testing
                     req: 4, id: id,
                     branches: [
                         GitBranch(
-                            name: "main", current: true, upstream: "origin/main", subject: "init", date: "2 days ago"),
+                            name: "main", current: true, upstream: "origin/main", subject: "init", date: "2 days ago",
+                            time: 1_700_000_000),
                         GitBranch(name: "origin/feat", remote: true, subject: "wip", date: "1 hour ago"),
                     ]))
     }

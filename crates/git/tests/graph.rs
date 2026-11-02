@@ -14,7 +14,7 @@ fn commit(id: &str, parents: &[&str]) -> Commit {
         parents: parents.iter().map(|&parent| parent.into()).collect(),
         subject: id.into(),
         author: String::new(),
-        date: String::new(),
+        time: None,
         refs: Vec::new(),
     }
 }

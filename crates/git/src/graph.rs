@@ -16,8 +16,9 @@ pub struct Commit {
     /// 说明的第一行。
     pub subject: String,
     pub author: String,
-    /// 提交时间，相对现在，如 `2 days ago`。
-    pub date: String,
+    /// 作者写下这个提交的时间，Unix 秒。
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub time: Option<i64>,
     /// 指向这个提交的引用，按 git 给的顺序：HEAD 和它所在的分支在前。
     pub refs: Vec<CommitRef>,
 }
@@ -233,7 +234,7 @@ fn parse_log(output: &[u8]) -> Vec<Commit> {
         .filter_map(|entry| {
             let entry = String::from_utf8_lossy(entry);
             let mut fields = entry.split('\x1f');
-            let (id, parents, author, date, refs) =
+            let (id, parents, author, time, refs) =
                 (fields.next()?, fields.next()?, fields.next()?, fields.next()?, fields.next()?);
             let subject = fields.collect::<Vec<_>>().join("\x1f");
             Some(Commit {
@@ -241,7 +242,7 @@ fn parse_log(output: &[u8]) -> Vec<Commit> {
                 parents: parents.split_whitespace().map(str::to_owned).collect(),
                 subject,
                 author: author.to_owned(),
-                date: date.to_owned(),
+                time: time.parse().ok(),
                 refs: parse_refs(refs),
             })
         })
@@ -290,8 +291,8 @@ fn without_parent_dirs(path: &Path) -> std::path::PathBuf {
     out
 }
 
-/// 提交号、父提交、作者、相对时间、引用和说明首行，字段之间用 0x1f 隔开。
-const LOG_FORMAT: &str = "--format=%H%x1f%P%x1f%an%x1f%ar%x1f%D%x1f%s";
+/// 提交号、父提交、作者、作者时间（Unix 秒）、引用和说明首行，字段之间用 0x1f 隔开。
+const LOG_FORMAT: &str = "--format=%H%x1f%P%x1f%an%x1f%at%x1f%D%x1f%s";
 
 impl Repo {
     /// 最近的 `limit` 个提交和排好的图：HEAD、所有本地分支，以及这些本地分支还在的上游，合在

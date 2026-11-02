@@ -18,6 +18,7 @@
 //! `set_git` 交进来，栏宽和状态栏的高度经 `set_input` 交进来。同一个仓库的操作排队，跑的时候这个仓库
 //! 不接新的操作。要 app 办的事经 `GitPanelEvent` 交出去。显示设置和图表的高度整个窗口一份，app 随窗口存档。
 
+pub(crate) mod ago;
 pub(crate) mod commit_message;
 mod graph;
 mod list;

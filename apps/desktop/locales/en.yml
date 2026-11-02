@@ -337,6 +337,14 @@ tooltip:
   expand_split: Expand Split
   close_preview: Close Preview
 git:
+  ago:
+    now: just now
+    minutes: "%{n}m ago"
+    hours: "%{n}h ago"
+    days: "%{n}d ago"
+    weeks: "%{n}w ago"
+    months: "%{n}mo ago"
+    years: "%{n}y ago"
   error:
     exited: "Git failed (%{status})"
     spawn: "Couldn't run git: %{error}"

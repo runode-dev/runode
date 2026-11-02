@@ -365,6 +365,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                         upstream: Some("origin/main".into()),
                         subject: "init".into(),
                         date: "2 days ago".into(),
+                        time: Some(1_700_000_000),
                     },
                     GitBranch {
                         name: "origin/feat".into(),
@@ -373,6 +374,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                         upstream: None,
                         subject: "wip".into(),
                         date: "1 hour ago".into(),
+                        time: None,
                     },
                 ],
             },

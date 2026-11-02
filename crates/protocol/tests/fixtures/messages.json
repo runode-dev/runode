@@ -1015,6 +1015,7 @@
           "name": "main",
           "remote": false,
           "subject": "init",
+          "time": 1700000000,
           "upstream": "origin/main"
         },
         {

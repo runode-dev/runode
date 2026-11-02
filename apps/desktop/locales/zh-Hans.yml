@@ -337,6 +337,14 @@ tooltip:
   expand_split: 展开分屏
   close_preview: 关闭预览
 git:
+  ago:
+    now: 刚刚
+    minutes: "%{n} 分钟前"
+    hours: "%{n} 小时前"
+    days: "%{n} 天前"
+    weeks: "%{n} 周前"
+    months: "%{n} 个月前"
+    years: "%{n} 年前"
   error:
     exited: "git 失败了（%{status}）"
     spawn: "没能运行 git：%{error}"

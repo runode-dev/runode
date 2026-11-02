@@ -941,7 +941,7 @@ mod tests {
             parents: parents.iter().map(|&parent| parent.into()).collect(),
             subject: id.into(),
             author: String::new(),
-            date: String::new(),
+            time: None,
             refs: Vec::new(),
         };
         let commits = vec![commit("b", &["a"]), commit("a", &[])];

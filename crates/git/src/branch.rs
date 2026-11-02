@@ -17,8 +17,11 @@ pub struct Branch {
     pub upstream: Option<String>,
     /// 最近一次提交的标题。
     pub subject: String,
-    /// 最近一次提交的相对时间，如 `2 days ago`。
+    /// 最近一次提交的相对时间，git 按英文写，如 `2 days ago`。
     pub date: String,
+    /// 最近一次提交的提交时间，Unix 秒；界面按自己的语言写相对时间用它。
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub time: Option<i64>,
 }
 
 /// `name` 能不能用作新分支的名字，按 `git check-ref-format --branch` 的规矩。不看哪个仓库，在根目录里跑：
@@ -42,8 +45,8 @@ fn parse_branches(output: &str) -> Vec<Branch> {
         .lines()
         .filter_map(|line| {
             let mut fields = line.split('\0');
-            let (refname, head, upstream, symref, date) =
-                (fields.next()?, fields.next()?, fields.next()?, fields.next()?, fields.next()?);
+            let (refname, head, upstream, symref, date, time) =
+                (fields.next()?, fields.next()?, fields.next()?, fields.next()?, fields.next()?, fields.next()?);
             let subject = fields.collect::<Vec<_>>().join("\0");
             // `origin/HEAD` 这类指向别的分支的符号引用不算分支。
             if !symref.is_empty() {
@@ -63,6 +66,7 @@ fn parse_branches(output: &str) -> Vec<Branch> {
                 upstream: (!upstream.is_empty()).then(|| upstream.to_owned()),
                 subject,
                 date: date.to_owned(),
+                time: time.parse().ok(),
             })
         })
         .collect();
@@ -75,7 +79,7 @@ impl Repo {
     /// 本地分支和远端分支，本地的在前、远端的在后，各按最近一次提交的时间
     /// 倒序。读不出来时为空。
     pub fn branches(&self) -> Vec<Branch> {
-        let format = "--format=%(refname)%00%(HEAD)%00%(upstream:strip=2)%00%(symref)%00%(committerdate:relative)%00%(contents:subject)";
+        let format = "--format=%(refname)%00%(HEAD)%00%(upstream:strip=2)%00%(symref)%00%(committerdate:relative)%00%(committerdate:unix)%00%(contents:subject)";
         let output = git(&self.root, &["for-each-ref", "--sort=-committerdate", format, "refs/heads", "refs/remotes"]);
         parse_branches(&String::from_utf8_lossy(&output.unwrap_or_default()))
     }
@@ -135,10 +139,10 @@ mod tests {
     #[test]
     fn parses_for_each_ref_output() {
         let rows = [
-            ["refs/heads/feat", " ", "", "", "1 hour ago", "add a\0b"],
-            ["refs/remotes/origin/HEAD", " ", "", "refs/remotes/origin/main", "2 days ago", "init"],
-            ["refs/remotes/origin/main", " ", "", "", "2 days ago", "init"],
-            ["refs/heads/main", "*", "origin/main", "", "2 days ago", "init"],
+            ["refs/heads/feat", " ", "", "", "1 hour ago", "1700003600", "add a\0b"],
+            ["refs/remotes/origin/HEAD", " ", "", "refs/remotes/origin/main", "2 days ago", "1700000000", "init"],
+            ["refs/remotes/origin/main", " ", "", "", "2 days ago", "1700000000", "init"],
+            ["refs/heads/main", "*", "origin/main", "", "2 days ago", "1700000000", "init"],
         ];
         let output: String = rows.iter().map(|row| row.join("\0") + "\n").collect();
         let branches = parse_branches(&output);
@@ -146,6 +150,7 @@ mod tests {
         assert_eq!(names, [("feat", false), ("main", false), ("origin/main", true)]);
         assert_eq!(branches[0].subject, "add a\0b");
         assert_eq!(branches[0].date, "1 hour ago");
+        assert_eq!(branches[0].time, Some(1_700_003_600));
         assert!(branches[1].current && !branches[0].current);
         assert_eq!(branches[1].upstream.as_deref(), Some("origin/main"));
     }

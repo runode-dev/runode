@@ -723,7 +723,7 @@
                                         .font(.body.weight(branch.current ? .semibold : .regular))
                                         .lineLimit(1)
                                         .truncationMode(.middle)
-                                    Text([branch.subject, branch.date].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    Text(Presentation.gitBranchDetail(branch))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)

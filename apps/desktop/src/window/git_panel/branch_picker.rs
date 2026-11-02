@@ -296,7 +296,8 @@ impl WindowView {
                         } else {
                             rust_i18n::t!("git.picker.local")
                         };
-                        let detail = [kind.as_ref(), branch.subject.as_str(), branch.date.as_str()]
+                        let when = branch.time.map(crate::git_panel::ago::ago);
+                        let detail = [kind.as_ref(), branch.subject.as_str(), when.as_deref().unwrap_or(&branch.date)]
                             .into_iter()
                             .filter(|part| !part.is_empty())
                             .collect::<Vec<_>>()

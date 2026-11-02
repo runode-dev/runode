@@ -171,6 +171,7 @@ fn replies() {
             upstream: Some("origin/main".into()),
             subject: "init".into(),
             date: "2 days ago".into(),
+            time: Some(1_700_000_000),
         },
         GitBranch {
             name: "origin/feat".into(),
@@ -179,6 +180,7 @@ fn replies() {
             upstream: None,
             subject: "wip".into(),
             date: "1 hour ago".into(),
+            time: None,
         },
     ];
     same(
@@ -186,7 +188,7 @@ fn replies() {
         json!({
             "type": "git_branches", "req": 4, "id": ID_TEXT,
             "branches": [
-                {"name": "main", "remote": false, "current": true, "upstream": "origin/main", "subject": "init", "date": "2 days ago"},
+                {"name": "main", "remote": false, "current": true, "upstream": "origin/main", "subject": "init", "date": "2 days ago", "time": 1_700_000_000},
                 {"name": "origin/feat", "remote": true, "current": false, "upstream": null, "subject": "wip", "date": "1 hour ago"}
             ]
         }),
