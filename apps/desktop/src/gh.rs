@@ -183,8 +183,6 @@ fn failure(stderr: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use super::*;
 
     /// 检查有一项失败就算失败，没失败但有没跑完的算在跑；check run 和 commit status 都认。
@@ -222,7 +220,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_stuck_command_is_killed_at_the_timeout() {
-        let started = Instant::now();
+        let started = std::time::Instant::now();
         let err = output_within(Command::new("/bin/sh").args(["-c", "sleep 30"]), Duration::from_millis(200));
         assert_eq!(err.unwrap_err(), "gh did not finish in 0 s");
         assert!(started.elapsed() < Duration::from_secs(10));
