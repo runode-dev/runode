@@ -29,6 +29,7 @@ mod i18n;
 mod kanban;
 mod keybinds;
 mod menus;
+mod mobile_page;
 mod prespawn;
 mod preview_panel;
 mod process_env;

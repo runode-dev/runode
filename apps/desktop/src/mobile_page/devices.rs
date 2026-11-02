@@ -7,7 +7,7 @@ use std::time::Duration;
 use gpui::{App, Context, Global, PromptLevel, SharedString, Task, Window};
 use runode_protocol::remote::DeviceId;
 
-use super::{WindowView, remote};
+use super::MobilePage;
 
 /// 隔多久读一次配对过的设备和连着哪些。
 const DEVICES_POLL: Duration = Duration::from_secs(2);
@@ -19,25 +19,20 @@ struct Devices(Vec<Paired>);
 impl Global for Devices {}
 
 #[derive(Clone, PartialEq)]
-pub(super) struct Paired {
-    pub(super) id: DeviceId,
-    pub(super) name: SharedString,
+pub(crate) struct Paired {
+    pub(crate) id: DeviceId,
+    pub(crate) name: SharedString,
     /// 配对的时刻，Unix 秒。
-    pub(super) paired_at: u64,
+    pub(crate) paired_at: u64,
     /// 现在连着。
-    pub(super) live: bool,
+    pub(crate) live: bool,
 }
 
-/// 在后台跟着配对过的设备和连着哪些，变了就重画各窗口；只有手机端引导页用得着，没有窗口开着它时不读。
-pub fn watch(cx: &mut App) {
+/// 在后台跟着配对过的设备和连着哪些，变了就重画各窗口；只有手机端引导页用得着，`shown` 说没有窗口开着它时不读。
+pub fn watch(cx: &mut App, shown: fn(&App) -> bool) {
     cx.spawn(async move |cx| {
         loop {
-            let read = cx.update(|cx| {
-                let shown = remote::windows(cx)
-                    .iter()
-                    .any(|handle| handle.read(cx).is_ok_and(|view| view.mobile_page().is_some()));
-                shown.then(|| refresh(cx))
-            });
+            let read = cx.update(|cx| shown(cx).then(|| refresh(cx)));
             if let Some(read) = read {
                 read.await;
             }
@@ -48,7 +43,7 @@ pub fn watch(cx: &mut App) {
 }
 
 /// 现读一次设备表，变了就重画各窗口。
-pub(super) fn refresh(cx: &mut App) -> Task<()> {
+pub(crate) fn refresh(cx: &mut App) -> Task<()> {
     cx.spawn(async move |cx| {
         let devices = cx.background_executor().spawn(async { read_devices() }).await;
         cx.update(|cx| {
@@ -79,14 +74,14 @@ fn read_devices() -> Devices {
 }
 
 /// 配对过的设备，按配对的先后；第一次打开手机端引导页、读到之前是空的。
-pub(super) fn devices(cx: &App) -> &[Paired] {
+pub(crate) fn devices(cx: &App) -> &[Paired] {
     cx.try_global::<Devices>().map_or(&[], |devices| &devices.0)
 }
 
-impl WindowView {
+impl MobilePage {
     /// 问用户要不要撤销设备，撤销了马上重读设备表；它连着的连接几秒内断开。撤销不了时弹框说原因，设备
     /// 照旧列着（还在设备表里）。
-    pub(super) fn revoke_device(&mut self, id: DeviceId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn revoke_device(&mut self, id: DeviceId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(device) = devices(cx).iter().find(|device| device.id == id) else { return };
         let name = device.name.clone();
         let title = rust_i18n::t!("machine.revoke_title", device = name);

@@ -1,28 +1,22 @@
-//! 侧栏顶上的「手机端」：窗口主区域换成一页引导，先介绍手机端能做什么，再装 App（有安装链接时），
-//! 最后扫码配对这台 Mac（`remote_access::pairing`）。已经配过手机时第一页换成配对过的设备（`devices`
-//! 读的那份），连着的标出来，能撤销，也能再配一台。远程访问没开时在这一页就能打开。切到任何一个
-//! 标签或 workspace（`activate`）、按 Esc 就收起，还在等的口令随之丢掉。
+//! 侧栏顶上的「手机端」那一页：先介绍手机端能做什么，再装 App（有安装链接时），最后扫码配对这台 Mac
+//! （`remote_access::pairing`）。已经配过手机时第一页换成配对过的设备（`devices`），连着的标出来，能撤销，也能
+//! 再配一台。远程访问没开时在这一页就能打开。按 Esc 就请窗口收起它（`MobileEvent::Close`），还在等的口令随之丢掉。
 //!
 //! 配对这一步能改手机上显示的电脑名（配置项 `remote-access-name`，改了监听方换上新名字后重新生成
 //! 二维码），也能挑手机先走哪个网络：挑中的地址排在配对 URI 最前面，手机先试它，连不上再试别的。
+//!
+//! 这一页是单独的视图，窗口把它画在侧栏右边、缓存着；配置变了由窗口叫它重画，设备表变了重画所有窗口。
 
-use crate::ui::theme::ActiveTheme as _;
-use crate::ui::theme::Theme;
+pub(crate) mod devices;
+
 use std::{net::IpAddr, rc::Rc};
 
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
-    MouseButton, Role, SharedString, Stateful, Subscription, Window, WindowControlArea, div, prelude::*, px, svg,
+    App, ClipboardItem, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
+    Render, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 use runode_remote::{host_name, local_interfaces};
 
-use super::{
-    CARD_GAP, TITLEBAR_HEIGHT, WindowView, cards,
-    devices::{Paired, devices},
-    drag_window,
-    sidebar::{ROW_HEIGHT, ROW_ICON_SIZE, ROW_TEXT_OPACITY},
-};
-use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, PHONE_ICON, REFRESH_ICON, TRASH_ICON},
     config::AppConfig,
@@ -30,11 +24,12 @@ use crate::{
     ui::{
         a11y::Press,
         button::{Button, ButtonSize, ButtonVariant},
-        card::Card,
         font_size::{FontSize, scaled},
         input::{Input, InputEvent, InputState},
+        theme::{ActiveTheme as _, Theme},
     },
 };
+use devices::Paired;
 
 /// 手机上显示的电脑名的配置项，见模块说明。
 const NAME_KEY: &str = "remote-access-name";
@@ -46,17 +41,23 @@ const MODULE_SIZE: f32 = 5.;
 /// 二维码那一栏的宽度：版本 10 上下的二维码加留白放得下。
 const QR_COLUMN_WIDTH: f32 = 300.;
 
+/// 这一页要窗口办的事。
+pub(crate) enum MobileEvent {
+    /// 收起这一页。
+    Close,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Step {
+pub(crate) enum Step {
     Intro,
     Install,
     Pair,
 }
 
-pub(super) struct MobilePage {
+pub(crate) struct MobilePage {
     step: Step,
     pairing: Pairing,
-    pub(super) focus: FocusHandle,
+    focus: FocusHandle,
     /// 装 App 的二维码，有安装链接时才有。
     install_qr: Option<Rc<Qr>>,
     /// 电脑名的输入框，以及它的回车、Esc 和失焦；空着时用系统的电脑名 `system_name`。
@@ -71,77 +72,61 @@ pub(super) struct MobilePage {
     network_open: bool,
 }
 
-/// 设置里的「配对…」：在最前面的窗口里打开引导页、直接到配对这一步；一个窗口都没有时先开一个。
-pub(crate) fn show_pairing(cx: &mut App) {
-    if super::remote::windows(cx).is_empty() {
-        super::open_window(cx, None);
+impl EventEmitter<MobileEvent> for MobilePage {}
+
+impl Focusable for MobilePage {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
     }
-    let Some(handle) = super::remote::front_window(cx) else { return };
-    let _ = handle.update(cx, |view, window, cx| {
-        window.activate_window();
-        view.show_mobile(window, cx);
-        view.go_mobile(Step::Pair, cx);
-    });
 }
 
-impl WindowView {
-    /// 打开手机端引导页；已经开着时把焦点给它。
-    pub(super) fn show_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.leave_todo_page(window, cx) {
-            return;
+impl Render for MobilePage {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.render_page(cx)
+    }
+}
+
+impl MobilePage {
+    /// 刚打开的一页，在第一步；设备表现读一次，不等下一轮。
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let system_name = host_name();
+        let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
+        let name = cx.new(|cx| {
+            InputState::new(saved, cx)
+                .with_placeholder(system_name.clone())
+                .with_label(rust_i18n::t!("mobile.name_label").into_owned())
+        });
+        let events = cx.subscribe_in(&name, window, |this, field, event: &InputEvent, window, cx| match event {
+            InputEvent::Next => window.focus(&this.focus, cx),
+            // 不改了：换回配置里的名字。
+            InputEvent::Dismiss => {
+                let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
+                field.update(cx, |field, cx| field.set_query(saved, cx));
+                window.focus(&this.focus, cx);
+            }
+            InputEvent::Changed(_) | InputEvent::Previous => {}
+        });
+        // 回车、点别处都是离开输入框，在这里写回。
+        let blurred = cx.on_focus_out(&name.focus_handle(cx), window, |this, _, _, cx| this.save_machine_name(cx));
+        devices::refresh(cx).detach();
+        Self {
+            step: Step::Intro,
+            pairing: Pairing::Idle,
+            focus: cx.focus_handle(),
+            install_qr: IOS_APP_URL.and_then(Qr::new).map(Rc::new),
+            name,
+            system_name: system_name.into(),
+            _name_events: [events, blurred],
+            interfaces: Vec::new(),
+            network: None,
+            network_open: false,
         }
-        self.drop_settings(cx);
-        self.drop_kanban();
-        self.leave_screen_page(window, cx);
-        if self.mobile_page().is_none() {
-            let system_name = host_name();
-            let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
-            let name = cx.new(|cx| {
-                InputState::new(saved, cx)
-                    .with_placeholder(system_name.clone())
-                    .with_label(rust_i18n::t!("mobile.name_label").into_owned())
-            });
-            let events = cx.subscribe_in(&name, window, |this, field, event: &InputEvent, window, cx| match event {
-                InputEvent::Next => this.focus_mobile(window, cx),
-                // 不改了：换回配置里的名字。
-                InputEvent::Dismiss => {
-                    let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
-                    field.update(cx, |field, cx| field.set_query(saved, cx));
-                    this.focus_mobile(window, cx);
-                }
-                InputEvent::Changed(_) | InputEvent::Previous => {}
-            });
-            // 回车、点别处都是离开输入框，在这里写回。
-            let blurred = cx.on_focus_out(&name.focus_handle(cx), window, |this, _, _, cx| this.save_machine_name(cx));
-            // 设备表只在手机端引导页开着时轮询，刚打开时现读，不等下一轮。
-            super::devices::refresh(cx).detach();
-            self.page = Some(super::Page::Mobile(Box::new(MobilePage {
-                step: Step::Intro,
-                pairing: Pairing::Idle,
-                focus: cx.focus_handle(),
-                install_qr: IOS_APP_URL.and_then(Qr::new).map(Rc::new),
-                name,
-                system_name: system_name.into(),
-                _name_events: [events, blurred],
-                interfaces: Vec::new(),
-                network: None,
-                network_open: false,
-            })));
-        }
-        self.focus_mobile(window, cx);
     }
 
-    fn focus_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(page) = self.mobile_page() {
-            window.focus(&page.focus, cx);
-        }
-        cx.notify();
-    }
-
-    /// 输入框里的电脑名和配置里的不一样时写回配置；监听方换上新名字后重新生成二维码。
-    fn save_machine_name(&mut self, cx: &mut Context<Self>) {
-        let Some(page) = self.mobile_page() else { return };
-        let name = page.name.read(cx).query().trim().to_owned();
+    /// 输入框里的电脑名和配置里的不一样时写回配置；监听方换上新名字后重新生成二维码。要收起这一页时先调：
+    /// 没按回车就切到别处时，这一页连同监听失焦的订阅一起没了，等不到失焦再写。
+    pub(crate) fn save_machine_name(&mut self, cx: &mut Context<Self>) {
+        let name = self.name.read(cx).query().trim().to_owned();
         let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
         if name == saved {
             return;
@@ -154,232 +139,77 @@ impl WindowView {
                     .map_err(|err| rust_i18n::t!("settings.write_failed", err = err.to_string()).into_owned())
             });
         match written {
-            Ok(_) => self.restart_mobile_pairing(cx),
-            Err(err) => {
-                if let Some(page) = self.mobile_page_mut() {
-                    page.pairing = Pairing::Failed(err);
-                }
-            }
+            Ok(_) => self.restart_pairing(cx),
+            Err(err) => self.pairing = Pairing::Failed(err),
         }
         cx.notify();
     }
 
     /// 二维码已经在或者在等的时候按现在的名字和网络重新生成；还没开始（远程访问没开）时不动。
-    fn restart_mobile_pairing(&mut self, cx: &mut Context<Self>) {
-        let Some(page) = self.mobile_page() else { return };
-        if page.step == Step::Pair && matches!(page.pairing, Pairing::Starting { .. } | Pairing::Waiting(_)) {
-            self.start_mobile_pairing(cx);
+    fn restart_pairing(&mut self, cx: &mut Context<Self>) {
+        if self.step == Step::Pair && matches!(self.pairing, Pairing::Starting { .. } | Pairing::Waiting(_)) {
+            self.start_pairing(cx);
         }
     }
 
     /// 重读网卡；挑的那个地址没了就回到按系统的顺序。
     fn refresh_interfaces(&mut self) {
-        if let Some(page) = self.mobile_page_mut() {
-            page.interfaces = local_interfaces();
-            if page.network.is_some_and(|addr| !page.interfaces.iter().any(|(_, seen)| *seen == addr)) {
-                page.network = None;
-            }
+        self.interfaces = local_interfaces();
+        if self.network.is_some_and(|addr| !self.interfaces.iter().any(|(_, seen)| *seen == addr)) {
+            self.network = None;
         }
     }
 
     fn pick_network(&mut self, network: Option<IpAddr>, cx: &mut Context<Self>) {
-        if let Some(page) = self.mobile_page_mut() {
-            page.network = network;
-            page.network_open = false;
-        }
-        self.restart_mobile_pairing(cx);
+        self.network = network;
+        self.network_open = false;
+        self.restart_pairing(cx);
         cx.notify();
-    }
-
-    pub(super) fn close_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.mobile_page().is_some() {
-            self.leave_mobile(cx);
-            window.focus(&self.focus_handle(cx), cx);
-            cx.notify();
-        }
-    }
-
-    /// 收起手机端引导页。输入框里改了的电脑名先写回：没按回车就切到别处时，页面连同监听失焦的订阅一起
-    /// 没了，等不到失焦再写。
-    pub(super) fn leave_mobile(&mut self, cx: &mut Context<Self>) {
-        if self.mobile_page().is_some() {
-            self.save_machine_name(cx);
-            self.page = None;
-        }
     }
 
     /// 翻到 `step`。到配对这一步时远程访问开着就马上生成口令，离开时丢掉口令。
-    fn go_mobile(&mut self, step: Step, cx: &mut Context<Self>) {
-        let Some(page) = self.mobile_page_mut() else { return };
-        page.step = step;
-        page.pairing = Pairing::Idle;
-        page.network_open = false;
+    pub(crate) fn go(&mut self, step: Step, cx: &mut Context<Self>) {
+        self.step = step;
+        self.pairing = Pairing::Idle;
+        self.network_open = false;
         self.refresh_interfaces();
         if step == Step::Pair && cx.global::<AppConfig>().0.remote_access {
-            self.start_mobile_pairing(cx);
+            self.start_pairing(cx);
         }
         cx.notify();
     }
 
-    fn start_mobile_pairing(&mut self, cx: &mut Context<Self>) {
-        if let Some(page) = self.mobile_page_mut() {
-            let extra = page.network.into_iter().collect();
-            page.pairing.start(|this: &mut Self| this.mobile_page_mut().map(|page| &mut page.pairing), extra, cx);
-        }
+    fn start_pairing(&mut self, cx: &mut Context<Self>) {
+        let extra = self.network.into_iter().collect();
+        self.pairing.start(|this: &mut Self| Some(&mut this.pairing), extra, cx);
     }
 
     /// 在配置里打开远程访问，等监听方开好就生成口令。
     fn turn_on_remote_access(&mut self, cx: &mut Context<Self>) {
         if let Err(err) = crate::config::set("remote-access", "true", cx) {
-            if let Some(page) = self.mobile_page_mut() {
-                page.pairing =
-                    Pairing::Failed(rust_i18n::t!("settings.write_failed", err = err.to_string()).into_owned());
-            }
+            self.pairing = Pairing::Failed(rust_i18n::t!("settings.write_failed", err = err.to_string()).into_owned());
             cx.notify();
             return;
         }
-        self.start_mobile_pairing(cx);
+        self.start_pairing(cx);
     }
 
-    /// 侧栏顶上的入口，引导页开着时高亮。
-    pub(super) fn render_mobile_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let label = rust_i18n::t!("mobile.entry").into_owned();
-        page_entry("mobile-entry", PHONE_ICON, label, self.mobile_page().is_some(), cx, |this, window, cx| {
-            this.show_mobile(window, cx);
-        })
-    }
-
-    /// 引导页开着时窗口的内容。
-    pub(super) fn render_mobile_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let page = self.render_mobile_page(cx).into_any_element();
-        self.render_page_body(page, true, window, cx)
-    }
-}
-
-/// 侧栏顶上打开一页（手机端、看板）的入口，那一页开着时高亮。按下鼠标就开，辅助工具的按下另外登记。
-pub(super) fn page_entry(
-    id: &'static str,
-    icon: &'static str,
-    label: String,
-    active: bool,
-    cx: &mut Context<WindowView>,
-    open: impl Fn(&mut WindowView, &mut Window, &mut Context<WindowView>) + 'static,
-) -> Stateful<Div> {
-    let active_bg = cx.theme().mix(0.10);
-    let hover_bg = cx.theme().mix(0.06);
-    let fg = cx.theme().foreground;
-    let open = Rc::new(open);
-    let press = open.clone();
-    let view = cx.entity().downgrade();
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(label.clone())
-        .aria_selected(active)
-        .flex_none()
-        .h(scaled(ROW_HEIGHT))
-        .mx(px(6.))
-        .mb(px(2.))
-        .px(px(8.))
-        .rounded(px(6.))
-        .flex()
-        .items_center()
-        .gap(px(6.))
-        .map(|row| {
-            if active {
-                row.bg(active_bg).text_color(fg)
-            } else {
-                row.text_color(fg.opacity(ROW_TEXT_OPACITY)).hover(|row| row.bg(hover_bg).text_color(fg))
-            }
-        })
-        .child(
-            div()
-                .flex_none()
-                .w(px(ROW_ICON_SIZE))
-                .flex()
-                .justify_center()
-                .child(svg().path(icon).size(px(14.)).text_color(fg.opacity(if active { 0.9 } else { 0.6 }))),
-        )
-        .child(div().min_w_0().truncate().child(label))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                open(this, window, cx);
-            }),
-        )
-        .on_a11y_press(view, move |this, window, cx| press(this, window, cx))
-}
-
-impl WindowView {
-    /// 铺满窗口的一页（手机端引导页、看板、远程桌面）开着时窗口的内容：侧栏（收着时没有），右边整块是 `page`，
-    /// 顶上留一条拖动窗口、放红绿灯。`rounded_bottom` 为假时卡片样式下那块的底下两个角是直的。
-    pub(super) fn render_page_body(
-        &mut self,
-        page: AnyElement,
-        rounded_bottom: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        let fullscreen = window.is_fullscreen();
-        let cards = cards(cx);
-        let sidebar = self.sidebar_visible().then(|| self.render_sidebar(window, cx));
-        let handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
-        let toggle = self.render_sidebar_toggle(fullscreen, cx);
-        let main = div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex_none()
-                    .h(px(TITLEBAR_HEIGHT))
-                    .window_control_area(WindowControlArea::Drag)
-                    .on_mouse_down(MouseButton::Left, drag_window),
-            )
-            .child(if cards {
-                Card::new()
-                    .when(!rounded_bottom, |card| card.rounded_b(px(0.)))
-                    .flex_1()
-                    .min_h_0()
-                    .mr(px(CARD_GAP))
-                    .mb(px(CARD_GAP))
-                    .overflow_hidden()
-                    .child(page)
-                    .into_any_element()
-            } else {
-                div().flex_1().min_h_0().child(page).into_any_element()
-            });
-        let mut body: Vec<AnyElement> = Vec::new();
-        body.extend(sidebar.map(IntoElement::into_any_element));
-        if cards {
-            body.push(div().flex_none().w(px(CARD_GAP)).into_any_element());
-        }
-        body.push(main.into_any_element());
-        body.extend(handle.map(IntoElement::into_any_element));
-        body.push(toggle.into_any_element());
-        body
-    }
-
-    fn render_mobile_page(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let page = self.mobile_page().expect("the mobile page is open");
+    fn render_page(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = &cx.theme().clone();
-        let content = match page.step {
+        let content = match self.step {
             Step::Intro => self.render_intro(theme, cx),
-            Step::Install => self.render_install(page, theme, cx),
-            Step::Pair => self.render_pair(page, theme, cx),
+            Step::Install => self.render_install(theme, cx),
+            Step::Pair => self.render_pair(theme, cx),
         };
         div()
             .id("mobile-page")
             .role(Role::Group)
             .aria_label(rust_i18n::t!("mobile.entry").into_owned())
-            .track_focus(&page.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
                     cx.stop_propagation();
-                    this.close_mobile(window, cx);
+                    cx.emit(MobileEvent::Close);
                 }
             }))
             .size_full()
@@ -407,7 +237,7 @@ impl WindowView {
             .text_color(theme.foreground.opacity(0.5))
             .child(svg().path(PHONE_ICON).size(px(14.)).text_color(theme.foreground.opacity(0.5)))
             .child(eyebrow_text);
-        let paired = devices(cx).to_vec();
+        let paired = devices::devices(cx).to_vec();
         if !paired.is_empty() {
             let rows: Vec<_> = paired.iter().map(|device| device_row(device, theme, cx)).collect();
             let another = Button::new("mobile-pair-another", rust_i18n::t!("mobile.pair_another").into_owned())
@@ -419,7 +249,7 @@ impl WindowView {
                 .gap(px(8.))
                 .child(rust_i18n::t!("mobile.pair_another").into_owned())
                 .child(svg().path(PHONE_ICON).size(px(14.)).text_color(theme.foreground.opacity(0.8)))
-                .on_press(cx, move |this, _, cx| this.go_mobile(first, cx));
+                .on_press(cx, move |this, _, cx| this.go(first, cx));
             return div()
                 .max_w(px(640.))
                 .flex()
@@ -461,12 +291,12 @@ impl WindowView {
                             .cursor_pointer()
                             .child(label)
                     }
-                    .on_press(cx, move |this, _, cx| this.go_mobile(first, cx)),
+                    .on_press(cx, move |this, _, cx| this.go(first, cx)),
                 ),
             )
     }
 
-    fn render_install(&self, page: &MobilePage, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    fn render_install(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let url = IOS_APP_URL.unwrap_or_default();
         let left = div()
             .flex_1()
@@ -502,7 +332,7 @@ impl WindowView {
                     ),
             );
         let right = div().flex_none().w(px(QR_COLUMN_WIDTH)).flex().justify_center().children(
-            page.install_qr.clone().map(|qr| {
+            self.install_qr.clone().map(|qr| {
                 qr_image("mobile-install-qr", rust_i18n::t!("mobile.install_qr").into_owned(), url.to_owned())
                     .child(qr_code(qr, MODULE_SIZE))
             }),
@@ -516,7 +346,7 @@ impl WindowView {
                     .cursor_pointer()
                     .child(label)
             }
-            .on_press(cx, |this, _, cx| this.go_mobile(Step::Intro, cx)),
+            .on_press(cx, |this, _, cx| this.go(Step::Intro, cx)),
             Some(
                 {
                     let label = format!("{}  →", rust_i18n::t!("mobile.next"));
@@ -528,13 +358,13 @@ impl WindowView {
                         .cursor_pointer()
                         .child(label)
                 }
-                .on_press(cx, |this, _, cx| this.go_mobile(Step::Pair, cx)),
+                .on_press(cx, |this, _, cx| this.go(Step::Pair, cx)),
             ),
         );
         columns(left, right).child(footer)
     }
 
-    fn render_pair(&self, page: &MobilePage, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    fn render_pair(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let config = &cx.global::<AppConfig>().0;
         let (remote_on, background_on) = (config.remote_access, config.terminal_host);
         let back_to = if IOS_APP_URL.is_some() { Step::Install } else { Step::Intro };
@@ -546,13 +376,13 @@ impl WindowView {
                 .cursor_pointer()
                 .child(label)
         }
-        .on_press(cx, move |this, _, cx| this.go_mobile(back_to, cx));
+        .on_press(cx, move |this, _, cx| this.go(back_to, cx));
         let mut left = div().flex_1().min_w_0().flex().flex_col().gap(px(18.));
         if IOS_APP_URL.is_some() {
             left = left.child(step_line(2, theme));
         }
 
-        if let Pairing::Paired { name } = &page.pairing {
+        if let Pairing::Paired { name } = &self.pairing {
             let actions = div()
                 .flex()
                 .items_center()
@@ -564,14 +394,14 @@ impl WindowView {
                         .rounded_full()
                         .font_weight(FontWeight::MEDIUM)
                         .cursor_pointer()
-                        .on_press(cx, |this, window, cx| this.close_mobile(window, cx)),
+                        .on_press(cx, |_, _, cx| cx.emit(MobileEvent::Close)),
                 )
                 .child(
                     Button::new("mobile-again", rust_i18n::t!("mobile.again").into_owned())
                         .variant(ButtonVariant::Link)
                         .with_size(ButtonSize::Lg)
                         .cursor_pointer()
-                        .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
+                        .on_press(cx, |this, _, cx| this.start_pairing(cx)),
                 );
             // `terminal-host` 关着时退出 app 宿主跟着退出、远程访问跟着停，提醒一句。
             let background = (!background_on).then(|| {
@@ -606,14 +436,14 @@ impl WindowView {
         left = left
             .child(headline(rust_i18n::t!("mobile.pair_title").into_owned(), 32.))
             .child(lead(rust_i18n::t!("mobile.pair_body").into_owned(), theme));
-        if let Pairing::Failed(err) = &page.pairing {
+        if let Pairing::Failed(err) = &self.pairing {
             left = left.child(notice("mobile-error", err.clone(), theme));
         }
         if remote_on {
-            left = left.child(self.render_machine_name(page, theme, cx)).child(self.render_network(page, theme, cx));
+            left = left.child(self.render_machine_name(theme, cx)).child(self.render_network(theme, cx));
         }
         let right = div().flex_none().w(px(QR_COLUMN_WIDTH)).flex().flex_col().items_center().gap(px(12.));
-        let right = match &page.pairing {
+        let right = match &self.pairing {
             Pairing::Waiting(waiting) => {
                 let uri = waiting.uri();
                 left = left.child(
@@ -656,7 +486,7 @@ impl WindowView {
                                 .variant(ButtonVariant::Link)
                                 .with_size(ButtonSize::Lg)
                                 .cursor_pointer()
-                                .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
+                                .on_press(cx, |this, _, cx| this.start_pairing(cx)),
                         ),
                 )
             }
@@ -666,7 +496,7 @@ impl WindowView {
             Pairing::Idle | Pairing::Failed(_) => {
                 left = if remote_on {
                     let label =
-                        if matches!(page.pairing, Pairing::Failed(_)) { "mobile.retry" } else { "mobile.generate" };
+                        if matches!(self.pairing, Pairing::Failed(_)) { "mobile.retry" } else { "mobile.generate" };
                     left.child(
                         div().child(
                             Button::new("mobile-generate", rust_i18n::t!(label).into_owned())
@@ -675,7 +505,7 @@ impl WindowView {
                                 .rounded_full()
                                 .font_weight(FontWeight::MEDIUM)
                                 .cursor_pointer()
-                                .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
+                                .on_press(cx, |this, _, cx| this.start_pairing(cx)),
                         ),
                     )
                 } else {
@@ -699,14 +529,14 @@ impl WindowView {
     }
 
     /// 电脑名：输入框，空着时浮着系统的电脑名，下面说手机上会看到什么。
-    fn render_machine_name(&self, page: &MobilePage, theme: &Theme, cx: &App) -> Stateful<Div> {
+    fn render_machine_name(&self, theme: &Theme, cx: &App) -> Stateful<Div> {
         let saved = cx.global::<AppConfig>().0.remote_access_name.clone();
-        let shown = saved.map_or_else(|| page.system_name.clone(), SharedString::from);
+        let shown = saved.map_or_else(|| self.system_name.clone(), SharedString::from);
         labeled(
             "mobile-name",
             rust_i18n::t!("mobile.name_label").into_owned(),
             // 和下面网络的下拉框一个样子，见 `input_box`。
-            Input::new(&page.name)
+            Input::new(&self.name)
                 .h(scaled(36.))
                 .px(px(12.))
                 .rounded(px(8.))
@@ -718,9 +548,9 @@ impl WindowView {
     }
 
     /// 网络：展开、收起的下拉框，旁边是重读网卡的按钮；展开时选项列在下面。
-    fn render_network(&self, page: &MobilePage, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_network(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = |network: Option<IpAddr>| -> SharedString {
-            match network.and_then(|addr| page.interfaces.iter().find(|(_, seen)| *seen == addr)) {
+            match network.and_then(|addr| self.interfaces.iter().find(|(_, seen)| *seen == addr)) {
                 Some((name, addr)) => network_label(name, *addr).into(),
                 None => rust_i18n::t!("mobile.network_auto").into_owned().into(),
             }
@@ -729,8 +559,8 @@ impl WindowView {
             .id("mobile-network")
             .role(Role::ComboBox)
             .aria_label(rust_i18n::t!("mobile.network_label").into_owned())
-            .aria_value(label(page.network))
-            .aria_expanded(page.network_open)
+            .aria_value(label(self.network))
+            .aria_expanded(self.network_open)
             .flex_1()
             .min_w_0()
             .flex()
@@ -738,12 +568,10 @@ impl WindowView {
             .justify_between()
             .cursor_pointer()
             .hover(|select| select.bg(theme.mix(0.08)))
-            .child(div().min_w_0().truncate().child(label(page.network)))
+            .child(div().min_w_0().truncate().child(label(self.network)))
             .child(svg().flex_none().path(CHEVRON_DOWN_ICON).size(px(14.)).text_color(theme.foreground.opacity(0.5)))
             .on_press(cx, |this, _, cx| {
-                if let Some(page) = this.mobile_page_mut() {
-                    page.network_open = !page.network_open;
-                }
+                this.network_open = !this.network_open;
                 cx.notify();
             });
         let refresh = Button::new("mobile-network-refresh", rust_i18n::t!("mobile.refresh_networks"))
@@ -755,11 +583,11 @@ impl WindowView {
             .cursor_pointer()
             .on_press(cx, |this, _, cx| {
                 this.refresh_interfaces();
-                this.restart_mobile_pairing(cx);
+                this.restart_pairing(cx);
                 cx.notify();
             });
-        let options = page.network_open.then(|| {
-            let choices = std::iter::once(None).chain(page.interfaces.iter().map(|(_, addr)| Some(*addr)));
+        let options = self.network_open.then(|| {
+            let choices = std::iter::once(None).chain(self.interfaces.iter().map(|(_, addr)| Some(*addr)));
             div()
                 .id("mobile-network-options")
                 .role(Role::ListBox)
@@ -772,7 +600,7 @@ impl WindowView {
                 .border_1()
                 .border_color(theme.foreground.opacity(0.12))
                 .children(choices.map(|network| {
-                    let chosen = network == page.network;
+                    let chosen = network == self.network;
                     let text = label(network);
                     // id 按地址取，不按行号：重新列网卡后顺序、个数变了，VoiceOver 的焦点不跳。
                     let id = match network {
@@ -811,7 +639,7 @@ impl WindowView {
 }
 
 /// 配对过的一台设备：图标，名字，连着没有和哪天配的，右边撤销（先问一句，见 `revoke_device`）。
-fn device_row(device: &Paired, theme: &Theme, cx: &mut Context<WindowView>) -> Stateful<Div> {
+fn device_row(device: &Paired, theme: &Theme, cx: &mut Context<MobilePage>) -> Stateful<Div> {
     let id = device.id;
     let (year, month, day) = local_date(device.paired_at);
     let date = rust_i18n::t!("mobile.date", y = year, m = month, d = day);

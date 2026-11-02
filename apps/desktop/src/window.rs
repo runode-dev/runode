@@ -15,13 +15,12 @@ mod arrange;
 mod askpass;
 mod background;
 mod clipboard;
-mod devices;
 mod files;
 mod git_panel;
 mod github_actions;
 mod kanban;
 mod layout_report;
-mod mobile;
+mod mobile_page;
 mod model;
 mod more_menu;
 mod new_tab;
@@ -64,8 +63,8 @@ pub(crate) use agents::{
 };
 pub use arrange::ArrangePanes;
 pub use background::refresh as watch_background;
-pub use devices::watch as watch_devices;
-pub(crate) use mobile::show_pairing;
+pub(crate) use mobile_page::show_pairing;
+pub use mobile_page::watch_devices;
 pub(crate) use open::{open_window, open_window_with};
 pub use pane_move::{MovePaneToNewTab, SwapPane};
 pub use persist::saved_window_options;
@@ -667,9 +666,13 @@ impl WindowView {
 
     /// 自己缓存、不跟着窗口重画的整页和浮层视图（`Slot` 之外）：配色或界面配置变了要逐个叫它们重画。
     fn cached_views(&self) -> Vec<EntityId> {
-        let board = self.kanban_page().map(|board| board.view.entity_id());
+        let page = match &self.page {
+            Some(Page::Kanban(board)) => Some(board.view.entity_id()),
+            Some(Page::Mobile(page)) => Some(page.view.entity_id()),
+            Some(Page::Settings(_)) | None => None,
+        };
         let screens = self.screen_viewers.views().map(Entity::entity_id);
-        board.into_iter().chain(screens).chain([self.preview.entity_id()]).collect()
+        page.into_iter().chain(screens).chain([self.preview.entity_id()]).collect()
     }
 
     fn render_sidebar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -741,7 +744,7 @@ enum Page {
     /// 设置页，盖住整个窗口。
     Settings(settings_page::SettingsPage),
     /// 手机端引导页，盖住标签和分屏。
-    Mobile(Box<mobile::MobilePage>),
+    Mobile(mobile_page::OpenMobile),
     /// 看板，盖住标签和分屏；新建、编辑任务和定时的对话框也在它身上。
     Kanban(kanban::OpenKanban),
 }
@@ -754,16 +757,9 @@ impl WindowView {
         }
     }
 
-    fn mobile_page(&self) -> Option<&mobile::MobilePage> {
+    fn mobile_page(&self) -> Option<&mobile_page::OpenMobile> {
         match &self.page {
-            Some(Page::Mobile(page)) => Some(page.as_ref()),
-            _ => None,
-        }
-    }
-
-    fn mobile_page_mut(&mut self) -> Option<&mut mobile::MobilePage> {
-        match &mut self.page {
-            Some(Page::Mobile(page)) => Some(page.as_mut()),
+            Some(Page::Mobile(page)) => Some(page),
             _ => None,
         }
     }
@@ -800,7 +796,7 @@ impl Focusable for WindowView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         match &self.page {
             Some(Page::Settings(page)) => return page.view.focus_handle(cx),
-            Some(Page::Mobile(page)) => return page.focus.clone(),
+            Some(Page::Mobile(page)) => return page.view.focus_handle(cx),
             Some(Page::Kanban(board)) => return board.view.focus_handle(cx),
             None => {}
         }

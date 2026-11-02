@@ -68,7 +68,10 @@ pub(crate) fn isolate(command: &mut Command) {
 /// Windows 上拉起控制台程序时不开窗口（`CREATE_NO_WINDOW`）；别的系统上什么都不做。
 pub(crate) fn hide_window(command: &mut Command) {
     #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(command, windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    std::os::windows::process::CommandExt::creation_flags(
+        command,
+        windows_sys::Win32::System::Threading::CREATE_NO_WINDOW,
+    );
     #[cfg(not(windows))]
     let _ = command;
 }

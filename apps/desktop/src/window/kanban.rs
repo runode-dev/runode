@@ -257,7 +257,7 @@ impl WindowView {
     pub(super) fn render_new_todo_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("kanban.new_todo").into_owned();
         let active = self.kanban_page().is_some_and(|board| board.view.read(cx).creating());
-        super::mobile::page_entry("new-todo-entry", PLUS_ICON, label.clone(), active, cx, |this, window, cx| {
+        super::mobile_page::page_entry("new-todo-entry", PLUS_ICON, label.clone(), active, cx, |this, window, cx| {
             this.new_todo(&NewTodo, window, cx);
         })
         .tooltip(tooltip(label, Some(&NewTodo)))
@@ -268,7 +268,7 @@ impl WindowView {
     pub(super) fn render_schedules_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("kanban.schedules").into_owned();
         let active = self.showing_todo_page(true, cx);
-        super::mobile::page_entry("schedules-entry", CLOCK_ICON, label.clone(), active, cx, |this, window, cx| {
+        super::mobile_page::page_entry("schedules-entry", CLOCK_ICON, label.clone(), active, cx, |this, window, cx| {
             this.close_todo_page(window, cx);
             this.show_kanban(true, window, cx);
         })
@@ -283,7 +283,7 @@ impl WindowView {
         let count = crate::kanban::needs_you(cx);
         let shortcut = entry_shortcut(&ToggleKanban, modifiers, cx);
         let pushed = shortcut.is_some();
-        super::mobile::page_entry("kanban-entry", KANBAN_ICON, label.clone(), active, cx, |this, window, cx| {
+        super::mobile_page::page_entry("kanban-entry", KANBAN_ICON, label.clone(), active, cx, |this, window, cx| {
             this.close_todo_page(window, cx);
             this.show_kanban(false, window, cx);
         })
