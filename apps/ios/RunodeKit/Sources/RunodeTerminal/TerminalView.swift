@@ -534,8 +534,12 @@
             return gridSize(fitting: size, scale: scale, font: TerminalFont(size: base))
         }
 
+        /// 适配手机时网格左右至少各空出的宽度（点）：字不贴着屏幕的圆角边，`centerContent` 把余下的宽度
+        /// 平分到两边。
+        static let fitMargin: CGFloat = 4
+
         static func gridSize(fitting size: CGSize, scale: CGFloat, font: TerminalFont) -> GridSize {
-            let columns = max(10, Int(size.width / font.cellWidth))
+            let columns = max(10, Int((size.width - 2 * fitMargin) / font.cellWidth))
             let rows = max(4, Int(size.height / font.cellHeight))
             return GridSize(
                 cols: UInt16(min(columns, 500)), rows: UInt16(min(rows, 300)),
