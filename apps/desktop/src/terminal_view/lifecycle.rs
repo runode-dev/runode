@@ -39,7 +39,7 @@ use runode_types::{
 
 use super::{
     DEFAULT_TITLE, Events, MAX_FONT_SIZE, MIN_FONT_SIZE, TerminalEvent, TerminalView,
-    cursor_blink::{BlinkStep, CURSOR_BLINK_INTERVAL, blink_step},
+    cursor_blink::{CURSOR_BLINK_INTERVAL, CursorBlink},
     screen::{Attach, Changes, HIDE_GRACE, Reopen, SHOW_WAIT, ScreenState, reopen_plan},
 };
 use crate::{
@@ -1014,7 +1014,7 @@ impl TerminalView {
                 view.reset_cursor_blink(cx);
             }),
             cx.on_blur(&focus_handle, window, |view, _, _| {
-                view._cursor_blink = None;
+                view.cursor_blink.pause();
             }),
         ];
 
@@ -1061,10 +1061,7 @@ impl TerminalView {
             hovered_link: None,
             link_lookup: None,
             click_cell: None,
-            cursor_blink_visible: true,
-            cursor_blink_since: Instant::now(),
-            cursor_blink_active_at: Instant::now(),
-            cursor_blink_stopped: false,
+            cursor_blink: CursorBlink::new(),
             adopted_size: None,
             start_pending: false,
             pending_command: None,
@@ -1072,7 +1069,6 @@ impl TerminalView {
             _reader: Task::ready(()),
             agent_changed_at: Instant::now(),
             _hold_timeout: None,
-            _cursor_blink: None,
             _image_frame: None,
             _autoscroll: None,
             _config_watch: config_watch,
@@ -1266,40 +1262,25 @@ impl TerminalView {
 
     /// 有了活动（键盘输入、终端输出、重新获得焦点、窗口重新激活、改了配置）：让光标立即亮起，
     /// 从头开始计闪烁周期和空闲期限，空闲停了的闪烁也恢复。每批输出都会调用，所以这里不碰
-    /// 计时器，只改时刻；计时器由绘制时的 `sync_cursor_blink` 按要不要闪来起停。
+    /// 计时器；计时器由绘制时的 `sync_cursor_blink` 按要不要闪来起停。
     pub(super) fn reset_cursor_blink(&mut self, cx: &mut Context<Self>) {
-        if !self.cursor_blink_visible || self.cursor_blink_stopped {
-            // 正灭着要重画一次才亮得起来；停了的要重画一次，绘制时才会重新起计时器。
-            self.cursor_blink_visible = true;
-            self.cursor_blink_stopped = false;
+        if self.cursor_blink.reset() {
             cx.notify();
         }
-        let now = Instant::now();
-        self.cursor_blink_since = now;
-        self.cursor_blink_active_at = now;
     }
 
     /// 绘制时调用，`blinking` 是这一帧光标要不要闪（有焦点、有光标、光标在闪）。要闪而计时器
-    /// 没在跑时起一个，不闪时停掉：光标不闪时没有任何计时器在跑，空闲的窗口就不再重画。
-    /// 光标从不闪变成闪只会因为有输出、换了主题或者重新获得焦点，这几样都会引起重画，所以只在
-    /// 绘制时检查就够了。空闲到期停下的（`cursor_blink_stopped`）不在这里重起，否则每次绘制
-    /// 又把它拉起来；等 `reset_cursor_blink` 清掉标记后的那次绘制再起。
+    /// 没在跑时起一个，不闪时停掉。光标从不闪变成闪只会因为有输出、换了主题或者重新获得焦点，
+    /// 这几样都会引起重画，所以只在绘制时检查就够了。
     pub(super) fn sync_cursor_blink(&mut self, blinking: bool, cx: &mut Context<Self>) {
         if !blinking {
-            if self._cursor_blink.take().is_some() {
-                self.cursor_blink_visible = true;
-            }
+            self.cursor_blink.halt();
             return;
         }
-        if self._cursor_blink.is_some() || self.cursor_blink_stopped {
+        if !self.cursor_blink.wants_timer() {
             return;
         }
-        // 开始闪也算一次活动，从现在起计空闲期限。
-        let now = Instant::now();
-        self.cursor_blink_visible = true;
-        self.cursor_blink_since = now;
-        self.cursor_blink_active_at = now;
-        self._cursor_blink = Some(cx.spawn(async move |this, cx| {
+        let timer = cx.spawn(async move |this, cx| {
             let mut wait = CURSOR_BLINK_INTERVAL;
             loop {
                 cx.background_executor().timer(wait).await;
@@ -1308,7 +1289,8 @@ impl TerminalView {
                     Ok(None) | Err(_) => break,
                 }
             }
-        }));
+        });
+        self.cursor_blink.start(timer);
     }
 
     /// 图片动画在播时，到下一帧该画的时候（`Frame::next_image_frame`）重画一次；没在播时停掉计时器。
@@ -1323,35 +1305,14 @@ impl TerminalView {
         });
     }
 
-    /// 闪烁计时器到点：切换亮灭，或者空闲到期后停在亮的那一半。返回下次再等多久，停了时为
-    /// `None`。
+    /// 闪烁计时器到点，返回下次再等多久，停了时为空。光标这期间不闪了的话，这次重画时
+    /// `sync_cursor_blink` 会停掉计时器。
     fn cursor_blink_tick(&mut self, cx: &mut Context<Self>) -> Option<Duration> {
-        let step = blink_step(
-            self.cursor_blink_since.elapsed(),
-            self.cursor_blink_active_at.elapsed(),
-            self.config.cursor_style_blink_timeout,
-        );
-        match step {
-            BlinkStep::Wait(wait) => Some(wait),
-            BlinkStep::Toggle { next } => {
-                self.cursor_blink_visible = !self.cursor_blink_visible;
-                self.cursor_blink_since = Instant::now();
-                // 光标这期间不闪了的话，这次重画时 `sync_cursor_blink` 会停掉计时器。
-                cx.notify();
-                Some(next)
-            }
-            BlinkStep::Stop => {
-                if !self.cursor_blink_visible {
-                    self.cursor_blink_visible = true;
-                    cx.notify();
-                }
-                self.cursor_blink_stopped = true;
-                // 这就是正在跑的那个计时器：丢掉句柄后它这一轮返回就结束，`sync_cursor_blink`
-                // 看到 `None` 才能在恢复时重新起一个。
-                self._cursor_blink = None;
-                None
-            }
+        let (next, repaint) = self.cursor_blink.tick(self.config.cursor_style_blink_timeout);
+        if repaint {
+            cx.notify();
         }
+        next
     }
 
     /// 同步输出的冻结超时后重绘一次，避免程序一直不释放导致画面卡死。

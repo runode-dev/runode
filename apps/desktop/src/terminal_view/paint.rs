@@ -169,7 +169,7 @@ pub(super) fn paint_frame(
     // 闪烁到灭的一半时不画光标；没有焦点时光标不闪，总画空心框。光标落在选区里时也不画，
     // 免得盖住那一格的选区颜色。
     let cursor_hidden = frame.cursor.is_some_and(|c| {
-        (focused && !view.cursor_blink_visible && c.blinking)
+        (focused && !view.cursor_blink.visible() && c.blinking)
             || frame.row(c.y).get(usize::from(c.x)).is_some_and(|cell| cell.selected)
     });
     // 有焦点时块状光标是实心的，光标下的字形改用光标文字色（默认背景色）画，保证仍然看得清。

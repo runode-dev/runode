@@ -212,14 +212,7 @@ pub struct TerminalView {
     link_lookup: Option<input::LinkLookup>,
     /// 这次左键按下是一次不带修饰键的单击，按在哪一格；松开时还在这一格就把光标挪过去。
     click_cell: Option<(i32, i32)>,
-    /// 闪烁光标当前处于亮的一半周期。
-    cursor_blink_visible: bool,
-    /// 当前这半个闪烁周期从何时开始。
-    cursor_blink_since: Instant,
-    /// 最近一次键盘输入、终端输出或重新获得焦点的时刻，闪烁的空闲期限从这里算。
-    cursor_blink_active_at: Instant,
-    /// 闪烁因空闲到期停了，光标常亮；有了活动（`reset_cursor_blink`）才恢复。
-    cursor_blink_stopped: bool,
+    cursor_blink: cursor_blink::CursorBlink,
     /// 接上的是提前启动的 shell 时它启动用的尺寸，第一次布局时比对过就清掉。
     adopted_size: Option<GridSize>,
     /// 要启动 shell，等下一次布局量出实际尺寸再启动。shell 读启动配置期间才收到尺寸变化时，
@@ -235,8 +228,6 @@ pub struct TerminalView {
     /// 前台 agent 上次换了种类或状态的时刻，agent 列表按它排同一状态里的先后。
     agent_changed_at: Instant,
     _hold_timeout: Option<Task<()>>,
-    /// 有焦点、光标在闪时才运行的闪烁计时器，见 `sync_cursor_blink`。
-    _cursor_blink: Option<Task<()>>,
     /// 图片动画到下一帧时重画的计时器。
     _image_frame: Option<Task<()>>,
     /// 拖选到网格外时运行的自动滚动计时器。
