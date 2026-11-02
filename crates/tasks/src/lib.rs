@@ -1,5 +1,6 @@
-//! 列一个目录里能跑的命令（`list`），以及看板新开的工作树先跑什么（`worktree_setup`）。`list` 先列
-//! runode 根目录的 `tasks.json` 里自己加的、这个目录所在项目的和通用的命令，再从目录往上找最近的
+//! 列一个目录里能跑的命令（`list`），看板新开的工作树先跑什么（`worktree_setup`），以及改写 `tasks.json`
+//! 里自己加的命令和快捷键（`file`）。`list` 先列 runode 根目录的 `tasks.json` 里自己加的、这个目录所在项目的
+//! 和通用的命令，再从目录往上找最近的
 //! Makefile 和 package.json，读出目标和 scripts，拼好在这个目录里能直接跑的命令行。宿主用它回
 //! `ClientMsg::ListTasks`，手机在会话卡片上、桌面在标题栏的菜单里列出来。只读几个小文件，但在断掉的网络挂载上也会一直卡住，调用方别在要及时响应的线程上调。
 
@@ -11,6 +12,8 @@ use std::{
 };
 
 use runode_types::tasks::{MAX_TASKS, TaskEntry, TaskSource, TaskSourceKind};
+
+pub mod file;
 
 /// make 按这个顺序找默认的 makefile。
 const MAKEFILE_NAMES: [&str; 3] = ["GNUmakefile", "makefile", "Makefile"];

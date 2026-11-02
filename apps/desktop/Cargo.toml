@@ -39,6 +39,8 @@ runode-ssh.workspace = true
 runode-speech.workspace = true
 # 看板的定时对话框和手机设置页按本地时间写钟点。
 runode-todo.workspace = true
+# 自己加命令、录快捷键时改写 tasks.json。
+runode-tasks.workspace = true
 # Markdown 引用的图片解码前先读头算解码后多大。
 gif.workspace = true
 image.workspace = true

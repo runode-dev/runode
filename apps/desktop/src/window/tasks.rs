@@ -14,6 +14,7 @@ use gpui::{Action, App, Context, Entity, Focusable, MouseButton, SharedString, W
 use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
+use runode_tasks::file::Keys;
 use runode_types::pane::Axis;
 
 pub(super) use custom::AddTaskDialog;
@@ -348,7 +349,7 @@ impl WindowView {
         let DeleteTask { project, name } = action.clone();
         let job = cx.background_spawn(async move {
             let file = Dirs::from_env().tasks_file().ok_or("no home directory")?;
-            custom::write_task(&file, &dir, (project.as_deref(), &name), None, custom::Keys::Keep)
+            runode_tasks::file::write_task(&file, &dir, (project.as_deref(), &name), None, Keys::Keep, &custom::RULES)
         });
         cx.spawn(async move |this, cx| {
             let deleted = job.await;
