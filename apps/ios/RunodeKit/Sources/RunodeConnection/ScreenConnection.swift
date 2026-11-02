@@ -105,28 +105,21 @@ public struct ScreenEvents: AsyncSequence, Sendable {
     fileprivate let decoder: FrameDecoder
 
     public func makeAsyncIterator() -> Iterator {
-        Iterator(transport: transport, decoder: decoder)
+        Iterator(reader: FrameReader(
+            transport: transport, decoder: decoder, closed: String(localized: "电脑关闭了远程桌面")))
     }
 
     public struct Iterator: AsyncIteratorProtocol, Sendable {
-        fileprivate let transport: any FrameTransport
-        fileprivate var decoder: FrameDecoder
+        fileprivate var reader: FrameReader
         fileprivate var finished = false
 
         public mutating func next() async throws -> ScreenEvent? {
             guard !finished else { return nil }
             do {
-                while true {
-                    if let frame = try decoder.next() { return try ScreenConnection.event(from: frame) }
-                    guard let chunk = try await transport.receive() else {
-                        try decoder.finish()
-                        throw LinkFailure.closed(String(localized: "电脑关闭了远程桌面"))
-                    }
-                    decoder.append(chunk)
-                }
+                return try ScreenConnection.event(from: try await reader.next())
             } catch {
                 finished = true
-                transport.close()
+                reader.transport.close()
                 throw error
             }
         }

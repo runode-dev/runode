@@ -25,6 +25,8 @@ public struct GateOutcome: Sendable {
 struct FrameReader {
     let transport: any FrameTransport
     var decoder: FrameDecoder
+    /// 对面关了连接时报的话。
+    var closed = String(localized: "电脑关闭了连接")
 
     /// 下一帧；对面关了连接时报错。
     mutating func next() async throws -> Frame {
@@ -34,7 +36,7 @@ struct FrameReader {
             }
             guard let chunk = try await transport.receive() else {
                 try decoder.finish()
-                throw LinkFailure.closed(String(localized: "电脑关闭了连接"))
+                throw LinkFailure.closed(closed)
             }
             decoder.append(chunk)
         }
