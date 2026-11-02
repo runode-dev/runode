@@ -310,14 +310,24 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         let id = view.read(cx).host().clone();
-        let HostId::Ssh(name) = &id else {
-            return;
-        };
-        let Some(host) = ssh::remote(name) else {
-            return;
+        let job = match &id {
+            HostId::Local => return,
+            HostId::Ssh(name) => {
+                let Some(host) = ssh::remote(name) else {
+                    return;
+                };
+                cx.background_spawn(async move { ssh::upload::upload(&host, upload) })
+            }
+            // 配对的电脑没有 ssh，经读写项目的连接传。
+            HostId::Paired(_) => {
+                let (project, home) = (ProjectHost::of(&id), id.home());
+                cx.background_spawn(async move {
+                    let home = home.ok_or_else(|| anyhow::anyhow!("the home directory there is not known yet"))?;
+                    crate::project_host::upload::upload(&project, &home, upload)
+                })
+            }
         };
         let quoting = Quoting::of_session(view.read(cx).meta());
-        let job = cx.background_spawn(async move { ssh::upload::upload(&host, upload) });
         let view = view.downgrade();
         cx.spawn_in(window, async move |_, cx| {
             let uploaded = job.await;

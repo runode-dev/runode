@@ -145,7 +145,7 @@ fn send(host: &RemoteHost, file: Option<&str>, input: &mut dyn Read) -> Result<S
 }
 
 /// 这次上传在远端的子目录名：秒数、进程号加计数，同一台电脑上不会重。
-fn upload_id() -> String {
+pub(crate) fn upload_id() -> String {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let secs = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs());
     format!("{secs}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))

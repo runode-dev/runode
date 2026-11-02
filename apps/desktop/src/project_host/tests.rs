@@ -15,7 +15,7 @@ use runode_git::{CommitOptions, DiffSide, GrepQuery, UntrackedCache};
 use super::{ProjectHost, client::Client, serve};
 
 /// 同一个进程里的项目服务，桌面这头经管道和它说话。
-fn remote() -> ProjectHost {
+pub(super) fn remote() -> ProjectHost {
     let (requests, to_service) = std::io::pipe().unwrap();
     let (from_service, responses) = std::io::pipe().unwrap();
     thread::spawn(move || serve::serve(BufReader::new(requests), responses));

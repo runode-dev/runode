@@ -9,6 +9,7 @@ mod scan;
 pub(crate) mod serve;
 #[cfg(test)]
 mod tests;
+pub(crate) mod upload;
 mod wire;
 
 use std::{
