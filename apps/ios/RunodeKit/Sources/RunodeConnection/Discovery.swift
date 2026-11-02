@@ -92,7 +92,7 @@ private struct Waiting {
     var result: TransportTarget??
 }
 
-/// 用 Bonjour 浏览 `_runode._tcp`：电脑开着远程访问时公布这个服务，TXT 记录里有 `v=1` 和 `fp=<指纹>`。
+/// 用 Bonjour 浏览 `_runode._tcp`：电脑开着远程访问时公布这个服务，TXT 记录里有门禁版本和证书指纹（`bonjourFingerprintKey`）。
 /// 要 Info.plist 里的 `NSLocalNetworkUsageDescription` 和 `NSBonjourServices`。
 public struct BonjourDiscovery: HostDiscovery {
     public static let serviceType = "_runode._tcp"
@@ -133,7 +133,7 @@ public struct BonjourDiscovery: HostDiscovery {
                 }
                 browser.browseResultsChangedHandler = { results, _ in
                     for result in results {
-                        guard case .bonjour(let txt) = result.metadata, let fp = txt["fp"],
+                        guard case .bonjour(let txt) = result.metadata, let fp = txt[bonjourFingerprintKey],
                             CertificateFingerprint(text: fp) == fingerprint
                         else { continue }
                         var label = "Bonjour"

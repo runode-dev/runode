@@ -107,6 +107,15 @@ pub const GATE_MAX_PAYLOAD: u32 = 16 << 10;
 pub const PAIRING_TTL: Duration = Duration::from_secs(5 * 60);
 /// Bonjour 公布的服务类型。
 pub const BONJOUR_SERVICE: &str = "_runode._tcp";
+/// Bonjour TXT 记录里门禁版本（`GATE_VERSION`）的键。
+pub const BONJOUR_VERSION_KEY: &str = "v";
+/// Bonjour TXT 记录里证书指纹（base64url）的键：手机按它认出公布的是不是配对过的那台电脑。
+pub const BONJOUR_FINGERPRINT_KEY: &str = "fp";
+
+/// 远程访问在 Bonjour 上公布的 TXT 记录，证书指纹是 `fingerprint`。
+pub fn bonjour_txt(fingerprint: &[u8; FINGERPRINT_LEN]) -> [(&'static str, String); 2] {
+    [(BONJOUR_VERSION_KEY, GATE_VERSION.to_string()), (BONJOUR_FINGERPRINT_KEY, encode_base64url(fingerprint))]
+}
 /// 配对 URI 的开头，见 `PairingUri`。
 pub const PAIRING_URI_PREFIX: &str = "runode://pair?";
 

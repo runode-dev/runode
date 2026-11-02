@@ -7,6 +7,11 @@ import Foundation
 /// 门禁的版本。宿主的 `remote_challenge` 里报的版本不是它时断开，提示升级。
 public let gateVersion: UInt32 = 1
 
+/// 电脑在 Bonjour TXT 记录里写门禁版本的键。
+public let bonjourVersionKey = "v"
+/// 电脑在 Bonjour TXT 记录里写证书指纹（base64url）的键。
+public let bonjourFingerprintKey = "fp"
+
 /// 宿主为什么拒绝。不认识的取值读成 `unknown`，按通用失败处理。
 public enum GateRejection: Hashable, Sendable, Codable {
     /// 没配对，或者已经在电脑上撤销了。

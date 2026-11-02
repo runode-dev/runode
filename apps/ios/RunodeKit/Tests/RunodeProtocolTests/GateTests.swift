@@ -115,6 +115,19 @@ func remoteFixtures() -> [URL] {
         }
     }
 
+    /// Rust 那边 Bonjour TXT 记录的样例（`bonjour_txt.json`）用的键和这里认的一样。
+    @Test func bonjourTxtKeysMatchTheMac() throws {
+        struct Sample: Decodable {
+            var fingerprint: String
+            var txt: [String: String]
+        }
+        let sample = try JSONDecoder().decode(
+            Sample.self, from: Data(contentsOf: remoteFixtureDirectory.appending(path: "bonjour_txt.json")))
+        #expect(sample.txt[bonjourVersionKey] == String(gateVersion))
+        let fingerprint = try #require(sample.txt[bonjourFingerprintKey].flatMap(CertificateFingerprint.init(text:)))
+        #expect(fingerprint.description == sample.fingerprint)
+    }
+
     /// Rust 那边配对链接的样例（`pair_uri.json`）解出来的各项和它列的一样。
     @Test func macPairingLinkParses() throws {
         struct Sample: Decodable {

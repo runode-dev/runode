@@ -7,7 +7,7 @@ use std::{net::IpAddr, path::Path};
 use runode_protocol::{
     ClientKind, ClientMsg, Frame, FrameError, FrameKind,
     remote::{
-        Bytes, DeviceId, GATE_MAX_PAYLOAD, GateClientMsg, GateHostMsg, PairingUri, Purpose, RejectReason,
+        Bytes, DeviceId, GATE_MAX_PAYLOAD, GateClientMsg, GateHostMsg, PairingUri, Purpose, RejectReason, bonjour_txt,
         decode_base64url, encode_base64url, read_gate_frame, signed_bytes,
     },
     write_frame,
@@ -171,6 +171,24 @@ fn base64url_round_trips_and_is_strict() {
     assert!(decode_base64url("Zh").is_err());
     assert!(decode_base64url("Zm9=").is_err());
     assert!(decode_base64url("Zm9v Zg").is_err());
+}
+
+#[test]
+fn the_bonjour_txt_record_matches_the_fixture() {
+    let json = fixture("bonjour_txt.json");
+    let fingerprint: [u8; 32] = bytes(&json["fingerprint"]).try_into().unwrap();
+    let txt: Vec<(String, String)> =
+        bonjour_txt(&fingerprint).into_iter().map(|(key, value)| (key.to_owned(), value)).collect();
+    let expected: Vec<(String, String)> = json["txt"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(key, value)| (key.clone(), value.as_str().unwrap().to_owned()))
+        .collect();
+    assert_eq!(txt.len(), expected.len());
+    for pair in &txt {
+        assert!(expected.contains(pair), "{pair:?}");
+    }
 }
 
 #[test]

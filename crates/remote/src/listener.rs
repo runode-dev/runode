@@ -16,7 +16,7 @@ use std::{
 };
 
 use runode_paths::Dirs;
-use runode_protocol::remote::{Bytes, DeviceId, GATE_VERSION, encode_base64url};
+use runode_protocol::remote::{Bytes, DeviceId, bonjour_txt, encode_base64url};
 use rustls::{ServerConfig, crypto::ring::default_provider, version::TLS13};
 
 use crate::{
@@ -270,8 +270,9 @@ impl Listener {
             .name("remote-listener".into())
             .spawn(move || accept_loop(&thread_shared, &listeners, &wake_rx))?;
         let bonjour = if advertise {
-            let version = GATE_VERSION.to_string();
-            match bonjour::register(&host_name, port, &[("v", &version), ("fp", &fp)]) {
+            let txt = bonjour_txt(&fingerprint);
+            let txt: Vec<(&str, &str)> = txt.iter().map(|(key, value)| (*key, value.as_str())).collect();
+            match bonjour::register(&host_name, port, &txt) {
                 Ok(registration) => Some(registration),
                 Err(err) => {
                     tracing::warn!("cannot advertise remote access over Bonjour: {err}");
