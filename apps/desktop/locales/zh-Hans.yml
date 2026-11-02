@@ -169,6 +169,7 @@ workspace:
   host_pair: Runode 配对
   host_pair_hint: 另一台开着远程访问的电脑
   host_paired: 配对的电脑
+  host_paired_name: "%{name}（配对）"
   pair_link: 配对链接
   pair_link_placeholder: "runode://pair?…"
   pair_connect: 配对

@@ -91,14 +91,23 @@ pub fn default_name(host: &HostId) -> String {
 }
 
 /// 远端主机 `host` 在界面上显示的名字：用户起过名字时是那个名字，否则是 `default_name`。本机是「本机」。
+/// 配对的电脑没起过名字、主机名又和某台 SSH 主机的显示名一样时（多半就是同一台经两条路连着），注明是配对的
+/// 那台，侧栏和主机菜单里才分得清。
 pub fn display_name(host: &HostId, cx: &App) -> String {
     let Some(key) = host.key() else {
         return rust_i18n::t!("workspace.host_local").into_owned();
     };
-    match cx.try_global::<HostNames>().and_then(|names| names.0.get(&key)) {
-        Some(name) => name.clone(),
-        None => default_name(host),
+    if let Some(name) = cx.try_global::<HostNames>().and_then(|names| names.0.get(&key)) {
+        return name.clone();
     }
+    let name = default_name(host);
+    let clashes = || {
+        hosts::remotes().iter().any(|other| matches!(other, HostId::Ssh(_)) && display_name(other, cx) == name)
+    };
+    if matches!(host, HostId::Paired(_)) && clashes() {
+        return rust_i18n::t!("workspace.host_paired_name", name = name).into_owned();
+    }
+    name
 }
 
 /// 用户给远端主机 `host` 起过名字。

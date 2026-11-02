@@ -169,6 +169,7 @@ workspace:
   host_pair: Runode Pairing
   host_pair_hint: Another computer with remote access turned on
   host_paired: Paired computer
+  host_paired_name: "%{name} (paired)"
   pair_link: Pairing link
   pair_link_placeholder: "runode://pair?…"
   pair_connect: Pair

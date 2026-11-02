@@ -169,6 +169,7 @@ workspace:
   host_pair: Runode 配對
   host_pair_hint: 另一台開著遠端存取的電腦
   host_paired: 配對的電腦
+  host_paired_name: "%{name}（配對）"
   pair_link: 配對連結
   pair_link_placeholder: "runode://pair?…"
   pair_connect: 配對
