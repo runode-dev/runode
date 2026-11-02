@@ -20,9 +20,6 @@ use crate::{
     refine::Refiner,
 };
 
-/// 等新画面最多这么久就回来看一眼要不要停、要不要重编。
-const FRAME_WAIT: Duration = Duration::from_millis(100);
-
 /// 后端交来的一张画面：BGRx（每像素四字节，蓝绿红，第四个字节不管），每行 `stride` 字节。
 pub(crate) struct Picture<'a> {
     pub(crate) data: &'a [u8],
@@ -168,9 +165,7 @@ impl Pipeline {
                 thread::sleep(interval - since);
             }
             last_poll = Instant::now();
-            let refine_in = refiner.wait(Instant::now());
-            let timeout = refine_in.map_or(FRAME_WAIT, |wait| wait.min(FRAME_WAIT));
-            let changed = match self.source.wait(timeout) {
+            let changed = match self.source.wait(refiner.timeout(Instant::now())) {
                 Ok(changed) => changed,
                 Err(err) => {
                     sink(Event::Stopped(err.to_string()));
@@ -218,11 +213,7 @@ impl Pipeline {
                 }
             }
             last_encoded = now;
-            if boost {
-                refiner.refined(now);
-            } else {
-                refiner.changed(now);
-            }
+            refiner.encoded(now, boost);
         }
     }
 }

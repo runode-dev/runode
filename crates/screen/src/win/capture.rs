@@ -68,15 +68,11 @@ use super::{
 use crate::{
     Codec, Event, Options,
     nv12::{self, Area},
-    refine::Refiner,
+    refine::{REPEAT_DELAY, Refiner},
 };
 
-/// 等新画面最多这么久就回来看一眼要不要停、要不要重编。
-const FRAME_WAIT: Duration = Duration::from_millis(100);
 /// 编码器没收下的画面过这么久再试。
 const RETRY_WAIT: Duration = Duration::from_millis(5);
-/// 要了关键帧这么久还没有新画面把它带出来，就重编最近一张。
-const REPEAT_DELAY: Duration = Duration::from_millis(100);
 /// 桌面复制断了（换到安全桌面、改了分辨率）以后隔这么久重连一次。
 const REOPEN_WAIT: Duration = Duration::from_millis(250);
 /// 轮流用的 NV12 纹理张数：交给编码器的那张编完之前不能再写。
@@ -290,8 +286,7 @@ impl Pipeline {
         let mut refiner = Refiner::default();
         // 编码器出错停了时它自己报过 `Event::Stopped`。
         while !self.state.stop.load(Ordering::Relaxed) && !self.state.encoder.stopped() {
-            let refine_in = refiner.wait(Instant::now());
-            let wait = if pending { RETRY_WAIT } else { refine_in.map_or(FRAME_WAIT, |wait| wait.min(FRAME_WAIT)) };
+            let wait = if pending { RETRY_WAIT } else { refiner.timeout(Instant::now()) };
             match self.next_frame(wait) {
                 Ok(true) => {
                     have_frame = true;
@@ -314,11 +309,7 @@ impl Pipeline {
                 let now = Instant::now();
                 if encoded {
                     // 重编的关键帧按原来的码率编，补清楚的画面又糊了，和新画面一样停下以后重新补。
-                    if pending || repeat {
-                        refiner.changed(now);
-                    } else if refine {
-                        refiner.refined(now);
-                    }
+                    refiner.encoded(now, !(pending || repeat));
                     pending = false;
                     last_encoded = now;
                 } else if pending || repeat {

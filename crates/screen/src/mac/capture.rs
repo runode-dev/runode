@@ -32,13 +32,13 @@ use super::{
     awake::KeepAwake,
     encoder::{Encoder, Sink},
 };
-use crate::{Codec, Event, Options, refine::Refiner};
+use crate::{
+    Codec, Event, Options,
+    refine::{REPEAT_DELAY, Refiner},
+};
 
 /// 等 ScreenCaptureKit 的完成回调最多这么久。
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
-/// 要了关键帧这么久还没有新帧把它带出来，就重编最近一张：屏幕在变时用不着重编，接连要关键帧时
-/// 也不至于一直重编。
-const REPEAT_DELAY: Duration = Duration::from_millis(100);
 /// `SCStreamConfiguration::queueDepth` 不该超过的帧数，ScreenCaptureKit 的文档这样要求。
 const MAX_QUEUE_DEPTH: isize = 8;
 
