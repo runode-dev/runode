@@ -149,7 +149,13 @@ public final class AppModel {
         let route = Route.terminal(machine: machine, session: session)
         // 栈顶已经是这个终端页、只是切到了别的分屏时，回到它本身。
         panes[route] = nil
-        if path.last == .machine(machine) {
+        push(route, machine: machine, ontoStack: path.last == .machine(machine))
+    }
+
+    /// 打开这台电脑的页 `route`：`ontoStack` 为真时压在当前页上面，否则连同这台电脑的会话列表一起换上，
+    /// 返回时先回到列表。
+    private func push(_ route: Route, machine: UUID, ontoStack: Bool) {
+        if ontoStack {
             path.append(route)
         } else {
             path = [.machine(machine), route]
@@ -193,11 +199,7 @@ public final class AppModel {
     public func openGit(machine: UUID, session: SessionId) {
         let route = Route.git(machine: machine, session: session)
         if path.last == route { return }
-        if path.first == .machine(machine) {
-            path.append(route)
-        } else {
-            path = [.machine(machine), route]
-        }
+        push(route, machine: machine, ontoStack: path.first == .machine(machine))
     }
 
     public func git(machine machineId: UUID, session: SessionId) -> GitModel? {
@@ -217,11 +219,7 @@ public final class AppModel {
     public func openScreen(machine: UUID) {
         let route = Route.screen(machine)
         if path.last == route { return }
-        if path.first == .machine(machine) {
-            path.append(route)
-        } else {
-            path = [.machine(machine), route]
-        }
+        push(route, machine: machine, ontoStack: path.first == .machine(machine))
     }
 
     public func screen(machine machineId: UUID) -> ScreenModel? {
@@ -414,18 +412,9 @@ public final class AppModel {
     private func pathChanged() {
         panes = panes.filter { path.contains($0.key) }
         let live = Set(path.map(shown))
-        for (route, model) in terminals where !live.contains(route) {
-            model.close()
-            terminals[route] = nil
-        }
-        for (route, model) in gits where !live.contains(route) {
-            model.close()
-            gits[route] = nil
-        }
-        for (route, model) in screens where !live.contains(route) {
-            model.close()
-            screens[route] = nil
-        }
+        Self.closeAbsent(&terminals, live: live) { $0.close() }
+        Self.closeAbsent(&gits, live: live) { $0.close() }
+        Self.closeAbsent(&screens, live: live) { $0.close() }
         if case .terminal(let machine, let session)? = path.last.map(shown) {
             remember(machine: machine, session: session)
             shownHistory.removeAll { $0 == session }
@@ -435,6 +424,16 @@ public final class AppModel {
         let viewed = Set(path.map(\.machine))
         for (id, list) in sessionLists {
             list.link.setFocused(viewed.contains(id))
+        }
+    }
+
+    /// 关掉、拿走 `models` 里不在 `live` 中的页。
+    private static func closeAbsent<Model>(
+        _ models: inout [Route: Model], live: Set<Route>, close: (Model) -> Void
+    ) {
+        for (route, model) in models where !live.contains(route) {
+            close(model)
+            models[route] = nil
         }
     }
 
