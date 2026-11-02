@@ -4,7 +4,7 @@ use std::io::Write;
 
 use anyhow::{Context as _, bail};
 use runode_autostart::{
-    Kind, Start, install as write_service, is_installed, service_file, starts_at_boot, uninstall as remove_service,
+    Kind, Registration, Start, install as write_service, registration, starts_at_boot, uninstall as remove_service,
 };
 
 use crate::Env;
@@ -16,9 +16,11 @@ pub(crate) fn install(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::Res
     // 服务文件里写的是可执行文件的真实位置：`rn`、`runode` 这些链接以后可能指到别处。
     let exe = std::env::current_exe().and_then(std::fs::canonicalize).context("cannot find the runode executable")?;
     match write_service(kind, &env.dirs, &exe, Start::Now)? {
-        Some(path) => writeln!(out, "Installed {}: runode {} starts at login.", path.display(), kind.name())?,
-        None if cfg!(windows) => writeln!(out, "Registered the host under HKCU\\{}: it starts at login.", run_key())?,
-        None => writeln!(out, "Added Runode to the login items: the app opens at login.")?,
+        Registration::File(path) => {
+            writeln!(out, "Installed {}: runode {} starts at login.", path.display(), kind.name())?;
+        }
+        place @ Registration::RunKey => writeln!(out, "Registered the host under {place}: it starts at login.")?,
+        Registration::LoginItem => writeln!(out, "Added Runode to the login items: the app opens at login.")?,
     }
     if kind == Kind::Host {
         writeln!(out, "The host keeps running in the background, even with no sessions, until you end it.")?;
@@ -48,14 +50,9 @@ pub(crate) fn uninstall(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::R
 
 pub(crate) fn status(env: &Env, out: &mut dyn Write) -> anyhow::Result<()> {
     for kind in Kind::ALL.into_iter().filter(|kind| kind.supported()) {
-        if !is_installed(kind, &env.dirs) {
-            writeln!(out, "{:<5} not installed", kind.name())?;
-            continue;
-        }
-        match service_file(kind, &env.dirs).filter(|path| path.exists()) {
-            Some(path) => writeln!(out, "{:<5} installed  {}", kind.name(), path.display())?,
-            None if cfg!(windows) => writeln!(out, "{:<5} installed  HKCU\\{}", kind.name(), run_key())?,
-            None => writeln!(out, "{:<5} installed  System Settings > General > Login Items", kind.name())?,
+        match registration(kind, &env.dirs) {
+            Some(place) => writeln!(out, "{:<5} installed  {place}", kind.name())?,
+            None => writeln!(out, "{:<5} not installed", kind.name())?,
         }
     }
     Ok(())
@@ -105,12 +102,4 @@ pub(crate) fn upgrade(env: &Env, out: &mut dyn Write) -> anyhow::Result<()> {
         }
         _ => bail!("the host did not come back as this build; its log says why"),
     }
-}
-
-/// Windows 上登录自启登记的注册表键（`HKEY_CURRENT_USER` 之下），别的系统上用不到。
-fn run_key() -> &'static str {
-    #[cfg(windows)]
-    return runode_autostart::RUN_KEY;
-    #[cfg(not(windows))]
-    ""
 }

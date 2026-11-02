@@ -23,6 +23,30 @@ mod run_key;
 #[cfg(windows)]
 pub use run_key::RUN_KEY;
 
+/// 登录自启登记在哪。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Registration {
+    /// launchd 的 LaunchAgent 或 systemd 的用户单元文件。
+    File(PathBuf),
+    /// Windows 当前用户的 `Run` 键，`HKEY_CURRENT_USER` 之下。
+    RunKey,
+    /// macOS 系统设置里的登录项。
+    LoginItem,
+}
+
+impl std::fmt::Display for Registration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::File(path) => write!(f, "{}", path.display()),
+            #[cfg(windows)]
+            Self::RunKey => write!(f, "HKCU\\{RUN_KEY}"),
+            #[cfg(not(windows))]
+            Self::RunKey => f.write_str("the Run key"),
+            Self::LoginItem => f.write_str("System Settings > General > Login Items"),
+        }
+    }
+}
+
 /// 登录时拉起什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -34,6 +58,11 @@ pub enum Kind {
 
 impl Kind {
     pub const ALL: [Self; 2] = [Self::Host, Self::App];
+
+    /// 命令行里写 `name` 的那种。
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
 
     /// 命令行里的写法。
     pub fn name(self) -> &'static str {
@@ -204,16 +233,20 @@ fn systemd_unit_file(dirs: &Dirs) -> io::Result<PathBuf> {
 
 /// 装了没有。app 登记成登录项的系统上，已有的 LaunchAgent 也算：它照样在登录时开 app。
 pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
+    registration(kind, dirs).is_some()
+}
+
+/// `kind` 的登录自启现在登记在哪，没装时为空。
+pub fn registration(kind: Kind, dirs: &Dirs) -> Option<Registration> {
     #[cfg(windows)]
     if kind == Kind::Host {
-        return run_key::is_installed();
+        return run_key::is_installed().then_some(Registration::RunKey);
     }
-    let has_file = service_file(kind, dirs).is_some_and(|path| path.exists());
     #[cfg(target_os = "macos")]
-    if kind == Kind::App && login_item::available() {
-        return login_item::is_enabled() || has_file;
+    if kind == Kind::App && login_item::available() && login_item::is_enabled() {
+        return Some(Registration::LoginItem);
     }
-    has_file
+    service_file(kind, dirs).filter(|path| path.exists()).map(Registration::File)
 }
 
 /// 装好登录自启后宿主什么时候起。
@@ -225,18 +258,18 @@ pub enum Start {
     Later,
 }
 
-/// 装上 `kind` 的登录自启，返回写的服务文件；app 登记成登录项时、Windows 上没有服务文件，返回 `None`。`exe` 是
+/// 装上 `kind` 的登录自启，返回登记在哪。`exe` 是
 /// runode 可执行文件；`Kind::App` 时它得在 `Runode.app` 里，登记的就是这个 app。可以重复装，每次整个
 /// 换掉服务文件。
 ///
 /// 宿主按 `start` 决定马上起还是等下次登录，经服务管理器起的崩了会被拉起来；app 不管 `start`，下次登录
 /// 才开，免得在设置里点一下开关就把窗口翻到前面。宿主已经在服务管理器里跑着时不重启它：它托管着会话，
 /// 一重启会话就丢了，新的服务文件等它下次起来时才用上。
-pub fn install(kind: Kind, dirs: &Dirs, exe: &Path, start: Start) -> io::Result<Option<PathBuf>> {
+pub fn install(kind: Kind, dirs: &Dirs, exe: &Path, start: Start) -> io::Result<Registration> {
     #[cfg(windows)]
     if kind == Kind::Host {
         run_key::install(exe, start)?;
-        return Ok(None);
+        return Ok(Registration::RunKey);
     }
     let path = service_file(kind, dirs).ok_or_else(|| unsupported(kind))?;
     let bundle = || {
@@ -250,7 +283,7 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path, start: Start) -> io::Result<
         login_item::register()?;
         // 已有的 LaunchAgent 删掉，不然登录时 app 开两回。
         remove_if_there(&path)?;
-        return Ok(None);
+        return Ok(Registration::LoginItem);
     }
     let content = match (kind, cfg!(target_os = "macos")) {
         (Kind::Host, true) => plist(kind.label(), &[&exe.to_string_lossy(), "--host", "--stay"], true),
@@ -338,7 +371,7 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path, start: Start) -> io::Result<
         }
         (Kind::App, _) => {}
     }
-    Ok(Some(path))
+    Ok(Registration::File(path))
 }
 
 /// Linux 上这个用户开着 linger，即宿主不用等人登录、开机就起（`install` 会试着开）。卸载时不关它：
