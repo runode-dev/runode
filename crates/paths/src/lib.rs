@@ -489,6 +489,18 @@ pub fn home_relative(path: &Path, home: &Path, separator: char) -> Option<String
 /// 同一目录的临时文件再改名换上，写到一半崩溃或磁盘满时原文件原样还在，不会被截成空的。`path` 是
 /// 符号链接时换的是它最终指向的文件，链接留着，dotfiles 管理器靠它；原文件的权限照旧，新建的文件只有自己能读。目录要已经有了。
 pub fn replace_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    replace(path, contents, true)
+}
+
+/// 把 `contents` 整个换进只给自己看的文件 `path`（设备表、密钥这类）：和 `replace_file` 一样先写临时文件
+/// 再换上去，换上后不管原文件什么权限，都只有自己能读写。
+pub fn replace_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    replace(path, contents, false)
+}
+
+/// `keep_permissions` 时换上的文件照旧用原文件的权限，否则只有自己能读写（Unix 上 0600，Windows 上随
+/// 所在目录）。
+fn replace(path: &Path, contents: &[u8], keep_permissions: bool) -> std::io::Result<()> {
     use std::{
         io::Write as _,
         sync::atomic::{AtomicU64, Ordering},
@@ -521,7 +533,7 @@ pub fn replace_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     // 建不出临时文件时直接返回，不去删同名的那个：它不是这里建的。
     let mut file = options.open(&temp)?;
     let written = (|| {
-        if let Ok(meta) = std::fs::metadata(&target) {
+        if keep_permissions && let Ok(meta) = std::fs::metadata(&target) {
             file.set_permissions(meta.permissions())?;
         }
         file.write_all(contents)?;

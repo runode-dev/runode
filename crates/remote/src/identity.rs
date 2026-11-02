@@ -9,7 +9,8 @@ use runode_paths::Dirs;
 use runode_protocol::remote::FINGERPRINT_LEN;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
-use crate::files::{no_home, read_optional, write_private};
+use crate::files::{no_home, read_optional};
+use runode_paths::replace_private;
 
 /// 证书和私钥。
 pub(crate) struct Identity {
@@ -33,7 +34,7 @@ pub(crate) fn load_or_create(dirs: &Dirs) -> io::Result<Identity> {
             params.distinguished_name.push(DnType::CommonName, "runode remote access");
             let cert = params.self_signed(&key).map_err(io::Error::other)?;
             let (cert, key) = (cert.der().to_vec(), key.serialize_der());
-            store(&cert_path, &key_path, &cert, &key, write_private)?;
+            store(&cert_path, &key_path, &cert, &key, replace_private)?;
             tracing::info!("generated the remote access certificate {}", cert_path.display());
             (cert, key)
         }
@@ -84,10 +85,10 @@ mod tests {
         let cert_path = dirs.remote_access_cert_file().unwrap();
         let key_path = dirs.remote_access_key_file().unwrap();
         let stale = b"stale certificate".to_vec();
-        write_private(&cert_path, &stale).unwrap();
+        replace_private(&cert_path, &stale).unwrap();
 
         let failed = store(&cert_path, &key_path, b"new certificate", b"new key", |path, bytes| {
-            if path == cert_path { Err(io::Error::other("disk full")) } else { write_private(path, bytes) }
+            if path == cert_path { Err(io::Error::other("disk full")) } else { replace_private(path, bytes) }
         });
 
         assert!(failed.is_err());

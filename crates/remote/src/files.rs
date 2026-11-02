@@ -1,17 +1,9 @@
 //! 远程访问的文件怎么读写：只有自己能读（Unix 上 0600，Windows 上靠目录的权限），写的时候先写到旁边的
 //! 临时文件再换上去，读的一方不会读到写了一半的；另外是取随机数。
 
-use std::{
-    fs::OpenOptions,
-    io::{self, Write as _},
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::{fs::OpenOptions, io, path::Path};
 
 use ring::rand::{SecureRandom as _, SystemRandom};
-
-/// `write_private` 的临时文件名里的序号：同一个进程里几个线程同时写同一个文件时各用各的临时文件。
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 /// 新建的文件只有自己能读写（0600）。
 #[cfg(unix)]
@@ -25,26 +17,6 @@ pub(crate) fn private_options() -> OpenOptions {
 #[cfg(windows)]
 pub(crate) fn private_options() -> OpenOptions {
     OpenOptions::new()
-}
-
-/// 把 `bytes` 整个换进 `path`，权限 0600。
-pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut temp = path.as_os_str().to_owned();
-    temp.push(format!(".{}.{}.tmp", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed)));
-    let temp = PathBuf::from(temp);
-    let written = (|| {
-        let mut file = private_options().write(true).create(true).truncate(true).open(&temp)?;
-        // 已经有的临时文件（上次没清掉的）沿用它原来的权限，收回来。
-        #[cfg(unix)]
-        file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        std::fs::rename(&temp, path)
-    })();
-    if written.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    written
 }
 
 /// 读整个文件；文件不存在时为 `None`。
@@ -63,11 +35,11 @@ pub(crate) fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> io::Resu
         .transpose()
 }
 
-/// 把 `value` 写成 JSON 整个换进 `path`，见 `write_private`。
+/// 把 `value` 写成 JSON 整个换进 `path`，只有自己能读写。
 pub(crate) fn write_json(path: &Path, value: &impl serde::Serialize) -> io::Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
     bytes.push(b'\n');
-    write_private(path, &bytes)
+    runode_paths::replace_private(path, &bytes)
 }
 
 /// `N` 个系统随机字节。
@@ -80,32 +52,4 @@ pub(crate) fn random<const N: usize>() -> io::Result<[u8; N]> {
 /// 路径没有时的错误：没有家目录（`runode_paths::Dirs` 的字段为 `None`）。
 pub(crate) fn no_home() -> io::Error {
     io::Error::new(io::ErrorKind::NotFound, "no home directory to keep remote access files in")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn threads_writing_the_same_file_do_not_trip_each_other() {
-        let root = std::env::temp_dir().join(format!("rra-files-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("shared.json");
-        let contents: Vec<Vec<u8>> = (0..8u8).map(|n| vec![b'a' + n; 1000 * (usize::from(n) + 1)]).collect();
-        std::thread::scope(|scope| {
-            for bytes in &contents {
-                let path = &path;
-                scope.spawn(move || {
-                    for _ in 0..50 {
-                        write_private(path, bytes).unwrap();
-                    }
-                });
-            }
-        });
-        assert!(contents.contains(&std::fs::read(&path).unwrap()));
-        // 临时文件都换上去了，没有剩下的。
-        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
-        let _ = std::fs::remove_dir_all(&root);
-    }
 }

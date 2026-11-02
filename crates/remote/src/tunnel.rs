@@ -29,7 +29,7 @@ use tokio::{
 };
 
 use crate::{
-    files::{no_home, random, read_optional, write_private},
+    files::{no_home, random, read_optional},
     listener::MAX_CONNECTIONS,
 };
 
@@ -155,7 +155,7 @@ fn secret_key(dirs: &Dirs) -> io::Result<SecretKey> {
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, format!("{} is not a key", path.display())))?,
         None => {
             let bytes = random::<32>()?;
-            write_private(&path, &bytes)?;
+            runode_paths::replace_private(&path, &bytes)?;
             bytes
         }
     };
