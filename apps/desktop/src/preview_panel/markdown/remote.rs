@@ -23,7 +23,7 @@ use futures::{FutureExt as _, channel::oneshot, future::Shared};
 use gpui::{App, SvgRenderer};
 use runode_preview::{Content, ImageFormat, MAX_IMAGE_BYTES};
 
-use super::{Picture, picture_of};
+use crate::preview_panel::picture::{Picture, picture_of};
 
 /// 一次下载连同各次重定向的总时长上限。
 const TIMEOUT: Duration = Duration::from_secs(10);

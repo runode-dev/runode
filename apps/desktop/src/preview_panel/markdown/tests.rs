@@ -1,5 +1,6 @@
 use std::sync::atomic::AtomicBool;
 
+use gpui::{Image, RenderImage};
 use runode_types::color::Rgb;
 
 use super::*;
@@ -258,40 +259,4 @@ fn shown_rows_cover_the_viewport() {
     // 刚滚进表格、空表格都不越界。
     assert_eq!(shown(5, 0.), 0..49);
     assert_eq!(shown_rows(ListOffset { item_ix: 5, offset_in_item: px(0.) }, 600., 5, 30., 20., 0), 0..0);
-}
-
-/// 位图解码后的大小按尺寸算；GIF 按帧数乘每帧的整张 RGBA，数过预算就停。
-#[test]
-fn decoded_size_counts_every_gif_frame() {
-    use runode_preview::ImageFormat;
-    let mut png = Vec::new();
-    image::RgbaImage::new(100, 50).write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
-    assert_eq!(decoded_bytes(ImageFormat::Png, &png, usize::MAX), Some(100 * 50 * 4));
-    let mut gif = Vec::new();
-    let frames = (0..3).map(|_| image::Frame::new(image::RgbaImage::new(10, 10)));
-    image::codecs::gif::GifEncoder::new(&mut gif).encode_frames(frames).unwrap();
-    assert_eq!(decoded_bytes(ImageFormat::Gif, &gif, usize::MAX), Some(3 * 400));
-    // 数过预算就停：第二帧时已经超了。
-    assert_eq!(decoded_bytes(ImageFormat::Gif, &gif, 500), Some(800));
-    assert_eq!(decoded_bytes(ImageFormat::Png, b"not an image", usize::MAX), None);
-    // 一帧写得比画布大：照帧的宽高算。
-    let mut big = Vec::new();
-    let frame = image::Frame::new(image::RgbaImage::new(30, 20));
-    image::codecs::gif::GifEncoder::new(&mut big).encode_frames([frame]).unwrap();
-    big[6..10].copy_from_slice(&[1, 0, 1, 0]);
-    assert_eq!(decoded_bytes(ImageFormat::Gif, &big, usize::MAX), Some(30 * 20 * 4));
-    // 头里把画布写成 65535×65535：不照它分配，直接算出来就是太大。
-    gif[6..10].copy_from_slice(&[0xff; 4]);
-    assert_eq!(decoded_bytes(ImageFormat::Gif, &gif, 500), Some(65535 * 65535 * 4));
-}
-
-/// Markdown 里的 GIF 只按第一帧算占用，几百帧的录屏也放得进预算。
-#[test]
-fn markdown_gif_keeps_only_first_frame() {
-    let mut gif = Vec::new();
-    let frames = (0..50).map(|_| image::Frame::new(image::RgbaImage::new(10, 10)));
-    image::codecs::gif::GifEncoder::new(&mut gif).encode_frames(frames).unwrap();
-    let Some(Picture::Bitmap(_, decoded)) = first_frame(&gif) else { panic!() };
-    assert_eq!(decoded, 10 * 10 * 4);
-    assert!(first_frame(b"not a gif").is_none());
 }

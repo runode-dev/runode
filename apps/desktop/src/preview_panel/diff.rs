@@ -39,7 +39,7 @@ use runode_preview::Span;
 use super::{
     ARROW_UP_ICON, BODY_PADDING, Loaded, MAX_COLUMNS, Note, PreviewEvent, PreviewPanel, ROW_EXTRA_HEIGHT,
     body::{TEXT_RIGHT_PADDING, WRAP_SLACK, highlight_style, shown_text},
-    file_stamp, gpui_format, markdown, right_fade, shown_width,
+    file_stamp, gpui_format, picture, right_fade, shown_width,
     wrap::{WrapCache, segment},
 };
 
@@ -248,7 +248,7 @@ impl PreviewPanel {
                         return Loaded::Note(Note::TooLarge);
                     };
                     // 解码后太大的（几百帧的 GIF）也不交给 GPUI 解码。
-                    if [&new, &old].into_iter().flatten().any(|bytes| markdown::too_large_to_decode(format, bytes)) {
+                    if [&new, &old].into_iter().flatten().any(|bytes| picture::too_large_to_decode(format, bytes)) {
                         return Loaded::Note(Note::TooLarge);
                     }
                     let image = |bytes: Vec<u8>| Arc::new(Image::from_bytes(gpui_format(format), bytes));

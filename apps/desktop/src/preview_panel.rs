@@ -25,6 +25,7 @@ mod diff;
 mod edit;
 mod markdown;
 mod marks;
+mod picture;
 mod tabs;
 mod wrap;
 
@@ -466,7 +467,7 @@ fn loaded(content: Content, svg: &SvgRenderer, cell_width: fn(char) -> u8) -> Lo
             Ok(image) => Loaded::Svg(image),
             Err(err) => Loaded::Note(Note::Unreadable(err)),
         },
-        Content::Image { format, bytes } if markdown::too_large_to_decode(format, &bytes) => {
+        Content::Image { format, bytes } if picture::too_large_to_decode(format, &bytes) => {
             Loaded::Note(Note::TooLarge)
         }
         Content::Image { format, bytes } => Loaded::Image(Arc::new(Image::from_bytes(gpui_format(format), bytes))),
@@ -1054,7 +1055,7 @@ impl PreviewPanel {
                             let blocks = runode_preview::parse_markdown(&lines.join("\n"), &cancel)?;
                             let dir = path.parent().unwrap_or(Path::new("/"));
                             Some(markdown::Doc::new(blocks, dir, cell_width, |path| {
-                                markdown::picture(&project, path, &svg)
+                                picture::picture(&project, path, &svg)
                             }))
                         }
                     })
