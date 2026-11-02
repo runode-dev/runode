@@ -1,4 +1,4 @@
-//! 状态栏上的「远程主机」：这次运行里连过几台 SSH 主机（`host_client::ssh::remotes`），一台都没有时不显示。
+//! 状态栏上的「远程主机」：这次运行里连过几台远端主机（`host_client::hosts::remotes`），一台都没有时不显示。
 //! 浮层里一台一行，写着连接状态，没连着的能连上、连着的能断开；最下面一行去设置页的 SSH 主机列表，在那里
 //! 忘掉主机、装登录服务、清理旧构建。
 
@@ -6,7 +6,7 @@ use gpui::{AnyElement, Context, Div, FontWeight, Hsla, Role, SharedString, State
 
 use super::{ACTIVE_DOT, PENDING_DOT, PressDown as _, StatusPopover, popover_header};
 use crate::{
-    host_client::ssh::{self as hosts, RemoteHost, Status},
+    host_client::hosts::{self, HostId, Status},
     ui::icons::{CHEVRON_RIGHT_ICON, SERVER_ICON},
     ui::{
         button::{Button, ButtonSize, ButtonVariant},
@@ -51,7 +51,7 @@ impl WindowView {
     pub(super) fn render_hosts_popover(&self, cx: &mut Context<Self>) -> AnyElement {
         let fg = cx.theme().foreground;
         let remotes = hosts::remotes();
-        let connected = remotes.iter().filter(|host| matches!(host.status(), Status::Connected(_))).count();
+        let connected = remotes.iter().filter(|host| matches!(hosts::status_of(host), Status::Connected(_))).count();
         let header = popover_header(
             Some(SERVER_ICON),
             rust_i18n::t!("status.hosts_title").into_owned(),
@@ -102,11 +102,10 @@ impl WindowView {
     }
 
     /// 一台主机的一行：状态点、名字和状态，右边连接或断开。
-    fn render_host_row(&self, host: &RemoteHost, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_host_row(&self, host: &HostId, cx: &mut Context<Self>) -> Stateful<Div> {
         let fg = cx.theme().foreground;
-        let name = host.name.clone();
-        let title = crate::ssh_hosts::display_name(&name, cx).to_owned();
-        let status = host.status();
+        let title = crate::remote_hosts::display_name(host, cx);
+        let status = hosts::status_of(host);
         let state = state_text(host, &status);
         // 连着、正在连、等着重连的能断开（断开后不再自己重连）；别的能马上连。
         let live = matches!(status, Status::Connected(_) | Status::Connecting(_) | Status::Waiting { .. });
@@ -115,22 +114,22 @@ impl WindowView {
         let action = rust_i18n::t!(key).into_owned();
         let named = rust_i18n::t!("settings.ssh_hosts.named", action = action.as_str(), host = title.as_str());
         let button = {
-            let name = name.clone();
+            let host = host.clone();
             Button::new(op, named.into_owned())
                 .variant(ButtonVariant::Ghost)
                 .with_size(ButtonSize::Sm)
                 .child(action)
                 .on_press_down(cx, move |_, _, cx| {
                     if live {
-                        crate::ssh_hosts::disconnect(&name, cx);
-                    } else if let Some(host) = hosts::find(&name) {
-                        host.retry_now();
+                        crate::remote_hosts::disconnect(&host, cx);
+                    } else {
+                        hosts::retry_now(&host);
                     }
                 })
         };
-        // 行的 id 按主机名取，主机多了、顺序变了，辅助工具的焦点也跟着同一台主机。
+        // 行的 id 按主机取，主机多了、顺序变了，辅助工具的焦点也跟着同一台主机。
         div()
-            .id(SharedString::from(format!("host:{name}")))
+            .id(SharedString::from(format!("host:{}", host.key().unwrap_or_default())))
             .role(Role::ListItem)
             .aria_label(title.clone())
             .aria_description(state.clone())
@@ -174,12 +173,12 @@ pub(super) fn latency_text(ms: u128) -> String {
 }
 
 /// 一台主机的状态写成一行：连着时写明远端的系统、带上心跳测的延迟，没连上时是原因。
-fn state_text(host: &RemoteHost, status: &Status) -> String {
+fn state_text(host: &HostId, status: &Status) -> String {
     let Status::Connected(connected) = status else {
-        return crate::ssh_hosts::status_text(status);
+        return crate::remote_hosts::status_text(status);
     };
-    let latency = host.latency().map(|latency| latency_text(latency.as_millis()));
-    let system = crate::ssh_hosts::system_name(&connected.os);
+    let latency = hosts::latency(host).map(|latency| latency_text(latency.as_millis()));
+    let system = crate::remote_hosts::system_name(&connected.os);
     [system.map(str::to_owned), Some(rust_i18n::t!("status.host_connected").into_owned()), latency]
         .into_iter()
         .flatten()

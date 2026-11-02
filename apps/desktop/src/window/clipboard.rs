@@ -12,7 +12,7 @@ use super::{
     WindowView,
     remote::{find_session, front_window},
 };
-use crate::host_client::{Link, UiTicket, ssh::HostId};
+use crate::host_client::{Link, UiTicket, hosts::HostId};
 
 /// 程序要写剪贴板：照写，回 `Done`（`req` 为 0，见 `ClientMsg::WriteClipboard`）。
 pub(super) fn write(text: String, cx: &mut App) -> HostMsg {

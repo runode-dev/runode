@@ -24,7 +24,10 @@ use super::{
 };
 use crate::{
     config::AppConfig,
-    host_client::ssh::{self, HostId, upload::Upload},
+    host_client::{
+        hosts::HostId,
+        ssh::{self, upload::Upload},
+    },
     project_host::ProjectHost,
     terminal_view::TerminalView,
     ui::{
@@ -306,10 +309,11 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let HostId::Ssh(name) = view.read(cx).host().clone() else {
+        let id = view.read(cx).host().clone();
+        let HostId::Ssh(name) = &id else {
             return;
         };
-        let Some(host) = ssh::remote(&name) else {
+        let Some(host) = ssh::remote(name) else {
             return;
         };
         let quoting = Quoting::of_session(view.read(cx).meta());
@@ -324,9 +328,9 @@ impl WindowView {
                     }
                 }
                 Err(err) => {
-                    tracing::warn!("cannot upload to {name}: {err:#}");
+                    tracing::warn!("cannot upload to {id:?}: {err:#}");
                     let detail = format!("{err:#}");
-                    let title = rust_i18n::t!("ssh.upload_failed", host = crate::ssh_hosts::display_name(&name, cx))
+                    let title = rust_i18n::t!("ssh.upload_failed", host = crate::remote_hosts::display_name(&id, cx))
                         .into_owned();
                     // 只说一声，不等回答。
                     drop(window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&*rust_i18n::t!("ssh.ok")], cx));

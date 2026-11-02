@@ -1,6 +1,6 @@
-//! 桌面这头：每台 SSH 主机一个 `runode --ssh-project`，经主连接起，按需重起。请求带编号，回话由读线程按
-//! 编号交给等着的一方，几个请求可以同时在路上。主机连上以后才起：经主连接时不用再认证，没有主连接
-//! （Windows）时这条 ssh 自己认证，要问用户时经 askpass 问。
+//! 桌面这头：每台远端主机一条读写项目的连接，按需重起。请求带编号，回话由读线程按编号交给等着的一方，几个
+//! 请求可以同时在路上。主机连上以后才起。SSH 主机上是一个 `runode --ssh-project`，经主连接起：经主连接时不用
+//! 再认证，没有主连接（Windows）时这条 ssh 自己认证，要问用户时经 askpass 问。
 
 use std::{
     collections::HashMap,
@@ -16,16 +16,21 @@ use std::{
 };
 
 use super::wire::{self, Call, Reply, Request, Response};
-use crate::host_client::ssh::{self, Status, deploy};
+use crate::host_client::{
+    hosts::{HostId, Status},
+    ssh::{self, deploy},
+};
 
 /// 等回话时每隔这么久看一次要不要停。
 const CANCEL_POLL: Duration = Duration::from_millis(50);
 
-static CLIENTS: LazyLock<Mutex<HashMap<String, Arc<Client>>>> = LazyLock::new(Default::default);
+static CLIENTS: LazyLock<Mutex<HashMap<HostId, Arc<Client>>>> = LazyLock::new(Default::default);
 
 type Pending = Mutex<HashMap<u64, mpsc::Sender<(Reply, Vec<u8>)>>>;
 
 pub(crate) struct Client {
+    host: HostId,
+    /// `HostId::key`，报错时写它。
     name: String,
     conn: Mutex<Option<Arc<Conn>>>,
 }
@@ -38,18 +43,20 @@ struct Conn {
 }
 
 impl Client {
-    /// 主机 `name` 的那一个。
-    pub(crate) fn of(name: &str) -> Arc<Self> {
+    /// 远端主机 `host` 的那一个。
+    pub(crate) fn of(host: &HostId) -> Arc<Self> {
         let mut clients = CLIENTS.lock().unwrap_or_else(PoisonError::into_inner);
-        clients
-            .entry(name.to_owned())
-            .or_insert_with(|| Arc::new(Self { name: name.to_owned(), conn: Mutex::default() }))
-            .clone()
+        clients.entry(host.clone()).or_insert_with(|| Arc::new(Self::new(host.clone(), None))).clone()
     }
 
-    /// 忘掉主机 `name` 的那一个；还在用它的请求照样收到回话或断开。
-    pub(crate) fn forget(name: &str) {
-        CLIENTS.lock().unwrap_or_else(PoisonError::into_inner).remove(name);
+    fn new(host: HostId, conn: Option<Arc<Conn>>) -> Self {
+        let name = host.key().unwrap_or_default();
+        Self { host, name, conn: Mutex::new(conn) }
+    }
+
+    /// 忘掉远端主机 `host` 的那一个；还在用它的请求照样收到回话或断开。
+    pub(crate) fn forget(host: &HostId) {
+        CLIENTS.lock().unwrap_or_else(PoisonError::into_inner).remove(host);
     }
 
     pub(crate) fn name(&self) -> &str {
@@ -64,7 +71,7 @@ impl Client {
         output: impl Read + Send + 'static,
     ) -> Arc<Self> {
         let conn = Conn::start(name, Box::new(input), output, || {}).expect("start the reader");
-        Arc::new(Self { name: name.to_owned(), conn: Mutex::new(Some(conn)) })
+        Arc::new(Self::new(HostId::Ssh(name.to_owned()), Some(conn)))
     }
 
     /// 发一个请求，等回话，最多等 `timeout`。会阻塞。
@@ -144,7 +151,17 @@ impl Client {
         if let Some(conn) = slot.as_ref().filter(|conn| !conn.closed.load(Ordering::Relaxed)) {
             return Ok(conn.clone());
         }
-        let host = ssh::find(&self.name).ok_or_else(|| format!("no such host: {}", self.name))?;
+        let conn = match &self.host {
+            HostId::Ssh(name) => self.open_ssh(name)?,
+            HostId::Local | HostId::Paired(_) => return Err(format!("not connected to {}", self.name)),
+        };
+        *slot = Some(conn.clone());
+        Ok(conn)
+    }
+
+    /// 经 SSH 主机 `name` 的主连接起 `runode --ssh-project`。
+    fn open_ssh(&self, name: &str) -> Result<Arc<Conn>, String> {
+        let host = ssh::find(name).ok_or_else(|| format!("no such host: {}", self.name))?;
         if !matches!(host.status(), Status::Connected(_)) {
             return Err(format!("not connected to {}", self.name));
         }
@@ -157,11 +174,9 @@ impl Client {
         let (Some(input), Some(output)) = (piped.stdin, piped.stdout) else {
             return Err("ssh gave no pipes".into());
         };
-        let conn = Conn::start(&self.name, Box::new(input), output, move || {
+        Conn::start(&self.name, Box::new(input), output, move || {
             let _ = child.wait();
-        })?;
-        *slot = Some(conn.clone());
-        Ok(conn)
+        })
     }
 }
 

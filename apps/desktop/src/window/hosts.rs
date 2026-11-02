@@ -6,34 +6,34 @@ use std::collections::HashSet;
 use gpui::{App, Context, WeakEntity};
 
 use super::WindowView;
-use crate::host_client::ssh::HostId;
+use crate::host_client::hosts::HostId;
 
 /// 用着的远端主机：哪个窗口里有工作区、终端在那台机器上，或者新建工作区的对话框选着它。`this` 是问的
 /// 那个窗口：GPUI 画一个窗口、给它派发事件时，`windows` 里读不到它自己。
-pub(super) fn hosts_in_use(this: &WeakEntity<WindowView>, cx: &App) -> HashSet<String> {
+pub(super) fn hosts_in_use(this: &WeakEntity<WindowView>, cx: &App) -> HashSet<HostId> {
     let mut hosts = HashSet::new();
     let current = this.upgrade();
     let others = super::windows(cx).into_iter().filter_map(|window| window.read(cx).ok());
     for view in others.chain(current.as_ref().map(|view| view.read(cx))) {
-        hosts.extend(view.workspaces.iter().filter_map(|workspace| workspace.host.label().map(str::to_owned)));
-        hosts.extend(view.terminal_views().filter_map(|terminal| terminal.read(cx).host().label().map(str::to_owned)));
-        hosts.extend(view.new_workspace.as_ref().and_then(|dialog| dialog.host.label().map(str::to_owned)));
+        hosts.extend(view.workspaces.iter().map(|workspace| workspace.host.clone()));
+        hosts.extend(view.terminal_views().map(|terminal| terminal.read(cx).host().clone()));
+        hosts.extend(view.new_workspace.as_ref().map(|dialog| dialog.host.clone()));
     }
+    hosts.remove(&HostId::Local);
     hosts
 }
 
 impl WindowView {
-    /// 主机 `name` 的连接状态变了：它上面断开着的终端重画提示，侧栏的主机标识跟着变淡变亮。
-    pub(crate) fn remote_status_changed(&mut self, name: &str, cx: &mut Context<Self>) {
-        let host = HostId::Ssh(name.to_owned());
+    /// 主机 `host` 的连接状态变了：它上面断开着的终端重画提示，侧栏的主机标识跟着变淡变亮。
+    pub(crate) fn remote_status_changed(&mut self, host: &HostId, cx: &mut Context<Self>) {
         for view in self.terminal_views() {
-            if view.read(cx).host() == &host && view.read(cx).lost() {
+            if view.read(cx).host() == host && view.read(cx).lost() {
                 view.update(cx, |_, cx| cx.notify());
             }
         }
-        if self.workspaces.iter().any(|workspace| workspace.host == host) {
+        if self.workspaces.iter().any(|workspace| workspace.host == *host) {
             cx.notify();
         }
-        self.new_workspace_host_changed(&host, cx);
+        self.new_workspace_host_changed(host, cx);
     }
 }

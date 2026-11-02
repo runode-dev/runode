@@ -75,7 +75,7 @@ pub struct SavedWindow {
 /// 吸附在右侧面板上的远程桌面，恢复时重新连上。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedSnappedScreen {
-    /// 看的是哪台 SSH 主机（`HostId::Ssh` 的连接目标）。
+    /// 看的是哪台远端主机，`HostId::key` 的写法。
     pub host: String,
     /// 吸附在面板下方；为假时在上方。
     #[serde(default, skip_serializing_if = "is_false")]
@@ -120,7 +120,7 @@ pub enum WindowMode {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedWorkspace {
     pub name: String,
-    /// 经 SSH 连的主机（`HostId::Ssh` 的连接目标）；本机的为空。
+    /// 在哪台远端主机上，`HostId::key` 的写法：SSH 主机是连接目标，配对的电脑另有写法；本机的为空。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
     pub dir: PathBuf,

@@ -9,7 +9,7 @@
 //! 会话自己退出了）顺手结束，免得它一直留在宿主里、挡着宿主空闲退出；任务的会话不结束，要不要结束
 //! 现问宿主的看板，问不到时这一轮一个都不结束。
 
-use crate::host_client::ssh::HostId;
+use crate::host_client::hosts::HostId;
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::theme::ActiveTheme as _;
 use std::{

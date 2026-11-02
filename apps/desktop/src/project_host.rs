@@ -24,7 +24,7 @@ pub(crate) use repo::ProjectRepo;
 pub(crate) use scan::{Scan, scan};
 use wire::{Call, Reply};
 
-use crate::host_client::ssh::HostId;
+use crate::host_client::hosts::HostId;
 
 /// 读一遍远端的项目最多等这么久：大仓库第一次读 git 状态要一阵。
 const SCAN_TIMEOUT: Duration = Duration::from_secs(120);
@@ -60,16 +60,16 @@ pub(crate) fn remote_path(path: &Path) -> PathBuf {
     }
 }
 
-/// 忘掉 SSH 主机 `name` 上读写项目的那条连接，再用这台主机时从头起。
-pub(crate) fn forget(name: &str) {
-    client::Client::forget(name);
+/// 忘掉远端主机 `host` 上读写项目的那条连接，再用这台主机时从头起。
+pub(crate) fn forget(host: &HostId) {
+    client::Client::forget(host);
 }
 
 impl ProjectHost {
     pub(crate) fn of(host: &HostId) -> Self {
         match host {
             HostId::Local => Self::Local,
-            HostId::Ssh(name) => Self::Remote(client::Client::of(name)),
+            remote => Self::Remote(client::Client::of(remote)),
         }
     }
 
@@ -240,7 +240,7 @@ impl ProjectHost {
         }
     }
 
-    /// SSH 主机的名字，本机为空。
+    /// 远端主机的写法（`HostId::key`），本机为空。
     pub(crate) fn name(&self) -> Option<&str> {
         match self {
             Self::Local => None,

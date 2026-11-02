@@ -39,10 +39,7 @@ use runode_types::{
 };
 
 use crate::{
-    host_client::{
-        self, LinkEvent,
-        ssh::{HostId, Status},
-    },
+    host_client::{self, LinkEvent, hosts::HostId},
     ui::{a11y::Press, font_size::FontSize, hsla, input::InputState},
 };
 use crop::Crop;
@@ -461,10 +458,9 @@ impl TerminalView {
             HostId::Local => {
                 (rust_i18n::t!("host_lost.message").into_owned(), rust_i18n::t!("host_lost.reopen").into_owned())
             }
-            HostId::Ssh(name) => {
-                let status = host_client::ssh::remote(name).map_or(Status::Idle, |host| host.status());
-                let status = crate::ssh_hosts::status_text(&status);
-                let host = crate::ssh_hosts::display_name(name, cx);
+            remote => {
+                let status = crate::remote_hosts::status_text(&host_client::hosts::status_of(remote));
+                let host = crate::remote_hosts::display_name(remote, cx);
                 let message = rust_i18n::t!("ssh.lost", host = host, status = status).into_owned();
                 (message, rust_i18n::t!("ssh.reconnect").into_owned())
             }

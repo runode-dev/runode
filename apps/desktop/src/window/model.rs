@@ -24,7 +24,7 @@ use super::{
 };
 use crate::WorkspaceId;
 use crate::{
-    host_client::ssh::HostId,
+    host_client::hosts::HostId,
     terminal_view::{PROVISIONAL_SIZE, SHOW_WAIT, TerminalEvent, TerminalView},
     ui::menu::MenuHost as _,
 };
@@ -820,7 +820,7 @@ impl WindowView {
         let last_on_host = self.workspaces.iter().filter(|workspace| workspace.host == closing.host).count() == 1;
         if self.renaming.as_ref().is_some_and(|renaming| match &renaming.target {
             super::RenameTarget::Workspace(id) => *id == closing.id,
-            super::RenameTarget::Host(name) => last_on_host && closing.host.label() == Some(name.as_str()),
+            super::RenameTarget::Host(host) => last_on_host && closing.host == *host,
         }) {
             self.renaming = None;
         }

@@ -28,9 +28,9 @@ use super::{
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
-    host_client::ssh::{self, HostId, Status},
+    host_client::hosts::{self, HostId, Status},
     menus::OpenSettings,
-    ssh_hosts::{self, status_text},
+    remote_hosts::{self, status_text},
     ui::icons::{
         CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON, SIDEBAR_ICON,
     },
@@ -285,16 +285,17 @@ impl WindowView {
         let fg = cx.theme().foreground;
         // 状态圆点的描边和侧栏同色。
         let background = if cards(cx) { cx.theme().frame } else { cx.theme().mix(0.03) };
-        let name = match host.label() {
-            Some(name) => ssh_hosts::display_name(name, cx).to_owned(),
-            None => rust_i18n::t!("workspace.host_local_group").into_owned(),
+        let name = match host {
+            HostId::Local => rust_i18n::t!("workspace.host_local_group").into_owned(),
+            remote => remote_hosts::display_name(remote, cx),
         };
         // 起了显示名的主机，提示和辅助工具里另写上连接目标。
-        let destination = host.label().filter(|name| ssh_hosts::has_display_name(name, cx)).map(str::to_owned);
-        let renaming = self.renaming.as_ref().filter(|renaming| {
-            matches!(&renaming.target, RenameTarget::Host(renaming) if host.label() == Some(renaming.as_str()))
-        });
-        let status = host.label().map(ssh::status_of);
+        let destination = remote_hosts::has_display_name(host, cx).then(|| remote_hosts::default_name(host));
+        let renaming = self
+            .renaming
+            .as_ref()
+            .filter(|renaming| matches!(&renaming.target, RenameTarget::Host(renaming) if host == renaming));
+        let status = (!host.is_local()).then(|| hosts::status_of(host));
         let status_color = status.as_ref().map(|status| match status {
             Status::Connected(_) => hsla(ADDED),
             Status::Connecting(_) | Status::Waiting { .. } => hsla(MODIFIED),
@@ -303,17 +304,14 @@ impl WindowView {
         });
         let status_text = status.as_ref().map(status_text);
         // 按系统画 logo：本机看自己的，远端主机看上次连上时报的，没连上过的画成服务器。
-        let system = match host.label() {
-            Some(name) => ssh_hosts::system(name, cx),
-            None => Some(std::env::consts::OS),
-        };
+        let system = remote_hosts::system(host, cx);
         let icon = match system {
             Some("macos") => system_logos::APPLE,
             Some("linux") => system_logos::LINUX,
             Some("windows") => system_logos::WINDOWS,
             _ => SERVER_ICON,
         };
-        let system_name = system.and_then(ssh_hosts::system_name).map(str::to_owned);
+        let system_name = system.and_then(remote_hosts::system_name).map(str::to_owned);
         let a11y_description = [
             system_name,
             destination.clone(),
@@ -328,15 +326,16 @@ impl WindowView {
             (Some(destination), Some(status)) => Some(format!("{destination} · {status}")),
             (destination, status) => status.or_else(|| destination.clone()),
         };
-        let key = SharedString::from(match host.label() {
-            Some(name) => format!("host-ssh-{name}"),
-            None => "host-local".to_owned(),
+        let key = SharedString::from(match host {
+            HostId::Local => "host-local".to_owned(),
+            HostId::Ssh(name) => format!("host-ssh-{name}"),
+            HostId::Paired(id) => format!("host-paired-{id}"),
         });
         let new_label = rust_i18n::t!("workspace.new_on_host", host = name.as_str()).into_owned();
         let group = SharedString::from(format!("{key}-group"));
-        let rename = host.label().filter(|_| renaming.is_none()).map(|label| {
+        let rename = (!host.is_local() && renaming.is_none()).then(|| {
             let rename_label = rust_i18n::t!("workspace.rename_host", host = name.as_str()).into_owned();
-            let label = label.to_owned();
+            let label = host.clone();
             Button::new(SharedString::from(format!("{key}-rename")), rename_label.clone())
                 .with_size(ButtonSize::IconXs)
                 .icon(PENCIL_ICON)
@@ -524,9 +523,9 @@ impl WindowView {
             }
         });
         let mark = workspace.mark(cx);
-        let host = workspace.host.label().map(|name| {
-            let status = ssh::status_of(name);
-            format!("{} {}", ssh_hosts::display_name(name, cx), status_text(&status))
+        let host = (!workspace.host.is_local()).then(|| {
+            let status = hosts::status_of(&workspace.host);
+            format!("{} {}", remote_hosts::display_name(&workspace.host, cx), status_text(&status))
         });
         // 目录不画出来，悬停时看提示；和名字一样（比如家目录的 `~`）时不提示。
         let dir = Some(workspace.host.display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
@@ -768,10 +767,10 @@ impl WindowView {
         cx.notify();
     }
 
-    /// 在侧栏里把远端主机 `name` 组头上的名字换成输入框，现在的显示名全选。
-    fn start_rename_host(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// 在侧栏里把远端主机 `host` 组头上的名字换成输入框，现在的显示名全选。
+    fn start_rename_host(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
         self.finish_rename(true, window, cx);
-        let text = ssh_hosts::display_name(&name, cx).to_owned();
+        let text = remote_hosts::display_name(&host, cx);
         let select = text.len();
         let edit = InlineEdit::new(
             text,
@@ -781,11 +780,11 @@ impl WindowView {
             window,
             cx,
         );
-        self.renaming = Some(Renaming { target: RenameTarget::Host(name), edit });
+        self.renaming = Some(Renaming { target: RenameTarget::Host(host), edit });
         cx.notify();
     }
 
-    /// 结束改名；`commit` 时用输入框里的名字。workspace 的名字空的不算；主机的显示名清空时改回连接目标。
+    /// 结束改名；`commit` 时用输入框里的名字。workspace 的名字空的不算；主机的显示名清空时改回默认的名字。
     fn finish_rename(&mut self, commit: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(renaming) = self.renaming.take() else {
             return;
@@ -802,7 +801,7 @@ impl WindowView {
             }
             RenameTarget::Host(host) => {
                 if commit {
-                    ssh_hosts::set_display_name(host, &name, cx);
+                    remote_hosts::set_display_name(host, &name, cx);
                 }
             }
         }

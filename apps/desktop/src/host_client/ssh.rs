@@ -23,16 +23,11 @@ use std::{
     net::Shutdown,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{
-        Arc, Condvar, LazyLock, Mutex, Once, PoisonError,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Condvar, LazyLock, Mutex, PoisonError, atomic::Ordering},
     thread,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
-use runode_protocol::{ClientMsg, SessionId};
 use runode_ssh::{
     Destination, Ssh,
     bootstrap::{self, Family},
@@ -40,64 +35,15 @@ use runode_ssh::{
     process::{Piped, Pipes},
 };
 
-use super::{Link, Timeouts, UnixStream, build};
+use super::{
+    Link, Timeouts, UnixStream, build,
+    hosts::{
+        self, Connected, HEARTBEAT, HEARTBEAT_TIMEOUT, HostId, LIST_TIMEOUT, Phase, RETRY_DELAYS, RemoteEvent,
+        STABLE_AFTER, Status, emit,
+    },
+};
 
 pub use askpass::Ask;
-
-/// 一个终端、一个工作区在哪台机器上。
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum HostId {
-    /// 这台机器（`host_client::link`）。
-    Local,
-    /// 经 SSH 连的主机，按用户填的连接目标（`Destination` 的写法）认。
-    Ssh(String),
-}
-
-impl HostId {
-    pub fn is_local(&self) -> bool {
-        matches!(self, Self::Local)
-    }
-
-    /// 侧栏、提示里显示的主机名；本机为空。
-    pub fn label(&self) -> Option<&str> {
-        match self {
-            Self::Local => None,
-            Self::Ssh(name) => Some(name),
-        }
-    }
-
-    /// 这台机器上的家目录；远端的是连上时那边报的，没连着时为空。
-    pub fn home(&self) -> Option<PathBuf> {
-        match self {
-            Self::Local => runode_paths::Dirs::from_env().home,
-            Self::Ssh(name) => match find(name)?.status() {
-                Status::Connected(connected) => connected.home,
-                _ => None,
-            },
-        }
-    }
-
-    /// 给人看的这台机器上的路径，家目录写成 `~`；远端的路径用 `/` 分隔（`Connected::home`）。
-    pub fn display_dir(&self, dir: &Path) -> String {
-        match self {
-            Self::Local => crate::ui::display_dir(dir),
-            Self::Ssh(_) => self
-                .home()
-                .and_then(|home| runode_paths::home_relative(dir, &home, '/'))
-                .unwrap_or_else(|| dir.display().to_string()),
-        }
-    }
-}
-
-/// 到 `host` 的那条连接；远端的头一回用时开始连。认不出主机的写法时是一条从不连上的连接，请求都失败：
-/// 不能退回本机，不然远端工作区的布局、开的终端落到本机宿主上。
-pub fn link_of(host: &HostId) -> Link {
-    static NOWHERE: LazyLock<Link> = LazyLock::new(|| Link::with_timeouts(build(), Timeouts::REMOTE));
-    match host {
-        HostId::Local => super::link().clone(),
-        HostId::Ssh(name) => remote(name).map_or_else(|| NOWHERE.clone(), |remote| remote.link.clone()),
-    }
-}
 
 /// 远端主机 `name`（`Destination` 的写法）；认不出这个写法时为空。头一回取时开始连。
 pub fn remote(name: &str) -> Option<Arc<RemoteHost>> {
@@ -110,64 +56,13 @@ pub fn remote(name: &str) -> Option<Arc<RemoteHost>> {
     hosts.insert(name.to_owned(), host.clone());
     drop(hosts);
     host.start();
-    static WATCH_NETWORK: Once = Once::new();
-    WATCH_NETWORK.call_once(|| {
-        if let Err(err) = thread::Builder::new().name("remote-network".into()).spawn(watch_network) {
-            tracing::error!("cannot start watching the network: {err}");
-        }
-    });
+    hosts::watch_network_once();
     Some(host)
-}
-
-/// 每隔 `NETWORK_POLL` 看一眼：这台电脑睡过一觉，或本机的地址变了（换了网络、连上 VPN），就叫正在重连和重连
-/// 放弃了的主机马上再试（`RemoteHost::nudge`）。
-///
-/// 睡没睡过按墙上时钟比 `Instant` 多走了 `SLEPT_AFTER` 以上认：macOS 和 Linux 的 `Instant` 不算睡着的时间，
-/// App Nap 推迟定时器时两边一起慢，不算睡过。Windows 的 `Instant` 算睡着的时间，那里按比 `NETWORK_POLL` 多等了
-/// `SLEPT_AFTER` 以上认。
-fn watch_network() {
-    let addresses = || {
-        let mut addresses = runode_remote::local_addresses();
-        addresses.sort_unstable();
-        addresses
-    };
-    let mut seen = addresses();
-    let mut last = (SystemTime::now(), Instant::now());
-    loop {
-        thread::sleep(NETWORK_POLL);
-        let now = (SystemTime::now(), Instant::now());
-        let waited = now.1 - last.1;
-        let slept = now.0.duration_since(last.0).is_ok_and(|wall| wall > waited + SLEPT_AFTER)
-            || cfg!(windows) && waited > NETWORK_POLL + SLEPT_AFTER;
-        last = now;
-        let current = addresses();
-        let changed = current != seen;
-        seen = current;
-        if !slept && !changed {
-            continue;
-        }
-        tracing::info!("woke up or the network changed (slept {slept}, addresses changed {changed}): reconnecting");
-        let hosts: Vec<_> = HOSTS.lock().unwrap_or_else(PoisonError::into_inner).values().cloned().collect();
-        for host in hosts {
-            host.nudge();
-        }
-    }
-}
-
-/// `hold` 时之后新建的主机先不连，停在 `Status::Idle`，等用户 `retry_now`：启动时恢复窗口期间按配置的
-/// `ssh-restore-on-launch` 设。
-pub fn hold_new_hosts(hold: bool) {
-    HOLD_NEW.store(hold, Ordering::Relaxed);
 }
 
 /// 已经有的远端主机 `name`；没有时不新建，也不开始连。
 pub fn find(name: &str) -> Option<Arc<RemoteHost>> {
     HOSTS.lock().unwrap_or_else(PoisonError::into_inner).get(name).cloned()
-}
-
-/// 主机 `name` 现在的连接状态；还没有这台主机时是没在连，也不新建它。
-pub fn status_of(name: &str) -> Status {
-    find(name).map_or(Status::Idle, |host| host.status())
 }
 
 /// 忘掉主机 `name`：断开，让主连接退出，不再列在 `remotes` 里；之后再用它时从头连。会阻塞。
@@ -177,7 +72,15 @@ pub fn forget(name: &str) {
     };
     host.state().forgotten = true;
     host.disconnect();
-    emit(RemoteEvent::Forgotten(name.to_owned()));
+    emit(RemoteEvent::Forgotten(HostId::Ssh(name.to_owned())));
+}
+
+/// 睡醒或网络变了：叫正在重连和重连放弃了的主机马上再试（`RemoteHost::nudge`）。
+pub(super) fn nudge_all() {
+    let hosts: Vec<_> = HOSTS.lock().unwrap_or_else(PoisonError::into_inner).values().cloned().collect();
+    for host in hosts {
+        host.nudge();
+    }
 }
 
 /// 让各台主机的主连接退出，不等它们办完：app 退出时调，退出的收尾等不了多久。
@@ -208,21 +111,6 @@ pub fn remotes() -> Vec<Arc<RemoteHost>> {
     let mut hosts: Vec<_> = hosts.values().cloned().collect();
     hosts.sort_by(|a, b| a.name.cmp(&b.name));
     hosts
-}
-
-/// 远端主机上发生的、界面要知道的事。只能取一次。
-pub fn events() -> Option<UnboundedReceiver<RemoteEvent>> {
-    EVENTS.1.lock().unwrap_or_else(PoisonError::into_inner).take()
-}
-
-/// 把配置里宿主关心的部分（`messages`）告诉各台远端主机的宿主，之后新连的主机也照它。
-pub fn configure(messages: Vec<ClientMsg>) {
-    for host in remotes() {
-        for message in &messages {
-            host.link.send(message.clone());
-        }
-    }
-    *HOST_OPTIONS.lock().unwrap_or_else(PoisonError::into_inner) = messages;
 }
 
 /// 怎么调 ssh，跟着配置走。
@@ -272,109 +160,8 @@ pub(crate) fn ssh() -> Ssh {
     Ssh { program: settings.program, control, persist_secs: settings.persist_secs }
 }
 
-/// 界面要知道的事。
-#[derive(Debug)]
-pub enum RemoteEvent {
-    /// 这台主机的连接状态变了。
-    Status(String),
-    /// 连上了这台主机（第一次或断开后又连上），`alive` 是那时它的宿主里还活着的会话。
-    Connected { host: String, alive: HashSet<SessionId> },
-    /// ssh 要问用户。
-    Ask(Ask),
-    /// 这台主机被忘掉了（`forget`）。
-    Forgotten(String),
-}
-
-/// 连接的状态。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Status {
-    /// 没在连，也没要连。
-    Idle,
-    /// 正连着，做到了哪一步。
-    Connecting(Phase),
-    Connected(Connected),
-    /// 断了或没连上，`retry_at` 时再试，这是第 `attempt` 次。
-    Waiting {
-        attempt: u32,
-        retry_at: Instant,
-        error: String,
-    },
-    /// 不再自己重连，等 `retry_now`：要用户来办才能再连（认证没过、主机密钥变了、平台不支持、装不上），
-    /// 或者重连的退避走完了还连不上。
-    Stopped {
-        error: String,
-        auth: bool,
-    },
-}
-
-/// 连上了的远端宿主。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Connected {
-    /// 远端宿主的构建。
-    pub build: String,
-    /// 远端宿主不是这个构建（升级时那边还连着装旧版本的桌面）。
-    pub mismatch: bool,
-    /// 远端宿主跟着 ssh 的登录会话走，最后一个连接断开时可能被系统结束（`Opening::session_bound`）。
-    pub session_bound: bool,
-    /// 远端的家目录，不知道时为空。Windows 远端的路径也用 `/` 分隔（`C:/Users/me`）。
-    pub home: Option<PathBuf>,
-    /// 远端的系统，`runode_ssh::bridge::Opening::os` 的写法；不知道时为空。
-    pub os: String,
-}
-
-/// 连接做到了哪一步。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Phase {
-    /// 连 ssh、认证。
-    Authenticating,
-    /// 看远端装没装这个构建。
-    Probing,
-    /// 准备要装上去的 runode（下载），`done`/`total` 字节。
-    Downloading { done: u64, total: u64 },
-    /// 把 runode 传到远端，`done`/`total` 字节。
-    Uploading { done: u64, total: u64 },
-    /// 起桥接、连远端的宿主。
-    Starting,
-}
-
-/// 第几次重连前等多久；走完了还连不上就停下。
-const RETRY_DELAYS: [Duration; 6] = [
-    Duration::ZERO,
-    Duration::from_secs(1),
-    Duration::from_secs(2),
-    Duration::from_secs(5),
-    Duration::from_secs(10),
-    Duration::from_secs(30),
-];
-/// 多久看一次睡没睡过、本机地址变没变（`watch_network`）。
-const NETWORK_POLL: Duration = Duration::from_secs(5);
-/// 两次看之间多走了这么久以上，算这台电脑睡过一觉（`watch_network`）。
-const SLEPT_AFTER: Duration = Duration::from_secs(30);
-/// 连上撑过这么久算稳了，下次断开从头退避。
-const STABLE_AFTER: Duration = Duration::from_secs(60);
-/// 连着时每隔这么久问一次宿主还在不在。
-const HEARTBEAT: Duration = Duration::from_secs(15);
-/// 心跳最多等这么久回话，等不到按断开处理。
-const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
-/// 重连上以后列会话最多等这么久。
-const LIST_TIMEOUT: Duration = Duration::from_secs(10);
-
 static HOSTS: LazyLock<Mutex<HashMap<String, Arc<RemoteHost>>>> = LazyLock::new(Mutex::default);
-/// 配置里宿主关心的部分（`SetTheme`、`SetOptions`），连上新主机时照发。
-static HOST_OPTIONS: Mutex<Vec<ClientMsg>> = Mutex::new(Vec::new());
 static SETTINGS: LazyLock<Mutex<SshSettings>> = LazyLock::new(Mutex::default);
-/// 为真时新建的主机先不连，等 `retry_now`。
-static HOLD_NEW: AtomicBool = AtomicBool::new(false);
-#[allow(clippy::type_complexity)]
-static EVENTS: LazyLock<(UnboundedSender<RemoteEvent>, Mutex<Option<UnboundedReceiver<RemoteEvent>>>)> =
-    LazyLock::new(|| {
-        let (tx, rx) = unbounded();
-        (tx, Mutex::new(Some(rx)))
-    });
-
-fn emit(event: RemoteEvent) {
-    let _ = EVENTS.0.unbounded_send(event);
-}
 
 /// 一台远端主机。
 pub struct RemoteHost {
@@ -415,17 +202,14 @@ impl fmt::Debug for RemoteHost {
 impl RemoteHost {
     fn new(name: String, dest: Destination) -> Self {
         let link = Link::with_timeouts(build(), Timeouts::REMOTE);
-        // `Link` 记着最近一次的，连上时补发。
-        for message in HOST_OPTIONS.lock().unwrap_or_else(PoisonError::into_inner).iter() {
-            link.send(message.clone());
-        }
+        hosts::send_host_options(&link);
         Self {
             name,
             dest,
             link,
             state: Mutex::new(State {
                 status: Status::Idle,
-                wanted: !HOLD_NEW.load(Ordering::Relaxed),
+                wanted: !hosts::holding_new_hosts(),
                 hurry: false,
                 nudged: false,
                 gave_up: false,
@@ -440,6 +224,10 @@ impl RemoteHost {
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn id(&self) -> HostId {
+        HostId::Ssh(self.name.clone())
     }
 
     pub fn status(&self) -> Status {
@@ -458,7 +246,7 @@ impl RemoteHost {
         }
         state.status = status;
         drop(state);
-        emit(RemoteEvent::Status(self.name.clone()));
+        emit(RemoteEvent::Status(self.id()));
     }
 
     fn start(self: &Arc<Self>) {
@@ -499,7 +287,7 @@ impl RemoteHost {
         self.changed.notify_all();
         drop(state);
         if show {
-            emit(RemoteEvent::Status(self.name.clone()));
+            emit(RemoteEvent::Status(self.id()));
         }
     }
 
@@ -774,7 +562,7 @@ impl RemoteHost {
                 HashSet::new()
             }
         };
-        emit(RemoteEvent::Connected { host: self.name.clone(), alive });
+        emit(RemoteEvent::Connected { host: self.id(), alive });
     }
 
     /// 连着时一直等到断开：ssh 退出、桥接断了，或者心跳等不到回话。
@@ -1052,7 +840,7 @@ mod tests {
 
     use futures::StreamExt as _;
 
-    use super::{RemoteEvent, Status, events, forward, remote, ssh, upload};
+    use super::{HostId, RemoteEvent, Status, forward, hosts::events, remote, ssh, upload};
     #[cfg(unix)]
     use super::{SshSettings, deploy, set_ssh_settings};
 
@@ -1060,7 +848,7 @@ mod tests {
 
     /// 连上的主机和那时还活着的会话。`RemoteEvent` 一个进程只能取一次，由一个线程收着，几个测试共用；ssh 经
     /// askpass 问的当场代答（`answer`）。
-    static CONNECTED: std::sync::LazyLock<std::sync::Mutex<std::sync::mpsc::Receiver<(String, Alive)>>> =
+    static CONNECTED: std::sync::LazyLock<std::sync::Mutex<std::sync::mpsc::Receiver<(HostId, Alive)>>> =
         std::sync::LazyLock::new(|| {
             let mut events = events().expect("events");
             let (connected, receiver) = std::sync::mpsc::channel();
@@ -1101,7 +889,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(600);
         loop {
             let (host, alive) = connected.recv_timeout(deadline.saturating_duration_since(Instant::now())).ok()?;
-            if host == name {
+            if host == HostId::Ssh(name.to_owned()) {
                 return Some(alive);
             }
         }

@@ -20,9 +20,9 @@ use crate::ui::picker::matches_query;
 use super::{Source, clone_command, repo_name};
 use crate::window::{Dropdown, TITLEBAR_HEIGHT, WindowView, files::Quoting, status_bar::host_list::dot_color};
 use crate::{
-    host_client::ssh::{self, HostId, Status},
+    host_client::hosts::{self, HostId, Status},
     project_host::ProjectHost,
-    ssh_hosts::{display_name, has_display_name, status_text},
+    remote_hosts::{default_name, display_name, has_display_name, status_text},
     ui::{
         a11y::{A11yPress as _, Press},
         button::{Button, ButtonSize, ButtonVariant},
@@ -98,21 +98,21 @@ impl WindowView {
     }
 
     /// 各窗口里远端工作区的主机和这次运行里连过的主机，当前窗口的在前。
-    fn known_hosts(&self, cx: &App) -> Vec<String> {
-        let mut hosts: Vec<String> = Vec::new();
+    fn known_hosts(&self, cx: &App) -> Vec<HostId> {
+        let mut known: Vec<HostId> = Vec::new();
         let others = crate::window::windows(cx).into_iter().filter_map(|window| window.read(cx).ok());
-        let names = self
+        let found = self
             .workspaces
             .iter()
-            .filter_map(|workspace| workspace.host.label().map(str::to_owned))
-            .chain(others.flat_map(|view| view.workspaces.iter().filter_map(|w| w.host.label().map(str::to_owned))))
-            .chain(ssh::remotes().into_iter().map(|host| host.name.clone()));
-        for name in names {
-            if !hosts.contains(&name) {
-                hosts.push(name);
+            .map(|workspace| workspace.host.clone())
+            .chain(others.flat_map(|view| view.workspaces.iter().map(|w| w.host.clone()).collect::<Vec<_>>()))
+            .chain(hosts::remotes());
+        for host in found {
+            if !host.is_local() && !known.contains(&host) {
+                known.push(host);
             }
         }
-        hosts
+        known
     }
 
     /// 主机菜单的各项：添加远程主机（子菜单里是各种连法，现在只有 SSH），分隔线，本机和认识的各台主机，
@@ -133,30 +133,24 @@ impl WindowView {
             Box::new(PickWorkspaceHost(HostId::Local)),
         )
         .with_description(rust_i18n::t!("workspace.host_local_hint").into_owned());
-        let mut names = self.known_hosts(cx);
-        if let Some(name) = dialog.host.label().filter(|name| !names.iter().any(|known| known == name)) {
-            names.push(name.to_owned());
+        let mut known = self.known_hosts(cx);
+        if !dialog.host.is_local() && !known.contains(&dialog.host) {
+            known.push(dialog.host.clone());
         }
-        let remotes = names.into_iter().map(|name| {
-            let status = ssh::status_of(&name);
-            let host = HostId::Ssh(name.clone());
+        let remotes = known.into_iter().map(|host| {
+            let status = hosts::status_of(&host);
             let checked = dialog.host == host;
             let state = rust_i18n::t!("workspace.host_remote_hint", status = short_status(&status)).into_owned();
             // 起了显示名的主机，悬停时另写上连接目标。
-            let tooltip = if has_display_name(&name, cx) {
-                format!("{name} · {}", status_text(&status))
+            let tooltip = if has_display_name(&host, cx) {
+                format!("{} · {}", default_name(&host), status_text(&status))
             } else {
                 status_text(&status)
             };
             Some(
-                MenuItem::checkbox(
-                    display_name(&name, cx).to_owned(),
-                    None,
-                    checked,
-                    Box::new(PickWorkspaceHost(host)),
-                )
-                .with_description(state)
-                .with_tooltip(tooltip),
+                MenuItem::checkbox(display_name(&host, cx), None, checked, Box::new(PickWorkspaceHost(host)))
+                    .with_description(state)
+                    .with_tooltip(tooltip),
             )
         });
         [Some(add), None, Some(local)].into_iter().chain(remotes).collect()
@@ -185,12 +179,7 @@ impl WindowView {
 
     /// 改在 `host` 上开：远端的开始连（之前停下的再试一次），换了主机时之前浏览的目录作废。
     pub(in crate::window) fn set_workspace_host(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
-        if let HostId::Ssh(name) = &host
-            && let Some(remote) = ssh::remote(name)
-            && matches!(remote.status(), Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle)
-        {
-            remote.retry_now();
-        }
+        hosts::ensure_connecting(&host);
         let Some(dialog) = &mut self.new_workspace else {
             return;
         };
@@ -293,10 +282,11 @@ impl WindowView {
         let Some(dialog) = &mut self.new_workspace else {
             return;
         };
-        let HostId::Ssh(name) = &dialog.host else {
-            return;
-        };
-        if dialog.source.is_none() || dialog.browse.is_some() || !matches!(ssh::status_of(name), Status::Connected(_)) {
+        if dialog.host.is_local()
+            || dialog.source.is_none()
+            || dialog.browse.is_some()
+            || !matches!(hosts::status_of(&dialog.host), Status::Connected(_))
+        {
             return;
         }
         let field =
@@ -324,17 +314,14 @@ impl WindowView {
         let Some(dialog) = &mut self.new_workspace else {
             return;
         };
-        let (HostId::Ssh(name), Some(browse)) = (&dialog.host, dialog.browse.as_mut()) else {
-            return;
-        };
-        let Some(host) = ssh::find(name) else {
+        let Some(browse) = dialog.browse.as_mut().filter(|_| !dialog.host.is_local()) else {
             return;
         };
         let host_id = dialog.host.clone();
         browse.loading = true;
         browse.request = LIST_REQUEST.fetch_add(1, Ordering::Relaxed) + 1;
         let request = browse.request;
-        let link = host.link.clone();
+        let link = hosts::link_of(&host_id);
         let job = cx.background_spawn(async move {
             link.request(|req| ClientMsg::ListDirs { req, path }, LIST_TIMEOUT).map_err(|err| err.to_string())
         });
@@ -406,7 +393,7 @@ impl WindowView {
             view.update(cx, |view, cx| view.run_command(command, cx));
         }
         // 根目录没有目录名，用主机名。
-        let label = path.file_name().is_none().then(|| host.label().map(str::to_owned)).flatten();
+        let label = path.file_name().is_none().then(|| default_name(host));
         self.insert_workspace(self.active + 1, path, label, view, window, cx);
     }
 
@@ -416,9 +403,9 @@ impl WindowView {
         let Some(dialog) = &mut self.new_workspace else {
             return;
         };
-        let HostId::Ssh(name) = &dialog.host else {
+        if dialog.host.is_local() {
             return;
-        };
+        }
         let Some(parent) = dialog.browse.as_ref().and_then(|browse| browse.path.clone()) else {
             return;
         };
@@ -435,7 +422,7 @@ impl WindowView {
             return;
         }
         let command = clone.then(|| {
-            let os = match ssh::status_of(name) {
+            let os = match hosts::status_of(&dialog.host) {
                 Status::Connected(connected) => connected.os,
                 _ => String::new(),
             };
@@ -479,10 +466,7 @@ impl WindowView {
         let dialog = self.new_workspace.as_ref()?;
         let fg = cx.theme().foreground;
         let open = self.host_menu_open();
-        let name = dialog.host.label().map_or_else(
-            || rust_i18n::t!("workspace.host_local").into_owned(),
-            |name| display_name(name, cx).to_owned(),
-        );
+        let name = display_name(&dialog.host, cx);
         let view = cx.entity().downgrade();
         let picker = Button::new(
             "new-workspace-host",
@@ -519,11 +503,11 @@ impl WindowView {
         })
         // 菜单最高到窗口底边，按钮的下沿取对话框顶上这一行大致的位置。
         .when(open, |button| button.children(self.render_dropdown_menu_rightward(TITLEBAR_HEIGHT + 150., window, cx)));
-        let status = dialog.host.label().map(|name| {
-            let status = ssh::status_of(name);
+        let status = (!dialog.host.is_local()).then(|| {
+            let status = hosts::status_of(&dialog.host);
             let text = status_text(&status);
             let stopped = matches!(status, Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle);
-            let name = name.to_owned();
+            let host = dialog.host.clone();
             div()
                 .flex_1()
                 .min_w_0()
@@ -549,9 +533,7 @@ impl WindowView {
                             .variant(ButtonVariant::Secondary)
                             .with_size(ButtonSize::Sm)
                             .cursor_pointer()
-                            .on_press(cx, move |this, window, cx| {
-                                this.set_workspace_host(HostId::Ssh(name.clone()), window, cx)
-                            }),
+                            .on_press(cx, move |this, window, cx| this.set_workspace_host(host.clone(), window, cx)),
                     )
                 })
         });
@@ -595,7 +577,7 @@ impl WindowView {
         let hosts: Vec<AnyElement> = adding
             .hosts
             .iter()
-            .filter(|host| !known.contains(host))
+            .filter(|host| !known.contains(&HostId::Ssh((*host).clone())))
             .filter(|host| matches_query(&[host], &typed))
             .take(MAX_HOSTS)
             .map(|host| {
@@ -650,15 +632,14 @@ impl WindowView {
 
     /// 远端主机上展开的一种来源：目录浏览，克隆和新建另有名字框；主机还没连上时是连接状态。
     pub(super) fn render_remote_source(&self, source: Source, cx: &mut Context<Self>) -> Option<Div> {
-        let dialog = self.new_workspace.as_ref()?;
-        let name = dialog.host.label()?;
+        let dialog = self.new_workspace.as_ref().filter(|dialog| !dialog.host.is_local())?;
         let fg = cx.theme().foreground;
         let field_bg = cx.theme().mix(0.03);
         let hover_bg = cx.theme().accent;
         let body = div().flex().flex_col().gap(px(8.)).pl(px(48.)).pr(px(16.)).pb(px(12.));
         let Some(browse) = dialog.browse.as_ref() else {
-            let text =
-                rust_i18n::t!("workspace.remote_waiting", status = status_text(&ssh::status_of(name))).into_owned();
+            let text = rust_i18n::t!("workspace.remote_waiting", status = status_text(&hosts::status_of(&dialog.host)))
+                .into_owned();
             return Some(
                 body.child(
                     div()

@@ -38,11 +38,11 @@ mod preview_panel;
 mod process_env;
 mod project_host;
 mod remote_access;
+mod remote_hosts;
 mod screen_process;
 mod screen_viewer;
 mod settings;
 mod sound;
-mod ssh_hosts;
 mod startup;
 mod subprocess;
 mod system_probe;
@@ -174,7 +174,7 @@ fn main() {
         window::install(cx);
         startup::mark("workspace_install");
         window::serve_requests(cx);
-        ssh_hosts::install(cx);
+        remote_hosts::install(cx);
         cx.on_window_closed(|cx, _| {
             if window::terminal_windows(cx) == 0 {
                 cx.quit();
@@ -190,11 +190,11 @@ fn main() {
         if saved.is_empty() {
             open_window(cx, shell.take());
         }
-        host_client::ssh::hold_new_hosts(!cx.global::<config::AppConfig>().0.ssh_restore_on_launch);
+        host_client::hosts::hold_new_hosts(!cx.global::<config::AppConfig>().0.ssh_restore_on_launch);
         for (saved, options) in saved {
             open_window_with(cx, options, Some(saved), shell.take());
         }
-        host_client::ssh::hold_new_hosts(false);
+        host_client::hosts::hold_new_hosts(false);
         startup::mark("open_window");
         // 先结束没用上的 shell，再看宿主里有没有没在窗口里显示的会话，免得把它也列进去。
         drop(shell);

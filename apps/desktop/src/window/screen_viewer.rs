@@ -25,6 +25,7 @@ use super::{
     ToggleRemoteDesktop, WindowView,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
 };
+use crate::host_client::hosts::HostId;
 use crate::screen_viewer::{Input, SUPPORTED, ScreenViewer, ScreenViewerEvent};
 use crate::ui::icons::MONITOR_ICON;
 use crate::ui::{a11y::PressDown as _, button::Toggle, theme::ActiveTheme as _, tooltip::tooltip};
@@ -149,7 +150,7 @@ impl ScreenViewers {
 
 /// 在最前面的窗口里打开主机 `host` 的远程桌面；一个窗口都没有时先开一个。等这一轮派发结束再开：点按钮时
 /// GPUI 正借着那个窗口派发事件，当场 `update` 它会失败。
-pub(crate) fn show_remote_desktop(host: String, cx: &mut App) {
+pub(crate) fn show_remote_desktop(host: HostId, cx: &mut App) {
     cx.defer(move |cx| {
         with_front_window(cx, |view, window, cx| {
             view.close_settings(window, cx);
@@ -187,7 +188,7 @@ impl WindowView {
         if !self.remote_desktop_button_shown(cx) {
             return;
         }
-        let Some(host) = self.workspace().host.label().map(str::to_owned) else { return };
+        let host = self.workspace().host.clone();
         match self.screen_of(&host, cx) {
             Some(id) if !self.screen_hidden(id) => self.close_screen_viewer(id, window, cx),
             _ => self.show_screen_viewer(host, window, cx),
@@ -195,20 +196,20 @@ impl WindowView {
     }
 
     /// 主机 `host` 的远程桌面在这个窗口里开着时它的编号。
-    fn screen_of(&self, host: &str, cx: &App) -> Option<EntityId> {
+    fn screen_of(&self, host: &HostId, cx: &App) -> Option<EntityId> {
         self.screen_viewers.views().find(|view| view.read(cx).host() == host).map(|view| view.entity_id())
     }
 
     /// 标题栏右上角有远程桌面按钮：当前 workspace 在 SSH 主机上，那台主机能采集画面，本机也能解远程桌面的画面。
     pub(super) fn remote_desktop_button_shown(&self, cx: &App) -> bool {
-        SUPPORTED && self.workspace().host.label().is_some_and(|host| crate::ssh_hosts::screen_capturable(host, cx))
+        SUPPORTED && crate::remote_hosts::screen_capturable(&self.workspace().host, cx)
     }
 
     /// 标题栏右上角、命令按钮左边的远程桌面按钮，打开当前 workspace 所在主机的远程桌面；它开着、看得见时按下着。
     pub(super) fn render_remote_desktop_button(&self, cx: &mut Context<Self>) -> Toggle {
         let text = rust_i18n::t!("tooltip.remote_desktop");
-        let host = self.workspace().host.label();
-        let open = host.and_then(|host| self.screen_of(host, cx)).is_some_and(|id| !self.screen_hidden(id));
+        let host = &self.workspace().host;
+        let open = self.screen_of(host, cx).is_some_and(|id| !self.screen_hidden(id));
         Toggle::new("remote-desktop", MONITOR_ICON, text.clone().into_owned())
             .pressed(open)
             .w(px(TOGGLE_WIDTH))
@@ -219,11 +220,11 @@ impl WindowView {
 
     /// 打开主机 `host` 的远程桌面，焦点给它；已经开着时把它提到最上面。吸附着而藏着的，有一台占满内容区、或者
     /// 钉在别的主机上时改成浮动，否则归到当前 workspace（钉住的不用）、打开右侧面板露出它。
-    pub(super) fn show_screen_viewer(&mut self, host: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn show_screen_viewer(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
         if !self.reveal_content(window, cx) {
             return;
         }
-        let existing = self.screen_viewers.views().find(|view| view.read(cx).host() == host).cloned();
+        let existing = self.screen_viewers.views().find(|view| *view.read(cx).host() == host).cloned();
         match existing {
             Some(view) => {
                 let id = view.entity_id();
@@ -266,8 +267,8 @@ impl WindowView {
     /// 把远程桌面页 `view` 放进这个窗口，焦点给它：窗口里没有别的远程桌面时照上回选的摆法，有了就浮动。同一台
     /// 主机已经开着时换下旧的。
     fn adopt_screen_viewer(&mut self, view: Entity<ScreenViewer>, window: &mut Window, cx: &mut Context<Self>) {
-        let host = view.read(cx).host().to_owned();
-        self.drop_screens(window, cx, |open, cx| open.view.read(cx).host() == host);
+        let host = view.read(cx).host().clone();
+        self.drop_screens(window, cx, |open, cx| *open.view.read(cx).host() == host);
         // 占满时要看得见：盖着的页面收不起来（看板里有对话框开着）就浮着放。
         let floating = self.screen_viewers.prefer_floating
             || !self.screen_viewers.open.is_empty()

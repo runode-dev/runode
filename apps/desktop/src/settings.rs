@@ -54,7 +54,7 @@ const NAV_WIDTH: f32 = 200.;
 const COMMIT_DELAY: Duration = Duration::from_millis(700);
 
 /// 问还有工作区、终端用着哪些远端主机。
-type HostsInUse = Box<dyn Fn(&App) -> HashSet<String>>;
+type HostsInUse = Box<dyn Fn(&App) -> HashSet<crate::host_client::hosts::HostId>>;
 
 /// 点了返回、按了 Esc 或关分屏的键：窗口收起设置页。
 pub struct Close;
@@ -115,7 +115,7 @@ impl EventEmitter<Close> for SettingsView {}
 
 impl SettingsView {
     pub fn new(
-        hosts_in_use: impl Fn(&App) -> HashSet<String> + 'static,
+        hosts_in_use: impl Fn(&App) -> HashSet<crate::host_client::hosts::HostId> + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -138,7 +138,7 @@ impl SettingsView {
             _observe: observe,
             _downloads: cx.observe_global::<crate::dictation::Downloads>(|_, cx| cx.notify()),
             hosts_in_use: Box::new(hosts_in_use),
-            _hosts: cx.observe_global::<crate::ssh_hosts::HostsChanged>(|_, cx| cx.notify()),
+            _hosts: cx.observe_global::<crate::remote_hosts::HostsChanged>(|_, cx| cx.notify()),
         };
         view.refresh_autostart(cx);
         view.refresh_firewall(cx);

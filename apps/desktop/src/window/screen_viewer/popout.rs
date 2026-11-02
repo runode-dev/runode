@@ -9,6 +9,7 @@ use gpui::{
 
 use super::super::{TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, titlebar};
 use super::put_back;
+use crate::host_client::hosts::HostId;
 use crate::screen_viewer::{Input, ScreenViewer, ScreenViewerEvent, Titlebar};
 use crate::{
     config::AppConfig,
@@ -30,7 +31,7 @@ struct ScreenWindow {
 /// 开一个单独的窗口，放在显示器 `display` 上的 `bounds` 处（位置相对这块显示器），把远程桌面页 `viewer` 放进去，
 /// 焦点给它。
 pub(super) fn open(viewer: Entity<ScreenViewer>, bounds: Bounds<Pixels>, display: Option<DisplayId>, cx: &mut App) {
-    let host = crate::ssh_hosts::display_name(viewer.read(cx).host(), cx);
+    let host = crate::remote_hosts::display_name(viewer.read(cx).host(), cx);
     let title = rust_i18n::t!("screen_viewer.title", host = host).into_owned();
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -74,7 +75,7 @@ pub(super) fn open(viewer: Entity<ScreenViewer>, bounds: Bounds<Pixels>, display
 }
 
 /// 主机 `host` 的远程桌面开在单独的窗口里时把那个窗口提到前面、焦点给它，返回找到了没有。
-pub(super) fn activate(host: &str, cx: &mut App) -> bool {
+pub(super) fn activate(host: &HostId, cx: &mut App) -> bool {
     cx.windows().into_iter().filter_map(|handle| handle.downcast::<ScreenWindow>()).any(|handle| {
         handle
             .update(cx, |this, window, cx| {

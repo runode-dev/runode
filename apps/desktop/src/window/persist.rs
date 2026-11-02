@@ -29,7 +29,7 @@ use super::{
     model::{Tab, Workspace, home_dir, workspace_name},
     project::{Project, SidePanel},
 };
-use crate::host_client::ssh::HostId;
+use crate::host_client::hosts::HostId;
 use crate::{
     host_client::{self, Mode},
     prespawn::Prespawned,
@@ -346,7 +346,7 @@ impl WindowView {
             active: self.active,
             sidebar: self.sidebar_shown,
             sidebar_width: self.sidebar_width,
-            collapsed_hosts: self.collapsed_hosts.iter().map(|host| host.label().map(str::to_owned)).collect(),
+            collapsed_hosts: self.collapsed_hosts.iter().map(HostId::key).collect(),
             panel_width: self.panel_width,
             preview_wrap: self.preview.read(cx).wrap(),
             preview_source: self.preview.read(cx).source(),
@@ -382,7 +382,7 @@ impl WindowView {
         // 存档里第几个 workspace 建出来的编号，吸附着的远程桌面按它找回所属的 workspace。
         let mut ids = Vec::new();
         for (wi, saved_workspace) in saved.workspaces.into_iter().enumerate() {
-            let host = saved_workspace.host.clone().map_or(HostId::Local, HostId::Ssh);
+            let host = HostId::from_saved(saved_workspace.host.as_deref());
             let mut tabs = Vec::new();
             let mut active_tab = 0;
             for (ti, saved_tab) in saved_workspace.tabs.iter().enumerate() {
@@ -459,7 +459,7 @@ impl WindowView {
             self.collapsed_hosts = saved
                 .collapsed_hosts
                 .into_iter()
-                .map(|host| host.map_or(HostId::Local, HostId::Ssh))
+                .map(|host| HostId::from_saved(host.as_deref()))
                 .filter(|host| workspaces.iter().any(|workspace| workspace.host == *host))
                 .collect();
             self.panel_width = saved.panel_width;
@@ -606,7 +606,7 @@ impl WindowView {
     fn save_workspace(&self, workspace: &Workspace, cx: &App) -> SavedWorkspace {
         let mut saved = SavedWorkspace {
             name: workspace.name.to_string(),
-            host: workspace.host.label().map(str::to_owned),
+            host: workspace.host.key(),
             dir: workspace.dir.clone(),
             tabs: workspace.tabs.iter().map(|tab| self.save_tab(tab, cx)).collect(),
             active: workspace.active,

@@ -11,6 +11,7 @@ use gpui::{
 };
 
 use super::{OpenScreenViewer, Placement, cached_page, set_input};
+use crate::host_client::hosts::HostId;
 use crate::screen_viewer::{SUPPORTED, ScreenViewer};
 use crate::ui::{card::Card, theme::ActiveTheme as _};
 use crate::window::{
@@ -100,7 +101,7 @@ impl WindowView {
     /// 吸附着的远程桌面在当前 workspace 里该不该显示：钉住了看主机，没钉住看是不是吸附时的 workspace。
     pub(super) fn snap_belongs_here(&self, open: &OpenScreenViewer, snap: Snap, cx: &App) -> bool {
         if snap.pinned {
-            self.workspace().host.label() == Some(open.view.read(cx).host())
+            self.workspace().host == *open.view.read(cx).host()
         } else {
             self.workspace().id == snap.workspace
         }
@@ -496,7 +497,7 @@ impl WindowView {
         self.snaps()
             .into_iter()
             .map(|(open, snap)| SavedSnappedScreen {
-                host: open.view.read(cx).host().to_owned(),
+                host: open.view.read(cx).host().key().unwrap_or_default(),
                 bottom: snap.side == SnapSide::Bottom,
                 pinned: snap.pinned,
                 workspace: self.workspaces.iter().position(|workspace| workspace.id == snap.workspace),
@@ -518,14 +519,15 @@ impl WindowView {
             return;
         }
         for saved in saved {
-            if self.screen_viewers.views().any(|view| view.read(cx).host() == saved.host) {
+            let host = HostId::from_key(&saved.host);
+            if self.screen_viewers.views().any(|view| *view.read(cx).host() == host) {
                 continue;
             }
             let workspace = saved.workspace.and_then(|ix| ids.get(ix).copied()).unwrap_or(self.workspace().id);
             let side = if saved.bottom { SnapSide::Bottom } else { SnapSide::Top };
             let ratio = saved.ratio.unwrap_or(SNAP_RATIO).clamp(SNAP_RATIO_MIN, SNAP_RATIO_MAX);
             // 先不连，显示出来才连：属于别的 workspace 的不一启动就连上。
-            let view = cx.new(|cx| ScreenViewer::new_suspended(saved.host, cx));
+            let view = cx.new(|cx| ScreenViewer::new_suspended(host, cx));
             let mut open = self.new_screen(view, window, cx);
             open.placement = Placement::Snapped(Snap { side, workspace, pinned: saved.pinned, ratio });
             set_input(&open.view, open.input(), cx);

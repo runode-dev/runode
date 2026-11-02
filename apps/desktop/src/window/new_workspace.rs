@@ -4,7 +4,7 @@
 //! 克隆和新建都先建好目录再在它上面开 workspace；克隆是在新 workspace 的第一个终端里跑 `git clone`，进度、
 //! 要密码和出错都在终端里看得见。名字一律按目录取，之后可以重命名。
 
-use crate::host_client::ssh::HostId;
+use crate::host_client::hosts::HostId;
 use crate::ui::dialog::{backdrop, is_dismiss_key};
 use crate::ui::theme::ActiveTheme as _;
 use std::path::PathBuf;

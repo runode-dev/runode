@@ -17,6 +17,7 @@
 pub(crate) mod bridge;
 #[cfg(unix)]
 mod handoff;
+pub mod hosts;
 mod launch;
 mod link;
 pub mod ssh;
@@ -217,7 +218,7 @@ pub fn configure(config: &Config) {
     for message in &messages {
         link.send(message.clone());
     }
-    ssh::configure(messages);
+    hosts::configure(messages);
     let defaults = ssh::SshSettings::default();
     ssh::set_ssh_settings(ssh::SshSettings {
         program: config.ssh_program.as_ref().map_or(defaults.program, PathBuf::from),

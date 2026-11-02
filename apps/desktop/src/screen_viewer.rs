@@ -1,4 +1,4 @@
-//! 远程桌面页：看一台 SSH 主机的屏幕，用本机的键鼠操作它。经 `host_client::ssh::screen` 连上那边的
+//! 远程桌面页：看一台远端主机的屏幕，用本机的键鼠操作它。经 `host_client::ssh::screen` 连上那边的
 //! 采集进程，说的和手机一样（`runode_protocol::screen`）。
 //!
 //! 画面在读连接的线程上解好（`video`），界面只留最新的一帧，来一帧只通知这一页。要多大的画面、多高的码率由
@@ -29,15 +29,17 @@ use gpui::{
 };
 use gpui::{Role, SharedString, WindowControlArea};
 use runode_protocol::screen::{ScreenClientMsg, ScreenDisplay, ScreenHostMsg, ScreenInput, ScreenMode};
-use runode_ssh::bootstrap::Family;
 use runode_types::{input::MouseButton as RemoteButton, screen::Codec};
 
 use crate::{
-    host_client::ssh::{
-        self, Status,
-        screen::{self, ScreenEvent, ScreenLink, ScreenSender},
+    host_client::{
+        hosts::{self, HostId, Status},
+        ssh::{
+            self,
+            screen::{self, ScreenEvent, ScreenLink, ScreenSender},
+        },
     },
-    ssh_hosts::status_text,
+    remote_hosts::status_text,
     ui::icons::{
         CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MONITOR_ICON, PIN_ICON, POP_IN_ICON, POP_OUT_ICON, REFRESH_ICON,
     },
@@ -198,7 +200,7 @@ struct Remote {
 }
 
 pub struct ScreenViewer {
-    host: String,
+    host: HostId,
     focus: FocusHandle,
     phase: Phase,
     link: Option<ScreenLink>,
@@ -287,20 +289,20 @@ impl Focusable for ScreenViewer {
 
 impl ScreenViewer {
     /// 不跟哪个窗口绑着：放在哪个窗口里，焦点在这一页上时那个窗口里按的键就交给远端。
-    pub fn new(host: String, cx: &mut Context<Self>) -> Self {
+    pub fn new(host: HostId, cx: &mut Context<Self>) -> Self {
         let mut viewer = Self::create(host, cx);
         viewer.connect(cx);
         viewer
     }
 
     /// 先不连的一页，等窗口显示它时 `resume`。
-    pub fn new_suspended(host: String, cx: &mut Context<Self>) -> Self {
+    pub fn new_suspended(host: HostId, cx: &mut Context<Self>) -> Self {
         let mut viewer = Self::create(host, cx);
         viewer.phase = Phase::Suspended;
         viewer
     }
 
-    fn create(host: String, cx: &mut Context<Self>) -> Self {
+    fn create(host: HostId, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         let intercept = {
             let (focus, view) = (focus.clone(), cx.entity().downgrade());
@@ -387,7 +389,7 @@ impl ScreenViewer {
 
     /// 在后台看记没记着这台的密码，开关照着摆。
     fn load_remember(&mut self, cx: &mut Context<Self>) {
-        let host = self.host.clone();
+        let host = self.password_key();
         let executor = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let saved = executor.spawn(async move { saved_password::exists(&host) }).await;
@@ -410,7 +412,7 @@ impl ScreenViewer {
         self.remember_touched = true;
         if !self.remember {
             self.pending_save = None;
-            let host = self.host.clone();
+            let host = self.password_key();
             cx.background_executor()
                 .spawn(async move {
                     if let Err(err) = saved_password::forget(&host) {
@@ -428,7 +430,7 @@ impl ScreenViewer {
             return;
         }
         self.auto_tried = true;
-        let host = self.host.clone();
+        let host = self.password_key();
         let executor = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let saved = executor.spawn(async move { saved_password::load(&host) }).await;
@@ -438,7 +440,7 @@ impl ScreenViewer {
                 if !this.locked || this.link.is_none() || this.typed_unlock || this.remember_off {
                     return;
                 }
-                tracing::info!("unlocking the remote desktop of {} with the saved password", this.host);
+                tracing::info!("unlocking the remote desktop of {:?} with the saved password", this.host);
                 this.send(ScreenClientMsg::Unlock { password });
                 this.auto_unlock = Some(cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(AUTO_UNLOCK_WAIT).await;
@@ -460,8 +462,13 @@ impl ScreenViewer {
         .detach();
     }
 
-    pub fn host(&self) -> &str {
+    pub fn host(&self) -> &HostId {
         &self.host
+    }
+
+    /// 记着的密码按哪台主机认（`HostId::key`）。
+    fn password_key(&self) -> String {
+        self.host.key().unwrap_or_default()
     }
 
     /// 焦点在这一页上：画面或解锁的密码框。
@@ -541,12 +548,12 @@ impl ScreenViewer {
         let (tx, mut rx) = unbounded::<UiEvent>();
         let latest = Arc::new(Mutex::new(None::<Picture>));
         let reader_latest = latest.clone();
-        let name = self.host.clone();
+        let id = self.host.clone();
         let network = self.network.clone();
         let executor = cx.background_executor().clone();
         self.connection = Some(cx.spawn(async move |this, cx| {
             let opened = async {
-                let host = wait_for_host(&name, &executor).await?;
+                let host = wait_for_host(&id, &executor).await?;
                 let on_event = reader(tx, reader_latest, network);
                 executor.spawn(async move { screen::open(&host, on_event) }).await
             };
@@ -564,7 +571,7 @@ impl ScreenViewer {
                 Err(err) => {
                     this.update(cx, |this, cx| {
                         if this.retries > 0 {
-                            tracing::info!("cannot reopen the remote desktop of {}: {err}", this.host);
+                            tracing::info!("cannot reopen the remote desktop of {:?}: {err}", this.host);
                             this.reconnect_later(cx);
                         } else {
                             this.phase = Phase::Stopped(err);
@@ -620,7 +627,7 @@ impl ScreenViewer {
                 }
             }
             UiEvent::Message(ScreenHostMsg::ModeFailed { reason }) => {
-                tracing::info!("the remote desktop of {} cannot change its resolution: {reason}", self.host);
+                tracing::info!("the remote desktop of {:?} cannot change its resolution: {reason}", self.host);
                 match self.mode_requests.front().copied() {
                     Some((display, Some(previous))) => self.modes.insert(display, previous),
                     Some((display, None)) => self.modes.remove(&display),
@@ -677,7 +684,7 @@ impl ScreenViewer {
                         self.pending_save.take().filter(|(_, at)| at.elapsed() <= AUTO_UNLOCK_WAIT)
                     {
                         self.saved_rejected = false;
-                        let host = self.host.clone();
+                        let host = self.password_key();
                         cx.background_executor()
                             .spawn(async move {
                                 if let Err(err) = saved_password::save(&host, &password) {
@@ -737,7 +744,7 @@ impl ScreenViewer {
         let attempt = self.retries;
         self.phase = Phase::Reconnecting(attempt);
         let delay = RECONNECT_DELAYS.get(attempt as usize - 1).copied().unwrap_or(RECONNECT_LAST);
-        tracing::info!("reconnecting to the remote desktop of {} in {delay:?} (attempt {attempt})", self.host);
+        tracing::info!("reconnecting to the remote desktop of {:?} in {delay:?} (attempt {attempt})", self.host);
         self.retry = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(delay).await;
             this.update(cx, |this, cx| this.connect(cx)).ok();
@@ -749,7 +756,7 @@ impl ScreenViewer {
         if matches!(self.phase, Phase::Stopped(_) | Phase::Suspended) {
             return;
         }
-        tracing::info!("suspending the hidden remote desktop of {}", self.host);
+        tracing::info!("suspending the hidden remote desktop of {:?}", self.host);
         self.connection = None;
         self.retry = None;
         self.retries = 0;
@@ -937,7 +944,7 @@ impl ScreenViewer {
         let needs = Needs { ultra: need(Level::Ultra), high: need(Level::High), standard: need(Level::Standard) };
         if self.adapter.update(&sample, &needs, now) {
             tracing::debug!(
-                "remote desktop of {}: {:?} at {} bit/s (queuing {:?}, receiving {} bit/s, losing {:.1}%)",
+                "remote desktop of {:?}: {:?} at {} bit/s (queuing {:?}, receiving {} bit/s, losing {:.1}%)",
                 self.host,
                 self.adapter.level(),
                 self.adapter.bitrate(),
@@ -1235,7 +1242,7 @@ impl ScreenViewer {
 
     fn render_toolbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let (border, fg) = (cx.theme().border, cx.theme().foreground);
-        let host = crate::ssh_hosts::display_name(&self.host, cx);
+        let host = crate::remote_hosts::display_name(&self.host, cx);
         let title = rust_i18n::t!("screen_viewer.title", host = host).into_owned();
         let displays: Vec<AnyElement> = self
             .remote
@@ -1363,7 +1370,7 @@ impl ScreenViewer {
     fn notice(&self, cx: &App) -> Option<String> {
         let notice = match &self.phase {
             Phase::Connecting | Phase::Suspended => {
-                rust_i18n::t!("screen_viewer.connecting", host = crate::ssh_hosts::display_name(&self.host, cx))
+                rust_i18n::t!("screen_viewer.connecting", host = crate::remote_hosts::display_name(&self.host, cx))
             }
             Phase::Stopped(reason) => return Some(reason.clone()),
             Phase::Reconnecting(_) if self.signed_out => rust_i18n::t!("screen_viewer.signed_out"),
@@ -1381,7 +1388,7 @@ impl ScreenViewer {
 
     /// 远端锁屏时能代敲密码：Windows 的锁屏在安全桌面上，注入不了按键。
     fn types_password(&self) -> bool {
-        !ssh::find(&self.host).is_some_and(|host| host.family() == Family::Windows)
+        !hosts::is_windows(&self.host)
     }
 
     /// 锁屏时盖在画面中间的一块：能代敲密码的远端给密码框和「解锁」；Windows 的锁屏在安全桌面上，注入不了按键，
@@ -1479,8 +1486,8 @@ impl Render for ScreenViewer {
             window.focus(&self.focus, cx);
         }
         let theme = cx.theme().clone();
-        let label =
-            rust_i18n::t!("screen_viewer.screen", host = crate::ssh_hosts::display_name(&self.host, cx)).into_owned();
+        let label = rust_i18n::t!("screen_viewer.screen", host = crate::remote_hosts::display_name(&self.host, cx))
+            .into_owned();
         // 画面是自己画的，另报一个图像节点给辅助工具，名字说是哪台的屏幕。
         let picture = self.picture.as_ref().map(|picture| {
             div()
@@ -1743,8 +1750,10 @@ fn reader(
 }
 
 /// 等主机连上（没在连时叫它连），连不上时带上给人看的原因。
-async fn wait_for_host(name: &str, executor: &gpui::BackgroundExecutor) -> Result<Arc<ssh::RemoteHost>, String> {
-    let host = ssh::remote(name).ok_or_else(|| rust_i18n::t!("screen_viewer.bad_host").into_owned())?;
+async fn wait_for_host(id: &HostId, executor: &gpui::BackgroundExecutor) -> Result<Arc<ssh::RemoteHost>, String> {
+    let bad_host = || rust_i18n::t!("screen_viewer.bad_host").into_owned();
+    let HostId::Ssh(name) = id else { return Err(bad_host()) };
+    let host = ssh::remote(name).ok_or_else(bad_host)?;
     if matches!(host.status(), Status::Stopped { .. } | Status::Waiting { .. } | Status::Idle) {
         host.retry_now();
     }

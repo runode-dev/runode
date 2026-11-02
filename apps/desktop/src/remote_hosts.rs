@@ -1,7 +1,7 @@
-//! 经 SSH 连的远端主机在界面这边要办的事：连上一台主机后开始办那台机器上的命令行转来的请求，把那台
-//! 主机上断开着的终端接回来；ssh 要问用户时交给最前面的窗口弹框；连接状态一变就更新全局的 `HostsChanged`。
+//! 远端主机（SSH 主机和配对的电脑）在界面这边要办的事：连上一台主机后开始办那台机器上的命令行转来的请求，把
+//! 那台主机上断开着的终端接回来；ssh 要问用户时交给最前面的窗口弹框；连接状态一变就更新全局的 `HostsChanged`。
 //! 连上的宿主会跟着 ssh 的登录被结束时，这次运行里每台主机问一次要不要把它装成登录服务（`install_service`）。
-//! 用户可以给主机另起一个显示名（`set_display_name`），连接仍按连接目标认。主机上次连上时报的系统记下来
+//! 用户可以给主机另起一个显示名（`set_display_name`），连接仍按 `HostId` 认。主机上次连上时报的系统记下来
 //! （`system`），没连着时界面也认得出是什么系统。
 
 use std::{
@@ -14,7 +14,10 @@ use futures::StreamExt as _;
 use gpui::{App, AppContext as _, Global, PromptLevel};
 
 use crate::{
-    host_client::ssh::{self, HostId, Phase, RemoteEvent, Status},
+    host_client::{
+        hosts::{self, HostId, Phase, RemoteEvent, Status},
+        ssh,
+    },
     terminal_view, window,
 };
 
@@ -29,20 +32,20 @@ fn hosts_changed(cx: &mut App) {
     cx.set_global(HostsChanged(next));
 }
 
-/// 用户给远端主机起的显示名，按连接目标记，各窗口共用；存在 `Dirs::host_names_file` 里，忘掉主机时留着。
+/// 用户给远端主机起的显示名，按 `HostId::key` 记，各窗口共用；存在 `Dirs::host_names_file` 里，忘掉主机时留着。
 #[derive(Default)]
 struct HostNames(BTreeMap<String, String>);
 
 impl Global for HostNames {}
 
-/// 各主机上次连上时报的系统（`Connected::os` 的写法），按连接目标记；存在 `Dirs::host_systems_file` 里，
+/// 各主机上次连上时报的系统（`Connected::os` 的写法），按 `HostId::key` 记；存在 `Dirs::host_systems_file` 里，
 /// 忘掉主机时留着。
 #[derive(Default)]
 struct HostSystems(BTreeMap<String, String>);
 
 impl Global for HostSystems {}
 
-/// 读出按连接目标记的一张表。读不懂的文件挪到一边再从空的开始，下次保存时不把记过的盖掉。
+/// 读出按 `HostId::key` 记的一张表。读不懂的文件挪到一边再从空的开始，下次保存时不把记过的盖掉。
 fn load_map(path: Option<PathBuf>) -> BTreeMap<String, String> {
     let Some(path) = path else {
         return BTreeMap::new();
@@ -72,24 +75,43 @@ fn save_map(path: Option<PathBuf>, map: &BTreeMap<String, String>) -> io::Result
     runode_paths::replace_file(&path, &serde_json::to_vec_pretty(map)?)
 }
 
-/// 主机 `name`（连接目标）在界面上显示的名字：用户起过名字时是那个名字，否则就是连接目标。
-pub fn display_name<'a>(name: &'a str, cx: &'a App) -> &'a str {
-    cx.try_global::<HostNames>().and_then(|names| names.0.get(name)).map_or(name, String::as_str)
+/// 远端主机 `host` 没另起名字时显示的名字：SSH 主机是连接目标。本机为空。
+pub fn default_name(host: &HostId) -> String {
+    match host {
+        HostId::Local => String::new(),
+        HostId::Ssh(name) => name.clone(),
+        HostId::Paired(id) => id.clone(),
+    }
 }
 
-/// 用户给主机 `name` 起过名字。
-pub fn has_display_name(name: &str, cx: &App) -> bool {
-    cx.try_global::<HostNames>().is_some_and(|names| names.0.contains_key(name))
+/// 远端主机 `host` 在界面上显示的名字：用户起过名字时是那个名字，否则是 `default_name`。本机是「本机」。
+pub fn display_name(host: &HostId, cx: &App) -> String {
+    let Some(key) = host.key() else {
+        return rust_i18n::t!("workspace.host_local").into_owned();
+    };
+    match cx.try_global::<HostNames>().and_then(|names| names.0.get(&key)) {
+        Some(name) => name.clone(),
+        None => default_name(host),
+    }
 }
 
-/// 把主机 `name` 的显示名改成 `display`；空的或者和连接目标一样时不再另起名字，显示连接目标。
-pub fn set_display_name(name: &str, display: &str, cx: &mut App) {
+/// 用户给远端主机 `host` 起过名字。
+pub fn has_display_name(host: &HostId, cx: &App) -> bool {
+    host.key().is_some_and(|key| cx.try_global::<HostNames>().is_some_and(|names| names.0.contains_key(&key)))
+}
+
+/// 把远端主机 `host` 的显示名改成 `display`；空的或者和 `default_name` 一样时不再另起名字。
+pub fn set_display_name(host: &HostId, display: &str, cx: &mut App) {
+    let Some(key) = host.key() else {
+        return;
+    };
     let display = display.trim();
+    let default = default_name(host);
     let names = &mut cx.default_global::<HostNames>().0;
-    let changed = if display.is_empty() || display == name {
-        names.remove(name).is_some()
+    let changed = if display.is_empty() || display == default {
+        names.remove(&key).is_some()
     } else {
-        names.insert(name.to_owned(), display.to_owned()).is_none_or(|old| old != display)
+        names.insert(key, display.to_owned()).is_none_or(|old| old != display)
     };
     if !changed {
         return;
@@ -102,9 +124,12 @@ pub fn set_display_name(name: &str, display: &str, cx: &mut App) {
     hosts_changed(cx);
 }
 
-/// 主机 `name` 上次连上时报的系统，`Connected::os` 的写法；没连上过时为 `None`。
-pub fn system<'a>(name: &str, cx: &'a App) -> Option<&'a str> {
-    cx.try_global::<HostSystems>().and_then(|systems| systems.0.get(name)).map(String::as_str)
+/// 远端主机 `host` 上次连上时报的系统，`Connected::os` 的写法；没连上过时为 `None`。本机是这台机器的系统。
+pub fn system<'a>(host: &HostId, cx: &'a App) -> Option<&'a str> {
+    let Some(key) = host.key() else {
+        return Some(std::env::consts::OS);
+    };
+    cx.try_global::<HostSystems>().and_then(|systems| systems.0.get(&key)).map(String::as_str)
 }
 
 /// 系统 `os`（`Connected::os` 的写法）给人看的名字，认不出时为 `None`。
@@ -117,26 +142,29 @@ pub fn system_name(os: &str) -> Option<&'static str> {
     }
 }
 
-/// 主机 `name` 的远程桌面能不能看：系统是 macOS、Windows 或 Linux 就算能，Linux 屏幕上有没有人登录桌面
-/// 等打开时由那边的采集进程报；没连上过、系统不明时算不能。
-pub fn screen_capturable(name: &str, cx: &App) -> bool {
-    system(name, cx).and_then(system_name).is_some()
+/// 远端主机 `host` 的远程桌面能不能看：系统是 macOS、Windows 或 Linux 就算能，Linux 屏幕上有没有人登录桌面
+/// 等打开时由那边的采集进程报；没连上过、系统不明时算不能，本机不算。
+pub fn screen_capturable(host: &HostId, cx: &App) -> bool {
+    !host.is_local() && system(host, cx).and_then(system_name).is_some()
 }
 
-/// 记下主机 `name` 报的系统 `os`；变了才存，并刷新画着系统图标、远程桌面按钮的各窗口。
-fn remember_system(name: &str, os: &str, cx: &mut App) {
-    if os.is_empty() || system(name, cx) == Some(os) {
+/// 记下远端主机 `host` 报的系统 `os`；变了才存，并刷新画着系统图标、远程桌面按钮的各窗口。
+fn remember_system(host: &HostId, os: &str, cx: &mut App) {
+    let Some(key) = host.key() else {
+        return;
+    };
+    if os.is_empty() || system(host, cx) == Some(os) {
         return;
     }
     let systems = &mut cx.default_global::<HostSystems>().0;
-    systems.insert(name.to_owned(), os.to_owned());
+    systems.insert(key, os.to_owned());
     if let Err(err) = save_map(runode_paths::Dirs::from_env().host_systems_file(), systems) {
         tracing::warn!("cannot save the host systems: {err}");
     }
     cx.refresh_windows();
 }
 
-/// 把远端宿主装成登录服务办到了哪一步，按主机名记。
+/// 把 SSH 主机上的宿主装成登录服务办到了哪一步，按连接目标记。
 #[derive(Clone, Debug)]
 pub enum ServiceJob {
     Running,
@@ -165,7 +193,7 @@ fn set_service_job(name: &str, job: ServiceJob, cx: &mut App) {
     hosts_changed(cx);
 }
 
-/// 在后台把主机 `name` 上的宿主装成登录服务；`report` 时没办成（或还要等）在最前面的窗口上说。
+/// 在后台把 SSH 主机 `name` 上的宿主装成登录服务；`report` 时没办成（或还要等）在最前面的窗口上说。
 pub fn install_service(name: &str, report: bool, cx: &mut App) {
     let Some(host) = ssh::find(name) else {
         return;
@@ -207,7 +235,7 @@ pub fn service_job_text(job: &ServiceJob) -> String {
     }
 }
 
-/// 清理远端旧构建办到了哪一步，按主机名记。
+/// 清理 SSH 主机上的旧构建办到了哪一步，按连接目标记。
 #[derive(Clone, Debug)]
 pub enum PruneJob {
     Running,
@@ -229,7 +257,7 @@ fn set_prune_job(name: &str, job: PruneJob, cx: &mut App) {
     hosts_changed(cx);
 }
 
-/// 在后台删掉主机 `name` 上用不着的 runode 构建（`RemoteHost::prune_builds`）。
+/// 在后台删掉 SSH 主机 `name` 上用不着的 runode 构建（`RemoteHost::prune_builds`）。
 pub fn prune_builds(name: &str, cx: &mut App) {
     let Some(host) = ssh::find(name) else {
         return;
@@ -276,12 +304,13 @@ fn tell(detail: &str, cx: &mut App) {
         front.update(cx, |_, window, cx| window.prompt(PromptLevel::Info, &title, Some(detail), &[ok.as_ref()], cx));
 }
 
-/// 主机 `name` 的宿主会跟着 ssh 的登录被结束：问用户要不要装成登录服务。
+/// SSH 主机 `name` 的宿主会跟着 ssh 的登录被结束：问用户要不要装成登录服务。
 fn offer_service(name: &str, cx: &mut App) {
     let Some(front) = window::front_window(cx) else {
         return;
     };
-    let title = rust_i18n::t!("ssh.bound_title", host = display_name(name, cx)).into_owned();
+    let host = display_name(&HostId::Ssh(name.to_owned()), cx);
+    let title = rust_i18n::t!("ssh.bound_title", host = host).into_owned();
     let detail = rust_i18n::t!("ssh.bound_detail");
     let (install, later) = (rust_i18n::t!("ssh.bound_install"), rust_i18n::t!("ssh.bound_later"));
     let answers: [&str; 2] = [&install, &later];
@@ -299,19 +328,17 @@ fn offer_service(name: &str, cx: &mut App) {
     .detach();
 }
 
-/// 在后台断开主机 `name`。
-pub fn disconnect(name: &str, cx: &mut App) {
-    let Some(host) = ssh::find(name) else {
-        return;
-    };
-    cx.background_spawn(async move { host.disconnect() }).detach();
+/// 在后台断开远端主机 `host`。
+pub fn disconnect(host: &HostId, cx: &mut App) {
+    let host = host.clone();
+    cx.background_spawn(async move { hosts::disconnect(&host) }).detach();
 }
 
-/// 在后台忘掉主机 `name`；只该在没有工作区、终端用着它时调。
-pub fn forget(name: &str, cx: &mut App) {
-    let name = name.to_owned();
-    crate::project_host::forget(&name);
-    cx.background_spawn(async move { ssh::forget(&name) }).detach();
+/// 在后台忘掉远端主机 `host`；只该在没有工作区、终端用着它时调。
+pub fn forget(host: &HostId, cx: &mut App) {
+    crate::project_host::forget(host);
+    let host = host.clone();
+    cx.background_spawn(async move { hosts::forget(&host) }).detach();
 }
 
 /// 开始收远端主机的事件，app 退出时让各台主机的主连接退出。要在恢复窗口之前调。
@@ -324,7 +351,7 @@ pub fn install(cx: &mut App) {
         async {}
     })
     .detach();
-    let Some(mut events) = ssh::events() else {
+    let Some(mut events) = hosts::events() else {
         return;
     };
     cx.spawn(async move |cx| {
@@ -336,34 +363,38 @@ pub fn install(cx: &mut App) {
     .detach();
 }
 
-/// 收事件时记着的主机名。
+/// 收事件时记着的主机。
 #[derive(Default)]
 struct Seen {
     /// 在办它的 `Link` 转来的请求。
-    served: HashSet<String>,
+    served: HashSet<HostId>,
     /// 问过要不要装成登录服务。
-    offered: HashSet<String>,
+    offered: HashSet<HostId>,
 }
 
 fn handle(event: RemoteEvent, seen: &mut Seen, cx: &mut App) {
     match event {
         RemoteEvent::Connected { host, alive } => {
-            // 连上前刚被忘掉的主机不再建出来（`ssh::remote` 会新建）。
-            let Some(remote) = ssh::find(&host) else {
+            // 连上前刚被忘掉的主机不再建出来（`hosts::link_of` 会新建）。
+            if !hosts::remotes().contains(&host) {
                 return;
-            };
-            let status = remote.status();
+            }
+            let status = hosts::status_of(&host);
             if let Status::Connected(connected) = &status {
                 remember_system(&host, &connected.os, cx);
             }
             let bound = matches!(status, Status::Connected(connected) if connected.session_bound);
-            if bound && service_job(&host, cx).is_none() && seen.offered.insert(host.clone()) {
-                offer_service(&host, cx);
+            if let HostId::Ssh(name) = &host
+                && bound
+                && service_job(name, cx).is_none()
+                && seen.offered.insert(host.clone())
+            {
+                offer_service(name, cx);
             }
             if seen.served.insert(host.clone()) {
-                window::serve(HostId::Ssh(host.clone()), remote.link.clone(), cx);
+                window::serve(host.clone(), hosts::link_of(&host), cx);
             }
-            terminal_view::remote_reconnected(HostId::Ssh(host), alive, cx);
+            terminal_view::remote_reconnected(host, alive, cx);
         }
         RemoteEvent::Status(host) => {
             for front in window::windows(cx) {
@@ -372,14 +403,16 @@ fn handle(event: RemoteEvent, seen: &mut Seen, cx: &mut App) {
             window::status_bar::redraw_status_bars(cx);
             hosts_changed(cx);
         }
-        // 再用这个名字时是新的一条 `Link`，连上时要重新办它转来的请求。
+        // 再用这台主机时是新的一条 `Link`，连上时要重新办它转来的请求。
         RemoteEvent::Forgotten(host) => {
             seen.served.remove(&host);
-            if cx.has_global::<ServiceJobs>() {
-                cx.global_mut::<ServiceJobs>().0.remove(&host);
-            }
-            if cx.has_global::<PruneJobs>() {
-                cx.global_mut::<PruneJobs>().0.remove(&host);
+            if let HostId::Ssh(name) = &host {
+                if cx.has_global::<ServiceJobs>() {
+                    cx.global_mut::<ServiceJobs>().0.remove(name);
+                }
+                if cx.has_global::<PruneJobs>() {
+                    cx.global_mut::<PruneJobs>().0.remove(name);
+                }
             }
             window::status_bar::redraw_status_bars(cx);
             hosts_changed(cx);

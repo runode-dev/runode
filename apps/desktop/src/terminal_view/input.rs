@@ -21,7 +21,10 @@ use super::{
     keys,
 };
 use crate::{
-    host_client::ssh::{self, HostId},
+    host_client::{
+        hosts::HostId,
+        ssh::{self, forward},
+    },
     project_host::ProjectHost,
 };
 
@@ -408,9 +411,9 @@ impl TerminalView {
     fn open_link(&mut self, target: LinkTarget, cx: &mut Context<Self>) {
         match (target, &self.host) {
             (LinkTarget::Url(url), HostId::Local) => cx.open_url(&url),
-            (LinkTarget::Url(url), HostId::Ssh(name)) => open_remote_url(name, url, cx),
+            (LinkTarget::Url(url), host) => open_remote_url(host, url, cx),
             (LinkTarget::Path(path), HostId::Local) => cx.open_with_system(&path),
-            (LinkTarget::Path(path), HostId::Ssh(_)) => {
+            (LinkTarget::Path(path), _) => {
                 let project = ProjectHost::of(&self.host);
                 let kind = cx.background_spawn({
                     let path = path.clone();
@@ -427,13 +430,16 @@ impl TerminalView {
     }
 }
 
-fn open_remote_url(name: &str, url: String, cx: &App) {
+fn open_remote_url(host: &HostId, url: String, cx: &App) {
+    let HostId::Ssh(name) = host else {
+        return;
+    };
     let Some(host) = ssh::remote(name) else {
         return;
     };
     let job = cx.background_spawn(async move {
         // 转发不了时照原样打开：本机恰好也在听那个端口时还能看到点什么，不至于点了没反应。
-        ssh::forward::local_url(&host, &url).unwrap_or_else(|err| {
+        forward::local_url(&host, &url).unwrap_or_else(|err| {
             tracing::warn!("cannot forward {url} from {}: {err:#}", host.name);
             url
         })

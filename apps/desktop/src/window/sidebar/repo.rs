@@ -12,7 +12,7 @@ use gpui::{AppContext, Context, SharedString};
 
 use super::super::WindowView;
 use crate::{
-    host_client::ssh::{self, Status},
+    host_client::hosts::{self, Status},
     project_host::ProjectHost,
 };
 
@@ -53,9 +53,7 @@ impl WindowView {
     pub(in crate::window) fn refresh_repo_badges(&mut self, cx: &mut Context<Self>) {
         let active = self.active;
         for (ix, workspace) in self.workspaces.iter_mut().enumerate() {
-            if let Some(name) = workspace.host.label()
-                && !matches!(ssh::status_of(name), Status::Connected(_))
-            {
+            if !workspace.host.is_local() && !matches!(hosts::status_of(&workspace.host), Status::Connected(_)) {
                 continue;
             }
             let badge = &mut workspace.repo;

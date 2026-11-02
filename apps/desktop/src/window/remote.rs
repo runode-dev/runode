@@ -13,7 +13,7 @@ use runode_types::pane::Axis;
 
 use super::persist::format;
 use super::{WindowView, agents::reveal, cards, clipboard, layout_report};
-use crate::host_client::ssh::HostId;
+use crate::host_client::hosts::HostId;
 use crate::{
     config::AppConfig,
     host_client::{self, Link},
@@ -48,7 +48,7 @@ pub fn serve(host: HostId, link: Link, cx: &mut App) {
                     cx.spawn(async move |cx| {
                         let (is_dir, real) = match host {
                             HostId::Local => super::model::inspect_dir(dir.clone()).await,
-                            HostId::Ssh(_) => (true, dir.clone()),
+                            HostId::Ssh(_) | HostId::Paired(_) => (true, dir.clone()),
                         };
                         let reply = cx.update(|cx| open_workspace(&host, req, &dir, is_dir, &real, focus, name, cx));
                         link.ui_reply(ticket, reply.wait().await);

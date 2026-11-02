@@ -25,7 +25,7 @@ use gpui::{
     Action, AnyElement, App, Context, Div, Focusable, MouseButton, Role, Stateful, Task, Window, div, prelude::*, px,
 };
 // 面板外框在 `runode_ui::panel`，窗口里各面板从这里引。
-use crate::host_client::ssh::HostId;
+use crate::host_client::hosts::HostId;
 use crate::project_host::ProjectHost;
 use crate::ui::a11y::A11yPress;
 pub(super) use crate::ui::panel::{panel_message, panel_shell};
