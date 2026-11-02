@@ -79,7 +79,8 @@ impl Key {
     }
 
     pub fn from_hex(text: &str) -> Option<Self> {
-        if text.len() != 64 || !text.is_ascii() {
+        // `from_str_radix` 认带 `+` 号的写法，先把每个字都限在十六进制数字里。
+        if text.len() != 64 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
             return None;
         }
         let mut bytes = [0u8; 32];

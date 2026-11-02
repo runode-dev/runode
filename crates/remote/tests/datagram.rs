@@ -6,10 +6,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_remote::datagram::{Event, Path, Receiver, Sender};
+use runode_remote::datagram::{Event, Key, Path, Receiver, Sender};
 
 fn localhost(port: u16) -> SocketAddr {
     (Ipv4Addr::LOCALHOST, port).into()
+}
+
+#[test]
+fn keys_read_back_only_from_plain_hex() {
+    let hex = "0f".repeat(32);
+    assert_eq!(Key::from_hex(&hex).map(|key| key.to_hex()), Some(hex.clone()));
+    assert!(Key::from_hex(&format!("+f{}", &hex[2..])).is_none());
+    assert!(Key::from_hex(&hex[2..]).is_none());
+    assert!(Key::from_hex(&format!("zz{}", &hex[2..])).is_none());
 }
 
 #[test]
