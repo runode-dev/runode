@@ -10,8 +10,9 @@ use crate::ui::theme::ActiveTheme as _;
 use std::path::PathBuf;
 
 use gpui::{
-    App, Context, Div, Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton,
-    PathPromptOptions, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
+    App, Axis, Context, Div, Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
+    MouseButton, PathPromptOptions, Role, ScrollHandle, SharedString, Stateful, Subscription, Window, div, prelude::*,
+    px, svg,
 };
 
 use super::{NewWorkspace, WindowView, files::Quoting, model::home_dir};
@@ -24,6 +25,7 @@ use crate::{
         dialog::Dialog,
         font_size::FontSize,
         input::{Input, InputEvent, InputState},
+        scrollbar::scrollbar,
     },
 };
 
@@ -56,6 +58,8 @@ pub(super) struct NewWorkspaceDialog {
     pairing: Option<paired::Pairing>,
     /// 在远端建目录没建成的原因。
     pub(super) error: Option<String>,
+    /// 对话框比窗口高时里面的滚动。
+    scroll: ScrollHandle,
 }
 
 impl NewWorkspaceDialog {
@@ -97,6 +101,7 @@ impl WindowView {
             adding: None,
             pairing: None,
             error: None,
+            scroll: ScrollHandle::new(),
         });
         let field = match (&dialog.adding, &dialog.url, &dialog.name) {
             _ if dialog.pairing.is_some() => dialog.pairing.as_ref().map(|pairing| pairing.focus_handle(cx)),
@@ -379,17 +384,12 @@ impl WindowView {
             .on_press(cx, |this, window, cx| this.close_new_workspace(window, cx));
         let title = rust_i18n::t!("workspace.new").into_owned();
         let other = rust_i18n::t!("workspace.other").into_owned();
-        let panel = Dialog::new("new-workspace-dialog", title.clone())
-            .track_focus(&dialog.focus)
-            .on_key_down(cx.listener(Self::new_workspace_key))
-            // 主机菜单的各项派发到对话框上：窗口上的动作在对话框开着时不办。
-            .on_action(cx.listener(Self::pick_workspace_host))
-            .on_action(cx.listener(Self::add_ssh_host))
-            .on_action(cx.listener(Self::add_paired_machine))
-            .w(px(480.))
-            .max_w_full()
-            .max_h_full()
+        // 比窗口高时对话框里这一层滚动，滚动条叠在对话框上，和它一样大。
+        let body = div()
+            .id("new-workspace-body")
+            .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&dialog.scroll)
             .p(px(24.))
             .flex()
             .flex_col()
@@ -409,7 +409,7 @@ impl WindowView {
                             .aria_label(title.clone())
                             .text_size(FontSize::Heading)
                             .font_weight(FontWeight::BOLD)
-                            .child(title),
+                            .child(title.clone()),
                     )
                     .child(close),
             )
@@ -434,6 +434,22 @@ impl WindowView {
                     .child(div().h(px(1.)).bg(border))
                     .child(div().child(create).children(create_body)),
             );
+        let panel = Dialog::new("new-workspace-dialog", title)
+            .track_focus(&dialog.focus)
+            .on_key_down(cx.listener(Self::new_workspace_key))
+            // 主机菜单的各项派发到对话框上：窗口上的动作在对话框开着时不办。
+            .on_action(cx.listener(Self::pick_workspace_host))
+            .on_action(cx.listener(Self::add_ssh_host))
+            .on_action(cx.listener(Self::add_paired_machine))
+            .w(px(480.))
+            .max_w_full()
+            .max_h_full()
+            .relative()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(body)
+            .child(scrollbar("new-workspace-scrollbar", dialog.scroll.clone(), Axis::Vertical));
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消；在本机上开时，从访达拖来的文件夹放在窗口哪里
         // 都直接开。
         Some(
