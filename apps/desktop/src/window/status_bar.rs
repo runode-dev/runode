@@ -30,8 +30,8 @@ use std::{
 
 use gpui::{
     AccessibleAction, Action, Anchor, AnyElement, App, Context, Div, Focusable, FontWeight, Global, Hsla, MouseButton,
-    MouseDownEvent, Pixels, Point, PromptLevel, Role, SharedString, Stateful, Window, WindowHandle, anchored, deferred,
-    div, point, prelude::*, px, svg,
+    MouseDownEvent, Pixels, Point, PromptButton, PromptLevel, Role, SharedString, Stateful, Window, WindowHandle,
+    anchored, deferred, div, point, prelude::*, px, svg,
 };
 use runode_config::{ConfigFile, PreventSleep, StatusItem};
 use runode_types::{
@@ -417,7 +417,7 @@ fn tell_forward_failed(detail: &str, cx: &mut App) {
     let Some(front) = remote::front_window(cx) else { return };
     let (title, ok) = (rust_i18n::t!("status.forward_failed"), rust_i18n::t!("ssh.ok"));
     let _ = front.update(cx, |_, window, cx| {
-        crate::prompt::show(window, PromptLevel::Warning, &title, Some(detail), &[ok.as_ref()], cx)
+        crate::prompt::show(window, PromptLevel::Warning, &title, Some(detail), &[PromptButton::cancel(ok)], cx)
     });
 }
 

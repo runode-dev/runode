@@ -4,7 +4,8 @@
 use std::time::{Duration, Instant};
 
 use gpui::{
-    Context, KeyUpEvent, Modifiers, ModifiersChangedEvent, PromptLevel, Stateful, Task, Window, div, prelude::*, px,
+    Context, KeyUpEvent, Modifiers, ModifiersChangedEvent, PromptButton, PromptLevel, Stateful, Task, Window, div,
+    prelude::*, px,
 };
 use runode_speech::Recorder;
 use runode_types::color::Rgb;
@@ -57,7 +58,10 @@ impl TerminalView {
                 PromptLevel::Info,
                 &rust_i18n::t!("dictation.no_model.title"),
                 Some(&detail),
-                &[&*rust_i18n::t!("dictation.no_model.open_settings"), &*rust_i18n::t!("dictation.cancel")],
+                &[
+                    PromptButton::new(rust_i18n::t!("dictation.no_model.open_settings")),
+                    PromptButton::cancel(rust_i18n::t!("dictation.cancel")),
+                ],
                 cx,
             );
             cx.spawn_in(window, async move |_, cx| {
@@ -218,7 +222,7 @@ fn report(err: &anyhow::Error, window: &mut Window, cx: &mut Context<TerminalVie
         PromptLevel::Warning,
         &rust_i18n::t!("dictation.failed"),
         Some(&detail),
-        &[&*rust_i18n::t!("dictation.ok")],
+        &[PromptButton::cancel(rust_i18n::t!("dictation.ok"))],
         cx,
     ));
 }

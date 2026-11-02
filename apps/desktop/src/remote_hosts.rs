@@ -11,7 +11,7 @@ use std::{
 };
 
 use futures::StreamExt as _;
-use gpui::{App, AppContext as _, Global, PromptLevel};
+use gpui::{App, AppContext as _, Global, PromptButton, PromptLevel};
 
 use crate::{
     host_client::{
@@ -329,7 +329,7 @@ fn tell(title: &str, detail: &str, cx: &mut App) {
     };
     let ok = rust_i18n::t!("ssh.ok");
     let _ = front.update(cx, |_, window, cx| {
-        crate::prompt::show(window, PromptLevel::Info, title, Some(detail), &[ok.as_ref()], cx)
+        crate::prompt::show(window, PromptLevel::Info, title, Some(detail), &[PromptButton::cancel(ok)], cx)
     });
 }
 
@@ -341,8 +341,8 @@ fn offer_service(name: &str, cx: &mut App) {
     let host = display_name(&HostId::Ssh(name.to_owned()), cx);
     let title = rust_i18n::t!("ssh.bound_title", host = host).into_owned();
     let detail = rust_i18n::t!("ssh.bound_detail");
-    let (install, later) = (rust_i18n::t!("ssh.bound_install"), rust_i18n::t!("ssh.bound_later"));
-    let answers: [&str; 2] = [&install, &later];
+    let answers =
+        [PromptButton::new(rust_i18n::t!("ssh.bound_install")), PromptButton::cancel(rust_i18n::t!("ssh.bound_later"))];
     let Ok(answer) = front.update(cx, |_, window, cx| {
         crate::prompt::show(window, PromptLevel::Warning, &title, Some(&detail), &answers, cx)
     }) else {

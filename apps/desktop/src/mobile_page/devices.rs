@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use gpui::{App, Context, Global, PromptLevel, SharedString, Task, Window};
+use gpui::{App, Context, Global, PromptButton, PromptLevel, SharedString, Task, Window};
 use runode_protocol::remote::{DeviceId, DeviceKind};
 
 use super::MobilePage;
@@ -89,8 +89,8 @@ impl MobilePage {
         let name = device.name.clone();
         let title = rust_i18n::t!("machine.revoke_title", device = name);
         let detail = rust_i18n::t!("machine.revoke_detail");
-        let answers = [rust_i18n::t!("machine.revoke"), rust_i18n::t!("machine.cancel")];
-        let answers: Vec<&str> = answers.iter().map(AsRef::as_ref).collect();
+        let answers =
+            [PromptButton::new(rust_i18n::t!("machine.revoke")), PromptButton::cancel(rust_i18n::t!("machine.cancel"))];
         let answer = crate::prompt::show(window, PromptLevel::Warning, &title, Some(&detail), &answers, cx);
         cx.spawn_in(window, async move |_, cx| {
             if answer.await != Ok(0) {
@@ -103,7 +103,7 @@ impl MobilePage {
                 let err = revoked.err()?;
                 tracing::warn!("cannot revoke remote device {id}: {err}");
                 let title = rust_i18n::t!("machine.revoke_failed_title", device = name);
-                let ok = [&*rust_i18n::t!("machine.ok")];
+                let ok = [PromptButton::cancel(rust_i18n::t!("machine.ok"))];
                 Some(crate::prompt::show(window, PromptLevel::Critical, &title, Some(&err.to_string()), &ok, cx))
             });
             // 只是告诉一声，等用户点掉。

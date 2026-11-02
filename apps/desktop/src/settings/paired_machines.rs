@@ -3,8 +3,8 @@
 
 use crate::ui::theme::Theme;
 use gpui::{
-    AppContext as _, Context, Div, Entity, Focusable as _, PromptLevel, Role, SharedString, Subscription, Window, div,
-    prelude::*, px, svg,
+    AppContext as _, Context, Div, Entity, Focusable as _, PromptButton, PromptLevel, Role, SharedString, Subscription,
+    Window, div, prelude::*, px, svg,
 };
 use runode_remote::client::PairedMachine;
 
@@ -217,8 +217,8 @@ fn confirm_forget(host: HostId, window: &mut Window, cx: &mut Context<SettingsVi
     let name = remote_hosts::display_name(&host, cx);
     let title = rust_i18n::t!("paired.forget_confirm_title", host = name);
     let detail = rust_i18n::t!("paired.forget_confirm_detail", host = name);
-    let answers = [rust_i18n::t!("paired.forget"), rust_i18n::t!("machine.cancel")];
-    let answers: Vec<&str> = answers.iter().map(AsRef::as_ref).collect();
+    let answers =
+        [PromptButton::new(rust_i18n::t!("paired.forget")), PromptButton::cancel(rust_i18n::t!("machine.cancel"))];
     let answer = crate::prompt::show(window, PromptLevel::Warning, &title, Some(&detail), &answers, cx);
     cx.spawn(async move |_, cx| {
         if answer.await == Ok(0) {

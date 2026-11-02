@@ -515,7 +515,10 @@ impl ActionsPanel {
             gpui::PromptLevel::Warning,
             &title,
             Some(&detail),
-            &[&confirm, &*rust_i18n::t!("github_actions.dialog_cancel")],
+            &[
+                gpui::PromptButton::new(&*confirm),
+                gpui::PromptButton::cancel(rust_i18n::t!("github_actions.dialog_cancel")),
+            ],
             cx,
         );
         cx.spawn(async move |this, cx| {

@@ -4,7 +4,7 @@
 //! 构建脚本嵌进去的信息表让它也有 bundle id，所以只在 .app 里发；授权请求在第一次发通知时才由通知中心
 //! 弹出。Windows 和 Linux 上随时能发。
 
-use gpui::{App, Global, PromptLevel, SystemNotification};
+use gpui::{App, Global, PromptButton, PromptLevel, SystemNotification};
 
 /// 是否已经开始接收通知的点击，以及系统设置里是否拒绝了 Runode 发通知（拒绝时通知照发但不会弹出来）、
 /// 是不是正在问。
@@ -25,17 +25,16 @@ pub fn prompt(
     level: PromptLevel,
     title: &str,
     detail: &str,
-    answers: &[&str],
+    answers: &[PromptButton],
     cx: &mut App,
     then: impl FnOnce(usize, &mut App) + 'static,
 ) {
     let (title, detail) = (title.to_owned(), detail.to_owned());
-    let answers: Vec<String> = answers.iter().map(|answer| (*answer).to_owned()).collect();
+    let answers = answers.to_vec();
     cx.defer(move |cx| {
         let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else { return };
-        let labels: Vec<&str> = answers.iter().map(String::as_str).collect();
         let Ok(answer) =
-            window.update(cx, |_, window, cx| crate::prompt::show(window, level, &title, Some(&detail), &labels, cx))
+            window.update(cx, |_, window, cx| crate::prompt::show(window, level, &title, Some(&detail), &answers, cx))
         else {
             return;
         };

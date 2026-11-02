@@ -28,8 +28,8 @@ use crate::ui::{
 use gpui::SharedString;
 use gpui::{
     AccessibleAction, Action, AnyElement, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, Div, Hsla,
-    MouseButton, MouseDownEvent, PathBuilder, Pixels, PromptLevel, Role, Window, canvas, div, fill, img, point,
-    prelude::*, px, quad, svg, uniform_list,
+    MouseButton, MouseDownEvent, PathBuilder, Pixels, PromptButton, PromptLevel, Role, Window, canvas, div, fill, img,
+    point, prelude::*, px, quad, svg, uniform_list,
 };
 use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, LaneColor, RefKind};
 use runode_types::color::Rgb;
@@ -363,7 +363,10 @@ impl GitPanel {
                     PromptLevel::Info,
                     &rust_i18n::t!("git.graph.checkout_title", id = short),
                     Some(&rust_i18n::t!("git.graph.checkout_detail")),
-                    &[&*rust_i18n::t!("git.graph.checkout_confirm"), &*rust_i18n::t!("git.cancel")],
+                    &[
+                        PromptButton::new(rust_i18n::t!("git.graph.checkout_confirm")),
+                        PromptButton::cancel(rust_i18n::t!("git.cancel")),
+                    ],
                     cx,
                 );
                 cx.spawn_in(window, async move |this, cx| {

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use gpui::{App, AppContext as _, ClipboardEntry, ClipboardItem, Context, PromptLevel, Window, px};
+use gpui::{App, AppContext as _, ClipboardEntry, ClipboardItem, Context, PromptButton, PromptLevel, Window, px};
 use runode_terminal::session::{Paste as PasteResult, Session};
 use runode_types::grid::ViewportScroll;
 
@@ -76,7 +76,7 @@ impl TerminalView {
             PromptLevel::Warning,
             &rust_i18n::t!("paste.title"),
             Some(&detail),
-            &[&*rust_i18n::t!("paste.confirm"), &*rust_i18n::t!("paste.cancel")],
+            &[PromptButton::new(rust_i18n::t!("paste.confirm")), PromptButton::cancel(rust_i18n::t!("paste.cancel"))],
             cx,
         );
         cx.spawn(async move |this, cx| {

@@ -752,7 +752,10 @@ impl WindowView {
             gpui::PromptLevel::Warning,
             title,
             Some(&detail),
-            &[&*rust_i18n::t!("close.confirm"), &*rust_i18n::t!("close.cancel")],
+            &[
+                gpui::PromptButton::new(rust_i18n::t!("close.confirm")),
+                gpui::PromptButton::cancel(rust_i18n::t!("close.cancel")),
+            ],
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {

@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::ui::base_name;
-use gpui::{App, Context, Global, PromptLevel, Window, prelude::*};
+use gpui::{App, Context, Global, PromptButton, PromptLevel, Window, prelude::*};
 use runode_git::{self as git, CommitOptions, FileDiff, Section};
 
 use crate::project_host::ProjectRepo;
@@ -167,7 +167,7 @@ impl GitPanel {
             PromptLevel::Warning,
             &title,
             Some(&detail),
-            &[&confirm, &*rust_i18n::t!("git.cancel")],
+            &[PromptButton::new(confirm), PromptButton::cancel(rust_i18n::t!("git.cancel"))],
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -369,7 +369,7 @@ impl GitPanel {
                     PromptLevel::Warning,
                     &rust_i18n::t!("git.conflicts_title"),
                     Some(&rust_i18n::t!("git.conflicts_detail")),
-                    &[&*rust_i18n::t!("git.ok")],
+                    &[PromptButton::cancel(rust_i18n::t!("git.ok"))],
                     cx,
                 ));
                 return;
@@ -379,7 +379,10 @@ impl GitPanel {
                 PromptLevel::Info,
                 &rust_i18n::t!("git.stage_all_title"),
                 Some(&rust_i18n::t!("git.stage_all_detail")),
-                &[&*rust_i18n::t!("git.stage_all_confirm"), &*rust_i18n::t!("git.cancel")],
+                &[
+                    PromptButton::new(rust_i18n::t!("git.stage_all_confirm")),
+                    PromptButton::cancel(rust_i18n::t!("git.cancel")),
+                ],
                 cx,
             );
             cx.spawn_in(window, async move |this, cx| {
@@ -547,7 +550,7 @@ impl GitPanel {
             PromptLevel::Warning,
             &rust_i18n::t!("git.stage_conflicts_title", count = conflicts),
             Some(&rust_i18n::t!("git.stage_conflicts_detail")),
-            &[&*rust_i18n::t!("git.stage_all"), &*rust_i18n::t!("git.cancel")],
+            &[PromptButton::new(rust_i18n::t!("git.stage_all")), PromptButton::cancel(rust_i18n::t!("git.cancel"))],
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {
@@ -624,7 +627,7 @@ pub fn show_git_error(err: &git::GitError, window: &mut Window, cx: &mut App) {
         PromptLevel::Warning,
         &rust_i18n::t!("git.failed"),
         Some(&detail),
-        &[&*rust_i18n::t!("git.ok")],
+        &[PromptButton::cancel(rust_i18n::t!("git.ok"))],
         cx,
     ));
 }

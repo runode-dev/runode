@@ -36,7 +36,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use futures::channel::mpsc::UnboundedReceiver;
-use gpui::{App, PromptLevel};
+use gpui::{App, PromptButton, PromptLevel};
 use runode_config::Config;
 use runode_host::{BuildId, ClientMsg, Host};
 #[cfg(unix)]
@@ -719,10 +719,12 @@ pub fn show_notice(cx: &mut App) {
         ),
         Notice::HandoffDegraded { .. } => return,
     };
-    let ok = rust_i18n::t!("host.ok");
-    let (keep, end_old) = (rust_i18n::t!("host.keep_old"), rust_i18n::t!("host.end_old"));
     // 默认（第一个）按钮留着旧宿主。
-    let answers: Vec<&str> = if end { vec![&keep, &end_old] } else { vec![&ok] };
+    let answers = if end {
+        vec![PromptButton::cancel(rust_i18n::t!("host.keep_old")), PromptButton::new(rust_i18n::t!("host.end_old"))]
+    } else {
+        vec![PromptButton::cancel(rust_i18n::t!("host.ok"))]
+    };
     crate::alerts::prompt(PromptLevel::Warning, &title, &detail, &answers, cx, move |answer, cx| {
         if end && answer == 1 {
             end_old_host(cx);

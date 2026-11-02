@@ -410,7 +410,10 @@ impl Kanban {
             gpui::PromptLevel::Warning,
             &rust_i18n::t!("kanban.remove_title", title = todo.spec.title.as_str()),
             Some(&rust_i18n::t!("kanban.remove_detail")),
-            &[&*rust_i18n::t!("kanban.remove"), &*rust_i18n::t!("kanban.cancel")],
+            &[
+                gpui::PromptButton::new(rust_i18n::t!("kanban.remove")),
+                gpui::PromptButton::cancel(rust_i18n::t!("kanban.cancel")),
+            ],
             cx,
         );
         cx.spawn(async move |this, cx| {

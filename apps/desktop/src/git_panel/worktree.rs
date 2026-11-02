@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gpui::{Action, Context, Pixels, Point, PromptLevel, Window};
+use gpui::{Action, Context, Pixels, Point, PromptButton, PromptLevel, Window};
 use runode_git::{self as git, RepoKind};
 
 use crate::ui::{
@@ -126,7 +126,7 @@ impl GitPanel {
             PromptLevel::Warning,
             &title,
             Some(&detail),
-            &[&confirm, &*rust_i18n::t!("git.cancel")],
+            &[PromptButton::new(&*confirm), PromptButton::cancel(rust_i18n::t!("git.cancel"))],
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {

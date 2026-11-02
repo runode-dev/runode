@@ -15,7 +15,7 @@
 
 use std::{collections::HashSet, time::Duration};
 
-use gpui::{AnyWindowHandle, App, Global, PromptLevel, Window};
+use gpui::{AnyWindowHandle, App, Global, PromptButton, PromptLevel, Window};
 use runode_protocol::{ClientMsg, SessionId, SessionInfo};
 use runode_types::agent::AgentKind;
 
@@ -325,7 +325,10 @@ fn discard_unsaved(
                     PromptLevel::Warning,
                     &rust_i18n::t!("preview.unsaved_title", count = unsaved),
                     Some(&rust_i18n::t!("preview.unsaved_detail")),
-                    &[&*rust_i18n::t!("preview.discard_edits"), &*rust_i18n::t!("quit.cancel")],
+                    &[
+                        PromptButton::new(rust_i18n::t!("preview.discard_edits")),
+                        PromptButton::cancel(rust_i18n::t!("quit.cancel")),
+                    ],
                     cx,
                 )
             })
@@ -531,7 +534,13 @@ fn confirm(
         .into_iter()
         .chain([(&*text.confirm, Some(Answer::End)), (&*cancel, None)])
         .collect();
-    let labels: Vec<&str> = answers.iter().map(|(label, _)| *label).collect();
+    let labels: Vec<PromptButton> = answers
+        .iter()
+        .map(|&(label, choice)| match choice {
+            Some(_) => PromptButton::new(label),
+            None => PromptButton::cancel(label),
+        })
+        .collect();
     let answer = window.update(cx, |_, window, cx| {
         crate::prompt::show(window, PromptLevel::Warning, &text.title, Some(&text.detail), &labels, cx)
     });

@@ -10,7 +10,7 @@ use crate::ui::{
     follow_move,
     inline_edit::InlineEdit,
 };
-use gpui::{AnyElement, Context, PromptLevel, Role, ScrollStrategy, Window, div, img, prelude::*, px};
+use gpui::{AnyElement, Context, PromptButton, PromptLevel, Role, ScrollStrategy, Window, div, img, prelude::*, px};
 use runode_files::ops::{self, OpError};
 
 use crate::file_tree::{
@@ -338,7 +338,7 @@ impl FileTree {
             PromptLevel::Warning,
             &title,
             Some(&detail),
-            &[&*confirm, &*rust_i18n::t!("files.cancel")],
+            &[PromptButton::new(&*confirm), PromptButton::cancel(rust_i18n::t!("files.cancel"))],
             cx,
         );
         // 完成时可能已经切到了别的 workspace，选中和定位的是发起的那个 workspace 的树（预览和别的树都跟着改）。
@@ -421,7 +421,10 @@ impl FileTree {
                         PromptLevel::Warning,
                         &rust_i18n::t!("files.untrack_title", name = base_name(&rel)),
                         Some(&rust_i18n::t!("files.untrack_detail")),
-                        &[&*rust_i18n::t!("files.untrack_confirm"), &*rust_i18n::t!("files.cancel")],
+                        &[
+                            PromptButton::new(rust_i18n::t!("files.untrack_confirm")),
+                            PromptButton::cancel(rust_i18n::t!("files.cancel")),
+                        ],
                         cx,
                     )
                 }) else {
@@ -489,7 +492,10 @@ impl FileTree {
             PromptLevel::Info,
             &title,
             None,
-            &[&*rust_i18n::t!("files.move_confirm"), &*rust_i18n::t!("files.cancel")],
+            &[
+                PromptButton::new(rust_i18n::t!("files.move_confirm")),
+                PromptButton::cancel(rust_i18n::t!("files.cancel")),
+            ],
             cx,
         );
         let src = src.to_path_buf();
@@ -545,7 +551,7 @@ impl FileTree {
             PromptLevel::Warning,
             &rust_i18n::t!("files.failed"),
             Some(&detail),
-            &[&*rust_i18n::t!("files.ok")],
+            &[PromptButton::cancel(rust_i18n::t!("files.ok"))],
             cx,
         ));
     }

@@ -23,7 +23,7 @@ use std::{
     time::Duration,
 };
 
-use gpui::{App, Global, PromptLevel};
+use gpui::{App, Global, PromptButton, PromptLevel};
 use runode_update::{Error, Installation, Release, Staged};
 
 use crate::config::AppConfig;
@@ -303,7 +303,10 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
         Ok(Found::Available { release, installation }) => {
             let title = rust_i18n::t!("update.available_title", version = release.version);
             let detail = rust_i18n::t!("update.available_detail", current = VERSION);
-            let answers = [&*rust_i18n::t!("update.download"), &*rust_i18n::t!("update.later")];
+            let answers = [
+                PromptButton::new(rust_i18n::t!("update.download")),
+                PromptButton::cancel(rust_i18n::t!("update.later")),
+            ];
             crate::alerts::prompt(PromptLevel::Info, &title, &detail, &answers, cx, move |answer, cx| {
                 if answer != 0 {
                     return;
@@ -327,7 +330,7 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
                     PromptLevel::Info,
                     &title,
                     &detail,
-                    &[&rust_i18n::t!("update.ok")],
+                    &[PromptButton::cancel(rust_i18n::t!("update.ok"))],
                     cx,
                     |_, _| {},
                 );
@@ -338,7 +341,10 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
             if manual {
                 let title = rust_i18n::t!("update.manual_title", version = release.version);
                 let detail = rust_i18n::t!("update.manual_detail", reason = reason);
-                let answers = [&*rust_i18n::t!("update.open_page"), &*rust_i18n::t!("update.later")];
+                let answers = [
+                    PromptButton::new(rust_i18n::t!("update.open_page")),
+                    PromptButton::cancel(rust_i18n::t!("update.later")),
+                ];
                 crate::alerts::prompt(PromptLevel::Info, &title, &detail, &answers, cx, move |answer, cx| {
                     if answer == 0 {
                         cx.open_url(&release.page);
@@ -354,7 +360,7 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
                     PromptLevel::Warning,
                     &title,
                     &err.to_string(),
-                    &[&rust_i18n::t!("update.ok")],
+                    &[PromptButton::cancel(rust_i18n::t!("update.ok"))],
                     cx,
                     |_, _| {},
                 );
@@ -421,7 +427,7 @@ fn finish_download(staged: Result<Staged, Error>, cx: &mut App) {
                     PromptLevel::Warning,
                     &title,
                     &err.to_string(),
-                    &[&rust_i18n::t!("update.ok")],
+                    &[PromptButton::cancel(rust_i18n::t!("update.ok"))],
                     cx,
                     |_, _| {},
                 );
@@ -436,7 +442,8 @@ pub fn offer_restart(cx: &mut App) {
     let Phase::Ready(staged) = &cx.global::<Updater>().phase else { return };
     let title = rust_i18n::t!("update.ready_title", version = staged.version());
     let detail = rust_i18n::t!("update.ready_detail");
-    let answers = [&*rust_i18n::t!("update.restart"), &*rust_i18n::t!("update.later")];
+    let answers =
+        [PromptButton::new(rust_i18n::t!("update.restart")), PromptButton::cancel(rust_i18n::t!("update.later"))];
     crate::alerts::prompt(PromptLevel::Info, &title, &detail, &answers, cx, |answer, cx| {
         if answer == 0 {
             crate::window::quit_to_update(cx);

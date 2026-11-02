@@ -17,8 +17,8 @@ use std::{
 };
 
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable as _, KeyDownEvent, PromptLevel, SharedString, Subscription, Task,
-    Window, prelude::*, px,
+    App, Context, Entity, FocusHandle, Focusable as _, KeyDownEvent, PromptButton, PromptLevel, SharedString,
+    Subscription, Task, Window, prelude::*, px,
 };
 use runode_files::Stamp;
 use runode_preview::MAX_TEXT_BYTES;
@@ -104,7 +104,7 @@ fn report(title: &str, err: &io::Error, window: &mut Window, cx: &mut Context<Pr
         PromptLevel::Critical,
         title,
         Some(&err.to_string()),
-        &[&*rust_i18n::t!("git.ok")],
+        &[PromptButton::cancel(rust_i18n::t!("git.ok"))],
         cx,
     ));
 }
@@ -361,7 +361,10 @@ impl PreviewPanel {
             PromptLevel::Warning,
             &rust_i18n::t!("preview.unsaved_title", count = count),
             Some(&rust_i18n::t!("preview.unsaved_detail")),
-            &[&*rust_i18n::t!("preview.discard_edits"), &*rust_i18n::t!("git.cancel")],
+            &[
+                PromptButton::new(rust_i18n::t!("preview.discard_edits")),
+                PromptButton::cancel(rust_i18n::t!("git.cancel")),
+            ],
             cx,
         )
     }
@@ -393,7 +396,10 @@ impl PreviewPanel {
                         PromptLevel::Warning,
                         &rust_i18n::t!("preview.changed_on_disk_title"),
                         Some(&rust_i18n::t!("preview.changed_on_disk_detail")),
-                        &[&*rust_i18n::t!("preview.overwrite"), &*rust_i18n::t!("git.cancel")],
+                        &[
+                            PromptButton::new(rust_i18n::t!("preview.overwrite")),
+                            PromptButton::cancel(rust_i18n::t!("git.cancel")),
+                        ],
                         cx,
                     )
                 });

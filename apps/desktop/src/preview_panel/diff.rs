@@ -30,8 +30,8 @@ use crate::ui::{
 };
 use gpui::{
     AnyElement, Axis, Context, HighlightStyle, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent,
-    PromptLevel, Role, ScrollStrategy, SharedString, StyledText, Window, combine_highlights, div, prelude::*, px, svg,
-    uniform_list,
+    PromptButton, PromptLevel, Role, ScrollStrategy, SharedString, StyledText, Window, combine_highlights, div,
+    prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
 use runode_preview::Span;
@@ -525,7 +525,10 @@ impl PreviewPanel {
             PromptLevel::Warning,
             &rust_i18n::t!("preview.diff.discard_hunk_title"),
             Some(&rust_i18n::t!("git.irreversible")),
-            &[&*rust_i18n::t!("git.discard_confirm"), &*rust_i18n::t!("git.cancel")],
+            &[
+                PromptButton::new(rust_i18n::t!("git.discard_confirm")),
+                PromptButton::cancel(rust_i18n::t!("git.cancel")),
+            ],
             cx,
         );
         cx.spawn_in(window, async move |this, cx| {

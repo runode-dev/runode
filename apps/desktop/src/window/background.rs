@@ -19,7 +19,10 @@ use std::{
 };
 
 use anyhow::Result;
-use gpui::{App, Context, Div, Global, PromptLevel, Role, SharedString, Stateful, Task, Window, div, prelude::*, px};
+use gpui::{
+    App, Context, Div, Global, PromptButton, PromptLevel, Role, SharedString, Stateful, Task, Window, div, prelude::*,
+    px,
+};
 use runode_protocol::{ClientMsg, HostMsg, SessionId, SessionInfo};
 
 use super::{
@@ -260,7 +263,10 @@ impl WindowView {
             PromptLevel::Warning,
             &rust_i18n::t!("background.end_title"),
             Some(&rust_i18n::t!("background.end_detail", count = agents)),
-            &[&*rust_i18n::t!("background.end_all"), &*rust_i18n::t!("quit.cancel")],
+            &[
+                PromptButton::new(rust_i18n::t!("background.end_all")),
+                PromptButton::cancel(rust_i18n::t!("quit.cancel")),
+            ],
             cx,
         );
         cx.spawn(async move |_, cx| {

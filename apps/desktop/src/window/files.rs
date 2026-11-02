@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::file_tree::{FileTree, FileTreeEvent, Input};
 use futures::FutureExt as _;
-use gpui::{Context, Div, Entity, Focusable, PromptLevel, Stateful, Window, div, prelude::*, px};
+use gpui::{Context, Div, Entity, Focusable, PromptButton, PromptLevel, Stateful, Window, div, prelude::*, px};
 use runode_config::PreviewClick;
 use runode_types::{session::SessionMeta, shell::Shell};
 
@@ -341,7 +341,7 @@ impl WindowView {
                         PromptLevel::Warning,
                         &title,
                         Some(&detail),
-                        &[&*rust_i18n::t!("ssh.ok")],
+                        &[PromptButton::cancel(rust_i18n::t!("ssh.ok"))],
                         cx,
                     ));
                 }
