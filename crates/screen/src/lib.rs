@@ -57,6 +57,18 @@ const BURST_HEADROOM: f64 = 1.5;
 #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 const REFINE_BOOST: f64 = 4.;
 
+/// 码率缓冲的大小，bit：`BURST_WINDOW` 那么长时间按 `BURST_HEADROOM` 倍的码率能发的量，单帧大不过它。
+#[cfg(any(windows, target_os = "linux"))]
+fn burst_bits(bitrate: u32) -> u32 {
+    (f64::from(bitrate) * BURST_WINDOW.as_secs_f64() * BURST_HEADROOM) as u32
+}
+
+/// 编码器用的码率：补清楚时（`boost`）按 `REFINE_BOOST` 放大。
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+fn boosted(bitrate: u32, boost: bool) -> f64 {
+    if boost { f64::from(bitrate) * REFINE_BOOST } else { f64::from(bitrate) }
+}
+
 /// `Capture` 交出的事件。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {

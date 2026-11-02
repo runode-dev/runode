@@ -30,7 +30,7 @@ use objc2_video_toolbox::{
     kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder,
 };
 
-use crate::{BURST_HEADROOM, BURST_WINDOW, Codec, Event, REFINE_BOOST, VideoFrame, nal};
+use crate::{BURST_HEADROOM, BURST_WINDOW, Codec, Event, VideoFrame, nal};
 
 pub(crate) type Sink = dyn Fn(Event) + Send + Sync;
 
@@ -167,8 +167,7 @@ impl Encoder {
 
     /// 把码率和单帧的上限交给编码器。
     fn apply_bitrate(&self, rate: &Rate) -> io::Result<()> {
-        let base = f64::from(rate.base);
-        let bitrate = if rate.boosted { base * REFINE_BOOST } else { base };
+        let bitrate = crate::boosted(rate.base, rate.boosted);
         let average = CFNumber::new_i32(bitrate.min(f64::from(i32::MAX)) as i32);
         // SAFETY: 读 VideoToolbox 导出的常量。
         self.set(unsafe { kVTCompressionPropertyKey_AverageBitRate }, &average)?;

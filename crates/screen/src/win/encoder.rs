@@ -44,7 +44,7 @@ use windows::{
 };
 
 use super::other;
-use crate::{BURST_HEADROOM, BURST_WINDOW, Codec, Event, REFINE_BOOST, VideoFrame, nal, nv12};
+use crate::{Codec, Event, VideoFrame, nal, nv12};
 
 pub(crate) type Sink = dyn Fn(Event) + Send + Sync;
 
@@ -231,14 +231,14 @@ impl Encoder {
     }
 
     fn apply_bitrate(&self, (base, boosted): (u32, bool)) -> io::Result<()> {
-        let bitrate = if boosted { (f64::from(base) * REFINE_BOOST) as u32 } else { base };
+        let bitrate = crate::boosted(base, boosted) as u32;
         let _calls = match &self.kind {
             Kind::Software { calls } => Some(calls.lock().unwrap_or_else(PoisonError::into_inner)),
             Kind::Hardware { .. } => None,
         };
         // SAFETY: 键是编码器的设置，值是它要的类型。
         unsafe {
-            if let Err(err) = self.api.SetValue(&CODECAPI_AVEncCommonBufferSize, &uint(buffer_size(bitrate))) {
+            if let Err(err) = self.api.SetValue(&CODECAPI_AVEncCommonBufferSize, &uint(crate::burst_bits(bitrate))) {
                 tracing::debug!("the encoder does not take a new buffer size: {err}");
             }
             self.api.SetValue(&CODECAPI_AVEncCommonMeanBitRate, &uint(bitrate)).map_err(other)
@@ -661,7 +661,7 @@ fn configure(mft: &IMFTransform, codec: Codec, size: (u32, u32), fps: u32, bitra
         for (key, value, what) in [
             (CODECAPI_AVEncCommonRateControlMode, uint(eAVEncCommonRateControlMode_CBR.0 as u32), "rate control"),
             (CODECAPI_AVEncCommonMeanBitRate, uint(bitrate), "bitrate"),
-            (CODECAPI_AVEncCommonBufferSize, uint(buffer_size(bitrate)), "buffer size"),
+            (CODECAPI_AVEncCommonBufferSize, uint(crate::burst_bits(bitrate)), "buffer size"),
             (CODECAPI_AVLowLatencyMode, boolean(), "low latency"),
             (CODECAPI_AVEncMPVGOPSize, uint(gop), "GOP size"),
             (CODECAPI_AVEncMPVDefaultBPictureCount, uint(0), "B frames"),
@@ -697,11 +697,6 @@ fn shut_down(mft: &IMFTransform) {
     {
         tracing::debug!("cannot shut the encoder down: {err}");
     }
-}
-
-/// 码率缓冲的大小，bit：`BURST_WINDOW` 那么长时间按 `BURST_HEADROOM` 倍的码率能发的量，单帧大不过它。
-fn buffer_size(bitrate: u32) -> u32 {
-    (f64::from(bitrate) * BURST_WINDOW.as_secs_f64() * BURST_HEADROOM) as u32
 }
 
 fn subtype(codec: Codec) -> GUID {

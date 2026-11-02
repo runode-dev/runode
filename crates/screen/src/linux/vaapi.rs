@@ -31,7 +31,7 @@ use self::{
     hevc::Hevc,
 };
 use super::encoder::{VideoEncoder, video_frame};
-use crate::{BURST_HEADROOM, BURST_WINDOW, Codec, VideoFrame, nal, nv12};
+use crate::{BURST_HEADROOM, Codec, VideoFrame, nal, nv12};
 
 /// 依次试的 DRM 渲染节点的编号（`/dev/dri/renderD128` 起）。
 const RENDER_NODES: std::ops::Range<u32> = 128..136;
@@ -527,7 +527,7 @@ impl Vaapi {
     /// 本来就不编，补到平均码率只是白占带宽。
     fn rate_parameters(&self, reset: bool) -> (ffi::RateControl, ffi::Hrd) {
         let bitrate = self.bitrate.max(1);
-        let buffer = buffer_size(bitrate);
+        let buffer = crate::burst_bits(bitrate);
         let rate = ffi::RateControl {
             bits_per_second: self.peak_bitrate(),
             target_percentage: if self.rate_control == ffi::RC_CBR { 100 } else { (100. / BURST_HEADROOM) as u32 },
@@ -964,11 +964,6 @@ fn copy_nv12(nv12: &[u8], size: (u32, u32), coded: (u32, u32), layout: &Layout, 
     }
 }
 
-/// 码率缓冲的大小，bit：`BURST_WINDOW` 那么长时间按 `BURST_HEADROOM` 倍的码率能发的量，单帧大不过它。
-fn buffer_size(bitrate: u32) -> u32 {
-    (f64::from(bitrate) * BURST_WINDOW.as_secs_f64() * BURST_HEADROOM) as u32
-}
-
 /// 去掉驱动为凑码率塞的填充数据（H.264 的 12 类、HEVC 的 38 类 NAL 单元），它们不带画面。
 fn drop_filler(codec: Codec, data: &mut Vec<u8>) {
     let is_filler = |unit: &[u8]| match (codec, unit.first()) {
@@ -1038,10 +1033,5 @@ mod tests {
         let mut data = [unit(&[0x26, 1, 9]), unit(&[38 << 1, 1, 0xff, 0x80])].concat();
         drop_filler(Codec::Hevc, &mut data);
         assert_eq!(data, unit(&[0x26, 1, 9]));
-    }
-
-    #[test]
-    fn sizes_the_rate_buffer_by_the_burst_window() {
-        assert_eq!(buffer_size(10_000_000), (10_000_000. * BURST_WINDOW.as_secs_f64() * BURST_HEADROOM) as u32);
     }
 }

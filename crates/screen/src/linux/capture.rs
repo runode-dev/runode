@@ -15,7 +15,7 @@ use std::{
 
 use super::encoder::{self, VideoEncoder};
 use crate::{
-    Codec, Event, Options, REFINE_BOOST,
+    Codec, Event, Options,
     nv12::{self, Area},
     refine::Refiner,
 };
@@ -200,7 +200,7 @@ impl Pipeline {
             let rate_changed = self.control.rate_changed.swap(false, Ordering::Relaxed);
             if rate_changed || boost != boosted {
                 let bitrate = self.control.bitrate.load(Ordering::Relaxed);
-                let bitrate = if boost { (f64::from(bitrate) * REFINE_BOOST) as u32 } else { bitrate };
+                let bitrate = crate::boosted(bitrate, boost) as u32;
                 if let Err(err) = self.encoder.set_bitrate(bitrate) {
                     tracing::debug!("cannot change the bitrate: {err}");
                 }
