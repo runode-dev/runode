@@ -24,6 +24,9 @@
         var dictation: DictationModel?
         /// 这个终端所在的电脑，交给电脑识别时连它。
         var machine: MachineRecord?
+        /// 打开 app 的设置页，语音输入缺模型时从弹框过去下载。
+        var onOpenSettings: () -> Void = {}
+        @Environment(\.openURL) private var openURL
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
         /// 嵌着的终端视图，底部的按键栏按了发给它。
@@ -100,7 +103,18 @@
                     isPresented: Binding(
                         get: { dictation?.errorMessage != nil }, set: { if !$0 { dictation?.errorMessage = nil } })
                 ) {
-                    Button("好") {}
+                    switch dictation?.remedy {
+                    case .downloadModel:
+                        Button("去下载", action: onOpenSettings)
+                        Button("取消", role: .cancel) {}
+                    case .microphonePermission:
+                        Button("打开系统设置") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                        }
+                        Button("取消", role: .cancel) {}
+                    case nil:
+                        Button("好") {}
+                    }
                 } message: {
                     Text(dictation?.errorMessage ?? "")
                 }

@@ -77,7 +77,8 @@
                             }
                         },
                         sessions: app.sessionList(for: machine),
-                        dictation: app.dictation, machine: app.machineList.machine(machine))
+                        dictation: app.dictation, machine: app.machineList.machine(machine),
+                        onOpenSettings: { app.showingSettings = true })
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
                 }

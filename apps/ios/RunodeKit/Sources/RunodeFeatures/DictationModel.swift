@@ -50,8 +50,12 @@ public final class DictationModel {
     /// 手机上的模型下好了。
     public private(set) var installed: Bool
     public private(set) var phase: Phase = .idle
-    /// 录音、识别出的错，终端页弹出来说。
-    public var errorMessage: String?
+    /// 录音、识别出的错，终端页弹出来说；清掉时 `remedy` 跟着清掉。
+    public var errorMessage: String? {
+        didSet { if errorMessage == nil { remedy = nil } }
+    }
+    /// `errorMessage` 说的错用户能去哪里补救，终端页的弹框据此多给一个按钮。
+    public private(set) var remedy: DictationRemedy?
 
     @ObservationIgnored private let root: URL
     @ObservationIgnored private let openSpeech: SpeechOpener?
@@ -205,12 +209,12 @@ public final class DictationModel {
             Task { _ = await SpeechRecorder.requestPermission() }
             return
         case .denied:
-            errorMessage = String(localized: "Runode 没有麦克风权限，请到系统设置里打开")
+            fail(String(localized: "Runode 没有麦克风权限，请到系统设置里打开"), remedy: .microphonePermission)
             return
         }
         let local = source == .phone && installed
         guard local || (machine != nil && openSpeech != nil) else {
-            errorMessage = String(localized: "请先在设置里下载语音模型")
+            fail(String(localized: "请先在设置里下载语音模型"), remedy: .downloadModel)
             return
         }
         let feed = Feed()
@@ -234,7 +238,7 @@ public final class DictationModel {
                     let self, let take, self.take === take
                 else { return }
                 cancel()
-                errorMessage = Self.message(for: DictationFailure.noModelAnywhere)
+                fail(DictationFailure.noModelAnywhere)
             }
         }
         // 录音器开起来之前就可能松手或取消，所以开不起来时只在这段还是当前这段时才复位。
@@ -246,7 +250,7 @@ public final class DictationModel {
             } catch {
                 take.closeRemote()
                 if let self {
-                    errorMessage = Self.message(for: error)
+                    fail(error)
                     if self.take === take {
                         self.take = nil
                         phase = .idle
@@ -284,7 +288,7 @@ public final class DictationModel {
                 if !text.isEmpty { take.insert(text) }
             } catch {
                 take.closeRemote()
-                if !(error is CancellationError) { errorMessage = Self.message(for: error) }
+                if !(error is CancellationError) { fail(error) }
             }
             phase = .idle
         }
@@ -302,6 +306,21 @@ public final class DictationModel {
         return stopped
     }
 
+    private func fail(_ message: String, remedy: DictationRemedy?) {
+        errorMessage = message
+        self.remedy = remedy
+    }
+
+    private func fail(_ error: any Error) {
+        let remedy: DictationRemedy? =
+            switch error {
+            case DictationFailure.noModelAnywhere: .downloadModel
+            case SpeechError.silent: .microphonePermission
+            default: nil
+            }
+        fail(Self.message(for: error), remedy: remedy)
+    }
+
     static func message(for error: any Error) -> String {
         switch error {
         case SpeechError.silent: String(localized: "麦克风只录到了静音，请检查 Runode 的麦克风权限")
@@ -314,6 +333,14 @@ public final class DictationModel {
         default: error.localizedDescription
         }
     }
+}
+
+/// 语音输入出错后用户能去哪里补救。
+public enum DictationRemedy: Hashable, Sendable {
+    /// 到 app 的设置页下载识别模型。
+    case downloadModel
+    /// 到系统设置里给 Runode 麦克风权限。
+    case microphonePermission
 }
 
 enum DictationFailure: Error {

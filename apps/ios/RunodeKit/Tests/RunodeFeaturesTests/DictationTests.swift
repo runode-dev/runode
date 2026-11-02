@@ -94,5 +94,6 @@ import Testing
         model.press(.down, machine: nil, source: .phone) { _ in }
         #expect(model.phase == .idle && !recorder.started)
         #expect(model.errorMessage != nil)
+        #expect(model.remedy == .downloadModel)
     }
 }
