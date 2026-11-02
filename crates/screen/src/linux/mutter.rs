@@ -20,16 +20,16 @@ use futures::{
     future::{Either, select},
 };
 
-use runode_types::{
-    input::MouseButton,
-    screen::{ScreenInput, ScreenMods},
-};
+use runode_types::{input::MouseButton, screen::ScreenInput};
 use zbus::{
     blocking::{Connection, Proxy},
     zvariant::{OwnedObjectPath, OwnedValue, Value},
 };
 
-use super::{keysym, pipewire};
+use super::{
+    pipewire,
+    remote_input::{self, RemoteInput},
+};
 use crate::Display;
 
 const REMOTE_DESKTOP: &str = "org.gnome.Mutter.RemoteDesktop";
@@ -40,10 +40,6 @@ const CURSOR_EMBEDDED: u32 = 1;
 const CURSOR_HIDDEN: u32 = 0;
 /// 等 Mutter 报出录屏流的 PipeWire 节点最多这么久。
 const STREAM_TIMEOUT: Duration = Duration::from_secs(5);
-/// evdev 的鼠标键码。
-const BTN_LEFT: i32 = 0x110;
-const BTN_RIGHT: i32 = 0x111;
-const BTN_MIDDLE: i32 = 0x112;
 
 /// 各块屏幕开着的会话，采集和注入共用；都放手了就关掉。
 static SESSIONS: Mutex<Option<HashMap<u32, Weak<Session>>>> = Mutex::new(None);
@@ -238,7 +234,7 @@ impl Session {
         };
         this.remote.call::<_, _, ()>("Start", &()).map_err(other)?;
         let node = block_on(async {
-            match select(pin!(added.next()), pin!(super::portal::sleep(STREAM_TIMEOUT))).await {
+            match select(pin!(added.next()), pin!(remote_input::sleep(STREAM_TIMEOUT))).await {
                 Either::Left((Some(message), _)) => message.body().deserialize::<u32>().ok(),
                 _ => None,
             }
@@ -269,79 +265,33 @@ impl Session {
     }
 
     pub(crate) fn inject(&self, input: &ScreenInput) {
-        if let Err(err) = self.try_inject(input) {
+        if let Err(err) = remote_input::inject(self, input) {
             tracing::debug!("cannot inject {input:?}: {err}");
         }
     }
+}
 
-    fn try_inject(&self, input: &ScreenInput) -> zbus::Result<()> {
-        match input {
-            ScreenInput::MouseMove { x, y } => self.move_to(*x, *y),
-            ScreenInput::MouseButton { button, down, x, y, mods } => {
-                self.move_to(*x, *y)?;
-                let held = if *down { keysym::modifiers(*mods) } else { Vec::new() };
-                self.keys(&held, true)?;
-                self.button(*button, *down)?;
-                self.keys(&held, false)
-            }
-            ScreenInput::Scroll { dx, dy } => {
-                // 正的 `dy` 是内容往下走、往上滚，Mutter 的格数朝下为正；横向同理。
-                for (axis, delta) in [(0u32, *dy), (1, *dx)] {
-                    if delta != 0 {
-                        let steps = -delta.signum() * (delta.abs() / super::POINTS_PER_NOTCH).max(1);
-                        self.remote.call::<_, _, ()>("NotifyPointerAxisDiscrete", &(axis, steps))?;
-                    }
-                }
-                Ok(())
-            }
-            ScreenInput::Key { key, mods } => {
-                let Some(keysym) = keysym::of_key(*key) else { return Ok(()) };
-                self.chord(*mods, keysym)
-            }
-            ScreenInput::Text { text } => {
-                for keysym in text.chars().filter_map(keysym::of_char) {
-                    self.keysym(keysym, true)?;
-                    self.keysym(keysym, false)?;
-                }
-                Ok(())
-            }
-        }
+impl RemoteInput for Session {
+    type Error = zbus::Error;
+
+    fn extent(&self) -> (u32, u32) {
+        self.pixels
     }
 
-    fn move_to(&self, x: f64, y: f64) -> zbus::Result<()> {
-        let (width, height) = (f64::from(self.pixels.0), f64::from(self.pixels.1));
-        let (x, y) = (x.clamp(0.0, 1.0) * (width - 1.0).max(0.0), y.clamp(0.0, 1.0) * (height - 1.0).max(0.0));
+    fn pointer_to(&self, x: f64, y: f64) -> zbus::Result<()> {
         self.remote.call("NotifyPointerMotionAbsolute", &(self.stream_path.as_str(), x, y))
     }
 
-    fn button(&self, button: MouseButton, down: bool) -> zbus::Result<()> {
-        let code = match button {
-            MouseButton::Left => BTN_LEFT,
-            MouseButton::Right => BTN_RIGHT,
-            MouseButton::Middle => BTN_MIDDLE,
-        };
+    fn button(&self, code: i32, down: bool) -> zbus::Result<()> {
         self.remote.call("NotifyPointerButton", &(code, down))
+    }
+
+    fn scroll(&self, vertical: bool, steps: i32) -> zbus::Result<()> {
+        self.remote.call("NotifyPointerAxisDiscrete", &(u32::from(!vertical), steps))
     }
 
     fn keysym(&self, keysym: u32, down: bool) -> zbus::Result<()> {
         self.remote.call("NotifyKeyboardKeysym", &(keysym, down))
-    }
-
-    fn keys(&self, keysyms: &[u32], down: bool) -> zbus::Result<()> {
-        let ordered: Vec<u32> = if down { keysyms.to_vec() } else { keysyms.iter().rev().copied().collect() };
-        for keysym in ordered {
-            self.keysym(keysym, down)?;
-        }
-        Ok(())
-    }
-
-    /// 像真键盘一样先按下修饰键，按一下 `keysym`，再松开修饰键。
-    fn chord(&self, mods: ScreenMods, keysym: u32) -> zbus::Result<()> {
-        let held = keysym::modifiers(mods);
-        self.keys(&held, true)?;
-        self.keysym(keysym, true)?;
-        self.keysym(keysym, false)?;
-        self.keys(&held, false)
     }
 }
 
@@ -378,7 +328,7 @@ impl Injector {
 impl Drop for Injector {
     fn drop(&mut self) {
         for button in std::mem::take(&mut self.pressed) {
-            let _ = self.session.button(button, false);
+            let _ = self.session.button(remote_input::button_code(button), false);
         }
     }
 }

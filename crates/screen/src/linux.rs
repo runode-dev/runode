@@ -10,6 +10,7 @@ mod logind;
 mod mutter;
 mod pipewire;
 mod portal;
+mod remote_input;
 pub(crate) mod session;
 mod software;
 mod vaapi;

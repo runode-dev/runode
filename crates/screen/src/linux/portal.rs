@@ -24,19 +24,16 @@ use ashpd::{
     enumflags2::BitFlags,
 };
 use futures::{FutureExt as _, executor::block_on};
-use runode_types::{
-    input::MouseButton,
-    screen::{ScreenInput, ScreenMods},
-};
+use runode_types::{input::MouseButton, screen::ScreenInput};
 
-use super::{keysym, pipewire};
+use super::{
+    pipewire,
+    remote_input::{self, RemoteInput},
+};
 use crate::Display;
 
 /// 等屏幕上的人点「允许」最多这么久。
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(90);
-const BTN_LEFT: i32 = 0x110;
-const BTN_RIGHT: i32 = 0x111;
-const BTN_MIDDLE: i32 = 0x112;
 
 /// 这个进程开着的会话。列屏幕、采集和注入各自拿一会儿就放手，会话要留在这里，不然每次都另开一个。
 static PORTAL: Mutex<Option<Arc<Portal>>> = Mutex::new(None);
@@ -128,7 +125,7 @@ impl Portal {
         }
         let started = {
             let started = remote.start(&session, None::<&WindowIdentifier>, Default::default()).fuse();
-            let timeout = sleep(APPROVAL_TIMEOUT).fuse();
+            let timeout = remote_input::sleep(APPROVAL_TIMEOUT).fuse();
             futures::pin_mut!(started, timeout);
             futures::select! {
                 started = started => Some(started),
@@ -181,84 +178,47 @@ impl Portal {
     }
 
     fn inject(&self, screen: Screen, input: &ScreenInput) {
-        if let Err(err) = block_on(self.try_inject(screen, input)) {
+        if let Err(err) = remote_input::inject(&Target { portal: self, screen }, input) {
             tracing::debug!("cannot inject {input:?}: {err}");
             if matches!(err, ashpd::Error::Portal(_) | ashpd::Error::Zbus(_)) {
                 self.closed.store(true, Ordering::Relaxed);
             }
         }
     }
+}
 
-    async fn try_inject(&self, screen: Screen, input: &ScreenInput) -> ashpd::Result<()> {
-        match input {
-            ScreenInput::MouseMove { x, y } => self.move_to(screen, *x, *y).await,
-            ScreenInput::MouseButton { button, down, x, y, mods } => {
-                self.move_to(screen, *x, *y).await?;
-                let held = if *down { keysym::modifiers(*mods) } else { Vec::new() };
-                self.keys(&held, true).await?;
-                self.button(*button, *down).await?;
-                self.keys(&held, false).await
-            }
-            ScreenInput::Scroll { dx, dy } => {
-                // 正的 `dy` 是内容往下走、往上滚，portal 的格数朝下为正；横向同理。
-                for (axis, delta) in [(Axis::Vertical, *dy), (Axis::Horizontal, *dx)] {
-                    if delta != 0 {
-                        let steps = -delta.signum() * (delta.abs() / super::POINTS_PER_NOTCH).max(1);
-                        self.remote
-                            .notify_pointer_axis_discrete(&self.session, axis, steps, Default::default())
-                            .await?;
-                    }
-                }
-                Ok(())
-            }
-            ScreenInput::Key { key, mods } => {
-                let Some(keysym) = keysym::of_key(*key) else { return Ok(()) };
-                self.chord(*mods, keysym).await
-            }
-            ScreenInput::Text { text } => {
-                for keysym in text.chars().filter_map(keysym::of_char) {
-                    self.keysym(keysym, true).await?;
-                    self.keysym(keysym, false).await?;
-                }
-                Ok(())
-            }
-        }
+/// 会话里的一路屏幕，注入的目标；ashpd 的每次调用都在调用线程上 `block_on`。
+struct Target<'a> {
+    portal: &'a Portal,
+    screen: Screen,
+}
+
+impl RemoteInput for Target<'_> {
+    type Error = ashpd::Error;
+
+    fn extent(&self) -> (u32, u32) {
+        self.screen.size
     }
 
-    async fn move_to(&self, screen: Screen, x: f64, y: f64) -> ashpd::Result<()> {
-        let (width, height) = (f64::from(screen.size.0), f64::from(screen.size.1));
-        let (x, y) = (x.clamp(0.0, 1.0) * (width - 1.0).max(0.0), y.clamp(0.0, 1.0) * (height - 1.0).max(0.0));
-        self.remote.notify_pointer_motion_absolute(&self.session, screen.node, x, y, Default::default()).await
+    fn pointer_to(&self, x: f64, y: f64) -> ashpd::Result<()> {
+        let Portal { remote, session, .. } = self.portal;
+        block_on(remote.notify_pointer_motion_absolute(session, self.screen.node, x, y, Default::default()))
     }
 
-    async fn button(&self, button: MouseButton, down: bool) -> ashpd::Result<()> {
-        let code = match button {
-            MouseButton::Left => BTN_LEFT,
-            MouseButton::Right => BTN_RIGHT,
-            MouseButton::Middle => BTN_MIDDLE,
-        };
-        self.remote.notify_pointer_button(&self.session, code, key_state(down), Default::default()).await
+    fn button(&self, code: i32, down: bool) -> ashpd::Result<()> {
+        let Portal { remote, session, .. } = self.portal;
+        block_on(remote.notify_pointer_button(session, code, key_state(down), Default::default()))
     }
 
-    async fn keysym(&self, keysym: u32, down: bool) -> ashpd::Result<()> {
-        self.remote.notify_keyboard_keysym(&self.session, keysym as i32, key_state(down), Default::default()).await
+    fn scroll(&self, vertical: bool, steps: i32) -> ashpd::Result<()> {
+        let Portal { remote, session, .. } = self.portal;
+        let axis = if vertical { Axis::Vertical } else { Axis::Horizontal };
+        block_on(remote.notify_pointer_axis_discrete(session, axis, steps, Default::default()))
     }
 
-    async fn keys(&self, keysyms: &[u32], down: bool) -> ashpd::Result<()> {
-        let ordered: Vec<u32> = if down { keysyms.to_vec() } else { keysyms.iter().rev().copied().collect() };
-        for keysym in ordered {
-            self.keysym(keysym, down).await?;
-        }
-        Ok(())
-    }
-
-    /// 像真键盘一样先按下修饰键，按一下 `keysym`，再松开修饰键。
-    async fn chord(&self, mods: ScreenMods, keysym: u32) -> ashpd::Result<()> {
-        let held = keysym::modifiers(mods);
-        self.keys(&held, true).await?;
-        self.keysym(keysym, true).await?;
-        self.keysym(keysym, false).await?;
-        self.keys(&held, false).await
+    fn keysym(&self, keysym: u32, down: bool) -> ashpd::Result<()> {
+        let Portal { remote, session, .. } = self.portal;
+        block_on(remote.notify_keyboard_keysym(session, keysym as i32, key_state(down), Default::default()))
     }
 }
 
@@ -272,16 +232,6 @@ impl Drop for Portal {
 
 fn key_state(down: bool) -> KeyState {
     if down { KeyState::Pressed } else { KeyState::Released }
-}
-
-/// `duration` 以后完成，在一个睡着的线程上计时。
-pub(super) async fn sleep(duration: Duration) {
-    let (tx, rx) = futures::channel::oneshot::channel::<()>();
-    std::thread::spawn(move || {
-        std::thread::sleep(duration);
-        let _ = tx.send(());
-    });
-    let _ = rx.await;
 }
 
 fn restore_token() -> Option<String> {
@@ -370,7 +320,8 @@ impl Injector {
 impl Drop for Injector {
     fn drop(&mut self) {
         for button in std::mem::take(&mut self.pressed) {
-            let _ = block_on(self.portal.button(button, false));
+            let _ =
+                Target { portal: &self.portal, screen: self.screen }.button(remote_input::button_code(button), false);
         }
     }
 }
