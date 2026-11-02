@@ -14,7 +14,7 @@
 | `tasks` | 一个目录里能跑的命令：`tasks.json`、Makefile 目标、package.json scripts；改写 `tasks.json` 里自己加的命令和快捷键（`file`），怎么认键由调用方给 | types、paths、serde_json |
 | `files` | 项目目录里不碰界面的文件操作：读文件树的目录（`list_dirs`）、列出所有文件（`walk_files`）、新建改名移动复制、移到废纸篓和直接删掉（`ops`）、有上限地读文件（`read_limited`）、监听改动（`watch`）；桌面在本机直接用，远端主机上的由那边的 `runode --ssh-project` 调，结果按 `serde` 特性序列化传回 | notify、tracing、serde（`serde` 特性）、libc（Unix）、objc2、objc2-foundation（macOS） |
 | `preview` | 文件预览不碰界面的部分：判断读到的文件能怎么显示（`decode`）、语法高亮、解析 Markdown；读文件经 `files`，界面是 `desktop` 的 `preview_panel` | std、syntect、two-face、pulldown-cmark、regex |
-| `agent` | 认出终端前台跑的 AI 编程 agent，判断它在干活、空闲还是等回答；起 agent 时挑模型和强度、续上次的对话，向 agent 本身问模型清单（`models`） | types、serde、serde_json、regex、toml、memchr、libc |
+| `agent` | 认出终端前台跑的 AI 编程 agent，判断它在干活、空闲还是等回答；起 agent 时挑模型和强度、续上次的对话，向 agent 本身问模型清单（`models`）；只打印结果地跑一次 agent（`oneshot`） | types、serde、serde_json、regex、toml、memchr、libc |
 | `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上（Windows 上是 ConPTY，`pty` 的 `conpty`），shell 集成，认出运行完的命令；三个平台上读别的进程的命令行（`pty` 的 `process_args`） | types、paths、agent、libghostty-vt、portable-pty、memchr、anyhow、tracing、libc（Unix）、windows-sys（Windows） |
 | `config` | Ghostty 兼容的配置文件、主题、快捷键和配置模板，生成 `TermSettings`。模板只有英文，配置项的说明写在 `docs`，动作的说明写在 `ActionSpec::doc`，译文都在 `desktop` 的 locales 里 | types、paths、tracing、objc2-foundation、objc2-app-kit |
 | `host` | 管终端会话的宿主（只有 lib），跑在 app 进程里或单独一个进程（`runode --host`）：持有 PTY 和权威的 VT，升级时新宿主接手旧宿主的会话、会话不断（Windows 上不交接，会话跟着重启）；也替前端读写 git、列目录和命令，持有看板 | terminal、protocol、types、git、paths、todo、tasks、agent、libc（Unix）、uds_windows 和 windows-sys（Windows）、anyhow、tracing |

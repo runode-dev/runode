@@ -12,8 +12,9 @@ serde.workspace = true
 regex.workspace = true
 memchr.workspace = true
 toml.workspace = true
-# 向 agent 问模型清单：回话是 JSON；到时限时杀掉它的整个进程组。
+# 向 agent 问模型清单：回话是 JSON。
 serde_json.workspace = true
+# 到时限时杀掉 agent 的整个进程组；只打印结果地跑一次时用 poll 读写管道。
 libc.workspace = true
 
 [lints]

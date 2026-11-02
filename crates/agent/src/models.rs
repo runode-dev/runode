@@ -331,9 +331,7 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     // 自成一个进程组：包装脚本（npx、node）拉起的真 agent 也在组里，完了一起杀掉。
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    hide_window(&mut command);
+    crate::process::isolate(&mut command);
     if let Some(path) = path {
         command.env("PATH", path);
     }
@@ -342,7 +340,7 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
         _ => Unanswered::NoAnswer,
     })?;
     let group = child.id();
-    let kill_group = move || kill_tree(group);
+    let kill_group = move || crate::process::kill_tree(group);
     let (done, timer) = mpsc::channel::<()>();
     // 到时限杀掉整组，读着的标准输出跟着到头。
     let watchdog = std::thread::spawn(move || {
@@ -414,32 +412,6 @@ fn probe_command(binary: &str, path: Option<&std::ffi::OsStr>) -> Command {
     #[cfg(not(windows))]
     let _ = path;
     Command::new(binary)
-}
-
-/// 杀掉 `ask` 拉起的整组进程，组号就是组长的进程号。
-#[cfg(unix)]
-fn kill_tree(group: u32) {
-    // SAFETY: 只是给自己拉起的那个进程组发信号；组长还没收尸，组号不会被别的进程占去。
-    unsafe { libc::killpg(group as libc::pid_t, libc::SIGKILL) };
-}
-
-/// 连同子孙进程一起强杀（`taskkill /T /F`）。
-/// shortcut: 进程已经退出时 taskkill 找不到这棵树，留下的子孙进程不杀；真碰上再改用 Job 对象。
-#[cfg(windows)]
-fn kill_tree(pid: u32) {
-    let mut command = Command::new("taskkill");
-    command.args(["/T", "/F", "/PID", &pid.to_string()]).stdin(Stdio::null()).stdout(Stdio::null());
-    hide_window(&mut command);
-    let _ = command.stderr(Stdio::null()).status();
-}
-
-/// Windows 上拉起控制台程序时不开窗口（`CREATE_NO_WINDOW`）：宿主没有控制台，不然每问一次就闪一个
-/// 黑窗。别的系统上什么都不做。
-fn hide_window(command: &mut Command) {
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(command, 0x0800_0000);
-    #[cfg(not(windows))]
-    let _ = command;
 }
 
 /// 等 `child` 退出但不收尸（`WNOWAIT`），组号在之后杀组时还是它的。
