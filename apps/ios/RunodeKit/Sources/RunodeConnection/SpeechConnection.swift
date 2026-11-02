@@ -54,11 +54,7 @@ public final class SpeechConnection: Sendable {
 
     /// 发一段录音（`speechSampleRate` 的单声道，-1 到 1）。
     public func send(_ samples: [Float]) {
-        var payload = Data(capacity: samples.count * 2)
-        for sample in samples {
-            let value = Int16(max(-1, min(1, sample)) * Float(Int16.max))
-            withUnsafeBytes(of: value.littleEndian) { payload.append(contentsOf: $0) }
-        }
+        let payload = speechAudioPayload(samples)
         guard let frame = try? Frame(kind: .audio, channel: 0, payload: payload).encoded() else { return }
         transport.send(frame)
     }

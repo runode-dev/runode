@@ -42,8 +42,7 @@ import Testing
         connection.send([0, 1, -1, 2])
         let audio = try #require(try await host.readFrame())
         #expect(audio.kind == .audio && audio.channel == 0)
-        // 超出范围的样本截到 ±1。
-        #expect(audio.payload == Data([0, 0, 0xff, 0x7f, 0x01, 0x80, 0xff, 0x7f]))
+        #expect(audio.payload == speechAudioPayload([0, 1, -1, 2]))
         let finishing = Task { try await connection.finish() }
         #expect(try await host.readControl()?["type"] as? String == "finish")
         host.send(json: #"{"type":"text","text":"你好"}"#)

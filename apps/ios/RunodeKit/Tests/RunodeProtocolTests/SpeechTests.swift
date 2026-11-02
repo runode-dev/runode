@@ -33,4 +33,9 @@ enum SpeechSamples {
     @Test func audioFramesHaveKindFive() {
         #expect(FrameKind.audio.rawValue == 5)
     }
+
+    /// 录音编成 16 位小端 PCM，超出 -1 到 1 的截到两头。
+    @Test func audioIsLittleEndianPCM() {
+        #expect(speechAudioPayload([0, 1, -1, 2]) == Data([0, 0, 0xff, 0x7f, 0x01, 0x80, 0xff, 0x7f]))
+    }
 }

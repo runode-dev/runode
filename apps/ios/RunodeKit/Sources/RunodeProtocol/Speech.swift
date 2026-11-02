@@ -9,6 +9,16 @@ public let speechSampleRate = 16_000
 /// 一段录音最长这么多秒，超了电脑回 `failed`。
 public let maxSpeechSeconds = 120
 
+/// 一段录音（`speechSampleRate` 的单声道，-1 到 1，超出的截到两头）编成 `FrameKind.audio` 的载荷。
+public func speechAudioPayload(_ samples: [Float]) -> Data {
+    var payload = Data(capacity: samples.count * 2)
+    for sample in samples {
+        let value = Int16(max(-1, min(1, sample)) * Float(Int16.max))
+        withUnsafeBytes(of: value.littleEndian) { payload.append(contentsOf: $0) }
+    }
+    return payload
+}
+
 /// 手机发给电脑的识别消息。
 public enum SpeechClientMsg: Hashable, Sendable, Encodable {
     /// 过了门禁后的第一条，这条连接就接到电脑的识别上。
