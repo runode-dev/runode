@@ -106,6 +106,8 @@ impl WindowView {
 }
 
 /// 侧栏顶上打开一页（手机端、看板）的入口，那一页开着时高亮。按下鼠标就开，辅助工具的按下另外登记。
+/// 开着的状态报成按下着（`aria_toggled`）而不是选中：AccessKit 不给带选中状态的按钮 Invoke，Windows 上
+/// 辅助工具就按不动它。
 pub(super) fn page_entry(
     id: &'static str,
     icon: &'static str,
@@ -124,7 +126,7 @@ pub(super) fn page_entry(
         .id(id)
         .role(Role::Button)
         .aria_label(label.clone())
-        .aria_selected(active)
+        .aria_toggled(active.into())
         .flex_none()
         .h(scaled(ROW_HEIGHT))
         .mx(px(6.))
