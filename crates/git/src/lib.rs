@@ -6,6 +6,7 @@
 
 mod branch;
 mod error;
+mod exec;
 mod graph;
 mod info;
 mod ops;

@@ -2,7 +2,7 @@
 
 use std::{path::Path, process::Stdio};
 
-use crate::{Refusal, Repo, Result, git, git_command, ops::run};
+use crate::{Refusal, Repo, Result, exec::run, git, git_command};
 
 /// 分支列表里的一项。
 #[derive(Clone, Debug, PartialEq, Eq)]

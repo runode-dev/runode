@@ -17,8 +17,9 @@ use std::{
 };
 
 use crate::{
-    FileStatus, Repo, Result, Snapshot, UntrackedCache, find_repo, git,
-    ops::run,
+    FileStatus, Repo, Result, Snapshot, UntrackedCache,
+    exec::run,
+    find_repo, git,
     snapshot::{Found, read_repo},
 };
 

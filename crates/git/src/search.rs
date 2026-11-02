@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{GitError, Result, git, git_command, in_repo, ops::output_result};
+use crate::{GitError, Result, exec::output_result, git, git_command, in_repo};
 
 /// `git grep` 输出的一行（含路径和行号）最多读这么多字节，多出的丢掉：压缩过的 js 一行就有几 MB，
 /// 结果里只显示命中处附近的一小段。

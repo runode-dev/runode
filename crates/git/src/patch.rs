@@ -2,7 +2,7 @@
 
 use std::{ffi::OsString, path::Path};
 
-use crate::{FileDiff, FileStatus, Hunk, LineKind, Refusal, Repo, Result, ops::run, snapshot::diff_args};
+use crate::{FileDiff, FileStatus, Hunk, LineKind, Refusal, Repo, Result, exec::run, snapshot::diff_args};
 
 /// 对一块改动做什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

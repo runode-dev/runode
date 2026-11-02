@@ -3,7 +3,7 @@
 
 use std::{collections::HashSet, ffi::OsStr, fs, path::Path};
 
-use crate::{FileDiff, Refusal, Repo, Result, git, ops::run, parse::parse_diff, snapshot::diff_args};
+use crate::{FileDiff, Refusal, Repo, Result, exec::run, git, parse::parse_diff, snapshot::diff_args};
 
 /// 历史里的一个提交。
 #[derive(Clone, Debug, PartialEq, Eq)]
