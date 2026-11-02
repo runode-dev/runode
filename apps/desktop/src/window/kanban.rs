@@ -1,10 +1,10 @@
 //! 把铺满窗口的看板接到窗口上。看板本身在 `kanban`：打开时建一个 `Kanban`，收起时丢掉。
 //! 这里启动时把和宿主说话的办法交给它（`watch_todos`），每次画之前交给它各 workspace 的目录和名字、当前的
-//! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上新建任务、定时、看板三个
+//! 目录、定时能不能在后台跑，画它的外框（和配对设备页一样，见 `render_page_body`）和侧栏顶上新建任务、定时、看板三个
 //! 入口（按着修饰键时右边写着快捷键）；卡片上 agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事
 //! （收起、换页、把任务会话接进窗口）经 `KanbanEvent` 交回来，它的对话框画在窗口最上层。
 //!
-//! 看板和手机端引导页一样盖住标签和分屏：切到任何一个标签或 workspace、按 Esc 就收起。卡片的「打开终端」
+//! 看板和配对设备页一样盖住标签和分屏：切到任何一个标签或 workspace、按 Esc 就收起。卡片的「打开终端」
 //! 把任务的会话接进它目录所在的 workspace 的一个新标签，已经在哪个分屏里时切过去。
 
 use std::path::{Path, PathBuf};
@@ -304,7 +304,7 @@ impl WindowView {
         }
     }
 
-    /// 看板开着时窗口的内容，摆法和手机端引导页一样。
+    /// 看板开着时窗口的内容，摆法和配对设备页一样。
     pub(super) fn render_todo_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(board) = self.kanban_page().map(|board| board.view.clone()) else { return Vec::new() };
         // 要读自启文件，只在定时那一页显示着时才查：窗口几乎每帧都重画。

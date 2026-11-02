@@ -10,7 +10,7 @@
 //! （`runode --host`）不管界面，自己读配置文件，文件变了就重读（`follow_config`）。app 连着单独跑的
 //! 宿主时不开监听，免得两个进程抢同一个端口。
 //!
-//! 窗口里的手机端引导页在界面上给手机配对，见 `pairing`。
+//! 窗口里的配对设备页在界面上给手机配对，见 `pairing`。
 
 #[cfg(windows)]
 pub mod firewall;

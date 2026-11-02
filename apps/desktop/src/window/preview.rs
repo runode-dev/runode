@@ -41,12 +41,12 @@ impl WindowView {
         self.preview.read(cx).shown(self.workspace().id)
     }
 
-    /// 当前 workspace 的文件标签在最前，预览盖在终端区上；看板、手机端引导页这些铺满时让给它们。
+    /// 当前 workspace 的文件标签在最前，预览盖在终端区上；看板、配对设备页这些铺满时让给它们。
     pub(super) fn preview_front(&self, cx: &App) -> bool {
         !self.page_covers_terminals() && self.preview.read(cx).front(self.workspace().id)
     }
 
-    /// 切到当前 workspace 的第 `ix` 个文件标签，预览盖到终端区上。开着的看板、手机端引导页先收起；
+    /// 切到当前 workspace 的第 `ix` 个文件标签，预览盖到终端区上。开着的看板、配对设备页先收起；
     /// 看板不让走时不切，返回假。
     pub(super) fn show_file_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.leave_pages(window, cx) {

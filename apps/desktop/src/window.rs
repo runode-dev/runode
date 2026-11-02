@@ -725,7 +725,7 @@ impl WindowView {
 enum Page {
     /// 设置页，盖住整个窗口。
     Settings(settings_page::SettingsPage),
-    /// 手机端引导页，盖住标签和分屏。
+    /// 配对设备页，盖住标签和分屏。
     Mobile(mobile_page::OpenMobile),
     /// 看板，盖住标签和分屏；新建、编辑任务和定时的对话框也在它身上。
     Kanban(kanban::OpenKanban),
@@ -753,8 +753,8 @@ impl WindowView {
         }
     }
 
-    /// 收起盖着终端区的看板、手机端引导页和占满内容区的远程桌面，露出标签和分屏（设置页不动）：看板写到
-    /// 一半的新建任务先收起来留着，手机端引导页改了的电脑名先写回；看板开着别的对话框、不让走时什么都不收，
+    /// 收起盖着终端区的看板、配对设备页和占满内容区的远程桌面，露出标签和分屏（设置页不动）：看板写到
+    /// 一半的新建任务先收起来留着，配对设备页改了的电脑名先写回；看板开着别的对话框、不让走时什么都不收，
     /// 返回假。
     fn leave_pages(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.leave_todo_page(window, cx) {
@@ -773,7 +773,7 @@ impl WindowView {
 }
 
 impl Focusable for WindowView {
-    /// 开着设置页、手机端引导页、看板时是它，文件盖着终端区时是预览；否则是有焦点的终端，当前
+    /// 开着设置页、配对设备页、看板时是它，文件盖着终端区时是预览；否则是有焦点的终端，当前
     /// workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         match &self.page {
@@ -891,7 +891,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::select_last_tab))
             .on_action(Self::act(cx, Self::new_split_right))
             .on_action(Self::act(cx, Self::new_split_down))
-            // 设置页、看板、手机端引导页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏；
+            // 设置页、看板、配对设备页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏；
             // 看板的对话框开着时不理。
             .on_action(cx.listener(|this, action, window, cx| match &this.page {
                 Some(Page::Settings(_)) => this.close_settings(window, cx),

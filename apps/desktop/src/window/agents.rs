@@ -210,7 +210,7 @@ impl WindowView {
             && !self.page_covers_terminals()
     }
 
-    /// 设置页、手机端引导页、看板或占满内容区的远程桌面盖住了终端区，终端和预览都看不见。
+    /// 设置页、配对设备页、看板或占满内容区的远程桌面盖住了终端区，终端和预览都看不见。
     pub(super) fn page_covers_terminals(&self) -> bool {
         self.page.is_some() || self.screen_docked()
     }

@@ -1,4 +1,4 @@
-//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是手机端入口（`mobile`），下面是
+//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是配对设备入口（`mobile`），下面是
 //! 后台会话（`background`）。有 workspace 在别的主机上时按主机分组，每组一个组头，能收起、在那台主机上新建。
 //! 每行名字前是 GitHub 头像，没有头像时是名字首字母的色块，右边是当前分支（`repo`）。
 
@@ -62,12 +62,12 @@ fn sidebar_toggle_left(fullscreen: bool) -> f32 {
 pub(super) fn sidebar_toggle_inset(fullscreen: bool) -> f32 {
     sidebar_toggle_left(fullscreen) + SIDEBAR_TOGGLE_WIDTH + 8.
 }
-/// 每个 workspace 一行：首字母或头像、名字和 agent 标记，右边是分支。顶上手机端、看板这些入口也是这么高，
+/// 每个 workspace 一行：首字母或头像、名字和 agent 标记，右边是分支。顶上配对设备、看板这些入口也是这么高，
 /// 整列行距一致。
 pub(super) const ROW_HEIGHT: f32 = 30.;
 /// 没选中的行的字色，入口和 workspace 行一样。
 pub(super) const ROW_TEXT_OPACITY: f32 = 0.78;
-/// 侧栏每行名字前的图标那一格：workspace 的 GitHub 头像或首字母色块，手机端入口和新建按钮的图标也占这么宽，
+/// 侧栏每行名字前的图标那一格：workspace 的 GitHub 头像或首字母色块，配对设备入口和新建按钮的图标也占这么宽，
 /// 几处的文字才对齐。
 pub(super) const ROW_ICON_SIZE: f32 = 16.;
 /// 改名输入框的高度。
@@ -225,7 +225,7 @@ impl WindowView {
             .child(self.render_new_todo_entry(modifiers, cx))
             .child(self.render_schedules_entry(modifiers, cx))
             .child(self.render_kanban_entry(modifiers, cx))
-            // 手机端、新建任务、定时和看板的入口不是 workspace，和下面的列表用一条线隔开。
+            // 配对设备、新建任务、定时和看板的入口不是 workspace，和下面的列表用一条线隔开。
             .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(cx.theme().border))
             .child(
                 div()
@@ -498,7 +498,7 @@ impl WindowView {
     fn render_row(&self, ix: usize, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
-        // 开着手机端引导页、看板时高亮的是入口。
+        // 开着配对设备页、看板时高亮的是入口。
         let active = ix == self.active && !matches!(self.page, Some(super::Page::Mobile(_) | super::Page::Kanban(_)));
         let active_bg = cx.theme().accent_selected;
         let hover_bg = cx.theme().accent;

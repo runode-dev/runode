@@ -173,11 +173,11 @@ workspace:
   pair_link: 配對連結
   pair_link_placeholder: "runode://pair?…"
   pair_connect: 配對
-  pair_detail: 在另一台電腦上打開 Runode 的「手機端」頁，在配對那裡點「拷貝配對連結」，貼上到這裡。那台電腦要開著遠端存取。
+  pair_detail: 在另一台電腦上打開 Runode 的「配對裝置」頁，在配對那裡點「拷貝配對連結」，貼上到這裡。那台電腦要開著遠端存取。
   pairing: "正在和 %{host} 配對…"
   pair_found: 區域網路裡開著遠端存取的電腦：
   pair_found_hint: 到這台電腦上拷貝配對連結
-  pair_found_picked: "在 %{host} 上打開 Runode 的「手機端」頁，點「拷貝配對連結」，貼上到上面。"
+  pair_found_picked: "在 %{host} 上打開 Runode 的「配對裝置」頁，點「拷貝配對連結」，貼上到上面。"
 window_controls:
   minimize: 最小化
   maximize: 最大化
@@ -959,8 +959,8 @@ status:
   host_connect: 連線
   host_disconnect: 中斷連線
 mobile:
-  entry: "手機端"
-  eyebrow: "RUNODE 手機端"
+  entry: "配對裝置"
+  eyebrow: "RUNODE 配對裝置"
   intro_title: "在 iPhone 上用 Runode。"
   intro_body: "在 iPhone 上看 agent 在做什麼、回答它們的提問，打開任何一個終端機接著工作。手機經區域網路或 Tailscale 直接連到這台電腦，不經過別的伺服器。"
   start: "開始使用"
@@ -1467,7 +1467,7 @@ paired:
   forget_title: 解除配對
   forget_confirm_title: "解除和 %{host} 的配對？"
   forget_confirm_detail: "兩台電腦都會忘掉對方。之後要再連，得到 %{host} 上重新複製配對連結。"
-  not_revoked: "這台已經忘掉了 %{host}，但那邊沒撤銷這台（%{error}）。請到 %{host} 的「手機端」頁裡把這台刪掉。"
+  not_revoked: "這台已經忘掉了 %{host}，但那邊沒撤銷這台（%{error}）。請到 %{host} 的「配對裝置」頁裡把這台刪掉。"
   forget_failed: "沒能忘掉 %{host}：%{error}"
   build_mismatch: "兩台電腦上的 Runode 版本不同（那台是 %{build}），升級到同一版本後才能看檔案和 Git。"
   link_invalid: 這不是配對連結。配對連結以 runode://pair? 開頭。

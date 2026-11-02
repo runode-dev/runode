@@ -173,11 +173,11 @@ workspace:
   pair_link: Pairing link
   pair_link_placeholder: "runode://pair?…"
   pair_connect: Pair
-  pair_detail: On the other computer, open Runode's Mobile page, click "Copy Pairing Link" under pairing, and paste it here. That computer needs remote access turned on.
+  pair_detail: On the other computer, open Runode's Devices page, click "Copy Pairing Link" under pairing, and paste it here. That computer needs remote access turned on.
   pairing: "Pairing with %{host}…"
   pair_found: "Computers with remote access on this network:"
   pair_found_hint: Copy the pairing link on this computer
-  pair_found_picked: "On %{host}, open Runode's Mobile page, click \"Copy Pairing Link\", and paste it above."
+  pair_found_picked: "On %{host}, open Runode's Devices page, click \"Copy Pairing Link\", and paste it above."
 window_controls:
   minimize: Minimize
   maximize: Maximize
@@ -959,8 +959,8 @@ status:
   host_connect: Connect
   host_disconnect: Disconnect
 mobile:
-  entry: "Mobile"
-  eyebrow: "RUNODE MOBILE"
+  entry: "Devices"
+  eyebrow: "RUNODE DEVICES"
   intro_title: "Runode on your iPhone."
   intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. The phone connects straight to this computer over the local network or Tailscale, with no server in between."
   start: "Get Started"
@@ -1393,7 +1393,7 @@ paired:
   forget_title: Unpair
   forget_confirm_title: "Unpair %{host}?"
   forget_confirm_detail: "Both computers forget each other. To connect again, copy a new pairing link on %{host}."
-  not_revoked: "This computer forgot %{host}, but %{host} did not revoke it (%{error}). Remove this computer on %{host}'s Mobile page."
+  not_revoked: "This computer forgot %{host}, but %{host} did not revoke it (%{error}). Remove this computer on %{host}'s Devices page."
   forget_failed: "Cannot forget %{host}: %{error}"
   build_mismatch: "The two computers run different versions of Runode (the other one is %{build}). Update them to the same version to see files and Git."
   link_invalid: This is not a pairing link. Pairing links start with runode://pair?

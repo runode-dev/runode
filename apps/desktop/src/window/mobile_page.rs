@@ -1,4 +1,4 @@
-//! 侧栏顶上的「手机端」：窗口主区域换成手机端引导页（`mobile_page`）。切到任何一个标签或 workspace
+//! 侧栏顶上的「配对设备」：窗口主区域换成配对设备页（`mobile_page`）。切到任何一个标签或 workspace
 //! （`activate`）、按 Esc 就收起。
 
 use std::rc::Rc;
@@ -18,7 +18,7 @@ use crate::{
     ui::{a11y::A11yPress, card::Card, font_size::scaled, theme::ActiveTheme as _},
 };
 
-/// 开着的手机端引导页。
+/// 开着的配对设备页。
 pub(super) struct OpenMobile {
     pub(super) view: Entity<MobilePage>,
     _events: Subscription,
@@ -39,7 +39,7 @@ pub(crate) fn show_pairing(cx: &mut App) {
     });
 }
 
-/// 在后台跟着配对过的设备，只在有窗口开着手机端引导页时读。
+/// 在后台跟着配对过的设备，只在有窗口开着配对设备页时读。
 pub fn watch_devices(cx: &mut App) {
     crate::mobile_page::devices::watch(cx, |cx| {
         super::remote::windows(cx).iter().any(|handle| handle.read(cx).is_ok_and(|view| view.mobile_page().is_some()))
@@ -47,7 +47,7 @@ pub fn watch_devices(cx: &mut App) {
 }
 
 impl WindowView {
-    /// 打开手机端引导页；已经开着时把焦点给它。
+    /// 打开配对设备页；已经开着时把焦点给它。
     pub(super) fn show_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.leave_todo_page(window, cx) {
             return;
@@ -76,7 +76,7 @@ impl WindowView {
         }
     }
 
-    /// 收起手机端引导页，输入框里改了的电脑名先写回（`MobilePage::save_machine_name`）。
+    /// 收起配对设备页，输入框里改了的电脑名先写回（`MobilePage::save_machine_name`）。
     pub(super) fn leave_mobile(&mut self, cx: &mut Context<Self>) {
         if let Some(page) = self.mobile_page().map(|page| page.view.clone()) {
             page.update(cx, |page, cx| page.save_machine_name(cx));
@@ -105,7 +105,7 @@ impl WindowView {
     }
 }
 
-/// 侧栏顶上打开一页（手机端、看板）的入口，那一页开着时高亮。按下鼠标就开，辅助工具的按下另外登记。
+/// 侧栏顶上打开一页（配对设备、看板）的入口，那一页开着时高亮。按下鼠标就开，辅助工具的按下另外登记。
 /// 开着的状态报成按下着（`aria_toggled`）而不是选中：AccessKit 不给带选中状态的按钮 Invoke，Windows 上
 /// 辅助工具就按不动它。
 pub(super) fn page_entry(
@@ -163,7 +163,7 @@ pub(super) fn page_entry(
 }
 
 impl WindowView {
-    /// 铺满窗口的一页（手机端引导页、看板、远程桌面）开着时窗口的内容：侧栏（收着时没有），右边整块是 `page`，
+    /// 铺满窗口的一页（配对设备页、看板、远程桌面）开着时窗口的内容：侧栏（收着时没有），右边整块是 `page`，
     /// 顶上留一条拖动窗口、放红绿灯。`rounded_bottom` 为假时卡片样式下那块的底下两个角是直的。
     pub(super) fn render_page_body(
         &mut self,
