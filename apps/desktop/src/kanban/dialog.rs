@@ -889,96 +889,230 @@ impl TodoDialog {
     }
 }
 
-impl Render for TodoDialog {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.focus_menu(window, cx);
-        let dialog = &*self;
+/// 输入框随内容长高，至少 28 点。
+fn grow_input(state: &Entity<InputState>) -> Input {
+    Input::new(state).h_auto().min_h(scaled(28.)).py(px(4.))
+}
+
+/// 一栏：上面一行说明，下面是 `child`。
+fn field(label: String, child: gpui::AnyElement, cx: &App) -> Div {
+    let fg_h = cx.theme().foreground;
+    div().flex().flex_col().gap(px(6.)).child(div().text_color(fg_h.opacity(0.7)).child(label)).child(child)
+}
+
+impl TodoDialog {
+    /// 点了弹出菜单的框：左边是挑着的值，右边一个下拉箭头，菜单（`menu`）挂在它下面。
+    #[allow(clippy::too_many_arguments)]
+    fn combo(
+        &self,
+        id: &'static str,
+        kind: Combo,
+        label: String,
+        value: String,
+        enabled: bool,
+        menu: Option<Div>,
+        cx: &App,
+    ) -> SelectTrigger {
         let theme = cx.theme();
         let hover_bg = theme.mix(0.10);
-        let primary_bg = theme.mix(0.16);
-        let (fg_h, bg_h, input_border, destructive) =
-            (theme.foreground, theme.background, theme.input, theme.destructive);
-        // 输入框随内容长高，至少 28 点。
-        let input = |state: &Entity<InputState>| Input::new(state).h_auto().min_h(scaled(28.)).py(px(4.));
-        let field = |label: String, child: gpui::AnyElement| {
-            div().flex().flex_col().gap(px(6.)).child(div().text_color(fg_h.opacity(0.7)).child(label)).child(child)
-        };
-        // 对话框底下的按钮：比 `ButtonSize::Default` 高一些，高度由上下留白撑开。
-        let button = |id: &'static str, label: String, variant: ButtonVariant| {
-            Button::new(id, label).variant(variant).h_auto().py(px(5.)).cursor_pointer()
-        };
-        let pill = |id: gpui::ElementId, label: String, on: bool| {
-            div()
-                .id(id)
-                .role(Role::RadioButton)
-                .aria_label(label.clone())
-                .aria_toggled(on.into())
-                .px(px(10.))
-                .py(px(3.))
-                .rounded(px(4.))
-                .cursor_pointer()
-                .when(on, |pill| pill.bg(primary_bg))
-                .when(!on, |pill| pill.hover(move |pill| pill.bg(hover_bg)))
-                .child(label)
-        };
-        // 点了弹出菜单的框：左边是挑着的值，右边一个下拉箭头，菜单（`menu`）挂在它下面。
-        let open = |kind: Combo| dialog.menu_for == Some(kind) && dialog.dropdown_open();
-        let combo = |id: &'static str, kind: Combo, label: String, value: String, enabled: bool, menu: Option<Div>| {
-            let bottoms = dialog.combo_bottoms.clone();
-            SelectTrigger::new(id, label, value)
-                .aria_expanded(open(kind))
-                .relative()
-                .min_h(scaled(28.))
-                .px(px(8.))
-                .rounded(px(6.))
-                .bg(bg_h)
-                .border_1()
-                // 和上下的输入框（`Input`）一样的边框。
-                .border_color(input_border)
-                .when(enabled, |combo| combo.hover(move |combo| combo.bg(hover_bg)))
-                .when(!enabled, |combo| combo.cursor_default().opacity(0.6))
-                .aria_disabled(!enabled)
-                // 记下下沿，菜单的最大高度按它算。
-                .child(
-                    canvas(
-                        move |bounds, _, _| bottoms[kind as usize].set(f32::from(bounds.bottom())),
-                        |_, (), _, _| {},
-                    )
+        let (bg_h, input_border) = (theme.background, theme.input);
+        let open = self.menu_for == Some(kind) && self.dropdown_open();
+        let bottoms = self.combo_bottoms.clone();
+        SelectTrigger::new(id, label, value)
+            .aria_expanded(open)
+            .relative()
+            .min_h(scaled(28.))
+            .px(px(8.))
+            .rounded(px(6.))
+            .bg(bg_h)
+            .border_1()
+            // 和上下的输入框（`Input`）一样的边框。
+            .border_color(input_border)
+            .when(enabled, |combo| combo.hover(move |combo| combo.bg(hover_bg)))
+            .when(!enabled, |combo| combo.cursor_default().opacity(0.6))
+            .aria_disabled(!enabled)
+            // 记下下沿，菜单的最大高度按它算。
+            .child(
+                canvas(move |bounds, _, _| bottoms[kind as usize].set(f32::from(bounds.bottom())), |_, (), _, _| {})
                     .absolute()
                     .size_full(),
+            )
+            .children(menu)
+    }
+
+    /// 对话框的标题：新建还是编辑，任务还是定时。
+    fn heading(&self) -> String {
+        match (&self.editing, self.schedule) {
+            (Some(_), false) => rust_i18n::t!("kanban.edit"),
+            (Some(_), true) => rust_i18n::t!("kanban.edit_schedule"),
+            (None, false) => rust_i18n::t!("kanban.new_todo"),
+            (None, true) => rust_i18n::t!("kanban.new_schedule"),
+        }
+        .into_owned()
+    }
+
+    fn render_title(title: String) -> impl IntoElement {
+        div()
+            .id("todo-dialog-title")
+            .role(Role::Heading)
+            .aria_level(1)
+            .aria_label(title.clone())
+            .text_size(FontSize::Title)
+            .font_weight(FontWeight::BOLD)
+            .child(title)
+    }
+
+    /// 标题和按钮之间的各栏；窗口矮时只有这些滚动，标题和保存按钮总在。
+    fn render_fields(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("todo-dialog-fields")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .children(self.render_template_input(cx))
+            .child(field(
+                rust_i18n::t!("kanban.dialog.title_label").into_owned(),
+                grow_input(&self.title).into_any_element(),
+                cx,
+            ))
+            .child(field(
+                rust_i18n::t!("kanban.dialog.prompt").into_owned(),
+                Textarea::new(&self.prompt).min_h(scaled(28.)).py(px(4.)).flex().items_center().into_any_element(),
+                cx,
+            ))
+            .children(self.render_when(cx))
+            .child(self.render_workspace(window, cx))
+            .child(self.render_agent_row(window, cx))
+            .child(self.render_skills_row(window, cx))
+            .child(self.render_attachments(cx))
+            .child(self.render_switches(cx))
+    }
+
+    /// 挑着的模板要另外填的那一项，放在最上面。
+    fn render_template_input(&self, cx: &App) -> Option<Div> {
+        self.template
+            .and_then(|index| self.templates[index].input.clone())
+            .map(|label| field(label, grow_input(&self.input).into_any_element(), cx))
+    }
+
+    /// 定时跑的方式和时间：一次、每天（可以只挑几天）、每隔；只有定时有。
+    fn render_when(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let fg_h = cx.theme().foreground;
+        self.schedule.then(|| {
+            let kind = |group: Segmented, id: &'static str, kind: Kind, label: &str, cx: &mut Context<Self>| {
+                group.option(
+                    id,
+                    rust_i18n::t!(label).into_owned(),
+                    self.kind == Some(kind),
+                    cx,
+                    move |dialog, window, cx| {
+                        dialog.kind = Some(kind);
+                        let input = match kind {
+                            Kind::Once => dialog.at.clone(),
+                            Kind::Daily => dialog.clock.clone(),
+                            Kind::Every => dialog.minutes.clone(),
+                        };
+                        window.focus(&input.focus_handle(cx), cx);
+                        cx.notify();
+                    },
                 )
-                .children(menu)
-        };
+            };
+            let when_label = rust_i18n::t!("kanban.dialog.when").into_owned();
+            let kinds = Segmented::new("todo-dialog-when", when_label.clone());
+            let kinds = kind(kinds, "todo-dialog-once", Kind::Once, "kanban.dialog.kind_once", cx);
+            let kinds = kind(kinds, "todo-dialog-daily", Kind::Daily, "kanban.dialog.kind_daily", cx);
+            let kinds = kind(kinds, "todo-dialog-every", Kind::Every, "kanban.dialog.kind_every", cx);
+            let when_input = match self.kind {
+                Some(Kind::Once) => grow_input(&self.at).into_any_element(),
+                Some(Kind::Daily) => grow_input(&self.clock).into_any_element(),
+                Some(Kind::Every) => grow_input(&self.minutes).into_any_element(),
+                None => {
+                    let hint = rust_i18n::t!("kanban.dialog.unknown_hint").into_owned();
+                    div()
+                        .id("todo-dialog-unknown")
+                        .role(Role::Label)
+                        .aria_label(hint.clone())
+                        .text_size(FontSize::Small)
+                        .text_color(fg_h.opacity(0.55))
+                        .child(hint)
+                        .into_any_element()
+                }
+            };
+            let days = (self.kind == Some(Kind::Daily)).then(|| {
+                let pills: Vec<_> = (0..7u8)
+                    .map(|day| {
+                        let on = self.days & (1 << day) != 0;
+                        let label = weekday(day);
+                        Chip::new(("todo-weekday", usize::from(day)), label, on).on_press(cx, move |dialog, _, cx| {
+                            dialog.days ^= 1 << day;
+                            cx.notify();
+                        })
+                    })
+                    .collect();
+                div().flex().flex_col().gap(px(4.)).child(div().flex().flex_wrap().gap(px(4.)).children(pills)).child(
+                    div()
+                        .text_size(FontSize::Small)
+                        .text_color(fg_h.opacity(0.55))
+                        .child(rust_i18n::t!("kanban.dialog.days_hint").into_owned()),
+                )
+            });
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(div().text_color(fg_h.opacity(0.7)).child(when_label))
+                        .child(kinds),
+                )
+                .child(when_input)
+                .children(days)
+        })
+    }
+
+    /// 工作区那一栏；任务开始过了就不能再改。
+    fn render_workspace(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let workspace_label = rust_i18n::t!("kanban.dialog.workspace").into_owned();
-        let workspace_text = dialog
+        let workspace_text = self
             .workspaces
             .iter()
-            .find(|(dir, _)| *dir == dialog.dir)
-            .map_or_else(|| display_dir(&dialog.dir), |(_, name)| name.to_string());
-        let menu = dialog.combo_menu(Combo::Workspace, window, cx);
-        let workspace = combo(
+            .find(|(dir, _)| *dir == self.dir)
+            .map_or_else(|| display_dir(&self.dir), |(_, name)| name.to_string());
+        let menu = self.combo_menu(Combo::Workspace, window, cx);
+        let workspace = self.combo(
             "todo-dialog-workspace",
             Combo::Workspace,
             workspace_label.clone(),
             workspace_text,
-            !dialog.locked,
+            !self.locked,
             menu,
+            cx,
         );
-        let workspace = if dialog.locked { workspace } else { Self::opens_menu(Combo::Workspace, workspace, cx) };
+        let workspace = if self.locked { workspace } else { Self::opens_menu(Combo::Workspace, workspace, cx) };
+        field(workspace_label, workspace.into_any_element(), cx)
+    }
+
+    /// 挑了 agent 时并排挑模型和强度；自己写命令时下面是命令框。
+    fn render_agent_row(&self, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let default = rust_i18n::t!("kanban.dialog.default").into_owned();
         let agent_label = rust_i18n::t!("kanban.dialog.agent").into_owned();
-        let agent_text = dialog.agent.as_ref().map_or_else(
+        let agent_text = self.agent.as_ref().map_or_else(
             || rust_i18n::t!("kanban.dialog.custom").into_owned(),
             |pick| pick.launcher().label.to_owned(),
         );
-        let menu = dialog.combo_menu(Combo::Agent, window, cx);
+        let menu = self.combo_menu(Combo::Agent, window, cx);
         let agent = Self::opens_menu(
             Combo::Agent,
-            combo("todo-dialog-agent", Combo::Agent, agent_label.clone(), agent_text, true, menu),
+            self.combo("todo-dialog-agent", Combo::Agent, agent_label.clone(), agent_text, true, menu, cx),
             cx,
         );
-        // 挑了 agent 时并排挑模型和强度；自己写命令时下面是命令框。
-        let agent_row = match &dialog.agent {
+        match &self.agent {
             Some(pick) => {
                 let launcher = pick.launcher();
                 let catalog = cached(launcher);
@@ -989,10 +1123,10 @@ impl Render for TodoDialog {
                         |model| catalog.as_deref().map_or(model, |catalog: &Catalog| catalog.label(model)).to_owned(),
                     );
                     let label = rust_i18n::t!("kanban.dialog.model").into_owned();
-                    let menu = dialog.combo_menu(Combo::Model, window, cx);
+                    let menu = self.combo_menu(Combo::Model, window, cx);
                     Self::opens_menu(
                         Combo::Model,
-                        combo("todo-dialog-model", Combo::Model, label, text, true, menu),
+                        self.combo("todo-dialog-model", Combo::Model, label, text, true, menu, cx),
                         cx,
                     )
                 });
@@ -1000,12 +1134,12 @@ impl Render for TodoDialog {
                     let enabled = pick.model.is_some() || !launcher.effort_needs_model;
                     let text = pick.effort.clone().filter(|_| enabled).unwrap_or_else(|| default.clone());
                     let label = rust_i18n::t!("kanban.dialog.effort").into_owned();
-                    let menu = dialog.combo_menu(Combo::Effort, window, cx);
-                    let effort = combo("todo-dialog-effort", Combo::Effort, label, text, enabled, menu);
+                    let menu = self.combo_menu(Combo::Effort, window, cx);
+                    let effort = self.combo("todo-dialog-effort", Combo::Effort, label, text, enabled, menu, cx);
                     if enabled { Self::opens_menu(Combo::Effort, effort, cx) } else { effort }
                 });
                 let column = |key: &str, child: SelectTrigger| {
-                    div().flex_1().min_w_0().child(field(rust_i18n::t!(key).into_owned(), child.into_any_element()))
+                    div().flex_1().min_w_0().child(field(rust_i18n::t!(key).into_owned(), child.into_any_element(), cx))
                 };
                 div()
                     .flex()
@@ -1019,36 +1153,44 @@ impl Render for TodoDialog {
                 .flex()
                 .flex_col()
                 .gap(px(8.))
-                .child(field(agent_label, agent.into_any_element()))
-                .child(input(&dialog.command))
+                .child(field(agent_label, agent.into_any_element(), cx))
+                .child(grow_input(&self.command))
                 .into_any_element(),
-        };
+        }
+    }
+
+    /// skill 那一栏，和自定义 agent 并排。
+    fn render_skills_row(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let none = rust_i18n::t!("kanban.dialog.none").into_owned();
         let skills_label = rust_i18n::t!("kanban.dialog.skills").into_owned();
-        let skills_text = if dialog.skills.is_empty() { none.clone() } else { dialog.skills.join(", ") };
-        let menu = dialog.combo_menu(Combo::Skills, window, cx);
+        let skills_text = if self.skills.is_empty() { none.clone() } else { self.skills.join(", ") };
+        let menu = self.combo_menu(Combo::Skills, window, cx);
         let skills = Self::opens_menu(
             Combo::Skills,
-            combo("todo-dialog-skills", Combo::Skills, skills_label.clone(), skills_text, true, menu),
+            self.combo("todo-dialog-skills", Combo::Skills, skills_label.clone(), skills_text, true, menu, cx),
             cx,
         );
         // 挑着的 agent 有自定义 agent 的参数、或者已经挑了（自己写的命令也可能用得上，存着的不能悄悄丢掉）时，
         // 和 skill 并排挑。
-        let subagent = (dialog.takes_subagent() || dialog.subagent.is_some()).then(|| {
+        let subagent = (self.takes_subagent() || self.subagent.is_some()).then(|| {
             let label = rust_i18n::t!("kanban.dialog.subagent").into_owned();
-            let text = dialog.subagent.clone().unwrap_or_else(|| none.clone());
-            let menu = dialog.combo_menu(Combo::Subagent, window, cx);
-            let subagent = combo("todo-dialog-subagent", Combo::Subagent, label.clone(), text, true, menu);
+            let text = self.subagent.clone().unwrap_or_else(|| none.clone());
+            let menu = self.combo_menu(Combo::Subagent, window, cx);
+            let subagent = self.combo("todo-dialog-subagent", Combo::Subagent, label.clone(), text, true, menu, cx);
             let subagent = Self::opens_menu(Combo::Subagent, subagent, cx);
-            div().flex_1().min_w_0().child(field(label, subagent.into_any_element()))
+            div().flex_1().min_w_0().child(field(label, subagent.into_any_element(), cx))
         });
-        let skills_row = div()
+        div()
             .flex()
             .gap(px(8.))
-            .child(div().flex_1().min_w_0().child(field(skills_label, skills.into_any_element())))
-            .children(subagent);
-        // 附件一个一块，写文件名，报给辅助工具的是整个路径；后面跟着添加的按钮。
-        let chips: Vec<_> = dialog
+            .child(div().flex_1().min_w_0().child(field(skills_label, skills.into_any_element(), cx)))
+            .children(subagent)
+    }
+
+    /// 附件一个一块，写文件名，报给辅助工具的是整个路径；后面跟着添加的按钮。
+    fn render_attachments(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let primary_bg = cx.theme().mix(0.16);
+        let chips: Vec<_> = self
             .attachments
             .iter()
             .map(|path| {
@@ -1086,7 +1228,7 @@ impl Render for TodoDialog {
                 .py(px(3.))
                 .cursor_pointer()
                 .on_press(cx, |dialog, window, cx| dialog.browse_attachments(window, cx));
-        let attachments = field(
+        field(
             rust_i18n::t!("kanban.dialog.attachments").into_owned(),
             div()
                 .flex()
@@ -1096,139 +1238,100 @@ impl Render for TodoDialog {
                 .children(chips)
                 .child(add_attachment)
                 .into_any_element(),
-        );
+            cx,
+        )
+    }
+
+    /// 要不要工作树、免确认一路跑完的两个开关，排在一行。
+    fn render_switches(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let auto_label = rust_i18n::t!("kanban.dialog.auto").into_owned();
-        let auto = Switch::new("todo-dialog-auto", auto_label.clone(), dialog.auto)
+        let auto = Switch::new("todo-dialog-auto", auto_label.clone(), self.auto)
             .label(auto_label)
             .cursor_pointer()
             .on_press(cx, |dialog, _, cx| {
                 dialog.auto = !dialog.auto;
                 cx.notify();
             });
-        // 挑着的模板要另外填的那一项，放在最上面。
-        let template_input = dialog
-            .template
-            .and_then(|index| dialog.templates[index].input.clone())
-            .map(|label| field(label, input(&dialog.input).into_any_element()));
         let worktree_label = rust_i18n::t!("kanban.dialog.worktree").into_owned();
         // 一行字配一个开关，点字也算点开关。
-        let worktree = Switch::new("todo-dialog-worktree", worktree_label.clone(), dialog.worktree)
+        let worktree = Switch::new("todo-dialog-worktree", worktree_label.clone(), self.worktree)
             .label(worktree_label)
             .cursor_pointer()
-            .when(!dialog.locked, |pill| {
+            .when(!self.locked, |pill| {
                 pill.on_press(cx, |dialog, _, cx| {
                     dialog.worktree = !dialog.worktree;
                     cx.notify();
                 })
             })
-            .when(dialog.locked, |pill| pill.opacity(0.6))
-            .aria_disabled(dialog.locked);
-        let when = dialog.schedule.then(|| {
-            let kind = |group: Segmented, id: &'static str, kind: Kind, label: &str, cx: &mut Context<Self>| {
-                group.option(
-                    id,
-                    rust_i18n::t!(label).into_owned(),
-                    dialog.kind == Some(kind),
-                    cx,
-                    move |dialog, window, cx| {
-                        dialog.kind = Some(kind);
-                        let input = match kind {
-                            Kind::Once => dialog.at.clone(),
-                            Kind::Daily => dialog.clock.clone(),
-                            Kind::Every => dialog.minutes.clone(),
-                        };
-                        window.focus(&input.focus_handle(cx), cx);
-                        cx.notify();
-                    },
-                )
-            };
-            let when_label = rust_i18n::t!("kanban.dialog.when").into_owned();
-            let kinds = Segmented::new("todo-dialog-when", when_label.clone());
-            let kinds = kind(kinds, "todo-dialog-once", Kind::Once, "kanban.dialog.kind_once", cx);
-            let kinds = kind(kinds, "todo-dialog-daily", Kind::Daily, "kanban.dialog.kind_daily", cx);
-            let kinds = kind(kinds, "todo-dialog-every", Kind::Every, "kanban.dialog.kind_every", cx);
-            let when_input = match dialog.kind {
-                Some(Kind::Once) => input(&dialog.at).into_any_element(),
-                Some(Kind::Daily) => input(&dialog.clock).into_any_element(),
-                Some(Kind::Every) => input(&dialog.minutes).into_any_element(),
-                None => {
-                    let hint = rust_i18n::t!("kanban.dialog.unknown_hint").into_owned();
-                    div()
-                        .id("todo-dialog-unknown")
-                        .role(Role::Label)
-                        .aria_label(hint.clone())
-                        .text_size(FontSize::Small)
-                        .text_color(fg_h.opacity(0.55))
-                        .child(hint)
-                        .into_any_element()
-                }
-            };
-            let days = (dialog.kind == Some(Kind::Daily)).then(|| {
-                let pills: Vec<_> = (0..7u8)
-                    .map(|day| {
-                        let on = dialog.days & (1 << day) != 0;
-                        let label = weekday(day);
-                        Chip::new(("todo-weekday", usize::from(day)), label, on).on_press(cx, move |dialog, _, cx| {
-                            dialog.days ^= 1 << day;
-                            cx.notify();
-                        })
-                    })
-                    .collect();
-                div().flex().flex_col().gap(px(4.)).child(div().flex().flex_wrap().gap(px(4.)).children(pills)).child(
-                    div()
-                        .text_size(FontSize::Small)
-                        .text_color(fg_h.opacity(0.55))
-                        .child(rust_i18n::t!("kanban.dialog.days_hint").into_owned()),
-                )
-            });
+            .when(self.locked, |pill| pill.opacity(0.6))
+            .aria_disabled(self.locked);
+        div().flex().flex_wrap().gap(px(16.)).child(worktree).child(auto)
+    }
+
+    /// 存的时候没办成的原因。
+    fn render_error(&self, cx: &App) -> Option<impl IntoElement> {
+        let destructive = cx.theme().destructive;
+        self.error.clone().map(|error| {
             div()
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .child(div().text_color(fg_h.opacity(0.7)).child(when_label))
-                        .child(kinds),
-                )
-                .child(when_input)
-                .children(days)
-        });
-        let title = match (&dialog.editing, dialog.schedule) {
-            (Some(_), false) => rust_i18n::t!("kanban.edit"),
-            (Some(_), true) => rust_i18n::t!("kanban.edit_schedule"),
-            (None, false) => rust_i18n::t!("kanban.new_todo"),
-            (None, true) => rust_i18n::t!("kanban.new_schedule"),
-        }
-        .into_owned();
+                .id("todo-dialog-error")
+                .role(Role::Label)
+                .aria_label(error.clone())
+                .text_color(destructive)
+                .child(error)
+        })
+    }
+
+    /// 底下的取消、保存和保存并开始。
+    fn render_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        // 对话框底下的按钮：比 `ButtonSize::Default` 高一些，高度由上下留白撑开。
+        let button = |id: &'static str, label: String, variant: ButtonVariant| {
+            Button::new(id, label).variant(variant).h_auto().py(px(5.)).cursor_pointer()
+        };
         let cancel = button("todo-dialog-cancel", rust_i18n::t!("kanban.cancel").into_owned(), ButtonVariant::Ghost)
             .on_press(cx, |_, _, cx| cx.emit(DialogEvent::Dismissed));
         let save = button("todo-dialog-save", rust_i18n::t!("kanban.save").into_owned(), ButtonVariant::Secondary)
-            .when(dialog.saving, |button| button.opacity(0.5))
+            .when(self.saving, |button| button.opacity(0.5))
             .on_press(cx, |this, _, cx| this.save(false, cx));
-        let save_and_start = dialog.startable().then(|| {
+        let save_and_start = self.startable().then(|| {
             button(
                 "todo-dialog-save-start",
                 rust_i18n::t!("kanban.save_and_start").into_owned(),
                 ButtonVariant::Default,
             )
-            .when(dialog.saving, |button| button.opacity(0.5))
+            .when(self.saving, |button| button.opacity(0.5))
             .on_press(cx, |this, _, cx| this.save(true, cx))
         });
-        let page = dialog.page;
-        // 新建任务那一页左边的模板，空白的在最前面。
-        let templates = (page && dialog.editing.is_none()).then(|| {
+        div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save).children(save_and_start)
+    }
+
+    /// 新建任务那一页左边的模板，空白的在最前面。
+    fn render_templates(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let theme = cx.theme();
+        let hover_bg = theme.mix(0.10);
+        let primary_bg = theme.mix(0.16);
+        let fg_h = theme.foreground;
+        let pill = |id: gpui::ElementId, label: String, on: bool| {
+            div()
+                .id(id)
+                .role(Role::RadioButton)
+                .aria_label(label.clone())
+                .aria_toggled(on.into())
+                .px(px(10.))
+                .py(px(3.))
+                .rounded(px(4.))
+                .cursor_pointer()
+                .when(on, |pill| pill.bg(primary_bg))
+                .when(!on, |pill| pill.hover(move |pill| pill.bg(hover_bg)))
+                .child(label)
+        };
+        (self.page && self.editing.is_none()).then(|| {
             let label = rust_i18n::t!("kanban.dialog.templates").into_owned();
             let blank = rust_i18n::t!("kanban.dialog.template_blank").into_owned();
             let rows: Vec<_> = std::iter::once((None, "blank".to_owned(), blank))
-                .chain(
-                    dialog.templates.iter().enumerate().map(|(index, t)| (Some(index), t.id.clone(), t.name.clone())),
-                )
+                .chain(self.templates.iter().enumerate().map(|(index, t)| (Some(index), t.id.clone(), t.name.clone())))
                 .map(|(index, id, name)| {
                     let id = gpui::ElementId::Name(format!("todo-template-{id}").into());
-                    pill(id, name, dialog.template == index)
+                    pill(id, name, self.template == index)
                         .truncate()
                         .on_press(cx, move |dialog, window, cx| dialog.pick_template(index, window, cx))
                 })
@@ -1257,10 +1360,18 @@ impl Render for TodoDialog {
                 .child(div().pb(px(6.)).text_color(fg_h.opacity(0.7)).child(label))
                 .children(rows)
                 .children(hint)
-        });
+        })
+    }
+}
+
+impl Render for TodoDialog {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.focus_menu(window, cx);
+        let title = self.heading();
+        let page = self.page;
         let panel = Dialog::new("todo-dialog", title.clone())
             .when(page, |panel| panel.role(Role::Group))
-            .track_focus(&dialog.focus)
+            .track_focus(&self.focus)
             .on_action(cx.listener(Self::pick_agent))
             .on_action(cx.listener(Self::pick_model))
             .on_action(cx.listener(Self::pick_effort))
@@ -1280,65 +1391,17 @@ impl Render for TodoDialog {
             .flex()
             .flex_col()
             .gap(px(12.))
-            .child(
-                div()
-                    .id("todo-dialog-title")
-                    .role(Role::Heading)
-                    .aria_level(1)
-                    .aria_label(title.clone())
-                    .text_size(FontSize::Title)
-                    .font_weight(FontWeight::BOLD)
-                    .child(title),
-            )
-            // 窗口矮时只有中间这些滚动，标题和保存按钮总在。
-            .child(
-                div()
-                    .id("todo-dialog-fields")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.))
-                    .children(template_input)
-                    .child(field(
-                        rust_i18n::t!("kanban.dialog.title_label").into_owned(),
-                        input(&dialog.title).into_any_element(),
-                    ))
-                    .child(field(
-                        rust_i18n::t!("kanban.dialog.prompt").into_owned(),
-                        Textarea::new(&dialog.prompt)
-                            .min_h(scaled(28.))
-                            .py(px(4.))
-                            .flex()
-                            .items_center()
-                            .into_any_element(),
-                    ))
-                    .children(when)
-                    .child(field(workspace_label, workspace.into_any_element()))
-                    .child(agent_row)
-                    .child(skills_row)
-                    .child(attachments)
-                    .child(div().flex().flex_wrap().gap(px(16.)).child(worktree).child(auto)),
-            )
-            .children(dialog.error.clone().map(|error| {
-                div()
-                    .id("todo-dialog-error")
-                    .role(Role::Label)
-                    .aria_label(error.clone())
-                    .text_color(destructive)
-                    .child(error)
-            }))
-            .child(
-                div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save).children(save_and_start),
-            );
+            .child(Self::render_title(title))
+            .child(self.render_fields(window, cx))
+            .children(self.render_error(cx))
+            .child(self.render_buttons(cx));
         if page {
             return div()
                 .id("todo-page")
                 .size_full()
                 .flex()
                 .gap(px(16.))
-                .children(templates)
+                .children(self.render_templates(cx))
                 .child(panel)
                 .into_any_element();
         }
