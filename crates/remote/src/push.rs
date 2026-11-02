@@ -38,9 +38,9 @@ use std::{
 
 use runode_paths::Dirs;
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, FrameKind, HostMsg, PROTOCOL_VERSION,
+    BuildId, Caps, ClientKind, ClientMsg, HostMsg, PROTOCOL_VERSION,
     push::{ApnsEnv, Notification, OFFICIAL_BUNDLE, RELAY_URL},
-    read_frame, write_control,
+    spawn_control_reader, write_control,
 };
 
 pub use self::probe::{TestPush, send_test_push};
@@ -490,19 +490,7 @@ struct HostLink {
 impl HostLink {
     fn connect(connect: &Connect) -> io::Result<Self> {
         let stream = connect()?;
-        let mut reader = stream.try_clone()?;
-        let (tx, messages) = mpsc::channel();
-        thread::Builder::new().name("remote-access-poll-read".into()).spawn(move || {
-            while let Ok(Some(frame)) = read_frame(&mut reader) {
-                if frame.kind != FrameKind::Control {
-                    continue;
-                }
-                let Ok(message) = frame.message::<HostMsg>() else { continue };
-                if tx.send(message).is_err() {
-                    break;
-                }
-            }
-        })?;
+        let messages = spawn_control_reader(stream.try_clone()?, "remote-access-poll-read")?;
         let mut link = Self { stream, messages, todos: false };
         link.send(&ClientMsg::Hello {
             protocol: PROTOCOL_VERSION,

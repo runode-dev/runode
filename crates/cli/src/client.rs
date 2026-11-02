@@ -18,7 +18,7 @@ use std::os::unix::net::UnixStream;
 use anyhow::{Context as _, Result, anyhow, bail};
 use runode_protocol::{
     BuildId, Caps, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo,
-    WindowLayout, read_frame, write_control, write_frame,
+    WindowLayout, read_frame, spawn_control_reader, write_control, write_frame,
 };
 use runode_types::todo::{Schedule, Todo};
 #[cfg(windows)]
@@ -180,19 +180,7 @@ impl Connection {
                     .with_context(|| format!("cannot reach the runode app at {}; is it running?", socket.display()));
             }
         };
-        let mut reader = stream.try_clone()?;
-        let (tx, messages) = mpsc::channel();
-        thread::Builder::new().name("runode-reader".into()).spawn(move || {
-            while let Ok(Some(frame)) = read_frame(&mut reader) {
-                if frame.kind != FrameKind::Control {
-                    continue;
-                }
-                let Ok(message) = frame.message::<HostMsg>() else { continue };
-                if tx.send(message).is_err() {
-                    break;
-                }
-            }
-        })?;
+        let messages = spawn_control_reader(stream.try_clone()?, "runode-reader")?;
         let mut connection = Self {
             stream,
             messages,

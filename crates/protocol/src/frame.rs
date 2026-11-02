@@ -145,6 +145,27 @@ pub fn read_frame_limited(reader: &mut impl Read, limit: u32) -> Result<Option<F
     Ok(Some(Frame { kind, channel, payload }))
 }
 
+/// 在名叫 `name` 的线程上一直读 `reader` 里的帧，控制帧解成 `T` 交给返回的通道；别的帧和解不出的控制消息
+/// 跳过。读到结尾、读出错或者通道的收端丢了就停。
+pub fn spawn_control_reader<T: serde::de::DeserializeOwned + Send + 'static>(
+    mut reader: impl Read + Send + 'static,
+    name: &str,
+) -> io::Result<std::sync::mpsc::Receiver<T>> {
+    let (tx, messages) = std::sync::mpsc::channel();
+    std::thread::Builder::new().name(name.into()).spawn(move || {
+        while let Ok(Some(frame)) = read_frame(&mut reader) {
+            if frame.kind != FrameKind::Control {
+                continue;
+            }
+            let Ok(message) = frame.message::<T>() else { continue };
+            if tx.send(message).is_err() {
+                break;
+            }
+        }
+    })?;
+    Ok(messages)
+}
+
 /// 把 `message` 编成 JSON，当作通道 0 的控制帧写出去（`Frame::control`、`write_frame`）。
 pub fn write_control(writer: &mut impl Write, message: &impl serde::Serialize) -> Result<(), FrameError> {
     let frame = Frame::control(message).map_err(FrameError::Json)?;
