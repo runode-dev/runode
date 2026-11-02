@@ -468,5 +468,6 @@ fn fixture_matches_the_serialized_messages() {
 
     for (name, value) in &samples {
         assert_eq!(&fixture[*name], value, "{name} 和生成的对不上，设 RUNODE_BLESS=1 重新生成");
-    }    assert_eq!(root["agents"], sorted(agents()), "agents 和生成的对不上，设 RUNODE_BLESS=1 重新生成");
+    }
+    assert_eq!(root["agents"], sorted(agents()), "agents 和生成的对不上，设 RUNODE_BLESS=1 重新生成");
 }
