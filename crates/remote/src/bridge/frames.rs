@@ -1,8 +1,8 @@
 //! 桥接时两个方向上的帧边界。字节照旧一块一块地搬，这里只跟着帧头数位置：
 //!
-//! - 手机 → 宿主（`FromPhone`）：控制帧整帧攒齐、解出 `ClientMsg`，手机连接不能做的（见
-//!   `refusal`）不转给宿主，改给手机回一条 `HostMsg::Error`；这边自己办的（见 `LocalRequests`）也不转，
-//!   回这边办完的回话；别的帧（输入等）不解析，边到边转。
+//! - 手机 → 宿主（`FromPhone`）：控制帧整帧攒齐、解出 `ClientMsg`，这台设备不能做的（见
+//!   `ClientMsg::remote_refusal`）不转给宿主，改给它回一条 `HostMsg::Error`；这边自己办的（见 `LocalRequests`）
+//!   也不转，回这边办完的回话；别的帧（输入等）不解析，边到边转。
 //! - 宿主 → 手机（`ToPhone`）：只数帧头里的长度，知道现在是不是正好在两帧之间，回给手机的
 //!   回话只在那里插进去，不会把宿主的帧拆开。
 
@@ -16,7 +16,8 @@ use runode_protocol::{
 /// 攒控制帧时一开始最多先要这么多内存，再多的随到达的字节长，不照对面声明的长度一上来就分配。
 const HOLD_RESERVE: usize = 64 << 10;
 /// 手机发来的控制帧载荷最多这么大，超了断开：控制帧要整帧攒在内存里，不能照 `MAX_PAYLOAD` 放。
-/// 控制消息里最长的是粘贴的文字（`ClientMsg::Paste`），手机上粘贴的一般到不了这么长。
+/// 控制消息里最长的是粘贴的文字（`ClientMsg::Paste`），手机上粘贴的一般到不了这么长。桌面设备的
+/// 控制帧照 `MAX_PAYLOAD` 放：它和本机的桌面一样会粘贴大段文字，配对过的电脑也不是要防的对象。
 const MAX_CONTROL_PAYLOAD: u32 = 1 << 20;
 
 /// 手机连接上由这边自己办、不转给宿主的请求。
@@ -44,16 +45,37 @@ pub(crate) struct FromPhone {
     held: Option<Vec<u8>>,
     /// 控制帧不解析、原样转：连的不是终端的宿主（远程桌面、语音识别），控制消息不是 `ClientMsg`。
     passthrough: bool,
+    /// 不分帧、原样转：专用连接（`ChannelHello`）开好以后对面跑的不是帧。
+    raw: bool,
+    /// 连来的是哪种设备，定下挡哪些请求、控制帧最大多少。
+    kind: DeviceKind,
 }
 
 impl FromPhone {
+    /// 连的是终端的宿主、来的是 `kind` 的设备。
+    pub(crate) fn terminal(kind: DeviceKind) -> Self {
+        Self { kind, ..Self::default() }
+    }
+
     /// 连的不是终端的宿主时用：只照帧头数边界、查长度，控制帧不解析、原样转给对面。
     pub(crate) fn passthrough() -> Self {
         Self { passthrough: true, ..Self::default() }
     }
 
+    /// 专用连接用：字节原样转，不看帧头。
+    pub(crate) fn raw() -> Self {
+        Self { raw: true, ..Self::default() }
+    }
+
+    fn max_control(&self) -> u32 {
+        match self.kind {
+            DeviceKind::Mobile => MAX_CONTROL_PAYLOAD,
+            DeviceKind::Desktop => MAX_PAYLOAD,
+        }
+    }
+
     /// 过一段明文：要转给宿主的追加到 `to_host`；挡下的和交给 `local` 办了的控制消息，给手机的回话
-    /// （编好的帧）追加到 `replies`。帧头声明的载荷超过 `MAX_PAYLOAD`（控制帧是 `MAX_CONTROL_PAYLOAD`）
+    /// （编好的帧）追加到 `replies`。帧头声明的载荷超过 `MAX_PAYLOAD`（手机的控制帧是 `MAX_CONTROL_PAYLOAD`）
     /// 时报错，连接上的数据已经对不齐了。
     pub(crate) fn feed(
         &mut self,
@@ -62,6 +84,10 @@ impl FromPhone {
         replies: &mut Vec<u8>,
         local: &mut dyn LocalRequests,
     ) -> Result<(), FrameError> {
+        if self.raw {
+            to_host.extend_from_slice(bytes);
+            return Ok(());
+        }
         while !bytes.is_empty() {
             if self.left == 0 && self.held.is_none() {
                 let take = (HEADER_LEN - self.have).min(bytes.len());
@@ -74,7 +100,7 @@ impl FromPhone {
                 self.have = 0;
                 let len = u32::from_le_bytes([self.header[0], self.header[1], self.header[2], self.header[3]]);
                 let control = self.header[4] == FrameKind::Control as u8;
-                if len > if control { MAX_CONTROL_PAYLOAD } else { MAX_PAYLOAD } {
+                if len > if control { self.max_control() } else { MAX_PAYLOAD } {
                     return Err(FrameError::TooLong(u64::from(len)));
                 }
                 self.left = len;
@@ -104,7 +130,7 @@ impl FromPhone {
         Ok(())
     }
 
-    /// 攒齐了一个控制帧：手机连接不能做的挡下、回一条 `Error`，`local` 办的回它的回话，别的原样转给
+    /// 攒齐了一个控制帧：这台设备不能做的挡下、回一条 `Error`，`local` 办的回它的回话，别的原样转给
     /// 宿主（解不出来的也转，由宿主照常回话）。
     fn decide(&mut self, to_host: &mut Vec<u8>, replies: &mut Vec<u8>, local: &mut dyn LocalRequests) {
         let Some(frame) = self.held.take() else { return };
@@ -113,7 +139,7 @@ impl FromPhone {
             return;
         }
         let reply = serde_json::from_slice::<ClientMsg>(&frame[HEADER_LEN..]).ok().and_then(|message| {
-            if let Some(what) = message.remote_refusal(DeviceKind::Mobile) {
+            if let Some(what) = message.remote_refusal(self.kind) {
                 tracing::info!("refused a remote device's request to {what}");
                 return Some(HostMsg::Error { req: None, id: None, message: format!("a remote device cannot {what}") });
             }
@@ -352,6 +378,18 @@ mod tests {
         let mut to_host = Vec::new();
         phone.feed(&header(FrameKind::Input), &mut to_host, &mut Vec::new(), &mut Nothing).unwrap();
         assert_eq!(to_host.len(), HEADER_LEN);
+        // 桌面设备的控制帧照 `MAX_PAYLOAD` 放。
+        let mut computer = FromPhone::terminal(DeviceKind::Desktop);
+        computer.feed(&header(FrameKind::Control), &mut Vec::new(), &mut Vec::new(), &mut Nothing).unwrap();
+    }
+
+    #[test]
+    fn a_raw_channel_is_not_read_as_frames() {
+        let mut phone = FromPhone::raw();
+        let mut to_host = Vec::new();
+        let bytes = [0xffu8; 64];
+        phone.feed(&bytes, &mut to_host, &mut Vec::new(), &mut Nothing).unwrap();
+        assert_eq!(to_host, bytes);
     }
 
     #[test]

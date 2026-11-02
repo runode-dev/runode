@@ -19,8 +19,8 @@ use runode_paths::Dirs;
 use runode_protocol::{
     ClientMsg, FrameKind, HostMsg, read_frame,
     remote::{
-        Bytes, DeviceId, DeviceKind, EXPORTER_LABEL, GateClientMsg, GateHostMsg, Purpose, decode_base64url,
-        read_gate_frame, signed_bytes,
+        Bytes, ChannelRefusal, DeviceId, DeviceKind, EXPORTER_LABEL, GateClientMsg, GateHostMsg, Purpose,
+        decode_base64url, read_gate_frame, signed_bytes,
     },
     write_frame,
 };
@@ -55,7 +55,12 @@ pub struct Harness {
     pub screens: mpsc::Receiver<UnixStream>,
     /// 同上，到识别的。
     pub speeches: mpsc::Receiver<UnixStream>,
+    /// 桌面设备要读写项目时，项目服务那一端送到这里；对面的构建是 `PROJECT_BUILD` 才给开。
+    pub projects: mpsc::Receiver<UnixStream>,
 }
+
+/// 测试里项目服务的构建，见 `Harness::projects`。
+pub const PROJECT_BUILD: &str = "测试的构建";
 
 impl Harness {
     pub fn start(name: &str) -> Self {
@@ -67,9 +72,17 @@ impl Harness {
         let (tx, hosts) = mpsc::channel();
         let (screen_tx, screens) = mpsc::channel();
         let (speech_tx, speeches) = mpsc::channel();
+        let (project_tx, projects) = mpsc::channel();
+        let project = pair_to(project_tx);
         let options = Options {
             connect_screen: pair_to(screen_tx),
             connect_speech: pair_to(speech_tx),
+            connect_project: Some(Arc::new(move |build: &str| {
+                if build != PROJECT_BUILD {
+                    return Err(ChannelRefusal::BuildMismatch { build: PROJECT_BUILD.into() });
+                }
+                project().map_err(|err| ChannelRefusal::Unavailable { message: err.to_string() })
+            })),
             ..options(&dirs, pair_to(tx))
         };
         let listener = Listener::start(options).unwrap();
@@ -77,7 +90,7 @@ impl Harness {
         let status = listener_status(&dirs).unwrap().expect("the listener writes its status");
         assert_eq!((status.port, status.host_name.as_str()), (addr.port(), "测试的 Mac"));
         let fingerprint = status.fingerprint.0.try_into().unwrap();
-        Self { root, dirs, listener: Some(listener), addr, fingerprint, hosts, screens, speeches }
+        Self { root, dirs, listener: Some(listener), addr, fingerprint, hosts, screens, speeches, projects }
     }
 
     /// 停掉监听再开一个，返回新的证书指纹。宿主连接换成一个连不上的。
@@ -120,6 +133,14 @@ impl Harness {
         host
     }
 
+    /// 设备 `device_id` 用 `key` 登录，还没发第一帧。
+    pub fn login(&self, device_id: DeviceId, key: &Key) -> Phone {
+        let mut phone = self.phone();
+        let auth = phone.auth_message(device_id, key);
+        assert_eq!(phone.ask(&auth), Some(GateHostMsg::RemoteAccepted { device_id }));
+        phone
+    }
+
     /// 设备 `device_id` 用 `key` 登录、发了 Hello，接到了宿主上：返回手机和宿主那一端（Hello 已经读掉）。
     pub fn bridged(&self, device_id: DeviceId, key: &Key) -> (Phone, UnixStream) {
         let mut phone = self.phone();
@@ -153,6 +174,7 @@ pub fn options(dirs: &Dirs, connect: runode_remote::Connect) -> Options {
         connect,
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen"))),
         connect_speech: Arc::new(|| Err(std::io::Error::other("no speech"))),
+        connect_project: None,
     }
 }
 
@@ -259,6 +281,16 @@ impl Phone {
         let frame = match read_gate_frame(&mut self.tls) {
             Ok(frame) => frame?,
             Err(err) => panic!("reading a gate message failed: {err}"),
+        };
+        assert_eq!((frame.kind, frame.channel), (FrameKind::Control, 0));
+        Some(frame.message().unwrap())
+    }
+
+    /// 读一条通道 0 的控制消息，`T` 是期待的类型（比如 `ChannelReply`）；连接干净地关了时为 `None`。
+    pub fn read_control<T: serde::de::DeserializeOwned>(&mut self) -> Option<T> {
+        let frame = match read_gate_frame(&mut self.tls) {
+            Ok(frame) => frame?,
+            Err(err) => panic!("reading a control message failed: {err}"),
         };
         assert_eq!((frame.kind, frame.channel), (FrameKind::Control, 0));
         Some(frame.message().unwrap())

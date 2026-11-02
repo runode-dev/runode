@@ -83,6 +83,7 @@ pub fn service(host: &Host) -> Option<Service> {
         connect,
         connect_screen: Arc::new(crate::screen_process::client::connect),
         connect_speech: Arc::new(crate::dictation::remote::connect),
+        connect_project: None,
     };
     Service::start(options).map_err(|err| tracing::warn!("cannot start remote access: {err}")).ok()
 }

@@ -1,11 +1,11 @@
-//! 门禁通过后，在手机的 TLS 连接和到宿主的 Unix 连接之间两个方向搬字节，直到两边都说完。
+//! 门禁通过后，在手机的 TLS 连接和到宿主的连接（`Upstream`）之间两个方向搬字节，直到两边都说完。
 //!
 //! rustls 的连接不能两个线程同时用（读的那边一直等着就把写的那边卡住了），所以一条连接一个线程：
 //! 两个 socket 都设成非阻塞，`poll` 等着哪边能读能写，手机发来的明文写给宿主，宿主发来的交给
 //! rustls 加密后写给手机。两个方向各自积压到上限就先不读那一头，慢的一方会把快的一方压住，不会
 //! 无限攒在内存里。
 //!
-//! 连的是终端的宿主时，手机发来的控制帧要过一道筛：管宿主本身的请求（让宿主退出、升级交接这些，见 `frames::refusal`）
+//! 连的是终端的宿主时，手机发来的控制帧要过一道筛：这台设备不能发的请求（按设备种类，见 `ClientMsg::remote_refusal`）
 //! 不转给宿主，改在发往手机的方向、两帧之间插一条 `HostMsg::Error`，连接照旧。登记推送的请求也不转给
 //! 宿主，由 `push` 按这台设备办了，同样在两帧之间插回话。
 //!
@@ -24,10 +24,65 @@ use std::{
     time::Duration,
 };
 
+use runode_protocol::remote::DeviceKind;
 use rustls::ServerConnection;
 
 use self::frames::{FromPhone, LocalRequests, ToPhone};
 use crate::{UnixStream, poll};
+
+/// 桥接的另一头：宿主、采集进程、识别和项目服务是本机的 socket，端口转发是回环地址上的 TCP。
+pub(crate) enum Upstream {
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl Upstream {
+    fn set_nonblocking(&self, on: bool) -> io::Result<()> {
+        match self {
+            Self::Unix(stream) => stream.set_nonblocking(on),
+            Self::Tcp(stream) => stream.set_nonblocking(on),
+        }
+    }
+
+    pub(crate) fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        match self {
+            Self::Unix(stream) => stream.shutdown(how),
+            Self::Tcp(stream) => stream.shutdown(how),
+        }
+    }
+
+    fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Unix(stream) => (&*stream).read(buf),
+            Self::Tcp(stream) => (&*stream).read(buf),
+        }
+    }
+
+    fn write(&self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Unix(stream) => (&*stream).write(buf),
+            Self::Tcp(stream) => (&*stream).write(buf),
+        }
+    }
+
+    fn entry(&self, events: i16) -> poll::Entry {
+        match self {
+            Self::Unix(stream) => poll::entry(stream, events),
+            Self::Tcp(stream) => poll::entry(stream, events),
+        }
+    }
+}
+
+/// 手机发来的字节怎么转给对面。
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Relay {
+    /// 连的是终端的宿主，来的是这种设备：控制帧过筛，这边自己办的交给 `LocalRequests`。
+    Terminal(DeviceKind),
+    /// 远程桌面、语音识别：照帧头数边界，控制帧不解析、原样转。
+    Frames,
+    /// 专用连接（`ChannelHello`）：不分帧，原样转。
+    Raw,
+}
 
 /// 手机发来、还没写给宿主的明文最多攒这么多。
 const TO_HOST_LIMIT: usize = 1 << 20;
@@ -42,14 +97,14 @@ const CHUNK: usize = 64 << 10;
 const POLL_TICK: Duration = Duration::from_secs(1);
 
 /// 搬到两边都说完，或者 `cut` 被置上（撤销了设备、关了远程访问；置上的一方同时会 `shutdown` 手机的
-/// 连接，这边马上醒）。`terminal` 为假时连的是远程桌面或语音识别，手机的控制帧不过筛、原样转；为真时手机
-/// 发来的请求里由这边办的交给 `local`。返回时两个连接都还开着，由调用方关。
+/// 连接，这边马上醒）。手机发来的照 `relay` 转，`Relay::Terminal` 时由这边办的请求交给 `local`。返回时
+/// 两个连接都还开着，由调用方关。
 pub(crate) fn bridge(
     conn: &mut ServerConnection,
     phone: &TcpStream,
-    host: &UnixStream,
+    host: &Upstream,
     cut: &AtomicBool,
-    terminal: bool,
+    relay: Relay,
     local: &mut dyn LocalRequests,
 ) {
     if let Err(err) = phone.set_nonblocking(true).and_then(|()| host.set_nonblocking(true)) {
@@ -59,7 +114,11 @@ pub(crate) fn bridge(
     conn.set_buffer_limit(Some(TO_PHONE_LIMIT));
     let mut bridge = Bridge {
         buf: vec![0u8; CHUNK],
-        from_phone: if terminal { FromPhone::default() } else { FromPhone::passthrough() },
+        from_phone: match relay {
+            Relay::Terminal(kind) => FromPhone::terminal(kind),
+            Relay::Frames => FromPhone::passthrough(),
+            Relay::Raw => FromPhone::raw(),
+        },
         to_host: Vec::new(),
         host_writable: true,
         phone_done: false,
@@ -106,7 +165,7 @@ impl Bridge {
         &mut self,
         conn: &mut ServerConnection,
         phone: &TcpStream,
-        host: &UnixStream,
+        host: &Upstream,
         cut: &AtomicBool,
         local: &mut dyn LocalRequests,
     ) -> io::Result<()> {
@@ -135,7 +194,7 @@ impl Bridge {
     fn phone_to_host(
         &mut self,
         conn: &mut ServerConnection,
-        host: &UnixStream,
+        host: &Upstream,
         local: &mut dyn LocalRequests,
     ) -> io::Result<()> {
         while self.wants_phone() {
@@ -154,7 +213,7 @@ impl Bridge {
             }
         }
         while self.host_writable && !self.to_host.is_empty() {
-            match (&*host).write(&self.to_host) {
+            match host.write(&self.to_host) {
                 Ok(n) => drop(self.to_host.drain(..n)),
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
@@ -228,7 +287,7 @@ impl Bridge {
     }
 
     /// 等两边能读能写，读到的交给下一轮。手机的 TCP 断了时返回 false。
-    fn wait_and_read(&mut self, conn: &mut ServerConnection, phone: &TcpStream, host: &UnixStream) -> io::Result<bool> {
+    fn wait_and_read(&mut self, conn: &mut ServerConnection, phone: &TcpStream, host: &Upstream) -> io::Result<bool> {
         let read_phone = self.wants_phone();
         let read_host = !self.host_done && self.from_host.is_empty();
         let write_host = self.host_writable && !self.to_host.is_empty();
@@ -239,7 +298,7 @@ impl Bridge {
             ),
             // 宿主那头既不读也不写时不等它：它挂断了的话 `POLLHUP` 会让 `poll` 一直返回、空转。
             if read_host || write_host {
-                poll::entry(host, (if read_host { poll::IN } else { 0 }) | (if write_host { poll::OUT } else { 0 }))
+                host.entry((if read_host { poll::IN } else { 0 }) | (if write_host { poll::OUT } else { 0 }))
             } else {
                 poll::skipped()
             },
@@ -266,7 +325,7 @@ impl Bridge {
             return Ok(false);
         }
         if read_host && host_fd.revents & (poll::IN | gone) != 0 {
-            match (&*host).read(&mut self.buf) {
+            match host.read(&mut self.buf) {
                 Ok(0) => self.host_done = true,
                 Ok(n) => self.from_host.extend_from_slice(&self.buf[..n]),
                 Err(err) if matches!(err.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {}

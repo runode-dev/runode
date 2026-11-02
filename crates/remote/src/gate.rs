@@ -1,29 +1,33 @@
-//! 一条远程连接从头到尾：TLS 握手、门禁（见 `runode_protocol::remote` 的模块文档）、按第一帧是手机的
-//! `Hello`、`ScreenHello` 还是 `SpeechHello` 接到宿主、远程桌面的采集进程或者识别上搬字节（`bridge`）。门禁阶段的读写
-//! 都按同一个截止时刻（`GATE_TIMEOUT`）设超时，对面一个字节一个字节地慢慢发也拖不过它。
+//! 一条远程连接从头到尾：TLS 握手、门禁（见 `runode_protocol::remote` 的模块文档）、按第一帧是终端的
+//! `Hello`、`ScreenHello`、`SpeechHello` 还是桌面设备的 `ChannelHello` 接到宿主、远程桌面的采集进程、识别、
+//! 项目服务或者本机的端口上搬字节（`bridge`）。门禁阶段的读写都按同一个截止时刻（`GATE_TIMEOUT`）设超时，
+//! 对面一个字节一个字节地慢慢发也拖不过它。
 
 use std::{
     io::{self, Read, Write},
-    net::{IpAddr, Shutdown, TcpStream},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpStream},
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
 use ring::signature::{ECDSA_P256_SHA256_ASN1, UnparsedPublicKey};
 use runode_protocol::{
-    ClientKind, ClientMsg, FrameKind,
+    ClientKind, ClientMsg, Frame, FrameKind,
     remote::{
-        Bytes, DeviceId, DeviceKind, EXPORTER_LABEL, EXPORTER_LEN, GATE_TIMEOUT, GATE_VERSION, GateClientMsg,
-        GateHostMsg, NONCE_LEN, PUBLIC_KEY_LEN, Purpose, RejectReason, SECRET_LEN, read_gate_frame, signed_bytes,
+        Bytes, ChannelHello, ChannelRefusal, ChannelReply, DeviceId, DeviceKind, EXPORTER_LABEL, EXPORTER_LEN,
+        GATE_TIMEOUT, GATE_VERSION, GateClientMsg, GateHostMsg, NONCE_LEN, PUBLIC_KEY_LEN, Purpose, RejectReason,
+        SECRET_LEN, read_gate_frame, signed_bytes,
     },
     screen::ScreenClientMsg,
     speech::SpeechClientMsg,
     write_frame,
 };
 use rustls::{ServerConnection, StreamOwned};
+use serde::Serialize;
 
 use crate::{
-    bridge::{bridge, push::PushRequests, unpair::UnpairRequests},
+    Connect,
+    bridge::{Relay, Upstream, bridge, push::PushRequests, unpair::UnpairRequests},
     devices::{self, Device},
     files::random,
     listener::Shared,
@@ -90,36 +94,41 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
         }
     };
     // 先登记再回话：从这里起撤销这台设备会断开这条连接。登记之前刚好撤销的，撤销的检查可能已经
-    // 看过了这条连接，这里再看一眼设备表。
+    // 看过了这条连接，这里再看一眼设备表，种类也从这里读。
     shared.attach_device(id, device_id);
-    match devices::find(&shared.dirs, device_id) {
-        Ok(Some(_)) => {}
+    let kind = match devices::find(&shared.dirs, device_id) {
+        Ok(Some(device)) => device.kind,
         Ok(None) => return reject(&mut tls, tcp, RejectReason::UnknownDevice),
         Err(err) => {
             tracing::warn!("cannot read the paired device table: {err}");
             return reject(&mut tls, tcp, RejectReason::Disabled);
         }
-    }
+    };
     send(&mut tls, &GateHostMsg::RemoteAccepted { device_id })?;
     tracing::info!("remote device {device_id} connected from {peer}");
     tls.sock.until = Instant::now() + GATE_TIMEOUT;
     let hello = read_gate_frame(&mut tls)
         .map_err(io::Error::other)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "closed before hello"))?;
-    let control = hello.kind == FrameKind::Control && hello.channel == 0;
-    // 第一帧定下这条连接接到哪里：终端的宿主、远程桌面的采集进程或者识别。
-    let terminal =
-        control && matches!(hello.message::<ClientMsg>(), Ok(ClientMsg::Hello { client: ClientKind::Mobile, .. }));
-    let host = if terminal {
-        (shared.connect)()?
-    } else if control && matches!(hello.message::<ScreenClientMsg>(), Ok(ScreenClientMsg::ScreenHello { .. })) {
-        (shared.connect_screen)()?
-    } else if control && matches!(hello.message::<SpeechClientMsg>(), Ok(SpeechClientMsg::SpeechHello { .. })) {
-        (shared.connect_speech)()?
-    } else {
-        return Err(io::Error::other("the first frame after the gate is not a mobile, screen or speech hello"));
+    // 第一帧定下这条连接接到哪里：终端的宿主、远程桌面的采集进程、识别，或者桌面设备的专用连接。
+    let (host, relay) = match first(&hello, kind) {
+        Some(First::Terminal) => (forward_hello(&shared.connect, &hello)?, Relay::Terminal(kind)),
+        Some(First::Screen) => (forward_hello(&shared.connect_screen, &hello)?, Relay::Frames),
+        Some(First::Speech) => (forward_hello(&shared.connect_speech, &hello)?, Relay::Frames),
+        Some(First::Channel(channel)) => match open_channel(shared, kind, channel) {
+            Ok(host) => {
+                send(&mut tls, &ChannelReply::ChannelReady)?;
+                (host, Relay::Raw)
+            }
+            Err(reason) => {
+                tracing::info!("refused a channel to remote device {device_id}: {reason:?}");
+                return say_and_close(&mut tls, tcp, &ChannelReply::ChannelRefused { reason });
+            }
+        },
+        None => {
+            return Err(io::Error::other(format!("the first frame after the gate is not a hello a {kind:?} sends")));
+        }
     };
-    write_frame(&mut &host, hello.kind, hello.channel, &hello.payload).map_err(io::Error::other)?;
     let StreamOwned { mut conn, sock } = tls;
     drop(sock);
     tcp.set_read_timeout(None)?;
@@ -128,7 +137,7 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
         PushRequests { dirs: &shared.dirs, device: device_id },
         UnpairRequests { dirs: &shared.dirs, device: device_id },
     );
-    bridge(&mut conn, tcp, &host, cut, terminal, &mut local);
+    bridge(&mut conn, tcp, &host, cut, relay, &mut local);
     let _ = host.shutdown(Shutdown::Both);
     // 关了连接以后（Windows 上 `serve` 收尾时只关读的一边也一样）对面再发来什么，连接马上被重置，已经交给
     // 系统、手机还没读走的输出跟着丢掉：先只关写的一边，等手机读完、自己关了再收尾。
@@ -137,6 +146,76 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     }
     tracing::info!("remote device {device_id} disconnected");
     Ok(())
+}
+
+/// 门禁之后的第一帧要开哪种连接。
+enum First {
+    Terminal,
+    Screen,
+    Speech,
+    Channel(ChannelHello),
+}
+
+/// `kind` 的设备发来的第一帧 `hello` 要开哪种连接；不是它能发的为 `None`。终端的 `Hello` 要和设备种类对得上。
+/// 手机发的 `ChannelHello` 也认出来，由 `open_channel` 回 `ChannelRefusal::NotAllowed`。
+fn first(hello: &Frame, kind: DeviceKind) -> Option<First> {
+    if hello.kind != FrameKind::Control || hello.channel != 0 {
+        return None;
+    }
+    let client = match kind {
+        DeviceKind::Mobile => ClientKind::Mobile,
+        DeviceKind::Desktop => ClientKind::Desktop,
+    };
+    if let Ok(ClientMsg::Hello { client: said, .. }) = hello.message::<ClientMsg>() {
+        return (said == client).then_some(First::Terminal);
+    }
+    if let Ok(ScreenClientMsg::ScreenHello { .. }) = hello.message::<ScreenClientMsg>() {
+        return Some(First::Screen);
+    }
+    if let Ok(SpeechClientMsg::SpeechHello { .. }) = hello.message::<SpeechClientMsg>() {
+        return Some(First::Speech);
+    }
+    hello.message::<ChannelHello>().ok().map(First::Channel)
+}
+
+/// 经 `connect` 要一条新连接，把第一帧 `hello` 原样转过去。
+fn forward_hello(connect: &Connect, hello: &Frame) -> io::Result<Upstream> {
+    let host = connect()?;
+    write_frame(&mut &host, hello.kind, hello.channel, &hello.payload).map_err(io::Error::other)?;
+    Ok(Upstream::Unix(host))
+}
+
+/// 连本机回环端口最多等这么久。
+const FORWARD_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// 给 `kind` 的设备开 `channel` 要的专用连接。
+fn open_channel(shared: &Shared, kind: DeviceKind, channel: ChannelHello) -> Result<Upstream, ChannelRefusal> {
+    if kind != DeviceKind::Desktop {
+        return Err(ChannelRefusal::NotAllowed);
+    }
+    match channel {
+        ChannelHello::ProjectHello { build } => match &shared.connect_project {
+            Some(connect) => connect(&build).map(Upstream::Unix),
+            None => Err(ChannelRefusal::Unavailable { message: "this runode cannot serve projects".into() }),
+        },
+        ChannelHello::ForwardHello { port } => forward(port).map(Upstream::Tcp),
+    }
+}
+
+/// 连本机回环地址上的 `port`：先 IPv4，连不上再 IPv6，都不行时说最后一个原因。
+fn forward(port: u16) -> Result<TcpStream, ChannelRefusal> {
+    let mut last = None;
+    for ip in [IpAddr::V4(Ipv4Addr::LOCALHOST), IpAddr::V6(Ipv6Addr::LOCALHOST)] {
+        match TcpStream::connect_timeout(&SocketAddr::new(ip, port), FORWARD_CONNECT_TIMEOUT) {
+            Ok(stream) => {
+                let _ = stream.set_nodelay(true);
+                return Ok(stream);
+            }
+            Err(err) => last = Some(err),
+        }
+    }
+    let reason = last.map_or_else(String::new, |err| format!(": {err}"));
+    Err(ChannelRefusal::Unavailable { message: format!("nothing is listening on port {port}{reason}") })
 }
 
 /// 握手、发 `RemoteChallenge`、读手机的门禁消息，返回 nonce、TLS exporter 和那条消息。
@@ -253,16 +332,25 @@ fn device_name(name: &str) -> String {
     if name.is_empty() { "unnamed device".into() } else { name.into() }
 }
 
-/// 回 `RemoteRejected`，关掉 TLS，等手机读完回话再断（见 `linger`），不然回话可能丢。
+/// 回 `RemoteRejected` 后断开，见 `say_and_close`。
 fn reject(tls: &mut StreamOwned<ServerConnection, Deadline>, tcp: &TcpStream, reason: RejectReason) -> io::Result<()> {
-    send(tls, &GateHostMsg::RemoteRejected { reason })?;
+    say_and_close(tls, tcp, &GateHostMsg::RemoteRejected { reason })
+}
+
+/// 发 `message`，关掉 TLS，等手机读完回话再断（见 `linger`），不然回话可能丢。
+fn say_and_close(
+    tls: &mut StreamOwned<ServerConnection, Deadline>,
+    tcp: &TcpStream,
+    message: &impl Serialize,
+) -> io::Result<()> {
+    send(tls, message)?;
     tls.conn.send_close_notify();
     tls.flush()?;
     linger(tcp);
     Ok(())
 }
 
-fn send(tls: &mut StreamOwned<ServerConnection, Deadline>, message: &GateHostMsg) -> io::Result<()> {
+fn send(tls: &mut StreamOwned<ServerConnection, Deadline>, message: &impl Serialize) -> io::Result<()> {
     let payload = serde_json::to_vec(message).map_err(io::Error::other)?;
     write_frame(tls, FrameKind::Control, 0, &payload).map_err(io::Error::other)?;
     tls.flush()

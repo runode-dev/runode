@@ -146,6 +146,7 @@ fn pairing_turns_remote_access_on_in_the_config_and_waits_for_the_listener() {
         connect: Arc::new(|| Err(std::io::Error::other("no host in this test"))),
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen in this test"))),
         connect_speech: Arc::new(|| Err(std::io::Error::other("no speech"))),
+        connect_project: None,
     })
     .unwrap();
     let file = root.dirs().remote_access_pairing_file().unwrap();
@@ -176,6 +177,7 @@ fn pairing_shows_a_code_and_a_link_and_waits() {
         connect: Arc::new(|| Err(std::io::Error::other("no host in this test"))),
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen in this test"))),
         connect_speech: Arc::new(|| Err(std::io::Error::other("no speech"))),
+        connect_project: None,
     })
     .unwrap();
     let env = root.env();
@@ -226,6 +228,7 @@ fn ctrl_c_withdraws_the_pairing_code() {
         connect: Arc::new(|| Err(std::io::Error::other("no host in this test"))),
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen in this test"))),
         connect_speech: Arc::new(|| Err(std::io::Error::other("no speech"))),
+        connect_project: None,
     })
     .unwrap();
     let mut child = std::process::Command::new(std::env::current_exe().unwrap())

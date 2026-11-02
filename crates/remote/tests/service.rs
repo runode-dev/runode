@@ -40,6 +40,7 @@ fn a_new_name_restarts_the_listener_under_that_name() {
         connect: Arc::new(|| Err(std::io::Error::other("no host"))),
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen"))),
         connect_speech: Arc::new(|| Err(std::io::Error::other("no speech"))),
+        connect_project: None,
     })
     .unwrap();
     service.set(Some(port), Some("书房的 Mac".into()));
