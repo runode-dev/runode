@@ -3,14 +3,8 @@
 //! 监听的 socket，再往状态管道写一行 `HandoffStatus`；这边读到结果再决定怎么办（见
 //! `host_client::establish`）。新宿主那一侧的入口是 `host_process::take_over`。
 //!
-//! 等结果分两段，各有上限，保证这边当作失败放弃以后新宿主不会再接手成功（否则会话到了新宿主
-//! 手里，这边却弹框说没交成）：
-//! - 拉起后到新宿主说「要回 `HandoffReady` 了」（状态管道上 `ready` 为真的一行）最多
-//!   `READY_TIMEOUT`。新宿主从它启动起过了 `READY_BY` 就不再回 `HandoffReady`
-//!   （`TakeOverOptions::ready_by`），`READY_TIMEOUT` = `READY_BY` + `STARTUP_SLACK`，只要它从被
-//!   拉起到开始计时不超过 `STARTUP_SLACK`，这边放弃时它已经回不了了。`READY_BY` 又比旧宿主接受
-//!   `HandoffReady` 的窗口（`GIVE_READY_WINDOW`）宽，旧宿主还肯交时新宿主不会先放弃。
-//! - 之后再等结果最多 `RESULT_TIMEOUT`，比新宿主那之后最多还要花的 `TAKE_OVER_AFTER_READY` 宽。
+//! 等结果分两段，拉起后等新宿主说「要回 `HandoffReady` 了」（状态管道上 `ready` 为真的一行）最多
+//! `READY_TIMEOUT`，之后再等结果最多 `RESULT_TIMEOUT`。
 
 use std::{
     fs::File,
@@ -21,21 +15,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_host::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY};
+use runode_host::{READY_TIMEOUT, RESULT_TIMEOUT};
 use runode_protocol::{HandoffRefusal, SessionId};
 use serde::{Deserialize, Serialize};
 
-/// 新宿主从它启动起过了这么久就不再回 `HandoffReady`，见模块文档。
-pub const READY_BY: Duration = Duration::from_secs(35);
-/// 留给新宿主启动（从被拉起到开始按 `READY_BY` 计时）的余量。
-const STARTUP_SLACK: Duration = Duration::from_secs(5);
-/// 拉起后等新宿主说「要回 `HandoffReady` 了」最多这么久，见模块文档。
-pub const READY_TIMEOUT: Duration = READY_BY.checked_add(STARTUP_SLACK).unwrap();
-/// 新宿主说「要回 `HandoffReady` 了」之后再等结果最多这么久，见模块文档。
-pub const RESULT_TIMEOUT: Duration = Duration::from_secs(45);
-
-const _: () = assert!(READY_BY.as_millis() > GIVE_READY_WINDOW.as_millis());
-const _: () = assert!(RESULT_TIMEOUT.as_millis() > TAKE_OVER_AFTER_READY.as_millis());
 /// 旧宿主说还有桌面连着（`HandoffRefusal::DesktopConnected`）时，最多重试这么久：app 刚退出时，
 /// 它的连接可能还没断干净。
 pub const DESKTOP_RETRY: Duration = Duration::from_secs(2);

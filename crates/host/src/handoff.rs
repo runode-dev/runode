@@ -42,6 +42,23 @@ pub const GIVE_READY_WINDOW: Duration =
 pub const TAKE_OVER_AFTER_READY: Duration =
     take::COMMIT_TIMEOUT.checked_add(take::EXIT_GRACE).unwrap().checked_add(take::RELEASE_TIMEOUT).unwrap();
 
+/// 拉起新宿主的一方等结果分两段，各有上限，保证它当作失败放弃以后新宿主不会再接手成功（否则会话到了
+/// 新宿主手里，拉起的一方却说没交成）。
+///
+/// 新宿主从它启动起过了这么久就不再回 `HandoffReady`（`TakeOverOptions::ready_by`）。比旧宿主接受
+/// `HandoffReady` 的窗口（`GIVE_READY_WINDOW`）宽，旧宿主还肯交时新宿主不会先放弃。
+pub const READY_BY: Duration = Duration::from_secs(35);
+/// 留给新宿主启动（从被拉起到开始按 `READY_BY` 计时）的余量。
+const STARTUP_SLACK: Duration = Duration::from_secs(5);
+/// 拉起后等新宿主说「要回 `HandoffReady` 了」最多这么久：只要它从被拉起到开始计时不超过
+/// `STARTUP_SLACK`，等的一方放弃时它已经回不了了。
+pub const READY_TIMEOUT: Duration = READY_BY.checked_add(STARTUP_SLACK).unwrap();
+/// 新宿主说「要回 `HandoffReady` 了」之后再等结果最多这么久，比它那之后最多还要花的 `TAKE_OVER_AFTER_READY` 宽。
+pub const RESULT_TIMEOUT: Duration = Duration::from_secs(45);
+
+const _: () = assert!(READY_BY.as_millis() > GIVE_READY_WINDOW.as_millis());
+const _: () = assert!(RESULT_TIMEOUT.as_millis() > TAKE_OVER_AFTER_READY.as_millis());
+
 /// `Host::take_over` 的选项。
 #[derive(Clone, Default)]
 pub struct TakeOverOptions {

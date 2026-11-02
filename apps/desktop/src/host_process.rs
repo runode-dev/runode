@@ -28,10 +28,10 @@ use std::{fs::OpenOptions, sync::Mutex, time::Duration};
 
 use runode_host::{BuildId, Host};
 #[cfg(unix)]
-use runode_host::{STATUS_FD, Stopped, TakeOverError, TakeOverOptions};
+use runode_host::{READY_BY, STATUS_FD, Stopped, TakeOverError, TakeOverOptions};
 
 #[cfg(unix)]
-use crate::host_client::{HandoffFailure, HandoffStatus, READY_BY};
+use crate::host_client::{HandoffFailure, HandoffStatus};
 
 /// 没有会话也没有连接，持续这么久就退出。
 const IDLE_EXIT: Duration = Duration::from_secs(30);
@@ -99,7 +99,7 @@ fn wait_for_children() {
 /// `runode --host --take-over`：接手 socket 上旧宿主的会话（见 `Host::take_over`），把结果写成一行
 /// `HandoffStatus` 交给拉起它的 app（状态管道，`STATUS_FD`），成了就照 `run` 跑下去；没成时会话
 /// 还在旧宿主手里，退出。要回 `HandoffReady` 之前先写一行 `HandoffStatus::ready`，从启动起过了
-/// `READY_BY` 就不再回，见 `host_client::handoff` 的模块文档。返回进程的退出码。
+/// `READY_BY` 就不再回。返回进程的退出码。
 #[cfg(unix)]
 pub fn take_over() -> i32 {
     // 先于认领状态管道：认领后它带着 close-on-exec，重新执行就丢了。
