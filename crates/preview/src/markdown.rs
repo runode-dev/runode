@@ -33,6 +33,9 @@ use regex::Regex;
 use crate::highlight::{Span, highlight_code};
 
 mod html;
+mod link;
+
+pub use link::{LinkTarget, link_target};
 
 /// 一段同样样式、同一个链接的文字。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -24,7 +24,7 @@ use std::{
     collections::{HashMap, HashSet},
     io::Cursor,
     ops::Range,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -37,7 +37,9 @@ use gpui::{
     MouseUpEvent, Pixels, Point, RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, SharedString, StrikethroughStyle,
     StyledText, SvgRenderer, UnderlineStyle, WeakEntity, Window, canvas, div, img, list, prelude::*, px, relative, svg,
 };
-use runode_preview::{Alert, Align, Block, Content, Image as MdImage, Inline, InlineStyle, Span};
+use runode_preview::{
+    Alert, Align, Block, Content, Image as MdImage, Inline, InlineStyle, LinkTarget, Span, link_target,
+};
 use select::{MdPos, TextKey};
 use text::{MdText, TextBox, Texts};
 
@@ -708,81 +710,6 @@ fn alpha(number: u64) -> String {
         rest /= 26;
     }
     out.iter().rev().collect()
-}
-
-/// 点链接去哪儿。
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum LinkTarget {
-    /// 交给系统浏览器（http、https、mailto）。
-    Web(String),
-    /// 相对 Markdown 文件所在目录的路径，在预览栏里打开。
-    File(PathBuf),
-    /// 同一篇文档里的锚点（`#` 后面的部分，已经百分号解码）。
-    Anchor(String),
-}
-
-/// 链接或图片地址 `url` 指向哪儿；`dir` 是 Markdown 文件所在的目录。别的协议为空；本地路径去掉
-/// `#锚点` 和 `?参数` 后做百分号解码，`..`、`.` 按字面消掉（不跟符号链接）。
-pub(super) fn link_target(dir: &Path, url: &str) -> Option<LinkTarget> {
-    let url = url.trim();
-    if let Some((scheme, _)) = url.split_once(':')
-        && is_scheme(scheme)
-    {
-        let web = ["http", "https", "mailto"].iter().any(|known| scheme.eq_ignore_ascii_case(known));
-        return web.then(|| LinkTarget::Web(url.to_owned()));
-    }
-    if let Some(anchor) = url.strip_prefix('#') {
-        return (!anchor.is_empty()).then(|| LinkTarget::Anchor(percent_decode(anchor)));
-    }
-    let path = url.split(['#', '?']).next().unwrap_or_default();
-    (!path.is_empty()).then(|| LinkTarget::File(normalize(&dir.join(percent_decode(path)))))
-}
-
-/// 按字面消掉路径里的 `.` 和 `..`：`..` 去掉前一段，到了根就停在根上。不读磁盘。
-fn normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
-                    out.pop();
-                } else if !out.has_root() {
-                    out.push(component);
-                }
-            }
-            _ => out.push(component),
-        }
-    }
-    out
-}
-
-/// 百分号解码（`my%20file.md` 是 `my file.md`）；解出来不是 UTF-8 时原样不动。
-fn percent_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut ix = 0;
-    while ix < bytes.len() {
-        let hex = |at: usize| bytes.get(at).and_then(|&byte| char::from(byte).to_digit(16));
-        match (bytes[ix], hex(ix + 1), hex(ix + 2)) {
-            (b'%', Some(high), Some(low)) => {
-                out.push((high * 16 + low) as u8);
-                ix += 3;
-            }
-            (byte, ..) => {
-                out.push(byte);
-                ix += 1;
-            }
-        }
-    }
-    String::from_utf8(out).unwrap_or_else(|_| text.to_owned())
-}
-
-/// 像 URL 的协议名：字母开头，两个字符以上（排除 `C:` 这类盘符）。
-fn is_scheme(text: &str) -> bool {
-    text.len() > 1
-        && text.starts_with(|ch: char| ch.is_ascii_alphabetic())
-        && text.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.'))
 }
 
 /// 网络图片：`http`、`https` 开头的地址。
