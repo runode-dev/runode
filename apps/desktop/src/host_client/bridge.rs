@@ -53,7 +53,7 @@ pub fn run() -> i32 {
                 return 1;
             }
             drop(stdout);
-            pump(stream);
+            pump_stdio(stream, "bridge-in", 64 * 1024);
             0
         }
         Err(failure) => {
@@ -476,50 +476,37 @@ fn prune_uploads(dirs: &runode_paths::Dirs) {
     });
 }
 
-/// 两头互搬，任一头读到结尾就关掉另一头。
-fn pump(stream: UnixStream) {
+/// 这个进程的 stdin、stdout 和 `stream` 两头互搬，一次搬至多 `chunk` 字节。往 stdout 写的每块都马上 flush：
+/// 协议一来一回、画面要尽快到，攒着不发对面就一直等。`stream` 读到结尾就关掉它返回；stdin 那头可能一直
+/// 阻塞着（ssh 还开着），不等它。`name` 是搬 stdin 的线程名。
+pub(crate) fn pump_stdio(stream: UnixStream, name: &str, chunk: usize) {
     let Ok(reader) = stream.try_clone() else {
         return;
     };
-    let writer = stream;
-    let upstream = thread::Builder::new().name("bridge-in".into()).spawn({
-        let writer = writer.try_clone();
+    let upstream = thread::Builder::new().name(name.into()).spawn({
+        let writer = stream.try_clone();
         move || {
             if let Ok(writer) = writer {
-                copy(io::stdin().lock(), &writer);
+                copy(io::stdin().lock(), &writer, chunk, false);
                 let _ = writer.shutdown(Shutdown::Write);
             }
         }
     });
-    let mut out = BufWriter::with_capacity(64 * 1024, io::stdout().lock());
-    copy_flushing(&reader, &mut out);
-    let _ = writer.shutdown(Shutdown::Both);
-    // stdin 那头可能一直阻塞着（ssh 还开着）：宿主断开就整个退出，不等它。
+    let mut out = BufWriter::with_capacity(chunk, io::stdout().lock());
+    copy(&reader, &mut out, chunk, true);
+    let _ = stream.shutdown(Shutdown::Both);
     drop(upstream);
 }
 
-fn copy(mut from: impl Read, mut to: impl Write) {
-    let mut buffer = vec![0; 64 * 1024];
+/// 一次至多搬 `chunk` 字节，`flush` 时每块写完就 flush；读到结尾或者读写出错就停。
+fn copy(mut from: impl Read, mut to: impl Write, chunk: usize, flush: bool) {
+    let mut buffer = vec![0; chunk];
     loop {
         match from.read(&mut buffer) {
             Ok(0) | Err(_) => return,
             Ok(n) => {
-                if to.write_all(&buffer[..n]).is_err() {
-                    return;
-                }
-            }
-        }
-    }
-}
-
-/// 每读到一块就写出去并 flush：协议是一来一回的，攒着不发对面就一直等。
-fn copy_flushing(mut from: impl Read, to: &mut impl Write) {
-    let mut buffer = vec![0; 64 * 1024];
-    loop {
-        match from.read(&mut buffer) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => {
-                if to.write_all(&buffer[..n]).and_then(|()| to.flush()).is_err() {
+                let written = to.write_all(&buffer[..n]).and_then(|()| if flush { to.flush() } else { Ok(()) });
+                if written.is_err() {
                     return;
                 }
             }

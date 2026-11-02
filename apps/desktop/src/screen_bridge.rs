@@ -3,8 +3,7 @@
 //! stdin、stdout 原样接到采集进程的 socket 上，两头说的都是 `runode_protocol::screen`。
 
 use std::{
-    io::{self, BufWriter, Read, Write},
-    net::Shutdown,
+    io::{self, Write},
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
@@ -137,34 +136,6 @@ pub fn run() -> i32 {
             return 1;
         }
     };
-    let Ok(reader) = stream.try_clone() else { return 1 };
-    let upstream = thread::Builder::new().name("screen-bridge-in".into()).spawn({
-        let writer = stream.try_clone();
-        move || {
-            if let Ok(mut writer) = writer {
-                let _ = io::copy(&mut io::stdin().lock(), &mut writer);
-                let _ = writer.shutdown(Shutdown::Write);
-            }
-        }
-    });
-    copy_flushing(reader, &mut BufWriter::with_capacity(256 * 1024, io::stdout().lock()));
-    let _ = stream.shutdown(Shutdown::Both);
-    // stdin 那头可能一直阻塞着（ssh 还开着）：采集进程断开就整个退出，不等它。
-    drop(upstream);
+    crate::host_client::bridge::pump_stdio(stream, "screen-bridge-in", 256 * 1024);
     0
-}
-
-/// 每读到一块就写出去并 flush：画面要尽快到，攒着不发就是延迟。
-fn copy_flushing(mut from: impl Read, to: &mut impl Write) {
-    let mut buffer = vec![0; 256 * 1024];
-    loop {
-        match from.read(&mut buffer) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => {
-                if to.write_all(&buffer[..n]).and_then(|()| to.flush()).is_err() {
-                    return;
-                }
-            }
-        }
-    }
 }
