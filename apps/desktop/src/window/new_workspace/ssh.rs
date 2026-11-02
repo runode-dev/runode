@@ -396,8 +396,8 @@ impl WindowView {
         if let Some(command) = command {
             view.update(cx, |view, cx| view.run_command(command, cx));
         }
-        let label =
-            path.file_name().map(|dir| dir.to_string_lossy().into_owned()).or_else(|| host.label().map(str::to_owned));
+        // 根目录没有目录名，用主机名。
+        let label = path.file_name().is_none().then(|| host.label().map(str::to_owned)).flatten();
         self.insert_workspace(self.active + 1, path, label, view, window, cx);
     }
 

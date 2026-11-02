@@ -35,7 +35,6 @@ use crate::{
         CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON, SIDEBAR_ICON,
     },
     ui::{
-        display_dir,
         font_size::{self, FontSize, scaled},
         hsla,
         theme::{ADDED, AGENT_BLOCKED_COLOR, MODIFIED, REMOVED},
@@ -530,7 +529,7 @@ impl WindowView {
             format!("{} {}", ssh_hosts::display_name(name, cx), status_text(&status))
         });
         // 目录不画出来，悬停时看提示；和名字一样（比如家目录的 `~`）时不提示。
-        let dir = Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
+        let dir = Some(workspace.host.display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
         // 名字之外报给辅助工具的：主机、分支、目录，以及只画成图形的 agent 状态和响铃。
         let a11y_description = [
             host,

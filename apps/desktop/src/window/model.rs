@@ -113,14 +113,14 @@ pub(super) fn group_slot(hosts: &[&HostId], host: &HostId, ix: usize) -> usize {
 
 /// 新 workspace 的名字：家目录叫 `~`；在 git 仓库里取仓库根的目录名，其余取目录名。
 /// 往上找仓库根时不看家目录本身，免得家目录是个管配置文件的仓库时个个都叫用户名。别的主机上的目录在本机
-/// 查不到，只取目录名。
+/// 查不到，只取目录名；那边的家目录要连着时才认得出。
 pub(super) fn workspace_name(host: &HostId, dir: &Path) -> String {
-    if !host.is_local() {
-        return dir.file_name().map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned());
-    }
-    let home = home_dir();
+    let home = if host.is_local() { home_dir() } else { host.home() };
     if home.as_deref() == Some(dir) {
         return "~".into();
+    }
+    if !host.is_local() {
+        return dir.file_name().map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned());
     }
     let root =
         dir.ancestors().take_while(|d| Some(*d) != home.as_deref()).find(|d| d.join(".git").exists()).unwrap_or(dir);

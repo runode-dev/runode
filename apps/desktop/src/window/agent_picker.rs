@@ -18,7 +18,6 @@ use super::{
     titlebar::styled_agent_mark,
 };
 use crate::ui::{
-    display_dir,
     font_size::{FontSize, scaled},
     input::{InputEvent, InputState},
 };
@@ -115,9 +114,7 @@ impl WindowView {
                 let dir = picker
                     .dirs
                     .entry(entry.pane)
-                    .or_insert_with(|| {
-                        entry.view.read(cx).cwd().map(|dir| display_dir(&dir)).unwrap_or_default().into()
-                    })
+                    .or_insert_with(|| entry.view.read(cx).display_cwd().unwrap_or_default().into())
                     .clone();
                 let mut fields = entry.haystack().to_vec();
                 fields.push(dir.clone());

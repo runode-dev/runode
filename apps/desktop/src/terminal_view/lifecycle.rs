@@ -1206,6 +1206,11 @@ impl TerminalView {
         prompt_cwd.or(meta.cwd.as_ref()).cloned().or_else(|| self.start_dir.clone())
     }
 
+    /// `cwd` 给人看的写法，家目录按终端所在的机器写成 `~`。
+    pub fn display_cwd(&self) -> Option<String> {
+        self.cwd().map(|dir| self.host.display_dir(&dir))
+    }
+
     /// 程序设置的标题；没设置时为前台进程的目录名或进程名，都没有时为 `DEFAULT_TITLE`。
     pub fn title(&self) -> &str {
         let meta = self.screen.meta();

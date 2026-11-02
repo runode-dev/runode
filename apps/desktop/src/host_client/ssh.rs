@@ -21,7 +21,7 @@ use std::{
     fs::File,
     io::{self, BufRead as _, BufReader, PipeWriter, Read, Write},
     net::Shutdown,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
         Arc, Condvar, LazyLock, Mutex, Once, PoisonError,
@@ -74,6 +74,17 @@ impl HostId {
                 Status::Connected(connected) => connected.home,
                 _ => None,
             },
+        }
+    }
+
+    /// 给人看的这台机器上的路径，家目录写成 `~`；远端的路径用 `/` 分隔（`Connected::home`）。
+    pub fn display_dir(&self, dir: &Path) -> String {
+        match self {
+            Self::Local => crate::ui::display_dir(dir),
+            Self::Ssh(_) => self
+                .home()
+                .and_then(|home| runode_paths::home_relative(dir, &home, '/'))
+                .unwrap_or_else(|| dir.display().to_string()),
         }
     }
 }
@@ -800,7 +811,7 @@ impl RemoteHost {
     }
 
     /// 开主连接（ControlMaster）：已经开着就复用。`interactive` 时要认证可以问用户，否则不问，要认证就停下等用户。
-    fn open_master(&self, ssh: &Ssh, interactive: bool, log: &std::path::Path) -> Result<(), Failure> {
+    fn open_master(&self, ssh: &Ssh, interactive: bool, log: &Path) -> Result<(), Failure> {
         let mut check = ssh.check(&self.dest);
         check.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         crate::subprocess::isolate(&mut check);

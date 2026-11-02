@@ -38,7 +38,6 @@ use crate::{
     ui::{
         base_name,
         button::{Button, ButtonSize},
-        display_dir,
         file_icons::file_icon,
         font_size::FontSize,
         hsla,
@@ -222,7 +221,7 @@ pub(super) fn pane_label(view: &TerminalView) -> (SharedString, Option<SharedStr
         if meta.foreground_is_shell { program } else { meta.title.clone().or(program) }
     }
     .unwrap_or_else(|| view.title().to_owned());
-    let dir = view.cwd().map(|dir| display_dir(&dir)).filter(|dir| *dir != name);
+    let dir = view.display_cwd().filter(|dir| *dir != name);
     (name.into(), dir.map(Into::into))
 }
 
