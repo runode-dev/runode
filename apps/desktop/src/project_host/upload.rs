@@ -1,11 +1,12 @@
 //! 经读写项目的连接把本机的文件传到远端，好交给那里的 agent：配对的电脑没有 ssh，截图粘贴、把文件拖进那边的终端
 //! 时走这里。放在那边 home 目录下的 `UPLOADS_DIR` 里，每次一个新的子目录，同名的分进不同的子目录。目录由那边
-//! 定、由那边建（`UploadOp`），只让自己进：截图和屏幕上的文字不能让那台机器上别的用户读到。
+//! 定、由那边建（`UploadOp`），只让自己进：截图和屏幕上的文字不能让那台机器上别的用户读到。文件一块块地读、
+//! 一块块地传，多大的文件都不整个读进内存，等回话也按块算；传不完时删掉这次上传的子目录。
 
 use std::{
     collections::HashSet,
     fs,
-    io::{self, Write as _},
+    io::{self, Read, Seek as _, SeekFrom, Write as _},
     path::{Component, Path, PathBuf},
     time::Duration,
 };
@@ -20,8 +21,10 @@ use super::{
 };
 use crate::host_client::ssh::upload::{Upload, private_dir, upload_id};
 
-/// 上传的每个请求最多等这么久回话。
+/// 上传的每个请求（每块）发完后最多等这么久回话。
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+/// 文件按这么大一块块地传：一块在路上时同一条连接上别的请求要排在它后面，块太大文件树、预览这些会卡。
+const CHUNK: usize = 4 << 20;
 
 /// 远端为上传做的一步。路径都要在放上传的目录里。
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,15 +33,18 @@ pub(super) enum UploadOp {
     Begin,
     /// 在这次上传里新建目录。
     Dir { path: PathBuf },
-    /// 把请求后面跟着的字节写成这次上传里的新文件 `path`。
-    File { path: PathBuf },
+    /// 把请求后面跟着的字节接在这次上传里的文件 `path` 的 `offset` 处：`offset` 为 0 时新建文件，已经有了就
+    /// 失败；不为 0 时文件要正好这么长，漏了、重了一块都报错。
+    Chunk { path: PathBuf, offset: u64 },
+    /// 删掉这次上传的子目录 `dir`：没传完时用，免得半截的文件留在那边。
+    Discard { dir: PathBuf },
 }
 
 impl UploadOp {
     pub(super) fn for_each_path(&mut self, f: &mut dyn FnMut(&mut PathBuf)) {
         match self {
             Self::Begin => {}
-            Self::Dir { path } | Self::File { path } => f(path),
+            Self::Dir { path } | Self::Chunk { path, .. } | Self::Discard { dir: path } => f(path),
         }
     }
 
@@ -54,24 +60,29 @@ impl UploadOp {
                 Ok(Some(slashed(dir)))
             }
             Self::Dir { path } => {
-                within(root, &path)?;
+                within(root, &path, false)?;
                 private_dir(&path).map(|()| None)
             }
-            Self::File { path } => {
-                within(root, &path)?;
-                new_file(&path)?.write_all(content).map(|()| None)
+            Self::Chunk { path, offset } => {
+                within(root, &path, false)?;
+                append(&path, offset, content).map(|()| None)
+            }
+            Self::Discard { dir } => {
+                within(root, &dir, true)?;
+                fs::remove_dir_all(&dir).map(|()| None)
             }
         }
     }
 }
 
-/// `path` 在 `root` 的某个子目录里（不是子目录本身），中间没有 `..` 这类跳出去的。
-fn within(root: &Path, path: &Path) -> io::Result<()> {
+/// `top` 时 `path` 是 `root` 下的一个子目录，否则在某个子目录里；中间没有 `..` 这类跳出去的。
+fn within(root: &Path, path: &Path, top: bool) -> io::Result<()> {
     let rest = path.strip_prefix(root).ok();
-    let nested = rest.is_some_and(|rest| {
-        rest.components().all(|part| matches!(part, Component::Normal(_))) && rest.components().count() >= 2
+    let inside = rest.is_some_and(|rest| {
+        let depth = rest.components().count();
+        rest.components().all(|part| matches!(part, Component::Normal(_))) && if top { depth == 1 } else { depth >= 2 }
     });
-    if nested {
+    if inside {
         Ok(())
     } else {
         Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{} is not in an upload", path.display())))
@@ -87,6 +98,18 @@ fn new_file(path: &Path) -> io::Result<fs::File> {
     options.open(path)
 }
 
+/// `UploadOp::Chunk`。
+fn append(path: &Path, offset: u64, bytes: &[u8]) -> io::Result<()> {
+    let mut file = if offset == 0 { new_file(path)? } else { fs::OpenOptions::new().write(true).open(path)? };
+    let len = file.metadata()?.len();
+    if len != offset {
+        let message = format!("{} has {len} bytes, not {offset}", path.display());
+        return Err(io::Error::new(io::ErrorKind::InvalidData, message));
+    }
+    file.seek(SeekFrom::End(0))?;
+    file.write_all(bytes)
+}
+
 /// Windows 上的路径分隔符换成 `/`：桌面那头按 `/` 拼路径、打进终端。
 fn slashed(path: PathBuf) -> PathBuf {
     if cfg!(windows) { PathBuf::from(text(&path).replace('\\', "/")) } else { path }
@@ -98,17 +121,33 @@ pub(crate) fn upload(project: &ProjectHost, upload: Upload) -> Result<Vec<String
     let ProjectHost::Remote(client) = project else {
         bail!("this computer is not remote");
     };
+    let mut dirs = Vec::new();
+    let sent = send_all(client, upload, &mut dirs);
+    if sent.is_err() {
+        for dir in dirs {
+            let _ = call(client, UploadOp::Discard { dir }, &[]);
+        }
+    }
+    sent
+}
+
+/// `upload` 的各步，新建的子目录记进 `dirs`。
+fn send_all(client: &Client, upload: Upload, dirs: &mut Vec<PathBuf>) -> Result<Vec<String>> {
+    let mut begin = || -> Result<PathBuf> {
+        let dir = begin(client)?;
+        dirs.push(dir.clone());
+        Ok(dir)
+    };
     match upload {
         Upload::Bytes { name, bytes } => {
-            let dir = begin(client)?;
-            let path = child(&dir, &name);
-            write(client, &path, &bytes)?;
+            let path = child(&begin()?, &name);
+            write(client, &path, &mut bytes.as_slice(), &name)?;
             Ok(vec![text(&path)])
         }
         Upload::Files(paths) => {
             let mut uploaded = vec![String::new(); paths.len()];
             for batch in batches(&paths) {
-                let dir = begin(client)?;
+                let dir = begin()?;
                 for ix in batch {
                     let local = &paths[ix];
                     let remote = child(&dir, &file_name(local));
@@ -153,8 +192,8 @@ fn begin(client: &Client) -> Result<PathBuf> {
 fn send(client: &Client, local: &Path, remote: &Path) -> Result<()> {
     let meta = fs::metadata(local).with_context(|| format!("cannot read {}", local.display()))?;
     if !meta.is_dir() {
-        let bytes = fs::read(local).with_context(|| format!("cannot read {}", local.display()))?;
-        return write(client, remote, &bytes);
+        let mut file = fs::File::open(local).with_context(|| format!("cannot read {}", local.display()))?;
+        return write(client, remote, &mut file, &local.display());
     }
     call(client, UploadOp::Dir { path: remote.to_path_buf() }, &[])
         .with_context(|| format!("cannot create {}", remote.display()))?;
@@ -169,10 +208,20 @@ fn send(client: &Client, local: &Path, remote: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write(client: &Client, path: &Path, bytes: &[u8]) -> Result<()> {
-    call(client, UploadOp::File { path: path.to_path_buf() }, bytes)
-        .with_context(|| format!("cannot write {}", path.display()))?;
-    Ok(())
+/// 把 `input` 读到头，一块块写成那边的 `path`；`source` 是读不了时报的名字。
+fn write(client: &Client, path: &Path, input: &mut dyn Read, source: &dyn std::fmt::Display) -> Result<()> {
+    let mut chunk = Vec::with_capacity(CHUNK);
+    let mut offset = 0;
+    loop {
+        chunk.clear();
+        input.take(CHUNK as u64).read_to_end(&mut chunk).with_context(|| format!("cannot read {source}"))?;
+        call(client, UploadOp::Chunk { path: path.to_path_buf(), offset }, &chunk)
+            .with_context(|| format!("cannot write {}", path.display()))?;
+        if chunk.len() < CHUNK {
+            return Ok(());
+        }
+        offset += chunk.len() as u64;
+    }
 }
 
 /// 远端目录 `dir` 下的 `name`，一律按 `/` 拼：Windows 远端也认 `/`，Windows 上的 `Path::join` 插的却是 `\`。
@@ -260,13 +309,53 @@ mod tests {
         let root = scratch("inside");
         let uploads = root.join("uploads");
         let dir = UploadOp::Begin.run(Some(&uploads), &[]).unwrap().unwrap();
-        let write = |path: PathBuf| UploadOp::File { path }.run(Some(&uploads), b"x");
+        let write = |path: PathBuf| UploadOp::Chunk { path, offset: 0 }.run(Some(&uploads), b"x");
         assert!(write(child(&dir, "ok.txt")).is_ok());
         assert!(write(uploads.join("loose.txt")).is_err());
         assert!(write(dir.join("../../escaped.txt")).is_err());
         assert!(write(root.join("elsewhere.txt")).is_err());
         assert!(!root.join("escaped.txt").exists() && !root.join("elsewhere.txt").exists());
+        assert!(UploadOp::Discard { dir: uploads.clone() }.run(Some(&uploads), &[]).is_err());
+        assert!(uploads.exists());
         assert!(UploadOp::Begin.run(None, &[]).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 比好几块还大的文件传得过去，内容一字不差；块接不上（漏了、重了）时那边不收。
+    #[test]
+    fn large_files_go_over_in_chunks() {
+        let root = scratch("chunks");
+        let uploads = root.join("uploads");
+        let big = root.join("big.bin");
+        let bytes: Vec<u8> = (0..super::CHUNK * 2 + 12345).map(|n| (n % 251) as u8).collect();
+        fs::write(&big, &bytes).unwrap();
+        let empty = root.join("empty.txt");
+        fs::write(&empty, "").unwrap();
+        let paths = upload(&remote_uploading_to(uploads.clone()), Upload::Files(vec![big, empty])).unwrap();
+        assert!(fs::read(&paths[0]).unwrap() == bytes);
+        assert_eq!(fs::read(&paths[1]).unwrap(), b"");
+
+        let dir = UploadOp::Begin.run(Some(&uploads), &[]).unwrap().unwrap();
+        let file = child(&dir, "a.txt");
+        let chunk = |offset, bytes: &[u8]| UploadOp::Chunk { path: file.clone(), offset }.run(Some(&uploads), bytes);
+        chunk(0, b"abc").unwrap();
+        assert!(chunk(0, b"abc").is_err());
+        assert!(chunk(5, b"def").is_err());
+        chunk(3, b"def").unwrap();
+        assert_eq!(fs::read(&file).unwrap(), b"abcdef");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 传到一半出错时这次上传的子目录删掉，那边不留半截的东西。
+    #[test]
+    fn a_failed_upload_leaves_nothing_behind() {
+        let root = scratch("failed");
+        let uploads = root.join("uploads");
+        fs::write(root.join("here.txt"), "here").unwrap();
+        let files = vec![root.join("here.txt"), root.join("gone.txt")];
+        let err = upload(&remote_uploading_to(uploads.clone()), Upload::Files(files)).unwrap_err();
+        assert!(format!("{err:#}").contains("gone.txt"), "{err:#}");
+        assert_eq!(fs::read_dir(&uploads).unwrap().count(), 0);
         let _ = fs::remove_dir_all(&root);
     }
 
