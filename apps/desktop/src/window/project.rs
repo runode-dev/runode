@@ -8,20 +8,20 @@
 mod state;
 mod watch;
 
+use crate::ui::panel::split_handle;
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
 
 use super::{
-    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit, ToggleGitHubActions, WindowView,
-    cards,
+    CARD_GAP, DIVIDER_GRAB_WIDTH, DIVIDER_STEP, Divider, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit, ToggleGitHubActions,
+    WindowView, cards,
 };
 use crate::ui::button::Toggle;
 use crate::ui::menu::MenuHost as _;
 use gpui::{
-    Action, AnyElement, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Role, Stateful, Window,
-    div, prelude::*, px,
+    Action, AnyElement, App, Context, Div, Focusable, MouseButton, Role, Stateful, Window, div, prelude::*, px,
 };
 // 面板外框在 `runode_ui::panel`，窗口里各面板从这里引。
 use crate::project_host::ProjectHost;
@@ -535,29 +535,29 @@ impl WindowView {
 
     /// 右侧面板左边的分隔线把手，盖在窗口的最上层；`right` 是分隔线离窗口右边的距离。
     pub(super) fn render_right_handle(&self, divider: Divider, right: f32, cx: &mut Context<Self>) -> Stateful<Div> {
-        div()
-            .id("panel-divider")
+        let label = rust_i18n::t!("divider.panel").into_owned();
+        let pressed = move |this: &mut Self, double: bool, cx: &mut Context<Self>| {
+            if double {
+                // 双击恢复默认宽度。
+                this.panel_width = None;
+                this.save(cx);
+            } else {
+                this.dragging_divider = Some(divider);
+            }
+        };
+        let nudge = |this: &mut Self, delta: f32, window: &mut Window, cx: &mut Context<Self>| {
+            let viewport = f32::from(window.viewport_size().width);
+            let width = this.right_panel_widths(viewport).panel;
+            this.resize_right_panel(viewport - width - delta * DIVIDER_STEP, viewport);
+            this.save(cx);
+        };
+        split_handle("panel-divider", false, label, cx, pressed, nudge)
             .absolute()
             // 卡片样式下标题栏横跨右侧面板，分隔线从标题栏下面开始，不挡着拖动窗口。
             .top(px(if cards(cx) { TITLEBAR_HEIGHT } else { 0. }))
             .bottom_0()
             .right(px(right - DIVIDER_GRAB_WIDTH / 2.))
             .w(px(DIVIDER_GRAB_WIDTH))
-            .cursor(CursorStyle::ResizeLeftRight)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    cx.stop_propagation();
-                    if event.click_count >= 2 {
-                        // 双击恢复默认宽度。
-                        this.panel_width = None;
-                        this.save(cx);
-                    } else {
-                        this.dragging_divider = Some(divider);
-                    }
-                    cx.notify();
-                }),
-            )
     }
 
     /// 当前目录问过或读过了且不在 git 仓库里时藏起 Git 标签；正显示着 Git 时仍留着。

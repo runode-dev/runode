@@ -1,6 +1,7 @@
 //! 标签里的终端区：分屏树、分隔线、拖动分隔线时的遮罩，以及别的终端里的程序（经命令行）正在
 //! 操作某个分屏时右上角的驱动标记。
 
+use crate::ui::panel::split_handle;
 use crate::ui::theme::ActiveTheme as _;
 use std::{
     borrow::Cow,
@@ -21,7 +22,7 @@ use runode_types::{
 
 use super::{
     AGENT_MARK_WIDTH, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight, NewTab,
-    PANE_HEADER_HEIGHT, PressDown, TogglePaneFold, TogglePaneZoom, WindowView,
+    PANE_HEADER_HEIGHT, PressDown, RATIO_STEP, TogglePaneFold, TogglePaneZoom, WindowView,
     agents::logo::agent_logo,
     cards,
     model::Tab,
@@ -665,44 +666,39 @@ impl WindowView {
             )
             // 分隔线只有一像素宽，在它两侧放一条透明的把手供拖动。
             .child(
-                div()
-                    .id(("divider", id))
-                    .absolute()
-                    .map(|handle| {
-                        if horizontal {
-                            handle
-                                .top_0()
-                                .h_full()
-                                .w(px(grab))
-                                .left(relative(ratio))
-                                .ml(px((gap - grab) / 2.))
-                                .cursor(CursorStyle::ResizeLeftRight)
-                        } else {
-                            handle
-                                .left_0()
-                                .w_full()
-                                .h(px(grab))
-                                .top(relative(ratio))
-                                .mt(px((gap - grab) / 2.))
-                                .cursor(CursorStyle::ResizeUpDown)
-                        }
-                    })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            cx.stop_propagation();
-                            if event.click_count >= 2 {
-                                // 双击分隔线让两边一样大。
-                                if let Some(tab) = this.tab_mut() {
-                                    tab.root.set_ratio(id, 0.5);
-                                }
-                                this.save(cx);
-                            } else {
-                                this.dragging_divider = Some(Divider::Split(id, axis));
+                split_handle(
+                    ("divider", id),
+                    !horizontal,
+                    rust_i18n::t!("divider.split").into_owned(),
+                    cx,
+                    move |this, double, cx| {
+                        if double {
+                            // 双击分隔线让两边一样大。
+                            if let Some(tab) = this.tab_mut() {
+                                tab.root.set_ratio(id, 0.5);
                             }
-                            cx.notify();
-                        }),
-                    ),
+                            this.save(cx);
+                        } else {
+                            this.dragging_divider = Some(Divider::Split(id, axis));
+                        }
+                    },
+                    move |this, delta, _, cx| {
+                        if let Some(tab) = this.tab_mut()
+                            && let Some(ratio) = tab.root.ratio(id)
+                        {
+                            tab.root.set_ratio(id, ratio + delta * RATIO_STEP);
+                        }
+                        this.save(cx);
+                    },
+                )
+                .absolute()
+                .map(|handle| {
+                    if horizontal {
+                        handle.top_0().h_full().w(px(grab)).left(relative(ratio)).ml(px((gap - grab) / 2.))
+                    } else {
+                        handle.left_0().w_full().h(px(grab)).top(relative(ratio)).mt(px((gap - grab) / 2.))
+                    }
+                }),
             )
             .into_any_element()
     }

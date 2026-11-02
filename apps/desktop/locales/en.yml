@@ -1316,3 +1316,8 @@ screen_viewer:
   resolution_default_detail: The remote computer's own setting
   resolution_hidpi: "HiDPI, %{pixels} pixels"
   mode_failed: "Cannot change the resolution: %{reason}"
+divider:
+  sidebar: Resize Sidebar
+  panel: Resize Side Panel
+  split: Resize Split
+  snapped_screen: Resize Remote Desktop

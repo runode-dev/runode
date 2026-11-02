@@ -21,14 +21,14 @@ use crate::ui::{
     hsla,
     icons::{ARROW_DOWN_ICON, REFRESH_ICON},
     menu::{MenuHost as _, MenuItem},
-    panel::{DIVIDER_GRAB_WIDTH, TITLEBAR_HEIGHT, added_label, removed_label},
+    panel::{DIVIDER_GRAB_WIDTH, TITLEBAR_HEIGHT, added_label, removed_label, split_handle},
     theme::{ADDED, ActiveTheme as _, MODIFIED, REMOVED, RENAMED},
     tooltip::tooltip,
 };
 use gpui::SharedString;
 use gpui::{
-    AccessibleAction, Action, AnyElement, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, Div,
-    Hsla, MouseButton, MouseDownEvent, PathBuilder, Pixels, PromptLevel, Role, Window, canvas, div, fill, img, point,
+    AccessibleAction, Action, AnyElement, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, Div, Hsla,
+    MouseButton, MouseDownEvent, PathBuilder, Pixels, PromptLevel, Role, Window, canvas, div, fill, img, point,
     prelude::*, px, quad, svg, uniform_list,
 };
 use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, LaneColor, RefKind};
@@ -205,44 +205,25 @@ impl GitPanel {
             .flex_1(),
         );
         let height = graph_height(self.graph_height, room);
-        let view = cx.entity().downgrade();
-        let nudge = move |delta: f32| {
-            let view = view.clone();
-            move |_: Option<&gpui::accesskit::ActionData>, _: &mut Window, cx: &mut gpui::App| {
-                view.update(cx, |this, cx| {
-                    this.graph_height = Some(graph_height(Some(height + delta), room));
-                    cx.emit(GitPanelEvent::OptionsChanged);
-                    cx.notify();
-                })
-                .ok();
+        let pressed = |this: &mut Self, double: bool, cx: &mut Context<Self>| {
+            if double {
+                this.graph_height = None;
+                cx.emit(GitPanelEvent::OptionsChanged);
+            } else {
+                cx.emit(GitPanelEvent::StartGraphResize);
             }
         };
-        // 辅助工具报成分隔条，加减一下改三行高。
-        let handle = div()
-            .id("git-graph-divider")
-            .role(Role::Splitter)
-            .aria_label(rust_i18n::t!("git.graph.resize").into_owned())
+        let nudge = move |this: &mut Self, delta: f32, _: &mut Window, cx: &mut Context<Self>| {
+            this.graph_height = Some(graph_height(Some(height + delta * GRAPH_STEP), room));
+            cx.emit(GitPanelEvent::OptionsChanged);
+        };
+        let label = rust_i18n::t!("git.graph.resize").into_owned();
+        let handle = split_handle("git-graph-divider", true, label, cx, pressed, nudge)
             .absolute()
             .left_0()
             .top(px(-DIVIDER_GRAB_WIDTH / 2.))
             .w_full()
-            .h(px(DIVIDER_GRAB_WIDTH))
-            .cursor(CursorStyle::ResizeUpDown)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    cx.stop_propagation();
-                    if event.click_count >= 2 {
-                        this.graph_height = None;
-                        cx.emit(GitPanelEvent::OptionsChanged);
-                    } else {
-                        cx.emit(GitPanelEvent::StartGraphResize);
-                    }
-                    cx.notify();
-                }),
-            )
-            .on_a11y_action(AccessibleAction::Increment, nudge(GRAPH_STEP))
-            .on_a11y_action(AccessibleAction::Decrement, nudge(-GRAPH_STEP));
+            .h(px(DIVIDER_GRAB_WIDTH));
         pane.h(px(height)).child(list).child(handle)
     }
 

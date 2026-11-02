@@ -6,18 +6,19 @@ mod repo;
 
 use crate::ui::button::{Button, ButtonSize, Toggle};
 use crate::ui::icons::system_logos;
+use crate::ui::panel::split_handle;
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
-    AccessibleAction, Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, FontWeight,
-    Hsla, Modifiers, MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, Window,
+    AccessibleAction, Action, AnyElement, App, Axis, Context, Div, ExternalPaths, Focusable, FontWeight, Hsla,
+    Modifiers, MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, Window,
     WindowControlArea, div, img, prelude::*, px, relative, svg,
 };
 use runode_types::color::Rgb;
 
 use super::{
-    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, PressDown, RenameTarget, RenameWorkspace, Renaming,
-    SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar,
-    WindowView,
+    CARD_GAP, DIVIDER_GRAB_WIDTH, DIVIDER_STEP, Divider, NewWorkspace, PressDown, RenameTarget, RenameWorkspace,
+    Renaming, SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH,
+    ToggleSidebar, WindowView,
     agents::Status as AgentStatus,
     background, cards, drag_window,
     inline_edit::InlineEdit,
@@ -148,28 +149,26 @@ impl WindowView {
     pub(super) fn render_sidebar_handle(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         // 卡片样式下分隔线落在侧栏和卡片之间的空隙中间。
         let spacing = if cards(cx) { CARD_GAP / 2. } else { 0. };
-        div()
-            .id("sidebar-divider")
+        let label = rust_i18n::t!("divider.sidebar").into_owned();
+        let pressed = |this: &mut Self, double: bool, cx: &mut Context<Self>| {
+            if double {
+                // 双击恢复默认宽度。
+                this.sidebar_width = None;
+                this.save(cx);
+            } else {
+                this.dragging_divider = Some(Divider::Sidebar);
+            }
+        };
+        let nudge = |this: &mut Self, delta: f32, _: &mut Window, cx: &mut Context<Self>| {
+            this.resize_sidebar(this.sidebar_width() + delta * DIVIDER_STEP);
+            this.save(cx);
+        };
+        split_handle("sidebar-divider", false, label, cx, pressed, nudge)
             .absolute()
             .top_0()
             .h_full()
             .left(px(self.sidebar_width() + spacing - DIVIDER_GRAB_WIDTH / 2.))
             .w(px(DIVIDER_GRAB_WIDTH))
-            .cursor(CursorStyle::ResizeLeftRight)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    cx.stop_propagation();
-                    if event.click_count >= 2 {
-                        // 双击恢复默认宽度。
-                        this.sidebar_width = None;
-                        this.save(cx);
-                    } else {
-                        this.dragging_divider = Some(Divider::Sidebar);
-                    }
-                    cx.notify();
-                }),
-            )
     }
 
     /// 红绿灯右边收起、展开侧栏的按钮，侧栏收着时也在原处，不随侧栏跳动。

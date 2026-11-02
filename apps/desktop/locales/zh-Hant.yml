@@ -1390,3 +1390,8 @@ screen_viewer:
   resolution_default_detail: 那台電腦自己的設定
   resolution_hidpi: "HiDPI，%{pixels} 像素"
   mode_failed: "無法變更解析度：%{reason}"
+divider:
+  sidebar: 調整側欄的寬度
+  panel: 調整右側面板的寬度
+  split: 調整分割畫面的大小
+  snapped_screen: 調整遠端桌面的高度

@@ -4,8 +4,9 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Div, ElementId, Hsla, MouseButton, Role, Stateful, Transformation,
-    div, percentage, prelude::*, px, svg,
+    AccessibleAction, Animation, AnimationExt as _, AnyElement, App, Context, CursorStyle, Div, ElementId, Hsla,
+    MouseButton, MouseDownEvent, Role, SharedString, Stateful, Transformation, Window, accesskit::ActionData, div,
+    percentage, prelude::*, px, svg,
 };
 
 use crate::{
@@ -23,6 +24,46 @@ pub const CARD_RADIUS: f32 = 10.;
 pub const PANE_HEADER_HEIGHT: f32 = 30.;
 /// 分隔线两边各留这么宽能按住拖动。
 pub const DIVIDER_GRAB_WIDTH: f32 = 6.;
+
+/// 拖动改两边大小的分隔线把手，位置和大小由调用方接着写；`vertical` 时上下拖。按下时不再往下传，交给
+/// `pressed`，`double` 说是不是双击（双击通常是恢复默认）；拖动本身由调用方跟着鼠标办。辅助工具报成叫 `label`
+/// 的分隔条，加减一下调 `nudge`，`+1.` 是加、`-1.` 是减。
+pub fn split_handle<V: 'static>(
+    id: impl Into<ElementId>,
+    vertical: bool,
+    label: impl Into<SharedString>,
+    cx: &mut Context<V>,
+    pressed: impl Fn(&mut V, bool, &mut Context<V>) + 'static,
+    nudge: impl Fn(&mut V, f32, &mut Window, &mut Context<V>) + 'static,
+) -> Stateful<Div> {
+    let view = cx.entity().downgrade();
+    let nudge = std::rc::Rc::new(nudge);
+    let step = move |delta: f32| {
+        let (view, nudge) = (view.clone(), nudge.clone());
+        move |_: Option<&ActionData>, window: &mut Window, cx: &mut App| {
+            view.update(cx, |this, cx| {
+                nudge(this, delta, window, cx);
+                cx.notify();
+            })
+            .ok();
+        }
+    };
+    div()
+        .id(id)
+        .role(Role::Splitter)
+        .aria_label(label.into())
+        .cursor(if vertical { CursorStyle::ResizeUpDown } else { CursorStyle::ResizeLeftRight })
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                cx.stop_propagation();
+                pressed(this, event.click_count >= 2, cx);
+                cx.notify();
+            }),
+        )
+        .on_a11y_action(AccessibleAction::Increment, step(1.))
+        .on_a11y_action(AccessibleAction::Decrement, step(-1.))
+}
 
 /// 加了多少行、删了多少行的标签，「+N」和「−N」。
 pub fn added_label(count: usize) -> Div {

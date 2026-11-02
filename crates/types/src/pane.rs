@@ -174,6 +174,15 @@ impl<T: Copy + PartialEq> Node<T> {
         true
     }
 
+    /// 分隔线 `id` 前一半占的比例；没有这条分隔线时为空。
+    pub fn ratio(&self, id: SplitId) -> Option<f32> {
+        match self {
+            Node::Split(split) if split.id == id => Some(split.ratio),
+            Node::Split(split) => split.first.ratio(id).or_else(|| split.second.ratio(id)),
+            Node::Leaf(_) => None,
+        }
+    }
+
     pub fn set_ratio(&mut self, id: SplitId, ratio: f32) {
         if let Node::Split(split) = self {
             if split.id == id {

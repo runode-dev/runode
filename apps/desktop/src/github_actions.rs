@@ -33,16 +33,15 @@ use crate::ui::{
         SYNC_ICON, TERMINAL_ICON, TRASH_ICON,
     },
     inline_edit::InlineEdit,
-    panel::{DIVIDER_GRAB_WIDTH, chevron, panel_message, panel_title},
+    panel::{DIVIDER_GRAB_WIDTH, chevron, panel_message, panel_title, split_handle},
     row_buttons::{RowButton, button, row_buttons},
     scrollbar::scrollbar,
     theme::{ADDED, MODIFIED, REMOVED},
     tooltip::tooltip,
 };
 use gpui::{
-    AccessibleAction, AnyElement, App, Axis, Bounds, ClipboardItem, Context, CursorStyle, Div, EventEmitter,
-    FocusHandle, IntoElement, MouseButton, MouseDownEvent, Pixels, Render, Role, ScrollHandle, SharedString, Stateful,
-    Window, canvas, div, prelude::*, px, svg,
+    AnyElement, App, Axis, Bounds, ClipboardItem, Context, Div, EventEmitter, FocusHandle, IntoElement, MouseButton,
+    Pixels, Render, Role, ScrollHandle, SharedString, Stateful, Window, canvas, div, prelude::*, px, svg,
 };
 use serde::{Deserialize, Serialize};
 
@@ -651,45 +650,25 @@ impl ActionsPanel {
     fn actions_divider(&self, si: usize, cx: &mut Context<Self>) -> Stateful<Div> {
         let above = rust_i18n::t!(SECTION_KEYS[si - 1]);
         let label = rust_i18n::t!("github_actions.resize", name = above).into_owned();
-        let view = cx.entity().downgrade();
-        let nudge = move |delta: f32| {
-            let view = view.clone();
-            move |_: Option<&gpui::accesskit::ActionData>, _: &mut Window, cx: &mut App| {
-                view.update(cx, |this, cx| {
-                    let above = this.bounds.get()[si - 1];
-                    if let Some(above) = above {
-                        this.resize_section(si, f32::from(above.bottom()) + delta, cx);
-                        cx.notify();
-                    }
-                })
-                .ok();
+        let pressed = move |this: &mut Self, double: bool, cx: &mut Context<Self>| {
+            if double {
+                this.heights = [None; 3];
+                cx.emit(ActionsEvent::LayoutChanged);
+            } else {
+                cx.emit(ActionsEvent::StartResize(si));
             }
         };
-        div()
-            .id(("actions-divider", si))
-            .role(Role::Splitter)
-            .aria_label(label)
+        let nudge = move |this: &mut Self, delta: f32, _: &mut Window, cx: &mut Context<Self>| {
+            if let Some(above) = this.bounds.get()[si - 1] {
+                this.resize_section(si, f32::from(above.bottom()) + delta * SECTION_STEP, cx);
+            }
+        };
+        split_handle(("actions-divider", si), true, label, cx, pressed, nudge)
             .absolute()
             .left_0()
             .top(px(-DIVIDER_GRAB_WIDTH / 2.))
             .w_full()
             .h(px(DIVIDER_GRAB_WIDTH))
-            .cursor(CursorStyle::ResizeUpDown)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    cx.stop_propagation();
-                    if event.click_count >= 2 {
-                        this.heights = [None; 3];
-                        cx.emit(ActionsEvent::LayoutChanged);
-                    } else {
-                        cx.emit(ActionsEvent::StartResize(si));
-                    }
-                    cx.notify();
-                }),
-            )
-            .on_a11y_action(AccessibleAction::Increment, nudge(SECTION_STEP))
-            .on_a11y_action(AccessibleAction::Decrement, nudge(-SECTION_STEP))
     }
 
     /// 拖第 `si` 段上沿的分隔线到窗口里的纵坐标 `y`：上面那段的下沿跟到 `y`，下面那段拖过高度的

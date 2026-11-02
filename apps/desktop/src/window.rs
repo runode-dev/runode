@@ -232,6 +232,11 @@ fn cards(cx: &App) -> bool {
     cx.global::<AppConfig>().0.window_style == WindowStyle::Cards
 }
 
+/// 辅助工具加减一下，侧栏、右侧面板宽这么多。
+const DIVIDER_STEP: f32 = 24.;
+/// 辅助工具加减一下，分屏和吸附着的远程桌面的比例变这么多。
+const RATIO_STEP: f32 = 0.05;
+
 /// 正在用鼠标拖动的分隔线。
 #[derive(Clone, Copy)]
 enum Divider {

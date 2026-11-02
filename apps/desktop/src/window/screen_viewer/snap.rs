@@ -2,19 +2,20 @@
 //! 一条分隔线拖着改那一台的高度。一栏里的先后记在 `ScreenViewers::column`。拖着浮动的远程桌面经过这一栏时按
 //! 鼠标落在哪台的哪一半、或面板的哪一半定下插到哪（`SnapTarget`），松开就插进去。
 
+use crate::ui::panel::split_handle;
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 use gpui::{
-    AnyElement, App, Bounds, Context, CursorStyle, Entity, EntityId, Focusable as _, MouseButton, MouseDownEvent,
-    Pixels, Point, StyleRefinement, Window, WindowControlArea, canvas, div, prelude::*, px, relative,
+    AnyElement, App, Bounds, Context, Entity, EntityId, Focusable as _, Pixels, Point, StyleRefinement, Window,
+    WindowControlArea, canvas, div, prelude::*, px, relative,
 };
 
 use super::{OpenScreenViewer, Placement, cached_page, set_input};
 use crate::screen_viewer::{SUPPORTED, ScreenViewer};
 use crate::ui::{card::Card, theme::ActiveTheme as _};
 use crate::window::{
-    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, WindowView, WorkspaceId, cached_slot, cards, column_slot,
-    persist::format::SavedSnappedScreen, slot::Slot,
+    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, RATIO_STEP, TITLEBAR_HEIGHT, WindowView, WorkspaceId, cached_slot, cards,
+    column_slot, persist::format::SavedSnappedScreen, slot::Slot,
 };
 
 /// 吸附着的一台默认占这一栏的比例；拖分隔线时每台不小于 `SNAP_RATIO_MIN`。
@@ -396,6 +397,17 @@ impl WindowView {
     }
 
     /// 双击分隔线：远程桌面 `id` 回到默认高度。
+    /// 辅助工具加减一下：这台吸附着的远程桌面占那一栏的比例加 `delta`。
+    fn nudge_snap_ratio(&mut self, id: EntityId, delta: f32, cx: &mut Context<Self>) {
+        if let Some(ix) = self.screen_viewers.position(id)
+            && let Placement::Snapped(snap) = &mut self.screen_viewers.open[ix].placement
+        {
+            snap.ratio = (snap.ratio + delta).clamp(0., 1.);
+        }
+        self.fit_snaps(cx);
+        self.save(cx);
+    }
+
     fn reset_snap_ratio(&mut self, id: EntityId, cx: &mut Context<Self>) {
         if let Some(ix) = self.screen_viewers.position(id)
             && let Placement::Snapped(snap) = &mut self.screen_viewers.open[ix].placement
@@ -527,25 +539,22 @@ impl WindowView {
 
 /// 吸附着的远程桌面 `id` 挨着面板的分隔线，位置由调用方接着写。
 fn snap_handle(id: EntityId, cx: &mut Context<WindowView>) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(("screen-snap-divider", id.as_u64() as usize))
+    let label = rust_i18n::t!("divider.snapped_screen").into_owned();
+    let pressed = move |this: &mut WindowView, double: bool, cx: &mut Context<WindowView>| {
+        if double {
+            this.reset_snap_ratio(id, cx);
+        } else {
+            this.dragging_divider = Some(Divider::SnappedScreen(id));
+        }
+    };
+    let nudge = move |this: &mut WindowView, delta: f32, _: &mut Window, cx: &mut Context<WindowView>| {
+        this.nudge_snap_ratio(id, delta * RATIO_STEP, cx);
+    };
+    split_handle(("screen-snap-divider", id.as_u64() as usize), true, label, cx, pressed, nudge)
         .absolute()
         .left_0()
         .w_full()
         .h(px(DIVIDER_GRAB_WIDTH))
-        .cursor(CursorStyle::ResizeUpDown)
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                cx.stop_propagation();
-                if event.click_count >= 2 {
-                    this.reset_snap_ratio(id, cx);
-                } else {
-                    this.dragging_divider = Some(Divider::SnappedScreen(id));
-                }
-                cx.notify();
-            }),
-        )
 }
 
 /// 吸附着的远程桌面和面板、彼此之间空多宽：卡片样式下是卡片间距，经典样式下只有一条线。
