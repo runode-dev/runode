@@ -235,7 +235,7 @@ impl HostSession {
         // shell 在前台时不读它此刻的目录：插件管理器在提示符出来后延迟加载插件，会临时切进插件目录。
         let title = match foreground {
             Some((_, true)) => self.prompt_cwd().map(|cwd| pty::dir_label(&cwd)),
-            Some((_, false)) => name,
+            Some((_, false)) => name.as_deref().map(|name| pty::program_label(name).to_owned()),
             None => None,
         };
         if title == self.fallback_title {

@@ -236,12 +236,18 @@ public enum Presentation {
         }
     }
 
+    /// 界面上写的程序名：Windows 上的进程名带着 `.exe`，写成 `powershell` 而不是 `powershell.exe`。
+    static func programLabel(_ name: String) -> String {
+        guard name.count > 4, name.lowercased().hasSuffix(".exe") else { return name }
+        return String(name.dropLast(4))
+    }
+
     /// 菜单里命令那一节的标题：终端结束了时说明为什么点不了，前台在跑别的程序时说明命令会在新终端里跑。
     public static func tasksHeader(_ session: SessionInfo) -> String {
         if session.exited { return String(localized: "运行 · 终端已经结束") }
         if session.meta.foregroundIsShell { return String(localized: "运行") }
         if let foreground = session.meta.foreground, !foreground.isEmpty {
-            return String(localized: "运行 · 前台在跑 \(foreground)，在新终端里跑")
+            return String(localized: "运行 · 前台在跑 \(programLabel(foreground))，在新终端里跑")
         }
         return String(localized: "运行 · 在新终端里跑")
     }

@@ -262,6 +262,16 @@ pub(crate) fn process_group(leader: Pid) -> Option<ForegroundJob> {
     (!processes.is_empty()).then_some(ForegroundJob { leader, processes })
 }
 
+/// 界面上写的程序名：进程名去掉 Windows 可执行文件的 `.exe`，标签上写 `powershell` 而不是
+/// `powershell.exe`。进程名本身（`process_name`）照旧带着它，认 agent、认 shell 都按进程名。
+pub fn program_label(name: &str) -> &str {
+    let cut = name.len().saturating_sub(4);
+    match name.get(cut..) {
+        Some(suffix) if cut > 0 && suffix.eq_ignore_ascii_case(".exe") => &name[..cut],
+        _ => name,
+    }
+}
+
 pub fn dir_label(path: &Path) -> String {
     if runode_paths::Dirs::from_env().is_home(path) {
         return "~".into();
@@ -270,6 +280,20 @@ pub fn dir_label(path: &Path) -> String {
         Some(name) => name.to_string_lossy().into_owned(),
         // 根目录没有文件名。
         None => path.display().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::program_label;
+
+    #[test]
+    fn program_labels_drop_the_exe_suffix() {
+        assert_eq!(program_label("powershell.exe"), "powershell");
+        assert_eq!(program_label("Code.EXE"), "Code");
+        assert_eq!(program_label("zsh"), "zsh");
+        assert_eq!(program_label(".exe"), ".exe");
+        assert_eq!(program_label("vim"), "vim");
     }
 }
 

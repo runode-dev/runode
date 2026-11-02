@@ -889,6 +889,13 @@ actor UnwritableMachineStore: MachineStore {
         #expect(Presentation.directory(nil) == nil)
     }
 
+    @Test func programLabelsDropTheExeSuffix() {
+        #expect(Presentation.programLabel("powershell.exe") == "powershell")
+        #expect(Presentation.programLabel("Code.EXE") == "Code")
+        #expect(Presentation.programLabel("zsh") == "zsh")
+        #expect(Presentation.programLabel(".exe") == ".exe")
+    }
+
     @Test func pairingListsTwoAddressesIPv4First() {
         #expect(Presentation.pairingAddresses(["10.0.0.2"], port: 7866) == "10.0.0.2:7866")
         #expect(

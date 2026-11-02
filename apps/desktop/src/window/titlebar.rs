@@ -217,10 +217,9 @@ pub(super) fn pane_label(view: &TerminalView) -> (SharedString, Option<SharedStr
         let dir_name = view.cwd().and_then(|dir| dir.file_name().map(|name| name.to_string_lossy().into_owned()));
         let title = meta.title.clone().filter(|title| dir_name.as_ref() != Some(title));
         title.or_else(|| Some(agent.kind.display_name().to_owned()))
-    } else if meta.foreground_is_shell {
-        meta.foreground.clone()
     } else {
-        meta.title.clone().or_else(|| meta.foreground.clone())
+        let program = meta.foreground.as_deref().map(|name| runode_terminal::pty::program_label(name).to_owned());
+        if meta.foreground_is_shell { program } else { meta.title.clone().or(program) }
     }
     .unwrap_or_else(|| view.title().to_owned());
     let dir = view.cwd().map(|dir| display_dir(&dir)).filter(|dir| *dir != name);

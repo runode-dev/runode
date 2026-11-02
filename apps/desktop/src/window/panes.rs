@@ -224,7 +224,9 @@ impl WindowView {
                 }
                 let meta = terminal.meta();
                 match &meta.foreground {
-                    Some(program) if !meta.foreground_is_shell => program.clone(),
+                    Some(program) if !meta.foreground_is_shell => {
+                        runode_terminal::pty::program_label(program).to_owned()
+                    }
                     _ => terminal.title().to_owned(),
                 }
             })

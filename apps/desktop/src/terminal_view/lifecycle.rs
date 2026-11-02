@@ -26,7 +26,7 @@ use futures::{
 use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
 use runode_protocol::{AttachMode, ClientMsg, Conversation, ERROR_BACKED_UP, HostMsg, SessionId};
 use runode_terminal::{
-    pty::dir_label,
+    pty::{dir_label, program_label},
     session::{self, Request, SYNC_OUTPUT_TIMEOUT, Session},
 };
 use runode_types::{
@@ -1238,7 +1238,7 @@ impl TerminalView {
         if let Some(agent) = meta.agent.filter(|agent| agent.kind.is_known()) {
             return Some(agent.kind.display_name().to_owned());
         }
-        meta.foreground.clone().filter(|_| !meta.foreground_is_shell)
+        meta.foreground.as_deref().filter(|_| !meta.foreground_is_shell).map(|name| program_label(name).to_owned())
     }
 
     /// 前台 agent 上次换了种类或状态的时刻。
