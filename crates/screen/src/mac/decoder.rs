@@ -55,15 +55,15 @@ struct Session {
 // SAFETY: VideoToolbox 的解码会话和格式描述可以在任意线程上用；`Decoder` 只交给一个线程。
 unsafe impl Send for Decoder {}
 
-impl Default for Decoder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Decoder {
-    pub fn new() -> Self {
-        Self { session: None, need_keyframe: true }
+    /// 解码会话等第一个关键帧带来参数集时才建，这里建不出错。
+    pub fn new() -> io::Result<Self> {
+        Ok(Self { session: None, need_keyframe: true })
+    }
+
+    /// VideoToolbox 两种编码都解得了。
+    pub fn supports(_codec: Codec) -> bool {
+        true
     }
 
     /// 丢掉解到一半的状态，从下一个关键帧重新开始。
@@ -389,7 +389,7 @@ mod tests {
     fn decodes_what_the_encoder_produces() {
         let frames = encode(640, 360, 180, 5);
         assert!(frames[0].keyframe);
-        let mut decoder = Decoder::new();
+        let mut decoder = Decoder::new().unwrap();
         assert!(decoder.decode(&frames[1]).unwrap().is_none(), "a delta frame before any keyframe");
         for frame in &frames {
             let decoded = decoder.decode(frame).unwrap().expect("a decoded frame");
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     #[ignore = "needs a hardware encoder"]
     fn decodes_h264_after_hevc() {
-        let mut decoder = Decoder::new();
+        let mut decoder = Decoder::new().unwrap();
         let hevc = encode(320, 240, 100, 2);
         decoder.decode(&hevc[0]).unwrap().expect("a decoded HEVC frame");
         let h264 = encode_as(Codec::H264, 640, 360, 180, 3);
@@ -427,7 +427,7 @@ mod tests {
     #[ignore = "needs a hardware HEVC encoder"]
     fn waits_for_a_keyframe_after_an_error() {
         let frames = encode(320, 240, 100, 3);
-        let mut decoder = Decoder::new();
+        let mut decoder = Decoder::new().unwrap();
         decoder.decode(&frames[0]).unwrap().expect("a decoded frame");
         let broken = VideoFrame { data: vec![0, 0, 0, 3, 0x02, 0x01, 0xff], ..frames[1].clone() };
         let _ = decoder.decode(&broken);

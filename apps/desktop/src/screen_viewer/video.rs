@@ -50,7 +50,7 @@ pub const SUPPORTED: bool = cfg!(any(target_os = "macos", windows));
 
 /// 这里解得了的编码，想要的排前面：同样的码率下 HEVC 清楚些。Windows 10 上 HEVC 的解码器要另装，没有时只要 H.264。
 pub fn codecs() -> Vec<Codec> {
-    #[cfg(windows)]
+    #[cfg(any(target_os = "macos", windows))]
     {
         static CODECS: std::sync::OnceLock<Vec<Codec>> = std::sync::OnceLock::new();
         CODECS
@@ -62,7 +62,7 @@ pub fn codecs() -> Vec<Codec> {
             })
             .clone()
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         vec![Codec::Hevc, Codec::H264]
     }
@@ -78,11 +78,7 @@ impl VideoDecoder {
     pub fn new() -> io::Result<Self> {
         #[cfg(any(target_os = "macos", windows))]
         {
-            #[cfg(target_os = "macos")]
-            let inner = runode_screen::Decoder::new();
-            #[cfg(windows)]
-            let inner = runode_screen::Decoder::new()?;
-            Ok(Self { inner })
+            Ok(Self { inner: runode_screen::Decoder::new()? })
         }
         #[cfg(not(any(target_os = "macos", windows)))]
         Err(io::Error::new(io::ErrorKind::Unsupported, "remote desktop is not available on this system"))

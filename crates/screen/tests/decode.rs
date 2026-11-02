@@ -33,14 +33,8 @@ fn frames() -> Vec<VideoFrame> {
     frames
 }
 
-#[cfg(target_os = "macos")]
 fn decoder() -> Decoder {
-    Decoder::new()
-}
-
-#[cfg(windows)]
-fn decoder() -> Decoder {
-    Decoder::new().expect("an HEVC decoder (HEVC Video Extensions)")
+    Decoder::new().expect("an HEVC decoder (HEVC Video Extensions on Windows)")
 }
 
 /// 解出来的一帧在 (x, y) 处的颜色，(红, 绿, 蓝)。
