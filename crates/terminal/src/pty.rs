@@ -656,7 +656,7 @@ impl Pty {
         // 拿到错的从设备名而失败。
         static OPENPTY: Mutex<()> = Mutex::new(());
         let pair = {
-            let _guard = OPENPTY.lock().unwrap_or_else(|e| e.into_inner());
+            let _guard = OPENPTY.lock().unwrap_or_else(PoisonError::into_inner);
             native_pty_system().openpty(pty_size(size))
         }
         .context("openpty failed")?;

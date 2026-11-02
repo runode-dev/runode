@@ -2,7 +2,7 @@
 //! 只拿着叫它停下的通道，可以交给任何线程。没开 `recording` 特性时 `Recorder::start` 报错。
 
 use std::{
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, Mutex, PoisonError, mpsc},
     thread::{self, JoinHandle},
 };
 
@@ -44,7 +44,7 @@ impl Recorder {
             };
             let _ = stopped.recv();
             drop(stream);
-            let samples = std::mem::take(&mut *samples.lock().unwrap_or_else(|e| e.into_inner()));
+            let samples = std::mem::take(&mut *samples.lock().unwrap_or_else(PoisonError::into_inner));
             Ok(resample(&samples, rate))
         })?;
         started.recv().context("recorder thread exited")??;
@@ -126,7 +126,7 @@ where
     let stream = device.build_input_stream(
         config,
         move |data: &[T], _: &_| {
-            let mut samples = samples.lock().unwrap_or_else(|e| e.into_inner());
+            let mut samples = samples.lock().unwrap_or_else(PoisonError::into_inner);
             // 几个声道取平均，混成单声道。
             let room = max.saturating_sub(samples.len());
             samples.extend(

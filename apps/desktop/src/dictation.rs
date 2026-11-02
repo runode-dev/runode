@@ -9,7 +9,7 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
@@ -71,13 +71,13 @@ pub fn start_download(model: SpeechModel, cx: &mut App) {
             let outcome = runode_speech::download(model, &root, china_first, &cancel, &|got, _| {
                 done.store(got, Ordering::Relaxed);
             });
-            *result.lock().unwrap_or_else(|e| e.into_inner()) = Some(outcome);
+            *result.lock().unwrap_or_else(PoisonError::into_inner) = Some(outcome);
         }
     });
     cx.spawn(async move |cx| {
         loop {
             cx.background_executor().timer(PROGRESS_INTERVAL).await;
-            let outcome = result.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let outcome = result.lock().unwrap_or_else(PoisonError::into_inner).take();
             let finished = outcome.is_some();
             cx.update_global::<Downloads, _>(|downloads, _| match outcome {
                 None => {
@@ -210,7 +210,7 @@ pub fn recognize(settings: &Settings, samples: &[f32]) -> anyhow::Result<String>
 
 /// 用 `model` 在本机识别，识别器没加载或换了模型时先加载。
 fn recognize_locally(model: SpeechModel, samples: &[f32]) -> anyhow::Result<String> {
-    let mut slot = RECOGNIZER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut slot = RECOGNIZER.lock().unwrap_or_else(PoisonError::into_inner);
     if slot.as_ref().is_none_or(|(loaded, _)| *loaded != model) {
         *slot = None;
         let root = models_dir().context("no home directory")?;

@@ -6,7 +6,7 @@ use std::{
     ffi::OsString,
     os::windows::ffi::OsStringExt as _,
     path::Path,
-    sync::{LazyLock, Mutex},
+    sync::{LazyLock, Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -70,7 +70,7 @@ pub(crate) fn processes(roots: &HashSet<u32>) -> Procs {
         .collect();
 
     let now = Instant::now();
-    let mut cpu_times = CPU_TIMES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut cpu_times = CPU_TIMES.lock().unwrap_or_else(PoisonError::into_inner);
     let mut seen = HashMap::new();
     // 各进程的创建时间，打不开的为 `None`。
     let mut created: HashMap<u32, Option<u64>> = HashMap::new();

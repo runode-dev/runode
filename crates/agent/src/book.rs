@@ -2,7 +2,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
 use runode_types::agent::AgentKind;
@@ -65,7 +65,7 @@ impl RuleBook {
 
     /// 取走攒下的警告。
     pub fn take_warnings(&self) -> Vec<String> {
-        std::mem::take(&mut *self.warnings.lock().unwrap_or_else(|e| e.into_inner()))
+        std::mem::take(&mut *self.warnings.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
     fn load(&self, kind: AgentKind) -> Option<Arc<RuleSet>> {
@@ -81,7 +81,7 @@ impl RuleBook {
                 Err(err) => self
                     .warnings
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(PoisonError::into_inner)
                     .push(format!("ignored agent rules {}: {err}", path.display())),
             }
         }

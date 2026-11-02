@@ -9,7 +9,7 @@
 use std::{
     path::PathBuf,
     sync::{
-        Mutex,
+        Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -50,7 +50,7 @@ static PENDING: Mutex<Option<mpsc::Receiver<Option<Prespawned>>>> = Mutex::new(N
 /// 主线程初始化 GPUI。主线程用 `take` 取。
 pub fn start() -> impl FnOnce(&Config) + Send + 'static {
     let (tx, rx) = mpsc::channel();
-    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
+    *PENDING.lock().unwrap_or_else(PoisonError::into_inner) = Some(rx);
     move |config| {
         let _ = tx.send(spawn(config));
     }
@@ -80,7 +80,7 @@ fn spawn(config: &Config) -> Option<Prespawned> {
 
 /// 取走提前启动的 shell；后台线程还没做完时等它。只有第一次调用可能取到。
 pub fn take() -> Option<Prespawned> {
-    let pending = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+    let pending = PENDING.lock().unwrap_or_else(PoisonError::into_inner).take()?;
     pending.recv().ok().flatten()
 }
 
