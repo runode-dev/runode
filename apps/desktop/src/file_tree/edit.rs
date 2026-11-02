@@ -333,7 +333,8 @@ impl FileTree {
                 crate::i18n::tr(&crate::i18n::os_key("files.delete_confirm")).into(),
             )
         };
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             PromptLevel::Warning,
             &title,
             Some(&detail),
@@ -415,7 +416,8 @@ impl FileTree {
             let untrack = tracked.await;
             if untrack {
                 let Ok(answer) = this.update_in(cx, |_, window, cx| {
-                    window.prompt(
+                    crate::prompt::show(
+                        window,
                         PromptLevel::Warning,
                         &rust_i18n::t!("files.untrack_title", name = base_name(&rel)),
                         Some(&rust_i18n::t!("files.untrack_detail")),
@@ -482,7 +484,8 @@ impl FileTree {
             return;
         }
         let title = rust_i18n::t!("files.move_title", name = base_name(src), dir = base_name(&dir));
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             PromptLevel::Info,
             &title,
             None,
@@ -537,7 +540,8 @@ impl FileTree {
 
     fn show_file_error(&self, detail: String, window: &mut Window, cx: &mut Context<Self>) {
         // 只有一个按钮，不用等回答。
-        drop(window.prompt(
+        drop(crate::prompt::show(
+            window,
             PromptLevel::Warning,
             &rust_i18n::t!("files.failed"),
             Some(&detail),

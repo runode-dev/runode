@@ -71,7 +71,8 @@ impl TerminalView {
             return;
         }
         let detail = rust_i18n::t!("paste.detail");
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             PromptLevel::Warning,
             &rust_i18n::t!("paste.title"),
             Some(&detail),

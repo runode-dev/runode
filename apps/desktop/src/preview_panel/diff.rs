@@ -520,7 +520,8 @@ impl PreviewPanel {
             run(self, window, cx);
             return;
         }
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             PromptLevel::Warning,
             &rust_i18n::t!("preview.diff.discard_hunk_title"),
             Some(&rust_i18n::t!("git.irreversible")),

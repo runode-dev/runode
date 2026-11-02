@@ -52,7 +52,8 @@ impl TerminalView {
         if !crate::dictation::Settings::new(&self.config).available() {
             let size = crate::dictation::format_size(runode_speech::download_size(model));
             let detail = rust_i18n::t!("dictation.no_model.detail", size = size);
-            let answer = window.prompt(
+            let answer = crate::prompt::show(
+                window,
                 PromptLevel::Info,
                 &rust_i18n::t!("dictation.no_model.title"),
                 Some(&detail),
@@ -212,7 +213,8 @@ fn report(err: &anyhow::Error, window: &mut Window, cx: &mut Context<TerminalVie
         format!("{err:#}")
     };
     // 只有一个「好」，不等回答。
-    drop(window.prompt(
+    drop(crate::prompt::show(
+        window,
         PromptLevel::Warning,
         &rust_i18n::t!("dictation.failed"),
         Some(&detail),

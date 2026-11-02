@@ -510,7 +510,8 @@ impl ActionsPanel {
         let gh = self.actions_gh();
         let detail = rust_i18n::t!("github_actions.delete_detail");
         let confirm = rust_i18n::t!("github_actions.delete");
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             gpui::PromptLevel::Warning,
             &title,
             Some(&detail),

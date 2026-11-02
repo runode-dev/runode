@@ -162,8 +162,14 @@ impl GitPanel {
         cx: &mut Context<Self>,
         then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        let answer =
-            window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&confirm, &*rust_i18n::t!("git.cancel")], cx);
+        let answer = crate::prompt::show(
+            window,
+            PromptLevel::Warning,
+            &title,
+            Some(&detail),
+            &[&confirm, &*rust_i18n::t!("git.cancel")],
+            cx,
+        );
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() == Some(0) {
                 this.update_in(cx, |this, window, cx| then(this, window, cx)).ok();
@@ -358,7 +364,8 @@ impl GitPanel {
             }
             // 暂存全部会把带冲突标记的文件也暂存进去，绕过 git 自己「有冲突不让提交」的保护。
             if git.unstaged.iter().any(|file| file.status == git::FileStatus::Conflicted) {
-                drop(window.prompt(
+                drop(crate::prompt::show(
+                    window,
                     PromptLevel::Warning,
                     &rust_i18n::t!("git.conflicts_title"),
                     Some(&rust_i18n::t!("git.conflicts_detail")),
@@ -367,7 +374,8 @@ impl GitPanel {
                 ));
                 return;
             }
-            let answer = window.prompt(
+            let answer = crate::prompt::show(
+                window,
                 PromptLevel::Info,
                 &rust_i18n::t!("git.stage_all_title"),
                 Some(&rust_i18n::t!("git.stage_all_detail")),
@@ -534,7 +542,8 @@ impl GitPanel {
             self.run_git(&root, Busy::Stage, window, cx, ProjectRepo::stage_all, |_, (), _, _| {});
             return;
         }
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             PromptLevel::Warning,
             &rust_i18n::t!("git.stage_conflicts_title", count = conflicts),
             Some(&rust_i18n::t!("git.stage_conflicts_detail")),
@@ -610,7 +619,8 @@ pub fn show_git_error(err: &git::GitError, window: &mut Window, cx: &mut App) {
     if detail.len() < message.len() {
         detail.push('…');
     }
-    drop(window.prompt(
+    drop(crate::prompt::show(
+        window,
         PromptLevel::Warning,
         &rust_i18n::t!("git.failed"),
         Some(&detail),

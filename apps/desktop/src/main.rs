@@ -37,6 +37,7 @@ mod prespawn;
 mod preview_panel;
 mod process_env;
 mod project_host;
+mod prompt;
 mod remote_access;
 mod remote_hosts;
 mod screen_process;

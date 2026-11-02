@@ -119,7 +119,7 @@ fn prompt_read(window: &mut Window, title: &str, detail: &str, cx: &mut App) -> 
         gpui::PromptButton::cancel(rust_i18n::t!("clipboard.deny").into_owned()),
         gpui::PromptButton::new(rust_i18n::t!("clipboard.allow").into_owned()),
     ];
-    window.prompt(gpui::PromptLevel::Warning, title, Some(detail), &answers, cx)
+    crate::prompt::show(window, gpui::PromptLevel::Warning, title, Some(detail), &answers, cx)
 }
 
 /// 用户在询问框里的回答让不让读：只有点了「允许」才让，窗口关了、框没了（`None`）时按不允许。

@@ -747,7 +747,8 @@ impl WindowView {
             (Some(detail), None) => detail.to_owned(),
             (None, Some(running)) => running,
         };
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             gpui::PromptLevel::Warning,
             title,
             Some(&detail),

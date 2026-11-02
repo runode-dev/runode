@@ -358,7 +358,8 @@ impl GitPanel {
             CommitOp::CopyId => cx.write_to_clipboard(ClipboardItem::new_string(id)),
             CommitOp::Checkout => {
                 let short: String = id.chars().take(7).collect();
-                let answer = window.prompt(
+                let answer = crate::prompt::show(
+                    window,
                     PromptLevel::Info,
                     &rust_i18n::t!("git.graph.checkout_title", id = short),
                     Some(&rust_i18n::t!("git.graph.checkout_detail")),

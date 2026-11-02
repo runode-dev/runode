@@ -320,7 +320,8 @@ fn discard_unsaved(
     let answer = window.filter(|_| unsaved > 0).and_then(|window| {
         window
             .update(cx, |_, window, cx| {
-                window.prompt(
+                crate::prompt::show(
+                    window,
                     PromptLevel::Warning,
                     &rust_i18n::t!("preview.unsaved_title", count = unsaved),
                     Some(&rust_i18n::t!("preview.unsaved_detail")),
@@ -531,8 +532,9 @@ fn confirm(
         .chain([(&*text.confirm, Some(Answer::End)), (&*cancel, None)])
         .collect();
     let labels: Vec<&str> = answers.iter().map(|(label, _)| *label).collect();
-    let answer = window
-        .update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &text.title, Some(&text.detail), &labels, cx));
+    let answer = window.update(cx, |_, window, cx| {
+        crate::prompt::show(window, PromptLevel::Warning, &text.title, Some(&text.detail), &labels, cx)
+    });
     let Ok(answer) = answer else {
         return;
     };

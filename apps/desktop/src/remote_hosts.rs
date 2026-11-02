@@ -328,7 +328,9 @@ fn tell(title: &str, detail: &str, cx: &mut App) {
         return;
     };
     let ok = rust_i18n::t!("ssh.ok");
-    let _ = front.update(cx, |_, window, cx| window.prompt(PromptLevel::Info, title, Some(detail), &[ok.as_ref()], cx));
+    let _ = front.update(cx, |_, window, cx| {
+        crate::prompt::show(window, PromptLevel::Info, title, Some(detail), &[ok.as_ref()], cx)
+    });
 }
 
 /// SSH 主机 `name` 的宿主会跟着 ssh 的登录被结束：问用户要不要装成登录服务。
@@ -341,9 +343,9 @@ fn offer_service(name: &str, cx: &mut App) {
     let detail = rust_i18n::t!("ssh.bound_detail");
     let (install, later) = (rust_i18n::t!("ssh.bound_install"), rust_i18n::t!("ssh.bound_later"));
     let answers: [&str; 2] = [&install, &later];
-    let Ok(answer) =
-        front.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx))
-    else {
+    let Ok(answer) = front.update(cx, |_, window, cx| {
+        crate::prompt::show(window, PromptLevel::Warning, &title, Some(&detail), &answers, cx)
+    }) else {
         return;
     };
     let name = name.to_owned();

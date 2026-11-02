@@ -219,7 +219,7 @@ fn confirm_forget(host: HostId, window: &mut Window, cx: &mut Context<SettingsVi
     let detail = rust_i18n::t!("paired.forget_confirm_detail", host = name);
     let answers = [rust_i18n::t!("paired.forget"), rust_i18n::t!("machine.cancel")];
     let answers: Vec<&str> = answers.iter().map(AsRef::as_ref).collect();
-    let answer = window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx);
+    let answer = crate::prompt::show(window, PromptLevel::Warning, &title, Some(&detail), &answers, cx);
     cx.spawn(async move |_, cx| {
         if answer.await == Ok(0) {
             cx.update(|cx| remote_hosts::forget(&host, cx));

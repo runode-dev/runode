@@ -255,7 +255,8 @@ impl WindowView {
             end_sessions(&ids, cx);
             return;
         }
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             PromptLevel::Warning,
             &rust_i18n::t!("background.end_title"),
             Some(&rust_i18n::t!("background.end_detail", count = agents)),

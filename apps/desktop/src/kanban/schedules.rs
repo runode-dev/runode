@@ -37,7 +37,8 @@ impl Kanban {
     fn remove_schedule(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let data = store::data(cx);
         let Some(schedule) = data.schedules.iter().find(|schedule| schedule.id == id) else { return };
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             gpui::PromptLevel::Warning,
             &rust_i18n::t!("kanban.remove_title", title = schedule.spec.title.as_str()),
             Some(&rust_i18n::t!("kanban.remove_schedule_detail")),

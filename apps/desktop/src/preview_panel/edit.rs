@@ -99,7 +99,14 @@ fn read_in_background(project: ProjectHost, path: &Path, cx: &mut Context<Previe
 /// 弹框报错，只有一个「好」。
 fn report(title: &str, err: &io::Error, window: &mut Window, cx: &mut Context<PreviewPanel>) {
     // 不等回答：框关掉就完了。
-    drop(window.prompt(PromptLevel::Critical, title, Some(&err.to_string()), &[&*rust_i18n::t!("git.ok")], cx));
+    drop(crate::prompt::show(
+        window,
+        PromptLevel::Critical,
+        title,
+        Some(&err.to_string()),
+        &[&*rust_i18n::t!("git.ok")],
+        cx,
+    ));
 }
 
 impl Editor {
@@ -349,7 +356,8 @@ impl PreviewPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> futures::channel::oneshot::Receiver<usize> {
-        window.prompt(
+        crate::prompt::show(
+            window,
             PromptLevel::Warning,
             &rust_i18n::t!("preview.unsaved_title", count = count),
             Some(&rust_i18n::t!("preview.unsaved_detail")),
@@ -380,7 +388,8 @@ impl PreviewPanel {
             };
             let overwrite = current == known || {
                 let answer = this.update_in(cx, |_, window, cx| {
-                    window.prompt(
+                    crate::prompt::show(
+                        window,
                         PromptLevel::Warning,
                         &rust_i18n::t!("preview.changed_on_disk_title"),
                         Some(&rust_i18n::t!("preview.changed_on_disk_detail")),

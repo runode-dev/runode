@@ -34,7 +34,8 @@ pub fn prompt(
     cx.defer(move |cx| {
         let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else { return };
         let labels: Vec<&str> = answers.iter().map(String::as_str).collect();
-        let Ok(answer) = window.update(cx, |_, window, cx| window.prompt(level, &title, Some(&detail), &labels, cx))
+        let Ok(answer) =
+            window.update(cx, |_, window, cx| crate::prompt::show(window, level, &title, Some(&detail), &labels, cx))
         else {
             return;
         };

@@ -416,8 +416,9 @@ fn stop_remote_port(host: HostId, port: u16, cx: &mut App) {
 fn tell_forward_failed(detail: &str, cx: &mut App) {
     let Some(front) = remote::front_window(cx) else { return };
     let (title, ok) = (rust_i18n::t!("status.forward_failed"), rust_i18n::t!("ssh.ok"));
-    let _ =
-        front.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(detail), &[ok.as_ref()], cx));
+    let _ = front.update(cx, |_, window, cx| {
+        crate::prompt::show(window, PromptLevel::Warning, &title, Some(detail), &[ok.as_ref()], cx)
+    });
 }
 
 /// 改写配置文件的 `prevent-sleep`，重载的配置经 `sync_sleep` 生效。

@@ -91,7 +91,7 @@ impl MobilePage {
         let detail = rust_i18n::t!("machine.revoke_detail");
         let answers = [rust_i18n::t!("machine.revoke"), rust_i18n::t!("machine.cancel")];
         let answers: Vec<&str> = answers.iter().map(AsRef::as_ref).collect();
-        let answer = window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx);
+        let answer = crate::prompt::show(window, PromptLevel::Warning, &title, Some(&detail), &answers, cx);
         cx.spawn_in(window, async move |_, cx| {
             if answer.await != Ok(0) {
                 return;
@@ -104,7 +104,7 @@ impl MobilePage {
                 tracing::warn!("cannot revoke remote device {id}: {err}");
                 let title = rust_i18n::t!("machine.revoke_failed_title", device = name);
                 let ok = [&*rust_i18n::t!("machine.ok")];
-                Some(window.prompt(PromptLevel::Critical, &title, Some(&err.to_string()), &ok, cx))
+                Some(crate::prompt::show(window, PromptLevel::Critical, &title, Some(&err.to_string()), &ok, cx))
             });
             // 只是告诉一声，等用户点掉。
             if let Ok(Some(failed)) = failed {

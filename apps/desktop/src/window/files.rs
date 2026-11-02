@@ -343,7 +343,14 @@ impl WindowView {
                     let title = rust_i18n::t!("ssh.upload_failed", host = crate::remote_hosts::display_name(&id, cx))
                         .into_owned();
                     // 只说一声，不等回答。
-                    drop(window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&*rust_i18n::t!("ssh.ok")], cx));
+                    drop(crate::prompt::show(
+                        window,
+                        PromptLevel::Warning,
+                        &title,
+                        Some(&detail),
+                        &[&*rust_i18n::t!("ssh.ok")],
+                        cx,
+                    ));
                 }
             })
             .ok();

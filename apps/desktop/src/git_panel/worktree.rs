@@ -121,8 +121,14 @@ impl GitPanel {
         } else {
             rust_i18n::t!("git.worktree.remove_confirm")
         };
-        let answer =
-            window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&confirm, &*rust_i18n::t!("git.cancel")], cx);
+        let answer = crate::prompt::show(
+            window,
+            PromptLevel::Warning,
+            &title,
+            Some(&detail),
+            &[&confirm, &*rust_i18n::t!("git.cancel")],
+            cx,
+        );
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() == Some(0) {
                 this.update_in(cx, |this, window, cx| {

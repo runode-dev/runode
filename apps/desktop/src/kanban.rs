@@ -405,7 +405,8 @@ impl Kanban {
             Self::send_todos(vec![Box::new(move |req| ClientMsg::RemoveTodo { req, id })], cx);
             return;
         }
-        let answer = window.prompt(
+        let answer = crate::prompt::show(
+            window,
             gpui::PromptLevel::Warning,
             &rust_i18n::t!("kanban.remove_title", title = todo.spec.title.as_str()),
             Some(&rust_i18n::t!("kanban.remove_detail")),
