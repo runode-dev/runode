@@ -715,7 +715,10 @@ impl RemoteHost {
                 }
                 Ok(Start::Probe(platform)) => {
                     let status = child.wait().map_err(|err| Failure::Retry(err.to_string()))?;
-                    let Some(platform) = platform.filter(|_| status.code() == Some(bootstrap::PROBE_EXIT)) else {
+                    // 默认 shell 是 Windows PowerShell 时，它只按成败交回 0 或 1，Windows 上认不出 `PROBE_EXIT`；
+                    // Windows 的脚本只在没装这个构建时打出平台信息，打出了就算。
+                    let probed = family == Family::Windows || status.code() == Some(bootstrap::PROBE_EXIT);
+                    let Some(platform) = platform.filter(|_| probed) else {
                         // 没打出平台信息、ssh 也没报连接或认证的错，多半是 Windows：cmd 把 Unix 脚本里的 `|`、`>`
                         // 当成管道和重定向，退出码也可能是 255，不能按退出码认。
                         let unix_log = std::fs::read(&log).unwrap_or_default();
@@ -1301,7 +1304,7 @@ mod tests {
     /// 对着真的 SSH 主机连：`RUNODE_TEST_SSH_HOST` 是连接目标，`RUNODE_SSH_BINARY`（或按平台的那个）指向那台
     /// 机器上跑得起来的 runode。ssh 要问（认主机指纹、要口令）时经 `RUNODE_TEST_ASKPASS` 指的本机 runode 问，
     /// 指纹答 yes，口令答 `RUNODE_TEST_SSH_SECRET`。连上、列会话，掐断 ssh
-    /// 后自己重连上，经项目服务读远端，传文件，有主连接时再试端口转发。
+    /// 后自己重连上，经项目服务读远端，传文件，有主连接、远端不是 Windows 时再试端口转发。
     #[test]
     #[ignore = "needs an ssh host"]
     fn connects_and_reconnects_to_a_real_host() {
@@ -1352,8 +1355,14 @@ mod tests {
         let files = vec![local.join("a/same.txt"), local.join("b/same.txt"), local.join("c")];
         let paths = upload::upload(&host, upload::Upload::Files(files)).expect("upload");
         assert_ne!(paths[0], paths[1]);
+        let windows = host.family() == super::Family::Windows;
         let read = |path: &str| {
-            let mut command = host.exec(&ssh(), &format!("cat {path}"), true, false);
+            let script = if windows {
+                format!(r#"cmd /d /c "type {}""#, path.replace('/', "\\"))
+            } else {
+                format!("cat {path}")
+            };
+            let mut command = host.exec(&ssh(), &script, true, false);
             let output = runode_ssh::process::output(command.stdin(std::process::Stdio::null())).unwrap();
             String::from_utf8(output.stdout).unwrap()
         };
@@ -1368,8 +1377,9 @@ mod tests {
             let asked = ASKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             assert!(asked.contains(&runode_ssh::askpass::Kind::Secret), "ssh never asked through askpass: {asked:?}");
         }
-        // 远端只在自己那里听的端口，经转发在本机打得开；转发挂在主连接上，没有主连接时不试。
-        if ssh().control.is_none() {
+        // 远端只在自己那里听的端口，经转发在本机打得开；转发挂在主连接上，没有主连接时不试。起来听的服务用的是
+        // Unix 远端的 python3，Windows 远端也不试。
+        if ssh().control.is_none() || windows {
             host.disconnect();
             return;
         }
