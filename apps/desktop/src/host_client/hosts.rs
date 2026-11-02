@@ -212,9 +212,10 @@ pub(super) fn holding_new_hosts() -> bool {
     HOLD_NEW.load(Ordering::Relaxed)
 }
 
-/// 把配置里宿主关心的部分（`messages`）告诉各台远端主机的宿主，之后新连的主机也照它。
+/// 把配置里宿主关心的部分（`messages`）告诉各台 SSH 主机的宿主，之后新连的主机也照它。配对的电脑不发：那边的
+/// 宿主照那台电脑自己的配置走。
 pub fn configure(messages: Vec<ClientMsg>) {
-    for host in remotes() {
+    for host in remotes().into_iter().filter(|host| matches!(host, HostId::Ssh(_))) {
         let link = link_of(&host);
         for message in &messages {
             link.send(message.clone());

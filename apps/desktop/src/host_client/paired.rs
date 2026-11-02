@@ -252,7 +252,6 @@ impl std::fmt::Debug for PairedHost {
 impl PairedHost {
     fn new(id: String) -> Self {
         let link = Link::with_timeouts(build(), Timeouts::REMOTE);
-        hosts::send_host_options(&link);
         Self {
             id,
             link,

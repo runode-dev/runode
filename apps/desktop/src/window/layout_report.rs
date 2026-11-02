@@ -180,6 +180,8 @@ pub(super) fn report_change(cx: &mut App) {
             hosts.extend(view.workspaces.iter().map(|workspace| workspace.host.clone()));
         }
     }
+    // 配对的电脑上的宿主记的是那台电脑自己的窗口布局，这边的不报给它，免得盖掉。
+    hosts.retain(|host| !matches!(host, HostId::Paired(_)));
     hosts.sort();
     hosts.dedup();
     let frozen = super::persist::frozen(cx);
