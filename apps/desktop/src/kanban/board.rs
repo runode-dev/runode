@@ -39,7 +39,7 @@ use super::{
 use crate::gh::{Checks, PullRequest};
 
 /// 一列最窄这么宽（基准字号下的点数）；窗口放不下四列时横着滚。
-const COLUMN_MIN_WIDTH: f32 = 240.;
+const COLUMN_MIN_WIDTH: f32 = 168.;
 /// 进行中那一列的圆点。
 const IN_PROGRESS_COLOR: u32 = 0x3B82F6;
 /// 换列的卡片飞多久。
@@ -316,13 +316,14 @@ impl Kanban {
         let window_hint = (column == Column::Done).then(|| {
             div()
                 .flex_1()
+                .min_w_0()
                 .flex()
                 .items_center()
                 .gap(px(8.))
                 .text_size(FontSize::Small)
                 .text_color(fg.opacity(0.4))
                 .font_weight(FontWeight::NORMAL)
-                .child(rust_i18n::t!("kanban.done_window").into_owned())
+                .child(div().min_w_0().truncate().child(rust_i18n::t!("kanban.done_window").into_owned()))
                 .child(div().flex_1())
                 .child(history_link("todo-done-history").on_press(cx, |this, _, cx| this.show_history(None, cx)))
         });
@@ -423,7 +424,6 @@ impl Kanban {
             .when(self.in_review(todo, data, now), |row| {
                 row.child(Badge::new(rust_i18n::t!("kanban.in_review").into_owned()).variant(BadgeVariant::Secondary))
             })
-            .children(corner)
             // 没有编号（0）时不写。
             .when(todo.number > 0, |row| row.child(div().flex_none().child(format!("#{}", todo.number))));
         // 分支单独一行，和目录挤在一行时窄列里两个都截得认不出。
@@ -456,7 +456,19 @@ impl Kanban {
                     .child(footer.join(" · ")),
             )
             .children(primary);
+        // 悬停时的操作按钮浮在右上角、盖住编号和目录名，不占顶上那一行：窄列里三五个按钮排进去会把卡片撑破。
+        let corner = corner.map(|corner| {
+            corner
+                .absolute()
+                .top(px(6.))
+                .right(px(8.))
+                .p(px(2.))
+                .rounded(px(6.))
+                .bg(bg)
+                .shadow(card_shadow(None, false))
+        });
         div()
+            .relative()
             .flex_none()
             .px(px(12.))
             .py(px(10.))
@@ -473,6 +485,7 @@ impl Kanban {
             .children(pull)
             .child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(todo.spec.title.clone()))
             .child(bottom)
+            .children(corner)
     }
 
     /// 待评审：在「需要你」那一列、分支上的 PR 开着、agent 也没在等回答，要用户去看的是 PR。
@@ -605,7 +618,7 @@ impl Kanban {
                 );
             }
         }
-        let corner = (!buttons.is_empty()).then(|| div().flex_none().flex().gap(px(2.)).my(px(-4.)).children(buttons));
+        let corner = (!buttons.is_empty()).then(|| div().flex().gap(px(2.)).children(buttons));
         let face = self.card_face(todo, data, now, named("todo-agent", &todo.id), corner, primary, cx);
         let geometry = self.geometry.clone();
         let (up_id, down_id, hover_id, bounds_id) = (id.clone(), id.clone(), id.clone(), id);
