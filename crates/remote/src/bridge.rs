@@ -15,6 +15,7 @@
 
 mod frames;
 pub(crate) mod push;
+pub(crate) mod unpair;
 
 use std::{
     io::{self, Read as _, Write as _},

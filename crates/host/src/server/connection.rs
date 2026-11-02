@@ -611,6 +611,9 @@ impl Connection {
             ClientMsg::PushRegister { req, .. } => {
                 self.error(Some(req), None, "only a remote device registers for push through remote access".into());
             }
+            ClientMsg::Unpair { req } => {
+                self.error(Some(req), None, "only a remote device unpairs itself through remote access".into());
+            }
             ClientMsg::KeepAwake => {}
             ClientMsg::Unknown => self.error(None, None, "unknown message".into()),
         }

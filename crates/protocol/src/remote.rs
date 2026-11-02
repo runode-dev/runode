@@ -45,7 +45,8 @@
 //!    `ClientMsg::remote_refusal` 挡下的请求不转给宿主，宿主在发往客户端的方向、两帧之间回一条
 //!    `HostMsg::Error`（挡下的都不带 `req` 和会话，`Error` 也就不带），连接照旧。登记推送的
 //!    `ClientMsg::PushRegister`（见 `push`）也不转给宿主，由监听方按这台设备记下，
-//!    同样在两帧之间回 `HostMsg::Done`（办不了时回带 `req` 的 `Error`）。
+//!    同样在两帧之间回 `HostMsg::Done`（办不了时回带 `req` 的 `Error`）。解除配对的 `ClientMsg::Unpair`
+//!    也一样由监听方办，回 `Done` 后撤掉这台设备。
 //!
 //! # 配对
 //!
@@ -160,6 +161,7 @@ impl crate::ClientMsg {
             | WriteClipboard { .. }
             | ReadClipboard { .. }
             | PushRegister { .. }
+            | Unpair { .. }
             | KeepAwake
             | ListTodos { .. }
             | AddTodo { .. }

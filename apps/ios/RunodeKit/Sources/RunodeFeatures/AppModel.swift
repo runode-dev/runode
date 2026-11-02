@@ -110,6 +110,8 @@ public final class AppModel {
 
     @ObservationIgnored private let dependencies: AppDependencies
     @ObservationIgnored private var sessionLists: [UUID: SessionListModel] = [:]
+    /// 发出去、在等电脑回话的解除配对（`ClientMsg.unpair`），按电脑。
+    @ObservationIgnored private var unpairing: [UUID: (req: UInt32, reply: CheckedContinuation<Bool, Never>)] = [:]
     @ObservationIgnored private var terminals: [Route: TerminalModel] = [:]
     @ObservationIgnored private var gits: [Route: GitModel] = [:]
     @ObservationIgnored private var screens: [Route: ScreenModel] = [:]
@@ -375,8 +377,14 @@ public final class AppModel {
             Task { [weak self] in await self?.machineList.purge(id) }
         case .state(let state) where !state.isConnected:
             push.disconnected(id)
+            if let pending = unpairing[id] { answerUnpair(id, req: pending.req, agreed: false) }
         case .message(let message):
             push.handle(message, from: id)
+            switch message {
+            case .done(let req): answerUnpair(id, req: req, agreed: true)
+            case .error(.some(let req), _, _): answerUnpair(id, req: req, agreed: false)
+            default: break
+            }
         default:
             break
         }
@@ -492,16 +500,45 @@ public final class AppModel {
     /// 时为真。
     private func forget(machine id: UUID) async -> Bool {
         path.removeAll { $0.machine == id }
-        let unregistered = await push.unregister(id, timeout: .seconds(2))
+        let unregistered = await leave(machine: id, timeout: .seconds(2))
         push.forget(id)
         sessionLists[id]?.stop()
         sessionLists[id] = nil
         return unregistered
     }
 
+    /// 请电脑忘掉这部手机：先请它解除配对（推送登记一起删），电脑不认得这条请求、没回话时退回只注销推送。
+    /// 电脑那边办好了（或者本来就没登记推送）时为真。
+    private func leave(machine id: UUID, timeout: Duration) async -> Bool {
+        if await unpair(machine: id, timeout: timeout) { return true }
+        return await push.unregister(id, timeout: timeout)
+    }
+
+    /// 连着这台电脑时请它解除配对，等回话最多 `timeout`；回了 `Done` 时为真。没连着时不发、不等。
+    private func unpair(machine id: UUID, timeout: Duration) async -> Bool {
+        guard let list = sessionLists[id], list.linkState.isConnected else { return false }
+        let req = list.link.nextRequestId()
+        return await withCheckedContinuation { reply in
+            if let earlier = unpairing[id] { answerUnpair(id, req: earlier.req, agreed: false) }
+            unpairing[id] = (req, reply)
+            list.link.send(.unpair(req: req))
+            Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                self?.answerUnpair(id, req: req, agreed: false)
+            }
+        }
+    }
+
+    /// 解除配对 `req` 有了结果：电脑回了话、断开了或者等不及了。
+    private func answerUnpair(_ id: UUID, req: UInt32, agreed: Bool) {
+        guard let pending = unpairing[id], pending.req == req else { return }
+        unpairing[id] = nil
+        pending.reply.resume(returning: agreed)
+    }
+
     /// 删掉时没注销成推送的电脑（`MachineRecord.deletedAt`）又连上了：注销好了才真删掉。
     private func finishDeleting(machine id: UUID) async {
-        guard await push.unregister(id, timeout: .seconds(5)) else { return }
+        guard await leave(machine: id, timeout: .seconds(5)) else { return }
         await machineList.purge(id)
     }
 

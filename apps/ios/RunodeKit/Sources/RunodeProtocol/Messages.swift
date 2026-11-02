@@ -106,6 +106,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 记进配对设备表，不到宿主。
     case pushRegister(
         req: UInt32, token: String?, env: ApnsEnv, bundle: String, machine: String, machineName: String)
+    /// 不再连这台电脑：电脑上的远程访问把这部手机从配对设备表里撤掉（推送登记一起），回 `Done`，随后断开。
+    /// 不到宿主。
+    case unpair(req: UInt32)
     /// 看着终端时每隔一小会儿发一条，宿主不回：一直有包来回，iPhone 的 Wi-Fi 就不省电，打字不卡。只发给在
     /// `Welcome` 里说认得它的宿主。
     case keepAwake
@@ -217,6 +220,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(bundle, forKey: Key("bundle"))
             try c.encode(machine, forKey: Key("machine"))
             try c.encode(machineName, forKey: Key("machine_name"))
+        case .unpair(let req):
+            try c.encode("unpair", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
         case .keepAwake:
             try c.encode("keep_awake", forKey: Key("type"))
         }

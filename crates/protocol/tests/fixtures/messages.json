@@ -1899,6 +1899,10 @@
       },
       "type": "theme_applied"
     },
+    "unpair": {
+      "req": 9,
+      "type": "unpair"
+    },
     "welcome": {
       "build": "0.1.0+abc",
       "handoff": 1,

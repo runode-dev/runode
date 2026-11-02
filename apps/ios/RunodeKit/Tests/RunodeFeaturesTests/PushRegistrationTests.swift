@@ -53,6 +53,14 @@ struct SentRegistration: Equatable {
 }
 
 extension FakeLink {
+    /// 发出去的解除配对的请求编号，按先后。
+    var unpairs: [UInt32] {
+        sent.compactMap {
+            guard case .unpair(let req) = $0 else { return nil }
+            return req
+        }
+    }
+
     /// 发出去的登记推送，按先后。
     var registrations: [SentRegistration] {
         sent.compactMap {
@@ -426,8 +434,8 @@ private let secondToken = Data([0x01, 0x02])
         #expect(preferences.load()?.alertsBlockedAgents == false)
     }
 
-    /// 删掉连着的电脑：先注销推送，电脑回了话才断开、删掉记录，免得电脑以后还往这部手机推它的提醒。
-    @Test func deletingAConnectedMachineUnregistersFirst() async throws {
+    /// 删掉连着的电脑：先请电脑解除配对（推送登记一起删），电脑回了话才断开、删掉记录，不用另外注销推送。
+    @Test func deletingAConnectedMachineUnpairsFirst() async throws {
         let app = await app()
         system.give(token: Data([0xab]))
         #expect(await eventually { app.push.token == "ab" })
@@ -435,52 +443,72 @@ private let secondToken = Data([0x01, 0x02])
         connect(list)
         #expect(await eventually { link.registrations.count == 1 })
         let deleting = Task { await app.machineList.delete(machine.id) }
-        #expect(await eventually { link.registrations.count == 2 })
-        #expect(link.registrations.last?.token == nil)
-        #expect(link.registrations.last?.machine == machine.id.uuidString)
+        #expect(await eventually { link.unpairs.count == 1 })
         try await Task.sleep(for: .milliseconds(20))
         // 还在等回话：没断开，记录也还在。
         #expect(link.stops == 0)
         #expect(app.machineList.machine(machine.id) != nil)
-        let req = try #require(link.registrations.last?.req)
-        list.handle(.message(.done(req: req)))
+        list.handle(.message(.done(req: try #require(link.unpairs.first))))
         await deleting.value
         #expect(app.machineList.machines.isEmpty)
+        #expect(await store.all().isEmpty)
         #expect(await eventually { link.stops == 1 })
+        #expect(link.registrations.count == 1)
         #expect(app.push.statuses[machine.id] == nil)
     }
 
-    /// 没连着的电脑删掉时不发注销，也不等；记录和私钥留着，下次连上时只注销、不登记，电脑回了话才真删。
-    @Test func aDisconnectedMachineIsUnregisteredWhenItConnects() async throws {
+    /// 电脑不肯解除配对（宿主回错）时退回只注销推送，注销好了照样删掉，免得电脑以后还往这部手机推它的提醒。
+    @Test func aComputerThatCannotUnpairIsUnregistered() async throws {
+        let app = await app()
+        system.give(token: Data([0xab]))
+        #expect(await eventually { app.push.token == "ab" })
+        let list = try #require(app.sessionList(for: machine.id))
+        connect(list)
+        #expect(await eventually { link.registrations.count == 1 })
+        let deleting = Task { await app.machineList.delete(machine.id) }
+        #expect(await eventually { link.unpairs.count == 1 })
+        list.handle(.message(.error(req: try #require(link.unpairs.first), id: nil, message: "unknown message")))
+        #expect(await eventually { link.registrations.count == 2 })
+        #expect(link.registrations.last?.token == nil)
+        #expect(link.registrations.last?.machine == machine.id.uuidString)
+        list.handle(.message(.done(req: try #require(link.registrations.last?.req))))
+        await deleting.value
+        #expect(app.machineList.machines.isEmpty)
+        #expect(await eventually { link.stops == 1 })
+    }
+
+    /// 没连着的电脑删掉时什么都不发，也不等；记录和私钥留着，下次连上时请它解除配对、不登记推送，电脑回了话
+    /// 才真删。
+    @Test func aDisconnectedMachineIsUnpairedWhenItConnects() async throws {
         let app = await app()
         system.give(token: Data([0xab]))
         #expect(await eventually { app.push.token == "ab" })
         await app.machineList.delete(machine.id)
         #expect(app.machineList.machines.isEmpty)
-        #expect(link.registrations.isEmpty)
+        #expect(link.sent.isEmpty)
         #expect(try keys.key(for: machine.id) != nil)
         #expect(!app.showsNotification(for: SessionLink(machine: machine.id, session: "1")))
         let list = try #require(app.sessionList(for: machine.id))
         connect(list)
-        #expect(await eventually { link.registrations.count == 1 })
-        #expect(link.registrations.first?.token == nil)
+        #expect(await eventually { link.unpairs.count == 1 })
         try await Task.sleep(for: .milliseconds(20))
-        #expect(link.registrations.count == 1)
-        let req = try #require(link.registrations.first?.req)
-        list.handle(.message(.done(req: req)))
+        #expect(link.registrations.isEmpty)
+        list.handle(.message(.done(req: try #require(link.unpairs.first))))
         #expect(await eventually { app.machineList.leaving.isEmpty })
         #expect(await store.all().isEmpty)
         #expect(try keys.key(for: machine.id) == nil)
     }
 
-    /// 删掉没连着的电脑后，连上时电脑回错（登记还在）：照样留着等下次；电脑撤销了这部手机：直接真删。
-    @Test func aLeavingMachineStaysUntilItIsReallyUnregistered() async throws {
+    /// 删掉没连着的电脑后，连上时解除配对和注销推送都回错：照样留着等下次；电脑撤销了这部手机：直接真删。
+    @Test func aLeavingMachineStaysUntilItIsReallyForgotten() async throws {
         let app = await app()
         system.give(token: Data([0xab]))
         #expect(await eventually { app.push.token == "ab" })
         await app.machineList.delete(machine.id)
         let list = try #require(app.sessionList(for: machine.id))
         connect(list)
+        #expect(await eventually { link.unpairs.count == 1 })
+        list.handle(.message(.error(req: try #require(link.unpairs.first), id: nil, message: "unknown message")))
         #expect(await eventually { link.registrations.count == 1 })
         let req = try #require(link.registrations.first?.req)
         list.handle(.message(.error(req: req, id: nil, message: "cannot write the device table")))

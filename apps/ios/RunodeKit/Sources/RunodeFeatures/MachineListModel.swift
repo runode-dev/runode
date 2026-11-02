@@ -20,7 +20,8 @@ public final class MachineListModel {
 
     @ObservationIgnored private let store: any MachineStore
     @ObservationIgnored private let keyStore: any DeviceKeyStore
-    /// 删掉一台电脑之前先注销推送、断开它的连接、退出它的页面；电脑那边注销好了（或者本来就没登记）时为真。
+    /// 删掉一台电脑之前先请电脑忘掉这部手机（解除配对，电脑不认得时只注销推送）、断开它的连接、退出它的页面；
+    /// 电脑那边办好了（或者本来就没登记推送）时为真。
     @ObservationIgnored public var willDelete: @MainActor (UUID) async -> Bool = { _ in true }
     /// 每次重新读完列表（配对、改名、删除之后都会读）以后调，`AppModel` 据此给每台电脑建好连接。
     @ObservationIgnored public var didLoad: @MainActor () -> Void = {}

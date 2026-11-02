@@ -75,7 +75,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         "list_tasks", "spawn",
         "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
         "read_screen", "read_screen_command", "send_keys", "paste",
-        "push_register", "push_unregister", "keep_awake",
+        "push_register", "push_unregister", "keep_awake", "unpair",
     ])
     func matchesTheHost(_ name: String) throws {
         let message: ClientMsg =
@@ -117,6 +117,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
                     req: 11, token: nil, env: .development, bundle: "cn.barey.runode",
                     machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF", machineName: "Ethan 的 MacBook Pro")
             case "keep_awake": .keepAwake
+            case "unpair": .unpair(req: 9)
             default: .listSessions
             }
         #expect(try sameJSON(JSONEncoder().encode(message), RustSamples.data(name)))
@@ -157,13 +158,13 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .sendKeys(req: 1, id: id, keys: ["enter"]), .paste(req: 2, id: id, text: "y"),
             .git(req: 3, id: id, request: .status),
             .pushRegister(req: 4, token: "00", env: .production, bundle: "b", machine: "m", machineName: "n"),
-            .keepAwake,
+            .unpair(req: 5), .keepAwake,
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
             case .hello, .listSessions, .layout, .open, .openWorkspace, .renameWorkspace, .listDirs, .listTasks,
                 .spawn, .attach, .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git, .pushRegister,
-                .keepAwake:
+                .unpair, .keepAwake:
                 true
             }
         }

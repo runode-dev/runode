@@ -23,7 +23,7 @@ use runode_protocol::{
 use rustls::{ServerConnection, StreamOwned};
 
 use crate::{
-    bridge::{bridge, push::PushRequests},
+    bridge::{bridge, push::PushRequests, unpair::UnpairRequests},
     devices::{self, Device},
     files::random,
     listener::Shared,
@@ -123,8 +123,11 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     drop(sock);
     tcp.set_read_timeout(None)?;
     tcp.set_write_timeout(None)?;
-    let mut push = PushRequests { dirs: &shared.dirs, device: device_id };
-    bridge(&mut conn, tcp, &host, cut, terminal, &mut push);
+    let mut local = (
+        PushRequests { dirs: &shared.dirs, device: device_id },
+        UnpairRequests { dirs: &shared.dirs, device: device_id },
+    );
+    bridge(&mut conn, tcp, &host, cut, terminal, &mut local);
     let _ = host.shutdown(Shutdown::Both);
     // 关了连接以后（Windows 上 `serve` 收尾时只关读的一边也一样）对面再发来什么，连接马上被重置，已经交给
     // 系统、手机还没读走的输出跟着丢掉：先只关写的一边，等手机读完、自己关了再收尾。

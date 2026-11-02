@@ -24,6 +24,13 @@ pub(crate) trait LocalRequests {
     fn handle(&mut self, message: &ClientMsg) -> Option<HostMsg>;
 }
 
+/// 两样请求合在一条连接上办：先问前一个，不归它的再问后一个。
+impl<A: LocalRequests, B: LocalRequests> LocalRequests for (A, B) {
+    fn handle(&mut self, message: &ClientMsg) -> Option<HostMsg> {
+        self.0.handle(message).or_else(|| self.1.handle(message))
+    }
+}
+
 /// 手机发来的明文按帧过一遍，见模块文档。
 #[derive(Default)]
 pub(crate) struct FromPhone {

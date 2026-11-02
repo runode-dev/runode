@@ -249,6 +249,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
             },
         ),
         ("keep_awake", ClientMsg::KeepAwake),
+        ("unpair", ClientMsg::Unpair { req: 9 }),
     ];
 
     let host = [
