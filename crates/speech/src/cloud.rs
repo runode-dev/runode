@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
 use crate::{
-    SAMPLE_RATE,
+    SAMPLE_RATE, audio,
     http::{self, Body, Response},
 };
 
@@ -32,7 +32,7 @@ pub struct Polish {
 
 /// 把 `SAMPLE_RATE` 的单声道录音交给云端识别。`words` 是热词，帮云端认出专有名词。
 pub fn transcribe_cloud(cloud: &Cloud, samples: &[f32], words: &[String]) -> anyhow::Result<String> {
-    let audio = http::wav(samples, SAMPLE_RATE);
+    let audio = audio::wav(samples, SAMPLE_RATE);
     match cloud {
         Cloud::OpenAi { url, key, model } => {
             let mut fields = vec![("model", model.clone()), ("response_format", "json".to_owned())];
@@ -109,7 +109,7 @@ fn doubao_body(audio: &[u8], words: &[String]) -> Value {
     json!({
         "user": {"uid": "runode"},
         "audio": {
-            "data": http::base64(audio),
+            "data": audio::base64(audio),
             "format": "wav",
             "rate": SAMPLE_RATE,
             "bits": 16,

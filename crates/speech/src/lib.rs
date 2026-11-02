@@ -1,6 +1,7 @@
 //! 语音转文字：识别模型的清单和下载（`models`）、录麦克风（`Recorder`）、在本机识别（`Recognizer`），
 //! 以及交给云端识别和用大模型润色（`cloud`）。
 
+mod audio;
 mod cloud;
 mod http;
 mod models;
