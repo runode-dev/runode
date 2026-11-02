@@ -704,10 +704,13 @@ impl RemoteHost {
                     return Ok(running);
                 }
                 Ok(Start::Failed(failure)) => {
+                    drop(stdin);
                     let _ = child.wait();
                     return Err(Failure::Retry(format!("{}: {}", failure.code, failure.message)));
                 }
                 Ok(Start::Probe(platform)) => {
+                    // 远端脚本已经退出；Windows 的 ssh 还要等到 stdin 读完才退，不关就一直等下去。
+                    drop(stdin);
                     let status = child.wait().map_err(|err| Failure::Retry(err.to_string()))?;
                     // 默认 shell 是 Windows PowerShell 时，它只按成败交回 0 或 1，Windows 上认不出 `PROBE_EXIT`；
                     // Windows 的脚本只在没装这个构建时打出平台信息，打出了就算。
