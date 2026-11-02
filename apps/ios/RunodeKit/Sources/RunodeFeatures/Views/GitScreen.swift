@@ -551,11 +551,14 @@
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            Text(target.path)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
+                            // 标题已是文件名，仓库根上的文件不重复写路径。
+                            if Presentation.gitPathParts(target.path).directory != nil {
+                                Text(target.path)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                            }
                             let hunkWords = words?.diff == diff ? words?.hunks : nil
                             ForEach(Array(diff.hunks.enumerated()), id: \.offset) { ix, hunk in
                                 GitHunkView(hunk: hunk, words: hunkWords?[ix])
