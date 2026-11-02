@@ -106,7 +106,7 @@
 
         private var subtitle: String? {
             if let action = model.running { return Presentation.gitRunning(action) }
-            return Presentation.directory(model.status?.root) ?? "Git"
+            return Presentation.directory(model.status?.root)
         }
 
         @ViewBuilder
