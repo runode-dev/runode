@@ -5,6 +5,10 @@
 //! 连接断开时换回原来的。macOS 上这个进程退出时系统也会换回去；Windows 上不会，换过的屏幕另记进
 //! `screen_modes_file`，由看守进程（`runode --screen-guard`，`guard`）等这个进程退出后照着换回去。观看端要画面改走
 //! UDP（`Datagram`）时开一个 `runode_remote::datagram::Sender`，打通以后画面改经它发（`Outbox::route`）。
+//! 连上它的一头在 `client`，经 ssh 接过来的在 `ssh`。
+
+pub mod client;
+pub mod ssh;
 
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
