@@ -49,7 +49,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, Conversation, Frame, FrameError, FrameKind, HostMsg,
     PROTOCOL_VERSION, SessionId, SessionInfo, ShellProfile, ShellReport, TaskSource, WindowLayout, read_frame,
-    write_frame,
+    write_control, write_frame,
 };
 use runode_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
@@ -1019,9 +1019,8 @@ fn handshake(stream: &UnixStream, build: &BuildId, timeout: Duration) -> Result<
         session: None,
         device: device_name(),
     };
-    let frame = Frame::control(&hello).map_err(|err| ConnectError::Io(io::Error::other(err)))?;
     let mut writer = stream;
-    write_frame(&mut writer, frame.kind, 0, &frame.payload).map_err(frame_error)?;
+    write_control(&mut writer, &hello).map_err(frame_error)?;
     stream.set_read_timeout(Some(timeout)).map_err(ConnectError::Io)?;
     // 不经缓冲读：缓冲会把握手之后的帧也读走。
     let mut reader = stream;

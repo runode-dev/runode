@@ -9,7 +9,7 @@ use std::{
 };
 
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION, read_frame, write_frame,
+    BuildId, Caps, ClientKind, ClientMsg, FrameKind, HostMsg, PROTOCOL_VERSION, read_frame, write_control,
 };
 
 use super::{
@@ -315,8 +315,7 @@ fn hello(build: &BuildId, client: ClientKind) -> ClientMsg {
 }
 
 fn send(stream: &mut UnixStream, message: &ClientMsg) -> io::Result<()> {
-    let frame = Frame::control(message).map_err(io::Error::other)?;
-    write_frame(stream, frame.kind, 0, &frame.payload).map_err(|err| io::Error::other(err.to_string()))
+    Ok(write_control(stream, message)?)
 }
 
 /// 下一条控制消息；连接断了时返回错误。

@@ -37,9 +37,9 @@ use std::{
 
 use runode_paths::Dirs;
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION,
+    BuildId, Caps, ClientKind, ClientMsg, FrameKind, HostMsg, PROTOCOL_VERSION,
     push::{ApnsEnv, Notification, OFFICIAL_BUNDLE, RELAY_URL},
-    read_frame, write_frame,
+    read_frame, write_control,
 };
 
 pub use self::probe::{TestPush, send_test_push};
@@ -525,8 +525,7 @@ impl HostLink {
     }
 
     fn send(&self, message: &ClientMsg) -> io::Result<()> {
-        let frame = Frame::control(message).map_err(io::Error::other)?;
-        write_frame(&mut &self.stream, frame.kind, frame.channel, &frame.payload).map_err(io::Error::other)
+        Ok(write_control(&mut &self.stream, message)?)
     }
 }
 

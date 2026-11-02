@@ -16,9 +16,9 @@ use std::{
 };
 
 use runode_protocol::{
-    AtPrompt, BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart,
+    AtPrompt, BuildId, Caps, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart,
     HandoffRefusal, HostMsg, OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, WindowLayout, decode_part,
-    read_frame, write_frame,
+    read_frame, write_control,
 };
 use runode_terminal::{
     fd_passing,
@@ -567,8 +567,7 @@ fn release_all(handles: &[(SessionId, Handle)]) {
 }
 
 fn send(stream: &UnixStream, message: &ClientMsg) -> io::Result<()> {
-    let frame = Frame::control(message).map_err(|err| io::Error::other(err.to_string()))?;
-    write_frame(&mut &*stream, frame.kind, 0, &frame.payload).map_err(|err| io::Error::other(err.to_string()))
+    Ok(write_control(&mut &*stream, message)?)
 }
 
 /// 读下一条控制消息。不经缓冲地读，只读这一帧的字节：之后的描述符消息要用 `recvmsg` 收。

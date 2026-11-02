@@ -17,8 +17,8 @@ use std::os::unix::net::UnixStream;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId,
-    WindowLayout, read_frame, write_frame,
+    BuildId, Caps, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId, WindowLayout,
+    read_frame, write_control, write_frame,
 };
 #[cfg(windows)]
 use uds_windows::UnixStream;
@@ -111,15 +111,17 @@ pub(crate) fn probe(env: &Env) -> Result<Option<Running>> {
         Err(err) => return Err(err).with_context(|| format!("cannot connect to {}", socket.display())),
     };
     stream.set_read_timeout(Some(REPLY_TIMEOUT))?;
-    let hello = Frame::control(&ClientMsg::Hello {
-        protocol: PROTOCOL_VERSION,
-        build: BuildId(env.build.clone()),
-        client: ClientKind::Cli,
-        caps: Caps::default(),
-        session: None,
-        device: None,
-    })?;
-    write_frame(&mut stream, hello.kind, hello.channel, &hello.payload)?;
+    write_control(
+        &mut stream,
+        &ClientMsg::Hello {
+            protocol: PROTOCOL_VERSION,
+            build: BuildId(env.build.clone()),
+            client: ClientKind::Cli,
+            caps: Caps::default(),
+            session: None,
+            device: None,
+        },
+    )?;
     loop {
         let frame = read_frame(&mut stream)?.ok_or_else(|| anyhow!(CLOSED))?;
         if frame.kind != FrameKind::Control {
@@ -221,9 +223,7 @@ impl Connection {
     }
 
     pub(crate) fn send(&self, message: &ClientMsg) -> Result<()> {
-        let frame = Frame::control(message)?;
-        write_frame(&mut &self.stream, frame.kind, frame.channel, &frame.payload)
-            .map_err(|err| anyhow!("lost the runode app: {err}"))
+        write_control(&mut &self.stream, message).map_err(|err| anyhow!("lost the runode app: {err}"))
     }
 
     pub(crate) fn input(&self, channel: u32, data: &[u8]) -> Result<()> {

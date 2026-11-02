@@ -8,7 +8,7 @@ use runode_config::Config;
 use runode_protocol::{
     Frame, FrameKind, read_frame_limited,
     speech::{MAX_AUDIO_SECS, SPEECH_VERSION, SpeechClientMsg, SpeechHostMsg},
-    write_frame,
+    write_control,
 };
 
 use super::worker::{self, MAX_AUDIO_BYTES};
@@ -68,13 +68,13 @@ fn read(stream: &UnixStream) -> anyhow::Result<Frame> {
 }
 
 fn send(stream: &UnixStream, message: &SpeechHostMsg) -> anyhow::Result<()> {
-    let frame = Frame::control(message)?;
-    write_frame(&mut &*stream, frame.kind, frame.channel, &frame.payload)?;
-    Ok(())
+    Ok(write_control(&mut &*stream, message)?)
 }
 
 #[cfg(test)]
 mod tests {
+    use runode_protocol::write_frame;
+
     use super::*;
 
     fn reply(stream: &UnixStream) -> SpeechHostMsg {
@@ -82,8 +82,7 @@ mod tests {
     }
 
     fn hello(stream: &UnixStream, version: u32) {
-        let frame = Frame::control(&SpeechClientMsg::SpeechHello { version }).unwrap();
-        write_frame(&mut &*stream, frame.kind, frame.channel, &frame.payload).unwrap();
+        write_control(&mut &*stream, &SpeechClientMsg::SpeechHello { version }).unwrap();
     }
 
     #[test]

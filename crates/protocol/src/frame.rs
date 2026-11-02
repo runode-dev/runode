@@ -74,6 +74,8 @@ pub enum FrameError {
     UnknownKind(u8),
     /// 一帧读到一半连接就断了。
     Truncated,
+    /// 控制消息编不成 JSON（`write_control`）。
+    Json(serde_json::Error),
 }
 
 impl std::fmt::Display for FrameError {
@@ -83,6 +85,7 @@ impl std::fmt::Display for FrameError {
             Self::TooLong(len) => write!(f, "frame payload of {len} bytes is over the limit"),
             Self::UnknownKind(kind) => write!(f, "unknown frame kind {kind}"),
             Self::Truncated => write!(f, "connection closed in the middle of a frame"),
+            Self::Json(err) => write!(f, "cannot encode a control message: {err}"),
         }
     }
 }
@@ -91,6 +94,7 @@ impl std::error::Error for FrameError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(err) => Some(err),
+            Self::Json(err) => Some(err),
             _ => None,
         }
     }
@@ -99,6 +103,16 @@ impl std::error::Error for FrameError {
 impl From<io::Error> for FrameError {
     fn from(err: io::Error) -> Self {
         Self::Io(err)
+    }
+}
+
+/// 读写帧的 I/O 错误原样交出；别的（超长、类型不认识、截断、编不出 JSON）算作数据不对。
+impl From<FrameError> for io::Error {
+    fn from(err: FrameError) -> Self {
+        match err {
+            FrameError::Io(err) => err,
+            err => io::Error::new(io::ErrorKind::InvalidData, err),
+        }
     }
 }
 
@@ -129,6 +143,12 @@ pub fn read_frame_limited(reader: &mut impl Read, limit: u32) -> Result<Option<F
         return Err(FrameError::Truncated);
     }
     Ok(Some(Frame { kind, channel, payload }))
+}
+
+/// 把 `message` 编成 JSON，当作通道 0 的控制帧写出去（`Frame::control`、`write_frame`）。
+pub fn write_control(writer: &mut impl Write, message: &impl serde::Serialize) -> Result<(), FrameError> {
+    let frame = Frame::control(message).map_err(FrameError::Json)?;
+    write_frame(writer, frame.kind, frame.channel, &frame.payload)
 }
 
 /// 写一帧，帧头和载荷一起写出去。载荷超过 `MAX_PAYLOAD` 时什么都不写，返回错误；快照这类
