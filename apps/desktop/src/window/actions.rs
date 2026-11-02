@@ -1,8 +1,8 @@
-//! 窗口绑定的动作：新建、关闭和切换 workspace、标签与分屏，以及调整、放大分屏。
+//! 窗口绑定的动作和它们共用的守卫（`act`）：新建、关闭和切换 workspace、标签与分屏，以及调整、放大分屏。
 
 use std::path::PathBuf;
 
-use gpui::{Bounds, Context, Entity, EntityId, Pixels, Window};
+use gpui::{Action, App, Bounds, Context, Entity, EntityId, Pixels, Window};
 use runode_types::pane::{self, Axis, Direction, SplitId};
 
 use super::{
@@ -17,6 +17,23 @@ use crate::terminal_view::TerminalView;
 const RESIZE_STEP: f32 = 10.;
 
 impl WindowView {
+    /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板开着新建任务那一页以外的对话框，或者
+    /// `modal_dialog_open` 时不理。
+    pub(super) fn act<A: Action>(
+        cx: &mut Context<Self>,
+        f: fn(&mut Self, &A, &mut Window, &mut Context<Self>),
+    ) -> impl Fn(&A, &mut Window, &mut App) + 'static {
+        cx.listener(move |this, action, window, cx| {
+            if (this.dialog_open(cx) && !this.drafting(cx)) || this.modal_dialog_open() {
+                return;
+            }
+            this.close_settings(window, cx);
+            this.acting = true;
+            f(this, action, window, cx);
+            this.acting = false;
+        })
+    }
+
     /// 切到目录是 `dir` 的 workspace（目录按规范化后的比，经过符号链接也认得出），给了 `name` 就改成
     /// 这个名字；还没有时在当前 workspace 下面新建一个，`name` 为空时按目录取名。规范化在别的线程上做
     /// （`inspect_dir`），做完才办。
