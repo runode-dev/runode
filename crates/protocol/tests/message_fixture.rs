@@ -342,7 +342,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                     hunks: vec![GitHunk {
                         header: "@@ -1,2 +1,2 @@ fn main".into(),
                         lines: vec![
-                            GitLine { kind: GitLineKind::Context, old: Some(1), new: Some(1), text: "keep".into() },
+                            GitLine { kind: GitLineKind::Context, old: Some(1), new: Some(1), text: "\tkeep".into() },
                             GitLine { kind: GitLineKind::Removed, old: Some(2), new: None, text: "old".into() },
                             GitLine { kind: GitLineKind::Added, old: None, new: Some(2), text: "new".into() },
                         ],

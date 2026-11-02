@@ -323,6 +323,22 @@ import Testing
         #expect(a.count == 1 && b.count == 1)
     }
 
+    @Test func tabsAreComparedAsWritten() {
+        #expect(changed("\tx = 1", "\tx = 2") == (["1"], ["2"]))
+        // 缩进从空格换成制表符算改了。
+        #expect(changed("    let x = 1;", "\tlet x = 1;") == (["    "], ["\t"]))
+    }
+
+    @Test func displayExpandsTabsToTabStops() {
+        let text = "\tab\tc"
+        let segments = Presentation.gitDisplaySegments(text, [])
+        #expect(segments.map(\.text) == ["    ab  c"])
+        // 改了的字跟着换到展开后的文字上，前面的制表位照算。
+        let c = text.index(before: text.endIndex)
+        let marked = Presentation.gitDisplaySegments(text, [c..<text.endIndex])
+        #expect(marked.map(\.text) == ["    ab  ", "c"] && marked.map(\.changed) == [false, true])
+    }
+
     @Test func rewrittenLinesAreNotMarked() {
         #expect(changed("fn alpha() {}", "let beta = gamma;") == ([], []))
     }

@@ -371,7 +371,7 @@
                 "kind": "context",
                 "new": 1,
                 "old": 1,
-                "text": "keep"
+                "text": "\tkeep"
               },
               {
                 "kind": "removed",

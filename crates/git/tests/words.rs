@@ -30,19 +30,14 @@ fn insertion_marks_only_the_new_side() {
 }
 
 #[test]
-fn expanded_tabs_match_raw_tabs() {
-    let (a, b) = changed_words("    x = 1", "\tx = 2");
-    assert_eq!(changed("    x = 1", &a), ["1"]);
+fn tabs_are_compared_as_written() {
+    let (a, b) = changed_words("\tx = 1", "\tx = 2");
+    assert_eq!(changed("\tx = 1", &a), ["1"]);
     assert_eq!(changed("\tx = 2", &b), ["2"]);
-}
-
-#[test]
-fn tabs_count_as_expanded_for_the_rewrite_cutoff() {
-    // 相同的缩进按四格算，占了长的那行的四分之一以上，两种写法、两个方向都照常标。
-    for (old, new) in [("\tfoo", "    bar"), ("    bar", "\tfoo"), ("    foo", "    bar")] {
-        let (a, b) = changed_words(old, new);
-        assert_eq!((a.len(), b.len()), (1, 1), "{old:?} -> {new:?}");
-    }
+    // 缩进从空格换成制表符算改了。
+    let (a, b) = changed_words("    let x = 1;", "\tlet x = 1;");
+    assert_eq!(changed("    let x = 1;", &a), ["    "]);
+    assert_eq!(changed("\tlet x = 1;", &b), ["\t"]);
 }
 
 #[test]

@@ -78,7 +78,7 @@ fn keeps_tabs_and_missing_final_newline() {
     let snapshot = read(&repo);
     let a = file(&snapshot, Section::Unstaged, "a.txt");
     assert_eq!(a.hunks.len(), 2);
-    assert_eq!(a.hunks[0].lines[1].text, "    FIRST");
+    assert_eq!(a.hunks[0].lines[1].text, "\tFIRST");
     snapshot.repo().apply_hunk(a, 1, HunkAction::Stage).unwrap();
     assert_eq!(repo.git(&["cat-file", "blob", ":a.txt"]), "\tfirst\n2\n3\n4\n5\n6\n7\n8\n9\nLAST");
     snapshot.repo().apply_hunk(a, 0, HunkAction::Stage).unwrap();

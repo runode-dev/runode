@@ -75,7 +75,7 @@ fn merges_hunks_into_the_whole_file() {
 fn shifts_old_numbers_after_additions_and_keeps_tabs() {
     let diff = file(vec![Hunk {
         header: "@@ -1,0 +2,2 @@".into(),
-        lines: vec![line(A, None, Some(2), "    x"), line(A, None, Some(3), "y")],
+        lines: vec![line(A, None, Some(2), "\tx"), line(A, None, Some(3), "y")],
     }]);
     let new = lines(&["a", "\tx", "y", "b"]);
     let rows = merge_rows(&diff, &new).unwrap();
@@ -150,7 +150,7 @@ fn reads_whole_file_diffs() {
     // 未跟踪的文件整篇是加的，删掉的文件整篇是删的。
     repo.write("new.txt", "x\n\ty\n");
     let new = handle.file_view(Path::new("new.txt"), None, &DiffSide::Worktree).unwrap().unwrap();
-    assert_eq!(render(&new), ["@@", "+x", "+    y"]);
+    assert_eq!(render(&new), ["@@", "+x", "+\ty"]);
     assert_eq!(new.new_line(2), Some("\ty"));
     std::fs::remove_file(repo.path().join("a.txt")).unwrap();
     let gone = handle.file_view(path, None, &DiffSide::Worktree).unwrap().unwrap();

@@ -79,7 +79,7 @@ import Testing
         #expect(diff.hunks.first?.header == "@@ -1,2 +1,2 @@ fn main")
         #expect(
             diff.hunks.first?.lines == [
-                GitLine(kind: .context, old: 1, new: 1, text: "keep"),
+                GitLine(kind: .context, old: 1, new: 1, text: "\tkeep"),
                 GitLine(kind: .removed, old: 2, text: "old"),
                 GitLine(kind: .added, new: 2, text: "new"),
             ])

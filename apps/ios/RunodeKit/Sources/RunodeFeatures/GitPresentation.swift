@@ -188,6 +188,38 @@ extension Presentation {
         return words
     }
 
+    /// diff 里一行显示出来的样子，切成几段，每段标着是不是改了的字（`words`，`text` 里的范围）：制表符按
+    /// `gitTabWidth` 列一个的制表位展开成空格，一个字算一列。
+    public static func gitDisplaySegments(_ text: String, _ words: [Range<String.Index>]) -> [(text: String, changed: Bool)] {
+        var column = 0
+        func expand(_ part: Substring) -> String {
+            var out = ""
+            for c in part {
+                if c == "\t" {
+                    let width = gitTabWidth - column % gitTabWidth
+                    out += String(repeating: " ", count: width)
+                    column += width
+                } else {
+                    out.append(c)
+                    column += 1
+                }
+            }
+            return out
+        }
+        var segments: [(text: String, changed: Bool)] = []
+        var at = text.startIndex
+        for range in words {
+            if at < range.lowerBound { segments.append((expand(text[at..<range.lowerBound]), false)) }
+            segments.append((expand(text[range]), true))
+            at = range.upperBound
+        }
+        if at < text.endIndex { segments.append((expand(text[at...]), false)) }
+        return segments
+    }
+
+    /// 制表符对齐到这么多列的倍数，和电脑上 `runode_preview::TAB_WIDTH` 一样。
+    public static let gitTabWidth = 4
+
     /// `old` 改成 `new` 时两边各自改了的范围：切成词，求最长公共子序列，没对上的就是改了的。规则和电脑上
     /// 的 `changed_words` 一样，改一边要跟着改另一边。
     public static func gitChangedWords(_ old: String, _ new: String) -> ([Range<String.Index>], [Range<String.Index>]) {

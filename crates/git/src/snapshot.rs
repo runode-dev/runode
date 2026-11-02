@@ -11,7 +11,7 @@ use std::{
 
 use crate::{
     Repo, RepoInfo, RepoKind, filter_overrides, find_repo, git, git_with, info,
-    parse::{expand_tabs, parse_diff, parse_status, status_sections},
+    parse::{parse_diff, parse_status, status_sections},
     repos,
 };
 
@@ -73,7 +73,7 @@ pub struct Line {
     /// 在旧文件和新文件里的行号；新增的行没有旧行号，删掉的行没有新行号。
     pub old: Option<u32>,
     pub new: Option<u32>,
-    /// 去掉开头的 `+`、`-` 或空格，制表符换成空格。
+    /// 去掉开头的 `+`、`-` 或空格。
     pub text: String,
 }
 
@@ -592,7 +592,7 @@ pub(crate) fn read_untracked(full: &Path, path: PathBuf, read: bool) -> FileDiff
                 .iter()
                 .take(MAX_FILE_LINES)
                 .zip(1..)
-                .map(|(text, n)| Line { kind: LineKind::Added, old: None, new: Some(n), text: expand_tabs(text) })
+                .map(|(text, n)| Line { kind: LineKind::Added, old: None, new: Some(n), text: (*text).to_owned() })
                 .collect(),
         });
     }

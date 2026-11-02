@@ -2,9 +2,7 @@
 
 use std::{ffi::OsString, path::Path};
 
-use crate::{
-    FileDiff, FileStatus, GitError, Hunk, LineKind, Repo, Result, ops::run, parse::expand_tabs, snapshot::diff_args,
-};
+use crate::{FileDiff, FileStatus, GitError, Hunk, LineKind, Repo, Result, ops::run, snapshot::diff_args};
 
 /// 对一块改动做什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,7 +79,7 @@ fn same_hunk(raw: &[&[u8]], hunk: &Hunk) -> bool {
                 // 「\ No newline at end of file」。
                 _ => return None,
             };
-            Some((kind, expand_tabs(&line_text(&line[1..]))))
+            Some((kind, line_text(&line[1..])))
         })
         .collect();
     if lines.len() != hunk.lines.len() {
@@ -94,7 +92,7 @@ impl Repo {
     /// 对 `file` 的第 `hunk` 块（`file.hunks` 的下标）做 `action`。暂存和丢弃时 `file` 来自
     /// 未暂存段，撤回时来自已暂存段；只接受 `hunk_actionable` 的文件。
     ///
-    /// `FileDiff` 里的行把制表符展开了，也丢了「\ No newline at end of file」，不能拿来拼补丁：
+    /// `FileDiff` 里的行丢了「\ No newline at end of file」，不能拿来拼补丁：
     /// 这里重新跑一次这个文件的 `git diff` 取原样的输出，按块头找到同一块、核对每一行，再把
     /// 文件头加这一块交给 `git apply`。找不到（文件在这之后又改过）时报错，刷新后重试即可。
     pub fn apply_hunk(&self, file: &FileDiff, hunk: usize, action: HunkAction) -> Result {

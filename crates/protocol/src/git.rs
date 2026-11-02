@@ -162,7 +162,7 @@ pub struct GitLine {
     pub old: Option<u32>,
     #[serde(default)]
     pub new: Option<u32>,
-    /// 去掉开头的 `+`、`-` 或空格，制表符换成了空格。
+    /// 去掉开头的 `+`、`-` 或空格，其余是原文（制表符照留，显示时由前端按制表位展开）。
     pub text: String,
 }
 

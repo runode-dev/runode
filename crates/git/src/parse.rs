@@ -195,7 +195,7 @@ pub(crate) fn parse_diff(text: &str) -> Vec<FileDiff> {
             continue;
         }
         if let Some(hunk) = file.hunks.last_mut() {
-            hunk.lines.push(Line { kind, old: numbers.0, new: numbers.1, text: expand_tabs(text) });
+            hunk.lines.push(Line { kind, old: numbers.0, new: numbers.1, text: text.to_owned() });
         }
     }
     files
@@ -254,10 +254,6 @@ fn unquote(text: &str) -> PathBuf {
         }
     }
     PathBuf::from(&crate::os_str(&bytes))
-}
-
-pub(crate) fn expand_tabs(text: &str) -> String {
-    text.replace('\t', "    ")
 }
 
 #[cfg(test)]

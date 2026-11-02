@@ -639,15 +639,11 @@
         private var text: AttributedString {
             if line.text.isEmpty { return AttributedString(" ") }
             var text = AttributedString()
-            var at = line.text.startIndex
-            for range in words {
-                text += AttributedString(line.text[at..<range.lowerBound])
-                var word = AttributedString(line.text[range])
-                word.backgroundColor = tint?.opacity(0.4)
-                text += word
-                at = range.upperBound
+            for segment in Presentation.gitDisplaySegments(line.text, words) {
+                var part = AttributedString(segment.text)
+                if segment.changed { part.backgroundColor = tint?.opacity(0.4) }
+                text += part
             }
-            text += AttributedString(line.text[at...])
             return text
         }
 

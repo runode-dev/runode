@@ -10,7 +10,6 @@ use std::{
 
 use crate::{
     FileDiff, FileStatus, GitError, LineKind, Repo, Result, filter_overrides, git,
-    parse::expand_tabs,
     snapshot::{MAX_DIFF_BYTES, diff, read_untracked, worktree_bytes},
 };
 
@@ -113,7 +112,7 @@ pub fn merge_rows(file: &FileDiff, new_lines: &[String]) -> Option<Vec<DiffRow>>
         for (li, line) in hunk.lines.iter().enumerate() {
             if line.kind != LineKind::Removed {
                 let text = new_lines.get(usize::try_from(new).ok()?.checked_sub(1)?)?;
-                if expand_tabs(text) != line.text {
+                if *text != line.text {
                     return None;
                 }
                 new += 1;
