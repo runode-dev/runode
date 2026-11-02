@@ -98,10 +98,10 @@ impl WindowView {
         if !self.leave_todo_page(window, cx) {
             return;
         }
-        let alone = self.kanban.is_none();
+        let alone = self.kanban_page().is_none();
         self.show_kanban(false, window, cx);
         let draft = self.todo_draft.take();
-        if let Some(board) = &self.kanban {
+        if let Some(board) = self.kanban_page() {
             board.view.update(cx, |board, cx| board.new_todo(alone, draft, window, cx));
         }
     }
@@ -109,7 +109,7 @@ impl WindowView {
     /// 用户要去别处：写到一半的新建任务那一页收起来留着（`todo_draft`），看板只为这一页开着时一起收起，
     /// 否则露出看板；开着别的对话框或页时为假，留在原处，免得丢掉写了一半的内容。
     pub(super) fn leave_todo_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) else { return true };
+        let Some(board) = self.kanban_page().map(|board| board.view.clone()) else { return true };
         let alone = board.read(cx).creating();
         if let Some(draft) = board.update(cx, |board, cx| board.take_draft(window, cx)) {
             self.todo_draft = Some(draft);
@@ -122,17 +122,17 @@ impl WindowView {
 
     /// 看板开着写到一半的新建任务那一页，离开时能收起来留着（`leave_todo_page`）。
     pub(super) fn drafting(&self, cx: &App) -> bool {
-        self.kanban.as_ref().is_some_and(|board| board.view.read(cx).drafting(cx))
+        self.kanban_page().is_some_and(|board| board.view.read(cx).drafting(cx))
     }
 
     /// 看板的新建、编辑对话框或任务那一页开着：换页、收起或再开一个会丢掉写了一半的内容。
     pub(super) fn dialog_open(&self, cx: &App) -> bool {
-        self.kanban.as_ref().is_some_and(|board| board.view.read(cx).editing())
+        self.kanban_page().is_some_and(|board| board.view.read(cx).editing())
     }
 
     /// 关掉看板里新建、编辑任务那一页，新建的收起来留着；没开着时为假。
     fn close_todo_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) else { return false };
+        let Some(board) = self.kanban_page().map(|board| board.view.clone()) else { return false };
         if let Some(draft) = board.update(cx, |board, cx| board.take_draft(window, cx)) {
             self.todo_draft = Some(draft);
             return true;
@@ -142,7 +142,7 @@ impl WindowView {
 
     /// 看板开着，显示的是定时页（`schedules`）或任务页；只为新建任务开着时都不算。
     fn showing_todo_page(&self, schedules: bool, cx: &App) -> bool {
-        self.kanban.as_ref().is_some_and(|board| {
+        self.kanban_page().is_some_and(|board| {
             let board = board.view.read(cx);
             !board.creating() && board.showing_schedules() == schedules
         })
@@ -153,7 +153,7 @@ impl WindowView {
         self.leave_mobile(cx);
         self.drop_settings(cx);
         self.leave_screen_page(window, cx);
-        match &self.kanban {
+        match self.kanban_page() {
             Some(board) => board.view.update(cx, |board, cx| board.show_schedules(schedules, cx)),
             None => {
                 let view = cx.new(|cx| Kanban::new(AGENT_MARKS, schedules, cx));
@@ -162,17 +162,17 @@ impl WindowView {
                 let input = self.kanban_input(false, cx);
                 view.update(cx, |board, _| board.set_input(input));
                 let events = cx.subscribe_in(&view, window, Self::on_kanban_event);
-                self.kanban = Some(OpenKanban { view, _events: events });
+                self.page = Some(super::Page::Kanban(OpenKanban { view, _events: events }));
             }
         }
-        if let Some(board) = &self.kanban {
+        if let Some(board) = self.kanban_page() {
             window.focus(&board.view.focus_handle(cx), cx);
         }
         cx.notify();
     }
 
     pub(super) fn close_kanban(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.kanban.take().is_some() {
+        if self.drop_kanban() {
             window.focus(&self.focus_handle(cx), cx);
             cx.notify();
         }
@@ -203,7 +203,7 @@ impl WindowView {
             .flat_map(|tab| &tab.panes)
             .find_map(|(pane, (terminal, _))| (terminal.read(cx).session_id() == Some(id)).then_some(*pane));
         if let Some(pane) = own {
-            self.kanban = None;
+            self.drop_kanban();
             self.show_pane(pane, window, cx);
             return;
         }
@@ -221,7 +221,7 @@ impl WindowView {
                 return;
             }
         };
-        self.kanban = None;
+        self.drop_kanban();
         let (dir, worktree) = (todo.spec.dir.clone(), todo.worktree_dir.clone());
         // 目录也许在挂死的网络卷上，规范化在别的线程上做（`inspect_dir`），做好再摆。
         cx.spawn_in(window, async move |this, cx| {
@@ -256,7 +256,7 @@ impl WindowView {
     /// 侧栏顶上的新建任务入口，只为新建任务开着那一页时高亮。
     pub(super) fn render_new_todo_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("kanban.new_todo").into_owned();
-        let active = self.kanban.as_ref().is_some_and(|board| board.view.read(cx).creating());
+        let active = self.kanban_page().is_some_and(|board| board.view.read(cx).creating());
         super::mobile::page_entry("new-todo-entry", PLUS_ICON, label.clone(), active, cx, |this, window, cx| {
             this.new_todo(&NewTodo, window, cx);
         })
@@ -311,7 +311,7 @@ impl WindowView {
 
     /// 看板开着时窗口的内容，摆法和手机端引导页一样。
     pub(super) fn render_todo_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let Some(board) = self.kanban.as_ref().map(|board| board.view.clone()) else { return Vec::new() };
+        let Some(board) = self.kanban_page().map(|board| board.view.clone()) else { return Vec::new() };
         // 要读自启文件，只在定时那一页显示着时才查：窗口几乎每帧都重画。
         let resident = board.read(cx).showing_schedules()
             && cx.global::<AppConfig>().0.terminal_host
@@ -334,7 +334,7 @@ impl WindowView {
 
     /// 看板开着的新建、编辑对话框，画在窗口最上层。
     pub(super) fn todo_dialog(&self, cx: &App) -> Option<Entity<TodoDialog>> {
-        self.kanban.as_ref().and_then(|board| board.view.read(cx).dialog(cx))
+        self.kanban_page().and_then(|board| board.view.read(cx).dialog(cx))
     }
 }
 

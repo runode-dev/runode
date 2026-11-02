@@ -57,17 +57,6 @@ impl WindowView {
         true
     }
 
-    /// 收起盖着终端区的看板、手机端引导页，好让预览露出来；看板不让走时返回假。
-    fn leave_pages(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if !self.leave_todo_page(window, cx) {
-            return false;
-        }
-        self.leave_mobile(cx);
-        self.kanban = None;
-        self.leave_screen_page(window, cx);
-        true
-    }
-
     /// 标签条滚到露出当前的标签。
     fn reveal_front_tab(&self, cx: &App) {
         if let Some(front) = self.front_tab(cx) {

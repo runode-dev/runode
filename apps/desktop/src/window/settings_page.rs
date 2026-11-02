@@ -41,26 +41,28 @@ impl WindowView {
             return;
         }
         self.leave_mobile(cx);
-        self.kanban = None;
+        self.drop_kanban();
         self.leave_screen_page(window, cx);
         self.new_workspace = None;
         self.add_task = None;
         self.commit_message_dialog = None;
-        let page = self.settings.get_or_insert_with(|| {
+        if self.settings_page().is_none() {
             let this = cx.entity().downgrade();
             let view = cx.new(|cx| SettingsView::new(move |cx| super::ssh::hosts_in_use(&this, cx), window, cx));
             let close =
                 cx.subscribe_in(&view, window, |this, _, _: &Close, window, cx| this.close_settings(window, cx));
-            SettingsPage { view, _close: close }
-        });
-        window.focus(&page.view.focus_handle(cx), cx);
+            self.page = Some(super::Page::Settings(SettingsPage { view, _close: close }));
+        }
+        if let Some(page) = self.settings_page() {
+            window.focus(&page.view.focus_handle(cx), cx);
+        }
         cx.notify();
     }
 
     /// 打开设置页的 SSH 主机列表。
     pub(super) fn open_ssh_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_settings(window, cx);
-        if let Some(page) = &self.settings {
+        if let Some(page) = self.settings_page() {
             page.view.update(cx, |view, cx| view.show_ssh_hosts(window, cx));
         }
     }
@@ -100,7 +102,10 @@ impl WindowView {
 
     /// 收起设置页，不动焦点；之前开着时返回真。
     pub(super) fn drop_settings(&mut self, cx: &mut App) -> bool {
-        let Some(page) = self.settings.take() else { return false };
+        let Some(super::Page::Settings(page)) = self.page.take_if(|page| matches!(page, super::Page::Settings(_)))
+        else {
+            return false;
+        };
         page.view.update(cx, |view, cx| view.commit_all(cx));
         true
     }

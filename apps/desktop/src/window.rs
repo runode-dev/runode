@@ -316,12 +316,8 @@ pub struct WindowView {
     add_task: Option<tasks::AddTaskDialog>,
     /// Git 面板里 AI 写提交说明的对话框。
     commit_message_dialog: Option<git_panel::CommitMessageDialog>,
-    /// 开着的手机端引导页，盖住标签和分屏。
-    mobile: Option<mobile::MobilePage>,
-    /// 开着的设置页，盖住整个窗口。
-    settings: Option<settings_page::SettingsPage>,
-    /// 开着的看板，和手机端引导页一样盖住标签和分屏；新建、编辑任务和定时的对话框。
-    kanban: Option<kanban::OpenKanban>,
+    /// 开着的整页，同一时刻至多一个。
+    page: Option<Page>,
     /// 开着的远程桌面：占满内容区的那台和看板一样盖住标签和分屏，浮动的浮在上面。
     screen_viewers: screen_viewer::ScreenViewers,
     /// 离开时收起来的写到一半的新建任务那一页，下回新建任务时接着写。
@@ -516,9 +512,7 @@ impl WindowView {
             asks: Default::default(),
             add_task: None,
             commit_message_dialog: None,
-            mobile: None,
-            settings: None,
-            kanban: None,
+            page: None,
             screen_viewers: screen_viewer::ScreenViewers::default(),
             todo_draft: None,
             acting: false,
@@ -673,7 +667,7 @@ impl WindowView {
 
     /// 自己缓存、不跟着窗口重画的整页和浮层视图（`Slot` 之外）：配色或界面配置变了要逐个叫它们重画。
     fn cached_views(&self) -> Vec<EntityId> {
-        let board = self.kanban.as_ref().map(|board| board.view.entity_id());
+        let board = self.kanban_page().map(|board| board.view.entity_id());
         let screens = self.screen_viewers.views().map(Entity::entity_id);
         board.into_iter().chain(screens).chain([self.preview.entity_id()]).collect()
     }
@@ -741,18 +735,74 @@ impl MenuHost for WindowView {
     }
 }
 
+/// 盖在终端区上的整页，同一时刻至多开着一个；换成别的页之前先按各自的规矩收起（`drop_settings`、
+/// `leave_mobile`、`leave_todo_page`）。占满内容区的远程桌面另由 `ScreenViewers` 记着。
+enum Page {
+    /// 设置页，盖住整个窗口。
+    Settings(settings_page::SettingsPage),
+    /// 手机端引导页，盖住标签和分屏。
+    Mobile(Box<mobile::MobilePage>),
+    /// 看板，盖住标签和分屏；新建、编辑任务和定时的对话框也在它身上。
+    Kanban(kanban::OpenKanban),
+}
+
+impl WindowView {
+    fn settings_page(&self) -> Option<&settings_page::SettingsPage> {
+        match &self.page {
+            Some(Page::Settings(page)) => Some(page),
+            _ => None,
+        }
+    }
+
+    fn mobile_page(&self) -> Option<&mobile::MobilePage> {
+        match &self.page {
+            Some(Page::Mobile(page)) => Some(page.as_ref()),
+            _ => None,
+        }
+    }
+
+    fn mobile_page_mut(&mut self) -> Option<&mut mobile::MobilePage> {
+        match &mut self.page {
+            Some(Page::Mobile(page)) => Some(page.as_mut()),
+            _ => None,
+        }
+    }
+
+    fn kanban_page(&self) -> Option<&kanban::OpenKanban> {
+        match &self.page {
+            Some(Page::Kanban(board)) => Some(board),
+            _ => None,
+        }
+    }
+
+    /// 收起盖着终端区的看板、手机端引导页和占满内容区的远程桌面，露出标签和分屏（设置页不动）：看板写到
+    /// 一半的新建任务先收起来留着，手机端引导页改了的电脑名先写回；看板开着别的对话框、不让走时什么都不收，
+    /// 返回假。
+    fn leave_pages(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.leave_todo_page(window, cx) {
+            return false;
+        }
+        self.leave_mobile(cx);
+        self.drop_kanban();
+        self.leave_screen_page(window, cx);
+        true
+    }
+
+    /// 开着的是看板时收起它，不动焦点；之前开着时返回真。
+    fn drop_kanban(&mut self) -> bool {
+        self.page.take_if(|page| matches!(page, Page::Kanban(_))).is_some()
+    }
+}
+
 impl Focusable for WindowView {
     /// 开着设置页、手机端引导页、看板时是它，文件盖着终端区时是预览；否则是有焦点的终端，当前
     /// workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        if let Some(page) = &self.settings {
-            return page.view.focus_handle(cx);
-        }
-        if let Some(page) = &self.mobile {
-            return page.focus.clone();
-        }
-        if let Some(board) = &self.kanban {
-            return board.view.focus_handle(cx);
+        match &self.page {
+            Some(Page::Settings(page)) => return page.view.focus_handle(cx),
+            Some(Page::Mobile(page)) => return page.focus.clone(),
+            Some(Page::Kanban(board)) => return board.view.focus_handle(cx),
+            None => {}
         }
         if let Some(focus) = self.docked_screen_focus(cx) {
             return focus;
@@ -781,12 +831,13 @@ impl Render for WindowView {
         self.begin_screen_frame();
         // 主题刚按这个窗口的配色换上，下面都从它读。
         let theme = cx.theme().clone();
-        let (base, body) = if let Some(page) = &self.settings {
+        let framed = if cards(cx) { theme.frame } else { theme.background };
+        let (base, body) = if let Some(page) = self.settings_page() {
             (theme.background, vec![page.view.clone().into_any_element()])
-        } else if self.mobile.is_some() {
-            (if cards(cx) { theme.frame } else { theme.background }, self.render_mobile_body(window, cx))
-        } else if self.kanban.is_some() {
-            (if cards(cx) { theme.frame } else { theme.background }, self.render_todo_body(window, cx))
+        } else if self.mobile_page().is_some() {
+            (framed, self.render_mobile_body(window, cx))
+        } else if self.kanban_page().is_some() {
+            (framed, self.render_todo_body(window, cx))
         } else if self.screen_docked() {
             (if cards(cx) { theme.frame } else { theme.background }, self.render_screen_body(window, cx))
         } else if cards(cx) {
@@ -807,7 +858,7 @@ impl Render for WindowView {
         let commit_message_dialog = self.render_commit_message_dialog(cx);
         let todo_dialog = self.todo_dialog(cx);
         let asking = ask.is_some();
-        let status_bar = (self.settings.is_none() && status_bar::shown(cx))
+        let status_bar = (self.settings_page().is_none() && status_bar::shown(cx))
             .then(|| row_slot(&self.slots(cx).status_bar, status_bar::STATUS_BAR_HEIGHT, window));
         // 这几个浮层挡住了后面的界面，开着时后面的不报给辅助工具。
         let modal = agent_picker.is_some()
@@ -864,17 +915,18 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::new_split_down))
             // 设置页、看板、手机端引导页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏；
             // 看板的对话框开着时不理。
-            .on_action(cx.listener(|this, action, window, cx| {
-                if this.settings.is_some() {
-                    this.close_settings(window, cx);
-                } else if this.kanban.is_some() {
+            .on_action(cx.listener(|this, action, window, cx| match &this.page {
+                Some(Page::Settings(_)) => this.close_settings(window, cx),
+                Some(Page::Kanban(_)) => {
                     if this.leave_todo_page(window, cx) {
                         this.close_kanban(window, cx);
                     }
-                } else if this.mobile.is_some() {
-                    this.close_mobile(window, cx);
-                } else if !this.close_screen_for_pane(window, cx) {
-                    this.close_pane(action, window, cx);
+                }
+                Some(Page::Mobile(_)) => this.close_mobile(window, cx),
+                None => {
+                    if !this.close_screen_for_pane(window, cx) {
+                        this.close_pane(action, window, cx);
+                    }
                 }
             }))
             .on_action(Self::act(cx, Self::focus_next_pane))

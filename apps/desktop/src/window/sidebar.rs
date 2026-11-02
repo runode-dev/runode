@@ -487,7 +487,7 @@ impl WindowView {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
         // 开着手机端引导页、看板时高亮的是入口。
-        let active = ix == self.active && self.mobile.is_none() && self.kanban.is_none();
+        let active = ix == self.active && !matches!(self.page, Some(super::Page::Mobile(_) | super::Page::Kanban(_)));
         let active_bg = cx.theme().mix(0.10);
         let hover_bg = cx.theme().mix(0.06);
         let close_label = rust_i18n::t!("menu.close_workspace");

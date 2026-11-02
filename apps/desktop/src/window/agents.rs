@@ -218,7 +218,7 @@ impl WindowView {
 
     /// 设置页、手机端引导页、看板或占满内容区的远程桌面盖住了终端区，终端和预览都看不见。
     pub(super) fn page_covers_terminals(&self) -> bool {
-        self.settings.is_some() || self.mobile.is_some() || self.kanban.is_some() || self.screen_docked()
+        self.page.is_some() || self.screen_docked()
     }
 
     /// 前台 agent 从工作中停了下来。停在空闲、用户又没在看时记为 done 并提醒；否则（用户看着、

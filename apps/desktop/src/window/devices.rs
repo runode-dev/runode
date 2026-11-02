@@ -33,8 +33,9 @@ pub fn watch(cx: &mut App) {
     cx.spawn(async move |cx| {
         loop {
             let read = cx.update(|cx| {
-                let shown =
-                    remote::windows(cx).iter().any(|handle| handle.read(cx).is_ok_and(|view| view.mobile.is_some()));
+                let shown = remote::windows(cx)
+                    .iter()
+                    .any(|handle| handle.read(cx).is_ok_and(|view| view.mobile_page().is_some()));
                 shown.then(|| refresh(cx))
             });
             if let Some(read) = read {

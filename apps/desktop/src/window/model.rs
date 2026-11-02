@@ -547,10 +547,7 @@ impl WindowView {
         // 也会走到这里，收了看板写到一半的任务就没了。用户自己按键换的离开新建任务那一页，留着它。
         let keep = self.dialog_open(cx) && !(self.acting && self.drafting(cx));
         if !keep {
-            self.leave_todo_page(window, cx);
-            self.leave_mobile(cx);
-            self.kanban = None;
-            self.leave_screen_page(window, cx);
+            self.leave_pages(window, cx);
             // 焦点要交给终端，盖着终端的预览退到后面。
             self.send_preview_back(cx);
         }

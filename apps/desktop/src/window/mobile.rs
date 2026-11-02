@@ -91,9 +91,9 @@ impl WindowView {
             return;
         }
         self.drop_settings(cx);
-        self.kanban = None;
+        self.drop_kanban();
         self.leave_screen_page(window, cx);
-        if self.mobile.is_none() {
+        if self.mobile_page().is_none() {
             let system_name = host_name();
             let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
             let name = cx.new(|cx| {
@@ -115,7 +115,7 @@ impl WindowView {
             let blurred = cx.on_focus_out(&name.focus_handle(cx), window, |this, _, _, cx| this.save_machine_name(cx));
             // 设备表只在手机端引导页开着时轮询，刚打开时现读，不等下一轮。
             super::devices::refresh(cx).detach();
-            self.mobile = Some(MobilePage {
+            self.page = Some(super::Page::Mobile(Box::new(MobilePage {
                 step: Step::Intro,
                 pairing: Pairing::Idle,
                 focus: cx.focus_handle(),
@@ -126,13 +126,13 @@ impl WindowView {
                 interfaces: Vec::new(),
                 network: None,
                 network_open: false,
-            });
+            })));
         }
         self.focus_mobile(window, cx);
     }
 
     fn focus_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(page) = &self.mobile {
+        if let Some(page) = self.mobile_page() {
             window.focus(&page.focus, cx);
         }
         cx.notify();
@@ -140,7 +140,7 @@ impl WindowView {
 
     /// 输入框里的电脑名和配置里的不一样时写回配置；监听方换上新名字后重新生成二维码。
     fn save_machine_name(&mut self, cx: &mut Context<Self>) {
-        let Some(page) = &self.mobile else { return };
+        let Some(page) = self.mobile_page() else { return };
         let name = page.name.read(cx).query().trim().to_owned();
         let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
         if name == saved {
@@ -156,7 +156,7 @@ impl WindowView {
         match written {
             Ok(_) => self.restart_mobile_pairing(cx),
             Err(err) => {
-                if let Some(page) = &mut self.mobile {
+                if let Some(page) = self.mobile_page_mut() {
                     page.pairing = Pairing::Failed(err);
                 }
             }
@@ -166,7 +166,7 @@ impl WindowView {
 
     /// 二维码已经在或者在等的时候按现在的名字和网络重新生成；还没开始（远程访问没开）时不动。
     fn restart_mobile_pairing(&mut self, cx: &mut Context<Self>) {
-        let Some(page) = &self.mobile else { return };
+        let Some(page) = self.mobile_page() else { return };
         if page.step == Step::Pair && matches!(page.pairing, Pairing::Starting { .. } | Pairing::Waiting(_)) {
             self.start_mobile_pairing(cx);
         }
@@ -174,7 +174,7 @@ impl WindowView {
 
     /// 重读网卡；挑的那个地址没了就回到按系统的顺序。
     fn refresh_interfaces(&mut self) {
-        if let Some(page) = &mut self.mobile {
+        if let Some(page) = self.mobile_page_mut() {
             page.interfaces = local_interfaces();
             if page.network.is_some_and(|addr| !page.interfaces.iter().any(|(_, seen)| *seen == addr)) {
                 page.network = None;
@@ -183,7 +183,7 @@ impl WindowView {
     }
 
     fn pick_network(&mut self, network: Option<IpAddr>, cx: &mut Context<Self>) {
-        if let Some(page) = &mut self.mobile {
+        if let Some(page) = self.mobile_page_mut() {
             page.network = network;
             page.network_open = false;
         }
@@ -192,7 +192,7 @@ impl WindowView {
     }
 
     pub(super) fn close_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.mobile.is_some() {
+        if self.mobile_page().is_some() {
             self.leave_mobile(cx);
             window.focus(&self.focus_handle(cx), cx);
             cx.notify();
@@ -202,15 +202,15 @@ impl WindowView {
     /// 收起手机端引导页。输入框里改了的电脑名先写回：没按回车就切到别处时，页面连同监听失焦的订阅一起
     /// 没了，等不到失焦再写。
     pub(super) fn leave_mobile(&mut self, cx: &mut Context<Self>) {
-        if self.mobile.is_some() {
+        if self.mobile_page().is_some() {
             self.save_machine_name(cx);
-            self.mobile = None;
+            self.page = None;
         }
     }
 
     /// 翻到 `step`。到配对这一步时远程访问开着就马上生成口令，离开时丢掉口令。
     fn go_mobile(&mut self, step: Step, cx: &mut Context<Self>) {
-        let Some(page) = &mut self.mobile else { return };
+        let Some(page) = self.mobile_page_mut() else { return };
         page.step = step;
         page.pairing = Pairing::Idle;
         page.network_open = false;
@@ -222,16 +222,16 @@ impl WindowView {
     }
 
     fn start_mobile_pairing(&mut self, cx: &mut Context<Self>) {
-        if let Some(page) = &mut self.mobile {
+        if let Some(page) = self.mobile_page_mut() {
             let extra = page.network.into_iter().collect();
-            page.pairing.start(|this: &mut Self| this.mobile.as_mut().map(|page| &mut page.pairing), extra, cx);
+            page.pairing.start(|this: &mut Self| this.mobile_page_mut().map(|page| &mut page.pairing), extra, cx);
         }
     }
 
     /// 在配置里打开远程访问，等监听方开好就生成口令。
     fn turn_on_remote_access(&mut self, cx: &mut Context<Self>) {
         if let Err(err) = crate::config::set("remote-access", "true", cx) {
-            if let Some(page) = &mut self.mobile {
+            if let Some(page) = self.mobile_page_mut() {
                 page.pairing =
                     Pairing::Failed(rust_i18n::t!("settings.write_failed", err = err.to_string()).into_owned());
             }
@@ -244,7 +244,7 @@ impl WindowView {
     /// 侧栏顶上的入口，引导页开着时高亮。
     pub(super) fn render_mobile_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("mobile.entry").into_owned();
-        page_entry("mobile-entry", PHONE_ICON, label, self.mobile.is_some(), cx, |this, window, cx| {
+        page_entry("mobile-entry", PHONE_ICON, label, self.mobile_page().is_some(), cx, |this, window, cx| {
             this.show_mobile(window, cx);
         })
     }
@@ -364,7 +364,7 @@ impl WindowView {
     }
 
     fn render_mobile_page(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let page = self.mobile.as_ref().expect("the mobile page is open");
+        let page = self.mobile_page().expect("the mobile page is open");
         let theme = &cx.theme().clone();
         let content = match page.step {
             Step::Intro => self.render_intro(theme, cx),
@@ -741,7 +741,7 @@ impl WindowView {
             .child(div().min_w_0().truncate().child(label(page.network)))
             .child(svg().flex_none().path(CHEVRON_DOWN_ICON).size(px(14.)).text_color(theme.foreground.opacity(0.5)))
             .on_press(cx, |this, _, cx| {
-                if let Some(page) = &mut this.mobile {
+                if let Some(page) = this.mobile_page_mut() {
                     page.network_open = !page.network_open;
                 }
                 cx.notify();

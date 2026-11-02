@@ -385,7 +385,7 @@ impl WindowView {
         }
         self.drop_settings(cx);
         self.leave_mobile(cx);
-        self.kanban = None;
+        self.drop_kanban();
         true
     }
 
