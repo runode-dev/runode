@@ -20,7 +20,7 @@ use std::{
 };
 
 use crate::ui::{
-    a11y::{A11yPress, Press},
+    a11y::{A11yPress, Press, StaticText},
     file_icons::{file_icon, folder_icon},
     font_size::{FontSize, scaled},
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON},
@@ -809,8 +809,7 @@ impl FileTree {
         .p(px(4.));
         let summary = div()
             .id("file-search-summary")
-            .role(Role::Label)
-            .aria_label(summary_text.clone())
+            .aria_static_text(summary_text.clone())
             .flex_none()
             .px(px(10.))
             .pb(px(4.))

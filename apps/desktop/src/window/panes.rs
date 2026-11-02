@@ -31,6 +31,7 @@ use super::{
     titlebar::{pane_label, styled_agent_mark},
 };
 use crate::file_tree::DraggedFile;
+use crate::ui::a11y::StaticText;
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::{
     badge::{Badge, BadgeVariant},
@@ -188,8 +189,7 @@ impl WindowView {
             .child(
                 div()
                     .id("empty-tab-hint")
-                    .role(Role::Label)
-                    .aria_label(rust_i18n::t!("workspace.empty"))
+                    .aria_static_text(rust_i18n::t!("workspace.empty"))
                     .child(rust_i18n::t!("workspace.empty").into_owned()),
             )
             .child(button);

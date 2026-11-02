@@ -5,6 +5,7 @@
 use gpui::{AnyElement, Context, Div, FontWeight, Hsla, Role, SharedString, Stateful, div, prelude::*, px, svg};
 
 use super::{ACTIVE_DOT, PENDING_DOT, PressDown as _, StatusPopover, popover_header};
+use crate::ui::a11y::StaticText;
 use crate::{
     host_client::hosts::{self, HostId, Status},
     ui::icons::{CHEVRON_RIGHT_ICON, MONITOR_ICON, SERVER_ICON},
@@ -146,8 +147,7 @@ impl WindowView {
             .child(
                 div()
                     .id("info")
-                    .role(Role::Label)
-                    .aria_label(format!("{title} · {state}"))
+                    .aria_static_text(format!("{title} · {state}"))
                     .flex_1()
                     .min_w_0()
                     .flex()

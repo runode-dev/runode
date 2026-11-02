@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::ui::{
-    a11y::PressDown,
+    a11y::{PressDown, StaticText},
     actions::InsertFilePath,
     badge::{Badge, BadgeVariant},
     base_name,
@@ -105,8 +105,7 @@ impl GitPanel {
             },
             GitRow::Clean(_) => div()
                 .id(repo_id("git-clean", &repo.root))
-                .role(Role::Label)
-                .aria_label(rust_i18n::t!("panel.no_changes").into_owned())
+                .aria_static_text(rust_i18n::t!("panel.no_changes").into_owned())
                 .flex_none()
                 .h(scaled(ROW_HEIGHT))
                 .w_full()

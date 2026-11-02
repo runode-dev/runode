@@ -13,7 +13,7 @@ use gpui::{
 use runode_git::{self as git, Branch};
 
 use super::super::WindowView;
-use crate::ui::a11y::A11yPress;
+use crate::ui::a11y::{A11yPress, StaticText};
 use crate::ui::popover::Popover;
 use crate::{
     ui::icons::{BRANCH_ICON, CHECK_ICON, PLUS_ICON},
@@ -272,8 +272,7 @@ impl WindowView {
             };
             div()
                 .id("branch-empty")
-                .role(Role::Label)
-                .aria_label(text.clone().into_owned())
+                .aria_static_text(text.clone().into_owned())
                 .px(px(10.))
                 .py(px(10.))
                 .text_color(dim)

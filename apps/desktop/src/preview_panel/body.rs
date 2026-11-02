@@ -20,6 +20,7 @@ use super::{
     BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, marks::Mark, right_fade,
     wrap::segment,
 };
+use crate::ui::a11y::StaticText;
 
 /// 改动标记的宽度；只删了行的地方在下一行顶上画一小段，这么高。
 const MARK_WIDTH: f32 = 3.;
@@ -80,7 +81,7 @@ impl PreviewPanel {
                     Note::NoContent => rust_i18n::t!("panel.no_content").into_owned(),
                     Note::DiffTooLarge => rust_i18n::t!("preview.diff.too_large").into_owned(),
                 };
-                panel_message(text.clone(), cx).id("preview-note").role(Role::Label).aria_label(text).into_any_element()
+                panel_message(text, cx).id("preview-note").into_any_element()
             }
             Some(Loaded::Image(image)) => div()
                 .id("preview-image")
@@ -283,8 +284,7 @@ impl PreviewPanel {
                     let note = rust_i18n::t!("preview.truncated", count = last).into_owned();
                     return row
                         .id(("preview-line", item))
-                        .role(Role::Label)
-                        .aria_label(note.clone())
+                        .aria_static_text(note.clone())
                         .pl(px(gutter + MARK_WIDTH + 8.))
                         .italic()
                         .text_color(dim)
@@ -323,8 +323,7 @@ impl PreviewPanel {
                 };
                 // 每行报成一段文字，辅助工具读得到看得见的这些行；按行选中的也报出来。
                 row.id(("preview-line", item))
-                    .role(Role::Label)
-                    .aria_label(content.clone())
+                    .aria_static_text(content.clone())
                     .aria_selected(selected.contains(&ix))
                     .when(selected.contains(&ix), |row| row.bg(selected_bg))
                     .child(marker)

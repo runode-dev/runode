@@ -45,7 +45,7 @@ use std::{
 use crate::WorkspaceId;
 use crate::ui::{
     self as ui,
-    a11y::A11yPress,
+    a11y::{A11yPress, StaticText},
     actions::{Copy, InsertFilePath, SelectAll},
     base_name,
     button::Toggle,
@@ -1253,8 +1253,7 @@ impl PreviewPanel {
         // 按钮至少留出自己的宽度，路径放不下时截断。
         let path = div()
             .id("preview-path")
-            .role(Role::Label)
-            .aria_label(preview.path.display().to_string())
+            .aria_static_text(preview.path.display().to_string())
             .flex_1()
             .min_w_0()
             .truncate()

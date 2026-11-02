@@ -9,6 +9,7 @@ use gpui::{
 use runode_remote::client::PairedMachine;
 
 use super::{SettingsView, controls::Press as _};
+use crate::ui::a11y::StaticText;
 use crate::{
     host_client::{
         hosts::{self, HostId, Status},
@@ -39,8 +40,7 @@ impl SettingsView {
             return rows.child(
                 div()
                     .id("paired-machines-empty")
-                    .role(Role::Label)
-                    .aria_label(text.clone())
+                    .aria_static_text(text.clone())
                     .py(px(12.))
                     .text_size(FontSize::Body)
                     .text_color(theme.foreground.opacity(0.55))
@@ -138,8 +138,7 @@ impl SettingsView {
                     .children(host_name.map(|host_name| {
                         div()
                             .id("host-name")
-                            .role(Role::Label)
-                            .aria_label(host_name.clone())
+                            .aria_static_text(host_name.clone())
                             .text_size(FontSize::Body)
                             .text_color(theme.foreground.opacity(0.55))
                             .child(host_name)

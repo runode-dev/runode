@@ -10,6 +10,7 @@ use gpui::{
 };
 
 use crate::{
+    a11y::StaticText,
     card::card_style,
     drag_window, hsla,
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, SYNC_ICON},
@@ -83,8 +84,7 @@ pub fn panel_title() -> Div {
 pub fn panel_message(text: String, cx: &App) -> Stateful<Div> {
     div()
         .id("panel-message")
-        .role(Role::Label)
-        .aria_label(text.clone())
+        .aria_static_text(text.clone())
         .flex_1()
         .flex()
         .items_center()

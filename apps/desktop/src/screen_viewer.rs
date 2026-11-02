@@ -41,7 +41,7 @@ use crate::{
         CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MONITOR_ICON, PIN_ICON, POP_IN_ICON, POP_OUT_ICON, REFRESH_ICON,
     },
     ui::{
-        a11y::{A11yPress as _, Press as _},
+        a11y::{A11yPress as _, Press as _, StaticText},
         button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
         icons::CHEVRON_DOWN_ICON,
@@ -1443,7 +1443,7 @@ impl ScreenViewer {
             .child(
                 div()
                     .id("screen-lock-label")
-                    .role(Role::Label)
+                    .aria_static_text(label.clone().into_owned())
                     .text_size(FontSize::Small)
                     .text_color(theme.muted_foreground)
                     .child(label),
@@ -1500,8 +1500,7 @@ impl Render for ScreenViewer {
             div().absolute().inset_0().flex().items_center().justify_center().p(px(24.)).child(
                 div()
                     .id("screen-notice")
-                    .role(Role::Label)
-                    .aria_label(notice.clone())
+                    .aria_static_text(notice.clone())
                     .max_w(scaled(480.))
                     .text_center()
                     .text_size(FontSize::Body)
@@ -1522,8 +1521,7 @@ impl Render for ScreenViewer {
         let banner = banner_text.map(|text| {
             div()
                 .id("screen-banner")
-                .role(Role::Label)
-                .aria_label(text.clone())
+                .aria_static_text(text.clone())
                 .absolute()
                 .top(px(8.))
                 .left(px(8.))

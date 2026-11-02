@@ -12,6 +12,7 @@ use super::{
     controls::{Press, dropdown, row},
     picker::{PickItem, PickTarget, ThemeSlot},
 };
+use crate::ui::a11y::StaticText;
 use crate::{
     i18n::tr,
     ui::font_size::FontSize,
@@ -193,8 +194,7 @@ impl SettingsView {
         let note = |id: &'static str, text: String, color| {
             div()
                 .id(id)
-                .role(Role::Label)
-                .aria_label(text.clone())
+                .aria_static_text(text.clone())
                 .pt(px(10.))
                 .pl(px(4.))
                 .text_size(FontSize::Body)

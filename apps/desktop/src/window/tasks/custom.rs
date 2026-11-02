@@ -25,7 +25,7 @@ use crate::ui::segmented::Segmented;
 use crate::{
     config::AppConfig,
     ui::{
-        a11y::Press,
+        a11y::{Press, StaticText},
         font_size::{FontSize, scaled},
         input::{Input, InputEvent, InputState},
     },
@@ -429,8 +429,7 @@ impl WindowView {
                 panel.child(
                     div()
                         .id("add-task-bound-command")
-                        .role(Role::Label)
-                        .aria_label(command.clone())
+                        .aria_static_text(command.clone())
                         .text_color(fg.opacity(0.7))
                         .child(command.clone()),
                 )
@@ -477,26 +476,13 @@ impl WindowView {
                 let text = rust_i18n::t!("tasks.shortcut_taken", what = what).into_owned();
                 div()
                     .id("add-task-shortcut-taken")
-                    .role(Role::Label)
-                    .aria_label(text.clone())
+                    .aria_static_text(text.clone())
                     .text_color(fg.opacity(0.7))
                     .child(text)
             }))
-            .child(
-                div()
-                    .id("add-task-hint")
-                    .role(Role::Label)
-                    .aria_label(hint.clone())
-                    .text_color(fg.opacity(0.55))
-                    .child(hint),
-            )
+            .child(div().id("add-task-hint").aria_static_text(hint.clone()).text_color(fg.opacity(0.55)).child(hint))
             .children(dialog.error.clone().map(|error| {
-                div()
-                    .id("add-task-error")
-                    .role(Role::Label)
-                    .aria_label(error.clone())
-                    .text_color(gpui::red())
-                    .child(error)
+                div().id("add-task-error").aria_static_text(error.clone()).text_color(gpui::red()).child(error)
             }))
             .child(div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save));
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消。

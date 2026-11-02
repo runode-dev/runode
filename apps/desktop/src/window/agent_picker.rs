@@ -17,6 +17,7 @@ use super::{
     cards,
     titlebar::styled_agent_mark,
 };
+use crate::ui::a11y::StaticText;
 use crate::ui::{
     font_size::{FontSize, scaled},
     input::{InputEvent, InputState},
@@ -174,8 +175,7 @@ impl WindowView {
             };
             div()
                 .id("agent-empty")
-                .role(Role::Label)
-                .aria_label(text.clone())
+                .aria_static_text(text.clone())
                 .px(px(10.))
                 .py(px(10.))
                 .text_color(fg.opacity(0.5))

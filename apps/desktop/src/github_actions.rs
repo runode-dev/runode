@@ -24,7 +24,7 @@ use std::{
 };
 
 use crate::ui::{
-    a11y::{A11yPress, PressDown},
+    a11y::{A11yPress, PressDown, StaticText},
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{self, FontSize, scaled},
     hsla,
@@ -708,8 +708,7 @@ impl ActionsPanel {
             .child(
                 div()
                     .id("actions-login-message")
-                    .role(Role::Label)
-                    .aria_label(text.clone())
+                    .aria_static_text(text.clone())
                     .w_full()
                     .text_center()
                     .text_color(cx.theme().foreground.opacity(0.6))
@@ -1195,8 +1194,7 @@ impl ActionsPanel {
     fn note_row(&self, walk: &mut Walk, depth: usize, text: String, cx: &App) {
         let row = div()
             .id(("actions-note", walk.ix()))
-            .role(Role::Label)
-            .aria_label(text.clone())
+            .aria_static_text(text.clone())
             .flex_none()
             .min_h(scaled(ROW_HEIGHT))
             .w_full()

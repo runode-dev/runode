@@ -18,7 +18,7 @@ use std::{
 };
 
 use crate::ui::{
-    a11y::A11yPress,
+    a11y::{A11yPress, StaticText},
     button::{Button, ButtonSize},
     font_size::FontSize,
     hsla,
@@ -438,17 +438,9 @@ impl PreviewPanel {
             .text_size(FontSize::Body)
             .border_b_1()
             .border_color(cx.theme().border)
+            .child(added_label(view.file.added).id("diff-added").aria_static_text(format!("+{}", view.file.added)))
             .child(
-                added_label(view.file.added)
-                    .id("diff-added")
-                    .role(Role::Label)
-                    .aria_label(format!("+{}", view.file.added)),
-            )
-            .child(
-                removed_label(view.file.removed)
-                    .id("diff-removed")
-                    .role(Role::Label)
-                    .aria_label(format!("-{}", view.file.removed)),
+                removed_label(view.file.removed).id("diff-removed").aria_static_text(format!("-{}", view.file.removed)),
             )
             .child(div().flex_1())
             .child(jump("diff-previous", ARROW_UP_ICON, "preview.diff.previous_change", false))
@@ -664,8 +656,7 @@ impl PreviewPanel {
                 // 每行报成一段文字，前面带着正负号；辅助工具读得到看得见的这些行。
                 let label = if sign.trim().is_empty() { text.clone() } else { format!("{sign} {text}") };
                 base.id(("preview-diff-line", item))
-                    .role(Role::Label)
-                    .aria_label(label)
+                    .aria_static_text(label)
                     .when_some(tint, |row, tint| row.bg(hsla(tint)))
                     .child(number_cell(line_number))
                     .child(div().flex_none().w(px(SIGN_WIDTH)).text_color(dim).child(sign))

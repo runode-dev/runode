@@ -43,7 +43,7 @@ use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, remo
 use crate::host_client::hosts::{self, HostId};
 use crate::project_host::ProjectHost;
 use crate::system_probe::{self as probe, Caffeinate, Helper, POLL_INTERVAL, Port, Procs, Usage};
-use crate::ui::a11y::A11yPress;
+use crate::ui::a11y::{A11yPress, StaticText};
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::menu::MenuHost as _;
 use crate::ui::panel::sync_icon;
@@ -534,8 +534,7 @@ impl WindowView {
             let name = crate::remote_hosts::display_name(host, cx);
             div()
                 .id("status-host")
-                .role(Role::Label)
-                .aria_label(format!("{name} · {state}"))
+                .aria_static_text(format!("{name} · {state}"))
                 .flex_none()
                 .h(px(STATUS_BAR_HEIGHT - 6.))
                 .px(px(6.))
@@ -794,8 +793,7 @@ impl WindowView {
             let n = next_row.replace(next_row.get() + 1);
             div()
                 .id(("resource-row", n))
-                .role(Role::Label)
-                .aria_label(format!("{name} · CPU {} · {}", format_cpu(usage.cpu), format_bytes(usage.memory)))
+                .aria_static_text(format!("{name} · CPU {} · {}", format_cpu(usage.cpu), format_bytes(usage.memory)))
                 .h(scaled(26.))
                 .px(px(12.))
                 .flex()
@@ -1118,8 +1116,7 @@ fn sleep_label(mode: PreventSleep) -> String {
 fn empty_note(text: String, fg: Hsla) -> Stateful<Div> {
     div()
         .id("empty-note")
-        .role(Role::Label)
-        .aria_label(text.clone())
+        .aria_static_text(text.clone())
         .h(scaled(40.))
         .flex()
         .items_center()

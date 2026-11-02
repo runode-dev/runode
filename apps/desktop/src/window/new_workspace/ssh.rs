@@ -28,7 +28,7 @@ use crate::{
     project_host::ProjectHost,
     remote_hosts::{default_name, display_name, has_display_name, status_text},
     ui::{
-        a11y::{A11yPress as _, Press},
+        a11y::{A11yPress as _, Press, StaticText},
         button::{Button, ButtonSize, ButtonVariant},
         file_icons::folder_icon,
         font_size::{FontSize, scaled},
@@ -652,16 +652,9 @@ impl WindowView {
         let Some(browse) = dialog.browse.as_ref() else {
             let text = rust_i18n::t!("workspace.remote_waiting", status = status_text(&hosts::status_of(&dialog.host)))
                 .into_owned();
-            return Some(
-                body.child(
-                    div()
-                        .id("ssh-waiting")
-                        .role(Role::Label)
-                        .aria_label(text.clone())
-                        .text_color(fg.opacity(0.55))
-                        .child(text),
-                ),
-            );
+            return Some(body.child(
+                div().id("ssh-waiting").aria_static_text(text.clone()).text_color(fg.opacity(0.55)).child(text),
+            ));
         };
         // 列表限了高，行不收缩，多出来的滚动。
         let row = |id: SharedString, label: String, icon: AnyElement, dim: bool| {
@@ -728,7 +721,7 @@ impl WindowView {
             )
         });
         let error = browse.error.clone().or_else(|| dialog.error.clone()).map(|error| {
-            div().id("ssh-error").role(Role::Label).aria_label(error.clone()).text_color(fg.opacity(0.7)).child(error)
+            div().id("ssh-error").aria_static_text(error.clone()).text_color(fg.opacity(0.7)).child(error)
         });
         Some(
             body.child(label(dir_label))

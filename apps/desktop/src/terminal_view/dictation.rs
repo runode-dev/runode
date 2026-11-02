@@ -4,13 +4,13 @@
 use std::time::{Duration, Instant};
 
 use gpui::{
-    Context, KeyUpEvent, Modifiers, ModifiersChangedEvent, PromptLevel, Role, Stateful, Task, Window, div, prelude::*,
-    px,
+    Context, KeyUpEvent, Modifiers, ModifiersChangedEvent, PromptLevel, Stateful, Task, Window, div, prelude::*, px,
 };
 use runode_speech::Recorder;
 use runode_types::color::Rgb;
 
 use super::{Dictate, TerminalView};
+use crate::ui::a11y::StaticText;
 use crate::{
     menus::OpenSettings,
     ui::{font_size::FontSize, hsla},
@@ -193,8 +193,7 @@ impl TerminalView {
         Some(
             div()
                 .id("dictation")
-                .role(Role::Label)
-                .aria_label(message.into_owned())
+                .aria_static_text(message.into_owned())
                 .absolute()
                 .bottom(px(6.))
                 .left_0()

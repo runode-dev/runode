@@ -21,7 +21,7 @@ use crate::kanban::{
     templates::{self, Template},
 };
 use crate::ui::{
-    a11y::{Disable as _, Press, PressDown as _},
+    a11y::{Disable as _, Press, PressDown as _, StaticText},
     base_name,
     button::{Button, ButtonVariant},
     chip::Chip,
@@ -1033,8 +1033,7 @@ impl TodoDialog {
                     let hint = rust_i18n::t!("kanban.dialog.unknown_hint").into_owned();
                     div()
                         .id("todo-dialog-unknown")
-                        .role(Role::Label)
-                        .aria_label(hint.clone())
+                        .aria_static_text(hint.clone())
                         .text_size(FontSize::Small)
                         .text_color(fg_h.opacity(0.55))
                         .child(hint)
@@ -1272,12 +1271,7 @@ impl TodoDialog {
     fn render_error(&self, cx: &App) -> Option<impl IntoElement> {
         let destructive = cx.theme().destructive;
         self.error.clone().map(|error| {
-            div()
-                .id("todo-dialog-error")
-                .role(Role::Label)
-                .aria_label(error.clone())
-                .text_color(destructive)
-                .child(error)
+            div().id("todo-dialog-error").aria_static_text(error.clone()).text_color(destructive).child(error)
         })
     }
 
@@ -1340,8 +1334,7 @@ impl TodoDialog {
                 let hint = rust_i18n::t!("kanban.dialog.templates_hint", dir = display_dir(&dir)).into_owned();
                 div()
                     .id("todo-templates-hint")
-                    .role(Role::Label)
-                    .aria_label(hint.clone())
+                    .aria_static_text(hint.clone())
                     .pt(px(8.))
                     .text_size(FontSize::Small)
                     .text_color(fg_h.opacity(0.55))

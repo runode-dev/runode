@@ -1,9 +1,10 @@
 //! 设置页里的控件：一行设置的排版，分段选项、下拉按钮、输入框和色块（按钮用 `Button`，开关用 `Switch`）。颜色在 render
 //! 里从窗口的主题（`Theme`）读，和终端窗口的界面一个色调。
 
+use crate::ui::a11y::StaticText;
 use crate::ui::select::SelectTrigger;
 use crate::ui::theme::Theme;
-use gpui::{AnyElement, Div, ElementId, Entity, Hsla, Role, SharedString, Stateful, div, prelude::*, px};
+use gpui::{AnyElement, Div, ElementId, Entity, Hsla, SharedString, Stateful, div, prelude::*, px};
 
 pub(super) use crate::ui::a11y::Press;
 use crate::ui::{
@@ -117,13 +118,7 @@ pub(super) fn row(
 /// 上次写回失败的原因，用 `Role::Label` 报给辅助工具；`id` 按它属于哪一项取，不按错误文字取，几项同样的
 /// 错误才不会撞 id。
 pub(super) fn error_text(id: impl Into<ElementId>, err: String, theme: &Theme) -> Stateful<Div> {
-    div()
-        .id(id)
-        .role(Role::Label)
-        .aria_label(err.clone())
-        .text_size(FontSize::Small)
-        .text_color(theme.destructive)
-        .child(err)
+    div().id(id).aria_static_text(err.clone()).text_size(FontSize::Small).text_color(theme.destructive).child(err)
 }
 
 /// 点开一个列表从里面挑的按钮：显示当前选的，`leading` 放在它左边（比如主题的色块），右边一个

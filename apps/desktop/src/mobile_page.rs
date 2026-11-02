@@ -23,7 +23,7 @@ use crate::{
     remote_access::pairing::{Pairing, Qr, qr_code},
     ui::icons::{MONITOR_ICON, PHONE_ICON, REFRESH_ICON, TRASH_ICON},
     ui::{
-        a11y::Press,
+        a11y::{Press, StaticText},
         button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
         input::{Input, InputEvent, InputState},
@@ -235,8 +235,7 @@ impl MobilePage {
         let eyebrow_text = rust_i18n::t!("mobile.eyebrow").into_owned();
         let eyebrow = div()
             .id("mobile-eyebrow")
-            .role(Role::Label)
-            .aria_label(eyebrow_text.clone())
+            .aria_static_text(eyebrow_text.clone())
             .flex()
             .items_center()
             .gap(px(8.))
@@ -791,9 +790,9 @@ fn lead(text: String, theme: &Theme) -> Stateful<Div> {
     text_label("mobile-lead", text, theme.foreground.opacity(0.6)).text_size(FontSize::Title).line_height(scaled(24.))
 }
 
-/// 一句报给辅助工具的文字：GPUI 不报文字本身，名字要另外写。
+/// 一句报给辅助工具的文字：GPUI 不报子元素里的文字，要另外写。
 fn text_label(id: &'static str, text: String, color: Hsla) -> Stateful<Div> {
-    div().id(id).role(Role::Label).aria_label(text.clone()).text_color(color).child(text)
+    div().id(id).aria_static_text(text.clone()).text_color(color).child(text)
 }
 
 /// 二维码的外框，作为一张图报给辅助工具，`content` 是码里的链接。
@@ -806,8 +805,7 @@ fn step_line(n: u32, theme: &Theme) -> Stateful<Div> {
     let text = rust_i18n::t!("mobile.step", n = n, total = 2).into_owned();
     div()
         .id("mobile-step")
-        .role(Role::Label)
-        .aria_label(text.clone())
+        .aria_static_text(text.clone())
         .flex()
         .items_center()
         .gap(px(10.))
@@ -847,8 +845,7 @@ fn labeled(id: &'static str, label: String, content: impl IntoElement, hint: Str
 fn notice(id: &'static str, text: String, theme: &Theme) -> Stateful<Div> {
     div()
         .id(id)
-        .role(Role::Label)
-        .aria_label(text.clone())
+        .aria_static_text(text.clone())
         .p(px(14.))
         .rounded(px(10.))
         .bg(theme.mix(0.04))
@@ -864,7 +861,7 @@ fn notice(id: &'static str, text: String, theme: &Theme) -> Stateful<Div> {
 fn placeholder(text: String, theme: &Theme) -> Stateful<Div> {
     div()
         .id("mobile-qr-placeholder")
-        .when(!text.is_empty(), |placeholder| placeholder.role(Role::Label).aria_label(text.clone()))
+        .when(!text.is_empty(), |placeholder| placeholder.aria_static_text(text.clone()))
         .size(px(240.))
         .rounded(px(12.))
         .bg(theme.mix(0.04))

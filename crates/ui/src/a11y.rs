@@ -1,12 +1,13 @@
 //! 让辅助工具（VoiceOver、CUA 这类读 AX 树的自动化工具）认得界面：GPUI 只把同时有 `id` 和 `role`
-//! 的元素报出去，名字用 `aria_label`，状态用 `aria_toggled`、`aria_selected`、`aria_value` 这些。
+//! 的元素报出去，名字用 `aria_label`（`Role::Label` 除外，用 `StaticText`），状态用 `aria_toggled`、
+//! `aria_selected`、`aria_value` 这些。
 //! 这里放几处界面共用的写法。
 
 use std::rc::Rc;
 
 use gpui::{
-    AccessibleAction, ClickEvent, Context, MouseButton, MouseDownEvent, Role, StatefulInteractiveElement, WeakEntity,
-    Window,
+    AccessibleAction, ClickEvent, Context, MouseButton, MouseDownEvent, Role, SharedString, StatefulInteractiveElement,
+    WeakEntity, Window,
 };
 
 /// 点击或辅助工具按下时调 `f`。
@@ -111,3 +112,17 @@ pub trait Hide: StatefulInteractiveElement + Sized {
 }
 
 impl<E: StatefulInteractiveElement> Hide for E {}
+
+/// 报成一段静态文字（`Role::Label`），文字是 `text`：出错、空状态、加载中这些只起提示作用的字，以及
+/// 只读的一行行内容。
+///
+/// AccessKit 的 `Role::Label` 从 value 取文字，Windows 和 Linux 的辅助工具把它当名字读，只给
+/// `aria_label` 时名字是空的；macOS 的 VoiceOver 读静态文字的 `AXValue`，label 和 value 都给可能读两遍。
+/// 所以同一个元素不要再给 `aria_label`；GPUI 也不收子元素里的文字，没给 `text` 就什么也读不到。
+pub trait StaticText: StatefulInteractiveElement + Sized {
+    fn aria_static_text(self, text: impl Into<SharedString>) -> Self {
+        self.role(Role::Label).aria_value(text)
+    }
+}
+
+impl<E: StatefulInteractiveElement> StaticText for E {}

@@ -14,7 +14,7 @@ use std::{
 };
 
 use crate::ui::{
-    a11y::PressDown,
+    a11y::{PressDown, StaticText},
     base_name,
     file_icons::{file_icon, folder_icon},
     font_size::{self, FontSize, scaled},
@@ -607,10 +607,13 @@ impl GitPanel {
             .and_then(|graph| graph.history.as_ref()?.as_ref().ok()?.rows.last())
             .map(|row| (row, lane_geometry(graph.map_or(0, |graph| graph.lanes))));
         // 「加载更多」报成按钮，其余是一句说明。
-        let row = self
-            .git_row(repo_id(&format!("git-graph-note-{note:?}"), &repo.root), 0., cx)
-            .role(if note == GraphNote::More { Role::Button } else { Role::Label })
-            .aria_label(text.clone().into_owned());
+        let row = self.git_row(repo_id(&format!("git-graph-note-{note:?}"), &repo.root), 0., cx).map(|row| {
+            if note == GraphNote::More {
+                row.role(Role::Button).aria_label(text.clone().into_owned())
+            } else {
+                row.aria_static_text(text.clone().into_owned())
+            }
+        });
         let Some((last, (lane, width))) = last else {
             return row
                 .pl(px(8. + INDENT))
@@ -667,8 +670,7 @@ impl GitPanel {
         let commit = self.graph(&repo.root).and_then(|graph| graph.commit(ci)).map(|commit| commit.id.clone());
         let row_id = format!("git-commit-note-{}", commit.unwrap_or_default());
         self.git_row(SharedString::from(row_id), 0., cx)
-            .role(Role::Label)
-            .aria_label(text.clone().into_owned())
+            .aria_static_text(text.clone().into_owned())
             .relative()
             .children(self.lanes_below(&repo.root, ci))
             .pl(px(8. + width + INDENT))

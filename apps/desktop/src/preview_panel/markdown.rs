@@ -42,7 +42,7 @@ use text::{MdText, TextBox, Texts};
 
 use crate::ui::{
     self as ui,
-    a11y::Press,
+    a11y::{Press, StaticText},
     hsla,
     icons::CHECK_ICON,
     input::word_range_at,
@@ -962,7 +962,7 @@ impl PreviewPanel {
                 links = link_nodes(rich, &weak);
                 element.role(Role::Paragraph).aria_label(rich.text.clone())
             }
-            Leaf::AlertTitle(_, title) => element.role(Role::Label).aria_label(title.clone()),
+            Leaf::AlertTitle(_, title) => element.aria_static_text(title.clone()),
             Leaf::Code { source, .. } => element.role(Role::Code).aria_label(source.clone()),
             Leaf::Table { .. } | Leaf::Rule | Leaf::Images(_) => element,
         };

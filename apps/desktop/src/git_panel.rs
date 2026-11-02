@@ -35,7 +35,7 @@ use std::{
 
 use crate::WorkspaceId;
 use crate::ui::{
-    a11y::{Disable, PressDown},
+    a11y::{Disable, PressDown, StaticText},
     actions::{FocusTerminal, InsertFilePath},
     badge::{Badge, BadgeVariant},
     base_name,
@@ -675,8 +675,7 @@ impl GitPanel {
                 .join(" ");
             div()
                 .id(repo_id("git-line-changes", &repo.root))
-                .role(Role::Label)
-                .aria_label(label)
+                .aria_static_text(label)
                 .flex_none()
                 .flex()
                 .gap(px(6.))

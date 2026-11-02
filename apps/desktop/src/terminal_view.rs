@@ -38,6 +38,7 @@ use runode_types::{
     grid::GridSize,
 };
 
+use crate::ui::a11y::StaticText;
 use crate::{
     host_client::{self, LinkEvent, hosts::HostId},
     ui::{a11y::Press, font_size::FontSize, hsla, input::InputState},
@@ -429,8 +430,7 @@ impl TerminalView {
         Some(
             div()
                 .id("link-target")
-                .role(Role::Label)
-                .aria_label(uri.clone())
+                .aria_static_text(uri.clone())
                 .absolute()
                 .bottom(px(6.))
                 .left(px(8.))

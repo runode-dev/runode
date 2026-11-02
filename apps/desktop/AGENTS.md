@@ -10,7 +10,7 @@
 - 自己画出来的内容（canvas、图片、视频帧）要另外给出辅助工具能读、能操作的节点。终端报成文本区域。macOS 把图片当叶子节点，挂在它下面的子节点报不出去，所以要摆子节点的容器用 `Role::Group`。
 - 只给辅助工具用、算起来又费事的节点，看 `Window::is_a11y_active` 再决定画不画，没开时不画。比如 Git 面板里每行都画出的按钮。
 - 缓存的视图（`.cached()`）照搬上一帧时跳过 prepaint，报给辅助工具的节点就丢了，所以辅助工具开着时不缓存，见窗口的 `Slot` 和终端分屏。
-- 出错、空状态、加载中这些只起提示作用的文字，用 `Role::Label` 报出去；`ui` 的 `panel_message` 已经这样做了。
+- 出错、空状态、加载中这些只起提示作用的文字，用 `Role::Label` 报出去，`ui` 的 `panel_message` 已经这样做了。`Role::Label` 的文字放在 `aria_value` 里，不放 `aria_label`：AccessKit 从 value 取这种节点的文字，Windows 和 Linux 的辅助工具把它当名字读，只给 `aria_label` 时名字是空的，macOS 的 VoiceOver 也读它的 `AXValue`。GPUI 不收子元素里的文字，所以没有 `aria_value` 的 Label 什么也读不到。统一用 `ui::a11y` 的 `StaticText::aria_static_text`，角色和文字一起设。
 - 改完用 CUA 的 `get_window_state` 看一遍 AX 树：每个按钮都要有名字，用 `AXPress` 按得动；状态变了，树里的状态也跟着变。列表要在数据读进来、行数变了以后再按一遍下面的行，只按第一行看不出节点编号跟着行号变的问题。app 启动后第一次读只有窗口按钮和菜单栏：GPUI 在辅助工具第一次来问时才打开辅助工具模式，当场只能交出空树，下一帧才建好完整的树，所以要再读一次再看。
 
 # 界面字号

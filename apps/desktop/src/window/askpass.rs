@@ -15,7 +15,7 @@ use super::WindowView;
 use crate::{
     host_client::ssh::Ask,
     ui::{
-        a11y::Press,
+        a11y::{Press, StaticText},
         button::{Button, ButtonVariant},
         dialog::Dialog,
         font_size::FontSize,
@@ -114,8 +114,7 @@ impl WindowView {
         // ssh 的提示常是好几行（主机指纹），照原样一行一行画。
         let prompt = div()
             .id("ssh-ask-prompt")
-            .role(Role::Label)
-            .aria_label(dialog.ask.prompt.clone())
+            .aria_static_text(dialog.ask.prompt.clone())
             .flex()
             .flex_col()
             .gap(px(2.))

@@ -6,6 +6,7 @@ use crate::ui::theme::Theme;
 use gpui::{Context, Div, Role, SharedString, div, prelude::*, px};
 
 use super::{SettingsView, controls::Press as _};
+use crate::ui::a11y::StaticText;
 use crate::{
     host_client::{
         hosts::{HostId, Status},
@@ -27,8 +28,7 @@ impl SettingsView {
             return rows.child(
                 div()
                     .id("ssh-hosts-empty")
-                    .role(Role::Label)
-                    .aria_label(text.clone())
+                    .aria_static_text(text.clone())
                     .py(px(12.))
                     .text_size(FontSize::Body)
                     .text_color(theme.foreground.opacity(0.55))
@@ -148,8 +148,7 @@ impl SettingsView {
                     .children(destination.map(|destination| {
                         div()
                             .id("destination")
-                            .role(Role::Label)
-                            .aria_label(destination.clone())
+                            .aria_static_text(destination.clone())
                             .text_size(FontSize::Body)
                             .text_color(theme.foreground.opacity(0.55))
                             .child(destination)
@@ -157,8 +156,7 @@ impl SettingsView {
                     .child(
                         div()
                             .id("status")
-                            .role(Role::Label)
-                            .aria_label(text.clone())
+                            .aria_static_text(text.clone())
                             .text_size(FontSize::Body)
                             .text_color(theme.foreground.opacity(0.55))
                             .child(text),
@@ -166,8 +164,7 @@ impl SettingsView {
                     .children(notice.map(|(notice, warn)| {
                         div()
                             .id("notice")
-                            .role(Role::Label)
-                            .aria_label(notice.clone())
+                            .aria_static_text(notice.clone())
                             .text_size(FontSize::Body)
                             .text_color(if warn { theme.destructive } else { theme.foreground.opacity(0.55) })
                             .child(notice)

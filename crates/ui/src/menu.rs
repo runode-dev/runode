@@ -14,7 +14,7 @@ use gpui::{
 };
 
 use crate::{
-    a11y::{A11yPress, Disable},
+    a11y::{A11yPress, Disable, StaticText},
     button::{Button, ButtonSize},
     font_size::{FontSize, scaled},
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
@@ -732,12 +732,15 @@ pub trait MenuHost: Sized + 'static {
                 .id(id.clone())
                 // 没有动作的一行是小标题；灰着的项报成不可用。
                 .map(|row| match item.checked {
-                    _ if item.submenu.is_some() => row.role(Role::MenuItem).aria_expanded(expanded),
-                    _ if item.action.is_none() => row.role(Role::Label),
-                    Some(checked) => row.role(Role::MenuItemCheckBox).aria_toggled(checked.into()),
-                    None => row.role(Role::MenuItem),
+                    _ if item.submenu.is_some() => {
+                        row.role(Role::MenuItem).aria_expanded(expanded).aria_label(item.label.clone())
+                    }
+                    _ if item.action.is_none() => row.aria_static_text(item.label.clone()),
+                    Some(checked) => {
+                        row.role(Role::MenuItemCheckBox).aria_toggled(checked.into()).aria_label(item.label.clone())
+                    }
+                    None => row.role(Role::MenuItem).aria_label(item.label.clone()),
                 })
-                .aria_label(item.label.clone())
                 .aria_disabled(disabled)
                 .when_some(item.description.clone().or_else(|| item.shortcut.clone()), |row, text| {
                     row.aria_description(text)
@@ -895,11 +898,12 @@ pub trait MenuHost: Sized + 'static {
             div()
                 .id(id.clone())
                 .map(|row| match item.checked {
-                    _ if item.action.is_none() => row.role(Role::Label),
-                    Some(checked) => row.role(Role::MenuItemCheckBox).aria_toggled(checked.into()),
-                    None => row.role(Role::MenuItem),
+                    _ if item.action.is_none() => row.aria_static_text(item.label.clone()),
+                    Some(checked) => {
+                        row.role(Role::MenuItemCheckBox).aria_toggled(checked.into()).aria_label(item.label.clone())
+                    }
+                    None => row.role(Role::MenuItem).aria_label(item.label.clone()),
                 })
-                .aria_label(item.label.clone())
                 .aria_disabled(item.action.is_some() && !item.enabled)
                 .when_some(item.description.clone().or_else(|| item.shortcut.clone()), |row, text| {
                     row.aria_description(text)

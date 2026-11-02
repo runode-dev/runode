@@ -37,7 +37,7 @@ use std::{
 };
 
 use crate::ui::{
-    a11y::Press,
+    a11y::{Press, StaticText},
     badge::Badge,
     base_name,
     button::{Button, ButtonSize, ButtonVariant},
@@ -503,8 +503,7 @@ impl Kanban {
             .on_press(cx, move |this, _, cx| this.set_toast(serial, None, cx));
         let pill = div()
             .id("todo-toast")
-            .role(Role::Label)
-            .aria_label(text.clone())
+            .aria_static_text(text.clone())
             .flex()
             .items_center()
             .gap(px(8.))
@@ -703,7 +702,7 @@ fn history_link(id: impl Into<ElementId>) -> Button {
 
 /// 只起提示作用的一行字，报给辅助工具。
 fn label_row(id: impl Into<gpui::ElementId>, text: String, color: Hsla) -> Stateful<Div> {
-    div().id(id).role(Role::Label).aria_label(text.clone()).text_size(FontSize::Small).text_color(color).child(text)
+    div().id(id).aria_static_text(text.clone()).text_size(FontSize::Small).text_color(color).child(text)
 }
 
 fn column_name(column: Column) -> String {

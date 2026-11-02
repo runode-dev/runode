@@ -15,7 +15,7 @@ use crate::git_panel::commit_message::{
     agents::{AGENTS, AgentSpec, CUSTOM_AGENT, agent},
     command_preview, save_recipe, saved_recipe, variable_preview,
 };
-use crate::ui::a11y::PressDown;
+use crate::ui::a11y::{PressDown, StaticText};
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::dialog::Dialog;
 use crate::ui::menu::MenuHost as _;
@@ -336,8 +336,7 @@ impl WindowView {
                     .child(
                         div()
                             .id("commit-message-preview")
-                            .role(Role::Label)
-                            .aria_label(format!("$ {line}"))
+                            .aria_static_text(format!("$ {line}"))
                             .px(px(8.))
                             .py(px(6.))
                             .rounded(px(6.))
@@ -352,8 +351,7 @@ impl WindowView {
             }
             Err(err) => div()
                 .id("commit-message-preview")
-                .role(Role::Label)
-                .aria_label(err.clone())
+                .aria_static_text(err.clone())
                 .text_size(FontSize::Small)
                 .text_color(gpui::red())
                 .child(err)
