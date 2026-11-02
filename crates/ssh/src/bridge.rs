@@ -54,7 +54,23 @@ pub struct Failure {
 
 impl Failure {
     pub fn line(&self) -> String {
-        format!("{PREFIX}error {} {}\n", self.code, self.message.replace('\n', " "))
+        self.line_after(PREFIX)
+    }
+
+    /// 没装成登录服务时回的那一行。
+    pub fn service_line(&self) -> String {
+        self.line_after(SERVICE_PREFIX)
+    }
+
+    fn line_after(&self, prefix: &str) -> String {
+        format!("{prefix}error {} {}\n", self.code, self.message.replace('\n', " "))
+    }
+
+    /// 前缀之后的 `rest` 是 `error <code> <message>` 时的失败。
+    fn parse(rest: &str) -> Option<Self> {
+        let error = rest.strip_prefix("error ")?;
+        let (code, message) = error.split_once(' ').unwrap_or((error, ""));
+        Some(Self { code: code.to_owned(), message: message.to_owned() })
     }
 }
 
@@ -89,9 +105,8 @@ pub fn read_start(input: &mut impl BufRead) -> io::Result<Start> {
 }
 
 fn parse(rest: &str) -> Start {
-    if let Some(error) = rest.strip_prefix("error ") {
-        let (code, message) = error.split_once(' ').unwrap_or((error, ""));
-        return Start::Failed(Failure { code: code.to_owned(), message: message.to_owned() });
+    if let Some(failure) = Failure::parse(rest) {
+        return Start::Failed(failure);
     }
     let rest = rest.strip_prefix("ok").unwrap_or(rest);
     let (fields, home) = rest.split_once(" home=").unwrap_or((rest, ""));
@@ -129,13 +144,6 @@ impl Service {
     }
 }
 
-impl Failure {
-    /// 没装成登录服务时回的那一行。`code` 为 `linger` 时是这个用户开不了 linger，要管理员开。
-    pub fn service_line(&self) -> String {
-        format!("{SERVICE_PREFIX}error {} {}\n", self.code, self.message.replace('\n', " "))
-    }
-}
-
 /// 读装登录服务的结果，跳过前面的杂行；读到结尾也没有结果行时报错。
 pub fn read_service(input: &mut impl BufRead) -> io::Result<Result<Service, Failure>> {
     let mut limited = input.take(MAX_NOISE);
@@ -149,9 +157,8 @@ pub fn read_service(input: &mut impl BufRead) -> io::Result<Result<Service, Fail
             continue;
         };
         let rest = rest.trim_end();
-        if let Some(error) = rest.strip_prefix("error ") {
-            let (code, message) = error.split_once(' ').unwrap_or((error, ""));
-            return Ok(Err(Failure { code: code.to_owned(), message: message.to_owned() }));
+        if let Some(failure) = Failure::parse(rest) {
+            return Ok(Err(failure));
         }
         let moved = rest.split_whitespace().any(|field| field == "moved=1");
         return Ok(Ok(Service { moved }));
