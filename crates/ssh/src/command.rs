@@ -13,7 +13,7 @@ use crate::Destination;
 /// 闪一个黑窗；要问用户的经 askpass 问，用不着控制台。
 fn no_window(command: &mut Command) {
     #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(command, 0x0800_0000);
+    std::os::windows::process::CommandExt::creation_flags(command, windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     #[cfg(not(windows))]
     let _ = command;
 }

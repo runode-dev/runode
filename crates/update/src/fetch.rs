@@ -220,7 +220,7 @@ fn curl(timeout: Duration, no_revoke: bool) -> std::process::Command {
         command.arg("--ssl-no-revoke");
     }
     #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+    std::os::windows::process::CommandExt::creation_flags(&mut command, crate::windows::CREATE_NO_WINDOW);
     command
 }
 

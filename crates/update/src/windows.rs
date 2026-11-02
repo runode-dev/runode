@@ -19,7 +19,7 @@ use crate::{Error, Release, authenticode};
 /// 下载安装包最多等这么久。
 const ARCHIVE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const SETUP_NAME: &str = "Runode-setup.exe";
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 

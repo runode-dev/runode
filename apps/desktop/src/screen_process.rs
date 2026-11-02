@@ -349,8 +349,7 @@ fn record(_: &HashMap<u32, HashSet<u64>>) {}
 #[cfg(windows)]
 fn spawn_guard() {
     use std::os::windows::process::CommandExt as _;
-    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW};
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(err) => return tracing::warn!("cannot find this program to guard the display modes: {err}"),

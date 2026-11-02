@@ -75,7 +75,7 @@ impl Curl {
         #[cfg_attr(not(windows), expect(unused_mut, reason = "只在 Windows 上设标志"))]
         let mut command = Command::new(&self.program);
         #[cfg(windows)]
-        std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+        std::os::windows::process::CommandExt::creation_flags(&mut command, windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
         command
     }
 
