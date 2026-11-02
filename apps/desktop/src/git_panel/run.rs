@@ -364,14 +364,16 @@ impl GitPanel {
             }
             // 暂存全部会把带冲突标记的文件也暂存进去，绕过 git 自己「有冲突不让提交」的保护。
             if git.unstaged.iter().any(|file| file.status == git::FileStatus::Conflicted) {
-                drop(crate::prompt::show(
+                // 只说一声，但收的那头要留到框关掉。
+                let answer = crate::prompt::show(
                     window,
                     PromptLevel::Warning,
                     &rust_i18n::t!("git.conflicts_title"),
                     Some(&rust_i18n::t!("git.conflicts_detail")),
                     &[PromptButton::cancel(rust_i18n::t!("git.ok"))],
                     cx,
-                ));
+                );
+                cx.foreground_executor().spawn(answer).detach();
                 return;
             }
             let answer = crate::prompt::show(
@@ -615,19 +617,21 @@ pub(super) enum StashOp {
     Drop,
 }
 
-/// git 报的错：只有一个按钮，不用等回答。app 写提交说明时读不了预设也用它报。
+/// 弹框报 git 的错，只有一个「好」。app 写提交说明时读不了预设也用它报。
 pub fn show_git_error(err: &git::GitError, window: &mut Window, cx: &mut App) {
     let message = crate::git_view::git_error_text(err);
     let mut detail: String = message.chars().take(MAX_ERROR_CHARS).collect();
     if detail.len() < message.len() {
         detail.push('…');
     }
-    drop(crate::prompt::show(
+    // 只说一声，但收的那头要留到框关掉。
+    let answer = crate::prompt::show(
         window,
         PromptLevel::Warning,
         &rust_i18n::t!("git.failed"),
         Some(&detail),
         &[PromptButton::cancel(rust_i18n::t!("git.ok"))],
         cx,
-    ));
+    );
+    cx.foreground_executor().spawn(answer).detach();
 }

@@ -545,14 +545,15 @@ impl FileTree {
     }
 
     fn show_file_error(&self, detail: String, window: &mut Window, cx: &mut Context<Self>) {
-        // 只有一个按钮，不用等回答。
-        drop(crate::prompt::show(
+        // 只说一声，但收的那头要留到框关掉。
+        let answer = crate::prompt::show(
             window,
             PromptLevel::Warning,
             &rust_i18n::t!("files.failed"),
             Some(&detail),
             &[PromptButton::cancel(rust_i18n::t!("files.ok"))],
             cx,
-        ));
+        );
+        cx.foreground_executor().spawn(answer).detach();
     }
 }

@@ -216,13 +216,14 @@ fn report(err: &anyhow::Error, window: &mut Window, cx: &mut Context<TerminalVie
     } else {
         format!("{err:#}")
     };
-    // 只有一个「好」，不等回答。
-    drop(crate::prompt::show(
+    // 只说一声，但收的那头要留到框关掉。
+    let answer = crate::prompt::show(
         window,
         PromptLevel::Warning,
         &rust_i18n::t!("dictation.failed"),
         Some(&detail),
         &[PromptButton::cancel(rust_i18n::t!("dictation.ok"))],
         cx,
-    ));
+    );
+    cx.foreground_executor().spawn(answer).detach();
 }

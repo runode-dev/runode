@@ -335,15 +335,16 @@ impl WindowView {
                     let detail = format!("{err:#}");
                     let title = rust_i18n::t!("ssh.upload_failed", host = crate::remote_hosts::display_name(&id, cx))
                         .into_owned();
-                    // 只说一声，不等回答。
-                    drop(crate::prompt::show(
+                    // 只说一声，但收的那头要留到框关掉。
+                    let answer = crate::prompt::show(
                         window,
                         PromptLevel::Warning,
                         &title,
                         Some(&detail),
                         &[PromptButton::cancel(rust_i18n::t!("ssh.ok"))],
                         cx,
-                    ));
+                    );
+                    cx.foreground_executor().spawn(answer).detach();
                 }
             })
             .ok();

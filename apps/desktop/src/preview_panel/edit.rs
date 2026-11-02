@@ -98,15 +98,16 @@ fn read_in_background(project: ProjectHost, path: &Path, cx: &mut Context<Previe
 
 /// 弹框报错，只有一个「好」。
 fn report(title: &str, err: &io::Error, window: &mut Window, cx: &mut Context<PreviewPanel>) {
-    // 不等回答：框关掉就完了。
-    drop(crate::prompt::show(
+    // 只说一声，但收的那头要留到框关掉。
+    let answer = crate::prompt::show(
         window,
         PromptLevel::Critical,
         title,
         Some(&err.to_string()),
         &[PromptButton::cancel(rust_i18n::t!("git.ok"))],
         cx,
-    ));
+    );
+    cx.foreground_executor().spawn(answer).detach();
 }
 
 impl Editor {

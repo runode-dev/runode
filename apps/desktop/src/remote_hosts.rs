@@ -328,9 +328,13 @@ fn tell(title: &str, detail: &str, cx: &mut App) {
         return;
     };
     let ok = rust_i18n::t!("ssh.ok");
-    let _ = front.update(cx, |_, window, cx| {
+    let Ok(answer) = front.update(cx, |_, window, cx| {
         crate::prompt::show(window, PromptLevel::Info, title, Some(detail), &[PromptButton::cancel(ok)], cx)
-    });
+    }) else {
+        return;
+    };
+    // 收的那头要留到框关掉。
+    cx.foreground_executor().spawn(answer).detach();
 }
 
 /// SSH 主机 `name` 的宿主会跟着 ssh 的登录被结束：问用户要不要装成登录服务。
