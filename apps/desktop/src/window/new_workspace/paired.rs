@@ -272,7 +272,6 @@ impl WindowView {
                     .role(Role::Button)
                     .aria_label(name.clone())
                     .aria_description(rust_i18n::t!("workspace.pair_found_hint").into_owned())
-                    .aria_selected(picked)
                     .flex_none()
                     .h(scaled(26.))
                     .px(px(8.))
@@ -315,8 +314,18 @@ impl WindowView {
             .child(note(rust_i18n::t!("workspace.pair_detail").into_owned()))
             .children(status)
             .when(!found.is_empty(), |body| {
-                body.child(note(rust_i18n::t!("workspace.pair_found").into_owned()))
-                    .child(div().id("pair-found").role(Role::List).flex().flex_col().children(found))
+                let title = rust_i18n::t!("workspace.pair_found").into_owned();
+                // 行上不标选中：Windows 上带选中状态的元素辅助工具按不了，点了哪台由下面那行状态说。
+                body.child(note(title.clone()))
+                    .child(
+                        div()
+                            .id("pair-found")
+                            .role(Role::List)
+                            .aria_label(title.trim_end_matches(['：', ':']).to_owned())
+                            .flex()
+                            .flex_col()
+                            .children(found),
+                    )
                     .children(picked)
             })
     }
