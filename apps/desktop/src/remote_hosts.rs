@@ -181,7 +181,7 @@ pub fn install_service(name: &str, report: bool, cx: &mut App) {
             Ok(service) => ServiceJob::Done { moved: service.moved },
             Err(failure) => {
                 tracing::warn!("cannot make the host on {name} a login service: {failure:?}");
-                ServiceJob::Failed { linger: failure.code == "linger", message: failure.message }
+                ServiceJob::Failed { linger: failure.code == runode_ssh::bridge::LINGER, message: failure.message }
             }
         };
         cx.update(|cx| {

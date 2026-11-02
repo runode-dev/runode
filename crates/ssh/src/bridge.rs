@@ -8,6 +8,8 @@ use crate::bootstrap::Platform;
 
 const PREFIX: &str = "RUNODE-BRIDGE 1 ";
 const SERVICE_PREFIX: &str = "RUNODE-SERVICE 1 ";
+/// 装登录服务失败时的 `Failure::code`：这个用户开不了 linger，要管理员开。
+pub const LINGER: &str = "linger";
 /// 开场白之前最多跳过这么多字节的杂行。
 const MAX_NOISE: u64 = 64 * 1024;
 

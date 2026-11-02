@@ -10,7 +10,7 @@ use std::{
 };
 
 use runode_autostart::{Kind, Start};
-use runode_ssh::bridge::{Failure, Service};
+use runode_ssh::bridge::{Failure, LINGER, Service};
 
 use super::{
     super::{
@@ -51,7 +51,7 @@ fn install(dirs: &runode_paths::Dirs) -> Result<Service, Failure> {
         let enabled = runode_autostart::enable_linger();
         if !runode_autostart::starts_at_boot() {
             let reason = enabled.err().map_or_else(|| "linger is still off".to_owned(), |err| err.to_string());
-            return Err(fail("linger", reason));
+            return Err(fail(LINGER, reason));
         }
     }
     let exe = std::env::current_exe().map_err(|err| fail("exe", format!("cannot tell where runode is: {err}")))?;
