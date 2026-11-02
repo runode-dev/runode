@@ -530,7 +530,7 @@ impl RemoteHost {
             return Err(fail("disconnected", format!("not connected to {}", self.name)));
         }
         let ssh = ssh();
-        let script = bootstrap::service_command(&deploy::install_dir());
+        let script = bootstrap::run_command(&deploy::install_dir(), bootstrap::Entry::Service);
         let mut command = self.exec(&ssh, &script, true, false);
         command.stdin(Stdio::null());
         let output =
@@ -546,10 +546,7 @@ impl RemoteHost {
             return Err(format!("not connected to {}", self.name));
         }
         let ssh = ssh();
-        let script = match self.family() {
-            Family::Unix => bootstrap::prune_command(&deploy::install_dir()),
-            Family::Windows => bootstrap::windows::prune_command(&deploy::install_dir()),
-        };
+        let script = self.family().prune_command(&deploy::install_dir());
         let mut command = self.exec(&ssh, &script, true, false);
         command.stdin(Stdio::null());
         let output = runode_ssh::process::output(&mut command).map_err(|err| format!("cannot run ssh: {err}"))?;
@@ -667,10 +664,7 @@ impl RemoteHost {
         let mut unix_failure: Option<(Vec<u8>, Option<i32>)> = None;
         loop {
             self.set_status(Status::Connecting(if deployed { Phase::Starting } else { Phase::Probing }));
-            let script = match family {
-                Family::Unix => bootstrap::connect_command(&dir),
-                Family::Windows => bootstrap::windows::connect_command(&dir),
-            };
+            let script = family.connect_command(&dir);
             let mut command = self.exec(&ssh, &script, interactive, false);
             let piped = spawn_piped(&mut command, &log)?;
             let (mut child, stdin) = (piped.child, piped.stdin);

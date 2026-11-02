@@ -15,6 +15,32 @@ pub enum Family {
     Windows,
 }
 
+impl Family {
+    /// 这种系统的 `connect_command`。
+    pub fn connect_command(self, dir: &str) -> String {
+        match self {
+            Self::Unix => connect_command(dir),
+            Self::Windows => windows::connect_command(dir),
+        }
+    }
+
+    /// 这种系统的 `run_command`。
+    pub fn run_command(self, dir: &str, entry: Entry) -> String {
+        match self {
+            Self::Unix => run_command(dir, entry),
+            Self::Windows => windows::run_command(dir, entry),
+        }
+    }
+
+    /// 这种系统的 `prune_command`。
+    pub fn prune_command(self, keep: &str) -> String {
+        match self {
+            Self::Unix => prune_command(keep),
+            Self::Windows => windows::prune_command(keep),
+        }
+    }
+}
+
 /// runode 在远端装在家目录下的这里，每个构建一个子目录，旁边的 `runode` 是指向当前那个的链接。
 pub const BIN_DIR: &str = ".runode/bin";
 /// 连接脚本发现远端还没装这个构建时，打完平台信息以这个码退出。
@@ -59,27 +85,34 @@ pub fn connect_command(dir: &str) -> String {
     ))
 }
 
-/// 起远端装着的 `dir` 这个构建的项目服务（`runode --ssh-project`），stdin、stdout 交给它；没装时以
-/// `PROBE_EXIT` 退出，先经 `connect_command` 装好。
-pub fn project_command(dir: &str) -> String {
-    wrap(&format!(
-        r#"X="$HOME/{BIN_DIR}/{dir}/runode"; if [ -x "$X" ]; then exec "$X" --ssh-project; fi; exit {PROBE_EXIT}"#
-    ))
+/// 连上以后在远端起的 runode，stdin、stdout 交给它。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entry {
+    /// 项目服务（`runode --ssh-project`）。
+    Project,
+    /// 远程桌面的桥接（`runode --ssh-screen`）。
+    Screen,
+    /// 把远端的宿主装成登录服务（`runode --ssh-service`）。
+    Service,
 }
 
-/// 起远端装着的 `dir` 这个构建的远程桌面桥接（`runode --ssh-screen`），stdin、stdout 交给它；没装时以
-/// `PROBE_EXIT` 退出，先经 `connect_command` 装好。
-pub fn screen_command(dir: &str) -> String {
-    wrap(&format!(
-        r#"X="$HOME/{BIN_DIR}/{dir}/runode"; if [ -x "$X" ]; then exec "$X" --ssh-screen; fi; exit {PROBE_EXIT}"#
-    ))
+impl Entry {
+    fn arg(self) -> &'static str {
+        match self {
+            Self::Project => "--ssh-project",
+            Self::Screen => "--ssh-screen",
+            Self::Service => "--ssh-service",
+        }
+    }
 }
 
-/// 把远端的宿主装成登录服务：装着 `dir` 这个构建就换成它的 `runode --ssh-service`，没装时以 `PROBE_EXIT` 退出。
-pub fn service_command(dir: &str) -> String {
-    wrap(&format!(
-        r#"X="$HOME/{BIN_DIR}/{dir}/runode"; if [ -x "$X" ]; then exec "$X" --ssh-service; fi; exit {PROBE_EXIT}"#
-    ))
+/// 起远端装着的 `dir` 这个构建的 `entry`；没装时以 `PROBE_EXIT` 退出，先经 `connect_command` 装好。
+pub fn run_command(dir: &str, entry: Entry) -> String {
+    run_installed(dir, entry.arg())
+}
+
+fn run_installed(dir: &str, arg: &str) -> String {
+    wrap(&format!(r#"X="$HOME/{BIN_DIR}/{dir}/runode"; if [ -x "$X" ]; then exec "$X" {arg}; fi; exit {PROBE_EXIT}"#))
 }
 
 /// 把 stdin 上的可执行文件装成 `dir` 这个构建：先写成临时文件，核对 SHA-256（`sha256`，十六进制）、试跑一下

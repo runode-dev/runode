@@ -13,8 +13,8 @@ use common::TempDir;
 #[cfg(unix)]
 use runode_ssh::bootstrap::{BIN_DIR, PROBE_EXIT, UPLOADS_DIR, parse_pruned, parse_uploaded};
 use runode_ssh::bootstrap::{
-    Libc, Os, Platform, Target, Unsupported, connect_command, install_command, install_dir_name, project_command,
-    prune_command, screen_command, service_command, upload_command, windows,
+    Entry, Libc, Os, Platform, Target, Unsupported, connect_command, install_command, install_dir_name, prune_command,
+    run_command, upload_command, windows,
 };
 
 /// 像 ssh 那样把命令行交给登录 shell（默认 /bin/sh）解释。
@@ -56,9 +56,9 @@ fn scripts_avoid_characters_remote_shells_mangle() {
         install_command("0.1.16.abc", &"0".repeat(64), true),
         upload_command("1-2", None),
         upload_command("1-2", Some("a.png")),
-        project_command("0.1.16.abc"),
-        screen_command("0.1.16.abc"),
-        service_command("0.1.16.abc"),
+        run_command("0.1.16.abc", Entry::Project),
+        run_command("0.1.16.abc", Entry::Screen),
+        run_command("0.1.16.abc", Entry::Service),
         prune_command("0.1.16.abc"),
     ] {
         let inner = command.strip_prefix("/bin/sh -c '").and_then(|rest| rest.strip_suffix('\'')).unwrap();
@@ -71,8 +71,8 @@ fn scripts_avoid_characters_remote_shells_mangle() {
         windows::connect_command("0.1.16.abc"),
         windows::install_command("0.1.16.abc", ".part-1"),
         windows::upload_command("1-2"),
-        windows::project_command("0.1.16.abc"),
-        windows::screen_command("0.1.16.abc"),
+        windows::run_command("0.1.16.abc", Entry::Project),
+        windows::run_command("0.1.16.abc", Entry::Screen),
     ] {
         let inner = command.strip_prefix("cmd /d /c \"").and_then(|rest| rest.strip_suffix('"')).unwrap();
         assert!(!inner.contains(['"', '$', '`', '\n']), "{inner}");
@@ -362,7 +362,7 @@ fn windows_probes_installs_and_prunes() {
     let left: Vec<_> = fs::read_dir(&bin).unwrap().map(|entry| entry.unwrap().file_name()).collect();
     assert_eq!(left, [dir]);
 
-    let missing = run_cmd(&home.0, &windows::project_command("0.1.17.next"), b"");
+    let missing = run_cmd(&home.0, &windows::run_command("0.1.17.next", Entry::Project), b"");
     assert_eq!(missing.status.code(), Some(runode_ssh::bootstrap::PROBE_EXIT));
 }
 

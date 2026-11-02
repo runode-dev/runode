@@ -6,7 +6,7 @@
 //! 把 stdin、stdout 交下去。要传的数据用系统自带的 tar.exe 从 stdin 解开：PowerShell 自己也读 stdin，
 //! 交给它读会卡住。PowerShell 只跑不读 stdin 的逻辑（清理旧构建），脚本经 `-EncodedCommand` 传，不用引号。
 
-use super::{BIN_DIR, BUILD_KEEP_DAYS, PROBE_EXIT, PRUNED, UPLOADED, UPLOADS_DIR};
+use super::{BIN_DIR, BUILD_KEEP_DAYS, Entry, PROBE_EXIT, PRUNED, UPLOADED, UPLOADS_DIR};
 
 /// 交给 ssh 的一行远端命令：进家目录，再跑 `script`。
 fn wrap(script: &str) -> String {
@@ -37,14 +37,9 @@ pub fn connect_command(dir: &str) -> String {
     run_installed(dir, "--ssh-bridge", true)
 }
 
-/// 起装着的 `dir` 这个构建的项目服务（`runode --ssh-project`）；没装时以 `PROBE_EXIT` 退出。
-pub fn project_command(dir: &str) -> String {
-    run_installed(dir, "--ssh-project", false)
-}
-
-/// 起装着的 `dir` 这个构建的远程桌面桥接（`runode --ssh-screen`）；没装时以 `PROBE_EXIT` 退出。
-pub fn screen_command(dir: &str) -> String {
-    run_installed(dir, "--ssh-screen", false)
+/// 起装着的 `dir` 这个构建的 `entry`；没装时以 `PROBE_EXIT` 退出。
+pub fn run_command(dir: &str, entry: Entry) -> String {
+    run_installed(dir, entry.arg(), false)
 }
 
 /// 把 stdin 上的 zip（`runode.exe`、`rn.exe` 和终端要的文件）装成 `dir` 这个构建：先解到 `part` 这个临时目录，

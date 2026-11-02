@@ -148,12 +148,7 @@ impl Client {
         if !matches!(host.status(), Status::Connected(_)) {
             return Err(format!("not connected to {}", self.name));
         }
-        let script = match host.family() {
-            runode_ssh::bootstrap::Family::Unix => runode_ssh::bootstrap::project_command(&deploy::install_dir()),
-            runode_ssh::bootstrap::Family::Windows => {
-                runode_ssh::bootstrap::windows::project_command(&deploy::install_dir())
-            }
-        };
+        let script = host.family().run_command(&deploy::install_dir(), runode_ssh::bootstrap::Entry::Project);
         let mut command = host.exec(&remote::ssh(), &script, true, false);
         command.stderr(Stdio::null());
         let pipes = runode_ssh::process::Pipes { stdin: true, stdout: true, stderr: false };
