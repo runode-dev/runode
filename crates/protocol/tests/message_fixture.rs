@@ -1,7 +1,8 @@
 //! 手机端测试读的消息样例 `tests/fixtures/messages.json`：按名字存着各条消息（以及消息里带的
-//! `TermSettings`、`IntegrationMode`）由这里的类型序列化出来的 JSON，手机据此核对自己的编解码。
-//! 样例由下面的 `samples` 生成，改了消息格式后设 `RUNODE_BLESS=1` 跑这个测试重新写出样例，
-//! 再跑手机端的测试；不设时样例和生成的结果对不上就失败，多一条少一条也算。
+//! `TermSettings`、`IntegrationMode`）由这里的类型序列化出来的 JSON，另有一节各种 agent 的显示名和转圈，
+//! 手机据此核对自己的编解码和对照表。样例由下面的 `samples` 和 `agents` 生成，改了消息格式后设
+//! `RUNODE_BLESS=1` 跑这个测试重新写出样例，再跑手机端的测试；不设时样例和生成的结果对不上就失败，
+//! 多一条少一条也算。
 
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -413,6 +414,22 @@ fn samples() -> BTreeMap<&'static str, Value> {
     samples
 }
 
+/// 每种 agent 给人看的名字、工作中的转圈和颜色，手机据此核对自己那份对照表。按 `AgentKind::ALL` 的
+/// 先后，最后是 `Other`。
+fn agents() -> Value {
+    let agents = AgentKind::ALL.into_iter().chain([AgentKind::Other]).map(|kind| {
+        let (frames, frame_time) = kind.spinner();
+        serde_json::json!({
+            "kind": kind,
+            "display_name": kind.display_name(),
+            "spinner_frames": frames,
+            "spinner_frame_ms": frame_time.as_millis(),
+            "spinner_color": kind.spinner_color(),
+        })
+    });
+    Value::Array(agents.collect())
+}
+
 /// 对象的键按字节序排好：`serde_json` 开着 `preserve_order` 时（工作区里别的 crate 会打开它）
 /// 照字段的先后写，写回的样例要和开没开它无关。
 fn sorted(value: Value) -> Value {
@@ -434,7 +451,7 @@ fn fixture_matches_the_serialized_messages() {
 
     if std::env::var_os("RUNODE_BLESS").is_some_and(|value| value == "1") {
         let messages: Map<_, _> = samples.into_iter().map(|(name, value)| (name.to_owned(), value)).collect();
-        let root = sorted(serde_json::json!({ "_说明": NOTE, "messages": messages }));
+        let root = sorted(serde_json::json!({ "_说明": NOTE, "messages": messages, "agents": agents() }));
         let text = serde_json::to_string_pretty(&root).unwrap() + "\n";
         std::fs::write(&path, text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         return;
@@ -451,5 +468,5 @@ fn fixture_matches_the_serialized_messages() {
 
     for (name, value) in &samples {
         assert_eq!(&fixture[*name], value, "{name} 和生成的对不上，设 RUNODE_BLESS=1 重新生成");
-    }
+    }    assert_eq!(root["agents"], sorted(agents()), "agents 和生成的对不上，设 RUNODE_BLESS=1 重新生成");
 }

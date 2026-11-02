@@ -1,5 +1,703 @@
 {
   "_说明": "由 runode_protocol 的测试 message_fixture 用宿主的 runode_protocol / runode_types（Rust）按 serde 序列化生成，手机端的测试据此核对 Swift 这边的编解码。不要手改：改了消息格式后在仓库根跑 `RUNODE_BLESS=1 cargo test -p runode-protocol --test message_fixture` 重新生成。",
+  "agents": [
+    {
+      "display_name": "Pi",
+      "kind": "pi",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Claude Code",
+      "kind": "claude",
+      "spinner_color": 14120791,
+      "spinner_frame_ms": 120,
+      "spinner_frames": [
+        "·",
+        "✢",
+        "✳",
+        "✶",
+        "✻",
+        "✽",
+        "✽",
+        "✻",
+        "✶",
+        "✳",
+        "✢",
+        "·"
+      ]
+    },
+    {
+      "display_name": "Codex",
+      "kind": "codex",
+      "spinner_color": null,
+      "spinner_frame_ms": 600,
+      "spinner_frames": [
+        "•",
+        "◦"
+      ]
+    },
+    {
+      "display_name": "Gemini CLI",
+      "kind": "gemini",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Cursor Agent",
+      "kind": "cursor",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Devin",
+      "kind": "devin",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Antigravity",
+      "kind": "antigravity",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Cline",
+      "kind": "cline",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Oh My Pi",
+      "kind": "omp",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Mastra Code",
+      "kind": "mastracode",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "OpenCode",
+      "kind": "open_code",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "GitHub Copilot",
+      "kind": "github_copilot",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Kimi Code",
+      "kind": "kimi",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Kiro",
+      "kind": "kiro",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Droid",
+      "kind": "droid",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Amp",
+      "kind": "amp",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Grok",
+      "kind": "grok",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Hermes",
+      "kind": "hermes",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Kilo Code",
+      "kind": "kilo",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Qoder CLI",
+      "kind": "qodercli",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Qwen Code",
+      "kind": "qwen",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Letta Code",
+      "kind": "letta",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Maki",
+      "kind": "maki",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Muse",
+      "kind": "muse",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Aider",
+      "kind": "aider",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Goose",
+      "kind": "goose",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Crush",
+      "kind": "crush",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Auggie",
+      "kind": "auggie",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Continue",
+      "kind": "continue_cli",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Junie",
+      "kind": "junie",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "OpenHands",
+      "kind": "open_hands",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Trae Agent",
+      "kind": "trae",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "CodeBuddy Code",
+      "kind": "code_buddy",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "iFlow CLI",
+      "kind": "iflow",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Codebuff",
+      "kind": "codebuff",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Mistral Vibe",
+      "kind": "mistral_vibe",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Jules",
+      "kind": "jules",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Plandex",
+      "kind": "plandex",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    },
+    {
+      "display_name": "Agent",
+      "kind": "other",
+      "spinner_color": null,
+      "spinner_frame_ms": 80,
+      "spinner_frames": [
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠸",
+        "⠼",
+        "⠴",
+        "⠦",
+        "⠧",
+        "⠇",
+        "⠏"
+      ]
+    }
+  ],
   "messages": {
     "attach_meta": {
       "id": "0123456789abcdef0011223344556677",

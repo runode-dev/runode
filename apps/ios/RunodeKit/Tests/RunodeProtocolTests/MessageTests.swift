@@ -28,6 +28,36 @@ enum RustSamples {
     }
 }
 
+/// 样例里 `agents` 那一节的一项：宿主那边一种 agent 的显示名和转圈。
+struct AgentSample: Decodable {
+    let kind: String
+    let display_name: String
+    let spinner_frames: [String]
+    let spinner_frame_ms: Int
+    let spinner_color: UInt32?
+
+    static let all: [AgentSample] = {
+        struct Root: Decodable { let agents: [AgentSample] }
+        guard let data = try? Data(contentsOf: RustSamples.url) else { return [] }
+        return (try? JSONDecoder().decode(Root.self, from: data).agents) ?? []
+    }()
+}
+
+@Suite struct AgentKindTests {
+    /// 每种 agent 的显示名、转圈和颜色和宿主的一样。
+    @Test func matchesTheHost() throws {
+        try #require(!AgentSample.all.isEmpty)
+        for sample in AgentSample.all {
+            let kind = AgentKind(sample.kind)
+            #expect(kind.displayName == sample.display_name, "\(sample.kind)")
+            #expect(kind.spinner.frames == sample.spinner_frames, "\(sample.kind)")
+            #expect(Int((kind.spinner.frameTime * 1000).rounded()) == sample.spinner_frame_ms, "\(sample.kind)")
+            let color = kind.spinnerColor.map { UInt32($0.r) << 16 | UInt32($0.g) << 8 | UInt32($0.b) }
+            #expect(color == sample.spinner_color, "\(sample.kind)")
+        }
+    }
+}
+
 /// 两段 JSON 解出来的值相等（键的顺序、空白不算）。
 func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     let left = try JSONSerialization.jsonObject(with: a, options: .fragmentsAllowed) as AnyObject
@@ -161,6 +191,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
 
     func decode(_ name: String) throws -> HostMsg {
         try JSONDecoder().decode(HostMsg.self, from: RustSamples.data(name))
+    }
     }
 
     @Test func welcomeAndIncompatible() throws {

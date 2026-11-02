@@ -896,11 +896,17 @@ actor UnwritableMachineStore: MachineStore {
         let images = Set(
             try FileManager.default.contentsOfDirectory(atPath: catalog.path)
                 .filter { $0.hasSuffix(".imageset") }.map { String($0.dropLast(".imageset".count)) })
-        let labels = [
-            "pi", "claude", "codex", "gemini", "cursor", "devin", "antigravity", "cline", "mastracode", "open_code",
-            "github_copilot", "kimi", "kiro", "amp", "grok", "hermes", "kilo", "qodercli", "qwen", "goose", "junie",
-            "open_hands", "trae", "code_buddy", "mistral_vibe", "jules", "omp",
-        ]
+        // 宿主认得的各种 agent，取自 `runode_protocol` 的测试 `message_fixture` 生成的样例。
+        struct Agents: Decodable {
+            struct Agent: Decodable { let kind: String }
+            let agents: [Agent]
+        }
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "crates/protocol/tests/fixtures/messages.json")
+        let labels = try JSONDecoder().decode(Agents.self, from: Data(contentsOf: fixture)).agents.map(\.kind)
+        try #require(labels.contains("claude"))
         let mapped = Set(labels.compactMap { Presentation.agentLogoAsset(AgentKind($0)) })
         // `prompt` 是 shell 那块的提示符，不是 agent 的 logo。
         #expect(mapped == images.subtracting(["prompt"]))
