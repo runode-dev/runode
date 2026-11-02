@@ -116,11 +116,8 @@ pub(crate) struct Peers {
     /// 宿主单独一个进程在跑，见 `Host::run_until_idle`：收到 `Shutdown` 时连宿主一起退出。
     /// `HostMsg::Welcome::standalone` 报的就是它。
     pub(crate) standalone: bool,
-    /// 要退出了，为什么。
-    pub(crate) stop: Option<Stopped>,
-    /// 正在把会话交给新宿主：那条连接的编号，见 `handoff::give`。这期间新来的连接收到
-    /// `Goodbye { Handoff }`，也不开新会话。
-    pub(crate) handoff: Option<u64>,
+    /// 照常办事、正在把会话交给新宿主，还是要退出了。
+    pub(crate) phase: Phase,
     /// 最近一次有连接连上或者断开的时刻，空闲从这时起算。
     pub(crate) activity_at: Instant,
     /// 没有会话也没有连接时也不算空闲，见 `Host::set_stay_up`。
@@ -130,6 +127,18 @@ pub(crate) struct Peers {
     /// `run_until_idle` 不因空闲返回（给的时限是 `Duration::MAX`），交接时告诉新宿主。
     #[cfg(unix)]
     pub(crate) stay: bool,
+}
+
+/// 宿主走到哪一步了。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Phase {
+    /// 照常办事。
+    Serving,
+    /// 正在把会话交给新宿主（`handoff::give`）：新来的连接收到 `Goodbye { Handoff }`，不开新会话，不改看板；
+    /// 交接没成时回到 `Serving`。
+    HandingOver,
+    /// 要退出了，为什么；不再开新会话。
+    Stopping(Stopped),
 }
 
 impl Default for Peers {
@@ -143,8 +152,7 @@ impl Default for Peers {
             accepting: true,
             listening: None,
             standalone: false,
-            stop: None,
-            handoff: None,
+            phase: Phase::Serving,
             activity_at: Instant::now(),
             stay_up: false,
             scheduled: false,
@@ -569,14 +577,17 @@ impl Shared {
     /// `Goodbye`、写完后断开，由 `Host::run_until_idle` 收尾，返回 true；跑在 app 进程里时什么都不做，
     /// 返回 false。
     ///
-    /// 置上 `stop` 和再清一遍登记表在同一把锁里：调用方结束所有会话之后、这里拿到锁之前开好的会话（别的
-    /// 连接、没有界面时另起的线程开的）在这里结束；之后 `Shared::spawn_with` 看得到 `stop`，不再登记。
+    /// 置上 `Phase::Stopping` 和再清一遍登记表在同一把锁里：调用方结束所有会话之后、这里拿到锁之前开好的会话（别的
+    /// 连接、没有界面时另起的线程开的）在这里结束；之后 `Shared::spawn_with` 看得到它，不再登记。
     pub(crate) fn shut_down(&self) -> bool {
         let mut peers = self.peers();
         if !peers.standalone {
             return false;
         }
-        peers.stop.get_or_insert(Stopped::Shutdown);
+        // 已经在停（交接已经提交、闲着退出）时不改原因。
+        if !matches!(peers.phase, Phase::Stopping(_)) {
+            peers.phase = Phase::Stopping(Stopped::Shutdown);
+        }
         peers.accepting = false;
         // 锁的先后：拿着 `peers` 再拿 `registry`。
         for (_, handle) in self.registry().sessions.drain() {
@@ -788,11 +799,10 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         let mut peers = shared.peers();
         // 登记之后、写线程起好之前宿主要退出了，或者开始把会话交给新宿主了：这条连接也收
         // `Goodbye`。
-        let reason = match peers.stop {
-            Some(Stopped::Shutdown) => Some(GoodbyeReason::Shutdown),
-            Some(Stopped::Handoff) => Some(GoodbyeReason::Handoff),
-            _ if peers.handoff.is_some() => Some(GoodbyeReason::Handoff),
-            _ => None,
+        let reason = match peers.phase {
+            Phase::Stopping(Stopped::Shutdown) => Some(GoodbyeReason::Shutdown),
+            Phase::HandingOver | Phase::Stopping(Stopped::Handoff) => Some(GoodbyeReason::Handoff),
+            Phase::Serving | Phase::Stopping(Stopped::Idle) => None,
         };
         if let Some(reason) = reason {
             out.control(&HostMsg::Goodbye { reason });

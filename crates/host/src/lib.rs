@@ -155,7 +155,7 @@ impl Shared {
     /// 新开一个会话，返回它的标识。
     ///
     /// 交接给新宿主期间不开新会话（交出去的会话已经定了，新开的会跟着这个宿主一起退出），要退出了
-    /// （`Peers::stop`）也不开：没有界面时开终端在另起的线程里办，可能在 `Shutdown` 结束了所有会话、或者
+    /// （`Peers::phase`）也不开：没有界面时开终端在另起的线程里办，可能在 `Shutdown` 结束了所有会话、或者
     /// 判定空闲以后才开好，登记进去的话没人收拾，shell 跟着进程一起被丢下。
     fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
         self.spawn_with(options, &[])
@@ -164,8 +164,8 @@ impl Shared {
     /// 同 `spawn`，这个会话的 shell 另外设上 `env` 里的环境变量。
     fn spawn_with(&self, options: SpawnOptions, env: &[(&str, &str)]) -> Result<SessionId> {
         // 已经不开了的当场拒绝，不白起 shell；还开的在同一把锁里记上一个会话线程，开完（登记好、或者被拒绝
-        // 后叫它结束）前一直算着：`Host::run_until_idle` 置上 `stop` 后等会话线程都结束，置上之前开始开的
-        // 会话一定等得到，开好时又看得到 `stop`，被拒绝、结束，shell 不会在进程退出后留下。
+        // 后叫它结束）前一直算着：`Host::run_until_idle` 置上 `Phase::Stopping` 后等会话线程都结束，置上之前开始开的
+        // 会话一定等得到，开好时又看得到它，被拒绝、结束，shell 不会在进程退出后留下。
         let _spawning = {
             let peers = self.peers();
             if let Some(refused) = refusal(&peers) {
@@ -191,7 +191,7 @@ impl Shared {
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
         let handle = session::spawn(setup, options)?;
         // 锁的先后：拿着 `peers` 再拿 `registry`；交接开始时在同一把锁里定下要交的会话，要退出时在同一把
-        // 锁里置上 `stop`、清空登记表（见 `Shared::shut_down`）。
+        // 锁里置上 `Phase::Stopping`、清空登记表（见 `Shared::shut_down`）。
         let peers = self.peers();
         if let Some(refused) = refusal(&peers) {
             drop(peers);
@@ -267,10 +267,12 @@ impl Shared {
 
 /// 现在还开不开新会话，不开时为什么，见 `Shared::spawn`。
 fn refusal(peers: &server::Peers) -> Option<&'static str> {
-    match peers.stop {
-        Some(Stopped::Handoff) => Some("the host is being upgraded; try again in a moment"),
-        Some(Stopped::Idle | Stopped::Shutdown) => Some("the host is shutting down"),
-        None => peers.handoff.is_some().then_some("the host is being upgraded; try again in a moment"),
+    match peers.phase {
+        server::Phase::HandingOver | server::Phase::Stopping(Stopped::Handoff) => {
+            Some("the host is being upgraded; try again in a moment")
+        }
+        server::Phase::Stopping(Stopped::Idle | Stopped::Shutdown) => Some("the host is shutting down"),
+        server::Phase::Serving => None,
     }
 }
 

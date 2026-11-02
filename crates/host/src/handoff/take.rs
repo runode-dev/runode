@@ -34,7 +34,7 @@ use runode_types::{
 use super::{TakeOverError, TakeOverOptions, TakeOverReport, exits_in_grace, ms, peer_pid};
 use crate::{
     Host, Shared, SpawnOptions,
-    server::ListenControl,
+    server::{ListenControl, Phase},
     session::{self, Adopted, Handle, Inbox, Unwritten},
 };
 
@@ -66,7 +66,7 @@ impl Host {
         let started = Instant::now();
         {
             let peers = self.shared.peers();
-            if peers.listening.is_some() || peers.handoff.is_some() {
+            if peers.listening.is_some() || peers.phase == Phase::HandingOver {
                 return Err(TakeOverError::Failed("this host is already listening".into()));
             }
         }

@@ -6,7 +6,7 @@
 //! 一个会话，等 shell 的提示符出来再打 `<agent> "$RUNODE_TODO_PROMPT"`（写法照 shell 来，见
 //! `agent_command`）：提示词经环境变量交给 shell，不用照各家 shell 的规矩转义。任务会话不进宿主手里的布局，桌面在看板上打开它时再接进窗口。
 //!
-//! 只有拿着会话的宿主改看板：开始交出会话（`Peers::handoff`）或者要退出（`Peers::stop`）以后不改库、
+//! 只有拿着会话的宿主改看板：开始交出会话或者要退出（`Peers::phase` 不是 `Phase::Serving`）以后不改库、
 //! 不开任务，定时也不触发；接手的新宿主提交后自己接着办。两边的库是同一个文件，SQLite 自己管得住两个
 //! 进程同时开着。锁的先后：拿着 `Todos::state` 可以再拿 `peers` 和 `registry`，反过来不行。
 
@@ -165,11 +165,7 @@ impl Host {
 impl Shared {
     /// 能不能改看板：正在交出会话或者要退出了的宿主不改，见模块文档。
     fn todos_writable(&self) -> Result<(), String> {
-        let peers = self.peers();
-        if peers.handoff.is_some() || peers.stop.is_some() {
-            return Err("the host is handing its sessions over; try again in a moment".into());
-        }
-        Ok(())
+        crate::refusal(&self.peers()).map_or(Ok(()), |why| Err(why.into()))
     }
 
     /// 看板变了：叫醒定时的线程，告诉问过 `ListTodos` 的连接。

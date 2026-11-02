@@ -26,7 +26,7 @@ use runode_types::shell::IntegrationMode;
 use super::{exits_in_grace, kill_peer, ms, peer_pid, running};
 use crate::{
     Shared, SpawnOptions, Stopped,
-    server::{ListenControl, Outbox},
+    server::{ListenControl, Outbox, Phase},
     session::{self, Adopted, Exported, Handle, Inbox, Prepared, Unwritten},
 };
 
@@ -166,7 +166,7 @@ pub(crate) fn give(
     }
     {
         let mut peers = shared.peers();
-        peers.stop = Some(Stopped::Handoff);
+        peers.phase = Phase::Stopping(Stopped::Handoff);
         peers.accepting = false;
     }
     giving.control.stop();
@@ -204,7 +204,12 @@ impl Giving {
         for (_, handle) in &self.handles {
             handle.send(Inbox::Resume);
         }
-        shared.peers().handoff = None;
+        let mut peers = shared.peers();
+        // 交接当中要退出了（`Shutdown`）时照旧退出，不回到照常办事。
+        if peers.phase == Phase::HandingOver {
+            peers.phase = Phase::Serving;
+        }
+        drop(peers);
         self.control.resume();
         shared.peers_changed.notify_all();
         tracing::warn!("the handoff was rolled back after {} ms: {why}", ms(started.elapsed()));
@@ -229,7 +234,7 @@ fn begin(shared: &Shared, connection: u64, asked: &Asked) -> Result<Giving, Hand
     if !peers.standalone {
         return Err(HandoffRefusal::NotStandalone);
     }
-    if peers.handoff.is_some() || peers.stop.is_some() {
+    if peers.phase != Phase::Serving {
         return Err(HandoffRefusal::Busy);
     }
     if !asked.formats.contains(&HANDOFF_FORMAT) {
@@ -246,7 +251,7 @@ fn begin(shared: &Shared, connection: u64, asked: &Asked) -> Result<Giving, Hand
     let control = listening.control.clone();
     let listener = listening.listener.clone();
     let socket = listening.socket.clone();
-    peers.handoff = Some(connection);
+    peers.phase = Phase::HandingOver;
     // 返回时接受连接的线程已经不会再接，之后连上来的排在 backlog 里，留给新宿主。
     control.pause();
     peers.say_goodbye(Some(connection), &GoodbyeReason::Handoff);

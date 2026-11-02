@@ -531,7 +531,7 @@ fn a_stopping_host_opens_no_more_sessions() {
 
     // 判定空闲退出以后开好的会话也不登记。
     let host = Host::new(BuildId("test".into()));
-    host.shared.peers().stop = Some(Stopped::Idle);
+    host.shared.peers().phase = Phase::Stopping(Stopped::Idle);
     assert!(host.shared.spawn(options(CAT)).is_err());
     assert!(host.shared.registry().sessions.is_empty());
 }
@@ -584,7 +584,7 @@ fn stops_after_a_session_being_opened(reason: Stopped, marker: u32) {
         assert!(Instant::now() < deadline, "the session never started opening");
         thread::sleep(Duration::from_millis(1));
     }
-    host.shared.peers().stop = Some(reason);
+    host.shared.peers().phase = Phase::Stopping(reason);
     let stopped = {
         let host = host.clone();
         let (tx, rx) = mpsc::channel();

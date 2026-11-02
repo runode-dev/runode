@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use crate::Host;
+use crate::{Host, server::Phase};
 
 /// 有连接断开时之外，隔多久再看一次是不是空闲了；短的空闲时限按它的几分之一看。
 const MAX_TICK: Duration = Duration::from_millis(500);
@@ -58,7 +58,7 @@ impl Host {
         }
         let mut quiet_since: Option<Instant> = None;
         let reason = loop {
-            if let Some(reason) = peers.stop {
+            if let Phase::Stopping(reason) = peers.phase {
                 break reason;
             }
             // 锁的先后：拿着 `peers` 再拿 `registry`。
@@ -70,7 +70,7 @@ impl Host {
                 let since = *quiet_since.get_or_insert_with(Instant::now);
                 let since = since.max(peers.activity_at);
                 if since.elapsed() >= idle {
-                    peers.stop = Some(Stopped::Idle);
+                    peers.phase = Phase::Stopping(Stopped::Idle);
                     break Stopped::Idle;
                 }
             } else {
@@ -100,7 +100,7 @@ impl Host {
             }
             peers = shared.peers_changed.wait_timeout(peers, left).map_or_else(|err| err.into_inner().0, |(p, _)| p);
         }
-        // 正在开的会话开好时要拿 `peers` 看 `stop`，等会话线程时不能拿着它。
+        // 正在开的会话开好时要拿 `peers` 看 `Peers::phase`，等会话线程时不能拿着它。
         drop(peers);
         let left = shared.session_threads.wait_until(Instant::now() + SESSIONS_END_TIMEOUT);
         if left > 0 {
