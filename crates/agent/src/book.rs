@@ -103,7 +103,15 @@ mod tests {
 
     #[test]
     fn every_builtin_rule_file_compiles_and_names_its_agent() {
-        assert_eq!(BUILTIN.len(), 22);
+        // 规则目录里的每个文件都编进来了，各编一次：文件名照上游的原名，和 `AgentKind::label` 不一定一样，按内容认。
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("rules");
+        let files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|entry| entry.unwrap().path()).collect();
+        for file in &files {
+            let text = std::fs::read_to_string(file).unwrap();
+            let built: Vec<_> = BUILTIN.iter().filter(|(_, builtin)| *builtin == text).collect();
+            assert_eq!(built.len(), 1, "{} is built in {} times", file.display(), built.len());
+        }
+        assert_eq!(BUILTIN.len(), files.len());
         for (label, text) in BUILTIN {
             let kind = AgentKind::ALL.into_iter().find(|kind| kind.label() == *label).unwrap();
             let set = RuleSet::parse(text).unwrap_or_else(|err| panic!("{label}: {err}"));
