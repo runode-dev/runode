@@ -102,7 +102,7 @@ pub(in crate::window) fn accent(kind: AgentKind) -> Option<u32> {
 
 /// 不在 `AgentKind` 里的 DeepSeek Harness 的 logo，按原色画：runode 认不出终端里跑的是它，只在 Git
 /// 面板写提交说明的 agent 菜单里用。
-pub(in crate::window) const DEEPSEEK_LOGO: &str = DEEPSEEK;
+pub(crate) const DEEPSEEK_LOGO: &str = DEEPSEEK;
 
 /// 按原色画 `path` 这个 logo，边长 `size`。
 pub(in crate::window) fn colored_logo(path: &'static str, size: Pixels) -> AnyElement {

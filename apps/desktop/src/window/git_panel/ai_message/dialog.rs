@@ -10,7 +10,7 @@ use gpui::{
     Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 
-use super::{
+use crate::git_panel::commit_message::{
     DEFAULT_TEMPLATE, Recipe, VARIABLES,
     agents::{AGENTS, AgentSpec, CUSTOM_AGENT, agent},
     command_preview, save_recipe, saved_recipe, variable_preview,

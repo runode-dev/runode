@@ -10,7 +10,7 @@
 
 mod actions;
 mod agent_picker;
-mod agents;
+pub(crate) mod agents;
 mod arrange;
 mod askpass;
 mod background;

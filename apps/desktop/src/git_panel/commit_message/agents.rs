@@ -6,18 +6,18 @@ use runode_types::agent::AgentKind;
 use crate::window::agents::logo::DEEPSEEK_LOGO;
 
 /// `tail` 里换成提示词的占位；`tail` 里没有它时提示词经标准输入给（改动可能很大，命令行放不下）。
-pub(super) const PROMPT: &str = "{prompt}";
+pub(crate) const PROMPT: &str = "{prompt}";
 
 /// agent 打印出来的是什么。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Output {
+pub(crate) enum Output {
     /// 就是提交说明。
     Text,
     /// OpenCode 的 `--format json`：一行一个事件，说明在 `text` 事件里。
     OpenCodeEvents,
 }
 
-pub(in crate::window) struct AgentSpec {
+pub(crate) struct AgentSpec {
     /// 存进预设的名字。
     pub id: &'static str,
     pub label: &'static str,
@@ -34,7 +34,7 @@ pub(in crate::window) struct AgentSpec {
 }
 
 /// 菜单里按这个顺序列，常用的在前。
-pub(in crate::window) const AGENTS: &[AgentSpec] = &[
+pub(crate) const AGENTS: &[AgentSpec] = &[
     AgentSpec {
         id: "claude",
         label: "Claude",
@@ -189,18 +189,18 @@ pub(in crate::window) const AGENTS: &[AgentSpec] = &[
 ];
 
 /// 选它时不用上面哪一家，跑用户自己写的命令（`Recipe::command`）。
-pub(in crate::window) const CUSTOM_AGENT: &str = "custom";
+pub(crate) const CUSTOM_AGENT: &str = "custom";
 
 /// 没选过时用的 agent。
-pub(in crate::window) const DEFAULT_AGENT: &str = "claude";
+pub(crate) const DEFAULT_AGENT: &str = "claude";
 
-pub(in crate::window) fn agent(id: &str) -> Option<&'static AgentSpec> {
+pub(crate) fn agent(id: &str) -> Option<&'static AgentSpec> {
     AGENTS.iter().find(|agent| agent.id == id)
 }
 
 impl AgentSpec {
     /// 完整的参数：自己的参数、用户写的参数、末尾的参数，见 `with_prompt`。
-    pub(super) fn command_line(&self, user_args: Vec<String>, prompt: &str) -> (Vec<String>, Option<String>) {
+    pub(crate) fn command_line(&self, user_args: Vec<String>, prompt: &str) -> (Vec<String>, Option<String>) {
         let mut args: Vec<String> = self.args.iter().map(|&arg| arg.to_owned()).collect();
         args.extend(user_args);
         args.extend(self.tail.iter().map(|&arg| arg.to_owned()));
@@ -209,7 +209,7 @@ impl AgentSpec {
 }
 
 /// 把参数里的 `PROMPT` 换成 `prompt`，再给出要经标准输入给的提示词：参数里放了提示词时为空。
-pub(super) fn with_prompt(args: Vec<String>, prompt: &str) -> (Vec<String>, Option<String>) {
+pub(crate) fn with_prompt(args: Vec<String>, prompt: &str) -> (Vec<String>, Option<String>) {
     let on_argv = args.iter().any(|arg| arg.contains(PROMPT));
     let args = args.into_iter().map(|arg| arg.replace(PROMPT, prompt)).collect();
     (args, (!on_argv).then(|| prompt.to_owned()))
