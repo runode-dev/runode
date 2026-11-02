@@ -1,7 +1,7 @@
 //! 设置页里的控件：一行设置的排版，分段选项、下拉按钮、输入框和色块（按钮用 `Button`，开关用 `Switch`）。颜色在 render
 //! 里从窗口的主题（`Theme`）读，和终端窗口的界面一个色调。
 
-use crate::ui::icons::{CHECK_ICON, CHEVRON_DOWN_ICON};
+use crate::ui::icons::CHEVRON_DOWN_ICON;
 use crate::ui::theme::Theme;
 use gpui::{AnyElement, Div, ElementId, Entity, Hsla, Role, SharedString, Stateful, div, prelude::*, px, svg};
 
@@ -172,36 +172,6 @@ pub(super) fn input_box(input: &Entity<InputState>, width: Option<f32>, error: b
         .h(scaled(CONTROL_HEIGHT))
         .bg(theme.mix(0.06))
         .text_size(FontSize::Body)
-}
-
-/// 可以选上、取消的小标签，选上的描强调色、打个勾。
-pub(super) fn chip(
-    id: impl Into<ElementId>,
-    icon: Option<&'static str>,
-    label: impl Into<SharedString>,
-    on: bool,
-    theme: &Theme,
-) -> Stateful<Div> {
-    let label = label.into();
-    div()
-        .id(id)
-        .role(Role::CheckBox)
-        .aria_label(label.clone())
-        .aria_toggled(on.into())
-        .h(scaled(24.))
-        .px(px(8.))
-        .flex()
-        .items_center()
-        .gap(px(5.))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(if on { theme.ring } else { theme.foreground.opacity(0.13) })
-        .text_size(FontSize::Body)
-        .when(on, |chip| chip.bg(theme.ring.opacity(0.15)))
-        .hover(|chip| chip.bg(theme.mix(0.07)))
-        .children(on.then(|| svg().path(CHECK_ICON).size(px(11.)).text_color(theme.ring)))
-        .children(icon.map(|icon| svg().path(icon).size(px(12.)).text_color(theme.foreground.opacity(0.7))))
-        .child(label)
 }
 
 /// 色块；`color` 为 `None` 时画一条斜线，表示没设、跟随别的颜色。

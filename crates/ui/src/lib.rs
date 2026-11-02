@@ -9,6 +9,7 @@ pub mod actions;
 pub mod badge;
 pub mod button;
 pub mod card;
+pub mod chip;
 pub mod dialog;
 pub mod file_icons;
 pub mod font_size;

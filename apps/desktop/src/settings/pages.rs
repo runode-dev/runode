@@ -1,14 +1,14 @@
 //! 设置页的各页：每页有哪些项、各用什么控件，以及主题、字体、调色板这些不止一个控件的项。
 
 use crate::ui::icons::{MINUS_ICON, REFRESH_ICON};
-use crate::ui::{segmented::Segmented, theme::Theme};
+use crate::ui::{chip::Chip, segmented::Segmented, theme::Theme};
 use gpui::{AnyElement, Context, Div, ElementId, Role, SharedString, Window, div, prelude::*, px};
 use runode_config::StatusItem;
 use runode_types::{agent::AgentKind, speech::DictationCloud};
 
 use super::{
     Commit, SettingsView,
-    controls::{Cards, Press, chip, dropdown, error_text, input_box, row, swatch},
+    controls::{Cards, Press, dropdown, error_text, input_box, row, swatch},
     picker::{PickItem, PickTarget},
 };
 use crate::{
@@ -625,7 +625,7 @@ impl SettingsView {
             .map(|(ix, item)| {
                 let on = hidden.contains(&item);
                 let (icon, title) = crate::window::status_item_icon_and_title(item);
-                chip(("status-hidden", ix), Some(icon), title, on, theme).on_press(cx, move |this, _, cx| {
+                Chip::new(("status-hidden", ix), title, on).icon(icon).on_press(cx, move |this, _, cx| {
                     let mut hidden = this.config.status_bar_hidden.clone();
                     if on {
                         hidden.retain(|other| *other != item);
@@ -658,7 +658,7 @@ impl SettingsView {
                     AgentKind::Other => rust_i18n::t!("settings.other_agents").into_owned(),
                     kind => kind.display_name().to_owned(),
                 };
-                chip(("exclude", ix), None, name, on, theme).on_press(cx, move |this, _, cx| {
+                Chip::new(("exclude", ix), name, on).on_press(cx, move |this, _, cx| {
                     let mut values = this.config.values(KEY);
                     if on {
                         values.retain(|name| name != label);

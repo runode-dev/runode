@@ -25,6 +25,7 @@ use crate::ui::{
     a11y::{Disable as _, Press, PressDown as _},
     base_name,
     button::{Button, ButtonVariant},
+    chip::Chip,
     dialog::Dialog,
     display_dir,
     font_size::{FontSize, scaled},
@@ -32,6 +33,7 @@ use crate::ui::{
     input::{Input, InputEvent, InputState},
     menu::{Menu, MenuHost, MenuItem},
     panel::TITLEBAR_HEIGHT,
+    segmented::Segmented,
     switch::Switch,
     textarea::{Textarea, TextareaEvent, TextareaState},
     theme::ActiveTheme as _,
@@ -905,10 +907,10 @@ impl Render for TodoDialog {
         let button = |id: &'static str, label: String, variant: ButtonVariant| {
             Button::new(id, label).variant(variant).h_auto().py(px(5.)).cursor_pointer()
         };
-        let pill = |id: gpui::ElementId, label: String, on: bool, role: Role| {
+        let pill = |id: gpui::ElementId, label: String, on: bool| {
             div()
                 .id(id)
-                .role(role)
+                .role(Role::RadioButton)
                 .aria_label(label.clone())
                 .aria_toggled(on.into())
                 .px(px(10.))
@@ -1132,9 +1134,13 @@ impl Render for TodoDialog {
             .when(dialog.locked, |pill| pill.opacity(0.6))
             .aria_disabled(dialog.locked);
         let when = dialog.schedule.then(|| {
-            let kind = |id: &'static str, kind: Kind, label: &str, cx: &mut Context<Self>| {
-                pill(id.into(), rust_i18n::t!(label).into_owned(), dialog.kind == Some(kind), Role::RadioButton)
-                    .on_press(cx, move |dialog, window, cx| {
+            let kind = |group: Segmented, id: &'static str, kind: Kind, label: &str, cx: &mut Context<Self>| {
+                group.option(
+                    id,
+                    rust_i18n::t!(label).into_owned(),
+                    dialog.kind == Some(kind),
+                    cx,
+                    move |dialog, window, cx| {
                         dialog.kind = Some(kind);
                         let input = match kind {
                             Kind::Once => dialog.at.clone(),
@@ -1143,21 +1149,14 @@ impl Render for TodoDialog {
                         };
                         window.focus(&input.focus_handle(cx), cx);
                         cx.notify();
-                    })
+                    },
+                )
             };
             let when_label = rust_i18n::t!("kanban.dialog.when").into_owned();
-            let kinds = div()
-                .id("todo-dialog-when")
-                .role(Role::RadioGroup)
-                .aria_label(when_label.clone())
-                .flex()
-                .p(px(2.))
-                .gap(px(2.))
-                .rounded(px(6.))
-                .bg(bg_h)
-                .child(kind("todo-dialog-once", Kind::Once, "kanban.dialog.kind_once", cx))
-                .child(kind("todo-dialog-daily", Kind::Daily, "kanban.dialog.kind_daily", cx))
-                .child(kind("todo-dialog-every", Kind::Every, "kanban.dialog.kind_every", cx));
+            let kinds = Segmented::new("todo-dialog-when", when_label.clone());
+            let kinds = kind(kinds, "todo-dialog-once", Kind::Once, "kanban.dialog.kind_once", cx);
+            let kinds = kind(kinds, "todo-dialog-daily", Kind::Daily, "kanban.dialog.kind_daily", cx);
+            let kinds = kind(kinds, "todo-dialog-every", Kind::Every, "kanban.dialog.kind_every", cx);
             let when_input = match dialog.kind {
                 Some(Kind::Once) => input(&dialog.at).into_any_element(),
                 Some(Kind::Daily) => input(&dialog.clock).into_any_element(),
@@ -1179,16 +1178,13 @@ impl Render for TodoDialog {
                     .map(|day| {
                         let on = dialog.days & (1 << day) != 0;
                         let label = weekday(day);
-                        pill(("todo-weekday", usize::from(day)).into(), label, on, Role::CheckBox).on_press(
-                            cx,
-                            move |dialog, _, cx| {
-                                dialog.days ^= 1 << day;
-                                cx.notify();
-                            },
-                        )
+                        Chip::new(("todo-weekday", usize::from(day)), label, on).on_press(cx, move |dialog, _, cx| {
+                            dialog.days ^= 1 << day;
+                            cx.notify();
+                        })
                     })
                     .collect();
-                div().flex().flex_col().gap(px(4.)).child(div().flex().flex_wrap().gap(px(2.)).children(pills)).child(
+                div().flex().flex_col().gap(px(4.)).child(div().flex().flex_wrap().gap(px(4.)).children(pills)).child(
                     div()
                         .text_size(FontSize::Small)
                         .text_color(fg_h.opacity(0.55))
@@ -1242,7 +1238,7 @@ impl Render for TodoDialog {
                 )
                 .map(|(index, id, name)| {
                     let id = gpui::ElementId::Name(format!("todo-template-{id}").into());
-                    pill(id, name, dialog.template == index, Role::RadioButton)
+                    pill(id, name, dialog.template == index)
                         .truncate()
                         .on_press(cx, move |dialog, window, cx| dialog.pick_template(index, window, cx))
                 })
