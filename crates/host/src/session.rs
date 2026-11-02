@@ -10,15 +10,6 @@
 //! 冻结，`Inbox::Release` 提交（交出 PTY、线程结束）、`Inbox::Resume` 回滚；新宿主这边 `adopt`
 //! 接手，PTY 停在闸门上，`Inbox::Open` 提交后打开闸门，`Inbox::Release` 不接手了原样交回去。
 //!
-//! 尺寸归属：几个前端带着屏幕看同一个会话时，会话的尺寸由最近交互过的那个（owner）决定，见
-//! `Runner::owner`。只有带着屏幕连着、请求过尺寸的连接（`Viewer`）有资格：只看状态的（命令行都是）
-//! 和从不说尺寸的（比如手机跟着 Mac 的尺寸看）没有，它们的输入和焦点不算交互，免得抢走 owner 却
-//! 没人改尺寸、桌面被裁切着画。交互是带尺寸的 `Inbox::Subscribe`、这条连接的 `Inbox::Input` 和
-//! `Inbox::Focus`；命令行的 `Inbox::Keys`、`Inbox::Paste` 不算。owner 的 `Inbox::Resize` 当场应用，
-//! 别的只记下，等它当上 owner 再用；还没有 owner 时谁的都应用。尺寸只在宿主插进输出流的
-//! `HostMsg::Resized` 处改，两份 VT 不会分叉；owner 换了用 `HostMsg::SizeOwner` 告诉前端。owner 是
-//! 连接级的状态，交接后新宿主上的会话从没有 owner 开始。
-//!
 //! 程序读写剪贴板（OSC 52）的请求按配置办，要桌面办的交给最近和这个会话交互过的桌面，见 `clipboard`。
 
 use std::{
@@ -36,15 +27,7 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{AttachMode, HostMsg, SessionId, SessionInfo};
-#[cfg(unix)]
-use std::os::fd::OwnedFd;
 
-#[cfg(unix)]
-use runode_terminal::{
-    SnapshotError,
-    host_session::{ImportError, ImportScreen, RedactorState, SessionExport},
-    pty::PtyHandoff,
-};
 use runode_terminal::{
     host_session::{HostSession, ReportRedactor},
     pty::{self, Pty, PtyEvent},
@@ -62,8 +45,14 @@ use runode_types::{
 use crate::{SpawnOptions, server::UiPort};
 
 mod clipboard;
+#[cfg(unix)]
+mod handoff;
+mod sizing;
 
 pub(crate) use clipboard::CLIPBOARD_READ_PATIENCE;
+#[cfg(unix)]
+pub(crate) use handoff::{Adopted, Adopting, Exported, Prepared, Unwritten, adopt};
+use sizing::Viewer;
 
 /// PTY 读线程最多积压这么多字节的输出，再多就等会话线程处理。按字节而不按块数算：程序不停输出
 /// 时一次只读到 1 KiB 左右，按块数限的话积压不了多少，会话线程稍一耽搁读线程就得停下。也不能
@@ -86,16 +75,6 @@ const TYPE_AT_PROMPT_PATIENCE: Duration = Duration::from_secs(5);
 const TYPE_AT_INTEGRATED_PROMPT_PATIENCE: Duration = Duration::from_secs(60);
 /// 有输出时重读前台进程的最短间隔：大量输出时不必每块都做几次系统调用，推迟的那次到点补上。
 const FOREGROUND_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
-/// 交接时 VT 停在一条编不进快照的序列中间（`SnapshotError::Unfinished`），最多这么久里让程序
-/// 接着输出、再试；还不行就只交重放。
-#[cfg(unix)]
-const SNAPSHOT_PATIENCE: Duration = Duration::from_secs(1);
-/// 编不出快照时每次让程序接着输出这么久再停下来试。
-#[cfg(unix)]
-const UNFINISHED_RETRY: Duration = Duration::from_millis(100);
-/// 交接时等读线程停下的过程中，隔这么久看一次它停了没有。
-#[cfg(unix)]
-const DRAIN_POLL: Duration = Duration::from_millis(2);
 
 /// 会话发给一个连着的前端的一件事，同一个会话的按发生的先后。
 #[derive(Clone, Debug)]
@@ -187,64 +166,6 @@ pub(crate) enum Inbox {
         ui: u64,
         reply: Box<HostMsg>,
     },
-}
-
-/// 会话交出 PTY 时还没写进 PTY 的输入，见 `Inbox::Release`、`Inbox::Open`。
-#[cfg(unix)]
-#[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct Unwritten {
-    /// 接手的一方当场写的。
-    pub(crate) now: Vec<u8>,
-    /// 还在等提示符的 `Inbox::TypeAtPrompt`：接手的一方接着等，不当场写。空的就是没有。
-    pub(crate) at_prompt: Vec<u8>,
-}
-
-#[cfg(unix)]
-impl Unwritten {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.now.is_empty() && self.at_prompt.is_empty()
-    }
-}
-
-/// 会话对 `Inbox::Prepare` 的回话。
-#[cfg(unix)]
-pub(crate) enum Prepared {
-    /// 不交：shell 已经退出了，或者会话正被结束。交接提交时结束它，回滚时照旧留着。
-    Gone,
-    /// 交不了（比如复制不了 PTY 的描述符），整个交接放弃。
-    Failed(String),
-    Ready(Box<Exported>),
-}
-
-/// 会话交给新宿主的东西，见 `runode_protocol::HandoffPart::Session`。
-#[cfg(unix)]
-pub(crate) struct Exported {
-    pub(crate) export: SessionExport,
-    /// 复制的一份 PTY master，自己这份照常留着直到提交；还没启动 shell 时为空。交出方发出去以后
-    /// 还留着它，直到新宿主确认接手。
-    pub(crate) master: Option<OwnedFd>,
-    /// shell 的进程号；还没启动时为空。
-    pub(crate) pid: Option<u32>,
-    /// 宿主那份 VT 的原始快照（没抹口令）；编不出来时为空，新宿主只能用重放。
-    pub(crate) snapshot: Option<Vec<u8>>,
-    /// 重画当前屏幕的 VT 序列。
-    pub(crate) replay: Vec<u8>,
-    /// 给前端的输出流停在哪里，新宿主接着抹。
-    pub(crate) redactor: RedactorState,
-    /// `Inbox::Start` 时启动的程序。
-    pub(crate) shell: Option<String>,
-}
-
-/// 交接过来、已经启动了 shell 的会话，见 `adopt`。
-#[cfg(unix)]
-pub(crate) struct Adopted {
-    pub(crate) handoff: PtyHandoff,
-    pub(crate) export: SessionExport,
-    /// 用它重建 VT；为空（或者解不开）时用 `replay`。
-    pub(crate) snapshot: Option<Vec<u8>>,
-    pub(crate) replay: Vec<u8>,
-    pub(crate) redactor: RedactorState,
-    pub(crate) shell: Option<String>,
 }
 
 /// 开会话和接手会话共用的设置。
@@ -443,116 +364,6 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
     let inbox = inbox.clone();
     let credits = credits.clone();
     Box::new(move |event| credits.acquire(output_len(&event)) && inbox.send(Inbox::Pty(event)).is_ok())
-}
-
-/// 接手交接过来的会话：PTY 停在闸门上（`Pty::adopt_paused`，不读不写），在会话线程里用快照
-/// 重建 `HostSession`，快照没有或者解不开时用重放。不等重建完就返回，几个会话一起重建，见
-/// `Adopting::finish`。闸门等 `Inbox::Open` 打开，不接手了发 `Inbox::Release`。
-///
-/// 失败时 PTY 已经原样交回、关掉了这边的描述符，shell 不受影响（交出方还拿着自己那份）。
-/// PTY 在会话线程起好之后才经 channel 交过去：起不了线程时它还在这里，用 `Pty::release` 明着交回。
-#[cfg(unix)]
-pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
-    let Setup { id, settings: _, env: _, ui, clipboard, read_patience, alive } = setup;
-    let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
-    // 交出时记着谁在操作它的，接手后照样记着：用户再打字时要清掉。
-    let driven = Arc::new(Mutex::new(export.meta.driver.is_some()));
-    let (inbox, rx) = mpsc::channel();
-    let credits = Arc::new(Credits::default());
-    let sink = pty_sink(&inbox, &credits);
-    // 失败时交来的描述符随 `AdoptError` 丢掉，只关这边这份。
-    let mut pty = Pty::adopt_paused(handoff, sink).map_err(|err| anyhow!("{err}"))?;
-    let (give, take) = mpsc::channel::<Pty>();
-    let (ready, created) = mpsc::channel();
-    let killed = Arc::new(AtomicBool::new(false));
-    let killed_flag = killed.clone();
-    let spawned = thread::Builder::new().name(format!("session-{id}")).spawn(move || {
-        // 最后丢掉，排在 `Pty` 后面，见 `Alive`。
-        let _alive = alive;
-        pty::set_current_thread_interactive();
-        let _close = CloseOnDrop(credits.clone());
-        let Ok(pty) = take.recv() else { return };
-        let settings = export.settings.clone();
-        let (session, replayed) = match import(id, pty, snapshot.as_deref(), &replay, redactor, export) {
-            Ok(imported) => imported,
-            Err(err) => {
-                let _ = ready.send(Err(err));
-                return;
-            }
-        };
-        let _ = ready.send(Ok(replayed));
-        let mut runner = Runner::new(id, session, shell, settings, credits);
-        runner.redactor = ReportRedactor::from_state(redactor);
-        runner.ui = ui;
-        runner.set_clipboard(clipboard);
-        runner.read_patience = read_patience;
-        runner.run(&rx, &killed_flag);
-    });
-    if let Err(err) = spawned {
-        release(&mut pty);
-        return Err(anyhow::Error::new(err).context("failed to start the session thread"));
-    }
-    if let Err(mpsc::SendError(mut pty)) = give.send(pty) {
-        release(&mut pty);
-        return Err(anyhow!("the session thread ended while starting"));
-    }
-    Ok(Adopting { handle: Handle { inbox, killed, driven }, created })
-}
-
-/// 正在重建的接手来的会话，见 `adopt`。
-#[cfg(unix)]
-pub(crate) struct Adopting {
-    handle: Handle,
-    created: mpsc::Receiver<Result<bool>>,
-}
-
-#[cfg(unix)]
-impl Adopting {
-    /// 等会话线程把会话建好，返回它和它的屏幕是不是从重放重建的。失败时 PTY 已经原样交回。
-    pub(crate) fn finish(self) -> Result<(Handle, bool)> {
-        let replayed = self.created.recv().map_err(|_| anyhow!("the session thread ended while starting"))??;
-        Ok((self.handle, replayed))
-    }
-}
-
-/// 用快照（没有或者解不开时用重放）把交接过来的会话建起来，返回会话和是不是用的重放。都不成时
-/// 把 PTY 原样交回去再报错。
-#[cfg(unix)]
-fn import(
-    id: SessionId,
-    pty: Pty,
-    snapshot: Option<&[u8]>,
-    replay: &[u8],
-    redactor: RedactorState,
-    export: SessionExport,
-) -> Result<(HostSession, bool)> {
-    let pty = match snapshot {
-        Some(snapshot) => match HostSession::import(pty, ImportScreen::Snapshot(snapshot), export.clone()) {
-            Ok(session) => return Ok((session, false)),
-            Err(err) => {
-                let ImportError { pty, error } = *err;
-                tracing::warn!("session {id} falls back to its VT replay: {error:#}");
-                pty
-            }
-        },
-        None => pty,
-    };
-    match HostSession::import(pty, ImportScreen::Replay { bytes: replay, redactor }, export) {
-        Ok(session) => Ok((session, true)),
-        Err(err) => {
-            let ImportError { mut pty, error } = *err;
-            release(&mut pty);
-            Err(error.context(format!("failed to rebuild session {id}")))
-        }
-    }
-}
-
-/// 把接手来、还停着的 PTY 原样交回去：只关这边的描述符，不结束 shell。
-#[cfg(unix)]
-fn release(pty: &mut Pty) {
-    if let Err(err) = pty.release() {
-        tracing::warn!("failed to give a pty back: {err:#}");
-    }
 }
 
 /// 会话线程里的状态。
@@ -901,215 +712,6 @@ impl Runner {
         }
     }
 
-    /// 交接（`Inbox::Prepare`）：停下来交出状态（`prepare`），之后冻结，直到交接提交
-    /// （`Inbox::Release`：交出 PTY，线程结束）或者回滚（`Inbox::Resume`）。返回会话是否还要接着跑。
-    ///
-    /// 冻结期间 PTY 不读，程序之后的输出留在 PTY 里，归提交后的新宿主或者回滚后的自己。前端改会话
-    /// 的请求（输入、改尺寸、换主题、清屏、启动 shell、连上来等）存进 `Freeze::held`：回滚时按先后
-    /// 重放；提交时其中的输入编好、接在没写出去的输入后面交给新宿主，别的丢掉（发请求的连接都已经
-    /// 收到 `Goodbye`）。只读的请求（列会话、读屏幕）照常办；断开当场放开订阅，它让出的尺寸归属
-    /// （会改尺寸）也存下回滚时重放。不按时刻轮询 agent：读线程停着没有输出，拖久了会把工作中的
-    /// agent 判成空闲。
-    #[cfg(unix)]
-    fn hand_over(
-        &mut self,
-        reply: &mpsc::Sender<Prepared>,
-        inbox: &mpsc::Receiver<Inbox>,
-        killed: &AtomicBool,
-    ) -> bool {
-        let mut freeze = Freeze::default();
-        let prepared = self.prepare(inbox, killed, &mut freeze);
-        let _ = reply.send(prepared);
-        loop {
-            // 冻结期间存下的 `Subscribe` 也要回，排在收件箱里的前面。
-            if killed.load(Ordering::Acquire) {
-                self.ended();
-                self.answer_pending(std::mem::take(&mut freeze.held), inbox);
-                return false;
-            }
-            match freeze.decision.take() {
-                Some(Decision::Release(reply)) => {
-                    let _ = reply.send(self.release(std::mem::take(&mut freeze.held)));
-                    return false;
-                }
-                Some(Decision::Resume) => {
-                    self.resume(std::mem::take(&mut freeze.held));
-                    return true;
-                }
-                None => {}
-            }
-            let Ok(message) = inbox.recv() else { return false };
-            self.frozen(message, &mut freeze);
-        }
-    }
-
-    /// 交接的第一步：已经启动了 shell 的，叫停读线程，把它已经读出来的输出处理完，编原始快照
-    /// （VT 停在编不进快照的序列中间时让程序再输出一会儿再试，最多 `SNAPSHOT_PATIENCE`）和重放，
-    /// 复制一份 PTY master；还没启动的只交状态。期间别的消息按冻结的规矩办，见 `hand_over`。
-    #[cfg(unix)]
-    fn prepare(&mut self, inbox: &mpsc::Receiver<Inbox>, killed: &AtomicBool, freeze: &mut Freeze) -> Prepared {
-        if self.exited {
-            return Prepared::Gone;
-        }
-        let exported = |runner: &Self, snapshot, replay, master, pid| {
-            Prepared::Ready(Box::new(Exported {
-                export: runner.session.export(),
-                master,
-                pid,
-                snapshot,
-                replay,
-                redactor: runner.redactor.state(),
-                shell: runner.shell.clone(),
-            }))
-        };
-        if !self.session.export().started {
-            return exported(self, None, Vec::new(), None, None);
-        }
-        self.session.stop_reading();
-        let deadline = Instant::now() + SNAPSHOT_PATIENCE;
-        let snapshot = loop {
-            if !self.drain(inbox, killed, freeze) || self.exited {
-                return Prepared::Gone;
-            }
-            match self.session.snapshot() {
-                Ok(snapshot) => break Some(snapshot),
-                Err(SnapshotError::Unfinished) if Instant::now() < deadline => {
-                    if let Err(err) = self.session.resume_reading() {
-                        tracing::warn!("session {} hands over a VT replay only: {err:#}", self.id);
-                        self.session.stop_reading();
-                        continue;
-                    }
-                    let until = (Instant::now() + UNFINISHED_RETRY).min(deadline);
-                    while let Some(left) = until.checked_duration_since(Instant::now()) {
-                        match inbox.recv_timeout(left) {
-                            Ok(message) => self.frozen(message, freeze),
-                            Err(mpsc::RecvTimeoutError::Timeout) => break,
-                            Err(mpsc::RecvTimeoutError::Disconnected) => return Prepared::Gone,
-                        }
-                        if killed.load(Ordering::Acquire) {
-                            return Prepared::Gone;
-                        }
-                    }
-                    self.session.stop_reading();
-                }
-                Err(err) => {
-                    tracing::warn!("session {} hands over a VT replay only: {err}", self.id);
-                    break None;
-                }
-            }
-        };
-        let replay = self.session.vt_replay().unwrap_or_else(|err| {
-            tracing::warn!("session {} cannot replay its screen: {err:#}", self.id);
-            Vec::new()
-        });
-        match self.session.dup_master() {
-            Ok(master) => exported(self, snapshot, replay, Some(master), self.session.shell_pid()),
-            Err(err) => Prepared::Failed(format!("session {} cannot duplicate its pty: {err}", self.id)),
-        }
-    }
-
-    /// 读线程叫停以后，把它已经交来的输出都处理完：等到 `pty_reader_finished`（之后读线程不会再
-    /// 往收件箱里放东西），再取完收件箱里剩下的。别的消息按冻结的规矩办。会话被结束或者宿主没了
-    /// 时返回 false。
-    #[cfg(unix)]
-    fn drain(&mut self, inbox: &mpsc::Receiver<Inbox>, killed: &AtomicBool, freeze: &mut Freeze) -> bool {
-        loop {
-            if killed.load(Ordering::Acquire) {
-                return false;
-            }
-            let message = if self.session.pty_reader_finished() {
-                match inbox.try_recv() {
-                    Ok(message) => message,
-                    Err(mpsc::TryRecvError::Empty) => return true,
-                    Err(mpsc::TryRecvError::Disconnected) => return false,
-                }
-            } else {
-                match inbox.recv_timeout(DRAIN_POLL) {
-                    Ok(message) => message,
-                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return false,
-                }
-            };
-            self.frozen(message, freeze);
-        }
-    }
-
-    /// 交接期间收到的一条消息，见 `hand_over`。
-    #[cfg(unix)]
-    fn frozen(&mut self, message: Inbox, freeze: &mut Freeze) {
-        match message {
-            message @ (Inbox::Pty(_) | Inbox::Info(_) | Inbox::ReadScreen { .. }) => self.handle(message),
-            // 断开的连接当场放开（它的 `Outbox` 跟着订阅丢掉）；它让出的尺寸归属会改尺寸，和别的
-            // 请求一样存下，回滚时重放。
-            Inbox::Detach { connection } => {
-                self.subscribers.retain(|s| s.connection != connection);
-                freeze.held.push(Inbox::Detach { connection });
-            }
-            Inbox::Release(reply) => {
-                freeze.decision.get_or_insert(Decision::Release(reply));
-            }
-            Inbox::Resume => {
-                freeze.decision.get_or_insert(Decision::Resume);
-            }
-            // `Kill` 由 `Handle::killed` 的标记办；同时只会有一次交接。
-            Inbox::Kill | Inbox::Prepare(_) => {}
-            message => freeze.held.push(message),
-        }
-        self.publish_meta();
-    }
-
-    /// 交接提交了：交出 PTY（不结束 shell），返回交出时没写进 PTY 的输入，`held` 里存下的输入编好
-    /// 接在后面；还在等提示符的 `TypeAtPrompt`（`held` 里的后来的替掉先前的，同 `handle`）单独交出，
-    /// 接手的一方接着等。还没启动 shell 的会话没有 PTY 可交，只有存下的输入。
-    #[cfg(unix)]
-    fn release(&mut self, held: Vec<Inbox>) -> Unwritten {
-        // 在等桌面回话的读剪贴板请求新宿主接不过去（它不知道在等什么，也不会替它计时），程序会一直等：交出
-        // PTY 之前回它空的，回话写不出去的话随没写出去的输入一起交给新宿主。冻结期间存下的界面回话随
-        // `held` 丢掉。
-        if let Some(read) = self.clipboard_read.take() {
-            tracing::info!("session {} answered a clipboard read with nothing: the host is handing over", self.id);
-            self.finish_read(read, None);
-        }
-        let mut now = match self.session.release_pty() {
-            // 丢掉交出来的 master 只关这边这份，新宿主手里还有一份。
-            Ok(handoff) => handoff.pending_input,
-            Err(err) => {
-                tracing::debug!("session {} has no pty to release: {err:#}", self.id);
-                Vec::new()
-            }
-        };
-        let mut at_prompt = self.type_ahead.take().map(|(data, _)| data).unwrap_or_default();
-        for message in held {
-            let bytes = match message {
-                Inbox::Input { data, .. } => Ok(data),
-                Inbox::TypeAtPrompt(data) => {
-                    at_prompt = data;
-                    continue;
-                }
-                Inbox::Keys(keys) => self.session.encode_keys(&keys),
-                Inbox::Paste(text) => self.session.encode_paste(&text),
-                _ => continue,
-            };
-            match bytes {
-                Ok(bytes) => now.extend_from_slice(&bytes),
-                Err(err) => tracing::warn!("session {} drops input held during the handoff: {err:#}", self.id),
-            }
-        }
-        Unwritten { now, at_prompt }
-    }
-
-    /// 交接回滚：接着读 PTY，按先后重放冻结期间存下的请求。
-    #[cfg(unix)]
-    fn resume(&mut self, held: Vec<Inbox>) {
-        if let Err(err) = self.session.resume_reading() {
-            tracing::error!("session {} cannot read its pty after the handoff was rolled back: {err:#}", self.id);
-        }
-        for message in held {
-            self.handle(message);
-        }
-        self.publish_meta();
-    }
-
     /// 连接上的前端连上来：按尺寸归属改好会话的尺寸，给它当前的屏幕，之后的事件接着发给它。
     ///
     /// 这条连接已经连着时（收到 `Resync` 后重新连上、在只看状态和看屏幕之间切换），新的订阅换掉
@@ -1162,85 +764,6 @@ impl Runner {
         // 口令。桌面经 `Host::connect_pair` 连上来时也一样：它那份 VT 不认这些报告（标题、目录、
         // shell 的名字都从 `Meta` 来），抹过的流喂出来的状态和宿主的一样。
         self.subscribers.push(Subscriber { connection, sink, desktop });
-    }
-
-    /// 连接 `connection` 的视图要尺寸 `size`：是 `Viewer` 的记下来；它是 owner、或者还没有 owner
-    /// 时当场应用。
-    fn request_size(&mut self, connection: u64, size: GridSize) {
-        if let Some(viewer) = self.viewers.iter_mut().find(|v| v.connection == connection) {
-            viewer.requested = Some(size);
-        }
-        if self.owner.is_none_or(|owner| owner == connection) {
-            self.apply_size(size);
-        }
-    }
-
-    /// 连接 `connection` 交互了一次：是请求过尺寸的 `Viewer` 的话轮到它决定尺寸。没资格的（只看
-    /// 状态、命令行，以及带着屏幕却从没请求过尺寸的）什么都不做，见模块文档。
-    fn interact(&mut self, connection: u64) {
-        let Some(viewer) = self.viewers.iter_mut().find(|v| v.connection == connection && v.requested.is_some()) else {
-            return;
-        };
-        self.interactions += 1;
-        viewer.last_active = self.interactions;
-        if self.owner != Some(connection) {
-            self.make_owner(connection);
-        }
-    }
-
-    /// 连接 `connection` 不再带着屏幕连着（断开、`Detach`、改成只看状态）：不再有资格；它是 owner
-    /// 的话交给剩下的、请求过尺寸的里面最近交互过的，应用那边的尺寸；没有这样的就没有 owner。
-    fn forget_viewer(&mut self, connection: u64) {
-        self.viewers.retain(|v| v.connection != connection);
-        if self.owner != Some(connection) {
-            return;
-        }
-        self.owner = None;
-        let next =
-            self.viewers.iter().filter(|v| v.requested.is_some()).max_by_key(|v| v.last_active).map(|v| v.connection);
-        if let Some(next) = next {
-            self.make_owner(next);
-        }
-    }
-
-    /// `connection`（`viewers` 里的）当上 owner：应用它最近请求的尺寸，告诉带着屏幕连着的前端。
-    fn make_owner(&mut self, connection: u64) {
-        self.owner = Some(connection);
-        let requested = self.viewers.iter().find(|v| v.connection == connection).and_then(|v| v.requested);
-        if let Some(size) = requested {
-            self.apply_size(size);
-        }
-        let device = self.device_of(connection);
-        let (id, viewers) = (self.id, &self.viewers);
-        self.subscribers.retain_mut(|subscriber| {
-            if !viewers.iter().any(|v| v.connection == subscriber.connection) {
-                return true;
-            }
-            let mine = subscriber.connection == connection;
-            (subscriber.sink)(Event::msg(HostMsg::SizeOwner { id, mine, owner: device.clone() }))
-        });
-    }
-
-    /// 改会话的尺寸，改了的话在输出流里标出 `Resized`，两份 VT 都在这里改。
-    fn apply_size(&mut self, size: GridSize) {
-        if self.session.resize(size) {
-            self.emit(Event::msg(HostMsg::Resized { id: self.id, size }));
-        }
-    }
-
-    /// 给连接 `connection` 的当前 `SizeOwner`：它带着屏幕连着、也有 owner 时才有。
-    fn size_owner_for(&self, connection: u64) -> Option<HostMsg> {
-        let owner = self.owner?;
-        self.viewers.iter().any(|v| v.connection == connection).then(|| HostMsg::SizeOwner {
-            id: self.id,
-            mine: owner == connection,
-            owner: self.device_of(owner),
-        })
-    }
-
-    /// 连接 `connection` 在 `Hello` 里报的设备名。
-    fn device_of(&self, connection: u64) -> Option<String> {
-        self.viewers.iter().find(|v| v.connection == connection).and_then(|v| v.device.clone())
     }
 
     fn replay(&self) -> Vec<u8> {
@@ -1345,22 +868,6 @@ impl Runner {
     }
 }
 
-/// 交接期间冻结着的会话存下的东西，见 `Runner::hand_over`。
-#[cfg(unix)]
-#[derive(Default)]
-struct Freeze {
-    /// 冻结期间收到的、改会话的请求，按先后。
-    held: Vec<Inbox>,
-    /// 交接的结果：先到的那个算。
-    decision: Option<Decision>,
-}
-
-#[cfg(unix)]
-enum Decision {
-    Release(mpsc::Sender<Unwritten>),
-    Resume,
-}
-
 /// 一个连着的前端。
 struct Subscriber {
     /// 连接的编号，`Inbox::Detach` 按它找。
@@ -1368,20 +875,6 @@ struct Subscriber {
     sink: EventSink,
     /// 是桌面的界面，见 `SessionInfo::claimed`。
     desktop: bool,
-}
-
-/// 带着屏幕连着会话的一条连接在尺寸归属里的状态，见 `Runner::owner`。从这条连接要屏幕的
-/// `Subscribe` 起，到它 `Detach`（含连接断开）或者改成只看状态为止。订阅因为读得太慢被丢掉
-/// （`Resync`）、还没重新连上时也留着：重新连上不带尺寸，沿用这里记着的。
-struct Viewer {
-    connection: u64,
-    /// 连接在 `Hello` 里报的设备名。
-    device: Option<String>,
-    /// 这个前端最近一次请求的尺寸（带尺寸的 `Subscribe` 或者 `Inbox::Resize`），轮到它当 owner 时
-    /// 应用；还没请求过时为空，这时没资格当 owner，见 `Runner::interact`。
-    requested: Option<GridSize>,
-    /// 最近一次交互的序号（`Runner::interactions`），没交互过为 0。
-    last_active: u64,
 }
 
 /// 读线程交来、会话线程还没处理完的输出有多少字节：读线程每交一块先记上（超过
@@ -1480,7 +973,7 @@ mod tests {
     };
 
     /// `CAT` 当 shell 的会话线程状态，`start` 时已经启动。
-    fn runner(start: bool) -> Runner {
+    pub(super) fn runner(start: bool) -> Runner {
         let mut pty = Pty::open(SIZE, Box::new(|_| true)).unwrap();
         if start {
             pty.start(Some(CAT), None, IntegrationMode::Off).unwrap();
@@ -1545,62 +1038,6 @@ mod tests {
             .collect();
         let expected = [b"ab".to_vec(), b"<resized>".to_vec(), b"c".to_vec(), big, b"de".to_vec()];
         assert_eq!(seen, expected);
-    }
-
-    /// 交接冻结期间被结束：冻结时存下的 `Subscribe` 也要回，前端才收得到 `Attached`（和随后的 `Exited`），
-    /// 不干等到超时。
-    #[cfg(unix)]
-    #[test]
-    fn a_session_killed_while_frozen_answers_held_subscribes() {
-        const WAIT: Duration = Duration::from_secs(10);
-        let (tx, rx) = mpsc::channel();
-        let killed = Arc::new(AtomicBool::new(false));
-        let thread_killed = killed.clone();
-        // `HostSession` 不是 `Send`，在会话的线程里建。
-        let session = thread::spawn(move || runner(true).run(&rx, &thread_killed));
-        let (prepared, ready) = mpsc::channel();
-        tx.send(Inbox::Prepare(prepared)).unwrap();
-        assert!(matches!(ready.recv_timeout(WAIT).unwrap(), Prepared::Ready(_)));
-        let (started, screen) = mpsc::channel();
-        let start = Box::new(move |_: Screen| {
-            let _ = started.send(());
-            None
-        });
-        let subscribe =
-            Subscribe { connection: 1, size: None, mode: AttachMode::MetaOnly, start, desktop: false, device: None };
-        tx.send(Inbox::Subscribe(subscribe)).unwrap();
-        // 冻结期间照常回读状态的请求：回来了，排在它前面的 `Subscribe` 就已经存下了。
-        let (info, answered) = mpsc::channel();
-        tx.send(Inbox::Info(info)).unwrap();
-        answered.recv_timeout(WAIT).unwrap();
-        killed.store(true, Ordering::Release);
-        tx.send(Inbox::Kill).unwrap();
-        screen.recv_timeout(WAIT).expect("the held subscribe was not answered");
-        session.join().unwrap();
-    }
-
-    /// 交出 PTY 时还在等提示符的 `TypeAtPrompt`（冻结期间存下的替掉先前的）不混进当场写的输入；接手的一方
-    /// `Open` 后接着等提示符，不当场写。
-    #[cfg(unix)]
-    #[test]
-    fn input_waiting_for_the_prompt_is_handed_over_apart() {
-        let mut giver = runner(false);
-        giver.handle(Inbox::TypeAtPrompt(b"old\r".to_vec()));
-        let held = vec![
-            Inbox::Input { connection: 1, data: b"ls\r".to_vec() },
-            Inbox::TypeAtPrompt(b"agent\r".to_vec()),
-            Inbox::Input { connection: 1, data: b"q".to_vec() },
-        ];
-        let unwritten = giver.release(held);
-        assert_eq!(unwritten, Unwritten { now: b"ls\rq".to_vec(), at_prompt: b"agent\r".to_vec() });
-        assert!(giver.type_ahead.is_none());
-
-        let mut taker = runner(false);
-        let before = Instant::now();
-        taker.handle(Inbox::Open(unwritten));
-        let (data, since) = taker.type_ahead.as_ref().expect("still waiting for the prompt");
-        assert_eq!(data, b"agent\r");
-        assert!(*since >= before, "the wait starts over when the session is taken over");
     }
 
     /// 没启动的 shell 不会被等超时的输入抢先写进 PTY，免得绕过提示符检测被启动脚本读走。
