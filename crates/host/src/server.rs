@@ -140,6 +140,7 @@ pub(crate) enum Phase {
     Serving,
     /// 正在把会话交给新宿主（`handoff::give`）：新来的连接收到 `Goodbye { Handoff }`，不开新会话，不改看板；
     /// 交接没成时回到 `Serving`。
+    #[cfg_attr(windows, expect(dead_code, reason = "Windows 上不交接"))]
     HandingOver,
     /// 要退出了，为什么；不再开新会话。
     Stopping(Stopped),
