@@ -102,7 +102,8 @@ impl SettingsView {
         let forget = button("paired.forget", "forget");
         let forget = if in_use {
             let why = rust_i18n::t!("paired.in_use").into_owned();
-            forget.disabled(true).tooltip(crate::ui::tooltip::tooltip(why, None))
+            // 悬停提示辅助工具读不到，按钮为什么按不了另写进说明。
+            forget.disabled(true).aria_description(why.clone()).tooltip(crate::ui::tooltip::tooltip(why, None))
         } else {
             forget.on_press(cx, move |_, _, cx| remote_hosts::forget(&id, cx))
         };
