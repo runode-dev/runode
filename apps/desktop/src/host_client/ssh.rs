@@ -839,7 +839,7 @@ mod tests {
 
     use futures::StreamExt as _;
 
-    use super::{HostId, RemoteEvent, Status, forward, hosts::events, remote, ssh, upload};
+    use super::{HostId, RemoteEvent, Status, hosts, hosts::events, remote, ssh, upload};
     #[cfg(unix)]
     use super::{SshSettings, deploy, set_ssh_settings};
 
@@ -1131,7 +1131,7 @@ mod tests {
         assert!(matches!(host.status(), Status::Connected(_)));
 
         // 文件树、Git 面板经项目服务读远端，没有主连接时它自己认证。
-        let project = crate::project_host::ProjectHost::of(&super::HostId::Ssh(name));
+        let project = crate::project_host::ProjectHost::of(&super::HostId::Ssh(name.clone()));
         let root = std::path::PathBuf::from("/");
         let listed = project.scan(root.clone(), Vec::new(), runode_git::UntrackedCache::default(), false);
         assert!(
@@ -1182,8 +1182,9 @@ mod tests {
         let output = ssh().exec(&host.dest, serve, true).output().unwrap();
         let server = String::from_utf8(output.stdout).unwrap().trim().to_owned();
         std::thread::sleep(Duration::from_secs(1));
-        let url = forward::local_url(&host, "http://localhost:18765/").expect("forward");
-        assert_eq!(forward::local_url(&host, "http://localhost:18765/").unwrap(), url);
+        let id = HostId::Ssh(name);
+        let url = hosts::forward::local_url(&id, "http://localhost:18765/").expect("forward");
+        assert_eq!(hosts::forward::local_url(&id, "http://localhost:18765/").unwrap(), url);
         let port: u16 = url.trim_start_matches("http://localhost:").trim_end_matches('/').parse().unwrap();
         let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         std::io::Write::write_all(&mut stream, b"GET / HTTP/1.0\r\n\r\n").unwrap();

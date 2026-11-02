@@ -4,8 +4,8 @@
 //! - 内存和终端数：runode 自己（app、单独跑的宿主和各个终端里的进程）一共占多少内存，所有窗口里有
 //!   几个终端；浮层里按 workspace 列出这个窗口里各终端的 CPU 和内存；
 //! - 端口：终端里跑的程序在监听几个 TCP 端口；浮层里列出来，点了在浏览器里打开，别的程序监听的收在
-//!   「外部端口」里。当前工作区在 SSH 主机上时另列那台机器上在监听的端口，点了经主连接转到本机再打开，
-//!   转着的能停掉（`host_client::ssh::forward`）。
+//!   「外部端口」里。当前工作区在远端主机上时另列那台机器上在监听的端口，点了转到本机再打开，转着的能停掉
+//!   （`host_client::hosts::forward`）。
 //! - 远程主机：连过几台 SSH 主机，没有时不显示；浮层里列出各台的连接状态，能连上、断开，或者去设置页管理
 //!   （`host_list`）。
 //!
@@ -40,10 +40,7 @@ use runode_types::{
 };
 
 use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, remote};
-use crate::host_client::{
-    hosts::{self, HostId},
-    ssh,
-};
+use crate::host_client::hosts::{self, HostId};
 use crate::project_host::ProjectHost;
 use crate::system_probe::{self as probe, Caffeinate, Helper, POLL_INTERVAL, Port, Procs, Usage};
 use crate::ui::a11y::A11yPress;
@@ -377,9 +374,10 @@ pub(crate) fn redraw_status_bars(cx: &mut App) {
 
 /// 把主机 `host` 上的 `port` 转到本机，在浏览器里打开；转不了时在最前面的窗口上说。
 fn open_remote_port(host: HostId, port: u16, cx: &mut App) {
-    let HostId::Ssh(name) = &host else { return };
-    let Some(remote) = ssh::find(name) else { return };
-    let job = cx.background_spawn(async move { ssh::forward::forward(&remote, port) });
+    let job = cx.background_spawn({
+        let host = host.clone();
+        async move { hosts::forward::forward(&host, port) }
+    });
     cx.spawn(async move |cx| {
         let forwarded = job.await;
         cx.update(|cx| {
@@ -398,9 +396,10 @@ fn open_remote_port(host: HostId, port: u16, cx: &mut App) {
 
 /// 停掉主机 `host` 上 `port` 到本机的转发。
 fn stop_remote_port(host: HostId, port: u16, cx: &mut App) {
-    let HostId::Ssh(name) = &host else { return };
-    let Some(remote) = ssh::find(name) else { return };
-    let job = cx.background_spawn(async move { ssh::forward::stop(&remote, port) });
+    let job = cx.background_spawn({
+        let host = host.clone();
+        async move { hosts::forward::stop(&host, port) }
+    });
     cx.spawn(async move |cx| {
         let stopped = job.await;
         cx.update(|cx| {
@@ -892,10 +891,7 @@ impl WindowView {
         let fg_h = cx.theme().foreground;
         let hover_bg = cx.theme().popover_hover;
         let ports = cx.try_global::<Status>().and_then(|status| status.remote_ports.get(host).cloned());
-        let forwarded = match host {
-            HostId::Ssh(name) => ssh::forward::forwarded(name),
-            _ => Vec::new(),
-        };
+        let forwarded = hosts::forward::forwarded(host);
         let title =
             rust_i18n::t!("status.remote_ports", host = crate::remote_hosts::display_name(host, cx)).into_owned();
         let mut rows = vec![

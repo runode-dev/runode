@@ -7,7 +7,10 @@
 //! 停下的都等 `retry_now`。连接的状态变了、连上了，经 `hosts::events` 告诉界面。
 //!
 //! 读写项目、端口转发和远程桌面各自另拨一条连接（`PairedHost::open_channel`、`PairedHost::dial`），过了门禁后
-//! 说各自的协议。断开这台（`disconnect`）或终端那条连接断了时，登记过的（`PairedHost::hold`）跟着关掉。
+//! 说各自的协议。断开这台（`disconnect`）或终端那条连接断了时，登记过的（`PairedHost::hold`）跟着关掉；端口转发
+//! 的监听（`forward`）在断开这台时关。
+
+pub(crate) mod forward;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -369,6 +372,7 @@ impl PairedHost {
         self.changed.notify_all();
         drop(state);
         self.close_channels();
+        forward::forget(&self.id);
     }
 
     /// 管这台电脑的连接：要用时连，断了按 `RETRY_DELAYS` 退避重连，走完了或要用户来办的停下等 `retry_now`。
