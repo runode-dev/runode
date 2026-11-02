@@ -18,6 +18,7 @@ mod detect;
 mod effects;
 mod keys;
 mod redact;
+mod shell_report;
 
 use std::{
     cell::{Cell as StdCell, RefCell},
@@ -53,8 +54,9 @@ use crate::{
     vt::{self, CommandOutput, SnapshotError},
 };
 pub use clipboard::{ClipboardQuery, ClipboardRequest};
-use effects::{Effects, PromptEvent, SHELL_REPORT};
+use effects::{Effects, PromptEvent};
 pub use redact::{RedactorState, ReportRedactor};
+use shell_report::SHELL_REPORT;
 
 /// 宿主升级时随会话交给新宿主的状态（`HostSession::export`），新宿主用它和交过来的 PTY、
 /// 屏幕重建会话（`HostSession::import`）。VT 本身经快照或重放走，PTY 经 `Pty::adopt_paused`

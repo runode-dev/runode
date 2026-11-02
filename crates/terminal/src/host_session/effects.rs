@@ -12,7 +12,10 @@ use runode_types::{
     shell::{FinishedCommand, ShellNames},
 };
 
-use super::{ClipboardRequest, HostSession};
+use super::{
+    ClipboardRequest, HostSession,
+    shell_report::{self, Report},
+};
 
 use crate::pty;
 
@@ -69,80 +72,42 @@ pub(super) struct Effects {
     pub(super) clipboard_writes: StdCell<bool>,
 }
 
-/// shell 集成在显示提示符时、内容和上次报告的不一样时用的私有 OSC：
-/// `ESC ] 6973;<口令>;<字段>=<百分号编码的值> BEL`。字段是 `cwd`（shell 的当前目录，每次显示
-/// 提示符前都发）、`path`（PATH）或 `functions`（名字之间用空格分开），别的字段不认识，丢掉。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
-/// 原文（拿不到时为空），见 `Effects::command_report`；`end`：紧接在 OSC 133;D 前面发，值为空，见
-/// `Effects::end_report`；`version`：集成脚本的版本，每条命令开始时和 `command` 一起发，2 起
-/// 有 `end`，见 `Effects::signed_ends`。
-///
-/// 报告运行完的命令（`HostMsg::CommandFinished`）同样只认这条报告，133;C 自带的命令原文一律
-/// 不用：伪造的命令会让 `runode wait` 这类等命令的前端以为命令跑完了。
-///
-/// 任何打印到终端的内容（`cat` 一个文件、ssh 远端的输出）都能写出这样的序列，而报告的 PATH
-/// 会被界面拿去找命令行工具（gh）来跑，所以只认带着本 shell 口令的报告。口令经一个用完就删的文件交给 shell（不经
-/// 环境变量，见 `shell_integration::prepare`），之后只留在 shell 自己不导出的变量里，在 shell 里运行的
-/// 程序正常拿不到它。只看是否处在提示符状态挡不住伪造：输出里可以先伪造一个 OSC 133;D。
-pub(super) const SHELL_REPORT: &[u8] = super::redact::REPORT_START.split_at(2).1;
-
 impl Effects {
-    /// 记下 shell 集成的一条报告 `<口令>;<字段>=<百分号编码的值>`。口令不对、缺口令或者
-    /// 这个 shell 没有口令时整条丢掉；不认识的字段不管。
+    /// 记下 shell 集成的一条报告 `<口令>;<字段>=<百分号编码的值>`，见 `shell_report::parse`。
     pub(super) fn shell_report(&self, report: &[u8]) {
-        let Some(semicolon) = report.iter().position(|&b| b == b';') else {
-            return;
-        };
-        let (token, report) = (&report[..semicolon], &report[semicolon + 1..]);
-        let trusted = self
-            .report_token
-            .try_borrow()
-            .is_ok_and(|expected| expected.as_deref().is_some_and(|expected| same_token(expected.as_bytes(), token)));
-        if !trusted {
-            return;
-        }
-        let Some(eq) = report.iter().position(|&b| b == b'=') else {
-            return;
-        };
-        let (field, value) = (&report[..eq], percent_decode(&report[eq + 1..]));
-        if field == b"command" {
-            if let Ok(mut pending) = self.command_report.try_borrow_mut() {
-                *pending = Some((!value.is_empty()).then(|| String::from_utf8_lossy(&value).into_owned()));
+        let Ok(token) = self.report_token.try_borrow() else { return };
+        let Some(report) = token.as_deref().and_then(|token| shell_report::parse(token, report)) else { return };
+        drop(token);
+        match report {
+            Report::Command(command) => {
+                if let Ok(mut pending) = self.command_report.try_borrow_mut() {
+                    *pending = Some(command);
+                }
             }
-            return;
-        }
-        if field == b"end" {
-            self.end_report.set(true);
-            return;
-        }
-        if field == b"version" {
-            let version = std::str::from_utf8(&value).ok().and_then(|value| value.parse::<u32>().ok());
-            if version.is_some_and(|version| version >= 2) {
-                self.signed_ends.set(true);
+            Report::End => self.end_report.set(true),
+            Report::Version(version) => {
+                if version >= 2 {
+                    self.signed_ends.set(true);
+                }
             }
-            return;
-        }
-        if field == b"path" {
-            if let Ok(mut path) = self.shell_path.try_borrow_mut() {
-                *path = Some(os_string(value));
-                self.reported.set(true);
+            Report::Path(value) => {
+                if let Ok(mut path) = self.shell_path.try_borrow_mut() {
+                    *path = Some(value);
+                    self.reported.set(true);
+                }
             }
-            return;
-        }
-        if field == b"cwd" {
-            if let Ok(mut cwd) = self.shell_cwd.try_borrow_mut() {
-                *cwd = (!value.is_empty()).then(|| os_string(value).into());
+            Report::Cwd(value) => {
+                if let Ok(mut cwd) = self.shell_cwd.try_borrow_mut() {
+                    *cwd = value;
+                }
             }
-            return;
+            Report::Functions(functions) => {
+                if let Ok(mut names) = self.shell_names.try_borrow_mut() {
+                    Arc::make_mut(&mut names).functions = functions;
+                    self.reported.set(true);
+                }
+            }
         }
-        if field != b"functions" {
-            return;
-        }
-        let Ok(mut names) = self.shell_names.try_borrow_mut() else {
-            return;
-        };
-        let names = Arc::make_mut(&mut names);
-        self.reported.set(true);
-        names.functions = String::from_utf8_lossy(&value).split_whitespace().map(str::to_owned).collect();
     }
 }
 
@@ -281,44 +246,6 @@ impl HostSession {
         self.meta_dirty = true;
         true
     }
-}
-
-/// 两个口令是否相同。逐字节比完全部内容再下结论，耗时不随第一个不同字节的位置变化，
-/// 不会因此泄露口令的内容。
-fn same_token(expected: &[u8], given: &[u8]) -> bool {
-    expected.len() == given.len() && expected.iter().zip(given).fold(0u8, |diff, (a, b)| diff | (a ^ b)) == 0
-}
-
-/// 解开百分号编码；`%` 后面不是两位十六进制数时原样保留。
-fn percent_decode(bytes: &[u8]) -> Vec<u8> {
-    let hex = |b: u8| (b as char).to_digit(16);
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && let (Some(hi), Some(lo)) =
-                (bytes.get(i + 1).and_then(|&b| hex(b)), bytes.get(i + 2).and_then(|&b| hex(b)))
-        {
-            out.push((hi * 16 + lo) as u8);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    out
-}
-
-/// shell 报告的路径。Unix 上按原样的字节；Windows 上的路径不是字节串，按 UTF-8 解，解不开的字换成
-/// 替换符。
-#[cfg(unix)]
-fn os_string(bytes: Vec<u8>) -> std::ffi::OsString {
-    std::os::unix::ffi::OsStringExt::from_vec(bytes)
-}
-
-#[cfg(not(unix))]
-fn os_string(bytes: Vec<u8>) -> std::ffi::OsString {
-    String::from_utf8_lossy(&bytes).into_owned().into()
 }
 
 #[cfg(test)]
@@ -477,7 +404,6 @@ mod tests {
         session.feed(format!("\x1b]6973;{TOKEN};functions=f\x07").as_bytes());
         assert_eq!(session.meta().shell_names.functions, ["f"]);
         assert_eq!(names.functions, functions);
-        assert_eq!(percent_decode(b"a%2fb%zz%4"), b"a/b%zz%4");
     }
 
     #[test]
@@ -502,9 +428,6 @@ mod tests {
         session.feed(format!("\x1b]6973;{TOKEN};path=/evil\x07\x1b]6973;;path=/evil\x07").as_bytes());
         session.feed(b"\x1b]6973;path=/evil\x07");
         assert_eq!(session.meta().shell_path, None);
-
-        assert!(same_token(b"abc", b"abc"));
-        assert!(!same_token(b"abc", b"abd") && !same_token(b"abc", b"ab") && !same_token(b"", b"a"));
     }
 
     #[test]
