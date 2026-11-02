@@ -10,9 +10,7 @@ use std::{
 };
 
 use anyhow::{Result, anyhow, bail};
-use runode_protocol::{
-    ClientMsg, HostMsg, PaneLayout, PaneRect, SessionId, SessionInfo, TabLayout, WindowLayout, WorkspaceLayout,
-};
+use runode_protocol::{PaneLayout, PaneRect, SessionId, SessionInfo, TabLayout, WindowLayout, WorkspaceLayout};
 use runode_types::{
     agent::AgentState,
     pane::{Direction, Rect, neighbor},
@@ -20,7 +18,7 @@ use runode_types::{
 
 use crate::{
     Env,
-    client::{Connection, kind},
+    client::Connection,
     output::{state_name, tilde, title},
 };
 
@@ -199,11 +197,7 @@ impl Place<'_> {
 impl World {
     /// 列出会话；`layout` 时还问 app 各个终端摆在哪。
     pub(crate) fn load(connection: &Connection, env: &Env, layout: bool) -> Result<Self> {
-        connection.send(&ClientMsg::ListSessions)?;
-        let sessions = match connection.reply()? {
-            HostMsg::SessionList { sessions } => sessions,
-            other => bail!("unexpected answer: {}", kind(&other)),
-        };
+        let sessions = connection.sessions()?;
         let layout = if layout { connection.layout()? } else { None };
         let own = env.session.as_deref().and_then(|own| own.parse().ok());
         Ok(Self { sessions, layout, own, home: env.dirs.home.clone() })

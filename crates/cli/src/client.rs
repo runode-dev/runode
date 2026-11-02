@@ -17,9 +17,10 @@ use std::os::unix::net::UnixStream;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId, WindowLayout,
-    read_frame, write_control, write_frame,
+    BuildId, Caps, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo,
+    WindowLayout, read_frame, write_control, write_frame,
 };
+use runode_types::todo::{Schedule, Todo};
 #[cfg(windows)]
 use uds_windows::UnixStream;
 
@@ -333,6 +334,35 @@ impl Connection {
         self.send(message)?;
         match self.reply()? {
             HostMsg::Done { .. } => Ok(()),
+            other => bail!("unexpected answer: {}", kind(&other)),
+        }
+    }
+
+    /// 宿主里的全部会话。
+    pub(crate) fn sessions(&self) -> Result<Vec<SessionInfo>> {
+        self.sessions_by(Instant::now() + REPLY_TIMEOUT)
+    }
+
+    /// 同 `sessions`，等到 `deadline`。
+    pub(crate) fn sessions_by(&self, deadline: Instant) -> Result<Vec<SessionInfo>> {
+        self.send(&ClientMsg::ListSessions)?;
+        match self.reply_by(deadline)? {
+            HostMsg::SessionList { sessions } => Ok(sessions),
+            other => bail!("unexpected answer: {}", kind(&other)),
+        }
+    }
+
+    /// 看板上的任务和定时。
+    pub(crate) fn board(&self) -> Result<(Vec<Todo>, Vec<Schedule>)> {
+        self.board_by(Instant::now() + REPLY_TIMEOUT)
+    }
+
+    /// 同 `board`，等到 `deadline`。
+    pub(crate) fn board_by(&self, deadline: Instant) -> Result<(Vec<Todo>, Vec<Schedule>)> {
+        let req = self.req();
+        self.send(&ClientMsg::ListTodos { req })?;
+        match self.reply_by(deadline)? {
+            HostMsg::Todos { todos, schedules, .. } => Ok((todos, schedules)),
             other => bail!("unexpected answer: {}", kind(&other)),
         }
     }

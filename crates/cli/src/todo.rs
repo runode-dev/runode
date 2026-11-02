@@ -8,8 +8,8 @@ use std::{
 
 use anyhow::{Result, anyhow, bail};
 use runode_protocol::{
-    ClientMsg, HostMsg, SessionId, SessionInfo,
-    todo::{Column, DEFAULT_AGENT, Schedule, Todo, TodoSpec, When, column},
+    ClientMsg, HostMsg, SessionId,
+    todo::{Column, DEFAULT_AGENT, Todo, TodoSpec, When, column},
 };
 use runode_remote::now_unix;
 
@@ -128,28 +128,9 @@ pub(crate) fn remove(env: &Env, id: String) -> Result<()> {
     }
 }
 
-/// 看板上的任务和定时。
-fn board(connection: &Connection) -> Result<(Vec<Todo>, Vec<Schedule>)> {
-    let req = connection.req();
-    connection.send(&ClientMsg::ListTodos { req })?;
-    match connection.reply()? {
-        HostMsg::Todos { todos, schedules, .. } => Ok((todos, schedules)),
-        other => bail!("unexpected answer: {}", kind(&other)),
-    }
-}
-
 /// 列名，同 JSON 里的写法（`in_progress`）。
 fn column_name(column: Column) -> String {
     serde_json::to_value(column).ok().and_then(|value| value.as_str().map(str::to_owned)).unwrap_or_default()
-}
-
-/// 宿主里的会话，算任务在哪一列要看。
-fn sessions(connection: &Connection) -> Result<Vec<SessionInfo>> {
-    connection.send(&ClientMsg::ListSessions)?;
-    match connection.reply()? {
-        HostMsg::SessionList { sessions } => Ok(sessions),
-        other => bail!("unexpected answer: {}", kind(&other)),
-    }
 }
 
 /// 任务的编号，写成 `#5`；`Todo::number` 为 0（没有编号）时为 `-`。
@@ -160,8 +141,8 @@ fn number_text(todo: &Todo) -> String {
 /// 列出任务和各自在看板的哪一列，按看板从左到右，同一列里照宿主给的先后。
 pub(crate) fn list(env: &Env, json: bool, out: &mut dyn Write) -> Result<()> {
     let connection = open(env)?;
-    let sessions = sessions(&connection)?;
-    let (todos, _) = board(&connection)?;
+    let sessions = connection.sessions()?;
+    let (todos, _) = connection.board()?;
     let now = now_unix();
     let mut todos: Vec<(Todo, Column)> = todos
         .into_iter()
@@ -212,10 +193,10 @@ pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Resu
         HostMsg::Todo { todo, .. } => todo,
         other => bail!("unexpected answer: {}", kind(&other)),
     };
-    let sessions = sessions(&connection)?;
+    let sessions = connection.sessions()?;
     let session = sessions.iter().find(|info| Some(info.id) == todo.session);
     let column = column(&todo, session, now_unix());
-    let (_, schedules) = board(&connection)?;
+    let (_, schedules) = connection.board()?;
     let schedule = todo.schedule.as_ref().and_then(|id| schedules.iter().find(|schedule| &schedule.id == id));
     if json {
         let mut value = serde_json::to_value(&todo)?;
@@ -287,7 +268,7 @@ pub(crate) fn add_schedule(env: &Env, spec: Spec, timing: Timing, out: &mut dyn 
 }
 
 pub(crate) fn list_schedules(env: &Env, json: bool, out: &mut dyn Write) -> Result<()> {
-    let (_, schedules) = board(&open(env)?)?;
+    let (_, schedules) = open(env)?.board()?;
     if json {
         serde_json::to_writer_pretty(&mut *out, &schedules)?;
         writeln!(out)?;

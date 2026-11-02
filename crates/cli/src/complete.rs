@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_protocol::{ClientMsg, HostMsg, SessionInfo};
+use runode_protocol::SessionInfo;
 use runode_types::todo::{Schedule, Todo};
 
 use crate::{
@@ -427,12 +427,7 @@ fn sessions(env: &Env) -> Vec<(String, String)> {
 
 fn list_sessions(env: &Env) -> Option<Vec<SessionInfo>> {
     let deadline = Instant::now() + HOST_TIMEOUT;
-    let connection = Connection::open_by(env, deadline).ok()?;
-    connection.send(&ClientMsg::ListSessions).ok()?;
-    match connection.reply_by(deadline).ok()? {
-        HostMsg::SessionList { sessions } => Some(sessions),
-        _ => None,
-    }
+    Connection::open_by(env, deadline).ok()?.sessions_by(deadline).ok()
 }
 
 fn board(env: &Env) -> Option<(Vec<Todo>, Vec<Schedule>)> {
@@ -441,12 +436,7 @@ fn board(env: &Env) -> Option<(Vec<Todo>, Vec<Schedule>)> {
     if !connection.todos {
         return None;
     }
-    let req = connection.req();
-    connection.send(&ClientMsg::ListTodos { req }).ok()?;
-    match connection.reply_by(deadline).ok()? {
-        HostMsg::Todos { todos, schedules, .. } => Some((todos, schedules)),
-        _ => None,
-    }
+    connection.board_by(deadline).ok()
 }
 
 /// 任务：有编号的按编号（`5`，`#5` 在 shell 里是注释），没有的按标识；`show` 之外做完的不提示。
