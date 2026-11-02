@@ -23,6 +23,7 @@
 mod addrs;
 mod bonjour;
 mod bridge;
+pub mod client;
 pub mod datagram;
 mod devices;
 mod files;

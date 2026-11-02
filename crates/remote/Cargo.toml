@@ -22,14 +22,12 @@ rcgen.workspace = true
 ring.workspace = true
 iroh.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+# 所有系统上查局域网里别的电脑公布的 Bonjour 服务；Linux 和 Windows 上还自己应答 mDNS，公布这台的。
+mdns-sd.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 # 枚举本机地址（getifaddrs）、主机名、poll，以及 socket2 没有的 TCP 选项。
 libc.workspace = true
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-# Linux 和 Windows 上自己应答 mDNS，公布 Bonjour 服务。
-mdns-sd.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 uds_windows.workspace = true

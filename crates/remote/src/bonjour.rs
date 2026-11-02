@@ -2,8 +2,25 @@
 //! 地址，见 `runode_protocol::remote`。macOS 上直接调 libSystem 里的 `DNSServiceRegister`（交给系统的
 //! mDNSResponder 去应答）；别的系统上没有人人都装着的 mDNS 服务，用 mdns-sd 在进程里自己应答，地址
 //! 变了跟着重新公布。
+//!
+//! 查找别的电脑（`browse`）所有系统上都用 mdns-sd：它和 mDNSResponder 一样带 `SO_REUSEPORT` 绑 5353，
+//! 两边都收得到组播的应答，本机经 mDNSResponder 公布的也查得到。
 
-use std::io;
+use std::{
+    collections::HashMap,
+    io,
+    net::IpAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::{self, JoinHandle},
+};
+
+use mdns_sd::{ServiceDaemon, ServiceEvent};
+use runode_protocol::remote::{BONJOUR_FINGERPRINT_KEY, BONJOUR_SERVICE, FINGERPRINT_LEN, decode_base64url};
+
+use crate::client::Found;
 
 /// 一次公布，丢掉时撤回。
 pub(crate) struct Registration {
@@ -46,6 +63,94 @@ pub(crate) fn instance_name(name: &str) -> &str {
         end -= 1;
     }
     &name[..end]
+}
+
+/// 开着的查找，丢掉时停下 mdns-sd 的守护和读事件的线程；丢掉以后不再调 `changed`。
+pub(crate) struct Browsing {
+    daemon: ServiceDaemon,
+    stopped: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for Browsing {
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::Relaxed);
+        // 守护停下时关掉事件的通道，读事件的线程随之结束。
+        let _ = self.daemon.shutdown();
+        if let Some(thread) = self.thread.take()
+            && thread.thread().id() != thread::current().id()
+        {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// 查 `BONJOUR_SERVICE`，解析出来的列表变了时把当前完整的列表交给 `changed`（在读事件的线程里调）。
+/// TXT 里没有能解成指纹的 `fp` 的不算。
+pub(crate) fn browse(changed: impl Fn(Vec<Found>) + Send + 'static) -> io::Result<Browsing> {
+    let daemon = ServiceDaemon::new().map_err(io::Error::other)?;
+    let events = daemon.browse(&format!("{BONJOUR_SERVICE}.local.")).map_err(io::Error::other)?;
+    let stopped = Arc::new(AtomicBool::new(false));
+    let thread = {
+        let stopped = stopped.clone();
+        thread::Builder::new().name("remote-browse".into()).spawn(move || {
+            let mut found: HashMap<String, Found> = HashMap::new();
+            while let Ok(event) = events.recv() {
+                let changed_now = match event {
+                    ServiceEvent::ServiceResolved(service) => {
+                        let fullname = service.get_fullname().to_owned();
+                        match resolved(&service) {
+                            Some(machine) => found.insert(fullname, machine.clone()) != Some(machine),
+                            None => found.remove(&fullname).is_some(),
+                        }
+                    }
+                    ServiceEvent::ServiceRemoved(_, fullname) => found.remove(&fullname).is_some(),
+                    _ => false,
+                };
+                if stopped.load(Ordering::Relaxed) {
+                    break;
+                }
+                if changed_now {
+                    let mut list: Vec<Found> = found.values().cloned().collect();
+                    list.sort_by(|a, b| (&a.name, a.port).cmp(&(&b.name, b.port)));
+                    changed(list);
+                }
+            }
+        })?
+    };
+    Ok(Browsing { daemon, stopped, thread: Some(thread) })
+}
+
+/// mdns-sd 解析出的一个服务。IPv6 的链路本地地址不要：`Found` 不带网卡，连不上。
+fn resolved(service: &mdns_sd::ResolvedService) -> Option<Found> {
+    let fingerprint = decode_base64url(service.get_property_val_str(BONJOUR_FINGERPRINT_KEY)?).ok()?;
+    let fingerprint: [u8; FINGERPRINT_LEN] = fingerprint.try_into().ok()?;
+    let mut addrs: Vec<IpAddr> = service
+        .get_addresses()
+        .iter()
+        .map(mdns_sd::ScopedIp::to_ip_addr)
+        .filter(|addr| !matches!(addr, IpAddr::V6(v6) if v6.is_unicast_link_local()))
+        .collect();
+    if addrs.is_empty() {
+        return None;
+    }
+    // IPv4 在前：同一网段里它最常连得通。
+    addrs.sort_by_key(|addr| (addr.is_ipv6(), *addr));
+    let suffix = format!(".{BONJOUR_SERVICE}.local.");
+    let fullname = service.get_fullname();
+    let name = fullname.strip_suffix(&suffix).unwrap_or(fullname);
+    Some(Found { name: unescape(name), fingerprint, addrs, port: service.get_port() })
+}
+
+/// 实例名里 DNS 转义的字符（`\.`、`\\`）还原。
+fn unescape(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut chars = name.chars();
+    while let Some(c) = chars.next() {
+        let escaped = if c == '\\' { chars.next() } else { None };
+        out.push(escaped.unwrap_or(c));
+    }
+    out
 }
 
 #[cfg(target_os = "macos")]
@@ -198,6 +303,42 @@ mod tests {
         assert_eq!(responder_host("My_PC.corp.example"), "runode-my-pc.local.");
         assert_eq!(responder_host("李的电脑"), "runode-host.local.");
         assert_eq!(responder_host(&"a".repeat(80)).len(), "runode-.local.".len() + 56);
+    }
+
+    #[test]
+    fn escaped_instance_names_are_restored() {
+        assert_eq!(unescape(r"Ethan\.s Mac"), "Ethan.s Mac");
+        assert_eq!(unescape(r"a\\b"), r"a\b");
+        assert_eq!(unescape("李的电脑"), "李的电脑");
+    }
+
+    /// 本机公布的服务（macOS 上经 mDNSResponder）`browse` 查得到，指纹从 TXT 里解出来。要本机的网卡能收发
+    /// 组播，手动跑：`cargo test -p runode-remote --lib bonjour -- --ignored`。
+    #[test]
+    #[ignore = "needs multicast on a real network interface"]
+    fn browsing_finds_a_local_advertisement() {
+        use std::{sync::mpsc, time::Duration};
+
+        use runode_protocol::remote::{bonjour_txt, encode_base64url};
+
+        let name = format!("runode-browse-{}", std::process::id());
+        let fingerprint = [7u8; FINGERPRINT_LEN];
+        let txt = bonjour_txt(&fingerprint);
+        let txt: Vec<(&str, &str)> = txt.iter().map(|(key, value)| (*key, value.as_str())).collect();
+        let _registration = register(&name, 47124, &txt).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let _browsing = browse(move |list| {
+            let _ = tx.send(list);
+        })
+        .unwrap();
+        let found = loop {
+            let list = rx.recv_timeout(Duration::from_secs(10)).expect("never found the advertisement");
+            if let Some(found) = list.into_iter().find(|found| found.name == name) {
+                break found;
+            }
+        };
+        assert_eq!((found.port, found.fingerprint), (47124, fingerprint), "{}", encode_base64url(&fingerprint));
+        assert!(!found.addrs.is_empty());
     }
 
     /// 公布出去的服务另起一个 mDNS 客户端解析得到：实例名、端口和 TXT 都对。要本机的网卡能收发组播，

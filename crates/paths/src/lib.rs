@@ -199,6 +199,11 @@ impl Dirs {
         self.remote_access_file("devices.json")
     }
 
+    /// 这台电脑配对过的别的电脑（JSON），连它们用的设备私钥也在里面。
+    pub fn paired_machines_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("machines.json")
+    }
+
     /// 改设备表时拿着的锁：监听方和命令行都会改它，设备表本身是整个换掉写的，锁不住。
     pub fn remote_access_devices_lock_file(&self) -> Option<PathBuf> {
         self.remote_access_file("devices.lock")
