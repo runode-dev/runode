@@ -5,7 +5,7 @@ use std::{
     os::fd::OwnedFd,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -103,6 +103,8 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
     let (ready, created) = mpsc::channel();
     let killed = Arc::new(AtomicBool::new(false));
     let killed_flag = killed.clone();
+    let desktop = Arc::new(AtomicU64::new(0));
+    let runner_desktop = desktop.clone();
     let spawned = thread::Builder::new().name(format!("session-{id}")).spawn(move || {
         // 最后丢掉，排在 `Pty` 后面，见 `Alive`。
         let _alive = alive;
@@ -121,6 +123,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
         let mut runner = Runner::new(id, session, shell, settings, credits);
         runner.redactor = ReportRedactor::from_state(redactor);
         runner.ui = ui;
+        runner.desktop = runner_desktop;
         runner.set_clipboard(clipboard);
         runner.read_patience = read_patience;
         runner.run(&rx, &killed_flag);
@@ -133,7 +136,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
         release(&mut pty);
         return Err(anyhow!("the session thread ended while starting"));
     }
-    Ok(Adopting { handle: Handle { inbox, killed, driven }, created })
+    Ok(Adopting { handle: Handle { inbox, killed, driven, desktop }, created })
 }
 
 /// 正在重建的接手来的会话，见 `adopt`。

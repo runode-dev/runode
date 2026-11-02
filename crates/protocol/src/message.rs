@@ -624,12 +624,13 @@ pub enum HostMsg {
         found: Vec<Option<String>>,
     },
     /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`Layout`；没有界面
-    /// 连着时除 `Reveal` 外宿主自己办），只发给登记为界面的
-    /// 连接（`Hello` 里 `client` 是 `Desktop` 的，有几个时是最近连上的那个）。`request` 原样带着
-    /// 发请求一方的 `req`；界面办完了用 `ClientMsg::UiReply` 带着同一个 `ui` 回话。
+    /// 连着时除 `Reveal` 外宿主自己办），只发给登记为界面的连接（`Hello` 里 `client` 是 `Desktop` 的）。
+    /// 有几个时，发请求的一方在 `Hello` 里报了所在的会话的，发给连着那个会话的界面里最近和它交互过的，
+    /// 挑不出来时发给最近连上的那个。`request` 原样带着发请求一方的 `req`；界面办完了用
+    /// `ClientMsg::UiReply` 带着同一个 `ui` 回话。
     ///
-    /// 宿主自己也用它请界面读写剪贴板（`ClientMsg::WriteClipboard`、`ClientMsg::ReadClipboard`），
-    /// 这两种优先发给最近和那个会话交互过的界面，没有时才是最近连上的那个。
+    /// 宿主自己也用它替会话请界面读写剪贴板（`ClientMsg::WriteClipboard`、`ClientMsg::ReadClipboard`），
+    /// 按那个会话照上面的挑法发。
     UiRequest {
         ui: u64,
         request: Box<ClientMsg>,

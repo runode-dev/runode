@@ -60,8 +60,8 @@ pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) struct Peers {
     /// 连着的连接，按编号；`out` 在连接的写线程起好之前为 `None`。
     connections: HashMap<u64, Peer>,
-    /// 说自己是 `ClientKind::Desktop` 的连接，按 `Hello` 的先后；最后一个是现在的界面。种类是自报的，
-    /// 见模块文档。
+    /// 说自己是 `ClientKind::Desktop` 的连接，按 `Hello` 的先后；请求没指明交给哪个界面、或者指明的那个
+    /// 已经断开时交给最后一个。种类是自报的，见模块文档。
     desktops: Vec<u64>,
     /// 转给界面、还没回话的请求，按 `HostMsg::UiRequest::ui`。
     pending: HashMap<u64, Pending>,
@@ -277,8 +277,8 @@ impl Shared {
         }
     }
 
-    /// 把 `request` 登记成 `asker` 请界面办的事，交给 `preferred` 这条界面的连接，它不是（或者不再是）界面时
-    /// 交给最近连上的界面。界面的连接刚断开时撤掉登记：它的读线程撤掉登记时已经替还在等的请求回过话的话，
+    /// 把 `request` 登记成 `asker` 请界面办的事，交给 `preferred` 这条界面的连接，没给、或者它不是（或者不再是）
+    /// 界面时交给最近连上的界面。界面的连接刚断开时撤掉登记：它的读线程撤掉登记时已经替还在等的请求回过话的话，
     /// `ToUi::Gone` 里是空的。
     fn send_to_ui(&self, preferred: Option<u64>, asker: Asker, request: ClientMsg) -> ToUi {
         let mut peers = self.peers();

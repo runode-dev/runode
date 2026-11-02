@@ -98,6 +98,11 @@ impl std::ops::DerefMut for Client {
 
 /// 经 `Host::connect_pair` 连上、按 `client` 握手，返回连接和读到的帧。
 fn greet(host: &Host, client: ClientKind) -> (Client, mpsc::Receiver<Frame>) {
+    greet_from(host, client, None)
+}
+
+/// 同 `greet`，`Hello` 里报自己在会话 `session` 里。
+fn greet_from(host: &Host, client: ClientKind, session: Option<SessionId>) -> (Client, mpsc::Receiver<Frame>) {
     let mut stream = Client(host.connect_pair().unwrap());
     let frames = frames(&stream);
     send(
@@ -107,7 +112,7 @@ fn greet(host: &Host, client: ClientKind) -> (Client, mpsc::Receiver<Frame>) {
             build: BuildId("test".into()),
             client,
             caps: Caps::default(),
-            session: None,
+            session,
             device: None,
         },
     );
@@ -345,6 +350,88 @@ fn requests_from_a_closed_connection_are_forgotten() {
     send(&mut desktop, &ClientMsg::UiReply { ui, reply: Box::new(HostMsg::Done { req: 1 }) });
     send(&mut desktop, &ClientMsg::ListSessions);
     assert!(matches!(message(&desktop_frames), HostMsg::SessionList { .. }));
+}
+
+/// 以桌面握手、带着屏幕连上会话 `id`；返回时会话线程已经记下这个桌面在看它。
+fn desktop_on(host: &Host, id: SessionId) -> (Client, mpsc::Receiver<Frame>) {
+    let (mut desktop, frames) = greet(host, ClientKind::Desktop);
+    send(&mut desktop, &ClientMsg::Attach { id, size: Some(SIZE), mode: AttachMode::VtReplay });
+    loop {
+        if matches!(message(&frames), HostMsg::Attached { .. }) {
+            break;
+        }
+    }
+    // 列会话要会话线程回话，回话时连上的那一步已经办完。
+    send(&mut desktop, &ClientMsg::ListSessions);
+    while !matches!(message(&frames), HostMsg::SessionList { .. }) {}
+    (desktop, frames)
+}
+
+/// 命令行（`Hello` 里报在会话 `by` 里）请界面开个终端，返回收到这条请求的桌面在 `desktops` 里的位置。
+fn who_opens(host: &Host, by: Option<SessionId>, desktops: &[&mpsc::Receiver<Frame>]) -> usize {
+    let (mut cli, _cli_frames) = greet_from(host, ClientKind::Cli, by);
+    let open = ClientMsg::Open {
+        req: 1,
+        placement: runode_protocol::Placement::Tab,
+        near: None,
+        cwd: None,
+        focus: false,
+        fold: None,
+        from: None,
+    };
+    send(&mut cli, &open);
+    let deadline = Instant::now() + WAIT;
+    loop {
+        assert!(Instant::now() < deadline, "no desktop got the request");
+        for (index, frames) in desktops.iter().enumerate() {
+            while let Ok(frame) = frames.try_recv() {
+                if frame.kind == FrameKind::Control
+                    && let HostMsg::UiRequest { request, .. } = frame.message().unwrap()
+                    && matches!(*request, ClientMsg::Open { .. })
+                {
+                    return index;
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// 几个桌面连着同一个宿主时，会话里的命令行请界面办的事交给看着那个会话的桌面，不管它是不是最后连上的；
+/// 不在会话里的交给最后连上的。
+#[test]
+fn ui_requests_go_to_the_desktop_watching_the_asking_session() {
+    let host = Host::new(BuildId("test".into()));
+    let first = host.shared.spawn(options(CAT)).unwrap();
+    let second = host.shared.spawn(options(CAT)).unwrap();
+    let (_a, a_frames) = desktop_on(&host, first);
+    let (_b, b_frames) = desktop_on(&host, second);
+    let desktops = [&a_frames, &b_frames];
+    assert_eq!(who_opens(&host, Some(first), &desktops), 0);
+    assert_eq!(who_opens(&host, Some(second), &desktops), 1);
+    assert_eq!(who_opens(&host, None, &desktops), 1);
+    host.shared.kill_all();
+}
+
+/// 看着发请求的会话的桌面断开了：交给最后连上的桌面。
+#[test]
+fn ui_requests_fall_back_to_the_latest_desktop() {
+    let host = Host::new(BuildId("test".into()));
+    let first = host.shared.spawn(options(CAT)).unwrap();
+    let second = host.shared.spawn(options(CAT)).unwrap();
+    let (a, a_frames) = desktop_on(&host, first);
+    let (_b, b_frames) = desktop_on(&host, second);
+    let (_c, c_frames) = greet(&host, ClientKind::Desktop);
+    let desktops = [&a_frames, &b_frames, &c_frames];
+    assert_eq!(who_opens(&host, Some(first), &desktops), 0);
+    drop(a);
+    let deadline = Instant::now() + WAIT;
+    while host.shared.peers().desktops.len() > 2 {
+        assert!(Instant::now() < deadline, "the closed desktop is still registered");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(who_opens(&host, Some(first), &desktops), 2);
+    host.shared.kill_all();
 }
 
 /// 界面说布局变了：只告诉问过 `Layout` 的连接；不是界面的连接不能这么说。

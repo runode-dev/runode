@@ -18,7 +18,7 @@ use std::{
     panic::{self, AssertUnwindSafe},
     sync::{
         Arc, Condvar, Mutex, PoisonError,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc,
     },
     thread,
@@ -281,6 +281,8 @@ pub(crate) struct Handle {
     /// `Inbox::Driven(None)` 不必进收件箱。改它和把 `Inbox::Driven` 排进收件箱在同一把锁里：几份克隆在
     /// 不同线程里一个标、一个清时，它和收件箱里最后一条 `Driven` 说的一样，不会记着标过却当成没标。
     driven: Arc<Mutex<bool>>,
+    /// 会话线程写的 `Runner::desktop`。
+    desktop: Arc<AtomicU64>,
 }
 
 impl Handle {
@@ -302,6 +304,12 @@ impl Handle {
         self.inbox.send(message).is_ok()
     }
 
+    /// 这个会话要界面办的事交给哪条桌面的连接（`Runner::ui_connection`）；没有桌面连着它时为 `None`。
+    /// 会话线程处理完每条消息后才更新，刚断开的连接可能还在这里。
+    pub(crate) fn desktop(&self) -> Option<u64> {
+        Some(self.desktop.load(Ordering::Relaxed)).filter(|&connection| connection != 0)
+    }
+
     /// 这个登记项是不是拿着 `killed` 的那个会话线程的。
     pub(crate) fn owns(&self, killed: &Arc<AtomicBool>) -> bool {
         Arc::ptr_eq(&self.killed, killed)
@@ -310,7 +318,7 @@ impl Handle {
     /// 测试用：发到 `inbox` 的一端，没有会话线程，由测试自己收、自己回话。
     #[cfg(all(test, unix))]
     pub(crate) fn detached(inbox: mpsc::Sender<Inbox>) -> Self {
-        Self { inbox, killed: Arc::default(), driven: Arc::default() }
+        Self { inbox, killed: Arc::default(), driven: Arc::default(), desktop: Arc::default() }
     }
 }
 
@@ -332,6 +340,8 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
     let (ready, created) = mpsc::channel();
     let killed = Arc::new(AtomicBool::new(false));
     let killed_flag = killed.clone();
+    let desktop = Arc::new(AtomicU64::new(0));
+    let runner_desktop = desktop.clone();
     thread::Builder::new()
         .name(format!("session-{id}"))
         .spawn(move || {
@@ -350,13 +360,14 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
             let _ = ready.send(Ok(()));
             let mut runner = Runner::new(id, session, options.shell, settings, credits);
             runner.ui = ui;
+            runner.desktop = runner_desktop;
             runner.set_clipboard(clipboard);
             runner.read_patience = read_patience;
             runner.run(&rx, &killed_flag);
         })
         .context("failed to start the session thread")?;
     created.recv().map_err(|_| anyhow!("the session thread ended while starting"))??;
-    Ok(Handle { inbox, killed, driven: Arc::default() })
+    Ok(Handle { inbox, killed, driven: Arc::default(), desktop })
 }
 
 /// 读线程交 PTY 输出的 `PtySink`：先记上字节数（积压太多就等），再排进收件箱。
@@ -396,6 +407,8 @@ struct Runner {
     foreground_due: Option<Instant>,
     /// 请界面办事的一头，见 `Setup::ui`。
     ui: UiPort,
+    /// `ui_connection` 的结果，0 表示没有；每处理完一条消息写一次，别的线程经 `Handle::desktop` 读。
+    desktop: Arc<AtomicU64>,
     /// 读写剪贴板的规矩，见 `set_clipboard`。
     clipboard: ClipboardAccess,
     /// 读剪贴板最多等界面多久，见 `Setup::read_patience`。
@@ -434,6 +447,7 @@ impl Runner {
             foreground_read_at: now,
             foreground_due: None,
             ui: UiPort::default(),
+            desktop: Arc::default(),
             clipboard: ClipboardAccess::default(),
             read_patience: CLIPBOARD_READ_PATIENCE,
             clipboard_read: None,
@@ -509,7 +523,21 @@ impl Runner {
         }
         self.type_at_prompt();
         self.publish_meta();
+        self.desktop.store(self.ui_connection().unwrap_or(0), Ordering::Relaxed);
         true
+    }
+
+    /// 这个会话要界面办的事交给哪条桌面的连接：连着这个会话的桌面里最近交互过的（尺寸归属里的交互，见
+    /// `Runner::interact`）；都没交互过时取最近连上这个会话的；没有桌面连着这个会话时为 `None`。
+    fn ui_connection(&self) -> Option<u64> {
+        let last_active = |connection: u64| {
+            self.viewers.iter().find(|viewer| viewer.connection == connection).map_or(0, |viewer| viewer.last_active)
+        };
+        self.subscribers
+            .iter()
+            .filter(|subscriber| subscriber.desktop)
+            .max_by_key(|subscriber| last_active(subscriber.connection))
+            .map(|subscriber| subscriber.connection)
     }
 
     /// 等着的 `Inbox::TypeAtPrompt` 到时候了就写出去：提示符出来了，或者等够了。

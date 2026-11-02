@@ -619,11 +619,13 @@ impl Connection {
         }
     }
 
-    /// 把要界面办的请求转给现在的界面（最近连上的 `ClientKind::Desktop` 连接）。没有界面连接
-    /// 时宿主自己办，见 `headless`。
+    /// 把要界面办的请求转给界面：这条连接在 `Hello` 里报了所在的会话时，交给看着那个会话的桌面
+    /// （`session::Handle::desktop`），几台电脑上的桌面连着同一个宿主时，命令行开的终端才落在它所在的
+    /// 窗口里；挑不出来时交给最近连上的 `ClientKind::Desktop` 连接。没有界面连接时宿主自己办，见 `headless`。
     fn to_ui(&self, req: u32, request: ClientMsg) {
         let asker = Asker::Client { from: self.id, origin: self.out.clone(), req };
-        match self.shared.send_to_ui(None, asker, request) {
+        let preferred = self.by.and_then(|by| self.shared.registry().sessions.get(&by)?.desktop());
+        match self.shared.send_to_ui(preferred, asker, request) {
             ToUi::Sent(_) => {}
             ToUi::NoDesktop(request) => self.headless(req, request),
             ToUi::Gone(Some(Asker::Client { origin, req, .. })) => {

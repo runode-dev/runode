@@ -182,18 +182,4 @@ impl Runner {
             self.session.answer_clipboard(query, None);
         }
     }
-
-    /// 剪贴板的请求交给哪条桌面的连接：连着这个会话的桌面里最近交互过的（尺寸归属里的交互，见
-    /// `Runner::interact`）；都没交互过时取最近连上这个会话的；没有桌面连着这个会话时为 `None`，由
-    /// `Shared::ask_ui` 交给最近连上的桌面。
-    fn ui_connection(&self) -> Option<u64> {
-        let last_active = |connection: u64| {
-            self.viewers.iter().find(|viewer| viewer.connection == connection).map_or(0, |viewer| viewer.last_active)
-        };
-        self.subscribers
-            .iter()
-            .filter(|subscriber| subscriber.desktop)
-            .max_by_key(|subscriber| last_active(subscriber.connection))
-            .map(|subscriber| subscriber.connection)
-    }
 }
