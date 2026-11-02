@@ -427,7 +427,7 @@ fn end_sessions_then(
 /// 在退出确认框里选了「留在后台并退出」：打开配置项 `terminal-host`，以后退出都留下会话。写不了
 /// 配置文件时只记一笔，这次照样留下。
 fn keep_from_now_on(cx: &mut App) {
-    if let Err(err) = crate::config::set("terminal-host", "true", cx) {
+    if let Err(err) = crate::config::set(runode_config::TERMINAL_HOST, "true", cx) {
         tracing::warn!("failed to turn terminal-host on: {err:#}");
     }
 }

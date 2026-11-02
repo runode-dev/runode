@@ -20,7 +20,7 @@ use runode_remote::{host_name, local_interfaces};
 use crate::{
     assets::{PHONE_ICON, REFRESH_ICON, TRASH_ICON},
     config::AppConfig,
-    remote_access::pairing::{BACKGROUND_KEY, Pairing, Qr, qr_code},
+    remote_access::pairing::{Pairing, Qr, qr_code},
     ui::{
         a11y::Press,
         button::{Button, ButtonSize, ButtonVariant},
@@ -187,7 +187,7 @@ impl MobilePage {
 
     /// 在配置里打开远程访问，等监听方开好就生成口令。
     fn turn_on_remote_access(&mut self, cx: &mut Context<Self>) {
-        if let Err(err) = crate::config::set("remote-access", "true", cx) {
+        if let Err(err) = crate::config::set(runode_config::REMOTE_ACCESS, "true", cx) {
             self.pairing = Pairing::Failed(rust_i18n::t!("settings.write_failed", err = err.to_string()).into_owned());
             cx.notify();
             return;
@@ -418,8 +418,8 @@ impl MobilePage {
                                 cx,
                                 // 配置重载后窗口跟着重画，这一块就收起来了。
                                 |_, _, cx| {
-                                    if let Err(err) = crate::config::set(BACKGROUND_KEY, "true", cx) {
-                                        tracing::warn!("could not turn on {BACKGROUND_KEY}: {err:#}");
+                                    if let Err(err) = crate::config::set(runode_config::TERMINAL_HOST, "true", cx) {
+                                        tracing::warn!("could not turn on {}: {err:#}", runode_config::TERMINAL_HOST);
                                     }
                                 },
                             ),

@@ -420,7 +420,7 @@ fn tell_forward_failed(detail: &str, cx: &mut App) {
 
 /// 改写配置文件的 `prevent-sleep`，重载的配置经 `sync_sleep` 生效。
 fn set_sleep(mode: PreventSleep, cx: &mut App) {
-    if let Err(err) = crate::config::set("prevent-sleep", mode.name(), cx) {
+    if let Err(err) = crate::config::set("prevent-sleep", runode_config::Named::name(mode), cx) {
         tracing::warn!("could not write prevent-sleep: {err}");
     }
 }

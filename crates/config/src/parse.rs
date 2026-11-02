@@ -8,15 +8,16 @@ use std::{
 
 use runode_types::{
     agent::AgentKind,
-    clipboard::{ClipboardRead, ClipboardWrite},
+    clipboard::ClipboardWrite,
     color::{Rgb, TerminalColor},
-    settings::{CursorStyle, MIN_SCROLLBACK_LIMIT, OptionAsAlt},
+    settings::{MIN_SCROLLBACK_LIMIT, OptionAsAlt},
     shell::{IntegrationMode, Shell, ShellFeatures},
     speech::{DictationCloud, SpeechModel},
 };
 
 use crate::{
-    CellHeight, Config, PreventSleep, PreviewClick, StatusItem, TaskPlacement, WindowStyle, color,
+    CellHeight, Config, StatusItem, color,
+    named::{expected, parse_named},
     theme::{Theme, find_theme, pick_theme},
 };
 
@@ -24,6 +25,11 @@ use crate::{
 /// 这里列出的键，模板也按这张表逐个写出，所以新增配置项只要在这里加上键名、在 `apply` 里
 /// 解析、在 `Config::values` 里写出值、在 `docs` 里写好说明。`theme` 和 `config-file`
 /// 在应用各层之前就已处理，列在这里是为了写进模板。
+/// 退出 app 后宿主留在后台的配置项，app 和命令行都会替用户打开它。
+pub const TERMINAL_HOST: &str = "terminal-host";
+/// 开远程访问的配置项，app 和命令行都会替用户打开它。
+pub const REMOTE_ACCESS: &str = "remote-access";
+
 pub const KEYS: &[&[&str]] = &[
     &["language"],
     &[
@@ -79,11 +85,11 @@ pub const KEYS: &[&[&str]] = &[
         "shell-integration-features",
     ],
     &["clipboard-write", "clipboard-read", "vt-window-resize-allowed"],
-    &["terminal-host"],
+    &[TERMINAL_HOST],
     &["ssh-program", "ssh-control-persist", "ssh-restore-on-launch"],
     &["auto-update"],
     &[
-        "remote-access",
+        REMOTE_ACCESS,
         "remote-access-port",
         "remote-access-name",
         "remote-access-push",
@@ -225,11 +231,7 @@ impl Config {
                 self.window_padding_y = or_default(empty, defaults.window_padding_y, || parse_pair(value))?;
             }
             "window-style" => {
-                self.window_style = match value {
-                    "" | "cards" => WindowStyle::Cards,
-                    "classic" => WindowStyle::Classic,
-                    _ => return Err("expected cards or classic".into()),
-                };
+                self.window_style = parse_named(value, defaults.window_style)?;
             }
             "status-bar" => self.status_bar = or_default(empty, defaults.status_bar, || parse_bool(value))?,
             "status-bar-hidden" => {
@@ -245,12 +247,7 @@ impl Config {
                 }
             }
             "prevent-sleep" => {
-                self.prevent_sleep = match value {
-                    "on" => PreventSleep::On,
-                    "agent" => PreventSleep::Agent,
-                    "" | "off" => PreventSleep::Off,
-                    _ => return Err("expected on, agent or off".into()),
-                };
+                self.prevent_sleep = parse_named(value, defaults.prevent_sleep)?;
             }
             "ui-font-size" => {
                 self.ui_font_size = or_default(empty, defaults.ui_font_size, || parse_positive(value))?;
@@ -259,19 +256,10 @@ impl Config {
                 self.preview_font_size = or_default(empty, defaults.preview_font_size, || parse_positive(value))?;
             }
             "file-tree-preview-click" => {
-                self.file_tree_preview_click = match value {
-                    "" | "single" => PreviewClick::Single,
-                    "double" => PreviewClick::Double,
-                    _ => return Err("expected single or double".into()),
-                };
+                self.file_tree_preview_click = parse_named(value, defaults.file_tree_preview_click)?;
             }
             "task-placement" => {
-                self.task_placement = match value {
-                    "" | "right" => TaskPlacement::Right,
-                    "down" => TaskPlacement::Down,
-                    "tab" => TaskPlacement::Tab,
-                    _ => return Err("expected right, down or tab".into()),
-                };
+                self.task_placement = parse_named(value, defaults.task_placement)?;
             }
             "task-split-fold" => {
                 self.task_split_fold = or_default(empty, defaults.task_split_fold, || parse_bool(value))?;
@@ -279,7 +267,8 @@ impl Config {
             "dictation-model" => {
                 self.dictation_model = match value {
                     "" => SpeechModel::default(),
-                    _ => SpeechModel::from_name(value).ok_or("expected sense-voice or fire-red-asr2")?,
+                    _ => SpeechModel::from_name(value)
+                        .ok_or_else(|| expected(SpeechModel::ALL.iter().map(|model| model.name())))?,
                 };
             }
             "dictation-words" => {
@@ -296,7 +285,8 @@ impl Config {
             "dictation-cloud" => {
                 self.dictation_cloud = match value {
                     "" => DictationCloud::default(),
-                    _ => DictationCloud::from_name(value).ok_or("expected none, openai or doubao")?,
+                    _ => DictationCloud::from_name(value)
+                        .ok_or_else(|| expected(DictationCloud::ALL.iter().map(|cloud| cloud.name())))?,
                 };
             }
             "dictation-openai-url" => {
@@ -312,13 +302,7 @@ impl Config {
             "dictation-polish-key" => self.dictation_polish_key = text(value),
             "dictation-polish-model" => self.dictation_polish_model = text(value),
             "cursor-style" => {
-                self.cursor_style = match value {
-                    "" | "block" => CursorStyle::Block,
-                    "bar" => CursorStyle::Bar,
-                    "underline" => CursorStyle::Underline,
-                    "block_hollow" => CursorStyle::BlockHollow,
-                    _ => return Err("expected block, bar, underline or block_hollow".into()),
-                };
+                self.cursor_style = parse_named(value, defaults.cursor_style)?;
             }
             "cursor-style-blink" => self.cursor_style_blink = or_default(empty, None, || parse_bool(value).map(Some))?,
             "cursor-style-blink-timeout" => {
@@ -389,24 +373,15 @@ impl Config {
             }
             "shell-integration-features" => self.shell_integration_features = parse_shell_features(value)?,
             "clipboard-write" => {
-                self.clipboard_write = match value {
-                    "" | "allow" => ClipboardWrite::Allow,
-                    "deny" => ClipboardWrite::Deny,
-                    // 写之前问用户还没做；写成 ask 的按 deny 办，不比用户要的更松，同时报出来。
-                    "ask" => {
-                        self.clipboard_write = ClipboardWrite::Deny;
-                        return Err("asking before a write is not supported yet, using deny".into());
-                    }
-                    _ => return Err("expected allow or deny".into()),
-                };
+                // 写之前问用户还没做；写成 ask 的按 deny 办，不比用户要的更松，同时报出来。
+                if value == "ask" {
+                    self.clipboard_write = ClipboardWrite::Deny;
+                    return Err("asking before a write is not supported yet, using deny".into());
+                }
+                self.clipboard_write = parse_named(value, defaults.clipboard_write)?;
             }
             "clipboard-read" => {
-                self.clipboard_read = match value {
-                    "" | "ask" => ClipboardRead::Ask,
-                    "allow" => ClipboardRead::Allow,
-                    "deny" => ClipboardRead::Deny,
-                    _ => return Err("expected ask, allow or deny".into()),
-                };
+                self.clipboard_read = parse_named(value, defaults.clipboard_read)?;
             }
             "vt-window-resize-allowed" => {
                 self.vt_window_resize_allowed =
@@ -710,9 +685,13 @@ fn ghostty_config_paths() -> Vec<PathBuf> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use runode_types::clipboard::ClipboardAccess;
+    use runode_types::{
+        clipboard::{ClipboardAccess, ClipboardRead},
+        settings::CursorStyle,
+    };
 
     use super::*;
+    use crate::{PreventSleep, PreviewClick, TaskPlacement, WindowStyle};
 
     fn entries(text: &str) -> Vec<Entry> {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

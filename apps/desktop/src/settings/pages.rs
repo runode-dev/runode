@@ -66,8 +66,10 @@ enum Item {
 #[derive(Clone, Copy)]
 enum Control {
     Switch,
-    /// 分段选项；值为空的那一项表示不写，用默认。
-    Choice(&'static [&'static str]),
+    /// 分段选项，选项是 `runode_config::choices` 给的名字。
+    Choice,
+    /// 分段选项，选项写在这里；值为空的那一项表示不写，用默认。
+    Options(&'static [&'static str]),
     /// 输入框，宽度。
     Text(f32),
     Color,
@@ -135,7 +137,7 @@ impl Page {
                 Row("language", Language),
                 Row("terminal-host", Switch),
                 Row("auto-update", Switch),
-                Row("prevent-sleep", Choice(&["on", "agent", "off"])),
+                Row("prevent-sleep", Choice),
                 Section("login"),
                 Autostart,
                 Section("config_file"),
@@ -143,11 +145,11 @@ impl Page {
                 ConfigFiles,
             ],
             Self::Dictation => &[
-                Row("dictation-model", Choice(&["sense-voice", "fire-red-asr2"])),
+                Row("dictation-model", Choice),
                 Dictation,
                 Row("dictation-words", Text(300.)),
                 Section("dictation_cloud"),
-                Row("dictation-cloud", Choice(&["none", "openai", "doubao"])),
+                Row("dictation-cloud", Choice),
                 Row("dictation-openai-url", Text(300.)),
                 Row("dictation-openai-key", Text(300.)),
                 Row("dictation-openai-model", Text(300.)),
@@ -165,7 +167,7 @@ impl Page {
                 Row("font-size", Text(80.)),
                 Row("adjust-cell-height", Text(80.)),
                 Section("window"),
-                Row("window-style", Choice(&["cards", "classic"])),
+                Row("window-style", Choice),
                 Row("ui-font-size", Text(80.)),
                 Row("window-padding-x", Text(80.)),
                 Row("window-padding-y", Text(80.)),
@@ -188,21 +190,21 @@ impl Page {
             ],
             Self::Terminal => &[
                 Section("cursor"),
-                Row("cursor-style", Choice(&["block", "bar", "underline", "block_hollow"])),
-                Row("shell-integration-features", Choice(&["cursor", "no-cursor"])),
-                Row("cursor-style-blink", Choice(&["", "true", "false"])),
+                Row("cursor-style", Choice),
+                Row("shell-integration-features", Options(&["cursor", "no-cursor"])),
+                Row("cursor-style-blink", Options(&["", "true", "false"])),
                 Row("cursor-style-blink-timeout", Text(80.)),
                 Section("keyboard"),
-                Row("macos-option-as-alt", Choice(&["", "true", "false", "left", "right"])),
+                Row("macos-option-as-alt", Options(&["", "true", "false", "left", "right"])),
                 Section("scrollback"),
                 Row("scrollback-limit", Text(120.)),
                 Section("clipboard"),
-                Row("clipboard-write", Choice(&["allow", "deny"])),
-                Row("clipboard-read", Choice(&["ask", "allow", "deny"])),
+                Row("clipboard-write", Choice),
+                Row("clipboard-read", Choice),
                 Section("window"),
                 Row("vt-window-resize-allowed", Switch),
                 Section("tasks"),
-                Row("task-placement", Choice(&["right", "down", "tab"])),
+                Row("task-placement", Choice),
                 Row("task-split-fold", Switch),
             ],
             Self::Ssh => &[
@@ -214,7 +216,7 @@ impl Page {
                 Row("ssh-restore-on-launch", Switch),
             ],
             Self::Files => &[
-                Row("file-tree-preview-click", Choice(&["single", "double"])),
+                Row("file-tree-preview-click", Choice),
                 Row("preview-font-size", Text(80.)),
                 Section("git"),
                 Row("git-auto-fetch", Switch),
@@ -287,6 +289,14 @@ pub(super) fn key_title(key: &str) -> String {
 
 pub(super) fn key_hint(key: &str) -> SharedString {
     tr(&format!("settings.hint.{}", tr_key(key))).into()
+}
+
+/// 分段选项列出的值。
+fn control_values(key: &str, control: Control) -> Vec<&'static str> {
+    match control {
+        Control::Options(values) => values.to_vec(),
+        _ => runode_config::choices(key).unwrap_or_default(),
+    }
 }
 
 fn choice_label(key: &str, value: &str) -> SharedString {
@@ -450,7 +460,8 @@ impl SettingsView {
                 });
                 div().flex().items_center().gap(px(8.)).children(open).children(test).child(switch).into_any_element()
             }
-            Control::Choice(values) => {
+            Control::Choice | Control::Options(_) => {
+                let values = control_values(key, control);
                 let selected = current.first().map_or("", String::as_str);
                 let group = Segmented::new(key, key_title(key));
                 values
@@ -792,6 +803,24 @@ mod tests {
 
     /// 每个键、每页、每个选项都有翻译。
     #[test]
+    fn every_choice_is_a_valid_value() {
+        for page in Page::ALL {
+            for item in page.items() {
+                let Item::Row(key, control) = item else { continue };
+                if matches!(control, Control::Choice) {
+                    assert!(runode_config::choices(key).is_some(), "{key} has no choices");
+                }
+                if !matches!(control, Control::Choice | Control::Options(_)) {
+                    continue;
+                }
+                for value in control_values(key, *control) {
+                    assert_eq!(runode_config::check_value(key, value), Ok(()), "{key} = {value}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn every_label_is_translated() {
         for locale in rust_i18n::available_locales!() {
             let t = |key: &str| rust_i18n::t!(key, locale = &locale).into_owned();
@@ -806,8 +835,8 @@ mod tests {
                         Item::Row(key, control) => {
                             missing(&format!("settings.key.{}", tr_key(key)));
                             missing(&format!("settings.hint.{}", tr_key(key)));
-                            if let Control::Choice(values) = control {
-                                for value in values.iter().filter(|value| !value.is_empty()) {
+                            if matches!(control, Control::Choice | Control::Options(_)) {
+                                for value in control_values(key, *control).iter().filter(|value| !value.is_empty()) {
                                     missing(&format!("settings.choice.{}.{value}", tr_key(key)));
                                 }
                             }

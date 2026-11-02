@@ -57,16 +57,6 @@ pub enum PreventSleep {
     Off,
 }
 
-impl PreventSleep {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::On => "on",
-            Self::Agent => "agent",
-            Self::Off => "off",
-        }
-    }
-}
-
 /// 窗口底部状态栏上的一块，`status-bar-hidden` 里写它的名字（`name`）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusItem {

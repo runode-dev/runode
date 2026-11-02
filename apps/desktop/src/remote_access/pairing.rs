@@ -6,7 +6,7 @@
 //! 刚打开远程访问、或者刚改了给手机看的名字（`remote-access-name`）时，监听方要过一会儿才开好、换好
 //! 名字，这时先等它（`Pairing::Starting`），好了再生成口令，二维码里不会是旧名字。
 //!
-//! 配好以后和命令行一样提醒 `terminal-host`（`BACKGROUND_KEY`）：它关着时退出 app 宿主跟着退出，远程
+//! 配好以后和命令行一样提醒 `runode_config::TERMINAL_HOST`：它关着时退出 app 宿主跟着退出，远程
 //! 访问跟着停，手机就连不上了。
 
 use std::{net::IpAddr, rc::Rc, time::Duration};
@@ -28,8 +28,6 @@ const STATUS_EVERY: u32 = 8;
 const START_POLLS: u32 = 40;
 /// 二维码四周留白的模块数。规范要 4 个，2 个手机照样扫得出；白底卡片本身也算留白。
 const QUIET_ZONE: usize = 2;
-/// 配好以后提醒的配置项，见模块说明。
-pub const BACKGROUND_KEY: &str = "terminal-host";
 
 /// 从视图里取出它的那份配对；取不到（页面关了）时等配对的任务停下。
 pub type Slot<V> = fn(&mut V) -> Option<&mut Pairing>;

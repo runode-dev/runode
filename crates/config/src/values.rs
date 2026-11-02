@@ -2,13 +2,12 @@
 //! 都从这里取，和 `Config::apply` 的解析互为逆运算。
 
 use runode_types::{
-    clipboard::{ClipboardRead, ClipboardWrite},
     color::{Rgb, TerminalColor},
-    settings::{CursorStyle, OptionAsAlt},
+    settings::OptionAsAlt,
     shell::{IntegrationMode, Shell},
 };
 
-use crate::{CellHeight, Config, PreviewClick, TaskPlacement, WindowStyle};
+use crate::{CellHeight, Config, Named as _};
 
 impl Config {
     /// `key` 在这份配置里的值，按配置文件的写法每项一行，写回配置文件再读进来得到同样的值；
@@ -33,29 +32,10 @@ impl Config {
             "status-bar" => bool(self.status_bar),
             "status-bar-hidden" => self.status_bar_hidden.iter().map(|item| item.name().to_owned()).collect(),
             "prevent-sleep" => vec![self.prevent_sleep.name().into()],
-            "window-style" => vec![
-                match self.window_style {
-                    WindowStyle::Cards => "cards",
-                    WindowStyle::Classic => "classic",
-                }
-                .into(),
-            ],
-            "file-tree-preview-click" => vec![
-                match self.file_tree_preview_click {
-                    PreviewClick::Single => "single",
-                    PreviewClick::Double => "double",
-                }
-                .into(),
-            ],
+            "window-style" => vec![self.window_style.name().into()],
+            "file-tree-preview-click" => vec![self.file_tree_preview_click.name().into()],
             "preview-font-size" => vec![self.preview_font_size.to_string()],
-            "task-placement" => vec![
-                match self.task_placement {
-                    TaskPlacement::Right => "right",
-                    TaskPlacement::Down => "down",
-                    TaskPlacement::Tab => "tab",
-                }
-                .into(),
-            ],
+            "task-placement" => vec![self.task_placement.name().into()],
             "task-split-fold" => bool(self.task_split_fold),
             "dictation-model" => vec![self.dictation_model.name().into()],
             // 一行写全，设置页的一个输入框改得了。
@@ -84,15 +64,7 @@ impl Config {
             "search-selected-foreground" => vec![color(self.search_selected_foreground)],
             "palette" => self.palette.iter().map(|(i, c)| format!("{i}={}", hex(*c))).collect(),
             "minimum-contrast" => vec![self.minimum_contrast.to_string()],
-            "cursor-style" => vec![
-                match self.cursor_style {
-                    CursorStyle::Block => "block",
-                    CursorStyle::Bar => "bar",
-                    CursorStyle::Underline => "underline",
-                    CursorStyle::BlockHollow => "block_hollow",
-                }
-                .into(),
-            ],
+            "cursor-style" => vec![self.cursor_style.name().into()],
             "cursor-style-blink" => self.cursor_style_blink.map(|on| on.to_string()).into_iter().collect(),
             // 0 表示一直闪。
             "cursor-style-blink-timeout" => {
@@ -123,21 +95,8 @@ impl Config {
             "shell-integration-features" => {
                 vec![if self.shell_integration_features.cursor { "cursor" } else { "no-cursor" }.into()]
             }
-            "clipboard-write" => vec![
-                match self.clipboard_write {
-                    ClipboardWrite::Allow => "allow",
-                    ClipboardWrite::Deny => "deny",
-                }
-                .into(),
-            ],
-            "clipboard-read" => vec![
-                match self.clipboard_read {
-                    ClipboardRead::Allow => "allow",
-                    ClipboardRead::Ask => "ask",
-                    ClipboardRead::Deny => "deny",
-                }
-                .into(),
-            ],
+            "clipboard-write" => vec![self.clipboard_write.name().into()],
+            "clipboard-read" => vec![self.clipboard_read.name().into()],
             "vt-window-resize-allowed" => bool(self.vt_window_resize_allowed),
             "terminal-host" => bool(self.terminal_host),
             "ssh-program" => self.ssh_program.iter().cloned().collect(),

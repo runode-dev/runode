@@ -12,7 +12,7 @@ use std::{
 
 use anyhow::{Context as _, anyhow, bail};
 use qrcode::{Color, EcLevel, QrCode};
-use runode_config::ConfigFile;
+use runode_config::{ConfigFile, REMOTE_ACCESS, TERMINAL_HOST};
 use runode_protocol::remote::PAIRING_TTL;
 use runode_remote::{
     Device, ListenerStatus, PairingProgress, PairingTicket, list_devices, listener_status, now_unix, revoke_device,
@@ -29,10 +29,6 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const STATUS_EVERY: u32 = 8;
 /// 二维码四周留白的模块数。规范要 4 个，2 个手机照样扫得出，画出来窄一些。
 const QUIET_ZONE: usize = 2;
-/// 退出 app 后宿主留在后台的配置项，见 `offer_background`。
-const BACKGROUND_KEY: &str = "terminal-host";
-/// 开远程访问的配置项，见 `turn_on`。
-const REMOTE_KEY: &str = "remote-access";
 /// `turn_on` 写完配置后等监听方起来的最长时间。
 pub(crate) const LISTENER_WAIT: Duration = Duration::from_secs(10);
 
@@ -203,7 +199,7 @@ pub(crate) fn read_answer() -> Option<String> {
     }
 }
 
-/// 配对成了以后，配置里还没开 `BACKGROUND_KEY` 时问用户要不要开，直接回车算要：宿主跑在 app 里时，
+/// 配对成了以后，配置里还没开 `TERMINAL_HOST` 时问用户要不要开，直接回车算要：宿主跑在 app 里时，
 /// 退出 app 远程访问跟着停，手机就连不上。`answer` 为 `None`（问不了）或者回答不要时不改配置，只说
 /// 怎么自己开；写不了配置文件也照样算配对成了，说明原因。回答以后重新读一遍配置再改，免得盖掉问的
 /// 时候别处做的修改。
@@ -212,7 +208,7 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
         return Ok(());
     };
     let shown = path.display();
-    let on = |file: &ConfigFile| file.values(BACKGROUND_KEY).last().is_some_and(|value| value == "true");
+    let on = |file: &ConfigFile| file.values(TERMINAL_HOST).last().is_some_and(|value| value == "true");
     match ConfigFile::read(&path) {
         Ok(file) if on(&file) => return Ok(()),
         Ok(_) => {}
@@ -234,7 +230,7 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
     if !yes {
         writeln!(
             out,
-            "Remote access stops when you quit runode. To keep it running, set `{BACKGROUND_KEY} = true` in {shown}."
+            "Remote access stops when you quit runode. To keep it running, set `{TERMINAL_HOST} = true` in {shown}."
         )?;
         return Ok(());
     }
@@ -245,28 +241,28 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
             writeln!(
                 out,
                 "Cannot read {shown} ({err}). To keep remote access running after you quit runode, set \
-                 `{BACKGROUND_KEY} = true` there yourself."
+                 `{TERMINAL_HOST} = true` there yourself."
             )?;
             return Ok(());
         }
     };
-    file.set(BACKGROUND_KEY, &["true".to_owned()]);
+    file.set(TERMINAL_HOST, &["true".to_owned()]);
     match file.write(&path) {
         Ok(()) => writeln!(
             out,
-            "Set `{BACKGROUND_KEY} = true` in {shown}: quitting runode now leaves its terminals and remote access \
+            "Set `{TERMINAL_HOST} = true` in {shown}: quitting runode now leaves its terminals and remote access \
              running in the background."
         )?,
         Err(err) => writeln!(
             out,
             "Cannot write {shown} ({err}). To keep remote access running after you quit runode, set \
-             `{BACKGROUND_KEY} = true` there yourself."
+             `{TERMINAL_HOST} = true` there yourself."
         )?,
     }
     Ok(())
 }
 
-/// 没有监听方时：配置里还没开 `REMOTE_KEY` 就替用户写上，说明改了什么，再等监听方（运行中的 app
+/// 没有监听方时：配置里还没开 `REMOTE_ACCESS` 就替用户写上，说明改了什么，再等监听方（运行中的 app
 /// 或 `runode --host`）读到配置起来，免得配对前还得自己改配置；给了 `Env::launch_host` 时自己拉起宿主。
 /// 已经开着又拉不起宿主（只是 runode 没在跑）、写不了配置或者等到 `wait` 还没起来时报错。
 fn turn_on(env: &Env, out: &mut dyn Write, wait: Duration) -> anyhow::Result<ListenerStatus> {
@@ -275,14 +271,15 @@ fn turn_on(env: &Env, out: &mut dyn Write, wait: Duration) -> anyhow::Result<Lis
     };
     let shown = path.display();
     let mut file = ConfigFile::read(&path).with_context(|| format!("cannot read {shown}"))?;
-    let on = file.values(REMOTE_KEY).last().is_some_and(|value| value == "true");
+    let on = file.values(REMOTE_ACCESS).last().is_some_and(|value| value == "true");
     if on && env.launch_host.is_none() {
         return Err(not_listening(env));
     }
     if !on {
-        file.set(REMOTE_KEY, &["true".to_owned()]);
-        file.write(&path).with_context(|| format!("cannot write {shown}; set `{REMOTE_KEY} = true` there yourself"))?;
-        writeln!(out, "Remote access was off: set `{REMOTE_KEY} = true` in {shown}.")?;
+        file.set(REMOTE_ACCESS, &["true".to_owned()]);
+        file.write(&path)
+            .with_context(|| format!("cannot write {shown}; set `{REMOTE_ACCESS} = true` there yourself"))?;
+        writeln!(out, "Remote access was off: set `{REMOTE_ACCESS} = true` in {shown}.")?;
         out.flush()?;
     }
     // 给了 `Env::launch_host` 时没有界面可打开：拉起宿主，监听开在它的进程里。
@@ -386,7 +383,7 @@ mod tests {
     }
 
     fn background_values(env: &Env) -> Vec<String> {
-        ConfigFile::read(&env.dirs.config_file().unwrap()).unwrap().values(BACKGROUND_KEY)
+        ConfigFile::read(&env.dirs.config_file().unwrap()).unwrap().values(TERMINAL_HOST)
     }
 
     #[test]
