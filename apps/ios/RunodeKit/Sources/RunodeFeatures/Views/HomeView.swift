@@ -192,7 +192,7 @@
                     ActionTile(title: String(localized: "配对电脑"), systemImage: "qrcode.viewfinder", busy: false) {
                         app.startPairing()
                     }
-                    ActionTile(title: String(localized: "新开会话"), systemImage: "plus", busy: spawnable.contains(where: \.isSpawning)) {
+                    ActionTile(title: String(localized: "新开终端"), systemImage: "plus", busy: spawnable.contains(where: \.isSpawning)) {
                         if targets.count == 1, let target = targets.first {
                             spawn(at: target)
                         } else {

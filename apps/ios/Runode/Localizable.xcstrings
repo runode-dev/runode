@@ -4736,29 +4736,6 @@
         }
       }
     },
-    "新开会话" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "New Session"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新开会话"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新開工作階段"
-          }
-        }
-      }
-    },
     "新开终端" : {
       "extractionState" : "manual",
       "localizations" : {

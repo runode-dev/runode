@@ -83,7 +83,7 @@
                     } description: {
                         Text("新开一个终端，在手机上就能用。")
                     } actions: {
-                        Button("新开会话") { Task { await model.spawn() } }
+                        Button("新开终端") { Task { await model.spawn() } }
                             .prominentButtonStyle()
                             .controlSize(.large)
                     }
