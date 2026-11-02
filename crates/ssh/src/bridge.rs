@@ -20,9 +20,7 @@ pub struct Opening {
     pub build: String,
     /// 远端宿主的进程号。
     pub pid: u32,
-    /// `launched`（新拉起的）、`kept`（本来就在跑、同一个构建）、`took`（新宿主接手了旧宿主的会话）、
-    /// `service`（登录服务换上了新版本）、`mismatch`（连上了别的构建、没能换）、`in_app`（远端 Mac 上开着
-    /// runode app、宿主跑在它里面）。
+    /// 桥接怎么连上远端宿主的，一个不带空格的词，给人看日志用。
     pub via: String,
     /// 远端宿主会跟着 ssh 的登录被系统结束：Linux 上它在 logind 的会话 scope 里、logind 又结束登录会话里的
     /// 进程，或者它在用户服务管理器里、这个用户没开 linger。

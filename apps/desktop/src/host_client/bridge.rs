@@ -193,16 +193,16 @@ fn connect(dirs: &runode_paths::Dirs) -> Result<(UnixStream, Opening), Failure> 
         // 拉起宿主时交回的，拿到连上它或者放弃（`launch_host`）。
         let mut _launched = None;
         let via = match &probe {
-            Probe::Absent if start_service(dirs, &exe) => "service",
+            Probe::Absent if start_service(dirs, &exe) => Via::Service,
             Probe::Absent => {
                 _launched = Some(
                     launch_host(&exe, &socket)
                         .map_err(|err| fail("launch", format!("cannot start the host: {err}")))?,
                 );
-                "launched"
+                Via::Launched
             }
-            Probe::OtherApp => "in_app",
-            Probe::Running { build, .. } if *build == ours => "kept",
+            Probe::OtherApp => Via::InApp,
+            Probe::Running { build, .. } if *build == ours => Via::Kept,
             Probe::Running { .. } | Probe::Incompatible { .. } => match take_over(dirs, &exe, &socket, &probe) {
                 Upgrade::Done(via) => via,
                 Upgrade::Retired => {
@@ -210,7 +210,7 @@ fn connect(dirs: &runode_paths::Dirs) -> Result<(UnixStream, Opening), Failure> 
                         launch_host(&exe, &socket)
                             .map_err(|err| fail("upgrade", format!("cannot replace the old host: {err}")))?,
                     );
-                    "launched"
+                    Via::Launched
                 }
                 Upgrade::Busy if busy < BUSY_TRIES => {
                     busy += 1;
@@ -227,7 +227,7 @@ fn connect(dirs: &runode_paths::Dirs) -> Result<(UnixStream, Opening), Failure> 
             Probe::Running { build, .. } => build.0,
             _ => String::new(),
         };
-        let via = if via == "kept" || host == ours.0 || via == "in_app" { via } else { "mismatch" };
+        let via = if matches!(via, Via::Kept | Via::InApp) || host == ours.0 { via } else { Via::Mismatch };
         // 桌面按 `/` 分隔认远端的路径，Windows 的也是；Unix 上 `\\` 是文件名里的普通字符，不换。
         let home = dirs
             .home
@@ -240,7 +240,7 @@ fn connect(dirs: &runode_paths::Dirs) -> Result<(UnixStream, Opening), Failure> 
         let opening = Opening {
             build: host,
             pid,
-            via: via.into(),
+            via: via.name().into(),
             session_bound: session_bound(pid),
             os: std::env::consts::OS.into(),
             home,
@@ -293,8 +293,39 @@ fn start_service(dirs: &runode_paths::Dirs, exe: &Path) -> bool {
     }
 }
 
+/// 桥接怎么连上远端宿主的，写进开场白。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Via {
+    /// 新拉起的。
+    Launched,
+    /// 本来就在跑、同一个构建。
+    Kept,
+    /// 新宿主接手了旧宿主的会话。
+    #[cfg_attr(windows, expect(dead_code, reason = "Windows 上不交接"))]
+    Took,
+    /// 登录服务换上了新版本。
+    Service,
+    /// 连上了别的构建、没能换。
+    Mismatch,
+    /// 远端 Mac 上开着 runode app、宿主跑在它里面。
+    InApp,
+}
+
+impl Via {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Launched => "launched",
+            Self::Kept => "kept",
+            Self::Took => "took",
+            Self::Service => "service",
+            Self::Mismatch => "mismatch",
+            Self::InApp => "in_app",
+        }
+    }
+}
+
 enum Upgrade {
-    Done(&'static str),
+    Done(Via),
     /// 旧宿主已经退出，由调用方拉起这个构建的宿主。
     Retired,
     #[cfg_attr(windows, expect(dead_code, reason = "Windows 上不交接"))]
@@ -303,7 +334,7 @@ enum Upgrade {
 }
 
 /// 在跑的是别的构建：它没有会话、也没有那台电脑上的桌面连着时让它退出、换上这个构建的（`Retired`）；
-/// 不然或者退不掉时协议对得上就照样连它（`mismatch`），对不上的连不了。
+/// 不然或者退不掉时协议对得上就照样连它（`Via::Mismatch`），对不上的连不了。
 #[cfg(windows)]
 fn take_over(_: &runode_paths::Dirs, _: &Path, socket: &Path, probe: &Probe) -> Upgrade {
     match probe {
@@ -313,10 +344,10 @@ fn take_over(_: &runode_paths::Dirs, _: &Path, socket: &Path, probe: &Probe) -> 
             Err(_) if launch::probe(socket, &build()) == Probe::Absent => Upgrade::Retired,
             Err(err) => {
                 tracing::warn!("cannot retire the old host without sessions, keeping it: {err}");
-                Upgrade::Done("mismatch")
+                Upgrade::Done(Via::Mismatch)
             }
         },
-        Probe::Running { .. } => Upgrade::Done("mismatch"),
+        Probe::Running { .. } => Upgrade::Done(Via::Mismatch),
         _ => Upgrade::Failed(
             "runode on this computer is a version that cannot talk to this one; quit it there first".into(),
         ),
@@ -324,7 +355,7 @@ fn take_over(_: &runode_paths::Dirs, _: &Path, socket: &Path, probe: &Probe) -> 
 }
 
 /// 在跑的是别的构建：让这个构建的新宿主接手。登录服务管着它时经服务换；接不了手、协议又对得上时照样
-/// 用旧的（`mismatch`），旧宿主没有会话时换掉它。
+/// 用旧的（`Via::Mismatch`），旧宿主没有会话时换掉它。
 #[cfg(unix)]
 fn take_over(dirs: &runode_paths::Dirs, exe: &Path, socket: &Path, probe: &Probe) -> Upgrade {
     let compatible = matches!(probe, Probe::Running { .. });
@@ -336,10 +367,10 @@ fn take_over(dirs: &runode_paths::Dirs, exe: &Path, socket: &Path, probe: &Probe
         && launch::host_pid(socket).is_ok_and(|pid| pid == service)
     {
         return match runode_autostart::reload_host_service(dirs, &stable_exe(dirs, exe)) {
-            Ok(()) => Upgrade::Done("service"),
+            Ok(()) => Upgrade::Done(Via::Service),
             Err(err) if compatible => {
                 tracing::warn!("the host service did not take the sessions over, keeping the old host: {err}");
-                Upgrade::Done("mismatch")
+                Upgrade::Done(Via::Mismatch)
             }
             Err(err) => Upgrade::Failed(format!("the host service did not take the sessions over: {err}")),
         };
@@ -354,14 +385,14 @@ fn take_over(dirs: &runode_paths::Dirs, exe: &Path, socket: &Path, probe: &Probe
         }
         if compatible {
             tracing::warn!("keeping the old host: {reason}");
-            return Upgrade::Done("mismatch");
+            return Upgrade::Done(Via::Mismatch);
         }
         Upgrade::Failed(reason)
     };
     match handoff::hand_over(exe, handoff::Timing::default()) {
         Outcome::TookOver { sessions, replayed } => {
             tracing::info!("the new host took over {sessions} sessions, {replayed} without scrollback");
-            Upgrade::Done("took")
+            Upgrade::Done(Via::Took)
         }
         Outcome::Refused(HandoffRefusal::Busy) => Upgrade::Busy,
         Outcome::Refused(HandoffRefusal::DesktopConnected) => {
