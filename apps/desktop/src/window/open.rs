@@ -2,7 +2,7 @@
 
 use gpui::{App, AppContext as _, Bounds, Window, WindowBounds, WindowOptions, px, size};
 
-use super::{WindowView, persist::format::SavedWindow, should_close, titlebar_options};
+use super::{WindowView, persist::format::SavedWindow, should_close, titlebar::window_decorations, titlebar_options};
 use crate::prespawn::Prespawned;
 
 /// 新窗口的默认选项：屏幕居中的默认大小。
@@ -12,6 +12,7 @@ pub(crate) fn window_options(cx: &App) -> WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(320.), px(200.))),
         titlebar: Some(titlebar_options()),
+        window_decorations: window_decorations(),
         // 标题栏的拖动和双击由 `WindowView` 自己处理；否则 AppKit 会抢先处理标题栏区域的双击，
         // 在标签或新建按钮上双击也会缩放窗口。
         app_owns_titlebar_drag: true,

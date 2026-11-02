@@ -8,7 +8,7 @@ use crate::ui::theme::ActiveTheme as _;
 use gpui::{
     Action, AnyElement, App, Axis, BoxShadow, Context, CursorStyle, Decorations, Div, ElementId, Hsla, MouseButton,
     MouseDownEvent, Pixels, Render, ResizeEdge, Role, SharedString, Stateful, TitlebarOptions, Window,
-    WindowControlArea, div, img, linear_color_stop, linear_gradient, point, prelude::*, px, svg,
+    WindowControlArea, WindowDecorations, div, img, linear_color_stop, linear_gradient, point, prelude::*, px, svg,
 };
 use runode_types::agent::AgentKind;
 
@@ -62,8 +62,8 @@ const WINDOW_CONTROL_FONT: &str = "Segoe MDL2 Assets";
 /// 鼠标停在关闭按钮上时的底色，和系统的一样。
 const WINDOW_CLOSE_HOVER: u32 = 0xC42B1C;
 
-/// 窗口按钮（最小化、最大化、关闭）由 app 自己画：Windows 上总是；Linux 上合成器不画边框（GNOME 的
-/// Wayland 不支持 xdg-decoration）、GPUI 退成客户端装饰时。
+/// 窗口按钮（最小化、最大化、关闭）由 app 自己画：Windows 上总是；Linux 上窗口是客户端装饰
+/// （`window_decorations`）时。
 pub(super) fn draws_window_controls(window: &Window) -> bool {
     cfg!(windows)
         || (cfg!(not(target_os = "macos")) && matches!(window.window_decorations(), Decorations::Client { .. }))
@@ -75,7 +75,7 @@ pub(super) fn window_controls_width(window: &Window) -> f32 {
 }
 
 /// 窗口的标题栏设置：macOS 和 Windows 上透明，终端背景一直铺到窗口顶部，macOS 上标签栏画在红绿灯
-/// 或侧栏右边，Windows 上右上角自己画窗口按钮；别的系统上用系统自己的标题栏和边框，标签栏在它下面。
+/// 或侧栏右边，Windows 上右上角自己画窗口按钮。Linux 上不要系统的标题栏和边框（`window_decorations`）。
 pub fn titlebar_options() -> TitlebarOptions {
     let macos = cfg!(target_os = "macos");
     TitlebarOptions {
@@ -83,6 +83,12 @@ pub fn titlebar_options() -> TitlebarOptions {
         appears_transparent: macos || cfg!(windows),
         traffic_light_position: macos.then(|| point(px(TRAFFIC_LIGHTS_ORIGIN.0), px(TRAFFIC_LIGHTS_ORIGIN.1))),
     }
+}
+
+/// Linux 上窗口要客户端装饰：标签栏顶到窗口最上面，窗口按钮和四边改尺寸的一圈由 app 自己画，和 Windows
+/// 上一样，不用合成器画的标题栏。合成器不肯时 GPUI 照旧给服务端装饰，实际的看 `Window::window_decorations`。
+pub fn window_decorations() -> Option<WindowDecorations> {
+    cfg!(target_os = "linux").then_some(WindowDecorations::Client)
 }
 
 /// 拖动中的标签：拖动时跟着鼠标画出来，放到另一个标签上时按 `id` 挪位置。
