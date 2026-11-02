@@ -20,6 +20,7 @@ mod desktop_session;
 mod dictation;
 mod file_tree;
 mod fs_probe;
+mod gh;
 mod git_panel;
 mod git_view;
 mod github_actions;

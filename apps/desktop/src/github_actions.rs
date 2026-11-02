@@ -10,7 +10,7 @@
 //! `ActionsEvent` 交出去。经用户自己装的 gh 读写，见 `gh`；app 在窗口在前台时每秒调一次 `poll`，页上
 //! 显示着的和固定在状态栏上的数据隔 `POLL_IDLE` 重读一次，有没跑完的运行或 job 时隔 `POLL_RUNNING`。
 
-pub(crate) mod gh;
+mod api;
 
 use crate::ui::theme::ActiveTheme as _;
 use std::{
@@ -45,8 +45,9 @@ use gpui::{
 };
 use serde::{Deserialize, Serialize};
 
-pub use gh::PROGRAM;
-use gh::{Data, Gh, Job, Query, Run, Scope, State, Workflow};
+pub use crate::gh::PROGRAM;
+use crate::gh::{self, Gh};
+use api::{Data, Job, Query, Run, Scope, State, Workflow};
 
 use crate::ui::icons::github_actions::{
     CANCELLED_ICON, FAILURE_ICON, INPROGRESS_ICON, PENDING_ICON, QUEUED_ICON, SKIPPED_ICON, SUCCESS_ICON, WAITING_ICON,
@@ -328,7 +329,7 @@ impl ActionsPanel {
         let now = Instant::now();
         let due: Vec<Query> = wanted
             .into_iter()
-            .filter(|query| gh::due(self.data.get(query), self.fetched.get(query).copied(), now))
+            .filter(|query| api::due(self.data.get(query), self.fetched.get(query).copied(), now))
             .collect();
         for query in due {
             self.fetch_actions(query, cx);
@@ -435,7 +436,7 @@ impl ActionsPanel {
 
     /// 在终端里交给 gh 设 `scope` 那一级叫 `name` 的 secret（`secret` 为真）或 variable 的值，gh 跑完时重读那份列表。
     fn set_in_terminal(&mut self, secret: bool, scope: Scope, name: &str, cx: &mut Context<Self>) {
-        let command = gh::set_command(secret, &scope, name);
+        let command = api::set_command(secret, &scope, name);
         let query = if secret { Query::Secrets(scope) } else { Query::Variables(scope) };
         self.run_in_terminal(command, Some(query), cx);
     }
@@ -694,7 +695,7 @@ impl ActionsPanel {
     fn render_actions_login(&self, cx: &mut Context<Self>) -> Div {
         let text = rust_i18n::t!("github_actions.login_needed").into_owned();
         let login = |this: &mut Self, _: &mut Window, cx: &mut Context<Self>| {
-            this.run_in_terminal(gh::LOGIN_COMMAND.map(str::to_owned).to_vec(), None, cx);
+            this.run_in_terminal(api::LOGIN_COMMAND.map(str::to_owned).to_vec(), None, cx);
         };
         div()
             .flex_1()
@@ -831,7 +832,7 @@ impl ActionsPanel {
                 TERMINAL_ICON,
                 rust_i18n::t!("github_actions.watch"),
                 move |this: &mut Self, _, cx| {
-                    this.run_in_terminal(gh::watch_command(id), None, cx);
+                    this.run_in_terminal(api::watch_command(id), None, cx);
                 },
             ));
             buttons.push(button(BAN_ICON, rust_i18n::t!("github_actions.cancel"), move |this: &mut Self, _, cx| {
@@ -906,7 +907,7 @@ impl ActionsPanel {
         // 日志要等 job 跑完才拿得到。
         if !state.running() {
             buttons.push(button(TERMINAL_ICON, rust_i18n::t!("github_actions.logs"), move |this: &mut Self, _, cx| {
-                this.run_in_terminal(gh::logs_command(id), None, cx);
+                this.run_in_terminal(api::logs_command(id), None, cx);
             }));
         }
         let url = job.url.clone();
@@ -929,7 +930,7 @@ impl ActionsPanel {
         for (si, step) in job.steps.iter().enumerate() {
             let ix = walk.ix();
             let state = step.state();
-            let url = gh::step_url(job, step);
+            let url = api::step_url(job, step);
             let open = {
                 let url = url.clone();
                 button(GLOBE_ICON, rust_i18n::t!("github_actions.step_logs"), move |_, _, cx| cx.open_url(&url))
@@ -957,7 +958,7 @@ impl ActionsPanel {
         if active && workflow.dispatch {
             let branch = self.input.branch.clone();
             buttons.push(button(PLAY_ICON, rust_i18n::t!("github_actions.trigger"), move |this: &mut Self, _, cx| {
-                this.run_in_terminal(gh::trigger_command(id, branch.as_deref()), None, cx);
+                this.run_in_terminal(api::trigger_command(id, branch.as_deref()), None, cx);
             }));
         }
         let file = self.input.dir.join(&workflow.path);
@@ -1317,7 +1318,7 @@ pub fn render_pinned<V: 'static>(items: Vec<PinnedItem>, height: f32, cx: &mut C
 fn gh_error(err: String) -> String {
     match err.as_str() {
         gh::LOGIN => rust_i18n::t!("github_actions.login_needed").into_owned(),
-        gh::NOT_ORG => rust_i18n::t!("github_actions.not_org").into_owned(),
+        api::NOT_ORG => rust_i18n::t!("github_actions.not_org").into_owned(),
         _ => err,
     }
 }

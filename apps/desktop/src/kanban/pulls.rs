@@ -10,7 +10,7 @@ use runode_git::Repo;
 use runode_protocol::{ClientMsg, todo::Todo};
 
 use super::{Kanban, ToastState, store, store::Step};
-use crate::github_actions::gh::{Gh, PullRequest};
+use crate::gh::{Gh, PullRequest};
 
 /// 隔多久重读一次。
 const POLL: Duration = Duration::from_secs(60);

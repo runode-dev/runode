@@ -65,7 +65,7 @@ use runode_types::agent::Agent;
 pub use dialog::TodoDialog;
 pub use store::{Host, Step, needs_you, todo_sessions, watch};
 
-use crate::github_actions::gh::{Checks, PullRequest};
+use crate::gh::{Checks, PullRequest};
 use dialog::{DialogEvent, Editing};
 use store::TodoData;
 
