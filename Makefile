@@ -20,7 +20,7 @@ endif
 # 默认打进 app，REMOTE=0 时不打。
 REMOTE ?=
 REMOTE_OUT = target/remote/out
-.PHONY: help submodules build release run run-release run-ios run-ios-device app install restart dmg check test test-ssh clippy fmt fmt-check clean
+.PHONY: help submodules build release run run-release run-ios run-ios-device app install restart dmg check test test-ssh clippy layers fmt fmt-check clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -110,6 +110,10 @@ test-ssh: ## 经假的 ssh 测连 SSH 主机：部署、桥接、断线重连、
 
 clippy: ## 运行 clippy
 	$(CARGO) clippy --workspace --all-targets $(CLIPPY_ARGS)
+
+layers: ## 检查 crate 分层：谁能依赖谁（cargo-deny）和几个 crate 只依赖谁（scripts/check-layers.py）
+	cargo deny check bans
+	python3 scripts/check-layers.py
 
 fmt: ## 按 rustfmt.toml 格式化工作区里的 crate（不碰 vendor）
 	$(CARGO) fmt

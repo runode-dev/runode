@@ -2,7 +2,8 @@
 # 界面框架只许 app（runode）和它的部件库（runode-ui）直接依赖，终端仿真和 PTY 只许 runode-terminal 直接依赖，
 # 语法高亮只许 runode-preview 直接依赖，终端宿主只许 app 直接依赖，TLS 和密码学只许
 # runode-remote 和推送中转 runode-push 直接依赖，SQLite 只许 runode-todo 直接依赖，
-# 终端会话（runode-terminal）只许 app 和宿主直接依赖。
+# 终端会话（runode-terminal）只许 app 和宿主直接依赖，宿主和前端之间的协议（runode-protocol）只许说这套协议的
+# crate 直接依赖。「某个 crate 只依赖谁」那类规则由 scripts/check-layers.py 核对。
 # `wrappers` 列出的 crate 可以直接依赖被禁的 crate，其他 crate 直接依赖时报错；经由这些
 # crate 间接用到不算违规。
 
@@ -47,6 +48,7 @@ deny = [
     { crate = "objc2-screen-capture-kit", wrappers = ["runode-screen"], reason = "远程桌面的屏幕采集只在 runode-screen 里" },
     { crate = "objc2-video-toolbox", wrappers = ["runode-screen"], reason = "远程桌面的视频编码只在 runode-screen 里" },
     { crate = "openh264", wrappers = ["runode-screen"], reason = "远程桌面的软件编码只在 runode-screen 里" },
+    { crate = "runode-protocol", wrappers = ["runode", "runode-host", "runode-remote", "runode-cli", "runode-push"], reason = "宿主和前端之间的消息只有宿主、远程访问、命令行、app 和推送中转说；别的 crate 不知道有宿主" },
     { crate = "runode-ssh", wrappers = ["runode"], reason = "连 SSH 主机只有 app 做：起 ssh、问用户、在远端装 runode 都在桌面这边，远端的宿主不知道自己是经 ssh 连上的" },
     { crate = "rusqlite", wrappers = ["runode-todo"], reason = "看板的库只在 runode-todo 里，别的 crate 经它的 Store 读写" },
     { crate = "sherpa-onnx", wrappers = ["runode-speech"], reason = "语音识别只在 runode-speech 里，别的 crate 经它的 Recognizer 用" },

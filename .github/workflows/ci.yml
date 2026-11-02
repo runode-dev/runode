@@ -78,7 +78,7 @@ jobs:
       - name: 确认 Cargo.lock 是最新的
         run: cargo metadata --locked --format-version 1 >/dev/null
       - name: 检查 crate 分层
-        run: cargo deny check bans
+        run: make layers
       # 一行安装的脚本用户直接从 main 上取，改坏了就装不上。
       - name: 检查安装脚本
         run: |
