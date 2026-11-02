@@ -107,23 +107,24 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
         .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "closed before hello"))?;
     let control = hello.kind == FrameKind::Control && hello.channel == 0;
     // 第一帧定下这条连接接到哪里：终端的宿主、远程桌面的采集进程或者识别。
-    let host =
-        if control && matches!(hello.message::<ClientMsg>(), Ok(ClientMsg::Hello { client: ClientKind::Mobile, .. })) {
-            (shared.connect)()?
-        } else if control && matches!(hello.message::<ScreenClientMsg>(), Ok(ScreenClientMsg::ScreenHello { .. })) {
-            (shared.connect_screen)()?
-        } else if control && matches!(hello.message::<SpeechClientMsg>(), Ok(SpeechClientMsg::SpeechHello { .. })) {
-            (shared.connect_speech)()?
-        } else {
-            return Err(io::Error::other("the first frame after the gate is not a mobile, screen or speech hello"));
-        };
+    let terminal =
+        control && matches!(hello.message::<ClientMsg>(), Ok(ClientMsg::Hello { client: ClientKind::Mobile, .. }));
+    let host = if terminal {
+        (shared.connect)()?
+    } else if control && matches!(hello.message::<ScreenClientMsg>(), Ok(ScreenClientMsg::ScreenHello { .. })) {
+        (shared.connect_screen)()?
+    } else if control && matches!(hello.message::<SpeechClientMsg>(), Ok(SpeechClientMsg::SpeechHello { .. })) {
+        (shared.connect_speech)()?
+    } else {
+        return Err(io::Error::other("the first frame after the gate is not a mobile, screen or speech hello"));
+    };
     write_frame(&mut &host, hello.kind, hello.channel, &hello.payload).map_err(io::Error::other)?;
     let StreamOwned { mut conn, sock } = tls;
     drop(sock);
     tcp.set_read_timeout(None)?;
     tcp.set_write_timeout(None)?;
     let mut push = PushRequests { dirs: &shared.dirs, device: device_id };
-    bridge(&mut conn, tcp, &host, cut, &mut push);
+    bridge(&mut conn, tcp, &host, cut, terminal, &mut push);
     let _ = host.shutdown(Shutdown::Both);
     // 关了连接以后（Windows 上 `serve` 收尾时只关读的一边也一样）对面再发来什么，连接马上被重置，已经交给
     // 系统、手机还没读走的输出跟着丢掉：先只关写的一边，等手机读完、自己关了再收尾。

@@ -34,9 +34,16 @@ pub(crate) struct FromPhone {
     left: u32,
     /// 正在攒的控制帧（含帧头）；不是控制帧时为 `None`，帧体边到边转。
     held: Option<Vec<u8>>,
+    /// 控制帧不解析、原样转：连的不是终端的宿主（远程桌面、语音识别），控制消息不是 `ClientMsg`。
+    passthrough: bool,
 }
 
 impl FromPhone {
+    /// 连的不是终端的宿主时用：只照帧头数边界、查长度，控制帧不解析、原样转给对面。
+    pub(crate) fn passthrough() -> Self {
+        Self { passthrough: true, ..Self::default() }
+    }
+
     /// 过一段明文：要转给宿主的追加到 `to_host`；挡下的和交给 `local` 办了的控制消息，给手机的回话
     /// （编好的帧）追加到 `replies`。帧头声明的载荷超过 `MAX_PAYLOAD`（控制帧是 `MAX_CONTROL_PAYLOAD`）
     /// 时报错，连接上的数据已经对不齐了。
@@ -93,6 +100,10 @@ impl FromPhone {
     /// 宿主（解不出来的也转，由宿主照常回话）。
     fn decide(&mut self, to_host: &mut Vec<u8>, replies: &mut Vec<u8>, local: &mut dyn LocalRequests) {
         let Some(frame) = self.held.take() else { return };
+        if self.passthrough {
+            to_host.extend_from_slice(&frame);
+            return;
+        }
         let reply = serde_json::from_slice::<ClientMsg>(&frame[HEADER_LEN..]).ok().and_then(|message| {
             if let Some(what) = message.remote_refusal() {
                 tracing::info!("refused a remote device's request to {what}");
@@ -221,6 +232,23 @@ mod tests {
             phone.feed(piece, &mut to_host, &mut replies, local).unwrap();
         }
         (to_host, replies)
+    }
+
+    /// 连的不是终端的宿主时什么都不挡、不自己办：宿主级的请求和 `Layout` 一样原样转。
+    #[test]
+    fn passthrough_forwards_every_frame() {
+        let stream = [
+            control(r#"{"type":"shutdown","kill_sessions":true}"#),
+            control(r#"{"type":"layout","req":1}"#),
+            frame(FrameKind::Input, 3, b"x"),
+            control(r#"{"type":"screen_hello","version":1}"#),
+        ]
+        .concat();
+        let mut phone = FromPhone::passthrough();
+        let (mut to_host, mut replies) = (Vec::new(), Vec::new());
+        phone.feed(&stream, &mut to_host, &mut replies, &mut Layouts).unwrap();
+        assert_eq!(to_host, stream);
+        assert!(replies.is_empty());
     }
 
     #[test]

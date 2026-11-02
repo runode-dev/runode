@@ -5,7 +5,7 @@
 //! rustls 加密后写给手机。两个方向各自积压到上限就先不读那一头，慢的一方会把快的一方压住，不会
 //! 无限攒在内存里。
 //!
-//! 手机发来的控制帧要过一道筛：管宿主本身的请求（让宿主退出、升级交接这些，见 `frames::refusal`）
+//! 连的是终端的宿主时，手机发来的控制帧要过一道筛：管宿主本身的请求（让宿主退出、升级交接这些，见 `frames::refusal`）
 //! 不转给宿主，改在发往手机的方向、两帧之间插一条 `HostMsg::Error`，连接照旧。登记推送的请求也不转给
 //! 宿主，由 `push` 按这台设备办了，同样在两帧之间插回话。
 //!
@@ -41,12 +41,14 @@ const CHUNK: usize = 64 << 10;
 const POLL_TICK: Duration = Duration::from_secs(1);
 
 /// 搬到两边都说完，或者 `cut` 被置上（撤销了设备、关了远程访问；置上的一方同时会 `shutdown` 手机的
-/// 连接，这边马上醒）。手机发来的请求里由这边办的交给 `local`。返回时两个连接都还开着，由调用方关。
+/// 连接，这边马上醒）。`terminal` 为假时连的是远程桌面或语音识别，手机的控制帧不过筛、原样转；为真时手机
+/// 发来的请求里由这边办的交给 `local`。返回时两个连接都还开着，由调用方关。
 pub(crate) fn bridge(
     conn: &mut ServerConnection,
     phone: &TcpStream,
     host: &UnixStream,
     cut: &AtomicBool,
+    terminal: bool,
     local: &mut dyn LocalRequests,
 ) {
     if let Err(err) = phone.set_nonblocking(true).and_then(|()| host.set_nonblocking(true)) {
@@ -56,7 +58,7 @@ pub(crate) fn bridge(
     conn.set_buffer_limit(Some(TO_PHONE_LIMIT));
     let mut bridge = Bridge {
         buf: vec![0u8; CHUNK],
-        from_phone: FromPhone::default(),
+        from_phone: if terminal { FromPhone::default() } else { FromPhone::passthrough() },
         to_host: Vec::new(),
         host_writable: true,
         phone_done: false,
