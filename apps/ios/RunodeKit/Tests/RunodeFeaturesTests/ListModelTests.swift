@@ -889,6 +889,16 @@ actor UnwritableMachineStore: MachineStore {
         #expect(Presentation.directory(nil) == nil)
     }
 
+    @Test func sectionDetailSkipsADirectoryThatRepeatsTheTitle() {
+        let home = SessionSection(id: .workspace(window: 1, index: 0), name: "~", dir: "/Users/ethan", sessions: [])
+        #expect(Presentation.sectionDetail(home) == nil)
+        var second = home
+        second.window = 2
+        #expect(Presentation.sectionDetail(second) == "窗口 2")
+        let repo = SessionSection(id: .workspace(window: 1, index: 1), name: "runode", dir: "/Users/ethan/dev/runode", sessions: [])
+        #expect(Presentation.sectionDetail(repo) == "~/dev/runode")
+    }
+
     @Test func programLabelsDropTheExeSuffix() {
         #expect(Presentation.programLabel("powershell.exe") == "powershell")
         #expect(Presentation.programLabel("Code.EXE") == "Code")

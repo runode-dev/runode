@@ -160,12 +160,14 @@ public enum Presentation {
     }
 
     /// 一节标题下面那行小字：工作区的目录，开着不止一个窗口时带上第几个窗口；后台那一节说明它是什么。
+    /// 目录写出来和标题一样时（家目录的工作区叫 `~`）不写目录。
     public static func sectionDetail(_ section: SessionSection) -> String? {
         switch section.id {
         case .background:
             return String(localized: "电脑上没有窗口在显示这些终端")
         case .workspace:
-            let parts = [section.window.map { String(localized: "窗口 \($0)") }, directory(section.dir)].compactMap { $0 }
+            let dir = directory(section.dir).flatMap { $0 == sectionTitle(section) ? nil : $0 }
+            let parts = [section.window.map { String(localized: "窗口 \($0)") }, dir].compactMap { $0 }
             return parts.isEmpty ? nil : parts.joined(separator: " · ")
         }
     }
