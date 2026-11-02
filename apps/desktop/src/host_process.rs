@@ -13,6 +13,7 @@
 //! 会话的旧宿主不马上退出，等它拉起的 shell 都结束了才退出（`wait_for_children`）。systemd 的服务重载时
 //! 拉起的新宿主向服务管理器报告自己是新的主进程（`systemd::Notifier`），接手后和服务的宿主一样不因空闲退出。
 
+use std::time::Duration;
 #[cfg(unix)]
 use std::{
     fs::File,
@@ -24,7 +25,6 @@ use std::{
     },
     time::Instant,
 };
-use std::time::Duration;
 
 use runode_host::{BuildId, Host};
 #[cfg(unix)]
