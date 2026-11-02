@@ -1,16 +1,14 @@
 //! agent 停下来要人处理时的提醒：系统通知和提示音。什么时候提醒由窗口判断（用户没在看那个
 //! 分屏时），这里只管按配置发出去，以及点了通知之后交给窗口跳过去。
 //!
-//! 通知走系统的通知中心。macOS 上没打包成 .app 的可执行文件里通知中心会直接抛异常让进程退出，即使
-//! 构建脚本嵌进去的信息表让它也有 bundle id，所以只在 .app 里发；授权请求在第一次发通知时才由通知中心
-//! 弹出。Windows 和 Linux 上随时能发。提示音用系统自带的声音，按名字播放，不打包音频文件，只有 macOS 上有。
+//! 通知经 `alerts` 发。提示音用系统自带的声音，按名字播放，不打包音频文件，只有 macOS 上有。
 
 use std::collections::HashSet;
 
-use gpui::{App, Global, SystemNotification};
+use gpui::{App, Global};
 use runode_types::agent::AgentKind;
 
-use crate::config::AppConfig;
+use crate::{alerts, config::AppConfig};
 
 /// 要提醒的事。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,16 +30,10 @@ pub struct AgentAlert {
     pub tab: String,
 }
 
-/// 发过的通知，是否已经开始接收点击，以及系统设置里是否拒绝了 Runode 发通知（拒绝时通知照发但不会
-/// 弹出来）、是不是正在问。
+/// 发过、还没收回的 agent 提醒的标识。
 #[derive(Default)]
 struct Notified {
-    listening: bool,
     posted: HashSet<String>,
-    #[cfg(target_os = "macos")]
-    denied: bool,
-    #[cfg(target_os = "macos")]
-    asking: bool,
 }
 
 impl Global for Notified {}
@@ -59,7 +51,7 @@ pub fn alert(alert: AgentAlert, cx: &mut App) {
     if let Some(sound) = sound {
         crate::sound::play(sound);
     }
-    if config.agent_notifications && notifications_available() {
+    if config.agent_notifications && alerts::notifications_available() {
         post(alert, cx);
     }
 }
@@ -67,16 +59,9 @@ pub fn alert(alert: AgentAlert, cx: &mut App) {
 /// 程序自己要求发的通知（OSC 9、OSC 777），开着通知又在 .app 里时发；同一个分屏的新通知替换旧的。
 /// 不记进 `posted`：agent 的状态变了、用户看过了都不收回，留在通知中心里。
 pub fn program(tag: String, title: String, body: String, cx: &mut App) {
-    if !cx.global::<AppConfig>().0.agent_notifications || !notifications_available() {
-        return;
+    if cx.global::<AppConfig>().0.agent_notifications {
+        alerts::notify(tag, title, body, cx);
     }
-    listen(cx);
-    cx.show_system_notification(SystemNotification {
-        tag: tag.into(),
-        title: title.into(),
-        body: body.into(),
-        actions: Vec::new(),
-    });
 }
 
 /// 设置页里的「发送测试通知」：播放「干完了」的提示音，在 .app 里发一条测试通知。第一次发时
@@ -85,14 +70,8 @@ pub fn test(cx: &mut App) {
     if let Some(sound) = &cx.global::<AppConfig>().0.agent_done_sound {
         crate::sound::play(sound);
     }
-    if notifications_available() {
-        cx.show_system_notification(SystemNotification {
-            tag: "runode-test".into(),
-            title: rust_i18n::t!("agent.test_title").into_owned().into(),
-            body: rust_i18n::t!("agent.test_body").into_owned().into(),
-            actions: Vec::new(),
-        });
-    }
+    let title = rust_i18n::t!("agent.test_title").into_owned();
+    alerts::notify("runode-test".into(), title, rust_i18n::t!("agent.test_body").into_owned(), cx);
 }
 
 /// 这个标识发过通知、还没收回。
@@ -117,83 +96,5 @@ fn post(alert: AgentAlert, cx: &mut App) {
     };
     let body = rust_i18n::t!("agent.notification_body", workspace = alert.workspace, tab = alert.tab);
     cx.default_global::<Notified>().posted.insert(alert.tag.clone());
-    listen(cx);
-    cx.show_system_notification(SystemNotification {
-        tag: alert.tag.into(),
-        title: title.into_owned().into(),
-        body: body.into_owned().into(),
-        actions: Vec::new(),
-    });
-}
-
-/// 开始接收通知的点击，发第一条通知之前调；已经在接收时什么都不做。注册回调就会建起通知中心，
-/// 所以第一次发通知时才注册。点的是更新的通知时交给 `update`，别的是 agent 的提醒，跳到那个分屏。
-/// 回调只能有一个，后注册的会顶掉先注册的，所以都经这里。
-pub fn listen(cx: &mut App) {
-    if std::mem::replace(&mut cx.default_global::<Notified>().listening, true) {
-        return;
-    }
-    cx.on_system_notification_response(|response, cx| {
-        if response.tag == crate::update::NOTIFICATION_TAG {
-            crate::update::offer_restart(cx);
-        } else {
-            crate::window::reveal_notified(&response.tag, cx);
-        }
-    });
-}
-
-#[cfg(target_os = "macos")]
-fn notifications_available() -> bool {
-    crate::about::in_app_bundle()
-}
-
-/// 系统设置里拒绝了 Runode 发通知。返回上次问到的结果（没问过、不在 .app 里时算没拒绝），同时在
-/// 后台再问一次，结果变了就重画各窗口：用户在系统设置里改完回来，设置页跟着变。一旦拒绝过，
-/// 系统不再弹授权框，只能去系统设置里打开。
-#[cfg(target_os = "macos")]
-pub fn notifications_denied(cx: &mut App) -> bool {
-    use std::ptr::NonNull;
-
-    use block2::RcBlock;
-    use futures::StreamExt as _;
-    use objc2_user_notifications::{UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter};
-
-    if !notifications_available() {
-        return false;
-    }
-    let notified = cx.default_global::<Notified>();
-    let denied = notified.denied;
-    if std::mem::replace(&mut notified.asking, true) {
-        return denied;
-    }
-    let (tx, mut rx) = futures::channel::mpsc::unbounded();
-    let completion = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
-        // SAFETY: 回调期间 settings 是有效的对象。
-        let status = unsafe { settings.as_ref() }.authorizationStatus();
-        tx.unbounded_send(status == UNAuthorizationStatus::Denied).ok();
-    });
-    UNUserNotificationCenter::currentNotificationCenter().getNotificationSettingsWithCompletionHandler(&completion);
-    cx.spawn(async move |cx| {
-        let now = rx.next().await;
-        cx.update(|cx| {
-            let notified = cx.global_mut::<Notified>();
-            notified.asking = false;
-            if let Some(now) = now.filter(|now| *now != notified.denied) {
-                notified.denied = now;
-                cx.refresh_windows();
-            }
-        })
-    })
-    .detach();
-    denied
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn notifications_denied(_: &mut App) -> bool {
-    false
-}
-
-#[cfg(not(target_os = "macos"))]
-fn notifications_available() -> bool {
-    true
+    alerts::notify(alert.tag, title.into_owned(), body.into_owned(), cx);
 }

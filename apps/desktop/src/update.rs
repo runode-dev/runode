@@ -23,7 +23,7 @@ use std::{
     time::Duration,
 };
 
-use gpui::{App, Global, PromptLevel, SystemNotification};
+use gpui::{App, Global, PromptLevel};
 use runode_update::{Error, Installation, Release, Staged};
 
 use crate::config::AppConfig;
@@ -304,7 +304,7 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
             let title = rust_i18n::t!("update.available_title", version = release.version);
             let detail = rust_i18n::t!("update.available_detail", current = VERSION);
             let answers = [&*rust_i18n::t!("update.download"), &*rust_i18n::t!("update.later")];
-            prompt(PromptLevel::Info, &title, &detail, &answers, cx, move |answer, cx| {
+            crate::alerts::prompt(PromptLevel::Info, &title, &detail, &answers, cx, move |answer, cx| {
                 if answer != 0 {
                     return;
                 }
@@ -323,7 +323,14 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
             if manual {
                 let title = rust_i18n::t!("update.up_to_date_title");
                 let detail = rust_i18n::t!("update.up_to_date_detail", version = VERSION);
-                prompt(PromptLevel::Info, &title, &detail, &[&rust_i18n::t!("update.ok")], cx, |_, _| {});
+                crate::alerts::prompt(
+                    PromptLevel::Info,
+                    &title,
+                    &detail,
+                    &[&rust_i18n::t!("update.ok")],
+                    cx,
+                    |_, _| {},
+                );
             }
         }
         Ok(Found::Manual { release, reason }) => {
@@ -332,7 +339,7 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
                 let title = rust_i18n::t!("update.manual_title", version = release.version);
                 let detail = rust_i18n::t!("update.manual_detail", reason = reason);
                 let answers = [&*rust_i18n::t!("update.open_page"), &*rust_i18n::t!("update.later")];
-                prompt(PromptLevel::Info, &title, &detail, &answers, cx, move |answer, cx| {
+                crate::alerts::prompt(PromptLevel::Info, &title, &detail, &answers, cx, move |answer, cx| {
                     if answer == 0 {
                         cx.open_url(&release.page);
                     }
@@ -343,7 +350,14 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
             tracing::warn!("failed to check for updates: {err}");
             if manual {
                 let title = rust_i18n::t!("update.failed_title");
-                prompt(PromptLevel::Warning, &title, &err.to_string(), &[&rust_i18n::t!("update.ok")], cx, |_, _| {});
+                crate::alerts::prompt(
+                    PromptLevel::Warning,
+                    &title,
+                    &err.to_string(),
+                    &[&rust_i18n::t!("update.ok")],
+                    cx,
+                    |_, _| {},
+                );
             }
         }
     }
@@ -403,7 +417,14 @@ fn finish_download(staged: Result<Staged, Error>, cx: &mut App) {
             tracing::warn!("failed to download the update: {err}");
             if manual {
                 let title = rust_i18n::t!("update.download_failed_title");
-                prompt(PromptLevel::Warning, &title, &err.to_string(), &[&rust_i18n::t!("update.ok")], cx, |_, _| {});
+                crate::alerts::prompt(
+                    PromptLevel::Warning,
+                    &title,
+                    &err.to_string(),
+                    &[&rust_i18n::t!("update.ok")],
+                    cx,
+                    |_, _| {},
+                );
             }
         }
     }
@@ -416,7 +437,7 @@ pub fn offer_restart(cx: &mut App) {
     let title = rust_i18n::t!("update.ready_title", version = staged.version());
     let detail = rust_i18n::t!("update.ready_detail");
     let answers = [&*rust_i18n::t!("update.restart"), &*rust_i18n::t!("update.later")];
-    prompt(PromptLevel::Info, &title, &detail, &answers, cx, |answer, cx| {
+    crate::alerts::prompt(PromptLevel::Info, &title, &detail, &answers, cx, |answer, cx| {
         if answer == 0 {
             crate::window::quit_to_update(cx);
         }
@@ -426,42 +447,8 @@ pub fn offer_restart(cx: &mut App) {
 /// 发一条「下好了」的系统通知。
 fn post_ready(cx: &mut App) {
     let Phase::Ready(staged) = &cx.global::<Updater>().phase else { return };
-    let notification = SystemNotification {
-        tag: NOTIFICATION_TAG.into(),
-        title: rust_i18n::t!("update.ready_title", version = staged.version()).into_owned().into(),
-        body: rust_i18n::t!("update.ready_notification").into_owned().into(),
-        actions: Vec::new(),
-    };
-    crate::window::listen_notifications(cx);
-    cx.show_system_notification(notification);
-}
-
-/// 在最前面的窗口上弹框，选了第几个按钮交给 `then`；没有窗口时不弹。从菜单派发时窗口正在处理
-/// 动作，弹不了框，推迟到这一轮更新结束。
-pub(crate) fn prompt(
-    level: PromptLevel,
-    title: &str,
-    detail: &str,
-    answers: &[&str],
-    cx: &mut App,
-    then: impl FnOnce(usize, &mut App) + 'static,
-) {
-    let (title, detail) = (title.to_owned(), detail.to_owned());
-    let answers: Vec<String> = answers.iter().map(|answer| (*answer).to_owned()).collect();
-    cx.defer(move |cx| {
-        let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else { return };
-        let labels: Vec<&str> = answers.iter().map(String::as_str).collect();
-        let Ok(answer) = window.update(cx, |_, window, cx| window.prompt(level, &title, Some(&detail), &labels, cx))
-        else {
-            return;
-        };
-        cx.spawn(async move |cx| {
-            if let Ok(answer) = answer.await {
-                cx.update(|cx| then(answer, cx));
-            }
-        })
-        .detach();
-    });
+    let title = rust_i18n::t!("update.ready_title", version = staged.version()).into_owned();
+    crate::alerts::notify(NOTIFICATION_TAG.into(), title, rust_i18n::t!("update.ready_notification").into_owned(), cx);
 }
 
 /// 重启以更新：退出，装上以后打开新版本。GPUI 的 `restart` 在 Windows 上等这个进程一退出就打开装着的

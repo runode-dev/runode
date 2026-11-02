@@ -13,6 +13,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod about;
+mod alerts;
 mod assets;
 mod config;
 #[cfg(windows)]

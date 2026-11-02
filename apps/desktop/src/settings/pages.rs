@@ -442,7 +442,7 @@ impl SettingsView {
                 });
                 let notify = key == "agent-notifications" && on;
                 // 开着通知、系统设置里却拒绝了：通知发不出来，提示去系统设置里打开。
-                let denied = notify && crate::window::notifications_denied(cx);
+                let denied = notify && crate::alerts::notifications_denied(cx);
                 if denied {
                     error.get_or_insert_with(|| rust_i18n::t!("settings.notifications_denied").into_owned());
                 }

@@ -57,10 +57,7 @@ use runode_types::{
     pane::{Axis, Direction, SplitId},
 };
 
-pub(crate) use agents::{
-    alert::{listen as listen_notifications, notifications_denied, test as test_notification},
-    reveal_notified,
-};
+pub(crate) use agents::{alert::test as test_notification, reveal_notified};
 pub use arrange::ArrangePanes;
 pub use background::refresh as watch_background;
 pub(crate) use mobile_page::show_pairing;

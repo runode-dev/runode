@@ -81,5 +81,5 @@ pub fn show(cx: &mut gpui::App) {
         url = "https://github.com/runode-dev/runode"
     );
     let ok = rust_i18n::t!("about.ok");
-    crate::update::prompt(gpui::PromptLevel::Info, "Runode", &detail, &[&ok], cx, |_, _| {});
+    crate::alerts::prompt(gpui::PromptLevel::Info, "Runode", &detail, &[&ok], cx, |_, _| {});
 }

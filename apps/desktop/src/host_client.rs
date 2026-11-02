@@ -507,7 +507,7 @@ fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
 /// 动手前再探一次：旧宿主已经退了的直接开 socket；socket 上已经是这个构建的宿主时不能结束它，
 /// 那会结束刚接过去的会话，只告诉用户（`Notice::AlreadyUpgraded`）。这个 app 不改连过去：窗口里的
 /// 终端都在 app 自己的宿主里。
-fn end_old_host(cx: &mut gpui::AsyncApp) {
+fn end_old_host(cx: &mut App) {
     let (tx, rx) = futures::channel::oneshot::channel();
     let spawned = thread::Builder::new().name("end-old-host".into()).spawn(move || {
         let Some(socket) = socket_path() else { return };
@@ -716,40 +716,27 @@ pub fn show_notice(cx: &mut App) {
         ),
         Notice::HandoffDegraded { .. } => return,
     };
-    let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
-        return;
-    };
     let ok = rust_i18n::t!("host.ok");
     let (keep, end_old) = (rust_i18n::t!("host.keep_old"), rust_i18n::t!("host.end_old"));
     // 默认（第一个）按钮留着旧宿主。
     let answers: Vec<&str> = if end { vec![&keep, &end_old] } else { vec![&ok] };
-    let answer =
-        window.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx));
-    if let Ok(answer) = answer {
-        cx.spawn(async move |cx| {
-            if end && answer.await == Ok(1) {
-                end_old_host(cx);
-            }
-        })
-        .detach();
-    }
+    crate::alerts::prompt(PromptLevel::Warning, &title, &detail, &answers, cx, move |answer, cx| {
+        if end && answer == 1 {
+            end_old_host(cx);
+        }
+    });
 }
 
-/// 交接后 `count` 个终端的回滚历史没带过来：发一条系统通知。不在 .app 里时通知中心用不了，只记
-/// 日志。
+/// 交接后 `count` 个终端的回滚历史没带过来：记日志，发一条系统通知。
 fn report_degraded(count: usize, cx: &mut App) {
     tracing::warn!("the scrollback of {count} terminals was not carried over in the handoff");
-    #[cfg(target_os = "macos")]
-    if crate::about::in_app_bundle() {
-        cx.show_system_notification(gpui::SystemNotification {
-            tag: DEGRADED_TAG.into(),
-            title: rust_i18n::t!("host.degraded_title").into_owned().into(),
-            body: rust_i18n::t!("host.degraded_detail", count = count).into_owned().into(),
-            actions: Vec::new(),
-        });
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (cx, DEGRADED_TAG);
+    let title = rust_i18n::t!("host.degraded_title").into_owned();
+    crate::alerts::notify(
+        DEGRADED_TAG.into(),
+        title,
+        rust_i18n::t!("host.degraded_detail", count = count).into_owned(),
+        cx,
+    );
 }
 
 #[cfg(test)]
