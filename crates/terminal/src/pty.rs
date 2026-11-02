@@ -1125,7 +1125,7 @@ fn args_of(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
 /// 解 `KERN_PROCARGS2` 的结果：本机字节序的 `int argc`，可执行文件的路径（以 NUL 结尾，后面可能补几个 NUL
 /// 对齐），接着 `argc` 个以 NUL 结尾的参数（第一个是程序名），再往后是环境变量，不要。返回路径和参数；格式
 /// 不对（截断了、`argc` 比实际多或是负数）时为 `None`。
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 fn parse_procargs(data: &[u8]) -> Option<(&[u8], Vec<&[u8]>)> {
     let argc = usize::try_from(i32::from_ne_bytes(data.get(..4)?.try_into().ok()?)).ok()?;
     let rest = &data[4..];
