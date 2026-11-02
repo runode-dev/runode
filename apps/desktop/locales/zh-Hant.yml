@@ -288,6 +288,7 @@ background:
   end_title: 終止所有背景工作階段？
   end_detail: 其中還有 %{count} 個 agent 在執行，會一併終止。
 panel:
+  label: 右側面板
   not_repo: 不在 git 倉庫裡
   no_content: 內容沒有變化
   no_changes: 沒有未提交的改動

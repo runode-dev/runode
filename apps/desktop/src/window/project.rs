@@ -28,7 +28,8 @@ use gpui::{
 use crate::host_client::hosts::HostId;
 use crate::project_host::ProjectHost;
 use crate::ui::a11y::A11yPress;
-pub(super) use crate::ui::panel::{panel_message, panel_shell};
+pub(super) use crate::ui::panel::panel_message;
+use crate::ui::panel::panel_shell;
 use crate::{
     ui::icons::{FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON, github_actions::WORKFLOW_ICON as ACTIONS_WORKFLOW_ICON},
     ui::{font_size::FontSize, theme::ActiveTheme as _, tooltip::tooltip},
@@ -554,10 +555,10 @@ impl WindowView {
             SidePanel::Files | SidePanel::Git => crate::remote_hosts::project_unavailable(&self.workspace().host),
         };
         if let Some(message) = unavailable {
-            let shell = panel_shell("remote-panel", width, cards(cx), cx)
+            let shell = self
+                .side_panel_shell("remote-panel", width, cx)
                 .bg(cx.theme().mix(0.03))
                 .text_size(FontSize::Body)
-                .child(self.render_panel_tabs(cx))
                 .child(panel_message(message, cx));
             return Some(shell.into_any_element());
         }
@@ -666,6 +667,16 @@ impl WindowView {
             .when(self.remote_desktop_button_shown(cx), |toggles| toggles.child(self.render_remote_desktop_button(cx)))
             .child(self.render_tasks_button(window, cx))
             .child(toggle)
+    }
+
+    /// 右侧面板各页的外框，顶上是切换各页的标签，下面的内容由调用方接着加。整块报成一个有名字的组：
+    /// GPUI 只把同时有 `id` 和 `role` 的元素当作辅助工具的父节点，外框没有 role 时标签和这一页的内容
+    /// 都挂到外面的节点上，辅助工具分不出哪些是面板的。
+    pub(super) fn side_panel_shell(&self, id: &'static str, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
+        panel_shell(id, width, cards(cx), cx)
+            .role(Role::Group)
+            .aria_label(rust_i18n::t!("panel.label").into_owned())
+            .child(self.render_panel_tabs(cx))
     }
 
     /// 右侧面板顶上那排切换文件树和 Git 的标签，显示着的那个底色亮一些。经典样式下标题栏右上角的

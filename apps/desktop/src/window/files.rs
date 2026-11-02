@@ -18,10 +18,7 @@ use runode_types::{session::SessionMeta, shell::Shell};
 // 菜单部件在 `runode_ui::menu`，窗口里各处从这里引。
 pub(super) use crate::ui::menu::{MenuButton, MenuItem};
 
-use super::{
-    WindowView, cards,
-    project::{SidePanel, panel_shell},
-};
+use super::{WindowView, project::SidePanel};
 use crate::{
     config::AppConfig,
     host_client::{
@@ -195,10 +192,9 @@ impl WindowView {
         let input = self.file_tree_input(cx);
         self.file_tree.update(cx, |tree, _| tree.set_input(input));
         let font_size = FontSize::Medium.points() * font_size::scale(cx);
-        panel_shell("files-panel", width, cards(cx), cx)
+        self.side_panel_shell("files-panel", width, cx)
             .bg(cx.theme().mix(0.03))
             .text_size(px(font_size))
-            .child(self.render_panel_tabs(cx))
             .child(div().flex_1().min_h_0().child(self.file_tree.clone()))
     }
 

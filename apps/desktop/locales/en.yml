@@ -288,6 +288,7 @@ background:
   end_title: End all background sessions?
   end_detail: "Agents still running in them: %{count}. They will be stopped."
 panel:
+  label: Side Panel
   not_repo: Not a git repository
   no_content: No content changes
   no_changes: No uncommitted changes

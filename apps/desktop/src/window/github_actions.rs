@@ -9,9 +9,9 @@ use crate::github_actions::{ActionsEvent, ActionsPanel, Input, PROGRAM, render_p
 use gpui::{AnyElement, App, Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*};
 
 use super::{
-    Divider, WindowView, cards,
+    Divider, WindowView,
     files::Quoting,
-    project::{SidePanel, panel_message, panel_shell},
+    project::{SidePanel, panel_message},
     status_bar,
 };
 use crate::{terminal_view::TerminalEvent, ui::font_size::FontSize};
@@ -78,10 +78,8 @@ impl WindowView {
     }
 
     pub(super) fn render_github_actions_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
-        let shell = panel_shell("github-actions-panel", width, cards(cx), cx)
-            .bg(cx.theme().mix(0.03))
-            .text_size(FontSize::Body)
-            .child(self.render_panel_tabs(cx));
+        let shell =
+            self.side_panel_shell("github-actions-panel", width, cx).bg(cx.theme().mix(0.03)).text_size(FontSize::Body);
         if !self.git_button_visible() {
             return shell.child(panel_message(rust_i18n::t!("panel.not_repo").into_owned(), cx));
         }

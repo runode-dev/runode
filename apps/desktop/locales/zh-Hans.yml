@@ -288,6 +288,7 @@ background:
   end_title: 结束所有后台会话？
   end_detail: 其中还有 %{count} 个 agent 在运行，会随之结束。
 panel:
+  label: 右侧面板
   not_repo: 不在 git 仓库里
   no_content: 内容没有变化
   no_changes: 没有未提交的改动

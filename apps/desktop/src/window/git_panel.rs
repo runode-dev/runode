@@ -19,7 +19,7 @@ use gpui::{Context, Div, Entity, Stateful, Window, div, prelude::*};
 pub(super) use ai_message::CommitMessageDialog;
 pub(super) use branch_picker::BranchPicker;
 
-use super::{Divider, WindowView, cards, preview::DiffTarget, project::panel_shell, status_bar};
+use super::{Divider, WindowView, preview::DiffTarget, status_bar};
 use crate::ui::{font_size::FontSize, theme::ActiveTheme as _};
 
 impl WindowView {
@@ -44,10 +44,9 @@ impl WindowView {
             panel.set_workspace(id, project);
             panel.set_input(input);
         });
-        panel_shell("git-panel", width, cards(cx), cx)
+        self.side_panel_shell("git-panel", width, cx)
             .bg(cx.theme().background)
             .text_size(FontSize::Body)
-            .child(self.render_panel_tabs(cx))
             .child(div().flex_1().min_h_0().child(self.git_panel.clone()))
     }
 
