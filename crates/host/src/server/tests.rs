@@ -1,7 +1,25 @@
-use runode_protocol::{BuildId, Caps};
-use runode_types::shell::IntegrationMode;
+use std::{
+    io::Write as _,
+    net::Shutdown,
+    sync::{atomic::Ordering, mpsc},
+    thread,
+};
 
-use super::*;
+use runode_protocol::{
+    AttachMode, BuildId, Caps, ClientKind, ERROR_BACKED_UP, Frame, FrameKind, PROTOCOL_VERSION, git::GitRequest,
+    read_frame, write_frame,
+};
+use runode_types::{grid::GridSize, shell::IntegrationMode};
+
+use super::{
+    connection::MAX_WAITING,
+    outbox::{MOBILE_OUTBOX_LIMIT, OUTBOX_HARD_LIMIT, OUTBOX_LIMIT},
+    *,
+};
+use crate::{
+    Host, SpawnOptions,
+    session::{Event, EventSink, Screen, Subscribe},
+};
 
 const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
 const WAIT: Duration = Duration::from_secs(10);
@@ -307,102 +325,6 @@ fn a_connection_that_stopped_reading_is_closed() {
             assert!(matches!(message(&frames), HostMsg::SessionList { .. }));
         }
     }
-}
-
-/// 连上会话时排进去的大屏幕还没写出去，不算会话输出的积压：紧接着的状态照常发，不回 `Resync`；
-/// 但新的连上、读屏幕照旧被拒。快照之后真积压了，照旧回 `Resync`。
-#[test]
-fn a_pending_snapshot_does_not_resync_the_session() {
-    let (tx, rx) = mpsc::channel();
-    let out = Outbox { tx, queued: Arc::default(), limit: MOBILE_OUTBOX_LIMIT };
-    let id = SessionId(1);
-    let control = |out: Out| match out {
-        Out::Frame { kind: FrameKind::Control, channel, payload } => {
-            Frame { kind: FrameKind::Control, channel, payload: payload.to_vec() }.message::<HostMsg>().unwrap()
-        }
-        _ => panic!("expected a control frame"),
-    };
-    out.push(FrameKind::Snapshot, 1, vec![0; MOBILE_OUTBOX_LIMIT + 1].into());
-    assert!(matches!(rx.recv().unwrap(), Out::Frame { kind: FrameKind::Snapshot, .. }));
-    let mut sink = session_sink(id, 1, false, None, out.clone());
-    assert!(sink(Event::msg(HostMsg::SizeOwner { id, mine: true, owner: None })));
-    assert!(matches!(control(rx.recv().unwrap()), HostMsg::SizeOwner { .. }));
-    assert!(out.backed_up());
-    out.push(FrameKind::Output, 1, vec![0; MOBILE_OUTBOX_LIMIT + 1].into());
-    rx.recv().unwrap();
-    assert!(!sink(Event::msg(HostMsg::Bell { id })));
-    assert!(matches!(control(rx.recv().unwrap()), HostMsg::Resync { .. }));
-}
-
-/// 装不进一帧的回话不交给写线程（交了它写不出、只能断开连接）：带 `req` 的改回一条带着它的 `Error`，
-/// 不带的丢掉。
-#[test]
-fn an_answer_over_the_frame_limit_is_not_queued() {
-    let (tx, rx) = mpsc::channel();
-    let out = Outbox { tx, queued: Arc::default(), limit: OUTBOX_LIMIT };
-    let huge = "x".repeat(MAX_PAYLOAD as usize);
-    assert!(out.control(&HostMsg::Error { req: Some(4), id: None, message: huge.clone() }));
-    let Ok(Out::Frame { kind: FrameKind::Control, channel, payload }) = rx.try_recv() else {
-        panic!("expected a control frame")
-    };
-    let frame = Frame { kind: FrameKind::Control, channel, payload: payload.to_vec() };
-    match frame.message::<HostMsg>().unwrap() {
-        HostMsg::Error { req: Some(4), message, .. } => assert!(message.contains("too large"), "{message}"),
-        other => panic!("expected an error for the request: {other:?}"),
-    }
-    let id = SessionId(1);
-    assert!(out.control(&HostMsg::ScreenText { id, text: huge.clone(), truncated: false }));
-    let Ok(Out::Frame { payload: screen, .. }) = rx.try_recv() else { panic!("expected a control frame") };
-    let frame = Frame { kind: FrameKind::Control, channel, payload: screen.to_vec() };
-    assert!(
-        matches!(frame.message::<HostMsg>().unwrap(), HostMsg::Error { req: None, id: Some(got), .. } if got == id),
-        "the screen text turns into an error for its session"
-    );
-    assert!(out.control(&HostMsg::Error { req: None, id: None, message: huge }));
-    assert!(rx.try_recv().is_err());
-    assert_eq!(out.streaming(), payload.len() + screen.len());
-}
-
-/// 说了 `Caps::shell_report` 的连接：`Meta` 里的 shell 集成报告拆出来，和上一次发的一样就不带；
-/// 没说的照旧整份放在 `meta` 里。
-#[test]
-fn meta_carries_the_shell_report_only_when_it_changes() {
-    use runode_types::{session::SessionMeta, shell::ShellNames};
-
-    let (tx, rx) = mpsc::channel();
-    let out = Outbox { tx, queued: Arc::default(), limit: MOBILE_OUTBOX_LIMIT };
-    let id = SessionId(1);
-    let next = || match rx.recv().unwrap() {
-        Out::Frame { kind: FrameKind::Control, channel, payload } => {
-            match (Frame { kind: FrameKind::Control, channel, payload: payload.to_vec() }).message::<HostMsg>().unwrap()
-            {
-                HostMsg::Meta { meta, shell, .. } => (meta, shell),
-                other => panic!("expected meta, got {other:?}"),
-            }
-        }
-        _ => panic!("expected a control frame"),
-    };
-    let names = Arc::new(ShellNames { functions: vec!["runode-reload".into()] });
-    let meta = |path: &str, title: &str| SessionMeta {
-        title: Some(title.into()),
-        shell_path: Some(path.into()),
-        shell_names: names.clone(),
-        ..SessionMeta::default()
-    };
-    let stripped = |title: &str| SessionMeta { title: Some(title.into()), ..SessionMeta::default() };
-    let report = |path: &str| ShellReport { path: Some(path.into()), names: names.clone() };
-
-    let mut sink = session_sink(id, 1, true, Some(report("/bin")), out.clone());
-    assert!(sink(Event::msg(HostMsg::Meta { id, meta: meta("/bin", "a"), shell: None })));
-    assert_eq!(next(), (stripped("a"), None));
-    assert!(sink(Event::msg(HostMsg::Meta { id, meta: meta("/opt/bin", "a"), shell: None })));
-    assert_eq!(next(), (stripped("a"), Some(report("/opt/bin"))));
-    assert!(sink(Event::msg(HostMsg::Meta { id, meta: meta("/opt/bin", "b"), shell: None })));
-    assert_eq!(next(), (stripped("b"), None));
-
-    let mut legacy = session_sink(id, 2, true, None, out);
-    assert!(legacy(Event::msg(HostMsg::Meta { id, meta: meta("/bin", "a"), shell: None })));
-    assert_eq!(next(), (meta("/bin", "a"), None));
 }
 
 /// 发请求的连接断开后，它转给界面、界面还没回话的请求跟着撤掉；界面之后再回话也只是丢掉。
