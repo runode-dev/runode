@@ -303,33 +303,24 @@ impl Drop for Session {
     }
 }
 
-/// 往一块屏幕上注入输入，记着按住的鼠标键；丢掉时松开还按着的鼠标键。
+/// 往一块屏幕上注入输入。
 pub(crate) struct Injector {
     session: Arc<Session>,
-    pressed: Vec<MouseButton>,
 }
 
 impl Injector {
     pub(crate) fn new(display: u32) -> io::Result<Self> {
-        Ok(Self { session: Session::get(display, true)?, pressed: Vec::new() })
-    }
-
-    pub(crate) fn inject(&mut self, input: &ScreenInput) {
-        if let ScreenInput::MouseButton { button, down, .. } = input {
-            self.pressed.retain(|held| held != button);
-            if *down {
-                self.pressed.push(*button);
-            }
-        }
-        self.session.inject(input);
+        Ok(Self { session: Session::get(display, true)? })
     }
 }
 
-impl Drop for Injector {
-    fn drop(&mut self) {
-        for button in std::mem::take(&mut self.pressed) {
-            let _ = self.session.button(remote_input::button_code(button), false);
-        }
+impl super::Inject for Injector {
+    fn inject(&mut self, input: &ScreenInput) {
+        self.session.inject(input);
+    }
+
+    fn release(&mut self, button: MouseButton) {
+        let _ = self.session.button(remote_input::button_code(button), false);
     }
 }
 

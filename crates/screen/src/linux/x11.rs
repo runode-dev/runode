@@ -366,13 +366,12 @@ fn draw_cursor(frame: &mut [u8], rect: Rect, cursor: &Cursor) {
     }
 }
 
-/// 往一块屏幕上注入输入（XTEST），记着按住的鼠标键；丢掉时松开还按着的鼠标键。
+/// 往一块屏幕上注入输入（XTEST）。
 pub(crate) struct Injector {
     conn: RustConnection,
     root: xproto::Window,
     rect: Rect,
     keymap: Keymap,
-    pressed: Vec<MouseButton>,
 }
 
 /// 键位表：keycode 对应的 keysym，每个 keycode `per_keycode` 个（第一个不按 Shift，第二个按 Shift）。
@@ -431,13 +430,7 @@ impl Injector {
             .ok_or_else(|| io::Error::new(io::ErrorKind::Unsupported, "the X server has no XTEST"))?;
         let rect = find(&conn, root, display);
         let keymap = Keymap::read(&conn)?;
-        Ok(Self { conn, root, rect, keymap, pressed: Vec::new() })
-    }
-
-    pub(crate) fn inject(&mut self, input: &ScreenInput) {
-        if let Err(err) = self.try_inject(input) {
-            tracing::debug!("cannot inject {input:?}: {err}");
-        }
+        Ok(Self { conn, root, rect, keymap })
     }
 
     fn try_inject(&mut self, input: &ScreenInput) -> io::Result<()> {
@@ -445,10 +438,6 @@ impl Injector {
         match input {
             ScreenInput::MouseMove { x, y } => self.move_to(*x, *y)?,
             ScreenInput::MouseButton { button, down, x, y, mods } => {
-                self.pressed.retain(|held| held != button);
-                if *down {
-                    self.pressed.push(*button);
-                }
                 self.move_to(*x, *y)?;
                 // 按下时带着的修饰键（Shift 加点击之类）只在按下那一刻按住。
                 let held = if *down { self.modifier_keys(*mods) } else { Vec::new() };
@@ -562,11 +551,15 @@ impl Injector {
     }
 }
 
-impl Drop for Injector {
-    fn drop(&mut self) {
-        for button in std::mem::take(&mut self.pressed) {
-            let _ = self.fake(BUTTON_RELEASE, button_number(button));
+impl super::Inject for Injector {
+    fn inject(&mut self, input: &ScreenInput) {
+        if let Err(err) = self.try_inject(input) {
+            tracing::debug!("cannot inject {input:?}: {err}");
         }
+    }
+
+    fn release(&mut self, button: MouseButton) {
+        let _ = self.fake(BUTTON_RELEASE, button_number(button));
         let _ = self.conn.flush();
     }
 }

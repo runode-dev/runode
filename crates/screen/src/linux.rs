@@ -26,7 +26,7 @@ use std::{
     time::Duration,
 };
 
-use runode_types::screen::ScreenInput;
+use runode_types::{input::MouseButton, screen::ScreenInput};
 
 pub use capture::{Capture, Keyframes};
 
@@ -113,29 +113,34 @@ fn open_source(display: u32, cursor: bool) -> io::Result<Box<dyn capture::Source
     })
 }
 
-/// 往一块屏幕上注入输入；后端开不起来时什么都不做。
+/// 往一块屏幕上注入输入；后端开不起来时什么都不做。记着按住的鼠标键，丢掉时松开还按着的：观看端断开时
+/// 按着的键不会一直按着。
 pub struct Injector {
-    backend: Option<InjectorBackend>,
+    backend: Option<Box<dyn Inject>>,
     /// 横向、纵向还没攒满一格的滚动点数：各后端只能按整格滚，触控板一次只滚几点。
     scroll: [i32; 2],
+    pressed: Vec<MouseButton>,
 }
 
-enum InjectorBackend {
-    X11(Box<x11::Injector>),
-    Mutter(mutter::Injector),
-    Portal(portal::Injector),
+/// 一个后端怎么往屏幕上注入输入。
+trait Inject {
+    fn inject(&mut self, input: &ScreenInput);
+    /// 松开鼠标键 `button`。
+    fn release(&mut self, button: MouseButton);
 }
 
 impl Injector {
     /// `display` 是 `ScreenInput` 的坐标所在的屏幕，和采集的是同一块。
     pub fn new(display: u32) -> Self {
-        let backend = with_backend(|backend| match backend {
-            Backend::X11 => x11::Injector::new(display).map(|injector| InjectorBackend::X11(Box::new(injector))),
-            Backend::Mutter => mutter::Injector::new(display).map(InjectorBackend::Mutter),
-            Backend::Portal => portal::Injector::new(display).map(InjectorBackend::Portal),
+        let backend = with_backend(|backend| -> io::Result<Box<dyn Inject>> {
+            Ok(match backend {
+                Backend::X11 => Box::new(x11::Injector::new(display)?),
+                Backend::Mutter => Box::new(mutter::Injector::new(display)?),
+                Backend::Portal => Box::new(portal::Injector::new(display)?),
+            })
         });
         let backend = backend.inspect_err(|err| tracing::warn!("cannot inject input: {err}")).ok();
-        Self { backend, scroll: [0; 2] }
+        Self { backend, scroll: [0; 2], pressed: Vec::new() }
     }
 
     pub fn inject(&mut self, input: &ScreenInput) {
@@ -151,11 +156,24 @@ impl Injector {
             }
             input => input,
         };
-        match &mut self.backend {
-            Some(InjectorBackend::X11(injector)) => injector.inject(input),
-            Some(InjectorBackend::Mutter(injector)) => injector.inject(input),
-            Some(InjectorBackend::Portal(injector)) => injector.inject(input),
-            None => {}
+        if let ScreenInput::MouseButton { button, down, .. } = input {
+            self.pressed.retain(|held| held != button);
+            if *down {
+                self.pressed.push(*button);
+            }
+        }
+        if let Some(backend) = &mut self.backend {
+            backend.inject(input);
+        }
+    }
+}
+
+impl Drop for Injector {
+    fn drop(&mut self) {
+        if let Some(backend) = &mut self.backend {
+            for button in std::mem::take(&mut self.pressed) {
+                backend.release(button);
+            }
         }
     }
 }

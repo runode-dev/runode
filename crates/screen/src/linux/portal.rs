@@ -292,36 +292,26 @@ impl super::capture::Source for Source {
     }
 }
 
-/// 往一块屏幕上注入输入，记着按住的鼠标键；丢掉时松开还按着的鼠标键。
+/// 往一块屏幕上注入输入。
 pub(crate) struct Injector {
     portal: Arc<Portal>,
     screen: Screen,
-    pressed: Vec<MouseButton>,
 }
 
 impl Injector {
     pub(crate) fn new(display: u32) -> io::Result<Self> {
         let portal = Portal::get()?;
         let screen = portal.screen(display);
-        Ok(Self { portal, screen, pressed: Vec::new() })
-    }
-
-    pub(crate) fn inject(&mut self, input: &ScreenInput) {
-        if let ScreenInput::MouseButton { button, down, .. } = input {
-            self.pressed.retain(|held| held != button);
-            if *down {
-                self.pressed.push(*button);
-            }
-        }
-        self.portal.inject(self.screen, input);
+        Ok(Self { portal, screen })
     }
 }
 
-impl Drop for Injector {
-    fn drop(&mut self) {
-        for button in std::mem::take(&mut self.pressed) {
-            let _ =
-                Target { portal: &self.portal, screen: self.screen }.button(remote_input::button_code(button), false);
-        }
+impl super::Inject for Injector {
+    fn inject(&mut self, input: &ScreenInput) {
+        self.portal.inject(self.screen, input);
+    }
+
+    fn release(&mut self, button: MouseButton) {
+        let _ = Target { portal: &self.portal, screen: self.screen }.button(remote_input::button_code(button), false);
     }
 }
