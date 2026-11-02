@@ -83,9 +83,37 @@ fn preferred_languages() -> Vec<String> {
     objc2_foundation::NSLocale::preferredLanguages().iter().map(|tag| tag.to_string()).collect()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn preferred_languages() -> Vec<String> {
     languages_from_env(|name| std::env::var(name).ok())
+}
+
+/// 语言环境变量在前：Git Bash 这类环境里设了 `LANG` 是用户自己的选择；之后是系统的界面语言，从开始菜单
+/// 打开时一般只有它。
+#[cfg(windows)]
+fn preferred_languages() -> Vec<String> {
+    let mut languages = languages_from_env(|name| std::env::var(name).ok());
+    languages.extend(windows_ui_languages());
+    languages
+}
+
+/// 用户设的 Windows 界面语言，按优先顺序，如 `zh-CN`、`en-US`。
+#[cfg(windows)]
+fn windows_ui_languages() -> Vec<String> {
+    use windows_sys::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
+
+    let (mut count, mut len) = (0u32, 0u32);
+    // SAFETY: 缓冲区传空指针时只回要多长，指针都指向本地变量。
+    if unsafe { GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, std::ptr::null_mut(), &mut len) } == 0 {
+        return Vec::new();
+    }
+    let mut buffer = vec![0u16; len as usize];
+    // SAFETY: 缓冲区正好是上一次回的长度（UTF-16 字符数）。
+    if unsafe { GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, buffer.as_mut_ptr(), &mut len) } == 0 {
+        return Vec::new();
+    }
+    // 结果是以空字符分隔、两个空字符结尾的一串名字。
+    buffer.split(|&unit| unit == 0).filter(|name| !name.is_empty()).map(String::from_utf16_lossy).collect()
 }
 
 /// 照 gettext 读语言环境变量：`LC_ALL`、`LC_MESSAGES`、`LANG` 里第一个非空的是生效的语言环境，前面的
