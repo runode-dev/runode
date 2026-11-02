@@ -301,7 +301,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{Event, encoder::Encoder};
+    use crate::{Event, mac::encoder::Encoder};
 
     /// 一张亮度处处是 `luma`（视频范围）、没有色彩的 NV12 画面。
     fn gray(width: usize, height: usize, luma: u8) -> CFRetained<CVPixelBuffer> {

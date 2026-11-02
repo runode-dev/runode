@@ -28,12 +28,11 @@ use objc2_screen_capture_kit::{
     SCStreamOutputType,
 };
 
-use crate::{
-    Codec, Event, Options,
+use super::{
     awake::KeepAwake,
     encoder::{Encoder, Sink},
-    refine::Refiner,
 };
+use crate::{Codec, Event, Options, refine::Refiner};
 
 /// 等 ScreenCaptureKit 的完成回调最多这么久。
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
