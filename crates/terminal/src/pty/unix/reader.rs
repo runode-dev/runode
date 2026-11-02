@@ -15,10 +15,10 @@ use std::{
 use anyhow::Result;
 
 use super::{
-    Gate, PtyEvent, PtySink,
+    Gate,
     notify::{EXIT_POLL_INTERVAL, Notifier},
-    set_current_thread_interactive,
 };
+use crate::pty::{PtyEvent, PtySink, set_current_thread_interactive};
 
 /// shell 已经退出、PTY 还没读到 EOF 时（比如后台程序还开着终端），最多再读这么多次，把 shell
 /// 退出前写的输出读完，然后报告退出。
@@ -167,7 +167,7 @@ fn read_once(master: &OwnedFd, buf: &mut [u8]) -> io::Result<Option<usize>> {
 fn read_loop(master: &OwnedFd, notifier: &Notifier, state: &Mutex<State>, mut sink: PtySink) -> Option<PtySink> {
     set_current_thread_interactive();
     let mut buf = vec![0u8; 64 * 1024];
-    let mut fish_marks = super::fish_marks::FishMarks::default();
+    let mut fish_marks = crate::pty::fish_marks::FishMarks::default();
     let mut fds = [poll_entry(master.as_raw_fd()), poll_entry(notifier.fd().as_raw_fd())];
     // 拿不到退出通知时定时问一次。
     let exit_poll = notifier.polls_exit();
