@@ -23,7 +23,8 @@
             micButton = mic
             pinTrailing([mic, keyboard])
 
-            keys.addArrangedSubview(button("escape", symbol: true, label: "Esc") { $0.press(.escape) })
+            // SF Symbol 的 `escape` 画成带箭头的圆圈，看着像撤销，不像 Esc，所以写字。
+            keys.addArrangedSubview(button("esc", label: "Esc") { $0.press(.escape) })
             // 不用 `control` 符号：它照 ⌃ 的样子画在字框的上半截，放在按钮里偏上；`chevron.up` 形状一样、上下居中。
             let control = button("chevron.up", symbol: true, label: String(localized: "Ctrl（粘住）")) { $0.controlLatched.toggle() }
             controlButton = control

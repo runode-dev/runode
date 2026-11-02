@@ -21,7 +21,7 @@ public struct QuickKey: Hashable, Sendable, Identifiable {
         QuickKey(label: "y", key: "y", accessibilityLabel: "y"),
         QuickKey(label: "n", key: "n", accessibilityLabel: "n"),
         QuickKey(label: "⏎", key: "enter", accessibilityLabel: String(localized: "回车"), symbol: "return"),
-        QuickKey(label: "Esc", key: "esc", accessibilityLabel: "Esc", symbol: "escape"),
+        QuickKey(label: "esc", key: "esc", accessibilityLabel: "Esc"),
         QuickKey(label: "↑", key: "up", accessibilityLabel: String(localized: "上"), symbol: "arrowtriangle.up.fill"),
         QuickKey(label: "↓", key: "down", accessibilityLabel: String(localized: "下"), symbol: "arrowtriangle.down.fill"),
     ]
