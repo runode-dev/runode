@@ -867,7 +867,7 @@ impl Render for WindowView {
                 this.update(cx, |_, cx| cx.notify()).ok();
             });
         }
-        div()
+        crate::ui::font::apply(div(), cx)
             .id("window")
             .key_context("Window")
             // 状态栏的浮层开着时 Esc 关掉它，不再传给焦点所在的终端。

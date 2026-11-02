@@ -111,7 +111,7 @@ impl Render for ScreenWindow {
         if changed {
             cx.defer(move |cx| viewer.update(cx, |_, cx| cx.notify()));
         }
-        div()
+        crate::ui::font::apply(div(), cx)
             .relative()
             .size_full()
             .bg(cx.theme().background)

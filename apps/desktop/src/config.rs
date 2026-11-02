@@ -221,6 +221,11 @@ fn apply(cx: &mut App, config: Config, seen: Stamps) {
     let task_keys = crate::window::TaskKeys::read().or_else(|| cx.try_global::<crate::window::TaskKeys>().cloned());
     cx.set_global(task_keys.unwrap_or_default());
     cx.set_global(runode_ui::font_size::UiFontSize(config.ui_font_size));
+    // 中文字体跟着界面语言挑，换了语言要重挑。
+    #[cfg(target_os = "linux")]
+    if let Some(font) = runode_ui::font::pick(&cx.text_system().all_font_names(), crate::i18n::current() == "zh-Hant") {
+        cx.set_global(font);
+    }
     // 主题 token 的初值；各窗口画的时候再换成自己的配色，见 `WindowView::follow_colors`。
     let palette = runode_ui::theme::ansi_colors(&config.palette);
     cx.set_global(runode_ui::theme::Theme::new(config.foreground, config.background, palette));

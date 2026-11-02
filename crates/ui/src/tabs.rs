@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use gpui::{App, Axis, BoxShadow, Div, Hsla, Pixels, SharedString, StyleRefinement, div, point, prelude::*, px};
 
-use crate::{font_size::FontSize, theme::ActiveTheme as _};
+use crate::{font, font_size::FontSize, theme::ActiveTheme as _};
 
 /// 标签上关闭按钮的边长，和 `ButtonSize::IconXs` 一样。
 pub const TAB_CLOSE_SIZE: f32 = 16.;
@@ -27,7 +27,7 @@ pub fn drop_marker(style: StyleRefinement, from: usize, to: usize, axis: Axis, c
 /// 由拖动预览在自己画的时候从主题算，和被拖的那一项选中时一样。
 pub fn drag_chip(width: Pixels, height: Pixels, label: SharedString, bg: Hsla, cx: &App) -> Div {
     let fg = cx.theme().foreground;
-    div()
+    font::apply(div(), cx)
         .w(width)
         .h(height)
         .px(px(8.))

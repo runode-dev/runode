@@ -12,6 +12,7 @@ pub mod card;
 pub mod chip;
 pub mod dialog;
 pub mod file_icons;
+pub mod font;
 pub mod font_size;
 pub mod icons;
 pub mod inline_edit;

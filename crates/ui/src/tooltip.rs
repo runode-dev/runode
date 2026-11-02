@@ -1,7 +1,7 @@
 //! 悬停提示：鼠标在按钮或标题上停一会儿弹出的一小块文字，有快捷键时跟在说明后面。颜色在提示自己
 //! 画的时候从主题读：弹出它的是悬停事件，那时读到的主题可能是别的窗口的。
 
-use super::font_size::FontSize;
+use super::{font, font_size::FontSize};
 use crate::theme::ActiveTheme as _;
 use gpui::{Action, AnyView, App, Context, IntoElement, Render, Role, SharedString, Window, div, prelude::*, px};
 
@@ -56,7 +56,7 @@ impl Render for Tooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let fg = theme.foreground;
-        div()
+        font::apply(div(), cx)
             .id("tooltip")
             .role(Role::Tooltip)
             .aria_label(self.text.clone())
