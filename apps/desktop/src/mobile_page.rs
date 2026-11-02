@@ -18,7 +18,7 @@ use gpui::{
 use runode_remote::{host_name, local_interfaces};
 
 use crate::{
-    assets::{CHEVRON_DOWN_ICON, PHONE_ICON, REFRESH_ICON, TRASH_ICON},
+    assets::{PHONE_ICON, REFRESH_ICON, TRASH_ICON},
     config::AppConfig,
     remote_access::pairing::{BACKGROUND_KEY, Pairing, Qr, qr_code},
     ui::{
@@ -26,6 +26,7 @@ use crate::{
         button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
         input::{Input, InputEvent, InputState},
+        select::SelectTrigger,
         theme::{ActiveTheme as _, Theme},
     },
 };
@@ -555,25 +556,25 @@ impl MobilePage {
                 None => rust_i18n::t!("mobile.network_auto").into_owned().into(),
             }
         };
-        let select = input_box(theme)
-            .id("mobile-network")
-            .role(Role::ComboBox)
-            .aria_label(rust_i18n::t!("mobile.network_label").into_owned())
-            .aria_value(label(self.network))
-            .aria_expanded(self.network_open)
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .items_center()
-            .justify_between()
-            .cursor_pointer()
-            .hover(|select| select.bg(theme.mix(0.08)))
-            .child(div().min_w_0().truncate().child(label(self.network)))
-            .child(svg().flex_none().path(CHEVRON_DOWN_ICON).size(px(14.)).text_color(theme.foreground.opacity(0.5)))
-            .on_press(cx, |this, _, cx| {
-                this.network_open = !this.network_open;
-                cx.notify();
-            });
+        let select = SelectTrigger::new(
+            "mobile-network",
+            rust_i18n::t!("mobile.network_label").into_owned(),
+            label(self.network),
+        )
+        .aria_expanded(self.network_open)
+        .h(scaled(36.))
+        .px(px(12.))
+        .rounded(px(8.))
+        .bg(theme.mix(0.04))
+        .border_1()
+        .border_color(theme.foreground.opacity(0.15))
+        .text_size(FontSize::Medium)
+        .flex_1()
+        .hover(|select| select.bg(theme.mix(0.08)))
+        .on_press(cx, |this, _, cx| {
+            this.network_open = !this.network_open;
+            cx.notify();
+        });
         let refresh = Button::new("mobile-network-refresh", rust_i18n::t!("mobile.refresh_networks"))
             .variant(ButtonVariant::Outline)
             .icon(REFRESH_ICON)
@@ -802,20 +803,6 @@ fn labeled(id: &'static str, label: String, content: impl IntoElement, hint: Str
         .child(
             text_label("hint", hint, theme.foreground.opacity(0.5)).text_size(FontSize::Body).line_height(scaled(18.)),
         )
-}
-
-/// 下拉框的外框，和电脑名的输入框一个样子。
-fn input_box(theme: &Theme) -> Div {
-    div()
-        .h(scaled(36.))
-        .px(px(12.))
-        .flex()
-        .items_center()
-        .rounded(px(8.))
-        .bg(theme.mix(0.04))
-        .border_1()
-        .border_color(theme.foreground.opacity(0.15))
-        .text_size(FontSize::Medium)
 }
 
 /// 一块浅底的提示文字。

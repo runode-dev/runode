@@ -1,9 +1,9 @@
 //! 设置页里的控件：一行设置的排版，分段选项、下拉按钮、输入框和色块（按钮用 `Button`，开关用 `Switch`）。颜色在 render
 //! 里从窗口的主题（`Theme`）读，和终端窗口的界面一个色调。
 
-use crate::ui::icons::CHEVRON_DOWN_ICON;
+use crate::ui::select::SelectTrigger;
 use crate::ui::theme::Theme;
-use gpui::{AnyElement, Div, ElementId, Entity, Hsla, Role, SharedString, Stateful, div, prelude::*, px, svg};
+use gpui::{AnyElement, Div, ElementId, Entity, Hsla, Role, SharedString, Stateful, div, prelude::*, px};
 
 pub(super) use crate::ui::a11y::Press;
 use crate::ui::{
@@ -135,29 +135,19 @@ pub(super) fn dropdown(
     label: impl Into<SharedString>,
     width: f32,
     theme: &Theme,
-) -> Stateful<Div> {
-    let label = label.into();
-    div()
-        .id(id)
-        .role(Role::ComboBox)
-        .aria_label(name)
-        .aria_value(label.clone())
+) -> SelectTrigger {
+    SelectTrigger::new(id, name, label)
+        .when_some(leading, SelectTrigger::leading)
         .w(scaled(width))
         .h(scaled(CONTROL_HEIGHT))
         .pl(px(10.))
         .pr(px(6.))
-        .flex()
-        .items_center()
-        .gap(px(6.))
         .rounded(px(6.))
         .bg(theme.mix(0.06))
         .border_1()
         .border_color(theme.foreground.opacity(0.13))
         .text_size(FontSize::Body)
         .hover(|button| button.bg(theme.mix(0.07)))
-        .children(leading)
-        .child(div().flex_1().min_w_0().truncate().child(label))
-        .child(svg().flex_none().path(CHEVRON_DOWN_ICON).size(px(12.)).text_color(theme.foreground.opacity(0.6)))
 }
 
 /// 设置页的输入框：比别处的 `Input` 矮一些，底色和别的控件一样；`width` 是基准字号下的点数，跟着界面

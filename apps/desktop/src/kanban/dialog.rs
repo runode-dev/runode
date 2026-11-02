@@ -16,7 +16,6 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use crate::assets::CHEVRON_DOWN_ICON;
 use crate::kanban::{
     skills::{self, Found},
     templates::{self, Template},
@@ -34,13 +33,14 @@ use crate::ui::{
     menu::{Menu, MenuHost, MenuItem},
     panel::TITLEBAR_HEIGHT,
     segmented::Segmented,
+    select::SelectTrigger,
     switch::Switch,
     textarea::{Textarea, TextareaEvent, TextareaState},
     theme::ActiveTheme as _,
 };
 use gpui::{
     Action, App, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, MouseButton,
-    PathPromptOptions, Render, Role, SharedString, Stateful, Subscription, Window, canvas, div, prelude::*, px, svg,
+    PathPromptOptions, Render, Role, SharedString, Subscription, Window, canvas, div, prelude::*, px,
 };
 use runode_protocol::{
     ClientMsg, HostMsg,
@@ -730,7 +730,7 @@ impl TodoDialog {
 
     /// 框 `combo` 按下就开关它的菜单。菜单开着时在捕获阶段就关掉、不再往下传：不然菜单自己的「点到外面就关」
     /// 先关了，按下又把它打开。
-    fn opens_menu(combo: Combo, element: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn opens_menu<E: StatefulInteractiveElement>(combo: Combo, element: E, cx: &mut Context<Self>) -> E {
         element
             .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
                 if this.menu_for == Some(combo) && this.dropdown_open() {
@@ -925,28 +925,18 @@ impl Render for TodoDialog {
         let open = |kind: Combo| dialog.menu_for == Some(kind) && dialog.dropdown_open();
         let combo = |id: &'static str, kind: Combo, label: String, value: String, enabled: bool, menu: Option<Div>| {
             let bottoms = dialog.combo_bottoms.clone();
-            div()
-                .id(id)
-                .role(Role::ComboBox)
-                .aria_label(label)
-                .aria_value(value.clone())
+            SelectTrigger::new(id, label, value)
                 .aria_expanded(open(kind))
                 .relative()
-                .min_w_0()
                 .min_h(scaled(28.))
                 .px(px(8.))
-                .flex()
-                .items_center()
-                .gap(px(6.))
                 .rounded(px(6.))
                 .bg(bg_h)
                 .border_1()
                 // 和上下的输入框（`Input`）一样的边框。
                 .border_color(input_border)
-                .child(div().flex_1().min_w_0().truncate().child(value))
-                .child(svg().path(CHEVRON_DOWN_ICON).flex_none().size(px(12.)).text_color(fg_h.opacity(0.6)))
-                .when(enabled, |combo| combo.cursor_pointer().hover(move |combo| combo.bg(hover_bg)))
-                .when(!enabled, |combo| combo.opacity(0.6))
+                .when(enabled, |combo| combo.hover(move |combo| combo.bg(hover_bg)))
+                .when(!enabled, |combo| combo.cursor_default().opacity(0.6))
                 .aria_disabled(!enabled)
                 // 记下下沿，菜单的最大高度按它算。
                 .child(
@@ -1014,7 +1004,7 @@ impl Render for TodoDialog {
                     let effort = combo("todo-dialog-effort", Combo::Effort, label, text, enabled, menu);
                     if enabled { Self::opens_menu(Combo::Effort, effort, cx) } else { effort }
                 });
-                let column = |key: &str, child: gpui::Stateful<gpui::Div>| {
+                let column = |key: &str, child: SelectTrigger| {
                     div().flex_1().min_w_0().child(field(rust_i18n::t!(key).into_owned(), child.into_any_element()))
                 };
                 div()

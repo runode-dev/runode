@@ -25,6 +25,7 @@ pub mod popover;
 pub mod row_buttons;
 pub mod scrollbar;
 pub mod segmented;
+pub mod select;
 pub mod sound;
 pub mod spinner;
 pub mod switch;

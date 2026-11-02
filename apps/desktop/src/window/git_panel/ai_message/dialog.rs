@@ -19,9 +19,10 @@ use crate::ui::a11y::PressDown;
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::dialog::Dialog;
 use crate::ui::menu::MenuHost as _;
+use crate::ui::select::SelectTrigger;
 use crate::ui::theme::ActiveTheme as _;
 use crate::{
-    assets::{CHEVRON_DOWN_ICON, CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
+    assets::{CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
     ui::{
         a11y::Press,
         font_size::{FontSize, scaled},
@@ -303,27 +304,18 @@ impl WindowView {
                 rust_i18n::t!("git.ai_message.custom").into_owned(),
             ),
         };
-        let agent_button = div()
-            .id("commit-message-agent")
-            .role(Role::ComboBox)
-            .aria_label(rust_i18n::t!("git.ai_message.agent").into_owned())
-            .aria_value(name.clone())
-            .flex_none()
-            .h(scaled(28.))
-            .px(px(8.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .rounded(px(6.))
-            .bg(field_bg)
-            .border_1()
-            .border_color(fg.opacity(0.2))
-            .cursor_pointer()
-            .hover(move |button| button.bg(hover_bg))
-            .children(logo)
-            .child(name)
-            .child(svg().path(CHEVRON_DOWN_ICON).size(px(12.)).text_color(fg.opacity(0.6)))
-            .on_press_down(cx, |this, window, cx| this.open_commit_agent_menu(window.mouse_position(), cx));
+        let agent_button =
+            SelectTrigger::new("commit-message-agent", rust_i18n::t!("git.ai_message.agent").into_owned(), name)
+                .when_some(logo, SelectTrigger::leading)
+                .flex_none()
+                .h(scaled(28.))
+                .px(px(8.))
+                .rounded(px(6.))
+                .bg(field_bg)
+                .border_1()
+                .border_color(fg.opacity(0.2))
+                .hover(move |button| button.bg(hover_bg))
+                .on_press_down(cx, |this, window, cx| this.open_commit_agent_menu(window.mouse_position(), cx));
 
         // CLI 参数（自己定义的命令时是整条命令），下面是照现在填的实际要跑的整条命令。
         let (input_label, input, hint) = match dialog.agent {
