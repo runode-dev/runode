@@ -2,6 +2,7 @@
 //! 第一行是「新建分支」。上下键选、回车切过去、Esc 关掉。只新建分支时只有新建那一行。列的是
 //! 打开时选定的那个仓库（主仓库或子仓库）的分支，切换、新建也在那个仓库里做。
 
+use crate::ui::picker::{matches_query, nav_delta, picker_panel};
 use crate::ui::theme::ActiveTheme as _;
 use std::path::{Path, PathBuf};
 
@@ -11,10 +12,7 @@ use gpui::{
 };
 use runode_git::{self as git, Branch};
 
-use super::super::{
-    WindowView,
-    agent_picker::{nav_delta, picker_panel},
-};
+use super::super::WindowView;
 use crate::ui::a11y::A11yPress;
 use crate::ui::popover::Popover;
 use crate::{
@@ -73,11 +71,10 @@ impl BranchPicker {
             rows.push(PickerRow::Create(query.to_owned()));
         }
         if !self.create_only {
-            let needle = query.to_lowercase();
             rows.extend(
                 branches
                     .iter()
-                    .filter(|branch| branch.name.to_lowercase().contains(&needle))
+                    .filter(|branch| matches_query(&[&branch.name], query))
                     .take(MAX_BRANCH_ROWS)
                     .map(PickerRow::Branch),
             );

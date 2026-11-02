@@ -170,12 +170,6 @@ pub(super) fn sort_entries<T>(entries: &mut [T], key: impl Fn(&T) -> (Status, In
     });
 }
 
-/// `query` 按空白分成几个词，每个词（不分大小写）都出现在 `fields` 的某一项里才算匹配。
-pub(super) fn matches_query<S: AsRef<str>>(fields: &[S], query: &str) -> bool {
-    let fields: Vec<String> = fields.iter().map(|field| field.as_ref().to_lowercase()).collect();
-    query.split_whitespace().map(str::to_lowercase).all(|term| fields.iter().any(|field| field.contains(&term)))
-}
-
 /// 切到这个窗口里的这个分屏：激活应用和窗口，切到它所在的 workspace 和标签并聚焦它。推迟到
 /// 当前的更新结束后再做，从这个窗口自己的回调里调用也不会重复借用。
 pub(super) fn reveal(target: WindowHandle<WindowView>, pane: EntityId, cx: &mut App) {
@@ -455,15 +449,6 @@ mod tests {
         sort_entries(&mut entries, |(_, status, at)| (*status, *at));
         let names: Vec<_> = entries.iter().map(|(name, ..)| *name).collect();
         assert_eq!(names, ["blocked", "new done", "old done", "working", "idle"]);
-    }
-
-    #[test]
-    fn every_term_must_match_some_field() {
-        let fields = ["Claude Code", "claude", "runode", "~/dev/runode"];
-        assert!(matches_query(&fields, ""));
-        assert!(matches_query(&fields, "CLAUDE"));
-        assert!(matches_query(&fields, "claude dev/run"));
-        assert!(!matches_query(&fields, "claude codex"));
     }
 
     #[test]

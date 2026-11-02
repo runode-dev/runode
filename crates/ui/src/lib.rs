@@ -21,6 +21,7 @@ pub mod keys;
 pub mod menu;
 pub mod panel;
 pub mod path_tree;
+pub mod picker;
 pub mod popover;
 pub mod row_buttons;
 pub mod scrollbar;

@@ -2,6 +2,7 @@
 //! 筛，上下键挪、回车选、Esc 或点外面关掉。
 
 use crate::ui::icons::CHECK_ICON;
+use crate::ui::picker::{matches_query, nav_delta};
 use crate::ui::theme::Theme;
 use std::ops::Range;
 
@@ -57,10 +58,8 @@ impl PickItem {
     }
 
     fn matches(&self, query: &str) -> bool {
-        let query = query.to_lowercase();
-        self.label.to_lowercase().contains(&query)
-            || self.value.to_lowercase().contains(&query)
-            || self.detail.as_ref().is_some_and(|detail| detail.to_lowercase().contains(&query))
+        let detail = self.detail.as_deref().unwrap_or_default();
+        matches_query(&[self.label.as_ref(), self.value.as_str(), detail], query)
     }
 }
 
@@ -80,8 +79,8 @@ pub(super) struct Picker {
 impl Picker {
     /// 筛过之后留下的项在 `items` 里的位置。
     fn visible(&self, cx: &gpui::App) -> Vec<usize> {
-        let query = self.field.read(cx).query().trim();
-        (0..self.items.len()).filter(|&ix| query.is_empty() || self.items[ix].matches(query)).collect()
+        let query = self.field.read(cx).query();
+        (0..self.items.len()).filter(|&ix| self.items[ix].matches(query)).collect()
     }
 }
 
@@ -188,12 +187,13 @@ impl SettingsView {
         if count == 0 {
             return;
         }
-        let step: isize = match event.keystroke.key.as_str() {
-            "up" => -1,
-            "down" => 1,
+        let step = match event.keystroke.key.as_str() {
             "pageup" => -(VISIBLE_ROWS as isize),
             "pagedown" => VISIBLE_ROWS as isize,
-            _ => return,
+            _ => match nav_delta(event) {
+                Some(step) => step,
+                None => return,
+            },
         };
         cx.stop_propagation();
         picker.highlighted = picker.highlighted.saturating_add_signed(step).min(count - 1);

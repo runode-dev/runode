@@ -17,6 +17,8 @@ use runode_files::ops::{self, OpError};
 use runode_protocol::{ClientMsg, HostMsg};
 use runode_ssh::Destination;
 
+use crate::ui::picker::matches_query;
+
 use super::{
     Dropdown, TITLEBAR_HEIGHT, WindowView,
     files::Quoting,
@@ -615,13 +617,13 @@ impl WindowView {
             .py(px(5.))
             .cursor_pointer()
             .on_press(cx, |this, window, cx| this.cancel_add_host(window, cx));
-        let typed = adding.field.read(cx).query().trim().to_lowercase();
+        let typed = adding.field.read(cx).query().to_owned();
         let known = self.known_hosts(cx);
         let hosts: Vec<AnyElement> = adding
             .hosts
             .iter()
             .filter(|host| !known.contains(host))
-            .filter(|host| typed.is_empty() || host.to_lowercase().contains(&typed))
+            .filter(|host| matches_query(&[host], &typed))
             .take(MAX_HOSTS)
             .map(|host| {
                 let name = host.clone();

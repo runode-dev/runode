@@ -1,18 +1,19 @@
 //! agent 列表：盖在窗口上面的浮层，列出所有窗口里的 agent 分屏，输入文字过滤，上下键选、回车
 //! 跳过去、Esc 关掉。排序和过滤的规则见 `agents`。
 
+use crate::ui::picker::{matches_query, nav_delta, picker_panel};
 use crate::ui::popover::Popover;
 use crate::ui::theme::ActiveTheme as _;
 use std::collections::HashMap;
 
 use gpui::{
-    App, Context, Div, Entity, EntityId, Focusable, KeyDownEvent, Role, ScrollHandle, SharedString, Stateful,
-    Subscription, Window, div, prelude::*, px,
+    Context, Div, Entity, EntityId, Focusable, KeyDownEvent, Role, ScrollHandle, SharedString, Subscription, Window,
+    div, prelude::*, px,
 };
 
 use super::{
-    GotoAgent, PressDown, TITLEBAR_HEIGHT, WindowView,
-    agents::{AgentEntry, matches_query, reveal},
+    GotoAgent, PressDown, WindowView,
+    agents::{AgentEntry, reveal},
     cards,
     titlebar::styled_agent_mark,
 };
@@ -28,7 +29,6 @@ const PICKER_WIDTH: f32 = 560.;
 const ROW_HEIGHT: f32 = 40.;
 /// 最多显示这么多行，多了滚动。
 const VISIBLE_ROWS: f32 = 8.;
-const INPUT_HEIGHT: f32 = 34.;
 
 /// 开着的 agent 列表。
 pub(super) struct AgentPicker {
@@ -259,42 +259,4 @@ impl WindowView {
             .children(empty);
         Some(picker_panel(panel, picker.field.clone(), list, cx))
     }
-}
-
-/// 选择列表里挪选中行的键：上下键和 ctrl-p、ctrl-n，往上是 -1，往下是 1。
-pub(super) fn nav_delta(event: &KeyDownEvent) -> Option<isize> {
-    let keystroke = &event.keystroke;
-    let m = &keystroke.modifiers;
-    let ctrl = m.control && !m.alt && !m.shift && !m.platform;
-    match keystroke.key.as_str() {
-        "up" if !m.modified() => Some(-1),
-        "down" if !m.modified() => Some(1),
-        "p" if ctrl => Some(-1),
-        "n" if ctrl => Some(1),
-        _ => None,
-    }
-}
-
-/// agent 列表和分支列表共用的浮层：`panel` 是调用方定好 id、宽度和按键处理的外框，上面一行放
-/// 输入框，下面是 `list`（调用方定好 id、最高多高、各行和滚动位置），多了竖着滚动。整个浮在标题栏
-/// 下方正中。
-pub(super) fn picker_panel(panel: Popover, field: Entity<InputState>, list: Stateful<Div>, cx: &App) -> Div {
-    let panel = panel
-        .max_w_full()
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .flex_none()
-                .h(scaled(INPUT_HEIGHT))
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .border_b_1()
-                .border_color(cx.theme().border)
-                .child(div().flex_1().min_w_0().h_full().child(field)),
-        )
-        .child(list.overflow_y_scroll().p(px(4.)).flex().flex_col().gap(px(1.)));
-    // 外层铺满窗口宽度、只为把列表摆到正中，没有鼠标处理，不挡下面的点击。
-    div().absolute().top(px(TITLEBAR_HEIGHT + 8.)).left_0().right_0().px(px(16.)).flex().justify_center().child(panel)
 }
