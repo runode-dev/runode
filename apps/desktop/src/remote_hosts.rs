@@ -101,9 +101,8 @@ pub fn display_name(host: &HostId, cx: &App) -> String {
         return name.clone();
     }
     let name = default_name(host);
-    let clashes = || {
-        hosts::remotes().iter().any(|other| matches!(other, HostId::Ssh(_)) && display_name(other, cx) == name)
-    };
+    let clashes =
+        || hosts::remotes().iter().any(|other| matches!(other, HostId::Ssh(_)) && display_name(other, cx) == name);
     if matches!(host, HostId::Paired(_)) && clashes() {
         return rust_i18n::t!("workspace.host_paired_name", name = name).into_owned();
     }
