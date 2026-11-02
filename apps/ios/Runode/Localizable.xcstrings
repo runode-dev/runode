@@ -5748,6 +5748,29 @@
         }
       }
     },
+    "电脑上已经关掉了这个终端。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This terminal was closed on the computer."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑上已经关掉了这个终端。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電腦上已經關掉了這個終端機。"
+          }
+        }
+      }
+    },
     "电脑上提到这部手机时用这个名字，比如终端尺寸由谁决定。下次连上电脑时生效；电脑上已配对设备列表里的名字是配对时的，重新配对后才会更新。留空用系统的名字。" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7503,29 +7526,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "這個檔案沒有逐行的變更。"
-          }
-        }
-      }
-    },
-    "这个终端已经不在了：%@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This terminal is gone: %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个终端已经不在了：%@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "這個終端機已經不在了：%@"
           }
         }
       }

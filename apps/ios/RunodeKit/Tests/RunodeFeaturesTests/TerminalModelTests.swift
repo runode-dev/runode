@@ -428,11 +428,11 @@ import Testing
         let other = TerminalModel(sessionId: sessionB, title: "x", link: link, onClose: { _ in })
         other.handle(.ready(generation: 1))
         other.handle(.message(.error(req: nil, id: sessionB, message: "no session")))
-        #expect(other.phase == .gone("no session"))
+        #expect(other.phase == .gone("电脑上已经关掉了这个终端。"))
         #expect(other.isEnded)
         // 重新连上时照样再问一次，但不回到「连接中」，印章不闪。
         other.handle(.ready(generation: 2))
-        #expect(other.phase == .gone("no session"))
+        #expect(other.phase == .gone("电脑上已经关掉了这个终端。"))
     }
 
     /// 等 `Attached` 时，只有宿主说没有这个会话才算结束：同一条连接上会话列表读预览出错时，宿主回的也是

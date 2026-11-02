@@ -286,7 +286,7 @@
             switch model.phase {
             case .exited(let status?): String(localized: "shell 已退出（退出码 \(status)）")
             case .exited(nil): String(localized: "shell 已退出")
-            case .gone(let message): String(localized: "这个终端已经不在了：\(message)")
+            case .gone(let message): message
             default: nil
             }
         }

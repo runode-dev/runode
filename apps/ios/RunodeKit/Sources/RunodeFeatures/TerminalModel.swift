@@ -62,7 +62,7 @@ public final class TerminalModel {
         case exited(Int32?)
         /// 连接断了，正在重连；带着原因。
         case disconnected(String)
-        /// 宿主说没有这个会话了。
+        /// 宿主说没有这个会话了，或者建不了；带着给用户看的说明。
         case gone(String)
     }
 
@@ -516,7 +516,7 @@ public final class TerminalModel {
             // 宿主说没有这个会话。同一条连接上会话列表读预览出错（读屏幕超时之类）也回不带编号、带着
             // 会话的 `Error`，那些不算会话结束。
             awaitingAttach = false
-            phase = .gone(message)
+            phase = .gone(String(localized: "电脑上已经关掉了这个终端。"))
         default:
             break
         }
