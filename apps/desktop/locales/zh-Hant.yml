@@ -150,6 +150,7 @@ workspace:
   edit_host_name: 主機名稱
   host_attention: 有工作區等你處理
   host_remote_hint: "%{status} · SSH"
+  host_paired_hint: "%{status} · Runode 配對"
   host_add: 新增 SSH 主機
   host_add_hint: 經 SSH 使用一台現有的機器。
   host_add_remote: 新增遠端主機

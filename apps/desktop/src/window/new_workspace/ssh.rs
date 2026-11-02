@@ -149,7 +149,12 @@ impl WindowView {
         let remotes = known.into_iter().map(|host| {
             let status = hosts::status_of(&host);
             let checked = dialog.host == host;
-            let state = rust_i18n::t!("workspace.host_remote_hint", status = short_status(&status)).into_owned();
+            let state = if matches!(host, HostId::Paired(_)) {
+                rust_i18n::t!("workspace.host_paired_hint", status = short_status(&status))
+            } else {
+                rust_i18n::t!("workspace.host_remote_hint", status = short_status(&status))
+            }
+            .into_owned();
             // 起了显示名的主机，悬停时另写上连接目标。
             let tooltip = if has_display_name(&host, cx) {
                 format!("{} · {}", default_name(&host), status_text(&status))

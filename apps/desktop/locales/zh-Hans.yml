@@ -150,6 +150,7 @@ workspace:
   edit_host_name: 主机名
   host_attention: 有工作区等你处理
   host_remote_hint: "%{status} · SSH"
+  host_paired_hint: "%{status} · Runode 配对"
   host_add: 添加 SSH 主机
   host_add_hint: 经 SSH 使用一台现有的机器。
   host_add_remote: 添加远程主机
