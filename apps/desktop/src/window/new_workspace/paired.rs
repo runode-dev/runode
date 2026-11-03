@@ -1,7 +1,10 @@
 //! 新建工作区对话框里的「Runode 配对」：粘贴另一台电脑「配对设备」页上复制来的配对链接，认出是配对链接就配对，
 //! 配上了选中这台电脑、接着浏览它的文件夹；下面列出局域网里找到的、开着远程访问还没配对过的电脑。
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use futures::{StreamExt as _, channel::mpsc::unbounded};
 use gpui::{
@@ -25,6 +28,9 @@ use crate::{
     },
 };
 
+/// 配对的编号，整个 app 共用一个往上数：收起再展开新建的 `Pairing` 也不会和先前那次同号。
+static PAIR_ATTEMPT: AtomicU64 = AtomicU64::new(0);
+
 /// 主机菜单里「添加远程主机」下的「Runode 配对」。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
@@ -41,7 +47,7 @@ pub(super) struct Pairing {
     _browser: Option<Browser>,
     /// 点了找到的哪台电脑，提示去那台上复制链接。
     picked: Option<String>,
-    /// 第几次配对：收起再展开、换了链接以后，先前那次的结果不再算数。
+    /// 这次配对的编号（`PAIR_ATTEMPT`）：收起再展开、换了链接以后，先前那次的结果不再算数。
     attempt: u64,
     /// 正在进行的配对，这一栏收起时取消。
     cancel: Cancel,
@@ -189,7 +195,7 @@ impl WindowView {
             cx.notify();
             return;
         }
-        pairing.attempt += 1;
+        pairing.attempt = PAIR_ATTEMPT.fetch_add(1, Ordering::Relaxed) + 1;
         let attempt = pairing.attempt;
         let host = uri.host_name.clone();
         pairing.state = PairState::Pairing { host: host.clone() };
