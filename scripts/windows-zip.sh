@@ -34,7 +34,10 @@ run "git -C $name config core.autocrlf false"
 have=$(run "git -C $name rev-parse -q --verify HEAD" 2>/dev/null | tr -d '\r' || true)
 
 uploads=()
-if [ "$have" != "$head" ]; then
+# 那边已经有这个提交（比如这里退回了旧的提交）时不带 bundle：git 不肯建空的 bundle。
+fetch=0
+if [ "$have" != "$head" ] && ! { [ -n "$have" ] && git -C "$root" merge-base --is-ancestor HEAD "$have" 2>/dev/null; }; then
+	fetch=1
 	# 那边已有的提交这里也有时只带两者之间的。
 	range=()
 	if [ -n "$have" ] && git -C "$root" cat-file -e "$have^{commit}" 2>/dev/null; then range=("^$have"); fi
@@ -48,7 +51,7 @@ GIT_INDEX_FILE="$work/index" git -C "$root" diff --cached --binary --ignore-subm
 [ -s "$work/$name.patch" ] && uploads+=("$work/$name.patch")
 if [ ${#uploads[@]} -gt 0 ]; then scp -q "${ssh_opts[@]}" "${uploads[@]}" "$host:"; fi
 
-[ "$have" != "$head" ] && run "git -C $name fetch -q ../$name.bundle HEAD"
+[ "$fetch" = 1 ] && run "git -C $name fetch -q ../$name.bundle HEAD"
 run "git -C $name checkout -q -f --detach $head"
 run "git -C $name clean -fdq"
 [ -s "$work/$name.patch" ] && run "git -C $name apply --whitespace=nowarn ../$name.patch"
