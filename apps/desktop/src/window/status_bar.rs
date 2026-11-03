@@ -485,6 +485,8 @@ impl WindowView {
             if effective { rust_i18n::t!("status.sleep_active") } else { rust_i18n::t!("status.sleep_inactive") };
         let sleep_item = self
             .status_item("status-sleep", StatusPopover::Sleep, cx)
+            // 上面只写着「开启」「关闭」，不说是什么开关。
+            .tooltip(tooltip(rust_i18n::t!("status.sleep_title"), None))
             .aria_description(format!("{} · {sleep_state}", sleep_label(sleep)))
             .child(icon(COFFEE_ICON))
             .child(sleep_label(sleep))
