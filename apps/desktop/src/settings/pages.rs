@@ -1,7 +1,7 @@
 //! 设置页的各页：每页有哪些项、各用什么控件，以及主题、字体、调色板这些不止一个控件的项。
 
 use crate::ui::icons::{MINUS_ICON, REFRESH_ICON};
-use crate::ui::{chip::Chip, segmented::Segmented, theme::Theme};
+use crate::ui::{a11y::StaticText as _, chip::Chip, segmented::Segmented, theme::Theme};
 use gpui::{AnyElement, Context, Div, ElementId, Role, SharedString, Window, div, prelude::*, px};
 use runode_config::StatusItem;
 use runode_types::{agent::AgentKind, speech::DictationCloud};
@@ -283,6 +283,12 @@ impl Page {
     }
 }
 
+/// 字节数写成「10 MiB」「2.5 MiB」。
+fn mib(bytes: u64) -> String {
+    let mib = bytes as f64 / (1024. * 1024.);
+    if mib.fract() == 0. { format!("{mib} MiB") } else { format!("{mib:.1} MiB") }
+}
+
 /// 翻译里键名用下划线。
 fn tr_key(key: &str) -> String {
     key.replace('-', "_")
@@ -490,7 +496,21 @@ impl SettingsView {
             }
             Control::Text(width) => {
                 let input = self.field(key, Commit::Value(key), Some(key_placeholder(key)), window, cx);
-                input_box(&input, Some(width), self.errors.contains_key(key), theme).into_any_element()
+                let field = input_box(&input, Some(width), self.errors.contains_key(key), theme);
+                // 回滚历史按字节填，一长串数字看不出多大，旁边折成 MiB。
+                let size = (key == "scrollback-limit")
+                    .then(|| current.first().and_then(|value| value.trim().parse::<u64>().ok()))
+                    .flatten()
+                    .map(|bytes| {
+                        let size = mib(bytes);
+                        div()
+                            .id("scrollback-size")
+                            .aria_static_text(size.clone())
+                            .text_size(FontSize::Small)
+                            .text_color(theme.foreground.opacity(0.55))
+                            .child(size)
+                    });
+                div().flex().items_center().gap(px(8.)).children(size).child(field).into_any_element()
             }
             Control::Color => {
                 let color = current.first().and_then(|value| runode_config::color::parse(value)).map(hsla);
