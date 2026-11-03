@@ -576,7 +576,12 @@ impl Render for InputState {
             .role(if self.masked { Role::PasswordInput } else { Role::TextInput })
             .when_some(self.label.clone(), |el, label| el.aria_label(label))
             .when_some(self.placeholder.clone(), |el, placeholder| el.aria_placeholder(placeholder))
-            .when(!self.masked, |el| el.aria_value(SharedString::from(self.query.clone())))
+            // 遮着的报 `MASK` 串，和系统自己的密码框一样不露出明文；不报值时 Windows 上没有 Value 模式，辅助工具填不了。
+            .aria_value(if self.masked {
+                SharedString::from(MASK.to_string().repeat(self.query.chars().count()))
+            } else {
+                SharedString::from(self.query.clone())
+            })
             .on_a11y_action(AccessibleAction::SetValue, move |data, _, cx| {
                 if let Some(ActionData::Value(value)) = data {
                     let value = value.to_string();
