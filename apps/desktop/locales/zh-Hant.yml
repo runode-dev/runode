@@ -1137,7 +1137,8 @@ kanban:
     bad_every: "間隔至少要一分鐘。"
     templates: 範本
     template_blank: 空白
-    templates_hint: "把 Markdown 檔案放進 %{dir} 就能加自己的範本。"
+    templates_hint: "把 Markdown 檔案放進範本目錄，就能加自己的範本。"
+    templates_open: "打開範本目錄"
     skills: Skill
     none: 不用
     no_skills: 這裡沒有找到 skill。

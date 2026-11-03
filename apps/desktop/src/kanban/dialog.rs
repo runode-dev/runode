@@ -23,7 +23,7 @@ use crate::kanban::{
 use crate::ui::{
     a11y::{Disable as _, Press, PressDown as _, StaticText},
     base_name,
-    button::{Button, ButtonVariant},
+    button::{Button, ButtonSize, ButtonVariant},
     chip::Chip,
     dialog::Dialog,
     display_dir,
@@ -1342,15 +1342,37 @@ impl TodoDialog {
                         .on_press(cx, move |dialog, window, cx| dialog.pick_template(index, window, cx))
                 })
                 .collect();
+            // 模板目录在 home 下的点目录里，访达和资源管理器默认都看不到，给个按钮直接打开；路径放在悬停提示里。
             let hint = runode_paths::Dirs::from_env().todo_templates_dir().map(|dir| {
-                let hint = rust_i18n::t!("kanban.dialog.templates_hint", dir = display_dir(&dir)).into_owned();
+                let hint = rust_i18n::t!("kanban.dialog.templates_hint").into_owned();
+                let shown = display_dir(&dir);
+                let open = Button::new("todo-templates-open", rust_i18n::t!("kanban.dialog.templates_open").into_owned())
+                    .variant(ButtonVariant::Link)
+                    .with_size(ButtonSize::Sm)
+                    .cursor_pointer()
+                    .aria_description(shown.clone())
+                    .tooltip(crate::ui::tooltip::tooltip(shown, None))
+                    .on_press(cx, move |_, _, cx| {
+                        if let Err(err) = std::fs::create_dir_all(&dir) {
+                            tracing::warn!("cannot create {}: {err}", dir.display());
+                        }
+                        cx.open_with_system(&dir);
+                    });
                 div()
-                    .id("todo-templates-hint")
-                    .aria_static_text(hint.clone())
                     .pt(px(8.))
-                    .text_size(FontSize::Small)
-                    .text_color(fg_h.opacity(0.55))
-                    .child(hint)
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .id("todo-templates-hint")
+                            .aria_static_text(hint.clone())
+                            .text_size(FontSize::Small)
+                            .text_color(fg_h.opacity(0.55))
+                            .child(hint),
+                    )
+                    .child(open)
             });
             div()
                 .id("todo-templates")

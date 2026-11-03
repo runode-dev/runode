@@ -1137,7 +1137,8 @@ kanban:
     bad_every: "间隔至少要一分钟。"
     templates: 模板
     template_blank: 空白
-    templates_hint: "把 Markdown 文件放进 %{dir} 就能加自己的模板。"
+    templates_hint: "把 Markdown 文件放进模板目录，就能加自己的模板。"
+    templates_open: "打开模板目录"
     skills: Skill
     none: 不用
     no_skills: 这里没有找到 skill。

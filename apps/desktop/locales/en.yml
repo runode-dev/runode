@@ -1137,7 +1137,8 @@ kanban:
     bad_every: "The interval must be at least one minute."
     templates: Templates
     template_blank: Blank
-    templates_hint: "Add your own templates as Markdown files in %{dir}."
+    templates_hint: "Add your own templates as Markdown files in the templates folder."
+    templates_open: "Open Templates Folder"
     skills: Skills
     none: None
     no_skills: No skills found here.
