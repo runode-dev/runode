@@ -27,7 +27,7 @@ use super::{
     agents::logo::agent_logo,
     cards,
     model::Tab,
-    pane_float::TogglePaneFloat,
+    pane_float::{MovePaneToWindow, TogglePaneFloat},
     pane_move::{DraggedPane, zone_at},
     status_bar,
     titlebar::{pane_label, styled_agent_mark},
@@ -41,7 +41,7 @@ use crate::ui::{
 };
 use crate::{
     ui::icons::{
-        CHEVRON_UP_ICON, CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, POP_IN_ICON, POP_OUT_ICON,
+        CHEVRON_UP_ICON, CLOSE_ICON, DOCK_ICON, FLOAT_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, POP_OUT_ICON,
         SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON, TERMINAL_ICON,
     },
     ui::{
@@ -480,7 +480,7 @@ impl WindowView {
         let float = if floating {
             Some(button(
                 "pane-float",
-                POP_IN_ICON,
+                DOCK_ICON,
                 rust_i18n::t!("tooltip.dock_split"),
                 Some(&TogglePaneFloat),
                 |this, id, window, cx| {
@@ -490,7 +490,7 @@ impl WindowView {
         } else if !folded && tab.can_float(id) {
             Some(button(
                 "pane-float",
-                POP_OUT_ICON,
+                FLOAT_ICON,
                 rust_i18n::t!("tooltip.float_split"),
                 Some(&TogglePaneFloat),
                 |this, id, window, cx| {
@@ -524,6 +524,15 @@ impl WindowView {
         } else {
             None
         };
+        let pop_out = floating.then(|| {
+            button(
+                "pane-window",
+                POP_OUT_ICON,
+                rust_i18n::t!("tooltip.move_split_to_window"),
+                Some(&MovePaneToWindow),
+                |this, id, window, cx| this.pop_out_pane(id, None, window, cx),
+            )
+        });
         let (zoom_icon, zoom_text) = if tab.zoomed {
             (MINIMIZE_ICON, rust_i18n::t!("tooltip.restore_split"))
         } else {
@@ -558,6 +567,7 @@ impl WindowView {
                     ))
             })
             .children(fold)
+            .children(pop_out)
             .children(float)
             .when(split && !folded && !floating, |buttons| {
                 buttons.child(button(

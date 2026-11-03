@@ -69,6 +69,7 @@ menu:
   zoom_split: Zoom Split
   fold_split: Collapse or Expand Split
   float_split: Float or Dock Split
+  move_split_to_window: Move Split to New Window
   move_split_to_new_tab: Move Split to New Tab
   equalize_splits: Equalize Splits
   goto_agent: Go to Agent…
@@ -373,6 +374,7 @@ tooltip:
   expand_split: Expand Split
   float_split: Float Split
   dock_split: Dock Split
+  move_split_to_window: Move to a Window of Its Own
   close_preview: Close Preview
 git:
   ago:
@@ -1499,3 +1501,7 @@ skill_install:
   open_nodejs: "Open nodejs.org"
   run_anyway: "Run Anyway"
   cancel: "Cancel"
+pane_window:
+  pop_in: Put back in the main window
+  keep_on_top: Keep on Top
+  stop_on_top: Stop Keeping on Top

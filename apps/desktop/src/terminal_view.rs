@@ -249,14 +249,9 @@ pub struct TerminalView {
     /// 拖选到网格外时运行的自动滚动计时器。
     _autoscroll: Option<Task<()>>,
     _config_watch: Subscription,
-    /// 窗口重新激活时恢复空闲停下的光标闪烁，见 `reset_cursor_blink`。
-    _activation_watch: Subscription,
-    _appearance_watch: Subscription,
-    /// 别的终端在和宿主断开后点了「在原目录重开」、重新连上了宿主，见 `host_reconnected`。
-    _reconnect_watch: Subscription,
     /// 包住终端和搜索栏的外层：焦点进到其中任何一处都算这个终端获得了焦点。
     pane_focus: FocusHandle,
-    _focus_watch: [Subscription; 4],
+    _window_watches: lifecycle::WindowWatches,
     /// 正在录的或正在识别的语音输入。
     dictation: Option<dictation::Dictation>,
 }

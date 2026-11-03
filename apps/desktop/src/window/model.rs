@@ -50,6 +50,8 @@ pub(super) struct Tab {
     pub(super) done: HashSet<EntityId>,
     /// 浮在别的分屏上面的终端和它在终端区里的位置（按终端区归一化），从下到上；它们仍在 `root` 里原来的位置上。
     pub(super) floating: Vec<(EntityId, Rect)>,
+    /// 浮着的终端里搬进了单独窗口的（`pane_float::popout`）。
+    pub(super) popped: HashSet<EntityId>,
 }
 
 impl Tab {
@@ -382,6 +384,7 @@ impl WindowView {
             bell: false,
             done: HashSet::new(),
             floating: Vec::new(),
+            popped: HashSet::new(),
         }
     }
 
@@ -514,7 +517,8 @@ impl WindowView {
                     cx.notify();
                 }
                 let tab = &mut self.workspaces[wi].tabs[ti];
-                if tab.focused != id {
+                // 单独窗口里的终端拿到焦点不算这个窗口的当前终端，见 `pane_float`。
+                if tab.focused != id && !tab.popped.contains(&id) {
                     tab.focused = id;
                     if shown {
                         self.sync_window_title(window, cx);
@@ -622,8 +626,10 @@ impl WindowView {
         for (wi, workspace) in self.workspaces.iter().enumerate() {
             for (ti, tab) in workspace.tabs.iter().enumerate() {
                 let selected = self.is_shown(wi, ti);
-                for (view, _) in tab.panes.values() {
-                    let shown = draws_screen(window_visible, selected, || view.read(cx).holds_view_state());
+                for (id, (view, _)) in &tab.panes {
+                    // 单独窗口里的终端不管这个窗口和标签显示没显示，一直画着。
+                    let shown = tab.popped.contains(id)
+                        || draws_screen(window_visible, selected, || view.read(cx).holds_view_state());
                     if view.read(cx).visible() != shown
                         && view.update(cx, |view, cx| view.request_visible(shown, window, cx))
                     {

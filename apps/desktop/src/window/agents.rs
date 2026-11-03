@@ -370,6 +370,9 @@ impl WindowView {
         let Some((wi, ti)) = self.locate(pane) else {
             return;
         };
+        if self.activate_popped(pane, cx) {
+            return;
+        }
         self.agent_picker = None;
         self.drop_settings(cx);
         let workspace = &mut self.workspaces[wi];

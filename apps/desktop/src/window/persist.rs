@@ -430,6 +430,7 @@ impl WindowView {
                     bell: false,
                     done: Default::default(),
                     floating,
+                    popped: Default::default(),
                 };
                 // 存档里不浮动的终端都没接上时，浮着的停靠回去。
                 tab.keep_one_docked();

@@ -23,7 +23,10 @@ use futures::{
     channel::{mpsc::UnboundedReceiver, oneshot},
     task::ArcWake,
 };
-use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
+use gpui::{
+    App, AppContext as _, Context, Entity, FocusHandle, Font, Global, Point, SharedString, Subscription, Task, Window,
+    font, px,
+};
 use runode_protocol::{AttachMode, ClientMsg, Conversation, ERROR_BACKED_UP, HostMsg, SessionId};
 use runode_terminal::{
     pty::{dir_label, program_label},
@@ -155,6 +158,49 @@ fn connect(
 
 /// 远端主机上在后台开着的会话：开好以后要不要启动 shell、按哪个 `Attach` 连上（等的时候视图的
 /// 显示变了就换成新的）。
+/// 挂在终端所在窗口上的订阅；终端搬进别的窗口时换成那个窗口的（`TerminalView::attach_window`）。
+pub(super) struct WindowWatches {
+    /// 窗口重新激活时恢复空闲停下的光标闪烁，见 `reset_cursor_blink`。
+    _activation: Subscription,
+    _appearance: Subscription,
+    /// 别的终端在和宿主断开后点了「在原目录重开」、重新连上了宿主，见 `host_reconnected`。
+    _reconnect: Subscription,
+    _focus: [Subscription; 4],
+}
+
+impl WindowWatches {
+    fn new(
+        focus_handle: &FocusHandle,
+        pane_focus: &FocusHandle,
+        window: &mut Window,
+        cx: &mut Context<TerminalView>,
+    ) -> Self {
+        // 切回这个窗口也算一次活动：焦点一直在这个终端上时不会触发 `on_focus`。
+        let activation = cx.observe_window_activation(window, |view, window, cx| {
+            if window.is_window_active() {
+                view.reset_cursor_blink(cx);
+            }
+        });
+        let appearance = cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
+        let reconnect =
+            cx.observe_global_in::<HostReconnected>(window, |view, window, cx| view.host_reconnected(window, cx));
+        let focus = [
+            cx.on_focus_in(pane_focus, window, |view, _, cx| {
+                view.report_focus(true);
+                cx.emit(TerminalEvent::Focused);
+            }),
+            cx.on_focus_out(pane_focus, window, |view, _, _, _| view.report_focus(false)),
+            cx.on_focus(focus_handle, window, |view, _, cx| {
+                view.reset_cursor_blink(cx);
+            }),
+            cx.on_blur(focus_handle, window, |view, _, _| {
+                view.cursor_blink.pause();
+            }),
+        ];
+        Self { _activation: activation, _appearance: appearance, _reconnect: reconnect, _focus: focus }
+    }
+}
+
 pub(super) struct Opening {
     start: bool,
     attach: Attach,
@@ -182,6 +228,11 @@ impl ArcWake for Unpark {
 }
 
 impl TerminalView {
+    /// 终端搬进了窗口 `window`（单独的终端窗口，或者从那里放回主窗口）：焦点、窗口激活这些订阅换成这个窗口的。
+    pub(crate) fn attach_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self._window_watches = WindowWatches::new(&self.focus_handle, &self.pane_focus, window, cx);
+    }
+
     /// 建好视图，在主机 `host` 的 `cwd` 下启动 `shell`（为空时宿主的默认 shell），`cwd` 为 `None` 时从家目录
     /// 开始；shell 等第一次布局后才启动，见 `start`。伪终端开不了时返回错误，不建视图。
     pub fn spawn(
@@ -991,31 +1042,9 @@ impl TerminalView {
             view.reset_cursor_blink(cx);
             cx.notify();
         });
-        // 切回这个窗口也算一次活动：焦点一直在这个终端上时不会触发 `on_focus`。
-        let activation_watch = cx.observe_window_activation(window, |view, window, cx| {
-            if window.is_window_active() {
-                view.reset_cursor_blink(cx);
-            }
-        });
-        let appearance_watch = cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
-        let reconnect_watch =
-            cx.observe_global_in::<HostReconnected>(window, |view, window, cx| view.host_reconnected(window, cx));
-
         let focus_handle = cx.focus_handle();
         let pane_focus = cx.focus_handle();
-        let focus_watch = [
-            cx.on_focus_in(&pane_focus, window, |view, _, cx| {
-                view.report_focus(true);
-                cx.emit(TerminalEvent::Focused);
-            }),
-            cx.on_focus_out(&pane_focus, window, |view, _, _, _| view.report_focus(false)),
-            cx.on_focus(&focus_handle, window, |view, _, cx| {
-                view.reset_cursor_blink(cx);
-            }),
-            cx.on_blur(&focus_handle, window, |view, _, _| {
-                view.cursor_blink.pause();
-            }),
-        ];
+        let window_watches = WindowWatches::new(&focus_handle, &pane_focus, window, cx);
 
         // 关掉的终端不会再画下一帧，画过的图片在这里交还贴图。
         cx.on_release(|view: &mut Self, cx| {
@@ -1073,12 +1102,9 @@ impl TerminalView {
             _image_frame: None,
             _autoscroll: None,
             _config_watch: config_watch,
-            _activation_watch: activation_watch,
-            _appearance_watch: appearance_watch,
-            _reconnect_watch: reconnect_watch,
             dictation: None,
             pane_focus,
-            _focus_watch: focus_watch,
+            _window_watches: window_watches,
         };
 
         // 提前启动的 shell 多半已经输出了提示符，宿主补发的事件现在就处理，第一帧就画得出来，

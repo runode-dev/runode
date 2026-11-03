@@ -1,14 +1,18 @@
-//! 浮动的终端：标签里的一个终端浮到别的分屏上面，拖标题挪、拖四边四角改大小，按「停靠」回到浮起来前的位置。
+//! 浮动的终端：标签里的一个终端浮到别的分屏上面，拖标题挪、拖四边四角改大小，按「停靠」回到浮起来前的位置；
+//! 拖到窗口外松开或按「搬进单独窗口」，就搬进单独的终端窗口（`popout`）。
 //!
 //! 浮着的终端仍在分屏树（`Tab::root`）里原来的位置上，画分屏时从树的副本里拿掉（`Tab::docked_root`），所以停靠
 //! 回去时位置、比例都和浮起来前一样。标签里总留着一个不浮动的终端。浮着的位置和大小按终端区归一化
-//! （`Tab::floating`），窗口改大小时跟着缩放。
+//! （`Tab::floating`），窗口改大小时跟着缩放。搬进单独窗口的终端仍算这个标签里浮着的（`Tab::popped`），存档、
+//! 布局照浮着的记；主窗口的当前终端（`Tab::focused`）不会是它，主窗口的焦点交不到别的窗口里。
+
+mod popout;
 
 use std::collections::HashMap;
 
 use gpui::{
-    AnyElement, Bounds, Context, CursorStyle, Div, EntityId, MouseButton, MouseMoveEvent, Pixels, Point, ResizeEdge,
-    SharedString, Size, Window, actions, div, point, prelude::*, px, relative, size,
+    AnyElement, App, Bounds, Context, CursorStyle, Div, EntityId, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, ResizeEdge, SharedString, Size, Window, actions, div, point, prelude::*, px, relative, size,
 };
 use runode_types::pane::{Node, Rect};
 
@@ -22,7 +26,9 @@ actions!(
     runode,
     [
         /// 当前分屏浮到别的分屏上面；浮着的停靠回原来的位置。
-        TogglePaneFloat
+        TogglePaneFloat,
+        /// 当前分屏搬进单独的终端窗口。
+        MovePaneToWindow
     ]
 );
 
@@ -63,17 +69,26 @@ impl Tab {
         !self.floats(id) && self.root.leaves().into_iter().any(|other| other != id && !self.floats(other))
     }
 
-    /// 去掉终端 `id` 的浮动，它回到分屏树里原来的位置；返回它原来浮着没有。
+    /// 去掉终端 `id` 的浮动，它回到分屏树里原来的位置，在单独窗口里的也放回来；返回它原来浮着没有。
     pub(super) fn unfloat(&mut self, id: EntityId) -> bool {
+        self.popped.remove(&id);
         let before = self.floating.len();
         self.floating.retain(|(pane, _)| *pane != id);
         self.floating.len() != before
     }
 
-    /// 不浮动的终端都关了、挪走了时，最下面那块浮着的停靠回去：终端区不能只剩浮着的。
+    /// 不浮动的终端都关了、挪走了时，最下面那块浮着的停靠回去，先挑不在单独窗口里的：终端区不能只剩浮着的。
+    /// 当前终端不能是单独窗口里的，换成不浮动的。
     pub(super) fn keep_one_docked(&mut self) {
         if !self.floating.is_empty() && self.root.leaves().into_iter().all(|id| self.floats(id)) {
-            self.floating.remove(0);
+            let ix = self.floating.iter().position(|(id, _)| !self.popped.contains(id)).unwrap_or(0);
+            let (id, _) = self.floating.remove(ix);
+            self.popped.remove(&id);
+        }
+        if self.popped.contains(&self.focused)
+            && let Some(docked) = self.docked_root().leaves().first()
+        {
+            self.focused = *docked;
         }
     }
 
@@ -119,6 +134,85 @@ impl WindowView {
         if self.tab_mut().is_some_and(|tab| tab.unfloat(id)) {
             self.focus_pane_in_active_tab(id, window, cx);
         }
+    }
+
+    pub(super) fn move_pane_to_window(&mut self, _: &MovePaneToWindow, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.tab().map(|tab| tab.focused) {
+            self.pop_out_pane(id, None, window, cx);
+        }
+    }
+
+    /// 当前标签里的终端 `id` 搬进单独的终端窗口，没浮着的先浮起来（标签里唯一不浮动的终端搬不走）。给了 `origin`
+    /// （相对这个窗口所在显示器的位置）时窗口放在那里，否则放在它浮着的地方。
+    pub(super) fn pop_out_pane(
+        &mut self,
+        id: EntityId,
+        origin: Option<Point<Pixels>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let area = self.layout.borrow().area;
+        let Some(tab) = self.tab_mut() else {
+            return;
+        };
+        if tab.popped.contains(&id) || !(tab.floats(id) || tab.can_float(id)) {
+            return;
+        }
+        if !tab.floats(id) {
+            let frame = tab.next_frame();
+            tab.floating.push((id, frame));
+            tab.collapsed.remove(&id);
+        }
+        tab.popped.insert(id);
+        tab.keep_one_docked();
+        let Some(&(_, frame)) = tab.floating.iter().find(|(pane, _)| *pane == id) else {
+            return;
+        };
+        let view = tab.panes[&id].0.clone();
+        if self.float_drag.as_ref().is_some_and(|drag| drag.pane == id) {
+            self.float_drag = None;
+        }
+        // 窗口照它浮着时的大小，加上标题栏；位置相对这个窗口所在的显示器。
+        let area = area.unwrap_or_else(|| Bounds::new(Point::default(), window.viewport_size()));
+        let (width, height) = (f32::from(area.size.width), f32::from(area.size.height));
+        let at = window.bounds().origin + area.origin + point(px(frame.x * width), px(frame.y * height));
+        let size = size(px(frame.width * width), px(frame.height * height + super::TITLEBAR_HEIGHT));
+        let bounds = Bounds { origin: origin.unwrap_or(at), size };
+        let display = window.display(cx);
+        let bounds = match &display {
+            Some(display) => clamp_frame(bounds, display.bounds().size, MIN_FLOAT),
+            None => bounds,
+        };
+        if let Some(owner) = window.window_handle().downcast::<WindowView>() {
+            let (entity, display) = (cx.entity(), display.map(|display| display.id()));
+            cx.defer(move |cx| popout::open(owner, entity, id, view, bounds, display, cx));
+        }
+        self.activate(self.workspace().active, window, cx);
+    }
+
+    /// 单独窗口里的终端 `id` 放回它的标签里浮着，切过去，焦点给它。
+    pub(super) fn pop_in_pane(&mut self, id: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((wi, ti)) = self.locate(id) else {
+            return;
+        };
+        let tab = &mut self.workspaces[wi].tabs[ti];
+        if !tab.popped.remove(&id) {
+            return;
+        }
+        let view = tab.panes[&id].0.clone();
+        view.update(cx, |view, cx| view.attach_window(window, cx));
+        window.activate_window();
+        self.show_pane(id, window, cx);
+    }
+
+    /// 终端 `id` 在单独窗口里。
+    pub(super) fn holds_popped(&self, id: EntityId) -> bool {
+        self.workspaces.iter().any(|workspace| workspace.tabs.iter().any(|tab| tab.popped.contains(&id)))
+    }
+
+    /// 终端 `id` 在单独窗口里时把那个窗口提到前面、焦点给它，返回是不是。
+    pub(super) fn activate_popped(&self, id: EntityId, cx: &mut App) -> bool {
+        self.holds_popped(id) && popout::activate(id, cx)
     }
 
     /// 浮着的终端 `id` 提到别的浮着的上面；返回挪了没有。
@@ -177,6 +271,7 @@ impl WindowView {
     ) -> Vec<AnyElement> {
         tab.floating
             .iter()
+            .filter(|(id, _)| !tab.popped.contains(id))
             .map(|&(id, frame)| {
                 let grips = float_frame::resize_grips(
                     id,
@@ -238,7 +333,24 @@ impl WindowView {
                     }
                 }))
                 .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.end_float_drag(cx)))
-                .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.end_float_drag(cx))),
+                .on_mouse_up_out(
+                    MouseButton::Left,
+                    cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                        let Some(drag) = this.float_drag.take() else { return };
+                        // 松在窗口里（落在盖在上面的窗口按钮、拉伸边上时也算「外面」）只是拖完了。
+                        let inside = Bounds::new(Point::default(), window.viewport_size()).contains(&event.position);
+                        if drag.resize.is_some() || inside {
+                            this.save(cx);
+                            cx.notify();
+                            return;
+                        }
+                        // 窗口在它那块显示器上的位置，加上松开的地方，减去按下时鼠标在这一块里的位置。
+                        let area = this.layout.borrow().area.map_or(Point::default(), |area| area.origin);
+                        let grab = drag.from - area - drag.frame.origin;
+                        let origin = window.bounds().origin + event.position - grab;
+                        this.pop_out_pane(drag.pane, Some(origin), window, cx);
+                    }),
+                ),
         )
     }
 }
@@ -281,6 +393,7 @@ mod tests {
             bell: false,
             done: HashSet::new(),
             floating: Vec::new(),
+            popped: HashSet::new(),
         }
     }
 

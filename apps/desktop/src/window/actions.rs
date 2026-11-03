@@ -225,7 +225,8 @@ impl WindowView {
         let Some(tab) = self.tab() else {
             return;
         };
-        let leaves = tab.root.leaves();
+        // 单独窗口里的终端不在这个窗口里轮。
+        let leaves: Vec<_> = tab.root.leaves().into_iter().filter(|id| !tab.popped.contains(id)).collect();
         let Some(at) = leaves.iter().position(|id| *id == tab.focused) else {
             return;
         };
@@ -268,8 +269,11 @@ impl WindowView {
         }
     }
 
-    /// 切到当前标签里的另一个终端；放大着的话先恢复，否则看不到它。
+    /// 切到当前标签里的另一个终端；放大着的话先恢复，否则看不到它。在单独窗口里的把那个窗口提到前面。
     pub(super) fn focus_pane_in_active_tab(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.activate_popped(pane, cx) {
+            return;
+        }
         // 调用方记着的分屏可能已经关掉了，切过去 `Tab::focused_view` 就找不到它。
         let Some(tab) = self.tab_mut().filter(|tab| tab.panes.contains_key(&pane)) else {
             return;

@@ -53,6 +53,8 @@ pub enum Action {
     ToggleSplitFold,
     /// 当前分屏浮到别的分屏上面；浮着的停靠回原来的位置。
     ToggleSplitFloat,
+    /// 当前分屏搬进单独的终端窗口。
+    MoveSplitToWindow,
     /// 在当前分屏旁边一次开出几个新终端，先选方向和个数。
     ArrangeSplits,
     NewWorkspace,
@@ -252,6 +254,11 @@ pub static ACTIONS: &[ActionSpec] = &[
         "toggle_split_float",
         "Float the current split over the others, or dock a floating one back where it was",
         Action::ToggleSplitFloat
+    ),
+    plain!(
+        "move_split_to_window",
+        "Move the current split into a terminal window of its own",
+        Action::MoveSplitToWindow
     ),
     plain!(
         "arrange_splits",

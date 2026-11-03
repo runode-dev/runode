@@ -31,6 +31,9 @@ crate::icons! {
     /// 搬到单独的窗口里、搬回来。
     pub POP_OUT_ICON = "pop-out",
     pub POP_IN_ICON = "pop-in",
+    /// 分屏浮到别的分屏上面、停靠回去。
+    pub FLOAT_ICON = "float",
+    pub DOCK_ICON = "dock",
     /// 「更多」菜单。
     pub MORE_ICON = "more",
     /// 切换树形式、列表形式的按钮，画的是切过去以后的样子。

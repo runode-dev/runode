@@ -17,10 +17,10 @@ use crate::{
     },
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
-        InstallSkill, MovePaneToNewTab, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace, NextAgent, NextTab,
-        NextWorkspace, PreviousTab, PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions,
-        ToggleKanban, TogglePaneFloat, TogglePaneFold, TogglePaneZoom, ToggleRemoteDesktop, ToggleSchedules,
-        ToggleSidebar, ToggleStatusBar, ToggleTasks,
+        InstallSkill, MovePaneToNewTab, MovePaneToWindow, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace,
+        NextAgent, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit,
+        ToggleGitHubActions, ToggleKanban, TogglePaneFloat, TogglePaneFold, TogglePaneZoom, ToggleRemoteDesktop,
+        ToggleSchedules, ToggleSidebar, ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -172,6 +172,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.zoom_split"), TogglePaneZoom),
             MenuItem::action(tr("menu.fold_split"), TogglePaneFold),
             MenuItem::action(tr("menu.float_split"), TogglePaneFloat),
+            MenuItem::action(tr("menu.move_split_to_window"), MovePaneToWindow),
             MenuItem::action(tr("menu.move_split_to_new_tab"), MovePaneToNewTab),
             MenuItem::action(tr("menu.equalize_splits"), EqualizePanes),
             MenuItem::separator(),

@@ -65,7 +65,7 @@ pub use background::refresh as watch_background;
 pub(crate) use mobile_page::show_pairing;
 pub use mobile_page::watch_devices;
 pub(crate) use open::{open_window, open_window_with};
-pub use pane_float::TogglePaneFloat;
+pub use pane_float::{MovePaneToWindow, TogglePaneFloat};
 pub use pane_move::{MovePaneToNewTab, SwapPane};
 pub use persist::saved_window_options;
 #[cfg(windows)]
@@ -929,6 +929,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::toggle_pane_zoom))
             .on_action(Self::act(cx, Self::toggle_pane_fold))
             .on_action(Self::act(cx, Self::toggle_pane_float))
+            .on_action(Self::act(cx, Self::move_pane_to_window))
             .on_action(Self::act(cx, Self::swap_pane))
             .on_action(Self::act(cx, Self::move_pane_to_new_tab))
             .on_action(Self::act(cx, Self::new_workspace))
