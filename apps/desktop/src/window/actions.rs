@@ -250,15 +250,16 @@ impl WindowView {
             height: f32::from(bounds.size.height),
         };
         let from = layout.panes.get(&tab.focused).map(rect)?;
-        if tab.zoomed {
+        if tab.zoomed && !tab.floats(tab.focused) {
             // 放大时只画了这一个，别的分屏记着的还是放大前的位置，全落在它里面：按分屏树的比例在它现在占的
             // 这一块里重新排一遍再找。
-            let rects = tab.root.rects(from);
+            let rects = tab.docked_root().rects(from);
             let from = rects.iter().find(|(id, _)| *id == tab.focused).map(|(_, rect)| *rect)?;
             pane::neighbor(from, direction, rects.into_iter().filter(|(id, _)| *id != tab.focused))
         } else {
+            // 浮着的终端压在别的上面，不算谁的邻居；从浮着的终端出发时按它浮着的位置找底下的分屏。
             let candidates = tab
-                .root
+                .docked_root()
                 .leaves()
                 .into_iter()
                 .filter(|id| *id != tab.focused)
@@ -291,8 +292,9 @@ impl WindowView {
         let Some(tab) = workspace.tabs.get_mut(workspace.active) else {
             return;
         };
-        // 放大时其他分屏看不见，调了也看不出效果。
-        let resized = !tab.zoomed && tab.root.resize(tab.focused, action.0, RESIZE_STEP, &size_of);
+        // 放大时其他分屏看不见，调了也看不出效果；浮着的终端不在分屏里。
+        let resized =
+            !tab.zoomed && !tab.floats(tab.focused) && tab.root.resize(tab.focused, action.0, RESIZE_STEP, &size_of);
         drop(layout);
         if resized {
             self.save(cx);
@@ -312,8 +314,12 @@ impl WindowView {
         let Some(tab) = self.tab_mut() else {
             return;
         };
-        if !tab.root.is_leaf() {
+        // 放大浮着的终端时先把它停靠回去。
+        let docked = tab.unfloat(tab.focused);
+        if !tab.docked_root().is_leaf() {
             tab.zoomed = !tab.zoomed;
+        }
+        if docked || !tab.docked_root().is_leaf() {
             self.save(cx);
             cx.notify();
         }

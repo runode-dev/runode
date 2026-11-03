@@ -13,7 +13,7 @@ use gpui::{
 use runode_protocol::SessionId;
 use runode_types::{
     grid::GridSize,
-    pane::{Node, SplitId},
+    pane::{Node, Rect, SplitId},
 };
 
 use super::{
@@ -48,6 +48,8 @@ pub(super) struct Tab {
     pub(super) bell: bool,
     /// agent 干完了、用户还没看过的分屏，见 `Mark::new`；用户看到那个分屏时清掉。
     pub(super) done: HashSet<EntityId>,
+    /// 浮在别的分屏上面的终端和它在终端区里的位置（按终端区归一化），从下到上；它们仍在 `root` 里原来的位置上。
+    pub(super) floating: Vec<(EntityId, Rect)>,
 }
 
 impl Tab {
@@ -61,6 +63,8 @@ impl Tab {
 pub(super) struct PaneLayout {
     pub(super) panes: HashMap<EntityId, Bounds<Pixels>>,
     pub(super) splits: HashMap<SplitId, Bounds<Pixels>>,
+    /// 当前标签的终端区，浮着的终端摆在它里面。
+    pub(super) area: Option<Bounds<Pixels>>,
 }
 
 pub(super) fn home_dir() -> Option<PathBuf> {
@@ -377,6 +381,7 @@ impl WindowView {
             collapsed: HashSet::new(),
             bell: false,
             done: HashSet::new(),
+            floating: Vec::new(),
         }
     }
 
@@ -829,11 +834,13 @@ impl WindowView {
         let tab = &mut self.workspaces[wi].tabs[ti];
         tab.done.remove(&pane);
         tab.collapsed.remove(&pane);
+        tab.unfloat(pane);
         let Some(next) = tab.root.remove(pane) else {
             self.close_tab_at(wi, ti, window, cx);
             return;
         };
         tab.panes.remove(&pane);
+        tab.keep_one_docked();
         // 关的是别的分屏（比如后台的 shell 自己退出了）时，放大和焦点都不动。
         if tab.focused != pane {
             self.save(cx);

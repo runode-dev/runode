@@ -40,6 +40,8 @@ pub(super) struct WorkspaceInput<'a, P> {
 pub(super) struct TabInput<'a, P> {
     pub(super) root: &'a Node<P>,
     pub(super) focused: P,
+    /// 浮着的分屏和它们在标签区域里的位置（按标签区域归一化），见 `Tab::floating`。
+    pub(super) floating: &'a [(P, Rect)],
 }
 
 /// 按 `WindowInput` 生成回话里的布局，`session` 给出分屏里的会话（找不到的分屏不列出，序号仍按
@@ -83,15 +85,35 @@ pub(super) fn report<P: Copy + PartialEq>(
         .collect()
 }
 
+/// 标签里的分屏，序号按整棵分屏树的叶子顺序（浮着的也占着它在树里的位置）；不浮动的按拿掉浮着的之后的树铺满
+/// 标签区域，浮着的报它浮着的位置。
 fn panes<P: Copy + PartialEq>(tab: &TabInput<'_, P>, session: &impl Fn(P) -> Option<SessionId>) -> Vec<PaneLayout> {
     let extent = f32::from(PaneRect::EXTENT);
     let area = Rect { x: 0., y: 0., width: extent, height: extent };
+    let mut docked = tab.root.clone();
+    for (pane, _) in tab.floating {
+        docked.remove(*pane);
+    }
+    let docked = docked.rects(area);
     tab.root
-        .rects(area)
+        .leaves()
         .into_iter()
         .zip(1..)
-        .filter_map(|((pane, rect), index)| {
-            Some(PaneLayout { index, id: session(pane)?, rect: pane_rect(rect), focused: pane == tab.focused })
+        .filter_map(|(pane, index)| {
+            let floating = tab.floating.iter().find(|(id, _)| *id == pane).map(|(_, frame)| Rect {
+                x: frame.x * extent,
+                y: frame.y * extent,
+                width: frame.width * extent,
+                height: frame.height * extent,
+            });
+            let rect = floating.or_else(|| docked.iter().find(|(id, _)| *id == pane).map(|(_, rect)| *rect))?;
+            Some(PaneLayout {
+                index,
+                id: session(pane)?,
+                rect: pane_rect(rect),
+                focused: pane == tab.focused,
+                floating: floating.is_some(),
+            })
         })
         .collect()
 }
@@ -231,7 +253,11 @@ pub(super) fn current(host: &HostId, cx: &mut App) -> Vec<WindowLayout> {
                     name: workspace.name.to_string(),
                     dir: &workspace.dir,
                     active: workspace.active,
-                    tabs: workspace.tabs.iter().map(|tab| TabInput { root: &tab.root, focused: tab.focused }).collect(),
+                    tabs: workspace
+                        .tabs
+                        .iter()
+                        .map(|tab| TabInput { root: &tab.root, focused: tab.focused, floating: &tab.floating })
+                        .collect(),
                 })
                 .collect(),
         });
@@ -280,7 +306,7 @@ mod tests {
                 name: "app".into(),
                 dir: Path::new("/Users/me/app"),
                 active: 0,
-                tabs: vec![TabInput { root: &root, focused: 3 }],
+                tabs: vec![TabInput { root: &root, focused: 3, floating: &[] }],
             }],
         }];
         let report = report(windows, |pane| Some(id(pane)));
@@ -292,6 +318,36 @@ mod tests {
                 (1, id(1), rect(0, 0, 300, 1000), false),
                 (2, id(2), rect(300, 0, 700, 500), false),
                 (3, id(3), rect(300, 500, 700, 500), true),
+            ]
+        );
+    }
+
+    /// 浮着的 2 照样按叶子顺序编号，报它浮着的位置；1 和 3 铺满标签区域。
+    #[test]
+    fn floating_panes_keep_their_number_and_report_where_they_float() {
+        let root = nested();
+        let floating = [(2, Rect { x: 0.2, y: 0.15, width: 0.6, height: 0.65 })];
+        let windows = vec![WindowInput {
+            opened: 1,
+            front: true,
+            active: 0,
+            workspaces: vec![WorkspaceInput {
+                here: true,
+                name: "app".into(),
+                dir: Path::new("/Users/me/app"),
+                active: 0,
+                tabs: vec![TabInput { root: &root, focused: 2, floating: &floating }],
+            }],
+        }];
+        let report = report(windows, |pane| Some(id(pane)));
+        let panes = &report[0].workspaces[0].tabs[0].panes;
+        let got: Vec<_> = panes.iter().map(|pane| (pane.index, pane.id, pane.rect, pane.floating)).collect();
+        assert_eq!(
+            got,
+            [
+                (1, id(1), rect(0, 0, 300, 1000), false),
+                (2, id(2), rect(200, 150, 600, 650), true),
+                (3, id(3), rect(300, 0, 700, 1000), false),
             ]
         );
     }
@@ -328,13 +384,13 @@ mod tests {
                 opened: 7,
                 front: true,
                 active: 0,
-                workspaces: vec![one_tab("later", TabInput { root: &b, focused: 2 })],
+                workspaces: vec![one_tab("later", TabInput { root: &b, focused: 2, floating: &[] })],
             },
             WindowInput {
                 opened: 3,
                 front: false,
                 active: 0,
-                workspaces: vec![one_tab("first", TabInput { root: &a, focused: 1 })],
+                workspaces: vec![one_tab("first", TabInput { root: &a, focused: 1, floating: &[] })],
             },
         ];
         let report = report(windows, |pane| Some(id(pane)));
@@ -360,14 +416,17 @@ mod tests {
                     name: "a".into(),
                     dir: Path::new("/Users/me/a"),
                     active: 0,
-                    tabs: vec![TabInput { root: &other, focused: 9 }],
+                    tabs: vec![TabInput { root: &other, focused: 9, floating: &[] }],
                 },
                 WorkspaceInput {
                     here: true,
                     name: "b".into(),
                     dir: Path::new("/Users/me/b"),
                     active: 0,
-                    tabs: vec![TabInput { root: &shown, focused: 1 }, TabInput { root: &background, focused: 2 }],
+                    tabs: vec![
+                        TabInput { root: &shown, focused: 1, floating: &[] },
+                        TabInput { root: &background, focused: 2, floating: &[] },
+                    ],
                 },
             ],
         }];
@@ -390,7 +449,7 @@ mod tests {
     fn a_zoomed_pane_keeps_its_place_in_the_split() {
         // 放大不改分屏树，报告里只看树：放大着的分屏仍是它在分屏里的位置，别的分屏也照常列出。
         let root = nested();
-        let tab = TabInput { root: &root, focused: 2 };
+        let tab = TabInput { root: &root, focused: 2, floating: &[] };
         let panes = panes(&tab, &|pane| Some(id(pane)));
         assert_eq!(panes.len(), 3);
         assert_eq!(panes[1].rect, rect(300, 0, 700, 500));
@@ -400,7 +459,7 @@ mod tests {
     #[test]
     fn panes_without_a_session_are_left_out_but_keep_numbering() {
         let root = nested();
-        let tab = TabInput { root: &root, focused: 1 };
+        let tab = TabInput { root: &root, focused: 1, floating: &[] };
         let panes = panes(&tab, &|pane| (pane != 2).then(|| id(pane)));
         assert_eq!(panes.iter().map(|pane| pane.index).collect::<Vec<_>>(), [1, 3]);
     }

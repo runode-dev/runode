@@ -51,6 +51,8 @@ pub enum Action {
     ToggleSplitZoom,
     /// 把当前分屏收到终端区底部，只剩标题条；已经折叠过的展开。
     ToggleSplitFold,
+    /// 当前分屏浮到别的分屏上面；浮着的停靠回原来的位置。
+    ToggleSplitFloat,
     /// 在当前分屏旁边一次开出几个新终端，先选方向和个数。
     ArrangeSplits,
     NewWorkspace,
@@ -245,6 +247,11 @@ pub static ACTIONS: &[ActionSpec] = &[
         "toggle_split_fold",
         "Collapse the current split to the bottom of the tab, or expand it again",
         Action::ToggleSplitFold
+    ),
+    plain!(
+        "toggle_split_float",
+        "Float the current split over the others, or dock a floating one back where it was",
+        Action::ToggleSplitFloat
     ),
     plain!(
         "arrange_splits",
@@ -443,6 +450,7 @@ pub static MACOS_DEFAULTS: &[&str] = &[
     "ctrl+cmd+equal=equalize_splits",
     "cmd+shift+enter=toggle_split_zoom",
     "ctrl+cmd+minus=toggle_split_fold",
+    "ctrl+cmd+enter=toggle_split_float",
     "cmd+shift+l=arrange_splits",
     "cmd+shift+n=new_workspace",
     "ctrl+cmd+]=next_workspace",
@@ -535,6 +543,7 @@ macro_rules! other_defaults {
     "ctrl+shift+alt+equal=equalize_splits",
     "ctrl+shift+enter=toggle_split_zoom",
     "ctrl+shift+alt+minus=toggle_split_fold",
+    "ctrl+shift+alt+enter=toggle_split_float",
     "ctrl+shift+l=arrange_splits",
     "ctrl+shift+alt+n=new_workspace",
     "ctrl+alt+page_down=next_workspace",

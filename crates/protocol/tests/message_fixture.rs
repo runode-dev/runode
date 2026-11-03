@@ -76,6 +76,7 @@ fn layout() -> Vec<WindowLayout> {
         id: SessionId(id),
         rect: PaneRect { x, y: 0, width, height: 1000 },
         focused,
+        floating: false,
     };
     vec![WindowLayout {
         index: 1,
@@ -94,6 +95,11 @@ fn layout() -> Vec<WindowLayout> {
                         panes: vec![
                             pane(1, 0x1111_1111_1111_1111_1111_1111_1111_1111, 0, 500, false),
                             pane(2, 0x2222_2222_2222_2222_2222_2222_2222_2222, 500, 500, true),
+                            PaneLayout {
+                                floating: true,
+                                rect: PaneRect { x: 200, y: 150, width: 600, height: 650 },
+                                ..pane(3, 0x3333_3333_3333_3333_3333_3333_3333_3333, 0, 0, false)
+                            },
                         ],
                     },
                 ],

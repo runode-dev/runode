@@ -428,7 +428,7 @@ fn answer_ui(desktop: &mut Peer, answer: impl FnOnce(&ClientMsg) -> HostMsg) -> 
 
 fn layout(id: SessionId) -> Vec<WindowLayout> {
     let rect = PaneRect { x: 0, y: 0, width: PaneRect::EXTENT, height: PaneRect::EXTENT };
-    let pane = PaneLayout { index: 1, id, rect, focused: true };
+    let pane = PaneLayout { index: 1, id, rect, focused: true, floating: false };
     let tab = TabLayout { index: 1, active: true, panes: vec![pane] };
     let workspace = WorkspaceLayout { index: 1, name: None, dir: None, active: true, tabs: vec![tab] };
     vec![WindowLayout { index: 1, front: true, workspaces: vec![workspace] }]

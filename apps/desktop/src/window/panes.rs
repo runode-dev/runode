@@ -27,6 +27,7 @@ use super::{
     agents::logo::agent_logo,
     cards,
     model::Tab,
+    pane_float::TogglePaneFloat,
     pane_move::{DraggedPane, zone_at},
     status_bar,
     titlebar::{pane_label, styled_agent_mark},
@@ -40,8 +41,8 @@ use crate::ui::{
 };
 use crate::{
     ui::icons::{
-        CHEVRON_UP_ICON, CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON,
-        TERMINAL_ICON,
+        CHEVRON_UP_ICON, CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, POP_IN_ICON, POP_OUT_ICON,
+        SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON, TERMINAL_ICON,
     },
     ui::{
         font_size::FontSize,
@@ -99,12 +100,12 @@ impl Tab {
     /// 这个分屏折叠着：用户折叠过，又不是当前分屏。切到它时（比如按方向键过去）照样展开着画，
     /// 所以标签里总有一个分屏是展开的。
     fn folded(&self, id: EntityId) -> bool {
-        self.collapsed.contains(&id) && id != self.focused
+        self.collapsed.contains(&id) && id != self.focused && !self.floats(id)
     }
 
     /// 折叠这个分屏时接替它的分屏：标签里另一个展开着的；没有时不能折叠。
     pub(super) fn fold_successor(&self, id: EntityId) -> Option<EntityId> {
-        self.root.leaves().into_iter().find(|other| *other != id && !self.folded(*other))
+        self.docked_root().leaves().into_iter().find(|other| *other != id && !self.folded(*other))
     }
 
     /// 这个标签里有分屏正被别的终端里的程序操作着（驱动标记还没消失）。
@@ -116,7 +117,7 @@ impl Tab {
 }
 
 impl WindowView {
-    /// 当前标签的终端区：分屏树，或者放大着的那一个终端；workspace 里没有标签时是空的标签区。
+    /// 当前标签的终端区：分屏树，或者放大着的那一个终端，上面叠着浮着的终端；workspace 里没有标签时是空的标签区。
     pub(super) fn render_panes(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let now = now_ms();
         let badges = self.driver_badges(now, window, cx);
@@ -126,17 +127,51 @@ impl WindowView {
         let Some(tab) = self.tab() else {
             return self.render_empty_tab(cx);
         };
-        if tab.zoomed || tab.root.is_leaf() {
-            return self.render_leaf(tab, tab.focused, &badges, window, cx);
+        let docked = self.render_docked_panes(tab, &badges, window, cx);
+        let floating = self.render_floating_panes(tab, &badges, window, cx);
+        let layout = self.layout.clone();
+        div()
+            .relative()
+            .size_full()
+            .child(
+                canvas(move |bounds, _, _| layout.borrow_mut().area = Some(bounds), |_, (), _, _| {})
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+            )
+            .child(docked)
+            .children(floating)
+            .into_any_element()
+    }
+
+    /// 标签里不浮动的终端：分屏树，或者放大着的那一个终端。
+    fn render_docked_panes(
+        &self,
+        tab: &Tab,
+        badges: &HashMap<EntityId, SharedString>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut root = tab.docked_root();
+        // 放大的是浮着的终端时（点了浮着的那块）照常画分屏。
+        if tab.zoomed && !tab.floats(tab.focused) {
+            return self.render_leaf(tab, tab.focused, badges, false, window, cx);
         }
-        let folded: Vec<EntityId> =
-            if cards(cx) { tab.root.leaves().into_iter().filter(|id| tab.folded(*id)).collect() } else { Vec::new() };
+        if let Node::Leaf(only) = root {
+            return self.render_leaf(tab, only, badges, false, window, cx);
+        }
+        let mut folded: Vec<EntityId> =
+            if cards(cx) { root.leaves().into_iter().filter(|id| tab.folded(*id)).collect() } else { Vec::new() };
+        // 焦点在浮着的终端上时分屏可能全折叠着，第一个照样展开着画。
+        if folded.len() == root.leaves().len() {
+            folded.remove(0);
+        }
         if folded.is_empty() {
-            return self.render_node(tab, &tab.root, &badges, window, cx);
+            return self.render_node(tab, &root, badges, window, cx);
         }
-        // 折叠的分屏从分屏树里拿掉，只剩标题条，在终端区底部排成一行；当前分屏不会折叠，树不会空。
-        // 拿掉的是一份拷贝，原来的树和比例不动，展开后回到原位。
-        let mut root = tab.root.clone();
+        // 折叠的分屏从分屏树里拿掉，只剩标题条，在终端区底部排成一行；拿掉的是一份拷贝，原来的树和比例不动，
+        // 展开后回到原位。
         for id in &folded {
             root.remove(*id);
         }
@@ -148,7 +183,7 @@ impl WindowView {
                     .min_w_0()
                     .max_w(px(FOLDED_MAX_WIDTH))
                     .h_full()
-                    .child(self.render_leaf(tab, id, &badges, window, cx))
+                    .child(self.render_leaf(tab, id, badges, false, window, cx))
             })
             .collect::<Vec<_>>();
         div()
@@ -156,7 +191,7 @@ impl WindowView {
             .flex()
             .flex_col()
             .gap(px(CARD_GAP))
-            .child(div().flex_1().min_h_0().child(self.render_node(tab, &root, &badges, window, cx)))
+            .child(div().flex_1().min_h_0().child(self.render_node(tab, &root, badges, window, cx)))
             // 卡片的边框各占一像素。
             .child(div().flex_none().h(px(PANE_HEADER_HEIGHT + 2.)).flex().gap(px(CARD_GAP)).children(bar))
             .into_any_element()
@@ -273,12 +308,14 @@ impl WindowView {
         self.driver_redraw = Some((due, task));
     }
 
+    /// 一个终端：经典样式下是终端本身，卡片样式和浮着的（`floating`）是带标题条的卡片。
     #[allow(clippy::too_many_arguments)]
-    fn render_leaf(
+    pub(super) fn render_leaf(
         &self,
         tab: &Tab,
         id: EntityId,
         badges: &HashMap<EntityId, SharedString>,
+        floating: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -286,7 +323,7 @@ impl WindowView {
         let dimmed = !tab.zoomed && !tab.root.is_leaf() && id != tab.focused;
         let layout = self.layout.clone();
         let badge = badges.get(&id).map(|text| driver_badge(("driver-badge", id), text.clone(), cx));
-        let cards = cards(cx);
+        let cards = cards(cx) || floating;
         let label = pane_label(view.read(cx));
         let (split, focused) = (!tab.zoomed && !tab.root.is_leaf(), id == tab.focused);
         let terminal = div()
@@ -321,20 +358,23 @@ impl WindowView {
             })
             .children(badge)
             .children(self.pane_drop_overlay(id, cx))
-            // 拖来的分屏：经过时记下落点画提示，放下时挪到这一块或者对调。
-            .on_drag_move(cx.listener(move |this, event: &DragMoveEvent<DraggedPane>, _, cx| {
-                let dragged = event.drag(cx).pane;
-                this.track_pane_drop(dragged, id, event.bounds, event.event.position, cx);
-            }))
-            .on_drop(cx.listener(move |this, dragged: &DraggedPane, window, cx| {
-                this.pane_drop = None;
-                let bounds = this.layout.borrow().panes.get(&id).copied();
-                if let Some(zone) = bounds.and_then(|bounds| zone_at(bounds, window.mouse_position()))
-                    && dragged.pane != id
-                {
-                    this.drop_pane_on_pane(dragged.pane, id, zone, window, cx);
-                }
-            }))
+            // 拖来的分屏：经过时记下落点画提示，放下时挪到这一块或者对调。浮着的终端不在分屏里，不接。
+            .when(!floating, |terminal| {
+                terminal
+                    .on_drag_move(cx.listener(move |this, event: &DragMoveEvent<DraggedPane>, _, cx| {
+                        let dragged = event.drag(cx).pane;
+                        this.track_pane_drop(dragged, id, event.bounds, event.event.position, cx);
+                    }))
+                    .on_drop(cx.listener(move |this, dragged: &DraggedPane, window, cx| {
+                        this.pane_drop = None;
+                        let bounds = this.layout.borrow().panes.get(&id).copied();
+                        if let Some(zone) = bounds.and_then(|bounds| zone_at(bounds, window.mouse_position()))
+                            && dragged.pane != id
+                        {
+                            this.drop_pane_on_pane(dragged.pane, id, zone, window, cx);
+                        }
+                    }))
+            })
             // 从文件树或访达拖来的文件放到这个终端上：切到它，把路径打进去。文件树里的和终端在同一台机器上，
             // 访达里的在这台电脑上。
             .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
@@ -387,10 +427,10 @@ impl WindowView {
             .into_any_element()
     }
 
-    /// 卡片样式下分屏顶上的标题条：agent 的状态标记（前台不是 agent 时是终端图标）和终端标题，
-    /// 右边是向右、向下分屏，放大或还原，关闭分屏的按钮，当前分屏一直显示，别的分屏悬停时显示；
-    /// 分屏窄于 `PANE_BUTTONS_MIN_WIDTH` 时不放。
-    /// 点标题条切到这个分屏，双击放大或还原。
+    /// 卡片样式下和浮着的终端顶上的标题条：agent 的状态标记（前台不是 agent 时是终端图标）和终端标题，
+    /// 右边是向右、向下分屏，浮动，放大或还原，关闭分屏的按钮，当前分屏一直显示，别的分屏悬停时显示；
+    /// 分屏窄于 `PANE_BUTTONS_MIN_WIDTH` 时不放。浮着的终端只有停靠和关闭，一直显示。
+    /// 点标题条切到这个分屏，双击放大或还原；浮着的按住标题条拖着挪。
     fn render_pane_header(
         &self,
         tab: &Tab,
@@ -400,6 +440,7 @@ impl WindowView {
     ) -> Stateful<Div> {
         let split = !tab.root.is_leaf();
         let current = id == tab.focused;
+        let floating = tab.floats(id);
         // 宽度取上一帧画出来的；还没画过时当它够宽。
         let narrow =
             self.layout.borrow().panes.get(&id).is_some_and(|bounds| bounds.size.width < px(PANE_BUTTONS_MIN_WIDTH));
@@ -436,6 +477,29 @@ impl WindowView {
                 .on_press_down(cx, move |this, window, cx| handler(this, id, window, cx))
         };
         let folded = split && tab.folded(id);
+        let float = if floating {
+            Some(button(
+                "pane-float",
+                POP_IN_ICON,
+                rust_i18n::t!("tooltip.dock_split"),
+                Some(&TogglePaneFloat),
+                |this, id, window, cx| {
+                    this.dock_pane(id, window, cx);
+                },
+            ))
+        } else if !folded && tab.can_float(id) {
+            Some(button(
+                "pane-float",
+                POP_OUT_ICON,
+                rust_i18n::t!("tooltip.float_split"),
+                Some(&TogglePaneFloat),
+                |this, id, window, cx| {
+                    this.float_pane(id, window, cx);
+                },
+            ))
+        } else {
+            None
+        };
         // 展开和点标题条一样：`focus_pane_from_header` 先把它展开。
         let fold = if folded {
             Some(button(
@@ -447,7 +511,7 @@ impl WindowView {
                     this.focus_pane_from_header(id, window, cx);
                 },
             ))
-        } else if split && !tab.zoomed && tab.fold_successor(id).is_some() {
+        } else if split && !tab.zoomed && !floating && tab.fold_successor(id).is_some() {
             Some(button(
                 "pane-fold",
                 MINUS_ICON,
@@ -469,8 +533,8 @@ impl WindowView {
             .flex_none()
             .flex()
             .gap(px(2.))
-            // 折叠的分屏只有展开和关闭两个按钮，一直显示，窄了也不收。
-            .when(!folded, |buttons| {
+            // 折叠的分屏只有展开和关闭两个按钮，一直显示，窄了也不收；浮着的只有停靠和关闭。
+            .when(!folded && !floating, |buttons| {
                 buttons
                     .child(button(
                         "pane-split-right",
@@ -494,7 +558,8 @@ impl WindowView {
                     ))
             })
             .children(fold)
-            .when(split && !folded, |buttons| {
+            .children(float)
+            .when(split && !folded && !floating, |buttons| {
                 buttons.child(button(
                     "pane-zoom",
                     zoom_icon,
@@ -516,11 +581,12 @@ impl WindowView {
                 },
             ))
             // 不能用 display 切换，见 `render_tab` 里关闭按钮的说明。
-            .when(!(current && split) && !folded, |buttons| buttons.reveal_on_hover(group));
+            .when(!(current && split) && !folded && !floating, |buttons| buttons.reveal_on_hover(group));
         let dragged = DraggedPane::new(id, name.clone());
         div()
             .id(("pane-header", id))
-            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            // 拖浮着的终端的标题是挪它（`start_float_drag`），拖分屏的标题是把它挪到别处。
+            .when(!floating, |header| header.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
             .flex_none()
             .h(px(PANE_HEADER_HEIGHT))
             .pl(px(10.))
@@ -547,7 +613,9 @@ impl WindowView {
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
                     this.focus_pane_from_header(id, window, cx);
-                    if event.click_count >= 2 {
+                    if floating {
+                        this.start_float_drag(id, event.position, None, cx);
+                    } else if event.click_count >= 2 {
                         this.toggle_pane_zoom(&TogglePaneZoom, window, cx);
                     }
                 }),
@@ -596,7 +664,7 @@ impl WindowView {
         if tab.collapsed.remove(&id) {
             self.save(cx);
             cx.notify();
-        } else if cards(cx) && !tab.zoomed {
+        } else if cards(cx) && !tab.zoomed && !tab.floats(id) {
             self.fold_pane(id, window, cx);
         }
     }
@@ -611,7 +679,7 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let split = match node {
-            Node::Leaf(id) => return self.render_leaf(tab, *id, badges, window, cx),
+            Node::Leaf(id) => return self.render_leaf(tab, *id, badges, false, window, cx),
             Node::Split(split) => split,
         };
         let (id, axis, ratio) = (split.id, split.axis, split.ratio);

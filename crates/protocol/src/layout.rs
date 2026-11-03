@@ -58,6 +58,9 @@ pub struct PaneLayout {
     /// 是标签里有焦点的那个分屏。
     #[serde(default)]
     pub focused: bool,
+    /// 浮在别的分屏上面；`rect` 是它浮着的位置，和别的分屏的位置会重叠。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub floating: bool,
 }
 
 /// 分屏在标签区域里的位置，整个标签区域按 0..1000 归一化，和窗口实际的像素大小无关；后台标签
@@ -73,4 +76,8 @@ pub struct PaneRect {
 impl PaneRect {
     /// 整个标签区域的边长。
     pub const EXTENT: u16 = 1000;
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }

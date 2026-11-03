@@ -608,7 +608,11 @@ fn the_clipboard_rules_and_the_layout_go_with_the_handoff() {
     desktop.send(&ClientMsg::SetOptions { record_history: false, clipboard });
     let id = desktop.spawn(&script(&dir, "da.sh", r"while read line; do printf '\033[c'; done"));
     let rect = PaneRect { x: 0, y: 0, width: PaneRect::EXTENT, height: PaneRect::EXTENT };
-    let tab = TabLayout { index: 1, active: true, panes: vec![PaneLayout { index: 1, id, rect, focused: true }] };
+    let tab = TabLayout {
+        index: 1,
+        active: true,
+        panes: vec![PaneLayout { index: 1, id, rect, focused: true, floating: false }],
+    };
     let workspace =
         WorkspaceLayout { index: 1, name: Some("app".into()), dir: Some(dir.clone()), active: true, tabs: vec![tab] };
     let layout = vec![WindowLayout { index: 1, front: true, workspaces: vec![workspace] }];

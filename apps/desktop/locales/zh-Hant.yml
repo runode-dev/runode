@@ -68,6 +68,7 @@ menu:
   next_split: 選擇下一個分割畫面
   zoom_split: 放大分割畫面
   fold_split: 摺疊或展開分割畫面
+  float_split: 浮動或停靠分割畫面
   move_split_to_new_tab: 把分割畫面移成新分頁
   equalize_splits: 平均分割畫面
   goto_agent: 前往 agent…
@@ -370,6 +371,8 @@ tooltip:
   restore_split: 還原分割畫面
   collapse_split: 摺疊分割畫面
   expand_split: 展開分割畫面
+  float_split: 浮動分割畫面
+  dock_split: 停靠回原位
   close_preview: 關閉預覽
 git:
   ago:
@@ -1415,6 +1418,7 @@ action:
   equalize_splits: 平均分割畫面
   toggle_split_zoom: 放大或還原目前的分割畫面
   toggle_split_fold: 把目前的分割畫面摺疊到分頁底部，或展開回原位
+  toggle_split_float: 把目前的分割畫面浮到其他分割畫面上方，或把浮動的停靠回原位
   arrange_splits: 在目前的分割畫面旁一次開出幾個新終端機，先選方向和個數
   new_workspace: 選一個目錄，在裡面新增工作區
   close_workspace: 關閉工作區和裡面所有分頁

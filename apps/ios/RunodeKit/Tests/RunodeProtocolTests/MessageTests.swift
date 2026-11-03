@@ -269,7 +269,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(try decode("size_owner") == .sizeOwner(id: id, mine: false, owner: "Ethan 的 MacBook"))
     }
 
-    /// 布局按窗口、工作区、标签、分屏一层层读出来，带分屏在标签里的位置；没有目录的工作区读成空。
+    /// 布局按窗口、工作区、标签、分屏一层层读出来，带分屏在标签里的位置和浮着的标记；没有目录的工作区读成空。
     @Test func layoutDescribesWorkspaces() throws {
         guard case .layout(let req, let windows) = try decode("layout") else {
             Issue.record("not a layout")
@@ -285,10 +285,13 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(runode.tabs.map(\.active) == [false, true])
         let a = SessionId("11111111111111111111111111111111")!
         let b = SessionId("22222222222222222222222222222222")!
-        #expect(runode.sessions == [id, a, b])
+        let c = SessionId("33333333333333333333333333333333")!
+        #expect(runode.sessions == [id, a, b, c])
         #expect(runode.tabs[1].panes.map(\.rect) == [
             PaneRect(x: 0, y: 0, width: 500, height: 1000), PaneRect(x: 500, y: 0, width: 500, height: 1000),
+            PaneRect(x: 200, y: 150, width: 600, height: 650),
         ])
+        #expect(runode.tabs[1].panes.map(\.floating) == [false, false, true])
         // 开新标签挨着当前标签里有焦点的分屏。
         #expect(runode.anchor == b)
         #expect(window.workspaces[1].anchor == nil)

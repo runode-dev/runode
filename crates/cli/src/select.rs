@@ -311,8 +311,7 @@ impl World {
         match *selector {
             Selector::Beside(direction) => {
                 let own = self.own_place(selector)?;
-                let others = own.tab.panes.iter().filter(|pane| pane.id != own.pane.id);
-                neighbor(rect(own.pane.rect), direction, others.map(|pane| (pane.id, rect(pane.rect))))
+                neighbor(rect(own.pane.rect), direction, beside(&own))
                     .ok_or_else(|| anyhow!("there is no pane {} of yours", beside_name(direction)))
             }
             Selector::Cycle(forward) => {
@@ -399,15 +398,19 @@ impl World {
             return Vec::new();
         };
         let mut relations = vec![(own.pane.id, "self")];
-        let others = || own.tab.panes.iter().filter(|pane| pane.id != own.pane.id);
         for direction in [Direction::Left, Direction::Right, Direction::Up, Direction::Down] {
-            let candidates = others().map(|pane| (pane.id, rect(pane.rect)));
-            if let Some(id) = neighbor(rect(own.pane.rect), direction, candidates) {
+            if let Some(id) = neighbor(rect(own.pane.rect), direction, beside(&own)) {
                 relations.push((id, direction_name(direction)));
             }
         }
         relations
     }
+}
+
+/// `own` 所在标签里能当它邻居的别的分屏和它们的位置：浮着的压在别的上面，不算谁的邻居。
+fn beside<'a>(own: &Place<'a>) -> impl Iterator<Item = (SessionId, Rect)> + 'a {
+    let (tab, own) = (own.tab, own.pane.id);
+    tab.panes.iter().filter(move |pane| pane.id != own && !pane.floating).map(|pane| (pane.id, rect(pane.rect)))
 }
 
 /// `place` 写成按序号找它的写法。

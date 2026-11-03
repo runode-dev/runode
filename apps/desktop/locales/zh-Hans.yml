@@ -68,6 +68,7 @@ menu:
   next_split: 选择下一个分屏
   zoom_split: 放大分屏
   fold_split: 折叠或展开分屏
+  float_split: 浮动或停靠分屏
   move_split_to_new_tab: 把分屏挪成新标签页
   equalize_splits: 均分分屏
   goto_agent: 前往 agent…
@@ -370,6 +371,8 @@ tooltip:
   restore_split: 还原分屏
   collapse_split: 折叠分屏
   expand_split: 展开分屏
+  float_split: 浮动分屏
+  dock_split: 停靠回原位
   close_preview: 关闭预览
 git:
   ago:
@@ -1415,6 +1418,7 @@ action:
   equalize_splits: 均分分屏
   toggle_split_zoom: 放大或还原当前分屏
   toggle_split_fold: 把当前分屏折叠到标签页底部，或者展开回原位
+  toggle_split_float: 把当前分屏浮到别的分屏上面，或者把浮着的停靠回原位
   arrange_splits: 在当前分屏旁边一次开出几个新终端，先选方向和个数
   new_workspace: 选一个目录，在里面新建工作区
   close_workspace: 关闭工作区和里面所有标签页

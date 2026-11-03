@@ -161,7 +161,7 @@ pub fn controls(fake: &FakeHost) -> Vec<ClientMsg> {
 
 /// 标签里的一个分屏：序号、会话和在标签区域里的位置（0..1000）。
 pub fn pane(index: u32, id: SessionId, (x, y, width, height): (u16, u16, u16, u16), focused: bool) -> PaneLayout {
-    PaneLayout { index, id, rect: PaneRect { x, y, width, height }, focused }
+    PaneLayout { index, id, rect: PaneRect { x, y, width, height }, focused, floating: false }
 }
 
 pub fn tab(index: u32, active: bool, panes: Vec<PaneLayout>) -> TabLayout {

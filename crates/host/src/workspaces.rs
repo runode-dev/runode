@@ -145,7 +145,11 @@ impl Shared {
 /// 只有一个分屏的标签，序号由 `tidy` 排。
 fn tab(id: SessionId) -> TabLayout {
     let rect = PaneRect { x: 0, y: 0, width: PaneRect::EXTENT, height: PaneRect::EXTENT };
-    TabLayout { index: 0, active: false, panes: vec![PaneLayout { index: 0, id, rect, focused: true }] }
+    TabLayout {
+        index: 0,
+        active: false,
+        panes: vec![PaneLayout { index: 0, id, rect, focused: true, floating: false }],
+    }
 }
 
 /// 工作区当前标签里有焦点的分屏的会话；一个标签都没有时为空。`tidy` 过的布局里当前标签、焦点都标着。
@@ -223,7 +227,7 @@ mod tests {
 
     fn pane(n: u128, focused: bool) -> PaneLayout {
         let rect = PaneRect { x: 0, y: 0, width: PaneRect::EXTENT, height: PaneRect::EXTENT };
-        PaneLayout { index: 9, id: id(n), rect, focused }
+        PaneLayout { index: 9, id: id(n), rect, focused, floating: false }
     }
 
     fn workspace(dir: &str, active: bool, tabs: Vec<TabLayout>) -> WorkspaceLayout {

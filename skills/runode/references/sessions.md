@@ -7,7 +7,7 @@ it matches several, runode lists them and fails, and you pick one by id.
 | --- | --- |
 | `3fa9c2d1` | an id or any unique prefix of it, from `runode list` |
 | `self` or `.` | your own terminal |
-| `left` `right` `up` `down` | the pane next to yours |
+| `left` `right` `up` `down` | the pane next to yours; a floating pane is nobody's neighbor |
 | `next` `prev` | the next or previous pane in your tab |
 | `pane:2` | pane 2 of your tab |
 | `tab:3`, `tab:3.2` | tab 3 of your workspace (its focused pane, or pane 2) |

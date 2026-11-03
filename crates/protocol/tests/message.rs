@@ -54,6 +54,7 @@ fn layout() -> Vec<WindowLayout> {
         id: SessionId(id),
         rect: PaneRect { x, y: 0, width: 500, height: PaneRect::EXTENT },
         focused,
+        floating: false,
     };
     vec![WindowLayout {
         index: 1,
@@ -725,6 +726,7 @@ fn layouts_read_with_defaults() {
                         id: ID,
                         rect: PaneRect { x: 0, y: 0, width: PaneRect::EXTENT, height: PaneRect::EXTENT },
                         focused: false,
+                        floating: false,
                     }],
                 }],
             }],
@@ -897,6 +899,25 @@ fn directory_and_workspace_messages() {
         json,
         r#"{"type":"ui_request","ui":2,"request":{"type":"open_workspace","req":8,"dir":"/Users/me/dev","focus":false,"name":null}}"#
     );
+}
+
+/// 浮着的分屏带 `floating`，别的不写这一项；旧的界面不给时读成不浮动。
+#[test]
+fn floating_panes_are_marked() {
+    let rect = PaneRect { x: 200, y: 150, width: 600, height: 650 };
+    let pane = PaneLayout { index: 2, id: ID, rect, focused: true, floating: true };
+    let json = serde_json::to_string(&pane).unwrap();
+    assert_eq!(
+        json,
+        format!(
+            r#"{{"index":2,"id":"{ID}","rect":{{"x":200,"y":150,"width":600,"height":650}},"focused":true,"floating":true}}"#
+        )
+    );
+    assert_eq!(serde_json::from_str::<PaneLayout>(&json).unwrap(), pane);
+    let docked = PaneLayout { floating: false, ..pane };
+    let json = serde_json::to_string(&docked).unwrap();
+    assert!(!json.contains("floating"), "{json}");
+    assert_eq!(serde_json::from_str::<PaneLayout>(&json).unwrap(), docked);
 }
 
 /// 布局里的工作区带着目录；旧的界面不给时读成空的。

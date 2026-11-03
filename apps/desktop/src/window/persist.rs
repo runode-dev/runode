@@ -22,7 +22,7 @@ use gpui::{
     App, Bounds, Context, EntityId, Global, Task, WeakEntity, Window, WindowBounds, WindowOptions, point, px, size,
 };
 use runode_protocol::{SessionInfo, WindowLayout};
-use runode_types::pane::{Node, Split};
+use runode_types::pane::{Node, Rect, Split};
 
 use super::{
     WindowView,
@@ -35,7 +35,9 @@ use crate::{
     prespawn::Prespawned,
     terminal_view::TerminalView,
 };
-use format::{SavedBounds, SavedNode, SavedPanel, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode};
+use format::{
+    SavedBounds, SavedFloat, SavedNode, SavedPanel, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode,
+};
 
 /// 布局变化后等这么久再写文件，拖动窗口、连续切标签时只写一次。
 const WRITE_DELAY: Duration = Duration::from_millis(500);
@@ -406,10 +408,19 @@ impl WindowView {
                 let (focused, collapsed) = saved_leaves(&leaves, saved_tab.focused, &saved_tab.collapsed);
                 let focused = focused.unwrap_or(root.leaves()[0]);
                 let collapsed = collapsed.into_iter().collect();
+                let floating = saved_tab
+                    .floating
+                    .iter()
+                    .filter_map(|saved| {
+                        let pane = leaves.get(saved.pane).copied().flatten()?;
+                        let frame = Rect { x: saved.x, y: saved.y, width: saved.width, height: saved.height };
+                        Some((pane, frame))
+                    })
+                    .collect();
                 if ti <= saved_workspace.active {
                     active_tab = tabs.len();
                 }
-                tabs.push(Tab {
+                let mut tab = Tab {
                     id: self.next_id(),
                     zoomed: saved_tab.zoomed && !root.is_leaf(),
                     collapsed,
@@ -418,7 +429,11 @@ impl WindowView {
                     focused,
                     bell: false,
                     done: Default::default(),
-                });
+                    floating,
+                };
+                // 存档里不浮动的终端都没接上时，浮着的停靠回去。
+                tab.keep_one_docked();
+                tabs.push(tab);
             }
             let panel = saved_workspace.shown_panel().map(|panel| match panel {
                 SavedPanel::Files => SidePanel::Files,
@@ -634,6 +649,14 @@ impl WindowView {
                 .enumerate()
                 .filter(|(_, id)| tab.collapsed.contains(id))
                 .map(|(ix, _)| ix)
+                .collect(),
+            floating: tab
+                .floating
+                .iter()
+                .filter_map(|(id, frame)| {
+                    let pane = tab.root.leaves().iter().position(|leaf| leaf == id)?;
+                    Some(SavedFloat { pane, x: frame.x, y: frame.y, width: frame.width, height: frame.height })
+                })
                 .collect(),
         }
     }

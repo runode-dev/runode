@@ -28,6 +28,7 @@ mod more_menu;
 mod new_tab;
 mod new_workspace;
 mod open;
+mod pane_float;
 mod pane_move;
 mod panes;
 mod persist;
@@ -64,6 +65,7 @@ pub use background::refresh as watch_background;
 pub(crate) use mobile_page::show_pairing;
 pub use mobile_page::watch_devices;
 pub(crate) use open::{open_window, open_window_with};
+pub use pane_float::TogglePaneFloat;
 pub use pane_move::{MovePaneToNewTab, SwapPane};
 pub use persist::saved_window_options;
 #[cfg(windows)]
@@ -349,6 +351,8 @@ pub struct WindowView {
     next_id: u64,
     layout: Rc<RefCell<PaneLayout>>,
     dragging_divider: Option<Divider>,
+    /// 正在拖的浮动终端。
+    float_drag: Option<pane_float::FloatDrag>,
     /// 拖着分屏经过的分屏和落点在它的哪一块，画落点提示用。
     pane_drop: Option<(EntityId, pane_move::DropZone)>,
     /// 窗口的位置和大小，以及所在屏幕的 UUID，存布局用：窗口关掉以后就问不到了。
@@ -496,6 +500,7 @@ impl WindowView {
             next_id: 0,
             layout: Rc::default(),
             dragging_divider: None,
+            float_drag: None,
             pane_drop: None,
             bounds: window.window_bounds(),
             display: Self::display_uuid(window, cx),
@@ -865,6 +870,7 @@ impl Render for WindowView {
                 .children(floating_screens)
         });
         let screen_drag = self.render_screen_drag(cx);
+        let float_drag = self.render_float_drag(cx);
         // 状态栏的浮层不拿焦点，挡住后面的对话框一开就收起，免得叠在对话框上面。状态栏是缓存的视图，等这一帧
         // 画完再通知。
         if modal && self.status_popover.take().is_some() {
@@ -922,6 +928,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::equalize_panes))
             .on_action(Self::act(cx, Self::toggle_pane_zoom))
             .on_action(Self::act(cx, Self::toggle_pane_fold))
+            .on_action(Self::act(cx, Self::toggle_pane_float))
             .on_action(Self::act(cx, Self::swap_pane))
             .on_action(Self::act(cx, Self::move_pane_to_new_tab))
             .on_action(Self::act(cx, Self::new_workspace))
@@ -980,6 +987,7 @@ impl Render for WindowView {
             )
             .children(floating_screens)
             .children(screen_drag)
+            .children(float_drag)
             .children(window_controls)
             .children(resize_edges)
             .children(drag)

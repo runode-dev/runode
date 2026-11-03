@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use runode_cli::exit;
-use runode_protocol::{ClientMsg, HostMsg, SessionId, WindowLayout};
+use runode_protocol::{ClientMsg, HostMsg, PaneLayout, SessionId, WindowLayout};
 use runode_types::{
     agent::{AgentKind, AgentState},
     session::{DriveAction, Driver, SessionMeta},
@@ -124,6 +124,27 @@ fn positions_are_found_from_your_own_pane() {
     {
         assert_eq!(read(&fake, selector), Ok(expected), "{selector}");
     }
+}
+
+/// 浮着的分屏压在别的上面，不算谁的邻居：A 右边是 C，浮在 C 上面、和 A 一样高的 B 不算。
+#[test]
+fn floating_panes_are_nobodys_neighbor() {
+    let floating = PaneLayout { floating: true, ..pane(2, id(B), (500, 350, 300, 300), false) };
+    let panes = vec![pane(1, id(A), (0, 0, 500, 1000), true), floating, pane(3, id(C), (500, 0, 500, 1000), false)];
+    let windows = vec![window(1, true, vec![workspace(1, true, vec![tab(1, true, panes)])])];
+    let fake = app("floating", Some(windows), Some(A));
+    assert_eq!(read(&fake, "right"), Ok(C));
+    assert_eq!(read(&fake, "next"), Ok(B));
+    let (code, out, err) = run("list --json", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let sessions = json["sessions"].as_array().unwrap();
+    let rel = |id: u128| {
+        let row = sessions.iter().find(|row| row["id"] == SessionId(id).to_string()).unwrap();
+        row.get("rel").cloned().unwrap_or_default()
+    };
+    assert_eq!(rel(C), serde_json::json!(["right"]));
+    assert!(rel(B).as_array().is_none_or(Vec::is_empty), "{out}");
 }
 
 #[test]

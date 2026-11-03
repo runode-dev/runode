@@ -99,8 +99,9 @@ struct Detached {
 }
 
 impl Tab {
-    /// 拿出终端 `pane` 和跟着它走的标记，不动布局。
+    /// 拿出终端 `pane` 和跟着它走的标记，不动布局；浮着的不再浮着，挪到哪就停靠在哪。
     fn release(&mut self, pane: EntityId) -> Detached {
+        self.unfloat(pane);
         let entry = self.panes.remove(&pane).expect("the pane was located in this tab");
         Detached { entry, done: self.done.remove(&pane), collapsed: self.collapsed.remove(&pane) }
     }
@@ -237,8 +238,9 @@ impl WindowView {
             Some(next) if tab.focused == pane => {
                 tab.focused = next;
                 tab.zoomed = false;
+                tab.keep_one_docked();
             }
-            Some(_) => {}
+            Some(_) => tab.keep_one_docked(),
             None => _ = workspace.remove_tab(ti),
         }
         detached
@@ -320,7 +322,9 @@ impl WindowView {
     }
 
     pub(super) fn swap_pane(&mut self, action: &SwapPane, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(from), Some(other)) = (self.tab().map(|tab| tab.focused), self.neighbor_pane(action.0)) else {
+        // 浮着的终端不在分屏里，没有可对调的位置。
+        let from = self.tab().filter(|tab| !tab.floats(tab.focused)).map(|tab| tab.focused);
+        let (Some(from), Some(other)) = (from, self.neighbor_pane(action.0)) else {
             return;
         };
         self.swap_panes(from, other, true, window, cx);

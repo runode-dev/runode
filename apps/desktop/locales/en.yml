@@ -68,6 +68,7 @@ menu:
   next_split: Select Next Split
   zoom_split: Zoom Split
   fold_split: Collapse or Expand Split
+  float_split: Float or Dock Split
   move_split_to_new_tab: Move Split to New Tab
   equalize_splits: Equalize Splits
   goto_agent: Go to Agent…
@@ -370,6 +371,8 @@ tooltip:
   restore_split: Restore Split
   collapse_split: Collapse Split
   expand_split: Expand Split
+  float_split: Float Split
+  dock_split: Dock Split
   close_preview: Close Preview
 git:
   ago:

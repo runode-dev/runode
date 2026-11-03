@@ -185,6 +185,19 @@ pub struct SavedTab {
     /// 折叠成只剩标题条的终端在叶子顺序里的位置。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collapsed: Vec<usize>,
+    /// 浮在别的分屏上面的终端，从下到上。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub floating: Vec<SavedFloat>,
+}
+
+/// 浮着的一个终端：它在叶子顺序里的位置，和它在终端区里的位置、大小（按终端区归一化到 0..1）。
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedFloat {
+    pub pane: usize,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 /// 分屏树，结构和 `pane::Node` 一样，叶子记终端所在的目录和宿主里的会话。
@@ -330,6 +343,7 @@ pub fn adopt(
                     focused: 0,
                     zoomed: false,
                     collapsed: Vec::new(),
+                    floating: Vec::new(),
                 })
                 .collect();
             let saved = windows.get_mut(wi).and_then(|window| {

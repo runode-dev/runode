@@ -36,6 +36,7 @@ fn state() -> State {
         focused: 2,
         zoomed: false,
         collapsed: vec![1],
+        floating: vec![SavedFloat { pane: 2, x: 0.2, y: 0.15, width: 0.6, height: 0.65 }],
     };
     State::new(vec![SavedWindow {
         bounds: SavedBounds { display: None, mode: WindowMode::Windowed, x: 10., y: 20., width: 960., height: 620. },
@@ -176,8 +177,10 @@ fn info(id: u128, claimed: bool, exited: bool) -> SessionInfo {
 
 fn window(tabs: Vec<SavedNode>) -> SavedWindow {
     let mut window = state().windows.remove(0);
-    window.workspaces[0].tabs =
-        tabs.into_iter().map(|root| SavedTab { root, focused: 0, zoomed: false, collapsed: Vec::new() }).collect();
+    window.workspaces[0].tabs = tabs
+        .into_iter()
+        .map(|root| SavedTab { root, focused: 0, zoomed: false, collapsed: Vec::new(), floating: Vec::new() })
+        .collect();
     window
 }
 
@@ -304,7 +307,7 @@ fn held(workspaces: Vec<(&str, Option<&str>, Vec<u128>)>) -> Vec<WindowLayout> {
     let tab = |id| TabLayout {
         index: 1,
         active: true,
-        panes: vec![PaneLayout { index: 1, id: SessionId(id), rect, focused: true }],
+        panes: vec![PaneLayout { index: 1, id: SessionId(id), rect, focused: true, floating: false }],
     };
     let workspaces = workspaces
         .into_iter()

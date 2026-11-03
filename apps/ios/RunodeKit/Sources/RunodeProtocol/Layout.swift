@@ -87,15 +87,18 @@ public struct PaneLayout: Hashable, Sendable, Decodable {
     public var rect: PaneRect?
     /// 是标签里有焦点的那个分屏。
     public var focused: Bool
+    /// 浮在别的分屏上面；`rect` 是它浮着的位置，和别的分屏的位置会重叠。
+    public var floating: Bool
 
-    public init(index: UInt32, id: SessionId, rect: PaneRect? = nil, focused: Bool = false) {
+    public init(index: UInt32, id: SessionId, rect: PaneRect? = nil, focused: Bool = false, floating: Bool = false) {
         self.index = index
         self.id = id
         self.rect = rect
         self.focused = focused
+        self.floating = floating
     }
 
-    enum CodingKeys: String, CodingKey { case index, id, rect, focused }
+    enum CodingKeys: String, CodingKey { case index, id, rect, focused, floating }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -103,6 +106,7 @@ public struct PaneLayout: Hashable, Sendable, Decodable {
         id = try c.decode(SessionId.self, forKey: .id)
         rect = try? c.decodeIfPresent(PaneRect.self, forKey: .rect)
         focused = try c.decodeIfPresent(Bool.self, forKey: .focused) ?? false
+        floating = try c.decodeIfPresent(Bool.self, forKey: .floating) ?? false
     }
 }
 

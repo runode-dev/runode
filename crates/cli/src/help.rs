@@ -452,7 +452,8 @@ candidates. It is one of
   ID            a session id or any unique prefix of it, as `runode list` shows
   self, .       your own terminal
   left, right, up, down
-                the pane next to yours in that direction
+                the pane next to yours in that direction; a pane floating
+                over the others is nobody's neighbor
   next, prev    the next or previous pane in your tab, wrapping around
   pane:N        pane N of your tab (of the front window's tab outside Runode)
   tab:N, tab:N.M
