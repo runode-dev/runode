@@ -317,7 +317,7 @@ impl WindowView {
             )
             // 蒙层没有鼠标处理，点击照样落到下面的终端上。
             .when(dimmed, |leaf| {
-                leaf.child(div().absolute().size_full().bg(cx.theme().background.opacity(UNFOCUSED_DIM)))
+                leaf.child(div().absolute().inset_0().bg(cx.theme().background.opacity(UNFOCUSED_DIM)))
             })
             .children(badge)
             .children(self.pane_drop_overlay(id, cx))
