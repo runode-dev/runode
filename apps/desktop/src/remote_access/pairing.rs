@@ -172,7 +172,10 @@ impl Pairing {
                         Self::begin(dirs.clone(), &status, extra, slot, cx)
                     }
                     Ok(_) if *polls < START_POLLS => return,
-                    Ok(_) => Pairing::Failed(rust_i18n::t!("settings.pairing.not_listening").into_owned()),
+                    Ok(_) => {
+                        let port = cx.global::<AppConfig>().0.remote_access_port;
+                        Pairing::Failed(rust_i18n::t!("settings.pairing.not_listening", port = port).into_owned())
+                    }
                     Err(err) => Pairing::Failed(io_failed(err)),
                 }
             }

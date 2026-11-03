@@ -891,7 +891,7 @@ settings:
     hint: "Scan a code with Runode on your phone, or paste the pairing link into Runode on another computer. A paired device can reach this computer while remote access is on."
     start: Pair…
     background: "Remote access stops when Runode quits, and paired devices can no longer connect. Choose Stay Connected After Quitting to keep sessions and remote access running in the background."
-    not_listening: Remote access is not listening. If you just turned it on, try again in a few seconds; otherwise the port may be taken, and the host's log says why.
+    not_listening: "Remote access is not listening on port %{port}. If you just turned it on, try again in a few seconds; otherwise another program is probably using that port, and you can pick a different one under Remote Access in Settings."
     stopped: Remote access stopped while waiting for the phone.
     expired: The code expired before a phone used it.
     replaced: Another pairing (such as runode remote pair) replaced this code.
