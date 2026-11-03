@@ -1351,8 +1351,8 @@ files:
   invalid_name: 「%{name}」不能用作名稱。
   unsupported:
     macos: "這個系統上不支援丟到垃圾桶。"
-    windows: "這個系統上還不能移到資源回收筒。"
-    linux: "這個系統上還不能丟到垃圾桶。"
+    windows: "這個位置沒有資源回收筒。"
+    linux: "這個位置沒有能用的垃圾桶。"
   ok: 好
   search_placeholder: 尋找檔案
   search_name: 名稱

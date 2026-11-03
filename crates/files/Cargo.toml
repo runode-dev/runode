@@ -20,6 +20,10 @@ libc.workspace = true
 objc2.workspace = true
 objc2-foundation = { workspace = true, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
 
+[target.'cfg(windows)'.dependencies]
+# 移到回收站用 SHFileOperationW。
+windows-sys = { workspace = true, features = ["Win32_UI_Shell"] }
+
 [features]
 # 桌面经 ssh 在远端读项目时，两边按 JSON 收发这些类型。
 serde = ["dep:serde"]

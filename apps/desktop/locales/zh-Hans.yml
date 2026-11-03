@@ -1351,8 +1351,8 @@ files:
   invalid_name: 「%{name}」不能用作名字。
   unsupported:
     macos: "这个系统上不支持移到废纸篓。"
-    windows: "这个系统上还不能移到回收站。"
-    linux: "这个系统上还不能移到回收站。"
+    windows: "这个位置没有回收站。"
+    linux: "这个位置没有能用的回收站。"
   ok: 好
   search_placeholder: 查找文件
   search_name: 名称

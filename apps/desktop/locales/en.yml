@@ -1351,8 +1351,8 @@ files:
   invalid_name: "“%{name}” isn't a valid name."
   unsupported:
     macos: "Moving to the Trash isn't supported on this system."
-    windows: "Moving to the Recycle Bin isn't supported on this system yet."
-    linux: "Moving to the Trash isn't supported on this system yet."
+    windows: "There is no Recycle Bin for this location."
+    linux: "There is no usable Trash for this location."
   ok: OK
   search_placeholder: Find files
   search_name: Name

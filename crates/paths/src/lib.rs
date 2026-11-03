@@ -42,6 +42,8 @@ pub struct Dirs {
     pub home: Option<PathBuf>,
     /// 用户配置的根目录：`$XDG_CONFIG_HOME`，没设时 `~/.config`。Ghostty 的配置在这下面。
     pub config: Option<PathBuf>,
+    /// 用户数据的根目录：`$XDG_DATA_HOME`，没设时 `~/.local/share`。Linux 上家目录的回收站在这下面。
+    pub data_home: Option<PathBuf>,
     /// runode 自己的根目录，即家目录下的 `.runode`。配置文件和要留着的数据放在这里。
     pub data: Option<PathBuf>,
     /// 可以重新生成的缓存，即 `data` 下的 `cache`。shell 会执行这里的集成脚本，所以放在
@@ -72,9 +74,16 @@ impl Dirs {
             var("HOME")
         };
         let config = var("XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|home| home.join(".config")));
+        let data_home = var("XDG_DATA_HOME").or_else(|| home.as_ref().map(|home| home.join(".local/share")));
         let data = home.as_ref().map(|home| home.join(DATA_DIR));
         let cache = data.as_ref().map(|data| data.join("cache"));
-        Self { home, config, data, cache, machine: machine_id() }
+        Self { home, config, data_home, data, cache, machine: machine_id() }
+    }
+
+    /// freedesktop 回收站规范里家目录的回收站（`files`、`info` 两个子目录在它下面）；只在 Linux 这类按
+    /// 这份规范的系统上有用。
+    pub fn trash_dir(&self) -> Option<PathBuf> {
+        self.data_home.as_ref().map(|dir| dir.join("Trash"))
     }
 
     /// runode 的配置文件。

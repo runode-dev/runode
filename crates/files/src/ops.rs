@@ -295,9 +295,13 @@ pub fn remove(path: &Path) -> Result {
     Ok(())
 }
 
-/// 把 `path` 移到废纸篓，在访达里能放回原处。
+#[cfg(target_os = "linux")]
+mod freedesktop;
+
+/// 把 `path` 移到废纸篓（回收站），在访达、资源管理器或文件管理器里能放回原处。`home_trash` 是 Linux 上家目录的
+/// 回收站（`Dirs::trash_dir`），别的系统不用。找不到能用的回收站时报 `Unsupported`。
 #[cfg(target_os = "macos")]
-pub fn trash(path: &Path) -> Result {
+pub fn trash(path: &Path, _home_trash: Option<&Path>) -> Result {
     use objc2_foundation::NSFileManager;
 
     let url = file_url(path).map_err(OpError::Io)?;
@@ -321,8 +325,47 @@ fn file_url(path: &Path) -> io::Result<objc2::rc::Retained<objc2_foundation::NSU
     })
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn trash(_: &Path) -> Result {
+#[cfg(target_os = "linux")]
+pub fn trash(path: &Path, home_trash: Option<&Path>) -> Result {
+    freedesktop::trash(path, home_trash).map_err(OpError::Io)
+}
+
+#[cfg(windows)]
+pub fn trash(path: &Path, _home_trash: Option<&Path>) -> Result {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::UI::Shell::{
+        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING, SHFILEOPSTRUCTW,
+        SHFileOperationW,
+    };
+
+    // 要的是以两个 NUL 结尾的路径列表；只能给绝对路径，相对路径按进程的当前目录算。
+    let path = std::path::absolute(path)?;
+    let mut from: Vec<u16> = path.as_os_str().encode_wide().collect();
+    from.extend([0, 0]);
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd: std::ptr::null_mut(),
+        wFunc: FO_DELETE,
+        pFrom: from.as_ptr(),
+        pTo: std::ptr::null(),
+        // 没有回收站的位置（网络盘）上 `FOF_ALLOWUNDO` 会直接删掉，`FOF_WANTNUKEWARNING` 让系统先问一句。
+        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_WANTNUKEWARNING) as u16,
+        fAnyOperationsAborted: 0,
+        hNameMappings: std::ptr::null_mut(),
+        lpszProgressTitle: std::ptr::null(),
+    };
+    // SAFETY: `from` 在调用期间一直活着，以两个 NUL 结尾；别的指针都是空的，系统按文档允许它们为空。
+    let code = unsafe { SHFileOperationW(&mut op) };
+    if code != 0 {
+        return Err(OpError::Io(io::Error::other(format!("SHFileOperationW: 0x{code:x}"))));
+    }
+    if op.fAnyOperationsAborted != 0 {
+        return Err(OpError::Io(io::ErrorKind::Interrupted.into()));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+pub fn trash(_: &Path, _: Option<&Path>) -> Result {
     Err(OpError::Io(io::ErrorKind::Unsupported.into()))
 }
 

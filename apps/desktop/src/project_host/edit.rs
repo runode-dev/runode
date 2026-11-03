@@ -139,6 +139,7 @@ impl ProjectHost {
 
     /// 本机的移到废纸篓；远端的没有废纸篓，直接删掉，调用方先问过要不要永久删除。
     pub(crate) fn delete(&self, path: &Path) -> Result<(), OpError> {
-        self.edit(|| FileOp::Remove { path: path.to_path_buf() }, || ops::trash(path), drop)
+        let home_trash = runode_paths::Dirs::from_env().trash_dir();
+        self.edit(|| FileOp::Remove { path: path.to_path_buf() }, || ops::trash(path, home_trash.as_deref()), drop)
     }
 }
