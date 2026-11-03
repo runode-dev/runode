@@ -997,7 +997,7 @@ mobile:
   copy_hint: "To pair another computer, paste the link into Runode there: Add Remote Host → Runode Pairing. It expires along with the code."
   expires: "Expires in %{time}"
   regenerate: "New Code"
-  off: "Remote access is off. With it on, paired phones can reach this computer's terminals over the local network or Tailscale."
+  off: "Remote access is off. With it on, paired phones and computers can reach this computer's terminals over the local network or Tailscale."
   turn_on: "Turn On Remote Access"
   generate: "Show Code"
   retry: "Try Again"

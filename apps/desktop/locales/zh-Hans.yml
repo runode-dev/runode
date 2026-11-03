@@ -997,7 +997,7 @@ mobile:
   copy_hint: "要配对另一台电脑，在那台电脑的 Runode 里选「添加远程主机 → Runode 配对」，粘贴这个链接。有效期和二维码一样。"
   expires: "%{time} 后过期"
   regenerate: "重新生成"
-  off: "远程访问还没打开。打开后，配对过的手机能经局域网或 Tailscale 连上这台电脑的终端。"
+  off: "远程访问还没打开。打开后，配对过的手机和电脑能经局域网或 Tailscale 连上这台电脑的终端。"
   turn_on: "打开远程访问"
   generate: "生成二维码"
   retry: "重试"

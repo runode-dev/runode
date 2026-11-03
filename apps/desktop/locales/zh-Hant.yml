@@ -997,7 +997,7 @@ mobile:
   copy_hint: "要配對另一台電腦，在那台電腦的 Runode 裡選「新增遠端主機 → Runode 配對」，貼上這個連結。有效期和 QR 碼一樣。"
   expires: "%{time} 後過期"
   regenerate: "重新產生"
-  off: "遠端存取還沒打開。打開後，配對過的手機能經區域網路或 Tailscale 連上這台電腦的終端機。"
+  off: "遠端存取還沒打開。打開後，配對過的手機和電腦能經區域網路或 Tailscale 連上這台電腦的終端機。"
   turn_on: "打開遠端存取"
   generate: "產生 QR 碼"
   retry: "重試"
