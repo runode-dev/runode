@@ -728,21 +728,17 @@ impl SettingsView {
             .collect();
         let reset = self.reset(KEY, cx);
         let error = self.errors.get(KEY).cloned();
-        div()
-            .flex()
-            .flex_col()
-            .child(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, error, theme))
-            .child(
-                div()
-                    .id(KEY)
-                    .role(gpui::Role::Group)
-                    .aria_label(key_title(KEY))
-                    .py(px(10.))
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(6.))
-                    .children(chips),
-            )
+        div().flex().flex_col().child(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, error, theme)).child(
+            div()
+                .id(KEY)
+                .role(gpui::Role::Group)
+                .aria_label(key_title(KEY))
+                .py(px(10.))
+                .flex()
+                .flex_wrap()
+                .gap(px(6.))
+                .children(chips),
+        )
     }
 
     fn render_config_files(&mut self, theme: &Theme, window: &mut Window, cx: &mut Context<Self>) -> Div {

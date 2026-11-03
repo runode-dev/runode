@@ -73,14 +73,7 @@ impl SettingsView {
         let title = rust_i18n::t!("settings.dictation.title").into_owned();
         // 按钮只写「下载」「删除」，套进以「模型文件」命名的一组，读屏才听得出下载、删除的是什么。
         let button = div().id("dictation-model-files").role(gpui::Role::Group).aria_label(title.clone()).child(button);
-        row(
-            title,
-            Some(status.into_owned().into()),
-            button,
-            None,
-            error,
-            theme,
-        )
+        row(title, Some(status.into_owned().into()), button, None, error, theme)
     }
 }
 
