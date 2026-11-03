@@ -17,7 +17,10 @@ use std::{
     collections::{HashMap, HashSet},
     net::{Shutdown, SocketAddr},
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Condvar, LazyLock, Mutex, MutexGuard, PoisonError, Weak,
+        atomic::{AtomicU64, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -202,8 +205,24 @@ pub struct PairedHost {
     addr: Mutex<Option<SocketAddr>>,
     /// 这台眼下各次拨号共用的取消句柄，`stop_dialing` 时取消、换一个新的。
     dialing: Mutex<Cancel>,
-    /// 登记过的专用连接（`hold`），断开时一起关掉。
-    channels: Mutex<Vec<UnixStream>>,
+    /// 登记着的专用连接（`hold`），按登记的编号记，断开时一起关掉。
+    channels: Mutex<HashMap<u64, UnixStream>>,
+    /// 下一个 `hold` 用的编号。
+    next_channel: AtomicU64,
+}
+
+/// `PairedHost::hold` 的登记，丢掉时撤销，登记时复制的那份连接跟着关掉。
+pub struct Held {
+    host: Weak<PairedHost>,
+    id: u64,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        if let Some(host) = self.host.upgrade() {
+            host.channels.lock().unwrap_or_else(PoisonError::into_inner).remove(&self.id);
+        }
+    }
 }
 
 /// 专用连接开不了。
@@ -329,6 +348,7 @@ impl PairedHost {
             addr: Mutex::new(None),
             dialing: Mutex::default(),
             channels: Mutex::default(),
+            next_channel: AtomicU64::new(0),
         }
     }
 
@@ -362,12 +382,16 @@ impl PairedHost {
         }
     }
 
-    /// 登记专用连接 `stream`：断开这台或终端那条连接断了时关掉它。
-    pub fn hold(&self, stream: &UnixStream) {
+    /// 登记专用连接 `stream`：断开这台或终端那条连接断了时关掉它。调用方用完这条连接时丢掉交回的 `Held`。
+    pub fn hold(self: &Arc<Self>, stream: &UnixStream) -> Held {
+        let id = self.next_channel.fetch_add(1, Ordering::Relaxed);
         match stream.try_clone() {
-            Ok(stream) => self.channels.lock().unwrap_or_else(PoisonError::into_inner).push(stream),
+            Ok(stream) => {
+                self.channels.lock().unwrap_or_else(PoisonError::into_inner).insert(id, stream);
+            }
             Err(err) => tracing::warn!("cannot keep track of a connection to the paired computer {}: {err}", self.id),
         }
+        Held { host: Arc::downgrade(self), id }
     }
 
     fn dialing(&self) -> Cancel {
@@ -381,7 +405,7 @@ impl PairedHost {
     }
 
     fn close_channels(&self) {
-        for stream in self.channels.lock().unwrap_or_else(PoisonError::into_inner).drain(..) {
+        for (_, stream) in self.channels.lock().unwrap_or_else(PoisonError::into_inner).drain() {
             let _ = stream.shutdown(Shutdown::Both);
         }
     }

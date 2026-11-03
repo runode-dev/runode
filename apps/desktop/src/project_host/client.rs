@@ -187,10 +187,10 @@ impl Client {
         }
         let hello = ChannelHello::ProjectHello { build: crate::host_client::build().0 };
         let stream = host.open_channel(&hello).map_err(|err| err.to_string())?;
-        host.hold(&stream);
+        let held = host.hold(&stream);
         let input =
             stream.try_clone().map_err(|err| format!("cannot use the connection to {}: {err}", self.label()))?;
-        Conn::start(&self.name, Box::new(input), stream, || {})
+        Conn::start(&self.name, Box::new(input), stream, move || drop(held))
     }
 
     /// 经 SSH 主机 `name` 的主连接起 `runode --ssh-project`。

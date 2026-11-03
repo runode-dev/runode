@@ -203,8 +203,8 @@ enum Arrival {
 enum Transport {
     /// SSH 主机：起着 `runode --ssh-screen` 的 ssh。
     Ssh(Child),
-    /// 配对的电脑：拨过去的那条连接。
-    Socket(UnixStream),
+    /// 配对的电脑：拨过去的那条连接和它在 `PairedHost` 里的登记。
+    Socket(UnixStream, paired::Held),
 }
 
 impl Drop for ScreenLink {
@@ -216,7 +216,7 @@ impl Drop for ScreenLink {
                     let _ = child.wait();
                 });
             }
-            Some(Transport::Socket(stream)) => {
+            Some(Transport::Socket(stream, _held)) => {
                 let _ = stream.shutdown(Shutdown::Both);
             }
             None => {}
@@ -262,9 +262,9 @@ pub fn open(
         HostId::Paired(id) => {
             let host = paired::find(id).ok_or_else(|| format!("no such host: {name}"))?;
             let stream = host.dial().map_err(|err| err.to_string())?;
-            host.hold(&stream);
+            let held = host.hold(&stream);
             let clone = || stream.try_clone().map_err(|err| format!("cannot use the connection to {name}: {err}"));
-            (Box::new(clone()?), Box::new(clone()?), Transport::Socket(stream))
+            (Box::new(clone()?), Box::new(clone()?), Transport::Socket(stream, held))
         }
         HostId::Local => return Err("the remote desktop is for other computers".into()),
     };
