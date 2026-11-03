@@ -88,6 +88,7 @@ pub(super) fn serve_with(mut input: impl BufRead, output: impl Write + Send + 's
     let caches = Shared::new(Mutex::new(Caches { places, ..Caches::default() }));
     // 在办的请求各自的停止标记，按编号记。
     let running = Arc::new(Mutex::new(HashMap::<u64, Arc<AtomicBool>>::new()));
+    let _stop_all = StopAll(running.clone());
     loop {
         let request = match wire::read_line::<Request>(&mut input) {
             Ok(Some(request)) => request,
@@ -124,6 +125,17 @@ pub(super) fn serve_with(mut input: impl BufRead, output: impl Write + Send + 's
         if let Err(err) = spawned {
             tracing::warn!("cannot start a thread: {err}");
             return 1;
+        }
+    }
+}
+
+/// `serve_with` 返回时把还在办的请求都叫停：回话已经没人收，停得下的（按内容找、等改动）不再白跑。
+struct StopAll(Arc<Mutex<HashMap<u64, Arc<AtomicBool>>>>);
+
+impl Drop for StopAll {
+    fn drop(&mut self) {
+        for stop in self.0.lock().unwrap_or_else(PoisonError::into_inner).values() {
+            stop.store(true, Ordering::Relaxed);
         }
     }
 }
@@ -376,6 +388,29 @@ mod tests {
         assert!(serde_json::from_value::<runode_git::Result<String>>(diff).unwrap().unwrap().contains("+hello"));
         fs::remove_dir_all(dir.join(".git")).unwrap();
         assert!(matches!(run(GitOp::StageAll), Reply::Failed(_)));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 对面断开时在等改动的请求马上停下，不等满 `WATCH_HOLD`。
+    #[test]
+    fn a_closed_connection_stops_the_calls_in_flight() {
+        let dir = std::env::temp_dir().join(format!("runode-project-closed-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (requests, mut to_service) = std::io::pipe().unwrap();
+        let (mut from_service, responses) = std::io::pipe().unwrap();
+        let service = std::thread::spawn(move || serve_with(BufReader::new(requests), responses, Places::default()));
+        let watch = |id| Request { id, call: Call::Watch { token: 1, dirs: vec![dir.clone()] }, blob: 0 };
+        wire::write(&mut to_service, &watch(1), &[]).unwrap();
+        let mut from_service_lines = BufReader::new(&mut from_service);
+        let started = wire::read_line::<Response>(&mut from_service_lines).unwrap().unwrap();
+        assert_eq!(started.id, 1);
+        wire::write(&mut to_service, &watch(2), &[]).unwrap();
+        let begun = Instant::now();
+        drop(to_service);
+        assert_eq!(service.join().unwrap(), 0);
+        let waited = wire::read_line::<Response>(&mut from_service_lines).unwrap().unwrap();
+        assert_eq!(waited.id, 2);
+        assert!(begun.elapsed() < WATCH_HOLD / 2, "waited {:?}", begun.elapsed());
         fs::remove_dir_all(&dir).ok();
     }
 
