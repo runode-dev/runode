@@ -358,9 +358,13 @@ impl PairedHost {
             return Err(ChannelError::Broken(format!("not connected to the paired computer {}", self.id)));
         }
         let prefer = *self.addr.lock().unwrap_or_else(PoisonError::into_inner);
-        client::dial_via(&dirs(), &self.id, prefer, &self.dialing())
-            .map(|dialed| dialed.stream)
-            .map_err(ChannelError::Dial)
+        let cancel = self.dialing().ok_or(ChannelError::Dial(DialError::Cancelled))?;
+        let dialed = client::dial_via(&dirs(), &self.id, prefer, &cancel).map_err(ChannelError::Dial)?;
+        // 拨通的同时断开了：`close_channels` 已经关过，这条不交出去。
+        if cancel.is_cancelled() {
+            return Err(ChannelError::Dial(DialError::Cancelled));
+        }
+        Ok(dialed.stream)
     }
 
     /// 开一条专用连接：拨号过门禁后发 `hello`、等那边回话，`ChannelReady` 后交回两边原样搬字节的 socket。会阻塞。
@@ -394,8 +398,11 @@ impl PairedHost {
         Held { host: Arc::downgrade(self), id }
     }
 
-    fn dialing(&self) -> Cancel {
-        self.dialing.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    /// 这次拨号用的取消句柄；已经断开、忘掉了这台时为空。先取句柄再看 `State::wanted`：清掉 `wanted` 之后换上
+    /// 的新句柄不会被拿去拨。
+    fn dialing(&self) -> Option<Cancel> {
+        let cancel = self.dialing.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        self.state().wanted.then_some(cancel)
     }
 
     /// 取消正在拨的连接（终端那条和另拨的），之后的拨号用新的句柄。
@@ -591,7 +598,10 @@ impl PairedHost {
         let handed = self.handed.lock().unwrap_or_else(PoisonError::into_inner).take();
         let dialed = match handed {
             Some(dialed) => dialed,
-            None => client::dial(&dirs(), &self.id, &self.dialing()).map_err(|err| classify(&err))?,
+            None => {
+                let cancel = self.dialing().ok_or_else(|| classify(&DialError::Cancelled))?;
+                client::dial(&dirs(), &self.id, &cancel).map_err(|err| classify(&err))?
+            }
         };
         remember(&dialed.machine);
         tracing::info!("dialed the paired computer {} at {:?}", self.id, dialed.addr);
