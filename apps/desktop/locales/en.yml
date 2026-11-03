@@ -598,6 +598,13 @@ settings:
   remove: Remove
   language_name: English
   invalid: "Not a valid value: %{err}"
+  config_error:
+    number: "Enter a number"
+    positive: "Enter a number greater than 0"
+    seconds: "Enter a number of seconds, 0 or more"
+    bool: "Enter true or false"
+    port: "Enter a port from 1 to 65535"
+    color: "That isn't a color"
   no_home: There is no home directory to keep the configuration file in
   write_failed: "Could not write the configuration file: %{err}"
   reset: Remove from the configuration file and go back to the default

@@ -598,6 +598,13 @@ settings:
   remove: 刪除
   language_name: 繁體中文
   invalid: "這個值不對：%{err}"
+  config_error:
+    number: "要填一個數"
+    positive: "要填一個大於 0 的數"
+    seconds: "要填不小於 0 的秒數"
+    bool: "要填 true 或 false"
+    port: "要填 1 到 65535 之間的連接埠號"
+    color: "認不出這個顏色"
   no_home: 找不到主目錄，沒地方放設定檔
   write_failed: "沒能寫入設定檔：%{err}"
   reset: 從設定檔裡刪掉這一項，回到預設

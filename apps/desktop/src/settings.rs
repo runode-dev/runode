@@ -350,7 +350,7 @@ impl SettingsView {
         let old = self.file.values(key);
         for value in values.iter().filter(|value| !old.contains(value)) {
             runode_config::check_value(key, value)
-                .map_err(|err| rust_i18n::t!("settings.invalid", err = err).into_owned())?;
+                .map_err(|err| rust_i18n::t!("settings.invalid", err = config_error(&err)).into_owned())?;
         }
         self.write_unchecked(key, &values, cx)
     }
@@ -511,9 +511,37 @@ impl Render for SettingsView {
     }
 }
 
+/// 读配置时报的错是英文的（`runode_config` 只有英文），设置页上常见的几种换成界面语言，别的照原文。
+pub(crate) fn config_error(err: &str) -> String {
+    let key = match err {
+        "expected a number" => "settings.config_error.number",
+        "expected a positive number" => "settings.config_error.positive",
+        "expected a non-negative number of seconds" => "settings.config_error.seconds",
+        "expected true or false" => "settings.config_error.bool",
+        "expected a port from 1 to 65535" => "settings.config_error.port",
+        "not a color" => "settings.config_error.color",
+        _ => return err.to_owned(),
+    };
+    rust_i18n::t!(key).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 设置页上几种常见的错按读配置时报的原文换成界面语言：原文改了这里就对不上了。
+    #[test]
+    fn common_config_errors_are_translated() {
+        for (key, value) in [
+            ("preview-font-size", "abc"),
+            ("cursor-style-blink-timeout", "-1"),
+            ("remote-access-port", "0"),
+            ("cursor-style-blink", "maybe"),
+        ] {
+            let err = runode_config::check_value(key, value).unwrap_err();
+            assert_ne!(config_error(&err), err, "{key}={value}: {err}");
+        }
+    }
 
     #[test]
     fn palette_lines_have_an_index() {

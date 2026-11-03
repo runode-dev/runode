@@ -472,7 +472,7 @@ impl SettingsView {
                 });
             // 同一行写错两次时 `row` 给的错误 id 一样，包一层按第几次出现取 id 的外层隔开。
             let wrap = SharedString::from(format!("bad-keybind-{line}-{nth}"));
-            let error = Some(rust_i18n::t!("settings.invalid", err = err).into());
+            let error = Some(rust_i18n::t!("settings.invalid", err = super::config_error(&err)).into());
             out.push(div().id(wrap).child(row(line, None, remove, None, error, theme)).into_any_element());
         }
 

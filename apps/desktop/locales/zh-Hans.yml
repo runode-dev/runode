@@ -598,6 +598,13 @@ settings:
   remove: 删除
   language_name: 简体中文
   invalid: "这个值不对：%{err}"
+  config_error:
+    number: "要填一个数"
+    positive: "要填一个大于 0 的数"
+    seconds: "要填不小于 0 的秒数"
+    bool: "要填 true 或 false"
+    port: "要填 1 到 65535 之间的端口号"
+    color: "认不出这个颜色"
   no_home: 找不到主目录，没地方放配置文件
   write_failed: "没能写入配置文件：%{err}"
   reset: 从配置文件里删掉这一项，回到默认
