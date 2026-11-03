@@ -865,6 +865,13 @@ impl TodoDialog {
     }
 
     /// 能「保存并开始」：是任务，还没开始过也没做完。
+    /// 挑着的 agent 问过了、找不到它的命令。
+    fn agent_missing(&self) -> bool {
+        self.agent.as_ref().is_some_and(|pick| {
+            !self.loading.contains(&pick.agent) && self.failed.get(&pick.agent) == Some(&Unanswered::Missing)
+        })
+    }
+
     fn startable(&self) -> bool {
         match &self.editing {
             None => !self.schedule,
@@ -1246,9 +1253,7 @@ impl TodoDialog {
                     .children(model.map(|model| column("kanban.dialog.model", model)))
                     .children(effort.map(|effort| column("kanban.dialog.effort", effort)));
                 // 找不到命令时开始了也只会在终端里报错，挑的时候就说出来。
-                let missing = (!self.loading.contains(&pick.agent)
-                    && self.failed.get(&pick.agent) == Some(&Unanswered::Missing))
-                .then(|| {
+                let missing = self.agent_missing().then(|| {
                     let note = rust_i18n::t!("kanban.dialog.agent_missing", agent = launcher.label).into_owned();
                     div()
                         .id("todo-dialog-agent-missing")
@@ -1397,14 +1402,17 @@ impl TodoDialog {
         let save = button("todo-dialog-save", rust_i18n::t!("kanban.save").into_owned(), ButtonVariant::Secondary)
             .when(self.saving, |button| button.opacity(0.5))
             .on_press(cx, |this, _, cx| this.save(false, cx));
+        // 找不到 agent 的命令时开始了也只会在终端里报错，只让先存下来。
+        let missing = self.agent_missing();
         let save_and_start = self.startable().then(|| {
             button(
                 "todo-dialog-save-start",
                 rust_i18n::t!("kanban.save_and_start").into_owned(),
                 ButtonVariant::Default,
             )
+            .disabled(missing)
             .when(self.saving, |button| button.opacity(0.5))
-            .on_press(cx, |this, _, cx| this.save(true, cx))
+            .when(!missing, |button| button.on_press(cx, |this, _, cx| this.save(true, cx)))
         });
         // 报错放在按钮左边的空处，不另占一行，免得把上面各栏挤出可见范围。
         div()
