@@ -174,8 +174,11 @@ impl FileTree {
         let (text, select) = match &target {
             EditTarget::New { dir, .. } => {
                 self.with_tree(cx, |state, root, filter| {
+                    state.split_at = Some(dir.clone());
                     if dir != root && !state.expanded.contains(dir) {
                         state.toggle_dir(dir, root, filter);
+                    } else {
+                        state.rebuild_rows(root, filter);
                     }
                 });
                 let name = typed.unwrap_or_default();
@@ -209,6 +212,7 @@ impl FileTree {
         let Some(FileEdit { target, edit }) = self.edit.take() else {
             return;
         };
+        self.end_split(cx);
         let name = edit.text(cx);
         edit.release_focus(&self.focus, window, cx);
         cx.notify();
@@ -219,6 +223,15 @@ impl FileTree {
             EditTarget::New { dir, is_dir } => self.create_entry(&dir, &name, is_dir, window, cx),
             EditTarget::Rename { path, is_dir } => self.rename_entry(&path, is_dir, &name, window, cx),
         }
+    }
+
+    /// 新建的输入框关掉了：拆开的目录重新并成一行。
+    pub(super) fn end_split(&mut self, cx: &mut Context<Self>) {
+        self.with_tree(cx, |state, root, filter| {
+            if state.split_at.take().is_some() {
+                state.rebuild_rows(root, filter);
+            }
+        });
     }
 
     /// 新建或改名没成：弹框说为什么，关掉以后把输入框和刚才输的 `name` 放回去，改了再试。

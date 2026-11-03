@@ -416,12 +416,14 @@ impl FileTree {
     /// 之后显示的、操作的都是 workspace `ws` 的树：框里的搜索词存回原来那个 workspace，换上这个 workspace 的
     /// 词重搜。和上次是同一个时什么也不做。会重画，不能在画的时候调。
     pub fn switch_workspace(&mut self, ws: WorkspaceId, cx: &mut Context<Self>) {
-        let old = self.ws.replace(ws);
-        if old == Some(ws) {
+        if self.ws == Some(ws) {
             return;
         }
         // 开着的改名、新建框作用在原来那个 workspace 的树上，切走就当取消。
-        self.edit = None;
+        if self.edit.take().is_some() {
+            self.end_split(cx);
+        }
+        let old = self.ws.replace(ws);
         // 首次扫描还没回来时旧 workspace 可能还没有树，搜索词也要记下；关掉了的（`forget_workspace`）不记。
         if let Some(old) = old {
             self.workspaces.entry(old).or_default().query = self.search.query(cx);

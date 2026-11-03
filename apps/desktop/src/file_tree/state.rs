@@ -75,8 +75,10 @@ pub(crate) struct TreeState {
     git_changes: Option<(Arc<git::Repos>, GitChanges)>,
     pub expanded: HashSet<PathBuf>,
     pub listings: HashMap<PathBuf, Vec<DirEntry>>,
-    /// 文件树里选中的路径。
+    /// 文件树里选中的路径；可以是并成一行的目录里的任何一段。
     pub selected: Option<PathBuf>,
+    /// 在这个目录里新建时，并成一行的目录到它为止拆开，新建的输入框才能放在它下面。
+    pub split_at: Option<PathBuf>,
     pub rows: Vec<FileRow>,
     /// 搜索框的搜索词：搜索框整个窗口一个，切走时把框里的词存在这里，切回来时放回去。
     pub query: String,
@@ -122,6 +124,9 @@ impl TreeState {
             let mut name = entry.name.to_string_lossy().into_owned();
             if entry.is_dir {
                 for _ in 0..MAX_COMPACT {
+                    if self.split_at.as_ref() == Some(&path) {
+                        break;
+                    }
                     let Some(child) = self.listings.get(&path).and_then(|entries| single_dir(entries)) else {
                         break;
                     };

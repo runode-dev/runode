@@ -141,6 +141,14 @@ fn compacts_single_child_dirs() {
     assert_eq!(state.selected_row(), Some(0));
     assert_eq!(state.select_step(1), Some(1));
     assert_eq!(state.selected, Some(PathBuf::from("/p/crates/app/src")));
+    // 在中间那一段里新建时，链条到它为止拆开。
+    state.split_at = Some("/p/crates".into());
+    state.expanded.insert("/p/crates".into());
+    state.rebuild_rows(root, ALL);
+    assert_eq!(names(&state)[..3], [("crates".into(), 0), ("app".into(), 1), ("src".into(), 2)]);
+    state.split_at = None;
+    state.rebuild_rows(root, ALL);
+    assert_eq!(names(&state)[0], ("crates / app".into(), 0));
     // 收起整行时选中的那一段不在收起的目录里面，照旧选中。
     state.selected = Some("/p/crates".into());
     state.toggle_dir(Path::new("/p/crates/app"), root, ALL);
