@@ -157,17 +157,16 @@ impl WindowView {
         self.with_preview(cx, |panel, cx| panel.refresh_if_changed(cx));
     }
 
-    /// 「交给 agent」贴给谁：当前分屏没在跑 agent、这个标签里别的分屏在跑时是那个分屏（按布局里的先后取第一个），
-    /// 否则为空，贴进当前分屏。贴进一个光是 shell 的分屏，多行的块会被当成命令。
+    /// 「交给 agent」贴给谁：当前分屏没在跑 agent、这个标签里别的分屏在跑时是那个分屏（按布局里的先后取第一个，
+    /// 不取开在单独窗口里的），否则为空，贴进当前分屏。贴进一个光是 shell 的分屏，多行的块会被当成命令。
     fn quote_target(&self, cx: &App) -> Option<EntityId> {
         let tab = self.tab()?;
         if tab.focused_view().read(cx).agent().is_some() {
             return None;
         }
-        tab.root
-            .leaves()
-            .into_iter()
-            .find(|id| tab.panes.get(id).is_some_and(|(view, _)| view.read(cx).agent().is_some()))
+        tab.root.leaves().into_iter().find(|id| {
+            !tab.popped.contains(id) && tab.panes.get(id).is_some_and(|(view, _)| view.read(cx).agent().is_some())
+        })
     }
 
     /// 监听到 `paths` 变了：当前预览的文件在里面就重读。
