@@ -60,10 +60,14 @@ pub fn scaled(points: f32) -> Rems {
     rems(points / BASE)
 }
 
-/// 配置的界面字号，窗口的 rem 设成它。配置值被限在一个范围内：太小时列表一行里定死大小的按钮和图标
-/// 会被截掉；太大时标题栏、标签、分屏标题条和状态栏的高度跟着窗口按钮定死，字就装不下了。
+/// 界面字号能取的范围：太小时列表一行里定死大小的按钮和图标会被截掉；太大时标题栏、标签、分屏标题条和
+/// 状态栏的高度跟着窗口按钮定死，字就装不下了。
+pub const UI_FONT_SIZE_MIN: f32 = 11.;
+pub const UI_FONT_SIZE_MAX: f32 = 20.;
+
+/// 配置的界面字号，窗口的 rem 设成它，限在 `UI_FONT_SIZE_MIN` 到 `UI_FONT_SIZE_MAX` 之间。
 pub fn rem_size(cx: &App) -> Pixels {
-    px(cx.global::<UiFontSize>().0.clamp(11., 20.))
+    px(cx.global::<UiFontSize>().0.clamp(UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX))
 }
 
 /// 界面相对基准字号放大的倍数。要拿长度做算术时（估宽度、拖动的上下限）乘上它。

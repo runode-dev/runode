@@ -283,9 +283,14 @@ impl SettingsView {
             return;
         };
         field.pending = None;
-        let text = field.input.read(cx).query().trim().to_owned();
+        let typed = field.input.read(cx).query().trim().to_owned();
         let (input, commit) = (field.input.clone(), field.commit.clone());
+        let text = clamp_field(&commit, &typed);
+        let clamped = text != typed;
         if text == self.field_text(&commit) {
+            if clamped {
+                input.update(cx, |input, cx| input.set_query(text, cx));
+            }
             self.errors.remove(id);
             cx.notify();
             return;
@@ -293,7 +298,7 @@ impl SettingsView {
         // 清空一行删掉了它，下面的行往上挪了一格。
         let mut removed = false;
         let written = match commit {
-            Commit::Value(key) => self.write(key, self.single(key, text), cx),
+            Commit::Value(key) => self.write(key, self.single(key, text.clone()), cx),
             Commit::Item(key, ix) => {
                 let mut values = self.list_values(key);
                 match (ix < values.len(), text.is_empty()) {
@@ -301,9 +306,9 @@ impl SettingsView {
                         values.remove(ix);
                         removed = true;
                     }
-                    (true, false) => values[ix] = text,
+                    (true, false) => values[ix] = text.clone(),
                     (false, true) => {}
-                    (false, false) => values.push(text),
+                    (false, false) => values.push(text.clone()),
                 }
                 self.write(key, values, cx)
             }
@@ -316,6 +321,10 @@ impl SettingsView {
                 self.write("palette", values, cx)
             }
         };
+        // 超出范围改成了能取的值，框里也换成它，免得写着一个没生效的数。
+        if written.is_ok() && clamped {
+            input.update(cx, |input, cx| input.set_query(text, cx));
+        }
         let removed = removed && written.is_ok();
         match written {
             Ok(()) => drop(self.errors.remove(id)),
@@ -523,6 +532,17 @@ impl Render for SettingsView {
     }
 }
 
+/// 有上下限的项（界面字号）超出范围时换成能取的边界值，别的原样。
+fn clamp_field(commit: &Commit, text: &str) -> String {
+    use crate::ui::font_size::{UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN};
+    match (commit, text.parse::<f32>()) {
+        (Commit::Value("ui-font-size"), Ok(size)) if size.is_finite() => {
+            size.clamp(UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX).to_string()
+        }
+        _ => text.to_owned(),
+    }
+}
+
 /// 读配置时报的错是英文的（`runode_config` 只有英文），设置页上常见的几种换成界面语言，别的照原文。
 pub(crate) fn config_error(err: &str) -> String {
     let key = match err {
@@ -540,6 +560,16 @@ pub(crate) fn config_error(err: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_ui_font_size_is_clamped_when_written() {
+        let size = Commit::Value("ui-font-size");
+        assert_eq!(clamp_field(&size, "30"), "20");
+        assert_eq!(clamp_field(&size, "9"), "11");
+        assert_eq!(clamp_field(&size, "13.5"), "13.5");
+        assert_eq!(clamp_field(&size, "abc"), "abc");
+        assert_eq!(clamp_field(&Commit::Value("font-size"), "30"), "30");
+    }
 
     /// 设置页上几种常见的错按读配置时报的原文换成界面语言：原文改了这里就对不上了。
     #[test]
