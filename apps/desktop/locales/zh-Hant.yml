@@ -553,7 +553,7 @@ git:
     cherry_pick: 正在揀選：解決衝突並暫存後提交
     revert: 正在還原：解決衝突並暫存後提交
   worktree:
-    open_in_new_tab: 在新的終端機分頁中開啟
+    open_in_new_tab: 在新終端機分頁中打開
     remove: 刪除工作樹…
     remove_title: "刪除工作樹「%{name}」？"
     remove_detail: 它的目錄會被刪除，它所在的分支保留。
