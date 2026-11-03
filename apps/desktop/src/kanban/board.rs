@@ -742,11 +742,9 @@ impl Kanban {
     }
 }
 
-/// 目录名首字母的小方块，颜色按名字取，同一个目录的卡片颜色一样。
+/// 目录名首字母的小方块。
 fn place_badge(place: &str) -> Div {
-    const COLORS: [u32; 6] = [0x10B981, 0x3B82F6, 0x8B5CF6, 0xF59E0B, 0xEC4899, 0x06B6D4];
-    let initial = place.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default();
-    let hash = place.bytes().fold(0usize, |hash, byte| hash.wrapping_mul(31).wrapping_add(byte.into()));
+    let (initial, color) = crate::ui::avatar::letter_avatar(place);
     div()
         .flex_none()
         .size(scaled(16.))
@@ -754,7 +752,7 @@ fn place_badge(place: &str) -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .bg(gpui::rgb(COLORS[hash % COLORS.len()]))
+        .bg(crate::ui::hsla(color))
         .text_size(FontSize::Tiny)
         .font_weight(FontWeight::BOLD)
         .text_color(gpui::white())

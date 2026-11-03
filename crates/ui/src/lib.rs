@@ -6,6 +6,7 @@
 
 pub mod a11y;
 pub mod actions;
+pub mod avatar;
 pub mod badge;
 pub mod button;
 pub mod card;
