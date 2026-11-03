@@ -184,7 +184,8 @@ impl Client {
         let hello = ChannelHello::ProjectHello { build: crate::host_client::build().0 };
         let stream = host.open_channel(&hello).map_err(|err| err.to_string())?;
         host.hold(&stream);
-        let input = stream.try_clone().map_err(|err| format!("cannot use the connection to {}: {err}", self.label()))?;
+        let input =
+            stream.try_clone().map_err(|err| format!("cannot use the connection to {}: {err}", self.label()))?;
         Conn::start(&self.name, Box::new(input), stream, || {})
     }
 
