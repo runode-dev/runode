@@ -127,6 +127,24 @@ fn compacts_single_child_dirs() {
     state.expanded.insert("/p/crates/app".into());
     state.rebuild_rows(root, ALL);
     assert_eq!(names(&state)[1..3], [("src".into(), 1), ("Cargo.toml".into(), 1)]);
+
+    // 链条里的每一段都能单独选中，选中的行仍是并起来的那一行。
+    let row = &state.rows[0];
+    let segments: Vec<_> = row.segments().into_iter().map(|(path, name)| (path, name.to_string())).collect();
+    assert_eq!(
+        segments,
+        [(PathBuf::from("/p/crates"), "crates".into()), (PathBuf::from("/p/crates/app"), "app".into())]
+    );
+    assert!(row.holds(Path::new("/p/crates")) && row.holds(Path::new("/p/crates/app")));
+    assert!(!row.holds(Path::new("/p")) && !row.holds(Path::new("/p/crates/app/src")));
+    state.selected = Some("/p/crates".into());
+    assert_eq!(state.selected_row(), Some(0));
+    assert_eq!(state.select_step(1), Some(1));
+    assert_eq!(state.selected, Some(PathBuf::from("/p/crates/app/src")));
+    // 收起整行时选中的那一段不在收起的目录里面，照旧选中。
+    state.selected = Some("/p/crates".into());
+    state.toggle_dir(Path::new("/p/crates/app"), root, ALL);
+    assert_eq!(state.selected, Some(PathBuf::from("/p/crates")));
 }
 
 #[test]
@@ -217,12 +235,13 @@ fn reveals_the_terminal_dir() {
     assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 0), ("c".into(), 1), ("y".into(), 2), ("x".into(), 1)]);
     assert_eq!(state.selected, Some(PathBuf::from("/p/b/c")));
 
-    // 终端目录在并成一行的链条中间时，展开到链条尽头。
+    // 终端目录在并成一行的链条中间时，展开到链条尽头，选中的是链条里的那一段。
     state.listings.insert("/p/a".into(), vec![dir("m")]);
     state.listings.insert("/p/a/m".into(), vec![file("z")]);
     state.reveal_dir(Path::new("/p/a"), root, ALL);
     assert_eq!(names(&state)[..2], [("a / m".into(), 0), ("z".into(), 1)]);
-    assert_eq!(state.selected, Some(PathBuf::from("/p/a/m")));
+    assert_eq!(state.selected, Some(PathBuf::from("/p/a")));
+    assert_eq!(state.selected_row(), Some(0));
 }
 
 #[test]

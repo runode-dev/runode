@@ -29,12 +29,36 @@ pub(crate) struct TreeFilter {
 pub(crate) struct FileRow {
     /// 并成一行的目录是链条最深的那个。
     pub path: PathBuf,
+    /// 并成一行的目录是链条最上面的那个，没并的行等于 `path`。
+    pub top: PathBuf,
     /// 并成一行的目录是「a / b / c」。
     pub name: SharedString,
     pub depth: usize,
     pub is_dir: bool,
     pub expanded: bool,
     pub decoration: Decoration,
+}
+
+impl FileRow {
+    /// `path` 是这一行，或者是并进这一行的链条里的一段。
+    pub(crate) fn holds(&self, path: &Path) -> bool {
+        path.starts_with(&self.top) && self.path.starts_with(path)
+    }
+
+    /// 并成一行的目录从上到下的每一段：路径和名字。没并的行只有一段。
+    pub(crate) fn segments(&self) -> Vec<(PathBuf, SharedString)> {
+        let mut segments: Vec<_> = self
+            .path
+            .ancestors()
+            .take_while(|dir| dir.starts_with(&self.top))
+            .map(|dir| {
+                let name = dir.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                (dir.to_path_buf(), name.into())
+            })
+            .collect();
+        segments.reverse();
+        segments
+    }
 }
 
 /// 一个 workspace 的文件树。
@@ -89,6 +113,7 @@ impl TreeState {
         };
         for entry in entries {
             let mut path = dir.join(&entry.name);
+            let top = path.clone();
             let hidden = (!filter.ignored && decorator.of(&path, entry.is_dir) == Decoration::Ignored)
                 || (!filter.dotfiles && entry.name.as_encoded_bytes().starts_with(b"."));
             if hidden {
@@ -122,6 +147,7 @@ impl TreeState {
                 expanded,
                 decoration: decorator.of(&path, entry.is_dir),
                 path: path.clone(),
+                top,
             });
             if expanded {
                 self.push_dir(&path, depth + 1, decorator, filter, rows);
@@ -172,7 +198,7 @@ impl TreeState {
             })
             .collect();
         if !holding.is_empty() {
-            self.selected = holding.into_iter().find(|dir| self.rows.iter().any(|row| row.path == **dir)).cloned();
+            self.selected = holding.into_iter().find(|dir| self.rows.iter().any(|row| row.holds(dir))).cloned();
         }
         let Some((path, expand, strategy)) = self.pending_reveal.take() else {
             return;
@@ -218,9 +244,9 @@ impl TreeState {
 
     /// 在文件树里展开到 `path` 所在的目录，选中它、滚到能看见。已经显示着时只选中，不重排。
     pub(crate) fn reveal_file(&mut self, path: &Path, root: &Path, filter: TreeFilter) {
-        if let Some(ix) = self.rows.iter().position(|row| row.path == path) {
+        if let Some(ix) = self.rows.iter().position(|row| row.holds(path)) {
             self.pending_reveal = None;
-            self.select_row(ix);
+            self.selected = Some(path.to_path_buf());
             self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
             return;
         }
@@ -262,19 +288,14 @@ impl TreeState {
         }
         self.expanded.extend(chain);
         self.rebuild_rows(root, filter);
-        // 并成一行的目录，行的路径是链条最深的那个，`path` 在链条中间时找不到原样的路径。
-        let rows = &self.rows;
-        let found = rows
-            .iter()
-            .position(|row| row.path == path)
-            .or_else(|| rows.iter().position(|row| row.path.starts_with(path)));
+        let found = self.rows.iter().position(|row| row.holds(path));
         // 要读的目录还没读回来、或者还排不出 `path` 那一行时（重读已经发出去了），读回来以后再定位一次。
         self.pending_reveal =
             (!self.to_list.is_empty() || found.is_none()).then(|| (path.to_path_buf(), expand, strategy));
         let Some(ix) = found else {
             return;
         };
-        self.selected = Some(rows[ix].path.clone());
+        self.selected = Some(path.to_path_buf());
         self.scroll.scroll_to_item(ix, strategy);
     }
 
@@ -326,10 +347,10 @@ impl TreeState {
         }
     }
 
-    /// 选中的行在 `rows` 里的位置。
+    /// 选中的行在 `rows` 里的位置；选中的是并成一行的目录里的一段时是那一行。
     pub(crate) fn selected_row(&self) -> Option<usize> {
         let selected = self.selected.as_ref()?;
-        self.rows.iter().position(|row| row.path == *selected)
+        self.rows.iter().position(|row| row.holds(selected))
     }
 
     /// 键盘上下移动选中的行，`step` 为负往上；没选中时往下从第一行开始，往上从最后一行开始。
@@ -436,7 +457,7 @@ impl TreeState {
                 let selected = self.selected.take();
                 self.selected = collapsed.into_iter().find(|dir| {
                     selected.as_deref().is_some_and(|selected| selected.starts_with(dir))
-                        && self.rows.iter().any(|row| row.path == *dir)
+                        && self.rows.iter().any(|row| row.holds(dir))
                 });
             }
         }

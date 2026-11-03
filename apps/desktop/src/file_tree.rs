@@ -24,6 +24,7 @@ use std::{
     collections::HashMap,
     ops::Range,
     path::{Path, PathBuf},
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -66,7 +67,7 @@ pub use search::SearchOptions;
 use edit::{FileClipboard, FileEdit};
 use listing::Decoration;
 use search::FileSearch;
-use state::{TreeFilter, TreeState};
+use state::{FileRow, TreeFilter, TreeState};
 
 actions!(
     runode,
@@ -361,6 +362,8 @@ pub struct FileTree {
     show_dotfiles: bool,
     /// 「更多」按钮画在哪，它的菜单从按钮下面开出来。
     anchors: MenuAnchors,
+    /// 鼠标按在并成一行的目录的哪一段上：段先收到按下，行随后选中这一段，不选整行。
+    pressed_segment: Option<PathBuf>,
 }
 
 impl EventEmitter<FileTreeEvent> for FileTree {}
@@ -396,6 +399,7 @@ impl FileTree {
             show_ignored: false,
             show_dotfiles: true,
             anchors: MenuAnchors::default(),
+            pressed_segment: None,
         }
     }
 
@@ -765,7 +769,8 @@ impl FileTree {
             Decoration::None | Decoration::Ignored => fg.opacity(0.85),
             Decoration::Status(status) | Decoration::ContainsChanges(status) => hsla(status_color(status)),
         };
-        let selected = self.state().selected.as_ref() == Some(&row.path);
+        let selected_path = self.state().selected.clone().filter(|selected| row.holds(selected));
+        let selected = selected_path.is_some();
         let cut = self.clipboard.as_ref().is_some_and(|clip| clip.cut && clip.path == row.path);
         let chevron = row.is_dir.then(|| {
             svg()
@@ -784,9 +789,12 @@ impl FileTree {
         };
         let status = badge;
         let badge = badge.map(|text| div().flex_none().pl(px(6.)).text_color(color).child(text));
-        let renaming = self.renaming(&row.path);
+        let renaming = self.renaming(row);
         let name: AnyElement = match renaming {
             Some(edit) => edit.render(px(font_size + 6.)).flex_1().min_w_0().into_any_element(),
+            None if row.top != row.path => {
+                self.render_segments(row, selected_path.as_deref(), font_size, color, cx).into_any_element()
+            }
             None => div().min_w_0().truncate().text_color(color).child(row.name.clone()).into_any_element(),
         };
         // 改名时在输入框里拖选文字，不能把整行拖走。
@@ -802,13 +810,14 @@ impl FileTree {
         let drop_dir =
             if is_dir { path.clone() } else { path.parent().map_or_else(|| self.files_root(), Path::to_path_buf) };
         let expanded = row.expanded;
+        let this_row = Rc::new(row.clone());
         // 辅助工具按下时打开文件、展开或收起目录；目录还能直接展开、收起。
         let a11y = |want: Option<bool>, cx: &mut Context<Self>| {
-            let (view, path) = (cx.entity().downgrade(), path.clone());
+            let (view, path, row) = (cx.entity().downgrade(), path.clone(), this_row.clone());
             move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
                 view.update(cx, |this, cx| match want {
                     // 正在改名的那一行不动。
-                    _ if this.renaming(&path).is_some() => {}
+                    _ if this.renaming(&row).is_some() => {}
                     Some(want) if want == expanded => {}
                     Some(_) => {
                         this.state_mut().selected = Some(path.clone());
@@ -858,29 +867,36 @@ impl FileTree {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener({
-                        let path = path.clone();
+                        let (path, row) = (path.clone(), this_row.clone());
                         move |this, _: &MouseDownEvent, window, cx| {
                             // 点在改名输入框里时交给输入框挪光标、选字。
                             cx.stop_propagation();
-                            if this.renaming(&path).is_some() {
+                            let segment = this.pressed_segment.take();
+                            if this.renaming(&row).is_some() {
                                 return;
                             }
                             window.focus(&this.focus, cx);
-                            this.state_mut().selected = Some(path.clone());
+                            this.state_mut().selected = Some(segment.unwrap_or_else(|| path.clone()));
                             cx.notify();
                         }
                     }),
                 )
                 // 按下只选中，松开才展开目录、打开预览：拖动时 GPUI 不发点击，拖走的文件不会被打开。
                 .on_click(cx.listener({
-                    let path = path.clone();
+                    let (path, row) = (path.clone(), this_row.clone());
                     move |this, event: &ClickEvent, _, cx| {
                         // 双击时 GPUI 按一下、两下各发一次点击，目录只认第一下，不然刚展开又收起。
                         if is_dir && event.click_count() >= 2 {
                             return;
                         }
-                        if this.renaming(&path).is_none() {
-                            this.click_file(&path, is_dir, event.click_count(), cx);
+                        if this.renaming(&row).is_some() {
+                            return;
+                        }
+                        // 按在并成一行的目录的某一段上时，展开收起的是整行，选中的仍是那一段。
+                        let segment = this.state().selected.clone().filter(|selected| row.holds(selected));
+                        this.click_file(&path, is_dir, event.click_count(), cx);
+                        if let Some(segment) = segment {
+                            this.state_mut().selected = Some(segment);
                         }
                     }
                 }))
@@ -902,6 +918,80 @@ impl FileTree {
                 }))
                 .into_any_element(),
         )
+    }
+
+    /// 并成一行的目录的名字，每一段单独能选：按下选中那一段（展开收起仍是整行），右键菜单、拖动和
+    /// 放下都作用在那一段上。`selected` 是选中的那一段，不在这一行时为空。
+    fn render_segments(
+        &self,
+        row: &FileRow,
+        selected: Option<&Path>,
+        font_size: f32,
+        color: Hsla,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = cx.theme();
+        let (selected_bg, drop_bg) = (theme.mix(0.22), theme.mix(0.20));
+        let segments = row.segments();
+        let last = segments.len().saturating_sub(1);
+        let view = cx.entity().downgrade();
+        let mut name = div().flex_1().min_w_0().flex().items_center().overflow_hidden().text_color(color);
+        for (ix, (path, label)) in segments.into_iter().enumerate() {
+            if ix > 0 {
+                name = name.child(div().flex_none().px(px(2.)).opacity(0.6).child("/"));
+            }
+            let dragged = DraggedFile {
+                path: path.clone(),
+                name: label.clone(),
+                width: px(180.),
+                height: px(font_size + ROW_EXTRA_HEIGHT),
+            };
+            let segment = div()
+                .id(ElementId::Path(Arc::from(path.as_path())))
+                .role(Role::Button)
+                .aria_label(label.clone())
+                .px(px(2.))
+                .rounded(px(3.))
+                .when(ix == last, |segment| segment.min_w_0().truncate())
+                .when(ix != last, |segment| segment.flex_none())
+                .when(selected == Some(path.as_path()), |segment| segment.bg(selected_bg))
+                .child(label)
+                // 辅助工具按下时选中这一段，菜单里的操作随后作用在它上面。
+                .on_a11y_press(view.clone(), {
+                    let path = path.clone();
+                    move |this, window, cx| {
+                        window.focus(&this.focus, cx);
+                        this.state_mut().selected = Some(path.clone());
+                        cx.notify();
+                    }
+                })
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener({
+                        let path = path.clone();
+                        move |this, _: &MouseDownEvent, _, _| this.pressed_segment = Some(path.clone())
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener({
+                        let path = path.clone();
+                        move |this, event: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            window.focus(&this.focus, cx);
+                            this.state_mut().selected = Some(path.clone());
+                            this.open_file_menu(event.position, cx);
+                        }
+                    }),
+                )
+                .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                .drag_over::<DraggedFile>(move |style, _, _, _| style.bg(drop_bg))
+                .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
+                    this.drop_file(&dragged.path, path.clone(), window, cx);
+                }));
+            name = name.child(segment);
+        }
+        name
     }
 
     /// 点击（按下又松开、没拖动）选中，目录同时展开或收起。文件按 app 交来的单击打不打开（`Input::single_click`）

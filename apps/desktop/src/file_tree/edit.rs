@@ -14,7 +14,8 @@ use gpui::{AnyElement, Context, PromptButton, PromptLevel, Role, ScrollStrategy,
 use runode_files::ops::{self, OpError};
 
 use crate::file_tree::{
-    AddToGitignore, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder, RenameFile, WorkspaceId, state::TreeState,
+    AddToGitignore, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder, RenameFile, WorkspaceId,
+    state::{FileRow, TreeState},
 };
 
 /// 剪切或复制下来等着粘贴的文件或目录。
@@ -103,13 +104,13 @@ impl FileTree {
             return true;
         }
         self.reveal_file(path, cx);
-        *path == self.files_root() || self.state().rows.iter().any(|row| row.path == path)
+        *path == self.files_root() || self.state().rows.iter().any(|row| row.holds(path))
     }
 
-    /// 正在改 `path` 的名字时是那个输入框。
-    pub(super) fn renaming(&self, path: &Path) -> Option<&InlineEdit> {
+    /// 正在改 `row` 这一行的名字（并成一行的目录是其中任何一段）时是那个输入框。
+    pub(super) fn renaming(&self, row: &FileRow) -> Option<&InlineEdit> {
         let edit = self.edit.as_ref()?;
-        matches!(&edit.target, EditTarget::Rename { path: renaming, .. } if renaming == path).then_some(&edit.edit)
+        matches!(&edit.target, EditTarget::Rename { path, .. } if row.holds(path)).then_some(&edit.edit)
     }
 
     /// 新建时输入框占的那一行：插在第几行、缩进几层。目录的那一行找不到时放在最上面，
@@ -119,7 +120,7 @@ impl FileTree {
             return None;
         };
         let rows = &self.state().rows;
-        let row = rows.iter().position(|row| row.path == *dir).filter(|_| *dir != self.files_root());
+        let row = rows.iter().position(|row| row.holds(dir)).filter(|_| *dir != self.files_root());
         Some(row.map_or((0, 0), |ix| (ix + 1, rows[ix].depth + 1)))
     }
 
