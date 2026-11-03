@@ -12,7 +12,7 @@
 | `git` | 用 git 命令行读仓库，做暂存、提交、分支、stash、工作树和同步；读到的状态可以序列化（`serde` 特性），桌面经 ssh 从远端取 | std、serde（`serde` 特性）、libc（Unix） |
 | `todo` | 看板的 SQLite 库（`Store`）和定时（`next_fire`），以及本地时间和 Unix 时间的换算（`LocalTime`）；宿主在跑时改看板仍经宿主的消息，它才会告诉在看看板的前端 | types、rusqlite、libc |
 | `tasks` | 一个目录里能跑的命令：`tasks.json`、Makefile 目标、package.json scripts；改写 `tasks.json` 里自己加的命令和快捷键（`file`），怎么认键由调用方给 | types、paths、serde_json |
-| `files` | 项目目录里不碰界面的文件操作：读文件树的目录（`list_dirs`）、列出所有文件（`walk_files`）、新建改名移动复制、移到废纸篓和直接删掉（`ops`）、有上限地读文件（`read_limited`）、监听改动（`watch`）；桌面在本机直接用，远端主机上的由那边的 `runode --ssh-project` 调，结果按 `serde` 特性序列化传回 | notify、tracing、serde（`serde` 特性）、libc（Unix）、objc2、objc2-foundation（macOS）、windows-sys（Windows） |
+| `files` | 项目目录里不碰界面的文件操作：读文件树的目录（`list_dirs`）、列出所有文件（`walk_files`）、新建改名移动复制、移到废纸篓和直接删掉（`ops`）、有上限地读文件（`read_limited`）、监听改动（`watch`）；桌面在本机直接用，远端主机上的由那边的 `runode --ssh-project` 调，结果按 `serde` 特性序列化传回 | notify、tracing、serde（`serde` 特性）、libc（Unix）、objc2、objc2-foundation（macOS）、windows 和 windows-core（Windows） |
 | `preview` | 文件预览不碰界面的部分：判断读到的文件能怎么显示（`decode`）、语法高亮、解析 Markdown；读文件经 `files`，界面是 `desktop` 的 `preview_panel` | std、syntect、two-face、pulldown-cmark、regex |
 | `agent` | 认出终端前台跑的 AI 编程 agent，判断它在干活、空闲还是等回答；起 agent 时挑模型和强度、续上次的对话，向 agent 本身问模型清单（`models`）；只打印结果地跑一次 agent（`oneshot`） | types、serde、serde_json、regex、toml、memchr、libc |
 | `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上（Windows 上是 ConPTY，`pty` 的 `conpty`），shell 集成，认出运行完的命令；三个平台上读别的进程的命令行（`pty` 的 `process_args`） | types、paths、agent、libghostty-vt、portable-pty、memchr、anyhow、tracing、libc（Unix）、windows-sys（Windows） |

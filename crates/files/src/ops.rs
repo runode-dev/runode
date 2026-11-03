@@ -297,6 +297,8 @@ pub fn remove(path: &Path) -> Result {
 
 #[cfg(target_os = "linux")]
 mod freedesktop;
+#[cfg(windows)]
+mod recycle_bin;
 
 /// 把 `path` 移到废纸篓（回收站），在访达、资源管理器或文件管理器里能放回原处。`home_trash` 是 Linux 上家目录的
 /// 回收站（`Dirs::trash_dir`），别的系统不用。找不到能用的回收站时报 `Unsupported`。
@@ -332,57 +334,7 @@ pub fn trash(path: &Path, home_trash: Option<&Path>) -> Result {
 
 #[cfg(windows)]
 pub fn trash(path: &Path, _home_trash: Option<&Path>) -> Result {
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows_sys::Win32::UI::Shell::{
-        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING, SHFILEOPSTRUCTW,
-        SHFileOperationW,
-    };
-
-    // 要的是以两个 NUL 结尾的路径列表；只能给绝对路径，相对路径按进程的当前目录算。
-    let path = std::path::absolute(path)?;
-    if !on_fixed_disk(&path) {
-        return Err(OpError::Io(io::ErrorKind::Unsupported.into()));
-    }
-    let mut from: Vec<u16> = path.as_os_str().encode_wide().collect();
-    from.extend([0, 0]);
-    let mut op = SHFILEOPSTRUCTW {
-        hwnd: std::ptr::null_mut(),
-        wFunc: FO_DELETE,
-        pFrom: from.as_ptr(),
-        pTo: std::ptr::null(),
-        // 万一漏过了没有回收站的位置，`FOF_WANTNUKEWARNING` 让有桌面的会话先问一句再删。
-        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_WANTNUKEWARNING) as u16,
-        fAnyOperationsAborted: 0,
-        hNameMappings: std::ptr::null_mut(),
-        lpszProgressTitle: std::ptr::null(),
-    };
-    // SAFETY: `from` 在调用期间一直活着，以两个 NUL 结尾；别的指针都是空的，系统按文档允许它们为空。
-    let code = unsafe { SHFileOperationW(&mut op) };
-    if code != 0 {
-        return Err(OpError::Io(io::Error::other(format!("SHFileOperationW: 0x{code:x}"))));
-    }
-    if op.fAnyOperationsAborted != 0 {
-        return Err(OpError::Io(io::ErrorKind::Interrupted.into()));
-    }
-    Ok(())
-}
-
-/// `path` 在本机的固定磁盘上。只有这样的卷有回收站：网络共享、映射的网络盘、U 盘上 `FOF_ALLOWUNDO` 不起作用，
-/// 没有桌面的会话（经 ssh 跑的项目服务）里 `FOF_WANTNUKEWARNING` 也不问，`SHFileOperationW` 会直接删掉。
-#[cfg(windows)]
-fn on_fixed_disk(path: &Path) -> bool {
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows_sys::Win32::{
-        Storage::FileSystem::{GetDriveTypeW, GetVolumePathNameW},
-        System::WindowsProgramming::DRIVE_FIXED,
-    };
-
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
-    let mut root = vec![0u16; wide.len() + 1];
-    // SAFETY: `wide` 以 NUL 结尾；`root` 比路径长，装得下它所在卷的根，长度照实传。
-    let found = unsafe { GetVolumePathNameW(wide.as_ptr(), root.as_mut_ptr(), root.len() as u32) };
-    // SAFETY: `GetVolumePathNameW` 成功时 `root` 里是以 NUL 结尾的卷根。
-    found != 0 && unsafe { GetDriveTypeW(root.as_ptr()) } == DRIVE_FIXED
+    recycle_bin::trash(path).map_err(OpError::Io)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
@@ -393,6 +345,28 @@ pub fn trash(_: &Path, _: Option<&Path>) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn trash_recycles_on_a_fixed_disk() {
+        let path = std::env::temp_dir().join(format!("runode-trash-{}.txt", std::process::id()));
+        fs::write(&path, "x").unwrap();
+        trash(&path, None).unwrap();
+        assert!(!path.exists());
+    }
+
+    /// 关了回收站的盘上系统会直接删掉，不能让它删。要先在临时目录所在的盘上关掉回收站，所以默认不跑。
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "needs the recycle bin turned off on the temp directory's drive"]
+    fn trash_refuses_when_the_recycle_bin_is_off() {
+        let path = std::env::temp_dir().join(format!("runode-trash-off-{}.txt", std::process::id()));
+        fs::write(&path, "x").unwrap();
+        let err = trash(&path, None).unwrap_err();
+        assert!(matches!(err, OpError::Io(err) if err.kind() == io::ErrorKind::Unsupported));
+        assert!(path.exists());
+        fs::remove_file(&path).unwrap();
+    }
 
     /// 网络共享上没有回收站，不能让系统直接删掉。经本机的管理共享 `C$` 访问，有的机器关了它，所以默认不跑。
     #[cfg(windows)]
