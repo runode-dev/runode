@@ -854,6 +854,7 @@ impl WindowView {
             return;
         }
         tab.focused = next;
+        tab.keep_one_docked();
         tab.zoomed = false;
         if shown {
             self.activate(ti, window, cx);
