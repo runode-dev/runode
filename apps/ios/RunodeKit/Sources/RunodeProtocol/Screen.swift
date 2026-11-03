@@ -142,6 +142,22 @@ public struct ScreenDisplay: Hashable, Sendable, Decodable, Identifiable {
     }
 }
 
+/// 远程桌面停下的原因归到哪类，线上写 snake_case。
+public enum ScreenStopCause: String, Hashable, Sendable {
+    /// 电脑屏幕上没人登录。
+    case signedOut = "signed_out"
+    /// 屏幕上没有 Runode 所用的那个用户登录着的桌面（X11 或 Wayland）。
+    case noDesktop = "no_desktop"
+    /// 屏幕上登录着别的用户。
+    case otherUser = "other_user"
+    /// Mac 没给 Runode 屏幕录制权限。
+    case noScreenCapture = "no_screen_capture"
+    /// 屏幕共享的授权框被拒绝了，或者没人点。
+    case declined
+    /// 建不出能编这个 app 解得了的格式的编码器，重连也看不了。
+    case noEncoder = "no_encoder"
+}
+
 /// 电脑发给手机的远程桌面消息。
 public enum ScreenHostMsg: Hashable, Sendable, Decodable {
     /// 握手后的第一条。`displays` 是开着的各块屏幕，主屏排第一。授权不够时采集（`screenCapture`）或输入
@@ -151,8 +167,8 @@ public enum ScreenHostMsg: Hashable, Sendable, Decodable {
     case incompatible(version: UInt32)
     /// 开始采集了，接下来第一帧是关键帧；`display` 是采的那块屏幕，之后的输入落在它上面。
     case started(display: UInt32, width: UInt32, height: UInt32)
-    /// 采集停了或者开不起来。`noEncoder` 说电脑上建不出能编这个 app 解得了的格式的编码器，重连也看不了。
-    case stopped(reason: String, noEncoder: Bool)
+    /// 采集停了或者开不起来。`reason` 是电脑给的原文；`cause` 是归了的类，电脑没归类或者分出了这个 app 不认得的类时为空。
+    case stopped(reason: String, cause: ScreenStopCause?)
     /// 电脑锁没锁屏：`ready` 之后马上报一次，之后变了再报。
     case lock(locked: Bool)
     /// 用户在电脑上打开或关掉了输入授权，`postEvent` 的含义和 `ready` 里的一样。`screenCapture` 是 `ready` 时的值，
@@ -168,6 +184,8 @@ public enum ScreenHostMsg: Hashable, Sendable, Decodable {
         case screenCapture = "screen_capture"
         case postEvent = "post_event"
         case noEncoder = "no_encoder"
+        case signedOut = "signed_out"
+        case cause
     }
 
     public init(from decoder: any Decoder) throws {
@@ -185,9 +203,13 @@ public enum ScreenHostMsg: Hashable, Sendable, Decodable {
                 display: try c.decode(UInt32.self, forKey: .display), width: try c.decode(UInt32.self, forKey: .width),
                 height: try c.decode(UInt32.self, forKey: .height))
         case "stopped":
+            // 不带 `cause` 的电脑（老版本，或者分了这边不认得的类）照两个标志归类。
+            let cause = try c.decodeIfPresent(String.self, forKey: .cause).flatMap(ScreenStopCause.init(rawValue:))
+            let signedOut = try c.decodeIfPresent(Bool.self, forKey: .signedOut) ?? false
+            let noEncoder = try c.decodeIfPresent(Bool.self, forKey: .noEncoder) ?? false
             self = .stopped(
                 reason: try c.decode(String.self, forKey: .reason),
-                noEncoder: try c.decodeIfPresent(Bool.self, forKey: .noEncoder) ?? false)
+                cause: cause ?? (signedOut ? .signedOut : noEncoder ? .noEncoder : nil))
         case "lock":
             self = .lock(locked: try c.decode(Bool.self, forKey: .locked))
         case "permissions":

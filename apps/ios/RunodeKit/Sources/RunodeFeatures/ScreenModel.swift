@@ -131,10 +131,8 @@ public final class ScreenModel {
             videoSize = CGSize(width: Int(width), height: Int(height))
             onVideoReset?()
             phase = .live
-        case .message(.stopped(let reason, let noEncoder)):
-            let noEncoderReason = String(
-                localized: "那台电脑上没有能用的视频编码器（比如没装媒体功能包的 Windows N 版），看不了它的屏幕")
-            phase = .failed(noEncoder ? noEncoderReason : reason)
+        case .message(.stopped(let reason, let cause)):
+            phase = .failed(cause.map(Self.explanation) ?? reason)
         case .message(.permissions(let screenCapture, let postEvent)):
             missingPermissions = Self.missing(screenCapture: screenCapture, postEvent: postEvent)
         case .message(.lock(let isLocked)):
@@ -385,6 +383,27 @@ public final class ScreenModel {
         if char.isLetter { return .key(char.uppercased(), mods: mods) }
         if char.isNumber { return .key("Digit\(char)", mods: mods) }
         return .text(text)
+    }
+
+    /// 电脑归了类的停下原因给人看的说明和办法；手机上停下后不自己重连，都说办好了再重新连接。
+    nonisolated static func explanation(_ cause: ScreenStopCause) -> String {
+        switch cause {
+        case .signedOut:
+            String(localized: "那台电脑上没人登录，有人登录后再重新连接")
+        case .noDesktop:
+            String(
+                localized:
+                    "那台电脑的屏幕上没有 Runode 所用的那个用户登录着的桌面（X11 或 Wayland）：用这个用户在它屏幕上登录桌面后再重新连接；没装桌面的服务器看不了")
+        case .otherUser:
+            String(
+                localized: "那台电脑的屏幕上登录着别的用户。远程桌面只能看 Runode 所用的那个用户自己的桌面：在它屏幕上登录或切换到这个用户，再重新连接")
+        case .noScreenCapture:
+            String(localized: "那台 Mac 还没给 Runode 屏幕录制权限：在那台 Mac 的「系统设置 › 隐私与安全性 › 屏幕与系统录音」里打开 Runode 的开关，再重新连接")
+        case .declined:
+            String(localized: "那台电脑没允许共享屏幕：它屏幕上的授权框被拒绝了，或者没人点。重新连接会再问一次，请在那台电脑的屏幕上点「共享」")
+        case .noEncoder:
+            String(localized: "那台电脑上没有能用的视频编码器（比如没装媒体功能包的 Windows N 版），看不了它的屏幕")
+        }
     }
 
     nonisolated static func missing(screenCapture: Bool, postEvent: Bool) -> [String] {

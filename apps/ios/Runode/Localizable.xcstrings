@@ -8243,6 +8243,52 @@
         }
       }
     },
+    "那台 Mac 还没给 Runode 屏幕录制权限：在那台 Mac 的「系统设置 › 隐私与安全性 › 屏幕与系统录音」里打开 Runode 的开关，再重新连接" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That Mac has no Screen Recording permission for Runode yet: turn on Runode in System Settings › Privacy & Security › Screen & System Audio Recording on that Mac, then reconnect"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台 Mac 还没给 Runode 屏幕录制权限：在那台 Mac 的「系统设置 › 隐私与安全性 › 屏幕与系统录音」里打开 Runode 的开关，再重新连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台 Mac 還沒給 Runode 螢幕錄製權限：在那台 Mac 的「系統設定 › 隱私權與安全性 › 螢幕與系統錄音」裡打開 Runode 的開關，再重新連線"
+          }
+        }
+      }
+    },
+    "那台电脑上没人登录，有人登录后再重新连接" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nobody is signed in on that computer. Reconnect once someone signs in"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台电脑上没人登录，有人登录后再重新连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台電腦上沒有人登入，有人登入後再重新連線"
+          }
+        }
+      }
+    },
     "那台电脑上没有能用的视频编码器（比如没装媒体功能包的 Windows N 版），看不了它的屏幕" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8262,6 +8308,75 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "那台電腦上沒有可用的影片編碼器（例如沒裝媒體功能套件的 Windows N 版），無法查看它的螢幕"
+          }
+        }
+      }
+    },
+    "那台电脑没允许共享屏幕：它屏幕上的授权框被拒绝了，或者没人点。重新连接会再问一次，请在那台电脑的屏幕上点「共享」" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screen sharing was not allowed on that computer: the prompt on its screen was declined or nobody answered it. Reconnect to ask again, then choose Share on that screen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台电脑没允许共享屏幕：它屏幕上的授权框被拒绝了，或者没人点。重新连接会再问一次，请在那台电脑的屏幕上点「共享」"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台電腦沒有允許分享螢幕：它螢幕上的授權視窗被拒絕了，或者沒有人點。重新連線會再問一次，請在那台電腦的螢幕上點「分享」"
+          }
+        }
+      }
+    },
+    "那台电脑的屏幕上没有 Runode 所用的那个用户登录着的桌面（X11 或 Wayland）：用这个用户在它屏幕上登录桌面后再重新连接；没装桌面的服务器看不了" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No desktop is signed in on that computer's screen for the user Runode runs as there (X11 or Wayland): sign in to a desktop session on its screen as that user, then reconnect. A server without a desktop cannot be viewed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台电脑的屏幕上没有 Runode 所用的那个用户登录着的桌面（X11 或 Wayland）：用这个用户在它屏幕上登录桌面后再重新连接；没装桌面的服务器看不了"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台電腦的螢幕上沒有 Runode 所用的那個使用者登入著的桌面（X11 或 Wayland）：用這個使用者在它螢幕上登入桌面後再重新連線；沒裝桌面的伺服器無法查看"
+          }
+        }
+      }
+    },
+    "那台电脑的屏幕上登录着别的用户。远程桌面只能看 Runode 所用的那个用户自己的桌面：在它屏幕上登录或切换到这个用户，再重新连接" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Someone else is signed in on that computer's screen. Remote desktop shows only the desktop of the user Runode runs as there: sign in as that user on its screen (or switch to them), then reconnect"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台电脑的屏幕上登录着别的用户。远程桌面只能看 Runode 所用的那个用户自己的桌面：在它屏幕上登录或切换到这个用户，再重新连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台電腦的螢幕上登入著別的使用者。遠端桌面只能查看 Runode 所用的那個使用者自己的桌面：在它螢幕上登入或切換到這個使用者，再重新連線"
           }
         }
       }

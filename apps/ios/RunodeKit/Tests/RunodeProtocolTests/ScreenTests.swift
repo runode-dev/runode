@@ -52,10 +52,24 @@ enum ScreenSamples {
         #expect(try read("ready.json") == .ready(displays: displays, screenCapture: true, postEvent: false))
         #expect(try read("incompatible.json") == .incompatible(version: 2))
         #expect(try read("started.json") == .started(display: 2, width: 2556, height: 1652))
-        #expect(try read("stopped.json") == .stopped(reason: "display unplugged", noEncoder: false))
+        #expect(try read("stopped.json") == .stopped(reason: "display unplugged", cause: nil))
         #expect(
             try read("stopped_no_encoder.json")
-                == .stopped(reason: "no hardware encoder on the display's GPU", noEncoder: true))
+                == .stopped(reason: "no hardware encoder on the display's GPU", cause: .noEncoder))
+        #expect(
+            try read("stopped_signed_out.json")
+                == .stopped(reason: "nobody is signed in on this computer's screen", cause: .signedOut))
+        #expect(
+            try read("stopped_no_desktop.json")
+                == .stopped(reason: "nobody is signed in to a desktop on this screen", cause: .noDesktop))
+        #expect(
+            try read("stopped_declined.json")
+                == .stopped(reason: "remote desktop was not allowed on this computer's screen: cancelled", cause: .declined))
+        #expect(
+            try read("stopped_cause_no_encoder.json")
+                == .stopped(reason: "cannot create a hardware encoder: hevc (-12902)", cause: .noEncoder))
+        // 更新的电脑分出来的、这边不认得的类退回看标志。
+        #expect(try read("stopped_future_cause.json") == .stopped(reason: "the display is asleep", cause: .signedOut))
         #expect(try read("lock.json") == .lock(locked: true))
         #expect(try read("permissions.json") == .permissions(screenCapture: true, postEvent: true))
         #expect(
