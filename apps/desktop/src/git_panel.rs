@@ -27,9 +27,11 @@ mod run;
 mod worktree;
 
 use std::{
+    cell::RefCell,
     collections::HashMap,
     ops::Range,
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
 };
 
@@ -54,8 +56,9 @@ use crate::ui::{
     tooltip::tooltip,
 };
 use gpui::{
-    Action, AnyElement, App, Context, Div, EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent, Render,
-    Role, SharedString, Stateful, Window, actions, div, list, prelude::*, px, svg, uniform_list,
+    Action, AnyElement, App, Bounds, Context, Div, EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent,
+    Pixels, Point, Render, Role, SharedString, Stateful, Window, actions, canvas, div, list, point, prelude::*, px,
+    svg, uniform_list,
 };
 use runode_git::{self as git, DiffSide, HunkAction, Operation, RepoKind, Section};
 
@@ -149,6 +152,8 @@ const BRANCH_BAR_HEIGHT: f32 = 30.;
 const COMMIT_BUTTON_HEIGHT: f32 = 26.;
 /// 标题栏上图标按钮的边长。
 const HEADER_BUTTON_SIZE: f32 = 22.;
+/// 按钮弹出的菜单离按钮下沿多远。
+const MENU_GAP: f32 = 4.;
 
 /// 提交按钮按下去做什么：提交，没有可提交的改动时换成同步或者发布分支。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -249,6 +254,26 @@ pub struct GitPanel {
     show_worktrees: bool,
     graph_collapsed: bool,
     graph_height: Option<f32>,
+    /// 弹菜单的几个按钮上一帧画在哪，按 `anchor_key` 记：菜单从按钮下沿开出来，键盘和辅助工具按下时
+    /// 也开在按钮旁边，不开在鼠标碰巧停着的地方。
+    anchors: Anchors,
+}
+
+type Anchors = Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>;
+
+/// 贴满按钮的一块画布，每帧把按钮的位置记到 `anchors` 的 `key` 下。
+fn anchor_canvas(anchors: &Anchors, key: SharedString) -> impl IntoElement {
+    let anchors = anchors.clone();
+    canvas(
+        move |bounds, _, _| {
+            anchors.borrow_mut().insert(key, bounds);
+        },
+        |_, (), _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 impl EventEmitter<GitPanelEvent> for GitPanel {}
@@ -285,6 +310,15 @@ impl GitPanel {
             show_worktrees: options.show_worktrees,
             graph_collapsed: options.graph_collapsed,
             graph_height: options.graph_height,
+            anchors: Anchors::default(),
+        }
+    }
+
+    /// 按钮 `key` 弹出的菜单开在哪：按钮的左下角往下让出一点；还没画过这个按钮时在鼠标那里。
+    fn menu_position(&self, key: &str, window: &Window) -> Point<Pixels> {
+        match self.anchors.borrow().get(key) {
+            Some(bounds) => bounds.bottom_left() + point(px(0.), px(MENU_GAP)),
+            None => window.mouse_position(),
         }
     }
 
@@ -539,12 +573,18 @@ impl GitPanel {
         };
         let changed = repo.changed();
         let root = repo.root.clone();
-        let more = Button::new(repo_id("git-repo-more", &repo.root), rust_i18n::t!("git.more"))
+        let more_key = repo_id("git-repo-more", &repo.root);
+        let more = Button::new(more_key.clone(), rust_i18n::t!("git.more"))
             .icon(MORE_ICON)
             .with_size(ButtonSize::IconSm)
+            .relative()
+            .child(anchor_canvas(&self.anchors, more_key.clone()))
             .on_press_down(cx, {
                 let root = root.clone();
-                move |this, window, cx| this.open_git_menu(&root, false, window.mouse_position(), cx)
+                move |this, window, cx| {
+                    let position = this.menu_position(&more_key, window);
+                    this.open_git_menu(&root, false, position, cx)
+                }
             });
         // 块头整行报成可以展开收起的一项：名字是仓库名，说明里是种类、分支或正在跑的操作，和改了
         // 几个文件。
@@ -835,8 +875,11 @@ impl GitPanel {
                 main.hover(move |main| main.bg(accent_hover))
                     .on_press_down(cx, move |this, window, cx| this.run_primary(&root, primary, window, cx))
             });
+        let more_key = repo_id("git-commit-more", &repo.root);
         let more = div()
-            .id(repo_id("git-commit-more", &repo.root))
+            .id(more_key.clone())
+            .relative()
+            .child(anchor_canvas(&self.anchors, more_key.clone()))
             .role(Role::Button)
             .aria_label(rust_i18n::t!("git.commit_more").into_owned())
             .aria_disabled(busy)
@@ -853,7 +896,8 @@ impl GitPanel {
             .child(svg().path(CHEVRON_DOWN_ICON).size(px(12.)).text_color(on_accent))
             .when(!busy, |more| {
                 more.hover(move |more| more.bg(accent_hover)).on_press_down(cx, move |this, window, cx| {
-                    this.open_commit_menu(&root, window.mouse_position(), cx)
+                    let position = this.menu_position(&more_key, window);
+                    this.open_commit_menu(&root, position, cx)
                 })
             });
         div()
@@ -1133,8 +1177,11 @@ impl Render for GitPanel {
                     ))
                     .child(
                         self.header_button("git-more", MORE_ICON, None, cx, move |this, window, cx| {
-                            this.open_git_menu(&root, true, window.mouse_position(), cx);
+                            let position = this.menu_position("git-more", window);
+                            this.open_git_menu(&root, true, position, cx);
                         })
+                        .relative()
+                        .child(anchor_canvas(&self.anchors, "git-more".into()))
                         // 多个仓库时这里只有显示设置，仓库的操作在块头的「更多操作」里。
                         .aria_label(rust_i18n::t!(if multi { "git.view_options" } else { "git.more" }).into_owned()),
                     )
