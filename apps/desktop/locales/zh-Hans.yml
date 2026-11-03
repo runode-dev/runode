@@ -152,7 +152,7 @@ workspace:
   host_remote_hint: "%{status} · SSH"
   host_paired_hint: "%{status} · Runode 配对"
   host_add: 添加 SSH 主机
-  host_add_hint: 经 SSH 使用一台现有的机器。
+  host_add_hint: 经 SSH 使用一台现有的机器
   host_add_remote: 添加远程主机
   host_add_remote_hint: SSH 主机或另一台 Runode
   host_add_detail: 连上时 Runode 会自动装到那台机器上。

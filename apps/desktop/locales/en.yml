@@ -152,7 +152,7 @@ workspace:
   host_remote_hint: "%{status} · SSH"
   host_paired_hint: "%{status} · Runode pairing"
   host_add: Add SSH Host
-  host_add_hint: Use an existing machine over SSH.
+  host_add_hint: An existing machine over SSH
   host_add_remote: Add Remote Host
   host_add_remote_hint: An SSH host or another Runode
   host_add_detail: Runode installs itself on the host when it connects.
