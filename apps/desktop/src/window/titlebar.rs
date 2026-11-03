@@ -212,7 +212,8 @@ fn driven_icon(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> {
 
 /// 卡片样式下标签和分屏标题条上写的：名字和所在目录。前台是认得的 agent 时名字是它设的标题
 /// （Claude Code 写的是在做的事），标题只是目录名或没设时是 agent 的名字（`Codex`、`Claude Code`），
-/// 是谁已经由前面的 logo 标出。shell 在前台时名字是 shell 自己（`zsh`、`fish`），别的程序是它设的
+/// 是谁已经由前面的 logo 标出。shell 在前台时名字是开来跑的命令（`TerminalView::task`），不是的话是
+/// shell 自己（`zsh`、`fish`），别的程序是它设的
 /// 标题，没设时是程序名；目录和名字一样时不再写。
 pub(super) fn pane_label(view: &TerminalView) -> (SharedString, Option<SharedString>) {
     let meta = view.meta();
@@ -222,7 +223,11 @@ pub(super) fn pane_label(view: &TerminalView) -> (SharedString, Option<SharedStr
         title.or_else(|| Some(agent.kind.display_name().to_owned()))
     } else {
         let program = meta.foreground.as_deref().map(|name| runode_terminal::pty::program_label(name).to_owned());
-        if meta.foreground_is_shell { program } else { meta.title.clone().or(program) }
+        if meta.foreground_is_shell {
+            view.task().map(ToString::to_string).or(program)
+        } else {
+            meta.title.clone().or(program)
+        }
     }
     .unwrap_or_else(|| view.title().to_owned());
     let dir = view.display_cwd().filter(|dir| *dir != name);

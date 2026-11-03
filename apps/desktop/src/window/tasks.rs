@@ -51,10 +51,11 @@ const TASK_FILES: [&str; 9] = [
     "package-lock.json",
 ];
 
-/// 命令菜单里的一条：开一个新终端跑 `command`，在 `dir`（为空时是列命令的目录）里。
+/// 命令菜单里的一条 `name`：开一个新终端跑 `command`，在 `dir`（为空时是列命令的目录）里。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(super) struct RunTask {
+    name: SharedString,
     command: String,
     dir: Option<PathBuf>,
 }
@@ -175,6 +176,7 @@ impl WindowView {
         let Some(view) = self.run_in_terminal(&dir, action.command.clone(), window, cx) else {
             return;
         };
+        view.update(cx, |view, _| view.set_task(action.name.clone()));
         self.workspace_mut().project.tasks_last = Some(action.command.clone());
         if let Some(before) = before.filter(|_| fold)
             && let Some(tab) = self.tab_mut()
@@ -241,6 +243,7 @@ impl WindowView {
                     .find_map(|source| {
                         let task = source.tasks.iter().find(|task| task.name == name)?;
                         Some(RunTask {
+                            name: task.name.clone().into(),
                             command: task.command.clone(),
                             dir: Some(source.project.clone().unwrap_or(root.clone())),
                         })
@@ -405,7 +408,11 @@ impl WindowView {
             }
             items.extend(source.tasks.iter().map(|task| {
                 let description = task.description.clone().filter(|text| *text != task.name);
-                let action = RunTask { command: task.command.clone(), dir: source.project.clone() };
+                let action = RunTask {
+                    name: task.name.clone().into(),
+                    command: task.command.clone(),
+                    dir: source.project.clone(),
+                };
                 // 说明和命令行在行里会截断，鼠标停上去看完整的。
                 let full = match &description {
                     Some(text) => format!("{text}\n{}", task.command),

@@ -1064,6 +1064,7 @@ impl TerminalView {
             adopted_size: None,
             start_pending: false,
             pending_command: None,
+            task: None,
             search_field: None,
             menu: None,
             _reader: Task::ready(()),
@@ -1209,6 +1210,16 @@ impl TerminalView {
     /// `cwd` 给人看的写法，家目录按终端所在的机器写成 `~`。
     pub fn display_cwd(&self) -> Option<String> {
         self.cwd().map(|dir| self.host.display_dir(&dir))
+    }
+
+    /// 记下这个终端是开来跑命令菜单里名为 `name` 的那一条的。
+    pub fn set_task(&mut self, name: SharedString) {
+        self.task = Some(name);
+    }
+
+    /// 开来跑的命令菜单里那一条的名字；不是从命令菜单开的为空。
+    pub fn task(&self) -> Option<&SharedString> {
+        self.task.as_ref()
     }
 
     /// 程序设置的标题；没设置时为前台进程的目录名或进程名，都没有时为 `DEFAULT_TITLE`。
