@@ -383,6 +383,8 @@ impl SettingsView {
                 ))
                 && (autostart || !matches!(item, Item::Section("login") | Item::Autostart))
                 && (firewall_blocked || !matches!(item, Item::Firewall))
+                // Linux 上的 app 自己换不了新版本，更新交给装它的包管理器，后台也不查，开关没有用。
+                && (!cfg!(target_os = "linux") || !matches!(item, Item::Row("auto-update", _)))
                 // Option 当不当 Alt、提示音（`sound`）只有 macOS 上才有。
                 && (cfg!(target_os = "macos")
                     || !matches!(
