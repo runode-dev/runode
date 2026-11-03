@@ -1045,7 +1045,7 @@ kanban:
   edit_schedule: 編輯定時
   remove_schedule: 刪除定時
   remove_schedule_detail: 它的提示詞和定時規則會一起刪掉，刪了找不回來。
-  schedules_need_host: "定時只在終端機宿主執行時生效。要在結束 app 後也跑，在設定裡打開「結束後保留工作階段」，再執行 runode service install host。"
+  schedules_need_host: "定時只在終端機宿主執行時生效。要在結束 Runode 後、重新登入後也照常跑，在設定裡打開「結束後保留工作階段」和「登入時在背景啟動宿主」。"
   no_schedules: 還沒有定時
   no_next: 不會再跑
   next: "下一次 %{time}"
