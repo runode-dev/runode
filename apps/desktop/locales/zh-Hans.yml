@@ -490,7 +490,7 @@ git:
     staged: 暂存的更改
     unstaged: 更改
     stashes: 储藏
-    graph: 图表
+    graph: 提交图
   message_label: 提交说明
   message_placeholder: 提交说明（%{key} 提交）
   commit: 提交
@@ -561,8 +561,8 @@ git:
     loading: 正在读取提交历史…
     failed: 读不出提交历史
     more: 加载更多…
-    refresh: 刷新图表
-    resize: 调整图表的高度
+    refresh: 刷新提交图
+    resize: 调整提交图的高度
     loading_changes: 正在读取改动…
     changes_failed: 读不出这个提交的改动
     no_files: 没有改动文件
