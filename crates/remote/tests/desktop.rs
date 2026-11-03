@@ -9,8 +9,9 @@ use std::{
 
 use common::*;
 use runode_protocol::{
-    ClientKind, ClientMsg, HostMsg,
+    ClientKind, ClientMsg, FrameKind, HostMsg,
     remote::{ChannelHello, ChannelRefusal, ChannelReply, DeviceKind, GateHostMsg},
+    write_frame,
 };
 use runode_remote::list_devices;
 
@@ -151,6 +152,32 @@ fn a_forward_channel_reaches_a_loopback_port() {
     };
     assert!(message.contains(&port.to_string()), "{message}");
     assert!(computer.closed());
+}
+
+/// 浏览器对转发的端口并发开好几条连接，同一台桌面设备的终端连接不被它们挤掉。
+#[test]
+fn forwarded_connections_do_not_push_out_the_terminal() {
+    let harness = Harness::start("forward-lane");
+    let key = Key::generate();
+    let device_id = harness.pair_as(&key, DeviceKind::Desktop);
+    let mut terminal = harness.login(device_id, &key);
+    terminal.send_control(&Phone::hello("desktop"));
+    let host = harness.host();
+    assert!(matches!(read_client_msg(&host), Some(ClientMsg::Hello { .. })));
+    let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = server.local_addr().unwrap().port();
+    let forwards: Vec<_> = (0..12)
+        .map(|_| {
+            let mut computer = harness.login(device_id, &key);
+            send_channel(&mut computer, &ChannelHello::ForwardHello { port });
+            assert_eq!(computer.read_control::<ChannelReply>(), Some(ChannelReply::ChannelReady));
+            computer
+        })
+        .collect();
+    let done = HostMsg::Done { req: 3 };
+    write_frame(&mut &host, FrameKind::Control, 0, &serde_json::to_vec(&done).unwrap()).unwrap();
+    assert_eq!(terminal.read_host_msg(), done);
+    drop(forwards);
 }
 
 #[test]

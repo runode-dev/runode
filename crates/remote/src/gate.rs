@@ -30,7 +30,7 @@ use crate::{
     bridge::{Relay, Upstream, bridge, push::PushRequests, unpair::UnpairRequests},
     devices::{self, Device},
     files::random,
-    listener::Shared,
+    listener::{Lane, Shared},
     now_unix,
 };
 
@@ -111,7 +111,12 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
         .map_err(io::Error::other)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "closed before hello"))?;
     // 第一帧定下这条连接接到哪里：终端的宿主、远程桌面的采集进程、识别，或者桌面设备的专用连接。
-    let (host, relay) = match first(&hello, kind) {
+    let first = first(&hello, kind);
+    let lane = match &first {
+        Some(First::Channel(ChannelHello::ForwardHello { .. })) => Lane::Forward,
+        _ => Lane::Session,
+    };
+    let (host, relay) = match first {
         Some(First::Terminal) => (forward_hello(&shared.connect, &hello)?, Relay::Terminal(kind)),
         Some(First::Screen) => (forward_hello(&shared.connect_screen, &hello)?, Relay::Frames),
         Some(First::Speech) => (forward_hello(&shared.connect_speech, &hello)?, Relay::Frames),
@@ -129,6 +134,7 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
             return Err(io::Error::other(format!("the first frame after the gate is not a hello a {kind:?} sends")));
         }
     };
+    shared.settle(id, device_id, lane);
     let StreamOwned { mut conn, sock } = tls;
     drop(sock);
     tcp.set_read_timeout(None)?;

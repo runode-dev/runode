@@ -43,8 +43,10 @@ const MAX_GATING_PER_SOURCE: usize = 4;
 const MAX_GATING_PER_PREFIX: usize = 16;
 /// 连接（含已经接到宿主上的）最多这么多。
 pub(crate) const MAX_CONNECTIONS: usize = 64;
-/// 同一台设备最多同时连着这么多条，见 `Shared::attach_device`。
+/// 同一台设备最多同时连着这么多条终端、远程桌面、识别和项目的连接，见 `Shared::settle`。
 const MAX_PER_DEVICE: usize = 8;
+/// 同一台桌面设备最多同时连着这么多条端口转发的连接，见 `Shared::settle`。
+const MAX_FORWARDS_PER_DEVICE: usize = 32;
 /// 隔多久看一次设备表，撤销了的设备在这么久之内断开。
 const REVOKE_CHECK: Duration = Duration::from_secs(1);
 /// 接受连接出错（比如文件描述符用完了）后等一会儿再接，免得空转。
@@ -132,9 +134,20 @@ struct Live {
     tcp: TcpStream,
     /// 过了门禁的设备；还在门禁阶段时为 `None`。
     device: Option<DeviceId>,
+    /// 第一帧定下的这条连接算哪一类；还没读到第一帧时为 `None`。
+    lane: Option<Lane>,
     /// 从哪个地址来。
     ip: IpAddr,
     cut: Arc<AtomicBool>,
+}
+
+/// 过了门禁的连接按第一帧分的类，同一台设备的连接只和同一类的挤名额。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Lane {
+    /// 终端、远程桌面、识别和项目的连接。
+    Session,
+    /// 桌面设备的端口转发：浏览器对一个端口就会并发开好几条。
+    Forward,
 }
 
 impl Shared {
@@ -151,19 +164,35 @@ impl Shared {
     }
 
     /// 连接 `id` 过了门禁，是设备 `device`：之后撤销这台设备时断开它。
-    ///
-    /// 同一台设备的连接超过 `MAX_PER_DEVICE` 条时断开最早的：手机反复重连、旧连接又还没被 keepalive
-    /// 发现断了时（见 `gate::keep_alive`），不让它们攒到 `MAX_CONNECTIONS` 把别的连接挡在外面。
     pub(crate) fn attach_device(&self, id: u64, device: DeviceId) {
         let mut connections = self.connections();
         if let Some(live) = connections.get_mut(&id) {
             live.device = Some(device);
         }
         self.publish(&connections);
-        let mut same: Vec<u64> =
-            connections.iter().filter(|(_, live)| live.device == Some(device)).map(|(&id, _)| id).collect();
+    }
+
+    /// 设备 `device` 的连接 `id` 读到了第一帧，算 `lane` 这一类。
+    ///
+    /// 同一台设备同一类的连接超过上限（`MAX_PER_DEVICE`、`MAX_FORWARDS_PER_DEVICE`）时断开这一类里最早的：
+    /// 手机反复重连、旧连接又还没被 keepalive 发现断了时（`gate::keep_alive`），不让它们攒到 `MAX_CONNECTIONS`
+    /// 把别的连接挡在外面；端口转发开得再多，也挤不掉终端和项目的连接。
+    pub(crate) fn settle(&self, id: u64, device: DeviceId, lane: Lane) {
+        let mut connections = self.connections();
+        if let Some(live) = connections.get_mut(&id) {
+            live.lane = Some(lane);
+        }
+        let mut same: Vec<u64> = connections
+            .iter()
+            .filter(|(_, live)| live.device == Some(device) && live.lane == Some(lane))
+            .map(|(&id, _)| id)
+            .collect();
         same.sort_unstable();
-        let excess = same.len().saturating_sub(MAX_PER_DEVICE);
+        let limit = match lane {
+            Lane::Session => MAX_PER_DEVICE,
+            Lane::Forward => MAX_FORWARDS_PER_DEVICE,
+        };
+        let excess = same.len().saturating_sub(limit);
         for old in &same[..excess] {
             if let Some(live) = connections.get(old) {
                 tracing::info!("remote device {device} has too many connections, closing an old one");
@@ -516,7 +545,7 @@ fn register(shared: &Shared, tcp: &TcpStream, ip: IpAddr) -> Option<(u64, Arc<At
     let tcp = tcp.try_clone().ok()?;
     let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
     let cut = Arc::new(AtomicBool::new(false));
-    connections.insert(id, Live { tcp, device: None, ip, cut: cut.clone() });
+    connections.insert(id, Live { tcp, device: None, lane: None, ip, cut: cut.clone() });
     Some((id, cut))
 }
 
@@ -540,7 +569,8 @@ mod tests {
     fn rotating_addresses_cannot_shut_out_an_address_that_got_in_before() {
         let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let tcp = TcpStream::connect(server.local_addr().unwrap()).unwrap();
-        let live = |ip: IpAddr| Live { tcp: tcp.try_clone().unwrap(), device: None, ip, cut: Arc::default() };
+        let live =
+            |ip: IpAddr| Live { tcp: tcp.try_clone().unwrap(), device: None, lane: None, ip, cut: Arc::default() };
         // 同一台主机换着几段前缀里的地址占满门禁的名额。
         let mut connections = HashMap::new();
         for i in 0..MAX_GATING {
