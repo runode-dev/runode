@@ -178,6 +178,8 @@ pub struct TodoDialog {
     /// 每天跑时只在这几天（第 0 位是星期日），全不选是每天。
     days: u8,
     error: Option<String>,
+    /// 填得不对的那一栏，下一次画时把焦点交给它。
+    focus_wrong: Option<FocusHandle>,
     saving: bool,
     /// 菜单里点了一项后焦点交给它，动作从这里派发到对话框。
     focus: FocusHandle,
@@ -303,7 +305,7 @@ impl TodoDialog {
         }
         events.push(cx.subscribe_in(&prompt, window, |this, _, event: &TextareaEvent, _, cx| match event {
             TextareaEvent::Submit => this.save(false, cx),
-            TextareaEvent::Changed => {}
+            TextareaEvent::Changed => this.clear_error(cx),
         }));
         window.focus(&title.focus_handle(cx), cx);
         let spec = spec.unwrap_or_default();
@@ -338,6 +340,7 @@ impl TodoDialog {
             minutes,
             days,
             error: None,
+            focus_wrong: None,
             saving: false,
             focus: cx.focus_handle(),
             menu: None,
@@ -356,13 +359,21 @@ impl TodoDialog {
         dialog
     }
 
-    /// 输入框里回车保存，Esc 关掉对话框。
+    /// 输入框里回车保存，Esc 关掉对话框，改了字就收起上次的报错。
     fn subscribe_input(input: &Entity<InputState>, window: &mut Window, cx: &mut Context<Self>) -> Subscription {
         cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| match event {
             InputEvent::Next => this.save(false, cx),
             InputEvent::Dismiss => cx.emit(DialogEvent::Dismissed),
-            InputEvent::Changed(_) | InputEvent::Previous => {}
+            InputEvent::Changed(_) => this.clear_error(cx),
+            InputEvent::Previous => {}
         })
+    }
+
+    /// 动手改了：上次保存时的报错已经不一定对，收起来。
+    fn clear_error(&mut self, cx: &mut Context<Self>) {
+        if self.error.take().is_some() {
+            cx.notify();
+        }
     }
 
     /// 在后台读模板（`templates::load`），读好了列出来。
@@ -851,8 +862,9 @@ impl TodoDialog {
         }
         let message = match self.request(cx) {
             Ok(message) => message,
-            Err(error) => {
+            Err((error, field)) => {
                 self.error = Some(error);
+                self.focus_wrong = Some(field);
                 cx.notify();
                 return;
             }
@@ -1453,6 +1465,9 @@ impl TodoDialog {
 impl Render for TodoDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.focus_menu(window, cx);
+        if let Some(field) = self.focus_wrong.take() {
+            window.focus(&field, cx);
+        }
         let title = self.heading();
         let page = self.page;
         let panel = Dialog::new("todo-dialog", title.clone())
@@ -1502,28 +1517,30 @@ impl Render for TodoDialog {
 }
 
 impl TodoDialog {
-    /// 按填的内容造出要发的请求；填得不对时是给人看的原因。
-    fn request(&self, cx: &App) -> Result<store::Step, String> {
+    /// 按填的内容造出要发的请求；填得不对时是给人看的原因和该去改的那一栏。
+    fn request(&self, cx: &App) -> Result<store::Step, (String, FocusHandle)> {
+        let wrong = |key: &str, field: FocusHandle| (rust_i18n::t!(key).into_owned(), field);
         let mut prompt = self.prompt.read(cx).text().trim().to_owned();
         let mut typed = self.title.read(cx).query().trim().to_owned();
         if let Some(label) = self.template.and_then(|index| self.templates[index].input.as_ref()) {
             let input = self.input.read(cx).query().trim();
             if input.is_empty() {
-                return Err(rust_i18n::t!("kanban.dialog.need_input", label = label).into_owned());
+                let error = rust_i18n::t!("kanban.dialog.need_input", label = label).into_owned();
+                return Err((error, self.input.focus_handle(cx)));
             }
             prompt = templates::fill(&prompt, input);
             typed = templates::fill(&typed, input);
         }
         let title = if typed.is_empty() { first_line(&prompt).to_owned() } else { typed };
         if title.is_empty() {
-            return Err(rust_i18n::t!("kanban.dialog.need_title").into_owned());
+            return Err(wrong("kanban.dialog.need_title", self.prompt.focus_handle(cx)));
         }
         let agent = match &self.agent {
             Some(pick) => pick.command(),
             None => self.command.read(cx).query().trim().to_owned(),
         };
         if agent.is_empty() {
-            return Err(rust_i18n::t!("kanban.dialog.need_agent").into_owned());
+            return Err(wrong("kanban.dialog.need_agent", self.command.focus_handle(cx)));
         }
         let spec = TodoSpec {
             title,
@@ -1555,17 +1572,17 @@ impl TodoDialog {
                 };
                 When::Once {
                     at: once_at(self.at.read(cx).query(), original)
-                        .ok_or_else(|| rust_i18n::t!("kanban.dialog.bad_once").into_owned())?,
+                        .ok_or_else(|| wrong("kanban.dialog.bad_once", self.at.focus_handle(cx)))?,
                 }
             }
             Some(Kind::Daily) => {
                 let (hour, minute) = runode_todo::parse_clock(self.clock.read(cx).query())
-                    .ok_or_else(|| rust_i18n::t!("kanban.dialog.bad_daily").into_owned())?;
+                    .ok_or_else(|| wrong("kanban.dialog.bad_daily", self.clock.focus_handle(cx)))?;
                 When::Daily { hour, minute, days: self.days }
             }
             Some(Kind::Every) => When::Every {
                 minutes: parse_minutes(self.minutes.read(cx).query())
-                    .ok_or_else(|| rust_i18n::t!("kanban.dialog.bad_every").into_owned())?,
+                    .ok_or_else(|| wrong("kanban.dialog.bad_every", self.minutes.focus_handle(cx)))?,
             },
         };
         Ok(match &self.editing {
