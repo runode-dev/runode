@@ -638,7 +638,13 @@ impl FileTree {
                 }),
             )
             .on_a11y_press(view.clone(), |_, _, cx| cx.emit(FileTreeEvent::Refresh));
-        let more = button("files-more", MORE_ICON, rust_i18n::t!("files.more"))
+        // 菜单开着时不挂提示：鼠标停在按钮上，提示到点会盖在菜单上面。
+        let more_label = rust_i18n::t!("files.more");
+        let more = Button::new("files-more", SharedString::from(more_label.clone()))
+            .icon(MORE_ICON)
+            .with_size(ButtonSize::Icon)
+            .size(px(TOOLBAR_BUTTON_SIZE))
+            .when(self.menu.is_none(), |more| more.tooltip(tooltip(more_label, None)))
             .relative()
             .child(self.anchors.track("files-more"))
             .on_mouse_down(
