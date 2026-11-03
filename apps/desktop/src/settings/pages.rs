@@ -695,7 +695,9 @@ impl SettingsView {
             .collect();
         let reset = self.reset(KEY, cx);
         let error = self.errors.get(KEY).cloned();
-        let control = div().flex().gap(px(6.)).children(chips);
+        // 一排开关报成以设置项命名的一组，读屏读到单个开关时知道它管什么。
+        let control =
+            div().id(KEY).role(gpui::Role::Group).aria_label(key_title(KEY)).flex().gap(px(6.)).children(chips);
         row(key_title(KEY), Some(key_hint(KEY)), control, reset, error, theme)
     }
 
@@ -730,7 +732,17 @@ impl SettingsView {
             .flex()
             .flex_col()
             .child(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, error, theme))
-            .child(div().py(px(10.)).flex().flex_wrap().gap(px(6.)).children(chips))
+            .child(
+                div()
+                    .id(KEY)
+                    .role(gpui::Role::Group)
+                    .aria_label(key_title(KEY))
+                    .py(px(10.))
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(6.))
+                    .children(chips),
+            )
     }
 
     fn render_config_files(&mut self, theme: &Theme, window: &mut Window, cx: &mut Context<Self>) -> Div {
