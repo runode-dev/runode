@@ -24,8 +24,8 @@ use objc2_core_media::{CMClock, CMSampleBuffer, CMTime};
 use objc2_core_video::{CVImageBuffer, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange};
 use objc2_foundation::{NSArray, NSError};
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCDisplay, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamDelegate, SCStreamOutput,
-    SCStreamOutputType,
+    SCContentFilter, SCDisplay, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamDelegate,
+    SCStreamErrorCode, SCStreamErrorDomain, SCStreamOutput, SCStreamOutputType,
 };
 
 use super::{
@@ -338,6 +338,14 @@ fn error_text(error: *mut NSError) -> Result<(), String> {
     }
 }
 
+/// ScreenCaptureKit 的错误 `error` 是不是用户没授权屏幕录制（`SCStreamErrorCode::UserDeclined`）。
+fn user_declined(error: *mut NSError) -> bool {
+    // SAFETY: 回调给的错误要么为空，要么在回调期间有效；错误域是系统的常量字符串。
+    unsafe { error.as_ref() }.is_some_and(|error| {
+        error.code() == SCStreamErrorCode::UserDeclined.0 && *error.domain() == *unsafe { SCStreamErrorDomain }
+    })
+}
+
 fn wait(rx: &mpsc::Receiver<Result<(), String>>, what: &str) -> io::Result<()> {
     match rx.recv_timeout(CALLBACK_TIMEOUT) {
         Ok(result) => result.map_err(|err| io::Error::other(format!("cannot {what}: {err}"))),
@@ -345,13 +353,14 @@ fn wait(rx: &mpsc::Receiver<Result<(), String>>, what: &str) -> io::Result<()> {
     }
 }
 
-/// 按 `CGDirectDisplayID` 找 ScreenCaptureKit 的屏幕；问它时系统核对屏幕录制的授权。
+/// 按 `CGDirectDisplayID` 找 ScreenCaptureKit 的屏幕；问它时系统核对屏幕录制的授权。列不出时只有 ScreenCaptureKit
+/// 说是用户没授权、或者这个进程确实没有屏幕录制的授权，才归成 `StopCause::NoScreenCapture`，别的原因照原话报。
 fn display(id: u32) -> io::Result<Retained<SCDisplay>> {
     let (tx, rx) = mpsc::channel();
     let handler = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
         // SAFETY: 回调给的内容要么为空，要么有效，这里多持有一份。
         let content = unsafe { Retained::retain(content) };
-        let _ = tx.send(content.ok_or_else(|| error_text(error).err().unwrap_or_default()));
+        let _ = tx.send(content.ok_or_else(|| (error_text(error).err().unwrap_or_default(), user_declined(error))));
     });
     // 只列屏上的窗口：列全部窗口要几百毫秒，这里只要屏幕。
     // SAFETY: ScreenCaptureKit 自己复制回调块。
@@ -363,12 +372,13 @@ fn display(id: u32) -> io::Result<Retained<SCDisplay>> {
     let content = rx
         .recv_timeout(CALLBACK_TIMEOUT)
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "cannot list the displays: no answer"))?
-        .map_err(|err| {
-            crate::caused_error(
-                crate::StopCause::NoScreenCapture,
-                io::ErrorKind::PermissionDenied,
-                format!("cannot list the displays: {err}"),
-            )
+        .map_err(|(err, declined)| {
+            let message = format!("cannot list the displays: {err}");
+            if declined || !super::permissions().screen_capture {
+                crate::caused_error(crate::StopCause::NoScreenCapture, io::ErrorKind::PermissionDenied, message)
+            } else {
+                io::Error::other(message)
+            }
         })?;
     // SAFETY: 读列表里的屏幕。
     let displays = unsafe { content.displays() };

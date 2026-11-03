@@ -18,7 +18,7 @@ objc2-core-graphics = { workspace = true, features = ["std", "CGDirectDisplay", 
 objc2-core-media = { workspace = true, features = ["std", "objc2-core-video", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMSync", "CMTime"] }
 objc2-core-video = { workspace = true, features = ["std", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
 objc2-video-toolbox = { workspace = true, features = ["std", "objc2-core-media", "objc2-core-video", "VTBase", "VTCompressionProperties", "VTCompressionSession", "VTDecompressionSession", "VTErrors", "VTSession"] }
-objc2-screen-capture-kit = { workspace = true, features = ["std", "block2", "dispatch2", "objc2-core-media", "objc2-core-graphics", "SCShareableContent", "SCStream"] }
+objc2-screen-capture-kit = { workspace = true, features = ["std", "block2", "dispatch2", "objc2-core-media", "objc2-core-graphics", "SCError", "SCShareableContent", "SCStream"] }
 block2.workspace = true
 dispatch2 = { workspace = true, features = ["std", "alloc", "objc2"] }
 
