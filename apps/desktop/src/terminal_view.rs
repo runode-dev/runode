@@ -233,8 +233,9 @@ pub struct TerminalView {
     start_pending: bool,
     /// 等 shell 出了提示符再打进去的命令，见 `run_command`。
     pending_command: Option<String>,
-    /// 从命令菜单开来跑的那条命令的名字：shell 在前台时分屏标题写它，几个命令的终端分得开。
-    task: Option<SharedString>,
+    /// 从命令菜单开来跑的那条命令的名字和命令行：shell 在前台时分屏标题写名字，几个命令的终端分得开；
+    /// 再跑同一条命令时按它找回这个终端。
+    task: Option<(SharedString, String)>,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
     search_field: Option<(Entity<InputState>, Subscription)>,
     /// 开着的右键菜单。

@@ -1237,14 +1237,22 @@ impl TerminalView {
         self.cwd().map(|dir| self.host.display_dir(&dir))
     }
 
-    /// 记下这个终端是开来跑命令菜单里名为 `name` 的那一条的。
-    pub fn set_task(&mut self, name: SharedString) {
-        self.task = Some(name);
+    /// 记下这个终端是开来跑命令菜单里名为 `name`、命令行是 `command` 的那一条的。
+    pub fn set_task(&mut self, name: SharedString, command: String) {
+        self.task = Some((name, command));
     }
 
     /// 开来跑的命令菜单里那一条的名字；不是从命令菜单开的为空。
     pub fn task(&self) -> Option<&SharedString> {
-        self.task.as_ref()
+        self.task.as_ref().map(|(name, _)| name)
+    }
+
+    /// 这个终端是开来跑命令菜单里名为 `name`、命令行是 `command` 的那一条的，而且会话还在：再跑这一条
+    /// 就在它里面跑，不另开终端。
+    pub fn runs_task(&self, name: &str, command: &str) -> bool {
+        !self.ended
+            && !self.screen.is_lost()
+            && self.task.as_ref().is_some_and(|(task, line)| task.as_ref() == name && line == command)
     }
 
     /// 程序设置的标题；没设置时为前台进程的目录名或进程名，都没有时为 `DEFAULT_TITLE`。

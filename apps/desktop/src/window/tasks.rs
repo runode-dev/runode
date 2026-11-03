@@ -1,7 +1,8 @@
 //! 标题栏右上角的命令：自己加的这个项目的和通用的命令、终端目录往上最近的 Makefile 的目标和
 //! package.json 的 scripts，由宿主列出、拼好命令行（`ClientMsg::ListTasks`），和手机会话卡片上的
 //! 是同一份。右侧面板开关左边的按钮弹出分组的菜单，点一条在当前标签里分出一个终端（或按配置开新标签）、
-//! 在列命令的目录里跑它；菜单最上面一项添加自己的
+//! 在列命令的目录里跑它；这个 workspace 里已经有开来跑这一条的终端时不再开，命令跑完了就在那里再跑一遍，
+//! 还在跑就切过去看；菜单最上面一项添加自己的
 //! 命令，自己加的命令行尾有编辑和删除按钮，Makefile、package.json 的命令行尾有设快捷键的按钮，这几个
 //! 对话框和改写命令文件在 `custom`，按项目分份的快捷键在 `keys`。
 
@@ -10,7 +11,7 @@ mod keys;
 
 use std::path::{Path, PathBuf};
 
-use gpui::{Action, App, Context, Entity, Focusable, MouseButton, SharedString, Window, prelude::*, px};
+use gpui::{Action, App, Context, Entity, EntityId, Focusable, MouseButton, SharedString, Window, prelude::*, px};
 use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
@@ -163,21 +164,31 @@ impl WindowView {
         .detach();
     }
 
-    /// 命令菜单里点了一条：按配置项 `task-placement` 在当前标签里分出一个终端或者在它右边开一个新标签，
+    /// 命令菜单里点了一条：这个 workspace 里已经有开来跑它的终端（`TerminalView::runs_task`）时在那里跑，
+    /// 见 `rerun_task`；没有时按配置项 `task-placement` 在当前标签里分出一个终端或者在它右边开一个新标签，
     /// 在列命令的目录里跑它。分出来的分屏按配置项 `task-split-fold` 折叠起来，焦点留在原来的分屏。
     pub(super) fn run_task(&mut self, action: &RunTask, window: &mut Window, cx: &mut Context<Self>) {
         let listed = self.workspace().project.tasks.as_ref().map(|(dir, _)| dir.clone());
         let Some(dir) = action.dir.clone().or(listed) else {
             return;
         };
+        self.workspace_mut().project.tasks_last = Some(action.command.clone());
+        let existing = self.workspace().tabs.iter().enumerate().find_map(|(ix, tab)| {
+            let (pane, (view, _)) =
+                tab.panes.iter().find(|(_, (view, _))| view.read(cx).runs_task(&action.name, &action.command))?;
+            Some((ix, *pane, view.clone()))
+        });
+        if let Some((tab, pane, view)) = existing {
+            self.rerun_task(tab, pane, view, action, window, cx);
+            return;
+        }
         let config = &cx.global::<AppConfig>().0;
         let fold = config.task_split_fold && config.task_placement != TaskPlacement::Tab && cards(cx);
         let before = self.tab().map(|tab| tab.focused);
         let Some(view) = self.run_in_terminal(&dir, action.command.clone(), window, cx) else {
             return;
         };
-        view.update(cx, |view, _| view.set_task(action.name.clone()));
-        self.workspace_mut().project.tasks_last = Some(action.command.clone());
+        view.update(cx, |view, _| view.set_task(action.name.clone(), action.command.clone()));
         if let Some(before) = before.filter(|_| fold)
             && let Some(tab) = self.tab_mut()
         {
@@ -187,6 +198,33 @@ impl WindowView {
             let size = view.read(cx).size();
             view.update(cx, |view, cx| view.start_at(size, window, cx));
         }
+    }
+
+    /// 在当前 workspace 第 `tab` 个标签里的分屏 `pane`（终端 `view`）里再跑一遍它开来跑的命令：上一次跑完了
+    /// 就打进去再跑，还在跑就只切过去看，不打断它。折叠着在当前标签里跑完了的，再跑时照样折叠着、焦点不动，
+    /// 和新开时一样不碍事；别的情形切到那个终端。
+    fn rerun_task(
+        &mut self,
+        tab: usize,
+        pane: EntityId,
+        view: Entity<TerminalView>,
+        action: &RunTask,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let running = view.read(cx).running().is_some();
+        if !running {
+            view.update(cx, |view, cx| view.run_command(action.command.clone(), cx));
+        }
+        let workspace = self.workspace();
+        let folded = tab == workspace.active && workspace.tabs[tab].collapsed.contains(&pane);
+        if folded && !running {
+            return;
+        }
+        if tab != self.workspace().active {
+            self.activate(tab, window, cx);
+        }
+        self.focus_pane_in_active_tab(pane, window, cx);
     }
 
     /// 菜单里的「安装 Agent Skill」：在家目录开一个终端跑安装命令，装的过程和出错都看得到。本机终端报的 PATH
