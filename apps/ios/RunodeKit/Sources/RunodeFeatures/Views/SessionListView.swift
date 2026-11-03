@@ -91,7 +91,8 @@
                     ProgressView("正在读取会话…")
                 }
             }
-            .leadingNavigationTitle(model.machine.name, subtitle: linkSubtitle)
+            // 「已连接」在前、地址在后，截开头会把连接状态截掉。
+            .leadingNavigationTitle(model.machine.name, subtitle: linkSubtitle, subtitleTruncation: .middle)
             .toolbar {
                 if let onOpenScreen {
                     ToolbarItem(placement: .primaryAction) {

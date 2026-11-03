@@ -203,11 +203,18 @@
     extension View {
         /// 标题放在导航栏左边（下面可以再带一行小字，前面可以带应用的标志），不随内容滚动变大变小，
         /// 也不居中。`navigationTitle` 照样设上，下一页的返回按钮用得到，只是不显示在导航栏中间。
-        func leadingNavigationTitle(_ title: String, subtitle: String? = nil, showsMark: Bool = false) -> some View {
+        /// 副标题放不下时按 `subtitleTruncation` 截：默认截掉开头，副标题多是目录，末尾那段最要紧。
+        func leadingNavigationTitle(
+            _ title: String, subtitle: String? = nil, subtitleTruncation: Text.TruncationMode = .head,
+            showsMark: Bool = false
+        ) -> some View {
             navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar(removing: .title)
-                .toolbar { LeadingTitleItem(title: title, subtitle: subtitle, showsMark: showsMark) }
+                .toolbar {
+                    LeadingTitleItem(
+                        title: title, subtitle: subtitle, subtitleTruncation: subtitleTruncation, showsMark: showsMark)
+                }
         }
     }
 
@@ -243,6 +250,7 @@
     private struct LeadingTitleItem: ToolbarContent {
         let title: String
         let subtitle: String?
+        let subtitleTruncation: Text.TruncationMode
         let showsMark: Bool
 
         /// 375 点宽的手机上，返回按钮和右边两个按钮之外剩下的宽度。
@@ -272,8 +280,7 @@
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
-                                // 副标题多是目录，末尾那段最要紧。
-                                .truncationMode(.head)
+                                .truncationMode(subtitleTruncation)
                         }
                     }
                 }
