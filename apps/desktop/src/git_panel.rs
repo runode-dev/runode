@@ -579,7 +579,10 @@ impl GitPanel {
             .when(active, |title| title.bg(cx.theme().mix(0.04)))
             .hover(|title| title.bg(cx.theme().accent))
             .text_color(fg_hsla)
-            .tooltip(tooltip(format!("{kind} · {}", repo.root.display()), None))
+            // 菜单开着时不弹路径提示：点了行上的「更多」，鼠标还停在这一行上，提示会盖住菜单的头几项。
+            .when(self.menu().is_none(), |title| {
+                title.tooltip(tooltip(format!("{kind} · {}", repo.root.display()), None))
+            })
             .child(list::chevron(expanded, cx))
             .child(svg().flex_none().path(GIT_ICON).size(px(13.)).text_color(fg_hsla.opacity(0.75)))
             .child(div().flex_initial().min_w_0().truncate().font_weight(gpui::FontWeight::SEMIBOLD).child(name))
