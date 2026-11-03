@@ -18,9 +18,9 @@ use gpui::{
 use runode_types::color::Rgb;
 
 use super::{
-    CARD_GAP, DIVIDER_GRAB_WIDTH, DIVIDER_STEP, Divider, NewWorkspace, PressDown, RenameTarget, RenameWorkspace,
-    Renaming, SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH,
-    ToggleSidebar, WindowView,
+    CARD_GAP, CloseWorkspace, DIVIDER_GRAB_WIDTH, DIVIDER_STEP, Divider, NewTab, NewWorkspace, PressDown, RenameTarget,
+    RenameWorkspace, Renaming, SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT,
+    TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView,
     agents::Status as AgentStatus,
     background, cards, drag_window,
     inline_edit::InlineEdit,
@@ -28,6 +28,7 @@ use super::{
     titlebar::{drag_chip, drop_marker, shortcut_hint, styled_agent_mark},
 };
 use crate::ui::a11y::A11yPress;
+use crate::ui::menu::{MenuHost as _, MenuItem};
 use crate::{
     host_client::hosts::{self, HostId, Status},
     menus::OpenSettings,
@@ -656,6 +657,13 @@ impl WindowView {
                     }
                 }),
             )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_workspace_menu(id, event.position, window, cx);
+                }),
+            )
             // 按下要看双击，用不了 `PressDown`；辅助工具按下时就是单击切过去，改名走菜单里的「重命名」。
             .on_a11y_press(view, move |this, window, cx| {
                 if let Some(ix) = this.workspaces.iter().position(|w| w.id == id)
@@ -745,6 +753,35 @@ impl WindowView {
             .child(div().min_w_0().truncate().child(rust_i18n::t!("workspace.new").into_owned()))
             .tooltip(tooltip)
             .on_press_down(cx, |this, window, cx| this.new_workspace(&NewWorkspace, window, cx))
+    }
+
+    /// 右键点了 workspace `id`：先切过去，再在 `position` 弹出新建标签、改名、关掉这几样的菜单，都对着它办。
+    fn open_workspace_menu(
+        &mut self,
+        id: WorkspaceId,
+        position: gpui::Point<gpui::Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // 快捷键按切过去之前的焦点找：刚切过去的终端上一帧还没画，键位表里找不到它。
+        let lookup = self.focus_handle(cx);
+        let Some(ix) = self.workspaces.iter().position(|w| w.id == id) else { return };
+        if !self.leave_todo_page(window, cx) {
+            return;
+        }
+        self.activate_workspace(ix, window, cx);
+        let item = |key: &str, action: Box<dyn Action>| {
+            let shortcut = crate::ui::tooltip::shortcut_text_in(action.as_ref(), &lookup, window);
+            Some(MenuItem::new(rust_i18n::t!(key), action, true, cx).with_shortcut(shortcut))
+        };
+        let items = vec![
+            item("menu.new_tab", Box::new(NewTab)),
+            item("menu.rename_workspace", Box::new(RenameWorkspace)),
+            None,
+            item("menu.close_workspace", Box::new(CloseWorkspace)),
+        ];
+        let focus = self.focus_handle(cx);
+        self.open_context_menu(position, items, focus, cx);
     }
 
     pub(super) fn rename_workspace(&mut self, _: &RenameWorkspace, window: &mut Window, cx: &mut Context<Self>) {
