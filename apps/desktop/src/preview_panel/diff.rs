@@ -438,10 +438,13 @@ impl PreviewPanel {
             .text_size(FontSize::Body)
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(added_label(view.file.added).id("diff-added").aria_static_text(format!("+{}", view.file.added)))
-            .child(
-                removed_label(view.file.removed).id("diff-removed").aria_static_text(format!("-{}", view.file.removed)),
-            )
+            // 是 0 的那边不写，只加了行的文件不挂着一个 −0。
+            .children((view.file.added > 0).then(|| {
+                added_label(view.file.added).id("diff-added").aria_static_text(format!("+{}", view.file.added))
+            }))
+            .children((view.file.removed > 0).then(|| {
+                removed_label(view.file.removed).id("diff-removed").aria_static_text(format!("-{}", view.file.removed))
+            }))
             .child(div().flex_1())
             .child(jump("diff-previous", ARROW_UP_ICON, "preview.diff.previous_change", false))
             .child(jump("diff-next", ARROW_DOWN_ICON, "preview.diff.next_change", true));
