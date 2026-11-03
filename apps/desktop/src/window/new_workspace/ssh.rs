@@ -9,8 +9,8 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, App, Context, Div, Entity, FocusHandle, Focusable as _, MouseButton, Role, SharedString,
-    Subscription, Window, div, img, prelude::*, px, svg,
+    Action, AnyElement, AnyWindowHandle, App, Context, Div, Entity, FocusHandle, Focusable as _, MouseButton, Role,
+    SharedString, Subscription, Window, div, img, prelude::*, px, svg,
 };
 use runode_files::ops::{self, OpError};
 use runode_protocol::{ClientMsg, HostMsg};
@@ -311,7 +311,7 @@ impl WindowView {
         let events = cx.subscribe(&field, |this, field, event: &InputEvent, cx| {
             if let InputEvent::Next = event {
                 let path = PathBuf::from(field.read(cx).query().trim());
-                this.list_remote(Some(path), cx);
+                this.list_remote(Some(path), None, cx);
             }
         });
         dialog.browse = Some(Browse {
@@ -323,11 +323,11 @@ impl WindowView {
             error: None,
             request: 0,
         });
-        self.list_remote(None, cx);
+        self.list_remote(None, None, cx);
     }
 
-    /// 在后台列远端的目录 `path`，为空时列家目录。
-    fn list_remote(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+    /// 在后台列远端的目录 `path`，为空时列家目录；给了 `open_in` 时列到了就在那个窗口里开它的工作区。
+    fn list_remote(&mut self, path: Option<PathBuf>, open_in: Option<AnyWindowHandle>, cx: &mut Context<Self>) {
         let Some(dialog) = &mut self.new_workspace else {
             return;
         };
@@ -344,30 +344,46 @@ impl WindowView {
         });
         cx.spawn(async move |this, cx| {
             let listed = job.await;
-            this.update(cx, |this, cx| {
-                let Some(dialog) = &mut this.new_workspace else {
-                    return;
-                };
-                let Some(browse) =
-                    dialog.browse.as_mut().filter(|browse| dialog.host == host_id && browse.request == request)
-                else {
-                    return;
-                };
-                browse.loading = false;
-                match listed {
-                    Ok(HostMsg::Dirs { path, dirs, .. }) => {
-                        let text = path.to_string_lossy().into_owned();
-                        browse.field.update(cx, |field, cx| field.set_query(text, cx));
-                        browse.path = Some(path);
-                        browse.dirs = dirs;
-                        browse.error = None;
-                    }
-                    Ok(HostMsg::Error { message, .. }) | Err(message) => browse.error = Some(message),
-                    Ok(other) => browse.error = Some(format!("unexpected reply {other:?}")),
-                }
-                cx.notify();
-            })
-            .ok();
+            let listed_ok = this
+                .update(cx, |this, cx| {
+                    let Some(dialog) = &mut this.new_workspace else {
+                        return false;
+                    };
+                    let Some(browse) =
+                        dialog.browse.as_mut().filter(|browse| dialog.host == host_id && browse.request == request)
+                    else {
+                        return false;
+                    };
+                    browse.loading = false;
+                    let ok = match listed {
+                        Ok(HostMsg::Dirs { path, dirs, .. }) => {
+                            let text = path.to_string_lossy().into_owned();
+                            browse.field.update(cx, |field, cx| field.set_query(text, cx));
+                            browse.path = Some(path);
+                            browse.dirs = dirs;
+                            browse.error = None;
+                            true
+                        }
+                        Ok(HostMsg::Error { message, .. }) | Err(message) => {
+                            browse.error = Some(message);
+                            false
+                        }
+                        Ok(other) => {
+                            browse.error = Some(format!("unexpected reply {other:?}"));
+                            false
+                        }
+                    };
+                    cx.notify();
+                    ok
+                })
+                .unwrap_or(false);
+            if let Some(handle) = open_in.filter(|_| listed_ok) {
+                handle
+                    .update(cx, |_, window, cx| {
+                        this.update(cx, |this, cx| this.open_remote_workspace(window, cx)).ok();
+                    })
+                    .ok();
+            }
         })
         .detach();
     }
@@ -377,7 +393,16 @@ impl WindowView {
         let Some(dialog) = &self.new_workspace else {
             return;
         };
-        let Some(path) = dialog.browse.as_ref().and_then(|browse| browse.path.clone()) else {
+        let Some(browse) = dialog.browse.as_ref() else {
+            return;
+        };
+        // 框里敲了别的路径、没按回车就点「打开」：开的是敲的那个，先列一下确认它是目录。
+        let typed = PathBuf::from(browse.field.read(cx).query().trim());
+        if !typed.as_os_str().is_empty() && browse.path.as_ref() != Some(&typed) {
+            self.list_remote(Some(typed), Some(window.window_handle()), cx);
+            return;
+        }
+        let Some(path) = browse.path.clone() else {
             return;
         };
         let host = dialog.host.clone();
@@ -690,7 +715,7 @@ impl WindowView {
         let up_row = up.map(|parent| {
             let icon = svg().flex_none().path(ARROW_UP_ICON).size(px(14.)).text_color(fg.opacity(0.6));
             row("ssh-parent-dir".into(), rust_i18n::t!("workspace.ssh_up").into_owned(), icon.into_any_element(), false)
-                .on_press(cx, move |this, _, cx| this.list_remote(Some(parent.clone()), cx))
+                .on_press(cx, move |this, _, cx| this.list_remote(Some(parent.clone()), None, cx))
                 .into_any_element()
         });
         let dirs = browse.dirs.iter().map(|dir| {
@@ -698,7 +723,7 @@ impl WindowView {
             let icon = img(folder_icon(dir, false)).flex_none().size(px(16.));
             // 点开头的隐藏目录淡一些，常用的目录好找。
             row(format!("ssh-subdir-{dir}").into(), dir.clone(), icon.into_any_element(), dir.starts_with('.'))
-                .on_press(cx, move |this, _, cx| this.list_remote(next.clone(), cx))
+                .on_press(cx, move |this, _, cx| this.list_remote(next.clone(), None, cx))
                 .into_any_element()
         });
         let dirs: Vec<AnyElement> = dirs.collect();
