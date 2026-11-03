@@ -902,6 +902,8 @@ settings:
   keybind:
     use_defaults: Use default shortcuts
     use_defaults_hint: When off, only the shortcuts you add are bound.
+    filter: Filter Shortcuts
+    filter_placeholder: Filter by name or keys
     add: Add Shortcut
     remove: Remove This Shortcut
     change: Change or Remove This Shortcut

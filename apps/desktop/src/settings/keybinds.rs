@@ -7,14 +7,15 @@
 //! 录键时拦下这个窗口里按的键（`App::intercept_keystrokes`），不让它当快捷键或者菜单命令生效；
 //! 一次只录一个按键，连按几个键的写法（`ctrl+a>n`）要在配置文件里写。
 
-use crate::ui::a11y::RevealOnHover;
+use crate::ui::a11y::{RevealOnHover, StaticText as _};
 use std::collections::HashMap;
 
 use crate::keybinds::{caps, caps_text};
 
 use crate::ui::icons::{BAN_ICON, MINUS_ICON, PLUS_ICON};
+use crate::ui::input::{Input, InputEvent, InputState};
 use crate::ui::theme::Theme;
-use gpui::{App, Context, Div, Keystroke, SharedString, Subscription, Window, div, prelude::*, px};
+use gpui::{App, Context, Div, Entity, Keystroke, SharedString, Subscription, Window, div, prelude::*, px};
 use runode_config::{
     Keybind,
     keybind::{self, Action, ActionSpec},
@@ -55,6 +56,8 @@ const GROUPS: &[(&str, &str)] = &[
 #[derive(Default)]
 pub(super) struct State {
     recording: Option<Recording>,
+    /// 筛选快捷键的搜索框，头一次显示这一页时建。
+    filter: Option<(Entity<InputState>, Subscription)>,
     /// 录到的键已经绑在别的动作上，等用户点替换或取消。
     conflict: Option<Conflict>,
 }
@@ -391,7 +394,28 @@ impl SettingsView {
         report(self, &values, cx);
     }
 
+    /// 筛选快捷键的搜索框，没有就建一个；改了字就重画。
+    fn keybind_filter(&mut self, cx: &mut Context<Self>) -> Entity<InputState> {
+        if let Some((field, _)) = &self.keybinds.filter {
+            return field.clone();
+        }
+        let field = cx.new(|cx| {
+            InputState::new(String::new(), cx)
+                .with_label(rust_i18n::t!("settings.keybind.filter"))
+                .with_placeholder(rust_i18n::t!("settings.keybind.filter_placeholder"))
+        });
+        let changed = cx.subscribe(&field, |_, _, event: &InputEvent, cx| {
+            if let InputEvent::Changed(_) = event {
+                cx.notify();
+            }
+        });
+        self.keybinds.filter = Some((field.clone(), changed));
+        field
+    }
+
     pub(super) fn render_keybinds(&mut self, theme: &Theme, _: &mut Window, cx: &mut Context<Self>) -> Div {
+        let filter = self.keybind_filter(cx);
+        let query = filter.read(cx).query().trim().to_lowercase();
         let values = self.file.values(KEY);
         let cleared = values.iter().any(|value| value == "clear");
         let title = rust_i18n::t!("settings.keybind.use_defaults").into_owned();
@@ -407,6 +431,12 @@ impl SettingsView {
             report(this, &values, cx);
         });
         let mut out = Cards::new(div().flex().flex_col(), theme);
+        out.raw(
+            div()
+                .mb(px(12.))
+                .child(Input::new(&filter).h(scaled(CONTROL_HEIGHT)).bg(theme.mix(0.06)))
+                .into_any_element(),
+        );
         out.push(
             row(
                 title,
@@ -419,7 +449,9 @@ impl SettingsView {
             .into_any_element(),
         );
 
-        let (rows, bad) = self.keybind_rows();
+        let (mut rows, bad) = self.keybind_rows();
+        rows.retain(|row| row_matches(row, &query));
+        let mut shown = 0;
         let mut seen: HashMap<String, usize> = HashMap::new();
         for (ix, line) in bad {
             let err = keybind::parse(&line).err().unwrap_or_default();
@@ -449,10 +481,12 @@ impl SettingsView {
             let start = group_start(first);
             let end = GROUPS.get(gx + 1).map_or(usize::MAX, |(next, _)| group_start(next));
             let group_rows: Vec<_> = rows.iter().filter(|row| (start..end).contains(&row.order)).collect();
-            let custom = *group == "text";
+            // 在筛选时不列自定义的说明，只列对得上的行。
+            let custom = *group == "text" && query.is_empty();
             if group_rows.is_empty() && !custom {
                 continue;
             }
+            shown += group_rows.len();
             let title = format!("settings.keybind.group.{group}");
             out.section(rust_i18n::t!(&title).into_owned());
             for row in group_rows {
@@ -479,6 +513,17 @@ impl SettingsView {
                         .into_any_element(),
                 );
             }
+        }
+        if shown == 0 && !query.is_empty() {
+            out.raw(
+                div()
+                    .id("keybind-filter-empty")
+                    .aria_static_text(rust_i18n::t!("search.no_results").into_owned())
+                    .py(px(8.))
+                    .text_color(theme.foreground.opacity(0.55))
+                    .child(rust_i18n::t!("search.no_results").into_owned())
+                    .into_any_element(),
+            );
         }
         out.finish()
     }
@@ -641,6 +686,19 @@ impl SettingsView {
     }
 }
 
+/// 筛选词 `query`（已转成小写、去掉两头空白）对得上这一行：动作的说明、配置里的名字或绑着的键里有它。空的都算。
+fn row_matches(row: &Row, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    // 键按界面上的写法（macOS 上是 ⌘⇧ 这类符号）和配置里的写法（`cmd+shift+t`）都比。
+    let keys = row.bound.iter().flat_map(|bound| [caps_text(&bound.trigger), bound.trigger.clone()]);
+    std::iter::once(crate::i18n::describe(row.name))
+        .chain(std::iter::once(row.usage.clone()))
+        .chain(keys)
+        .any(|text| text.to_lowercase().contains(query))
+}
+
 fn keycap(cap: String, theme: &Theme) -> Div {
     div()
         .min_w(scaled(CONTROL_HEIGHT))
@@ -770,6 +828,21 @@ mod tests {
     }
 
     /// 每个动作都有行可放，默认绑定都落在某一行上，`goto_tab` 一行管 1 到 9。
+    #[test]
+    fn the_filter_matches_names_usages_and_keys() {
+        let row = Row {
+            key: RowKey::Digits("goto_tab"),
+            order: 0,
+            name: "new_tab",
+            usage: "new_tab".to_owned(),
+            bound: vec![Bound { trigger: "ctrl+shift+t".to_owned(), source: Source::Default }],
+        };
+        assert!(row_matches(&row, ""));
+        assert!(row_matches(&row, "new_tab"));
+        assert!(row_matches(&row, "shift"));
+        assert!(!row_matches(&row, "zzz"));
+    }
+
     #[test]
     fn rows_cover_actions_and_defaults() {
         for spec in keybind::ACTIONS.iter().filter(|spec| !matches!(spec.name, "text" | "esc" | "csi")) {

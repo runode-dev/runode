@@ -902,6 +902,8 @@ settings:
   keybind:
     use_defaults: 使用默认快捷键
     use_defaults_hint: 关掉后只有你自己加的快捷键生效。
+    filter: 筛选快捷键
+    filter_placeholder: 按名称或按键筛选
     add: 添加快捷键
     remove: 去掉这个快捷键
     change: 改键或去掉这个快捷键
