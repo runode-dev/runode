@@ -719,7 +719,7 @@ impl WindowView {
             .h(height)
             .rounded(px(0.))
             .rounded_l(px(4.));
-        let options = new_tab_options_button(ButtonSize::Icon)
+        let options = new_tab_options_button(ButtonSize::Icon, self.new_tab_menu_open())
             .w(px(NEW_TAB_MENU_BUTTON_WIDTH))
             .h(height)
             .rounded(px(0.))
@@ -743,7 +743,7 @@ impl WindowView {
             .h_full()
             .rounded(px(0.));
         let options =
-            new_tab_options_button(ButtonSize::IconSm).w(px(NEW_TAB_MENU_BUTTON_WIDTH)).h_full().rounded(px(0.));
+            new_tab_options_button(ButtonSize::IconSm, self.new_tab_menu_open()).w(px(NEW_TAB_MENU_BUTTON_WIDTH)).h_full().rounded(px(0.));
         div()
             .flex_none()
             .flex()
@@ -767,13 +767,14 @@ fn new_tab_button(size: ButtonSize, cx: &mut Context<WindowView>) -> Button {
 }
 
 /// 「+」旁边弹出新建标签菜单的箭头。
-fn new_tab_options_button(size: ButtonSize) -> Button {
+/// 弹出新建标签菜单的箭头；菜单 `open` 着时不挂提示，免得到点盖在菜单上。
+fn new_tab_options_button(size: ButtonSize, open: bool) -> Button {
     let label = rust_i18n::t!("menu.new_tab_options");
     Button::new("new-tab-menu", label.clone())
         .icon(CHEVRON_DOWN_ICON)
         .icon_size(12.)
         .with_size(size)
-        .tooltip(tooltip(label, None))
+        .when(!open, |button| button.tooltip(tooltip(label, None)))
 }
 
 /// 标题栏右上角的最小化、最大化（最大化着时是还原）和关闭按钮（`draws_window_controls`），盖在窗口最上层，

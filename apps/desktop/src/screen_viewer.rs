@@ -1138,7 +1138,8 @@ impl ScreenViewer {
             .with_size(ButtonSize::Sm)
             .variant(ButtonVariant::Ghost)
             .aria_expanded(open)
-            .tooltip(tooltip(tip, None))
+            // 菜单开着时不挂提示：按下就开，鼠标停在按钮上，提示到点会盖在菜单上面。
+            .when(!open, |button| button.tooltip(tooltip(tip, None)))
             .child(current)
             .child(svg_icon(CHEVRON_DOWN_ICON, fg.opacity(0.6)))
             // 菜单开着时在捕获阶段就关掉、不再往下传：菜单自己的「点到外面就关」和下面再打开的都不跑。
