@@ -771,9 +771,9 @@ settings:
     ssh_control_persist: Seconds the connection to a host stays open after its last terminal closes, so reconnecting meanwhile asks for no password. 0 keeps it open. Quitting Runode always closes it.
     ssh_restore_on_launch: Connects to SSH hosts right away when Runode reopens workspaces and terminals that are on them. Turn it off to connect only when you click Reconnect, so launching Runode does not ask for passwords. Takes effect from the next launch.
     auto_update: Check for new versions in the background, download them and install them when Runode quits.
-    remote_access: "Lets a paired phone reach this computer's terminals over the local network or Tailscale. Pair below, or with runode remote pair."
+    remote_access: "Lets paired phones and computers reach this computer's terminals over the local network or Tailscale. Pair below, or with runode remote pair."
     remote_access_port: TCP port, 1 to 65535.
-    remote_access_name: "The name paired phones show. When empty, the system computer name. Connected phones drop briefly when it changes."
+    remote_access_name: "The name paired phones and computers show. When empty, the system computer name. Connected devices drop briefly when it changes."
     remote_access_push: When an agent waits for your answer, paired phones get a notification, even with the app closed.
     remote_access_push_text: Sends the question and choices from the bottom of the screen. Off sends only the title and the agent.
     remote_access_push_delay: Seconds the agent has to keep waiting first, so answering at the computer doesn't buzz the phone. 0 notifies right away.
@@ -877,10 +877,10 @@ settings:
     push_title: Runode test push
     push_line: Push notifications work.
   pairing:
-    title: Pair a phone
-    hint: "Scan a code with Runode on your phone. A paired phone can reach this computer while remote access is on."
+    title: Pair a device
+    hint: "Scan a code with Runode on your phone, or paste the pairing link into Runode on another computer. A paired device can reach this computer while remote access is on."
     start: Pair…
-    background: "Remote access stops when Runode quits, and the phone can no longer connect. Choose Stay Connected After Quitting to keep sessions and remote access running in the background."
+    background: "Remote access stops when Runode quits, and paired devices can no longer connect. Choose Stay Connected After Quitting to keep sessions and remote access running in the background."
     not_listening: Remote access is not listening. If you just turned it on, try again in a few seconds; otherwise the port may be taken, and the host's log says why.
     stopped: Remote access stopped while waiting for the phone.
     expired: The code expired before a phone used it.

@@ -771,9 +771,9 @@ settings:
     ssh_control_persist: 最后一个终端关掉后，到这台主机的连接再留多少秒，这期间重连不用再输密码。0 是一直留着。退出 Runode 时总会断开。
     ssh_restore_on_launch: 打开 Runode、恢复 SSH 主机上的工作区和终端时马上连那台主机。关掉后等你点「立即重连」才连，打开 Runode 时不会先问密码。下次启动起生效。
     auto_update: 在后台查新版本、下载好，退出 Runode 时装上。
-    remote_access: "让配对过的手机经局域网或 Tailscale 连上这台电脑的终端。在下面配对，或者用 runode remote pair。"
+    remote_access: "让配对过的手机和电脑经局域网或 Tailscale 连上这台电脑的终端。在下面配对，或者用 runode remote pair。"
     remote_access_port: TCP 端口，1 到 65535。
-    remote_access_name: "配对过的手机上显示的名字，留空时用系统的电脑名。改了以后连着的手机会断开一下再连上。"
+    remote_access_name: "配对过的手机和电脑上显示的名字，留空时用系统的电脑名。改了以后连着的设备会断开一下再连上。"
     remote_access_push: agent 等你回答时，配对过的手机会收到一条通知，App 没开着也行。
     remote_access_push_text: 带上屏幕底部的问题和选项；关掉时只发标题和 agent。
     remote_access_push_delay: agent 要先等这么多秒，在电脑前很快答了的不打扰手机。0 是马上推。
@@ -877,10 +877,10 @@ settings:
     push_title: Runode 测试推送
     push_line: 推送没问题。
   pairing:
-    title: 配对手机
-    hint: "用手机上的 Runode 扫码配对。配好的手机在远程访问打开时能连上这台电脑。"
+    title: 配对设备
+    hint: "用手机上的 Runode 扫码，或者把配对链接粘贴到另一台电脑的 Runode 里。配好的设备在远程访问打开时能连上这台电脑。"
     start: 配对…
-    background: "现在退出 Runode 时远程访问会跟着停，手机就连不上了。点「退出后保持连接」，退出时会话和远程访问都留在后台。"
+    background: "现在退出 Runode 时远程访问会跟着停，配对过的设备就连不上了。点「退出后保持连接」，退出时会话和远程访问都留在后台。"
     not_listening: 远程访问没在监听。刚打开的话等几秒再试；一直这样的话，端口可能被占了，宿主的日志里有原因。
     stopped: 等手机时远程访问停了。
     expired: 口令过期了，手机没来配对。

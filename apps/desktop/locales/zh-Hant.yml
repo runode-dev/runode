@@ -771,9 +771,9 @@ settings:
     ssh_control_persist: 最後一個終端機關掉後，到這台主機的連線再留多少秒，這期間重連不用再輸入密碼。0 是一直留著。結束 Runode 時總會中斷。
     ssh_restore_on_launch: 打開 Runode、恢復 SSH 主機上的工作區和終端機時馬上連那台主機。關掉後等你點「立即重連」才連，打開 Runode 時不會先問密碼。下次啟動起生效。
     auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
-    remote_access: "讓配對過的手機經區域網路或 Tailscale 連上這台電腦的終端機。在下面配對，或者用 runode remote pair。"
+    remote_access: "讓配對過的手機和電腦經區域網路或 Tailscale 連上這台電腦的終端機。在下面配對，或者用 runode remote pair。"
     remote_access_port: TCP 連接埠，1 到 65535。
-    remote_access_name: "配對過的手機上顯示的名稱，留空時用系統的電腦名稱。改了以後連著的手機會斷開一下再連上。"
+    remote_access_name: "配對過的手機和電腦上顯示的名稱，留空時用系統的電腦名稱。改了以後連著的裝置會斷開一下再連上。"
     remote_access_push: agent 等你回答時，配對過的手機會收到一則通知，App 沒開著也行。
     remote_access_push_text: 帶上螢幕底部的問題和選項；關掉時只發標題和 agent。
     remote_access_push_delay: agent 要先等這麼多秒，在電腦前很快答了的不打擾手機。0 是馬上推播。
@@ -877,10 +877,10 @@ settings:
     push_title: Runode 測試推送
     push_line: 推送沒問題。
   pairing:
-    title: 配對手機
-    hint: "用手機上的 Runode 掃碼配對。配好的手機在遠端存取打開時能連上這台電腦。"
+    title: 配對裝置
+    hint: "用手機上的 Runode 掃碼，或者把配對連結貼到另一台電腦的 Runode 裡。配好的裝置在遠端存取打開時能連上這台電腦。"
     start: 配對…
-    background: "現在結束 Runode 時遠端存取會跟著停，手機就連不上了。點「結束後保持連線」，結束時工作階段和遠端存取都留在背景。"
+    background: "現在結束 Runode 時遠端存取會跟著停，配對過的裝置就連不上了。點「結束後保持連線」，結束時工作階段和遠端存取都留在背景。"
     not_listening: 遠端存取沒在監聽。剛打開的話等幾秒再試；一直這樣的話，連接埠可能被占用了，宿主的日誌裡有原因。
     stopped: 等手機時遠端存取停了。
     expired: 口令過期了，手機沒來配對。
