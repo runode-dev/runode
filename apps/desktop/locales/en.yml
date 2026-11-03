@@ -275,7 +275,7 @@ ssh:
   upload_write: "Could not write %{path}"
   ok: OK
   bound_title: "Terminals on %{host} end when you log out of SSH"
-  bound_detail: This machine ends the processes left behind when an SSH login closes, so the remote terminals and agents go with it. Install the Runode host as a systemd user service with linger enabled to keep them running after you disconnect. You can also do this later on the SSH Hosts page in Settings.
+  bound_detail: This machine ends the processes left behind when an SSH login closes, so the remote terminals and agents go with it. Install the Runode host as a systemd user service with linger enabled to keep them running after you disconnect. You can also do this later on the Remote Hosts page in Settings.
   bound_install: Install as Login Service
   bound_later: Not Now
   service_title: Login Service
@@ -850,7 +850,7 @@ settings:
     remove: Delete
     failed: "Download failed: %{err}"
   ssh_hosts:
-    empty: No SSH hosts yet. To connect to one, choose SSH Host when you create a workspace.
+    empty: No SSH hosts yet. When creating a workspace, choose Add SSH Host under Add Remote Host.
     connect: Connect
     disconnect: Disconnect
     forget: Forget
