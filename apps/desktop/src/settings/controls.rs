@@ -121,8 +121,12 @@ pub(super) fn error_text(id: impl Into<ElementId>, err: String, theme: &Theme) -
     div().id(id).aria_static_text(err.clone()).text_size(FontSize::Small).text_color(theme.destructive).child(err)
 }
 
+/// 下拉按钮跟着界面字号最多放大到基准宽度的这么多倍：这一行左边的说明不跟着按钮让位，按钮再宽就把说明
+/// 挤成窄窄一列。
+const DROPDOWN_MAX_GROWTH: f32 = 1.3;
+
 /// 点开一个列表从里面挑的按钮：显示当前选的，`leading` 放在它左边（比如主题的色块），右边一个
-/// 下拉箭头。`width` 是基准字号下的点数，跟着界面字号缩放。
+/// 下拉箭头。`width` 是基准字号下的点数，跟着界面字号缩放，有上限（`DROPDOWN_MAX_GROWTH`）。
 pub(super) fn dropdown(
     id: impl Into<ElementId>,
     name: impl Into<SharedString>,
@@ -134,6 +138,7 @@ pub(super) fn dropdown(
     SelectTrigger::new(id, name, label)
         .when_some(leading, SelectTrigger::leading)
         .w(scaled(width))
+        .max_w(px(width * DROPDOWN_MAX_GROWTH))
         .h(scaled(CONTROL_HEIGHT))
         .pl(px(10.))
         .pr(px(6.))
