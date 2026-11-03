@@ -32,6 +32,7 @@ use crate::ui::{
     input::{Input, InputEvent, InputState},
     menu::{Menu, MenuHost, MenuItem},
     panel::TITLEBAR_HEIGHT,
+    scrollbar::scrollbar,
     segmented::Segmented,
     select::SelectTrigger,
     switch::Switch,
@@ -39,8 +40,9 @@ use crate::ui::{
     theme::ActiveTheme as _,
 };
 use gpui::{
-    Action, App, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, MouseButton,
-    PathPromptOptions, Render, Role, SharedString, Subscription, Window, canvas, div, prelude::*, px,
+    Action, App, Axis, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent,
+    MouseButton, PathPromptOptions, Render, Role, ScrollHandle, SharedString, Subscription, Window, canvas, div,
+    prelude::*, px,
 };
 use runode_protocol::{
     ClientMsg, HostMsg,
@@ -50,6 +52,9 @@ use runode_protocol::{
 use crate::kanban::store;
 use runode_agent::models::{Catalog, LAUNCHERS, Launcher, Pick, Unanswered};
 use runode_todo::LocalTime;
+
+/// 各栏右边给滚动条留的宽度，伸进面板的内边距里，比面板的内边距窄。
+const SCROLLBAR_GUTTER: f32 = 14.;
 
 /// 问到的各家 agent 的模型清单：下次打开对话框先用着，同时再问一遍。
 static CATALOGS: LazyLock<Mutex<HashMap<&'static str, Arc<Catalog>>>> = LazyLock::new(Mutex::default);
@@ -152,6 +157,8 @@ pub struct TodoDialog {
     /// 正在问模型清单的 agent（`LAUNCHERS` 里第几个），和没问到的、为什么没问到。
     loading: HashSet<usize>,
     failed: HashMap<usize, Unanswered>,
+    /// 标题和按钮之间那些栏的滚动位置，滚动条读它。
+    fields_scroll: ScrollHandle,
     dir: PathBuf,
     worktree: bool,
     /// 挑上的 skill、自定义 agent 和附上的文件，见 `TodoSpec`；`found` 是在 `dir` 能找到的 skill 和自定义 agent。
@@ -315,6 +322,7 @@ impl TodoDialog {
             workspaces,
             shell_path,
             loading: HashSet::new(),
+            fields_scroll: ScrollHandle::new(),
             failed: HashMap::new(),
             dir,
             worktree,
@@ -962,12 +970,14 @@ impl TodoDialog {
             .child(title)
     }
 
-    /// 标题和按钮之间的各栏；窗口矮时只有这些滚动，标题和保存按钮总在。
+    /// 标题和按钮之间的各栏；窗口矮时只有这些滚动，标题和保存按钮总在。默认大小的窗口里附件和下面的开关就在
+    /// 底下藏着，挂上滚动条，鼠标进来时看得出还能往下滚。滚动条画在面板右边的内边距里，不压住各栏的边框。
     fn render_fields(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+        let fields = div()
             .id("todo-dialog-fields")
-            .flex_1()
-            .min_h_0()
+            .size_full()
+            .pr(px(SCROLLBAR_GUTTER))
+            .track_scroll(&self.fields_scroll)
             .overflow_y_scroll()
             .flex()
             .flex_col()
@@ -988,7 +998,12 @@ impl TodoDialog {
             .child(self.render_agent_row(window, cx))
             .child(self.render_skills_row(window, cx))
             .child(self.render_attachments(cx))
-            .child(self.render_switches(cx))
+            .child(self.render_switches(cx));
+        div().flex_1().min_h_0().mr(px(-SCROLLBAR_GUTTER)).relative().child(fields).child(scrollbar(
+            "todo-dialog-scrollbar",
+            self.fields_scroll.clone(),
+            Axis::Vertical,
+        ))
     }
 
     /// 挑着的模板要另外填的那一项，放在最上面。
@@ -1346,18 +1361,19 @@ impl TodoDialog {
             let hint = runode_paths::Dirs::from_env().todo_templates_dir().map(|dir| {
                 let hint = rust_i18n::t!("kanban.dialog.templates_hint").into_owned();
                 let shown = display_dir(&dir);
-                let open = Button::new("todo-templates-open", rust_i18n::t!("kanban.dialog.templates_open").into_owned())
-                    .variant(ButtonVariant::Link)
-                    .with_size(ButtonSize::Sm)
-                    .cursor_pointer()
-                    .aria_description(shown.clone())
-                    .tooltip(crate::ui::tooltip::tooltip(shown, None))
-                    .on_press(cx, move |_, _, cx| {
-                        if let Err(err) = std::fs::create_dir_all(&dir) {
-                            tracing::warn!("cannot create {}: {err}", dir.display());
-                        }
-                        cx.open_with_system(&dir);
-                    });
+                let open =
+                    Button::new("todo-templates-open", rust_i18n::t!("kanban.dialog.templates_open").into_owned())
+                        .variant(ButtonVariant::Link)
+                        .with_size(ButtonSize::Sm)
+                        .cursor_pointer()
+                        .aria_description(shown.clone())
+                        .tooltip(crate::ui::tooltip::tooltip(shown, None))
+                        .on_press(cx, move |_, _, cx| {
+                            if let Err(err) = std::fs::create_dir_all(&dir) {
+                                tracing::warn!("cannot create {}: {err}", dir.display());
+                            }
+                            cx.open_with_system(&dir);
+                        });
                 div()
                     .pt(px(8.))
                     .flex()
