@@ -535,11 +535,8 @@ impl WindowView {
             .text_color(fg_hsla.opacity(if current || !split { 0.9 } else { 0.55 }))
             .child(icon)
             .child(div().flex_shrink_0().max_w(relative(0.6)).truncate().child(name))
-            // 折叠的分屏地方小，只写标题。
-            .children(
-                dir.filter(|_| !folded)
-                    .map(|dir| div().min_w_0().truncate().text_color(fg_hsla.opacity(0.45)).child(dir)),
-            )
+            // 折叠的分屏也写目录：几个都是 bash 时只靠它分得清，放不下就截短。
+            .children(dir.map(|dir| div().min_w_0().truncate().text_color(fg_hsla.opacity(0.45)).child(dir)))
             .children(trailing_mark.map(|mark| styled_agent_mark(mark, ("pane-agent", id), fg_hsla, true)))
             .child(div().flex_1())
             .children((!narrow || folded).then_some(buttons))
