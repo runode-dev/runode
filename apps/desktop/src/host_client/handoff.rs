@@ -373,7 +373,9 @@ mod tests {
             m = marker.display()
         );
         let exe = fake_successor("retry", &body);
-        assert_eq!(hand_over(&exe, QUICK), Outcome::TookOver { sessions: 1, replayed: 0 });
+        // 重试的期限留够新写的脚本第一次执行的时间：系统要先检查一遍新的可执行文件，可能要一两秒。
+        let timing = Timing { desktop_retry: Duration::from_secs(10), ..QUICK };
+        assert_eq!(hand_over(&exe, timing), Outcome::TookOver { sessions: 1, replayed: 0 });
 
         // 一直连着：到期限后报拒绝。
         let exe = fake_successor("stuck", &format!("echo '{refused}' >&3"));
