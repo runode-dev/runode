@@ -263,6 +263,11 @@ ssh:
   lost: "%{host}: %{status}"
   reconnect: Reconnect Now
   remote_desktop: Remote Desktop
+  failure_auth: Authentication failed
+  failure_host_key: The host key does not match the one recorded before
+  failure_resolve: Cannot resolve this host name
+  failure_unreachable: Cannot reach this host
+  failure_timeout: The connection timed out
   upload_failed: "Could not upload to %{host}"
   upload_begin: Could not create the upload folder there
   upload_read: "Could not read %{path}"

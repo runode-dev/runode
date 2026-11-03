@@ -393,38 +393,35 @@ impl RemoteHost {
                 self.set_status(Status::Idle);
                 continue;
             }
-            let error = match failure {
-                Some(Failure::Stop { mut error, auth }) => {
-                    if auth && !can_ask(&ssh()) {
-                        error.push_str(
-                            " (this ssh cannot ask for passwords, which needs OpenSSH 8.4 or later: use a key or ssh-agent)",
-                        );
-                    }
-                    tracing::warn!("connecting to {} needs the user: {error}", self.name);
-                    self.set_status(Status::Stopped { error: HostError::Plain(error), auth });
-                    self.wait_for_retry();
-                    attempt = 0;
-                    continue;
+            let (error, stop) = match failure {
+                Some(Failure::Stop { error, auth }) => (HostError::Plain(error), Some(auth)),
+                Some(Failure::Ssh { failure, detail }) => {
+                    let stop = (!failure.retryable()).then_some(true);
+                    (HostError::Ssh { failure, detail }, stop)
                 }
-                Some(Failure::Retry(error)) => error,
-                None => "lost the connection".to_owned(),
+                Some(Failure::Retry(error)) => (HostError::Plain(error), None),
+                None => (HostError::Plain("lost the connection".to_owned()), None),
             };
+            if let Some(auth) = stop {
+                let error = if auth && !can_ask(&ssh()) { error.with_note(NO_ASKPASS) } else { error };
+                tracing::warn!("connecting to {} needs the user: {error:?}", self.name);
+                self.set_status(Status::Stopped { error, auth });
+                self.wait_for_retry();
+                attempt = 0;
+                continue;
+            }
             let Some(&delay) = RETRY_DELAYS.get(attempt as usize) else {
-                tracing::warn!("gave up reconnecting to {} after {attempt} attempts: {error}", self.name);
+                tracing::warn!("gave up reconnecting to {} after {attempt} attempts: {error:?}", self.name);
                 self.state().gave_up = true;
-                self.set_status(Status::Stopped { error: HostError::Plain(error), auth: false });
+                self.set_status(Status::Stopped { error, auth: false });
                 self.wait_for_retry();
                 self.state().gave_up = false;
                 attempt = 0;
                 continue;
             };
             attempt += 1;
-            tracing::info!("reconnecting to {} in {delay:?} (attempt {attempt}): {error}", self.name);
-            self.set_status(Status::Waiting {
-                attempt,
-                retry_at: Instant::now() + delay,
-                error: HostError::Plain(error),
-            });
+            tracing::info!("reconnecting to {} in {delay:?} (attempt {attempt}): {error:?}", self.name);
+            self.set_status(Status::Waiting { attempt, retry_at: Instant::now() + delay, error });
             self.sleep(delay);
         }
     }
@@ -669,7 +666,12 @@ pub(crate) enum Failure {
     Retry(String),
     /// 要用户来办；`auth` 是认证的问题。
     Stop { error: String, auth: bool },
+    /// ssh 自己报的、认出了种类的失败，`detail` 是它最后说的那句话；种类决定是重试还是等用户。
+    Ssh { failure: runode_ssh::Failure, detail: String },
 }
+
+/// 认证要用户来办、这个 ssh 又不能经 askpass 问密码时，原因后面补的一句。
+const NO_ASKPASS: &str = "this ssh cannot ask for passwords, which needs OpenSSH 8.4 or later: use a key or ssh-agent";
 
 /// ssh 自己出错时的退出码；别的退出码是远端命令的。
 const SSH_ERROR_EXIT: i32 = 255;
@@ -688,9 +690,9 @@ fn classify(log: &std::path::Path, code: Option<i32>) -> Failure {
     let error = match &failure {
         runode_ssh::Failure::Other(last) if last.is_empty() => format!("ssh exited with {code:?}"),
         runode_ssh::Failure::Other(last) => last.clone(),
-        other => format!("{other:?}: {}", runode_ssh::last_line(&stderr)),
+        _ => return Failure::Ssh { detail: runode_ssh::last_line(&stderr).to_owned(), failure },
     };
-    if failure.retryable() { Failure::Retry(error) } else { Failure::Stop { error, auth: true } }
+    Failure::Retry(error)
 }
 
 /// 起 `command`：stdin、stdout 接管道，stderr 写进 `log`，自成一个进程组。

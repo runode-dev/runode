@@ -263,6 +263,11 @@ ssh:
   lost: "%{host}：%{status}"
   reconnect: 立即重連
   remote_desktop: 遠端桌面
+  failure_auth: 認證沒通過
+  failure_host_key: 主機金鑰和以前記下的不一樣
+  failure_resolve: 找不到這個主機名稱
+  failure_unreachable: 連不到這台主機
+  failure_timeout: 連線逾時
   upload_failed: "傳不到 %{host} 上"
   upload_begin: 沒能在那邊建上傳目錄
   upload_read: "讀不了 %{path}"

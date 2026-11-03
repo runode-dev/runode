@@ -278,16 +278,42 @@ pub enum Status {
 /// 没连上、断了的原因。存的是种类，画界面时才写成当时语言的文字（`text`），切换语言后跟着变。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostError {
-    /// 照原样显示的文字：ssh 和系统报的错误，没有译文。
+    /// 照原样显示的文字：系统报的错误和没认出种类的 ssh 错误，没有译文。
     Plain(String),
+    /// 按 ssh 的话认出了种类的连接失败，`detail` 是 ssh 最后说的那句话。
+    Ssh {
+        failure: runode_ssh::Failure,
+        detail: String,
+    },
     Paired(paired::PairedError),
 }
 
 impl HostError {
+    /// 原因后面补上 `note`：ssh 的原话后面、或者照原样的文字后面括上它。
+    pub fn with_note(self, note: &str) -> Self {
+        match self {
+            Self::Plain(text) => Self::Plain(format!("{text} ({note})")),
+            Self::Ssh { failure, detail } => Self::Ssh { failure, detail: format!("{detail} ({note})") },
+            other => other,
+        }
+    }
+
     /// 写给人看的原因，按当前的语言。
     pub fn text(&self) -> String {
         match self {
             Self::Plain(text) => text.clone(),
+            Self::Ssh { failure, detail } => {
+                use runode_ssh::Failure;
+                let kind = match failure {
+                    Failure::Auth => rust_i18n::t!("ssh.failure_auth"),
+                    Failure::HostKey => rust_i18n::t!("ssh.failure_host_key"),
+                    Failure::Resolve => rust_i18n::t!("ssh.failure_resolve"),
+                    Failure::Unreachable => rust_i18n::t!("ssh.failure_unreachable"),
+                    Failure::Timeout => rust_i18n::t!("ssh.failure_timeout"),
+                    Failure::Other(_) => return detail.clone(),
+                };
+                if detail.is_empty() { kind.into_owned() } else { format!("{kind}（{detail}）") }
+            }
             Self::Paired(error) => error.text(),
         }
     }
@@ -401,7 +427,22 @@ fn watch_network() {
 
 #[cfg(test)]
 mod tests {
-    use super::HostId;
+    use super::{HostError, HostId};
+
+    /// ssh 认出了种类的失败按界面语言说，后面括着 ssh 的原话；补的说明接在原话后面。
+    #[test]
+    fn ssh_failures_are_put_in_words() {
+        let timeout = HostError::Ssh {
+            failure: runode_ssh::Failure::Timeout,
+            detail: "ssh: connect to host 10.0.0.9 port 22: Connection timed out".into(),
+        };
+        let text = timeout.text();
+        assert!(text.contains("Connection timed out") && !text.starts_with("Timeout"), "{text}");
+        let noted = HostError::Ssh { failure: runode_ssh::Failure::Auth, detail: "Permission denied".into() }
+            .with_note("use a key");
+        assert!(noted.text().ends_with("Permission denied (use a key)）"), "{}", noted.text());
+        assert_eq!(HostError::Plain("x".into()).with_note("y").text(), "x (y)");
+    }
 
     /// 配对的电脑和 SSH 主机在存档里的写法认得回来；旧存档里的 SSH 主机照旧是 SSH 主机。
     #[test]
