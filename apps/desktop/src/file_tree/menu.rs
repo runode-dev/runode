@@ -36,7 +36,7 @@ impl FileTree {
         }
         items.push(None);
         if selected.is_some() {
-            items.extend([item("menu.cut", Box::new(Cut)), item("menu.copy", Box::new(Copy))]);
+            items.extend([item("menu.cut", Box::new(Cut)), item(&crate::i18n::os_key("copy"), Box::new(Copy))]);
         }
         items.push(Some(MenuItem::new(rust_i18n::t!("menu.paste"), Box::new(Paste), can_paste, cx)));
         items.extend([

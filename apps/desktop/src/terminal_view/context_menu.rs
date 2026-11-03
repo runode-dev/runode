@@ -34,7 +34,7 @@ impl TerminalView {
             Some(MenuItem::new(label, action, enabled, cx).with_shortcut(shortcut))
         };
         let items = vec![
-            item(tr(&os_key("terminal_menu.copy")), Box::new(Copy), selected),
+            item(tr(&os_key("copy")), Box::new(Copy), selected),
             item(tr("menu.paste"), Box::new(Paste), true),
             item(tr("menu.select_all"), Box::new(SelectAll), true),
             None,

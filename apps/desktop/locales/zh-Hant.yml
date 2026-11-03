@@ -1511,8 +1511,7 @@ host_error:
   timeout: 終端宿主沒有及時回話
   lost: 和終端宿主的連線斷了
   not_connected: 沒連上終端宿主
-terminal_menu:
-  copy:
-    macos: 拷貝
-    windows: 複製
-    linux: 複製
+copy:
+  macos: 拷貝
+  windows: 複製
+  linux: 複製

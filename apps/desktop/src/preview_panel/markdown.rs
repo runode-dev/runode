@@ -1070,7 +1070,7 @@ impl PreviewPanel {
                         div()
                             .id("md-copy")
                             .role(Role::Button)
-                            .aria_label(rust_i18n::t!("menu.copy").into_owned())
+                            .aria_label(crate::i18n::tr(&crate::i18n::os_key("copy")))
                             // 只有按下的处理，辅助工具按不到，另外登记；按钮悬停时才露出来，辅助工具照样按得到。
                             .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copied.to_string()));
@@ -1087,7 +1087,7 @@ impl PreviewPanel {
                             .cursor_pointer()
                             .reveal_on_hover("md-code")
                             .hover(|button| button.text_color(colors.fg))
-                            .child(rust_i18n::t!("menu.copy").into_owned())
+                            .child(crate::i18n::tr(&crate::i18n::os_key("copy")))
                             // 按下就复制，也不让正文的拖选接着开始。
                             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                                 cx.stop_propagation();
