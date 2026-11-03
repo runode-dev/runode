@@ -214,6 +214,15 @@ impl TextareaState {
         self.center_caret = true;
     }
 
+    /// 选中硬换行第 `line` 行（从 0 数）里字节范围 `range` 那段，光标不在可见范围里时下一帧滚到让它居中。超出那一行
+    /// 的收到行尾。
+    pub fn select_in_line(&mut self, line: usize, range: Range<usize>, cx: &mut Context<Self>) {
+        let row = lines_range(&self.content, line..line + 1);
+        let at = |offset: usize| self.content.floor_char_boundary((row.start + offset).min(row.end));
+        self.select_range(at(range.start)..at(range.end), cx);
+        self.center_caret = true;
+    }
+
     /// 换上按版本 `version` 的文字算的样式段（字节范围，从前到后不重叠）。文字已经又改过、或者正在组字时
     /// 对不上，丢掉。
     pub fn set_highlights(

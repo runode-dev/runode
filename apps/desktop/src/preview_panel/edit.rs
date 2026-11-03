@@ -119,6 +119,11 @@ impl Editor {
     pub(super) fn select_lines(&self, lines: Range<usize>, cx: &mut App) {
         self.area.update(cx, |area, cx| area.select_lines(lines, cx));
     }
+
+    /// 选中第 `line` 行（从 0 数）里字节范围 `range` 那段，滚到能看见。
+    pub(super) fn select_in_line(&self, line: usize, range: Range<usize>, cx: &mut App) {
+        self.area.update(cx, |area, cx| area.select_in_line(line, range, cx));
+    }
 }
 
 impl Preview {
@@ -252,11 +257,14 @@ impl PreviewPanel {
             tabs.tabs.iter_mut().find(|tab| tab.path == path && tab.diff.is_none() && tab.editor.is_none())?;
         let name = preview.name();
         let selected = preview.selected_lines();
+        let hit = preview.hit.take().filter(|(line, _)| preview.selection == Some((*line, *line)));
         let area = cx.new(|cx| {
             let mut area = TextareaState::new(cx);
             area.load_text(source.text.clone(), cx);
-            if let Some(lines) = selected {
-                area.select_lines(lines, cx);
+            match (hit, selected) {
+                (Some((line, range)), _) => area.select_in_line(line, range, cx),
+                (None, Some(lines)) => area.select_lines(lines, cx),
+                (None, None) => {}
             }
             area.fill_height(cx);
             area.show_line_numbers(cx);

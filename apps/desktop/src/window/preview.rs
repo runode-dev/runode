@@ -5,7 +5,10 @@
 //! 它自己从主题读）；它要窗口办的事（文件树定位、出现收起和到最前时重排窗口、开关变了要存档、把路径打进
 //! 终端、按块暂存）经 `PreviewEvent` 交回来。自动换行和 Markdown 显示源码的开关在它身上，随窗口存档。
 
-use std::path::{Path, PathBuf};
+use std::{
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
 use crate::preview_panel::{Input, PreviewEvent, PreviewPanel};
 use gpui::{
@@ -105,9 +108,17 @@ impl WindowView {
         self.reveal_front_tab(cx);
     }
 
-    /// 和 `open_preview` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间。
-    pub(super) fn open_preview_at(&mut self, path: &Path, line: usize, pin: bool, edit: bool, cx: &mut Context<Self>) {
-        self.with_preview(cx, |panel, cx| panel.open_at(path, line, pin, edit, cx));
+    /// 和 `open_preview` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间；`hit` 见 `PreviewPanel::open_at`。
+    pub(super) fn open_preview_at(
+        &mut self,
+        path: &Path,
+        line: usize,
+        hit: Option<Range<usize>>,
+        pin: bool,
+        edit: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_preview(cx, |panel, cx| panel.open_at(path, line, hit, pin, edit, cx));
         self.reveal_front_tab(cx);
     }
 

@@ -85,12 +85,13 @@ struct Found {
     lines: Vec<FoundLine>,
 }
 
-/// 按内容找到的一行：`line` 从 1 数，`hit` 是 `text` 里命中的那段。
+/// 按内容找到的一行：`line` 从 1 数，`hit` 是显示的 `text` 里命中的那段，`column` 是原文那一行里的。
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FoundLine {
     line: u32,
     text: SharedString,
     hit: Option<Range<usize>>,
+    column: Option<Range<usize>>,
 }
 
 /// 结果排成的一行。`file` 是 `FileSearch::found` 的下标，`line` 是那个文件 `lines` 的下标。
@@ -438,7 +439,12 @@ fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Result<
                         .iter()
                         .map(|hit| {
                             let (text, range) = snippet(&hit.text, matcher.as_ref());
-                            FoundLine { line: hit.line, text: text.into(), hit: range }
+                            let column = matcher
+                                .as_ref()
+                                .and_then(|matcher| matcher.find(&hit.text))
+                                .map(|found| found.range())
+                                .filter(|found| !found.is_empty());
+                            FoundLine { line: hit.line, text: text.into(), hit: range, column }
                         })
                         .collect();
                     found(root, group[0].path.clone(), lines)
@@ -634,12 +640,13 @@ impl FileTree {
             }
             Some(SearchRow::File { file, .. }) => {
                 let path = search.found[file].path.clone();
-                cx.emit(FileTreeEvent::Open { path, line: None, pin });
+                cx.emit(FileTreeEvent::Open { path, line: None, hit: None, pin });
             }
             Some(SearchRow::Line { file, line, .. }) => {
                 let found = &search.found[file];
-                let (path, line) = (found.path.clone(), found.lines[line].line);
-                cx.emit(FileTreeEvent::Open { path, line: Some(line.saturating_sub(1) as usize), pin });
+                let (path, hit) = (found.path.clone(), &found.lines[line]);
+                let (line, hit) = (Some(hit.line.saturating_sub(1) as usize), hit.column.clone());
+                cx.emit(FileTreeEvent::Open { path, line, hit, pin });
             }
             None => return,
         }
@@ -1050,7 +1057,7 @@ mod tests {
 
     #[test]
     fn lays_out_rows_as_a_list_or_a_tree() {
-        let line = FoundLine { line: 3, text: "x".into(), hit: None };
+        let line = FoundLine { line: 3, text: "x".into(), hit: None, column: None };
         let found = vec![
             found(Path::new("/r"), "src/b.rs".into(), vec![line.clone(), line]),
             found(Path::new("/r"), "a.rs".into(), Vec::new()),
@@ -1084,7 +1091,7 @@ mod tests {
     #[test]
     fn selected_rows_point_at_their_file_or_dir() {
         let root = Path::new("/r");
-        let line = FoundLine { line: 3, text: "x".into(), hit: None };
+        let line = FoundLine { line: 3, text: "x".into(), hit: None, column: None };
         let found = vec![found(root, "src/b.rs".into(), vec![line]), found(root, "a.rs".into(), Vec::new())];
         let rows = layout_rows(&found, true, &HashSet::new());
         let entry = |ix| row_entry(&rows, &found, root, ix);

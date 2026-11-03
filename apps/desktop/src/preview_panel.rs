@@ -153,6 +153,8 @@ struct Preview {
     stamp: Option<Stamp>,
     /// 选中的行：按下的那行和现在拖到的那行，从 0 数。
     selection: Option<(usize, usize)>,
+    /// 搜索结果打开时那一行里搜到的那段（行号和字节范围）：进编辑模式时只选中它，选区还是那一行时才算。
+    hit: Option<(usize, Range<usize>)>,
     /// 按着鼠标在拖选。
     selecting: bool,
     scroll: UniformListScrollHandle,
@@ -235,6 +237,7 @@ impl Preview {
             content: None,
             stamp: None,
             selection: None,
+            hit: None,
             selecting: false,
             scroll: UniformListScrollHandle::new(),
             markdown_view: markdown::View::new(),
@@ -741,8 +744,17 @@ impl PreviewPanel {
         self.open_tab(path, None, pin, edit, cx);
     }
 
-    /// 和 `open` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间；进编辑模式时在编辑器里选中它。
-    pub fn open_at(&mut self, path: &Path, line: usize, pin: bool, edit: bool, cx: &mut Context<Self>) {
+    /// 和 `open` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间；进编辑模式时在编辑器里选中它，有 `hit`
+    /// （这一行里的字节范围）时只选中那段，免得接着打字把整行换掉。
+    pub fn open_at(
+        &mut self,
+        path: &Path,
+        line: usize,
+        hit: Option<Range<usize>>,
+        pin: bool,
+        edit: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.open(path, pin, edit, cx);
         // 排版视图不按行定位，显示着排版的 Markdown 先切到源码，选中的那一行才看得到。
         if self.preview().is_some_and(|preview| preview.path == path && self.markdown_shown(preview)) {
@@ -750,9 +762,13 @@ impl PreviewPanel {
         }
         if let Some(preview) = self.preview_mut().filter(|preview| preview.path == path) {
             preview.selection = Some((line, line));
+            preview.hit = hit.clone().map(|hit| (line, hit));
             preview.reveal.set(Some((line, ScrollStrategy::Center)));
             if let Some(editor) = &preview.editor {
-                editor.select_lines(line..line + 1, cx);
+                match hit {
+                    Some(hit) => editor.select_in_line(line, hit, cx),
+                    None => editor.select_lines(line..line + 1, cx),
+                }
             }
         }
     }

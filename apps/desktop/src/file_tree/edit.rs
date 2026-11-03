@@ -260,7 +260,7 @@ impl FileTree {
                 this.relist_and_reveal(ws, vec![dir], &path, cx);
                 // 新建的文件直接开成固定标签，接着就能看；已经切到别的 workspace 时不开到那边的预览栏里。
                 if !is_dir && ws == this.ws {
-                    cx.emit(FileTreeEvent::Open { path, line: None, pin: true });
+                    cx.emit(FileTreeEvent::Open { path, line: None, hit: None, pin: true });
                 }
             })
             .ok();

@@ -207,8 +207,10 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            FileTreeEvent::Open { path, line: None, pin } => self.open_preview(path, *pin, true, cx),
-            FileTreeEvent::Open { path, line: Some(line), pin } => self.open_preview_at(path, *line, *pin, true, cx),
+            FileTreeEvent::Open { path, line: None, pin, .. } => self.open_preview(path, *pin, true, cx),
+            FileTreeEvent::Open { path, line: Some(line), hit, pin } => {
+                self.open_preview_at(path, *line, hit.clone(), *pin, true, cx)
+            }
             FileTreeEvent::InsertPath(path) => self.insert_paths(vec![path.clone()], None, window, cx),
             FileTreeEvent::OpenTerminal(dir) => {
                 if let Some(view) = self.spawn_terminal(Some(dir), window, cx) {

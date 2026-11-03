@@ -173,8 +173,8 @@ pub struct Options {
 /// 要 app 办的事。
 pub enum FileTreeEvent {
     /// 在预览栏里打开 `path`：`pin` 时开成固定标签，否则开成临时标签；`line` 不为空时选中这一行（从 0 数）、
-    /// 滚到中间。
-    Open { path: PathBuf, line: Option<usize>, pin: bool },
+    /// 滚到中间，`hit` 是那一行里搜到的那段（字节）。
+    Open { path: PathBuf, line: Option<usize>, hit: Option<Range<usize>>, pin: bool },
     /// 把这个路径打进当前终端，焦点交回终端。
     InsertPath(PathBuf),
     /// 在当前 workspace 里开一个新标签页，终端的目录是这个目录。
@@ -914,7 +914,7 @@ impl FileTree {
             return;
         }
         if clicks >= 2 || self.input.single_click {
-            cx.emit(FileTreeEvent::Open { path: path.to_path_buf(), line: None, pin: clicks >= 2 });
+            cx.emit(FileTreeEvent::Open { path: path.to_path_buf(), line: None, hit: None, pin: clicks >= 2 });
         }
         cx.notify();
     }
@@ -1045,7 +1045,7 @@ impl FileTree {
                 cx,
             );
         } else {
-            cx.emit(FileTreeEvent::Open { path, line: None, pin: false });
+            cx.emit(FileTreeEvent::Open { path, line: None, hit: None, pin: false });
             // 预览栏刚打开时文件树变窄，选中的行可能被挤出视野。
             self.move_selection(|state, _, _| state.selected_row(), cx);
         }
