@@ -1457,75 +1457,6 @@
         }
       }
     },
-    "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。现在没连着这台电脑，它上面的 agent 等回答时可能还会推送到这部手机，可以在那台电脑上运行 `runode remote revoke %@` 撤销配对。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. This phone isn't connected to the computer right now, so agents there may still send notifications here when they're waiting for an answer. Run `runode remote revoke %@` on that computer to revoke the pairing."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。现在没连着这台电脑，它上面的 agent 等回答时可能还会推送到这部手机，可以在那台电脑上运行 `runode remote revoke %@` 撤销配对。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "會刪掉這部手機上為它儲存的裝置金鑰，之後要重新掃碼配對。現在沒連著這台電腦，它上面的 agent 等回答時可能還會推送到這部手機，可以在那台電腦上執行 `runode remote revoke %@` 撤銷配對。"
-          }
-        }
-      }
-    },
-    "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录要在那台电脑上撤销：运行 `runode remote revoke %@`。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. To revoke the pairing record on the computer, run `runode remote revoke %@` there."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录要在那台电脑上撤销：运行 `runode remote revoke %@`。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "會刪掉這部手機上為它儲存的裝置金鑰，之後要重新掃碼配對。電腦上的配對紀錄要在那台電腦上撤銷：執行 `runode remote revoke %@`。"
-          }
-        }
-      }
-    },
-    "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录请在那台电脑上撤销。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. Revoke the pairing record on the computer itself."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录请在那台电脑上撤销。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "會刪掉這部手機上為它儲存的裝置金鑰，之後要重新掃碼配對。電腦上的配對紀錄請在那台電腦上撤銷。"
-          }
-        }
-      }
-    },
     "会话" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9389,6 +9320,98 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "麥克風只錄到了靜音，請檢查 Runode 的麥克風權限"
+          }
+        }
+      }
+    },
+    "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对；这台电脑上的配对记录也一起撤销。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deletes the device key this phone keeps for it; you will need to scan the code again to pair. The pairing record on this computer is revoked too."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对；这台电脑上的配对记录也一起撤销。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "會刪掉這支手機上為它保存的裝置金鑰，以後要重新掃碼配對；這台電腦上的配對記錄也一起撤銷。"
+          }
+        }
+      }
+    },
+    "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。\n现在没连着这台电脑：等它下次连上再撤销它上面的配对记录，在那之前它的 agent 等回答时可能还会推送到这部手机。也可以在那台电脑上 Runode 的「配对设备」页里撤销。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deletes the device key this phone keeps for it; you will need to scan the code again to pair.\nThis computer is not connected right now: its pairing record is revoked the next time it connects, and until then its agents may still notify this phone when they need an answer. You can also revoke it in Runode's Paired Devices page on that computer."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。\n现在没连着这台电脑：等它下次连上再撤销它上面的配对记录，在那之前它的 agent 等回答时可能还会推送到这部手机。也可以在那台电脑上 Runode 的「配对设备」页里撤销。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "會刪掉這支手機上為它保存的裝置金鑰，以後要重新掃碼配對。\n現在沒連著這台電腦：等它下次連上再撤銷它上面的配對記錄，在那之前它的 agent 等回答時可能還會推送到這支手機。也可以在那台電腦上 Runode 的「配對裝置」頁裡撤銷。"
+          }
+        }
+      }
+    },
+    "现在没连着这台电脑：等它下次连上再撤销它上面的配对记录，在那之前它的 agent 等回答时可能还会推送到这部手机。也可以在那台电脑上 Runode 的「配对设备」页里撤销。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This computer is not connected right now: its pairing record is revoked the next time it connects, and until then its agents may still notify this phone when they need an answer. You can also revoke it in Runode's Paired Devices page on that computer."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在没连着这台电脑：等它下次连上再撤销它上面的配对记录，在那之前它的 agent 等回答时可能还会推送到这部手机。也可以在那台电脑上 Runode 的「配对设备」页里撤销。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在沒連著這台電腦：等它下次連上再撤銷它上面的配對記錄，在那之前它的 agent 等回答時可能還會推送到這支手機。也可以在那台電腦上 Runode 的「配對裝置」頁裡撤銷。"
+          }
+        }
+      }
+    },
+    "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。连着这台电脑时，它上面的配对记录一起撤销。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deletes the device key this phone keeps for it; you will need to scan the code again to pair. While this computer is connected, its pairing record is revoked too."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。连着这台电脑时，它上面的配对记录一起撤销。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "會刪掉這支手機上為它保存的裝置金鑰，以後要重新掃碼配對。連著這台電腦時，它上面的配對記錄一起撤銷。"
           }
         }
       }

@@ -312,13 +312,13 @@
                                 }
                             }
                         } message: {
-                            // 连着时删除前会先注销推送（`PushRegistration.unregister`）；没连着就注销不了。
+                            // 连着时删除前先请电脑解除配对（`AppModel.leave`）；没连着时等它再连上。
                             if app.sessionList(for: id)?.linkState.isConnected != true {
-                                Text("现在没连着这台电脑，它上面的 agent 等回答时可能还会推送到这部手机，可以在那台电脑上运行 `runode remote revoke \(machine.deviceId.prefix(8))` 撤销配对。")
+                                Text("现在没连着这台电脑：等它下次连上再撤销它上面的配对记录，在那之前它的 agent 等回答时可能还会推送到这部手机。也可以在那台电脑上 Runode 的「配对设备」页里撤销。")
                             }
                         }
                 } footer: {
-                    Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录要在那台电脑上撤销：运行 `runode remote revoke \(machine.deviceId.prefix(8))`。")
+                    Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。连着这台电脑时，它上面的配对记录一起撤销。")
                 }
                 .themedRows()
             }
