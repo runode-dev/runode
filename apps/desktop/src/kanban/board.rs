@@ -408,10 +408,20 @@ impl Kanban {
         let agent = session.and_then(|info| info.meta.agent);
         let place = self.place_name(&todo.spec.dir);
         let schedule = todo.schedule.as_ref().and_then(|id| data.schedules.iter().find(|s| &s.id == id));
+        let from = schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned());
         let footer: Vec<String> = [
             agent.is_none().then(|| todo.spec.agent.clone()),
             todo.started.map(|at| short_time(at, now)),
-            schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned()),
+            from.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        // 卡片上只写时间，窄列里放得下；悬停时说清是什么时间。
+        let footer_tip: Vec<String> = [
+            agent.is_none().then(|| todo.spec.agent.clone()),
+            todo.started.map(|at| rust_i18n::t!("kanban.started_at", time = short_time(at, now)).into_owned()),
+            from,
         ]
         .into_iter()
         .flatten()
@@ -456,11 +466,15 @@ impl Kanban {
             .when_some(agent, |row, agent| row.child((self.marks.render)(agent, agent_id, cx)))
             .child(
                 div()
+                    .id(named("todo-footer", &todo.id))
                     .flex_1()
                     .min_w_0()
                     .truncate()
                     .text_size(FontSize::Small)
                     .text_color(muted)
+                    .when(!footer_tip.is_empty(), |text| {
+                        text.tooltip(crate::ui::tooltip::tooltip(footer_tip.join(" · "), None))
+                    })
                     .child(footer.join(" · ")),
             )
             .children(primary);
