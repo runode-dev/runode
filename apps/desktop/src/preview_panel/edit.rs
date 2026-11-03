@@ -17,8 +17,8 @@ use std::{
 };
 
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable as _, KeyDownEvent, PromptButton, PromptLevel, SharedString,
-    Subscription, Task, Window, prelude::*, px,
+    App, Context, Entity, FocusHandle, Focusable as _, KeyDownEvent, Modifiers, PromptButton, PromptLevel,
+    SharedString, Subscription, Task, Window, prelude::*, px,
 };
 use runode_files::Stamp;
 use runode_preview::MAX_TEXT_BYTES;
@@ -478,7 +478,7 @@ impl PreviewPanel {
         .detach();
     }
 
-    /// 编辑模式下的正文：撑满的输入框，用终端的字体和预览字号。⌘S 存，Tab 插入制表符。
+    /// 编辑模式下的正文：撑满的输入框，用终端的字体和预览字号。⌘S（Linux、Windows 上是 Ctrl+S）存，Tab 插入制表符。
     pub(super) fn render_editor(
         &self,
         editor: &Editor,
@@ -508,11 +508,10 @@ impl PreviewPanel {
             .font_family(font)
             .line_height(px(font_size + ROW_EXTRA_HEIGHT))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                let mods = &event.keystroke.modifiers;
-                let plain = !mods.control && !mods.alt && !mods.shift;
+                let mods = event.keystroke.modifiers;
                 match event.keystroke.key.as_str() {
-                    "s" if plain && mods.platform => this.save(area.clone(), window, cx),
-                    "tab" if plain && !mods.platform => area.update(cx, |area, cx| area.insert("\t", cx)),
+                    "s" if mods == Modifiers::secondary_key(cx) => this.save(area.clone(), window, cx),
+                    "tab" if !mods.modified() => area.update(cx, |area, cx| area.insert("\t", cx)),
                     _ => return,
                 }
                 cx.stop_propagation();
