@@ -737,7 +737,7 @@ fn ref_labels(commit: &Commit, shown: usize, cx: &gpui::App) -> Vec<gpui::Div> {
                 .items_center()
                 .text_size(FontSize::Tiny)
                 .border_1()
-                .truncate();
+                .overflow_hidden();
             let label = match r.kind {
                 RefKind::Head | RefKind::CurrentBranch => label
                     .bg(hsla(RENAMED))
@@ -751,7 +751,7 @@ fn ref_labels(commit: &Commit, shown: usize, cx: &gpui::App) -> Vec<gpui::Div> {
                     .border_color(hsla(MODIFIED).opacity(0.5))
                     .text_color(fg_hsla),
             };
-            label.child(r.name.clone())
+            label.child(div().min_w_0().truncate().child(r.name.clone()))
         })
         .collect();
     if commit.refs.len() > shown {
