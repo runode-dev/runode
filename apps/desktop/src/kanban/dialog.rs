@@ -449,6 +449,29 @@ impl TodoDialog {
         cx.notify();
     }
 
+    /// 系统选择框的结果：选好的路径；取消了为空，打不开时还在对话框里写出原因。
+    fn picked(
+        &mut self,
+        result: Result<anyhow::Result<Option<Vec<PathBuf>>>, futures::channel::oneshot::Canceled>,
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<PathBuf>> {
+        match result {
+            Ok(Ok(paths)) => paths,
+            Ok(Err(err)) => {
+                tracing::warn!("could not open the system file picker: {err:#}");
+                let key = if cfg!(target_os = "linux") {
+                    "kanban.dialog.picker_failed_linux"
+                } else {
+                    "kanban.dialog.picker_failed"
+                };
+                self.error = Some(rust_i18n::t!(key).into_owned());
+                cx.notify();
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
     /// 弹出系统的文件选择框，选好的文件附上。
     fn browse_attachments(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
@@ -458,7 +481,10 @@ impl TodoDialog {
             prompt: Some(rust_i18n::t!("kanban.dialog.add_attachment").into_owned().into()),
         });
         cx.spawn_in(window, async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return };
+            let picked = paths.await;
+            let Some(paths) = this.update(cx, |dialog, cx| dialog.picked(picked, cx)).ok().flatten() else {
+                return;
+            };
             this.update(cx, |dialog, cx| {
                 for path in paths {
                     if !dialog.attachments.contains(&path) {
@@ -562,7 +588,10 @@ impl TodoDialog {
             prompt: Some(rust_i18n::t!("kanban.dialog.choose_dir").into_owned().into()),
         });
         cx.spawn_in(window, async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return };
+            let picked = paths.await;
+            let Some(paths) = this.update(cx, |dialog, cx| dialog.picked(picked, cx)).ok().flatten() else {
+                return;
+            };
             let Some(dir) = paths.into_iter().next() else { return };
             this.update(cx, |dialog, cx| {
                 dialog.dir = dir;

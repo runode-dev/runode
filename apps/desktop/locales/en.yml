@@ -1135,6 +1135,8 @@ kanban:
     prompt_placeholder: What should the agent do? %{key} saves
     workspace: Workspace
     choose_dir: "Choose a Directory…"
+    picker_failed: "Could not open the system file picker."
+    picker_failed_linux: "Could not open the system file picker; it needs xdg-desktop-portal and a portal backend for your desktop installed."
     agent: Agent
     model: Model
     effort: Effort

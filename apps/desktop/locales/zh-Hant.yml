@@ -1135,6 +1135,8 @@ kanban:
     prompt_placeholder: 要 agent 做什麼？%{key} 儲存
     workspace: 工作區
     choose_dir: 選擇目錄…
+    picker_failed: "打不開系統的檔案選擇視窗。"
+    picker_failed_linux: "打不開系統的檔案選擇視窗：它要裝 xdg-desktop-portal 和你所用桌面的 portal 後端。"
     agent: Agent
     model: 模型
     effort: 強度
