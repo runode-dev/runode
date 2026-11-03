@@ -1,7 +1,9 @@
 //! 定时页：各个定时的规则、下次什么时候跑、最近开出的几张任务，编辑和删除。
 
+use crate::menus::OpenSettings;
 use crate::ui::{
     a11y::Press,
+    button::{Button, ButtonSize, ButtonVariant},
     font_size::FontSize,
     icons::{PENCIL_ICON, TRASH_ICON},
     scrollbar::scrollbar,
@@ -62,8 +64,25 @@ impl Kanban {
     pub(super) fn render_schedules(&self, data: &TodoData, cx: &mut Context<Self>) -> Div {
         let fg = cx.theme().foreground;
         let now = unix_now();
+        // 要打开的两个开关都在设置的头一页，打开设置就看得到。
         let hint = (!self.input.resident).then(|| {
-            label_row("todo-schedules-hint", rust_i18n::t!("kanban.schedules_need_host").into_owned(), fg.opacity(0.6))
+            let open =
+                Button::new("todo-schedules-settings", rust_i18n::t!("kanban.schedules_open_settings").into_owned())
+                    .variant(ButtonVariant::Link)
+                    .with_size(ButtonSize::Sm)
+                    .cursor_pointer()
+                    .on_press(cx, |_, window, cx| window.dispatch_action(Box::new(OpenSettings), cx));
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap(px(2.))
+                .child(label_row(
+                    "todo-schedules-hint",
+                    rust_i18n::t!("kanban.schedules_need_host").into_owned(),
+                    fg.opacity(0.6),
+                ))
+                .child(open)
         });
         let rows: Vec<_> =
             data.schedules.iter().map(|schedule| self.render_schedule(schedule, data, now, cx)).collect();

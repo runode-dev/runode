@@ -1050,6 +1050,7 @@ kanban:
   remove_schedule: "Delete Schedule"
   remove_schedule_detail: "Its prompt and schedule are deleted too and can't be recovered."
   schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit Runode or log in again, turn on “Keep sessions after quitting” and “Run the host in the background at login” in Settings."
+  schedules_open_settings: Open Settings
   no_schedules: No schedules yet
   no_next: Will not run again
   next: "next %{time}"
