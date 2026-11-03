@@ -186,6 +186,18 @@ impl PreviewPanel {
         self.open_tab(&path, Some(target), pin, false, cx);
     }
 
+    /// 工作区或暂存区的 diff 标签 `preview` 这一段没有改动了、另一段还有时，指向另一段的 diff；别的为空。
+    pub(super) fn other_side_with_changes(&self, preview: &super::Preview) -> Option<DiffTarget> {
+        let diff = preview.diff.as_ref()?;
+        let side = match diff.side {
+            DiffSide::Worktree => DiffSide::Index,
+            DiffSide::Index => DiffSide::Worktree,
+            DiffSide::Commit { .. } => return None,
+        };
+        let other = DiffTarget { side, ..diff.clone() };
+        super::diff_file(self.tabs()?.git.as_deref(), &other).is_some().then_some(other)
+    }
+
     /// 按块操作做完了：当前显示的是 diff 标签时马上重读，不等扫描。
     pub fn reload_diff(&mut self, cx: &mut Context<Self>) {
         self.load_diff(cx);

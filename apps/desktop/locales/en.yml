@@ -1274,6 +1274,10 @@ preview:
     worktree_tab: "%{name} (Working Tree)"
     staged_tab: "%{name} (Staged)"
     no_changes: No changes
+    all_staged: "All changes to this file are staged."
+    show_staged: "Show Staged Changes"
+    none_staged: "Nothing in this file is staged."
+    show_unstaged: "Show Unstaged Changes"
     previous_change: Previous Change
     next_change: Next Change
     discard_hunk_title: Discard this change?

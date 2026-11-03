@@ -14,13 +14,14 @@ use gpui::{
     ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, Role, SMOOTH_SVG_SCALE_FACTOR,
     SharedString, StyledText, Window, canvas, div, fill, img, point, prelude::*, px, size, uniform_list,
 };
+use runode_git as git;
 use runode_types::color::Rgb;
 
 use super::{
     BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, marks::Mark, right_fade,
     wrap::segment,
 };
-use crate::ui::a11y::StaticText;
+use crate::ui::a11y::{Press as _, StaticText};
 
 /// 改动标记的宽度；只删了行的地方在下一行顶上画一小段，这么高。
 const MARK_WIDTH: f32 = 3.;
@@ -82,7 +83,31 @@ impl PreviewPanel {
                     Note::NoContent => rust_i18n::t!("panel.no_content").into_owned(),
                     Note::DiffTooLarge => rust_i18n::t!("preview.diff.too_large").into_owned(),
                 };
-                panel_message(text, cx).id("preview-note").into_any_element()
+                // 这一段没改动了、另一段还有（比如刚把改动都暂存了）：说清改动在哪，给个按钮过去。
+                let other = matches!(note, Note::NoChanges).then(|| self.other_side_with_changes(preview)).flatten();
+                let Some(other) = other else {
+                    return panel_message(text, cx).id("preview-note").into_any_element();
+                };
+                let staged = other.side == git::DiffSide::Index;
+                let (text, open) = if staged {
+                    (rust_i18n::t!("preview.diff.all_staged"), rust_i18n::t!("preview.diff.show_staged"))
+                } else {
+                    (rust_i18n::t!("preview.diff.none_staged"), rust_i18n::t!("preview.diff.show_unstaged"))
+                };
+                let button = ui::button::Button::new("preview-other-side", open.into_owned())
+                    .variant(ui::button::ButtonVariant::Outline)
+                    .on_press(cx, move |this, _, cx| this.open_diff(other.clone(), false, cx));
+                div()
+                    .id("preview-note")
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(10.))
+                    .child(panel_message(text.into_owned(), cx).flex_none())
+                    .child(button)
+                    .into_any_element()
             }
             Some(Loaded::Image(image)) => div()
                 .id("preview-image")
