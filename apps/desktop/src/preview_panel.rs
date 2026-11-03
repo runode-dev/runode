@@ -1277,20 +1277,26 @@ impl PreviewPanel {
                         .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_source(cx)),
                 )
             })
-            // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图里有。
-            .when(!typeset && !editing, |buttons| {
-                buttons.child(
-                    toggle("preview-wrap", WRAP_ICON, self.wrap, rust_i18n::t!("preview.wrap"))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _, cx| {
-                                cx.stop_propagation();
-                                this.toggle_preview_wrap(cx);
-                            }),
-                        )
-                        .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_wrap(cx)),
-                )
-            });
+            // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图和 diff 里有；图片这类不是文字的
+            // 没有可折的行，也不给。
+            .when(
+                !typeset
+                    && !editing
+                    && (preview.diff.is_some() || matches!(preview.content, Some(Loaded::Text { .. }))),
+                |buttons| {
+                    buttons.child(
+                        toggle("preview-wrap", WRAP_ICON, self.wrap, rust_i18n::t!("preview.wrap"))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.toggle_preview_wrap(cx);
+                                }),
+                            )
+                            .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_wrap(cx)),
+                    )
+                },
+            );
         // 按钮至少留出自己的宽度，路径放不下时截断。远端的路径照那边的写法显示。
         let shown = crate::project_host::remote_path(&preview.path);
         let path = div()
