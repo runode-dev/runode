@@ -464,14 +464,15 @@
         }
     }
 
-    /// 连接状态前面的小圆点：连着绿，等着重连橙，失败红，其余灰。
+    /// 连接状态前面的小圆点：连着绿，等着重连橙，失败红，其余灰。用符号画：跟着字号缩放，和后面的字按基线对齐。
     private struct StatusDot: View {
         let state: LinkState
 
         var body: some View {
-            Circle()
-                .fill(color)
-                .frame(width: 8, height: 8)
+            Image(systemName: "circle.fill")
+                .font(.caption2)
+                .imageScale(.small)
+                .foregroundStyle(color)
                 .accessibilityHidden(true)
         }
 
