@@ -148,7 +148,7 @@ fn verbatim_from_client(path: &str) -> Option<PathBuf> {
     Some(PathBuf::from(format!(r"\\?\{}", rest.replace('/', "\\"))))
 }
 
-fn forward_slashes(path: PathBuf) -> PathBuf {
+pub(crate) fn forward_slashes(path: PathBuf) -> PathBuf {
     match path.to_str() {
         Some(text) if cfg!(windows) => PathBuf::from(text.replace('\\', "/")),
         _ => path,

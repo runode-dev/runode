@@ -996,7 +996,10 @@ fn welcome_reports_the_system_and_home() {
     match peer.message() {
         HostMsg::Welcome { os, home, .. } => {
             assert_eq!(os, std::env::consts::OS);
-            assert_eq!(home, runode_paths::Dirs::from_env().home);
+            let expected = runode_paths::Dirs::from_env()
+                .home
+                .map(|home| if cfg!(windows) { home.to_string_lossy().replace('\\', "/").into() } else { home });
+            assert_eq!(home, expected);
             assert!(home.is_some());
         }
         other => panic!("expected welcome, got {other:?}"),

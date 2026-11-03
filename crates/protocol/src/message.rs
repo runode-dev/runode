@@ -455,7 +455,7 @@ pub enum HostMsg {
     /// 消息（`ClientMsg::ListTodos` 等），`shells` 是认得 `ClientMsg::ListShells` 和 `ClientMsg::FindCommands`（不认得的
     /// 宿主回的 `Error` 不带请求编号，前端只能干等到超时，所以不认得时不发）。`desktops` 是有几个桌面的界面连着（回桌面的 `Hello` 时不
     /// 算它自己）：退出时不留会话的桌面看到还有别的桌面，只结束自己的会话，不让宿主退出。`os` 是宿主跑在
-    /// 什么系统上，写法同 `std::env::consts::OS`，`home` 是宿主所在用户的家目录；
+    /// 什么系统上，写法同 `std::env::consts::OS`，`home` 是宿主所在用户的家目录，Windows 上也用 `/` 分隔；
     /// 没报时 `os` 为空、`home` 为 `None`，前端要自己去认。
     Welcome {
         protocol: u32,

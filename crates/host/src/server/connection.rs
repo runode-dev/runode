@@ -379,7 +379,7 @@ impl Connection {
             shells: true,
             desktops,
             os: std::env::consts::OS.to_owned(),
-            home: runode_paths::Dirs::from_env().home,
+            home: runode_paths::Dirs::from_env().home.map(crate::browse::forward_slashes),
         }
     }
 
