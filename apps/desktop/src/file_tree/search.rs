@@ -49,8 +49,9 @@ const MAX_FILES: usize = 500;
 const MAX_LINES: usize = 2000;
 /// 按内容找时停止打字这么久才搜。
 const CONTENT_DEBOUNCE: Duration = Duration::from_millis(200);
-/// 内容结果里命中处前面最多留的字节数，再多就从前面截掉，命中的词才露得出来。
-const SNIPPET_LEAD: usize = 24;
+/// 内容结果里命中处前面最多留的字节数，再多就从前面截掉，命中的词才露得出来。默认宽度的侧栏一行只放得下
+/// 三十来个字符，前面留多了命中的词会被挤到行尾截掉。
+const SNIPPET_LEAD: usize = 12;
 /// 内容结果一行最多留的字节数，压缩过的长行不整行排版。
 const SNIPPET_MAX: usize = 300;
 
