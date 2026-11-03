@@ -3,7 +3,7 @@
 //! 打开时选定的那个仓库（主仓库或子仓库）的分支，切换、新建也在那个仓库里做。已经在另一个工作树里
 //! 检出的本地分支 git 不让再检出，这一行写明在哪个工作树里，选它就在新标签里打开那个工作树。
 
-use crate::ui::picker::{matches_query, nav_delta, picker_panel};
+use crate::ui::picker::{match_rank, matches_query, nav_delta, picker_panel};
 use crate::ui::theme::ActiveTheme as _;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -75,13 +75,9 @@ impl BranchPicker {
             rows.push(PickerRow::Create(query.to_owned()));
         }
         if !self.create_only {
-            rows.extend(
-                branches
-                    .iter()
-                    .filter(|branch| matches_query(&[&branch.name], query))
-                    .take(MAX_BRANCH_ROWS)
-                    .map(PickerRow::Branch),
-            );
+            let mut matched: Vec<_> = branches.iter().filter(|branch| matches_query(&[&branch.name], query)).collect();
+            matched.sort_by_key(|branch| match_rank(&branch.name, query));
+            rows.extend(matched.into_iter().take(MAX_BRANCH_ROWS).map(PickerRow::Branch));
         }
         rows
     }

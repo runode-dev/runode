@@ -16,7 +16,7 @@ use runode_files::ops::{self, OpError};
 use runode_protocol::{ClientMsg, HostMsg};
 use runode_ssh::Destination;
 
-use crate::ui::picker::matches_query;
+use crate::ui::picker::{match_rank, matches_query};
 
 use super::{Source, clone_command, paired::AddPairedMachine, repo_name};
 use crate::window::{Dropdown, TITLEBAR_HEIGHT, WindowView, files::Quoting, status_bar::host_list::dot_color};
@@ -616,11 +616,15 @@ impl WindowView {
             .on_press(cx, |this, window, cx| this.cancel_add_host(window, cx));
         let typed = adding.field.read(cx).query().to_owned();
         let known = self.known_hosts(cx);
-        let hosts: Vec<AnyElement> = adding
+        let mut matched: Vec<&String> = adding
             .hosts
             .iter()
             .filter(|host| !known.contains(&HostId::Ssh((*host).clone())))
             .filter(|host| matches_query(&[host], &typed))
+            .collect();
+        matched.sort_by_key(|host| match_rank(host, &typed));
+        let hosts: Vec<AnyElement> = matched
+            .into_iter()
             .take(MAX_HOSTS)
             .map(|host| {
                 let name = host.clone();
