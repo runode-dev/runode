@@ -1310,7 +1310,12 @@ files:
   move_title: "Move “%{name}” into “%{dir}”?"
   move_confirm: Move
   cancel: Cancel
-  failed: The operation couldn't be completed
+  failed_new: "Couldn't Create"
+  failed_rename: "Couldn't Rename"
+  failed_delete: "Couldn't Delete"
+  failed_ignore: "Couldn't Add to .gitignore"
+  failed_move: "Couldn't Move"
+  failed_copy: "Couldn't Copy"
   exists: "“%{name}” already exists here."
   into_itself: "Can't put “%{name}” inside itself."
   newline_in_name: The name contains a line break, so it can't be written to .gitignore. Rename it first.

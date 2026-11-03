@@ -1310,7 +1310,12 @@ files:
   move_title: 把「%{name}」移到「%{dir}」裡？
   move_confirm: 移動
   cancel: 取消
-  failed: 操作沒有完成
+  failed_new: 沒能新增
+  failed_rename: 沒能重新命名
+  failed_delete: 沒能刪除
+  failed_ignore: 沒能加進 .gitignore
+  failed_move: 沒能移動
+  failed_copy: 沒能複製
   exists: 這裡已經有「%{name}」了。
   into_itself: 不能把「%{name}」放進它自己裡面。
   newline_in_name: 名字裡有換行，沒法寫進 .gitignore，先改個名再加。

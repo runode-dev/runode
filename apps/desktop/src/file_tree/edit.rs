@@ -205,7 +205,7 @@ impl FileTree {
 
     fn create_entry(&mut self, dir: &Path, name: &str, is_dir: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(path) = ops::child_path(dir, name) else {
-            self.show_invalid_name(name, window, cx);
+            self.show_invalid_name("files.failed_new", name, window, cx);
             return;
         };
         // 同 `transfer`：在后台建，网络卷挂住时不卡界面；完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树。
@@ -219,7 +219,7 @@ impl FileTree {
             let result = job.await;
             this.update_in(cx, |this, window, cx| {
                 if let Err(err) = result {
-                    this.show_file_error(error_text(&err, &name), window, cx);
+                    this.show_file_error("files.failed_new", error_text(&err, &name), window, cx);
                     return;
                 }
                 this.relist_and_reveal(ws, vec![dir], &path, cx);
@@ -239,7 +239,7 @@ impl FileTree {
             return;
         }
         let Some(to) = path.parent().and_then(|parent| ops::child_name(parent, name)) else {
-            self.show_invalid_name(name, window, cx);
+            self.show_invalid_name("files.failed_rename", name, window, cx);
             return;
         };
         // 同 `create_entry`，在后台改。
@@ -253,7 +253,7 @@ impl FileTree {
             let result = job.await;
             this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => this.after_move(ws, &from, &to, cx),
-                Err(err) => this.show_file_error(error_text(&err, &name), window, cx),
+                Err(err) => this.show_file_error("files.failed_rename", error_text(&err, &name), window, cx),
             })
             .ok();
         })
@@ -354,7 +354,7 @@ impl FileTree {
             let result = result.await;
             this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => this.after_delete(ws, &path, window, cx),
-                Err(err) => this.show_file_error(error_text(&err, &name), window, cx),
+                Err(err) => this.show_file_error("files.failed_delete", error_text(&err, &name), window, cx),
             })
             .ok();
         })
@@ -446,7 +446,7 @@ impl FileTree {
                 .await;
             this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => cx.emit(FileTreeEvent::Refresh),
-                Err(err) => this.show_file_error(error_text(&err, ".gitignore"), window, cx),
+                Err(err) => this.show_file_error("files.failed_ignore", error_text(&err, ".gitignore"), window, cx),
             })
             .ok();
         })
@@ -532,7 +532,8 @@ impl FileTree {
                     // 失败也可能已经动了磁盘（移动了一半、复制被清掉），让树和磁盘对上。
                     this.with_tree_of(ws, cx, |state, root, filter| state.relist(vec![dir], root, filter));
                     cx.notify();
-                    this.show_file_error(error_text(&err, &base_name(&src)), window, cx);
+                    let title = if cut { "files.failed_move" } else { "files.failed_copy" };
+                    this.show_file_error(title, error_text(&err, &base_name(&src)), window, cx);
                 }
             })
             .ok();
@@ -540,16 +541,17 @@ impl FileTree {
         .detach();
     }
 
-    fn show_invalid_name(&self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.show_file_error(rust_i18n::t!("files.invalid_name", name = name).into_owned(), window, cx);
+    fn show_invalid_name(&self, title: &str, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_file_error(title, rust_i18n::t!("files.invalid_name", name = name).into_owned(), window, cx);
     }
 
-    fn show_file_error(&self, detail: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// 弹框说哪个操作没成（`title` 是标题的译文键）、为什么。
+    fn show_file_error(&self, title: &str, detail: String, window: &mut Window, cx: &mut Context<Self>) {
         // 只说一声，但收的那头要留到框关掉。
         let answer = crate::prompt::show(
             window,
             PromptLevel::Warning,
-            &rust_i18n::t!("files.failed"),
+            &rust_i18n::t!(title),
             Some(&detail),
             &[PromptButton::cancel(rust_i18n::t!("files.ok"))],
             cx,
