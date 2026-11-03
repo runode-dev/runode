@@ -118,12 +118,9 @@ impl TerminalView {
         }
     }
 
-    /// 右上角的搜索栏：输入框、匹配进度、上下切换和关闭按钮。
-    pub(super) fn render_search_bar(
-        &self,
-        field: &Entity<InputState>,
-        cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
+    /// 右上角的搜索栏：输入框、匹配进度、上下切换和关闭按钮。分屏比搜索栏窄时搜索栏跟着收窄，不伸到
+    /// 分屏外面去。
+    pub(super) fn render_search_bar(&self, field: &Entity<InputState>, cx: &mut Context<Self>) -> gpui::Div {
         let frame = self.colors;
         let fg = hsla(frame.0);
         let bar_bg = hsla(frame.1.mix(frame.0, 0.1));
@@ -152,14 +149,13 @@ impl TerminalView {
         let name = |key: &str| SharedString::from(rust_i18n::t!(key).into_owned());
         let (previous, next, close) =
             (name("menu.find_previous"), name("menu.find_next"), name("tooltip.close_search"));
-        div()
+        let bar = div()
             .id("search-bar")
             .role(Role::Search)
             .aria_label(rust_i18n::t!("search.placeholder").into_owned())
-            .absolute()
-            .top(px(8.))
-            .right(px(16.))
             .w(scaled(320.))
+            .min_w_0()
+            .flex_shrink(1.)
             .h(scaled(32.))
             .pl(px(10.))
             .pr(px(4.))
@@ -222,6 +218,8 @@ impl TerminalView {
                 button("search-close", "×", &close)
                     .tooltip(tooltip(close, Some(&EndSearch)))
                     .on_press(cx, |view, window, cx| view.close_search(window, cx)),
-            )
+            );
+        // 外层只管摆位置，没有鼠标处理，不挡下面的终端。
+        div().absolute().top(px(8.)).left(px(8.)).right(px(16.)).flex().justify_end().child(bar)
     }
 }
