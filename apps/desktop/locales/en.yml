@@ -123,6 +123,9 @@ workspace:
   close_detail: Its %{count} terminals will be closed along with it.
   browse: Browse Folder
   browse_hint: A local project, Git repository or any folder; you can also drop one on the window
+  picker_failed: "Could not open the system folder picker. You can drag a folder onto the Runode window to open it."
+  picker_failed_linux: "Could not open the system folder picker; it needs xdg-desktop-portal and a portal backend for your desktop installed. Meanwhile you can drag a folder onto the Runode window to open it."
+  create_failed: "Could not create %{dir}: %{error}"
   other: Other Ways
   clone: Clone from URL
   clone_hint: Clone a remote Git repository

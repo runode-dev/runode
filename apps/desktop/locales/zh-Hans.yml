@@ -123,6 +123,9 @@ workspace:
   close_detail: 里面的 %{count} 个终端会一起关闭。
   browse: 浏览文件夹
   browse_hint: 本地项目、Git 仓库或任意文件夹，也可以把文件夹拖到窗口上
+  picker_failed: "打不开系统的选择文件夹窗口。可以把文件夹拖到 Runode 的窗口上打开。"
+  picker_failed_linux: "打不开系统的选择文件夹窗口：它要装 xdg-desktop-portal 和你所用桌面的 portal 后端。没装之前可以把文件夹拖到 Runode 的窗口上打开。"
+  create_failed: "建不了 %{dir}：%{error}"
   other: 其他方式
   clone: 从 URL 克隆
   clone_hint: 克隆远程 Git 仓库

@@ -123,6 +123,9 @@ workspace:
   close_detail: 裡面的 %{count} 個終端機會一起關閉。
   browse: 瀏覽檔案夾
   browse_hint: 本機專案、Git 儲存庫或任意檔案夾，也可以把檔案夾拖到視窗上
+  picker_failed: "打不開系統的選擇資料夾視窗。可以把資料夾拖到 Runode 的視窗上打開。"
+  picker_failed_linux: "打不開系統的選擇資料夾視窗：它要裝 xdg-desktop-portal 和你所用桌面的 portal 後端。沒裝之前可以把資料夾拖到 Runode 的視窗上打開。"
+  create_failed: "建不了 %{dir}：%{error}"
   other: 其他方式
   clone: 從 URL 複製
   clone_hint: 複製遠端 Git 儲存庫

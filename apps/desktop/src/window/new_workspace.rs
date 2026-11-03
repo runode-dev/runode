@@ -20,7 +20,7 @@ use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::{
     ui::icons::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
     ui::{
-        a11y::Press,
+        a11y::{Press, StaticText as _},
         card::Card,
         dialog::Dialog,
         font_size::FontSize,
@@ -163,15 +163,37 @@ impl WindowView {
             prompt: Some(rust_i18n::t!("workspace.choose").into_owned().into()),
         });
         cx.spawn_in(window, async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else {
+            let Ok(result) = paths.await else {
                 return;
             };
-            let Some(dir) = paths.into_iter().next() else {
-                return;
-            };
-            this.update_in(cx, |this, window, cx| this.open_new_workspace(dir, window, cx)).ok();
+            match result {
+                Ok(Some(paths)) => {
+                    let Some(dir) = paths.into_iter().next() else {
+                        return;
+                    };
+                    this.update_in(cx, |this, window, cx| this.open_new_workspace(dir, window, cx)).ok();
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    this.update(cx, |this, cx| this.report_picker_failed(&err, cx)).ok();
+                }
+            }
         })
         .detach();
+    }
+
+    /// 系统的选择面板打不开时在对话框里说明，给出把文件夹拖到窗口上这条路。
+    fn report_picker_failed(&mut self, err: &anyhow::Error, cx: &mut Context<Self>) {
+        tracing::warn!("could not open the system file picker: {err:#}");
+        let key = if cfg!(target_os = "linux") { "workspace.picker_failed_linux" } else { "workspace.picker_failed" };
+        self.report_new_workspace_error(rust_i18n::t!(key).into_owned(), cx);
+    }
+
+    fn report_new_workspace_error(&mut self, message: String, cx: &mut Context<Self>) {
+        if let Some(dialog) = &mut self.new_workspace {
+            dialog.error = Some(message);
+            cx.notify();
+        }
     }
 
     /// 点了一种来源：本机上打开、新建交给系统的面板；克隆和远端上的各种在对话框里展开，焦点给要填的框。
@@ -180,9 +202,23 @@ impl WindowView {
             return;
         };
         match (dialog.host.is_local(), source) {
-            (true, Source::Browse) => self.browse_new_workspace(window, cx),
-            (true, Source::Create) => self.new_workspace_dir(None, None, window, cx),
+            (true, Source::Browse) => {
+                self.clear_local_error(cx);
+                self.browse_new_workspace(window, cx)
+            }
+            (true, Source::Create) => {
+                self.clear_local_error(cx);
+                self.new_workspace_dir(None, None, window, cx)
+            }
             _ => self.show_source(source, window, cx),
+        }
+    }
+
+    fn clear_local_error(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = &mut self.new_workspace
+            && dialog.error.take().is_some()
+        {
+            cx.notify();
         }
     }
 
@@ -273,12 +309,23 @@ impl WindowView {
         let home = home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let path = cx.prompt_for_new_path(&home, suggested.as_deref());
         cx.spawn_in(window, async move |this, cx| {
-            let Ok(Ok(Some(dir))) = path.await else {
-                return;
+            let dir = match path.await {
+                Ok(Ok(Some(dir))) => dir,
+                Ok(Err(err)) => {
+                    this.update(cx, |this, cx| this.report_picker_failed(&err, cx)).ok();
+                    return;
+                }
+                Ok(Ok(None)) | Err(_) => return,
             };
             this.update_in(cx, |this, window, cx| {
                 if let Err(err) = std::fs::create_dir_all(&dir) {
                     tracing::warn!("could not create {}: {err}", dir.display());
+                    let message = rust_i18n::t!(
+                        "workspace.create_failed",
+                        dir = dir.display().to_string(),
+                        error = err.to_string()
+                    );
+                    this.report_new_workspace_error(message.into_owned(), cx);
                     return;
                 }
                 let Some(command) = command else {
@@ -393,6 +440,15 @@ impl WindowView {
         let create_body =
             (!local && expanded(Source::Create)).then(|| self.render_remote_source(Source::Create, cx)).flatten();
         let host_row = self.render_host_picker(window, cx);
+        // 远端的错误写在展开的那一块里。
+        let local_error = dialog.error.clone().filter(|_| local).map(|error| {
+            div()
+                .id("new-workspace-error")
+                .aria_static_text(error.clone())
+                .flex_none()
+                .text_color(cx.theme().destructive)
+                .child(error)
+        });
         let add_host = dialog.adding.as_ref().map(|adding| card().child(self.render_add_host(adding, cx)));
         let pairing = dialog.pairing.as_ref().map(|pairing| card().child(self.render_pairing(pairing, cx)));
         let close = Button::new("new-workspace-close", rust_i18n::t!("workspace.close"))
@@ -436,6 +492,7 @@ impl WindowView {
             .children(host_row)
             .children(add_host)
             .children(pairing)
+            .children(local_error)
             .child(card().child(div().child(browse).children(browse_body)))
             .child(
                 div()
