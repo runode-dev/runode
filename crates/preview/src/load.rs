@@ -45,6 +45,8 @@ pub enum Content {
     TooLarge,
     /// 读不了，附上原因。
     Unreadable(String),
+    /// 文件不在了（删了或挪走了）。
+    Missing,
 }
 
 /// 按扩展名判断是不是图片，不分大小写。

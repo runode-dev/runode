@@ -33,7 +33,7 @@ use std::{
     borrow::Cow,
     cell::Cell,
     collections::HashMap,
-    fs,
+    fs, io,
     ops::Range,
     path::{Path, PathBuf},
     sync::{
@@ -205,6 +205,7 @@ enum Note {
     Binary,
     TooLarge,
     Unreadable(String),
+    Missing,
     /// diff 标签：文件已经没有这一种改动了（比如全暂存了）。
     NoChanges,
     /// diff 标签：只改了权限或者只改了名，内容没变。
@@ -415,6 +416,13 @@ fn load_from(project: &ProjectHost, path: &Path) -> runode_preview::Content {
     let (max, whole) = runode_preview::limit(path);
     match project.read_limited(path, max, whole) {
         Ok(read) => runode_preview::decode(path, read.bytes, read.cut),
+        // 远端交回的只有原因的文字，认不出是不是文件不在了。
+        Err(_)
+            if !project.is_remote()
+                && fs::symlink_metadata(path).is_err_and(|err| err.kind() == io::ErrorKind::NotFound) =>
+        {
+            runode_preview::Content::Missing
+        }
         Err(err) => runode_preview::Content::Unreadable(err),
     }
 }
@@ -474,6 +482,7 @@ fn loaded(content: Content, svg: &SvgRenderer, cell_width: fn(char) -> u8) -> Lo
         Content::Binary => Loaded::Note(Note::Binary),
         Content::TooLarge => Loaded::Note(Note::TooLarge),
         Content::Unreadable(err) => Loaded::Note(Note::Unreadable(err)),
+        Content::Missing => Loaded::Note(Note::Missing),
     }
 }
 

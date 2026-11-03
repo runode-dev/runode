@@ -1229,6 +1229,7 @@ preview:
   binary: 无法预览二进制文件
   too_large: 图片太大，无法预览
   unreadable: "无法读取文件：%{error}"
+  missing: 文件已被删除或移走
   truncated: 文件太大，只显示了前 %{count} 行
   close: 关闭
   close_others: 关闭其他

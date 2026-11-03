@@ -1229,6 +1229,7 @@ preview:
   binary: Can't preview a binary file
   too_large: The image is too large to preview
   unreadable: "Can't read the file: %{error}"
+  missing: This file was deleted or moved
   truncated: The file is too large; only the first %{count} lines are shown
   close: Close
   close_others: Close Others

@@ -77,6 +77,7 @@ impl PreviewPanel {
                     Note::Binary => rust_i18n::t!("preview.binary").into_owned(),
                     Note::TooLarge => rust_i18n::t!("preview.too_large").into_owned(),
                     Note::Unreadable(err) => rust_i18n::t!("preview.unreadable", error = err).into_owned(),
+                    Note::Missing => rust_i18n::t!("preview.missing").into_owned(),
                     Note::NoChanges => rust_i18n::t!("preview.diff.no_changes").into_owned(),
                     Note::NoContent => rust_i18n::t!("panel.no_content").into_owned(),
                     Note::DiffTooLarge => rust_i18n::t!("preview.diff.too_large").into_owned(),
