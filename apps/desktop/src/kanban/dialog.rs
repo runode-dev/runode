@@ -1357,7 +1357,7 @@ impl TodoDialog {
         })
     }
 
-    /// 底下的取消、保存和保存并开始。
+    /// 底下的报错、取消、保存和保存并开始。
     fn render_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
         // 对话框底下的按钮：比 `ButtonSize::Default` 高一些，高度由上下留白撑开。
         let button = |id: &'static str, label: String, variant: ButtonVariant| {
@@ -1377,7 +1377,16 @@ impl TodoDialog {
             .when(self.saving, |button| button.opacity(0.5))
             .on_press(cx, |this, _, cx| this.save(true, cx))
         });
-        div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save).children(save_and_start)
+        // 报错放在按钮左边的空处，不另占一行，免得把上面各栏挤出可见范围。
+        div()
+            .pt(px(4.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(div().flex_1().min_w_0().children(self.render_error(cx)))
+            .child(cancel)
+            .child(save)
+            .children(save_and_start)
     }
 
     /// 新建任务那一页左边的模板，空白的在最前面。
@@ -1496,7 +1505,6 @@ impl Render for TodoDialog {
             .gap(px(12.))
             .child(Self::render_title(title))
             .child(self.render_fields(window, cx))
-            .children(self.render_error(cx))
             .child(self.render_buttons(cx));
         if page {
             return div()
