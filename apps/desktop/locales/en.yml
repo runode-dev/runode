@@ -1273,7 +1273,7 @@ files:
     macos: "Reveal in Finder"
     windows: "Reveal in File Explorer"
     linux: "Show in File Manager"
-  open_in_terminal: Open in New Tab
+  open_in_terminal: Open in New Terminal Tab
   preview: Open in Preview
   insert_path: Insert Path into Terminal
   copy_path: Copy Path

@@ -1273,7 +1273,7 @@ files:
     macos: "在 Finder 中顯示"
     windows: "在檔案總管中顯示"
     linux: "在檔案管理員中顯示"
-  open_in_terminal: 在新分頁中打開
+  open_in_terminal: 在新終端機分頁中打開
   preview: 在預覽中打開
   insert_path: 把路徑打進終端機
   copy_path: 拷貝路徑
