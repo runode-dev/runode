@@ -81,9 +81,19 @@ impl Pump {
                 self.say_bye(tcp);
                 return Ok(());
             }
-            self.local_to_remote()?;
-            if !self.flush_tls(tcp)? {
-                return Ok(());
+            loop {
+                let left = self.to_remote.len() - self.to_remote_at;
+                self.local_to_remote()?;
+                let flushing = self.conn.wants_write();
+                if !self.flush_tls(tcp)? {
+                    return Ok(());
+                }
+                // rustls 的密文都交给 TCP 了、调用方的明文还没交完：接着交。`poll` 只等 TCP 能写和对面发来，
+                // 这时两样都不会来，要睡到 `POLL_TICK` 才动。
+                let moved = self.to_remote.len() - self.to_remote_at != left;
+                if self.to_remote.is_empty() || self.conn.wants_write() || !(moved || flushing) {
+                    break;
+                }
             }
             if !self.wait_and_read(tcp, local)? {
                 self.say_bye(tcp);

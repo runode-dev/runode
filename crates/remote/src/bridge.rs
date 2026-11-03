@@ -171,13 +171,23 @@ impl Bridge {
     ) -> io::Result<()> {
         while !cut.load(Ordering::Relaxed) {
             self.phone_to_host(conn, host, local)?;
-            self.host_to_phone(conn)?;
-            while conn.wants_write() {
-                match conn.write_tls(&mut &*phone) {
-                    Ok(_) => {}
-                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
-                    Err(err) => return Err(err),
+            loop {
+                let at = (self.from_host_at, self.from_host.len(), self.replies_at, self.replies.len());
+                self.host_to_phone(conn)?;
+                let flushing = conn.wants_write();
+                while conn.wants_write() {
+                    match conn.write_tls(&mut &*phone) {
+                        Ok(_) => {}
+                        Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+                        Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                // rustls 的密文都交给 TCP 了、宿主的字节还没交完：接着交。`poll` 只等 TCP 能写和两边发来，
+                // 这时都不会来，要睡到 `POLL_TICK` 才动。
+                let moved = at != (self.from_host_at, self.from_host.len(), self.replies_at, self.replies.len());
+                if self.from_host_at == self.from_host.len() || conn.wants_write() || !(moved || flushing) {
+                    break;
                 }
             }
             if self.said_bye && !conn.wants_write() {

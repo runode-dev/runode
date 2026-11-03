@@ -189,6 +189,28 @@ fn large_transfers_arrive_intact() {
     });
 }
 
+/// 只往一个方向发、对面一声不吭时（往配对的电脑传文件就是这样）也一口气送完，不等对面回话才接着送。
+#[test]
+fn a_one_way_transfer_does_not_wait_for_the_other_side() {
+    let harness = Harness::start("client-one-way");
+    let client = Client::new("one-way");
+    let dialed = pair(&harness, &client);
+    let screen = open_screen(&harness, &dialed);
+    let chunk = vec![7u8; 1 << 20];
+    let mut data = Vec::new();
+    for n in 0..8 {
+        write_frame(&mut data, FrameKind::Input, n, &chunk).unwrap();
+    }
+    let started = std::time::Instant::now();
+    std::thread::scope(|scope| {
+        scope.spawn(|| (&dialed.stream).write_all(&data).unwrap());
+        let mut got = vec![0u8; data.len()];
+        (&screen).read_exact(&mut got).unwrap();
+        assert!(got == data);
+    });
+    assert!(started.elapsed() < std::time::Duration::from_secs(10), "took {:?}", started.elapsed());
+}
+
 #[test]
 fn a_revoked_device_is_rejected() {
     let harness = Harness::start("client-revoked");
