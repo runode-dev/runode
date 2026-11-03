@@ -1024,6 +1024,7 @@ kanban:
   close: 關閉看板
   count: "%{count} 個任務"
   empty: 沒有任務
+  empty_done: "最近 7 天沒有完成的任務"
   started_at: "開始於 %{time}"
   from_schedule: "來自定時「%{name}」"
   reorder_hint: 調整值可以上移、下移
@@ -1049,7 +1050,7 @@ kanban:
   no_next: 不會再跑
   next: "下一次 %{time}"
   worktree_on: 獨立工作樹
-  done_window: 最近 7 天
+  done_window: "完成這一欄只列最近 7 天的任務"
   all_history: 全部記錄
   history: 記錄
   history_of: "「%{name}」的記錄"

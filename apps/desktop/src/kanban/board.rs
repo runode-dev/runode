@@ -295,9 +295,12 @@ impl Kanban {
             .map(|(ix, todo)| self.render_card(todo, column, ix, data, now, a11y, cx))
             .collect();
         let empty = cards.is_empty().then(|| {
+            // 完成那一栏只列最近几天的，空着时照实说。
+            let text =
+                if column == Column::Done { rust_i18n::t!("kanban.empty_done") } else { rust_i18n::t!("kanban.empty") };
             div().flex_1().flex().items_center().justify_center().child(label_row(
                 ("todo-column-empty", column_index(column)),
-                rust_i18n::t!("kanban.empty").into_owned(),
+                text.into_owned(),
                 fg.opacity(0.4),
             ))
         });
@@ -313,19 +316,23 @@ impl Kanban {
                 .child(cards.len().to_string())
                 .into_any_element()
         };
+        // 窄的一栏里标题、计数、说明和链接挤不下一行，只列最近几天这句放在链接的悬停提示里。
         let window_hint = (column == Column::Done).then(|| {
+            let window = rust_i18n::t!("kanban.done_window").into_owned();
             div()
                 .flex_1()
                 .min_w_0()
                 .flex()
                 .items_center()
-                .gap(px(8.))
+                .justify_end()
                 .text_size(FontSize::Small)
-                .text_color(fg.opacity(0.4))
                 .font_weight(FontWeight::NORMAL)
-                .child(div().min_w_0().truncate().child(rust_i18n::t!("kanban.done_window").into_owned()))
-                .child(div().flex_1())
-                .child(history_link("todo-done-history").on_press(cx, |this, _, cx| this.show_history(None, cx)))
+                .child(
+                    history_link("todo-done-history")
+                        .aria_description(window.clone())
+                        .tooltip(crate::ui::tooltip::tooltip(window, None))
+                        .on_press(cx, |this, _, cx| this.show_history(None, cx)),
+                )
         });
         let accept_bg = cx.theme().mix(0.1);
         div()

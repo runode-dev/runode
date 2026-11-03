@@ -1024,6 +1024,7 @@ kanban:
   close: Close the Kanban
   count: "%{count} task(s)"
   empty: Nothing here
+  empty_done: "Nothing finished in the last 7 days"
   started_at: "started %{time}"
   from_schedule: "from %{name}"
   reorder_hint: Adjust the value to move it up or down
@@ -1049,7 +1050,7 @@ kanban:
   no_next: Will not run again
   next: "next %{time}"
   worktree_on: own worktree
-  done_window: Last 7 days
+  done_window: "This column lists only the last 7 days"
   all_history: All history
   history: History
   history_of: "History of “%{name}”"
