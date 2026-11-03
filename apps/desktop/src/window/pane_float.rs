@@ -143,7 +143,7 @@ impl WindowView {
     }
 
     /// 当前标签里的终端 `id` 搬进单独的终端窗口，没浮着的先浮起来（标签里唯一不浮动的终端搬不走）。给了 `origin`
-    /// （相对这个窗口所在显示器的位置）时窗口放在那里，否则放在它浮着的地方。
+    /// （和 `Window::bounds` 同一套坐标）时窗口放在那里，否则放在它浮着的地方。
     pub(super) fn pop_out_pane(
         &mut self,
         id: EntityId,
@@ -349,7 +349,7 @@ impl WindowView {
                             cx.notify();
                             return;
                         }
-                        // 窗口在它那块显示器上的位置，加上松开的地方，减去按下时鼠标在这一块里的位置。
+                        // 窗口的位置（`Window::bounds` 的坐标），加上松开的地方，减去按下时鼠标在这一块里的位置。
                         let area = this.layout.borrow().area.map_or(Point::default(), |area| area.origin);
                         let grab = drag.from - area - drag.frame.origin;
                         let origin = window.bounds().origin + event.position - grab;
