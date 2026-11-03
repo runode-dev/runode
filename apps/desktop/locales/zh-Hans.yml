@@ -349,6 +349,7 @@ tasks:
   shortcut_press: "按下快捷键，Esc 取消"
   shortcut_clear: "清除"
   shortcut_taken: "「%{what}」现在用着这个键，保存后改成跑这条命令。"
+  running: "运行中"
   bind: "设快捷键（%{key}）"
   bind_title: "「%{name}」的快捷键"
   bind_hint: "快捷键只在这个项目里有效，别的项目可以把同一个键绑给自己的命令；通用命令的快捷键在没绑这个键的项目里都能用。"

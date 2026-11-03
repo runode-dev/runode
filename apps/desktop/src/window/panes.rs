@@ -12,11 +12,12 @@ use std::{
 
 use gpui::{
     Action, AnyElement, App, Context, CursorStyle, Div, DragMoveEvent, EntityId, ExternalPaths, Focusable, FontWeight,
-    MouseButton, MouseDownEvent, MouseMoveEvent, Role, SharedString, Stateful, StyleRefinement, Window, canvas, div,
-    prelude::*, px, relative, svg,
+    Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, Role, SharedString, Stateful, StyleRefinement, Window, canvas,
+    div, prelude::*, px, relative, svg,
 };
 use runode_protocol::SessionId;
 use runode_types::{
+    agent::AgentKind,
     pane::{Axis, Node},
     session::{DriveAction, Driver},
 };
@@ -38,6 +39,7 @@ use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::{
     badge::{Badge, BadgeVariant},
     card::Card,
+    spinner::spinner,
 };
 use crate::{
     ui::icons::{
@@ -427,7 +429,8 @@ impl WindowView {
             .into_any_element()
     }
 
-    /// 卡片样式下和浮着的终端顶上的标题条：agent 的状态标记（前台不是 agent 时是终端图标）和终端标题，
+    /// 卡片样式下和浮着的终端顶上的标题条：agent 的状态标记（前台不是 agent 时是终端图标，开来跑的命令还在跑时
+    /// 是转圈，见 `task_spinner`）和终端标题，
     /// 右边是向右、向下分屏，浮动，放大或还原，关闭分屏的按钮，当前分屏一直显示，别的分屏悬停时显示；
     /// 分屏窄于 `PANE_BUTTONS_MIN_WIDTH` 时不放。浮着的终端只有停靠和关闭，一直显示。
     /// 点标题条切到这个分屏，双击放大或还原；浮着的按住标题条拖着挪。
@@ -444,7 +447,9 @@ impl WindowView {
         // 宽度取上一帧画出来的；还没画过时当它够宽。
         let narrow =
             self.layout.borrow().panes.get(&id).is_some_and(|bounds| bounds.size.width < px(PANE_BUTTONS_MIN_WIDTH));
-        let (name, dir) = pane_label(tab.panes[&id].0.read(cx));
+        let view = tab.panes[&id].0.read(cx);
+        let (name, dir) = pane_label(view);
+        let task_running = view.task().is_some() && view.running().is_some();
         let fg_hsla = cx.theme().foreground;
         // 有 logo 的 agent：前面放 logo，状态标记跟在标题后面；没有 logo 的 agent 状态标记放前面。
         let mark = tab.pane_mark(id, cx);
@@ -453,6 +458,7 @@ impl WindowView {
         let icon = match (logo, mark) {
             (Some(logo), _) => logo,
             (None, Some(mark)) => styled_agent_mark(mark, ("pane-agent", id), fg_hsla, true),
+            (None, None) if task_running => task_spinner(id, fg_hsla),
             (None, None) => div()
                 .flex_none()
                 .w(px(AGENT_MARK_WIDTH + 2.))
@@ -882,6 +888,26 @@ fn pane_group<E: StatefulInteractiveElement + IntoElement>(
         .aria_label(name)
         .when_some(dir, |el, dir| el.aria_description(dir))
         .when(split, |el| el.aria_selected(focused))
+}
+
+/// 标题条前面的转圈：开来跑的命令还在跑。和没有 logo 的 agent 干活时的标记同一个位置、同一种转法，
+/// 用标题的颜色。
+fn task_spinner(id: EntityId, fg: Hsla) -> AnyElement {
+    let (frames, frame_time) = AgentKind::Other.spinner();
+    div()
+        .id(("pane-task", id))
+        .role(Role::Status)
+        .aria_label(rust_i18n::t!("tasks.running"))
+        .flex_none()
+        .w(px(AGENT_MARK_WIDTH + 2.))
+        .flex()
+        .justify_center()
+        .items_center()
+        .text_size(px(15.))
+        .font_weight(FontWeight::BOLD)
+        .text_color(fg.opacity(0.85))
+        .child(spinner(("pane-task-spinner", id), frames, frame_time))
+        .into_any_element()
 }
 
 /// 分屏右上角的驱动标记。没有鼠标处理，点击照样落到下面的终端上。
