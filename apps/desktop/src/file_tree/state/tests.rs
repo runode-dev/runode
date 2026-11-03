@@ -303,6 +303,16 @@ fn lists_dirs_later_and_reveals_when_they_arrive() {
     state.apply_listings(read.collect(), 0, root, ALL);
     assert_eq!(state.selected, Some(PathBuf::from("/p/a/new")));
 
+    // 重读已经发出去、还没回来时又定位一次（新建的文件开进预览栏时预览栏也要定位它），回来以后照样选中。
+    state.relist(vec![PathBuf::from("/p/a")], root, ALL);
+    state.reveal_file(Path::new("/p/a/later"), root, ALL);
+    let sent = std::mem::take(&mut state.to_list);
+    state.reveal_file(Path::new("/p/a/later"), root, ALL);
+    let read = sent.into_iter().map(|dir| (dir, Some(vec![file("b"), file("new"), file("later")])));
+    state.apply_listings(read.collect(), 0, root, ALL);
+    assert_eq!(state.selected, Some(PathBuf::from("/p/a/later")));
+    state.removed(Path::new("/p/a/later"));
+
     // 删掉的不等重读回来就从行里去掉，选中的是它或在它下面时不留选中；选中别处的不动。
     state.removed(Path::new("/p/a/new"));
     state.rebuild_rows(root, ALL);

@@ -262,15 +262,16 @@ impl TreeState {
         }
         self.expanded.extend(chain);
         self.rebuild_rows(root, filter);
-        // 要读的目录还没读回来时，读回来以后再定位一次：那时才排得出 `path` 那一行。
-        self.pending_reveal = (!self.to_list.is_empty()).then(|| (path.to_path_buf(), expand, strategy));
         // 并成一行的目录，行的路径是链条最深的那个，`path` 在链条中间时找不到原样的路径。
         let rows = &self.rows;
-        let Some(ix) = rows
+        let found = rows
             .iter()
             .position(|row| row.path == path)
-            .or_else(|| rows.iter().position(|row| row.path.starts_with(path)))
-        else {
+            .or_else(|| rows.iter().position(|row| row.path.starts_with(path)));
+        // 要读的目录还没读回来、或者还排不出 `path` 那一行时（重读已经发出去了），读回来以后再定位一次。
+        self.pending_reveal =
+            (!self.to_list.is_empty() || found.is_none()).then(|| (path.to_path_buf(), expand, strategy));
+        let Some(ix) = found else {
             return;
         };
         self.selected = Some(rows[ix].path.clone());
