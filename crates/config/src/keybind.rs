@@ -551,8 +551,9 @@ macro_rules! other_defaults {
     "ctrl+shift+a=goto_agent",
     "ctrl+shift+alt+a=next_agent",
     "ctrl+shift+c=copy_to_clipboard",
-    "ctrl+shift+v=paste_from_clipboard",
+    // 同一个动作绑了几个键时菜单和提示写后面那个，常用的放后面。
     "shift+insert=paste_from_clipboard",
+    "ctrl+shift+v=paste_from_clipboard",
     "shift+page_up=scroll_page_up",
     "shift+page_down=scroll_page_down",
     "ctrl+shift+page_up=jump_to_prompt:-1",

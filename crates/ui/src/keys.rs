@@ -48,6 +48,7 @@ pub fn key_symbol(key: &str) -> String {
             "tab" => "Tab",
             "backspace" => "Backspace",
             "delete" => "Delete",
+            "insert" => "Insert",
             "pageup" => "PgUp",
             "pagedown" => "PgDn",
             "home" => "Home",
