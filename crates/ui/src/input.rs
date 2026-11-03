@@ -12,7 +12,7 @@ use std::ops::Range;
 
 use gpui::{
     AccessibleAction, AnyElement, App, Bounds, ClipboardItem, Context, DispatchPhase, Div, Element, ElementId, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla, KeyDownEvent, LayoutId,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla, KeyDownEvent, LayoutId, Modifiers,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render, Role, ShapedLine,
     SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point,
     prelude::*, px, relative, size,
@@ -348,12 +348,12 @@ impl InputState {
         let mods = &event.keystroke.modifiers;
         let cursor = self.cursor();
         let target = match event.keystroke.key.as_str() {
-            "left" if mods.platform => 0,
-            "left" if mods.alt => previous_word(&self.text, cursor),
+            "left" if to_edge(mods) => 0,
+            "left" if by_word(mods) => previous_word(&self.text, cursor),
             "left" if !mods.shift && !self.selected.is_empty() => self.selected.start,
             "left" => previous_char(&self.text, cursor),
-            "right" if mods.platform => self.text.len(),
-            "right" if mods.alt => next_word(&self.text, cursor),
+            "right" if to_edge(mods) => self.text.len(),
+            "right" if by_word(mods) => next_word(&self.text, cursor),
             "right" if !mods.shift && !self.selected.is_empty() => self.selected.end,
             "right" => next_char(&self.text, cursor),
             "up" | "home" => 0,
@@ -363,10 +363,10 @@ impl InputState {
                 let range = if !self.selected.is_empty() {
                     self.selected.clone()
                 } else if forward {
-                    cursor..if mods.alt { next_word(&self.text, cursor) } else { next_char(&self.text, cursor) }
-                } else if mods.platform {
+                    cursor..if by_word(mods) { next_word(&self.text, cursor) } else { next_char(&self.text, cursor) }
+                } else if to_edge(mods) {
                     0..cursor
-                } else if mods.alt {
+                } else if by_word(mods) {
                     previous_word(&self.text, cursor)..cursor
                 } else {
                     previous_char(&self.text, cursor)..cursor
@@ -481,6 +481,16 @@ pub(super) fn next_char(text: &str, offset: usize) -> usize {
 /// 时不算输入，免得把选中的文字删掉；本来就是空串的是删除，照办。组字（`composing`）时照常换。
 pub(super) fn ignores_input(typed: &str, kept: &str, range: &Range<usize>, composing: bool) -> bool {
     kept.is_empty() && !composing && (range.is_empty() || !typed.is_empty())
+}
+
+/// 按词移动、删除时按着的修饰键：macOS 上是 Option，别处是 Ctrl。
+pub(super) fn by_word(mods: &Modifiers) -> bool {
+    if cfg!(target_os = "macos") { mods.alt } else { mods.control }
+}
+
+/// 移到、删到行首行尾时按着的修饰键：macOS 上是 ⌘；别处没有，用 Home、End。
+pub(super) fn to_edge(mods: &Modifiers) -> bool {
+    cfg!(target_os = "macos") && mods.platform
 }
 
 fn is_word_char(c: char) -> bool {

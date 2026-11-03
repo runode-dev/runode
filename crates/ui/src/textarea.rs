@@ -23,8 +23,8 @@ use gpui::{
 use gpui::accesskit::ActionData;
 
 use super::input::{
-    EditKind, Frame, History, Snapshot, copy_selection, forward_frame, ignores_input, next_char, next_word,
-    offset_to_utf16, previous_char, previous_word, range_from_utf16, range_to_utf16,
+    EditKind, Frame, History, Snapshot, by_word, copy_selection, forward_frame, ignores_input, next_char, next_word,
+    offset_to_utf16, previous_char, previous_word, range_from_utf16, range_to_utf16, to_edge,
 };
 use crate::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use element::TextareaText;
@@ -472,9 +472,10 @@ impl TextareaState {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // 组字时这些键归输入法；ctrl 组合不在这里处理。
+        // 组字时这些键归输入法；macOS 上的 ctrl 组合不在这里处理，别处的 ctrl 是按词移动、到文首文末。
         let mods = &event.keystroke.modifiers;
-        if self.marked.is_some() || mods.control {
+        let mac = cfg!(target_os = "macos");
+        if self.marked.is_some() || (mac && mods.control) {
             return;
         }
         self.ensure_rows(window);
@@ -484,22 +485,24 @@ impl TextareaState {
         let mut goal_x = None;
         let (target, upstream) = match key {
             // cmd-enter 由按键绑定发 `SubmitText`，不会走到这里。
-            "enter" if !mods.platform => {
+            "enter" if !mods.platform && !mods.control => {
                 self.record(None);
                 self.replace(self.selected.clone(), "\n", cx);
                 cx.stop_propagation();
                 return;
             }
-            "left" if mods.platform => (row_start(&self.rows, cursor, self.upstream), false),
-            "left" if mods.alt => (previous_word(&self.content, cursor), false),
+            "left" if to_edge(mods) => (row_start(&self.rows, cursor, self.upstream), false),
+            "left" if by_word(mods) => (previous_word(&self.content, cursor), false),
             "left" if !mods.shift && !self.selected.is_empty() => (self.selected.start, false),
             "left" => (previous_char(&self.content, cursor), false),
-            "right" if mods.platform => row_end(&self.rows, cursor, self.upstream),
-            "right" if mods.alt => (next_word(&self.content, cursor), false),
+            "right" if to_edge(mods) => row_end(&self.rows, cursor, self.upstream),
+            "right" if by_word(mods) => (next_word(&self.content, cursor), false),
             "right" if !mods.shift && !self.selected.is_empty() => (self.selected.end, false),
             "right" => (next_char(&self.content, cursor), false),
-            "up" if mods.platform => (0, false),
-            "down" if mods.platform => (self.content.len(), false),
+            "up" if to_edge(mods) => (0, false),
+            "down" if to_edge(mods) => (self.content.len(), false),
+            "home" if !mac && mods.control => (0, false),
+            "end" if !mac && mods.control => (self.content.len(), false),
             "up" | "down" => {
                 let up = key == "up";
                 // 有选区时不按 shift：从选区靠移动方向的那一头出发。
@@ -519,9 +522,9 @@ impl TextareaState {
                 let range = if !self.selected.is_empty() {
                     self.selected.clone()
                 } else if forward {
-                    let end = if mods.alt {
+                    let end = if by_word(mods) {
                         next_word(&self.content, cursor)
-                    } else if mods.platform {
+                    } else if to_edge(mods) {
                         row_end(&self.rows, cursor, self.upstream).0
                     } else {
                         cursor
@@ -529,9 +532,9 @@ impl TextareaState {
                     // 已经在行尾时 cmd-delete 删掉后面一个字符，和 cmd-backspace 对称。
                     cursor..if end > cursor { end } else { next_char(&self.content, cursor) }
                 } else {
-                    let start = if mods.alt {
+                    let start = if by_word(mods) {
                         previous_word(&self.content, cursor)
-                    } else if mods.platform {
+                    } else if to_edge(mods) {
                         row_start(&self.rows, cursor, self.upstream)
                     } else {
                         cursor
