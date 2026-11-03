@@ -25,7 +25,7 @@ use runode_types::{
 use super::{
     AGENT_MARK_WIDTH, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight, NewTab,
     PANE_HEADER_HEIGHT, PressDown, RATIO_STEP, TogglePaneFold, TogglePaneZoom, WindowView,
-    agents::logo::agent_logo,
+    agents::{Mark, Status, logo::agent_logo},
     cards,
     model::Tab,
     pane_float::{MovePaneToWindow, TogglePaneFloat},
@@ -39,7 +39,6 @@ use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::{
     badge::{Badge, BadgeVariant},
     card::Card,
-    spinner::spinner,
 };
 use crate::{
     ui::icons::{
@@ -430,7 +429,7 @@ impl WindowView {
     }
 
     /// 卡片样式下和浮着的终端顶上的标题条：agent 的状态标记（前台不是 agent 时是终端图标，开来跑的命令还在跑时
-    /// 是转圈，见 `task_spinner`）和终端标题，
+    /// 是转圈）和终端标题，
     /// 右边是向右、向下分屏，浮动，放大或还原，关闭分屏的按钮，当前分屏一直显示，别的分屏悬停时显示；
     /// 分屏窄于 `PANE_BUTTONS_MIN_WIDTH` 时不放。浮着的终端只有停靠和关闭，一直显示。
     /// 点标题条切到这个分屏，双击放大或还原；浮着的按住标题条拖着挪。
@@ -890,10 +889,9 @@ fn pane_group<E: StatefulInteractiveElement + IntoElement>(
         .when(split, |el| el.aria_selected(focused))
 }
 
-/// 标题条前面的转圈：开来跑的命令还在跑。和没有 logo 的 agent 干活时的标记同一个位置、同一种转法，
-/// 用标题的颜色。
+/// 标题条前面的转圈：开来跑的命令还在跑，用标题的颜色。
 fn task_spinner(id: EntityId, fg: Hsla) -> AnyElement {
-    let (frames, frame_time) = AgentKind::Other.spinner();
+    let mark = Mark { kind: AgentKind::Other, status: Status::Working };
     div()
         .id(("pane-task", id))
         .role(Role::Status)
@@ -903,10 +901,8 @@ fn task_spinner(id: EntityId, fg: Hsla) -> AnyElement {
         .flex()
         .justify_center()
         .items_center()
-        .text_size(px(15.))
-        .font_weight(FontWeight::BOLD)
         .text_color(fg.opacity(0.85))
-        .child(spinner(("pane-task-spinner", id), frames, frame_time))
+        .child(styled_agent_mark(mark, ("pane-task-spinner", id), fg, true))
         .into_any_element()
 }
 

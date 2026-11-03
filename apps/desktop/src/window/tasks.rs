@@ -164,21 +164,26 @@ impl WindowView {
         .detach();
     }
 
-    /// 命令菜单里点了一条：这个 workspace 里已经有开来跑它的终端（`TerminalView::runs_task`）时在那里跑，
-    /// 见 `rerun_task`；没有时按配置项 `task-placement` 在当前标签里分出一个终端或者在它右边开一个新标签，
-    /// 在列命令的目录里跑它。分出来的分屏按配置项 `task-split-fold` 折叠起来，焦点留在原来的分屏。
+    /// 命令菜单里点了一条：这个 workspace 里已经有开来跑它的终端（`TerminalView::runs_task`，先找当前标签里的）
+    /// 时在那里跑（`rerun_task`）；没有时按配置项 `task-placement` 在当前标签里分出一个终端或者在它右边开一个
+    /// 新标签，在列命令的目录里跑它。分出来的分屏按配置项 `task-split-fold` 折叠起来，焦点留在原来的分屏。
     pub(super) fn run_task(&mut self, action: &RunTask, window: &mut Window, cx: &mut Context<Self>) {
         let listed = self.workspace().project.tasks.as_ref().map(|(dir, _)| dir.clone());
         let Some(dir) = action.dir.clone().or(listed) else {
             return;
         };
-        self.workspace_mut().project.tasks_last = Some(action.command.clone());
-        let existing = self.workspace().tabs.iter().enumerate().find_map(|(ix, tab)| {
-            let (pane, (view, _)) =
-                tab.panes.iter().find(|(_, (view, _))| view.read(cx).runs_task(&action.name, &action.command))?;
+        let workspace = self.workspace();
+        let active = workspace.active;
+        let mut order = std::iter::once(active).chain((0..workspace.tabs.len()).filter(|ix| *ix != active));
+        let existing = order.find_map(|ix| {
+            let (pane, (view, _)) = workspace.tabs[ix]
+                .panes
+                .iter()
+                .find(|(_, (view, _))| view.read(cx).runs_task(&action.name, &action.command, &dir))?;
             Some((ix, *pane, view.clone()))
         });
         if let Some((tab, pane, view)) = existing {
+            self.workspace_mut().project.tasks_last = Some(action.command.clone());
             self.rerun_task(tab, pane, view, action, window, cx);
             return;
         }
@@ -188,7 +193,8 @@ impl WindowView {
         let Some(view) = self.run_in_terminal(&dir, action.command.clone(), window, cx) else {
             return;
         };
-        view.update(cx, |view, _| view.set_task(action.name.clone(), action.command.clone()));
+        self.workspace_mut().project.tasks_last = Some(action.command.clone());
+        view.update(cx, |view, _| view.set_task(action.name.clone(), action.command.clone(), dir));
         if let Some(before) = before.filter(|_| fold)
             && let Some(tab) = self.tab_mut()
         {
@@ -216,11 +222,13 @@ impl WindowView {
         if !running {
             view.update(cx, |view, cx| view.run_command(action.command.clone(), cx));
         }
-        let workspace = self.workspace();
+        let workspace = self.workspace_mut();
         let folded = tab == workspace.active && workspace.tabs[tab].collapsed.contains(&pane);
         if folded && !running {
             return;
         }
+        // 切过去看的和点标题条展开的一样不再折叠着，焦点再挪开也留着。
+        workspace.tabs[tab].collapsed.remove(&pane);
         if tab != self.workspace().active {
             self.activate(tab, window, cx);
         }

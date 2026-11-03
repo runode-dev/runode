@@ -41,7 +41,7 @@ use runode_types::{
 };
 
 use super::{
-    DEFAULT_TITLE, Events, MAX_FONT_SIZE, MIN_FONT_SIZE, TerminalEvent, TerminalView,
+    DEFAULT_TITLE, Events, MAX_FONT_SIZE, MIN_FONT_SIZE, TaskRun, TerminalEvent, TerminalView,
     cursor_blink::{CURSOR_BLINK_INTERVAL, CursorBlink},
     screen::{Attach, Changes, HIDE_GRACE, Reopen, SHOW_WAIT, ScreenState, reopen_plan},
 };
@@ -575,10 +575,11 @@ impl TerminalView {
         self.flush_pending_command(false);
     }
 
-    /// 等 shell 出了提示符（有 shell 集成时 `SessionMeta::prompt_cwd` 有了）把 `command` 打进去回车；
-    /// 等了 `PROMPT_TIMEOUT` 还没等到时照样打，和 `runode open -- 命令` 一样。
+    /// 等 shell 出了提示符（有 shell 集成时 `SessionMeta::prompt_cwd` 有了）把 `command` 打进去回车，已经出了
+    /// 的马上打；等了 `PROMPT_TIMEOUT` 还没等到时照样打，和 `runode open -- 命令` 一样。
     pub fn run_command(&mut self, command: String, cx: &mut Context<Self>) {
         self.pending_command = Some(command);
+        self.flush_pending_command(false);
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(PROMPT_TIMEOUT).await;
             this.update(cx, |view, _| view.flush_pending_command(true)).ok();
@@ -1237,22 +1238,29 @@ impl TerminalView {
         self.cwd().map(|dir| self.host.display_dir(&dir))
     }
 
-    /// 记下这个终端是开来跑命令菜单里名为 `name`、命令行是 `command` 的那一条的。
-    pub fn set_task(&mut self, name: SharedString, command: String) {
-        self.task = Some((name, command));
+    /// 记下这个终端是开来在 `dir` 里跑命令菜单里名为 `name`、命令行是 `command` 的那一条的。
+    pub fn set_task(&mut self, name: SharedString, command: String, dir: PathBuf) {
+        self.task = Some(TaskRun { name, command, dir });
     }
 
     /// 开来跑的命令菜单里那一条的名字；不是从命令菜单开的为空。
     pub fn task(&self) -> Option<&SharedString> {
-        self.task.as_ref().map(|(name, _)| name)
+        self.task.as_ref().map(|task| &task.name)
     }
 
-    /// 这个终端是开来跑命令菜单里名为 `name`、命令行是 `command` 的那一条的，而且会话还在：再跑这一条
-    /// 就在它里面跑，不另开终端。
-    pub fn runs_task(&self, name: &str, command: &str) -> bool {
-        !self.ended
+    /// 这个终端是开来在 `dir` 里跑命令菜单里名为 `name`、命令行是 `command` 的那一条的，而且会话还在：再跑这一条
+    /// 就在它里面跑，不另开终端。命令跑完后 shell 已经不在 `dir` 里（用户 cd 走了）的不算，再打进去就跑错了目录；
+    /// 还在跑时前台程序的目录可能是子目录，不看。
+    pub fn runs_task(&self, name: &str, command: &str, dir: &Path) -> bool {
+        let Some(task) = self.task.as_ref() else {
+            return false;
+        };
+        task.name.as_ref() == name
+            && task.command == command
+            && task.dir == dir
+            && !self.ended
             && !self.screen.is_lost()
-            && self.task.as_ref().is_some_and(|(task, line)| task.as_ref() == name && line == command)
+            && (self.running().is_some() || self.cwd().as_deref() == Some(dir))
     }
 
     /// 程序设置的标题；没设置时为前台进程的目录名或进程名，都没有时为 `DEFAULT_TITLE`。
