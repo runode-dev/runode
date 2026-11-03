@@ -261,7 +261,7 @@ impl SettingsView {
         let key = id.to_owned();
         let task = cx.spawn(async move |this, cx| {
             cx.background_executor().timer(COMMIT_DELAY).await;
-            this.update(cx, |this, cx| this.commit(&key, cx)).ok();
+            this.update(cx, |this, cx| this.commit_field(&key, false, cx)).ok();
         });
         if let Some(field) = self.fields.get_mut(id) {
             field.pending = Some(task);
@@ -279,14 +279,23 @@ impl SettingsView {
 
     /// 把输入框 `id` 里的文字写回配置文件；和当前的值一样时不写。
     fn commit(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.commit_field(id, true, cx);
+    }
+
+    /// `settled` 为假时是打字停了一会儿：超出范围的先不写，等按回车、离开输入框或换页时再换成边界值，
+    /// 打到一半的数（想打 16 先打出的 1）不会被改掉。
+    fn commit_field(&mut self, id: &str, settled: bool, cx: &mut Context<Self>) {
         let Some(field) = self.fields.get_mut(id) else {
             return;
         };
-        field.pending = None;
         let typed = field.input.read(cx).query().trim().to_owned();
         let (input, commit) = (field.input.clone(), field.commit.clone());
         let text = clamp_field(&commit, &typed);
         let clamped = text != typed;
+        if clamped && !settled {
+            return;
+        }
+        field.pending = None;
         if text == self.field_text(&commit) {
             if clamped {
                 input.update(cx, |input, cx| input.set_query(text, cx));
