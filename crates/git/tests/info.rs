@@ -85,3 +85,9 @@ fn lists_stashes_newest_first() {
     );
     assert!(stashes[0].message.starts_with("WIP on main: "), "{:?}", stashes[0]);
 }
+
+/// 跑测试的机器上装着 git。
+#[test]
+fn git_is_installed_where_tests_run() {
+    assert!(runode_git::installed());
+}

@@ -80,6 +80,20 @@ pub(crate) fn hide_window(command: &mut Command) {
     let _ = command;
 }
 
+/// 这台机器上的 git 跑得起来：没装（macOS 上没装命令行工具时 `/usr/bin/git` 只是个让你先装的壳子）时为假。
+/// 会起一次 git，放到后台跑。
+pub fn installed() -> bool {
+    let mut command = Command::new("git");
+    hide_window(&mut command);
+    command
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 pub(crate) fn git<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Option<Vec<u8>> {
     git_with(dir, &[], args)
 }

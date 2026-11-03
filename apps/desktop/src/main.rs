@@ -200,6 +200,7 @@ fn main() {
         // 先结束没用上的 shell，再看宿主里有没有没在窗口里显示的会话，免得把它也列进去。
         drop(shell);
         window::watch_background(cx);
+        git_view::check_git_installed(cx, |_| {});
         window::watch_devices(cx);
         window::watch_todos(cx);
         window::watch_status(cx);

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use gpui::{App, AppContext as _, Global};
 use runode_git::{FileStatus, GitError, Refusal, Repos};
 use runode_types::color::Rgb;
 
@@ -69,4 +70,35 @@ pub(crate) fn git_error_text(err: &GitError) -> String {
         _ => return err.to_string(),
     };
     text.into_owned()
+}
+
+/// 本机的 git 跑不跑得起来，`check_git_installed` 查过以后才有。
+struct GitInstalled(bool);
+
+impl Global for GitInstalled {}
+
+/// 在后台查本机的 git 装没装，查完调 `done`。
+pub(crate) fn check_git_installed(cx: &mut App, done: impl FnOnce(&mut App) + 'static) {
+    let job = cx.background_spawn(async { runode_git::installed() });
+    cx.spawn(async move |cx| {
+        let installed = job.await;
+        cx.update(|cx| {
+            cx.set_global(GitInstalled(installed));
+            done(cx);
+        });
+    })
+    .detach();
+}
+
+/// 查过、本机的 git 跑不起来。
+pub(crate) fn git_missing(cx: &App) -> bool {
+    cx.try_global::<GitInstalled>().is_some_and(|installed| !installed.0)
+}
+
+/// 不在仓库里时面板上的话：`local` 的仓库而本机的 git 跑不起来时说先装 git，不然看着像是目录不对。
+pub(crate) fn not_repo_text(local: bool, cx: &App) -> String {
+    if local && git_missing(cx) {
+        return crate::i18n::tr(&crate::i18n::os_key("panel.git_missing"));
+    }
+    rust_i18n::t!("panel.not_repo").into_owned()
 }

@@ -309,6 +309,13 @@ impl GitPanel {
     pub fn set_git(&mut self, ws: WorkspaceId, git: Option<Arc<git::Repos>>, cx: &mut Context<Self>) {
         let view = (self.tree, self.show_subs, self.show_worktrees);
         let state = self.workspaces.entry(ws).or_default();
+        // 本机的 git 跑不起来时每读一次状态再查一回：装好以后面板自己认出仓库，不用重开 Runode。
+        if git.is_none() && matches!(state.project, ProjectHost::Local) && crate::git_view::git_missing(cx) {
+            let panel = cx.entity().downgrade();
+            crate::git_view::check_git_installed(cx, move |cx| {
+                panel.update(cx, |_, cx| cx.notify()).ok();
+            });
+        }
         if !state.replace_git(git) {
             return;
         }
@@ -1146,7 +1153,7 @@ impl Render for GitPanel {
             });
         let body: AnyElement = match &panel.git {
             _ if !panel.scanned => div().flex_1().into_any_element(),
-            None => panel_message(rust_i18n::t!("panel.not_repo").into_owned(), cx).into_any_element(),
+            None => panel_message(crate::git_view::not_repo_text(matches!(panel.project, ProjectHost::Local), cx), cx).into_any_element(),
             Some(_) if multi => div()
                 .id("git-repos")
                 .role(Role::Tree)

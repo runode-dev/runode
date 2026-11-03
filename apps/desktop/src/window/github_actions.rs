@@ -81,7 +81,8 @@ impl WindowView {
         let shell =
             self.side_panel_shell("github-actions-panel", width, cx).bg(cx.theme().mix(0.03)).text_size(FontSize::Body);
         if !self.git_button_visible() {
-            return shell.child(panel_message(rust_i18n::t!("panel.not_repo").into_owned(), cx));
+            let local = self.workspace().host.is_local();
+            return shell.child(panel_message(crate::git_view::not_repo_text(local, cx), cx));
         }
         self.sync_github_actions(cx);
         shell.child(div().flex_1().min_h_0().child(self.github_actions.clone()))

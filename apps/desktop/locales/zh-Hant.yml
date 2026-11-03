@@ -300,6 +300,10 @@ background:
 panel:
   label: 右側面板
   not_repo: 不在 git 倉庫裡
+  git_missing:
+    macos: "這台 Mac 上還沒裝 git。在終端機裡執行 xcode-select --install 裝上命令列工具，裝好後不用重開 Runode。"
+    windows: "這台電腦上還沒裝 git。裝上 Git for Windows（git-scm.com）就行，不用重開 Runode。"
+    linux: "這台電腦上還沒裝 git。用系統的套件管理器裝上（例如 sudo apt install git）就行，不用重開 Runode。"
   no_content: 內容沒有變化
   no_changes: 沒有未提交的改動
   remote: GitHub Actions 頁只看本機的倉庫，遠端主機上的工作區裡用不了

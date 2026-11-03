@@ -300,6 +300,10 @@ background:
 panel:
   label: Side Panel
   not_repo: Not a git repository
+  git_missing:
+    macos: "Git is not installed on this Mac. Run xcode-select --install in a terminal to install the command line tools; no need to restart Runode afterwards."
+    windows: "Git is not installed on this computer. Install Git for Windows (git-scm.com); no need to restart Runode afterwards."
+    linux: "Git is not installed on this computer. Install it with your package manager (for example sudo apt install git); no need to restart Runode afterwards."
   no_content: No content changes
   no_changes: No uncommitted changes
   remote: GitHub Actions only works with repositories on this computer, not in workspaces on remote hosts
