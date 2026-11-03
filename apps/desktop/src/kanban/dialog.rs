@@ -1650,7 +1650,7 @@ pub(crate) fn weekday(day: u8) -> String {
     rust_i18n::t!(&key).into_owned()
 }
 
-/// 一周七天按界面语言的习惯排好的顺序（`kanban.first_weekday` 是一周从哪天起），值同 `weekday` 的 `day`。
+/// 一周七天按界面语言的习惯排好的顺序（`kanban.first_weekday` 是一周从哪天起），每个值从星期日的 0 数到星期六的 6。
 pub(crate) fn week_order() -> impl Iterator<Item = u8> {
     let first = rust_i18n::t!("kanban.first_weekday").parse::<u8>().map_or(0, |day| day % 7);
     (0..7u8).map(move |offset| (first + offset) % 7)
