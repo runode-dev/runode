@@ -27,8 +27,10 @@ use crate::{
 const MENU_MARGIN: f32 = 8.;
 /// 按钮下面弹出的菜单离按钮这么远。
 const DROPDOWN_GAP: f32 = 4.;
-/// 菜单默认的宽度，按基准字号下的点数写，跟界面字号一起缩放。
+/// 菜单最窄这么宽，按基准字号下的点数写，跟界面字号一起缩放；有一项的字和快捷键放不下时跟着加宽，
+/// 最宽到 `MENU_MAX_WIDTH`，再长的截断。
 const MENU_WIDTH: f32 = 240.;
+const MENU_MAX_WIDTH: f32 = 400.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
 /// 只是一行字，点不了。`buttons` 是右边的图标按钮和它们派发的动作：整行点不了时一直显示，整行能点
@@ -444,7 +446,7 @@ pub trait MenuHost: Sized + 'static {
         cx.notify();
     }
 
-    /// 开着的菜单改成 `width` 宽，按基准字号下的点数写：各项写得长、默认的宽度装不下时用。
+    /// 开着的菜单至少 `width` 宽，按基准字号下的点数写：各项写得长、要比 `MENU_WIDTH` 宽一截时用。
     fn set_menu_width(&mut self, width: f32) {
         if let Some(menu) = self.menu_slot() {
             menu.width = width;
@@ -853,7 +855,8 @@ pub trait MenuHost: Sized + 'static {
             .track_focus(&menu.focus)
             .on_key_down(cx.listener(Self::menu_key))
             .track_scroll(&menu.scroll)
-            .w(scaled(menu.width))
+            .min_w(scaled(menu.width))
+            .max_w(scaled(menu.width.max(MENU_MAX_WIDTH)))
             .max_h(px(max_height))
             .overflow_y_scroll()
             .py(px(4.))
@@ -963,7 +966,8 @@ pub trait MenuHost: Sized + 'static {
                 .role(Role::Menu)
                 .aria_label(parent_label)
                 .track_scroll(&menu.submenu_scroll)
-                .w(scaled(menu.width))
+                .min_w(scaled(menu.width))
+                .max_w(scaled(menu.width.max(MENU_MAX_WIDTH)))
                 .max_h(window.viewport_size().height - px(MENU_MARGIN * 2.))
                 .overflow_y_scroll()
                 .py(px(4.))
