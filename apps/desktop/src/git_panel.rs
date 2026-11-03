@@ -953,7 +953,18 @@ impl GitPanel {
     fn git_repo_menu_items(&mut self, root: &Path, cx: &mut Context<Self>) -> Vec<Option<MenuItem>> {
         self.set_git_active(root);
         let enabled = self.state().busy(root).is_none();
-        let item = |key: &str, action: Box<dyn Action>| Some(MenuItem::new(rust_i18n::t!(key), action, enabled, cx));
+        // 按仓库此刻的样子把办不了的项变灰：没有远端、没有改动、没有储藏、还没有提交。还没读到仓库时都能点。
+        let repo = self.state().git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root));
+        let can = |check: fn(&git::Snapshot) -> bool| enabled && repo.is_none_or(check);
+        let item_if = |key: &str, action: Box<dyn Action>, enabled: bool| {
+            Some(MenuItem::new(rust_i18n::t!(key), action, enabled, cx))
+        };
+        let item = |key: &str, action: Box<dyn Action>| item_if(key, action, enabled);
+        let remote = can(|repo| repo.info.has_remote);
+        let changed = |repo: &git::Snapshot| !repo.staged.is_empty() || !repo.unstaged.is_empty();
+        let tracked_changes = |repo: &git::Snapshot| {
+            !repo.staged.is_empty() || repo.unstaged.iter().any(|file| file.status != git::FileStatus::Untracked)
+        };
         // 其他工作树的「更多」菜单前面加上打开、显示和删除它。
         let mut items = if self.is_worktree(root) {
             let mut items = self.worktree_menu_items(root, cx);
@@ -963,23 +974,23 @@ impl GitPanel {
             Vec::new()
         };
         items.extend([
-            item("git.pull", Box::new(GitPull)),
-            item("git.push", Box::new(GitPush)),
-            item("git.sync", Box::new(GitSync)),
-            item("git.fetch", Box::new(GitFetch)),
+            item_if("git.pull", Box::new(GitPull), remote),
+            item_if("git.push", Box::new(GitPush), remote),
+            item_if("git.sync", Box::new(GitSync), remote),
+            item_if("git.fetch", Box::new(GitFetch), remote),
             None,
             item("git.checkout", Box::new(GitCheckout)),
             item("git.create_branch", Box::new(GitCreateBranch)),
             None,
-            item("git.stage_all", Box::new(GitStageAll)),
-            item("git.unstage_all", Box::new(GitUnstageAll)),
-            item("git.discard_all", Box::new(GitDiscardAll)),
+            item_if("git.stage_all", Box::new(GitStageAll), can(|repo| !repo.unstaged.is_empty())),
+            item_if("git.unstage_all", Box::new(GitUnstageAll), can(|repo| !repo.staged.is_empty())),
+            item_if("git.discard_all", Box::new(GitDiscardAll), can(changed)),
             None,
-            item("git.stash", Box::new(GitStash)),
-            item("git.stash_include_untracked", Box::new(GitStashIncludeUntracked)),
-            item("git.stash_pop_latest", Box::new(GitStashPopLatest)),
+            item_if("git.stash", Box::new(GitStash), can(tracked_changes)),
+            item_if("git.stash_include_untracked", Box::new(GitStashIncludeUntracked), can(changed)),
+            item_if("git.stash_pop_latest", Box::new(GitStashPopLatest), can(|repo| !repo.info.stashes.is_empty())),
             None,
-            item("git.undo_last_commit", Box::new(GitUndoLastCommit)),
+            item_if("git.undo_last_commit", Box::new(GitUndoLastCommit), can(|repo| repo.info.head.is_some())),
         ]);
         items
     }
