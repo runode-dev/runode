@@ -9,9 +9,10 @@
 use std::{
     io::{BufReader, BufWriter, Read, Write},
     net::{Shutdown, SocketAddr},
-    process::{Child, Stdio},
+    process::Child,
     sync::{Arc, Condvar, Mutex, PoisonError, atomic::Ordering, mpsc},
     thread,
+    time::Duration,
 };
 
 use runode_protocol::{
@@ -33,8 +34,12 @@ use super::{
 pub enum ScreenEvent {
     Message(ScreenHostMsg),
     Video(VideoFrame),
-    /// 连接断了（ssh 退出、远端断开或者发来读不懂的帧），之后不会再有事件。
-    Closed,
+    /// 连接断了（ssh 退出、远端断开或者发来读不懂的帧），之后不会再有事件。还没交出过别的事件就断了时，
+    /// `detail` 是 ssh 在 stderr 上最后说的几行（`Tail::text`），远端的桥接没起来时只有它说得出为什么；交出过
+    /// 事件以后断的、配对的电脑和 ssh 什么也没说的为空。
+    Closed {
+        detail: Option<String>,
+    },
 }
 
 /// 往远端发消息的一头，可以复制给别的线程用；连接断了以后发的消息丢掉。
@@ -107,6 +112,86 @@ impl Backlog {
     }
 }
 
+/// ssh 的 stderr 留下最后这么多字节。
+const STDERR_KEEP: usize = 2048;
+/// 断开时给人看的 stderr 最多这么多行。
+const STDERR_LINES: usize = 3;
+/// 断开时等 ssh 关掉 stderr 最多这么久：stdout 先到头时，stderr 上的最后几句可能还没读到。
+const STDERR_WAIT: Duration = Duration::from_secs(1);
+
+/// 一条流最后的 `STDERR_KEEP` 字节。
+#[derive(Default)]
+struct Tail {
+    bytes: Vec<u8>,
+    /// 前面丢掉过，`bytes` 的第一行不完整。
+    cut: bool,
+}
+
+impl Tail {
+    fn push(&mut self, chunk: &[u8]) {
+        self.bytes.extend_from_slice(chunk);
+        if self.bytes.len() > STDERR_KEEP {
+            self.bytes.drain(..self.bytes.len() - STDERR_KEEP);
+            self.cut = true;
+        }
+    }
+
+    /// 最后 `STDERR_LINES` 个非空行，去掉首尾空白和控制字符，用空格连成一行；什么也没有时为空。
+    fn text(&self) -> Option<String> {
+        let text = String::from_utf8_lossy(&self.bytes);
+        let text = match text.split_once('\n') {
+            Some((_, rest)) if self.cut => rest,
+            _ => &text,
+        };
+        let lines: Vec<String> = text
+            .lines()
+            .map(|line| line.chars().filter(|c| !c.is_control()).collect::<String>().trim().to_owned())
+            .filter(|line| !line.is_empty())
+            .collect();
+        let start = lines.len().saturating_sub(STDERR_LINES);
+        let text = lines[start..].join(" ");
+        (!text.is_empty()).then_some(text)
+    }
+}
+
+/// 读线程收着的 ssh 的 stderr，和读完了没有。
+#[derive(Default)]
+struct Stderr {
+    state: Mutex<(Tail, bool)>,
+    ended: Condvar,
+}
+
+impl Stderr {
+    /// 在后台一直读到 ssh 关掉 stderr，只留最后一段：不读的话 ssh 写满管道就卡住。
+    fn collect(reader: impl Read + Send + 'static) -> std::io::Result<Arc<Self>> {
+        let stderr = Arc::new(Self::default());
+        let collecting = stderr.clone();
+        thread::Builder::new().name("screen-stderr".into()).spawn(move || {
+            let mut reader = reader;
+            let mut chunk = [0u8; 1024];
+            loop {
+                match reader.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => collecting.state.lock().unwrap_or_else(PoisonError::into_inner).0.push(&chunk[..read]),
+                }
+            }
+            collecting.state.lock().unwrap_or_else(PoisonError::into_inner).1 = true;
+            collecting.ended.notify_all();
+        })?;
+        Ok(stderr)
+    }
+
+    /// 等 ssh 关掉 stderr（最多 `STDERR_WAIT`），交出它最后说的（`Tail::text`）。
+    fn last_words(&self) -> Option<String> {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let (state, _) = self
+            .ended
+            .wait_timeout_while(state, STDERR_WAIT, |(_, ended)| !*ended)
+            .unwrap_or_else(PoisonError::into_inner);
+        state.0.text()
+    }
+}
+
 /// 排进交出线程的：ssh 上来的帧和 UDP 上来的。
 enum Arrival {
     Stream(Frame),
@@ -147,6 +232,7 @@ pub fn open(
     on_event: impl FnMut(ScreenEvent, &ScreenSender) + Send + 'static,
 ) -> Result<ScreenLink, String> {
     let name = host.key().unwrap_or_default();
+    let mut stderr = None;
     let (input, output, transport): (Box<dyn Write + Send>, Box<dyn Read + Send>, Transport) = match host {
         HostId::Ssh(name) => {
             let host = ssh::find(name).ok_or_else(|| format!("no such host: {name}"))?;
@@ -154,15 +240,24 @@ pub fn open(
                 return Err(format!("not connected to {}", host.name));
             }
             let script = host.family().run_command(&deploy::install_dir(), runode_ssh::bootstrap::Entry::Screen);
+            // 要问用户的经 askpass 问，提示和回答都不经 stderr。
             let mut command = host.exec(&ssh::ssh(), &script, true, false);
-            command.stderr(Stdio::null());
-            let pipes = runode_ssh::process::Pipes { stdin: true, stdout: true, stderr: false };
+            let pipes = runode_ssh::process::Pipes { stdin: true, stdout: true, stderr: true };
             let piped =
                 runode_ssh::process::spawn(&mut command, pipes).map_err(|err| format!("cannot run ssh: {err}"))?;
-            let (Some(input), Some(output)) = (piped.stdin, piped.stdout) else {
+            let (Some(input), Some(output), Some(errors)) = (piped.stdin, piped.stdout, piped.stderr) else {
                 return Err("ssh gave no pipes".into());
             };
-            (Box::new(input), Box::new(output), Transport::Ssh(piped.child))
+            let mut child = piped.child;
+            match Stderr::collect(errors) {
+                Ok(errors) => stderr = Some(errors),
+                Err(err) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("cannot start a thread: {err}"));
+                }
+            }
+            (Box::new(input), Box::new(output), Transport::Ssh(child))
         }
         HostId::Paired(id) => {
             let host = paired::find(id).ok_or_else(|| format!("no such host: {name}"))?;
@@ -215,6 +310,7 @@ pub fn open(
                 arrivals: udp_arrivals,
                 stats: dispatch_stats,
                 backlog: dispatch_backlog,
+                stderr,
             };
             link.run(&arrived, receiver, on_event);
         })
@@ -252,6 +348,8 @@ struct Dispatch {
     arrivals: mpsc::Sender<Arrival>,
     stats: Arc<Mutex<Option<Arc<datagram::Stats>>>>,
     backlog: Arc<Backlog>,
+    /// 走 ssh 时它的 stderr。
+    stderr: Option<Arc<Stderr>>,
 }
 
 /// 交出线程 panic 退栈时也放开等着的读线程。
@@ -282,6 +380,7 @@ impl Dispatch {
     ) {
         let mut receiving: Option<datagram::Receiving> = None;
         let mut udp = Udp::Waiting;
+        let mut heard = false;
         for arrival in arrived {
             if matches!(arrival, Arrival::Stream(_)) {
                 self.backlog.taken();
@@ -349,11 +448,16 @@ impl Dispatch {
                     continue;
                 }
             };
+            heard = true;
             on_event(event, &self.sender);
         }
         self.backlog.close();
         drop(receiving);
-        on_event(ScreenEvent::Closed, &self.sender);
+        let detail = if heard { None } else { self.stderr.as_ref().and_then(|stderr| stderr.last_words()) };
+        if let Some(detail) = &detail {
+            tracing::info!("ssh to the remote desktop of {} said: {detail}", self.name);
+        }
+        on_event(ScreenEvent::Closed { detail }, &self.sender);
     }
 
     /// 远端答应了走 UDP：往它给的地址打洞、收画面。
@@ -377,5 +481,60 @@ impl Dispatch {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tail(chunks: &[&[u8]]) -> Option<String> {
+        let mut tail = Tail::default();
+        for chunk in chunks {
+            tail.push(chunk);
+        }
+        tail.text()
+    }
+
+    #[test]
+    fn nothing_said_is_no_detail() {
+        assert_eq!(tail(&[]), None);
+        assert_eq!(tail(&[b"\n  \r\n\t\n"]), None);
+    }
+
+    #[test]
+    fn keeps_the_last_lines_on_one_line() {
+        let said = tail(&[b"one\ntwo\n", b"\nthree\r\nfour: not ", b"found\n"]);
+        assert_eq!(said.as_deref(), Some("two three four: not found"));
+    }
+
+    #[test]
+    fn control_characters_are_dropped() {
+        assert_eq!(tail(&[b"\x1b[31mboom\x07\n"]).as_deref(), Some("[31mboom"));
+    }
+
+    /// 超过 `STDERR_KEEP` 时只留最后一段，被截断的那一行不要。
+    #[test]
+    fn long_output_keeps_only_the_end() {
+        let mut tail = Tail::default();
+        tail.push(&vec![b'x'; STDERR_KEEP]);
+        tail.push(b"\nlast words\n");
+        assert!(tail.bytes.len() <= STDERR_KEEP);
+        assert_eq!(tail.text().as_deref(), Some("last words"));
+    }
+
+    /// 截在一个字的中间时，第一行是半个字，整行丢掉，不留乱码。
+    #[test]
+    fn a_cut_character_does_not_show() {
+        let mut tail = Tail::default();
+        tail.push("找".repeat(STDERR_KEEP).as_bytes());
+        tail.push("\n找不到 runode\n".as_bytes());
+        assert_eq!(tail.text().as_deref(), Some("找不到 runode"));
+    }
+
+    #[test]
+    fn waits_for_stderr_to_end() {
+        let stderr = Stderr::collect(&b"bash: runode: command not found\n"[..]).expect("thread");
+        assert_eq!(stderr.last_words().as_deref(), Some("bash: runode: command not found"));
     }
 }

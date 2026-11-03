@@ -1401,6 +1401,7 @@ screen_viewer:
   no_screen_capture: "That Mac has no Screen Recording permission for Runode yet. A prompt has been shown on that Mac: turn on Runode in System Settings › Privacy & Security › Screen & System Audio Recording there, then reconnect."
   no_post_event: "View only: Runode on that Mac has no Accessibility permission yet. Turn on Runode in System Settings › Privacy & Security › Accessibility on that Mac, then reconnect."
   closed: The connection to the remote desktop closed.
+  closed_because: "The connection to the remote desktop closed: %{reason}"
   reconnecting: "The connection to the remote desktop was lost. Reconnecting (attempt %{attempt})…"
   signed_out: "Nobody is signed in on that computer. This connects on its own once someone signs in."
   incompatible: "The remote desktop on that computer is a different version. Try again in a few seconds, after it exits on its own."

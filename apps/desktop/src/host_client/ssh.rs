@@ -1092,6 +1092,45 @@ mod tests {
         fake.host.link.kill(session);
     }
 
+    /// 远端的远程桌面桥接没起来就退出时，观看端拿到的关闭事件带着它在 stderr 上说的话；什么也没说的不带。
+    /// `make test-ssh` 编好 runode 再跑它。
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "runs a built runode over a fake ssh; make test-ssh"]
+    fn screen_closes_with_what_the_remote_said_over_a_fake_ssh() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        use crate::host_client::remote_screen::{self, ScreenEvent};
+
+        assert!(std::env::var_os("RUNODE_SSH_BINARY").is_some(), "RUNODE_SSH_BINARY points at a built runode");
+        let fake = FakeRemote::new("fake-ssh-screen");
+        let status = fake.connected();
+        assert!(matches!(status, Status::Connected(_)), "not connected: {status:?}");
+        let installed = fake.home.join(runode_ssh::bootstrap::BIN_DIR).join(deploy::install_dir()).join("runode");
+        // 换成立刻退出的脚本；跑着的宿主用的是原来那个文件，换名盖上不碰它。
+        let replace = |script: &str| {
+            let part = installed.with_extension("part");
+            std::fs::write(&part, script).unwrap();
+            std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::rename(&part, &installed).unwrap();
+        };
+        let closed = || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _link = remote_screen::open(&HostId::Ssh(fake.host.name.clone()), move |event, _| {
+                if let ScreenEvent::Closed { detail } = event {
+                    let _ = tx.send(detail);
+                }
+            })
+            .expect("ssh started");
+            rx.recv_timeout(Duration::from_secs(30)).expect("the link closed")
+        };
+
+        replace("#!/bin/sh\necho \"runode: unknown option $1\" >&2\nexit 2\n");
+        assert_eq!(closed().as_deref(), Some("runode: unknown option --ssh-screen"));
+        replace("#!/bin/sh\nexit 2\n");
+        assert_eq!(closed(), None);
+    }
+
     fn wait_for(host: &super::RemoteHost, timeout: Duration, done: impl Fn(&Status) -> bool) -> Status {
         let deadline = Instant::now() + timeout;
         loop {

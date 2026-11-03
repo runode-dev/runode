@@ -186,7 +186,8 @@ enum UiEvent {
     Picture,
     /// 这台机器上解不了画面，带给人看的原因。
     Undecodable(String),
-    Closed,
+    /// 连接断了；`ScreenEvent::Closed` 的 `detail`。
+    Closed(Option<String>),
 }
 
 /// 远端回的 `Ready`。
@@ -711,15 +712,15 @@ impl ScreenViewer {
             }
             // 远端说了为什么停的，等用户来办；屏幕上没人登录的等有人登录，一直重连。别的断开（ssh 断了、
             // 远端进程没了）在出过画面以后自己重连；还没出过画面就断了的，多半重连也一样，停下等用户点
-            // 「重新连接」。
-            UiEvent::Closed => {
+            // 「重新连接」，ssh 说了为什么时一起给人看。
+            UiEvent::Closed(detail) => {
                 self.link = None;
                 self.drop_picture();
                 match self.phase {
                     Phase::Stopped(_) => {}
                     Phase::Live => self.reconnect_later(cx),
                     _ if self.retries > 0 || self.signed_out.is_some() => self.reconnect_later(cx),
-                    _ => self.phase = Phase::Stopped(rust_i18n::t!("screen_viewer.closed").into_owned()),
+                    _ => self.phase = Phase::Stopped(closed_text(detail.as_deref())),
                 }
             }
         }
@@ -1711,8 +1712,8 @@ fn reader(
                 let _ = tx.unbounded_send(UiEvent::Message(message));
                 return;
             }
-            ScreenEvent::Closed => {
-                let _ = tx.unbounded_send(UiEvent::Closed);
+            ScreenEvent::Closed { detail } => {
+                let _ = tx.unbounded_send(UiEvent::Closed(detail));
                 return;
             }
             ScreenEvent::Video(_) if undecodable => return,
@@ -1783,6 +1784,15 @@ fn stop_text(cause: Option<StopCause>, reason: &str) -> String {
     text.into_owned()
 }
 
+/// 还没出画面就断了时给人看的话，带上 ssh 最后说的 `detail`。
+fn closed_text(detail: Option<&str>) -> String {
+    match detail {
+        Some(detail) => rust_i18n::t!("screen_viewer.closed_because", reason = detail),
+        None => rust_i18n::t!("screen_viewer.closed"),
+    }
+    .into_owned()
+}
+
 /// 等主机连上（没在连时叫它连），连不上时带上给人看的原因。
 async fn wait_for_host(host: &HostId, executor: &gpui::BackgroundExecutor) -> Result<(), String> {
     if !hosts::ensure_connecting(host) {
@@ -1823,5 +1833,13 @@ mod tests {
     fn unclassified_stops_show_the_remote_reason() {
         assert!(stop_text(None, "the display was disconnected").contains("the display was disconnected"));
         assert!(!stop_text(Some(StopCause::Declined), "cancelled").contains("cancelled"));
+    }
+
+    #[test]
+    fn a_closed_connection_shows_what_ssh_said() {
+        let said = closed_text(Some("sh: 1: runode: not found"));
+        assert!(said.contains("sh: 1: runode: not found"), "{said}");
+        assert_ne!(said, closed_text(None));
+        assert_eq!(closed_text(None), rust_i18n::t!("screen_viewer.closed"));
     }
 }

@@ -1475,6 +1475,7 @@ screen_viewer:
   no_screen_capture: "那台 Mac 还没给 Runode 屏幕录制权限，已经在它屏幕上弹出授权框：请在那台 Mac 的「系统设置 › 隐私与安全性 › 屏幕与系统录音」里打开 Runode 的开关，再重新连接。"
   no_post_event: "只能看：那台 Mac 还没给 Runode 辅助功能权限。请在那台 Mac 的「系统设置 › 隐私与安全性 › 辅助功能」里打开 Runode 的开关，再重新连接。"
   closed: 和远程桌面的连接断开了。
+  closed_because: "和远程桌面的连接断开了：%{reason}"
   reconnecting: "和远程桌面的连接断开了，正在重连（第 %{attempt} 次）…"
   signed_out: 那台电脑上没人登录，有人登录后这里自动连上。
   incompatible: 那台电脑上的远程桌面是别的版本，等它自己退出后过几秒再试。
