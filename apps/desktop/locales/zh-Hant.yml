@@ -900,6 +900,7 @@ settings:
     use_defaults_hint: 關掉後只有你自己加的快速鍵生效。
     add: 新增快速鍵
     remove: 去掉這個快速鍵
+    change: 改鍵或去掉這個快速鍵
     press: 按下按鍵…
     press_hint: 按下快速鍵，Esc 取消。
     press_digit_hint: 按修飾鍵加一個數字，1 到 9 一起綁上。Esc 取消。

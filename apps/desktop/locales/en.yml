@@ -900,6 +900,7 @@ settings:
     use_defaults_hint: When off, only the shortcuts you add are bound.
     add: Add Shortcut
     remove: Remove This Shortcut
+    change: Change or Remove This Shortcut
     press: Press a key…
     press_hint: Press a shortcut. Esc to cancel.
     press_digit_hint: Press modifiers and a digit; 1 through 9 are bound together. Esc to cancel.

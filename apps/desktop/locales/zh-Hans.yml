@@ -900,6 +900,7 @@ settings:
     use_defaults_hint: 关掉后只有你自己加的快捷键生效。
     add: 添加快捷键
     remove: 去掉这个快捷键
+    change: 改键或去掉这个快捷键
     press: 按下按键…
     press_hint: 按下快捷键，Esc 取消。
     press_digit_hint: 按修饰键加一个数字，1 到 9 一起绑上。Esc 取消。

@@ -554,9 +554,15 @@ impl SettingsView {
                 )));
                 continue;
             }
+            // 点键帽进入重录，录的时候旁边才出现去掉的按钮；悬停时说出来，不然看不出能点。
+            let change = rust_i18n::t!("settings.keybind.change").into_owned();
             keys = keys.child(
                 div()
                     .id(SharedString::from(format!("keybind-keys-{usage}-{}", bound.trigger)))
+                    .role(gpui::Role::Button)
+                    .aria_label(caps_text(&bound.trigger))
+                    .aria_description(change.clone())
+                    .tooltip(crate::ui::tooltip::tooltip(change, None))
                     .flex()
                     .items_center()
                     .gap(px(10.))
