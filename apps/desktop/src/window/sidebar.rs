@@ -691,7 +691,8 @@ impl WindowView {
             .on_drop(cx.listener(move |this, dragged: &DraggedPane, window, cx| {
                 this.drop_pane_as_tab(dragged.pane, id, window, cx);
             }))
-            .when_some(dir, |row, dir| row.tooltip(tooltip(dir, None)))
+            // 右键菜单从指针处弹出，指针还停在行上，提示会盖住菜单的第一项。
+            .when_some(dir.filter(|_| self.menu().is_none()), |row, dir| row.tooltip(tooltip(dir, None)))
             .child(icon)
             .child(div().flex_1().min_w_0().child(name))
             .child(
