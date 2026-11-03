@@ -742,8 +742,10 @@ impl WindowView {
             .w(px(NEW_TAB_BUTTON_WIDTH - NEW_TAB_MENU_BUTTON_WIDTH))
             .h_full()
             .rounded(px(0.));
-        let options =
-            new_tab_options_button(ButtonSize::IconSm, self.new_tab_menu_open()).w(px(NEW_TAB_MENU_BUTTON_WIDTH)).h_full().rounded(px(0.));
+        let options = new_tab_options_button(ButtonSize::IconSm, self.new_tab_menu_open())
+            .w(px(NEW_TAB_MENU_BUTTON_WIDTH))
+            .h_full()
+            .rounded(px(0.));
         div()
             .flex_none()
             .flex()

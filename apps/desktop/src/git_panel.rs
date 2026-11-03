@@ -1153,7 +1153,8 @@ impl Render for GitPanel {
             });
         let body: AnyElement = match &panel.git {
             _ if !panel.scanned => div().flex_1().into_any_element(),
-            None => panel_message(crate::git_view::not_repo_text(matches!(panel.project, ProjectHost::Local), cx), cx).into_any_element(),
+            None => panel_message(crate::git_view::not_repo_text(matches!(panel.project, ProjectHost::Local), cx), cx)
+                .into_any_element(),
             Some(_) if multi => div()
                 .id("git-repos")
                 .role(Role::Tree)
