@@ -789,10 +789,14 @@ impl TodoDialog {
             .on_press_down(cx, move |this, window, cx| this.toggle_menu(combo, window, cx))
     }
 
-    /// 挂在框 `combo` 下面的菜单，开着的不是它的菜单时为空。
+    /// 挂在框 `combo` 下面的菜单，开着的不是它的菜单时为空。菜单比框宽：靠右一栏的框右边对齐着往左展开，
+    /// 别的左边对齐着往右展开，都不越出对话框。
     fn combo_menu(&self, combo: Combo, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
         let bottom = self.combo_bottoms[combo as usize].get();
-        self.menu_for.filter(|open| *open == combo).and_then(|_| self.render_dropdown_menu(bottom, window, cx))
+        self.menu_for.filter(|open| *open == combo).and_then(|_| match combo {
+            Combo::Effort | Combo::Subagent => self.render_dropdown_menu(bottom, window, cx),
+            _ => self.render_dropdown_menu_rightward(bottom, window, cx),
+        })
     }
 
     /// 换 agent：模型和强度回到默认；换成自己写的命令时先填上刚才挑的那条，焦点给它。
