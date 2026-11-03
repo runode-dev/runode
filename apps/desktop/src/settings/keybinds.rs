@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use crate::keybinds::{caps, caps_text};
 
-use crate::ui::icons::{BAN_ICON, MINUS_ICON, PLUS_ICON};
+use crate::ui::icons::{BAN_ICON, CLOSE_ICON, MINUS_ICON, PLUS_ICON};
 use crate::ui::input::{Input, InputEvent, InputState};
 use crate::ui::theme::Theme;
 use gpui::{App, Context, Div, Entity, Keystroke, SharedString, Subscription, Window, div, prelude::*, px};
@@ -559,15 +559,18 @@ impl SettingsView {
 
         let add_target = Record { row: row.key.clone(), usage: row.usage.clone(), replace: None };
         let adding = recording.as_ref() == Some(&add_target);
-        let add_label = rust_i18n::t!("settings.keybind.add").into_owned();
+        // 录着的时候再按一下是不录了：图标和名字跟着换，也不弹提示，免得提示盖在录键的框上。
+        let add_label =
+            if adding { rust_i18n::t!("settings.keybind.cancel") } else { rust_i18n::t!("settings.keybind.add") }
+                .into_owned();
         let add = Button::new(SharedString::from(format!("keybind-add-{usage}")), add_label.clone())
-            .icon(PLUS_ICON)
+            .icon(if adding { CLOSE_ICON } else { PLUS_ICON })
             .icon_size(12.)
             .with_size(ButtonSize::IconSm)
             .flex_none()
             .mt(px((CONTROL_HEIGHT * font_size::scale(cx) - 20.) / 2.))
             .when(!row.bound.is_empty() && !adding, |add| add.reveal_on_hover(group.clone()))
-            .tooltip(crate::ui::tooltip::tooltip(add_label, None))
+            .when(!adding, |add| add.tooltip(crate::ui::tooltip::tooltip(add_label, None)))
             .on_press(cx, move |this, window, cx| {
                 if this.keybinds.target() == Some(&add_target) {
                     this.keybinds.stop_recording();
