@@ -457,8 +457,10 @@ impl Kanban {
                 .child(div().min_w_0().truncate().child(branch))
         });
         let pull = self.pulls.get(&todo.id).map(|pr| pull_row(pr, &todo.id, cx));
+        // 放不下时右边的按钮折到下一行靠右，不把 agent 和时间挤成省略号。
         let bottom = div()
             .flex()
+            .flex_wrap()
             .items_center()
             .gap(px(6.))
             .min_w_0()
@@ -467,7 +469,7 @@ impl Kanban {
             .child(
                 div()
                     .id(named("todo-footer", &todo.id))
-                    .flex_1()
+                    .flex_grow(1.)
                     .min_w_0()
                     .truncate()
                     .text_size(FontSize::Small)
@@ -477,7 +479,7 @@ impl Kanban {
                     })
                     .child(footer.join(" · ")),
             )
-            .children(primary);
+            .children(primary.map(|primary| div().ml_auto().child(primary)));
         // 悬停时的操作按钮浮在右上角、盖住编号和目录名，不占顶上那一行：窄列里三五个按钮排进去会把卡片撑破。
         let corner = corner.map(|corner| {
             corner
