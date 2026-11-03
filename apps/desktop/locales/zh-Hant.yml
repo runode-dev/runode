@@ -84,7 +84,7 @@ agent:
     working: 工作中
     idle: 閒置
   picker:
-    none: 沒有在執行的 agent
+    none: 沒有在執行的 agent。在終端機裡執行 claude、codex 這類 agent，或者從新增分頁按鈕旁的選單開一個。
     no_matches: 沒有相符的 agent
     title: agent 列表
     filter: 篩選 agent

@@ -84,7 +84,7 @@ agent:
     working: 工作中
     idle: 空闲
   picker:
-    none: 没有在运行的 agent
+    none: 没有在运行的 agent。在终端里运行 claude、codex 这类 agent，或者从新建标签页按钮旁的菜单开一个。
     no_matches: 没有匹配的 agent
     title: agent 列表
     filter: 筛选 agent

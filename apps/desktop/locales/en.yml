@@ -84,7 +84,7 @@ agent:
     working: Working
     idle: Idle
   picker:
-    none: No agents are running
+    none: No agents are running. Run one such as claude or codex in a terminal, or start one from the menu next to the New Tab button.
     no_matches: No matching agents
     title: Agents
     filter: Filter Agents
