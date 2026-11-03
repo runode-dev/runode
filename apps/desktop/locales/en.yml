@@ -972,7 +972,7 @@ mobile:
   entry: "Devices"
   eyebrow: "RUNODE DEVICES"
   intro_title: "Runode on your iPhone."
-  intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. The phone connects straight to this computer over the local network or Tailscale, with no server in between."
+  intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. The phone connects straight to this computer over the local network or Tailscale, with no server in between. Runode on another computer can pair here too, and open this computer's terminals and projects as it would an SSH host."
   start: "Get Started"
   step: "Step %{n} of %{total}"
   install_title: "Get the app."

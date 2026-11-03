@@ -972,7 +972,7 @@ mobile:
   entry: "配对设备"
   eyebrow: "RUNODE 配对设备"
   intro_title: "在 iPhone 上用 Runode。"
-  intro_body: "在 iPhone 上看 agent 在做什么、回答它们的提问，打开任何一个终端接着干活。手机经局域网或 Tailscale 直接连到这台电脑，不经过别的服务器。"
+  intro_body: "在 iPhone 上看 agent 在做什么、回答它们的提问，打开任何一个终端接着干活。手机经局域网或 Tailscale 直接连到这台电脑，不经过别的服务器。另一台电脑上的 Runode 也能在这里配对，像 SSH 主机一样打开这台电脑的终端和项目。"
   start: "开始使用"
   step: "第 %{n} 步（共 %{total} 步）"
   install_title: "装上 App。"
