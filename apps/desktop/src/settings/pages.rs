@@ -803,6 +803,8 @@ fn key_placeholder(key: &str) -> SharedString {
         "dictation-polish-model" => return "deepseek-chat".into(),
         "ssh-program" => return "ssh".into(),
         "ssh-control-persist" => return runode_ssh::DEFAULT_PERSIST_SECS.to_string().into(),
+        // 空着时配对的设备上显示系统的电脑名，就把它写出来。
+        "remote-access-name" => return runode_remote::host_name().into(),
         _ => {}
     }
     match runode_config::Config::default().values(key).into_iter().next() {
