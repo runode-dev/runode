@@ -493,7 +493,6 @@ git:
     graph: Graph
   message_label: Commit message
   message_placeholder: Message (%{key} to commit)
-  message_placeholder_branch: "Message (%{key} to commit on “%{branch}”)"
   commit: Commit
   commit_amend: Commit (Amend)
   commit_and_push: Commit & Push

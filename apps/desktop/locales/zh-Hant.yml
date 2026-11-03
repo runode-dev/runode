@@ -493,7 +493,6 @@ git:
     graph: 圖表
   message_label: 提交說明
   message_placeholder: 提交說明（%{key} 提交）
-  message_placeholder_branch: 提交說明（%{key} 提交到「%{branch}」）
   commit: 提交
   commit_amend: 提交（修改上次提交）
   commit_and_push: 提交並推送

@@ -215,8 +215,6 @@ pub(crate) struct RepoPanel {
     /// 提交说明框，第一次显示这个仓库时建出来；以及它的事件订阅。
     pub commit_box: Option<Entity<TextareaState>>,
     pub commit_events: Option<Subscription>,
-    /// 提交说明框的提示里写的分支，变了才换提示。
-    pub placeholder_branch: Option<Option<String>>,
     pub busy: Option<Busy>,
     pub graph: Graph,
 }

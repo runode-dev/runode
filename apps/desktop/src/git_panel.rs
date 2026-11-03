@@ -445,15 +445,17 @@ impl GitPanel {
         self.workspaces.entry(self.ws).or_default()
     }
 
-    /// 根目录是 `root` 的仓库的提交说明框，第一次用时建出来；按 cmd-enter 提交到这个仓库。提示里
-    /// 写着当前分支，分支变了才换。
-    fn sync_commit_box(&mut self, root: &Path, branch: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    /// 根目录是 `root` 的仓库的提交说明框，第一次用时建出来；按 cmd-enter 提交到这个仓库。提示里不写
+    /// 分支，分支写在说明框上面那一行。
+    fn sync_commit_box(&mut self, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let panel = self.state_mut().repo_mut(root);
         if panel.commit_box.is_none() {
             let area = cx.new(|cx| {
                 let mut area = TextareaState::new(cx);
                 area.set_line_limits(COMMIT_BOX_LINES.0, COMMIT_BOX_LINES.1, cx);
                 area.set_label(rust_i18n::t!("git.message_label"), cx);
+                let key = crate::keybinds::secondary_text("enter");
+                area.set_placeholder(rust_i18n::t!("git.message_placeholder", key = key).into_owned().into(), cx);
                 area
             });
             let target = root.to_path_buf();
@@ -464,20 +466,6 @@ impl GitPanel {
                 });
             panel.commit_box = Some(area);
             panel.commit_events = Some(events);
-        }
-        if panel.placeholder_branch.as_ref() != Some(&branch) {
-            let text = match &branch {
-                Some(branch) => rust_i18n::t!(
-                    "git.message_placeholder_branch",
-                    branch = branch,
-                    key = crate::keybinds::secondary_text("enter")
-                ),
-                None => rust_i18n::t!("git.message_placeholder", key = crate::keybinds::secondary_text("enter")),
-            };
-            if let Some(area) = &panel.commit_box {
-                area.update(cx, |area, cx| area.set_placeholder(text.into_owned().into(), cx));
-            }
-            panel.placeholder_branch = Some(branch);
         }
     }
 
@@ -1061,7 +1049,7 @@ impl Render for GitPanel {
                 let multi = panel.multi(git);
                 git.iter()
                     .filter(|repo| panel.shows(repo) && (!multi || panel.repo_expanded(repo)))
-                    .map(|repo| (repo.root.clone(), repo.info.branch.clone()))
+                    .map(|repo| repo.root.clone())
                     .collect()
             }
             None => Vec::new(),
@@ -1076,7 +1064,7 @@ impl Render for GitPanel {
         // 图表显示的仓库的块收着时也留着，读到的历史才在。正在读历史的也留着：丢掉了再切回来会另起一次读，
         // 先发的那次读完时就把后发的那次的 `loading` 清掉、拿旧的结果盖上去。
         panel.repos.retain(|root, repo| {
-            let keep = shown.iter().any(|(shown, _)| shown == root)
+            let keep = shown.contains(root)
                 || graph_root.as_ref() == Some(root)
                 || repo.busy.is_some()
                 || repo.graph.loading
@@ -1089,8 +1077,8 @@ impl Render for GitPanel {
         if lost_focus {
             window.focus(&self.focus, cx);
         }
-        for (root, branch) in shown {
-            self.sync_commit_box(&root, branch, window, cx);
+        for root in shown {
+            self.sync_commit_box(&root, window, cx);
         }
         self.sync_graphs(cx);
         let panel = self.state();
