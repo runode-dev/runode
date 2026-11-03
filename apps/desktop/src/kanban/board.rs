@@ -521,7 +521,15 @@ impl Kanban {
             .child(top)
             .children(branch)
             .children(pull)
-            .child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(todo.spec.title.clone()))
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .line_clamp(2)
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(todo.spec.title.clone()),
+            )
             .child(bottom)
             .children(corner)
     }
