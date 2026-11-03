@@ -1037,6 +1037,8 @@ impl PreviewPanel {
                         std::mem::take(&mut preview.edit_on_load) && preview.editor.is_none() && preview.editable();
                     if edit {
                         this.start_editing_quietly(id, path.clone(), cx);
+                    } else {
+                        this.follow_disk(id, &path, cx);
                     }
                     cx.notify();
                     lines

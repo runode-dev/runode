@@ -176,6 +176,27 @@ impl TextareaState {
         self.move_to(0, false, cx);
     }
 
+    /// 换上别处改过的全部文字（可撤销），选区跟着不同的那段挪、滚动不动；文字没变时什么也不做，返回 `false`。
+    /// 编辑着的文件在磁盘上被别的程序改了时用。
+    pub fn reload_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
+        let text = normalize_newlines(&text);
+        if self.marked.is_none() && text == self.content {
+            return false;
+        }
+        self.record(None);
+        self.marked = None;
+        let (range, len) = changed_middle(&self.content, &text);
+        let shift = |offset| offset_after_change(offset, &range, len);
+        let selected = shift(self.selected.start)..shift(self.selected.end);
+        self.replace_all(text);
+        self.selected =
+            self.content.floor_char_boundary(selected.start)..self.content.floor_char_boundary(selected.end);
+        self.goal_x = None;
+        self.sync(cx);
+        self.autoscroll = false;
+        true
+    }
+
     /// 文字的版本，每改一次（含输入法组字）变一次；交给 `set_highlights` 认出算样式段时的文字。
     pub fn version(&self) -> u64 {
         self.version
@@ -856,6 +877,16 @@ fn shift_spans(spans: &mut Vec<(Range<usize>, HighlightStyle)>, range: &Range<us
     *spans = shifted;
 }
 
+/// `range` 换成 `len` 字节的新文字以后，原来在 `offset` 的位置挪到哪：在前面的不动，在后面的跟着挪，落在换掉的
+/// 那段里的放到新文字后面。
+fn offset_after_change(offset: usize, range: &Range<usize>, len: usize) -> usize {
+    match offset {
+        offset if offset <= range.start => offset,
+        offset if offset >= range.end => offset - range.end + range.start + len,
+        _ => range.start + len,
+    }
+}
+
 /// `old` 换成 `new` 时中间不同的那段：返回它在 `old` 里的范围和在 `new` 里的长度，两头落在字的边界上。
 fn changed_middle(old: &str, new: &str) -> (Range<usize>, usize) {
     let (a, b) = (old.as_bytes(), new.as_bytes());
@@ -887,6 +918,19 @@ mod tests {
         assert_eq!(lines_spanned(text, 2..3), Some(1..2));
         assert_eq!(lines_spanned(text, line_range_at(text, 2)), Some(1..2));
         assert_eq!(lines_spanned(text, 0..text.len()), Some(0..3));
+    }
+
+    #[test]
+    fn offsets_follow_an_outside_change() {
+        let (old, new) = ("one\ntwo\n", "zero\none\ntwo\n");
+        let (range, len) = changed_middle(old, new);
+        // 光标在 two 前面：上面多出一行时跟着往下挪，还在 two 前面。
+        assert_eq!(&new[offset_after_change(4, &range, len)..][..3], "two");
+        let (range, len) = changed_middle("one\ntwo\n", "one\ntwo\nthree\n");
+        assert_eq!(offset_after_change(4, &range, len), 4);
+        // 光标所在的那段被换掉时放到新文字后面。
+        let (range, len) = changed_middle("abc", "aXYc");
+        assert_eq!(offset_after_change(2, &range, len), 3);
     }
 
     #[test]

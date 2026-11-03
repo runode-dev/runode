@@ -272,6 +272,50 @@ impl PreviewPanel {
         Some(area)
     }
 
+    /// workspace `ws` 里 `path` 的普通标签重读过以后：编辑着、没改过的输入框换成磁盘上现在的文字；文件读不成
+    /// 能编辑的文本了（删了、变成二进制）时退出编辑，正文说为什么读不了。改过没存的不动，存的时候再问要不要覆盖。
+    pub(super) fn follow_disk(&mut self, ws: WorkspaceId, path: &Path, cx: &mut Context<Self>) {
+        let Some(tabs) = self.workspaces.get_mut(&ws) else {
+            return;
+        };
+        let project = tabs.project.clone();
+        let Some(preview) = tabs.tabs.iter_mut().find(|tab| tab.path == path && tab.diff.is_none()) else {
+            return;
+        };
+        let Some(editor) = preview.editor.as_ref().filter(|editor| !editor.dirty && !editor.saving) else {
+            return;
+        };
+        if !preview.editable() {
+            preview.editor = None;
+            cx.notify();
+            return;
+        }
+        if preview.stamp.is_some() && preview.stamp == editor.stamp {
+            return;
+        }
+        let area = editor.area.clone();
+        let job = read_in_background(project, path, cx);
+        cx.spawn(async move |this, cx| {
+            let Ok(source) = job.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                // 读的期间打了字、开始存了的不换。
+                if this.editor(&area).is_none_or(|editor| editor.dirty || editor.saving) {
+                    return;
+                }
+                area.update(cx, |area, cx| area.reload_text(source.text, cx));
+                let saved = area.read(cx).text().to_owned();
+                if let Some(editor) = this.editor_mut(&area) {
+                    (editor.saved, editor.stamp, editor.crlf, editor.bom) =
+                        (saved, source.stamp, source.crlf, source.bom);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// 输入框 `area` 所在的标签，在哪个 workspace 都找。
     fn editing_tab_mut(&mut self, area: &Entity<TextareaState>) -> Option<&mut Preview> {
         self.workspaces
