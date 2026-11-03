@@ -199,7 +199,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         "welcome", "incompatible", "session_list", "spawned", "attached", "snapshot_end", "resized", "theme_applied",
         "meta", "command_finished", "resync", "exited", "exited_none", "bell", "opened", "done", "screen_text",
         "layout", "layout_changed", "dirs", "tasks", "git_status", "git_status_none", "git_diff", "git_branches",
-        "error", "error_backed_up", "error_no_session", "goodbye", "goodbye_handoff", "size_owner",
+        "error", "error_not_found", "error_backed_up", "error_no_session", "goodbye", "goodbye_handoff", "size_owner",
     ])
     func knowsEveryHostMessage(_ name: String) throws {
         if case .unknown(let type) = try decode(name) {
@@ -325,6 +325,12 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(
             try decode("dirs") == .dirs(req: 5, path: "/Users/ethan", dirs: [".config", "dev", "中文"], truncated: true))
         #expect(try decode("error") == .error(req: nil, id: id, message: "no session"))
+        // 宿主标了原因的，显示界面语言的说法，不显示英文的原文。
+        guard case .error(let req, nil, let notFound) = try decode("error_not_found") else {
+            Issue.record("expected an error"); return
+        }
+        #expect(req == 3)
+        #expect(notFound.contains("/root/nope") && !notFound.contains("os error"))
         // 宿主实际发的两句：措辞一改，重新生成样例后这里就对不上。
         guard case .error(_, _, let backedUp) = try decode("error_backed_up"),
             case .error(_, _, let noSession) = try decode("error_no_session")

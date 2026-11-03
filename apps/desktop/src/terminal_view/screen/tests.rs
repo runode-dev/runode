@@ -429,7 +429,8 @@ fn bells_ring_with_or_without_the_view_vt() {
 
 #[test]
 fn a_failed_attach_means_the_session_is_gone() {
-    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: format!("{ERROR_NO_SESSION} 1") };
+    let error =
+        HostMsg::Error { req: None, id: Some(SessionId(1)), message: format!("{ERROR_NO_SESSION} 1"), reason: None };
     // 平常连不成（会话被命令行结束了，它的 `Exited` 在连的时候被丢掉了）：按 shell 退出，关掉终端。
     let mut h = Harness::live(b"");
     h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
@@ -460,7 +461,7 @@ fn a_failed_attach_means_the_session_is_gone() {
 fn a_backed_up_attach_is_retried() {
     let mut h = Harness::live(b"old");
     h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
-    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: ERROR_BACKED_UP.into() };
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: ERROR_BACKED_UP.into(), reason: None };
     let changes = h.apply(vec![msg(error)]);
     assert!(changes.retry_attach && !changes.exited && !changes.lost);
     assert_eq!(name(h.state.screen()), "Attaching(keep)");
@@ -475,7 +476,7 @@ fn a_backed_up_attach_is_retried() {
 fn a_backed_up_attach_replaced_meanwhile_is_not_sent_again() {
     let mut h = Harness::live(b"old");
     h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
-    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: ERROR_BACKED_UP.into() };
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: ERROR_BACKED_UP.into(), reason: None };
     assert!(h.apply(vec![msg(error)]).retry_attach);
     h.state.set_visible(false, h.now);
     assert_eq!(h.state.tick(h.now + HIDE_GRACE), META_ONLY);
@@ -489,7 +490,7 @@ fn a_first_attach_backed_up_is_retried_without_a_size() {
     assert!(state.is_attaching());
     let alive = Rc::new(Cell::new(0));
     let mut build = |screen: HostScreen| Ok(Fake::new(&screen.data, &alive));
-    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: ERROR_BACKED_UP.into() };
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: ERROR_BACKED_UP.into(), reason: None };
     let changes = state.apply(vec![msg(error)], &mut build, Instant::now());
     assert!(changes.retry_attach && !changes.exited && !changes.lost);
     assert_eq!(state.retry_attach(), SNAPSHOT);
@@ -502,7 +503,7 @@ fn a_first_attach_backed_up_is_retried_without_a_size() {
 fn an_attach_failing_for_another_reason_counts_as_lost() {
     let mut h = Harness::live(b"old");
     h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
-    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: "too large".into() };
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: "too large".into(), reason: None };
     let changes = h.apply(vec![msg(error)]);
     assert!(changes.lost && !changes.exited);
     assert_eq!(name(h.state.screen()), "Lost(screen)");

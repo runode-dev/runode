@@ -404,7 +404,7 @@ impl TerminalView {
         let config = cx.global::<AppConfig>().0.clone();
         let link = host_client::hosts::link_of(host);
         if !link.connected() {
-            anyhow::bail!("not connected to the host");
+            anyhow::bail!(rust_i18n::t!("host_error.not_connected").into_owned());
         }
         let (screen, rx) = if visible && !host.is_local() {
             // 远端的不在主线程上等屏幕，先画背景，屏幕到了由读事件的任务补上。

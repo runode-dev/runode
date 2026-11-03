@@ -139,7 +139,8 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
             let ticket = UiTicket::new(ui, generation);
             drop(state);
             if inner.ui.unbounded_send((ticket, *request)).is_err() {
-                let reply = HostMsg::Error { req: None, id: None, message: "the runode app is quitting".into() };
+                let reply =
+                    HostMsg::Error { req: None, id: None, message: "the runode app is quitting".into(), reason: None };
                 let _ = inner.control_on(generation, &ClientMsg::UiReply { ui, reply: Box::new(reply) });
             }
         }
@@ -186,12 +187,12 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
                 drop_route(&mut state, id);
             }
         }
-        HostMsg::Error { req: Some(req), id, message } if state.replies.contains_key(&req) => {
+        HostMsg::Error { req: Some(req), id, message, reason } if state.replies.contains_key(&req) => {
             if let Some(reply) = state.replies.remove(&req) {
-                let _ = reply.send(HostMsg::Error { req: Some(req), id, message });
+                let _ = reply.send(HostMsg::Error { req: Some(req), id, message, reason });
             }
         }
-        HostMsg::Error { req, id: Some(id), message } => {
+        HostMsg::Error { req, id: Some(id), message, reason } => {
             let Some(route) = state.sessions.get_mut(&id) else {
                 tracing::debug!("error from the host about session {id}: {message}");
                 return;
@@ -204,7 +205,8 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
                     return;
                 }
             }
-            if !(route.deliver(LinkEvent::Msg(HostMsg::Error { req, id: Some(id), message })) && route.settle()) {
+            if !(route.deliver(LinkEvent::Msg(HostMsg::Error { req, id: Some(id), message, reason })) && route.settle())
+            {
                 drop_route(&mut state, id);
             }
         }

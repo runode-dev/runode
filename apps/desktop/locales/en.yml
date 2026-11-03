@@ -1418,3 +1418,11 @@ project_host:
   lost_because: "Lost the connection to %{host}: %{reason}"
   timeout: "%{host} did not answer in time"
   not_connected: "Not connected to %{host}"
+host_error:
+  not_found: "%{path} does not exist"
+  not_a_directory: "%{path} is not a folder"
+  permission_denied: "No permission to open %{path}"
+  not_absolute: "%{path} is not a full path; start it with / or a drive letter"
+  timeout: The terminal host did not answer in time
+  lost: Lost the connection to the terminal host
+  not_connected: Not connected to the terminal host

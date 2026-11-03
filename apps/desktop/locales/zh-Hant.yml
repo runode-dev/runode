@@ -1492,3 +1492,11 @@ project_host:
   lost_because: "和 %{host} 的連線斷了：%{reason}"
   timeout: "%{host} 沒有及時回話"
   not_connected: "沒連上 %{host}"
+host_error:
+  not_found: "找不到 %{path}"
+  not_a_directory: "%{path} 不是資料夾"
+  permission_denied: "沒有權限打開 %{path}"
+  not_absolute: "%{path} 不是完整的路徑，要從 / 或磁碟機代號寫起"
+  timeout: 終端宿主沒有及時回話
+  lost: 和終端宿主的連線斷了
+  not_connected: 沒連上終端宿主

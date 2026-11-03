@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use runode_protocol::message::MAX_DIRS;
+use runode_protocol::{ErrorReason, message::MAX_DIRS};
 
 /// 列出来的一个目录。
 #[derive(Debug, PartialEq, Eq)]
@@ -21,21 +21,50 @@ pub(crate) struct Listing {
     pub(crate) truncated: bool,
 }
 
-/// 列出 `path` 里的子目录，为空时列家目录。办不了时返回给前端看的原因。
-pub(crate) fn list_dirs(path: Option<PathBuf>) -> Result<Listing, String> {
+/// 列不出目录的原因：`message` 是英文的说明，`reason` 是前端能换成界面语言说的那几种。
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ListError {
+    pub(crate) message: String,
+    pub(crate) reason: Option<ErrorReason>,
+}
+
+impl ListError {
+    fn new(message: String, reason: Option<ErrorReason>) -> Self {
+        Self { message, reason }
+    }
+
+    /// 读 `path` 时出的 `err`，`doing` 是在做什么（cannot open、cannot read）。
+    fn io(doing: &str, path: &Path, err: &io::Error) -> Self {
+        let path_buf = forward_slashes(path.to_path_buf());
+        let reason = match err.kind() {
+            io::ErrorKind::NotFound => Some(ErrorReason::NotFound { path: path_buf }),
+            io::ErrorKind::PermissionDenied => Some(ErrorReason::PermissionDenied { path: path_buf }),
+            io::ErrorKind::NotADirectory => Some(ErrorReason::NotADirectory { path: path_buf }),
+            _ => None,
+        };
+        Self::new(format!("{doing} {}: {err}", path.display()), reason)
+    }
+}
+
+/// 列出 `path` 里的子目录，为空时列家目录。
+pub(crate) fn list_dirs(path: Option<PathBuf>) -> Result<Listing, ListError> {
     let path = match path {
         Some(path) => path,
-        None => runode_paths::Dirs::from_env().home.ok_or("the home directory is not known")?,
+        None => runode_paths::Dirs::from_env()
+            .home
+            .ok_or_else(|| ListError::new("the home directory is not known".into(), None))?,
     };
     let path = drive_root(from_client(path));
     if !path.is_absolute() {
-        return Err(format!("{} is not an absolute path", path.display()));
+        let reason = ErrorReason::NotAbsolute { path: path.clone() };
+        return Err(ListError::new(format!("{} is not an absolute path", path.display()), Some(reason)));
     }
-    let path = canonicalize(&path).map_err(|err| format!("cannot open {}: {err}", path.display()))?;
+    let path = canonicalize(&path).map_err(|err| ListError::io("cannot open", &path, &err))?;
     if !path.is_dir() {
-        return Err(format!("{} is not a directory", path.display()));
+        let reason = ErrorReason::NotADirectory { path: forward_slashes(path.clone()) };
+        return Err(ListError::new(format!("{} is not a directory", path.display()), Some(reason)));
     }
-    let entries = fs::read_dir(&path).map_err(|err| format!("cannot read {}: {err}", path.display()))?;
+    let entries = fs::read_dir(&path).map_err(|err| ListError::io("cannot read", &path, &err))?;
     // 读不了的目录项（读到一半被删了之类）跳过，不让整个目录列不出来。
     let mut dirs: Vec<String> = entries
         .filter_map(Result::ok)

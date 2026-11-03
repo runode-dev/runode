@@ -742,9 +742,9 @@ impl Link {
             Ok(other) => Err(anyhow!("unexpected answer from the host: {other:?}")),
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 tracing::warn!("the host did not open a terminal in time");
-                Err(anyhow!("the host did not answer in time"))
+                Err(anyhow!(rust_i18n::t!("host_error.timeout").into_owned()))
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!("lost the connection to the host")),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!(rust_i18n::t!("host_error.lost").into_owned())),
         }
     }
 
@@ -778,7 +778,7 @@ impl Link {
         // 发 `Attach` 之前取：取晚了可能已经换上新连接，超时时断错了。
         let generation = self.inner.state().generation;
         if !self.start_attach(id, size, mode, Some(route)) {
-            return Err(anyhow!("not connected to the host"));
+            return Err(anyhow!(rust_i18n::t!("host_error.not_connected").into_owned()));
         }
         match screen.recv_timeout(timeout) {
             Ok(Ok(screen)) => Ok((screen, rx)),
@@ -790,7 +790,7 @@ impl Link {
                 self.inner.timed_out(generation);
                 Err(anyhow!("the host did not send session {id} in time"))
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!("lost the connection to the host")),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!(rust_i18n::t!("host_error.lost").into_owned())),
         }
     }
 
@@ -855,7 +855,7 @@ impl Link {
     pub fn list_sessions(&self, timeout: Duration) -> Result<Vec<SessionInfo>> {
         self.ask_sessions(timeout).map_err(|err| match err {
             mpsc::RecvTimeoutError::Timeout => anyhow!("the host did not list its sessions in time"),
-            mpsc::RecvTimeoutError::Disconnected => anyhow!("not connected to the host"),
+            mpsc::RecvTimeoutError::Disconnected => anyhow!(rust_i18n::t!("host_error.not_connected").into_owned()),
         })
     }
 
@@ -958,8 +958,8 @@ impl Link {
         match answer {
             Ok(HostMsg::Error { message, .. }) => Err(anyhow!(message)),
             Ok(reply) => Ok(reply),
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(anyhow!("the host did not answer in time")),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!("lost the connection to the host")),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(anyhow!(rust_i18n::t!("host_error.timeout").into_owned())),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!(rust_i18n::t!("host_error.lost").into_owned())),
         }
     }
 
@@ -998,7 +998,7 @@ impl Link {
         let (tx, rx) = mpsc::channel();
         let mut state = self.inner.state();
         if !state.connected {
-            return Err(anyhow!("not connected to the host"));
+            return Err(anyhow!(rust_i18n::t!("host_error.not_connected").into_owned()));
         }
         state.replies.insert(req, tx);
         Ok((rx, state.generation))

@@ -106,7 +106,7 @@ fn host_level_requests_from_the_phone_are_refused_between_frames() {
                 outputs += 1;
             }
             _ => match frame.message::<HostMsg>().unwrap() {
-                HostMsg::Error { req: None, id: None, message } => {
+                HostMsg::Error { req: None, id: None, message, .. } => {
                     assert!(message.starts_with("a remote device cannot"), "{message}");
                     errors += 1;
                 }

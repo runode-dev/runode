@@ -52,7 +52,9 @@ fn host(name: &str, meta: SessionMeta, then: Vec<HostMsg>, screens: Vec<&'static
             vec![HostMsg::ScreenText { id: *id, text, truncated: false }]
         }
         ClientMsg::SendKeys { req, .. } | ClientMsg::Paste { req, .. } => vec![HostMsg::Done { req: *req }],
-        ClientMsg::Layout { req } => vec![HostMsg::Error { req: Some(*req), id: None, message: "no window".into() }],
+        ClientMsg::Layout { req } => {
+            vec![HostMsg::Error { req: Some(*req), id: None, message: "no window".into(), reason: None }]
+        }
         _ => vec![],
     })
 }

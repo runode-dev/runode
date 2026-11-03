@@ -67,7 +67,9 @@ fn host(name: &str, meta: SessionMeta, then: Vec<HostMsg>, screen: Option<&'stat
             Some(text) => vec![HostMsg::ScreenText { id: *id, text: text.into(), truncated: false }],
             None => vec![],
         },
-        ClientMsg::Layout { req } => vec![HostMsg::Error { req: Some(*req), id: None, message: "no window".into() }],
+        ClientMsg::Layout { req } => {
+            vec![HostMsg::Error { req: Some(*req), id: None, message: "no window".into(), reason: None }]
+        }
         _ => vec![],
     })
 }

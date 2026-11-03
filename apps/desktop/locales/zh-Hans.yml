@@ -1492,3 +1492,11 @@ project_host:
   lost_because: "和 %{host} 的连接断了：%{reason}"
   timeout: "%{host} 没有及时回话"
   not_connected: "没连上 %{host}"
+host_error:
+  not_found: "找不到 %{path}"
+  not_a_directory: "%{path} 不是文件夹"
+  permission_denied: "没有权限打开 %{path}"
+  not_absolute: "%{path} 不是完整的路径，要从 / 或盘符写起"
+  timeout: 终端宿主没有及时回话
+  lost: 和终端宿主的连接断了
+  not_connected: 没连上终端宿主

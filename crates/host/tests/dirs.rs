@@ -9,6 +9,8 @@ use std::{fs, path::PathBuf};
 
 use common::{Peer, listen, temp_dir};
 use runode_host::{ClientMsg, HostMsg};
+#[cfg(unix)]
+use runode_protocol::ErrorReason;
 use runode_protocol::message::MAX_DIRS;
 
 fn list(peer: &mut Peer, req: u32, path: Option<PathBuf>) -> HostMsg {
@@ -127,7 +129,7 @@ fn long_listings_are_truncated() {
     }
 }
 
-/// 相对路径、不存在的、不是目录的、没权限读的：回带着请求编号的 `Error`，连接照旧。
+/// 相对路径、不存在的、不是目录的、没权限读的：回带着请求编号的 `Error`，标出是哪种原因，连接照旧。
 #[cfg(unix)]
 #[test]
 fn unlistable_paths_are_errors() {
@@ -141,14 +143,20 @@ fn unlistable_paths_are_errors() {
     let locked_out = fs::read_dir(&locked).is_err();
 
     let mut peer = Peer::hello(&socket, false);
-    let mut bad = vec![PathBuf::from("relative/dir"), dir.join("missing"), dir.join("file")];
+    type Expected = fn(&ErrorReason) -> bool;
+    let mut bad: Vec<(PathBuf, Expected)> = vec![
+        (PathBuf::from("relative/dir"), |reason| matches!(reason, ErrorReason::NotAbsolute { .. })),
+        (dir.join("missing"), |reason| matches!(reason, ErrorReason::NotFound { .. })),
+        (dir.join("file"), |reason| matches!(reason, ErrorReason::NotADirectory { .. })),
+    ];
     if locked_out {
-        bad.push(locked.clone());
+        bad.push((locked.clone(), |reason| matches!(reason, ErrorReason::PermissionDenied { .. })));
     }
-    for (req, path) in (10..).zip(bad) {
+    for (req, (path, expected)) in (10..).zip(bad) {
         let reply = list(&mut peer, req, Some(path.clone()));
         assert!(
-            matches!(&reply, HostMsg::Error { req: Some(r), id: None, message } if *r == req && !message.is_empty()),
+            matches!(&reply, HostMsg::Error { req: Some(r), id: None, message, reason: Some(reason) }
+                if *r == req && !message.is_empty() && expected(reason)),
             "{path:?}: {reply:?}"
         );
     }

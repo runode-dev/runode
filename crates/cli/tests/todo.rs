@@ -79,7 +79,9 @@ fn host(name: &str, todos: Vec<Todo>, schedules: Vec<Schedule>) -> FakeHost {
         ClientMsg::GetTodo { req, id } => {
             match todos.iter().find(|todo| todo.id == *id || format!("#{}", todo.number) == *id) {
                 Some(todo) => vec![HostMsg::Todo { req: *req, todo: todo.clone() }],
-                None => vec![HostMsg::Error { req: Some(*req), id: None, message: format!("no todo {id}") }],
+                None => {
+                    vec![HostMsg::Error { req: Some(*req), id: None, message: format!("no todo {id}"), reason: None }]
+                }
             }
         }
         ClientMsg::UpdateTodo { req, .. }
@@ -305,7 +307,7 @@ fn errors_from_the_host_are_reported() {
         ClientMsg::Hello { .. } => vec![welcome(true)],
         ClientMsg::AddTodo { req, .. } => vec![HostMsg::TodoAdded { req: *req, id: "0000abcd".into() }],
         ClientMsg::StartTodo { req, .. } | ClientMsg::UpdateTodo { req, .. } => {
-            vec![HostMsg::Error { req: Some(*req), id: None, message: "no todo 0000abcd".into() }]
+            vec![HostMsg::Error { req: Some(*req), id: None, message: "no todo 0000abcd".into(), reason: None }]
         }
         _ => vec![],
     });

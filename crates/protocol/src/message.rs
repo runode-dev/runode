@@ -425,6 +425,23 @@ fn is_zero(n: &u32) -> bool {
     *n == 0
 }
 
+/// `HostMsg::Error` 里前端要换成界面语言说的原因。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ErrorReason {
+    /// `path` 不存在。
+    NotFound { path: PathBuf },
+    /// `path` 在，但不是目录。
+    NotADirectory { path: PathBuf },
+    /// 宿主没有权限读 `path`。
+    PermissionDenied { path: PathBuf },
+    /// `path` 不是绝对路径。
+    NotAbsolute { path: PathBuf },
+    /// 比自己新的宿主才有的原因，前端显示 `message`。
+    #[serde(other)]
+    Unknown,
+}
+
 /// 宿主发给前端的消息。带 `id` 的消息和这个会话的 `FrameKind::Output` 帧在同一条连接上按
 /// 顺序到达，`Resized`、`ThemeApplied` 这类标记的位置就是 VT 要做这件事的位置。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -642,11 +659,14 @@ pub enum HostMsg {
         request: Box<ClientMsg>,
     },
     /// 请求没法办，`req`、`id` 是对得上的那条请求的。前端要分辨的两种原因见 `ERROR_BACKED_UP` 和
-    /// `ERROR_NO_SESSION`。
+    /// `ERROR_NO_SESSION`。`message` 是英文的原因；`reason` 是前端能换成自己的话说的几种，认不出或没有时
+    /// 显示 `message`。
     Error {
         req: Option<u32>,
         id: Option<SessionId>,
         message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<ErrorReason>,
     },
     /// 宿主要断开这条连接了。
     Goodbye {

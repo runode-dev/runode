@@ -31,7 +31,7 @@ impl LocalRequests for PushRequests<'_> {
         };
         Some(match self.register(token.as_deref(), *env, bundle, machine, machine_name) {
             Ok(()) => HostMsg::Done { req: *req },
-            Err(message) => HostMsg::Error { req: Some(*req), id: None, message },
+            Err(message) => HostMsg::Error { req: Some(*req), id: None, message, reason: None },
         })
     }
 }

@@ -70,7 +70,12 @@ fn app(name: &str, windows: Option<Vec<WindowLayout>>, own: Option<u128>) -> Fak
         ClientMsg::ListSessions => vec![HostMsg::SessionList { sessions: sessions() }],
         ClientMsg::Layout { req } => match &windows {
             Some(windows) => vec![HostMsg::Layout { req: *req, windows: windows.clone() }],
-            None => vec![HostMsg::Error { req: Some(*req), id: None, message: "there is no Runode window".into() }],
+            None => vec![HostMsg::Error {
+                req: Some(*req),
+                id: None,
+                message: "there is no Runode window".into(),
+                reason: None,
+            }],
         },
         ClientMsg::ReadScreen { id, .. } => {
             vec![HostMsg::ScreenText { id: *id, text: format!("{id}\n"), truncated: false }]

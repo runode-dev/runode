@@ -1011,8 +1011,16 @@ fn ui_errors_without_req_get_the_request_s() {
     let mut desktop = Peer::desktop(&socket);
     let mut cli = Peer::hello(&socket, false);
     cli.send(&ClientMsg::Reveal { req: 12, id: SessionId(9) });
-    answer_ui(&mut desktop, |_| HostMsg::Error { req: None, id: None, message: "unknown request".into() });
-    assert_eq!(cli.reply(), HostMsg::Error { req: Some(12), id: None, message: "unknown request".into() });
+    answer_ui(&mut desktop, |_| HostMsg::Error {
+        req: None,
+        id: None,
+        message: "unknown request".into(),
+        reason: None,
+    });
+    assert_eq!(
+        cli.reply(),
+        HostMsg::Error { req: Some(12), id: None, message: "unknown request".into(), reason: None }
+    );
 }
 
 /// `same_user`：同一个进程两端的 socket 是同一个用户；拿不到对端凭据（描述符根本不是 socket）时

@@ -121,7 +121,12 @@ impl Outbox {
                 if req.is_none() && id.is_none() {
                     return true;
                 }
-                self.control(&HostMsg::Error { req, id, message: "the answer is too large to send".into() })
+                self.control(&HostMsg::Error {
+                    req,
+                    id,
+                    message: "the answer is too large to send".into(),
+                    reason: None,
+                })
             }
             Ok(frame) => self.push(FrameKind::Control, 0, frame.payload.into()),
             Err(err) => {
@@ -286,7 +291,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let out = Outbox { tx, queued: Arc::default(), limit: OUTBOX_LIMIT };
         let huge = "x".repeat(MAX_PAYLOAD as usize);
-        assert!(out.control(&HostMsg::Error { req: Some(4), id: None, message: huge.clone() }));
+        assert!(out.control(&HostMsg::Error { req: Some(4), id: None, message: huge.clone(), reason: None }));
         let Ok(Out::Frame { kind: FrameKind::Control, channel, payload }) = rx.try_recv() else {
             panic!("expected a control frame")
         };
@@ -303,7 +308,7 @@ mod tests {
             matches!(frame.message::<HostMsg>().unwrap(), HostMsg::Error { req: None, id: Some(got), .. } if got == id),
             "the screen text turns into an error for its session"
         );
-        assert!(out.control(&HostMsg::Error { req: None, id: None, message: huge }));
+        assert!(out.control(&HostMsg::Error { req: None, id: None, message: huge, reason: None }));
         assert!(rx.try_recv().is_err());
         assert_eq!(out.streaming(), payload.len() + screen.len());
     }

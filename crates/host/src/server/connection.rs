@@ -95,7 +95,7 @@ fn unregister(shared: &Shared, id: u64) {
     for ui in orphaned {
         match peers.pending.remove(&ui).map(|pending| pending.asker) {
             Some(Asker::Client { origin, req, .. }) => {
-                origin.control(&HostMsg::Error { req: Some(req), id: None, message: gone() });
+                origin.control(&HostMsg::Error { req: Some(req), id: None, message: gone(), reason: None });
             }
             Some(Asker::Session(session)) => sessions.push((session, ui)),
             None => {}
@@ -105,7 +105,7 @@ fn unregister(shared: &Shared, id: u64) {
     drop(peers);
     shared.peers_changed.notify_all();
     for (session, ui) in sessions {
-        let reply = Box::new(HostMsg::Error { req: None, id: Some(session), message: gone() });
+        let reply = Box::new(HostMsg::Error { req: None, id: Some(session), message: gone(), reason: None });
         shared.deliver(session, Inbox::UiAnswer { ui, reply });
     }
 }
@@ -522,8 +522,12 @@ impl Connection {
                 }
             }
             ClientMsg::ListDirs { req, path } => self.read_files(req, "host-list-dirs", move || {
-                let browse::Listing { path, dirs, truncated } = browse::list_dirs(path)?;
-                Ok(HostMsg::Dirs { req, path, dirs, truncated })
+                Ok(match browse::list_dirs(path) {
+                    Ok(browse::Listing { path, dirs, truncated }) => HostMsg::Dirs { req, path, dirs, truncated },
+                    Err(browse::ListError { message, reason }) => {
+                        HostMsg::Error { req: Some(req), id: None, message, reason }
+                    }
+                })
             }),
             ClientMsg::ListTasks { req, dir } => self.read_files(req, "host-list-tasks", move || {
                 let sources = runode_tasks::list(&dir)?;
@@ -631,7 +635,12 @@ impl Connection {
             ToUi::Sent(_) => {}
             ToUi::NoDesktop(request) => self.headless(req, request),
             ToUi::Gone(Some(Asker::Client { origin, req, .. })) => {
-                origin.control(&HostMsg::Error { req: Some(req), id: None, message: ERROR_WINDOW_GONE.into() });
+                origin.control(&HostMsg::Error {
+                    req: Some(req),
+                    id: None,
+                    message: ERROR_WINDOW_GONE.into(),
+                    reason: None,
+                });
             }
             ToUi::Gone(_) => {}
         }
@@ -648,7 +657,12 @@ impl Connection {
             }
             ClientMsg::RenameWorkspace { req, window, workspace, name } => {
                 let reply = shared.rename_workspace(req, window, workspace, &name);
-                self.out.control(&reply.unwrap_or_else(|message| HostMsg::Error { req: Some(req), id: None, message }));
+                self.out.control(&reply.unwrap_or_else(|message| HostMsg::Error {
+                    req: Some(req),
+                    id: None,
+                    message,
+                    reason: None,
+                }));
             }
             ClientMsg::OpenWorkspace { req, dir, name, .. } => {
                 self.read_files(req, "host-open-workspace", move || shared.open_workspace(req, dir, name));
@@ -675,7 +689,9 @@ impl Connection {
         match pending.map(|pending| pending.asker) {
             Some(Asker::Client { origin, req, .. }) => {
                 let reply = match reply {
-                    HostMsg::Error { req: None, id, message } => HostMsg::Error { req: Some(req), id, message },
+                    HostMsg::Error { req: None, id, message, reason } => {
+                        HostMsg::Error { req: Some(req), id, message, reason }
+                    }
                     reply => reply,
                 };
                 origin.control(&reply);
@@ -765,12 +781,20 @@ impl Connection {
                 Ok(Ok((text, truncated))) => HostMsg::ScreenText { id, text, truncated },
                 // 读命令输出时的错误（没有 shell 集成这类）本身就是给读的一方看的说明。
                 Ok(Err(err)) if command.is_some() => {
-                    HostMsg::Error { req: None, id: Some(id), message: format!("{err:#}") }
+                    HostMsg::Error { req: None, id: Some(id), message: format!("{err:#}"), reason: None }
                 }
-                Ok(Err(err)) => {
-                    HostMsg::Error { req: None, id: Some(id), message: format!("failed to read the screen: {err:#}") }
-                }
-                Err(_) => HostMsg::Error { req: None, id: Some(id), message: format!("session {id} did not answer") },
+                Ok(Err(err)) => HostMsg::Error {
+                    req: None,
+                    id: Some(id),
+                    message: format!("failed to read the screen: {err:#}"),
+                    reason: None,
+                },
+                Err(_) => HostMsg::Error {
+                    req: None,
+                    id: Some(id),
+                    message: format!("session {id} did not answer"),
+                    reason: None,
+                },
             };
             out.control(&message);
             drop(slot);
@@ -798,7 +822,8 @@ impl Connection {
         };
         let out = self.out.clone();
         answer_later(name, move || {
-            let message = answer().unwrap_or_else(|message| HostMsg::Error { req: Some(req), id: None, message });
+            let message =
+                answer().unwrap_or_else(|message| HostMsg::Error { req: Some(req), id: None, message, reason: None });
             out.control(&message);
             drop(slot);
         });
@@ -879,7 +904,7 @@ impl Connection {
     }
 
     fn error(&self, req: Option<u32>, id: Option<SessionId>, message: String) {
-        self.out.control(&HostMsg::Error { req, id, message });
+        self.out.control(&HostMsg::Error { req, id, message, reason: None });
     }
 
     fn goodbye(&self, message: &str) {

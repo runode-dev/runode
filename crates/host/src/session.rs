@@ -606,7 +606,12 @@ impl Runner {
             .or_else(|| panic.downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "unknown panic".into());
         tracing::error!("session {} panicked: {message}", self.id);
-        let error = HostMsg::Error { req: None, id: Some(self.id), message: format!("the session crashed: {message}") };
+        let error = HostMsg::Error {
+            req: None,
+            id: Some(self.id),
+            message: format!("the session crashed: {message}"),
+            reason: None,
+        };
         // 发给前端时又 panic 的（比如出事的正是前端的 `EventSink`），也只能到此为止。
         let _ = panic::catch_unwind(AssertUnwindSafe(|| {
             self.emit(Event::msg(error));

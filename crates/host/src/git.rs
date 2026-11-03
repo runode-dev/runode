@@ -63,7 +63,7 @@ impl GitWorker {
 fn answer(job: &Job, cache: &mut UntrackedCache) -> HostMsg {
     let (req, id) = (job.req, job.id);
     // 错是这件 git 请求的，不是会话的：不带 `id`，前端看着这个会话的终端页不会当成自己的错。
-    let error = |message: String| HostMsg::Error { req: Some(req), id: None, message };
+    let error = |message: String| HostMsg::Error { req: Some(req), id: None, message, reason: None };
     let dir = match job.info.recv_timeout(REPLY_TIMEOUT) {
         Ok(info) => info.meta.cwd,
         Err(_) => return error(format!("session {id} did not answer")),

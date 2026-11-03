@@ -479,10 +479,12 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         case "ui_request":
             self = .uiRequest(ui: try c.decode(UInt64.self, forKey: .ui))
         case "error":
+            let message = try c.decode(String.self, forKey: .message)
+            let reason = (try? c.decodeIfPresent(HostErrorReason.self, forKey: .reason)) ?? nil
             self = .error(
                 req: try c.decodeIfPresent(UInt32.self, forKey: .req),
                 id: try c.decodeIfPresent(SessionId.self, forKey: .id),
-                message: try c.decode(String.self, forKey: .message))
+                message: reason?.text ?? message)
         case "goodbye":
             self = .goodbye(try c.decode(GoodbyeReason.self, forKey: .reason))
         case "handoff_refused":
@@ -497,6 +499,24 @@ public enum HostMsg: Hashable, Sendable, Decodable {
                 owner: try c.decodeIfPresent(String.self, forKey: .owner))
         default:
             self = .unknown(type)
+        }
+    }
+}
+
+/// `HostMsg::Error` 的 `reason`：宿主标出的几种原因，换成界面语言的说法；认不出的种类没有说法，照旧显示宿主写的
+/// `message`。
+struct HostErrorReason: Decodable {
+    let kind: String
+    let path: String?
+
+    var text: String? {
+        guard let path else { return nil }
+        switch kind {
+        case "not_found": return String(localized: "找不到 \(path)")
+        case "not_a_directory": return String(localized: "\(path) 不是文件夹")
+        case "permission_denied": return String(localized: "没有权限打开 \(path)")
+        case "not_absolute": return String(localized: "\(path) 不是完整的路径，要从 / 或盘符写起")
+        default: return nil
         }
     }
 }

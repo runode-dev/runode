@@ -210,7 +210,7 @@ fn client_messages_round_trip() {
         ClientMsg::UiReply { ui: 8, reply: Box::new(HostMsg::Layout { req: 7, windows: layout() }) },
         ClientMsg::UiReply {
             ui: 9,
-            reply: Box::new(HostMsg::Error { req: Some(1), id: None, message: "no window".into() }),
+            reply: Box::new(HostMsg::Error { req: Some(1), id: None, message: "no window".into(), reason: None }),
         },
         ClientMsg::Open {
             req: 10,
@@ -420,7 +420,7 @@ fn host_messages_round_trip() {
         },
         HostMsg::Shells { req: 10, shells: Vec::new() },
         HostMsg::Commands { req: 11, found: vec![Some("claude.cmd".into()), None] },
-        HostMsg::Error { req: Some(3), id: None, message: "no such directory".into() },
+        HostMsg::Error { req: Some(3), id: None, message: "no such directory".into(), reason: None },
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff },
         HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "boom".into() } },
         HostMsg::HandoffRefused { reason: HandoffRefusal::DesktopConnected },
@@ -984,7 +984,7 @@ fn task_messages() {
 fn the_req_of_an_encoded_reply() {
     let req_in = |message: &HostMsg| HostMsg::req_in(&Frame::control(message).unwrap().payload);
     assert_eq!(req_in(&HostMsg::Spawned { req: 3, id: ID }), Some(3));
-    assert_eq!(req_in(&HostMsg::Error { req: None, id: Some(ID), message: "gone".into() }), None);
+    assert_eq!(req_in(&HostMsg::Error { req: None, id: Some(ID), message: "gone".into(), reason: None }), None);
     assert_eq!(req_in(&HostMsg::Bell { id: ID }), None);
     let ui = HostMsg::UiRequest { ui: 1, request: Box::new(ClientMsg::ListTodos { req: 9 }) };
     assert_eq!(req_in(&ui), None);

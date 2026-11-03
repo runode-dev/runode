@@ -42,7 +42,12 @@ fn host(name: &str, state: Option<AgentState>, then: Vec<AgentState>) -> FakeHos
 
 /// app 没开窗口时宿主对 `Layout` 的回话。
 fn no_window(req: u32) -> Vec<HostMsg> {
-    vec![HostMsg::Error { req: Some(req), id: None, message: "there is no Runode window to do this in".into() }]
+    vec![HostMsg::Error {
+        req: Some(req),
+        id: None,
+        message: "there is no Runode window to do this in".into(),
+        reason: None,
+    }]
 }
 
 fn full(n: u128) -> String {

@@ -141,7 +141,12 @@ impl FromPhone {
         let reply = serde_json::from_slice::<ClientMsg>(&frame[HEADER_LEN..]).ok().and_then(|message| {
             if let Some(what) = message.remote_refusal(self.kind) {
                 tracing::info!("refused a remote device's request to {what}");
-                return Some(HostMsg::Error { req: None, id: None, message: format!("a remote device cannot {what}") });
+                return Some(HostMsg::Error {
+                    req: None,
+                    id: None,
+                    message: format!("a remote device cannot {what}"),
+                    reason: None,
+                });
             }
             local.handle(&message)
         });
@@ -321,7 +326,7 @@ mod tests {
             assert_eq!(errors.len(), refused.len(), "split {split}");
             for error in errors {
                 match error.message::<HostMsg>().unwrap() {
-                    HostMsg::Error { req: None, id: None, message } => {
+                    HostMsg::Error { req: None, id: None, message, .. } => {
                         assert!(message.starts_with("a remote device cannot"), "{message}");
                     }
                     other => panic!("{other:?}"),

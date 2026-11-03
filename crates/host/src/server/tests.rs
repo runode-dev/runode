@@ -483,7 +483,7 @@ fn a_panicking_session_tells_its_front_end() {
         }
     };
     match next() {
-        HostMsg::Error { req: None, id: Some(errored), message } => {
+        HostMsg::Error { req: None, id: Some(errored), message, .. } => {
             assert_eq!(errored, id);
             assert!(message.contains("crashed"), "{message}");
         }

@@ -102,7 +102,7 @@ fn opened(req: u32, window: WindowHandle<WindowView>, view: &Entity<TerminalView
             }
             HostMsg::Opened { req, id }
         }
-        _ => HostMsg::Error { req: Some(req), id: None, message: "could not start a terminal".into() },
+        _ => HostMsg::Error { req: Some(req), id: None, message: "could not start a terminal".into(), reason: None },
     }))
 }
 
@@ -119,7 +119,7 @@ fn open_workspace(
     name: Option<String>,
     cx: &mut App,
 ) -> Reply {
-    let fail = |message: String| Reply::Now(HostMsg::Error { req: Some(req), id: None, message });
+    let fail = |message: String| Reply::Now(HostMsg::Error { req: Some(req), id: None, message, reason: None });
     let Some(window) = front_window(cx) else {
         return fail("there is no Runode window to open it in".into());
     };
@@ -139,7 +139,7 @@ fn open_workspace(
 
 /// 主机 `host` 转来的请求，只找那台主机上的终端。
 fn handle(host: &HostId, request: ClientMsg, cx: &mut App) -> Reply {
-    let fail = |req: u32, message: String| HostMsg::Error { req: Some(req), id: None, message };
+    let fail = |req: u32, message: String| HostMsg::Error { req: Some(req), id: None, message, reason: None };
     let reply = match request {
         ClientMsg::Open { req, placement, near, cwd, focus, fold, from } => {
             let target = match near {
@@ -263,7 +263,12 @@ fn handle(host: &HostId, request: ClientMsg, cx: &mut App) -> Reply {
         }
         ClientMsg::Layout { req } => HostMsg::Layout { req, windows: layout_report::current(host, cx) },
         ClientMsg::WriteClipboard { text, .. } => clipboard::write(text.0, cx),
-        other => HostMsg::Error { req: None, id: None, message: format!("the runode app does not handle {other:?}") },
+        other => HostMsg::Error {
+            req: None,
+            id: None,
+            message: format!("the runode app does not handle {other:?}"),
+            reason: None,
+        },
     };
     Reply::Now(reply)
 }

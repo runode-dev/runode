@@ -7,7 +7,7 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use runode_protocol::{
-    AttachMode, BuildId, Caps, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, FinishedCommand,
+    AttachMode, BuildId, Caps, ClientKind, ClientMsg, ERROR_BACKED_UP, ERROR_NO_SESSION, ErrorReason, FinishedCommand,
     GoodbyeReason, HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, ShellReport, TabLayout, TaskEntry,
     TaskSource, TaskSourceKind, WindowLayout, WorkspaceLayout,
     git::{
@@ -395,9 +395,21 @@ fn samples() -> BTreeMap<&'static str, Value> {
             },
         ),
         ("tasks", HostMsg::Tasks { req: 6, dir: "/Users/ethan/dev/app/web".into(), sources: tasks() }),
-        ("error", HostMsg::Error { req: None, id: Some(ID), message: "no session".into() }),
-        ("error_backed_up", HostMsg::Error { req: None, id: Some(ID), message: ERROR_BACKED_UP.into() }),
-        ("error_no_session", HostMsg::Error { req: None, id: Some(ID), message: format!("{ERROR_NO_SESSION} {ID}") }),
+        ("error", HostMsg::Error { req: None, id: Some(ID), message: "no session".into(), reason: None }),
+        (
+            "error_not_found",
+            HostMsg::Error {
+                req: Some(3),
+                id: None,
+                message: "cannot open /root/nope: No such file or directory (os error 2)".into(),
+                reason: Some(ErrorReason::NotFound { path: "/root/nope".into() }),
+            },
+        ),
+        ("error_backed_up", HostMsg::Error { req: None, id: Some(ID), message: ERROR_BACKED_UP.into(), reason: None }),
+        (
+            "error_no_session",
+            HostMsg::Error { req: None, id: Some(ID), message: format!("{ERROR_NO_SESSION} {ID}"), reason: None },
+        ),
         ("goodbye", HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "bye".into() } }),
         ("goodbye_handoff", HostMsg::Goodbye { reason: GoodbyeReason::Handoff }),
         ("size_owner", HostMsg::SizeOwner { id: ID, mine: false, owner: Some("Ethan 的 MacBook".into()) }),

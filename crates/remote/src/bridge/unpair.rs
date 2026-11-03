@@ -22,9 +22,12 @@ impl LocalRequests for UnpairRequests<'_> {
                 tracing::info!("remote device {device} unpaired itself");
                 HostMsg::Done { req: *req }
             }
-            Err(err) => {
-                HostMsg::Error { req: Some(*req), id: None, message: format!("cannot update the device table: {err}") }
-            }
+            Err(err) => HostMsg::Error {
+                req: Some(*req),
+                id: None,
+                message: format!("cannot update the device table: {err}"),
+                reason: None,
+            },
         })
     }
 }

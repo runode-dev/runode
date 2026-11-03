@@ -992,6 +992,16 @@
       "req": null,
       "type": "error"
     },
+    "error_not_found": {
+      "id": null,
+      "message": "cannot open /root/nope: No such file or directory (os error 2)",
+      "reason": {
+        "kind": "not_found",
+        "path": "/root/nope"
+      },
+      "req": 3,
+      "type": "error"
+    },
     "exited": {
       "id": "0123456789abcdef0011223344556677",
       "status": 1,

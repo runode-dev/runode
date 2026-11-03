@@ -744,9 +744,35 @@ fn report_degraded(count: usize, cx: &mut App) {
     );
 }
 
+/// 宿主报的错给人看的说法：`reason` 认得时按界面语言说，不然是宿主写的 `message`。
+pub fn error_text(message: &str, reason: Option<&runode_protocol::ErrorReason>) -> String {
+    use runode_protocol::ErrorReason;
+    let text = match reason {
+        Some(ErrorReason::NotFound { path }) => rust_i18n::t!("host_error.not_found", path = path.display()),
+        Some(ErrorReason::NotADirectory { path }) => {
+            rust_i18n::t!("host_error.not_a_directory", path = path.display())
+        }
+        Some(ErrorReason::PermissionDenied { path }) => {
+            rust_i18n::t!("host_error.permission_denied", path = path.display())
+        }
+        Some(ErrorReason::NotAbsolute { path }) => rust_i18n::t!("host_error.not_absolute", path = path.display()),
+        Some(ErrorReason::Unknown) | None => return message.to_owned(),
+    };
+    text.into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use std::{ffi::OsString, path::Path};
+
+    #[test]
+    fn known_host_errors_are_put_in_the_ui_language() {
+        let missing = runode_protocol::ErrorReason::NotFound { path: "/root/nope".into() };
+        let text = super::error_text("cannot open /root/nope: No such file or directory (os error 2)", Some(&missing));
+        assert!(text.contains("/root/nope") && !text.contains("os error"), "{text}");
+        assert_eq!(super::error_text("something else", None), "something else");
+        assert_eq!(super::error_text("newer", Some(&runode_protocol::ErrorReason::Unknown)), "newer");
+    }
 
     use super::path_with;
 

@@ -452,7 +452,11 @@ fn an_exit_while_reattaching_reaches_the_view() {
     dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default(), shell: None });
     dispatch(&link.inner, 0, HostMsg::Exited { id, status: None });
     assert!(rx.try_recv().is_err(), "nothing reaches the view while attaching");
-    dispatch(&link.inner, 0, HostMsg::Error { req: None, id: Some(id), message: format!("no session {id}") });
+    dispatch(
+        &link.inner,
+        0,
+        HostMsg::Error { req: None, id: Some(id), message: format!("no session {id}"), reason: None },
+    );
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Error { id: Some(got), .. })) if got == id));
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { id: got, .. })) if got == id));
     assert!(rx.try_recv().is_err());
