@@ -397,18 +397,18 @@ impl WindowView {
         }
     }
 
-    /// 双击分隔线：远程桌面 `id` 回到默认高度。
     /// 辅助工具加减一下：这台吸附着的远程桌面占那一栏的比例加 `delta`。
     fn nudge_snap_ratio(&mut self, id: EntityId, delta: f32, cx: &mut Context<Self>) {
         if let Some(ix) = self.screen_viewers.position(id)
             && let Placement::Snapped(snap) = &mut self.screen_viewers.open[ix].placement
         {
-            snap.ratio = (snap.ratio + delta).clamp(0., 1.);
+            snap.ratio = (snap.ratio + delta).clamp(SNAP_RATIO_MIN, SNAP_RATIO_MAX);
         }
         self.fit_snaps(cx);
         self.save(cx);
     }
 
+    /// 双击分隔线：远程桌面 `id` 回到默认高度。
     fn reset_snap_ratio(&mut self, id: EntityId, cx: &mut Context<Self>) {
         if let Some(ix) = self.screen_viewers.position(id)
             && let Placement::Snapped(snap) = &mut self.screen_viewers.open[ix].placement
