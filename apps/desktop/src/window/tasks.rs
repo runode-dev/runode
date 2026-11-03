@@ -449,10 +449,10 @@ impl WindowView {
                     command: task.command.clone(),
                     dir: source.project.clone(),
                 };
-                // 说明和命令行在行里会截断，鼠标停上去看完整的。
+                // 说明和命令行在行里会截断，鼠标停上去看完整的；自己加的命令说明就是命令行，只写一遍。
                 let full = match &description {
-                    Some(text) => format!("{text}\n{}", task.command),
-                    None => task.command.clone(),
+                    Some(text) if *text != task.command => format!("{text}\n{}", task.command),
+                    _ => task.command.clone(),
                 };
                 let item =
                     MenuItem::label(task.name.clone(), description.map(SharedString::from), Some(Box::new(action)))
