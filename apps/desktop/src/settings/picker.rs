@@ -2,7 +2,7 @@
 //! 筛，上下键挪、回车选、Esc 或点外面关掉。
 
 use crate::ui::icons::CHECK_ICON;
-use crate::ui::picker::{matches_query, nav_delta};
+use crate::ui::picker::{match_rank, matches_query, nav_delta};
 use crate::ui::theme::Theme;
 use std::ops::Range;
 
@@ -77,10 +77,12 @@ pub(super) struct Picker {
 }
 
 impl Picker {
-    /// 筛过之后留下的项在 `items` 里的位置。
+    /// 筛过之后留下的项在 `items` 里的位置，按 `match_rank` 排，同一档里照原来的先后。
     fn visible(&self, cx: &gpui::App) -> Vec<usize> {
         let query = self.field.read(cx).query();
-        (0..self.items.len()).filter(|&ix| self.items[ix].matches(query)).collect()
+        let mut visible: Vec<usize> = (0..self.items.len()).filter(|&ix| self.items[ix].matches(query)).collect();
+        visible.sort_by_key(|&ix| match_rank(&self.items[ix].label, query));
+        visible
     }
 }
 

@@ -27,6 +27,21 @@ pub fn matches_query<S: AsRef<str>>(fields: &[S], query: &str) -> bool {
     query.split_whitespace().map(str::to_lowercase).all(|term| fields.iter().any(|field| field.contains(&term)))
 }
 
+/// `label` 和 `query` 匹配得有多好，越小越靠前：整个以查询开头是 0，有个词以第一个查询词开头是 1，别的是 2。
+/// 名字中间碰巧含着查询的排到后面，打几个字母就回车时选中的是要的那个。
+pub fn match_rank(label: &str, query: &str) -> u8 {
+    let label = label.to_lowercase();
+    let query = query.trim().to_lowercase();
+    let Some(first) = query.split_whitespace().next() else { return 0 };
+    if label.starts_with(&query) {
+        0
+    } else if label.split(|c: char| !c.is_alphanumeric()).any(|word| word.starts_with(first)) {
+        1
+    } else {
+        2
+    }
+}
+
 /// 浮在标题栏下方正中的选择器：`panel` 是调用方定好 id、宽度和按键处理的外框，上面一行放输入框，
 /// 下面是 `list`（调用方定好 id、最高多高、各行和滚动位置），多了竖着滚动。
 pub fn picker_panel(panel: Popover, field: Entity<InputState>, list: Stateful<Div>, cx: &App) -> Div {
@@ -61,5 +76,14 @@ mod tests {
         assert!(matches_query(&fields, "CLAUDE"));
         assert!(matches_query(&fields, "claude dev/run"));
         assert!(!matches_query(&fields, "claude codex"));
+    }
+
+    #[test]
+    fn names_starting_with_the_query_rank_first() {
+        assert_eq!(match_rank("Menlo", "men"), 0);
+        assert_eq!(match_rank("SF Mono", "mono"), 1);
+        assert_eq!(match_rank("Hack Nerd Font Mono", "nerd font"), 1);
+        assert_eq!(match_rank("Bodoni Ornaments", "men"), 2);
+        assert_eq!(match_rank("anything", ""), 0);
     }
 }
