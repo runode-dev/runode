@@ -759,7 +759,7 @@ settings:
     dictation_polish_url: "An OpenAI-compatible API; /chat/completions is appended. Its model fixes misheard words, punctuation and casing. Leave empty to turn polishing off; when it fails, the text is typed as recognized."
     dictation_polish_key: "Stored in plain text in the config file."
     dictation_polish_model: "Chat model of that API."
-    theme: Colors below override the theme. With Light & Dark the theme follows the system appearance.
+    theme: Colors you change on the Colors page override the theme. With Light & Dark the theme follows the system appearance.
     background: "A color such as #1e1e2e, or a color name."
     foreground: The color of text.
     cursor_color: A color, or cell-foreground / cell-background to follow the cell. Empty uses the foreground.

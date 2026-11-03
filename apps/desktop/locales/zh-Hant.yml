@@ -759,7 +759,7 @@ settings:
     dictation_polish_url: "OpenAI 相容的 API，後面接 /chat/completions。由它的模型改正聽錯的字、標點和大小寫。留空不潤飾；潤飾出錯時打進去的是辨識出的原文。"
     dictation_polish_key: "明文存在設定檔裡。"
     dictation_polish_model: "這個 API 上的對話模型。"
-    theme: 下面寫了的顏色會蓋過主題。選「淺色深色分開」時跟著系統外觀換。
+    theme: 在「顏色」頁裡改過的顏色會蓋過主題。選「淺色深色分開」時跟著系統外觀換。
     background: "顏色，例如 #1e1e2e，或顏色名稱。"
     foreground: 文字的顏色。
     cursor_color: 顏色，或 cell-foreground、cell-background（跟隨游標所在格子）。留空用前景色。
