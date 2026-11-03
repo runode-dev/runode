@@ -11,6 +11,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::Duration,
 };
 
 use anyhow::{Context as _, Result};
@@ -18,6 +19,9 @@ use runode_protocol::remote::ChannelHello;
 
 use super::{PairedHost, find};
 use crate::host_client::{UnixStream, hosts::forward::pick_local};
+
+/// 接本机的连接出错（比如文件描述符用完了）后等这么久再接，免得空转。
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 
 /// 本机开着的一个监听。
 struct Listening {
@@ -101,7 +105,14 @@ fn accept(listener: TcpListener, id: &str, port: u16, stopped: &AtomicBool) {
         if stopped.load(Ordering::Relaxed) {
             return;
         }
-        let Ok(local) = incoming else { continue };
+        let local = match incoming {
+            Ok(local) => local,
+            Err(err) => {
+                tracing::debug!("cannot accept a connection to forward to the paired computer {id}: {err}");
+                thread::sleep(ACCEPT_BACKOFF);
+                continue;
+            }
+        };
         let host = id.to_owned();
         let spawned = thread::Builder::new().name("paired-forward-conn".into()).spawn(move || {
             let peer = local.peer_addr().ok();
