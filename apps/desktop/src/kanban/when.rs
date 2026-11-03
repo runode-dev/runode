@@ -21,7 +21,8 @@ pub(super) fn describe_when(when: &When) -> String {
             if days == 0 {
                 rust_i18n::t!("kanban.when.daily", time = time).into_owned()
             } else {
-                let names: Vec<String> = (0..7).filter(|day| days & (1 << day) != 0).map(dialog::weekday).collect();
+                let names: Vec<String> =
+                    dialog::week_order().filter(|day| days & (1 << day) != 0).map(dialog::weekday).collect();
                 rust_i18n::t!("kanban.when.weekly", time = time, days = names.join(" ")).into_owned()
             }
         }

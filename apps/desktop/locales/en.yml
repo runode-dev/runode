@@ -1115,6 +1115,7 @@ kanban:
     every_hours: "Every %{count} h"
     every_minutes: "Every %{count} min"
     unknown: Unknown schedule
+  first_weekday: "0"
   weekday:
     "0": Sun
     "1": Mon

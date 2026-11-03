@@ -1115,6 +1115,7 @@ kanban:
     every_hours: "每 %{count} 小时"
     every_minutes: "每 %{count} 分钟"
     unknown: 看不懂的定时
+  first_weekday: "1"
   weekday:
     "0": 周日
     "1": 周一

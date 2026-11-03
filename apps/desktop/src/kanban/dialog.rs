@@ -1111,7 +1111,7 @@ impl TodoDialog {
                 }
             };
             let days = (self.kind == Some(Kind::Daily)).then(|| {
-                let pills: Vec<_> = (0..7u8)
+                let pills: Vec<_> = week_order()
                     .map(|day| {
                         let on = self.days & (1 << day) != 0;
                         let label = weekday(day);
@@ -1609,6 +1609,12 @@ impl TodoDialog {
 pub(crate) fn weekday(day: u8) -> String {
     let key = format!("kanban.weekday.{day}");
     rust_i18n::t!(&key).into_owned()
+}
+
+/// 一周七天按界面语言的习惯排好的顺序（`kanban.first_weekday` 是一周从哪天起），值同 `weekday` 的 `day`。
+pub(crate) fn week_order() -> impl Iterator<Item = u8> {
+    let first = rust_i18n::t!("kanban.first_weekday").parse::<u8>().map_or(0, |day| day % 7);
+    (0..7u8).map(move |offset| (first + offset) % 7)
 }
 
 /// 下一个整点，`YYYY-MM-DD HH:MM`：新建一次性的定时时先填上它。
