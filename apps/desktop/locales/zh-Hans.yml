@@ -854,7 +854,7 @@ settings:
     remove: 删除
     failed: "下载失败：%{err}"
   ssh_hosts:
-    empty: 还没有连过 SSH 主机。新建工作区时在「添加远程主机」里选「添加 SSH 主机」连一台。
+    empty: 还没有连过 SSH 主机。
     connect: 连接
     disconnect: 断开
     forget: 忘掉
@@ -1504,7 +1504,7 @@ paired:
   pair_fingerprint: "%{host} 的证书指纹和链接里的对不上，连到的可能不是那台电脑。到那台电脑上重新复制链接再试。"
   pair_disabled: "%{host} 的远程访问没开着，或者一时办不了。"
   pair_failed: "没配上：%{reason}"
-  settings_empty: 还没有配对过别的电脑。新建工作区时在「添加远程主机」里选「Runode 配对」。
+  settings_empty: 还没有配对过别的电脑。
   rename: 改名
   forget: 解除配对
   in_use: 先关掉这台电脑上的工作区和终端。

@@ -79,6 +79,7 @@ pub use crate::file_tree::{
     RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
 pub use kanban::watch_todos;
+pub(crate) use new_workspace::add_remote_host;
 pub(crate) use screen_viewer::show_remote_desktop;
 pub(crate) use settings_page::show_settings;
 pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;

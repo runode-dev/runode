@@ -25,14 +25,25 @@ impl SettingsView {
         let rows = div().flex().flex_col();
         if hosts.is_empty() {
             let text = rust_i18n::t!("settings.ssh_hosts.empty").into_owned();
+            let add = Button::new("ssh-hosts-empty-add", rust_i18n::t!("workspace.host_add").into_owned())
+                .variant(ButtonVariant::Secondary)
+                .on_press(cx, |_, _, cx| crate::window::add_remote_host(false, cx));
             return rows.child(
                 div()
-                    .id("ssh-hosts-empty")
-                    .aria_static_text(text.clone())
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.))
                     .py(px(12.))
-                    .text_size(FontSize::Body)
-                    .text_color(theme.foreground.opacity(0.55))
-                    .child(text),
+                    .child(
+                        div()
+                            .id("ssh-hosts-empty")
+                            .aria_static_text(text.clone())
+                            .text_size(FontSize::Body)
+                            .text_color(theme.foreground.opacity(0.55))
+                            .child(text),
+                    )
+                    .child(add),
             );
         }
         let in_use = (self.hosts_in_use)(cx);

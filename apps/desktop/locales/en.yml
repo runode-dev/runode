@@ -854,7 +854,7 @@ settings:
     remove: Delete
     failed: "Download failed: %{err}"
   ssh_hosts:
-    empty: No SSH hosts yet. When creating a workspace, choose Add SSH Host under Add Remote Host.
+    empty: No SSH hosts yet.
     connect: Connect
     disconnect: Disconnect
     forget: Forget
@@ -1430,7 +1430,7 @@ paired:
   pair_fingerprint: "%{host}'s certificate does not match the link, so this may not be that computer. Copy the link again on it and retry."
   pair_disabled: "Remote access on %{host} is off or busy."
   pair_failed: "Pairing failed: %{reason}"
-  settings_empty: No computers paired yet. When creating a workspace, choose Runode Pairing under Add Remote Host.
+  settings_empty: No computers paired yet.
   rename: Rename
   forget: Unpair
   in_use: Close the workspaces and terminals on this computer first.

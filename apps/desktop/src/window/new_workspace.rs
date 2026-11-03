@@ -32,6 +32,26 @@ use crate::{
 mod paired;
 mod ssh;
 
+/// 设置页里的「添加 SSH 主机」「Runode 配对」（`pair`）：收起最前面窗口的设置页，打开新建工作区对话框，
+/// 展开对应的一栏。
+pub(crate) fn add_remote_host(pair: bool, cx: &mut App) {
+    cx.defer(move |cx| {
+        let Some(handle) = super::remote::front_window(cx) else { return };
+        let added = handle.update(cx, |view, window, cx| {
+            view.close_settings(window, cx);
+            view.new_workspace(&NewWorkspace, window, cx);
+            if pair {
+                view.add_paired_machine(&paired::AddPairedMachine, window, cx);
+            } else {
+                view.add_ssh_host(&ssh::AddSshHost, window, cx);
+            }
+        });
+        if let Err(err) = added {
+            tracing::warn!("failed to open the new workspace dialog: {err:#}");
+        }
+    });
+}
+
 /// 对话框里的一种来源。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Source {

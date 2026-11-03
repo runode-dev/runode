@@ -37,14 +37,25 @@ impl SettingsView {
         let rows = div().flex().flex_col();
         if machines.is_empty() {
             let text = rust_i18n::t!("paired.settings_empty").into_owned();
+            let add = Button::new("paired-machines-empty-add", rust_i18n::t!("workspace.host_pair").into_owned())
+                .variant(ButtonVariant::Secondary)
+                .on_press(cx, |_, _, cx| crate::window::add_remote_host(true, cx));
             return rows.child(
                 div()
-                    .id("paired-machines-empty")
-                    .aria_static_text(text.clone())
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.))
                     .py(px(12.))
-                    .text_size(FontSize::Body)
-                    .text_color(theme.foreground.opacity(0.55))
-                    .child(text),
+                    .child(
+                        div()
+                            .id("paired-machines-empty")
+                            .aria_static_text(text.clone())
+                            .text_size(FontSize::Body)
+                            .text_color(theme.foreground.opacity(0.55))
+                            .child(text),
+                    )
+                    .child(add),
             );
         }
         let in_use = (self.hosts_in_use)(cx);
