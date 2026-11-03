@@ -1,9 +1,11 @@
 //! 分支列表：盖在窗口上面的浮层，列出本地和远端分支，输入文字过滤；输入的是还没有的分支名时
 //! 第一行是「新建分支」。上下键选、回车切过去、Esc 关掉。只新建分支时只有新建那一行。列的是
-//! 打开时选定的那个仓库（主仓库或子仓库）的分支，切换、新建也在那个仓库里做。
+//! 打开时选定的那个仓库（主仓库或子仓库）的分支，切换、新建也在那个仓库里做。已经在另一个工作树里
+//! 检出的本地分支 git 不让再检出，这一行写明在哪个工作树里，选它就在新标签里打开那个工作树。
 
 use crate::ui::picker::{matches_query, nav_delta, picker_panel};
 use crate::ui::theme::ActiveTheme as _;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use gpui::{
@@ -42,6 +44,8 @@ pub(in crate::window) struct BranchPicker {
     branches: Option<Vec<Branch>>,
     /// 只新建分支，不列出已有的。
     create_only: bool,
+    /// 在别的工作树里检出着的本地分支：分支名到那个工作树的根目录。
+    elsewhere: HashMap<String, PathBuf>,
     /// 输入的文字能不能当分支名，文字变了时在后台问一次 git；`named` 是问过的那段文字。
     valid_name: bool,
     named: String,
@@ -105,6 +109,13 @@ impl WindowView {
         else {
             return;
         };
+        let elsewhere: HashMap<String, PathBuf> = git
+            .filter(|git| git.main.root == root || git.worktrees.iter().any(|wt| wt.root == root))
+            .into_iter()
+            .flat_map(|git| std::iter::once(&git.main).chain(&git.worktrees))
+            .filter(|wt| wt.root != root)
+            .filter_map(|wt| Some((wt.info.branch.clone()?, wt.root.clone())))
+            .collect();
         let placeholder = match &start {
             Some(start) => {
                 rust_i18n::t!("git.picker.new_branch_at", id = start.chars().take(7).collect::<String>())
@@ -169,6 +180,7 @@ impl WindowView {
             field,
             branches: None,
             create_only,
+            elsewhere,
             valid_name: false,
             named: String::new(),
             selected: 0,
@@ -230,7 +242,7 @@ impl WindowView {
 
     /// 回车：切到选中的分支，或者新建分支。
     fn confirm_branch_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (root, start, choice) = {
+        let (root, start, choice, worktree) = {
             let Some(picker) = &mut self.branch_picker else {
                 return;
             };
@@ -246,9 +258,19 @@ impl WindowView {
                 Some(PickerRow::Branch(branch)) => Err((*branch).clone()),
                 None => return,
             };
-            (picker.repo.clone(), picker.start.clone(), choice)
+            let worktree = match &choice {
+                Err(branch) if !branch.remote => picker.elsewhere.get(&branch.name).cloned(),
+                _ => None,
+            };
+            (picker.repo.clone(), picker.start.clone(), choice, worktree)
         };
         self.close_branch_picker(window, cx);
+        if let Some(worktree) = worktree {
+            if let Some(view) = self.spawn_terminal(Some(&worktree), window, cx) {
+                self.insert_tab(self.workspace().active + 1, view, window, cx);
+            }
+            return;
+        }
         self.with_git_panel(cx, |panel, cx| match choice {
             Ok(name) => panel.create_branch(&root, name, start, window, cx),
             Err(branch) => panel.checkout(&root, branch, window, cx),
@@ -290,10 +312,13 @@ impl WindowView {
                         SharedString::default(),
                     ),
                     PickerRow::Branch(branch) => {
-                        let kind = if branch.remote {
-                            rust_i18n::t!("git.picker.remote")
-                        } else {
-                            rust_i18n::t!("git.picker.local")
+                        let worktree = (!branch.remote).then(|| picker.elsewhere.get(&branch.name)).flatten();
+                        let kind = match worktree {
+                            Some(worktree) => {
+                                rust_i18n::t!("git.picker.in_worktree", name = crate::ui::base_name(worktree))
+                            }
+                            None if branch.remote => rust_i18n::t!("git.picker.remote"),
+                            None => rust_i18n::t!("git.picker.local"),
                         };
                         let when = branch.time.map(crate::git_panel::ago::ago);
                         let detail = [kind.as_ref(), branch.subject.as_str(), when.as_deref().unwrap_or(&branch.date)]

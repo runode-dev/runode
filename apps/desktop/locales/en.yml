@@ -459,6 +459,7 @@ git:
     create: "Create branch “%{name}”"
     local: Local
     remote: Remote
+    in_worktree: "in worktree %{name}"
   quote_hunk: Send to Agent
   stage_hunk: Stage Hunk
   unstage_hunk: Unstage Hunk

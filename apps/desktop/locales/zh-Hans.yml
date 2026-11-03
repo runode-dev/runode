@@ -459,6 +459,7 @@ git:
     create: "新建分支「%{name}」"
     local: 本地
     remote: 远端
+    in_worktree: "在工作树 %{name} 里"
   quote_hunk: 交给 agent
   stage_hunk: 暂存这一块
   unstage_hunk: 取消暂存这一块
