@@ -68,10 +68,12 @@ public enum Presentation {
         }
     }
 
-    public static func linkState(_ state: LinkState) -> String {
+    /// 连接状态的完整说法。`shownName` 是旁边已经写着的电脑名字：连上的那台报的名字和它一样时不再写一遍。
+    public static func linkState(_ state: LinkState, shownName: String? = nil) -> String {
         switch state {
         case .idle: String(localized: "未连接")
         case .connecting: String(localized: "正在连接…")
+        case .connected(let hostName, _) where hostName == shownName: String(localized: "已连接")
         case .connected(let hostName, _): String(localized: "已连接 \(hostName)")
         case .waiting(let reason, _, true): String(localized: "\(reason)，电脑上线后自动连接")
         case .waiting(let reason, _, false): String(localized: "\(reason)，稍后自动重连")

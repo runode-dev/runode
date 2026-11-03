@@ -919,6 +919,14 @@ actor UnwritableMachineStore: MachineStore {
 }
 
 @Suite struct PresentationTests {
+    /// 旁边写着的电脑名字和连上的那台报的一样时，状态里不再重复名字。
+    @Test func linkStateSkipsTheNameAlreadyShown() {
+        let state = LinkState.connected(hostName: "Mac mini", address: nil)
+        #expect(Presentation.linkState(state, shownName: "Mac mini") == "已连接")
+        #expect(Presentation.linkState(state, shownName: "办公室") == "已连接 Mac mini")
+        #expect(Presentation.linkState(state) == "已连接 Mac mini")
+    }
+
     @Test func directoriesUnderHomeAreShortened() {
         #expect(Presentation.directory("/Users/ethan/dev/runode") == "~/dev/runode")
         #expect(Presentation.directory("/Users/ethan") == "~")

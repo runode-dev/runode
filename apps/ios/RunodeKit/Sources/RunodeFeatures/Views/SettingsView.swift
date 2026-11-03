@@ -233,7 +233,7 @@
         var body: some View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(machine.name)
-                Text(Presentation.linkState(state))
+                Text(Presentation.linkState(state, shownName: machine.name))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
