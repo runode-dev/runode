@@ -278,7 +278,7 @@ pub fn refs_changed(git_dir: &Path, path: &Path) -> bool {
 }
 
 /// 按字面去掉路径里的 `..`（连同它前面的一段），不碰文件系统。
-fn without_parent_dirs(path: &Path) -> std::path::PathBuf {
+pub fn without_parent_dirs(path: &Path) -> std::path::PathBuf {
     let mut out = std::path::PathBuf::new();
     for part in path.components() {
         match part {

@@ -45,8 +45,10 @@ fn watch_git_dirs(root: &Path, git: Option<&git::Repos>) -> Vec<PathBuf> {
         .iter()
         .flat_map(|git| git.iter())
         .flat_map(|repo| {
-            let common =
-                fs::read_to_string(repo.git_dir.join("commondir")).ok().map(|common| repo.git_dir.join(common.trim()));
+            // 监听的路径按原样出现在事件里：带着 `..` 时和各仓库的 git 目录比不上，图表就不知道分支变了。
+            let common = fs::read_to_string(repo.git_dir.join("commondir"))
+                .ok()
+                .map(|common| git::without_parent_dirs(&repo.git_dir.join(common.trim())));
             std::iter::once(repo.git_dir.clone()).chain(common)
         })
         .map(|dir| {

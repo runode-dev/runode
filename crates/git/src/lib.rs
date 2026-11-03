@@ -22,6 +22,7 @@ pub use branch::{Branch, valid_branch_name};
 pub use error::{GitError, Refusal};
 pub use graph::{
     Commit, CommitRef, GraphLine, GraphRow, Half, History, LaneColor, RefKind, graph_layout, refs_changed,
+    without_parent_dirs,
 };
 pub use info::{Operation, RepoInfo, Stash};
 pub use ops::{CommitOptions, Repo, Result};
