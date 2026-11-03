@@ -202,7 +202,11 @@ pub(crate) fn reveal_notified(tag: &str, cx: &mut App) {
 impl WindowView {
     /// 用户正看着这个分屏：窗口在前台、也确实看得见，它所在的标签正显示着，焦点在它上面，也没被
     /// 整页盖住（`page_covers_terminals`）。显示器睡了或切到别的 Space 时窗口可能仍在前台，却没人看得到。
-    fn is_watching_pane(&self, pane: EntityId, wi: usize, ti: usize, window: &Window) -> bool {
+    /// 开在单独窗口里的按那个窗口算（`watching_popped`）。
+    fn is_watching_pane(&self, pane: EntityId, wi: usize, ti: usize, window: &Window, cx: &App) -> bool {
+        if self.workspaces[wi].tabs[ti].popped.contains(&pane) {
+            return self.watching_popped(pane, cx);
+        }
         window.is_window_active()
             && window.is_visible()
             && self.is_shown(wi, ti)
@@ -225,7 +229,7 @@ impl WindowView {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let watching = self.is_watching_pane(pane, wi, ti, window);
+        let watching = self.is_watching_pane(pane, wi, ti, window, cx);
         let tab = &mut self.workspaces[wi].tabs[ti];
         let Some(agent) = tab.panes[&pane].0.read(cx).agent() else {
             tab.done.remove(&pane);
@@ -250,7 +254,7 @@ impl WindowView {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let watching = self.is_watching_pane(pane, wi, ti, window);
+        let watching = self.is_watching_pane(pane, wi, ti, window, cx);
         let tab = &mut self.workspaces[wi].tabs[ti];
         tab.done.remove(&pane);
         if !watching && let Some(agent) = tab.panes[&pane].0.read(cx).agent() {
@@ -270,7 +274,7 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> bool {
         let tab = &self.workspaces[wi].tabs[ti];
-        if self.is_watching_pane(pane, wi, ti, window) || tab.panes[&pane].0.read(cx).agent().is_some() {
+        if self.is_watching_pane(pane, wi, ti, window, cx) || tab.panes[&pane].0.read(cx).agent().is_some() {
             return false;
         }
         let title = match title {
@@ -306,6 +310,16 @@ impl WindowView {
         let tab = workspace.tabs[ti].focused_view().read(cx).title().to_owned();
         let alert = AgentAlert { kind, alert, tag: notification_tag(pane), workspace: workspace.name.to_string(), tab };
         alert::alert(alert, cx);
+    }
+
+    /// 用户看到了单独窗口里的终端 `pane`：清掉它的 done，收回它的通知。
+    pub(super) fn mark_popped_seen(&mut self, pane: EntityId, cx: &mut Context<Self>) {
+        if let Some((wi, ti)) = self.locate(pane)
+            && self.workspaces[wi].tabs[ti].done.remove(&pane)
+        {
+            cx.notify();
+        }
+        alert::dismiss(&notification_tag(pane), cx);
     }
 
     /// 用户看到了当前分屏（窗口在前台、看得见，终端没被设置页这些盖住）：清掉它的 done，收回它的通知。

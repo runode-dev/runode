@@ -210,6 +210,11 @@ impl WindowView {
         self.workspaces.iter().any(|workspace| workspace.tabs.iter().any(|tab| tab.popped.contains(&id)))
     }
 
+    /// 终端 `id` 在单独窗口里，那个窗口在前台、看得见。
+    pub(super) fn watching_popped(&self, id: EntityId, cx: &App) -> bool {
+        self.holds_popped(id) && popout::watched(id, cx)
+    }
+
     /// 终端 `id` 在单独窗口里时把那个窗口提到前面、焦点给它，返回是不是。
     pub(super) fn activate_popped(&self, id: EntityId, cx: &mut App) -> bool {
         self.holds_popped(id) && popout::activate(id, cx)

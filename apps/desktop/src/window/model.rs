@@ -526,7 +526,11 @@ impl WindowView {
                     self.save(cx);
                     cx.notify();
                 }
-                self.mark_seen(window, cx);
+                if self.workspaces[wi].tabs[ti].popped.contains(&id) {
+                    self.mark_popped_seen(id, cx);
+                } else {
+                    self.mark_seen(window, cx);
+                }
             }
             // agent 的分屏响铃不点亮提示点：agent 停下来要人处理时已经有它自己的标记。
             TerminalEvent::Bell => {

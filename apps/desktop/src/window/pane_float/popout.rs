@@ -33,6 +33,8 @@ struct PaneWindow {
     owner: WindowHandle<WindowView>,
     /// 用户按了置顶，窗口浮在别的程序的窗口上面。
     pinned: bool,
+    /// 窗口在前台、也看得见：窗口里只有这个终端，用户就算看着它。
+    watched: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -69,6 +71,14 @@ pub(super) fn open(
                 true
             });
             let subscriptions = vec![
+                cx.observe_window_activation(window, move |this: &mut PaneWindow, window, cx| {
+                    this.watched = window.is_window_active() && window.is_visible();
+                    if this.watched {
+                        cx.defer(move |cx| {
+                            let _ = owner.update(cx, |view, _, cx| view.mark_popped_seen(pane, cx));
+                        });
+                    }
+                }),
                 cx.observe_in(&owner_view, window, move |this: &mut PaneWindow, owner, window, cx| {
                     if !owner.read(cx).holds_popped(pane) {
                         let view = this.view.clone();
@@ -92,13 +102,21 @@ pub(super) fn open(
                     cx.notify();
                 }),
             ];
-            PaneWindow { pane, view, owner, pinned: false, _subscriptions: subscriptions }
+            PaneWindow { pane, view, owner, pinned: false, watched: true, _subscriptions: subscriptions }
         })
     });
     if let Err(err) = opened {
         tracing::warn!("failed to open the terminal window: {err:#}");
         cx.defer(move |cx| put_back(owner, pane, cx));
     }
+}
+
+/// 开着终端 `pane` 的单独窗口在前台、看得见。
+pub(super) fn watched(pane: EntityId, cx: &App) -> bool {
+    cx.windows()
+        .into_iter()
+        .filter_map(|handle| handle.downcast::<PaneWindow>())
+        .any(|handle| handle.read(cx).is_ok_and(|this| this.pane == pane && this.watched))
 }
 
 /// 终端 `pane` 开在单独的窗口里时把那个窗口提到前面、焦点给终端，返回找到了没有。
