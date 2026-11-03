@@ -189,12 +189,45 @@ impl WindowView {
         }
     }
 
-    /// 菜单里的「安装 Agent Skill」：在家目录开一个终端跑安装命令，装的过程和出错都看得到。
+    /// 菜单里的「安装 Agent Skill」：在家目录开一个终端跑安装命令，装的过程和出错都看得到。本机的 PATH 里
+    /// 没有 npx 时先说要装 Node.js，可以去它的网站，不开终端。
     pub(super) fn install_skill(&mut self, _: &InstallSkill, window: &mut Window, cx: &mut Context<Self>) {
         let Some(home) = home_dir() else {
             return;
         };
-        self.run_in_terminal(&home, "npx skills add runode-dev/runode --skill runode -g".into(), window, cx);
+        let local = self
+            .workspaces
+            .get(self.active)
+            .is_none_or(|workspace| workspace.host == crate::host_client::hosts::HostId::Local);
+        let path = self
+            .terminal_path(Some(&crate::host_client::hosts::HostId::Local), cx)
+            .or_else(|| std::env::var_os("PATH"));
+        let missing = local
+            && path.is_some_and(|path| {
+                let dirs: Vec<_> = std::env::split_paths(&path).filter(|dir| dir.is_absolute()).collect();
+                runode_terminal::shells::find_command(&dirs, "npx").is_none()
+            });
+        if !missing {
+            self.run_in_terminal(&home, "npx skills add runode-dev/runode --skill runode -g".into(), window, cx);
+            return;
+        }
+        let answer = crate::prompt::show(
+            window,
+            gpui::PromptLevel::Info,
+            &rust_i18n::t!("skill_install.no_npx_title"),
+            Some(&rust_i18n::t!("skill_install.no_npx_detail")),
+            &[
+                gpui::PromptButton::new(rust_i18n::t!("skill_install.open_nodejs")),
+                gpui::PromptButton::cancel(rust_i18n::t!("skill_install.cancel")),
+            ],
+            cx,
+        );
+        cx.spawn(async move |_, cx| {
+            if answer.await.ok() == Some(0) {
+                cx.update(|cx| cx.open_url("https://nodejs.org/"));
+            }
+        })
+        .detach();
     }
 
     /// 在 `dir` 里开一个终端跑 `command`：按配置项 `task-placement` 在当前标签里分出来或者在它右边开新标签。
