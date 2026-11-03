@@ -10,7 +10,11 @@ use std::{
 
 /// 把 `path` 移到回收站。`home_trash` 是家目录的回收站（`Dirs::trash_dir`），没有时只试文件系统顶层的。
 pub(super) fn trash(path: &Path, home_trash: Option<&Path>) -> io::Result<()> {
+    // 上一级规范化成真实路径，经链接进了别的文件系统时才找得到那个文件系统的顶层；被删的这一项本身是链接时移走的
+    // 仍是链接。
     let path = std::path::absolute(path)?;
+    let name = path.file_name().ok_or_else(unsupported)?.to_owned();
+    let path = fs::canonicalize(path.parent().ok_or_else(unsupported)?)?.join(name);
     let dev = fs::symlink_metadata(&path)?.dev();
     if let Some(home) = home_trash {
         // 家目录的回收站还没建时按它所在的目录比：建出来以后也在那个文件系统上。
