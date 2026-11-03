@@ -1406,17 +1406,15 @@ impl TodoDialog {
         let save = button("todo-dialog-save", rust_i18n::t!("kanban.save").into_owned(), ButtonVariant::Secondary)
             .when(self.saving, |button| button.opacity(0.5))
             .on_press(cx, |this, _, cx| this.save(false, cx));
-        // 找不到 agent 的命令时开始了也只会在终端里报错，只让先存下来。
-        let missing = self.agent_missing();
+        // 「找不到命令」只按 PATH 找，shell 里用别名装的 agent 也会被说成找不到，所以照样让开始。
         let save_and_start = self.startable().then(|| {
             button(
                 "todo-dialog-save-start",
                 rust_i18n::t!("kanban.save_and_start").into_owned(),
                 ButtonVariant::Default,
             )
-            .disabled(missing)
             .when(self.saving, |button| button.opacity(0.5))
-            .when(!missing, |button| button.on_press(cx, |this, _, cx| this.save(true, cx)))
+            .on_press(cx, |this, _, cx| this.save(true, cx))
         });
         // 报错放在按钮左边的空处，不另占一行，免得把上面各栏挤出可见范围。
         div()
