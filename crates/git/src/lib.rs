@@ -17,6 +17,8 @@ mod search;
 mod snapshot;
 mod view;
 mod words;
+#[cfg(target_os = "macos")]
+mod xcode;
 
 pub use branch::{Branch, valid_branch_name};
 pub use error::{GitError, Refusal};
@@ -46,7 +48,11 @@ use std::{
 /// `gpg.*.program` 设成任意命令，进一个别人给的目录不能因此跑了里面的脚本。
 /// 命令行上的 `-c` 压过仓库的配置，也传给 git 自己拉起的 git。其余会执行命令的配置：
 /// `diff.external` 和 textconv 由 `snapshot::DIFF` 关掉，过滤器见 `filter_overrides`。
-pub(crate) fn git_command(dir: &Path) -> Command {
+/// `runnable` 为假时不起 git，是 `GitError::Spawn`。
+pub(crate) fn git_command(dir: &Path) -> Result<Command> {
+    if !runnable(false) {
+        return Err(GitError::Spawn(NOT_RUNNABLE.to_owned()));
+    }
     let mut command = Command::new("git");
     hide_window(&mut command);
     command
@@ -54,7 +60,22 @@ pub(crate) fn git_command(dir: &Path) -> Command {
         .arg(dir)
         .args(["-c", "core.quotePath=false", "-c", "core.fsmonitor=false", "-c", "log.showSignature=false"])
         .stdin(Stdio::null());
-    command
+    Ok(command)
+}
+
+/// `runnable` 为假时 `GitError::Spawn` 里的话。
+const NOT_RUNNABLE: &str = "git is not installed";
+
+/// 按名字起 `git` 能不能跑起来，判断时不起 git。macOS 上由 `xcode::git_runnable` 判断（`recheck` 时不用记着的
+/// 结果），认出没装命令行开发者工具时那个一执行就弹框让用户装的壳子；别的系统上一律为真，没装时起 git 只是失败。
+fn runnable(recheck: bool) -> bool {
+    #[cfg(target_os = "macos")]
+    return xcode::git_runnable(recheck);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = recheck;
+        true
+    }
 }
 
 /// git 输出里的一段路径。Unix 上按原样的字节，不是 UTF-8 的文件名也找得到；Windows 上的路径不是
@@ -81,9 +102,12 @@ pub(crate) fn hide_window(command: &mut Command) {
     let _ = command;
 }
 
-/// 这台机器上的 git 跑得起来：没装（macOS 上没装命令行工具时 `/usr/bin/git` 只是个让你先装的壳子）时为假。
-/// 会起一次 git，放到后台跑。
+/// 这台机器上的 git 跑得起来：没装时为假。当场查 `runnable`，不用记着的结果，查到的也留给之后各处起 git 时用；
+/// 它为真才起一次 `git --version`，放到后台跑。
 pub fn installed() -> bool {
+    if !runnable(true) {
+        return false;
+    }
     let mut command = Command::new("git");
     hide_window(&mut command);
     command
@@ -101,7 +125,7 @@ pub(crate) fn git<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Option<Vec<u8>> {
 
 /// 同 `git`，另外设上 `env` 里的环境变量（`filter_overrides` 给的）。
 pub(crate) fn git_with<S: AsRef<OsStr>>(dir: &Path, env: &[(String, String)], args: &[S]) -> Option<Vec<u8>> {
-    let mut command = git_command(dir);
+    let mut command = git_command(dir).ok()?;
     command.args(args).envs(env.iter().cloned()).stderr(Stdio::null()).env("GIT_OPTIONAL_LOCKS", "0");
     let output = command.output().ok()?;
     output.status.success().then_some(output.stdout)

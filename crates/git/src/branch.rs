@@ -31,12 +31,14 @@ pub fn valid_branch_name(name: &str) -> bool {
     if name.is_empty() || name.starts_with('-') || name.contains("@{") || name == "HEAD" {
         return false;
     }
-    git_command(Path::new("/"))
-        .args(["check-ref-format", "--branch", name])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+    git_command(Path::new("/")).is_ok_and(|mut command| {
+        command
+            .args(["check-ref-format", "--branch", name])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    })
 }
 
 /// 解析 `branches` 里 `git for-each-ref` 的输出，一行一个引用，字段间用 NUL 隔开。

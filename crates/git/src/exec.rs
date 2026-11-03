@@ -43,7 +43,7 @@ pub(crate) fn run_for<S: AsRef<OsStr>>(
     timeout: Duration,
     env: &[(&str, &str)],
 ) -> Result<Vec<u8>> {
-    let mut command = git_command(dir);
+    let mut command = git_command(dir)?;
     command
         .args(args)
         .envs(env.iter().copied())
