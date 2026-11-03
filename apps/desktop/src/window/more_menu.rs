@@ -1,10 +1,11 @@
 //! 没有菜单栏的系统（Windows、Linux）上标题栏右上角的「更多」按钮：按下弹出菜单，放 macOS 只在菜单栏的
-//! 应用菜单和文件菜单里才有入口的几条命令（新窗口、设置、配置文件、装 skill、检查更新、关于、退出）。
+//! 应用菜单和文件菜单里才有入口的几条命令（新窗口、设置、配置文件、装 skill、检查更新、关于、退出），
+//! 以及侧栏收起时就没了入口的看板、定时和新建任务。
 
 use gpui::{Action, App, Context, Focusable as _, MouseButton, Window, prelude::*, px};
 
 use super::{
-    Dropdown, InstallSkill, TITLEBAR_HEIGHT, WindowView,
+    Dropdown, InstallSkill, NewTodo, TITLEBAR_HEIGHT, ToggleKanban, ToggleSchedules, WindowView,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
 };
 use crate::{
@@ -30,6 +31,10 @@ fn items(cx: &App) -> Vec<Option<MenuItem>> {
     let item = |label: String, action: Box<dyn Action>| Some(MenuItem::new(label, action, true, cx));
     let mut items = vec![
         item(tr("menu.new_window"), Box::new(NewWindow)),
+        None,
+        item(tr("menu.new_todo"), Box::new(NewTodo)),
+        item(tr("menu.toggle_kanban"), Box::new(ToggleKanban)),
+        item(tr("menu.toggle_schedules"), Box::new(ToggleSchedules)),
         None,
         item(tr("menu.settings"), Box::new(OpenSettings)),
         item(tr("menu.open_config"), Box::new(OpenConfiguration)),
