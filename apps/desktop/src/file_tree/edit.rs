@@ -27,6 +27,7 @@ pub(crate) struct FileClipboard {
     pub cut: bool,
 }
 
+#[derive(Clone)]
 enum EditTarget {
     /// 在 `dir` 里新建，输入框插在它的第一项。
     New { dir: PathBuf, is_dir: bool },
@@ -151,6 +152,17 @@ impl FileTree {
 
     /// 打开新建或改名的输入框。改名时文件只选中主名，直接打字时扩展名留着。
     fn start_file_edit(&mut self, target: EditTarget, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_file_edit_with(target, None, window, cx);
+    }
+
+    /// 和 `start_file_edit` 一样，`typed` 不为空时输入框里填它：新建、改名没成时把刚才输的名字放回去改。
+    fn start_file_edit_with(
+        &mut self,
+        target: EditTarget,
+        typed: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // 正在改别的时先把那个改完。
         self.finish_file_edit(true, window, cx);
         self.menu = None;
@@ -161,12 +173,13 @@ impl FileTree {
                         state.toggle_dir(dir, root, filter);
                     }
                 });
-                (String::new(), 0)
+                let name = typed.unwrap_or_default();
+                let select = stem_end(&name, false);
+                (name, select)
             }
             EditTarget::Rename { path, is_dir } => {
-                let name = base_name(path);
-                let stem = if *is_dir { None } else { name.rfind('.').filter(|&dot| dot > 0) };
-                let select = stem.unwrap_or(name.len());
+                let name = typed.unwrap_or_else(|| base_name(path));
+                let select = stem_end(&name, *is_dir);
                 (name, select)
             }
         };
@@ -199,13 +212,34 @@ impl FileTree {
         }
         match target {
             EditTarget::New { dir, is_dir } => self.create_entry(&dir, &name, is_dir, window, cx),
-            EditTarget::Rename { path, .. } => self.rename_entry(&path, &name, window, cx),
+            EditTarget::Rename { path, is_dir } => self.rename_entry(&path, is_dir, &name, window, cx),
         }
     }
 
+    /// 新建或改名没成：弹框说为什么，关掉以后把输入框和刚才输的 `name` 放回去，改了再试。
+    fn edit_failed(
+        &self,
+        target: EditTarget,
+        name: String,
+        title: &str,
+        detail: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ws = self.ws;
+        self.show_file_error_then(title, detail, window, cx, move |this, window, cx| {
+            // 期间切到了别的 workspace 时不放回去：那棵树里没有这个输入框的位置。
+            if this.ws == ws && this.edit.is_none() {
+                this.start_file_edit_with(target, Some(name), window, cx);
+            }
+        });
+    }
+
     fn create_entry(&mut self, dir: &Path, name: &str, is_dir: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let target = EditTarget::New { dir: dir.to_path_buf(), is_dir };
         let Some(path) = ops::child_path(dir, name) else {
-            self.show_invalid_name("files.failed_new", name, window, cx);
+            let detail = rust_i18n::t!("files.invalid_name", name = name).into_owned();
+            self.edit_failed(target, name.to_owned(), "files.failed_new", detail, window, cx);
             return;
         };
         // 同 `transfer`：在后台建，网络卷挂住时不卡界面；完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树。
@@ -219,7 +253,8 @@ impl FileTree {
             let result = job.await;
             this.update_in(cx, |this, window, cx| {
                 if let Err(err) = result {
-                    this.show_file_error("files.failed_new", error_text(&err, &name), window, cx);
+                    let detail = error_text(&err, &name);
+                    this.edit_failed(target, name, "files.failed_new", detail, window, cx);
                     return;
                 }
                 this.relist_and_reveal(ws, vec![dir], &path, cx);
@@ -234,12 +269,14 @@ impl FileTree {
     }
 
     /// 改名只改名字，不挪到别的目录。
-    fn rename_entry(&mut self, path: &Path, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn rename_entry(&mut self, path: &Path, is_dir: bool, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         if ops::unchanged_name(path, name) {
             return;
         }
+        let target = EditTarget::Rename { path: path.to_path_buf(), is_dir };
         let Some(to) = path.parent().and_then(|parent| ops::child_name(parent, name)) else {
-            self.show_invalid_name("files.failed_rename", name, window, cx);
+            let detail = rust_i18n::t!("files.invalid_name", name = name).into_owned();
+            self.edit_failed(target, name.to_owned(), "files.failed_rename", detail, window, cx);
             return;
         };
         // 同 `create_entry`，在后台改。
@@ -253,7 +290,10 @@ impl FileTree {
             let result = job.await;
             this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => this.after_move(ws, &from, &to, cx),
-                Err(err) => this.show_file_error("files.failed_rename", error_text(&err, &name), window, cx),
+                Err(err) => {
+                    let detail = error_text(&err, &name);
+                    this.edit_failed(target, name, "files.failed_rename", detail, window, cx);
+                }
             })
             .ok();
         })
@@ -541,13 +581,20 @@ impl FileTree {
         .detach();
     }
 
-    fn show_invalid_name(&self, title: &str, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.show_file_error(title, rust_i18n::t!("files.invalid_name", name = name).into_owned(), window, cx);
-    }
-
     /// 弹框说哪个操作没成（`title` 是标题的译文键）、为什么。
     fn show_file_error(&self, title: &str, detail: String, window: &mut Window, cx: &mut Context<Self>) {
-        // 只说一声，但收的那头要留到框关掉。
+        self.show_file_error_then(title, detail, window, cx, |_, _, _| {});
+    }
+
+    /// 和 `show_file_error` 一样，框关掉以后再做 `then`。
+    fn show_file_error_then(
+        &self,
+        title: &str,
+        detail: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
         let answer = crate::prompt::show(
             window,
             PromptLevel::Warning,
@@ -556,6 +603,16 @@ impl FileTree {
             &[PromptButton::cancel(rust_i18n::t!("files.ok"))],
             cx,
         );
-        cx.foreground_executor().spawn(answer).detach();
+        cx.spawn_in(window, async move |this, cx| {
+            let _ = answer.await;
+            this.update_in(cx, |this, window, cx| then(this, window, cx)).ok();
+        })
+        .detach();
     }
+}
+
+/// 名字里选中的那一段的长度：文件只选主名，打字时扩展名留着；目录和没有扩展名的选全部。
+fn stem_end(name: &str, is_dir: bool) -> usize {
+    let stem = if is_dir { None } else { name.rfind('.').filter(|&dot| dot > 0) };
+    stem.unwrap_or(name.len())
 }
