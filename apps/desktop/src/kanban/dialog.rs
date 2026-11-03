@@ -1045,7 +1045,14 @@ impl TodoDialog {
             let when_input = match self.kind {
                 Some(Kind::Once) => grow_input(&self.at).into_any_element(),
                 Some(Kind::Daily) => grow_input(&self.clock).into_any_element(),
-                Some(Kind::Every) => grow_input(&self.minutes).into_any_element(),
+                // 框里只有数字，单位写在后面。
+                Some(Kind::Every) => div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(grow_input(&self.minutes).w(scaled(96.)))
+                    .child(div().text_color(fg_h.opacity(0.7)).child(rust_i18n::t!("kanban.dialog.every").into_owned()))
+                    .into_any_element(),
                 None => {
                     let hint = rust_i18n::t!("kanban.dialog.unknown_hint").into_owned();
                     div()
