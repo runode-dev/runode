@@ -28,7 +28,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{
     Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Pixels, Point,
     Render, RenderImage, Role, ShapedLine, SharedString, Subscription, Task, Window, actions, div, prelude::*, px,
-    relative, rgb,
+    relative, rgb, svg,
 };
 use runode_config::Config;
 use runode_protocol::{Conversation, SessionId};
@@ -46,6 +46,7 @@ use crate::{
         a11y::Press,
         font_size::FontSize,
         hsla,
+        icons::ARROW_DOWN_ICON,
         input::InputState,
         menu::{Menu, MenuHost as _},
     },
@@ -350,12 +351,12 @@ impl Render for TerminalView {
                     })
                     .child(TerminalElement { view: cx.entity() }),
             );
-        let position = self
-            .screen
-            .shown()
-            .and_then(Session::scrolled_back)
-            .map(|(top, len)| render_scroll_position(top, len, foreground));
+        let scrolled = self.screen.shown().and_then(Session::scrolled_back);
+        let position = scrolled.map(|(top, len)| render_scroll_position(top, len, foreground));
         let lost = self.screen.is_lost().then(|| self.render_lost_bar(foreground, background, cx));
+        // 和断开的提示都在底部，断开时只留那个。
+        let jump =
+            (scrolled.is_some() && lost.is_none()).then(|| self.render_jump_to_latest(foreground, background, cx));
         let size_owner = self.render_size_owner(foreground, background, cx);
         let link_target = self.render_link_target(foreground, background);
         let dictation = self.render_dictation(foreground, background);
@@ -367,6 +368,7 @@ impl Render for TerminalView {
             .size_full()
             .child(terminal)
             .children(position)
+            .children(jump)
             .children(search_bar)
             .children(size_owner)
             .children(link_target)
@@ -491,6 +493,42 @@ impl TerminalView {
                 .text_ellipsis()
                 .child(uri.clone()),
         )
+    }
+
+    /// 翻回了回滚历史时右下角的「回到最新」，按了滚到最底部。
+    fn render_jump_to_latest(
+        &self,
+        foreground: Rgb,
+        background: Rgb,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        let fg = hsla(foreground);
+        let label = rust_i18n::t!("terminal_jump_to_latest").into_owned();
+        div()
+            .id("terminal-jump-to-latest")
+            .role(Role::Button)
+            .aria_label(label.clone())
+            .absolute()
+            .bottom(px(10.))
+            .right(px(14.))
+            .px(px(10.))
+            .py(px(4.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .rounded_full()
+            .bg(hsla(background.mix(foreground, 0.12)))
+            .hover(|button| button.bg(hsla(background.mix(foreground, 0.2))))
+            .border_1()
+            .border_color(fg.opacity(0.15))
+            .shadow_md()
+            .occlude()
+            .cursor(CursorStyle::PointingHand)
+            .text_size(FontSize::Small)
+            .text_color(fg)
+            .child(svg().flex_none().path(ARROW_DOWN_ICON).size(px(12.)).text_color(fg))
+            .child(label)
+            .on_press(cx, |view, window, cx| view.scroll_to_bottom(&ScrollToBottom, window, cx))
     }
 
     /// 和宿主断开后盖在底部的提示：画面停在最后一屏，以及「在原目录重开」；远端主机的显示连接状态和

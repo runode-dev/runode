@@ -245,6 +245,7 @@ dictation:
   failed: 语音输入失败
   ok: 好
 terminal_image: "[图片]"
+terminal_jump_to_latest: 回到最新
 host_lost:
   message: 和终端会话的连接断开了，现在看到的是断开前的最后一屏。
   reopen: 在原目录重新打开

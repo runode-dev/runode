@@ -245,6 +245,7 @@ dictation:
   failed: Dictation failed
   ok: OK
 terminal_image: "[image]"
+terminal_jump_to_latest: Jump to Latest
 host_lost:
   message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.
   reopen: Reopen in This Directory

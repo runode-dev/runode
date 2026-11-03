@@ -245,6 +245,7 @@ dictation:
   failed: 語音輸入失敗
   ok: 好
 terminal_image: "[圖片]"
+terminal_jump_to_latest: 回到最新
 host_lost:
   message: 和終端機工作階段的連線中斷了，現在看到的是中斷前的最後一個畫面。
   reopen: 在原目錄重新開啟
