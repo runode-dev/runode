@@ -975,7 +975,8 @@ impl TodoDialog {
     fn render_fields(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let fields = div()
             .id("todo-dialog-fields")
-            .size_full()
+            .flex_1()
+            .min_h_0()
             .pr(px(SCROLLBAR_GUTTER))
             .track_scroll(&self.fields_scroll)
             .overflow_y_scroll()
@@ -999,7 +1000,8 @@ impl TodoDialog {
             .child(self.render_skills_row(window, cx))
             .child(self.render_attachments(cx))
             .child(self.render_switches(cx));
-        div().flex_1().min_h_0().mr(px(-SCROLLBAR_GUTTER)).relative().child(fields).child(scrollbar(
+        // 不是整页时面板的高度跟着内容，压得住各栏的只有伸缩，百分比的高度压不住。
+        div().flex_1().min_h_0().mr(px(-SCROLLBAR_GUTTER)).relative().flex().flex_col().child(fields).child(scrollbar(
             "todo-dialog-scrollbar",
             self.fields_scroll.clone(),
             Axis::Vertical,
