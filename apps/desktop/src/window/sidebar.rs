@@ -563,7 +563,8 @@ impl WindowView {
                 .into_any_element(),
         };
         // 右侧靠边写分支，按着快捷键的修饰键或者单按 ⌘ 时换成快捷键提示（按 ⌘ 是找快捷键时最先按的键）；
-        // 后面是等回答的标签和响铃的圆点。悬停时这些都让给关闭按钮。
+        // 后面是等回答的标签和响铃的圆点。有等回答的标签时不写分支：侧栏窄，两样挤在一起分支只剩一个字母。
+        // 悬停时这些都让给关闭按钮。
         let is_last = ix + 1 == self.workspaces.len();
         let held = modifiers == Modifiers::command()
             || shortcut_modifiers(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx) == Some(modifiers);
@@ -578,8 +579,10 @@ impl WindowView {
             .map(|trailing| {
                 if held {
                     trailing.children(shortcut_hint(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx))
-                } else {
+                } else if !blocked {
                     trailing.children(repo.branch.clone().map(|branch| div().min_w_0().truncate().child(branch)))
+                } else {
+                    trailing
                 }
             })
             .when(blocked, |trailing| {
