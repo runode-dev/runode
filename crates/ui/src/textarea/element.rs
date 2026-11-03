@@ -231,11 +231,16 @@ impl Element for TextareaText {
         });
         if area.autoscroll || (resized && area.focus_handle.is_focused(window)) {
             let top = line_height * caret_row;
-            if top < scroll_y {
-                scroll_y = top;
-            }
-            if top + line_height > scroll_y + bounds.size.height {
-                scroll_y = top + line_height - bounds.size.height;
+            let hidden = top < scroll_y || top + line_height > scroll_y + bounds.size.height;
+            if area.center_caret && hidden {
+                scroll_y = top + line_height / 2. - bounds.size.height / 2.;
+            } else {
+                if top < scroll_y {
+                    scroll_y = top;
+                }
+                if top + line_height > scroll_y + bounds.size.height {
+                    scroll_y = top + line_height - bounds.size.height;
+                }
             }
         }
         let scroll_y = scroll_y.clamp(px(0.), max_scroll);
@@ -371,6 +376,7 @@ impl Element for TextareaText {
             area.metrics = Some(metrics);
             area.scroll_y = scroll_y;
             area.autoscroll = false;
+            area.center_caret = false;
         });
     }
 }

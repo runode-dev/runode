@@ -96,6 +96,9 @@ pub struct TextareaState {
     scroll_y: Pixels,
     /// 光标动过或文字改过，下一帧滚到让光标露出来；滚轮滚动时不设，免得又被拉回去。
     autoscroll: bool,
+    /// 和 `autoscroll` 一起设：光标不在可见范围里时滚到让它居中，不是刚好露在边上。跳到某一行时用，跳过去后
+    /// 上下文看得见。
+    center_caret: bool,
 }
 
 struct Metrics {
@@ -141,6 +144,7 @@ impl TextareaState {
             metrics: None,
             scroll_y: px(0.),
             autoscroll: false,
+            center_caret: false,
         }
     }
 
@@ -182,10 +186,11 @@ impl TextareaState {
         lines_spanned(&self.content, self.selected.clone())
     }
 
-    /// 选中硬换行行号 `lines`（从 0 数，不含 `end`）这几行，不含末行的换行符，下一帧滚到露出光标；超出的行号
-    /// 收到文末。
+    /// 选中硬换行行号 `lines`（从 0 数，不含 `end`）这几行，不含末行的换行符；光标不在可见范围里时下一帧滚到
+    /// 让它居中。超出的行号收到文末。
     pub fn select_lines(&mut self, lines: Range<usize>, cx: &mut Context<Self>) {
         self.select_range(lines_range(&self.content, lines), cx);
+        self.center_caret = true;
     }
 
     /// 换上按版本 `version` 的文字算的样式段（字节范围，从前到后不重叠）。文字已经又改过、或者正在组字时
@@ -572,6 +577,7 @@ impl TextareaState {
         let delta = event.delta.pixel_delta(metrics.line_height).y;
         self.scroll_y = (self.scroll_y - delta).clamp(px(0.), max);
         self.autoscroll = false;
+        self.center_caret = false;
         cx.stop_propagation();
         cx.notify();
     }
