@@ -1071,6 +1071,7 @@ kanban:
   schedules_need_host: "定時只在終端機宿主執行時生效。要在結束 Runode 後、重新登入後也照常跑，在設定裡打開「結束後保留工作階段」和「登入時在背景啟動宿主」。"
   schedules_open_settings: 打開設定
   no_schedules: 還沒有定時
+  no_schedules_detail: "到了設好的時間，定時就在看板上開一張任務交給 agent，適合每天早上的檢查、每週的整理這類活。"
   no_next: 不會再跑
   next: "下一次 %{time}"
   next_held: 上次開出的任務還在做或在等你回答，到點先跳過

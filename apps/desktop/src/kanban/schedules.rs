@@ -4,8 +4,8 @@ use crate::menus::OpenSettings;
 use crate::ui::{
     a11y::Press,
     button::{Button, ButtonSize, ButtonVariant},
-    font_size::FontSize,
-    icons::{PENCIL_ICON, TRASH_ICON},
+    font_size::{FontSize, scaled},
+    icons::{PENCIL_ICON, PLUS_ICON, TRASH_ICON},
     scrollbar::scrollbar,
     theme::ActiveTheme as _,
 };
@@ -86,8 +86,33 @@ impl Kanban {
         });
         let rows: Vec<_> =
             data.schedules.iter().map(|schedule| self.render_schedule(schedule, data, now, cx)).collect();
+        // 空着时说清定时是做什么的，就地给个新建的入口。
         let empty = rows.is_empty().then(|| {
-            label_row("todo-schedules-empty", rust_i18n::t!("kanban.no_schedules").into_owned(), fg.opacity(0.45))
+            let add = Button::new("todo-schedules-new", rust_i18n::t!("kanban.new_schedule").into_owned())
+                .variant(ButtonVariant::Ghost)
+                .with_size(ButtonSize::Sm)
+                .icon(PLUS_ICON)
+                .icon_size(12.)
+                .cursor_pointer()
+                .on_press(cx, |this, window, cx| this.open_dialog(true, None, window, cx));
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(4.))
+                .child(label_row(
+                    "todo-schedules-empty",
+                    rust_i18n::t!("kanban.no_schedules").into_owned(),
+                    fg.opacity(0.6),
+                ))
+                .child(div().max_w(scaled(320.)).text_center().child(label_row(
+                    "todo-schedules-empty-detail",
+                    rust_i18n::t!("kanban.no_schedules_detail").into_owned(),
+                    fg.opacity(0.45),
+                )))
+                .child(add)
         });
         div().size_full().flex().flex_col().gap(px(8.)).children(hint).child(
             div()

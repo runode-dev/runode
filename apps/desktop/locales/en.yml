@@ -1071,6 +1071,7 @@ kanban:
   schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit Runode or log in again, turn on “Keep sessions after quitting” and “Run the host in the background at login” in Settings."
   schedules_open_settings: Open Settings
   no_schedules: No schedules yet
+  no_schedules_detail: "At the times you set, a schedule opens a task on the board and hands it to an agent: morning checks, weekly cleanups and the like."
   no_next: Will not run again
   next: "next %{time}"
   next_held: skipped while the last task is still working or waiting for you
