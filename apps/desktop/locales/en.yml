@@ -1490,4 +1490,5 @@ skill_install:
   no_npx_title: "npx was not found on this computer"
   no_npx_detail: "Installing the Agent Skill uses npx, which comes with Node.js. Install Node.js, then try again."
   open_nodejs: "Open nodejs.org"
+  run_anyway: "Run Anyway"
   cancel: "Cancel"

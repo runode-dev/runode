@@ -189,8 +189,9 @@ impl WindowView {
         }
     }
 
-    /// 菜单里的「安装 Agent Skill」：在家目录开一个终端跑安装命令，装的过程和出错都看得到。本机的 PATH 里
-    /// 没有 npx 时先说要装 Node.js，可以去它的网站，不开终端。
+    /// 菜单里的「安装 Agent Skill」：在家目录开一个终端跑安装命令，装的过程和出错都看得到。本机终端报的 PATH
+    /// 里没有 npx 时先说要装 Node.js，可以去它的网站，也可以照样运行：shell 里延迟加载的 nvm 这类把 npx 做成函数，
+    /// PATH 里找不到。
     pub(super) fn install_skill(&mut self, _: &InstallSkill, window: &mut Window, cx: &mut Context<Self>) {
         let Some(home) = home_dir() else {
             return;
@@ -199,16 +200,15 @@ impl WindowView {
             .workspaces
             .get(self.active)
             .is_none_or(|workspace| workspace.host == crate::host_client::hosts::HostId::Local);
-        let path = self
-            .terminal_path(Some(&crate::host_client::hosts::HostId::Local), cx)
-            .or_else(|| std::env::var_os("PATH"));
+        let path = self.terminal_path(Some(&crate::host_client::hosts::HostId::Local), cx);
         let missing = local
             && path.is_some_and(|path| {
                 let dirs: Vec<_> = std::env::split_paths(&path).filter(|dir| dir.is_absolute()).collect();
                 runode_terminal::shells::find_command(&dirs, "npx").is_none()
             });
+        let command = "npx skills add runode-dev/runode --skill runode -g";
         if !missing {
-            self.run_in_terminal(&home, "npx skills add runode-dev/runode --skill runode -g".into(), window, cx);
+            self.run_in_terminal(&home, command.into(), window, cx);
             return;
         }
         let answer = crate::prompt::show(
@@ -218,14 +218,17 @@ impl WindowView {
             Some(&rust_i18n::t!("skill_install.no_npx_detail")),
             &[
                 gpui::PromptButton::new(rust_i18n::t!("skill_install.open_nodejs")),
+                gpui::PromptButton::new(rust_i18n::t!("skill_install.run_anyway")),
                 gpui::PromptButton::cancel(rust_i18n::t!("skill_install.cancel")),
             ],
             cx,
         );
-        cx.spawn(async move |_, cx| {
-            if answer.await.ok() == Some(0) {
-                cx.update(|cx| cx.open_url("https://nodejs.org/"));
+        cx.spawn_in(window, async move |this, cx| match answer.await.ok() {
+            Some(0) => cx.update(|_, cx| cx.open_url("https://nodejs.org/")).unwrap_or(()),
+            Some(1) => {
+                this.update_in(cx, |this, window, cx| this.run_in_terminal(&home, command.into(), window, cx)).ok();
             }
+            _ => {}
         })
         .detach();
     }

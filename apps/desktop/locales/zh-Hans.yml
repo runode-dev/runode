@@ -1564,4 +1564,5 @@ skill_install:
   no_npx_title: "这台电脑上没找到 npx"
   no_npx_detail: "安装 Agent Skill 要用 Node.js 带的 npx，先装好 Node.js 再试。"
   open_nodejs: "打开 nodejs.org"
+  run_anyway: "仍然运行"
   cancel: "取消"
