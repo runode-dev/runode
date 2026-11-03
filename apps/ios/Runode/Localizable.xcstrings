@@ -1146,6 +1146,29 @@
         }
       }
     },
+    "局域网" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local network"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "局域网"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "區域網路"
+          }
+        }
+      }
+    },
     "打开的配对链接要连这台电脑。" : {
       "extractionState" : "manual",
       "localizations" : {

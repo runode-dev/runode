@@ -112,10 +112,15 @@ public enum Presentation {
         return parts.joined(separator: " · ")
     }
 
-    /// 给人看的地址：去掉 IPv4/IPv6 链路本地地址后面的网卡作用域（`%en0`）。连接用的地址本身不改。
+    /// 给人看的地址：去掉 IPv4/IPv6 链路本地地址后面的网卡作用域（`%en0`）；IPv6 链路本地地址（`fe80::/10`）
+    /// 对人没有意义，写成「局域网」。连接用的地址本身不改。
     public static func displayAddress(_ address: String) -> String {
-        guard let percent = address.firstIndex(of: "%") else { return address }
-        return String(address[..<percent])
+        let bare = address.firstIndex(of: "%").map { String(address[..<$0]) } ?? address
+        let lower = bare.lowercased()
+        if ["fe8", "fe9", "fea", "feb"].contains(where: lower.hasPrefix), lower.contains(":") {
+            return String(localized: "局域网")
+        }
+        return bare
     }
 
     /// 屏幕文字的最后几行：去掉行尾空白、空行和只有制表符（分隔线、边框）的行。`atPrompt` 为真

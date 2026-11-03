@@ -496,7 +496,8 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
 
     @Test func addressesAreShownWithoutTheInterfaceScope() {
         #expect(Presentation.displayAddress("10.0.0.10%en0") == "10.0.0.10")
-        #expect(Presentation.displayAddress("fe80::1c2:3%en0") == "fe80::1c2:3")
+        #expect(Presentation.displayAddress("fe80::1c2:3%en0") == "局域网")
+        #expect(Presentation.displayAddress("FE80::be24:11ff:fe8f:b9") == "局域网")
         #expect(Presentation.displayAddress("fd7a:115c:a1e0::1") == "fd7a:115c:a1e0::1")
         #expect(Presentation.displayAddress("192.168.1.20") == "192.168.1.20")
     }
