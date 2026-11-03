@@ -18,7 +18,7 @@ use crate::git_panel::commit_message::{
 use crate::ui::a11y::{PressDown, StaticText};
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::dialog::Dialog;
-use crate::ui::menu::MenuHost as _;
+use crate::ui::menu::{MenuAnchors, MenuHost as _};
 use crate::ui::select::SelectTrigger;
 use crate::ui::theme::ActiveTheme as _;
 use crate::{
@@ -63,6 +63,8 @@ pub(in crate::window) struct CommitMessageDialog {
     status: Option<Status>,
     /// 正在后台写文件，写完之前不再写。
     saving: bool,
+    /// 选 agent 的框画在哪，它的菜单从框下面开出来。
+    anchors: MenuAnchors,
     _events: [Subscription; 3],
 }
 
@@ -122,6 +124,7 @@ impl WindowView {
             repo_only,
             status,
             saving: false,
+            anchors: MenuAnchors::default(),
             _events: [on_args, on_command, on_template],
         });
         cx.notify();
@@ -315,7 +318,13 @@ impl WindowView {
                 .border_1()
                 .border_color(fg.opacity(0.2))
                 .hover(move |button| button.bg(hover_bg))
-                .on_press_down(cx, |this, window, cx| this.open_commit_agent_menu(window.mouse_position(), cx));
+                .relative()
+                .child(dialog.anchors.track("commit-message-agent"))
+                .on_press_down(cx, |this, window, cx| {
+                    let Some(dialog) = &this.commit_message_dialog else { return };
+                    let position = dialog.anchors.below("commit-message-agent", window);
+                    this.open_commit_agent_menu(position, cx);
+                });
 
         // CLI 参数（自己定义的命令时是整条命令），下面是照现在填的实际要跑的整条命令。
         let (input_label, input, hint) = match dialog.agent {

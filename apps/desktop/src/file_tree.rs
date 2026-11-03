@@ -43,7 +43,7 @@ use crate::ui::{
         CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CODE_ICON, FILTER_ICON, FOLDER_OPEN_ICON, MORE_ICON, REFRESH_ICON,
         VIEW_LIST_ICON, VIEW_TREE_ICON,
     },
-    menu::{Menu, MenuHost, MenuItem},
+    menu::{Menu, MenuAnchors, MenuHost, MenuItem},
     panel::panel_title,
     scrollbar::scrollbar,
     tabs::drag_chip,
@@ -359,6 +359,8 @@ pub struct FileTree {
     /// 显示被 git 忽略的文件、名字以 `.` 开头的文件。整个窗口一份，app 存档。
     show_ignored: bool,
     show_dotfiles: bool,
+    /// 「更多」按钮画在哪，它的菜单从按钮下面开出来。
+    anchors: MenuAnchors,
 }
 
 impl EventEmitter<FileTreeEvent> for FileTree {}
@@ -393,6 +395,7 @@ impl FileTree {
             clipboard: None,
             show_ignored: false,
             show_dotfiles: true,
+            anchors: MenuAnchors::default(),
         }
     }
 
@@ -636,15 +639,18 @@ impl FileTree {
             )
             .on_a11y_press(view.clone(), |_, _, cx| cx.emit(FileTreeEvent::Refresh));
         let more = button("files-more", MORE_ICON, rust_i18n::t!("files.more"))
+            .relative()
+            .child(self.anchors.track("files-more"))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                cx.listener(|this, _: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
-                    this.open_files_more_menu(event.position, cx);
+                    this.open_files_more_menu(this.anchors.below("files-more", window), cx);
                 }),
             )
-            // 辅助工具按下时没有鼠标事件，菜单弹在鼠标所在的地方，贴着窗口边挪进来。
-            .on_a11y_press(view, |this, window, cx| this.open_files_more_menu(window.mouse_position(), cx));
+            .on_a11y_press(view, |this, window, cx| {
+                this.open_files_more_menu(this.anchors.below("files-more", window), cx)
+            });
         panel_title()
             .gap(px(6.))
             .child(div().flex_initial().min_w_0().truncate().text_color(cx.theme().foreground).child(name))

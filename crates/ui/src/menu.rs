@@ -5,12 +5,12 @@
 //! 一项可以带子菜单（`MenuItem::submenu`），只有一层：鼠标指到那一行、或者按回车、右方向键时在它右边
 //! 展开；键盘进了子菜单后上下键在子菜单里选，左方向键、Esc 收起子菜单回到上一层。
 
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use gpui::{
-    Action, Anchor, AnyElement, App, Context, Div, ElementId, FocusHandle, FontWeight, KeyDownEvent, MouseButton,
-    MouseDownEvent, Pixels, Point, Role, ScrollHandle, SharedString, Window, anchored, deferred, div, point,
-    prelude::*, px, relative, svg,
+    Action, Anchor, AnyElement, App, Bounds, Context, Div, ElementId, FocusHandle, FontWeight, KeyDownEvent,
+    MouseButton, MouseDownEvent, Pixels, Point, Role, ScrollHandle, SharedString, Window, anchored, canvas, deferred,
+    div, point, prelude::*, px, relative, svg,
 };
 
 use crate::{
@@ -22,6 +22,36 @@ use crate::{
     theme::ActiveTheme as _,
     tooltip::{shortcut_text, tooltip},
 };
+
+/// 弹右键菜单的按钮上一帧画在哪，按名字记：按钮弹出的菜单从按钮左下角开出来，键盘和辅助工具按下时
+/// 也开在按钮旁边，不开在鼠标碰巧停着的地方。
+#[derive(Clone, Default)]
+pub struct MenuAnchors(Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>);
+
+impl MenuAnchors {
+    /// 贴满按钮的一块画布，作为按钮的子元素（按钮要 `relative`），每帧把按钮的位置记在 `key` 下。
+    pub fn track(&self, key: impl Into<SharedString>) -> impl IntoElement {
+        let (anchors, key) = (self.0.clone(), key.into());
+        canvas(
+            move |bounds, _, _| {
+                anchors.borrow_mut().insert(key, bounds);
+            },
+            |_, (), _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
+    /// 按钮 `key` 弹出的右键菜单开在哪：按钮左下角往下让出一点；还没画过这个按钮时在鼠标那里。
+    pub fn below(&self, key: &str, window: &Window) -> Point<Pixels> {
+        match self.0.borrow().get(key) {
+            Some(bounds) => bounds.bottom_left() + point(px(0.), px(DROPDOWN_GAP)),
+            None => window.mouse_position(),
+        }
+    }
+}
 
 /// 菜单离窗口边缘至少留这么宽。
 const MENU_MARGIN: f32 = 8.;
