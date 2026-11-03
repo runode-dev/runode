@@ -349,6 +349,7 @@ tasks:
 about:
   detail: "版本 %{version}（%{revision}）\n%{url}"
   ok: 好
+  open_site: 在 GitHub 上查看
 tooltip:
   more: 更多
   show_sidebar: 显示侧栏

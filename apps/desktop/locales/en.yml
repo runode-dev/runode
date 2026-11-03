@@ -349,6 +349,7 @@ tasks:
 about:
   detail: "Version %{version} (%{revision})\n%{url}"
   ok: OK
+  open_site: View on GitHub
 tooltip:
   more: More
   show_sidebar: Show Sidebar

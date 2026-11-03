@@ -71,15 +71,24 @@ pub fn show(_: &mut gpui::App) {
 #[cfg(not(target_os = "macos"))]
 pub fn install_icon() {}
 
-/// 在最前面的窗口上弹框写出版本号和括号里的提交号（`RUNODE_REVISION`）。
+/// 在最前面的窗口上弹框写出版本号和括号里的提交号（`RUNODE_REVISION`），另有一个按钮打开项目主页：
+/// 框里的文字点不了。
 #[cfg(not(target_os = "macos"))]
 pub fn show(cx: &mut gpui::App) {
+    const URL: &str = "https://github.com/runode-dev/runode";
     let detail = rust_i18n::t!(
         "about.detail",
         version = env!("CARGO_PKG_VERSION"),
         revision = env!("RUNODE_REVISION"),
-        url = "https://github.com/runode-dev/runode"
+        url = URL
     );
-    let ok = rust_i18n::t!("about.ok");
-    crate::alerts::prompt(gpui::PromptLevel::Info, "Runode", &detail, &[gpui::PromptButton::cancel(ok)], cx, |_, _| {});
+    let answers = [
+        gpui::PromptButton::cancel(rust_i18n::t!("about.ok")),
+        gpui::PromptButton::new(rust_i18n::t!("about.open_site")),
+    ];
+    crate::alerts::prompt(gpui::PromptLevel::Info, "Runode", &detail, &answers, cx, |answer, cx| {
+        if answer == 1 {
+            cx.open_url(URL);
+        }
+    });
 }
