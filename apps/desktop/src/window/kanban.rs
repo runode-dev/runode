@@ -140,11 +140,11 @@ impl WindowView {
         board.update(cx, |board, cx| board.close_page(window, cx))
     }
 
-    /// 看板开着，显示的是定时页（`schedules`）或任务页；只为新建任务开着时都不算。
+    /// 看板开着，显示的是定时页（`schedules`）或任务页；开着新建任务那一页时都不算。
     fn showing_todo_page(&self, schedules: bool, cx: &App) -> bool {
         self.kanban_page().is_some_and(|board| {
             let board = board.view.read(cx);
-            !board.creating() && board.showing_schedules() == schedules
+            !board.drafting(cx) && board.showing_schedules() == schedules
         })
     }
 
@@ -248,10 +248,10 @@ impl WindowView {
         .detach();
     }
 
-    /// 侧栏顶上的新建任务入口，只为新建任务开着那一页时高亮。
+    /// 侧栏顶上的新建任务入口，开着新建任务那一页时高亮。
     pub(super) fn render_new_todo_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("kanban.new_todo").into_owned();
-        let active = self.kanban_page().is_some_and(|board| board.view.read(cx).creating());
+        let active = self.kanban_page().is_some_and(|board| board.view.read(cx).drafting(cx));
         super::mobile_page::page_entry("new-todo-entry", PLUS_ICON, label.clone(), active, cx, |this, window, cx| {
             this.new_todo(&NewTodo, window, cx);
         })
