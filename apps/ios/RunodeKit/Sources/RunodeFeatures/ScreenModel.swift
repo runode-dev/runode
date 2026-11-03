@@ -15,6 +15,10 @@ public final class ScreenModel {
         case connecting
         case live
         case failed(String)
+
+        var isFailed: Bool {
+            if case .failed = self { true } else { false }
+        }
     }
 
     /// 画面最长的一边最多这么多像素：再大手机屏幕也显示不出来，只多占带宽。
@@ -105,7 +109,8 @@ public final class ScreenModel {
             }
             // `retry` 已经开了新的一次：这次的结果不算数，别把新的状态冲掉。
             guard let self, self.attempt == attempt else { return }
-            if let failure { phase = .failed(failure) }
+            // 电脑说了为什么停（`stopped`）以后紧接着断开连接，断开的错误不盖掉它说的原因。
+            if let failure, !self.phase.isFailed { phase = .failed(failure) }
             connection = nil
             task = nil
             forgetLock()
