@@ -141,6 +141,12 @@ impl MenuItem {
     }
 
     /// 鼠标停在这一行上时显示 `text`。
+    /// 换掉跟在后面的快捷键，`None` 时不写。
+    pub fn with_shortcut(mut self, shortcut: Option<SharedString>) -> Self {
+        self.shortcut = shortcut;
+        self
+    }
+
     pub fn with_tooltip(mut self, text: impl Into<SharedString>) -> Self {
         self.tooltip = Some(text.into());
         self

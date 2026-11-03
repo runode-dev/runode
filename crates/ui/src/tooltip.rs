@@ -3,13 +3,23 @@
 
 use super::{font, font_size::FontSize};
 use crate::theme::ActiveTheme as _;
-use gpui::{Action, AnyView, App, Context, IntoElement, Render, Role, SharedString, Window, div, prelude::*, px};
+use gpui::{
+    Action, AnyView, App, Context, FocusHandle, IntoElement, Render, Role, SharedString, Window, div, prelude::*, px,
+};
 
 /// 说明再长也不比这宽，多了折行。
 const TOOLTIP_MAX_WIDTH: f32 = 420.;
 /// 代码样的长说明（`code_tooltip`）最宽、最高这么多，再高的截掉：悬停提示里滚动不了。
 const CODE_TOOLTIP_MAX_WIDTH: f32 = 520.;
 const CODE_TOOLTIP_MAX_HEIGHT: f32 = 420.;
+
+/// `focus` 有焦点时按下就派发 `action` 的快捷键：同一个动作在不同地方绑的键不一样时（比如终端里外的
+/// 粘贴），菜单要写的是派发给 `focus` 的那一个。
+pub fn shortcut_text_in(action: &dyn Action, focus: &FocusHandle, window: &Window) -> Option<SharedString> {
+    window
+        .highest_precedence_binding_for_action_in(action, focus)
+        .map(|binding| SharedString::from(crate::keys::text(binding.keystrokes())))
+}
 
 /// `action` 在键位表里的快捷键。后加的绑定优先，取最后一个，快捷键改了也跟着变。
 pub fn shortcut_text(action: &dyn Action, cx: &App) -> Option<SharedString> {

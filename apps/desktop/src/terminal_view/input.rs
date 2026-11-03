@@ -177,6 +177,11 @@ impl TerminalView {
             }
             return;
         }
+        // 程序没要鼠标时右键弹菜单；要了的话按住 Shift 右键。
+        if event.button == MouseButton::Right {
+            self.open_terminal_menu(event.position, window, cx);
+            return;
+        }
         if HAS_PRIMARY && event.button == MouseButton::Middle {
             self.paste_selection(&PasteSelection, window, cx);
             return;

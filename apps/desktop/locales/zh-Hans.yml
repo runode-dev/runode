@@ -1506,3 +1506,8 @@ host_error:
   timeout: 终端宿主没有及时回话
   lost: 和终端宿主的连接断了
   not_connected: 没连上终端宿主
+terminal_menu:
+  copy:
+    macos: 拷贝
+    windows: 复制
+    linux: 复制

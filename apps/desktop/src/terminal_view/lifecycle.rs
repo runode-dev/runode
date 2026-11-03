@@ -1065,6 +1065,7 @@ impl TerminalView {
             start_pending: false,
             pending_command: None,
             search_field: None,
+            menu: None,
             _reader: Task::ready(()),
             agent_changed_at: Instant::now(),
             _hold_timeout: None,

@@ -8,6 +8,7 @@
 //! 以及尺寸归别的前端管时 VT 的哪一块画进视图（`crop`）。
 
 mod actions;
+mod context_menu;
 mod crop;
 mod cursor_blink;
 mod dictation;
@@ -41,7 +42,13 @@ use runode_types::{
 use crate::ui::a11y::StaticText;
 use crate::{
     host_client::{self, LinkEvent, hosts::HostId},
-    ui::{a11y::Press, font_size::FontSize, hsla, input::InputState},
+    ui::{
+        a11y::Press,
+        font_size::FontSize,
+        hsla,
+        input::InputState,
+        menu::{Menu, MenuHost as _},
+    },
 };
 use crop::Crop;
 use element::TerminalElement;
@@ -223,6 +230,8 @@ pub struct TerminalView {
     pending_command: Option<String>,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
     search_field: Option<(Entity<InputState>, Subscription)>,
+    /// 开着的右键菜单。
+    menu: Option<Menu>,
     /// 收宿主发来的输出和状态的任务，见 `read_events`。
     _reader: Task<()>,
     /// 前台 agent 上次换了种类或状态的时刻，agent 列表按它排同一状态里的先后。
@@ -339,6 +348,8 @@ impl Render for TerminalView {
         let size_owner = self.render_size_owner(foreground, background, cx);
         let link_target = self.render_link_target(foreground, background);
         let dictation = self.render_dictation(foreground, background);
+        self.focus_menu(window, cx);
+        let menu = self.render_context_menu(window, cx);
         div()
             .track_focus(&self.pane_focus)
             .relative()
@@ -349,6 +360,7 @@ impl Render for TerminalView {
             .children(link_target)
             .children(dictation)
             .children(lost)
+            .children(menu)
     }
 }
 

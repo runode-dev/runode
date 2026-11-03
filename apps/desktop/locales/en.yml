@@ -1432,3 +1432,8 @@ host_error:
   timeout: The terminal host did not answer in time
   lost: Lost the connection to the terminal host
   not_connected: Not connected to the terminal host
+terminal_menu:
+  copy:
+    macos: Copy
+    windows: Copy
+    linux: Copy
