@@ -47,9 +47,6 @@ fn error_text(err: &OpError, name: &str) -> String {
         OpError::Exists => rust_i18n::t!("files.exists", name = name).into_owned(),
         OpError::IntoItself => rust_i18n::t!("files.into_itself", name = name).into_owned(),
         OpError::NewlineInName => rust_i18n::t!("files.newline_in_name").into_owned(),
-        OpError::Io(err) if err.kind() == std::io::ErrorKind::Unsupported => {
-            crate::i18n::tr(&crate::i18n::os_key("files.unsupported"))
-        }
         OpError::Io(err) => err.to_string(),
     }
 }
@@ -59,6 +56,11 @@ impl FileTree {
     fn host_of(&self, ws: Option<WorkspaceId>) -> Option<String> {
         let state = ws.and_then(|ws| self.workspaces.get(&ws));
         state.map_or(self.input.project.name(), |state| state.project.name()).map(str::to_owned)
+    }
+
+    /// `key` 下按当前 workspace 的文件所在的那台机器的系统写的那一条（`i18n::os_key`）。
+    pub(super) fn project_os_key(&self, key: &str, cx: &gpui::App) -> String {
+        crate::i18n::os_key_on(key, self.project().system(cx))
     }
 
     /// 当前 workspace 的文件在哪台机器上。按 `Input` 取：还没读到目录时 `state` 是空的，那里记着的是本机。
@@ -361,24 +363,18 @@ impl FileTree {
         };
         let name = base_name(&path);
         let project = self.project();
-        // SSH 主机上没有废纸篓，问的是要不要永久删除。
-        let (title, detail, confirm) = if project.is_remote() {
-            let detail = if is_dir { "files.remove_dir_detail" } else { "files.remove_detail" };
-            (rust_i18n::t!("files.remove_title", name = name), rust_i18n::t!(detail), rust_i18n::t!("files.remove"))
-        } else {
-            let detail = if is_dir { "files.delete_dir_detail" } else { "files.delete_detail" };
-            (
-                rust_i18n::t!(&crate::i18n::os_key("files.delete_title"), name = name),
-                crate::i18n::tr(&crate::i18n::os_key(detail)).into(),
-                crate::i18n::tr(&crate::i18n::os_key("files.delete_confirm")).into(),
-            )
-        };
+        let detail = if is_dir { "files.delete_dir_detail" } else { "files.delete_detail" };
+        let title = rust_i18n::t!(&self.project_os_key("files.delete_title", cx), name = name);
+        let detail = crate::i18n::tr(&self.project_os_key(detail, cx));
+        let confirm = crate::i18n::tr(&self.project_os_key("files.delete_confirm", cx));
+        // 找不到回收站时的提示也按文件所在的那台机器说。
+        let unsupported = crate::i18n::tr(&self.project_os_key("files.unsupported", cx));
         let answer = crate::prompt::show(
             window,
             PromptLevel::Warning,
             &title,
             Some(&detail),
-            &[PromptButton::new(&*confirm), PromptButton::cancel(rust_i18n::t!("files.cancel"))],
+            &[PromptButton::new(&confirm), PromptButton::cancel(rust_i18n::t!("files.cancel"))],
             cx,
         );
         // 完成时可能已经切到了别的 workspace，选中和定位的是发起的那个 workspace 的树（预览和别的树都跟着改）。
@@ -389,11 +385,14 @@ impl FileTree {
             }
             let result = cx.background_spawn({
                 let path = path.clone();
-                async move { project.delete(&path) }
+                async move { project.trash(&path) }
             });
             let result = result.await;
             this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => this.after_delete(ws, &path, window, cx),
+                Err(OpError::Io(err)) if err.kind() == std::io::ErrorKind::Unsupported => {
+                    this.show_file_error("files.failed_delete", unsupported, window, cx)
+                }
                 Err(err) => this.show_file_error("files.failed_delete", error_text(&err, &name), window, cx),
             })
             .ok();

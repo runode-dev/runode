@@ -66,6 +66,10 @@ impl Client {
         &self.name
     }
 
+    pub(crate) fn host(&self) -> &HostId {
+        &self.host
+    }
+
     /// 报错时怎么称呼这台主机：配对的电脑用它报的主机名，SSH 主机用连接目标。
     fn label(&self) -> String {
         match &self.host {

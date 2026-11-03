@@ -54,13 +54,12 @@ pub fn tr(key: &str) -> String {
 
 /// `key` 下分系统写的那一条（`<key>.macos`、`.windows`、`.linux`）：文件管理器和回收站各系统叫法不同。
 pub fn os_key(key: &str) -> String {
-    let os = if cfg!(target_os = "macos") {
-        "macos"
-    } else if cfg!(windows) {
-        "windows"
-    } else {
-        "linux"
-    };
+    os_key_on(key, Some(std::env::consts::OS))
+}
+
+/// `os_key`，按系统 `os`（`std::env::consts::OS` 的写法）取；别的系统和不知道的取 `.linux` 那条。
+pub fn os_key_on(key: &str, os: Option<&str>) -> String {
+    let os = os.filter(|os| matches!(*os, "macos" | "windows")).unwrap_or("linux");
     format!("{key}.{os}")
 }
 

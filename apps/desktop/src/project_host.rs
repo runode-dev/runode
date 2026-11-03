@@ -249,6 +249,14 @@ impl ProjectHost {
         }
     }
 
+    /// 项目所在的机器的系统，`std::env::consts::OS` 的写法；远端的是它上次连上时报的，没连上过时为空。
+    pub(crate) fn system<'a>(&self, cx: &'a gpui::App) -> Option<&'a str> {
+        match self {
+            Self::Local => Some(std::env::consts::OS),
+            Self::Remote(client) => crate::remote_hosts::system(client.host(), cx),
+        }
+    }
+
     /// 这台机器上的仓库 `repo`。
     pub(crate) fn repo(&self, repo: runode_git::Repo) -> ProjectRepo {
         ProjectRepo::new(self.clone(), repo)

@@ -1334,10 +1334,6 @@ files:
     macos: "丟到垃圾桶"
     windows: "移到資源回收筒"
     linux: "丟到垃圾桶"
-  remove: 刪除
-  remove_title: 永久刪除「%{name}」？
-  remove_detail: SSH 主機上的檔案不會進資源回收筒，刪除後無法復原。
-  remove_dir_detail: 裡面的所有內容會一起刪掉。SSH 主機上的檔案不會進資源回收筒，刪除後無法復原。
   move_title: 把「%{name}」移到「%{dir}」裡？
   move_confirm: 移動
   cancel: 取消

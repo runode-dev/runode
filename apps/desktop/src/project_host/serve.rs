@@ -42,8 +42,16 @@ struct Caches {
     untracked: HashMap<PathBuf, UntrackedCache>,
     git: HashMap<PathBuf, Option<Repos>>,
     watches: HashMap<u64, Watched>,
+    places: Places,
+}
+
+/// 项目服务在这台机器上用的目录。
+#[derive(Default)]
+pub(super) struct Places {
     /// 放上传的目录，没有 home 目录时为空。
-    uploads: Option<PathBuf>,
+    pub uploads: Option<PathBuf>,
+    /// 移到回收站时用的 home 目录回收站（`Dirs::trash_dir`）。
+    pub home_trash: Option<PathBuf>,
 }
 
 /// 攒着还没交给桌面的改动，来了改动时叫醒等着的那条 `Call::Watch`。
@@ -67,20 +75,17 @@ pub(crate) fn serve_on(input: impl Read, output: impl Write + Send + 'static) ->
 }
 
 /// 从 `input` 一条条读请求，回话写进 `output`；`input` 读完（桌面断开）时返回退出码。传来的文件放在 home
-/// 目录下的 `UPLOADS_DIR`。
+/// 目录下的 `UPLOADS_DIR`，移到回收站用这台机器的 `Dirs::trash_dir`。
 pub(super) fn serve(input: impl BufRead, output: impl Write + Send + 'static) -> i32 {
-    let uploads = runode_paths::Dirs::from_env().home.map(|home| home.join(runode_ssh::bootstrap::UPLOADS_DIR));
-    serve_with(input, output, uploads)
+    let dirs = runode_paths::Dirs::from_env();
+    let uploads = dirs.home.as_ref().map(|home| home.join(runode_ssh::bootstrap::UPLOADS_DIR));
+    serve_with(input, output, Places { uploads, home_trash: dirs.trash_dir() })
 }
 
-/// `serve`，传来的文件放在 `uploads` 下。
-pub(super) fn serve_with(
-    mut input: impl BufRead,
-    output: impl Write + Send + 'static,
-    uploads: Option<PathBuf>,
-) -> i32 {
+/// `serve`，用的目录换成 `places`。
+pub(super) fn serve_with(mut input: impl BufRead, output: impl Write + Send + 'static, places: Places) -> i32 {
     let output = Arc::new(Mutex::new(output));
-    let caches = Shared::new(Mutex::new(Caches { uploads, ..Caches::default() }));
+    let caches = Shared::new(Mutex::new(Caches { places, ..Caches::default() }));
     // 在办的请求各自的停止标记，按编号记。
     let running = Arc::new(Mutex::new(HashMap::<u64, Arc<AtomicBool>>::new()));
     loop {
@@ -171,7 +176,10 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
             let git = lock().git.get(&root).cloned().flatten();
             (Reply::Listed(crate::file_tree::list_dirs(dirs, git.as_ref())), Vec::new())
         }
-        Call::Edit(op) => (Reply::Edited(op.run()), Vec::new()),
+        Call::Edit(op) => {
+            let home_trash = lock().places.home_trash.clone();
+            (Reply::Edited(op.run(home_trash.as_deref())), Vec::new())
+        }
         Call::ListFiles { root } => {
             let files = runode_git::list_files(&root).unwrap_or_else(|| runode_files::walk_files(&root));
             let files = files.into_iter().filter(|rel| root.join(rel).symlink_metadata().is_ok()).collect();
@@ -197,7 +205,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
             Err(err) => (Reply::Failed(err.to_string()), Vec::new()),
         },
         Call::Upload(op) => {
-            let uploads = lock().uploads.clone();
+            let uploads = lock().places.uploads.clone();
             match op.run(uploads.as_deref(), &content) {
                 Ok(path) => (Reply::Upload(path), Vec::new()),
                 Err(err) => (Reply::Failed(err.to_string()), Vec::new()),
@@ -338,10 +346,8 @@ mod tests {
             panic!("写回没交回版本戳")
         };
         assert_eq!(fs::read(&file).unwrap(), b"hello");
-        let stamped = handle(Call::Stamp { path: file.clone() }, Vec::new(), &caches, &GO);
+        let stamped = handle(Call::Stamp { path: file }, Vec::new(), &caches, &GO);
         assert!(matches!(stamped, (Reply::Stamp(Some(stamp)), _) if stamp == written));
-        let removed = handle(Call::Edit(FileOp::Remove { path: dir.join("a") }), Vec::new(), &caches, &GO);
-        assert!(matches!(removed, (Reply::Edited(Ok(None)), _)) && !file.exists());
         fs::remove_dir_all(&dir).ok();
     }
 

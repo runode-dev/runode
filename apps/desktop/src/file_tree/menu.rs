@@ -51,11 +51,7 @@ impl FileTree {
             items.extend([
                 None,
                 item("files.rename", Box::new(RenameFile)),
-                if self.remote() {
-                    item("files.remove", Box::new(DeleteFile))
-                } else {
-                    item(&crate::i18n::os_key("files.delete"), Box::new(DeleteFile))
-                },
+                item(&self.project_os_key("files.delete", cx), Box::new(DeleteFile)),
             ]);
         }
         let target = self.focus.clone();

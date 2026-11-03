@@ -1334,10 +1334,6 @@ files:
     macos: "Move to Trash"
     windows: "Move to Recycle Bin"
     linux: "Move to Trash"
-  remove: Delete
-  remove_title: "Delete “%{name}” permanently?"
-  remove_detail: Files on SSH hosts don't go to the Trash, so this can't be undone.
-  remove_dir_detail: Everything inside is deleted too. Files on SSH hosts don't go to the Trash, so this can't be undone.
   move_title: "Move “%{name}” into “%{dir}”?"
   move_confirm: Move
   cancel: Cancel

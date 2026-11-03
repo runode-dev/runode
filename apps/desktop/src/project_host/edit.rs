@@ -18,7 +18,8 @@ use super::{
 /// 远端改文件最多等这么久：复制、删掉大目录要一阵。
 const EDIT_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// 远端要做的一个改文件的操作，字段是 `runode_files::ops` 同名函数的参数。
+/// 远端要做的一个改文件的操作，字段是 `runode_files::ops` 同名函数的参数；`Trash` 不带 `home_trash`，用做的
+/// 那台机器自己的。
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum FileOp {
     Create { path: PathBuf, is_dir: bool },
@@ -26,14 +27,14 @@ pub(super) enum FileOp {
     MoveInto { src: PathBuf, dir: PathBuf },
     CopyInto { src: PathBuf, dir: PathBuf },
     AddToGitignore { root: PathBuf, rel: PathBuf, is_dir: bool },
-    Remove { path: PathBuf },
+    Trash { path: PathBuf },
 }
 
 impl FileOp {
     /// 对操作里的每个路径调一次 `f`。
     pub(super) fn for_each_path(&mut self, f: &mut dyn FnMut(&mut PathBuf)) {
         match self {
-            Self::Create { path, .. } | Self::Remove { path } => f(path),
+            Self::Create { path, .. } | Self::Trash { path } => f(path),
             Self::Rename { from: a, to: b }
             | Self::MoveInto { src: a, dir: b }
             | Self::CopyInto { src: a, dir: b }
@@ -80,15 +81,15 @@ impl From<OpFailure> for OpError {
 }
 
 impl FileOp {
-    /// 在远端做；挪进、复制进目录的交回落到了哪里。
-    pub(super) fn run(self) -> Result<Option<PathBuf>, OpFailure> {
+    /// 在远端做，`home_trash` 是那台机器的 `Dirs::trash_dir`；挪进、复制进目录的交回落到了哪里。
+    pub(super) fn run(self, home_trash: Option<&Path>) -> Result<Option<PathBuf>, OpFailure> {
         let done = match self {
             Self::Create { path, is_dir } => ops::create(&path, is_dir).map(|()| None),
             Self::Rename { from, to } => ops::rename(&from, &to).map(|()| None),
             Self::MoveInto { src, dir } => ops::move_into(&src, &dir).map(Some),
             Self::CopyInto { src, dir } => ops::copy_into(&src, &dir).map(Some),
             Self::AddToGitignore { root, rel, is_dir } => ops::add_to_gitignore(&root, &rel, is_dir).map(|()| None),
-            Self::Remove { path } => ops::remove(&path).map(|()| None),
+            Self::Trash { path } => ops::trash(&path, home_trash).map(|()| None),
         };
         done.map_err(OpFailure::from)
     }
@@ -137,9 +138,9 @@ impl ProjectHost {
         self.edit(op, || ops::add_to_gitignore(root, rel, is_dir), drop)
     }
 
-    /// 本机的移到废纸篓；远端的没有废纸篓，直接删掉，调用方先问过要不要永久删除。
-    pub(crate) fn delete(&self, path: &Path) -> Result<(), OpError> {
-        let home_trash = runode_paths::Dirs::from_env().trash_dir();
-        self.edit(|| FileOp::Remove { path: path.to_path_buf() }, || ops::trash(path, home_trash.as_deref()), drop)
+    /// 在项目所在的机器上移到废纸篓（回收站），用的是那台机器的 home 目录回收站。
+    pub(crate) fn trash(&self, path: &Path) -> Result<(), OpError> {
+        let local = || ops::trash(path, runode_paths::Dirs::from_env().trash_dir().as_deref());
+        self.edit(|| FileOp::Trash { path: path.to_path_buf() }, local, drop)
     }
 }

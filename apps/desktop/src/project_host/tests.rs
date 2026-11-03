@@ -16,18 +16,18 @@ use super::{ProjectHost, client::Client, serve};
 
 /// 同一个进程里的项目服务，桌面这头经管道和它说话。
 pub(super) fn remote() -> ProjectHost {
-    serving(None)
+    serving(serve::Places::default())
 }
 
 /// `remote`，传来的文件放在 `uploads` 下。
 pub(super) fn remote_uploading_to(uploads: PathBuf) -> ProjectHost {
-    serving(Some(uploads))
+    serving(serve::Places { uploads: Some(uploads), ..serve::Places::default() })
 }
 
-fn serving(uploads: Option<PathBuf>) -> ProjectHost {
+fn serving(places: serve::Places) -> ProjectHost {
     let (requests, to_service) = std::io::pipe().unwrap();
     let (from_service, responses) = std::io::pipe().unwrap();
-    thread::spawn(move || serve::serve_with(BufReader::new(requests), responses, uploads));
+    thread::spawn(move || serve::serve_with(BufReader::new(requests), responses, places));
     ProjectHost::Remote(Client::over("contract", to_service, from_service))
 }
 
@@ -165,6 +165,22 @@ fn a_non_utf8_name_does_not_break_the_remote_scan() {
     let git = scan.git.unwrap();
     assert!(git.main.statuses.contains_key(Path::new("a.txt")));
     assert!(!git.main.statuses.keys().any(|path| path.to_str().is_none()));
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// 远端的移到回收站进的是那台机器的 home 目录回收站：文件进了它的 `files`，`info` 里记着原来的位置。
+#[cfg(target_os = "linux")]
+#[test]
+fn remote_trash_uses_that_machines_trash() {
+    let dir = fixture("trash");
+    let home_trash = dir.join(".trash");
+    let remote = serving(serve::Places { home_trash: Some(home_trash.clone()), ..serve::Places::default() });
+    remote.trash(&dir.join("src")).unwrap();
+    assert!(!dir.join("src").exists());
+    assert_eq!(fs::read_to_string(home_trash.join("files/src/lib.rs")).unwrap(), "fn needle() {}\n");
+    let info = fs::read_to_string(home_trash.join("info/src.trashinfo")).unwrap();
+    assert!(info.lines().any(|line| line == format!("Path={}", dir.join("src").display())), "{info}");
+    assert!(matches!(remote.trash(&dir.join("src")), Err(runode_files::ops::OpError::Io(_))));
     fs::remove_dir_all(&dir).ok();
 }
 

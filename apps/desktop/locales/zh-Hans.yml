@@ -1334,10 +1334,6 @@ files:
     macos: "移到废纸篓"
     windows: "移到回收站"
     linux: "移到回收站"
-  remove: 删除
-  remove_title: 永久删除「%{name}」？
-  remove_detail: SSH 主机上的文件不进回收站，删了不能恢复。
-  remove_dir_detail: 里面的所有内容会一起删掉。SSH 主机上的文件不进回收站，删了不能恢复。
   move_title: 把「%{name}」移到「%{dir}」里？
   move_confirm: 移动
   cancel: 取消
