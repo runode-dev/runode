@@ -22,7 +22,7 @@ objc2-foundation = { workspace = true, features = ["std", "NSError", "NSFileMana
 
 [target.'cfg(windows)'.dependencies]
 # 移到回收站用 SHFileOperationW。
-windows-sys = { workspace = true, features = ["Win32_UI_Shell"] }
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem", "Win32_System_WindowsProgramming", "Win32_UI_Shell"] }
 
 [features]
 # 桌面经 ssh 在远端读项目时，两边按 JSON 收发这些类型。
