@@ -35,7 +35,11 @@ pub(crate) fn subcommands(command: &str) -> &'static [(&'static str, &'static st
             ("rm", "Remove a task"),
         ],
         "schedule" => &[("add", "Add a schedule"), ("list", "List the schedules"), ("rm", "Remove a schedule")],
-        "remote" => &[("pair", "Pair a phone"), ("devices", "List the paired phones"), ("revoke", "Unpair a phone")],
+        "remote" => &[
+            ("pair", "Pair a phone or another computer"),
+            ("devices", "List the paired devices"),
+            ("revoke", "Unpair a device"),
+        ],
         "service" => &[
             ("install", "Install the login service"),
             ("uninstall", "Remove the login service"),
@@ -54,7 +58,7 @@ pub(crate) fn service_kinds() -> Vec<(&'static str, &'static str)> {
         .map(|kind| {
             let doc = match kind {
                 Kind::Host => "The terminal host without a window (default)",
-                Kind::App => "The Runode app (macOS only)",
+                Kind::App => "The Runode app (macOS and Windows)",
             };
             (kind.name(), doc)
         })
