@@ -1051,6 +1051,7 @@ kanban:
   remove_todo: 刪除任務
   remove_title: "刪除「%{title}」？"
   remove_detail: 它的終端機還會在背景繼續跑。
+  remove_unfinished_detail: "它還沒做完，刪了就不能再接著 agent 上次的對話。"
   remove: 刪除
   cancel: 取消
   save: 儲存

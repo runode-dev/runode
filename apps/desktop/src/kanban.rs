@@ -398,20 +398,27 @@ impl Kanban {
         );
     }
 
-    /// 删掉任务；它的会话还在时先问一句（会话留着，在后台照常跑）。
+    /// 删掉任务；它的会话还在（会话留着，在后台照常跑）或开始了还没做完时先问一句。
     fn remove_todo(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let data = store::data(cx);
         let Some(todo) = data.todos.iter().chain(&self.history.todos).find(|todo| todo.id == id) else { return };
         let alive = todo.session.is_some_and(|session| data.sessions.get(&session).is_some_and(|info| !info.exited));
-        if !alive {
+        // 开始了还没做完的删了就接不上 agent 上次的对话，先问；没开始的和做完的直接删。
+        let unfinished = todo.started.is_some() && todo.done_at.is_none();
+        if !alive && !unfinished {
             Self::send_todos(vec![Box::new(move |req| ClientMsg::RemoveTodo { req, id })], cx);
             return;
         }
+        let detail = if alive {
+            rust_i18n::t!("kanban.remove_detail")
+        } else {
+            rust_i18n::t!("kanban.remove_unfinished_detail")
+        };
         let answer = crate::prompt::show(
             window,
             gpui::PromptLevel::Warning,
             &rust_i18n::t!("kanban.remove_title", title = todo.spec.title.as_str()),
-            Some(&rust_i18n::t!("kanban.remove_detail")),
+            Some(&detail),
             &[
                 gpui::PromptButton::new(rust_i18n::t!("kanban.remove")),
                 gpui::PromptButton::cancel(rust_i18n::t!("kanban.cancel")),

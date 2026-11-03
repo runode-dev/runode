@@ -1051,6 +1051,7 @@ kanban:
   remove_todo: "Delete Task"
   remove_title: "Delete “%{title}”?"
   remove_detail: Its terminal keeps running in the background.
+  remove_unfinished_detail: "It isn't finished yet. Once deleted, you can't pick up the agent's last conversation."
   remove: Delete
   cancel: Cancel
   save: Save
