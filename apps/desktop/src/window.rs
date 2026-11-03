@@ -16,6 +16,7 @@ mod askpass;
 mod background;
 mod clipboard;
 mod files;
+mod float_frame;
 mod git_panel;
 mod github_actions;
 mod hosts;

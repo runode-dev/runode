@@ -17,12 +17,13 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, Context, CursorStyle, Div, Entity, EntityId, Focusable as _, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ResizeEdge, Size, StyleRefinement, Subscription, Task,
-    Window, div, point, prelude::*, px, size,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ResizeEdge, Size, StyleRefinement, Subscription, Task, Window, div,
+    point, prelude::*, px, size,
 };
 
 use super::{
     ToggleRemoteDesktop, WindowView,
+    float_frame::{self, clamp_frame, resize_frame},
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
 };
 use crate::host_client::hosts::HostId;
@@ -33,10 +34,6 @@ use snap::{ShownSnap, Snap, SnapTarget};
 
 /// 浮动的远程桌面最小这么大。
 const MIN_FLOAT: Size<Pixels> = Size { width: px(360.), height: px(240.) };
-/// 浮动的远程桌面四角拖着改大小的那块的边长。
-const RESIZE_GRIP: f32 = 14.;
-/// 浮动的远程桌面四边拖着改大小的那条的宽度。
-const RESIZE_EDGE: f32 = 6.;
 /// 再开一块浮动的远程桌面时比上一块往右下错开这么多。
 const CASCADE: f32 = 32.;
 /// 搬进单独的窗口时，原来占满内容区的那块用这个大小。
@@ -144,7 +141,7 @@ impl ScreenViewers {
             Some(top) => Bounds { origin: top.origin + point(px(CASCADE), px(CASCADE)), size: top.size },
             None => self.last_frame.unwrap_or_else(|| default_frame(viewport)),
         };
-        clamp_frame(frame, viewport)
+        clamp_frame(frame, viewport, MIN_FLOAT)
     }
 }
 
@@ -450,7 +447,7 @@ impl WindowView {
         // 排着，挪到别的显示器上交给系统的标题栏。
         let display = window.display(cx);
         let bounds = match &display {
-            Some(display) => clamp_frame(bounds, display.bounds().size),
+            Some(display) => clamp_frame(bounds, display.bounds().size, MIN_FLOAT),
             None => bounds,
         };
         let (view, display_id) = (open.view, display.map(|display| display.id()));
@@ -509,29 +506,13 @@ impl WindowView {
         }
         self.sync_hidden_screens(cx);
         for open in self.screen_viewers.open.iter_mut().filter(|open| open.placement == Placement::Floating) {
-            open.frame = clamp_frame(open.frame, viewport);
+            open.frame = clamp_frame(open.frame, viewport, MIN_FLOAT);
             let (id, frame) = (open.view.entity_id(), open.frame);
-            let grip = |name: &'static str, edge: ResizeEdge, cx: &mut Context<Self>| {
-                div().id((name, id.as_u64() as usize)).absolute().cursor(resize_cursor(edge)).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                        cx.stop_propagation();
-                        this.start_screen_drag(id, event.position, Some(edge), cx);
-                    }),
-                )
-            };
-            let (edge, corner) = (px(RESIZE_EDGE), px(RESIZE_GRIP));
-            // 四角排在四边后面，叠在上面先接住按下。
-            let grips = [
-                grip("screen-float-resize-top", ResizeEdge::Top, cx).top_0().left_0().w_full().h(edge),
-                grip("screen-float-resize-bottom", ResizeEdge::Bottom, cx).bottom_0().left_0().w_full().h(edge),
-                grip("screen-float-resize-left", ResizeEdge::Left, cx).top_0().left_0().h_full().w(edge),
-                grip("screen-float-resize-right", ResizeEdge::Right, cx).top_0().right_0().h_full().w(edge),
-                grip("screen-float-resize-top-left", ResizeEdge::TopLeft, cx).top_0().left_0().size(corner),
-                grip("screen-float-resize-top-right", ResizeEdge::TopRight, cx).top_0().right_0().size(corner),
-                grip("screen-float-resize-bottom-left", ResizeEdge::BottomLeft, cx).bottom_0().left_0().size(corner),
-                grip("screen-float-resize-bottom-right", ResizeEdge::BottomRight, cx).bottom_0().right_0().size(corner),
-            ];
+            let grips = float_frame::resize_grips(
+                id,
+                |this, id, from, edge, cx| this.start_screen_drag(id, from, Some(edge), cx),
+                cx,
+            );
             let screen = div()
                 .id(("screen-float", id.as_u64() as usize))
                 .absolute()
@@ -575,7 +556,7 @@ impl WindowView {
                 .absolute()
                 .size_full()
                 .occlude()
-                .cursor(resize.map_or(CursorStyle::ClosedHand, resize_cursor))
+                .cursor(resize.map_or(CursorStyle::ClosedHand, float_frame::resize_cursor))
                 .children(target)
                 .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                     cx.stop_propagation();
@@ -605,10 +586,10 @@ impl WindowView {
                     drag.target = target.filter(|_| drag.resize.is_none());
                     let viewport = window.viewport_size();
                     let frame = match drag.resize {
-                        Some(edge) => resize_frame(drag.frame, edge, delta, viewport),
+                        Some(edge) => resize_frame(drag.frame, edge, delta, viewport, MIN_FLOAT),
                         None => Bounds { origin: drag.frame.origin + delta, size: drag.frame.size },
                     };
-                    let (id, frame) = (drag.id, clamp_frame(frame, viewport));
+                    let (id, frame) = (drag.id, clamp_frame(frame, viewport, MIN_FLOAT));
                     if let Some(ix) = this.screen_viewers.position(id) {
                         this.screen_viewers.open[ix].frame = frame;
                     }
@@ -671,83 +652,14 @@ fn default_frame(viewport: Size<Pixels>) -> Bounds<Pixels> {
     Bounds { origin: point(px(width - w - 24.), px(height - h - 48.)), size: size(px(w), px(h)) }
 }
 
-/// 拖边或角 `edge` 挪了 `delta` 后浮动的远程桌面在哪：对面的边不动，拖的边不越出窗口，也不缩到比 `MIN_FLOAT` 小。
-fn resize_frame(
-    frame: Bounds<Pixels>,
-    edge: ResizeEdge,
-    delta: Point<Pixels>,
-    viewport: Size<Pixels>,
-) -> Bounds<Pixels> {
-    use ResizeEdge::*;
-    let (mut left, mut top) = (f32::from(frame.origin.x), f32::from(frame.origin.y));
-    let (mut right, mut bottom) = (left + f32::from(frame.size.width), top + f32::from(frame.size.height));
-    let (min_w, min_h) = (f32::from(MIN_FLOAT.width), f32::from(MIN_FLOAT.height));
-    let (dx, dy) = (f32::from(delta.x), f32::from(delta.y));
-    if matches!(edge, Left | TopLeft | BottomLeft) {
-        left = (left + dx).min(right - min_w).max(0.);
-    }
-    if matches!(edge, Right | TopRight | BottomRight) {
-        right = (right + dx).max(left + min_w).min(f32::from(viewport.width));
-    }
-    if matches!(edge, Top | TopLeft | TopRight) {
-        top = (top + dy).min(bottom - min_h).max(0.);
-    }
-    if matches!(edge, Bottom | BottomLeft | BottomRight) {
-        bottom = (bottom + dy).max(top + min_h).min(f32::from(viewport.height));
-    }
-    Bounds { origin: point(px(left), px(top)), size: size(px(right - left), px(bottom - top)) }
-}
-
-fn resize_cursor(edge: ResizeEdge) -> CursorStyle {
-    match edge {
-        ResizeEdge::Left | ResizeEdge::Right => CursorStyle::ResizeLeftRight,
-        ResizeEdge::Top | ResizeEdge::Bottom => CursorStyle::ResizeUpDown,
-        ResizeEdge::TopLeft | ResizeEdge::BottomRight => CursorStyle::ResizeUpLeftDownRight,
-        ResizeEdge::TopRight | ResizeEdge::BottomLeft => CursorStyle::ResizeUpRightDownLeft,
-    }
-}
-
-/// 把浮动的远程桌面限在窗口里：不比窗口大，整块都在窗口里。
-fn clamp_frame(frame: Bounds<Pixels>, viewport: Size<Pixels>) -> Bounds<Pixels> {
-    let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
-    let w = f32::from(frame.size.width).min(vw).max(f32::from(MIN_FLOAT.width).min(vw));
-    let h = f32::from(frame.size.height).min(vh).max(f32::from(MIN_FLOAT.height).min(vh));
-    let x = f32::from(frame.origin.x).clamp(0., (vw - w).max(0.));
-    let y = f32::from(frame.origin.y).clamp(0., (vh - h).max(0.));
-    Bounds { origin: point(px(x), px(y)), size: size(px(w), px(h)) }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn floating_frame_stays_inside_the_window() {
+    fn the_first_floating_frame_fits_the_window() {
         let viewport = size(px(1200.), px(800.));
-        let outside = Bounds { origin: point(px(1100.), px(-50.)), size: size(px(500.), px(300.)) };
-        let frame = clamp_frame(outside, viewport);
-        assert_eq!(frame.origin, point(px(700.), px(0.)));
-        assert_eq!(frame.size, size(px(500.), px(300.)));
-        let huge = Bounds { origin: point(px(0.), px(0.)), size: size(px(5000.), px(5000.)) };
-        assert_eq!(clamp_frame(huge, viewport).size, viewport);
-        let tiny = Bounds { origin: point(px(10.), px(10.)), size: size(px(10.), px(10.)) };
-        assert_eq!(clamp_frame(tiny, viewport).size, MIN_FLOAT);
         let first = default_frame(viewport);
-        assert_eq!(clamp_frame(first, viewport), first);
-    }
-
-    #[test]
-    fn resizing_keeps_the_opposite_edges() {
-        let viewport = size(px(1200.), px(800.));
-        let frame = Bounds { origin: point(px(100.), px(100.)), size: size(px(500.), px(300.)) };
-        let grown = resize_frame(frame, ResizeEdge::TopLeft, point(px(-50.), px(-30.)), viewport);
-        assert_eq!(grown, Bounds { origin: point(px(50.), px(70.)), size: size(px(550.), px(330.)) });
-        let past_window = resize_frame(frame, ResizeEdge::Left, point(px(-500.), px(0.)), viewport);
-        assert_eq!(past_window, Bounds { origin: point(px(0.), px(100.)), size: size(px(600.), px(300.)) });
-        let shrunk = resize_frame(frame, ResizeEdge::Top, point(px(0.), px(500.)), viewport);
-        assert_eq!(shrunk, Bounds { origin: point(px(100.), px(160.)), size: size(px(500.), MIN_FLOAT.height) });
-        let wider = resize_frame(frame, ResizeEdge::Right, point(px(900.), px(0.)), viewport);
-        assert_eq!(wider.origin, frame.origin);
-        assert_eq!(wider.size, size(px(1100.), px(300.)));
+        assert_eq!(clamp_frame(first, viewport, MIN_FLOAT), first);
     }
 }
