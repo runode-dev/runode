@@ -419,7 +419,8 @@ impl Kanban {
             .text_size(FontSize::Small)
             .text_color(muted)
             .child(place_badge(&place))
-            .child(div().min_w_0().truncate().child(place))
+            // 名字至少留这么宽：悬停时右上角多出几个按钮，`~` 这样的短名字照样整个露出来，长的露个开头。
+            .child(div().min_w(scaled(20.)).truncate().child(place))
             .child(div().flex_1())
             .when(self.in_review(todo, data, now), |row| {
                 row.child(Badge::new(rust_i18n::t!("kanban.in_review").into_owned()).variant(BadgeVariant::Secondary))
