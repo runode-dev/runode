@@ -620,6 +620,11 @@ impl WindowView {
         self.git_shown() || self.workspace().project.in_repo != Some(false)
     }
 
+    /// 本机的 git 跑不起来、当前 workspace 在本机：哪个目录都算不在仓库里，Git 标签也留着，点开是先装 git 的说明。
+    fn git_install_hint(&self, cx: &App) -> bool {
+        !self.on_remote() && crate::git_view::git_missing(cx)
+    }
+
     /// 右侧面板左边的分隔线离窗口右边多远：经典样式下是面板的宽度；卡片样式下还要加上卡片到窗口右边的
     /// 间距，分隔线落在终端区和面板两张卡片中间。
     pub(super) fn right_divider_offset(&self, widths: PanelWidths, cards: bool) -> f32 {
@@ -716,7 +721,7 @@ impl WindowView {
             .px(px(6.))
             .gap(px(TOGGLE_GAP))
             .child(tab(SidePanel::Files, cx))
-            .when(self.git_button_visible(), |tabs| tabs.child(tab(SidePanel::Git, cx)))
+            .when(self.git_button_visible() || self.git_install_hint(cx), |tabs| tabs.child(tab(SidePanel::Git, cx)))
             .when(self.github_actions_tab_visible(cx), |tabs| tabs.child(tab(SidePanel::GitHubActions, cx)))
     }
 
