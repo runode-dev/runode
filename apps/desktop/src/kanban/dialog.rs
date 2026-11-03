@@ -868,7 +868,6 @@ impl TodoDialog {
         self.agent.as_ref().is_some_and(|pick| pick.launcher().subagent_arg.is_some())
     }
 
-    /// 能「保存并开始」：是任务，还没开始过也没做完。
     /// 挑着的 agent 问过了、找不到它的命令。
     fn agent_missing(&self) -> bool {
         self.agent.as_ref().is_some_and(|pick| {
@@ -876,6 +875,7 @@ impl TodoDialog {
         })
     }
 
+    /// 能「保存并开始」：是任务，还没开始过也没做完。
     fn startable(&self) -> bool {
         match &self.editing {
             None => !self.schedule,
