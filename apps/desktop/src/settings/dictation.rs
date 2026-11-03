@@ -1,7 +1,7 @@
 //! 语音输入页的模型文件一行：选中的模型下没下、下载进度，以及下载、取消和删除。
 
 use crate::ui::theme::Theme;
-use gpui::{AppContext as _, Context, Div};
+use gpui::{AppContext as _, Context, Div, div, prelude::*};
 
 use super::{
     SettingsView,
@@ -70,8 +70,11 @@ impl SettingsView {
             }
         };
         let error = error.or_else(|| self.errors.get(ERROR_ID).cloned());
+        let title = rust_i18n::t!("settings.dictation.title").into_owned();
+        // 按钮只写「下载」「删除」，套进以「模型文件」命名的一组，读屏才听得出下载、删除的是什么。
+        let button = div().id("dictation-model-files").role(gpui::Role::Group).aria_label(title.clone()).child(button);
         row(
-            rust_i18n::t!("settings.dictation.title").into_owned(),
+            title,
             Some(status.into_owned().into()),
             button,
             None,
