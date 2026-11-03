@@ -106,7 +106,7 @@ fn an_unfinished_run_holds_its_schedule_while_working_or_asking() {
     assert!(holds_schedule(&started(), Some(&blocked), LATER));
     assert!(!holds_schedule(&started(), Some(&idle), LATER));
     assert!(!holds_schedule(&started(), None, LATER));
-    let exited = SessionInfo { exited: true, ..blocked.clone() };
+    let exited = SessionInfo { exited: true, ..blocked };
     assert!(!holds_schedule(&started(), Some(&exited), LATER));
     let other = SessionInfo { id: SessionId(8), ..working };
     assert!(!holds_schedule(&started(), Some(&other), LATER));
