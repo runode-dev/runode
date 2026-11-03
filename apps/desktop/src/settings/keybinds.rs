@@ -33,6 +33,9 @@ const KEY: &str = "keybind";
 /// 一行管数字 1 到 9 的动作：不带参数、绑在 `digit` 上时按几就去第几个。
 const DIGIT_ACTIONS: [&str; 3] = ["goto_tab", "goto_workspace", "new_tab_shell"];
 
+/// 只有 macOS 上有的动作：隐藏应用这几样别的系统没有，不列出来。
+const MACOS_ONLY: [&str; 3] = ["hide", "hide_others", "show_all"];
+
 /// 分组：每组的第一个动作和组名在翻译里的 `settings.keybind.group.<名字>`，组里的动作按 `ACTIONS`
 /// 的顺序排到下一组的第一个为止。
 const GROUPS: &[(&str, &str)] = &[
@@ -236,6 +239,7 @@ impl SettingsView {
         let mut rows: Vec<Row> = keybind::ACTIONS
             .iter()
             .enumerate()
+            .filter(|(_, spec)| cfg!(target_os = "macos") || !MACOS_ONLY.contains(&spec.name))
             .flat_map(|(order, spec)| {
                 base_usages(spec).into_iter().filter_map(move |usage| {
                     let key = row_key(spec, &usage, DIGIT_ACTIONS.contains(&spec.name))?;
