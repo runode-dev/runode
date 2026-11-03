@@ -1,10 +1,10 @@
-//! 看板的数据：卡片在哪一列、拖拽放下时做什么，以及 `When` 的写法。
+//! 看板的数据：卡片在哪一列、拖拽放下时做什么、定时上次开出的任务挡不挡着下一次，以及 `When` 的写法。
 
 use std::path::PathBuf;
 
 use runode_protocol::{
     SessionId, SessionInfo,
-    todo::{Column, DropAction, START_GRACE, Todo, TodoSpec, When, column, drop_action},
+    todo::{Column, DropAction, START_GRACE, Todo, TodoSpec, When, column, drop_action, holds_schedule},
 };
 use runode_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -92,6 +92,24 @@ fn columns_follow_the_task_and_its_session() {
     assert_eq!(column(&started(), Some(&shell), LATER), Column::NeedsYou);
     // 时钟往回调过，开始时间比现在晚：也算刚开始。
     assert_eq!(column(&started(), Some(&shell), STARTED - 100), Column::InProgress);
+}
+
+/// 没开始成、在干活、停在询问上的挡着；干完停下、会话没了或退出了的不挡。
+#[test]
+fn an_unfinished_run_holds_its_schedule_while_working_or_asking() {
+    let working = session(Some(AgentState::Working), false);
+    let blocked = session(Some(AgentState::Blocked), false);
+    let idle = session(Some(AgentState::Idle), false);
+
+    assert!(holds_schedule(&todo(), None, LATER));
+    assert!(holds_schedule(&started(), Some(&working), LATER));
+    assert!(holds_schedule(&started(), Some(&blocked), LATER));
+    assert!(!holds_schedule(&started(), Some(&idle), LATER));
+    assert!(!holds_schedule(&started(), None, LATER));
+    let exited = SessionInfo { exited: true, ..blocked.clone() };
+    assert!(!holds_schedule(&started(), Some(&exited), LATER));
+    let other = SessionInfo { id: SessionId(8), ..working };
+    assert!(!holds_schedule(&started(), Some(&other), LATER));
 }
 
 #[test]

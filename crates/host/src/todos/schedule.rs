@@ -9,9 +9,8 @@ use std::{
     time::Duration,
 };
 
-use runode_protocol::todo::{Column, Schedule, column};
+use runode_protocol::todo::{Schedule, holds_schedule};
 use runode_todo::next_fire;
-use runode_types::agent::AgentState;
 
 use super::{Todos, unix_now};
 use crate::Shared;
@@ -75,19 +74,11 @@ impl Shared {
                 return;
             }
         };
-        // 上次开出的那张没开始成（比如目录没了）时也跳过，免得每到点就多一张开不起来的待办。
         if let Some(todo) = &previous
-            && match todo.session {
-                None => true,
-                Some(session) => match self.session_info(session) {
-                    // 停在权限询问上的看板算「需要你」，可用户一答应它就接着改。
-                    Some(info) => {
-                        column(todo, Some(&info), now) == Column::InProgress
-                            || !info.exited && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Blocked)
-                    }
-                    // 会话还在却没及时回话：看不出它在不在干活，当它在干，免得两个 agent 一起跑。
-                    None => self.registry().sessions.contains_key(&session),
-                },
+            && match todo.session.map(|session| (session, self.session_info(session))) {
+                // 会话还在却没及时回话：看不出它在不在干活，当它在干，免得两个 agent 一起跑。
+                Some((session, None)) => self.registry().sessions.contains_key(&session),
+                found => holds_schedule(todo, found.and_then(|(_, info)| info).as_ref(), now),
             }
         {
             tracing::info!(

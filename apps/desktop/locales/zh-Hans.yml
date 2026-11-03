@@ -1054,6 +1054,7 @@ kanban:
   no_schedules: 还没有定时
   no_next: 不会再跑
   next: "下一次 %{time}"
+  next_held: 上次开出的任务还在干活或在等你回答，到点先跳过
   worktree_on: 独立工作树
   done_window: "完成这一栏只列最近 7 天的任务"
   all_history: 全部记录

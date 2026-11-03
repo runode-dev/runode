@@ -12,7 +12,7 @@ use crate::ui::{
 use gpui::{AnyElement, Axis, Context, Div, FontWeight, Role, Stateful, Window, div, prelude::*, px};
 use runode_protocol::{
     ClientMsg,
-    todo::{Schedule, Todo, column},
+    todo::{Schedule, Todo, column, holds_schedule},
 };
 
 use super::{
@@ -120,6 +120,15 @@ impl Kanban {
             || rust_i18n::t!("kanban.no_next").into_owned(),
             |at| rust_i18n::t!("kanban.next", time = short_time(at, now)).into_owned(),
         );
+        // 宿主到点时看的是没完成的里面最后开出的那张。
+        let held = schedule.next_fire.is_some()
+            && data
+                .todos
+                .iter()
+                .filter(|todo| todo.schedule.as_deref() == Some(schedule.id.as_str()) && todo.done_at.is_none())
+                .max_by_key(|todo| todo.created)
+                .is_some_and(|todo| holds_schedule(todo, todo.session.and_then(|id| data.sessions.get(&id)), now));
+        let next = if held { format!("{next} · {}", rust_i18n::t!("kanban.next_held")) } else { next };
         let place = self.place_name(&schedule.spec.dir);
         let worktree = schedule.spec.worktree.then(|| rust_i18n::t!("kanban.worktree_on").into_owned());
         let details: Vec<String> =

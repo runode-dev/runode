@@ -1054,6 +1054,7 @@ kanban:
   no_schedules: No schedules yet
   no_next: Will not run again
   next: "next %{time}"
+  next_held: skipped while the last task is still working or waiting for you
   worktree_on: own worktree
   done_window: "This column lists only the last 7 days"
   all_history: All history
