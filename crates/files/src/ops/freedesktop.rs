@@ -77,7 +77,9 @@ fn move_into(trash: &Path, path: &Path, recorded: &Path) -> io::Result<()> {
     let content = format!("[Trash Info]\nPath={}\nDeletionDate={}\n", url_escape(recorded), deletion_date());
     for n in 1..10_000 {
         let candidate = numbered(name, n);
-        let info_file = info.join(format!("{}.trashinfo", candidate.to_string_lossy()));
+        let mut info_name = candidate.clone();
+        info_name.push(".trashinfo");
+        let info_file = info.join(info_name);
         let mut file = match fs::OpenOptions::new().write(true).create_new(true).open(&info_file) {
             Ok(file) => file,
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
