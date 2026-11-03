@@ -738,7 +738,7 @@ impl Link {
         };
         match answer {
             Ok(HostMsg::Spawned { id, .. }) => Ok(id),
-            Ok(HostMsg::Error { message, .. }) => Err(anyhow!(message)),
+            Ok(HostMsg::Error { message, reason, .. }) => Err(anyhow!(super::error_text(&message, reason.as_ref()))),
             Ok(other) => Err(anyhow!("unexpected answer from the host: {other:?}")),
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 tracing::warn!("the host did not open a terminal in time");
@@ -956,7 +956,7 @@ impl Link {
             answer = reply.try_recv().map_err(|_| mpsc::RecvTimeoutError::Timeout);
         }
         match answer {
-            Ok(HostMsg::Error { message, .. }) => Err(anyhow!(message)),
+            Ok(HostMsg::Error { message, reason, .. }) => Err(anyhow!(super::error_text(&message, reason.as_ref()))),
             Ok(reply) => Ok(reply),
             Err(mpsc::RecvTimeoutError::Timeout) => Err(anyhow!(rust_i18n::t!("host_error.timeout").into_owned())),
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!(rust_i18n::t!("host_error.lost").into_owned())),

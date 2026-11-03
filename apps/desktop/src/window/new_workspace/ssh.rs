@@ -364,11 +364,7 @@ impl WindowView {
                             browse.error = None;
                             true
                         }
-                        Ok(HostMsg::Error { message, reason, .. }) => {
-                            browse.error = Some(crate::host_client::error_text(&message, reason.as_ref()));
-                            false
-                        }
-                        Err(message) => {
+                        Ok(HostMsg::Error { message, .. }) | Err(message) => {
                             browse.error = Some(message);
                             false
                         }
