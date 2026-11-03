@@ -822,10 +822,13 @@ impl WindowView {
                 .tabs
                 .iter()
                 .flat_map(|tab| tab.panes.values())
-                .map(|(view, _)| {
+                // 只量得到这台电脑上的进程，远端主机上的终端不列，免得一排排 0。
+                .filter_map(|(view, _)| {
                     let view = view.read(cx);
-                    let usage = view.local_pid().map_or(Usage::default(), |pid| procs.tree(pid));
-                    (SharedString::from(view.title().to_owned()), usage)
+                    view.host().is_local().then(|| {
+                        let usage = view.local_pid().map_or(Usage::default(), |pid| procs.tree(pid));
+                        (SharedString::from(view.title().to_owned()), usage)
+                    })
                 })
                 .collect();
             if terminals.is_empty() {
