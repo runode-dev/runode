@@ -475,10 +475,13 @@ impl WindowView {
             None => (PreventSleep::Off, false, Usage::default(), 0, 0),
         };
         let icon = |path: &'static str| svg().flex_none().path(path).size(px(13.)).text_color(fg_h.opacity(0.6));
-        let dot = div().flex_none().size(px(6.)).rounded_full().bg(if effective {
-            hsla(ACTIVE_DOT)
-        } else {
-            fg_h.opacity(0.3)
+        // 点说的是这会儿有没有在防睡眠；关着时它总是灰的，和「关闭」两个字重复，不画。
+        let dot = (sleep != PreventSleep::Off).then(|| {
+            div().flex_none().size(px(6.)).rounded_full().bg(if effective {
+                hsla(ACTIVE_DOT)
+            } else {
+                fg_h.opacity(0.3)
+            })
         });
         // 状态栏上每块报成一个按钮，名字是这一块的标题，上面写的数放进说明：按钮的值辅助工具多半不念。
         let sleep_state =
@@ -490,7 +493,7 @@ impl WindowView {
             .aria_description(format!("{} · {sleep_state}", sleep_label(sleep)))
             .child(icon(COFFEE_ICON))
             .child(sleep_label(sleep))
-            .child(dot);
+            .children(dot);
         // 还没量到内存（刚启动、头一次采样没回来）时写一道横线，不写 0。
         let memory = if total.memory == 0 { "—".to_owned() } else { format_bytes(total.memory) };
         let resources_item = self
