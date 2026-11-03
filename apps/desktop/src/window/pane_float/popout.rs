@@ -69,8 +69,10 @@ pub(super) fn open(
                 true
             });
             let subscriptions = vec![
-                cx.observe_in(&owner_view, window, move |_, owner, window, cx| {
+                cx.observe_in(&owner_view, window, move |this: &mut PaneWindow, owner, window, cx| {
                     if !owner.read(cx).holds_popped(pane) {
+                        let view = this.view.clone();
+                        cx.defer(move |cx| redock(view, pane, cx));
                         window.remove_window();
                     }
                 }),
@@ -113,6 +115,24 @@ pub(super) fn activate(pane: EntityId, cx: &mut App) -> bool {
             })
             .unwrap_or(false)
     })
+}
+
+/// 终端 `pane` 不在单独窗口里了、还在某个主窗口里时，它的焦点和窗口订阅换回那个主窗口。
+fn redock(view: Entity<TerminalView>, pane: EntityId, cx: &mut App) {
+    for handle in cx.windows().into_iter().filter_map(|handle| handle.downcast::<WindowView>()) {
+        let held = handle
+            .update(cx, |this, window, cx| {
+                let held = this.locate(pane).is_some();
+                if held {
+                    view.update(cx, |view, cx| view.attach_window(window, cx));
+                }
+                held
+            })
+            .unwrap_or(false);
+        if held {
+            break;
+        }
+    }
 }
 
 /// 把终端 `pane` 放回主窗口 `owner` 里它的标签。等这一轮派发结束再放：点按钮时 GPUI 正借着这个窗口派发事件。
