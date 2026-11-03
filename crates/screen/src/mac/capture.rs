@@ -363,7 +363,13 @@ fn display(id: u32) -> io::Result<Retained<SCDisplay>> {
     let content = rx
         .recv_timeout(CALLBACK_TIMEOUT)
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "cannot list the displays: no answer"))?
-        .map_err(|err| io::Error::new(io::ErrorKind::PermissionDenied, format!("cannot list the displays: {err}")))?;
+        .map_err(|err| {
+            crate::caused_error(
+                crate::StopCause::NoScreenCapture,
+                io::ErrorKind::PermissionDenied,
+                format!("cannot list the displays: {err}"),
+            )
+        })?;
     // SAFETY: 读列表里的屏幕。
     let displays = unsafe { content.displays() };
     (0..displays.count())

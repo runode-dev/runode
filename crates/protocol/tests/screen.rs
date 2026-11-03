@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use runode_protocol::screen::{
-    Codec, ScreenClientMsg, ScreenDisplay, ScreenHostMsg, ScreenInput, ScreenMode, ScreenMods, VideoFrame,
+    Codec, ScreenClientMsg, ScreenDisplay, ScreenHostMsg, ScreenInput, ScreenMode, ScreenMods, StopCause, VideoFrame,
     decode_video, encode_video,
 };
 use runode_types::input::{Key, MouseButton};
@@ -115,14 +115,23 @@ fn host_messages_match_the_fixtures() {
     matches("ready_datagram.json", &ready(true));
     matches("incompatible.json", &ScreenHostMsg::Incompatible { version: 2 });
     matches("started.json", &ScreenHostMsg::Started { display: 2, width: 2556, height: 1652 });
-    matches(
-        "stopped.json",
-        &ScreenHostMsg::Stopped { reason: "display unplugged".into(), signed_out: false, no_encoder: false },
-    );
+    matches("stopped.json", &ScreenHostMsg::stopped("display unplugged".into(), None));
     let reason = "nobody is signed in on this computer's screen".into();
-    matches("stopped_signed_out.json", &ScreenHostMsg::Stopped { reason, signed_out: true, no_encoder: false });
+    matches(
+        "stopped_signed_out.json",
+        &ScreenHostMsg::Stopped { reason, signed_out: true, no_encoder: false, cause: None },
+    );
     let reason = "no hardware encoder on the display's GPU".into();
-    matches("stopped_no_encoder.json", &ScreenHostMsg::Stopped { reason, signed_out: false, no_encoder: true });
+    matches(
+        "stopped_no_encoder.json",
+        &ScreenHostMsg::Stopped { reason, signed_out: false, no_encoder: true, cause: None },
+    );
+    let reason = "nobody is signed in to a desktop on this screen".into();
+    matches("stopped_no_desktop.json", &ScreenHostMsg::stopped(reason, Some(StopCause::NoDesktop)));
+    let reason = "remote desktop was not allowed on this computer's screen: cancelled".into();
+    matches("stopped_declined.json", &ScreenHostMsg::stopped(reason, Some(StopCause::Declined)));
+    let reason = "cannot create a hardware encoder: hevc (-12902)".into();
+    matches("stopped_cause_no_encoder.json", &ScreenHostMsg::stopped(reason, Some(StopCause::NoEncoder)));
     matches("lock.json", &ScreenHostMsg::Lock { locked: true });
     matches("permissions.json", &ScreenHostMsg::Permissions { screen_capture: true, post_event: true });
     let reason = "the password has keys a US keyboard cannot type".into();
@@ -147,6 +156,38 @@ fn unknown_codecs_are_skipped() {
     let text = r#"{"type":"start","width":8,"height":8,"fps":60,"bitrate":1,"codecs":["av1","h264"]}"#;
     let start: ScreenClientMsg = serde_json::from_str(text).unwrap();
     assert!(matches!(start, ScreenClientMsg::Start { codecs, .. } if codecs == [Codec::H264]));
+}
+
+/// 各种原因的写法；`Stopped` 里的两个标志跟着原因填，给不认得 `cause` 的客户端看。
+#[test]
+fn stop_causes_are_snake_case() {
+    let causes = [
+        (StopCause::SignedOut, "signed_out", true),
+        (StopCause::NoDesktop, "no_desktop", true),
+        (StopCause::OtherUser, "other_user", false),
+        (StopCause::NoScreenCapture, "no_screen_capture", false),
+        (StopCause::Declined, "declined", false),
+        (StopCause::NoEncoder, "no_encoder", false),
+    ];
+    for (cause, name, signed_out) in causes {
+        assert_eq!(serde_json::to_value(cause).unwrap(), name);
+        let stopped = ScreenHostMsg::stopped(String::new(), Some(cause));
+        let expected = ScreenHostMsg::Stopped {
+            reason: String::new(),
+            signed_out,
+            no_encoder: cause == StopCause::NoEncoder,
+            cause: Some(cause),
+        };
+        assert_eq!(stopped, expected, "{name}");
+    }
+}
+
+/// 更新的电脑多分的类读成没给原因，两个标志和原文照收。
+#[test]
+fn unknown_stop_causes_read_as_none() {
+    let read: ScreenHostMsg = serde_json::from_str(&fixture("stopped_future_cause.json")).unwrap();
+    let reason = "the display is asleep".into();
+    assert_eq!(read, ScreenHostMsg::Stopped { reason, signed_out: true, no_encoder: false, cause: None });
 }
 
 #[test]

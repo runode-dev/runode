@@ -40,6 +40,11 @@ static PORTAL: Mutex<Option<Arc<Portal>>> = Mutex::new(None);
 /// 上次在屏幕上请求授权时没被允许（拒绝了、没人理）的错误：`ask_again` 之前不再弹框，照样报它。
 static REFUSED: Mutex<Option<(io::ErrorKind, String)>> = Mutex::new(None);
 
+/// 屏幕上的人没允许：拒绝了是 `PermissionDenied`，没人理是 `TimedOut`。
+fn declined(kind: io::ErrorKind, message: impl Into<String>) -> io::Error {
+    crate::caused_error(crate::StopCause::Declined, kind, message)
+}
+
 /// 下次要会话时可以再在屏幕上请求授权。
 pub(crate) fn ask_again() {
     *REFUSED.lock().unwrap_or_else(PoisonError::into_inner) = None;
@@ -79,7 +84,7 @@ impl Portal {
         // 停掉了的那个先关掉，再开新的。
         drop(current.take());
         if let Some((kind, reason)) = REFUSED.lock().unwrap_or_else(PoisonError::into_inner).clone() {
-            return Err(io::Error::new(kind, reason));
+            return Err(declined(kind, reason));
         }
         let portal = block_on(Self::open()).inspect_err(|err| {
             if matches!(err.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::TimedOut) {
@@ -134,13 +139,13 @@ impl Portal {
         };
         let Some(started) = started else {
             let _ = session.close().await;
-            return Err(io::Error::new(
+            return Err(declined(
                 io::ErrorKind::TimedOut,
                 "nobody allowed remote desktop on this computer's screen in time",
             ));
         };
         let selected = started.map_err(other)?.response().map_err(|err| {
-            io::Error::new(
+            declined(
                 io::ErrorKind::PermissionDenied,
                 format!("remote desktop was not allowed on this computer's screen: {err}"),
             )

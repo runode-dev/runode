@@ -69,7 +69,11 @@ enum Backend {
 /// 按接过来的图形会话挑后端；没有图形会话时错误是 `io::ErrorKind::NotConnected`。
 fn backend() -> io::Result<Backend> {
     let kind = session::find().map(|session| session.kind).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotConnected, "nobody is signed in to a desktop on this screen")
+        crate::caused_error(
+            crate::StopCause::NoDesktop,
+            io::ErrorKind::NotConnected,
+            "nobody is signed in to a desktop on this screen",
+        )
     })?;
     match kind {
         session::Kind::X11 => Ok(Backend::X11),

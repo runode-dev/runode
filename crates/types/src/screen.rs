@@ -70,3 +70,29 @@ pub enum ScreenInput {
     /// 输入一段文字，不管键盘布局；输入法上屏的字和 `Key::Unidentified` 的字符走这里。
     Text { text: String },
 }
+
+/// 被看的电脑上远程桌面停下或开不起来的原因里认得出的几类，观看端照它给人看说明和办法。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopCause {
+    /// 屏幕上没人登录（Windows）：有人登录后重连就能看。
+    SignedOut,
+    /// 屏幕上没有本用户的 X11 或 Wayland 会话（Linux）：本用户在屏幕上登录桌面后重连就能看，没装桌面的服务器上
+    /// 一直看不了。
+    NoDesktop,
+    /// 屏幕上登录着的是别的用户（Windows）：只看得了连过来的那个用户自己的桌面。
+    OtherUser,
+    /// 采集进程没有「屏幕录制」的授权（macOS）。
+    NoScreenCapture,
+    /// 屏幕上的人没允许共享屏幕：拒绝了，或者没及时点允许（Linux 的 xdg-desktop-portal）。重连时再问一次。
+    Declined,
+    /// 建不出能编观看端解得了的格式的编码器，重连也看不了。
+    NoEncoder,
+}
+
+impl StopCause {
+    /// 屏幕上暂时没有能看的桌面，有人登录以后自己就能看：观看端一直重连等着。
+    pub fn waits_for_sign_in(self) -> bool {
+        matches!(self, Self::SignedOut | Self::NoDesktop)
+    }
+}

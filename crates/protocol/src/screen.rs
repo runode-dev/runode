@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use std::net::IpAddr;
 
-pub use runode_types::screen::{Codec, ScreenInput, ScreenMods, VideoFrame};
+pub use runode_types::screen::{Codec, ScreenInput, ScreenMods, StopCause, VideoFrame};
 
 /// 远程桌面这套消息和画面格式的版本，见 `ScreenClientMsg::ScreenHello`。
 pub const SCREEN_VERSION: u32 = 2;
@@ -118,14 +118,20 @@ pub enum ScreenHostMsg {
     /// 按 `Start` 开始采集了，在这之后的画面都是新的，第一帧是关键帧（开不起来时随后是 `Stopped`）；
     /// `display` 是采的那块屏幕，之后的输入落在它上面。
     Started { display: u32, width: u32, height: u32 },
-    /// 采集停了或者开不起来，带原因；可以再发 `Start`。`signed_out` 说电脑的屏幕上没人登录，有人登录后
-    /// 重新连上就能看。`no_encoder` 说电脑上建不出能编客户端解得了的格式的编码器，重连也看不了。
+    /// 采集停了或者开不起来，带原因；可以再发 `Start`。电脑认得出原因时给出 `cause`，客户端照它给人看说明，
+    /// `reason` 是电脑上的错误原文。`signed_out` 说电脑的屏幕上没有能看的桌面，有人登录后重新连上就能看；
+    /// `no_encoder` 说电脑上建不出能编客户端解得了的格式的编码器，重连也看不了。给了 `cause` 时两个标志和它
+    /// 对得上（`StopCause::waits_for_sign_in` 的类带 `signed_out`，`NoEncoder` 带 `no_encoder`），不认得
+    /// `cause` 的客户端照标志办。
     Stopped {
         reason: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         signed_out: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         no_encoder: bool,
+        /// 不认得的种类（更新的电脑多分的类）读成空。
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "known_cause")]
+        cause: Option<StopCause>,
     },
     /// 电脑锁没锁屏：`Ready` 之后马上报一次，之后变了再报。
     Lock { locked: bool },
@@ -142,6 +148,32 @@ pub enum ScreenHostMsg {
     Datagram { port: u16, addrs: Vec<IpAddr> },
     /// UDP 没打通或者不通了，之后的画面走这条连接，换路后的第一帧是关键帧。这条连接不再试 UDP。
     DatagramLost,
+}
+
+impl ScreenHostMsg {
+    /// 带原因 `reason` 的 `Stopped`，`signed_out`、`no_encoder` 按 `cause` 填。
+    pub fn stopped(reason: String, cause: Option<StopCause>) -> Self {
+        Self::Stopped {
+            reason,
+            signed_out: cause.is_some_and(StopCause::waits_for_sign_in),
+            no_encoder: cause == Some(StopCause::NoEncoder),
+            cause,
+        }
+    }
+}
+
+/// 读 `Stopped::cause`，不认得的种类当成没给。
+fn known_cause<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<StopCause>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Given {
+        Known(StopCause),
+        Unknown(serde::de::IgnoredAny),
+    }
+    Ok(match Option::<Given>::deserialize(deserializer)? {
+        Some(Given::Known(cause)) => Some(cause),
+        Some(Given::Unknown(_)) | None => None,
+    })
 }
 
 /// 被采集的那块屏幕。

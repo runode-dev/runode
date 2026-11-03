@@ -40,7 +40,7 @@ pub use platform::{Decoded, Decoder};
 #[cfg(windows)]
 pub use win::{console_user, in_service_session};
 
-pub use runode_types::screen::{Codec, VideoFrame};
+pub use runode_types::screen::{Codec, StopCause, VideoFrame};
 
 use std::{
     collections::HashMap,
@@ -67,6 +67,35 @@ fn burst_bits(bitrate: u32) -> u32 {
 #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 fn boosted(bitrate: u32, boost: bool) -> f64 {
     if boost { f64::from(bitrate) * REFINE_BOOST } else { f64::from(bitrate) }
+}
+
+/// 归了类的错误，放在 `io::Error` 里面，`stop_cause` 读回它的类。
+#[derive(Debug)]
+struct Caused {
+    cause: StopCause,
+    message: String,
+}
+
+impl std::fmt::Display for Caused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Caused {}
+
+/// 归到 `cause` 一类的错误：种类照旧是 `kind`，文字是 `message`。
+pub fn caused_error(cause: StopCause, kind: std::io::ErrorKind, message: impl Into<String>) -> std::io::Error {
+    std::io::Error::new(kind, Caused { cause, message: message.into() })
+}
+
+/// 远程桌面开不起来的错误（`Capture::start` 的，或者 `caused_error` 造的）归到哪类，归不了的为空。种类是
+/// `ErrorKind::Unsupported` 的是建不出编码器。
+pub fn stop_cause(err: &std::io::Error) -> Option<StopCause> {
+    err.get_ref()
+        .and_then(|inner| inner.downcast_ref::<Caused>())
+        .map(|caused| caused.cause)
+        .or((err.kind() == std::io::ErrorKind::Unsupported).then_some(StopCause::NoEncoder))
 }
 
 /// `Capture` 交出的事件。

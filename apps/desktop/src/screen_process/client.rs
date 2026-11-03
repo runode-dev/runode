@@ -7,6 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use runode_protocol::screen::{ScreenHostMsg, StopCause};
+
 use crate::host_client::UnixStream;
 
 /// 拉起采集进程后最多等它这么久开好监听：刚换上的程序第一次跑时系统要先校验签名、扫描一遍。
@@ -21,7 +23,8 @@ const RETRY: Duration = Duration::from_millis(20);
 /// 里加握手确认
 pub fn connect() -> io::Result<UnixStream> {
     if !runode_screen::desktop_available() {
-        return Err(io::Error::new(
+        return Err(runode_screen::caused_error(
+            StopCause::NoDesktop,
             io::ErrorKind::NotConnected,
             "nobody is signed in to a desktop on this computer's screen",
         ));
@@ -50,6 +53,12 @@ pub fn connect() -> io::Result<UnixStream> {
     }
 }
 
+/// 连不上采集进程（`connect` 的错误）时告诉观看端的。
+pub fn refusal(err: &io::Error) -> ScreenHostMsg {
+    let reason = format!("cannot start remote desktop on this computer: {err}");
+    ScreenHostMsg::stopped(reason, runode_screen::stop_cause(err))
+}
+
 /// 拉起采集进程。
 #[cfg(not(windows))]
 fn launch(exe: &Path) -> io::Result<()> {
@@ -64,10 +73,13 @@ fn launch(exe: &Path) -> io::Result<Option<crate::desktop_session::Scheduled>> {
     match desktop() {
         Desktop::Here => runode_host::launch_screen(exe).map(|_| None),
         Desktop::Mine => schedule(exe, "--screen").map(Some),
-        Desktop::Nobody => {
-            Err(io::Error::new(io::ErrorKind::NotConnected, "nobody is signed in on this computer's screen"))
-        }
-        Desktop::Other(user) => Err(io::Error::new(
+        Desktop::Nobody => Err(runode_screen::caused_error(
+            StopCause::SignedOut,
+            io::ErrorKind::NotConnected,
+            "nobody is signed in on this computer's screen",
+        )),
+        Desktop::Other(user) => Err(runode_screen::caused_error(
+            StopCause::OtherUser,
             io::ErrorKind::PermissionDenied,
             format!("{user} is signed in on this computer's screen, not this user"),
         )),
