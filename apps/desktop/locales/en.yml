@@ -960,6 +960,7 @@ status:
   speech: Speech Recognition
   screen: Remote Desktop
   ports_title: Ports
+  ports_tooltip: Ports that programs in your terminals listen on
   ports_summary: "%{ours} in terminals · %{external} external"
   no_ports: No program in a terminal is listening on a port
   external_ports: External Ports

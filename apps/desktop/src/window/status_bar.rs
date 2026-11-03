@@ -504,6 +504,7 @@ impl WindowView {
             .child(terminals.to_string());
         let ports_item = self
             .status_item("status-ports", StatusPopover::Ports { external: false }, cx)
+            .tooltip(tooltip(rust_i18n::t!("status.ports_tooltip"), None))
             .aria_description(ours.to_string())
             .child(icon(PLUG_ICON))
             .child(ours.to_string());

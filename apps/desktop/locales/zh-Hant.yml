@@ -960,6 +960,7 @@ status:
   speech: 語音辨識
   screen: 遠端桌面
   ports_title: 連接埠
+  ports_tooltip: 終端機裡的程式在監聽的連接埠
   ports_summary: "終端機裡 %{ours} 個 · 外部 %{external} 個"
   no_ports: 終端機裡沒有程式在監聽連接埠
   external_ports: 外部連接埠

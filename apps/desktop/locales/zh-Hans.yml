@@ -960,6 +960,7 @@ status:
   speech: 语音识别
   screen: 远程桌面
   ports_title: 端口
+  ports_tooltip: 终端里的程序在监听的端口
   ports_summary: "终端里 %{ours} 个 · 外部 %{external} 个"
   no_ports: 终端里没有程序在监听端口
   external_ports: 外部端口
