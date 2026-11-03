@@ -489,16 +489,14 @@ impl WindowView {
             .child(icon(COFFEE_ICON))
             .child(sleep_label(sleep))
             .child(dot);
+        // 还没量到内存（刚启动、头一次采样没回来）时写一道横线，不写 0。
+        let memory = if total.memory == 0 { "—".to_owned() } else { format_bytes(total.memory) };
         let resources_item = self
             .status_item("status-resources", StatusPopover::Resources, cx)
             .tooltip(tooltip(rust_i18n::t!("status.resources_tooltip"), None))
-            .aria_description(format!(
-                "{}: {} · {terminals}",
-                rust_i18n::t!("status.resources_tooltip"),
-                format_bytes(total.memory)
-            ))
+            .aria_description(format!("{}: {memory} · {terminals}", rust_i18n::t!("status.resources_tooltip")))
             .child(icon(MEMORY_ICON))
-            .child(format_bytes(total.memory))
+            .child(memory)
             .child(div().text_color(fg_h.opacity(0.35)).child("·"))
             .child(icon(SHELL_ICON))
             .child(terminals.to_string());
