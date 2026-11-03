@@ -949,6 +949,40 @@ impl TodoDialog {
     }
 
     /// 对话框的标题：新建还是编辑，任务还是定时。
+    /// 对话框里能打字的框，按显示的先后：模板要填的那一项、标题、提示词、定时的时间、自定义 agent 的命令。
+    fn text_fields(&self, cx: &App) -> Vec<FocusHandle> {
+        let template_input = self.template.and_then(|index| self.templates[index].input.as_ref()).map(|_| &self.input);
+        let when = match self.kind {
+            Some(Kind::Once) if self.schedule => Some(&self.at),
+            Some(Kind::Daily) if self.schedule => Some(&self.clock),
+            Some(Kind::Every) if self.schedule => Some(&self.minutes),
+            _ => None,
+        };
+        let command = self.agent.is_none().then_some(&self.command);
+        let inputs = template_input.into_iter().chain([&self.title]);
+        let mut fields: Vec<FocusHandle> = inputs.map(|input| input.focus_handle(cx)).collect();
+        fields.push(self.prompt.focus_handle(cx));
+        fields.extend(when.into_iter().chain(command).map(|input| input.focus_handle(cx)));
+        fields
+    }
+
+    /// Tab 和 Shift+Tab 在能打字的框之间往后、往前挪，到头了绕回另一头；焦点不在这些框里时到第一个。
+    fn tab_between_fields(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let modifiers = &event.keystroke.modifiers;
+        if event.keystroke.key != "tab" || modifiers.control || modifiers.alt || modifiers.platform {
+            return;
+        }
+        let fields = self.text_fields(cx);
+        let at = fields.iter().position(|field| field.is_focused(window));
+        let next = match at {
+            Some(at) if modifiers.shift => (at + fields.len() - 1) % fields.len(),
+            Some(at) => (at + 1) % fields.len(),
+            None => 0,
+        };
+        cx.stop_propagation();
+        window.focus(&fields[next], cx);
+    }
+
     fn heading(&self) -> String {
         match (&self.editing, self.schedule) {
             (Some(_), false) => rust_i18n::t!("kanban.edit"),
@@ -1430,10 +1464,12 @@ impl Render for TodoDialog {
             .on_action(cx.listener(Self::pick_workspace))
             .on_action(cx.listener(Self::pick_skill))
             .on_action(cx.listener(Self::pick_subagent))
-            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if is_dismiss_key(&event.keystroke) {
                     cx.stop_propagation();
                     cx.emit(DialogEvent::Dismissed);
+                } else {
+                    this.tab_between_fields(event, window, cx);
                 }
             }))
             .when(page, |panel| panel.flex_1().min_w_0().max_w(px(720.)))
