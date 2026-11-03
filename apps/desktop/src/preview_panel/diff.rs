@@ -499,7 +499,9 @@ impl PreviewPanel {
             return;
         };
         if let Some(hunk) = content.view.file.hunks.get(hunk) {
-            cx.emit(PreviewEvent::Quote(hunk_quote(&target.root.join(&target.rel), hunk)));
+            // 交给的 agent 可能在远端，路径照那边的写法。
+            let path = crate::project_host::remote_path(&target.root.join(&target.rel));
+            cx.emit(PreviewEvent::Quote(hunk_quote(&path, hunk)));
         }
     }
 

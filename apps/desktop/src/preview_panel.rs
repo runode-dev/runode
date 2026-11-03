@@ -1250,16 +1250,17 @@ impl PreviewPanel {
                         .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_wrap(cx)),
                 )
             });
-        // 按钮至少留出自己的宽度，路径放不下时截断。
+        // 按钮至少留出自己的宽度，路径放不下时截断。远端的路径照那边的写法显示。
+        let shown = crate::project_host::remote_path(&preview.path);
         let path = div()
             .id("preview-path")
-            .aria_static_text(preview.path.display().to_string())
+            .aria_static_text(shown.display().to_string())
             .flex_1()
             .min_w_0()
             .truncate()
             .text_color(cx.theme().foreground.opacity(0.55))
-            .child(ui::display_dir(&preview.path))
-            .tooltip(tooltip(preview.path.display().to_string(), None));
+            .child(ui::display_dir(&shown))
+            .tooltip(tooltip(shown.display().to_string(), None));
         // 顶上这条是界面，不跟着正文的 `preview-font-size`；不拖动窗口，标题栏在它上面。
         let header = panel_header(true, cx).pr(px(6.)).text_size(FontSize::Medium).child(path).child(buttons);
         // 正文整个报成一篇文档，以标签上的名字为名。
