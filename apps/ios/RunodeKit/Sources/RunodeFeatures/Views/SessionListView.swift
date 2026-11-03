@@ -240,7 +240,7 @@
                 ) {
                     Button("结束会话", role: .destructive) { model.kill(session.id) }
                 } message: {
-                    Text("「\(Presentation.sessionTitle(session))」里正在跑的程序会收到 SIGHUP 并退出。")
+                    Text("「\(Presentation.sessionTitle(session))」在电脑上也会关掉，里面正在跑的程序跟着结束。")
                 }
         }
 

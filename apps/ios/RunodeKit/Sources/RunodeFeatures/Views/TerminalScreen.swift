@@ -235,7 +235,7 @@
             .confirmationDialog("结束这个终端？", isPresented: $model.isConfirmingKill, titleVisibility: .visible) {
                 Button("结束会话", role: .destructive) { model.kill() }
             } message: {
-                Text("里面正在跑的程序会收到 SIGHUP 并退出。")
+                Text("它在电脑上也会关掉，里面正在跑的程序跟着结束。")
             }
         }
 

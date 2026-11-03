@@ -870,25 +870,25 @@
         }
       }
     },
-    "「%@」里正在跑的程序会收到 SIGHUP 并退出。" : {
+    "「%@」在电脑上也会关掉，里面正在跑的程序跟着结束。" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Programs running in “%@” will receive SIGHUP and exit."
+            "value" : "“%@” closes on the computer too, and the programs running in it end."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "「%@」里正在跑的程序会收到 SIGHUP 并退出。"
+            "value" : "「%@」在电脑上也会关掉，里面正在跑的程序跟着结束。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "「%@」裡正在執行的程式會收到 SIGHUP 並結束。"
+            "value" : "「%@」在電腦上也會關掉，裡面正在執行的程式跟著結束。"
           }
         }
       }
@@ -7737,6 +7737,29 @@
         }
       }
     },
+    "它在电脑上也会关掉，里面正在跑的程序跟着结束。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It closes on the computer too, and the programs running in it end."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它在电脑上也会关掉，里面正在跑的程序跟着结束。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它在電腦上也會關掉，裡面正在執行的程式跟著結束。"
+          }
+        }
+      }
+    },
     "这个终端当前的目录不在 Git 仓库里。在终端里 cd 进仓库后下拉刷新。" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8492,29 +8515,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "配對連結裡缺少 %@"
-          }
-        }
-      }
-    },
-    "里面正在跑的程序会收到 SIGHUP 并退出。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Programs running in it will receive SIGHUP and exit."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "里面正在跑的程序会收到 SIGHUP 并退出。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "裡面正在執行的程式會收到 SIGHUP 並結束。"
           }
         }
       }
