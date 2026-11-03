@@ -20,6 +20,8 @@ menu:
   split_down: 向下分屏
   close: 关闭
   close_tab: 关闭标签页
+  close_other_tabs: 关闭其他标签页
+  close_tabs_right: 关闭右侧的标签页
   close_workspace: 关闭工作区
   close_window: 关闭窗口
   close_all_windows: 关闭所有窗口
@@ -188,6 +190,7 @@ close:
   unsaved: "有 %{count} 个文件改过还没保存，关闭后修改会丢掉。"
   pane_title: 关闭这个终端？
   tab_title: 关闭这个标签页？
+  tabs_title: "关闭 %{count} 个标签页？"
   running: "%{programs} 还在运行，关闭后会随之结束。"
   confirm: 关闭
   cancel: 取消

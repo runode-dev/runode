@@ -7,15 +7,17 @@ use std::borrow::Cow;
 use crate::ui::theme::ActiveTheme as _;
 
 use gpui::{
-    Action, AnyElement, App, Axis, BoxShadow, Context, CursorStyle, Decorations, Div, ElementId, Hsla, MouseButton,
-    MouseDownEvent, Pixels, Render, ResizeEdge, Role, SharedString, Stateful, TitlebarOptions, Window,
-    WindowControlArea, WindowDecorations, div, img, linear_color_stop, linear_gradient, point, prelude::*, px, svg,
+    Action, AnyElement, App, Axis, BoxShadow, Context, CursorStyle, Decorations, Div, ElementId, Focusable as _, Hsla,
+    MouseButton, MouseDownEvent, Pixels, Point, Render, ResizeEdge, Role, SharedString, Stateful, TitlebarOptions,
+    Window, WindowControlArea, WindowDecorations, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
+    svg,
 };
 use runode_types::agent::AgentKind;
 
 use super::{
-    AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NEW_TAB_MENU_BUTTON_WIDTH, NewTab, PressDown, SelectLastTab, SelectTab,
-    TAB_CLOSE_SIZE, TAB_TRACK_HEIGHT, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_ORIGIN, WindowView,
+    AGENT_MARK_WIDTH, CloseOtherTabs, CloseTab, CloseTabsToRight, NEW_TAB_BUTTON_WIDTH, NEW_TAB_MENU_BUTTON_WIDTH,
+    NewTab, PressDown, SelectLastTab, SelectTab, TAB_CLOSE_SIZE, TAB_TRACK_HEIGHT, TITLEBAR_HEIGHT,
+    TRAFFIC_LIGHTS_ORIGIN, WindowView,
     agents::{
         Mark, Status,
         logo::{accent, agent_logo, brand_color},
@@ -25,6 +27,7 @@ use super::{
     panes::now_ms,
 };
 use crate::ui::a11y::A11yPress;
+use crate::ui::menu::{MenuHost as _, MenuItem};
 // agent 状态标记的颜色和转圈在 `runode_ui`，看板也用。
 use crate::ui::{
     spinner::spinner,
@@ -289,6 +292,29 @@ pub(super) fn shortcut_hint(select: &dyn Action, last: &dyn Action, is_last: boo
 }
 
 impl WindowView {
+    /// 右键点了终端标签 `id`：先切过去，再在 `position` 弹出新建、关闭这几样的菜单，都对着它办。
+    fn open_tab_menu(&mut self, id: TabId, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        // 快捷键按切过去之前的焦点找：刚切过去的终端上一帧还没画，键位表里找不到它。
+        let lookup = self.focus_handle(cx);
+        self.activate_tab_id(id, window, cx);
+        let tabs = &self.workspace().tabs;
+        let Some(ix) = tabs.iter().position(|tab| tab.id == id) else { return };
+        let count = tabs.len();
+        let focus = self.focus_handle(cx);
+        let item = |key: &str, action: Box<dyn Action>, enabled: bool| {
+            let shortcut = crate::ui::tooltip::shortcut_text_in(action.as_ref(), &lookup, window);
+            Some(MenuItem::new(rust_i18n::t!(key), action, enabled, cx).with_shortcut(shortcut))
+        };
+        let items = vec![
+            item("menu.new_tab", Box::new(NewTab), true),
+            None,
+            item("menu.close_tab", Box::new(CloseTab), true),
+            item("menu.close_other_tabs", Box::new(CloseOtherTabs), count > 1),
+            item("menu.close_tabs_right", Box::new(CloseTabsToRight), ix + 1 < count),
+        ];
+        self.open_context_menu(position, items, focus, cx);
+    }
+
     /// 切到当前 workspace 里的标签 `id`。点标签时按 id 找：画出标签条以后标签可能已经增删、挪了位置，
     /// 也可能换了 workspace，照画的时候的序号会切到别的标签上，甚至越界。
     fn activate_tab_id(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
@@ -426,6 +452,13 @@ impl WindowView {
                 cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();
                     this.close_tab_by_id(id, window, cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_tab_menu(id, event.position, window, cx);
                 }),
             )
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))

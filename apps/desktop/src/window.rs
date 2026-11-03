@@ -114,6 +114,10 @@ actions!(
     runode,
     [
         NewTab,
+        /// 关掉当前 workspace 里当前标签以外的终端标签。
+        CloseOtherTabs,
+        /// 关掉当前标签右边的终端标签。
+        CloseTabsToRight,
         NextTab,
         PreviousTab,
         SelectLastTab,
@@ -885,6 +889,8 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::new_agent_tab))
             .on_action(Self::act(cx, Self::new_shell_tab))
             .on_action(Self::act(cx, Self::close_tab))
+            .on_action(Self::act(cx, Self::close_other_tabs))
+            .on_action(Self::act(cx, Self::close_tabs_to_right))
             .on_action(Self::act(cx, Self::next_tab))
             .on_action(Self::act(cx, Self::previous_tab))
             .on_action(Self::act(cx, Self::select_tab))

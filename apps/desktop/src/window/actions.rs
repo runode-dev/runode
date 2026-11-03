@@ -6,9 +6,10 @@ use gpui::{Action, App, Bounds, Context, Entity, EntityId, Pixels, Window};
 use runode_types::pane::{self, Axis, Direction, SplitId};
 
 use super::{
-    ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane, NewSplitDown,
-    NewSplitRight, NewTab, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace, ResizePane, SelectLastTab,
-    SelectLastWorkspace, SelectTab, SelectWorkspace, TogglePaneZoom, ToggleSidebar, WindowView,
+    CloseOtherTabs, ClosePane, CloseTab, CloseTabsToRight, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPane,
+    FocusPreviousPane, NewSplitDown, NewSplitRight, NewTab, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace,
+    ResizePane, SelectLastTab, SelectLastWorkspace, SelectTab, SelectWorkspace, TogglePaneZoom, ToggleSidebar,
+    WindowView,
 };
 use crate::host_client::hosts::HostId;
 use crate::terminal_view::TerminalView;
@@ -116,6 +117,18 @@ impl WindowView {
     pub(super) fn close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(id) = self.tab().map(|tab| tab.id) {
             self.close_tab_by_id(id, window, cx);
+        }
+    }
+
+    pub(super) fn close_other_tabs(&mut self, _: &CloseOtherTabs, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.tab().map(|tab| tab.id) {
+            self.close_tabs_beside(id, false, window, cx);
+        }
+    }
+
+    pub(super) fn close_tabs_to_right(&mut self, _: &CloseTabsToRight, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.tab().map(|tab| tab.id) {
+            self.close_tabs_beside(id, true, window, cx);
         }
     }
 

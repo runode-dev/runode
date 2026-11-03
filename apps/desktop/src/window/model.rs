@@ -704,6 +704,40 @@ impl WindowView {
         });
     }
 
+    /// 关掉标签 `keep` 所在 workspace 里它以外的终端标签，`right_only` 时只关它右边的；里面有程序在跑时
+    /// 先问一句，几个标签一起问一次。
+    pub(super) fn close_tabs_beside(
+        &mut self,
+        keep: TabId,
+        right_only: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((wi, ti)) = self.locate_tab(keep) else {
+            return;
+        };
+        let tabs = &self.workspaces[wi].tabs;
+        let closing: Vec<usize> = (0..tabs.len()).filter(|&ix| if right_only { ix > ti } else { ix != ti }).collect();
+        if closing.is_empty() {
+            return;
+        }
+        let running =
+            running_programs(closing.iter().flat_map(|&ix| tabs[ix].panes.values().map(|(view, _)| view)), cx);
+        let ids: Vec<TabId> = closing.iter().map(|&ix| tabs[ix].id).collect();
+        let title = match ids.len() {
+            1 => rust_i18n::t!("close.tab_title"),
+            count => rust_i18n::t!("close.tabs_title", count = count),
+        };
+        self.confirm_closing(&title, None, &running, window, cx, move |this, window, cx| {
+            // 问的时候标签可能已经挪了位置或者自己关掉了。
+            for id in ids {
+                if let Some((wi, ti)) = this.locate_tab(id) {
+                    this.close_tab_at(wi, ti, window, cx);
+                }
+            }
+        });
+    }
+
     pub(super) fn locate_tab(&self, id: TabId) -> Option<(usize, usize)> {
         self.workspaces
             .iter()

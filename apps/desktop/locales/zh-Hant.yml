@@ -20,6 +20,8 @@ menu:
   split_down: 向下分割
   close: 關閉
   close_tab: 關閉分頁
+  close_other_tabs: 關閉其他分頁
+  close_tabs_right: 關閉右側的分頁
   close_workspace: 關閉工作區
   close_window: 關閉視窗
   close_all_windows: 關閉所有視窗
@@ -188,6 +190,7 @@ close:
   unsaved: "有 %{count} 個檔案改過還沒儲存，關閉後修改會遺失。"
   pane_title: 關閉這個終端機？
   tab_title: 關閉這個分頁？
+  tabs_title: "關閉 %{count} 個分頁？"
   running: "%{programs} 還在執行，關閉後會隨之結束。"
   confirm: 關閉
   cancel: 取消
