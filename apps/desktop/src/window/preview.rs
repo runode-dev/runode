@@ -12,8 +12,8 @@ use std::{
 
 use crate::preview_panel::{Input, PreviewEvent, PreviewPanel};
 use gpui::{
-    AnyElement, App, Context, Empty, Entity, Focusable as _, IntoElement as _, ParentElement as _, Pixels, Point,
-    StyleRefinement, Styled as _, Window, div,
+    AnyElement, App, Context, Empty, Entity, EntityId, Focusable as _, IntoElement as _, ParentElement as _, Pixels,
+    Point, StyleRefinement, Styled as _, Window, div,
 };
 use runode_config::PreviewClick;
 
@@ -157,6 +157,19 @@ impl WindowView {
         self.with_preview(cx, |panel, cx| panel.refresh_if_changed(cx));
     }
 
+    /// 「交给 agent」贴给谁：当前分屏没在跑 agent、这个标签里别的分屏在跑时是那个分屏（按布局里的先后取第一个），
+    /// 否则为空，贴进当前分屏。贴进一个光是 shell 的分屏，多行的块会被当成命令。
+    fn quote_target(&self, cx: &App) -> Option<EntityId> {
+        let tab = self.tab()?;
+        if tab.focused_view().read(cx).agent().is_some() {
+            return None;
+        }
+        tab.root
+            .leaves()
+            .into_iter()
+            .find(|id| tab.panes.get(id).is_some_and(|(view, _)| view.read(cx).agent().is_some()))
+    }
+
     /// 监听到 `paths` 变了：当前预览的文件在里面就重读。
     pub(super) fn preview_files_changed(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         self.with_preview(cx, |panel, cx| panel.files_changed(paths, cx));
@@ -261,6 +274,9 @@ impl WindowView {
                 self.insert_paths(vec![path.clone()], *lines, window, cx);
             }
             PreviewEvent::Quote(text) => {
+                if let Some(pane) = self.quote_target(cx) {
+                    self.focus_pane_in_active_tab(pane, window, cx);
+                }
                 if let Some(view) = self.focused_view().cloned() {
                     // 预览盖着终端，退到后面才看得到贴进去的字。
                     self.send_preview_back(cx);
