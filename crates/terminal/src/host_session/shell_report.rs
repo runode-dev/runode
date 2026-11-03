@@ -6,16 +6,15 @@ use std::{ffi::OsString, path::PathBuf};
 /// shell 集成在显示提示符时、内容和上次报告的不一样时用的私有 OSC：
 /// `ESC ] 6973;<口令>;<字段>=<百分号编码的值> BEL`。字段是 `cwd`（shell 的当前目录，每次显示
 /// 提示符前都发）、`path`（PATH）或 `functions`（名字之间用空格分开），别的字段不认识，丢掉。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
-/// 原文（拿不到时为空），见 `Report::Command`；`end`：紧接在 OSC 133;D 前面发，值为空，见
-/// `Report::End`；`version`：集成脚本的版本，每条命令开始时和 `command` 一起发，2 起
-/// 有 `end`，见 `Effects::signed_ends`。
+/// 原文（拿不到时为空）；`end`：紧接在 OSC 133;D 前面发，值为空；`version`：集成脚本的版本，每条命令
+/// 开始时和 `command` 一起发，2 起有 `end`。
 ///
 /// 报告运行完的命令（`HostMsg::CommandFinished`）同样只认这条报告，133;C 自带的命令原文一律
 /// 不用：伪造的命令会让 `runode wait` 这类等命令的前端以为命令跑完了。
 ///
 /// 任何打印到终端的内容（`cat` 一个文件、ssh 远端的输出）都能写出这样的序列，而报告的 PATH
 /// 会被界面拿去找命令行工具（gh）来跑，所以只认带着本 shell 口令的报告。口令经一个用完就删的文件交给 shell（不经
-/// 环境变量，见 `shell_integration::prepare`），之后只留在 shell 自己不导出的变量里，在 shell 里运行的
+/// 环境变量），之后只留在 shell 自己不导出的变量里，在 shell 里运行的
 /// 程序正常拿不到它。只看是否处在提示符状态挡不住伪造：输出里可以先伪造一个 OSC 133;D。
 pub(crate) const SHELL_REPORT: &[u8] = super::redact::REPORT_START.split_at(2).1;
 

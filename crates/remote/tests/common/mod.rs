@@ -59,7 +59,7 @@ pub struct Harness {
     pub projects: mpsc::Receiver<UnixStream>,
 }
 
-/// 测试里项目服务的构建，见 `Harness::projects`。
+/// 测试里项目服务的构建。
 pub const PROJECT_BUILD: &str = "测试的构建";
 
 impl Harness {

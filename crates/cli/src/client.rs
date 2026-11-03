@@ -325,7 +325,7 @@ impl Connection {
         self.sessions_by(Instant::now() + REPLY_TIMEOUT)
     }
 
-    /// 同 `sessions`，等到 `deadline`。
+    /// 宿主里的全部会话，等回话等到 `deadline` 为止。
     pub(crate) fn sessions_by(&self, deadline: Instant) -> Result<Vec<SessionInfo>> {
         self.send(&ClientMsg::ListSessions)?;
         match self.reply_by(deadline)? {
@@ -339,7 +339,7 @@ impl Connection {
         self.board_by(Instant::now() + REPLY_TIMEOUT)
     }
 
-    /// 同 `board`，等到 `deadline`。
+    /// 看板上的任务和定时，等回话等到 `deadline` 为止。
     pub(crate) fn board_by(&self, deadline: Instant) -> Result<(Vec<Todo>, Vec<Schedule>)> {
         let req = self.req();
         self.send(&ClientMsg::ListTodos { req })?;

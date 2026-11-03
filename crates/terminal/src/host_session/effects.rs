@@ -73,7 +73,7 @@ pub(super) struct Effects {
 }
 
 impl Effects {
-    /// 记下 shell 集成的一条报告 `<口令>;<字段>=<百分号编码的值>`，见 `shell_report::parse`。
+    /// 记下 shell 集成的一条报告 `<口令>;<字段>=<百分号编码的值>`，口令不对或认不出的丢掉。
     pub(super) fn shell_report(&self, report: &[u8]) {
         let Ok(token) = self.report_token.try_borrow() else { return };
         let Some(report) = token.as_deref().and_then(|token| shell_report::parse(token, report)) else { return };

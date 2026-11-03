@@ -108,7 +108,8 @@ impl WindowView {
         self.reveal_front_tab(cx);
     }
 
-    /// 和 `open_preview` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间；`hit` 见 `PreviewPanel::open_at`。
+    /// 在预览栏里打开 `path` 并切到它的标签，再选中第 `line` 行（从 0 数）、滚到中间；`hit` 是这一行里要选中的
+    /// 字节范围，给了时只选中那段。
     pub(super) fn open_preview_at(
         &mut self,
         path: &Path,

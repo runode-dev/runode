@@ -25,7 +25,7 @@ const TERM_GRACE: Duration = Duration::from_secs(2);
 
 /// 跑一条会写仓库的 git 命令，返回标准输出。和只读的 `git` 不同：不设 `GIT_OPTIONAL_LOCKS`，
 /// 要拿的锁照常拿；`GIT_TERMINAL_PROMPT=0` 让要密码的远端直接报错，不卡着等输入，ssh 同样不问
-/// （见 `batch_ssh`）；`input` 给了就写进标准输入，否则标准输入是空的。超过 `RUN_TIMEOUT` 杀掉，
+/// （`batch_ssh`）；`input` 给了就写进标准输入，否则标准输入是空的。超过 `RUN_TIMEOUT` 杀掉，
 /// 报超时。失败时的错误是 git 的标准错误，没有就用标准输出。
 pub(crate) fn run<S: AsRef<OsStr>>(
     dir: &Path,
@@ -35,7 +35,7 @@ pub(crate) fn run<S: AsRef<OsStr>>(
     run_for(dir, args, input, RUN_TIMEOUT, &[])
 }
 
-/// 同 `run`，最多跑 `timeout`，另外设上 `env` 里的环境变量。
+/// 在 `dir` 里跑一条 git 命令，`input` 给了就写进标准输入，最多跑 `timeout`，另外设上 `env` 里的环境变量。
 pub(crate) fn run_for<S: AsRef<OsStr>>(
     dir: &Path,
     args: impl IntoIterator<Item = S>,

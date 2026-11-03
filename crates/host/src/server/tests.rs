@@ -101,7 +101,7 @@ fn greet(host: &Host, client: ClientKind) -> (Client, mpsc::Receiver<Frame>) {
     greet_from(host, client, None)
 }
 
-/// 同 `greet`，`Hello` 里报自己在会话 `session` 里。
+/// 经 `Host::connect_pair` 连上、按 `client` 握手，`Hello` 里报自己在会话 `session` 里，返回连接和读到的帧。
 fn greet_from(host: &Host, client: ClientKind, session: Option<SessionId>) -> (Client, mpsc::Receiver<Frame>) {
     let mut stream = Client(host.connect_pair().unwrap());
     let frames = frames(&stream);

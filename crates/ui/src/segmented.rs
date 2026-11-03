@@ -2,7 +2,7 @@
 //! 自带 `Role::RadioGroup`、每段的 `Role::RadioButton` 和选没选（`aria_toggled`），点击和辅助工具的按下都
 //! 经 `a11y` 的 `Press`。竖排或每项带说明的单选组不用它。
 //!
-//! 调用方接着写的样式盖在轨道自己的上面，写法同 `Button`。
+//! 调用方接着写的样式盖在轨道自己的上面。
 
 use gpui::{
     AnyElement, App, Context, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement,

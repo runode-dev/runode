@@ -14,7 +14,7 @@ use runode_types::grid::GridSize;
 
 use super::{Event, Runner};
 
-/// 带着屏幕连着会话的一条连接在尺寸归属里的状态，见 `Runner::owner`。从这条连接要屏幕的
+/// 带着屏幕连着会话的一条连接在尺寸归属里的状态。从这条连接要屏幕的
 /// `Subscribe` 起，到它 `Detach`（含连接断开）或者改成只看状态为止。订阅因为读得太慢被丢掉
 /// （`Resync`）、还没重新连上时也留着：重新连上不带尺寸，沿用这里记着的。
 pub(super) struct Viewer {
@@ -22,7 +22,7 @@ pub(super) struct Viewer {
     /// 连接在 `Hello` 里报的设备名。
     pub(super) device: Option<String>,
     /// 这个前端最近一次请求的尺寸（带尺寸的 `Subscribe` 或者 `Inbox::Resize`），轮到它当 owner 时
-    /// 应用；还没请求过时为空，这时没资格当 owner，见 `Runner::interact`。
+    /// 应用；还没请求过时为空，这时没资格当 owner。
     pub(super) requested: Option<GridSize>,
     /// 最近一次交互的序号（`Runner::interactions`），没交互过为 0。
     pub(super) last_active: u64,

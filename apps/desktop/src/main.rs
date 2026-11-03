@@ -1,11 +1,11 @@
 //! runode：面向 AI 编程 agent 的桌面工作台。终端用 libghostty-vt 仿真，窗口和绘制用 GPUI。
-//! 带子命令启动时是命令行（`runode list` 等），不开窗口，见 `runode_cli`；`runode --host` 是单独
-//! 一个进程跑的终端宿主，`runode --host --take-over` 是升级时接手旧宿主会话的新宿主，见
-//! `host_process`；`runode --screen` 是远程桌面的采集进程，`runode --screen-guard` 是 Windows 上替它换回
-//! 显示模式的看守进程，见 `screen_process`；`runode --speech` 是语音输入的识别子进程，见 `dictation::worker`；
-//! `runode --ssh-bridge` 是桌面经 ssh 连过来时在远端跑的桥接，见 `host_client::bridge`；`runode --ssh-service` 把远端的宿主装成登录服务（`host_client::bridge::service`）；
+//! 带子命令启动时是命令行（`runode list` 等），不开窗口（`runode_cli`）；`runode --host` 是单独
+//! 一个进程跑的终端宿主，`runode --host --take-over` 是升级时接手旧宿主会话的新宿主
+//! （`host_process`）；`runode --screen` 是远程桌面的采集进程，`runode --screen-guard` 是 Windows 上替它换回
+//! 显示模式的看守进程（`screen_process`）；`runode --speech` 是语音输入的识别子进程（`dictation::worker`）；
+//! `runode --ssh-bridge` 是桌面经 ssh 连过来时在远端跑的桥接（`host_client::bridge`）；`runode --ssh-service` 把远端的宿主装成登录服务（`host_client::bridge::service`）；
 //! `runode --ssh-project` 替桌面读远端的项目（`project_host::serve`）；`runode --ssh-screen` 把桌面经 ssh 看这台
-//! 电脑的远程桌面接到采集进程上（`screen_process::ssh`）。ssh 要问用户时也调这个程序当 askpass，见 `runode_ssh::askpass`。
+//! 电脑的远程桌面接到采集进程上（`screen_process::ssh`）。ssh 要问用户时也调这个程序当 askpass（`runode_ssh::askpass`）。
 //!
 //! Windows 上这个程序是界面程序，打开时不带控制台窗口；在终端里跑命令行用同一个包里的控制台程序
 //! `rn`。

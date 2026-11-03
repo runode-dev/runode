@@ -517,7 +517,7 @@ impl WindowView {
                     cx.notify();
                 }
                 let tab = &mut self.workspaces[wi].tabs[ti];
-                // 单独窗口里的终端拿到焦点不算这个窗口的当前终端，见 `pane_float`。
+                // 单独窗口里的终端拿到焦点不算这个窗口的当前终端。
                 if tab.focused != id && !tab.popped.contains(&id) {
                     tab.focused = id;
                     if shown {

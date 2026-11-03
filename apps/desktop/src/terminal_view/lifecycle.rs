@@ -72,8 +72,7 @@ const ATTACH_RETRY: Duration = Duration::from_millis(100);
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// 和主机 `host` 的宿主断开后又连上了（本机的是有个终端点了「在原目录重开」，远端的是自己重连上）：
-/// 第几次重连，以及那时宿主里还活着的会话。同一台主机上断开着的视图见了，会话还在的就重新连上，见
-/// `TerminalView::host_reconnected`。
+/// 第几次重连，以及那时宿主里还活着的会话。同一台主机上断开着的视图见了，会话还在的就重新连上。
 struct HostReconnected {
     generation: u64,
     host: HostId,
@@ -160,10 +159,10 @@ fn connect(
 /// 显示变了就换成新的）。
 /// 挂在终端所在窗口上的订阅；终端搬进别的窗口时换成那个窗口的（`TerminalView::attach_window`）。
 pub(super) struct WindowWatches {
-    /// 窗口重新激活时恢复空闲停下的光标闪烁，见 `reset_cursor_blink`。
+    /// 窗口重新激活时恢复空闲停下的光标闪烁。
     _activation: Subscription,
     _appearance: Subscription,
-    /// 别的终端在和宿主断开后点了「在原目录重开」、重新连上了宿主，见 `host_reconnected`。
+    /// 盯着 `HostReconnected`：自己所在主机的宿主断开后又连上了。
     _reconnect: Subscription,
     _focus: [Subscription; 4],
 }

@@ -1,4 +1,4 @@
-//! 远程访问（手机或配对过的别的电脑经网络连上宿主，见 `runode_remote`）跟着宿主活：宿主跑在哪个进程里，
+//! 远程访问（`runode_remote`：手机或配对过的别的电脑经网络连上宿主）跟着宿主活：宿主跑在哪个进程里，
 //! 监听就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上，要远程桌面的接到采集进程上
 //! （`screen_process::client::connect_or_explain`），要电脑识别录音的接到 `dictation::remote`，别的电脑要读写项目的
 //! 接到本进程里起的项目服务上（`connect_project`）。开关（配置项
@@ -10,7 +10,7 @@
 //! （`runode --host`）不管界面，自己读配置文件，文件变了就重读（`follow_config`）。app 连着单独跑的
 //! 宿主时不开监听，免得两个进程抢同一个端口。
 //!
-//! 窗口里的配对设备页在界面上给手机配对，见 `pairing`。
+//! `pairing` 是窗口里的配对设备页在界面上给手机配对的那部分。
 
 #[cfg(windows)]
 pub mod firewall;

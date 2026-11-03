@@ -657,7 +657,7 @@ impl Link {
         self.inner.todos_changed.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
 
-    /// 最近一次连上的宿主在 `Welcome` 里报的系统，写法同 `std::env::consts::OS`；没报时为空。
+    /// 最近一次连上的宿主在 `Welcome` 里报的 `os`；没报时为空。
     pub fn host_os(&self) -> String {
         self.inner.state().os.clone()
     }

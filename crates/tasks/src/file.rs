@@ -23,7 +23,7 @@ pub struct Rules {
 /// 同一份内容再各自换上去时，先写的那份改动就丢了。
 static WRITING: Mutex<()> = Mutex::new(());
 
-/// 快捷键怎么跟着命令改，见 `move_keys`。
+/// 快捷键怎么跟着命令改。
 pub enum Keys {
     /// 原来绑的几个键原样跟着走。
     Keep,

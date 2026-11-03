@@ -50,7 +50,7 @@ pub(crate) struct Listening {
     pub(crate) control: Arc<ListenControl>,
 }
 
-/// 接受连接的线程该做什么，见 `ListenControl`。
+/// 接受连接的线程该做什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ListenState {
     Accepting,
@@ -70,7 +70,7 @@ pub(crate) struct ListenControl {
 }
 
 impl ListenControl {
-    /// 不再接新连接，返回时已经不会再接，见 `ListenState::Paused`。
+    /// 不再接新连接，返回时已经不会再接。
     #[cfg(unix)]
     pub(crate) fn pause(&self) {
         self.set(ListenState::Paused);
@@ -82,7 +82,7 @@ impl ListenControl {
         self.set(ListenState::Accepting);
     }
 
-    /// 结束接受连接的线程，见 `ListenState::Stopped`。
+    /// 结束接受连接的线程。
     pub(crate) fn stop(&self) {
         self.set(ListenState::Stopped);
     }
@@ -233,7 +233,7 @@ impl Host {
         Ok(())
     }
 
-    /// 在已经开好的 `listener` 上接受别的进程来的前端，同 `Host::listen`，但不设 shell 的环境变量。
+    /// 在已经开好的 `listener` 上在后台线程里接受别的进程来的前端，不设 shell 的环境变量。
     /// `lock` 是锁住了的锁文件（`flock` 锁的是打开的文件，交接时连同描述符一起交过来的仍锁着），
     /// 丢掉时放开；`socket` 是 `listener` 的路径。`paused` 时接受连接的线程先停着（连接排在
     /// backlog 里），等 `ListenControl::resume`。

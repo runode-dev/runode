@@ -1,4 +1,4 @@
-//! 一条远程连接从头到尾：TLS 握手、门禁（见 `runode_protocol::remote` 的模块文档）、按第一帧是终端的
+//! 一条远程连接从头到尾：TLS 握手、门禁、按第一帧是终端的
 //! `Hello`、`ScreenHello`、`SpeechHello` 还是桌面设备的 `ChannelHello` 接到宿主、远程桌面的采集进程、识别、
 //! 项目服务或者本机的端口上搬字节（`bridge`）。门禁阶段的读写都按同一个截止时刻（`GATE_TIMEOUT`）设超时，
 //! 对面一个字节一个字节地慢慢发也拖不过它。
@@ -338,12 +338,12 @@ fn device_name(name: &str) -> String {
     if name.is_empty() { "unnamed device".into() } else { name.into() }
 }
 
-/// 回 `RemoteRejected` 后断开，见 `say_and_close`。
+/// 回 `RemoteRejected` 后断开。
 fn reject(tls: &mut StreamOwned<ServerConnection, Deadline>, tcp: &TcpStream, reason: RejectReason) -> io::Result<()> {
     say_and_close(tls, tcp, &GateHostMsg::RemoteRejected { reason })
 }
 
-/// 发 `message`，关掉 TLS，等手机读完回话再断（见 `linger`），不然回话可能丢。
+/// 发 `message`，关掉 TLS，等手机读完回话再断（`linger`），不然回话可能丢。
 fn say_and_close(
     tls: &mut StreamOwned<ServerConnection, Deadline>,
     tcp: &TcpStream,

@@ -30,7 +30,7 @@ const UNFINISHED_RETRY: Duration = Duration::from_millis(100);
 /// 交接时等读线程停下的过程中，隔这么久看一次它停了没有。
 const DRAIN_POLL: Duration = Duration::from_millis(2);
 
-/// 会话交出 PTY 时还没写进 PTY 的输入，见 `Inbox::Release`、`Inbox::Open`。
+/// 会话交出 PTY 时还没写进 PTY 的输入。
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Unwritten {
     /// 接手的一方当场写的。
@@ -54,7 +54,7 @@ pub(crate) enum Prepared {
     Ready(Box<Exported>),
 }
 
-/// 会话交给新宿主的东西，见 `runode_protocol::HandoffPart::Session`。
+/// 会话交给新宿主的东西。
 pub(crate) struct Exported {
     pub(crate) export: SessionExport,
     /// 复制的一份 PTY master，自己这份照常留着直到提交；还没启动 shell 时为空。交出方发出去以后
@@ -72,7 +72,7 @@ pub(crate) struct Exported {
     pub(crate) shell: Option<String>,
 }
 
-/// 交接过来、已经启动了 shell 的会话，见 `adopt`。
+/// 交接过来、已经启动了 shell 的会话。
 pub(crate) struct Adopted {
     pub(crate) handoff: PtyHandoff,
     pub(crate) export: SessionExport,
@@ -106,7 +106,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
     let desktop = Arc::new(AtomicU64::new(0));
     let runner_desktop = desktop.clone();
     let spawned = thread::Builder::new().name(format!("session-{id}")).spawn(move || {
-        // 最后丢掉，排在 `Pty` 后面，见 `Alive`。
+        // 最后丢掉，排在 `Pty` 后面。
         let _alive = alive;
         pty::set_current_thread_interactive();
         let _close = CloseOnDrop(credits.clone());
@@ -139,7 +139,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
     Ok(Adopting { handle: Handle { inbox, killed, driven, desktop }, created })
 }
 
-/// 正在重建的接手来的会话，见 `adopt`。
+/// 正在重建的接手来的会话。
 pub(crate) struct Adopting {
     handle: Handle,
     created: mpsc::Receiver<Result<bool>>,
@@ -235,7 +235,7 @@ impl Runner {
 
     /// 交接的第一步：已经启动了 shell 的，叫停读线程，把它已经读出来的输出处理完，编原始快照
     /// （VT 停在编不进快照的序列中间时让程序再输出一会儿再试，最多 `SNAPSHOT_PATIENCE`）和重放，
-    /// 复制一份 PTY master；还没启动的只交状态。期间别的消息按冻结的规矩办，见 `hand_over`。
+    /// 复制一份 PTY master；还没启动的只交状态。期间别的消息照冻结时的规矩办。
     fn prepare(&mut self, inbox: &mpsc::Receiver<Inbox>, killed: &AtomicBool, freeze: &mut Freeze) -> Prepared {
         if self.exited {
             return Prepared::Gone;
@@ -322,7 +322,7 @@ impl Runner {
         }
     }
 
-    /// 交接期间收到的一条消息，见 `hand_over`。
+    /// 处理交接期间收到的一条消息。
     fn frozen(&mut self, message: Inbox, freeze: &mut Freeze) {
         match message {
             message @ (Inbox::Pty(_) | Inbox::Info(_) | Inbox::ReadScreen { .. }) => self.handle(message),
@@ -346,7 +346,7 @@ impl Runner {
     }
 
     /// 交接提交了：交出 PTY（不结束 shell），返回交出时没写进 PTY 的输入，`held` 里存下的输入编好
-    /// 接在后面；还在等提示符的 `TypeAtPrompt`（`held` 里的后来的替掉先前的，同 `handle`）单独交出，
+    /// 接在后面；还在等提示符的 `TypeAtPrompt`（`held` 里的后来的替掉先前的）单独交出，
     /// 接手的一方接着等。还没启动 shell 的会话没有 PTY 可交，只有存下的输入。
     pub(super) fn release(&mut self, held: Vec<Inbox>) -> Unwritten {
         // 在等桌面回话的读剪贴板请求新宿主接不过去（它不知道在等什么，也不会替它计时），程序会一直等：交出
@@ -396,7 +396,7 @@ impl Runner {
     }
 }
 
-/// 交接期间冻结着的会话存下的东西，见 `Runner::hand_over`。
+/// 交接期间冻结着的会话存下的东西。
 #[derive(Default)]
 struct Freeze {
     /// 冻结期间收到的、改会话的请求，按先后。

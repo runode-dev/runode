@@ -284,7 +284,7 @@ pub enum ChannelReply {
     Unknown,
 }
 
-/// 为什么开不了专用连接，见 `ChannelReply::ChannelRefused`。
+/// 为什么开不了专用连接，随 `ChannelReply::ChannelRefused` 回给对面。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChannelRefusal {

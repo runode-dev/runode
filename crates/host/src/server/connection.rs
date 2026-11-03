@@ -40,10 +40,10 @@ use crate::{
     session::{Drive, Inbox, Screen, Subscribe},
 };
 
-/// 快照分成这么大的帧发，不必一帧装下整份（上限见 `runode_protocol::MAX_PAYLOAD`）。
+/// 快照分成这么大的帧发，不必一帧装下整份。
 const SNAPSHOT_CHUNK: usize = 1 << 20;
 /// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求、列目录和列命令的
-/// 请求各另有这么多，见 `Waiting`。
+/// 请求各另有这么多。
 pub(super) const MAX_WAITING: usize = 16;
 /// 等回话的请求已经有 `MAX_WAITING` 条时回的错误。
 const ERROR_TOO_MANY_WAITING: &str = "too many requests are waiting for an answer";
@@ -166,7 +166,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
 
 impl Shared {
     /// 所有会话在 `SessionList` 里的样子：在调用的线程里把请求按先后送到各个会话线程，返回等
-    /// 回话的一端，见 `collect_sessions`。
+    /// 回话的一端。
     fn ask_sessions(&self) -> Vec<mpsc::Receiver<SessionInfo>> {
         self.handles()
             .into_iter()
@@ -235,9 +235,9 @@ struct Connection {
     out: Outbox,
     /// `Hello` 里说的前端种类。
     kind: ClientKind,
-    /// `Hello` 里说的前端所在的会话，记谁在操作会话时用，见 `drive`。
+    /// `Hello` 里说的前端所在的会话，记谁在操作会话时用。
     by: Option<SessionId>,
-    /// `Hello` 里报的设备名，尺寸归这条连接时告诉别的前端，见 `HostMsg::SizeOwner`。
+    /// `Hello` 里报的设备名，尺寸归这条连接时在 `HostMsg::SizeOwner` 里告诉别的前端。
     device: Option<String>,
     /// 前端解得了快照：自己说能解，构建也和宿主一样。
     snapshots: bool,
@@ -250,7 +250,7 @@ struct Connection {
     waiting: Waiting,
     /// 在排队或在办的 git 请求，和 `waiting` 分开算：推送、拉取卡在网络上时不占列会话、读屏幕的名额。
     git_waiting: Waiting,
-    /// 在另起的线程里读文件系统的请求（列目录、列命令），也和 `waiting` 分开算，见 `read_files`。
+    /// 在另起的线程里读文件系统的请求（列目录、列命令），也和 `waiting` 分开算。
     files_waiting: Waiting,
     /// 在另起的线程里开的会话，和 `files_waiting` 同理另算。
     spawn_waiting: Waiting,
@@ -274,7 +274,7 @@ impl Connection {
             self.goodbye("the first message must be hello");
             return;
         };
-        // 接手的新宿主不比对协议版本，永远如此，见 `runode_protocol::message` 的模块文档。
+        // 接手的新宿主不比对协议版本：旧宿主可能是任何发布过的版本，新宿主都要能和它谈交接。
         #[cfg(unix)]
         if client == ClientKind::Successor {
             self.kind = client;
@@ -500,7 +500,7 @@ impl Connection {
                 self.to_ui(req, message);
             }
             ClientMsg::Layout { req } => {
-                // 界面自己问的是宿主手里的布局：恢复窗口前接回没开着时宿主办的事，见 `workspaces`。
+                // 界面自己问的是宿主手里的布局：恢复窗口前接回没开着时宿主办的事。
                 if self.kind == ClientKind::Desktop {
                     self.out.control(&HostMsg::Layout { req, windows: self.shared.held_layout() });
                     return;
@@ -597,7 +597,7 @@ impl Connection {
             ClientMsg::WriteClipboard { .. } | ClientMsg::ReadClipboard { .. } => {
                 self.error(None, None, "only the host asks the runode window to use the clipboard".into());
             }
-            // 宿主要退出时这条连接上之后的请求都不办（同一次读进缓冲里的 `Spawn` 也是），见 `Connection::run`。
+            // 宿主要退出时这条连接上之后的请求都不办（同一次读进缓冲里的 `Spawn` 也是）。
             ClientMsg::Shutdown { kill_sessions: true } => {
                 self.channels.clear();
                 self.shared.kill_all();
@@ -606,7 +606,7 @@ impl Connection {
             ClientMsg::Shutdown { kill_sessions: false } => {
                 self.error(None, None, "the host cannot hand its sessions over yet".into());
             }
-            // 交接只在 `Hello` 里说自己是 `ClientKind::Successor` 的连接上谈，见 `successor`。
+            // 交接只在 `Hello` 里说自己是 `ClientKind::Successor` 的连接上谈。
             ClientMsg::Handoff { .. }
             | ClientMsg::HandoffReady
             | ClientMsg::HandoffAbort { .. }
@@ -627,7 +627,7 @@ impl Connection {
 
     /// 把要界面办的请求转给界面：这条连接在 `Hello` 里报了所在的会话时，交给看着那个会话的桌面
     /// （`session::Handle::desktop`），几台电脑上的桌面连着同一个宿主时，命令行开的终端才落在它所在的
-    /// 窗口里；挑不出来时交给最近连上的 `ClientKind::Desktop` 连接。没有界面连接时宿主自己办，见 `headless`。
+    /// 窗口里；挑不出来时交给最近连上的 `ClientKind::Desktop` 连接。没有界面连接时宿主自己办。
     fn to_ui(&self, req: u32, request: ClientMsg) {
         let asker = Asker::Client { from: self.id, origin: self.out.clone(), req };
         let preferred = self.by.and_then(|by| self.shared.registry().sessions.get(&by)?.desktop());
@@ -705,7 +705,7 @@ impl Connection {
 
     /// 连上会话。已经连着的换一个新通道重新连，前端收到 `Resync` 后就是这样重新连上的；
     /// `MetaOnly` 和看屏幕之间来回切换也是这样。不先发 `Detach`：会话线程收到同一条连接的
-    /// `Subscribe` 时换掉旧的订阅，尺寸归属的状态（见 `Runner::subscribe`）留着；旧通道的帧都在
+    /// `Subscribe` 时换掉旧的订阅，尺寸归属的状态留着；旧通道的帧都在
     /// 新的 `Attached` 之前，新通道的帧都在它之后。
     fn attach(&mut self, id: SessionId, size: Option<GridSize>, mode: AttachMode) {
         if let Err(message) = size.map_or(Ok(()), check_size) {
@@ -808,7 +808,7 @@ impl Connection {
         self.read_files_in(&self.files_waiting, req, name, answer);
     }
 
-    /// 同 `read_files`，占 `slots` 的名额。
+    /// 另起线程办一件要读文件系统的请求，占 `slots` 的一个名额。
     fn read_files_in(
         &self,
         slots: &Waiting,
@@ -829,14 +829,14 @@ impl Connection {
         });
     }
 
-    /// 另起线程办一件看板的请求，见 `todos`：要读写库、stat 目录，开始任务时还要跑 git、开会话。
+    /// 另起线程办一件看板的请求：要读写库、stat 目录，开始任务时还要跑 git、开会话。
     fn todos(&self, req: u32, name: &str, answer: impl FnOnce(&Shared) -> Result<HostMsg, String> + Send + 'static) {
         let shared = self.shared.clone();
         self.read_files(req, name, move || answer(&shared));
     }
 
     /// 在会话 `id` 所在的仓库里办 git 请求：向会话线程要它的目录，连同请求交给这条连接的 git
-    /// 工作线程，见 `git` 模块。
+    /// 工作线程。
     fn git(&mut self, req: u32, id: SessionId, request: GitRequest) {
         if self.out.backed_up() {
             self.error(Some(req), None, ERROR_BACKED_UP.into());
@@ -869,7 +869,7 @@ impl Connection {
         }
     }
 
-    /// 这条连接要对会话做 `action`，先告诉会话谁在操作它（见 `SessionMeta::driver`）：桌面、
+    /// 这条连接要对会话做 `action`，先告诉会话谁在操作它：桌面、
     /// 手机、TUI 的界面上是用户自己（手机上的滚动和点按也发输入帧），清掉记录（会话没被标过时
     /// `Handle::send` 直接丢掉，不进收件箱）；别的前端记下来。只有会改会话的操作才调。
     fn drive(&self, id: SessionId, action: DriveAction) {

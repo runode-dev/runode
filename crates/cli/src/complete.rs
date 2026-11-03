@@ -63,9 +63,9 @@ enum Value {
     Choice(&'static [(&'static str, &'static str)]),
     /// `--key`：键名。
     Key,
-    /// `--command`：后面可以跟一个次数，见 `is_command_count`。
+    /// `--command`：后面可以跟一个次数，也可以不跟，是不是次数由 `is_command_count` 认。
     OptionalCount,
-    /// `--for`：有的写法后面还跟一个词，见 `until_takes_value`。
+    /// `--for`：有的写法后面还跟一个词，哪些写法由 `until_takes_value` 认。
     Until,
     /// 带值，但没有候选（数字、时间、文字）。
     Free,

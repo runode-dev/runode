@@ -14,8 +14,7 @@
 //! 闸门（`Gate`）上，一个字节都不读不写；`Pty::resume_reading` 打开闸门，不接手了就
 //! `Pty::release` 原样交回去。线程事先起好，开闸这一步不会失败。从没开过闸的 `Pty` 直接丢掉
 //! （比如接手方的会话线程 panic 了）也不碰 shell：只放读写线程过去、等它们结束，关掉自己的
-//! 描述符，不发信号：那时 shell 还归交出方管，它回滚后照常用。开过闸以后丢掉照常结束 shell，
-//! 见 `Drop`。
+//! 描述符，不发信号：那时 shell 还归交出方管，它回滚后照常用。开过闸以后丢掉照常结束 shell。
 
 mod notify;
 mod reader;
@@ -51,7 +50,7 @@ const WRITER_STUCK_POLL: Duration = Duration::from_millis(50);
 /// 比它大的软上限。
 const FD_LIMIT_TARGET: libc::rlim_t = 10240;
 
-/// 闸门的状态，见 `Gate`。
+/// 闸门（`Gate`）的状态。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum GateState {
     Closed,
@@ -254,9 +253,9 @@ pub struct PtyHandoff {
     pub pid: u32,
     /// PTY 现在的尺寸。内核里的尺寸随描述符一起留着，这里只是给接手方记账用。
     pub size: GridSize,
-    /// 启动 shell 时交给集成脚本的报告口令，见 `Pty::report_token`。
+    /// 启动 shell 时交给集成脚本的报告口令。
     pub report_token: Option<String>,
-    /// 交出时还没写进 PTY 的输入（程序没在读输入），接手方在别的输入之前先写，见 `Pty::adopt`。
+    /// 交出时还没写进 PTY 的输入（程序没在读输入），接手方在别的输入之前先写。
     pub pending_input: Vec<u8>,
 }
 
@@ -337,7 +336,7 @@ pub struct Pty {
     /// 碰 PTY。
     master: Option<Arc<OwnedFd>>,
     /// `adopt_paused` 接手来、还没 `resume_reading` 时读写线程等着的闸门，开了或者放弃了以后为
-    /// `None`。丢掉时它还在就说明从没开过闸，不结束 shell，见 `Drop`。
+    /// `None`。丢掉时它还在就说明从没开过闸，不结束 shell。
     gate: Option<Arc<Gate>>,
     /// 叫醒读线程；接手来的会话里还看着 shell 退出。
     notifier: Arc<Notifier>,
@@ -350,14 +349,14 @@ pub struct Pty {
     pub writer: PtyWriter,
     /// 写线程，`release` 时取走。
     writer_thread: Option<WriterThread>,
-    /// 启动 shell 时交给集成脚本的报告口令，见 `shell_integration::prepare`；没注入集成或者
+    /// 启动 shell 时交给集成脚本的报告口令；没注入集成或者
     /// 还没启动时为 `None`。
     report_token: Option<String>,
     /// 交口令给集成脚本的文件，脚本读完自己删；shell 没读就退出时由 `Drop` 删。
     report_token_file: Option<PathBuf>,
-    /// 启动 shell 时另外设的环境变量，见 `set_env`。
+    /// 启动 shell 时另外设的环境变量。
     env: Vec<(OsString, OsString)>,
-    /// 启动 shell 时告诉集成脚本开哪些功能，见 `set_shell_features`。
+    /// 启动 shell 时告诉集成脚本开哪些功能。
     shell_features: String,
     /// 最近一次设给 PTY 的尺寸。
     size: Cell<GridSize>,
@@ -471,7 +470,7 @@ impl Pty {
         self.env.push((key.into(), value.into()));
     }
 
-    /// 启动 shell 时按 `settings` 告诉集成脚本开哪些功能，见 `shell_integration::features`；不调时
+    /// 启动 shell 时按 `settings` 告诉集成脚本开哪些功能；不调时
     /// 按默认的设置开。已经启动了的不受影响。
     pub fn set_shell_features(&mut self, settings: &TermSettings) {
         self.shell_features = shell_integration::features(settings);
@@ -480,14 +479,15 @@ impl Pty {
     /// 接手 `Pty::release` 交出来的会话：用交来的 master 起读写线程，输出交给 `sink`，交出时没写
     /// 出去的输入先写。shell 不是本进程的子进程，不回收它也拿不到退出码；它退出时即使 PTY 还没
     /// 读到 EOF（比如后台程序还开着终端），读完剩下的输出也报告 `PtyEvent::Exited`。丢掉返回的
-    /// `Pty` 会结束 shell 的进程组，见 `Drop`。失败时交来的东西原样放在 `AdoptError` 里还回去。
+    /// `Pty` 会结束 shell 的进程组。失败时交来的东西原样放在 `AdoptError` 里还回去。
     pub fn adopt(handoff: PtyHandoff, sink: PtySink) -> Result<Self, AdoptError> {
         Self::adopt_with(handoff, sink, None)
     }
 
-    /// 同 `adopt`，但读写线程起好后先停在闸门上：不从 PTY 读，`handoff.pending_input` 和之后经
-    /// `writer` 写的都排着不写，直到 `resume_reading` 打开闸门，排着的按先后写出去（交出时没写
-    /// 出去的在最前面）。交出方还没提交、可能回滚时用它：在这之前 PTY 原封未动。
+    /// 接手 `Pty::release` 交出来的会话，读写线程起好后先停在闸门上：不从 PTY 读，
+    /// `handoff.pending_input` 和之后经 `writer` 写的都排着不写，直到 `resume_reading` 打开闸门，
+    /// 排着的按先后写出去（交出时没写出去的在最前面）。交出方还没提交、可能回滚时用它：在这之前 PTY
+    /// 原封未动。
     ///
     /// 停着时改尺寸、读前台进程照常（它们不读写 PTY）；不接手了用 `release` 原样交回去，
     /// `pending_input` 和排着的输入都在交回的 `PtyHandoff::pending_input` 里。
@@ -496,7 +496,7 @@ impl Pty {
     /// 还没提交，shell 仍归它管，丢掉只是放弃接手。读写线程放过去并等它们结束，排着的输入丢掉，
     /// 关掉这边的 master 和 `Notifier`，不给 shell 和前台进程组发任何信号。这时交出方要是也已经
     /// 关了它那份 master，这里关的就是最后一份，shell 照终端的规矩收到内核发的 SIGHUP。开过闸
-    /// 以后丢掉和 `adopt` 的一样结束 shell。
+    /// 以后丢掉照常结束 shell 的进程组。
     pub fn adopt_paused(handoff: PtyHandoff, sink: PtySink) -> Result<Self, AdoptError> {
         Self::adopt_with(handoff, sink, Some(Gate::closed()))
     }
@@ -565,7 +565,7 @@ impl Pty {
     /// 让读线程停下，之后不再从 PTY 读，没读的输出留在 PTY 里。读线程已经读出来的那块照样交给
     /// `PtySink`，交完就结束，不报告 `PtyEvent::Exited`；`reader_finished` 为 true 后，`PtySink`
     /// 不会再收到东西。不等读线程结束。交接用它先停下来，交接不成或者要等下一批输出（比如快照
-    /// 编不出来，见 `SnapshotError::Unfinished`）时用 `resume_reading` 接着读。
+    /// 编不出来、得到 `SnapshotError::Unfinished`）时用 `resume_reading` 接着读。
     pub fn stop_reading(&mut self) {
         if let Some(reader) = &mut self.reader {
             reader.stop();
@@ -591,9 +591,9 @@ impl Pty {
         self.reader.as_ref().is_none_or(Reader::finished)
     }
 
-    /// 交出会话，不结束 shell：停下读线程并等它结束（同 `stop_reading`），叫停写线程，然后交出
+    /// 交出会话，不结束 shell：停下读线程并等它结束，叫停写线程，然后交出
     /// master 描述符、shell 的 pid、尺寸、报告口令和写不进去的输入（程序没在读输入时，写线程
-    /// 不等它读，见 `PtyHandoff::pending_input`）。交出后这个 `Pty` 不再管这个会话：写进去的都
+    /// 不等它读）。交出后这个 `Pty` 不再管这个会话：写进去的都
     /// 丢掉，改尺寸、读前台进程都不碰 PTY，丢掉它也不结束 shell。出错时（还没启动 shell、已经
     /// 交出去过）什么都没动，`Pty` 照常可用。
     ///
@@ -638,7 +638,7 @@ impl Pty {
     }
 
     /// 丢掉还停在闸门上、从没开过闸的 `Pty`：放读写线程过去并等它们结束（它们都还停在闸门上，
-    /// 放过去就结束，不会卡住），排着的输入丢掉；shell 不碰，见 `adopt_paused`。读写线程手里的
+    /// 放过去就结束，不会卡住），排着的输入丢掉；shell 不碰。读写线程手里的
     /// master 和 `Notifier` 随它们结束放开，这个 `Pty` 自己的那份随后在字段丢掉时关掉。
     fn drop_paused(&mut self, gate: &Gate) {
         gate.set(GateState::Abandoned);
@@ -658,12 +658,13 @@ impl Pty {
         self.pending.is_none()
     }
 
-    /// shell 报告 PATH 等信息时要带的口令，见 `shell_integration::prepare`。
+    /// shell 报告 PATH 等信息时要带的口令。
     pub fn report_token(&self) -> Option<&str> {
         self.report_token.as_deref()
     }
 
-    /// 在 `cwd` 下启动 shell 和读线程，参数同 `spawn`。已经启动过时什么都不做。shell 起不来
+    /// 在 `cwd` 下以登录 shell 方式启动 `shell`（为 `None` 时用用户的 `$SHELL`），按 `integration`
+    /// 注入 shell 集成，并启动读线程。已经启动过时什么都不做。shell 起不来
     /// （程序或者目录不存在）时什么都没动，还算没启动，可以换个参数再来。读线程起不来时 shell
     /// 已经启动过，这时结束它再返回错误，算启动过、不能再来。
     pub fn start(
@@ -823,7 +824,7 @@ pub(super) fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
     vec![leader]
 }
 
-/// 进程启动时的可执行文件路径和全部参数，用 `sysctl(KERN_PROCARGS2)` 读，见 `parse_procargs`。程序运行中
+/// 进程启动时的可执行文件路径和全部参数，用 `sysctl(KERN_PROCARGS2)` 读。程序运行中
 /// 改了 argv[0]（比如 node 的 `process.title`）时读到的是改过的。
 #[cfg(target_os = "macos")]
 pub(super) fn args_of(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
@@ -944,7 +945,7 @@ fn process_cwd(_pid: libc::pid_t) -> Option<PathBuf> {
     None
 }
 
-/// 结束自己启动的 shell 并在单独的线程里回收，见 `Pty` 的 `drop`。
+/// 结束自己启动的 shell 并在单独的线程里回收。
 fn end_child(mut child: Box<dyn Child + Send + Sync>) {
     let _ = child.kill();
     let _ = thread::Builder::new().name("pty-reaper".into()).spawn(move || {

@@ -40,7 +40,7 @@ pub(super) struct WorkspaceInput<'a, P> {
 pub(super) struct TabInput<'a, P> {
     pub(super) root: &'a Node<P>,
     pub(super) focused: P,
-    /// 浮着的分屏和它们在标签区域里的位置（按标签区域归一化），见 `Tab::floating`。
+    /// 浮着的分屏和它们在标签区域里的位置（按标签区域归一化）。
     pub(super) floating: &'a [(P, Rect)],
 }
 

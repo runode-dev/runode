@@ -46,7 +46,7 @@ impl Picture {
         }
     }
 
-    /// 关掉或换掉时放掉解码结果，见 `Preview::release_image`。
+    /// 放掉这张图的解码结果。
     pub(super) fn release(&self, cx: &mut App) {
         match self {
             Picture::Bitmap(image, _) => ui::release_bitmap(image.clone(), cx),

@@ -12,11 +12,11 @@ use runode_protocol::todo::Todo;
 /// 分支名和工作树目录名里取自标题的部分最长这么多个字符。
 const MAX_SLUG: usize = 40;
 
-/// 给任务开工作树时最多拿这么多个没被占的名字去试，见 `add_worktree`。
+/// 给任务开工作树时最多拿这么多个没被占的名字去试。
 const WORKTREE_ATTEMPTS: usize = 2;
 
 /// 给任务新开工作树：仓库的 `.worktrees/<名字>`，分支 `runode/<名字>`，名字取自标题；已经有了时名字后面
-/// 加上任务的标识，还有的话再加上序号。占掉了的（见 `taken`）直接跳过，不用 git 去试；
+/// 加上任务的标识，还有的话再加上序号。已经被占了的名字（`taken`）直接跳过，不用 git 去试；
 /// 真去试的最多 `WORKTREE_ATTEMPTS` 个。返回工作树的根目录和分支。
 pub(super) fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
     let repo =

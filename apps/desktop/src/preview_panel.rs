@@ -359,7 +359,7 @@ impl Preview {
 }
 
 impl Loaded {
-    /// 放掉这份内容里图片的解码结果，见 `Preview::release_image`。
+    /// 放掉这份内容里图片的解码结果。
     fn release(&self, cx: &mut App) {
         match self {
             Loaded::Image(image) => ui::release_bitmap(image.clone(), cx),

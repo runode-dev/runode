@@ -93,7 +93,7 @@ impl WindowView {
     }
 
     /// 引导页开着时窗口的内容。缓存：窗口跟着终端输出几乎每帧都重画，这一页只在自己的状态变了时重画。辅助工具
-    /// 开着时不缓存，理由同 `cached_slot`。
+    /// 开着时不缓存，GPUI 才会逐帧重建报给辅助工具的节点。
     pub(super) fn render_mobile_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(page) = self.mobile_page().map(|page| page.view.clone()) else { return Vec::new() };
         let page = if window.is_a11y_active() {

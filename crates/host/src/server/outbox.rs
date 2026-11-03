@@ -23,7 +23,7 @@ pub(super) const OUTBOX_LIMIT: usize = 32 << 20;
 /// 手机连接（`ClientKind::Mobile`）的 `OUTBOX_LIMIT`：手机隔着 Wi-Fi 和 TLS 读得慢，积压的每个字节都是
 /// 回显前要等的，宁可早点 `Resync` 跳过一段输出，也不让画面落后几秒。
 pub(super) const MOBILE_OUTBOX_LIMIT: usize = 1 << 20;
-/// 不算快照的积压过了它，读的线程不再办这条连接的请求，直接断开，见 `Outbox::overflowing`。过了
+/// 不算快照的积压过了它，读的线程不再办这条连接的请求，直接断开。过了
 /// `OUTBOX_LIMIT` 的会话输出改发 `Resync`、多数请求回 `Error`，但列目录、看板、`Done` 这些回话不看积压，
 /// 只发不读的前端能让它们一直涨；正常读着的前端积压到这里之前早就 `Resync` 了，留了好几倍的余量。
 pub(super) const OUTBOX_HARD_LIMIT: usize = 8 * OUTBOX_LIMIT;
@@ -60,12 +60,12 @@ pub(super) fn start_writer(stream: &UnixStream) -> Option<Outbox> {
 pub(crate) struct Outbox {
     tx: mpsc::Sender<Out>,
     pub(super) queued: Arc<Queued>,
-    /// `queued` 过了它就算积压，见 `backed_up`；收到 `Hello` 后按前端种类定，之后才有会话的 sink 克隆它。
+    /// `queued` 过了它就算积压；收到 `Hello` 后按前端种类定，之后才有会话的 sink 克隆它。
     pub(super) limit: usize,
 }
 
 /// 已经交给写的线程、还没写出去的载荷字节数，快照和别的分开记：`session_sink` 判断积压时只看
-/// `streaming`（见 `streaming_backed_up`），各记各的，读它不会撞上另一个数正改到一半。
+/// `streaming`，各记各的，读它不会撞上另一个数正改到一半。
 #[derive(Default)]
 pub(super) struct Queued {
     pub(super) streaming: AtomicUsize,
@@ -96,7 +96,7 @@ enum Out {
     /// 之前的帧写完后断开连接。
     Close,
     /// 之前的帧写完后写的线程结束，但不断开连接，写完时往里发一声：交接时之后由交出会话的线程
-    /// 直接在 socket 上发描述符消息，见 `handoff::give`。
+    /// 直接在 socket 上发描述符消息。
     Detach(mpsc::Sender<()>),
 }
 

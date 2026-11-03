@@ -669,7 +669,7 @@ fn paired_title(paired: &[Paired]) -> String {
     }
 }
 
-/// 配对过的一台设备：手机或电脑的图标，名字，是哪种、连着没有和哪天配的，右边撤销（先问一句，见 `revoke_device`）。
+/// 配对过的一台设备：手机或电脑的图标，名字，是哪种、连着没有和哪天配的，右边撤销（先问一句）。
 fn device_row(device: &Paired, theme: &Theme, cx: &mut Context<MobilePage>) -> Stateful<Div> {
     let id = device.id;
     let (year, month, day) = local_date(device.paired_at);

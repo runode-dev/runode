@@ -26,7 +26,7 @@ pub enum Upload {
     Bytes { name: String, bytes: Vec<u8> },
 }
 
-/// 传到 `host` 上，回各自在远端的绝对路径，顺序同 `Upload::Files`。会阻塞，在后台线程上调。
+/// 传到 `host` 上，回各自在远端的绝对路径，和 `Upload::Files` 里的文件按顺序一一对应。会阻塞，在后台线程上调。
 pub fn upload(host: &RemoteHost, upload: Upload) -> Result<Vec<String>> {
     match upload {
         // Windows 远端只收 tar 包：先落成本机的临时文件，再按文件传。临时目录新建、只给自己进：Linux 的

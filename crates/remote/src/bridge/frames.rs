@@ -1,7 +1,7 @@
 //! 桥接时两个方向上的帧边界。字节照旧一块一块地搬，这里只跟着帧头数位置：
 //!
-//! - 手机 → 宿主（`FromPhone`）：控制帧整帧攒齐、解出 `ClientMsg`，这台设备不能做的（见
-//!   `ClientMsg::remote_refusal`）不转给宿主，改给它回一条 `HostMsg::Error`；这边自己办的（见 `LocalRequests`）
+//! - 手机 → 宿主（`FromPhone`）：控制帧整帧攒齐、解出 `ClientMsg`，这台设备不能做的（由
+//!   `ClientMsg::remote_refusal` 判断）不转给宿主，改给它回一条 `HostMsg::Error`；这边自己办的（`LocalRequests`）
 //!   也不转，回这边办完的回话；别的帧（输入等）不解析，边到边转。
 //! - 宿主 → 手机（`ToPhone`）：只数帧头里的长度，知道现在是不是正好在两帧之间，回给手机的
 //!   回话只在那里插进去，不会把宿主的帧拆开。

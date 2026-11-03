@@ -61,7 +61,8 @@ pub fn column(todo: &Todo, session: Option<&SessionInfo>, now: u64) -> Column {
 
 /// 定时上次开出、还没完成的 `todo` 挡不挡着它下一次到点：没开始成、还在干活或者停在询问上时挡着，到点跳过，
 /// 免得两个 agent 改同一处、也免得每到点就多一张开不起来的待办。停在权限询问上的看板算「需要你」，可用户
-/// 一答应它就接着改，所以也挡着。参数同 `column`；`session` 为空表示找不到那个会话。
+/// 一答应它就接着改，所以也挡着。`session` 是它那个会话现在的状态，为空表示找不到那个会话；
+/// `now` 是 Unix 时间的秒数。
 pub fn holds_schedule(todo: &Todo, session: Option<&SessionInfo>, now: u64) -> bool {
     let Some(id) = todo.session else { return true };
     session.filter(|info| info.id == id).is_some_and(|info| {

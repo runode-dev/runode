@@ -47,7 +47,7 @@ use std::{
 /// 关掉 `core.fsmonitor` 和 `log.showSignature`：仓库自己的配置能把前者、以及校验签名用的
 /// `gpg.*.program` 设成任意命令，进一个别人给的目录不能因此跑了里面的脚本。
 /// 命令行上的 `-c` 压过仓库的配置，也传给 git 自己拉起的 git。其余会执行命令的配置：
-/// `diff.external` 和 textconv 由 `snapshot::DIFF` 关掉，过滤器见 `filter_overrides`。
+/// `diff.external` 和 textconv 由 `snapshot::DIFF` 关掉，过滤器另由 `filter_overrides` 覆盖。
 /// `runnable` 为假时不起 git，是 `GitError::Spawn`。
 pub(crate) fn git_command(dir: &Path) -> Result<Command> {
     if !runnable(false) {
@@ -123,7 +123,7 @@ pub(crate) fn git<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Option<Vec<u8>> {
     git_with(dir, &[], args)
 }
 
-/// 同 `git`，另外设上 `env` 里的环境变量（`filter_overrides` 给的）。
+/// 在 `dir` 里跑一条 git 命令，另外设上 `env` 里的环境变量（`filter_overrides` 给的）。
 pub(crate) fn git_with<S: AsRef<OsStr>>(dir: &Path, env: &[(String, String)], args: &[S]) -> Option<Vec<u8>> {
     let mut command = git_command(dir).ok()?;
     command.args(args).envs(env.iter().cloned()).stderr(Stdio::null()).env("GIT_OPTIONAL_LOCKS", "0");

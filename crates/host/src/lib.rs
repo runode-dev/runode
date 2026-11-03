@@ -213,7 +213,7 @@ impl Shared {
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
         let handle = session::spawn(setup, options)?;
         // 锁的先后：拿着 `peers` 再拿 `registry`；交接开始时在同一把锁里定下要交的会话，要退出时在同一把
-        // 锁里置上 `Phase::Stopping`、清空登记表（见 `Shared::shut_down`）。
+        // 锁里置上 `Phase::Stopping`、清空登记表。
         let peers = self.peers();
         if let Some(refused) = refusal(&peers) {
             drop(peers);

@@ -158,8 +158,8 @@ fn slashed(path: PathBuf) -> PathBuf {
     if cfg!(windows) { PathBuf::from(text(&path).replace('\\', "/")) } else { path }
 }
 
-/// 传到 `project` 所在的那台机器上；交回各自在那边的绝对路径，顺序同 `Upload::Files`。目录连同里面的一起传，
-/// 里面的符号链接跳过。会阻塞，在后台线程上调。
+/// 传到 `project` 所在的那台机器上；交回各自在那边的绝对路径，和 `Upload::Files` 里的文件按顺序一一对应。
+/// 目录连同里面的一起传，里面的符号链接跳过。会阻塞，在后台线程上调。
 pub(crate) fn upload(project: &ProjectHost, upload: Upload) -> Result<Vec<String>> {
     let ProjectHost::Remote(client) = project else {
         bail!("this computer is not remote");

@@ -1,7 +1,7 @@
 //! 可以选上、取消的小标签（多选里的一项）：选上的描强调色、打个勾。自带 `Role::CheckBox`、报给辅助工具的
 //! 名字和选没选；点击照旧用 `a11y` 的 `Press`。
 //!
-//! 调用方接着写的样式盖在组件自己的上面，写法同 `Button`。
+//! 调用方接着写的样式盖在组件自己的上面。
 
 use gpui::{
     App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement, RenderOnce, Role, SharedString,

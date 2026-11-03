@@ -18,7 +18,8 @@ use crate::ui::{
     theme::ActiveTheme as _,
 };
 
-/// 交给 `App::set_prompt_builder` 的构造函数，参数同 `Window::prompt`。
+/// 交给 `App::set_prompt_builder` 的构造函数：在窗口里画对话框，`message` 和 `detail` 是正文，`answers` 是按钮，
+/// 不按 `level` 区分样子。
 pub(super) fn build(
     _level: PromptLevel,
     message: &str,
