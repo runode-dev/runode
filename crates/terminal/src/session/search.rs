@@ -1,7 +1,7 @@
 //! 搜索：搜索栏打开期间的 libghostty 搜索，以及把视口里的匹配换算成高亮段。
 
 use libghostty_vt::{
-    search::{MatchBuffer, Search},
+    search::{MatchBuffer, Scroll, Search},
     terminal::{Point, PointCoordinate, PointSpace, Terminal},
 };
 
@@ -16,9 +16,14 @@ impl Session {
     }
 
     fn try_search(&mut self, needle: &str) -> libghostty_vt::error::Result<()> {
+        // 选中匹配后视口由 `reveal_selected` 来滚，libghostty 自己滚只滚到刚好露出。
         let search = match &mut self.search {
             Some(search) => search,
-            None => self.search.insert(Search::new(&mut self.terminal)?),
+            None => {
+                let mut search = Search::new(&mut self.terminal)?;
+                search.set_scroll(Scroll::None)?;
+                self.search.insert(search)
+            }
         };
         // 空的 needle 清掉搜索，回到空闲。
         if needle.is_empty() {
@@ -29,6 +34,16 @@ impl Session {
             search.select_next(&mut self.terminal)?;
             // 选中的匹配可能在视口最后一行：平滑滚动错开的半行会把它挡掉一截。
             self.scroll_offset = 0.;
+            self.reveal_selected()?;
+        }
+        Ok(())
+    }
+
+    /// 选中的匹配不在视口里时滚到让它落在中间，前后几行都看得到；已经看得到时不动。
+    fn reveal_selected(&mut self) -> libghostty_vt::error::Result<()> {
+        let Some(search) = &mut self.search else { return Ok(()) };
+        if let Some(row) = hidden_selected_row(search, &mut self.terminal)? {
+            self.scroll_to_row(row);
         }
         Ok(())
     }
@@ -43,7 +58,7 @@ impl Session {
         });
         // 同 `try_search`，不留平滑滚动错开的半行。
         self.scroll_offset = 0.;
-        log_err("search step", result);
+        log_err("search step", result.and_then(|_| self.reveal_selected()));
     }
 
     /// 搜索栏上显示的进度：选中的是第几个（从 0 数，没选中为 `None`）和匹配总数。
@@ -57,6 +72,20 @@ impl Session {
     pub fn end_search(&mut self) {
         self.search = None;
     }
+}
+
+/// 选中的匹配开头在视口外时，它在整个屏幕（含回滚历史）中的行号；没选中或已经看得到时为 `None`。
+fn hidden_selected_row(
+    search: &mut Search<'static, 'static>,
+    terminal: &mut Terminal<'static, 'static>,
+) -> libghostty_vt::error::Result<Option<u32>> {
+    let snapshot = search.snapshot(terminal)?;
+    let terminal = snapshot.terminal();
+    let Some(selected) = snapshot.selected_match()? else { return Ok(None) };
+    if terminal.point_from_grid_ref(&selected.start(), PointSpace::Viewport)?.is_some() {
+        return Ok(None);
+    }
+    Ok(terminal.point_from_grid_ref(&selected.start(), PointSpace::Screen)?.map(|point| point.y))
 }
 
 /// 让搜索追上终端的最新内容，再把视口里的匹配换算成逐行的高亮段。

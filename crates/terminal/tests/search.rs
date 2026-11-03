@@ -78,3 +78,20 @@ fn a_match_longer_than_the_viewport_highlights_all_of_it() {
     let selected = Some(theme::SEARCH_SELECTED_BACKGROUND);
     assert!((0..4).all(|y| frame.row(y).iter().all(|cell| cell.bg == selected)));
 }
+
+/// 选中的匹配在视口外时滚到让它落在视口中间，上面几行也看得到；已经看得到时视口不动。
+#[test]
+fn a_hidden_match_is_scrolled_to_the_middle() {
+    let mut session = idle_session();
+    for n in 0..30 {
+        let line = if n == 10 { "needle".to_owned() } else { format!("line {n}") };
+        session.feed(format!("{line}\r\n").as_bytes());
+    }
+    session.search("needle");
+    let frame = session.frame();
+    assert_eq!(row_text(&frame, 2), "needle");
+    assert_eq!(row_text(&frame, 1), "line 9");
+    drop(frame);
+    session.search_step(false);
+    assert_eq!(row_text(&session.frame(), 2), "needle");
+}
