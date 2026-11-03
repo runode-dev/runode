@@ -773,7 +773,7 @@ impl FileTree {
         };
         let selected_path = self.state().selected.clone().filter(|selected| row.holds(selected));
         let selected = selected_path.is_some();
-        let cut = self.clipboard.as_ref().is_some_and(|clip| clip.cut && clip.path == row.path);
+        let cut = self.clipboard.as_ref().is_some_and(|clip| clip.cut && row.holds(&clip.path));
         let chevron = row.is_dir.then(|| {
             svg()
                 .path(if row.expanded { CHEVRON_DOWN_ICON } else { CHEVRON_RIGHT_ICON })
