@@ -445,11 +445,13 @@ public final class SessionListModel {
         return panes.count > 1 ? panes : []
     }
 
-    /// 电脑上 `id` 在所在工作区里是第几个标签页（从 1 数）；工作区只有一个标签页、或它不在任何窗口里时为空。
+    /// 电脑上 `id` 在所在工作区里是第几个标签页（从 1 数）。只有工作区里不止一个标签页列得出会话时才有：
+    /// 列表里就它一个标签页的卡片时标了也分不出什么；还没启动的标签页没有会话，不算。
     public func tabNumber(of id: SessionId) -> Int? {
         for workspace in windows.flatMap(\.workspaces) {
             guard let i = workspace.tabs.firstIndex(where: { $0.panes.contains { $0.id == id } }) else { continue }
-            return workspace.tabs.count > 1 ? i + 1 : nil
+            let listed = workspace.tabs.filter { tab in tab.panes.contains { session($0.id) != nil } }
+            return listed.count > 1 ? i + 1 : nil
         }
         return nil
     }

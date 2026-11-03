@@ -354,6 +354,10 @@ import Testing
                 .layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [WorkspaceLayout(index: 1, tabs: [first, second])])])))
         #expect(model.tabNumber(of: sessionA) == 1)
         #expect(model.tabNumber(of: sessionB) == 2)
+        // 另一个标签页的会话列表里没有（电脑上还没启动它）：只剩一张卡片，不标。
+        model.handle(.message(.sessionList([info(sessionA, title: "a")])))
+        #expect(model.tabNumber(of: sessionA) == nil)
+        model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
         model.handle(
             .message(
                 .layout(
