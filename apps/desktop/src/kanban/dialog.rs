@@ -1140,13 +1140,25 @@ impl TodoDialog {
                 let column = |key: &str, child: SelectTrigger| {
                     div().flex_1().min_w_0().child(field(rust_i18n::t!(key).into_owned(), child.into_any_element(), cx))
                 };
-                div()
+                let row = div()
                     .flex()
                     .gap(px(8.))
                     .child(column("kanban.dialog.agent", agent))
                     .children(model.map(|model| column("kanban.dialog.model", model)))
-                    .children(effort.map(|effort| column("kanban.dialog.effort", effort)))
-                    .into_any_element()
+                    .children(effort.map(|effort| column("kanban.dialog.effort", effort)));
+                // 找不到命令时开始了也只会在终端里报错，挑的时候就说出来。
+                let missing = (!self.loading.contains(&pick.agent)
+                    && self.failed.get(&pick.agent) == Some(&Unanswered::Missing))
+                .then(|| {
+                    let note = rust_i18n::t!("kanban.dialog.agent_missing", agent = launcher.label).into_owned();
+                    div()
+                        .id("todo-dialog-agent-missing")
+                        .aria_static_text(note.clone())
+                        .text_size(FontSize::Small)
+                        .text_color(cx.theme().destructive)
+                        .child(note)
+                });
+                div().flex().flex_col().gap(px(6.)).child(row).children(missing).into_any_element()
             }
             None => div()
                 .flex()
