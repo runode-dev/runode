@@ -1,6 +1,6 @@
-//! 系统原生的确认框。GPUI 的 `Window::prompt` 在 Windows 上把级别名（Warning、Info、Critical）写死成
+//! 确认框。GPUI 的 `Window::prompt` 在 Windows 上把级别名（Warning、Info、Critical）写死成
 //! 窗口标题，不是产品名、也不随界面语言变，所以 Windows 上自己弹 TaskDialog，标题写 Runode；
-//! 别的平台交给 GPUI。
+//! Linux 上没有原生的，画在窗口里（`in_window`）；macOS 交给 GPUI 弹原生的。
 
 use futures::channel::oneshot;
 use gpui::{App, PromptButton, PromptLevel, Window};
@@ -28,6 +28,17 @@ where
         }
     }
     window.prompt(level, message, detail, answers, cx)
+}
+
+#[cfg(target_os = "linux")]
+mod in_window;
+
+/// 启动时调一次：没有原生确认框的平台上，`Window::prompt` 改弹 `in_window` 画的那个。
+pub fn install(cx: &mut App) {
+    #[cfg(target_os = "linux")]
+    cx.set_prompt_builder(in_window::build);
+    #[cfg(not(target_os = "linux"))]
+    let _ = cx;
 }
 
 #[cfg(windows)]

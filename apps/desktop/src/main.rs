@@ -183,6 +183,7 @@ fn main() {
         })
         .detach();
 
+        prompt::install(cx);
         // 上次退出时开着的窗口原样恢复，没有时开一个新窗口。提前拉起的 shell 在家目录里，
         // 交给第一个窗口里从家目录开始的终端；没用上就丢掉，丢掉时会结束它。
         let mut shell = prespawn::take();
