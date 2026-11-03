@@ -215,8 +215,9 @@ public final class SessionListModel {
     }
 
     /// 按电脑上的工作区分好节的会话：窗口按序号，工作区按侧栏里的先后，最后是不在任何窗口里的会话。
-    /// 一个标签都没有的工作区也出一节（`sessions` 为空），电脑上关掉最后一个标签后工作区还在；有标签
-    /// 但其中没有已知会话的工作区不出现（刚开的会话列表里还没有时，等下一次列表，免得闪一下空节）。
+    /// 没有会话的工作区也出一节（`sessions` 为空）：电脑上关掉了最后一个标签，或者标签都还没启动（恢复窗口时
+    /// 后台的标签要点开才起 shell，布局里没有它们的会话）。分屏里有会话、但列表里一个都还没有的工作区
+    /// 不出现（刚开的会话列表里还没有时，等下一次列表，免得闪一下空节）。
     public var sections: [SessionSection] {
         let byId = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var placed: Set<SessionId> = []
@@ -229,7 +230,7 @@ public final class SessionListModel {
                     placed.insert(id)
                     return session
                 }
-                guard !members.isEmpty || workspace.tabs.isEmpty else { continue }
+                guard !members.isEmpty || workspace.sessions.isEmpty else { continue }
                 sections.append(
                     SessionSection(
                         id: .workspace(window: window.index, index: workspace.index), name: workspace.name,

@@ -295,10 +295,17 @@ import Testing
                             workspaces: [
                                 WorkspaceLayout(index: 1, name: "a", dir: "/Users/ethan/a", tabs: [tab]),
                                 WorkspaceLayout(index: 2, name: "空", dir: "/Users/ethan/empty", tabs: []),
+                                // 恢复窗口时还没启动的标签页：有标签，但里面没有会话。
+                                WorkspaceLayout(
+                                    index: 3, name: "未启动", dir: "/Users/ethan/later",
+                                    tabs: [TabLayout(index: 1, active: true, panes: [])]),
                             ])
                     ])))
         let sections = model.sections
-        #expect(sections.map(\.id) == [.workspace(window: 1, index: 1), .workspace(window: 1, index: 2)])
+        #expect(
+            sections.map(\.id) == [
+                .workspace(window: 1, index: 1), .workspace(window: 1, index: 2), .workspace(window: 1, index: 3),
+            ])
         let empty = sections[1]
         #expect(empty.sessions.isEmpty)
         #expect(empty.anchor == nil)
