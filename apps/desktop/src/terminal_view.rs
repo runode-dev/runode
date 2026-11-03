@@ -98,6 +98,10 @@ pub use runode_config::keybind::ScreenFile;
 pub(crate) use screen::SHOW_WAIT;
 pub use search::{SearchSelection, StartSearch};
 
+/// 翻回回滚历史时右边那条位置条的宽度、离右边的距离和最短的长度。
+const SCROLL_THUMB_WIDTH: f32 = 4.;
+const SCROLL_THUMB_INSET: f32 = 2.;
+const SCROLL_THUMB_MIN: f32 = 16.;
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
 /// 程序没设置标题、也读不到前台进程时用的标题。
@@ -346,6 +350,11 @@ impl Render for TerminalView {
                     })
                     .child(TerminalElement { view: cx.entity() }),
             );
+        let position = self
+            .screen
+            .shown()
+            .and_then(Session::scrolled_back)
+            .map(|(top, len)| render_scroll_position(top, len, foreground));
         let lost = self.screen.is_lost().then(|| self.render_lost_bar(foreground, background, cx));
         let size_owner = self.render_size_owner(foreground, background, cx);
         let link_target = self.render_link_target(foreground, background);
@@ -357,6 +366,7 @@ impl Render for TerminalView {
             .relative()
             .size_full()
             .child(terminal)
+            .children(position)
             .children(search_bar)
             .children(size_owner)
             .children(link_target)
@@ -364,6 +374,23 @@ impl Render for TerminalView {
             .children(lost)
             .children(menu)
     }
+}
+
+/// 翻回了回滚历史时贴着右边画的一条细条：在全部行里的位置和视口占多少，看得出翻到了哪、下面还有多少。
+/// 只是提示，不接鼠标，点击和滚轮照样落到终端上。`top`、`len` 是视口顶边的位置和视口的长度，都按占全部行的比例。
+fn render_scroll_position(top: f32, len: f32, foreground: Rgb) -> gpui::Div {
+    let color = gpui::Hsla::from(rgb(foreground.to_u32())).opacity(0.3);
+    div().absolute().top_0().bottom_0().right(px(SCROLL_THUMB_INSET)).w(px(SCROLL_THUMB_WIDTH)).overflow_hidden().child(
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .top(relative(top))
+            .h(relative(len))
+            .min_h(px(SCROLL_THUMB_MIN))
+            .rounded_full()
+            .bg(color),
+    )
 }
 
 impl TerminalView {

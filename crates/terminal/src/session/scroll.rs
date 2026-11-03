@@ -11,6 +11,21 @@ impl Session {
         self.terminal.viewport_active().unwrap_or(false) && self.scroll_offset == 0.
     }
 
+    /// 翻回了回滚历史时视口在全部行里的位置：视口顶边在全部行的几成处、视口占全部行的几成，都在 0 到 1
+    /// 之间。停在最底部时为空。
+    pub fn scrolled_back(&self) -> Option<(f32, f32)> {
+        if self.viewport_at_bottom() {
+            return None;
+        }
+        let scrollbar = self.terminal.scrollbar().ok()?;
+        if scrollbar.total <= scrollbar.len || scrollbar.total == 0 {
+            return None;
+        }
+        let total = scrollbar.total as f32;
+        let top = (scrollbar.offset as f32 - self.scroll_offset).max(0.);
+        Some(((top / total).min(1.), (scrollbar.len as f32 / total).min(1.)))
+    }
+
     /// 不开鼠标上报时按像素滚动回滚历史：`lines` 为正往回看，可以是零点几行。凑够整行的
     /// 部分挪视口，剩下的记在 `scroll_offset`，绘制时整屏往下错开这么多，露出视口上面那一行
     /// 的一部分。返回画面是否变了。

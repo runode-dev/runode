@@ -22,6 +22,24 @@ fn scrolling_the_viewport_by_page_and_to_the_ends() {
 }
 
 #[test]
+fn the_position_in_the_scrollback_is_reported_only_when_scrolled_back() {
+    let mut session = idle_session();
+    for n in 0..20 {
+        session.feed(format!("{n}\r\n").as_bytes());
+    }
+    // 停在底部时不报。
+    assert_eq!(session.scrolled_back(), None);
+    // 20 行输出加上光标那一行共 21 行，视口 4 行。
+    session.scroll_viewport(ViewportScroll::Top);
+    assert_eq!(session.scrolled_back(), Some((0., 4. / 21.)));
+    session.scroll_viewport(ViewportScroll::Page(1));
+    let (top, len) = session.scrolled_back().unwrap();
+    assert!((top - 4. / 21.).abs() < 1e-6 && (len - 4. / 21.).abs() < 1e-6);
+    session.scroll_viewport(ViewportScroll::Bottom);
+    assert_eq!(session.scrolled_back(), None);
+}
+
+#[test]
 fn smooth_scrolling_shifts_by_fractions_and_stops_at_the_ends() {
     let mut session = idle_session();
     for n in 0..20 {
