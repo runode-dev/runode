@@ -40,12 +40,27 @@ impl WindowView {
         } else {
             rust_i18n::t!("status.hosts_count", count = count).into_owned()
         };
+        // 没连上的主机不打开浮层也要看得出来；用户自己断开的不算。正在连的也算：重连时在连和等退避之间来回，
+        // 只算后者的话点会一闪一闪。
+        let down = hosts::remotes()
+            .iter()
+            .filter(|host| !matches!(hosts::status_of(host), Status::Connected(_) | Status::Idle))
+            .count();
+        let down_text = (down > 0).then(|| rust_i18n::t!("status.hosts_down", count = down).into_owned());
         let icon = svg().flex_none().path(SERVER_ICON).size(px(13.)).text_color(cx.theme().foreground.opacity(0.6));
+        let description = match &down_text {
+            Some(down_text) => format!("{label} · {down_text}"),
+            None => label.clone(),
+        };
         Some(
             self.status_item("status-hosts", StatusPopover::Hosts, cx)
-                .aria_description(label.clone())
+                .aria_description(description)
                 .child(icon)
-                .child(label),
+                .child(label)
+                .when_some(down_text, |item, text| {
+                    item.child(div().flex_none().size(px(6.)).rounded_full().bg(hsla(PENDING_DOT)))
+                        .tooltip(tooltip(text, None))
+                }),
         )
     }
 

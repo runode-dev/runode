@@ -991,6 +991,7 @@ status:
   hosts_count: "%{count} 台主機"
   hosts_count_one: 1 台主機
   hosts_summary: "%{connected}/%{total} 已連線"
+  hosts_down: "%{count} 台沒連上"
   hosts_manage: 管理遠端主機
   host_connect: 連線
   host_disconnect: 中斷連線

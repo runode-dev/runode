@@ -991,6 +991,7 @@ status:
   hosts_count: "%{count} hosts"
   hosts_count_one: 1 host
   hosts_summary: "%{connected}/%{total} connected"
+  hosts_down: "%{count} not connected"
   hosts_manage: Manage remote hosts
   host_connect: Connect
   host_disconnect: Disconnect

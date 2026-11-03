@@ -991,6 +991,7 @@ status:
   hosts_count: "%{count} 个主机"
   hosts_count_one: 1 个主机
   hosts_summary: "%{connected}/%{total} 已连接"
+  hosts_down: "%{count} 台没连上"
   hosts_manage: 管理远程主机
   host_connect: 连接
   host_disconnect: 断开连接
