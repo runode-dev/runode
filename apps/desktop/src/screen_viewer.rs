@@ -28,7 +28,7 @@ use gpui::{
     Window, canvas, div, prelude::*, px,
 };
 use gpui::{Role, SharedString, WindowControlArea};
-use runode_protocol::screen::{ScreenClientMsg, ScreenDisplay, ScreenHostMsg, ScreenInput, ScreenMode};
+use runode_protocol::screen::{ScreenClientMsg, ScreenDisplay, ScreenHostMsg, ScreenInput, ScreenMode, StopCause};
 use runode_types::{input::MouseButton as RemoteButton, screen::Codec};
 
 use crate::{
@@ -258,8 +258,8 @@ pub struct ScreenViewer {
     remember_off: bool,
     /// 用户拨过「记住密码」的开关，后台查到的结果不再盖掉它。
     remember_touched: bool,
-    /// 远端说过屏幕上没人登录，到再出画面为止一直重连。
-    signed_out: bool,
+    /// 远端说过屏幕上暂时没有能看的桌面（`StopCause::waits_for_sign_in`），到再出画面为止一直重连，提示它的说明。
+    signed_out: Option<StopCause>,
     password: Entity<InputState>,
     /// 上一帧画面区域的位置，由画的时候记下。
     bounds: Rc<Cell<Option<Placement>>>,
@@ -367,7 +367,7 @@ impl ScreenViewer {
             saved_rejected: false,
             remember_off: false,
             remember_touched: false,
-            signed_out: false,
+            signed_out: None,
             password,
             bounds: Rc::default(),
             pressed: Vec::new(),
@@ -598,7 +598,7 @@ impl ScreenViewer {
                 }
                 self.phase = Phase::Live;
                 self.retries = 0;
-                self.signed_out = false;
+                self.signed_out = None;
                 self.drop_picture();
                 self.picture = Some(picture);
             }
@@ -644,22 +644,13 @@ impl ScreenViewer {
                 self.phase = Phase::Stopped(rust_i18n::t!("screen_viewer.incompatible").into_owned());
             }
             UiEvent::Message(ScreenHostMsg::Started { display, .. }) => self.display = Some(display),
-            UiEvent::Message(ScreenHostMsg::Stopped { signed_out: true, .. }) => {
-                self.signed_out = true;
-                self.drop_picture();
-            }
-            UiEvent::Message(ScreenHostMsg::Stopped { no_encoder: true, .. }) => {
-                self.phase = Phase::Stopped(rust_i18n::t!("screen_viewer.no_encoder").into_owned());
-                self.drop_picture();
-            }
-            UiEvent::Message(ScreenHostMsg::Stopped { reason, .. }) => {
-                // 缺屏幕录制授权时系统报的原因看不懂，换成去哪里打开的指引。
-                let unauthorized = self.remote.as_ref().is_some_and(|remote| !remote.screen_capture);
-                self.phase = Phase::Stopped(if unauthorized {
-                    rust_i18n::t!("screen_viewer.no_screen_capture").into_owned()
-                } else {
-                    reason
-                });
+            UiEvent::Message(ScreenHostMsg::Stopped { reason, signed_out, no_encoder, cause }) => {
+                tracing::info!("the remote desktop of {:?} stopped: {reason}", self.host);
+                let screen_capture = self.remote.as_ref().is_none_or(|remote| remote.screen_capture);
+                match stop_cause(cause, signed_out, no_encoder, screen_capture) {
+                    Some(cause) if cause.waits_for_sign_in() => self.signed_out = Some(cause),
+                    cause => self.phase = Phase::Stopped(stop_text(cause, &reason)),
+                }
                 self.drop_picture();
             }
             UiEvent::Message(ScreenHostMsg::Permissions { screen_capture, post_event }) => {
@@ -727,7 +718,7 @@ impl ScreenViewer {
                 match self.phase {
                     Phase::Stopped(_) => {}
                     Phase::Live => self.reconnect_later(cx),
-                    _ if self.retries > 0 || self.signed_out => self.reconnect_later(cx),
+                    _ if self.retries > 0 || self.signed_out.is_some() => self.reconnect_later(cx),
                     _ => self.phase = Phase::Stopped(rust_i18n::t!("screen_viewer.closed").into_owned()),
                 }
             }
@@ -1371,7 +1362,7 @@ impl ScreenViewer {
                 rust_i18n::t!("screen_viewer.connecting", host = crate::remote_hosts::display_name(&self.host, cx))
             }
             Phase::Stopped(reason) => return Some(reason.clone()),
-            Phase::Reconnecting(_) if self.signed_out => rust_i18n::t!("screen_viewer.signed_out"),
+            Phase::Reconnecting(_) if self.signed_out.is_some() => return Some(stop_text(self.signed_out, "")),
             Phase::Reconnecting(attempt) => rust_i18n::t!("screen_viewer.reconnecting", attempt = attempt),
             Phase::Opening if self.remote.as_ref().is_some_and(|remote| !remote.screen_capture) => {
                 rust_i18n::t!("screen_viewer.no_screen_capture")
@@ -1764,6 +1755,34 @@ fn reader(
     }
 }
 
+/// 远端停下的原因归到哪类。认得 `cause` 的远端直接给；老的远端只给两个标志，都没有、`Ready` 又说没有屏幕录制
+/// 授权（`screen_capture` 为假）时算缺授权：这时系统报的原因看不懂。
+fn stop_cause(cause: Option<StopCause>, signed_out: bool, no_encoder: bool, screen_capture: bool) -> Option<StopCause> {
+    cause.or(if signed_out {
+        Some(StopCause::SignedOut)
+    } else if no_encoder {
+        Some(StopCause::NoEncoder)
+    } else if !screen_capture {
+        Some(StopCause::NoScreenCapture)
+    } else {
+        None
+    })
+}
+
+/// 远端停下时给人看的说明和办法；归不了类的附上远端的原文 `reason`。
+fn stop_text(cause: Option<StopCause>, reason: &str) -> String {
+    let text = match cause {
+        Some(StopCause::SignedOut) => rust_i18n::t!("screen_viewer.signed_out"),
+        Some(StopCause::NoDesktop) => rust_i18n::t!("screen_viewer.no_desktop"),
+        Some(StopCause::OtherUser) => rust_i18n::t!("screen_viewer.other_user"),
+        Some(StopCause::NoScreenCapture) => rust_i18n::t!("screen_viewer.no_screen_capture"),
+        Some(StopCause::Declined) => rust_i18n::t!("screen_viewer.declined"),
+        Some(StopCause::NoEncoder) => rust_i18n::t!("screen_viewer.no_encoder"),
+        None => rust_i18n::t!("screen_viewer.stopped", reason = reason),
+    };
+    text.into_owned()
+}
+
 /// 等主机连上（没在连时叫它连），连不上时带上给人看的原因。
 async fn wait_for_host(host: &HostId, executor: &gpui::BackgroundExecutor) -> Result<(), String> {
     if !hosts::ensure_connecting(host) {
@@ -1778,5 +1797,31 @@ async fn wait_for_host(host: &HostId, executor: &gpui::BackgroundExecutor) -> Re
             _ if Instant::now() >= deadline => return Err(status_text(&status)),
             _ => executor.timer(HOST_POLL).await,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_given_cause_wins() {
+        assert_eq!(stop_cause(Some(StopCause::NoDesktop), true, false, true), Some(StopCause::NoDesktop));
+        assert_eq!(stop_cause(Some(StopCause::Declined), false, false, false), Some(StopCause::Declined));
+    }
+
+    /// 不给 `cause` 的远端（老版本，或者分了这边不认得的类）照两个标志和授权归类。
+    #[test]
+    fn older_remotes_fall_back_to_the_flags() {
+        assert_eq!(stop_cause(None, true, false, false), Some(StopCause::SignedOut));
+        assert_eq!(stop_cause(None, false, true, false), Some(StopCause::NoEncoder));
+        assert_eq!(stop_cause(None, false, false, false), Some(StopCause::NoScreenCapture));
+        assert_eq!(stop_cause(None, false, false, true), None);
+    }
+
+    #[test]
+    fn unclassified_stops_show_the_remote_reason() {
+        assert!(stop_text(None, "the display was disconnected").contains("the display was disconnected"));
+        assert!(!stop_text(Some(StopCause::Declined), "cancelled").contains("cancelled"));
     }
 }

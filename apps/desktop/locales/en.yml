@@ -1406,6 +1406,10 @@ screen_viewer:
   incompatible: "The remote desktop on that computer is a different version. Try again in a few seconds, after it exits on its own."
   no_decoder: "This computer cannot decode the remote screen (HEVC): %{error}. On Windows, install HEVC Video Extensions from the Microsoft Store."
   no_encoder: That computer has no usable video encoder (Windows N without the Media Feature Pack, for example), so its screen cannot be shown.
+  no_desktop: "No desktop is signed in on that computer's screen for the user Runode runs as there (X11 or Wayland). Sign in to a desktop session on its screen as that user; this connects on its own once you do. A server without a desktop cannot be viewed."
+  other_user: "Someone else is signed in on that computer's screen. Remote desktop shows only the desktop of the user Runode runs as there: sign in as that user on its screen (or switch to them), then reconnect."
+  declined: "Screen sharing was not allowed on that computer: the prompt on its screen was declined or nobody answered it. Reconnect to ask again, then choose Share on that screen."
+  stopped: "The remote desktop on that computer stopped: %{reason}. Reconnect to try again."
   unsupported: Remote desktop is not available on this system.
   bad_host: Not a valid SSH host.
   locked: The remote screen is locked. Enter the login password to unlock it.
