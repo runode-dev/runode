@@ -15,7 +15,7 @@ use crate::keybinds::{caps, caps_text};
 use crate::ui::icons::{BAN_ICON, CLOSE_ICON, MINUS_ICON, PLUS_ICON};
 use crate::ui::input::{Input, InputEvent, InputState};
 use crate::ui::theme::Theme;
-use gpui::{App, Context, Div, Entity, Keystroke, SharedString, Subscription, Window, div, prelude::*, px};
+use gpui::{App, Context, Div, Entity, Keystroke, SharedString, Stateful, Subscription, Window, div, prelude::*, px};
 use runode_config::{
     Keybind,
     keybind::{self, Action, ActionSpec},
@@ -528,7 +528,7 @@ impl SettingsView {
         out.finish()
     }
 
-    fn render_keybind_row(&mut self, row: &Row, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    fn render_keybind_row(&mut self, row: &Row, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
         // 元素 id 按这一行的用法和键取，不按行号：绑定增减、行挪了位置时 VoiceOver 的焦点不跳。
         let usage = &row.usage;
         let recording = self.keybinds.target().filter(|target| target.row == row.key).cloned();
@@ -675,7 +675,15 @@ impl SettingsView {
                     .child(cancel)
                     .child(replace)
             });
+        // 整行报成以动作命名的一组，读屏读到「+」和键帽时知道是哪个动作的。
+        let name = match row.usage.split_once(':') {
+            Some((_, param)) => format!("{} {param}", crate::i18n::describe(row.name)),
+            None => crate::i18n::describe(row.name),
+        };
         div()
+            .id(group.clone())
+            .role(gpui::Role::Group)
+            .aria_label(name)
             .group(group)
             .py(px(8.))
             .flex()
