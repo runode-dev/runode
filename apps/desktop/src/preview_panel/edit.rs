@@ -330,8 +330,11 @@ impl PreviewPanel {
                 return;
             };
             this.update(cx, |this, cx| {
-                // 读的期间打了字、开始存了的不换。
-                if this.editor(&area).is_none_or(|editor| editor.dirty || editor.saving) {
+                // 读的期间打了字、开始存了的不换。标签已经换上了别的版本时也不换：几次重读的结果先后不定，晚到的
+                // 旧内容不能盖掉新的；磁盘上比标签还新的，标签重读完会再来一次。
+                if this.editor(&area).is_none_or(|editor| editor.dirty || editor.saving)
+                    || this.editing_tab_mut(&area).is_some_and(|tab| tab.stamp.is_some() && tab.stamp != source.stamp)
+                {
                     return;
                 }
                 area.update(cx, |area, cx| area.reload_text(source.text, cx));
