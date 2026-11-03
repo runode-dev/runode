@@ -771,7 +771,7 @@ settings:
     ssh_control_persist: 最後一個終端機關掉後，到這台主機的連線再留多少秒，這期間重連不用再輸入密碼。0 是一直留著。結束 Runode 時總會中斷。
     ssh_restore_on_launch: 打開 Runode、恢復 SSH 主機上的工作區和終端機時馬上連那台主機。關掉後等你點「立即重連」才連，打開 Runode 時不會先問密碼。下次啟動起生效。
     auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
-    remote_access: "讓配對過的手機和電腦經區域網路或 Tailscale 連上這台電腦的終端機。在下面配對，或者用 runode remote pair。"
+    remote_access: "讓配對過的手機和電腦連上這台電腦的終端機：在同一個網路裡直接連，不在時經網際網路連過來，必要時走中繼，內容照樣加密。在下面配對，或者用 runode remote pair。"
     remote_access_port: TCP 連接埠，1 到 65535。
     remote_access_name: "配對過的手機和電腦上顯示的名稱，留空時用系統的電腦名稱。改了以後連著的裝置會斷開一下再連上。"
     remote_access_push: agent 等你回答時，配對過的手機會收到一則通知，App 沒開著也行。
@@ -972,7 +972,7 @@ mobile:
   entry: "配對裝置"
   eyebrow: "RUNODE 配對裝置"
   intro_title: "在 iPhone 上用 Runode。"
-  intro_body: "在 iPhone 上看 agent 在做什麼、回答它們的提問，打開任何一個終端機接著工作。手機經區域網路或 Tailscale 直接連到這台電腦，不經過別的伺服器。另一台電腦上的 Runode 也能在這裡配對，像 SSH 主機一樣打開這台電腦的終端機和專案。"
+  intro_body: "在 iPhone 上看 agent 在做什麼、回答它們的提問，打開任何一個終端機接著工作。手機和這台電腦在同一個網路裡時直接連；出了門也連得上，打不通時經中繼轉送，內容端對端加密，中繼看不到。另一台電腦上的 Runode 也能在這裡配對，像 SSH 主機一樣打開這台電腦的終端機和專案。"
   start: "開始使用"
   step: "第 %{n} 步（共 %{total} 步）"
   install_title: "裝上 App。"
@@ -987,7 +987,7 @@ mobile:
   name_hint: "手機上會看到「%{name}」。留空則用這台電腦自己的名稱。"
   network_label: "網路"
   network_auto: "自動（依系統順序試全部位址）"
-  network_hint: "手機先試這個位址，連不上再試別的。要和這台電腦連著同一個 Wi-Fi，或者都連著 Tailscale。"
+  network_hint: "手機在同一個網路裡時先試這個位址，連不上再試別的；不在同一個網路時經網際網路連過來。"
   refresh_networks: "重新讀取網路"
   pair_qr: "配對 QR 碼"
   install_qr: "安裝 QR 碼"
@@ -997,7 +997,7 @@ mobile:
   copy_hint: "要配對另一台電腦，在那台電腦的 Runode 裡選「新增遠端主機 → Runode 配對」，貼上這個連結。有效期和 QR 碼一樣。"
   expires: "%{time} 後過期"
   regenerate: "重新產生"
-  off: "遠端存取還沒打開。打開後，配對過的手機和電腦能經區域網路或 Tailscale 連上這台電腦的終端機。"
+  off: "遠端存取還沒打開。打開後，配對過的手機和電腦就能連上這台電腦的終端機，不在同一個網路裡也行。"
   turn_on: "打開遠端存取"
   generate: "產生 QR 碼"
   retry: "重試"

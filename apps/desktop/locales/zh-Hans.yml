@@ -771,7 +771,7 @@ settings:
     ssh_control_persist: 最后一个终端关掉后，到这台主机的连接再留多少秒，这期间重连不用再输密码。0 是一直留着。退出 Runode 时总会断开。
     ssh_restore_on_launch: 打开 Runode、恢复 SSH 主机上的工作区和终端时马上连那台主机。关掉后等你点「立即重连」才连，打开 Runode 时不会先问密码。下次启动起生效。
     auto_update: 在后台查新版本、下载好，退出 Runode 时装上。
-    remote_access: "让配对过的手机和电脑经局域网或 Tailscale 连上这台电脑的终端。在下面配对，或者用 runode remote pair。"
+    remote_access: "让配对过的手机和电脑连上这台电脑的终端：在同一个网络里直接连，不在时经互联网连过来，必要时走中继，内容照样加密。在下面配对，或者用 runode remote pair。"
     remote_access_port: TCP 端口，1 到 65535。
     remote_access_name: "配对过的手机和电脑上显示的名字，留空时用系统的电脑名。改了以后连着的设备会断开一下再连上。"
     remote_access_push: agent 等你回答时，配对过的手机会收到一条通知，App 没开着也行。
@@ -972,7 +972,7 @@ mobile:
   entry: "配对设备"
   eyebrow: "RUNODE 配对设备"
   intro_title: "在 iPhone 上用 Runode。"
-  intro_body: "在 iPhone 上看 agent 在做什么、回答它们的提问，打开任何一个终端接着干活。手机经局域网或 Tailscale 直接连到这台电脑，不经过别的服务器。另一台电脑上的 Runode 也能在这里配对，像 SSH 主机一样打开这台电脑的终端和项目。"
+  intro_body: "在 iPhone 上看 agent 在做什么、回答它们的提问，打开任何一个终端接着干活。手机和这台电脑在同一个网络里时直接连；出了门也连得上，打不通时经中继转发，内容端到端加密，中继看不到。另一台电脑上的 Runode 也能在这里配对，像 SSH 主机一样打开这台电脑的终端和项目。"
   start: "开始使用"
   step: "第 %{n} 步（共 %{total} 步）"
   install_title: "装上 App。"
@@ -987,7 +987,7 @@ mobile:
   name_hint: "手机上会看到「%{name}」。留空则用这台电脑自己的名字。"
   network_label: "网络"
   network_auto: "自动（按系统顺序试全部地址）"
-  network_hint: "手机先试这个地址，连不上再试别的。要和这台电脑连着同一个 Wi-Fi，或者都连着 Tailscale。"
+  network_hint: "手机在同一个网络里时先试这个地址，连不上再试别的；不在同一个网络时经互联网连过来。"
   refresh_networks: "重新读取网络"
   pair_qr: "配对二维码"
   install_qr: "安装二维码"
@@ -997,7 +997,7 @@ mobile:
   copy_hint: "要配对另一台电脑，在那台电脑的 Runode 里选「添加远程主机 → Runode 配对」，粘贴这个链接。有效期和二维码一样。"
   expires: "%{time} 后过期"
   regenerate: "重新生成"
-  off: "远程访问还没打开。打开后，配对过的手机和电脑能经局域网或 Tailscale 连上这台电脑的终端。"
+  off: "远程访问还没打开。打开后，配对过的手机和电脑就能连上这台电脑的终端，不在同一个网络里也行。"
   turn_on: "打开远程访问"
   generate: "生成二维码"
   retry: "重试"
