@@ -443,11 +443,10 @@ impl WindowView {
             let origin = origin.unwrap_or(screen + point(px(CASCADE), px(CASCADE)));
             Bounds { origin, size: POPOUT_SIZE }
         };
-        // 放在这个窗口所在的那块显示器上、整块都在它里面：GPUI 给的各块显示器的范围都从原点算，看不出它们怎么
-        // 排着，挪到别的显示器上交给系统的标题栏。
+        // 放在这个窗口所在的那块显示器上、整块都在它里面，挪到别的显示器上交给系统的标题栏。
         let display = window.display(cx);
         let bounds = match &display {
-            Some(display) => clamp_frame(bounds, display.bounds().size, MIN_FLOAT),
+            Some(display) => float_frame::clamp_to_display(bounds, display.bounds(), MIN_FLOAT),
             None => bounds,
         };
         let (view, display_id) = (open.view, display.map(|display| display.id()));

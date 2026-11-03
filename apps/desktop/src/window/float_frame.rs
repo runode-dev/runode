@@ -87,9 +87,26 @@ pub(super) fn resize_grips(id: EntityId, start: StartResize, cx: &mut Context<Wi
     ]
 }
 
+/// 要单独开的窗口 `bounds` 限在显示器的范围 `display`（`PlatformDisplay::bounds`）里。两者在同一套坐标里：macOS
+/// 上窗口的位置相对它所在的显示器，显示器的原点是 0；别的系统上都是整个桌面的坐标，显示器带着它在桌面上的位置。
+pub(super) fn clamp_to_display(bounds: Bounds<Pixels>, display: Bounds<Pixels>, min: Size<Pixels>) -> Bounds<Pixels> {
+    let local = Bounds { origin: bounds.origin - display.origin, size: bounds.size };
+    let clamped = clamp_frame(local, display.size, min);
+    Bounds { origin: clamped.origin + display.origin, size: clamped.size }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_window_on_a_secondary_display_stays_there() {
+        let display = Bounds { origin: point(px(1920.), px(-200.)), size: size(px(1600.), px(900.)) };
+        let inside = Bounds { origin: point(px(2400.), px(0.)), size: size(px(500.), px(300.)) };
+        assert_eq!(clamp_to_display(inside, display, MIN), inside);
+        let past = Bounds { origin: point(px(3400.), px(-500.)), size: size(px(500.), px(300.)) };
+        assert_eq!(clamp_to_display(past, display, MIN).origin, point(px(3020.), px(-200.)));
+    }
 
     const MIN: Size<Pixels> = Size { width: px(360.), height: px(240.) };
 

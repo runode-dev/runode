@@ -172,7 +172,7 @@ impl WindowView {
         if self.float_drag.as_ref().is_some_and(|drag| drag.pane == id) {
             self.float_drag = None;
         }
-        // 窗口照它浮着时的大小，加上标题栏；位置相对这个窗口所在的显示器。
+        // 窗口照它浮着时的大小，加上标题栏，放在这个窗口所在的显示器上。
         let area = area.unwrap_or_else(|| Bounds::new(Point::default(), window.viewport_size()));
         let (width, height) = (f32::from(area.size.width), f32::from(area.size.height));
         let at = window.bounds().origin + area.origin + point(px(frame.x * width), px(frame.y * height));
@@ -180,7 +180,7 @@ impl WindowView {
         let bounds = Bounds { origin: origin.unwrap_or(at), size };
         let display = window.display(cx);
         let bounds = match &display {
-            Some(display) => clamp_frame(bounds, display.bounds().size, MIN_FLOAT),
+            Some(display) => float_frame::clamp_to_display(bounds, display.bounds(), MIN_FLOAT),
             None => bounds,
         };
         if let Some(owner) = window.window_handle().downcast::<WindowView>() {

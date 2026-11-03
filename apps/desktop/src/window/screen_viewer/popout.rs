@@ -28,7 +28,7 @@ struct ScreenWindow {
     _config: Subscription,
 }
 
-/// 开一个单独的窗口，放在显示器 `display` 上的 `bounds` 处（位置相对这块显示器），把远程桌面页 `viewer` 放进去，
+/// 开一个单独的窗口，放在显示器 `display` 上的 `bounds` 处（和 `Window::bounds` 同一套坐标），把远程桌面页 `viewer` 放进去，
 /// 焦点给它。
 pub(super) fn open(viewer: Entity<ScreenViewer>, bounds: Bounds<Pixels>, display: Option<DisplayId>, cx: &mut App) {
     let host = crate::remote_hosts::display_name(viewer.read(cx).host(), cx);

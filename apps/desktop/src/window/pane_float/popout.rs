@@ -38,7 +38,7 @@ struct PaneWindow {
     _subscriptions: Vec<Subscription>,
 }
 
-/// 开一个单独的终端窗口，放在显示器 `display` 上的 `bounds` 处（位置相对这块显示器），把主窗口 `owner` 里的终端
+/// 开一个单独的终端窗口，放在显示器 `display` 上的 `bounds` 处（和 `Window::bounds` 同一套坐标），把主窗口 `owner` 里的终端
 /// `view`（分屏 `pane`）放进去，焦点给它。
 pub(super) fn open(
     owner: WindowHandle<WindowView>,
