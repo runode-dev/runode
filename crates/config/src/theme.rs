@@ -11,8 +11,11 @@ pub(crate) fn pick_theme(value: &str, dark: bool) -> String {
 /// runode 自己的深色主题，和不设 `theme` 时的默认配色一样；设置页把不设主题显示成它。
 pub const DEFAULT_THEME: &str = "Runode Dark";
 
+/// runode 自己的浅色主题。
+pub const DEFAULT_LIGHT_THEME: &str = "Runode Light";
+
 /// runode 自己的主题，在选主题的列表里排最前。
-const RUNODE_THEMES: [&str; 2] = [DEFAULT_THEME, "Runode Light"];
+const RUNODE_THEMES: [&str; 2] = [DEFAULT_THEME, DEFAULT_LIGHT_THEME];
 
 /// 编进二进制的配色主题，按名字排序。
 pub(crate) static BUNDLED_THEMES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/themes.rs"));

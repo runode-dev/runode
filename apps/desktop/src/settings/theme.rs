@@ -83,6 +83,12 @@ pub(super) struct Look {
 }
 
 impl Look {
+    /// 底色是亮的：按人眼对红绿蓝的敏感程度加权后过半。
+    fn is_light(self) -> bool {
+        let Rgb(r, g, b) = self.bg;
+        0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b) > 127.5
+    }
+
     fn of(config: &Config) -> Self {
         let accent = config.palette.iter().rfind(|(i, _)| *i == 4).map_or(Rgb(0x3b, 0x82, 0xf6), |(_, c)| *c);
         Self { bg: config.background, fg: config.foreground, accent }
@@ -117,14 +123,25 @@ impl SettingsView {
         self.write_or_report("theme", vec![theme.value()], cx);
     }
 
-    /// 点了一张预览卡：换成一个主题时留深色那个，分开时两边先都用原来那个。
+    /// 点了一张预览卡：换成一个主题时留深色那个；换成分开时原来那个留在它那一边，另一边用 runode 自己的。
     fn pick_theme_mode(&mut self, mode: &str, cx: &mut Context<Self>) {
         match (mode, ThemeChoice::parse(self.config.theme.as_deref())) {
             ("single", ThemeChoice::Pair { dark, .. }) => self.write_or_report("theme", vec![dark], cx),
             ("pair", ThemeChoice::Single(name)) => {
-                self.write_or_report("theme", vec![format!("light:{name},dark:{name}")], cx)
+                let (light, dark) = self.split_theme(&name);
+                self.write_or_report("theme", vec![format!("light:{light},dark:{dark}")], cx)
             }
             _ => {}
+        }
+    }
+
+    /// 从一个主题 `name` 换成浅色深色分开时两边各用什么：`name` 按它的底色放到浅色或深色那边，另一边用
+    /// runode 自己的，换过去马上看得出两边不同。
+    fn split_theme(&mut self, name: &str) -> (String, String) {
+        if self.theme_look(name).is_some_and(Look::is_light) {
+            (name.to_owned(), runode_config::DEFAULT_THEME.to_owned())
+        } else {
+            (runode_config::DEFAULT_LIGHT_THEME.to_owned(), name.to_owned())
         }
     }
 
@@ -143,7 +160,10 @@ impl SettingsView {
         let (pair, single) = match &choice {
             ThemeChoice::Single(name) => {
                 let look = self.theme_look(name).unwrap_or(current);
-                (vec![look, look], look)
+                let (light, dark) = self.split_theme(name);
+                let light = self.theme_look(&light).unwrap_or(PLAIN_LIGHT);
+                let dark = self.theme_look(&dark).unwrap_or(PLAIN_DARK);
+                (vec![light, dark], look)
             }
             ThemeChoice::Pair { light, dark } => {
                 let light = self.theme_look(light).unwrap_or(PLAIN_LIGHT);

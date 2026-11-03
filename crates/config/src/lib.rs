@@ -23,5 +23,5 @@ pub use model::{CellHeight, Config, Keybind, PreventSleep, PreviewClick, StatusI
 pub use named::{Named, choices};
 pub use parse::{KEYS, REMOTE_ACCESS, TERMINAL_HOST, config_path, theme_config};
 pub use template::create_config_file;
-pub use theme::{DEFAULT_THEME, theme_names};
+pub use theme::{DEFAULT_LIGHT_THEME, DEFAULT_THEME, theme_names};
 pub use values::hex;
