@@ -12,7 +12,7 @@ use crate::ui::{
     font_size::{self, FontSize, scaled},
     hsla,
     icons::{
-        BRANCH_ICON, CHECK_ICON, DISCARD_ICON, GIT_ICON, PENCIL_ICON, TERMINAL_ICON, TRASH_ICON,
+        BRANCH_ICON, CHECK_ICON, DISCARD_ICON, GIT_ICON, PENCIL_ICON, PLUS_ICON, TERMINAL_ICON, TRASH_ICON,
         github_actions::{FAILURE_ICON, PENDING_ICON, SUCCESS_ICON},
     },
     scrollbar::scrollbar,
@@ -30,7 +30,7 @@ use runode_protocol::{
 use runode_types::agent::Agent;
 
 use super::{
-    Kanban, Page, RING_WIDTH, card_shadow, column_name,
+    Kanban, KanbanEvent, Page, RING_WIDTH, card_shadow, column_name,
     dialog::Editing,
     history_link, icon_button, label_row, named, needs_you_badge,
     store::{self, Step, TodoData},
@@ -298,11 +298,25 @@ impl Kanban {
             // 完成那一栏只列最近几天的，空着时照实说。
             let text =
                 if column == Column::Done { rust_i18n::t!("kanban.empty_done") } else { rust_i18n::t!("kanban.empty") };
-            div().flex_1().flex().items_center().justify_center().child(label_row(
-                ("todo-column-empty", column_index(column)),
-                text.into_owned(),
-                fg.opacity(0.4),
-            ))
+            // 待办空着时就地给个新建的入口，不用回侧栏找。
+            let add = (column == Column::Todo).then(|| {
+                Button::new("todo-column-new", rust_i18n::t!("kanban.new_todo").into_owned())
+                    .variant(ButtonVariant::Ghost)
+                    .with_size(ButtonSize::Sm)
+                    .icon(PLUS_ICON)
+                    .icon_size(12.)
+                    .cursor_pointer()
+                    .on_press(cx, |_, _, cx| cx.emit(KanbanEvent::NewTodo))
+            });
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(4.))
+                .child(label_row(("todo-column-empty", column_index(column)), text.into_owned(), fg.opacity(0.4)))
+                .children(add)
         });
         // 需要你那一列有卡片时计数是个实心的徽标，一眼看得到。
         let badge = column == Column::NeedsYou && !cards.is_empty();

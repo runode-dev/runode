@@ -190,6 +190,7 @@ impl WindowView {
             KanbanEvent::Close => self.close_kanban(window, cx),
             KanbanEvent::PageChanged => cx.notify(),
             KanbanEvent::OpenSession { session, todo } => self.open_todo_session(*session, todo, window, cx),
+            KanbanEvent::NewTodo => self.new_todo(&NewTodo, window, cx),
         }
     }
 

@@ -105,6 +105,8 @@ pub enum KanbanEvent {
     PageChanged,
     /// 切到任务 `todo` 的会话 `session`：已经在哪个分屏里就切过去，否则接进窗口，看板随之收起。
     OpenSession { session: SessionId, todo: Box<Todo> },
+    /// 点了看板里的新建任务：和侧栏的入口一样打开新建任务那一页，上回写到一半的接着写。
+    NewTodo,
 }
 
 /// 开着的看板，见模块说明。
