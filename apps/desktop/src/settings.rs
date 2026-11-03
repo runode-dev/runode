@@ -49,7 +49,7 @@ use crate::{
 use pages::Page;
 use picker::Picker;
 
-/// 左边页面列表的宽度。
+/// 左边页面列表的宽度，按基准字号的点数。
 const NAV_WIDTH: f32 = 200.;
 /// 输入框停手这么久之后写回。
 const COMMIT_DELAY: Duration = Duration::from_millis(700);
@@ -401,7 +401,7 @@ impl SettingsView {
                     }
                 })
                 .child(svg().flex_none().path(icon).size(px(16.)).text_color(theme.foreground.opacity(0.7)))
-                .child(label)
+                .child(div().min_w_0().truncate().child(label))
         };
         let back = item("settings-back", ARROW_LEFT_ICON, rust_i18n::t!("settings.back").into_owned(), false)
             .role(Role::Button)
@@ -409,7 +409,7 @@ impl SettingsView {
             .on_press(cx, |_, _, cx| cx.emit(Close));
         div()
             .flex_none()
-            .w(px(NAV_WIDTH))
+            .w(scaled(NAV_WIDTH))
             .h_full()
             .flex()
             .flex_col()
@@ -418,16 +418,28 @@ impl SettingsView {
             .border_color(theme.control_border)
             .id("settings-nav")
             .child(titlebar_strip())
-            .child(div().flex().flex_col().gap(px(2.)).px(px(10.)).child(back).child(
-                div().id("settings-pages").role(Role::TabList).flex().flex_col().gap(px(2.)).children(
-                    Page::ALL.into_iter().map(|page| {
-                        item(page.id(), page.icon(), page.title(), page == self.page)
-                            .role(Role::Tab)
-                            .aria_selected(page == self.page)
-                            .on_press(cx, move |this, window, cx| this.select_page(page, window, cx))
-                    }),
-                ),
-            ))
+            // 界面字号调大、窗口又矮时一列放不下，自己滚。
+            .child(
+                div()
+                    .id("settings-nav-items")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .px(px(10.))
+                    .pb(px(10.))
+                    .child(back)
+                    .child(div().id("settings-pages").role(Role::TabList).flex().flex_col().gap(px(2.)).children(
+                        Page::ALL.into_iter().map(|page| {
+                            item(page.id(), page.icon(), page.title(), page == self.page)
+                                .role(Role::Tab)
+                                .aria_selected(page == self.page)
+                                .on_press(cx, move |this, window, cx| this.select_page(page, window, cx))
+                        }),
+                    )),
+            )
     }
 
     /// Esc：焦点在页面本身（不在输入框、挑选浮层里，也没在录快捷键）时收起。
