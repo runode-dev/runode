@@ -291,14 +291,19 @@ impl WindowView {
         })
     }
 
+    /// 看板的任务在本机的宿主上跑，只交这台电脑上的工作区；当前工作区在远端主机上时，新建任务先填第一个
+    /// 本机工作区的目录，一个都没有时填 home 目录。
     fn kanban_input(&self, resident: bool, cx: &App) -> Input {
+        let local: Vec<_> = self.workspaces.iter().filter(|workspace| workspace.host.is_local()).collect();
+        let current = self.workspace();
+        let dir = if current.host.is_local() {
+            Some(current.dir.clone())
+        } else {
+            local.first().map(|workspace| workspace.dir.clone())
+        };
         Input {
-            workspaces: self
-                .workspaces
-                .iter()
-                .map(|workspace| (workspace.dir.clone(), workspace.name.clone()))
-                .collect(),
-            dir: self.workspace().dir.clone(),
+            workspaces: local.iter().map(|workspace| (workspace.dir.clone(), workspace.name.clone())).collect(),
+            dir: dir.or_else(|| runode_paths::Dirs::from_env().home).unwrap_or_default(),
             shell_path: self.shell_path(cx),
             resident,
         }
