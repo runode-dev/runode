@@ -1345,9 +1345,9 @@ files:
   use_regex: 使用規則運算式
   clear_search: 清除
   include: 要包含的檔案
-  include_placeholder: 要包含的檔案（例如 *.ts、src/**）
+  include_placeholder: 例如 *.ts、src/**
   exclude: 要排除的檔案
-  exclude_placeholder: 要排除的檔案（例如 *.min.js、dist/**）
+  exclude_placeholder: 例如 *.min.js、dist/**
   search_summary: "%{count} 個結果，在 %{files} 個檔案中"
   search_files: "%{files} 個檔案"
   search_truncated: "（只列出前 %{limit} 個）"
