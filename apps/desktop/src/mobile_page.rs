@@ -242,7 +242,8 @@ impl MobilePage {
             .text_size(FontSize::Body)
             .text_color(theme.foreground.opacity(0.5))
             .child(svg().path(PHONE_ICON).size(px(14.)).text_color(theme.foreground.opacity(0.5)))
-            .child(eyebrow_text);
+            // 只在画出来时转大写：报给辅助工具的照文案写，全大写的词读屏会逐个字母念。
+            .child(eyebrow_text.to_uppercase());
         let paired = devices::devices(cx).to_vec();
         if !paired.is_empty() {
             let rows: Vec<_> = paired.iter().map(|device| device_row(device, theme, cx)).collect();

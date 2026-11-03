@@ -997,7 +997,7 @@ status:
   host_disconnect: Disconnect
 mobile:
   entry: "Devices"
-  eyebrow: "RUNODE DEVICES"
+  eyebrow: "Runode Devices"
   intro_title: "Runode on your iPhone."
   intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. On the same network the phone connects straight to this computer; away from it, it still gets through, over a relay when a direct path fails, end-to-end encrypted so the relay cannot read it. Runode on another computer can pair here too, and open this computer's terminals and projects as it would an SSH host."
   start: "Get Started"
