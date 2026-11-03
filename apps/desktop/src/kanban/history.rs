@@ -4,7 +4,7 @@ use crate::ui::{
     a11y::Press,
     button::{Button, ButtonSize, ButtonVariant},
     font_size::FontSize,
-    icons::{CHECK_ICON, TERMINAL_ICON, TRASH_ICON},
+    icons::{DISCARD_ICON, TERMINAL_ICON, TRASH_ICON},
     scrollbar::scrollbar,
     theme::ActiveTheme as _,
 };
@@ -165,7 +165,7 @@ impl Kanban {
             let id = todo.id.clone();
             let label = rust_i18n::t!("kanban.reopen").into_owned();
             buttons.push(
-                icon_button("todo-done", CHECK_ICON, label)
+                icon_button("todo-reopen", DISCARD_ICON, label)
                     .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), false, cx)),
             );
         }

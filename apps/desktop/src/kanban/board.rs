@@ -12,7 +12,7 @@ use crate::ui::{
     font_size::{self, FontSize, scaled},
     hsla,
     icons::{
-        BRANCH_ICON, CHECK_ICON, GIT_ICON, PENCIL_ICON, TERMINAL_ICON, TRASH_ICON,
+        BRANCH_ICON, CHECK_ICON, DISCARD_ICON, GIT_ICON, PENCIL_ICON, TERMINAL_ICON, TRASH_ICON,
         github_actions::{FAILURE_ICON, PENDING_ICON, SUCCESS_ICON},
     },
     scrollbar::scrollbar,
@@ -616,11 +616,16 @@ impl Kanban {
             }
             if primary_id != Some("done") {
                 let done = todo.done_at.is_none();
-                let label = if done { rust_i18n::t!("kanban.finish") } else { rust_i18n::t!("kanban.reopen") };
+                // 完成了的再按是重新打开，换成撤回的箭头，和「标为完成」的勾分开。
+                let (button_id, icon, label) = if done {
+                    ("todo-done", CHECK_ICON, rust_i18n::t!("kanban.finish"))
+                } else {
+                    ("todo-reopen", DISCARD_ICON, rust_i18n::t!("kanban.reopen"))
+                };
                 let label = label.into_owned();
                 let id = id.clone();
                 buttons.push(
-                    icon_button("todo-done", CHECK_ICON, label)
+                    icon_button(button_id, icon, label)
                         .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), done, cx)),
                 );
             }
