@@ -39,6 +39,8 @@ public final class ScreenModel {
     public private(set) var display: ScreenDisplay?
     /// 电脑缺的授权，给人看的说明；都有时为空。
     public private(set) var missingPermissions: [String] = []
+    /// 电脑缺屏幕录制的授权：缺它时看不了画面，连不上就是因为它。
+    public private(set) var lacksScreenCapture = false
     /// 画面的像素尺寸，开始采集后才有。
     public private(set) var videoSize: CGSize?
     /// 按住不放的修饰键，下一次按键或输入文字时带上，用完松开。
@@ -95,6 +97,8 @@ public final class ScreenModel {
     public func start() {
         guard task == nil else { return }
         phase = .connecting
+        // 授权按这次连上时电脑报的算，上一次的不沿用。
+        setPermissions(screenCapture: true, postEvent: true)
         attempt += 1
         let attempt = attempt
         task = Task { [weak self, openConnection, machine] in
@@ -120,7 +124,7 @@ public final class ScreenModel {
     private func run(_ connection: ScreenConnection) async throws {
         self.connection = connection
         displays = connection.displays
-        missingPermissions = Self.missing(screenCapture: connection.screenCapture, postEvent: connection.postEvent)
+        setPermissions(screenCapture: connection.screenCapture, postEvent: connection.postEvent)
         request(displays.first { $0.id == chosenDisplay } ?? displays[0])
         for try await event in connection.events() {
             handle(event)
@@ -139,7 +143,7 @@ public final class ScreenModel {
         case .message(.stopped(let reason, let cause)):
             phase = .failed(cause.map(Self.explanation) ?? reason)
         case .message(.permissions(let screenCapture, let postEvent)):
-            missingPermissions = Self.missing(screenCapture: screenCapture, postEvent: postEvent)
+            setPermissions(screenCapture: screenCapture, postEvent: postEvent)
         case .message(.lock(let isLocked)):
             locked = isLocked
             if !isLocked {
@@ -409,6 +413,11 @@ public final class ScreenModel {
         case .noEncoder:
             String(localized: "那台电脑上没有能用的视频编码器（比如没装媒体功能包的 Windows N 版），看不了它的屏幕")
         }
+    }
+
+    private func setPermissions(screenCapture: Bool, postEvent: Bool) {
+        missingPermissions = Self.missing(screenCapture: screenCapture, postEvent: postEvent)
+        lacksScreenCapture = !screenCapture
     }
 
     nonisolated static func missing(screenCapture: Bool, postEvent: Bool) -> [String] {

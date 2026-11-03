@@ -24,15 +24,16 @@
                     case .connecting:
                         ProgressView("正在连接远程桌面…").tint(.white).foregroundStyle(.white)
                     case .failed(let reason):
-                        // 缺权限时连不上是意料中的，说清缺什么、去哪里开，不摆电脑那边的原话。
+                        // 缺屏幕录制时连不上是意料中的，说清缺什么、去哪里开，不摆电脑那边的原话；只缺辅助功能时
+                        // 画面照样看得了，断开另有原因，照说原因。
                         ContentUnavailableView {
-                            if permissionMessage != nil {
+                            if failedForPermission {
                                 Label("电脑上的 Runode 缺少权限", systemImage: "lock.display")
                             } else {
                                 Label("远程桌面断开了", systemImage: "display.trianglebadge.exclamationmark")
                             }
                         } description: {
-                            Text(permissionMessage ?? reason)
+                            Text(failedForPermission ? permissionMessage ?? reason : reason)
                         } actions: {
                             Button("重新连接") { model.retry() }
                         }
@@ -51,8 +52,8 @@
             }
             .background(Color.black.ignoresSafeArea())
             .overlay(alignment: .top) {
-                // 连不上时中间已经说了，不再重复；排在浮动按钮下面，不被它们盖住。
-                if let permissionMessage, !failed {
+                // 中间的失败页说着缺的权限时不再重复；排在浮动按钮下面，不被它们盖住。
+                if let permissionMessage, !failedForPermission {
                     Text(permissionMessage)
                         .font(.footnote)
                         .padding(.horizontal, 12)
@@ -125,6 +126,11 @@
 
         private var failed: Bool {
             if case .failed = model.phase { true } else { false }
+        }
+
+        /// 连不上是因为电脑缺屏幕录制的权限，中间的失败页说的就是缺的权限。
+        private var failedForPermission: Bool {
+            failed && model.lacksScreenCapture
         }
 
         /// 电脑上缺的权限和去哪里开；不缺时为空。
