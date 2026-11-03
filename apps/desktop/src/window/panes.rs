@@ -529,6 +529,8 @@ impl WindowView {
             .items_center()
             .gap(px(6.))
             .text_size(FontSize::Body)
+            // 条高定死，界面字号调到最大时默认的行高比条还高，折叠的那条会把字截掉一半；行高收紧到放得下。
+            .line_height(relative(1.2))
             .font_weight(FontWeight::MEDIUM)
             .text_color(fg_hsla.opacity(if current || !split { 0.9 } else { 0.55 }))
             .child(icon)
