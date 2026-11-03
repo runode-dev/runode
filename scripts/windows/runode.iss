@@ -47,9 +47,11 @@ Name: "{autoprograms}\Runode"; Filename: "{app}\runode.exe"
 ; 命令行 `rn` 要在 PATH 上。
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
   ValueData: "{olddata};{app}"; Check: NeedsPathEntry
-; 登录自启（`runode service install host`，`runode_autostart` 的 `run_key`）登记的值，安装时不写，卸载时删掉。
+; 登录自启（`runode service install host|app`，`runode_autostart` 的 `run_key`）登记的值，安装时不写，卸载时删掉。
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; \
   ValueName: "Runode Host"; Flags: dontcreatekey uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; \
+  ValueName: "Runode"; Flags: dontcreatekey uninsdeletevalue
 
 [Run]
 ; 交互安装时问一句要不要打开；静默安装（自动更新、脚本）直接打开，/NORUN 不打开。

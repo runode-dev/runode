@@ -1,7 +1,7 @@
 //! 登录时自启：macOS 写 launchd 的 LaunchAgent（`~/Library/LaunchAgents`），Linux 写 systemd 的
 //! 用户服务（用户服务管理器自己查找的 `$XDG_CONFIG_HOME/systemd/user`，见 `systemd_unit_files`），Windows
 //! 登记在当前用户的 `Run` 键下（`run_key`）。能拉起两样东西（`Kind`）：无界面的宿主
-//! （`runode --host`，手机远程访问靠它在后台等着）和桌面 app（只有 macOS 有）。app 在 macOS 13 起
+//! （`runode --host`，手机远程访问靠它在后台等着）和桌面 app（Linux 上没有）。app 在 macOS 13 起
 //! 登记成系统的登录项（`SMAppService`），更早的系统上也写 LaunchAgent。
 //! 有没有装就看服务文件在不在、登录项登没登记，不另存状态；命令行（`runode service`）和设置页用的是同一套。
 
@@ -52,7 +52,7 @@ impl std::fmt::Display for Registration {
 pub enum Kind {
     /// 无界面的终端宿主 `runode --host`。
     Host,
-    /// 桌面 app（`Runode.app`），只有 macOS。
+    /// 桌面 app：macOS 上是 `Runode.app`，Windows 上是 runode.exe；Linux 上没有。
     App,
 }
 
@@ -76,7 +76,7 @@ impl Kind {
     pub fn supported(self) -> bool {
         match self {
             Self::Host => cfg!(any(target_os = "macos", target_os = "linux", windows)),
-            Self::App => cfg!(target_os = "macos"),
+            Self::App => cfg!(any(target_os = "macos", windows)),
         }
     }
 
@@ -239,8 +239,8 @@ pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
 /// `kind` 的登录自启现在登记在哪，没装时为空。
 pub fn registration(kind: Kind, dirs: &Dirs) -> Option<Registration> {
     #[cfg(windows)]
-    if kind == Kind::Host {
-        return run_key::is_installed().then_some(Registration::RunKey);
+    if kind.supported() {
+        return run_key::is_installed(kind).then_some(Registration::RunKey);
     }
     #[cfg(target_os = "macos")]
     if kind == Kind::App && login_item::available() && login_item::is_enabled() {
@@ -259,7 +259,7 @@ pub enum Start {
 }
 
 /// 装上 `kind` 的登录自启，返回登记在哪。`exe` 是
-/// runode 可执行文件；`Kind::App` 时它得在 `Runode.app` 里，登记的就是这个 app。可以重复装，每次整个
+/// runode 可执行文件；macOS 上 `Kind::App` 时它得在 `Runode.app` 里，登记的就是这个 app。可以重复装，每次整个
 /// 换掉服务文件。
 ///
 /// 宿主按 `start` 决定马上起还是等下次登录，经服务管理器起的崩了会被拉起来；app 不管 `start`，下次登录
@@ -267,8 +267,8 @@ pub enum Start {
 /// 一重启会话就丢了，新的服务文件等它下次起来时才用上。
 pub fn install(kind: Kind, dirs: &Dirs, exe: &Path, start: Start) -> io::Result<Registration> {
     #[cfg(windows)]
-    if kind == Kind::Host {
-        run_key::install(exe, start)?;
+    if kind.supported() {
+        run_key::install(kind, exe, start)?;
         return Ok(Registration::RunKey);
     }
     let path = service_file(kind, dirs).ok_or_else(|| unsupported(kind))?;
@@ -397,8 +397,8 @@ pub fn enable_linger() -> io::Result<()> {
 /// 正在跑的宿主不停：它托管着会话，停了会话就丢了；它空闲时自己会退出，或者跟着这次登录结束。
 pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
     #[cfg(windows)]
-    if kind == Kind::Host {
-        return run_key::uninstall();
+    if kind.supported() {
+        return run_key::uninstall(kind);
     }
     let path = service_file(kind, dirs).ok_or_else(|| unsupported(kind))?;
     #[cfg(target_os = "macos")]
@@ -473,7 +473,7 @@ fn unsupported(kind: Kind) -> io::Error {
         io::ErrorKind::Unsupported,
         match kind {
             Kind::Host => "starting at login is only supported on macOS, Linux and Windows",
-            Kind::App => "the app only exists on macOS, so there is no app to start at login",
+            Kind::App => "the app only exists on macOS and Windows, so there is no app to start at login",
         },
     )
 }

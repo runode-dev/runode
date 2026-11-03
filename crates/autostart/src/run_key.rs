@@ -1,5 +1,5 @@
-//! Windows 的登录自启：当前用户的 `Run` 键（`RUN_KEY`）下一个值（`VALUE`），登录时 Explorer 照它拉起
-//! 宿主。不要管理员权限；安装包卸载时删掉这个值。
+//! Windows 的登录自启：当前用户的 `Run` 键（`RUN_KEY`）下每样东西一个值（`value`），登录时 Explorer 照它
+//! 拉起宿主或打开 app。不要管理员权限；安装包卸载时删掉这些值。
 
 use std::{
     io,
@@ -13,12 +13,18 @@ use windows_sys::Win32::{
     System::Registry::{HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW},
 };
 
-use crate::Start;
+use crate::{Kind, Start};
 
 /// 当前用户登录时拉起的程序都登记在这个键下（`HKEY_CURRENT_USER` 之下）。
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-/// 宿主在 `RUN_KEY` 下的值名；安装包卸载时按这个名字删，改名要和安装脚本一起改。
-const VALUE: &str = "Runode Host";
+
+/// `kind` 在 `RUN_KEY` 下的值名；安装包卸载时按这些名字删，改名要和安装脚本一起改。
+fn value(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Host => "Runode Host",
+        Kind::App => "Runode",
+    }
+}
 
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
@@ -27,21 +33,25 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain([0]).collect()
 }
 
-/// 登录时跑的命令行：宿主是 `exe` 旁边的 runode.exe（命令行 rn.exe 只管命令），路径加引号，安装目录在
-/// 带空格的用户名下也对；`canonicalize` 加的 `\\?\` 前缀换回普通写法，网络共享上的 `\\?\UNC\` 换回 `\\`。
-pub(crate) fn command(exe: &Path) -> String {
+/// 登录时跑的命令行：宿主和 app 都是 `exe` 旁边的 runode.exe（命令行 rn.exe 只管命令），宿主另带
+/// `--host --stay`。路径加引号，安装目录在带空格的用户名下也对；`canonicalize` 加的 `\\?\` 前缀换回普通
+/// 写法，网络共享上的 `\\?\UNC\` 换回 `\\`。
+pub(crate) fn command(kind: Kind, exe: &Path) -> String {
     let exe = exe.with_file_name("runode.exe");
     let exe = exe.to_string_lossy();
     let exe = match exe.strip_prefix(r"\\?\UNC\") {
         Some(share) => format!(r"\\{share}"),
         None => exe.strip_prefix(r"\\?\").unwrap_or(&exe).to_owned(),
     };
-    format!("\"{exe}\" --host --stay")
+    match kind {
+        Kind::Host => format!("\"{exe}\" --host --stay"),
+        Kind::App => format!("\"{exe}\""),
+    }
 }
 
-/// 登记着的命令行；没登记时为 `None`。
-fn get() -> Option<String> {
-    let (key, value) = (wide(RUN_KEY), wide(VALUE));
+/// `kind` 登记着的命令行；没登记时为 `None`。
+fn get(kind: Kind) -> Option<String> {
+    let (key, value) = (wide(RUN_KEY), wide(value(kind)));
     let mut size = 0u32;
     // SAFETY: 字符串都以 NUL 结尾；先只问长度。
     let status = unsafe {
@@ -78,16 +88,16 @@ fn get() -> Option<String> {
     Some(String::from_utf16_lossy(&data[..end]))
 }
 
-pub(crate) fn is_installed() -> bool {
-    get().is_some()
+pub(crate) fn is_installed(kind: Kind) -> bool {
+    get(kind).is_some()
 }
 
-/// 登记宿主，`Start::Now` 时再在后台拉起一个，不用等下次登录；已经有宿主在跑时新拉起的抢不到锁、自己退出。
-/// 拉不起来时登记恢复成原样，免得报了失败却留着一个登录时会跑的登记。
-pub(crate) fn install(exe: &Path, start: Start) -> io::Result<()> {
-    let previous = get();
-    set(&command(exe))?;
-    if start == Start::Later {
+/// 登记 `kind`。宿主在 `Start::Now` 时再在后台拉起一个，不用等下次登录；已经有宿主在跑时新拉起的抢不到锁、
+/// 自己退出。拉不起来时登记恢复成原样，免得报了失败却留着一个登录时会跑的登记。app 只登记，下次登录才开。
+pub(crate) fn install(kind: Kind, exe: &Path, start: Start) -> io::Result<()> {
+    let previous = get(kind);
+    set(kind, &command(kind, exe))?;
+    if kind == Kind::App || start == Start::Later {
         return Ok(());
     }
     let spawned = Command::new(exe.with_file_name("runode.exe"))
@@ -99,8 +109,8 @@ pub(crate) fn install(exe: &Path, start: Start) -> io::Result<()> {
         .spawn();
     if let Err(err) = spawned {
         let restored = match &previous {
-            Some(previous) => set(previous),
-            None => uninstall().map(drop),
+            Some(previous) => set(kind, previous),
+            None => uninstall(kind).map(drop),
         };
         if let Err(restore) = restored {
             return Err(io::Error::new(err.kind(), format!("{err}; the login item was left changed: {restore}")));
@@ -110,8 +120,8 @@ pub(crate) fn install(exe: &Path, start: Start) -> io::Result<()> {
     Ok(())
 }
 
-fn set(command: &str) -> io::Result<()> {
-    let (key, value, data) = (wide(RUN_KEY), wide(VALUE), wide(command));
+fn set(kind: Kind, command: &str) -> io::Result<()> {
+    let (key, value, data) = (wide(RUN_KEY), wide(value(kind)), wide(command));
     let bytes = u32::try_from(data.len() * 2).map_err(io::Error::other)?;
     // SAFETY: 字符串都以 NUL 结尾，`bytes` 是 `data` 含结尾 NUL 的字节数。
     let status = unsafe {
@@ -123,9 +133,9 @@ fn set(command: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// 去掉登记，原来就没有时返回 `false`。在跑的宿主不停。
-pub(crate) fn uninstall() -> io::Result<bool> {
-    let (key, value) = (wide(RUN_KEY), wide(VALUE));
+/// 去掉 `kind` 的登记，原来就没有时返回 `false`。在跑的宿主不停。
+pub(crate) fn uninstall(kind: Kind) -> io::Result<bool> {
+    let (key, value) = (wide(RUN_KEY), wide(value(kind)));
     // SAFETY: 字符串都以 NUL 结尾。
     match unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), value.as_ptr()) } {
         ERROR_SUCCESS => Ok(true),
@@ -139,14 +149,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_command_quotes_the_host_next_to_the_cli() {
+    fn the_command_quotes_runode_next_to_the_cli() {
         let exe = Path::new(r"\\?\C:\Users\A B\AppData\Local\Programs\Runode\rn.exe");
-        assert_eq!(command(exe), r#""C:\Users\A B\AppData\Local\Programs\Runode\runode.exe" --host --stay"#);
+        assert_eq!(
+            command(Kind::Host, exe),
+            r#""C:\Users\A B\AppData\Local\Programs\Runode\runode.exe" --host --stay"#
+        );
+        assert_eq!(command(Kind::App, exe), r#""C:\Users\A B\AppData\Local\Programs\Runode\runode.exe""#);
     }
 
     #[test]
     fn the_command_keeps_network_shares_absolute() {
         let exe = Path::new(r"\\?\UNC\server\apps\Runode\rn.exe");
-        assert_eq!(command(exe), r#""\\server\apps\Runode\runode.exe" --host --stay"#);
+        assert_eq!(command(Kind::Host, exe), r#""\\server\apps\Runode\runode.exe" --host --stay"#);
     }
 }

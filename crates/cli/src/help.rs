@@ -420,7 +420,7 @@ Arguments:
         Started this way it keeps running in the background even with no
         sessions, so a phone with remote-access = true can connect without
         the app open and task board schedules start on time
-  app   The Runode app, opened at the next login (macOS only)
+  app   The Runode app, opened at the next login (macOS and Windows)
 
 Options:
   -h, --help  Show this help

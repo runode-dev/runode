@@ -19,6 +19,9 @@ pub(crate) fn install(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::Res
         Registration::File(path) => {
             writeln!(out, "Installed {}: Runode {} starts at login.", path.display(), kind.name())?;
         }
+        place @ Registration::RunKey if kind == Kind::App => {
+            writeln!(out, "Registered the app under {place}: it opens at login.")?
+        }
         place @ Registration::RunKey => writeln!(out, "Registered the host under {place}: it starts at login.")?,
         Registration::LoginItem => writeln!(out, "Added Runode to the login items: the app opens at login.")?,
     }
