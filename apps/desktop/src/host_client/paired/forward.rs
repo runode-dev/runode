@@ -83,8 +83,15 @@ pub fn forward(host: &PairedHost, port: u16) -> Result<u16> {
         move || accept(listener, &id, port, &stopped)
     };
     thread::Builder::new().name("paired-forward".into()).spawn(accepting).context("cannot start a thread")?;
+    let listening = Listening { local, stopped };
+    let mut forwards = FORWARDS.lock().unwrap_or_else(PoisonError::into_inner);
+    // 同一个端口同时要转两次时先登记的算数，后开的这个停掉。
+    if let Some(existing) = forwards.get(&key) {
+        listening.stop();
+        return Ok(existing.local);
+    }
     tracing::info!("forwarding localhost:{local} to the paired computer {}:{port}", host.id);
-    FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).insert(key, Listening { local, stopped });
+    forwards.insert(key, listening);
     Ok(local)
 }
 
