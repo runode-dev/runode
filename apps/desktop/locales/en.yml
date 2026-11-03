@@ -1413,3 +1413,8 @@ paired:
   rename: Rename
   forget: Unpair
   in_use: Close the workspaces and terminals on this computer first.
+project_host:
+  lost: "Lost the connection to %{host}"
+  lost_because: "Lost the connection to %{host}: %{reason}"
+  timeout: "%{host} did not answer in time"
+  not_connected: "Not connected to %{host}"

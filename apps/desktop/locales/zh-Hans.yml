@@ -1487,3 +1487,8 @@ paired:
   rename: 改名
   forget: 解除配对
   in_use: 先关掉这台电脑上的工作区和终端。
+project_host:
+  lost: "和 %{host} 的连接断了"
+  lost_because: "和 %{host} 的连接断了：%{reason}"
+  timeout: "%{host} 没有及时回话"
+  not_connected: "没连上 %{host}"

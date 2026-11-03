@@ -66,6 +66,14 @@ impl Client {
         &self.name
     }
 
+    /// 报错时怎么称呼这台主机：配对的电脑用它报的主机名，SSH 主机用连接目标。
+    fn label(&self) -> String {
+        match &self.host {
+            HostId::Paired(id) => paired::machine(id).map_or_else(|| self.name.clone(), |machine| machine.host_name),
+            _ => self.name.clone(),
+        }
+    }
+
     /// 经 `input`、`output` 和同一个进程里的项目服务说话的一个，不经 ssh，测试用。
     #[cfg(test)]
     pub(super) fn over(
@@ -115,10 +123,10 @@ impl Client {
         if let Err(err) = written {
             conn.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);
             if err.kind() == std::io::ErrorKind::InvalidData {
-                return Err(format!("cannot send the request to {}: {err}", self.name));
+                return Err(format!("cannot send the request to {}: {err}", self.label()));
             }
             conn.closed.store(true, Ordering::Relaxed);
-            return Err(format!("lost the connection to {}: {err}", self.name));
+            return Err(rust_i18n::t!("project_host.lost_because", host = self.label(), reason = err).into_owned());
         }
         let deadline = Instant::now() + timeout;
         loop {
@@ -128,7 +136,7 @@ impl Client {
                 Ok((Reply::Failed(error), _)) => return Err(error),
                 Ok(reply) => return Ok(reply),
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(format!("lost the connection to {}", self.name));
+                    return Err(rust_i18n::t!("project_host.lost", host = self.label()).into_owned());
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
@@ -138,7 +146,7 @@ impl Client {
             }
             conn.pending.lock().unwrap_or_else(PoisonError::into_inner).remove(&id);
             if !cancelled {
-                return Err(format!("{} did not answer in time", self.name));
+                return Err(rust_i18n::t!("project_host.timeout", host = self.label()).into_owned());
             }
             let stop = Request { id: conn.next.fetch_add(1, Ordering::Relaxed), call: Call::Cancel { id }, blob: 0 };
             if wire::write(&mut *conn.input.lock().unwrap_or_else(PoisonError::into_inner), &stop, &[]).is_err() {
@@ -157,7 +165,7 @@ impl Client {
         let conn = match &self.host {
             HostId::Ssh(name) => self.open_ssh(name)?,
             HostId::Paired(id) => self.open_paired(id)?,
-            HostId::Local => return Err(format!("not connected to {}", self.name)),
+            HostId::Local => return Err(rust_i18n::t!("project_host.not_connected", host = self.label()).into_owned()),
         };
         *slot = Some(conn.clone());
         Ok(conn)
@@ -165,26 +173,26 @@ impl Client {
 
     /// 到配对的电脑 `id` 另开一条读写项目的专用连接。那边的构建和这边不同时不拨号，直接交回给人看的原因。
     fn open_paired(&self, id: &str) -> Result<Arc<Conn>, String> {
-        let host = paired::find(id).ok_or_else(|| format!("no such host: {}", self.name))?;
+        let host = paired::find(id).ok_or_else(|| format!("no such host: {}", self.label()))?;
         match host.status() {
             Status::Connected(connected) if connected.mismatch => {
                 return Err(ChannelError::Refused(ChannelRefusal::BuildMismatch { build: connected.build }).to_string());
             }
             Status::Connected(_) => {}
-            _ => return Err(format!("not connected to {}", self.name)),
+            _ => return Err(rust_i18n::t!("project_host.not_connected", host = self.label()).into_owned()),
         }
         let hello = ChannelHello::ProjectHello { build: crate::host_client::build().0 };
         let stream = host.open_channel(&hello).map_err(|err| err.to_string())?;
         host.hold(&stream);
-        let input = stream.try_clone().map_err(|err| format!("cannot use the connection to {}: {err}", self.name))?;
+        let input = stream.try_clone().map_err(|err| format!("cannot use the connection to {}: {err}", self.label()))?;
         Conn::start(&self.name, Box::new(input), stream, || {})
     }
 
     /// 经 SSH 主机 `name` 的主连接起 `runode --ssh-project`。
     fn open_ssh(&self, name: &str) -> Result<Arc<Conn>, String> {
-        let host = ssh::find(name).ok_or_else(|| format!("no such host: {}", self.name))?;
+        let host = ssh::find(name).ok_or_else(|| format!("no such host: {}", self.label()))?;
         if !matches!(host.status(), Status::Connected(_)) {
-            return Err(format!("not connected to {}", self.name));
+            return Err(rust_i18n::t!("project_host.not_connected", host = self.label()).into_owned());
         }
         let script = host.family().run_command(&deploy::install_dir(), runode_ssh::bootstrap::Entry::Project);
         let mut command = host.exec(&ssh::ssh(), &script, true, false);
