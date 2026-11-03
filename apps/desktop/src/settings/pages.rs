@@ -12,7 +12,7 @@ use super::{
     picker::{PickItem, PickTarget},
 };
 use crate::{
-    i18n::tr,
+    i18n::{os_key, tr},
     ui::{
         button::{Button, ButtonSize, ButtonVariant},
         display_dir,
@@ -293,7 +293,14 @@ pub(super) fn key_title(key: &str) -> String {
 }
 
 pub(super) fn key_hint(key: &str) -> SharedString {
-    tr(&format!("settings.hint.{}", tr_key(key))).into()
+    tr(&hint_key(key, &crate::i18n::current())).into()
+}
+
+/// 设置项 `key` 的说明在 `locale` 的翻译里的键：各系统说法不同的写成 `os_key` 那几条，取本系统那条。
+fn hint_key(key: &str, locale: &str) -> String {
+    let plain = format!("settings.hint.{}", tr_key(key));
+    let os = os_key(&plain);
+    if crate::_rust_i18n_try_translate(locale, &os).is_some() { os } else { plain }
 }
 
 /// 分段选项列出的值。
@@ -840,7 +847,7 @@ mod tests {
                     match item {
                         Item::Row(key, control) => {
                             missing(&format!("settings.key.{}", tr_key(key)));
-                            missing(&format!("settings.hint.{}", tr_key(key)));
+                            missing(&hint_key(key, &locale));
                             if matches!(control, Control::Choice | Control::Options(_)) {
                                 for value in control_values(key, *control).iter().filter(|value| !value.is_empty()) {
                                     missing(&format!("settings.choice.{}.{value}", tr_key(key)));
@@ -853,7 +860,7 @@ mod tests {
                 }
                 for key in page.keys() {
                     missing(&format!("settings.key.{}", tr_key(key)));
-                    missing(&format!("settings.hint.{}", tr_key(key)));
+                    missing(&hint_key(key, &locale));
                 }
             }
         }
