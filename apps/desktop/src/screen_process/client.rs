@@ -1,13 +1,19 @@
-//! 连上采集进程（`connect`），没有在跑的就拉起一个。
+//! 连上采集进程（`connect`），没有在跑的就拉起一个；远程访问连不上时交回一条说明原因的连接
+//! （`connect_or_explain`）。
 
 use std::{
     io,
+    net::Shutdown,
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
 
-use runode_protocol::screen::{ScreenHostMsg, StopCause};
+use runode_protocol::{
+    Frame, FrameKind, read_frame,
+    screen::{SCREEN_VERSION, ScreenClientMsg, ScreenDisplay, ScreenHostMsg, StopCause},
+    write_frame,
+};
 
 use crate::host_client::UnixStream;
 
@@ -51,6 +57,62 @@ pub fn connect() -> io::Result<UnixStream> {
         }
         thread::sleep(RETRY);
     }
+}
+
+/// 远程访问的 `Connect`：连不上采集进程时交回一条只说一句 `ScreenHostMsg::Stopped`（带原因）就结束的连接，
+/// 手机和配对的电脑看得到为什么开不起来。
+pub fn connect_or_explain() -> io::Result<UnixStream> {
+    connect().or_else(|err| {
+        tracing::warn!("cannot reach the screen process: {err}");
+        explain(&err)
+    })
+}
+
+/// 一条照采集进程的样子回过 `ScreenHello` 就说带着 `err` 的 `ScreenHostMsg::Stopped`、随后结束的连接，对面再写来的
+/// 都收下扔掉。
+fn explain(err: &io::Error) -> io::Result<UnixStream> {
+    let stopped = refusal(err);
+    let (ours, theirs) = UnixStream::pair()?;
+    thread::Builder::new().name("screen-refusal".into()).spawn(move || {
+        if let Err(err) = refuse(&theirs, stopped) {
+            tracing::debug!("cannot tell the viewer why there is no remote desktop: {err}");
+        }
+        let _ = theirs.shutdown(Shutdown::Write);
+        // 一直收到对面关掉：对面写进来的帧要有人收，写不进时说的原因也转不出去。
+        let _ = io::copy(&mut &theirs, &mut io::sink());
+    })?;
+    Ok(ours)
+}
+
+/// 读对面的 `ScreenHello`，版本不同时回 `Incompatible`，否则回 `Ready` 再回 `stopped`。手机要先收到有屏幕的
+/// `Ready` 才读后面的消息，这里列不出屏幕，报一块凑的 1920×1080。
+fn refuse(stream: &UnixStream, stopped: ScreenHostMsg) -> io::Result<()> {
+    let hello = read_frame(&mut &*stream).map_err(io::Error::other)?;
+    let version = hello.and_then(|frame| match frame.message::<ScreenClientMsg>() {
+        Ok(ScreenClientMsg::ScreenHello { version }) => Some(version),
+        _ => None,
+    });
+    let replies = if version.is_some_and(|version| version != SCREEN_VERSION) {
+        vec![ScreenHostMsg::Incompatible { version: SCREEN_VERSION }]
+    } else {
+        let display = ScreenDisplay {
+            id: 0,
+            width: 1920,
+            height: 1080,
+            pixel_width: 1920,
+            pixel_height: 1080,
+            modes: Vec::new(),
+            changed: false,
+        };
+        let ready =
+            ScreenHostMsg::Ready { displays: vec![display], screen_capture: true, post_event: true, datagram: false };
+        vec![ready, stopped]
+    };
+    for reply in replies {
+        let frame = Frame::control(&reply).map_err(io::Error::other)?;
+        write_frame(&mut &*stream, FrameKind::Control, 0, &frame.payload).map_err(io::Error::other)?;
+    }
+    Ok(())
 }
 
 /// 连不上采集进程（`connect` 的错误）时告诉观看端的。
@@ -120,4 +182,38 @@ fn copy_if_changed(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(&part, to).inspect_err(|_| {
         let _ = std::fs::remove_file(&part);
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn say_hello(stream: &UnixStream, version: u32) {
+        let hello = Frame::control(&ScreenClientMsg::ScreenHello { version }).unwrap();
+        write_frame(&mut &*stream, FrameKind::Control, 0, &hello.payload).unwrap();
+    }
+
+    fn next(stream: &UnixStream) -> Option<ScreenHostMsg> {
+        read_frame(&mut &*stream).unwrap().map(|frame| frame.message().unwrap())
+    }
+
+    /// 回过 `Ready` 再说带原因的 `Stopped`，然后结束。
+    #[test]
+    fn explains_why_the_screen_process_is_out_of_reach() {
+        let err = runode_screen::caused_error(StopCause::NoDesktop, io::ErrorKind::NotConnected, "no desktop");
+        let stream = explain(&err).unwrap();
+        say_hello(&stream, SCREEN_VERSION);
+        assert!(matches!(next(&stream), Some(ScreenHostMsg::Ready { displays, .. }) if displays.len() == 1));
+        let reason = "cannot start remote desktop on this computer: no desktop".into();
+        assert_eq!(next(&stream), Some(ScreenHostMsg::stopped(reason, Some(StopCause::NoDesktop))));
+        assert_eq!(next(&stream), None);
+    }
+
+    #[test]
+    fn other_versions_hear_incompatible() {
+        let stream = explain(&io::Error::other("no socket")).unwrap();
+        say_hello(&stream, SCREEN_VERSION + 1);
+        assert_eq!(next(&stream), Some(ScreenHostMsg::Incompatible { version: SCREEN_VERSION }));
+        assert_eq!(next(&stream), None);
+    }
 }

@@ -1,6 +1,6 @@
 //! 远程访问（手机或配对过的别的电脑经网络连上宿主，见 `runode_remote`）跟着宿主活：宿主跑在哪个进程里，
 //! 监听就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上，要远程桌面的接到采集进程上
-//! （`screen_process::client::connect`），要电脑识别录音的接到 `dictation::remote`，别的电脑要读写项目的
+//! （`screen_process::client::connect_or_explain`），要电脑识别录音的接到 `dictation::remote`，别的电脑要读写项目的
 //! 接到本进程里起的项目服务上（`connect_project`）。开关（配置项
 //! `remote-access`）、端口（`remote-access-port`）和给手机看的名字（`remote-access-name`）随配置变，
 //! 几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
@@ -85,7 +85,7 @@ pub fn service(host: &Host) -> Option<Service> {
         advertise: true,
         tunnel: true,
         connect,
-        connect_screen: Arc::new(crate::screen_process::client::connect),
+        connect_screen: Arc::new(crate::screen_process::client::connect_or_explain),
         connect_speech: Arc::new(crate::dictation::remote::connect),
         connect_project: Some(Arc::new(connect_project)),
     };
