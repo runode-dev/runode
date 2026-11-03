@@ -609,7 +609,12 @@ impl Render for Kanban {
                 .cursor_pointer()
                 .on_press(cx, |this, window, cx| this.open_dialog(true, None, window, cx))
         });
-        let close_label = rust_i18n::t!("kanban.close").into_owned();
+        let close_label = match self.page {
+            Page::Todos => rust_i18n::t!("kanban.close"),
+            Page::Schedules => rust_i18n::t!("kanban.close_schedules"),
+            Page::History => rust_i18n::t!("kanban.close_history"),
+        }
+        .into_owned();
         let close =
             icon_button("kanban-close", CLOSE_ICON, close_label).on_press(cx, |_, _, cx| cx.emit(KanbanEvent::Close));
         let header = div()

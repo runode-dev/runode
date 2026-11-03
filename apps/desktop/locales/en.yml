@@ -1049,6 +1049,8 @@ kanban:
   new_todo: New Task
   new_schedule: New Schedule
   close: Close the Kanban
+  close_schedules: Close Schedules
+  close_history: Close History
   count: "%{count} task(s)"
   empty: Nothing here
   empty_done: "Nothing finished in the last 7 days"

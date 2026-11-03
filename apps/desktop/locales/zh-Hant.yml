@@ -1049,6 +1049,8 @@ kanban:
   new_todo: 新增任務
   new_schedule: 新增定時
   close: 關閉看板
+  close_schedules: 關閉定時
+  close_history: 關閉記錄
   count: "%{count} 個任務"
   empty: 沒有任務
   empty_done: "最近 7 天沒有完成的任務"
