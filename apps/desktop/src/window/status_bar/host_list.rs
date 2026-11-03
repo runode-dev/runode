@@ -53,13 +53,12 @@ impl WindowView {
             None => label.clone(),
         };
         Some(
-            self.status_item("status-hosts", StatusPopover::Hosts, cx)
+            self.status_item("status-hosts", StatusPopover::Hosts, down_text.clone().map(Into::into), cx)
                 .aria_description(description)
                 .child(icon)
                 .child(label)
-                .when_some(down_text, |item, text| {
+                .when(down_text.is_some(), |item| {
                     item.child(div().flex_none().size(px(6.)).rounded_full().bg(hsla(PENDING_DOT)))
-                        .tooltip(tooltip(text, None))
                 }),
         )
     }

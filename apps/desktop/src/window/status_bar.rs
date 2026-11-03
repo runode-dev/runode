@@ -487,9 +487,8 @@ impl WindowView {
         let sleep_state =
             if effective { rust_i18n::t!("status.sleep_active") } else { rust_i18n::t!("status.sleep_inactive") };
         let sleep_item = self
-            .status_item("status-sleep", StatusPopover::Sleep, cx)
             // 上面只写着「开启」「关闭」，不说是什么开关。
-            .tooltip(tooltip(rust_i18n::t!("status.sleep_title"), None))
+            .status_item("status-sleep", StatusPopover::Sleep, Some(rust_i18n::t!("status.sleep_title").into()), cx)
             .aria_description(format!("{} · {sleep_state}", sleep_label(sleep)))
             .child(icon(COFFEE_ICON))
             .child(sleep_label(sleep))
@@ -497,8 +496,12 @@ impl WindowView {
         // 还没量到内存（刚启动、头一次采样没回来）时写一道横线，不写 0。
         let memory = if total.memory == 0 { "—".to_owned() } else { format_bytes(total.memory) };
         let resources_item = self
-            .status_item("status-resources", StatusPopover::Resources, cx)
-            .tooltip(tooltip(rust_i18n::t!("status.resources_tooltip"), None))
+            .status_item(
+                "status-resources",
+                StatusPopover::Resources,
+                Some(rust_i18n::t!("status.resources_tooltip").into()),
+                cx,
+            )
             .aria_description(format!("{}: {memory} · {terminals}", rust_i18n::t!("status.resources_tooltip")))
             .child(icon(MEMORY_ICON))
             .child(memory)
@@ -506,8 +509,12 @@ impl WindowView {
             .child(icon(SHELL_ICON))
             .child(terminals.to_string());
         let ports_item = self
-            .status_item("status-ports", StatusPopover::Ports { external: false }, cx)
-            .tooltip(tooltip(rust_i18n::t!("status.ports_tooltip"), None))
+            .status_item(
+                "status-ports",
+                StatusPopover::Ports { external: false },
+                Some(rust_i18n::t!("status.ports_tooltip").into()),
+                cx,
+            )
             .aria_description(ours.to_string())
             .child(icon(PLUG_ICON))
             .child(ours.to_string());
@@ -632,7 +639,14 @@ impl WindowView {
     }
 
     /// 状态栏上的一块：点了弹出 `popover`，再点一下关掉；开着时把浮层挂在它上面。
-    fn status_item(&self, id: &'static str, popover: StatusPopover, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// 状态栏上的一块，点开 `popover`。`hint` 是悬停提示，浮层开着时不挂，免得盖在浮层上。
+    fn status_item(
+        &self,
+        id: &'static str,
+        popover: StatusPopover,
+        hint: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let open = self.status_popover.filter(|open| open.same_kind(popover));
         let content = open.map(|open| match open {
             StatusPopover::Sleep => self.render_sleep_popover(cx),
@@ -680,6 +694,7 @@ impl WindowView {
             .gap(px(5.))
             .cursor_pointer()
             .when(open.is_some(), |item| item.bg(cx.theme().mix(0.07)))
+            .when_some(hint.filter(|_| open.is_none()), |item, hint| item.tooltip(tooltip(hint, None)))
             .hover(|item| item.bg(cx.theme().mix(0.10)))
             // 浮层开着时在捕获阶段就关掉、不再往下传：浮层自己的「点到外面就关」和下面再打开的都不跑。
             .capture_any_mouse_down(cx.listener(move |this, _, _, cx| {
