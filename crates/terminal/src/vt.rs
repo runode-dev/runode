@@ -49,14 +49,14 @@ pub(crate) const KITTY_IMAGE_STORAGE_BYTES: u64 = 64 * 1024 * 1024;
 /// 多传的到了也存不下。
 const REPLAY_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 
-/// 按 `size` 新建一个 VT，按默认配置设好 `configure_common` 的选项（之后 `apply_theme` 再按
-/// 实际配置设一遍），并从一开始就记录没写完的序列，随时能编快照。要在喂输入之前开始记录：
-/// 开的时候已经停在序列中间的话，这条序列编不出来，要等它结束。记录的开销可以忽略。
 /// 记日志并吞掉错误：读屏幕、鼠标和选区这类操作失败时只影响这一下，不该打断输入和输出。
 pub(crate) fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> {
     result.inspect_err(|err| tracing::warn!("{what} failed: {err}")).ok()
 }
 
+/// 按 `size` 新建一个 VT，按默认配置设好 `configure_common` 的选项（之后 `apply_theme` 再按
+/// 实际配置设一遍），并从一开始就记录没写完的序列，随时能编快照。要在喂输入之前开始记录：
+/// 开的时候已经停在序列中间的话，这条序列编不出来，要等它结束。记录的开销可以忽略。
 pub(crate) fn new_terminal(size: GridSize) -> Result<Terminal<'static, 'static>> {
     let mut terminal = Terminal::new(size.cols, size.rows)?;
     configure_common(&mut terminal, Some(DEFAULT_SCROLLBACK_LIMIT))?;
