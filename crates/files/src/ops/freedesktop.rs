@@ -61,12 +61,17 @@ fn shared_trash_usable(dir: &Path) -> bool {
     fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir() && meta.permissions().mode() & 0o1000 != 0)
 }
 
-/// 建只有自己能进的目录；已经有了也行。
+/// 建只有自己能进的目录。已经有了时要是真的目录（不是链接）、属主是自己：共用的 `$topdir` 人人可写时，别的用户
+/// 事先建好的同名目录不能用，不然移进去的文件他能删、能看，还能把里面的 `files` 换成链接引到别处。
 fn make_private_dir(dir: &Path) -> io::Result<()> {
     match fs::DirBuilder::new().mode(0o700).create(dir) {
         Err(err) if err.kind() != io::ErrorKind::AlreadyExists => Err(err),
-        _ if fs::symlink_metadata(dir)?.is_dir() => Ok(()),
-        _ => Err(unsupported()),
+        _ => {
+            let meta = fs::symlink_metadata(dir)?;
+            // SAFETY: getuid 不会失败，也不碰内存。
+            let mine = meta.uid() == unsafe { libc::getuid() };
+            if meta.is_dir() && mine { Ok(()) } else { Err(unsupported()) }
+        }
     }
 }
 
