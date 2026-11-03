@@ -14,6 +14,8 @@ fn main() {
     // 打包脚本在工作区有没提交的改动时设它（`dirty.<改动的摘要>`）：不然改了代码没提交就重新打包，
     // 构建号和在跑的宿主一样，新宿主接不了手（同构建的接手请求宿主一律回 `Busy`）。
     println!("cargo:rerun-if-env-changed=RUNODE_BUILD_TAG");
+    // `rust_i18n::i18n!` 在编译期读译文，却不告诉 cargo 它读了哪些文件：只改译文时要靠这里让本 crate 重编。
+    println!("cargo:rerun-if-changed=locales");
     let version = env::var("CARGO_PKG_VERSION").unwrap();
     let commit = git_short_head().unwrap_or_else(|| "unknown".into());
     // 构建号是「0.1.0.<commit>」，带改动时是「0.1.0.<commit>-dirty.<摘要>」；关于面板的括号里只显示版本号后面那段。
