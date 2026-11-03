@@ -264,6 +264,10 @@ ssh:
   reconnect: 立即重连
   remote_desktop: 远程桌面
   upload_failed: "传不到 %{host} 上"
+  upload_begin: 没能在那边建上传目录
+  upload_read: "读不了 %{path}"
+  upload_create: "建不了 %{path}"
+  upload_write: "写不了 %{path}"
   ok: 好
   bound_title: "%{host} 上的终端会跟着 SSH 登录一起结束"
   bound_detail: 这台机器会在 SSH 登录断开后结束留下的进程，远端的终端和 agent 也就没了。把 Runode 的宿主装成 systemd 用户服务并开启 linger，断开后它们就能留下来。以后也可以在设置的「SSH 主机」页里装。

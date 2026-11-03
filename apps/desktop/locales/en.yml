@@ -264,6 +264,10 @@ ssh:
   reconnect: Reconnect Now
   remote_desktop: Remote Desktop
   upload_failed: "Could not upload to %{host}"
+  upload_begin: Could not create the upload folder there
+  upload_read: "Could not read %{path}"
+  upload_create: "Could not create %{path}"
+  upload_write: "Could not write %{path}"
   ok: OK
   bound_title: "Terminals on %{host} end when you log out of SSH"
   bound_detail: This machine ends the processes left behind when an SSH login closes, so the remote terminals and agents go with it. Install the Runode host as a systemd user service with linger enabled to keep them running after you disconnect. You can also do this later on the SSH Hosts page in Settings.

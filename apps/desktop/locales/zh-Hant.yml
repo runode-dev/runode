@@ -264,6 +264,10 @@ ssh:
   reconnect: 立即重連
   remote_desktop: 遠端桌面
   upload_failed: "傳不到 %{host} 上"
+  upload_begin: 沒能在那邊建上傳目錄
+  upload_read: "讀不了 %{path}"
+  upload_create: "建不了 %{path}"
+  upload_write: "寫不了 %{path}"
   ok: 好
   bound_title: "%{host} 上的終端機會跟著 SSH 登入一起結束"
   bound_detail: 這台機器會在 SSH 登入中斷後結束留下的程序，遠端的終端機和 agent 也就沒了。把 Runode 的主機程序裝成 systemd 使用者服務並開啟 linger，中斷後它們就能留下來。之後也可以在設定的「SSH 主機」頁裡安裝。

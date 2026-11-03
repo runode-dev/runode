@@ -228,21 +228,22 @@ fn call(client: &Client, op: UploadOp, content: &[u8]) -> Result<Option<PathBuf>
 fn begin(client: &Client) -> Result<PathBuf> {
     call(client, UploadOp::Begin, &[])
         .and_then(|dir| dir.ok_or_else(|| anyhow!("no upload directory")))
-        .context("cannot start the upload")
+        .context(rust_i18n::t!("ssh.upload_begin"))
 }
 
 /// 本机的 `local` 传成那边的 `remote`：文件写过去，目录建出来再一项项传。
 fn send(client: &Client, local: &Path, remote: &Path) -> Result<()> {
-    let meta = fs::metadata(local).with_context(|| format!("cannot read {}", local.display()))?;
+    let meta = fs::metadata(local).with_context(|| rust_i18n::t!("ssh.upload_read", path = local.display()))?;
     if !meta.is_dir() {
-        let mut file = fs::File::open(local).with_context(|| format!("cannot read {}", local.display()))?;
+        let mut file =
+            fs::File::open(local).with_context(|| rust_i18n::t!("ssh.upload_read", path = local.display()))?;
         return write(client, remote, &mut file, &local.display());
     }
     call(client, UploadOp::Dir { path: remote.to_path_buf() }, &[])
-        .with_context(|| format!("cannot create {}", remote.display()))?;
-    let entries = fs::read_dir(local).with_context(|| format!("cannot read {}", local.display()))?;
+        .with_context(|| rust_i18n::t!("ssh.upload_create", path = remote.display()))?;
+    let entries = fs::read_dir(local).with_context(|| rust_i18n::t!("ssh.upload_read", path = local.display()))?;
     for entry in entries {
-        let entry = entry.with_context(|| format!("cannot read {}", local.display()))?;
+        let entry = entry.with_context(|| rust_i18n::t!("ssh.upload_read", path = local.display()))?;
         if entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
             continue;
         }
@@ -257,9 +258,12 @@ fn write(client: &Client, path: &Path, input: &mut dyn Read, source: &dyn std::f
     let mut offset = 0;
     loop {
         chunk.clear();
-        input.take(CHUNK as u64).read_to_end(&mut chunk).with_context(|| format!("cannot read {source}"))?;
+        input
+            .take(CHUNK as u64)
+            .read_to_end(&mut chunk)
+            .with_context(|| rust_i18n::t!("ssh.upload_read", path = source))?;
         call(client, UploadOp::Chunk { path: path.to_path_buf(), offset }, &chunk)
-            .with_context(|| format!("cannot write {}", path.display()))?;
+            .with_context(|| rust_i18n::t!("ssh.upload_write", path = path.display()))?;
         if chunk.len() < CHUNK {
             return Ok(());
         }
