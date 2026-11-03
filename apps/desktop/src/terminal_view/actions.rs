@@ -40,6 +40,15 @@ impl TerminalView {
         let Some(item) = cx.read_from_clipboard() else {
             return;
         };
+        // 复制的文件在剪贴板里另带一份路径文字，远端主机上先看文件。
+        let files = item.entries().iter().find_map(|entry| match entry {
+            ClipboardEntry::ExternalPaths(paths) if !paths.paths().is_empty() => Some(paths.paths().to_vec()),
+            _ => None,
+        });
+        if let Some(files) = files.filter(|_| !self.host.is_local()) {
+            cx.emit(super::TerminalEvent::PasteFiles(files));
+            return;
+        }
         if let Some(text) = item.text() {
             self.paste_text(text, window, cx);
             return;
