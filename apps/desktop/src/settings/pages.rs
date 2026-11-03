@@ -194,7 +194,7 @@ impl Page {
                 Section("cursor"),
                 Row("cursor-style", Choice),
                 Row("shell-integration-features", Options(&["cursor", "no-cursor"])),
-                Row("cursor-style-blink", Options(&["", "true", "false"])),
+                Row("cursor-style-blink", Options(&["true", "false"])),
                 Row("cursor-style-blink-timeout", Text(80.)),
                 Section("keyboard"),
                 Row("macos-option-as-alt", Options(&["", "true", "false", "left", "right"])),
@@ -314,6 +314,15 @@ fn control_values(key: &str, control: Control) -> Vec<&'static str> {
     match control {
         Control::Options(values) => values.to_vec(),
         _ => runode_config::choices(key).unwrap_or_default(),
+    }
+}
+
+/// 配置里没写这个键时选中的那一项：没写和写了某个值一样时是那个值，没有专门的「默认」一项；别的键是
+/// 「默认」那一项（空串）。
+fn unset_choice(key: &str) -> &'static str {
+    match key {
+        "cursor-style-blink" => "false",
+        _ => "",
     }
 }
 
@@ -481,7 +490,7 @@ impl SettingsView {
             }
             Control::Choice | Control::Options(_) => {
                 let values = control_values(key, control);
-                let selected = current.first().map_or("", String::as_str);
+                let selected = current.first().map_or_else(|| unset_choice(key), String::as_str);
                 let group = Segmented::new(key, key_title(key));
                 values
                     .iter()
