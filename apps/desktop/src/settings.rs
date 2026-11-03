@@ -233,6 +233,7 @@ impl SettingsView {
         };
         let input = cx.new(|cx| {
             let input = InputState::editing(text, 0, cx).with_label(label);
+            let input = if pages::is_secret(id) { input.with_masked() } else { input };
             match placeholder {
                 Some(placeholder) => input.with_placeholder(placeholder),
                 None => input,

@@ -792,7 +792,15 @@ impl SettingsView {
 }
 
 /// 输入框空着时的提示：默认值，没有默认值的写「默认」；APNs 几项留空就是不用，给出写法的样子。
+/// 填密钥的键：输入框里遮住，录屏、共享屏幕时不露出来。
+pub(super) fn is_secret(key: &str) -> bool {
+    matches!(key, "dictation-openai-key" | "dictation-doubao-key" | "dictation-polish-key")
+}
+
 fn key_placeholder(key: &str) -> SharedString {
+    if is_secret(key) {
+        return SharedString::default();
+    }
     match key {
         "apns-key-file" => return "~/AuthKey_ABC123DEFG.p8".into(),
         "apns-key-id" => return "ABC123DEFG".into(),
