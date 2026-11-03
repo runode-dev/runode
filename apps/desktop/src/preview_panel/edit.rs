@@ -31,6 +31,10 @@ use crate::ui::{
     theme::{ActiveTheme as _, Theme},
 };
 
+/// `PreviewPanel::ask_unsaved` 的回答。
+pub(super) const UNSAVED_SAVE: usize = 0;
+pub(super) const UNSAVED_DISCARD: usize = 1;
+
 /// 停下打字这么久之后重算语法高亮。
 const REHIGHLIGHT_DELAY: Duration = Duration::from_millis(200);
 
@@ -123,6 +127,11 @@ impl Preview {
         self.editor.as_ref().is_some_and(|editor| editor.dirty)
     }
 
+    /// 改过还没存的输入框。
+    pub(super) fn unsaved_area(&self) -> Option<Entity<TextareaState>> {
+        self.editor.as_ref().filter(|editor| editor.dirty).map(|editor| editor.area.clone())
+    }
+
     /// 能进编辑模式：普通标签里读全了的文本。
     pub(super) fn editable(&self) -> bool {
         self.diff.is_none() && matches!(self.content, Some(Loaded::Text { truncated: false, .. }))
@@ -158,21 +167,34 @@ impl PreviewPanel {
             cx.notify();
             return;
         }
-        let area = preview.editor.as_ref().map(|editor| editor.area.clone());
-        let answer = self.ask_discard(1, window, cx);
+        let area = preview.unsaved_area();
+        let name = preview.name();
+        let answer = self.ask_unsaved(&[name], window, cx);
         cx.spawn_in(window, async move |this, cx| {
-            if answer.await.ok() == Some(0) {
-                this.update_in(cx, |this, window, cx| {
-                    if let Some(preview) =
-                        this.preview_mut().filter(|preview| preview.editor.as_ref().map(|e| e.area.clone()) == area)
-                    {
-                        preview.editor = None;
-                        window.focus(&this.focus, cx);
-                        cx.notify();
-                    }
-                })
-                .ok();
+            let answer = answer.await.ok();
+            if answer == Some(UNSAVED_SAVE) {
+                let Some(saved) = area
+                    .clone()
+                    .and_then(|area| this.update_in(cx, |this, window, cx| this.save(area, window, cx)).ok())
+                else {
+                    return;
+                };
+                if !saved.await {
+                    return;
+                }
+            } else if answer != Some(UNSAVED_DISCARD) {
+                return;
             }
+            this.update_in(cx, |this, window, cx| {
+                if let Some(preview) =
+                    this.preview_mut().filter(|preview| preview.editor.as_ref().map(|e| e.area.clone()) == area)
+                {
+                    preview.editor = None;
+                    window.focus(&this.focus, cx);
+                    cx.notify();
+                }
+            })
+            .ok();
         })
         .detach();
     }
@@ -394,20 +416,25 @@ impl PreviewPanel {
         });
     }
 
-    /// 问要不要放弃 `count` 个标签里没存的修改，答 0 是放弃。
-    pub(super) fn ask_discard(
+    /// 问名字是 `names` 的这几个标签里没存的修改怎么办：答 `UNSAVED_SAVE` 是存、`UNSAVED_DISCARD` 是放弃，别的是不办了。
+    pub(super) fn ask_unsaved(
         &self,
-        count: usize,
+        names: &[SharedString],
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> futures::channel::oneshot::Receiver<usize> {
+        let title = match names {
+            [name] => rust_i18n::t!("preview.save_unsaved_title_one", name = name),
+            _ => rust_i18n::t!("preview.save_unsaved_title", count = names.len()),
+        };
         crate::prompt::show(
             window,
             PromptLevel::Warning,
-            &rust_i18n::t!("preview.unsaved_title", count = count),
-            Some(&rust_i18n::t!("preview.unsaved_detail")),
+            &title,
+            Some(&rust_i18n::t!("preview.save_unsaved_detail")),
             &[
-                PromptButton::new(rust_i18n::t!("preview.discard_edits")),
+                PromptButton::new(rust_i18n::t!("preview.save")),
+                PromptButton::new(rust_i18n::t!("preview.dont_save")),
                 PromptButton::cancel(rust_i18n::t!("git.cancel")),
             ],
             cx,
@@ -415,16 +442,22 @@ impl PreviewPanel {
     }
 
     /// 把编辑器 `area` 里的文字存回它的文件。文件在磁盘上比读进来、上次存下时变过（别人改了、删了）先问
-    /// 要不要覆盖；写是先写临时文件再换上（`replace_file`），写不成时原文件不动、报错。
-    fn save(&mut self, area: Entity<TextareaState>, window: &mut Window, cx: &mut Context<Self>) {
+    /// 要不要覆盖；写是先写临时文件再换上（`replace_file`），写不成时原文件不动、报错。存下了交回 `true`，没存
+    /// （不覆盖、写不成、正在存）交回 `false`。
+    pub(super) fn save(
+        &mut self,
+        area: Entity<TextareaState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<bool> {
         let Some((project, path)) = self.workspaces.values().find_map(|tabs| {
             let tab = tabs.tabs.iter().find(|tab| tab.editor.as_ref().is_some_and(|editor| editor.area == area))?;
             Some((tabs.project.clone(), tab.path.clone()))
         }) else {
-            return;
+            return Task::ready(false);
         };
         let Some(editor) = self.editor_mut(&area).filter(|editor| !editor.saving) else {
-            return;
+            return Task::ready(false);
         };
         editor.saving = true;
         let text = area.read(cx).text().to_owned();
@@ -459,7 +492,7 @@ impl PreviewPanel {
             };
             this.update_in(cx, |this, window, cx| {
                 let Some(editor) = this.editor_mut(&area) else {
-                    return;
+                    return false;
                 };
                 editor.saving = false;
                 match written {
@@ -468,14 +501,17 @@ impl PreviewPanel {
                         editor.saved = text;
                         editor.stamp = stamp;
                         cx.notify();
+                        true
                     }
-                    Some(Err(err)) => report(&rust_i18n::t!("preview.save_failed"), &err, window, cx),
-                    None => {}
+                    Some(Err(err)) => {
+                        report(&rust_i18n::t!("preview.save_failed"), &err, window, cx);
+                        false
+                    }
+                    None => false,
                 }
             })
-            .ok();
+            .unwrap_or(false)
         })
-        .detach();
     }
 
     /// 编辑模式下的正文：撑满的输入框，用终端的字体和预览字号。⌘S（Linux、Windows 上是 Ctrl+S）存，Tab 插入制表符。
@@ -510,7 +546,7 @@ impl PreviewPanel {
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let mods = event.keystroke.modifiers;
                 match event.keystroke.key.as_str() {
-                    "s" if mods == Modifiers::secondary_key(cx) => this.save(area.clone(), window, cx),
+                    "s" if mods == Modifiers::secondary_key(cx) => this.save(area.clone(), window, cx).detach(),
                     "tab" if !mods.modified() => area.update(cx, |area, cx| area.insert("\t", cx)),
                     _ => return,
                 }

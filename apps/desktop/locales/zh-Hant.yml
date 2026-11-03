@@ -1245,7 +1245,12 @@ preview:
   modified_tab: "%{name}（已修改）"
   unsaved_title: "捨棄 %{count} 個檔案裡沒儲存的修改？"
   unsaved_detail: 改過的內容會遺失。
+  save_unsaved_title: "要儲存 %{count} 個檔案的修改嗎？"
+  save_unsaved_title_one: "要儲存「%{name}」的修改嗎？"
+  save_unsaved_detail: "不儲存的話，改過的內容會遺失。"
   discard_edits: 捨棄修改
+  save: 儲存
+  dont_save: "不儲存"
   changed_on_disk_title: 檔案在磁碟上被改過了
   changed_on_disk_detail: "儲存會蓋掉在 Runode 之外做的修改。"
   overwrite: 覆蓋

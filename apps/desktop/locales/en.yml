@@ -1245,7 +1245,12 @@ preview:
   modified_tab: "%{name} (modified)"
   unsaved_title: "Discard unsaved changes in %{count} file(s)?"
   unsaved_detail: Your edits will be lost.
+  save_unsaved_title: "Save changes to %{count} files?"
+  save_unsaved_title_one: "Save changes to %{name}?"
+  save_unsaved_detail: "If you don't save, your edits will be lost."
   discard_edits: Discard Changes
+  save: Save
+  dont_save: "Don't Save"
   changed_on_disk_title: The file changed on disk
   changed_on_disk_detail: "Saving will overwrite the changes made outside Runode."
   overwrite: Overwrite

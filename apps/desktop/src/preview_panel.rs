@@ -806,7 +806,7 @@ impl PreviewPanel {
     }
 
     /// 只留下 `keep` 为真的预览标签，当前标签关掉了就切到旁边的。都关掉时预览栏收起，焦点在
-    /// 预览栏上的交回终端。要关的标签里有改过没存的，先问要不要放弃修改。
+    /// 预览栏上的交回终端。要关的标签里有改过没存的，先问存还是放弃。
     fn retain_previews(
         &mut self,
         mut keep: impl FnMut(usize, &Preview) -> bool,
@@ -820,20 +820,34 @@ impl PreviewPanel {
             self.close_previews(keep, window, cx);
             return;
         }
+        let unsaved: Vec<_> = closing.iter().filter_map(|tab| tab.unsaved_area()).collect();
+        let names: Vec<_> = closing.iter().filter(|tab| tab.dirty()).map(|tab| tab.name()).collect();
         // 问的期间标签可能挪了位置，按身份记下要关的。
         let closing: Vec<_> = closing.iter().map(|tab| (tab.path.clone(), tab.diff.clone())).collect();
-        let (ws, answer) = (self.ws, self.ask_discard(dirty, window, cx));
+        let (ws, answer) = (self.ws, self.ask_unsaved(&names, window, cx));
         cx.spawn_in(window, async move |this, cx| {
-            if answer.await.ok() == Some(0) {
-                this.update_in(cx, |this, window, cx| {
-                    // 问的期间切到了别的 workspace 时不关，免得关到那边同名的标签。
-                    if this.ws != ws {
-                        return;
-                    }
-                    this.close_previews(|_, tab| !closing.contains(&(tab.path.clone(), tab.diff.clone())), window, cx);
-                })
-                .ok();
+            let answer = answer.await.ok();
+            if answer == Some(edit::UNSAVED_SAVE) {
+                let Ok(saves) = this.update_in(cx, |this, window, cx| {
+                    unsaved.into_iter().map(|area| this.save(area, window, cx)).collect::<Vec<_>>()
+                }) else {
+                    return;
+                };
+                // 有一个没存下（不覆盖、写不成）就都不关，留着给人看。
+                if !futures::future::join_all(saves).await.into_iter().all(|saved| saved) {
+                    return;
+                }
+            } else if answer != Some(edit::UNSAVED_DISCARD) {
+                return;
             }
+            this.update_in(cx, |this, window, cx| {
+                // 问的期间切到了别的 workspace 时不关，免得关到那边同名的标签。
+                if this.ws != ws {
+                    return;
+                }
+                this.close_previews(|_, tab| !closing.contains(&(tab.path.clone(), tab.diff.clone())), window, cx);
+            })
+            .ok();
         })
         .detach();
     }
