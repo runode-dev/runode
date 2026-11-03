@@ -43,9 +43,9 @@ const MAX_GATING_PER_SOURCE: usize = 4;
 const MAX_GATING_PER_PREFIX: usize = 16;
 /// 连接（含已经接到宿主上的）最多这么多。
 pub(crate) const MAX_CONNECTIONS: usize = 64;
-/// 同一台设备最多同时连着这么多条终端、远程桌面、识别和项目的连接，见 `Shared::settle`。
+/// 同一台设备最多同时连着这么多条终端、远程桌面、识别和项目的连接；过了门禁、还没发第一帧的另算，也是这么多。
 const MAX_PER_DEVICE: usize = 8;
-/// 同一台桌面设备最多同时连着这么多条端口转发的连接，见 `Shared::settle`。
+/// 同一台桌面设备最多同时连着这么多条端口转发的连接。
 const MAX_FORWARDS_PER_DEVICE: usize = 32;
 /// 隔多久看一次设备表，撤销了的设备在这么久之内断开。
 const REVOKE_CHECK: Duration = Duration::from_secs(1);
@@ -141,6 +141,23 @@ struct Live {
     cut: Arc<AtomicBool>,
 }
 
+/// 设备 `device` 的 `lane` 这一类连接（`None` 是还没发第一帧的）超过 `limit` 条时断开最早的。
+fn crowd_out(connections: &HashMap<u64, Live>, device: DeviceId, lane: Option<Lane>, limit: usize) {
+    let mut same: Vec<u64> = connections
+        .iter()
+        .filter(|(_, live)| live.device == Some(device) && live.lane == lane)
+        .map(|(&id, _)| id)
+        .collect();
+    same.sort_unstable();
+    let excess = same.len().saturating_sub(limit);
+    for old in &same[..excess] {
+        if let Some(live) = connections.get(old) {
+            tracing::info!("remote device {device} has too many connections, closing an old one");
+            cut(live);
+        }
+    }
+}
+
 /// 过了门禁的连接按第一帧分的类，同一台设备的连接只和同一类的挤名额。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Lane {
@@ -163,13 +180,15 @@ impl Shared {
         self.connections.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// 连接 `id` 过了门禁，是设备 `device`：之后撤销这台设备时断开它。
+    /// 连接 `id` 过了门禁，是设备 `device`：之后撤销这台设备时断开它。同一台设备过了门禁、还没发第一帧的连接
+    /// 超过 `MAX_PER_DEVICE` 条时断开最早的，反复连上不发第一帧的占不满 `MAX_CONNECTIONS`。
     pub(crate) fn attach_device(&self, id: u64, device: DeviceId) {
         let mut connections = self.connections();
         if let Some(live) = connections.get_mut(&id) {
             live.device = Some(device);
         }
         self.publish(&connections);
+        crowd_out(&connections, device, None, MAX_PER_DEVICE);
     }
 
     /// 设备 `device` 的连接 `id` 读到了第一帧，算 `lane` 这一类。
@@ -182,23 +201,11 @@ impl Shared {
         if let Some(live) = connections.get_mut(&id) {
             live.lane = Some(lane);
         }
-        let mut same: Vec<u64> = connections
-            .iter()
-            .filter(|(_, live)| live.device == Some(device) && live.lane == Some(lane))
-            .map(|(&id, _)| id)
-            .collect();
-        same.sort_unstable();
         let limit = match lane {
             Lane::Session => MAX_PER_DEVICE,
             Lane::Forward => MAX_FORWARDS_PER_DEVICE,
         };
-        let excess = same.len().saturating_sub(limit);
-        for old in &same[..excess] {
-            if let Some(live) = connections.get(old) {
-                tracing::info!("remote device {device} has too many connections, closing an old one");
-                cut(live);
-            }
-        }
+        crowd_out(&connections, device, Some(lane), limit);
     }
 
     /// 连接 `id` 结束了。过了门禁的连接结束时重写状态文件。

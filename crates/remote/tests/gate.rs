@@ -517,6 +517,20 @@ fn a_device_keeps_at_most_eight_connections() {
     drop(newest);
 }
 
+/// 过了门禁却不发第一帧的连接也按台数封顶：第九条连上来，最早那条断开。
+#[test]
+fn a_device_cannot_pile_up_connections_without_a_hello() {
+    let harness = Harness::start("nohello");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    let mut idle: Vec<_> = (0..8).map(|_| harness.login(device_id, &key)).collect();
+    let _newest = harness.login(device_id, &key);
+    assert!(idle.remove(0).closed());
+    // 别的照旧能发第一帧、接到宿主上。
+    idle[0].send_control(&Phone::hello("mobile"));
+    assert!(matches!(read_client_msg(&harness.host()), Some(ClientMsg::Hello { .. })));
+}
+
 /// 停掉的监听的连接线程晚收尾时不重写状态文件，不然重开的监听写好的新端口会被换回旧的。
 #[test]
 fn a_stopped_listener_does_not_bring_its_status_back() {
