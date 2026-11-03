@@ -1497,17 +1497,36 @@ impl Render for ScreenViewer {
                 .child(picture.render())
         });
         // 提示可能很长，限宽、折行、居中，不在一行里两头截断。
+        // 停下了要用户来办的，提示下面直接给「重新连接」：标题条上那个小图标不显眼。
+        let stopped = matches!(self.phase, Phase::Stopped(_));
         let notice = self.notice(cx).map(|notice| {
-            div().absolute().inset_0().flex().items_center().justify_center().p(px(24.)).child(
-                div()
-                    .id("screen-notice")
-                    .aria_static_text(notice.clone())
-                    .max_w(scaled(480.))
-                    .text_center()
-                    .text_size(FontSize::Body)
-                    .text_color(theme.muted_foreground)
-                    .child(notice),
-            )
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(12.))
+                .p(px(24.))
+                .child(
+                    div()
+                        .id("screen-notice")
+                        .aria_static_text(notice.clone())
+                        .max_w(scaled(480.))
+                        .text_center()
+                        .text_size(FontSize::Body)
+                        .text_color(theme.muted_foreground)
+                        .child(notice),
+                )
+                .when(stopped, |notice| {
+                    notice.child(
+                        Button::new("screen-reconnect-notice", rust_i18n::t!("screen_viewer.reconnect"))
+                            .variant(ButtonVariant::Secondary)
+                            .icon(REFRESH_ICON)
+                            .on_press(cx, |this, _, cx| this.reconnect_now(cx)),
+                    )
+                })
         });
         let readonly = matches!(self.phase, Phase::Live)
             && self.remote.as_ref().is_some_and(|remote| !remote.post_event)
