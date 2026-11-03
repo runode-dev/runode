@@ -107,10 +107,12 @@ impl FileTree {
         *path == self.files_root() || self.state().rows.iter().any(|row| row.holds(path))
     }
 
-    /// 正在改 `row` 这一行的名字（并成一行的目录是其中任何一段）时是那个输入框。
-    pub(super) fn renaming(&self, row: &FileRow) -> Option<&InlineEdit> {
-        let edit = self.edit.as_ref()?;
-        matches!(&edit.target, EditTarget::Rename { path, .. } if row.holds(path)).then_some(&edit.edit)
+    /// 正在改 `row` 这一行的名字（并成一行的目录是其中任何一段）时，是改名的路径和那个输入框。
+    pub(super) fn renaming(&self, row: &FileRow) -> Option<(&Path, &InlineEdit)> {
+        match &self.edit.as_ref()?.target {
+            EditTarget::Rename { path, .. } if row.holds(path) => Some((path, &self.edit.as_ref()?.edit)),
+            _ => None,
+        }
     }
 
     /// 新建时输入框占的那一行：插在第几行、缩进几层。目录的那一行找不到时放在最上面，

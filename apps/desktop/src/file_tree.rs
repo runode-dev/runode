@@ -791,10 +791,10 @@ impl FileTree {
         let badge = badge.map(|text| div().flex_none().pl(px(6.)).text_color(color).child(text));
         let renaming = self.renaming(row);
         let name: AnyElement = match renaming {
-            Some(edit) => edit.render(px(font_size + 6.)).flex_1().min_w_0().into_any_element(),
-            None if row.top != row.path => {
+            _ if row.top != row.path => {
                 self.render_segments(row, selected_path.as_deref(), font_size, color, cx).into_any_element()
             }
+            Some((_, edit)) => edit.render(px(font_size + 6.)).flex_1().min_w_0().into_any_element(),
             None => div().min_w_0().truncate().text_color(color).child(row.name.clone()).into_any_element(),
         };
         // 改名时在输入框里拖选文字，不能把整行拖走。
@@ -921,7 +921,7 @@ impl FileTree {
     }
 
     /// 并成一行的目录的名字，每一段单独能选：按下选中那一段（展开收起仍是整行），右键菜单、拖动和
-    /// 放下都作用在那一段上。`selected` 是选中的那一段，不在这一行时为空。
+    /// 放下都作用在那一段上；改名时输入框只换掉改的那一段。`selected` 是选中的那一段，不在这一行时为空。
     fn render_segments(
         &self,
         row: &FileRow,
@@ -935,10 +935,15 @@ impl FileTree {
         let segments = row.segments();
         let last = segments.len().saturating_sub(1);
         let view = cx.entity().downgrade();
+        let renaming = self.renaming(row);
         let mut name = div().flex_1().min_w_0().flex().items_center().overflow_hidden().text_color(color);
         for (ix, (path, label)) in segments.into_iter().enumerate() {
             if ix > 0 {
                 name = name.child(div().flex_none().px(px(2.)).opacity(0.6).child("/"));
+            }
+            if let Some((_, edit)) = renaming.filter(|(renamed, _)| *renamed == path) {
+                name = name.child(edit.render(px(font_size + 6.)).flex_1().min_w_0());
+                continue;
             }
             let dragged = DraggedFile {
                 path: path.clone(),
@@ -984,7 +989,10 @@ impl FileTree {
                         }
                     }),
                 )
-                .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                // 改名时在输入框里拖选文字，不能把别的段拖走。
+                .when(renaming.is_none(), |segment| {
+                    segment.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                })
                 .drag_over::<DraggedFile>(move |style, _, _, _| style.bg(drop_bg))
                 .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
                     this.drop_file(&dragged.path, path.clone(), window, cx);
