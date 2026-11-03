@@ -181,7 +181,9 @@ pub fn download(
                 Err(_) if cancel.load(Ordering::Relaxed) => bail!("cancelled"),
                 Err(err) => {
                     tracing::warn!("下载 {url} 失败：{err:#}");
-                    errors.push(format!("{url}: {err:#}"));
+                    // 给人看的只写是哪个下载源，完整地址在日志里：两条长地址折成好几行，原因反倒看不清。
+                    let source = url.split("//").nth(1).and_then(|rest| rest.split('/').next()).unwrap_or(&url);
+                    errors.push(format!("{source}: {err:#}"));
                 }
             }
         }
