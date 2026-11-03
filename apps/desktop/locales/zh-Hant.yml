@@ -1539,6 +1539,7 @@ paired:
   pair_disabled: "%{host} 的遠端存取沒開著，或者一時無法處理。"
   pair_failed: "沒配上：%{reason}"
   settings_empty: 還沒有配對過別的電腦。
+  settings_add: 配對電腦
   rename: 改名
   forget: 解除配對
   in_use: 先關掉這台電腦上的工作區和終端。

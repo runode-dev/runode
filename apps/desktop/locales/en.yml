@@ -1465,6 +1465,7 @@ paired:
   pair_disabled: "Remote access on %{host} is off or busy."
   pair_failed: "Pairing failed: %{reason}"
   settings_empty: No computers paired yet.
+  settings_add: Pair a Computer
   rename: Rename
   forget: Unpair
   in_use: Close the workspaces and terminals on this computer first.

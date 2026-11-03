@@ -37,7 +37,7 @@ impl SettingsView {
         let rows = div().flex().flex_col();
         if machines.is_empty() {
             let text = rust_i18n::t!("paired.settings_empty").into_owned();
-            let add = Button::new("paired-machines-empty-add", rust_i18n::t!("workspace.host_pair").into_owned())
+            let add = Button::new("paired-machines-empty-add", rust_i18n::t!("paired.settings_add").into_owned())
                 .variant(ButtonVariant::Secondary)
                 .on_press(cx, |_, _, cx| crate::window::add_remote_host(true, cx));
             return rows.child(

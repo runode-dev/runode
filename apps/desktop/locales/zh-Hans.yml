@@ -1539,6 +1539,7 @@ paired:
   pair_disabled: "%{host} 的远程访问没开着，或者一时办不了。"
   pair_failed: "没配上：%{reason}"
   settings_empty: 还没有配对过别的电脑。
+  settings_add: 配对电脑
   rename: 改名
   forget: 解除配对
   in_use: 先关掉这台电脑上的工作区和终端。
