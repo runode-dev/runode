@@ -499,7 +499,11 @@ impl RemoteHost {
                         home,
                         os: opening.os,
                     };
-                    self.connected(connected);
+                    if let Err(err) = self.connected(connected) {
+                        running.stop();
+                        self.state().child = None;
+                        return Err(Failure::Retry(err));
+                    }
                     return Ok(running);
                 }
                 Ok(Start::Failed(failure)) => {
@@ -552,17 +556,18 @@ impl RemoteHost {
         }
     }
 
-    /// 连上了：记下状态，告诉界面那边还活着的会话，断开着的终端接回来。
-    fn connected(&self, connected: Connected) {
+    /// 连上了：记下状态，告诉界面那边还活着的会话，断开着的终端接回来。列不出会话时不报连上、交回错误重连：
+    /// `RemoteEvent::Connected` 的 `alive` 一定是那边列出来的。
+    fn connected(&self, connected: Connected) -> Result<(), String> {
+        let sessions = self.link.list_sessions(LIST_TIMEOUT).map_err(|err| {
+            tracing::warn!("cannot list the sessions on {}: {err}", self.name);
+            format!("cannot list the sessions on {}: {err}", self.name)
+        })?;
+        let alive: HashSet<_> =
+            sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect();
         self.set_status(Status::Connected(connected));
-        let alive = match self.link.list_sessions(LIST_TIMEOUT) {
-            Ok(sessions) => sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect(),
-            Err(err) => {
-                tracing::warn!("cannot list the sessions on {}: {err}", self.name);
-                HashSet::new()
-            }
-        };
         emit(RemoteEvent::Connected { host: self.id(), alive });
+        Ok(())
     }
 
     /// 连着时一直等到断开：ssh 退出、桥接断了，或者心跳等不到回话。

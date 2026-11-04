@@ -633,8 +633,10 @@ impl PairedHost {
         self.state().windows = windows;
         self.link.set_windows_paths(windows);
         let mismatch = build != super::build().0;
-        self.connected(Connected { build, mismatch, session_bound: false, home, os });
-        Ok(())
+        self.connected(Connected { build, mismatch, session_bound: false, home, os }).map_err(|err| {
+            self.drop_stream();
+            Failure::Retry(HostError::Plain(err))
+        })
     }
 
     /// 那台电脑的家目录和系统（`Connected::os` 的写法）；问不到家目录时记一笔日志。
@@ -651,17 +653,18 @@ impl PairedHost {
         (home, os)
     }
 
-    /// 连上了：记下状态，告诉界面那边还活着的会话，断开着的终端接回来。
-    fn connected(&self, connected: Connected) {
+    /// 连上了：记下状态，告诉界面那边还活着的会话，断开着的终端接回来。列不出会话时不报连上、交回错误重连：
+    /// `RemoteEvent::Connected` 的 `alive` 一定是那边列出来的。
+    fn connected(&self, connected: Connected) -> Result<(), String> {
+        let sessions = self.link.list_sessions(LIST_TIMEOUT).map_err(|err| {
+            tracing::warn!("cannot list the sessions on the paired computer {}: {err}", self.id);
+            format!("cannot list the sessions: {err}")
+        })?;
+        let alive: HashSet<_> =
+            sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect();
         self.set_status(Status::Connected(connected));
-        let alive: HashSet<_> = match self.link.list_sessions(LIST_TIMEOUT) {
-            Ok(sessions) => sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect(),
-            Err(err) => {
-                tracing::warn!("cannot list the sessions on the paired computer {}: {err}", self.id);
-                HashSet::new()
-            }
-        };
         emit(RemoteEvent::Connected { host: self.host_id(), alive });
+        Ok(())
     }
 
     /// 连着时一直等到断开：那边关了连接，或者心跳等不到回话。
