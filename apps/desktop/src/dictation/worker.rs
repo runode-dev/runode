@@ -46,7 +46,9 @@ struct Worker {
 /// 识别、交给云端和润色都算在里面。
 pub fn recognize(pcm: &[u8], timeout: Duration) -> anyhow::Result<SpeechHostMsg> {
     let deadline = Instant::now() + timeout;
-    let mut slot = WORKER.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some(mut slot) = lock_worker_until(deadline) else {
+        bail!("timed out waiting for another recording to be recognized");
+    };
     let left = deadline.saturating_duration_since(Instant::now());
     if left.is_zero() {
         bail!("timed out waiting for another recording to be recognized");
@@ -79,6 +81,24 @@ pub fn recognize(pcm: &[u8], timeout: Duration) -> anyhow::Result<SpeechHostMsg>
         end_worker(worker);
     }
     reply
+}
+
+/// 隔一会儿试一次拿 `WORKER`，到 `deadline` 还拿不到就返回 `None`：前一段的识别可以比这一段的期限还长，
+/// 排队的不能跟着它一直等。
+fn lock_worker_until(deadline: Instant) -> Option<std::sync::MutexGuard<'static, Option<Worker>>> {
+    const RETRY: Duration = Duration::from_millis(50);
+    loop {
+        match WORKER.try_lock() {
+            Ok(slot) => return Some(slot),
+            Err(TryLockError::Poisoned(poisoned)) => return Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => {}
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        thread::sleep(left.min(RETRY));
+    }
 }
 
 /// 结束在跑的子进程；正在识别的话不等，留给 `end_when_idle` 结束。
@@ -188,5 +208,16 @@ mod tests {
         let line = [b"onnxruntime says hi\npartial".as_slice(), REPLY_MARK, &serde_json::to_vec(&text).unwrap(), b"\n"];
         assert_eq!(read_reply(&mut line.concat().as_slice()).unwrap(), text);
         assert!(read_reply(&mut b"no reply\n".as_slice()).is_err());
+    }
+
+    /// 前一段占着子进程时，排队的到了自己的期限就不再等。
+    #[test]
+    fn a_queued_recording_gives_up_at_its_deadline() {
+        let held = WORKER.lock().unwrap_or_else(PoisonError::into_inner);
+        let started = Instant::now();
+        assert!(lock_worker_until(started + Duration::from_millis(100)).is_none());
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        drop(held);
+        assert!(lock_worker_until(Instant::now() + Duration::from_millis(100)).is_some());
     }
 }
