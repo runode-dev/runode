@@ -45,6 +45,17 @@ pub(crate) fn find_theme(name: &str) -> Option<Theme> {
     bundled_theme(name).map(Theme::Bundled)
 }
 
+/// 找不到的主题 `name` 之后放在哪儿就找得到：绝对路径是它自己，否则是 runode 和 Ghostty 的用户主题目录下的
+/// 同名文件。
+pub(crate) fn theme_candidates(name: &str) -> Vec<PathBuf> {
+    let paths = runode_paths::Dirs::from_env();
+    let path = paths.expand_home(name);
+    if path.is_absolute() {
+        return vec![path];
+    }
+    paths.themes_dir().into_iter().chain(paths.ghostty_themes_dir()).map(|dir| dir.join(name)).collect()
+}
+
 /// 能选的主题名：用户的主题目录、Ghostty 的用户和自带主题目录里的文件，以及内置的主题，去重后
 /// 按名字排序（不分大小写），runode 自己的 `RUNODE_THEMES` 排最前。
 pub fn theme_names() -> Vec<String> {

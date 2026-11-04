@@ -18,7 +18,7 @@ use runode_types::{
 use crate::{
     CellHeight, Config, StatusItem, color,
     named::{expected, parse_named},
-    theme::{Theme, find_theme, pick_theme},
+    theme::{Theme, find_theme, pick_theme, theme_candidates},
 };
 
 /// runode 认的全部键，按配置模板里的顺序分组，组与组之间在模板里空一行。`apply` 只处理
@@ -172,7 +172,15 @@ impl Config {
             match find_theme(&name) {
                 Some(Theme::File(path)) => config.apply_layer(&read_entries(&path, sources)),
                 Some(Theme::Bundled(text)) => config.apply_layer(&parse_entries(text, &name)),
-                None => tracing::warn!("theme not found: {name}"),
+                None => {
+                    tracing::warn!("theme not found: {name}");
+                    // 记进监视列表：主题文件后来才建出来（或删了又放回去）时照样重新加载。
+                    for path in theme_candidates(&name) {
+                        if !sources.contains(&path) {
+                            sources.push(path);
+                        }
+                    }
+                }
             }
         }
         for layer in layers {
@@ -1166,6 +1174,15 @@ unknown-key = whatever
         assert_eq!(config.cursor_text, Some(TerminalColor::CellBackground));
         assert_eq!(config.selection_background, Some(TerminalColor::CellBackground));
         assert_eq!(config.selection_foreground, Some(TerminalColor::Rgb(Rgb(1, 2, 3))));
+    }
+
+    /// 找不到的主题文件也记进监视列表，之后建出来时重新加载。
+    #[test]
+    fn a_missing_theme_file_is_watched() {
+        let path = std::env::temp_dir().join(format!("runode-missing-theme-{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let config = load(&[&format!("theme = {}", path.display())]);
+        assert!(config.watch_paths().contains(&path), "{:?}", config.watch_paths());
     }
 
     /// 加载时也把 Ghostty 和 runode 的配置文件记进了 `sources`：监视列表里它们只出现一次，顺序不变。
