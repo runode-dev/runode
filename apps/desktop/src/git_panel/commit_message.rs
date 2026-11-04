@@ -541,7 +541,7 @@ mod tests {
         let (line, stdin) = command_preview(&recipe).unwrap();
         assert_eq!(
             line,
-            "claude -p --output-format text --permission-mode plan --no-session-persistence --model 'my model'"
+            "claude -p --output-format text --permission-mode plan --tools '' --strict-mcp-config --no-session-persistence --model 'my model'"
         );
         assert!(stdin);
         let recipe = Recipe { agent: "custom".into(), command: "tool --ask {prompt} it's".into(), ..Recipe::default() };

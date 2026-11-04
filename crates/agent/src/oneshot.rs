@@ -54,7 +54,19 @@ pub struct Cli {
 
 pub const CLAUDE: Cli = Cli {
     binary: "claude",
-    args: &["-p", "--output-format", "text", "--permission-mode", "plan", "--no-session-persistence"],
+    // 提示词里可能夹带别人写的指令：`--tools ""` 关掉所有内置工具，`--strict-mcp-config` 不接用户配的
+    // MCP 服务，它就读写不了文件、跑不了命令。
+    args: &[
+        "-p",
+        "--output-format",
+        "text",
+        "--permission-mode",
+        "plan",
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--no-session-persistence",
+    ],
     tail: &[],
     output: Output::Text,
 };

@@ -14,6 +14,9 @@ fn puts_the_prompt_on_argv_or_stdin() {
     let (args, stdin) = oneshot::CLAUDE.command_line(vec!["--model".into(), "haiku".into()], "P");
     assert_eq!(args.last().map(String::as_str), Some("haiku"));
     assert_eq!(stdin.as_deref(), Some("P"));
+    let tools = args.iter().position(|arg| arg == "--tools").unwrap();
+    assert_eq!(args[tools + 1], "");
+    assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
     let (args, stdin) = oneshot::ANTIGRAVITY.command_line(vec![], "-P");
     assert_eq!(args, ["--sandbox", "--print=-P"]);
     assert_eq!(stdin, None);
