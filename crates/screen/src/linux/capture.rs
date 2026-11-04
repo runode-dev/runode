@@ -49,6 +49,7 @@ struct Control {
     keyframe: AtomicBool,
     /// 观看端要的平均码率（bit/s），`rate_changed` 时采集线程交给编码器。
     bitrate: AtomicU32,
+    /// 先写 `bitrate` 再以 Release 置上，采集线程以 Acquire 取下，取到时读得到新的码率。
     rate_changed: AtomicBool,
 }
 
@@ -105,7 +106,7 @@ impl Capture {
     /// 改平均码率，单位 bit/s。
     pub fn set_bitrate(&self, bitrate: u32) -> io::Result<()> {
         self.control.bitrate.store(bitrate, Ordering::Relaxed);
-        self.control.rate_changed.store(true, Ordering::Relaxed);
+        self.control.rate_changed.store(true, Ordering::Release);
         Ok(())
     }
 
@@ -192,7 +193,7 @@ impl Pipeline {
             // 读到这里之后才来的请求也算进这一帧，不在后面清掉时丢了。
             let keyframe = self.control.keyframe.swap(false, Ordering::Relaxed) || keyframe;
             let boost = refine && !changed && !keyframe;
-            let rate_changed = self.control.rate_changed.swap(false, Ordering::Relaxed);
+            let rate_changed = self.control.rate_changed.swap(false, Ordering::Acquire);
             if rate_changed || boost != boosted {
                 let bitrate = self.control.bitrate.load(Ordering::Relaxed);
                 let bitrate = crate::boosted(bitrate, boost) as u32;
