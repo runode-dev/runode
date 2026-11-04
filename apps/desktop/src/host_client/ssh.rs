@@ -184,7 +184,7 @@ struct State {
     nudged: bool,
     /// 重连的退避走完了停在 `Status::Stopped`，网络变了可以再试。
     gave_up: bool,
-    /// 连着时的 ssh 子进程，断开（`disconnect`）时结束它。
+    /// 连着时、连的途中（认证、探平台、装 runode）正在跑的 ssh 子进程，断开（`disconnect`）时结束它。
     child: Option<u32>,
     /// 被 `forget` 了，supervisor 不再等着要连，退出。
     forgotten: bool,
@@ -467,20 +467,30 @@ impl RemoteHost {
             let mut command = self.exec(&ssh, &script, interactive, false);
             let piped = spawn_piped(&mut command, &log)?;
             let (mut child, stdin) = (piped.child, piped.stdin);
-            let stdout = piped.stdout.ok_or_else(|| Failure::Retry("ssh gave no output".into()))?;
+            let pid = child.id();
+            if let Err(failure) = self.track(pid) {
+                let _ = child.wait();
+                return Err(failure);
+            }
+            let Some(stdout) = piped.stdout else {
+                crate::subprocess::kill(pid);
+                self.untrack(pid);
+                let _ = child.wait();
+                return Err(Failure::Retry("ssh gave no output".into()));
+            };
             let mut stdout = BufReader::with_capacity(256 << 10, stdout);
             let start = read_start(&mut stdout).map_err(|err| Failure::Retry(format!("cannot read from ssh: {err}")));
             match start {
                 Ok(Start::Bridge(opening)) => {
                     tracing::info!("bridged to {}: {opening:?}", self.name);
-                    let pid = child.id();
                     let mut state = self.state();
                     // 连的时候用户断开或忘掉了这台主机：不接上，不然它连上后照样报 `RemoteEvent::Connected`。
                     if !state.wanted {
+                        state.child = None;
                         drop(state);
                         crate::subprocess::kill(pid);
                         let _ = child.wait();
-                        return Err(Failure::Retry(format!("disconnected from {} while connecting", self.name)));
+                        return Err(self.cancelled());
                     }
                     state.child = Some(pid);
                     state.family = family;
@@ -509,12 +519,15 @@ impl RemoteHost {
                 Ok(Start::Failed(failure)) => {
                     drop(stdin);
                     let _ = child.wait();
+                    self.untrack(pid);
                     return Err(Failure::Retry(format!("{}: {}", failure.code, failure.message)));
                 }
                 Ok(Start::Probe(platform)) => {
                     // 远端脚本已经退出；Windows 的 ssh 还要等到 stdin 读完才退，不关就一直等下去。
                     drop(stdin);
-                    let status = child.wait().map_err(|err| Failure::Retry(err.to_string()))?;
+                    let status = child.wait();
+                    self.untrack(pid);
+                    let status = status.map_err(|err| Failure::Retry(err.to_string()))?;
                     // 默认 shell 是 Windows PowerShell 时，它只按成败交回 0 或 1，Windows 上认不出 `PROBE_EXIT`；
                     // Windows 的脚本只在没装这个构建时打出平台信息，打出了就算。
                     let probed = family == Family::Windows || status.code() == Some(bootstrap::PROBE_EXIT);
@@ -548,7 +561,8 @@ impl RemoteHost {
                 }
                 Err(failure) => {
                     // 读不到开场白时远端可能还在跑、等着 stdin，不结束它就一直等不到退出。
-                    crate::subprocess::kill(child.id());
+                    crate::subprocess::kill(pid);
+                    self.untrack(pid);
                     let _ = child.wait();
                     return Err(failure);
                 }
@@ -620,11 +634,44 @@ impl RemoteHost {
         let stderr = File::create(log).map_err(|err| Failure::Retry(format!("cannot write the ssh log: {err}")))?;
         master.stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr);
         crate::subprocess::isolate(&mut master);
-        let status = master.status().map_err(|err| Failure::Stop {
+        let mut child = master.spawn().map_err(|err| Failure::Stop {
             error: format!("cannot run {}: {err}", ssh.program.display()),
             auth: false,
         })?;
+        let pid = child.id();
+        if let Err(failure) = self.track(pid) {
+            let _ = child.wait();
+            return Err(failure);
+        }
+        let status = child.wait();
+        self.untrack(pid);
+        let status = status.map_err(|err| Failure::Retry(format!("cannot wait for ssh: {err}")))?;
         if status.success() { Ok(()) } else { Err(classify(log, status.code())) }
+    }
+
+    /// 记下连的途中起的 ssh 子进程 `pid`（自成一个进程组），`disconnect` 时结束它，认证、探平台、装 runode 卡住
+    /// 时也断得开。已经不要连这台了时当场结束它、返回错误，调用方照样收掉它。
+    fn track(&self, pid: u32) -> Result<(), Failure> {
+        let mut state = self.state();
+        if !state.wanted {
+            drop(state);
+            crate::subprocess::kill(pid);
+            return Err(self.cancelled());
+        }
+        state.child = Some(pid);
+        Ok(())
+    }
+
+    /// 不再记着 `pid`。
+    fn untrack(&self, pid: u32) {
+        let mut state = self.state();
+        if state.child == Some(pid) {
+            state.child = None;
+        }
+    }
+
+    fn cancelled(&self) -> Failure {
+        Failure::Retry(format!("disconnected from {} while connecting", self.name))
     }
 
     /// 在这台主机上跑 `script` 的 ssh，`compressed` 时传的数据压缩。经主连接时不用认证；不经主连接时自己

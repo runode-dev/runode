@@ -79,6 +79,11 @@ pub(super) fn install(
     let piped = runode_ssh::process::spawn(&mut command, pipes)
         .map_err(|err| Failure::Retry(format!("cannot run ssh: {err}")))?;
     let mut child = piped.child;
+    let pid = child.id();
+    if let Err(failure) = host.track(pid) {
+        let _ = child.wait();
+        return Err(failure);
+    }
     let sent = piped.stdin.ok_or_else(|| io::Error::other("ssh has no stdin")).and_then(|mut stdin| {
         let mut file = File::open(&source.path)?;
         let mut buffer = vec![0; 1 << 20];
@@ -97,7 +102,9 @@ pub(super) fn install(
             }
         }
     });
-    let status = child.wait().map_err(|err| Failure::Retry(err.to_string()))?;
+    let status = child.wait();
+    host.untrack(pid);
+    let status = status.map_err(|err| Failure::Retry(err.to_string()))?;
     let stderr = std::fs::read_to_string(log).unwrap_or_default();
     if stderr.contains("RUNODE-INSTALL checksum") {
         return Err(Failure::Retry("the upload arrived damaged".into()));
