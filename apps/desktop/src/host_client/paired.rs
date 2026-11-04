@@ -654,7 +654,8 @@ impl PairedHost {
     }
 
     /// 连上了：记下状态，告诉界面那边还活着的会话，断开着的终端接回来。列不出会话时不报连上、交回错误重连：
-    /// `RemoteEvent::Connected` 的 `alive` 一定是那边列出来的。
+    /// `RemoteEvent::Connected` 的 `alive` 一定是那边列出来的。连的时候用户断开或忘掉了这台、连接已经断了时
+    /// 两样都不报，由 `watch` 收拾；在状态锁里看了再报，`disconnect` 清掉 `wanted` 之后不会再报连上。
     fn connected(&self, connected: Connected) -> Result<(), String> {
         let sessions = self.link.list_sessions(LIST_TIMEOUT).map_err(|err| {
             tracing::warn!("cannot list the sessions on the paired computer {}: {err}", self.id);
@@ -662,7 +663,12 @@ impl PairedHost {
         })?;
         let alive: HashSet<_> =
             sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect();
-        self.set_status(Status::Connected(connected));
+        let mut state = self.state();
+        if !(state.wanted && self.link.connected()) {
+            return Ok(());
+        }
+        state.status = Status::Connected(connected);
+        emit(RemoteEvent::Status(self.host_id()));
         emit(RemoteEvent::Connected { host: self.host_id(), alive });
         Ok(())
     }
