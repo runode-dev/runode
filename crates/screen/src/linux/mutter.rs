@@ -173,26 +173,36 @@ pub(crate) struct Session {
     size: (u32, u32),
     /// 录屏流的像素尺寸：Mutter 收的绝对坐标是流里的像素，屏幕缩放时它再除以缩放比例换成点数。
     pixels: (u32, u32),
+    /// 指针画进了画面。录屏流开了就改不了，要换就另开一个会话。
+    cursor: bool,
     /// 会话的 `Closed` 信号：屏幕拔掉、本机改了分辨率或缩放时 Mutter 关掉会话，录屏流跟着没了。
     closed_signal: Mutex<zbus::proxy::SignalStream<'static>>,
     closed: AtomicBool,
 }
 
 impl Session {
-    /// 屏幕 `display` 的会话：这个进程里已经开着就共用，没开就开一个；屏幕不在了用主屏。指针画不画进画面按第一个
-    /// 开会话的 `cursor`。
-    pub(crate) fn get(display: u32, cursor: bool) -> io::Result<Arc<Self>> {
+    /// 屏幕 `display` 的会话：这个进程里已经开着、指针画不画和 `cursor` 一样就共用，不然另开一个（`cursor` 为空时
+    /// 不挑，新开的画指针），之后再要的都拿新开的；屏幕不在了用主屏。
+    pub(crate) fn get(display: u32, cursor: Option<bool>) -> io::Result<Arc<Self>> {
         let mut sessions = SESSIONS.lock().unwrap_or_else(PoisonError::into_inner);
         let sessions = sessions.get_or_insert_default();
         sessions.retain(|_, session| session.strong_count() > 0);
         if let Some(session) = sessions.get(&display).and_then(Weak::upgrade)
             && !session.closed()
+            && cursor.is_none_or(|cursor| cursor == session.cursor)
         {
             return Ok(session);
         }
-        let session = Arc::new(Self::open(display, cursor)?);
+        let session = Arc::new(Self::open(display, cursor.unwrap_or(true))?);
         sessions.insert(display, Arc::downgrade(&session));
         Ok(session)
+    }
+
+    /// 屏幕 `display` 现在共用的会话，没开着或者已经关了时为空；不开新的。
+    fn current(display: u32) -> Option<Arc<Self>> {
+        let sessions = SESSIONS.lock().unwrap_or_else(PoisonError::into_inner);
+        let session = sessions.as_ref()?.get(&display)?.upgrade()?;
+        (!session.closed()).then_some(session)
     }
 
     fn open(display: u32, cursor: bool) -> io::Result<Self> {
@@ -229,6 +239,7 @@ impl Session {
             node: 0,
             size: monitor.logical,
             pixels: monitor.pixels,
+            cursor,
             closed_signal: Mutex::new(closed_signal),
             closed: AtomicBool::new(false),
         };
@@ -303,24 +314,34 @@ impl Drop for Session {
     }
 }
 
-/// 往一块屏幕上注入输入。
+/// 往一块屏幕上注入输入。不挑指针画不画，跟着采集另开的会话走，旧的会话才关得掉。
 pub(crate) struct Injector {
+    display: u32,
     session: Arc<Session>,
 }
 
 impl Injector {
     pub(crate) fn new(display: u32) -> io::Result<Self> {
-        Ok(Self { session: Session::get(display, true)? })
+        Ok(Self { display, session: Session::get(display, None)? })
+    }
+
+    fn session(&mut self) -> &Session {
+        if let Some(current) = Session::current(self.display)
+            && !Arc::ptr_eq(&current, &self.session)
+        {
+            self.session = current;
+        }
+        &self.session
     }
 }
 
 impl super::Inject for Injector {
     fn inject(&mut self, input: &ScreenInput) {
-        self.session.inject(input);
+        self.session().inject(input);
     }
 
     fn release(&mut self, button: MouseButton) {
-        let _ = self.session.button(remote_input::button_code(button), false);
+        let _ = self.session().button(remote_input::button_code(button), false);
     }
 }
 
@@ -332,7 +353,7 @@ pub(crate) struct Source {
 
 impl Source {
     pub(crate) fn open(display: u32, cursor: bool) -> io::Result<Self> {
-        let session = Session::get(display, cursor)?;
+        let session = Session::get(display, Some(cursor))?;
         Ok(Self { stream: session.stream()?, session })
     }
 }
