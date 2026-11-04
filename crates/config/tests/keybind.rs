@@ -122,6 +122,20 @@ fn actions_carry_their_parameters() {
     assert_eq!(parse_action("increase_font_size:1"), Ok(Action::IncreaseFontSize));
 }
 
+/// 发文字的动作的参数原样留着，行尾的空格和只有空白的参数都照打；别的动作照旧去掉两头的空白。
+#[test]
+fn text_payloads_keep_their_whitespace() {
+    let action = |value: &str| match parse(value).unwrap().as_slice() {
+        [Keybind::Bind { action, .. }] => action.clone(),
+        other => panic!("{value}: {other:?}"),
+    };
+    assert_eq!(action("ctrl+t= text:ls "), Action::SendText("ls ".into()));
+    assert_eq!(action("ctrl+t=text: "), Action::SendText(" ".into()));
+    assert_eq!(action("ctrl+t=esc:b "), Action::SendText("\x1bb ".into()));
+    assert_eq!(action("ctrl+t=csi: A"), Action::SendText("\x1b[ A".into()));
+    assert_eq!(action("ctrl+t= goto_tab:3 "), Action::GotoTab(2));
+}
+
 #[test]
 fn user_keybinds_override_unbind_and_clear() {
     let keybinds: Vec<_> =

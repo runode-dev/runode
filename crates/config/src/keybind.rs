@@ -604,7 +604,12 @@ pub fn parse(value: &str) -> Result<Vec<Keybind>, String> {
     // 触发键里不会出现 `=`（等号键写作 equal），第一个 `=` 就是分隔。
     let (trigger, action) = value.split_once('=').ok_or("expected TRIGGER=ACTION or clear")?;
     let keys = parse_trigger(trigger.trim())?;
-    let action = action.trim();
+    // `text`、`esc`、`csi` 的参数原样打出去，引号里写在行尾的空白也要打；别的动作去掉两头的空白。
+    let action = action.trim_start();
+    let action = match action.split_once(':') {
+        Some(("text" | "esc" | "csi", _)) => action,
+        _ => action.trim_end(),
+    };
     let (prefix, expand) = keys.strip_suffix(DIGIT).map_or((keys.as_str(), false), |prefix| (prefix, true));
     if prefix.contains(DIGIT) {
         return Err("digit only works as the last key".into());
