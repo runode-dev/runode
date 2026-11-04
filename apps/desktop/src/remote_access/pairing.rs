@@ -39,7 +39,7 @@ pub enum Pairing {
     Idle,
     /// 等监听方开好、换上 `name`，见模块说明。
     Starting {
-        dirs: Dirs,
+        dirs: Box<Dirs>,
         name: String,
         extra: Vec<IpAddr>,
         polls: u32,
@@ -130,7 +130,7 @@ impl Pairing {
         *self = Pairing::Idle;
         let name = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_else(host_name);
         // 当场那次就好了的话，`Starting` 连同看它的任务一起换掉。
-        *self = Pairing::Starting { dirs: Dirs::from_env(), name, extra, polls: 0, _poll: watch(slot, cx) };
+        *self = Pairing::Starting { dirs: Box::new(Dirs::from_env()), name, extra, polls: 0, _poll: watch(slot, cx) };
         self.poll(slot, cx);
         cx.notify();
     }
@@ -169,7 +169,7 @@ impl Pairing {
                 *polls += 1;
                 match listener_status(dirs) {
                     Ok(Some(status)) if status.host_name == *name || *polls >= START_POLLS => {
-                        Self::begin(dirs.clone(), &status, extra, slot, cx)
+                        Self::begin(Dirs::clone(dirs), &status, extra, slot, cx)
                     }
                     Ok(_) if *polls < START_POLLS => return,
                     Ok(_) => {
