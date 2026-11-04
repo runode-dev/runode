@@ -170,9 +170,10 @@ fn step_row(len: usize, selected: Option<usize>, step: isize) -> Option<usize> {
     })
 }
 
-/// 一次搜索：在哪个根目录、按什么词、哪种方式和选项。
+/// 一次搜索：在哪台机器（`ProjectHost::name`）的哪个根目录、按什么词、哪种方式和选项。
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SearchKey {
+    host: Option<String>,
     root: PathBuf,
     query: String,
     mode: SearchMode,
@@ -461,7 +462,19 @@ impl FileTree {
         self.edit.is_none() && !self.search.field.read(cx).query().trim().is_empty()
     }
 
-    /// 根目录、搜索词或方式和上次搜的不一样时在后台重搜，停下还在跑的上一次。
+    /// 现在的项目所在的机器，记进 `SearchKey`。
+    fn search_host(&self) -> Option<String> {
+        self.input.project.name().map(str::to_owned)
+    }
+
+    /// 显示的结果是现在这台机器、这个根目录的搜索时是那次搜索；换了 workspace 后、重搜完之前为空，那时的
+    /// 结果是别处的，不能显示，也不能打开、删除、改名。
+    fn current_search(&self) -> Option<&SearchKey> {
+        let key = self.search.searched.as_ref()?;
+        (key.root == self.files_root() && key.host == self.search_host()).then_some(key)
+    }
+
+    /// 机器、根目录、搜索词或方式和上次搜的不一样时在后台重搜，停下还在跑的上一次。
     pub(super) fn sync_file_search(&mut self, cx: &mut Context<Self>) {
         self.search_files(false, cx);
     }
@@ -475,7 +488,7 @@ impl FileTree {
             SearchMode::Content => search.options(cx),
         };
         let query = search_query(search.mode, search.field.read(cx).query());
-        let key = SearchKey { root: self.files_root(), query, mode: search.mode, options };
+        let key = SearchKey { host: self.search_host(), root: self.files_root(), query, mode: search.mode, options };
         let search = &mut self.search;
         cx.notify();
         // 文件一直在变时重读比按内容找的去抖还勤，每次都打断就永远搜不完：不打断，跑完再搜一次。
@@ -594,7 +607,7 @@ impl FileTree {
     /// 藏起来的文件树上。没选中、或者显示的还不是这个根目录的结果时为空。
     pub(super) fn selected_search_entry(&self) -> Option<(PathBuf, bool)> {
         let search = &self.search;
-        let key = search.searched.as_ref().filter(|key| key.root == self.files_root())?;
+        let key = self.current_search()?;
         row_entry(&search.rows, &search.found, &key.root, search.selected?)
     }
 
@@ -626,8 +639,7 @@ impl FileTree {
 
     /// 在预览栏里打开第 `ix` 行结果，`pin` 时开成固定标签；内容结果跳到那一行，目录展开或收起。
     fn open_search_row(&mut self, ix: usize, pin: bool, cx: &mut Context<Self>) {
-        // 换了 workspace 或根目录、重搜完之前，行还是另一个根目录的结果（没显示出来），回车不能打开那边的文件。
-        if !self.search.searched.as_ref().is_some_and(|key| key.root == self.files_root()) {
+        if self.current_search().is_none() {
             return;
         }
         let search = &mut self.search;
@@ -775,8 +787,7 @@ impl FileTree {
             return None;
         }
         let search = &self.search;
-        // 换了 workspace 后、重搜完之前，不显示另一个根目录的结果。
-        let fresh = search.searched.as_ref().is_some_and(|key| key.root == self.files_root());
+        let fresh = self.current_search().is_some();
         if !fresh || search.rows.is_empty() {
             let text = if search.pending.is_some() {
                 String::new()
@@ -1032,6 +1043,7 @@ mod tests {
         fs::write(root.join("src/a.rs"), "").unwrap();
         fs::write(root.join("src/ab.rs"), "").unwrap();
         let key = SearchKey {
+            host: None,
             root: root.clone(),
             query: "a".into(),
             mode: SearchMode::Name,
