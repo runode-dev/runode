@@ -263,9 +263,18 @@ fn package_manager(json: &serde_json::Value, dirs: &[PathBuf]) -> &'static str {
 
 /// 能用 `quote` 拼进命令行的任务名：以 `-` 开头的会被 make、包管理器当成选项；fish 的单引号里
 /// `\\` 和 `\'` 是转义，含 `\` 的加了单引号在 fish 里也不对；控制字符（换行等）会把一条命令拆开。
-/// 这些任务不列出来。
+/// 这些任务不列出来。Windows 上另外只收 `windows_plain` 的名字。
 fn quotable(name: &str) -> bool {
-    !name.starts_with('-') && !name.contains(|c: char| c == '\\' || c.is_control())
+    !name.starts_with('-')
+        && !name.contains(|c: char| c == '\\' || c.is_control())
+        && (!cfg!(windows) || windows_plain(name))
+}
+
+/// Windows 上命令行打进的可能是 PowerShell 也可能是 cmd，`quote` 的单引号两边都不对（cmd 不认单引号，
+/// PowerShell 里 `'\''` 不是转义），`%`、`^`、`,`、`@`、`=` 在其中一边也有特殊含义：只收两边都原样不动、
+/// 不用加引号的名字。
+fn windows_plain(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.:/+".contains(c))
 }
 
 /// 名字里只有不用转义的字符时原样用，否则加单引号。只给 `quotable` 的名字用：单引号里的 `\` 在 fish
@@ -498,6 +507,17 @@ build: other
         assert_eq!(quote("a;rm"), "'a;rm'");
         assert_eq!(quote("=build"), "'=build'");
         assert_eq!(quote("a=b"), "a=b");
+    }
+
+    /// Windows 上只列 PowerShell 和 cmd 里都不用加引号的名字。
+    #[test]
+    fn windows_lists_only_plain_names() {
+        for name in ["build", "test:unit", "lint-fix", "dev.server", "a_b", "c++", "ui/web"] {
+            assert!(windows_plain(name), "{name}");
+        }
+        for name in ["", "it's", "run it", "a;rm", "a,b", "%PATH%", "a^b", "@scope", "a=b", "a&b", "$x"] {
+            assert!(!windows_plain(name), "{name}");
+        }
     }
 
     /// 目标多得列不全时收到 `MAX_TASKS` 加一个就停，看得出列不全。
