@@ -32,7 +32,7 @@ fn images(images: &[Image]) -> Block {
 }
 
 fn link(text: &str, url: &str) -> Inline {
-    Inline { text: text.to_owned(), style: InlineStyle::default(), link: Some(url.to_owned()) }
+    Inline { text: text.to_owned(), style: InlineStyle::default(), link: Some(url.into()) }
 }
 
 fn item(blocks: Vec<Block>) -> ListItem {
@@ -85,6 +85,16 @@ fn inline_styles_and_links() {
             plain(" next"),
         ])]
     );
+}
+
+#[test]
+fn pieces_of_one_link_share_its_address() {
+    let url = "x".repeat(10_000);
+    let blocks = parse(&format!("[{}](https://{url})", "*a* ".repeat(200)));
+    let [Block::Paragraph(inlines)] = blocks.as_slice() else { panic!("{blocks:?}") };
+    let first = inlines[0].link.as_ref().unwrap();
+    assert!(inlines.len() > 100);
+    assert!(inlines.iter().all(|inline| inline.link.as_ref().is_some_and(|link| std::sync::Arc::ptr_eq(link, first))));
 }
 
 #[test]
@@ -228,7 +238,7 @@ fn images_split_paragraphs() {
 
 #[test]
 fn badges_in_a_row_share_one_block_and_keep_their_links() {
-    let badge = |url: &str, link: &str| Image { link: Some(link.to_owned()), ..image(url, "b") };
+    let badge = |url: &str, link: &str| Image { link: Some(link.into()), ..image(url, "b") };
     assert_eq!(
         parse("[![b](a.svg)](https://a) [![b](b.svg)](https://b)\n![b](c.svg)\n\n![b](d.svg) text ![b](e.svg)\n"),
         vec![
@@ -403,9 +413,10 @@ fn footnotes_are_numbered_by_first_reference_and_collected_at_the_end() {
     let note = |text: &str, label: &str| Inline {
         text: text.into(),
         style: InlineStyle { footnote: true, ..InlineStyle::default() },
-        link: Some(format!("#fn-{label}")),
+        link: Some(format!("#fn-{label}").into()),
     };
-    let back = |label: &str| Inline { text: " ↩".into(), link: Some(format!("#fnref-{label}")), ..Inline::default() };
+    let back =
+        |label: &str| Inline { text: " ↩".into(), link: Some(format!("#fnref-{label}").into()), ..Inline::default() };
     assert_eq!(
         blocks,
         vec![
@@ -432,9 +443,10 @@ fn references_inside_unused_footnotes_do_not_count() {
     let note = |text: &str, label: &str| Inline {
         text: text.into(),
         style: InlineStyle { footnote: true, ..InlineStyle::default() },
-        link: Some(format!("#fn-{label}")),
+        link: Some(format!("#fn-{label}").into()),
     };
-    let back = |label: &str| Inline { text: " ↩".into(), link: Some(format!("#fnref-{label}")), ..Inline::default() };
+    let back =
+        |label: &str| Inline { text: " ↩".into(), link: Some(format!("#fnref-{label}").into()), ..Inline::default() };
     let blocks =
         parse("[^unused]: see[^hidden]\n\n[^hidden]: h\n[^shown]: s[^deep][^deep]\n[^deep]: d\n\nbody[^shown]\n");
     assert_eq!(

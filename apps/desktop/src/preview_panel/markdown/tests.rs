@@ -125,7 +125,7 @@ fn rich_text_records_styles_and_merges_links() {
     let bold = InlineStyle { bold: true, ..InlineStyle::default() };
     let code = InlineStyle { code: true, ..InlineStyle::default() };
     assert_eq!(rich.runs, vec![(2..3, bold, false), (4..6, InlineStyle::default(), true), (6..7, code, true)]);
-    assert_eq!(rich.links, vec![(4..7, "x.md".to_owned())]);
+    assert_eq!(rich.links, vec![(4..7, "x.md".into())]);
     let colors = Colors::new(&Theme::new(Rgb(0xEE, 0xEE, 0xEE), Rgb(0x11, 0x11, 0x11), runode_types::theme::ANSI));
     let highlights = rich_highlights(rich, colors, None);
     assert_eq!(highlights[0].1.font_weight, Some(FontWeight::SEMIBOLD));

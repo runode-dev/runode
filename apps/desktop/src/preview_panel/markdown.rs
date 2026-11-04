@@ -230,7 +230,7 @@ pub(super) struct RowImage {
     pub width: Option<u32>,
     pub height: Option<u32>,
     /// 图片外面那层链接的地址，点图片打开它。
-    pub link: Option<String>,
+    pub link: Option<Arc<str>>,
     /// 读出来的本地图片；读不了的、不是图片的为空，只显示替代文字。网络图片也为空，下好的在
     /// `View::remote` 里。
     pub picture: Option<Picture>,
@@ -268,14 +268,14 @@ pub(super) struct Rich {
     /// 不是普通样式的那些段，从前往后、不重叠；最后一项为真表示在链接里。
     pub runs: Vec<(Range<usize>, InlineStyle, bool)>,
     /// 链接占的范围和地址，挨着的同一个链接并成一段。
-    pub links: Vec<(Range<usize>, String)>,
+    pub links: Vec<(Range<usize>, Arc<str>)>,
 }
 
 impl Rich {
     fn new(inlines: &[Inline]) -> Self {
         let mut text = String::new();
         let mut runs = Vec::new();
-        let mut links: Vec<(Range<usize>, String)> = Vec::new();
+        let mut links: Vec<(Range<usize>, Arc<str>)> = Vec::new();
         for inline in inlines.iter().filter(|inline| !inline.text.is_empty()) {
             let range = text.len()..text.len() + inline.text.len();
             text.push_str(&inline.text);
@@ -284,7 +284,11 @@ impl Rich {
             }
             if let Some(url) = &inline.link {
                 match links.last_mut() {
-                    Some((last, last_url)) if last.end == range.start && last_url == url => last.end = range.end,
+                    Some((last, last_url))
+                        if last.end == range.start && (Arc::ptr_eq(last_url, url) || last_url == url) =>
+                    {
+                        last.end = range.end
+                    }
                     _ => links.push((range, url.clone())),
                 }
             }

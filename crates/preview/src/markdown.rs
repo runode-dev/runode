@@ -21,7 +21,7 @@ use std::{
     ops::Range,
     path::Path,
     sync::{
-        LazyLock,
+        Arc, LazyLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -42,8 +42,8 @@ pub use link::{LinkTarget, link_target};
 pub struct Inline {
     pub text: String,
     pub style: InlineStyle,
-    /// 在链接里时是链接的地址，原样不解析。
-    pub link: Option<String>,
+    /// 在链接里时是链接的地址，原样不解析；同一个链接里的几段共用一份。
+    pub link: Option<Arc<str>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -127,7 +127,7 @@ pub struct Image {
     pub width: Option<u32>,
     pub height: Option<u32>,
     /// 图片在链接里时是链接的地址（徽章大多这样），点图片打开它。
-    pub link: Option<String>,
+    pub link: Option<Arc<str>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -382,7 +382,11 @@ fn autolink(inlines: Vec<Inline>, cancel: &AtomicBool) -> Vec<Inline> {
                     link: inline.link.clone(),
                 });
             }
-            out.push(Inline { text: inline.text[range.clone()].to_owned(), style: inline.style, link: Some(url) });
+            out.push(Inline {
+                text: inline.text[range.clone()].to_owned(),
+                style: inline.style,
+                link: Some(url.into()),
+            });
             at = range.end;
         }
         if at < inline.text.len() {
@@ -467,7 +471,7 @@ struct Builder<'a> {
     kbd: u32,
     /// HTML 的 `<code>`。
     html_code: u32,
-    links: Vec<String>,
+    links: Vec<Arc<str>>,
     /// 没闭上的 HTML `<a>` 各自往 `links` 里压了地址没有（`<a name>` 这类没有 `href` 的不压）。
     html_links: Vec<bool>,
     /// 在 `<script>`、`<style>` 里：标签名。行内 HTML 的开标签、内容和闭标签是分开的几个事件，内容到
@@ -538,7 +542,7 @@ impl Builder<'_> {
                 } else {
                     superscript(self.footnote_number(&label))
                 };
-                self.push_inline(&text, style, Some(format!("#fn-{label}")));
+                self.push_inline(&text, style, Some(format!("#fn-{label}").into()));
             }
             Event::SoftBreak => self.push_text(" ", false),
             Event::HardBreak => self.push_text("\n", false),
@@ -641,7 +645,7 @@ impl Builder<'_> {
             Tag::Emphasis => self.italic += 1,
             Tag::Strong => self.bold += 1,
             Tag::Strikethrough => self.strike += 1,
-            Tag::Link { dest_url, .. } => self.links.push(dest_url.into_string()),
+            Tag::Link { dest_url, .. } => self.links.push(dest_url.as_ref().into()),
             Tag::Image { .. } if self.image.is_some() => self.nested_images += 1,
             Tag::Image { dest_url, .. } => self.image = Some((dest_url.into_string(), String::new())),
             _ => {}
@@ -872,7 +876,7 @@ impl Builder<'_> {
             "a" => {
                 let href = attr("href");
                 if let Some(href) = href {
-                    self.links.push(href.to_owned());
+                    self.links.push(href.into());
                 }
                 self.html_links.push(href.is_some());
             }
@@ -1082,7 +1086,7 @@ impl Builder<'_> {
         self.push_inline(text, style, self.links.last().cloned());
     }
 
-    fn push_inline(&mut self, text: &str, style: InlineStyle, link: Option<String>) {
+    fn push_inline(&mut self, text: &str, style: InlineStyle, link: Option<Arc<str>>) {
         if self.raw_text.is_some() {
             return;
         }
@@ -1100,7 +1104,9 @@ impl Builder<'_> {
         }
         match self.inlines.last_mut() {
             // 脚注的引用一个一段：定义里的引用文字暂放标签，`finish_footnotes` 按段换成编号。
-            Some(last) if last.style == style && last.link == link && !style.footnote => last.text.push_str(text),
+            Some(last) if last.style == style && same_link(&last.link, &link) && !style.footnote => {
+                last.text.push_str(text)
+            }
             _ => self.inlines.push(Inline { text: text.to_owned(), style, link }),
         }
     }
@@ -1142,10 +1148,11 @@ impl Builder<'_> {
                 continue;
             };
             self.number_footnote_refs(&mut blocks);
-            let back =
-                Inline {
-                    text: " ↩".to_owned(), style: InlineStyle::default(), link: Some(format!("#fnref-{label}"))
-                };
+            let back = Inline {
+                text: " ↩".to_owned(),
+                style: InlineStyle::default(),
+                link: Some(format!("#fnref-{label}").into()),
+            };
             match blocks.last_mut() {
                 Some(Block::Paragraph(inlines)) => inlines.push(back),
                 _ => blocks.push(Block::Paragraph(vec![Inline { text: "↩".to_owned(), ..back }])),
@@ -1184,5 +1191,14 @@ impl Builder<'_> {
                 inline.text = superscript(self.footnote_number(label));
             }
         }
+    }
+}
+
+/// 两段文字在同一个链接里：同一个链接的几段共用一份地址，先比指针，不逐字比长地址。
+fn same_link(a: &Option<Arc<str>>, b: &Option<Arc<str>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b) || a == b,
+        (None, None) => true,
+        _ => false,
     }
 }
