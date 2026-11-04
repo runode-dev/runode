@@ -111,22 +111,27 @@ impl Vaapi {
         for &codec in codecs {
             for (path, slot) in &mut devices {
                 let Some(device) = slot.take() else { continue };
-                let plan = match device.plan(codec, size, fps, bitrate) {
-                    Ok(plan) => plan,
+                let plans = match device.plans(codec, size, fps, bitrate) {
+                    Ok(plans) => plans,
                     Err(err) => {
                         failures.push(format!("{codec:?} on {path}: {err}"));
                         *slot = Some(device);
                         continue;
                     }
                 };
-                match Self::start(device, codec, plan, size, fps, bitrate) {
-                    Ok(encoder) => return Ok(encoder),
-                    Err(err) => {
-                        failures.push(format!("{codec:?} on {path}: {err}"));
-                        // 建不成的编码器连同显示一起放掉了，另一种编码再打开一次。
-                        *slot = Device::open(va, path).ok();
+                // 驱动报得出能力、建或试编时才失败的（比如缺固件的低功耗入口），换同一块显卡的下一种做法。
+                let mut device = Some(device);
+                for plan in plans {
+                    // 建不成的编码器连同显示一起放掉了，再打开一次。
+                    let Some(opened) = device.take().or_else(|| Device::open(va, path).ok()) else { break };
+                    let (profile, entrypoint) = (plan.profile, plan.entrypoint);
+                    match Self::start(opened, codec, plan, size, fps, bitrate) {
+                        Ok(encoder) => return Ok(encoder),
+                        Err(err) => failures
+                            .push(format!("{codec:?} profile {profile} entrypoint {entrypoint} on {path}: {err}")),
                     }
                 }
+                *slot = device.or_else(|| Device::open(va, path).ok());
             }
         }
         Err(io::Error::new(io::ErrorKind::Unsupported, failures.join("; ")))
@@ -637,11 +642,12 @@ impl Device {
         Ok(Self { va, display, vendor, _node: node })
     }
 
-    /// 这块显卡怎么编 `codec`：先试低功耗的入口（编码电路，延迟低、不占着色器），没有再用普通的；驱动的哪项能力
-    /// 不够时错误是 `io::ErrorKind::Unsupported`，带着原因。
-    fn plan(&self, codec: Codec, size: (u32, u32), fps: u32, bitrate: u32) -> io::Result<Plan> {
+    /// 这块显卡编 `codec` 的各种做法，按先试的排：低功耗的入口（编码电路，延迟低、不占着色器）排在普通的前面；
+    /// 一种也没有时错误是 `io::ErrorKind::Unsupported`，带着驱动的哪项能力不够。
+    fn plans(&self, codec: Codec, size: (u32, u32), fps: u32, bitrate: u32) -> io::Result<Vec<Plan>> {
         let profiles = self.profiles()?;
         let mut failure = io::Error::new(io::ErrorKind::Unsupported, format!("the driver cannot encode {codec:?}"));
+        let mut plans = Vec::new();
         let candidates: Vec<(c_int, Option<h264::Profile>)> = match codec {
             Codec::H264 => h264::Profile::PREFERRED.iter().map(|&profile| (profile.va(), Some(profile))).collect(),
             Codec::Hevc => vec![(ffi::PROFILE_HEVC_MAIN, None)],
@@ -656,7 +662,7 @@ impl Device {
                     continue;
                 }
                 match self.plan_with(profile, entrypoint, h264, size, fps, bitrate) {
-                    Ok(plan) => return Ok(plan),
+                    Ok(plan) => plans.push(plan),
                     Err(err) => {
                         tracing::debug!("{codec:?} profile {profile} entrypoint {entrypoint}: {err}");
                         failure = err;
@@ -664,7 +670,7 @@ impl Device {
                 }
             }
         }
-        Err(failure)
+        if plans.is_empty() { Err(failure) } else { Ok(plans) }
     }
 
     fn plan_with(
