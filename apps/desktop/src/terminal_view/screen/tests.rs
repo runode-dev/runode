@@ -685,6 +685,30 @@ fn a_resize_from_the_owner_is_not_answered_with_our_size() {
     assert_eq!(h.state.live().unwrap().requested, [BIG]);
 }
 
+/// 不带尺寸的 `Attach` 等屏幕时先量出了尺寸，屏幕到了尺寸一样也报一次给宿主；带着这个尺寸要的不再报。
+#[test]
+fn a_size_measured_while_attaching_without_one_is_still_sent() {
+    let alive = Rc::new(Cell::new(0));
+    let mut build = |screen: HostScreen| Ok(Fake::new(&screen.data, &alive));
+    let now = Instant::now();
+    let mut state: ScreenState<Fake> = ScreenState::new_attaching(AttachMode::Snapshot, SIZE, now);
+    state.resize(SIZE);
+    state.apply(vec![screen(AttachMode::Snapshot, 1, SessionMeta::default(), b"")], &mut build, now);
+    assert_eq!(state.live().unwrap().requested, [SIZE]);
+    state.resize(SIZE);
+    assert_eq!(state.live().unwrap().requested, [SIZE]);
+
+    let mut h = Harness::live(b"");
+    h.state.resize(SIZE);
+    h.state.set_visible(false, h.now);
+    let later = h.later(HIDE_GRACE);
+    assert_eq!(h.state.tick(later), META_ONLY);
+    h.apply(vec![screen(AttachMode::MetaOnly, 2, SessionMeta::default(), b"")]);
+    assert_eq!(h.state.set_visible(true, h.now), Some(Attach { size: Some(SIZE), mode: AttachMode::Snapshot }));
+    h.apply(vec![screen(AttachMode::Snapshot, 3, SessionMeta::default(), b"")]);
+    assert!(h.state.live().unwrap().requested.is_empty());
+}
+
 /// 尺寸归别的前端管时，程序要改窗口尺寸（CSI 8 t）的请求不改这边的窗口。
 #[test]
 fn window_resize_requests_need_the_size() {

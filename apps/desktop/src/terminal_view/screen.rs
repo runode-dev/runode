@@ -485,7 +485,7 @@ impl<S: Vt> ScreenState<S> {
         if !self.sized {
             self.last_size = size;
         }
-        self.attaching = None;
+        let asked = self.attaching.take().and_then(|attach| attach.size);
         self.reconnecting = false;
         // 第一次连上时的状态是现在的样子，不是刚发生的变化，不通知；之后重新连上时和记着的比，agent
         // 从工作中停了下来照样通知（这个变化的 `Meta` 被连接那一层丢掉了）。
@@ -511,8 +511,9 @@ impl<S: Vt> ScreenState<S> {
             Ok(mut session) => {
                 session.apply_meta(self.meta.clone());
                 // 回到显示时按视图的尺寸要的屏幕，宿主已经改好；没改成的（比如重新连上时没给尺寸、
-                // 等的时候视图又变了）这里补上。
-                if self.sized && size != self.last_size {
+                // 等的时候视图又变了）这里补上。`Attach` 没带这个尺寸时，屏幕的尺寸碰巧一样也要报：宿主
+                // 没记下这边要的尺寸，这个视图就当不了 owner。
+                if self.sized && (size != self.last_size || asked != Some(self.last_size)) {
                     session.resize(self.last_size);
                 }
                 self.screen = Screen::Live { session, channel };
