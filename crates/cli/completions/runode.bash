@@ -71,12 +71,16 @@ _runode() {
             case $kind in
                 files)
                     if type compopt >/dev/null 2>&1; then compopt -o default; else
-                        while IFS= read -r line; do _runode_escape_file "$line"; COMPREPLY+=("$REPLY"); done < <(compgen -f -- "$cur")
+                        while IFS= read -r line; do
+                            _runode_escape_file "$line"
+                            [[ -d ${line/#\~/$HOME} ]] && REPLY+=/
+                            COMPREPLY+=("$REPLY")
+                        done < <(compgen -f -- "$cur")
                     fi
                     ;;
                 dirs)
                     if type compopt >/dev/null 2>&1; then compopt -o dirnames; else
-                        while IFS= read -r line; do _runode_escape_file "$line"; COMPREPLY+=("$REPLY"); done < <(compgen -d -- "$cur")
+                        while IFS= read -r line; do _runode_escape_file "$line"; COMPREPLY+=("$REPLY/"); done < <(compgen -d -- "$cur")
                     fi
                     ;;
             esac
@@ -94,6 +98,19 @@ _runode() {
             COMPREPLY[i]=${COMPREPLY[i]#"$prefix"}
         done
     fi
+    # Without compopt the completion is registered with -o nospace (below): a
+    # finished word gets its space here, a directory keeps going after its slash.
+    if ! type compopt >/dev/null 2>&1; then
+        for ((i = 0; i < ${#COMPREPLY[@]}; i++)); do
+            [[ ${COMPREPLY[i]} == */ ]] || COMPREPLY[i]+=' '
+        done
+    fi
 }
 
-complete -F _runode runode rn
+# bash 3.2 has no compopt, so a directory candidate cannot turn off the space
+# readline adds after a unique match there.
+if type compopt >/dev/null 2>&1; then
+    complete -F _runode runode rn
+else
+    complete -o nospace -F _runode runode rn
+fi
