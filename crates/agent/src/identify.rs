@@ -467,20 +467,47 @@ fn letta_is_interactive(process: &ForegroundProcess) -> bool {
     if one_shot {
         return false;
     }
-    // 跳过选后端的参数后，第一个参数要么没有，要么是选项；是别的词就是子命令或一次性提示词。
+    // 跳过选项和带值选项的值后，剩下的词不管在哪儿都是子命令或一次性提示词。
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
-        if arg == "--backend" {
+        if !arg.starts_with('-') || arg == "--" {
+            return false;
+        }
+        if LETTA_VALUE_OPTIONS.contains(&arg.as_str()) {
             rest.next();
-            continue;
         }
-        if arg.starts_with("--backend=") {
-            continue;
-        }
-        return arg.starts_with('-');
     }
     true
 }
+
+/// letta 交互式会话也认、值写在下一个参数里的选项；`--name=value`、`-mvalue` 这样值连着写的不在此列。
+const LETTA_VALUE_OPTIONS: &[&str] = &[
+    "--conversation",
+    "--conv",
+    "-C",
+    "--agent",
+    "-a",
+    "--name",
+    "-n",
+    "--model",
+    "-m",
+    "--system",
+    "-s",
+    "--system-custom",
+    "--embedding",
+    "--base-tools",
+    "--personality",
+    "--toolset",
+    "--backend",
+    "--tools",
+    "--allowedTools",
+    "--disallowedTools",
+    "--permission-mode",
+    "--skills",
+    "--skill-sources",
+    "--reflection-trigger",
+    "--reflection-step-count",
+];
 
 /// letta 入口（它自己，或者 node、bun 跑的 letta 脚本）在参数里的位置。
 fn letta_entry(argv: &[String]) -> Option<usize> {

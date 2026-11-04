@@ -179,8 +179,12 @@ fn only_interactive_letta_counts() {
         alone("MainThread", &["node", "/home/user/project/node_modules/.bin/letta", "--conversation", "c"]),
         Some(Letta)
     );
+    assert_eq!(alone("letta", &["letta", "-m", "opus", "--yolo", "--backend=local", "-C", "c"]), Some(Letta));
     for args in [
         &["--prompt", "hello"][..],
+        &["--conversation", "c", "fix this bug"],
+        &["--yolo", "fix this bug"],
+        &["-m", "opus", "--", "fix this bug"],
         &["--output-format", "json"],
         &["--input-format=stream-json"],
         &["--max-turns=1"],
