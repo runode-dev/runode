@@ -72,7 +72,7 @@ unsafe impl Send for Encoder {}
 unsafe impl Sync for Encoder {}
 
 impl Encoder {
-    /// 按 `codecs` 的先后挑编码建编码器，见模块的说明。
+    /// 按 `codecs` 的先后挑编码建编码器，见模块的说明。一种也建不出时错误是 `io::ErrorKind::Unsupported`。
     pub(crate) fn new(
         width: u32,
         height: u32,
@@ -116,7 +116,10 @@ impl Encoder {
                 return Ok(encoder);
             }
         }
-        Err(io::Error::other(format!("cannot create a hardware encoder: {}", failures.join(", "))))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("cannot create a hardware encoder: {}", failures.join(", ")),
+        ))
     }
 
     fn configure(&self, fps: u32) -> io::Result<()> {
