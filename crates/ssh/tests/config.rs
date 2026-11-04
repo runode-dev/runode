@@ -1,4 +1,4 @@
-//! 从 `~/.ssh/config` 里列主机：展开 Include，跳过通配和取反的模式，去重。
+//! 从 `~/.ssh/config` 里列主机：展开 Include，跳过通配和取反的模式、行尾的注释，去重。
 
 mod common;
 
@@ -35,4 +35,32 @@ fn includes_expand_wildcards_in_every_segment() {
     }
     fs::write(ssh.join("config"), "Include hosts/*/config ~/.ssh/h?sts/w*/config\n").unwrap();
     assert_eq!(list_hosts(&home.0), ["home", "work"]);
+}
+
+/// `Host` 和 `Include` 行尾的注释不当成主机，也不当成要读的文件。
+#[test]
+fn trailing_comments_are_not_hosts_or_files() {
+    let home = TempDir::new("config-comments");
+    let ssh = home.0.join(".ssh");
+    fs::create_dir_all(&ssh).unwrap();
+    fs::write(
+        ssh.join("config"),
+        "Host devbox # production box
+Include extra # other
+",
+    )
+    .unwrap();
+    fs::write(
+        ssh.join("extra"),
+        "Host extra
+",
+    )
+    .unwrap();
+    fs::write(
+        ssh.join("other"),
+        "Host other
+",
+    )
+    .unwrap();
+    assert_eq!(list_hosts(&home.0), ["devbox", "extra"]);
 }

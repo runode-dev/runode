@@ -66,7 +66,7 @@ fn split_line(line: &str) -> Option<(&str, &str)> {
     Some((key, rest))
 }
 
-/// 按空白拆开值，双引号括起来的算一个词。
+/// 按空白拆开值，双引号括起来的算一个词；不在引号里、开头一个词的 `#` 起是注释，到行尾都不要。
 fn split_words(value: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut word = String::new();
@@ -74,6 +74,7 @@ fn split_words(value: &str) -> Vec<String> {
     let mut any = false;
     for c in value.chars() {
         match c {
+            '#' if !quoted && !any => break,
             '"' => {
                 quoted = !quoted;
                 any = true;
@@ -170,6 +171,9 @@ mod tests {
         assert_eq!(split_line("HostName\tx"), Some(("HostName", "x")));
         assert_eq!(split_line("# Host x"), None);
         assert_eq!(split_words(r#"a "b c" d"#), ["a", "b c", "d"]);
+        assert_eq!(split_words("devbox # production"), ["devbox"]);
+        assert_eq!(split_words("devbox #production"), ["devbox"]);
+        assert_eq!(split_words(r##"a#b "#c" d"##), ["a#b", "#c", "d"]);
     }
 
     #[test]
