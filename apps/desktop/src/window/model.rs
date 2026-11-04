@@ -557,6 +557,7 @@ impl WindowView {
             TerminalEvent::PasteImage(image) => self.paste_image(view.clone(), image, window, cx),
             TerminalEvent::PasteFiles(paths) => self.paste_files(view.clone(), paths, window, cx),
             TerminalEvent::PasteScreen(text) => self.paste_screen(view.clone(), text, window, cx),
+            TerminalEvent::PastePath(path) => self.paste_path(view, path, window, cx),
             TerminalEvent::OpenRemotePath { path, dir } => {
                 let host = view.read(cx).host().clone();
                 self.open_remote_path(wi, &host, path, *dir, window, cx);

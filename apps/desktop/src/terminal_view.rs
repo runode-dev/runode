@@ -147,6 +147,8 @@ pub enum TerminalEvent {
     PasteFiles(Vec<PathBuf>),
     /// 远端主机上的终端里要粘贴屏幕内容存成的文件：本机的文件那边读不到，要把这些文字传过去。
     PasteScreen(String),
+    /// 本机的终端里要粘贴本机文件的路径：照终端前台 shell 的写法加引号再打进去。
+    PastePath(PathBuf),
     /// 远端主机上的终端里 ⌘ 点了那台机器上的文件或目录（`dir`），本机打不开，要在窗口里看。
     OpenRemotePath { path: PathBuf, dir: bool },
     /// shell 已经退出，这个终端该关掉了。

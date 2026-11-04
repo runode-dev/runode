@@ -272,6 +272,18 @@ impl WindowView {
         self.upload_to_view(view, Upload::Files(paths.to_vec()), window, cx);
     }
 
+    /// 把本机的 `path` 照 `view` 前台 shell 的写法加好引号，当作粘贴打进去。
+    pub(super) fn paste_path(
+        &mut self,
+        view: &Entity<TerminalView>,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = Quoting::of_session(view.read(cx).meta()).quote(&path.display().to_string());
+        view.update(cx, |view, cx| view.paste_text(text, window, cx));
+    }
+
     /// 远端终端里粘贴的屏幕内容存成文件传到那台主机上，再把它在远端的路径打进这个终端。
     pub(super) fn paste_screen(
         &mut self,

@@ -172,7 +172,7 @@ impl TerminalView {
         cx.notify();
     }
 
-    pub(super) fn write_screen_file(&mut self, action: &WriteScreenFile, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn write_screen_file(&mut self, action: &WriteScreenFile, _: &mut Window, cx: &mut Context<Self>) {
         let Some(text) = self.screen.shown().and_then(Session::screen_text) else {
             return;
         };
@@ -183,7 +183,7 @@ impl TerminalView {
         // 屏幕内容在这里取好，清旧文件和写文件放到后台：缓存目录在挂住的网络卷上时会一直卡着。
         let job = cx.background_spawn(async move { write_screen_file(&text) });
         let what = action.0;
-        cx.spawn_in(window, async move |this, cx| {
+        cx.spawn(async move |this, cx| {
             let path = match job.await {
                 Ok(path) => path,
                 Err(err) => {
@@ -191,11 +191,11 @@ impl TerminalView {
                     return;
                 }
             };
-            this.update_in(cx, |this, window, cx| match what {
+            this.update(cx, |_, cx| match what {
                 ScreenFile::CopyPath => {
                     cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
                 }
-                ScreenFile::PastePath => this.paste_text(path.display().to_string(), window, cx),
+                ScreenFile::PastePath => cx.emit(super::TerminalEvent::PastePath(path)),
                 ScreenFile::Open => cx.open_with_system(&path),
             })
             .ok();
