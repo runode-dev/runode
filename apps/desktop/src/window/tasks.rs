@@ -300,8 +300,13 @@ impl WindowView {
 
     /// 按了命令的快捷键（见 `keys`）：这里没绑时交给别的绑定或终端。绑着时现请宿主列一遍终端目录的命令
     /// （菜单没打开过时还没列），找叫这个名字的（项目的键找不是通用的命令，通用的键只找通用命令），像在菜单里
-    /// 点它一样跑；没有或者列不出来时响一声、记日志。列的期间切到了别的 workspace 时不跑。
+    /// 点它一样跑；没有或者列不出来时响一声、记日志。列的期间切到了别的 workspace 时不跑。远端的 workspace
+    /// 没有命令（`list_tasks`），键交给别的绑定或终端：这里列的是本机的命令，跑却跑在远端。
     pub(super) fn run_task_key(&mut self, action: &RunTaskKey, window: &mut Window, cx: &mut Context<Self>) {
+        if self.on_remote() {
+            cx.propagate();
+            return;
+        }
         let root = self.project_dir(cx);
         let Some((global, name)) = cx.global::<TaskKeys>().lookup(&root, &action.0) else {
             cx.propagate();
