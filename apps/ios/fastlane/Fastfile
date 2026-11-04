@@ -13,7 +13,8 @@ platform :ios do
     key_path = File.expand_path(ENV.fetch("ASC_KEY_PATH"))
     app_store_connect_api_key(key_id: key_id, issuer_id: issuer_id, key_filepath: key_path)
 
-    unless File.directory?("../Frameworks/ghostty-vt.xcframework")
+    unless File.directory?("../Frameworks/ghostty-vt.xcframework") &&
+           File.directory?("../RunodeKit/Sources/GhosttyVt/include")
       sh("../scripts/build-ghostty-vt.sh")
     end
 

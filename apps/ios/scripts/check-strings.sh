@@ -16,7 +16,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ios_dir="$(cd "$script_dir/.." && pwd)"
 derived="$ios_dir/build/dd-strings"
 
-if [[ ! -d "$ios_dir/Frameworks/ghostty-vt.xcframework" ]]; then
+if [[ ! -d "$ios_dir/Frameworks/ghostty-vt.xcframework" || ! -d "$ios_dir/RunodeKit/Sources/GhosttyVt/include" ]]; then
   "$script_dir/build-ghostty-vt.sh"
 fi
 
