@@ -16,7 +16,7 @@ use runode_config::{
     keybind::{self, Action},
 };
 use runode_paths::Dirs;
-use runode_tasks::file::{Keys, Rules, write_task, write_task_key};
+use runode_tasks::file::{Keys, Rules, task_project, write_task, write_task_key};
 
 use super::{AddTask, BindTask, EditTask, TaskKeys};
 use crate::ui::button::{Button, ButtonVariant};
@@ -251,11 +251,11 @@ impl WindowView {
             if dialog.shortcut == dialog.initial_shortcut { Keys::Keep } else { Keys::Set(dialog.shortcut.clone()) };
         let job = cx.background_spawn(async move {
             let file = Dirs::from_env().tasks_file().ok_or("no home directory")?;
-            // 编辑本项目的命令时还是那个项目；加到本项目时现查终端目录在哪个仓库里。
+            // 编辑本项目的命令时还是那个项目；加到本项目时加在列命令时给终端目录用的那份里。
             let project = match &editing {
                 _ if global => None,
                 Some((Some(project), _)) => Some(project.clone()),
-                _ => Some(runode_git::repo_root(&dir).unwrap_or_else(|| dir.clone())),
+                _ => Some(task_project(&file, &dir, &RULES)),
             };
             let (old_project, old_name) = editing.unwrap_or_else(|| (project.clone(), name.clone()));
             let new = Some((project.as_deref(), name.as_str(), command.as_str()));

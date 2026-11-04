@@ -61,6 +61,17 @@ pub fn write_task_key(file: &Path, dir: &Path, name: &str, trigger: Option<&str>
     })
 }
 
+/// 终端目录 `dir` 里新加的项目命令记在哪份：列命令时给 `dir` 用的那份（`dir` 自己或上级里已经有命令的、最深的），
+/// 还没有、读不了文件时问 `Rules::project_of`。
+pub fn task_project(file: &Path, dir: &Path, rules: &Rules) -> PathBuf {
+    let text = {
+        let _writing = WRITING.lock().unwrap_or_else(PoisonError::into_inner);
+        fs::read_to_string(file).ok()
+    };
+    let json = text.and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    json.as_ref().and_then(|json| deepest(json.get("projects"), dir)).unwrap_or_else(|| (rules.project_of)(dir))
+}
+
 /// 改命令文件 `file`：文件和它的目录不在时建出来，没有文件、改完也是空的（比如删除）时不建；读不懂原来的
 /// 内容时不写，免得把手写的文件冲掉。
 fn edit_file(file: &Path, edit: impl FnOnce(&mut Map<String, Value>) -> Result<(), String>) -> Result<(), String> {
@@ -178,13 +189,15 @@ fn key_table<'a>(
 /// 终端目录 `dir` 的项目快捷键记在哪份：先找已经有键的、`dir` 自己或上级里最深的那份，再找自己加的
 /// 命令所在的项目，都没有时问 `Rules::project_of`。
 fn key_project(root: &Map<String, Value>, dir: &Path, rules: &Rules) -> PathBuf {
-    let deepest = |table: Option<&Value>| {
-        let dirs = table.and_then(Value::as_object).into_iter().flatten().map(|(at, _)| Path::new(at));
-        dirs.filter(|at| dir.starts_with(at)).max_by_key(|at| at.components().count()).map(Path::to_path_buf)
-    };
-    deepest(root.get("keys").and_then(|keys| keys.get("projects")))
-        .or_else(|| deepest(root.get("projects")))
+    deepest(root.get("keys").and_then(|keys| keys.get("projects")), dir)
+        .or_else(|| deepest(root.get("projects"), dir))
         .unwrap_or_else(|| (rules.project_of)(dir))
+}
+
+/// 按目录分份的表 `table` 里，`dir` 自己或上级的、最深的那份的目录。
+fn deepest(table: Option<&Value>, dir: &Path) -> Option<PathBuf> {
+    let dirs = table.and_then(Value::as_object).into_iter().flatten().map(|(at, _)| Path::new(at));
+    dirs.filter(|at| dir.starts_with(at)).max_by_key(|at| at.components().count()).map(Path::to_path_buf)
 }
 
 /// `project` 那一份（为空时是通用的）的命令表，没有时建出来。
@@ -230,7 +243,7 @@ fn replace(tasks: &mut Map<String, Value>, old: Option<&str>, new: Option<(&str,
 mod tests {
     use std::path::Path;
 
-    use super::{Keys, Rules, edit_text, move_keys, write_task};
+    use super::{Keys, Rules, edit_text, move_keys, task_project, write_task};
 
     /// `command` 和 `cmd` 是同一个修饰键。
     const RULES: Rules = Rules {
@@ -266,6 +279,22 @@ mod tests {
         );
         assert!(with_task(Some("[1]"), (None, "dev"), Some((None, "dev", "x"))).is_err());
         assert!(with_task(Some("{oops"), (None, "dev"), Some((None, "dev", "x"))).is_err());
+    }
+
+    /// 新加的项目命令记在列命令时用的那份里：上级或更深一层已经有命令时用最深的那份，都没有时问 `project_of`。
+    #[test]
+    fn new_tasks_go_where_the_listing_looks() {
+        let dir = std::env::temp_dir().join(format!("rdr-tasks-project-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("tasks.json");
+        let at = |dir: &str| task_project(&file, Path::new(dir), &RULES);
+        assert_eq!(at("/w/app/sub"), Path::new("/w/app/sub"));
+        std::fs::write(&file, r#"{"projects": {"/w": {"a": "x"}, "/w/app/sub": {"b": "y"}}}"#).unwrap();
+        assert_eq!(at("/w/app/sub/deeper"), Path::new("/w/app/sub"));
+        assert_eq!(at("/w/app"), Path::new("/w"));
+        assert_eq!(at("/elsewhere"), Path::new("/elsewhere"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 几个后台任务同时改命令文件：各自的改动都留下，不会读到同一份内容再互相盖掉。
