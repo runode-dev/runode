@@ -9,8 +9,9 @@
     @MainActor @Suite struct TerminalViewTests {
         @MainActor final class Recorder: TerminalViewDelegate {
             var fitSizes: [GridSize] = []
+            var inputs = 0
 
-            func terminalView(_ view: TerminalView, didInput input: TerminalInput) {}
+            func terminalView(_ view: TerminalView, didInput input: TerminalInput) { inputs += 1 }
             func terminalView(_ view: TerminalView, fitSizeDidChange size: GridSize) { fitSizes.append(size) }
             func terminalView(_ view: TerminalView, didScrollBack scrolledBack: Bool) {}
             func terminalView(_ view: TerminalView, keyboardVisible visible: Bool) {}
@@ -47,6 +48,19 @@
             view.deleteBackward()
             #expect(view.markedText == "a")
             #expect(view.markedSelection == NSRange(location: 1, length: 0))
+        }
+
+        /// 组字到一半换了会话：组字中的文字丢掉，之后输入法再交出来也不发给新的会话。
+        @Test func switchingSessionsDiscardsTheComposition() {
+            let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 402, height: 680))
+            let recorder = Recorder()
+            view.delegate = recorder
+            view.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0))
+            view.terminalDidReset(nil, settings: .default)
+            #expect(view.markedText.isEmpty)
+            #expect(view.markedTextRange == nil)
+            view.unmarkText()
+            #expect(recorder.inputs == 0)
         }
     }
 #endif

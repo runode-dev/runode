@@ -115,6 +115,16 @@
             positionMarkedText()
         }
 
+        /// 丢掉组字中的文字，不发出去：它是给原来那个会话打的。告诉系统文字变了，输入法才一起丢掉它那份组字。
+        func discardMarkedText() {
+            guard !markedText.isEmpty else { return }
+            inputDelegate?.textWillChange(self)
+            markedText = ""
+            markedSelection = NSRange(location: 0, length: 0)
+            inputDelegate?.textDidChange(self)
+            positionMarkedText()
+        }
+
         public func unmarkText() {
             guard !markedText.isEmpty else { return }
             let text = markedText

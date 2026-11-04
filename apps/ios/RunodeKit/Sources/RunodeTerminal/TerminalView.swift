@@ -246,8 +246,9 @@
         /// 换一份 VT（重新 `Attach` 后新建的），整屏重画。
         public func terminalDidReset(_ terminal: VTerminal?, settings: TermSettings) {
             stopMomentum()
-            // 按住的键是给原来那份 VT 的：视图换了会话或者重新连上时不接着连发。
+            // 按住的键、组字中的文字是给原来那份 VT 的：视图换了会话或者重新连上时不接着连发、不上屏。
             stopRepeating()
+            discardMarkedText()
             self.terminal = terminal
             grid.imageSource = { [weak terminal] id, generation in terminal?.image(id: id, generation: generation) }
             aboveGrid.imageSource = grid.imageSource
