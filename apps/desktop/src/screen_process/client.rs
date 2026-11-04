@@ -167,7 +167,9 @@ fn screen_exe() -> io::Result<PathBuf> {
 }
 
 /// `from` 比 `to` 新或者大小不同时，把它复制成 `to`：先写临时文件再改名换上，在跑的旧采集进程不受影响。
+/// 临时文件每次调用一个：同一个进程里同时有几个观看端连进来时各复制各的，不会把别人写了一半的换上去。
 fn copy_if_changed(from: &Path, to: &Path) -> io::Result<()> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let source = std::fs::metadata(from)?;
     if let Ok(target) = std::fs::metadata(to)
         && target.len() == source.len()
@@ -177,7 +179,8 @@ fn copy_if_changed(from: &Path, to: &Path) -> io::Result<()> {
     }
     let dir = to.parent().ok_or_else(|| io::Error::other("no directory for the screen process"))?;
     std::fs::create_dir_all(dir)?;
-    let part = dir.join(format!(".runode-{}", std::process::id()));
+    let nth = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let part = dir.join(format!(".runode-{}-{nth}", std::process::id()));
     std::fs::copy(from, &part)?;
     std::fs::rename(&part, to).inspect_err(|_| {
         let _ = std::fs::remove_file(&part);
@@ -207,6 +210,32 @@ mod tests {
         let reason = "cannot start remote desktop on this computer: no desktop".into();
         assert_eq!(next(&stream), Some(ScreenHostMsg::stopped(reason, Some(StopCause::NoDesktop))));
         assert_eq!(next(&stream), None);
+    }
+
+    /// 同时复制的几次各用各的临时文件，换上去的都是完整的一份，也不留下临时文件。
+    #[test]
+    fn concurrent_copies_do_not_clobber_each_other() {
+        let dir = std::env::temp_dir().join(format!("rnm-screen-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let from = dir.join("runode");
+        let content = vec![7u8; 4 << 20];
+        std::fs::write(&from, &content).unwrap();
+        let to = dir.join("screen/runode");
+        let copies: Vec<_> = (0..4)
+            .map(|_| {
+                let (from, to) = (from.clone(), to.clone());
+                std::thread::spawn(move || copy_if_changed(&from, &to))
+            })
+            .collect();
+        for copy in copies {
+            copy.join().unwrap().unwrap();
+        }
+        assert_eq!(std::fs::read(&to).unwrap(), content);
+        let left: Vec<_> =
+            std::fs::read_dir(to.parent().unwrap()).unwrap().flatten().map(|entry| entry.file_name()).collect();
+        assert_eq!(left, [std::ffi::OsString::from("runode")]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
