@@ -270,8 +270,12 @@ impl Invocation {
             let binary = words.next().ok_or_else(|| rust_i18n::t!("git.ai_message.empty_command").into_owned())?;
             return Ok(Self { agent: None, env, binary, words: words.collect() });
         }
-        let agent = agents::agent(&recipe.agent)
-            .ok_or_else(|| rust_i18n::t!("git.ai_message.unknown_agent", agent = recipe.agent).into_owned())?;
+        let agent = agents::agent(&recipe.agent).ok_or_else(|| {
+            match agents::REMOVED.iter().find(|(id, _)| *id == recipe.agent) {
+                Some((_, label)) => rust_i18n::t!("git.ai_message.removed_agent", agent = label).into_owned(),
+                None => rust_i18n::t!("git.ai_message.unknown_agent", agent = recipe.agent).into_owned(),
+            }
+        })?;
         let words = split_args(&recipe.args)?;
         Ok(Self { agent: Some(agent), env: Vec::new(), binary: agent.cli.binary.to_owned(), words })
     }
@@ -534,6 +538,18 @@ mod tests {
         assert_eq!(clean("\r\n  fix: x\r\n\r\nbody  \n"), "fix: x\n\nbody");
         assert_eq!(clean("<think>hmm</think>\nfix: x"), "fix: x");
         assert_eq!(clean("```text\nfix: x\n```"), "fix: x");
+    }
+
+    #[test]
+    fn explains_why_a_removed_agent_is_gone() {
+        let removed = Recipe { agent: "kimi".into(), ..Recipe::default() };
+        let err = command_preview(&removed).unwrap_err();
+        assert!(err.starts_with("Kimi "), "{err}");
+        let unknown = Recipe { agent: "nobody".into(), ..Recipe::default() };
+        assert!(command_preview(&unknown).unwrap_err().contains("nobody"));
+        for (id, _) in agents::REMOVED {
+            assert!(agents::agent(id).is_none(), "{id} is still built in");
+        }
     }
 
     #[test]

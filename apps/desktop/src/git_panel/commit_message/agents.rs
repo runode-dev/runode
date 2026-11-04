@@ -22,6 +22,19 @@ pub(crate) const AGENTS: &[AgentSpec] = &[
     AgentSpec { id: "omp", label: "OMP", kind: AgentKind::Omp, cli: &oneshot::OMP },
 ];
 
+/// 关不掉全部工具、不再内置的 agent：存进预设的名字和菜单里的名字。存着它们的预设要能说出为什么不能用。
+pub(crate) const REMOVED: &[(&str, &str)] = &[
+    ("opencode", "OpenCode"),
+    ("opencode2", "OpenCode 2"),
+    ("amp", "Amp"),
+    ("cursor", "Cursor"),
+    ("kimi", "Kimi"),
+    ("muse", "Muse"),
+    ("dsh", "DeepSeek Harness"),
+    ("copilot", "GitHub Copilot"),
+    ("antigravity", "Antigravity"),
+];
+
 /// 选它时不用上面哪一家，跑用户自己写的命令（`Recipe::command`）。
 pub(crate) const CUSTOM_AGENT: &str = "custom";
 

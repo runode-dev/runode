@@ -447,6 +447,7 @@ git:
     via_argv: 提示词放在 <prompt> 处。
     nothing: 没有要提交的改动。
     busy: "仓库正在忙，等当前的 Git 操作做完再试。"
+    removed_agent: "%{agent} 关不掉读文件、跑命令的工具，而提示词里的改动和以前的提交说明可能夹带别人写的指令，所以不再内置。请从 Git 面板菜单里的「生成提交说明」改选别的 agent，或者自己写命令。"
     unknown_agent: "不认识的 agent：%{agent}"
     unclosed_quote: CLI 参数里的引号没有配对。
     missing: "找不到 %{binary} 命令。请先安装，或者确认它在 shell 的 PATH 里。"
