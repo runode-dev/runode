@@ -31,6 +31,9 @@ default_bin_dir() {
     printf '%s' "$HOME/.local/bin"
 }
 bin_dir=${RUNODE_BIN_DIR:-$(default_bin_dir)}
+# 版本号也认带 v 的标签写法（v0.3.0）；下载地址里的标签和包名里的版本号都从去掉 v 的这份拼。
+RUNODE_VERSION=${RUNODE_VERSION:-}
+RUNODE_VERSION=${RUNODE_VERSION#v}
 
 say() { printf '%s\n' "$*"; }
 fail() {
@@ -41,7 +44,7 @@ fail() {
 # 发布页的下载地址：给了版本时是那个版本，否则是最新版。
 download_base() {
     if [ -n "${RUNODE_VERSION:-}" ]; then
-        printf 'https://github.com/%s/releases/download/v%s' "$repo" "${RUNODE_VERSION#v}"
+        printf 'https://github.com/%s/releases/download/v%s' "$repo" "$RUNODE_VERSION"
     else
         printf 'https://github.com/%s/releases/latest/download' "$repo"
     fi
