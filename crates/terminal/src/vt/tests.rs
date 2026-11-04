@@ -260,6 +260,21 @@ fn replay_keeps_soft_wraps_and_pending_wrap() {
     assert_eq!((b.cursor_x().unwrap(), b.cursor_y().unwrap()), (1, 3));
 }
 
+/// 左右边距（DECLRMM、DECSLRM）里写到右边距上、等着折行时，重放出的光标也等着，接着写的字折到
+/// 下一行的左边距上，不盖掉右边距那一格。
+#[test]
+fn replay_keeps_pending_wrap_at_the_right_margin() {
+    let mut a = new_terminal(size(10, 4)).unwrap();
+    a.vt_write(b"\x1b[?69h\x1b[3;6s\x1b[1;3HABCD");
+    assert!(a.is_cursor_pending_wrap().unwrap());
+    let mut b = replayed(&a);
+    assert!(b.is_cursor_pending_wrap().unwrap());
+    a.vt_write(b"X");
+    b.vt_write(b"X");
+    assert_eq!(screen_lines(&a, 0, 3).unwrap(), screen_lines(&b, 0, 3).unwrap());
+    assert_eq!((b.cursor_x().unwrap(), b.cursor_y().unwrap()), (3, 1));
+}
+
 #[test]
 fn replay_keeps_modes_title_palette_and_keyboard() {
     let mut a = new_terminal(size(20, 4)).unwrap();
