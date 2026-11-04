@@ -286,6 +286,10 @@ impl Menu {
         let highlighted = if keyboard { next_selectable(items, None, true) } else { None };
         self.highlighted = Some(ix);
         self.submenu = Some(Submenu { parent: ix, highlighted });
+        // 子菜单共用一个滚动位置：上一个子菜单滚下去过时，键盘选中的第一项可能在看不见的地方。
+        if let Some(first) = highlighted {
+            self.submenu_scroll.scroll_to_item(first);
+        }
     }
 
     /// 选中往下（`down`）或往上数的下一个能选的项，到头了绕回来。
@@ -654,6 +658,10 @@ pub trait MenuHost: Sized + 'static {
                     let items = menu.submenu_items(parent).unwrap_or_default();
                     let next = next_selectable(items, highlighted, key == "down");
                     menu.submenu = Some(Submenu { parent, highlighted: next });
+                    // 子菜单高过窗口时滚着看：选中的项要滚进来，不然回车按的是看不见的那一项。
+                    if let Some(ix) = next {
+                        menu.submenu_scroll.scroll_to_item(ix);
+                    }
                     cx.notify();
                 }
                 "enter" => {
