@@ -10,7 +10,11 @@ use std::{
     io::{BufReader, BufWriter, Read, Write},
     net::{Shutdown, SocketAddr},
     process::Child,
-    sync::{Arc, Condvar, Mutex, PoisonError, atomic::Ordering, mpsc},
+    sync::{
+        Arc, Condvar, Mutex, PoisonError,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc,
+    },
     thread,
     time::Duration,
 };
@@ -112,6 +116,48 @@ impl Backlog {
     }
 }
 
+/// UDP 上拼好、交出线程还没取走的帧最多这么多：交出线程解码跟不上时再来的帧丢掉，等它追上了从下一个关键帧
+/// 接着放，不在这里越排越久。UDP 的收包线程不能停下等，停了就收不到补片、丢更多包。
+const MAX_DATAGRAM_BACKLOG: usize = 4;
+
+/// UDP 上拼好、交出线程还没取走的帧数，和排满以后丢过帧没有。
+#[derive(Default)]
+struct DatagramBacklog {
+    queued: AtomicUsize,
+    /// 排满丢了帧、已经告诉过交出线程，到它取空为止不再告诉。
+    dropped: AtomicBool,
+}
+
+impl DatagramBacklog {
+    /// 收包线程拼好了 `event`，返回要排进交出线程的；排满时丢掉这一帧，这一轮丢的第一帧换成
+    /// `Arrival::Overflowed`。
+    fn offer(&self, event: datagram::Event) -> Option<Arrival> {
+        if !matches!(event, datagram::Event::Frame(_)) {
+            return Some(Arrival::Datagram(event));
+        }
+        let admitted = self
+            .queued
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
+                (queued < MAX_DATAGRAM_BACKLOG).then_some(queued + 1)
+            })
+            .is_ok();
+        if admitted {
+            Some(Arrival::Datagram(event))
+        } else if self.dropped.swap(true, Ordering::AcqRel) {
+            None
+        } else {
+            Some(Arrival::Overflowed)
+        }
+    }
+
+    /// 交出线程取走了一帧；取空了，再排满时重新告诉它。
+    fn taken(&self) {
+        if self.queued.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.dropped.store(false, Ordering::Release);
+        }
+    }
+}
+
 /// ssh 的 stderr 留下最后这么多字节。
 const STDERR_KEEP: usize = 2048;
 /// 断开时给人看的 stderr 最多这么多行。
@@ -196,6 +242,8 @@ impl Stderr {
 enum Arrival {
     Stream(Frame),
     Datagram(datagram::Event),
+    /// UDP 上来的帧排满了，丢了帧（`DatagramBacklog`）。
+    Overflowed,
     Closed,
 }
 
@@ -307,6 +355,7 @@ pub fn open(
                 name: dispatch_name,
                 sender: dispatch_sender,
                 arrivals: udp_arrivals,
+                datagrams: Arc::default(),
                 stats: dispatch_stats,
                 backlog: dispatch_backlog,
                 stderr,
@@ -345,6 +394,7 @@ struct Dispatch {
     sender: ScreenSender,
     /// UDP 上来的也排进同一个队列。
     arrivals: mpsc::Sender<Arrival>,
+    datagrams: Arc<DatagramBacklog>,
     stats: Arc<Mutex<Option<Arc<datagram::Stats>>>>,
     backlog: Arc<Backlog>,
     /// 走 ssh 时它的 stderr。
@@ -380,9 +430,13 @@ impl Dispatch {
         let mut receiving: Option<datagram::Receiving> = None;
         let mut udp = Udp::Waiting;
         let mut heard = false;
+        // UDP 上来的帧丢过，解码器要从关键帧重新开始，之前的帧不交出去。
+        let mut skipping = false;
         for arrival in arrived {
-            if matches!(arrival, Arrival::Stream(_)) {
-                self.backlog.taken();
+            match arrival {
+                Arrival::Stream(_) => self.backlog.taken(),
+                Arrival::Datagram(datagram::Event::Frame(_)) => self.datagrams.taken(),
+                _ => {}
             }
             let event = match arrival {
                 Arrival::Closed => break,
@@ -428,19 +482,29 @@ impl Dispatch {
                     },
                     _ => continue,
                 },
-                Arrival::Datagram(_) if udp == Udp::Closed => continue,
+                Arrival::Datagram(_) | Arrival::Overflowed if udp == Udp::Closed => continue,
                 Arrival::Datagram(datagram::Event::Frame(payload)) => {
                     if udp == Udp::Waiting {
                         tracing::info!("the remote desktop of {} comes over datagrams", self.name);
                         udp = Udp::Active;
                     }
                     match decode_video(&payload) {
-                        Some(video) => ScreenEvent::Video(video),
+                        Some(video) if skipping && !video.keyframe => continue,
+                        Some(video) => {
+                            skipping = false;
+                            ScreenEvent::Video(video)
+                        }
                         None => {
                             tracing::warn!("bad video datagram from {}", self.name);
                             continue;
                         }
                     }
+                }
+                Arrival::Overflowed => {
+                    tracing::debug!("the remote desktop of {} decodes slower than it sends", self.name);
+                    skipping = true;
+                    self.sender.send(ScreenClientMsg::Keyframe);
+                    continue;
                 }
                 Arrival::Datagram(datagram::Event::Gap) => {
                     self.sender.send(ScreenClientMsg::Keyframe);
@@ -468,8 +532,11 @@ impl Dispatch {
     ) -> Option<datagram::Receiving> {
         let candidates = addrs.iter().map(|&addr| SocketAddr::new(addr, port)).collect();
         let arrivals = self.arrivals.clone();
+        let datagrams = self.datagrams.clone();
         match receiver.start(candidates, move |event| {
-            let _ = arrivals.send(Arrival::Datagram(event));
+            if let Some(arrival) = datagrams.offer(event) {
+                let _ = arrivals.send(arrival);
+            }
         }) {
             Ok(receiving) => {
                 *self.stats.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiving.stats());
@@ -529,6 +596,29 @@ mod tests {
         tail.push("找".repeat(STDERR_KEEP).as_bytes());
         tail.push("\n找不到 runode\n".as_bytes());
         assert_eq!(tail.text().as_deref(), Some("找不到 runode"));
+    }
+
+    /// UDP 上来的帧排满以后丢掉，这一轮只告诉一次；交出线程取空以后再排满时再告诉。
+    #[test]
+    fn datagram_frames_beyond_the_backlog_are_dropped() {
+        let backlog = DatagramBacklog::default();
+        let frame = || datagram::Event::Frame(Vec::new());
+        for _ in 0..MAX_DATAGRAM_BACKLOG {
+            assert!(matches!(backlog.offer(frame()), Some(Arrival::Datagram(_))));
+        }
+        assert!(matches!(backlog.offer(frame()), Some(Arrival::Overflowed)));
+        assert!(backlog.offer(frame()).is_none());
+        assert!(matches!(backlog.offer(datagram::Event::Gap), Some(Arrival::Datagram(datagram::Event::Gap))));
+        backlog.taken();
+        assert!(matches!(backlog.offer(frame()), Some(Arrival::Datagram(_))));
+        assert!(backlog.offer(frame()).is_none(), "还没取空");
+        for _ in 0..MAX_DATAGRAM_BACKLOG {
+            backlog.taken();
+        }
+        for _ in 0..MAX_DATAGRAM_BACKLOG {
+            assert!(matches!(backlog.offer(frame()), Some(Arrival::Datagram(_))));
+        }
+        assert!(matches!(backlog.offer(frame()), Some(Arrival::Overflowed)));
     }
 
     #[test]
