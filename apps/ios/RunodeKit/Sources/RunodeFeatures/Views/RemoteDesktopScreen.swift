@@ -216,7 +216,7 @@
     private struct RestingKeyBar: UIViewRepresentable {
         let model: ScreenModel
         let mods: ScreenMods
-        let showKeyboard: () -> Void
+        let showKeyboard: @MainActor () -> Void
 
         func makeUIView(context: Context) -> ScreenKeyBar {
             ScreenKeyBar(model: model, resting: true, onKeyboard: showKeyboard)
@@ -540,7 +540,7 @@
         private let model: ScreenModel
         private var modButtons: [(UIButton, WritableKeyPath<ScreenMods, Bool>)] = []
 
-        init(model: ScreenModel, resting: Bool, onKeyboard: @escaping () -> Void) {
+        init(model: ScreenModel, resting: Bool, onKeyboard: @escaping @MainActor () -> Void) {
             self.model = model
             super.init(resting: resting)
             let keyboard = key(
