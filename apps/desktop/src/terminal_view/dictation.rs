@@ -131,8 +131,16 @@ impl TerminalView {
         self.dictation = Some(Dictation::Transcribing { _task: task });
     }
 
-    pub(super) fn dictation_key_up(&mut self, _: &KeyUpEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.dictation_released(window, cx);
+    /// 松开的是 `Dictate` 的快捷键最后那个键时算松开了快捷键；别的键（打字时还没松开的上一个键）不算。
+    pub(super) fn dictation_key_up(&mut self, event: &KeyUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.dictation, Some(Dictation::Recording { held: true, .. })) {
+            return;
+        }
+        let key = &event.keystroke.key;
+        let bindings = window.bindings_for_action(&Dictate);
+        if bindings.iter().any(|binding| binding.keystrokes().last().is_some_and(|stroke| stroke.key() == key)) {
+            self.dictation_released(window, cx);
+        }
     }
 
     pub(super) fn dictation_modifiers_changed(
