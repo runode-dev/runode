@@ -211,25 +211,24 @@ impl Latest {
         }
     }
 
-    /// 在编码的队列上把最新的一张编掉，编的时候又来了就接着编，直到没有新的。
+    /// 在编码的队列上把最新的一张编掉。编完排到队尾再看有没有新的，不在这里接着编：编码器忙时一张要编
+    /// 几十毫秒，画面一直在动就一直有新的，排在队列上的要关键帧（`Keyframes::request`）、补清楚要等到画面停下。
     fn drain(self: &Arc<Self>) {
-        loop {
-            let next = self.pending.lock().unwrap_or_else(PoisonError::into_inner).take();
-            match next {
-                Some((image, pts)) => {
-                    if !self.stopped.load(Ordering::Relaxed) {
-                        self.encode(image, pts);
-                    }
-                }
-                None => {
-                    self.draining.store(false, Ordering::Release);
-                    // 放下标志之前刚到的那张没人叫来编，这里接着编；别人已经又叫了就交给它。
-                    let more = self.pending.lock().unwrap_or_else(PoisonError::into_inner).is_some();
-                    if !more || self.draining.swap(true, Ordering::AcqRel) {
-                        return;
-                    }
-                }
+        let next = self.pending.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some((image, pts)) = next {
+            if !self.stopped.load(Ordering::Relaxed) {
+                self.encode(image, pts);
             }
+            let latest = self.clone();
+            self.queue.exec_async(move || latest.drain());
+            return;
+        }
+        self.draining.store(false, Ordering::Release);
+        // 放下标志之前刚到的那张没人叫来编，这里接着编；别人已经又叫了就交给它。
+        let more = self.pending.lock().unwrap_or_else(PoisonError::into_inner).is_some();
+        if more && !self.draining.swap(true, Ordering::AcqRel) {
+            let latest = self.clone();
+            self.queue.exec_async(move || latest.drain());
         }
     }
 
