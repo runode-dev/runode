@@ -155,6 +155,34 @@ enum Dropdown {
     Resolution,
 }
 
+/// 发给远端的一次换分辨率：屏幕、要换成的（为空时换回远端原来的）、发之前 `ScreenViewer::modes` 里它的值。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ModeRequest {
+    display: u32,
+    requested: Option<ScreenMode>,
+    previous: Option<ScreenMode>,
+}
+
+/// 远端换不了 `requests` 最前面那个请求要的分辨率：`modes` 里那块屏幕还是它要的时换回它之前的，重连时不再
+/// 拿换不了的去换；之后又选了别的时留着后选的，排在后面、以它为之前的值的请求改成以它之前的为准。
+fn mode_failed(modes: &mut HashMap<u32, ScreenMode>, requests: &mut VecDeque<ModeRequest>) {
+    let Some(&ModeRequest { display, requested, previous }) = requests.front() else {
+        return;
+    };
+    if modes.get(&display).copied() == requested {
+        match previous {
+            Some(previous) => modes.insert(display, previous),
+            None => modes.remove(&display),
+        };
+        return;
+    }
+    for later in requests.iter_mut().skip(1) {
+        if later.display == display && later.previous == requested {
+            later.previous = previous;
+        }
+    }
+}
+
 /// 换不了分辨率的提示显示这么久。
 const MODE_ERROR_TIMEOUT: Duration = Duration::from_secs(6);
 /// 用记住的密码自动解锁以后这么久还锁着，就当密码不对，请用户重新输入。
@@ -233,9 +261,9 @@ pub struct ScreenViewer {
     menu_for: Dropdown,
     /// 选过的分辨率，按屏幕记；重连上以后照着再换一次。
     modes: HashMap<u32, ScreenMode>,
-    /// 发出去、远端还没回 `Displays` 的换分辨率请求：屏幕和请求之前 `modes` 里它的值，换不了（`ModeFailed`）时
-    /// 换回这个值，重连时不再拿换不了的去换。远端按顺序回，每个请求先回可能的 `ModeFailed`、再回 `Displays`。
-    mode_requests: VecDeque<(u32, Option<ScreenMode>)>,
+    /// 发出去、远端还没回 `Displays` 的换分辨率请求（`ModeRequest`）。远端按顺序回，每个请求先回可能的
+    /// `ModeFailed`、再回 `Displays`。
+    mode_requests: VecDeque<ModeRequest>,
     /// 远端说换不了分辨率的原因，显示一阵（`MODE_ERROR_TIMEOUT`）。
     mode_error: Option<String>,
     mode_error_timer: Option<Task<()>>,
@@ -626,11 +654,7 @@ impl ScreenViewer {
             }
             UiEvent::Message(ScreenHostMsg::ModeFailed { reason }) => {
                 tracing::info!("the remote desktop of {:?} cannot change its resolution: {reason}", self.host);
-                match self.mode_requests.front().copied() {
-                    Some((display, Some(previous))) => self.modes.insert(display, previous),
-                    Some((display, None)) => self.modes.remove(&display),
-                    None => None,
-                };
+                mode_failed(&mut self.modes, &mut self.mode_requests);
                 self.mode_error = Some(reason);
                 self.mode_error_timer = Some(cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(MODE_ERROR_TIMEOUT).await;
@@ -997,7 +1021,7 @@ impl ScreenViewer {
             Some(mode) => self.modes.insert(display, mode),
             None => self.modes.remove(&display),
         };
-        self.mode_requests.push_back((display, previous));
+        self.mode_requests.push_back(ModeRequest { display, requested: mode, previous });
         self.mode_error = None;
         self.send(ScreenClientMsg::SetMode { display, mode });
         cx.notify();
@@ -1015,7 +1039,7 @@ impl ScreenViewer {
             .map(|(id, mode)| (*id, *mode))
             .collect();
         for (display, mode) in &pending {
-            self.mode_requests.push_back((*display, None));
+            self.mode_requests.push_back(ModeRequest { display: *display, requested: Some(*mode), previous: None });
             self.send(ScreenClientMsg::SetMode { display: *display, mode: Some(*mode) });
         }
         !pending.is_empty()
@@ -1813,6 +1837,23 @@ async fn wait_for_host(host: &HostId, executor: &gpui::BackgroundExecutor) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 先后选了 A、B，A 换不了：留着后选的 B；B 也换不了时换回选 A 之前的，不回到换不了的 A。
+    #[test]
+    fn a_failed_mode_does_not_overwrite_a_newer_choice() {
+        let mode = |width| ScreenMode { width, height: 1, pixel_width: width, pixel_height: 1 };
+        let (a, b, original) = (mode(1), mode(2), mode(3));
+        let mut modes = HashMap::from([(1, b)]);
+        let mut requests = VecDeque::from([
+            ModeRequest { display: 1, requested: Some(a), previous: Some(original) },
+            ModeRequest { display: 1, requested: Some(b), previous: Some(a) },
+        ]);
+        mode_failed(&mut modes, &mut requests);
+        assert_eq!(modes.get(&1), Some(&b));
+        requests.pop_front();
+        mode_failed(&mut modes, &mut requests);
+        assert_eq!(modes.get(&1), Some(&original));
+    }
 
     #[test]
     fn the_given_cause_wins() {
