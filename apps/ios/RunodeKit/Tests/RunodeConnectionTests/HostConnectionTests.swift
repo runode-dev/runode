@@ -74,7 +74,7 @@ import Testing
             knows ? FakeHost.welcome.replacingOccurrences(of: "}", with: #","shells":true}"#) : FakeHost.welcome
         _ = try await admit(&host, welcome: welcome)
         _ = try #require(await waitReady(&events))
-        link.send(.findCommands(req: 1, programs: ["claude"]))
+        link.send(.findCommands(req: 1, path: nil, programs: ["claude"]))
         link.send(.listSessions)
         let first = try await host.readControl()?["type"] as? String
         #expect(first == (knows ? "find_commands" : "list_sessions"))

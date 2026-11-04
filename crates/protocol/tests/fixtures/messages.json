@@ -1029,6 +1029,14 @@
       "req": 6,
       "type": "find_commands"
     },
+    "find_commands_path": {
+      "path": "/Users/ethan/.local/bin:/usr/bin",
+      "programs": [
+        "claude"
+      ],
+      "req": 6,
+      "type": "find_commands"
+    },
     "focus": {
       "focused": true,
       "id": "0123456789abcdef0011223344556677",
@@ -1367,6 +1375,27 @@
         "pid": null,
         "prompt_cwd": null,
         "title": null
+      },
+      "type": "meta"
+    },
+    "meta_shell": {
+      "id": "0123456789abcdef0011223344556677",
+      "meta": {
+        "agent": null,
+        "cwd": null,
+        "driver": null,
+        "fallback_title": null,
+        "foreground": null,
+        "foreground_is_shell": false,
+        "pid": null,
+        "prompt_cwd": null,
+        "title": null
+      },
+      "shell": {
+        "names": {
+          "functions": []
+        },
+        "path": "/Users/ethan/.local/bin:/usr/bin"
       },
       "type": "meta"
     },

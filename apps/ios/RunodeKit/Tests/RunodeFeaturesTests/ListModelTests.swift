@@ -137,7 +137,7 @@ import Testing
     @Test func findsTheInstalledAgentsOnConnect() throws {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
-        guard case .findCommands(let req, let programs)? = link.sent.last else {
+        guard case .findCommands(let req, nil, let programs)? = link.sent.last else {
             Issue.record("expected find_commands, got \(link.sent)")
             return
         }
@@ -150,6 +150,32 @@ import Testing
         #expect(model.agents.map(\.command) == ["claude"])
         model.handle(.state(.idle))
         #expect(model.agents.map(\.command) == ["claude"])
+    }
+
+    /// 会话里 shell 报告了 PATH 就按它重新找：宿主新起的 shell 拿到的 PATH 常常没有装 agent 的目录。PATH 没变时
+    /// 不重找，报告 PATH 的会话没了时换下一个会话的。
+    @Test func findsAgentsOnThePathTheShellsReport() {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
+        link.clearSent()
+        func searched() -> [String?] {
+            link.sent.compactMap {
+                if case .findCommands(_, let path, _) = $0 { path } else { nil }
+            }
+        }
+        let attached = HostMsg.Attached(
+            id: sessionB, channel: 1, size: smallGrid, mode: .metaOnly, meta: SessionMeta(title: "b"), settings: nil,
+            shell: ShellReport(path: "/b/bin"))
+        model.handle(.message(.attached(attached)))
+        #expect(searched() == ["/b/bin"])
+        model.handle(.message(.meta(id: sessionB, meta: SessionMeta(title: "b"), shell: ShellReport(path: "/b/bin"))))
+        model.handle(.message(.meta(id: sessionB, meta: SessionMeta(title: "b2"))))
+        #expect(searched() == ["/b/bin"])
+        model.handle(.message(.meta(id: sessionA, meta: SessionMeta(title: "a"), shell: ShellReport(path: "/a/bin"))))
+        #expect(searched() == ["/b/bin", "/a/bin"])
+        model.handle(.message(.sessionList([info(sessionB, title: "b")])))
+        #expect(searched() == ["/b/bin", "/a/bin", "/b/bin"])
     }
 
     /// 新开 agent：和新开终端一样开标签，开好后在新终端里打它的命令、回车。

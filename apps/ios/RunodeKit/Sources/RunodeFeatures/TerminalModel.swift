@@ -484,7 +484,7 @@ public final class TerminalModel {
             background = newSettings.background
             terminal.applyTheme(newSettings)
             display?.terminalSettingsDidChange(newSettings)
-        case .meta(_, let meta):
+        case .meta(_, let meta, _):
             if let title = meta.displayTitle { self.title = title }
             agent = meta.agent
         case .resync:

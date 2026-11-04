@@ -209,6 +209,14 @@ fn samples() -> BTreeMap<&'static str, Value> {
             ClientMsg::FindCommands { req: 6, path: None, programs: vec!["claude".into(), "codex".into()] },
         ),
         (
+            "find_commands_path",
+            ClientMsg::FindCommands {
+                req: 6,
+                path: Some("/Users/ethan/.local/bin:/usr/bin".into()),
+                programs: vec!["claude".into()],
+            },
+        ),
+        (
             "spawn",
             ClientMsg::Spawn {
                 req: 3,
@@ -312,6 +320,17 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ("resized", HostMsg::Resized { id: ID, size: size() }),
         ("theme_applied", HostMsg::ThemeApplied { id: ID, settings: custom_settings() }),
         ("meta", HostMsg::Meta { id: ID, meta: SessionMeta::default(), shell: None }),
+        (
+            "meta_shell",
+            HostMsg::Meta {
+                id: ID,
+                meta: SessionMeta::default(),
+                shell: Some(ShellReport {
+                    path: Some("/Users/ethan/.local/bin:/usr/bin".into()),
+                    ..Default::default()
+                }),
+            },
+        ),
         (
             "command_finished",
             HostMsg::CommandFinished {

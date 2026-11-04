@@ -78,9 +78,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 列电脑上一个目录（绝对路径）里能跑的命令（Makefile 的目标、package.json 的 scripts），宿主回
     /// `Tasks`，出错时回 `Error`。
     case listTasks(req: UInt32, dir: String)
-    /// 在电脑上按新起的 shell 会拿到的 PATH 找 `programs` 这几个命令（个数不超过宿主的 `runode_protocol::MAX_FIND_COMMANDS`），
+    /// 在电脑上按 `path`（为空时按新起的 shell 会拿到的 PATH）找 `programs` 这几个命令（个数不超过宿主的 `runode_protocol::MAX_FIND_COMMANDS`），
     /// 宿主回 `Commands`。只发给在 `Welcome` 里说认得它的宿主。
-    case findCommands(req: UInt32, programs: [String])
+    case findCommands(req: UInt32, path: String?, programs: [String])
     /// 新开一个会话；宿主回 `Spawned`，开好的会话要另外 `Attach`。
     case spawn(req: UInt32, size: GridSize, cwd: String?, integration: IntegrationMode, start: Bool)
     /// 连上会话。`size` 为空时不改会话的尺寸，也不算一次交互（见宿主的尺寸归属）。
@@ -167,10 +167,10 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode("list_tasks", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
             try c.encode(dir, forKey: Key("dir"))
-        case let .findCommands(req, programs):
+        case let .findCommands(req, path, programs):
             try c.encode("find_commands", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
-            try c.encodeNil(forKey: Key("path"))
+            try c.encode(path, forKey: Key("path"))
             try c.encode(programs, forKey: Key("programs"))
         case let .spawn(req, size, cwd, integration, start):
             try c.encode("spawn", forKey: Key("type"))
@@ -303,6 +303,22 @@ public enum GoodbyeReason: Hashable, Sendable, Decodable {
     }
 }
 
+/// shell 集成报告的东西，手机只读 shell 自己的 PATH。宿主在 PATH 不是合法 UTF-8 时写成一串字节，那时为空。
+public struct ShellReport: Hashable, Sendable, Decodable {
+    public var path: String?
+
+    public init(path: String?) {
+        self.path = path
+    }
+
+    private enum CodingKeys: String, CodingKey { case path }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try? c.decodeIfPresent(String.self, forKey: .path)
+    }
+}
+
 /// 宿主发给前端的消息，和宿主的 `HostMsg` 一一对应。不认识的种类读成 `unknown`（和宿主的
 /// `#[serde(other)]` 一样），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的
 /// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只读 `keep_awake` 和 `shells`。
@@ -322,7 +338,8 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     case snapshotEnd(id: SessionId)
     case resized(id: SessionId, size: GridSize)
     case themeApplied(id: SessionId, settings: TermSettings)
-    case meta(id: SessionId, meta: SessionMeta)
+    /// `shell` 是 shell 集成报告的东西变了时带的新一份，为空是没变。
+    case meta(id: SessionId, meta: SessionMeta, shell: ShellReport? = nil)
     case commandFinished(id: SessionId)
     case resync(id: SessionId, reason: String)
     case exited(id: SessionId, status: Int32?)
@@ -369,10 +386,12 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         public var meta: SessionMeta
         /// 宿主那份 VT 现在套着的主题；VT 重放时按它和 `size` 新建自己的 VT。
         public var settings: TermSettings?
+        /// shell 集成报告的东西的第一份，之后变了在 `meta` 里带。
+        public var shell: ShellReport?
 
         public init(
             id: SessionId, channel: UInt32, size: GridSize, mode: AttachMode, meta: SessionMeta,
-            settings: TermSettings?
+            settings: TermSettings?, shell: ShellReport? = nil
         ) {
             self.id = id
             self.channel = channel
@@ -380,6 +399,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
             self.mode = mode
             self.meta = meta
             self.settings = settings
+            self.shell = shell
         }
     }
 
@@ -387,7 +407,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     public var sessionId: SessionId? {
         switch self {
         case .attached(let attached): attached.id
-        case .snapshotEnd(let id), .resized(let id, _), .themeApplied(let id, _), .meta(let id, _),
+        case .snapshotEnd(let id), .resized(let id, _), .themeApplied(let id, _), .meta(let id, _, _),
             .commandFinished(let id), .resync(let id, _), .exited(let id, _), .bell(let id),
             .screenText(let id, _, _), .sizeOwner(let id, _, _), .spawned(_, let id), .opened(_, let id):
             id
@@ -399,7 +419,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     private enum Keys: String, CodingKey {
         case type, `protocol`, build, reason, sessions, req, id, channel, size, mode, meta, settings
         case status, text, truncated, ui, message, format, mine, owner, windows, path, dirs, diff, branches
-        case dir, sources, found, shells
+        case dir, sources, found, shells, shell
         case keepAwake = "keep_awake"
     }
 
@@ -428,7 +448,8 @@ public enum HostMsg: Hashable, Sendable, Decodable {
                     size: try c.decode(GridSize.self, forKey: .size),
                     mode: try c.decode(AttachMode.self, forKey: .mode),
                     meta: try c.decode(SessionMeta.self, forKey: .meta),
-                    settings: try c.decodeIfPresent(TermSettings.self, forKey: .settings)))
+                    settings: try c.decodeIfPresent(TermSettings.self, forKey: .settings),
+                    shell: try c.decodeIfPresent(ShellReport.self, forKey: .shell)))
         case "snapshot_end":
             self = .snapshotEnd(id: try c.decode(SessionId.self, forKey: .id))
         case "resized":
@@ -438,7 +459,9 @@ public enum HostMsg: Hashable, Sendable, Decodable {
                 id: try c.decode(SessionId.self, forKey: .id),
                 settings: try c.decode(TermSettings.self, forKey: .settings))
         case "meta":
-            self = .meta(id: try c.decode(SessionId.self, forKey: .id), meta: try c.decode(SessionMeta.self, forKey: .meta))
+            self = .meta(
+                id: try c.decode(SessionId.self, forKey: .id), meta: try c.decode(SessionMeta.self, forKey: .meta),
+                shell: try c.decodeIfPresent(ShellReport.self, forKey: .shell))
         case "command_finished":
             self = .commandFinished(id: try c.decode(SessionId.self, forKey: .id))
         case "resync":

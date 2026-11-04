@@ -72,7 +72,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     @Test(arguments: [
         "hello", "list", "layout_request", "open", "open_workspace", "open_workspace_named", "rename_workspace",
         "list_dirs", "list_dirs_home",
-        "list_tasks", "find_commands", "spawn",
+        "list_tasks", "find_commands", "find_commands_path", "spawn",
         "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
         "read_screen", "read_screen_command", "send_keys", "paste",
         "push_register", "push_unregister", "keep_awake", "unpair",
@@ -95,7 +95,9 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             case "list_dirs": .listDirs(req: 5, path: "/Users/ethan")
             case "list_dirs_home": .listDirs(req: 5, path: nil)
             case "list_tasks": .listTasks(req: 5, dir: "/Users/ethan/dev/中文")
-            case "find_commands": .findCommands(req: 6, programs: ["claude", "codex"])
+            case "find_commands": .findCommands(req: 6, path: nil, programs: ["claude", "codex"])
+            case "find_commands_path":
+                .findCommands(req: 6, path: "/Users/ethan/.local/bin:/usr/bin", programs: ["claude"])
             case "spawn": .spawn(req: 3, size: size, cwd: nil, integration: .detect, start: true)
             case "attach_vt": .attach(id: id, size: nil, mode: .vtReplay)
             case "attach_meta": .attach(id: id, size: nil, mode: .metaOnly)
@@ -152,7 +154,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .listSessions, .layout(req: 0), .open(req: 1, placement: .tab, near: id, cwd: "/tmp", focus: false),
             .openWorkspace(req: 1, dir: "/tmp", focus: false),
             .renameWorkspace(req: 1, window: 1, workspace: 1, name: "a"), .listDirs(req: 1, path: nil),
-            .listTasks(req: 1, dir: "/tmp"), .findCommands(req: 1, programs: ["claude"]),
+            .listTasks(req: 1, dir: "/tmp"), .findCommands(req: 1, path: nil, programs: ["claude"]),
             .spawn(req: 1, size: size, cwd: nil, integration: .detect, start: true),
             .attach(id: id, size: nil, mode: .vtReplay), .detach(id: id), .resize(id: id, size: size),
             .focus(id: id, focused: true), .kill(id: id), .readScreen(id: id, lines: 3),
@@ -198,7 +200,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     /// 宿主发来的各条样例都认得，不会读成 `unknown`：宿主改了消息的类型名时这里先发现。
     @Test(arguments: [
         "welcome", "incompatible", "session_list", "spawned", "attached", "snapshot_end", "resized", "theme_applied",
-        "meta", "command_finished", "resync", "exited", "exited_none", "bell", "opened", "done", "screen_text",
+        "meta", "meta_shell", "command_finished", "resync", "exited", "exited_none", "bell", "opened", "done", "screen_text",
         "layout", "layout_changed", "dirs", "tasks", "commands", "git_status", "git_status_none", "git_diff", "git_branches",
         "error", "error_not_found", "error_backed_up", "error_no_session", "goodbye", "goodbye_handoff", "size_owner",
     ])
@@ -214,6 +216,19 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         let bare = Data(#"{"type":"welcome","protocol":4}"#.utf8)
         #expect(try JSONDecoder().decode(HostMsg.self, from: bare) == .welcome(keepAwake: false, findsCommands: false))
         #expect(try decode("incompatible") == .incompatible(protocol: 5, build: "x", reason: "old"))
+    }
+
+    /// shell 报告的 PATH 第一份在 `Attached` 里，变了在 `Meta` 里带；没变的 `Meta` 不带。
+    @Test func shellReportsCarryThePath() throws {
+        guard case .attached(let attached) = try decode("attached") else {
+            Issue.record("not attached")
+            return
+        }
+        #expect(attached.shell == ShellReport(path: "/usr/bin:/bin"))
+        #expect(
+            try decode("meta_shell")
+                == .meta(id: id, meta: SessionMeta(), shell: ShellReport(path: "/Users/ethan/.local/bin:/usr/bin")))
+        #expect(try decode("meta") == .meta(id: id, meta: SessionMeta(), shell: nil))
     }
 
     @Test func commandsKeepTheirOrder() throws {

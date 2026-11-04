@@ -186,6 +186,10 @@ public final class SessionListModel {
     @ObservationIgnored private var listingDirs: Set<String> = []
     /// 在等回话的找 agent 的请求编号。
     @ObservationIgnored private var pendingAgentSearch: UInt32?
+    /// 上次找 agent 时交给宿主的 PATH；这次连上还没找过时是 `.none`。
+    @ObservationIgnored private var searchedPath: String??
+    /// 各个会话里 shell 报告的 PATH，从只看状态的 `Attach` 和之后的 `Meta` 里来。
+    @ObservationIgnored private var shellPaths: [SessionId: String] = [:]
 
     private struct PendingSpawn {
         var req: UInt32
@@ -334,12 +338,32 @@ public final class SessionListModel {
         agent.map { ($0.command, link.nextRequestId(), link.nextRequestId()) }
     }
 
-    /// 问宿主这台电脑上装着哪些 agent，回话到了换掉 `agents`。宿主按新起的 shell 会拿到的 PATH 找。
+    /// 问宿主这台电脑上装着哪些 agent，回话到了换掉 `agents`。按会话里 shell 报告的 PATH 找：宿主新起的
+    /// shell 拿到的 PATH 还没经过用户的 shell 配置，常常没有装 agent 的目录；一个会话都没报告时只能按它找。
     public func findAgents() {
         guard connected else { return }
+        let path = reportedPath
         let req = link.nextRequestId()
         pendingAgentSearch = req
-        link.send(.findCommands(req: req, programs: AgentLauncher.programs))
+        searchedPath = .some(path)
+        link.send(.findCommands(req: req, path: path, programs: AgentLauncher.programs))
+    }
+
+    /// 列表里第一个报告了 PATH 的会话的 PATH。
+    private var reportedPath: String? {
+        sessions.lazy.compactMap { self.shellPaths[$0.id] }.first
+    }
+
+    /// 记下会话 `id` 的 shell 报告；`reportedPath` 因此变了时重新找 agent。
+    private func noteShell(_ shell: ShellReport?, of id: SessionId) {
+        guard let shell else { return }
+        shellPaths[id] = shell.path
+        findAgentsIfPathChanged()
+    }
+
+    private func findAgentsIfPathChanged() {
+        if case .some(let searched) = searchedPath, searched == reportedPath { return }
+        findAgents()
     }
 
     /// 开始新建工作区：从家目录开始选目录。
@@ -634,6 +658,8 @@ public final class SessionListModel {
                 pendingTasks = [:]
                 listingDirs = []
                 pendingAgentSearch = nil
+                searchedPath = nil
+                shellPaths = [:]
                 pendingRenames = []
                 for reply in quickReplies.values {
                     reply.connectionLost()
@@ -679,6 +705,8 @@ public final class SessionListModel {
             loaded = true
             let present = Set(list.map(\.id))
             previews = previews.filter { present.contains($0.key) }
+            shellPaths = shellPaths.filter { present.contains($0.key) }
+            if searchedPath != nil { findAgentsIfPathChanged() }
             for session in list where !screens.contains(session.id) && !watching.contains(session.id) {
                 watching.insert(session.id)
                 link.send(.attach(id: session.id, size: nil, mode: .metaOnly))
@@ -688,11 +716,13 @@ public final class SessionListModel {
             }
         case .attached(let attached):
             update(attached.id) { $0.meta = attached.meta }
+            noteShell(attached.shell, of: attached.id)
             if let settings = attached.settings { setTheme(AppTheme(settings)) }
         case .themeApplied(_, let settings):
             setTheme(AppTheme(settings))
-        case .meta(let id, let meta):
+        case .meta(let id, let meta, let shell):
             update(id) { $0.meta = meta }
+            noteShell(shell, of: id)
             requestPreview(id)
         case .bell(let id):
             requestPreview(id)
