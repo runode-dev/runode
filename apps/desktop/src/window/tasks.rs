@@ -300,7 +300,8 @@ impl WindowView {
 
     /// 按了命令的快捷键（见 `keys`）：这里没绑时交给别的绑定或终端。绑着时现请宿主列一遍终端目录的命令
     /// （菜单没打开过时还没列），找叫这个名字的（项目的键找不是通用的命令，通用的键只找通用命令），像在菜单里
-    /// 点它一样跑；没有或者列不出来时响一声、记日志。列的期间切到了别的 workspace 时不跑。远端的 workspace
+    /// 点它一样跑；没有或者列不出来时响一声、记日志。列的期间切到了别的 workspace、按的时候或列完时有对话框
+    /// 开着（`modal_dialog_open`、看板的 `dialog_open`）时不跑，免得终端开在对话框后面、焦点被换走。远端的 workspace
     /// 没有命令（`list_tasks`），键交给别的绑定或终端：这里列的是本机的命令，跑却跑在远端。
     pub(super) fn run_task_key(&mut self, action: &RunTaskKey, window: &mut Window, cx: &mut Context<Self>) {
         if self.on_remote() {
@@ -313,7 +314,7 @@ impl WindowView {
             return;
         };
         let name = name.to_owned();
-        if !self.leave_todo_page(window, cx) {
+        if self.modal_dialog_open() || !self.leave_todo_page(window, cx) {
             return;
         }
         self.close_settings(window, cx);
@@ -344,6 +345,9 @@ impl WindowView {
                 // 列的期间切到了别的 workspace：命令是按原来那个的目录找的，不在这里跑。
                 Some(_) if this.workspace().id != id => {
                     tracing::info!("not running the task {name:?}: switched workspaces while listing the tasks");
+                }
+                Some(_) if this.modal_dialog_open() || this.dialog_open(cx) => {
+                    tracing::info!("not running the task {name:?}: a dialog opened while listing the tasks");
                 }
                 Some(task) => this.run_task(&task, window, cx),
                 None => {
