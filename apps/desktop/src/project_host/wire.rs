@@ -16,6 +16,14 @@ use super::{
     upload::UploadOp,
 };
 
+/// 一条消息后面最多跟这么多字节，比读文件（`Call::Read` 的上限）、写文件和传文件的一块都大得多。对面说要
+/// 更多时不读、断开：长度是对面写的，不能照着先分配。
+const MAX_BLOB: usize = 256 << 20;
+/// 一行消息最多这么多字节，大仓库列出的全部文件也放得下；更长的不再往下读，报错断开。
+const MAX_LINE: u64 = 256 << 20;
+/// 读消息后面的字节时一开始最多先分配这么多，收到多少再长多少。
+const BLOB_RESERVE: usize = 1 << 20;
+
 /// 桌面要远端办的事。
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum Call {
@@ -214,19 +222,29 @@ pub(super) fn write(out: &mut impl Write, message: &impl Serialize, blob: &[u8])
     out.flush()
 }
 
-/// 读一行消息；连接关了时为 `None`。
+/// 读一行消息；连接关了时为 `None`，比 `MAX_LINE` 长时报 `InvalidData`。
 pub(super) fn read_line<T: for<'de> Deserialize<'de>>(input: &mut impl BufRead) -> io::Result<Option<T>> {
     let mut line = String::new();
-    if input.read_line(&mut line)? == 0 {
+    let read = input.take(MAX_LINE).read_line(&mut line)?;
+    if read == 0 {
         return Ok(None);
+    }
+    if read as u64 == MAX_LINE && !line.ends_with('\n') {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "a message line is too long"));
     }
     serde_json::from_str(&line).map(Some).map_err(io::Error::other)
 }
 
-/// 读消息后面跟着的 `len` 个字节。
+/// 读消息后面跟着的 `len` 个字节；超过 `MAX_BLOB` 时报 `InvalidData`，什么都不读。
 pub(super) fn read_blob(input: &mut impl Read, len: usize) -> io::Result<Vec<u8>> {
-    let mut blob = vec![0; len];
-    input.read_exact(&mut blob)?;
+    if len > MAX_BLOB {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("a message is followed by {len} bytes")));
+    }
+    let mut blob = Vec::with_capacity(len.min(BLOB_RESERVE));
+    input.take(len as u64).read_to_end(&mut blob)?;
+    if blob.len() < len {
+        return Err(io::ErrorKind::UnexpectedEof.into());
+    }
     Ok(blob)
 }
 
@@ -235,6 +253,15 @@ mod tests {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 
     use super::*;
+
+    #[test]
+    fn blobs_are_read_whole_and_capped() {
+        let mut input: &[u8] = b"hello";
+        assert_eq!(read_blob(&mut input, 4).unwrap(), b"hell");
+        assert_eq!(read_blob(&mut input, 4).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+        let mut input: &[u8] = b"";
+        assert_eq!(read_blob(&mut input, usize::MAX).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
 
     #[test]
     fn unsendable_paths_are_dropped_instead_of_failing_the_reply() {
