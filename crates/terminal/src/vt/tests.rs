@@ -426,6 +426,18 @@ fn replay_drops_images_beyond_the_budget() {
     assert_eq!(replay(20), [1, 2]);
     assert_eq!(replay(19).len(), 1);
     assert!(replay(3).is_empty());
+    // RGB 的图片按转成 RGBA 以后的大小算。
+    let mut a = new_terminal(size(20, 4)).unwrap();
+    a.vt_write(b"\x1b_Ga=T,f=24,i=3,s=2,v=2,q=2;/wAAAP8AAAD/////\x1b\\");
+    let replay = |budget| {
+        let mut out = Vec::new();
+        replay_images(&a, budget, &mut out).unwrap();
+        let mut b = new_terminal(size(20, 4)).unwrap();
+        b.vt_write(&out);
+        images(&b).into_iter().map(|image| image.0).collect::<Vec<_>>()
+    };
+    assert_eq!(replay(16), [3]);
+    assert!(replay(15).is_empty());
 }
 
 /// 重放丢掉的东西：快照都带着，快照用不了、只能重放时界面上会看到这些差别。

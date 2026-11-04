@@ -324,12 +324,14 @@ fn replay_images(terminal: &Terminal<'static, '_>, mut budget: usize, out: &mut 
             )
         };
         if !sent.contains(&id) {
-            let Some(rgba) = image_rgba(&image) else { continue };
-            let Some(left) = budget.checked_sub(rgba.len()) else {
+            // 先按尺寸看放不放得下，放不下的不必转成 RGBA。
+            let size = (image.width()? as usize).checked_mul(image.height()? as usize).and_then(|n| n.checked_mul(4));
+            if size.is_none_or(|size| size > budget) {
                 dropped.insert(id);
                 continue;
-            };
-            budget = left;
+            }
+            let Some(rgba) = image_rgba(&image) else { continue };
+            budget -= rgba.len();
             transmit_image(id, image.width()?, image.height()?, &rgba, &mut body);
             sent.insert(id);
         }
