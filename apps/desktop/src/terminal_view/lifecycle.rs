@@ -344,7 +344,7 @@ impl TerminalView {
         let link = self.host_link.clone();
         if self.host.is_local() {
             let spawned = link.spawn(options);
-            self.session_opened(spawned, start, attach);
+            self.session_opened(spawned, start, attach, cx);
             for waiting in self.open_waiting.drain(..) {
                 let _ = waiting.send(self.id);
             }
@@ -372,7 +372,7 @@ impl TerminalView {
                 let Some(opening) = view.opening.take() else {
                     return;
                 };
-                view.session_opened(spawned, start, opening.attach);
+                view.session_opened(spawned, start, opening.attach, cx);
                 for waiting in opening.waiting {
                     let _ = waiting.send(view.id);
                 }
@@ -391,8 +391,14 @@ impl TerminalView {
         self.opening = Some(Opening { start, attach, waiting, claim, _task: task });
     }
 
-    /// `open_session` 等到了宿主的回话。
-    fn session_opened(&mut self, spawned: anyhow::Result<SessionId>, start: bool, attach: Attach) {
+    /// `open_session` 等到了宿主的回话；开成了时发 `TerminalEvent::SessionOpened`。
+    fn session_opened(
+        &mut self,
+        spawned: anyhow::Result<SessionId>,
+        start: bool,
+        attach: Attach,
+        cx: &mut Context<Self>,
+    ) {
         match spawned {
             // `end` 经 `Opening::claim` 结束了它。
             Ok(_) if self.ended => {}
@@ -401,6 +407,7 @@ impl TerminalView {
                 self.id = Some(id);
                 self.started |= start;
                 self.events = Rc::new(RefCell::new(self.host_link.attach(id, attach.size, attach.mode)));
+                cx.emit(TerminalEvent::SessionOpened);
             }
             Err(err) => {
                 tracing::warn!("failed to open the session of a terminal that was put off: {err:#}");

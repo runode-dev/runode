@@ -126,6 +126,8 @@ pub enum TerminalEvent {
     TitleChanged,
     /// 宿主公布的会话状态变了：目录、前台程序，也包括标题和 agent。终端的输出不算。
     MetaChanged,
+    /// 晚开的会话开好了，有了 `session_id`。
+    SessionOpened,
     /// 焦点进入了这个终端（包括它的搜索栏）。
     Focused,
     /// 程序响铃（BEL）。

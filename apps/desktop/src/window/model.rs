@@ -511,6 +511,8 @@ impl WindowView {
             }
             // 侧栏、标签和状态栏是缓存的视图（见 `Slot`），只在窗口通知时重画，不跟着终端的输出。
             TerminalEvent::MetaChanged => cx.notify(),
+            // 存档和报给宿主的布局里按会话记分屏，开好以前记不下它。
+            TerminalEvent::SessionOpened => self.save(cx),
             // 终端拿到焦点时自己露出来，盖着它的文件退到后面，免得打的字进了看不见的 shell。
             TerminalEvent::Focused => {
                 if shown && self.preview_front(cx) {
