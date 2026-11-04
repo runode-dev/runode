@@ -477,6 +477,11 @@ impl Flatten<'_> {
                     images
                         .into_iter()
                         .map(|MdImage { url, alt, width, height, link }| {
+                            // 省了协议的 `//主机/路径` 按 `link_target` 补成 https 的地址去下载。
+                            let url = match link_target(self.dir, &url) {
+                                Some(LinkTarget::Web(web)) if is_remote(&web) => web,
+                                _ => url,
+                            };
                             let remote = is_remote(&url);
                             let picture = if remote { None } else { self.local_picture(&url) };
                             let alt = if alt.is_empty() { url.clone() } else { alt };

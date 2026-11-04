@@ -32,3 +32,14 @@ fn local_links_and_anchors_are_percent_decoded() {
     assert_eq!(link_target(dir, "a%zzb"), Some(LinkTarget::File("/repo/a%zzb".into())));
     assert_eq!(link_target(dir, "%FF"), Some(LinkTarget::File("/repo/%FF".into())));
 }
+
+/// 省了协议的地址按 https 的网页算；两个斜杠或反斜杠开头的本地路径（Windows 上别的机器的共享）不认。
+#[test]
+fn network_paths_are_web_links_or_nothing() {
+    let dir = Path::new("/repo");
+    assert_eq!(link_target(dir, "//x.dev/logo.png"), Some(LinkTarget::Web("https://x.dev/logo.png".into())));
+    assert_eq!(link_target(dir, r"\\host\share\a.png"), None);
+    assert_eq!(link_target(dir, r"/\host\share\a.png"), None);
+    assert_eq!(link_target(dir, "%5C%5Chost/share/a.png"), None);
+    assert_eq!(link_target(dir, "%2F%2Fhost/a.png"), None);
+}

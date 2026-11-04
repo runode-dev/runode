@@ -13,10 +13,15 @@ pub enum LinkTarget {
     Anchor(String),
 }
 
-/// 链接或图片地址 `url` 指向哪儿；`dir` 是 Markdown 文件所在的目录。别的协议为空；本地路径去掉
-/// `#锚点` 和 `?参数` 后做百分号解码，`..`、`.` 按字面消掉（不跟符号链接）。
+/// 链接或图片地址 `url` 指向哪儿；`dir` 是 Markdown 文件所在的目录。别的协议为空；省了协议的
+/// `//主机/路径` 按 https 的网页算。本地路径去掉 `#锚点` 和 `?参数` 后做百分号解码，`..`、`.` 按字面
+/// 消掉（不跟符号链接）；解出来以两个斜杠或反斜杠开头的为空：Windows 上那是别的机器上的共享，
+/// 读它会连过去、交出登录凭据。
 pub fn link_target(dir: &Path, url: &str) -> Option<LinkTarget> {
     let url = url.trim();
+    if url.starts_with("//") {
+        return Some(LinkTarget::Web(format!("https:{url}")));
+    }
     if let Some((scheme, _)) = url.split_once(':')
         && is_scheme(scheme)
     {
@@ -26,8 +31,9 @@ pub fn link_target(dir: &Path, url: &str) -> Option<LinkTarget> {
     if let Some(anchor) = url.strip_prefix('#') {
         return (!anchor.is_empty()).then(|| LinkTarget::Anchor(percent_decode(anchor)));
     }
-    let path = url.split(['#', '?']).next().unwrap_or_default();
-    (!path.is_empty()).then(|| LinkTarget::File(normalize(&dir.join(percent_decode(path)))))
+    let path = percent_decode(url.split(['#', '?']).next().unwrap_or_default());
+    let network = path.len() >= 2 && path.bytes().take(2).all(|b| matches!(b, b'/' | b'\\'));
+    (!path.is_empty() && !network).then(|| LinkTarget::File(normalize(&dir.join(path))))
 }
 
 /// 按字面消掉路径里的 `.` 和 `..`：`..` 去掉前一段，到了根就停在根上。不读磁盘。
