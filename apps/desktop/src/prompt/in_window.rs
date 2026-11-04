@@ -5,9 +5,9 @@
 //! `PromptButton::Cancel` 的那个，没有时不起作用。
 
 use gpui::{
-    App, AppContext as _, Context, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, PromptButton,
-    PromptHandle, PromptLevel, PromptResponse, Render, RenderablePromptHandle, Role, SharedString, Window, div,
-    prelude::*, px,
+    App, AppContext as _, Axis, Context, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent, PromptButton,
+    PromptHandle, PromptLevel, PromptResponse, Render, RenderablePromptHandle, Role, ScrollHandle, SharedString,
+    Window, div, prelude::*, px,
 };
 
 use crate::ui::{
@@ -15,6 +15,7 @@ use crate::ui::{
     button::{Button, ButtonVariant},
     dialog::{Dialog, backdrop, is_dismiss_key},
     font_size::FontSize,
+    scrollbar::scrollbar,
     theme::ActiveTheme as _,
 };
 
@@ -34,6 +35,7 @@ pub(super) fn build(
         detail: detail.map(|detail| detail.to_owned().into()),
         answers: answers.to_vec(),
         focus: cx.focus_handle(),
+        scroll: ScrollHandle::new(),
     });
     handle.with_view(view, window, cx)
 }
@@ -43,6 +45,8 @@ struct InWindowPrompt {
     detail: Option<SharedString>,
     answers: Vec<PromptButton>,
     focus: FocusHandle,
+    /// 详细说明的滚动位置。
+    scroll: ScrollHandle,
 }
 
 impl InWindowPrompt {
@@ -89,22 +93,35 @@ impl Render for InWindowPrompt {
                     .on_press(cx, move |_, _, cx| cx.emit(PromptResponse(ix)))
             })
             .collect();
-        // 详细说明可能分好几段，一行一行画，每行放不下时折行。
+        // 详细说明可能分好几段，一行一行画，每行放不下时折行。长的（命令的输出、出错的原因）窗口里放不下时
+        // 只有这一块缩短、在里面滚，标题和按钮总在框里。
         let detail = self.detail.clone().map(|detail| {
             div()
-                .id("prompt-detail")
-                .aria_static_text(detail.clone())
+                .relative()
                 .flex()
                 .flex_col()
-                .gap(px(2.))
-                .text_color(fg.opacity(0.8))
-                .children(detail.lines().map(|line| div().child(line.to_owned())).collect::<Vec<_>>())
+                .min_h_0()
+                .child(
+                    div()
+                        .id("prompt-detail")
+                        .aria_static_text(detail.clone())
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll)
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .text_color(fg.opacity(0.8))
+                        .children(detail.lines().map(|line| div().child(line.to_owned())).collect::<Vec<_>>()),
+                )
+                .child(scrollbar("prompt-detail-scrollbar", self.scroll.clone(), Axis::Vertical))
         });
         let panel = Dialog::new("prompt-dialog", self.message.clone())
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
             .w(px(420.))
             .max_w_full()
+            .max_h_full()
             .p(px(20.))
             .flex()
             .flex_col()
@@ -115,12 +132,13 @@ impl Render for InWindowPrompt {
                     .role(Role::Heading)
                     .aria_level(1)
                     .aria_label(self.message.clone())
+                    .flex_none()
                     .text_size(FontSize::Title)
                     .font_weight(FontWeight::BOLD)
                     .child(self.message.clone()),
             )
             .children(detail)
-            .child(div().flex().flex_wrap().justify_end().gap(px(8.)).children(buttons));
+            .child(div().flex_none().flex().flex_wrap().justify_end().gap(px(8.)).children(buttons));
         // 点到外面不算答：和别的平台的确认框一样，非得按一个按钮。
         backdrop("prompt-backdrop").child(panel)
     }
