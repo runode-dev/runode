@@ -7,7 +7,7 @@ mod common;
 
 use std::{thread, time::Duration, time::Instant};
 
-use common::{CAT, Peer, WAIT, listen, script, temp_dir};
+use common::{CAT, Peer, WAIT, contains, listen, script, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::{AttachMode, ClientKind, FrameKind};
 use runode_types::{
@@ -31,6 +31,26 @@ fn spawn_attached(peer: &mut Peer, shell: &str) -> (SessionId, u32) {
     (id, channel)
 }
 
+/// 等到回话 `Done { req }`、输出里也出现了 `needle`。宿主先把输入交给会话再回话，程序的输出可能抢在
+/// 回话前面到，所以两样一起等，不先读回话：先读回话会把抢先到的输出跳过去。
+fn wait_done_and_output(peer: &Peer, channel: u32, req: u32, needle: &[u8]) {
+    let mut done = false;
+    peer.wait(channel, |message, output| {
+        match message {
+            Some(HostMsg::Done { req: replied }) if *replied == req => done = true,
+            Some(
+                HostMsg::Meta { .. }
+                | HostMsg::CommandFinished { .. }
+                | HostMsg::Bell { .. }
+                | HostMsg::SizeOwner { .. },
+            )
+            | None => {}
+            Some(other) => panic!("expected done for {req}: {other:?}"),
+        }
+        done && contains(output, needle)
+    });
+}
+
 /// 控制键按宿主 VT 当前的模式编好写给程序：应用光标键开着时方向键是 `ESC O A`。
 #[test]
 fn keys_reach_the_program_encoded_for_its_modes() {
@@ -41,8 +61,7 @@ fn keys_reach_the_program_encoded_for_its_modes() {
     peer.wait_for_output(channel, b"ready");
     let keys = vec!["up".into(), "ctrl-c".into(), "x*2".into(), "enter".into()];
     peer.send(&ClientMsg::SendKeys { req: 1, id, keys });
-    assert!(matches!(peer.reply(), HostMsg::Done { req: 1 }));
-    peer.wait_for_output(channel, b"^[[A^Cxx");
+    wait_done_and_output(&peer, channel, 1, b"^[[A^Cxx");
     // 写错的键：回 `Error`，什么都不写，连接照旧。
     peer.send(&ClientMsg::SendKeys { req: 2, id, keys: vec!["enter".into(), "hyper-x".into()] });
     assert!(matches!(peer.reply(), HostMsg::Error { req: Some(2), id: Some(errored), .. } if errored == id));
@@ -57,8 +76,7 @@ fn keys_reach_the_program_encoded_for_its_modes() {
     // 程序打开应用光标键的序列在 `ready` 之前，宿主的 VT 已经处理过它。
     peer.wait_for_output(channel, b"ready");
     peer.send(&ClientMsg::SendKeys { req: 1, id, keys: vec!["up".into(), "enter".into()] });
-    assert!(matches!(peer.reply(), HostMsg::Done { req: 1 }));
-    peer.wait_for_output(channel, b"^[OA");
+    wait_done_and_output(&peer, channel, 1, b"^[OA");
     peer.send(&ClientMsg::Kill { id });
 }
 
@@ -73,8 +91,7 @@ fn pastes_are_bracketed_when_the_program_asks() {
     peer.send(&ClientMsg::Paste { req: 4, id, text: "pasted".into() });
     assert!(matches!(peer.reply(), HostMsg::Done { req: 4 }));
     peer.send(&ClientMsg::SendKeys { req: 5, id, keys: vec!["enter".into()] });
-    assert!(matches!(peer.reply(), HostMsg::Done { req: 5 }));
-    peer.wait_for_output(channel, b"^[[200~pasted^[[201~");
+    wait_done_and_output(&peer, channel, 5, b"^[[200~pasted^[[201~");
     peer.send(&ClientMsg::Kill { id });
 }
 
