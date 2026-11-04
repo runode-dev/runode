@@ -284,18 +284,25 @@ fn tells_ref_changes_from_other_files() {
         ("logs/HEAD", false),
         ("objects/ab/cdef", false),
     ] {
-        assert_eq!(refs_changed(&git_dir, &git_dir.join(rel)), expected, "{rel}");
+        assert_eq!(refs_changed(&git_dir, &git_dir, &git_dir.join(rel)), expected, "{rel}");
     }
-    assert!(!refs_changed(&git_dir, &repo.path().join("refs/x.txt")), "工作区里叫 refs 的目录不算");
+    assert!(!refs_changed(&git_dir, &git_dir, &repo.path().join("refs/x.txt")), "工作区里叫 refs 的目录不算");
 
     // worktree 自己的 git 目录里只有 HEAD，分支和 tag 在共用的 git 目录里。
     let worktree = repo.path().join("wt");
     repo.git(&["worktree", "add", "-q", "-b", "wt", &worktree.to_string_lossy()]);
-    let wt_dir = runode_git::snapshot(&worktree, &mut Default::default()).unwrap().git_dir;
+    let wt = runode_git::snapshot(&worktree, &mut Default::default()).unwrap();
+    let (wt_dir, common) = (wt.git_dir.clone(), wt.common_git_dir().to_path_buf());
     assert_ne!(wt_dir, git_dir);
-    assert!(refs_changed(&wt_dir, &wt_dir.join("HEAD")));
-    assert!(refs_changed(&wt_dir, &git_dir.join("refs/tags/v2")));
-    assert!(!refs_changed(&wt_dir, &git_dir.join("HEAD")));
+    assert!(refs_changed(&wt_dir, &common, &wt_dir.join("HEAD")));
+    assert!(refs_changed(&wt_dir, &common, &git_dir.join("refs/tags/v2")));
+    assert!(!refs_changed(&wt_dir, &common, &git_dir.join("HEAD")));
+    // 远端主机上的路径这台机器上没有，照样按给的共用 git 目录认。
+    let remote = std::path::Path::new("/nowhere/repo/.git");
+    let remote_wt = remote.join("worktrees/wt");
+    assert!(refs_changed(&remote_wt, remote, &remote.join("refs/heads/main")));
+    assert!(refs_changed(&remote_wt, remote, &remote.join("packed-refs")));
+    assert!(!refs_changed(&remote_wt, remote, &remote.join("HEAD")));
 }
 
 /// 上游的名字不是 UTF-8（只能在 packed-refs 里，macOS 上建不出这样的文件）：照样读得出历史，不因为它整条报错。

@@ -354,7 +354,9 @@ impl PanelState {
     /// `RepoInfo` 看不出别的分支和 tag 的变化；正在读的那次读完也不清掉标记，随后再读一次，读到的可能
     /// 是变化之前的。
     pub fn refs_changed(&mut self, paths: &[PathBuf]) -> bool {
-        self.mark_graphs_stale(|git_dir| paths.iter().any(|path| git::refs_changed(git_dir, path)))
+        self.mark_graphs_stale(|repo| {
+            paths.iter().any(|path| git::refs_changed(&repo.git_dir, repo.common_git_dir(), path))
+        })
     }
 
     /// 监听丢了事件、说不准哪里变了：哪个仓库的引用都可能变过，读过或正在读的图表都标成要重读，返回
@@ -363,8 +365,8 @@ impl PanelState {
         self.mark_graphs_stale(|_| true)
     }
 
-    /// git 目录让 `changed` 为真的仓库，读过或正在读的图表标成要重读，返回标了没有。
-    fn mark_graphs_stale(&mut self, changed: impl Fn(&Path) -> bool) -> bool {
+    /// 让 `changed` 为真的仓库，读过或正在读的图表标成要重读，返回标了没有。
+    fn mark_graphs_stale(&mut self, changed: impl Fn(&git::Snapshot) -> bool) -> bool {
         let Some(git) = self.git.clone() else {
             return false;
         };
@@ -372,7 +374,7 @@ impl PanelState {
         for repo in git.iter() {
             if let Some(repo_state) = self.repos.get_mut(&repo.root)
                 && (repo_state.graph.history.is_some() || repo_state.graph.loading)
-                && changed(&repo.git_dir)
+                && changed(repo)
             {
                 repo_state.graph.stale = true;
                 marked = true;

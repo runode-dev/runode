@@ -250,9 +250,11 @@ fn parse_log(output: &[u8]) -> Vec<Commit> {
 }
 
 /// 监听到变了的 `path`（绝对路径）是不是 git 目录是 `git_dir` 的那个仓库的引用：`HEAD`、`refs/`
-/// 下面的分支和 tag、`packed-refs`。worktree 的分支和 tag 在 `commondir` 指向的共用 git 目录里，
-/// 也算。锁文件不算，写完会改名成正式的文件。图表据此重读，工作区里的文件变了不重读。
-pub fn refs_changed(git_dir: &Path, path: &Path) -> bool {
+/// 下面的分支和 tag、`packed-refs`。链接工作树的分支和 tag 在共用的 git 目录 `common_git_dir`
+/// （`Snapshot::common_git_dir`）里，也算，那里的 `HEAD` 是主工作树的，不算；不是链接工作树时两者相同。
+/// 不读 git 目录里的 `commondir`：仓库可能在远端主机上。锁文件不算，写完会改名成正式的文件。图表据此
+/// 重读，工作区里的文件变了不重读。
+pub fn refs_changed(git_dir: &Path, common_git_dir: &Path, path: &Path) -> bool {
     // 先按名字粗筛，大多数事件用不着去碰文件系统。
     let named = |name: &str| path.file_name().is_some_and(|file| file == name);
     let maybe_ref = named("HEAD") || named("packed-refs") || path.components().any(|part| part.as_os_str() == "refs");
@@ -268,13 +270,7 @@ pub fn refs_changed(git_dir: &Path, path: &Path) -> bool {
             })
         })
     };
-    if under(git_dir, true) {
-        return true;
-    }
-    // `commondir` 一般是 `../..` 这样的相对路径。规范化的路径在 Windows 上带 `\\?\` 前缀，和事件里的
-    // 路径比不上，所以另按字面去掉 `..` 比一次。
-    let common = fs::read_to_string(git_dir.join("commondir")).ok().map(|common| git_dir.join(common.trim()));
-    common.is_some_and(|common| under(&common, false) || under(&without_parent_dirs(&common), false))
+    under(git_dir, true) || (common_git_dir != git_dir && under(common_git_dir, false))
 }
 
 /// 按字面去掉路径里的 `..`（连同它前面的一段），不碰文件系统。
