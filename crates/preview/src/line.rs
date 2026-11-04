@@ -18,9 +18,11 @@ pub struct DisplayLine {
 /// 把 `line` 里的制表符展开成空格，最多留 `max_columns` 列（一个字符算一列），`spans` 的
 /// 字节范围换算到展开后的文字上。
 pub fn display_line(line: &str, spans: &[Span], max_columns: usize) -> DisplayLine {
-    let mut text = String::with_capacity(line.len());
-    // 原文每个字节位置对应到展开后的位置，末尾也有一项。
-    let mut map = Vec::with_capacity(line.len() + 1);
+    // 整行可能有几 MB、每画一次都要换一遍，只按留下的那段（最多 `max_columns` 个字符，一个最多四个字节）留地方。
+    let shown = line.len().min(max_columns.saturating_mul(4));
+    let mut text = String::with_capacity(shown);
+    // 原文每个字节位置对应到展开后的位置，末尾也有一项；只用来换算 `spans`，没有时不建。
+    let mut map = Vec::with_capacity(if spans.is_empty() { 0 } else { shown + 1 });
     let mut columns = 0;
     let mut end = line.len();
     let mut cut = false;
@@ -29,8 +31,9 @@ pub fn display_line(line: &str, spans: &[Span], max_columns: usize) -> DisplayLi
             end = ix;
             break;
         }
-        let at = text.len();
-        map.extend(std::iter::repeat_n(at, ch.len_utf8()));
+        if !spans.is_empty() {
+            map.extend(std::iter::repeat_n(text.len(), ch.len_utf8()));
+        }
         if ch == '\t' {
             // 展开到下一个制表位，最多到上限；没展开完也算截掉了。
             let full = TAB_WIDTH - columns % TAB_WIDTH;
