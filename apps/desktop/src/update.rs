@@ -187,9 +187,7 @@ pub fn install(cx: &mut App) {
         // 这份 app 不能自己更新时后台不查，菜单里点了照样查、给下载页。
         let supported = cx
             .background_executor()
-            .spawn(async {
-                Installation::current().inspect_err(|reason| tracing::debug!("no updates: {reason}")).is_ok()
-            })
+            .spawn(async { installation().inspect_err(|reason| tracing::debug!("no updates: {reason}")).is_ok() })
             .await;
         if !supported {
             return;
@@ -274,6 +272,22 @@ fn check(manual: bool, cx: &mut App) {
     .detach();
 }
 
+/// 在跑的这份 app 能自己更新时的安装；不能时说为什么。
+#[cfg(not(target_os = "linux"))]
+fn installation() -> Result<Installation, String> {
+    Installation::current()
+}
+
+/// 在跑的这份 app 能自己更新时的安装；不能时说为什么。Linux 上只有从 AppImage 跑的能更新。认的是第一次问时
+/// （启动时）的那个文件，之后它被换成别的版本时 `Staged::install` 不覆盖。
+#[cfg(target_os = "linux")]
+fn installation() -> Result<Installation, String> {
+    static FIRST: std::sync::OnceLock<Result<Installation, String>> = std::sync::OnceLock::new();
+    FIRST
+        .get_or_init(|| Installation::appimage(&runode_paths::appimage().ok_or("not running from an AppImage")?))
+        .clone()
+}
+
 /// 查最新的版本，比这份新就看这份能不能自己装。
 fn look() -> Result<Found, Error> {
     let release = runode_update::latest()?;
@@ -281,7 +295,7 @@ fn look() -> Result<Found, Error> {
         return Ok(Found::UpToDate(release.version));
     }
     tracing::info!("Runode {} is out, this is {VERSION}", release.version);
-    let installation = match Installation::current() {
+    let installation = match installation() {
         Ok(installation) => installation,
         Err(reason) => return Ok(Found::Manual { release, reason }),
     };
@@ -469,7 +483,14 @@ pub fn restart(cx: &mut App) {
         cx.quit();
     }
     #[cfg(not(windows))]
-    cx.restart();
+    {
+        // GPUI 在 Linux 上重新打开 `current_exe`，从 AppImage 跑时那是退出后就卸掉的挂载点里的文件。
+        #[cfg(target_os = "linux")]
+        if let Ok(exe) = runode_paths::runode_exe() {
+            cx.set_restart_path(exe);
+        }
+        cx.restart();
+    }
 }
 
 /// app 退出时：下好了就装上。重启以更新时随后打开装上的新版本。Windows 上安装程序会强行关掉单独跑的宿主，

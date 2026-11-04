@@ -3,7 +3,8 @@
 //! 签名后留着（`Installation::stage`），等 app 退出时和装着的那份原子地对调（`Staged::install`）。
 //! 正在跑的进程不受影响，下次启动就是新版本。
 //!
-//! Windows 上更新包是 setup.exe，签名者证书要和在跑的 runode.exe 一样，见 `windows`。
+//! Windows 上更新包是 setup.exe，签名者证书要和在跑的 runode.exe 一样，见 `windows`。Linux 上更新包是
+//! AppImage，没有签名，按 `SHA256SUMS` 核对，见 `linux`。
 //!
 //! 只有用 Developer ID 签过名的 .app 才自己更新：新包也要是 Developer ID Application 证书签的，
 //! 和在跑的这份出自同一个 Team ID、是同一个 bundle id（`codesign --verify -R`），这就认定了是同一个
@@ -20,8 +21,10 @@
 mod authenticode;
 pub mod bundle;
 mod fetch;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 mod install;
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(windows)]
 mod windows;
 
@@ -29,8 +32,10 @@ use std::{cmp::Ordering, collections::BTreeMap, fmt, time::Duration};
 
 use serde::Deserialize;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub use install::{Installation, Staged};
+#[cfg(target_os = "linux")]
+pub use linux::{Installation, Staged};
 #[cfg(windows)]
 pub use windows::{Installation, Staged};
 
@@ -50,7 +55,7 @@ pub struct Release {
     pub version: String,
     /// Release 的网页：更新说明、手动下载。
     pub page: String,
-    /// 各平台的更新包：Mac 的 dmg 按 `lipo -archs` 的架构名（`arm64`、`x86_64`），Windows 的安装包是 `windows-x86_64`。
+    /// 各平台的更新包，按 `arch` 的名字：Mac 的 dmg、Windows 的安装包和 Linux 的 AppImage。
     #[serde(default)]
     pub archives: BTreeMap<String, String>,
 }
@@ -70,7 +75,7 @@ impl Release {
         Ok(release)
     }
 
-    /// 这台 Mac 的架构（见 `arch`）的更新包；没有时只能手动下载。
+    /// 这台机器（见 `arch`）的更新包；没有时只能手动下载。
     pub fn archive(&self) -> Option<&str> {
         self.archives.get(arch()).map(String::as_str)
     }
@@ -81,10 +86,18 @@ pub fn latest() -> Result<Release, Error> {
     Release::parse(&fetch::get(MANIFEST_URL, MANIFEST_TIMEOUT, &|_, _| {})?)
 }
 
-/// 这台机器的更新包在清单里的名字：Mac 按架构（`lipo -archs` 的叫法），Windows 是 `windows-x86_64`。
+/// 这台机器的更新包在清单里的名字：Mac 按架构（`lipo -archs` 的叫法），Windows 是 `windows-x86_64`，Linux 是
+/// `linux-` 加 Rust 的架构名。
 pub fn arch() -> &'static str {
     if cfg!(windows) {
         return "windows-x86_64";
+    }
+    if cfg!(target_os = "linux") {
+        return match std::env::consts::ARCH {
+            "aarch64" => "linux-aarch64",
+            "x86_64" => "linux-x86_64",
+            _ => "linux-unsupported",
+        };
     }
     match std::env::consts::ARCH {
         "aarch64" => "arm64",
@@ -114,7 +127,7 @@ pub enum Error {
     Network(String),
     /// 清单读不懂。
     Manifest(String),
-    /// 清单里没有这台 Mac 的架构的更新包。
+    /// 清单里没有这台机器的更新包。
     NoArchive,
     /// 下载的包签名不对，或者版本和清单对不上。
     Rejected(String),

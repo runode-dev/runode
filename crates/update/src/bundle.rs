@@ -18,10 +18,10 @@ use crate::Error;
 /// 发布包的签名要出自这个 Team。
 pub const TEAM_ID: &str = "5VRL2M2A3V";
 
-const RELEASES: &str = "https://github.com/runode-dev/runode/releases/download";
+pub(crate) const RELEASES: &str = "https://github.com/runode-dev/runode/releases/download";
 /// 下载一个包最多等这么久。
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-const SUMS_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const SUMS_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 同一时间只取一个包：几台主机一起部署时，下载中的 `.part`、mac 的解包目录和 dmg 都在同一个路径上，
 /// 一起取会互相踩坏；排在后面的等前面的取完，直接用缓存。
