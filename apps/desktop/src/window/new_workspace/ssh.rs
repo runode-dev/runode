@@ -49,6 +49,9 @@ const HOST_MENU_WIDTH: f32 = 320.;
 /// 列目录的请求序号，整个进程递增：重新浏览后，先前发出的回话也对不上新的序号。
 static LIST_REQUEST: AtomicU64 = AtomicU64::new(0);
 
+/// 列到了敲的目录以后接着办的事。
+type AfterList = fn(&mut WindowView, &mut Window, &mut Context<WindowView>);
+
 /// 主机菜单里选了一台主机。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
@@ -326,8 +329,13 @@ impl WindowView {
         self.list_remote(None, None, cx);
     }
 
-    /// 在后台列远端的目录 `path`，为空时列家目录；给了 `open_in` 时列到了就在那个窗口里开它的工作区。
-    fn list_remote(&mut self, path: Option<PathBuf>, open_in: Option<AnyWindowHandle>, cx: &mut Context<Self>) {
+    /// 在后台列远端的目录 `path`，为空时列家目录；给了 `then` 时列到了就在那个窗口里接着办它（开工作区、建目录）。
+    fn list_remote(
+        &mut self,
+        path: Option<PathBuf>,
+        then: Option<(AnyWindowHandle, AfterList)>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(dialog) = &mut self.new_workspace else {
             return;
         };
@@ -377,10 +385,10 @@ impl WindowView {
                     ok
                 })
                 .unwrap_or(false);
-            if let Some(handle) = open_in.filter(|_| listed_ok) {
+            if let Some((handle, after)) = then.filter(|_| listed_ok) {
                 handle
                     .update(cx, |_, window, cx| {
-                        this.update(cx, |this, cx| this.open_remote_workspace(window, cx)).ok();
+                        this.update(cx, |this, cx| after(this, window, cx)).ok();
                     })
                     .ok();
             }
@@ -399,7 +407,7 @@ impl WindowView {
         // 框里敲了别的路径、没按回车就点「打开」：开的是敲的那个，先列一下确认它是目录。
         let typed = PathBuf::from(browse.field.read(cx).query().trim());
         if !typed.as_os_str().is_empty() && browse.path.as_ref() != Some(&typed) {
-            self.list_remote(Some(typed), Some(window.window_handle()), cx);
+            self.list_remote(Some(typed), Some((window.window_handle(), Self::open_remote_workspace)), cx);
             return;
         }
         let Some(path) = browse.path.clone() else {
@@ -440,7 +448,7 @@ impl WindowView {
     }
 
     /// 在远端浏览到的目录下按名字框建一个目录，在它上面开工作区；克隆（`Source::Clone`）时接着在第一个终端里
-    /// 把地址框里的仓库克隆进去，名字空着时用仓库名。建不出来时原因写在对话框里，对话框还在。
+    /// 把地址框里的仓库克隆进去，名字空着时用仓库名。建不出来时原因写在对话框里，对话框还在。还在列目录时不建。
     pub(super) fn create_remote_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = &mut self.new_workspace else {
             return;
@@ -448,7 +456,16 @@ impl WindowView {
         if dialog.host.is_local() {
             return;
         }
-        let Some(parent) = dialog.browse.as_ref().and_then(|browse| browse.path.clone()) else {
+        let Some(browse) = dialog.browse.as_ref().filter(|browse| !browse.loading) else {
+            return;
+        };
+        // 框里敲了别的路径、没按回车就点了建：建在敲的那个下面，先列一下确认它是目录。
+        let typed = PathBuf::from(browse.field.read(cx).query().trim());
+        if !typed.as_os_str().is_empty() && browse.path.as_ref() != Some(&typed) {
+            self.list_remote(Some(typed), Some((window.window_handle(), Self::create_remote_workspace)), cx);
+            return;
+        }
+        let Some(parent) = browse.path.clone() else {
             return;
         };
         let clone = dialog.source == Some(Source::Clone);
