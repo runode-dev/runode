@@ -140,18 +140,23 @@ fn shut_down(mut stream: UnixStream) -> io::Result<()> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ended {
     /// 旧宿主连同会话结束了。
-    Ended,
+    Exited,
     /// socket 对面的进程不是以 `--host` 启动的单独宿主（协议对不上的另一个 app，宿主跑在它的
     /// 进程里）：没发信号，免得结束一整个 app。
     NotAHost,
+    /// socket 上已经是要求的构建（`build`）的宿主，多半刚接手了旧宿主的会话：没让它退出。
+    AlreadyUpgraded,
 }
 
 /// 用户要结束交接没成的旧宿主（连同它的会话）：说得通协议的同 `retire`；协议对不上的（`Probe`
-/// 是 `Incompatible`）没法让它自己退出，同 `terminate`。跑在另一个 app 里的不碰，返回 `Ended::NotAHost`。
+/// 是 `Incompatible`）没法让它自己退出，同 `terminate`。跑在另一个 app 里的不碰，返回 `Ended::NotAHost`；
+/// 已经是 `build` 的宿主不碰，返回 `Ended::AlreadyUpgraded`，在让它退出的同一条连接上看，调用方先探过也
+/// 可能在那之后才交接完。
 pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
     let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(build, ClientKind::Cli))?;
     match receive(&mut stream)? {
+        HostMsg::Welcome { build: theirs, .. } if theirs == *build => return Ok(Ended::AlreadyUpgraded),
         HostMsg::Welcome { standalone: true, .. } => {}
         HostMsg::Welcome { standalone: false, .. } => return Ok(Ended::NotAHost),
         HostMsg::Incompatible { .. } => {
@@ -161,7 +166,7 @@ pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
         _ => return Err(io::Error::other("the host did not say welcome")),
     }
     shut_down(stream)?;
-    Ok(Ended::Ended)
+    Ok(Ended::Exited)
 }
 
 /// 结束 `socket` 上的宿主进程（连同它的会话），不管它说什么协议：pid 见
@@ -188,7 +193,7 @@ fn terminate(socket: &Path) -> io::Result<Ended> {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    Ok(Ended::Ended)
+    Ok(Ended::Exited)
 }
 
 /// 给进程 `pid` 发 SIGTERM；Windows 上没有信号，直接结束它（`taskkill /F`）。
@@ -530,6 +535,26 @@ mod tests {
             connect(&desktop, &socket).unwrap();
             assert!(matches!(probe(&socket, &build()), Probe::Running { desktops: 1, .. }));
             retire(&socket, &build()).unwrap();
+            assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
+        }
+
+        /// 要结束的旧宿主已经换成了要求的构建：不让它退出；还是别的构建时照常结束。
+        #[cfg(unix)]
+        #[test]
+        fn ending_the_old_host_spares_one_already_upgraded() {
+            let (host, socket) = listening("upgraded");
+            let stopped = {
+                let (tx, rx) = mpsc::channel();
+                thread::spawn(move || tx.send(host.run_until_idle(Duration::from_secs(60))));
+                rx
+            };
+            let deadline = Instant::now() + WAIT;
+            while probe(&socket, &build()) == Probe::OtherApp && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(end_old_host(&socket, &build()).unwrap(), Ended::AlreadyUpgraded);
+            assert!(matches!(probe(&socket, &build()), Probe::Running { .. }));
+            assert_eq!(end_old_host(&socket, &BuildId("newer".into())).unwrap(), Ended::Exited);
             assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
         }
     }

@@ -422,7 +422,8 @@ fn establish() {
 #[cfg(windows)]
 fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
     match launch::end_old_host(socket, &build()) {
-        Ok(launch::Ended::Ended) => tracing::info!("ended the old host and its {sessions:?} sessions to upgrade it"),
+        Ok(launch::Ended::Exited) => tracing::info!("ended the old host and its {sessions:?} sessions to upgrade it"),
+        Ok(launch::Ended::AlreadyUpgraded) => tracing::info!("the host on the socket is already this build"),
         Ok(launch::Ended::NotAHost) => {
             notify(Notice::OtherApp);
             return Some(in_process(false));
@@ -528,7 +529,7 @@ fn end_old_host(cx: &mut App) {
             // `Absent`，那时 socket 还连得上，照常去结束它。
             Probe::Absent if socket_gone(&socket) => {
                 tracing::info!("the old host is already gone");
-                Ok(launch::Ended::Ended)
+                Ok(launch::Ended::Exited)
             }
             // 探完到动手之间旧宿主也可能刚好退了，结束它就会出错：socket 连不上了的不算失败。
             _ => launch::end_old_host(&socket, &build()).or_else(|err| {
@@ -536,11 +537,11 @@ fn end_old_host(cx: &mut App) {
                     return Err(err);
                 }
                 tracing::info!("the old host went away while ending it: {err}");
-                Ok(launch::Ended::Ended)
+                Ok(launch::Ended::Exited)
             }),
         };
         match ended {
-            Ok(launch::Ended::Ended) => {
+            Ok(launch::Ended::Exited) => {
                 tracing::info!("the old host and its sessions are gone");
                 if let Some(host) = IN_PROCESS.get() {
                     listen_in_app(host);
@@ -549,6 +550,10 @@ fn end_old_host(cx: &mut App) {
             Ok(launch::Ended::NotAHost) => {
                 tracing::warn!("the old host runs inside an older runode app, asking to quit it instead");
                 let _ = tx.send(Notice::OldAppRunning);
+            }
+            Ok(launch::Ended::AlreadyUpgraded) => {
+                tracing::warn!("the host on the socket became this build, so not ending it");
+                let _ = tx.send(Notice::AlreadyUpgraded);
             }
             Err(err) => {
                 tracing::warn!("failed to end the old host: {err}");
