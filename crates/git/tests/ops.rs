@@ -222,6 +222,26 @@ fn pending_diff_ignores_external_diff_color_and_textconv() {
     assert!(!staged.contains("EXTERNAL") && !staged.contains("TEXTCONV") && !staged.contains('\x1b'), "{staged}");
 }
 
+/// 读要提交的改动时不执行仓库配置的过滤器。
+#[test]
+fn pending_diff_does_not_run_repository_filters() {
+    let repo = TestRepo::new("ops-pending-filter");
+    repo.commit_file(".gitattributes", "* filter=evil\n", "attributes");
+    repo.commit_file("a.txt", "one\n", "first");
+    let marker = repo.path().join(".git/filter-ran");
+    let command = format!("sh -c 'echo x >> \"{}\"; cat'", marker.display());
+    repo.git(&["config", "filter.evil.clean", &command]);
+    repo.git(&["config", "filter.evil.process", &command]);
+    repo.git(&["config", "filter.evil.required", "true"]);
+    repo.write("a.txt", "two\n");
+    let all = read(&repo).repo().pending_diff(false).unwrap();
+    assert!(all.contains("-one\n+two\n"), "{all}");
+    assert!(!marker.exists(), "读要提交的改动时执行了仓库配置的过滤器");
+    // 对照：不覆盖时 git diff 会执行它，上面的断言才有意义。
+    repo.try_git(&["diff", "HEAD"]);
+    assert!(marker.exists());
+}
+
 /// 比 `MAX_DIFF_BYTES` 大的文件只报一行二进制，补丁不会被一个大文件撑满。
 #[test]
 fn pending_diff_reports_big_files_as_binary() {

@@ -10,7 +10,7 @@ use std::{
 use crate::{
     FileDiff, FileStatus, GitError, Refusal, Stash, UntrackedCache,
     exec::{RUN_TIMEOUT, run, run_for},
-    find_repo, git,
+    filter_overrides, find_repo, git,
     snapshot::{DIFF, MAX_DIFF_BYTES},
     view::literal,
 };
@@ -272,9 +272,13 @@ impl Repo {
         // shortcut: 大小没变的大文件，git 的 autoRefreshIndex 比对会先读全文、阈值不生效，要彻底设上限得在
         // `run` 里边读边截断；等真碰上这种仓库再改。
         let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
+        // 只是读，不执行仓库配置的过滤器，也不进子模块里看有没有改动（进去会执行子模块配置的）。
+        let filters = filter_overrides(&self.root);
+        let env: Vec<_> = filters.iter().map(|(key, value)| (key.as_str(), value.as_str())).collect();
         let diff = |target: &str| {
-            let args = ["-c", threshold.as_str()].into_iter().chain(DIFF).chain([target, "--"]);
-            run(&self.root, args.collect::<Vec<_>>(), None)
+            let args =
+                ["-c", threshold.as_str()].into_iter().chain(DIFF).chain(["--ignore-submodules=dirty", target, "--"]);
+            run_for(&self.root, args.collect::<Vec<_>>(), None, RUN_TIMEOUT, &env)
         };
         let diff = if staged {
             diff("--cached")?

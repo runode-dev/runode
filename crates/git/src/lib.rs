@@ -131,7 +131,7 @@ pub(crate) fn git_with<S: AsRef<OsStr>>(dir: &Path, env: &[(OsString, OsString)]
     output.status.success().then_some(output.stdout)
 }
 
-/// 覆盖掉 `dir` 所在仓库自己配置的过滤器的环境变量，设给只读的 `status`、`diff`（经 `git_with`）：
+/// 覆盖掉 `dir` 所在仓库自己配置的过滤器的环境变量，设给只读的 `status`、`diff`：
 /// `.gitattributes` 指定的过滤器在 git 比对工作区文件时执行，仓库的配置能把它设成任意命令，
 /// 后台自动读状态不能因此跑了别人目录里的脚本；暂存、提交这些写操作要靠过滤器，不覆盖。
 /// 只管仓库级的配置，用户全局装的和 `LFS_COMMANDS` 照旧；仓库级配了 `lfs.extension.*` 时，
