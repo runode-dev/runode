@@ -1,4 +1,5 @@
-//! Windows 上的私有目录（宿主的运行目录、远程访问的目录）只让自己、SYSTEM 和管理员进，不继承上一级的权限。
+//! Windows 上的私有目录（宿主的运行目录、远程访问的目录）只让自己、SYSTEM 和管理员进，不继承上一级的权限；
+//! 覆盖写用户的文件时原文件的 DACL 照旧。
 
 #![cfg(windows)]
 
@@ -10,7 +11,7 @@ use std::{
     ptr,
 };
 
-use runode_paths::Dirs;
+use runode_paths::{Dirs, replace_file};
 use windows_sys::Win32::{
     Foundation::{ERROR_SUCCESS, LocalFree},
     Security::{
@@ -135,4 +136,35 @@ fn a_protected_dacl_that_grants_everyone_is_replaced() {
     assert_eq!(sids.len(), 3, "{sids:?}");
     assert!(!sids.iter().any(|sid| sid == EVERYONE), "{sids:?}");
     let _ = std::fs::remove_dir_all(&home);
+}
+
+/// 上一级让所有人都能读，文件自己单独收紧过：覆盖写后 DACL 和原来一样，不换成继承来的那份；照常继承的
+/// 文件覆盖写后也照常继承。
+#[test]
+fn replacing_a_file_keeps_its_dacl() {
+    let dir = scratch("replace");
+    let granted = Command::new("icacls").arg(&dir).args(["/grant", "*S-1-1-0:(OI)(CI)R"]).output().unwrap();
+    assert!(granted.status.success(), "{granted:?}");
+    let user = std::env::var("USERNAME").unwrap();
+
+    let restricted = dir.join("restricted.conf");
+    std::fs::write(&restricted, "old\n").unwrap();
+    let narrowed = Command::new("icacls")
+        .arg(&restricted)
+        .args(["/inheritance:r", "/grant:r", "*S-1-5-18:F", "/grant:r", &format!("{user}:F")])
+        .output()
+        .unwrap();
+    assert!(narrowed.status.success(), "{narrowed:?}");
+    let inherited = dir.join("inherited.conf");
+    std::fs::write(&inherited, "old\n").unwrap();
+
+    for file in [&restricted, &inherited] {
+        let before = dacl(file);
+        replace_file(file, b"new\n").unwrap();
+        assert_eq!(std::fs::read_to_string(file).unwrap(), "new\n");
+        assert_eq!(dacl(file), before, "{}", file.display());
+    }
+    assert!(!dacl(&restricted).1.iter().any(|sid| sid == EVERYONE));
+    assert!(dacl(&inherited).1.iter().any(|sid| sid == EVERYONE));
+    let _ = std::fs::remove_dir_all(&dir);
 }

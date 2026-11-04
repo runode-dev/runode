@@ -1,4 +1,4 @@
-//! Windows 上把私有目录的访问控制收紧：`create_private_dir` 建好目录后调 `restrict`。
+//! Windows 上的访问控制：把私有目录收紧（`restrict`），覆盖写文件时把原文件的 DACL 搬到临时文件上（`copy_dacl`）。
 
 use std::{
     ffi::c_void,
@@ -20,7 +20,7 @@ use windows_sys::Win32::{
         GetSecurityDescriptorControl, GetTokenInformation, OWNER_SECURITY_INFORMATION,
         PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, SECURITY_MAX_SID_SIZE,
         SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_OWNER, TOKEN_QUERY, TOKEN_USER, TokenOwner, TokenUser,
-        WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+        UNPROTECTED_DACL_SECURITY_INFORMATION, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinLocalSystemSid,
     },
     Storage::FileSystem::FILE_ALL_ACCESS,
     System::{
@@ -72,6 +72,51 @@ pub(crate) fn restrict(dir: &Path) -> Result<()> {
             ptr::null_mut(),
             ptr::null_mut(),
             acl.0.cast(),
+            ptr::null(),
+        )
+    })
+}
+
+/// 把 `from` 的 DACL 设到 `to` 上，受不受保护（继不继承上一级）也照 `from`。两个文件在同一目录时，`to`
+/// 换到 `from` 的位置后谁能访问和原来一样；不受保护时继承来的项由系统按 `to` 的上一级重新算。
+pub(crate) fn copy_dacl(from: &Path, to: &Path) -> Result<()> {
+    let from: Vec<u16> = from.as_os_str().encode_wide().chain([0]).collect();
+    let to: Vec<u16> = to.as_os_str().encode_wide().chain([0]).collect();
+    let mut dacl: *mut ACL = ptr::null_mut();
+    let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
+    // SAFETY: 路径以 NUL 结尾；只要 DACL，不要的几项传空。
+    check(unsafe {
+        GetNamedSecurityInfoW(
+            from.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut dacl,
+            ptr::null_mut(),
+            &mut descriptor,
+        )
+    })?;
+    let descriptor = Local(descriptor);
+    let (mut control, mut revision) = (0u16, 0u32);
+    // SAFETY: `descriptor` 由 `GetNamedSecurityInfoW` 给出。
+    if unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) } == 0 {
+        return Err(Error::last_os_error());
+    }
+    let protection = if control & SE_DACL_PROTECTED != 0 {
+        PROTECTED_DACL_SECURITY_INFORMATION
+    } else {
+        UNPROTECTED_DACL_SECURITY_INFORMATION
+    };
+    // SAFETY: 路径以 NUL 结尾；`dacl` 为空（空 DACL 照样搬过去）或指在还活着的 `descriptor` 里；属主和组不动。
+    check(unsafe {
+        SetNamedSecurityInfoW(
+            to.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | protection,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            dacl,
             ptr::null(),
         )
     })

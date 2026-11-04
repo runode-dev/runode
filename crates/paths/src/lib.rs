@@ -552,15 +552,25 @@ fn replace(path: &Path, contents: &[u8], keep_permissions: bool) -> std::io::Res
     let temp =
         target.with_file_name(format!(".{name}.{}.{}.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     // 临时文件一开始就只有自己能读：先按 umask 建再收紧权限的话，中间别的用户能把它打开并一直拿着
-    // 描述符，之后写进去的私密内容（设备表、口令）就漏了。原文件在的话下面再换回它的权限。
+    // 描述符，之后写进去的私密内容（设备表、口令）就漏了。原文件在的话下面再换回它的权限。Windows 上
+    // 新建的文件按所在目录继承权限，开着时不让别人打开来读写，只共享删除（改名换上要用）。
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::share_mode(
+        &mut options,
+        windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE,
+    );
     // 建不出临时文件时直接返回，不去删同名的那个：它不是这里建的。
     let mut file = options.open(&temp)?;
     let written = (|| {
         if keep_permissions && let Ok(meta) = std::fs::metadata(&target) {
+            // Windows 上 `Permissions` 只有只读这一位，谁能访问在 DACL 里：不搬过来的话换上后原文件单独
+            // 收紧的权限就没了。写内容前就搬好。
+            #[cfg(windows)]
+            acl::copy_dacl(&target, &temp)?;
             file.set_permissions(meta.permissions())?;
         }
         file.write_all(contents)?;
