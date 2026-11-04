@@ -48,6 +48,10 @@ struct RealShell {
     output: mpsc::Receiver<Vec<u8>>,
     finished: Vec<FinishedCommand>,
     name: String,
+    /// shell 输出的原样字节。
+    raw: Vec<u8>,
+    /// 集成报告带的口令。
+    token: Option<String>,
 }
 
 impl RealShell {
@@ -58,8 +62,9 @@ impl RealShell {
             PtyEvent::Exited => false,
         });
         let pty = Pty::spawn(SIZE, Some(program), Some(dir), IntegrationMode::Detect, sink).unwrap();
+        let token = pty.report_token().map(str::to_owned);
         let session = HostSession::new(SIZE, pty, Some(dir), &TermSettings::default()).unwrap();
-        Self { session, output, finished: Vec::new(), name: program.into() }
+        Self { session, output, finished: Vec::new(), name: program.into(), raw: Vec::new(), token }
     }
 
     fn wait_for(&mut self, what: &str, done: impl Fn(&Self) -> bool) {
@@ -68,6 +73,7 @@ impl RealShell {
             let left = until.saturating_duration_since(Instant::now());
             match self.output.recv_timeout(left.min(Duration::from_millis(50))) {
                 Ok(data) => {
+                    self.raw.extend_from_slice(&data);
                     self.session.feed(&data);
                     let finished = self.session.take_commands();
                     self.finished.extend(finished);
@@ -178,6 +184,27 @@ fn windows_powershell_keeps_the_user_prompt_working() {
     let (text, _) = shell.session.command_output(1).unwrap();
     assert_eq!(text.trim(), "ok");
     shell.wait_for("the success in the prompt", |shell| prompt(shell) == "custom True>");
+}
+
+/// 用户开着 `Set-PSDebug -Trace 2`：跟踪打到屏幕上的赋值里没有口令，口令只出现在集成发的报告里。宿主自己
+/// 调 prompt 时不跟踪，用户的命令里调到集成的函数时才跟踪，测试里直接调一次。跟踪打出的值里带着 ESC
+/// 原样写给终端，一条赋值打出的报告前面是 `= '`。
+#[test]
+fn windows_powershell_trace_hides_the_token() {
+    let dir = long_path(&std::env::temp_dir());
+    let mut shell = RealShell::start("powershell.exe", &dir);
+    shell.run("Set-PSDebug -Trace 2");
+    shell.run("$null = prompt");
+    let ok = shell.run("Write-Output ok");
+    assert_eq!(ok.exit, Some(0));
+    let screen = shell.session.screen_text(Some(200)).unwrap();
+    assert!(screen.contains("! SET $"), "not traced: {screen}");
+    let token = shell.token.clone().expect("a report token");
+    let raw = &shell.raw;
+    let leaked = (0..raw.len())
+        .filter(|&i| raw[i..].starts_with(token.as_bytes()))
+        .any(|i| !raw[..i].ends_with(b"\x1b]6973;") || raw[..i].ends_with(b"= '\x1b]6973;"));
+    assert!(!leaked && !screen.contains(&token), "the token is traced: {screen}");
 }
 
 /// Git Bash 里的路径写成 /c/Users/…，集成报告前换成 Windows 的写法。

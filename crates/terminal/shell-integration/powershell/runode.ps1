@@ -34,6 +34,9 @@
 # 里运行的程序拿不到。没有 runode-reload：PowerShell 不能拿新的进程换掉自己。
 #
 # 集成的函数都先关掉严格模式：用户的 profile 开了 Set-StrictMode 时，读还没赋值的变量会出错。
+#
+# 口令和带着口令的报告不赋给变量，报告攒在 StringBuilder 里：开着 Set-PSDebug -Trace 2 时 PowerShell 把
+# 每次给变量赋的值当普通文字打到屏幕上，对象的属性和方法调用不打。
 
 if (-not (Test-Path Variable:Global:__runode)) {
     $Global:__runode = @{
@@ -74,16 +77,16 @@ if (-not (Test-Path Variable:Global:__runode)) {
                 $state = $Global:__runode
                 $e = [char]27
                 $a = [char]7
-                $out = ''
+                $out = [Text.StringBuilder]::new()
                 if ($state.cursor) {
-                    $out += "$e[0 q"
+                    [void]$out.Append("$e[0 q")
                 }
                 if ($state.token) {
                     $command = ''
                     if ($line.Length -le 4096) {
                         $command = [Uri]::EscapeDataString($line)
                     }
-                    $out += "$e]6973;$($state.token);version=2$a$e]6973;$($state.token);command=$command$a"
+                    [void]$out.Append("$e]6973;$($state.token);version=2$a$e]6973;$($state.token);command=$command$a")
                 }
                 [Console]::Write("$out$e]133;C$a")
             }
@@ -106,7 +109,7 @@ if (-not (Test-Path Variable:Global:__runode)) {
         $state = $Global:__runode
         $e = [char]27
         $a = [char]7
-        $out = ''
+        $out = [Text.StringBuilder]::new()
         if ($state.prompted) {
             $exit = 0
             if (-not $ok) {
@@ -117,25 +120,24 @@ if (-not (Test-Path Variable:Global:__runode)) {
                 }
             }
             if ($state.token) {
-                $out += "$e]6973;$($state.token);end=$a"
+                [void]$out.Append("$e]6973;$($state.token);end=$a")
             }
-            $out += "$e]133;D;$exit$a"
+            [void]$out.Append("$e]133;D;$exit$a")
         }
         $state.prompted = $true
         if ($state.token) {
-            $token = $state.token
             if ($PWD.Provider.Name -eq 'FileSystem') {
-                $out += "$e]6973;$token;cwd=$(__runode_encode $PWD.ProviderPath)$a"
+                [void]$out.Append("$e]6973;$($state.token);cwd=$(__runode_encode $PWD.ProviderPath)$a")
             }
             if ($env:PATH -cne $state.path) {
                 $state.path = $env:PATH
-                $out += "$e]6973;$token;path=$(__runode_encode $env:PATH)$a"
+                [void]$out.Append("$e]6973;$($state.token);path=$(__runode_encode $env:PATH)$a")
             }
             $names = @(Get-ChildItem Function: | ForEach-Object Name |
                 Where-Object { $_ -cmatch '^[A-Za-z0-9][A-Za-z0-9_.:+@,=-]*$' }) -join '%20'
             if ($names -cne $state.names) {
                 $state.names = $names
-                $out += "$e]6973;$token;functions=$names$a"
+                [void]$out.Append("$e]6973;$($state.token);functions=$names$a")
             }
         }
         # 标记先写出去再跑用户的 prompt：它可能用 Write-Host 直接往屏幕上写，不在返回的字符串里。
