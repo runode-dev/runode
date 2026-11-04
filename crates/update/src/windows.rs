@@ -108,7 +108,9 @@ impl Staged {
 
     /// 起了安装程序时为 `true`；不用装时为 `false`。
     fn start_installer(&self, relaunch: bool) -> Result<bool, Error> {
-        if !crate::is_newer(&self.version, env!("CARGO_PKG_VERSION")) {
+        let installed = installed_version(&self.exe);
+        if !crate::is_newer(&self.version, &installed) {
+            tracing::info!("Runode {installed} is installed, not replacing it with {}", self.version);
             let _ = fs::remove_dir_all(&self.dir);
             return Ok(false);
         }
@@ -123,6 +125,21 @@ impl Staged {
             .map_err(|err| io(&self.setup, err))?;
         tracing::info!("started the installer for Runode {}", self.version);
         Ok(true)
+    }
+}
+
+/// 装在 `exe` 的那份的版本号：下好之后用户可能自己装了别的版本，所以读文件上的，读不出时算在跑的这份的。
+fn installed_version(exe: &Path) -> String {
+    match signature(exe) {
+        Ok(signed) if crate::version_parts(&signed.version).is_some() => signed.version,
+        Ok(signed) => {
+            tracing::warn!("cannot read the version of {}: {:?}", exe.display(), signed.version);
+            env!("CARGO_PKG_VERSION").to_owned()
+        }
+        Err(err) => {
+            tracing::warn!("cannot read the version of {}: {err}", exe.display());
+            env!("CARGO_PKG_VERSION").to_owned()
+        }
     }
 }
 
