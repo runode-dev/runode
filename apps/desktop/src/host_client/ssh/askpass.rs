@@ -24,7 +24,7 @@ pub struct Ask {
     pub kind: Kind,
     pub prompt: String,
     reply: Option<oneshot::Sender<Reply>>,
-    /// `Kind::Notice` 的提示该收起了：ssh 办完、结束了 askpass 进程。
+    /// 询问该收起了：askpass 进程结束了（ssh 办完提示的事，或者等不到回答、放弃了）。
     pub dismissed: Option<oneshot::Receiver<()>>,
 }
 
@@ -123,18 +123,16 @@ fn serve(stream: Stream) {
         return;
     };
     let (reply, answer) = oneshot::channel();
-    let dismissed = (kind == Kind::Notice).then(|| {
-        let (dismiss, dismissed) = oneshot::channel();
-        // ssh 办完就结束 askpass 进程，连接随之关掉。
-        if let Ok(mut watch) = stream.try_clone() {
-            let _ = thread::Builder::new().name("ssh-askpass-notice".into()).spawn(move || {
-                let _ = watch.read(&mut [0; 1]);
-                let _ = dismiss.send(());
-            });
-        }
-        dismissed
-    });
-    emit(RemoteEvent::Ask(Ask { host, kind, prompt, reply: Some(reply), dismissed }));
+    let (dismiss, dismissed) = oneshot::channel();
+    // ssh 办完提示的事、或者认证超时放弃了，就结束 askpass 进程，连接随之关掉；回答以后 askpass 读完回话也
+    // 关掉，那时界面上已经收起了。
+    if let Ok(mut watch) = stream.try_clone() {
+        let _ = thread::Builder::new().name("ssh-askpass-watch".into()).spawn(move || {
+            let _ = watch.read(&mut [0; 1]);
+            let _ = dismiss.send(());
+        });
+    }
+    emit(RemoteEvent::Ask(Ask { host, kind, prompt, reply: Some(reply), dismissed: Some(dismissed) }));
     let reply = futures::executor::block_on(answer).unwrap_or(None);
     let _ = write_reply(&mut &stream, &reply);
 }

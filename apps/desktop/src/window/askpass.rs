@@ -53,7 +53,7 @@ impl WindowView {
                 });
             (field, events)
         });
-        // 只是告知的提示，ssh 办完（用户触碰了安全密钥）就收起。
+        // askpass 进程结束了就收起：只是告知的提示 ssh 办完（用户触碰了安全密钥），要回答的 ssh 等不及放弃了。
         if let Some(dismissed) = ask.dismissed.take() {
             cx.spawn_in(window, async move |this, cx| {
                 let _ = dismissed.await;
