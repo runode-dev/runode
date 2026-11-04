@@ -75,6 +75,17 @@ impl Saver {
         Some(self.seq)
     }
 
+    /// 最近一次交去写的还没写进文件（文件里是编号 `on_disk` 的那次）时，按新的编号再写一遍同样的内容，
+    /// 当场写的时候用：那次多半还在后台写，不等它的话 app 可能在它写完之前就退出了。
+    fn rewrite_unfinished(&mut self, on_disk: u64) -> Option<(u64, State)> {
+        if on_disk >= self.seq {
+            return None;
+        }
+        let state = self.written.clone()?;
+        self.seq += 1;
+        Some((self.seq, state))
+    }
+
     /// 编号 `seq` 的写失败了。之后又开始了别的写时文件里是哪份由那次说了算，不动。
     fn write_failed(&mut self, seq: u64) {
         if self.seq == seq {
@@ -279,7 +290,11 @@ fn closed(view: &mut WindowView, window: WeakEntity<WindowView>, cx: &mut App) {
 
 /// 当场写存档：退出、关窗口时用，app 随即可能退出，要写完再走。
 fn write(cx: &mut App) {
-    let Some((seq, state)) = next_write(cx) else {
+    let next = next_write(cx).or_else(|| {
+        let on_disk = *WRITTEN_SEQ.lock().unwrap_or_else(PoisonError::into_inner);
+        cx.global_mut::<Saver>().rewrite_unfinished(on_disk)
+    });
+    let Some((seq, state)) = next else {
         return;
     };
     if let Err(err) = write_in_order(seq, &state) {
@@ -708,6 +723,18 @@ mod tests {
         assert_eq!(saver.begin_write(&a), None);
         saver.write_failed(3);
         assert_eq!(saver.begin_write(&a), Some(4));
+    }
+
+    /// 当场写时，内容和最近一次交去写的一样、那次却还没写进文件，就按新编号再写一遍；写进去了就不用写。
+    #[test]
+    fn writing_now_redoes_a_write_still_running_in_the_background() {
+        let a = State::new(Vec::new());
+        let mut saver = Saver::default();
+        assert_eq!(saver.rewrite_unfinished(0), None);
+        assert_eq!(saver.begin_write(&a), Some(1));
+        assert_eq!(saver.rewrite_unfinished(0), Some((2, a.clone())));
+        assert_eq!(saver.rewrite_unfinished(2), None);
+        assert_eq!(saver.begin_write(&a), None);
     }
 
     /// 前面的叶子开不起来时，焦点和折叠的叶子仍按存档里的位置找，不往前错一位落到别的终端上。
