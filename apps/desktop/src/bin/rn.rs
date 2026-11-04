@@ -48,9 +48,13 @@ fn forward(arg: &str) -> i32 {
     }
 }
 
-/// 拉起和这个程序放在一起的 `runode`，不等它；返回退出码。
+/// 拉起和这个程序放在一起的 `runode`，不等它；返回退出码。窗口不继承标准流：调用方读着 `rn` 的输出时，
+/// 窗口开着管道就一直不到头。
 fn open_window() -> i32 {
-    match app().and_then(|app| std::process::Command::new(app).spawn()) {
+    use std::process::Stdio;
+    let spawn =
+        |app| std::process::Command::new(app).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+    match app().and_then(spawn) {
         Ok(_) => runode_cli::exit::OK,
         Err(err) => {
             use std::io::Write as _;
