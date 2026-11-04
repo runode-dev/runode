@@ -196,9 +196,8 @@ fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
         let target = fs::read_link(src)?;
         #[cfg(unix)]
         return std::os::unix::fs::symlink(target, dest);
-        // Windows 的链接分指向文件和指向目录两种，照原来的建；目录联接也算指向目录的链接。
         #[cfg(windows)]
-        return if std::os::windows::fs::FileTypeExt::is_symlink_dir(&meta.file_type()) {
+        return if is_symlink_dir(&meta) {
             std::os::windows::fs::symlink_dir(target, dest)
         } else {
             std::os::windows::fs::symlink_file(target, dest)
@@ -293,12 +292,27 @@ pub fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result {
 
 /// 删掉 `path`，不进废纸篓、不能恢复：是目录时连同里面的一起删，是符号链接时只删链接本身。
 pub fn remove(path: &Path) -> Result {
-    if fs::symlink_metadata(path)?.is_dir() {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.is_dir() {
         fs::remove_dir_all(path)?;
+    } else if is_symlink_dir(&meta) {
+        // 指向目录的链接要按目录删，删掉的只是链接。
+        fs::remove_dir(path)?;
     } else {
         fs::remove_file(path)?;
     }
     Ok(())
+}
+
+/// `meta` 是指向目录的链接（包括目录联接）。只有 Windows 的链接分指向文件和指向目录两种，别的系统上总是 false。
+#[cfg(windows)]
+fn is_symlink_dir(meta: &fs::Metadata) -> bool {
+    std::os::windows::fs::FileTypeExt::is_symlink_dir(&meta.file_type())
+}
+
+#[cfg(not(windows))]
+fn is_symlink_dir(_meta: &fs::Metadata) -> bool {
+    false
 }
 
 #[cfg(target_os = "linux")]
