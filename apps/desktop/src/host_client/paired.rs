@@ -205,10 +205,19 @@ pub struct PairedHost {
     addr: Mutex<Option<SocketAddr>>,
     /// 这台眼下各次拨号共用的取消句柄，`stop_dialing` 时取消、换一个新的。
     dialing: Mutex<Cancel>,
-    /// 登记着的专用连接（`hold`），按登记的编号记，断开时一起关掉。
-    channels: Mutex<HashMap<u64, UnixStream>>,
+    /// 登记着的专用连接（`hold`），断开时一起关掉。
+    channels: Mutex<Channels>,
     /// 下一个 `hold` 用的编号。
     next_channel: AtomicU64,
+}
+
+/// 登记着的专用连接。
+#[derive(Default)]
+struct Channels {
+    /// 按登记的编号记。
+    open: HashMap<u64, UnixStream>,
+    /// `close_channels` 关过几回：拨号前记下，登记时对不上说明拨的时候关过，这条不能留。
+    closed: u64,
 }
 
 /// `PairedHost::hold` 的登记，丢掉时撤销，登记时复制的那份连接跟着关掉。
@@ -220,7 +229,7 @@ pub struct Held {
 impl Drop for Held {
     fn drop(&mut self) {
         if let Some(host) = self.host.upgrade() {
-            host.channels.lock().unwrap_or_else(PoisonError::into_inner).remove(&self.id);
+            host.channels().open.remove(&self.id);
         }
     }
 }
@@ -352,25 +361,28 @@ impl PairedHost {
         }
     }
 
-    /// 另拨一条过了门禁的连接，调用方在上面发第一帧（`ScreenHello` 这类）。连着时才拨。会阻塞。
-    pub fn dial(&self) -> Result<UnixStream, ChannelError> {
+    /// 另拨一条过了门禁的连接，调用方在上面发第一帧（`ScreenHello` 这类）。连着时才拨，拨通就登记（`hold`），
+    /// 调用方用完这条连接时丢掉交回的 `Held`。会阻塞。
+    pub fn dial(self: &Arc<Self>) -> Result<(UnixStream, Held), ChannelError> {
+        let generation = self.channels().closed;
         if !matches!(self.status(), Status::Connected(_)) {
             return Err(ChannelError::Broken(format!("not connected to the paired computer {}", self.id)));
         }
         let prefer = *self.addr.lock().unwrap_or_else(PoisonError::into_inner);
         let cancel = self.dialing().ok_or(ChannelError::Dial(DialError::Cancelled))?;
         let dialed = client::dial_via(&dirs(), &self.id, prefer, &cancel).map_err(ChannelError::Dial)?;
-        // 拨通的同时断开了：`close_channels` 已经关过，这条不交出去。
         if cancel.is_cancelled() {
             return Err(ChannelError::Dial(DialError::Cancelled));
         }
-        Ok(dialed.stream)
+        let held = self.hold(&dialed.stream, generation).ok_or(ChannelError::Dial(DialError::Cancelled))?;
+        Ok((dialed.stream, held))
     }
 
-    /// 开一条专用连接：拨号过门禁后发 `hello`、等那边回话，`ChannelReady` 后交回两边原样搬字节的 socket。会阻塞。
-    pub fn open_channel(&self, hello: &ChannelHello) -> Result<UnixStream, ChannelError> {
+    /// 开一条专用连接：拨号过门禁后发 `hello`、等那边回话，`ChannelReady` 后交回两边原样搬字节的 socket 和它的
+    /// 登记。等回话时已经登记着，断开这台时等的这一下当场断掉。会阻塞。
+    pub fn open_channel(self: &Arc<Self>, hello: &ChannelHello) -> Result<(UnixStream, Held), ChannelError> {
         let broken = |err: &dyn std::fmt::Display| ChannelError::Broken(err.to_string());
-        let mut stream = self.dial()?;
+        let (mut stream, held) = self.dial()?;
         let frame = Frame::control(hello).map_err(|err| broken(&err))?;
         write_frame(&mut stream, FrameKind::Control, 0, &frame.payload).map_err(|err| broken(&err))?;
         stream.set_read_timeout(Some(CHANNEL_TIMEOUT)).map_err(|err| broken(&err))?;
@@ -378,7 +390,7 @@ impl PairedHost {
         let reply = read_frame(&mut stream).map_err(|err| broken(&err))?;
         stream.set_read_timeout(None).map_err(|err| broken(&err))?;
         match reply.map(|frame| frame.message::<ChannelReply>()) {
-            Some(Ok(ChannelReply::ChannelReady)) => Ok(stream),
+            Some(Ok(ChannelReply::ChannelReady)) => Ok((stream, held)),
             Some(Ok(ChannelReply::ChannelRefused { reason })) => Err(ChannelError::Refused(reason)),
             Some(Ok(ChannelReply::Unknown)) => Err(ChannelError::Refused(ChannelRefusal::Unknown)),
             Some(Err(err)) => Err(broken(&err)),
@@ -386,16 +398,27 @@ impl PairedHost {
         }
     }
 
-    /// 登记专用连接 `stream`：断开这台或终端那条连接断了时关掉它。调用方用完这条连接时丢掉交回的 `Held`。
-    pub fn hold(self: &Arc<Self>, stream: &UnixStream) -> Held {
+    /// 登记专用连接 `stream`：断开这台或终端那条连接断了时关掉它。`generation` 是拨号前记下的
+    /// `Channels::closed`；其间关过或断开了这台时当场关掉 `stream`、返回 `None`。和 `close_channels` 在同一把锁里
+    /// 看，不会登记到关过之后。
+    fn hold(self: &Arc<Self>, stream: &UnixStream, generation: u64) -> Option<Held> {
+        let mut channels = self.channels();
+        if channels.closed != generation || !self.state().wanted {
+            let _ = stream.shutdown(Shutdown::Both);
+            return None;
+        }
         let id = self.next_channel.fetch_add(1, Ordering::Relaxed);
         match stream.try_clone() {
             Ok(stream) => {
-                self.channels.lock().unwrap_or_else(PoisonError::into_inner).insert(id, stream);
+                channels.open.insert(id, stream);
             }
             Err(err) => tracing::warn!("cannot keep track of a connection to the paired computer {}: {err}", self.id),
         }
-        Held { host: Arc::downgrade(self), id }
+        Some(Held { host: Arc::downgrade(self), id })
+    }
+
+    fn channels(&self) -> MutexGuard<'_, Channels> {
+        self.channels.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// 这次拨号用的取消句柄；已经断开、忘掉了这台时为空。先取句柄再看 `State::wanted`：清掉 `wanted` 之后换上
@@ -412,7 +435,9 @@ impl PairedHost {
     }
 
     fn close_channels(&self) {
-        for (_, stream) in self.channels.lock().unwrap_or_else(PoisonError::into_inner).drain() {
+        let mut channels = self.channels();
+        channels.closed += 1;
+        for (_, stream) in channels.open.drain() {
             let _ = stream.shutdown(Shutdown::Both);
         }
     }

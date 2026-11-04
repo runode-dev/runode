@@ -186,8 +186,7 @@ impl Client {
             _ => return Err(rust_i18n::t!("project_host.not_connected", host = self.label()).into_owned()),
         }
         let hello = ChannelHello::ProjectHello { build: crate::host_client::build().0 };
-        let stream = host.open_channel(&hello).map_err(|err| err.to_string())?;
-        let held = host.hold(&stream);
+        let (stream, held) = host.open_channel(&hello).map_err(|err| err.to_string())?;
         let input =
             stream.try_clone().map_err(|err| format!("cannot use the connection to {}: {err}", self.label()))?;
         Conn::start(&self.name, Box::new(input), stream, move || drop(held))

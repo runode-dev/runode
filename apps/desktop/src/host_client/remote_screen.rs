@@ -261,8 +261,7 @@ pub fn open(
         }
         HostId::Paired(id) => {
             let host = paired::find(id).ok_or_else(|| format!("no such host: {name}"))?;
-            let stream = host.dial().map_err(|err| err.to_string())?;
-            let held = host.hold(&stream);
+            let (stream, held) = host.dial().map_err(|err| err.to_string())?;
             let clone = || stream.try_clone().map_err(|err| format!("cannot use the connection to {name}: {err}"));
             (Box::new(clone()?), Box::new(clone()?), Transport::Socket(stream, held))
         }

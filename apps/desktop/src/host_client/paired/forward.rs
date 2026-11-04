@@ -126,10 +126,12 @@ fn accept(listener: TcpListener, id: &str, port: u16, stopped: &AtomicBool) {
     }
 }
 
-/// 拨一条到那台电脑 `port` 的专用连接，和本机来的 `local` 互搬字节，两边都搬完为止。
+/// 拨一条到那台电脑 `port` 的专用连接，和本机来的 `local` 互搬字节，两边都搬完为止。两边搬完前一直登记着，
+/// 断开这台或终端那条连接断了时转发的连接跟着断。
 fn carry(local: TcpStream, id: &str, port: u16) -> Result<()> {
     let host = find(id).context("the paired computer is gone")?;
-    let remote = host.open_channel(&ChannelHello::ForwardHello { port }).map_err(|err| anyhow::anyhow!("{err}"))?;
+    let (remote, _held) =
+        host.open_channel(&ChannelHello::ForwardHello { port }).map_err(|err| anyhow::anyhow!("{err}"))?;
     let _ = local.set_nodelay(true);
     let (local_in, remote_out) = (local.try_clone()?, remote.try_clone()?);
     let upload = thread::Builder::new()
