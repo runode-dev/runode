@@ -2,9 +2,12 @@
 //! 都可能拿着输出的管道），Unix 上让它自成一个进程组、给整组发 SIGKILL，Windows 上按父子关系结束整棵
 //! 进程树；Windows 上不给控制台程序开窗口。
 
-use std::process::Command;
 #[cfg(windows)]
 use std::process::Stdio;
+use std::{
+    io,
+    process::{Child, Command},
+};
 
 /// `CREATE_NO_WINDOW` 的值：拉起控制台程序时不给它开窗口。
 #[cfg(windows)]
@@ -24,6 +27,28 @@ pub(crate) fn hide_window(command: &mut Command) {
     std::os::windows::process::CommandExt::creation_flags(command, CREATE_NO_WINDOW);
     #[cfg(not(windows))]
     let _ = command;
+}
+
+/// `child` 退出了没有，不收尸：Unix 上用 `waitid` 的 `WNOWAIT`，组号在之后 `kill_tree` 时还是它的。
+#[cfg(unix)]
+pub(crate) fn has_exited(child: &mut Child) -> io::Result<bool> {
+    // SAFETY: `info` 是纯数据，全零合法；`waitid` 只写它。
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    // SAFETY: 等的是自己拉起的子进程，`info` 指向局部变量。
+    let result =
+        unsafe { libc::waitid(libc::P_PID, child.id(), &raw mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+    if result < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // 没有退出时 `waitid` 不填 `info`，`si_pid` 保持调用前的零。
+    // SAFETY: `waitid` 成功返回，`info` 要么由它填好，要么还是全零。
+    Ok(unsafe { info.si_pid() } != 0)
+}
+
+/// `Child` 拿着进程句柄，收了尸进程号也不会被别的进程占去，直接 `try_wait`。
+#[cfg(windows)]
+pub(crate) fn has_exited(child: &mut Child) -> io::Result<bool> {
+    child.try_wait().map(|status| status.is_some())
 }
 
 /// 结束 `isolate` 过的子进程 `pid` 和它的整组进程。要在收尸之前调，不然组号可能已经给了别的进程。

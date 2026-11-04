@@ -239,9 +239,10 @@ pub fn run(
         }
     };
     let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child.try_wait().map_err(RunError::Io)? {
-            break status;
+    // 组长退了也先不收尸，杀组用的组号要一直是它的，直到下面不再杀组。
+    loop {
+        if crate::process::has_exited(&mut child).map_err(RunError::Io)? {
+            break;
         }
         let now = Instant::now();
         if now > deadline {
@@ -250,7 +251,7 @@ pub fn run(
             return Err(RunError::Timeout);
         }
         pipes.pump((deadline - now).min(POLL_INTERVAL));
-    };
+    }
     // agent 退了，组里还有进程拿着输出管道时读不到头：等到时限，再杀掉整组读完剩下的。拿着管道的
     // 进程自己另开了进程组或会话、杀不到它时，再等一会儿还读不到头就算超时，不一直等下去；返回时
     // `pipes` 跟着关掉，那个进程再写只会写不进去。
@@ -260,6 +261,7 @@ pub fn run(
         let now = Instant::now();
         if now >= until {
             if killed {
+                child.wait().ok();
                 return Err(RunError::Timeout);
             }
             kill_group();
@@ -269,6 +271,7 @@ pub fn run(
         }
         pipes.pump(until - now);
     }
+    let status = child.wait().map_err(RunError::Io)?;
     let (stdout, stderr) = pipes.into_outputs();
     let (stdout, stderr) =
         (String::from_utf8_lossy(&stdout).into_owned(), String::from_utf8_lossy(&stderr).into_owned());
