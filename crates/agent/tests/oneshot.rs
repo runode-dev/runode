@@ -18,9 +18,11 @@ fn puts_the_prompt_on_argv_or_stdin() {
     assert_eq!(args[tools + 1], "");
     assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
     let (args, _) = oneshot::CODEX.command_line(vec![], "P");
-    for feature in ["shell_tool", "unified_exec"] {
+    for feature in ["shell_tool", "unified_exec", "apps", "view_image", "image_generation"] {
         assert!(args.windows(2).any(|pair| pair == ["--disable", feature]), "{args:?}");
     }
+    assert!(args.iter().any(|arg| arg == "--ignore-user-config"));
+    assert!(args.windows(2).any(|pair| pair == ["-c", "web_search=\"disabled\""]), "{args:?}");
     let (args, stdin) = with_prompt(vec!["--ask".into(), "x{prompt}".into()], "P");
     assert_eq!((args, stdin), (vec!["--ask".to_owned(), "xP".to_owned()], None));
 }

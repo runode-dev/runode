@@ -62,17 +62,28 @@ pub const CLAUDE: Cli = Cli {
 
 pub const CODEX: Cli = Cli {
     binary: "codex",
-    // 只读沙箱里照样能跑命令、读本机任意文件：关掉 `shell_tool` 和 `unified_exec`，它就没有执行命令的工具。
+    // 只读沙箱只管它跑的命令：命令照样能读本机任意文件，用户配的 MCP 服务器、ChatGPT 连接器和网页工具也都
+    // 在。不读用户的 `config.toml`（MCP 服务器配在那里），关掉执行命令、连接器、看本地图片、生成图片和
+    // 网页的工具；不认识的 feature 名它会报错退出，不会悄悄留着工具。
     args: &[
         "exec",
         "--ephemeral",
         "--skip-git-repo-check",
         "-s",
         "read-only",
+        "--ignore-user-config",
         "--disable",
         "shell_tool",
         "--disable",
         "unified_exec",
+        "--disable",
+        "apps",
+        "--disable",
+        "view_image",
+        "--disable",
+        "image_generation",
+        "-c",
+        "web_search=\"disabled\"",
     ],
     tail: &[],
 };
