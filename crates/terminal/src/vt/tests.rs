@@ -633,6 +633,15 @@ fn screen_tail_reads_the_bottom_of_the_screen() {
     let mut top = new_terminal(GridSize { cols: 10, rows: 6, cell_width_px: 1, cell_height_px: 1 }).unwrap();
     top.vt_write(b"a\r\nb\r\nc");
     assert_eq!(screen_tail(&top, Some(2)).unwrap(), "b\nc\n");
+    // 末尾的空行多过一屏、把有字的行挤进了回滚历史，也从那一行往上取。
+    let mut blank = new_terminal(GridSize { cols: 10, rows: 3, cell_width_px: 1, cell_height_px: 1 }).unwrap();
+    blank.vt_write(b"x\r\n\r\nhello");
+    blank.vt_write(&b"\r\n".repeat(10));
+    assert_eq!(screen_tail(&blank, Some(1)).unwrap(), "hello\n");
+    assert_eq!(screen_tail(&blank, Some(3)).unwrap(), "x\n\nhello\n");
+    assert_eq!(screen_tail(&blank, None).unwrap(), "");
+    let empty = new_terminal(GridSize { cols: 10, rows: 3, cell_width_px: 1, cell_height_px: 1 }).unwrap();
+    assert_eq!(screen_tail(&empty, Some(2)).unwrap(), "");
 }
 
 #[test]

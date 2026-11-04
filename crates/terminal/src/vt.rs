@@ -459,15 +459,27 @@ pub(crate) fn screen_tail(terminal: &Terminal<'_, '_>, lines: Option<u32>) -> Re
     if total == 0 || lines == Some(0) {
         return Ok(String::new());
     }
-    // 末尾的空行都在活动区里，最多一屏；按行数取时多读一屏，去掉它们后还够数。
-    let count = lines.map_or(rows, |lines| lines as usize + rows);
-    let mut picked = screen_lines(terminal, total.saturating_sub(count), total - 1)?;
-    while picked.last().is_some_and(String::is_empty) {
-        picked.pop();
+    let Some(lines) = lines else {
+        let mut picked = screen_lines(terminal, total.saturating_sub(rows), total - 1)?;
+        while picked.last().is_some_and(String::is_empty) {
+            picked.pop();
+        }
+        return Ok(picked.into_iter().map(|line| line + "\n").collect());
+    };
+    // 末尾的空行可能多过一屏、伸进回滚历史：一屏一屏往上找最后一个有字的行。
+    let mut end = total;
+    loop {
+        let start = end.saturating_sub(rows.max(1));
+        if let Some(last) = screen_lines(terminal, start, end - 1)?.iter().rposition(|line| !line.is_empty()) {
+            end = start + last + 1;
+            break;
+        }
+        if start == 0 {
+            return Ok(String::new());
+        }
+        end = start;
     }
-    if let Some(lines) = lines {
-        picked.drain(..picked.len().saturating_sub(lines as usize));
-    }
+    let picked = screen_lines(terminal, end.saturating_sub(lines as usize), end - 1)?;
     Ok(picked.into_iter().map(|line| line + "\n").collect())
 }
 
