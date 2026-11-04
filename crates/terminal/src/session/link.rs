@@ -163,7 +163,11 @@ fn join_hard_wraps(terminal: &Terminal<'_, '_>, line: &[LineCell], rows: u16) ->
     // 逻辑行的每一列都在 `cells` 里，最后一格就在最后一列。
     let ends_in_link = |cells: &[LineCell]| cells.last().is_some_and(|cell| cell.text.chars().all(link_char));
     let indent = |cells: &[LineCell]| cells.iter().take_while(|cell| cell.text == " ").count();
-    let continues = |cells: &[LineCell]| cells.get(indent(cells)).is_some_and(|cell| cell.text.chars().all(link_char));
+    // 没有缩进的下一行多半是另一段输出：写满最后一列的网址接上它就成了另一个网址，网址又不查在不在。
+    let continues = |cells: &[LineCell]| {
+        let indent = indent(cells);
+        indent > 0 && cells.get(indent).is_some_and(|cell| cell.text.chars().all(link_char))
+    };
     let mut cells = line.to_vec();
     let mut joined = false;
     while cells[0].y > 0 && continues(&cells) {

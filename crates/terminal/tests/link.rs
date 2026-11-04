@@ -83,6 +83,17 @@ fn a_path_hard_wrapped_with_an_indent_is_joined() {
     assert_eq!(link.spans, [LinkSpan { y: 0, x: 7..20 }]);
 }
 
+/// 网址正好写满 20 列，下一行顶格是别的输出：不接上，网址还是原来那个。
+#[test]
+fn a_full_width_url_is_not_joined_with_the_next_line() {
+    let mut session = idle_session();
+    session.feed(b"https://example.org/\r\nnext output");
+    let link = link_at(&session, at(5.5, 0.5)).unwrap();
+    assert_eq!(link.target, LinkTarget::Url("https://example.org/".into()));
+    assert_eq!(link.spans, [LinkSpan { y: 0, x: 0..20 }]);
+    assert_eq!(link_at(&session, at(1.5, 1.5)), None);
+}
+
 /// 别的机器上的 shell：`~/` 按调用方给的家目录展开，在不在由调用方判断，不查这台机器的文件系统。
 #[test]
 fn a_home_path_on_another_machine_resolves_with_the_given_check() {
