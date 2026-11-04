@@ -98,10 +98,20 @@ fn driver_text(name: Option<&str>, action: DriveAction, locale: &str) -> String 
 }
 
 impl Tab {
-    /// 这个分屏折叠着：用户折叠过，又不是当前分屏。切到它时（比如按方向键过去）照样展开着画，
-    /// 所以标签里总有一个分屏是展开的。
+    /// 这个分屏折叠着：用户折叠过，又不是当前分屏，也不是 `forced_open`。切到它时（比如按方向键过去）
+    /// 照样展开着画，所以不浮动的分屏里总有一个是展开的。
     fn folded(&self, id: EntityId) -> bool {
+        self.marked_folded(id) && self.forced_open() != Some(id)
+    }
+
+    fn marked_folded(&self, id: EntityId) -> bool {
         self.collapsed.contains(&id) && id != self.focused && !self.floats(id)
+    }
+
+    /// 不浮动的分屏都折叠着时（焦点在浮着的终端上、别的都折叠过）照样展开着画的那个：排在最前的。
+    fn forced_open(&self) -> Option<EntityId> {
+        let docked = self.docked_root().leaves();
+        if docked.iter().all(|id| self.marked_folded(*id)) { docked.first().copied() } else { None }
     }
 
     /// 折叠这个分屏时接替它的分屏：标签里另一个展开着的；没有时不能折叠。
@@ -162,12 +172,8 @@ impl WindowView {
         if let Node::Leaf(only) = root {
             return self.render_leaf(tab, only, badges, false, window, cx);
         }
-        let mut folded: Vec<EntityId> =
+        let folded: Vec<EntityId> =
             if cards(cx) { root.leaves().into_iter().filter(|id| tab.folded(*id)).collect() } else { Vec::new() };
-        // 焦点在浮着的终端上时分屏可能全折叠着，第一个照样展开着画。
-        if folded.len() == root.leaves().len() {
-            folded.remove(0);
-        }
         if folded.is_empty() {
             return self.render_node(tab, &root, badges, window, cx);
         }
