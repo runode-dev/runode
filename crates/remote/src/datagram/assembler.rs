@@ -196,9 +196,15 @@ impl Assembler {
                     self.frames.remove(&frame);
                     self.dropped.insert(frame);
                 }
-                // 一直等不来（要来的关键帧整帧丢了、片补不上被挤出电脑的记录），再要一次；还在来片时不算。
+                // 一直等不来（要来的关键帧整帧丢了、片补不上被挤出电脑的记录），再要一次；可能是关键帧的帧还在来片时
+                // 不算。已知是差分帧的来片不算：关键帧补不上时它们照样源源不断地来，却一帧也交不出。
                 let since = *self.waiting.get_or_insert(now);
-                let quiet_since = self.frames.values().map(|partial| partial.last_chunk).fold(since, Instant::max);
+                let quiet_since = self
+                    .frames
+                    .values()
+                    .filter(|partial| !partial.chunks.is_empty() && partial.keyframe() != Some(false))
+                    .map(|partial| partial.last_chunk)
+                    .fold(since, Instant::max);
                 if now.duration_since(quiet_since) >= GIVE_UP + rtt * 3 {
                     self.waiting = Some(now);
                     poll.gave_up = true;
@@ -429,6 +435,25 @@ mod tests {
         assert!(assembler.poll(start + GIVE_UP, Duration::ZERO).gave_up);
         assert!(!assembler.poll(start + GIVE_UP, Duration::ZERO).gave_up, "not again right away");
         assert!(assembler.poll(start + GIVE_UP * 2, Duration::ZERO).gave_up);
+    }
+
+    /// 等着的关键帧缺了片、一直补不上，后面的差分帧接着源源不断地来：照样到时候放弃、再要关键帧。
+    #[test]
+    fn deltas_after_a_stuck_keyframe_do_not_postpone_giving_up() {
+        let start = Instant::now();
+        let mut assembler = Assembler::new();
+        let key = chunks(&payload(true, 20), 10);
+        assembler.chunk(0, 0, 2, &key[0], start);
+        let step = Duration::from_millis(16);
+        let mut now = start;
+        let mut frame = 1;
+        while now < start + GIVE_UP {
+            assert!(!assembler.poll(now, Duration::ZERO).gave_up);
+            now += step;
+            feed(&mut assembler, frame, &chunks(&payload(false, 10), 10), &[], now);
+            frame += 1;
+        }
+        assert!(assembler.poll(now, Duration::ZERO).gave_up);
     }
 
     /// 等关键帧时，关键帧前面的差分帧丢掉、不再要；关键帧后面先到的差分帧留着，关键帧拼齐了一起交出。
