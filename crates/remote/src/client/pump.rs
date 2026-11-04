@@ -167,12 +167,15 @@ impl Pump {
         let read_tcp = !self.tcp_eof && self.to_local.len() < TO_LOCAL_LIMIT;
         let read_local = !self.local_done && self.to_remote.is_empty();
         let write_local = !self.to_local.is_empty();
+        let write_tcp = self.conn.wants_write();
+        // 哪头既不读也不写时不等它：它挂断了的话 `POLLHUP` 会让 `poll` 一直返回、空转。TCP 那头不读时
+        // 是调用方还没收完，断了的事等收完了再读 TCP 时知道。
         let mut fds = [
-            poll::entry(
-                tcp,
-                (if read_tcp { poll::IN } else { 0 }) | (if self.conn.wants_write() { poll::OUT } else { 0 }),
-            ),
-            // 调用方那头既不读也不写时不等它：它挂断了的话 `POLLHUP` 会让 `poll` 一直返回、空转。
+            if read_tcp || write_tcp {
+                poll::entry(tcp, (if read_tcp { poll::IN } else { 0 }) | (if write_tcp { poll::OUT } else { 0 }))
+            } else {
+                poll::skipped()
+            },
             if read_local || write_local {
                 poll::entry(local, (if read_local { poll::IN } else { 0 }) | (if write_local { poll::OUT } else { 0 }))
             } else {
