@@ -243,6 +243,7 @@
 
         func updateUIView(_ view: ScreenSurfaceView, context: Context) {
             view.videoSize = model.videoSize
+            view.trackpad = model.pointerMode == .trackpad
             if keyboardVisible, !view.keys.isFirstResponder {
                 _ = view.keys.becomeFirstResponder()
             } else if !keyboardVisible, view.keys.isFirstResponder {
@@ -265,6 +266,14 @@
         let cursor = UIImageView(image: UIImage(systemName: "cursorarrow"))
         var videoSize: CGSize? {
             didSet { if videoSize != oldValue { setNeedsLayout() } }
+        }
+        /// 在触控板模式：显示光标、认双指单击。切进来时电脑上的光标挪到显示的光标那里，点下去的就是看到的位置。
+        var trackpad = false {
+            didSet {
+                cursor.isHidden = !trackpad
+                rightTap.isEnabled = trackpad
+                if trackpad, !oldValue { model.moveCursor(dx: 0, dy: 0) }
+            }
         }
 
         init(model: ScreenModel) {
@@ -291,6 +300,7 @@
             rightTap.addTarget(self, action: #selector(rightTapped))
             rightTap.numberOfTouchesRequired = 2
             tap.require(toFail: rightTap)
+            rightTap.isEnabled = false
             cursor.tintColor = .white
             cursor.isHidden = true
             cursor.layer.shadowOpacity = 1
