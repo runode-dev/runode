@@ -74,8 +74,11 @@ fn scripts_avoid_characters_remote_shells_mangle() {
         windows::run_command("0.1.16.abc", Entry::Project),
         windows::run_command("0.1.16.abc", Entry::Screen),
     ] {
-        let inner = command.strip_prefix("cmd /d /c \"").and_then(|rest| rest.strip_suffix('"')).unwrap();
-        assert!(!inner.contains(['"', '$', '`', '\n']), "{inner}");
+        let inner = command.strip_prefix("cmd /d /v:on /c \"").and_then(|rest| rest.strip_suffix('"')).unwrap();
+        // 开着延迟展开：`!` 只出现在 `!USERPROFILE!` 里，家目录不经 `%…%` 在拆命令前展开。
+        assert!(!inner.contains(['"', '$', '`', '\n', '^']), "{inner}");
+        assert_eq!(inner.matches('!').count(), inner.matches("!USERPROFILE!").count() * 2, "{inner}");
+        assert!(!inner.contains("%USERPROFILE%"), "{inner}");
     }
     assert!(
         windows::prune_command("0.1.16.abc")
@@ -332,8 +335,8 @@ fn zip(dir: &std::path::Path, files: &[&str], out: &std::path::Path) {
 #[test]
 fn windows_probes_installs_and_prunes() {
     use std::fs;
-    // 家目录名里带空格：脚本靠 `cd` 进家目录，路径都相对它写。
-    let home = common::TempDir::new("boot strap");
+    // 家目录名里带空格和 `&`：脚本靠 `cd` 进家目录，路径都相对它写。
+    let home = common::TempDir::new("boot strap&x");
     let dir = "0.1.16.test";
     let probe = run_cmd(&home.0, &windows::connect_command(dir), b"");
     assert_eq!(probe.status.code(), Some(runode_ssh::bootstrap::PROBE_EXIT));
@@ -392,7 +395,7 @@ fn windows_probes_installs_and_prunes() {
 #[test]
 fn windows_uploads_a_tar_into_a_fresh_directory() {
     use std::fs;
-    let home = common::TempDir::new("up load");
+    let home = common::TempDir::new("up load&x");
     let src = home.0.join("src");
     fs::create_dir_all(src.join("folder")).unwrap();
     fs::write(src.join("folder/inner.txt"), "inner").unwrap();

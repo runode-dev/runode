@@ -1,6 +1,8 @@
 //! Windows 远端的脚本。Windows 的 OpenSSH 把命令交给默认 shell（cmd 或 PowerShell），所以一律写成
-//! `cmd /d /c "…"`：两种 shell 都把引号里的原样交给 cmd。脚本里不出现 `"`（结束引号）、换行和 PowerShell
-//! 在双引号里会展开的 `$`、`` ` ``。cmd 先进家目录，路径都相对它写，家目录名里有空格也不用加引号。
+//! `cmd /d /v:on /c "…"`：两种 shell 都把引号里的原样交给 cmd。脚本里不出现 `"`（结束引号）、换行和 PowerShell
+//! 在双引号里会展开的 `$`、`` ` ``。cmd 先进家目录，路径都相对它写，家目录名里有空格也不用加引号。家目录
+//! 一律写成延迟展开的 `!USERPROFILE!`：`%USERPROFILE%` 在 cmd 拆命令之前展开，用户名里的 `&`、`^`、`(` 会被当成
+//! 操作符，延迟展开的值不再拆。所以脚本里别处不能有 `!` 和 `^`。
 //!
 //! runode.exe 是界面程序，经 cmd 起时拿不到 ssh 的 stdin、stdout，所以经旁边的控制台程序 rn.exe 起，由它
 //! 把 stdin、stdout 交下去。要传的数据用系统自带的 tar.exe 从 stdin 解开：PowerShell 自己也读 stdin，
@@ -10,8 +12,8 @@ use super::{BIN_DIR, BUILD_KEEP_DAYS, Entry, PROBE_EXIT, PRUNED, UPLOADED, UPLOA
 
 /// 交给 ssh 的一行远端命令：进家目录，再跑 `script`。
 fn wrap(script: &str) -> String {
-    debug_assert!(!script.contains(['"', '$', '`', '\n']), "脚本里有远端 shell 解释不了的字符：{script}");
-    format!(r#"cmd /d /c "cd /d %USERPROFILE% || exit 1 & {script}""#)
+    debug_assert!(!script.contains(['"', '$', '`', '\n', '^']), "脚本里有远端 shell 解释不了的字符：{script}");
+    format!(r#"cmd /d /v:on /c "cd /d !USERPROFILE! || exit 1 & {script}""#)
 }
 
 /// 家目录下的相对路径，cmd 的写法。
@@ -111,7 +113,7 @@ pub fn upload_command(id: &str) -> String {
         concat!(
             "(if not exist {uploads} mkdir {uploads}) & cd {uploads} || exit 1 & ",
             "mkdir {id} || exit 1 & tar -xf - -C {id} || exit 1 & ",
-            r"echo {uploaded}%USERPROFILE%\{uploads}\{id}"
+            r"echo {uploaded}!USERPROFILE!\{uploads}\{id}"
         ),
         uploads = uploads,
         id = id,
