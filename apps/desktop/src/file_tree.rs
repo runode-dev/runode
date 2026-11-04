@@ -1139,7 +1139,9 @@ impl FileTree {
         if is_dir {
             self.move_selection(
                 |state, root, filter| {
-                    state.toggle_dir(&path, root, filter);
+                    // 并成一行的目录选中的是前面的一段时，展开收起的仍是整行，按最深的那层。
+                    let dir = state.selected_row().map_or(path, |ix| state.rows[ix].path.clone());
+                    state.toggle_dir(&dir, root, filter);
                     None
                 },
                 cx,
