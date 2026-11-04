@@ -345,6 +345,9 @@ impl TerminalView {
         if self.host.is_local() {
             let spawned = link.spawn(options);
             self.session_opened(spawned, start, attach);
+            for waiting in self.open_waiting.drain(..) {
+                let _ = waiting.send(self.id);
+            }
             return;
         }
         let claim = Arc::new(Mutex::new(Claim::default()));
@@ -384,7 +387,8 @@ impl TerminalView {
             })
             .ok();
         });
-        self.opening = Some(Opening { start, attach, waiting: Vec::new(), claim, _task: task });
+        let waiting = std::mem::take(&mut self.open_waiting);
+        self.opening = Some(Opening { start, attach, waiting, claim, _task: task });
     }
 
     /// `open_session` 等到了宿主的回话。
@@ -1092,6 +1096,7 @@ impl TerminalView {
             cursor_blink: CursorBlink::new(),
             adopted_size: None,
             start_pending: false,
+            open_waiting: Vec::new(),
             pending_command: None,
             task: None,
             search_field: None,
@@ -1137,11 +1142,13 @@ impl TerminalView {
         view
     }
 
-    /// 会话开好以后交回它，开不成时交回空；已经开好或者没在后台开时当场交回。
+    /// 会话开好以后交回它，开不成时交回空；已经开好、或者没在开也不等着启动时当场交回。要启动的
+    /// `deferred` 视图等到显示出来开了会话再交回。
     pub fn opened(&mut self) -> oneshot::Receiver<Option<SessionId>> {
         let (tx, rx) = oneshot::channel();
         match &mut self.opening {
             Some(opening) => opening.waiting.push(tx),
+            None if self.id.is_none() && self.start_pending && !self.ended => self.open_waiting.push(tx),
             None => {
                 let _ = tx.send(self.id);
             }
@@ -1184,6 +1191,9 @@ impl TerminalView {
     pub fn end(&mut self) {
         if std::mem::replace(&mut self.ended, true) {
             return;
+        }
+        for waiting in self.open_waiting.drain(..) {
+            let _ = waiting.send(None);
         }
         if let Some(id) = self.id {
             self.host_link.kill(id);

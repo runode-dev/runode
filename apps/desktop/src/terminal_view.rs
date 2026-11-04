@@ -189,6 +189,8 @@ pub struct TerminalView {
     host_link: host_client::Link,
     /// 远端主机上正在后台开会话，见 `open_session`。
     opening: Option<Opening>,
+    /// 要启动、还没开始开会话的 `deferred` 视图上等着会话开好的，开始开时交给 `Opening::waiting`。
+    open_waiting: Vec<futures::channel::oneshot::Sender<Option<SessionId>>>,
     /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。`deferred` 建的视图开会话
     /// 之前为 `None`。
     id: Option<SessionId>,
