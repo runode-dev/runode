@@ -57,6 +57,8 @@
         /// 拖动开始时手指所在的格子，程序自己管滚动时滚轮事件报在这里。
         private var scrollAnchor = (column: 0, row: 0)
         private var repeatTask: Task<Void, Never>?
+        /// 硬件键盘上按着的 Option 键（左、右）：`UIKey` 的修饰键标志分不出是哪一边。
+        private var heldOptions: Set<UIKeyboardHIDUsage> = []
         private let bellFeedback = UIImpactFeedbackGenerator(style: .light)
         private var lastBell = ContinuousClock.now - .seconds(1)
         /// 用户最近一次自己拖动、缩放网格的时刻：之后一会儿不自动跟着光标走，免得和手指抢。
@@ -813,6 +815,7 @@
         // MARK: 硬件键盘
 
         public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            trackOptions(presses, down: true)
             // 输入法正在组字时按键都归输入法。
             guard markedText.isEmpty else {
                 super.pressesBegan(presses, with: event)
@@ -826,6 +829,10 @@
                         input.modifiers.insert(.control)
                         controlLatched = false
                     }
+                    if input.modifiers.contains(.alt) {
+                        input.rightAlt =
+                            heldOptions.contains(.keyboardRightAlt) && !heldOptions.contains(.keyboardLeftAlt)
+                    }
                     emit(.key(input))
                     startRepeating(input)
                 } else {
@@ -838,13 +845,29 @@
         }
 
         public override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            trackOptions(presses, down: false)
             stopRepeating()
             super.pressesEnded(presses, with: event)
         }
 
         public override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            trackOptions(presses, down: false)
             stopRepeating()
             super.pressesCancelled(presses, with: event)
+        }
+
+        /// 记下按下、松开的 Option 键。别的键按下时修饰键标志里没有 Option，说明松开时没收到事件（焦点被
+        /// 拿走了），记着的都作废。
+        private func trackOptions(_ presses: Set<UIPress>, down: Bool) {
+            for press in presses {
+                guard let key = press.key else { continue }
+                switch key.keyCode {
+                case .keyboardLeftAlt, .keyboardRightAlt:
+                    if down { heldOptions.insert(key.keyCode) } else { heldOptions.remove(key.keyCode) }
+                default:
+                    if down, !key.modifierFlags.contains(.alternate) { heldOptions.removeAll() }
+                }
+            }
         }
 
         /// 按住不放时连发：0.4 秒后每 50 毫秒一次。
