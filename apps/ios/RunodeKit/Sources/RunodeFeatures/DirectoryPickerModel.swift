@@ -36,10 +36,13 @@ public final class DirectoryPickerModel {
         showsHidden ? dirs : dirs.filter { !$0.hasPrefix(".") }
     }
 
-    /// 上一级目录；已经在根目录（Windows 上是 `C:/` 这样的盘符根）或者还没列好时为空。
+    /// 上一级目录；已经在根目录（Windows 上是 `C:/` 这样的盘符根、`//server/share` 这样的共享根）或者还没列好时为空。
+    /// 按 `/` 自己切：`NSString` 会把 UNC 路径开头的 `//` 并成 `/`，Windows 不认那是绝对路径。
     public var parent: String? {
-        guard let path, path != "/", !Self.isDriveRoot(path) else { return nil }
-        let parent = (path as NSString).deletingLastPathComponent
+        guard let path, path != "/", !Self.isDriveRoot(path), !Self.isShareRoot(path),
+            let slash = path.lastIndex(of: "/")
+        else { return nil }
+        let parent = String(path[..<slash])
         return parent.isEmpty ? "/" : parent
     }
 
@@ -47,6 +50,12 @@ public final class DirectoryPickerModel {
     static func isDriveRoot(_ path: String) -> Bool {
         let chars = Array(path)
         return chars.count == 3 && chars[0].isASCII && chars[0].isLetter && chars[1] == ":" && chars[2] == "/"
+    }
+
+    /// Windows 宿主回的共享根：`//server/share`（再往上不是能列的目录）。
+    static func isShareRoot(_ path: String) -> Bool {
+        guard path.hasPrefix("//") else { return false }
+        return path.dropFirst(2).split(separator: "/").count <= 2
     }
 
     /// 能在 `path` 里新建：列好了、没在等回话、连着，也没有出错的提示盖着。进不去的子目录报错时 `path`
@@ -72,7 +81,7 @@ public final class DirectoryPickerModel {
     /// 进到现在这个目录里名叫 `name` 的子目录。
     public func enter(_ name: String) async {
         guard let path else { return }
-        await load((path as NSString).appendingPathComponent(name))
+        await load(path.hasSuffix("/") ? path + name : path + "/" + name)
     }
 
     public func goUp() async {

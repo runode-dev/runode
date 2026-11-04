@@ -1141,4 +1141,15 @@ actor UnwritableMachineStore: MachineStore {
         let root = await listed("C:/", ["Users"])
         #expect(root.parent == nil)
     }
+
+    /// Windows 宿主回的 UNC 路径 `//server/share/…`：拼子目录、往上走都留着开头的 `//`，到共享根为止。
+    @Test func uncPathsKeepTheirLeadingSlashes() async {
+        let picker = await listed("//server/share/team", ["dev"])
+        #expect(picker.parent == "//server/share")
+        await picker.enter("dev")
+        #expect(
+            link.sent.last.map { if case .listDirs(_, "//server/share/team/dev") = $0 { true } else { false } } == true)
+        let share = await listed("//server/share", ["team"])
+        #expect(share.parent == nil)
+    }
 }
