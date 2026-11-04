@@ -1,12 +1,18 @@
 //! 就地输入框：回车确定，
-//! Esc 取消，点到别处也算确定；切到别的应用时窗口失去焦点，回来接着改。
+//! Esc 取消，点到别处也算确定（点到不拿焦点的空白处也算）；切到别的应用时窗口失去焦点，回来接着改。
+
+use std::rc::Rc;
 
 use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Subscription, Window, prelude::*, px};
 
 use crate::input::{Input, InputEvent, InputState};
 
+type Commit = Rc<dyn Fn(&mut Window, &mut App)>;
+
 pub struct InlineEdit {
     pub field: Entity<InputState>,
+    /// 在输入框外按下鼠标时确定。点到不拿焦点的地方焦点不动，光靠失焦结束不了。
+    commit: Commit,
     _subscriptions: [Subscription; 2],
 }
 
@@ -37,7 +43,11 @@ impl InlineEdit {
             }
         });
         window.focus(&focus, cx);
-        Self { field, _subscriptions: [events, blur] }
+        let view = cx.weak_entity();
+        let commit = Rc::new(move |window: &mut Window, cx: &mut App| {
+            view.update(cx, |this, cx| finish(this, true, window, cx)).ok();
+        });
+        Self { field, commit, _subscriptions: [events, blur] }
     }
 
     /// 输入的文字，去掉首尾空白。
@@ -54,6 +64,11 @@ impl InlineEdit {
 
     /// 带边框的输入框，高 `height`，比别处的 `Input` 留白和圆角小一些，好塞进一行里。
     pub fn render(&self, height: Pixels) -> Input {
-        Input::new(&self.field).h(height).px(px(3.)).rounded(px(3.))
+        let commit = self.commit.clone();
+        Input::new(&self.field)
+            .h(height)
+            .px(px(3.))
+            .rounded(px(3.))
+            .on_mouse_down_out(move |_, window, cx| commit(window, cx))
     }
 }
