@@ -234,19 +234,24 @@ impl FileTree {
         });
     }
 
-    /// 新建或改名没成：弹框说为什么，关掉以后把输入框和刚才输的 `name` 放回去，改了再试。
+    /// 在 workspace `ws` 里发起的新建或改名没成：弹框说为什么，关掉以后把输入框和刚才输的 `name` 放回去，
+    /// 改了再试。
     fn edit_failed(
         &self,
+        ws: Option<WorkspaceId>,
         target: EditTarget,
         name: String,
-        title: &str,
         detail: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let ws = self.ws;
+        let title = match target {
+            EditTarget::New { .. } => "files.failed_new",
+            EditTarget::Rename { .. } => "files.failed_rename",
+        };
         self.show_file_error_then(title, detail, window, cx, move |this, window, cx| {
-            // 期间切到了别的 workspace 时不放回去：那棵树里没有这个输入框的位置。
+            // 现在显示的不是发起的 workspace 时不放回去：那棵树里没有这个输入框的位置，提交时也会用那边的
+            // `ProjectHost`。
             if this.ws == ws && this.edit.is_none() {
                 this.start_file_edit_with(target, Some(name), window, cx);
             }
@@ -257,7 +262,7 @@ impl FileTree {
         let target = EditTarget::New { dir: dir.to_path_buf(), is_dir };
         let Some(path) = ops::child_path(dir, name) else {
             let detail = rust_i18n::t!("files.invalid_name", name = name).into_owned();
-            self.edit_failed(target, name.to_owned(), "files.failed_new", detail, window, cx);
+            self.edit_failed(self.ws, target, name.to_owned(), detail, window, cx);
             return;
         };
         // 同 `transfer`：在后台建，网络卷挂住时不卡界面；完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树。
@@ -272,7 +277,7 @@ impl FileTree {
             this.update_in(cx, |this, window, cx| {
                 if let Err(err) = result {
                     let detail = error_text(&err, &name);
-                    this.edit_failed(target, name, "files.failed_new", detail, window, cx);
+                    this.edit_failed(ws, target, name, detail, window, cx);
                     return;
                 }
                 this.relist_and_reveal(ws, vec![dir], &path, cx);
@@ -294,7 +299,7 @@ impl FileTree {
         let target = EditTarget::Rename { path: path.to_path_buf(), is_dir };
         let Some(to) = path.parent().and_then(|parent| ops::child_name(parent, name)) else {
             let detail = rust_i18n::t!("files.invalid_name", name = name).into_owned();
-            self.edit_failed(target, name.to_owned(), "files.failed_rename", detail, window, cx);
+            self.edit_failed(self.ws, target, name.to_owned(), detail, window, cx);
             return;
         };
         // 同 `create_entry`，在后台改。
@@ -310,7 +315,7 @@ impl FileTree {
                 Ok(()) => this.after_move(ws, &from, &to, cx),
                 Err(err) => {
                     let detail = error_text(&err, &name);
-                    this.edit_failed(target, name, "files.failed_rename", detail, window, cx);
+                    this.edit_failed(ws, target, name, detail, window, cx);
                 }
             })
             .ok();
