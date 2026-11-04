@@ -18,8 +18,14 @@ pub(crate) fn window_options(cx: &App) -> WindowOptions {
         app_owns_titlebar_drag: true,
         // Wayland 和 X11 按它把窗口对上 .desktop 文件，任务栏的图标和窗口分组靠它。
         app_id: Some(runode_update::BUNDLE_ID.into()),
-        ..Default::default()
+        ..base_options()
     }
+}
+
+/// 各种窗口共用的底：GPUI 的默认选项，但系统处在低电量或省电模式时不限帧。runode 只在终端有输出、
+/// 远程桌面来了新画面时才重画，空闲时本来不耗电，限帧只会让敲字上屏和远程桌面的画面变慢。
+pub(crate) fn base_options() -> WindowOptions {
+    WindowOptions { low_power_frame_interval: None, ..Default::default() }
 }
 
 /// 打开一个新窗口，里面一个终端；`shell` 是启动时提前拉起的 shell，没有时现启动一个。

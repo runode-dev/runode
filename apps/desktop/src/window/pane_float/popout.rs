@@ -62,7 +62,7 @@ pub(super) fn open(
         // 拖动和双击由标题栏自己办，和主窗口一样。
         app_owns_titlebar_drag: true,
         app_id: Some(runode_update::BUNDLE_ID.into()),
-        ..Default::default()
+        ..crate::window::open::base_options()
     };
     let opened = cx.open_window(options, |window, cx| {
         cx.new(|cx| {
