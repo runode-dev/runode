@@ -54,7 +54,7 @@ fn install(dirs: &runode_paths::Dirs) -> Result<Service, Failure> {
             return Err(fail(LINGER, reason));
         }
     }
-    let exe = std::env::current_exe().map_err(|err| fail("exe", format!("cannot tell where runode is: {err}")))?;
+    let exe = runode_paths::runode_exe().map_err(|err| fail("exe", format!("cannot tell where runode is: {err}")))?;
     let socket = dirs.host_socket_file().ok_or_else(|| fail("runtime", "the host socket path is too long".into()))?;
     let service = runode_autostart::host_service_pid();
     let running = launch::host_pid(&socket).ok();

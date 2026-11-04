@@ -172,7 +172,7 @@ fn locale_exists(name: &str) -> bool {
 
 /// 原子地把符号链接 `link` 改指 `target`。
 #[cfg(unix)]
-fn relink(target: &Path, link: &Path) -> io::Result<()> {
+pub(crate) fn relink(target: &Path, link: &Path) -> io::Result<()> {
     let staged = link.with_extension(format!("{}.tmp", std::process::id()));
     let _ = std::fs::remove_file(&staged);
     std::os::unix::fs::symlink(target, &staged)?;
@@ -182,7 +182,7 @@ fn relink(target: &Path, link: &Path) -> io::Result<()> {
 /// 连上这台机器的宿主（需要时拉起、让新宿主接手），交回连接和开场白。
 fn connect(dirs: &runode_paths::Dirs) -> Result<(UnixStream, Opening), Failure> {
     let fail = |code: &str, message: String| Failure { code: code.into(), message };
-    let exe = std::env::current_exe().map_err(|err| fail("exe", format!("cannot tell where runode is: {err}")))?;
+    let exe = runode_paths::runode_exe().map_err(|err| fail("exe", format!("cannot tell where runode is: {err}")))?;
     dirs.create_runtime_dir().map_err(|err| fail("runtime", format!("no place for the host socket: {err}")))?;
     let socket = dirs.host_socket_file().ok_or_else(|| fail("runtime", "the host socket path is too long".into()))?;
     let ours = build();

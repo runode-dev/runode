@@ -14,7 +14,8 @@ pub(crate) fn install(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::Res
         bail!("{} cannot be started at login on this system", kind.name());
     }
     // 服务文件里写的是可执行文件的真实位置：`rn`、`runode` 这些链接以后可能指到别处。
-    let exe = std::env::current_exe().and_then(std::fs::canonicalize).context("cannot find the runode executable")?;
+    let exe =
+        runode_paths::runode_exe().and_then(std::fs::canonicalize).context("cannot find the runode executable")?;
     match write_service(kind, &env.dirs, &exe, Start::Now)? {
         Registration::File(path) => {
             writeln!(out, "Installed {}: Runode {} starts at login.", path.display(), kind.name())?;
@@ -79,7 +80,8 @@ pub(crate) fn upgrade(env: &Env, out: &mut dyn Write) -> anyhow::Result<()> {
     if !running.standalone {
         bail!("the host runs inside the Runode app; quit the app and open the new one");
     }
-    let exe = std::env::current_exe().and_then(std::fs::canonicalize).context("cannot find the runode executable")?;
+    let exe =
+        runode_paths::runode_exe().and_then(std::fs::canonicalize).context("cannot find the runode executable")?;
     let service = runode_autostart::host_service_pid();
     if service.is_some() && running.pid.is_none_or(|pid| Some(pid) == service) {
         writeln!(out, "Handing the sessions over through the runode-host systemd service.")?;

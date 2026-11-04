@@ -86,6 +86,22 @@ impl Dirs {
         self.data_home.as_ref().map(|dir| dir.join("Trash"))
     }
 
+    /// 桌面环境的应用菜单从这里读本用户的 .desktop 文件，即 `data_home` 下的 `applications`。
+    pub fn applications_dir(&self) -> Option<PathBuf> {
+        self.data_home.as_ref().map(|dir| dir.join("applications"))
+    }
+
+    /// 本用户的图标主题目录，即 `data_home` 下的 `icons`。
+    pub fn icons_dir(&self) -> Option<PathBuf> {
+        self.data_home.as_ref().map(|dir| dir.join("icons"))
+    }
+
+    /// 可执行文件不叫 `runode` 时（从 AppImage 跑），shell 按名字找命令行用的目录，即 `data` 下的 `cli`：
+    /// 里面的 `runode` 链接指向它。
+    pub fn cli_link_dir(&self) -> Option<PathBuf> {
+        self.data_file("cli")
+    }
+
     /// runode 的配置文件。
     pub fn config_file(&self) -> Option<PathBuf> {
         self.data_file("config.conf")
@@ -407,6 +423,33 @@ impl Dirs {
     }
 }
 
+/// 另起 runode 自己（宿主、采集进程、重启后的 app），或者把它的位置写进文件和环境变量（登录服务、shell 的
+/// `PATH`）时用的可执行文件：从 AppImage 跑时是那个 AppImage 文件（`appimage`），别的时候是
+/// `std::env::current_exe`。
+pub fn runode_exe() -> std::io::Result<PathBuf> {
+    let exe = std::env::current_exe()?;
+    Ok(appimage_of(&exe, std::env::var_os("APPDIR"), std::env::var_os("APPIMAGE")).unwrap_or(exe))
+}
+
+/// 这个进程是从 AppImage 跑起来的时，那个 AppImage 文件。AppImage 的运行时把镜像挂在一个临时目录上，
+/// 进程在那里面跑：挂载点每次启动都不同，用着它的进程都退出后就卸掉，所以不能拿里面的路径另起进程或者记下来。
+pub fn appimage() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    appimage_of(&exe, std::env::var_os("APPDIR"), std::env::var_os("APPIMAGE"))
+}
+
+/// 运行时给 AppImage 里的程序设 `APPDIR`（挂载点）和 `APPIMAGE`（镜像文件）。这两个变量会传给子进程，从
+/// AppImage 里拉起的 shell 再跑别的 runode 时也看得到，所以只在可执行文件 `exe` 确实在 `appdir` 里时才算数。
+fn appimage_of(exe: &Path, appdir: Option<OsString>, appimage: Option<OsString>) -> Option<PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let appdir = PathBuf::from(appdir.filter(|dir| !dir.is_empty())?);
+    let appimage = PathBuf::from(appimage?);
+    (appdir.is_absolute() && exe.starts_with(&appdir) && appimage.is_absolute() && appimage.is_file())
+        .then_some(appimage)
+}
+
 /// `lock` 这个锁文件这时有进程锁着（宿主用 `File::try_lock` 拿锁）。文件不在、打不开时算没有。试的是共享锁：
 /// NFS 上排他锁要文件以写方式打开，只读打开时报错，就看不出有人锁着。
 fn locked(lock: &Path) -> bool {
@@ -602,6 +645,28 @@ mod tests {
         let profile = dirs(&[("USERPROFILE", "/users/me")]);
         assert_eq!(profile.home, cfg!(windows).then(|| "/users/me".into()));
         assert_eq!(dirs(&[("HOME", "/home/me")]).home, Some("/home/me".into()));
+    }
+
+    /// 只有可执行文件在 `APPDIR` 里时才认 `APPIMAGE`：AppImage 里拉起的 shell 继承了这两个变量，在那里跑的
+    /// 别的 runode 不能把自己当成那个 AppImage。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_appimage_counts_only_from_inside_its_mount() {
+        let root = std::env::temp_dir().join(format!("runode-paths-appimage-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let image = root.join("Runode.AppImage");
+        std::fs::write(&image, b"").unwrap();
+        let mount = "/tmp/.mount_RunodeAb12";
+        let inside = Path::new("/tmp/.mount_RunodeAb12/usr/bin/runode");
+        let of = |exe: &Path, appdir: &str, appimage: &Path| {
+            appimage_of(exe, Some(appdir.into()), Some(appimage.as_os_str().to_owned()))
+        };
+        assert_eq!(of(inside, mount, &image), Some(image.clone()));
+        assert_eq!(of(Path::new("/home/me/.local/lib/runode/runode"), mount, &image), None);
+        assert_eq!(of(inside, "", &image), None);
+        assert_eq!(of(inside, mount, &root.join("gone.AppImage")), None);
+        assert_eq!(appimage_of(inside, None, Some(image.as_os_str().to_owned())), None);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// Windows 上 `HOME` 下已有数据时接着用 `HOME`，`USERPROFILE` 下后来有了目录也一样。

@@ -127,7 +127,7 @@ pub fn hand_over(exe: &Path, timing: Timing) -> Outcome {
 /// systemd 服务的重载拉起它），结果写到标准输出、原因写到标准错误。返回进程的退出码。
 pub fn upgrade() -> i32 {
     use std::io::Write as _;
-    let outcome = match std::env::current_exe() {
+    let outcome = match runode_paths::runode_exe() {
         Ok(exe) => hand_over(&exe, Timing::default()),
         Err(err) => Outcome::Failed(format!("cannot tell where runode is: {err}")),
     };

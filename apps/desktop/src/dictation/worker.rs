@@ -158,7 +158,7 @@ fn lock(child: &Mutex<Child>) -> std::sync::MutexGuard<'_, Child> {
 }
 
 fn spawn() -> anyhow::Result<Worker> {
-    let mut command = Command::new(std::env::current_exe()?);
+    let mut command = Command::new(runode_paths::runode_exe()?);
     command.arg("--speech").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     crate::subprocess::hide_window(&mut command);
     let mut child = command.spawn().context("cannot start the speech process")?;

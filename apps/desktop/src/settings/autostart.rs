@@ -73,7 +73,7 @@ impl SettingsView {
             let result = if runode_autostart::is_installed(kind, &dirs) {
                 runode_autostart::uninstall(kind, &dirs).map(drop)
             } else {
-                std::env::current_exe()
+                runode_paths::runode_exe()
                     .and_then(std::fs::canonicalize)
                     .and_then(|exe| runode_autostart::install(kind, &dirs, &exe, runode_autostart::Start::Now))
                     .map(drop)

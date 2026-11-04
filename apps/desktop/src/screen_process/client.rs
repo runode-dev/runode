@@ -148,12 +148,16 @@ fn launch(exe: &Path) -> io::Result<Option<crate::desktop_session::Scheduled>> {
     }
 }
 
-/// 拉起采集进程用的可执行文件。在 .app 里跑时就是自己，系统按 app 记授权；不在 .app 里时（经 ssh 装在
-/// 按构建分开的目录里的那份）用 `Dirs::screen_exe_file`，按需从自己复制过去：系统按路径记授权，路径一换，
-/// 屏幕录制和辅助功能就得重新打开，系统设置里还多出一个同名的程序。复制不成时退回用自己。
+/// 拉起采集进程用的可执行文件。macOS 上在 .app 里跑时就是自己，系统按 app 记授权；不在 .app 里时（经 ssh
+/// 装在按构建分开的目录里的那份）用 `Dirs::screen_exe_file`，按需从自己复制过去：系统按路径记授权，路径一换，
+/// 屏幕录制和辅助功能就得重新打开，系统设置里还多出一个同名的程序。复制不成时退回用自己。别的系统上是
+/// `runode_paths::runode_exe`：采集进程和拉起它的进程脱开，可能比它活得久。
 fn screen_exe() -> io::Result<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return runode_paths::runode_exe();
+    }
     let exe = std::env::current_exe()?;
-    if !cfg!(target_os = "macos") || exe.components().any(|part| part.as_os_str().to_string_lossy().ends_with(".app")) {
+    if exe.components().any(|part| part.as_os_str().to_string_lossy().ends_with(".app")) {
         return Ok(exe);
     }
     let Some(fixed) = runode_paths::Dirs::from_env().screen_exe_file() else { return Ok(exe) };

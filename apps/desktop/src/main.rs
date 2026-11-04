@@ -16,6 +16,8 @@ mod about;
 mod alerts;
 mod assets;
 mod config;
+#[cfg(target_os = "linux")]
+mod desktop_entry;
 #[cfg(windows)]
 mod desktop_session;
 mod dictation;
@@ -109,6 +111,10 @@ fn main() {
     if args == ["--speech"] {
         std::process::exit(dictation::worker::run());
     }
+    #[cfg(target_os = "linux")]
+    if args == ["--desktop-entry"] {
+        std::process::exit(desktop_entry::run());
+    }
     if args == ["--ssh-screen"] {
         std::process::exit(screen_process::ssh::run());
     }
@@ -141,7 +147,7 @@ fn main() {
                 .iter()
                 .all(|key| std::env::var_os(key).is_none_or(|value| value.is_empty()))
         {
-            env.launch_host = std::env::current_exe().ok();
+            env.launch_host = runode_paths::runode_exe().ok();
         }
         runode_cli::prepare_console();
         let code = runode_cli::run(&args, &env, &mut std::io::stdout().lock(), &mut std::io::stderr().lock());
@@ -157,6 +163,8 @@ fn main() {
     // 在后台线程里读配置、定宿主怎么跑、连上它，再提前拉起第一个 shell（启动要几十毫秒），和 GPUI
     // 初始化同时进行；主线程第一次用到宿主时等它连好。
     host_client::start(prespawn::start());
+    #[cfg(target_os = "linux")]
+    desktop_entry::refresh();
 
     application().with_assets(ui::icons::Assets).run(|cx: &mut App| {
         startup::mark("app_run");

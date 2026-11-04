@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Runode
+GenericName=Terminal
+Comment=A terminal built for AI coding agents
+Comment[zh_CN]=给 AI 编程 agent 准备的终端
+Comment[zh_TW]=為 AI 程式設計 agent 準備的終端機
+Exec=runode
+Icon=dev.runode.app
+Terminal=false
+Categories=System;TerminalEmulator;Development;
+Keywords=terminal;shell;agent;claude;codex;
+StartupWMClass=dev.runode.app
+StartupNotify=true

@@ -68,7 +68,7 @@ pub(super) fn program() -> io::Result<PathBuf> {
     if let Some(exe) = std::env::var_os("RUNODE_TEST_ASKPASS") {
         return Ok(exe.into());
     }
-    let exe = std::env::current_exe()?;
+    let exe = runode_paths::runode_exe()?;
     #[cfg(windows)]
     let exe = Some(exe.with_file_name("rn.exe")).filter(|rn| rn.is_file()).unwrap_or(exe);
     Ok(exe)

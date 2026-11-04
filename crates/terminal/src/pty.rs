@@ -139,11 +139,14 @@ pub fn set_current_thread_interactive() {
     }
 }
 
-/// 拉起 runode 的那个终端和 agent 会话给子进程设的标识，说的不是 runode 的终端，shell 不继承：
-/// Claude Code 带着 `CLAUDE_CODE_CHILD_SESSION` 启动时不在 `~/.claude/sessions` 登记自己的对话，
-/// 重启后接不回；tmux 见到 `TMUX` 当成嵌套。只列这些程序自己设的名字，`CLAUDE_CODE_` 开头的
-/// 还有用户自己的设置。
+/// 拉起 runode 的那个终端和 agent 会话给子进程设的标识，以及 AppImage 的运行时给 runode 自己设的变量，说的
+/// 不是 runode 的终端，shell 不继承：Claude Code 带着 `CLAUDE_CODE_CHILD_SESSION` 启动时不在
+/// `~/.claude/sessions` 登记自己的对话，重启后接不回；tmux 见到 `TMUX` 当成嵌套；程序见到 `APPIMAGE` 会以为
+/// 自己是从那个 AppImage 跑的。只列这些程序自己设的名字，`CLAUDE_CODE_` 开头的还有用户自己的设置。
 const OUTER_SESSION_VARS: &[&str] = &[
+    "APPDIR",
+    "APPIMAGE",
+    "ARGV0",
     "CLAUDECODE",
     "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDE_CODE_ENTRYPOINT",
@@ -159,6 +162,7 @@ const OUTER_SESSION_VARS: &[&str] = &[
     "KITTY_WINDOW_ID",
     "LC_TERMINAL",
     "LC_TERMINAL_VERSION",
+    "OWD",
     "STY",
     "TERMINAL_EMULATOR",
     "TERM_SESSION_ID",
@@ -307,7 +311,8 @@ mod environment_tests {
     #[test]
     fn the_shell_does_not_inherit_the_outer_session() {
         let mut cmd = CommandBuilder::new("sh");
-        let dropped = ["CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "ITERM_SESSION_ID", "TMUX", "VSCODE_IPC_HOOK_CLI"];
+        let dropped =
+            ["APPIMAGE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "ITERM_SESSION_ID", "TMUX", "VSCODE_IPC_HOOK_CLI"];
         let kept = ["CLAUDE_CODE_USE_BEDROCK", "KITTY_CONFIG_DIRECTORY", "RUNODE_SESSION", "TMUX_TMPDIR"];
         for key in dropped.iter().chain(&kept) {
             cmd.env(key, "1");

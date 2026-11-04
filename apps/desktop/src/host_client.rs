@@ -258,7 +258,7 @@ pub fn reconnect() -> Result<()> {
         Mode::InProcess => in_process(false),
         Mode::Standalone => {
             let socket = socket_path().ok_or_else(|| anyhow!("no place for the host socket"))?;
-            let exe = std::env::current_exe()?;
+            let exe = runode_paths::runode_exe()?;
             match launch::connect_or_launch(link, &socket, &exe) {
                 Ok(()) => Mode::Standalone,
                 Err(ConnectError::NotStandalone) => {
@@ -445,7 +445,7 @@ fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
 #[cfg(unix)]
 fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
     let started = Instant::now();
-    let outcome = match std::env::current_exe() {
+    let outcome = match runode_paths::runode_exe() {
         Ok(exe) => handoff::hand_over(&exe, handoff::Timing::default()),
         Err(err) => handoff::Outcome::Failed(format!("cannot tell where this app is: {err}")),
     };
@@ -578,7 +578,7 @@ fn end_old_host(cx: &mut App) {
 
 /// 连上 socket 上单独一个进程的宿主，没有就拉起一个，见 `launch::connect_or_launch`。
 fn launch_host(socket: &Path) -> Result<(), ConnectError> {
-    std::env::current_exe().map_err(ConnectError::Io).and_then(|exe| launch::connect_or_launch(&LINK, socket, &exe))
+    runode_paths::runode_exe().map_err(ConnectError::Io).and_then(|exe| launch::connect_or_launch(&LINK, socket, &exe))
 }
 
 /// 单独一个进程的宿主连不上也拉不起来（`err`）：这次跑在 app 里，告诉用户。协议对不上、socket 上
@@ -607,11 +607,14 @@ fn fall_back(err: ConnectError) -> Mode {
 /// 目录追加到 `PATH` 末尾。设在环境里而不是只在 shell 集成里定义函数，是因为 agent 跑命令时另起
 /// 非交互的 shell，不加载集成脚本，但继承环境。追加在末尾，不盖过用户自己装的同名程序。
 pub(crate) fn expose_cli(host: &Host) {
-    let Ok(exe) = std::env::current_exe() else {
+    let Ok(exe) = runode_paths::runode_exe() else {
         return;
     };
+    let dirs = runode_paths::Dirs::from_env();
     #[cfg(unix)]
-    let exe = bridge::stable_exe(&runode_paths::Dirs::from_env(), &exe);
+    let exe = bridge::stable_exe(&dirs, &exe);
+    #[cfg(target_os = "linux")]
+    let exe = named_runode(&dirs, exe);
     if let Some(path) = exe.parent().and_then(|dir| path_with(std::env::var_os("PATH"), dir)) {
         host.set_env("PATH", path);
     }
@@ -619,6 +622,24 @@ pub(crate) fn expose_cli(host: &Host) {
     #[cfg(windows)]
     let exe = Some(exe.with_file_name("rn.exe")).filter(|rn| rn.is_file()).unwrap_or(exe);
     host.set_env(runode_cli::ENV_BIN, exe);
+}
+
+/// 可执行文件不叫 `runode`（AppImage）时，shell 按名字找不到它：在 `Dirs::cli_link_dir` 里放一个指向它的
+/// `runode` 链接，交出链接；放不成时原样交出。
+#[cfg(target_os = "linux")]
+fn named_runode(dirs: &runode_paths::Dirs, exe: PathBuf) -> PathBuf {
+    if exe.file_name().is_some_and(|name| name == "runode") {
+        return exe;
+    }
+    let Some(dir) = dirs.cli_link_dir() else { return exe };
+    let link = dir.join("runode");
+    match std::fs::create_dir_all(&dir).and_then(|()| bridge::relink(&exe, &link)) {
+        Ok(()) => link,
+        Err(err) => {
+            tracing::warn!("cannot link {} to {}: {err}", link.display(), exe.display());
+            exe
+        }
+    }
 }
 
 /// `path` 末尾追加 `dir` 后的 `PATH`；已经在里面时原样返回，拼不出来（目录名里有分隔符）时为 `None`。

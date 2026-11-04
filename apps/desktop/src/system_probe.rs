@@ -169,8 +169,12 @@ pub(crate) struct Port {
 #[cfg(not(windows))]
 pub(crate) fn processes(roots: &HashSet<u32>) -> Procs {
     let text = output(Command::new("/bin/ps").args(["-axo", "pid=,ppid=,rss=,%cpu=,args="]), PROBE_TIMEOUT);
-    let exe = std::env::current_exe().map(|exe| exe.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut procs = Procs::new(parse_ps(&text, &exe));
+    let exe = runode_paths::runode_exe().map(|exe| exe.to_string_lossy().into_owned()).unwrap_or_default();
+    #[cfg_attr(not(target_os = "linux"), expect(unused_mut, reason = "只有 Linux 上要去掉 AppImage 的运行时"))]
+    let mut parsed = parse_ps(&text, &exe);
+    #[cfg(target_os = "linux")]
+    drop_appimage_runtimes(&mut parsed);
+    let mut procs = Procs::new(parsed);
     let used: HashSet<u32> = roots
         .iter()
         .flat_map(|&root| procs.subtree(root))
@@ -184,6 +188,18 @@ pub(crate) fn processes(roots: &HashSet<u32>) -> Procs {
         }
     }
     procs
+}
+
+/// 从 AppImage 跑时，运行时 fork 出来给镜像供文件的 FUSE 进程和它服务的 runode 进程命令行一模一样，不能当成
+/// runode 的子进程：它的可执行文件是 AppImage 文件本身，runode 自己的在挂载点里。
+#[cfg(target_os = "linux")]
+fn drop_appimage_runtimes(procs: &mut HashMap<u32, Proc>) {
+    let Some(image) = runode_paths::appimage() else { return };
+    for (pid, proc) in procs.iter_mut() {
+        if proc.helper.is_some() && std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|exe| exe == image) {
+            proc.helper = None;
+        }
+    }
 }
 
 /// 一个进程的启动时刻、累计 CPU 时间（都按时钟滴答计）和问的时刻。
