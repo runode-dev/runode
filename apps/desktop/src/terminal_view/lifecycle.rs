@@ -590,6 +590,7 @@ impl TerminalView {
     /// 的马上打；等了 `PROMPT_TIMEOUT` 还没等到时照样打，和 `runode open -- 命令` 一样。
     pub fn run_command(&mut self, command: String, cx: &mut Context<Self>) {
         self.pending_command = Some(command);
+        self.command_overdue = false;
         self.flush_pending_command(false);
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(PROMPT_TIMEOUT).await;
@@ -598,14 +599,23 @@ impl TerminalView {
         .detach();
     }
 
+    /// 打出 `pending_command`：shell 出了提示符，或者 `force`（等够了 `PROMPT_TIMEOUT`）时。会话还没开好（远端
+    /// 的会话开得慢）时留着，开好后宿主发来第一批事件时再打。
     fn flush_pending_command(&mut self, force: bool) {
-        if self.pending_command.is_none() || !(force || self.screen.meta().prompt_cwd.is_some()) {
+        if self.pending_command.is_none() {
             return;
         }
-        let (Some(id), Some(command)) = (self.id, self.pending_command.take()) else {
+        self.command_overdue |= force;
+        if !(self.command_overdue || self.screen.meta().prompt_cwd.is_some()) {
+            return;
+        }
+        let Some(id) = self.id else {
             return;
         };
-        self.host_link.input(id, format!("{command}\r").as_bytes());
+        if let Some(command) = self.pending_command.take() {
+            self.command_overdue = false;
+            self.host_link.input(id, format!("{command}\r").as_bytes());
+        }
     }
 
     fn apply_changes(&mut self, changes: Changes, window: &mut Window, cx: &mut Context<Self>) {
@@ -1105,6 +1115,7 @@ impl TerminalView {
             start_pending: false,
             open_waiting: Vec::new(),
             pending_command: None,
+            command_overdue: false,
             task: None,
             search_field: None,
             menu: None,

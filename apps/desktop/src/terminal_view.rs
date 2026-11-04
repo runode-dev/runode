@@ -246,6 +246,8 @@ pub struct TerminalView {
     start_pending: bool,
     /// 等 shell 出了提示符再打进去的命令，见 `run_command`。
     pending_command: Option<String>,
+    /// `pending_command` 已经等过了 `PROMPT_TIMEOUT`，会话一开好就打，不再等提示符。
+    command_overdue: bool,
     /// 从命令菜单开来跑的那条命令：分屏标题写它的名字，几个命令的终端分得开；再跑同一条命令时按它找回这个终端。
     task: Option<TaskRun>,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
