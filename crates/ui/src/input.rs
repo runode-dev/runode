@@ -54,6 +54,8 @@ pub struct InputState {
     reversed: bool,
     /// 正在组的字在 `text` 里的范围，确认后才算进 `query`。
     marked: Option<Range<usize>>,
+    /// 开始组字时被换掉的文字（组字前选中的）：组着字时照旧算在 `query` 里，确认上屏或组的字删光了才算换掉。
+    replaced: String,
     /// 最近一次经 `InputEvent::Changed` 交出去的文字，不含组字。
     query: String,
     /// 按住鼠标拖选中；双击后拖动按词扩展。
@@ -147,6 +149,7 @@ impl InputState {
             selected: end..end,
             reversed: false,
             marked: None,
+            replaced: String::new(),
             query,
             drag: None,
             history: History::default(),
@@ -301,10 +304,7 @@ impl InputState {
 
     /// 去掉组字后的文字有变化时发 `InputEvent::Changed`。
     fn sync_query(&mut self, cx: &mut Context<Self>) {
-        let committed = match &self.marked {
-            Some(marked) => [&self.text[..marked.start], &self.text[marked.end..]].concat(),
-            None => self.text.clone(),
-        };
+        let committed = committed_text(&self.text, self.marked.as_ref(), &self.replaced);
         if committed != self.query {
             self.query = committed.clone();
             cx.emit(InputEvent::Changed(committed));
@@ -479,6 +479,14 @@ pub(super) fn next_char(text: &str, offset: usize) -> usize {
 
 /// 输入法送来的 `typed` 滤掉控制字符后剩 `kept`，要换掉 `range`：只有控制字符（按 tab 送来的 `\t`）
 /// 时不算输入，免得把选中的文字删掉；本来就是空串的是删除，照办。组字（`composing`）时照常换。
+/// 去掉组字后的文字：`text` 里正在组的 `marked` 那段换回开始组字时被它换掉的 `replaced`。
+pub(super) fn committed_text(text: &str, marked: Option<&Range<usize>>, replaced: &str) -> String {
+    match marked {
+        Some(marked) => [&text[..marked.start], replaced, &text[marked.end..]].concat(),
+        None => text.to_owned(),
+    }
+}
+
 pub(super) fn ignores_input(typed: &str, kept: &str, range: &Range<usize>, composing: bool) -> bool {
     kept.is_empty() && !composing && (range.is_empty() || !typed.is_empty())
 }
@@ -681,6 +689,7 @@ impl EntityInputHandler for InputState {
             .unwrap_or(self.selected.clone());
         if self.marked.is_none() {
             self.record(Some(EditKind::Insert));
+            self.replaced = self.text[range.clone()].to_owned();
         }
         self.text.replace_range(range.clone(), text);
         self.marked = (!text.is_empty()).then(|| range.start..range.start + text.len());
@@ -1071,6 +1080,14 @@ mod tests {
         assert_eq!(pasted_line("\r\n\t\n a\tb").as_deref(), Some(" ab"));
         assert_eq!(pasted_line(""), None);
         assert_eq!(pasted_line("\n\r\n\t\n"), None);
+    }
+
+    /// 在选中的文字上组字时，选中的照旧算在已确认的文字里，组的字不算。
+    #[test]
+    fn composing_over_a_selection_keeps_it_committed() {
+        assert_eq!(committed_text("a拼c", Some(&(1..4)), "b"), "abc");
+        assert_eq!(committed_text("a拼c", Some(&(1..4)), ""), "ac");
+        assert_eq!(committed_text("abc", None, "x"), "abc");
     }
 
     /// 只有控制字符的输入不删选中的文字；空串是删除，照办。

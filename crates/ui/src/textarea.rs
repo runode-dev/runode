@@ -23,8 +23,8 @@ use gpui::{
 use gpui::accesskit::ActionData;
 
 use super::input::{
-    EditKind, Frame, History, Snapshot, by_word, copy_selection, forward_frame, ignores_input, next_char, next_word,
-    offset_to_utf16, previous_char, previous_word, range_from_utf16, range_to_utf16, to_edge,
+    EditKind, Frame, History, Snapshot, by_word, committed_text, copy_selection, forward_frame, ignores_input,
+    next_char, next_word, offset_to_utf16, previous_char, previous_word, range_from_utf16, range_to_utf16, to_edge,
 };
 use crate::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use element::TextareaText;
@@ -65,6 +65,8 @@ pub struct TextareaState {
     goal_x: Option<Pixels>,
     /// 正在组的字在 `content` 里的范围。
     marked: Option<Range<usize>>,
+    /// 开始组字时被换掉的文字（组字前选中的）：组着字时照旧算在 `committed` 里，确认上屏或组的字删光了才算换掉。
+    replaced: String,
     /// 文字的样式段（语法高亮），按 `content` 里的字节范围从前到后排、互不重叠。改文字时跟着挪，
     /// 被改到的那部分去掉，等调用方按新文字重算后经 `set_highlights` 换上。
     highlights: Vec<(Range<usize>, HighlightStyle)>,
@@ -128,6 +130,7 @@ impl TextareaState {
             upstream: false,
             goal_x: None,
             marked: None,
+            replaced: String::new(),
             highlights: Vec::new(),
             committed: String::new(),
             placeholder: SharedString::default(),
@@ -396,10 +399,7 @@ impl TextareaState {
     fn sync(&mut self, cx: &mut Context<Self>) -> bool {
         self.version += 1;
         self.autoscroll = true;
-        let committed = match &self.marked {
-            Some(marked) => [&self.content[..marked.start], &self.content[marked.end..]].concat(),
-            None => self.content.clone(),
-        };
+        let committed = committed_text(&self.content, self.marked.as_ref(), &self.replaced);
         let changed = committed != self.committed;
         if changed {
             self.committed = committed;
@@ -784,6 +784,7 @@ impl EntityInputHandler for TextareaState {
             .unwrap_or(self.selected.clone());
         if self.marked.is_none() {
             self.record(Some(EditKind::Insert));
+            self.replaced = self.content[range.clone()].to_owned();
         }
         self.shift_highlights(&range, text.len());
         self.content.replace_range(range.clone(), text);
