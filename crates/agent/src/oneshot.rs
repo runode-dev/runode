@@ -1,5 +1,5 @@
 //! 让 agent 的命令行不进交互、只打印结果地跑一次：各家的调用方式（`Cli`），和在后台限时跑完、取它的
-//! 输出（`run`）。这些调用都关掉工具或者只读，不留会话记录。模型不在这里选，由调用方加在参数里，比如
+//! 输出（`run`）。这些调用都关掉执行命令、读写文件的工具，不留会话记录。模型不在这里选，由调用方加在参数里，比如
 //! `--model sonnet`。
 
 use std::{
@@ -33,15 +33,6 @@ pub(crate) const KILL_GRACE: Duration = Duration::from_secs(1);
 /// 等 agent 退出时最多隔这么久看一次。
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-/// agent 打印出来的是什么。
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Output {
-    /// 就是结果。
-    Text,
-    /// OpenCode 的 `--format json`：一行一个事件，结果在 `text` 事件里。
-    OpenCodeEvents,
-}
-
 /// 一家 agent 只打印结果的命令行。
 pub struct Cli {
     pub binary: &'static str,
@@ -49,7 +40,6 @@ pub struct Cli {
     pub args: &'static [&'static str],
     /// 调用方加的参数后面的参数：放提示词和必须排在最后的位置参数。
     pub tail: &'static [&'static str],
-    pub output: Output,
 }
 
 pub const CLAUDE: Cli = Cli {
@@ -68,7 +58,6 @@ pub const CLAUDE: Cli = Cli {
         "--no-session-persistence",
     ],
     tail: &[],
-    output: Output::Text,
 };
 
 pub const CODEX: Cli = Cli {
@@ -86,81 +75,18 @@ pub const CODEX: Cli = Cli {
         "unified_exec",
     ],
     tail: &[],
-    output: Output::Text,
 };
 
 pub const PI: Cli = Cli {
     binary: "pi",
     args: &["--print", "--no-session", "--no-tools", "--no-skills", "--no-context-files", "--mode", "text"],
     tail: &[],
-    output: Output::Text,
 };
 
 pub const OMP: Cli = Cli {
     binary: "omp",
     args: &["--print", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-rules", "--mode", "text"],
     tail: &[],
-    output: Output::Text,
-};
-
-pub const OPENCODE: Cli = Cli {
-    binary: "opencode",
-    args: &["run", "--agent", "plan", "--format", "json"],
-    tail: &[],
-    output: Output::OpenCodeEvents,
-};
-
-pub const OPENCODE2: Cli = Cli {
-    binary: "opencode2",
-    args: &["run", "--agent", "plan", "--format", "json"],
-    tail: &[],
-    output: Output::OpenCodeEvents,
-};
-
-pub const CURSOR: Cli = Cli {
-    binary: "cursor-agent",
-    args: &["--print", "--mode", "ask", "--trust", "--output-format", "text"],
-    tail: &[PROMPT],
-    output: Output::Text,
-};
-
-pub const MUSE: Cli = Cli {
-    binary: "muse",
-    args: &[
-        "exec",
-        "--no-session-log",
-        "--approval-mode",
-        "never",
-        "--disable-sandbox",
-        "--disable-shell",
-        "--disable-write",
-        "--disable-web-tools",
-    ],
-    tail: &["--", PROMPT],
-    output: Output::Text,
-};
-
-pub const DSH: Cli = Cli {
-    binary: "dsh",
-    // `-` 是 dsh 明说的「从标准输入读」，不写它时就算标准输入是管道也报缺任务。
-    args: &["--profile", "headless"],
-    tail: &["-"],
-    output: Output::Text,
-};
-
-pub const COPILOT: Cli = Cli {
-    binary: "copilot",
-    args: &["--silent", "--stream", "off", "--no-custom-instructions"],
-    tail: &["--prompt", PROMPT],
-    output: Output::Text,
-};
-
-pub const ANTIGRAVITY: Cli = Cli {
-    binary: "agy",
-    args: &["--sandbox"],
-    // 写成 `--print=…`：提示词以 `-` 开头时也归 `--print`，不被当成别的选项。
-    tail: &["--print={prompt}"],
-    output: Output::Text,
 };
 
 impl Cli {

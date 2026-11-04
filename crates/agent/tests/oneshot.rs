@@ -17,13 +17,12 @@ fn puts_the_prompt_on_argv_or_stdin() {
     let tools = args.iter().position(|arg| arg == "--tools").unwrap();
     assert_eq!(args[tools + 1], "");
     assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
-    let (args, stdin) = oneshot::ANTIGRAVITY.command_line(vec![], "-P");
-    assert_eq!(args, ["--sandbox", "--print=-P"]);
-    assert_eq!(stdin, None);
+    let (args, _) = oneshot::CODEX.command_line(vec![], "P");
+    for feature in ["shell_tool", "unified_exec"] {
+        assert!(args.windows(2).any(|pair| pair == ["--disable", feature]), "{args:?}");
+    }
     let (args, stdin) = with_prompt(vec!["--ask".into(), "x{prompt}".into()], "P");
     assert_eq!((args, stdin), (vec!["--ask".to_owned(), "xP".to_owned()], None));
-    let (args, _) = oneshot::MUSE.command_line(vec!["--model".into(), "m".into()], "P");
-    assert_eq!(&args[args.len() - 4..], ["--model", "m", "--", "P"]);
 }
 
 /// 提示词经标准输入给，比管道的缓冲大也不卡；失败时报标准错误。

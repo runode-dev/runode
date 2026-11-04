@@ -9,9 +9,8 @@ use gpui::{AnyElement, FontWeight, Hsla, Pixels, div, img, prelude::*, svg};
 use runode_types::agent::AgentKind;
 
 use crate::ui::icons::agent_logos::{
-    AMP, ANTIGRAVITY, CLAUDE, CLINE, CODEBUDDY, CODEX, CURSOR, DEEPSEEK, DEVIN, GEMINI, GITHUB_COPILOT, GOOSE, GROK,
-    HERMES, JULES, JUNIE, KILO, KIMI, KIRO, MASTRACODE, MISTRAL_VIBE, MUSE, OMP, OPENCODE, OPENHANDS, PI, QODER, QWEN,
-    TRAE,
+    AMP, ANTIGRAVITY, CLAUDE, CLINE, CODEBUDDY, CODEX, CURSOR, DEVIN, GEMINI, GITHUB_COPILOT, GOOSE, GROK, HERMES,
+    JULES, JUNIE, KILO, KIMI, KIRO, MASTRACODE, MISTRAL_VIBE, MUSE, OMP, OPENCODE, OPENHANDS, PI, QODER, QWEN, TRAE,
 };
 
 /// 一个 logo 怎么画：按原色，染成前景色，还是没有 logo、写名字的头一个字母。
@@ -100,10 +99,6 @@ pub(in crate::window) fn accent(kind: AgentKind) -> Option<u32> {
     Some(brand_color(kind).unwrap_or(0x6B7280))
 }
 
-/// 不在 `AgentKind` 里的 DeepSeek Harness 的 logo，按原色画：runode 认不出终端里跑的是它，只在 Git
-/// 面板写提交说明的 agent 菜单里用。
-pub(crate) const DEEPSEEK_LOGO: &str = DEEPSEEK;
-
 /// 按原色画 `path` 这个 logo，边长 `size`。
 pub(in crate::window) fn colored_logo(path: &'static str, size: Pixels) -> AnyElement {
     img(path).flex_none().size(size).into_any_element()
@@ -158,8 +153,7 @@ mod tests {
                 None => panic!("{kind:?} has neither a logo nor an initial"),
             }
         }
-        // 不对应哪个 `AgentKind` 的 logo 另外数。
-        assert_eq!(files + [DEEPSEEK_LOGO].len(), FILES.len());
+        assert_eq!(files, FILES.len());
         assert!(logo_of(AgentKind::Other).is_none());
     }
 }

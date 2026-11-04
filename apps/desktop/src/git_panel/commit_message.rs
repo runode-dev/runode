@@ -17,7 +17,7 @@ use std::{
 };
 
 use crate::git_view::git_error_text;
-use runode_agent::oneshot::{self, Output, RunError};
+use runode_agent::oneshot::{self, RunError};
 use runode_paths::Dirs;
 use serde::{Deserialize, Serialize};
 
@@ -195,11 +195,7 @@ pub(crate) fn generate(
     let stdout = oneshot::run(program, &args, stdin, dir, path, &command.env, TIMEOUT)
         .map_err(|err| run_error_text(&command.binary, err))?;
     drop(scratch);
-    let text = match command.agent.map_or(Output::Text, |agent| agent.cli.output) {
-        Output::Text => stdout,
-        Output::OpenCodeEvents => opencode_text(&stdout)?,
-    };
-    let message = clean(&text);
+    let message = clean(&stdout);
     if message.is_empty() {
         return Err(rust_i18n::t!("git.ai_message.empty").into_owned());
     }
@@ -461,34 +457,6 @@ fn run_error_text(binary: &str, err: RunError) -> String {
     }
 }
 
-/// OpenCode `--format json` 的输出里最后一步的文字；出错的事件报它的错。
-fn opencode_text(output: &str) -> Result<String, String> {
-    let mut parts: Vec<(String, String)> = Vec::new();
-    for line in output.lines().filter(|line| !line.trim().is_empty()) {
-        let event: serde_json::Value =
-            serde_json::from_str(line).map_err(|_| "OpenCode returned invalid JSON events.".to_owned())?;
-        let text = |pointer: &str| event.pointer(pointer).and_then(serde_json::Value::as_str);
-        match text("/type") {
-            Some("step_start") => parts.clear(),
-            Some("error") => {
-                let message = text("/error/data/message").or(text("/error/message")).or(text("/error/name"));
-                return Err(message.unwrap_or("OpenCode reported an error.").to_owned());
-            }
-            Some("text") => {
-                if let Some(part) = text("/part/text") {
-                    let id = text("/part/id").map_or_else(|| format!("#{}", parts.len()), str::to_owned);
-                    match parts.iter_mut().find(|(known, _)| *known == id) {
-                        Some((_, known)) => *known = part.to_owned(),
-                        None => parts.push((id, part.to_owned())),
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(parts.into_iter().map(|(_, text)| text).collect::<Vec<_>>().join("\n"))
-}
-
 /// 去掉 agent 输出里提交说明以外的东西：前后空白、开头的 `<think>…</think>` 推理、把整段包起来的
 /// 代码块。
 fn clean(text: &str) -> String {
@@ -566,17 +534,6 @@ mod tests {
         assert_eq!(clean("\r\n  fix: x\r\n\r\nbody  \n"), "fix: x\n\nbody");
         assert_eq!(clean("<think>hmm</think>\nfix: x"), "fix: x");
         assert_eq!(clean("```text\nfix: x\n```"), "fix: x");
-    }
-
-    #[test]
-    fn reads_opencode_events() {
-        let output = r#"{"type":"text","part":{"id":"a","text":"draft"}}
-{"type":"step_start"}
-{"type":"text","part":{"id":"b","text":"fix: x"}}
-{"type":"text","part":{"id":"b","text":"fix: y"}}"#;
-        assert_eq!(opencode_text(output).unwrap(), "fix: y");
-        assert_eq!(opencode_text(r#"{"type":"error","error":{"message":"boom"}}"#).unwrap_err(), "boom");
-        assert!(opencode_text("oops").is_err());
     }
 
     #[test]

@@ -140,7 +140,6 @@ pub mod agent_logos {
         pub JULES = "jules",
         pub OMP = "omp",
         pub MUSE = "muse",
-        pub DEEPSEEK = "deepseek",
     }
 }
 

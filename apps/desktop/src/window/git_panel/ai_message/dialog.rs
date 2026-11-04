@@ -32,7 +32,7 @@ use crate::{
     },
     window::{
         TITLEBAR_HEIGHT, WindowView,
-        agents::logo::{agent_logo, colored_logo, logo_path},
+        agents::logo::{agent_logo, logo_path},
         files::MenuItem,
     },
 };
@@ -217,7 +217,7 @@ impl WindowView {
             .iter()
             .enumerate()
             .map(|(index, spec)| {
-                let icon = spec.kind.and_then(logo_path).or(spec.logo);
+                let icon = logo_path(spec.kind);
                 let checked = dialog.agent.is_some_and(|agent| agent.id == spec.id);
                 let action = Box::new(SelectCommitAgent { index: Some(index) });
                 Some(MenuItem::checkbox(spec.label.to_owned(), icon, checked, action))
@@ -298,10 +298,7 @@ impl WindowView {
             .child(close);
 
         let (logo, name) = match dialog.agent {
-            Some(spec) => {
-                let logo = spec.kind.and_then(|kind| agent_logo(kind, px(14.), fg));
-                (logo.or_else(|| spec.logo.map(|path| colored_logo(path, px(14.)))), spec.label.to_owned())
-            }
+            Some(spec) => (agent_logo(spec.kind, px(14.), fg), spec.label.to_owned()),
             None => (
                 Some(svg().path(TERMINAL_ICON).flex_none().size(px(14.)).text_color(fg).into_any_element()),
                 rust_i18n::t!("git.ai_message.custom").into_owned(),
