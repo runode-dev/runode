@@ -260,16 +260,17 @@ fn find(chars: &[char], pointer: usize, path_of: impl Fn(&str) -> Option<PathBuf
     if let Some(url) = find_url(chars, pointer) {
         return vec![url];
     }
-    if !link_char(chars[pointer]) {
+    if !path_char(chars[pointer]) {
         return Vec::new();
     }
-    let start = chars[..pointer].iter().rposition(|&c| !link_char(c)).map_or(0, |i| i + 1);
-    let end = chars[pointer..].iter().position(|&c| !link_char(c)).map_or(chars.len(), |i| pointer + i);
+    let start = chars[..pointer].iter().rposition(|&c| !path_char(c)).map_or(0, |i| i + 1);
+    let end = chars[pointer..].iter().position(|&c| !path_char(c)).map_or(chars.len(), |i| pointer + i);
     let mut range = trim(chars, start..end);
     // 网址从协议名开始，前面粘着的（比如 `url=`）不算。
     if let Some(scheme) = scheme_start(&chars[range.clone()]) {
         range.start += scheme;
-        if !range.contains(&pointer) {
+        // 反斜杠不是网址里的字，带着它的不当网址打开。
+        if !range.contains(&pointer) || chars[range.clone()].contains(&'\\') {
             return Vec::new();
         }
         let url: String = chars[range.clone()].iter().collect();
@@ -354,6 +355,11 @@ fn link_char(c: char) -> bool {
     }
 }
 
+/// 能出现在路径里的字：`link_char` 之外还有 Windows 路径的分隔符 `\`。
+fn path_char(c: char) -> bool {
+    link_char(c) || c == '\\'
+}
+
 /// 去掉句末的标点：结尾的 `.,:;!?`，开头的 `,:;!?`（开头的 `.` 是 `./`、`../` 的一部分）。
 fn trim(chars: &[char], mut range: Range<usize>) -> Range<usize> {
     while range.end > range.start && matches!(chars[range.end - 1], '.' | ',' | ':' | ';' | '!' | '?') {
@@ -395,14 +401,20 @@ fn strip_location(text: &str) -> &str {
     text
 }
 
-/// 像路径的文字换成完整路径：`~/` 开头的按家目录 `home`，相对路径按 `cwd`。不查存在与否。
+/// 像路径的文字换成完整路径：`~/` 开头的按家目录 `home`，相对路径按 `cwd`。不查存在与否。Windows 的
+/// 绝对路径（`C:\`、`C:/` 开头的和 UNC 的 `\\服务器\共享`）不管本机是什么系统都原样用：shell 可能在
+/// 别的机器上。
 fn path_of(text: &str, cwd: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
     if text.is_empty() || text == "~" {
         return None;
     }
+    let drive = |text: &str| {
+        let bytes = text.as_bytes();
+        bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/')
+    };
     Some(match text.strip_prefix("~/") {
         Some(rest) => home?.join(rest),
-        None if text.starts_with('/') => PathBuf::from(text),
+        None if text.starts_with('/') || text.starts_with(r"\\") || drive(text) => PathBuf::from(text),
         None => cwd?.join(text),
     })
 }
@@ -527,6 +539,30 @@ mod tests {
             found("+++ b/crates/x.rs", "crates", &["crates/x.rs"]),
             Some(("b/crates/x.rs".into(), path("crates/x.rs")))
         );
+    }
+
+    /// Windows 的路径整个算一个，不在反斜杠处切成几截、各按当前目录去找同名的文件。
+    #[test]
+    fn finds_a_windows_path() {
+        let line = r"error at C:\repo\src\main.rs:12:5, \\server\share\a.txt";
+        let windows = r"C:\repo\src\main.rs";
+        assert_eq!(found(line, "main", &[windows]), Some((format!("{windows}:12:5"), path(windows))));
+        assert_eq!(found(line, "main", &["main.rs", r"src\main.rs"]), None);
+        let unc = r"\\server\share\a.txt";
+        assert_eq!(found(line, "share", &[unc]), Some((unc.into(), path(unc))));
+        // 反斜杠后面的那截不当网址。
+        assert_eq!(found(r"https://x\y", "y", &[]), None);
+        assert_eq!(found(r"see https://x/a\n", "x/a", &[]), Some(("https://x/a".into(), url("https://x/a"))));
+    }
+
+    #[test]
+    fn windows_absolute_paths_ignore_the_directory() {
+        let cwd = Some(Path::new("/cwd"));
+        for text in [r"C:\repo\a.rs", "c:/repo/a.rs", r"\\server\share\a.rs"] {
+            assert_eq!(path_of(text, cwd, None), Some(PathBuf::from(text)), "{text}");
+        }
+        assert_eq!(path_of(r"src\a.rs", cwd, None), Some(Path::new("/cwd").join(r"src\a.rs")));
+        assert_eq!(path_of("C:", cwd, None), Some(Path::new("/cwd").join("C:")));
     }
 
     #[test]
