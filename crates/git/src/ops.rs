@@ -273,8 +273,7 @@ impl Repo {
         // `run` 里边读边截断；等真碰上这种仓库再改。
         let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
         // 只是读，不执行仓库配置的过滤器，也不进子模块里看有没有改动（进去会执行子模块配置的）。
-        let filters = filter_overrides(&self.root);
-        let env: Vec<_> = filters.iter().map(|(key, value)| (key.as_str(), value.as_str())).collect();
+        let env = filter_overrides(&self.root);
         let diff = |target: &str| {
             let args =
                 ["-c", threshold.as_str()].into_iter().chain(DIFF).chain(["--ignore-submodules=dirty", target, "--"]);

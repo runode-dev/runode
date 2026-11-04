@@ -32,21 +32,24 @@ pub(crate) fn run<S: AsRef<OsStr>>(
     args: impl IntoIterator<Item = S>,
     input: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
-    run_for(dir, args, input, RUN_TIMEOUT, &[])
+    run_for(dir, args, input, RUN_TIMEOUT, &NO_ENV)
 }
 
+/// 不另设环境变量。
+const NO_ENV: [(&str, &str); 0] = [];
+
 /// 在 `dir` 里跑一条 git 命令，`input` 给了就写进标准输入，最多跑 `timeout`，另外设上 `env` 里的环境变量。
-pub(crate) fn run_for<S: AsRef<OsStr>>(
+pub(crate) fn run_for<S: AsRef<OsStr>, K: AsRef<OsStr>, V: AsRef<OsStr>>(
     dir: &Path,
     args: impl IntoIterator<Item = S>,
     input: Option<&[u8]>,
     timeout: Duration,
-    env: &[(&str, &str)],
+    env: &[(K, V)],
 ) -> Result<Vec<u8>> {
     let mut command = git_command(dir)?;
     command
         .args(args)
-        .envs(env.iter().copied())
+        .envs(env.iter().map(|(key, value)| (key, value)))
         .env("GIT_TERMINAL_PROMPT", "0")
         // 关掉「hint:」建议：本地化后的提示不以「hint:」开头，事后滤不掉。
         .env("GIT_ADVICE", "0")
@@ -258,7 +261,7 @@ mod tests {
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
         let started = Instant::now();
         // 给足时间让钩子跑起来、记下进程号：整套测试一起跑时机器很忙。
-        let err = run_for(&dir, commit, None, Duration::from_secs(3), &[]).unwrap_err();
+        let err = run_for(&dir, commit, None, Duration::from_secs(3), &NO_ENV).unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(12), "{:?}", started.elapsed());
         assert!(matches!(err, GitError::Timeout { lock: None, .. }), "{err}");
         // 钩子在 git 的进程组里，跟着一起杀掉；死了以后要等被收掉，`kill -0` 才找不到它。
@@ -288,7 +291,7 @@ mod tests {
         fs::create_dir_all(&hooks).unwrap();
         fs::write(hooks.join("pre-commit"), "#!/bin/sh\nexec sleep 30\n").unwrap();
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
-        let err = run_for(&dir, commit, None, Duration::from_secs(3), &[]).unwrap_err();
+        let err = run_for(&dir, commit, None, Duration::from_secs(3), &NO_ENV).unwrap_err();
         assert!(matches!(&err, GitError::Timeout { lock: Some(lock), .. } if lock.ends_with("index.lock")), "{err}");
         assert!(dir.join(".git/index.lock").exists());
         let _ = fs::remove_dir_all(&dir);
@@ -308,7 +311,7 @@ mod tests {
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
         let started = Instant::now();
         let args = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
-        let result = run_for(&dir, args, None, Duration::from_secs(20), &[]);
+        let result = run_for(&dir, args, None, Duration::from_secs(20), &NO_ENV);
         let elapsed = started.elapsed();
         let pid = fs::read_to_string(&pid_file).unwrap().trim().to_owned();
         let _ = Command::new("kill").arg(&pid).status();
