@@ -213,6 +213,8 @@ struct State {
     size: (u32, u32),
     /// `frame` 还没被采集线程取走。
     fresh: bool,
+    /// 上一次算作新画面的那帧的指纹（`fingerprint`）和尺寸。`frame` 和采集线程手里的轮换着用，所以不拿它比。
+    last: Option<(u64, (u32, u32))>,
     /// 商定的像素格式（`VIDEO_FORMATS` 之一）和尺寸。
     format: Option<(u32, (u32, u32))>,
     /// 流断了或出错了，带原因。
@@ -528,9 +530,27 @@ unsafe fn copy_buffer(callback: &Callback, buffer: *mut PwBuffer) {
             _ => to.copy_from_slice(from),
         }
     }
+    // 有的 portal 屏幕没变也一直交帧，和上一帧一样的不算新画面，静止时才补得清楚。
+    let seen = Some((fingerprint(frame), (width, height)));
+    if state.last == seen {
+        return;
+    }
+    state.last = seen;
     state.size = (width, height);
     state.fresh = true;
     callback.shared.changed.notify_all();
+}
+
+/// BGRx 画面的指纹，不看每个像素没用到的第四个字节。只有一个字（八字节）不同的两帧，指纹一定不同。
+fn fingerprint(frame: &[u8]) -> u64 {
+    const MASK: u64 = u64::from_le_bytes([0xff, 0xff, 0xff, 0, 0xff, 0xff, 0xff, 0]);
+    let mix = |hash: u64, word: u64| (hash.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    let (words, rest) = frame.as_chunks::<8>();
+    let hash = words.iter().fold(0, |hash, word| mix(hash, u64::from_le_bytes(*word) & MASK));
+    match rest.first_chunk::<4>() {
+        Some(pixel) => mix(hash, u64::from(u32::from_le_bytes(*pixel) & 0x00ff_ffff)),
+        None => hash,
+    }
 }
 
 /// 拼 SPA 的 pod：每个 pod 是四字节的长度、四字节的类型，再是内容，补齐到八字节。
@@ -671,6 +691,21 @@ fn parse_format(pod: &[u8]) -> Option<(u32, (u32, u32))> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_fingerprint_ignores_only_the_unused_channel() {
+        let frame: Vec<u8> = (0..60u8).collect();
+        let mut padding = frame.clone();
+        for pixel in padding.as_chunks_mut::<4>().0 {
+            pixel[3] = 0xff;
+        }
+        assert_eq!(fingerprint(&frame), fingerprint(&padding));
+        for byte in (0..frame.len()).filter(|byte| byte % 4 != 3) {
+            let mut changed = frame.clone();
+            changed[byte] ^= 1;
+            assert_ne!(fingerprint(&frame), fingerprint(&changed), "byte {byte}");
+        }
+    }
 
     fn bytes(pod: &AlignedPod) -> Vec<u8> {
         // SAFETY: 读 pod 自己报的长度。
