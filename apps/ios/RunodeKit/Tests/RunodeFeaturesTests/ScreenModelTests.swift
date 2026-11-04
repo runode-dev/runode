@@ -207,6 +207,20 @@ private func encodedKeyframe() throws -> VideoFrame {
         try await Task.sleep(for: .milliseconds(200))
         #expect(!model.unlocking && !model.askingPassword && passwords.hasPassword(for: machine.id))
     }
+
+    /// 等用户输密码时断开：收起输密码的框，断开以后再交上来的密码不发，也不过一会儿报密码不对。
+    @Test func closingWhileAskingDropsThePasswordSheet() async throws {
+        try passwords.save("stale", for: machine.id)
+        let model = model()
+        model.handle(.message(.lock(locked: true)))
+        #expect(await eventually { model.askingPassword && model.unlockError != nil })
+        model.close()
+        #expect(!model.askingPassword && model.unlockError == nil)
+        model.unlock(with: "secret", remember: false)
+        #expect(!model.unlocking)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!model.askingPassword && model.unlockError == nil)
+    }
 }
 
 /// 取密码要等一会儿，像在等 Face ID。

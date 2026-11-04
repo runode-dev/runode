@@ -183,9 +183,10 @@ public final class ScreenModel {
         }
     }
 
-    /// 用用户输的密码解锁；`remember` 时解开以后存下（之后要过 Face ID 才取得出）。
+    /// 用用户输的密码解锁；`remember` 时解开以后存下（之后要过 Face ID 才取得出）。电脑没锁着（包括已经断开）时什么都不发。
     public func unlock(with password: String, remember: Bool) {
         askingPassword = false
+        guard locked else { return }
         sendUnlock(password, save: remember ? password : nil, stored: false)
     }
 
@@ -258,11 +259,13 @@ public final class ScreenModel {
         forgetLock()
     }
 
-    /// 断开不算密码不对：作废在等的解锁，新的连接会重新报锁屏。
+    /// 断开不算密码不对：作废在等的解锁、收起输密码的框，新的连接会重新报锁屏。
     private func forgetLock() {
         unlockTask?.cancel()
         unlocking = false
         passwordToSave = nil
+        askingPassword = false
+        unlockError = nil
         locked = false
         triedAutomatically = false
     }
