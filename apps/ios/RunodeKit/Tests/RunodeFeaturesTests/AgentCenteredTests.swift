@@ -388,7 +388,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
 
 
 
-    /// 断着时不发：按失败报出来，草稿留着；列表重新连上后照常发。
+    /// 断着时不发：按失败报出来，草稿留着；列表重新连上、收到新的会话列表后照常发。
     @Test func nothingIsSentWhileDisconnected() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
         let reply = model.quickReply(for: waiting)
@@ -401,7 +401,12 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(reply.failedCount == 2)
         #expect(reply.errorMessage == "未连接")
         model.handle(.ready(generation: 1))
+        // 连上了、新列表还没到：卡片还是断开前的，不能发。
+        #expect(!reply.isConnected)
+        #expect(!model.quickReply(for: working).isConnected)
+        model.handle(.message(.sessionList([])))
         #expect(reply.isConnected)
+        #expect(model.quickReply(for: working).isConnected)
         link.clearSent()
         await reply.sendDraft()
         #expect(reply.draft.isEmpty)

@@ -408,10 +408,11 @@ public final class SessionListModel {
         quickReplies[id] = nil
     }
 
-    /// 这个会话的快速回复，第一次要时建好。送到以后刷新它的预览。
+    /// 这个会话的快速回复，第一次要时建好。送到以后刷新它的预览。重连后收到新列表之前不能发：卡片还是断开前的，
+    /// 那个会话可能已经不在等这个回答了。
     public func quickReply(for id: SessionId) -> QuickReplyModel {
         if let existing = quickReplies[id] { return existing }
-        let model = QuickReplyModel(sessionId: id, link: link, connected: connected) { [weak self] id in
+        let model = QuickReplyModel(sessionId: id, link: link, connected: connected && listCurrent) { [weak self] id in
             self?.requestPreview(id)
         }
         quickReplies[id] = model
@@ -621,9 +622,6 @@ public final class SessionListModel {
             }
         case .ready:
             connected = true
-            for reply in quickReplies.values {
-                reply.isConnected = true
-            }
             directoryPicker?.isConnected = true
             listCurrent = false
             watching = []
@@ -651,6 +649,9 @@ public final class SessionListModel {
             let known = Set(sessions.map(\.id))
             listCurrent = true
             sessions = list
+            for reply in quickReplies.values {
+                reply.isConnected = true
+            }
             loaded = true
             let present = Set(list.map(\.id))
             previews = previews.filter { present.contains($0.key) }
