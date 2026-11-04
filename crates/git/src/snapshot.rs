@@ -247,7 +247,7 @@ pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
 
 /// `repo` 里的 `git diff`，参数见 `diff_args`，`filters` 是 `filter_overrides` 给的环境变量；
 /// git 报错时为空，不当成没有改动。
-pub(crate) fn diff(repo: &Path, filters: &[(String, String)], args: &[impl AsRef<OsStr>]) -> Option<Vec<FileDiff>> {
+pub(crate) fn diff(repo: &Path, filters: &[(OsString, OsString)], args: &[impl AsRef<OsStr>]) -> Option<Vec<FileDiff>> {
     let full: Vec<OsString> =
         diff_args(&[]).into_iter().map(OsString::from).chain(args.iter().map(|arg| arg.as_ref().to_owned())).collect();
     let mut files = parse_diff(&String::from_utf8_lossy(&git_with(repo, filters, &full)?));
@@ -467,7 +467,7 @@ pub(crate) fn read_repo(
 
 /// `paths` 里的文件相对 HEAD 增删的行数，`filters` 是 `filter_overrides` 给的环境变量；二进制文件
 /// 记成没有增删。git 读不出来时为空。
-fn head_stats(repo: &Path, filters: &[(String, String)], paths: &[&Path]) -> HashMap<PathBuf, (usize, usize)> {
+fn head_stats(repo: &Path, filters: &[(OsString, OsString)], paths: &[&Path]) -> HashMap<PathBuf, (usize, usize)> {
     if paths.is_empty() {
         return HashMap::new();
     }

@@ -37,7 +37,7 @@ pub use words::changed_words;
 
 use std::{
     borrow::Cow,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -124,7 +124,7 @@ pub(crate) fn git<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Option<Vec<u8>> {
 }
 
 /// 在 `dir` 里跑一条 git 命令，另外设上 `env` 里的环境变量（`filter_overrides` 给的）。
-pub(crate) fn git_with<S: AsRef<OsStr>>(dir: &Path, env: &[(String, String)], args: &[S]) -> Option<Vec<u8>> {
+pub(crate) fn git_with<S: AsRef<OsStr>>(dir: &Path, env: &[(OsString, OsString)], args: &[S]) -> Option<Vec<u8>> {
     let mut command = git_command(dir).ok()?;
     command.args(args).envs(env.iter().cloned()).stderr(Stdio::null()).env("GIT_OPTIONAL_LOCKS", "0");
     let output = command.output().ok()?;
@@ -137,29 +137,35 @@ pub(crate) fn git_with<S: AsRef<OsStr>>(dir: &Path, env: &[(String, String)], ar
 /// 只管仓库级的配置，用户全局装的和 `LFS_COMMANDS` 照旧；仓库级配了 `lfs.extension.*` 时，
 /// 所有过滤器一样覆盖掉（git-lfs clean 会执行它配的命令）。`required` 也要关掉，免得 git 报错。
 /// 经 `GIT_CONFIG_KEY_n`、`GIT_CONFIG_VALUE_n` 给而不用 `-c`：`-c` 在第一个 `=` 处切开键和值，
-/// 名字里带 `=` 的过滤器（`.gitattributes` 能写 `filter=a=b`）就覆盖不到。
-pub(crate) fn filter_overrides(dir: &Path) -> Vec<(String, String)> {
+/// 名字里带 `=` 的过滤器（`.gitattributes` 能写 `filter=a=b`）就覆盖不到。名字按 git 输出的字节拼进键里，
+/// 不是 UTF-8 的名字照样覆盖得到。
+pub(crate) fn filter_overrides(dir: &Path) -> Vec<(OsString, OsString)> {
     let Some(out) = git(
         dir,
         &["config", "-z", "--show-scope", "--get-regexp", r"^(filter\..*\.(clean|process)|lfs\.extension\..*)$"],
     ) else {
         return Vec::new();
     };
-    let out = String::from_utf8_lossy(&out);
-    let names = local_filter_names(&out);
+    // 接在继承来的那组后面（比如容器里设的 `safe.directory`），从 0 编会把它们冲掉。
+    let base: usize = std::env::var("GIT_CONFIG_COUNT").ok().and_then(|count| count.parse().ok()).unwrap_or(0);
+    override_env(&local_filter_names(&out), base)
+}
+
+/// 关掉 `names` 这些过滤器的 `GIT_CONFIG_*` 环境变量，从第 `base` 条编起。
+fn override_env(names: &[&[u8]], base: usize) -> Vec<(OsString, OsString)> {
     if names.is_empty() {
         return Vec::new();
     }
     let items = names.iter().flat_map(|name| {
-        [("clean", ""), ("process", ""), ("required", "false")]
-            .map(|(key, value)| (format!("filter.{name}.{key}"), value))
+        [("clean", ""), ("process", ""), ("required", "false")].map(|(key, value)| {
+            let key = [b"filter.".as_slice(), name, b".", key.as_bytes()].concat();
+            (os_str(&key).into_owned(), value)
+        })
     });
-    // 接在继承来的那组后面（比如容器里设的 `safe.directory`），从 0 编会把它们冲掉。
-    let base: usize = std::env::var("GIT_CONFIG_COUNT").ok().and_then(|count| count.parse().ok()).unwrap_or(0);
-    let mut env = vec![("GIT_CONFIG_COUNT".to_owned(), (base + names.len() * 3).to_string())];
+    let mut env = vec![("GIT_CONFIG_COUNT".into(), (base + names.len() * 3).to_string().into())];
     for (n, (key, value)) in (base..).zip(items) {
-        env.push((format!("GIT_CONFIG_KEY_{n}"), key));
-        env.push((format!("GIT_CONFIG_VALUE_{n}"), value.to_owned()));
+        env.push((format!("GIT_CONFIG_KEY_{n}").into(), key));
+        env.push((format!("GIT_CONFIG_VALUE_{n}").into(), value.into()));
     }
     env
 }
@@ -170,21 +176,26 @@ const LFS_COMMANDS: [&str; 2] = ["git-lfs clean -- %f", "git-lfs filter-process"
 /// `git config -z --show-scope --get-regexp` 的输出（每条是 `范围\0键\n值\0`）里仓库级（`local`、
 /// `worktree`）的过滤器名，去重，大小写照原样；命令是 `LFS_COMMANDS` 之一的那条不算，
 /// 除非仓库级配了 `lfs.extension.*`，那时不论哪一级、什么命令的过滤器都算上。
-fn local_filter_names(out: &str) -> Vec<&str> {
+fn local_filter_names(out: &[u8]) -> Vec<&[u8]> {
     let mut entries = Vec::new();
-    let mut fields = out.split('\0');
+    let mut fields = out.split(|&byte| byte == 0);
     while let (Some(scope), Some(entry)) = (fields.next(), fields.next()) {
-        let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
-        entries.push((matches!(scope, "local" | "worktree"), key, value));
+        let (key, value) = match entry.iter().position(|&byte| byte == b'\n') {
+            Some(at) => (&entry[..at], &entry[at + 1..]),
+            None => (entry, &[][..]),
+        };
+        entries.push((matches!(scope, b"local" | b"worktree"), key, value));
     }
-    let local_extension = entries.iter().any(|&(local, key, _)| local && key.starts_with("lfs.extension."));
+    let local_extension = entries.iter().any(|&(local, key, _)| local && key.starts_with(b"lfs.extension."));
     let mut names = Vec::new();
     for (local, key, value) in entries {
-        let counts = local_extension || (local && !LFS_COMMANDS.contains(&value));
+        let counts = local_extension || (local && !LFS_COMMANDS.iter().any(|command| command.as_bytes() == value));
         if !counts {
             continue;
         }
-        let name = key.strip_prefix("filter.").and_then(|rest| rest.rsplit_once('.')).map(|(name, _)| name);
+        let name = key
+            .strip_prefix(b"filter.")
+            .and_then(|rest| rest.iter().rposition(|&byte| byte == b'.').map(|dot| &rest[..dot]));
         if let Some(name) = name.filter(|name| !names.contains(name)) {
             names.push(name);
         }
@@ -246,6 +257,10 @@ fn local_root(dir: &Path, root: PathBuf) -> PathBuf {
 mod tests {
     use super::*;
 
+    fn names(out: &str) -> Vec<&str> {
+        local_filter_names(out.as_bytes()).into_iter().map(|name| std::str::from_utf8(name).unwrap()).collect()
+    }
+
     #[test]
     fn picks_filters_from_repository_config_only() {
         let out = "local\0filter.evil.clean\nsh -c x\0global\0filter.lfs.clean\ngit-lfs clean\0\
@@ -253,21 +268,34 @@ mod tests {
                    local\0filter.evil.process\ncat\0local\0filter.Up.clean\n\0\
                    local\0filter.lfs.clean\ngit-lfs clean -- %f\0local\0filter.lfs.process\ngit-lfs filter-process\0\
                    local\0filter.fake.process\ngit-lfs filter-process; sh x\0";
-        assert_eq!(local_filter_names(out), ["evil", "My Odd.x", "Up", "fake"]);
-        assert!(local_filter_names("").is_empty());
+        assert_eq!(names(out), ["evil", "My Odd.x", "Up", "fake"]);
+        assert!(names("").is_empty());
     }
 
     #[test]
     fn repository_lfs_extension_disables_lfs_filters_too() {
         let lfs = "global\0filter.lfs.clean\ngit-lfs clean -- %f\0global\0filter.lfs.process\ngit-lfs filter-process\0\
                    local\0filter.mine.clean\ngit-lfs clean -- %f\0";
-        assert!(local_filter_names(lfs).is_empty());
+        assert!(names(lfs).is_empty());
         // 全局配的扩展是用户自己的，不算。
-        assert!(local_filter_names(&format!("{lfs}global\0lfs.extension.x.clean\nfoo\0")).is_empty());
+        assert!(names(&format!("{lfs}global\0lfs.extension.x.clean\nfoo\0")).is_empty());
         let evil = format!("{lfs}local\0lfs.extension.x.clean\nsh -c evil\0");
-        assert_eq!(local_filter_names(&evil), ["lfs", "mine"]);
+        assert_eq!(names(&evil), ["lfs", "mine"]);
         let evil = format!("{lfs}worktree\0lfs.extension.x.priority\n0\0");
-        assert_eq!(local_filter_names(&evil), ["lfs", "mine"]);
+        assert_eq!(names(&evil), ["lfs", "mine"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn overrides_filter_names_that_are_not_utf8() {
+        use std::os::unix::ffi::OsStrExt;
+        let out = b"local\0filter.bad\xff.clean\nsh -c x\0";
+        let names = local_filter_names(out);
+        assert_eq!(names, [b"bad\xff".as_slice()]);
+        let env = override_env(&names, 2);
+        assert_eq!(env[0], ("GIT_CONFIG_COUNT".into(), "5".into()));
+        assert_eq!(env[1].0, "GIT_CONFIG_KEY_2");
+        assert_eq!(env[1].1.as_bytes(), b"filter.bad\xff.clean");
     }
 
     #[cfg(unix)]
