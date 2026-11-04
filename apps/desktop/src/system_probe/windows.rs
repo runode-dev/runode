@@ -7,7 +7,7 @@ use std::{
     os::windows::ffi::OsStringExt as _,
     path::Path,
     sync::{LazyLock, Mutex, PoisonError},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use windows_sys::{
@@ -35,17 +35,13 @@ use windows_sys::{
     },
 };
 
-use super::{Helper, Port, Proc, Procs};
+use super::{CPU_SAMPLE_MAX_AGE, Helper, Port, Proc, Procs};
 
 /// 一个进程的创建时间、累计 CPU 时间（都按 100 纳秒计）和问的时刻。
 type CpuSample = (u64, u64, Instant);
 
 /// 上一次问到的各进程，下一次据此算出这段时间的 CPU 占用。
 static CPU_TIMES: LazyLock<Mutex<HashMap<u32, CpuSample>>> = LazyLock::new(Mutex::default);
-
-/// 比这更早的采样不拿来算 CPU，这一轮当作没有上一次：隔得太久的两次采样做差，算出的是那整段时间的平均值，
-/// 不是现在的占用。
-const CPU_SAMPLE_MAX_AGE: Duration = super::POLL_INTERVAL.saturating_mul(2);
 
 /// 现在的进程表；快照拿不到时是空的。内存、CPU 和命令行只问 `roots` 和它们的子孙，以及这个 app 的
 /// 可执行文件跑的进程（认 `Helper`）。

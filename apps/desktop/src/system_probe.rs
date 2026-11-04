@@ -17,8 +17,13 @@ use std::{
     time::Duration,
 };
 
-/// 状态栏隔多久重新问一次系统；Windows 上算 CPU 时据此认出太旧的采样。
+/// 状态栏隔多久重新问一次系统；Windows 和 Linux 上算 CPU 时据此认出太旧的采样。
 pub(crate) const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// 比这更早的采样不拿来算 CPU，这一轮当作没有上一次：隔得太久的两次采样做差，算出的是那整段时间的平均值，
+/// 不是现在的占用。
+#[cfg(any(windows, all(unix, not(target_os = "macos")), test))]
+const CPU_SAMPLE_MAX_AGE: std::time::Duration = POLL_INTERVAL.saturating_mul(2);
 
 /// `ps`、`lsof` 最多跑这么久，超时当这次没数据：卡住一次不能让状态栏的轮询（连同防休眠）停下。
 #[cfg(not(windows))]
@@ -171,12 +176,77 @@ pub(crate) fn processes(roots: &HashSet<u32>) -> Procs {
         .flat_map(|&root| procs.subtree(root))
         .chain(procs.helpers().into_iter().map(|(_, pid)| pid))
         .collect();
+    #[cfg(not(target_os = "macos"))]
+    sample_cpu(&mut procs, &used);
     for pid in used {
         if let (Some(proc), Some(footprint)) = (procs.procs.get_mut(&pid), phys_footprint(pid)) {
             proc.memory = footprint;
         }
     }
     procs
+}
+
+/// 一个进程的启动时刻、累计 CPU 时间（都按时钟滴答计）和问的时刻。
+#[cfg(any(all(unix, not(target_os = "macos")), test))]
+type CpuSample = (u64, u64, std::time::Instant);
+
+/// 上一次问到的各进程，下一次据此算出这段时间的 CPU 占用。
+#[cfg(all(unix, not(target_os = "macos")))]
+static CPU_TIMES: std::sync::LazyLock<std::sync::Mutex<HashMap<u32, CpuSample>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// 把 `used` 里各进程的 CPU 换成上一次问到现在这段时间的占用。procps 的 `%cpu` 是进程整个寿命里的平均：跑了很久的
+/// 进程忙起来还显示近乎 0，闲下来又一直像在忙。读不到 `/proc/<pid>/stat`、没有上一次的采样时为 0。
+#[cfg(all(unix, not(target_os = "macos")))]
+fn sample_cpu(procs: &mut Procs, used: &HashSet<u32>) {
+    // SAFETY: 只问一个配置值。
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks <= 0 {
+        return;
+    }
+    let now = std::time::Instant::now();
+    let mut samples = CPU_TIMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // 不同的调用方问的进程不同，各自的采样都留着，只扔掉太旧的。
+    samples.retain(|_, &mut (_, _, when)| now.duration_since(when) <= CPU_SAMPLE_MAX_AGE);
+    for &pid in used {
+        let Some(proc) = procs.procs.get_mut(&pid) else { continue };
+        let Some((started, cpu_time)) =
+            std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|stat| parse_proc_stat(&stat))
+        else {
+            proc.cpu = 0.;
+            continue;
+        };
+        let sample = (started, cpu_time, now);
+        proc.cpu = cpu_since(samples.insert(pid, sample), sample, ticks as f64);
+    }
+}
+
+/// `/proc/<pid>/stat` 里的启动时刻和累计 CPU 时间（用户态加内核态），都按时钟滴答计。进程名在括号里，可以带空格和
+/// 括号，从最后一个右括号往后数字段。
+#[cfg(any(all(unix, not(target_os = "macos")), test))]
+fn parse_proc_stat(stat: &str) -> Option<(u64, u64)> {
+    // 右括号后面从第 3 个字段（状态）数起：utime、stime 是第 14、15 个，starttime 是第 22 个。
+    let fields: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
+    let field = |n: usize| fields.get(n - 3)?.parse::<u64>().ok();
+    Some((field(22)?, field(14)?.checked_add(field(15)?)?))
+}
+
+/// 从 `before` 到 `now` 这段时间的 CPU 占用（百分比，一个核满载是 100），`units` 是一秒多少个 CPU 时间单位。
+/// 没有上一次、进程号换了进程（启动时刻不同）、太旧的采样时为 0。
+#[cfg(any(all(unix, not(target_os = "macos")), test))]
+fn cpu_since(before: Option<CpuSample>, now: CpuSample, units: f64) -> f32 {
+    let (started, cpu_time, at) = now;
+    match before {
+        Some((before_started, before, when))
+            if before_started == started
+                && cpu_time >= before
+                && at.duration_since(when) <= CPU_SAMPLE_MAX_AGE
+                && at > when =>
+        {
+            ((cpu_time - before) as f64 / units / at.duration_since(when).as_secs_f64() * 100.) as f32
+        }
+        _ => 0.,
+    }
 }
 
 /// 进程的 phys_footprint，和活动监视器「内存」一栏同一个口径。`ps` 的 rss 把映射进来的可执行文件、
@@ -450,6 +520,28 @@ mod tests {
         assert_eq!(output(Command::new("/bin/sleep").arg("30"), Duration::from_millis(200)), "");
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
         assert_eq!(output(Command::new("/bin/echo").arg("hi"), PROBE_TIMEOUT), "hi\n");
+    }
+
+    /// 进程名里带空格和括号也从最后一个右括号往后数。
+    #[test]
+    fn proc_stat_gives_start_and_cpu_time() {
+        let stat = "4242 (my (odd) name) S 1 4242 4242 0 -1 4194304 100 0 0 0 250 50 0 0 20 0 1 0 98765 1000 10 \
+                    18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 3 0 0 0 0 0";
+        assert_eq!(parse_proc_stat(stat), Some((98765, 300)));
+        assert_eq!(parse_proc_stat("4242 (cut"), None);
+    }
+
+    /// 两次采样之间用了多少 CPU；换了进程、太旧、头一次时为 0。
+    #[test]
+    fn cpu_is_measured_between_samples() {
+        let start = std::time::Instant::now();
+        let later = start + Duration::from_secs(2);
+        assert_eq!(cpu_since(Some((7, 100, start)), (7, 300, later), 100.), 100.);
+        assert_eq!(cpu_since(Some((7, 100, start)), (7, 150, later), 100.), 25.);
+        assert_eq!(cpu_since(None, (7, 300, later), 100.), 0.);
+        assert_eq!(cpu_since(Some((6, 100, start)), (7, 300, later), 100.), 0.);
+        let stale = start + CPU_SAMPLE_MAX_AGE + Duration::from_secs(1);
+        assert_eq!(cpu_since(Some((7, 100, start)), (7, 300, stale), 100.), 0.);
     }
 
     #[test]
