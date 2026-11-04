@@ -5,7 +5,7 @@
 <h1 align="center">Runode</h1>
 
 <p align="center">
-  A native terminal for macOS and Windows, built for AI coding agents
+  A native terminal for macOS, Windows and Linux, built for AI coding agents
   <br>
   <a href="#install">Download</a>
   ·
@@ -60,7 +60,7 @@ It installs Runode.app into Applications and links the `runode` command line int
 
 On Windows (x86_64), download `Runode-<version>-windows-x86_64-setup.exe` from the [latest release](https://github.com/runode-dev/runode/releases/latest). It installs per user without admin rights, puts the `rn` command line on your PATH and updates itself. The installer is signed with a self-signed certificate, so SmartScreen warns on the first run.
 
-On Linux (x86_64 and aarch64), the same install script sets up the command line and the terminal host, without a desktop UI.
+On Linux (x86_64 and aarch64), the same install script installs the desktop app as an AppImage in a graphical session, adds it to the application menu and keeps it up to date; it needs FUSE (`fuse3`). Prefer your package manager? Download the `.deb` or `.rpm` from the [latest release](https://github.com/runode-dev/runode/releases/latest) instead; these don't update themselves, so install each new version the same way. On a server without a desktop, the script installs just the command line and the terminal host.
 
 Every version is on [Releases](https://github.com/runode-dev/runode/releases). The iOS app isn't on the App Store yet; [build it from source](CONTRIBUTING.md).
 
@@ -93,7 +93,7 @@ Runode is not a fork of Ghostty. It uses libghostty-vt as a terminal emulation l
 Any agent that runs in a terminal. More than 20 have their state recognized, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode, Amp, GitHub Copilot, Kimi and Qwen Code, and you can add your own detection rules.
 
 **Which platforms are supported?**
-The desktop app runs on macOS (Apple silicon and Intel) and Windows (x86_64), and an iOS app gives remote access. Linux (x86_64 and aarch64) gets the command line and the terminal host without a desktop UI; reach it from your phone, or open it as an SSH host or remote desktop from Runode on another computer. SSH hosts can run macOS, Linux or Windows, including ARM64.
+The desktop app runs on macOS (Apple silicon and Intel), Windows (x86_64) and Linux (x86_64 and aarch64, as an AppImage, deb or rpm), and an iOS app gives remote access. Linux servers without a desktop get the command line and the terminal host; reach them from your phone, or open them as an SSH host from Runode on another computer. SSH hosts can run macOS, Linux or Windows, including ARM64.
 
 ## Contributing
 

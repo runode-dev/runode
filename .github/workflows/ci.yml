@@ -145,6 +145,12 @@ jobs:
           cargo test -p runode-terminal --test fd_passing --test handoff
           cargo test -p runode-host --lib handoff::
           cargo test -p runode-host --test handoff
+      # AppImage 的自动更新、从 AppImage 跑时认出镜像文件、写应用菜单项，只在 Linux 上编得到。
+      - name: Linux 专有的 AppImage 测试
+        run: |
+          cargo test -p runode-update --lib linux::
+          cargo test -p runode-paths --lib appimage
+          cargo test -p runode --features runode/linux-desktop -- desktop_entry::
 
   # Windows 上发的是完整的桌面 app，`cfg(windows)` 的代码（ConPTY、AF_UNIX 的 socket、自动更新换安装包）在别的
   # 系统上编不到；平时就在 Windows 上 lint 全部 crate（含测试代码），跑不依赖真 shell 和计时的那几个 crate 的测试。

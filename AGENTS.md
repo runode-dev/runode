@@ -6,7 +6,7 @@
 
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |
-| `paths` | 配置、数据和缓存放在哪（`Dirs`；Linux 上宿主的 socket 和锁按机器分目录，家目录在 NFS 上共享时各台机器各跑各的宿主），以及覆盖写用户手写过的文件（`replace_file`）；Windows 上私有目录只让自己、SYSTEM 和管理员进 | std、windows-sys（Windows） |
+| `paths` | 配置、数据和缓存放在哪（`Dirs`；Linux 上宿主的 socket 和锁按机器分目录，家目录在 NFS 上共享时各台机器各跑各的宿主），以及覆盖写用户手写过的文件（`replace_file`）；另起 runode 自己、把它的位置写进文件和环境时用哪个可执行文件（`runode_exe`，从 AppImage 跑时是 AppImage 文件本身，不是挂载点里的）；Windows 上私有目录只让自己、SYSTEM 和管理员进 | std、windows-sys（Windows） |
 | `types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话标识、看板、终端设置、剪贴板的规矩、输入事件、语音识别的模型 | std、serde |
 | `protocol` | 宿主和各前端之间的消息；手机远程连接（`remote`）和推送通知（`push`）的线上格式以它为准 | types、serde、serde_json |
 | `git` | 用 git 命令行读仓库，做暂存、提交、分支、stash、工作树和同步；读到的状态可以序列化（`serde` 特性），桌面经 ssh 从远端取 | std、serde（`serde` 特性）、libc（Unix） |
@@ -22,7 +22,7 @@
 | `ssh` | 连 SSH 主机：一律调系统的 OpenSSH（不内置 SSH 库），ControlMaster 复用一条连接（`Ssh`），要问用户时经 runode 自己当 askpass 问桌面（`askpass`），读 `~/.ssh/config` 里的主机（`list_hosts`），远端探测平台、装 runode 的脚本（`bootstrap`；远端是 Windows 时另用 `bootstrap::windows`：命令交给 cmd，装的是 zip，经旁边的控制台程序 rn.exe 起 runode）和桥接的开场白（`bridge`），起 ssh 时接管道（`process`，Windows 上的 ssh 要 overlapped 的管道） | std、uds_windows 和 windows-sys（Windows） |
 | `screen` | 远程桌面不碰界面的部分：被看的电脑上采集屏幕、编成低延迟的硬件 HEVC 或 H.264（`Capture`，按观看端解得了的挑，单帧有上限，静止后补清楚；Windows 上没有能用的显卡时在 CPU 上转换、用系统的软件编码器），把观看端发来的键鼠输入注入系统（`Injector`），临时换屏幕的显示模式（`set_display_mode`，进程退出时系统换回去）；桌面 app 当观看端时把画面解回来（`Decoder`）；macOS 上用 ScreenCaptureKit 和 VideoToolbox，Windows 上用 DXGI 桌面复制和 Media Foundation；Linux 上只当被看的电脑，按屏幕上本用户的图形会话挑后端（X11 用 x11rb，GNOME 的 Wayland 用 Mutter 的 D-Bus 接口，别的 Wayland 桌面用 xdg-desktop-portal，画面经 PipeWire 来），用 VA-API 编码、没有显卡时用 OpenH264，libpipewire 和 libva 都在运行时 dlopen，没装图形库的服务器上可执行文件照样跑（`desktop_available` 报屏幕上有没有桌面）；传输和协议不在这里 | types、tracing、objc2、block2、dispatch2、objc2-screen-capture-kit、objc2-video-toolbox、objc2-core-media、objc2-core-video、objc2-core-graphics（macOS）、windows（Windows）、paths、x11rb、zbus、ashpd、futures、libloading、openh264、libc（Linux） |
 | `speech` | 离线语音转文字：识别模型的清单和下载（调系统的 curl，按大小和 SHA-256 核对，国内先试 ModelScope 上 runode 的镜像、海外先试 HuggingFace），录麦克风（`Recorder`，`recording` 特性，无头的 Linux 构建不开），用 sherpa-onnx 先切句再识别（`Recognizer`）；也能交给云端识别、用大模型润色（`cloud`，同样调系统的 curl） | types、sherpa-onnx、cpal（`recording`）、sha2、serde_json、anyhow、tracing |
-| `update` | 桌面 app 的自动更新：查 GitHub Release、下载、核对签名，退出时原子地换上；也给 SSH 远端取按 `SHA256SUMS` 和签名核对过的发布包（`bundle`，Windows 远端是便携 zip） | serde、serde_json、sha2、tracing、libc、objc2、block2、objc2-foundation |
+| `update` | 桌面 app 的自动更新：查 GitHub Release、下载、核对签名（Linux 的 AppImage 没有签名，按 `SHA256SUMS` 核对），退出时原子地换上；也给 SSH 远端取按 `SHA256SUMS` 和签名核对过的发布包（`bundle`，Windows 远端是便携 zip） | serde、serde_json、sha2、tracing、libc、objc2、block2、objc2-foundation |
 | `autostart` | 登录时自启（launchd、systemd、`SMAppService`、Windows 当前用户的 `Run` 键），命令行和设置页共用 | paths、objc2、objc2-foundation、objc2-service-management（macOS）、windows-sys（Windows） |
 | `ui` | 桌面几处界面共用的 GPUI 部件（照 shadcn 起名，variant、size 选样子）、全 app 一份的主题 `Theme`（只能在 render 和 paint 里读）、所有图标（GPUI 按路径取图标经 `icons::Assets`）、界面字号、快捷键的显示（`keys`）和无障碍的共用写法；界面文字由调用方翻译好交进来 | types、paths、GPUI、unicode-segmentation、raw-window-handle 和 windows-sys（Windows） |
 | `cli` | 命令行前端（`runode list`、`send`、`todo` 等），经宿主的 Unix socket（Windows 上是 AF_UNIX）按 protocol 说话；`remote`、`service` 不经宿主 | protocol、types、paths、config、remote、autostart、todo、qrcode、anyhow、regex、serde_json、unicode-width、libc、uds_windows 和 windows-sys（Windows） |

@@ -5,7 +5,7 @@
 <h1 align="center">Runode</h1>
 
 <p align="center">
-  给 AI 编程 agent 准备的原生终端，支持 macOS 和 Windows
+  给 AI 编程 agent 准备的原生终端，支持 macOS、Windows 和 Linux
   <br>
   <a href="#安装">下载</a>
   ·
@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/runode-dev/runode/main/scripts/inst
 
 Windows（x86_64）到[最新发布页](https://github.com/runode-dev/runode/releases/latest)下载 `Runode-<版本>-windows-x86_64-setup.exe`，装到当前用户的目录，不需要管理员权限，会把命令行 `rn` 加进 PATH，之后同样自动更新。安装包用自签名证书签名，首次运行 SmartScreen 会警告。
 
-Linux（x86_64 和 aarch64）上同一个安装脚本装的是命令行和终端宿主，没有桌面界面。
+Linux（x86_64 和 aarch64）上在图形界面的终端里跑同一个安装脚本，装的是 AppImage 格式的桌面 app，会加进应用菜单，之后自动更新；需要系统有 FUSE（`fuse3`）。想交给包管理器管理的，可以到[最新发布页](https://github.com/runode-dev/runode/releases/latest)下载 `.deb` 或 `.rpm`，它们不会自动更新，新版本要同样下载安装。在没有桌面的服务器上，安装脚本只装命令行和终端宿主。
 
 历次版本见 [Releases](https://github.com/runode-dev/runode/releases)。iOS app 还没上架，需要[从源码构建](CONTRIBUTING.md)。
 
@@ -93,7 +93,7 @@ Runode 不是 Ghostty 的分支。它把 libghostty-vt 当作终端仿真的库�
 任何在终端里跑的 agent 都能用。其中二十多种能认出状态，包括 Claude Code、Codex、Gemini CLI、Cursor、OpenCode、Amp、GitHub Copilot、Kimi、Qwen Code 等。识别规则可以自己加。
 
 **支持哪些平台？**
-桌面 app 支持 macOS（Apple 芯片和 Intel）和 Windows（x86_64），另有 iOS app 做远程访问。Linux（x86_64 和 aarch64）上有命令行和终端宿主，没有桌面界面，可以用手机连上来，也可以在另一台电脑的 Runode 里当 SSH 主机打开、看它的远程桌面。SSH 主机可以是 macOS、Linux 或 Windows，ARM64 也行。
+桌面 app 支持 macOS（Apple 芯片和 Intel）、Windows（x86_64）和 Linux（x86_64 和 aarch64，有 AppImage、deb 和 rpm），另有 iOS app 做远程访问。没有桌面的 Linux 服务器上装命令行和终端宿主，可以用手机连上来，也可以在另一台电脑的 Runode 里当 SSH 主机打开。SSH 主机可以是 macOS、Linux 或 Windows，ARM64 也行。
 
 ## 参与开发
 

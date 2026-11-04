@@ -5,8 +5,9 @@
 #
 # macOS：下载这台 Mac 架构的最新版 Runode.app，装进 /Applications（不能写时装进 ~/Applications），
 # 再把命令行 runode 和短名字 rn 链接到 bin 目录里。app 之后自己会自动更新，命令行跟着 app 走。
-# Linux：没有桌面 app，下载只有命令行和终端宿主的 runode（`runode --host`、`runode remote pair`，
-# 手机经远程访问连上来用），装进 bin 目录。
+# Linux：有图形会话时装桌面 app 的 AppImage，放进 lib 目录，登记进应用菜单，命令行链接到它，之后 app 自己
+# 更新；没有图形会话时（服务器、经 ssh 跑这个脚本）装只有命令行和终端宿主的 runode（`runode --host`、
+# `runode remote pair`，手机或别的电脑上的 Runode 连上来用）。要用 apt、dnf 管理的，到发布页下载 deb、rpm。
 #
 # 环境变量：
 #   RUNODE_VERSION      装哪个版本，比如 0.3.0；不给时装最新版。
@@ -14,6 +15,8 @@
 #                       都不行时用 ~/.local/bin 并提醒加进 PATH。
 #   RUNODE_APP_DIR      （macOS）Runode.app 装到哪；默认 /Applications。
 #   RUNODE_LIB_DIR      （Linux）可执行文件放在哪，bin 目录里只放指向它的链接；默认 ~/.local/lib/runode。
+#   RUNODE_DESKTOP      （Linux）1 装桌面 app，0 装只有命令行和宿主的；不给时有图形会话（DISPLAY、
+#                       WAYLAND_DISPLAY）就装桌面 app。
 set -eu
 
 repo=runode-dev/runode
@@ -173,6 +176,39 @@ and certificate leaf[subject.OU] = \"$team_id\"" "$tmp/Runode.app" ||
     say "已装好 $app_dir/Runode.app，命令行在 $bin_dir/runode。打开 Runode：open -a Runode"
 }
 
+# Linux 上装桌面 app：没指定时看有没有图形会话。
+want_desktop() {
+    case ${RUNODE_DESKTOP:-} in
+        1) return 0 ;;
+        0) return 1 ;;
+        "") [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] ;;
+        *) fail "RUNODE_DESKTOP 只能是 0 或 1" ;;
+    esac
+}
+
+# 换上新版本的 Linux 可执行文件 $1 以后，旧宿主还在跑就让新版本的宿主接手它的会话，终端不断。宿主的命令行
+# 第一个词是 runode、rn，或者从 AppImage 跑时的 AppImage 文件。
+upgrade_host() {
+    if pgrep -f '(^|/)(runode|rn|[^ /]*\.AppImage) --host' >/dev/null 2>&1; then
+        say "旧版本的 runode 宿主还在跑，让新版本接手它的会话。"
+        if ! "$1" service upgrade; then
+            say "没换成，旧宿主照旧跑着、退出前用的还是旧版本；之后可以再跑一次 runode service upgrade。"
+        fi
+    fi
+}
+
+# 下好的 Linux 可执行文件在这里跑不起来时报出原因，$1 是它 --version 的输出。
+explain_start_failure() {
+    case $1 in
+        *GLIBC_*) fail "这个系统的 glibc 太旧，runode 起不来：$1" ;;
+        *FUSE* | *fuse*)
+            fail "这个系统上 AppImage 挂不上（没装 FUSE）。装上 fuse3 再装一次（Debian、Ubuntu：sudo apt install fuse3；\
+Fedora：sudo dnf install fuse3），或者改装发布页上的 deb、rpm：$1"
+            ;;
+        *) fail "runode 在这个系统上起不来：$1" ;;
+    esac
+}
+
 install_linux() {
     case $(uname -m) in
         x86_64 | amd64) arch=x86_64 ;;
@@ -185,8 +221,13 @@ install_linux() {
     fi
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
-
+    lib_dir=${RUNODE_LIB_DIR:-$HOME/.local/lib/runode}
     pin_version
+    if want_desktop; then
+        install_linux_desktop
+        return
+    fi
+
     name="Runode-$RUNODE_VERSION-linux-$arch.tar.gz"
     url="$(download_base)/$name"
     say "正在下载 $url"
@@ -196,7 +237,6 @@ install_linux() {
     [ -f "$tmp/runode" ] || fail "安装包里没有 runode"
 
     # 可执行文件放在 bin 目录旁边的 lib 目录里，bin 里只放链接，和 macOS 一样有 runode、rn 两个名字。
-    lib_dir=${RUNODE_LIB_DIR:-$HOME/.local/lib/runode}
     mkdir -p "$lib_dir"
     # 先放成临时名再改名：正在跑的宿主还开着旧文件，直接覆盖会写坏它。临时名带上进程号，同时跑的两个
     # 安装不会互相截断、挪走对方的文件；没改成名就退出时删掉。
@@ -206,24 +246,41 @@ install_linux() {
     # 换上之前先在装去的位置跑一次（临时目录可能挂成 noexec）：glibc 太旧、缺共享库时在这里报出来，
     # 装着的旧版本不动。
     if ! "$staged" --version >"$tmp/version.txt" 2>&1; then
-        detail=$(cat "$tmp/version.txt")
-        case $detail in
-            *GLIBC_*) fail "这个系统的 glibc 太旧，runode 起不来：$detail" ;;
-            *) fail "runode 在这个系统上起不来：$detail" ;;
-        esac
+        explain_start_failure "$(cat "$tmp/version.txt")"
     fi
     mv -f "$staged" "$lib_dir/runode"
 
     link_cli "$lib_dir/runode"
-    say "已装好 $bin_dir/runode。Linux 版没有桌面界面，用手机连上来：先用 runode service install host"
+    say "已装好 $bin_dir/runode。这一份没有桌面界面，用手机连上来：先用 runode service install host"
     say "让宿主登录时自己起来、一直跑着，再用 runode remote pair 和手机配对（会自己在配置里打开 remote-access）。"
-    # 旧宿主还在跑时让新版本的宿主接手它的会话，终端不断。
-    if pgrep -f '(^|/)(runode|rn) --host' >/dev/null 2>&1; then
-        say "旧版本的 runode 宿主还在跑，让新版本接手它的会话。"
-        if ! "$lib_dir/runode" service upgrade; then
-            say "没换成，旧宿主照旧跑着、退出前用的还是旧版本；之后可以再跑一次 runode service upgrade。"
-        fi
+    say "要装桌面 app，在图形界面的终端里再跑一次安装脚本，或者设 RUNODE_DESKTOP=1。"
+    upgrade_host "$lib_dir/runode"
+}
+
+# 装桌面 app 的 AppImage。固定叫 Runode.AppImage，app 自己更新时原地换掉它，菜单项和命令行的链接不用改。
+install_linux_desktop() {
+    name="Runode-$RUNODE_VERSION-linux-$arch.AppImage"
+    url="$(download_base)/$name"
+    say "正在下载 $url"
+    fetch "$url" "$tmp/Runode.AppImage" progress
+    verify "$tmp/Runode.AppImage" "$name"
+
+    mkdir -p "$lib_dir"
+    # 和无头版一样先放成临时名、在装去的位置跑一次再改名：缺 FUSE、缺图形库、glibc 太旧时在这里报出来。
+    staged=$lib_dir/.Runode.AppImage.new.$$
+    trap 'rm -rf "$tmp" "$staged"' EXIT
+    install -m 755 "$tmp/Runode.AppImage" "$staged"
+    if ! "$staged" --version >"$tmp/version.txt" 2>&1; then
+        explain_start_failure "$(cat "$tmp/version.txt")"
     fi
+    image=$lib_dir/Runode.AppImage
+    mv -f "$staged" "$image"
+
+    link_cli "$image"
+    "$image" --desktop-entry || say "提示：没能把 Runode 加进应用菜单，第一次打开 Runode 后它会自己加上。"
+    say "已装好 $image，命令行在 $bin_dir/runode。从应用菜单打开 Runode，或者在终端里运行 runode。"
+    say "之后 Runode 会自己更新；想交给 apt、dnf 管理的，可以改装发布页上的 deb、rpm。"
+    upgrade_host "$image"
 }
 
 case $(uname -s) in
