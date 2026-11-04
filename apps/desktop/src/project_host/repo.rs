@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use runode_git::{
-    self as git, Branch, CommitOptions, DiffSide, DiffView, FileDiff, GitError, History, HunkAction, ReadOptions,
-    Stash, TooLarge,
+    self as git, Branch, Commit, CommitOptions, DiffSide, DiffView, FileDiff, GitError, History, HunkAction,
+    ReadOptions, Stash, TooLarge,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -33,6 +33,7 @@ pub(super) enum GitOp {
     Checkout { branch: Branch },
     CreateBranch { name: String, start: Option<String> },
     History { limit: usize },
+    CommitChanges { commit: Commit },
     CheckoutDetached { id: String },
     Stage { paths: Vec<PathBuf> },
     Unstage { paths: Vec<PathBuf> },
@@ -72,6 +73,7 @@ impl GitOp {
             Self::Checkout { branch } => json(repo.checkout(&branch)),
             Self::CreateBranch { name, start } => json(repo.create_branch(&name, start.as_deref())),
             Self::History { limit } => json(repo.history(limit)),
+            Self::CommitChanges { commit } => json(repo.commit_changes(&commit)),
             Self::CheckoutDetached { id } => json(repo.checkout_detached(&id)),
             Self::Stage { paths } => json(repo.stage(&paths)),
             Self::Unstage { paths } => json(repo.unstage(&paths)),
@@ -125,6 +127,7 @@ impl GitOp {
             | Self::Checkout { .. }
             | Self::CreateBranch { .. }
             | Self::History { .. }
+            | Self::CommitChanges { .. }
             | Self::CheckoutDetached { .. }
             | Self::StageAll
             | Self::UnstageAll
@@ -220,6 +223,11 @@ impl ProjectRepo {
 
     pub(crate) fn history(&self, limit: usize) -> git::Result<History> {
         dispatch!(self, self.repo.history(limit), GitOp::History { limit }, git_failed)
+    }
+
+    pub(crate) fn commit_changes(&self, commit: &Commit) -> git::Result<Vec<FileDiff>> {
+        let op = GitOp::CommitChanges { commit: commit.clone() };
+        dispatch!(self, self.repo.commit_changes(commit), op, git_failed)
     }
 
     pub(crate) fn checkout_detached(&self, id: &str) -> git::Result {

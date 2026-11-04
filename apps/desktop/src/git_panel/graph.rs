@@ -316,6 +316,7 @@ impl GitPanel {
         else {
             return;
         };
+        let repo = panel.project.repo(repo);
         let load = panel.toggle_commit(root, &commit.id, git.as_deref());
         cx.notify();
         if !load {
