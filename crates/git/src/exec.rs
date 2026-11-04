@@ -99,15 +99,17 @@ pub(crate) fn run_for<S: AsRef<OsStr>>(
     output_result(status, stdout.take(), &stderr.take())
 }
 
-/// 在另一个线程里读 `pipe` 直到关上，读到的随时可取。
+/// 在另一个线程里读 `pipe` 直到关上，读到的随时可取。取过一次或者丢掉以后，线程接着读、但读到的都扔掉：
+/// 钩子留在后台的进程还拿着管道、一直在写时，不再为没人要的输出攒内存，也不让它写不进去。
 struct Drain {
-    read: Arc<Mutex<Vec<u8>>>,
+    /// `None` 是已经取走了，之后读到的不再留。
+    read: Arc<Mutex<Option<Vec<u8>>>>,
     thread: JoinHandle<()>,
 }
 
 impl Drain {
     fn spawn(pipe: Option<impl Read + Send + 'static>) -> Self {
-        let read = Arc::new(Mutex::new(Vec::new()));
+        let read = Arc::new(Mutex::new(Some(Vec::new())));
         let out = read.clone();
         let thread = thread::spawn(move || {
             let Some(mut pipe) = pipe else { return };
@@ -115,7 +117,11 @@ impl Drain {
             loop {
                 match pipe.read(&mut chunk) {
                     Ok(0) => break,
-                    Ok(n) => out.lock().unwrap_or_else(PoisonError::into_inner).extend_from_slice(&chunk[..n]),
+                    Ok(n) => {
+                        if let Some(read) = out.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+                            read.extend_from_slice(&chunk[..n]);
+                        }
+                    }
                     // 信号打断的读接着读，不然输出缺一段却当成读完了。
                     Err(err) if err.kind() == ErrorKind::Interrupted => {}
                     Err(_) => break,
@@ -130,9 +136,15 @@ impl Drain {
         self.thread.is_finished()
     }
 
-    /// 到现在读到的。
+    /// 到现在读到的。只能取一次，再取是空的。
     fn take(&self) -> Vec<u8> {
-        std::mem::take(&mut *self.read.lock().unwrap_or_else(PoisonError::into_inner))
+        self.read.lock().unwrap_or_else(PoisonError::into_inner).take().unwrap_or_default()
+    }
+}
+
+impl Drop for Drain {
+    fn drop(&mut self) {
+        self.take();
     }
 }
 
@@ -303,6 +315,27 @@ mod tests {
         assert!(result.is_ok(), "{result:?}");
         assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 取走以后管道里再来的不攒着，线程照样读到管道关上。
+    #[test]
+    fn discards_output_read_after_it_was_taken() {
+        let (reader, mut writer) = std::io::pipe().unwrap();
+        let drain = Drain::spawn(Some(reader));
+        writer.write_all(b"a").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while drain.read.lock().unwrap().as_ref().is_some_and(Vec::is_empty) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(drain.take(), b"a");
+        writer.write_all(&[b'b'; 100_000]).unwrap();
+        drop(writer);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !drain.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(drain.is_finished());
+        assert!(drain.read.lock().unwrap().is_none());
     }
 
     #[test]
