@@ -9,7 +9,7 @@ ifeq ($(OS),Windows_NT)
 prepare_run = $(CARGO) build -p runode --bin rn $(if $(filter release,$(1)),--release)
 else
 # Unix 用符号链接；打包时 scripts/bundle-macos.sh 在 Runode.app 里放同样的链接。
-link_rn = @mkdir -p target/$(1) && ln -sfn runode target/$(1)/rn
+link_rn = @dir="$${CARGO_TARGET_DIR:-target}/$(1)" && mkdir -p "$$dir" && ln -sfn runode "$$dir/rn"
 prepare_run = $(call link_rn,$(1))
 endif
 
