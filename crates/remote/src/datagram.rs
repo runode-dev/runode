@@ -560,6 +560,8 @@ impl Receiver {
         let started = Instant::now();
         let mut peer: Option<SocketAddr> = None;
         let mut last_ping: Option<Instant> = None;
+        // 最近一次收到电脑发来、核对过的包：打通后它每个 `Ping` 都回 `Pong`。
+        let mut last_heard = started;
         let mut rtt = Duration::from_millis(20);
         let mut gaps = 0;
         while !stop.load(Ordering::Relaxed) {
@@ -568,6 +570,7 @@ impl Receiver {
                     let from = canonical(from);
                     let Some(packet) = opener.open(&mut buffer[..len]) else { continue };
                     let now = Instant::now();
+                    last_heard = now;
                     if peer != Some(from) {
                         // 刚打通：马上告诉电脑收到了，它才开始发画面。
                         peer = Some(from);
@@ -610,6 +613,12 @@ impl Receiver {
                         self.send_to(&sealer, &Packet::Ping { sent_us: micros(started, now), heard: false }, addr);
                     }
                     last_ping = Some(now);
+                }
+                // 只是电脑到这边不通时照样 `Ping` 的话，电脑一直当通着，画面却过不来、也不会再报缺了帧：停下收包，
+                // 电脑收不到 `Ping` 就判定断了。
+                Some(_) if now.duration_since(last_heard) >= PATH_TIMEOUT => {
+                    tracing::info!("the remote desktop went quiet on the datagram path, leaving it");
+                    return;
                 }
                 Some(peer) => {
                     if last_ping.is_none_or(|at| now - at >= PING_INTERVAL) {

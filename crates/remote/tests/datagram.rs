@@ -1,8 +1,12 @@
 //! 本机回环上走一遍 UDP 通道：打通、按顺序收到帧。丢包和重发由 `datagram` 里的单元测试管。
 
 use std::{
-    net::{Ipv4Addr, SocketAddr},
-    sync::mpsc,
+    net::{Ipv4Addr, SocketAddr, UdpSocket},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
@@ -85,4 +89,45 @@ fn the_path_fails_when_the_viewer_goes_quiet() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(!sender.send(vec![1]), "no video once the path failed");
+}
+
+/// 只有电脑到观看端这个方向不通了：观看端过一阵不再 `Ping`，电脑照样认定断了，画面不会卡在 UDP 上。
+#[test]
+fn the_path_fails_when_only_the_host_to_viewer_direction_breaks() {
+    let receiver = Receiver::bind().unwrap();
+    // 两头都只认识中转的地址；按来源端口转给另一头，`cut` 后电脑发来的扔掉。
+    let relay = UdpSocket::bind(localhost(0)).unwrap();
+    relay.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
+    let relay_addr = relay.local_addr().unwrap();
+    let sender = Sender::start(receiver.key(), vec![relay_addr], 8_000_000).unwrap();
+    let (viewer, host) = (localhost(receiver.port()), localhost(sender.port()));
+    let (cut, stop) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let relaying = {
+        let (cut, stop) = (cut.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let mut buffer = vec![0u8; 65536];
+            while !stop.load(Ordering::Relaxed) {
+                let Ok((len, from)) = relay.recv_from(&mut buffer) else { continue };
+                if from == viewer {
+                    let _ = relay.send_to(&buffer[..len], host);
+                } else if from == host && !cut.load(Ordering::Relaxed) {
+                    let _ = relay.send_to(&buffer[..len], viewer);
+                }
+            }
+        })
+    };
+    let _receiving = receiver.start(vec![relay_addr], |_| {}).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while sender.path() != Path::Ready {
+        assert!(Instant::now() < deadline, "the path never became ready");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    cut.store(true, Ordering::Relaxed);
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while sender.path() != Path::Failed {
+        assert!(Instant::now() < deadline, "the one-way path never failed");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    stop.store(true, Ordering::Relaxed);
+    relaying.join().unwrap();
 }
