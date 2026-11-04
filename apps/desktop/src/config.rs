@@ -113,23 +113,46 @@ pub(crate) struct FileWatch {
     roots: Vec<PathBuf>,
     /// 正盯着的目录，都是真实路径。
     dirs: Vec<PathBuf>,
+    /// 删掉或改名挪走的路径，由监视的回调记下、`follow` 取走。盯着的目录在这里面（或在它下面）时原来的
+    /// 监视已经作废（inotify 按 inode 盯），同一路径上再建出来的目录要重新盯。
+    gone: Arc<std::sync::Mutex<Vec<PathBuf>>>,
 }
 
 impl FileWatch {
     /// 先什么都不盯，由 `follow` 给出要盯的文件。
     pub(crate) fn new(changed: impl Fn() + Send + 'static) -> notify::Result<Self> {
-        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            // 出错（比如事件太多丢了一些）时也叫调用方比一遍。
-            if !event.is_ok_and(|event| event.kind.is_access()) {
-                changed();
+        let gone = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let watcher = notify::recommended_watcher({
+            let gone = gone.clone();
+            move |event: notify::Result<notify::Event>| {
+                if let Ok(event) = &event
+                    && matches!(
+                        event.kind,
+                        notify::EventKind::Remove(_) | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
+                    )
+                {
+                    gone.lock().unwrap_or_else(|err| err.into_inner()).extend(event.paths.iter().cloned());
+                }
+                // 出错（比如事件太多丢了一些）时也叫调用方比一遍。
+                if !event.is_ok_and(|event| event.kind.is_access()) {
+                    changed();
+                }
             }
         })?;
         let dirs = runode_paths::Dirs::from_env();
-        Ok(Self { watcher, roots: [dirs.config, dirs.data].into_iter().flatten().collect(), dirs: Vec::new() })
+        Ok(Self { watcher, roots: [dirs.config, dirs.data].into_iter().flatten().collect(), dirs: Vec::new(), gone })
     }
 
     /// 改成盯着 `paths` 所在的目录（见 `watch_dirs`）。盯不上的下次再试，这时返回 false。
     pub(crate) fn follow(&mut self, paths: &[PathBuf]) -> bool {
+        let gone = std::mem::take(&mut *self.gone.lock().unwrap_or_else(|err| err.into_inner()));
+        self.dirs.retain(|dir| {
+            let stale = gone.iter().any(|path| dir.starts_with(path));
+            if stale {
+                let _ = self.watcher.unwatch(dir);
+            }
+            !stale
+        });
         let wanted = watch_dirs(paths, &self.roots);
         if wanted == self.dirs {
             return true;
@@ -435,6 +458,37 @@ mod tests {
         assert!(woken());
         settle();
         std::fs::write(root.join("dotfiles/theme"), "b").unwrap();
+        assert!(woken());
+        drop(files);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// 盯着的目录删掉又在同一路径上建出来，`follow` 之后里面改了照样叫得醒。
+    #[test]
+    fn file_watch_rewatches_a_recreated_dir() {
+        let root = std::env::temp_dir().join(format!("rdr-file-watch-recreated-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut files = FileWatch::new(move || {
+            let _ = tx.send(());
+        })
+        .unwrap();
+        let paths = [root.join("data/config.conf")];
+        assert!(files.follow(&paths));
+        let settle = || {
+            std::thread::sleep(Duration::from_millis(300));
+            while rx.try_recv().is_ok() {}
+        };
+        let woken = || rx.recv_timeout(Duration::from_secs(10)).is_ok();
+        settle();
+        std::fs::remove_dir(root.join("data")).unwrap();
+        assert!(woken());
+        std::fs::create_dir(root.join("data")).unwrap();
+        settle();
+        assert!(files.follow(&paths));
+        settle();
+        std::fs::write(&paths[0], "font-size = 14").unwrap();
         assert!(woken());
         drop(files);
         std::fs::remove_dir_all(&root).unwrap();
