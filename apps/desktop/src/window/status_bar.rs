@@ -175,6 +175,28 @@ impl Status {
         self.procs.owner(port.pid, |pid| self.shells.contains(&pid))
     }
 
+    /// 本机在监听的端口分成终端里的（带着所属的 shell）和外面的，按端口号各只列一次：同一个端口号可以是几个进程
+    /// 分别在不同的地址上监听，有一个在终端里就算终端的。
+    fn split_ports(&self) -> (Vec<(&Port, u32)>, Vec<&Port>) {
+        let mut ours: Vec<(&Port, u32)> = Vec::new();
+        for port in &self.ports {
+            if let Some(owner) = self.port_owner(port)
+                && !ours.iter().any(|(known, _)| known.port == port.port)
+            {
+                ours.push((port, owner));
+            }
+        }
+        let mut external: Vec<&Port> = Vec::new();
+        for port in &self.ports {
+            if !ours.iter().any(|(known, _)| known.port == port.port)
+                && !external.iter().any(|known| known.port == port.port)
+            {
+                external.push(port);
+            }
+        }
+        (ours, external)
+    }
+
     /// 照现在的模式和 agent 的状态拿起或放下 `Caffeinate`。
     fn apply_sleep(&mut self) {
         match self.caffeinate.as_mut().and_then(Caffeinate::exit) {
@@ -303,7 +325,12 @@ fn probe_remote(found: Vec<HostId>) -> HashMap<HostId, Vec<Port>> {
     found
         .into_iter()
         .filter_map(|host| match ProjectHost::of(&host).listening_ports() {
-            Ok(ports) => Some((host, ports)),
+            // 远端的端口不分是谁的，同一个端口号只列一次。
+            Ok(mut ports) => {
+                let mut seen = HashSet::new();
+                ports.retain(|port| seen.insert(port.port));
+                Some((host, ports))
+            }
             Err(err) => {
                 tracing::debug!("cannot list the ports on {host:?}: {err}");
                 None
@@ -469,8 +496,7 @@ impl WindowView {
                 status.caffeinate.is_some(),
                 status.total(),
                 status.terminals,
-                status.ports.iter().filter(|port| status.port_owner(port).is_some()).count()
-                    + status.remote_ports.get(host).map_or(0, Vec::len),
+                status.split_ports().0.len() + status.remote_ports.get(host).map_or(0, Vec::len),
             ),
             None => (PreventSleep::Off, false, Usage::default(), 0, 0),
         };
@@ -1010,8 +1036,7 @@ impl WindowView {
             })
             .filter_map(|(view, workspace)| Some((view.read(cx).local_pid()?, workspace.name.clone())))
             .collect();
-        let (ours, external): (Vec<_>, Vec<_>) =
-            status.ports.iter().map(|port| (port, status.port_owner(port))).partition(|(_, owner)| owner.is_some());
+        let (ours, external) = status.split_ports();
         let hover_bg = cx.theme().popover_hover;
         let view = cx.entity().downgrade();
         let port_row = |id: &'static str, port: &Port, workspace: Option<SharedString>| {
@@ -1058,9 +1083,7 @@ impl WindowView {
         };
         let mut body: Vec<AnyElement> = ours
             .iter()
-            .map(|(port, owner)| {
-                port_row("port", port, owner.and_then(|owner| names.get(&owner).cloned())).into_any_element()
-            })
+            .map(|(port, owner)| port_row("port", port, names.get(owner).cloned()).into_any_element())
             .collect();
         if body.is_empty() {
             body.push(empty_note(rust_i18n::t!("status.no_ports").into_owned(), fg_h).into_any_element());
@@ -1101,8 +1124,7 @@ impl WindowView {
                 this.status_popover = Some(StatusPopover::Ports { external: !external_open });
                 cx.notify();
             });
-        let external_rows =
-            external.iter().filter(|_| external_open).map(|(port, _)| port_row("external-port", port, None));
+        let external_rows = external.iter().filter(|_| external_open).map(|port| port_row("external-port", port, None));
         div()
             .w(px(340.))
             .flex()

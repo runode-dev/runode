@@ -156,7 +156,7 @@ impl PartialEq for Procs {
     }
 }
 
-/// 一个在监听的 TCP 端口，和监听它的进程。
+/// 一个在监听的 TCP 端口，和监听它的进程。同一个端口号可以有几个进程分别在不同的地址上监听，各是一个。
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Port {
     pub port: u16,
@@ -266,7 +266,7 @@ fn phys_footprint(_pid: u32) -> Option<u64> {
     None
 }
 
-/// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次（IPv4 和 IPv6 各监听一次的那种）。
+/// 现在在监听的 TCP 端口，按端口号排好、同一个进程的同一个端口只列一次（IPv4 和 IPv6 各监听一次的那种）。
 #[cfg(target_os = "macos")]
 pub(crate) fn listening_ports() -> Vec<Port> {
     let text = output(Command::new("/usr/sbin/lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]), PROBE_TIMEOUT);
@@ -312,7 +312,7 @@ fn parse_ps(text: &str, exe: &str) -> HashMap<u32, Proc> {
         .collect()
 }
 
-/// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次。只认得出本用户进程的端口：别人的进程的
+/// 现在在监听的 TCP 端口，按端口号排好、同一个进程的同一个端口只列一次。只认得出本用户进程的端口：别人的进程的
 /// 描述符读不了，和不带 sudo 的 `lsof` 一样。
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) fn listening_ports() -> Vec<Port> {
@@ -342,7 +342,7 @@ pub(crate) fn listening_ports() -> Vec<Port> {
                 continue;
             };
             let Some(&port) = inodes.get(&inode) else { continue };
-            if ports.iter().any(|known| known.port == port) {
+            if ports.iter().any(|known| known.port == port && known.pid == pid) {
                 continue;
             }
             let command = command
@@ -390,7 +390,7 @@ fn parse_lsof(text: &str) -> Vec<Port> {
             'c' => command = value.to_owned(),
             'n' => {
                 let Some(port) = value.rsplit_once(':').and_then(|(_, port)| port.parse().ok()) else { continue };
-                if pid != 0 && !ports.iter().any(|known| known.port == port) {
+                if pid != 0 && !ports.iter().any(|known| known.port == port && known.pid == pid) {
                     ports.push(Port { port, pid, command: command.clone() });
                 }
             }
@@ -555,12 +555,16 @@ mod tests {
         assert_eq!(parse_proc_net_tcp(text), HashMap::from([(4242, 3000)]));
     }
 
+    /// 同一个进程的同一个端口只列一次；别的进程在另一个地址上监听同一个端口时也列出来。
     #[test]
     fn lsof_ports_are_deduplicated_and_sorted() {
-        let text =
-            "p713\ncrapportd\nf11\nn*:49152\nf12\nn*:49152\np731\ncnode\nf9\nn127.0.0.1:5173\nf10\nn[::1]:3000\n";
+        let text = concat!(
+            "p713\ncrapportd\nf11\nn*:49152\nf12\nn*:49152\n",
+            "p731\ncnode\nf9\nn127.0.0.1:5173\nf10\nn[::1]:3000\n",
+            "p800\ncpython\nf3\nn127.0.0.1:3000\n",
+        );
         let ports = parse_lsof(text);
         let pairs: Vec<_> = ports.iter().map(|port| (port.port, port.pid, port.command.as_str())).collect();
-        assert_eq!(pairs, [(3000, 731, "node"), (5173, 731, "node"), (49152, 713, "rapportd")]);
+        assert_eq!(pairs, [(3000, 731, "node"), (3000, 800, "python"), (5173, 731, "node"), (49152, 713, "rapportd")]);
     }
 }

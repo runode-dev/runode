@@ -198,14 +198,14 @@ impl Drop for Process {
     }
 }
 
-/// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次（IPv4 和 IPv6 各监听一次的那种）。
+/// 现在在监听的 TCP 端口，按端口号排好、同一个进程的同一个端口只列一次（IPv4 和 IPv6 各监听一次的那种）。
 pub(crate) fn listening_ports() -> Vec<Port> {
     let names = snapshot();
     let v4 = tcp_listeners::<MIB_TCPROW_OWNER_PID>(AF_INET, |row| (row.dwLocalPort, row.dwOwningPid));
     let v6 = tcp_listeners::<MIB_TCP6ROW_OWNER_PID>(AF_INET6, |row| (row.dwLocalPort, row.dwOwningPid));
     let mut ports: Vec<Port> = Vec::new();
     for (port, pid) in v4.into_iter().chain(v6) {
-        if !ports.iter().any(|known| known.port == port) {
+        if !ports.iter().any(|known| known.port == port && known.pid == pid) {
             let command = names.get(&pid).map_or_else(String::new, |(_, name)| command_name(name).to_owned());
             ports.push(Port { port, pid, command });
         }
