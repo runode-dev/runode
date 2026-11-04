@@ -46,9 +46,6 @@ pub(in crate::window) struct BranchPicker {
     create_only: bool,
     /// 在别的工作树里检出着的本地分支：分支名到那个工作树的根目录。
     elsewhere: HashMap<String, PathBuf>,
-    /// 输入的文字能不能当分支名，文字变了时在后台问一次 git；`named` 是问过的那段文字。
-    valid_name: bool,
-    named: String,
     selected: usize,
     scroll: ScrollHandle,
     _subscriptions: [Subscription; 2],
@@ -71,7 +68,7 @@ impl BranchPicker {
         let branches = self.branches.as_deref().unwrap_or_default();
         let mut rows = Vec::new();
         let exists = branches.iter().any(|branch| !branch.remote && branch.name == query);
-        if !query.is_empty() && self.valid_name && !exists {
+        if !exists && git::valid_branch_name(query) {
             rows.push(PickerRow::Create(query.to_owned()));
         }
         if !self.create_only {
@@ -126,34 +123,10 @@ impl WindowView {
         });
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和关掉。
         let events = cx.subscribe_in(&field, window, |this, _, event: &InputEvent, window, cx| match event {
-            InputEvent::Changed(query) => {
+            InputEvent::Changed(_) => {
                 if let Some(picker) = &mut this.branch_picker {
-                    let query = query.trim().to_owned();
-                    // 上次的结果先留着，列表不跳；回车时 `named` 对不上就当场再问。
-                    picker.named.clear();
                     picker.selected = 0;
                     picker.scroll.scroll_to_item(0);
-                    // 问 git 要起一个子进程，不在界面线程上等；回来时还是这个列表、文字也没变才算数。
-                    let opened = picker.field.entity_id();
-                    let job = cx.background_spawn({
-                        let query = query.clone();
-                        async move { !query.is_empty() && git::valid_branch_name(&query) }
-                    });
-                    cx.spawn(async move |this, cx| {
-                        let valid = job.await;
-                        this.update(cx, |this, cx| {
-                            if let Some(picker) = &mut this.branch_picker
-                                && picker.field.entity_id() == opened
-                                && picker.field.read(cx).query().trim() == query
-                            {
-                                picker.valid_name = valid;
-                                picker.named = query;
-                                cx.notify();
-                            }
-                        })
-                        .ok();
-                    })
-                    .detach();
                 }
                 cx.notify();
             }
@@ -177,8 +150,6 @@ impl WindowView {
             branches: None,
             create_only,
             elsewhere,
-            valid_name: false,
-            named: String::new(),
             selected: 0,
             scroll: ScrollHandle::new(),
             _subscriptions: [events, blur],
@@ -239,15 +210,9 @@ impl WindowView {
     /// 回车：切到选中的分支，或者新建分支。
     fn confirm_branch_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (root, start, choice, worktree) = {
-            let Some(picker) = &mut self.branch_picker else {
+            let Some(picker) = &self.branch_picker else {
                 return;
             };
-            // 后台还没问完就按了回车：当场问，不然没有新建那一行，回车会切到别的分支上。
-            let query = picker.field.read(cx).query().trim().to_owned();
-            if picker.named != query {
-                picker.valid_name = !query.is_empty() && git::valid_branch_name(&query);
-                picker.named = query;
-            }
             let rows = picker.rows(cx);
             let choice = match rows.get(picker.selected.min(rows.len().saturating_sub(1))) {
                 Some(PickerRow::Create(name)) => Ok(name.clone()),

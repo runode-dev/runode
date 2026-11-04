@@ -9,8 +9,27 @@ use runode_git::{current_branch, origin_url, valid_branch_name};
 fn checks_branch_names() {
     assert!(valid_branch_name("feat/x"));
     assert!(valid_branch_name("修复"));
-    for name in ["", "a b", "-x", "x..y", "@{-1}", "HEAD", "x.lock", "a~1", "x/"] {
+    for name in ["", "a b", "-x", "x..y", "@{-1}", "HEAD", "@", "x.lock", "a~1", "x/"] {
         assert!(!valid_branch_name(name), "{name}");
+    }
+}
+
+/// 自己判断的结果和 `git check-ref-format --branch` 一样。
+#[test]
+fn branch_names_are_judged_like_git() {
+    let repo = TestRepo::new("branch-names");
+    let names = [
+        "a", "feat/x", "修复", "a@b", "@a", "a@", "a/@", "a.b", "a/b.c", "a.lock.b", "a/HEAD", "HEAD/a", "a/-b", "a]b",
+        "a{b", "a}b", "a#b", "a!b", ".a", "a/.b", "a.", "a/.", "a/..", "...", "a.lock", "a.lock/b", "a//b", "/a", "a/",
+        "a\\b", "a?b", "a*b", "a[b", "a:b", "a^b", "a~b", "a b", "a\tb", "a\x7fb", "a@{b", "a..b", "-a", "HEAD",
+    ];
+    for name in names {
+        let git = std::process::Command::new("git")
+            .args(["check-ref-format", "--branch", name])
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert_eq!(valid_branch_name(name), git.status.success(), "{name:?}");
     }
 }
 

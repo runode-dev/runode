@@ -1,8 +1,6 @@
 //! 分支：列出本地和远端分支，切换、新建分支。只对句柄所指的那个仓库。
 
-use std::{path::Path, process::Stdio};
-
-use crate::{Refusal, Repo, Result, exec::run, git, git_command};
+use crate::{Refusal, Repo, Result, exec::run, git};
 
 /// 分支列表里的一项。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,21 +22,21 @@ pub struct Branch {
     pub time: Option<i64>,
 }
 
-/// `name` 能不能用作新分支的名字，按 `git check-ref-format --branch` 的规矩。不看哪个仓库，在根目录里跑：
-/// 不读进程当前目录所在仓库的配置，当前目录被删掉了也照常判断。
+/// `name` 能不能用作新分支的名字，按 `git check-ref-format --branch` 的规矩，不起 git：远端仓库的分支名
+/// 也在这台机器上判断，这台机器上不一定装着 git。
 pub fn valid_branch_name(name: &str) -> bool {
-    // `@{-1}` 这类写法 git 会当成「上一个分支」去解析，`HEAD` 也不能用。
-    if name.is_empty() || name.starts_with('-') || name.contains("@{") || name == "HEAD" {
+    // `@{-1}` 这类写法 git 会当成「上一个分支」去解析，`HEAD` 和单独的 `@` 指当前提交。
+    if name.is_empty() || name.starts_with('-') || name.contains("@{") || name == "HEAD" || name == "@" {
         return false;
     }
-    git_command(Path::new("/")).is_ok_and(|mut command| {
-        command
-            .args(["check-ref-format", "--branch", name])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
-    })
+    if name.contains("..") || name.ends_with('.') {
+        return false;
+    }
+    let forbidden = |c: char| c.is_ascii_control() || matches!(c, ' ' | '~' | '^' | ':' | '?' | '*' | '[' | '\\');
+    if name.chars().any(forbidden) {
+        return false;
+    }
+    name.split('/').all(|part| !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock"))
 }
 
 /// 解析 `branches` 里 `git for-each-ref` 的输出，一行一个引用，字段间用 NUL 隔开。
