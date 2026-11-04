@@ -295,24 +295,23 @@ pub(crate) fn read_repo(
     let repo = root.as_path();
     let filters = filter_overrides(repo);
     // 状态、暂存段和未暂存段互不依赖，几个 git 进程同时跑；stash、远端和子模块也一起读。
-    let (status, staged, unstaged, extra, submodules) = std::thread::scope(|scope| {
+    let (status, staged, unstaged, extra, submodules, index_links) = std::thread::scope(|scope| {
         let status = scope.spawn(|| {
-            // 开头多一项 `## 分支...上游 [ahead 1, behind 2]`。里面有改动的子模块也报出来，连同没
-            // 写进 `.gitmodules` 的 gitlink，据此认出子仓库；列进改动的条目以 `diff` 为准。
-            // shortcut: status 递归进子模块时，子模块自己配置的过滤器不在覆盖之列；要挡就得连子模块的配置
-            // 一起列出来，或者把 --ignore-submodules 改成 dirty。
+            // 开头多一项 `## 分支...上游 [ahead 1, behind 2]`。不进子模块里看有没有改动：`filters` 只覆盖得了
+            // 这个仓库配置的过滤器，进去了会执行子模块自己配置的。列进改动的条目以 `diff` 为准。
             let args = [
                 "status",
                 "--porcelain=v1",
                 "-z",
                 "--untracked-files=all",
                 "--ignored=matching",
-                "--ignore-submodules=none",
+                "--ignore-submodules=dirty",
                 "--branch",
                 "--ahead-behind",
             ];
             git_with(repo, &filters, &args)
         });
+        let index_links = scope.spawn(|| recorded_gitlinks(repo, None));
         let staged = scope.spawn(|| {
             // 还没有提交时 `--cached` 自己和空树比，暂存了的新文件也算进来。短哈希给 `RepoInfo::head`。
             let head = git(repo, &["rev-parse", "--verify", "--quiet", "--short", "HEAD"])
@@ -327,7 +326,8 @@ pub(crate) fn read_repo(
         let staged = staged.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         let extra = extra.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         let submodules = submodules.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-        (status, staged, unstaged, extra, submodules)
+        let index_links = index_links.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        (status, staged, unstaged, extra, submodules, index_links)
     });
     let status = status?;
     let (mut statuses, ignored) = parse_status(&status);
@@ -338,7 +338,7 @@ pub(crate) fn read_repo(
     // 换掉的普通文件、指向别的仓库的符号链接却像子模块。
     let listed = |section| {
         let (staged, unstaged) = status_sections(&status);
-        let index = recorded_gitlinks(repo, None);
+        let index = &index_links;
         match section {
             Section::Staged => {
                 // 暂存了删除的不在暂存区里，看 HEAD 里记的。
@@ -424,7 +424,7 @@ pub(crate) fn read_repo(
         .collect();
     let head_stats = head_stats(repo, &filters, &partial);
     // 已跟踪、自带 `.git` 的目录是 gitlink：`.gitmodules` 里登记的子模块，或者没登记、直接
-    // `git add` 进来的仓库。后者只能从 `git status` 认出来，所以只有它有改动时才读得到。只是
+    // `git add` 进来的仓库，后者从暂存区记的模式认，暂存了删除的从 `git status` 认。只是
     // 里面有改动、提交号没变的不算这个仓库的改动，状态里也不留。
     let gitlinks: Vec<PathBuf> = statuses
         .iter()
@@ -438,6 +438,7 @@ pub(crate) fn read_repo(
     }
     let mut submodules = submodules;
     submodules.extend(gitlinks);
+    submodules.extend(index_links.into_keys().filter(|path| repo.join(path).join(".git").exists()));
     submodules.sort();
     submodules.dedup();
     let children = submodules

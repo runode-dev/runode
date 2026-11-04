@@ -164,6 +164,30 @@ fn does_not_run_filters_from_included_config() {
     });
 }
 
+/// 只在子模块自己的配置里定义的过滤器，读主仓库连同子仓库的快照时也不执行。
+#[test]
+fn does_not_run_filters_configured_only_in_submodules() {
+    let lib = TestRepo::new("snapshot-sub-filter-lib");
+    lib.commit_file(".gitattributes", "* filter=evil\n", "attributes");
+    lib.commit_file("a.txt", "one\n", "init");
+    let repo = TestRepo::new("snapshot-sub-filter");
+    repo.commit_file("top.txt", "top\n", "init");
+    repo.add_submodule(&lib, "lib");
+    let marker = repo.path().join(".git/filter-ran");
+    let command = format!("sh -c 'echo x >> \"{}\"; cat'", marker.display());
+    repo.git(&["-C", "lib", "config", "filter.evil.clean", &command]);
+    repo.git(&["-C", "lib", "config", "filter.evil.required", "true"]);
+    let later = std::time::SystemTime::now() + Duration::from_secs(60);
+    fs::File::options().write(true).open(repo.path().join("lib/a.txt")).unwrap().set_modified(later).unwrap();
+    let repos = common::read_all(&repo);
+    assert!(!marker.exists(), "读快照时执行了子模块配置的过滤器");
+    assert!(repos.main.is_clean(), "{:?}", repos.main.unstaged);
+    assert_eq!(repos.subs.len(), 1);
+    // 对照：不覆盖时 git status 进到子模块里会执行它，上面的断言才有意义。
+    repo.try_git(&["status"]);
+    assert!(marker.exists());
+}
+
 /// 仓库开了 `log.showSignature`、把 `gpg.program` 设成脚本时，读快照（`stash list` 内部跑 `log`）和
 /// 读提交历史都不执行它去校验签过名的提交。
 #[cfg(unix)]
