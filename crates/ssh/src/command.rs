@@ -123,14 +123,41 @@ impl Ssh {
         command
     }
 
-    /// 在主连接上加（`cancel` 时去掉）一条本地端口转发：本机的 `local` 端口转到远端的 `remote` 端口。
-    pub fn forward(&self, dest: &Destination, local: u16, remote: u16, cancel: bool) -> Command {
+    /// `ssh -G`：打出 OpenSSH 按用户配置给 `dest` 算好的选项，`parse_control_path` 从里面读出主连接 socket
+    /// 的实际路径，交给 `forward`。
+    pub fn resolve(&self, dest: &Destination) -> Command {
         let mut command = self.base();
+        command.arg("-G").args(dest.args());
+        command
+    }
+
+    /// 在主连接上加（`cancel` 时去掉）一条本地端口转发：本机的 `local` 端口转到远端的 `remote` 端口。
+    ///
+    /// `-O forward`、`-O cancel` 把这次调用读到的所有转发都交给主连接，用户配置里给这台主机写的
+    /// `LocalForward`、`RemoteForward` 也在内，`ClearAllForwardings` 又会连 `-L` 一起清掉。所以给了 `socket`
+    /// （主连接 socket 的实际路径）时不读配置文件，直接连它；没给时按配置找主连接，配置里的转发跟着加上去。
+    pub fn forward(&self, dest: &Destination, socket: Option<&Path>, local: u16, remote: u16, cancel: bool) -> Command {
+        let mut command = match socket {
+            Some(socket) => {
+                let mut command = Command::new(&self.program);
+                no_window(&mut command);
+                command.args(["-F", "none", "-o"]).arg(control_path_option(socket)).args(["-o", "LogLevel=ERROR"]);
+                command
+            }
+            None => self.base(),
+        };
         command.args(["-O", if cancel { "cancel" } else { "forward" }]);
         command.arg("-L").arg(format!("127.0.0.1:{local}:localhost:{remote}"));
         command.args(dest.args());
         command
     }
+}
+
+/// 读 `ssh -G` 的输出里主连接 socket 的路径。没有、是 `none`、还带着没展开的 `%` 占位符（旧版 ssh 的 `-G`
+/// 不展开）时为空。
+pub fn parse_control_path(config: &str) -> Option<PathBuf> {
+    let path = config.lines().find_map(|line| line.strip_prefix("controlpath "))?.trim_end();
+    (!path.is_empty() && path != "none" && !path.contains('%')).then(|| PathBuf::from(path))
 }
 
 /// `ControlPath=…`：路径里的 `%` 除了 `%C` 都要写成 `%%`，免得被 OpenSSH 当成别的占位符；带空白时加上

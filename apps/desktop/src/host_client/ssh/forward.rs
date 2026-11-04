@@ -3,6 +3,7 @@
 use std::{
     collections::HashMap,
     net::Ipv4Addr,
+    path::PathBuf,
     process::Stdio,
     sync::{LazyLock, Mutex, PoisonError},
 };
@@ -37,7 +38,7 @@ pub fn stop(host: &RemoteHost, port: u16) -> Result<()> {
         return Ok(());
     };
     let ssh = ssh();
-    let mut command = ssh.forward(&host.dest, local, port, true);
+    let mut command = ssh.forward(&host.dest, control_socket(&ssh, host).as_deref(), local, port, true);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let output = command.output()?;
     // 主连接已经退出时转发本来就没了。
@@ -69,7 +70,7 @@ pub fn forward(host: &RemoteHost, port: u16) -> Result<u16> {
         return Ok(local);
     }
     let local = pick_local(known, port)?;
-    let mut command = ssh.forward(&host.dest, local, port, false);
+    let mut command = ssh.forward(&host.dest, control_socket(&ssh, host).as_deref(), local, port, false);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let output = command.output()?;
     if !output.status.success() {
@@ -78,6 +79,14 @@ pub fn forward(host: &RemoteHost, port: u16) -> Result<u16> {
     tracing::info!("forwarding localhost:{local} to {}:{port}", host.name);
     FORWARDS.lock().unwrap_or_else(PoisonError::into_inner).insert(key, local);
     Ok(local)
+}
+
+/// `host` 的主连接 socket 的实际路径，读不出时为空。
+fn control_socket(ssh: &runode_ssh::Ssh, host: &RemoteHost) -> Option<PathBuf> {
+    let mut command = ssh.resolve(&host.dest);
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let output = command.output().ok().filter(|output| output.status.success())?;
+    runode_ssh::parse_control_path(&String::from_utf8_lossy(&output.stdout))
 }
 
 fn master_alive(ssh: &runode_ssh::Ssh, host: &RemoteHost) -> bool {

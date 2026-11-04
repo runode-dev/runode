@@ -12,7 +12,7 @@ mod destination;
 mod error;
 pub mod process;
 
-pub use command::{DEFAULT_PERSIST_SECS, Ssh, parse_version, supports_askpass};
+pub use command::{DEFAULT_PERSIST_SECS, Ssh, parse_control_path, parse_version, supports_askpass};
 pub use config::list_hosts;
 pub use destination::Destination;
 pub use error::{Failure, last_line};
