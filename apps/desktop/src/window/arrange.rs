@@ -192,6 +192,10 @@ impl WindowView {
         if entries.is_empty() {
             return;
         }
+        // 浮着的当前终端先停靠回去：浮着的不画在分屏树里，排出来的样子才和浮层里画的一样。
+        if self.tab().is_some_and(|tab| tab.floats(original)) {
+            self.dock_pane(original, window, cx);
+        }
         let steps = plan(arrangement, entries.len());
         let new: Vec<_> = entries.iter().map(|(id, _)| *id).collect();
         let split_ids: Vec<_> = steps.iter().map(|_| self.next_id()).collect();
