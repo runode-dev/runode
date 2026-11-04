@@ -443,13 +443,13 @@ fn read_commands_from(shell: Option<RealShell>) {
 
 #[test]
 fn real_bash_commands_are_read() {
-    read_commands_from(RealShell::start("bash", "bash", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]));
+    read_commands_from(RealShell::start("bash", "bash", "PS1='[b]$ '\n", "[b]$", &["[b]$"]));
 }
 
 /// 用户的 PROMPT_COMMAND 以 `;` 结尾时照样跑，集成也不出语法错误、照常标出提示符和退出码。
 #[test]
 fn real_bash_keeps_a_prompt_command_ending_in_a_semicolon() {
-    let rc = "PS1='[b]\\$ '\nPROMPT_COMMAND='ran=yes;'\n";
+    let rc = "PS1='[b]$ '\nPROMPT_COMMAND='ran=yes;'\n";
     let Some(mut shell) = RealShell::start("bash", "bash-prompt-command", rc, "[b]$", &["[b]$"]) else { return };
     shell.run("false");
     shell.wait_for_bytes("the exit status of false", 0, b"\x1b]133;D;1\x07");
@@ -461,7 +461,7 @@ fn real_bash_keeps_a_prompt_command_ending_in_a_semicolon() {
 /// 用户的 PROMPT_COMMAND 看到的 $? 是上一条命令的退出码，不是集成记下退出码那一步的。
 #[test]
 fn real_bash_prompt_command_sees_the_exit_status() {
-    let rc = "PS1='[b]\\$ '\nPROMPT_COMMAND='seen=$?'\n";
+    let rc = "PS1='[b]$ '\nPROMPT_COMMAND='seen=$?'\n";
     let Some(mut shell) = RealShell::start("bash", "bash-prompt-status", rc, "[b]$", &["[b]$"]) else { return };
     shell.run("false");
     shell.run("echo $seen");
@@ -501,7 +501,7 @@ fn real_bash_wraps_a_sparse_array_prompt_command() {
 /// 退出码 1，却不触发 errexit。
 #[test]
 fn real_bash_survives_errexit_while_restoring_the_exit_status() {
-    let rc = "PS1='[b]\\$ '\nPROMPT_COMMAND='seen=$?'\nset -e\n";
+    let rc = "PS1='[b]$ '\nPROMPT_COMMAND='seen=$?'\nset -e\n";
     let Some(mut shell) = RealShell::start("bash", "bash-prompt-errexit", rc, "[b]$", &["[b]$"]) else { return };
     shell.run("! true");
     shell.run("echo $seen");
@@ -512,7 +512,7 @@ fn real_bash_survives_errexit_while_restoring_the_exit_status() {
 /// dotglob。
 #[test]
 fn real_bash_keeps_the_users_dotglob() {
-    let rc = "PS1='[b]\\$ '\nshopt -s dotglob\n";
+    let rc = "PS1='[b]$ '\nshopt -s dotglob\n";
     let Some(mut shell) = RealShell::start("bash", "bash-dotglob", rc, "[b]$", &["[b]$"]) else { return };
     shell.run("shopt -q dotglob && echo on || echo off");
     assert_eq!(shell.output(1), "on\n");
@@ -520,7 +520,7 @@ fn real_bash_keeps_the_users_dotglob() {
 
 #[test]
 fn real_bash_commands_are_read_under_a_two_line_prompt() {
-    read_commands_from(RealShell::start("bash", "bash-two-line", "PS1='\\W\\n[b]\\$ '\n", "[b]$", &["[b]$"]));
+    read_commands_from(RealShell::start("bash", "bash-two-line", "PS1='\\W\\n[b]$ '\n", "[b]$", &["[b]$"]));
 }
 
 #[test]
@@ -557,7 +557,7 @@ fn real_zsh_drops_mouse_reports() {
 #[test]
 fn real_bash_drops_mouse_reports() {
     if bash_at_least(4, 2) {
-        drop_mouse_reports_in(RealShell::start("bash", "bash-mouse", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]));
+        drop_mouse_reports_in(RealShell::start("bash", "bash-mouse", "PS1='[b]$ '\n", "[b]$", &["[b]$"]));
     }
 }
 
@@ -613,7 +613,7 @@ fn real_zsh_cursor_follows_the_prompt_and_vi_mode() {
 #[test]
 fn real_bash_cursor_follows_the_prompt() {
     let has_ps0 = bash_at_least(4, 4);
-    let Some(mut shell) = RealShell::start("bash", "bash-cursor", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]) else { return };
+    let Some(mut shell) = RealShell::start("bash", "bash-cursor", "PS1='[b]$ '\n", "[b]$", &["[b]$"]) else { return };
     if has_ps0 {
         cursor_follows_the_prompt(&mut shell);
     } else {
@@ -685,7 +685,7 @@ fn real_bash_reload_key_works_in_vi_command_mode() {
     if !bash_at_least(4, 4) {
         return;
     }
-    let rc = "set -o vi\nPS1='[b]\\$ '\n[ -r ~/extra ] && . ~/extra\n";
+    let rc = "set -o vi\nPS1='[b]$ '\n[ -r ~/extra ] && . ~/extra\n";
     reload_key_in_vi_command_mode(RealShell::start("bash", "bash-reload-key", rc, "[b]$", &["[b]$"]));
 }
 
@@ -712,7 +712,7 @@ fn real_zsh_reports_its_functions() {
 #[test]
 fn real_bash_reloads_with_the_integration() {
     reload_in(
-        RealShell::start("bash", "bash-reload", "PS1='[b]\\$ '\n[ -r ~/extra ] && . ~/extra\n", "[b]$", &["[b]$"]),
+        RealShell::start("bash", "bash-reload", "PS1='[b]$ '\n[ -r ~/extra ] && . ~/extra\n", "[b]$", &["[b]$"]),
         POSIX_RELOAD_CHECK,
     );
 }
@@ -870,7 +870,7 @@ fn real_bash_reports_functions_and_exit_status() {
         return;
     }
     reports_functions_and_exit_status(
-        RealShell::start("bash", "bash-report", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]),
+        RealShell::start("bash", "bash-report", "PS1='[b]$ '\n", "[b]$", &["[b]$"]),
         "false",
     );
 }
@@ -881,7 +881,7 @@ fn real_bash_ignores_foreign_command_marks() {
     if !bash_at_least(4, 4) {
         return;
     }
-    let rc = "PS1='[b]\\$ '\nPS0='\\e]133;C\\a'\nPROMPT_COMMAND='printf \"\\033]133;D;0\\007\"'\n";
+    let rc = "PS1='[b]$ '\nPS0='\\e]133;C\\a'\nPROMPT_COMMAND='printf \"\\033]133;D;0\\007\"'\n";
     foreign_marks_do_not_end_commands(RealShell::start("bash", "bash-foreign", rc, "[b]$", &["[b]$"]), FORGED_END);
 }
 
@@ -1062,7 +1062,7 @@ fn real_shells_take_the_token_from_an_old_reload() {
     let start =
         |shell, name, rc: &str, prompt, idle| RealShell::start_handing_token(shell, name, rc, prompt, idle, true);
     legacy_token_in(start("zsh", "zsh-legacy", "PROMPT='[z]%% '\n", "[z]%", &["[z]%"]));
-    legacy_token_in(start("bash", "bash-legacy", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]));
+    legacy_token_in(start("bash", "bash-legacy", "PS1='[b]$ '\n", "[b]$", &["[b]$"]));
     legacy_token_in(start("fish", "fish-legacy", &fish_rc(""), "[f]>", &["[f]>"]));
     legacy_token_in(start("elvish", "elvish-legacy", &elvish_rc(""), "[e]>", &["[e]>"]));
     legacy_token_in(start("nu", "nushell-legacy", &nushell_rc(""), "[n]>", &["[n]>"]));
@@ -1103,7 +1103,7 @@ fn real_zsh_nounset_keeps_reporting() {
 
 #[test]
 fn real_bash_xtrace_hides_the_token() {
-    let rc = "PS1='[b]\\$ '\nset -x\n";
+    let rc = "PS1='[b]$ '\nset -x\n";
     trace_hides_the_token(RealShell::start("bash", "bash-xtrace", rc, "[b]$", &["[b]$"]), "+ echo hi");
 }
 
@@ -1113,7 +1113,7 @@ fn real_bash_xtrace_to_its_own_fd_hides_the_token() {
     if !bash_at_least(4, 4) {
         return;
     }
-    let rc = "PS1='[b]\\$ '\nexec 5>&2\nBASH_XTRACEFD=5\nset -x\n";
+    let rc = "PS1='[b]$ '\nexec 5>&2\nBASH_XTRACEFD=5\nset -x\n";
     trace_hides_the_token(RealShell::start("bash", "bash-xtracefd", rc, "[b]$", &["[b]$"]), "+ echo hi");
 }
 
