@@ -116,8 +116,9 @@ fn run_installed(dir: &str, arg: &str) -> String {
 }
 
 /// 把 stdin 上的可执行文件装成 `dir` 这个构建：先写成临时文件，核对 SHA-256（`sha256`，十六进制）、试跑一下
-/// （拦住挂成 noexec 的家目录、太旧的 glibc），都过了才原子地换上，再把 `runode` 链接指过去；哪一步没成都删掉
-/// 临时文件，临时文件名每次不同，留下的没人清。`archive` 时
+/// （拦住挂成 noexec 的家目录、太旧的 glibc、缺的动态库），都过了才原子地换上，再把 `runode` 链接指过去；哪一步
+/// 没成都删掉临时文件，临时文件名每次不同，留下的没人清。试跑不成时 stderr 上打一行 `RUNODE-INSTALL exec`，
+/// 后面跟着试跑报错的开头（`parse_exec_failure` 认）。`archive` 时
 /// stdin 是只装着 `runode` 的 tar.gz，核对的是包。换上以后删掉放了超过 `BUILD_KEEP_DAYS` 天的旧构建
 /// （`prune_script`），链接原先指着的那个留着。
 pub fn install_command(dir: &str, sha256: &str, archive: bool) -> String {
@@ -130,7 +131,8 @@ pub fn install_command(dir: &str, sha256: &str, archive: bool) -> String {
             r#"if [ "$S" = "{sha}" ]; then :; else rm -f "$T.in"; echo "RUNODE-INSTALL checksum" >&2; exit 1; fi; "#,
             r#"{unpack} || {{ rm -f "$T" "$T.in"; exit 1; }}; "#,
             r#"chmod 755 "$T" || {{ rm -f "$T"; exit 1; }}; "#,
-            r#"if "$T" --version > /dev/null 2>&1; then :; else rm -f "$T"; echo "RUNODE-INSTALL exec" >&2; exit 1; fi; "#,
+            r#"if "$T" --version > /dev/null 2> "$T.err"; then rm -f "$T.err"; else "#,
+            r#"E=$(head -c 300 "$T.err" | tr "\n" " "); rm -f "$T" "$T.err"; echo "RUNODE-INSTALL exec $E" >&2; exit 1; fi; "#,
             r#"mv -f "$T" "$D/{dir}/runode" || {{ rm -f "$T"; exit 1; }}; P=$(readlink "$D/runode" 2>/dev/null); P="${{P%%/*}}"; "#,
             r#"ln -sf "{dir}/runode" "$D/.link-$$" && mv -f "$D/.link-$$" "$D/runode" || exit 1; "#,
             "{prune} > /dev/null; :"
@@ -141,6 +143,12 @@ pub fn install_command(dir: &str, sha256: &str, archive: bool) -> String {
         unpack = unpack,
         prune = prune_script(dir, Some(BUILD_KEEP_DAYS)),
     ))
+}
+
+/// `install_command` 和 `windows::install_command` 的 stderr 里试跑装上的 runode 不成的那一行：报了原因时是
+/// 原因，没报时是空串；不是这种失败时是 `None`。
+pub fn parse_exec_failure(stderr: &str) -> Option<&str> {
+    stderr.lines().find_map(|line| line.strip_prefix("RUNODE-INSTALL exec")).map(str::trim)
 }
 
 /// 装上新构建时，别的构建放满这么多天才删。

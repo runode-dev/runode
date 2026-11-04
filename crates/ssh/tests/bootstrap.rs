@@ -11,7 +11,7 @@ use std::{fs, io::Write as _, process::Stdio};
 #[cfg(unix)]
 use common::TempDir;
 #[cfg(unix)]
-use runode_ssh::bootstrap::{BIN_DIR, PROBE_EXIT, UPLOADS_DIR, parse_pruned, parse_uploaded};
+use runode_ssh::bootstrap::{BIN_DIR, PROBE_EXIT, UPLOADS_DIR, parse_exec_failure, parse_pruned, parse_uploaded};
 use runode_ssh::bootstrap::{
     Entry, Libc, Os, Platform, Target, Unsupported, connect_command, install_command, install_dir_name, prune_command,
     run_command, upload_command, windows,
@@ -171,6 +171,22 @@ fn pruning_keeps_the_current_linked_and_running_builds() {
     let mut left: Vec<_> = fs::read_dir(&bin).unwrap().map(|entry| entry.unwrap().file_name()).collect();
     left.sort();
     assert_eq!(left, ["current", "linked", "running", "runode"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn refuses_a_build_that_cannot_run_and_says_why() {
+    let home = TempDir::new("bootstrap-exec");
+    let fake = home.0.join("fake");
+    fs::write(&fake, "#!/bin/sh\necho \"error while loading shared libraries: libasound.so.2\" >&2\nexit 127\n")
+        .unwrap();
+    let output = run(&home.0, &install_command("v1", &sha256_hex(&fake), false), &fs::read(&fake).unwrap());
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(parse_exec_failure(&stderr), Some("error while loading shared libraries: libasound.so.2"));
+    assert_eq!(fs::read_dir(home.0.join(BIN_DIR).join("v1")).unwrap().count(), 0);
+    assert_eq!(parse_exec_failure("RUNODE-INSTALL exec \r\n"), Some(""));
+    assert_eq!(parse_exec_failure("RUNODE-INSTALL checksum\n"), None);
 }
 
 #[cfg(unix)]

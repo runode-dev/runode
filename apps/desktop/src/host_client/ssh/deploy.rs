@@ -16,7 +16,7 @@ use std::{
 
 use runode_ssh::{
     Ssh,
-    bootstrap::{Platform, Target, install_command, install_dir_name, windows},
+    bootstrap::{Platform, Target, install_command, install_dir_name, parse_exec_failure, windows},
     process::Pipes,
 };
 
@@ -105,15 +105,21 @@ pub(super) fn install(
     let status = child.wait();
     host.untrack(pid);
     let status = status.map_err(|err| Failure::Retry(err.to_string()))?;
-    let stderr = std::fs::read_to_string(log).unwrap_or_default();
+    // 试跑的报错按字节截断，可能切在多字节字符中间，不能整个按 UTF-8 读。
+    let stderr = String::from_utf8_lossy(&std::fs::read(log).unwrap_or_default()).into_owned();
     if stderr.contains("RUNODE-INSTALL checksum") {
         return Err(Failure::Retry("the upload arrived damaged".into()));
     }
-    if stderr.contains("RUNODE-INSTALL exec") {
-        return Err(Failure::Stop {
-            error: "runode cannot run on the remote (its home directory may be mounted noexec)".into(),
-            auth: false,
-        });
+    if let Some(reason) = parse_exec_failure(&stderr) {
+        const NOEXEC: &str = "its home directory may be mounted noexec";
+        let error = if reason.is_empty() {
+            format!("runode cannot run on the remote ({NOEXEC})")
+        } else if reason.contains("Permission denied") {
+            format!("runode cannot run on the remote ({NOEXEC}): {reason}")
+        } else {
+            format!("runode cannot run on the remote: {reason}")
+        };
+        return Err(Failure::Stop { error, auth: false });
     }
     if let Err(err) = sent {
         return Err(Failure::Retry(format!("the upload was cut off: {err}")));
