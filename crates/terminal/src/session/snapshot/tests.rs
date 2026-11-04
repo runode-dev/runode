@@ -771,8 +771,6 @@ fn a_session_from_a_snapshot_applies_the_theme_like_the_host() {
 #[test]
 fn scrollback_pruning_diverges_after_a_snapshot() {
     let data = long_scrollback();
-    // 切在哪里会分叉要看 page 怎么划分；这个切点上两份留下的历史行数不同。
-    let cut = data.len() / 10;
     let new_terminal = || {
         let mut terminal = vt::new_terminal(size(LONG_SCROLLBACK_COLS, 6)).unwrap();
         vt::configure_common(&mut terminal, LONG_SCROLLBACK_BYTES).unwrap();
@@ -780,10 +778,16 @@ fn scrollback_pruning_diverges_after_a_snapshot() {
     };
     let mut expected = new_terminal();
     expected.vt_write(&data);
-    let mut actual = new_terminal();
-    actual.vt_write(&data[..cut]);
-    let mut actual = round_trip(&actual).unwrap();
-    actual.vt_write(&data[cut..]);
-    assert_ne!(expected.scrollback_rows().unwrap(), actual.scrollback_rows().unwrap());
-    assert_same("pruned", &expected, &actual, true);
+    // 切在哪里会分叉要看 page 怎么划分，各平台不同，所以试一串切点，至少一处两份留下的历史行数不同。
+    let mut diverged = false;
+    for tenth in 1..10 {
+        let cut = data.len() * tenth / 10;
+        let mut actual = new_terminal();
+        actual.vt_write(&data[..cut]);
+        let mut actual = round_trip(&actual).unwrap();
+        actual.vt_write(&data[cut..]);
+        diverged |= expected.scrollback_rows().unwrap() != actual.scrollback_rows().unwrap();
+        assert_same(&format!("pruned, cut at {tenth}/10"), &expected, &actual, true);
+    }
+    assert!(diverged);
 }
