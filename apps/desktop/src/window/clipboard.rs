@@ -3,8 +3,10 @@
 //! `remote`），这里在主线程上写系统剪贴板；读之前按宿主的意思先问用户，问在显示那个终端的窗口上，
 //! 说清是哪个终端、哪个程序要读。日志里不记剪贴板的内容。
 
+use std::collections::HashMap;
+
 use futures::channel::oneshot;
-use gpui::{App, ClipboardItem, EntityId, Window, WindowHandle};
+use gpui::{App, ClipboardItem, EntityId, Global, Window, WindowHandle};
 use runode_protocol::{HostMsg, SessionId};
 use runode_types::clipboard::MAX_CLIPBOARD_BYTES;
 
@@ -20,9 +22,17 @@ pub(super) fn write(text: String, cx: &mut App) -> HostMsg {
     HostMsg::Done { req: 0 }
 }
 
+/// 还没答的询问框，按主机和会话记着回话该交给哪个请求。宿主一个会话同时只转来一个读请求，等不及
+/// 用户回答时放弃它、之后再转来的是新的请求：这时不再弹一个框，原来那个框的回答交给最新的请求，
+/// 用户不在时程序一遍遍地读也只有一个框。
+#[derive(Default)]
+struct PendingReads(HashMap<(HostId, SessionId), (Link, UiTicket)>);
+
+impl Global for PendingReads {}
+
 /// 主机 `host` 上的程序要读剪贴板，`ticket` 是宿主经 `link` 转来的请求的回执。不用问时当场读；要问时在显示这个会话的窗口上
-/// （没有时在最前面的窗口上）弹框，用户点了允许才读。都用 `Link::ui_reply` 回 `ClipboardText`，
-/// 不让读、没有窗口可问、剪贴板里没有文字时 `text` 为空。
+/// （没有时在最前面的窗口上）弹框，用户点了允许才读，这个会话已经有框开着时沿用它（`PendingReads`）。都用 `Link::ui_reply`
+/// 回 `ClipboardText`，不让读、没有窗口可问、剪贴板里没有文字时 `text` 为空。
 pub(super) fn read(
     host: &HostId,
     link: Link,
@@ -32,11 +42,16 @@ pub(super) fn read(
     program: Option<String>,
     cx: &mut App,
 ) {
-    let reply = move |text: Option<String>| {
+    let reply = move |link: &Link, ticket, text: Option<String>| {
         link.ui_reply(ticket, HostMsg::ClipboardText { id, text: text.map(Into::into) });
     };
     if !ask {
-        reply(clipboard_text(cx));
+        reply(&link, ticket, clipboard_text(cx));
+        return;
+    }
+    let key = (host.clone(), id);
+    if let Some(pending) = cx.default_global::<PendingReads>().0.get_mut(&key) {
+        *pending = (link, ticket);
         return;
     }
     let (target, pane) = match find_session(host, id, cx) {
@@ -45,19 +60,24 @@ pub(super) fn read(
     };
     let Some(window) = target else {
         tracing::info!("no window to ask whether session {id} may read the clipboard");
-        reply(None);
+        reply(&link, ticket, None);
         return;
     };
     let detail = read_detail(&terminal_title(window, pane, id, cx), program.as_deref());
     let title = rust_i18n::t!("clipboard.read_title");
     let answer = window.update(cx, |_, window, cx| prompt_read(window, &title, &detail, cx));
     let Ok(answer) = answer else {
-        reply(None);
+        reply(&link, ticket, None);
         return;
     };
+    cx.default_global::<PendingReads>().0.insert(key.clone(), (link, ticket));
     cx.spawn(async move |cx| {
-        let text = if allowed(answer.await.ok()) { cx.update(clipboard_text) } else { None };
-        reply(text);
+        let allow = allowed(answer.await.ok());
+        cx.update(|cx| {
+            let Some((link, ticket)) = cx.default_global::<PendingReads>().0.remove(&key) else { return };
+            let text = if allow { clipboard_text(cx) } else { None };
+            reply(&link, ticket, text);
+        });
     })
     .detach();
 }
