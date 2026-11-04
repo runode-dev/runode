@@ -8,9 +8,9 @@ use std::{
     ffi::OsString,
     io::{BufRead as _, BufReader, ErrorKind, Read as _, Write as _},
     path::Path,
-    process::{Command, Stdio},
-    sync::mpsc::{self, RecvTimeoutError},
-    time::Duration,
+    process::{ChildStdout, Command, Stdio},
+    sync::mpsc::{self, Receiver, RecvTimeoutError},
+    time::{Duration, Instant},
 };
 
 use serde_json::Value;
@@ -309,7 +309,7 @@ pub fn fetch(launcher: &Launcher, dir: &Path, path: Option<OsString>) -> Result<
     // 问清单时不带命令里的子命令（`opencode2 mini` 的 `mini`）。
     let binary = launcher.command.split(' ').next().unwrap_or_default();
     let dir = if dir.is_dir() { dir } else { Path::new("/") };
-    let mut catalog = ask(binary, &launcher.probe, dir, path)?;
+    let mut catalog = ask(binary, &launcher.probe, dir, path, PROBE_TIMEOUT)?;
     // agent 答的模型名和强度都要拼进 shell 命令，放不进 `quote` 的单引号里的不要。
     catalog.models.retain(|model| usable(&model.id));
     for model in &mut catalog.models {
@@ -320,9 +320,15 @@ pub fn fetch(launcher: &Launcher, dir: &Path, path: Option<OsString>) -> Result<
 }
 
 /// 在 `dir` 里跑 `binary` 照 `probe` 问模型清单：把请求写进标准输入，再照 `Answer` 读标准输出。过了
-/// `PROBE_TIMEOUT`、或者程序退了还没认出来时是 `NoAnswer`。完了杀掉整组。有请求时标准输入一直开着，关了的话
+/// `timeout`、或者程序退了还没认出来时是 `NoAnswer`。完了杀掉整组。有请求时标准输入一直开着，关了的话
 /// 有的 agent（codex）不回话就退出。
-fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Result<Catalog, Unanswered> {
+fn ask(
+    binary: &str,
+    probe: &Probe,
+    dir: &Path,
+    path: Option<OsString>,
+    timeout: Duration,
+) -> Result<Catalog, Unanswered> {
     let mut command = probe_command(binary, path.as_deref());
     command
         .args(probe.args)
@@ -344,7 +350,7 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
     let (done, timer) = mpsc::channel::<()>();
     // 到时限杀掉整组，读着的标准输出跟着到头。
     let watchdog = std::thread::spawn(move || {
-        if timer.recv_timeout(PROBE_TIMEOUT) == Err(RecvTimeoutError::Timeout) {
+        if timer.recv_timeout(timeout) == Err(RecvTimeoutError::Timeout) {
             kill_group();
         }
     });
@@ -353,15 +359,18 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
         Some(stdin) => stdin.write_all(text.as_bytes()).is_ok(),
         None => text.is_empty(),
     };
+    // 杀了组以后标准输出一般跟着到头；拿着它的后代另开了进程组、杀不到时，再等 `KILL_GRACE` 就不等了。
+    let deadline = Instant::now() + timeout + crate::oneshot::KILL_GRACE;
     let found = (|| {
         if !send(probe.request) {
             return None;
         }
-        let mut stdout = BufReader::new(child.stdout.take()?);
+        let output = read_stdout(child.stdout.take()?, matches!(probe.answer, Answer::Output(_)))?;
+        let next = || output.recv_timeout(deadline.saturating_duration_since(Instant::now())).ok();
         match probe.answer {
             Answer::Lines(answer) => {
-                for line in stdout.lines() {
-                    match answer(&line.ok()?) {
+                while let Some(line) = next() {
+                    match answer(&line) {
                         Reply::Wait => {}
                         Reply::Send(text) => {
                             if !send(text) {
@@ -374,8 +383,7 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
                 None
             }
             Answer::Output(answer) => {
-                let mut output = String::new();
-                stdout.read_to_string(&mut output).ok()?;
+                let output = next()?;
                 // 等它自己退出再杀组：先杀的话还没退的会算成被杀，退出码就看不出它是不是出错了。
                 wait_unreaped(&mut child);
                 answer(&output)
@@ -390,6 +398,31 @@ fn ask(binary: &str, probe: &Probe, dir: &Path, path: Option<OsString>) -> Resul
     // 读整段输出的要它正常退出才算：出错退出时标准输出空着，看起来像一份空清单。
     let failed = matches!(probe.answer, Answer::Output(_)) && !status.is_some_and(|status| status.success());
     found.filter(|_| !failed).ok_or(Unanswered::NoAnswer)
+}
+
+/// 在另一个线程里读 `stdout`，`whole` 时读到头整段交来，不然一行一行交来；读到头或读错了就不再交。
+/// shortcut: 拿着标准输出的后代杀不到时，读的线程卡在读上，直到那个进程关上管道才结束；碰上了再改用
+/// 非阻塞读。
+fn read_stdout(stdout: ChildStdout, whole: bool) -> Option<Receiver<String>> {
+    let (sender, output) = mpsc::channel();
+    let read = move || {
+        let mut stdout = BufReader::new(stdout);
+        if whole {
+            let mut text = String::new();
+            if stdout.read_to_string(&mut text).is_ok() {
+                sender.send(text).ok();
+            }
+            return;
+        }
+        for line in stdout.lines() {
+            let Ok(line) = line else { return };
+            if sender.send(line).is_err() {
+                return;
+            }
+        }
+    };
+    std::thread::Builder::new().name("agent-models-stdout".into()).spawn(read).ok()?;
+    Some(output)
 }
 
 /// Windows 的 `Command` 不会替没有后缀的名字找 `.cmd`、`.bat`；npm 和 pi 的安装器用这些启动器。
@@ -957,18 +990,40 @@ mod tests {
         // 要等一句回话才说下一句、答完了还不退的程序：认出回话就杀掉，不等到时限。
         let started = std::time::Instant::now();
         let script = &["-c", "read a; echo noise; echo \"$a\"; read b; echo \"$b\"; sleep 30"];
-        let answer = ask("/bin/sh", &lines_probe(script, "first\n"), Path::new("/"), None);
+        let answer = ask("/bin/sh", &lines_probe(script, "first\n"), Path::new("/"), None, PROBE_TIMEOUT);
         assert_eq!(answer, Ok(Catalog::default()));
         assert!(started.elapsed() < Duration::from_secs(10));
-        let quiet = ask("/bin/sh", &lines_probe(&["-c", "exit 0"], "first\n"), Path::new("/"), None);
+        let quiet = ask("/bin/sh", &lines_probe(&["-c", "exit 0"], "first\n"), Path::new("/"), None, PROBE_TIMEOUT);
         assert_eq!(quiet, Err(Unanswered::NoAnswer));
-        let missing = ask("runode-no-such-agent", &lines_probe(&[], ""), Path::new("/"), None);
+        let missing = ask("runode-no-such-agent", &lines_probe(&[], ""), Path::new("/"), None, PROBE_TIMEOUT);
         assert_eq!(missing, Err(Unanswered::Missing));
         // 读整段输出的：标准输入接空设备，程序自己退出后再认；出错退出的不算，哪怕输出了点什么。
         let opencode =
             Probe { args: &["-c", "echo a/b; echo c/d"], request: "", answer: Answer::Output(opencode_catalog) };
-        assert_eq!(ask("/bin/sh", &opencode, Path::new("/"), None).map(|catalog| catalog.models.len()), Ok(2));
+        assert_eq!(
+            ask("/bin/sh", &opencode, Path::new("/"), None, PROBE_TIMEOUT).map(|catalog| catalog.models.len()),
+            Ok(2)
+        );
         let broken = Probe { args: &["-c", "echo a/b; exit 1"], request: "", answer: Answer::Output(opencode_catalog) };
-        assert_eq!(ask("/bin/sh", &broken, Path::new("/"), None), Err(Unanswered::NoAnswer));
+        assert_eq!(ask("/bin/sh", &broken, Path::new("/"), None, PROBE_TIMEOUT), Err(Unanswered::NoAnswer));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gives_up_on_stdout_held_outside_the_process_group() {
+        // `set -m` 让后台的 `sleep` 自成一个进程组，杀组杀不到它，它一直拿着标准输出。指名用 bash：dash 没有
+        // 终端就开不了作业控制。
+        let timeout = Duration::from_secs(1);
+        let lines = lines_probe(&["-c", "set -m; sleep 10 & echo noise"], "first\n");
+        let whole = Probe {
+            args: &["-c", "set -m; sleep 10 & echo a/b"],
+            request: "",
+            answer: Answer::Output(opencode_catalog),
+        };
+        for probe in [lines, whole] {
+            let started = std::time::Instant::now();
+            assert_eq!(ask("bash", &probe, Path::new("/"), None, timeout), Err(Unanswered::NoAnswer));
+            assert!(started.elapsed() < Duration::from_secs(5));
+        }
     }
 }

@@ -29,7 +29,7 @@ pub const PROMPT: &str = "{prompt}";
 /// 问登录 shell 的 PATH 最多等这么久：配置里有等终端输入的东西时不至于卡住。
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(10);
 /// 到时限杀掉整组以后，再等输出管道关上这么久。
-const KILL_GRACE: Duration = Duration::from_secs(1);
+pub(crate) const KILL_GRACE: Duration = Duration::from_secs(1);
 /// 等 agent 退出时最多隔这么久看一次。
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
