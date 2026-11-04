@@ -906,8 +906,9 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::new_split_right))
             .on_action(Self::act(cx, Self::new_split_down))
             // 设置页、看板、配对设备页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏；
-            // 看板的对话框开着时不理。
+            // 看板的对话框开着时不理；`modal_dialog_open` 时也不理，免得关掉对话框底下的页或分屏。
             .on_action(cx.listener(|this, action, window, cx| match &this.page {
+                _ if this.modal_dialog_open() => {}
                 Some(Page::Settings(_)) => this.close_settings(window, cx),
                 Some(Page::Kanban(_)) => {
                     if this.leave_todo_page(window, cx) {
