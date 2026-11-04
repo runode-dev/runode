@@ -610,6 +610,7 @@ pub(crate) fn expose_cli(host: &Host) {
     let Ok(exe) = runode_paths::runode_exe() else {
         return;
     };
+    #[cfg(unix)]
     let dirs = runode_paths::Dirs::from_env();
     #[cfg(unix)]
     let exe = bridge::stable_exe(&dirs, &exe);
