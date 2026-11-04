@@ -186,6 +186,8 @@ struct Pipeline {
     have_image: bool,
     /// 在画面上画指针（`Options::cursor`）。
     cursor: bool,
+    /// 两次把新画面交给编码器至少隔这么久，按 `Options::fps` 的帧率上限算。
+    interval: Duration,
     state: Arc<State>,
     started: Instant,
     last_pts: i64,
@@ -272,6 +274,7 @@ impl Pipeline {
                 convert,
                 have_image: false,
                 cursor: options.cursor,
+                interval: Duration::from_secs(1) / options.fps.max(1),
                 state,
                 started: Instant::now(),
                 last_pts: -1,
@@ -282,11 +285,19 @@ impl Pipeline {
     fn run(mut self, sink: &Sink) {
         // 有没有拿到过画面、有没有还没交给编码器的画面、上次交出去的时刻。
         let (mut have_frame, mut pending) = (false, false);
-        let mut last_encoded = Instant::now();
+        let started = Instant::now();
+        let mut last_encoded = started.checked_sub(self.interval).unwrap_or(started);
         let mut refiner = Refiner::default();
         // 编码器出错停了时它自己报过 `Event::Stopped`。
         while !self.state.stop.load(Ordering::Relaxed) && !self.state.encoder.stopped() {
-            let wait = if pending { RETRY_WAIT } else { refiner.timeout(Instant::now()) };
+            // 桌面复制有更新就交来，不按帧率：没到下一帧的时候接着收，新画面盖掉旧的，到点再交最新的一张。
+            let now = Instant::now();
+            let until_due = (last_encoded + self.interval).saturating_duration_since(now);
+            let wait = match (pending, until_due.is_zero()) {
+                (false, _) => refiner.timeout(now),
+                (true, false) => until_due,
+                (true, true) => RETRY_WAIT,
+            };
             match self.next_frame(wait) {
                 Ok(true) => {
                     have_frame = true;
@@ -302,7 +313,8 @@ impl Pipeline {
             let repeat =
                 have_frame && self.state.encoder.keyframe_requested() && last_encoded.elapsed() >= REPEAT_DELAY;
             let refine = have_frame && !pending && refiner.wait(Instant::now()).is_some_and(|wait| wait.is_zero());
-            if pending || repeat || refine {
+            let due = pending && last_encoded.elapsed() >= self.interval;
+            if due || repeat || refine {
                 // 新画面回到原来的码率；屏幕停下以后补清楚时放大码率。
                 self.state.encoder.boost(refine && !pending && !repeat);
                 let encoded = self.encode();
