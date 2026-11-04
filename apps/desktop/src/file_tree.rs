@@ -14,6 +14,7 @@
 //! 右键菜单存在页自己身上。显示哪些文件、搜索结果的排法和按内容搜的选项整个窗口一份，app 随窗口存档。
 
 mod edit;
+mod editors;
 mod listing;
 mod menu;
 mod search;
@@ -192,6 +193,11 @@ pub enum FileTreeEvent {
     /// 显示哪些文件、搜索结果的排法或者按内容搜的选项变了，app 存档；下次经 `set_options` 交回。
     OptionsChanged,
 }
+
+/// Zed 装时向系统登记的链接前缀。
+const ZED_SCHEME: &str = "zed";
+/// 「更多」菜单里能用来打开根目录的编辑器的链接前缀，`editors` 按它们问装没装。
+const EDITOR_SCHEMES: &[&str] = &["vscode", "cursor", ZED_SCHEME];
 
 /// VS Code 一系、认 Remote-SSH 链接的编辑器。
 #[derive(Clone, Copy)]
@@ -386,6 +392,7 @@ impl MenuHost for FileTree {
 
 impl FileTree {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        editors::refresh(EDITOR_SCHEMES);
         Self {
             workspaces: HashMap::new(),
             ws: None,
@@ -552,17 +559,27 @@ impl FileTree {
             check("files.show_dotfiles", self.show_dotfiles, Box::new(ToggleShowDotfiles)),
             check("files.show_ignored", self.show_ignored, Box::new(ToggleShowIgnored)),
         ];
-        items.extend([
-            None,
-            item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
-            item("files.open_in_cursor", Box::new(OpenRootInCursor)).map(|item| item.with_icon(CODE_ICON)),
-            item("files.open_in_zed", Box::new(OpenRootInZed)).map(|item| item.with_icon(CODE_ICON)),
-        ]);
+        // 只列本机装着的编辑器。
+        let editors: [(&str, &str, Box<dyn Action>); 3] = [
+            (VsCodeLike::VsCode.scheme(), "files.open_in_vscode", Box::new(OpenRootInVsCode)),
+            (VsCodeLike::Cursor.scheme(), "files.open_in_cursor", Box::new(OpenRootInCursor)),
+            (ZED_SCHEME, "files.open_in_zed", Box::new(OpenRootInZed)),
+        ];
+        let mut open_with: Vec<_> = editors
+            .into_iter()
+            .filter(|(scheme, _, _)| editors::handles(scheme))
+            .map(|(_, key, action)| item(key, action).map(|item| item.with_icon(CODE_ICON)))
+            .collect();
+        editors::refresh(EDITOR_SCHEMES);
         if !self.remote() {
-            items.push(
+            open_with.push(
                 item(&crate::i18n::os_key("files.open_in_finder"), Box::new(OpenRootInFinder))
                     .map(|item| item.with_icon(FOLDER_OPEN_ICON)),
             );
+        }
+        if !open_with.is_empty() {
+            items.push(None);
+            items.extend(open_with);
         }
         let target = self.focus.clone();
         self.open_context_menu(position, items, target, cx);
