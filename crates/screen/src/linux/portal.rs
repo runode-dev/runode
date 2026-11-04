@@ -184,7 +184,7 @@ impl Portal {
 
     fn inject(&self, screen: Screen, input: &ScreenInput) {
         if let Err(err) = remote_input::inject(&Target { portal: self, screen }, input) {
-            tracing::debug!("cannot inject {input:?}: {err}");
+            tracing::debug!("cannot inject {}: {err}", super::input_kind(input));
             if matches!(err, ashpd::Error::Portal(_) | ashpd::Error::Zbus(_)) {
                 self.closed.store(true, Ordering::Relaxed);
             }

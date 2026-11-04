@@ -266,7 +266,7 @@ impl Session {
 
     pub(crate) fn inject(&self, input: &ScreenInput) {
         if let Err(err) = remote_input::inject(self, input) {
-            tracing::debug!("cannot inject {input:?}: {err}");
+            tracing::debug!("cannot inject {}: {err}", super::input_kind(input));
         }
     }
 }

@@ -182,6 +182,17 @@ impl Drop for Injector {
     }
 }
 
+/// 日志里写的输入种类：输入的文字和按键可能是密码，不进日志。
+fn input_kind(input: &ScreenInput) -> &'static str {
+    match input {
+        ScreenInput::MouseMove { .. } => "a pointer move",
+        ScreenInput::MouseButton { .. } => "a mouse button",
+        ScreenInput::Scroll { .. } => "a scroll",
+        ScreenInput::Key { .. } => "a key",
+        ScreenInput::Text { .. } => "text",
+    }
+}
+
 /// 攒进 `rest` 的滚动点数里满整格的那部分，符号和点数一样；不满一格的留在 `rest`，换了方向时丢掉。
 fn whole_notches(rest: &mut i32, points: i32) -> i32 {
     if points.signum() == -rest.signum() {

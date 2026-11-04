@@ -554,7 +554,7 @@ impl Injector {
 impl super::Inject for Injector {
     fn inject(&mut self, input: &ScreenInput) {
         if let Err(err) = self.try_inject(input) {
-            tracing::debug!("cannot inject {input:?}: {err}");
+            tracing::debug!("cannot inject {}: {err}", super::input_kind(input));
         }
     }
 
