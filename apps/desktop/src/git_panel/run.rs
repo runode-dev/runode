@@ -170,9 +170,27 @@ impl GitPanel {
             &[PromptButton::new(confirm), PromptButton::cancel(rust_i18n::t!("git.cancel"))],
             cx,
         );
+        self.when_confirmed(answer, window, cx, then);
+    }
+
+    /// 确认框 `answer` 答了第一个按钮、而且显示的还是弹框时的 workspace，才调 `then`。`then` 按当前 workspace
+    /// 找仓库，两台机器上的仓库路径常常一样，期间换了 workspace 再办就办到另一台机器上了。
+    pub(super) fn when_confirmed(
+        &self,
+        answer: futures::channel::oneshot::Receiver<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let ws = self.ws;
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() == Some(0) {
-                this.update_in(cx, |this, window, cx| then(this, window, cx)).ok();
+                this.update_in(cx, |this, window, cx| {
+                    if this.ws == ws {
+                        then(this, window, cx);
+                    }
+                })
+                .ok();
             }
         })
         .detach();
@@ -387,16 +405,10 @@ impl GitPanel {
                 ],
                 cx,
             );
-            cx.spawn_in(window, async move |this, cx| {
-                if answer.await.ok() == Some(0) {
-                    this.update_in(cx, |this, window, cx| {
-                        let options = CommitOptions { amend, stage_all: true };
-                        this.run_commit(root, message, options, after, window, cx);
-                    })
-                    .ok();
-                }
-            })
-            .detach();
+            self.when_confirmed(answer, window, cx, move |this, window, cx| {
+                let options = CommitOptions { amend, stage_all: true };
+                this.run_commit(root, message, options, after, window, cx);
+            });
             return;
         }
         self.run_commit(root, message, CommitOptions { amend, stage_all: false }, after, window, cx);
@@ -555,15 +567,9 @@ impl GitPanel {
             &[PromptButton::new(rust_i18n::t!("git.stage_all")), PromptButton::cancel(rust_i18n::t!("git.cancel"))],
             cx,
         );
-        cx.spawn_in(window, async move |this, cx| {
-            if answer.await.ok() == Some(0) {
-                this.update_in(cx, |this, window, cx| {
-                    this.run_git(&root, Busy::Stage, window, cx, ProjectRepo::stage_all, |_, (), _, _| {});
-                })
-                .ok();
-            }
-        })
-        .detach();
+        self.when_confirmed(answer, window, cx, move |this, window, cx| {
+            this.run_git(&root, Busy::Stage, window, cx, ProjectRepo::stage_all, |_, (), _, _| {});
+        });
     }
 
     pub(crate) fn git_unstage_all(&mut self, _: &GitUnstageAll, window: &mut Window, cx: &mut Context<Self>) {

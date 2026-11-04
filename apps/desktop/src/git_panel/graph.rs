@@ -370,22 +370,16 @@ impl GitPanel {
                     ],
                     cx,
                 );
-                cx.spawn_in(window, async move |this, cx| {
-                    if answer.await.ok() == Some(0) {
-                        this.update_in(cx, |this, window, cx| {
-                            this.run_git(
-                                &root,
-                                Busy::Checkout,
-                                window,
-                                cx,
-                                move |repo| repo.checkout_detached(&id),
-                                |_, (), _, _| {},
-                            );
-                        })
-                        .ok();
-                    }
-                })
-                .detach();
+                self.when_confirmed(answer, window, cx, move |this, window, cx| {
+                    this.run_git(
+                        &root,
+                        Busy::Checkout,
+                        window,
+                        cx,
+                        move |repo| repo.checkout_detached(&id),
+                        |_, (), _, _| {},
+                    );
+                });
             }
             CommitOp::CreateBranch => {
                 cx.emit(GitPanelEvent::OpenBranchPicker { root, create_only: true, start: Some(id) });

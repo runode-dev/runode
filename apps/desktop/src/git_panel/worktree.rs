@@ -129,35 +129,29 @@ impl GitPanel {
             &[PromptButton::new(&*confirm), PromptButton::cancel(rust_i18n::t!("git.cancel"))],
             cx,
         );
-        cx.spawn_in(window, async move |this, cx| {
-            if answer.await.ok() == Some(0) {
-                this.update_in(cx, |this, window, cx| {
-                    if this.is_busy(&main) || this.is_busy(&path) {
-                        return;
-                    }
-                    let ws = this.ws;
-                    let target = path.clone();
-                    // 失败也要放开工作树那块，错误带回 `done` 里报，`run_git` 出错时不调 `done`。
-                    let op = {
-                        let path = path.clone();
-                        move |repo: &ProjectRepo| Ok(repo.remove_worktree(&path, dirty))
-                    };
-                    this.run_git(&main, Busy::RemoveWorktree, window, cx, op, move |this, result, window, cx| {
-                        if let Some(state) = this.workspaces.get_mut(&ws) {
-                            state.repo_mut(&target).busy = None;
-                        }
-                        if let Err(err) = result {
-                            show_git_error(&err, window, cx);
-                        }
-                    });
-                    // 主仓库这会儿才忙说明 `run_git` 开跑了；没开跑（比如已经切到别的 workspace）就不占。
-                    if this.is_busy(&main) {
-                        this.state_mut().repo_mut(&path).busy = Some(Busy::RemoveWorktree);
-                    }
-                })
-                .ok();
+        self.when_confirmed(answer, window, cx, move |this, window, cx| {
+            if this.is_busy(&main) || this.is_busy(&path) {
+                return;
             }
-        })
-        .detach();
+            let ws = this.ws;
+            let target = path.clone();
+            // 失败也要放开工作树那块，错误带回 `done` 里报，`run_git` 出错时不调 `done`。
+            let op = {
+                let path = path.clone();
+                move |repo: &ProjectRepo| Ok(repo.remove_worktree(&path, dirty))
+            };
+            this.run_git(&main, Busy::RemoveWorktree, window, cx, op, move |this, result, window, cx| {
+                if let Some(state) = this.workspaces.get_mut(&ws) {
+                    state.repo_mut(&target).busy = None;
+                }
+                if let Err(err) = result {
+                    show_git_error(&err, window, cx);
+                }
+            });
+            // 主仓库这会儿才忙说明 `run_git` 开跑了；没开跑（仓库已经不在了）就不占。
+            if this.is_busy(&main) {
+                this.state_mut().repo_mut(&path).busy = Some(Busy::RemoveWorktree);
+            }
+        });
     }
 }
