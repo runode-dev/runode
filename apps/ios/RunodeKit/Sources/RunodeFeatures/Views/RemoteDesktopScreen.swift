@@ -264,8 +264,13 @@
         private var lastPoint = CGPoint.zero
         /// 触控板模式的光标。
         let cursor = UIImageView(image: UIImage(systemName: "cursorarrow"))
+        /// 换了尺寸时退回不放大：放大着时 `layoutSubviews` 不重排，画面会留在旧比例的框里，点的位置就对不上。
         var videoSize: CGSize? {
-            didSet { if videoSize != oldValue { setNeedsLayout() } }
+            didSet {
+                guard videoSize != oldValue else { return }
+                setZoomScale(1, animated: false)
+                setNeedsLayout()
+            }
         }
         /// 在触控板模式：显示光标、认双指单击。切进来时电脑上的光标挪到显示的光标那里，点下去的就是看到的位置。
         var trackpad = false {
