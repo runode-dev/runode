@@ -15,7 +15,7 @@
 
 use std::{collections::HashSet, time::Duration};
 
-use gpui::{AnyWindowHandle, App, Global, PromptButton, PromptLevel, Window};
+use gpui::{AnyWindowHandle, App, Global, PromptButton, PromptLevel, Window, WindowHandle};
 use runode_protocol::{ClientMsg, SessionId, SessionInfo};
 use runode_types::agent::AgentKind;
 
@@ -252,7 +252,8 @@ pub fn close_window(window: AnyWindowHandle, cx: &mut App) {
         };
         let windows = terminal_windows(cx);
         if windows > 1 {
-            discard_unsaved(vec![window], Some(window), cx, move |cx| {
+            discard_unsaved(vec![window], Some(window), cx, move |cx, discard| {
+                discard.apply(cx);
                 view.update(cx, |view, _, cx| view.end_sessions(Closing::Window { windows }, cx)).ok();
                 remove(cx);
             });
@@ -300,16 +301,33 @@ fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: 
     if prompting(cx) {
         return;
     }
-    discard_unsaved(cx.windows(), window, cx, move |cx| end_sessions_then(action, window, cx, then));
+    // 修改等后面的确认都过了才丢：接着问 agent 时取消了退出，修改还在。
+    discard_unsaved(cx.windows(), window, cx, move |cx, discard| {
+        end_sessions_then(action, window, cx, move |cx| {
+            discard.apply(cx);
+            then(cx);
+        });
+    });
 }
 
-/// `windows` 的预览栏里有没存的修改时，在 `window` 上问要不要放弃；放弃了先丢掉修改再做 `then`，取消了
-/// 什么都不做。没有要问的或没有窗口能弹框时直接做 `then`。
+/// 用户说了放弃的那些窗口里预览栏没存的修改，`apply` 时才丢掉。
+struct Discard(Vec<WindowHandle<WindowView>>);
+
+impl Discard {
+    fn apply(self, cx: &mut App) {
+        for view in self.0 {
+            view.update(cx, |view, _, cx| view.preview.update(cx, |panel, cx| panel.discard_edits(None, cx))).ok();
+        }
+    }
+}
+
+/// `windows` 的预览栏里有没存的修改时，在 `window` 上问要不要放弃；放弃了做 `then`，交给它要丢掉的修改
+/// （`Discard`），取消了什么都不做。没有要问的或没有窗口能弹框时直接做 `then`，没有要丢的。
 fn discard_unsaved(
     windows: Vec<AnyWindowHandle>,
     window: Option<AnyWindowHandle>,
     cx: &mut App,
-    then: impl FnOnce(&mut App) + 'static,
+    then: impl FnOnce(&mut App, Discard) + 'static,
 ) {
     if prompting(cx) {
         return;
@@ -335,7 +353,7 @@ fn discard_unsaved(
             .ok()
     });
     let Some(answer) = answer else {
-        then(cx);
+        then(cx, Discard(Vec::new()));
         return;
     };
     cx.set_global(Prompting(true));
@@ -343,13 +361,9 @@ fn discard_unsaved(
         let discard = answer.await.ok() == Some(0);
         cx.update(|cx| {
             cx.set_global(Prompting(false));
-            if !discard {
-                return;
+            if discard {
+                then(cx, Discard(views));
             }
-            for view in views {
-                view.update(cx, |view, _, cx| view.preview.update(cx, |panel, cx| panel.discard_edits(None, cx))).ok();
-            }
-            then(cx);
         });
     })
     .detach();
