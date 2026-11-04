@@ -686,6 +686,30 @@ fn welcome_reports_the_system_and_home_only_when_known() {
     assert_eq!(old, welcome("", None));
 }
 
+/// 家目录不是合法 UTF-8 时 `Welcome` 照样发得出去，那几个字节换成 U+FFFD。
+#[cfg(unix)]
+#[test]
+fn welcome_with_a_non_utf8_home_still_serializes() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
+
+    let welcome = HostMsg::Welcome {
+        protocol: 4,
+        build: BuildId("b".into()),
+        host_pid: 9,
+        snapshot_format: 1,
+        standalone: true,
+        handoff: 1,
+        keep_awake: true,
+        todos: true,
+        shells: true,
+        desktops: 0,
+        os: "linux".into(),
+        home: Some(OsStr::from_bytes(b"/home/\xff").into()),
+    };
+    let json = serde_json::to_value(welcome).unwrap();
+    assert_eq!(json["home"].as_str(), Some("/home/\u{fffd}"));
+}
+
 /// 转给界面的请求和界面的回话里套着另一种消息，JSON 里就是嵌着的一条消息。
 #[test]
 fn ui_requests_nest_the_original_message() {

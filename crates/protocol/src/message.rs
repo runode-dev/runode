@@ -476,7 +476,11 @@ pub enum HostMsg {
         desktops: u32,
         #[serde(default, skip_serializing_if = "String::is_empty")]
         os: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "runode_types::lossy_path::serialize_opt"
+        )]
         home: Option<PathBuf>,
     },
     /// 协议版本对不上，宿主接着关掉连接。
