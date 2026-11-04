@@ -193,10 +193,16 @@ fn free_name(dir: &Path, name: &Path) -> PathBuf {
 fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
     let meta = fs::symlink_metadata(src)?;
     if meta.is_symlink() {
+        let target = fs::read_link(src)?;
         #[cfg(unix)]
-        return std::os::unix::fs::symlink(fs::read_link(src)?, dest);
-        #[cfg(not(unix))]
-        return fs::copy(src, dest).map(drop);
+        return std::os::unix::fs::symlink(target, dest);
+        // Windows 的链接分指向文件和指向目录两种，照原来的建；目录联接也算指向目录的链接。
+        #[cfg(windows)]
+        return if std::os::windows::fs::FileTypeExt::is_symlink_dir(&meta.file_type()) {
+            std::os::windows::fs::symlink_dir(target, dest)
+        } else {
+            std::os::windows::fs::symlink_file(target, dest)
+        };
     }
     if meta.is_file() {
         return copy_file(src, dest);
