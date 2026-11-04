@@ -7009,7 +7009,7 @@ dependencies = [
 
 [[package]]
 name = "runode"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -7062,7 +7062,7 @@ dependencies = [
 
 [[package]]
 name = "runode-agent"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "libc",
  "memchr",
@@ -7075,7 +7075,7 @@ dependencies = [
 
 [[package]]
 name = "runode-autostart"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
@@ -7086,7 +7086,7 @@ dependencies = [
 
 [[package]]
 name = "runode-cli"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "libc",
@@ -7107,7 +7107,7 @@ dependencies = [
 
 [[package]]
 name = "runode-config"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
@@ -7118,7 +7118,7 @@ dependencies = [
 
 [[package]]
 name = "runode-files"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "libc",
  "notify",
@@ -7132,7 +7132,7 @@ dependencies = [
 
 [[package]]
 name = "runode-git"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "libc",
  "serde",
@@ -7140,7 +7140,7 @@ dependencies = [
 
 [[package]]
 name = "runode-host"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "libc",
@@ -7161,14 +7161,14 @@ dependencies = [
 
 [[package]]
 name = "runode-paths"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "runode-preview"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "pulldown-cmark",
  "regex",
@@ -7178,7 +7178,7 @@ dependencies = [
 
 [[package]]
 name = "runode-protocol"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "runode-types",
  "serde",
@@ -7187,7 +7187,7 @@ dependencies = [
 
 [[package]]
 name = "runode-push"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "axum",
  "reqwest",
@@ -7203,7 +7203,7 @@ dependencies = [
 
 [[package]]
 name = "runode-remote"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "iroh",
  "libc",
@@ -7225,7 +7225,7 @@ dependencies = [
 
 [[package]]
 name = "runode-screen"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "ashpd",
  "block2 0.6.2",
@@ -7252,7 +7252,7 @@ dependencies = [
 
 [[package]]
 name = "runode-speech"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "cpal",
@@ -7265,7 +7265,7 @@ dependencies = [
 
 [[package]]
 name = "runode-ssh"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "uds_windows",
  "windows-sys 0.61.2",
@@ -7273,7 +7273,7 @@ dependencies = [
 
 [[package]]
 name = "runode-tasks"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "runode-paths",
  "runode-types",
@@ -7282,7 +7282,7 @@ dependencies = [
 
 [[package]]
 name = "runode-terminal"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "libc",
@@ -7298,7 +7298,7 @@ dependencies = [
 
 [[package]]
 name = "runode-todo"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "libc",
  "runode-types",
@@ -7307,7 +7307,7 @@ dependencies = [
 
 [[package]]
 name = "runode-types"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "serde",
  "serde_json",
@@ -7315,7 +7315,7 @@ dependencies = [
 
 [[package]]
 name = "runode-ui"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "gpui-pre",
  "raw-window-handle",
@@ -7327,7 +7327,7 @@ dependencies = [
 
 [[package]]
 name = "runode-update"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "block2 0.6.2",
  "libc",
