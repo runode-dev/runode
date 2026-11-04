@@ -15,6 +15,7 @@ use crate::{
         commit_message::{MAX_FILES_BYTES, PromptContext, Recipe, generate, limit, saved_recipe},
         show_git_error,
     },
+    host_client::hosts::HostId,
     project_host::ProjectRepo,
     window::WindowView,
 };
@@ -57,9 +58,9 @@ impl WindowView {
             branch: repo.info.branch.clone().unwrap_or_else(|| "(detached)".to_owned()),
             files: limit(files.join("\n"), MAX_FILES_BYTES),
         };
-        // 从访达打开的 app 自己的 PATH 里没有 agent 装的目录，用终端里 shell 报告的 PATH；窗口里
-        // 一个终端都没有时在后台问登录 shell。
-        let path = self.terminal_path(None, cx);
+        // 从访达打开的 app 自己的 PATH 里没有 agent 装的目录，用终端里 shell 报告的 PATH。agent 在这台
+        // 机器上跑，只认本机终端的；窗口里一个本机终端都没有时在后台问登录 shell。
+        let path = self.terminal_path(Some(&HostId::Local), cx);
         let op = move |repo: &ProjectRepo| generate(repo, &recipe, &context, path).map_err(GitError::Other);
         self.with_git_panel(cx, |panel, cx| panel.write_message(root, op, window, cx));
     }

@@ -279,9 +279,10 @@ impl WindowView {
     }
 
     /// 找用户自己装的命令行工具（gh）用的 PATH：从访达打开时 app 自己的 PATH 里没有
-    /// brew 装的目录，用终端里 shell 报告的 PATH（`terminal_path`），没有时才用 app 自己的。
+    /// brew 装的目录，用本机终端里 shell 报告的 PATH（`terminal_path`），没有时才用 app 自己的。工具在
+    /// 这台机器上跑，远端终端的 PATH 不算。
     pub(super) fn shell_path(&self, cx: &App) -> Option<std::ffi::OsString> {
-        self.terminal_path(None, cx).or_else(|| std::env::var_os("PATH"))
+        self.terminal_path(Some(&HostId::Local), cx).or_else(|| std::env::var_os("PATH"))
     }
 
     /// 终端里 shell 报告的 PATH：先看有焦点的终端，当前 workspace 没有标签时看窗口里别的终端；给了 `host` 时
