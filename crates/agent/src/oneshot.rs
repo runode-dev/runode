@@ -73,7 +73,18 @@ pub const CLAUDE: Cli = Cli {
 
 pub const CODEX: Cli = Cli {
     binary: "codex",
-    args: &["exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only"],
+    // 只读沙箱里照样能跑命令、读本机任意文件：关掉 `shell_tool` 和 `unified_exec`，它就没有执行命令的工具。
+    args: &[
+        "exec",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "-s",
+        "read-only",
+        "--disable",
+        "shell_tool",
+        "--disable",
+        "unified_exec",
+    ],
     tail: &[],
     output: Output::Text,
 };
@@ -106,25 +117,10 @@ pub const OPENCODE2: Cli = Cli {
     output: Output::OpenCodeEvents,
 };
 
-pub const AMP: Cli = Cli {
-    binary: "amp",
-    args: &["--execute", "--no-notifications", "--no-ide", "--no-jetbrains"],
-    tail: &[],
-    output: Output::Text,
-};
-
 pub const CURSOR: Cli = Cli {
     binary: "cursor-agent",
     args: &["--print", "--mode", "ask", "--trust", "--output-format", "text"],
     tail: &[PROMPT],
-    output: Output::Text,
-};
-
-pub const KIMI: Cli = Cli {
-    binary: "kimi",
-    // kimi 只认 `--prompt` 带的提示词，不读标准输入。
-    args: &["--quiet"],
-    tail: &["--prompt", PROMPT],
     output: Output::Text,
 };
 

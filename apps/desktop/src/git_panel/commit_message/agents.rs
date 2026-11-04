@@ -17,7 +17,8 @@ pub(crate) struct AgentSpec {
     pub cli: &'static oneshot::Cli,
 }
 
-/// 菜单里按这个顺序列，常用的在前。
+/// 菜单里按这个顺序列，常用的在前。提示词里有别人写的文字，只列关得掉执行命令和写文件的 agent：
+/// Kimi 的只打印模式自动批准所有工具调用，Amp 的执行模式没有关工具的开关，都不列。
 pub(crate) const AGENTS: &[AgentSpec] = &[
     AgentSpec { id: "claude", label: "Claude", kind: Some(AgentKind::Claude), logo: None, cli: &oneshot::CLAUDE },
     AgentSpec { id: "codex", label: "Codex", kind: Some(AgentKind::Codex), logo: None, cli: &oneshot::CODEX },
@@ -37,9 +38,7 @@ pub(crate) const AGENTS: &[AgentSpec] = &[
         logo: None,
         cli: &oneshot::OPENCODE2,
     },
-    AgentSpec { id: "amp", label: "Amp", kind: Some(AgentKind::Amp), logo: None, cli: &oneshot::AMP },
     AgentSpec { id: "cursor", label: "Cursor", kind: Some(AgentKind::Cursor), logo: None, cli: &oneshot::CURSOR },
-    AgentSpec { id: "kimi", label: "Kimi", kind: Some(AgentKind::Kimi), logo: None, cli: &oneshot::KIMI },
     AgentSpec { id: "muse", label: "Muse", kind: Some(AgentKind::Muse), logo: None, cli: &oneshot::MUSE },
     AgentSpec { id: "dsh", label: "DeepSeek Harness", kind: None, logo: Some(DEEPSEEK_LOGO), cli: &oneshot::DSH },
     AgentSpec {
