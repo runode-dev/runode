@@ -59,14 +59,37 @@ git fetch -q --tags origin main
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "本地 main 和 origin/main 不一致，先同步"
 ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "标签 $tag 已经有了"
 command -v gh >/dev/null || die "要装 gh：发版前要查 main 的 CI 和有没有发版在跑"
-# CI 没过时不发：标签一推上去就收不回来，等发版工作流里的 CI 挂了才知道就晚了。看 main 上最近一次 CI，
-# 没跑完就等它：只改了 CI 忽略的文件（文档、iOS 端这类）的提交不跑 CI，最近一次跑的就是管着 HEAD 的。
-# shortcut: 刚推上去、CI 还没建出运行的那几秒里看到的是上一次，推完等 CI 开跑再发。
-run=$(gh run list --workflow ci.yml --branch main --limit 1 --json databaseId --jq '.[0].databaseId // empty') \
-  || die "没能用 gh 查 main 的 CI"
-[[ -n "$run" ]] || die "main 上还没跑过 CI"
+# CI 没过时不发：标签一推上去就收不回来，等发版工作流里的 CI 挂了才知道就晚了。管着 HEAD 的 CI 是哪一次：
+# 只改 ci.yml 的 paths-ignore 里的文件（文档、iOS 端这类）的提交和发版提交不跑 CI，从 HEAD 往回到最近一个
+# 要跑 CI 的提交 `need` 为止，这段里最新建出的那次运行就是；一次推几个提交时运行只建在推上去的那个上，
+# 所以不能只找 `need` 自己的。刚推上去时运行还没建出来，等它出现；一直不出现（GitHub 漏了推送事件）时手动
+# 触发一次。都等到了再等它跑完，所以推完提交直接运行这个脚本就行。
+ignored=()
+while read -r pattern; do
+  ignored+=(":(exclude,glob)$pattern")
+done < <(sed -n '/^  push:/,/^  [a-z_]*:$/s/^      - "\(.*\)"$/\1/p' .github/workflows/ci.yml)
+[[ ${#ignored[@]} -gt 0 ]] || die "没从 ci.yml 读出 paths-ignore"
+release_subject='^chore: 发布 v'
+need=$(git log -1 --format=%H --invert-grep --grep="$release_subject" HEAD -- . "${ignored[@]}")
+[[ -n "$need" ]] || die "找不到要跑 CI 的提交"
+shas=$(git rev-list --invert-grep --grep="$release_subject" "$need^..HEAD" | sed 's/.*/"&"/' | paste -sd, -)
+echo "等管着 HEAD 的 CI（${need:0:8} 起）建出运行……" >&2
+run=
+dispatched=
+for ((waited = 0; waited <= 900; waited += 15)); do
+  run=$(gh run list --workflow ci.yml --branch main --limit 50 --json databaseId,headSha \
+    --jq "first(.[] | select(.headSha | IN($shas))) | .databaseId") || die "没能用 gh 查 main 的 CI"
+  [[ -z "$run" ]] || break
+  if [[ -z "$dispatched" && $waited -ge 300 ]]; then
+    echo "五分钟了还没有运行，手动触发 main 的 CI" >&2
+    gh workflow run ci.yml --ref main >/dev/null || die "手动触发 CI 失败：gh workflow run ci.yml --ref main"
+    dispatched=1
+  fi
+  sleep 15
+done
+[[ -n "$run" ]] || die "等了十五分钟 main 的 CI 还没建出运行，看一下 GitHub Actions 的状态再发"
 echo "等 main 的 CI 跑完（gh run view ${run}）……" >&2
-gh run watch "$run" --exit-status >/dev/null 2>&1 || die "main 最近一次 CI 没过（gh run view ${run}），修好再发"
+gh run watch "$run" --exit-status >/dev/null 2>&1 || die "管着 HEAD 的 CI 没过（gh run view ${run}），修好再发"
 # 发版工作流的并发组 `release` 里新来的会顶掉排着队的那次，推了标签却没有 Release，所以有发版在跑或排队时不推。
 busy=$(gh run list --workflow release.yml --limit 20 --json status --jq '[.[] | select(.status != "completed")] | length') \
   || die "没能用 gh 查发版有没有在跑"
