@@ -955,6 +955,14 @@
       "id": "0123456789abcdef0011223344556677",
       "type": "command_finished"
     },
+    "commands": {
+      "found": [
+        "claude.cmd",
+        null
+      ],
+      "req": 6,
+      "type": "commands"
+    },
     "detach": {
       "id": "0123456789abcdef0011223344556677",
       "type": "detach"
@@ -1011,6 +1019,15 @@
       "id": "0123456789abcdef0011223344556677",
       "status": null,
       "type": "exited"
+    },
+    "find_commands": {
+      "path": null,
+      "programs": [
+        "claude",
+        "codex"
+      ],
+      "req": 6,
+      "type": "find_commands"
     },
     "focus": {
       "focused": true,
@@ -1933,6 +1950,7 @@
       "keep_awake": true,
       "os": "macos",
       "protocol": 4,
+      "shells": true,
       "snapshot_format": 1,
       "standalone": true,
       "todos": false,

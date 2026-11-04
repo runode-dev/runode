@@ -48,8 +48,9 @@ public actor HostConnection: HostLink {
     private var state: LinkState = .idle
     /// 门禁和握手都过了的连接；没连上时为空，排着的消息就丢掉。
     private var transport: (any FrameTransport)?
-    /// 这次连上的宿主认得 `ClientMsg.keepAwake`；不认得时不发，见 `write`。
+    /// 这次连上的宿主认得 `ClientMsg.keepAwake`、`ClientMsg.findCommands`；不认得时不发，见 `write`。
     private var hostKeepsAwake = false
+    private var hostFindsCommands = false
     private var generation: UInt64 = 0
     /// 一个订阅者转出去、还没取走的输出和快照最多这么多字节，再多就先不读，见 `readUntilClosed`。
     private static let backlogLimit = 256 << 10
@@ -247,6 +248,7 @@ public actor HostConnection: HostLink {
                 generation += 1
                 transport = session.transport
                 hostKeepsAwake = session.keepAwake
+                hostFindsCommands = session.findsCommands
                 setState(.connected(hostName: session.hostName, address: session.transport.remoteAddress))
                 broadcast(.ready(generation: generation))
                 reason = await readUntilClosed(session.transport, decoder: session.decoder)
@@ -318,6 +320,7 @@ public actor HostConnection: HostLink {
         var decoder: FrameDecoder
         var hostName: String
         var keepAwake: Bool
+        var findsCommands: Bool
     }
 
     /// 经 `dial` 连上这台电脑，在连上的那条连接上走门禁、`Hello` 和 `Welcome`。
@@ -334,12 +337,12 @@ public actor HostConnection: HostLink {
             let outcome = try await GateClient.run(
                 over: transport, credential: .auth(deviceId: machine.deviceId, key: key))
             transport.send(try Frame.control(identity.hello).encoded())
-            let (decoder, keepAwake) = try await withTimeout(GateClient.timeout, onTimeout: { transport.close() }) {
+            let (decoder, keepAwake, findsCommands) = try await withTimeout(GateClient.timeout, onTimeout: { transport.close() }) {
                 var reader = FrameReader(transport: transport, decoder: outcome.decoder)
                 while true {
                     let payload = try await reader.nextControl()
                     switch try JSONDecoder().decode(HostMsg.self, from: payload) {
-                    case .welcome(let keepAwake): return (reader.decoder, keepAwake)
+                    case .welcome(let keepAwake, let findsCommands): return (reader.decoder, keepAwake, findsCommands)
                     case .incompatible(_, _, let reason): throw LinkFailure.incompatible(reason)
                     case .goodbye(let reason): throw LinkFailure.closed(String(localized: "宿主断开了连接（\(String(describing: reason))）"))
                     default: continue
@@ -355,7 +358,8 @@ public actor HostConnection: HostLink {
                 // 只改地址：`machine` 是开连接时拷的，整条写回会盖掉之后改的名字、写回已删的记录。
                 try? await machines.updateLastAddress(id: machine.id, address)
             }
-            return Session(transport: transport, decoder: decoder, hostName: outcome.hostName, keepAwake: keepAwake)
+            return Session(transport: transport, decoder: decoder, hostName: outcome.hostName, keepAwake: keepAwake,
+                findsCommands: findsCommands)
         } catch {
             transport.close()
             throw error
@@ -439,6 +443,7 @@ public actor HostConnection: HostLink {
         case .message(let message):
             // 宿主对不认得的消息回不带编号的 `Error`，会被等着回话的页面当成自己的。
             if message == .keepAwake, !hostKeepsAwake { return }
+            if case .findCommands = message, !hostFindsCommands { return }
             guard let control = try? Frame.control(message) else { return }
             frame = control
         case let .input(data, channel, generation):

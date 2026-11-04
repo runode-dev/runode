@@ -205,6 +205,10 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ("list_dirs_home", ClientMsg::ListDirs { req: 5, path: None }),
         ("list_tasks", ClientMsg::ListTasks { req: 5, dir: "/Users/ethan/dev/中文".into() }),
         (
+            "find_commands",
+            ClientMsg::FindCommands { req: 6, path: None, programs: vec!["claude".into(), "codex".into()] },
+        ),
+        (
             "spawn",
             ClientMsg::Spawn {
                 req: 3,
@@ -270,7 +274,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 handoff: 1,
                 keep_awake: true,
                 todos: false,
-                shells: false,
+                shells: true,
                 desktops: 0,
                 os: "macos".into(),
                 home: Some("/Users/ethan".into()),
@@ -401,6 +405,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
             },
         ),
         ("tasks", HostMsg::Tasks { req: 6, dir: "/Users/ethan/dev/app/web".into(), sources: tasks() }),
+        ("commands", HostMsg::Commands { req: 6, found: vec![Some("claude.cmd".into()), None] }),
         ("error", HostMsg::Error { req: None, id: Some(ID), message: "no session".into(), reason: None }),
         (
             "error_not_found",

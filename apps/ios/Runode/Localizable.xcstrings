@@ -4828,6 +4828,29 @@
         }
       }
     },
+    "新开 %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新开 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新開 %@"
+          }
+        }
+      }
+    },
     "新开一个终端，在手机上就能用。" : {
       "extractionState" : "manual",
       "localizations" : {

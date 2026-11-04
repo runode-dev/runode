@@ -62,6 +62,25 @@ import Testing
         await link.stop()
     }
 
+    /// `findCommands` 也只发给在 `Welcome` 里说认得它的宿主。
+    @Test(arguments: [false, true]) func findCommandsOnlyGoesToHostsThatKnowIt(_ knows: Bool) async throws {
+        let transport = FakeTransport()
+        supply.add(transport)
+        let link = connection()
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        var host = FakeHost(transport)
+        let welcome =
+            knows ? FakeHost.welcome.replacingOccurrences(of: "}", with: #","shells":true}"#) : FakeHost.welcome
+        _ = try await admit(&host, welcome: welcome)
+        _ = try #require(await waitReady(&events))
+        link.send(.findCommands(req: 1, programs: ["claude"]))
+        link.send(.listSessions)
+        let first = try await host.readControl()?["type"] as? String
+        #expect(first == (knows ? "find_commands" : "list_sessions"))
+        await link.stop()
+    }
+
     @Test func connectsSaysHelloAndForwardsMessages() async throws {
         // 连接开着时用户改了名字：记地址不能把名字改回去。
         var renamed = machine

@@ -39,6 +39,33 @@
                 fontSize: fontSize.map { CGFloat($0) })
         }
 
+        /// 「新建」菜单里新开终端（`agent` 为空）或起一家 agent 的一项：能新开终端的工作区不止一个时是挑工作区的
+        /// 子菜单，否则直接开在电脑上当前的工作区里。
+        @ViewBuilder
+        private func spawnItem(agent: InstalledAgent?, @ViewBuilder label: () -> some View) -> some View {
+            let choices = model.spawnChoices
+            if choices.isEmpty {
+                Button {
+                    Task { await model.spawn(agent: agent) }
+                } label: {
+                    label()
+                }
+            } else {
+                Menu {
+                    ForEach(choices) { section in
+                        Button {
+                            Task { await model.spawn(in: section, agent: agent) }
+                        } label: {
+                            Text(Presentation.sectionTitle(section))
+                            if let detail = Presentation.sectionDetail(section) { Text(detail) }
+                        }
+                    }
+                } label: {
+                    label()
+                }
+            }
+        }
+
         private func list(_ proxy: ScrollViewProxy) -> some View {
             List {
                 if !model.linkState.isConnected {
@@ -62,7 +89,8 @@
                     Section {
                         WorkspaceHeader(
                             section: section, canSpawn: model.canSpawn(in: section), isSpawning: model.isSpawning,
-                            onSpawn: { Task { await model.spawn(in: section) } },
+                            agents: model.agents,
+                            onSpawn: { agent in Task { await model.spawn(in: section, agent: agent) } },
                             onRename: {
                                 renameText = Presentation.sectionTitle(section)
                                 renaming = section
@@ -83,9 +111,19 @@
                     } description: {
                         Text("新开一个终端，在手机上就能用。")
                     } actions: {
-                        Button("新开终端") { Task { await model.spawn() } }
-                            .prominentButtonStyle()
-                            .controlSize(.large)
+                        Group {
+                            if model.agents.isEmpty {
+                                Button("新开终端") { Task { await model.spawn() } }
+                            } else {
+                                Menu("新开终端") {
+                                    SpawnKindItems(agents: model.agents) { agent in
+                                        Task { await model.spawn(agent: agent) }
+                                    }
+                                }
+                            }
+                        }
+                        .prominentButtonStyle()
+                        .controlSize(.large)
                     }
                 } else if !model.loaded, model.linkState.isConnected {
                     ProgressView("正在读取会话…")
@@ -102,21 +140,14 @@
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu("新建", systemImage: "plus") {
-                        let choices = model.spawnChoices
-                        if !choices.isEmpty {
-                            Menu("新开终端", systemImage: "terminal") {
-                                ForEach(choices) { section in
-                                    Button {
-                                        Task { await model.spawn(in: section) }
-                                    } label: {
-                                        Text(Presentation.sectionTitle(section))
-                                        if let detail = Presentation.sectionDetail(section) { Text(detail) }
-                                    }
-                                }
+                        Section {
+                            spawnItem(agent: nil) {
+                                Label("新开终端", systemImage: "terminal")
                             }
-                        } else {
-                            Button("新开终端", systemImage: "terminal") {
-                                Task { await model.spawn() }
+                            ForEach(model.agents) { agent in
+                                spawnItem(agent: agent) {
+                                    AgentMenuLabel(title: String(localized: "新开 \(agent.label)"), kind: agent.kind)
+                                }
                             }
                         }
                         Button("新建工作区", systemImage: "folder.badge.plus") {
@@ -140,6 +171,7 @@
             }
             .refreshable {
                 model.refresh()
+                model.findAgents()
                 model.refreshPreviews()
                 await model.refreshTasks()
             }
@@ -329,13 +361,15 @@
         }
     }
 
-    /// 一节的标题：工作区的名字和目录，右边一个在这个工作区里新开终端的按钮，长按菜单能新开终端、改名；
-    /// 后台那一节只有标题。
+    /// 一节的标题：工作区的名字和目录，右边一个在这个工作区里新开终端的按钮（电脑上装着 agent 时是挑开终端
+    /// 还是哪家 agent 的菜单），长按菜单能新开终端、改名；后台那一节只有标题。
     private struct WorkspaceHeader: View {
         let section: SessionSection
         let canSpawn: Bool
         let isSpawning: Bool
-        let onSpawn: () -> Void
+        let agents: [InstalledAgent]
+        /// 收到的为空时开普通终端，否则起这家 agent。
+        let onSpawn: (InstalledAgent?) -> Void
         let onRename: () -> Void
 
         var body: some View {
@@ -361,11 +395,16 @@
                 }
                 Spacer(minLength: 8)
                 if canSpawn {
-                    Button(action: onSpawn) {
-                        Label("在这里新开终端", systemImage: "plus")
-                            .labelStyle(.iconOnly)
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
+                    Group {
+                        if agents.isEmpty {
+                            Button { onSpawn(nil) } label: { spawnLabel }
+                        } else {
+                            Menu {
+                                SpawnKindItems(agents: agents, action: onSpawn)
+                            } label: {
+                                spawnLabel
+                            }
+                        }
                     }
                     .font(.body.weight(.semibold))
                     .buttonStyle(.borderless)
@@ -379,12 +418,26 @@
             .contextMenu {
                 if case .workspace = section.id {
                     if canSpawn {
-                        Button("在这里新开终端", systemImage: "plus", action: onSpawn).disabled(isSpawning)
+                        if agents.isEmpty {
+                            Button("在这里新开终端", systemImage: "plus") { onSpawn(nil) }.disabled(isSpawning)
+                        } else {
+                            Menu("在这里新开终端", systemImage: "plus") {
+                                SpawnKindItems(agents: agents, action: onSpawn)
+                            }
+                            .disabled(isSpawning)
+                        }
                     }
                     Button("改名", systemImage: "pencil", action: onRename)
                 }
             }
             .plainListRow()
+        }
+
+        private var spawnLabel: some View {
+            Label("在这里新开终端", systemImage: "plus")
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
         }
     }
 

@@ -14,7 +14,6 @@
         @Environment(\.displayScale) private var displayScale
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
         @Environment(\.themeColors) private var colors
-        @State private var choosingSpawnTarget = false
         /// 首页的大小，和终端页差不多；新开会话按它和设置里的字号算网格尺寸。
         @State private var pageSize: CGSize?
 
@@ -192,21 +191,16 @@
                     ActionTile(title: String(localized: "配对电脑"), systemImage: "qrcode.viewfinder", busy: false) {
                         app.startPairing()
                     }
-                    ActionTile(title: String(localized: "新开终端"), systemImage: "plus", busy: spawnable.contains(where: \.isSpawning)) {
-                        if targets.count == 1, let target = targets.first {
+                    let busy = spawnable.contains(where: \.isSpawning)
+                    if targets.count == 1, let target = targets.first, target.list.agents.isEmpty {
+                        ActionTile(title: String(localized: "新开终端"), systemImage: "plus", busy: busy) {
                             spawn(at: target)
-                        } else {
-                            choosingSpawnTarget = true
                         }
-                    }
-                    .disabled(spawnable.isEmpty)
-                    .confirmationDialog(
-                        targets.contains { $0.section != nil } ? Text("在哪里新开终端？") : Text("在哪台电脑上新开终端？"),
-                        isPresented: $choosingSpawnTarget, titleVisibility: .visible
-                    ) {
-                        ForEach(targets) { target in
-                            Button(target.title) { spawn(at: target) }
-                        }
+                    } else {
+                        ActionTile(title: String(localized: "新开终端"), systemImage: "plus", busy: busy, menu: {
+                            spawnMenu(targets)
+                        })
+                        .disabled(spawnable.isEmpty)
                     }
                 }
                 .padding(.bottom, 16)
@@ -242,7 +236,31 @@
             }
         }
 
-        private func spawn(at target: SpawnTarget) {
+        /// 新开终端的菜单：只有一处能开时直接是开什么（终端或那台电脑上装着的 agent），否则先挑开在哪，
+        /// 那台电脑上装着 agent 时再挑开什么。
+        @ViewBuilder
+        private func spawnMenu(_ targets: [SpawnTarget]) -> some View {
+            if targets.count == 1, let target = targets.first {
+                SpawnKindItems(agents: target.list.agents) { agent in spawn(at: target, agent: agent) }
+            } else {
+                let title =
+                    targets.contains { $0.section != nil }
+                    ? String(localized: "在哪里新开终端？") : String(localized: "在哪台电脑上新开终端？")
+                Section(title) {
+                    ForEach(targets) { target in
+                        if target.list.agents.isEmpty {
+                            Button(target.title) { spawn(at: target) }
+                        } else {
+                            Menu(target.title) {
+                                SpawnKindItems(agents: target.list.agents) { agent in spawn(at: target, agent: agent) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private func spawn(at target: SpawnTarget, agent: InstalledAgent? = nil) {
             let list = target.list
             if let pageSize {
                 list.spawnSize = TerminalView.gridSize(
@@ -251,9 +269,9 @@
             }
             Task {
                 if let section = target.section {
-                    await list.spawn(in: section)
+                    await list.spawn(in: section, agent: agent)
                 } else {
-                    await list.spawn()
+                    await list.spawn(agent: agent)
                 }
             }
         }
@@ -425,42 +443,65 @@
     }
 
     /// 快捷操作那一排里的一格。
-    private struct ActionTile: View {
+    private struct ActionTile<MenuItems: View>: View {
         let title: String
         let systemImage: String
         let busy: Bool
-        let action: () -> Void
+        /// 点了直接办的事；为空时点了弹出 `menuItems` 的菜单。
+        let action: (() -> Void)?
+        @ViewBuilder let menuItems: () -> MenuItems
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.themeColors) private var colors
         @ScaledMetric(relativeTo: .body) private var iconSide: CGFloat = 32
 
         var body: some View {
-            Button(action: action) {
-                HStack(spacing: 10) {
-                    Group {
-                        if busy {
-                            ProgressView()
-                        } else {
-                            Image(systemName: systemImage)
-                                .font(.body.weight(.semibold))
-                        }
-                    }
-                    .frame(width: iconSide, height: iconSide)
-                    .background(colors.fill, in: .inner)
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    Spacer(minLength: 0)
+            Group {
+                if let action {
+                    Button(action: action) { tile }
+                } else {
+                    Menu { menuItems() } label: { tile }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, minHeight: 56)
-                .background(colors.card, in: .card)
-                .contentShape(.card)
             }
             .buttonStyle(.plain)
             .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
             .disabled(busy)
+        }
+
+        private var tile: some View {
+            HStack(spacing: 10) {
+                Group {
+                    if busy {
+                        ProgressView()
+                    } else {
+                        Image(systemName: systemImage)
+                            .font(.body.weight(.semibold))
+                    }
+                }
+                .frame(width: iconSide, height: iconSide)
+                .background(colors.fill, in: .inner)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background(colors.card, in: .card)
+            .contentShape(.card)
+        }
+    }
+
+    extension ActionTile where MenuItems == EmptyView {
+        init(title: String, systemImage: String, busy: Bool, action: @escaping () -> Void) {
+            self.init(title: title, systemImage: systemImage, busy: busy, action: action, menuItems: { EmptyView() })
+        }
+    }
+
+    extension ActionTile {
+        /// 点了弹出菜单的一格。
+        init(title: String, systemImage: String, busy: Bool, @ViewBuilder menu: @escaping () -> MenuItems) {
+            self.init(title: title, systemImage: systemImage, busy: busy, action: nil, menuItems: menu)
         }
     }
 

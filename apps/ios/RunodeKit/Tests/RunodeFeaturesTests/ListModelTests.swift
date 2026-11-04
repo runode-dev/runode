@@ -17,7 +17,7 @@ import Testing
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.state(.connected(hostName: "homelab", address: nil)))
         model.handle(.ready(generation: 1))
-        #expect(link.sent == [.listSessions, .layout(req: 0)])
+        #expect(link.sent.prefix(2) == [.listSessions, .layout(req: 0)])
         model.screenOpened(sessionB)
         model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
         #expect(model.sessions.count == 2)
@@ -131,6 +131,52 @@ import Testing
         model.handle(.message(.opened(req: req, id: sessionA)))
         #expect(spawned == [sessionA])
         #expect(!model.isSpawning)
+    }
+
+    /// 连上就问宿主装着哪些 agent，只认自己那次请求的回话；断开后留着上次问到的。
+    @Test func findsTheInstalledAgentsOnConnect() throws {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        guard case .findCommands(let req, let programs)? = link.sent.last else {
+            Issue.record("expected find_commands, got \(link.sent)")
+            return
+        }
+        #expect(programs == AgentLauncher.programs)
+        var found: [String?] = programs.map { _ in nil }
+        found[try #require(programs.firstIndex(of: "claude"))] = "claude"
+        model.handle(.message(.commands(req: req &+ 1, found: found)))
+        #expect(model.agents.isEmpty)
+        model.handle(.message(.commands(req: req, found: found)))
+        #expect(model.agents.map(\.command) == ["claude"])
+        model.handle(.state(.idle))
+        #expect(model.agents.map(\.command) == ["claude"])
+    }
+
+    /// 新开 agent：和新开终端一样开标签，开好后在新终端里打它的命令、回车。
+    @Test func spawningAnAgentRunsItInTheNewTerminal() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        link.clearSent()
+        let agent = InstalledAgent(label: "Pi", kind: AgentKind("pi"), command: "pi")
+        await model.spawn(near: sessionB, agent: agent)
+        guard case .open(let req, .tab, sessionB?, nil, false)? = link.sent.first else {
+            Issue.record("expected an open beside sessionB, got \(link.sent)")
+            return
+        }
+        link.clearSent()
+        model.handle(.message(.opened(req: req, id: sessionA)))
+        let typed = link.sent.filter {
+            switch $0 {
+            case .paste, .sendKeys: true
+            default: false
+            }
+        }
+        guard case .paste(_, sessionA, "pi")? = typed.first, case .sendKeys(_, sessionA, ["enter"])? = typed.last,
+            typed.count == 2
+        else {
+            Issue.record("expected the agent to be typed, got \(link.sent)")
+            return
+        }
     }
 
     /// 电脑上的 app 没开着窗口时退回自己开一个后台会话。

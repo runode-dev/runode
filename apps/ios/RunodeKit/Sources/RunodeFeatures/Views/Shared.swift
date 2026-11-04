@@ -741,4 +741,40 @@
             .accessibilityHidden(true)
         }
     }
+
+    /// 新开终端时开什么的菜单项：普通终端，和电脑上装着的各家 agent（`agents`），前面是它的 logo。
+    /// `action` 收到的为空时是普通终端。
+    struct SpawnKindItems: View {
+        let agents: [InstalledAgent]
+        let action: (InstalledAgent?) -> Void
+
+        var body: some View {
+            Button("终端", systemImage: "terminal") { action(nil) }
+            ForEach(agents) { agent in
+                Button {
+                    action(agent)
+                } label: {
+                    AgentMenuLabel(title: agent.label, kind: agent.kind)
+                }
+            }
+        }
+    }
+
+    /// 菜单里一家 agent：名字前面是它的 logo，没收 logo 的用通用的符号。
+    struct AgentMenuLabel: View {
+        let title: String
+        let kind: AgentKind
+
+        var body: some View {
+            Label {
+                Text(verbatim: title)
+            } icon: {
+                if let asset = Presentation.agentLogoAsset(kind) {
+                    Image(asset, bundle: .module).renderingMode(.template)
+                } else {
+                    Image(systemName: "sparkles")
+                }
+            }
+        }
+    }
 #endif

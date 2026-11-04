@@ -142,6 +142,9 @@ public final class SessionListModel {
     /// 各个会话目录里能跑的命令（Makefile 的目标、package.json 的 scripts），按目录；宿主回过话的
     /// 目录才有，列不出来的目录是空的。
     public private(set) var tasks: [String: [TaskSource]] = [:]
+    /// 这台电脑上装着的 agent，新开终端时能直接起它们。每次连上问一遍宿主，问到之前是上次的；宿主不认得
+    /// 这个请求时为空。
+    public private(set) var agents: [InstalledAgent] = []
     /// 新建工作区时选目录用的，选着的时候才有。
     public private(set) var directoryPicker: DirectoryPickerModel?
     /// 新开会话用的网格尺寸，视图按手机屏幕算好后设进来。
@@ -181,6 +184,8 @@ public final class SessionListModel {
     @ObservationIgnored private var pendingTasks: [UInt32: String] = [:]
     /// 正在列的目录：取请求编号之前就记上，同一个目录不会同时要两次。
     @ObservationIgnored private var listingDirs: Set<String> = []
+    /// 在等回话的找 agent 的请求编号。
+    @ObservationIgnored private var pendingAgentSearch: UInt32?
 
     private struct PendingSpawn {
         var req: UInt32
@@ -310,16 +315,31 @@ public final class SessionListModel {
         Task { await link.reconnectNow() }
     }
 
-    /// 新开一个会话，开好后调 `onSpawned`。先请电脑上的 app 开一个新标签（`Open`），电脑上也看得到、
-    /// 接着用：`near` 是挨着哪个会话（某个工作区的 `anchor`），为空时开在最前面那个窗口当前的工作区里。
-    /// app 没开着窗口（宿主回 `Error`）时退回 `Spawn`，开一个只在后台跑的会话。
-    public func spawn(near: SessionId? = nil) async {
+    /// 新开一个会话，开好后调 `onSpawned`；`agent` 不为空时开好后在它的 shell 里起这家 agent。先请电脑上的
+    /// app 开一个新标签（`Open`），电脑上也看得到、接着用：`near` 是挨着哪个会话（某个工作区的 `anchor`），
+    /// 为空时开在最前面那个窗口当前的工作区里。app 没开着窗口（宿主回 `Error`）时退回 `Spawn`，开一个只在
+    /// 后台跑的会话。
+    public func spawn(near: SessionId? = nil, agent: InstalledAgent? = nil) async {
         guard connected, !isSpawning else { return }
         isSpawning = true
         let req = link.nextRequestId()
         let fallback = link.nextRequestId()
-        pendingSpawn = PendingSpawn(req: req, fallback: fallback, failure: String(localized: "开不了新终端"))
+        pendingSpawn = PendingSpawn(
+            req: req, fallback: fallback, failure: String(localized: "开不了新终端"), command: launch(agent))
         link.send(.open(req: req, placement: .tab, near: near, cwd: nil, focus: false))
+    }
+
+    /// 开好后起 `agent` 要打的命令，带着预先取好的粘贴、回车的请求编号；`agent` 为空时不打。
+    private func launch(_ agent: InstalledAgent?) -> (text: String, paste: UInt32, enter: UInt32)? {
+        agent.map { ($0.command, link.nextRequestId(), link.nextRequestId()) }
+    }
+
+    /// 问宿主这台电脑上装着哪些 agent，回话到了换掉 `agents`。宿主按新起的 shell 会拿到的 PATH 找。
+    public func findAgents() {
+        guard connected else { return }
+        let req = link.nextRequestId()
+        pendingAgentSearch = req
+        link.send(.findCommands(req: req, programs: AgentLauncher.programs))
     }
 
     /// 开始新建工作区：从家目录开始选目录。
@@ -353,17 +373,19 @@ public final class SessionListModel {
         }
     }
 
-    /// 在工作区这一节里新开终端：挨着它的 `anchor` 开新标签（`spawn(near:)`）。一个标签都没有的工作区
-    /// 没有 `anchor`，对它的目录发 `OpenWorkspace`：电脑上的 app 对已有这个目录的工作区在它里面新开标签。
-    public func spawn(in section: SessionSection) async {
+    /// 在工作区这一节里新开终端，`agent` 同 `spawn(near:agent:)`：挨着它的 `anchor` 开新标签。一个标签都
+    /// 没有的工作区没有 `anchor`，对它的目录发 `OpenWorkspace`：电脑上的 app 对已有这个目录的工作区在它里面
+    /// 新开标签。
+    public func spawn(in section: SessionSection, agent: InstalledAgent? = nil) async {
         if let anchor = section.anchor {
-            await spawn(near: anchor)
+            await spawn(near: anchor, agent: agent)
             return
         }
         guard case .workspace = section.id, let dir = section.dir, connected, !isSpawning else { return }
         isSpawning = true
         let req = link.nextRequestId()
-        pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: String(localized: "开不了新终端"))
+        pendingSpawn = PendingSpawn(
+            req: req, fallback: nil, failure: String(localized: "开不了新终端"), command: launch(agent))
         link.send(.openWorkspace(req: req, dir: dir, focus: false))
     }
 
@@ -611,6 +633,7 @@ public final class SessionListModel {
                 previewsAgain = []
                 pendingTasks = [:]
                 listingDirs = []
+                pendingAgentSearch = nil
                 pendingRenames = []
                 for reply in quickReplies.values {
                     reply.connectionLost()
@@ -627,6 +650,7 @@ public final class SessionListModel {
             watching = []
             refresh()
             loadMissingTasks()
+            findAgents()
         case .message(let message):
             handle(message)
         case .frame:
@@ -709,6 +733,9 @@ public final class SessionListModel {
             refreshLayout()
         case .tasks(let req, _, let sources):
             finishTasks(req, sources: sources)
+        case .commands(let req, let found) where req == pendingAgentSearch:
+            pendingAgentSearch = nil
+            agents = AgentLauncher.installed(found: found)
         case .done(let req) where pendingRenames.contains(req):
             pendingRenames.remove(req)
             refresh()

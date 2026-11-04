@@ -1,0 +1,69 @@
+{
+  "_说明": "由 runode_agent 的测试 launcher_fixture 按 LAUNCHERS 生成，手机端的测试据此核对新开 agent 的菜单。不要手改：改了 LAUNCHERS 后在仓库根跑 `RUNODE_BLESS=1 cargo test -p runode-agent --test launcher_fixture` 重新生成。",
+  "launchers": [
+    {
+      "kind": "claude",
+      "label": "Claude",
+      "programs": [
+        "claude"
+      ]
+    },
+    {
+      "kind": "codex",
+      "label": "Codex",
+      "programs": [
+        "codex"
+      ]
+    },
+    {
+      "kind": "pi",
+      "label": "Pi",
+      "programs": [
+        "pi"
+      ]
+    },
+    {
+      "kind": "omp",
+      "label": "OMP",
+      "programs": [
+        "omp"
+      ]
+    },
+    {
+      "kind": "open_code",
+      "label": "OpenCode",
+      "programs": [
+        "opencode2",
+        "opencode"
+      ]
+    },
+    {
+      "kind": "github_copilot",
+      "label": "GitHub Copilot",
+      "programs": [
+        "copilot"
+      ]
+    },
+    {
+      "kind": "cursor",
+      "label": "Cursor",
+      "programs": [
+        "cursor-agent"
+      ]
+    },
+    {
+      "kind": "antigravity",
+      "label": "Antigravity",
+      "programs": [
+        "agy"
+      ]
+    },
+    {
+      "kind": "muse",
+      "label": "Muse",
+      "programs": [
+        "muse"
+      ]
+    }
+  ]
+}

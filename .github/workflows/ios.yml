@@ -11,6 +11,7 @@ on:
     paths:
       - "apps/ios/**"
       - "crates/protocol/tests/fixtures/**"
+      - "crates/agent/tests/fixtures/**"
       - "crates/ui/assets/icons/**"
       - "vendor/ghostty"
       - ".github/workflows/ios.yml"
@@ -19,6 +20,7 @@ on:
     paths:
       - "apps/ios/**"
       - "crates/protocol/tests/fixtures/**"
+      - "crates/agent/tests/fixtures/**"
       - "crates/ui/assets/icons/**"
       - "vendor/ghostty"
       - ".github/workflows/ios.yml"

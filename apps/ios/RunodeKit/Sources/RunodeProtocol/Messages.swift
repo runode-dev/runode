@@ -78,6 +78,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 列电脑上一个目录（绝对路径）里能跑的命令（Makefile 的目标、package.json 的 scripts），宿主回
     /// `Tasks`，出错时回 `Error`。
     case listTasks(req: UInt32, dir: String)
+    /// 在电脑上按新起的 shell 会拿到的 PATH 找 `programs` 这几个命令（个数不超过宿主的 `runode_protocol::MAX_FIND_COMMANDS`），
+    /// 宿主回 `Commands`。只发给在 `Welcome` 里说认得它的宿主。
+    case findCommands(req: UInt32, programs: [String])
     /// 新开一个会话；宿主回 `Spawned`，开好的会话要另外 `Attach`。
     case spawn(req: UInt32, size: GridSize, cwd: String?, integration: IntegrationMode, start: Bool)
     /// 连上会话。`size` 为空时不改会话的尺寸，也不算一次交互（见宿主的尺寸归属）。
@@ -164,6 +167,11 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode("list_tasks", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
             try c.encode(dir, forKey: Key("dir"))
+        case let .findCommands(req, programs):
+            try c.encode("find_commands", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encodeNil(forKey: Key("path"))
+            try c.encode(programs, forKey: Key("programs"))
         case let .spawn(req, size, cwd, integration, start):
             try c.encode("spawn", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
@@ -297,7 +305,7 @@ public enum GoodbyeReason: Hashable, Sendable, Decodable {
 
 /// 宿主发给前端的消息，和宿主的 `HostMsg` 一一对应。不认识的种类读成 `unknown`（和宿主的
 /// `#[serde(other)]` 一样），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的
-/// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只读 `keep_awake`。
+/// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只读 `keep_awake` 和 `shells`。
 public enum HostMsg: Hashable, Sendable, Decodable {
     /// `error` 以它开头：这条连接在宿主那边积压着，请求没办、会话还在，过一会儿再来。对应宿主的
     /// `runode_protocol::ERROR_BACKED_UP`，是认错误种类的约定。
@@ -305,8 +313,8 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     /// `error` 以它开头：会话已经没了。对应宿主的 `runode_protocol::ERROR_NO_SESSION`。
     public static let noSessionPrefix = "no session"
 
-    /// `keepAwake`：宿主认得 `ClientMsg.keepAwake`。
-    case welcome(keepAwake: Bool)
+    /// `keepAwake`：宿主认得 `ClientMsg.keepAwake`；`findsCommands`：宿主认得 `ClientMsg.findCommands`。
+    case welcome(keepAwake: Bool, findsCommands: Bool)
     case incompatible(protocol: UInt32, build: String, reason: String)
     case sessionList([SessionInfo])
     case spawned(req: UInt32, id: SessionId)
@@ -332,6 +340,9 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     /// 回 `ListTasks`：请求里的目录和找到的 Makefile、package.json 里的命令，先 Makefile 后
     /// package.json，一样都没找到时为空。
     case tasks(req: UInt32, dir: String, sources: [TaskSource])
+    /// 回 `FindCommands`：和请求里的 `programs` 一一对应，找到的是命令的文件名（Windows 上带着扩展名），
+    /// 找不到的为空。
+    case commands(req: UInt32, found: [String?])
     /// 回 `Git` 里读状态和改仓库的操作：办完以后仓库的样子；会话的目录不在 git 仓库里时为空。
     case gitStatus(req: UInt32, id: SessionId, status: GitStatus?)
     /// 回 `GitRequest.diff`；这个文件在那一段里已经没有改动时为空。
@@ -388,7 +399,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     private enum Keys: String, CodingKey {
         case type, `protocol`, build, reason, sessions, req, id, channel, size, mode, meta, settings
         case status, text, truncated, ui, message, format, mine, owner, windows, path, dirs, diff, branches
-        case dir, sources
+        case dir, sources, found, shells
         case keepAwake = "keep_awake"
     }
 
@@ -397,7 +408,9 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         let type = try c.decode(String.self, forKey: .type)
         switch type {
         case "welcome":
-            self = .welcome(keepAwake: try c.decodeIfPresent(Bool.self, forKey: .keepAwake) ?? false)
+            self = .welcome(
+                keepAwake: try c.decodeIfPresent(Bool.self, forKey: .keepAwake) ?? false,
+                findsCommands: try c.decodeIfPresent(Bool.self, forKey: .shells) ?? false)
         case "incompatible":
             self = .incompatible(
                 protocol: try c.decode(UInt32.self, forKey: .protocol),
@@ -461,6 +474,9 @@ public enum HostMsg: Hashable, Sendable, Decodable {
                 req: try c.decode(UInt32.self, forKey: .req),
                 dir: try c.decode(String.self, forKey: .dir),
                 sources: try c.decode([TaskSource].self, forKey: .sources))
+        case "commands":
+            self = .commands(
+                req: try c.decode(UInt32.self, forKey: .req), found: try c.decode([String?].self, forKey: .found))
         case "git_status":
             self = .gitStatus(
                 req: try c.decode(UInt32.self, forKey: .req),
