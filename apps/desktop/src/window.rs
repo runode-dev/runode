@@ -234,6 +234,17 @@ const CARD_GAP: f32 = 8.;
 const TAB_TRACK_HEIGHT: f32 = 28.;
 
 /// 窗口用卡片样式，见 `WindowStyle`。
+/// 按配色 `fg`、`bg` 和配置的调色板换上全 app 共用的主题 token（`Theme`），返回换上的：同一次绘制里接着画的
+/// 缓存的视图、悬停提示和拖动预览读到的就是这个窗口的。每个窗口画的时候一开头调，单独的终端窗口、远程桌面
+/// 窗口也一样，不然它们读到的是最后画的那个窗口的颜色。
+pub(crate) fn install_theme(fg: Rgb, bg: Rgb, cx: &mut App) -> Theme {
+    let theme = Theme::new(fg, bg, ansi_colors(&cx.global::<AppConfig>().0.palette));
+    if *cx.theme() != theme {
+        cx.set_global(theme.clone());
+    }
+    theme
+}
+
 fn cards(cx: &App) -> bool {
     cx.global::<AppConfig>().0.window_style == WindowStyle::Cards
 }
@@ -611,17 +622,13 @@ impl WindowView {
         self.slots.clone().unwrap()
     }
 
-    /// 按窗口的配色 `fg`、`bg` 和配置的调色板换上全 app 共用的主题 token（`Theme`）：同一次绘制里接着
-    /// 画的缓存的几块、悬停提示和拖动预览读到的就是这个窗口的。每次画窗口时一开头调。
+    /// 按窗口的配色 `fg`、`bg` 换上主题（`install_theme`）。
     ///
     /// 窗口的配色跟着有焦点的终端当前的配色走，程序用 OSC 10/11 改了默认色、配置改了调色板时没有谁
     /// 通知缓存的几块（连同 `cached_views`），它们会停在旧颜色上：主题一变就叫它们重画。这时正在画窗口，
     /// 画的时候发的通知不会再要一帧，所以等这一帧画完再通知。
     fn follow_colors(&mut self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
-        let theme = Theme::new(fg, bg, ansi_colors(&cx.global::<AppConfig>().0.palette));
-        if *cx.theme() != theme {
-            cx.set_global(theme.clone());
-        }
+        let theme = install_theme(fg, bg, cx);
         if self.slot_theme.as_ref() == Some(&theme) {
             return;
         }

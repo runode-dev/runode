@@ -9,7 +9,7 @@ use gpui::{
     prelude::*, px, size, svg,
 };
 
-use super::super::{TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, WindowView, titlebar};
+use super::super::{TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, WindowView, install_theme, titlebar};
 use crate::terminal_view::{TerminalEvent, TerminalView};
 use crate::{
     config::AppConfig,
@@ -18,7 +18,7 @@ use crate::{
         button::{Button, ButtonSize},
         font_size::FontSize,
         icons::{PIN_ICON, POP_IN_ICON, TERMINAL_ICON},
-        theme::{ActiveTheme as _, Theme},
+        theme::ActiveTheme as _,
         tooltip::tooltip,
     },
 };
@@ -93,10 +93,6 @@ pub(super) fn open(
                         cx.notify();
                     }
                 }),
-                cx.observe_global_in::<Theme>(window, |this: &mut PaneWindow, _, cx| {
-                    this.view.update(cx, |_, cx| cx.notify());
-                    cx.notify();
-                }),
                 cx.observe_global::<AppConfig>(|this: &mut PaneWindow, cx| {
                     this.view.update(cx, |_, cx| cx.notify());
                     cx.notify();
@@ -166,6 +162,9 @@ impl Render for PaneWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 界面的字号按 rem 写（`ui::font_size`），和主窗口一样设成配置的界面字号。
         window.set_rem_size(crate::ui::font_size::rem_size(cx));
+        // 主题跟着这个终端的配色；终端改了配色会通知它自己，这个窗口跟着重画。
+        let (fg, bg) = self.view.update(cx, |view, _| view.colors());
+        install_theme(fg, bg, cx);
         let (name, dir) = titlebar::pane_label(self.view.read(cx));
         window.set_window_title(&name);
         // 标题栏两头给窗口按钮让地方：全屏时红绿灯和 Windows 的按钮都不画。

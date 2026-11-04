@@ -7,14 +7,11 @@ use gpui::{
     WindowBounds, WindowOptions, div, prelude::*, px, size,
 };
 
-use super::super::{TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, titlebar};
+use super::super::{TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, install_theme, titlebar};
 use super::put_back;
 use crate::host_client::hosts::HostId;
 use crate::screen_viewer::{Input, ScreenViewer, ScreenViewerEvent, Titlebar};
-use crate::{
-    config::AppConfig,
-    ui::theme::{ActiveTheme as _, Theme},
-};
+use crate::{config::AppConfig, ui::theme::ActiveTheme as _};
 
 /// 单独窗口最小这么大。
 const MIN_SIZE: (f32, f32) = (360., 240.);
@@ -22,9 +19,10 @@ const MIN_SIZE: (f32, f32) = (360., 240.);
 /// 单独窗口的根视图。
 struct ScreenWindow {
     viewer: Entity<ScreenViewer>,
+    /// 窗口外观上次按深色还是浅色设的。
+    dark: Option<bool>,
     _events: Subscription,
-    /// 主题、界面字号和语言变了时重画：远程桌面页是缓存的视图，画面静止时没人叫它重画。
-    _theme: Subscription,
+    /// 配置（连同主题的颜色）、界面字号和语言变了时重画：远程桌面页是缓存的视图，画面静止时没人叫它重画。
     _config: Subscription,
 }
 
@@ -56,17 +54,11 @@ pub(super) fn open(viewer: Entity<ScreenViewer>, bounds: Bounds<Pixels>, display
                     _ => {}
                 });
             window.focus(&viewer.focus_handle(cx), cx);
-            match_appearance(window, cx.theme().background.l < 0.5);
-            let theme = cx.observe_global_in::<Theme>(window, |this: &mut ScreenWindow, window, cx| {
-                match_appearance(window, cx.theme().background.l < 0.5);
-                this.viewer.update(cx, |_, cx| cx.notify());
-                cx.notify();
-            });
             let config = cx.observe_global::<AppConfig>(|this: &mut ScreenWindow, cx| {
                 this.viewer.update(cx, |_, cx| cx.notify());
                 cx.notify();
             });
-            ScreenWindow { viewer, _events: events, _theme: theme, _config: config }
+            ScreenWindow { viewer, dark: None, _events: events, _config: config }
         })
     });
     if let Err(err) = opened {
@@ -94,6 +86,16 @@ impl Render for ScreenWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 界面的字号按 rem 写（`ui::font_size`），和主窗口一样设成配置的界面字号。
         window.set_rem_size(crate::ui::font_size::rem_size(cx));
+        // 窗口里没有终端，主题按配置的颜色，和没有终端的主窗口一样。
+        let (fg, bg) = {
+            let config = &cx.global::<AppConfig>().0;
+            (config.foreground, config.background)
+        };
+        let dark = install_theme(fg, bg, cx).background.l < 0.5;
+        if self.dark != Some(dark) {
+            self.dark = Some(dark);
+            match_appearance(window, dark);
+        }
         // 工具条两头给窗口按钮让地方：全屏时红绿灯和 Windows 的按钮都不画，工具条也收起来。
         let fullscreen = window.is_fullscreen();
         let lights = cfg!(target_os = "macos") && !fullscreen;
