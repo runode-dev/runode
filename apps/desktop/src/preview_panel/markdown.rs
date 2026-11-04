@@ -73,6 +73,9 @@ const MAX_LOCAL_IMAGES: usize = 256;
 const MAX_LOCAL_IMAGE_BYTES: usize = 512 << 20;
 /// 一篇文档最多下载这么多个不同的网络图片，再多的只显示替代文字。
 const MAX_REMOTE_IMAGES: usize = 64;
+/// 一篇文档换上的网络图片合起来最多占这么多字节（`Picture::bytes`），超出的只显示替代文字。下载共用的
+/// 缓存放掉的图，这里换上了就还留着，所以要另算。
+const MAX_REMOTE_IMAGE_BYTES: usize = 512 << 20;
 
 /// 一个预览标签的排版视图的状态：列表的滚动位置、选区、鼠标在干什么、下好的网络图片。重读文件时
 /// 留着，网络图片只留新文档还用的。
@@ -128,6 +131,15 @@ impl View {
         // 新文档不再用的网络图片不留着，否则反复改图片地址时这里攒下每一张下过的图。
         let urls = doc.remote_urls();
         self.remote.retain(|url, _| urls.contains(url));
+    }
+
+    /// 换上地址 `url` 下好的图，下不了时为空；和已经换上的合起来超过 `MAX_REMOTE_IMAGE_BYTES` 时不要，
+    /// 当成下不了。
+    fn set_remote(&mut self, url: String, picture: Option<Picture>) {
+        let others = self.remote.iter().filter(|(known, _)| **known != url).filter_map(|(_, picture)| picture.as_ref());
+        let kept: usize = others.map(Picture::bytes).sum();
+        let picture = picture.filter(|picture| kept + picture.bytes() <= MAX_REMOTE_IMAGE_BYTES);
+        self.remote.insert(url, picture);
     }
 }
 
@@ -1479,7 +1491,7 @@ impl PreviewPanel {
                         return;
                     }
                     if let Some((preview, ..)) = this.preview_for(id, &cancel) {
-                        preview.markdown_view.remote.insert(url.clone(), picture);
+                        preview.markdown_view.set_remote(url.clone(), picture);
                         cx.notify();
                     }
                 })

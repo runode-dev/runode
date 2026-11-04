@@ -235,6 +235,20 @@ fn reloads_keep_only_remote_pictures_the_new_doc_uses() {
     assert_eq!(view.remote.keys().collect::<Vec<_>>(), ["https://x/keep.png"]);
 }
 
+/// 一篇文档换上的网络图片合起来不超过 `MAX_REMOTE_IMAGE_BYTES`，超出的那张当成下不了。
+#[test]
+fn remote_pictures_are_capped_per_document() {
+    let big = |byte: u8| Picture::Bitmap(Arc::new(Image::from_bytes(gpui::ImageFormat::Png, vec![byte])), 300 << 20);
+    let mut view = View::new();
+    view.set_remote("https://x/a.png".into(), Some(big(1)));
+    view.set_remote("https://x/b.png".into(), Some(big(2)));
+    assert!(matches!(view.remote.get("https://x/a.png"), Some(Some(_))));
+    assert!(matches!(view.remote.get("https://x/b.png"), Some(None)), "超出的不要");
+    // 同一个地址重下换上时不和自己的旧图一起算。
+    view.set_remote("https://x/a.png".into(), Some(big(3)));
+    assert!(matches!(view.remote.get("https://x/a.png"), Some(Some(_))));
+}
+
 /// 撑列宽的格子按终端里占几格挑：汉字算两格，表头也算一行。
 #[test]
 fn widest_cells_count_wide_characters() {
