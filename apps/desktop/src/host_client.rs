@@ -291,7 +291,8 @@ fn socket_gone(socket: &Path) -> bool {
 }
 
 /// 单独跑的宿主上除了这个 app 还有别的桌面连着：开关关着时退出只结束这个 app 窗口里的会话，不让宿主
-/// 退出，免得连别人的会话一起结束。最多卡住调用的线程 `launch::probe` 的超时；问不到时当作没有。
+/// 退出，免得连别人的会话一起结束。最多卡住调用的线程 `launch::probe` 的超时；问不到（超时、握不了手）时
+/// 当作有：错当成有只是留下宿主和后台会话，错当成没有会结束别的桌面的会话。
 pub fn other_desktops() -> bool {
     if mode() != Mode::Standalone {
         return false;
@@ -299,7 +300,10 @@ pub fn other_desktops() -> bool {
     let Some(socket) = socket_path() else { return false };
     // 探的是命令行的连接，连着的桌面里有这个 app 自己。
     let ours = usize::from(link().connected());
-    matches!(launch::probe(&socket, &build()), Probe::Running { desktops, .. } if desktops > ours)
+    match launch::probe(&socket, &build()) {
+        Probe::Running { desktops, .. } => desktops > ours,
+        _ => true,
+    }
 }
 
 /// 宿主里所有的会话。
