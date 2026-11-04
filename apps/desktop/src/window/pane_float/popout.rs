@@ -5,11 +5,11 @@
 
 use gpui::{
     App, AppContext as _, Bounds, Context, DisplayId, Entity, EntityId, Focusable as _, MouseButton, MouseDownEvent,
-    Pixels, Render, Subscription, Window, WindowBounds, WindowControlArea, WindowHandle, WindowOptions, div,
+    Pixels, Point, Render, Subscription, Window, WindowBounds, WindowControlArea, WindowHandle, WindowOptions, div,
     prelude::*, px, size, svg,
 };
 
-use super::super::{TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, WindowView, install_theme, titlebar};
+use super::super::{TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, WindowView, drag_out, install_theme, titlebar};
 use crate::terminal_view::{TerminalEvent, TerminalView};
 use crate::{
     config::AppConfig,
@@ -39,7 +39,8 @@ struct PaneWindow {
 }
 
 /// 开一个单独的终端窗口，放在显示器 `display` 上的 `bounds` 处（和 `Window::bounds` 同一套坐标），把主窗口 `owner` 里的终端
-/// `view`（分屏 `pane`）放进去，焦点给它。
+/// `view`（分屏 `pane`）放进去，焦点给它；`activate` 为假时窗口不到前台，主窗口仍接着鼠标拖动。
+#[expect(clippy::too_many_arguments, reason = "窗口开在哪、放什么、到不到前台各是一样，捆成结构体只用一次")]
 pub(super) fn open(
     owner: WindowHandle<WindowView>,
     owner_view: Entity<WindowView>,
@@ -47,12 +48,14 @@ pub(super) fn open(
     view: Entity<TerminalView>,
     bounds: Bounds<Pixels>,
     display: Option<DisplayId>,
+    activate: bool,
     cx: &mut App,
 ) {
     let (title, _) = titlebar::pane_label(view.read(cx));
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         display_id: display,
+        focus: activate,
         window_min_size: Some(size(px(MIN_SIZE.0), px(MIN_SIZE.1))),
         titlebar: Some(gpui::TitlebarOptions { title: Some(title), ..titlebar::titlebar_options() }),
         window_decorations: titlebar::window_decorations(),
@@ -129,6 +132,19 @@ pub(super) fn activate(pane: EntityId, cx: &mut App) -> bool {
             })
             .unwrap_or(false)
     })
+}
+
+/// 终端 `pane` 的单独窗口挪到左上角在主窗口 `owner` 内容里 `at` 处的地方（可以在主窗口外面）；窗口还没开出来时不挪。
+pub(super) fn follow(owner: &Window, pane: EntityId, at: Point<Pixels>, cx: &mut App) {
+    let Some(handle) = cx
+        .windows()
+        .into_iter()
+        .filter_map(|handle| handle.downcast::<PaneWindow>())
+        .find(|handle| handle.read(cx).is_ok_and(|this| this.pane == pane))
+    else {
+        return;
+    };
+    drag_out::move_window(owner, handle.into(), at, cx);
 }
 
 /// 终端 `pane` 不在单独窗口里了、还在某个主窗口里时，它的焦点和窗口订阅换回那个主窗口。

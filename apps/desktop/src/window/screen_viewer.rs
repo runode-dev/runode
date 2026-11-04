@@ -8,7 +8,8 @@
 //! 面板显示、又是吸附时的 workspace 时看得见，钉住后换成那台主机上的各个 workspace，切到那台主机上面板收着的
 //! workspace 时打开面板；切到别的页面、别的 workspace，收起面板时跟着藏起来，连接不断。浮动的拖到窗口外面
 //! 松开，或按页面上的按钮，就搬进单独的窗口（`popout`），连接不断；在那里按「放回主窗口」再搬回来。只有点页面上的
-//! 关闭（或关掉单独的窗口）才收起，收起就断开。
+//! 关闭（或关掉单独的窗口）才收起，收起就断开。拖着浮动的那块时它跟着鼠标走，可以挪出窗口边，松在窗口里时收回
+//! 窗口里；鼠标一出窗口就搬进单独的窗口，那个窗口接着跟到松开（`drag_out::FOLLOWS_DRAG` 为假的系统上松开时才搬）。
 
 mod popout;
 mod snap;
@@ -16,13 +17,13 @@ mod snap;
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, CursorStyle, Div, Entity, EntityId, Focusable as _, MouseButton,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, ResizeEdge, Size, StyleRefinement, Subscription, Task, Window, div,
-    point, prelude::*, px, size,
+    AnyElement, App, AppContext as _, Bounds, Context, CursorStyle, DispatchPhase, Div, Entity, EntityId,
+    Focusable as _, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, ResizeEdge, Size, StyleRefinement,
+    Subscription, Task, Window, canvas, div, point, prelude::*, px, size,
 };
 
 use super::{
-    ToggleRemoteDesktop, WindowView,
+    ToggleRemoteDesktop, WindowView, drag_out,
     float_frame::{self, clamp_frame, resize_frame},
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
 };
@@ -108,6 +109,8 @@ struct FloatDrag {
     resize: Option<ResizeEdge>,
     from: Point<Pixels>,
     frame: Bounds<Pixels>,
+    /// 已经搬进单独窗口，那个窗口跟着鼠标走。
+    torn: bool,
     /// 拖的是吸附着的那台，鼠标挪过 `UNSNAP_DISTANCE` 才浮起来。
     unsnap: bool,
     /// 拖起来之前它吸附着的样子，再吸附上时照旧钉没钉住、照旧那么高。
@@ -312,7 +315,7 @@ impl WindowView {
                 ScreenViewerEvent::Close => this.close_screen_viewer(id, window, cx),
                 ScreenViewerEvent::ToggleFloating => this.toggle_screen_floating(id, window, cx),
                 ScreenViewerEvent::StartDrag(from) => this.start_screen_drag(id, *from, None, cx),
-                ScreenViewerEvent::PopOut => this.pop_out_screen(id, None, window, cx),
+                ScreenViewerEvent::PopOut => this.pop_out_screen(id, None, true, window, cx),
                 ScreenViewerEvent::PopIn => {}
                 ScreenViewerEvent::TogglePin => this.toggle_screen_pin(id, cx),
             }
@@ -424,11 +427,12 @@ impl WindowView {
     }
 
     /// 把远程桌面 `id` 搬进单独的窗口：给了 `origin`（相对这个窗口所在显示器的位置）时窗口尽量放在那里，否则放在
-    /// 它原来的地方。
+    /// 它原来的地方。`activate` 为假时新窗口不抢前台。
     fn pop_out_screen(
         &mut self,
         id: EntityId,
         origin: Option<Point<Pixels>>,
+        activate: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -450,7 +454,7 @@ impl WindowView {
             None => bounds,
         };
         let (view, display_id) = (open.view, display.map(|display| display.id()));
-        cx.defer(move |cx| popout::open(view, bounds, display_id, cx));
+        cx.defer(move |cx| popout::open(view, bounds, display_id, activate, cx));
         window.focus(&self.focus_handle(cx), cx);
         self.save(cx);
         cx.notify();
@@ -476,7 +480,7 @@ impl WindowView {
             frame.origin = from - point(frame.size.width / 2., px(UNSNAP_GRAB_Y));
         }
         let unsnap = was.is_some();
-        self.screen_viewers.drag = Some(FloatDrag { id, resize, from, frame, unsnap, was, target: None });
+        self.screen_viewers.drag = Some(FloatDrag { id, resize, from, frame, torn: false, unsnap, was, target: None });
         self.raise_screen(id);
         cx.notify();
     }
@@ -504,8 +508,12 @@ impl WindowView {
             cx.defer_in(window, |this, window, cx| window.focus(&this.focus_handle(cx), cx));
         }
         self.sync_hidden_screens(cx);
+        // 正挪着的那块跟着鼠标，可以挪出窗口边，松开时再收回来。
+        let moving = self.screen_viewers.drag.as_ref().filter(|drag| drag.resize.is_none()).map(|drag| drag.id);
         for open in self.screen_viewers.open.iter_mut().filter(|open| open.placement == Placement::Floating) {
-            open.frame = clamp_frame(open.frame, viewport, MIN_FLOAT);
+            if moving != Some(open.view.entity_id()) {
+                open.frame = clamp_frame(open.frame, viewport, MIN_FLOAT);
+            }
             let (id, frame) = (open.view.entity_id(), open.frame);
             let grips = float_frame::resize_grips(
                 id,
@@ -544,12 +552,33 @@ impl WindowView {
         screens
     }
 
-    /// 拖动浮动的远程桌面时盖住整个窗口、接住鼠标移动和松开的一层；没在拖时为空。挪动时落在右侧面板上就标出
-    /// 松开后吸附到哪，在窗口外松开就搬进单独的窗口，放在松开的地方。
+    /// 拖动浮动的远程桌面时盖住整个窗口、接住鼠标的一层；没在拖时为空。挪动时落在右侧面板上就标出松开后吸附到哪。
+    /// 挪动和松开挂在窗口上、在捕获阶段接：鼠标出了窗口也照样收到，也不传给远程桌面页。
     pub(super) fn render_screen_drag(&self, cx: &mut Context<Self>) -> Option<Div> {
         let drag = self.screen_viewers.drag.as_ref()?;
         let resize = drag.resize;
         let target = drag.target.and_then(|target| self.render_snap_target(target, cx));
+        let weak = cx.weak_entity();
+        let events = canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                let view = weak.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture {
+                        cx.stop_propagation();
+                        view.update(cx, |this, cx| this.move_screen_drag(event, window, cx)).ok();
+                    }
+                });
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                        cx.stop_propagation();
+                        weak.update(cx, |this, cx| this.end_screen_drag(event.position, window, cx)).ok();
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_full();
         Some(
             div()
                 .absolute()
@@ -557,71 +586,99 @@ impl WindowView {
                 .occlude()
                 .cursor(resize.map_or(CursorStyle::ClosedHand, float_frame::resize_cursor))
                 .children(target)
-                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                    cx.stop_propagation();
-                    let target = this.snap_target(event.position);
-                    let Some(drag) = &mut this.screen_viewers.drag else { return };
-                    // 在窗口外松开时可能收不到松开事件，回来时按键已经没按着了。
-                    if event.pressed_button != Some(MouseButton::Left) {
-                        this.screen_viewers.drag = None;
-                        cx.notify();
-                        return;
-                    }
-                    let delta = event.position - drag.from;
-                    if drag.unsnap {
-                        if f32::from(delta.x).hypot(f32::from(delta.y)) < UNSNAP_DISTANCE {
-                            return;
-                        }
-                        drag.unsnap = false;
-                        let id = drag.id;
-                        if let Some(ix) = this.screen_viewers.position(id) {
-                            let open = &mut this.screen_viewers.open[ix];
-                            open.placement = Placement::Floating;
-                            set_input(&open.view, open.input(), cx);
-                            this.save(cx);
-                        }
-                    }
-                    let Some(drag) = &mut this.screen_viewers.drag else { return };
-                    drag.target = target.filter(|_| drag.resize.is_none());
-                    let viewport = window.viewport_size();
-                    let frame = match drag.resize {
-                        Some(edge) => resize_frame(drag.frame, edge, delta, viewport, MIN_FLOAT),
-                        None => Bounds { origin: drag.frame.origin + delta, size: drag.frame.size },
-                    };
-                    let (id, frame) = (drag.id, clamp_frame(frame, viewport, MIN_FLOAT));
-                    if let Some(ix) = this.screen_viewers.position(id) {
-                        this.screen_viewers.open[ix].frame = frame;
-                    }
-                    cx.notify();
-                }))
-                .on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|this, _, window, cx| {
-                        let Some(drag) = this.screen_viewers.drag.take() else { return };
-                        if let Some(target) = drag.target {
-                            this.snap_screen(drag.id, target, drag.was, window, cx);
-                        }
-                        cx.notify();
-                    }),
-                )
-                .on_mouse_up_out(
-                    MouseButton::Left,
-                    cx.listener(|this, event: &MouseUpEvent, window, cx| {
-                        let Some(drag) = this.screen_viewers.drag.take() else { return };
-                        cx.notify();
-                        // 松在窗口里（落在盖在上面的窗口按钮、拉伸边上时也算「外面」）只是拖完了。
-                        let inside = Bounds::new(Point::default(), window.viewport_size()).contains(&event.position);
-                        if drag.resize.is_some() || inside {
-                            return;
-                        }
-                        // 窗口在它那块显示器上的位置，加上松开的地方，减去按下时鼠标在这一块里的位置。
-                        let grab = drag.from - drag.frame.origin;
-                        let origin = window.bounds().origin + event.position - grab;
-                        this.pop_out_screen(drag.id, Some(origin), window, cx);
-                    }),
-                ),
+                .child(events),
         )
     }
+
+    /// 拖着时鼠标挪了；出了窗口也收得到，位置照样相对这个窗口。
+    fn move_screen_drag(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // 在窗口外松开时可能收不到松开事件，下一次挪动时按键已经没按着了。
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.end_screen_drag(event.position, window, cx);
+            return;
+        }
+        let target = self.snap_target(event.position);
+        let Some(drag) = &mut self.screen_viewers.drag else { return };
+        if drag.torn {
+            popout::follow(window, drag.id, event.position - (drag.from - drag.frame.origin), cx);
+            return;
+        }
+        let delta = event.position - drag.from;
+        if drag.unsnap {
+            if f32::from(delta.x).hypot(f32::from(delta.y)) < UNSNAP_DISTANCE {
+                return;
+            }
+            drag.unsnap = false;
+            let id = drag.id;
+            if let Some(ix) = self.screen_viewers.position(id) {
+                let open = &mut self.screen_viewers.open[ix];
+                open.placement = Placement::Floating;
+                set_input(&open.view, open.input(), cx);
+                self.save(cx);
+            }
+        }
+        let Some(drag) = &mut self.screen_viewers.drag else { return };
+        if drag.resize.is_none() && drag_out::FOLLOWS_DRAG && !inside(window, event.position) {
+            self.tear_off_screen(event.position, window, cx);
+            return;
+        }
+        drag.target = target.filter(|_| drag.resize.is_none());
+        let viewport = window.viewport_size();
+        let frame = match drag.resize {
+            Some(edge) => clamp_frame(resize_frame(drag.frame, edge, delta, viewport, MIN_FLOAT), viewport, MIN_FLOAT),
+            None => Bounds { origin: drag.frame.origin + delta, size: drag.frame.size },
+        };
+        let id = drag.id;
+        if let Some(ix) = self.screen_viewers.position(id) {
+            self.screen_viewers.open[ix].frame = frame;
+        }
+        cx.notify();
+    }
+
+    /// 拖着时鼠标挪出了窗口，到了 `position`：远程桌面搬进单独的窗口，窗口左上角对着鼠标按下时在这一块里的位置，
+    /// 不抢前台，接着跟着鼠标走到松开。
+    fn tear_off_screen(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(drag) = self.screen_viewers.drag.take() else { return };
+        if let Some(ix) = self.screen_viewers.position(drag.id) {
+            self.screen_viewers.open[ix].frame = drag.frame;
+        }
+        let origin = window.bounds().origin + position - (drag.from - drag.frame.origin);
+        self.pop_out_screen(drag.id, Some(origin), false, window, cx);
+        self.screen_viewers.drag = Some(FloatDrag { torn: true, target: None, ..drag });
+    }
+
+    /// 在窗口里的 `position` 松开：落在右侧面板上就吸附上去；挪的松在窗口里时整块收回窗口里，松在窗口外时搬进单独
+    /// 的窗口；已经搬进单独窗口的，那个窗口这时才到前台。
+    fn end_screen_drag(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(drag) = self.screen_viewers.drag.take() else { return };
+        cx.notify();
+        if drag.torn {
+            popout::activate_view(drag.id, cx);
+            return;
+        }
+        if let Some(target) = drag.target {
+            self.snap_screen(drag.id, target, drag.was, window, cx);
+            return;
+        }
+        if drag.resize.is_some() || drag.unsnap {
+            return;
+        }
+        if inside(window, position) {
+            let viewport = window.viewport_size();
+            if let Some(ix) = self.screen_viewers.position(drag.id) {
+                let open = &mut self.screen_viewers.open[ix];
+                open.frame = clamp_frame(open.frame, viewport, MIN_FLOAT);
+            }
+            return;
+        }
+        let origin = window.bounds().origin + position - (drag.from - drag.frame.origin);
+        self.pop_out_screen(drag.id, Some(origin), true, window, cx);
+    }
+}
+
+/// 窗口里的 `position` 在窗口的内容里。
+fn inside(window: &Window, position: Point<Pixels>) -> bool {
+    Bounds::new(Point::default(), window.viewport_size()).contains(&position)
 }
 
 /// 远程桌面页：缓存，来一帧画面只通知这一页，窗口跟着终端输出重画时照搬上一帧。辅助工具开着时不缓存：照搬上一帧

@@ -3,11 +3,11 @@
 //! 页面上的「放回主窗口」把它搬回最前面的主窗口（`put_back`），连接不断。
 
 use gpui::{
-    App, AppContext as _, Bounds, Context, DisplayId, Entity, Focusable as _, Pixels, Render, Subscription, Window,
-    WindowBounds, WindowOptions, div, prelude::*, px, size,
+    App, AppContext as _, Bounds, Context, DisplayId, Entity, EntityId, Focusable as _, Pixels, Point, Render,
+    Subscription, Window, WindowBounds, WindowHandle, WindowOptions, div, prelude::*, px, size,
 };
 
-use super::super::{TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, install_theme, titlebar};
+use super::super::{TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, drag_out, install_theme, titlebar};
 use super::put_back;
 use crate::host_client::hosts::HostId;
 use crate::screen_viewer::{Input, ScreenViewer, ScreenViewerEvent, Titlebar};
@@ -27,13 +27,20 @@ struct ScreenWindow {
 }
 
 /// 开一个单独的窗口，放在显示器 `display` 上的 `bounds` 处（和 `Window::bounds` 同一套坐标），把远程桌面页 `viewer` 放进去，
-/// 焦点给它。
-pub(super) fn open(viewer: Entity<ScreenViewer>, bounds: Bounds<Pixels>, display: Option<DisplayId>, cx: &mut App) {
+/// 焦点给它；`activate` 为假时窗口不到前台，主窗口仍接着鼠标拖动。
+pub(super) fn open(
+    viewer: Entity<ScreenViewer>,
+    bounds: Bounds<Pixels>,
+    display: Option<DisplayId>,
+    activate: bool,
+    cx: &mut App,
+) {
     let host = crate::remote_hosts::display_name(viewer.read(cx).host(), cx);
     let title = rust_i18n::t!("screen_viewer.title", host = host).into_owned();
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         display_id: display,
+        focus: activate,
         window_min_size: Some(size(px(MIN_SIZE.0), px(MIN_SIZE.1))),
         titlebar: Some(gpui::TitlebarOptions { title: Some(title.into()), ..titlebar::titlebar_options() }),
         // 拖动和双击由工具条自己办，和主窗口一样。
@@ -80,6 +87,31 @@ pub(super) fn activate(host: &HostId, cx: &mut App) -> bool {
             })
             .unwrap_or(false)
     })
+}
+
+/// 放着远程桌面页 `viewer` 的单独窗口。
+fn window_of(viewer: EntityId, cx: &App) -> Option<WindowHandle<ScreenWindow>> {
+    cx.windows()
+        .into_iter()
+        .filter_map(|handle| handle.downcast::<ScreenWindow>())
+        .find(|handle| handle.read(cx).is_ok_and(|this| this.viewer.entity_id() == viewer))
+}
+
+/// 远程桌面页 `viewer` 的单独窗口提到前面、焦点给它。
+pub(super) fn activate_view(viewer: EntityId, cx: &mut App) {
+    if let Some(handle) = window_of(viewer, cx) {
+        let _ = handle.update(cx, |this, window, cx| {
+            window.activate_window();
+            window.focus(&this.viewer.focus_handle(cx), cx);
+        });
+    }
+}
+
+/// 远程桌面页 `viewer` 的单独窗口挪到左上角在主窗口 `owner` 内容里 `at` 处的地方；窗口还没开出来时不挪。
+pub(super) fn follow(owner: &Window, viewer: EntityId, at: Point<Pixels>, cx: &mut App) {
+    if let Some(handle) = window_of(viewer, cx) {
+        drag_out::move_window(owner, handle.into(), at, cx);
+    }
 }
 
 impl Render for ScreenWindow {

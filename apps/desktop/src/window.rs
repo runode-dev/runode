@@ -15,6 +15,7 @@ mod arrange;
 mod askpass;
 mod background;
 mod clipboard;
+mod drag_out;
 mod files;
 mod float_frame;
 mod git_panel;

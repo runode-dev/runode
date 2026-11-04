@@ -541,7 +541,7 @@ impl WindowView {
                 POP_OUT_ICON,
                 rust_i18n::t!("tooltip.move_split_to_window"),
                 Some(&MovePaneToWindow),
-                |this, id, window, cx| this.pop_out_pane(id, None, window, cx),
+                |this, id, window, cx| this.pop_out_pane(id, None, true, window, cx),
             )
         });
         let (zoom_icon, zoom_text) = if tab.zoomed {

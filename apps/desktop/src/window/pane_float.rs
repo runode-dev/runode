@@ -1,5 +1,7 @@
 //! 浮动的终端：标签里的一个终端浮到别的分屏上面，拖标题挪、拖四边四角改大小，按「停靠」回到浮起来前的位置；
-//! 拖到窗口外松开或按「搬进单独窗口」，就搬进单独的终端窗口（`popout`）。
+//! 拖出窗口或按「搬进单独窗口」，就搬进单独的终端窗口（`popout`）。拖着标题时它跟着鼠标走，可以越过终端区，
+//! 松在窗口里时收回终端区；鼠标一出窗口就搬进单独窗口，那个窗口接着跟到松开（`drag_out::FOLLOWS_DRAG`
+//! 为假的系统上松开时才搬）。
 //!
 //! 浮着的终端仍在分屏树（`Tab::root`）里原来的位置上，画分屏时从树的副本里拿掉（`Tab::docked_root`），所以停靠
 //! 回去时位置、比例都和浮起来前一样。标签里总留着一个不浮动的终端。浮着的位置和大小按终端区归一化
@@ -11,13 +13,14 @@ mod popout;
 use std::collections::HashMap;
 
 use gpui::{
-    AnyElement, App, Bounds, Context, CursorStyle, Div, EntityId, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ResizeEdge, SharedString, Size, Window, actions, div, point, prelude::*, px, relative, size,
+    AnyElement, App, Bounds, Context, CursorStyle, DispatchPhase, EntityId, MouseButton, MouseMoveEvent, MouseUpEvent,
+    Pixels, Point, ResizeEdge, SharedString, Size, Window, actions, canvas, deferred, div, point, prelude::*, px,
+    relative, size,
 };
 use runode_types::pane::{Node, Rect};
 
 use super::{
-    WindowView,
+    WindowView, drag_out,
     float_frame::{self, clamp_frame, resize_frame},
     model::Tab,
 };
@@ -39,14 +42,16 @@ const FIRST_FRAME: Rect = Rect { x: 0.2, y: 0.15, width: 0.6, height: 0.65 };
 /// 再浮起一块时比最上面那块往右下错开终端区的这么多。
 const CASCADE: f32 = 0.03;
 
-/// 正在拖浮动的终端 `pane`：从窗口里的 `from` 按下，那时它在终端区里的 `frame`，终端区大小是 `area`；`resize` 有值时
-/// 拖的是那条边或那个角。
+/// 正在拖浮动的终端 `pane`：从窗口里的 `from` 按下，按在它左上角往右下 `grab` 处，那时它在终端区里的 `frame`，
+/// 终端区大小是 `area`；`resize` 有值时拖的是那条边或那个角。`torn` 是已经搬进单独窗口、那个窗口跟着鼠标走。
 pub(super) struct FloatDrag {
     pane: EntityId,
     resize: Option<ResizeEdge>,
     from: Point<Pixels>,
+    grab: Point<Pixels>,
     frame: Bounds<Pixels>,
     area: Size<Pixels>,
+    torn: bool,
 }
 
 impl Tab {
@@ -150,16 +155,17 @@ impl WindowView {
 
     pub(super) fn move_pane_to_window(&mut self, _: &MovePaneToWindow, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(id) = self.tab().map(|tab| tab.focused) {
-            self.pop_out_pane(id, None, window, cx);
+            self.pop_out_pane(id, None, true, window, cx);
         }
     }
 
     /// 当前标签里的终端 `id` 搬进单独的终端窗口，没浮着的先浮起来（标签里唯一不浮动的终端搬不走）。给了 `origin`
-    /// （和 `Window::bounds` 同一套坐标）时窗口放在那里，否则放在它浮着的地方。
+    /// （和 `Window::bounds` 同一套坐标）时窗口放在那里，否则放在它浮着的地方。`activate` 为假时新窗口不抢前台。
     pub(super) fn pop_out_pane(
         &mut self,
         id: EntityId,
         origin: Option<Point<Pixels>>,
+        activate: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -197,7 +203,7 @@ impl WindowView {
         };
         if let Some(owner) = window.window_handle().downcast::<WindowView>() {
             let (entity, display) = (cx.entity(), display.map(|display| display.id()));
-            cx.defer(move |cx| popout::open(owner, entity, id, view, bounds, display, cx));
+            cx.defer(move |cx| popout::open(owner, entity, id, view, bounds, display, activate, cx));
         }
         self.activate(self.workspace().active, window, cx);
     }
@@ -245,25 +251,89 @@ impl WindowView {
         resize: Option<ResizeEdge>,
         cx: &mut Context<Self>,
     ) {
-        let Some(area) = self.layout.borrow().area.map(|area| area.size) else {
+        let Some(area) = self.layout.borrow().area else {
             return;
         };
         let Some(&(_, rect)) = self.tab().and_then(|tab| tab.floating.iter().find(|(pane, _)| *pane == id)) else {
             return;
         };
-        let (width, height) = (f32::from(area.width), f32::from(area.height));
-        let frame = Bounds {
-            origin: point(px(rect.x * width), px(rect.y * height)),
-            size: size(px(rect.width * width), px(rect.height * height)),
-        };
-        self.float_drag = Some(FloatDrag { pane: id, resize, from, frame, area });
+        let frame = denormalized(rect, area.size);
+        let grab = from - area.origin - frame.origin;
+        self.float_drag = Some(FloatDrag { pane: id, resize, from, grab, frame, area: area.size, torn: false });
         self.raise_float(id);
         cx.notify();
     }
 
-    fn end_float_drag(&mut self, cx: &mut Context<Self>) {
-        if self.float_drag.take().is_some() {
-            self.save(cx);
+    /// 拖着时鼠标挪了；出了窗口也收得到，位置照样相对这个窗口。
+    fn move_float_drag(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // 在窗口外松开时可能收不到松开事件，下一次挪动时按键已经没按着了。
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.end_float_drag(event.position, window, cx);
+            return;
+        }
+        let Some(drag) = &self.float_drag else { return };
+        if drag.torn {
+            popout::follow(window, drag.pane, event.position - drag.grab, cx);
+            return;
+        }
+        let delta = event.position - drag.from;
+        let frame = match drag.resize {
+            Some(edge) => {
+                clamp_frame(resize_frame(drag.frame, edge, delta, drag.area, MIN_FLOAT), drag.area, MIN_FLOAT)
+            }
+            None if drag_out::FOLLOWS_DRAG && !inside(window, event.position) => {
+                self.tear_off(event.position, window, cx);
+                return;
+            }
+            None => Bounds { origin: drag.frame.origin + delta, size: drag.frame.size },
+        };
+        let (pane, area) = (drag.pane, drag.area);
+        self.set_float_frame(pane, frame, area, cx);
+    }
+
+    /// 拖着时鼠标挪出了窗口，到了 `position`：终端搬进单独窗口，窗口左上角对着鼠标按下时在这一块里的位置，不抢前台，
+    /// 接着跟着鼠标走到松开。存着的浮动位置换回按下时的：放回主窗口时从那里出来。
+    fn tear_off(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(drag) = self.float_drag.take() else { return };
+        self.set_float_frame(drag.pane, drag.frame, drag.area, cx);
+        let origin = window.bounds().origin + position - drag.grab;
+        self.pop_out_pane(drag.pane, Some(origin), false, window, cx);
+        if self.holds_popped(drag.pane) {
+            self.float_drag = Some(FloatDrag { torn: true, ..drag });
+        }
+    }
+
+    /// 在窗口里的 `position` 松开：拖着改大小的只是拖完了；挪的松在窗口里时整块收回终端区，松在窗口外时搬进单独
+    /// 窗口；已经搬进单独窗口的，那个窗口这时才到前台。
+    fn end_float_drag(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(drag) = self.float_drag.take() else { return };
+        if drag.torn {
+            popout::activate(drag.pane, cx);
+        } else if drag.resize.is_none() {
+            if inside(window, position) {
+                let frame = self.tab().and_then(|tab| tab.floating.iter().find(|(id, _)| *id == drag.pane));
+                if let Some(frame) = frame.map(|&(_, rect)| denormalized(rect, drag.area)) {
+                    self.set_float_frame(drag.pane, clamp_frame(frame, drag.area, MIN_FLOAT), drag.area, cx);
+                }
+            } else {
+                // 挪的时候不限在终端区里，存着的浮动位置换回按下时的，放回主窗口时才在终端区里。
+                self.set_float_frame(drag.pane, drag.frame, drag.area, cx);
+                let origin = window.bounds().origin + position - drag.grab;
+                self.pop_out_pane(drag.pane, Some(origin), true, window, cx);
+            }
+        }
+        self.save(cx);
+        cx.notify();
+    }
+
+    /// 浮着的终端 `pane` 摆到终端区（大小 `area`）里的 `frame` 处，变了才重画。
+    fn set_float_frame(&mut self, pane: EntityId, frame: Bounds<Pixels>, area: Size<Pixels>, cx: &mut Context<Self>) {
+        let rect = normalized(frame, area);
+        if let Some(tab) = self.tab_mut()
+            && let Some(entry) = tab.floating.iter_mut().find(|(id, _)| *id == pane)
+            && entry.1 != rect
+        {
+            entry.1 = rect;
             cx.notify();
         }
     }
@@ -280,12 +350,14 @@ impl WindowView {
             .iter()
             .filter(|(id, _)| !tab.popped.contains(id))
             .map(|&(id, frame)| {
+                // 正挪着的那块画在窗口里别的东西上面，越过终端区时不被侧栏、右侧面板盖住。
+                let moving = self.float_drag.as_ref().is_some_and(|drag| drag.pane == id && drag.resize.is_none());
                 let grips = float_frame::resize_grips(
                     id,
                     |this, id, from, edge, cx| this.start_float_drag(id, from, Some(edge), cx),
                     cx,
                 );
-                div()
+                let pane = div()
                     .id(("pane-float", id))
                     .absolute()
                     .left(relative(frame.x))
@@ -302,63 +374,58 @@ impl WindowView {
                         }
                     }))
                     .child(self.render_leaf(tab, id, badges, true, window, cx))
-                    .children(grips)
-                    .into_any_element()
+                    .children(grips);
+                if moving { deferred(pane).into_any_element() } else { pane.into_any_element() }
             })
             .collect()
     }
 
-    /// 拖浮着的终端时盖住整个窗口、接住鼠标移动和松开的一层；没在拖时为空。
-    pub(super) fn render_float_drag(&self, cx: &mut Context<Self>) -> Option<Div> {
+    /// 拖浮着的终端时盖住整个窗口的一层，接住鼠标；没在拖时为空。它盖在正挪着的那块上面，那块里的终端不接鼠标。
+    /// 挪动和松开挂在窗口上、在捕获阶段接：鼠标出了窗口也照样收到，也不传给别处。
+    pub(super) fn render_float_drag(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let drag = self.float_drag.as_ref()?;
-        Some(
-            div()
-                .absolute()
-                .size_full()
-                .occlude()
-                .cursor(drag.resize.map_or(CursorStyle::ClosedHand, float_frame::resize_cursor))
-                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                    cx.stop_propagation();
-                    // 在窗口外松开时可能收不到松开事件，回来时按键已经没按着了。
-                    if event.pressed_button != Some(MouseButton::Left) {
-                        this.end_float_drag(cx);
-                        return;
+        let weak = cx.weak_entity();
+        let events = canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                let view = weak.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture {
+                        cx.stop_propagation();
+                        view.update(cx, |this, cx| this.move_float_drag(event, window, cx)).ok();
                     }
-                    let Some(drag) = &this.float_drag else { return };
-                    let delta = event.position - drag.from;
-                    let frame = match drag.resize {
-                        Some(edge) => resize_frame(drag.frame, edge, delta, drag.area, MIN_FLOAT),
-                        None => Bounds { origin: drag.frame.origin + delta, size: drag.frame.size },
-                    };
-                    let (pane, rect) = (drag.pane, normalized(clamp_frame(frame, drag.area, MIN_FLOAT), drag.area));
-                    if let Some(tab) = this.tab_mut()
-                        && let Some(entry) = tab.floating.iter_mut().find(|(id, _)| *id == pane)
-                        && entry.1 != rect
-                    {
-                        entry.1 = rect;
-                        cx.notify();
+                });
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                        cx.stop_propagation();
+                        weak.update(cx, |this, cx| this.end_float_drag(event.position, window, cx)).ok();
                     }
-                }))
-                .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.end_float_drag(cx)))
-                .on_mouse_up_out(
-                    MouseButton::Left,
-                    cx.listener(|this, event: &MouseUpEvent, window, cx| {
-                        let Some(drag) = this.float_drag.take() else { return };
-                        // 松在窗口里（落在盖在上面的窗口按钮、拉伸边上时也算「外面」）只是拖完了。
-                        let inside = Bounds::new(Point::default(), window.viewport_size()).contains(&event.position);
-                        if drag.resize.is_some() || inside {
-                            this.save(cx);
-                            cx.notify();
-                            return;
-                        }
-                        // 窗口的位置（`Window::bounds` 的坐标），加上松开的地方，减去按下时鼠标在这一块里的位置。
-                        let area = this.layout.borrow().area.map_or(Point::default(), |area| area.origin);
-                        let grab = drag.from - area - drag.frame.origin;
-                        let origin = window.bounds().origin + event.position - grab;
-                        this.pop_out_pane(drag.pane, Some(origin), window, cx);
-                    }),
-                ),
+                });
+            },
         )
+        .absolute()
+        .size_full();
+        let layer = div()
+            .absolute()
+            .size_full()
+            .occlude()
+            .cursor(drag.resize.map_or(CursorStyle::ClosedHand, float_frame::resize_cursor))
+            .child(events);
+        Some(deferred(layer).with_priority(1).into_any_element())
+    }
+}
+
+/// 窗口里的 `position` 在窗口的内容里。
+fn inside(window: &Window, position: Point<Pixels>) -> bool {
+    Bounds::new(Point::default(), window.viewport_size()).contains(&position)
+}
+
+/// 按终端区归一化的 `rect` 换回大小为 `area` 的终端区里的位置和大小。
+fn denormalized(rect: Rect, area: Size<Pixels>) -> Bounds<Pixels> {
+    let (width, height) = (f32::from(area.width), f32::from(area.height));
+    Bounds {
+        origin: point(px(rect.x * width), px(rect.y * height)),
+        size: size(px(rect.width * width), px(rect.height * height)),
     }
 }
 
@@ -449,5 +516,6 @@ mod tests {
         let area = size(px(1000.), px(500.));
         let frame = Bounds { origin: point(px(250.), px(100.)), size: size(px(500.), px(250.)) };
         assert_eq!(normalized(frame, area), Rect { x: 0.25, y: 0.2, width: 0.5, height: 0.5 });
+        assert_eq!(denormalized(normalized(frame, area), area), frame);
     }
 }
