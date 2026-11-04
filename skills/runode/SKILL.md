@@ -89,7 +89,8 @@ shell integration it waits for the command to finish, prints `exit N` and fails
 with status 4 if N is not 0; for an agent it waits until the agent has worked
 and stopped, and fails if the agent shows no activity within 10 seconds (Enter
 may not have submitted the prompt, or it was a command that finishes at once);
-if the agent was asking a question and a different one is on screen by then
+if the agent starts asking a question, even one so quick it was never seen
+working, or it was asking a question and a different one is on screen by then
 (say the next permission prompt), it prints `blocked` instead; otherwise until
 the screen has been quiet for 2 seconds.
 

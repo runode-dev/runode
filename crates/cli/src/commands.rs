@@ -686,14 +686,15 @@ fn wait_for_agent(
         worked |= state == Some(AgentState::Working);
         // 只有新进入的提问才算动静：发送前就在提问的，按 esc 或答「不」后可能不干活直接回到空闲，
         // 不能因此把停滞检测关掉。
-        if state == Some(AgentState::Working)
-            || (state == Some(AgentState::Blocked) && last != Some(AgentState::Blocked))
-        {
+        let asked = state == Some(AgentState::Blocked) && last != Some(AgentState::Blocked);
+        if state == Some(AgentState::Working) || asked {
             stall_at = None;
         }
         last = state;
         let reached = match until {
-            Until::Done => worked && state != Some(AgentState::Working),
+            // `send --wait` 时新问起来的提问也算停下：干活短到没认出来就提问的，没有 `worked`，停滞检测
+            // 又已关掉，不停在这里就一直等下去。
+            Until::Done => (worked && state != Some(AgentState::Working)) || (stall.is_some() && asked),
             Until::Working => state == Some(AgentState::Working),
             Until::Idle => state == Some(AgentState::Idle),
             Until::Blocked => state == Some(AgentState::Blocked),

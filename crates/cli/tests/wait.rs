@@ -270,6 +270,25 @@ fn send_wait_gives_up_when_a_blocked_agent_goes_idle_without_working() {
     assert!(started.elapsed() < Duration::from_secs(30));
 }
 
+/// 发出输入后 agent 没被认出在干活就问起问题（空闲直接到提问，或提问、空闲、又提问）：停在 `blocked`，
+/// 不一直等下去。
+#[test]
+fn send_wait_stops_when_the_agent_asks_without_working_first() {
+    let state =
+        |state| HostMsg::Meta { id: id(S), meta: meta("claude", Some((AgentKind::Claude, state))), shell: None };
+    let cases = [
+        ("idleask", AgentState::Idle, vec![state(AgentState::Blocked)]),
+        ("askagain", AgentState::Blocked, vec![state(AgentState::Idle), state(AgentState::Blocked)]),
+    ];
+    for (name, before, then) in cases {
+        let fake = host(name, meta("claude", Some((AgentKind::Claude, before))), then, vec!["Allow ls?\n"]);
+        let started = Instant::now();
+        let (code, out, err) = run("send 5e55 go --enter --wait", &fake.env);
+        assert_eq!((code, out.as_str()), (exit::OK, "blocked\n"), "{name}: {err}");
+        assert!(started.elapsed() < Duration::from_secs(30), "{name}");
+    }
+}
+
 /// 答完一个提问紧接着问下一个、中间的干活没认出来时状态一直是 Blocked，宿主不发状态：到点时屏幕上换了
 /// 提问就停在 `blocked`，还是同一个提问才当成没提交上。
 #[test]

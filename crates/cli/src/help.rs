@@ -129,9 +129,10 @@ Options:
                       three times
       --enter         Press Enter at the end
       --wait          Wait after sending: for the agent like `wait --for done`
-                      if one runs there (failing if it shows no activity
-                      within 10 seconds, or printing blocked if it was asking
-                      and the screen shows a different question by then), for
+                      if one runs there (printing blocked if it starts asking
+                      even before it was seen working, or if it was asking and
+                      the screen shows a different question 10 seconds later;
+                      failing if it shows no activity within 10 seconds), for
                       the command like `wait --for command` if Enter ran one
                       at a shell prompt with shell integration, else until the
                       screen is quiet for 2 seconds. It says which on stderr.
