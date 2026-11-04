@@ -25,6 +25,9 @@ use crate::project_host::ProjectRepo;
 
 /// 交给 agent 的改动最多这么多字节，多出来的截掉：大改动整份塞进去又慢又贵。
 const MAX_PATCH_BYTES: usize = 100_000;
+/// 提示词放在参数里时整个提示词最多这么多字节，超出时先少给改动。Windows 的整条命令行最多 32767 个 UTF-16
+/// 码元，参数里的引号要转义，最坏时翻一倍；Linux 的单个参数最多 128 KiB。
+const MAX_ARGV_PROMPT_BYTES: usize = if cfg!(windows) { 15_000 } else { 120_000 };
 /// 改动的文件列表最多这么多字节。
 pub(crate) const MAX_FILES_BYTES: usize = 6_000;
 /// 照着写的最近提交说明的条数。
@@ -155,13 +158,26 @@ pub(crate) fn generate(
 ) -> Result<String, String> {
     // 先看命令写得对不对，再去读改动。
     let command = Invocation::of(recipe)?;
-    let patch = limit(repo.pending_diff(context.staged).map_err(|err| git_error_text(&err))?, MAX_PATCH_BYTES);
+    let diff = repo.pending_diff(context.staged).map_err(|err| git_error_text(&err))?;
     let recent = repo.recent_messages(EXAMPLES).map_err(|err| git_error_text(&err))?;
-    let base = base_prompt(context, &recent, &patch);
-    let prompt = render_template(
-        &recipe.template,
-        &[("basePrompt", &base), ("branch", &context.branch), ("stagedFiles", &context.files), ("stagedPatch", &patch)],
-    );
+    let render = |patch: &str| {
+        let base = base_prompt(context, &recent, patch);
+        render_template(
+            &recipe.template,
+            &[
+                ("basePrompt", &base),
+                ("branch", &context.branch),
+                ("stagedFiles", &context.files),
+                ("stagedPatch", patch),
+            ],
+        )
+    };
+    let on_argv = command.args("").1.is_none();
+    let max_patch = if on_argv { argv_patch_budget(&render) } else { MAX_PATCH_BYTES };
+    let prompt = render(&limit(diff, max_patch));
+    if on_argv && prompt.len() > MAX_ARGV_PROMPT_BYTES {
+        return Err(rust_i18n::t!("git.ai_message.prompt_too_long", binary = command.binary).into_owned());
+    }
     let (args, stdin) = command.args(&prompt);
     // 内置的 agent 和登录 shell 都在空目录里跑：陌生仓库里的项目配置（`.claude/settings.json` 的钩子、
     // `opencode.json`、direnv 的 `.envrc` 这类）会被它们读到、执行，提示词里已经有要的全部内容。用户自己
@@ -188,6 +204,20 @@ pub(crate) fn generate(
         return Err(rust_i18n::t!("git.ai_message.empty").into_owned());
     }
     Ok(message)
+}
+
+/// 提示词放在参数里时最多给多少字节的改动，整个提示词才不超过 `MAX_ARGV_PROMPT_BYTES`。`render` 按改动
+/// 生成提示词；模板里可以不止一处放改动。
+fn argv_patch_budget(render: &impl Fn(&str) -> String) -> usize {
+    /// `limit` 截断时在末尾补的说明最多这么长。
+    const TRUNCATION_NOTE: usize = 64;
+    let fixed = render("").len();
+    let copies = render("\n").len() - fixed;
+    if copies == 0 {
+        return MAX_PATCH_BYTES;
+    }
+    let room = MAX_ARGV_PROMPT_BYTES.saturating_sub(fixed) / copies;
+    room.saturating_sub(TRUNCATION_NOTE).min(MAX_PATCH_BYTES)
 }
 
 /// agent 在里面跑的空目录（`Dirs::ai_message_dir`），丢掉时连同 agent 在里面留下的东西一起删掉。路径每次
@@ -509,6 +539,20 @@ mod tests {
         // 引号外末尾落单的反斜杠原样留着，不悄悄丢掉；反斜杠接换行是续行。
         assert_eq!(split_args(r"a b\").unwrap(), ["a", r"b\"]);
         assert_eq!(split_args("a\\\nb").unwrap(), ["ab"]);
+    }
+
+    /// 提示词放在参数里时，模板里每放一份改动，能给的改动就少一份，整个提示词不超过上限。
+    #[test]
+    fn fits_the_patch_into_the_argv_budget() {
+        let fixed = "x".repeat(1_000);
+        let once = |patch: &str| format!("{fixed}{patch}");
+        let twice = |patch: &str| format!("{fixed}{patch}{patch}");
+        let budget = argv_patch_budget(&once);
+        assert!(budget <= MAX_PATCH_BYTES);
+        let patch = "+line\n".repeat(MAX_PATCH_BYTES);
+        assert!(once(&limit(patch.clone(), budget)).len() <= MAX_ARGV_PROMPT_BYTES);
+        assert!(twice(&limit(patch, argv_patch_budget(&twice))).len() <= MAX_ARGV_PROMPT_BYTES);
+        assert_eq!(argv_patch_budget(&|_: &str| fixed.clone()), MAX_PATCH_BYTES);
     }
 
     #[test]

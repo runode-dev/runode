@@ -452,6 +452,7 @@ git:
     missing: "找不到 %{binary} 指令。請先安裝，或確認它在 shell 的 PATH 裡。"
     timeout: "%{binary} 太久沒有結果，已經停止。"
     empty: agent 傳回的提交說明是空的。
+    prompt_too_long: "提示詞太長，%{binary} 的命令列放不下。請精簡範本，或改用從標準輸入讀取提示詞的 agent。"
     menu: 產生提交說明…
     button: 用 AI 產生提交說明
   checkout: 切換分支…
