@@ -25,7 +25,10 @@ try {
 }
 
 & (Join-Path $PSScriptRoot 'setup-conpty.ps1') -Destination $binDir -Architecture $architecture
+# Notices for the agent rules and syntax definitions compiled into runode.exe.
+Copy-Item -LiteralPath (Join-Path $repoRoot 'crates/agent/LICENSE-rules') -Destination (Join-Path $binDir 'agent-rules-LICENSE.txt')
+Copy-Item -LiteralPath (Join-Path $repoRoot 'crates/preview/LICENSE-syntaxes') -Destination (Join-Path $binDir 'syntaxes-LICENSE.txt')
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output }
-& tar.exe -a -cf $output -C $binDir runode.exe rn.exe conpty.dll OpenConsole.exe conpty-LICENSE.txt
+& tar.exe -a -cf $output -C $binDir runode.exe rn.exe conpty.dll OpenConsole.exe conpty-LICENSE.txt agent-rules-LICENSE.txt syntaxes-LICENSE.txt
 if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE" }
 Write-Output "Packed $output ($architecture, $BuildProfile)"

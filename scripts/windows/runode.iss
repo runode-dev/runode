@@ -39,6 +39,9 @@ Source: "{#SourceDir}\rn.exe"; DestDir: "{app}"; DestName: "runode.com"; Flags: 
 Source: "{#SourceDir}\conpty.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\OpenConsole.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\conpty-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+; 编进 runode.exe 的 agent 识别规则和语法高亮的语法定义要求附带的许可声明。
+Source: "{#SourcePath}\..\..\crates\agent\LICENSE-rules"; DestDir: "{app}"; DestName: "agent-rules-LICENSE.txt"; Flags: ignoreversion
+Source: "{#SourcePath}\..\..\crates\preview\LICENSE-syntaxes"; DestDir: "{app}"; DestName: "syntaxes-LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Runode"; Filename: "{app}\runode.exe"

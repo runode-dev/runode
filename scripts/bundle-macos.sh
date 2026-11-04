@@ -78,6 +78,9 @@ cp "$plist" "$app/Contents/Info.plist"
 cp apps/desktop/assets/compiled/Assets.car apps/desktop/assets/compiled/runode.icns "$app/Contents/Resources/"
 # 终端字体 Hack Nerd Font Mono 编进了二进制，它的许可（MIT、Bitstream Vera）要求分发时带上许可证。
 cp apps/desktop/assets/fonts/HackNerdFontMono/LICENSE.md "$app/Contents/Resources/HackNerdFontMono-LICENSE.md"
+# 编进二进制的 agent 识别规则（Apache 2.0）和语法高亮的语法定义（MIT 等）同样要带上许可声明。
+cp crates/agent/LICENSE-rules "$app/Contents/Resources/agent-rules-LICENSE.txt"
+cp crates/preview/LICENSE-syntaxes "$app/Contents/Resources/syntaxes-LICENSE.txt"
 
 # 公证要带安全时间戳；ad-hoc 签名没有时间戳可带。
 sign_options=(--force --sign "$SIGN_IDENTITY")

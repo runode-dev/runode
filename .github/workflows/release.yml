@@ -298,7 +298,11 @@ jobs:
           done
           bundle=target/release/bundle
           mkdir -p "$bundle"
-          tar -czf "$bundle/Runode-$VERSION-linux-${{ matrix.arch }}.tar.gz" -C target/release runode
+          # 编进可执行文件的 agent 识别规则和语法定义要求附带许可声明。
+          cp crates/agent/LICENSE-rules target/release/agent-rules-LICENSE.txt
+          cp crates/preview/LICENSE-syntaxes target/release/syntaxes-LICENSE.txt
+          tar -czf "$bundle/Runode-$VERSION-linux-${{ matrix.arch }}.tar.gz" -C target/release \
+            runode agent-rules-LICENSE.txt syntaxes-LICENSE.txt
       # 发布前在最老的几个目标发行版上跑一遍：哪个依赖要了更新的 glibc 或 libstdc++，在这里就拦下。
       - name: 在老发行版上起宿主、开会话
         run: |
@@ -369,9 +373,12 @@ jobs:
           "$iscc" //DAppVersion="$VERSION" //DSourceDir="$(cygpath -aw "$release")" \
             //DOutputDir="$(cygpath -aw "$bundle")" scripts/windows/runode.iss
           sign "$bundle/Runode-$VERSION-windows-x86_64-setup.exe"
-          # 装到 SSH 远端用的便携包：签过名的 exe 和终端要的文件，远端用系统的 tar.exe 解开。
+          # 装到 SSH 远端用的便携包：签过名的 exe、终端要的文件和编进 exe 的规则、语法定义的许可声明，
+          # 远端用系统的 tar.exe 解开。
+          cp crates/agent/LICENSE-rules "$release/agent-rules-LICENSE.txt"
+          cp crates/preview/LICENSE-syntaxes "$release/syntaxes-LICENSE.txt"
           (cd "$release" && 7z a -tzip -mx=9 "$OLDPWD/$bundle/Runode-$VERSION-windows-x86_64.zip" \
-            runode.exe rn.exe conpty.dll OpenConsole.exe conpty-LICENSE.txt)
+            runode.exe rn.exe conpty.dll OpenConsole.exe conpty-LICENSE.txt agent-rules-LICENSE.txt syntaxes-LICENSE.txt)
       - name: 删掉签名证书
         if: always()
         run: rm -f "$RUNNER_TEMP/codesign.pfx"
