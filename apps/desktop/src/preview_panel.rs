@@ -583,6 +583,8 @@ impl PreviewPanel {
         for preview in &mut tabs.tabs {
             preview.git_changed(old.as_deref(), tabs.git.as_deref(), tabs.real_root.as_ref());
         }
+        // 预览栏是缓存的视图，改动标记变了要自己通知才重画。
+        cx.notify();
         let Some(root) = tabs.git.as_ref().map(|git| git.main.root.clone()) else {
             return;
         };
