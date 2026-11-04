@@ -450,6 +450,7 @@ impl Drop for Caffeinate {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     #[cfg(unix)]
     use std::time::Instant;
 
