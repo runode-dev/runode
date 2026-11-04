@@ -69,6 +69,11 @@ regex.workspace = true
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 runode-speech = { workspace = true, features = ["recording"] }
 
+# X11 上拖出主窗口的单独窗口跟着鼠标挪：GPUI 不给摆窗口的接口，拿它的窗口号自己摆。
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb.workspace = true
+raw-window-handle.workspace = true
+
 # 标准「关于」面板、系统偏好的语言和窗口菜单只有 AppKit 提供，GPUI 没有封装。
 [target.'cfg(windows)'.dependencies]
 # Windows 10 起有的 AF_UNIX socket，连宿主用。

@@ -9,7 +9,7 @@
 //! workspace 时打开面板；切到别的页面、别的 workspace，收起面板时跟着藏起来，连接不断。浮动的拖到窗口外面
 //! 松开，或按页面上的按钮，就搬进单独的窗口（`popout`），连接不断；在那里按「放回主窗口」再搬回来。只有点页面上的
 //! 关闭（或关掉单独的窗口）才收起，收起就断开。拖着浮动的那块时它跟着鼠标走，可以挪出窗口边，松在窗口里时收回
-//! 窗口里；鼠标一出窗口就搬进单独的窗口，那个窗口接着跟到松开（`drag_out::FOLLOWS_DRAG` 为假的系统上松开时才搬）。
+//! 窗口里；鼠标一出窗口就搬进单独的窗口，那个窗口接着跟到松开（`drag_out::follows_drag` 为假时松开才搬）。
 
 mod popout;
 mod snap;
@@ -618,7 +618,7 @@ impl WindowView {
             }
         }
         let Some(drag) = &mut self.screen_viewers.drag else { return };
-        if drag.resize.is_none() && drag_out::FOLLOWS_DRAG && !inside(window, event.position) {
+        if drag.resize.is_none() && !inside(window, event.position) && drag_out::follows_drag(window) {
             self.tear_off_screen(event.position, window, cx);
             return;
         }

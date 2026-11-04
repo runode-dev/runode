@@ -1,7 +1,7 @@
 //! 浮动的终端：标签里的一个终端浮到别的分屏上面，拖标题挪、拖四边四角改大小，按「停靠」回到浮起来前的位置；
 //! 拖出窗口或按「搬进单独窗口」，就搬进单独的终端窗口（`popout`）。拖着标题时它跟着鼠标走，可以越过终端区，
-//! 松在窗口里时收回终端区；鼠标一出窗口就搬进单独窗口，那个窗口接着跟到松开（`drag_out::FOLLOWS_DRAG`
-//! 为假的系统上松开时才搬）。
+//! 松在窗口里时收回终端区；鼠标一出窗口就搬进单独窗口，那个窗口接着跟到松开（`drag_out::follows_drag`
+//! 为假时松开才搬）。
 //!
 //! 浮着的终端仍在分屏树（`Tab::root`）里原来的位置上，画分屏时从树的副本里拿掉（`Tab::docked_root`），所以停靠
 //! 回去时位置、比例都和浮起来前一样。标签里总留着一个不浮动的终端。浮着的位置和大小按终端区归一化
@@ -281,7 +281,7 @@ impl WindowView {
             Some(edge) => {
                 clamp_frame(resize_frame(drag.frame, edge, delta, drag.area, MIN_FLOAT), drag.area, MIN_FLOAT)
             }
-            None if drag_out::FOLLOWS_DRAG && !inside(window, event.position) => {
+            None if !inside(window, event.position) && drag_out::follows_drag(window) => {
                 self.tear_off(event.position, window, cx);
                 return;
             }
