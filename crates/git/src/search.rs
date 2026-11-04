@@ -33,10 +33,25 @@ pub struct GrepMatch {
 /// 里的文件不列。已跟踪但在工作区里删掉了的照样列出：逐个查在不在占了大仓库里列文件的大半时间，
 /// 调用方只查要用的那些。
 pub fn list_files(root: &Path) -> Option<Vec<PathBuf>> {
-    let out = git(root, &["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"])?;
+    // 暂存区一项是「模式 对象号 阶段\t路径」。子模块（模式 160000 的 gitlink）是目录，不是文件，丢掉；
+    // 冲突的文件每个阶段各一项，挨着，只留一个。
+    let cached = git(root, &["ls-files", "-z", "--cached", "--stage"])?;
+    let mut last: Option<&[u8]> = None;
+    let cached = cached.split(|&b| b == 0).filter_map(|entry| {
+        let tab = entry.iter().position(|&b| b == b'\t')?;
+        let path = &entry[tab + 1..];
+        if entry.starts_with(b"160000 ") || last == Some(path) {
+            return None;
+        }
+        last = Some(path);
+        Some(path)
+    });
+    let mut files: Vec<PathBuf> = cached.map(|path| PathBuf::from(&crate::os_str(path))).collect();
+    let others = git(root, &["ls-files", "-z", "--others", "--exclude-standard"])?;
     // 嵌套仓库（自带 `.git` 的未跟踪目录）会以结尾带 `/` 的目录项列出来，不是文件，丢掉。
-    let paths = out.split(|&b| b == 0).filter(|path| !path.is_empty() && !path.ends_with(b"/"));
-    Some(paths.map(|path| PathBuf::from(&crate::os_str(path))).collect())
+    let others = others.split(|&b| b == 0).filter(|path| !path.is_empty() && !path.ends_with(b"/"));
+    files.extend(others.map(|path| PathBuf::from(&crate::os_str(path))));
+    Some(files)
 }
 
 /// 按内容找什么、在哪些文件里找。

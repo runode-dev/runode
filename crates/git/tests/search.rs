@@ -24,6 +24,20 @@ fn lists_tracked_and_untracked_files_but_not_ignored_ones() {
     assert!(list_files(&std::env::temp_dir()).is_none());
 }
 
+/// 子模块和嵌套仓库是目录，它们本身和里面的文件都不列。
+#[test]
+fn lists_no_submodules_or_nested_repositories() {
+    let lib = TestRepo::new("search-list-lib");
+    lib.commit_file("lib.txt", "x", "init");
+    let repo = TestRepo::new("search-list-sub");
+    repo.commit_file("top.txt", "x", "init");
+    repo.add_submodule(&lib, "lib");
+    repo.nested("inner");
+    let mut files = list_files(repo.path()).unwrap();
+    files.sort();
+    assert_eq!(files, [PathBuf::from(".gitmodules"), PathBuf::from("top.txt")]);
+}
+
 #[test]
 fn greps_literal_text_and_stops_at_the_limit() {
     let repo = TestRepo::new("search-grep");
