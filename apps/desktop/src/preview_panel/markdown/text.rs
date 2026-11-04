@@ -15,11 +15,13 @@ use super::select::{MdPos, TextKey};
 /// 这一帧画出来的各段文字和它们的布局，鼠标事件据此找点在哪段文字上。每帧画之前清空。
 pub(crate) type Texts = Rc<RefCell<Vec<Placed>>>;
 
-/// 画出来的一段文字：是哪段、排好的布局、是不是居中排的。
+/// 画出来的一段文字：是哪段、排好的布局、是不是居中排的，以及看得见的范围（`visible`）：横着滚的表格、
+/// 代码块里的字可能排在滚动区外面，那部分被裁掉了。
 pub(crate) struct Placed {
     key: TextKey,
     layout: TextLayout,
     centered: bool,
+    visible: Bounds<Pixels>,
 }
 
 /// 一段文字底下要垫的圆角框：行内代码只有底色，按键另带边框。
@@ -96,7 +98,8 @@ impl Element for MdText {
         self.text.prepaint(id, inspector_id, bounds, state, window, cx);
         // 到这里布局才有位置，登记之后命中测试才能用。
         let centered = matches!(window.text_style().text_align, TextAlign::Center);
-        self.texts.borrow_mut().push(Placed { key: self.key, layout: self.text.layout().clone(), centered });
+        let visible = window.content_mask().bounds;
+        self.texts.borrow_mut().push(Placed { key: self.key, layout: self.text.layout().clone(), centered, visible });
     }
 
     fn paint(
@@ -256,9 +259,11 @@ pub(super) fn hit(texts: &[Placed], position: gpui::Point<Pixels>) -> Option<MdP
     })
 }
 
-/// 这一帧画着的文字里，正好在 `position` 底下的那个字的位置；不在任何字上时为空。点链接、悬停用。
+/// 这一帧画着的文字里，正好在 `position` 底下、看得见的那个字的位置；不在任何字上、那里的字被裁掉了时为空。
+/// 点链接、悬停用。
 pub(super) fn exact_hit(texts: &[Placed], position: gpui::Point<Pixels>) -> Option<(TextKey, usize)> {
-    texts.iter().find(|placed| placed.layout.bounds().contains(&position)).and_then(|placed| {
+    let shown = |placed: &&Placed| placed.visible.contains(&position) && placed.layout.bounds().contains(&position);
+    texts.iter().find(shown).and_then(|placed| {
         placed.layout.index_for_position(unshift(placed, position)).ok().map(|offset| (placed.key, offset))
     })
 }
