@@ -32,7 +32,7 @@ use runode_todo::Store;
 use check::{check_spec, check_text, check_title, check_when};
 use command::{
     ENV_TODO_ARG, ENV_TODO_BATCH_ARG, ENV_TODO_PROMPT, ENV_TODO_SETUP, WINDOWS_COMMAND_LINE, agent_command,
-    agent_session, agent_with_options, batch_quote, passes_command_line, windows_quote,
+    agent_session, agent_with_options, batch_quote, passes_command_line, resume_command_line, windows_quote,
 };
 use worktree::{add_worktree, clean_worktree, in_worktree};
 
@@ -485,6 +485,7 @@ impl Shared {
         }
         let session = self.spawn_with(SpawnOptions::headless(Some(cwd)), &[]).map_err(|err| format!("{err:#}"))?;
         if let Some(command) = command {
+            let command = resume_command_line(&command, &runode_terminal::pty::default_shell());
             self.deliver(session, Inbox::TypeAtPrompt(format!("{command}\r").into_bytes()));
         }
         if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, started, session, None)) {

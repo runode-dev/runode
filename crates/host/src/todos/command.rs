@@ -68,7 +68,7 @@ pub(super) fn passes_command_line(shell: &str) -> bool {
 /// 那里。程序名带引号、空格这类字符时原样打。
 fn powershell_program(agent: &str) -> String {
     let (program, args) = agent.split_once(' ').unwrap_or((agent, ""));
-    if program.is_empty() || !program.chars().all(|ch| ch.is_alphanumeric() || "-_.:\\/".contains(ch)) {
+    if !plain_program(program) {
         return agent.to_owned();
     }
     format!(
@@ -78,6 +78,31 @@ fn powershell_program(agent: &str) -> String {
          throw 'the prompt is too long for {program}, a batch file' }}; \
          $env:{ENV_TODO_ARG} = $env:{ENV_TODO_BATCH_ARG} }}; \
          & $__runode_agent.Path{}{args}",
+        if args.is_empty() { "" } else { " " }
+    )
+}
+
+/// 程序名不带引号、空格这类字符，能原样放进 PowerShell 的单引号里。
+fn plain_program(program: &str) -> bool {
+    !program.is_empty() && program.chars().all(|ch| ch.is_alphanumeric() || "-_.:\\/".contains(ch))
+}
+
+/// 在 `shell` 的提示符上打的续上 agent 对话的命令 `resume`（不带提示词）。Windows 上的 PowerShell 里开头的
+/// 程序名先找成程序文件再跑：只打名字会先跑 npm 放的 `.ps1`，执行策略不让跑脚本时报错。
+pub(super) fn resume_command_line(resume: &str, shell_program: &str) -> String {
+    if !passes_command_line(shell_program) {
+        return resume.to_owned();
+    }
+    powershell_resume(resume)
+}
+
+fn powershell_resume(resume: &str) -> String {
+    let (program, args) = resume.split_once(' ').unwrap_or((resume, ""));
+    if !plain_program(program) {
+        return resume.to_owned();
+    }
+    format!(
+        "& (Get-Command -ErrorAction Stop -CommandType Application -TotalCount 1 -Name '{program}').Path{}{args}",
         if args.is_empty() { "" } else { " " }
     )
 }
@@ -203,6 +228,16 @@ mod tests {
              & $__runode_agent.Path --full-auto"
         );
         assert_eq!(powershell_program("'C:\\my tools\\agent.exe' -x"), "'C:\\my tools\\agent.exe' -x");
+    }
+
+    #[test]
+    fn powershell_resumes_through_the_agent_program_file() {
+        assert_eq!(
+            powershell_resume("claude --resume 0f3a"),
+            "& (Get-Command -ErrorAction Stop -CommandType Application -TotalCount 1 -Name 'claude').Path --resume 0f3a"
+        );
+        assert_eq!(powershell_resume("'C:\\my tools\\agent.exe' -r"), "'C:\\my tools\\agent.exe' -r");
+        assert_eq!(resume_command_line("claude --resume 0f3a", "/bin/zsh"), "claude --resume 0f3a");
     }
 
     #[test]
