@@ -172,6 +172,7 @@ workspace:
   remote_clone_name: 文件夹名，空着时用仓库名
   remote_clone: 克隆
   remote_create: 创建
+  clone_url_unsafe: 地址里有 Windows 的 shell 会展开的字符（$、`、%、引号），请检查后再试。
   host_state_waiting: 正在重连
   host_state_stopped: 连不上
   host_pair: Runode 配对

@@ -172,6 +172,7 @@ workspace:
   remote_clone_name: Folder name, the repository name if empty
   remote_clone: Clone
   remote_create: Create
+  clone_url_unsafe: "The address contains characters a Windows shell would expand ($, `, %, quotes). Check it and try again."
   host_state_waiting: Reconnecting
   host_state_stopped: Can't connect
   host_pair: Runode Pairing

@@ -104,6 +104,12 @@ pub(super) fn clone_command(url: &str, quoting: Quoting) -> String {
     format!("git clone -- {} .", quoting.quote(url))
 }
 
+/// `url` 放进双引号里交给 Windows 上不知道是 cmd 还是 PowerShell 的 shell 也只是一段文字：PowerShell 在双引号里
+/// 展开 `$` 和 `` ` ``、把 `“”„‟` 也当双引号，cmd 展开 `%`，双引号本身会提前结束引号。
+pub(super) fn plain_in_windows_quotes(url: &str) -> bool {
+    !url.chars().any(|c| c.is_control() || matches!(c, '"' | '$' | '`' | '%' | '“' | '”' | '„' | '‟'))
+}
+
 impl WindowView {
     /// 打开新建 workspace 的对话框；已经开着时把焦点给它。
     pub(super) fn new_workspace(&mut self, _: &NewWorkspace, window: &mut Window, cx: &mut Context<Self>) {
@@ -569,7 +575,19 @@ pub(super) fn repo_name(url: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::repo_name;
+    use super::{plain_in_windows_quotes, repo_name};
+
+    /// 平常的仓库地址照样克隆；能在 PowerShell、cmd 的双引号里展开或结束引号的拒掉。
+    #[test]
+    fn urls_that_windows_shells_would_expand_are_refused() {
+        for url in ["https://github.com/foo/bar.git", "git@github.com:foo/bar.git", "ssh://h/~u/r?a=1&b=2#x"] {
+            assert!(plain_in_windows_quotes(url), "{url}");
+        }
+        for url in ["https://h/$(calc)", "https://h/`whoami`", "https://h/\"&calc&\"", "https://h/%PATH%", "a”;calc;”"]
+        {
+            assert!(!plain_in_windows_quotes(url), "{url}");
+        }
+    }
 
     #[test]
     fn names_the_clone_after_the_repo() {

@@ -172,6 +172,7 @@ workspace:
   remote_clone_name: 資料夾名稱，空著時用儲存庫名稱
   remote_clone: 複製
   remote_create: 建立
+  clone_url_unsafe: 網址裡有 Windows 的 shell 會展開的字元（$、`、%、引號），請檢查後再試。
   host_state_waiting: 正在重新連線
   host_state_stopped: 連不上
   host_pair: Runode 配對

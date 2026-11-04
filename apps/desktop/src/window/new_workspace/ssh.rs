@@ -18,7 +18,7 @@ use runode_ssh::Destination;
 
 use crate::ui::picker::{match_rank, matches_query};
 
-use super::{Source, clone_command, paired::AddPairedMachine, repo_name};
+use super::{Source, clone_command, paired::AddPairedMachine, plain_in_windows_quotes, repo_name};
 use crate::window::{Dropdown, TITLEBAR_HEIGHT, WindowView, files::Quoting, status_bar::host_list::dot_color};
 use crate::{
     host_client::{
@@ -463,13 +463,18 @@ impl WindowView {
         if ops::child_path(Path::new("/"), &dir_name).is_none() {
             return;
         }
-        let command = clone.then(|| {
-            let os = match hosts::status_of(&dialog.host) {
-                Status::Connected(connected) => connected.os,
-                _ => String::new(),
-            };
-            clone_command(&url, Quoting::of_os(&os))
-        });
+        let os = match hosts::status_of(&dialog.host) {
+            Status::Connected(connected) => connected.os,
+            _ => String::new(),
+        };
+        let quoting = Quoting::of_os(&os);
+        // 远端 Windows 上新开的终端可能是 cmd，也可能是 PowerShell，只有两边都当文字的地址才敲进去。
+        if clone && quoting == Quoting::Cmd && !plain_in_windows_quotes(&url) {
+            dialog.error = Some(rust_i18n::t!("workspace.clone_url_unsafe").into_owned());
+            cx.notify();
+            return;
+        }
+        let command = clone.then(|| clone_command(&url, quoting));
         let host = dialog.host.clone();
         let dir = remote_child(&parent, &dir_name);
         dialog.error = None;
