@@ -197,6 +197,11 @@ pub struct SelectTab(pub usize);
 #[action(namespace = runode, no_json)]
 pub struct NewShellTab(pub usize);
 
+/// 用新建标签菜单里第几家 agent（从 0 数）开新标签。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub struct NewAgentTab(pub usize);
+
 /// 焦点移到这个方向上相邻的分屏。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]

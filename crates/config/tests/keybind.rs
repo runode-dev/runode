@@ -175,6 +175,8 @@ fn defaults_keep_gpui_keystrokes() {
     assert!(has("ctrl-cmd-=", Action::EqualizeSplits));
     assert!(has("cmd-pageup", Action::ScrollPageUp));
     assert!(has("ctrl-shift-cmd-j", Action::WriteScreenFile(ScreenFile::CopyPath)));
+    assert!(has("ctrl-cmd-1", Action::NewAgentTab(0)));
+    assert!(has("ctrl-cmd-3", Action::NewAgentTab(2)));
 }
 
 /// `digit` 一条顶九条：按的数字就是第几个，9 是最后一个；解绑也一次解九个。

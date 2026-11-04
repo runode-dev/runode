@@ -27,8 +27,8 @@ use crate::{
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath,
         DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, GotoAgent,
-        MovePaneToNewTab, MovePaneToWindow, NewShellTab, NewSplitDown, NewSplitRight, NewTab, NewTodo, NewWorkspace,
-        NextAgent, NextTab, NextWorkspace, OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile,
+        MovePaneToNewTab, MovePaneToWindow, NewAgentTab, NewShellTab, NewSplitDown, NewSplitRight, NewTab, NewTodo,
+        NewWorkspace, NextAgent, NextTab, NextWorkspace, OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile,
         RenameWorkspace, ResizePane, RevealInFinder, RunTaskKey, SelectFirstFile, SelectLastFile, SelectLastTab,
         SelectLastWorkspace, SelectNextFile, SelectPreviousFile, SelectTab, SelectWorkspace, SwapPane, TaskKeys,
         ToggleFiles, ToggleGit, ToggleGitHubActions, ToggleKanban, TogglePaneFloat, TogglePaneFold, TogglePaneZoom,
@@ -76,6 +76,7 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::ToggleFullscreen => (boxed(ToggleFullScreen), GLOBAL),
         Action::NewTab => (boxed(NewTab), WINDOW),
         Action::NewShellTab(n) => (boxed(NewShellTab(n)), WINDOW),
+        Action::NewAgentTab(n) => (boxed(NewAgentTab(n)), WINDOW),
         Action::CloseTab => (boxed(CloseTab), WINDOW),
         Action::NextTab => (boxed(NextTab), WINDOW),
         Action::PreviousTab => (boxed(PreviousTab), WINDOW),

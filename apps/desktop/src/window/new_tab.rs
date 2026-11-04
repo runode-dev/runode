@@ -1,18 +1,18 @@
 //! 标题栏上的新建标签按钮：「+」用默认 shell 开新标签（`NewTab`），旁边的箭头弹出菜单。菜单上面是能开的
 //! shell：工作区所在主机的宿主列出了可挑的 shell（Windows 上）时每个一项（`NewShellTab`，快捷键按序号），
-//! 没列出时只有一项普通终端，默认 shell 那一项加粗；下面是那台主机上装着的各家 agent，点了在当前终端的目录
-//! 开一个新标签、在 shell 里起它。shell 和 agent 都由那台主机的宿主找：agent 按那台主机上的终端里 shell
-//! 报告的 PATH 找命令，都没报告时（没有集成的 cmd）按新开的 shell 会拿到的 PATH 找。每次打开菜单都在后台
-//! 重新问一遍，问到之前菜单里是上次的。
+//! 没列出时只有一项普通终端，默认 shell 那一项加粗；下面是那台主机上装着的各家 agent（`NewAgentTab`，快捷键
+//! 按序号），点了在当前终端的目录开一个新标签、在 shell 里起它。shell 和 agent 都由那台主机的宿主找：agent
+//! 按那台主机上的终端里 shell 报告的 PATH 找命令，都没报告时（没有集成的 cmd）按新开的 shell 会拿到的 PATH
+//! 找。每次打开菜单都在后台重新问一遍，问到之前菜单里是上次的。
 
 use std::time::Duration;
 
 use gpui::Task;
-use gpui::{Action, App, Context, Focusable, MouseButton, Window, prelude::*};
+use gpui::{App, Context, Focusable, MouseButton, Window, prelude::*};
 use runode_agent::models::{LAUNCHERS, Launcher, listed, same_kind};
 use runode_protocol::{ShellProfile, ShellProfileKind};
 
-use super::{Dropdown, NewShellTab, NewTab, TITLEBAR_HEIGHT, WindowView, agents::logo::logo_path};
+use super::{Dropdown, NewAgentTab, NewShellTab, NewTab, TITLEBAR_HEIGHT, WindowView, agents::logo::logo_path};
 use crate::{
     host_client::hosts::{HostId, link_of},
     ui::{
@@ -26,13 +26,6 @@ use crate::{
 
 /// 问宿主有哪些 shell、装了哪些 agent 最多等这么久；等不到时菜单里只有普通终端，没有 agent。
 const ASK_HOST_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// 新建标签菜单里的一家 agent：在新标签的 shell 里打 `command` 起它。
-#[derive(Clone, PartialEq, Action)]
-#[action(namespace = runode, no_json)]
-pub(super) struct NewAgentTab {
-    command: String,
-}
 
 /// 找到的一家 agent：`LAUNCHERS` 里第几个，和起它时在 shell 里打的命令。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,10 +76,34 @@ impl WindowView {
         self.dropdown_shown(Dropdown::NewTab)
     }
 
-    /// 菜单里点了一家 agent：在当前终端的目录开新标签，在它的 shell 里起这家 agent。
+    /// 菜单里点了第几家 agent、或者按了它的快捷键：在当前终端的目录开新标签，在它的 shell 里起这家 agent。
+    /// 还没找过当前工作区的主机上装着哪些 agent 时先在后台找，找到了再开。
     pub(super) fn new_agent_tab(&mut self, action: &NewAgentTab, window: &mut Window, cx: &mut Context<Self>) {
+        let index = action.0;
+        if self.listed_agents().is_some() {
+            self.open_agent(index, window, cx);
+            return;
+        }
+        let (host, job) = self.ask_installed_agents(cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let agents = job.await;
+            this.update_in(cx, |this, window, cx| {
+                if this.store_installed_agents(host, agents, cx) {
+                    this.open_agent(index, window, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 开第 `index` 家 agent；序号超出了什么都不做。
+    fn open_agent(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(command) = self.listed_agents().unwrap_or_default().get(index).map(|agent| agent.command.clone())
+        else {
+            return;
+        };
         if let Some(view) = self.spawn_beside_focused(window, cx) {
-            let command = action.command.clone();
             view.update(cx, |view, cx| view.run_command(command, cx));
             self.insert_tab(self.workspace().active + 1, view, window, cx);
         }
@@ -202,14 +219,13 @@ impl WindowView {
             let terminal = MenuItem::new(rust_i18n::t!("agent.launch.terminal"), Box::new(NewTab), true, cx);
             items.push(Some(terminal.with_icon(TERMINAL_ICON).bold()));
         }
-        let agents = self.listed_agents();
+        let agents = self.listed_agents().unwrap_or_default();
         if !agents.is_empty() {
             items.push(None);
         }
-        items.extend(agents.iter().map(|installed| {
+        items.extend(agents.iter().enumerate().map(|(index, installed)| {
             let launcher = &LAUNCHERS[installed.agent];
-            let action = NewAgentTab { command: installed.command.clone() };
-            let item = MenuItem::new(launcher.label, Box::new(action), true, cx);
+            let item = MenuItem::new(launcher.label, Box::new(NewAgentTab(index)), true, cx);
             let logo = runode_agent::agent_from_name(program(launcher)).and_then(logo_path);
             Some(match logo {
                 Some(logo) => item.with_icon(logo),
@@ -259,18 +275,27 @@ impl WindowView {
         true
     }
 
-    /// 上次问到的当前工作区的主机上装着的 agent；还没问到时为空。
-    fn listed_agents(&self) -> &[Installed] {
+    /// 上次问到的当前工作区的主机上装着的 agent；还没问到时为 `None`。
+    fn listed_agents(&self) -> Option<&[Installed]> {
         match &self.installed_agents {
-            Some((host, agents)) if *host == self.workspace().host => agents,
-            _ => &[],
+            Some((host, agents)) if *host == self.workspace().host => Some(agents),
+            _ => None,
         }
     }
 
-    /// 在后台请当前工作区的主机找装着的 agent：按那台主机上的终端里 shell 报告的 PATH 找，都没报告时宿主按
-    /// 新起的 shell 会拿到的 PATH 找。和上次找到的不一样时换上，菜单开着就换掉它的各项；宿主答不上来时当作
-    /// 一家都没装。问的时候所在的工作区已经换到别的主机上时不记：那边的回话可能先到，不拿这个晚到的盖掉它。
+    /// 在后台请当前工作区的主机找装着的 agent，找到的和上次不一样时换上，菜单开着就换掉它的各项。
     fn find_installed_agents(&mut self, cx: &mut Context<Self>) {
+        let (host, job) = self.ask_installed_agents(cx);
+        cx.spawn(async move |this, cx| {
+            let agents = job.await;
+            this.update(cx, |this, cx| this.store_installed_agents(host, agents, cx)).ok();
+        })
+        .detach();
+    }
+
+    /// 在后台请当前工作区的主机找装着的 agent，返回问的是哪台主机和等回话的任务：按那台主机上的终端里 shell
+    /// 报告的 PATH 找，都没报告时宿主按新起的 shell 会拿到的 PATH 找；宿主答不上来时当作一家都没装。
+    fn ask_installed_agents(&self, cx: &mut Context<Self>) -> (HostId, Task<Vec<Installed>>) {
         let host = self.workspace().host.clone();
         let reported = self.terminal_path(Some(&host), cx);
         let link = link_of(&host);
@@ -282,25 +307,24 @@ impl WindowView {
                 .unwrap_or_default();
             installed_agents(&programs, &found)
         });
-        cx.spawn(async move |this, cx| {
-            let agents = job.await;
-            this.update(cx, |this, cx| {
-                if host != this.workspace().host {
-                    return;
-                }
-                let found = Some((host, agents));
-                if this.installed_agents == found {
-                    return;
-                }
-                this.installed_agents = found;
-                if this.new_tab_menu_open() {
-                    let items = this.new_tab_menu_items(cx);
-                    this.replace_menu_items(items, cx);
-                }
-            })
-            .ok();
-        })
-        .detach();
+        (host, job)
+    }
+
+    /// 记下 `host` 上找到的 agent，菜单开着且有变化时换掉它的各项。问的时候所在的工作区已经换到别的主机上时
+    /// 不记、返回假：那边的回话可能先到，不拿这个晚到的盖掉它。
+    fn store_installed_agents(&mut self, host: HostId, agents: Vec<Installed>, cx: &mut Context<Self>) -> bool {
+        if host != self.workspace().host {
+            return false;
+        }
+        let found = Some((host, agents));
+        if self.installed_agents != found {
+            self.installed_agents = found;
+            if self.new_tab_menu_open() {
+                let items = self.new_tab_menu_items(cx);
+                self.replace_menu_items(items, cx);
+            }
+        }
+        true
     }
 }
 

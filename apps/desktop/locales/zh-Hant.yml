@@ -1410,6 +1410,7 @@ action:
   toggle_fullscreen: 切換全螢幕
   new_tab: 新增分頁
   new_tab_shell: 用新增分頁選單裡第 N 個 shell 新增分頁，從 1 數
+  new_tab_agent: 用新增分頁選單裡第 N 家 agent 新增分頁，從 1 數
   close_tab: 關閉分頁
   next_tab: 下一個分頁
   previous_tab: 上一個分頁

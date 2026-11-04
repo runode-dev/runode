@@ -1,6 +1,7 @@
 //! 快捷键那一页：按动作一行一行列出来，右边是绑在这个动作上的键，一个键一个键帽（⌘ ⇧ R）。
 //! 点 + 录一个新键加上；点已有的键帽重新录、换掉它，录的时候旁边的 ⊘ 去掉它。带参数的动作按参数
-//! 分成几行，参数标在名字旁边；`goto_tab`、`goto_workspace`、`new_tab_shell` 一行管数字 1 到 9（`cmd+digit`）。
+//! 分成几行，参数标在名字旁边；`goto_tab`、`goto_workspace`、`new_tab_shell`、`new_tab_agent` 一行管数字
+//! 1 到 9（`cmd+digit`）。
 //! 改动都写成配置文件里的 `keybind` 行，改掉或去掉默认绑定时先写一行 `触发键=unbind`。
 //! 发送文字这类参数要自己填的动作只列出已经绑了的，新加的在配置文件里写。
 //!
@@ -32,7 +33,7 @@ use crate::ui::switch::Switch;
 const KEY: &str = "keybind";
 
 /// 一行管数字 1 到 9 的动作：不带参数、绑在 `digit` 上时按几就去第几个。
-const DIGIT_ACTIONS: [&str; 3] = ["goto_tab", "goto_workspace", "new_tab_shell"];
+const DIGIT_ACTIONS: [&str; 4] = ["goto_tab", "goto_workspace", "new_tab_shell", "new_tab_agent"];
 
 /// 只有 macOS 上有的动作：隐藏应用这几样别的系统没有，不列出来。
 const MACOS_ONLY: [&str; 3] = ["hide", "hide_others", "show_all"];

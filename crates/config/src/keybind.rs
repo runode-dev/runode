@@ -30,6 +30,8 @@ pub enum Action {
     NewTab,
     /// 用新建标签菜单里第几个 shell 开新标签，从 0 数。
     NewShellTab(usize),
+    /// 用新建标签菜单里第几家 agent 开新标签，从 0 数。
+    NewAgentTab(usize),
     CloseTab,
     NextTab,
     PreviousTab,
@@ -186,6 +188,15 @@ pub static ACTIONS: &[ActionSpec] = &[
         parse: |param| match required(param)?.parse::<usize>() {
             Ok(n) if n >= 1 => Ok(Action::NewShellTab(n - 1)),
             _ => Err("expected a shell number starting from 1".into()),
+        },
+    },
+    ActionSpec {
+        name: "new_tab_agent",
+        doc: "New tab running the Nth agent in the new tab menu, counting from 1",
+        param: Some("N"),
+        parse: |param| match required(param)?.parse::<usize>() {
+            Ok(n) if n >= 1 => Ok(Action::NewAgentTab(n - 1)),
+            _ => Err("expected an agent number starting from 1".into()),
         },
     },
     plain!("close_tab", "Close the tab", Action::CloseTab),
@@ -431,6 +442,7 @@ pub static MACOS_DEFAULTS: &[&str] = &[
     "ctrl+cmd+f=toggle_fullscreen",
     "cmd+enter=toggle_fullscreen",
     "cmd+t=new_tab",
+    "ctrl+cmd+digit=new_tab_agent",
     "cmd+w=close_surface",
     "cmd+alt+w=close_tab",
     "cmd+}=next_tab",
@@ -595,8 +607,8 @@ const DIGIT: &str = "digit";
 
 /// 解析一条 `keybind` 的值。触发键转成 GPUI 的写法，动作解析成 `Action`。
 ///
-/// 最后一个键写 `digit` 时一条顶九条，数字 1 到 9 各绑一次：`goto_tab`、`goto_workspace`、`new_tab_shell`
-/// 不带参数时按的数字就是第几个，前两个的 9 是最后一个；别的动作九个数字都绑同一个。
+/// 最后一个键写 `digit` 时一条顶九条，数字 1 到 9 各绑一次：`goto_tab`、`goto_workspace`、`new_tab_shell`、
+/// `new_tab_agent` 不带参数时按的数字就是第几个，前两个的 9 是最后一个；别的动作九个数字都绑同一个。
 pub fn parse(value: &str) -> Result<Vec<Keybind>, String> {
     if value == "clear" {
         return Ok(vec![Keybind::Clear]);
@@ -622,7 +634,7 @@ pub fn parse(value: &str) -> Result<Vec<Keybind>, String> {
             let action = match (action, n) {
                 ("goto_tab", 9) => "last_tab".to_owned(),
                 ("goto_workspace", 9) => "last_workspace".to_owned(),
-                ("goto_tab" | "goto_workspace" | "new_tab_shell", n) => format!("{action}:{n}"),
+                ("goto_tab" | "goto_workspace" | "new_tab_shell" | "new_tab_agent", n) => format!("{action}:{n}"),
                 _ => action.to_owned(),
             };
             bind(format!("{prefix}{n}"), &action)
