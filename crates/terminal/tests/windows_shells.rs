@@ -5,7 +5,10 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
@@ -90,7 +93,10 @@ impl RealShell {
 
 fn integrated(program: &str, syntax: &Syntax) {
     let stem = Path::new(program).file_stem().unwrap().to_string_lossy().into_owned();
-    let dir = std::env::temp_dir().join(format!("runode-shell-{}-{stem}", std::process::id()));
+    // 同一个 shell 可能有几个测试同时在测，各用各的目录，不删掉别人正在用的。
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let call = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("runode-shell-{}-{stem}-{call}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let sub = dir.join("子目录 x");
     std::fs::create_dir_all(&sub).unwrap();
