@@ -201,7 +201,8 @@ pub(crate) fn reveal_notified(tag: &str, cx: &mut App) {
 
 impl WindowView {
     /// 用户正看着这个分屏：窗口在前台、也确实看得见，它所在的标签正显示着，焦点在它上面，也没被
-    /// 整页盖住（`page_covers_terminals`）。显示器睡了或切到别的 Space 时窗口可能仍在前台，却没人看得到。
+    /// 整页盖住（`page_covers_terminals`）、被文件预览盖住（`preview_front`）。显示器睡了或切到别的 Space 时
+    /// 窗口可能仍在前台，却没人看得到。
     /// 开在单独窗口里的按那个窗口算（`watching_popped`）。
     fn is_watching_pane(&self, pane: EntityId, wi: usize, ti: usize, window: &Window, cx: &App) -> bool {
         if self.workspaces[wi].tabs[ti].popped.contains(&pane) {
@@ -212,6 +213,7 @@ impl WindowView {
             && self.is_shown(wi, ti)
             && self.workspaces[wi].tabs[ti].focused == pane
             && !self.page_covers_terminals()
+            && !self.preview_front(cx)
     }
 
     /// 设置页、配对设备页、看板或占满内容区的远程桌面盖住了终端区，终端和预览都看不见。
@@ -322,9 +324,10 @@ impl WindowView {
         alert::dismiss(&notification_tag(pane), cx);
     }
 
-    /// 用户看到了当前分屏（窗口在前台、看得见，终端没被设置页这些盖住）：清掉它的 done，收回它的通知。
+    /// 用户看到了当前分屏（窗口在前台、看得见，终端没被设置页、文件预览这些盖住）：清掉它的 done，收回它的通知。
     pub(super) fn mark_seen(&mut self, window: &Window, cx: &mut Context<Self>) {
-        if !window.is_window_active() || !window.is_visible() || self.page_covers_terminals() {
+        if !window.is_window_active() || !window.is_visible() || self.page_covers_terminals() || self.preview_front(cx)
+        {
             return;
         }
         let Some(tab) = self.tab_mut() else {
