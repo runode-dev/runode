@@ -64,10 +64,12 @@ pub(crate) struct MobilePage {
     focus: FocusHandle,
     /// 装 App 的二维码，有安装链接时才有。
     install_qr: Option<Rc<Qr>>,
-    /// 电脑名的输入框，以及它的回车、Esc 和失焦；空着时用系统的电脑名 `system_name`。
+    /// 电脑名的输入框，以及它的回车、Esc、失焦和配置的改动；空着时用系统的电脑名 `system_name`。
     name: Entity<InputState>,
+    /// 输入框上次和配置对齐时配置里的名字。输入框里还是它时用户没改过，不写回，配置在别处改了时跟着换。
+    synced_name: String,
     system_name: SharedString,
-    _name_events: [Subscription; 2],
+    _name_events: [Subscription; 3],
     /// 这台机器的网卡和地址，进配对这一步、点刷新时重读。
     interfaces: Vec<(String, IpAddr)>,
     /// 挑的网络，它的地址排在配对 URI 最前面；`None` 时按系统的顺序。
@@ -98,7 +100,7 @@ impl MobilePage {
         let system_name = host_name();
         let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
         let name = cx.new(|cx| {
-            InputState::new(saved, cx)
+            InputState::new(saved.clone(), cx)
                 .with_placeholder(system_name.clone())
                 .with_label(rust_i18n::t!("mobile.name_label").into_owned())
         });
@@ -107,10 +109,23 @@ impl MobilePage {
             // 不改了：换回配置里的名字。
             InputEvent::Dismiss => {
                 let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
-                field.update(cx, |field, cx| field.set_query(saved, cx));
+                field.update(cx, |field, cx| field.set_query(saved.clone(), cx));
+                this.synced_name = saved;
                 window.focus(&this.focus, cx);
             }
             InputEvent::Changed(_) | InputEvent::Previous => {}
+        });
+        // 别的窗口或者手改配置换了名字：输入框没改过时跟着换，免得失焦时把旧名字写回去。
+        let config = cx.observe_global::<AppConfig>(|this, cx| {
+            let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
+            if saved == this.synced_name {
+                return;
+            }
+            if this.name.read(cx).query().trim() == this.synced_name {
+                this.name.update(cx, |field, cx| field.set_query(saved.clone(), cx));
+            }
+            this.synced_name = saved;
+            cx.notify();
         });
         // 回车、点别处都是离开输入框，在这里写回。
         let blurred = cx.on_focus_out(&name.focus_handle(cx), window, |this, _, _, cx| this.save_machine_name(cx));
@@ -121,8 +136,9 @@ impl MobilePage {
             focus: cx.focus_handle(),
             install_qr: IOS_APP_URL.and_then(Qr::new).map(Rc::new),
             name,
+            synced_name: saved,
             system_name: system_name.into(),
-            _name_events: [events, blurred],
+            _name_events: [events, blurred, config],
             interfaces: Vec::new(),
             network: None,
             network_open: false,
@@ -130,15 +146,14 @@ impl MobilePage {
         }
     }
 
-    /// 输入框里的电脑名和配置里的不一样时写回配置；监听方换上新名字后重新生成二维码。要收起这一页时先调：
+    /// 用户改过输入框里的电脑名时写回配置；监听方换上新名字后重新生成二维码。要收起这一页时先调：
     /// 没按回车就切到别处时，这一页连同监听失焦的订阅一起没了，等不到失焦再写。
     pub(crate) fn save_machine_name(&mut self, cx: &mut Context<Self>) {
         let name = self.name.read(cx).query().trim().to_owned();
-        let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
-        if name == saved {
+        if name == self.synced_name {
             return;
         }
-        let values = if name.is_empty() { Vec::new() } else { vec![name] };
+        let values = if name.is_empty() { Vec::new() } else { vec![name.clone()] };
         let written = runode_config::config_path()
             .ok_or_else(|| rust_i18n::t!("settings.no_home").into_owned())
             .and_then(|path| {
@@ -146,7 +161,10 @@ impl MobilePage {
                     .map_err(|err| rust_i18n::t!("settings.write_failed", err = err.to_string()).into_owned())
             });
         match written {
-            Ok(_) => self.restart_pairing(cx),
+            Ok(_) => {
+                self.synced_name = name;
+                self.restart_pairing(cx);
+            }
             Err(err) => self.pairing = Pairing::Failed(err),
         }
         cx.notify();
