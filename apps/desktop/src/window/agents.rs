@@ -382,7 +382,8 @@ impl WindowView {
         entries
     }
 
-    /// 切到这个窗口里的这个分屏所在的 workspace 和标签，并聚焦它；agent 列表和设置页开着时关掉。
+    /// 切到这个窗口里的这个分屏所在的 workspace 和标签，并聚焦它，浮着的提到别的浮着的上面；agent 列表和
+    /// 设置页开着时关掉。
     pub(super) fn show_pane(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
         let Some((wi, ti)) = self.locate(pane) else {
             return;
@@ -398,6 +399,7 @@ impl WindowView {
             tab.focused = pane;
             tab.zoomed = false;
         }
+        tab.raise_float(pane);
         workspace.active = ti;
         self.activate_workspace(wi, window, cx);
     }

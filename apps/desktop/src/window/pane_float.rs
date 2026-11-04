@@ -92,6 +92,18 @@ impl Tab {
         }
     }
 
+    /// 浮着的终端 `id` 提到别的浮着的上面；返回挪了没有。
+    pub(super) fn raise_float(&mut self, id: EntityId) -> bool {
+        match self.floating.iter().position(|(pane, _)| *pane == id) {
+            Some(ix) if ix + 1 != self.floating.len() => {
+                let entry = self.floating.remove(ix);
+                self.floating.push(entry);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// 新浮起一块放在哪：没有浮着的时用 `FIRST_FRAME`，有了就比最上面那块往右下错开，不出终端区。
     fn next_frame(&self) -> Rect {
         let Some((_, top)) = self.floating.last() else {
@@ -220,19 +232,9 @@ impl WindowView {
         self.holds_popped(id) && popout::activate(id, cx)
     }
 
-    /// 浮着的终端 `id` 提到别的浮着的上面；返回挪了没有。
+    /// 当前标签里浮着的终端 `id` 提到别的浮着的上面；返回挪了没有。
     fn raise_float(&mut self, id: EntityId) -> bool {
-        let Some(tab) = self.tab_mut() else {
-            return false;
-        };
-        match tab.floating.iter().position(|(pane, _)| *pane == id) {
-            Some(ix) if ix + 1 != tab.floating.len() => {
-                let entry = tab.floating.remove(ix);
-                tab.floating.push(entry);
-                true
-            }
-            _ => false,
-        }
+        self.tab_mut().is_some_and(|tab| tab.raise_float(id))
     }
 
     /// 从窗口里的 `from` 开始拖浮着的终端 `id`，`resize` 有值时拖的是那条边或那个角；它提到最上面。
