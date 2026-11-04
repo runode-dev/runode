@@ -190,7 +190,8 @@ impl WindowView {
         true
     }
 
-    /// 终端 `a` 和 `b` 对调位置，可以在不同的标签里。返回对调成了没有。`focus` 为真时切到 `a` 的新位置。
+    /// 终端 `a` 和 `b` 对调位置，可以在不同的标签里；浮着的先停靠回去，对调的是分屏树里的位置。返回对调成了
+    /// 没有。`focus` 为真时切到 `a` 的新位置。
     pub(super) fn swap_panes(
         &mut self,
         a: EntityId,
@@ -208,6 +209,9 @@ impl WindowView {
         let focused = self.focused_view().map(Entity::entity_id);
         if at_a == at_b {
             let tab = &mut self.workspaces[at_a.0].tabs[at_a.1];
+            // 浮着的位置按终端记，不停靠回去的话只对调树里的位置，看得见的位置不变。
+            tab.unfloat(a);
+            tab.unfloat(b);
             tab.root.swap(a, b);
             tab.zoomed = false;
         } else {
