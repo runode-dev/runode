@@ -241,9 +241,16 @@ fn copy_file(src: &Path, dest: &Path) -> io::Result<()> {
 
 #[cfg(not(target_os = "macos"))]
 fn copy_file(src: &Path, dest: &Path) -> io::Result<()> {
+    let mut input = fs::File::open(src)?;
+    let permissions = input.metadata()?.permissions();
     let mut out = fs::OpenOptions::new().write(true).create_new(true).open(dest)?;
-    io::copy(&mut fs::File::open(src)?, &mut out)?;
-    out.set_permissions(fs::metadata(src)?.permissions())
+    let result = io::copy(&mut input, &mut out).and_then(|_| out.set_permissions(permissions));
+    // `dest` 是上面刚建的，复制到一半出错时删掉，不留半个副本。Windows 上要先关了才删得掉。
+    drop(out);
+    if result.is_err() {
+        let _ = fs::remove_file(dest);
+    }
+    result
 }
 
 /// 把仓库里的 `rel`（相对仓库根 `root`）写进根目录的 `.gitignore`：只匹配这一个路径，开头的 `/`

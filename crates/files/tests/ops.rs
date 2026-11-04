@@ -161,6 +161,23 @@ fn refuses_to_copy_fifos() {
     assert!(!tmp.0.join("d copy").exists());
 }
 
+/// 读不了源文件时报错，不留下空的副本。
+#[cfg(unix)]
+#[test]
+fn failed_file_copy_leaves_no_copy() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = TempDir::new("copy-unreadable");
+    let file = tmp.0.join("a.txt");
+    fs::write(&file, "x").unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+    // root 不受权限限制，测不了。
+    if fs::File::open(&file).is_ok() {
+        return;
+    }
+    assert!(copy_into(&file, &tmp.0).is_err());
+    assert!(fs::symlink_metadata(tmp.0.join("a copy.txt")).is_err());
+}
+
 /// 经符号链接指进自己下面的目录也算放进自己，挪动、复制都拦；源本身是符号链接时照旧只动链接。
 #[cfg(unix)]
 #[test]
