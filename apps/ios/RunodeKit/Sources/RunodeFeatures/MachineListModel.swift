@@ -80,10 +80,9 @@ public final class MachineListModel {
 
     public func rename(_ id: UUID, to name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard var machine = machine(id), !trimmed.isEmpty else { return }
-        machine.name = trimmed
+        guard machine(id) != nil, !trimmed.isEmpty else { return }
         do {
-            try await store.upsert(machine)
+            try await store.updateName(id: id, trimmed)
         } catch {
             errorMessage = String(localized: "改不了名字：\(error.localizedDescription)")
         }

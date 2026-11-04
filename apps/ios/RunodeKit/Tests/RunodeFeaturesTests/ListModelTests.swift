@@ -554,6 +554,21 @@ extension LinkState {
         #expect(try keys.key(for: machine.id) == nil)
     }
 
+    /// 改名只改名字：连接在列表不知道时记下的 `node`、`lastAddress` 不被列表里的旧副本盖掉。
+    @Test func renamingKeepsWhatTheConnectionLearned() async throws {
+        let store = MemoryMachineStore()
+        let model = MachineListModel(store: store, keyStore: MemoryDeviceKeyStore())
+        let machine = machineRecord()
+        try await model.add(machine)
+        await store.updateNode(id: machine.id, "learned-node")
+        await store.updateLastAddress(id: machine.id, "10.0.0.9")
+        await model.rename(machine.id, to: "工作机")
+        let stored = try #require(await store.all().first)
+        #expect(stored.name == "工作机")
+        #expect(stored.node == "learned-node")
+        #expect(stored.lastAddress == "10.0.0.9")
+    }
+
     @Test func repairingTheSameMachineReplacesTheOldRecord() async throws {
         let store = MemoryMachineStore()
         let keys = MemoryDeviceKeyStore()
@@ -656,6 +671,7 @@ actor UnwritableMachineStore: MachineStore {
     func upsert(_ machine: MachineRecord) throws { throw WriteFailed() }
     func updateLastAddress(id: UUID, _ address: String) throws { throw WriteFailed() }
     func updateNode(id: UUID, _ node: String) throws { throw WriteFailed() }
+    func updateName(id: UUID, _ name: String) throws { throw WriteFailed() }
     func remove(id: UUID) throws { throw WriteFailed() }
 }
 

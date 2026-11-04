@@ -58,6 +58,8 @@ public protocol MachineStore: Sendable {
     func updateLastAddress(id: UUID, _ address: String) async throws
     /// 只改存着的那条的 `node`，同 `updateLastAddress`。
     func updateNode(id: UUID, _ node: String) async throws
+    /// 只改存着的那条的 `name`：连接在后台记下的 `node`、`lastAddress` 照旧；这条已经删了时什么也不做。
+    func updateName(id: UUID, _ name: String) async throws
     func remove(id: UUID) async throws
 }
 
@@ -84,6 +86,11 @@ public actor MemoryMachineStore: MachineStore {
     public func updateNode(id: UUID, _ node: String) {
         guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
         machines[index].node = node
+    }
+
+    public func updateName(id: UUID, _ name: String) {
+        guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
+        machines[index].name = name
     }
 
     public func remove(id: UUID) { machines.removeAll { $0.id == id } }
@@ -150,6 +157,13 @@ public actor FileMachineStore: MachineStore {
         var machines = try load()
         guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
         machines[index].node = node
+        try write(machines)
+    }
+
+    public func updateName(id: UUID, _ name: String) throws {
+        var machines = try load()
+        guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
+        machines[index].name = name
         try write(machines)
     }
 
