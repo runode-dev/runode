@@ -26,13 +26,14 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
         .cloned();
 
     // Shift 和 Option 改变了产出的文本时（a → A，s → ß）算作「已消耗」，
-    // 免得编码器再把它们报告一次。
+    // 免得编码器再把它们报告一次。只有 macOS 的 Option 会打出字；别的系统上 Alt 不参与产出文本
+    // （Alt+Shift+A 打出的 A 只是 Shift 的），照旧报给编码器，程序才收得到 Meta。
     let mut consumed_mods = Mods::default();
     if let Some(text) = &text
         && *text != unshifted.to_string()
     {
         consumed_mods.shift = m.shift;
-        consumed_mods.alt = m.alt;
+        consumed_mods.alt = m.alt && cfg!(target_os = "macos");
     }
 
     let layout_option_as_alt = m.alt && layout_option_as_alt();
@@ -175,6 +176,15 @@ mod tests {
         assert_eq!(input.text.as_deref(), Some("A"));
         assert_eq!(input.consumed_mods, Mods { shift: true, ..Mods::default() });
         assert_eq!(input.unshifted, 'a');
+    }
+
+    #[test]
+    fn alt_shift_letter_keeps_alt_off_macos() {
+        let input =
+            translate(&stroke("a", Some("A"), Modifiers { alt: true, shift: true, ..Modifiers::none() })).unwrap();
+        assert!(input.mods.alt);
+        let alt = cfg!(target_os = "macos");
+        assert_eq!(input.consumed_mods, Mods { shift: true, alt, ..Mods::default() });
     }
 
     #[test]
