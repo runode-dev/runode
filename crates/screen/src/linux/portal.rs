@@ -23,7 +23,7 @@ use ashpd::{
     },
     enumflags2::BitFlags,
 };
-use futures::{FutureExt as _, executor::block_on};
+use futures::{FutureExt as _, StreamExt as _, executor::block_on};
 use runode_types::{input::MouseButton, screen::ScreenInput};
 
 use super::{
@@ -68,7 +68,9 @@ pub(crate) struct Portal {
     screencast: Screencast,
     session: Session<RemoteDesktop>,
     screens: Vec<Screen>,
-    /// 用户在屏幕上停掉了，或者流断了：下次要用时另开一个。
+    /// 会话的 `Closed` 信号：用户在屏幕上停掉、portal 收回会话时来，PipeWire 的流不一定跟着报错。
+    closed_signal: Mutex<zbus::proxy::SignalStream<'static>>,
+    /// 会话停了，或者流断了：下次要用时另开一个。
     closed: AtomicBool,
 }
 
@@ -77,7 +79,7 @@ impl Portal {
     fn get() -> io::Result<Arc<Self>> {
         let mut current = PORTAL.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(portal) = current.as_ref()
-            && !portal.closed.load(Ordering::Relaxed)
+            && !portal.closed()
         {
             return Ok(portal.clone());
         }
@@ -100,6 +102,13 @@ impl Portal {
         let remote = RemoteDesktop::new().await.map_err(other)?;
         let screencast = Screencast::new().await.map_err(other)?;
         let session = remote.create_session(Default::default()).await.map_err(other)?;
+        let closed_signal = match closed_signal(&remote, &session).await {
+            Ok(signal) => signal,
+            Err(err) => {
+                let _ = session.close().await;
+                return Err(other(err));
+            }
+        };
         let token = restore_token();
         remote
             .select_devices(
@@ -169,7 +178,28 @@ impl Portal {
             return Err(io::Error::other("the portal shared no screen"));
         }
         tracing::info!("portal remote desktop with {} screen(s)", screens.len());
-        Ok(Self { remote, screencast, session, screens, closed: AtomicBool::new(false) })
+        Ok(Self {
+            remote,
+            screencast,
+            session,
+            screens,
+            closed_signal: Mutex::new(closed_signal),
+            closed: AtomicBool::new(false),
+        })
+    }
+
+    /// 会话停了，要另开一个。
+    fn closed(&self) -> bool {
+        if self.closed.load(Ordering::Relaxed) {
+            return true;
+        }
+        let mut signal = self.closed_signal.lock().unwrap_or_else(PoisonError::into_inner);
+        // 信号来过，或者连接断了。
+        if signal.next().now_or_never().is_some() {
+            tracing::info!("the portal closed the remote desktop session");
+            self.closed.store(true, Ordering::Relaxed);
+        }
+        self.closed.load(Ordering::Relaxed)
     }
 
     /// 编号是 `display` 的那路屏幕；没有时是第一路。
@@ -190,6 +220,20 @@ impl Portal {
             }
         }
     }
+}
+
+/// 订 `session` 的 `Closed` 信号。portal 只把它发给开会话的那条连接，所以订在 ashpd 用的连接上。
+async fn closed_signal(
+    remote: &RemoteDesktop,
+    session: &Session<RemoteDesktop>,
+) -> zbus::Result<zbus::proxy::SignalStream<'static>> {
+    // ashpd 不交出会话的对象路径，会话按 D-Bus 的对象路径序列化。
+    let context = zbus::zvariant::serialized::Context::new_dbus(zbus::zvariant::LE, 0);
+    let (path, _): (zbus::zvariant::OwnedObjectPath, _) = zbus::zvariant::to_bytes(context, session)?.deserialize()?;
+    let proxy =
+        zbus::Proxy::new(remote.connection(), "org.freedesktop.portal.Desktop", path, "org.freedesktop.portal.Session")
+            .await?;
+    proxy.receive_signal("Closed").await
 }
 
 /// 会话里的一路屏幕，注入的目标；ashpd 的每次调用都在调用线程上 `block_on`。
@@ -289,6 +333,10 @@ impl Source {
 
 impl super::capture::Source for Source {
     fn wait(&mut self, timeout: Duration) -> io::Result<bool> {
+        // 会话停了时流不一定报错，可能一直停着不来新画面。
+        if self.portal.closed() {
+            return Err(io::Error::other("the portal closed the remote desktop session"));
+        }
         self.stream.wait(timeout).inspect_err(|_| self.portal.closed.store(true, Ordering::Relaxed))
     }
 
