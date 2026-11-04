@@ -172,7 +172,7 @@ impl WindowView {
 
     /// 在单独的线程上（`fs_probe::off_thread`，不占后台线程池）看当前终端的目录是不是目录，记下来；
     /// `project_dir` 因此变了时按新目录再检查一遍。
-    /// 远端的目录这台机器上看不了，照终端报的读，读不了时 `refresh_project` 退回 workspace 的目录。
+    /// 远端的目录这台机器上看不了，先当它是目录照读，`refresh_project` 列不出它时再记成不是。
     fn check_cwd(&mut self, cx: &mut Context<Self>) {
         let Some(cwd) = self.focused_view().and_then(|view| view.read(cx).cwd()) else {
             return;
@@ -373,6 +373,19 @@ impl WindowView {
                         return;
                     }
                 };
+                // 远端终端报的目录列不出来（删掉了）：记成不是目录，按 `project_dir` 退回 workspace 的目录重读。
+                let cwd_gone = !workspace.host.is_local()
+                    && scan.dir != workspace.dir
+                    && workspace.project.cwd.as_ref() == Some(&(scan.dir.clone(), true))
+                    && scan.git.is_none()
+                    && scan.listings.iter().any(|(dir, listing)| *dir == scan.root && listing.is_none());
+                if cwd_gone {
+                    workspace.project.cwd = Some((scan.dir, false));
+                    if this.workspace().id == id {
+                        this.refresh_project(cx);
+                    }
+                    return;
+                }
                 workspace.project.scan_cost = scan.cost;
                 let (changed, tree) = workspace.apply_scan(scan, started);
                 let git = workspace.project.git.clone();
