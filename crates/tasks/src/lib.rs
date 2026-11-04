@@ -78,7 +78,8 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
             name: name.clone(),
             description: Some(body.to_owned()),
         });
-        sources.push(TaskSource { kind: TaskSourceKind::PackageJson, file, project: None, tasks, truncated });
+        let project = (!finds_package(dir, at)).then(|| at.to_path_buf());
+        sources.push(TaskSource { kind: TaskSourceKind::PackageJson, file, project, tasks, truncated });
     }
     Ok(sources)
 }
@@ -236,6 +237,15 @@ fn makefile_targets(text: &str) -> Vec<(String, Option<String>)> {
         }
     }
     targets
+}
+
+/// 在 `dir` 里跑包管理器时它找到的是 `at` 里的 package.json。包管理器从进程真实的目录往上找，`dir`
+/// 经过符号链接时可能找到另一个目录里的。
+fn finds_package(dir: &Path, at: &Path) -> bool {
+    let (Ok(real), Ok(at)) = (fs::canonicalize(dir), fs::canonicalize(at)) else {
+        return false;
+    };
+    real.ancestors().find(|ancestor| ancestor.join("package.json").is_file()) == Some(at.as_path())
 }
 
 /// 跑 package.json 的 scripts 用哪个包管理器：`packageManager` 字段说了算，没有时看 `dirs`（从
@@ -424,6 +434,29 @@ build: other
         };
         assert_eq!(commands(&sources), [format!("make -C {} wrong", quote(root.join("work").to_str().unwrap()))]);
         assert_eq!(commands(&normal), ["make -C .. real"]);
+    }
+
+    /// 请求的目录经过符号链接时，包管理器从真实的目录往上找到的是另一个 package.json：在找到的那个所在的
+    /// 目录里跑。不经过符号链接时照旧在请求的目录里跑。
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_directory_runs_scripts_in_the_package_dir() {
+        let root = std::env::temp_dir().join(format!("runode-tasks-package-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("ext/app/sub")).unwrap();
+        fs::create_dir_all(root.join("work")).unwrap();
+        fs::write(root.join("ext/app/package.json"), r#"{"scripts": {"real": "x"}}"#).unwrap();
+        fs::write(root.join("work/package.json"), r#"{"scripts": {"wrong": "y"}}"#).unwrap();
+        std::os::unix::fs::symlink(root.join("ext/app/sub"), root.join("work/link")).unwrap();
+        let sources = list(&root.join("work/link")).unwrap();
+        let normal = list(&root.join("ext/app/sub")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        let package = |sources: &[TaskSource]| {
+            let package = sources.iter().find(|source| source.kind == TaskSourceKind::PackageJson).unwrap();
+            (package.project.clone(), package.tasks.iter().map(|task| task.command.clone()).collect::<Vec<_>>())
+        };
+        assert_eq!(package(&sources), (Some(root.join("work")), vec!["npm run wrong".to_owned()]));
+        assert_eq!(package(&normal), (None, vec!["npm run real".to_owned()]));
     }
 
     /// 经过符号链接、Makefile 所在目录的绝对路径又拼不进命令行（这里带反斜杠）时不列：退回 `make -C ..`

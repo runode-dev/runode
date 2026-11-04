@@ -20,7 +20,8 @@ pub struct TaskSource {
     #[serde(serialize_with = "crate::lossy_path::serialize")]
     pub file: PathBuf,
     /// `Custom` 的命令是给哪个项目目录的，也是它们跑的目录（不是请求的目录时，前端在这里开终端跑）；
-    /// 别的种类为空，在请求的目录里跑。
+    /// `PackageJson` 的命令在请求的目录里跑会找到别的 package.json 时（请求的目录经过符号链接）是
+    /// package.json 所在的目录。别的为空，在请求的目录里跑。
     #[serde(default, skip_serializing_if = "Option::is_none", serialize_with = "crate::lossy_path::serialize_opt")]
     pub project: Option<PathBuf>,
     /// 按文件里的先后，最多 `MAX_TASKS` 条。
