@@ -277,7 +277,8 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Windows 上强杀的 git 留下的 `index.lock` 不删（可能是别的 git 的），在报错里指给用户。
+    /// Windows 上强杀的 git 留下的 `index.lock` 不删（可能是别的 git 的），在报错里指给用户；没留下就不提。
+    /// `taskkill /T` 杀进程树的先后不定：钩子先死时 git 当成钩子失败，删掉锁再退出，所以两种结局都会有。
     #[cfg(windows)]
     #[test]
     fn points_at_the_lock_left_by_a_killed_git() {
@@ -289,14 +290,16 @@ mod tests {
         fs::write(dir.join("f"), "b").unwrap();
         let hooks = dir.join(".git/test-hooks");
         fs::create_dir_all(&hooks).unwrap();
-        // 钩子跑起来时 git 已经拿着 `index.lock`，记个标记，好分清是没等到钩子还是锁没找着。
+        // 钩子跑起来时 git 已经拿着 `index.lock`，记个标记，确认杀的时候锁在。
         fs::write(hooks.join("pre-commit"), "#!/bin/sh\necho > hook-started\nexec sleep 30\n").unwrap();
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
-        // 给足时间让钩子跑起来：整套测试一起跑时 CI 的 Windows 很忙，起一个 git 和 sh 要好几秒。
-        let err = run_for(&dir, commit, None, Duration::from_secs(10), &NO_ENV).unwrap_err();
+        // 整套测试一起跑时 CI 的 Windows 很忙，给钩子留足跑起来的时间。
+        let err = run_for(&dir, commit, None, Duration::from_secs(5), &NO_ENV).unwrap_err();
         assert!(dir.join("hook-started").exists(), "钩子没跑起来：{err}");
-        assert!(matches!(&err, GitError::Timeout { lock: Some(lock), .. } if lock.ends_with("index.lock")), "{err}");
-        assert!(dir.join(".git/index.lock").exists());
+        let GitError::Timeout { lock, .. } = &err else { panic!("{err}") };
+        let left = dir.join(".git/index.lock").exists();
+        assert_eq!(lock.is_some(), left, "{err}");
+        assert!(lock.as_ref().is_none_or(|lock| lock.ends_with("index.lock")), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 
