@@ -289,9 +289,12 @@ mod tests {
         fs::write(dir.join("f"), "b").unwrap();
         let hooks = dir.join(".git/test-hooks");
         fs::create_dir_all(&hooks).unwrap();
-        fs::write(hooks.join("pre-commit"), "#!/bin/sh\nexec sleep 30\n").unwrap();
+        // 钩子跑起来时 git 已经拿着 `index.lock`，记个标记，好分清是没等到钩子还是锁没找着。
+        fs::write(hooks.join("pre-commit"), "#!/bin/sh\necho > hook-started\nexec sleep 30\n").unwrap();
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
-        let err = run_for(&dir, commit, None, Duration::from_secs(3), &NO_ENV).unwrap_err();
+        // 给足时间让钩子跑起来：整套测试一起跑时 CI 的 Windows 很忙，起一个 git 和 sh 要好几秒。
+        let err = run_for(&dir, commit, None, Duration::from_secs(10), &NO_ENV).unwrap_err();
+        assert!(dir.join("hook-started").exists(), "钩子没跑起来：{err}");
         assert!(matches!(&err, GitError::Timeout { lock: Some(lock), .. } if lock.ends_with("index.lock")), "{err}");
         assert!(dir.join(".git/index.lock").exists());
         let _ = fs::remove_dir_all(&dir);
