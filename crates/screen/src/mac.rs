@@ -70,7 +70,6 @@ pub(crate) fn permissions() -> Permissions {
     }
 
     // 「辅助功能」和「发送事件」（`CGRequestPostEventAccess` 要的）是 TCC 里的两项，有哪项都能注入键鼠。
-    // `AXIsProcessTrusted` 每次现查，`CGPreflightPostEventAccess` 在进程里缓存结果、用户改了开关也不更新。
     // SAFETY: 无参数，只读系统的授权状态。
     let post_event = unsafe { AXIsProcessTrusted() } != 0 || CGPreflightPostEventAccess();
     Permissions { screen_capture: CGPreflightScreenCaptureAccess(), post_event }

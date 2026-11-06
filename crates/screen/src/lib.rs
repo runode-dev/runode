@@ -298,6 +298,8 @@ pub struct Permissions {
     pub post_event: bool,
 }
 
+/// 这个进程里查到的授权。macOS 在进程里缓存查到的结果，用户之后在系统设置里改了开关，这个进程里查到的
+/// 仍是旧的，`Injector` 却照现在的开关办；要知道现在的开关得另起一个同一可执行文件的进程来查。
 #[cfg(target_os = "macos")]
 pub fn permissions() -> Permissions {
     platform::permissions()
