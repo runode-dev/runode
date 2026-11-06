@@ -11,7 +11,7 @@ runode 的 vendor 下有两个子模块，另外 GPUI 取自 crates.io、原样�
 | --- | --- | --- | --- |
 | `vendor/ghostty` | 子模块，runode-dev/ghostty 的 fork | `upstream` = ghostty-org/ghostty 的 `main` | fork `main` 上基于上游的几个修复提交，一处一个 |
 | `vendor/libghostty-rs` | 子模块，runode-dev/libghostty-rs 的 fork | `upstream` = Uzaaft/libghostty-rs 的 `master` | fork `main` 上的提交：新接口、修复、`GHOSTTY_COMMIT` 和重新生成的绑定 |
-| 根 `Cargo.toml` 的 gpui-pre | crates.io 上的包，原样使用 | crates.io 的 gpui-pre（Zed 的 gpui 快照） | 没有改动；`desktop` 里有几处经原生窗口绕着平台层做的事 |
+| 根 `Cargo.toml` 的 gpui-pre | crates.io 上的包；macOS 平台层 gpui-pre-macos 换成 `vendor/gpui-pre-macos` 里打了补丁的一份 | crates.io 的 gpui-pre（Zed 的 gpui 快照） | `vendor/gpui-pre-macos` 里原样源码之后的修改提交，一处一个；`desktop` 里有几处经原生窗口绕着平台层做的事 |
 
 用户没说升哪个时，先跑摸底（下面第一步）看哪边有更新，把结果讲给用户再动手。ghostty 和 libghostty-rs 必须一起动，不能只挪一个：构建编的是 `vendor/ghostty` 的源码，绑定却是照 `GHOSTTY_COMMIT` 那版头文件生成的，两边不一致时编得过，运行时却读写错内存。
 

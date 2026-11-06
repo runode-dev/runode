@@ -25,6 +25,8 @@ done
 
 **`desktop` 里绕着平台层做的事，上游做了没有**：`AGENTS.md` 的 GPUI 一段列着这些地方。逐个看新版平台层（`gpui-pre-macos` 的 `window.rs`、渲染器在 `gpui-pre-apple`）有没有自己做同样的事，比如自己关了 `displaySyncEnabled`，或者 `prompt` 在第一个按钮是取消时把回车和焦点留给它。做了就删掉 `desktop` 里的那段、改用上游的；看不准的问用户。
 
+**`vendor/gpui-pre-macos` 里的补丁，上游修了没有**：`git log --oneline -- vendor/gpui-pre-macos` 列出原样拷进来之后的修改提交，逐个看新版 `gpui-pre-macos` 有没有同样的处理（比如虚拟机里不用 `CAMetalDisplayLink`）。修了的那个提交不再搬；都修了就删掉 `vendor/gpui-pre-macos` 和根 `Cargo.toml` 里的 `[patch.crates-io]`，回到原样使用。
+
 **新功能和接口变化**：比对 gpui-pre 本体和平台层，diff 很大时交给一个只读的 agent 去读：
 
 ```sh
@@ -36,7 +38,14 @@ diff -ru "$S/crates/<old>/gpui-pre-macos-<old>" "$S/crates/<new>/gpui-pre-macos-
 
 ## 3. 动手
 
-改根 `Cargo.toml` 里 gpui-pre 和 gpui-pre-platform 的 `=` 版本，然后：
+改根 `Cargo.toml` 里 gpui-pre 和 gpui-pre-platform 的 `=` 版本。还留着 `vendor/gpui-pre-macos` 时，先把它换成新版的原样源码单独提交（`chore: vendor/gpui-pre-macos 换成 <new> 的原样源码`），再把还要的修改一个一个搬上去，每个一个提交：
+
+```sh
+rm -rf vendor/gpui-pre-macos && cp -R "$S/crates/<new>/gpui-pre-macos-<new>" vendor/gpui-pre-macos
+rm -f vendor/gpui-pre-macos/Cargo.lock vendor/gpui-pre-macos/.cargo_vcs_info.json vendor/gpui-pre-macos/.cargo-ok
+```
+
+然后：
 
 ```sh
 cargo update -p gpui-pre -p gpui-pre-platform

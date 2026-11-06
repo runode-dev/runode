@@ -33,7 +33,7 @@
 
 同步 ghostty 上游时两个子模块一起动。`vendor/ghostty` 是 runode-dev/ghostty 的 fork，等于上游 main 加几个 runode 的修复提交，一处修复一个提交，彼此独立：把这组提交一起变基到上游最新，用 `git push --force-with-lease` 推上 fork；上游自己修好了哪处，就删掉对应的提交。同一次同步里，在 `vendor/libghostty-rs` 里把 `libghostty-vt-sys` 构建脚本的 `GHOSTTY_COMMIT` 改成 ghostty fork 所基于的那个上游 commit，用 `gen-bindings` 重新生成绑定，提交并推上 fork 的 `main`；要跟进 Uzaaft 的上游时，也是把 `main` 变基到上游的 `master` 上。最后在 runode 里一起挪两个子模块的指针，绑定有变化就看 `terminal` 要不要跟着改。两边必须对齐，因为构建时编的是 `vendor/ghostty` 的源码，绑定却是照 `GHOSTTY_COMMIT` 那版头文件生成的，不一致时结构体布局可能对不上，编得过，运行时却读写错内存。
 
-GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），原样使用，根 `Cargo.toml` 里 gpui-pre 和 gpui-pre-platform 用同一个 `=` 版本钉住、一起改。要改 GPUI 平台层的行为时，先在 `desktop` 里经 raw-window-handle 拿到原生窗口自己做，比如建窗口时关掉 Metal 图层的 `displaySyncEnabled`（`window` 的 `open`）、问要不要让程序读剪贴板时自己弹 NSAlert（`window` 的 `clipboard`）；平台层内部才做得到的提给上游。
+GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），根 `Cargo.toml` 里 gpui-pre 和 gpui-pre-platform 用同一个 `=` 版本钉住、一起改。只有 macOS 平台层 gpui-pre-macos 换成 `vendor/gpui-pre-macos` 里打了补丁的一份（根 `Cargo.toml` 的 `[patch.crates-io]`），别的原样使用：那份是同版本的原样源码加上 runode 的修改，一处修改一个提交，修改也都提给上游；上游有了同样的处理就删掉对应的提交，都删光了就连目录和 patch 一起删掉。要改 GPUI 平台层的行为时，先在 `desktop` 里经 raw-window-handle 拿到原生窗口自己做，比如建窗口时关掉 Metal 图层的 `displaySyncEnabled`（`window` 的 `open`）、问要不要让程序读剪贴板时自己弹 NSAlert（`window` 的 `clipboard`）；平台层内部才做得到的提给上游。
 
 不变量：
 

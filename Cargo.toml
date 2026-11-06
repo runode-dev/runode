@@ -144,6 +144,11 @@ libloading = "0.8"
 # Linux 上没有能用的硬件编码器时的软件 H.264 编码器（BSD-2-Clause）：编进 OpenH264 的源码，不依赖系统的库。
 openh264 = "0.9"
 
+[patch.crates-io]
+# GPUI 的 macOS 平台层换成 vendor 下打了补丁的一份（虚拟机里的窗口不用 CAMetalDisplayLink 出帧，
+# `use_metal_frames`），版本和 gpui-pre 一起改。
+gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
+
 [profile.dev.package."*"]
 opt-level = 2
 
