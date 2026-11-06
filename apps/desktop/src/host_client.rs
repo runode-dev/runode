@@ -76,6 +76,9 @@ const LISTEN_RETRY: Duration = Duration::from_secs(2);
 const BUSY_RETRY: Duration = Duration::from_secs(1);
 /// 最多这么多次。
 const BUSY_TRIES: u32 = 5;
+/// 等别的桌面从旧宿主上断开时，隔这么久探一次。
+#[cfg(unix)]
+const DESKTOPS_POLL: Duration = Duration::from_millis(100);
 /// 交接后有终端的回滚历史没带过来时发的通知的标识。
 const DEGRADED_TAG: &str = "runode-handoff-degraded";
 /// 和别的桌面共用别的构建的宿主时发的通知的标识。
@@ -398,11 +401,11 @@ fn establish() {
                 }
             }
             (Choice::HandOver, Some(socket)) => {
-                let sessions = match &probe {
-                    Probe::Running { sessions, .. } => Some(*sessions),
-                    _ => None,
+                let (sessions, desktops) = match &probe {
+                    Probe::Running { sessions, desktops, .. } => (Some(*sessions), *desktops),
+                    _ => (None, 0),
                 };
-                match hand_over(socket, sessions) {
+                match hand_over(socket, sessions, desktops) {
                     Some(mode) => mode,
                     None if busy < BUSY_TRIES => {
                         busy += 1;
@@ -434,7 +437,7 @@ fn establish() {
 /// Windows 上的 ConPTY 交不出去：让 `socket` 上的旧宿主连同它的 `sessions` 个会话结束，再拉起这个
 /// 构建的宿主，会话跟着重启。旧宿主跑在另一个 app 里时不碰它，这次跑在 app 里、不开 socket。
 #[cfg(windows)]
-fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
+fn hand_over(socket: &Path, sessions: Option<usize>, _desktops: usize) -> Option<Mode> {
     match launch::end_old_host(socket, &build()) {
         Ok(launch::Ended::Exited) => tracing::info!("ended the old host and its {sessions:?} sessions to upgrade it"),
         Ok(launch::Ended::AlreadyUpgraded) => tracing::info!("the host on the socket is already this build"),
@@ -454,11 +457,15 @@ fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
 /// `sessions` 是旧宿主有几个会话，协议对不上时不知道。另一个新 app 正在交接时返回 `None`，由
 /// 调用方过一会儿重新探。
 ///
-/// 旧宿主上连着别的桌面、不交时，连上旧宿主和那边共用它。别的原因没交成时旧宿主连同会话照常跑着，这次
-/// 跑在 app 里、不开 socket（锁在它手里），弹框问用户；只有旧宿主没有会话时，没什么可丢的，让它退出、
-/// 拉起这个构建的。
+/// 旧宿主上连着别的桌面（探到的有 `desktops` 个）时它不交：等到 `handoff::DESKTOP_RETRY` 还连着，就不试交接，
+/// 连上旧宿主和那边共用它。别的原因没交成时旧宿主连同会话照常跑着，这次跑在 app 里、不开 socket（锁在它手里），
+/// 弹框问用户；只有旧宿主没有会话时，没什么可丢的，让它退出、拉起这个构建的。
 #[cfg(unix)]
-fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
+fn hand_over(socket: &Path, sessions: Option<usize>, desktops: usize) -> Option<Mode> {
+    // 刚退出的旧版 app 的连接可能还没断开：用探测等它，不为每次重试拉起一个新宿主。
+    if desktops > 0 && !desktops_left(socket) {
+        return Some(share_old_host(socket));
+    }
     let started = Instant::now();
     let outcome = match runode_paths::runode_exe() {
         Ok(exe) => handoff::hand_over(&exe, handoff::Timing::default()),
@@ -507,18 +514,7 @@ fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
             }
         }
         handoff::Outcome::Refused(HandoffRefusal::Busy) => return None,
-        // 别的桌面连着旧宿主时交不了：和它共用旧宿主，会话不跟着这个 app 退出。
-        handoff::Outcome::Refused(HandoffRefusal::DesktopConnected) => match launch::connect(&LINK, socket) {
-            Ok(()) => {
-                tracing::warn!("another runode desktop is connected to the old host, so sharing that host");
-                Mode::Standalone
-            }
-            Err(err) => {
-                tracing::warn!("another runode desktop keeps the old host, which cannot be connected to: {err}");
-                notify(Notice::OldAppRunning);
-                in_process(false)
-            }
-        },
+        handoff::Outcome::Refused(HandoffRefusal::DesktopConnected) => share_old_host(socket),
         handoff::Outcome::Refused(HandoffRefusal::NotStandalone) => {
             tracing::warn!("the host on the socket now runs inside another runode app, running this one's in the app");
             notify(Notice::OtherApp);
@@ -528,6 +524,37 @@ fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
         handoff::Outcome::Failed(reason) => failed(reason),
     };
     Some(mode)
+}
+
+/// `socket` 上的旧宿主在 `handoff::DESKTOP_RETRY` 内没有别的桌面连着了（或者探不到它了，交给交接去办）。
+#[cfg(unix)]
+fn desktops_left(socket: &Path) -> bool {
+    let deadline = Instant::now() + handoff::DESKTOP_RETRY;
+    loop {
+        if !matches!(launch::probe(socket, &build()), Probe::Running { desktops, .. } if desktops > 0) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(DESKTOPS_POLL);
+    }
+}
+
+/// 别的桌面连着旧宿主、交不了：和它们共用旧宿主，会话不跟着这个 app 退出。连不上时跑在 app 里。
+#[cfg(unix)]
+fn share_old_host(socket: &Path) -> Mode {
+    match launch::connect(&LINK, socket) {
+        Ok(()) => {
+            tracing::warn!("another runode desktop is connected to the old host, so sharing that host");
+            Mode::Standalone
+        }
+        Err(err) => {
+            tracing::warn!("another runode desktop keeps the old host, which cannot be connected to: {err}");
+            notify(Notice::OldAppRunning);
+            in_process(false)
+        }
+    }
 }
 
 /// 用户在弹框里选了结束旧宿主（连同它的会话）：在后台线程里结束它（见 `launch::end_old_host`），
