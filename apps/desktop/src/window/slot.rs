@@ -12,6 +12,7 @@ use gpui::{
 };
 
 use super::WindowView;
+use crate::ui::spinner::SpinnerLayer;
 
 /// 画这一块：在 `WindowView` 上算出要的尺寸、颜色，返回这一块的元素。
 pub(super) type RenderSlot = fn(&mut WindowView, &mut Window, &mut Context<WindowView>) -> AnyElement;
@@ -19,6 +20,8 @@ pub(super) type RenderSlot = fn(&mut WindowView, &mut Window, &mut Context<Windo
 pub(super) struct Slot {
     view: WeakEntity<WindowView>,
     render: RenderSlot,
+    /// 这一块里的转圈画在块外面的这一层，转一格不让这一块重画。
+    pub(super) spinners: SpinnerLayer,
     _watch: Subscription,
 }
 
@@ -28,6 +31,7 @@ impl Slot {
         cx.new(|cx| Self {
             view: view.downgrade(),
             render,
+            spinners: SpinnerLayer::new(cx),
             // 这一块画的都是 `WindowView` 的状态，它一通知就跟着重画。
             _watch: cx.observe(&view, |_, _, cx| cx.notify()),
         })
@@ -37,6 +41,9 @@ impl Slot {
 impl Render for Slot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render = self.render;
-        self.view.update(cx, |view, cx| render(view, window, cx)).unwrap_or_else(|_| Empty.into_any_element())
+        self.spinners.clear();
+        let content =
+            self.view.update(cx, |view, cx| render(view, window, cx)).unwrap_or_else(|_| Empty.into_any_element());
+        self.spinners.scope(content)
     }
 }

@@ -289,7 +289,7 @@ impl WindowView {
             .map(|(view, snap, bounds)| ShownSnap { id: view.entity_id(), side: snap.side, cell: bounds.clone() })
             .collect();
         if snaps.is_empty() {
-            return column.child(column_slot(panel, width, window)).into_any_element();
+            return column.child(column_slot(panel, width, window, cx)).into_any_element();
         }
         let cards = cards(cx);
         let gap = snap_gap(cards);
@@ -346,7 +346,7 @@ impl WindowView {
             below += snap.ratio * scale;
             handles.push(snap_handle(view.entity_id(), cx).bottom(relative(below)).mb(px(k as f32 * gap + offset)));
         }
-        let panel = cached_slot(panel, StyleRefinement::default().flex_1().min_h_0().w(px(width)), window);
+        let panel = cached_slot(panel, StyleRefinement::default().flex_1().min_h_0().w(px(width)), window, cx);
         column
             .when(cards, |column| column.gap(px(CARD_GAP)))
             .children(strip)

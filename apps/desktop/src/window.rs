@@ -680,28 +680,30 @@ impl WindowView {
 }
 
 /// 缓存的视图按给出的样式排版、不量里面的内容，所以这里给的尺寸要和这一块原本的一样。
-fn column_slot(slot: &Entity<Slot>, width: f32, window: &Window) -> AnyElement {
-    cached_slot(slot, StyleRefinement::default().flex_none().w(px(width)).h_full(), window)
+fn column_slot(slot: &Entity<Slot>, width: f32, window: &Window, cx: &App) -> AnyElement {
+    cached_slot(slot, StyleRefinement::default().flex_none().w(px(width)).h_full(), window, cx)
 }
 
-fn row_slot(slot: &Entity<Slot>, height: f32, window: &Window) -> AnyElement {
-    cached_slot(slot, StyleRefinement::default().flex_none().w_full().h(px(height)), window)
+fn row_slot(slot: &Entity<Slot>, height: f32, window: &Window, cx: &App) -> AnyElement {
+    cached_slot(slot, StyleRefinement::default().flex_none().w_full().h(px(height)), window, cx)
 }
 
+/// 按 `style` 在父元素里占地方，后面紧跟着画这一块的转圈（`Slot::spinners`）。
+///
 /// 辅助工具开着时不缓存：GPUI 在 prepaint 里逐帧重建报给辅助工具的节点，照搬上一帧的视图跳过了
 /// prepaint，它里面的按钮、列表就从树里消失了。
 ///
 /// shortcut: Windows 上一律不缓存，GPUI 照搬上一帧时不重放拖窗口的区域（`window_control_area`），
 /// 标题栏和侧栏就拖不动窗口；GPUI 重放它以后去掉
-fn cached_slot(slot: &Entity<Slot>, style: StyleRefinement, window: &Window) -> AnyElement {
-    if window.is_a11y_active() || cfg!(windows) {
-        // 不缓存时也按 `style` 在父元素里占地方。
-        let mut wrapper = div();
-        wrapper.style().refine(&style);
-        wrapper.child(slot.clone()).into_any_element()
+fn cached_slot(slot: &Entity<Slot>, style: StyleRefinement, window: &Window, cx: &App) -> AnyElement {
+    let mut wrapper = div();
+    wrapper.style().refine(&style);
+    let content = if window.is_a11y_active() || cfg!(windows) {
+        slot.clone().into_any_element()
     } else {
-        slot.clone().cached(style).into_any_element()
-    }
+        slot.clone().cached(StyleRefinement::default().size_full()).into_any_element()
+    };
+    wrapper.child(content).child(slot.read(cx).spinners.overlay()).into_any_element()
 }
 
 /// 经典样式下标题栏画不画、两头给红绿灯和面板开关让出多宽，画主体和画标题栏时都要。
@@ -861,7 +863,7 @@ impl Render for WindowView {
         let todo_dialog = self.todo_dialog(cx);
         let asking = ask.is_some();
         let status_bar = (self.settings_page().is_none() && status_bar::shown(cx))
-            .then(|| row_slot(&self.slots(cx).status_bar, status_bar::STATUS_BAR_HEIGHT, window));
+            .then(|| row_slot(&self.slots(cx).status_bar, status_bar::STATUS_BAR_HEIGHT, window, cx));
         // 这几个浮层挡住了后面的界面，开着时后面的不报给辅助工具。
         let modal = agent_picker.is_some()
             || arrange_picker.is_some()
@@ -1079,7 +1081,7 @@ impl WindowView {
             cx.defer_in(window, |this, window, cx| this.close_menu(window, cx));
         }
         let panes = self.render_panes(window, cx);
-        let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window));
+        let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window, cx));
         let sidebar_toggle = (titlebar_shown || sidebar.is_some()).then(|| self.render_sidebar_toggle(fullscreen, cx));
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
@@ -1099,7 +1101,7 @@ impl WindowView {
                 .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
                 .right(px(project::TOGGLE_MARGIN + titlebar::window_controls_width(window)))
         });
-        let titlebar = titlebar_shown.then(|| row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window));
+        let titlebar = titlebar_shown.then(|| row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window, cx));
         let panes = covered_panes(panes, front_preview.is_some());
         let main = div()
             .flex_1()
@@ -1215,7 +1217,7 @@ impl WindowView {
         let fullscreen = window.is_fullscreen();
         let viewport = f32::from(window.viewport_size().width);
         let panes = self.render_panes(window, cx);
-        let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window));
+        let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window, cx));
         let sidebar_toggle = self.render_sidebar_toggle(fullscreen, cx);
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
@@ -1232,7 +1234,7 @@ impl WindowView {
             let right = self.right_divider_offset(widths, true);
             self.render_right_handle(Divider::Panel, right, cx)
         });
-        let titlebar = row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window);
+        let titlebar = row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window, cx);
         let panes = covered_panes(panes, front_preview.is_some());
         let content = div()
             .flex_1()
