@@ -454,13 +454,18 @@ fn watch(outbox: &Outbox, reported: runode_screen::Permissions) -> StopFlag {
     StopFlag(stop)
 }
 
-/// 这台电脑现在的授权。macOS 上另起 `runode --screen-permissions` 来查，起不来时退回本进程里查到的。
+/// `runode --screen-permissions` 最多等这么久，卡住了就结束它：`watch` 在同一个线程里报锁屏，不能跟着卡住。
+#[cfg(target_os = "macos")]
+const PERMISSIONS_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// 这台电脑现在的授权。macOS 上另起 `runode --screen-permissions` 来查，查不成时退回本进程里查到的。
 #[cfg(target_os = "macos")]
 fn current_permissions() -> runode_screen::Permissions {
-    use std::process::{Command, Stdio};
-    let output = std::env::current_exe().and_then(|exe| {
-        Command::new(exe).arg("--screen-permissions").stdin(Stdio::null()).stderr(Stdio::null()).output()
-    });
+    use crate::subprocess::{RunError, output_within};
+    let output = match runode_paths::runode_exe() {
+        Ok(exe) => output_within(std::process::Command::new(exe).arg("--screen-permissions"), PERMISSIONS_TIMEOUT),
+        Err(err) => Err(RunError::Spawn(err)),
+    };
     match output {
         Ok(output) if output.status.success() => {
             if let [screen_capture, post_event] = output.stdout[..] {
@@ -472,7 +477,7 @@ fn current_permissions() -> runode_screen::Permissions {
             tracing::warn!("cannot read the permissions: {:?}", String::from_utf8_lossy(&output.stdout));
         }
         Ok(output) => tracing::warn!("cannot check the permissions: {}", output.status),
-        Err(err) => tracing::warn!("cannot check the permissions: {err}"),
+        Err(err) => tracing::warn!("cannot check the permissions: {err:?}"),
     }
     runode_screen::permissions()
 }
