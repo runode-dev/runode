@@ -29,11 +29,11 @@ Runode 用 [Ghostty](https://ghostty.org) 的 libghostty-vt 做终端仿真，�
 ## 特性
 
 - **认得出 agent**：认出 Claude Code、Codex、Gemini CLI、Cursor、OpenCode、Amp 等二十多种 agent，在标签和侧栏上标出它在工作、在等你，还是干完了你还没看。
-- **提醒与跳转**：你没在看时发通知、出提示音；`⌘⇧A` 列出所有窗口里的 agent，`⌘⌥A` 直接跳到下一个需要你的。
+- **提醒与跳转**：你没在看时发通知、出提示音；`⌘⇧A` 列出所有窗口里的 agent，`⌘⌥A` 直接跳到下一个需要你的。程序用 OSC 9、OSC 777 发的通知也转成系统通知。
 - **从标签菜单起 agent**：新建标签的菜单列出工作区所在机器上装着的 agent，本机和 SSH 主机都行，点一下就在新标签里起它，`⌃⌘1` 到 `⌃⌘9` 按序号开。Windows 上还能挑 PowerShell、命令提示符或 Git Bash。
 - **可编程**：自带 `runode` 命令行，能列出、读取、操作每个终端。agent 能用它在旁边的窗格跑命令、等结果、读输出，或者指挥另一个 agent。
   <br><img src="docs/agents.gif" alt="两个 Claude Code 窗格：左边在问问题，右边在下方新窗格里跑 cargo test 并总结结果" width="900">
-- **会话常驻**：打开 `terminal-host` 后，会话由独立的宿主进程持有，退出、重开、升级 app 都不断。
+- **会话常驻**：打开 `terminal-host` 后，会话由独立的宿主进程持有，退出、重开、升级 app 都不断。不得不重开的窗格会接着 Claude Code 上次的对话。
 - **SSH 远端主机**：新建工作区时选一台主机，Runode 调系统的 OpenSSH 连过去，需要时自动装好 runode，断线后自动接回。终端、文件树、Git 面板和预览都直接读写那台机器，macOS、Linux、Windows 都行。粘贴的截图和拖进来的文件先传到那台主机，点开 localhost 网址自动把端口转到本机。
 - **配对另一台电脑**：和别的电脑上的 Runode 配对后，它的终端、文件、Git、端口转发和远程桌面都能像 SSH 主机一样用。
 - **手机远程**：iOS app 和电脑配对，连接用 TLS 1.3 加密。在同一个网络里直连，不在时经 [iroh](https://iroh.computer) 按公钥连过来，能打洞就直连，打不通走中继。在手机上能看终端、回复 agent、新开 agent、跑命令、提交 git。
@@ -44,8 +44,10 @@ Runode 用 [Ghostty](https://ghostty.org) 的 libghostty-vt 做终端仿真，�
 - **看板**：给 agent 派活的看板。到了定的时间自动开终端、起 agent 做任务，任务的 PR 合并后自动标完成。agent 也能用 `runode todo`、`runode schedule` 操作它。
   <br><img src="docs/kanban.gif" alt="看板：新加一个任务，启动两个任务，它们挪到需要你，其中一个标为完成" width="900">
 - **浮动分屏**：分屏能浮到别的分屏上面、再停靠回去，能挪到别的标签或工作区，终端和远程桌面还能拖出去变成单独的窗口。
-- **项目面板**：文件树、带语法高亮且能编辑保存的文件预览，加上 Git 面板，能按块暂存、提交、切分支、推拉。
+- **项目命令**：`⌘⇧R` 列出项目的 Makefile 目标、package.json scripts 和你自己加的命令，在旁边的分屏里跑，每个项目能给它们绑各自的快捷键。
+- **项目面板**：文件树、带语法高亮且能编辑保存的文件预览，加上 Git 面板，能按块暂存、提交、切分支、推拉。提交说明可以让大模型写，diff 的一块改动点一下就交给当前终端里的 agent，GitHub Actions 页能看仓库的工作流运行。
   <br><img src="docs/panels.gif" alt="文件树、Markdown 和 Rust 文件预览，以及 Git 面板暂存一块改动并提交" width="900">
+- **状态栏**：agent 干活时不让电脑睡眠，显示内存占用和在监听的端口，能把 SSH 主机上的端口转到本机。
 - **兼容 Ghostty**：直接读你现有的 Ghostty 配置和主题。支持 Kitty 图形协议，`kitten icat` 这类程序输出的图片在电脑和手机上都能看到。
 - **原生**：Rust 写成，不是 Electron。界面有简体中文、繁体中文和英文，支持自动更新。
 

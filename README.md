@@ -29,11 +29,11 @@ Runode uses [Ghostty](https://ghostty.org)'s libghostty-vt for terminal emulatio
 ## Features
 
 - **Agent-aware**: recognizes 20+ agents, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode and Amp, and marks each tab and sidebar entry as working, waiting for you, or done but unread.
-- **Notifications and jumping**: notifies you and plays a sound when you're not looking. `⌘⇧A` lists the agents in every window, and `⌘⌥A` jumps straight to the next one that needs you.
+- **Notifications and jumping**: notifies you and plays a sound when you're not looking. `⌘⇧A` lists the agents in every window, and `⌘⌥A` jumps straight to the next one that needs you. Notifications that programs send with OSC 9 or OSC 777 become system notifications too.
 - **Start agents from the tab menu**: the new tab menu lists the agents installed on the workspace's machine, local or over SSH, and starts one in a new tab; `⌃⌘1` to `⌃⌘9` open them by number. On Windows it also picks between PowerShell, Command Prompt and Git Bash.
 - **Scriptable**: the built-in `runode` CLI lists, reads and drives every terminal. Agents use it to run commands in a neighbouring pane, wait for them, read the output, or direct another agent.
   <br><img src="docs/agents.gif" alt="Two Claude Code panes: the left one asks a question, the right one runs cargo test in a new pane below and summarizes it" width="900">
-- **Persistent sessions**: with `terminal-host` on, sessions live in a separate host process and survive quitting, relaunching and upgrading the app.
+- **Persistent sessions**: with `terminal-host` on, sessions live in a separate host process and survive quitting, relaunching and upgrading the app. A pane that has to start over picks its Claude Code conversation back up.
 - **SSH hosts**: pick a host when you create a workspace. Runode connects with your system's OpenSSH, installs runode there when needed and reconnects after a drop. Terminals, the file tree, the Git panel and previews work directly on that machine, whether it runs macOS, Linux or Windows. Pasted screenshots and dropped files are uploaded to it, and localhost links are forwarded to your machine.
 - **Pair another computer**: pair with Runode on another computer and use its terminals, files, Git, port forwarding and remote desktop the same way as an SSH host.
 - **Remote from your phone**: the iOS app pairs with your computer over a TLS 1.3 connection. On the same network it connects directly; elsewhere it reaches your computer through [iroh](https://iroh.computer) by public key, punching a direct path and falling back to a relay. From your phone you can watch terminals, answer agents, start a new agent, run tasks and commit to git.
@@ -44,8 +44,10 @@ Runode uses [Ghostty](https://ghostty.org)'s libghostty-vt for terminal emulatio
 - **Task board**: a kanban board for agent work. A schedule opens a terminal and starts an agent on a task at the time you set, and a task whose PR gets merged is marked done. Agents use it too, through `runode todo` and `runode schedule`.
   <br><img src="docs/kanban.gif" alt="Task board: a new task is added, two tasks start, move to Needs You, and one is marked done" width="900">
 - **Floating panes**: float a pane over the others and dock it back, move panes between tabs and workspaces, or drag a terminal or remote desktop out into a window of its own.
-- **Project panels**: a file tree, syntax-highlighted previews you can edit and save, and a Git panel that can stage hunks, commit, switch branches, and pull or push.
+- **Project commands**: `⌘⇧R` lists the project's Makefile targets, package.json scripts and commands you add yourself. They run in a split beside you, and each project can bind its own shortcuts to them.
+- **Project panels**: a file tree, syntax-highlighted previews you can edit and save, and a Git panel that can stage hunks, commit, switch branches, and pull or push. An LLM can write the commit message, a diff hunk goes to the agent in the current terminal with one click, and a GitHub Actions page shows the repository's workflow runs.
   <br><img src="docs/panels.gif" alt="File tree, Markdown and Rust previews, and the Git panel staging a hunk and committing" width="900">
+- **Status bar**: keeps the computer awake while an agent works, shows memory use and listening ports, and forwards ports from SSH hosts to your machine.
 - **Ghostty compatible**: reads your existing Ghostty config and themes. Images sent with the Kitty graphics protocol, such as from `kitten icat`, show up on your computer and your phone.
 - **Native**: written in Rust, not Electron. The UI comes in English, Simplified Chinese and Traditional Chinese, and the app updates itself.
 
