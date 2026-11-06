@@ -458,26 +458,32 @@ fn watch(outbox: &Outbox, reported: runode_screen::Permissions) -> StopFlag {
 #[cfg(target_os = "macos")]
 const PERMISSIONS_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// 这台电脑现在的授权。macOS 上另起 `runode --screen-permissions` 来查，查不成时退回本进程里查到的。
+/// 这台电脑现在的授权。macOS 上另起 `runode --screen-permissions` 来查，查不成时退回本进程里查到的。`watch`
+/// 每秒都查，接连查不成时只记第一次。
 #[cfg(target_os = "macos")]
 fn current_permissions() -> runode_screen::Permissions {
     use crate::subprocess::{RunError, output_within};
+    static FAILING: AtomicBool = AtomicBool::new(false);
     let output = match runode_paths::runode_exe() {
         Ok(exe) => output_within(std::process::Command::new(exe).arg("--screen-permissions"), PERMISSIONS_TIMEOUT),
         Err(err) => Err(RunError::Spawn(err)),
     };
-    match output {
-        Ok(output) if output.status.success() => {
-            if let [screen_capture, post_event] = output.stdout[..] {
+    let failure = match output {
+        Ok(output) if output.status.success() => match output.stdout[..] {
+            [screen_capture, post_event] => {
+                FAILING.store(false, Ordering::Relaxed);
                 return runode_screen::Permissions {
                     screen_capture: screen_capture == b'1',
                     post_event: post_event == b'1',
                 };
             }
-            tracing::warn!("cannot read the permissions: {:?}", String::from_utf8_lossy(&output.stdout));
-        }
-        Ok(output) => tracing::warn!("cannot check the permissions: {}", output.status),
-        Err(err) => tracing::warn!("cannot check the permissions: {err:?}"),
+            _ => format!("unexpected output {:?}", String::from_utf8_lossy(&output.stdout)),
+        },
+        Ok(output) => output.status.to_string(),
+        Err(err) => format!("{err:?}"),
+    };
+    if !FAILING.swap(true, Ordering::Relaxed) {
+        tracing::warn!("cannot check the permissions, using this process's: {failure}");
     }
     runode_screen::permissions()
 }
