@@ -78,6 +78,8 @@ const BUSY_RETRY: Duration = Duration::from_secs(1);
 const BUSY_TRIES: u32 = 5;
 /// 交接后有终端的回滚历史没带过来时发的通知的标识。
 const DEGRADED_TAG: &str = "runode-handoff-degraded";
+/// 和别的桌面共用别的构建的宿主时发的通知的标识。
+const SHARED_TAG: &str = "runode-shared-host";
 
 pub(crate) fn build() -> BuildId {
     BuildId(env!("RUNODE_BUILD").into())
@@ -118,9 +120,9 @@ pub enum Notice {
     /// 交接成了，但 `count` 个终端退成了重放，回滚历史没带过来。不用用户做什么，不弹框。
     #[cfg_attr(not(unix), expect(dead_code, reason = "Windows 上不交接"))]
     HandoffDegraded { count: usize },
-    /// 旧版本的 app 还开着：它连着旧宿主、旧宿主不交（`HandoffRefusal::DesktopConnected`），或者
-    /// 用户要结束的旧宿主其实跑在它的进程里（见 `launch::Ended::NotAHost`）。这次跑在 app 里、
-    /// 不开 socket，请用户先退出旧版本。
+    /// 旧版本的 app 还开着：旧宿主上连着桌面、不交（`HandoffRefusal::DesktopConnected`），这个 app 又
+    /// 连不上旧宿主，或者用户要结束的旧宿主其实跑在它的进程里（见 `launch::Ended::NotAHost`）。这次跑在
+    /// app 里、不开 socket，请用户先退出旧版本。
     OldAppRunning,
     /// 用户要结束旧宿主，socket 上却已经是这个构建的宿主了（交接其实成了，或者另一个同版本的
     /// app 让它接手了）：没结束它，会话在它那里；这个 app 已经跑着自己的宿主，下次打开时连上它。
@@ -128,6 +130,9 @@ pub enum Notice {
     /// 连上的单独宿主是别的构建（`host` 是它报的构建号）：交接时又被别的版本接手了之类。终端照常
     /// 能用，提醒用户退出后重新打开，让这个构建的宿主接手。
     BuildMismatch { host: String },
+    /// 连上的单独宿主是别的构建（`host`），上面还连着别的桌面（这台电脑上别的版本的 app，或者别的电脑
+    /// 经 ssh 连过来的）：交接不了，和它们共用这个宿主。终端照常能用，只发一条系统通知，不弹框。
+    SharedHost { host: String },
 }
 
 fn notify(notice: Notice) {
@@ -378,11 +383,19 @@ fn establish() {
                 Ok(()) => Mode::Standalone,
                 Err(err) => fall_back(err),
             },
-            // 旧宿主上还连着旧版本的 app：结束它会连带结束那个 app 里开着的终端，不碰它。
+            // 旧宿主上还连着别的桌面：结束它会连带结束那边开着的终端，不碰它，和那边共用它。
             #[cfg(windows)]
-            (Choice::HandOver, Some(_)) if matches!(probe, Probe::Running { desktops, .. } if desktops > 0) => {
-                notify(Notice::OtherApp);
-                in_process(false)
+            (Choice::HandOver, Some(socket)) if matches!(probe, Probe::Running { desktops, .. } if desktops > 0) => {
+                match launch::connect(&LINK, socket) {
+                    Ok(()) => Mode::Standalone,
+                    Err(err) => {
+                        tracing::warn!(
+                            "cannot connect to the old host another desktop uses, running one in the app: {err}"
+                        );
+                        notify(Notice::OtherApp);
+                        in_process(false)
+                    }
+                }
             }
             (Choice::HandOver, Some(socket)) => {
                 let sessions = match &probe {
@@ -411,8 +424,9 @@ fn establish() {
         && let Some(theirs) = LINK.host_build()
         && theirs != build
     {
-        tracing::warn!("connected to a host of build {theirs:?}, this app is {build:?}");
-        notify(Notice::BuildMismatch { host: theirs.0 });
+        let shared = LINK.other_desktops_at_connect() > 0;
+        tracing::warn!("connected to a host of build {theirs:?}, this app is {build:?}, shared: {shared}");
+        notify(if shared { Notice::SharedHost { host: theirs.0 } } else { Notice::BuildMismatch { host: theirs.0 } });
     }
     *MODE.lock().unwrap_or_else(PoisonError::into_inner) = mode;
 }
@@ -440,8 +454,9 @@ fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
 /// `sessions` 是旧宿主有几个会话，协议对不上时不知道。另一个新 app 正在交接时返回 `None`，由
 /// 调用方过一会儿重新探。
 ///
-/// 没交成时旧宿主连同会话照常跑着，这次跑在 app 里、不开 socket（锁在它手里），弹框问用户；只有
-/// 旧宿主没有会话时，没什么可丢的，让它退出、拉起这个构建的。
+/// 旧宿主上连着别的桌面、不交时，连上旧宿主和那边共用它。别的原因没交成时旧宿主连同会话照常跑着，这次
+/// 跑在 app 里、不开 socket（锁在它手里），弹框问用户；只有旧宿主没有会话时，没什么可丢的，让它退出、
+/// 拉起这个构建的。
 #[cfg(unix)]
 fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
     let started = Instant::now();
@@ -492,11 +507,18 @@ fn hand_over(socket: &Path, sessions: Option<usize>) -> Option<Mode> {
             }
         }
         handoff::Outcome::Refused(HandoffRefusal::Busy) => return None,
-        handoff::Outcome::Refused(HandoffRefusal::DesktopConnected) => {
-            tracing::warn!("an older runode app is still connected to the old host, running the host in the app");
-            notify(Notice::OldAppRunning);
-            in_process(false)
-        }
+        // 别的桌面连着旧宿主时交不了：和它共用旧宿主，会话不跟着这个 app 退出。
+        handoff::Outcome::Refused(HandoffRefusal::DesktopConnected) => match launch::connect(&LINK, socket) {
+            Ok(()) => {
+                tracing::warn!("another runode desktop is connected to the old host, so sharing that host");
+                Mode::Standalone
+            }
+            Err(err) => {
+                tracing::warn!("another runode desktop keeps the old host, which cannot be connected to: {err}");
+                notify(Notice::OldAppRunning);
+                in_process(false)
+            }
+        },
         handoff::Outcome::Refused(HandoffRefusal::NotStandalone) => {
             tracing::warn!("the host on the socket now runs inside another runode app, running this one's in the app");
             notify(Notice::OtherApp);
@@ -717,6 +739,7 @@ pub fn show_notice(cx: &mut App) {
     for notice in take_notice() {
         match notice {
             Notice::HandoffDegraded { count } => report_degraded(count, cx),
+            Notice::SharedHost { host } => report_shared(&host, cx),
             notice => last = Some(notice),
         }
     }
@@ -748,7 +771,7 @@ pub fn show_notice(cx: &mut App) {
             rust_i18n::t!("host.build_mismatch_detail", host = host, app = build().0),
             false,
         ),
-        Notice::HandoffDegraded { .. } => return,
+        Notice::HandoffDegraded { .. } | Notice::SharedHost { .. } => return,
     };
     // 默认（第一个）按钮留着旧宿主。
     let answers = if end {
@@ -761,6 +784,16 @@ pub fn show_notice(cx: &mut App) {
             end_old_host(cx);
         }
     });
+}
+
+/// 和别的桌面共用 `host` 这个构建的宿主：发一条系统通知。
+fn report_shared(host: &str, cx: &mut App) {
+    crate::alerts::notify(
+        SHARED_TAG.into(),
+        rust_i18n::t!("host.build_mismatch_title").into_owned(),
+        rust_i18n::t!("host.shared_host_detail", host = host, app = build().0).into_owned(),
+        cx,
+    );
 }
 
 /// 交接后 `count` 个终端的回滚历史没带过来：记日志，发一条系统通知。

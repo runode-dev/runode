@@ -293,6 +293,8 @@ struct State {
     host_build: Option<BuildId>,
     /// 现在这条连接上的宿主的进程号，见 `Link::host_pid`。
     host_pid: Option<u32>,
+    /// 连上时宿主上另外连着几个桌面，见 `Link::other_desktops_at_connect`。
+    other_desktops: u32,
     /// 现在这条连接上的宿主认得看板的消息，见 `Link::host_knows_todos`。
     todos: bool,
     /// 现在这条连接上的宿主认得 `ListShells`、`FindCommands`，不认得时这两条不发。
@@ -582,6 +584,7 @@ impl Link {
             state.snapshots = snapshots;
             state.host_build = Some(welcome.build);
             state.host_pid = Some(host_pid);
+            state.other_desktops = welcome.desktops;
             state.todos = welcome.todos;
             state.shells = welcome.shells;
             state.os = welcome.os;
@@ -665,6 +668,11 @@ impl Link {
     /// 最近一次连上的宿主在 `Welcome` 里报的家目录（宿主所在的用户的）；没报时为 `None`。
     pub fn host_home(&self) -> Option<PathBuf> {
         self.inner.state().home.clone()
+    }
+
+    /// 最近一次连上时宿主在 `Welcome` 里报的、这个 app 之外连着的桌面数；宿主没报时为 0。
+    pub fn other_desktops_at_connect(&self) -> u32 {
+        self.inner.state().other_desktops
     }
 
     /// 最近一次连上的宿主在 `Welcome` 里报的进程号；宿主跑在 app 里时就是 app 自己。
@@ -1022,6 +1030,7 @@ struct Welcome {
     build: BuildId,
     todos: bool,
     shells: bool,
+    desktops: u32,
     os: String,
     home: Option<PathBuf>,
 }
@@ -1046,9 +1055,28 @@ fn handshake(stream: &UnixStream, build: &BuildId, timeout: Duration) -> Result<
             None => return Err(ConnectError::Closed),
             Some(frame) if frame.kind == FrameKind::Control => match frame.message::<HostMsg>() {
                 Ok(HostMsg::Welcome {
-                    host_pid, snapshot_format, standalone, build, todos, shells, os, home, ..
+                    host_pid,
+                    snapshot_format,
+                    standalone,
+                    build,
+                    todos,
+                    shells,
+                    desktops,
+                    os,
+                    home,
+                    ..
                 }) => {
-                    break Ok(Welcome { host_pid, snapshot_format, standalone, build, todos, shells, os, home });
+                    break Ok(Welcome {
+                        host_pid,
+                        snapshot_format,
+                        standalone,
+                        build,
+                        todos,
+                        shells,
+                        desktops,
+                        os,
+                        home,
+                    });
                 }
                 Ok(HostMsg::Incompatible { reason, .. }) => break Err(ConnectError::Incompatible(reason)),
                 Ok(HostMsg::Goodbye { .. }) => break Err(ConnectError::Closed),

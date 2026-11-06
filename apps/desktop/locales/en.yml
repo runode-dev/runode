@@ -115,6 +115,7 @@ host:
   already_upgraded_detail: "The terminal host is already running this version of Runode: the old terminals moved over after all, and none were ended. This window still runs its own terminals; quit and reopen Runode to see the moved ones."
   build_mismatch_title: The terminal host runs a different version of Runode
   build_mismatch_detail: "The terminal host is %{host} and this app is %{app}. Terminals work as usual, but some features may not match. Quit and reopen Runode to let this version take over the terminals."
+  shared_host_detail: "The terminal host is %{host} and this app is %{app}. Another Runode is still connected to it (a different version on this computer, or another computer over SSH), so this app shares that host instead of taking it over. Terminals work as usual, but some features may not match. Once the other one disconnects, reopen Runode to let this version take over the terminals."
   degraded_title: Runode was updated
   degraded_detail: "Scrollback history couldn't be carried over for some terminals (%{count}). Their screens and running programs are fine."
 workspace:

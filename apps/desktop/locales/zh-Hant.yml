@@ -115,6 +115,7 @@ host:
   already_upgraded_detail: "終端機宿主已經是這個版本的 Runode，舊的終端機最後還是交了過來，一個都沒有終止，照常執行。這個視窗仍用自己的終端機；結束後重新開啟 Runode 就能看到交過來的終端機。"
   build_mismatch_title: 終端機宿主和這個 Runode 的版本不一致
   build_mismatch_detail: 終端機宿主是 %{host}，這個 app 是 %{app}。終端機照常能用，但有些功能可能對不上。結束 Runode 後重新開啟，會讓這個版本的宿主接手終端機。
+  shared_host_detail: 終端機宿主是 %{host}，這個 app 是 %{app}。宿主上還連著別的 Runode（這台電腦上別的版本，或者別的電腦經 SSH 連過來的），終端機交不過來，這個 app 和它共用宿主，終端機照常能用，但有些功能可能對不上。那邊都斷開後重新開啟 Runode，會讓這個版本的宿主接手終端機。
   degraded_title: Runode 已更新
   degraded_detail: 升級時有 %{count} 個終端機的捲動紀錄沒能帶過來，畫面和正在執行的程式都不受影響。
 workspace:
