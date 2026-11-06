@@ -21,6 +21,9 @@ use gpui::{
 /// 所有转圈共用的起点：同一种转圈在哪儿都转到同一格。
 static EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
 
+/// 每格至少停这么久：转一格整个窗口都要重新提交一帧，转得比这快的放慢到这个速度。
+const MIN_FRAME_TIME: Duration = Duration::from_millis(250);
+
 /// 缓存的字形超过这么多套时整个清空：只有字体、字号不断变化才会到。
 const SHAPED_LIMIT: usize = 64;
 
@@ -149,8 +152,8 @@ trait Ticking: 'static + Sized {
     }
 }
 
-/// 在 `id` 处画一个按 `frames` 转的圈，每格停 `frame_time`。字体、字号和颜色跟着外面的文字样式，
-/// 占的宽是最宽那格的宽，每格在里面居中。
+/// 在 `id` 处画一个按 `frames` 转的圈，每格停 `frame_time`，至少 `MIN_FRAME_TIME`。字体、字号和颜色
+/// 跟着外面的文字样式，占的宽是最宽那格的宽，每格在里面居中。
 pub fn spinner(id: impl Into<ElementId>, frames: &'static [&'static str], frame_time: Duration) -> impl IntoElement {
     SpinnerSlot { id: id.into(), frames, frame_time }
 }
@@ -277,7 +280,7 @@ impl Element for Glyphs {
         let frames: &'static [&'static str] = if self.frame_time.is_zero() { &self.frames[..1] } else { self.frames };
         let spin = Spin {
             frames,
-            frame_time: self.frame_time,
+            frame_time: self.frame_time.max(MIN_FRAME_TIME),
             shaped,
             bounds,
             mask: window.content_mask(),
