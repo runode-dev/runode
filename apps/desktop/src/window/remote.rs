@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use futures::StreamExt as _;
 use gpui::{AnyWindowHandle, App, Context, Entity, EntityId, Task, Window, WindowHandle};
 use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
-use runode_types::pane::Axis;
+use runode_types::{grid::GridSize, pane::Axis};
 
 use super::persist::format;
 use super::{WindowView, agents::reveal, cards, clipboard, layout_report};
@@ -324,6 +324,14 @@ pub(crate) fn front_any_window(cx: &App) -> Option<AnyWindowHandle> {
     cx.active_window().or_else(|| cx.window_stack()?.into_iter().next()).or_else(|| cx.windows().into_iter().next())
 }
 
+/// 别的进程要开的终端开在显示着的地方时，shell 要等下一次布局量出实际尺寸才启动（`TerminalView::start`）；
+/// 窗口看不见（锁屏、被盖住、最小化）时平台不出帧，那次布局等不来，按 `size` 当场启动，显示出来时再按实际尺寸改。
+fn start_unseen(view: &Entity<TerminalView>, size: GridSize, window: &mut Window, cx: &mut App) {
+    if !window.is_visible() {
+        view.update(cx, |view, cx| view.start_at(size, window, cx));
+    }
+}
+
 pub(crate) fn windows(cx: &App) -> Vec<WindowHandle<WindowView>> {
     cx.windows().into_iter().filter_map(|window| window.downcast::<WindowView>()).collect()
 }
@@ -348,7 +356,9 @@ impl WindowView {
             let (host, fallback) = (self.workspace().host.clone(), self.workspace().dir.clone());
             let cwd = format::start_dir(cwd.as_deref(), &fallback);
             let view = self.spawn_terminal_on(&host, Some(&cwd), Some(&fallback), window, cx)?;
+            let size = self.reference_size(cx);
             self.insert_tab(0, view.clone(), window, cx);
+            start_unseen(&view, size, window, cx);
             return Some(view);
         };
         let (wi, ti) = self.locate(beside)?;
@@ -376,12 +386,14 @@ impl WindowView {
                 }
             }
         }
+        // 旁边那个终端在后台标签里时没有界面这份 VT，尺寸是它最后量出的。
+        let size = near.read(cx).size();
         if !focus {
-            // 旁边那个终端在后台标签里时没有界面这份 VT，尺寸是它最后量出的。
-            let size = near.read(cx).size();
             view.update(cx, |view, cx| view.start_at(size, window, cx));
             // 开在不显示的标签里的，到时丢掉界面这份 VT。
             self.sync_visibility(window, cx);
+        } else {
+            start_unseen(&view, size, window, cx);
         }
         self.save(cx);
         cx.notify();
@@ -413,12 +425,13 @@ impl WindowView {
             }
             // 恢复布局时看不见的终端要等显示出来才开会话，见 `TerminalView::deferred`。
             let view = self.spawn_terminal_on(host, Some(dir), None, window, cx).ok_or("could not start a terminal")?;
+            let size = self.reference_size(cx);
             if wi == self.active && self.tab().is_none() {
                 // 显示着的空 workspace：新标签当场显示出来。
                 self.insert_tab(0, view.clone(), window, cx);
+                start_unseen(&view, size, window, cx);
                 return Ok(view);
             }
-            let size = self.reference_size(cx);
             let tab = self.single_pane_tab(view.clone(), window, cx);
             self.workspaces[wi].tabs.push(tab);
             view.update(cx, |view, cx| view.start_at(size, window, cx));
@@ -429,10 +442,11 @@ impl WindowView {
         }
         let view = self.spawn_terminal_on(host, Some(dir), None, window, cx).ok_or("could not start a terminal")?;
         let ix = self.active + 1;
+        let size = self.reference_size(cx);
         if focus {
             self.insert_workspace(ix, dir.to_path_buf(), name, view.clone(), window, cx);
+            start_unseen(&view, size, window, cx);
         } else {
-            let size = self.reference_size(cx);
             self.add_workspace(ix, dir.to_path_buf(), name, view.clone(), window, cx);
             view.update(cx, |view, cx| view.start_at(size, window, cx));
             // 开在不显示的 workspace 里，到时丢掉界面这份 VT。
