@@ -46,7 +46,8 @@ pub fn connect() -> io::Result<UnixStream> {
         match UnixStream::connect(&socket) {
             Ok(stream) => return Ok(stream),
             Err(err) if deadline.is_none() => {
-                tracing::info!("starting the screen process: {err}");
+                tracing::debug!("cannot connect to the screen socket: {err}");
+                tracing::info!("no screen process is running, starting one");
                 _launched = Some(launch(&screen_exe()?)?);
                 deadline = Some(Instant::now() + START_TIMEOUT);
             }
