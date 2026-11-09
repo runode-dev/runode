@@ -2,8 +2,8 @@
 //! 监听就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上，要远程桌面的接到采集进程上
 //! （`screen_process::client::connect_or_explain`），要电脑识别录音的接到 `dictation::remote`，别的电脑要读写项目的
 //! 接到本进程里起的项目服务上（`connect_project`）。开关（配置项
-//! `remote-access`）、端口（`remote-access-port`）和给手机看的名字（`remote-access-name`）随配置变，
-//! 几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
+//! `remote-access`）、端口（`remote-access-port`）、给手机看的名字（`remote-access-name`）和在哪听、
+//! 经不经互联网（`remote-access-address`，见 `wanted`）随配置变，几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
 //! 这几项和 `apns-*`）同样随配置变，见 `push_settings`。
 //!
 //! 宿主跑在 app 里时，app 每次应用配置都告诉它（见 `host_client::configure`）；单独跑的宿主
@@ -26,21 +26,29 @@ use std::{
 use runode_config::Config;
 use runode_host::Host;
 use runode_protocol::remote::ChannelRefusal;
-use runode_remote::{ApnsKey, Bind, Connect, Options, PushSettings, Service};
+use runode_remote::{ApnsKey, Bind, Connect, Listen, Options, PushSettings, Service};
 
 use crate::host_client::UnixStream;
 
 /// 盯不了文件时，单独跑的宿主隔多久看一次配置文件、设备表和配对口令；有配对口令在等时也按它看过期没有。
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 
-/// 配置要远程访问开在哪个端口；关着时为 `None`。
-pub fn wanted_port(config: &Config) -> Option<u16> {
-    config.remote_access.then_some(config.remote_access_port)
+/// 配置要远程访问怎么开；关着时为 `None`。`remote-access-address` 是未指定地址（`0.0.0.0`、`::`）时
+/// 听所有网卡、另开跨网络的端点，没配时听所有网卡、只限局域网，是别的地址时只听它、只限局域网。
+pub fn wanted(config: &Config) -> Option<Listen> {
+    config.remote_access.then(|| {
+        let (bind, tunnel) = match config.remote_access_address {
+            None => (Bind::All, false),
+            Some(addr) if addr.is_unspecified() => (Bind::All, true),
+            Some(addr) => (Bind::Addr(addr), false),
+        };
+        Listen { port: config.remote_access_port, name: config.remote_access_name.clone(), bind, tunnel }
+    })
 }
 
-/// 远程访问照配置 `config` 开在 `port` 上（为空时关着）、用配置里的名字，推送也照配置设。
-pub fn apply(service: &Service, port: Option<u16>, config: &Config) {
-    service.set(port, config.remote_access_name.clone());
+/// 远程访问照 `listen` 开着（为空时关着），推送照配置 `config` 设。
+pub fn apply(service: &Service, listen: Option<Listen>, config: &Config) {
+    service.set(listen);
     service.set_push(push_settings(config));
 }
 
@@ -83,7 +91,7 @@ pub fn service(host: &Host) -> Option<Service> {
         bind: Bind::All,
         host_name: None,
         advertise: true,
-        tunnel: true,
+        tunnel: false,
         connect,
         connect_screen: Arc::new(crate::screen_process::client::connect_or_explain),
         connect_speech: Arc::new(crate::dictation::remote::connect),
@@ -122,7 +130,7 @@ pub fn follow_config(host: &Host) -> Option<Following> {
     let config = Config::load(true);
     let seen = crate::config::seen_after(&before, &config);
     let dirs = runode_paths::Dirs::from_env();
-    apply(&service, wanted_port(&config), &config);
+    apply(&service, wanted(&config), &config);
     let mut stay = StayUp::default();
     host.set_stay_up(stay.check(&config, &dirs));
     let weak = Arc::downgrade(&service);
@@ -205,7 +213,7 @@ fn watch(
             // 重读可能引入新的文件（比如换了主题），按新配置重新记录；读之前就盯着的用读之前取的
             // 时间，读的时候有人写进来下一轮照样重读。
             seen = crate::config::seen_after(&stamp, &config);
-            apply(&service, wanted_port(&config), &config);
+            apply(&service, wanted(&config), &config);
         }
         host.set_stay_up(stay.check(&config, dirs));
     }
@@ -289,9 +297,25 @@ mod tests {
     #[test]
     fn the_default_port_is_the_protocol_default() {
         assert_eq!(Config::default().remote_access_port, runode_protocol::remote::DEFAULT_PORT);
-        assert_eq!(wanted_port(&Config::default()), None);
+        assert_eq!(wanted(&Config::default()), None);
         let config = Config { remote_access: true, remote_access_port: 9000, ..Config::default() };
-        assert_eq!(wanted_port(&config), Some(9000));
+        assert_eq!(wanted(&config).map(|listen| listen.port), Some(9000));
+    }
+
+    #[test]
+    fn only_the_unspecified_address_reaches_over_the_internet() {
+        let reach = |address: Option<&str>| {
+            let config = Config {
+                remote_access: true,
+                remote_access_address: address.map(|addr| addr.parse().unwrap()),
+                ..Config::default()
+            };
+            wanted(&config).map(|listen| (listen.bind, listen.tunnel)).unwrap()
+        };
+        assert_eq!(reach(None), (Bind::All, false));
+        assert_eq!(reach(Some("0.0.0.0")), (Bind::All, true));
+        assert_eq!(reach(Some("::")), (Bind::All, true));
+        assert_eq!(reach(Some("10.0.0.10")), (Bind::Addr("10.0.0.10".parse().unwrap()), false));
     }
 
     #[test]

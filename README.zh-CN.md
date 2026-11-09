@@ -36,7 +36,7 @@ Runode 用 [Ghostty](https://ghostty.org) 的 libghostty-vt 做终端仿真，�
 - **会话常驻**：打开 `terminal-host` 后，会话由独立的宿主进程持有，退出、重开、升级 app 都不断。不得不重开的窗格会接着 Claude Code 上次的对话。
 - **SSH 远端主机**：新建工作区时选一台主机，Runode 调系统的 OpenSSH 连过去，需要时自动装好 runode，断线后自动接回。终端、文件树、Git 面板和预览都直接读写那台机器，macOS、Linux、Windows 都行。粘贴的截图和拖进来的文件先传到那台主机，点开 localhost 网址自动把端口转到本机。
 - **配对另一台电脑**：和别的电脑上的 Runode 配对后，它的终端、文件、Git、端口转发和远程桌面都能像 SSH 主机一样用。
-- **手机远程**：iOS app 和电脑配对，连接用 TLS 1.3 加密。在同一个网络里直连，不在时经 [iroh](https://iroh.computer) 按公钥连过来，能打洞就直连，打不通走中继。在手机上能看终端、回复 agent、新开 agent、跑命令、提交 git。
+- **手机远程**：iOS app 和电脑配对，连接用 TLS 1.3 加密。在同一个网络里直连；配对时网络选 0.0.0.0 后，不在同一个网络也能经 [iroh](https://iroh.computer) 按公钥连过来，能打洞就直连，打不通走中继。在手机上能看终端、回复 agent、新开 agent、跑命令、提交 git。
   <br><img src="docs/mobile.gif" alt="iOS app：Claude Code 在等回答、Codex 在干活，接着在 Git 页看 diff、暂存一个文件并提交" width="300">
 - **远程桌面**：在手机上，或在另一台电脑的 Runode 里经 SSH、配对，看到并操控整个屏幕。Mac、Windows 和 Linux 的电脑都能看，用硬件编码，延迟低。能切换显示器，电脑锁屏时用存着的密码解锁。
   <br><img src="docs/remote-desktop.gif" alt="iOS app 横屏显示 Mac 的屏幕：点按打开 Runode 的侧栏、新标签和看板" width="900">

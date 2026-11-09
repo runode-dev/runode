@@ -7,7 +7,7 @@ use std::{
 };
 
 use runode_paths::Dirs;
-use runode_remote::{Bind, Options, Service, listener_status};
+use runode_remote::{Bind, Listen, Options, Service, listener_status};
 
 /// 等状态文件里的名字变成 `name`（`None` 是关着），最多等几秒。
 fn wait_for(dirs: &Dirs, name: Option<&str>) {
@@ -43,11 +43,12 @@ fn a_new_name_restarts_the_listener_under_that_name() {
         connect_project: None,
     })
     .unwrap();
-    service.set(Some(port), Some("书房的 Mac".into()));
+    let listen = |name: &str| Listen { port, name: Some(name.into()), bind: Bind::Loopback, tunnel: false };
+    service.set(Some(listen("书房的 Mac")));
     wait_for(&dirs, Some("书房的 Mac"));
-    service.set(Some(port), Some("客厅的 Mac".into()));
+    service.set(Some(listen("客厅的 Mac")));
     wait_for(&dirs, Some("客厅的 Mac"));
-    service.set(None, Some("客厅的 Mac".into()));
+    service.set(None);
     wait_for(&dirs, None);
     drop(service);
     std::fs::remove_dir_all(&root).unwrap();

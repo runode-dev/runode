@@ -3,8 +3,9 @@
 //! 用它（设置里的「配对…」也切到那里）。口令跟着 `Pairing::Waiting` 活：取消、重新生成、
 //! 关掉所在的页面时丢掉，口令文件随之删掉，手机再拿它来配对就对不上了。
 //!
-//! 刚打开远程访问、或者刚改了给手机看的名字（`remote-access-name`）时，监听方要过一会儿才开好、换好
-//! 名字，这时先等它（`Pairing::Starting`），好了再生成口令，二维码里不会是旧名字。
+//! 刚打开远程访问、或者刚改了给手机看的名字（`remote-access-name`）、在哪听（`remote-access-address`）时，
+//! 监听方要过一会儿才照新配置重开，这时先等它（`Pairing::Starting`），好了再生成口令，二维码里不会是
+//! 旧名字、旧地址。
 //!
 //! 配好以后和命令行一样提醒 `runode_config::TERMINAL_HOST`：它关着时退出 app 宿主跟着退出，远程
 //! 访问跟着停，手机就连不上了。
@@ -15,7 +16,7 @@ use gpui::{Bounds, Context, Hsla, SharedString, Task, Window, canvas, div, fill,
 use qrcode::{Color, EcLevel, QrCode};
 use runode_paths::Dirs;
 use runode_protocol::remote::PAIRING_TTL;
-use runode_remote::{ListenerStatus, PairingProgress, PairingTicket, host_name, listener_status, now_unix};
+use runode_remote::{Bind, ListenerStatus, PairingProgress, PairingTicket, host_name, listener_status, now_unix};
 
 use crate::config::AppConfig;
 
@@ -23,8 +24,8 @@ use crate::config::AppConfig;
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// 等配对时隔这么多次看一眼监听方还在不在。
 const STATUS_EVERY: u32 = 8;
-/// 等监听方开好最多看这么多次：还没开好就说没在监听；开着但名字一直不对（比如监听开在
-/// 没读到新配置的别的进程里）就照它现在的名字生成口令。
+/// 等监听方开好最多看这么多次：还没开好就说没在监听；开着但一直和配置对不上（比如监听开在
+/// 没读到新配置的别的进程里）就照它现在的样子生成口令。
 const START_POLLS: u32 = 40;
 /// 二维码四周留白的模块数。规范要 4 个，2 个手机照样扫得出；白底卡片本身也算留白。
 const QUIET_ZONE: usize = 2;
@@ -37,11 +38,10 @@ pub type Slot<V> = fn(&mut V) -> Option<&mut Pairing>;
 pub enum Pairing {
     #[default]
     Idle,
-    /// 等监听方开好、换上 `name`，见模块说明。
+    /// 等监听方照配置开好，见模块说明。
     Starting {
         dirs: Box<Dirs>,
-        name: String,
-        extra: Vec<IpAddr>,
+        expect: Expect,
         polls: u32,
         _poll: Task<()>,
     },
@@ -51,6 +51,29 @@ pub enum Pairing {
     },
     /// 没开成或者没配成，原因已经翻译好。
     Failed(String),
+}
+
+/// 照配置开好的监听方的状态该是什么样。
+pub struct Expect {
+    name: String,
+    bound: Option<IpAddr>,
+    tunnel: bool,
+}
+
+impl Expect {
+    fn new(config: &runode_config::Config) -> Self {
+        let name = config.remote_access_name.clone().unwrap_or_else(host_name);
+        let (bound, tunnel) = crate::remote_access::wanted(config).map_or((None, false), |listen| match listen.bind {
+            Bind::Addr(addr) => (Some(addr), false),
+            Bind::All | Bind::Loopback => (None, listen.tunnel),
+        });
+        Self { name, bound, tunnel }
+    }
+
+    /// 跨网络的端点开不成时 `node` 一直为空，等到 `START_POLLS` 照样往下走。
+    fn met_by(&self, status: &ListenerStatus) -> bool {
+        status.host_name == self.name && status.bound == self.bound && status.node.is_some() == self.tunnel
+    }
 }
 
 pub struct Waiting {
@@ -123,28 +146,21 @@ fn io_failed(err: std::io::Error) -> String {
 }
 
 impl Pairing {
-    /// 生成口令，开始等手机；监听方还没开好、名字还不是配置里的时先等它。配对 URI 里的地址先列
-    /// `extra`，再列本机别的地址。`slot` 是这份配对在视图里的位置。
-    pub fn start<V: 'static>(&mut self, slot: Slot<V>, extra: Vec<IpAddr>, cx: &mut Context<V>) {
+    /// 生成口令，开始等手机；监听方还没照配置开好时先等它。`slot` 是这份配对在视图里的位置。
+    pub fn start<V: 'static>(&mut self, slot: Slot<V>, cx: &mut Context<V>) {
         // 先丢掉上一个口令，免得新口令写好后旧的那份在丢掉时把文件删了。
         *self = Pairing::Idle;
-        let name = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_else(host_name);
+        let expect = Expect::new(&cx.global::<AppConfig>().0);
         // 当场那次就好了的话，`Starting` 连同看它的任务一起换掉。
-        *self = Pairing::Starting { dirs: Box::new(Dirs::from_env()), name, extra, polls: 0, _poll: watch(slot, cx) };
+        *self = Pairing::Starting { dirs: Box::new(Dirs::from_env()), expect, polls: 0, _poll: watch(slot, cx) };
         self.poll(slot, cx);
         cx.notify();
     }
 
-    fn begin<V: 'static>(
-        dirs: Dirs,
-        status: &ListenerStatus,
-        extra: &[IpAddr],
-        slot: Slot<V>,
-        cx: &mut Context<V>,
-    ) -> Self {
+    fn begin<V: 'static>(dirs: Dirs, status: &ListenerStatus, slot: Slot<V>, cx: &mut Context<V>) -> Self {
         let waiting = (|| {
             let ticket = PairingTicket::begin(&dirs, PAIRING_TTL).map_err(io_failed)?;
-            let uri = ticket.uri(status, extra).map_err(io_failed)?.to_string();
+            let uri = ticket.uri(status, &[]).map_err(io_failed)?.to_string();
             let qr = Qr::new(&uri).ok_or_else(|| rust_i18n::t!("settings.pairing.too_long").into_owned())?;
             Ok::<_, String>(Waiting {
                 shown_secs: ticket.expires_at().saturating_sub(now_unix()),
@@ -165,11 +181,11 @@ impl Pairing {
     /// 看一眼监听方开好没有、配对进行到哪了；不等了就换掉这一份，看的任务随之停下。
     fn poll<V: 'static>(&mut self, slot: Slot<V>, cx: &mut Context<V>) {
         let next = match self {
-            Pairing::Starting { dirs, name, extra, polls, .. } => {
+            Pairing::Starting { dirs, expect, polls, .. } => {
                 *polls += 1;
                 match listener_status(dirs) {
-                    Ok(Some(status)) if status.host_name == *name || *polls >= START_POLLS => {
-                        Self::begin(Dirs::clone(dirs), &status, extra, slot, cx)
+                    Ok(Some(status)) if expect.met_by(&status) || *polls >= START_POLLS => {
+                        Self::begin(Dirs::clone(dirs), &status, slot, cx)
                     }
                     Ok(_) if *polls < START_POLLS => return,
                     Ok(_) => {

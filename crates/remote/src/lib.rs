@@ -52,7 +52,7 @@ pub use devices::{Device, PushRegistration, list_devices, push_registrations, re
 pub use listener::{Bind, ConnectProject, Listener, Options};
 pub use pairing::{PairingProgress, PairingTicket, pairing_pending};
 pub use push::{ApnsKey, PushSettings, TestPush, send_test_push};
-pub use service::Service;
+pub use service::{Listen, Service};
 pub use status::{ListenerStatus, listener_status};
 
 /// 要一条到宿主的新连接，见 `Listener`。返回的连接还没说过话，第一帧由这边转发手机的 `Hello`。

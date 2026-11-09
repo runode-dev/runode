@@ -60,6 +60,8 @@ const ACCEPT_BATCH: usize = 64;
 pub enum Bind {
     /// 所有网卡：IPv4 的 `0.0.0.0` 和 IPv6 的 `::`（只收 IPv6，IPv4 由前一个收）。
     All,
+    /// 只听这一个地址；这台电脑没有这个地址时开不了。
+    Addr(IpAddr),
     /// 只听 `127.0.0.1`，测试用。
     Loopback,
 }
@@ -80,7 +82,8 @@ pub struct Options {
     pub host_name: Option<String>,
     /// 用 Bonjour 公布。
     pub advertise: bool,
-    /// 另开 iroh 端点，手机不在同一个网络时也连得上，见 `tunnel`。
+    /// 另开 iroh 端点，手机不在同一个网络时也连得上，见 `tunnel`。它转给本机回环地址上的监听，
+    /// 所以只和 `Bind::All`、`Bind::Loopback` 一起开，配 `Bind::Addr` 时不开。
     pub tunnel: bool,
     /// 门禁过了以后要一条到宿主的新连接。
     pub connect: Connect,
@@ -289,6 +292,7 @@ impl Listener {
         let host_name = host_name.unwrap_or_else(addrs::host_name);
         let fp = encode_base64url(&fingerprint);
         let limiter = remembered_limiter(&dirs);
+        let tunnel = tunnel && !matches!(bind, Bind::Addr(_));
         let tunnel = tunnel.then(|| Tunnel::start(&dirs, port)).transpose().unwrap_or_else(|err| {
             tracing::warn!("remote access stays on this network only: {err}");
             None
@@ -300,6 +304,10 @@ impl Listener {
             host_name: host_name.clone(),
             connected: Vec::new(),
             node: node.clone(),
+            bound: match bind {
+                Bind::Addr(addr) => Some(addr),
+                Bind::All | Bind::Loopback => None,
+            },
         };
         write_json(&dirs.remote_access_status_file().ok_or_else(no_home)?, &status)?;
         let shared = Arc::new(Shared {
@@ -374,6 +382,7 @@ impl Drop for Listener {
 fn open(bind: Bind, port: u16) -> io::Result<Vec<TcpListener>> {
     let listeners = match bind {
         Bind::Loopback => vec![TcpListener::bind((Ipv4Addr::LOCALHOST, port))?],
+        Bind::Addr(addr) => vec![TcpListener::bind((addr, port))?],
         Bind::All => {
             let mut listeners = vec![TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))?];
             match listen_v6_only(port) {

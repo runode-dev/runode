@@ -5,6 +5,7 @@
 use std::{
     fs::{File, TryLockError},
     io,
+    net::IpAddr,
 };
 
 use runode_paths::Dirs;
@@ -26,6 +27,9 @@ pub struct ListenerStatus {
     /// 跨网络连接的地址，没开成时为空，见 `runode_protocol::remote::PairingUri::node`。
     #[serde(default)]
     pub node: Option<String>,
+    /// 只听这一个地址（`Bind::Addr`）时是它；听所有网卡时为空。
+    #[serde(default)]
+    pub bound: Option<IpAddr>,
 }
 
 /// 开着的监听方的状态；没有监听方在跑时为 `None`。
@@ -83,6 +87,7 @@ mod tests {
             host_name: "old".to_owned(),
             connected: Vec::new(),
             node: None,
+            bound: None,
         };
         write_json(&dirs.remote_access_status_file().unwrap(), &stale).unwrap();
 

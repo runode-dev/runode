@@ -9,7 +9,11 @@
 
 pub(crate) mod devices;
 
-use std::{net::IpAddr, rc::Rc, time::Duration};
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    rc::Rc,
+    time::Duration,
+};
 
 use gpui::{
     App, ClipboardItem, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
@@ -35,6 +39,8 @@ use devices::Paired;
 
 /// 手机上显示的电脑名的配置项，见模块说明。
 const NAME_KEY: &str = "remote-access-name";
+/// 远程访问在哪听的配置项，网络的下拉框选的就是它，见 `remote_access::wanted`。
+const ADDRESS_KEY: &str = "remote-access-address";
 
 /// iPhone 上装 App 的链接；还没有公开的安装链接时为 `None`，引导里跳过装 App 这一步。
 const IOS_APP_URL: Option<&str> = None;
@@ -72,8 +78,8 @@ pub(crate) struct MobilePage {
     _name_events: [Subscription; 3],
     /// 这台机器的网卡和地址，进配对这一步、点刷新时重读。
     interfaces: Vec<(String, IpAddr)>,
-    /// 挑的网络，它的地址排在配对 URI 最前面；`None` 时按系统的顺序。
-    network: Option<IpAddr>,
+    /// 二维码上次照着生成的 `ADDRESS_KEY`；配置在别处改了时据此重新生成。
+    synced_address: Option<IpAddr>,
     /// 网络的下拉列表展开着。
     network_open: bool,
     /// 刚复制了配对链接：按钮上写「已复制」，任务到点后换回来。
@@ -115,8 +121,15 @@ impl MobilePage {
             }
             InputEvent::Changed(_) | InputEvent::Previous => {}
         });
-        // 别的窗口或者手改配置换了名字：输入框没改过时跟着换，免得失焦时把旧名字写回去。
+        // 别的窗口或者手改配置换了名字：输入框没改过时跟着换，免得失焦时把旧名字写回去。换了在哪听时
+        // 重新生成二维码。
         let config = cx.observe_global::<AppConfig>(|this, cx| {
+            let address = cx.global::<AppConfig>().0.remote_access_address;
+            if address != this.synced_address {
+                this.synced_address = address;
+                this.restart_pairing(cx);
+                cx.notify();
+            }
             let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
             if saved == this.synced_name {
                 return;
@@ -140,7 +153,7 @@ impl MobilePage {
             system_name: system_name.into(),
             _name_events: [events, blurred, config],
             interfaces: Vec::new(),
-            network: None,
+            synced_address: cx.global::<AppConfig>().0.remote_access_address,
             network_open: false,
             copied: None,
         }
@@ -177,18 +190,17 @@ impl MobilePage {
         }
     }
 
-    /// 重读网卡；挑的那个地址没了就回到按系统的顺序。
     fn refresh_interfaces(&mut self) {
         self.interfaces = local_interfaces();
-        if self.network.is_some_and(|addr| !self.interfaces.iter().any(|(_, seen)| *seen == addr)) {
-            self.network = None;
-        }
     }
 
+    /// 写回在哪听（`None` 是所有局域网地址），配置重载后由观察配置的回调重新生成二维码。
     fn pick_network(&mut self, network: Option<IpAddr>, cx: &mut Context<Self>) {
-        self.network = network;
         self.network_open = false;
-        self.restart_pairing(cx);
+        let value = network.map(|addr| addr.to_string()).unwrap_or_default();
+        if let Err(err) = crate::config::set(ADDRESS_KEY, &value, cx) {
+            self.pairing = Pairing::Failed(rust_i18n::t!("settings.write_failed", err = err.to_string()).into_owned());
+        }
         cx.notify();
     }
 
@@ -205,8 +217,7 @@ impl MobilePage {
     }
 
     fn start_pairing(&mut self, cx: &mut Context<Self>) {
-        let extra = self.network.into_iter().collect();
-        self.pairing.start(|this: &mut Self| Some(&mut this.pairing), extra, cx);
+        self.pairing.start(|this: &mut Self| Some(&mut this.pairing), cx);
     }
 
     /// 在配置里打开远程访问，等监听方开好就生成口令。
@@ -587,33 +598,43 @@ impl MobilePage {
         )
     }
 
-    /// 网络：展开、收起的下拉框，旁边是重读网卡的按钮；展开时选项列在下面。
+    /// 网络（在哪听）：展开、收起的下拉框，旁边是重读网卡的按钮；展开时选项列在下面：所有局域网地址、
+    /// 0.0.0.0、各个网卡的地址，配置里的地址这台电脑现在没有时也列上。
     fn render_network(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let current = cx.global::<AppConfig>().0.remote_access_address;
         let label = |network: Option<IpAddr>| -> SharedString {
-            match network.and_then(|addr| self.interfaces.iter().find(|(_, seen)| *seen == addr)) {
+            let Some(addr) = network else {
+                return rust_i18n::t!("mobile.network_lan").into_owned().into();
+            };
+            if addr.is_unspecified() {
+                return rust_i18n::t!("mobile.network_any", addr = addr).into_owned().into();
+            }
+            match self.interfaces.iter().find(|(_, seen)| *seen == addr) {
                 Some((name, addr)) => network_label(name, *addr).into(),
-                None => rust_i18n::t!("mobile.network_auto").into_owned().into(),
+                None => rust_i18n::t!("mobile.network_missing", addr = addr).into_owned().into(),
             }
         };
-        let select = SelectTrigger::new(
-            "mobile-network",
-            rust_i18n::t!("mobile.network_label").into_owned(),
-            label(self.network),
-        )
-        .aria_expanded(self.network_open)
-        .h(scaled(36.))
-        .px(px(12.))
-        .rounded(px(8.))
-        .bg(theme.mix(0.04))
-        .border_1()
-        .border_color(theme.foreground.opacity(0.15))
-        .text_size(FontSize::Medium)
-        .flex_1()
-        .hover(|select| select.bg(theme.mix(0.08)))
-        .on_press(cx, |this, _, cx| {
-            this.network_open = !this.network_open;
-            cx.notify();
-        });
+        let hint = match current {
+            None => rust_i18n::t!("mobile.network_lan_hint"),
+            Some(addr) if addr.is_unspecified() => rust_i18n::t!("mobile.network_any_hint"),
+            Some(_) => rust_i18n::t!("mobile.network_addr_hint"),
+        };
+        let select =
+            SelectTrigger::new("mobile-network", rust_i18n::t!("mobile.network_label").into_owned(), label(current))
+                .aria_expanded(self.network_open)
+                .h(scaled(36.))
+                .px(px(12.))
+                .rounded(px(8.))
+                .bg(theme.mix(0.04))
+                .border_1()
+                .border_color(theme.foreground.opacity(0.15))
+                .text_size(FontSize::Medium)
+                .flex_1()
+                .hover(|select| select.bg(theme.mix(0.08)))
+                .on_press(cx, |this, _, cx| {
+                    this.network_open = !this.network_open;
+                    cx.notify();
+                });
         let refresh = Button::new("mobile-network-refresh", rust_i18n::t!("mobile.refresh_networks"))
             .variant(ButtonVariant::Outline)
             .icon(REFRESH_ICON)
@@ -627,7 +648,11 @@ impl MobilePage {
                 cx.notify();
             });
         let options = self.network_open.then(|| {
-            let choices = std::iter::once(None).chain(self.interfaces.iter().map(|(_, addr)| Some(*addr)));
+            let mut choices = vec![None, Some(IpAddr::from(Ipv4Addr::UNSPECIFIED))];
+            choices.extend(self.interfaces.iter().map(|(_, addr)| Some(*addr)));
+            if !choices.contains(&current) {
+                choices.push(current);
+            }
             div()
                 .id("mobile-network-options")
                 .role(Role::ListBox)
@@ -639,13 +664,13 @@ impl MobilePage {
                 .bg(theme.mix(0.04))
                 .border_1()
                 .border_color(theme.foreground.opacity(0.12))
-                .children(choices.map(|network| {
-                    let chosen = network == self.network;
+                .children(choices.into_iter().map(|network| {
+                    let chosen = network == current;
                     let text = label(network);
                     // id 按地址取，不按行号：重新列网卡后顺序、个数变了，VoiceOver 的焦点不跳。
                     let id = match network {
                         Some(addr) => SharedString::from(format!("mobile-network-option-{addr}")),
-                        None => SharedString::from("mobile-network-option-auto"),
+                        None => SharedString::from("mobile-network-option-lan"),
                     };
                     div()
                         .id(id)
@@ -672,7 +697,7 @@ impl MobilePage {
                 .gap(px(6.))
                 .child(div().flex().items_center().gap(px(8.)).child(select).child(refresh))
                 .children(options),
-            rust_i18n::t!("mobile.network_hint").into_owned(),
+            hint.into_owned(),
             theme,
         )
     }

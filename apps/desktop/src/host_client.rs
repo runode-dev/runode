@@ -236,16 +236,16 @@ pub fn configure(config: &Config) {
     });
     KEEP_SESSIONS.store(config.terminal_host, Ordering::Relaxed);
     let in_app = mode() == Mode::InProcess;
-    let port = if in_app { crate::remote_access::wanted_port(config) } else { None };
+    let listen = if in_app { crate::remote_access::wanted(config) } else { None };
     let mut remote = REMOTE.lock().unwrap_or_else(PoisonError::into_inner);
     if remote.is_none()
-        && port.is_some()
+        && listen.is_some()
         && let Some(host) = IN_PROCESS.get()
     {
         *remote = crate::remote_access::service(host);
     }
     if let Some(service) = remote.as_ref() {
-        crate::remote_access::apply(service, port, config);
+        crate::remote_access::apply(service, listen, config);
     }
 }
 

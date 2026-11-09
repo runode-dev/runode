@@ -800,7 +800,7 @@ settings:
     ssh_control_persist: Seconds the connection to a host stays open after its last terminal closes, so reconnecting meanwhile asks for no password. 0 keeps it open. Quitting Runode always closes it.
     ssh_restore_on_launch: Connects to SSH hosts right away when Runode reopens workspaces and terminals that are on them. Turn it off to connect only when you click Reconnect, so launching Runode does not ask for passwords. Takes effect from the next launch.
     auto_update: Check for new versions in the background, download them and install them when Runode quits.
-    remote_access: "Lets paired phones and computers reach this computer's terminals: directly on the same network, and over the internet from elsewhere, through an encrypted relay when needed. Pair below, or with runode remote pair."
+    remote_access: "Lets paired phones and computers reach this computer's terminals on the same network, and over the internet from elsewhere when the network on the pairing page is 0.0.0.0, through an encrypted relay when needed. Pair below, or with runode remote pair."
     remote_access_port: TCP port, 1 to 65535.
     remote_access_name: "The name paired phones and computers show. When empty, the system computer name. Connected devices drop briefly when it changes."
     remote_access_push: When an agent waits for your answer, paired phones get a notification, even with the app closed.
@@ -1009,7 +1009,7 @@ mobile:
   entry: "Devices"
   eyebrow: "Runode Devices"
   intro_title: "Runode on your iPhone."
-  intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. On the same network the phone connects straight to this computer; away from it, it still gets through, over a relay when a direct path fails, end-to-end encrypted so the relay cannot read it. Runode on another computer can pair here too, and open this computer's terminals and projects as it would an SSH host."
+  intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. On the same network the phone connects straight to this computer; with the network set to 0.0.0.0 it also gets through from elsewhere, over a relay when a direct path fails, end-to-end encrypted so the relay cannot read it. Runode on another computer can pair here too, and open this computer's terminals and projects as it would an SSH host."
   start: "Get Started"
   step: "Step %{n} of %{total}"
   install_title: "Get the app."
@@ -1023,8 +1023,12 @@ mobile:
   name_label: "Computer name"
   name_hint: "Phones will see “%{name}”. Leave empty to use this computer's own name."
   network_label: "Network"
-  network_auto: "Automatic (try every address in system order)"
-  network_hint: "On the same network the phone tries this address first, then the others; from another network it connects over the internet."
+  network_lan: "All local addresses"
+  network_any: "%{addr} (all networks, including the internet)"
+  network_missing: "%{addr} (not on this computer right now)"
+  network_lan_hint: "Only devices on the same network can connect; they try each of this computer's addresses."
+  network_any_hint: "Devices on the same network connect directly; from another network they connect over the internet, through an encrypted relay when needed."
+  network_addr_hint: "Listens on this address only, for devices on the same network. While this computer doesn't have it, remote access waits for it to come back."
   refresh_networks: "Refresh Networks"
   pair_qr: "Pairing QR Code"
   install_qr: "Install QR Code"
@@ -1034,7 +1038,7 @@ mobile:
   copy_hint: "To pair another computer, paste the link into Runode there: Add Remote Host → Runode Pairing. It expires along with the code."
   expires: "Expires in %{time}"
   regenerate: "New Code"
-  off: "Remote access is off. With it on, paired phones and computers can reach this computer's terminals, even from another network."
+  off: "Remote access is off. With it on, paired phones and computers can reach this computer's terminals."
   turn_on: "Turn On Remote Access"
   generate: "Show Code"
   retry: "Try Again"

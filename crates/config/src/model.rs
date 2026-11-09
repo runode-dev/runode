@@ -1,6 +1,6 @@
 //! 配置的内容：各项设置和默认值。
 
-use std::{path::PathBuf, time::Duration};
+use std::{net::IpAddr, path::PathBuf, time::Duration};
 
 use runode_types::{
     agent::AgentKind,
@@ -187,6 +187,9 @@ pub struct Config {
     pub remote_access_port: u16,
     /// 配对过的手机上显示的这台电脑的名字；`None` 时用系统设置里的电脑名。
     pub remote_access_name: Option<String>,
+    /// 远程访问在哪听：`None` 是所有网卡、只限局域网；`0.0.0.0` 或 `::` 是所有网卡，另经互联网也连得上；
+    /// 别的地址是只听这一个地址、只限局域网。
+    pub remote_access_address: Option<IpAddr>,
     /// agent 等回答时给配对过、登记了推送的手机推一条通知。
     pub remote_access_push: bool,
     /// 推送带屏幕上的问题和选项；关着时只有标题和 agent。
@@ -284,6 +287,7 @@ impl Default for Config {
             // 和 `runode_protocol::remote::DEFAULT_PORT` 一样；config 不依赖 protocol，桌面的测试对着两边。
             remote_access_port: 7866,
             remote_access_name: None,
+            remote_access_address: None,
             remote_access_push: true,
             remote_access_push_text: true,
             remote_access_push_delay: Duration::from_secs(10),

@@ -1,6 +1,6 @@
-//! 让远程访问的监听跟着配置走：调用方随时告诉它想要的端口（`None` 是关）和给手机看的名字，它在后台
-//! 线程里开、关、换端口；名字变了就重开一次监听，Bonjour、状态文件和门禁里的名字一起换掉，连着的
-//! 手机会断开后自己重连。开不了（端口被占、另一个 runode 进程正占着监听，比如交接时还没退出的旧宿主）就每隔
+//! 让远程访问的监听跟着配置走：调用方随时告诉它想怎么开（`Listen`，`None` 是关），它在后台线程里开、
+//! 关、换端口；名字、监听的地址或跨网络的开关变了就重开一次监听，Bonjour、状态文件和门禁里的名字一起
+//! 换掉，连着的手机会断开后自己重连。开不了（端口被占、另一个 runode 进程正占着监听，比如交接时还没退出的旧宿主）就每隔
 //! `RETRY` 再试，直到开成或者不要了。
 //!
 //! agent 等回答时给手机推通知的 `Pusher` 也归它管：监听开着时才推（只有占着监听的那个进程推，同一次
@@ -13,7 +13,7 @@ use std::{
 };
 
 use crate::{
-    listener::{Listener, Options},
+    listener::{Bind, Listener, Options},
     push::{Listening, PushSettings, Pusher},
 };
 
@@ -33,18 +33,27 @@ struct Wanted {
     changed: Condvar,
 }
 
+/// 监听要怎么开，各项换掉 `Options` 里同名的那项。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Listen {
+    pub port: u16,
+    /// 给手机看的名字；`None` 时用电脑名，见 `Options::host_name`。
+    pub name: Option<String>,
+    pub bind: Bind,
+    /// 见 `Options::tunnel`。
+    pub tunnel: bool,
+}
+
 #[derive(Default)]
 struct State {
-    port: Option<u16>,
-    /// 给手机看的名字；`None` 时用电脑名，见 `Options::host_name`。
-    name: Option<String>,
+    listen: Option<Listen>,
     quit: bool,
     /// 每改一次加一，后台线程据此知道等的时候有没有变。
     generation: u64,
 }
 
 impl Service {
-    /// 起后台线程，先关着，等 `set`。`options.port` 和 `options.host_name` 不用，每次开时换成要的。
+    /// 起后台线程，先关着，等 `set`。`options` 里 `Listen` 管的几项不用，每次开时换成要的。
     /// 推送先按 `PushSettings::default`，等 `set_push`。
     pub fn start(options: Options) -> std::io::Result<Self> {
         let pusher = Arc::new(Pusher::start(options.dirs.clone(), options.connect.clone())?);
@@ -61,13 +70,11 @@ impl Service {
         self.pusher.set_settings(settings);
     }
 
-    /// 要在 `port` 上开着，手机看到的名字是 `name`（`None` 是电脑名）；`port` 为 `None` 时关掉。和现在的
-    /// 一样时什么都不做。
-    pub fn set(&self, port: Option<u16>, name: Option<String>) {
+    /// 照 `listen` 开着，为 `None` 时关掉。和现在的一样时什么都不做。
+    pub fn set(&self, listen: Option<Listen>) {
         let mut state = self.shared.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if state.port != port || state.name != name {
-            state.port = port;
-            state.name = name;
+        if state.listen != listen {
+            state.listen = listen;
             state.generation += 1;
             self.shared.changed.notify_all();
         }
@@ -90,8 +97,8 @@ impl Drop for Service {
 }
 
 fn run(shared: &Wanted, pusher: &Pusher, options: Options) {
-    // 开着的监听和开它时用的名字。
-    let mut running: Option<(Listener, Option<String>)> = None;
+    // 开着的监听和开它时照的 `Listen`。
+    let mut running: Option<(Listener, Listen)> = None;
     // 连着开不成几次了：第一次记警告，之后只记调试日志，免得每两秒一条。
     let mut failures = 0u32;
     let mut state = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -99,15 +106,23 @@ fn run(shared: &Wanted, pusher: &Pusher, options: Options) {
         if state.quit {
             break;
         }
-        let (wanted, name, generation) = (state.port, state.name.clone(), state.generation);
+        let (wanted, generation) = (state.listen.clone(), state.generation);
         drop(state);
-        if running.as_ref().is_some_and(|(listener, named)| Some(listener.port()) != wanted || *named != name) {
+        if running.as_ref().is_some_and(|(_, opened)| Some(opened) != wanted.as_ref()) {
             running = None;
         }
-        if let (Some(port), None) = (wanted, &running) {
-            match Listener::start(Options { port, host_name: name.clone(), ..options.clone() }) {
+        if let (Some(listen), None) = (&wanted, &running) {
+            let port = listen.port;
+            let options = Options {
+                port,
+                host_name: listen.name.clone(),
+                bind: listen.bind,
+                tunnel: listen.tunnel,
+                ..options.clone()
+            };
+            match Listener::start(options) {
                 Ok(listener) => {
-                    running = Some((listener, name));
+                    running = Some((listener, listen.clone()));
                     failures = 0;
                 }
                 Err(err) => {
@@ -120,7 +135,7 @@ fn run(shared: &Wanted, pusher: &Pusher, options: Options) {
                 }
             }
         }
-        pusher.set_listening(match (wanted, &running) {
+        pusher.set_listening(match (&wanted, &running) {
             (None, _) => Listening::Off,
             (Some(_), None) => Listening::Starting,
             (Some(_), Some(_)) => Listening::On,

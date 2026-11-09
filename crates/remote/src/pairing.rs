@@ -99,7 +99,7 @@ impl PairingTicket {
     }
 
     /// 手机扫的配对 URI：监听方 `status` 的主机名、证书指纹和端口，这次的口令，地址先列 `extra`，
-    /// 再列本机的各个地址。监听方写的指纹长度不对时报 `InvalidData`。
+    /// 再列监听着的地址：只听一个地址时是它，不然是本机的各个地址。监听方写的指纹长度不对时报 `InvalidData`。
     pub fn uri(&self, status: &ListenerStatus, extra: &[IpAddr]) -> io::Result<PairingUri> {
         let fingerprint = status
             .fingerprint
@@ -108,7 +108,8 @@ impl PairingTicket {
             .try_into()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "the listener wrote a bad fingerprint"))?;
         let mut addrs = extra.to_vec();
-        for addr in local_addresses() {
+        let listening = status.bound.map_or_else(local_addresses, |bound| vec![bound]);
+        for addr in listening {
             if !addrs.contains(&addr) {
                 addrs.push(addr);
             }
@@ -289,6 +290,28 @@ mod tests {
         assert_eq!(newer.poll().unwrap(), PairingProgress::Waiting);
         drop(old);
         drop(newer);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_listener_on_one_address_offers_only_that_address() {
+        let root = std::env::temp_dir().join(format!("rra-bound-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let ticket = PairingTicket::begin(&dirs, Duration::from_secs(60)).unwrap();
+        let bound: IpAddr = "10.0.0.10".parse().unwrap();
+        let status = ListenerStatus {
+            port: 7866,
+            fingerprint: Bytes(vec![1; 32]),
+            host_name: "Mac".into(),
+            connected: Vec::new(),
+            node: None,
+            bound: Some(bound),
+        };
+        let extra: IpAddr = "127.0.0.1".parse().unwrap();
+        assert_eq!(ticket.uri(&status, &[extra]).unwrap().addrs, [extra, bound]);
+        drop(ticket);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

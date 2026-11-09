@@ -107,6 +107,7 @@ impl Config {
             "remote-access" => bool(self.remote_access),
             "remote-access-port" => vec![self.remote_access_port.to_string()],
             "remote-access-name" => self.remote_access_name.iter().cloned().collect(),
+            "remote-access-address" => self.remote_access_address.iter().map(ToString::to_string).collect(),
             "remote-access-push" => bool(self.remote_access_push),
             "remote-access-push-text" => bool(self.remote_access_push_text),
             "remote-access-push-delay" => vec![self.remote_access_push_delay.as_secs().to_string()],

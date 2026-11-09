@@ -378,7 +378,8 @@ Commands:
            Sets remote-access = true in the config if it is off (Runode must
            be running to pick it up); once paired, offers to set
            terminal-host = true so remote access keeps running after you
-           quit Runode
+           quit Runode. Devices on another network reach this computer over
+           the internet only with remote-access-address = 0.0.0.0
   devices  List the paired devices, phones and computers
   revoke   Unpair a device; it is disconnected within seconds
 

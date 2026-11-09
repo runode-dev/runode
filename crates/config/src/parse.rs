@@ -92,6 +92,7 @@ pub const KEYS: &[&[&str]] = &[
         REMOTE_ACCESS,
         "remote-access-port",
         "remote-access-name",
+        "remote-access-address",
         "remote-access-push",
         "remote-access-push-text",
         "remote-access-push-delay",
@@ -417,6 +418,11 @@ impl Config {
             }
             "remote-access-name" => {
                 self.remote_access_name = Some(value.trim().to_owned()).filter(|name| !name.is_empty());
+            }
+            "remote-access-address" => {
+                self.remote_access_address = (!empty)
+                    .then(|| value.trim().parse().map_err(|_| "expected an IP address such as 0.0.0.0"))
+                    .transpose()?;
             }
             "remote-access-push" => {
                 self.remote_access_push = or_default(empty, defaults.remote_access_push, || parse_bool(value))?;
@@ -929,6 +935,16 @@ unknown-key = whatever
         assert_eq!(d.remote_access_name, None);
         assert_eq!(load(&["remote-access-name =  书房的 Mac "]).remote_access_name.as_deref(), Some("书房的 Mac"));
         assert_eq!(load(&["remote-access-name = 书房的 Mac\nremote-access-name ="]).remote_access_name, None);
+        assert_eq!(d.remote_access_address, None);
+        for addr in ["0.0.0.0", "10.0.0.10", "fd07::1"] {
+            let config = load(&[&format!("remote-access-address = {addr}")]);
+            assert_eq!(config.remote_access_address, Some(addr.parse().unwrap()));
+        }
+        assert_eq!(
+            load(&["remote-access-address = 0.0.0.0\nremote-access-address = lan"]).remote_access_address,
+            Some("0.0.0.0".parse().unwrap())
+        );
+        assert_eq!(load(&["remote-access-address = 0.0.0.0\nremote-access-address ="]).remote_access_address, None);
     }
 
     #[test]
