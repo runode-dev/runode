@@ -731,6 +731,7 @@ settings:
     remote_access: 远程访问
     remote_access_port: 端口
     remote_access_name: "电脑名"
+    remote_access_address: "监听地址"
     remote_access_push: agent 等回答时通知手机
     remote_access_push_text: 带上问题
     remote_access_push_delay: 等多久再推
@@ -803,6 +804,7 @@ settings:
     remote_access: "让配对过的手机和电脑连上这台电脑的终端：在同一个网络里直接连；配对页的网络选 0.0.0.0 时，不在同一个网络也能经互联网连过来，必要时走中继，内容照样加密。在下面配对，或者用 runode remote pair。"
     remote_access_port: TCP 端口，1 到 65535。
     remote_access_name: "配对过的手机和电脑上显示的名字，留空时用系统的电脑名。改了以后连着的设备会断开一下再连上。"
+    remote_access_address: "留空时听所有地址，只有同一个网络里的设备连得上；0.0.0.0 另让配对过的设备经互联网连过来；别的地址只在那个地址上听。改了以后连着的设备会断开一下再连上。"
     remote_access_push: agent 等你回答时，配对过的手机会收到一条通知，App 没开着也行。
     remote_access_push_text: 带上屏幕底部的问题和选项；关掉时只发标题和 agent。
     remote_access_push_delay: agent 要先等这么多秒，在电脑前很快答了的不打扰手机。0 是马上推。

@@ -39,7 +39,7 @@ use devices::Paired;
 
 /// 手机上显示的电脑名的配置项，见模块说明。
 const NAME_KEY: &str = "remote-access-name";
-/// 远程访问在哪听的配置项，网络的下拉框选的就是它，见 `remote_access::wanted`。
+/// 远程访问在哪听的配置项，网络的下拉框选的就是它。
 const ADDRESS_KEY: &str = "remote-access-address";
 
 /// iPhone 上装 App 的链接；还没有公开的安装链接时为 `None`，引导里跳过装 App 这一步。
@@ -183,9 +183,12 @@ impl MobilePage {
         cx.notify();
     }
 
-    /// 二维码已经在或者在等的时候按现在的名字和网络重新生成；还没开始（远程访问没开）时不动。
+    /// 二维码已经在、在等或者远程访问开着却没生成成的时候按现在的名字和网络重新生成；还没开始（远程访问
+    /// 没开）时不动。
     fn restart_pairing(&mut self, cx: &mut Context<Self>) {
-        if self.step == Step::Pair && matches!(self.pairing, Pairing::Starting { .. } | Pairing::Waiting(_)) {
+        let pending = matches!(self.pairing, Pairing::Starting { .. } | Pairing::Waiting(_));
+        let failed = matches!(self.pairing, Pairing::Failed(_)) && cx.global::<AppConfig>().0.remote_access;
+        if self.step == Step::Pair && (pending || failed) {
             self.start_pairing(cx);
         }
     }

@@ -33,14 +33,14 @@ struct Wanted {
     changed: Condvar,
 }
 
-/// 监听要怎么开，各项换掉 `Options` 里同名的那项。
+/// 监听要怎么开，开时换掉 `Options` 里的 `port`、`host_name`、`bind` 和 `tunnel`。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Listen {
     pub port: u16,
-    /// 给手机看的名字；`None` 时用电脑名，见 `Options::host_name`。
+    /// 给手机看的名字；`None` 时用电脑名。
     pub name: Option<String>,
     pub bind: Bind,
-    /// 见 `Options::tunnel`。
+    /// 另开跨网络的端点。
     pub tunnel: bool,
 }
 

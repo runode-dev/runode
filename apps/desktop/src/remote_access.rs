@@ -3,7 +3,7 @@
 //! （`screen_process::client::connect_or_explain`），要电脑识别录音的接到 `dictation::remote`，别的电脑要读写项目的
 //! 接到本进程里起的项目服务上（`connect_project`）。开关（配置项
 //! `remote-access`）、端口（`remote-access-port`）、给手机看的名字（`remote-access-name`）和在哪听、
-//! 经不经互联网（`remote-access-address`，见 `wanted`）随配置变，几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
+//! 经不经互联网（`remote-access-address`）随配置变，几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
 //! 这几项和 `apns-*`）同样随配置变，见 `push_settings`。
 //!
 //! 宿主跑在 app 里时，app 每次应用配置都告诉它（见 `host_client::configure`）；单独跑的宿主
@@ -33,8 +33,7 @@ use crate::host_client::UnixStream;
 /// 盯不了文件时，单独跑的宿主隔多久看一次配置文件、设备表和配对口令；有配对口令在等时也按它看过期没有。
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 
-/// 配置要远程访问怎么开；关着时为 `None`。`remote-access-address` 是未指定地址（`0.0.0.0`、`::`）时
-/// 听所有网卡、另开跨网络的端点，没配时听所有网卡、只限局域网，是别的地址时只听它、只限局域网。
+/// 配置要远程访问怎么开；关着时为 `None`。
 pub fn wanted(config: &Config) -> Option<Listen> {
     config.remote_access.then(|| {
         let (bind, tunnel) = match config.remote_access_address {

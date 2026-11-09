@@ -731,6 +731,7 @@ settings:
     remote_access: 遠端存取
     remote_access_port: 連接埠
     remote_access_name: "電腦名稱"
+    remote_access_address: "監聽位址"
     remote_access_push: agent 等回答時通知手機
     remote_access_push_text: 帶上問題
     remote_access_push_delay: 等多久再推播
@@ -803,6 +804,7 @@ settings:
     remote_access: "讓配對過的手機和電腦連上這台電腦的終端機：在同一個網路裡直接連；配對頁的網路選 0.0.0.0 時，不在同一個網路也能經網際網路連過來，必要時走中繼，內容照樣加密。在下面配對，或者用 runode remote pair。"
     remote_access_port: TCP 連接埠，1 到 65535。
     remote_access_name: "配對過的手機和電腦上顯示的名稱，留空時用系統的電腦名稱。改了以後連著的裝置會斷開一下再連上。"
+    remote_access_address: "留空時聽所有位址，只有同一個網路裡的裝置連得上；0.0.0.0 另讓配對過的裝置經網際網路連過來；別的位址只在那個位址上聽。改了以後連著的裝置會斷開一下再連上。"
     remote_access_push: agent 等你回答時，配對過的手機會收到一則通知，App 沒開著也行。
     remote_access_push_text: 帶上螢幕底部的問題和選項；關掉時只發標題和 agent。
     remote_access_push_delay: agent 要先等這麼多秒，在電腦前很快答了的不打擾手機。0 是馬上推播。

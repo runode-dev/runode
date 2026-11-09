@@ -237,6 +237,7 @@ impl Page {
                 Firewall,
                 Row("remote-access-port", Text(80.)),
                 Row("remote-access-name", Text(200.)),
+                Row("remote-access-address", Text(200.)),
                 Pairing,
                 Section("push"),
                 Row("remote-access-push", Switch),
