@@ -292,7 +292,11 @@ impl Listener {
         let host_name = host_name.unwrap_or_else(addrs::host_name);
         let fp = encode_base64url(&fingerprint);
         let limiter = remembered_limiter(&dirs);
-        let tunnel = tunnel && !matches!(bind, Bind::Addr(_));
+        let bound = match bind {
+            Bind::Addr(addr) => Some(addr),
+            Bind::All | Bind::Loopback => None,
+        };
+        let tunnel = tunnel && bound.is_none();
         let tunnel = tunnel.then(|| Tunnel::start(&dirs, port)).transpose().unwrap_or_else(|err| {
             tracing::warn!("remote access stays on this network only: {err}");
             None
@@ -304,10 +308,7 @@ impl Listener {
             host_name: host_name.clone(),
             connected: Vec::new(),
             node: node.clone(),
-            bound: match bind {
-                Bind::Addr(addr) => Some(addr),
-                Bind::All | Bind::Loopback => None,
-            },
+            bound,
         };
         write_json(&dirs.remote_access_status_file().ok_or_else(no_home)?, &status)?;
         let shared = Arc::new(Shared {
@@ -334,7 +335,7 @@ impl Listener {
         let bonjour = if advertise {
             let txt = bonjour_txt(&fingerprint);
             let txt: Vec<(&str, &str)> = txt.iter().map(|(key, value)| (*key, value.as_str())).collect();
-            match bonjour::register(&host_name, port, &txt) {
+            match bonjour::register(&host_name, port, &txt, bound) {
                 Ok(registration) => Some(registration),
                 Err(err) => {
                     tracing::warn!("cannot advertise remote access over Bonjour: {err}");

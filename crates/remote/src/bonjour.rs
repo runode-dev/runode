@@ -31,15 +31,16 @@ pub(crate) struct Registration {
     _responder: responder::Responder,
 }
 
-/// 以 `name` 为实例名公布端口 `port`，TXT 记录是 `txt` 里的各项（`key=value`）。
+/// 以 `name` 为实例名公布端口 `port`，TXT 记录是 `txt` 里的各项（`key=value`）。`only` 有值时只在这个
+/// 地址所在的网卡上公布：macOS 上那块网卡的各个地址都公布出去，别的系统上只公布这一个地址。
 #[cfg(target_os = "macos")]
-pub(crate) fn register(name: &str, port: u16, txt: &[(&str, &str)]) -> io::Result<Registration> {
-    imp::register(name, port, txt).map(|service| Registration { _service: service })
+pub(crate) fn register(name: &str, port: u16, txt: &[(&str, &str)], only: Option<IpAddr>) -> io::Result<Registration> {
+    imp::register(name, port, txt, only).map(|service| Registration { _service: service })
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn register(name: &str, port: u16, txt: &[(&str, &str)]) -> io::Result<Registration> {
-    responder::register(name, port, txt).map(|responder| Registration { _responder: responder })
+pub(crate) fn register(name: &str, port: u16, txt: &[(&str, &str)], only: Option<IpAddr>) -> io::Result<Registration> {
+    responder::register(name, port, txt, only).map(|responder| Registration { _responder: responder })
 }
 
 /// DNS-SD 的 TXT 记录：每项一个字节的长度再跟内容，一项最长 255 字节。
@@ -158,6 +159,7 @@ mod imp {
     use std::{
         ffi::{CString, c_char, c_void},
         io,
+        net::IpAddr,
     };
 
     use runode_protocol::remote::BONJOUR_SERVICE;
@@ -196,7 +198,27 @@ mod imp {
         }
     }
 
-    pub(super) fn register(name: &str, port: u16, txt: &[(&str, &str)]) -> io::Result<ServiceRef> {
+    pub(super) fn register(
+        name: &str,
+        port: u16,
+        txt: &[(&str, &str)],
+        only: Option<IpAddr>,
+    ) -> io::Result<ServiceRef> {
+        // 0 是所有网卡。
+        let interface = match only {
+            None => 0,
+            Some(addr) => {
+                let ifname = crate::addrs::interface_of(addr).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::AddrNotAvailable, format!("no interface has {addr}"))
+                })?;
+                let ifname = CString::new(ifname).map_err(io::Error::other)?;
+                // SAFETY: 以 NUL 结尾的网卡名，调用期间活着。
+                match unsafe { libc::if_nametoindex(ifname.as_ptr()) } {
+                    0 => return Err(io::Error::last_os_error()),
+                    index => index,
+                }
+            }
+        };
         let name = CString::new(super::instance_name(name)).map_err(io::Error::other)?;
         let regtype = CString::new(BONJOUR_SERVICE).map_err(io::Error::other)?;
         let record = super::txt_record(txt);
@@ -209,7 +231,7 @@ mod imp {
             DNSServiceRegister(
                 &mut service,
                 0,
-                0,
+                interface,
                 name.as_ptr(),
                 regtype.as_ptr(),
                 std::ptr::null(),
@@ -248,9 +270,9 @@ fn responder_host(host: &str) -> String {
 
 #[cfg(not(target_os = "macos"))]
 mod responder {
-    use std::{io, time::Duration};
+    use std::{io, net::IpAddr, time::Duration};
 
-    use mdns_sd::{ServiceDaemon, ServiceInfo};
+    use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
     use runode_protocol::remote::BONJOUR_SERVICE;
 
     /// 撤回时等告别包发出去最多这么久，免得手机一直记着已经不在的服务。
@@ -271,14 +293,23 @@ mod responder {
         }
     }
 
-    pub(super) fn register(name: &str, port: u16, txt: &[(&str, &str)]) -> io::Result<Responder> {
+    pub(super) fn register(name: &str, port: u16, txt: &[(&str, &str)], only: Option<IpAddr>) -> io::Result<Responder> {
         let daemon = ServiceDaemon::new().map_err(io::Error::other)?;
         let host = super::responder_host(&crate::addrs::host_name());
         let service = format!("{BONJOUR_SERVICE}.local.");
-        // 地址留空、交给守护跟着网卡的地址填：换了地址、插拔网线后照样公布现在的地址。
-        let info = ServiceInfo::new(&service, super::instance_name(name), &host, "", port, txt)
-            .map_err(io::Error::other)?
-            .enable_addr_auto();
+        let ip = only.map(|addr| addr.to_string()).unwrap_or_default();
+        let info = ServiceInfo::new(&service, super::instance_name(name), &host, ip.as_str(), port, txt)
+            .map_err(io::Error::other)?;
+        let info = match only {
+            // 地址留空、交给守护跟着网卡的地址填：换了地址、插拔网线后照样公布现在的地址。
+            None => info.enable_addr_auto(),
+            // 后加的规则盖过先加的：先关掉所有网卡，再只开这个地址所在的那块。
+            Some(addr) => {
+                daemon.disable_interface(IfKind::All).map_err(io::Error::other)?;
+                daemon.enable_interface(IfKind::Addr(addr)).map_err(io::Error::other)?;
+                info
+            }
+        };
         let fullname = info.get_fullname().to_owned();
         daemon.register(info).map_err(io::Error::other)?;
         Ok(Responder { daemon, fullname })
@@ -325,7 +356,7 @@ mod tests {
         let fingerprint = [7u8; FINGERPRINT_LEN];
         let txt = bonjour_txt(&fingerprint);
         let txt: Vec<(&str, &str)> = txt.iter().map(|(key, value)| (*key, value.as_str())).collect();
-        let _registration = register(&name, 47124, &txt).unwrap();
+        let _registration = register(&name, 47124, &txt, None).unwrap();
         let (tx, rx) = mpsc::channel();
         let _browsing = browse(move |list| {
             let _ = tx.send(list);
@@ -353,7 +384,7 @@ mod tests {
         use runode_protocol::remote::BONJOUR_SERVICE;
 
         let name = format!("runode-test-{}", std::process::id());
-        let _registration = register(&name, 47123, &[("v", "1"), ("fp", "abcd")]).unwrap();
+        let _registration = register(&name, 47123, &[("v", "1"), ("fp", "abcd")], None).unwrap();
         let browser = ServiceDaemon::new().unwrap();
         let events = browser.browse(&format!("{BONJOUR_SERVICE}.local.")).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -371,6 +402,38 @@ mod tests {
         assert_eq!(resolved.get_property_val_str("fp"), Some("abcd"));
         assert_eq!(resolved.get_property_val_str("v"), Some("1"));
         assert!(!resolved.get_addresses().is_empty());
+        let _ = browser.shutdown();
+    }
+
+    /// 只在一个地址上公布时，解析出来只有这个地址。要本机的网卡能收发组播，手动跑：
+    /// `cargo test -p runode-remote --lib bonjour -- --ignored`。
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    #[ignore = "needs multicast on a real network interface"]
+    fn advertising_on_one_address_publishes_only_it() {
+        use std::time::{Duration, Instant};
+
+        use mdns_sd::{ServiceDaemon, ServiceEvent};
+        use runode_protocol::remote::BONJOUR_SERVICE;
+
+        let only = *crate::addrs::local_addresses().iter().find(|addr| addr.is_ipv4()).expect("no IPv4 address");
+        let name = format!("runode-only-{}", std::process::id());
+        let _registration = register(&name, 47125, &[("v", "1")], Some(only)).unwrap();
+        let browser = ServiceDaemon::new().unwrap();
+        let events = browser.browse(&format!("{BONJOUR_SERVICE}.local.")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let resolved = loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match events.recv_timeout(left) {
+                Ok(ServiceEvent::ServiceResolved(service)) if service.get_fullname().starts_with(&name) => {
+                    break service;
+                }
+                Ok(_) => {}
+                Err(err) => panic!("{name} never resolved: {err}"),
+            }
+        };
+        let addrs: Vec<IpAddr> = resolved.get_addresses().iter().map(mdns_sd::ScopedIp::to_ip_addr).collect();
+        assert_eq!(addrs, [only]);
         let _ = browser.shutdown();
     }
 }

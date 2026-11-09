@@ -103,6 +103,12 @@ pub fn local_interfaces() -> Vec<(String, IpAddr)> {
     addrs
 }
 
+/// 地址 `addr` 所在的开着的网卡的名字；本机没有这个地址时为 `None`。
+#[cfg(target_os = "macos")]
+pub(crate) fn interface_of(addr: IpAddr) -> Option<String> {
+    up_interfaces().into_iter().find(|(_, seen)| *seen == addr).map(|(name, _)| name)
+}
+
 /// 开着的、不是回环的网卡上的地址，按网卡的顺序。
 #[cfg(unix)]
 fn up_interfaces() -> Vec<(String, IpAddr)> {
