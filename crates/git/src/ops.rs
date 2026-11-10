@@ -81,7 +81,8 @@ fn first_error(results: impl IntoIterator<Item = Result>) -> Result {
 }
 
 impl Repo {
-    pub(crate) fn new(root: PathBuf) -> Self {
+    /// 根目录是 `root` 的仓库的句柄，不核对它是不是仓库；别的机器上的仓库在本机核对不了。
+    pub fn new(root: PathBuf) -> Self {
         Self { root }
     }
 

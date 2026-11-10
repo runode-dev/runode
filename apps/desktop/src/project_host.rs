@@ -34,6 +34,20 @@ const READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// 问远端的路径在不在、在监听哪些端口最多等这么久：终端里按着 ⌘ 悬停、状态栏轮询时在等它。
 const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// 侧栏的 workspace 行和项目组头要的仓库信息；不在仓库里时都为空。
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RepoSummary {
+    /// 当前分支（`runode_git::current_branch`）。
+    pub branch: Option<String>,
+    /// `origin` 远端的地址。
+    pub origin: Option<String>,
+    /// 各个工作树共用的 git 目录（`runode_git::RepoLocation::common_dir`），解开了符号链接，路径按项目所在的
+    /// 机器算：同一个仓库的各个工作树交回同一个目录。
+    pub common_git_dir: Option<PathBuf>,
+    /// 主工作树的根目录（`runode_git::RepoLocation::main_worktree`），解开了符号链接。
+    pub main_worktree: Option<PathBuf>,
+}
+
 #[derive(Clone, Default)]
 pub(crate) enum ProjectHost {
     #[default]
@@ -141,15 +155,14 @@ impl ProjectHost {
         }
     }
 
-    /// `dir` 所在仓库的当前分支（HEAD 分离时是短哈希）和 `origin` 的地址，不在仓库里时都为空；远端问不到
-    /// 时为 `Err`。会阻塞。
-    pub(crate) fn repo_badge(&self, dir: &Path) -> Result<(Option<String>, Option<String>), String> {
+    /// `dir` 所在仓库的 `RepoSummary`；远端问不到时为 `Err`。会阻塞。
+    pub(crate) fn repo_badge(&self, dir: &Path) -> Result<RepoSummary, String> {
         let client = match self {
             Self::Local => return Ok(serve::repo_badge(dir)),
             Self::Remote(client) => client,
         };
         match client.call(Call::RepoBadge { dir: dir.to_path_buf() }, QUERY_TIMEOUT)? {
-            (Reply::RepoBadge { branch, origin }, _) => Ok((branch, origin)),
+            (Reply::RepoBadge(badge), _) => Ok(badge),
             (other, _) => Err(unexpected(&other)),
         }
     }

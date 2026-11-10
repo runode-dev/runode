@@ -57,6 +57,7 @@ pub(super) enum GitOp {
     StashDrop { stash: Stash },
     ApplyHunk { file: FileDiff, hunk: usize, action: HunkAction },
     RemoveWorktree { worktree: PathBuf, force: bool },
+    AddWorktree { worktree: PathBuf, branch: String },
     FileView { path: PathBuf, old_path: Option<PathBuf>, side: DiffSide },
     NewBytes { path: PathBuf, side: DiffSide, options: ReadOptions },
     OldBytes { path: PathBuf, old_path: Option<PathBuf>, side: DiffSide, options: ReadOptions },
@@ -97,6 +98,7 @@ impl GitOp {
             Self::StashDrop { stash } => json(repo.stash_drop(&stash)),
             Self::ApplyHunk { file, hunk, action } => json(repo.apply_hunk(&file, hunk, action)),
             Self::RemoveWorktree { worktree, force } => json(repo.remove_worktree(&worktree, force)),
+            Self::AddWorktree { worktree, branch } => json(repo.add_worktree(&worktree, &branch)),
             Self::FileView { path, old_path, side } => json(repo.file_view(&path, old_path.as_deref(), &side)),
             Self::NewBytes { path, side, options } => bytes(repo.new_bytes(&path, &side, options)),
             Self::OldBytes { path, old_path, side, options } => {
@@ -116,7 +118,7 @@ impl GitOp {
         match self {
             Self::Stage { paths } | Self::Unstage { paths } | Self::Untrack { paths } => paths.iter_mut().for_each(f),
             Self::IsTracked { path } | Self::NewBytes { path, .. } => f(path),
-            Self::RemoveWorktree { worktree, .. } => f(worktree),
+            Self::RemoveWorktree { worktree, .. } | Self::AddWorktree { worktree, .. } => f(worktree),
             Self::FileView { path, old_path, .. } | Self::OldBytes { path, old_path, .. } => {
                 f(path);
                 old_path.iter_mut().for_each(f);
@@ -326,6 +328,11 @@ impl ProjectRepo {
     pub(crate) fn remove_worktree(&self, worktree: &Path, force: bool) -> git::Result {
         let op = GitOp::RemoveWorktree { worktree: worktree.to_path_buf(), force };
         dispatch!(self, self.repo.remove_worktree(worktree, force), op, git_failed)
+    }
+
+    pub(crate) fn add_worktree(&self, worktree: &Path, branch: &str) -> git::Result {
+        let op = GitOp::AddWorktree { worktree: worktree.to_path_buf(), branch: branch.to_owned() };
+        dispatch!(self, self.repo.add_worktree(worktree, branch), op, git_failed)
     }
 
     pub(crate) fn file_view(

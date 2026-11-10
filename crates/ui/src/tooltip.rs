@@ -41,7 +41,8 @@ pub fn tooltip(
     let action = action.map(Action::boxed_clone);
     move |_, cx| {
         let shortcut = action.as_deref().and_then(|action| shortcut_text(action, cx));
-        cx.new(|_| Tooltip { text: text.clone(), shortcut, font: None }).into()
+        let hidden = cx.has_active_drag();
+        cx.new(|_| Tooltip { text: text.clone(), shortcut, font: None, hidden }).into()
     }
 }
 
@@ -52,7 +53,10 @@ pub fn code_tooltip(
     font: SharedString,
 ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     let text = text.into();
-    move |_, cx| cx.new(|_| Tooltip { text: text.clone(), shortcut: None, font: Some(font.clone()) }).into()
+    move |_, cx| {
+        let hidden = cx.has_active_drag();
+        cx.new(|_| Tooltip { text: text.clone(), shortcut: None, font: Some(font.clone()), hidden }).into()
+    }
 }
 
 struct Tooltip {
@@ -60,10 +64,17 @@ struct Tooltip {
     shortcut: Option<SharedString>,
     /// 代码样的说明用的等宽字体，见 `code_tooltip`。
     font: Option<SharedString>,
+    /// 弹出时正拖着东西，什么也不画。GPUI 拖动时照样给经过的元素弹提示，弹出后按那一帧元素的位置判断还要不要
+    /// 显示：放下后元素挪了位置、鼠标还在原处，提示就一直留在别的行上。只在弹出时看一次：拖完了照样不画，等鼠标
+    /// 移出去再进来另弹一个。
+    hidden: bool,
 }
 
 impl Render for Tooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.hidden {
+            return div().into_any_element();
+        }
         let theme = cx.theme();
         let fg = theme.foreground;
         font::apply(div(), cx)
@@ -92,5 +103,6 @@ impl Render for Tooltip {
             // 字放在能缩的一格里，长的一行才会在最宽处折行，不然撑出框外。
             .child(div().flex_1().min_w_0().child(self.text.clone()))
             .children(self.shortcut.clone().map(|shortcut| div().text_color(fg.opacity(0.5)).child(shortcut)))
+            .into_any_element()
     }
 }

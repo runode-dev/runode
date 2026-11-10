@@ -157,6 +157,15 @@ workspace:
   rename_host: "為 %{host} 重新命名"
   edit_host_name: 主機名稱
   host_attention: 有工作區等你處理
+  projects: 專案
+  collapse_all: 收合所有專案
+  expand_all: 展開所有專案
+  add_project: 新增專案
+  new_worktree: "在 %{project} 新增工作樹"
+  worktree_branch: 新分支名稱
+  worktree_bad_name: "「%{name}」不能用作分支名稱。"
+  worktree_failed: 無法建立工作樹
+  no_terminals: 沒有終端機
   host_remote_hint: "%{status} · SSH"
   host_paired_hint: "%{status} · Runode 配對"
   host_add: 新增 SSH 主機

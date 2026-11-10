@@ -36,7 +36,8 @@ use crate::{
     terminal_view::TerminalView,
 };
 use format::{
-    SavedBounds, SavedFloat, SavedNode, SavedPanel, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode,
+    SavedBounds, SavedFloat, SavedNode, SavedPanel, SavedProject, SavedTab, SavedWindow, SavedWorkspace, State,
+    WindowMode,
 };
 
 /// 布局变化后等这么久再写文件，拖动窗口、连续切标签时只写一次。
@@ -364,6 +365,11 @@ impl WindowView {
             sidebar: self.sidebar_shown,
             sidebar_width: self.sidebar_width,
             collapsed_hosts: self.collapsed_hosts.iter().map(HostId::key).collect(),
+            collapsed_projects: self
+                .collapsed_projects
+                .iter()
+                .map(|(host, dir)| SavedProject { host: host.key(), dir: dir.clone() })
+                .collect(),
             panel_width: self.panel_width,
             preview_wrap: self.preview.read(cx).wrap(),
             preview_source: self.preview.read(cx).source(),
@@ -471,6 +477,7 @@ impl WindowView {
                 host: host.clone(),
                 name: name.into(),
                 repo: Default::default(),
+                common_git_dir: saved_workspace.project,
                 canonical: super::model::canonical_dir_later(&host, &saved_workspace.dir),
                 dir: saved_workspace.dir,
                 active: active_tab,
@@ -482,7 +489,7 @@ impl WindowView {
                 pinned_workflows: saved_workspace.pinned_workflows,
             });
         }
-        let active = self.group_workspaces_by_host(active);
+        let active = self.group_workspaces(active);
         if !self.workspaces.is_empty() {
             self.sidebar_shown = saved.sidebar;
             self.sidebar_width = saved.sidebar_width;
@@ -493,6 +500,12 @@ impl WindowView {
                 .map(|host| HostId::from_saved(host.as_deref()))
                 .filter(|host| workspaces.iter().any(|workspace| workspace.host == *host))
                 .collect();
+            self.collapsed_projects = saved
+                .collapsed_projects
+                .into_iter()
+                .map(|project| (HostId::from_saved(project.host.as_deref()), project.dir))
+                .collect();
+            self.forget_gone_projects();
             self.panel_width = saved.panel_width;
             self.preview.update(cx, |panel, _| panel.set_options(saved.preview_wrap, saved.preview_source));
             let file_tree = crate::file_tree::Options {
@@ -639,6 +652,7 @@ impl WindowView {
             name: workspace.name.to_string(),
             host: workspace.host.key(),
             dir: workspace.dir.clone(),
+            project: workspace.common_git_dir.clone(),
             tabs: workspace.tabs.iter().map(|tab| self.save_tab(tab, cx)).collect(),
             active: workspace.active,
             last_task: workspace.project.tasks_last.clone(),

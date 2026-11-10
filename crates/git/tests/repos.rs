@@ -346,3 +346,63 @@ fn excludes_worktree_dirs_whose_names_look_like_globs() {
     let exclude = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap();
     assert!(exclude.ends_with("/work\\[1\\]/\n"), "{exclude:?}");
 }
+
+/// 解开符号链接再比：测试目录在 macOS 上经 `/var` 这个符号链接。
+fn real(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap()
+}
+
+fn location(dir: &Path) -> (PathBuf, Option<PathBuf>) {
+    let found = runode_git::repo_location(dir).unwrap();
+    (real(&found.common_dir), found.main_worktree.as_deref().map(real))
+}
+
+#[test]
+fn every_worktree_of_a_repo_finds_the_same_main_worktree() {
+    let repo = TestRepo::new("repos-location");
+    repo.commit_file("a.txt", "one\n", "init");
+    std::fs::create_dir(repo.path().join("sub")).unwrap();
+    let handle = runode_git::Repo::open(repo.path()).unwrap();
+    let worktree = handle.root.join(".worktrees").join("side");
+    handle.add_worktree(&worktree, "side").unwrap();
+
+    let expected = (real(&repo.path().join(".git")), Some(real(repo.path())));
+    assert_eq!(location(repo.path()), expected);
+    assert_eq!(location(&repo.path().join("sub")), expected);
+    assert_eq!(location(&worktree), expected);
+    assert_eq!(runode_git::repo_location(&repo.path().join("..")), None);
+}
+
+/// 子模块的 git 目录在上级仓库的 `.git/modules` 里，主工作树要按它记的 `core.worktree` 找，不是 git 目录的上一级。
+#[test]
+fn a_submodule_and_its_worktrees_find_the_submodule_checkout() {
+    let lib = TestRepo::new("repos-location-lib");
+    lib.commit_file("a.txt", "one\n", "init");
+    let outer = TestRepo::new("repos-location-outer");
+    let lib_path = lib.path().to_string_lossy().into_owned();
+    outer.git(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", &lib_path, "sub"]);
+    let sub = outer.path().join("sub");
+    let side = outer.path().join("side");
+    runode_git::Repo::open(&sub).unwrap().add_worktree(&side, "side").unwrap();
+
+    let expected = (real(&outer.path().join(".git/modules/sub")), Some(real(&sub)));
+    assert_eq!(location(&sub), expected);
+    assert_eq!(location(&side), expected);
+}
+
+/// 裸仓库没有主工作树，它的链接工作树只认得出共用的 git 目录。
+#[test]
+fn worktrees_of_a_bare_repo_have_no_main_worktree() {
+    let source = TestRepo::new("repos-location-source");
+    source.commit_file("a.txt", "one\n", "init");
+    let bare = source.path().with_extension("bare.git");
+    let worktree = source.path().with_extension("bare-wt");
+    let (bare_path, worktree_path) = (bare.to_string_lossy().into_owned(), worktree.to_string_lossy().into_owned());
+    source.git(&["clone", "-q", "--bare", ".", &bare_path]);
+    source.git(&["-C", &bare_path, "worktree", "add", "-q", "-b", "wt", &worktree_path]);
+
+    assert_eq!(location(&worktree), (real(&bare), None));
+    assert_eq!(runode_git::repo_location(&bare), None);
+    std::fs::remove_dir_all(&bare).ok();
+    std::fs::remove_dir_all(&worktree).ok();
+}

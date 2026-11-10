@@ -1,12 +1,14 @@
 //! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是配对设备入口（`mobile`），下面是
-//! 后台会话（`background`）。有 workspace 在别的主机上时按主机分组，每组一个组头，能收起、在那台主机上新建。
-//! 每行名字前是 GitHub 头像，没有头像时是名字首字母的色块，右边是当前分支（`repo`）。
+//! 后台会话（`background`）。workspace 按项目（`project_group`）归组；有 workspace 在别的主机上时先按主机分组，
+//! 每组一个组头，能收起、在那台主机上新建。每行两行字：状态圆点和名字，下面是当前分支（`repo`）。
 
+mod project_group;
 mod repo;
+
+use std::path::PathBuf;
 
 use crate::WorkspaceId;
 use crate::ui::a11y::RevealOnHover;
-use crate::ui::avatar::letter_avatar;
 use crate::ui::button::{Button, ButtonSize, Toggle};
 use crate::ui::icons::system_logos;
 use crate::ui::panel::split_handle;
@@ -14,7 +16,7 @@ use crate::ui::theme::ActiveTheme as _;
 use gpui::{
     AccessibleAction, Action, AnyElement, App, Axis, Context, Div, ExternalPaths, Focusable, FontWeight, Hsla,
     Modifiers, MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, Window,
-    WindowControlArea, div, img, prelude::*, px, relative, svg,
+    WindowControlArea, div, prelude::*, px, relative, svg,
 };
 
 use super::{
@@ -63,13 +65,16 @@ fn sidebar_toggle_left(fullscreen: bool) -> f32 {
 pub(super) fn sidebar_toggle_inset(fullscreen: bool) -> f32 {
     sidebar_toggle_left(fullscreen) + SIDEBAR_TOGGLE_WIDTH + 8.
 }
-/// 每个 workspace 一行：首字母或头像、名字和 agent 标记，右边是分支。顶上配对设备、看板这些入口也是这么高，
-/// 整列行距一致。
+/// 顶上配对设备、看板这些入口一行的高度。
 pub(super) const ROW_HEIGHT: f32 = 30.;
+/// 每个 workspace 一项，两行字：上面是状态和名字，下面是分支。
+const WORKSPACE_ROW_HEIGHT: f32 = 42.;
+const WORKSPACE_NAME_LINE: f32 = 18.;
+const WORKSPACE_DETAIL_LINE: f32 = 16.;
 /// 没选中的行的字色，入口和 workspace 行一样。
 pub(super) const ROW_TEXT_OPACITY: f32 = 0.78;
-/// 侧栏每行名字前的图标那一格：workspace 的 GitHub 头像或首字母色块，配对设备入口和新建按钮的图标也占这么宽，
-/// 几处的文字才对齐。
+/// 侧栏每行名字前的图标那一格：项目的头像或文件夹、workspace 的状态圆点，配对设备入口和新建按钮的图标也占
+/// 这么宽，几处的文字才对齐。
 pub(super) const ROW_ICON_SIZE: f32 = 16.;
 /// 改名输入框的高度。
 const RENAME_FIELD_HEIGHT: f32 = 18.;
@@ -91,6 +96,11 @@ pub(super) fn shortcut_modifiers(select: &dyn Action, last: &dyn Action, is_last
     modifiers(select).or_else(|| if is_last { modifiers(last) } else { None })
 }
 
+/// 配置里终端的第一个字体，侧栏写分支、目录时用作等宽字体。
+pub(super) fn mono_font(cx: &App) -> SharedString {
+    cx.global::<crate::config::AppConfig>().0.font_family.first().cloned().unwrap_or_default().into()
+}
+
 /// 拖动中的 workspace：拖动时跟着鼠标画出来，放到另一行上时按 `id` 挪位置。
 #[derive(Clone)]
 struct DraggedWorkspace {
@@ -98,8 +108,9 @@ struct DraggedWorkspace {
     /// 开始拖动时所在的位置，用来决定落点提示画在目标行的上边还是下边。
     ix: usize,
     name: SharedString,
-    /// 只能挪到同一台主机的组里。
+    /// 只能挪到同一台主机、同一个项目的组里。
     host: HostId,
+    project: PathBuf,
     /// 侧栏当前的宽度，预览照这个宽度画。
     width: f32,
 }
@@ -108,7 +119,7 @@ impl Render for DraggedWorkspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 底色和当前 workspace 那一行一样。
         let bg = cx.theme().mix(0.10);
-        drag_chip(px(self.width - 12.), px(ROW_HEIGHT * font_size::scale(cx)), self.name.clone(), bg, cx)
+        drag_chip(px(self.width - 12.), px(WORKSPACE_ROW_HEIGHT * font_size::scale(cx)), self.name.clone(), bg, cx)
     }
 }
 
@@ -207,7 +218,8 @@ impl WindowView {
             .child(self.render_schedules_entry(modifiers, cx))
             .child(self.render_kanban_entry(modifiers, cx))
             // 配对设备、新建任务、定时和看板的入口不是 workspace，和下面的列表用一条线隔开。
-            .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(cx.theme().border))
+            .child(div().flex_none().mx(px(14.)).mb(px(4.)).h(px(1.)).bg(cx.theme().border))
+            .child(self.render_projects_bar(cx))
             .child(
                 div()
                     .id("workspace-list")
@@ -228,8 +240,9 @@ impl WindowView {
             .child(self.render_sidebar_footer(cx))
     }
 
-    /// 列表里的各行。都在本机上时一行一个 workspace；有在别的主机上的就按主机分组，每组前面是组头，
-    /// 收起的组只留当前 workspace 那一行。同一台主机的 workspace 在列表里挨着，见 `model::group_slot`。
+    /// 列表里的各行：按项目分段，每段前面是项目的组头（`render_project_groups`）。有在别的主机上的就先按主机
+    /// 分组，每组前面是主机的组头，收起的主机组只留当前 workspace 那一行。要求同一台主机、同一个项目的
+    /// workspace 在列表里挨着。
     fn render_workspace_rows(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let grouped = self.workspaces.iter().any(|workspace| !workspace.host.is_local());
         let mut rows = Vec::new();
@@ -237,20 +250,23 @@ impl WindowView {
         for group in self.workspaces.chunk_by(|a, b| a.host == b.host) {
             let range = start..start + group.len();
             start = range.end;
-            if !grouped {
-                rows.extend(range.map(|ix| self.render_row(ix, modifiers, cx).into_any_element()));
-                continue;
+            if grouped {
+                let host = &group[0].host;
+                let collapsed = self.collapsed_hosts.contains(host);
+                // 收起时藏起来的 workspace 里有要用户处理的，组头上提示一下。
+                let attention =
+                    collapsed && range.clone().any(|ix| ix != self.active && self.workspace_needs_attention(ix, cx));
+                rows.push(self.render_host_header(host, range.start == 0, collapsed, attention, cx).into_any_element());
+                if collapsed {
+                    rows.extend(
+                        range
+                            .filter(|ix| *ix == self.active)
+                            .map(|ix| self.render_row(ix, modifiers, cx).into_any_element()),
+                    );
+                    continue;
+                }
             }
-            let host = &group[0].host;
-            let collapsed = self.collapsed_hosts.contains(host);
-            let shown = |ix: &usize| !collapsed || *ix == self.active;
-            // 收起时藏起来的 workspace 里有要用户处理的，组头上提示一下。
-            let attention = range.clone().filter(|ix| !shown(ix)).any(|ix| {
-                let workspace = &self.workspaces[ix];
-                workspace.bell() || workspace.mark(cx).is_some_and(|mark| mark.status.needs_attention())
-            });
-            rows.push(self.render_host_header(host, range.start == 0, collapsed, attention, cx).into_any_element());
-            rows.extend(range.filter(shown).map(|ix| self.render_row(ix, modifiers, cx).into_any_element()));
+            rows.extend(self.render_project_groups(range, modifiers, cx));
         }
         rows
     }
@@ -488,28 +504,9 @@ impl WindowView {
         let fg = cx.theme().foreground;
         let group = SharedString::from(format!("workspace-{ix}"));
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.target == RenameTarget::Workspace(id));
-        // 名字前是 GitHub 头像，没有头像时是名字首字母的色块；agent 的标记跟在名字后面。
         let repo = &workspace.repo;
-        let icon = div().flex_none().w(px(ROW_ICON_SIZE)).flex().map(|slot| match &repo.avatar {
-            Some(avatar) => slot.child(img(avatar.clone()).size(px(ROW_ICON_SIZE)).rounded(px(4.))),
-            None => {
-                let (letter, color) = letter_avatar(&workspace.name);
-                slot.child(
-                    div()
-                        .size(px(ROW_ICON_SIZE))
-                        .rounded(px(4.))
-                        .bg(hsla(color))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(FontSize::Tiny)
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(gpui::white())
-                        .child(letter),
-                )
-            }
-        });
         let mark = workspace.mark(cx);
+        let live = !workspace.tabs.is_empty();
         let host = (!workspace.host.is_local()).then(|| {
             let status = hosts::status_of(&workspace.host);
             format!("{} {}", remote_hosts::display_name(&workspace.host, cx), status_text(&status))
@@ -522,29 +519,36 @@ impl WindowView {
             repo.branch.as_ref().map(ToString::to_string),
             dir.clone(),
             mark.map(|mark| mark.describe()),
+            (!live).then(|| rust_i18n::t!("workspace.no_terminals").into_owned()),
             workspace.bell().then(|| rust_i18n::t!("workspace.bell").into_owned()),
         ]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
-        // 等用户回答的不在名字后面画标记，在右边写成显眼的标签。
+        // 名字前是状态：有 agent 时是它的标记，没有时开着终端是绿点，一个终端都没有是空心圆点。等用户回答的
+        // 另在右边写成显眼的标签。
         let blocked = mark.is_some_and(|mark| mark.status == AgentStatus::Blocked);
-        let mark =
-            mark.filter(|_| !blocked).map(|mark| styled_agent_mark(mark, ("workspace-agent", id), fg, cards(cx)));
+        let status =
+            div().flex_none().w(px(ROW_ICON_SIZE)).h_full().flex().items_center().justify_center().child(match mark {
+                Some(mark) => styled_agent_mark(mark, ("workspace-agent", id), fg, cards(cx)),
+                None => div()
+                    .size(px(7.))
+                    .rounded_full()
+                    .map(|dot| if live { dot.bg(hsla(ADDED)) } else { dot.border_1().border_color(fg.opacity(0.35)) })
+                    .into_any_element(),
+            });
         let name: AnyElement = match renaming {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx))).into_any_element(),
-            None => div()
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .child(div().min_w_0().truncate().child(workspace.name.clone()))
-                .children(mark)
-                .into_any_element(),
+            None => div().min_w_0().truncate().child(workspace.name.clone()).into_any_element(),
         };
-        // 右侧靠边写分支，按着快捷键的修饰键或者单按 ⌘ 时换成快捷键提示（按 ⌘ 是找快捷键时最先按的键）；
-        // 后面是等回答的标签和响铃的圆点。有等回答的标签时不写分支：侧栏窄，两样挤在一起分支只剩一个字母。
-        // 悬停时这些都让给关闭按钮。
+        // 名字下面一行用等宽字写分支，不在仓库里时写目录。
+        let detail = match &repo.branch {
+            Some(branch) => branch.clone(),
+            None => workspace.host.display_dir(&workspace.dir).into(),
+        };
+        // 名字右边按着快捷键的修饰键或者单按 ⌘ 时是快捷键提示（按 ⌘ 是找快捷键时最先按的键）；后面是等回答的
+        // 标签和响铃的圆点。悬停时这些都让给关闭按钮。
         let is_last = ix + 1 == self.workspaces.len();
         let held = modifiers == Modifiers::command()
             || shortcut_modifiers(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx) == Some(modifiers);
@@ -559,8 +563,6 @@ impl WindowView {
             .map(|trailing| {
                 if held {
                     trailing.children(shortcut_hint(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx))
-                } else if !blocked {
-                    trailing.children(repo.branch.clone().map(|branch| div().min_w_0().truncate().child(branch)))
                 } else {
                     trailing
                 }
@@ -592,9 +594,11 @@ impl WindowView {
             ix,
             name: workspace.name.clone(),
             host: workspace.host.clone(),
+            project: workspace.project_dir().to_path_buf(),
             width: self.sidebar_width(),
         };
-        let (drag_host, drop_host) = (workspace.host.clone(), workspace.host.clone());
+        let group_key = (workspace.host.clone(), workspace.project_dir().to_path_buf());
+        let drop_key = group_key.clone();
         let view = cx.entity().downgrade();
         div()
             // 改名时换一个 id：双击那次按下被 GPUI 记作待拖动，改名期间不挂 `on_drag`，松开时也就没人清它，
@@ -606,12 +610,12 @@ impl WindowView {
             .when(!a11y_description.is_empty(), |row| row.aria_description(a11y_description))
             .group(group.clone())
             .flex_none()
-            .h(scaled(ROW_HEIGHT))
+            .h(scaled(WORKSPACE_ROW_HEIGHT))
             .px(px(8.))
             .rounded(px(6.))
             .flex()
-            .items_center()
-            .gap(px(6.))
+            .flex_col()
+            .justify_center()
             .map(|row| {
                 if active {
                     row.bg(active_bg).text_color(fg)
@@ -657,12 +661,16 @@ impl WindowView {
             })
             // 改名时在输入框里拖选文字，不能把整行拖走。
             .when(renaming.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
-            // 只能在同一台主机的组里挪。
+            // 只能在同一台主机、同一个项目的组里挪。
             .drag_over::<DraggedWorkspace>(move |style, dragged, _, cx| {
-                if dragged.host == drag_host { drop_marker(style, dragged.ix, ix, Axis::Vertical, cx) } else { style }
+                if (&dragged.host, &dragged.project) == (&group_key.0, &group_key.1) {
+                    drop_marker(style, dragged.ix, ix, Axis::Vertical, cx)
+                } else {
+                    style
+                }
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedWorkspace, window, cx| {
-                if dragged.host == drop_host {
+                if (&dragged.host, &dragged.project) == (&drop_key.0, &drop_key.1) {
                     this.move_workspace(dragged.id, ix, window, cx);
                 }
             }))
@@ -673,35 +681,62 @@ impl WindowView {
             }))
             // 右键菜单从指针处弹出，指针还停在行上，提示会盖住菜单的第一项。
             .when_some(dir.filter(|_| self.menu().is_none()), |row, dir| row.tooltip(tooltip(dir, None)))
-            .child(icon)
-            .child(div().flex_1().min_w_0().child(name))
             .child(
                 div()
                     .flex_none()
-                    .relative()
-                    .h_full()
-                    .min_w(px(TAB_CLOSE_SIZE))
-                    .max_w(relative(0.5))
+                    .h(scaled(WORKSPACE_NAME_LINE))
                     .flex()
                     .items_center()
-                    .justify_end()
-                    .child(trailing)
+                    .gap(px(6.))
+                    .child(status)
+                    .child(div().flex_1().min_w_0().child(name))
                     .child(
-                        Button::new(("workspace-close", id), close_label)
-                            .with_size(ButtonSize::IconXs)
-                            .text_size(px(14.))
-                            .child("×")
-                            .absolute()
-                            .right_0()
-                            .top(relative(0.5))
-                            .mt(px(-TAB_CLOSE_SIZE / 2.))
-                            .reveal_on_hover(group)
-                            .tooltip(close_tooltip)
-                            .on_press_down(cx, move |this, window, cx| {
-                                if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {
-                                    this.confirm_close_workspace(ix, window, cx);
-                                }
-                            }),
+                        div()
+                            .flex_none()
+                            .relative()
+                            .h_full()
+                            .min_w(px(TAB_CLOSE_SIZE))
+                            .max_w(relative(0.5))
+                            .flex()
+                            .items_center()
+                            .justify_end()
+                            .child(trailing)
+                            .child(
+                                Button::new(("workspace-close", id), close_label)
+                                    .with_size(ButtonSize::IconXs)
+                                    .text_size(px(14.))
+                                    .child("×")
+                                    .absolute()
+                                    .right_0()
+                                    .top(relative(0.5))
+                                    .mt(px(-TAB_CLOSE_SIZE / 2.))
+                                    .reveal_on_hover(group)
+                                    .tooltip(close_tooltip)
+                                    .on_press_down(cx, move |this, window, cx| {
+                                        if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {
+                                            this.confirm_close_workspace(ix, window, cx);
+                                        }
+                                    }),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .h(scaled(WORKSPACE_DETAIL_LINE))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().flex_none().w(px(ROW_ICON_SIZE)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(mono_font(cx))
+                            .text_size(FontSize::Small)
+                            .text_color(fg.opacity(if active { 0.55 } else { 0.4 }))
+                            .child(detail),
                     ),
             )
     }
@@ -774,8 +809,7 @@ impl WindowView {
 
     /// 在侧栏里把第 `ix` 个 workspace 的名字换成输入框，原名全选，直接打字就替换掉。
     fn start_rename(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        // 正在改别的 workspace 时先把那个改完。
-        self.finish_rename(true, window, cx);
+        self.finish_pending_edit(window, cx);
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
         let name = workspace.name.to_string();
@@ -795,7 +829,7 @@ impl WindowView {
 
     /// 在侧栏里把远端主机 `host` 组头上的名字换成输入框，现在的显示名全选。
     fn start_rename_host(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
-        self.finish_rename(true, window, cx);
+        self.finish_pending_edit(window, cx);
         let text = remote_hosts::display_name(&host, cx);
         let select = text.len();
         let edit = InlineEdit::new(
@@ -808,6 +842,13 @@ impl WindowView {
         );
         self.renaming = Some(Renaming { target: RenameTarget::Host(host), edit });
         cx.notify();
+    }
+
+    /// 要开别的输入框时结束手上这个：正在改的名字改完，没按回车的新分支名不算，不建工作树。
+    fn finish_pending_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let creating =
+            self.renaming.as_ref().is_some_and(|renaming| matches!(renaming.target, RenameTarget::NewWorktree(..)));
+        self.finish_rename(!creating, window, cx);
     }
 
     /// 结束改名；`commit` 时用输入框里的名字。workspace 的名字空的不算；主机的显示名清空时改回默认的名字。
@@ -828,6 +869,11 @@ impl WindowView {
             RenameTarget::Host(host) => {
                 if commit {
                     remote_hosts::set_display_name(host, &name, cx);
+                }
+            }
+            RenameTarget::NewWorktree(host, project) => {
+                if commit && !name.is_empty() {
+                    self.create_worktree(host.clone(), project.clone(), name, window, cx);
                 }
             }
         }

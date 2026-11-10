@@ -288,6 +288,8 @@ enum RenameTarget {
     Workspace(WorkspaceId),
     /// 远端主机，改的是它的显示名（`remote_hosts::set_display_name`）。
     Host(HostId),
+    /// 不是改名：在主机上项目目录是这个的仓库里新建工作树，输入的是新分支的名字。
+    NewWorktree(HostId, PathBuf),
 }
 
 /// 窗口的根视图。
@@ -303,6 +305,8 @@ pub struct WindowView {
     sidebar_scroll: ScrollHandle,
     /// 侧栏按主机分组时收起来的组，按收起的先后。
     collapsed_hosts: Vec<HostId>,
+    /// 侧栏里收起来的项目：主机和项目目录（`Workspace::project_dir`），按收起的先后。
+    collapsed_projects: Vec<(HostId, PathBuf)>,
     /// 右侧面板拖动过宽度时是那个宽度，没拖过时用默认宽度；显示哪一页每个 workspace 各记一份（`Workspace::panel`）。
     panel_width: Option<f32>,
     /// 右侧面板的 Git 页，见 `git_panel`：各 workspace 的面板都在它里面，显示设置和图表的高度也是。
@@ -482,6 +486,7 @@ impl WindowView {
             sidebar_width: None,
             sidebar_scroll: ScrollHandle::new(),
             collapsed_hosts: Vec::new(),
+            collapsed_projects: Vec::new(),
             panel_width: None,
             git_panel,
             _git_panel_events: git_panel_events,
@@ -579,6 +584,7 @@ impl WindowView {
                     host: HostId::Local,
                     name: model::workspace_name(&HostId::Local, &dir).into(),
                     repo: Default::default(),
+                    common_git_dir: None,
                     canonical: model::canonical_dir_later(&HostId::Local, &dir),
                     dir,
                     tabs: Vec::new(),
@@ -612,7 +618,7 @@ impl WindowView {
     fn font_family(&self, cx: &App) -> SharedString {
         match self.focused_view() {
             Some(view) => view.read(cx).font_family(),
-            None => cx.global::<AppConfig>().0.font_family.first().cloned().unwrap_or_default().into(),
+            None => sidebar::mono_font(cx),
         }
     }
 

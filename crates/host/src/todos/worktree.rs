@@ -22,7 +22,7 @@ pub(super) fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
     let repo =
         Repo::open(&todo.spec.dir).ok_or_else(|| format!("{} is not in a git repository", todo.spec.dir.display()))?;
     let slug = slug(&todo.spec.title).unwrap_or_else(|| todo.id.clone());
-    let worktrees = repo.root.join(".worktrees");
+    let worktrees = repo.root.join(runode_git::WORKTREES_DIR);
     let branches: HashSet<String> =
         repo.branches().into_iter().filter(|branch| !branch.remote).map(|branch| branch.name).collect();
     let names = [slug.clone(), format!("{slug}-{}", todo.id)]

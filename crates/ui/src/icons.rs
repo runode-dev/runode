@@ -41,6 +41,12 @@ crate::icons! {
     pub VIEW_LIST_ICON = "view-list",
     /// 浏览文件夹、在访达里打开。
     pub FOLDER_OPEN_ICON = "folder-open",
+    /// 侧栏里的项目，以及添加项目。
+    pub FOLDER_ICON = "folder",
+    pub FOLDER_PLUS_ICON = "folder-plus",
+    /// 侧栏里一起收起、一起展开所有项目。
+    pub COLLAPSE_ALL_ICON = "chevrons-collapse",
+    pub EXPAND_ALL_ICON = "chevrons-expand",
     /// 关闭、清空。
     pub CLOSE_ICON = "close",
     pub BRANCH_ICON = "branch",

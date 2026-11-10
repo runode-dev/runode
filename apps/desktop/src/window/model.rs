@@ -105,16 +105,49 @@ pub(super) async fn dropped_dirs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     crate::fs_probe::off_thread(move || paths.into_iter().filter(|path| path.is_dir()).collect(), Vec::new()).await
 }
 
-/// 主机是 `host` 的 workspace 放进列表（各 workspace 的主机依次是 `hosts`）时落在第几个：侧栏按主机分组，
-/// 同一台主机的要挨在一起。已经有这台主机的组时，`ix` 在组里（含紧跟组尾）就照 `ix`，否则挪到离它近的组头
-/// 或组尾；还没有时 `ix` 落在两组之间就照 `ix`，落在别的组中间就接在最后。
-pub(super) fn group_slot(hosts: &[&HostId], host: &HostId, ix: usize) -> usize {
-    let ix = ix.min(hosts.len());
-    match (hosts.iter().position(|h| *h == host), hosts.iter().rposition(|h| *h == host)) {
+/// 组是 `key` 的一项放进列表（各项的组依次是 `keys`）时落在第几个：同一组的要挨在一起。已经有这一组时，
+/// `ix` 在组里（含紧跟组尾）就照 `ix`，否则挪到离它近的组头或组尾；还没有时 `ix` 落在两组之间就照 `ix`，
+/// 落在别的组中间就接在最后。
+pub(super) fn group_slot<T: PartialEq + ?Sized>(keys: &[&T], key: &T, ix: usize) -> usize {
+    let ix = ix.min(keys.len());
+    match (keys.iter().position(|k| *k == key), keys.iter().rposition(|k| *k == key)) {
         (Some(first), Some(last)) => ix.clamp(first, last + 1),
-        _ if ix == 0 || ix == hosts.len() || hosts[ix - 1] != hosts[ix] => ix,
-        _ => hosts.len(),
+        _ if ix == 0 || ix == keys.len() || keys[ix - 1] != keys[ix] => ix,
+        _ => keys.len(),
     }
+}
+
+/// 主机是 `host`、项目是 `project` 的 workspace 放进列表（各 workspace 的主机和项目依次是 `keys`）时落在
+/// 第几个：侧栏先按主机、再在主机里按项目分组，按 `group_slot` 先挪进主机的组，再挪进组里项目的那一段。
+pub(super) fn workspace_slot(keys: &[(&HostId, &Path)], host: &HostId, project: &Path, ix: usize) -> usize {
+    let hosts: Vec<&HostId> = keys.iter().map(|(host, _)| *host).collect();
+    let ix = group_slot(&hosts, host, ix);
+    let (Some(first), Some(last)) = (hosts.iter().position(|h| *h == host), hosts.iter().rposition(|h| *h == host))
+    else {
+        return ix;
+    };
+    let projects: Vec<&Path> = keys[first..=last].iter().map(|(_, project)| *project).collect();
+    first + group_slot(&projects, project, ix - first)
+}
+
+/// 把 `items` 里满足 `moving` 的那一段挪到满足 `target` 的那一段旁边：原来在它前面的挪到它后面，原来在后面
+/// 的挪到前面，两段里各项的先后不变。两段都要各自挨着；有一段没有或是同一段时不动，返回挪没挪。
+pub(super) fn move_group<T>(items: &mut Vec<T>, moving: impl Fn(&T) -> bool, target: impl Fn(&T) -> bool) -> bool {
+    let (Some(from), Some(to)) = (items.iter().position(&moving), items.iter().position(&target)) else {
+        return false;
+    };
+    if from == to {
+        return false;
+    }
+    let count = items[from..].iter().take_while(|item| moving(item)).count();
+    let group: Vec<T> = items.drain(from..from + count).collect();
+    let at = if from < to {
+        items.iter().rposition(&target).map_or(items.len(), |last| last + 1)
+    } else {
+        items.iter().position(&target).unwrap_or(0)
+    };
+    items.splice(at..at, group);
+    true
 }
 
 /// 新 workspace 的名字：家目录叫 `~`；在 git 仓库里取仓库根的目录名，其余取目录名。
@@ -149,6 +182,9 @@ pub(super) struct Workspace {
     pub(super) canonical: Arc<OnceLock<PathBuf>>,
     /// 侧栏这一行上的当前分支和 GitHub 头像。
     pub(super) repo: RepoBadge,
+    /// 所在仓库的共用 git 目录（`project_host::RepoSummary::common_git_dir`），侧栏按它把同一个仓库的工作树
+    /// 归到一个项目下；还没问到或不在仓库里时为空。
+    pub(super) common_git_dir: Option<PathBuf>,
     /// 可以没有：最后一个关掉后 workspace 留着，显示一个空的标签区，等用户新开。
     pub(super) tabs: Vec<Tab>,
     /// 当前标签；没有标签时为 0。
@@ -169,6 +205,11 @@ impl Workspace {
     /// `dir` 解开符号链接后的写法，比两个目录是不是同一个用；后台还没算好时照 `dir` 原样。
     pub(super) fn real_dir(&self) -> &Path {
         self.canonical.get().unwrap_or(&self.dir)
+    }
+
+    /// 侧栏把它归在哪个项目下：所在仓库的共用 git 目录，不在仓库里时是自己的目录。
+    pub(super) fn project_dir(&self) -> &Path {
+        self.common_git_dir.as_deref().unwrap_or(&self.dir)
     }
 
     fn active_tab(&self) -> Option<&Tab> {
@@ -419,7 +460,7 @@ impl WindowView {
         self.activate_workspace(ix, window, cx);
     }
 
-    /// 在第 `ix` 个位置附近放一个目录是 `dir` 的新 workspace（位置按 `group_slot` 挪进它主机的那一组），
+    /// 在第 `ix` 个位置附近放一个目录是 `dir` 的新 workspace（位置按 `workspace_slot` 挪进它的那一组），
     /// `view` 是它的第一个终端，不切过去：当前的 workspace 还是原来那个。`name` 为空时按目录取名。返回放在
     /// 了第几个。
     pub(super) fn add_workspace(
@@ -432,13 +473,14 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> usize {
         let host = view.read(cx).host().clone();
-        let ix = group_slot(&self.workspace_hosts(), &host, ix);
+        let ix = workspace_slot(&self.workspace_keys(), &host, &dir, ix);
         let tab = self.single_pane_tab(view, window, cx);
         let workspace = Workspace {
             id: self.next_id(),
             host: host.clone(),
             name: name.unwrap_or_else(|| workspace_name(&host, &dir)).into(),
             repo: RepoBadge::default(),
+            common_git_dir: None,
             canonical: canonical_dir_later(&host, &dir),
             dir,
             tabs: vec![tab],
@@ -457,23 +499,69 @@ impl WindowView {
         ix
     }
 
-    /// 各 workspace 所在的主机，按列表的顺序。
-    pub(super) fn workspace_hosts(&self) -> Vec<&HostId> {
-        self.workspaces.iter().map(|workspace| &workspace.host).collect()
+    /// 各 workspace 所在的主机和项目（`Workspace::project_dir`），按列表的顺序。
+    pub(super) fn workspace_keys(&self) -> Vec<(&HostId, &Path)> {
+        self.workspaces.iter().map(|workspace| (&workspace.host, workspace.project_dir())).collect()
     }
 
-    /// 把同一台主机的 workspace 排到一起，各组按主机第一次出现的先后、组里照原来的先后；返回原来第
+    /// 把同一台主机、同一个项目的 workspace 排到一起，各组按第一次出现的先后、组里照原来的先后；返回原来第
     /// `active` 个排到了第几个。
-    pub(super) fn group_workspaces_by_host(&mut self, active: usize) -> usize {
+    pub(super) fn group_workspaces(&mut self, active: usize) -> usize {
         let active = self.workspaces.get(active).map(|workspace| workspace.id);
-        let mut order: Vec<HostId> = Vec::new();
+        let mut hosts: Vec<HostId> = Vec::new();
+        let mut projects: Vec<(HostId, PathBuf)> = Vec::new();
         for workspace in &self.workspaces {
-            if !order.contains(&workspace.host) {
-                order.push(workspace.host.clone());
+            if !hosts.contains(&workspace.host) {
+                hosts.push(workspace.host.clone());
+            }
+            let project = (workspace.host.clone(), workspace.project_dir().to_path_buf());
+            if !projects.contains(&project) {
+                projects.push(project);
             }
         }
-        self.workspaces.sort_by_key(|workspace| order.iter().position(|host| *host == workspace.host));
+        self.workspaces.sort_by_key(|workspace| {
+            let host = hosts.iter().position(|host| *host == workspace.host);
+            let project = projects
+                .iter()
+                .position(|(host, dir)| *host == workspace.host && dir.as_path() == workspace.project_dir());
+            (host, project)
+        });
         self.workspaces.iter().position(|workspace| Some(workspace.id) == active).unwrap_or(0)
+    }
+
+    /// workspace `id` 的项目变了（问到了所在的仓库）时把它挪进那个项目的组，当前的 workspace 不变。
+    pub(super) fn regroup_workspace(&mut self, id: WorkspaceId) {
+        let Some(from) = self.workspaces.iter().position(|workspace| workspace.id == id) else {
+            return;
+        };
+        let active = self.workspaces.get(self.active).map(|workspace| workspace.id);
+        let workspace = self.workspaces.remove(from);
+        let to = workspace_slot(&self.workspace_keys(), &workspace.host, workspace.project_dir(), from);
+        self.workspaces.insert(to, workspace);
+        self.active = self.workspaces.iter().position(|workspace| Some(workspace.id) == active).unwrap_or(0);
+    }
+
+    /// 把主机 `host` 上的项目 `from` 整组挪到项目 `to` 旁边（`move_group`），当前的 workspace 不变。
+    pub(super) fn move_project(&mut self, host: &HostId, from: &Path, to: &Path, cx: &mut Context<Self>) {
+        let active = self.workspaces.get(self.active).map(|workspace| workspace.id);
+        let moved = move_group(
+            &mut self.workspaces,
+            |workspace| workspace.host == *host && workspace.project_dir() == from,
+            |workspace| workspace.host == *host && workspace.project_dir() == to,
+        );
+        if moved {
+            self.active = self.workspaces.iter().position(|workspace| Some(workspace.id) == active).unwrap_or(0);
+            self.save(cx);
+            cx.notify();
+        }
+    }
+
+    /// 侧栏里收起来的项目只记还有 workspace 的。
+    pub(super) fn forget_gone_projects(&mut self) {
+        let workspaces = &self.workspaces;
+        self.collapsed_projects.retain(|(host, dir)| {
+            workspaces.iter().any(|workspace| workspace.host == *host && workspace.project_dir() == dir)
+        });
     }
 
     /// 装着这个终端的 workspace 和标签。
@@ -876,12 +964,21 @@ impl WindowView {
     /// （没有就上面），关的是别的时当前的照旧显示。最后一个关掉时关窗口。
     fn close_workspace_at(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.end_sessions(Closing::Workspace(ix), cx);
-        // 关的是正在改名的 workspace，或者正在改名的主机组里的最后一个时，输入框跟着没了。
+        // 关的是正在改名的 workspace，或者正在改名的主机组、正在新建工作树的项目里的最后一个时，输入框跟着没了。
         let closing = &self.workspaces[ix];
         let last_on_host = self.workspaces.iter().filter(|workspace| workspace.host == closing.host).count() == 1;
+        let last_in_project = self
+            .workspaces
+            .iter()
+            .filter(|workspace| workspace.host == closing.host && workspace.project_dir() == closing.project_dir())
+            .count()
+            == 1;
         if self.renaming.as_ref().is_some_and(|renaming| match &renaming.target {
             super::RenameTarget::Workspace(id) => *id == closing.id,
             super::RenameTarget::Host(host) => last_on_host && closing.host == *host,
+            super::RenameTarget::NewWorktree(host, project) => {
+                last_in_project && closing.host == *host && closing.project_dir() == project
+            }
         }) {
             self.renaming = None;
         }
@@ -902,6 +999,7 @@ impl WindowView {
         // 主机上的 workspace 关完了，这组就没了，不再记着它收没收起。
         let workspaces = &self.workspaces;
         self.collapsed_hosts.retain(|host| workspaces.iter().any(|workspace| workspace.host == *host));
+        self.forget_gone_projects();
         self.forget_previews(id, cx);
         self.file_tree.update(cx, |tree, _| tree.forget_workspace(id));
         self.git_panel.update(cx, |panel, _| panel.forget_workspace(id));
@@ -960,7 +1058,7 @@ impl WindowView {
             return;
         };
         let workspace = self.workspaces.remove(from);
-        let to = group_slot(&self.workspace_hosts(), &workspace.host, to.min(self.workspaces.len()));
+        let to = workspace_slot(&self.workspace_keys(), &workspace.host, workspace.project_dir(), to);
         self.workspaces.insert(to, workspace);
         self.activate_workspace(to, window, cx);
     }
@@ -1104,7 +1202,42 @@ mod tests {
         assert_eq!(group_slot(&hosts, &c, 0), 0);
         assert_eq!(group_slot(&hosts, &c, 1), 5);
         assert_eq!(group_slot(&hosts, &c, 9), 5);
-        assert_eq!(group_slot(&[], &c, 3), 0);
+        assert_eq!(group_slot::<HostId>(&[], &c, 3), 0);
+    }
+
+    #[test]
+    fn new_workspaces_join_their_project_within_the_host() {
+        let (local, a) = (HostId::Local, HostId::Ssh("a".into()));
+        let (app, lib) = (Path::new("/app"), Path::new("/lib"));
+        let keys = [(&local, app), (&local, app), (&local, lib), (&a, app)];
+        // 同一台主机上已有的项目：挪进那一段。
+        assert_eq!(workspace_slot(&keys, &local, app, 0), 0);
+        assert_eq!(workspace_slot(&keys, &local, app, 3), 2);
+        assert_eq!(workspace_slot(&keys, &local, lib, 0), 2);
+        assert_eq!(workspace_slot(&keys, &local, lib, 9), 3);
+        // 主机上的新项目：落在两个项目之间照放，落在项目中间接在主机的组尾。
+        let new = Path::new("/new");
+        assert_eq!(workspace_slot(&keys, &local, new, 2), 2);
+        assert_eq!(workspace_slot(&keys, &local, new, 1), 3);
+        // 别的主机上同名的目录是另一个项目，不挪进本机的组。
+        assert_eq!(workspace_slot(&keys, &a, app, 0), 3);
+        assert_eq!(workspace_slot(&keys, &HostId::Ssh("b".into()), app, 2), 4);
+    }
+
+    #[test]
+    fn projects_move_as_a_whole() {
+        let mut items = vec!["a1", "a2", "b1", "c1", "c2"];
+        let group = |name: char| move |item: &&str| item.starts_with(name);
+        // 往后拖插到目标整组的后面，往前拖插到目标整组的前面。
+        assert!(move_group(&mut items, group('a'), group('c')));
+        assert_eq!(items, ["b1", "c1", "c2", "a1", "a2"]);
+        assert!(move_group(&mut items, group('a'), group('b')));
+        assert_eq!(items, ["a1", "a2", "b1", "c1", "c2"]);
+        assert!(move_group(&mut items, group('c'), group('b')));
+        assert_eq!(items, ["a1", "a2", "c1", "c2", "b1"]);
+        assert!(!move_group(&mut items, group('c'), group('c')));
+        assert!(!move_group(&mut items, group('x'), group('a')));
+        assert_eq!(items, ["a1", "a2", "c1", "c2", "b1"]);
     }
 
     /// 目录解开符号链接的写法在别的线程上算好后交回来。

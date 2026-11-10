@@ -157,6 +157,15 @@ workspace:
   rename_host: "Rename %{host}"
   edit_host_name: Host name
   host_attention: Has workspaces that need you
+  projects: Projects
+  collapse_all: Collapse All Projects
+  expand_all: Expand All Projects
+  add_project: Add Project
+  new_worktree: "New Worktree in %{project}"
+  worktree_branch: New branch name
+  worktree_bad_name: "“%{name}” can't be used as a branch name."
+  worktree_failed: Couldn't Create the Worktree
+  no_terminals: No terminals
   host_remote_hint: "%{status} · SSH"
   host_paired_hint: "%{status} · Runode pairing"
   host_add: Add SSH Host

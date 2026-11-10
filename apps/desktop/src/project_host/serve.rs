@@ -145,11 +145,30 @@ pub(super) fn kind(path: &std::path::Path) -> Option<bool> {
     std::fs::metadata(path).ok().map(|meta| meta.is_dir())
 }
 
-/// `dir` 所在仓库的当前分支和 `origin` 的地址（`Reply::RepoBadge`）；不在仓库里时不再问地址。
-pub(super) fn repo_badge(dir: &std::path::Path) -> (Option<String>, Option<String>) {
-    let branch = runode_git::current_branch(dir);
-    let origin = branch.as_ref().and_then(|_| runode_git::origin_url(dir));
-    (branch, origin)
+/// `dir` 所在仓库的 `RepoSummary`；不在仓库里时不再问别的。
+pub(super) fn repo_badge(dir: &std::path::Path) -> super::RepoSummary {
+    let Some(branch) = runode_git::current_branch(dir) else {
+        return super::RepoSummary::default();
+    };
+    let real = |path: PathBuf| runode_host::canonicalize(&path).unwrap_or(path);
+    let location = runode_git::repo_location(dir);
+    let mut common_git_dir = location.as_ref().map(|location| real(location.common_dir.clone()));
+    let mut main_worktree = location.and_then(|location| location.main_worktree).map(real);
+    let home = runode_paths::Dirs::from_env().home.map(real);
+    if under_home_repo(&real(dir.to_path_buf()), main_worktree.as_deref(), home.as_deref()) {
+        (common_git_dir, main_worktree) = (None, None);
+    }
+    super::RepoSummary { branch: Some(branch), origin: runode_git::origin_url(dir), common_git_dir, main_worktree }
+}
+
+/// `dir` 不是家目录、所在仓库的主工作树却是家目录：家目录是管配置文件的仓库，下面没进别的仓库的目录不归成它的
+/// 项目，也不在家目录下建工作树。路径都解开了符号链接。
+fn under_home_repo(
+    dir: &std::path::Path,
+    main_worktree: Option<&std::path::Path>,
+    home: Option<&std::path::Path>,
+) -> bool {
+    home.is_some_and(|home| main_worktree == Some(home) && dir != home)
 }
 
 /// 办一个请求，`content` 是请求后面跟着的字节；`stop` 置位时停得下的停下，交回已经找到的。
@@ -207,10 +226,7 @@ fn handle(call: Call, content: Vec<u8>, caches: &Shared, stop: &AtomicBool) -> (
         }
         Call::Stamp { path } => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
         Call::Ports => (Reply::Ports(crate::system_probe::listening_ports()), Vec::new()),
-        Call::RepoBadge { dir } => {
-            let (branch, origin) = repo_badge(&dir);
-            (Reply::RepoBadge { branch, origin }, Vec::new())
-        }
+        Call::RepoBadge { dir } => (Reply::RepoBadge(repo_badge(&dir)), Vec::new()),
         Call::Kinds { paths } => (Reply::Kinds(paths.iter().map(|path| kind(path)).collect()), Vec::new()),
         Call::Write { path } => match runode_paths::replace_file(&path, &content) {
             Ok(()) => (Reply::Stamp(runode_files::stamp(&path)), Vec::new()),
@@ -449,7 +465,18 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// 侧栏要的分支和 `origin`：仓库里两样都回，不在仓库里时都为空。
+    #[test]
+    fn dirs_below_a_home_repo_are_not_its_project() {
+        use std::path::Path;
+        let (home, notes) = (Path::new("/home/u"), Path::new("/home/u/notes"));
+        assert!(super::under_home_repo(notes, Some(home), Some(home)));
+        assert!(!super::under_home_repo(home, Some(home), Some(home)));
+        assert!(!super::under_home_repo(notes, Some(notes), Some(home)));
+        assert!(!super::under_home_repo(notes, Some(home), None));
+        assert!(!super::under_home_repo(notes, None, Some(home)));
+    }
+
+    /// 侧栏要的分支、`origin` 和主工作树：仓库里都回，不在仓库里时都为空。
     #[test]
     fn repo_badge_reports_branch_and_origin() {
         let dir = std::env::temp_dir().join(format!("runode-project-badge-{}", std::process::id()));
@@ -459,13 +486,13 @@ mod tests {
         git(&["init", "-q", "-b", "topic"]);
         git(&["remote", "add", "origin", "git@github.com:runode-dev/runode.git"]);
         let (reply, _) = handle(Call::RepoBadge { dir: repo.clone() }, Vec::new(), &Shared::default(), &GO);
-        assert!(matches!(
-            reply,
-            Reply::RepoBadge { branch: Some(branch), origin: Some(origin) }
-                if branch == "topic" && origin == "git@github.com:runode-dev/runode.git"
-        ));
+        let Reply::RepoBadge(badge) = reply else { panic!("{reply:?}") };
+        assert_eq!(badge.branch.as_deref(), Some("topic"));
+        assert_eq!(badge.origin.as_deref(), Some("git@github.com:runode-dev/runode.git"));
+        assert_eq!(badge.common_git_dir, Some(runode_host::canonicalize(&repo.join(".git")).unwrap()));
+        assert_eq!(badge.main_worktree, Some(runode_host::canonicalize(&repo).unwrap()));
         let (reply, _) = handle(Call::RepoBadge { dir: dir.clone() }, Vec::new(), &Shared::default(), &GO);
-        assert!(matches!(reply, Reply::RepoBadge { branch: None, origin: None }));
+        assert!(matches!(reply, Reply::RepoBadge(badge) if badge == crate::project_host::RepoSummary::default()));
         fs::remove_dir_all(&dir).ok();
     }
 }

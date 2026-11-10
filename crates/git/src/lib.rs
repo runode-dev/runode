@@ -230,6 +230,56 @@ pub fn current_branch(dir: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&out).trim().to_owned()).filter(|name| !name.is_empty())
 }
 
+/// runode 新建的工作树放在主工作树下的这个目录里，一个工作树占一级。
+pub const WORKTREES_DIR: &str = ".worktrees";
+
+/// 一个工作树属于哪个仓库：路径都没解开符号链接。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepoLocation {
+    /// 各个工作树共用的 git 目录，同一个仓库的工作树都一样。
+    pub common_dir: PathBuf,
+    /// 主工作树的根目录；裸仓库没有，单独放 git 目录的仓库从链接工作树里找不到，都为空。
+    pub main_worktree: Option<PathBuf>,
+}
+
+/// `dir` 所在的工作树属于哪个仓库；不在工作树里（不在仓库里，或者在裸仓库、git 目录里面）时为空。
+/// `git worktree list` 列的主工作树是共用 git 目录去掉 `/.git`，子模块、单独放 git 目录的仓库都不对，不用它：
+/// 在主工作树里时自己的 git 目录就是共用的那个，取工作树的根；在链接工作树里时看共用 git 目录记的
+/// `core.worktree`（子模块记着），没有时共用 git 目录叫 `.git` 就取它的上一级。
+pub fn repo_location(dir: &Path) -> Option<RepoLocation> {
+    let out = git(dir, &["rev-parse", "--git-dir", "--git-common-dir", "--show-toplevel"])?;
+    let out = String::from_utf8_lossy(&out);
+    let mut lines = out.lines().map(str::trim).filter(|line| !line.is_empty());
+    // git 在仓库根上答相对 `dir` 的 `.git`，在子目录和链接工作树里答绝对路径。
+    let (git_dir, common_dir) = (dir.join(lines.next()?), dir.join(lines.next()?));
+    let top = PathBuf::from(lines.next()?);
+    let same =
+        |a: &Path, b: &Path| a == b || fs::canonicalize(a).ok().is_some_and(|a| fs::canonicalize(b).ok() == Some(a));
+    let main_worktree = if same(&git_dir, &common_dir) {
+        Some(local_root(dir, top))
+    } else {
+        let config = common_dir.join("config");
+        let configured = git(
+            dir,
+            &[
+                OsStr::new("config"),
+                OsStr::new("--file"),
+                config.as_os_str(),
+                OsStr::new("--get"),
+                OsStr::new("core.worktree"),
+            ],
+        );
+        match configured.map(|out| String::from_utf8_lossy(&out).trim().to_owned()).filter(|value| !value.is_empty()) {
+            Some(value) => Some(common_dir.join(value)),
+            None => common_dir
+                .parent()
+                .filter(|_| common_dir.file_name().is_some_and(|name| name == ".git"))
+                .map(Path::to_path_buf),
+        }
+    };
+    Some(RepoLocation { common_dir, main_worktree })
+}
+
 /// `dir` 所在仓库 `origin` 远端的地址；没有这个远端时为空。
 pub fn origin_url(dir: &Path) -> Option<String> {
     let out = git(dir, &["remote", "get-url", "origin"])?;

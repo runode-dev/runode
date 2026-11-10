@@ -44,6 +44,7 @@ fn state() -> State {
             name: "tmp".into(),
             host: None,
             dir: "/tmp".into(),
+            project: Some("/repo".into()),
             tabs: vec![tab],
             active: 0,
             last_task: None,
@@ -56,6 +57,10 @@ fn state() -> State {
         sidebar: None,
         sidebar_width: Some(240.),
         collapsed_hosts: vec![None, Some("vps".into())],
+        collapsed_projects: vec![
+            SavedProject { host: None, dir: "/repo".into() },
+            SavedProject { host: Some("vps".into()), dir: "/srv/app".into() },
+        ],
         panel_width: Some(200.),
         preview_wrap: true,
         preview_source: true,

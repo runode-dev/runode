@@ -1,5 +1,5 @@
-//! 侧栏每个 workspace 行上的仓库信息：当前分支，以及 `origin` 在 GitHub 上时 owner 的头像。远端的分支和
-//! `origin` 经 `ProjectHost` 在那台机器上问，头像在本机下载。
+//! 侧栏每个 workspace 行上的仓库信息：当前分支，以及 `origin` 在 GitHub 上时 owner 的头像；顺带问到所在仓库的
+//! 主工作树，侧栏按它归组。远端的经 `ProjectHost` 在那台机器上问，头像在本机下载。
 
 use std::{
     path::{Path, PathBuf},
@@ -32,6 +32,8 @@ pub(in crate::window) struct RepoBadge {
     pub branch: Option<SharedString>,
     /// 下载好的 owner 头像。
     pub avatar: Option<PathBuf>,
+    /// 所在仓库的主工作树（`project_host::RepoSummary::main_worktree`），项目组头按它取名字、在它下面新建工作树。
+    pub main_worktree: Option<PathBuf>,
     checked: Option<Instant>,
     checking: bool,
     /// 这次运行里找过头像了，找没找到都不再找，之后只刷新分支。
@@ -65,9 +67,9 @@ impl WindowView {
             let (id, dir, find_avatar) = (workspace.id, workspace.dir.clone(), !badge.avatar_looked);
             let host = ProjectHost::of(&workspace.host);
             let job = cx.background_spawn(async move {
-                let (branch, origin) = host.repo_badge(&dir).ok()?;
-                let avatar = find_avatar.then(|| origin.as_deref().and_then(avatar_for)).flatten();
-                Some((branch, avatar))
+                let badge = host.repo_badge(&dir).ok()?;
+                let avatar = find_avatar.then(|| badge.origin.as_deref().and_then(avatar_for)).flatten();
+                Some((badge.branch, badge.common_git_dir, badge.main_worktree, avatar))
             });
             cx.spawn(async move |this, cx| {
                 let answer = job.await;
@@ -79,17 +81,26 @@ impl WindowView {
                     let badge = &mut workspace.repo;
                     badge.checking = false;
                     badge.checked = Some(Instant::now());
-                    let Some((branch, avatar)) = answer else {
+                    let Some((branch, common_git_dir, main_worktree, avatar)) = answer else {
                         return;
                     };
                     let branch = branch.map(SharedString::from);
-                    let changed = badge.branch != branch || (find_avatar && badge.avatar != avatar);
+                    let changed = badge.branch != branch
+                        || badge.main_worktree != main_worktree
+                        || (find_avatar && badge.avatar != avatar);
                     badge.branch = branch;
+                    badge.main_worktree = main_worktree;
                     if find_avatar {
                         badge.avatar = avatar;
                         badge.avatar_looked = true;
                     }
-                    if changed {
+                    if workspace.common_git_dir != common_git_dir {
+                        workspace.common_git_dir = common_git_dir;
+                        this.regroup_workspace(id);
+                        this.forget_gone_projects();
+                        this.save(cx);
+                        cx.notify();
+                    } else if changed {
                         cx.notify();
                     }
                 })

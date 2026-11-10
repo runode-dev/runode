@@ -157,6 +157,15 @@ workspace:
   rename_host: "给 %{host} 改名"
   edit_host_name: 主机名
   host_attention: 有工作区等你处理
+  projects: 项目
+  collapse_all: 收起所有项目
+  expand_all: 展开所有项目
+  add_project: 添加项目
+  new_worktree: "在 %{project} 新建工作树"
+  worktree_branch: 新分支名
+  worktree_bad_name: "「%{name}」不能用作分支名。"
+  worktree_failed: 建不了工作树
+  no_terminals: 没有终端
   host_remote_hint: "%{status} · SSH"
   host_paired_hint: "%{status} · Runode 配对"
   host_add: 添加 SSH 主机

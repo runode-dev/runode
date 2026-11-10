@@ -43,6 +43,9 @@ pub struct SavedWindow {
     /// 侧栏里收起来的主机组，写法同 `SavedWorkspace::host`：本机为空。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collapsed_hosts: Vec<Option<String>>,
+    /// 侧栏里收起来的项目。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collapsed_projects: Vec<SavedProject>,
     /// 右侧面板拖动过的宽度；没拖过时为空，用默认宽度。
     pub panel_width: Option<f32>,
     /// 预览的文本和 diff 自动换行；默认不换。
@@ -117,6 +120,14 @@ pub enum WindowMode {
     Fullscreen,
 }
 
+/// 侧栏里的一个项目：主机按 `HostId::key` 写，本机为空；目录是 `Workspace::project_dir`。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SavedProject {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    pub dir: PathBuf,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedWorkspace {
     pub name: String,
@@ -124,6 +135,9 @@ pub struct SavedWorkspace {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
     pub dir: PathBuf,
+    /// 所在仓库的共用 git 目录（`Workspace::common_git_dir`），下次打开时不等问到仓库就能归进项目。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<PathBuf>,
     pub tabs: Vec<SavedTab>,
     /// 当前的标签。
     pub active: usize,
