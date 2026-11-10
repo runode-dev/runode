@@ -244,7 +244,7 @@ fn adds_a_worktree_inside_the_repo_without_dirtying_it() {
     let handle = runode_git::Repo::open(repo.path()).unwrap();
     let worktree = handle.root.join(".worktrees").join("fix-login");
 
-    handle.add_worktree(&worktree, "runode/fix-login").unwrap();
+    handle.add_worktree(&worktree, "runode/fix-login", None).unwrap();
     assert_eq!(std::fs::read_to_string(worktree.join("a.txt")).unwrap(), "one\n");
     assert_eq!(repo.git(&["-C", &worktree.to_string_lossy(), "branch", "--show-current"]).trim(), "runode/fix-login");
     // 新工作树的目录写进了 info/exclude，主仓库的状态里看不到它；`.gitignore` 没被碰。
@@ -254,9 +254,9 @@ fn adds_a_worktree_inside_the_repo_without_dirtying_it() {
     assert!(exclude.ends_with("/.worktrees/\n"), "{exclude:?}");
 
     // 第二个工作树不再重复写；分支已经有了时 git 拒绝。
-    handle.add_worktree(&handle.root.join(".worktrees").join("second"), "runode/second").unwrap();
+    handle.add_worktree(&handle.root.join(".worktrees").join("second"), "runode/second", None).unwrap();
     assert_eq!(std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap(), exclude);
-    assert!(handle.add_worktree(&handle.root.join(".worktrees").join("again"), "runode/fix-login").is_err());
+    assert!(handle.add_worktree(&handle.root.join(".worktrees").join("again"), "runode/fix-login", None).is_err());
 
     // 干净时不强制也删得掉，有改动时删不掉。
     handle.remove_worktree(&worktree, false).unwrap();
@@ -275,6 +275,25 @@ fn adds_a_worktree_inside_the_repo_without_dirtying_it() {
     assert!(handle.delete_merged_branch("-D").is_err());
 }
 
+/// 给了起点时新分支从它拉出来，不从当前 HEAD，也不跟踪它；不是提交、`-` 开头的起点拒掉。
+#[test]
+fn adds_a_worktree_from_another_branch() {
+    let repo = TestRepo::new("repos-add-worktree-start");
+    repo.commit_file("a.txt", "one\n", "init");
+    repo.git(&["branch", "base"]);
+    repo.commit_file("a.txt", "two\n", "later");
+    repo.git(&["config", "branch.autoSetupMerge", "always"]);
+    let handle = runode_git::Repo::open(repo.path()).unwrap();
+    let worktree = handle.root.join(".worktrees").join("from-base");
+
+    handle.add_worktree(&worktree, "from-base", Some("base")).unwrap();
+    assert_eq!(std::fs::read_to_string(worktree.join("a.txt")).unwrap(), "one\n");
+    assert_eq!(repo.try_git(&["config", "--get", "branch.from-base.merge"]), None);
+    assert!(handle.add_worktree(&handle.root.join(".worktrees").join("x"), "x", Some("nope")).is_err());
+    assert!(handle.add_worktree(&handle.root.join(".worktrees").join("y"), "y", Some("--detach")).is_err());
+    assert!(!handle.root.join(".worktrees").join("y").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn removes_the_new_worktree_and_branch_when_info_exclude_cannot_be_written() {
@@ -287,7 +306,7 @@ fn removes_the_new_worktree_and_branch_when_info_exclude_cannot_be_written() {
     let handle = runode_git::Repo::open(repo.path()).unwrap();
     let worktree = handle.root.join(".worktrees").join("a");
 
-    assert!(handle.add_worktree(&worktree, "runode/a").is_err());
+    assert!(handle.add_worktree(&worktree, "runode/a", None).is_err());
     assert!(!worktree.exists());
     assert!(!repo.git(&["branch", "--list"]).contains("runode/a"));
     assert!(!repo.git(&["worktree", "list"]).contains(".worktrees"));
@@ -300,7 +319,7 @@ fn leaves_info_exclude_alone_when_the_worktree_dir_is_ignored() {
     let handle = runode_git::Repo::open(repo.path()).unwrap();
     let before = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap_or_default();
 
-    handle.add_worktree(&handle.root.join(".worktrees").join("a"), "runode/a").unwrap();
+    handle.add_worktree(&handle.root.join(".worktrees").join("a"), "runode/a", None).unwrap();
     assert_eq!(std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap_or_default(), before);
     assert!(repo.status().is_empty(), "{:?}", repo.status());
 }
@@ -312,7 +331,7 @@ fn excludes_a_worktree_given_by_a_relative_path() {
     repo.commit_file("a.txt", "one\n", "init");
     let handle = runode_git::Repo::open(repo.path()).unwrap();
 
-    handle.add_worktree(std::path::Path::new(".worktrees/new"), "runode/new").unwrap();
+    handle.add_worktree(std::path::Path::new(".worktrees/new"), "runode/new", None).unwrap();
     assert!(repo.path().join(".worktrees/new/a.txt").exists());
     assert!(repo.status().is_empty(), "{:?}", repo.status());
 }
@@ -326,7 +345,7 @@ fn excludes_the_real_top_dir_of_a_path_with_parent_components() {
     repo.write("scratch/notes.txt", "x\n");
     let handle = runode_git::Repo::open(repo.path()).unwrap();
 
-    handle.add_worktree(std::path::Path::new("scratch/../new"), "runode/new").unwrap();
+    handle.add_worktree(std::path::Path::new("scratch/../new"), "runode/new", None).unwrap();
     assert!(repo.path().join("new/a.txt").exists());
     assert_eq!(repo.status(), ["?? scratch/notes.txt"]);
     let exclude = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap();
@@ -341,7 +360,7 @@ fn excludes_worktree_dirs_whose_names_look_like_globs() {
     let handle = runode_git::Repo::open(repo.path()).unwrap();
     repo.write("work1/x.txt", "x\n");
 
-    handle.add_worktree(&handle.root.join("work[1]").join("new"), "runode/new").unwrap();
+    handle.add_worktree(&handle.root.join("work[1]").join("new"), "runode/new", None).unwrap();
     assert_eq!(repo.status(), ["?? work1/x.txt"]);
     let exclude = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap();
     assert!(exclude.ends_with("/work\\[1\\]/\n"), "{exclude:?}");
@@ -364,7 +383,7 @@ fn every_worktree_of_a_repo_finds_the_same_main_worktree() {
     std::fs::create_dir(repo.path().join("sub")).unwrap();
     let handle = runode_git::Repo::open(repo.path()).unwrap();
     let worktree = handle.root.join(".worktrees").join("side");
-    handle.add_worktree(&worktree, "side").unwrap();
+    handle.add_worktree(&worktree, "side", None).unwrap();
 
     let expected = (real(&repo.path().join(".git")), Some(real(repo.path())));
     assert_eq!(location(repo.path()), expected);
@@ -383,7 +402,7 @@ fn a_submodule_and_its_worktrees_find_the_submodule_checkout() {
     outer.git(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", &lib_path, "sub"]);
     let sub = outer.path().join("sub");
     let side = outer.path().join("side");
-    runode_git::Repo::open(&sub).unwrap().add_worktree(&side, "side").unwrap();
+    runode_git::Repo::open(&sub).unwrap().add_worktree(&side, "side", None).unwrap();
 
     let expected = (real(&outer.path().join(".git/modules/sub")), Some(real(&sub)));
     assert_eq!(location(&sub), expected);

@@ -28,6 +28,7 @@ mod model;
 mod more_menu;
 mod new_tab;
 mod new_workspace;
+mod new_worktree;
 mod open;
 mod pane_float;
 mod pane_move;
@@ -37,6 +38,7 @@ mod preview;
 mod project;
 mod quit;
 mod remote;
+mod remove_worktree;
 mod resize_request;
 mod screen_viewer;
 mod settings_page;
@@ -288,8 +290,6 @@ enum RenameTarget {
     Workspace(WorkspaceId),
     /// 远端主机，改的是它的显示名（`remote_hosts::set_display_name`）。
     Host(HostId),
-    /// 不是改名：在主机上项目目录是这个的仓库里新建工作树，输入的是新分支的名字。
-    NewWorktree(HostId, PathBuf),
 }
 
 /// 窗口的根视图。
@@ -341,6 +341,8 @@ pub struct WindowView {
     renaming: Option<Renaming>,
     /// 新建 workspace 的对话框。
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
+    /// 新建工作树的对话框。
+    new_worktree: Option<new_worktree::NewWorktreeDialog>,
     /// ssh 要问用户的，排着队，见 `askpass`。
     asks: askpass::Asks,
     /// 添加命令的对话框。
@@ -506,6 +508,7 @@ impl WindowView {
             shells: None,
             renaming: None,
             new_workspace: None,
+            new_worktree: None,
             asks: Default::default(),
             add_task: None,
             commit_message_dialog: None,
@@ -863,6 +866,7 @@ impl Render for WindowView {
         let arrange_picker = self.render_arrange_picker(cx);
         let branch_picker = self.render_branch_picker(cx);
         let new_workspace = self.render_new_workspace(window, cx);
+        let new_worktree = self.render_new_worktree(cx);
         let ask = self.render_ask(cx);
         let add_task = self.render_add_task(cx);
         let commit_message_dialog = self.render_commit_message_dialog(cx);
@@ -875,6 +879,7 @@ impl Render for WindowView {
             || arrange_picker.is_some()
             || branch_picker.is_some()
             || new_workspace.is_some()
+            || new_worktree.is_some()
             || ask.is_some()
             || add_task.is_some()
             || commit_message_dialog.is_some()
@@ -1020,6 +1025,7 @@ impl Render for WindowView {
             .children(branch_picker)
             // 询问框叠在别的对话框上时（新建工作区连主机要口令），下面的对话框不报给辅助工具。
             .children(new_workspace.map(|dialog| dialog.aria_hidden(asking)))
+            .children(new_worktree.map(|dialog| dialog.aria_hidden(asking)))
             .children(add_task.map(|dialog| dialog.aria_hidden(asking)))
             .children(commit_message_dialog.map(|dialog| dialog.aria_hidden(asking)))
             .children(todo_dialog)

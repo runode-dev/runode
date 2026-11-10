@@ -30,12 +30,24 @@ const ASK_HOST_TIMEOUT: Duration = Duration::from_secs(5);
 /// 找到的一家 agent：`LAUNCHERS` 里第几个，和起它时在 shell 里打的命令。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Installed {
-    agent: usize,
-    command: String,
+    pub(super) agent: usize,
+    pub(super) command: String,
+}
+
+impl Installed {
+    /// 这家 agent 是哪个，画 logo 用；认不出时为空。
+    pub(super) fn kind(&self) -> Option<runode_types::agent::AgentKind> {
+        launcher_kind(self.agent)
+    }
+}
+
+/// `LAUNCHERS` 里第 `agent` 个是哪家 agent；认不出时为空。
+pub(super) fn launcher_kind(agent: usize) -> Option<runode_types::agent::AgentKind> {
+    runode_agent::agent_from_name(program(&LAUNCHERS[agent]))
 }
 
 /// 起 `launcher` 的程序名，不带子命令：`opencode2 mini` 是挑模型用的小界面，从这里开的是它的全屏界面。
-fn program(launcher: &Launcher) -> &'static str {
+pub(super) fn program(launcher: &Launcher) -> &'static str {
     launcher.command.split_whitespace().next().unwrap_or(launcher.command)
 }
 
@@ -84,7 +96,7 @@ impl WindowView {
             self.open_agent(index, window, cx);
             return;
         }
-        let (host, job) = self.ask_installed_agents(cx);
+        let (host, job) = self.ask_installed_agents(self.workspace().host.clone(), cx);
         cx.spawn_in(window, async move |this, cx| {
             let agents = job.await;
             this.update_in(cx, |this, window, cx| {
@@ -226,7 +238,7 @@ impl WindowView {
         items.extend(agents.iter().enumerate().map(|(index, installed)| {
             let launcher = &LAUNCHERS[installed.agent];
             let item = MenuItem::new(launcher.label, Box::new(NewAgentTab(index)), true, cx);
-            let logo = runode_agent::agent_from_name(program(launcher)).and_then(logo_path);
+            let logo = installed.kind().and_then(logo_path);
             Some(match logo {
                 Some(logo) => item.with_icon(logo),
                 None => item,
@@ -285,7 +297,7 @@ impl WindowView {
 
     /// 在后台请当前工作区的主机找装着的 agent，找到的和上次不一样时换上，菜单开着就换掉它的各项。
     fn find_installed_agents(&mut self, cx: &mut Context<Self>) {
-        let (host, job) = self.ask_installed_agents(cx);
+        let (host, job) = self.ask_installed_agents(self.workspace().host.clone(), cx);
         cx.spawn(async move |this, cx| {
             let agents = job.await;
             this.update(cx, |this, cx| this.store_installed_agents(host, agents, cx)).ok();
@@ -293,10 +305,9 @@ impl WindowView {
         .detach();
     }
 
-    /// 在后台请当前工作区的主机找装着的 agent，返回问的是哪台主机和等回话的任务：按那台主机上的终端里 shell
+    /// 在后台请主机 `host` 找装着的 agent，返回问的是哪台主机和等回话的任务：按那台主机上的终端里 shell
     /// 报告的 PATH 找，都没报告时宿主按新起的 shell 会拿到的 PATH 找；宿主答不上来时当作一家都没装。
-    fn ask_installed_agents(&self, cx: &mut Context<Self>) -> (HostId, Task<Vec<Installed>>) {
-        let host = self.workspace().host.clone();
+    pub(super) fn ask_installed_agents(&self, host: HostId, cx: &mut Context<Self>) -> (HostId, Task<Vec<Installed>>) {
         let reported = self.terminal_path(Some(&host), cx);
         let link = link_of(&host);
         let job = cx.background_spawn(async move {

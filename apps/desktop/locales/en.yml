@@ -162,9 +162,7 @@ workspace:
   expand_all: Expand All Projects
   add_project: Add Project
   new_worktree: "New Worktree in %{project}"
-  worktree_branch: New branch name
   worktree_bad_name: "“%{name}” can't be used as a branch name."
-  worktree_failed: Couldn't Create the Worktree
   no_terminals: No terminals
   host_remote_hint: "%{status} · SSH"
   host_paired_hint: "%{status} · Runode pairing"
@@ -197,6 +195,31 @@ workspace:
   pair_found: "Computers with remote access on this network:"
   pair_found_hint: Copy the pairing link on this computer
   pair_found_picked: "On %{host}, open Runode's Devices page, click \"Copy Pairing Link\", and paste it above."
+worktree:
+  title: New Worktree
+  close: Close
+  project: Project
+  host: Run on
+  name: Workspace name
+  optional: (optional)
+  agent: Agent
+  blank_terminal: Blank terminal
+  advanced: Advanced
+  branch: Branch name
+  base: Based on
+  base_head: "%{branch} (current)"
+  base_head_plain: Current HEAD
+  loading: Loading…
+  more: Create more
+  create: Create Worktree
+  creating: Creating…
+  remove_hint: "It's open on the worktree %{dir}. You can remove the worktree too: its branch goes with it if merged, and stays otherwise."
+  remove_and_close: Remove Worktree and Close
+  close_only: Close Only
+  remove_failed: Couldn't Remove the Worktree
+  remove_force_hint: Git won't remove a worktree with changes or untracked files. Force removal discards them.
+  remove_force: Force Remove
+  ok: OK
 window_controls:
   minimize: Minimize
   maximize: Maximize

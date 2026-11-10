@@ -876,18 +876,9 @@ impl WindowView {
         cx: &mut Context<Self>,
         close: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        let running = (!running.is_empty()).then(|| {
-            rust_i18n::t!("close.running", programs = running.join(rust_i18n::t!("close.separator").as_ref()))
-                .into_owned()
-        });
-        let detail = match (detail, running) {
-            (None, None) => {
-                close(self, window, cx);
-                return;
-            }
-            (Some(detail), Some(running)) => format!("{detail}\n\n{running}"),
-            (Some(detail), None) => detail.to_owned(),
-            (None, Some(running)) => running,
+        let Some(detail) = closing_detail(detail, running) else {
+            close(self, window, cx);
+            return;
         };
         let answer = crate::prompt::show(
             window,
@@ -964,21 +955,12 @@ impl WindowView {
     /// （没有就上面），关的是别的时当前的照旧显示。最后一个关掉时关窗口。
     fn close_workspace_at(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.end_sessions(Closing::Workspace(ix), cx);
-        // 关的是正在改名的 workspace，或者正在改名的主机组、正在新建工作树的项目里的最后一个时，输入框跟着没了。
+        // 关的是正在改名的 workspace，或者正在改名的主机组里的最后一个时，输入框跟着没了。
         let closing = &self.workspaces[ix];
         let last_on_host = self.workspaces.iter().filter(|workspace| workspace.host == closing.host).count() == 1;
-        let last_in_project = self
-            .workspaces
-            .iter()
-            .filter(|workspace| workspace.host == closing.host && workspace.project_dir() == closing.project_dir())
-            .count()
-            == 1;
         if self.renaming.as_ref().is_some_and(|renaming| match &renaming.target {
             super::RenameTarget::Workspace(id) => *id == closing.id,
             super::RenameTarget::Host(host) => last_on_host && closing.host == *host,
-            super::RenameTarget::NewWorktree(host, project) => {
-                last_in_project && closing.host == *host && closing.project_dir() == project
-            }
         }) {
             self.renaming = None;
         }
@@ -1000,6 +982,7 @@ impl WindowView {
         let workspaces = &self.workspaces;
         self.collapsed_hosts.retain(|host| workspaces.iter().any(|workspace| workspace.host == *host));
         self.forget_gone_projects();
+        self.keep_new_worktree_project(window, cx);
         self.forget_previews(id, cx);
         self.file_tree.update(cx, |tree, _| tree.forget_workspace(id));
         self.git_panel.update(cx, |panel, _| panel.forget_workspace(id));
@@ -1031,13 +1014,19 @@ impl WindowView {
         let running =
             running_programs(workspace.tabs.iter().flat_map(|tab| tab.panes.values().map(|(view, _)| view)), cx);
         let detail = (!detail.is_empty()).then_some(detail);
-        self.confirm_closing(&title, detail.as_deref(), &running, window, cx, move |this, window, cx| {
+        let close = move |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| {
             // 问的时候 workspace 可能已经挪了位置或者自己关掉了。
             if let Some(ix) = this.workspaces.iter().position(|workspace| workspace.id == id) {
                 this.preview.update(cx, |panel, cx| panel.discard_edits(Some(id), cx));
                 this.close_workspace_at(ix, window, cx);
             }
-        });
+        };
+        if let Some(worktree) = self.closing_worktree(ix) {
+            let detail = closing_detail(detail.as_deref(), &running);
+            self.confirm_close_worktree(&title, detail, worktree, window, cx, close);
+            return;
+        }
+        self.confirm_closing(&title, detail.as_deref(), &running, window, cx, close);
     }
 
     /// 把拖动的标签挪到第 `to` 个位置，并切到它。
@@ -1178,6 +1167,19 @@ fn reveal_offset(x: f32, view: (f32, f32), tab: (f32, f32), span: (f32, f32), ma
 /// 最底下、没有选区，往回翻着或选着字的终端（`holds_view_state`）丢了它就回不到原样，照样留着。
 fn draws_screen(window_visible: bool, selected: bool, holds_view_state: impl FnOnce() -> bool) -> bool {
     selected && (window_visible || holds_view_state())
+}
+
+/// 关闭前弹框要说的话：`detail` 加上 `running` 里还在跑的程序；两样都没有时为空，不用问。
+fn closing_detail(detail: Option<&str>, running: &[String]) -> Option<String> {
+    let running = (!running.is_empty()).then(|| {
+        rust_i18n::t!("close.running", programs = running.join(rust_i18n::t!("close.separator").as_ref())).into_owned()
+    });
+    match (detail, running) {
+        (None, None) => None,
+        (Some(detail), Some(running)) => Some(format!("{detail}\n\n{running}")),
+        (Some(detail), None) => Some(detail.to_owned()),
+        (None, Some(running)) => Some(running),
+    }
 }
 
 #[cfg(test)]

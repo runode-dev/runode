@@ -71,6 +71,7 @@ impl WindowView {
     /// 窗口的快捷键照样冒泡上来，这时不办，免得焦点换走、对话框却还开着，或者两个对话框叠在一起。
     pub(super) fn modal_dialog_open(&self) -> bool {
         self.new_workspace.is_some()
+            || self.new_worktree.is_some()
             || !self.asks.is_empty()
             || self.add_task.is_some()
             || self.commit_message_dialog.is_some()

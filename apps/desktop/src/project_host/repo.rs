@@ -57,7 +57,8 @@ pub(super) enum GitOp {
     StashDrop { stash: Stash },
     ApplyHunk { file: FileDiff, hunk: usize, action: HunkAction },
     RemoveWorktree { worktree: PathBuf, force: bool },
-    AddWorktree { worktree: PathBuf, branch: String },
+    AddWorktree { worktree: PathBuf, branch: String, start: Option<String> },
+    DeleteMergedBranch { name: String },
     FileView { path: PathBuf, old_path: Option<PathBuf>, side: DiffSide },
     NewBytes { path: PathBuf, side: DiffSide, options: ReadOptions },
     OldBytes { path: PathBuf, old_path: Option<PathBuf>, side: DiffSide, options: ReadOptions },
@@ -98,7 +99,10 @@ impl GitOp {
             Self::StashDrop { stash } => json(repo.stash_drop(&stash)),
             Self::ApplyHunk { file, hunk, action } => json(repo.apply_hunk(&file, hunk, action)),
             Self::RemoveWorktree { worktree, force } => json(repo.remove_worktree(&worktree, force)),
-            Self::AddWorktree { worktree, branch } => json(repo.add_worktree(&worktree, &branch)),
+            Self::AddWorktree { worktree, branch, start } => {
+                json(repo.add_worktree(&worktree, &branch, start.as_deref()))
+            }
+            Self::DeleteMergedBranch { name } => json(repo.delete_merged_branch(&name)),
             Self::FileView { path, old_path, side } => json(repo.file_view(&path, old_path.as_deref(), &side)),
             Self::NewBytes { path, side, options } => bytes(repo.new_bytes(&path, &side, options)),
             Self::OldBytes { path, old_path, side, options } => {
@@ -128,6 +132,7 @@ impl GitOp {
             Self::Branches
             | Self::Checkout { .. }
             | Self::CreateBranch { .. }
+            | Self::DeleteMergedBranch { .. }
             | Self::History { .. }
             | Self::CommitChanges { .. }
             | Self::CheckoutDetached { .. }
@@ -330,9 +335,18 @@ impl ProjectRepo {
         dispatch!(self, self.repo.remove_worktree(worktree, force), op, git_failed)
     }
 
-    pub(crate) fn add_worktree(&self, worktree: &Path, branch: &str) -> git::Result {
-        let op = GitOp::AddWorktree { worktree: worktree.to_path_buf(), branch: branch.to_owned() };
-        dispatch!(self, self.repo.add_worktree(worktree, branch), op, git_failed)
+    pub(crate) fn add_worktree(&self, worktree: &Path, branch: &str, start: Option<&str>) -> git::Result {
+        let op = GitOp::AddWorktree {
+            worktree: worktree.to_path_buf(),
+            branch: branch.to_owned(),
+            start: start.map(str::to_owned),
+        };
+        dispatch!(self, self.repo.add_worktree(worktree, branch, start), op, git_failed)
+    }
+
+    pub(crate) fn delete_merged_branch(&self, name: &str) -> git::Result {
+        let op = GitOp::DeleteMergedBranch { name: name.to_owned() };
+        dispatch!(self, self.repo.delete_merged_branch(name), op, git_failed)
     }
 
     pub(crate) fn file_view(

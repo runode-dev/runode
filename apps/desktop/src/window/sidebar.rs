@@ -5,6 +5,7 @@
 mod project_group;
 mod repo;
 
+pub(super) use project_group::RepoProject;
 use std::path::PathBuf;
 
 use crate::WorkspaceId;
@@ -809,7 +810,7 @@ impl WindowView {
 
     /// 在侧栏里把第 `ix` 个 workspace 的名字换成输入框，原名全选，直接打字就替换掉。
     fn start_rename(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        self.finish_pending_edit(window, cx);
+        self.finish_rename(true, window, cx);
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
         let name = workspace.name.to_string();
@@ -829,7 +830,7 @@ impl WindowView {
 
     /// 在侧栏里把远端主机 `host` 组头上的名字换成输入框，现在的显示名全选。
     fn start_rename_host(&mut self, host: HostId, window: &mut Window, cx: &mut Context<Self>) {
-        self.finish_pending_edit(window, cx);
+        self.finish_rename(true, window, cx);
         let text = remote_hosts::display_name(&host, cx);
         let select = text.len();
         let edit = InlineEdit::new(
@@ -842,13 +843,6 @@ impl WindowView {
         );
         self.renaming = Some(Renaming { target: RenameTarget::Host(host), edit });
         cx.notify();
-    }
-
-    /// 要开别的输入框时结束手上这个：正在改的名字改完，没按回车的新分支名不算，不建工作树。
-    fn finish_pending_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let creating =
-            self.renaming.as_ref().is_some_and(|renaming| matches!(renaming.target, RenameTarget::NewWorktree(..)));
-        self.finish_rename(!creating, window, cx);
     }
 
     /// 结束改名；`commit` 时用输入框里的名字。workspace 的名字空的不算；主机的显示名清空时改回默认的名字。
@@ -869,11 +863,6 @@ impl WindowView {
             RenameTarget::Host(host) => {
                 if commit {
                     remote_hosts::set_display_name(host, &name, cx);
-                }
-            }
-            RenameTarget::NewWorktree(host, project) => {
-                if commit && !name.is_empty() {
-                    self.create_worktree(host.clone(), project.clone(), name, window, cx);
                 }
             }
         }

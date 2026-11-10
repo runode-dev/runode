@@ -1,6 +1,5 @@
 //! 侧栏里的项目：同一台主机上同一个仓库的各个工作树（`Workspace::project_dir`）归在一个项目下，每个项目一行
-//! 组头，能收起、拖动排序，能在仓库里新建工作树开成工作区；列表顶上一条写「项目」，带一起收起展开和添加项目
-//! 的按钮。
+//! 组头，能收起、拖动排序，能打开新建工作树的对话框；列表顶上一条写「项目」，带一起收起展开和添加项目的按钮。
 
 use std::{
     ops::Range,
@@ -8,31 +7,40 @@ use std::{
 };
 
 use gpui::{
-    AccessibleAction, AnyElement, App, Axis, ClickEvent, Context, Div, FontWeight, Modifiers, PromptButton,
-    PromptLevel, Render, Role, SharedString, Stateful, Window, div, img, prelude::*, px, svg,
+    AccessibleAction, AnyElement, App, Axis, ClickEvent, Context, Div, FontWeight, Modifiers, Render, Role,
+    SharedString, Stateful, Window, div, img, prelude::*, px, svg,
 };
 
-use super::{RENAME_FIELD_HEIGHT, ROW_HEIGHT, ROW_ICON_SIZE, drag_chip, drop_marker};
+use super::{ROW_ICON_SIZE, drag_chip, drop_marker};
 use crate::{
     host_client::hosts::HostId,
-    project_host::ProjectHost,
     ui::{
         button::{Button, ButtonSize},
         font_size::{self, FontSize, scaled},
         icons::{
-            BRANCH_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COLLAPSE_ALL_ICON, EXPAND_ALL_ICON, FOLDER_ICON,
-            FOLDER_PLUS_ICON, PLUS_ICON,
+            CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COLLAPSE_ALL_ICON, EXPAND_ALL_ICON, FOLDER_ICON, FOLDER_PLUS_ICON,
+            PLUS_ICON,
         },
         theme::{AGENT_BLOCKED_COLOR, ActiveTheme as _},
         tooltip::tooltip,
     },
-    window::{NewWorkspace, PressDown as _, RenameTarget, Renaming, WindowView, inline_edit::InlineEdit},
+    window::{NewWorkspace, PressDown as _, WindowView},
 };
 
 /// 项目的组头。
 const PROJECT_HEADER_HEIGHT: f32 = 28.;
 /// 列表顶上写「项目」的那一条。
 const PROJECTS_BAR_HEIGHT: f32 = 26.;
+
+/// 能新建工作树的项目：知道主工作树的仓库。
+pub(in crate::window) struct RepoProject {
+    pub(in crate::window) host: HostId,
+    /// `Workspace::project_dir`。
+    pub(in crate::window) dir: PathBuf,
+    pub(in crate::window) main_worktree: PathBuf,
+    pub(in crate::window) name: String,
+    pub(in crate::window) avatar: Option<PathBuf>,
+}
 
 /// 拖动中的项目：拖动时跟着鼠标画出来，放到同一台主机的另一个项目上时整组挪过去。
 #[derive(Clone)]
@@ -55,7 +63,7 @@ impl Render for DraggedProject {
 
 /// 项目组头上的名字：家目录写 `~`，别的取目录名，裸仓库去掉 `.git` 后缀。还不知道主工作树、`dir` 是共用的
 /// git 目录 `.git` 时取它的上一级。
-fn project_name(host: &HostId, dir: &Path) -> String {
+pub(in crate::window) fn project_name(host: &HostId, dir: &Path) -> String {
     let dir = dir.parent().filter(|_| dir.file_name().is_some_and(|name| name == ".git")).unwrap_or(dir);
     if host.home().as_deref() == Some(dir) {
         return "~".into();
@@ -68,11 +76,6 @@ fn project_name(host: &HostId, dir: &Path) -> String {
 /// 项目在侧栏里的元素 id：按主机和目录取，不按位置。
 fn project_key(host: &HostId, dir: &Path) -> String {
     format!("project-{}-{}", host.key().unwrap_or_default(), dir.display())
-}
-
-/// 新工作树的目录名：分支名里的 `/` 换成 `-`，一个分支只占 `runode_git::WORKTREES_DIR` 下的一级。
-fn worktree_dir_name(branch: &str) -> String {
-    branch.replace('/', "-")
 }
 
 impl WindowView {
@@ -89,6 +92,20 @@ impl WindowView {
             }
         }
         projects
+    }
+
+    /// 侧栏里能新建工作树的项目，按列表的先后。
+    pub(in crate::window) fn repo_projects(&self) -> Vec<RepoProject> {
+        self.projects()
+            .into_iter()
+            .filter_map(|(host, dir)| {
+                let workspaces = || self.workspaces.iter().filter(|w| w.host == host && w.project_dir() == dir);
+                let main_worktree = workspaces().find_map(|workspace| workspace.repo.main_worktree.clone())?;
+                let avatar = workspaces().find_map(|workspace| workspace.repo.avatar.clone());
+                let name = project_name(&host, &main_worktree);
+                Some(RepoProject { host, dir, main_worktree, name, avatar })
+            })
+            .collect()
     }
 
     fn all_projects_collapsed(&self) -> bool {
@@ -161,8 +178,8 @@ impl WindowView {
             )
     }
 
-    /// 一台主机上 `range` 里的 workspace，按项目分段，每段包成一块：前面是项目的组头，正在新建工作树时组头下面
-    /// 是输入框，收起的项目只留当前 workspace 那一行。拖来的项目放在整块上，落点提示画在整块的上边或下边。
+    /// 一台主机上 `range` 里的 workspace，按项目分段，每段包成一块：前面是项目的组头，收起的项目只留当前
+    /// workspace 那一行。拖来的项目放在整块上，落点提示画在整块的上边或下边。
     pub(super) fn render_project_groups(
         &self,
         range: Range<usize>,
@@ -183,9 +200,6 @@ impl WindowView {
             let mut rows = vec![
                 self.render_project_header(host, dir, group_range.clone(), collapsed, attention, cx).into_any_element(),
             ];
-            if let Some(edit) = self.new_worktree_edit(host, dir) {
-                rows.push(self.render_new_worktree_row(edit, cx).into_any_element());
-            }
             for ix in group_range.clone().filter(shown) {
                 rows.push(self.render_row(ix, modifiers, cx).into_any_element());
             }
@@ -218,13 +232,6 @@ impl WindowView {
             );
         }
         groups
-    }
-
-    fn new_worktree_edit(&self, host: &HostId, dir: &Path) -> Option<&InlineEdit> {
-        self.renaming.as_ref().and_then(|renaming| match &renaming.target {
-            RenameTarget::NewWorktree(h, d) if h == host && d == dir => Some(&renaming.edit),
-            _ => None,
-        })
     }
 
     /// 项目的组头：仓库 owner 的 GitHub 头像（没有时画文件夹）和项目名，悬停时露出新建工作树（项目是仓库时）
@@ -288,7 +295,7 @@ impl WindowView {
                 .opacity(0.)
                 .group_hover(group.clone(), |button| button.opacity(1.))
                 .on_press_down(cx, move |this, window, cx| {
-                    this.start_new_worktree(host.clone(), dir.clone(), window, cx)
+                    this.open_new_worktree(Some((host.clone(), dir.clone())), window, cx)
                 })
         });
         div()
@@ -340,120 +347,6 @@ impl WindowView {
                     ),
             )
     }
-
-    /// 项目组头下面输入新分支名的一行。
-    fn render_new_worktree_row(&self, edit: &InlineEdit, cx: &mut Context<Self>) -> Div {
-        let fg = cx.theme().foreground;
-        div()
-            .flex_none()
-            .h(scaled(ROW_HEIGHT))
-            .px(px(8.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(ROW_ICON_SIZE))
-                    .flex()
-                    .justify_center()
-                    .child(svg().path(BRANCH_ICON).size(px(12.)).text_color(fg.opacity(0.5))),
-            )
-            .child(div().flex_1().min_w_0().child(edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx)))))
-    }
-
-    /// 在主机 `host` 上项目是 `dir` 的仓库里新建工作树：组头下面出一个输入框，输入新分支的名字，按回车才建，
-    /// 按 Esc 或点开都不建。
-    fn start_new_worktree(&mut self, host: HostId, dir: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        self.finish_pending_edit(window, cx);
-        self.collapsed_projects.retain(|(h, d)| !(*h == host && *d == dir));
-        let label = rust_i18n::t!("workspace.worktree_branch").into_owned();
-        let edit = InlineEdit::new(String::new(), 0, label.clone(), Self::finish_rename, window, cx).cancel_on_leave();
-        edit.field.update(cx, |field, _| field.set_placeholder(label));
-        self.renaming = Some(Renaming { target: RenameTarget::NewWorktree(host, dir), edit });
-        cx.notify();
-    }
-
-    /// 在主机 `host` 上项目是 `project`（`Workspace::project_dir`）的仓库里，从当前 HEAD 拉出新分支 `branch`，
-    /// 检出在主工作树下 `runode_git::WORKTREES_DIR` 里的新工作树，建好后开成工作区，归在这个项目下。不知道主
-    /// 工作树时不建；建不出来时弹框说原因。
-    pub(super) fn create_worktree(
-        &mut self,
-        host: HostId,
-        project: PathBuf,
-        branch: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(main_worktree) = self
-            .workspaces
-            .iter()
-            .filter(|workspace| workspace.host == host && workspace.project_dir() == project)
-            .find_map(|workspace| workspace.repo.main_worktree.clone())
-        else {
-            return;
-        };
-        if !runode_git::valid_branch_name(&branch) {
-            let detail = rust_i18n::t!("workspace.worktree_bad_name", name = branch.as_str()).into_owned();
-            report_worktree_failed(&detail, window, cx);
-            return;
-        }
-        let worktree = main_worktree.join(runode_git::WORKTREES_DIR).join(worktree_dir_name(&branch));
-        let repo = ProjectHost::of(&host).repo(runode_git::Repo::new(main_worktree));
-        let job = cx.background_spawn({
-            let (worktree, branch) = (worktree.clone(), branch.clone());
-            async move { repo.add_worktree(&worktree, &branch) }
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let added = job.await;
-            this.update_in(cx, |this, window, cx| match added {
-                Ok(()) => this.open_worktree(&host, project, worktree, branch, window, cx),
-                Err(err) => report_worktree_failed(&crate::git_view::git_error_text(&err), window, cx),
-            })
-            .ok();
-        })
-        .detach();
-    }
-
-    /// 在新建的工作树 `worktree` 上开工作区，名字是分支名，归在项目 `project` 下、排在它的最后，并切过去。
-    fn open_worktree(
-        &mut self,
-        host: &HostId,
-        project: PathBuf,
-        worktree: PathBuf,
-        branch: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(view) = self.spawn_terminal_on(host, Some(&worktree), None, window, cx) else {
-            return;
-        };
-        let ix = self
-            .workspaces
-            .iter()
-            .rposition(|workspace| workspace.host == *host && workspace.project_dir() == project)
-            .map_or(self.workspaces.len(), |last| last + 1);
-        self.insert_workspace(ix, worktree, Some(branch), view, window, cx);
-        let workspace = &mut self.workspaces[self.active];
-        workspace.common_git_dir = Some(project);
-        let id = workspace.id;
-        self.regroup_workspace(id);
-        self.save(cx);
-        cx.notify();
-    }
-}
-
-fn report_worktree_failed(detail: &str, window: &mut Window, cx: &mut App) {
-    let answer = crate::prompt::show(
-        window,
-        PromptLevel::Warning,
-        &rust_i18n::t!("workspace.worktree_failed"),
-        Some(detail),
-        &[PromptButton::cancel(rust_i18n::t!("ssh.ok"))],
-        cx,
-    );
-    // 只说一声，但收的那头要留到框关掉。
-    cx.foreground_executor().spawn(answer).detach();
 }
 
 #[cfg(test)]
@@ -465,11 +358,5 @@ mod tests {
         assert_eq!(project_name(&HostId::Local, Path::new("/src/runode")), "runode");
         assert_eq!(project_name(&HostId::Local, Path::new("/srv/app.git")), "app");
         assert_eq!(project_name(&HostId::Local, Path::new("/src/runode/.git")), "runode");
-    }
-
-    #[test]
-    fn worktrees_take_one_level_per_branch() {
-        assert_eq!(worktree_dir_name("feat/login/form"), "feat-login-form");
-        assert_eq!(worktree_dir_name("fix"), "fix");
     }
 }

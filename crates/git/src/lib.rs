@@ -233,6 +233,9 @@ pub fn current_branch(dir: &Path) -> Option<String> {
 /// runode 新建的工作树放在主工作树下的这个目录里，一个工作树占一级。
 pub const WORKTREES_DIR: &str = ".worktrees";
 
+/// 看板任务的工作树上拉出的分支名的前缀，后面接工作树的目录名。
+pub const TASK_BRANCH_PREFIX: &str = "runode/";
+
 /// 一个工作树属于哪个仓库：路径都没解开符号链接。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepoLocation {

@@ -162,9 +162,7 @@ workspace:
   expand_all: 展開所有專案
   add_project: 新增專案
   new_worktree: "在 %{project} 新增工作樹"
-  worktree_branch: 新分支名稱
   worktree_bad_name: "「%{name}」不能用作分支名稱。"
-  worktree_failed: 無法建立工作樹
   no_terminals: 沒有終端機
   host_remote_hint: "%{status} · SSH"
   host_paired_hint: "%{status} · Runode 配對"
@@ -197,6 +195,31 @@ workspace:
   pair_found: 區域網路裡開著遠端存取的電腦：
   pair_found_hint: 到這台電腦上拷貝配對連結
   pair_found_picked: "在 %{host} 上打開 Runode 的「配對裝置」頁，點「拷貝配對連結」，貼上到上面。"
+worktree:
+  title: 新增工作樹
+  close: 關閉
+  project: 專案
+  host: 執行於
+  name: 工作區名稱
+  optional: "[選填]"
+  agent: 智慧體
+  blank_terminal: 空白終端機
+  advanced: 進階
+  branch: 分支名稱
+  base: 基於
+  base_head: "%{branch}（目前）"
+  base_head_plain: 目前的 HEAD
+  loading: 正在讀取…
+  more: 建立更多
+  create: 建立工作樹
+  creating: 正在建立…
+  remove_hint: "它開在工作樹 %{dir} 上，可以連工作樹一起刪除：已經合併的分支一起刪，沒合併的留著。"
+  remove_and_close: 刪除工作樹並關閉
+  close_only: 只關閉
+  remove_failed: 無法刪除工作樹
+  remove_force_hint: 工作樹裡有變更或未追蹤的檔案時 git 不讓刪，強制刪除會把它們一起丟掉。
+  remove_force: 強制刪除
+  ok: 好
 window_controls:
   minimize: 最小化
   maximize: 最大化

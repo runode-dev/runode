@@ -35,12 +35,12 @@ pub(super) fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
     let mut last = String::new();
     let mut attempts = 0;
     for name in names.take(branches.len() + occupied + WORKTREE_ATTEMPTS) {
-        let (root, branch) = (worktrees.join(&name), format!("runode/{name}"));
+        let (root, branch) = (worktrees.join(&name), format!("{}{name}", runode_git::TASK_BRANCH_PREFIX));
         if taken(&root, &branch, &branches) {
             last = format!("{branch} or {} is taken", root.display());
             continue;
         }
-        match repo.add_worktree(&root, &branch) {
+        match repo.add_worktree(&root, &branch, None) {
             Ok(()) => return Ok((root, branch)),
             Err(err) => last = err.to_string(),
         }
