@@ -20,6 +20,7 @@ use crate::ui::{
     panel::{added_label, removed_label},
     row_buttons::{RowButton, button, row_buttons},
     theme::ActiveTheme as _,
+    tooltip::tooltip,
 };
 use gpui::SharedString;
 use gpui::{
@@ -296,10 +297,12 @@ impl GitPanel {
             .child(img(file_icon(&name)).flex_none().size(px(14.)))
             .child(
                 div()
+                    .id("name")
                     .flex_initial()
                     .min_w_0()
                     .truncate()
                     .when(deleted, |name| name.line_through().text_color(dim))
+                    .tooltip(tooltip(file.path.display().to_string(), None))
                     .child(name),
             )
             .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(dir))

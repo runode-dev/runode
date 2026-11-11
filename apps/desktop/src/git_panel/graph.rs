@@ -537,7 +537,15 @@ impl GitPanel {
             .pl(px(8. + width + INDENT * (depth + 1.)))
             .when(tree, |row| row.child(div().flex_none().w(px(12.))))
             .child(img(file_icon(&name)).flex_none().size(px(14.)))
-            .child(div().flex_initial().min_w_0().truncate().child(name))
+            .child(
+                div()
+                    .id("name")
+                    .flex_initial()
+                    .min_w_0()
+                    .truncate()
+                    .tooltip(tooltip(file.path.display().to_string(), None))
+                    .child(name),
+            )
             .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(dir))
             .when(file.added > 0, |row| row.child(added_label(file.added)))
             .when(file.removed > 0, |row| row.child(removed_label(file.removed)))
