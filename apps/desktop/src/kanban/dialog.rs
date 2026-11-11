@@ -152,7 +152,7 @@ pub struct TodoDialog {
     command: Entity<InputState>,
     /// 各工作区的目录和名字，工作区菜单里列。
     workspaces: Vec<(PathBuf, SharedString)>,
-    /// 找 agent 用的 PATH，问模型清单时用。
+    /// 本机终端里 shell 报告的 PATH，没有这样的终端时为空。
     shell_path: Option<OsString>,
     /// 正在问模型清单的 agent（`LAUNCHERS` 里第几个），和没问到的、为什么没问到。
     loading: HashSet<usize>,
@@ -229,7 +229,7 @@ impl EventEmitter<DialogEvent> for TodoDialog {}
 
 impl TodoDialog {
     /// 新建（`editing` 为空）或编辑任务、定时的对话框，焦点给标题；新建时目录先填 `dir`（当前 workspace 的）。
-    /// `workspaces` 是各工作区的目录和名字，`shell_path` 是找 agent 用的 PATH。
+    /// `workspaces` 是各工作区的目录和名字，`shell_path` 是本机终端里 shell 报告的 PATH。
     pub(crate) fn new(
         schedule: bool,
         editing: Option<Editing>,
@@ -613,7 +613,7 @@ impl TodoDialog {
         let (dir, path) = (self.dir.clone(), self.shell_path.clone());
         let job = cx.background_executor().spawn(async move {
             let launcher = &LAUNCHERS[agent];
-            let catalog = runode_agent::models::fetch(launcher, &dir, path)?;
+            let catalog = runode_agent::models::fetch(launcher, &dir, crate::process_env::user_path(path))?;
             if let Ok(mut catalogs) = CATALOGS.lock()
                 && (!catalog.models.is_empty() || !catalogs.contains_key(launcher.command))
             {

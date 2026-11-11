@@ -305,7 +305,7 @@ impl WindowView {
         Input {
             workspaces: local.iter().map(|workspace| (workspace.dir.clone(), workspace.name.clone())).collect(),
             dir: dir.or_else(|| runode_paths::Dirs::from_env().home).unwrap_or_default(),
-            shell_path: self.shell_path(cx),
+            shell_path: self.terminal_path(Some(&HostId::Local), cx),
             resident,
         }
     }

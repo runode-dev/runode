@@ -1,5 +1,7 @@
 //! 启动时校正从拉起方继承的环境变量。宿主进程和各个终端都继承 app 的环境，这里补对了，终端里就和
-//! Terminal.app 开的一样。
+//! Terminal.app 开的一样。另外给 app 自己找用户装的命令行工具时补上登录 shell 配好的 PATH（`user_path`）。
+
+use std::{ffi::OsString, path::Path, sync::OnceLock};
 
 /// 在 `main` 最开头调用：要改环境变量，那时还没有别的线程。
 pub fn fix() {
@@ -7,6 +9,16 @@ pub fn fix() {
     use_login_shell();
     #[cfg(target_os = "macos")]
     ensure_lang();
+}
+
+/// app 自己找用户装的命令行工具（agent、gh）用的 PATH：`reported` 是本机终端里 shell 报告的 PATH，没有时用
+/// 登录 shell 配好的 PATH，再问不到才用 app 自己的。从访达打开时 app 自己的 PATH 里没有 brew、`~/.local/bin`
+/// 这类目录。第一次问登录 shell 要起一个交互的 shell，会卡住，放到后台调；问到的一个进程只问一次。
+pub fn user_path(reported: Option<OsString>) -> Option<OsString> {
+    static LOGIN: OnceLock<Option<OsString>> = OnceLock::new();
+    // 在 `/` 里起：项目目录里的 direnv 这类配置不该被它读到、执行。
+    let login = || runode_agent::oneshot::login_shell_path(&runode_terminal::pty::default_shell(), Path::new("/"));
+    reported.or_else(|| LOGIN.get_or_init(login).clone()).or_else(|| std::env::var_os("PATH"))
 }
 
 /// 父进程是 launchd（从程序坞、Finder 或 `open` 打开，登录项，登录时自启的宿主）时照 Terminal.app 改用

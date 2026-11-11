@@ -179,16 +179,15 @@ pub(crate) fn generate(
         return Err(rust_i18n::t!("git.ai_message.prompt_too_long", binary = command.binary).into_owned());
     }
     let (args, stdin) = command.args(&prompt);
-    // 内置的 agent 和登录 shell 都在空目录里跑：陌生仓库里的项目配置（`.claude/settings.json` 的钩子、
-    // `opencode.json`、direnv 的 `.envrc` 这类）会被它们读到、执行，提示词里已经有要的全部内容。用户自己
+    // 第一次问登录 shell 会卡住，先问好再占着 `ScratchDir`，别让同时排着的生成跟着等。
+    let path = crate::process_env::user_path(path);
+    // 内置的 agent 在空目录里跑：陌生仓库里的项目配置（`.claude/settings.json` 的钩子、
+    // `opencode.json`、direnv 的 `.envrc` 这类）会被它读到、执行，提示词里已经有要的全部内容。用户自己
     // 写的命令可能就要在仓库里跑（比如自己调 git），照旧在仓库里。
     let scratch = Dirs::from_env()
         .ai_message_dir()
         .ok_or_else(|| "no home directory".to_owned())
         .and_then(|dir| ScratchDir::new(dir).map_err(|err| err.to_string()))?;
-    let path = path
-        .or_else(|| oneshot::login_shell_path(&runode_terminal::pty::default_shell(), &scratch.dir))
-        .or_else(|| std::env::var_os("PATH"));
     // 远端的仓库目录这台机器上没有，命令同样在空目录里跑。
     let dir = if command.agent.is_some() || repo.is_remote() { &scratch.dir } else { &repo.root };
     let program = program_file(&command.binary, path.as_deref(), &command.env);

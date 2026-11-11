@@ -14,7 +14,7 @@ use crate::gh::{Gh, PullRequest};
 
 /// 隔多久重读一次。
 const POLL: Duration = Duration::from_secs(60);
-/// 看板建好后等这么久再读第一次：app 在第一次画之前才交进 `Input`，那之前没有找 gh 用的 PATH。
+/// 看板建好后等这么久再读第一次：app 在第一次画之前才交进 `Input`，那之前还没有终端报告的 PATH。
 const FIRST_POLL: Duration = Duration::from_millis(500);
 
 /// 各任务（按标识）分支上的 PR。
@@ -79,6 +79,11 @@ type Found = Vec<(String, Result<Option<PullRequest>, String>)>;
 /// 任务开始前开的 PR 不算：分支名取自标题，旧分支删了以后同名的新任务会再用上它，GitHub 上还留着
 /// 以前那个分支合并了的 PR。
 fn fetch(targets: Vec<Target>, path: Option<OsString>) -> Found {
+    // 没有要查的任务时不去问登录 shell 的 PATH。
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    let path = crate::process_env::user_path(path);
     targets
         .into_iter()
         .map(|Target { id, dir, branch, started }| {
@@ -92,7 +97,7 @@ fn fetch(targets: Vec<Target>, path: Option<OsString>) -> Found {
 fn create(worktree: PathBuf, branch: String, path: Option<OsString>) -> Result<Option<PullRequest>, String> {
     let repo = Repo::open(&worktree).ok_or_else(|| format!("{} is not in a git repository", worktree.display()))?;
     repo.push().map_err(|err| err.to_string())?;
-    let gh = Gh { dir: worktree, path };
+    let gh = Gh { dir: worktree, path: crate::process_env::user_path(path) };
     gh.create_pull_request(&branch)?;
     gh.pull_request(&branch)
 }

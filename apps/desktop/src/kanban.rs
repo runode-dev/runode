@@ -82,7 +82,7 @@ pub struct Input {
     pub workspaces: Vec<(PathBuf, SharedString)>,
     /// 当前 workspace 的目录：新建任务、定时时先填它。
     pub dir: PathBuf,
-    /// 找 agent 用的 PATH：对话框向 agent 问模型清单时用。
+    /// 本机终端里 shell 报告的 PATH，没有这样的终端时为空。
     pub shell_path: Option<std::ffi::OsString>,
     /// 定时在 app 退出后也照跑（打开了 `terminal-host`，宿主登录时自启）；否则定时那一页上说一句。
     pub resident: bool,
