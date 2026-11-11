@@ -21,7 +21,7 @@ runode 的 vendor 下有两个子模块，另外 GPUI 取自 crates.io、原样�
 2. **核对我们自己的补丁**，见下一节。这是这个 skill 最要紧的部分。
 3. **找新功能和行为变化**，见再下一节。
 4. **动手**：ghostty 和 libghostty-rs 照 `references/ghostty.md`，gpui 照 `references/gpui.md`。
-5. **验证**：fork 各自的测试、runode 的 `make check`、`make test`、`make clippy CLIPPY_ARGS="-- -D warnings"`、`make fmt-check`、`cargo deny check bans`。工具链、缺 Metal Toolchain 时怎么办、在 worktree 里怎么初始化子模块，见 `references/ghostty.md` 的"环境"。哪项没跑、为什么没跑，报告里照实写。
+5. **验证**：fork 各自的测试、runode 的 `make check`、`make test`、`make clippy CLIPPY_ARGS="-- -D warnings"`、`make fmt-check`、`cargo deny check bans`；动了 ghostty 时再加 iOS 端的构建和测试（`references/ghostty.md` 的"runode 这边"）。工具链、缺 Metal Toolchain 时怎么办、在 worktree 里怎么初始化子模块，见 `references/ghostty.md` 的"环境"。哪项没跑、为什么没跑，报告里照实写。
 6. **报告**，格式见最后一节；推送 fork 之前等用户点头。
 
 ## 核对我们自己的补丁：上游修了，就用上游的
@@ -45,6 +45,8 @@ libghostty-rs 也是同一个道理，规矩在 `AGENTS.md`：Uzaaft 上游已�
 - **测试里断言了局限**，比如 `replay_loses_what_the_formatter_cannot_express` 列着重放会丢的东西。上游补上了某样，这条断言就会挂；挂了先确认是上游有意的改进，再把它改成"保留"的断言（挪进对应的 `…_keeps_…` 测试），注释一起改。
 
 在 `crates/terminal` 和 `crates/host` 里搜这几类，没把握的列进报告让用户定。动手改之前先看本地 main 上还没推的提交（`git log origin/main..main`），用户可能已经照着上游修过了。这些改动是跟着上游修，不算擅自接新功能，但都要在报告的"行为变化"里写上。
+
+第四处是 iOS 端：`apps/ios/RunodeKit` 的 `VTerminal` 不经 libghostty-rs，直接照 `vendor/ghostty` 的 C 头文件用 libghostty-vt。C 接口一改名、改签名，Rust 这边改完了它还是旧的，而 `make` 的各项检查不编 Swift，只有推上去以后 iOS 的 CI 才红。同步 ghostty 时同一个提交里把它一起改好，步骤见 `references/ghostty.md` 的"runode 这边"。
 
 ## 新功能和行为变化：单独、醒目地提醒用户
 

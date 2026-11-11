@@ -152,6 +152,20 @@ cargo deny check bans
 - 快照格式版本可以这样看有没有变：比较新旧 `src/terminal/snapshot` 里的版本常量（`git -C vendor/ghostty diff <old> <new> -- src/terminal/snapshot`），变了就写进报告。
 - 新上游改了终端查询的应答时，host 和 terminal 里断言应答内容的测试可能会挂，挂了先确认是上游有意改的行为，再改测试，并在报告的"行为变化"里写上。
 
+iOS 端直接用 C 头文件，上面几条命令不编它，另跑 iOS 工作流的那三步：
+
+```sh
+apps/ios/scripts/build-ghostty-vt.sh   # 照新的 vendor/ghostty 重编 xcframework 和头文件
+swift test --package-path apps/ios/RunodeKit
+xcodebuild -project apps/ios/Runode.xcodeproj -scheme Runode -configuration Debug \
+  -destination "generic/platform=iOS Simulator" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO -quiet build
+```
+
+- xcframework 和 `RunodeKit/Sources/GhosttyVt/include` 下的头文件不进 git，是脚本生成的；不先重编，本机编的还是旧接口，什么也看不出来。
+- 编不过的照新头文件改 `RunodeTerminal` 的 `VTerminal`，改名的跟着改名。
+- 编译器拦不住的要自己核：`ghostty_*_get`、`ghostty_*_set` 的值经 `void*` 传，某个选项换了值的类型、NULL 的含义或返回码时照样编得过。把 `VTerminal` 用到的每个选项和数据键对照新旧头文件里它的说明看一遍（`git -C vendor/ghostty diff <old> <new> -- include/ghostty`）。
+- 带类型转换的宏 Swift 导不进来，`VTerminal` 里照头文件手抄了一份（`StyleFlag`）；上游动了 `style.h` 时对照着核，`VTerminalTests` 里逐个属性的测试守着它。
+
 runode 的提交照用户的规范，例子见 SKILL.md 的"提交信息"。只在用户要求时提交。
 
 ## 7. 推送
