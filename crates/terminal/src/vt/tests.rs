@@ -206,6 +206,16 @@ fn a_c1_control_ending_a_string_still_encodes() {
     }
 }
 
+/// 不限字节的回滚上限经快照解出来还是不限。
+#[test]
+fn an_unlimited_scrollback_stays_unlimited() {
+    let mut terminal = new_terminal(size(20, 4)).unwrap();
+    configure_common(&mut terminal, None).unwrap();
+    assert_eq!(terminal.scrollback_max_bytes().unwrap(), None);
+    let decoded = decode_snapshot(&encode_snapshot(&terminal).unwrap()).unwrap();
+    assert_eq!(decoded.scrollback_max_bytes().unwrap(), None);
+}
+
 #[test]
 fn without_tracking_only_a_grounded_terminal_encodes() {
     let mut terminal = Terminal::new(20, 4).unwrap();
@@ -345,7 +355,7 @@ type Placed = (u32, u32, Option<(i32, i32)>, [u32; 2], [u32; 4], i32, bool, Vec<
 
 /// 屏幕上的每个放置。
 fn images(t: &Terminal<'static, '_>) -> Vec<Placed> {
-    let graphics = t.kitty_graphics().unwrap();
+    let graphics = t.kitty_graphics().unwrap().expect("kitty graphics enabled");
     let mut iterator = PlacementIterator::new().unwrap();
     let mut placements = iterator.update(&graphics).unwrap();
     let mut out = Vec::new();
@@ -394,7 +404,7 @@ fn replay_keeps_the_visible_part_of_a_half_scrolled_image() {
     a.vt_write(b"\x1b_Ga=T,f=32,i=1,s=2,v=2,c=2,r=2,q=2;/wAA/wD/AP8AAP///////w==\x1b\\\r\n\r\n\r\n");
     assert_eq!(images(&a)[0].2, Some((0, -1)));
     let b = replayed(&a);
-    let graphics = b.kitty_graphics().unwrap();
+    let graphics = b.kitty_graphics().unwrap().expect("kitty graphics enabled");
     let mut iterator = PlacementIterator::new().unwrap();
     let mut placements = iterator.update(&graphics).unwrap();
     let placement = placements.next().unwrap();
@@ -413,7 +423,7 @@ fn replay_keeps_the_visible_part_of_a_half_scrolled_image() {
     a.vt_write(b"\x1b\\\r\n\r\n");
     assert_eq!(images(&a)[0].2, Some((0, -1)));
     let b = replayed(&a);
-    let graphics = b.kitty_graphics().unwrap();
+    let graphics = b.kitty_graphics().unwrap().expect("kitty graphics enabled");
     let mut iterator = PlacementIterator::new().unwrap();
     let mut placements = iterator.update(&graphics).unwrap();
     let placement = placements.next().unwrap();

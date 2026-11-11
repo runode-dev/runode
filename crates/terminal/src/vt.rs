@@ -12,7 +12,7 @@ use std::{borrow::Cow, collections::HashSet};
 use libghostty_vt::{
     Terminal,
     error::{Error, Result},
-    fmt::{Format, Formatter, FormatterOptions},
+    fmt::{Extras, Format, Formatter},
     kitty::graphics::{Image, ImageFormat, PlacementIterator},
     render::{CursorVisualStyle, RenderState},
     screen::{CellSemanticContent, RowSemanticPrompt, Screen},
@@ -89,7 +89,8 @@ pub(crate) fn terminal_size(terminal: &Terminal<'_, '_>) -> Result<GridSize> {
 pub(crate) fn configure_common(terminal: &mut Terminal<'_, '_>, scrollback_bytes: Option<usize>) -> Result<()> {
     terminal
         .set_scrollback_max_lines(Some(SCROLLBACK_LINES))?
-        .set_scrollback_max_bytes(scrollback_bytes)?
+        // libghostty 把 `None` 当成恢复它自己的默认上限，不限要明说。
+        .set_scrollback_max_bytes(Some(scrollback_bytes.unwrap_or(usize::MAX)))?
         .set_unknown_max_bytes(UNKNOWN_SEQUENCE_MAX_BYTES)?
         .set_kitty_image_storage_limit(KITTY_IMAGE_STORAGE_BYTES)?
         .set_kitty_image_from_file_allowed(false)?
@@ -211,7 +212,11 @@ pub(crate) fn encode_snapshot(terminal: &Terminal<'_, '_>) -> std::result::Resul
 /// 并接着记录没写完的序列，所以解出来的 VT 也能再编快照。一次解完，不按页增量解码。
 pub(crate) fn decode_snapshot(bytes: &[u8]) -> std::result::Result<Terminal<'static, 'static>, SnapshotError> {
     let mut decoder = Decoder::new_buf(bytes)?;
-    decoder.set_max_continuation_bytes(CONTINUATION_MAX_BYTES)?.set_retain_continuation(true)?;
+    // 恢复图片时就按两份 VT 共用的存储上限，不先按新终端的默认上限占着内存。
+    decoder
+        .set_max_continuation_bytes(CONTINUATION_MAX_BYTES)?
+        .set_retain_continuation(true)?
+        .set_kitty_image_storage_limit(KITTY_IMAGE_STORAGE_BYTES)?;
     let mut terminal = decoder.decode()?;
     // 快照里带着编快照那份的字节上限；照它设，不退回默认值。
     let scrollback_bytes = terminal.scrollback_max_bytes()?;
@@ -234,7 +239,7 @@ pub(crate) fn format_replay(
 ) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     // SAFETY: 写进 `Vec` 不会回头调用这个格式化器或它的终端。
-    unsafe { Formatter::new(terminal, replay_options())?.format_write(&mut out) }?;
+    unsafe { replay_formatter(terminal)?.format_write(&mut out) }?;
     replay_images(terminal, REPLAY_IMAGE_BYTES, &mut out)?;
     let shape = RenderState::new()?.update(terminal)?.cursor_visual_style()?;
     let decscusr = match shape {
@@ -268,7 +273,7 @@ pub(crate) fn format_replay(
 /// 放图片要挪光标，所以前后用 DECSC、DECRC 保住格式化写好的光标，代价是程序自己用 DECSC 存的
 /// 光标被换掉（格式化本来也带不过去）。都带 `q=2`，接收的 VT 是宿主那份时也不会应答。
 fn replay_images(terminal: &Terminal<'static, '_>, mut budget: usize, out: &mut Vec<u8>) -> Result<()> {
-    let graphics = terminal.kitty_graphics()?;
+    let Some(graphics) = terminal.kitty_graphics()? else { return Ok(()) };
     let mut iterator = PlacementIterator::new()?;
     let mut placements = iterator.update(&graphics)?;
     let mut sent = HashSet::new();
@@ -394,25 +399,14 @@ pub(crate) fn encode_base64(data: &[u8], out: &mut Vec<u8>) {
     }
 }
 
-/// `format_replay` 的格式化选项。软折行的行接起来输出，靠自动折行在原处折回去；分开输出
-/// 的话每行末尾是 `\r\n`，软折行就成了硬换行。
-pub(crate) fn replay_options<'t, 's>() -> FormatterOptions<'t, 's> {
-    FormatterOptions::new()
-        .with_format(Format::Vt)
-        .with_unwrap(true)
-        .with_trim(false)
-        .with_palette(true)
-        .with_modes(true)
-        .with_scrolling_region(true)
-        .with_tabstops(true)
-        .with_pwd(true)
-        .with_keyboard(true)
-        .with_cursor(true)
-        .with_style(true)
-        .with_hyperlink(true)
-        .with_protection(true)
-        .with_kitty_keyboard(true)
-        .with_charsets(true)
+/// `format_replay` 的格式化器：带上格式化能复原的全部终端状态。软折行的行接起来输出，靠自动
+/// 折行在原处折回去；分开输出的话每行末尾是 `\r\n`，软折行就成了硬换行。
+pub(crate) fn replay_formatter<'t, 'alloc, 'cb>(
+    terminal: &'t Terminal<'alloc, 'cb>,
+) -> Result<Formatter<'t, 'alloc, 'cb>> {
+    let mut formatter = Formatter::new(terminal)?;
+    formatter.set_format(Format::Vt)?.set_unwrap(true)?.set_trim(false)?.set_extras(Extras::ALL)?;
+    Ok(formatter)
 }
 
 /// 屏幕底部一屏高的文字，给识别规则用：一行一个 `\n`，行尾空白去掉，末尾的空行去掉。
@@ -588,9 +582,11 @@ pub(crate) fn snapshot_format() -> std::result::Result<u16, SnapshotError> {
 pub(crate) fn scroll_margins(terminal: &Terminal<'_, '_>) -> Result<((u16, u16), bool)> {
     let corner = || terminal.grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }));
     let selection = Selection::new(corner()?, corner()?, false);
-    let options =
-        FormatterOptions::new().with_format(Format::Vt).with_scrolling_region(true).with_selection(&selection);
-    let bytes = Formatter::new(terminal, options)?.format_alloc(None)?.to_vec();
+    let mut formatter = Formatter::new(terminal)?;
+    formatter.set_format(Format::Vt)?.set_extras(Extras::SCROLLING_REGION)?;
+    // SAFETY: 选区的两端取自同一个终端当前的屏幕。
+    unsafe { formatter.set_selection(Some(&selection)) }?;
+    let bytes = formatter.format_alloc(None)?;
     let mut rows = (0, terminal.rows()?.saturating_sub(1));
     let mut sides = false;
     // 一格的内容里没有 ESC，ESC 起头的只有格式化写出的这两条。
@@ -616,11 +612,10 @@ pub(crate) fn screen_lines(terminal: &Terminal<'_, '_>, first: usize, last: usiz
         terminal.grid_ref(point(cols.saturating_sub(1), last))?,
         false,
     );
-    let options = FormatterOptions::new()
-        .with_format(Format::Plain)
-        .with_unwrap(false)
-        .with_trim(true)
-        .with_selection(&selection);
-    let bytes = Formatter::new(terminal, options)?.format_alloc(None)?.to_vec();
+    let mut formatter = Formatter::new(terminal)?;
+    formatter.set_format(Format::Plain)?.set_unwrap(false)?.set_trim(true)?;
+    // SAFETY: 选区的两端取自同一个终端当前的屏幕。
+    unsafe { formatter.set_selection(Some(&selection)) }?;
+    let bytes = formatter.format_alloc(None)?;
     Ok(String::from_utf8_lossy(&bytes).split('\n').map(|line| line.trim_end().to_owned()).collect())
 }

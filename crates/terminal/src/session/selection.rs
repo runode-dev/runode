@@ -3,10 +3,10 @@
 use std::time::{Duration, Instant};
 
 use libghostty_vt::{
-    fmt::{Format, Formatter, FormatterOptions},
+    fmt::{Format, Formatter},
     screen::GridRef,
     selection::{
-        Adjustment, FormatOptions,
+        Adjustment,
         gesture::{self, AutoscrollTickEvent, DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
     },
     terminal::{Point, PointSpace},
@@ -133,10 +133,9 @@ impl Session {
 
     /// 选区的纯文本：软换行处接起来，行尾空白去掉。没有选区时为 `None`。
     pub fn selection_text(&self) -> Option<String> {
-        let options = FormatOptions::new().with_emit_format(Format::Plain).with_unwrap(true).with_trim(true);
-        log_err("selection format", self.terminal.format_selection_alloc(None, options))
-            .flatten()
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        let result = Formatter::new_selection(&self.terminal)
+            .and_then(|formatter| formatter.map(|mut formatter| plain_text(&mut formatter)).transpose());
+        log_err("selection format", result).flatten()
     }
 
     /// 选中屏幕和回滚历史里的全部内容。
@@ -200,19 +199,25 @@ impl Session {
 
     /// 当前屏幕连同回滚历史的纯文本：软换行处接起来，行尾空白去掉。
     pub fn screen_text(&self) -> Option<String> {
-        let options = FormatterOptions::new().with_format(Format::Plain).with_unwrap(true).with_trim(true);
-        let result = Formatter::new(&self.terminal, options)
-            .and_then(|mut formatter| formatter.format_alloc(None).map(|bytes| bytes.to_vec()));
-        log_err("format screen", result).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        let result = Formatter::new(&self.terminal).and_then(|mut formatter| plain_text(&mut formatter));
+        log_err("format screen", result)
     }
 
     fn gesture_geometry(&self) -> Geometry {
         let size = self.size.get();
+        let (cell_width, cell_height) = self.cell_px();
         Geometry {
             columns: u32::from(size.cols.max(1)),
-            cell_width: u32::from(size.cell_width_px.max(1)),
+            cell_width: u32::from(cell_width),
             padding_left: 0,
-            screen_height: (u32::from(size.rows) * u32::from(size.cell_height_px)).max(1),
+            screen_height: (u32::from(size.rows) * u32::from(cell_height)).max(1),
         }
     }
+}
+
+/// `formatter` 范围内的纯文本：软换行处接起来，行尾空白去掉。
+fn plain_text(formatter: &mut Formatter<'_, '_, '_>) -> libghostty_vt::error::Result<String> {
+    formatter.set_format(Format::Plain)?.set_unwrap(true)?.set_trim(true)?;
+    let bytes = formatter.format_alloc(None)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }

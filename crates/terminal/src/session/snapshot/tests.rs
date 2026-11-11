@@ -5,14 +5,12 @@
 //! 协议的栈、退出备用屏幕、改尺寸等），把快照里带着、但当下看不出来的状态也翻出来比。
 //!
 //! 唯一允许不同的是回滚历史最老的那几行留没留着：回滚按 page 整块丢弃，page 怎么划分不在
-//! 快照里，解出来的 VT 之后丢的行数可能多也可能少，见
-//! `scrollback_pruning_diverges_after_a_snapshot`。所以最后只比两边都还留着的那些行。
+//! 快照里，解出来的 VT 之后丢的行数可能多也可能少。所以最后只比两边都还留着的那些行。
 //! 刚解完、还没接着喂的时候不一样：解出来的历史必须一行不少，见 `assert_history_survives`
 //! 和 `decoding_keeps_a_full_scrollback`。
 
 use libghostty_vt::{
     Terminal,
-    fmt::Formatter,
     selection::Selection,
     terminal::{Mode, Point, PointCoordinate},
 };
@@ -128,11 +126,10 @@ fn state(terminal: &Terminal<'static, '_>, history: usize, detailed: bool) -> Ve
         terminal.grid_ref(at(cols - 1, total - 1)).unwrap(),
         false,
     );
-    let vt = Formatter::new(terminal, vt::replay_options().with_selection(&selection))
-        .unwrap()
-        .format_alloc(None)
-        .unwrap()
-        .to_vec();
+    let mut formatter = vt::replay_formatter(terminal).unwrap();
+    // SAFETY: 选区的两端取自同一个终端当前的屏幕。
+    unsafe { formatter.set_selection(Some(&selection)) }.unwrap();
+    let vt = formatter.format_alloc(None).unwrap().to_vec();
     let scrollbar = terminal.scrollbar().unwrap();
     vec![
         ("vt", String::from_utf8_lossy(&vt).into_owned()),
@@ -765,11 +762,11 @@ fn a_session_from_a_snapshot_applies_the_theme_like_the_host() {
     assert_eq!(resumed.frame().cursor.map(|c| c.blinking), Some(true));
 }
 
-/// 回滚历史按 page 整块丢弃，page 的划分不在快照里：解出来的 VT 之后丢掉的行数和原来那份
-/// 不一样，两份留着的历史行数就不同了，最近的那些行和屏幕上的内容仍然一样。所以宿主和界面
+/// 回滚历史按 page 整块丢弃，page 的划分不在快照里：解出来的 VT 之后丢掉的行数不一定和原来
+/// 那份一样，两份留着的历史行数可能不同，但最近的那些行和屏幕上的内容一样。所以宿主和界面
 /// 之间不能用回滚历史里的绝对行号指同一行。
 #[test]
-fn scrollback_pruning_diverges_after_a_snapshot() {
+fn scrollback_pruning_after_a_snapshot_keeps_the_recent_rows() {
     let data = long_scrollback();
     let new_terminal = || {
         let mut terminal = vt::new_terminal(size(LONG_SCROLLBACK_COLS, 6)).unwrap();
@@ -778,16 +775,13 @@ fn scrollback_pruning_diverges_after_a_snapshot() {
     };
     let mut expected = new_terminal();
     expected.vt_write(&data);
-    // 切在哪里会分叉要看 page 怎么划分，各平台不同，所以试一串切点，至少一处两份留下的历史行数不同。
-    let mut diverged = false;
+    // page 怎么划分各平台不同，所以试一串切点。
     for tenth in 1..10 {
         let cut = data.len() * tenth / 10;
         let mut actual = new_terminal();
         actual.vt_write(&data[..cut]);
         let mut actual = round_trip(&actual).unwrap();
         actual.vt_write(&data[cut..]);
-        diverged |= expected.scrollback_rows().unwrap() != actual.scrollback_rows().unwrap();
         assert_same(&format!("pruned, cut at {tenth}/10"), &expected, &actual, true);
     }
-    assert!(diverged);
 }

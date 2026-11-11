@@ -10,7 +10,7 @@ use runode_types::{
     input::{Mods, MouseAction, MouseButton},
 };
 
-use super::Session;
+use super::{Session, log_err};
 use crate::convert::ghostty_mods;
 
 impl Session {
@@ -110,19 +110,23 @@ impl Session {
     /// 让鼠标编码器跟上终端的上报模式和当前网格尺寸。
     fn sync_mouse_encoder(&mut self) {
         let size = self.size.get();
-        self.mouse_encoder
+        let (cell_width, cell_height) = self.cell_px();
+        let (cell_width, cell_height) = (u32::from(cell_width), u32::from(cell_height));
+        let result = self
+            .mouse_encoder
             .set_options_from_terminal(&self.terminal)
             // 同一单元格里的移动不重复上报。
             .set_track_last_cell(true)
             .set_size(mouse::EncoderSize {
-                screen_width: u32::from(size.cols) * u32::from(size.cell_width_px),
-                screen_height: u32::from(size.rows) * u32::from(size.cell_height_px),
-                cell_width: u32::from(size.cell_width_px),
-                cell_height: u32::from(size.cell_height_px),
+                screen_width: u32::from(size.cols) * cell_width,
+                screen_height: u32::from(size.rows) * cell_height,
+                cell_width,
+                cell_height,
                 padding_top: 0,
                 padding_bottom: 0,
                 padding_left: 0,
                 padding_right: 0,
             });
+        log_err("mouse encoder size", result);
     }
 }

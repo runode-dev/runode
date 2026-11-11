@@ -144,17 +144,17 @@ impl QueryScanner {
                     return terminal.vt_write(data);
                 }
             };
-            let (done, rest) = data.split_at(stop.consumed());
+            let (done, rest) = data.split_at(stop.consumed);
             data = rest;
-            if stop.reached().contains(Boundary::OSC_START) {
+            if stop.reached.contains(Boundary::OSC_START) {
                 (self.in_osc, self.len) = (true, 0);
                 continue;
             }
             // 结束的那个字节不是内容。
             self.collect(&done[..done.len().saturating_sub(1)]);
-            let bel = match stop.end() {
-                Ok(StringEnd::Bel) => Some(true),
-                Ok(StringEnd::StEsc) => Some(false),
+            let bel = match stop.end {
+                Some(StringEnd::Bel) => Some(true),
+                Some(StringEnd::StEsc) => Some(false),
                 _ => None,
             };
             if std::mem::take(&mut self.in_osc)

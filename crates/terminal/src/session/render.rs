@@ -95,7 +95,7 @@ impl Session {
     /// 帧里一块图片（`FrameImage::id`、`FrameImage::generation`）的像素：宽、高和逐行存放的
     /// 8 位 RGBA，每次调用复制一份。图片已经换了版本或删了时为 `None`，下一帧会带上新的。
     pub fn image_rgba(&self, id: u32, generation: u64) -> Option<(u32, u32, Vec<u8>)> {
-        let graphics = self.terminal.kitty_graphics().ok()?;
+        let graphics = self.terminal.kitty_graphics().ok()??;
         let image = graphics.image(id).filter(|image| image.generation().ok() == Some(generation))?;
         let rgba = crate::vt::image_rgba(&image)?.into_owned();
         Some((image.width().ok()?, image.height().ok()?, rgba))

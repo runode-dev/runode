@@ -274,10 +274,17 @@ impl Session {
         (self.sender)(Request::Input(data));
     }
 
-    /// 网格位置换算成以设备像素计的坐标，和 `GridSize` 的单元格尺寸一致。
-    fn surface_position(&self, at: GridPoint) -> (f64, f64) {
+    /// 单元格以设备像素计的宽和高，至少是 1：libghostty 的鼠标编码器和选区手势都不收零宽或零高的单元格，
+    /// 换算坐标和告诉它们的尺寸要用同一组值。
+    fn cell_px(&self) -> (u16, u16) {
         let size = self.size.get();
-        (f64::from(at.x) * f64::from(size.cell_width_px), f64::from(at.y) * f64::from(size.cell_height_px))
+        (size.cell_width_px.max(1), size.cell_height_px.max(1))
+    }
+
+    /// 网格位置换算成以设备像素计的坐标，单元格尺寸取 `cell_px`。
+    fn surface_position(&self, at: GridPoint) -> (f64, f64) {
+        let (width, height) = self.cell_px();
+        (f64::from(at.x) * f64::from(width), f64::from(at.y) * f64::from(height))
     }
 
     /// 指针所在的视口单元格；落在网格外时取最近的边上的单元格。
