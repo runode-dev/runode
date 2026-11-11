@@ -281,8 +281,8 @@ pub enum ClientMsg {
     /// 列宿主这台机器上新建终端时可以挑的 shell，回 `HostMsg::Shells`。宿主自己办，不转给界面。
     ListShells { req: u32 },
     /// 在宿主这台机器上按 PATH 找 `programs` 这几个命令，回 `HostMsg::Commands`；`path` 是 shell 报告的
-    /// PATH，为空时用新起的 shell 会拿到的。`programs` 多于 `MAX_FIND_COMMANDS` 个时回 `Error`。宿主自己办，
-    /// 不转给界面。
+    /// PATH，为空时用登录 shell 配好的，问不到时用新起的 shell 会拿到的。`programs` 多于 `MAX_FIND_COMMANDS`
+    /// 个时回 `Error`。宿主自己办，不转给界面。
     FindCommands {
         req: u32,
         #[serde(default, with = "os_text")]

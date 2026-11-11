@@ -2,8 +2,8 @@
 //! shell：工作区所在主机的宿主列出了可挑的 shell（Windows 上）时每个一项（`NewShellTab`，快捷键按序号），
 //! 没列出时只有一项普通终端，默认 shell 那一项加粗；下面是那台主机上装着的各家 agent（`NewAgentTab`，快捷键
 //! 按序号），点了在当前终端的目录开一个新标签、在 shell 里起它。shell 和 agent 都由那台主机的宿主找：agent
-//! 按那台主机上的终端里 shell 报告的 PATH 找命令，都没报告时（没有集成的 cmd）按新开的 shell 会拿到的 PATH
-//! 找。每次打开菜单都在后台重新问一遍，问到之前菜单里是上次的。
+//! 按那台主机上的终端里 shell 报告的 PATH 找命令，都没报告时（一个终端都没开、没有集成的 cmd）由宿主自己定
+//! PATH。每次打开菜单都在后台重新问一遍，问到之前菜单里是上次的。
 
 use std::time::Duration;
 
@@ -306,7 +306,7 @@ impl WindowView {
     }
 
     /// 在后台请主机 `host` 找装着的 agent，返回问的是哪台主机和等回话的任务：按那台主机上的终端里 shell
-    /// 报告的 PATH 找，都没报告时宿主按新起的 shell 会拿到的 PATH 找；宿主答不上来时当作一家都没装。
+    /// 报告的 PATH 找，都没报告时不给 PATH；宿主答不上来时当作一家都没装。
     pub(super) fn ask_installed_agents(&self, host: HostId, cx: &mut Context<Self>) -> (HostId, Task<Vec<Installed>>) {
         let reported = self.terminal_path(Some(&host), cx);
         let link = link_of(&host);

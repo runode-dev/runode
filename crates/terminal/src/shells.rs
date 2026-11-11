@@ -3,8 +3,9 @@
 //! 找 shell 能跑的命令（`find_command`、`find_commands`）各系统都做。
 
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
 use runode_types::shell::{ShellProfile, ShellProfileKind};
@@ -21,15 +22,25 @@ pub fn find_command(dirs: &[PathBuf], program: &str) -> Option<PathBuf> {
 }
 
 /// `programs` 里每个在 `path` 上找得到时它的文件名（带着找到的扩展名），找不到时为 `None`，和 `programs`
-/// 一一对应。`path` 为空时按新起的 shell 会拿到的 PATH（`pty::spawn_path`）找，只搜
-/// `search_dirs`。
+/// 一一对应。`path` 为空时按 `default_path` 找，只搜 `search_dirs`。第一次按 `default_path` 找会起一个登录
+/// shell，要等一会儿，不在界面线程上调。
 pub fn find_commands(path: Option<&OsStr>, programs: &[String]) -> Vec<Option<String>> {
-    let path = path.map(OsStr::to_os_string).or_else(crate::pty::spawn_path);
+    let path = path.map(OsStr::to_os_string).or_else(default_path);
     let dirs = search_dirs(path.as_deref());
     programs
         .iter()
         .map(|program| Some(find_command(&dirs, program)?.file_name()?.to_string_lossy().into_owned()))
         .collect()
+}
+
+/// 没有 shell 报告 PATH 时找命令用的 PATH：登录 shell 配好的，问不到时是新起的 shell 会拿到的
+/// （`pty::spawn_path`）。从访达、程序坞或 launchd 拉起的进程自己的 PATH 里没有 brew、`~/.local/bin` 这类
+/// 目录，用户装的 agent 多半在那里。登录 shell 一个进程只问一次。
+fn default_path() -> Option<OsString> {
+    static LOGIN: OnceLock<Option<OsString>> = OnceLock::new();
+    // 在 `/` 里起：项目目录里的 direnv 这类配置不该被它读到、执行。
+    let login = || runode_agent::oneshot::login_shell_path(&crate::pty::default_shell(), Path::new("/"));
+    LOGIN.get_or_init(login).clone().or_else(crate::pty::spawn_path)
 }
 
 /// PATH 是 `path` 时找命令的目录：只要绝对路径的项，空项和相对路径落在调用方的当前目录，那里的同名文件
