@@ -43,6 +43,13 @@ pub struct Launcher {
     probe: Probe,
 }
 
+impl Launcher {
+    /// 命令里的程序名，不带子命令（`opencode2 mini` 的 `mini`）：在 PATH 上找它、问清单时起它。
+    pub fn program(&self) -> &'static str {
+        self.command.split(' ').next().unwrap_or_default()
+    }
+}
+
 /// 怎么问模型清单：起 agent 时的参数、写进标准输入的请求（为空时标准输入接空设备）和怎么认回话。
 struct Probe {
     args: &'static [&'static str],
@@ -306,10 +313,8 @@ pub enum Unanswered {
 /// 在 `dir` 里问 `launcher` 的模型清单，最多等 `PROBE_TIMEOUT`，会卡住，放到后台跑；`path` 是找 agent 用的 PATH，
 /// 为空时用本进程的。`dir` 不在了（任务的目录被删了）时在 `/` 里问：进不去目录也报 NotFound，会被当成没装。
 pub fn fetch(launcher: &Launcher, dir: &Path, path: Option<OsString>) -> Result<Catalog, Unanswered> {
-    // 问清单时不带命令里的子命令（`opencode2 mini` 的 `mini`）。
-    let binary = launcher.command.split(' ').next().unwrap_or_default();
     let dir = if dir.is_dir() { dir } else { Path::new("/") };
-    let mut catalog = ask(binary, &launcher.probe, dir, path, PROBE_TIMEOUT)?;
+    let mut catalog = ask(launcher.program(), &launcher.probe, dir, path, PROBE_TIMEOUT)?;
     // agent 答的模型名和强度都要拼进 shell 命令，放不进 `quote` 的单引号里的不要。
     catalog.models.retain(|model| usable(&model.id));
     for model in &mut catalog.models {

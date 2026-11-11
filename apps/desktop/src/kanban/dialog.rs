@@ -154,6 +154,8 @@ pub struct TodoDialog {
     workspaces: Vec<(PathBuf, SharedString)>,
     /// 本机终端里 shell 报告的 PATH，没有这样的终端时为空。
     shell_path: Option<OsString>,
+    /// 各 agent（`LAUNCHERS` 里第几个）的程序在 PATH 上找不找得到；后台找好之前为空，菜单里全列。
+    installed: Option<Vec<bool>>,
     /// 正在问模型清单的 agent（`LAUNCHERS` 里第几个），和没问到的、为什么没问到。
     loading: HashSet<usize>,
     failed: HashMap<usize, Unanswered>,
@@ -323,6 +325,7 @@ impl TodoDialog {
             command,
             workspaces,
             shell_path,
+            installed: None,
             loading: HashSet::new(),
             fields_scroll: ScrollHandle::new(),
             failed: HashMap::new(),
@@ -353,10 +356,55 @@ impl TodoDialog {
             dialog.load_templates(cx);
         }
         dialog.find_skills(cx);
+        dialog.find_installed(new_todo, cx);
         if let Some(pick) = &dialog.agent {
             dialog.fetch_models(pick.agent, cx);
         }
         dialog
+    }
+
+    /// 在后台按 PATH 找各 agent 的程序，记进 `installed`。`new_todo` 时挑着的那家没装、也没挑模型和强度，
+    /// 而别家有装着的，换成菜单里排第一的那家。
+    fn find_installed(&mut self, new_todo: bool, cx: &mut Context<Self>) {
+        let path = self.shell_path.clone();
+        let job = cx.background_executor().spawn(async move {
+            let path = crate::process_env::user_path(path);
+            let programs: Vec<String> = LAUNCHERS.iter().map(|launcher| launcher.program().to_owned()).collect();
+            let found = runode_terminal::shells::find_commands(path.as_deref(), &programs);
+            found.iter().map(Option::is_some).collect::<Vec<_>>()
+        });
+        cx.spawn(async move |this, cx| {
+            let installed = job.await;
+            this.update(cx, |dialog, cx| {
+                dialog.installed = Some(installed);
+                let untouched = dialog.agent.as_ref().filter(|pick| pick.model.is_none() && pick.effort.is_none());
+                if new_todo
+                    && let Some(current) = untouched.map(|pick| dialog.family_of(pick.agent))
+                    && !dialog.family_installed(current)
+                    && let Some(other) = (0..LAUNCHERS.len())
+                        .find(|agent| runode_agent::models::listed(*agent) && dialog.family_installed(*agent))
+                {
+                    dialog.agent = Some(Pick { agent: other, model: None, effort: None });
+                    dialog.fetch_models(other, cx);
+                }
+                dialog.refresh_menu(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 第 `agent` 个 agent 那一家在菜单里列的那个（`runode_agent::models::listed`）。
+    fn family_of(&self, agent: usize) -> usize {
+        (0..=agent).rev().find(|index| runode_agent::models::listed(*index)).unwrap_or(agent)
+    }
+
+    /// 菜单里列的第 `listed` 家有哪个版本装着；还没找好时当作装着。
+    fn family_installed(&self, listed: usize) -> bool {
+        let Some(installed) = &self.installed else { return true };
+        std::iter::successors(Some(listed), |agent| runode_agent::models::same_kind(*agent))
+            .any(|agent| installed.get(agent).copied().unwrap_or(false))
     }
 
     /// 输入框里回车保存，Esc 关掉对话框，改了字就收起上次的报错。
@@ -660,6 +708,10 @@ impl TodoDialog {
         self.menu_for = Some(combo);
         let target = self.focus.clone();
         self.open_dropdown(items, target, None, cx);
+        // 对话框能收起来留很久，其间装上、卸掉的 agent 每次打开菜单时重新找，找好了换上。
+        if combo == Combo::Agent {
+            self.find_installed(false, cx);
+        }
     }
 
     /// 开着的菜单照现在的清单重建：问到了模型清单时用。
@@ -682,13 +734,16 @@ impl TodoDialog {
         }
     }
 
-    /// agent 菜单：`LAUNCHERS` 里每家一项（`listed`），最后是自己写的命令。
+    /// agent 菜单：`LAUNCHERS` 里装着的每家一项（`listed`），最后是自己写的命令。
     fn agent_items(&self) -> Vec<Option<MenuItem>> {
         let current = self.agent.as_ref().map(|pick| pick.launcher().label);
+        // 没装的不列，挑着的那家照样列，免得存着的任务打开后菜单里没有它。
         let mut items: Vec<_> = LAUNCHERS
             .iter()
             .enumerate()
-            .filter(|(index, _)| runode_agent::models::listed(*index))
+            .filter(|(index, spec)| {
+                runode_agent::models::listed(*index) && (self.family_installed(*index) || current == Some(spec.label))
+            })
             .map(|(index, spec)| {
                 let action = Box::new(PickTodoAgent { index: Some(index) });
                 Some(MenuItem::checkbox(spec.label.to_owned(), None, current == Some(spec.label), action))
