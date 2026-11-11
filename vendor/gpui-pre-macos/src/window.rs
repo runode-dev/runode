@@ -1108,7 +1108,7 @@ impl MacWindow {
             let native_view: *mut AnyObject = msg_send![native_view, initWithFrame: content_bounds];
             assert!(!native_view.is_null());
 
-            let metal_frames = crate::display_link::use_metal_frames().then(Rc::<MetalFrames>::default);
+            let metal_frames = MetalFrameSource::is_available().then(Rc::<MetalFrames>::default);
             let state = Rc::new(Mutex::new(MacWindowState {
                 handle,
                 foreground_executor,

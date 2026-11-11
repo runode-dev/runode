@@ -294,41 +294,6 @@ fn unsubscribe(display_id: CGDirectDisplayID, subscriber_id: SubscriberId) {
     }
 }
 
-/// Whether windows take their frames from a `CAMetalDisplayLink`. In macOS
-/// virtual machines the link often delivers no update for hundreds of
-/// milliseconds after a frame is requested, while the display-paced
-/// `WindowFrameSource` keeps time, so windows there use the latter.
-pub fn use_metal_frames() -> bool {
-    static USE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *USE.get_or_init(|| MetalFrameSource::is_available() && !in_virtual_machine())
-}
-
-fn in_virtual_machine() -> bool {
-    unsafe extern "C" {
-        fn sysctlbyname(
-            name: *const std::ffi::c_char,
-            oldp: *mut c_void,
-            oldlenp: *mut usize,
-            newp: *mut c_void,
-            newlen: usize,
-        ) -> std::ffi::c_int;
-    }
-    let mut present: std::ffi::c_int = 0;
-    let mut len = size_of::<std::ffi::c_int>();
-    // SAFETY: `kern.hv_vmm_present` is an int, and `present` and `len` are
-    // valid for writes of one.
-    let status = unsafe {
-        sysctlbyname(
-            c"kern.hv_vmm_present".as_ptr(),
-            (&raw mut present).cast(),
-            &mut len,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    status == 0 && present == 1
-}
-
 /// A window's `CAMetalDisplayLink`, shared with GPUI's frame waker so that a
 /// wake reaches the current link without taking the window's lock.
 ///
