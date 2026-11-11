@@ -117,7 +117,7 @@ public final class VTerminal {
         installRenderHold()
         // 多取视口上面一行：平滑滚动时画面往下错开，顶上要露出它的一部分。
         var overscan = GhosttyRenderStateOverscan(above: 1, below: 0)
-        ghostty_render_state_set(renderState, GHOSTTY_RENDER_STATE_OPTION_OVERSCAN, &overscan)
+        ghostty_render_state_set(renderState, GHOSTTY_RENDER_STATE_OPT_OVERSCAN, &overscan)
         applyTheme(settings)
     }
 
@@ -287,7 +287,7 @@ public final class VTerminal {
     public func scrollToBottom() {
         scrollFraction = 0
         var behavior = GhosttyTerminalScrollViewport()
-        behavior.tag = GHOSTTY_SCROLL_VIEWPORT_BOTTOM
+        behavior.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM
         ghostty_terminal_scroll_viewport(handle, behavior)
     }
 
@@ -301,7 +301,7 @@ public final class VTerminal {
         let whole = offset.rounded(.down)
         if whole != 0 {
             var behavior = GhosttyTerminalScrollViewport()
-            behavior.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA
+            behavior.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA
             behavior.value.delta = -Int(whole)
             ghostty_terminal_scroll_viewport(handle, behavior)
             // 到了历史顶上或者已经在底部时视口挪不动，按实际挪了多少扣。
@@ -375,10 +375,10 @@ public final class VTerminal {
         encoderSize.screen_height = UInt32(size.rows) * cellHeight
         encoderSize.cell_width = cellWidth
         encoderSize.cell_height = cellHeight
-        ghostty_mouse_encoder_setopt_from_terminal(mouseEncoder, handle)
-        ghostty_mouse_encoder_setopt(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &encoderSize)
+        ghostty_mouse_encoder_set_from_terminal(mouseEncoder, handle)
+        ghostty_mouse_encoder_set(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &encoderSize)
         var pressed = action != GHOSTTY_MOUSE_ACTION_RELEASE
-        ghostty_mouse_encoder_setopt(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed)
+        ghostty_mouse_encoder_set(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed)
         ghostty_mouse_event_set_action(mouseEvent, action)
         ghostty_mouse_event_set_button(mouseEvent, button)
         ghostty_mouse_event_set_mods(mouseEvent, 0)
@@ -389,13 +389,13 @@ public final class VTerminal {
             mouseEvent,
             GhosttyMousePosition(
                 x: (Float(clampedColumn) + 0.5) * Float(cellWidth), y: (Float(clampedRow) + 0.5) * Float(cellHeight)))
-        var output = [CChar](repeating: 0, count: 64)
+        var output = [UInt8](repeating: 0, count: 64)
         var written = 0
         let result = output.withUnsafeMutableBufferPointer { buffer in
             ghostty_mouse_encoder_encode(mouseEncoder, mouseEvent, buffer.baseAddress, buffer.count, &written)
         }
         guard result == GHOSTTY_SUCCESS else { return false }
-        bytes.append(contentsOf: output.prefix(written).map { UInt8(bitPattern: $0) })
+        bytes.append(contentsOf: output.prefix(written))
         return true
     }
 
@@ -536,9 +536,9 @@ public final class VTerminal {
             guard read == GHOSTTY_SUCCESS, place.protocol == GHOSTTY_IMAGE_PROTOCOL_KITTY else { continue }
             let layer: ImageLayer
             switch place.layer {
-            case GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND: layer = .belowBackground
-            case GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT: layer = .belowText
-            case GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT: layer = .aboveText
+            case GHOSTTY_IMAGE_LAYER_BELOW_BACKGROUND: layer = .belowBackground
+            case GHOSTTY_IMAGE_LAYER_BELOW_TEXT: layer = .belowText
+            case GHOSTTY_IMAGE_LAYER_ABOVE_TEXT: layer = .aboveText
             default: continue
             }
             let image = ScreenImage(
@@ -558,7 +558,7 @@ public final class VTerminal {
         var `protocol` = GHOSTTY_IMAGE_PROTOCOL_KITTY
         var id: UInt32 = 0
         var generation: UInt64 = 0
-        var layer = GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT
+        var layer = GHOSTTY_IMAGE_LAYER_ABOVE_TEXT
         var z: Int32 = 0
         var column: Int32 = 0
         var row: Int32 = 0
@@ -591,18 +591,18 @@ public final class VTerminal {
         var width: UInt32 = 0
         var height: UInt32 = 0
         var format = GHOSTTY_KITTY_IMAGE_FORMAT_RGBA
-        var data: UnsafePointer<UInt8>?
-        var length = 0
-        guard ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_GENERATION, &current) == GHOSTTY_SUCCESS,
+        var stored = GhosttyString()
+        guard
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_GENERATION, &current)
+                == GHOSTTY_SUCCESS,
             current == generation,
-            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_WIDTH, &width) == GHOSTTY_SUCCESS,
-            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_HEIGHT, &height) == GHOSTTY_SUCCESS,
-            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_FORMAT, &format) == GHOSTTY_SUCCESS,
-            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR, &data) == GHOSTTY_SUCCESS,
-            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN, &length) == GHOSTTY_SUCCESS,
-            let data
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_WIDTH, &width) == GHOSTTY_SUCCESS,
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_HEIGHT, &height) == GHOSTTY_SUCCESS,
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_FORMAT, &format) == GHOSTTY_SUCCESS,
+            ghostty_kitty_graphics_image_get(image, GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_PIXELS, &stored) == GHOSTTY_SUCCESS
         else { return nil }
-        let pixels = UnsafeBufferPointer(start: data, count: length)
+        let pixels = UnsafeBufferPointer(start: stored.ptr, count: stored.len)
+        let length = pixels.count
         let rgba: [UInt8]
         switch format {
         case GHOSTTY_KITTY_IMAGE_FORMAT_RGBA: rgba = Array(pixels)
@@ -685,23 +685,37 @@ public final class VTerminal {
         }
         if fields.styled {
             var style = GhosttyStyle()
-            style.size = MemoryLayout<GhosttyStyle>.size
             if ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &style)
                 == GHOSTTY_SUCCESS
             {
+                let flags = style.flags
                 var attributes: CellAttributes = []
-                if style.bold { attributes.insert(.bold) }
-                if style.italic { attributes.insert(.italic) }
-                if style.faint { attributes.insert(.faint) }
-                if style.inverse { attributes.insert(.inverse) }
-                if style.invisible { attributes.insert(.invisible) }
-                if style.strikethrough { attributes.insert(.strikethrough) }
-                if style.blink { attributes.insert(.blink) }
+                if flags & StyleFlag.bold != 0 { attributes.insert(.bold) }
+                if flags & StyleFlag.italic != 0 { attributes.insert(.italic) }
+                if flags & StyleFlag.faint != 0 { attributes.insert(.faint) }
+                if flags & StyleFlag.inverse != 0 { attributes.insert(.inverse) }
+                if flags & StyleFlag.invisible != 0 { attributes.insert(.invisible) }
+                if flags & StyleFlag.strikethrough != 0 { attributes.insert(.strikethrough) }
+                if flags & StyleFlag.blink != 0 { attributes.insert(.blink) }
                 cell.attributes = attributes
-                cell.underline = UnderlineStyle(rawValue: UInt8(clamping: style.underline)) ?? .single
+                let underline = (flags & StyleFlag.underlineMask) >> GHOSTTY_STYLE_UNDERLINE_SHIFT
+                cell.underline = UnderlineStyle(rawValue: UInt8(underline)) ?? .single
             }
         }
         return cell
+    }
+
+    /// `GhosttyStyle.flags` 里各属性的位。头文件里的 `GHOSTTY_STYLE_FLAG_*` 和 `GHOSTTY_STYLE_UNDERLINE_MASK`
+    /// 是带类型转换的宏，Swift 导不进来，所以照着写一份；libghostty 保证这个布局不变。
+    private enum StyleFlag {
+        static let bold: GhosttyStyleFlags = 1 << 0
+        static let italic: GhosttyStyleFlags = 1 << 1
+        static let faint: GhosttyStyleFlags = 1 << 2
+        static let blink: GhosttyStyleFlags = 1 << 3
+        static let inverse: GhosttyStyleFlags = 1 << 4
+        static let invisible: GhosttyStyleFlags = 1 << 5
+        static let strikethrough: GhosttyStyleFlags = 1 << 6
+        static let underlineMask: GhosttyStyleFlags = 0x7 << GHOSTTY_STYLE_UNDERLINE_SHIFT
     }
 
     private func readGrapheme() -> String {
@@ -731,9 +745,9 @@ public final class VTerminal {
         else { return nil }
         let shape: CursorShape =
             switch cursor.visual_style {
-            case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR: .bar
-            case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE: .underline
-            case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW: .blockHollow
+            case GHOSTTY_CURSOR_STYLE_BAR: .bar
+            case GHOSTTY_CURSOR_STYLE_UNDERLINE: .underline
+            case GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW: .blockHollow
             default: .block
             }
         return ScreenCursor(
@@ -756,7 +770,7 @@ public final class VTerminal {
         var consumed = input.consumedModifiers
         // Option 当作 Alt 时不能算「已消耗」，编码器才会改用未加修饰的字符并加 ESC 前缀。
         if optionAsAlt { consumed.remove(.alt) }
-        ghostty_key_encoder_setopt_from_terminal(keyEncoder, handle)
+        ghostty_key_encoder_set_from_terminal(keyEncoder, handle)
         var option: GhosttyOptionAsAlt =
             switch settings.optionAsAlt {
             case .yes: GHOSTTY_OPTION_AS_ALT_TRUE
@@ -764,7 +778,7 @@ public final class VTerminal {
             case .right: GHOSTTY_OPTION_AS_ALT_RIGHT
             case .no, .auto: GHOSTTY_OPTION_AS_ALT_FALSE
             }
-        ghostty_key_encoder_setopt(keyEncoder, GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, &option)
+        ghostty_key_encoder_set(keyEncoder, GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, &option)
         ghostty_key_event_set_action(keyEvent, GHOSTTY_KEY_ACTION_PRESS)
         ghostty_key_event_set_key(keyEvent, input.key.ghosttyKey)
         ghostty_key_event_set_mods(keyEvent, input.modifiers.ghosttyMods(rightAlt: input.rightAlt))
@@ -777,18 +791,16 @@ public final class VTerminal {
         }
         var output = [UInt8](repeating: 0, count: 128)
         var written = 0
-        func run(_ utf8: UnsafePointer<CChar>?, _ length: Int) -> GhosttyResult {
-            ghostty_key_event_set_utf8(keyEvent, utf8, length)
-            defer { ghostty_key_event_set_utf8(keyEvent, nil, 0) }
+        func run(_ utf8: GhosttyString) -> GhosttyResult {
+            ghostty_key_event_set_utf8(keyEvent, utf8)
+            defer { ghostty_key_event_set_utf8(keyEvent, GhosttyString()) }
             return output.withUnsafeMutableBufferPointer { buffer in
-                buffer.withMemoryRebound(to: CChar.self) { chars in
-                    ghostty_key_encoder_encode(keyEncoder, keyEvent, chars.baseAddress, chars.count, &written)
-                }
+                ghostty_key_encoder_encode(keyEncoder, keyEvent, buffer.baseAddress, buffer.count, &written)
             }
         }
         func attempt() -> GhosttyResult {
-            guard let text else { return run(nil, 0) }
-            return text.withCString { run($0, text.utf8.count) }
+            guard var text else { return run(GhosttyString()) }
+            return text.withUTF8 { run(GhosttyString(ptr: $0.baseAddress, len: $0.count)) }
         }
         var result = attempt()
         if result == GHOSTTY_OUT_OF_SPACE {
@@ -805,15 +817,14 @@ public final class VTerminal {
         guard !data.isEmpty else { return [] }
         let bracketed = bracketedPaste
         var written = 0
-        var output = [CChar](repeating: 0, count: data.count + 16)
+        var output = [UInt8](repeating: 0, count: data.count + 16)
         var result = data.withUnsafeMutableBufferPointer { input in
             output.withUnsafeMutableBufferPointer { out in
                 ghostty_paste_encode(input.baseAddress, input.count, bracketed, out.baseAddress, out.count, &written)
             }
         }
         if result == GHOSTTY_OUT_OF_SPACE {
-            data = Array(text.utf8).map { CChar(bitPattern: $0) }
-            output = [CChar](repeating: 0, count: written)
+            output = [UInt8](repeating: 0, count: written)
             result = data.withUnsafeMutableBufferPointer { input in
                 output.withUnsafeMutableBufferPointer { out in
                     ghostty_paste_encode(
@@ -822,7 +833,7 @@ public final class VTerminal {
             }
         }
         guard result == GHOSTTY_SUCCESS else { return [] }
-        return output.prefix(written).map { UInt8(bitPattern: $0) }
+        return Array(output.prefix(written))
     }
 
     // MARK: 转换
@@ -835,12 +846,12 @@ public final class VTerminal {
         Rgb(color.r, color.g, color.b)
     }
 
-    private static func ghosttyCursorStyle(_ style: CursorStyle) -> GhosttyTerminalCursorStyle {
+    private static func ghosttyCursorStyle(_ style: CursorStyle) -> GhosttyCursorStyle {
         switch style {
-        case .block: GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK
-        case .blockHollow: GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK_HOLLOW
-        case .bar: GHOSTTY_TERMINAL_CURSOR_STYLE_BAR
-        case .underline: GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE
+        case .block: GHOSTTY_CURSOR_STYLE_BLOCK
+        case .blockHollow: GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW
+        case .bar: GHOSTTY_CURSOR_STYLE_BAR
+        case .underline: GHOSTTY_CURSOR_STYLE_UNDERLINE
         }
     }
 }

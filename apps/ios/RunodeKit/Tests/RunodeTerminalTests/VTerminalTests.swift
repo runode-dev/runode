@@ -47,6 +47,32 @@ import Testing
         #expect(frame.background == TermSettings.default.background)
     }
 
+    /// 每个 SGR 属性只读出它自己那一个，下划线的几种样式各是各的。
+    @Test(arguments: [
+        (1, CellAttributes.bold), (2, .faint), (3, .italic), (5, .blink), (7, .inverse), (8, .invisible),
+        (9, .strikethrough),
+    ])
+    func eachAttributeIsReadAlone(sgr: Int, attribute: CellAttributes) throws {
+        let vt = try terminal()
+        vt.feed(Array("\u{1b}[\(sgr)mX".utf8))
+        var frame = ScreenFrame()
+        _ = vt.refresh(&frame)
+        #expect(frame.cells[0][0].attributes == attribute)
+        #expect(frame.cells[0][0].underline == .none)
+    }
+
+    @Test(arguments: [
+        ("4", UnderlineStyle.single), ("4:2", .double), ("4:3", .curly), ("4:4", .dotted), ("4:5", .dashed),
+    ])
+    func underlineStylesAreRead(sgr: String, underline: UnderlineStyle) throws {
+        let vt = try terminal()
+        vt.feed(Array("\u{1b}[\(sgr)mX".utf8))
+        var frame = ScreenFrame()
+        _ = vt.refresh(&frame)
+        #expect(frame.cells[0][0].underline == underline)
+        #expect(frame.cells[0][0].attributes == [])
+    }
+
     /// 不带样式的字和空白格不读颜色；只有背景色的格子（带背景色擦掉的）仍读得到背景。
     @Test func plainAndBackgroundOnlyCellsAreRead() throws {
         let vt = try terminal()
