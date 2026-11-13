@@ -1240,6 +1240,23 @@ kanban:
     auto: 免确认，一路跑完
     auto_done: agent 做完后自动标完成
     need_input: "填上%{label}。"
+    time_limit: 时限
+    time_limit_placeholder: 不限
+    time_limit_unit: 分钟
+    time_limit_hint: "开始后过了这么久，agent 还在干活或停在询问上就记成没做成，没有窗口开着它的终端时结束终端。"
+    bad_time_limit: "时限写分钟数，至少 1，或者空着。"
+    kind_cron: Cron
+    cron: cron 表达式
+    cron_placeholder: "30 9 * * 1-5"
+    cron_hint: "分 时 日 月 星期，按本机时间；30 9 * * 1-5 是工作日 9:30。"
+    bad_cron: "写五段：分 时 日 月 星期。"
+    cron_never: 这个 cron 表达式永远等不到。
+    queue: 开始方式
+    queue_manual: 我来开始
+    queue_queued: 排队，轮到就开始
+    queue_after: "等 #%{number} 做完：%{title}"
+    queue_after_gone: 等一个不在看板上的任务
+    host_too_old_for: "在跑的终端宿主太旧，不认得%{what}；退出 Runode 再打开。"
   template:
     issue: 修复 Issue
     issue_input: Issue 号或链接

@@ -297,6 +297,8 @@ struct State {
     other_desktops: u32,
     /// 现在这条连接上的宿主认得看板的消息，见 `Link::host_knows_todos`。
     todos: bool,
+    /// 这条连接上的宿主认得的看板级别，`HostMsg::Welcome::board`。
+    board: u32,
     /// 现在这条连接上的宿主认得 `ListShells`、`FindCommands`，不认得时这两条不发。
     shells: bool,
     /// 现在这条连接上的宿主在 `Welcome` 里报的系统和家目录，没报时为空。
@@ -586,6 +588,7 @@ impl Link {
             state.host_pid = Some(host_pid);
             state.other_desktops = welcome.desktops;
             state.todos = welcome.todos;
+            state.board = welcome.board;
             state.shells = welcome.shells;
             state.os = welcome.os;
             state.home = welcome.home;
@@ -643,6 +646,12 @@ impl Link {
     pub fn host_knows_todos(&self) -> bool {
         let state = self.inner.state();
         state.connected && state.todos
+    }
+
+    /// 现在连着的宿主认得的看板级别（`HostMsg::Welcome::board`）；没连着时为空。
+    pub fn host_board(&self) -> Option<u32> {
+        let state = self.inner.state();
+        state.connected.then_some(state.board)
     }
 
     /// 现在连着的宿主认得 `ClientMsg::ListShells` 和 `ClientMsg::FindCommands`；不认得时报错。
@@ -1029,6 +1038,7 @@ struct Welcome {
     standalone: bool,
     build: BuildId,
     todos: bool,
+    board: u32,
     shells: bool,
     desktops: u32,
     os: String,
@@ -1060,6 +1070,7 @@ fn handshake(stream: &UnixStream, build: &BuildId, timeout: Duration) -> Result<
                     standalone,
                     build,
                     todos,
+                    board,
                     shells,
                     desktops,
                     os,
@@ -1072,6 +1083,7 @@ fn handshake(stream: &UnixStream, build: &BuildId, timeout: Duration) -> Result<
                         standalone,
                         build,
                         todos,
+                        board,
                         shells,
                         desktops,
                         os,

@@ -340,6 +340,11 @@ pub fn ask_todos(make: impl FnOnce(u32) -> ClientMsg) -> Result<runode_protocol:
     link.request(make, TODO_TIMEOUT)
 }
 
+/// 现在连着的宿主认得的看板级别；没连着时为空。
+pub fn host_board() -> Option<u32> {
+    link().host_board()
+}
+
 /// 宿主的 socket 放在哪；建不了 `run/` 目录或者路径太长时为 `None`。
 fn socket_path() -> Option<PathBuf> {
     let dirs = runode_paths::Dirs::from_env();

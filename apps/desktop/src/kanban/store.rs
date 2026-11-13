@@ -74,13 +74,15 @@ fn count_needs_you(cx: &mut App) {
     }
 }
 
-/// 看板经它和宿主说话，app 启动时经 `watch` 交进来。两样都会等宿主回话，只在后台线程上调。
+/// 看板经它和宿主说话，app 启动时经 `watch` 交进来。`ask`、`list_sessions` 会等宿主回话，只在后台线程上调。
 #[derive(Clone, Copy)]
 pub struct Host {
     /// 发一条看板的请求（拿到请求编号造出消息），等宿主回话；宿主不认得看板时是给人看的原因。
     pub ask: fn(Step) -> Result<HostMsg>,
     /// 宿主里现在的会话。
     pub list_sessions: fn() -> Result<Vec<SessionInfo>>,
+    /// 现在连着的宿主认得的看板级别（`runode_protocol::todo::BOARD_LEVEL`），没连着时为空。
+    pub board: fn() -> Option<u32>,
 }
 
 impl Global for Host {}
@@ -91,8 +93,15 @@ impl Host {
         cx.try_global::<Self>().copied().unwrap_or(Self {
             ask: |_| Err(anyhow!("no terminal host")),
             list_sessions: || Err(anyhow!("no terminal host")),
+            board: || None,
         })
     }
+}
+
+/// 连着的宿主认得的看板级别不到 `level`：发这一级的消息、带这一级的字段前先看它。没连着时为假，请求自己会
+/// 报连不上，不说成宿主太旧。
+pub(crate) fn host_below(cx: &App, level: u32) -> bool {
+    (Host::get(cx).board)().is_some_and(|board| board < level)
 }
 
 /// 问到任务却没问到会话时，隔多久补问一次，见 `watch`。

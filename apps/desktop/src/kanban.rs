@@ -318,8 +318,16 @@ impl Kanban {
             this.dialog = None;
             match event {
                 DialogEvent::Dismissed if std::mem::take(&mut this.alone) => return cx.emit(KanbanEvent::Close),
-                DialogEvent::Saved { start: Some(id) } => this.start_todo(id.clone(), cx),
-                _ => {}
+                DialogEvent::Dismissed => {}
+                DialogEvent::Saved { start, failed } => {
+                    if let Some(reason) = failed {
+                        let text = rust_i18n::t!("kanban.toast.request_failed", reason = reason).into_owned();
+                        this.show_toast(ToastState::Failed(text), cx);
+                    }
+                    if let Some(id) = start {
+                        this.start_todo(id.clone(), cx);
+                    }
+                }
             }
             this.alone = false;
             // 焦点在对话框的输入框里，对话框一丢就没了着落，看板的 Esc 也收不到：关掉、存好了都交回看板。

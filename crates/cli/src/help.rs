@@ -356,9 +356,10 @@ Options:
                      or after it exits; a question unanswered for 30
                      minutes marks the task failed instead
       --time-limit MINUTES
-                     With `add`: mark the task failed if it is not done
-                     MINUTES after it starts, keeping the bottom of its
-                     screen, and end its terminal unless a window shows it
+                     With `add`: mark the task failed if its agent is still
+                     working or asking MINUTES after it starts, keeping the
+                     bottom of its screen, and end its terminal unless a
+                     window shows it
       --start        With `add`: start the task right away
       --queue        With `add`: queue the task (see `queue`)
       --after ID     With `add` and `queue`: queue the task to start once

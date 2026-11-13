@@ -50,7 +50,11 @@ const AGENT_MARKS: AgentMarks = AgentMarks {
 
 /// 在后台跟着看板，见 `kanban::watch`：经 `host_client` 和宿主说话，宿主说变了就重问。
 pub fn watch_todos(cx: &mut App) {
-    let host = Host { ask: |step| host_client::ask_todos(step), list_sessions: host_client::list_sessions };
+    let host = Host {
+        ask: |step| host_client::ask_todos(step),
+        list_sessions: host_client::list_sessions,
+        board: host_client::host_board,
+    };
     crate::kanban::watch(host, host_client::todos_changed(), cx);
 }
 

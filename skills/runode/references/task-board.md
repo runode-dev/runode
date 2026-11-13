@@ -46,8 +46,9 @@ runode todo add 'Update the CLI docs' --agent codex --model gpt-5 --effort high 
   instead. Longer reports still belong in a file. A question left
   unanswered for 30 minutes marks the task failed and ends its terminal
   unless a window shows it.
-- `--time-limit MINUTES` marks the task failed if it is not done that long
-  after it starts, keeps the bottom of its screen as the result and ends its
+- `--time-limit MINUTES` marks the task failed if its agent is still working
+  or asking for an answer that long after it starts (a finished agent waiting
+  for review is left alone), keeps the bottom of its screen as the result and ends its
   terminal unless a window shows it. Give unattended tasks one so a stuck
   agent does not run forever.
 - Without `--start` the task waits in the todo column for the user to start

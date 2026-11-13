@@ -16,7 +16,7 @@ use runode_protocol::{
 };
 
 use super::{
-    Kanban, Page, column_name,
+    Kanban, Page, ToastState, column_name,
     dialog::Editing,
     history_link, icon_button, label_row, named,
     store::{self, TodoData},
@@ -209,7 +209,12 @@ impl Kanban {
             } else {
                 (PLAY_ICON, rust_i18n::t!("kanban.resume_schedule").into_owned())
             };
-            icon_button("todo-schedule-pause", icon, label).on_press(cx, move |_, _, cx| {
+            icon_button("todo-schedule-pause", icon, label.clone()).on_press(cx, move |this, _, cx| {
+                if store::host_below(cx, 3) {
+                    let text = rust_i18n::t!("kanban.dialog.host_too_old_for", what = label.as_str()).into_owned();
+                    this.show_toast(ToastState::Failed(text), cx);
+                    return;
+                }
                 let id = id.clone();
                 Self::send_todos(vec![Box::new(move |req| ClientMsg::PauseSchedule { req, id, paused })], cx)
             })

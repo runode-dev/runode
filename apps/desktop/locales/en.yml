@@ -1240,6 +1240,23 @@ kanban:
     auto: Run without asking for permission
     auto_done: Mark done when the agent finishes
     need_input: "Fill in %{label}."
+    time_limit: Time limit
+    time_limit_placeholder: None
+    time_limit_unit: minutes
+    time_limit_hint: "Marked failed if its agent is still working or asking this long after it starts; its terminal ends unless a window shows it."
+    bad_time_limit: "Write the time limit in minutes, at least 1, or leave it empty."
+    kind_cron: Cron
+    cron: Cron expression
+    cron_placeholder: "30 9 * * 1-5"
+    cron_hint: "minute hour day month weekday, in this computer's time; 30 9 * * 1-5 is 9:30 on weekdays."
+    bad_cron: "Write five fields: minute hour day month weekday."
+    cron_never: This cron expression never comes.
+    queue: Start
+    queue_manual: When I start it
+    queue_queued: "Queue: start when there is room"
+    queue_after: "After #%{number} is done: %{title}"
+    queue_after_gone: After a task no longer on the board
+    host_too_old_for: "The running terminal host is too old for %{what}; quit Runode and open it again."
   template:
     issue: Fix an issue
     issue_input: Issue number or URL
