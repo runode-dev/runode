@@ -1231,6 +1231,7 @@ kanban:
     add_attachment: 加入檔案…
     remove_attachment: "移除「%{name}」"
     auto: 免確認，一路跑完
+    auto_done: agent 做完後自動標完成
     need_input: "填上%{label}。"
   template:
     issue: 修復 Issue

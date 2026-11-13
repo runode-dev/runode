@@ -156,8 +156,10 @@ fn add_outside_a_repository_needs_no_worktree_and_start_follows() {
     // `--no-worktree` 在仓库里也不要工作树。
     let fake = host("todonowt", vec![], vec![]);
     let repo = git_repo(&fake.dir);
-    assert_eq!(run(&format!("todo add docs --cwd {repo} --no-worktree"), &fake.env).0, exit::OK);
-    assert!(matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if !spec.worktree));
+    assert_eq!(run(&format!("todo add docs --cwd {repo} --no-worktree --auto-done"), &fake.env).0, exit::OK);
+    assert!(
+        matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if !spec.worktree && spec.auto_done)
+    );
 }
 
 /// 标题、提示词里的控制字符（转义序列、换行）不原样打到终端上：不清屏、不把表格的一行拆成几行。
@@ -240,6 +242,7 @@ fn show_prints_everything_about_one_task() {
         ..todo("00000004", "gone")
     };
     gone.spec.prompt = "first line\nsecond line".into();
+    gone.spec.auto_done = true;
     let nightly = Schedule {
         id: "0000cafe".into(),
         spec: spec("nightly", "/tmp/project"),
@@ -255,6 +258,7 @@ fn show_prints_everything_about_one_task() {
     for wanted in [
         "id        00000004",
         "column    needs_you",
+        "auto-done yes",
         "worktree  /tmp/project/.worktrees/gone",
         "branch    runode/gone",
         "schedule  nightly (0000cafe)",
@@ -339,8 +343,10 @@ fn schedule_add_sends_when_and_no_worktree_by_default() {
     assert_eq!(code, exit::OK, "{err}");
     assert_eq!(out, "0000beef\n");
     let repo = git_repo(&fake.dir);
-    let (code, _, err) =
-        run_args(&["schedule", "add", "once", "--at", "2099-01-02 03:04", "--cwd", &repo, "--worktree"], &fake);
+    let (code, _, err) = run_args(
+        &["schedule", "add", "once", "--at", "2099-01-02 03:04", "--cwd", &repo, "--worktree", "--auto-done"],
+        &fake,
+    );
     assert_eq!(code, exit::OK, "{err}");
     let sent = requests(&fake);
     let [ClientMsg::AddSchedule { spec, when, .. }, ClientMsg::AddSchedule { spec: once, when: at, .. }] =
@@ -351,7 +357,7 @@ fn schedule_add_sends_when_and_no_worktree_by_default() {
     assert_eq!((spec.title.as_str(), spec.worktree, spec.agent.as_str()), ("morning report", false, DEFAULT_AGENT));
     assert_eq!(spec.dir, std::env::current_dir().unwrap());
     assert_eq!(*when, When::Daily { hour: 9, minute: 30, days: 0b011_1110 });
-    assert!(once.worktree);
+    assert!(once.worktree && once.auto_done && !spec.auto_done);
     assert!(matches!(at, When::Once { at } if *at > now()), "{at:?}");
 
     let (code, _, err) = run_args(&["schedule", "add", "late", "--at", "2000-01-01 00:00"], &fake);

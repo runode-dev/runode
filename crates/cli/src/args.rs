@@ -97,6 +97,7 @@ pub(crate) enum Command {
         agent: Option<String>,
         /// 要新开的工作树。
         worktree: bool,
+        auto_done: bool,
         start: bool,
     },
     TodoList {
@@ -123,6 +124,7 @@ pub(crate) enum Command {
         cwd: Option<PathBuf>,
         agent: Option<String>,
         worktree: bool,
+        auto_done: bool,
         timing: Timing,
     },
     ScheduleList {
@@ -237,6 +239,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             "--no-worktree" => flags.no_worktree = true,
             "--start" => flags.start = true,
             "--worktree" => flags.worktree = true,
+            "--auto-done" => flags.auto_done = true,
             "--at" => {
                 let at = value(&mut rest, arg)?;
                 flags.at =
@@ -445,6 +448,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                         cwd: flags.cwd.take(),
                         agent: flags.agent.take(),
                         worktree: !std::mem::take(&mut flags.no_worktree),
+                        auto_done: std::mem::take(&mut flags.auto_done),
                         start: std::mem::take(&mut flags.start),
                     }
                 }
@@ -495,6 +499,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                         cwd: flags.cwd.take(),
                         agent: flags.agent.take(),
                         worktree: std::mem::take(&mut flags.worktree),
+                        auto_done: std::mem::take(&mut flags.auto_done),
                         timing,
                     }
                 }
@@ -553,6 +558,7 @@ struct Flags {
     no_worktree: bool,
     start: bool,
     worktree: bool,
+    auto_done: bool,
     at: Option<LocalTime>,
     daily: Option<(u8, u8)>,
     days: Option<u8>,
@@ -583,6 +589,7 @@ impl Flags {
             (self.no_worktree, "--no-worktree"),
             (self.start, "--start"),
             (self.worktree, "--worktree"),
+            (self.auto_done, "--auto-done"),
             (self.at.is_some(), "--at"),
             (self.daily.is_some(), "--daily"),
             (self.days.is_some(), "--days"),
@@ -897,20 +904,23 @@ mod tests {
                 cwd: None,
                 agent: None,
                 worktree: true,
+                auto_done: false,
                 start: false,
             })
         );
         assert_eq!(
-            parse("todo add --cwd app --agent codex --prompt why? --no-worktree --start docs"),
+            parse("todo add --cwd app --agent codex --prompt why? --no-worktree --auto-done --start docs"),
             Ok(Command::TodoAdd {
                 title: "docs".into(),
                 prompt: "why?".into(),
                 cwd: Some("app".into()),
                 agent: Some("codex".into()),
                 worktree: false,
+                auto_done: true,
                 start: true,
             })
         );
+        assert!(parse("todo list --auto-done").unwrap_err().contains("does not take --auto-done"));
         assert_eq!(parse("todo list --json"), Ok(Command::TodoList { json: true }));
         assert_eq!(parse("todo show 5"), Ok(Command::TodoShow { id: "5".into(), json: false }));
         assert_eq!(parse("todo show #5 --json"), Ok(Command::TodoShow { id: "#5".into(), json: true }));
@@ -930,13 +940,14 @@ mod tests {
     fn schedule_commands() {
         let add = |args: &[&str]| super::parse(&args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>());
         assert_eq!(
-            add(&["schedule", "add", "daily", "report", "--at", "2026-10-13 14:00", "--worktree"]),
+            add(&["schedule", "add", "daily", "report", "--at", "2026-10-13 14:00", "--worktree", "--auto-done"]),
             Ok(Command::ScheduleAdd {
                 title: "daily report".into(),
                 prompt: String::new(),
                 cwd: None,
                 agent: None,
                 worktree: true,
+                auto_done: true,
                 timing: Timing::At(LocalTime { year: 2026, month: 10, day: 13, hour: 14, minute: 0 }),
             })
         );

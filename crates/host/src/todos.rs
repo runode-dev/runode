@@ -10,6 +10,7 @@
 //! 不开任务，定时也不触发；接手的新宿主提交后自己接着办。两边的库是同一个文件，SQLite 自己管得住两个
 //! 进程同时开着。锁的先后：拿着 `Todos::state` 可以再拿 `peers` 和 `registry`，反过来不行。
 
+mod auto_done;
 mod check;
 mod command;
 mod schedule;
@@ -18,8 +19,11 @@ mod worktree;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use runode_git::Repo;
@@ -28,6 +32,7 @@ use runode_protocol::{
     todo::{DONE_TODOS_PAGE, Todo, TodoSpec, When},
 };
 use runode_todo::Store;
+use runode_types::agent::AgentState;
 
 use check::{check_spec, check_text, check_title, check_when};
 use command::{
@@ -44,9 +49,41 @@ pub(crate) struct Todos {
     state: Mutex<State>,
     /// 看板变了时通知定时的线程，见 `State::generation`。
     changed: Condvar,
-    /// 任务用的会话和任务做没做完，看板一变就重读，连同读的是第几次变（`State::generation`）之后的库。会话线程
-    /// 拿它判断要不要报状态变了，见 `Shared::todo_session_changed`；单独一把锁，会话线程不等库。
-    sessions: Mutex<(u64, HashMap<SessionId, bool>)>,
+    /// 任务用的会话，看板一变就重读。会话线程拿它判断要不要报状态变了、记下自动完成要的 agent 状态；单独
+    /// 一把锁，会话线程不等库。
+    sessions: Mutex<Watched>,
+    /// 会话线程要定时的线程马上再看一轮（自动完成的任务空闲下来了），不等看板变了。
+    nudged: AtomicBool,
+}
+
+/// 任务用的会话，看板第 `generation` 次变了以后读到的。
+#[derive(Default)]
+struct Watched {
+    /// 读的是看板第几次变（`State::generation`）之后的库。
+    generation: u64,
+    sessions: HashMap<SessionId, Watch>,
+    /// 带 `TodoSpec::auto_done`、没完成的任务的会话里，开始以后（或者上次标完成、取消完成以后）见过 agent
+    /// 在干活的；值是它这次空闲下来的时刻，不在空闲时为空。只在见过干活以后才自动完成：agent 起得慢、或者
+    /// 没收到提示词停在空输入框上时不算做完。
+    worked: HashMap<SessionId, Option<Instant>>,
+    /// 新读到的带 `TodoSpec::auto_done`、没完成的任务的会话，定时的线程还没问过它的 agent 在不在干活。会话线程
+    /// 只在状态变了时报，读到之前（接手旧宿主的会话、刚开始的任务）报的干活会漏掉。
+    unchecked: HashSet<SessionId>,
+    /// 自动完成时结束掉的会话，值是会话线程报结束的时刻（还没报时为空）。还没报、报了不到 `ENDING_GRACE`
+    /// 的算还在用：报结束时 shell 还没被杀，杀了也要一会儿才退出，这期间进程还占着工作树（Windows 上删不掉，
+    /// 清不掉的不再试）。
+    ending: HashMap<SessionId, Option<Instant>>,
+}
+
+/// 结束掉的会话报了结束以后，再过这么久才清它的工作树。
+const ENDING_GRACE: Duration = Duration::from_secs(5);
+
+/// 一个任务会话。
+#[derive(Clone, Copy)]
+struct Watch {
+    /// 任务还没完成。
+    open: bool,
+    auto_done: bool,
 }
 
 #[derive(Default)]
@@ -88,10 +125,24 @@ impl Todos {
         self.lock().generation
     }
 
-    /// 等到看板变了（`generation` 不再是 `seen`）或者过了 `timeout`。
+    /// 等到看板变了（`generation` 不再是 `seen`）、被 `nudge` 叫醒，或者过了 `timeout`。
     fn wait_for_change(&self, seen: u64, timeout: Duration) {
         let state = self.lock();
-        let _ = self.changed.wait_timeout_while(state, timeout, |state| state.generation == seen);
+        let _ = self.changed.wait_timeout_while(state, timeout, |state| {
+            state.generation == seen && !self.nudged.load(Ordering::Acquire)
+        });
+        self.nudged.store(false, Ordering::Release);
+    }
+
+    /// 叫醒定时的线程再看一轮。不拿 `state`（会话线程调，不等库）：恰好在它查完条件、还没睡下时叫的话
+    /// 这次叫不醒，最多晚一个 `timeout`。
+    fn nudge(&self) {
+        self.nudged.store(true, Ordering::Release);
+        self.changed.notify_all();
+    }
+
+    fn watched(&self) -> MutexGuard<'_, Watched> {
+        self.sessions.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// 在库上做 `f`。看板没开、库打不开时报错；`f` 出错时关掉库，下次重新打开。
@@ -170,20 +221,71 @@ impl Shared {
 
     /// 记下看板第 `generation` 次变了以后读到的 `todos` 用的会话，见 `Todos::sessions`。
     fn remember_todo_sessions(&self, generation: u64, todos: &[Todo]) {
-        let mut watched = self.todos.sessions.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut watched = self.todos.watched();
         // 两个线程一起改看板时，先读的库可能后写回来：只留变得最晚的那次之后读到的。
-        if watched.0 < generation {
-            let sessions = todos.iter().filter_map(|todo| Some((todo.session?, todo.done_at.is_none())));
-            *watched = (generation, sessions.collect());
+        if watched.generation < generation {
+            watched.generation = generation;
+            let sessions: HashMap<_, _> = todos
+                .iter()
+                .filter_map(|todo| {
+                    Some((todo.session?, Watch { open: todo.done_at.is_none(), auto_done: todo.spec.auto_done }))
+                })
+                .collect();
+            let Watched { sessions: old, worked, unchecked, ending, .. } = &mut *watched;
+            // 没有工作树要清的任务不会来问 `Shared::ending`，过了时限的在这里忘掉。
+            ending.retain(|_, at| at.is_none_or(|at| at.elapsed() < ENDING_GRACE));
+            let finishing = |id: &SessionId| sessions.get(id).is_some_and(|watch| watch.open && watch.auto_done);
+            // 新读到的，和刚打开自动完成、刚取消完成的。
+            let was = |id: &SessionId| old.get(id).is_some_and(|watch| watch.open && watch.auto_done);
+            let added: Vec<_> = sessions.keys().filter(|id| finishing(id) && !was(id)).copied().collect();
+            unchecked.extend(&added);
+            unchecked.retain(|id| finishing(id));
+            worked.retain(|id, _| finishing(id));
+            *old = sessions;
+            drop(watched);
+            // 定时的线程可能在这之前就醒了、看过了，叫它再看一轮。
+            if !added.is_empty() {
+                self.todos.nudge();
+            }
         }
     }
 
-    /// 会话 `id` 的 agent 状态、前台是不是 shell 变了，或者会话结束了（`ended`：shell 退出或者会话被收掉，
-    /// 会话线程报的）：告诉问过 `ListTodos` 的连接，前端不用轮询会话的状态。没做完的任务的卡片可能换了列；
-    /// 完成了的任务只在会话结束时报，卡片上打开终端的按钮要跟着收起，agent 的状态变了不影响它。
-    pub(crate) fn todo_session_changed(&self, id: SessionId, ended: bool) {
-        let open = self.todos.sessions.lock().unwrap_or_else(PoisonError::into_inner).1.get(&id).copied();
-        if open.is_some_and(|open| open || ended) {
+    /// 会话 `id` 的 agent 状态（`agent`）、前台是不是 shell 变了，或者会话结束了（`ended`：shell 退出或者
+    /// 会话被收掉，会话线程报的）：告诉问过 `ListTodos` 的连接，前端不用轮询会话的状态。没做完的任务的卡片
+    /// 可能换了列；完成了的任务只在会话结束时报，卡片上打开终端的按钮要跟着收起，agent 的状态变了不影响它。
+    /// 自动完成的任务另记下 agent 干过活、什么时候空闲下来的（`Watched::worked`）。
+    pub(crate) fn todo_session_changed(&self, id: SessionId, ended: bool, agent: Option<AgentState>) {
+        let mut watched = self.todos.watched();
+        if ended && let Some(at @ None) = watched.ending.get_mut(&id) {
+            *at = Some(Instant::now());
+        }
+        let Some(watch) = watched.sessions.get(&id).copied() else { return };
+        let mut nudge = false;
+        if ended {
+            watched.worked.remove(&id);
+        } else if watch.open && watch.auto_done {
+            match agent {
+                Some(AgentState::Working) => {
+                    watched.worked.insert(id, None);
+                }
+                Some(AgentState::Idle) => {
+                    if let Some(since @ None) = watched.worked.get_mut(&id) {
+                        *since = Some(Instant::now());
+                        nudge = true;
+                    }
+                }
+                _ => {
+                    if let Some(since) = watched.worked.get_mut(&id) {
+                        *since = None;
+                    }
+                }
+            }
+        }
+        drop(watched);
+        if nudge {
+            self.todos.nudge();
+        }
+        if watch.open || ended {
             self.peers().todos_changed();
         }
     }
@@ -258,6 +360,12 @@ impl Shared {
         if !self.todos.with_db(|db| db.update_todo(id, spec, done_at))? {
             return Err(no_todo(id));
         }
+        // 标完成、取消完成以后，agent 要再干一轮活才自动完成：取消完成后卡片停在需要你给人看。
+        if done.is_some()
+            && let Ok(Some(Todo { session: Some(session), .. })) = self.todos.with_db(|db| db.todo_by_id(id))
+        {
+            self.todos.watched().worked.remove(&session);
+        }
         // 先放开再通知：叫醒的定时线程马上来清这张刚标完成的任务，还占着的话它跳过，要等下一次看板变了
         // 或者睡满才再看。
         drop(claim);
@@ -286,7 +394,21 @@ impl Shared {
     /// 里，看着和结束了一样，其实在新宿主那边接着跑。所以要先查会话再查这个，反过来的话中间交出去的会被
     /// 当成结束了。
     fn in_use(&self, todo: &Todo) -> bool {
-        todo.session.is_some_and(|session| self.running(session)) || self.todos_writable().is_err()
+        todo.session.is_some_and(|session| self.running(session) || self.ending(session))
+            || self.todos_writable().is_err()
+    }
+
+    /// 会话 `id` 是自动完成时结束掉的，还算在用；报了结束、过了 `ENDING_GRACE` 的不算，顺带忘掉。
+    fn ending(&self, id: SessionId) -> bool {
+        let mut watched = self.todos.watched();
+        match watched.ending.get(&id) {
+            None => false,
+            Some(Some(at)) if at.elapsed() >= ENDING_GRACE => {
+                watched.ending.remove(&id);
+                false
+            }
+            Some(_) => true,
+        }
     }
 
     /// 会话 `id` 还在跑。shell 退出了的会话留在宿主里给人看最后的输出，不算；没及时回话的算还在，免得
@@ -639,5 +761,44 @@ mod tests {
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(shared.update_todo(2, &id, None, Some(true)), Ok(HostMsg::Done { req: 2 }));
         assert!(!busy_on_wake.join().unwrap(), "the todo was still claimed when the scheduler woke up");
+    }
+
+    /// 自动完成只认干过活以后的空闲：开始后直接空闲不记，干活以后空闲才记下时刻；标完成、取消完成以后
+    /// 要再干一轮活。
+    #[test]
+    fn auto_done_waits_for_the_agent_to_have_worked() {
+        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-auto-done", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = Host::new(runode_protocol::BuildId("test".into()));
+        host.shared.todos.lock().path = Some(dir.join("todos.db"));
+        let spec = TodoSpec { title: "t".into(), dir, agent: "claude".into(), auto_done: true, ..TodoSpec::default() };
+        let shared = &host.shared;
+        let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("expected the new todo") };
+        let session = SessionId(41);
+        shared.todos.with_db(|db| db.set_started(&id, unix_now(), session, None)).unwrap();
+        shared.todos_changed();
+        let since = |shared: &Shared| shared.todos.watched().worked.get(&session).copied();
+        // 新读到的会话等定时的线程去问一次；问不到（没有这个会话）就算了。
+        assert!(shared.todos.watched().unchecked.contains(&session));
+        assert_eq!(shared.finish_idle_todos(), None);
+        assert!(shared.todos.watched().unchecked.is_empty());
+        assert_eq!(since(shared), None);
+
+        shared.todo_session_changed(session, false, Some(AgentState::Idle));
+        assert_eq!(since(shared), None);
+        shared.todo_session_changed(session, false, Some(AgentState::Working));
+        assert_eq!(since(shared), Some(None));
+        shared.todo_session_changed(session, false, Some(AgentState::Idle));
+        assert!(matches!(since(shared), Some(Some(_))));
+        shared.todo_session_changed(session, false, Some(AgentState::Blocked));
+        assert_eq!(since(shared), Some(None));
+
+        shared.todo_session_changed(session, false, Some(AgentState::Working));
+        assert_eq!(shared.update_todo(2, &id, None, Some(true)), Ok(HostMsg::Done { req: 2 }));
+        assert_eq!(shared.update_todo(3, &id, None, Some(false)), Ok(HostMsg::Done { req: 3 }));
+        assert_eq!(since(shared), None);
+        shared.todo_session_changed(session, false, Some(AgentState::Idle));
+        assert_eq!(since(shared), None);
     }
 }

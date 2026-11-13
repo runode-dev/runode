@@ -219,9 +219,14 @@ impl UiPort {
     }
 
     /// 见 `Shared::todo_session_changed`。
-    pub(crate) fn todo_session_changed(&self, session: SessionId, ended: bool) {
+    pub(crate) fn todo_session_changed(
+        &self,
+        session: SessionId,
+        ended: bool,
+        agent: Option<runode_types::agent::AgentState>,
+    ) {
         if let Some(shared) = self.0.upgrade() {
-            shared.todo_session_changed(session, ended);
+            shared.todo_session_changed(session, ended, agent);
         }
     }
 

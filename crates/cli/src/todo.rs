@@ -32,6 +32,7 @@ pub(crate) struct Spec {
     pub(crate) cwd: Option<PathBuf>,
     pub(crate) agent: Option<String>,
     pub(crate) worktree: bool,
+    pub(crate) auto_done: bool,
 }
 
 impl Spec {
@@ -48,6 +49,7 @@ impl Spec {
             },
             agent: self.agent.unwrap_or_else(|| DEFAULT_AGENT.to_owned()),
             worktree: self.worktree,
+            auto_done: self.auto_done,
             ..TodoSpec::default()
         })
     }
@@ -215,10 +217,11 @@ pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Resu
     let title =
         if todo.number == 0 { todo.spec.title.clone() } else { format!("#{}  {}", todo.number, todo.spec.title) };
     writeln!(out, "{}", plain(&title))?;
-    let fields: [(&str, Option<String>); 11] = [
+    let fields: [(&str, Option<String>); 12] = [
         ("id", Some(todo.id.clone())),
         ("column", Some(column_name(column))),
         ("agent", Some(todo.spec.agent.clone())),
+        ("auto-done", todo.spec.auto_done.then(|| "yes".into())),
         ("dir", Some(tilde(&todo.spec.dir, home))),
         ("worktree", todo.worktree_dir.as_deref().map(|dir| tilde(dir, home))),
         ("branch", todo.branch.clone()),

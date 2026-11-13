@@ -14,7 +14,8 @@
 //! 等回答的通知），过了同样的宽限期还是这样时推一条任务做完的通知；一次做完只推一次，推过以后不再是做完
 //! 等着的样子（又回去干活、标成完成、删掉了、会话没了或退出了）时还没发出去的别发了，会话正在等回答时除外
 //! （撤的是整个会话的通知，那条等回答的要留着）。会话没了、shell 退出了也算需要你，但多半是用户自己关的，
-//! 不推。重连时清掉记着的任务表和各任务的列，第一次看到的任务只记基线，规矩同会话。
+//! 不推。带 `TodoSpec::auto_done` 的任务空闲下来时至少等 `AUTO_DONE_WAIT` 才按需要你推，在那之前 agent 空闲着
+//! 进了完成的推一条做完。重连时清掉记着的任务表和各任务的列，第一次看到的任务只记基线，规矩同会话。
 
 use std::{
     collections::HashMap,
@@ -24,11 +25,15 @@ use std::{
 use runode_protocol::{
     SessionId, SessionInfo,
     push::BLOCKED_LINES,
-    todo::{Column, Todo, column},
+    todo::{AUTO_DONE_WITHIN, Column, Todo, column, finished_by_agent},
 };
 use runode_types::{agent::AgentState, session::SessionMeta};
 
 use super::preview::preview_lines;
+
+/// 带 `TodoSpec::auto_done`、还会被自动完成的任务空闲下来后至少等这么久才按需要你推，在这之前进了完成的改推
+/// 完成的那一条。
+const AUTO_DONE_WAIT: Duration = Duration::from_secs(AUTO_DONE_WITHIN);
 
 /// 要做的事。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +71,8 @@ struct TodoTrack {
     finished_at: Option<Instant>,
     /// 这次做完推过了、推的是哪个会话，还没回去干活。
     pushed: Option<SessionId>,
+    /// 会话还在，agent 空闲着。
+    idle: bool,
 }
 
 #[derive(Default)]
@@ -143,6 +150,23 @@ impl Rounds {
             // 停下来不是在等回答，会话还在。
             let finished = column == Column::NeedsYou && info.is_some_and(|info| !info.exited && !blocked(info.id));
             let previous = self.todo_tracked.remove(&todo.id);
+            // agent 空闲着，会话还在。
+            let idle = info.is_some_and(|info| {
+                !info.exited && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Idle)
+            });
+            // 自动完成的任务上一轮 agent 空闲着、这一轮进了完成，还没推过：推这一条。在干活、在等回答时进了完成的
+            // 是用户标的，不推。
+            if todo.spec.auto_done
+                && column == Column::Done
+                && let (Some(previous), Some(session)) = (&previous, todo.session)
+                && previous.column != Column::Done
+                && previous.idle
+                && previous.pushed.is_none()
+            {
+                actions.push(Action::TodoDone(session, todo.spec.title.clone()));
+            }
+            // 宿主还会自动完成的，多等一会儿，等它进了完成再推；一直没进（比如宿主没见过 agent 干活）的照样推。
+            let delay = if finished_by_agent(todo, info, unix) { self.delay.max(AUTO_DONE_WAIT) } else { self.delay };
             let mut pushed = previous.as_ref().and_then(|track| track.pushed).filter(|_| column == Column::NeedsYou);
             // 推过做完、现在不再是做完等着的样子：还在退避、没发出去的那条过时了。会话在等回答时不撤，那条
             // 等回答的通知要留着。
@@ -160,13 +184,13 @@ impl Rounds {
                 None => None,
             };
             if let (Some(at), Some(info)) = (finished_at, info)
-                && now.duration_since(at) >= self.delay
+                && now.duration_since(at) >= delay
             {
                 finished_at = None;
                 pushed = Some(info.id);
                 actions.push(Action::TodoDone(info.id, todo.spec.title.clone()));
             }
-            tracked.insert(todo.id.clone(), TodoTrack { column, finished_at, pushed });
+            tracked.insert(todo.id.clone(), TodoTrack { column, finished_at, pushed, idle });
         }
         // 删掉了的任务推过的也撤。
         for session in self.todo_tracked.values().filter_map(|track| track.pushed) {

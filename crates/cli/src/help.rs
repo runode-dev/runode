@@ -278,7 +278,7 @@ agent there with the prompt; by default in a new git worktree and branch, so
 it does not touch your checkout.
 
 Usage: runode todo add TITLE... [--prompt TEXT] [--cwd DIR] [--agent CMD]
-                       [--no-worktree] [--start]
+                       [--no-worktree] [--auto-done] [--start]
        runode todo list [--json]
        runode todo show ID [--json]
        runode todo start ID
@@ -290,7 +290,8 @@ Commands:
          the id of the session its agent runs in
   list   List the tasks and their column on the board: todo (not started),
          in_progress (the agent is working), needs_you (the agent is asking,
-         has stopped, or its terminal is gone) or done
+         has stopped, or its terminal is gone) or done (marked by you, or
+         by Runode with --auto-done)
   show   Print everything about one task: its column, prompt, worktree and
          branch, session, schedule and times; done tasks of any age too
   start  Start a task and print the id of its session; a task whose terminal
@@ -316,6 +317,10 @@ Options:
                      `codex --full-auto` (default claude)
       --no-worktree  With `add`: work in DIR itself, not in a new worktree.
                      Implied when DIR is not in a git repository
+      --auto-done    With `add`: mark the task done once its agent has
+                     worked and stopped, and end its terminal unless a
+                     window shows it. Not while the agent asks a question
+                     or after it exits
       --start        With `add`: start the task right away
       --json         With `list` and `show`: print JSON instead of text
   -h, --help         Show this help
@@ -333,7 +338,7 @@ or could not start, is skipped.
 
 Usage: runode schedule add TITLE... (--at TIME | --daily HH:MM [--days DAYS] |
                            --every MINUTES) [--prompt TEXT] [--cwd DIR]
-                           [--agent CMD] [--worktree]
+                           [--agent CMD] [--worktree] [--auto-done]
        runode schedule list [--json]
        runode schedule rm ID
 
@@ -360,6 +365,8 @@ Options:
                        (default claude)
       --worktree       With `add`: give each task a new git worktree and
                        branch; DIR must be in a git repository
+      --auto-done      With `add`: mark each task done once its agent has
+                       worked and stopped (see `runode help todo`)
       --json           With `list`: print JSON instead of a table
   -h, --help           Show this help
 ";

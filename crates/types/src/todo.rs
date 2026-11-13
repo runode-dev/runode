@@ -41,6 +41,9 @@ pub struct TodoSpec {
     /// 不问权限、一路跑完：起 agent 时加上那家免确认的参数。
     #[serde(default)]
     pub auto: bool,
+    /// agent 干完活停下来（空闲，不是在等回答）时由宿主标成完成；没有窗口开着它的终端时一并结束终端。
+    #[serde(default)]
+    pub auto_done: bool,
 }
 
 impl TodoSpec {

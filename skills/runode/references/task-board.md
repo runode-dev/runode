@@ -27,6 +27,12 @@ runode todo add 'Update the CLI docs' --agent 'codex --full-auto' --prompt '...'
   (`"setup": {"/path/to/repo": "pnpm install"}`), a fresh worktree runs it
   first and the agent starts only if it succeeds.
 - `--agent CMD` is the command the prompt is given to (default `claude`).
+- `--auto-done` moves the task to done by itself once its agent has worked
+  and stopped, and ends its terminal unless a window shows it (the worktree
+  and branch then go as with `todo done`). It stays in needs_you while the
+  agent asks a question or after it exits. Use it for tasks whose result is
+  a report or a commit nobody needs to look at first, and have the agent
+  write the report to a file, since the terminal goes away.
 - Without `--start` the task waits in the todo column for the user to start
   it. `--start` starts it at once and prints the task id, then the id of the
   session its agent runs in. Making the worktree can take a while in a big
@@ -42,7 +48,8 @@ shells). The user will often name a task by its number.
 
 `runode todo list` shows each task's column: `todo` (not started),
 `in_progress` (the agent is working), `needs_you` (the agent asks a question,
-has stopped, or its terminal is gone) and `done`. `--json` adds the details:
+has stopped, or its terminal is gone) and `done` (marked by the user or by
+`--auto-done`). `--json` adds the details:
 the session, the worktree and the branch. Done tasks are listed for seven
 days.
 
@@ -73,7 +80,7 @@ local time:
 ```sh
 runode schedule add 'Nightly flaky-test hunt' --daily 02:00 --prompt '...'
 runode schedule add 'Weekly report' --daily 09:00 --days mon --prompt '...'
-runode schedule add 'Check the deploy' --every 30 --prompt '...'
+runode schedule add 'Check the deploy' --every 30 --auto-done --prompt '...'
 runode schedule add 'Release notes' --at '2026-11-02 10:00' --prompt '...'
 runode schedule list     # WHEN and NEXT, the next time it fires
 runode schedule rm ID    # the tasks it started stay
@@ -81,7 +88,8 @@ runode schedule rm ID    # the tasks it started stay
 
 Scheduled tasks work in DIR itself unless you add `--worktree` (DIR must then
 be in a git repository), since a new worktree each time is rarely wanted for
-reports and checks. A schedule missed while the computer slept fires once
+reports and checks. `--auto-done` applies to every task the schedule starts,
+so routine checks do not pile up in needs_you. A schedule missed while the computer slept fires once
 when it wakes; one whose last task is still working, or could not start, is
 skipped. Schedules
 fire while runode runs, or its host runs in the background.

@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use runode_protocol::{
     SessionId, SessionInfo,
-    todo::{Column, DropAction, START_GRACE, Todo, TodoSpec, When, column, drop_action, holds_schedule},
+    todo::{
+        Column, DropAction, START_GRACE, Todo, TodoSpec, When, column, drop_action, finished_by_agent, holds_schedule,
+    },
 };
 use runode_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -110,6 +112,40 @@ fn an_unfinished_run_holds_its_schedule_while_working_or_asking() {
     assert!(!holds_schedule(&started(), Some(&exited), LATER));
     let other = SessionInfo { id: SessionId(8), ..working };
     assert!(!holds_schedule(&started(), Some(&other), LATER));
+}
+
+/// 只有开了 `auto_done`、过了宽限期、会话还在、agent 空闲着才算 agent 自己做完了。
+#[test]
+fn only_an_idle_agent_past_the_grace_finishes_an_auto_done_todo() {
+    let auto = || {
+        let mut todo = started();
+        todo.spec.auto_done = true;
+        todo
+    };
+    let idle = session(Some(AgentState::Idle), false);
+    assert!(finished_by_agent(&auto(), Some(&idle), LATER));
+
+    assert!(!finished_by_agent(&started(), Some(&idle), LATER));
+    assert!(!finished_by_agent(&auto(), Some(&idle), FRESH));
+    assert!(!finished_by_agent(&auto(), None, LATER));
+    for other in [
+        session(Some(AgentState::Working), false),
+        session(Some(AgentState::Blocked), false),
+        session(None, true),
+        SessionInfo { exited: true, ..idle.clone() },
+        SessionInfo { id: SessionId(8), ..idle.clone() },
+    ] {
+        assert!(!finished_by_agent(&auto(), Some(&other), LATER), "{other:?}");
+    }
+    let done = Todo { done_at: Some(LATER), ..auto() };
+    assert!(!finished_by_agent(&done, Some(&idle), LATER));
+}
+
+/// 旧的前端、库里没有 `auto_done` 时读成关着。
+#[test]
+fn auto_done_defaults_to_off() {
+    let spec: TodoSpec = serde_json::from_str(r#"{"title":"t","dir":"/src"}"#).unwrap();
+    assert!(!spec.auto_done);
 }
 
 #[test]

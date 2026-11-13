@@ -6,7 +6,7 @@
 
 use std::{
     sync::{Arc, Weak},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use runode_protocol::todo::{Schedule, holds_schedule};
@@ -16,19 +16,23 @@ use super::{Todos, unix_now};
 use crate::Shared;
 
 /// 定时的线程最多睡这么久就再看一次：电脑睡眠时单调时钟停着，醒来后按墙上时间补上。
-const MAX_SLEEP: Duration = Duration::from_secs(30);
+pub(super) const MAX_SLEEP: Duration = Duration::from_secs(30);
 
-/// 定时的线程：清完成了的任务的工作树，到点的定时开任务，再睡到下一次到点、最多 `MAX_SLEEP`，看板变了
-/// 时提前醒。宿主没了就结束。
+/// 定时的线程：标完成做完了的自动完成任务，清完成了的任务的工作树，到点的定时开任务，再睡到下一次该看的
+/// 时候、最多 `MAX_SLEEP`，看板变了时提前醒。宿主没了就结束。
 pub(super) fn run(todos: &Arc<Todos>, shared: &Weak<Shared>) {
     loop {
         let seen = todos.generation();
         let Some(strong) = shared.upgrade() else { return };
+        let settle = strong.finish_idle_todos();
         strong.sweep_worktrees();
         strong.end_finished_sessions();
         let next = strong.fire_due();
         drop(strong);
-        let sleep = next.map_or(MAX_SLEEP, |at| Duration::from_secs(at.saturating_sub(unix_now())).min(MAX_SLEEP));
+        let mut sleep = next.map_or(MAX_SLEEP, |at| Duration::from_secs(at.saturating_sub(unix_now())).min(MAX_SLEEP));
+        if let Some(at) = settle {
+            sleep = sleep.min(at.saturating_duration_since(Instant::now()));
+        }
         todos.wait_for_change(seen, sleep);
     }
 }

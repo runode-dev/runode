@@ -1,5 +1,5 @@
 //! 新建、编辑任务和定时的对话框：标题、提示词、在哪个工作区或目录里做、agent 和它的模型、强度（见 `runode_agent::models`），
-//! 要用的 skill、以哪个自定义 agent 的身份跑（`skills`）、附上的文件，免不免确认，要不要独立的工作树；定时多一组什么时候跑
+//! 要用的 skill、以哪个自定义 agent 的身份跑（`skills`）、附上的文件，免不免确认，要不要独立的工作树，做完要不要自动标完成；定时多一组什么时候跑
 //! （一次、每天某时可选星期几、每隔几分钟）。时间都按本机的本地时间填、显示（`runode_todo::LocalTime`）。填得不对时在对话框里说，不发请求；宿主那边还会再查一遍。
 //!
 //! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，关掉、存好了经 `DialogEvent` 告诉看板。定时的
@@ -169,6 +169,7 @@ pub struct TodoDialog {
     attachments: Vec<PathBuf>,
     found: Found,
     auto: bool,
+    auto_done: bool,
     /// 任务开始过了：目录和要不要工作树不能再改。
     locked: bool,
     /// 读不懂的定时规则（`When::Unknown`）在用户选一种之前为空，存的时候规则照原样留着。
@@ -336,6 +337,7 @@ impl TodoDialog {
             attachments: spec.attachments,
             found: Found::default(),
             auto: spec.auto,
+            auto_done: spec.auto_done,
             locked,
             kind,
             at,
@@ -1416,7 +1418,7 @@ impl TodoDialog {
         )
     }
 
-    /// 要不要工作树、免确认一路跑完的两个开关，排在一行。
+    /// 要不要工作树、免确认一路跑完、做完自动标完成的三个开关，排在一行。
     fn render_switches(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let auto_label = rust_i18n::t!("kanban.dialog.auto").into_owned();
         let auto = Switch::new("todo-dialog-auto", auto_label.clone(), self.auto)
@@ -1424,6 +1426,14 @@ impl TodoDialog {
             .cursor_pointer()
             .on_press(cx, |dialog, _, cx| {
                 dialog.auto = !dialog.auto;
+                cx.notify();
+            });
+        let auto_done_label = rust_i18n::t!("kanban.dialog.auto_done").into_owned();
+        let auto_done = Switch::new("todo-dialog-auto-done", auto_done_label.clone(), self.auto_done)
+            .label(auto_done_label)
+            .cursor_pointer()
+            .on_press(cx, |dialog, _, cx| {
+                dialog.auto_done = !dialog.auto_done;
                 cx.notify();
             });
         let worktree_label = rust_i18n::t!("kanban.dialog.worktree").into_owned();
@@ -1439,7 +1449,7 @@ impl TodoDialog {
             })
             .when(self.locked, |pill| pill.opacity(0.6))
             .aria_disabled(self.locked);
-        div().flex().flex_wrap().gap(px(16.)).child(worktree).child(auto)
+        div().flex().flex_wrap().gap(px(16.)).child(worktree).child(auto).child(auto_done)
     }
 
     /// 存的时候没办成的原因。
@@ -1654,6 +1664,7 @@ impl TodoDialog {
             subagent: self.subagent.clone(),
             attachments: self.attachments.clone(),
             auto: self.auto,
+            auto_done: self.auto_done,
         };
         if !self.schedule {
             return Ok(match &self.editing {

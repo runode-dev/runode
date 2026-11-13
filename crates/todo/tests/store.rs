@@ -124,6 +124,7 @@ fn skills_subagent_attachments_and_auto_round_trip() {
         subagent: Some("reviewer".into()),
         attachments: vec!["/tmp/a b.png".into(), "/src/app/spec.md".into()],
         auto: true,
+        auto_done: true,
         ..spec("full")
     };
     let id = store.add_todo(&full, 100, None).unwrap();
@@ -133,8 +134,34 @@ fn skills_subagent_attachments_and_auto_round_trip() {
     assert_eq!(store.todo_by_id(&id).unwrap().unwrap().spec, empty);
     let schedule = store.add_schedule(&full, &When::Every { minutes: 5 }, 100).unwrap();
     assert_eq!(store.list_schedules().unwrap()[0].spec, full);
+    let fired = store.fire_schedule(&schedule, 1_000).unwrap().unwrap();
+    assert_eq!(store.todo_by_id(&fired).unwrap().unwrap().spec, full);
     assert!(store.update_schedule(&schedule, Some(&empty), None, 100).unwrap());
     assert_eq!(store.list_schedules().unwrap()[0].spec, empty);
+}
+
+/// 版本 3 的库升上来：原有的任务和定时留着，`auto_done` 读成关着，之后能照常写。
+#[test]
+fn upgrades_a_version_3_database() {
+    let path = temp_db("v3");
+    let mut store = Store::open(&path).unwrap();
+    let todo = store.add_todo(&spec("old"), 100, None).unwrap();
+    store.add_schedule(&spec("old"), &When::Every { minutes: 5 }, 100).unwrap();
+    drop(store);
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "ALTER TABLE todos DROP COLUMN auto_done;
+             ALTER TABLE schedules DROP COLUMN auto_done;
+             PRAGMA user_version = 3;",
+        )
+        .unwrap();
+    let mut store = Store::open(&path).unwrap();
+    assert_eq!(store.todo_by_id(&todo).unwrap().unwrap().spec, spec("old"));
+    assert_eq!(store.list_schedules().unwrap()[0].spec, spec("old"));
+    let auto_done = TodoSpec { auto_done: true, ..spec("old") };
+    assert!(store.update_todo(&todo, Some(&auto_done), None).unwrap());
+    assert!(store.todo_by_id(&todo).unwrap().unwrap().spec.auto_done);
 }
 
 #[test]

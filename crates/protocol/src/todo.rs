@@ -2,7 +2,8 @@
 //! 宿主持有它们（存在自己的库里），前端经 `ClientMsg::ListTodos` 这几条消息读写。
 //!
 //! 卡片在看板的哪一列不存，由 `column` 按任务和它那个会话的状态推出来，所以列总和 agent 实际
-//! 在干什么对得上；拖拽卡片能不能放、放下做什么由 `drop_action` 定。
+//! 在干什么对得上；拖拽卡片能不能放、放下做什么由 `drop_action` 定。完成要么是用户标的，要么是带
+//! `TodoSpec::auto_done` 的任务做完后宿主标的（`finished_by_agent`）。
 
 use runode_types::agent::AgentState;
 pub use runode_types::todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When};
@@ -13,6 +14,10 @@ use crate::message::SessionInfo;
 /// 开始后这么多秒内，agent 还没认出来或者还没开始干活也算进行中：会话要先等提示符、再打命令，
 /// agent 起来、认出来都要时间。
 pub const START_GRACE: u64 = 30;
+
+/// 带 `TodoSpec::auto_done` 的任务，agent 空闲下来以后（`finished_by_agent` 一直为真的话）宿主最晚这么多秒内
+/// 标完成。
+pub const AUTO_DONE_WITHIN: u64 = 60;
 
 /// `HostMsg::DoneTodos` 一页最多给这么多张任务。
 pub const DONE_TODOS_PAGE: u32 = 100;
@@ -27,7 +32,7 @@ pub enum Column {
     InProgress,
     /// 要用户看一眼：agent 在等回答、干完了停下来，或者会话已经没了。
     NeedsYou,
-    /// 用户标成了完成。
+    /// 标成了完成：用户标的，或者带 `TodoSpec::auto_done` 的任务做完后宿主标的。
     Done,
 }
 
@@ -69,6 +74,19 @@ pub fn holds_schedule(todo: &Todo, session: Option<&SessionInfo>, now: u64) -> b
         column(todo, Some(info), now) == Column::InProgress
             || !info.exited && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Blocked)
     })
+}
+
+/// 带 `TodoSpec::auto_done` 的 `todo` 是不是 agent 自己做完了：还没完成，会话还在，agent 认得出、空闲着，
+/// 过了 `START_GRACE`。停在询问上、退回 shell、会话没了都不算。`session` 是它那个会话现在的状态，`now` 是
+/// Unix 时间的秒数。
+pub fn finished_by_agent(todo: &Todo, session: Option<&SessionInfo>, now: u64) -> bool {
+    todo.spec.auto_done
+        && column(todo, session, now) == Column::NeedsYou
+        && session.is_some_and(|info| {
+            Some(info.id) == todo.session
+                && !info.exited
+                && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Idle)
+        })
 }
 
 /// 把卡片拖到另一列（或同一列的别处）放下时要做的事。

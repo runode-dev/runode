@@ -135,9 +135,11 @@ const TODO_ADD_OPTS: &[Opt] = &[
     CWD,
     AGENT,
     opt("--no-worktree", "Work in the directory itself, not in a new worktree", Value::None),
+    AUTO_DONE,
     opt("--start", "Start the task right away", Value::None),
     HELP,
 ];
+const AUTO_DONE: Opt = opt("--auto-done", "Mark the task done once its agent has worked and stopped", Value::None);
 const SCHEDULE_ADD_OPTS: &[Opt] = &[
     opt("--at", "Once, at \"YYYY-MM-DD HH:MM\"", Value::Free),
     opt("--daily", "Every day at HH:MM", Value::Free),
@@ -147,6 +149,7 @@ const SCHEDULE_ADD_OPTS: &[Opt] = &[
     CWD,
     AGENT,
     opt("--worktree", "Give each task a new git worktree and branch", Value::None),
+    AUTO_DONE,
     HELP,
 ];
 const PAIR_OPTS: &[Opt] =
@@ -570,7 +573,7 @@ mod tests {
         assert_eq!(complete_offline("todo ").1, ["add", "list", "show", "start", "done", "rm"]);
         assert_eq!(
             complete_offline("todo add --").1,
-            ["--prompt", "--cwd", "--agent", "--no-worktree", "--start", "--help"]
+            ["--prompt", "--cwd", "--agent", "--no-worktree", "--auto-done", "--start", "--help"]
         );
         assert_eq!(complete_offline("service install ").1, ["host", "app"]);
         assert_eq!(complete_offline("service install host ").1, Vec::<String>::new());

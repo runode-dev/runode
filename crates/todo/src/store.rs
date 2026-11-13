@@ -1,5 +1,5 @@
-//! 任务库：任务和定时存在一个 SQLite 文件里，表结构的版本记在 `PRAGMA user_version`。版本和自己
-//! 认得的不一样的库不读也不写，免得弄坏别的版本的数据。路径存成原样的字节，不要求是 UTF-8。
+//! 任务库：任务和定时存在一个 SQLite 文件里，表结构的版本记在 `PRAGMA user_version`。打开时把
+//! 认得的旧版本升上来，别的版本的库不读也不写，免得弄坏它的数据。路径存成原样的字节，不要求是 UTF-8。
 
 use std::{
     path::{Path, PathBuf},
@@ -15,7 +15,7 @@ use runode_types::{
 use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior, params};
 
 /// 这个版本认得的表结构。
-const VERSION: i64 = 3;
+const VERSION: i64 = 4;
 
 /// 完成了的任务给前端最近这么久（秒）的，更早的留在库里。
 pub const DONE_KEPT: u64 = 7 * 24 * 60 * 60;
@@ -34,6 +34,7 @@ CREATE TABLE todos (
     -- 附上的文件，路径的字节用 NUL 隔开。
     attachments BLOB NOT NULL,
     auto INTEGER NOT NULL,
+    auto_done INTEGER NOT NULL DEFAULT 0,
     created INTEGER NOT NULL,
     started INTEGER,
     session TEXT,
@@ -63,6 +64,7 @@ CREATE TABLE schedules (
     -- 附上的文件，路径的字节用 NUL 隔开。
     attachments BLOB NOT NULL,
     auto INTEGER NOT NULL,
+    auto_done INTEGER NOT NULL DEFAULT 0,
     kind TEXT NOT NULL,
     at INTEGER,
     hour INTEGER,
@@ -73,10 +75,16 @@ CREATE TABLE schedules (
 );
 ";
 
+/// 版本 3 的库升到 4：任务和定时多一列 `auto_done`。
+const MIGRATE_TO_4: &str = "
+ALTER TABLE todos ADD COLUMN auto_done INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE schedules ADD COLUMN auto_done INTEGER NOT NULL DEFAULT 0;
+";
+
 const TODO_COLUMNS: &str = "id, number, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto, \
-     created, started, session, worktree_dir, branch, done_at, schedule, rank";
-const SCHEDULE_COLUMNS: &str = "id, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto, kind, at, \
-     hour, minute, days, minutes, last_fired";
+     auto_done, created, started, session, worktree_dir, branch, done_at, schedule, rank";
+const SCHEDULE_COLUMNS: &str = "id, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto, \
+     auto_done, kind, at, hour, minute, days, minutes, last_fired";
 
 /// 库出了错：错误说明。
 pub type Result<T> = std::result::Result<T, String>;
@@ -131,6 +139,7 @@ fn spec(row: &Row<'_>) -> rusqlite::Result<TodoSpec> {
         subagent: row.get("subagent")?,
         attachments: paths_from(&row.get::<_, Vec<u8>>("attachments")?),
         auto: row.get("auto")?,
+        auto_done: row.get("auto_done")?,
     })
 }
 
@@ -197,8 +206,8 @@ fn insert_todo(tx: &Transaction<'_>, spec: &TodoSpec, now: u64, schedule: Option
     tx.execute("UPDATE meta SET value = ?1 WHERE key = 'next_number'", [number + 1]).map_err(failed)?;
     tx.execute(
         "INSERT INTO todos (id, number, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto,
-             created, schedule, rank)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+             auto_done, created, schedule, rank)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
              (SELECT COALESCE(MAX(rank), 0) + 1 FROM todos))",
         params![
             id,
@@ -212,6 +221,7 @@ fn insert_todo(tx: &Transaction<'_>, spec: &TodoSpec, now: u64, schedule: Option
             spec.subagent,
             paths_bytes(&spec.attachments),
             spec.auto,
+            spec.auto_done,
             now as i64,
             schedule
         ],
@@ -271,6 +281,7 @@ impl Store {
         let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0)).map_err(failed)?;
         match version {
             0 => tx.execute_batch(&format!("{SCHEMA} PRAGMA user_version = {VERSION};")).map_err(failed)?,
+            3 => tx.execute_batch(&format!("{MIGRATE_TO_4} PRAGMA user_version = {VERSION};")).map_err(failed)?,
             VERSION => {}
             other => return Err(format!("{} was written by another runode version (schema {other})", path.display())),
         }
@@ -362,7 +373,7 @@ impl Store {
         if let Some(spec) = spec {
             tx.execute(
                 "UPDATE todos SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6, skills = ?7,
-                     subagent = ?8, attachments = ?9, auto = ?10
+                     subagent = ?8, attachments = ?9, auto = ?10, auto_done = ?11
                  WHERE id = ?1",
                 params![
                     id,
@@ -374,7 +385,8 @@ impl Store {
                     spec.skills.join("\n"),
                     spec.subagent,
                     paths_bytes(&spec.attachments),
-                    spec.auto
+                    spec.auto,
+                    spec.auto_done
                 ],
             )
             .map_err(failed)?;
@@ -502,7 +514,7 @@ impl Store {
         tx.execute(
             &format!(
                 "INSERT INTO schedules ({SCHEDULE_COLUMNS})
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"
             ),
             params![
                 id,
@@ -515,6 +527,7 @@ impl Store {
                 spec.subagent,
                 paths_bytes(&spec.attachments),
                 spec.auto,
+                spec.auto_done,
                 kind,
                 at,
                 hour,
@@ -541,7 +554,7 @@ impl Store {
         if let Some(spec) = spec {
             tx.execute(
                 "UPDATE schedules SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6, skills = ?7,
-                     subagent = ?8, attachments = ?9, auto = ?10
+                     subagent = ?8, attachments = ?9, auto = ?10, auto_done = ?11
                  WHERE id = ?1",
                 params![
                     id,
@@ -553,7 +566,8 @@ impl Store {
                     spec.skills.join("\n"),
                     spec.subagent,
                     paths_bytes(&spec.attachments),
-                    spec.auto
+                    spec.auto,
+                    spec.auto_done
                 ],
             )
             .map_err(failed)?;

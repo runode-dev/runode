@@ -336,3 +336,45 @@ fn todos_wait_for_the_same_round() {
     assert_eq!(rounds.todo_sessions(&[working(A)], secs(t, 16), UNIX), []);
     assert_eq!(rounds.set_todos(todos.to_vec(), secs(t, 16), UNIX), []);
 }
+
+/// 自动完成的任务空闲时先不推，宿主标成完成的那一轮推一条，之后不再推；一直没被标完成的过了
+/// `AUTO_DONE_WAIT` 照样推，之后再标完成不重推。干活时被用户标完成的不推。
+#[test]
+fn auto_done_todos_are_pushed_when_marked_done() {
+    let t = Instant::now();
+    let mut rounds = Rounds::new(Duration::ZERO, true);
+    let mut open = todo("1", A);
+    open.spec.auto_done = true;
+    let finished = Todo { done_at: Some(UNIX), ..open.clone() };
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&open), &[idle(A)], secs(t, 2)), []);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&finished), &[], secs(t, 4)), [done(A)]);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&finished), &[], secs(t, 6)), []);
+
+    let mut rounds = Rounds::new(Duration::ZERO, true);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&open), &[idle(A)], secs(t, 2)), []);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&open), &[idle(A)], secs(t, 30)), []);
+    let late = secs(t, 2) + AUTO_DONE_WAIT;
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&open), &[idle(A)], late), [done(A)]);
+    assert_eq!(
+        round(&mut rounds, std::slice::from_ref(&finished), &[], late + Duration::from_secs(2)),
+        [Action::Cancel(A)]
+    );
+
+    // 在干活、在等回答时被用户标完成：不推。
+    let mut rounds = Rounds::new(Duration::ZERO, true);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&finished), &[working(A)], secs(t, 2)), []);
+    let mut rounds = Rounds::new(Duration::ZERO, true);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    round(&mut rounds, std::slice::from_ref(&open), &[blocked(A)], secs(t, 2));
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&finished), &[blocked(A)], secs(t, 4)), []);
+
+    // 开始后宽限期里就干完、还算进行中时被标完成：也推。
+    let fresh = Todo { started: Some(UNIX - 5), ..open };
+    let mut rounds = Rounds::new(Duration::ZERO, true);
+    round(&mut rounds, std::slice::from_ref(&fresh), &[working(A)], t);
+    round(&mut rounds, std::slice::from_ref(&fresh), &[idle(A)], secs(t, 2));
+    assert_eq!(round(&mut rounds, &[finished], &[], secs(t, 4)), [done(A)]);
+}
