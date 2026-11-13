@@ -5,7 +5,7 @@ description: runode 升级 vendor 依赖的流程：同步 ghostty 上游（vend
 
 # 升级 vendor 依赖
 
-runode 的 vendor 下有两个子模块，另外 GPUI 取自 crates.io、原样使用。各自的来历和不变量写在根 `AGENTS.md`（"终端仿真用的 libghostty-vt…"、"同步 ghostty 上游时…"、"GPUI 取自…"三段），动手前先读那三段，这里不重复，只讲怎么升、怎么核对。
+runode 的 vendor 下有两个子模块，另外 GPUI 取自 crates.io、原样使用。各自的来历和不变量写在 `vendor/AGENTS.md`（"终端仿真用的 libghostty-vt…"、"同步 ghostty 上游时…"、"GPUI 取自…"三段），动手前先读那三段，这里不重复，只讲怎么升、怎么核对。
 
 | 目录 | 是什么 | 上游 | runode 的改动在哪 |
 | --- | --- | --- | --- |
@@ -36,7 +36,7 @@ runode 的 vendor 下有两个子模块，另外 GPUI 取自 crates.io、原样�
 - 只修了一部分时，不要两套都留：在上游修法之上把我们还需要的那一点重写成一个更小的提交，并在报告里写明上游修了哪部分、我们还补了哪部分。
 - 上游的修法和我们的意图相反（比如上游认定那是对的行为），或者看不出是不是同一件事时，停下来问用户，不要自己挑。
 
-libghostty-rs 也是同一个道理，规矩在 `AGENTS.md`：Uzaaft 上游已经有了同样能力、只是名字或形状不同的，删掉 fork 上我们的提交，**改 runode 去适应上游的接口**，不改 fork 去迁就 runode。gpui 同理，上游做了 `desktop` 里绕着平台层做的同一件事，就删掉 `desktop` 里的那段、改用上游的。
+libghostty-rs 也是同一个道理，规矩在 `vendor/AGENTS.md`：Uzaaft 上游已经有了同样能力、只是名字或形状不同的，删掉 fork 上我们的提交，**改 runode 去适应上游的接口**，不改 fork 去迁就 runode。gpui 同理，上游做了 `desktop` 里绕着平台层做的同一件事，就删掉 `desktop` 里的那段、改用上游的。
 
 还有第三处容易漏的：runode 自己的代码里有些地方跟着 libghostty 的现状写，上游一变它们就该跟着变。有三种：
 

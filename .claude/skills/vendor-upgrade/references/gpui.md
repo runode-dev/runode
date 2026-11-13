@@ -23,7 +23,7 @@ done
 
 ## 2. 核对上游
 
-**`desktop` 里绕着平台层做的事，上游做了没有**：`AGENTS.md` 的 GPUI 一段列着这些地方。逐个看新版平台层（`gpui-pre-macos` 的 `window.rs`、渲染器在 `gpui-pre-apple`）有没有自己做同样的事，比如自己关了 `displaySyncEnabled`，或者 `prompt` 在第一个按钮是取消时把回车和焦点留给它。做了就删掉 `desktop` 里的那段、改用上游的；看不准的问用户。
+**`desktop` 里绕着平台层做的事，上游做了没有**：`vendor/AGENTS.md` 的 GPUI 一段列着这些地方。逐个看新版平台层（`gpui-pre-macos` 的 `window.rs`、渲染器在 `gpui-pre-apple`）有没有自己做同样的事，比如自己关了 `displaySyncEnabled`，或者 `prompt` 在第一个按钮是取消时把回车和焦点留给它。做了就删掉 `desktop` 里的那段、改用上游的；看不准的问用户。
 
 **`vendor/gpui-pre-macos` 里的补丁，上游修了没有**：`git log --oneline -- vendor/gpui-pre-macos` 列出原样拷进来之后的修改提交，逐个看新版 `gpui-pre-macos` 有没有同样的处理（比如虚拟机里不用 `CAMetalDisplayLink`）。修了的那个提交不再搬；都修了就删掉 `vendor/gpui-pre-macos` 和根 `Cargo.toml` 里的 `[patch.crates-io]`，回到原样使用。
 

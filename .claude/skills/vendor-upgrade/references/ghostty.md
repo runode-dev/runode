@@ -132,7 +132,7 @@ GHOSTTY_SOURCE_DIR=$R/vendor/ghostty cargo test
 
 摸底里"Uzaaft 上游新增 N 个提交"不是 0 时：
 
-1. 读这些提交，和 fork 上我们的提交逐个比对（`git cherry` 标 `-` 的直接删）。上游加了和我们一样的能力、只是名字或形状不同的，**删掉我们的提交、改 runode 去用上游的接口**，这是 `AGENTS.md` 定的规矩。
+1. 读这些提交，和 fork 上我们的提交逐个比对（`git cherry` 标 `-` 的直接删）。上游加了和我们一样的能力、只是名字或形状不同的，**删掉我们的提交、改 runode 去用上游的接口**，这是 `vendor/AGENTS.md` 定的规矩。
 2. 上游新加的、我们没有的接口，记进报告的"新功能"。
 3. 把保留的提交挪到 `upstream/master` 上：`git checkout -B main upstream/master`，再按顺序 cherry-pick 保留的提交。`GHOSTTY_COMMIT` 相关的 `chore` 提交和上游的 pin 冲突时，以我们这次要的 `<new>` 为准。
 4. 同样跑 `cargo test`。
