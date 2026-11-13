@@ -31,7 +31,11 @@ impl LocalRequests for PushRequests<'_> {
         };
         Some(match self.register(token.as_deref(), *env, bundle, machine, machine_name) {
             Ok(()) => HostMsg::Done { req: *req },
-            Err(message) => HostMsg::Error { req: Some(*req), id: None, message, reason: None },
+            Err(message) => {
+                // 原因只回给了手机，电脑这边也留一条，推送登记不上时查得到。
+                tracing::warn!("refused a push registration from remote device {}: {message}", self.device);
+                HostMsg::Error { req: Some(*req), id: None, message, reason: None }
+            }
         })
     }
 }
