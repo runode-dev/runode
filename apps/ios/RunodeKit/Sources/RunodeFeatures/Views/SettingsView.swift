@@ -375,7 +375,7 @@
                 Button("删除手机上的模型", role: .destructive) { dictation.remove() }
             case .idle, .failed:
                 LabeledContent("手机上的模型", value: String(localized: "未下载，约 \(size)"))
-                Button("下载") { dictation.startDownload() }
+                Button("下载", systemImage: "arrow.down.circle") { dictation.startDownload() }
                 if case .failed(let message) = dictation.download {
                     Label(message, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)

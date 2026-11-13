@@ -8,7 +8,7 @@ use runode_types::{agent::AgentKind, speech::DictationCloud};
 
 use super::{
     Commit, SettingsView,
-    controls::{Cards, Press, dropdown, error_text, input_box, row, swatch},
+    controls::{Cards, Press, dropdown, error_text, input_box, row, stacked, swatch},
     picker::{PickItem, PickTarget},
 };
 use crate::{
@@ -614,12 +614,14 @@ impl SettingsView {
                     })
             });
             let control = div().flex().items_center().gap(px(4.)).children(remove).child(picker);
-            out = out.child(row(title, hint, control, reset, error, theme));
+            let font = row(title, hint, control, reset, error, theme);
+            // 最后一个字体和下面的「添加」按钮是一起的，线画在按钮底下。
+            out = out.child(if ix + 1 == count { font.border_b_0() } else { font });
         }
         let add = Button::new("add-font", rust_i18n::t!("settings.add_fallback_font").into_owned())
             .variant(ButtonVariant::Outline)
             .on_press(cx, move |this, window, cx| this.open_font_picker(count, None, window, cx));
-        out.child(div().py(px(10.)).flex().child(add))
+        out.border_b_1().border_color(theme.control_border.opacity(0.6)).child(div().pb(px(12.)).flex().child(add))
     }
 
     fn open_font_picker(&mut self, ix: usize, current: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
@@ -729,12 +731,12 @@ impl SettingsView {
             .collect();
         let reset = self.reset(KEY, cx);
         let error = self.errors.get(KEY).cloned();
-        div().flex().flex_col().child(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, error, theme)).child(
+        stacked(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, error, theme), theme).child(
             div()
                 .id(KEY)
                 .role(gpui::Role::Group)
                 .aria_label(key_title(KEY))
-                .py(px(10.))
+                .pb(px(12.))
                 .flex()
                 .flex_wrap()
                 .gap(px(6.))
@@ -747,8 +749,7 @@ impl SettingsView {
         let files = self.file.values(KEY);
         let reset = self.reset(KEY, cx);
         let error = self.errors.get(KEY).cloned();
-        let mut out =
-            div().flex().flex_col().child(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, error, theme));
+        let mut out = stacked(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, error, theme), theme);
         // 末尾总留一个空的，在里面打字就是加一行。
         let last = files.len();
         for ix in 0..=last {

@@ -1270,6 +1270,7 @@ github_actions:
   refresh: Refresh
   missing: gh was not found. Install it with brew install gh, sign in with gh auth login, then press Refresh.
   login_needed: gh isn't signed in to GitHub, or its sign-in has expired. Sign in in the terminal; this page picks it up by itself.
+  no_remote: This repository has no remote yet. Add one that points to GitHub, then press Refresh.
   login: Sign In in Terminal
   resize: "Resize %{name}"
   loading: Loading…

@@ -18,6 +18,8 @@ pub const PROGRAM: &str = "gh";
 pub(crate) const MISSING: &str = "gh not found";
 /// gh 没登录或者令牌失效时 `Gh` 返回的错，页上据此请用户登录。
 pub(crate) const LOGIN: &str = "gh auth required";
+/// 仓库没有远端时 `Gh` 返回的错，页上据此说明要先加远端。
+pub(crate) const NO_REMOTE: &str = "no git remotes found";
 /// gh 一次最多跑多久，到点连同它拉起的进程一起结束：gh 或凭据 helper 卡住时查询报错，不会一直在读。
 const TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -174,11 +176,15 @@ fn needs_login(code: Option<i32>, stderr: &[u8]) -> bool {
     code == Some(4) || String::from_utf8_lossy(stderr).contains("HTTP 401")
 }
 
-/// gh 出错时 stderr 的第一行就是原因（没登录时是「请运行 gh auth login」）。
+/// gh 出错时 stderr 的第一行就是原因（没登录时是「请运行 gh auth login」）。没有远端时各个子命令在
+/// 这句话前面加的前缀不一样，一律归成 `NO_REMOTE`。
 fn failure(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
-    let line = text.lines().map(str::trim).find(|line| !line.is_empty());
-    line.map_or_else(|| format!("{PROGRAM} failed"), str::to_owned)
+    match text.lines().map(str::trim).find(|line| !line.is_empty()) {
+        Some(line) if line.ends_with(NO_REMOTE) => NO_REMOTE.to_owned(),
+        Some(line) => line.to_owned(),
+        None => format!("{PROGRAM} failed"),
+    }
 }
 
 #[cfg(test)]
@@ -208,6 +214,12 @@ mod tests {
             "To get started with GitHub CLI, please run:  gh auth login"
         );
         assert_eq!(failure(b""), "gh failed");
+    }
+
+    #[test]
+    fn no_remote_is_one_error_whatever_the_prefix() {
+        assert_eq!(failure(b"no git remotes found\n"), NO_REMOTE);
+        assert_eq!(failure(b"failed to determine base repo: no git remotes found\n"), NO_REMOTE);
     }
 
     #[test]

@@ -59,7 +59,19 @@
         /// 实心的主按钮：底是强调色，字用 `systemBackground`，和首页的「配对电脑」一样。系统的
         /// `borderedProminent` 字固定是白的，强调色是主题的前景色，深色主题下就成了白底白字。
         func prominentButtonStyle() -> some View {
-            buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground))
+            modifier(ProminentButton())
+        }
+    }
+
+    private struct ProminentButton: ViewModifier {
+        @Environment(\.isEnabled) private var isEnabled
+
+        /// 不可用时系统把底换成灰的填充色，字跟着换成次要色，不留 `systemBackground`：深色主题下
+        /// 那是灰底上的黑字，看不清。
+        func body(content: Content) -> some View {
+            content
+                .buttonStyle(.borderedProminent)
+                .foregroundStyle(isEnabled ? AnyShapeStyle(Color(.systemBackground)) : AnyShapeStyle(.secondary))
         }
     }
 

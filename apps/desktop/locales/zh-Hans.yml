@@ -1270,6 +1270,7 @@ github_actions:
   refresh: 刷新
   missing: 没有找到 gh。在终端里运行 brew install gh 装好、gh auth login 登录后按刷新。
   login_needed: gh 还没登录 GitHub，或者登录已经失效。在终端里登录后，这一页会自己刷新。
+  no_remote: 这个仓库还没有远端。加上指向 GitHub 的远端后按刷新。
   login: 在终端里登录
   resize: "调整「%{name}」的高度"
   loading: 正在读取…

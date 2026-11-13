@@ -371,11 +371,17 @@
         /// 收到的为空时开普通终端，否则起这家 agent。
         let onSpawn: (InstalledAgent?) -> Void
         let onRename: () -> Void
+        @ScaledMetric(relativeTo: .subheadline) private var iconWidth: CGFloat = 24
 
         var body: some View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
+                // 图标单独一列，目录和「没有终端」才和标题的字左对齐，不缩回图标底下。
+                Image(systemName: Presentation.sectionSymbol(section))
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: iconWidth)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Label(Presentation.sectionTitle(section), systemImage: Presentation.sectionSymbol(section))
+                    Text(Presentation.sectionTitle(section))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
                         .accessibilityAddTraits(.isHeader)

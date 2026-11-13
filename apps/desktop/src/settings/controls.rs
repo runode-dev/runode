@@ -115,6 +115,11 @@ pub(super) fn row(
         .child(div().flex_none().flex().items_center().gap(px(6.)).children(reset).child(control))
 }
 
+/// 标题行下面还接着内容的一项设置：分隔线画在整项底下，`header` 自己那条去掉，标题和它的内容之间不隔线。
+pub(super) fn stacked(header: Div, theme: &Theme) -> Div {
+    div().flex().flex_col().border_b_1().border_color(theme.control_border.opacity(0.6)).child(header.border_b_0())
+}
+
 /// 上次写回失败的原因，用 `Role::Label` 报给辅助工具；`id` 按它属于哪一项取，不按错误文字取，几项同样的
 /// 错误才不会撞 id。
 pub(super) fn error_text(id: impl Into<ElementId>, err: String, theme: &Theme) -> Stateful<Div> {

@@ -12,7 +12,7 @@ use gpui::{Axis, Context, Div, FontWeight, Role, Stateful, div, prelude::*, px};
 use runode_protocol::{ClientMsg, HostMsg, todo::Todo};
 
 use super::{
-    Kanban, Page, dialog, icon_button, label_row, named,
+    Kanban, Page, agent_text, dialog, icon_button, label_row, named,
     store::{self, TodoData},
 };
 
@@ -144,7 +144,7 @@ impl Kanban {
         let details: Vec<String> = [
             (todo.number > 0).then(|| format!("#{}", todo.number)),
             Some(self.place_name(&todo.spec.dir)),
-            Some(todo.spec.agent.clone()),
+            Some(agent_text(&todo.spec.agent)),
             todo.branch.clone(),
             todo.done_at.map(|at| rust_i18n::t!("kanban.done_at", time = dialog::full_time(at)).into_owned()),
             schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned()),

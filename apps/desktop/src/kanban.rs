@@ -52,6 +52,7 @@ use gpui::{
     FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent, Render, Role, ScrollHandle, SharedString, Stateful,
     Subscription, Window, canvas, div, ease_out_quint, point, prelude::*, px, svg,
 };
+use runode_agent::models::Pick;
 use runode_protocol::{
     ClientMsg, HostMsg, SessionId,
     todo::{Column, Todo},
@@ -731,6 +732,13 @@ fn label_row(id: impl Into<gpui::ElementId>, text: String, color: Hsla) -> State
     div().id(id).aria_static_text(text.clone()).text_size(FontSize::Small).text_color(color).child(text)
 }
 
+/// 任务的 agent 写在卡片上的样子：对话框里挑出来的写名字，挑了模型、强度的接在后面；自己写的命令照原样。
+fn agent_text(command: &str) -> String {
+    let Some(pick) = Pick::parse(command) else { return command.to_owned() };
+    let parts = [Some(pick.launcher().label), pick.model.as_deref(), pick.effort.as_deref()];
+    parts.into_iter().flatten().collect::<Vec<_>>().join(" · ")
+}
+
 fn column_name(column: Column) -> String {
     match column {
         Column::Todo => rust_i18n::t!("kanban.column.todo"),
@@ -771,5 +779,14 @@ mod tests {
             queued: false,
             after: None,
         }
+    }
+
+    #[test]
+    fn agent_text_names_a_picked_agent() {
+        assert_eq!(super::agent_text("claude"), "Claude");
+        assert_eq!(super::agent_text("claude --model opus"), "Claude · opus");
+        assert_eq!(super::agent_text("claude --model opus --effort high"), "Claude · opus · high");
+        assert_eq!(super::agent_text("claude --effort high"), "Claude · high");
+        assert_eq!(super::agent_text("my-agent --flag"), "my-agent --flag");
     }
 }

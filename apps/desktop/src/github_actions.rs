@@ -336,12 +336,13 @@ impl ActionsPanel {
         }
     }
 
-    /// 页上要重读的数据：上一帧树里用到的，加上等着登录或找不到 gh 的。整页换成登录说明或装 gh 的说明时
-    /// 树没排，`shown` 可能是空的；这两种错只要缓存里还有一份（比如固定工作流取到一半摘了 pin）整页就一直
-    /// 是说明，所以都要接着读，登好、装好以后页才恢复得过来。
+    /// 页上要重读的数据：上一帧树里用到的，加上等着登录、找不到 gh 或仓库没有远端的。整页换成这几种说明时
+    /// 树没排，`shown` 可能是空的；这几种错只要缓存里还有一份（比如固定工作流取到一半摘了 pin）整页就一直
+    /// 是说明，所以都要接着读，登好、装好、加好远端以后页才恢复得过来。
     fn actions_queries(&self) -> Vec<Query> {
-        let blank =
-            self.data.iter().filter(|(_, result)| matches!(result, Err(err) if err == gh::LOGIN || err == gh::MISSING));
+        let blank = self.data.iter().filter(
+            |(_, result)| matches!(result, Err(err) if err == gh::LOGIN || err == gh::MISSING || err == gh::NO_REMOTE),
+        );
         let mut queries: Vec<Query> = self.shown.iter().cloned().collect();
         queries.extend(blank.map(|(query, _)| query.clone()).filter(|query| !self.shown.contains(query)));
         queries
@@ -562,6 +563,11 @@ impl ActionsPanel {
         let login = self.data.values().any(|result| matches!(result, Err(err) if err == gh::LOGIN));
         if login {
             return shell.child(self.render_actions_login(cx));
+        }
+        // 没有远端时三段都读不出来，整页说一遍要先加远端。
+        let no_remote = self.data.values().any(|result| matches!(result, Err(err) if err == gh::NO_REMOTE));
+        if no_remote {
+            return shell.child(panel_message(rust_i18n::t!("github_actions.no_remote").into_owned(), cx));
         }
         let error = self.error.clone().map(|error| {
             div()

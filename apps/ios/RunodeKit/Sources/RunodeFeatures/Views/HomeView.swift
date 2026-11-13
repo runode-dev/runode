@@ -601,27 +601,30 @@
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
                 Button(action: onOpen) {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(Presentation.sessionTitle(item.session))
-                                .font(.headline)
-                                .lineLimit(2)
-                            AgentBadge(agent: item.session.meta.agent, showsState: false)
-                            if let place {
-                                Text(place)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.head)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(Presentation.sessionTitle(item.session))
+                                    .font(.headline)
+                                    .lineLimit(2)
+                                AgentBadge(agent: item.session.meta.agent, showsState: false)
+                                if let place {
+                                    Text(place)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.head)
+                                }
                             }
-                            let preview = item.list.previews[item.session.id] ?? []
-                            if !preview.isEmpty {
-                                ScreenPreview(lines: preview)
-                            }
+                            Spacer(minLength: 0)
+                            DisclosureChevron()
+                                .padding(.top, 4)
                         }
-                        Spacer(minLength: 0)
-                        DisclosureChevron()
-                            .padding(.top, 4)
+                        // 预览和下面的按键、输入框一样占满卡片的宽，不让右上角的箭头挤窄。
+                        let preview = item.list.previews[item.session.id] ?? []
+                        if !preview.isEmpty {
+                            ScreenPreview(lines: preview)
+                        }
                     }
                     .contentShape(Rectangle())
                     .accessibilityElement(children: .combine)

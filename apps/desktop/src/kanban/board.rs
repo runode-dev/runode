@@ -30,7 +30,7 @@ use runode_protocol::{
 use runode_types::agent::Agent;
 
 use super::{
-    Kanban, KanbanEvent, Page, RING_WIDTH, card_shadow, column_name,
+    Kanban, KanbanEvent, Page, RING_WIDTH, agent_text, card_shadow, column_name,
     dialog::Editing,
     history_link, icon_button, label_row, named, needs_you_badge,
     store::{self, Step, TodoData},
@@ -424,7 +424,7 @@ impl Kanban {
         let schedule = todo.schedule.as_ref().and_then(|id| data.schedules.iter().find(|s| &s.id == id));
         let from = schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned());
         let footer: Vec<String> = [
-            agent.is_none().then(|| todo.spec.agent.clone()),
+            agent.is_none().then(|| agent_text(&todo.spec.agent)),
             todo.started.map(|at| short_time(at, now)),
             from.clone(),
         ]
@@ -433,7 +433,7 @@ impl Kanban {
         .collect();
         // 卡片上只写时间，窄列里放得下；悬停时说清是什么时间。
         let footer_tip: Vec<String> = [
-            agent.is_none().then(|| todo.spec.agent.clone()),
+            agent.is_none().then(|| agent_text(&todo.spec.agent)),
             todo.started.map(|at| rust_i18n::t!("kanban.started_at", time = short_time(at, now)).into_owned()),
             from,
         ]
@@ -599,7 +599,7 @@ impl Kanban {
         let agent = session.and_then(|info| info.meta.agent);
         let place = self.place_name(&todo.spec.dir);
         let schedule = todo.schedule.as_ref().and_then(|id| data.schedules.iter().find(|s| &s.id == id));
-        let status = agent.map_or_else(|| todo.spec.agent.clone(), self.marks.describe);
+        let status = agent.map_or_else(|| agent_text(&todo.spec.agent), self.marks.describe);
         let started =
             todo.started.map(|at| rust_i18n::t!("kanban.started_at", time = short_time(at, now)).into_owned());
         let from = schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned());

@@ -16,7 +16,7 @@ use runode_protocol::{
 };
 
 use super::{
-    Kanban, Page, ToastState, column_name,
+    Kanban, Page, ToastState, agent_text, column_name,
     dialog::Editing,
     history_link, icon_button, label_row, named,
     store::{self, TodoData},
@@ -158,7 +158,7 @@ impl Kanban {
         let place = self.place_name(&schedule.spec.dir);
         let worktree = schedule.spec.worktree.then(|| rust_i18n::t!("kanban.worktree_on").into_owned());
         let details: Vec<String> =
-            [Some(place), Some(schedule.spec.agent.clone()), worktree].into_iter().flatten().collect();
+            [Some(place), Some(agent_text(&schedule.spec.agent)), worktree].into_iter().flatten().collect();
         let runs = recent_runs(&data.todos, &schedule.id);
         let mut run_rows: Vec<AnyElement> = runs
             .iter()
@@ -225,6 +225,8 @@ impl Kanban {
             icon_button("todo-schedule-remove", TRASH_ICON, label)
                 .on_press(cx, move |this, window, cx| this.remove_schedule(id.clone(), window, cx))
         };
+        // 停用的三行字各调淡一档，一眼和还在排的分开；下面的记录链接照样能点，不跟着淡。
+        let (title_alpha, rule_alpha, details_alpha) = if schedule.paused { (0.6, 0.5, 0.4) } else { (1., 0.75, 0.55) };
         div()
             .id(named("todo-schedule", &schedule.id))
             .role(Role::ListItem)
@@ -243,14 +245,23 @@ impl Kanban {
                     .flex()
                     .flex_col()
                     .gap(px(4.))
-                    .child(div().truncate().font_weight(FontWeight::MEDIUM).child(schedule.spec.title.clone()))
                     .child(
-                        div().text_size(FontSize::Small).text_color(fg.opacity(0.75)).child(format!("{rule} · {next}")),
+                        div()
+                            .truncate()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(fg.opacity(title_alpha))
+                            .child(schedule.spec.title.clone()),
                     )
                     .child(
                         div()
                             .text_size(FontSize::Small)
-                            .text_color(fg.opacity(0.55))
+                            .text_color(fg.opacity(rule_alpha))
+                            .child(format!("{rule} · {next}")),
+                    )
+                    .child(
+                        div()
+                            .text_size(FontSize::Small)
+                            .text_color(fg.opacity(details_alpha))
                             .truncate()
                             .child(details.join(" · ")),
                     )

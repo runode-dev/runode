@@ -1270,6 +1270,7 @@ github_actions:
   refresh: 重新整理
   missing: 找不到 gh。在終端機裡執行 brew install gh 安裝、gh auth login 登入後按重新整理。
   login_needed: gh 還沒登入 GitHub，或者登入已經失效。在終端機裡登入後，這一頁會自己重新整理。
+  no_remote: 這個儲存庫還沒有遠端。加上指向 GitHub 的遠端後按重新整理。
   login: 在終端機裡登入
   resize: "調整「%{name}」的高度"
   loading: 正在讀取…
