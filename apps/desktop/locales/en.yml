@@ -1111,6 +1111,10 @@ kanban:
   reopen: "Mark as Not Done"
   edit: Edit Task
   in_review: "In review"
+  failed: "Failed"
+  queued: "Queued"
+  queued_after: "After #%{number}"
+  paused: "Paused"
   create_pr: "Push Branch and Open PR"
   remove_todo: "Delete Task"
   remove_title: "Delete “%{title}”?"
@@ -1122,6 +1126,8 @@ kanban:
   save_and_start: Save & Start
   edit_schedule: Edit Schedule
   remove_schedule: "Delete Schedule"
+  pause_schedule: "Pause Schedule"
+  resume_schedule: "Resume Schedule"
   remove_schedule_detail: "Its prompt and schedule are deleted too and can't be recovered."
   schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit Runode or log in again, turn on “Keep sessions after quitting” and “Run the host in the background at login” in Settings."
   schedules_open_settings: Open Settings
@@ -1170,6 +1176,7 @@ kanban:
     weekly: "%{time} on %{days}"
     every_hours: "Every %{count} h"
     every_minutes: "Every %{count} min"
+    cron: "cron %{expr}"
     unknown: Unknown schedule
   first_weekday: "0"
   weekday:

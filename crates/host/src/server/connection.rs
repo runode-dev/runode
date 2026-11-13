@@ -376,6 +376,7 @@ impl Connection {
             handoff: HANDOFF_FORMAT,
             keep_awake: true,
             todos: true,
+            board: runode_protocol::todo::BOARD_LEVEL,
             shells: true,
             desktops,
             os: std::env::consts::OS.to_owned(),
@@ -591,6 +592,20 @@ impl Connection {
             }
             ClientMsg::RemoveSchedule { req, id } => {
                 self.todos(req, "host-remove-schedule", move |shared| shared.remove_schedule(req, &id));
+            }
+            ClientMsg::ReportTodo { req, id, outcome, result } => {
+                self.todos(req, "host-report-todo", move |shared| shared.report_todo(req, &id, outcome, &result));
+            }
+            ClientMsg::QueueTodo { req, id, queued, after } => {
+                self.todos(req, "host-queue-todo", move |shared| {
+                    shared.queue_todo(req, &id, queued, after.as_deref())
+                });
+            }
+            ClientMsg::PauseSchedule { req, id, paused } => {
+                self.todos(req, "host-pause-schedule", move |shared| shared.pause_schedule(req, &id, paused));
+            }
+            ClientMsg::SetMaxRunning { req, max_running } => {
+                self.todos(req, "host-max-running", move |shared| shared.set_max_running(req, max_running));
             }
             ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, *reply),
             // 读写剪贴板是宿主替会话里的程序请界面办的，前端不能直接要。

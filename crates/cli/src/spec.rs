@@ -33,8 +33,18 @@ pub(crate) fn subcommands(command: &str) -> &'static [(&'static str, &'static st
             ("start", "Start a task"),
             ("done", "Mark a task done"),
             ("rm", "Remove a task"),
+            ("report", "Report how your own task ended"),
+            ("queue", "Let Runode start a task when there is room"),
+            ("unqueue", "Take a task out of the queue"),
+            ("limit", "Show or set how many agents work at once"),
         ],
-        "schedule" => &[("add", "Add a schedule"), ("list", "List the schedules"), ("rm", "Remove a schedule")],
+        "schedule" => &[
+            ("add", "Add a schedule"),
+            ("list", "List the schedules"),
+            ("rm", "Remove a schedule"),
+            ("pause", "Stop a schedule from firing"),
+            ("resume", "Let a paused schedule fire again"),
+        ],
         "remote" => &[
             ("pair", "Pair a phone or another computer"),
             ("devices", "List the paired devices"),
@@ -135,7 +145,10 @@ mod tests {
                 }
             }
         }
-        assert_eq!(parse(&words("todo frob")).unwrap_err(), "todo knows add, list, show, start, done and rm, not frob");
+        assert_eq!(
+            parse(&words("todo frob")).unwrap_err(),
+            "todo knows add, list, show, start, done, rm, report, queue, unqueue and limit, not frob"
+        );
     }
 
     #[test]

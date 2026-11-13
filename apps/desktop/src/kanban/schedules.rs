@@ -5,7 +5,7 @@ use crate::ui::{
     a11y::Press,
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{FontSize, scaled},
-    icons::{PENCIL_ICON, PLUS_ICON, TRASH_ICON},
+    icons::{BAN_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, TRASH_ICON},
     scrollbar::scrollbar,
     theme::ActiveTheme as _,
 };
@@ -141,10 +141,11 @@ impl Kanban {
         let fg = cx.theme().foreground;
         let hover_bg = cx.theme().accent;
         let rule = describe_when(&schedule.when);
-        let next = schedule.next_fire.map_or_else(
-            || rust_i18n::t!("kanban.no_next").into_owned(),
-            |at| rust_i18n::t!("kanban.next", time = short_time(at, now)).into_owned(),
-        );
+        let next = match schedule.next_fire {
+            _ if schedule.paused => rust_i18n::t!("kanban.paused").into_owned(),
+            Some(at) => rust_i18n::t!("kanban.next", time = short_time(at, now)).into_owned(),
+            None => rust_i18n::t!("kanban.no_next").into_owned(),
+        };
         // 宿主到点时看的是没完成的里面最后开出的那张。
         let held = schedule.next_fire.is_some()
             && data
@@ -201,6 +202,18 @@ impl Kanban {
                 this.open_dialog(true, Some(Editing::Schedule(schedule.clone())), window, cx)
             })
         };
+        let pause = {
+            let (id, paused) = (schedule.id.clone(), !schedule.paused);
+            let (icon, label) = if paused {
+                (BAN_ICON, rust_i18n::t!("kanban.pause_schedule").into_owned())
+            } else {
+                (PLAY_ICON, rust_i18n::t!("kanban.resume_schedule").into_owned())
+            };
+            icon_button("todo-schedule-pause", icon, label).on_press(cx, move |_, _, cx| {
+                let id = id.clone();
+                Self::send_todos(vec![Box::new(move |req| ClientMsg::PauseSchedule { req, id, paused })], cx)
+            })
+        };
         let remove = {
             let id = schedule.id.clone();
             let label = rust_i18n::t!("kanban.remove_schedule").into_owned();
@@ -238,7 +251,7 @@ impl Kanban {
                     )
                     .child(div().pt(px(4.)).flex().flex_wrap().items_center().gap(px(4.)).children(run_rows)),
             )
-            .child(div().flex_none().flex().items_start().gap(px(2.)).child(edit).child(remove))
+            .child(div().flex_none().flex().items_start().gap(px(2.)).child(pause).child(edit).child(remove))
     }
 }
 

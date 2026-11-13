@@ -3,7 +3,10 @@
 use std::{net::IpAddr, path::PathBuf, time::Duration};
 
 use runode_autostart::Kind;
-use runode_protocol::{Placement, todo::When};
+use runode_protocol::{
+    Placement,
+    todo::{Outcome, When},
+};
 use runode_todo::LocalTime;
 use runode_types::input::parse_key_list;
 
@@ -89,16 +92,21 @@ pub(crate) enum Command {
     ServiceStatus,
     /// 让这个构建的宿主接手正在跑的宿主的会话。
     ServiceUpgrade,
-    /// 往看板上加一张任务；`cwd` 没给时是当前目录，`agent` 没给时是 `runode_protocol::todo::DEFAULT_AGENT`。
+    /// 往看板上加一张任务。
     TodoAdd {
-        title: String,
-        prompt: String,
-        cwd: Option<PathBuf>,
-        agent: Option<String>,
-        /// 要新开的工作树。
-        worktree: bool,
-        auto_done: bool,
+        spec: Spec,
         start: bool,
+        /// 排进队里，`Queue::after` 给了时等那张任务先做完。
+        queue: Option<Queue>,
+    },
+    /// `todo queue`、`todo unqueue`：`queue` 为空时不再排队。
+    TodoQueue {
+        id: String,
+        queue: Option<Queue>,
+    },
+    /// 打印看板的并发上限，给了 `limit` 时改成它（0 是不限）。
+    TodoLimit {
+        limit: Option<u32>,
     },
     TodoList {
         json: bool,
@@ -117,14 +125,14 @@ pub(crate) enum Command {
     TodoRemove {
         id: String,
     },
-    /// 加一个定时；同 `TodoAdd`，只是工作树默认不开（`worktree` 是用户要了）。
+    /// 报自己所在的任务会话的结局和结果。
+    TodoReport {
+        outcome: Outcome,
+        text: Text,
+    },
+    /// 加一个定时；工作树默认不开（`Spec::worktree` 是用户要了）。
     ScheduleAdd {
-        title: String,
-        prompt: String,
-        cwd: Option<PathBuf>,
-        agent: Option<String>,
-        worktree: bool,
-        auto_done: bool,
+        spec: Spec,
         timing: Timing,
     },
     ScheduleList {
@@ -132,6 +140,11 @@ pub(crate) enum Command {
     },
     ScheduleRemove {
         id: String,
+    },
+    /// `schedule pause`、`schedule resume`。
+    SchedulePause {
+        id: String,
+        paused: bool,
     },
     /// 打印给这种 shell 装的补全脚本。
     Completions {
@@ -144,6 +157,32 @@ pub(crate) enum Shell {
     Bash,
     Fish,
     Zsh,
+}
+
+/// `todo add`、`schedule add` 共有的部分。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Spec {
+    pub(crate) title: String,
+    pub(crate) prompt: String,
+    /// 没给时是当前目录。
+    pub(crate) cwd: Option<PathBuf>,
+    /// 没给时是 `runode_protocol::todo::DEFAULT_AGENT`。
+    pub(crate) agent: Option<String>,
+    pub(crate) model: Option<String>,
+    pub(crate) effort: Option<String>,
+    /// 要新开的工作树。
+    pub(crate) worktree: bool,
+    pub(crate) skills: Vec<String>,
+    pub(crate) auto: bool,
+    pub(crate) auto_done: bool,
+    /// 分钟。
+    pub(crate) time_limit: Option<u32>,
+}
+
+/// 排队：`after` 是要先等的任务（标识或编号）。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Queue {
+    pub(crate) after: Option<String>,
 }
 
 /// `schedule add` 什么时候到点。
@@ -240,6 +279,31 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             "--start" => flags.start = true,
             "--worktree" => flags.worktree = true,
             "--auto-done" => flags.auto_done = true,
+            "--auto" => flags.auto = true,
+            "--model" => flags.model = Some(value(&mut rest, arg)?.to_owned()),
+            "--effort" => flags.effort = Some(value(&mut rest, arg)?.to_owned()),
+            "--skill" => flags.skills.push(value(&mut rest, arg)?.to_owned()),
+            "--queue" => flags.queue = true,
+            "--after" => flags.after = Some(value(&mut rest, arg)?.to_owned()),
+            "--cron" => {
+                let expr = value(&mut rest, arg)?;
+                if !runode_todo::valid_cron(expr) {
+                    return Err(format!(
+                        "--cron takes five fields: minute hour day month weekday, like \"30 9 * * 1-5\", not {expr:?}"
+                    ));
+                }
+                flags.cron = Some(expr.to_owned());
+            }
+            "--time-limit" => {
+                let minutes = value(&mut rest, arg)?;
+                flags.time_limit = Some(
+                    minutes
+                        .parse()
+                        .ok()
+                        .filter(|&n: &u32| n > 0)
+                        .ok_or_else(|| format!("--time-limit takes minutes, not {minutes}"))?,
+                );
+            }
             "--at" => {
                 let at = value(&mut rest, arg)?;
                 flags.at =
@@ -442,15 +506,33 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     if words.is_empty() {
                         return Err("todo add needs a TITLE".into());
                     }
-                    Command::TodoAdd {
-                        title: words.join(" "),
-                        prompt: flags.prompt.take().unwrap_or_default(),
-                        cwd: flags.cwd.take(),
-                        agent: flags.agent.take(),
-                        worktree: !std::mem::take(&mut flags.no_worktree),
-                        auto_done: std::mem::take(&mut flags.auto_done),
-                        start: std::mem::take(&mut flags.start),
+                    let worktree = !std::mem::take(&mut flags.no_worktree);
+                    let start = std::mem::take(&mut flags.start);
+                    let queue = flags.queue();
+                    if start && queue.is_some() {
+                        return Err("give only one of --start and --queue or --after".into());
                     }
+                    Command::TodoAdd { spec: flags.spec(words, worktree), start, queue }
+                }
+                "queue" | "unqueue" => {
+                    let name = format!("todo {what}");
+                    no_more(words, 1, &name)?;
+                    let id = words.first().ok_or_else(|| format!("{name} needs an ID"))?.clone();
+                    let queue = if what == "queue" {
+                        flags.queue = true;
+                        flags.queue()
+                    } else {
+                        None
+                    };
+                    Command::TodoQueue { id, queue }
+                }
+                "limit" => {
+                    no_more(words, 1, "todo limit")?;
+                    let limit = words
+                        .first()
+                        .map(|word| word.parse().map_err(|_| format!("todo limit takes a number, not {word}")))
+                        .transpose()?;
+                    Command::TodoLimit { limit }
                 }
                 "list" => {
                     no_more(words, 0, "todo list")?;
@@ -471,6 +553,18 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                         _ => Command::TodoRemove { id },
                     }
                 }
+                "report" => {
+                    let names = || list(Outcome::ALL.map(Outcome::name), "or");
+                    let (word, text) = words.split_first().ok_or_else(|| format!("todo report needs {}", names()))?;
+                    let outcome = Some(Outcome::from_name(word))
+                        .filter(|outcome| *outcome != Outcome::Unknown)
+                        .ok_or_else(|| format!("todo report takes {}, not {word}", names()))?;
+                    let text = match text {
+                        [dash] if dash == "-" && literal_from.is_none_or(|from| from > 3) => Text::Stdin,
+                        words => Text::Given(words.join(" ")),
+                    };
+                    Command::TodoReport { outcome, text }
+                }
                 other => return Err(format!("todo knows {}, not {other}", subcommand_list("todo", "and"))),
             }
         }
@@ -485,23 +579,17 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     if flags.days.is_some() && flags.daily.is_none() {
                         return Err("--days needs --daily".into());
                     }
-                    let timing = match (flags.at.take(), flags.daily.take(), flags.every.take()) {
-                        (Some(at), None, None) => Timing::At(at),
-                        (None, Some((hour, minute)), None) => {
+                    let timing = match (flags.at.take(), flags.daily.take(), flags.every.take(), flags.cron.take()) {
+                        (Some(at), None, None, None) => Timing::At(at),
+                        (None, Some((hour, minute)), None, None) => {
                             Timing::Repeat(When::Daily { hour, minute, days: flags.days.take().unwrap_or(0) })
                         }
-                        (None, None, Some(minutes)) => Timing::Repeat(When::Every { minutes }),
-                        _ => return Err("schedule add needs one of --at, --daily and --every".into()),
+                        (None, None, Some(minutes), None) => Timing::Repeat(When::Every { minutes }),
+                        (None, None, None, Some(expr)) => Timing::Repeat(When::Cron { expr }),
+                        _ => return Err("schedule add needs one of --at, --daily, --every and --cron".into()),
                     };
-                    Command::ScheduleAdd {
-                        title: words.join(" "),
-                        prompt: flags.prompt.take().unwrap_or_default(),
-                        cwd: flags.cwd.take(),
-                        agent: flags.agent.take(),
-                        worktree: std::mem::take(&mut flags.worktree),
-                        auto_done: std::mem::take(&mut flags.auto_done),
-                        timing,
-                    }
+                    let worktree = std::mem::take(&mut flags.worktree);
+                    Command::ScheduleAdd { spec: flags.spec(words, worktree), timing }
                 }
                 "list" => {
                     no_more(words, 0, "schedule list")?;
@@ -510,6 +598,12 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                 "rm" => {
                     no_more(words, 1, "schedule rm")?;
                     Command::ScheduleRemove { id: words.first().ok_or("schedule rm needs an ID")?.clone() }
+                }
+                "pause" | "resume" => {
+                    let name = format!("schedule {what}");
+                    no_more(words, 1, &name)?;
+                    let id = words.first().ok_or_else(|| format!("{name} needs an ID"))?.clone();
+                    Command::SchedulePause { id, paused: what == "pause" }
                 }
                 other => return Err(format!("schedule knows {}, not {other}", subcommand_list("schedule", "and"))),
             }
@@ -559,6 +653,14 @@ struct Flags {
     start: bool,
     worktree: bool,
     auto_done: bool,
+    auto: bool,
+    model: Option<String>,
+    effort: Option<String>,
+    skills: Vec<String>,
+    time_limit: Option<u32>,
+    queue: bool,
+    after: Option<String>,
+    cron: Option<String>,
     at: Option<LocalTime>,
     daily: Option<(u8, u8)>,
     days: Option<u8>,
@@ -566,6 +668,29 @@ struct Flags {
 }
 
 impl Flags {
+    /// 取走 `--queue`、`--after`；`--after` 也算排队。
+    fn queue(&mut self) -> Option<Queue> {
+        let after = self.after.take();
+        (std::mem::take(&mut self.queue) || after.is_some()).then_some(Queue { after })
+    }
+
+    /// 取走任务的选项，`words` 是标题。
+    fn spec(&mut self, words: &[String], worktree: bool) -> Spec {
+        Spec {
+            title: words.join(" "),
+            prompt: self.prompt.take().unwrap_or_default(),
+            cwd: self.cwd.take(),
+            agent: self.agent.take(),
+            model: self.model.take(),
+            effort: self.effort.take(),
+            worktree,
+            skills: std::mem::take(&mut self.skills),
+            auto: std::mem::take(&mut self.auto),
+            auto_done: std::mem::take(&mut self.auto_done),
+            time_limit: self.time_limit.take(),
+        }
+    }
+
     fn unused(&self) -> Option<&'static str> {
         [
             (self.json, "--json"),
@@ -590,6 +715,14 @@ impl Flags {
             (self.start, "--start"),
             (self.worktree, "--worktree"),
             (self.auto_done, "--auto-done"),
+            (self.auto, "--auto"),
+            (self.model.is_some(), "--model"),
+            (self.effort.is_some(), "--effort"),
+            (!self.skills.is_empty(), "--skill"),
+            (self.time_limit.is_some(), "--time-limit"),
+            (self.queue, "--queue"),
+            (self.after.is_some(), "--after"),
+            (self.cron.is_some(), "--cron"),
             (self.at.is_some(), "--at"),
             (self.daily.is_some(), "--daily"),
             (self.days.is_some(), "--days"),
@@ -899,27 +1032,61 @@ mod tests {
         assert_eq!(
             parse("todo add fix the  login bug"),
             Ok(Command::TodoAdd {
-                title: "fix the login bug".into(),
-                prompt: String::new(),
-                cwd: None,
-                agent: None,
-                worktree: true,
-                auto_done: false,
+                spec: Spec { title: "fix the login bug".into(), worktree: true, ..Spec::default() },
                 start: false,
+                queue: None,
             })
         );
+        let queued = |args: &str| match parse(args) {
+            Ok(Command::TodoAdd { queue, start: false, .. }) => Ok(queue),
+            other => Err(format!("{other:?}")),
+        };
+        assert_eq!(queued("todo add x --queue"), Ok(Some(Queue { after: None })));
+        assert_eq!(queued("todo add x --after 5"), Ok(Some(Queue { after: Some("5".into()) })));
+        assert!(parse("todo add x --queue --start").unwrap_err().contains("only one of --start"));
+        assert_eq!(
+            parse("todo queue 6 --after #5"),
+            Ok(Command::TodoQueue { id: "6".into(), queue: Some(Queue { after: Some("#5".into()) }) })
+        );
+        assert_eq!(parse("todo unqueue 6"), Ok(Command::TodoQueue { id: "6".into(), queue: None }));
+        assert!(parse("todo unqueue 6 --after 5").unwrap_err().contains("does not take --after"));
+        assert_eq!(parse("todo limit"), Ok(Command::TodoLimit { limit: None }));
+        assert_eq!(parse("todo limit 3"), Ok(Command::TodoLimit { limit: Some(3) }));
+        assert!(parse("todo limit many").unwrap_err().contains("number"));
         assert_eq!(
             parse("todo add --cwd app --agent codex --prompt why? --no-worktree --auto-done --start docs"),
             Ok(Command::TodoAdd {
-                title: "docs".into(),
-                prompt: "why?".into(),
-                cwd: Some("app".into()),
-                agent: Some("codex".into()),
-                worktree: false,
-                auto_done: true,
+                spec: Spec {
+                    title: "docs".into(),
+                    prompt: "why?".into(),
+                    cwd: Some("app".into()),
+                    agent: Some("codex".into()),
+                    auto_done: true,
+                    ..Spec::default()
+                },
                 start: true,
+                queue: None,
             })
         );
+        assert_eq!(
+            parse("todo add --model opus --effort high --skill review --skill docs --auto docs"),
+            Ok(Command::TodoAdd {
+                spec: Spec {
+                    title: "docs".into(),
+                    model: Some("opus".into()),
+                    effort: Some("high".into()),
+                    worktree: true,
+                    skills: vec!["review".into(), "docs".into()],
+                    auto: true,
+                    ..Spec::default()
+                },
+                start: false,
+                queue: None,
+            })
+        );
+        assert!(parse("todo list --model opus").unwrap_err().contains("does not take --model"));
+        assert!(parse("todo done 5 --skill x").unwrap_err().contains("does not take --skill"));
+        assert!(parse("open --auto").unwrap_err().contains("does not take --auto"));
         assert!(parse("todo list --auto-done").unwrap_err().contains("does not take --auto-done"));
         assert_eq!(parse("todo list --json"), Ok(Command::TodoList { json: true }));
         assert_eq!(parse("todo show 5"), Ok(Command::TodoShow { id: "5".into(), json: false }));
@@ -929,7 +1096,21 @@ mod tests {
         assert_eq!(parse("todo start 0a1b2c3d"), Ok(Command::TodoStart { id: "0a1b2c3d".into() }));
         assert_eq!(parse("todo rm 0a1b2c3d"), Ok(Command::TodoRemove { id: "0a1b2c3d".into() }));
         assert!(parse("todo start").unwrap_err().contains("ID"));
-        assert!(parse("todo").unwrap_err().contains("add, list, show, start, done or rm"));
+        assert!(parse("todo").unwrap_err().contains("add, list, show, start, done, rm, report, queue, unqueue or limit"));
+        assert_eq!(
+            parse("todo report ok fixed the  bug"),
+            Ok(Command::TodoReport { outcome: Outcome::Ok, text: Text::Given("fixed the bug".into()) })
+        );
+        assert_eq!(
+            parse("todo report silent -"),
+            Ok(Command::TodoReport { outcome: Outcome::Silent, text: Text::Stdin })
+        );
+        assert_eq!(
+            parse("todo report failed -- -"),
+            Ok(Command::TodoReport { outcome: Outcome::Failed, text: Text::Given("-".into()) })
+        );
+        assert!(parse("todo report").unwrap_err().contains("ok, silent or failed"));
+        assert!(parse("todo report unknown").unwrap_err().contains("not unknown"));
         assert!(parse("todo add").unwrap_err().contains("TITLE"));
         assert!(parse("todo done").unwrap_err().contains("ID"));
         assert!(parse("todo list --start").unwrap_err().contains("does not take --start"));
@@ -942,17 +1123,12 @@ mod tests {
         assert_eq!(
             add(&["schedule", "add", "daily", "report", "--at", "2026-10-13 14:00", "--worktree", "--auto-done"]),
             Ok(Command::ScheduleAdd {
-                title: "daily report".into(),
-                prompt: String::new(),
-                cwd: None,
-                agent: None,
-                worktree: true,
-                auto_done: true,
+                spec: Spec { title: "daily report".into(), worktree: true, auto_done: true, ..Spec::default() },
                 timing: Timing::At(LocalTime { year: 2026, month: 10, day: 13, hour: 14, minute: 0 }),
             })
         );
         let timing = |args: &str| match parse(args) {
-            Ok(Command::ScheduleAdd { timing, worktree: false, .. }) => Ok(timing),
+            Ok(Command::ScheduleAdd { timing, spec: Spec { worktree: false, .. } }) => Ok(timing),
             other => Err(format!("{other:?}")),
         };
         let daily = |days| Ok(Timing::Repeat(When::Daily { hour: 9, minute: 30, days }));
@@ -961,7 +1137,20 @@ mod tests {
         assert_eq!(timing("schedule add r --daily 09:30 --days sat,sun"), daily(0b100_0001));
         assert_eq!(timing("schedule add r --daily 09:30 --days fri-mon"), daily(0b110_0011));
         assert_eq!(timing("schedule add r --every 15"), Ok(Timing::Repeat(When::Every { minutes: 15 })));
-        assert!(parse("schedule add r").unwrap_err().contains("one of --at, --daily and --every"));
+        assert_eq!(
+            add(&["schedule", "add", "r", "--cron", "30 9 * * 1-5"]).map(|command| match command {
+                Command::ScheduleAdd { timing, .. } => timing,
+                _ => unreachable!(),
+            }),
+            Ok(Timing::Repeat(When::Cron { expr: "30 9 * * 1-5".into() }))
+        );
+        assert!(add(&["schedule", "add", "r", "--cron", "every morning"]).unwrap_err().contains("five fields"));
+        assert!(parse("schedule add r").unwrap_err().contains("one of --at, --daily, --every and --cron"));
+        assert_eq!(parse("schedule pause 0a1b2c3d"), Ok(Command::SchedulePause { id: "0a1b2c3d".into(), paused: true }));
+        assert_eq!(
+            parse("schedule resume 0a1b2c3d"),
+            Ok(Command::SchedulePause { id: "0a1b2c3d".into(), paused: false })
+        );
         assert!(parse("schedule add r --every 5 --daily 09:00").unwrap_err().contains("one of"));
         assert!(parse("schedule add r --every 0").unwrap_err().contains("minutes"));
         assert!(parse("schedule add r --daily 25:00").unwrap_err().contains("HH:MM"));
@@ -972,7 +1161,7 @@ mod tests {
         assert!(parse("todo add r --worktree").unwrap_err().contains("does not take --worktree"));
         assert_eq!(parse("schedule list --json"), Ok(Command::ScheduleList { json: true }));
         assert_eq!(parse("schedule rm 0a1b2c3d"), Ok(Command::ScheduleRemove { id: "0a1b2c3d".into() }));
-        assert!(parse("schedule").unwrap_err().contains("add, list or rm"));
+        assert!(parse("schedule").unwrap_err().contains("add, list, rm, pause or resume"));
     }
 
     #[test]

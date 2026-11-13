@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::ui::{
-    a11y::Press,
+    a11y::{Press, StaticText as _},
     badge::{Badge, BadgeVariant},
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{self, FontSize, scaled},
@@ -25,7 +25,7 @@ use gpui::{
 };
 use runode_protocol::{
     ClientMsg,
-    todo::{Column, DropAction, Todo, column, drop_action},
+    todo::{Column, DropAction, Outcome, Todo, column, drop_action},
 };
 use runode_types::agent::Agent;
 
@@ -441,6 +441,22 @@ impl Kanban {
         .flatten()
         .collect();
         let muted = fg.opacity(0.55);
+        let failed = todo.outcome == Some(Outcome::Failed);
+        // agent 报的结果（或者宿主读下的屏幕）只露第一行，悬停看全文。
+        let result = todo.result.as_deref().and_then(|result| {
+            let first = result.lines().find(|line| !line.trim().is_empty())?.trim().to_owned();
+            Some(
+                div()
+                    .id(named("todo-result", &todo.id))
+                    .aria_static_text(first.clone())
+                    .min_w_0()
+                    .truncate()
+                    .text_size(FontSize::Small)
+                    .text_color(if failed { cx.theme().destructive } else { muted })
+                    .tooltip(crate::ui::tooltip::tooltip(result.to_owned(), None))
+                    .child(first),
+            )
+        });
         let top = div()
             .flex()
             .items_center()
@@ -455,6 +471,31 @@ impl Kanban {
             .child(div().flex_1())
             .when(self.in_review(todo, data, now), |row| {
                 row.child(Badge::new(rust_i18n::t!("kanban.in_review").into_owned()).variant(BadgeVariant::Secondary))
+            })
+            .when(failed, |row| {
+                let text = rust_i18n::t!("kanban.failed").into_owned();
+                row.child(
+                    Badge::new(text.clone())
+                        .id(named("todo-failed", &todo.id))
+                        .aria_static_text(text)
+                        .variant(BadgeVariant::Outline)
+                        .border_color(cx.theme().destructive)
+                        .text_color(cx.theme().destructive),
+                )
+            })
+            .when(todo.queued && todo.started.is_none(), |row| {
+                // 等的任务不在看板上（早就完成了）时只写排队中。
+                let after = todo.after.as_ref().and_then(|after| data.todos.iter().find(|other| &other.id == after));
+                let text = match after {
+                    Some(after) => rust_i18n::t!("kanban.queued_after", number = after.number).into_owned(),
+                    None => rust_i18n::t!("kanban.queued").into_owned(),
+                };
+                row.child(
+                    Badge::new(text.clone())
+                        .id(named("todo-queued", &todo.id))
+                        .aria_static_text(text)
+                        .variant(BadgeVariant::Secondary),
+                )
             })
             // 没有编号（0）时不写。
             .when(todo.number > 0, |row| row.child(div().flex_none().child(format!("#{}", todo.number))));
@@ -530,6 +571,7 @@ impl Kanban {
                     .font_weight(FontWeight::MEDIUM)
                     .child(todo.spec.title.clone()),
             )
+            .children(result)
             .child(bottom)
             .children(corner)
     }

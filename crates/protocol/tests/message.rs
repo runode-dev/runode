@@ -7,7 +7,7 @@ use runode_protocol::{
     message::InvalidSessionId,
     push::ApnsEnv,
     read_frame,
-    todo::{Schedule, Todo, TodoSpec, When},
+    todo::{Outcome, Schedule, Todo, TodoSpec, When},
     write_frame,
 };
 use runode_types::{
@@ -111,6 +111,10 @@ fn sample_todo() -> Todo {
         done_at: None,
         schedule: Some("0000cafe".into()),
         rank: 3,
+        outcome: Some(Outcome::Ok),
+        result: Some("fixed".into()),
+        queued: true,
+        after: Some("0000beef".into()),
     }
 }
 
@@ -277,6 +281,10 @@ fn client_messages_round_trip() {
             when: Some(When::Every { minutes: 15 }),
         },
         ClientMsg::RemoveSchedule { req: 29, id: "0000cafe".into() },
+        ClientMsg::ReportTodo { req: 30, id: "#5".into(), outcome: Outcome::Silent, result: "nothing new".into() },
+        ClientMsg::QueueTodo { req: 31, id: "#6".into(), queued: true, after: Some("#5".into()) },
+        ClientMsg::PauseSchedule { req: 32, id: "0000cafe".into(), paused: true },
+        ClientMsg::SetMaxRunning { req: 33, max_running: 2 },
     ];
     for message in messages {
         assert_eq!(through_frame(&message), message);
@@ -295,6 +303,7 @@ fn host_messages_round_trip() {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            board: 0,
             shells: false,
             desktops: 0,
             os: String::new(),
@@ -309,6 +318,7 @@ fn host_messages_round_trip() {
             handoff: 1,
             keep_awake: true,
             todos: false,
+            board: 2,
             shells: true,
             desktops: 0,
             os: "linux".into(),
@@ -437,10 +447,12 @@ fn host_messages_round_trip() {
             schedules: vec![Schedule {
                 id: "0000cafe".into(),
                 spec: todo_spec(),
-                when: When::Once { at: 1_760_003_600 },
+                when: When::Cron { expr: "30 9 * * 1-5".into() },
                 last_fired: 1_760_000_000,
                 next_fire: Some(1_760_003_600),
+                paused: true,
             }],
+            max_running: 2,
         },
         HostMsg::Todo { req: 28, todo: sample_todo() },
         HostMsg::DoneTodos { req: 29, todos: vec![sample_todo()], more: true },
@@ -670,6 +682,7 @@ fn welcome_reports_the_system_and_home_only_when_known() {
         handoff: 1,
         keep_awake: true,
         todos: true,
+        board: 0,
         shells: true,
         desktops: 0,
         os: os.into(),
@@ -701,6 +714,7 @@ fn welcome_with_a_non_utf8_home_still_serializes() {
         handoff: 1,
         keep_awake: true,
         todos: true,
+        board: 0,
         shells: true,
         desktops: 0,
         os: "linux".into(),

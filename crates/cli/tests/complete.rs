@@ -33,6 +33,10 @@ fn todo(id: &str, number: u64, title: &str, done: bool) -> Todo {
         done_at: done.then_some(2),
         schedule: None,
         rank: 0,
+        outcome: None,
+        result: None,
+        queued: false,
+        after: None,
     }
 }
 
@@ -54,6 +58,7 @@ fn host(name: &str) -> FakeHost {
             req: *req,
             todos: vec![todo("00000001", 1, "write docs", false), todo("00000002", 2, "old one", true)],
             schedules: vec![],
+            max_running: 0,
         }],
         _ => vec![],
     })

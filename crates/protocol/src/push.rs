@@ -15,7 +15,8 @@
 //!    （`Notification::collapse_id`），同一个会话再等时新通知替掉通知中心里的旧的；`thread-id` 是电脑，
 //!    同一台电脑的通知归在一组。电脑撤不回发出去的通知，答完的由手机打开 App 时自己清掉。
 //! 3. 看板上的任务从进行中变成需要你、又不是在等回答（agent 干完活停下来）时，电脑同样推一条
-//!    （`Notification::todo_done`），一次做完只推一次；`apns-collapse-id` 也是任务的会话标识。
+//!    （`Notification::todo_done`），一次做完只推一次；`apns-collapse-id` 也是任务的会话标识。agent 报了
+//!    没做成时推另一种（`NotificationKind::TodoFailed`，标题「任务没做成」，正文是它报的结果）。
 //!
 //! 官方 App 的推送经中转服务发（它持有签 APNs 请求的密钥）。官方 App 拿到 device token 后为每台电脑向
 //! 中转服务换一个句柄（`RelayRegister`），电脑只拿得到句柄，推送时交回去（`RelayNotify`）：中转服务从
@@ -72,8 +73,9 @@ const UNTITLED: &str = "终端";
 const TITLE_KEY: &str = "agent.blocked.title";
 const TITLE_KEY_UNNAMED: &str = "agent.blocked.title.unnamed";
 const SUBTITLE_KEY: &str = "agent.blocked.body";
-/// 任务做完的通知的标题，不带参数；副标题和等回答的一样用 `SUBTITLE_KEY`。
+/// 任务做完、没做成的通知的标题，不带参数；副标题和等回答的一样用 `SUBTITLE_KEY`。
 const TODO_DONE_TITLE_KEY: &str = "todo.done.title";
+const TODO_FAILED_TITLE_KEY: &str = "todo.failed.title";
 
 /// 推给哪个 APNs 环境：App Store、TestFlight 装的是 `Production`，Xcode 直接装的是 `Development`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -162,6 +164,9 @@ pub enum NotificationKind {
     /// 看板上的任务做完了：agent 干完活停下来，不是在等回答。`Notification` 的 `title` 是任务标题，
     /// `agent`、`lines` 为空。
     TodoDone,
+    /// 看板上的任务没做成（agent 报了 `todo::Outcome::Failed`）。`title` 是任务标题，`lines` 是 agent 报的
+    /// 结果开头几行，`agent` 为空。
+    TodoFailed,
 }
 
 impl NotificationKind {
@@ -223,6 +228,15 @@ impl Notification {
             agent: String::new(),
             lines: Vec::new(),
             kind: NotificationKind::TodoDone,
+        }
+    }
+
+    /// 任务 `title` 没做成：它的会话是 `session`，`lines` 是结果，只留前 `BLOCKED_LINES` 行。
+    pub fn todo_failed(machine: String, machine_name: &str, session: SessionId, title: &str, lines: &[String]) -> Self {
+        Self {
+            lines: lines.iter().take(BLOCKED_LINES).map(|line| clipped(line, LINE_LIMIT)).collect(),
+            kind: NotificationKind::TodoFailed,
+            ..Self::todo_done(machine, machine_name, session, title)
         }
     }
 
@@ -318,6 +332,7 @@ struct Alert<'a> {
 fn encode(notification: &Notification) -> Option<Vec<u8>> {
     let (title_loc_key, title_loc_args) = match notification.kind {
         NotificationKind::TodoDone => (TODO_DONE_TITLE_KEY, Vec::new()),
+        NotificationKind::TodoFailed => (TODO_FAILED_TITLE_KEY, Vec::new()),
         NotificationKind::Blocked if notification.agent.is_empty() => (TITLE_KEY_UNNAMED, Vec::new()),
         NotificationKind::Blocked => (TITLE_KEY, vec![notification.agent.as_str()]),
     };

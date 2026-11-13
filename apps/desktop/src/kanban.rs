@@ -758,6 +758,10 @@ mod tests {
             done_at,
             schedule: None,
             rank: 0,
+            outcome: None,
+            result: None,
+            queued: false,
+            after: None,
         }
     }
 }

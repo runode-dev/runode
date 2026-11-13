@@ -278,16 +278,32 @@ agent there with the prompt; by default in a new git worktree and branch, so
 it does not touch your checkout.
 
 Usage: runode todo add TITLE... [--prompt TEXT] [--cwd DIR] [--agent CMD]
-                       [--no-worktree] [--auto-done] [--start]
+                       [--model MODEL] [--effort EFFORT] [--skill NAME]...
+                       [--no-worktree] [--auto] [--auto-done]
+                       [--time-limit MINUTES] [--start | --queue | --after ID]
        runode todo list [--json]
        runode todo show ID [--json]
        runode todo start ID
        runode todo done ID
        runode todo rm ID
+       runode todo report OUTCOME [TEXT... | -]
+       runode todo queue ID [--after ID]
+       runode todo unqueue ID
+       runode todo limit [N]
 
 Commands:
   add    Add a task and print its id; with --start, also start it and print
          the id of the session its agent runs in
+  queue  Let Runode start a task that has not started: in board order, when
+         fewer agents are working than the limit, and with --after only once
+         that task is done. If that task fails, this one is marked failed
+         too. One that cannot start is tried again after 1 and 5 more
+         minutes, then marked failed
+  unqueue
+         Take a task out of the queue; it waits in todo for you to start it
+  limit  Print how many agents may work at once (0, the default, is no
+         limit); with N, set it. Tasks you start yourself do not wait for
+         it, but count
   list   List the tasks and their column on the board: todo (not started),
          in_progress (the agent is working), needs_you (the agent is asking,
          has stopped, or its terminal is gone) or done (marked by you, or
@@ -302,12 +318,19 @@ Commands:
          the terminal, worktree and branch are removed, unless the worktree
          has uncommitted changes or the branch has unmerged commits
   rm     Remove a task; its terminal stays open while its shell runs
+  report For the agent of a task, run in the task's own terminal: record how
+         the task ended and a short result, shown on the board and by `show`.
+         ok and silent let --auto-done mark it done (silent sends no phone
+         notification); failed keeps it in needs_you and notifies the phone
 
 Arguments:
   TITLE...  With `add`: the title, words joined by spaces; also the prompt
             unless --prompt is given
   ID        A task, as `runode todo list` shows: its number (5 or #5) or
             its id
+  OUTCOME   With `report`: ok, silent (nothing worth telling) or failed
+  TEXT...   With `report`: the result, words joined by spaces; `-` reads it
+            from stdin
 
 Options:
       --prompt TEXT  With `add`: the prompt for the agent
@@ -315,13 +338,31 @@ Options:
                      current one
       --agent CMD    With `add`: the command the prompt is given to, such as
                      `codex --full-auto` (default claude)
+      --model MODEL  With `add`: the model the agent uses, such as opus. The
+                     agent must be one Runode knows (claude, codex, pi, ...),
+                     not a whole command
+      --effort EFFORT
+                     With `add`: how hard the agent thinks, such as high; the
+                     same agents as --model
+      --skill NAME   With `add`: ask the agent to use this skill; once per
+                     skill
       --no-worktree  With `add`: work in DIR itself, not in a new worktree.
                      Implied when DIR is not in a git repository
+      --auto         With `add`: let the agent work without asking for
+                     permission, for agents Runode knows how to tell
       --auto-done    With `add`: mark the task done once its agent has
                      worked and stopped, and end its terminal unless a
                      window shows it. Not while the agent asks a question
-                     or after it exits
+                     or after it exits; a question unanswered for 30
+                     minutes marks the task failed instead
+      --time-limit MINUTES
+                     With `add`: mark the task failed if it is not done
+                     MINUTES after it starts, keeping the bottom of its
+                     screen, and end its terminal unless a window shows it
       --start        With `add`: start the task right away
+      --queue        With `add`: queue the task (see `queue`)
+      --after ID     With `add` and `queue`: queue the task to start once
+                     task ID is done
       --json         With `list` and `show`: print JSON instead of text
   -h, --help         Show this help
 
@@ -331,21 +372,31 @@ count up as tasks are added and are never given to another task.
 
 const SCHEDULE: &str = "\
 Start a task for an agent at set times: when a schedule is due, Runode adds a
-task to the task board (see `runode help todo`) and starts it. Times are this
-computer's local time. A schedule missed while the computer slept or Runode was
-not running fires once when it is back; one whose last task is still working,
-or could not start, is skipped.
+task to the task board (see `runode help todo`) and queues it, so it starts at
+once unless `runode todo limit` is reached. Times are this computer's local
+time. A schedule missed while the computer slept or Runode was not running
+fires once when it is back; one whose last task is still queued, working or
+asking a question is skipped. A task that could not start is tried again after
+1 and 5 more minutes and then marked failed, which no longer holds the schedule
+back.
 
 Usage: runode schedule add TITLE... (--at TIME | --daily HH:MM [--days DAYS] |
-                           --every MINUTES) [--prompt TEXT] [--cwd DIR]
-                           [--agent CMD] [--worktree] [--auto-done]
+                           --every MINUTES | --cron EXPR) [--prompt TEXT]
+                           [--cwd DIR] [--agent CMD] [--model MODEL]
+                           [--effort EFFORT] [--skill NAME]... [--worktree]
+                           [--auto] [--auto-done] [--time-limit MINUTES]
        runode schedule list [--json]
        runode schedule rm ID
+       runode schedule pause ID
+       runode schedule resume ID
 
 Commands:
-  add   Add a schedule and print its id
-  list  List the schedules with when they fire and the next time they will
-  rm    Remove a schedule; the tasks it started stay
+  add     Add a schedule and print its id
+  list    List the schedules with when they fire and the next time they will
+  rm      Remove a schedule; the tasks it started stay
+  pause   Stop a schedule from firing until it is resumed
+  resume  Let a paused schedule fire again, counting from now: the times it
+          missed while paused do not fire
 
 Arguments:
   TITLE...  With `add`: the title of the tasks it starts, words joined by
@@ -358,11 +409,18 @@ Options:
       --days DAYS      With --daily: only on these days, like mon,wed,fri or
                        mon-fri
       --every MINUTES  With `add`: every MINUTES minutes
+      --cron EXPR      With `add`: at the times a crontab line gives, as one
+                       argument: minute hour day month weekday, each `*`, a
+                       number, a range a-b or a list, with /STEP; weekday 0
+                       or 7 is Sunday. \"30 9 * * 1-5\" is 9:30 on weekdays
       --prompt TEXT    With `add`: the prompt for the agent
       --cwd DIR        With `add`: the directory to work in; defaults to the
                        current one
       --agent CMD      With `add`: the command the prompt is given to
                        (default claude)
+      --model MODEL, --effort EFFORT, --skill NAME, --auto,
+      --time-limit MINUTES
+                       With `add`: as for `runode todo add`
       --worktree       With `add`: give each task a new git worktree and
                        branch; DIR must be in a git repository
       --auto-done      With `add`: mark each task done once its agent has

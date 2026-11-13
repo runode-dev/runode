@@ -36,6 +36,9 @@ pub(super) fn check_text(spec: &TodoSpec) -> Result<(), String> {
     if spec.title.trim().is_empty() {
         return Err("a todo needs a title".into());
     }
+    if spec.time_limit == Some(0) {
+        return Err("the time limit must be at least a minute".into());
+    }
     let one_line = |name: &str| !name.trim().is_empty() && !name.chars().any(char::is_control);
     if !spec.skills.iter().all(|skill| one_line(skill)) {
         return Err("each skill must be a one-line name".into());
@@ -67,6 +70,12 @@ pub(super) fn check_when(when: &When, now: u64) -> Result<(), String> {
             Err("not a valid time of day".into())
         }
         When::Every { minutes: 0 } => Err("the interval must be at least a minute".into()),
+        When::Cron { ref expr } if !runode_todo::valid_cron(expr) => {
+            Err(format!("{expr:?} is not a cron expression: minute hour day month weekday"))
+        }
+        When::Cron { ref expr } if runode_todo::next_fire(when, now).is_none() => {
+            Err(format!("{expr:?} never comes"))
+        }
         When::Unknown => Err("unknown kind of schedule".into()),
         _ => Ok(()),
     }
@@ -118,5 +127,9 @@ mod tests {
         assert!(check_when(&When::Daily { hour: 9, minute: 0, days: 0b1000_0000 }, 0).is_err());
         assert!(check_when(&When::Every { minutes: 0 }, 0).is_err());
         assert!(check_when(&When::Unknown, 0).is_err());
+        let cron = |expr: &str| When::Cron { expr: expr.into() };
+        assert!(check_when(&cron("30 9 * * 1-5"), 1_760_000_000).is_ok());
+        assert!(check_when(&cron("30 9 * *"), 1_760_000_000).unwrap_err().contains("not a cron expression"));
+        assert!(check_when(&cron("0 0 31 2 *"), 1_760_000_000).unwrap_err().contains("never comes"));
     }
 }

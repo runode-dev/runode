@@ -17,6 +17,8 @@ runode-types.workspace = true
 # `remote` 命令：配对口令、设备表和监听方的状态，以及配对 URI 里的本机地址。
 runode-remote.workspace = true
 runode-todo.workspace = true
+# `todo add --model --effort` 照桌面的写法把模型和强度拼进 agent 的命令。
+runode-agent.workspace = true
 anyhow.workspace = true
 # `wait --for text` 按正则找屏幕上的行。
 regex.workspace = true

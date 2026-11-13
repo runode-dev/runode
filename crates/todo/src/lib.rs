@@ -10,5 +10,5 @@ mod schedule;
 mod store;
 
 pub use local_time::{LocalTime, parse_clock};
-pub use schedule::next_fire;
+pub use schedule::{next_fire, valid_cron};
 pub use store::{DONE_KEPT, Result, Store};

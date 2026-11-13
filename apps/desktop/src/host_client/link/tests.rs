@@ -239,6 +239,7 @@ fn answers_to_requests_from_an_earlier_connection_are_dropped() {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            board: 0,
             shells: false,
             desktops: 0,
             os: String::new(),
@@ -544,6 +545,7 @@ fn a_host_with_another_snapshot_format_gets_asked_for_replays() {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            board: 0,
             shells: false,
             desktops: 0,
             os: String::new(),
@@ -581,6 +583,7 @@ fn fake_host(then: impl FnOnce(UnixStream) + Send + 'static) -> Link {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            board: 0,
             shells: false,
             desktops: 0,
             os: String::new(),
@@ -742,7 +745,7 @@ fn a_task_listing_that_times_out_keeps_the_connection() {
                     continue;
                 }
                 Ok(ClientMsg::ListTodos { req }) => {
-                    late = Some(HostMsg::Todos { req, todos: Vec::new(), schedules: Vec::new() });
+                    late = Some(HostMsg::Todos { req, todos: Vec::new(), schedules: Vec::new(), max_running: 0 });
                     continue;
                 }
                 Ok(ClientMsg::ListSessions) => vec![HostMsg::SessionList { sessions: Vec::new() }],
@@ -837,6 +840,7 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
             handoff: 0,
             keep_awake: false,
             todos: false,
+            board: 0,
             shells: false,
             desktops: 0,
             os: String::new(),

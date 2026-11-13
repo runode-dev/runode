@@ -50,7 +50,7 @@ use crate::{
     layout::WindowLayout,
     push::ApnsEnv,
     tasks::TaskSource,
-    todo::{Schedule, Todo, TodoSpec, When},
+    todo::{Outcome, Schedule, Todo, TodoSpec, When},
 };
 
 /// 是哪一次构建，由版本号和构建时的标识拼成，宿主和前端各自报。快照格式还没有兼容保证，
@@ -408,6 +408,28 @@ pub enum ClientMsg {
     },
     /// 删掉定时，回 `Done`；它开出来的任务留着。
     RemoveSchedule { req: u32, id: String },
+    /// 记下任务的结局（`todo::Outcome`）和结果，agent 做完时报，回 `Done`；完成了的任务也收。结果整个换掉，
+    /// `result` 为空时清掉原来的；超过 `todo::RESULT_LIMIT` 个字时宿主截掉后面的。宿主的 `Welcome::board` 不小于 1 时才认得。
+    ReportTodo {
+        req: u32,
+        id: String,
+        outcome: Outcome,
+        #[serde(default)]
+        result: String,
+    },
+    /// 让还没开始的任务排队（`Todo::queued`；`after` 是要先等的任务，也认编号）或者不再排队，回 `Done`。开始过的、
+    /// 等下去会绕回自己的回 `Error`。宿主的 `Welcome::board` 不小于 3 时才认得。
+    QueueTodo {
+        req: u32,
+        id: String,
+        queued: bool,
+        #[serde(default)]
+        after: Option<String>,
+    },
+    /// 停用或者接着用定时（`Schedule::paused`），回 `Done`。宿主的 `Welcome::board` 不小于 3 时才认得。
+    PauseSchedule { req: u32, id: String, paused: bool },
+    /// 设看板的并发上限（`HostMsg::Todos::max_running`），回 `Done`。宿主的 `Welcome::board` 不小于 3 时才认得。
+    SetMaxRunning { req: u32, max_running: u32 },
     /// 比自己新的一方才有的消息。宿主回 `HostMsg::Error`，连接照旧。
     #[serde(other)]
     Unknown,
@@ -470,6 +492,9 @@ pub enum HostMsg {
         keep_awake: bool,
         #[serde(default)]
         todos: bool,
+        /// 认得看板后加的消息到哪一级（`todo::BOARD_LEVEL`）；0 是只认 `todos` 那几条。
+        #[serde(default, skip_serializing_if = "is_zero")]
+        board: u32,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         shells: bool,
         #[serde(default, skip_serializing_if = "is_zero")]
@@ -708,6 +733,10 @@ pub enum HostMsg {
         req: u32,
         todos: Vec<Todo>,
         schedules: Vec<Schedule>,
+        /// 最多几个任务的 agent 同时在干活（看板上算进行中），0 是不限；到了上限时排队的任务等着。用户直接开始的
+        /// 不受它管，但算在里面。
+        #[serde(default, skip_serializing_if = "is_zero")]
+        max_running: u32,
     },
     /// 回 `ClientMsg::ListDoneTodos`：这一页的任务；`more` 是后面还有。
     DoneTodos {

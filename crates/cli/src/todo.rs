@@ -2,22 +2,24 @@
 
 use std::{
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     time::{Duration, Instant},
 };
 
 use anyhow::{Result, anyhow, bail};
+use runode_agent::models::{LAUNCHERS, Pick};
 use runode_protocol::{
     ClientMsg, HostMsg, SessionId,
-    todo::{Column, DEFAULT_AGENT, Todo, TodoSpec, When, column},
+    todo::{Column, DEFAULT_AGENT, Outcome, Todo, TodoSpec, When, column},
 };
 use runode_remote::now_unix;
 
 use runode_todo::LocalTime;
 
+pub(crate) use crate::args::Spec;
 use crate::{
     Env,
-    args::{DAYS, Timing},
+    args::{DAYS, Queue, Timing},
     client::{Connection, kind},
     output::{plain, table, tilde},
 };
@@ -25,20 +27,17 @@ use crate::{
 /// 等 `StartTodo`、`RemoveTodo` 回话的最长时间：宿主要先跑工作树和分支的 git 命令，比一般请求久。
 const GIT_TIMEOUT: Duration = Duration::from_secs(250);
 
-/// `todo add`、`schedule add` 共有的部分，见 `args::Command::TodoAdd`。
-pub(crate) struct Spec {
-    pub(crate) title: String,
-    pub(crate) prompt: String,
-    pub(crate) cwd: Option<PathBuf>,
-    pub(crate) agent: Option<String>,
-    pub(crate) worktree: bool,
-    pub(crate) auto_done: bool,
-}
-
 impl Spec {
-    /// 照 `open --cwd`：相对路径按命令行的当前目录算；没给 agent 时用 `DEFAULT_AGENT`。
+    /// 照 `open --cwd`：相对路径按命令行的当前目录算；没给 agent 时用 `DEFAULT_AGENT`，给了模型或强度时按桌面
+    /// 挑出来的写法拼进 agent 的命令（`Pick::command`）。
     fn resolve(self) -> Result<TodoSpec> {
         let here = std::env::current_dir()?;
+        let agent = self.agent.unwrap_or_else(|| DEFAULT_AGENT.to_owned());
+        let agent = if self.model.is_none() && self.effort.is_none() {
+            agent
+        } else {
+            pick(&agent, self.model, self.effort)?.command()
+        };
         Ok(TodoSpec {
             title: self.title,
             prompt: self.prompt,
@@ -47,12 +46,47 @@ impl Spec {
                 Some(dir) => here.join(dir),
                 None => here,
             },
-            agent: self.agent.unwrap_or_else(|| DEFAULT_AGENT.to_owned()),
+            agent,
             worktree: self.worktree,
+            skills: self.skills,
+            auto: self.auto,
             auto_done: self.auto_done,
+            time_limit: self.time_limit,
             ..TodoSpec::default()
         })
     }
+}
+
+/// `--agent` 认得的一家配上 `--model`、`--effort`：先按 `Launcher::command` 找，找不到再按不分大小写的
+/// `Launcher::label` 找（同一家的几个版本共用一个名字，按名字找到的是排在前面的新版本）。
+fn pick(agent: &str, model: Option<String>, effort: Option<String>) -> Result<Pick> {
+    let Some(index) = LAUNCHERS
+        .iter()
+        .position(|launcher| launcher.command == agent)
+        .or_else(|| LAUNCHERS.iter().position(|launcher| launcher.label.eq_ignore_ascii_case(agent)))
+    else {
+        let known: Vec<_> = LAUNCHERS.iter().map(|launcher| launcher.command).collect();
+        bail!("--model and --effort need --agent to be one of {}, not {agent}", known.join(", "));
+    };
+    let launcher = &LAUNCHERS[index];
+    // 拼进命令时按 shell 的一个词加引号，引号和空白拼不出原样的一个词。
+    for (option, word) in [("--model", &model), ("--effort", &effort)] {
+        if let Some(word) = word
+            && (word.is_empty() || word.chars().any(|ch| ch == '\'' || ch.is_whitespace() || ch.is_control()))
+        {
+            bail!("{option} takes one word without quotes, not {word:?}");
+        }
+    }
+    if model.is_some() && launcher.model_arg.is_none() {
+        bail!("{} cannot pick a model", launcher.label);
+    }
+    if effort.is_some() && launcher.effort_arg.is_none() {
+        bail!("{} cannot pick an effort", launcher.label);
+    }
+    if effort.is_some() && model.is_none() && launcher.effort_needs_model {
+        bail!("{} needs --model to pick an effort", launcher.label);
+    }
+    Ok(Pick { agent: index, model, effort })
 }
 
 /// 连上宿主；宿主不认得看板的消息时报错，不发。
@@ -60,6 +94,15 @@ fn open(env: &Env) -> Result<Connection> {
     let connection = Connection::open(env)?;
     if !connection.todos {
         bail!("the running Runode host is too old for the task board; quit Runode and open it again");
+    }
+    Ok(connection)
+}
+
+/// 连上宿主准备交 `spec`；宿主认不得它用到的选项时报错，不让它悄悄丢掉。
+fn open_for(env: &Env, spec: &TodoSpec) -> Result<Connection> {
+    let connection = open(env)?;
+    if spec.time_limit.is_some() {
+        need_board(&connection, 2, "--time-limit")?;
     }
     Ok(connection)
 }
@@ -72,11 +115,14 @@ fn in_git_repo(dir: &Path) -> bool {
 }
 
 /// 加一张任务，打印它的标识；`start` 时接着开始它，再打印它的会话的标识。
-pub(crate) fn add(env: &Env, spec: Spec, start: bool, out: &mut dyn Write) -> Result<()> {
+pub(crate) fn add(env: &Env, spec: Spec, start: bool, queue: Option<Queue>, out: &mut dyn Write) -> Result<()> {
     let mut spec = spec.resolve()?;
     // 宿主不给仓库外的目录开工作树；工作树是默认开着的，这里改成不要，免得命令白白失败。
     spec.worktree &= in_git_repo(&spec.dir);
-    let connection = open(env)?;
+    let connection = open_for(env, &spec)?;
+    if queue.is_some() {
+        need_board(&connection, 3, "--queue and --after")?;
+    }
     let req = connection.req();
     connection.send(&ClientMsg::AddTodo { req, spec })?;
     let id = added(&connection)?;
@@ -85,7 +131,49 @@ pub(crate) fn add(env: &Env, spec: Spec, start: bool, out: &mut dyn Write) -> Re
         let session = start_todo(&connection, &id).map_err(|err| err.context(format!("added todo {id}")))?;
         writeln!(out, "{session}")?;
     }
+    if let Some(Queue { after }) = queue {
+        let req = connection.req();
+        connection
+            .request_done(&ClientMsg::QueueTodo { req, id: id.clone(), queued: true, after })
+            .map_err(|err| err.context(format!("added todo {id}")))?;
+    }
     Ok(())
+}
+
+/// 宿主认得的看板消息不到 `level` 级时报错，`what` 是要用的选项或命令。
+fn need_board(connection: &Connection, level: u32, what: &str) -> Result<()> {
+    if connection.board < level {
+        bail!("the running Runode host is too old for {what}; quit Runode and open it again");
+    }
+    Ok(())
+}
+
+/// 让任务排队（`queue` 给了时）或者不再排队。
+pub(crate) fn queue(env: &Env, id: String, queue: Option<Queue>) -> Result<()> {
+    let connection = open(env)?;
+    need_board(&connection, 3, "todo queue")?;
+    let req = connection.req();
+    let queued = queue.is_some();
+    let after = queue.and_then(|queue| queue.after);
+    connection.request_done(&ClientMsg::QueueTodo { req, id, queued, after })
+}
+
+/// 打印看板的并发上限（`0` 是不限），给了 `limit` 时改成它。
+pub(crate) fn limit(env: &Env, limit: Option<u32>, out: &mut dyn Write) -> Result<()> {
+    let connection = open(env)?;
+    need_board(&connection, 3, "todo limit")?;
+    let req = connection.req();
+    match limit {
+        Some(max_running) => connection.request_done(&ClientMsg::SetMaxRunning { req, max_running }),
+        None => {
+            connection.send(&ClientMsg::ListTodos { req })?;
+            match connection.reply()? {
+                HostMsg::Todos { max_running, .. } => writeln!(out, "{max_running}")?,
+                other => bail!("unexpected answer: {}", kind(&other)),
+            }
+            Ok(())
+        }
+    }
 }
 
 /// 开始任务，打印它的会话的标识。
@@ -118,6 +206,28 @@ pub(crate) fn done(env: &Env, id: String) -> Result<()> {
     let connection = open(env)?;
     let req = connection.req();
     connection.request_done(&ClientMsg::UpdateTodo { req, id, spec: None, done: Some(true) })
+}
+
+/// 报自己所在的会话开着的那张任务的结局和结果。
+pub(crate) fn report(env: &Env, outcome: Outcome, result: String) -> Result<()> {
+    let own: SessionId = env
+        .session
+        .as_deref()
+        .and_then(|own| own.parse().ok())
+        .ok_or_else(|| anyhow!("todo report runs in the terminal of a task, and this is not a Runode terminal"))?;
+    let connection = open(env)?;
+    if connection.board < 1 {
+        bail!("the running Runode host is too old for todo report; quit Runode and open it again");
+    }
+    let (todos, _) = connection.board()?;
+    // 同一个会话接回过、又开过别的任务时，取最近开始的。
+    let todo = todos
+        .iter()
+        .filter(|todo| todo.session == Some(own))
+        .max_by_key(|todo| todo.started)
+        .ok_or_else(|| anyhow!("this terminal runs no task on the board"))?;
+    let req = connection.req();
+    connection.request_done(&ClientMsg::ReportTodo { req, id: todo.id.clone(), outcome, result })
 }
 
 pub(crate) fn remove(env: &Env, id: String) -> Result<()> {
@@ -176,7 +286,11 @@ pub(crate) fn list(env: &Env, json: bool, out: &mut dyn Write) -> Result<()> {
         vec![
             number_text(todo),
             todo.id.clone(),
-            column_name(*column),
+            if todo.queued && todo.started.is_none() {
+                format!("{} (queued)", column_name(*column))
+            } else {
+                column_name(*column)
+            },
             todo.spec.agent.clone(),
             todo.spec.title.clone(),
             tilde(&todo.spec.dir, home),
@@ -198,8 +312,16 @@ pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Resu
     let sessions = connection.sessions()?;
     let session = sessions.iter().find(|info| Some(info.id) == todo.session);
     let column = column(&todo, session, now_unix());
-    let (_, schedules) = connection.board()?;
+    let (todos, schedules) = connection.board()?;
     let schedule = todo.schedule.as_ref().and_then(|id| schedules.iter().find(|schedule| &schedule.id == id));
+    // 等的任务不在看板上（早就完成了）时只写它的标识。
+    let queued = (todo.queued && todo.started.is_none()).then(|| match &todo.after {
+        Some(after) => match todos.iter().find(|other| &other.id == after) {
+            Some(other) => format!("after {}", number_text(other)),
+            None => format!("after {after}"),
+        },
+        None => "yes".into(),
+    });
     if json {
         let mut value = serde_json::to_value(&todo)?;
         value["column"] = column_name(column).into();
@@ -217,11 +339,16 @@ pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Resu
     let title =
         if todo.number == 0 { todo.spec.title.clone() } else { format!("#{}  {}", todo.number, todo.spec.title) };
     writeln!(out, "{}", plain(&title))?;
-    let fields: [(&str, Option<String>); 12] = [
+    let fields: [(&str, Option<String>); 17] = [
         ("id", Some(todo.id.clone())),
         ("column", Some(column_name(column))),
+        ("queued", queued),
+        ("outcome", todo.outcome.map(|outcome| outcome.name().to_owned())),
         ("agent", Some(todo.spec.agent.clone())),
+        ("skills", (!todo.spec.skills.is_empty()).then(|| todo.spec.skills.join(", "))),
+        ("auto", todo.spec.auto.then(|| "yes".into())),
         ("auto-done", todo.spec.auto_done.then(|| "yes".into())),
+        ("time-limit", todo.spec.time_limit.map(|minutes| format!("{minutes} min"))),
         ("dir", Some(tilde(&todo.spec.dir, home))),
         ("worktree", todo.worktree_dir.as_deref().map(|dir| tilde(dir, home))),
         ("branch", todo.branch.clone()),
@@ -244,6 +371,13 @@ pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Resu
     for line in todo.spec.prompt().lines() {
         writeln!(out, "  {}", plain(line))?;
     }
+    if let Some(result) = &todo.result {
+        // 没报结局时是宿主读下的屏幕。
+        writeln!(out, "{}", if todo.outcome.is_some() { "result" } else { "screen" })?;
+        for line in result.lines() {
+            writeln!(out, "  {}", plain(line))?;
+        }
+    }
     Ok(())
 }
 
@@ -263,7 +397,10 @@ pub(crate) fn add_schedule(env: &Env, spec: Spec, timing: Timing, out: &mut dyn 
             When::Once { at: unix }
         }
     };
-    let connection = open(env)?;
+    let connection = open_for(env, &spec)?;
+    if matches!(when, When::Cron { .. }) {
+        need_board(&connection, 3, "--cron")?;
+    }
     let req = connection.req();
     connection.send(&ClientMsg::AddSchedule { req, spec, when })?;
     writeln!(out, "{}", added(&connection)?)?;
@@ -287,7 +424,7 @@ pub(crate) fn list_schedules(env: &Env, json: bool, out: &mut dyn Write) -> Resu
         vec![
             schedule.id.clone(),
             when_text(&schedule.when, local),
-            schedule.next_fire.map_or_else(|| "-".into(), local),
+            if schedule.paused { "paused".into() } else { schedule.next_fire.map_or_else(|| "-".into(), local) },
             schedule.spec.agent.clone(),
             schedule.spec.title.clone(),
             tilde(&schedule.spec.dir, home),
@@ -302,7 +439,14 @@ pub(crate) fn remove_schedule(env: &Env, id: String) -> Result<()> {
     connection.request_done(&ClientMsg::RemoveSchedule { req, id })
 }
 
-/// 定时什么时候到点，人看的写法：`daily 09:30 mon-fri`、`every 15m`、`once 2026-10-13 14:00`。
+pub(crate) fn pause_schedule(env: &Env, id: String, paused: bool) -> Result<()> {
+    let connection = open(env)?;
+    need_board(&connection, 3, if paused { "schedule pause" } else { "schedule resume" })?;
+    let req = connection.req();
+    connection.request_done(&ClientMsg::PauseSchedule { req, id, paused })
+}
+
+/// 定时什么时候到点，人看的写法：`daily 09:30 mon-fri`、`every 15m`、`once 2026-10-13 14:00`、`cron 30 9 * * 1-5`。
 fn when_text(when: &When, local: impl Fn(u64) -> String) -> String {
     match *when {
         When::Once { at } => format!("once {}", local(at)),
@@ -312,6 +456,7 @@ fn when_text(when: &When, local: impl Fn(u64) -> String) -> String {
             format!("daily {hour:02}:{minute:02}{sep}{days}")
         }
         When::Every { minutes } => format!("every {minutes}m"),
+        When::Cron { ref expr } => format!("cron {expr}"),
         When::Unknown => "unknown".into(),
     }
 }

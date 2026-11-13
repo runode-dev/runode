@@ -96,6 +96,21 @@ fn todo_done_notifications_match_the_fixtures() {
     assert_eq!((long.title.chars().count(), long.machine_name.chars().count()), (TEXT_LIMIT, TEXT_LIMIT));
 }
 
+/// 任务没做成的通知：标题换成没做成的键，副标题同做完的，正文是结果的前几行。
+#[test]
+fn todo_failed_notifications_match_the_fixtures() {
+    let lines = ["cargo test 有 3 个失败", "没找到暗色的配色"].map(String::from);
+    let failed =
+        Notification::todo_failed(MACHINE.into(), "Ethan 的 MacBook Pro", SESSION, "给设置页加暗色模式", &lines);
+    assert_eq!(String::from_utf8(notify_payload(&failed).unwrap()).unwrap(), fixture("apns_todo_failed.json"));
+    matches("relay_notify_todo_failed.json", &RelayNotify::new(HANDLE.into(), &failed, NOW).unwrap());
+
+    let many: Vec<String> = (0..10).map(|i| format!("{i}{}", "x".repeat(200))).collect();
+    let long = Notification::todo_failed("m".into(), "Mac", SESSION, "t", &many);
+    assert_eq!(long.lines.len(), BLOCKED_LINES);
+    assert!(long.lines[0].starts_with('0') && long.lines[0].chars().count() == LINE_LIMIT);
+}
+
 /// 中转请求体里的内容和直连时的 payload 一样照上限删减过：中转服务拼出的 payload 也装得下。
 #[test]
 fn relay_requests_carry_fitted_content() {

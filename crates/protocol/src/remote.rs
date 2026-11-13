@@ -189,6 +189,10 @@ impl crate::ClientMsg {
             | AddSchedule { .. }
             | UpdateSchedule { .. }
             | RemoveSchedule { .. }
+            | ReportTodo { .. }
+            | QueueTodo { .. }
+            | PauseSchedule { .. }
+            | SetMaxRunning { .. }
             | Unknown => None,
         }
     }

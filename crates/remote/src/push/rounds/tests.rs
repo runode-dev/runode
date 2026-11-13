@@ -164,6 +164,10 @@ fn todo(id: &str, session: SessionId) -> Todo {
         done_at: None,
         schedule: None,
         rank: 0,
+        outcome: None,
+        result: None,
+        queued: false,
+        after: None,
     }
 }
 
@@ -377,4 +381,45 @@ fn auto_done_todos_are_pushed_when_marked_done() {
     round(&mut rounds, std::slice::from_ref(&fresh), &[working(A)], t);
     round(&mut rounds, std::slice::from_ref(&fresh), &[idle(A)], secs(t, 2));
     assert_eq!(round(&mut rounds, &[finished], &[], secs(t, 4)), [done(A)]);
+}
+
+/// agent 报了没做成：变成这样时马上推一条带结果的，只推一次，不再按做完推；不带屏幕文字时没有正文。
+#[test]
+fn failed_todos_are_pushed_once_with_their_result() {
+    let t = Instant::now();
+    let open = todo("1", A);
+    let failed = Todo { outcome: Some(Outcome::Failed), result: Some("tests fail\nsee log".into()), ..open.clone() };
+    let failure = |lines: &[&str]| {
+        Action::TodoFailed(A, open.spec.title.clone(), lines.iter().map(|line| (*line).to_owned()).collect())
+    };
+    let mut rounds = Rounds::new(DELAY, true);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    assert_eq!(
+        round(&mut rounds, std::slice::from_ref(&failed), &[idle(A)], secs(t, 2)),
+        [failure(&["tests fail", "see log"])]
+    );
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&failed), &[idle(A)], secs(t, 60)), []);
+
+    let mut rounds = Rounds::new(Duration::ZERO, false);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&failed), &[working(A)], secs(t, 2)), [failure(&[])]);
+    // 第一次看到时已经这样的只记基线。
+    let mut rounds = Rounds::new(Duration::ZERO, true);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&failed), &[idle(A)], t), []);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&failed), &[idle(A)], secs(t, 2)), []);
+}
+
+/// agent 说没什么要告诉用户的：停下来、自动完成都不推。
+#[test]
+fn silent_todos_are_not_pushed() {
+    let t = Instant::now();
+    let mut open = todo("1", A);
+    open.spec.auto_done = true;
+    let silent = Todo { outcome: Some(Outcome::Silent), ..open.clone() };
+    let finished = Todo { done_at: Some(UNIX), ..silent.clone() };
+    let mut rounds = Rounds::new(Duration::ZERO, true);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&silent), &[idle(A)], secs(t, 2)), []);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&silent), &[idle(A)], secs(t, 2) + AUTO_DONE_WAIT), []);
+    assert_eq!(round(&mut rounds, &[finished], &[], secs(t, 4) + AUTO_DONE_WAIT), []);
 }

@@ -170,6 +170,8 @@ pub struct TodoDialog {
     found: Found,
     auto: bool,
     auto_done: bool,
+    /// 对话框里不改，编辑时照原样存回去。
+    time_limit: Option<u32>,
     /// 任务开始过了：目录和要不要工作树不能再改。
     locked: bool,
     /// 读不懂的定时规则（`When::Unknown`）在用户选一种之前为空，存的时候规则照原样留着。
@@ -293,7 +295,8 @@ impl TodoDialog {
             Some(When::Every { minutes }) => {
                 (Some(Kind::Every), String::new(), "09:00".to_owned(), minutes.to_string(), 0)
             }
-            Some(When::Unknown) => (None, String::new(), "09:00".to_owned(), "60".to_owned(), 0),
+            // 对话框里没有这两种，规则照原样留着。
+            Some(When::Cron { .. } | When::Unknown) => (None, String::new(), "09:00".to_owned(), "60".to_owned(), 0),
             None => (Some(Kind::Daily), String::new(), "09:00".to_owned(), "60".to_owned(), 0),
         };
         let at_text = if at_text.is_empty() { next_hour() } else { at_text };
@@ -338,6 +341,7 @@ impl TodoDialog {
             found: Found::default(),
             auto: spec.auto,
             auto_done: spec.auto_done,
+            time_limit: spec.time_limit,
             locked,
             kind,
             at,
@@ -1665,6 +1669,7 @@ impl TodoDialog {
             attachments: self.attachments.clone(),
             auto: self.auto,
             auto_done: self.auto_done,
+            time_limit: self.time_limit,
         };
         if !self.schedule {
             return Ok(match &self.editing {

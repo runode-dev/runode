@@ -146,6 +146,8 @@ pub(crate) struct Connection {
     next_req: Cell<u32>,
     /// 宿主认得看板的几条消息（`Welcome` 的 `todos`）。
     pub(crate) todos: bool,
+    /// 宿主认得的看板消息到哪一级（`Welcome` 的 `board`）。
+    pub(crate) board: u32,
 }
 
 impl Connection {
@@ -183,6 +185,7 @@ impl Connection {
             lost: RefCell::default(),
             next_req: Cell::new(1),
             todos: false,
+            board: 0,
         };
         connection.send(&ClientMsg::Hello {
             protocol: PROTOCOL_VERSION,
@@ -196,8 +199,9 @@ impl Connection {
             device: None,
         })?;
         match connection.reply_by(deadline)? {
-            HostMsg::Welcome { todos, .. } => {
+            HostMsg::Welcome { todos, board, .. } => {
                 connection.todos = todos;
+                connection.board = board;
                 Ok(connection)
             }
             HostMsg::Incompatible { reason, .. } => bail!("the Runode app speaks another protocol: {reason}"),

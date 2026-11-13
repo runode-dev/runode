@@ -15,7 +15,8 @@
 //! 等着的样子（又回去干活、标成完成、删掉了、会话没了或退出了）时还没发出去的别发了，会话正在等回答时除外
 //! （撤的是整个会话的通知，那条等回答的要留着）。会话没了、shell 退出了也算需要你，但多半是用户自己关的，
 //! 不推。带 `TodoSpec::auto_done` 的任务空闲下来时至少等 `AUTO_DONE_WAIT` 才按需要你推，在那之前 agent 空闲着
-//! 进了完成的推一条做完。重连时清掉记着的任务表和各任务的列，第一次看到的任务只记基线，规矩同会话。
+//! 进了完成的推一条做完。agent 报了 `Outcome::Silent` 的做完了也不推；报了 `Outcome::Failed` 的变成这样时马上推
+//! 一条没做成，不再按做完推。重连时清掉记着的任务表和各任务的列，第一次看到的任务只记基线，规矩同会话。
 
 use std::{
     collections::HashMap,
@@ -25,7 +26,7 @@ use std::{
 use runode_protocol::{
     SessionId, SessionInfo,
     push::BLOCKED_LINES,
-    todo::{AUTO_DONE_WITHIN, Column, Todo, column, finished_by_agent},
+    todo::{AUTO_DONE_WITHIN, Column, Outcome, Todo, column, finished_by_agent},
 };
 use runode_types::{agent::AgentState, session::SessionMeta};
 
@@ -47,6 +48,8 @@ pub(crate) enum Action {
     Cancel(SessionId),
     /// 推一条任务做完的通知：任务的会话和标题。
     TodoDone(SessionId, String),
+    /// 推一条任务没做成的通知：任务的会话、标题和 agent 报的结果的几行（不带屏幕文字时为空）。
+    TodoFailed(SessionId, String, Vec<String>),
 }
 
 /// 各会话等没等回答、推没推过，见模块文档。
@@ -73,6 +76,8 @@ struct TodoTrack {
     pushed: Option<SessionId>,
     /// 会话还在，agent 空闲着。
     idle: bool,
+    /// agent 报了没做成。
+    failed: bool,
 }
 
 #[derive(Default)]
@@ -154,9 +159,24 @@ impl Rounds {
             let idle = info.is_some_and(|info| {
                 !info.exited && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Idle)
             });
+            let failed = todo.outcome == Some(Outcome::Failed) && column != Column::Done;
+            // 报了没做成：变成这样时推一条，替掉做完的那条，不再等宽限期。
+            if failed
+                && let (Some(previous), Some(session)) = (&previous, todo.session)
+                && !previous.failed
+            {
+                let lines = match &todo.result {
+                    Some(result) if self.text => result.lines().map(str::to_owned).collect(),
+                    _ => Vec::new(),
+                };
+                actions.push(Action::TodoFailed(session, todo.spec.title.clone(), lines));
+            }
+            // agent 说没什么要告诉用户的，做完了也不推。
+            let silent = todo.outcome == Some(Outcome::Silent);
             // 自动完成的任务上一轮 agent 空闲着、这一轮进了完成，还没推过：推这一条。在干活、在等回答时进了完成的
             // 是用户标的，不推。
             if todo.spec.auto_done
+                && !silent
                 && column == Column::Done
                 && let (Some(previous), Some(session)) = (&previous, todo.session)
                 && previous.column != Column::Done
@@ -178,7 +198,7 @@ impl Rounds {
                 pushed = None;
             }
             let mut finished_at = match previous {
-                _ if !finished => None,
+                _ if !finished || failed || silent => None,
                 Some(TodoTrack { column: Column::InProgress, .. }) => Some(now),
                 Some(track) => track.finished_at,
                 None => None,
@@ -190,7 +210,7 @@ impl Rounds {
                 pushed = Some(info.id);
                 actions.push(Action::TodoDone(info.id, todo.spec.title.clone()));
             }
-            tracked.insert(todo.id.clone(), TodoTrack { column, finished_at, pushed, idle });
+            tracked.insert(todo.id.clone(), TodoTrack { column, finished_at, pushed, idle, failed });
         }
         // 删掉了的任务推过的也撤。
         for session in self.todo_tracked.values().filter_map(|track| track.pushed) {

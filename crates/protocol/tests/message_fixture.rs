@@ -282,6 +282,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 handoff: 1,
                 keep_awake: true,
                 todos: false,
+                board: 0,
                 shells: true,
                 desktops: 0,
                 os: "macos".into(),

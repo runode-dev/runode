@@ -80,7 +80,7 @@ fn board_state(peer: &mut Peer) -> (Vec<Todo>, Vec<Schedule>) {
     peer.send(&ClientMsg::ListTodos { req: 2 });
     loop {
         match peer.reply() {
-            HostMsg::Todos { req: 2, todos, schedules } => return (todos, schedules),
+            HostMsg::Todos { req: 2, todos, schedules, .. } => return (todos, schedules),
             HostMsg::TodosChanged => {}
             other => panic!("expected the todos, got {other:?}"),
         }

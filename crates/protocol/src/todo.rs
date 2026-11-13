@@ -6,7 +6,7 @@
 //! `TodoSpec::auto_done` 的任务做完后宿主标的（`finished_by_agent`）。
 
 use runode_types::agent::AgentState;
-pub use runode_types::todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When};
+pub use runode_types::todo::{DEFAULT_AGENT, Outcome, Schedule, Todo, TodoSpec, When};
 use serde::{Deserialize, Serialize};
 
 use crate::message::SessionInfo;
@@ -21,6 +21,18 @@ pub const AUTO_DONE_WITHIN: u64 = 60;
 
 /// `HostMsg::DoneTodos` 一页最多给这么多张任务。
 pub const DONE_TODOS_PAGE: u32 = 100;
+
+/// 这个版本的宿主认得的看板消息到哪一级（`HostMsg::Welcome::board`），前端发某一级的消息前先看宿主够不够：
+/// 1 加了 `ClientMsg::ReportTodo`，2 认得 `TodoSpec::time_limit`（旧宿主收到时悄悄丢掉），3 加了
+/// `ClientMsg::QueueTodo`、`ClientMsg::PauseSchedule`、`ClientMsg::SetMaxRunning`，认得 `When::Cron`。
+pub const BOARD_LEVEL: u32 = 3;
+
+/// 带 `TodoSpec::auto_done` 的任务的 agent 停在询问上这么多秒还没人答，宿主就记成没做成（`Outcome::Failed`），
+/// 没有窗口开着它的终端时结束终端。
+pub const BLOCKED_GIVE_UP: u64 = 30 * 60;
+
+/// `Todo::result` 最多这么多个字。
+pub const RESULT_LIMIT: usize = 4000;
 
 /// 看板上的一列。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -65,27 +77,32 @@ pub fn column(todo: &Todo, session: Option<&SessionInfo>, now: u64) -> Column {
 }
 
 /// 定时上次开出、还没完成的 `todo` 挡不挡着它下一次到点：没开始成、还在干活或者停在询问上时挡着，到点跳过，
-/// 免得两个 agent 改同一处、也免得每到点就多一张开不起来的待办。停在权限询问上的看板算「需要你」，可用户
-/// 一答应它就接着改，所以也挡着。`session` 是它那个会话现在的状态，为空表示找不到那个会话；
-/// `now` 是 Unix 时间的秒数。
+/// 免得两个 agent 改同一处、也免得每到点就多一张开不起来的待办；试过几次都开始不了、记成没做成的不再挡。停在
+/// 权限询问上的看板算「需要你」，可用户一答应它就接着改，所以也挡着。`session` 是它那个会话现在的状态，为空
+/// 表示找不到那个会话；`now` 是 Unix 时间的秒数。
 pub fn holds_schedule(todo: &Todo, session: Option<&SessionInfo>, now: u64) -> bool {
-    let Some(id) = todo.session else { return true };
+    let Some(id) = todo.session else { return todo.outcome != Some(Outcome::Failed) };
     session.filter(|info| info.id == id).is_some_and(|info| {
         column(todo, Some(info), now) == Column::InProgress
             || !info.exited && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Blocked)
     })
 }
 
-/// 带 `TodoSpec::auto_done` 的 `todo` 是不是 agent 自己做完了：还没完成，会话还在，agent 认得出、空闲着，
-/// 过了 `START_GRACE`。停在询问上、退回 shell、会话没了都不算。`session` 是它那个会话现在的状态，`now` 是
-/// Unix 时间的秒数。
+/// 带 `TodoSpec::auto_done` 的 `todo` 是不是 agent 自己做完了：还没完成，会话还在，过了 `START_GRACE`，agent
+/// 认得出、空闲着；报过做完了的（`Outcome::Ok`、`Outcome::Silent`）退回 shell 也算。报了没做成的、停在询问上、
+/// 会话没了都不算。`session` 是它那个会话现在的状态，`now` 是 Unix 时间的秒数。
 pub fn finished_by_agent(todo: &Todo, session: Option<&SessionInfo>, now: u64) -> bool {
+    let reported = matches!(todo.outcome, Some(Outcome::Ok | Outcome::Silent));
     todo.spec.auto_done
+        && (todo.outcome.is_none() || reported)
         && column(todo, session, now) == Column::NeedsYou
         && session.is_some_and(|info| {
             Some(info.id) == todo.session
                 && !info.exited
-                && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Idle)
+                && match info.meta.agent {
+                    Some(agent) => agent.state == AgentState::Idle,
+                    None => reported && info.meta.foreground_is_shell,
+                }
         })
 }
 

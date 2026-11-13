@@ -10,12 +10,12 @@ use std::{
 use runode_types::{
     random::random_hex,
     session::SessionId,
-    todo::{Schedule, Todo, TodoSpec, When},
+    todo::{Outcome, Schedule, Todo, TodoSpec, When},
 };
 use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior, params};
 
 /// 这个版本认得的表结构。
-const VERSION: i64 = 4;
+const VERSION: i64 = 5;
 
 /// 完成了的任务给前端最近这么久（秒）的，更早的留在库里。
 pub const DONE_KEPT: u64 = 7 * 24 * 60 * 60;
@@ -45,12 +45,22 @@ CREATE TABLE todos (
     rank INTEGER NOT NULL,
     -- 完成后清过它的工作树和分支了（清不掉的留着，不再试）；取消完成时重置。
     swept INTEGER NOT NULL DEFAULT 0,
-    number INTEGER NOT NULL
+    number INTEGER NOT NULL,
+    -- `Outcome::name`。
+    outcome TEXT,
+    result TEXT,
+    -- 分钟。
+    time_limit INTEGER,
+    queued INTEGER NOT NULL DEFAULT 0,
+    -- `Todo::after`。
+    after_todo TEXT
 );
 CREATE UNIQUE INDEX todos_number ON todos (number);
--- 下一张任务的编号：删掉的任务的编号不再发，所以不能按现有的最大值算。
+-- next_number 是下一张任务的编号：删掉的任务的编号不再发，所以不能按现有的最大值算。max_running 是
+-- 看板的并发上限，0 是不限。
 CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value INTEGER NOT NULL);
 INSERT INTO meta VALUES ('next_number', 1);
+INSERT INTO meta VALUES ('max_running', 0);
 CREATE TABLE schedules (
     id TEXT PRIMARY KEY NOT NULL,
     title TEXT NOT NULL,
@@ -71,20 +81,40 @@ CREATE TABLE schedules (
     minute INTEGER,
     days INTEGER,
     minutes INTEGER,
-    last_fired INTEGER NOT NULL
+    last_fired INTEGER NOT NULL,
+    -- 分钟。
+    time_limit INTEGER,
+    paused INTEGER NOT NULL DEFAULT 0,
+    -- `When::Cron` 的写法。
+    cron TEXT
 );
 ";
 
-/// 版本 3 的库升到 4：任务和定时多一列 `auto_done`。
-const MIGRATE_TO_4: &str = "
-ALTER TABLE todos ADD COLUMN auto_done INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE schedules ADD COLUMN auto_done INTEGER NOT NULL DEFAULT 0;
-";
+/// 认得的旧版本怎么升上来：第 i 段把版本 `FIRST_MIGRATED + i` 的库升一版，旧库从它的版本起依次跑到最后。
+const FIRST_MIGRATED: i64 = 3;
+const MIGRATIONS: &[&str] = &[
+    // 任务和定时多一列 `auto_done`。
+    "ALTER TABLE todos ADD COLUMN auto_done INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE schedules ADD COLUMN auto_done INTEGER NOT NULL DEFAULT 0;",
+    // 任务的结局、结果和排队，任务和定时的时限，定时的停用和 cron，看板的并发上限。
+    "ALTER TABLE todos ADD COLUMN outcome TEXT;
+     ALTER TABLE todos ADD COLUMN result TEXT;
+     ALTER TABLE todos ADD COLUMN time_limit INTEGER;
+     ALTER TABLE todos ADD COLUMN queued INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE todos ADD COLUMN after_todo TEXT;
+     ALTER TABLE schedules ADD COLUMN time_limit INTEGER;
+     ALTER TABLE schedules ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE schedules ADD COLUMN cron TEXT;
+     INSERT INTO meta VALUES ('max_running', 0);",
+];
+
+const _: () = assert!(FIRST_MIGRATED + MIGRATIONS.len() as i64 == VERSION);
 
 const TODO_COLUMNS: &str = "id, number, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto, \
-     auto_done, created, started, session, worktree_dir, branch, done_at, schedule, rank";
+     auto_done, time_limit, created, started, session, worktree_dir, branch, done_at, schedule, rank, outcome, result, \
+     queued, after_todo";
 const SCHEDULE_COLUMNS: &str = "id, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto, \
-     auto_done, kind, at, hour, minute, days, minutes, last_fired";
+     auto_done, time_limit, kind, at, hour, minute, days, minutes, cron, last_fired, paused";
 
 /// 库出了错：错误说明。
 pub type Result<T> = std::result::Result<T, String>;
@@ -140,6 +170,7 @@ fn spec(row: &Row<'_>) -> rusqlite::Result<TodoSpec> {
         attachments: paths_from(&row.get::<_, Vec<u8>>("attachments")?),
         auto: row.get("auto")?,
         auto_done: row.get("auto_done")?,
+        time_limit: row.get::<_, Option<i64>>("time_limit")?.and_then(|minutes| u32::try_from(minutes).ok()),
     })
 }
 
@@ -156,6 +187,10 @@ fn todo(row: &Row<'_>) -> rusqlite::Result<Todo> {
         done_at: row.get::<_, Option<i64>>("done_at")?.map(secs),
         schedule: row.get("schedule")?,
         rank: row.get("rank")?,
+        outcome: row.get::<_, Option<String>>("outcome")?.map(|name| Outcome::from_name(&name)),
+        result: row.get("result")?,
+        queued: row.get("queued")?,
+        after: row.get("after_todo")?,
     })
 }
 
@@ -169,6 +204,7 @@ fn schedule(row: &Row<'_>) -> rusqlite::Result<Schedule> {
         "every" => {
             When::Every { minutes: u32::try_from(row.get::<_, Option<i64>>("minutes")?.unwrap_or(0)).unwrap_or(0) }
         }
+        "cron" => When::Cron { expr: row.get::<_, Option<String>>("cron")?.unwrap_or_default() },
         _ => When::Unknown,
     };
     Ok(Schedule {
@@ -177,6 +213,7 @@ fn schedule(row: &Row<'_>) -> rusqlite::Result<Schedule> {
         when,
         last_fired: secs(row.get("last_fired")?),
         next_fire: None,
+        paused: row.get("paused")?,
     })
 }
 
@@ -198,16 +235,22 @@ fn new_id(tx: &Transaction<'_>) -> Result<String> {
     Err("cannot pick an unused id".into())
 }
 
-/// 在 `tx` 里加一张待办的任务，见 `Store::add_todo`。
-fn insert_todo(tx: &Transaction<'_>, spec: &TodoSpec, now: u64, schedule: Option<&str>) -> Result<String> {
+/// 在 `tx` 里加一张待办的任务，见 `Store::add_todo`；`queued` 时排着队。
+fn insert_todo(
+    tx: &Transaction<'_>,
+    spec: &TodoSpec,
+    now: u64,
+    schedule: Option<&str>,
+    queued: bool,
+) -> Result<String> {
     let id = new_id(tx)?;
     let number: i64 =
         tx.query_row("SELECT value FROM meta WHERE key = 'next_number'", [], |row| row.get(0)).map_err(failed)?;
     tx.execute("UPDATE meta SET value = ?1 WHERE key = 'next_number'", [number + 1]).map_err(failed)?;
     tx.execute(
         "INSERT INTO todos (id, number, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto,
-             auto_done, created, schedule, rank)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+             auto_done, created, schedule, time_limit, queued, rank)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
              (SELECT COALESCE(MAX(rank), 0) + 1 FROM todos))",
         params![
             id,
@@ -223,7 +266,9 @@ fn insert_todo(tx: &Transaction<'_>, spec: &TodoSpec, now: u64, schedule: Option
             spec.auto,
             spec.auto_done,
             now as i64,
-            schedule
+            schedule,
+            spec.time_limit,
+            queued
         ],
     )
     .map_err(failed)?;
@@ -250,19 +295,22 @@ fn mark_fired(tx: &Transaction<'_>, current: &Schedule, now: u64) -> Result<()> 
     Ok(())
 }
 
-/// `when` 拆成表里的几列：种类，以及 `at`、`hour`、`minute`、`days`、`minutes`。存不下的时刻报错：转成负数存进去
-/// 会读回成 0，定时就再也不到点了。
-fn when_columns(when: &When) -> Result<(&'static str, [Option<i64>; 5])> {
+/// `When` 存成的几列：种类，`at`、`hour`、`minute`、`days`、`minutes`，以及 `cron`。
+type WhenColumns<'a> = (&'static str, [Option<i64>; 5], Option<&'a str>);
+
+/// `when` 拆成表里的几列。存不下的时刻报错：转成负数存进去会读回成 0，定时就再也不到点了。
+fn when_columns(when: &When) -> Result<WhenColumns<'_>> {
     Ok(match *when {
         When::Once { at } => {
             let at = i64::try_from(at).map_err(|_| format!("{at} is too far in the future"))?;
-            ("once", [Some(at), None, None, None, None])
+            ("once", [Some(at), None, None, None, None], None)
         }
         When::Daily { hour, minute, days } => {
-            ("daily", [None, Some(hour.into()), Some(minute.into()), Some(days.into()), None])
+            ("daily", [None, Some(hour.into()), Some(minute.into()), Some(days.into()), None], None)
         }
-        When::Every { minutes } => ("every", [None, None, None, None, Some(minutes.into())]),
-        When::Unknown => ("unknown", [None; 5]),
+        When::Every { minutes } => ("every", [None, None, None, None, Some(minutes.into())], None),
+        When::Cron { ref expr } => ("cron", [None; 5], Some(expr)),
+        When::Unknown => ("unknown", [None; 5], None),
     })
 }
 
@@ -281,8 +329,11 @@ impl Store {
         let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0)).map_err(failed)?;
         match version {
             0 => tx.execute_batch(&format!("{SCHEMA} PRAGMA user_version = {VERSION};")).map_err(failed)?,
-            3 => tx.execute_batch(&format!("{MIGRATE_TO_4} PRAGMA user_version = {VERSION};")).map_err(failed)?,
             VERSION => {}
+            old if (FIRST_MIGRATED..VERSION).contains(&old) => {
+                let steps = MIGRATIONS[(old - FIRST_MIGRATED) as usize..].concat();
+                tx.execute_batch(&format!("{steps} PRAGMA user_version = {VERSION};")).map_err(failed)?;
+            }
             other => return Err(format!("{} was written by another runode version (schema {other})", path.display())),
         }
         tx.commit().map_err(failed)?;
@@ -362,7 +413,7 @@ impl Store {
     /// 加一张待办的任务，排在最后；`schedule` 是开出它的定时。返回新任务的标识。
     pub fn add_todo(&mut self, spec: &TodoSpec, now: u64, schedule: Option<&str>) -> Result<String> {
         let tx = self.conn.transaction().map_err(failed)?;
-        let id = insert_todo(&tx, spec, now, schedule)?;
+        let id = insert_todo(&tx, spec, now, schedule, false)?;
         tx.commit().map_err(failed)?;
         Ok(id)
     }
@@ -373,7 +424,7 @@ impl Store {
         if let Some(spec) = spec {
             tx.execute(
                 "UPDATE todos SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6, skills = ?7,
-                     subagent = ?8, attachments = ?9, auto = ?10, auto_done = ?11
+                     subagent = ?8, attachments = ?9, auto = ?10, auto_done = ?11, time_limit = ?12
                  WHERE id = ?1",
                 params![
                     id,
@@ -386,7 +437,8 @@ impl Store {
                     spec.subagent,
                     paths_bytes(&spec.attachments),
                     spec.auto,
-                    spec.auto_done
+                    spec.auto_done,
+                    spec.time_limit
                 ],
             )
             .map_err(failed)?;
@@ -405,20 +457,23 @@ impl Store {
         Ok(exists)
     }
 
-    /// 记下任务开始了：时刻、会话，以及给它开的工作树和分支。任务已经不在了（开的途中被别的进程删掉）时
-    /// 报错，调用方好收掉刚开的会话和工作树。
+    /// 记下任务开始了：时刻、会话，以及给它开的工作树和分支，不再排队；`fresh` 时是重新开始，清掉上一次的结局
+    /// 和结果，接着上次的对话时留着。任务已经不在了（开的途中被别的进程删掉）时报错，调用方好收掉刚开的会话和
+    /// 工作树。
     pub fn set_started(
         &self,
         id: &str,
         started: u64,
         session: SessionId,
         worktree: Option<(&Path, &str)>,
+        fresh: bool,
     ) -> Result<()> {
         let changed = self
             .conn
             .execute(
-                "UPDATE todos SET started = ?2, session = ?3,
-             worktree_dir = COALESCE(?4, worktree_dir), branch = COALESCE(?5, branch)
+                "UPDATE todos SET started = ?2, session = ?3, queued = 0, after_todo = NULL,
+             worktree_dir = COALESCE(?4, worktree_dir), branch = COALESCE(?5, branch),
+             outcome = CASE WHEN ?6 THEN NULL ELSE outcome END, result = CASE WHEN ?6 THEN NULL ELSE result END
          WHERE id = ?1",
                 params![
                     id,
@@ -426,6 +481,7 @@ impl Store {
                     session.to_string(),
                     worktree.map(|(dir, _)| path_bytes(dir)),
                     worktree.map(|(_, branch)| branch),
+                    fresh,
                 ],
             )
             .map_err(failed)?;
@@ -433,6 +489,28 @@ impl Store {
             return Err(format!("no todo {id}"));
         }
         Ok(())
+    }
+
+    /// 记下任务的结局和结果，`None` 的那项不动。没有这个任务时为假。
+    pub fn set_outcome(&self, id: &str, outcome: Option<Outcome>, result: Option<&str>) -> Result<bool> {
+        let changed = self
+            .conn
+            .execute(
+                "UPDATE todos SET outcome = COALESCE(?2, outcome), result = COALESCE(?3, result) WHERE id = ?1",
+                params![id, outcome.map(Outcome::name), result],
+            )
+            .map_err(failed)?;
+        Ok(changed > 0)
+    }
+
+    /// 记下 agent 报的结局，结果换成 `result`：没带结果时清掉，不留宿主存的屏幕或者上一次报的话。没有这个任务时
+    /// 为假。
+    pub fn report(&self, id: &str, outcome: Outcome, result: Option<&str>) -> Result<bool> {
+        let changed = self
+            .conn
+            .execute("UPDATE todos SET outcome = ?2, result = ?3 WHERE id = ?1", params![id, outcome.name(), result])
+            .map_err(failed)?;
+        Ok(changed > 0)
     }
 
     /// 完成了、有工作树、还没清过的任务：宿主清掉它们的工作树和分支后用 `set_swept` 记下。
@@ -472,13 +550,87 @@ impl Store {
         Ok(())
     }
 
-    /// 删掉任务，返回删掉的那张；没有时为空。
-    pub fn remove_todo(&self, id: &str) -> Result<Option<Todo>> {
+    /// 删掉任务，返回删掉的那张；没有时为空。排队等它的任务不再等。
+    pub fn remove_todo(&mut self, id: &str) -> Result<Option<Todo>> {
+        let tx = self.conn.transaction().map_err(failed)?;
         // 一条语句删掉并取回：先读再删的话，中间别的进程改过的会读成旧的。
-        self.conn
+        let removed = tx
             .query_row(&format!("DELETE FROM todos WHERE id = ?1 RETURNING {TODO_COLUMNS}"), [id], todo)
             .optional()
-            .map_err(failed)
+            .map_err(failed)?;
+        tx.execute("UPDATE todos SET after_todo = NULL WHERE after_todo = ?1", [id]).map_err(failed)?;
+        tx.commit().map_err(failed)?;
+        Ok(removed)
+    }
+
+    /// 让还没开始的任务排队（`after` 是要先等的任务）或者不再排队。没有这个任务时为假；任务已经开始了、
+    /// `after` 没有或者是它自己、等下去会绕回它自己时报错。
+    pub fn set_queued(&mut self, id: &str, queued: bool, after: Option<&str>) -> Result<bool> {
+        let tx = self.conn.transaction().map_err(failed)?;
+        let Some((started, number)) = tx
+            .query_row("SELECT started, number FROM todos WHERE id = ?1", [id], |row| {
+                Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()
+            .map_err(failed)?
+        else {
+            return Ok(false);
+        };
+        if queued && started.is_some() {
+            return Err(format!("todo #{number} has started"));
+        }
+        let after = after.filter(|_| queued);
+        // 顺着要等的那张往前找，找到自己就是绕了一圈；别的程序直接写库绕出的、不经过自己的圈走到重复的就停。
+        let mut next = after.map(str::to_owned);
+        let mut seen = std::collections::HashSet::new();
+        while let Some(current) = next {
+            if current == id {
+                return Err(format!("todo #{number} would wait for itself"));
+            }
+            if !seen.insert(current.clone()) {
+                break;
+            }
+            let Some(found) = tx
+                .query_row("SELECT after_todo FROM todos WHERE id = ?1", [&current], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
+                .optional()
+                .map_err(failed)?
+            else {
+                return Err(format!("no todo {current}"));
+            };
+            next = found;
+        }
+        tx.execute("UPDATE todos SET queued = ?2, after_todo = ?3 WHERE id = ?1", params![id, queued, after])
+            .map_err(failed)?;
+        tx.commit().map_err(failed)?;
+        Ok(true)
+    }
+
+    /// 停用或者接着用定时；接着用时从 `now` 算起。没有这个定时时为假。
+    pub fn set_paused(&self, id: &str, paused: bool, now: u64) -> Result<bool> {
+        let changed = self
+            .conn
+            .execute(
+                "UPDATE schedules SET paused = ?2,
+                     last_fired = CASE WHEN ?2 OR paused = 0 THEN last_fired ELSE ?3 END
+                 WHERE id = ?1",
+                params![id, paused, now as i64],
+            )
+            .map_err(failed)?;
+        Ok(changed > 0)
+    }
+
+    /// 看板的并发上限：最多几个任务的 agent 同时在干活，0 是不限。
+    pub fn max_running(&self) -> Result<u32> {
+        let value: i64 =
+            self.conn.query_row("SELECT value FROM meta WHERE key = 'max_running'", [], |row| row.get(0)).map_err(failed)?;
+        Ok(u32::try_from(value).unwrap_or(0))
+    }
+
+    pub fn set_max_running(&self, limit: u32) -> Result<()> {
+        self.conn.execute("UPDATE meta SET value = ?1 WHERE key = 'max_running'", [limit]).map_err(failed)?;
+        Ok(())
     }
 
     /// 把任务挪到 `before` 前面，为空时挪到最后。没有这个任务、或者没有 `before` 时报错。
@@ -510,11 +662,11 @@ impl Store {
     pub fn add_schedule(&mut self, spec: &TodoSpec, when: &When, now: u64) -> Result<String> {
         let tx = self.conn.transaction().map_err(failed)?;
         let id = new_id(&tx)?;
-        let (kind, [at, hour, minute, days, minutes]) = when_columns(when)?;
+        let (kind, [at, hour, minute, days, minutes], cron) = when_columns(when)?;
         tx.execute(
             &format!(
                 "INSERT INTO schedules ({SCHEDULE_COLUMNS})
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 0)"
             ),
             params![
                 id,
@@ -528,12 +680,14 @@ impl Store {
                 paths_bytes(&spec.attachments),
                 spec.auto,
                 spec.auto_done,
+                spec.time_limit,
                 kind,
                 at,
                 hour,
                 minute,
                 days,
                 minutes,
+                cron,
                 now as i64
             ],
         )
@@ -554,7 +708,7 @@ impl Store {
         if let Some(spec) = spec {
             tx.execute(
                 "UPDATE schedules SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6, skills = ?7,
-                     subagent = ?8, attachments = ?9, auto = ?10, auto_done = ?11
+                     subagent = ?8, attachments = ?9, auto = ?10, auto_done = ?11, time_limit = ?12
                  WHERE id = ?1",
                 params![
                     id,
@@ -567,18 +721,19 @@ impl Store {
                     spec.subagent,
                     paths_bytes(&spec.attachments),
                     spec.auto,
-                    spec.auto_done
+                    spec.auto_done,
+                    spec.time_limit
                 ],
             )
             .map_err(failed)?;
         }
         if let Some(when) = when {
-            let (kind, [at, hour, minute, days, minutes]) = when_columns(when)?;
+            let (kind, [at, hour, minute, days, minutes], cron) = when_columns(when)?;
             tx.execute(
                 "UPDATE schedules SET kind = ?2, at = ?3, hour = ?4, minute = ?5, days = ?6, minutes = ?7,
-                     last_fired = ?8
+                     cron = ?8, last_fired = ?9
                  WHERE id = ?1",
-                params![id, kind, at, hour, minute, days, minutes, now as i64],
+                params![id, kind, at, hour, minute, days, minutes, cron, now as i64],
             )
             .map_err(failed)?;
         }
@@ -589,15 +744,15 @@ impl Store {
         Ok(exists)
     }
 
-    /// 定时 `id` 到点了：照库里它现在的样子加一张任务、记下到点的时刻（一次性的删掉），都在一个事务里，
-    /// 中途失败或者进程退出时定时原样留着、下一轮再试。定时已经删掉了、或者照现在的样子还没到点（读出来
+    /// 定时 `id` 到点了：照库里它现在的样子加一张排着队的任务、记下到点的时刻（一次性的删掉），都在一个事务里，
+    /// 中途失败或者进程退出时定时原样留着、下一轮再试。定时已经删掉了、停着、或者照现在的样子还没到点（读出来
     /// 以后被改过）时什么都不做，为空。返回新任务的标识。
     pub fn fire_schedule(&mut self, id: &str, now: u64) -> Result<Option<String>> {
         let tx = self.conn.transaction().map_err(failed)?;
-        let Some(current) = due_schedule(&tx, id, now)? else {
+        let Some(current) = due_schedule(&tx, id, now)?.filter(|current| !current.paused) else {
             return Ok(None);
         };
-        let todo = insert_todo(&tx, &current.spec, now, Some(id))?;
+        let todo = insert_todo(&tx, &current.spec, now, Some(id), true)?;
         mark_fired(&tx, &current, now)?;
         tx.commit().map_err(failed)?;
         Ok(Some(todo))

@@ -467,6 +467,7 @@ impl FakeHost {
                         handoff: 0,
                         keep_awake: false,
                         todos: self.todos.lock().unwrap().is_some(),
+                        board: 0,
                         shells: false,
                         desktops: 0,
                         os: String::new(),
@@ -499,7 +500,7 @@ impl FakeHost {
                 ClientMsg::ListTodos { req } => {
                     self.list_todos.fetch_add(1, Ordering::SeqCst);
                     let todos = self.todos.lock().unwrap().clone().expect("an old host got ListTodos");
-                    if !write(&writer, &HostMsg::Todos { req, todos, schedules: Vec::new() }) {
+                    if !write(&writer, &HostMsg::Todos { req, todos, schedules: Vec::new(), max_running: 0 }) {
                         return;
                     }
                     HostMsg::TodosChanged
@@ -638,6 +639,10 @@ fn finished_todos_are_pushed() {
         done_at: None,
         schedule: None,
         rank: 0,
+        outcome: None,
+        result: None,
+        queued: false,
+        after: None,
     };
     *host.todos.lock().unwrap() = Some(vec![todo]);
     let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();

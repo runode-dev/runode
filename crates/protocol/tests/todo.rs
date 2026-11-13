@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use runode_protocol::{
     SessionId, SessionInfo,
     todo::{
-        Column, DropAction, START_GRACE, Todo, TodoSpec, When, column, drop_action, finished_by_agent, holds_schedule,
+        Column, DropAction, Outcome, START_GRACE, Todo, TodoSpec, When, column, drop_action, finished_by_agent,
+        holds_schedule,
     },
 };
 use runode_types::{
@@ -37,6 +38,10 @@ fn todo() -> Todo {
         done_at: None,
         schedule: None,
         rank: 0,
+        outcome: None,
+        result: None,
+        queued: false,
+        after: None,
     }
 }
 
@@ -139,6 +144,26 @@ fn only_an_idle_agent_past_the_grace_finishes_an_auto_done_todo() {
     }
     let done = Todo { done_at: Some(LATER), ..auto() };
     assert!(!finished_by_agent(&done, Some(&idle), LATER));
+
+    // 报了没做成的不算；报了做完的退回 shell 也算，没报的退回 shell 不算。
+    let reported = |outcome| Todo { outcome: Some(outcome), ..auto() };
+    let shell = session(None, true);
+    assert!(!finished_by_agent(&reported(Outcome::Failed), Some(&idle), LATER));
+    assert!(!finished_by_agent(&reported(Outcome::Unknown), Some(&idle), LATER));
+    for outcome in [Outcome::Ok, Outcome::Silent] {
+        assert!(finished_by_agent(&reported(outcome), Some(&idle), LATER));
+        assert!(finished_by_agent(&reported(outcome), Some(&shell), LATER));
+        assert!(!finished_by_agent(&reported(outcome), Some(&session(None, false)), LATER));
+    }
+}
+
+/// 自动完成的任务叫 agent 做完时报结局，别的不叫。
+#[test]
+fn unattended_tasks_ask_the_agent_to_report() {
+    assert!(!todo().spec.instructions().contains("runode todo report"));
+    let auto = TodoSpec { auto_done: true, ..todo().spec };
+    assert!(auto.instructions().starts_with("Fix login\n\n"));
+    assert!(auto.instructions().contains("runode todo report ok"));
 }
 
 /// 旧的前端、库里没有 `auto_done` 时读成关着。
@@ -202,5 +227,9 @@ fn when_is_tagged_by_kind_and_unknown_kinds_never_fire() {
     );
     assert_eq!(serde_json::from_str::<When>(r#"{"kind":"every","minutes":15}"#).unwrap(), When::Every { minutes: 15 });
     assert_eq!(serde_json::from_str::<When>(r#"{"kind":"once","at":5}"#).unwrap(), When::Once { at: 5 });
-    assert_eq!(serde_json::from_str::<When>(r#"{"kind":"cron","expr":"* * * * *"}"#).unwrap(), When::Unknown);
+    assert_eq!(
+        serde_json::from_str::<When>(r#"{"kind":"cron","expr":"*/5 * * * *"}"#).unwrap(),
+        When::Cron { expr: "*/5 * * * *".into() }
+    );
+    assert_eq!(serde_json::from_str::<When>(r#"{"kind":"sunset","offset":5}"#).unwrap(), When::Unknown);
 }

@@ -7090,6 +7090,7 @@ dependencies = [
  "libc",
  "qrcode",
  "regex",
+ "runode-agent",
  "runode-autostart",
  "runode-config",
  "runode-paths",

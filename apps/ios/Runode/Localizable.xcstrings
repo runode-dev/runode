@@ -847,6 +847,30 @@
         }
       }
     },
+    "todo.failed.title" : {
+      "comment" : "电脑推来的任务没做成通知的标题（APNs 的 title-loc-key），不带参数；副标题同 agent.blocked.body，是任务标题和电脑名，正文是 agent 报的结果。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Task failed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务没做成"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務沒做成"
+          }
+        }
+      }
+    },
     "−%u" : {
       "extractionState" : "manual",
       "localizations" : {

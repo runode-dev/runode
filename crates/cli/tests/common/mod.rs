@@ -100,7 +100,7 @@ fn serve(mut stream: UnixStream, tx: &mpsc::Sender<Received>, script: &Mutex<imp
     }
 }
 
-/// 回 `Hello` 的 `Welcome`；`todos` 是宿主认得看板的消息。
+/// 回 `Hello` 的 `Welcome`；`todos` 是宿主认得看板的消息，认得时也认得这个版本看板的全部消息。
 pub fn welcome(todos: bool) -> HostMsg {
     HostMsg::Welcome {
         protocol: PROTOCOL_VERSION,
@@ -111,6 +111,7 @@ pub fn welcome(todos: bool) -> HostMsg {
         handoff: 0,
         keep_awake: false,
         todos,
+        board: if todos { runode_protocol::todo::BOARD_LEVEL } else { 0 },
         shells: false,
         desktops: 0,
         os: String::new(),

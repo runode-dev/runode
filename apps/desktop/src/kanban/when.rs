@@ -30,6 +30,7 @@ pub(super) fn describe_when(when: &When) -> String {
             rust_i18n::t!("kanban.when.every_hours", count = minutes / 60).into_owned()
         }
         When::Every { minutes } => rust_i18n::t!("kanban.when.every_minutes", count = minutes).into_owned(),
+        When::Cron { ref expr } => rust_i18n::t!("kanban.when.cron", expr = expr).into_owned(),
         When::Unknown => rust_i18n::t!("kanban.when.unknown").into_owned(),
     }
 }

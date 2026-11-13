@@ -12,7 +12,7 @@ use common::*;
 use runode_cli::exit;
 use runode_protocol::{
     ClientMsg, HostMsg, SessionId,
-    todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When},
+    todo::{DEFAULT_AGENT, Outcome, Schedule, Todo, TodoSpec, When},
 };
 use runode_types::agent::{AgentKind, AgentState};
 use unicode_width::UnicodeWidthStr as _;
@@ -57,6 +57,10 @@ fn todo(id: &str, title: &str) -> Todo {
         done_at: None,
         schedule: None,
         rank: 0,
+        outcome: None,
+        result: None,
+        queued: false,
+        after: None,
     }
 }
 
@@ -69,7 +73,7 @@ fn host(name: &str, todos: Vec<Todo>, schedules: Vec<Schedule>) -> FakeHost {
         }],
         ClientMsg::ListTodos { req } => {
             vec![
-                HostMsg::Todos { req: *req, todos: todos.clone(), schedules: schedules.clone() },
+                HostMsg::Todos { req: *req, todos: todos.clone(), schedules: schedules.clone(), max_running: 2 },
                 HostMsg::TodosChanged,
             ]
         }
@@ -86,11 +90,38 @@ fn host(name: &str, todos: Vec<Todo>, schedules: Vec<Schedule>) -> FakeHost {
         }
         ClientMsg::UpdateTodo { req, .. }
         | ClientMsg::RemoveTodo { req, .. }
-        | ClientMsg::RemoveSchedule { req, .. } => {
+        | ClientMsg::RemoveSchedule { req, .. }
+        | ClientMsg::ReportTodo { req, .. }
+        | ClientMsg::QueueTodo { req, .. }
+        | ClientMsg::PauseSchedule { req, .. }
+        | ClientMsg::SetMaxRunning { req, .. } => {
             vec![HostMsg::Done { req: *req }]
         }
         _ => vec![],
     })
+}
+
+/// 排队、并发上限和停用定时都交给宿主：加任务时排队跟在加的后面发。
+#[test]
+fn queue_limit_and_pause_go_to_the_host() {
+    let fake = host("todoqueue", vec![], vec![]);
+    let (code, out, err) = run("todo add docs --after 3 --no-worktree", &fake.env);
+    assert_eq!((code, out.as_str()), (exit::OK, "0000abcd\n"), "{err}");
+    let sent = requests(&fake);
+    let [ClientMsg::AddTodo { .. }, ClientMsg::QueueTodo { id, queued: true, after, .. }] = sent.as_slice() else {
+        panic!("{sent:?}")
+    };
+    assert_eq!((id.as_str(), after.as_deref()), ("0000abcd", Some("3")));
+
+    let fake = host("todolimit", vec![], vec![]);
+    assert_eq!(run("todo limit", &fake.env).1, "2\n");
+    assert_eq!(run("todo limit 4", &fake.env).0, exit::OK);
+    assert_eq!(run("todo unqueue 6", &fake.env).0, exit::OK);
+    assert_eq!(run("schedule pause 0000cafe", &fake.env).0, exit::OK);
+    let sent = requests(&fake);
+    assert!(sent.iter().any(|message| matches!(message, ClientMsg::SetMaxRunning { max_running: 4, .. })));
+    assert!(sent.iter().any(|message| matches!(message, ClientMsg::QueueTodo { queued: false, after: None, .. })));
+    assert!(sent.iter().any(|message| matches!(message, ClientMsg::PauseSchedule { paused: true, .. })));
 }
 
 /// 收到的控制消息，去掉握手。
@@ -160,6 +191,72 @@ fn add_outside_a_repository_needs_no_worktree_and_start_follows() {
     assert!(
         matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if !spec.worktree && spec.auto_done)
     );
+}
+
+#[test]
+fn model_effort_and_unattended_options_go_into_the_spec() {
+    let fake = host("todomodel", vec![], vec![]);
+    let (code, _, err) = run(
+        "todo add docs --agent Codex --model gpt-5 --effort high --skill review --skill docs --auto --no-worktree",
+        &fake.env,
+    );
+    assert_eq!(code, exit::OK, "{err}");
+    let sent = requests(&fake);
+    let [ClientMsg::AddTodo { spec, .. }] = sent.as_slice() else { panic!("{sent:?}") };
+    assert_eq!(spec.agent, "codex -m gpt-5 -c model_reasoning_effort=high");
+    assert_eq!(spec.skills, ["review", "docs"]);
+    assert!(spec.auto);
+    assert_eq!(spec.time_limit, None);
+
+    let fake = host("todotimelimit", vec![], vec![]);
+    assert_eq!(run("todo add docs --time-limit 45 --no-worktree", &fake.env).0, exit::OK);
+    assert!(
+        matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if spec.time_limit == Some(45))
+    );
+    assert!(run("todo add docs --time-limit 0", &fake.env).2.contains("--time-limit takes minutes"));
+
+    // 只给模型也行；自己写的命令、带引号的模型名和没法挑强度的组合在发出去之前就报错。
+    let fake = host("todomodelonly", vec![], vec![]);
+    assert_eq!(run("todo add docs --model opus --no-worktree", &fake.env).0, exit::OK);
+    assert!(
+        matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if spec.agent == "claude --model opus")
+    );
+    let fake = host("todomodelbad", vec![], vec![]);
+    let (code, _, err) = run_args(&["todo", "add", "x", "--agent", "codex --full-auto", "--model", "o3"], &fake);
+    assert_eq!(code, exit::FAILED);
+    assert!(err.contains("--agent to be one of"), "{err}");
+    let (code, _, err) = run_args(&["todo", "add", "x", "--model", "it's"], &fake);
+    assert_eq!(code, exit::FAILED);
+    assert!(err.contains("without quotes"), "{err}");
+    let (code, _, err) = run("todo add x --agent opencode --effort high", &fake.env);
+    assert_eq!(code, exit::FAILED);
+    assert!(err.contains("cannot pick an effort"), "{err}");
+    assert!(requests(&fake).is_empty());
+}
+
+/// `todo report` 报的是自己所在的会话最近开始的那张任务；不在任务的终端里时不发。
+#[test]
+fn report_goes_to_the_task_of_the_own_terminal() {
+    let mut older = todo("00000001", "older");
+    (older.session, older.started) = (Some(SessionId(S)), Some(10));
+    let mut newer = todo("00000002", "newer");
+    (newer.session, newer.started) = (Some(SessionId(S)), Some(20));
+    let other = todo("00000003", "other");
+    let mut fake = host("todoreport", vec![older, newer, other], vec![]);
+    fake.env.session = Some(SessionId(S).to_string());
+    let (code, _, err) = run("todo report failed tests do not pass", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    let sent = requests(&fake);
+    let Some(ClientMsg::ReportTodo { id, outcome, result, .. }) = sent.last() else { panic!("{sent:?}") };
+    assert_eq!((id.as_str(), *outcome, result.as_str()), ("00000002", Outcome::Failed, "tests do not pass"));
+
+    assert!(run("todo report maybe", &fake.env).2.contains("ok, silent or failed"));
+    fake.env.session = Some(SessionId(S + 1).to_string());
+    let (code, _, err) = run("todo report ok", &fake.env);
+    assert_eq!(code, exit::FAILED);
+    assert!(err.contains("runs no task"), "{err}");
+    fake.env.session = None;
+    assert!(run("todo report ok", &fake.env).2.contains("not a Runode terminal"));
 }
 
 /// 标题、提示词里的控制字符（转义序列、换行）不原样打到终端上：不清屏、不把表格的一行拆成几行。
@@ -249,6 +346,7 @@ fn show_prints_everything_about_one_task() {
         when: When::Every { minutes: 60 },
         last_fired: 0,
         next_fire: None,
+        paused: false,
     };
     let fake = host("todoshow", vec![gone], vec![nightly]);
     let (code, out, err) = run("todo show #4", &fake.env);
@@ -385,6 +483,7 @@ fn schedule_list_writes_when_and_next_in_local_time() {
         when,
         last_fired: 0,
         next_fire,
+        paused: false,
     };
     let fake = host(
         "schedlist",

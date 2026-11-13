@@ -1111,6 +1111,10 @@ kanban:
   reopen: 取消完成
   edit: 編輯任務
   in_review: "待審查"
+  failed: "沒做成"
+  queued: "排隊中"
+  queued_after: "等 #%{number}"
+  paused: "已停用"
   create_pr: "推送分支並開 PR"
   remove_todo: 刪除任務
   remove_title: "刪除「%{title}」？"
@@ -1122,6 +1126,8 @@ kanban:
   save_and_start: 儲存並開始
   edit_schedule: 編輯定時
   remove_schedule: 刪除定時
+  pause_schedule: 停用定時
+  resume_schedule: 恢復定時
   remove_schedule_detail: 它的提示詞和定時規則會一起刪掉，刪了找不回來。
   schedules_need_host: "定時只在終端機宿主執行時生效。要在結束 Runode 後、重新登入後也照常跑，在設定裡打開「結束後保留工作階段」和「登入時在背景啟動宿主」。"
   schedules_open_settings: 打開設定
@@ -1170,6 +1176,7 @@ kanban:
     weekly: "%{days} %{time}"
     every_hours: "每 %{count} 小時"
     every_minutes: "每 %{count} 分鐘"
+    cron: "cron %{expr}"
     unknown: 看不懂的定時
   first_weekday: "1"
   weekday:

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use runode_todo::{DONE_KEPT, Store};
 use runode_types::{
     session::SessionId,
-    todo::{TodoSpec, When},
+    todo::{Outcome, TodoSpec, When},
 };
 use rusqlite::Connection;
 fn spec(title: &str) -> TodoSpec {
@@ -40,8 +40,8 @@ fn todos_round_trip_and_keep_their_order() {
     assert_eq!(ids(&store, 200), [a.clone(), b.clone(), c.clone()]);
 
     let session = SessionId(0xabc);
-    store.set_started(&b, 150, session, Some((Path::new("/src/app/.worktrees/b"), "runode/b"))).unwrap();
-    assert!(store.set_started("nothere", 150, session, None).is_err());
+    store.set_started(&b, 150, session, Some((Path::new("/src/app/.worktrees/b"), "runode/b")), true).unwrap();
+    assert!(store.set_started("nothere", 150, session, None, true).is_err());
     let read = store.todo_by_id(&b).unwrap().unwrap();
     assert_eq!(
         (read.started, read.session, read.worktree_dir.as_deref(), read.branch.as_deref(), read.schedule.as_deref()),
@@ -125,6 +125,7 @@ fn skills_subagent_attachments_and_auto_round_trip() {
         attachments: vec!["/tmp/a b.png".into(), "/src/app/spec.md".into()],
         auto: true,
         auto_done: true,
+        time_limit: Some(45),
         ..spec("full")
     };
     let id = store.add_todo(&full, 100, None).unwrap();
@@ -140,7 +141,7 @@ fn skills_subagent_attachments_and_auto_round_trip() {
     assert_eq!(store.list_schedules().unwrap()[0].spec, empty);
 }
 
-/// 版本 3 的库升上来：原有的任务和定时留着，`auto_done` 读成关着，之后能照常写。
+/// 版本 3 的库一路升上来：原有的任务和定时留着，`auto_done` 读成关着、没有结局，之后能照常写。
 #[test]
 fn upgrades_a_version_3_database() {
     let path = temp_db("v3");
@@ -153,15 +154,115 @@ fn upgrades_a_version_3_database() {
         .execute_batch(
             "ALTER TABLE todos DROP COLUMN auto_done;
              ALTER TABLE schedules DROP COLUMN auto_done;
+             ALTER TABLE todos DROP COLUMN outcome;
+             ALTER TABLE todos DROP COLUMN result;
+             ALTER TABLE todos DROP COLUMN time_limit;
+             ALTER TABLE todos DROP COLUMN queued;
+             ALTER TABLE todos DROP COLUMN after_todo;
+             ALTER TABLE schedules DROP COLUMN time_limit;
+             ALTER TABLE schedules DROP COLUMN paused;
+             ALTER TABLE schedules DROP COLUMN cron;
+             DELETE FROM meta WHERE key = 'max_running';
              PRAGMA user_version = 3;",
         )
         .unwrap();
     let mut store = Store::open(&path).unwrap();
-    assert_eq!(store.todo_by_id(&todo).unwrap().unwrap().spec, spec("old"));
-    assert_eq!(store.list_schedules().unwrap()[0].spec, spec("old"));
+    let read = store.todo_by_id(&todo).unwrap().unwrap();
+    assert_eq!((read.spec, read.outcome, read.result, read.queued), (spec("old"), None, None, false));
+    let schedule = &store.list_schedules().unwrap()[0];
+    assert_eq!((&schedule.spec, schedule.paused), (&spec("old"), false));
+    assert_eq!(store.max_running().unwrap(), 0);
     let auto_done = TodoSpec { auto_done: true, ..spec("old") };
     assert!(store.update_todo(&todo, Some(&auto_done), None).unwrap());
     assert!(store.todo_by_id(&todo).unwrap().unwrap().spec.auto_done);
+    assert!(store.set_outcome(&todo, Some(Outcome::Ok), Some("done")).unwrap());
+}
+
+/// 结局和结果：只改给了的那项；重新开始时清掉，接着上次的对话时留着。
+#[test]
+fn outcomes_are_kept_until_the_todo_starts_afresh() {
+    let store_path = temp_db("outcome");
+    let mut store = Store::open(&store_path).unwrap();
+    let id = store.add_todo(&spec("t"), 100, None).unwrap();
+    let read = |store: &Store| {
+        let todo = store.todo_by_id(&id).unwrap().unwrap();
+        (todo.outcome, todo.result)
+    };
+    assert!(store.set_outcome(&id, None, Some("screen")).unwrap());
+    assert_eq!(read(&store), (None, Some("screen".into())));
+    assert!(store.set_outcome(&id, Some(Outcome::Failed), Some("tests fail")).unwrap());
+    assert!(store.set_outcome(&id, Some(Outcome::Silent), None).unwrap());
+    assert_eq!(read(&store), (Some(Outcome::Silent), Some("tests fail".into())));
+    assert!(!store.set_outcome("nothere", Some(Outcome::Ok), None).unwrap());
+    // agent 报的结局把结果整个换掉，没带话时清掉。
+    assert!(store.report(&id, Outcome::Ok, None).unwrap());
+    assert_eq!(read(&store), (Some(Outcome::Ok), None));
+    assert!(store.report(&id, Outcome::Silent, Some("tests fail")).unwrap());
+    assert!(!store.report("nothere", Outcome::Ok, None).unwrap());
+
+    store.set_started(&id, 200, SessionId(1), None, false).unwrap();
+    assert_eq!(read(&store), (Some(Outcome::Silent), Some("tests fail".into())));
+    store.set_started(&id, 300, SessionId(2), None, true).unwrap();
+    assert_eq!(read(&store), (None, None));
+    // 别的版本写的结局读成 `Unknown`。
+    Connection::open(&store_path).unwrap().execute("UPDATE todos SET outcome = 'later'", []).unwrap();
+    assert_eq!(read(&store).0, Some(Outcome::Unknown));
+}
+
+/// 排队：开始以后不再排队；等的任务不能绕回自己，删掉了就不再等。
+#[test]
+fn queued_todos_wait_without_cycles() {
+    let mut store = Store::open(&temp_db("queue")).unwrap();
+    let first = store.add_todo(&spec("first"), 100, None).unwrap();
+    let second = store.add_todo(&spec("second"), 100, None).unwrap();
+    let third = store.add_todo(&spec("third"), 100, None).unwrap();
+    let read = |store: &Store, id: &str| {
+        let todo = store.todo_by_id(id).unwrap().unwrap();
+        (todo.queued, todo.after)
+    };
+    assert!(store.set_queued(&second, true, Some(&first)).unwrap());
+    assert!(store.set_queued(&third, true, Some(&second)).unwrap());
+    assert_eq!(read(&store, &third), (true, Some(second.clone())));
+    let err = store.set_queued(&first, true, Some(&third)).unwrap_err();
+    assert!(err.contains("wait for itself"), "{err}");
+    assert!(store.set_queued(&first, true, Some(&first)).is_err());
+    assert!(store.set_queued(&first, true, Some("nothere")).is_err());
+    assert!(!store.set_queued("nothere", true, None).unwrap());
+    // 不排队时也不再等。
+    assert!(store.set_queued(&third, false, Some(&second)).unwrap());
+    assert_eq!(read(&store, &third), (false, None));
+
+    store.remove_todo(&first).unwrap();
+    assert_eq!(read(&store, &second), (true, None));
+    store.set_started(&second, 200, SessionId(1), None, true).unwrap();
+    assert_eq!(read(&store, &second), (false, None));
+    assert!(store.set_queued(&second, true, None).unwrap_err().contains("has started"));
+
+    assert_eq!(store.max_running().unwrap(), 0);
+    store.set_max_running(3).unwrap();
+    assert_eq!(store.max_running().unwrap(), 3);
+}
+
+/// 停着的定时到点不开任务；接着用时从那一刻算起，停着时错过的不补。定时开出的任务排着队，cron 存得住。
+#[test]
+fn paused_schedules_do_not_fire() {
+    let mut store = Store::open(&temp_db("pause")).unwrap();
+    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, 100).unwrap();
+    assert!(store.set_paused(&every, true, 150).unwrap());
+    assert!(store.list_schedules().unwrap()[0].paused);
+    assert_eq!(store.fire_schedule(&every, 1_000).unwrap(), None);
+    assert!(store.set_paused(&every, false, 2_000).unwrap());
+    // 已经在用时再说接着用，不挪起点。
+    assert!(store.set_paused(&every, false, 3_000).unwrap());
+    let schedule = &store.list_schedules().unwrap()[0];
+    assert_eq!((schedule.paused, schedule.last_fired), (false, 2_000));
+    assert!(!store.set_paused("nothere", true, 0).unwrap());
+    let todo = store.fire_schedule(&every, 2_060).unwrap().unwrap();
+    assert!(store.todo_by_id(&todo).unwrap().unwrap().queued);
+
+    let cron = When::Cron { expr: "30 9 * * 1-5".into() };
+    store.add_schedule(&spec("standup"), &cron, 100).unwrap();
+    assert_eq!(store.list_schedules().unwrap()[1].when, cron);
 }
 
 #[test]
@@ -322,9 +423,9 @@ fn done_sessions_lists_every_finished_todo_session() {
     let recent = store.add_todo(&spec("recent"), 101, None).unwrap();
     let old = store.add_todo(&spec("old"), 102, None).unwrap();
     let never_started = store.add_todo(&spec("never"), 103, None).unwrap();
-    store.set_started(&open, 110, SessionId(1), None).unwrap();
-    store.set_started(&recent, 110, SessionId(2), None).unwrap();
-    store.set_started(&old, 110, SessionId(3), None).unwrap();
+    store.set_started(&open, 110, SessionId(1), None, true).unwrap();
+    store.set_started(&recent, 110, SessionId(2), None, true).unwrap();
+    store.set_started(&old, 110, SessionId(3), None, true).unwrap();
     store.update_todo(&recent, None, Some(Some(200 + DONE_KEPT))).unwrap();
     store.update_todo(&old, None, Some(Some(1))).unwrap();
     store.update_todo(&never_started, None, Some(Some(200 + DONE_KEPT))).unwrap();

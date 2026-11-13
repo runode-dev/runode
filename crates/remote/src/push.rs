@@ -427,6 +427,15 @@ impl Poller {
                         self.sender.notify(targets);
                     }
                 }
+                Action::TodoFailed(id, title, lines) => {
+                    let targets = self.targets(settings, |registration| {
+                        let (machine, name) = (registration.machine.clone(), &registration.machine_name);
+                        Notification::todo_failed(machine, name, id, &title, &lines)
+                    });
+                    if !targets.is_empty() {
+                        self.sender.notify(targets);
+                    }
+                }
                 Action::Cancel(id) => self.sender.cancel(id),
             }
         }

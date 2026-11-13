@@ -270,20 +270,25 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
         Command::ServiceUninstall { kind } => crate::service::uninstall(env, kind, out)?,
         Command::ServiceStatus => crate::service::status(env, out)?,
         Command::ServiceUpgrade => crate::service::upgrade(env, out)?,
-        Command::TodoAdd { title, prompt, cwd, agent, worktree, auto_done, start } => {
-            crate::todo::add(env, crate::todo::Spec { title, prompt, cwd, agent, worktree, auto_done }, start, out)?
-        }
+        Command::TodoAdd { spec, start, queue } => crate::todo::add(env, spec, start, queue, out)?,
+        Command::TodoQueue { id, queue } => crate::todo::queue(env, id, queue)?,
+        Command::TodoLimit { limit } => crate::todo::limit(env, limit, out)?,
         Command::TodoList { json } => crate::todo::list(env, json, out)?,
         Command::TodoShow { id, json } => crate::todo::show(env, &id, json, out)?,
         Command::TodoStart { id } => crate::todo::start(env, &id, out)?,
         Command::TodoDone { id } => crate::todo::done(env, id)?,
         Command::TodoRemove { id } => crate::todo::remove(env, id)?,
-        Command::ScheduleAdd { title, prompt, cwd, agent, worktree, auto_done, timing } => {
-            let spec = crate::todo::Spec { title, prompt, cwd, agent, worktree, auto_done };
-            crate::todo::add_schedule(env, spec, timing, out)?
+        Command::TodoReport { outcome, text } => {
+            let text = match text {
+                Text::Given(text) => text,
+                Text::Stdin => stdin_text()?,
+            };
+            crate::todo::report(env, outcome, text)?
         }
+        Command::ScheduleAdd { spec, timing } => crate::todo::add_schedule(env, spec, timing, out)?,
         Command::ScheduleList { json } => crate::todo::list_schedules(env, json, out)?,
         Command::ScheduleRemove { id } => crate::todo::remove_schedule(env, id)?,
+        Command::SchedulePause { id, paused } => crate::todo::pause_schedule(env, id, paused)?,
         Command::Completions { shell } => out.write_all(crate::complete::script(shell).as_bytes())?,
     }
     Ok(())

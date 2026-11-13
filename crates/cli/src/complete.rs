@@ -92,6 +92,11 @@ const TIMEOUT: Opt = opt("--timeout", "Stop waiting after SECS", Value::Free);
 const LINES: Opt = opt("--lines", "Only the last N lines", Value::Free);
 
 const AGENTS: &[(&str, &str)] = &[("claude", "Claude Code"), ("codex", "Codex")];
+const OUTCOMES: &[(&str, &str)] = &[
+    ("ok", "Done, with a result worth telling"),
+    ("silent", "Done, nothing worth telling"),
+    ("failed", "Could not finish"),
+];
 
 const READ_OPTS: &[Opt] =
     &[LINES, opt("--command", "The output of the last (or the Nth last) command", Value::OptionalCount), HELP];
@@ -134,22 +139,41 @@ const TODO_ADD_OPTS: &[Opt] = &[
     PROMPT,
     CWD,
     AGENT,
+    MODEL,
+    EFFORT,
+    SKILL,
     opt("--no-worktree", "Work in the directory itself, not in a new worktree", Value::None),
+    AUTO,
     AUTO_DONE,
+    TIME_LIMIT,
+    opt("--queue", "Let Runode start it when fewer agents work than the limit", Value::None),
+    AFTER,
     opt("--start", "Start the task right away", Value::None),
     HELP,
 ];
+const MODEL: Opt = opt("--model", "The model the agent uses", Value::Free);
+const EFFORT: Opt = opt("--effort", "How hard the agent thinks", Value::Free);
+const SKILL: Opt = Opt { flag: "--skill", doc: "A skill the agent should use", value: Value::Free, repeatable: true };
+const AUTO: Opt = opt("--auto", "Let the agent work without asking for permission", Value::None);
 const AUTO_DONE: Opt = opt("--auto-done", "Mark the task done once its agent has worked and stopped", Value::None);
+const AFTER: Opt = opt("--after", "Queue it to start once this task is done", Value::Free);
+const TIME_LIMIT: Opt = opt("--time-limit", "Mark the task failed if it is not done within MINUTES", Value::Free);
 const SCHEDULE_ADD_OPTS: &[Opt] = &[
     opt("--at", "Once, at \"YYYY-MM-DD HH:MM\"", Value::Free),
     opt("--daily", "Every day at HH:MM", Value::Free),
     opt("--days", "With --daily: only on these days", Value::Choice(DAY_CHOICES)),
     opt("--every", "Every MINUTES minutes", Value::Free),
+    opt("--cron", "At the times a crontab line gives", Value::Free),
     PROMPT,
     CWD,
     AGENT,
+    MODEL,
+    EFFORT,
+    SKILL,
     opt("--worktree", "Give each task a new git worktree and branch", Value::None),
+    AUTO,
     AUTO_DONE,
+    TIME_LIMIT,
     HELP,
 ];
 const PAIR_OPTS: &[Opt] =
@@ -166,6 +190,7 @@ fn options(command: &str, sub: Option<&str>) -> &'static [Opt] {
         ("move", _) => MOVE_OPTS,
         ("swap", _) => SWAP_OPTS,
         ("todo", Some("add")) => TODO_ADD_OPTS,
+        ("todo", Some("queue")) => &[AFTER, HELP],
         ("todo", Some("list" | "show")) | ("schedule", Some("list")) | ("remote", Some("devices")) => &[JSON, HELP],
         ("schedule", Some("add")) => SCHEDULE_ADD_OPTS,
         ("remote", Some("pair")) => PAIR_OPTS,
@@ -372,8 +397,11 @@ fn candidates(previous: &[String], current: &str, env: &Env) -> (Also, Vec<(Stri
         ("todo" | "schedule" | "remote" | "service" | "completions", None, 0) => {
             (Also::Nothing, owned(subcommands(command)))
         }
-        ("todo", Some(sub @ ("show" | "start" | "done" | "rm")), 1) => (Also::Nothing, todos(env, sub)),
-        ("schedule", Some("rm"), 1) => (Also::Nothing, schedules(env)),
+        ("todo", Some(sub @ ("show" | "start" | "done" | "rm" | "queue" | "unqueue")), 1) => {
+            (Also::Nothing, todos(env, sub))
+        }
+        ("todo", Some("report"), 1) => (Also::Nothing, owned(OUTCOMES)),
+        ("schedule", Some("rm" | "pause" | "resume"), 1) => (Also::Nothing, schedules(env)),
         ("remote", Some("revoke"), 1) => (Also::Nothing, devices(env)),
         ("service", Some("install" | "uninstall"), 1) => (Also::Nothing, owned(&service_kinds())),
         _ => (Also::Nothing, Vec::new()),
@@ -483,8 +511,22 @@ mod tests {
             ("focus", &[None]),
             ("move", &[None]),
             ("swap", &[None]),
-            ("todo", &[Some("add"), Some("list"), Some("show"), Some("start"), Some("done"), Some("rm")]),
-            ("schedule", &[Some("add"), Some("list"), Some("rm")]),
+            (
+                "todo",
+                &[
+                    Some("add"),
+                    Some("list"),
+                    Some("show"),
+                    Some("start"),
+                    Some("done"),
+                    Some("rm"),
+                    Some("report"),
+                    Some("queue"),
+                    Some("unqueue"),
+                    Some("limit"),
+                ],
+            ),
+            ("schedule", &[Some("add"), Some("list"), Some("rm"), Some("pause"), Some("resume")]),
             ("remote", &[Some("pair"), Some("devices"), Some("revoke")]),
             ("service", &[Some("install"), Some("uninstall"), Some("status"), Some("upgrade")]),
             ("completions", &[Some("bash")]),
@@ -570,10 +612,29 @@ mod tests {
 
     #[test]
     fn subcommands_and_their_words() {
-        assert_eq!(complete_offline("todo ").1, ["add", "list", "show", "start", "done", "rm"]);
+        assert_eq!(
+            complete_offline("todo ").1,
+            ["add", "list", "show", "start", "done", "rm", "report", "queue", "unqueue", "limit"]
+        );
+        assert_eq!(complete_offline("todo report ").1, ["ok", "silent", "failed"]);
         assert_eq!(
             complete_offline("todo add --").1,
-            ["--prompt", "--cwd", "--agent", "--no-worktree", "--auto-done", "--start", "--help"]
+            [
+                "--prompt",
+                "--cwd",
+                "--agent",
+                "--model",
+                "--effort",
+                "--skill",
+                "--no-worktree",
+                "--auto",
+                "--auto-done",
+                "--time-limit",
+                "--queue",
+                "--after",
+                "--start",
+                "--help"
+            ]
         );
         assert_eq!(complete_offline("service install ").1, ["host", "app"]);
         assert_eq!(complete_offline("service install host ").1, Vec::<String>::new());
