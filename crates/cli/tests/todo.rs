@@ -210,9 +210,7 @@ fn model_effort_and_unattended_options_go_into_the_spec() {
 
     let fake = host("todotimelimit", vec![], vec![]);
     assert_eq!(run("todo add docs --time-limit 45 --no-worktree", &fake.env).0, exit::OK);
-    assert!(
-        matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if spec.time_limit == Some(45))
-    );
+    assert!(matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if spec.time_limit == Some(45)));
     assert!(run("todo add docs --time-limit 0", &fake.env).2.contains("--time-limit takes minutes"));
 
     // 只给模型也行；自己写的命令、带引号的模型名和没法挑强度的组合在发出去之前就报错。

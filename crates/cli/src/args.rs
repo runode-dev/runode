@@ -1096,7 +1096,9 @@ mod tests {
         assert_eq!(parse("todo start 0a1b2c3d"), Ok(Command::TodoStart { id: "0a1b2c3d".into() }));
         assert_eq!(parse("todo rm 0a1b2c3d"), Ok(Command::TodoRemove { id: "0a1b2c3d".into() }));
         assert!(parse("todo start").unwrap_err().contains("ID"));
-        assert!(parse("todo").unwrap_err().contains("add, list, show, start, done, rm, report, queue, unqueue or limit"));
+        assert!(
+            parse("todo").unwrap_err().contains("add, list, show, start, done, rm, report, queue, unqueue or limit")
+        );
         assert_eq!(
             parse("todo report ok fixed the  bug"),
             Ok(Command::TodoReport { outcome: Outcome::Ok, text: Text::Given("fixed the bug".into()) })
@@ -1146,7 +1148,10 @@ mod tests {
         );
         assert!(add(&["schedule", "add", "r", "--cron", "every morning"]).unwrap_err().contains("five fields"));
         assert!(parse("schedule add r").unwrap_err().contains("one of --at, --daily, --every and --cron"));
-        assert_eq!(parse("schedule pause 0a1b2c3d"), Ok(Command::SchedulePause { id: "0a1b2c3d".into(), paused: true }));
+        assert_eq!(
+            parse("schedule pause 0a1b2c3d"),
+            Ok(Command::SchedulePause { id: "0a1b2c3d".into(), paused: true })
+        );
         assert_eq!(
             parse("schedule resume 0a1b2c3d"),
             Ok(Command::SchedulePause { id: "0a1b2c3d".into(), paused: false })

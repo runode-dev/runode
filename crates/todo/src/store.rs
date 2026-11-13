@@ -623,8 +623,10 @@ impl Store {
 
     /// 看板的并发上限：最多几个任务的 agent 同时在干活，0 是不限。
     pub fn max_running(&self) -> Result<u32> {
-        let value: i64 =
-            self.conn.query_row("SELECT value FROM meta WHERE key = 'max_running'", [], |row| row.get(0)).map_err(failed)?;
+        let value: i64 = self
+            .conn
+            .query_row("SELECT value FROM meta WHERE key = 'max_running'", [], |row| row.get(0))
+            .map_err(failed)?;
         Ok(u32::try_from(value).unwrap_or(0))
     }
 

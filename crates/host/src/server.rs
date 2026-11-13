@@ -203,7 +203,7 @@ enum ToUi {
     /// 交出去了，登记的编号。
     Sent(u64),
     /// 没有界面连着，请求交回来。
-    NoDesktop(ClientMsg),
+    NoDesktop(Box<ClientMsg>),
     /// 界面的连接刚断开，撤掉的登记；读线程已经撤掉、替它回过话时为空。
     Gone(Option<Asker>),
 }
@@ -292,7 +292,7 @@ impl Shared {
         let Some((desktop, out)) =
             desktop.and_then(|desktop| Some((desktop, peers.connections.get(&desktop)?.out.clone()?)))
         else {
-            return ToUi::NoDesktop(request);
+            return ToUi::NoDesktop(Box::new(request));
         };
         let ui = peers.next_ui;
         peers.next_ui += 1;

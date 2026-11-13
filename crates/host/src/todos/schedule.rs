@@ -101,9 +101,8 @@ impl Shared {
         let mut running = todos
             .iter()
             .filter(|todo| {
-                todo.session.is_some_and(|session| {
-                    column(todo, self.session_info(session).as_ref(), now) == Column::InProgress
-                })
+                todo.session
+                    .is_some_and(|session| column(todo, self.session_info(session).as_ref(), now) == Column::InProgress)
             })
             .count();
         for todo in waiting {

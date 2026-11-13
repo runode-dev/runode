@@ -597,9 +597,7 @@ impl Connection {
                 self.todos(req, "host-report-todo", move |shared| shared.report_todo(req, &id, outcome, &result));
             }
             ClientMsg::QueueTodo { req, id, queued, after } => {
-                self.todos(req, "host-queue-todo", move |shared| {
-                    shared.queue_todo(req, &id, queued, after.as_deref())
-                });
+                self.todos(req, "host-queue-todo", move |shared| shared.queue_todo(req, &id, queued, after.as_deref()));
             }
             ClientMsg::PauseSchedule { req, id, paused } => {
                 self.todos(req, "host-pause-schedule", move |shared| shared.pause_schedule(req, &id, paused));
@@ -648,7 +646,7 @@ impl Connection {
         let preferred = self.by.and_then(|by| self.shared.registry().sessions.get(&by)?.desktop());
         match self.shared.send_to_ui(preferred, asker, request) {
             ToUi::Sent(_) => {}
-            ToUi::NoDesktop(request) => self.headless(req, request),
+            ToUi::NoDesktop(request) => self.headless(req, *request),
             ToUi::Gone(Some(Asker::Client { origin, req, .. })) => {
                 origin.control(&HostMsg::Error {
                     req: Some(req),

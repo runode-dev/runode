@@ -73,9 +73,7 @@ pub(super) fn check_when(when: &When, now: u64) -> Result<(), String> {
         When::Cron { ref expr } if !runode_todo::valid_cron(expr) => {
             Err(format!("{expr:?} is not a cron expression: minute hour day month weekday"))
         }
-        When::Cron { ref expr } if runode_todo::next_fire(when, now).is_none() => {
-            Err(format!("{expr:?} never comes"))
-        }
+        When::Cron { ref expr } if runode_todo::next_fire(when, now).is_none() => Err(format!("{expr:?} never comes")),
         When::Unknown => Err("unknown kind of schedule".into()),
         _ => Ok(()),
     }
