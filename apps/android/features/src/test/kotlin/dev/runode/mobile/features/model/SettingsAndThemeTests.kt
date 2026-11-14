@@ -98,6 +98,18 @@ class SettingsTests {
         for ((tags, language) in cases) assertEquals(language, AppLanguage.fromLanguageTags(tags), tags)
     }
 
+    @Test fun reconcilingFollowsTheSystemExceptForAnUnsyncedChoice() {
+        val en = AppLanguage.English
+        val system = AppLanguage.System
+        // 还没对齐过、系统空着而设置里选过语言：写给系统。
+        assertEquals(null, AppLanguage.reconcile(system, en, synced = false))
+        // 对齐过之后系统清空了，是用户在系统设置里改回跟随系统。
+        assertEquals(system, AppLanguage.reconcile(system, en, synced = true))
+        // 系统那边选过就以系统为准。
+        assertEquals(AppLanguage.TraditionalChinese, AppLanguage.reconcile(AppLanguage.TraditionalChinese, en, synced = false))
+        assertEquals(system, AppLanguage.reconcile(system, system, synced = false))
+    }
+
     @Test fun newTerminalsStartWithTheDefaultSize() = runTest {
         val app = app()
         app.settings.preferences = app.settings.preferences.copy(defaultSize = SizePreference.FitPhone)

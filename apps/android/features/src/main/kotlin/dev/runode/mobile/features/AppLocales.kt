@@ -45,6 +45,21 @@ object AppLocales {
         return AppLanguage.fromLanguageTags(locales.toLanguageTags())
     }
 
+    /**
+     * 启动时对齐设置里的 [stored] 和系统的分 App 语言（[AppLanguage.reconcile]），交回设置该改成的语言，不用改时为空；
+     * Android 13 以前没有分 App 语言，什么都不做。[synced] 是头一次对齐做过没有，对齐了就调 [markSynced]。
+     */
+    fun sync(context: Context, stored: AppLanguage, synced: Boolean, markSynced: () -> Unit): AppLanguage? {
+        val system = systemChoice(context) ?: return null
+        if (!synced) markSynced()
+        val language = AppLanguage.reconcile(system, stored, synced)
+        if (language == null) {
+            apply(context, stored)
+            return null
+        }
+        return language.takeIf { it != stored }
+    }
+
     private fun localeList(language: AppLanguage): LocaleList =
         language.tag?.let(LocaleList::forLanguageTags) ?: LocaleList.getEmptyLocaleList()
 }

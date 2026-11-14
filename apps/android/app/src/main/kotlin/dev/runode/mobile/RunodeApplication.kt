@@ -40,6 +40,11 @@ class RunodeApplication : Application() {
     val language: AppLanguage
         get() = model?.settings?.preferences?.language ?: preferences().load()?.language ?: AppLanguage.System
 
+    /** 头一次对齐设置和系统的界面语言做过没有（[AppLocales.sync]）。 */
+    var languageSynced: Boolean
+        get() = getSharedPreferences(DEFAULTS, MODE_PRIVATE).getBoolean(LANGUAGE_SYNCED, false)
+        set(value) = getSharedPreferences(DEFAULTS, MODE_PRIVATE).edit().putBoolean(LANGUAGE_SYNCED, value).apply()
+
     override fun onCreate() {
         super.onCreate()
         NativeIroh.context = applicationContext
@@ -105,5 +110,6 @@ class RunodeApplication : Application() {
     private companion object {
         const val DEFAULTS = "dev.runode.mobile.defaults"
         const val SPEECH_MODELS = "speech-models"
+        const val LANGUAGE_SYNCED = "languageSynced"
     }
 }

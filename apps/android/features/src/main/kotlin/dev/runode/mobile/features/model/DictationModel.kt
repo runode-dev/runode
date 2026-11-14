@@ -1,6 +1,7 @@
 package dev.runode.mobile.features.model
 
 import android.content.Context
+import android.content.res.Resources
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -16,7 +17,6 @@ import dev.runode.mobile.speech.SpeechModels
 import dev.runode.mobile.speech.SpeechRecorder
 import dev.runode.mobile.terminal.DictationPress
 import java.io.File
-import java.util.Locale
 import kotlin.time.ComparableTimeMark
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -83,6 +83,8 @@ class DictationModel internal constructor(
     isInstalled: (File) -> Boolean = SpeechModels::isInstalled,
     private val downloadModels: suspend (root: File, chinaFirst: Boolean, progress: (Long) -> Unit) -> Unit =
         SpeechModels::download,
+    /** 下载先试国内的镜像；测试里不碰系统的语言。 */
+    private val chinaFirst: () -> Boolean = { false },
 ) {
     /** [context] 用来录麦克风、查麦克风权限；为空时（测试、演示模式）语音输入报没有能用的麦克风。 */
     constructor(root: File, openSpeech: SpeechOpener?, context: Context?) : this(
@@ -91,6 +93,8 @@ class DictationModel internal constructor(
         makeRecorder = { onChunk -> if (context == null) NoMicrophone else SystemRecorder(SpeechRecorder(context, onChunk)) },
         transcribe = SpeechEngine(root)::transcribe,
         permitted = { context == null || SpeechRecorder.permitted(context) },
+        // 看系统的语言，不看界面的：界面可以在设置里单独换成英文，人还在国内。
+        chinaFirst = { Resources.getSystem().configuration.locales[0].language == "zh" },
     )
 
     sealed class Download {
@@ -164,10 +168,10 @@ class DictationModel internal constructor(
 
     // 模型
 
-    /** 在后台下载手机上的模型。中文界面先试 ModelScope，国内连 HuggingFace 常常不通。 */
+    /** 在后台下载手机上的模型。系统语言是中文时先试 ModelScope，国内连 HuggingFace 常常不通。 */
     fun startDownload() {
         if (downloading != null || installed) return
-        val chinaFirst = Locale.getDefault().language == "zh"
+        val chinaFirst = chinaFirst()
         download = Download.Running(0)
         val total = SpeechModels.downloadSize
         var shown = 0L

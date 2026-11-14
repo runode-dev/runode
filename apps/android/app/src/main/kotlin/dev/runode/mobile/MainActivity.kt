@@ -48,15 +48,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val demo = intent?.getStringExtra(DemoComposition.EXTRA)
-        app = (application as RunodeApplication).appModel(demo)
-        // 用户可能在系统设置里给本 App 换过语言，以系统的为准。
-        AppLocales.systemChoice(this)?.let { language ->
-            val settings = app.settings
-            if (language != settings.preferences.language) settings.preferences = settings.preferences.copy(language = language)
-        }
+        val application = application as RunodeApplication
+        app = application.appModel(demo)
+        val settings = app.settings
+        AppLocales.sync(this, settings.preferences.language, application.languageSynced) {
+            application.languageSynced = true
+        }?.let { language -> settings.preferences = settings.preferences.copy(language = language) }
         AndroidPushNotifications.shared(this)?.askPermission = askNotifications
         app.dictation.requestPermission = askMicrophone
-        (application as RunodeApplication).dependencies?.authenticate = authenticate
+        application.dependencies?.authenticate = authenticate
         if (savedInstanceState == null) {
             handle(intent)
             if (demo != null) DemoComposition.open(app, demo)

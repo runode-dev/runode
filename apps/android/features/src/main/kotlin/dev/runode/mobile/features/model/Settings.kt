@@ -49,6 +49,14 @@ enum class AppLanguage(val tag: String?) {
             }
         }
 
+        /**
+         * 启动时设置里是 [stored]、系统给本 App 定的是 [system] 时以哪边为准：交回设置该改成的语言，为空时反过来把 [stored]
+         * 写给系统。平常以系统为准，用户可能在系统设置里改过；还没对齐过（[synced] 为假）、系统空着而设置里选过语言时，
+         * 系统还不知道这个选择，以设置为准。
+         */
+        fun reconcile(system: AppLanguage, stored: AppLanguage, synced: Boolean): AppLanguage? =
+            if (!synced && system == System && stored != System) null else system
+
         /** 不写文字系统时按繁体中文算的地区。 */
         private val traditionalRegions = setOf("TW", "HK", "MO")
     }

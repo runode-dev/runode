@@ -117,10 +117,19 @@ public final class DictationModel {
 
     // MARK: 模型
 
-    /// 在后台下载手机上的模型。中文界面先试 ModelScope，国内连 HuggingFace 常常不通。
+    /// 系统语言是中文。设置里换过界面语言时 `Locale.preferredLanguages` 只剩选的那种、读不到系统的，改看系统地区是不是
+    /// 中国大陆：界面可以单独换成英文，人还在国内。
+    private static var chinaFirst: Bool {
+        if AppLocalization.stored() == .system {
+            return Locale.preferredLanguages.first?.hasPrefix("zh") ?? false
+        }
+        return Locale.current.region?.identifier == "CN"
+    }
+
+    /// 在后台下载手机上的模型。人多半在国内时先试 ModelScope，国内连 HuggingFace 常常不通。
     public func startDownload() {
         guard downloading == nil, !installed else { return }
-        let chinaFirst = Locale.preferredLanguages.first?.hasPrefix("zh") ?? false
+        let chinaFirst = Self.chinaFirst
         download = .running(0)
         let root = root
         downloading = Task { [weak self] in
