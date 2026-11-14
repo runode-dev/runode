@@ -176,7 +176,10 @@ impl WindowView {
         let active = workspace.active;
         let mut order = std::iter::once(active).chain((0..workspace.tabs.len()).filter(|ix| *ix != active));
         let existing = order.find_map(|ix| {
-            let (pane, (view, _)) = workspace.tabs[ix]
+            // workspace 里没有标签时 `active` 不指着任何标签。
+            let (pane, (view, _)) = workspace
+                .tabs
+                .get(ix)?
                 .panes
                 .iter()
                 .find(|(_, (view, _))| view.read(cx).runs_task(&action.name, &action.command, &dir))?;
