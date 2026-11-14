@@ -488,6 +488,8 @@
             spellCheckingType = .no
             smartQuotesType = .no
             smartDashesType = .no
+            // 画面四周常黑，键盘和跟在上面的快捷键栏不随 app 主题变浅。
+            keyboardAppearance = .dark
             alpha = 0.01
             addTarget(self, action: #selector(changed), for: .editingChanged)
             inputAccessoryView = ScreenKeyBar(model: model, resting: false) { [weak self] in
@@ -545,6 +547,8 @@
         init(model: ScreenModel, resting: Bool, onKeyboard: @escaping @MainActor () -> Void) {
             self.model = model
             super.init(resting: resting)
+            // 这一页的背景常黑，按钮的系统色要按深色取，浅色主题下才看得清。
+            overrideUserInterfaceStyle = .dark
             let keyboard = key(
                 resting ? "keyboard" : "keyboard.chevron.compact.down", symbol: true,
                 label: resting ? String(localized: "打开键盘") : String(localized: "收起键盘"), action: onKeyboard)
