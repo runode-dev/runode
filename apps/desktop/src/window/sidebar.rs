@@ -73,8 +73,8 @@ fn sidebar_background(cx: &App) -> Hsla {
     if cards(cx) { cx.theme().frame } else { cx.theme().mix(0.03) }
 }
 
-/// workspace 行右边的 agent 图标，一个 agent 一个，单色的 logo 染成 `fg`。右下角的圆点是那个 agent 的状态：
-/// 等回答琥珀色，在干活蓝色，干完了没看绿色，空闲不画；圆点描一圈 `ring`，压在图标上也分得开。认不出是哪家的
+/// workspace 行右边的 agent 图标，一个 agent 一个，单色的 logo 染成 `fg`。右下角的圆点按那个 agent 的
+/// 状态着色，空闲不画；圆点描一圈 `ring`，压在图标上也分得开。认不出是哪家的
 /// agent 画成提示符。图标定宽、不能截断，所以按 `room`（可用的宽度）少画几个，画不下的并进「+N」，至少画一个。
 fn agent_icons(agents: &[Mark], room: f32, ring: Hsla, fg: Hsla, cx: &App) -> Div {
     let theme = cx.theme();
