@@ -14,6 +14,8 @@ public struct AppPreferences: Hashable, Sendable, Codable {
     /// agent 停下来等回答时，由电脑经推送发通知提醒。关掉时向各台电脑注销推送。
     public var alertsBlockedAgents = true
     public var dictationSource: DictationSource = .phone
+    /// 终端页以外的界面用哪套配色；终端页总按各自会话的主题。
+    public var appearance: AppAppearance = .computer
 
     public init() {}
 
@@ -29,7 +31,29 @@ public struct AppPreferences: Hashable, Sendable, Codable {
         deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
         alertsBlockedAgents = try container.decodeIfPresent(Bool.self, forKey: .alertsBlockedAgents) ?? true
         dictationSource = try container.decodeIfPresent(DictationSource.self, forKey: .dictationSource) ?? .phone
+        appearance = try container.decodeIfPresent(AppAppearance.self, forKey: .appearance) ?? .computer
     }
+}
+
+/// 设置里的「主题」：终端页以外的界面用哪套配色。
+public enum AppAppearance: String, Hashable, Sendable, CaseIterable, Codable {
+    /// 从电脑上终端的主题推出来（`AppModel.computerTheme`）。
+    case computer
+    /// 内置的浅色主题 `AppTheme.light`。
+    case light
+    /// 内置的深色主题 `AppTheme.dark`。
+    case dark
+    /// 系统是深色模式时用 `AppTheme.dark`，否则用 `AppTheme.light`。
+    case system
+}
+
+/// 设置里的「语言」：界面文字用哪种语言，经 `AppLocalization` 存取，下次打开 App 时生效。
+public enum AppLanguage: String, Hashable, Sendable, CaseIterable, Codable {
+    /// 按系统的语言偏好挑 App 有译文的语言。
+    case system
+    case en
+    case zhHans = "zh-Hans"
+    case zhHant = "zh-Hant"
 }
 
 /// 设置页的视图模型：改了马上存；设备名变了告诉 `AppModel`，由它转给各台电脑的连接；等回答提醒的开关

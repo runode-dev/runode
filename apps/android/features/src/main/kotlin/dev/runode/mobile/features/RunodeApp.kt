@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,7 +38,7 @@ import dev.runode.mobile.features.ui.theme.themeColors
 
 /**
  * App 的根界面：首页，往里是 [AppModel.path] 上的会话列表、终端页这些。配对页、设置页盖在整个导航栈上。系统的返回键依次
- * 关掉配对页、设置页，再退回导航栈的上一页；在首页时交给系统。终端页以外的界面跟电脑上终端的主题走（[AppModel.theme]），
+ * 关掉配对页、设置页，再退回导航栈的上一页；在首页时交给系统。终端页以外的界面按设置里选的配色（[AppModel.theme]），
  * 终端页按它那个会话的主题上色。App 进出前台时告诉 [AppModel.setActive]。
  */
 @Composable
@@ -63,7 +64,7 @@ fun RunodeApp(app: AppModel) {
             else -> app.path = app.path.dropLast(1)
         }
     }
-    RunodeTheme(app.theme) {
+    RunodeTheme(app.theme(isSystemInDarkTheme())) {
         Box(Modifier.fillMaxSize().background(themeColors.page)) {
             when {
                 pairing != null -> key(pairing) {

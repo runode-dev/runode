@@ -5,8 +5,8 @@ import dev.runode.mobile.protocol.TermSettings
 import kotlinx.serialization.Serializable
 
 /**
- * 终端页以外的界面（首页、会话列表、设置、配对）用的配色，从电脑上终端的主题推出来，进出终端页时底色和明暗不跳。
- * 深色主题照系统深色模式的样子：页面铺终端的底色，卡片往前景色提亮一点；浅色主题照系统浅色模式：卡片是终端的底色，
+ * 终端页以外的界面（首页、会话列表、设置、配对）用的配色，默认从电脑上终端的主题推出来，进出终端页时底色和明暗不跳；
+ * 设置里也能改用内置的 [light] 或 [dark]（[AppAppearance]）。深色主题照系统深色模式的样子：页面铺终端的底色，卡片往前景色提亮一点；浅色主题照系统浅色模式：卡片是终端的底色，
  * 页面往前景色压暗一点。字、强调色仍用系统的，按 [isDark] 选深色或浅色模式；状态的颜色取 [status]。
  */
 @Serializable
@@ -17,6 +17,14 @@ data class AppTheme(
     val foreground: Rgb,
 ) {
     constructor(settings: TermSettings) : this(settings.background, settings.foreground)
+
+    companion object {
+        /** 内置的浅色：桌面自带的浅色终端主题 Runode Light（`config` 的 `DEFAULT_LIGHT_THEME`）的底色和前景色。 */
+        val light = AppTheme(Rgb(0xFAFAFAu), Rgb(0x383A43u))
+
+        /** 内置的深色：runode 默认的终端主题，和终端页没设主题时一样。 */
+        val dark = AppTheme(TermSettings.default)
+    }
 
     val isDark: Boolean get() = background.isDark
 

@@ -1,6 +1,7 @@
 package dev.runode.mobile
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.hardware.biometrics.BiometricManager.Authenticators
 import android.hardware.biometrics.BiometricPrompt
@@ -10,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import dev.runode.mobile.features.AppLocales
 import dev.runode.mobile.features.RunodeApp
 import dev.runode.mobile.features.model.AppModel
 import dev.runode.mobile.features.model.UiText
@@ -37,11 +39,21 @@ class MainActivity : ComponentActivity() {
     private val askMicrophone: suspend () -> Boolean = { ask(Manifest.permission.RECORD_AUDIO) }
     private val authenticate: suspend (Cipher, UiText) -> Cipher? = { cipher, reason -> authenticate(cipher, reason) }
 
+    override fun attachBaseContext(newBase: Context) {
+        // 这时 Activity 还没拿到 application，从 newBase 取。
+        super.attachBaseContext(AppLocales.wrap(newBase, (newBase.applicationContext as RunodeApplication).language))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val demo = intent?.getStringExtra(DemoComposition.EXTRA)
         app = (application as RunodeApplication).appModel(demo)
+        // 用户可能在系统设置里给本 App 换过语言，以系统的为准。
+        AppLocales.systemChoice(this)?.let { language ->
+            val settings = app.settings
+            if (language != settings.preferences.language) settings.preferences = settings.preferences.copy(language = language)
+        }
         AndroidPushNotifications.shared(this)?.askPermission = askNotifications
         app.dictation.requestPermission = askMicrophone
         (application as RunodeApplication).dependencies?.authenticate = authenticate

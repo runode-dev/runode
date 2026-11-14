@@ -72,7 +72,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.runode.mobile.connection.LinkState
 import dev.runode.mobile.connection.MachineRecord
+import dev.runode.mobile.features.AppLocales
 import dev.runode.mobile.features.R
+import dev.runode.mobile.features.model.AppAppearance
+import dev.runode.mobile.features.model.AppLanguage
 import dev.runode.mobile.features.model.AppModel
 import dev.runode.mobile.features.model.AppPreferences
 import dev.runode.mobile.features.model.DictationModel
@@ -151,6 +154,7 @@ private fun SettingsList(app: AppModel, onClose: () -> Unit, onOpenMachine: (UUI
             contentPadding = PaddingValues(horizontal = ScreenPadding, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            section("appearance", R.string.settings_appearance, R.string.settings_appearance_footer) { AppearanceRows(settings) }
             section("terminal", R.string.settings_terminal, R.string.settings_terminal_footer) { TerminalRows(settings) }
             section("dictation", R.string.settings_dictation, R.string.settings_dictation_footer) { DictationRows(app.dictation, settings) }
             section("alerts", R.string.settings_notifications, R.string.settings_notifications_footer) {
@@ -192,6 +196,47 @@ private fun LazyListScope.section(key: String, header: Int, footer: Int?, rows: 
             Column(Modifier.fillMaxWidth().cardBackground(themeColors, padding = 0.dp, shape = Shapes.group), content = rows)
             if (footer != null) Footer(stringResource(footer))
         }
+    }
+}
+
+// 外观
+
+@Composable
+private fun AppearanceRows(settings: SettingsModel) {
+    MenuPickerRow(
+        stringResource(R.string.settings_theme),
+        AppAppearance.entries,
+        settings.preferences.appearance,
+        {
+            stringResource(
+                when (it) {
+                    AppAppearance.Computer -> R.string.size_follow_machine
+                    AppAppearance.Light -> R.string.theme_light
+                    AppAppearance.Dark -> R.string.theme_dark
+                    AppAppearance.System -> R.string.follow_system
+                },
+            )
+        },
+    ) { settings.preferences = settings.preferences.copy(appearance = it) }
+    RowDivider()
+    val context = LocalContext.current
+    MenuPickerRow(
+        stringResource(R.string.settings_language),
+        AppLanguage.entries,
+        settings.preferences.language,
+        {
+            stringResource(
+                when (it) {
+                    AppLanguage.System -> R.string.follow_system
+                    AppLanguage.English -> R.string.language_english
+                    AppLanguage.SimplifiedChinese -> R.string.language_simplified_chinese
+                    AppLanguage.TraditionalChinese -> R.string.language_traditional_chinese
+                },
+            )
+        },
+    ) {
+        settings.preferences = settings.preferences.copy(language = it)
+        AppLocales.apply(context, it)
     }
 }
 

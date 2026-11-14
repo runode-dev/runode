@@ -3,7 +3,56 @@ package dev.runode.mobile.features.model
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.util.Locale
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+
+/** 终端页以外的界面用哪套配色；终端页总按各自会话的主题上色。 */
+@Serializable
+enum class AppAppearance {
+    /** 跟电脑上终端的主题走，按 [AppModel.computerTheme] 挑电脑。 */
+    @SerialName("computer") Computer,
+
+    /** 内置的浅色，[AppTheme.light]。 */
+    @SerialName("light") Light,
+
+    /** 内置的深色，[AppTheme.dark]。 */
+    @SerialName("dark") Dark,
+
+    /** 系统是深色模式时用 [AppTheme.dark]，否则用 [AppTheme.light]。 */
+    @SerialName("system") System,
+}
+
+/** 界面用哪种语言；[tag] 是 BCP 47 的语言标签，跟随系统时为空。 */
+@Serializable
+enum class AppLanguage(val tag: String?) {
+    @SerialName("system") System(null),
+    @SerialName("en") English("en"),
+    @SerialName("zh-Hans") SimplifiedChinese("zh-Hans"),
+    @SerialName("zh-Hant") TraditionalChinese("zh-Hant"),
+    ;
+
+    companion object {
+        /** 系统给本 App 定的语言（逗号分隔的标签）对应哪一项：只看第一个，不是英文和中文时算跟随系统。 */
+        fun fromLanguageTags(tags: String): AppLanguage {
+            val first = tags.substringBefore(',').trim()
+            if (first.isEmpty()) return System
+            val locale = Locale.forLanguageTag(first)
+            return when (locale.language) {
+                "en" -> English
+                "zh" -> when (locale.script) {
+                    "Hant" -> TraditionalChinese
+                    "" -> if (locale.country in traditionalRegions) TraditionalChinese else SimplifiedChinese
+                    else -> SimplifiedChinese
+                }
+                else -> System
+            }
+        }
+
+        /** 不写文字系统时按繁体中文算的地区。 */
+        private val traditionalRegions = setOf("TW", "HK", "MO")
+    }
+}
 
 /** 设置页里能改的东西，整份存下来。 */
 @Serializable
@@ -19,6 +68,8 @@ data class AppPreferences(
     /** agent 停下来等回答时，由电脑经推送发通知提醒。关掉时向各台电脑注销推送。 */
     val alertsBlockedAgents: Boolean = true,
     val dictationSource: DictationSource = DictationSource.Phone,
+    val appearance: AppAppearance = AppAppearance.Computer,
+    val language: AppLanguage = AppLanguage.System,
 ) {
     companion object {
         /** 手动字号能调的范围。 */

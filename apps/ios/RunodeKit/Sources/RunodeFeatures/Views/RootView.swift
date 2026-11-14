@@ -8,12 +8,14 @@
     public struct RootView: View {
         @Bindable var app: AppModel
         @Environment(\.scenePhase) private var scenePhase
+        @Environment(\.colorScheme) private var colorScheme
 
         public init(app: AppModel) {
             self.app = app
         }
 
         public var body: some View {
+            let theme = app.theme(systemIsDark: colorScheme == .dark)
             NavigationStack(path: $app.path) {
                 HomeView(app: app, machines: app.machineList)
                 .navigationDestination(for: Route.self) { route in
@@ -22,16 +24,16 @@
             }
             .sheet(isPresented: $app.showingSettings, onDismiss: app.settingsDismissed) {
                 SettingsView(app: app, settings: app.settings, machines: app.machineList)
-                    .appTheme(app.theme)
+                    .appTheme(theme)
             }
             .fullScreenCover(item: $app.pairing) { model in
-                PairingView(model: model, settings: app.settings, theme: app.theme) { machine in
+                PairingView(model: model, settings: app.settings, theme: theme) { machine in
                     app.pairing = nil
                     if let machine {
                         app.path = [.machine(machine.id)]
                     }
                 }
-                .appTheme(app.theme)
+                .appTheme(theme)
             }
             .onChange(of: scenePhase) { _, phase in
                 app.setActive(phase != .background)
@@ -39,9 +41,10 @@
             .onOpenURL { url in
                 app.open(url: url)
             }
-            // 终端页以外的界面跟电脑上终端的主题走；终端页自己按它那个会话的主题上色。弹出的页面各自
+            // 终端页以外的界面按设置里的主题上色；终端页自己按它那个会话的主题上色。弹出的页面各自
             // 再套一次，深浅模式才跟着变。
-            .appTheme(app.theme)
+            .appTheme(theme)
+            .environment(\.followsSystemColorScheme, app.settings.preferences.appearance == .system)
         }
 
         @ViewBuilder

@@ -94,21 +94,21 @@ private struct Setup {
 
     @Test func isDarkUntilAMachineReportsATheme() async {
         let setup = await Setup()
-        #expect(setup.app.theme == AppTheme(.default))
-        #expect(setup.app.theme.isDark)
+        #expect(setup.app.computerTheme == AppTheme(.default))
+        #expect(setup.app.computerTheme.isDark)
         #expect(setup.themes.load() == nil)
     }
 
     @Test func usesTheSavedThemeBeforeConnecting() async {
         let setup = await Setup(saved: AppTheme(light))
-        #expect(setup.app.theme == AppTheme(light))
+        #expect(setup.app.computerTheme == AppTheme(light))
     }
 
     @Test func takesTheThemeFromTheFirstMachineAndSavesIt() async throws {
         let setup = await Setup(saved: AppTheme(light))
         try setup.connect(setup.second, settings: light)
         try setup.connect(setup.first, settings: dark)
-        #expect(setup.app.theme == AppTheme(dark))
+        #expect(setup.app.computerTheme == AppTheme(dark))
         #expect(setup.themes.load() == AppTheme(dark))
     }
 
@@ -117,7 +117,7 @@ private struct Setup {
         try setup.connect(setup.first, settings: dark)
         try setup.connect(setup.second, settings: light)
         setup.app.path = [.machine(setup.second.id), .terminal(machine: setup.second.id, session: sessionA)]
-        #expect(setup.app.theme == AppTheme(light))
+        #expect(setup.app.computerTheme == AppTheme(light))
         #expect(setup.themes.load() == AppTheme(light))
     }
 
@@ -126,8 +126,42 @@ private struct Setup {
         try setup.connect(setup.first, settings: dark)
         let list = try #require(setup.app.sessionList(for: setup.first.id))
         list.handle(.message(.themeApplied(id: sessionA, settings: light)))
-        #expect(setup.app.theme == AppTheme(light))
+        #expect(setup.app.computerTheme == AppTheme(light))
         #expect(setup.themes.load() == AppTheme(light))
+    }
+
+    @Test func builtInThemes() {
+        #expect(!AppTheme.light.isDark)
+        #expect(AppTheme.light == AppTheme(background: Rgb(hex: 0xFAFAFA), foreground: Rgb(hex: 0x383A43)))
+        #expect(AppTheme.dark.isDark)
+        #expect(AppTheme.dark == AppTheme(.default))
+    }
+
+    @Test(arguments: [false, true])
+    func appearancePicksTheTheme(systemIsDark: Bool) async throws {
+        let setup = await Setup()
+        try setup.connect(setup.first, settings: light)
+        let app = setup.app
+        #expect(app.settings.preferences.appearance == .computer)
+        #expect(app.theme(systemIsDark: systemIsDark) == AppTheme(light))
+        app.settings.preferences.appearance = .light
+        #expect(app.theme(systemIsDark: systemIsDark) == .light)
+        app.settings.preferences.appearance = .dark
+        #expect(app.theme(systemIsDark: systemIsDark) == .dark)
+        app.settings.preferences.appearance = .system
+        #expect(app.theme(systemIsDark: systemIsDark) == (systemIsDark ? .dark : .light))
+    }
+
+    @Test func keepsSavingTheComputerThemeWhileAnotherIsChosen() async throws {
+        let setup = await Setup()
+        try setup.connect(setup.first, settings: dark)
+        setup.app.settings.preferences.appearance = .light
+        let list = try #require(setup.app.sessionList(for: setup.first.id))
+        list.handle(.message(.themeApplied(id: sessionA, settings: light)))
+        #expect(setup.app.theme(systemIsDark: true) == .light)
+        #expect(setup.themes.load() == AppTheme(light))
+        setup.app.settings.preferences.appearance = .computer
+        #expect(setup.app.theme(systemIsDark: true) == AppTheme(light))
     }
 
     @Test func userDefaultsKeepsTheTheme() throws {

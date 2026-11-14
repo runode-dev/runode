@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Resources
 import android.os.Build
 import android.os.Bundle
 import androidx.core.app.NotificationCompat
@@ -14,7 +15,9 @@ import androidx.core.content.ContextCompat
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import dev.runode.mobile.connection.HttpPushRelay
+import dev.runode.mobile.features.AppLocales
 import dev.runode.mobile.features.model.AppDependencies
+import dev.runode.mobile.features.model.AppLanguage
 import dev.runode.mobile.features.model.DeliveredNotification
 import dev.runode.mobile.features.model.PushChannel
 import dev.runode.mobile.features.model.PushIdentity
@@ -87,8 +90,8 @@ class AndroidPushNotifications private constructor(private val context: Context)
      */
     fun show(message: PushMessage) {
         if (!manager.areNotificationsEnabled()) return
-        createChannels()
-        val resources = context.resources
+        val resources = localizedResources()
+        createChannels(resources)
         val subtitle = message.subtitle.resolve(resources)
         val machine = message.link.machine.toString().uppercase()
         val open = Intent(context, MainActivity::class.java)
@@ -129,12 +132,16 @@ class AndroidPushNotifications private constructor(private val context: Context)
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
+    /** 按设置里的界面语言取的资源，出通知时 App 的界面可能没开着。 */
+    private fun localizedResources(): Resources =
+        AppLocales.wrap(context, (context as? RunodeApplication)?.language ?: AppLanguage.System).resources
+
     /** 建通知渠道；已经建过的系统不再改它，用户在系统设置里改过的照旧。 */
-    private fun createChannels() {
+    private fun createChannels(resources: Resources) {
         for (channel in PushChannel.entries) {
             val importance =
                 if (channel == PushChannel.Blocked) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT
-            manager.createNotificationChannel(NotificationChannel(channel.id, context.getString(channel.label), importance))
+            manager.createNotificationChannel(NotificationChannel(channel.id, resources.getString(channel.label), importance))
         }
     }
 

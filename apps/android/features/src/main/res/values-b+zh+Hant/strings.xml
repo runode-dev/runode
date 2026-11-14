@@ -432,6 +432,13 @@
     <string name="screen_arrow_down">下方向鍵</string>
     <string name="screen_arrow_right">右方向鍵</string>
     <string name="settings_done">完成</string>
+    <string name="settings_appearance">外觀</string>
+    <string name="settings_theme">主題</string>
+    <string name="theme_light">淺色</string>
+    <string name="theme_dark">深色</string>
+    <string name="follow_system">跟隨系統</string>
+    <string name="settings_language">語言</string>
+    <string name="settings_appearance_footer">跟隨電腦時用電腦上終端機的配色，幾台電腦不一樣時用上次開啟的終端機所在的那台；終端機頁總按各自工作階段的配色顯示。</string>
     <string name="settings_terminal">終端機</string>
     <string name="settings_default_size">預設尺寸</string>
     <string name="settings_font_follows">字級跟隨系統</string>

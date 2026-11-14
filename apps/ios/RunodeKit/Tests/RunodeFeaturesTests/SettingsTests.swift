@@ -41,6 +41,7 @@ import Testing
         #expect(decoded.bellHaptics)
         #expect(decoded.deviceName == nil)
         #expect(decoded.alertsBlockedAgents)
+        #expect(decoded.appearance == .computer)
     }
 
     @Test func newTerminalsStartWithTheDefaultSize() async throws {

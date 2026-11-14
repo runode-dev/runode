@@ -76,6 +76,26 @@ class SettingsTests {
         assertTrue(decoded.bellHaptics)
         assertNull(decoded.deviceName)
         assertTrue(decoded.alertsBlockedAgents)
+        assertEquals(AppAppearance.Computer, decoded.appearance)
+        assertEquals(AppLanguage.System, decoded.language)
+    }
+
+    @Test fun languageFromSystemTags() {
+        val cases = mapOf(
+            "" to AppLanguage.System,
+            "en-US" to AppLanguage.English,
+            "zh-CN" to AppLanguage.SimplifiedChinese,
+            "zh-Hans" to AppLanguage.SimplifiedChinese,
+            "zh-Hant-TW" to AppLanguage.TraditionalChinese,
+            "zh-HK" to AppLanguage.TraditionalChinese,
+            // 写明文字系统时不看地区。
+            "zh-Hans-HK" to AppLanguage.SimplifiedChinese,
+            "zh-Hant-CN" to AppLanguage.TraditionalChinese,
+            "fr" to AppLanguage.System,
+            // 只看第一个。
+            "zh-TW,en-US" to AppLanguage.TraditionalChinese,
+        )
+        for ((tags, language) in cases) assertEquals(language, AppLanguage.fromLanguageTags(tags), tags)
     }
 
     @Test fun newTerminalsStartWithTheDefaultSize() = runTest {
@@ -199,21 +219,21 @@ class ThemeTests {
 
     @Test fun isDarkUntilAMachineReportsATheme() = runTest {
         val setup = themeSetup()
-        assertEquals(AppTheme(TermSettings.default), setup.app.theme)
-        assertTrue(setup.app.theme.isDark)
+        assertEquals(AppTheme(TermSettings.default), setup.app.computerTheme)
+        assertTrue(setup.app.computerTheme.isDark)
         assertNull(setup.themes.load())
     }
 
     @Test fun usesTheSavedThemeBeforeConnecting() = runTest {
         val setup = themeSetup(saved = AppTheme(light))
-        assertEquals(AppTheme(light), setup.app.theme)
+        assertEquals(AppTheme(light), setup.app.computerTheme)
     }
 
     @Test fun takesTheThemeFromTheFirstMachineAndSavesIt() = runTest {
         val setup = themeSetup(saved = AppTheme(light))
         setup.connect(setup.second, light)
         setup.connect(setup.first, dark)
-        assertEquals(AppTheme(dark), setup.app.theme)
+        assertEquals(AppTheme(dark), setup.app.computerTheme)
         assertEquals(AppTheme(dark), setup.themes.load())
     }
 
@@ -222,7 +242,7 @@ class ThemeTests {
         setup.connect(setup.first, dark)
         setup.connect(setup.second, light)
         setup.app.path = listOf(Route.Machine(setup.second.id), Route.Terminal(setup.second.id, sessionA))
-        assertEquals(AppTheme(light), setup.app.theme)
+        assertEquals(AppTheme(light), setup.app.computerTheme)
         assertEquals(AppTheme(light), setup.themes.load())
         setup.app.path = emptyList()
     }
@@ -232,8 +252,46 @@ class ThemeTests {
         setup.connect(setup.first, dark)
         val list = assertNotNull(setup.app.sessionList(setup.first.id))
         list.handle(HostEvent.Message(HostMsg.ThemeApplied(sessionA, light)))
-        assertEquals(AppTheme(light), setup.app.theme)
+        assertEquals(AppTheme(light), setup.app.computerTheme)
         assertEquals(AppTheme(light), setup.themes.load())
+    }
+
+    @Test fun builtInThemes() {
+        assertEquals(AppTheme(Rgb(0xFAFAFAu), Rgb(0x383A43u)), AppTheme.light)
+        assertFalse(AppTheme.light.isDark)
+        assertEquals(AppTheme(TermSettings.default), AppTheme.dark)
+        assertTrue(AppTheme.dark.isDark)
+    }
+
+    @Test fun appearancePicksTheTheme() = runTest {
+        val setup = themeSetup()
+        setup.connect(setup.first, light)
+        val settings = setup.app.settings
+        val expected = mapOf(
+            AppAppearance.Computer to (AppTheme(light) to AppTheme(light)),
+            AppAppearance.Light to (AppTheme.light to AppTheme.light),
+            AppAppearance.Dark to (AppTheme.dark to AppTheme.dark),
+            AppAppearance.System to (AppTheme.light to AppTheme.dark),
+        )
+        for ((appearance, themes) in expected) {
+            settings.preferences = settings.preferences.copy(appearance = appearance)
+            assertEquals(themes.first, setup.app.theme(systemDark = false), "$appearance，系统浅色")
+            assertEquals(themes.second, setup.app.theme(systemDark = true), "$appearance，系统深色")
+        }
+    }
+
+    @Test fun keepsSavingTheMachineThemeWhileUsingABuiltInOne() = runTest {
+        val setup = themeSetup()
+        val settings = setup.app.settings
+        settings.preferences = settings.preferences.copy(appearance = AppAppearance.Light)
+        setup.connect(setup.first, dark)
+        assertEquals(AppTheme.light, setup.app.theme(systemDark = true))
+        assertEquals(AppTheme(dark), setup.themes.load())
+        val list = assertNotNull(setup.app.sessionList(setup.first.id))
+        list.handle(HostEvent.Message(HostMsg.ThemeApplied(sessionA, light)))
+        assertEquals(AppTheme(light), setup.themes.load())
+        settings.preferences = settings.preferences.copy(appearance = AppAppearance.Computer)
+        assertEquals(AppTheme(light), setup.app.theme(systemDark = true))
     }
 
     @Test fun defaultsKeepTheTheme() {

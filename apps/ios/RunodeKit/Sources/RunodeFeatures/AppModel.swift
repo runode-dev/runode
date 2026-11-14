@@ -324,14 +324,25 @@ public final class AppModel {
         return model
     }
 
-    /// 终端页以外的界面用的主题：上次打开的终端所在的那台电脑的，它还没报主题时用配对列表里第一台报了
+    /// 终端页以外的界面用的主题，按设置里的 `AppPreferences.appearance` 挑；`systemIsDark` 是系统现在
+    /// 是不是深色模式，只在跟随系统时用到。
+    public func theme(systemIsDark: Bool) -> AppTheme {
+        switch settings.preferences.appearance {
+        case .computer: computerTheme
+        case .light: .light
+        case .dark: .dark
+        case .system: systemIsDark ? .dark : .light
+        }
+    }
+
+    /// 跟随电脑时的主题：上次打开的终端所在的那台电脑的，它还没报主题时用配对列表里第一台报了
     /// 的，都没有时用上次记下的；从没连上过电脑时用 runode 默认的深色主题，和终端页没设主题时一样。
     /// 几台电脑主题不同时，进出会话列表也不换主题，免得翻页时整个界面变色。
-    public var theme: AppTheme {
+    var computerTheme: AppTheme {
         reportedTheme ?? savedTheme ?? AppTheme(.default)
     }
 
-    /// 电脑报来的主题，按 `theme` 说的先后挑；还没有电脑报过时为空。
+    /// 电脑报来的主题，按 `computerTheme` 说的先后挑；还没有电脑报过时为空。
     private var reportedTheme: AppTheme? {
         let order = (recent.map { [$0.machine] } ?? []) + machineList.machines.map(\.id)
         for id in order {

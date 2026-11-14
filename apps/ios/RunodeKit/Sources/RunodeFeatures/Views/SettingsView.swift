@@ -3,17 +3,20 @@
     import RunodeSpeech
     import SwiftUI
 
-    /// 设置页：终端、语音输入、通知、配对过的电脑、报给电脑的设备名，以及版本和开源许可。开关、选择器要系统的
+    /// 设置页：外观、终端、语音输入、通知、配对过的电脑、报给电脑的设备名，以及版本和开源许可。开关、选择器要系统的
     /// 行样式，所以用分组的 `Form`，不用自己画的卡片列表。改了马上生效、马上存（见 `SettingsModel`）。
     struct SettingsView: View {
         let app: AppModel
         @Bindable var settings: SettingsModel
         @Bindable var machines: MachineListModel
         @Environment(\.dismiss) private var dismiss
+        /// 界面语言不在 `SettingsModel` 里，存取经 `AppLocalization`，重新打开 App 才换。
+        @State private var language = AppLocalization.stored()
 
         var body: some View {
             NavigationStack {
                 Form {
+                    appearanceSection
                     terminalSection
                     DictationSection(dictation: app.dictation, settings: settings)
                     alertSection
@@ -42,6 +45,38 @@
                 Button("好") {}
             } message: {
                 Text(machines.errorMessage ?? "")
+            }
+        }
+
+        // MARK: 外观
+
+        private var appearanceSection: some View {
+            Section {
+                Picker("主题", selection: $settings.preferences.appearance) {
+                    Text("跟随电脑").tag(AppAppearance.computer)
+                    Text("浅色").tag(AppAppearance.light)
+                    Text("深色").tag(AppAppearance.dark)
+                    Text("跟随系统").tag(AppAppearance.system)
+                }
+                Picker("语言", selection: $language) {
+                    Text("跟随系统").tag(AppLanguage.system)
+                    Text("English").tag(AppLanguage.en)
+                    Text("简体中文").tag(AppLanguage.zhHans)
+                    Text("繁體中文").tag(AppLanguage.zhHant)
+                }
+            } header: {
+                Text("外观")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("跟随电脑时用电脑上终端的配色，几台电脑不一样时用上次打开的终端所在的那台；终端页总按各自会话的配色显示。")
+                    if AppLocalization.needsRelaunch(for: language) {
+                        Text("重新打开 Runode 后换成所选的语言。")
+                    }
+                }
+            }
+            .themedRows()
+            .onChange(of: language) { _, language in
+                AppLocalization.store(language)
             }
         }
 

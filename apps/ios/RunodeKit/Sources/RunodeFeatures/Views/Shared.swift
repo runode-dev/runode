@@ -92,6 +92,8 @@
         @Entry var themeColors = ThemeColors.system
         /// 外层套的主题，弹出 sheet 的页面取出来给 sheet 的内容再套一次。没套过主题时为空。
         @Entry var appTheme: AppTheme?
+        /// 设置里选了跟随系统：`appTheme(_:)` 不锁深浅模式，系统换模式时界面才收得到。
+        @Entry var followsSystemColorScheme = false
     }
 
     extension View {
@@ -99,10 +101,7 @@
         /// 模式；按钮、链接这些强调色用终端的前景色，和桌面一样黑白为主，不用系统的蓝色。`preferredColorScheme`
         /// 传不进 sheet，弹出的页面各自再套一次。
         func appTheme(_ theme: AppTheme) -> some View {
-            environment(\.themeColors, ThemeColors(theme))
-                .environment(\.appTheme, theme)
-                .tint(Color(theme.foreground))
-                .preferredColorScheme(theme.isDark ? .dark : .light)
+            modifier(AppThemeModifier(theme: theme))
         }
 
         /// 从环境取来的主题：为空时原样。
@@ -114,6 +113,19 @@
         /// `borderedProminent` 字固定是白的，强调色是主题的前景色，深色主题下就成了白底白字。
         func prominentButtonStyle() -> some View {
             modifier(ProminentButton())
+        }
+    }
+
+    private struct AppThemeModifier: ViewModifier {
+        let theme: AppTheme
+        @Environment(\.followsSystemColorScheme) private var followsSystemColorScheme
+
+        func body(content: Content) -> some View {
+            content
+                .environment(\.themeColors, ThemeColors(theme))
+                .environment(\.appTheme, theme)
+                .tint(Color(theme.foreground))
+                .preferredColorScheme(followsSystemColorScheme ? nil : theme.isDark ? .dark : .light)
         }
     }
 

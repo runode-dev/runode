@@ -16,6 +16,7 @@ import dev.runode.mobile.connection.RemotePairing
 import dev.runode.mobile.connection.ScreenConnection
 import dev.runode.mobile.connection.SpeechConnection
 import dev.runode.mobile.features.model.AppDependencies
+import dev.runode.mobile.features.model.AppLanguage
 import dev.runode.mobile.features.model.AppModel
 import dev.runode.mobile.features.model.AppPreferences
 import dev.runode.mobile.features.model.DefaultsStore
@@ -34,6 +35,10 @@ class RunodeApplication : Application() {
     /** 建好的那份的依赖；演示模式时为空。Activity 往里装要它才能做的事（验证身份）。 */
     var dependencies: AppDependencies? = null
         private set
+
+    /** 设置里的界面语言；[AppModel] 还没建时直接读存着的设置。 */
+    val language: AppLanguage
+        get() = model?.settings?.preferences?.language ?: preferences().load()?.language ?: AppLanguage.System
 
     override fun onCreate() {
         super.onCreate()
@@ -56,8 +61,8 @@ class RunodeApplication : Application() {
         val store = FileMachineStore(FileMachineStore.defaultFile(context))
         val discovery = NsdDiscovery(context)
         val network = NetworkChanges(context)
-        val defaults = SharedPreferencesDefaults(getSharedPreferences(DEFAULTS, MODE_PRIVATE))
-        val preferences = DefaultsStore<AppPreferences>("preferences", defaults)
+        val defaults = defaults()
+        val preferences = preferences()
         val systemName = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL
         val dependencies = AppDependencies(
             store = store,
@@ -92,6 +97,10 @@ class RunodeApplication : Application() {
         this.dependencies = dependencies
         return AppModel(dependencies)
     }
+
+    private fun defaults() = SharedPreferencesDefaults(getSharedPreferences(DEFAULTS, MODE_PRIVATE))
+
+    private fun preferences() = DefaultsStore<AppPreferences>("preferences", defaults())
 
     private companion object {
         const val DEFAULTS = "dev.runode.mobile.defaults"

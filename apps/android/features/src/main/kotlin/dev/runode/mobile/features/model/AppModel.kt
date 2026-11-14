@@ -20,7 +20,6 @@ import dev.runode.mobile.protocol.GateRejection
 import dev.runode.mobile.protocol.HostMsg
 import dev.runode.mobile.protocol.SessionId
 import dev.runode.mobile.protocol.SessionLink
-import dev.runode.mobile.protocol.TermSettings
 import java.io.File
 import java.net.URI
 import java.util.UUID
@@ -364,14 +363,21 @@ class AppModel(private val dependencies: AppDependencies) {
         return model
     }
 
-    /**
-     * 终端页以外的界面用的主题：上次打开的终端所在的那台电脑的，它还没报主题时用配对列表里第一台报了的，都没有时用上次
-     * 记下的；从没连上过电脑时用 runode 默认的深色主题，和终端页没设主题时一样。几台电脑主题不同时，进出会话列表也不换
-     * 主题，免得翻页时整个界面变色。
-     */
-    val theme: AppTheme get() = reportedTheme ?: savedTheme ?: AppTheme(TermSettings.default)
+    /** 终端页以外的界面用的主题，按设置里的 [AppAppearance] 挑；[systemDark] 是系统现在是不是深色模式。 */
+    fun theme(systemDark: Boolean): AppTheme = when (settings.preferences.appearance) {
+        AppAppearance.Computer -> computerTheme
+        AppAppearance.Light -> AppTheme.light
+        AppAppearance.Dark -> AppTheme.dark
+        AppAppearance.System -> if (systemDark) AppTheme.dark else AppTheme.light
+    }
 
-    /** 电脑报来的主题，按 [theme] 说的先后挑；还没有电脑报过时为空。 */
+    /**
+     * 跟电脑走时的主题：上次打开的终端所在的那台电脑的，它还没报主题时用配对列表里第一台报了的，都没有时用上次
+     * 记下的；从没连上过电脑时用 [AppTheme.dark]。几台电脑主题不同时，进出会话列表也不换主题，免得翻页时整个界面变色。
+     */
+    internal val computerTheme: AppTheme get() = reportedTheme ?: savedTheme ?: AppTheme.dark
+
+    /** 电脑报来的主题，按 [computerTheme] 说的先后挑；还没有电脑报过时为空。 */
     private val reportedTheme: AppTheme?
         get() {
             val order = listOfNotNull(recent?.machine) + machineList.machines.map { it.id }

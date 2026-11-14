@@ -48,7 +48,7 @@ extension Presentation {
         return String(localized: "\(branch.subject)，\(when)")
     }
 
-    /// 界面文字实际用的语言：系统语言 app 没有译文时界面退回中文，日期也跟着界面写，不按系统的地区设置。
+    /// 界面文字实际用的语言：系统语言 app 没有译文时界面退回英文，日期也跟着界面写，不按系统的地区设置。
     static var interfaceLocale: Locale {
         Locale(identifier: Bundle.main.preferredLocalizations.first ?? "zh-Hans")
     }
