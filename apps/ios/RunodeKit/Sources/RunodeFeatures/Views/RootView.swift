@@ -45,7 +45,7 @@
             }
             // 终端页以外的界面按设置里的主题上色；终端页自己按它那个会话的主题上色。弹出的页面各自
             // 再套一次，深浅模式才跟着变。
-            .appTheme(theme)
+            .appTheme(theme, colorScheme: app.shownTerminal.map { $0.isDark ? .dark : .light })
             .environment(\.followsSystemColorScheme, app.settings.preferences.appearance == .system)
         }
 
@@ -84,7 +84,9 @@
                         },
                         sessions: app.sessionList(for: machine),
                         dictation: app.dictation, machine: app.machineList.machine(machine),
-                        onOpenSettings: { app.showingSettings = true })
+                        onOpenSettings: { app.showingSettings = true },
+                        onShown: { isDark in app.terminalShown(model, isDark: isDark) },
+                        onHidden: { app.terminalHidden(model) })
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
                 }

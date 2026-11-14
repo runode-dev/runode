@@ -100,8 +100,9 @@
         /// 套用主题：底色和主题本身放进环境，深色主题用深色模式（字、系统控件、键盘跟着变），浅色主题用浅色
         /// 模式；按钮、链接这些强调色用终端的前景色，和桌面一样黑白为主，不用系统的蓝色。`preferredColorScheme`
         /// 传不进 sheet，弹出的页面各自再套一次。
-        func appTheme(_ theme: AppTheme) -> some View {
-            modifier(AppThemeModifier(theme: theme))
+        /// `colorScheme` 不为空时深浅模式用它，不按主题。
+        func appTheme(_ theme: AppTheme, colorScheme: ColorScheme? = nil) -> some View {
+            modifier(AppThemeModifier(theme: theme, colorScheme: colorScheme))
         }
 
         /// 从环境取来的主题：为空时原样。
@@ -118,6 +119,7 @@
 
     private struct AppThemeModifier: ViewModifier {
         let theme: AppTheme
+        let colorScheme: ColorScheme?
         @Environment(\.followsSystemColorScheme) private var followsSystemColorScheme
 
         func body(content: Content) -> some View {
@@ -125,7 +127,7 @@
                 .environment(\.themeColors, ThemeColors(theme))
                 .environment(\.appTheme, theme)
                 .tint(Color(theme.foreground))
-                .preferredColorScheme(followsSystemColorScheme ? nil : theme.isDark ? .dark : .light)
+                .preferredColorScheme(colorScheme ?? (followsSystemColorScheme ? nil : theme.isDark ? .dark : .light))
         }
     }
 

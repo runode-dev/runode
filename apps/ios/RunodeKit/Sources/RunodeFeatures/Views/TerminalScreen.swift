@@ -26,7 +26,12 @@
         var machine: MachineRecord?
         /// 打开 app 的设置页，语音输入缺模型时从弹框过去下载。
         var onOpenSettings: () -> Void = {}
+        /// 这一页显示了，或者显示着时背景换了深浅；带着背景是不是深色。
+        var onShown: (Bool) -> Void = { _ in }
+        /// 这一页不显示了（返回了，或者上面又推了一页）。
+        var onHidden: () -> Void = {}
         @Environment(\.openURL) private var openURL
+        @State private var isShown = false
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
         /// 嵌着的终端视图，底部的按键栏按了发给它。
@@ -95,7 +100,22 @@
                     if ended, tabMates.contains(model.sessionId) { onPaneEnded(tabMates) }
                 }
                 .sensoryFeedback(.start, trigger: dictation?.phase == .recording) { _, recording in recording }
-                .onDisappear { dictation?.cancel() }
+                .onAppear {
+                    isShown = true
+                    onShown(model.background.isDark)
+                }
+                .onDisappear {
+                    dictation?.cancel()
+                    isShown = false
+                    onHidden()
+                }
+                .onChange(of: model.background.isDark) { _, isDark in
+                    if isShown { onShown(isDark) }
+                }
+                // 切分屏只换 `model`，这一页不重新出现，要重新报一次，`onHidden` 撤的才是现在这个。
+                .onChange(of: ObjectIdentifier(model)) {
+                    if isShown { onShown(model.background.isDark) }
+                }
                 .alert(
                     "语音输入没有成功",
                     isPresented: Binding(

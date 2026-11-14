@@ -107,6 +107,19 @@ public final class AppModel {
     public private(set) var recent: RecentTerminal?
     /// 上次用的主题，电脑还没连上时用它。
     private var savedTheme: AppTheme?
+    /// 显示着的终端页（按它的 `TerminalModel` 认）和它的背景是不是深色；为空时没有终端页在显示。
+    /// 终端页显示时整个窗口用它的深浅模式，状态栏才和终端的背景配得上。
+    public private(set) var shownTerminal: (model: ObjectIdentifier, isDark: Bool)?
+
+    /// 终端页显示了，或者显示着时背景换了深浅。
+    func terminalShown(_ model: TerminalModel, isDark: Bool) {
+        shownTerminal = (ObjectIdentifier(model), isDark)
+    }
+
+    /// 终端页不显示了。切分屏时新的一页可能先报显示，所以只撤自己报的。
+    func terminalHidden(_ model: TerminalModel) {
+        if shownTerminal?.model == ObjectIdentifier(model) { shownTerminal = nil }
+    }
 
     @ObservationIgnored private let dependencies: AppDependencies
     @ObservationIgnored private var sessionLists: [UUID: SessionListModel] = [:]
