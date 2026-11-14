@@ -142,7 +142,7 @@
             backgroundColor = .black
             scrollView.delegate = self
             scrollView.minimumZoomScale = 0.3
-            scrollView.maximumZoomScale = 4
+            scrollView.maximumZoomScale = Self.maximumZoom
             scrollView.bouncesZoom = true
             scrollView.alwaysBounceVertical = false
             scrollView.contentInsetAdjustmentBehavior = .never
@@ -397,7 +397,7 @@
             grid.frame = gridContainer.bounds
             applyScrollOffset()
             scrollView.contentSize = gridContainer.frame.size
-            if userZoomed {
+            if userZoomed && !fitsPhone {
                 scrollView.zoomScale = zoom
             } else {
                 applyDefaultZoom()
@@ -406,16 +406,24 @@
             centerContent()
         }
 
-        /// 默认的缩放：适配手机时不缩放（网格本来就按视图排）；跟随电脑时网格比屏幕宽就缩到正好一屏宽，
+        /// 默认的缩放：适配手机时固定不缩放、也不能捏合（网格本来就按视图排）；跟随电脑时网格比屏幕宽就缩到正好一屏宽，
         /// 但字不小于可读字号，再宽的横着拖。捏合也不能缩到可读字号以下。
         private func applyDefaultZoom() {
+            if fitsPhone {
+                scrollView.minimumZoomScale = 1
+                scrollView.maximumZoomScale = 1
+                scrollView.zoomScale = 1
+                updateRasterScale()
+                return
+            }
             guard grid.gridSize.width > 0, bounds.width > 0 else { return }
             let sizes = Self.fontSizes(for: traitCollection, override: fontSizeOverride)
             let readable = min(sizes.readable / grid.font.size, 1)
             scrollView.minimumZoomScale = readable
+            scrollView.maximumZoomScale = Self.maximumZoom
             guard !userZoomed else { return }
             let fitWidth = bounds.width / grid.gridSize.width
-            scrollView.zoomScale = fitsPhone ? 1 : max(min(fitWidth, 1), readable)
+            scrollView.zoomScale = max(min(fitWidth, 1), readable)
             updateRasterScale()
         }
 
@@ -544,6 +552,9 @@
         /// 适配手机时网格左右至少各空出的宽度（点）：字不贴着屏幕的圆角边，`centerContent` 把余下的宽度
         /// 平分到两边。
         static let fitMargin: CGFloat = 4
+
+        /// 跟随电脑时捏合能放大到的倍数。
+        static let maximumZoom: CGFloat = 4
 
         static func gridSize(fitting size: CGSize, scale: CGFloat, font: TerminalFont) -> GridSize {
             let columns = max(10, Int((size.width - 2 * fitMargin) / font.cellWidth))

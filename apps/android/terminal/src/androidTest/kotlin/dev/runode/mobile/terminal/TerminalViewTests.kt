@@ -192,9 +192,9 @@ class TerminalViewTests {
         }
     }
 
-    /** 两指张开放大字号，抬手后报的「适配手机」网格行列都变少。 */
+    /** 适配手机时两指张开不缩放：抬手后不报新的网格尺寸。 */
     @Test
-    fun pinchingChangesTheGridSize() = onMain {
+    fun pinchingDoesNotZoomWhenFittingThePhone() = onMain {
         val recorder = Recorder()
         val view = view(recorder)
         view.terminalSizeModeDidChange(fitsPhone = true)
@@ -229,13 +229,10 @@ class TerminalViewTests {
             val spread = 300f + step * 20f
             view.dispatchTouchEvent(event(down + 10 + step * 16L, MotionEvent.ACTION_MOVE, center - spread, center + spread))
         }
-        assertEquals(1, recorder.fitSizes.size, "捏合中途不报尺寸")
         view.dispatchTouchEvent(event(down + 200, pointerUp, center - 500, center + 500))
         view.dispatchTouchEvent(event(down + 210, MotionEvent.ACTION_UP, center - 500))
-        val after = recorder.fitSizes.last()
-        assertEquals(2, recorder.fitSizes.size)
-        assertTrue(after.cols < before.cols && after.rows < before.rows, "$before → $after")
-        assertEquals(view.fitSize, after)
+        assertEquals(listOf(before), recorder.fitSizes)
+        assertEquals(before, view.fitSize)
     }
 
     /** 备用屏上程序不管鼠标时，往下拖看更早的内容换成往上的方向键，攒够一行发一个。 */

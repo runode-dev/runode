@@ -538,11 +538,9 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
     val fitSize: GridSize
         get() = gridSize(width.toFloat(), height.toFloat(), fitFont(), FIT_MARGIN_DP * resources.displayMetrics.density)
 
-    /** 适配手机时用的字体：捏合定过就用它，否则用默认字号；跟随电脑时缩放过的字号不算。 */
+    /** 适配手机时用的字体：默认字号，跟随电脑时捏合缩放过的字号不算。 */
     private fun fitFont(): TerminalFont {
-        val sizes = fontSizes()
-        val size = if (fitsPhone) userFontSize?.coerceIn(sizes.readable, sizes.base * MAX_ZOOM) ?: sizes.base else sizes.base
-        val rounded = (size * 2).roundToInt() / 2f
+        val rounded = (fontSizes().base * 2).roundToInt() / 2f
         if (abs(font.size - rounded) < 0.01f) return font
         fitFontCache?.let { if (abs(it.size - rounded) < 0.01f) return it }
         return TerminalFont(rounded, symbolTypeface).also { fitFontCache = it }
@@ -689,7 +687,8 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
             zooming = false
             pinchScale = 1f
         }
-        scaleDetector.onTouchEvent(event)
+        // 适配手机时网格按视图排，不能捏合缩放。
+        if (!fitsPhone) scaleDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
             drag = Drag.None
@@ -778,7 +777,7 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
         }
     }
 
-    /** 捏合定字号：网格按新字号重新排，抬手后把新的「适配手机」尺寸报上去。 */
+    /** 捏合定字号：网格按新字号重新摆。 */
     internal fun setUserFontSize(size: Float) {
         userFontSize = size
         fitFontCache = null
