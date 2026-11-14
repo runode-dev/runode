@@ -385,6 +385,114 @@ class VTerminalTests {
         }
     }
 
+    @Test
+    fun selectWordPicksTheWordUnderTheCell() = onMain {
+        terminal().use { vt ->
+            vt.feed("hello world")
+            assertFalse(vt.selectWord(15, 3))
+            assertFalse(vt.hasSelection)
+            assertTrue(vt.selectWord(7, 0))
+            assertTrue(vt.hasSelection)
+            assertEquals("world", vt.selectionText())
+            assertEquals(6..10, vt.frame().selected[0])
+            assertEquals(SelectionBounds(GridCell(6, 0), GridCell(10, 0)), vt.selectionBounds)
+        }
+    }
+
+    /** 宽字符的后一格也算这个字；选中的列连同占位格。 */
+    @Test
+    fun selectWordOnAWideCharacterTail() = onMain {
+        terminal().use { vt ->
+            vt.feed("中文 ok")
+            assertTrue(vt.selectWord(1, 0))
+            assertEquals("中文", vt.selectionText())
+            assertEquals(0..3, vt.frame().selected[0])
+        }
+    }
+
+    @Test
+    fun chinesePunctuationSeparatesWords() = onMain {
+        terminal().use { vt ->
+            vt.feed("你好，世界")
+            assertTrue(vt.selectWord(0, 0))
+            assertEquals("你好", vt.selectionText())
+        }
+    }
+
+    /** 新输出把内容往上推时，选区跟着内容走。 */
+    @Test
+    fun selectionFollowsScrolledContent() = onMain {
+        terminal().use { vt ->
+            val frame = ScreenFrame()
+            vt.feed("\r\n\r\n\r\n\r\nhello world")
+            vt.refresh(frame)
+            assertTrue(vt.selectWord(7, 4))
+            vt.refresh(frame)
+            assertEquals(6..10, frame.selected[4])
+            vt.feed("\r\nnext")
+            vt.refresh(frame)
+            assertEquals(6..10, frame.selected[3])
+            assertNull(frame.selected[4])
+            assertEquals("world", vt.selectionText())
+        }
+    }
+
+    @Test
+    fun draggingTheStartPastTheEndSwapsThem() = onMain {
+        terminal().use { vt ->
+            vt.feed("hello world")
+            assertTrue(vt.selectWord(0, 0))
+            assertEquals(SelectionEnd.Start, vt.extendSelection(SelectionEnd.Start, 2, 0))
+            assertEquals("llo", vt.selectionText())
+            assertEquals(SelectionEnd.End, vt.extendSelection(SelectionEnd.Start, 8, 0))
+            assertEquals("o wor", vt.selectionText())
+            assertEquals(SelectionBounds(GridCell(4, 0), GridCell(8, 0)), vt.selectionBounds)
+            // 拖到视口外夹在边上。
+            assertEquals(SelectionEnd.End, vt.extendSelection(SelectionEnd.End, 99, 0))
+            assertEquals(SelectionBounds(GridCell(4, 0), GridCell(19, 0)), vt.selectionBounds)
+        }
+    }
+
+    /** 软换行的长行拷出来是一行。 */
+    @Test
+    fun softWrappedLinesCopyWithoutBreaks() = onMain {
+        terminal().use { vt ->
+            vt.feed("abcdefghijklmnopqrstuvwxy")
+            assertTrue(vt.selectWord(3, 0))
+            assertEquals("abcdefghijklmnopqrstuvwxy", vt.selectionText())
+            val frame = vt.frame()
+            assertEquals(0..19, frame.selected[0])
+            assertEquals(0..4, frame.selected[1])
+        }
+    }
+
+    @Test
+    fun selectAllIncludesScrollback() = onMain {
+        terminal().use { vt ->
+            vt.feed((0 until 10).joinToString("\r\n") { "line$it" })
+            assertTrue(vt.selectAll())
+            assertEquals((0 until 10).joinToString("\n") { "line$it" }, vt.selectionText())
+            val bounds = assertNotNull(vt.selectionBounds)
+            assertNull(bounds.start)
+        }
+    }
+
+    @Test
+    fun clearSelectionRemovesIt() = onMain {
+        terminal().use { vt ->
+            vt.feed("hello world")
+            val frame = ScreenFrame()
+            assertTrue(vt.selectWord(0, 0))
+            vt.refresh(frame)
+            vt.clearSelection()
+            vt.refresh(frame)
+            assertFalse(vt.hasSelection)
+            assertTrue(frame.selected.all { it == null })
+            assertNull(vt.selectionText())
+            assertNull(vt.selectionBounds)
+        }
+    }
+
     /** 关掉以后不能再用，重复关不出事。 */
     @Test
     fun closedTerminalsRefuseWork() = onMain {

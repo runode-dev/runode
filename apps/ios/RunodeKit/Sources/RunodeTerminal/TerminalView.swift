@@ -26,7 +26,9 @@
     /// 大小排，缩放靠滚动视图的 `zoomScale`（缩放的是容器），缩放结束后按新的比例重画，字不发虚。
     /// 平滑滚动错开不足一行时，网格在容器里往下挪，容器顶上露出另画的视口上面那一行，底下多出的被
     /// 容器裁掉；挪的是现成的位图，不用每帧重画。
-    public final class TerminalView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate, TerminalDisplay {
+    public final class TerminalView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate,
+        @preconcurrency UIEditMenuInteractionDelegate, TerminalDisplay
+    {
         public weak var delegate: (any TerminalViewDelegate)?
 
         /// 正在画的那份 VT，由视图模型给；视图只读它和滚它的视口。
@@ -73,6 +75,32 @@
         /// 几次，等停稳了再报「适配手机」的尺寸，宿主只改一次。
         private var keyboardMotion: KeyboardMotion?
         private var keyboardSettle: Task<Void, Never>?
+        private lazy var tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        /// 一个、两个手指上下拖看回滚历史的两个手势。
+        private var scrollbackPans: [UIPanGestureRecognizer] = []
+
+        /// 在选中：画拖柄、弹「拷贝」菜单。选区本身只存在 VT 里，`refreshNow` 每次对账。
+        private(set) var selecting = false
+        /// 正在拖的是选区的哪一端；没在拖时为空。
+        private var selectionDrag: SelectionEnd?
+        /// 拖选区时手指（拖柄时加上 `handleGrab`）最后在哪，本视图坐标：网格自动滚动、平移后照它重新取格。
+        private var selectionFinger = CGPoint.zero
+        /// 上次拖到的格子和拖完后被拖的是哪一端。
+        private var lastDragTarget: (cell: GridCell, end: SelectionEnd)?
+        /// 按住拖柄时手指到拖柄所指的格子边、行中线的偏移（网格坐标）。
+        private var handleGrab = CGVector.zero
+        /// 长按选中时手指所在的那格，手指离开它之前不算拖。
+        private var longPressOrigin: GridCell?
+        /// 拖柄拖到可见区域外时驱动自动滚动、平移的显示刷新。
+        private var selectionScrollLink: CADisplayLink?
+        private let startHandle = SelectionHandleView(end: .start)
+        private let endHandle = SelectionHandleView(end: .end)
+        private lazy var editMenu = UIEditMenuInteraction(delegate: self)
+        /// 没有选区时「粘贴」菜单指着的位置，本视图坐标。
+        private var menuPoint: CGPoint?
+        private let selectFeedback = UIImpactFeedbackGenerator(style: .medium)
+        /// 拷贝写进、粘贴读出的剪贴板。
+        var pasteboard: UIPasteboard = .general
 
         private enum KeyboardMotion {
             case opening, closing
@@ -159,7 +187,6 @@
             markedLabel.backgroundColor = UIColor.darkGray
             grid.addSubview(markedLabel)
 
-            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             addGestureRecognizer(tap)
             let oneFinger = UIPanGestureRecognizer(target: self, action: #selector(handleScrollback(_:)))
             oneFinger.maximumNumberOfTouches = 1
@@ -170,6 +197,17 @@
             twoFingers.maximumNumberOfTouches = 2
             twoFingers.delegate = self
             scrollView.addGestureRecognizer(twoFingers)
+            scrollbackPans = [oneFinger, twoFingers]
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+            longPress.minimumPressDuration = 0.4
+            longPress.delegate = self
+            scrollView.addGestureRecognizer(longPress)
+            // 拖柄是本视图自己的子视图、盖在滚动视图上面，不跟着缩放变粗。
+            for handle in [startHandle, endHandle] {
+                handle.onPan = { [weak self] handle, pan in self?.dragHandle(handle, pan) }
+                addSubview(handle)
+            }
+            addInteraction(editMenu)
             // 手指一按下就停住惯性，和系统的滚动视图一样；不认成别的手势，也不拦触摸。
             let touchDown = UILongPressGestureRecognizer(target: self, action: #selector(handleTouchDown(_:)))
             touchDown.minimumPressDuration = 0
@@ -255,6 +293,7 @@
             // 按住的键、组字中的文字是给原来那份 VT 的：视图换了会话或者重新连上时不接着连发、不上屏。
             stopRepeating()
             discardMarkedText()
+            endSelection()
             self.terminal = terminal
             grid.imageSource = { [weak terminal] id, generation in terminal?.image(id: id, generation: generation) }
             aboveGrid.imageSource = grid.imageSource
@@ -353,6 +392,14 @@
                 delegate?.terminalView(self, didScrollBack: scrolledBack)
             }
             followCursor()
+            // 选区在 VT 里没了（切到备用屏等）就退出选中；没在选中却还有选区就清掉。
+            if selecting, !terminal.hasSelection {
+                endSelection()
+            } else if !selecting, terminal.hasSelection {
+                terminal.clearSelection()
+                scheduleRefresh()
+            }
+            layoutSelectionHandles()
         }
 
         /// 有在播的图片动画时到点再刷新一次；动画停了就不再刷。
@@ -371,7 +418,7 @@
         /// 回滚历史时不动。
         private func followCursor() {
             guard !lastScrolledBack, !scrollView.isDragging, !scrollView.isDecelerating, !scrollView.isZooming,
-                ContinuousClock.now - lastUserScroll > .seconds(2)
+                selectionDrag == nil, ContinuousClock.now - lastUserScroll > .seconds(2)
             else { return }
             revealCursor()
         }
@@ -387,6 +434,7 @@
             }
             centerContent(stickToBottom: resized)
             reportFitSize()
+            layoutSelectionHandles()
         }
 
         /// 网格的行列数变了：按新的大小排，没手动缩放过时重新按屏幕宽度缩放。
@@ -433,6 +481,11 @@
 
         public func scrollViewDidZoom(_ scrollView: UIScrollView) {
             centerContent()
+            layoutSelectionHandles()
+        }
+
+        public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            layoutSelectionHandles()
         }
 
         public func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
@@ -442,6 +495,7 @@
 
         public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
             lastUserScroll = .now
+            editMenu.dismissMenu()
         }
 
         public func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
@@ -471,6 +525,7 @@
             row.columns = grid.screen.columns
             row.rows = grid.screen.above.isEmpty ? 0 : 1
             row.cells = grid.screen.above.isEmpty ? [] : [grid.screen.above]
+            row.selected = grid.screen.above.isEmpty ? [] : [grid.screen.aboveSelected]
             row.background = grid.screen.background
             row.foreground = grid.screen.foreground
             row.cursorColor = grid.screen.cursorColor
@@ -638,6 +693,7 @@
             switch pan.state {
             case .began:
                 stopMomentum()
+                editMenu.dismissMenu()
                 scrollbackRemainder = 0
                 let point = pan.location(in: grid)
                 scrollAnchor = (
@@ -742,9 +798,22 @@
 
         /// 轻点：程序开着鼠标上报时当成一次点击发给它（全屏 agent 界面里「跳到底部」这类按钮）。只有点在
         /// 光标那行的上一行及以下（输入框和它下面的状态栏）才弹键盘，点上面的对话、输出不弹，键盘开着时
-        /// 收起；看不到光标时，程序管鼠标就只点击，不管就照旧弹键盘。
+        /// 收起；看不到光标时，程序管鼠标就只点击，不管就照旧弹键盘。选中时只管选区：点在选区或拖柄上
+        /// 重新弹菜单，点在别处退出选中，都不点击、不开关键盘。
         @objc private func handleTap(_ tap: UITapGestureRecognizer) {
-            let point = tap.location(in: grid)
+            handleTap(at: tap.location(in: grid))
+        }
+
+        /// 轻点网格上的 `point`（网格坐标）。
+        func handleTap(at point: CGPoint) {
+            if selecting {
+                if selectionContains(point) || handle(at: grid.convert(point, to: self)) != nil {
+                    showEditMenu(at: nil)
+                } else {
+                    endSelection()
+                }
+                return
+            }
             let row = Int((point.y / grid.font.cellHeight).rounded(.down))
             let tracking = terminal?.mouseTracking == true
             if tracking, grid.bounds.contains(point) {
@@ -765,10 +834,376 @@
             return true
         }
 
+        // MARK: 选区
+
+        /// 长按：取到词就进入选中，手指不抬接着拖等于拖终点柄，抬手弹菜单；取不到词只弹「粘贴」。程序开着
+        /// 鼠标上报时也在本地选，不发给程序。
+        @objc private func handleLongPress(_ press: UILongPressGestureRecognizer) {
+            switch press.state {
+            case .began:
+                let point = press.location(in: grid)
+                guard beginSelection(at: point) else {
+                    showEditMenu(at: press.location(in: self))
+                    return
+                }
+                selectFeedback.impactOccurred()
+                longPressOrigin = fingerCell(point)
+            case .changed:
+                guard selecting, selectionDrag != nil else { return }
+                let point = press.location(in: grid)
+                // 手指离开按下的那格之前不拖，刚选中的词不被手指的抖动缩短。
+                if let origin = longPressOrigin {
+                    guard fingerCell(point) != origin else { return }
+                    longPressOrigin = nil
+                }
+                dragSelection(to: point)
+            case .ended, .cancelled, .failed:
+                longPressOrigin = nil
+                finishSelectionDrag()
+            default:
+                break
+            }
+        }
+
+        /// `point`（网格坐标）落在的那一格，不按格子边取整。
+        private func fingerCell(_ point: CGPoint) -> GridCell {
+            let width = max(grid.font.cellWidth, 1)
+            let height = max(grid.font.cellHeight, 1)
+            return GridCell(column: Int((point.x / width).rounded(.down)), row: Int((point.y / height).rounded(.down)))
+        }
+
+        /// 选中网格上 `point`（网格坐标）所在的词，进入选中，接着拖的是终点柄。点在网格外、格子空着、取到
+        /// 的只有空白时不进入，原来的选区也退出，返回假。
+        @discardableResult
+        func beginSelection(at point: CGPoint) -> Bool {
+            guard let terminal, grid.bounds.contains(point), grid.font.cellWidth > 0, grid.font.cellHeight > 0 else {
+                endSelection()
+                return false
+            }
+            let column = Int(point.x / grid.font.cellWidth)
+            let row = Int(point.y / grid.font.cellHeight)
+            guard terminal.selectWord(column: column, row: row) else {
+                endSelection()
+                return false
+            }
+            guard let text = terminal.selectionText(), !text.allSatisfy(\.isWhitespace) else {
+                terminal.clearSelection()
+                endSelection()
+                scheduleRefresh()
+                return false
+            }
+            stopMomentum()
+            editMenu.dismissMenu()
+            selecting = true
+            selectionDrag = .end
+            lastDragTarget = nil
+            selectionFinger = grid.convert(point, to: self)
+            // 关了再开，取消这一按里已经在跟的滚动和轻点：之后手指的移动只拖选区，抬手也不算轻点。
+            for recognizer in [scrollView.panGestureRecognizer, tap] + scrollbackPans {
+                recognizer.isEnabled = false
+                recognizer.isEnabled = true
+            }
+            scheduleRefresh()
+            return true
+        }
+
+        /// 正在拖的那一端拖到 `point`（网格坐标）；越出可见区域时开始自动滚动、平移。
+        func dragSelection(to point: CGPoint) {
+            guard selecting, selectionDrag != nil else { return }
+            editMenu.dismissMenu()
+            selectionFinger = grid.convert(point, to: self)
+            if extendSelectionToFinger() { scheduleRefresh() }
+            updateSelectionScroll()
+        }
+
+        /// 拖完了：停下自动滚动，弹菜单。
+        private func finishSelectionDrag() {
+            stopSelectionScroll()
+            guard selecting, selectionDrag != nil else { return }
+            selectionDrag = nil
+            lastDragTarget = nil
+            refreshNow()
+            showEditMenu(at: nil)
+        }
+
+        /// 退出选中：清掉 VT 里的选区，收起拖柄和菜单。
+        func endSelection() {
+            guard selecting else { return }
+            selecting = false
+            selectionDrag = nil
+            lastDragTarget = nil
+            longPressOrigin = nil
+            stopSelectionScroll()
+            editMenu.dismissMenu()
+            terminal?.clearSelection()
+            layoutSelectionHandles()
+            scheduleRefresh()
+        }
+
+        private func dragHandle(_ handle: SelectionHandleView, _ pan: UIPanGestureRecognizer) {
+            switch pan.state {
+            case .began:
+                let ends = selecting ? terminal?.selectionBounds : nil
+                guard let cell = handle.end == .start ? ends?.start : ends?.end else { return }
+                stopMomentum()
+                editMenu.dismissMenu()
+                selectionDrag = handle.end
+                lastDragTarget = nil
+                let anchor = handleAnchor(handle.end, at: cell)
+                let finger = pan.location(in: grid)
+                handleGrab = CGVector(dx: anchor.x - finger.x, dy: (anchor.top + anchor.bottom) / 2 - finger.y)
+            case .changed:
+                guard selectionDrag != nil else { return }
+                let finger = pan.location(in: grid)
+                dragSelection(to: CGPoint(x: finger.x + handleGrab.dx, y: finger.y + handleGrab.dy))
+            case .ended, .cancelled, .failed:
+                finishSelectionDrag()
+            default:
+                break
+            }
+        }
+
+        /// 两个拖柄离得近、按住的范围叠在一起时，交给离手指近的那个。
+        public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            let hit = super.hitTest(point, with: event)
+            guard hit != nil, selecting, let end = handle(at: point) else { return hit }
+            return end == .start ? startHandle : endHandle
+        }
+
+        /// 本视图坐标里的 `point` 按在哪个拖柄上。
+        private func handle(at point: CGPoint) -> SelectionEnd? {
+            SelectionGeometry.hitHandle(
+                point, start: startHandle.isHidden ? nil : startHandle.center,
+                end: endHandle.isHidden ? nil : endHandle.center, radius: SelectionHandleView.minimumTouchSize / 2)
+        }
+
+        /// 两个拖柄摆到选区两端；那一端不在视口里、或在滚动视图外面时不画。
+        private func layoutSelectionHandles() {
+            let ends = selecting ? terminal?.selectionBounds : nil
+            for handle in [startHandle, endHandle] {
+                guard let cell = handle.end == .start ? ends?.start : ends?.end else {
+                    handle.isHidden = true
+                    continue
+                }
+                let anchor = handleAnchor(handle.end, at: cell)
+                let top = grid.convert(CGPoint(x: anchor.x, y: anchor.top), to: self)
+                let bottom = grid.convert(CGPoint(x: anchor.x, y: anchor.bottom), to: self)
+                handle.place(x: top.x, top: top.y, bottom: bottom.y)
+                let middle = CGPoint(x: top.x, y: (top.y + bottom.y) / 2)
+                handle.isHidden = !scrollView.frame.insetBy(dx: -1, dy: -1).contains(middle)
+            }
+        }
+
+        private func handleCell(_ end: SelectionEnd, at point: CGPoint) -> GridCell {
+            SelectionGeometry.handleCell(
+                end, x: point.x, y: point.y, cellWidth: grid.font.cellWidth, cellHeight: grid.font.cellHeight,
+                columns: grid.screen.columns, rows: grid.screen.rows)
+        }
+
+        private func handleAnchor(_ end: SelectionEnd, at cell: GridCell) -> SelectionGeometry.HandleAnchor {
+            SelectionGeometry.handleAnchor(
+                end, at: cell, in: grid.screen.cells, cellWidth: grid.font.cellWidth, cellHeight: grid.font.cellHeight)
+        }
+
+        /// 网格上的 `point`（网格坐标）落在选中的格子里。
+        private func selectionContains(_ point: CGPoint) -> Bool {
+            guard grid.font.cellWidth > 0, grid.font.cellHeight > 0, point.x >= 0, point.y >= 0 else { return false }
+            let row = Int(point.y / grid.font.cellHeight)
+            let column = Int(point.x / grid.font.cellWidth)
+            guard grid.screen.selected.indices.contains(row), let range = grid.screen.selected[row] else { return false }
+            return range.contains(column)
+        }
+
+        /// 网格露在滚动视图里的部分（网格坐标）。
+        private var visibleGridRect: CGRect {
+            grid.bounds.intersection(grid.convert(scrollView.bounds, from: scrollView))
+        }
+
+        /// 按手指最后的位置（夹进可见区域）挪正在拖的那一端，返回挪了没有。落到的格子和被拖的那一端都和
+        /// 上次一样时不再挪；网格滚过、平移过之后同一格已经是别的内容，`force` 为真照样挪。
+        @discardableResult
+        private func extendSelectionToFinger(force: Bool = false) -> Bool {
+            guard let terminal, let moving = selectionDrag else { return false }
+            let visible = visibleGridRect
+            guard !visible.isEmpty else { return false }
+            var point = grid.convert(selectionFinger, from: self)
+            point.x = min(max(point.x, visible.minX), visible.maxX)
+            point.y = min(max(point.y, visible.minY), visible.maxY - 0.01)
+            let cell = handleCell(moving, at: point)
+            if !force, let last = lastDragTarget, last.cell == cell, last.end == moving { return false }
+            let moved = terminal.extendSelection(moving: moving, column: cell.column, row: cell.row)
+            selectionDrag = moved
+            lastDragTarget = (cell, moved)
+            return true
+        }
+
+        /// 手指越过它就开始自动滚动、平移的范围（网格坐标）：可见区域，但哪条边离滚动视图的边不到
+        /// `SelectionGeometry.edgeBand` 时，那条边退到滚动视图的边往里 `edgeBand` 处。
+        private func selectionScrollBounds(_ visible: CGRect) -> CGRect {
+            let view = grid.convert(scrollView.bounds, from: scrollView)
+            let band = SelectionGeometry.edgeBand / max(scrollView.zoomScale, 0.01)
+            func span(_ low: CGFloat, _ high: CGFloat, _ viewLow: CGFloat, _ viewHigh: CGFloat) -> (CGFloat, CGFloat) {
+                let start = max(low, viewLow + band)
+                let end = min(high, viewHigh - band)
+                return start <= end ? (start, end) : ((low + high) / 2, (low + high) / 2)
+            }
+            let (minX, maxX) = span(visible.minX, visible.maxX, view.minX, view.maxX)
+            let (minY, maxY) = span(visible.minY, visible.maxY, view.minY, view.maxY)
+            return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        }
+
+        /// 手指越出 `selectionScrollBounds` 时，网格在那个方向还有没露出来的部分就平移网格（`pan`，滚动视图
+        /// 的点每秒）；纵向已经到了网格边上、手指又越出可见区域时滚回滚历史（`lines`，行每秒，为正看更早的内容）。
+        private func selectionEdgeMotion() -> (pan: CGVector, lines: Double) {
+            let visible = visibleGridRect
+            guard let terminal, selectionDrag != nil, !visible.isEmpty else { return (.zero, 0) }
+            let edges = selectionScrollBounds(visible)
+            let point = grid.convert(selectionFinger, from: self)
+            let zoom = scrollView.zoomScale
+            var pan = CGVector.zero
+            var lines = 0.0
+            let columns = SelectionGeometry.edgeRate(
+                point.x, low: edges.minX, high: edges.maxX, cell: grid.font.cellWidth)
+            let moreSideways = columns < 0 ? visible.minX > grid.bounds.minX + 0.5 : visible.maxX < grid.bounds.maxX - 0.5
+            if columns != 0, moreSideways {
+                pan.dx = CGFloat(columns) * grid.font.cellWidth * zoom
+            }
+            let rows = SelectionGeometry.edgeRate(
+                point.y, low: edges.minY, high: edges.maxY, cell: grid.font.cellHeight)
+            let moreVertically = rows < 0 ? visible.minY > grid.bounds.minY + 0.5 : visible.maxY < grid.bounds.maxY - 0.5
+            if rows != 0, moreVertically {
+                pan.dy = CGFloat(rows) * grid.font.cellHeight * zoom
+            } else if !terminal.programScrolls {
+                // shortcut: 程序自己管滚动时不自动滚，选区只能在一屏之内；要跨屏选全屏程序的输出时改成按
+                // 滚轮事件让程序滚
+                // 滚回滚历史只看可见区域本身、不加触发带：首行、末行的行中线离视图边不到一条触发带宽。
+                lines = SelectionGeometry.autoscrollRate(
+                    y: point.y, top: visible.minY, bottom: visible.maxY, cellHeight: grid.font.cellHeight)
+            }
+            return (pan, lines)
+        }
+
+        private func updateSelectionScroll() {
+            let motion = selectionEdgeMotion()
+            guard motion.pan != .zero || motion.lines != 0 else {
+                stopSelectionScroll()
+                return
+            }
+            guard selectionScrollLink == nil else { return }
+            let link = CADisplayLink(target: self, selector: #selector(stepSelectionScroll(_:)))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+            link.add(to: .main, forMode: .common)
+            selectionScrollLink = link
+        }
+
+        @objc private func stepSelectionScroll(_ link: CADisplayLink) {
+            let motion = selectionEdgeMotion()
+            guard let terminal, motion.pan != .zero || motion.lines != 0 else {
+                stopSelectionScroll()
+                return
+            }
+            let elapsed = min(link.targetTimestamp - link.timestamp, 0.05)
+            var moved = false
+            if motion.pan != .zero {
+                moved = panGrid(by: CGVector(dx: motion.pan.dx * elapsed, dy: motion.pan.dy * elapsed))
+            }
+            if motion.lines != 0 {
+                moved = terminal.scrollSmoothly(lines: motion.lines * elapsed) || moved
+            }
+            // 滚到了头、挪不动时不重读重画，等手指回来。
+            guard moved else { return }
+            extendSelectionToFinger(force: true)
+            refreshNow()
+        }
+
+        private func stopSelectionScroll() {
+            selectionScrollLink?.invalidate()
+            selectionScrollLink = nil
+        }
+
+        /// 平移网格 `delta`（滚动视图的点），不越过能滚到的范围；返回挪了没有。
+        @discardableResult
+        private func panGrid(by delta: CGVector) -> Bool {
+            let inset = scrollView.contentInset
+            let content = scrollView.contentSize
+            let size = scrollView.bounds.size
+            var offset = scrollView.contentOffset
+            offset.x = min(
+                max(offset.x + delta.dx, -inset.left), max(-inset.left, content.width + inset.right - size.width))
+            offset.y = min(
+                max(offset.y + delta.dy, -inset.top), max(-inset.top, content.height + inset.bottom - size.height))
+            guard offset != scrollView.contentOffset else { return false }
+            lastUserScroll = .now
+            scrollView.contentOffset = offset
+            return true
+        }
+
+        /// 弹编辑菜单：选中时指着选区；没在选中时指着 `point`（本视图坐标），只有「粘贴」，不能粘贴就不弹。
+        private func showEditMenu(at point: CGPoint?) {
+            if !selecting {
+                guard point != nil, canPerformAction(#selector(paste(_:)), withSender: nil) else { return }
+            }
+            menuPoint = point
+            let target = menuTargetRect
+            guard !target.isNull, !target.isEmpty || !selecting else { return }
+            editMenu.presentEditMenu(
+                with: UIEditMenuConfiguration(identifier: nil, sourcePoint: CGPoint(x: target.midX, y: target.minY)))
+        }
+
+        /// 菜单指着的矩形（本视图坐标）：选区露在滚动视图里的部分的外接矩形；没在选中时是 `menuPoint`。
+        private var menuTargetRect: CGRect {
+            guard selecting else {
+                return menuPoint.map { CGRect(origin: $0, size: .zero) } ?? .null
+            }
+            let cellWidth = grid.font.cellWidth
+            let cellHeight = grid.font.cellHeight
+            var rect = CGRect.null
+            for (row, range) in grid.screen.selected.enumerated() {
+                guard let range else { continue }
+                rect = rect.union(
+                    CGRect(
+                        x: CGFloat(range.lowerBound) * cellWidth, y: CGFloat(row) * cellHeight,
+                        width: CGFloat(range.count) * cellWidth, height: cellHeight))
+            }
+            guard !rect.isNull else { return .null }
+            return grid.convert(rect, to: self).intersection(scrollView.frame)
+        }
+
+        public func editMenuInteraction(
+            _ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
+            suggestedActions: [UIMenuElement]
+        ) -> UIMenu? {
+            let actions = editMenuActions()
+            return actions.isEmpty ? nil : UIMenu(children: actions)
+        }
+
+        public func editMenuInteraction(
+            _ interaction: UIEditMenuInteraction, targetRectFor configuration: UIEditMenuConfiguration
+        ) -> CGRect {
+            menuTargetRect
+        }
+
+        /// 菜单里的「拷贝」「粘贴」「全选」，按 `canPerformAction` 取能用的。
+        private func editMenuActions() -> [UIAction] {
+            let items: [(Selector, String, (TerminalView) -> Void)] = [
+                (#selector(copy(_:)), String(localized: "拷贝"), { $0.copy(nil) }),
+                (#selector(paste(_:)), String(localized: "粘贴"), { $0.paste(nil) }),
+                (#selector(selectAll(_:)), String(localized: "全选"), { $0.selectAll(nil) }),
+            ]
+            return items.compactMap { action, title, perform in
+                guard canPerformAction(action, withSender: nil) else { return nil }
+                return UIAction(title: title) { [weak self] _ in
+                    guard let self else { return }
+                    perform(self)
+                }
+            }
+        }
+
         // MARK: 输入
 
         /// 发一份输入给上层；打字时回到最底下、把光标露出来。
         func emit(_ input: TerminalInput) {
+            endSelection()
             stopMomentum()
             if lastScrolledBack {
                 terminal?.scrollToBottom()
@@ -817,15 +1252,34 @@
         }
 
         public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-            if action == #selector(paste(_:)) {
-                return UIPasteboard.general.hasStrings
+            switch action {
+            case #selector(paste(_:)): acceptsInput && pasteboard.hasStrings
+            case #selector(copy(_:)): terminal?.hasSelection == true
+            case #selector(selectAll(_:)): selecting
+            default: super.canPerformAction(action, withSender: sender)
             }
-            return super.canPerformAction(action, withSender: sender)
         }
 
         public override func paste(_ sender: Any?) {
-            guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+            guard let text = pasteboard.string, !text.isEmpty else { return }
             emit(.paste(text))
+        }
+
+        /// 选中的文字写进剪贴板，退出选中。
+        public override func copy(_ sender: Any?) {
+            guard let text = terminal?.selectionText(), !text.isEmpty else {
+                endSelection()
+                return
+            }
+            pasteboard.string = text
+            endSelection()
+        }
+
+        /// 选中整屏连同回滚历史，菜单接着留着。
+        public override func selectAll(_ sender: Any?) {
+            guard selecting, let terminal, terminal.selectAll() else { return }
+            refreshNow()
+            showEditMenu(at: nil)
         }
 
         // MARK: 硬件键盘

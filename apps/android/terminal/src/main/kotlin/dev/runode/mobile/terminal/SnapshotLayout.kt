@@ -5,12 +5,13 @@ package dev.runode.mobile.terminal
  * 两边一致由 [signature] 和 [VtJni.nativeLayout] 相等守着，改布局时 [VERSION] 加一、两边和签名一起改。
  *
  * 一帧依次是：头（[HEADER_SIZE] 字节）、[ROW_COUNT] 个行记录、按 8 字节对齐的 [IMAGE_COUNT] 个图片记录、字素簇池。
- * 行记录是行号（视口上面那一行是 -1）加上 [COLUMNS] 个格子。格子的 [CELL_TEXT] 为 0 是没有字；不带
+ * 行记录是行号（视口上面那一行是 -1）、本行选中的起止列（int16，含两端，本行没有选中时都是 -1）加上 [COLUMNS] 个
+ * 格子。格子的 [CELL_TEXT] 为 0 是没有字；不带
  * [CELL_TEXT_GRAPHEME] 时是唯一的码点，带着时低 31 位是字素簇池里的下标（以 int32 计），那里先是码点个数、
  * 再是各个码点。颜色带着 [COLOR_SET] 时低 24 位是 0xRRGGBB，没带是用默认色。
  */
 internal object SnapshotLayout {
-    const val VERSION = 1
+    const val VERSION = 2
 
     const val FLAGS = 0
     const val COLUMNS = 4
@@ -39,7 +40,9 @@ internal object SnapshotLayout {
     const val FLAG_NEXT_IMAGE_FRAME = 1 shl 7
 
     const val ROW_Y = 0
-    const val ROW_HEADER_SIZE = 4
+    const val ROW_SELECTION_START = 4
+    const val ROW_SELECTION_END = 6
+    const val ROW_HEADER_SIZE = 8
 
     const val CELL_TEXT = 0
     const val CELL_FOREGROUND = 4
@@ -83,7 +86,7 @@ internal object SnapshotLayout {
                 NEXT_IMAGE_FRAME_MS,
                 FLAG_FULL, FLAG_ABOVE_CHANGED, FLAG_IMAGES_CHANGED, FLAG_CURSOR, FLAG_CURSOR_BLINKING,
                 FLAG_CURSOR_WIDE_TAIL, FLAG_CURSOR_COLOR, FLAG_NEXT_IMAGE_FRAME,
-                ROW_Y, ROW_HEADER_SIZE,
+                ROW_Y, ROW_SELECTION_START, ROW_SELECTION_END, ROW_HEADER_SIZE,
                 CELL_TEXT, CELL_FOREGROUND, CELL_BACKGROUND, CELL_ATTRIBUTES, CELL_UNDERLINE, CELL_WIDTH, CELL_SIZE,
                 CELL_TEXT_GRAPHEME, COLOR_SET,
             ) +

@@ -361,6 +361,10 @@ static void put8(Out *out, size_t at, uint8_t value) {
     if (at + 1 <= out->cap) out->base[at] = value;
 }
 
+static void put16(Out *out, size_t at, int16_t value) {
+    if (at + 2 <= out->cap) memcpy(out->base + at, &value, 2);
+}
+
 static void put32(Out *out, size_t at, int32_t value) {
     if (at + 4 <= out->cap) memcpy(out->base + at, &value, 4);
 }
@@ -497,11 +501,17 @@ static bool write_cell(Vt *vt, Out *out, size_t at) {
     return true;
 }
 
-// 行迭代器当前那一行的记录：行号加 columns 个格子，render state 里不够的格子补空白。内存不够时返回假。
+// 行迭代器当前那一行的记录：行号、选中的起止列加 columns 个格子，render state 里不够的格子补空白。
+// 内存不够时返回假。
 static bool write_row(Vt *vt, Out *out, int32_t y, uint16_t columns) {
     size_t at = out->len;
     out->len += SNAPSHOT_ROW_HEADER_SIZE + (size_t)columns * SNAPSHOT_CELL_SIZE;
     put32(out, at + SNAPSHOT_ROW_Y, y);
+    GhosttyRenderStateRowSelection selection = GHOSTTY_INIT_SIZED(GhosttyRenderStateRowSelection);
+    bool selected =
+        ghostty_render_state_row_get(vt->rows, GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION, &selection) == GHOSTTY_SUCCESS;
+    put16(out, at + SNAPSHOT_ROW_SELECTION_START, selected ? (int16_t)selection.start_x : -1);
+    put16(out, at + SNAPSHOT_ROW_SELECTION_END, selected ? (int16_t)selection.end_x : -1);
     size_t cells_at = at + SNAPSHOT_ROW_HEADER_SIZE;
     uint16_t x = 0;
     GhosttyRenderStateRowCells cells = vt->cells;
@@ -819,6 +829,186 @@ JNIEXPORT jbyteArray JNICALL Java_dev_runode_mobile_terminal_VtJni_nativeImagePi
     return array;
 }
 
+// MARK: 选区
+//
+// 选区装在 VT 里，滚动、新输出、改尺寸重排时由 libghostty 跟着内容走。从 VT 取出的选区和 grid ref 只到下一次改 VT
+// 的调用（设选区、喂字节、改尺寸等）为止有效，所以「取、排序、装回」都在同一个 native 调用里做完，不交给 Kotlin。
+
+// 选词时的词边界：Ghostty 默认的那组，加上中文的全角标点。没有标点隔开的一串汉字算一个词。
+static const uint32_t word_boundaries[] = {
+    0,      ' ',    '\t',   '\'',   '"',    0x2502, '`',    '|',    ':',    ';',    ',',    '(',
+    ')',    '[',    ']',    '{',    '}',    '<',    '>',    '$',    0xFF0C, 0x3002, 0x3001, 0xFF1B,
+    0xFF1A, 0xFF1F, 0xFF01, 0x201C, 0x201D, 0x2018, 0x2019, 0xFF08, 0xFF09, 0x300A, 0x300B, 0x3010,
+    0x3011, 0x300C, 0x300D, 0x300E, 0x300F, 0x2026, 0x2014,
+};
+
+// 视口第 row 行第 column 列那一格的 grid ref；格子不在视口里时返回假。
+static bool viewport_ref(Vt *vt, int column, int row, GhosttyGridRef *out) {
+    if (column < 0 || row < 0 || column > UINT16_MAX) {
+        return false;
+    }
+    GhosttyPoint point = {.tag = GHOSTTY_POINT_TAG_VIEWPORT};
+    point.value.coordinate.x = (uint16_t)column;
+    point.value.coordinate.y = (uint32_t)row;
+    return ghostty_terminal_grid_ref(vt->terminal, point, out) == GHOSTTY_SUCCESS;
+}
+
+// VT 当前的选区排成从左上到右下；没有选区时返回假。
+static bool ordered_selection(Vt *vt, GhosttySelection *out) {
+    GhosttySelection selection = {0};
+    if (ghostty_terminal_get(vt->terminal, GHOSTTY_TERMINAL_DATA_SELECTION, &selection) != GHOSTTY_SUCCESS) {
+        return false;
+    }
+    return ghostty_terminal_selection_ordered(vt->terminal, &selection, GHOSTTY_SELECTION_ORDER_FORWARD, out) ==
+           GHOSTTY_SUCCESS;
+}
+
+// 选中视口第 row 行第 column 列所在的词并装进 VT。格子是空的、不在视口里时什么都不改，返回假。
+JNIEXPORT jboolean JNICALL Java_dev_runode_mobile_terminal_VtJni_nativeSelectWord(JNIEnv *env, jclass cls,
+                                                                                  jlong handle, jint column,
+                                                                                  jint row) {
+    (void)env;
+    (void)cls;
+    Vt *vt = vt_of(handle);
+    GhosttyTerminalSelectWordOptions options = GHOSTTY_INIT_SIZED(GhosttyTerminalSelectWordOptions);
+    if (!viewport_ref(vt, column, row, &options.ref)) {
+        return JNI_FALSE;
+    }
+    options.boundary_codepoints = word_boundaries;
+    options.boundary_codepoints_len = sizeof(word_boundaries) / sizeof(word_boundaries[0]);
+    GhosttySelection selection = {0};
+    if (ghostty_terminal_select_word(vt->terminal, &options, &selection) != GHOSTTY_SUCCESS) {
+        return JNI_FALSE;
+    }
+    return ghostty_terminal_set(vt->terminal, GHOSTTY_TERMINAL_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS;
+}
+
+// 选中屏幕连同回滚历史里的全部内容；什么都没有时返回假。
+JNIEXPORT jboolean JNICALL Java_dev_runode_mobile_terminal_VtJni_nativeSelectAll(JNIEnv *env, jclass cls,
+                                                                                 jlong handle) {
+    (void)env;
+    (void)cls;
+    Vt *vt = vt_of(handle);
+    GhosttySelection selection = {0};
+    if (ghostty_terminal_select_all(vt->terminal, &selection) != GHOSTTY_SUCCESS) {
+        return JNI_FALSE;
+    }
+    return ghostty_terminal_set(vt->terminal, GHOSTTY_TERMINAL_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS;
+}
+
+JNIEXPORT void JNICALL Java_dev_runode_mobile_terminal_VtJni_nativeClearSelection(JNIEnv *env, jclass cls,
+                                                                                  jlong handle) {
+    (void)env;
+    (void)cls;
+    ghostty_terminal_set(vt_of(handle)->terminal, GHOSTTY_TERMINAL_OPT_SELECTION, NULL);
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_runode_mobile_terminal_VtJni_nativeHasSelection(JNIEnv *env, jclass cls,
+                                                                                    jlong handle) {
+    (void)env;
+    (void)cls;
+    GhosttySelection selection = {0};
+    return ghostty_terminal_get(vt_of(handle)->terminal, GHOSTTY_TERMINAL_DATA_SELECTION, &selection) ==
+           GHOSTTY_SUCCESS;
+}
+
+// 拖选区的一端：moving_start 为真拖的是排好序后的起点，否则是终点。另一端不动，被拖端换成视口第 row 行第 column 列
+// （夹在视口里）的格子。返回被拖的那端现在是不是起点：拖过另一端时两端互换，落在另一端同一格时不变。没有选区时
+// 什么都不改，原样返回 moving_start。
+JNIEXPORT jboolean JNICALL Java_dev_runode_mobile_terminal_VtJni_nativeExtendSelection(JNIEnv *env, jclass cls,
+                                                                                       jlong handle,
+                                                                                       jboolean moving_start,
+                                                                                       jint column, jint row) {
+    (void)env;
+    (void)cls;
+    Vt *vt = vt_of(handle);
+    GhosttySelection ordered = {0};
+    if (!ordered_selection(vt, &ordered)) {
+        return moving_start;
+    }
+    uint16_t columns = 0;
+    uint16_t rows = 0;
+    ghostty_terminal_get(vt->terminal, GHOSTTY_TERMINAL_DATA_COLS, &columns);
+    ghostty_terminal_get(vt->terminal, GHOSTTY_TERMINAL_DATA_ROWS, &rows);
+    if (columns == 0 || rows == 0) {
+        return moving_start;
+    }
+    int x = column < 0 ? 0 : column >= columns ? columns - 1 : column;
+    int y = row < 0 ? 0 : row >= rows ? rows - 1 : row;
+    GhosttyGridRef moved = {0};
+    if (!viewport_ref(vt, x, y, &moved)) {
+        return moving_start;
+    }
+    // start 放不动的那端、end 放被拖的那端，排序结果就说明被拖端跑到了哪一边。
+    GhosttySelection selection = {
+        .start = moving_start ? ordered.end : ordered.start,
+        .end = moved,
+        .rectangle = false,
+    };
+    GhosttySelectionOrder order = GHOSTTY_SELECTION_ORDER_FORWARD;
+    ghostty_terminal_selection_order(vt->terminal, &selection, &order);
+    bool same = selection.start.node == moved.node && selection.start.x == moved.x && selection.start.y == moved.y;
+    bool now_start = same ? moving_start : order == GHOSTTY_SELECTION_ORDER_REVERSE;
+    ghostty_terminal_set(vt->terminal, GHOSTTY_TERMINAL_OPT_SELECTION, &selection);
+    return now_start;
+}
+
+// 选区两端在视口里的位置写进 out：起点可见（1 或 0）、起点列、起点行、终点可见、终点列、终点行。不在视口里的那端
+// 可见为 0、行列为 0。没有选区时返回假。
+JNIEXPORT jboolean JNICALL Java_dev_runode_mobile_terminal_VtJni_nativeSelectionBounds(JNIEnv *env, jclass cls,
+                                                                                       jlong handle,
+                                                                                       jintArray out) {
+    (void)cls;
+    Vt *vt = vt_of(handle);
+    GhosttySelection ordered = {0};
+    if (!ordered_selection(vt, &ordered)) {
+        return JNI_FALSE;
+    }
+    jint values[6] = {0};
+    const GhosttyGridRef *ends[2] = {&ordered.start, &ordered.end};
+    for (int i = 0; i < 2; i++) {
+        GhosttyPointCoordinate point = {0};
+        if (ghostty_terminal_point_from_grid_ref(vt->terminal, ends[i], GHOSTTY_POINT_TAG_VIEWPORT, &point) ==
+            GHOSTTY_SUCCESS) {
+            values[i * 3] = 1;
+            values[i * 3 + 1] = point.x;
+            values[i * 3 + 2] = (jint)point.y;
+        }
+    }
+    (*env)->SetIntArrayRegion(env, out, 0, 6, values);
+    return JNI_TRUE;
+}
+
+// 选中的纯文本（UTF-8）：软换行处接起来，行尾空白去掉。没有选区或排版失败时返回 NULL。
+JNIEXPORT jbyteArray JNICALL Java_dev_runode_mobile_terminal_VtJni_nativeSelectionText(JNIEnv *env, jclass cls,
+                                                                                       jlong handle) {
+    (void)cls;
+    Vt *vt = vt_of(handle);
+    GhosttySelection selection = {0};
+    if (ghostty_terminal_get(vt->terminal, GHOSTTY_TERMINAL_DATA_SELECTION, &selection) != GHOSTTY_SUCCESS) {
+        return NULL;
+    }
+    GhosttyFormatter formatter = NULL;
+    if (ghostty_formatter_terminal_new(NULL, &formatter, vt->terminal) != GHOSTTY_SUCCESS) {
+        return NULL;
+    }
+    GhosttyFormatterFormat emit = GHOSTTY_FORMATTER_FORMAT_PLAIN;
+    bool on = true;
+    uint8_t *text = NULL;
+    size_t len = 0;
+    bool formatted = ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS &&
+                     ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_EMIT, &emit) == GHOSTTY_SUCCESS &&
+                     ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_UNWRAP, &on) == GHOSTTY_SUCCESS &&
+                     ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_TRIM, &on) == GHOSTTY_SUCCESS &&
+                     ghostty_formatter_format_alloc(formatter, NULL, &text, &len) == GHOSTTY_SUCCESS;
+    jbyteArray bytes = formatted ? byte_array(env, text, len) : NULL;
+    if (text != NULL) {
+        ghostty_free(NULL, text, len);
+    }
+    ghostty_formatter_free(formatter);
+    return bytes;
+}
+
 // MARK: 输入编码
 
 // 按这份 VT 当前的模式编码一次按下的键。key、mods、consumed_mods、option_as_alt 是 libghostty 的取值，
@@ -958,6 +1148,8 @@ static const jint layout_signature[] = {
     SNAPSHOT_FLAG_CURSOR_COLOR,
     SNAPSHOT_FLAG_NEXT_IMAGE_FRAME,
     SNAPSHOT_ROW_Y,
+    SNAPSHOT_ROW_SELECTION_START,
+    SNAPSHOT_ROW_SELECTION_END,
     SNAPSHOT_ROW_HEADER_SIZE,
     SNAPSHOT_CELL_TEXT,
     SNAPSHOT_CELL_FOREGROUND,

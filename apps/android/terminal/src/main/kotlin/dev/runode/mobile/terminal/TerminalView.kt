@@ -1,12 +1,15 @@
 package dev.runode.mobile.terminal
 
 import android.annotation.SuppressLint
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Canvas
+import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RenderNode
+import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -25,6 +28,7 @@ import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowInsetsAnimation
@@ -33,6 +37,7 @@ import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import android.widget.Magnifier
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -41,6 +46,7 @@ import dev.runode.mobile.protocol.TermSettings
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -65,8 +71,8 @@ interface TerminalViewDelegate {
 
 /**
  * 终端视图：自己在 Canvas 上画 VT 的一屏，接软键盘（含输入法的组字）、硬件键盘和按键栏的输入，单指拖动看回滚
- * 历史，捏合改字号。网格比视图矮时贴着底边放，上面空出来的是终端背景色；比视图宽或高时拖着平移，有输出或打字时
- * 视口跟着光标。
+ * 历史，捏合改字号，长按选中文字、拖拖柄改选区、拷贝。网格比视图矮时贴着底边放，上面空出来的是终端背景色；比视图宽
+ * 或高时拖着平移，有输出或打字时视口跟着光标。
  *
  * 画法：每一行录成一个 [RenderNode]，VT 报了哪些行变了（[VTerminal.refresh] 的 [FrameChange]）就只重录那几行，
  * 其余行的显示列表留着；光标、组字中的文字每次画时现画，光标闪烁不用重录。平滑滚动错开不足一行时整个网格往下挪，
@@ -151,6 +157,61 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
     private var momentumLastFrame = 0L
     private val momentumFrame = Choreographer.FrameCallback { stepMomentum(it) }
 
+    /**
+     * 在选中文字：画拖柄、弹「拷贝 / 粘贴 / 全选」。选区本身只存在 VT 里，每次刷新后经 [syncSelection] 和它对账。
+     */
+    private var selecting = false
+
+    /** 正在拖的那个拖柄（长按选中后手指不抬接着拖算拖终点柄）；没在拖时为空。 */
+    private var selectionDrag: SelectionEnd? = null
+
+    /**
+     * 这次触摸归拖柄管，直到抬手：途中选区被清掉（[selectionDrag] 跟着置空）时剩下的事件也不交给手势识别，
+     * 它们没收到这次的按下。
+     */
+    private var handleTouch = false
+
+    /** 这次拖动上一次把在拖的那端装到的格子；每次开始拖时清空。 */
+    private var lastDragCell: GridCell? = null
+
+    /** 上次刷新时选区两端在视口里的格子，画拖柄、认拖柄用。 */
+    private var selectionBounds: SelectionBounds? = null
+
+    /**
+     * 弹着的浮动菜单（选中时的，或长按没取到词时只有「粘贴」的）。自己收菜单时先把它置空再 finish，
+     * [ActionMode.Callback.onDestroyActionMode] 据此分出用户关的（返回键）和自己收的。
+     */
+    private var selectionMode: ActionMode? = null
+
+    /** 拖柄时选区那端的格边（行中线）相对手指的偏移：手指按在拖柄图上，选区那端跟着格边走、不跟着指尖。 */
+    private var dragOffsetX = 0f
+    private var dragOffsetY = 0f
+
+    /** 为假时是长按刚选中，手指挪出触摸容差才开始拖，按着不动时的抖动不改选区。 */
+    private var dragArmed = true
+    private var pressX = 0f
+    private var pressY = 0f
+
+    /** 最近一次拖到的位置（加上偏移后的，视图坐标），自动滚动每帧按它扩选区。 */
+    private var dragX = 0f
+    private var dragY = 0f
+
+    private var edgeScrolling = false
+    private var edgeLastFrame = 0L
+    private val edgeFrame = Choreographer.FrameCallback { stepEdgeScroll(it) }
+    private var magnifier: Magnifier? = null
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+
+    /** 系统主题里的选区拖柄图，左柄画起点、右柄画终点；主题里没有时不画，只按 [HANDLE_FALLBACK_DP] 认触摸。 */
+    private val startHandle: Drawable? by lazy { themeDrawable(android.R.attr.textSelectHandleLeft) }
+    private val endHandle: Drawable? by lazy { themeDrawable(android.R.attr.textSelectHandleRight) }
+
+    /** 拷贝选中的文字时怎么写剪贴板；测试换掉它，不碰系统剪贴板。 */
+    internal var writeClipboard: (String) -> Unit = { text ->
+        context.getSystemService(ClipboardManager::class.java)
+            ?.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.terminal_label), text))
+    }
+
     private var blinkOn = true
     private val blinkTask = Runnable {
         blinkOn = !blinkOn
@@ -223,6 +284,7 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
     /** 换一份 VT（重新 `Attach` 后新建的），整屏重画。 */
     override fun terminalDidReset(terminal: VTerminal?, settings: TermSettings) {
         stopMomentum()
+        leaveSelection()
         // 组字中的文字是给原来那份 VT 的：视图换了会话或者重新连上时不上屏。
         discardMarkedText()
         this.terminal = terminal
@@ -306,6 +368,7 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
             delegate?.didScrollBack(this, scrolledBack)
         }
         followCursor()
+        syncSelection(terminal)
     }
 
     /** 有在播的图片动画时到点再刷新一次；动画停了就不再刷。 */
@@ -314,9 +377,9 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
         if (dueMs != null) mainHandler.postDelayed(imageFrameTask, max(dueMs, MIN_IMAGE_FRAME_MS))
     }
 
-    /** 有输出时视口跟着光标走；用户正在拖、刚拖过，或者在看回滚历史时不动。 */
+    /** 有输出时视口跟着光标走；用户正在拖（含拖拖柄）、刚拖过，或者在看回滚历史时不动。 */
     private fun followCursor() {
-        if (lastScrolledBack || drag != Drag.None || momentumVelocity != 0f || zooming) return
+        if (lastScrolledBack || drag != Drag.None || selectionDrag != null || momentumVelocity != 0f || zooming) return
         if (SystemClock.uptimeMillis() - lastUserScroll <= FOLLOW_PAUSE_MS) return
         revealCursor()
     }
@@ -377,6 +440,7 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
         val marked = markedText
         if (marked.isNotEmpty()) renderer.drawMarkedText(canvas, screen, marked)
         canvas.restore()
+        if (selecting) drawSelectionHandles(canvas)
         drawNanos += System.nanoTime() - started
     }
 
@@ -531,6 +595,7 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
         val gridHeight = gridHeight()
         val top = restingTop()
         if (gridHeight + top > height) gridTop = (gridTop - dy).coerceIn(height - gridHeight, top)
+        if (selecting) selectionMode?.invalidateContentRect()
         invalidate()
     }
 
@@ -665,6 +730,10 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
     override fun onDetachedFromWindow() {
         viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
         stopMomentum()
+        stopEdgeScroll()
+        finishSelectionMode()
+        magnifier?.dismiss()
+        magnifier = null
         mainHandler.removeCallbacks(refreshTask)
         mainHandler.removeCallbacks(heldTask)
         mainHandler.removeCallbacks(imageFrameTask)
@@ -686,6 +755,16 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
             drag = Drag.None
             zooming = false
             pinchScale = 1f
+            selectionDrag = null
+            handleTouch = selecting && grabHandle(event.x, event.y)
+        }
+        // 拖拖柄（含长按选中后接着拖）的这次触摸不交给捏合和手势识别。
+        if (handleTouch) {
+            dragHandle(event)
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                handleTouch = false
+            }
+            return true
         }
         // 适配手机时网格按视图排，不能捏合缩放。
         if (!fitsPhone) scaleDetector.onTouchEvent(event)
@@ -718,7 +797,7 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
 
         override fun onLongPress(e: MotionEvent) {
             if (zooming || drag != Drag.None) return
-            showPasteMenu(e.x, e.y)
+            if (!beginSelection(e.x, e.y)) showSelectionMenu(pasteOnly = true, x = e.x, y = e.y)
         }
 
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
@@ -738,7 +817,10 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
                 }
             }
             when (drag) {
-                Drag.Scrollback -> scrollContent(-distanceY)
+                Drag.Scrollback -> {
+                    if (selecting) selectionMode?.hide(ViewConfiguration.getDefaultActionModeHideDuration())
+                    scrollContent(-distanceY)
+                }
                 Drag.Pan -> {
                     lastUserScroll = SystemClock.uptimeMillis()
                     panBy(distanceX, distanceY)
@@ -845,9 +927,13 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
     /**
      * 轻点：程序开着鼠标上报时当成一次点击发给它（全屏 agent 界面里「跳到底部」这类按钮）。只有点在光标那行的上一行
      * 及以下（输入框和它下面的状态栏）才弹键盘，点上面的对话、输出不弹，键盘开着时收起；看不到光标时，程序管鼠标就
-     * 只点击，不管就照旧弹键盘。
+     * 只点击，不管就照旧弹键盘。选中文字时只管选区：点在选区里重新弹菜单，点在外面退出选中，都不发点击、不开关键盘。
      */
     private fun handleTap(x: Float, y: Float) {
+        if (selecting) {
+            if (inSelection(x, y)) showSelectionMenu(pasteOnly = false) else endSelection()
+            return
+        }
         val gridX = x - gridLeft()
         val gridY = y - gridTop - scrollShift()
         val row = floor(gridY / font.cellHeight).toInt()
@@ -863,40 +949,388 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
         }
     }
 
-    /** 长按：剪贴板里有字时在手指处弹出「粘贴」。 */
-    private fun showPasteMenu(x: Float, y: Float) {
-        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
-        if (!acceptsInput || !clipboard.hasPrimaryClip()) return
+    // 选区
+
+    /**
+     * 长按在 ([x], [y])：选中手指下的词、震一下，之后手指不抬接着拖等于拖终点柄。手指下是空白或不在网格里时返回假，
+     * 原来的选区也退出。
+     */
+    internal fun beginSelection(x: Float, y: Float): Boolean {
+        val terminal = terminal
+        val cell = gridCellAt(x, y)
+        if (terminal == null || cell == null || !terminal.selectWord(cell.column, cell.row)) {
+            endSelection()
+            return false
+        }
+        // 落在一串空格上时 VT 也会选中那串空格：当成没取到词。
+        if (terminal.selectionText().isNullOrBlank()) {
+            endSelection()
+            return false
+        }
+        finishSelectionMode()
+        selecting = true
+        selectionDrag = SelectionEnd.End
+        handleTouch = true
+        lastDragCell = null
+        dragArmed = false
+        pressX = x
+        pressY = y
+        dragOffsetX = 0f
+        dragOffsetY = 0f
+        parent?.requestDisallowInterceptTouchEvent(true)
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-        startActionMode(
+        refreshNow()
+        return true
+    }
+
+    /** 退出选中：收起拖柄和菜单，清掉 VT 里的选区。 */
+    private fun endSelection() {
+        leaveSelection()
+        val terminal = terminal ?: return
+        if (terminal.hasSelection) {
+            terminal.clearSelection()
+            scheduleRefresh()
+        }
+    }
+
+    /** 只收起视图这边的选中状态，不碰 VT：换 VT 时原来那份可能已经关了。 */
+    private fun leaveSelection() {
+        if (selecting) invalidate()
+        selecting = false
+        selectionDrag = null
+        selectionBounds = null
+        stopEdgeScroll()
+        magnifier?.dismiss()
+        finishSelectionMode()
+    }
+
+    /** 刷新后对账：视图在选中而 VT 里的选区没了（切到备用屏之类）就退出选中；视图没在选中而 VT 里有选区就清掉。 */
+    private fun syncSelection(terminal: VTerminal) {
+        if (!selecting) {
+            if (terminal.hasSelection) {
+                terminal.clearSelection()
+                scheduleRefresh()
+            }
+            return
+        }
+        val bounds = terminal.selectionBounds
+        if (bounds == null) {
+            leaveSelection()
+            return
+        }
+        selectionBounds = bounds
+        selectionMode?.invalidateContentRect()
+    }
+
+    /** 拷贝选中的文字，退出选中。 */
+    internal fun copySelection() {
+        val text = terminal?.selectionText()
+        if (!text.isNullOrEmpty()) writeClipboard(text)
+        endSelection()
+    }
+
+    /** 全选屏幕连同回滚历史，菜单留着。 */
+    private fun selectAllText() {
+        val terminal = terminal ?: return
+        if (!terminal.selectAll()) return
+        selecting = true
+        refreshNow()
+    }
+
+    /** 视图里 ([x], [y]) 落在网格的哪一格；在网格外时为空。 */
+    private fun gridCellAt(x: Float, y: Float): GridCell? {
+        if (screen.columns == 0 || screen.rows == 0 || font.cellHeight <= 0f) return null
+        val gridX = x - gridLeft()
+        val gridY = y - gridTop - scrollShift()
+        if (gridX < 0 || gridY < 0 || gridX >= gridWidth() || gridY >= gridHeight()) return null
+        return GridCell(
+            min((gridX / font.cellWidth).toInt(), screen.columns - 1),
+            min((gridY / font.cellHeight).toInt(), screen.rows - 1),
+        )
+    }
+
+    private fun inSelection(x: Float, y: Float): Boolean {
+        val cell = gridCellAt(x, y) ?: return false
+        return screen.selected.getOrNull(cell.row)?.contains(cell.column) == true
+    }
+
+    /** 拖柄贴着的格边，视图坐标；那一端不在视口里或没在选中时为空。 */
+    private fun handleAnchor(end: SelectionEnd): HandleAnchor? {
+        if (!selecting) return null
+        val bounds = selectionBounds ?: return null
+        val cell = (if (end == SelectionEnd.Start) bounds.start else bounds.end) ?: return null
+        val width = screen.cells.getOrNull(cell.row)?.getOrNull(cell.column)?.width
+        val anchor = SelectionGeometry.handleAnchor(end, cell, width, font.cellWidth, font.cellHeight)
+        val top = gridTop + scrollShift()
+        return HandleAnchor(anchor.x + gridLeft(), anchor.top + top, anchor.bottom + top)
+    }
+
+    private fun handleDrawable(end: SelectionEnd): Drawable? = if (end == SelectionEnd.Start) startHandle else endHandle
+
+    private fun handleWidth(): Float =
+        startHandle?.intrinsicWidth?.takeIf { it > 0 }?.toFloat() ?: (HANDLE_FALLBACK_DP * resources.displayMetrics.density)
+
+    private fun handleHeight(): Float =
+        startHandle?.intrinsicHeight?.takeIf { it > 0 }?.toFloat() ?: (HANDLE_FALLBACK_DP * resources.displayMetrics.density)
+
+    /** 拖柄图的中心，视图坐标；那一端看不见时为空。 */
+    internal fun handleCenter(end: SelectionEnd): PointF? {
+        val anchor = handleAnchor(end) ?: return null
+        val width = handleWidth()
+        return PointF(SelectionGeometry.handleLeft(end, anchor.x, width) + width / 2, anchor.bottom + handleHeight() / 2)
+    }
+
+    private fun themeDrawable(attribute: Int): Drawable? {
+        val attributes = context.obtainStyledAttributes(intArrayOf(attribute))
+        return try {
+            attributes.getDrawable(0)
+        } finally {
+            attributes.recycle()
+        }
+    }
+
+    /** 拖柄挂在那一端所在行的底下，画在网格的裁剪之外。 */
+    private fun drawSelectionHandles(canvas: Canvas) {
+        for (end in SelectionEnd.entries) {
+            val drawable = handleDrawable(end) ?: continue
+            val anchor = handleAnchor(end) ?: continue
+            val width = drawable.intrinsicWidth
+            val height = drawable.intrinsicHeight
+            if (width <= 0 || height <= 0) continue
+            val left = SelectionGeometry.handleLeft(end, anchor.x, width.toFloat()).roundToInt()
+            val top = anchor.bottom.roundToInt()
+            drawable.setBounds(left, top, left + width, top + height)
+            drawable.draw(canvas)
+        }
+    }
+
+    /** 手指按下时按住了拖柄：之后这次触摸拖它。返回是否按住了。 */
+    private fun grabHandle(x: Float, y: Float): Boolean {
+        val start = handleAnchor(SelectionEnd.Start)
+        val end = handleAnchor(SelectionEnd.End)
+        val hit = SelectionGeometry.hitHandle(x, y, start, end, handleWidth(), handleHeight(), touchSlop) ?: return false
+        val anchor = (if (hit == SelectionEnd.Start) start else end) ?: return false
+        selectionDrag = hit
+        lastDragCell = null
+        dragArmed = true
+        dragOffsetX = anchor.x - x
+        dragOffsetY = (anchor.top + anchor.bottom) / 2 - y
+        parent?.requestDisallowInterceptTouchEvent(true)
+        finishSelectionMode()
+        return true
+    }
+
+    /** 拖拖柄这次触摸里的一个事件：挪动时改选区，抬手时停下自动滚动、收起放大镜、弹菜单。 */
+    private fun dragHandle(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                if (!dragArmed) {
+                    if (hypot(event.x - pressX, event.y - pressY) < touchSlop) return
+                    dragArmed = true
+                }
+                dragSelection(event.x + dragOffsetX, event.y + dragOffsetY)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                selectionDrag = null
+                stopEdgeScroll()
+                magnifier?.dismiss()
+                if (selecting) showSelectionMenu(pasteOnly = false)
+            }
+        }
+    }
+
+    /** 把在拖的那端拖到视图里的 ([x], [y])（已加上偏移）；越出可见区域时开始自动滚动、平移。 */
+    private fun dragSelection(x: Float, y: Float) {
+        val terminal = terminal ?: return
+        val moving = selectionDrag ?: return
+        if (screen.columns == 0 || screen.rows == 0 || font.cellHeight <= 0f) return
+        dragX = x
+        dragY = y
+        val cell = SelectionGeometry.handleCell(
+            moving, x - gridLeft(), y - gridTop - scrollShift(), font.cellWidth, font.cellHeight, screen.columns,
+            screen.rows,
+        )
+        // 选区一装回 VT 就整屏重读，格子没变时不重装。
+        if (cell != lastDragCell) {
+            lastDragCell = cell
+            selectionDrag = terminal.extendSelection(moving, cell.column, cell.row)
+            scheduleRefresh()
+        }
+        showMagnifier(x, cell.row)
+        if (horizontalEdgeRate() != 0f || verticalEdgeRate() != 0f) startEdgeScroll()
+    }
+
+    private fun showMagnifier(x: Float, row: Int) {
+        if (!isAttachedToWindow) return
+        val magnifier = magnifier ?: Magnifier.Builder(this).build().also { magnifier = it }
+        val y = gridTop + scrollShift() + (row + 0.5f) * font.cellHeight
+        magnifier.show(x.coerceIn(0f, width.toFloat()), y.coerceIn(0f, height.toFloat()))
+    }
+
+    /** 网格在视图里看得见的上下沿。 */
+    private fun visibleTop(): Float = max(gridTop, 0f)
+
+    private fun visibleBottom(): Float = min(gridTop + gridHeight(), height.toFloat())
+
+    /** 网格比视图宽时，拖到视图左右边上 [EDGE_DP] 以内每秒平移几列。 */
+    private fun horizontalEdgeRate(): Float {
+        if (gridWidth() <= width) return 0f
+        val edge = EDGE_DP * resources.displayMetrics.density
+        return SelectionGeometry.panRate(dragX, edge, width - edge, font.cellWidth)
+    }
+
+    /** 拖到网格可见区域上下边以外每秒挪几行，往上为正。 */
+    private fun verticalEdgeRate(): Float =
+        SelectionGeometry.autoscrollRate(dragY, visibleTop(), visibleBottom(), font.cellHeight)
+
+    private fun startEdgeScroll() {
+        if (edgeScrolling) return
+        edgeScrolling = true
+        edgeLastFrame = 0L
+        Choreographer.getInstance().postFrameCallback(edgeFrame)
+    }
+
+    private fun stopEdgeScroll() {
+        if (edgeScrolling) Choreographer.getInstance().removeFrameCallback(edgeFrame)
+        edgeScrolling = false
+    }
+
+    /**
+     * 拖柄停在边外时每帧走一步：网格比视图大、还能往那边挪时先平移网格，竖直方向挪到头了再滚回滚历史，然后把在拖的
+     * 那端扩到手指那列、可见区域边上那行。手指回到区域里就停。
+     */
+    private fun stepEdgeScroll(frameTimeNanos: Long) {
+        if (!edgeScrolling) return
+        val terminal = terminal
+        val moving = selectionDrag
+        val across = horizontalEdgeRate()
+        val up = verticalEdgeRate()
+        if (terminal == null || moving == null || (across == 0f && up == 0f)) {
+            stopEdgeScroll()
+            return
+        }
+        val elapsed = if (edgeLastFrame == 0L) {
+            1f / 60
+        } else {
+            min((frameTimeNanos - edgeLastFrame) / 1e9f, Momentum.MAX_STEP_SECONDS)
+        }
+        edgeLastFrame = frameTimeNanos
+        val oldPanX = panX
+        val oldTop = gridTop
+        panBy(across * font.cellWidth * elapsed, -up * font.cellHeight * elapsed)
+        var moved = panX != oldPanX || gridTop != oldTop
+        // shortcut: 程序自己管滚动时（VTerminal.programScrolls）不自动滚，选区只能在一屏之内；要支持得给程序发滚轮、
+        // 等它重画完再扩选区，等有人要跨屏选全屏程序里的内容时再做。
+        if (up != 0f && gridTop == oldTop && !terminal.programScrolls) {
+            moved = terminal.scrollSmoothly(up * elapsed.toDouble()) || moved
+        }
+        if (moved) {
+            lastUserScroll = SystemClock.uptimeMillis()
+            val top = visibleTop()
+            val y = dragY.coerceIn(top, max(top, visibleBottom() - 1f))
+            val cell = SelectionGeometry.handleCell(
+                moving, dragX - gridLeft(), y - gridTop - scrollShift(), font.cellWidth, font.cellHeight,
+                screen.columns, screen.rows,
+            )
+            lastDragCell = cell
+            selectionDrag = terminal.extendSelection(moving, cell.column, cell.row)
+            refreshNow()
+        }
+        Choreographer.getInstance().postFrameCallback(edgeFrame)
+    }
+
+    /** 收起菜单，不退出选中。 */
+    private fun finishSelectionMode() {
+        val mode = selectionMode ?: return
+        selectionMode = null
+        mode.finish()
+    }
+
+    /**
+     * 弹浮动菜单。[pasteOnly] 时是长按没取到词，在手指处 ([x], [y]) 只弹「粘贴」，剪贴板里没字或不能打字时不弹；否则是
+     * 选中时的「拷贝 / 粘贴 / 全选」，贴着选区看得见的部分，不能打字时没有「粘贴」。
+     */
+    private fun showSelectionMenu(pasteOnly: Boolean, x: Float = 0f, y: Float = 0f) {
+        val clipboard = context.getSystemService(ClipboardManager::class.java)
+        val canPaste = acceptsInput && clipboard?.hasPrimaryClip() == true
+        if (pasteOnly && !canPaste) return
+        finishSelectionMode()
+        if (pasteOnly) performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        selectionMode = startActionMode(
             object : ActionMode.Callback2() {
                 override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-                    menu.add(Menu.NONE, android.R.id.paste, Menu.NONE, android.R.string.paste)
+                    if (!pasteOnly) menu.add(Menu.NONE, android.R.id.copy, 0, android.R.string.copy)
+                    if (canPaste) menu.add(Menu.NONE, android.R.id.paste, 1, android.R.string.paste)
+                    if (!pasteOnly) menu.add(Menu.NONE, android.R.id.selectAll, 2, android.R.string.selectAll)
                     return true
                 }
 
                 override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
 
                 override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
-                    if (item.itemId == android.R.id.paste) paste()
-                    mode.finish()
+                    when (item.itemId) {
+                        android.R.id.copy -> copySelection()
+                        android.R.id.paste -> paste()
+                        android.R.id.selectAll -> {
+                            selectAllText()
+                            return true
+                        }
+                    }
+                    if (mode === selectionMode) finishSelectionMode()
                     return true
                 }
 
-                override fun onDestroyActionMode(mode: ActionMode) = Unit
+                override fun onDestroyActionMode(mode: ActionMode) {
+                    if (mode !== selectionMode) return
+                    selectionMode = null
+                    if (!pasteOnly) endSelection()
+                }
 
                 override fun onGetContentRect(mode: ActionMode, view: View, outRect: Rect) {
-                    outRect.set(x.toInt(), y.toInt(), x.toInt() + 1, y.toInt() + 1)
+                    if (pasteOnly) {
+                        outRect.set(x.toInt(), y.toInt(), x.toInt() + 1, y.toInt() + 1)
+                    } else if (!selectionRect(outRect)) {
+                        outRect.set(width / 2, height / 2, width / 2 + 1, height / 2 + 1)
+                    } else {
+                        // 拖柄挂在选区下面，算进去：上面放不下、菜单改弹在下面时不盖住拖柄。
+                        outRect.bottom += ceil(handleHeight()).toInt()
+                    }
                 }
             },
             ActionMode.TYPE_FLOATING,
         )
     }
 
+    /** 选区看得见的部分的外接矩形，视图坐标，写进 [out]；看不见选区时返回假。 */
+    private fun selectionRect(out: Rect): Boolean {
+        var first = -1
+        var last = -1
+        var left = Int.MAX_VALUE
+        var right = -1
+        for (row in 0 until screen.rows) {
+            val range = screen.selected.getOrNull(row) ?: continue
+            if (first < 0) first = row
+            last = row
+            left = min(left, range.first)
+            right = max(right, range.last)
+        }
+        if (first < 0) return false
+        val originX = gridLeft()
+        val originY = gridTop + scrollShift()
+        out.set(
+            max(0, floor(originX + left * font.cellWidth).toInt()),
+            max(0, floor(originY + first * font.cellHeight).toInt()),
+            min(width, ceil(originX + (right + 1) * font.cellWidth).toInt()),
+            min(height, ceil(originY + (last + 1) * font.cellHeight).toInt()),
+        )
+        return out.left < out.right && out.top < out.bottom
+    }
+
     // 输入
 
-    /** 发一份输入给上层；打字时回到最底下、把光标露出来。 */
+    /** 发一份输入给上层，退出选中；打字时回到最底下、把光标露出来。 */
     private fun emit(input: TerminalInput) {
+        endSelection()
         stopMomentum()
         if (lastScrolledBack) {
             terminal?.scrollToBottom()
@@ -1082,6 +1516,12 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
         private const val KEYBOARD_SETTLE_MS = 1_000L
         private const val FOLLOW_PAUSE_MS = 2_000L
         private const val ACCESSIBLE_LINES = 5
+
+        /** 网格比视图宽时，拖柄拖到视图左右边上这么宽（dp）以内就开始平移网格：手指拖不出屏幕边。 */
+        private const val EDGE_DP = 24f
+
+        /** 主题里没有拖柄图时，按这么大（dp）的拖柄认触摸。 */
+        private const val HANDLE_FALLBACK_DP = 22f
 
         /**
          * 默认字号按系统字体大小放大缩小，夹在 11 到 28 dp 之间；可读的最小字号同样按系统字体大小，夹在 9 到 20 dp

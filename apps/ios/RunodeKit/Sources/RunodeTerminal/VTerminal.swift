@@ -426,6 +426,7 @@ public final class VTerminal {
             frame.rows = Int(rows)
             frame.cells = Array(
                 repeating: Array(repeating: ScreenCell.blank, count: Int(cols)), count: Int(rows))
+            frame.selected = Array(repeating: nil, count: Int(rows))
             full = true
         }
         frame.background = background
@@ -439,6 +440,7 @@ public final class VTerminal {
         var aboveChanged = frame.above.count != aboveCount
         if aboveChanged {
             frame.above = Array(repeating: .blank, count: aboveCount)
+            frame.aboveSelected = nil
         }
         frame.scrollOffset = aboveCount == 0 ? 0 : scrollFraction
 
@@ -451,14 +453,27 @@ public final class VTerminal {
                 ghostty_render_state_row_get(rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_VIEWPORT_Y, &y)
                 var rowDirty = false
                 ghostty_render_state_row_get(rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_DIRTY, &rowDirty)
+                // 选区每次都读：只有它变了的行也要算进改了的行里。
+                let selected = readRowSelection()
                 if y == -1, aboveCount > 0 {
                     if full || rowDirty || aboveChanged {
                         readRow(into: &frame.above, columns: frame.columns)
                         aboveChanged = true
                     }
-                } else if y >= 0, Int(y) < frame.rows, full || rowDirty {
-                    readRow(into: &frame.cells[Int(y)], columns: frame.columns)
-                    changedRows.append(Int(y))
+                    if selected != frame.aboveSelected {
+                        frame.aboveSelected = selected
+                        aboveChanged = true
+                    }
+                } else if y >= 0, Int(y) < frame.rows {
+                    let row = Int(y)
+                    let selectionChanged = selected != frame.selected[row]
+                    frame.selected[row] = selected
+                    if full || rowDirty {
+                        readRow(into: &frame.cells[row], columns: frame.columns)
+                    }
+                    if full || rowDirty || selectionChanged {
+                        changedRows.append(row)
+                    }
                 }
             }
         }
@@ -651,6 +666,16 @@ public final class VTerminal {
         }
     }
 
+    /// 行迭代器当前那一行选中的列；不和选区相交时为空。
+    private func readRowSelection() -> ClosedRange<Int>? {
+        var range = GhosttyRenderStateRowSelection()
+        range.size = MemoryLayout<GhosttyRenderStateRowSelection>.size
+        guard ghostty_render_state_row_get(rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION, &range)
+            == GHOSTTY_SUCCESS, range.start_x <= range.end_x
+        else { return nil }
+        return Int(range.start_x)...Int(range.end_x)
+    }
+
     /// 一屏大多是空白格和不带样式的字，所以先从原始格子一次取齐有没有字、样式、单设的背景色，
     /// 没有的就不再一项项去问颜色和样式。
     private func readCell() -> ScreenCell {
@@ -753,6 +778,144 @@ public final class VTerminal {
         return ScreenCursor(
             column: Int(cursor.viewport_x), row: Int(cursor.viewport_y), shape: shape, blinking: cursor.blinking,
             onWideTail: cursor.wide_tail)
+    }
+
+    // MARK: 选区
+
+    // 选区存在 VT 里，滚动、新输出、改尺寸重排时跟着内容走，主屏和备用屏各有一份。读出来的
+    // `GhosttySelection` 两端是不跟踪的 grid ref，只到下一次改 VT 的调用为止有效，所以取、排序、改、
+    // 装回都在一个方法里做完，不把它留到方法外面。
+
+    /// 选词的词边界：libghostty 的默认那组（`default_word_boundaries`）加上中文全角标点。传了这组就不再
+    /// 用默认的，所以默认的那些也要列上。没有标点隔开的一串汉字算一个词。
+    private static let wordBoundaries: [UInt32] = Array(
+        "\u{0} \t'\"│`|:;,()[]{}<>$，。、；：？！“”‘’（）《》【】「」『』…—".unicodeScalars.map(\.value))
+
+    /// 选中视口里这一格所在的词，换掉原来的选区。格子是空的、取不到词时不动选区，返回假。
+    @discardableResult
+    public func selectWord(column: Int, row: Int) -> Bool {
+        guard let ref = viewportRef(column: column, row: row) else { return false }
+        var options = GhosttyTerminalSelectWordOptions()
+        options.size = MemoryLayout<GhosttyTerminalSelectWordOptions>.size
+        options.ref = ref
+        var selection = GhosttySelection()
+        let result = Self.wordBoundaries.withUnsafeBufferPointer { boundaries in
+            options.boundary_codepoints = boundaries.baseAddress
+            options.boundary_codepoints_len = boundaries.count
+            return ghostty_terminal_select_word(handle, &options, &selection)
+        }
+        guard result == GHOSTTY_SUCCESS else { return false }
+        return ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS
+    }
+
+    /// 选中当前屏连同回滚历史里的全部文字；屏幕上没字时返回假。
+    @discardableResult
+    public func selectAll() -> Bool {
+        var selection = GhosttySelection()
+        guard ghostty_terminal_select_all(handle, &selection) == GHOSTTY_SUCCESS else { return false }
+        return ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS
+    }
+
+    public func clearSelection() {
+        guard hasSelection else { return }
+        ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SELECTION, nil)
+    }
+
+    /// 当前屏上有选区。
+    public var hasSelection: Bool {
+        var selection = GhosttySelection()
+        return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_SELECTION, &selection) == GHOSTTY_SUCCESS
+    }
+
+    /// 把选区的 `moving` 那一端挪到视口里这一格（行列夹在视口里），另一端不动。返回挪过去的那一端
+    /// 现在是哪一端：拖过了另一端时两端互换。没有选区时原样返回 `moving`。
+    @discardableResult
+    public func extendSelection(moving: SelectionEnd, column: Int, row: Int) -> SelectionEnd {
+        guard var selection = orderedSelection(), let ref = viewportRef(column: column, row: row) else {
+            return moving
+        }
+        switch moving {
+        case .start: selection.start = ref
+        case .end: selection.end = ref
+        }
+        var order = GHOSTTY_SELECTION_ORDER_FORWARD
+        ghostty_terminal_selection_order(handle, &selection, &order)
+        ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SELECTION, &selection)
+        guard order == GHOSTTY_SELECTION_ORDER_REVERSE else { return moving }
+        return moving == .start ? .end : .start
+    }
+
+    /// 选区两端在视口里的位置；没有选区时为空。
+    public var selectionBounds: SelectionBounds? {
+        guard let selection = orderedSelection() else { return nil }
+        return SelectionBounds(start: viewportCell(selection.start), end: viewportCell(selection.end))
+    }
+
+    /// 选中的文字：软换行处接起来，行尾空白去掉。没有选区时为空。
+    public func selectionText() -> String? {
+        var formatter: GhosttyFormatter?
+        guard ghostty_formatter_terminal_new(nil, &formatter, handle) == GHOSTTY_SUCCESS, let formatter else {
+            return nil
+        }
+        defer { ghostty_formatter_free(formatter) }
+        var selection = GhosttySelection()
+        guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_SELECTION, &selection) == GHOSTTY_SUCCESS else {
+            return nil
+        }
+        var emit = GHOSTTY_FORMATTER_FORMAT_PLAIN
+        var on = true
+        guard ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_EMIT, &emit) == GHOSTTY_SUCCESS,
+            ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_UNWRAP, &on) == GHOSTTY_SUCCESS,
+            ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_TRIM, &on) == GHOSTTY_SUCCESS,
+            ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS
+        else { return nil }
+        var needed = 0
+        var result = ghostty_formatter_format_buf(formatter, nil, 0, &needed)
+        if result == GHOSTTY_SUCCESS { return "" }
+        guard result == GHOSTTY_OUT_OF_SPACE else { return nil }
+        var bytes = [UInt8](repeating: 0, count: needed)
+        var written = 0
+        result = bytes.withUnsafeMutableBufferPointer { buffer in
+            ghostty_formatter_format_buf(formatter, buffer.baseAddress, buffer.count, &written)
+        }
+        guard result == GHOSTTY_SUCCESS else { return nil }
+        return String(decoding: bytes.prefix(written), as: UTF8.self)
+    }
+
+    /// 当前选区，两端排成先左上后右下。
+    private func orderedSelection() -> GhosttySelection? {
+        var current = GhosttySelection()
+        guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_SELECTION, &current) == GHOSTTY_SUCCESS else {
+            return nil
+        }
+        var ordered = GhosttySelection()
+        guard ghostty_terminal_selection_ordered(handle, &current, GHOSTTY_SELECTION_ORDER_FORWARD, &ordered)
+            == GHOSTTY_SUCCESS
+        else { return nil }
+        return ordered
+    }
+
+    /// 视口里一格的 grid ref，行列先夹在视口里。
+    private func viewportRef(column: Int, row: Int) -> GhosttyGridRef? {
+        var point = GhosttyPoint()
+        point.tag = GHOSTTY_POINT_TAG_VIEWPORT
+        let lastColumn = max(Int(size.cols), 1) - 1
+        let lastRow = max(Int(size.rows), 1) - 1
+        point.value.coordinate = GhosttyPointCoordinate(
+            x: UInt16(min(max(column, 0), lastColumn)), y: UInt32(min(max(row, 0), lastRow)))
+        var ref = GhosttyGridRef()
+        guard ghostty_terminal_grid_ref(handle, point, &ref) == GHOSTTY_SUCCESS else { return nil }
+        return ref
+    }
+
+    /// grid ref 在视口里的哪一格；不在视口里时为空。
+    private func viewportCell(_ ref: GhosttyGridRef) -> GridCell? {
+        var ref = ref
+        var coordinate = GhosttyPointCoordinate()
+        guard ghostty_terminal_point_from_grid_ref(handle, &ref, GHOSTTY_POINT_TAG_VIEWPORT, &coordinate)
+            == GHOSTTY_SUCCESS
+        else { return nil }
+        return GridCell(column: Int(coordinate.x), row: Int(coordinate.y))
     }
 
     // MARK: 输入编码

@@ -141,6 +141,16 @@
             return cell.attributes.contains(.inverse) ? (background, foreground) : (foreground, background)
         }
 
+        /// 第 `row` 行第 `column` 列格子画出来的颜色：落在选区里时换成选区的配色。
+        private func colors(of cell: ScreenCell, row: Int, column: Int) -> (foreground: Rgb, background: Rgb) {
+            let plain = colors(of: cell)
+            guard screen.selected.indices.contains(row), let range = screen.selected[row], range.contains(column)
+            else { return plain }
+            return SelectionGeometry.selectionColors(
+                foreground: plain.foreground, background: plain.background, settings: settings,
+                screenBackground: screen.background)
+        }
+
         override func draw(_ rect: CGRect) {
             let started = ContinuousClock.now
             defer { drawTime += .now - started }
@@ -211,7 +221,8 @@
                 // 宽字符的后一格跟着前一格的背景走。
                 let background =
                     cell.width == .spacerTail && column > 0
-                    ? colors(of: screen.cells[row][column - 1]).background : colors(of: cell).background
+                    ? colors(of: screen.cells[row][column - 1], row: row, column: column - 1).background
+                    : colors(of: cell, row: row, column: column).background
                 if let current = run, current.color == background, current.end == column {
                     run?.end = column + 1
                     continue
@@ -238,7 +249,7 @@
                 guard cell.width != .spacerTail, cell.width != .spacerHead else { continue }
                 let x = CGFloat(column) * font.cellWidth
                 let width = font.cellWidth * (cell.width == .wide ? 2 : 1)
-                let ink = ink(of: cell)
+                let ink = ink(of: cell, row: row, column: column)
                 let ctFont = font.font(bold: cell.attributes.contains(.bold), italic: cell.attributes.contains(.italic))
                 if hasText(cell), plainGlyph(cell.text, font: ctFont) == nil {
                     let cellRect = CGRect(x: x, y: top, width: width, height: font.cellHeight)
@@ -270,8 +281,8 @@
             !cell.text.isEmpty && cell.text != " " && !cell.attributes.contains(.invisible)
         }
 
-        private func ink(of cell: ScreenCell) -> CGColor {
-            color(colors(of: cell).foreground, alpha: cell.attributes.contains(.faint) ? 0.6 : 1)
+        private func ink(of cell: ScreenCell, row: Int, column: Int) -> CGColor {
+            color(colors(of: cell, row: row, column: column).foreground, alpha: cell.attributes.contains(.faint) ? 0.6 : 1)
         }
 
         /// 有直接字形的格子按同字体、同颜色攒成一段，一次 `CTFontDrawGlyphs` 画完，省掉逐格的状态保存、
@@ -296,7 +307,7 @@
                 guard cell.width == .narrow || cell.width == .wide, hasText(cell) else { continue }
                 let ctFont = font.font(bold: cell.attributes.contains(.bold), italic: cell.attributes.contains(.italic))
                 guard let plain = plainGlyph(cell.text, font: ctFont) else { continue }
-                let ink = ink(of: cell)
+                let ink = ink(of: cell, row: row, column: column)
                 if run?.font != plain.font || run?.color != ink {
                     flush()
                     run = (plain.font, ink)

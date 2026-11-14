@@ -116,11 +116,17 @@ public struct ScreenFrame: Sendable {
     public var images: [ScreenImage]
     /// 图片动画下一帧离现在多久该画；没有在播的动画时为空。
     public var nextImageFrame: Duration?
+    /// 每行选中的列（含两端，宽字符两格都算），一行一个，和 `cells` 对齐；不在选区里的行为空。
+    public var selected: [ClosedRange<Int>?]
+    /// `above` 那一行选中的列。
+    public var aboveSelected: ClosedRange<Int>?
 
     public init() {
         columns = 0
         rows = 0
         cells = []
+        selected = []
+        aboveSelected = nil
         above = []
         scrollOffset = 0
         background = TermSettings.default.background
@@ -144,6 +150,33 @@ public struct ScreenFrame: Sendable {
         }
         while line.last == " " { line.removeLast() }
         return line
+    }
+}
+
+/// 选区的哪一端：`start` 在前（靠左上），`end` 在后。
+public enum SelectionEnd: Sendable, Hashable {
+    case start, end
+}
+
+/// 视口里的一格。
+public struct GridCell: Sendable, Hashable {
+    public var column: Int
+    public var row: Int
+
+    public init(column: Int, row: Int) {
+        self.column = column
+        self.row = row
+    }
+}
+
+/// 选区两端在视口里的位置，`start` 不在 `end` 后面；滚出了视口的那一端为空。
+public struct SelectionBounds: Sendable, Hashable {
+    public var start: GridCell?
+    public var end: GridCell?
+
+    public init(start: GridCell?, end: GridCell?) {
+        self.start = start
+        self.end = end
     }
 }
 

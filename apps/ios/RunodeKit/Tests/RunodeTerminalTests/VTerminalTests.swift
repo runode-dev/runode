@@ -281,4 +281,112 @@ import Testing
         #expect(vt.bracketedPaste)
         #expect(vt.encodePaste("a\nb") == Array("\u{1b}[200~a\nb\u{1b}[201~".utf8))
     }
+
+    // MARK: 选区
+
+    @Test func selectWordPicksTheWordUnderTheCell() throws {
+        let vt = try terminal()
+        vt.feed(Array("hello world".utf8))
+        #expect(vt.selectWord(column: 7, row: 0))
+        #expect(vt.hasSelection)
+        #expect(vt.selectionText() == "world")
+        #expect(vt.selectionBounds == SelectionBounds(start: GridCell(column: 6, row: 0), end: GridCell(column: 10, row: 0)))
+    }
+
+    /// 按在宽字符的后一格上也选中这个词，选中的列把宽字符的两格都算上。
+    @Test func selectWordOnWideCharacters() throws {
+        let vt = try terminal()
+        vt.feed(Array("中文 ok".utf8))
+        #expect(vt.selectWord(column: 1, row: 0))
+        #expect(vt.selectionText() == "中文")
+        var frame = ScreenFrame()
+        _ = vt.refresh(&frame)
+        #expect(frame.selected[0] == 0...3)
+        #expect(frame.selected[1] == nil)
+    }
+
+    @Test func fullWidthPunctuationEndsAWord() throws {
+        let vt = try terminal()
+        vt.feed(Array("你好，世界".utf8))
+        #expect(vt.selectWord(column: 0, row: 0))
+        #expect(vt.selectionText() == "你好")
+    }
+
+    @Test func selectWordOnBlankCellFails() throws {
+        let vt = try terminal()
+        vt.feed(Array("hi".utf8))
+        #expect(!vt.selectWord(column: 10, row: 2))
+        #expect(!vt.hasSelection)
+        #expect(vt.selectionBounds == nil)
+    }
+
+    /// 选区跟着内容走：新输出把屏幕往上推时，选中的行跟着上移，改了的行算进 `FrameChange`。
+    @Test func selectionFollowsScrollingOutput() throws {
+        let vt = try terminal()
+        vt.feed(Array("\r\n\r\nhello world".utf8))
+        #expect(vt.selectWord(column: 0, row: 2))
+        var frame = ScreenFrame()
+        _ = vt.refresh(&frame)
+        #expect(frame.selected[2] == 0...4)
+        vt.feed(Array("\r\n\r\n\r\n".utf8))
+        let change = vt.refresh(&frame)
+        #expect(change.full || change.rows.contains(1))
+        #expect(frame.selected[1] == 0...4)
+        #expect(frame.selected[2] == nil)
+        #expect(vt.selectionBounds?.start == GridCell(column: 0, row: 1))
+        #expect(vt.selectionText() == "hello")
+    }
+
+    /// 起点拖过了终点，挪过去的那一端变成终点，另一端不动。
+    @Test func extendingPastTheOtherEndSwapsEnds() throws {
+        let vt = try terminal()
+        vt.feed(Array("hello world".utf8))
+        #expect(vt.selectWord(column: 0, row: 0))
+        #expect(vt.extendSelection(moving: .start, column: 8, row: 0) == .end)
+        #expect(vt.selectionText() == "o wor")
+        #expect(vt.selectionBounds == SelectionBounds(start: GridCell(column: 4, row: 0), end: GridCell(column: 8, row: 0)))
+        #expect(vt.extendSelection(moving: .end, column: 10, row: 0) == .end)
+        #expect(vt.selectionText() == "o world")
+        // 行列越出视口时夹在视口里。
+        #expect(vt.extendSelection(moving: .start, column: -3, row: -1) == .start)
+        #expect(vt.selectionText() == "hello world")
+    }
+
+    @Test func copyingASoftWrappedLineHasNoNewline() throws {
+        let vt = try terminal()
+        let long = String(repeating: "abcdefghij", count: 3)
+        vt.feed(Array(long.utf8))
+        #expect(vt.selectWord(column: 0, row: 0))
+        #expect(vt.selectionText() == long)
+        var frame = ScreenFrame()
+        _ = vt.refresh(&frame)
+        #expect(frame.selected[0] == 0...19)
+        #expect(frame.selected[1] == 0...9)
+    }
+
+    @Test func selectAllIncludesScrollback() throws {
+        let vt = try terminal()
+        let lines = (0..<10).map { "line\($0)" }
+        vt.feed(Array(lines.joined(separator: "\r\n").utf8))
+        #expect(vt.scrollbar.total > vt.scrollbar.length)
+        #expect(vt.selectAll())
+        #expect(vt.selectionText() == lines.joined(separator: "\n"))
+        // 起点在回滚历史里，不在视口里。
+        #expect(vt.selectionBounds == SelectionBounds(start: nil, end: GridCell(column: 4, row: 4)))
+    }
+
+    @Test func clearSelectionClearsEveryRow() throws {
+        let vt = try terminal()
+        vt.feed(Array("hello world".utf8))
+        #expect(vt.selectWord(column: 0, row: 0))
+        var frame = ScreenFrame()
+        _ = vt.refresh(&frame)
+        #expect(frame.selected[0] != nil)
+        vt.clearSelection()
+        _ = vt.refresh(&frame)
+        #expect(!vt.hasSelection)
+        #expect(frame.selected.allSatisfy { $0 == nil })
+        #expect(vt.selectionBounds == nil)
+        #expect(vt.selectionText() == nil)
+    }
 }

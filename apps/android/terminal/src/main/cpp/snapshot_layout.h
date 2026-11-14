@@ -3,14 +3,15 @@
 // 两边和签名一起改。
 //
 // 一帧依次是：头（SNAPSHOT_HEADER_SIZE 字节）、ROW_COUNT 个行记录、按 8 字节对齐的 IMAGE_COUNT 个图片记录、
-// 字素簇池。行记录是行号（视口上面那一行是 -1）加上 COLUMNS 个格子。格子的 CELL_TEXT 为 0 是没有字；
+// 字素簇池。行记录是行号（视口上面那一行是 -1）、本行选中的起止列（int16，含两端，本行没有选中时都是 -1）
+// 加上 COLUMNS 个格子。格子的 CELL_TEXT 为 0 是没有字；
 // 不带 CELL_TEXT_GRAPHEME 时是唯一的码点，带着时低 31 位是字素簇池里的下标（以 int32 计），那里先是码点个数、
 // 再是各个码点。颜色带着 COLOR_SET 时低 24 位是 0xRRGGBB，没带是用默认色。
 
 #ifndef RUNODE_SNAPSHOT_LAYOUT_H
 #define RUNODE_SNAPSHOT_LAYOUT_H
 
-#define SNAPSHOT_VERSION 1
+#define SNAPSHOT_VERSION 2
 
 #define SNAPSHOT_FLAGS 0
 #define SNAPSHOT_COLUMNS 4
@@ -39,7 +40,9 @@
 #define SNAPSHOT_FLAG_NEXT_IMAGE_FRAME (1 << 7)
 
 #define SNAPSHOT_ROW_Y 0
-#define SNAPSHOT_ROW_HEADER_SIZE 4
+#define SNAPSHOT_ROW_SELECTION_START 4
+#define SNAPSHOT_ROW_SELECTION_END 6
+#define SNAPSHOT_ROW_HEADER_SIZE 8
 
 #define SNAPSHOT_CELL_TEXT 0
 #define SNAPSHOT_CELL_FOREGROUND 4

@@ -62,5 +62,102 @@
             view.unmarkText()
             #expect(recorder.inputs == 0)
         }
+
+        // MARK: 选区
+
+        /// 字号定死的视图挂着一份写了 `text` 的真 VT。
+        func selectionView(_ text: String) throws -> (TerminalView, VTerminal, Recorder) {
+            let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 402, height: 680))
+            view.fontSizeOverride = 13
+            let recorder = Recorder()
+            view.delegate = recorder
+            let terminal = try VTerminal(
+                size: GridSize(cols: 30, rows: 8, cellWidthPx: 16, cellHeightPx: 32), settings: .default)
+            terminal.feed(Array(text.utf8))
+            view.terminalDidReset(terminal, settings: .default)
+            view.layoutIfNeeded()
+            return (view, terminal, recorder)
+        }
+
+        /// 第 `row` 行第 `column` 列格子里 x 方向 `fraction` 处的点（网格坐标）。
+        func point(_ column: Int, _ row: Int, fraction: CGFloat = 0.5) -> CGPoint {
+            let font = TerminalFont(size: 13)
+            return CGPoint(x: (CGFloat(column) + fraction) * font.cellWidth, y: (CGFloat(row) + 0.5) * font.cellHeight)
+        }
+
+        /// 长按选中一个词，打一个字就退出选中、清掉 VT 里的选区。
+        @Test func typingEndsTheSelection() throws {
+            let (view, terminal, recorder) = try selectionView("hello world")
+            #expect(view.beginSelection(at: point(7, 0)))
+            #expect(view.selecting)
+            #expect(terminal.selectionText() == "world")
+            view.emit(.text("x"))
+            #expect(!view.selecting)
+            #expect(!terminal.hasSelection)
+            #expect(recorder.inputs == 1)
+        }
+
+        /// 长按在空白上不进入选中。
+        @Test func pressingOnBlanksSelectsNothing() throws {
+            let (view, terminal, _) = try selectionView("hello     world")
+            #expect(!view.beginSelection(at: point(7, 0)))
+            #expect(!view.beginSelection(at: point(3, 5)))
+            #expect(!view.selecting)
+            #expect(!terminal.hasSelection)
+        }
+
+        /// 选中时再长按空白格或网格外：退出选中、清掉原来的选区，不在旧选区上接着选。
+        @Test func pressingOnBlanksWhileSelectingEndsTheSelection() throws {
+            let (view, terminal, _) = try selectionView("hello world")
+            #expect(view.beginSelection(at: point(1, 0)))
+            #expect(!view.beginSelection(at: point(20, 5)))
+            #expect(!view.selecting)
+            #expect(!terminal.hasSelection)
+            #expect(view.beginSelection(at: point(1, 0)))
+            #expect(!view.beginSelection(at: CGPoint(x: -5, y: -5)))
+            #expect(!view.selecting)
+            #expect(!terminal.hasSelection)
+        }
+
+        /// 拖终点柄把选区拉长，拷贝写进剪贴板后退出选中。
+        @Test func copyWritesTheDraggedSelectionAndEnds() throws {
+            let (view, terminal, _) = try selectionView("hello world")
+            let pasteboard = try #require(UIPasteboard(name: UIPasteboard.Name("runode-test-\(UUID())"), create: true))
+            defer { UIPasteboard.remove(withName: pasteboard.name) }
+            view.pasteboard = pasteboard
+            #expect(view.beginSelection(at: point(1, 0)))
+            #expect(terminal.selectionText() == "hello")
+            view.dragSelection(to: point(10, 0, fraction: 0.9))
+            #expect(terminal.selectionText() == "hello world")
+            view.copy(nil)
+            #expect(pasteboard.string == "hello world")
+            #expect(!view.selecting)
+            #expect(!terminal.hasSelection)
+        }
+
+        /// 选中时轻点选区外只退出选中：程序开着鼠标上报也不发点击，不弹键盘；点在选区里还在选中。
+        @Test func tappingOutsideTheSelectionOnlyEndsIt() throws {
+            let (view, terminal, recorder) = try selectionView("\u{1b}[?1000hhello world")
+            #expect(terminal.mouseTracking)
+            #expect(view.beginSelection(at: point(1, 0)))
+            // 选区落进视图的帧要一次刷新；`scrollToBottom` 当场刷新。
+            view.scrollToBottom()
+            view.handleTap(at: point(2, 0))
+            #expect(view.selecting)
+            view.handleTap(at: point(4, 5))
+            #expect(!view.selecting)
+            #expect(!terminal.hasSelection)
+            #expect(recorder.inputs == 0)
+            #expect(!view.isFirstResponder)
+        }
+
+        /// 换一份 VT 就退出选中，原来那份的选区也清掉。
+        @Test func resettingTheTerminalEndsTheSelection() throws {
+            let (view, terminal, _) = try selectionView("hello world")
+            #expect(view.beginSelection(at: point(1, 0)))
+            view.terminalDidReset(nil, settings: .default)
+            #expect(!view.selecting)
+            #expect(!terminal.hasSelection)
+        }
     }
 #endif

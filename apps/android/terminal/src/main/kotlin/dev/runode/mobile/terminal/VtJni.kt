@@ -96,6 +96,35 @@ internal object VtJni {
     @JvmStatic
     external fun nativeImagePixels(handle: Long, id: Int, generation: Long, size: IntArray): ByteArray?
 
+    /** 选中视口第 [row] 行第 [column] 列所在的词；格子是空的或不在视口里时什么都不改，返回假。 */
+    @JvmStatic
+    external fun nativeSelectWord(handle: Long, column: Int, row: Int): Boolean
+
+    /** 选中屏幕连同回滚历史里的全部内容；什么都没有时返回假。 */
+    @JvmStatic
+    external fun nativeSelectAll(handle: Long): Boolean
+
+    @JvmStatic
+    external fun nativeClearSelection(handle: Long)
+
+    @JvmStatic
+    external fun nativeHasSelection(handle: Long): Boolean
+
+    /**
+     * 拖选区的一端（[movingStart] 为真拖的是起点），另一端不动，被拖端换成视口第 [row] 行第 [column] 列（夹在视口里）。
+     * 返回被拖的那端现在是不是起点；没有选区时原样返回 [movingStart]。
+     */
+    @JvmStatic
+    external fun nativeExtendSelection(handle: Long, movingStart: Boolean, column: Int, row: Int): Boolean
+
+    /** 起点可见（1 或 0）、起点列、起点行、终点可见、终点列、终点行写进 [out]；没有选区时返回假。 */
+    @JvmStatic
+    external fun nativeSelectionBounds(handle: Long, out: IntArray): Boolean
+
+    /** 选中的纯文本（UTF-8），软换行处接起来、行尾空白去掉；没有选区时为空。 */
+    @JvmStatic
+    external fun nativeSelectionText(handle: Long): ByteArray?
+
     /** [key]、[mods]、[consumedMods]、[optionAsAlt] 是 [GhosttyAbi] 的取值；[unshifted] 没有时为 0。 */
     @JvmStatic
     external fun nativeEncodeKey(

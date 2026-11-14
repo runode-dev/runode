@@ -17,6 +17,7 @@ import java.io.ByteArrayOutputStream
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -280,6 +281,124 @@ class TerminalViewTests {
             assertEquals(0xFFFF0000.toInt(), bitmap.getPixel(left + cellWidth, middle))
             val background = TerminalRenderer.argb(TermSettings.default.background)
             assertEquals(background, bitmap.getPixel(left + cellWidth * 5, middle))
+        }
+    }
+
+    /**
+     * 适配手机、600 × 400 的视图里接上 [vt]：20 列的网格贴着顶边（没有回滚历史，在等宿主改尺寸），左右居中。格宽取整
+     * 了，取的点都在格子中间。
+     */
+    private class Grid(val left: Float, val cellWidth: Float, val cellHeight: Float) {
+        fun x(column: Int): Float = left + cellWidth * (column + 0.5f)
+
+        fun y(row: Int): Float = cellHeight * (row + 0.5f)
+    }
+
+    /** 屏幕上是 [text] 的 VT 接在视图上跑 [body]；跑完先把 VT 从视图上摘下来再关，排着的刷新不碰关掉的 VT。 */
+    private fun selectingView(
+        text: String, recorder: Recorder = Recorder(), body: (vt: VTerminal, view: TerminalView, grid: Grid) -> Unit,
+    ) {
+        VTerminal(size, TermSettings.default).use { vt ->
+            val view = view(recorder)
+            view.terminalSizeModeDidChange(fitsPhone = true)
+            vt.feed(text.encodeToByteArray())
+            view.terminalDidReset(vt, TermSettings.default)
+            view.layoutAt(600, 400)
+            val cellWidth = view.fitSize.cellWidthPx.toFloat()
+            try {
+                body(vt, view, Grid((600 - 20 * cellWidth) / 2, cellWidth, view.fitSize.cellHeightPx.toFloat()))
+            } finally {
+                view.terminalDidReset(null, TermSettings.default)
+            }
+        }
+    }
+
+    private fun touch(down: Long, time: Long, action: Int, x: Float, y: Float): MotionEvent =
+        MotionEvent.obtain(down, time, action, x, y, 0).also { it.source = InputDevice.SOURCE_TOUCHSCREEN }
+
+    /** 长按选中手指下的词；按住终点柄往右拖六格，选区跟着变长。 */
+    @Test
+    fun draggingTheEndHandleExtendsTheSelection() = onMain {
+        selectingView("hello world foo") { vt, view, grid ->
+            assertTrue(view.beginSelection(grid.x(1), grid.y(0)))
+            assertEquals("hello", vt.selectionText())
+            val handle = assertNotNull(view.handleCenter(SelectionEnd.End))
+            val down = SystemClock.uptimeMillis()
+            view.dispatchTouchEvent(touch(down, down, MotionEvent.ACTION_DOWN, handle.x, handle.y))
+            for (step in 1..6) {
+                val x = handle.x + grid.cellWidth * step
+                view.dispatchTouchEvent(touch(down, down + step * 16L, MotionEvent.ACTION_MOVE, x, handle.y))
+            }
+            view.dispatchTouchEvent(touch(down, down + 200, MotionEvent.ACTION_UP, handle.x + grid.cellWidth * 6, handle.y))
+            assertEquals("hello world", vt.selectionText())
+        }
+    }
+
+    /** 长按在空格上不算取到词：不留选区。 */
+    @Test
+    fun longPressOnBlankSelectsNothing() = onMain {
+        selectingView("hello world") { vt, view, grid ->
+            assertTrue(!view.beginSelection(grid.x(5), grid.y(0)))
+            assertTrue(!view.beginSelection(grid.x(15), grid.y(0)))
+            assertTrue(!vt.hasSelection)
+        }
+    }
+
+    /** 选中时打字照常发出去，选区退出。 */
+    @Test
+    fun typingEndsTheSelection() = onMain {
+        val recorder = Recorder()
+        selectingView("hello world", recorder) { vt, view, grid ->
+            assertTrue(view.beginSelection(grid.x(1), grid.y(0)))
+            view.typeText("a")
+            assertTrue(!vt.hasSelection)
+            assertNull(view.handleCenter(SelectionEnd.End))
+            assertContentEquals("a".encodeToByteArray(), vt.bytes(recorder.inputs))
+        }
+    }
+
+    /** 选中时程序开着鼠标上报：点在选区里留着选区，点在外面退出选中，两下都不发点击给程序。 */
+    @Test
+    fun tappingOutsideEndsTheSelectionWithoutClicking() = onMain {
+        val recorder = Recorder()
+        selectingView("\u001b[?1000hselection world", recorder) { vt, view, grid ->
+            assertTrue(view.beginSelection(grid.x(1), grid.y(0)))
+            fun tap(x: Float, y: Float) {
+                val down = SystemClock.uptimeMillis()
+                view.dispatchTouchEvent(touch(down, down, MotionEvent.ACTION_DOWN, x, y))
+                view.dispatchTouchEvent(touch(down, down + 50, MotionEvent.ACTION_UP, x, y))
+            }
+            tap(grid.x(4), grid.y(0))
+            assertTrue(vt.hasSelection)
+            tap(grid.x(1), grid.y(3))
+            assertTrue(!vt.hasSelection)
+            assertTrue(recorder.inputs.isEmpty())
+        }
+    }
+
+    /** 拷贝把选中的文字写进剪贴板，退出选中。 */
+    @Test
+    fun copyWritesTheClipboardAndEndsTheSelection() = onMain {
+        selectingView("hello world") { vt, view, grid ->
+            var copied: String? = null
+            view.writeClipboard = { copied = it }
+            assertTrue(view.beginSelection(grid.x(7), grid.y(0)))
+            view.copySelection()
+            assertEquals("world", copied)
+            assertTrue(!vt.hasSelection)
+        }
+    }
+
+    /** 选中的格子画成选区底色（深色背景上没配颜色时的默认色），没选中的照旧是终端背景。 */
+    @Test
+    fun selectedCellsAreDrawnWithTheSelectionColor() = onMain {
+        selectingView("hello world") { _, view, grid ->
+            assertTrue(view.beginSelection(grid.x(1), grid.y(0)))
+            val bitmap = Bitmap.createBitmap(600, 400, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bitmap))
+            assertEquals(TerminalRenderer.argb(SelectionGeometry.ON_DARK), bitmap.getPixel(grid.x(2).toInt(), 1))
+            val background = TerminalRenderer.argb(TermSettings.default.background)
+            assertEquals(background, bitmap.getPixel(grid.x(7).toInt(), 1))
         }
     }
 

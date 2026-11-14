@@ -115,6 +115,12 @@ class ScreenFrame {
     /** 视口上面那一行，平滑滚动错开时从顶上露出一部分；视口在历史最顶上时为空。 */
     var above: Array<ScreenCell> = emptyArray()
 
+    /** 一行一个，这行选中的列（含两端，宽字符已折算成它占的格子）；这行没有选中时为空。 */
+    var selected: Array<IntRange?> = emptyArray()
+
+    /** [above] 那一行选中的列。 */
+    var aboveSelected: IntRange? = null
+
     /** 平滑滚动时整屏往下错开几分之一行，在 [0, 1) 里；[above] 为空时总是 0。 */
     var scrollOffset: Double = 0.0
     var background: Rgb = TermSettings.default.background
@@ -148,6 +154,17 @@ class ScreenFrame {
         }
     }
 }
+
+/** 选区的哪一端：起点在左上，终点在右下。 */
+enum class SelectionEnd {
+    Start, End,
+}
+
+/** 视口里的一格。 */
+data class GridCell(val column: Int, val row: Int)
+
+/** 选区两端在视口里的格子（含两端）；不在视口里的那端为空。 */
+data class SelectionBounds(val start: GridCell?, val end: GridCell?)
 
 /** 一次刷新改了哪些：整屏，还是某几行。 */
 data class FrameChange(

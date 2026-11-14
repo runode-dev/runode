@@ -115,16 +115,20 @@ internal class TerminalRenderer(var font: TerminalFont) {
         canvas.clipRect(0f, 0f, width, cellHeight)
         fill.color = argb(frame.background)
         canvas.drawRect(0f, 0f, width, cellHeight, fill)
+        val selected = if (row < 0) frame.aboveSelected else frame.selected.getOrNull(row)
         drawImages(canvas, frame, row, ImageLayer.BelowBackground)
-        drawBackgrounds(canvas, frame, cells)
+        drawBackgrounds(canvas, frame, cells, selected)
         drawImages(canvas, frame, row, ImageLayer.BelowText)
-        drawText(canvas, frame, cells)
+        drawText(canvas, frame, cells, selected)
         drawImages(canvas, frame, row, ImageLayer.AboveText)
         canvas.restore()
     }
 
-    /** 背景按同色的一段一起填：格子宽度不是整像素，一格一格填时同色的相邻格子之间会露出细缝。 */
-    private fun drawBackgrounds(canvas: Canvas, frame: ScreenFrame, cells: Array<ScreenCell>) {
+    /**
+     * 背景按同色的一段一起填：格子宽度不是整像素，一格一格填时同色的相邻格子之间会露出细缝。[selected] 是这一行选中
+     * 的列，用选区的底色。
+     */
+    private fun drawBackgrounds(canvas: Canvas, frame: ScreenFrame, cells: Array<ScreenCell>, selected: IntRange?) {
         var start = -1
         var color = 0
         val cellWidth = font.cellWidth
@@ -139,7 +143,9 @@ internal class TerminalRenderer(var font: TerminalFont) {
             val cell = cells[column]
             // 宽字符的后一格跟着前一格的背景走。
             val source = if (cell.width == CellWidth.SpacerTail && column > 0) cells[column - 1] else cell
-            val background = argb(background(frame, source))
+            val background = argb(
+                if (selected != null && column in selected) selectionColors(frame, source).background else background(frame, source),
+            )
             if (start >= 0 && background == color) continue
             flush(column)
             if (background != defaultBackground) {
@@ -150,7 +156,7 @@ internal class TerminalRenderer(var font: TerminalFont) {
         flush(cells.size)
     }
 
-    private fun drawText(canvas: Canvas, frame: ScreenFrame, cells: Array<ScreenCell>) {
+    private fun drawText(canvas: Canvas, frame: ScreenFrame, cells: Array<ScreenCell>, selected: IntRange?) {
         val cellWidth = font.cellWidth
         val baseline = font.ascent
         var runStart = -1
@@ -174,7 +180,7 @@ internal class TerminalRenderer(var font: TerminalFont) {
             if (cell.width == CellWidth.SpacerTail || cell.width == CellWidth.SpacerHead) continue
             val x = column * cellWidth
             val width = if (cell.width == CellWidth.Wide) cellWidth * 2 else cellWidth
-            val ink = ink(frame, cell)
+            val ink = ink(frame, cell, selected?.contains(column) == true)
             val bold = CellAttributes.bold in cell.attributes
             val italic = CellAttributes.italic in cell.attributes
             if (!hasText(cell)) {
@@ -488,8 +494,12 @@ internal class TerminalRenderer(var font: TerminalFont) {
         if (CellAttributes.inverse in cell.attributes) cell.foreground ?: frame.foreground
         else cell.background ?: frame.background
 
-    private fun ink(frame: ScreenFrame, cell: ScreenCell): Int {
-        val color = argb(foreground(frame, cell))
+    private fun selectionColors(frame: ScreenFrame, cell: ScreenCell): SelectionColors =
+        SelectionGeometry.selectionColors(foreground(frame, cell), background(frame, cell), settings, frame.background)
+
+    /** 字实际画的颜色；[selected] 时用选区的字色。 */
+    private fun ink(frame: ScreenFrame, cell: ScreenCell, selected: Boolean): Int {
+        val color = argb(if (selected) selectionColors(frame, cell).foreground else foreground(frame, cell))
         return if (CellAttributes.faint in cell.attributes) withAlpha(color, FAINT_ALPHA) else color
     }
 

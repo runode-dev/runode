@@ -46,6 +46,7 @@ class VTerminal(size: GridSize, settings: TermSettings) : AutoCloseable {
     /** [refresh] 让 native 那边写一帧的缓冲区，不够大时换个大的。 */
     private var snapshot: ByteBuffer
     private val scrollbarValues = LongArray(3)
+    private val selectionValues = IntArray(6)
 
     /** 读格子时上一个前景色、背景色，一行里连着同色的格子共用一个 [Rgb]。 */
     private var lastColorBits = -1
@@ -299,6 +300,7 @@ class VTerminal(size: GridSize, settings: TermSettings) : AutoCloseable {
             frame.columns = columns
             frame.rows = rows
             frame.cells = Array(rows) { Array(columns) { ScreenCell.blank } }
+            frame.selected = arrayOfNulls(rows)
         }
         frame.background = rgb(buffer.getInt(SnapshotLayout.BACKGROUND))
         frame.foreground = rgb(buffer.getInt(SnapshotLayout.FOREGROUND))
@@ -308,6 +310,7 @@ class VTerminal(size: GridSize, settings: TermSettings) : AutoCloseable {
         val aboveColumns = buffer.getInt(SnapshotLayout.ABOVE_COLUMNS)
         if (frame.above.size != aboveColumns) {
             frame.above = Array(aboveColumns) { ScreenCell.blank }
+            frame.aboveSelected = null
         }
         frame.scrollOffset = if (aboveColumns == 0) 0.0 else scrollFraction
 
@@ -317,6 +320,13 @@ class VTerminal(size: GridSize, settings: TermSettings) : AutoCloseable {
         repeat(buffer.getInt(SnapshotLayout.ROW_COUNT)) {
             val y = buffer.getInt(at + SnapshotLayout.ROW_Y)
             val row = if (y == -1) frame.above else frame.cells[y]
+            val selectionStart = buffer.getShort(at + SnapshotLayout.ROW_SELECTION_START).toInt()
+            val selected = if (selectionStart < 0) {
+                null
+            } else {
+                selectionStart..buffer.getShort(at + SnapshotLayout.ROW_SELECTION_END).toInt()
+            }
+            if (y == -1) frame.aboveSelected = selected else frame.selected[y] = selected
             var cellAt = at + SnapshotLayout.ROW_HEADER_SIZE
             for (x in 0 until columns) {
                 row[x] = readCell(buffer, cellAt, graphemes)
@@ -464,6 +474,61 @@ class VTerminal(size: GridSize, settings: TermSettings) : AutoCloseable {
         val frame = ScreenFrame()
         refresh(frame)
         return frame.lines
+    }
+
+    // 选区：装在 VT 里，滚动、新输出、改尺寸重排时跟着内容走；主屏和备用屏各存一份，切到另一块屏幕时 hasSelection
+    // 为假。选区一变，下一次 refresh 整屏重读，ScreenFrame.selected 跟着更新。
+
+    /** 选中视口第 [row] 行第 [column] 列所在的词。格子是空的或不在视口里时什么都不改，返回假。 */
+    fun selectWord(column: Int, row: Int): Boolean {
+        checkThread()
+        return VtJni.nativeSelectWord(live(), column, row)
+    }
+
+    /** 选中屏幕连同回滚历史里的全部内容；什么都没有时返回假。 */
+    fun selectAll(): Boolean {
+        checkThread()
+        return VtJni.nativeSelectAll(live())
+    }
+
+    fun clearSelection() {
+        checkThread()
+        VtJni.nativeClearSelection(live())
+    }
+
+    /** 当前这块屏幕上有选区。 */
+    val hasSelection: Boolean
+        get() {
+            checkThread()
+            return VtJni.nativeHasSelection(live())
+        }
+
+    /**
+     * 把选区的 [moving] 端拖到视口第 [row] 行第 [column] 列（夹在视口里），另一端不动。返回被拖的那端现在是哪一端：
+     * 拖过另一端时两端互换。没有选区时什么都不改，原样返回 [moving]。
+     */
+    fun extendSelection(moving: SelectionEnd, column: Int, row: Int): SelectionEnd {
+        checkThread()
+        val start = VtJni.nativeExtendSelection(live(), moving == SelectionEnd.Start, column, row)
+        return if (start) SelectionEnd.Start else SelectionEnd.End
+    }
+
+    /** 选区两端在视口里的格子；没有选区时为空。 */
+    val selectionBounds: SelectionBounds?
+        get() {
+            checkThread()
+            val v = selectionValues
+            if (!VtJni.nativeSelectionBounds(live(), v)) return null
+            return SelectionBounds(
+                start = if (v[0] != 0) GridCell(v[1], v[2]) else null,
+                end = if (v[3] != 0) GridCell(v[4], v[5]) else null,
+            )
+        }
+
+    /** 选中的纯文本：软换行处接起来，行尾空白去掉。没有选区时为空。 */
+    fun selectionText(): String? {
+        checkThread()
+        return VtJni.nativeSelectionText(live())?.decodeToString()
     }
 
     // 输入编码
