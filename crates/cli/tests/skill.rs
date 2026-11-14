@@ -31,14 +31,13 @@ fn install_writes_the_skill_and_reports_each_place() {
         let (code, out, err) = run("skill install", &env);
         assert_eq!(code, exit::OK, "{err}");
         let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(
-            lines,
-            [
-                "Installed the runode skill in ~/.agents/skills/runode",
-                "Claude Code reads it from ~/.claude/skills/runode",
-                "Skipped ~/.kiro/skills/runode: something of yours is there, left untouched.",
-            ]
-        );
+        let expected = [
+            "Installed the runode skill in ~/.agents/skills/runode",
+            "Claude Code reads it from ~/.claude/skills/runode",
+            "Skipped ~/.kiro/skills/runode: something of yours is there, left untouched.",
+        ]
+        .map(|line| line.replace('/', std::path::MAIN_SEPARATOR_STR));
+        assert_eq!(lines, expected);
     }
 
     let runode = BUNDLED.iter().find(|skill| skill.name == "runode").unwrap();
