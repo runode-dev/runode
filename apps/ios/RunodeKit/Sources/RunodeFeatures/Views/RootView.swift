@@ -23,8 +23,10 @@
                 }
             }
             .sheet(isPresented: $app.showingSettings, onDismiss: app.settingsDismissed) {
+                // 菜单式的 Picker 不跟着 tint 变，开着设置页换主题时值的字色停在旧主题上，所以换主题就重建。
                 SettingsView(app: app, settings: app.settings, machines: app.machineList)
                     .appTheme(theme)
+                    .id(theme)
             }
             .fullScreenCover(item: $app.pairing) { model in
                 PairingView(model: model, settings: app.settings, theme: theme) { machine in
