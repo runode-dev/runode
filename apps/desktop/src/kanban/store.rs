@@ -5,7 +5,7 @@
 //! 说一声（app 交进来的通知），说了就重问；换了一条连接也重问。卡片在哪一列要看任务会话里 agent 的状态，
 //! 所以每次连同宿主里的会话一起问，全留着（记录页上完成已久的任务也要看会话还在不在），不轮询；不 attach，
 //! 免得宿主把它们算成有界面连着。
-//! 数据变了才重画开着的看板，各窗口只在需要你的数（`needs_you`）变了时重画；刚开始的任务过宽限期时列会变、
+//! 数据变了才重画开着的看板，各窗口只在各列的数（`tally`）变了时重画；刚开始的任务过宽限期时列会变、
 //! 数据却不变，所以排一个定时器等到那时（`wait_for_grace`）。
 //! 请求都在后台线程上等宿主回话。
 
@@ -22,7 +22,13 @@ use runode_protocol::{
     todo::{Column, START_GRACE, Schedule, Todo, column},
 };
 
-use crate::kanban::Kanban;
+use runode_types::agent::AgentState;
+
+use crate::{
+    agent_prompts::{self, Access},
+    host_client::hosts::HostId,
+    kanban::Kanban,
+};
 
 #[derive(Clone, Default, PartialEq)]
 pub(crate) struct TodoData {
@@ -49,27 +55,42 @@ pub fn todo_sessions(cx: &App) -> HashSet<SessionId> {
     data(cx).todos.iter().filter_map(|todo| todo.session).collect()
 }
 
-/// 需要你那一列有几张任务，侧栏的看板入口上显示。
-pub fn needs_you(cx: &App) -> usize {
-    cx.try_global::<NeedsYou>().map_or(0, |count| count.0)
+/// 看板上没做完的任务按列各有几张，侧栏的导航上显示。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tally {
+    /// 需要你那一列。
+    pub needs_you: usize,
+    /// 待办那一列。
+    pub todo: usize,
+    /// 进行中那一列。
+    pub running: usize,
 }
 
-/// 上一次算出的需要你的数，见 `count_needs_you`。
-#[derive(Default)]
-struct NeedsYou(usize);
+impl Global for Tally {}
 
-impl Global for NeedsYou {}
+/// 上一次算出的各列的数（`count_tally`）；还没问到看板时都是零。
+pub fn tally(cx: &App) -> Tally {
+    cx.try_global::<Tally>().copied().unwrap_or_default()
+}
 
-/// 按现在的数据和时间重算需要你的数，变了就重画各窗口。
-fn count_needs_you(cx: &mut App) {
-    let data = data(cx);
-    let now = crate::kanban::when::unix_now();
-    let count = data
-        .todos
-        .iter()
-        .filter(|todo| column(todo, todo.session.and_then(|id| data.sessions.get(&id)), now) == Column::NeedsYou)
-        .count();
-    if std::mem::replace(&mut cx.default_global::<NeedsYou>().0, count) != count {
+/// `data` 里的任务在 Unix 时间 `now` 时各列的数。
+fn tally_of(data: &TodoData, now: u64) -> Tally {
+    let mut tally = Tally::default();
+    for todo in &data.todos {
+        match column(todo, todo.session.and_then(|id| data.sessions.get(&id)), now) {
+            Column::NeedsYou => tally.needs_you += 1,
+            Column::Todo => tally.todo += 1,
+            Column::InProgress => tally.running += 1,
+            Column::Done => {}
+        }
+    }
+    tally
+}
+
+/// 按现在的数据和时间重算各列的数，变了就重画各窗口。
+fn count_tally(cx: &mut App) {
+    let tally = tally_of(data(cx), crate::kanban::when::unix_now());
+    if std::mem::replace(cx.default_global::<Tally>(), tally) != tally {
         cx.refresh_windows();
     }
 }
@@ -83,6 +104,10 @@ pub struct Host {
     pub list_sessions: fn() -> Result<Vec<SessionInfo>>,
     /// 现在连着的宿主认得的看板级别（`runode_protocol::todo::BOARD_LEVEL`），没连着时为空。
     pub board: fn() -> Option<u32>,
+    /// 读任务会话屏幕上从最后一个有字的行往上多少行，认 agent 的提问。
+    pub read_screen: fn(SessionId, u32) -> Result<String>,
+    /// 给任务会话按键，回答 agent 的提问。
+    pub send_keys: fn(SessionId, Vec<String>) -> Result<()>,
 }
 
 impl Global for Host {}
@@ -94,8 +119,15 @@ impl Host {
             ask: |_| Err(anyhow!("no terminal host")),
             list_sessions: || Err(anyhow!("no terminal host")),
             board: || None,
+            read_screen: |_, _| Err(anyhow!("no terminal host")),
+            send_keys: |_, _| Err(anyhow!("no terminal host")),
         })
     }
+}
+
+/// 读任务会话屏幕的办法（`Host::read_screen`），只在后台线程上调。
+pub(crate) fn read_screen(cx: &App) -> fn(SessionId, u32) -> Result<String> {
+    Host::get(cx).read_screen
 }
 
 /// 连着的宿主认得的看板级别不到 `level`：发这一级的消息、带这一级的字段前先看它。没连着时为假，请求自己会
@@ -175,11 +207,13 @@ fn refresh_todos(cx: &mut App) -> Task<bool> {
         cx.update(|cx| {
             let mut data = take(cx);
             let mut missed = false;
+            let mut fresh = false;
             match answer {
                 Ok(HostMsg::Todos { todos, schedules, .. }) => {
                     missed = live.is_none();
                     if let Some(live) = live {
                         data.sessions = live.into_iter().map(|info| (info.id, info)).collect();
+                        fresh = true;
                     }
                     data.todos = todos;
                     data.schedules = schedules;
@@ -189,9 +223,49 @@ fn refresh_todos(cx: &mut App) -> Task<bool> {
                 Err(err) => data.error = Some(format!("{err:#}")),
             }
             put(data, cx);
+            if fresh {
+                watch_prompts(cx);
+            }
             missed
         })
     })
+}
+
+/// 看板上一次跟着的任务会话。
+#[derive(Default)]
+struct Followed(HashSet<SessionId>);
+
+impl Global for Followed {}
+
+/// 任务会话里的 agent 在等回答的读它屏幕上的提问，别的（包括会话已经没了的）忘掉。任务删掉或移走后，会话也
+/// 没了的忘掉；会话还在的可能有窗口在跟着，留给它。会话都在本机的宿主里。
+fn watch_prompts(cx: &mut App) {
+    let host = Host::get(cx);
+    let access =
+        Access::new(move |id, lines| (host.read_screen)(id, lines), move |id, keys| (host.send_keys)(id, keys));
+    let data = data(cx);
+    let sessions: Vec<_> = data
+        .todos
+        .iter()
+        .filter_map(|todo| todo.session)
+        .map(|id| {
+            let meta = data.sessions.get(&id).map(|info| &info.meta);
+            let blocked = meta.and_then(|meta| meta.agent).is_some_and(|agent| agent.state == AgentState::Blocked);
+            (id, blocked, meta.and_then(|meta| meta.agent_since_ms))
+        })
+        .collect();
+    let followed: HashSet<SessionId> = sessions.iter().map(|(id, ..)| *id).collect();
+    let gone: Vec<SessionId> = cx
+        .try_global::<Followed>()
+        .map(|before| before.0.difference(&followed).filter(|id| !data.sessions.contains_key(id)).copied().collect())
+        .unwrap_or_default();
+    cx.set_global(Followed(followed));
+    for id in gone {
+        agent_prompts::ended(&(HostId::Local, id), cx);
+    }
+    for (id, blocked, since) in sessions {
+        agent_prompts::watch((HostId::Local, id), access.clone(), blocked, since, cx);
+    }
 }
 
 /// 在后台发一条看板的请求，等宿主回话；办成了的等宿主说变了再重问。
@@ -220,7 +294,7 @@ fn take(cx: &mut App) -> TodoData {
     cx.default_global::<TodoData>().clone()
 }
 
-/// 放回改过的数据；和原来的不一样时重画看板、重排宽限期的定时器，再重算需要你的数。
+/// 放回改过的数据；和原来的不一样时重画看板、重排宽限期的定时器，再重算各列的数。
 fn put(data: TodoData, cx: &mut App) {
     let old = std::mem::replace(cx.default_global::<TodoData>(), data);
     let new = cx.global::<TodoData>();
@@ -229,7 +303,7 @@ fn put(data: TodoData, cx: &mut App) {
         notify_boards(old.todos != new.todos, cx);
         wait_for_grace(cx);
     }
-    count_needs_you(cx);
+    count_tally(cx);
 }
 
 /// 等下一张任务过宽限期的定时器，换上新的时旧的丢掉、不再响。
@@ -239,7 +313,7 @@ struct GraceTimer(Option<Task<()>>);
 impl Global for GraceTimer {}
 
 /// 刚开始的任务过了宽限期（`START_GRACE`）时列可能变（干完了的从进行中落进需要你），会话的样子却没变，
-/// 宿主不会说：等到最早过期的那张，到时重画看板、重算需要你的数，再等下一张。
+/// 宿主不会说：等到最早过期的那张，到时重画看板、重算各列的数，再等下一张。
 fn wait_for_grace(cx: &mut App) {
     let now = crate::kanban::when::unix_now();
     let next = grace_ends(&data(cx).todos).filter(|&end| end > now).min();
@@ -248,7 +322,7 @@ fn wait_for_grace(cx: &mut App) {
             cx.background_executor().timer(Duration::from_secs(end - now)).await;
             cx.update(|cx| {
                 notify_boards(false, cx);
-                count_needs_you(cx);
+                count_tally(cx);
                 wait_for_grace(cx);
             });
         })
@@ -302,5 +376,28 @@ mod tests {
     fn grace_ends_only_for_started_open_todos() {
         let todos = [todo(Some(1_000), None), todo(None, None), todo(Some(2_000), Some(2_001))];
         assert_eq!(grace_ends(&todos).collect::<Vec<_>>(), [1_000 + START_GRACE]);
+    }
+
+    /// 没开始的算待办，宽限期里的算在跑，会话没了的算需要你，做完了的不算。
+    #[test]
+    fn tallies_open_todos_by_column() {
+        let now = 10_000;
+        let session = SessionInfo {
+            id: SessionId(1),
+            size: runode_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 },
+            meta: runode_types::session::SessionMeta::default(),
+            clients: 0,
+            claimed: false,
+            exited: false,
+            size_owner: None,
+        };
+        let data = TodoData {
+            todos: vec![todo(None, None), todo(None, None), todo(Some(now - 1), None), todo(Some(now - 1), Some(now))],
+            sessions: HashMap::from([(SessionId(1), session)]),
+            ..TodoData::default()
+        };
+        assert_eq!(tally_of(&data, now), Tally { needs_you: 0, todo: 2, running: 1 });
+        let gone = TodoData { sessions: HashMap::new(), ..data };
+        assert_eq!(tally_of(&gone, now), Tally { needs_you: 1, todo: 2, running: 0 });
     }
 }

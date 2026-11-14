@@ -20,7 +20,7 @@ use super::{
     GitDirAction, GitDiscardAll, GitFetch, GitFileAction, GitPanel, GitPanelEvent, GitPull, GitPush, GitRefresh,
     GitStageAll, GitStash, GitStashIncludeUntracked, GitStashPopLatest, GitSync, GitUndoLastCommit, GitUnstageAll,
     PrimaryAction, WorkspaceId,
-    rows::{Busy, GitSection, PanelState},
+    rows::{Busy, Committed, GitSection, PanelState, check_counts},
 };
 
 /// 提交成功以后接着做什么。
@@ -424,6 +424,10 @@ impl GitPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let snapshot = self.state().git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root));
+        let before = snapshot.and_then(|repo| repo.info.head.clone());
+        // 全部暂存再提交时提交的是全部改了的文件。
+        let files = snapshot.map_or(0, |repo| if options.stage_all { check_counts(repo).0 } else { repo.staged.len() });
         let op = move |repo: &ProjectRepo| {
             repo.commit(&message, options)?;
             Ok(match after {
@@ -435,11 +439,27 @@ impl GitPanel {
         // 提交期间（比如 pre-commit 钩子跑得慢）框里又写了别的，就留着，只清掉提交出去的那段。
         let area = self.commit_box(&root);
         let sent = area.as_ref().map(|area| area.read(cx).text().to_owned());
-        self.run_git(&root, Busy::Commit, window, cx, op, move |_, remote_error, window, cx| {
+        let ws = self.ws;
+        let subject = sent.as_deref().and_then(|text| text.lines().find(|line| !line.trim().is_empty())).map(str::trim);
+        let committed = Committed { before, head: None, subject: subject.unwrap_or_default().to_owned(), files };
+        let target = root.clone();
+        self.run_git(&root, Busy::Commit, window, cx, op, move |this, remote_error, window, cx| {
             if let Some(area) = area
                 && Some(area.read(cx).text()) == sent.as_deref()
             {
                 area.update(cx, |area, cx| area.set_text(String::new(), cx));
+            }
+            if let Some(state) = this.workspaces.get_mut(&ws) {
+                let snapshot = state.git.clone();
+                let panel = state.repo_mut(&target);
+                panel.drafted = None;
+                let mut committed = committed;
+                // 提交以后的状态可能已经先读到了。
+                let shown = snapshot
+                    .as_ref()
+                    .and_then(|git| git.iter().find(|repo| repo.root == target))
+                    .is_none_or(|repo| committed.still_shown(repo));
+                panel.committed = shown.then_some(committed);
             }
             if let Some(err) = remote_error {
                 show_git_error(&err, window, cx);
@@ -468,7 +488,9 @@ impl GitPanel {
         match action {
             PrimaryAction::Commit => self.commit(root.to_path_buf(), false, AfterCommit::Nothing, window, cx),
             PrimaryAction::Sync => self.run_git(root, Busy::Sync, window, cx, ProjectRepo::sync, |_, (), _, _| {}),
-            PrimaryAction::Publish => self.run_git(root, Busy::Push, window, cx, ProjectRepo::push, |_, (), _, _| {}),
+            PrimaryAction::Publish | PrimaryAction::Push => {
+                self.run_git(root, Busy::Push, window, cx, ProjectRepo::push, |_, (), _, _| {})
+            }
         }
     }
 
@@ -510,9 +532,14 @@ impl GitPanel {
 
     /// 撤销上次提交，改动留在暂存区；说明框空着时把那次的说明放回去，改改再提交。
     pub(crate) fn git_undo_last_commit(&mut self, _: &GitUndoLastCommit, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(root) = self.git_target(window, cx) else {
-            return;
-        };
+        if let Some(root) = self.git_target(window, cx) {
+            self.undo_last_commit(&root, window, cx);
+        }
+    }
+
+    /// 撤销根目录是 `root` 的仓库的上次提交，改动留在暂存区；说明框空着时把那次的说明放回去。
+    pub(super) fn undo_last_commit(&mut self, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let root = root.to_path_buf();
         let area = self.commit_box(&root);
         self.run_git(&root, Busy::Commit, window, cx, ProjectRepo::undo_last_commit, move |_, message, _, cx| {
             if let Some(area) = area
@@ -548,9 +575,13 @@ impl GitPanel {
 
     /// 暂存全部；还有冲突的文件时先问一句，免得冲突标记被顺手标成已解决、一路提交进去。
     pub(crate) fn git_stage_all(&mut self, _: &GitStageAll, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(root) = self.git_target(window, cx) else {
-            return;
-        };
+        if let Some(root) = self.git_target(window, cx) {
+            self.stage_all(root, window, cx);
+        }
+    }
+
+    /// 暂存根目录是 `root` 的仓库里的全部改动；还有冲突的文件时先问一句。
+    pub(super) fn stage_all(&mut self, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let conflicts =
             self.state().git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root)).map_or(0, |repo| {
                 repo.unstaged.iter().filter(|file| file.status == git::FileStatus::Conflicted).count()

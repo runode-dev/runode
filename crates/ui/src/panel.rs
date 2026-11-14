@@ -107,10 +107,10 @@ pub fn panel_header(cards: bool, cx: &App) -> Div {
 }
 
 /// 右侧面板的外框：定宽、占满高度、竖着排。经典样式下左边一条分隔线，卡片样式（`cards`）下是一张
-/// 卡片。底色和字号由调用方接着写。
+/// `Theme::surface` 底的卡片。字号由调用方接着写，经典样式下的底色也是。
 pub fn panel_shell(id: &'static str, width: f32, cards: bool, cx: &App) -> Stateful<Div> {
     let shell = if cards {
-        card_style(div(), cx.theme()).overflow_hidden()
+        card_style(div(), cx.theme()).bg(cx.theme().surface).overflow_hidden()
     } else {
         div().border_l_1().border_color(cx.theme().border)
     };

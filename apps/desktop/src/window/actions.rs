@@ -18,7 +18,7 @@ use crate::terminal_view::TerminalView;
 const RESIZE_STEP: f32 = 10.;
 
 impl WindowView {
-    /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板开着新建任务那一页以外的对话框，或者
+    /// 窗口上动作的处理函数 `f`，设置页开着时先收起它；看板开着新建任务以外的对话框，或者
     /// `modal_dialog_open` 时不理。
     pub(super) fn act<A: Action>(
         cx: &mut Context<Self>,

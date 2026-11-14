@@ -204,7 +204,7 @@ impl WindowView {
     /// 整页盖住（`page_covers_terminals`）、被文件预览盖住（`preview_front`）。显示器睡了或切到别的 Space 时
     /// 窗口可能仍在前台，却没人看得到。
     /// 开在单独窗口里的按那个窗口算（`watching_popped`）。
-    fn is_watching_pane(&self, pane: EntityId, wi: usize, ti: usize, window: &Window, cx: &App) -> bool {
+    pub(super) fn is_watching_pane(&self, pane: EntityId, wi: usize, ti: usize, window: &Window, cx: &App) -> bool {
         if self.workspaces[wi].tabs[ti].popped.contains(&pane) {
             return self.watching_popped(pane, cx);
         }
@@ -341,7 +341,7 @@ impl WindowView {
     }
 
     /// 这个窗口里所有前台是 agent 的分屏。
-    fn push_entries(&self, handle: WindowHandle<WindowView>, out: &mut Vec<AgentEntry>, cx: &App) {
+    pub(super) fn push_entries(&self, handle: WindowHandle<WindowView>, out: &mut Vec<AgentEntry>, cx: &App) {
         for workspace in &self.workspaces {
             for tab in &workspace.tabs {
                 let title: SharedString = tab.focused_view().read(cx).title().to_owned().into();
@@ -379,6 +379,15 @@ impl WindowView {
             }
         }
         sort_entries(&mut entries, |entry| (entry.mark.status, entry.changed_at));
+        entries
+    }
+
+    /// 只是这个窗口里的 agent 分屏，按 workspace、标签和分屏的先后，不排序。
+    pub(super) fn window_entries(&self, window: &Window, cx: &App) -> Vec<AgentEntry> {
+        let mut entries = Vec::new();
+        if let Some(handle) = window.window_handle().downcast::<WindowView>() {
+            self.push_entries(handle, &mut entries, cx);
+        }
         entries
     }
 

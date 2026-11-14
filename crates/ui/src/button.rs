@@ -22,7 +22,7 @@ use crate::{
 pub enum ButtonVariant {
     /// 主按钮：反色，前景色的底、背景色的字。
     Default,
-    /// 次要按钮：淡淡一层底色。
+    /// 次要按钮：淡淡一层底色，描一圈 `Theme::control_border` 的边。
     Secondary,
     /// 描一圈边，没有底色。
     Outline,
@@ -229,7 +229,13 @@ impl RenderOnce for Button {
             }
             ButtonVariant::Link => (if on { fg } else { fg.opacity(0.75) }, None, None, Some(fg)),
         };
-        let border = (self.variant == ButtonVariant::Outline).then_some(theme.input);
+        // 除了 `Link` 都描 1 点的边，看不见边的 variant 用透明色：高度由内容和留白撑开的几种并排时一样高。
+        let border = match self.variant {
+            ButtonVariant::Outline => Some(theme.input),
+            ButtonVariant::Secondary => Some(theme.control_border),
+            ButtonVariant::Default | ButtonVariant::Ghost => Some(gpui::transparent_black()),
+            ButtonVariant::Link => None,
+        };
         let own_hover = (!self.disabled && (hover_bg.is_some() || hover_color.is_some())).then(|| {
             let mut hover = StyleRefinement::default();
             if let Some(bg) = hover_bg {

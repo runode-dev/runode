@@ -309,6 +309,9 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> (EntityId, (Entity<TerminalView>, Subscription)) {
         let events = cx.subscribe_in(&view, window, Self::handle_terminal_event);
+        // 建好时就带着宿主给的状态的终端（显示着的本机终端）要等状态再变才发 `MetaChanged`，本来就在等回答的
+        // 在这里开始跟。
+        crate::agent_prompts::watch_terminal(&view, cx);
         (view.entity_id(), (view, events))
     }
 
@@ -597,8 +600,12 @@ impl WindowView {
                 self.forget_stale_done(id, wi, ti, cx);
                 cx.notify();
             }
-            // 侧栏、标签和状态栏是缓存的视图（见 `Slot`），只在窗口通知时重画，不跟着终端的输出。
-            TerminalEvent::MetaChanged => cx.notify(),
+            // 侧栏、标签和状态栏是缓存的视图（见 `Slot`），只在窗口通知时重画，不跟着终端的输出。agent 等回答时
+            // 读它屏幕上的提问，不等了忘掉。
+            TerminalEvent::MetaChanged => {
+                crate::agent_prompts::watch_terminal(view, cx);
+                cx.notify();
+            }
             // 存档和报给宿主的布局里按会话记分屏，开好以前记不下它。
             TerminalEvent::SessionOpened => self.save(cx),
             // 终端拿到焦点时自己露出来，盖着它的文件退到后面，免得打的字进了看不见的 shell。
@@ -664,7 +671,7 @@ impl WindowView {
     /// 上次画出时的布局可能已经过时（开了侧栏、缩了窗口），按它算的偏移不准。
     fn show_tab(&mut self, ix: usize, reveal_now: bool, window: &mut Window, cx: &mut Context<Self>) {
         // 看板的对话框开着时只在后面换标签，不收看板、不抢焦点：标签里的程序退出、`runode open --focus`
-        // 也会走到这里，收了看板写到一半的任务就没了。用户自己按键换的离开新建任务那一页，留着它。
+        // 也会走到这里，收了看板写到一半的任务就没了。用户自己按键换的离开新建任务的对话框，留着它。
         let keep = self.dialog_open(cx) && !(self.acting && self.drafting(cx));
         if !keep {
             self.leave_pages(window, cx);

@@ -12,10 +12,9 @@ use gpui::{
 };
 
 use super::{
-    GotoAgent, PressDown, WindowView,
+    AGENT_MARK_SIZE_SMALL, GotoAgent, PressDown, WindowView,
     agents::{AgentEntry, reveal},
-    cards,
-    titlebar::styled_agent_mark,
+    titlebar::agent_mark,
 };
 use crate::ui::a11y::StaticText;
 use crate::ui::{
@@ -205,7 +204,7 @@ impl WindowView {
                         this.close_agent_picker(window, cx);
                         reveal(target, pane, cx);
                     })
-                    .child(styled_agent_mark(entry.mark, ("picker-agent", ix), fg, cards(cx)))
+                    .child(agent_mark(Some(entry.mark), ("picker-agent", ix), AGENT_MARK_SIZE_SMALL, false, cx))
                     .child(
                         div()
                             .flex_1()

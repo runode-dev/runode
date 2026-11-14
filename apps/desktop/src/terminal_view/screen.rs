@@ -278,6 +278,11 @@ impl<S: Vt> ScreenState<S> {
         matches!(self.screen, Screen::Lost { .. })
     }
 
+    /// 宿主说会话的 shell 已经退出了（或者会话已经没了）。
+    pub(super) fn exited(&self) -> bool {
+        self.exited
+    }
+
     /// 被宿主以积压拒掉（`Changes::retry_attach`）后还在等同一次连接时，返回要再发的那个 `Attach`，
     /// 同一次拒绝只返回一回；之后已经连上、断开、退出或者另发了 `Attach`（那一个还在路上）时为 `None`。
     pub(super) fn retry_attach(&mut self) -> Option<Attach> {

@@ -1,12 +1,12 @@
 //! 文件树、Git 面板和预览栏都要画的 git 状态：按状态上的颜色，以及认出 app 交来的是不是同一份状态。
 
-use std::sync::Arc;
+use std::{collections::HashMap, path::Path, sync::Arc};
 
-use gpui::{App, AppContext as _, Global};
-use runode_git::{FileStatus, GitError, Refusal, Repos};
+use gpui::{App, AppContext as _, Global, Hsla};
+use runode_git::{FileStatus, GitError, Refusal, Repos, Snapshot};
 use runode_types::color::Rgb;
 
-use crate::ui::theme::{ADDED, MODIFIED, REMOVED, RENAMED};
+use crate::ui::theme::{ADDED, MODIFIED, REMOVED, RENAMED, Theme};
 
 /// 文件名、标签名和状态字母按 git 状态上的颜色。
 pub(crate) fn status_color(status: FileStatus) -> Rgb {
@@ -16,6 +16,39 @@ pub(crate) fn status_color(status: FileStatus) -> Rgb {
         FileStatus::Deleted | FileStatus::Conflicted => REMOVED,
         FileStatus::Renamed => RENAMED,
     }
+}
+
+/// 按主题的状态色给 git 状态上色：改过的是 `info`，新加和未跟踪的是 `success`，删掉和冲突的是
+/// `destructive`。
+pub(crate) fn status_tint(status: FileStatus, theme: &Theme) -> Hsla {
+    match status {
+        FileStatus::Modified | FileStatus::Renamed => theme.info,
+        FileStatus::Added | FileStatus::Untracked => theme.success,
+        FileStatus::Deleted | FileStatus::Conflicted => theme.destructive,
+    }
+}
+
+/// 主仓库的 `repo_change_summary`。
+pub(crate) fn change_summary(repos: &Repos) -> (usize, usize, usize) {
+    repo_change_summary(&repos.main)
+}
+
+/// 仓库 `repo` 里有改动的文件数和相对 HEAD 一共增删的行数。部分暂存的文件两段里都有，只算一个，行数取
+/// `Snapshot::head_stats` 里的，那里没有时才把两段的相加。只算已读好的状态，每次画都会调。
+pub(crate) fn repo_change_summary(repo: &Snapshot) -> (usize, usize, usize) {
+    let mut stats: HashMap<&Path, (usize, usize)> = HashMap::new();
+    for file in repo.staged.iter().chain(&repo.unstaged) {
+        let stat = stats.entry(&file.path).or_default();
+        stat.0 += file.added;
+        stat.1 += file.removed;
+    }
+    for (path, head) in &repo.head_stats {
+        if let Some(stat) = stats.get_mut(path.as_path()) {
+            *stat = *head;
+        }
+    }
+    let (added, removed) = stats.values().fold((0, 0), |(added, removed), stat| (added + stat.0, removed + stat.1));
+    (stats.len(), added, removed)
 }
 
 /// 两次交来的 git 状态是同一份：app 只在状态变了时才换一份新的，所以按是不是同一个 `Arc` 比。
@@ -101,4 +134,68 @@ pub(crate) fn not_repo_text(local: bool, cx: &App) -> String {
         return crate::i18n::tr(&crate::i18n::os_key("panel.git_missing"));
     }
     rust_i18n::t!("panel.not_repo").into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::{HashMap, HashSet},
+        path::PathBuf,
+    };
+
+    use runode_git::{FileDiff, RepoInfo, RepoKind, Snapshot};
+
+    use super::*;
+
+    fn file(path: &str, status: FileStatus, added: usize, removed: usize) -> FileDiff {
+        FileDiff {
+            path: path.into(),
+            old_path: None,
+            status,
+            added,
+            removed,
+            hunks: Vec::new(),
+            binary: false,
+            truncated: false,
+            gitlink: false,
+        }
+    }
+
+    fn repo(staged: Vec<FileDiff>, unstaged: Vec<FileDiff>, head_stats: &[(&str, (usize, usize))]) -> Snapshot {
+        Snapshot {
+            root: PathBuf::from("/repo"),
+            git_dir: PathBuf::from("/repo/.git"),
+            prefix: PathBuf::new(),
+            kind: RepoKind::Main,
+            staged,
+            unstaged,
+            statuses: HashMap::new(),
+            ignored: HashSet::new(),
+            head_stats: head_stats.iter().map(|(path, stat)| (PathBuf::from(path), *stat)).collect(),
+            info: RepoInfo::default(),
+        }
+    }
+
+    #[test]
+    fn change_summary_counts_partly_staged_files_once() {
+        let staged = vec![file("a.rs", FileStatus::Modified, 2, 1), file("b.rs", FileStatus::Added, 5, 0)];
+        let unstaged = vec![file("a.rs", FileStatus::Modified, 3, 0), file("new.txt", FileStatus::Untracked, 4, 0)];
+        // 部分暂存的 a.rs 相对 HEAD 是 +4 −1，不是两段相加的 +5 −1。
+        let repos = Repos::new(repo(staged, unstaged, &[("a.rs", (4, 1))]));
+        assert_eq!(change_summary(&repos), (3, 4 + 5 + 4, 1));
+    }
+
+    #[test]
+    fn change_summary_adds_both_sections_without_head_stats() {
+        let staged = vec![file("a.rs", FileStatus::Modified, 2, 1)];
+        let unstaged = vec![file("a.rs", FileStatus::Modified, 3, 2)];
+        let repos = Repos::new(repo(staged, unstaged, &[]));
+        assert_eq!(change_summary(&repos), (1, 5, 3));
+    }
+
+    #[test]
+    fn change_summary_of_a_clean_repo_is_empty() {
+        let repos = Repos::new(repo(Vec::new(), Vec::new(), &[("stale.rs", (1, 1))]));
+        assert_eq!(change_summary(&repos), (0, 0, 0));
+    }
 }

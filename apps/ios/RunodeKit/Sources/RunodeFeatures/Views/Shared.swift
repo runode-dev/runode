@@ -24,10 +24,38 @@
         var secondaryFill: Color
         /// 按下时盖在卡片上的一层，相当于 `systemFill`。
         var pressed: Color
+        /// 卡片里凸起的一块（按键、选项、标签）。
+        var raised: Color
+        /// 凹下去的底槽（终端摘录、输入框、分段控件的底）。
+        var well: Color
+        /// 卡片的边和分隔线。
+        var hairline: Color
+        /// 次要按钮的边、发送键的底。
+        var strongHairline: Color
+        /// 首页卡片底下露出来的那截卡边。
+        var stackEdge: Color
+        /// 下面几种只表示状态，取自 `StatusPalette`。
+        var waiting: Color
+        var waitingFill: Color
+        var onWaitingFill: Color
+        var working: Color
+        var success: Color
+        var failure: Color
 
         static let system = ThemeColors(
             page: Color(.systemGroupedBackground), card: Color(.secondarySystemGroupedBackground),
-            fill: Color(.tertiarySystemFill), secondaryFill: Color(.secondarySystemFill), pressed: Color(.systemFill))
+            fill: Color(.tertiarySystemFill), secondaryFill: Color(.secondarySystemFill), pressed: Color(.systemFill),
+            raised: Color(.tertiarySystemFill), well: Color(.systemBackground), hairline: Color(.separator),
+            strongHairline: Color(.opaqueSeparator), stackEdge: Color(.tertiarySystemGroupedBackground),
+            waiting: status(\.waiting), waitingFill: status(\.waitingFill), onWaitingFill: status(\.onWaitingFill),
+            working: status(\.working), success: status(\.success), failure: status(\.failure))
+
+        /// 跟着系统深浅模式变的状态色。
+        private static func status(_ key: KeyPath<StatusPalette, Rgb>) -> Color {
+            let dark = UIColor(StatusPalette.dark[keyPath: key])
+            let light = UIColor(StatusPalette.light[keyPath: key])
+            return Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
+        }
     }
 
     extension ThemeColors {
@@ -39,21 +67,47 @@
             fill = foreground.opacity(0.10)
             secondaryFill = foreground.opacity(0.14)
             pressed = foreground.opacity(0.18)
+            raised = Color(theme.raised)
+            well = Color(theme.well)
+            hairline = Color(theme.hairline)
+            strongHairline = Color(theme.strongHairline)
+            stackEdge = Color(theme.stackEdge)
+            let status = theme.status
+            waiting = Color(status.waiting)
+            waitingFill = Color(status.waitingFill)
+            onWaitingFill = Color(status.onWaitingFill)
+            working = Color(status.working)
+            success = Color(status.success)
+            failure = Color(status.failure)
+        }
+    }
+
+    extension UIColor {
+        convenience init(_ rgb: Rgb) {
+            self.init(red: CGFloat(rgb.r) / 255, green: CGFloat(rgb.g) / 255, blue: CGFloat(rgb.b) / 255, alpha: 1)
         }
     }
 
     extension EnvironmentValues {
         @Entry var themeColors = ThemeColors.system
+        /// 外层套的主题，弹出 sheet 的页面取出来给 sheet 的内容再套一次。没套过主题时为空。
+        @Entry var appTheme: AppTheme?
     }
 
     extension View {
-        /// 套用主题：底色放进环境，深色主题用深色模式（字、系统控件、键盘跟着变），浅色主题用浅色模式；
-        /// 按钮、链接这些强调色用终端的前景色，和桌面一样黑白为主，不用系统的蓝色。放在根视图上，弹出的
-        /// 页面也跟着。
+        /// 套用主题：底色和主题本身放进环境，深色主题用深色模式（字、系统控件、键盘跟着变），浅色主题用浅色
+        /// 模式；按钮、链接这些强调色用终端的前景色，和桌面一样黑白为主，不用系统的蓝色。`preferredColorScheme`
+        /// 传不进 sheet，弹出的页面各自再套一次。
         func appTheme(_ theme: AppTheme) -> some View {
             environment(\.themeColors, ThemeColors(theme))
+                .environment(\.appTheme, theme)
                 .tint(Color(theme.foreground))
                 .preferredColorScheme(theme.isDark ? .dark : .light)
+        }
+
+        /// 从环境取来的主题：为空时原样。
+        @ViewBuilder func appTheme(_ theme: AppTheme?) -> some View {
+            if let theme { appTheme(theme) } else { self }
         }
 
         /// 实心的主按钮：底是强调色，字用 `systemBackground`，和首页的「配对电脑」一样。系统的
@@ -75,23 +129,44 @@
         }
     }
 
-    /// 界面上的两档圆角：卡片（列表里的一块、首页的统计格、终端页的横幅）和卡片里的小块（按键、输入框、
-    /// 预览、图标底）。系统分组列表自带的圆角太大，还会按它裁掉行里的内容，所以列表一律用 `cardList`，
-    /// 卡片自己画，见 `cardBackground`。
+    /// 界面上的几档圆角。系统分组列表自带的圆角太大，还会按它裁掉行里的内容，所以列表一律用 `cardList`，
+    /// 卡片用 `cardBackground` 自己画。
     enum CornerRadius {
-        static let card: CGFloat = 14
-        static let inner: CGFloat = 8
+        /// 卡片：列表里的一块、首页的统计格、终端页的横幅。
+        static let card: CGFloat = 20
+        /// 几行并成一张的列表卡。
+        static let group: CGFloat = 18
+        /// 底部的大按钮。
+        static let action: CGFloat = 15
+        /// 卡片里的小块：输入框、预览、图标底、一般的按钮。
+        static let inner: CGFloat = 12
+        /// 按键。
+        static let key: CGFloat = 10
     }
 
     extension Shape where Self == RoundedRectangle {
         static var card: RoundedRectangle { RoundedRectangle(cornerRadius: CornerRadius.card, style: .continuous) }
+        static var group: RoundedRectangle { RoundedRectangle(cornerRadius: CornerRadius.group, style: .continuous) }
+        static var action: RoundedRectangle {
+            RoundedRectangle(cornerRadius: CornerRadius.action, style: .continuous)
+        }
         static var inner: RoundedRectangle { RoundedRectangle(cornerRadius: CornerRadius.inner, style: .continuous) }
+        static var key: RoundedRectangle { RoundedRectangle(cornerRadius: CornerRadius.key, style: .continuous) }
     }
 
     extension View {
-        /// 画成一张卡片：四周留边，`ThemeColors.card` 的底色，`CornerRadius.card` 的圆角。
-        func cardBackground() -> some View {
-            modifier(CardBackground())
+        /// 画成一张卡片：四边留 `padding`，`ThemeColors.card` 的底色，`CornerRadius.card` 的圆角，
+        /// 描一圈 1pt 的 `ThemeColors.hairline`。
+        func cardBackground(padding: CGFloat = 12) -> some View {
+            modifier(CardBackground(padding: padding))
+        }
+
+        /// 画成按钮的面：至少高 `height`，圆角 `cornerRadius`，底色、字色和字重按 `kind`；宽度和左右的空由
+        /// 调用方定。`Menu` 的 label 不一定吃自定义的 `ButtonStyle`，直接套这个，再加 `.buttonStyle(.plain)`。
+        func actionSurface(
+            _ kind: ActionKind, height: CGFloat = 44, cornerRadius: CGFloat = CornerRadius.inner
+        ) -> some View {
+            modifier(ActionSurface(kind: kind, height: height, cornerRadius: cornerRadius))
         }
 
         /// 列表里自己画卡片的一行：左右留出卡片到屏幕边的空，去掉系统给的底色和分隔线。
@@ -144,15 +219,96 @@
     }
 
     private struct CardBackground: ViewModifier {
+        let padding: CGFloat
         @Environment(\.themeColors) private var colors
 
         func body(content: Content) -> some View {
             content
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(padding)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(colors.card, in: .card)
+                .overlay(RoundedRectangle.card.strokeBorder(colors.hairline, lineWidth: 1).allowsHitTesting(false))
                 .contentShape(.contextMenuPreview, .card)
+        }
+    }
+
+    /// 按钮的几种面。颜色只表示状态，除了 `waiting` 都是中性色。
+    enum ActionKind {
+        /// 实心，底是前景色、字用页面的底色：一屏里最要紧的那个操作。
+        case primary
+        /// 卡片的底加一圈 `ThemeColors.strongHairline`。
+        case secondary
+        /// 凸起的浅块，不描边：卡片里的按键、选项。
+        case raised
+        /// 琥珀实心：回答在等你的 agent。
+        case waiting
+    }
+
+    private struct ActionSurface: ViewModifier {
+        let kind: ActionKind
+        let height: CGFloat
+        let cornerRadius: CGFloat
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.themeColors) private var colors
+
+        func body(content: Content) -> some View {
+            let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            content
+                .fontWeight(weight)
+                .foregroundStyle(foreground)
+                .frame(minHeight: height)
+                .background(background, in: shape)
+                .overlay {
+                    if kind == .secondary {
+                        shape.strokeBorder(colors.strongHairline, lineWidth: 1).allowsHitTesting(false)
+                    }
+                }
+                .contentShape(shape)
+                // 不可用时整块变淡：实心的面换不了灰底，只能这样看出点不了。
+                .opacity(isEnabled ? 1 : 0.4)
+        }
+
+        private var weight: Font.Weight {
+            switch kind {
+            case .primary, .waiting: .semibold
+            case .secondary, .raised: .medium
+            }
+        }
+
+        private var foreground: AnyShapeStyle {
+            switch kind {
+            case .primary: AnyShapeStyle(colors.page)
+            case .waiting: AnyShapeStyle(colors.onWaitingFill)
+            case .secondary, .raised: AnyShapeStyle(.primary)
+            }
+        }
+
+        private var background: AnyShapeStyle {
+            switch kind {
+            case .primary: AnyShapeStyle(Color.primary)
+            case .secondary: AnyShapeStyle(colors.card)
+            case .raised: AnyShapeStyle(colors.raised)
+            case .waiting: AnyShapeStyle(colors.waitingFill)
+            }
+        }
+    }
+
+    /// 按钮套上 `actionSurface` 的面，按下时变淡。
+    struct SurfaceButtonStyle: ButtonStyle {
+        let kind: ActionKind
+        var height: CGFloat = 44
+        var cornerRadius: CGFloat = CornerRadius.inner
+
+        init(_ kind: ActionKind, height: CGFloat = 44, cornerRadius: CGFloat = CornerRadius.inner) {
+            self.kind = kind
+            self.height = height
+            self.cornerRadius = cornerRadius
+        }
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .actionSurface(kind, height: height, cornerRadius: cornerRadius)
+                .opacity(configuration.isPressed ? 0.7 : 1)
         }
     }
 
@@ -175,7 +331,7 @@
         }
     }
 
-    /// `cardList` 里一组卡片上面的标题，和卡片里的字对齐。
+    /// `cardList` 里一组卡片上面的标题。
     struct ListSectionHeader: View {
         let title: String
         var systemImage: String?
@@ -189,9 +345,9 @@
                 }
                 Text(title)
             }
-            .font(.subheadline.weight(.semibold))
+            .font(.footnote.weight(.semibold))
             .foregroundStyle(tint)
-            .padding(.leading, 16)
+            .padding(.leading, 4)
             .padding(.top, 12)
             .accessibilityAddTraits(.isHeader)
             .plainListRow()
@@ -206,7 +362,7 @@
             Text(text)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 4)
                 .padding(.bottom, 8)
                 .plainListRow()
         }
@@ -281,7 +437,7 @@
             ToolbarItem(placement: .topBarLeading) {
                 HStack(spacing: 8) {
                     if showsMark {
-                        RunodeMark().frame(width: 22, height: 22)
+                        RunodeMark().frame(width: 28, height: 28)
                     }
                     VStack(alignment: .leading, spacing: 0) {
                         Text(title)
@@ -309,12 +465,13 @@
 
     /// 整张卡片是一个按钮：按下时卡片变暗一点，和系统列表行的高亮一样。
     struct CardButtonStyle: ButtonStyle {
+        var padding: CGFloat = 12
         @Environment(\.themeColors) private var colors
 
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
                 .contentShape(Rectangle())
-                .cardBackground()
+                .cardBackground(padding: padding)
                 .overlay {
                     if configuration.isPressed {
                         RoundedRectangle.card.fill(colors.pressed)
@@ -334,185 +491,54 @@
         }
     }
 
-    /// agent 的状态：图标加文字，不只靠颜色区分。放在已经按状态分了组的地方（分组标题写着「等你回答」）
-    /// 时 `showsState` 给假，只写 agent 的名字，图标和颜色照旧。
-    struct AgentBadge: View {
+    /// 写着 agent 等了、干了多久的视图按 `AgentClock` 重画；空闲或没有时刻时不重画。
+    struct AgentClockSchedule: TimelineSchedule {
         let agent: Agent?
-        var showsState = true
+        /// `SessionMeta.agentSince`。
+        let since: Date?
 
-        var body: some View {
-            if let agent, let status = Presentation.agentStatus(agent) {
-                let tint = AgentStateIcon.tint(for: status.state)
-                HStack(spacing: 4) {
-                    AgentStateIcon(agent: agent)
-                        .imageScale(.small)
-                    Text(showsState ? status.text : agent.kind.displayName)
-                        .lineLimit(1)
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(tint.opacity(0.14), in: Capsule())
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(status.text)
-            }
+        init(agent: Agent?, since: Date?) {
+            self.agent = agent
+            self.since = since
         }
 
-        static func tint(for group: SessionGroup) -> Color {
-            switch group {
-            case .waiting: .orange
-            case .working: .primary
-            case .other: .secondary
+        init(_ session: SessionInfo) {
+            self.init(agent: session.meta.agent, since: session.meta.agentSince)
+        }
+
+        func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+            guard let since, agent?.state == .blocked || agent?.state == .working else {
+                return AnyIterator([startDate].makeIterator())
             }
+            return AgentClock.ticks(since: since, from: startDate)
         }
     }
 
-    /// agent 状态的图标，按状态着色，读屏时念出 agent 的名字和状态。状态认不出时什么也不画。
-    /// 带着动：干活时是和桌面一样的这个 agent 自己的转圈，空闲时月亮慢慢呼吸，等回答时不动
-    /// （卡片已经描了橙边）。打开了「减弱动态效果」时都不动。
-    struct AgentStateIcon: View {
-        let agent: Agent?
-        @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-        var body: some View {
-            if let agent, let status = Presentation.agentStatus(agent) {
-                Group {
-                    switch Self.group(for: status.state) {
-                    case .working:
-                        AgentSpinner(kind: agent.kind, animates: !reduceMotion)
-                    case .other:
-                        Image(systemName: "moon.zzz.fill")
-                            .symbolEffect(.breathe, isActive: !reduceMotion)
-                    case .waiting:
-                        Image(systemName: Presentation.symbol(for: .waiting))
-                    }
-                }
-                .foregroundStyle(Self.tint(for: status.state))
-                .accessibilityLabel(status.text)
-            }
-        }
-
-        static func tint(for state: AgentState) -> Color {
-            AgentBadge.tint(for: group(for: state))
-        }
-
-        private static func group(for state: AgentState) -> SessionGroup {
-            switch state {
-            case .blocked: .waiting
-            case .working: .working
-            default: .other
-            }
-        }
-    }
-
-    /// agent 干活时的转圈，帧、快慢和颜色照 `AgentKind.spinner`、`AgentKind.spinnerColor`，和桌面一样。
-    /// 当前帧按绝对时间算，几张卡片上同一种 agent 一起转、步调一致；各帧字宽不一，定宽了文字才不跟着晃。
-    private struct AgentSpinner: View {
-        let kind: AgentKind
-        let animates: Bool
-        @ScaledMetric(relativeTo: .subheadline) private var width: CGFloat = 15
-
-        var body: some View {
-            let (frames, frameTime) = kind.spinner
-            Group {
-                if animates {
-                    TimelineView(.periodic(from: .now, by: frameTime)) { context in
-                        let tick = Int(context.date.timeIntervalSinceReferenceDate / frameTime)
-                        Text(TextPresentation.apply(to: frames[tick % frames.count]))
-                    }
-                } else {
-                    // 不动时挑中间一帧：Claude 的头一帧只是个小点。
-                    Text(TextPresentation.apply(to: frames[frames.count / 2]))
-                }
-            }
-            .frame(width: width)
-            .foregroundStyle(kind.spinnerColor.map(Color.init) ?? .primary)
-        }
-    }
-
-    /// 会话标题前的图标，和桌面卡片样式下标签前的那块一样，边长 `size`：agent 是浅底上的 logo（和桌面
-    /// 用的同一套，有品牌色的按原色画，单色的染成前景色，没收 logo 的写名字的头一个字母）；shell、别的
-    /// 程序和认不出是哪个的 agent（`other`）是深底上的提示符，像个小终端。
-    struct SessionIcon: View {
-        let agent: AgentKind?
-        let size: CGFloat
-        @Environment(\.colorScheme) private var colorScheme
-        @Environment(\.themeColors) private var colors
-
-        var body: some View {
-            let logoTile = colorScheme == .light ? Color.white : colors.secondaryFill
-            Group {
-                if let agent, let asset = Presentation.agentLogoAsset(agent) {
-                    tile(logoTile) {
-                        Image(asset, bundle: .module)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: size * 0.66, height: size * 0.66)
-                            .foregroundStyle(.primary.opacity(0.85))
-                    }
-                } else if let agent, agent.label != "other", let initial = agent.displayName.first {
-                    tile(logoTile) {
-                        Text(String(initial))
-                            .font(.system(size: size * 0.55, weight: .bold))
-                            .foregroundStyle(.primary.opacity(0.85))
-                    }
-                } else {
-                    // 和桌面上提示符那块一样的颜色，深浅主题下都不变。
-                    tile(Color(Rgb(hex: 0x232326))) {
-                        Image("prompt", bundle: .module)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: size * 0.6, height: size * 0.6)
-                            .foregroundStyle(Color(Rgb(hex: 0xEDEDED)))
-                    }
-                }
-            }
-            .accessibilityHidden(true)
-        }
-
-        private func tile(_ background: Color, @ViewBuilder content: () -> some View) -> some View {
-            let shape = RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            return content()
-                .frame(width: size, height: size)
-                .background(background, in: shape)
-                .overlay(shape.strokeBorder(.primary.opacity(0.15), lineWidth: 1))
-        }
-    }
-
-    /// 小图标加一行字，图标和字挨得紧（系统的 `Label` 在列表里留的空太大）。
-    struct CompactLabel: View {
-        let text: String
-        let systemImage: String
-
-        var body: some View {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Image(systemName: systemImage)
-                    .imageScale(.small)
-                    .accessibilityHidden(true)
-                Text(text)
-            }
-        }
-    }
-
-    /// 屏幕最后几行的预览：等宽小字，浅底圆角，每行单独截断（长行折下去会把别的行挤掉）。
+    /// 屏幕最后几行的预览：等宽小字，凹下去的底槽，每行单独截断（长行折下去会把别的行挤掉）。
     struct ScreenPreview: View {
+        /// 字的深浅：一般是次要色；等你回答的卡片上要读的是 agent 的提问，用 `primary`。
+        enum Tone {
+            case primary, secondary
+        }
+
         let lines: [String]
+        var tone: Tone = .secondary
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
         @Environment(\.themeColors) private var colors
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                     text(line)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(tone == .primary ? AnyShapeStyle(.primary.opacity(0.85)) : AnyShapeStyle(.secondary))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
-            .background(colors.secondaryFill, in: .inner)
+            .padding(.vertical, 9)
+            .padding(.horizontal, 12)
+            .background(colors.well, in: .inner)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("屏幕预览：\(lines.joined(separator: "，"))")
         }
@@ -554,13 +580,16 @@
         }
     }
 
-    /// 快速回复栏：一排常用按键，加一个单行文本框（发送时粘贴进去再按回车）。会话列表上等回答的
-    /// 会话、终端页底部都用它。
+    /// 快速回复栏：一排常用按键，加一个单行文本框（发送时粘贴进去再按回车）。首页和会话列表上等回答的
+    /// 会话用它。
     struct QuickReplyBar: View {
         @Bindable var model: QuickReplyModel
-        /// 栏的标题，比如「Claude Code 在等你回答」；为空时不显示。
-        var prompt: String?
-        /// 栏两边到容器边缘留的空（列表行、终端页底栏的左右边距）。按键那一排横着滚时伸进这段空里，
+        /// 屏幕上认出来的提问：有时按键换成它的选项，没有时是 `QuickKey.standard` 那一排。
+        var prompt: AgentPrompt?
+        var optionLayout: PromptOptionLayout = .rows
+        /// 为假时只有按键那一排，不带输入框。
+        var showsDraft = true
+        /// 栏两边到容器边缘留的空（列表行的左右边距）。按键那一排横着滚时伸进这段空里，
         /// 滚出去的键在边缘淡出，不会被生硬地切掉。
         var edgeInset: CGFloat = 16
         @FocusState private var draftFocused: Bool
@@ -568,20 +597,23 @@
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
-                if let prompt {
-                    Label(prompt, systemImage: "exclamationmark.bubble.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.orange)
-                }
                 Group {
-                    keys
-                    draftField
+                    if let prompt {
+                        PromptOptions(prompt: prompt, layout: optionLayout) { key in
+                            Task { await model.press(key) }
+                        }
+                    } else {
+                        keys
+                    }
+                    if showsDraft {
+                        draftField
+                    }
                 }
                 .disabled(!model.isConnected)
                 if let error = model.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(colors.failure)
                 }
             }
             .sensoryFeedback(.success, trigger: model.deliveredCount)
@@ -602,12 +634,12 @@
                                     Text(key.label)
                                 }
                             }
-                                .font(.callout.monospaced().weight(.semibold))
+                                .font(.callout.monospaced().weight(.medium))
                                 .lineLimit(1)
                                 .padding(.horizontal, 10)
-                                .frame(minWidth: 44, minHeight: 40)
+                                .frame(minWidth: 44)
                         }
-                        .buttonStyle(QuickKeyStyle())
+                        .buttonStyle(SurfaceButtonStyle(.raised))
                         .accessibilityLabel("发送 \(key.accessibilityLabel)")
                     }
                 }
@@ -626,46 +658,37 @@
             }
         }
 
-        /// 输入框，发送按钮在框里的右端。
+        /// 输入框，发送按钮在框里的右端：点按的范围比圆底大一圈，多出来的伸进框的右边距里。
         private var draftField: some View {
             HStack(spacing: 4) {
-                TextField("输入回复，发送时带回车", text: $model.draft)
+                TextField("或者直接打字回复", text: $model.draft)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .submitLabel(.send)
                     .focused($draftFocused)
                     .onSubmit { Task { await model.sendDraft() } }
-                    .padding(.leading, 14)
-                    .frame(minHeight: 40)
                 Button {
                     Task { await model.sendDraft() }
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .frame(width: 44, height: 40)
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(model.canSendDraft ? HierarchicalShapeStyle.primary : .tertiary)
+                        .frame(width: 34, height: 34)
+                        .background(colors.strongHairline, in: .circle)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .disabled(!model.canSendDraft)
                 .accessibilityLabel("发送回复")
             }
-            .background(colors.fill, in: .inner)
+            .padding(.leading, 14)
+            .padding(.trailing, 1)
+            .frame(minHeight: 46)
+            .background(colors.well, in: .inner)
+            .overlay(RoundedRectangle.inner.strokeBorder(colors.hairline, lineWidth: 1).allowsHitTesting(false))
             .contentShape(.inner)
             .onTapGesture { draftFocused = true }
-        }
-    }
-
-    /// 快速回复的一个键：浅底圆角块，字用强调色，按下时变暗。比 `.bordered` 矮，一排能多放几个。
-    private struct QuickKeyStyle: ButtonStyle {
-        @Environment(\.isEnabled) private var isEnabled
-        @Environment(\.themeColors) private var colors
-
-        func makeBody(configuration: Configuration) -> some View {
-            configuration.label
-                .foregroundStyle(isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                .background(colors.fill, in: .inner)
-                .contentShape(.inner)
-                .opacity(configuration.isPressed ? 0.55 : 1)
-                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }
     }
 
@@ -687,6 +710,7 @@
     struct ConnectionStatusRow: View {
         let state: LinkState
         let onRetry: () -> Void
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             HStack(spacing: 10) {
@@ -694,11 +718,11 @@
                 case .connecting, .idle:
                     ProgressView()
                 case .waiting:
-                    Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
+                    Image(systemName: "wifi.exclamationmark").foregroundStyle(colors.waiting)
                 case .failed:
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(colors.failure)
                 case .connected:
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(colors.success)
                 }
                 LinkClock(state: state) { now in
                     VStack(alignment: .leading, spacing: 2) {
@@ -718,39 +742,16 @@
                 Spacer(minLength: 8)
                 switch state {
                 case .waiting, .failed:
-                    Button("重试", action: onRetry)
-                        .buttonStyle(.bordered)
-                        .frame(minHeight: 44)
+                    Button(action: onRetry) {
+                        Text("重试")
+                            .padding(.horizontal, 16)
+                    }
+                    .buttonStyle(SurfaceButtonStyle(.raised))
                 default:
                     EmptyView()
                 }
             }
             .accessibilityElement(children: .contain)
-        }
-    }
-
-    /// 分屏在电脑上那个标签里的位置：一个小框，这个分屏占的那块填满。电脑没报位置时只画框。
-    struct PaneGlyph: View {
-        let rect: PaneRect?
-        @ScaledMetric(relativeTo: .subheadline) private var width: CGFloat = 18
-
-        var body: some View {
-            Canvas { context, size in
-                let frame = CGRect(origin: .zero, size: size).insetBy(dx: 0.75, dy: 0.75)
-                context.stroke(Path(roundedRect: frame, cornerRadius: 2.5), with: .foreground, lineWidth: 1.5)
-                guard let rect else { return }
-                let extent = CGFloat(PaneRect.extent)
-                let pane = CGRect(
-                    x: frame.minX + frame.width * CGFloat(rect.x) / extent,
-                    y: frame.minY + frame.height * CGFloat(rect.y) / extent,
-                    width: frame.width * CGFloat(rect.width) / extent,
-                    height: frame.height * CGFloat(rect.height) / extent)
-                // 分屏之间留一道缝，切得再细也至少剩一点。
-                let inset = pane.insetBy(dx: min(1.5, pane.width / 3), dy: min(1.5, pane.height / 3))
-                context.fill(Path(roundedRect: inset, cornerRadius: 1), with: .foreground)
-            }
-            .frame(width: width, height: width * 0.75)
-            .accessibilityHidden(true)
         }
     }
 

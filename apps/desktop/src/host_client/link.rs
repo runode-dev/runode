@@ -24,8 +24,9 @@
 //! （`Inner::timed_out`）：宿主按先后处理同一条连接上的消息，等不到回话说明它卡住了。断开后请求
 //! 立刻失败，等重连。
 //! `spawn` 例外，超时了连接照旧：宿主多半只是开会话慢，开好后回的 `Spawned` 没人等，读线程见了就
-//! 结束那个会话（重连后认不出哪个会话是它开的）。`list_tasks` 和看板的请求（`request`）也例外，
-//! 超时只撤掉这条请求（`OnTimeout::Wait`）：宿主另起线程办它们，办得慢不说明连接卡住了。
+//! 结束那个会话（重连后认不出哪个会话是它开的）。`list_tasks`、看板的请求（`request`）、读屏
+//! （`read_screen`）和按键（`send_keys`）也例外，超时了连接照旧：宿主另起线程办它们，办得慢不说明连接
+//! 卡住了。
 
 mod reader;
 
@@ -282,6 +283,9 @@ struct State {
     replies: HashMap<u32, mpsc::Sender<HostMsg>>,
     /// 等 `SessionList` 的调用方，按发请求的先后。
     lists: VecDeque<mpsc::Sender<Vec<SessionInfo>>>,
+    /// 等读屏回话（`ScreenText`，或者带这个会话、不带 `req` 的 `Error`）的调用方，按会话、按发请求的先后；
+    /// 有登记的会话的这两种消息交给它们，不交给看这个会话的视图。
+    screen_reads: HashMap<SessionId, VecDeque<mpsc::Sender<Result<String, String>>>>,
     /// 最近一次换的主题和选项（`SetOptions` 的两项），重连后补发。
     theme: Option<TermSettings>,
     options: Option<(bool, ClipboardAccess)>,
@@ -503,6 +507,7 @@ impl Inner {
         state.channels.clear();
         state.replies.clear();
         state.lists.clear();
+        state.screen_reads.clear();
         drop(state);
         let mut writer = self.writer();
         if writer.as_ref().is_some_and(|writer| writer.generation == generation)
@@ -938,6 +943,40 @@ impl Link {
     pub fn held_layout(&self, timeout: Duration) -> Result<Vec<WindowLayout>> {
         match self.request_on(|req| ClientMsg::Layout { req }, timeout, OnTimeout::Disconnect)? {
             HostMsg::Layout { windows, .. } => Ok(windows),
+            other => Err(anyhow!("unexpected answer from the host: {other:?}")),
+        }
+    }
+
+    /// 会话 `id` 屏幕上从最后一个有字的行往上 `lines` 行的文字（`ClientMsg::ReadScreen`），最多等 `timeout`。
+    /// 宿主另起线程等会话回话，超时连接照用。回话不带请求编号，按会话认：超时的这次登记留着，晚到的回话交给
+    /// 排在后面的读屏，没人等了就丢掉。
+    pub fn read_screen(&self, id: SessionId, lines: u32, timeout: Duration) -> Result<String> {
+        let (tx, rx) = mpsc::channel();
+        let generation = {
+            let mut state = self.inner.state();
+            if !state.connected {
+                return Err(anyhow!(rust_i18n::t!("host_error.not_connected").into_owned()));
+            }
+            state.screen_reads.entry(id).or_default().push_back(tx);
+            state.generation
+        };
+        let message = ClientMsg::ReadScreen { id, lines: Some(lines), command: None };
+        if let Err(err) = self.inner.control_on(generation, &message) {
+            return Err(anyhow!("failed to ask the host: {err}"));
+        }
+        match rx.recv_timeout(timeout) {
+            Ok(Ok(text)) => Ok(text),
+            Ok(Err(message)) => Err(anyhow!(message)),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(anyhow!(rust_i18n::t!("host_error.timeout").into_owned())),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!(rust_i18n::t!("host_error.lost").into_owned())),
+        }
+    }
+
+    /// 给会话 `id` 里的程序按键（`ClientMsg::SendKeys`），`keys` 每项是一个键的写法，最多等 `timeout`；超时只撤掉
+    /// 这条请求，连接照用。
+    pub fn send_keys(&self, id: SessionId, keys: Vec<String>, timeout: Duration) -> Result<()> {
+        match self.request_on(|req| ClientMsg::SendKeys { req, id, keys }, timeout, OnTimeout::Wait)? {
+            HostMsg::Done { .. } => Ok(()),
             other => Err(anyhow!("unexpected answer from the host: {other:?}")),
         }
     }

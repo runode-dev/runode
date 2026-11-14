@@ -41,7 +41,7 @@ use runode_config::Config;
 use runode_host::{BuildId, ClientMsg, Host};
 #[cfg(unix)]
 use runode_protocol::HandoffRefusal;
-use runode_protocol::{SessionInfo, TaskSource, WindowLayout};
+use runode_protocol::{SessionId, SessionInfo, TaskSource, WindowLayout};
 
 #[cfg(unix)]
 pub use handoff::{HandoffFailure, HandoffStatus, upgrade};
@@ -69,6 +69,8 @@ const LIST_TIMEOUT: Duration = Duration::from_secs(2);
 /// 看板的请求最多等这么久：宿主办一条要连跑两条 git 命令，比单条 git 的超时长，否则办成了这边却
 /// 先超时，晚到的回话（比如开好的会话）也丢了。
 const TODO_TIMEOUT: Duration = Duration::from_secs(250);
+/// 读屏、按键最多等这么久：宿主等会话线程回话也有上限，这里等得比它久，会话没回话时收得到宿主报的错。
+const SESSION_TIMEOUT: Duration = Duration::from_secs(6);
 /// 让留下的宿主退出后，最多等这么久拿到它放开的锁、开自己的 socket。
 const LISTEN_RETRY: Duration = Duration::from_secs(2);
 /// 另一个新 app 正在让新宿主接手（`HandoffRefusal::Busy`）时，等这么久再探一次：多半会探到它
@@ -338,6 +340,16 @@ pub fn ask_todos(make: impl FnOnce(u32) -> ClientMsg) -> Result<runode_protocol:
         return Err(anyhow!(rust_i18n::t!("kanban.host_too_old").into_owned()));
     }
     link.request(make, TODO_TIMEOUT)
+}
+
+/// 本机会话 `id` 屏幕上从最后一个有字的行往上 `lines` 行的文字。会等宿主回话，别在主线程上调。
+pub fn read_screen(id: SessionId, lines: u32) -> Result<String> {
+    link().read_screen(id, lines, SESSION_TIMEOUT)
+}
+
+/// 给本机会话 `id` 里的程序按键，`keys` 每项是一个键的写法。会等宿主回话，别在主线程上调。
+pub fn send_keys(id: SessionId, keys: Vec<String>) -> Result<()> {
+    link().send_keys(id, keys, SESSION_TIMEOUT)
 }
 
 /// 现在连着的宿主认得的看板级别；没连着时为空。

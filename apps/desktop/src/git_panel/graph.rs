@@ -22,7 +22,7 @@ use crate::ui::{
     icons::{ARROW_DOWN_ICON, REFRESH_ICON},
     menu::{MenuHost as _, MenuItem},
     panel::{DIVIDER_GRAB_WIDTH, TITLEBAR_HEIGHT, added_label, removed_label, split_handle},
-    theme::{ADDED, ActiveTheme as _, MODIFIED, REMOVED, RENAMED},
+    theme::{ADDED, ActiveTheme as _, REMOVED, RENAMED},
     tooltip::tooltip,
 };
 use gpui::SharedString;
@@ -40,15 +40,17 @@ use super::{
     GitPanel, GitPanelEvent,
     list::{Diff, ROW_HEIGHT, a11y_open_diff, chevron, file_description, status_letter},
     repo_id, repo_name,
-    rows::{Busy, CommitChanges, CommitNote, GRAPH_PAGE, Graph, GraphNote},
+    rows::{Busy, CommitChanges, CommitNote, GRAPH_PAGE, GitRow, Graph, GraphNote},
 };
 
 /// HEAD 往下那条 lane 用蓝色，和 HEAD 的标签同色；HEAD 还没推上去时，从推上去的地方往下换成紫色，
 /// 远端分支的标签也描这个色。
 const CURRENT_LANE: Rgb = RENAMED;
 const REMOTE_LANE: Rgb = Rgb(0xB0, 0x83, 0xF0);
-/// 别的 lane 轮换的颜色：面板里改动用的另几种，再加青、橙，深浅底色上都看得清，不和上面两种撞色。
-const LANE_COLORS: [Rgb; 5] = [ADDED, MODIFIED, Rgb(0x39, 0xB8, 0xC6), REMOVED, Rgb(0xE0, 0x8A, 0x3C)];
+/// lane 轮换色里的黄，也是 Tag 标签的颜色：只用来分类别，不表示状态。
+const TAG_YELLOW: Rgb = Rgb(0xD2, 0xA8, 0x3E);
+/// 别的 lane 轮换的颜色：加、删用的绿、红，再加黄、青、橙，深浅底色上都看得清，不和上面两种撞色。
+const LANE_COLORS: [Rgb; 5] = [ADDED, TAG_YELLOW, Rgb(0x39, 0xB8, 0xC6), REMOVED, Rgb(0xE0, 0x8A, 0x3C)];
 
 fn lane_color(color: LaneColor) -> Rgb {
     match color {
@@ -102,9 +104,19 @@ pub struct GitCommitAction {
 /// 辅助工具加减一下，图表高这么多。
 const GRAPH_STEP: f32 = ROW_HEIGHT * 3.;
 
-/// 图表展开着时多高：`saved` 是拖过的高度，`room` 是面板标题以下的高度。
-fn graph_height(saved: Option<f32>, room: f32) -> f32 {
-    saved.unwrap_or(room * GRAPH_SHARE).min(room - CHANGES_MIN_HEIGHT).max(GRAPH_MIN_HEIGHT)
+/// 图表展开着时多高：`saved` 是拖过的高度，`room` 是面板标题以下的高度，`content` 是标题加所有行画全要的
+/// 高度。没拖过时不比 `content` 高，提交少的仓库把地方让给上面的改动。
+fn graph_height(saved: Option<f32>, room: f32, content: f32) -> f32 {
+    saved.unwrap_or((room * GRAPH_SHARE).min(content)).min(room - CHANGES_MIN_HEIGHT).max(GRAPH_MIN_HEIGHT)
+}
+
+/// 图表的标题加 `rows` 这些行画全要多高，`scale` 是界面字号的倍数。历史还在读（只有一行
+/// `GraphNote::Loading`）或还没有行时没有上限：读到了再按行数收，高度不来回跳。
+fn graph_content(rows: &[GitRow], scale: f32) -> f32 {
+    if matches!(rows, [] | [GitRow::GraphNote(_, GraphNote::Loading)]) {
+        return f32::INFINITY;
+    }
+    (ROW_HEIGHT + 4. + rows.len() as f32 * ROW_HEIGHT) * scale
 }
 
 /// 图有 `lanes` 条 lane 时一条 lane 画多宽，以及整个图多宽。
@@ -204,7 +216,8 @@ impl GitPanel {
             .track_scroll(&panel.graph_scroll)
             .flex_1(),
         );
-        let height = graph_height(self.graph_height, room);
+        let content = graph_content(&panel.graph_rows, font_size::scale(cx));
+        let height = graph_height(self.graph_height, room, content);
         let pressed = |this: &mut Self, double: bool, cx: &mut Context<Self>| {
             if double {
                 this.graph_height = None;
@@ -214,7 +227,7 @@ impl GitPanel {
             }
         };
         let nudge = move |this: &mut Self, delta: f32, _: &mut Window, cx: &mut Context<Self>| {
-            this.graph_height = Some(graph_height(Some(height + delta * GRAPH_STEP), room));
+            this.graph_height = Some(graph_height(Some(height + delta * GRAPH_STEP), room, f32::INFINITY));
             cx.emit(GitPanelEvent::OptionsChanged);
         };
         let label = rust_i18n::t!("git.graph.resize").into_owned();
@@ -230,7 +243,7 @@ impl GitPanel {
     /// 拖动图表上沿的分隔线，上沿跟到窗口里的纵坐标 `y`；`viewport` 是面板底边在窗口里的纵坐标，面板从窗口
     /// 顶上一直到它。app 跟着鼠标调，调完让页重画。
     pub fn resize_graph(&mut self, y: f32, viewport: f32) {
-        self.graph_height = Some(graph_height(Some(viewport - y), viewport - TITLEBAR_HEIGHT));
+        self.graph_height = Some(graph_height(Some(viewport - y), viewport - TITLEBAR_HEIGHT, f32::INFINITY));
     }
 
     /// 图表的列表里看得见的那些行。
@@ -750,8 +763,8 @@ fn ref_labels(commit: &Commit, shown: usize, cx: &gpui::App) -> Vec<gpui::Div> {
                 RefKind::Branch => label.border_color(fg_hsla.opacity(0.35)).text_color(fg_hsla),
                 RefKind::Remote => label.border_color(hsla(REMOTE_LANE).opacity(0.6)).text_color(fg_hsla.opacity(0.7)),
                 RefKind::Tag => label
-                    .bg(hsla(cx.theme().bg_rgb().mix(MODIFIED, 0.18)))
-                    .border_color(hsla(MODIFIED).opacity(0.5))
+                    .bg(hsla(cx.theme().bg_rgb().mix(TAG_YELLOW, 0.18)))
+                    .border_color(hsla(TAG_YELLOW).opacity(0.5))
                     .text_color(fg_hsla),
             };
             label.child(div().min_w_0().truncate().child(r.name.clone()))
@@ -888,11 +901,31 @@ mod tests {
     #[test]
     fn keeps_room_for_the_changes_above() {
         // 没拖过时占四成；拖得太高给上面的改动留够地方，太矮不矮于下限。
-        assert_eq!(graph_height(None, 600.), 240.);
-        assert_eq!(graph_height(Some(550.), 600.), 480.);
-        assert_eq!(graph_height(Some(10.), 600.), GRAPH_MIN_HEIGHT);
+        assert_eq!(graph_height(None, 600., f32::INFINITY), 240.);
+        assert_eq!(graph_height(Some(550.), 600., f32::INFINITY), 480.);
+        assert_eq!(graph_height(Some(10.), 600., f32::INFINITY), GRAPH_MIN_HEIGHT);
         // 窗口矮得两头都顾不上时保住图表的下限。
-        assert_eq!(graph_height(None, 150.), GRAPH_MIN_HEIGHT);
+        assert_eq!(graph_height(None, 150., f32::INFINITY), GRAPH_MIN_HEIGHT);
+        // 没拖过时不比内容高；拖过的照拖的算。
+        assert_eq!(graph_height(None, 600., 130.), 130.);
+        assert_eq!(graph_height(None, 600., 40.), GRAPH_MIN_HEIGHT);
+        assert_eq!(graph_height(Some(300.), 600., 130.), 300.);
+    }
+
+    #[test]
+    fn the_graph_is_not_capped_while_its_history_loads() {
+        // 在读、还没有行：没有上限，读到以后高度不跳。
+        assert_eq!(graph_content(&[], 1.), f32::INFINITY);
+        assert_eq!(graph_content(&[GitRow::GraphNote(0, GraphNote::Loading)], 1.), f32::INFINITY);
+        // 读到了：标题加各行，跟着界面字号放大。读不了、没有提交的那一行也照行数算。
+        let one = ROW_HEIGHT + 4. + ROW_HEIGHT;
+        assert_eq!(graph_content(&[GitRow::Commit(0, 0)], 1.), one);
+        assert_eq!(graph_content(&[GitRow::GraphNote(0, GraphNote::Empty)], 1.), one);
+        assert_eq!(graph_content(&[GitRow::GraphNote(0, GraphNote::Failed)], 1.), one);
+        assert_eq!(
+            graph_content(&[GitRow::Commit(0, 0), GitRow::GraphNote(0, GraphNote::More)], 1.5),
+            (one + ROW_HEIGHT) * 1.5
+        );
     }
 
     #[test]

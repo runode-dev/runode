@@ -15,15 +15,20 @@ use crate::ui::{
 /// 控件的高度。
 pub(super) const CONTROL_HEIGHT: f32 = 26.;
 
-/// 一页里的小标题。
-pub(super) fn section(title: impl Into<SharedString>, theme: &Theme) -> Div {
+/// 一页里的小标题；`note` 是跟在它后面的一句说明。
+pub(super) fn section(title: impl Into<SharedString>, note: Option<SharedString>, theme: &Theme) -> Div {
     div()
-        .pt(px(20.))
+        .pt(px(24.))
         .pb(px(10.))
-        .pl(px(4.))
-        .text_size(FontSize::Large)
-        .text_color(theme.foreground.opacity(0.6))
-        .child(title.into())
+        .pl(px(2.))
+        .flex()
+        .flex_wrap()
+        .items_baseline()
+        .gap_x(px(10.))
+        .gap_y(px(4.))
+        .text_size(FontSize::Body)
+        .child(div().font_weight(gpui::FontWeight::SEMIBOLD).text_color(theme.subtle_foreground).child(title.into()))
+        .children(note.map(|note| div().text_color(theme.muted_foreground).child(note)))
 }
 
 /// 把一页的各项按小标题分组，每组收进一张圆角卡片。
@@ -40,7 +45,12 @@ impl Cards {
 
     /// 结束上一组，另起一组，上面是小标题 `title`。
     pub fn section(&mut self, title: impl Into<SharedString>) {
-        self.raw(section(title, &self.theme).into_any_element());
+        self.raw(section(title, None, &self.theme).into_any_element());
+    }
+
+    /// 结束上一组，另起一组，小标题 `title` 后面跟一句说明 `note`。
+    pub fn section_with_note(&mut self, title: impl Into<SharedString>, note: SharedString) {
+        self.raw(section(title, Some(note), &self.theme).into_any_element());
     }
 
     /// 结束上一组，`element` 不进卡片，直接放在页面上。
@@ -66,11 +76,11 @@ impl Cards {
         // 每行底下都有分隔线，内容往下多出一像素让卡片裁掉最后一行的那条。
         let card = div()
             .mb(px(8.))
-            .px(px(16.))
-            .rounded(px(10.))
-            .bg(self.theme.mix(0.045))
+            .px(px(20.))
+            .rounded(px(12.))
+            .bg(self.theme.surface)
             .border_1()
-            .border_color(self.theme.control_border.opacity(0.5))
+            .border_color(self.theme.border)
             .overflow_hidden()
             .child(div().mb(px(-1.)).flex().flex_col().children(items));
         self.page = std::mem::replace(&mut self.page, div()).child(card);
@@ -87,10 +97,33 @@ pub(super) fn row(
     error: Option<String>,
     theme: &Theme,
 ) -> Div {
+    row_with(title, hint, RowExtras::default(), control, reset, error, theme)
+}
+
+/// 一行设置里不常有的部分。
+#[derive(Default)]
+pub(super) struct RowExtras {
+    /// 画在标题左边，比如表示状态的标记。
+    pub leading: Option<AnyElement>,
+    /// 接在说明下面的一行小字。
+    pub note: Option<AnyElement>,
+}
+
+/// 一行设置，另带标题前的标记或说明下面的小字（`extras`）。
+pub(super) fn row_with(
+    title: impl Into<SharedString>,
+    hint: Option<SharedString>,
+    extras: RowExtras,
+    control: impl IntoElement,
+    reset: Option<AnyElement>,
+    error: Option<String>,
+    theme: &Theme,
+) -> Div {
     let title = title.into();
     let error_id = SharedString::from(format!("row-error-{title}"));
+    let RowExtras { leading, note } = extras;
     div()
-        .py(px(12.))
+        .py(px(14.))
         .flex()
         .items_center()
         .gap(px(16.))
@@ -103,12 +136,20 @@ pub(super) fn row(
                 .flex()
                 .flex_col()
                 .gap(px(3.))
-                .child(div().text_size(FontSize::Medium).font_weight(gpui::FontWeight::MEDIUM).child(title))
-                .children(
-                    hint.map(|hint| {
-                        div().text_size(FontSize::Body).text_color(theme.foreground.opacity(0.55)).child(hint)
-                    }),
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(9.))
+                        .text_size(FontSize::Medium)
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .children(leading)
+                        .child(div().min_w_0().child(title)),
                 )
+                .children(
+                    hint.map(|hint| div().text_size(FontSize::Body).text_color(theme.subtle_foreground).child(hint)),
+                )
+                .children(note)
                 .children(error.map(|err| error_text(error_id, err, theme))),
         )
         // 控件贴着右边，恢复按钮有的时候放在它左边。

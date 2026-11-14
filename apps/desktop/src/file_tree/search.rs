@@ -23,7 +23,7 @@ use crate::ui::{
     a11y::{A11yPress, Press, StaticText},
     file_icons::{file_icon, folder_icon},
     font_size::{FontSize, scaled},
-    icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON},
+    icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, SEARCH_ICON},
     input::{Input, InputEvent, InputState},
     panel::panel_message,
     path_tree::{TreeItem, path_tree},
@@ -32,8 +32,9 @@ use crate::ui::{
     tooltip::tooltip,
 };
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Div, Entity, HighlightStyle, Role, ScrollStrategy, SharedString, StyledText,
-    Subscription, UniformListScrollHandle, div, img, prelude::*, px, svg, uniform_list,
+    AnyElement, App, ClickEvent, Context, Div, Entity, Focusable as _, HighlightStyle, Role, ScrollStrategy,
+    SharedString, StyledText, Subscription, UniformListScrollHandle, Window, div, img, prelude::*, px, svg,
+    uniform_list,
 };
 use regex::{Regex, RegexBuilder};
 use runode_git::GrepQuery;
@@ -41,7 +42,7 @@ use runode_git::GrepQuery;
 use crate::project_host::ProjectHost;
 use serde::{Deserialize, Serialize};
 
-use crate::file_tree::{FILTER_ICON, FileTree, FileTreeEvent};
+use crate::file_tree::{FileTree, FileTreeEvent};
 
 /// 按名称最多列出的文件数。
 const MAX_FILES: usize = 500;
@@ -668,13 +669,24 @@ impl FileTree {
 
     /// 搜索框，下面是切换按名称、按内容找的两段按钮；按内容找时搜索框里多出区分大小写、全字
     /// 匹配和正则三个开关，下面多出要包含、要排除的文件两个输入框。
-    pub(super) fn render_file_search_box(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_file_search_box(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let search = &self.search;
         let content = search.mode == SearchMode::Content;
         let theme = cx.theme();
-        let (fg, input_bg, on_bg) = (theme.foreground, theme.mix(0.06), theme.mix(0.18));
-        // 输入框，比文件树的底色浅一档。
-        let input_box = |field: &Entity<InputState>| Input::new(field).gap(px(4.)).bg(input_bg);
+        let (fg, muted, field_bg, on_bg) = (theme.foreground, theme.muted_foreground, theme.field, theme.mix(0.18));
+        let (border, ring) = (theme.border, theme.ring);
+        let [field_focused, include_focused, exclude_focused] =
+            [&search.field, &search.include, &search.exclude].map(|field| field.focus_handle(cx).is_focused(window));
+        // 外框的样式盖掉了 `Input` 自己按焦点挑的边色，这里照样按焦点挑。
+        let input_box = |field: &Entity<InputState>, focused: bool| {
+            Input::new(field)
+                .h(scaled(30.))
+                .gap(px(8.))
+                .px(px(10.))
+                .rounded(px(8.))
+                .bg(field_bg)
+                .border_color(if focused { ring } else { border })
+        };
         // 搜索框里的小按钮：开着的开关垫一层底色。
         let small_button = |id: &'static str, tip: String, on: bool| {
             div()
@@ -728,9 +740,11 @@ impl FileTree {
                 option("search-regex", ".*", "files.use_regex", search.regex, |s| s.regex ^= true, cx),
             ]
         });
-        let filter_icon = svg().path(FILTER_ICON).flex_none().size(px(14.)).text_color(fg.opacity(0.5));
-        let field =
-            input_box(&search.field).prefix(filter_icon).children(clear).children(options.into_iter().flatten());
+        let search_icon = svg().path(SEARCH_ICON).flex_none().size(px(13.)).text_color(muted);
+        let field = input_box(&search.field, field_focused)
+            .prefix(search_icon)
+            .children(clear)
+            .children(options.into_iter().flatten());
         let mode = search.mode;
         let segments = Segmented::new("search-mode", rust_i18n::t!("files.search_mode").into_owned())
             .fill()
@@ -748,7 +762,7 @@ impl FileTree {
                 cx,
                 |this, _, cx| this.set_search_mode(SearchMode::Content, cx),
             );
-        let labeled = |label: &str, field: &Entity<InputState>| {
+        let labeled = |label: &str, field: &Entity<InputState>, focused: bool| {
             div()
                 .flex()
                 .flex_col()
@@ -759,20 +773,20 @@ impl FileTree {
                         .text_color(fg.opacity(0.7))
                         .child(rust_i18n::t!(label).into_owned()),
                 )
-                .child(input_box(field))
+                .child(input_box(field, focused))
         };
         let filters = content.then(|| {
             div()
                 .flex()
                 .flex_col()
                 .gap(px(6.))
-                .child(labeled("files.include", &search.include))
-                .child(labeled("files.exclude", &search.exclude))
+                .child(labeled("files.include", &search.include, include_focused))
+                .child(labeled("files.exclude", &search.exclude, exclude_focused))
         });
         div()
             .flex_none()
-            .px(px(10.))
-            .pb(px(8.))
+            .px(px(8.))
+            .pb(px(6.))
             .flex()
             .flex_col()
             .gap(px(6.))

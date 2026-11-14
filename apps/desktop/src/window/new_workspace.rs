@@ -113,7 +113,7 @@ pub(super) fn plain_in_windows_quotes(url: &str) -> bool {
 impl WindowView {
     /// 打开新建 workspace 的对话框；已经开着时把焦点给它。
     pub(super) fn new_workspace(&mut self, _: &NewWorkspace, window: &mut Window, cx: &mut Context<Self>) {
-        // 建好的 workspace 要露出来，不能落在新建任务那一页后面。
+        // 建好的 workspace 要露出来，不能落在新建任务的对话框后面。
         if !self.leave_todo_page(window, cx) {
             return;
         }

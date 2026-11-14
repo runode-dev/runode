@@ -153,8 +153,8 @@ import Testing
         }
         #expect(spawned == [sessionC])
         #expect(!model.isSpawning)
-        #expect(Presentation.tasksHeader(busy) == "运行 · 前台在跑 claude，在新终端里跑")
-        #expect(Presentation.tasksHeader(gone) == "运行 · 终端已经结束")
+        #expect(Presentation.tasksHeader(busy) == "运行，前台在跑 claude，在新终端里跑")
+        #expect(Presentation.tasksHeader(gone) == "运行，终端已经结束")
         #expect(Presentation.tasksHeader(info(sessionA)) == "运行")
     }
 
@@ -183,7 +183,7 @@ import Testing
     /// 文件不在会话目录里时标出在哪一级。
     @Test func sourceTitlesTellWhereTheFileIs() {
         #expect(Presentation.taskSourceTitle(make, cwd: dir) == "Makefile")
-        #expect(Presentation.taskSourceTitle(make, cwd: "/Users/ethan/dev/app/web/src") == "Makefile · ../..")
+        #expect(Presentation.taskSourceTitle(make, cwd: "/Users/ethan/dev/app/web/src") == "Makefile，../..")
         #expect(Presentation.taskSourceTitle(make, cwd: "/Users/ethan/dev/application") == "Makefile")
         #expect(Presentation.taskSourceTitle(make, cwd: nil) == "Makefile")
         let custom = TaskSource(kind: .custom, file: "/Users/ethan/.runode/tasks.json", tasks: [])

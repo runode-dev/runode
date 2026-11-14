@@ -1,6 +1,6 @@
-//! Git 面板中间的列表：每段的标题、改动的文件和储藏；面板底部图表的各行也由 `render_git_row` 画。各行的按钮平时藏着，鼠标移到行上才
-//! 露出来。每一行都属于某个仓库，按钮作用到那个仓库。点文件在预览栏里看它的整篇
-//! diff。
+//! Git 面板中间的列表：每段的标题、改动的文件和储藏；面板底部图表的各行也由 `render_git_row` 画。文件和目录行
+//! 最前面是复选框，勾上的是整个暂存了的，按下暂存或取消暂存。各行的按钮平时藏着，鼠标移到行上才露出来。每一行
+//! 都属于某个仓库，复选框和按钮作用到那个仓库。点文件在预览栏里看它的整篇 diff。
 
 use std::{
     ops::Range,
@@ -8,10 +8,11 @@ use std::{
 };
 
 use crate::ui::{
-    a11y::{PressDown, StaticText},
+    a11y::{Disable, PressDown, StaticText},
     actions::InsertFilePath,
     badge::{Badge, BadgeVariant},
     base_name,
+    checkbox::Checkbox,
     file_icons::{file_icon, folder_icon},
     font_size::{FontSize, scaled},
     hsla,
@@ -24,16 +25,16 @@ use crate::ui::{
 };
 use gpui::SharedString;
 use gpui::{
-    AccessibleAction, AnyElement, App, Context, Div, ElementId, MouseButton, MouseDownEvent, Role, Stateful, Window,
-    accesskit::ActionData, div, img, prelude::*, px,
+    AccessibleAction, AnyElement, App, Context, Div, ElementId, MouseButton, MouseDownEvent, Role, Stateful, Toggled,
+    Window, accesskit::ActionData, div, img, prelude::*, px,
 };
 use runode_git::{self as git, DiffSide, FileStatus, Section};
 
-use crate::git_view::status_color;
+use crate::{git_view::status_color, i18n::action_for};
 
 use super::{
     DirOp, FileOp, GitDirAction, GitFileAction, GitPanel, GitPanelEvent, STASH_APPLY_ICON, STASH_POP_ICON, repo_id,
-    rows::{DirOwner, GitRow, GitSection, PanelState, section_of},
+    rows::{DirOwner, GitRow, GitSection, PanelState, file_checked, section_of},
     run::StashOp,
 };
 
@@ -177,6 +178,24 @@ impl GitPanel {
         row_buttons(buttons, shown, panel.busy(root).is_none(), cx)
     }
 
+    /// 文件和目录行最前面的复选框，名字是 `label`、状态是 `state`，按下调 `toggle`；根目录是 `root` 的仓库有操作在
+    /// 跑时按不动。按下鼠标就办，不往外传给行打开 diff、展开目录。
+    fn row_check(
+        &self,
+        root: &Path,
+        state: Toggled,
+        label: String,
+        cx: &mut Context<Self>,
+        toggle: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) -> Checkbox {
+        let busy = self.state().busy(root).is_some();
+        Checkbox::new("check", label, state)
+            .mixed(rust_i18n::t!("git.partly_checked"))
+            .aria_disabled(busy)
+            .when(busy, |check| check.opacity(0.5))
+            .when(!busy, |check| check.cursor_pointer().on_press_down(cx, toggle))
+    }
+
     fn render_git_section(
         &self,
         ix: usize,
@@ -266,17 +285,20 @@ impl GitPanel {
             })
         };
         let mut buttons = vec![file_button(OPEN_FILE_ICON, "git.open_file", FileOp::Open)];
-        match shown_in {
-            GitSection::Merge => buttons.push(file_button(PLUS_ICON, "git.mark_resolved", FileOp::Stage)),
-            GitSection::Staged => buttons.push(file_button(MINUS_ICON, "git.unstage", FileOp::Unstage)),
-            _ => {
-                // 子模块那一条丢不掉，不给丢弃的按钮。
-                if !file.gitlink {
-                    buttons.push(file_button(DISCARD_ICON, "git.discard", FileOp::Discard));
-                }
-                buttons.push(file_button(PLUS_ICON, "git.stage", FileOp::Stage));
-            }
+        // 子模块那一条丢不掉，不给丢弃的按钮。
+        if shown_in == GitSection::Unstaged && !file.gitlink {
+            buttons.push(file_button(DISCARD_ICON, "git.discard", FileOp::Discard));
         }
+        // 冲突的文件勾上是标成已解决。
+        let (state, check_key) = match shown_in {
+            GitSection::Merge => (Toggled::False, "git.mark_resolved"),
+            _ => (file_checked(git, section, &file.path), "git.stage"),
+        };
+        let check_action = action(if state == Toggled::True { FileOp::Unstage } else { FileOp::Stage });
+        let check_label = action_for(&rust_i18n::t!(check_key), &file.path.display().to_string());
+        let check = self.row_check(&root, state, check_label, cx, move |this, window, cx| {
+            this.git_file_action(&check_action, window, cx)
+        });
         let path = file.path.clone();
         let dim = cx.theme().foreground.opacity(0.5);
         let deleted = file.status == FileStatus::Deleted;
@@ -292,6 +314,7 @@ impl GitPanel {
             .aria_label(name.clone())
             .aria_description(file_description(file, &dir))
             .on_hover(self.track_row_hover(ix, cx))
+            .child(check)
             // 树形式里目录行有箭头，文件行空出同样宽，名字才对得齐。
             .when(panel.tree, |row| row.child(div().flex_none().w(px(12.))))
             .child(img(file_icon(&name)).flex_none().size(px(14.)))
@@ -338,8 +361,8 @@ impl GitPanel {
             .into_any_element()
     }
 
-    /// 以树形式查看时工作区改动里的一个目录：可以展开收起，悬停时有暂存、取消暂存或丢掉这个目录
-    /// 下所有改动的按钮，右键菜单同样。
+    /// 以树形式查看时工作区改动里的一个目录：可以展开收起，最前面的复选框暂存或取消暂存这个目录下所有改动，
+    /// 未暂存的悬停时有丢掉的按钮，右键菜单里三样都有。
     pub(crate) fn render_git_dir(
         &self,
         ix: usize,
@@ -361,13 +384,28 @@ impl GitPanel {
             })
         };
         let buttons = match section {
-            GitSection::Merge => vec![dir_button(PLUS_ICON, "git.mark_resolved", DirOp::Stage)],
-            GitSection::Staged => vec![dir_button(MINUS_ICON, "git.unstage", DirOp::Unstage)],
-            _ => vec![
-                dir_button(DISCARD_ICON, "git.discard", DirOp::Discard),
-                dir_button(PLUS_ICON, "git.stage", DirOp::Stage),
-            ],
+            GitSection::Unstaged => vec![dir_button(DISCARD_ICON, "git.discard", DirOp::Discard)],
+            _ => Vec::new(),
         };
+        // 勾上的是暂存区的目录；下面有暂存了一部分的文件时是半勾。冲突的勾上是标成已解决。
+        let source = section.source();
+        let snapshot = panel.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root));
+        let partly = snapshot.is_some_and(|repo| {
+            section != GitSection::Merge
+                && repo.files(source).iter().any(|file| {
+                    file.path.starts_with(&path) && file_checked(repo, source, &file.path) == Toggled::Mixed
+                })
+        });
+        let (state, check_key) = match section {
+            GitSection::Merge => (Toggled::False, "git.mark_resolved"),
+            _ if partly => (Toggled::Mixed, "git.stage"),
+            _ => ((section == GitSection::Staged).into(), "git.stage"),
+        };
+        let check_action = action(if state == Toggled::True { DirOp::Unstage } else { DirOp::Stage });
+        let check_label = action_for(&rust_i18n::t!(check_key), &path.display().to_string());
+        let check = self.row_check(&root, state, check_label, cx, move |this, window, cx| {
+            this.git_dir_action(&check_action, window, cx)
+        });
         let last = base_name(&path);
         let menu = action(DirOp::Stage);
         let id = format!("git-dir-{section:?}-{}-{}", root.display(), path.display());
@@ -377,6 +415,7 @@ impl GitPanel {
             .aria_expanded(dir.expanded)
             .aria_label(dir.name.clone())
             .on_hover(self.track_row_hover(ix, cx))
+            .child(check)
             .child(chevron(dir.expanded, cx))
             .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
             .child(div().flex_1().min_w_0().truncate().child(dir.name.clone()))

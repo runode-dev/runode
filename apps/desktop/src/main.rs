@@ -13,6 +13,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod about;
+mod agent_prompts;
 mod alerts;
 mod assets;
 mod config;
@@ -35,6 +36,7 @@ mod keybinds;
 mod logging;
 mod menus;
 mod mobile_page;
+mod motion;
 mod prespawn;
 mod preview_panel;
 mod process_env;
@@ -42,6 +44,7 @@ mod project_host;
 mod prompt;
 mod remote_access;
 mod remote_hosts;
+mod review;
 mod screen_process;
 mod screen_viewer;
 mod settings;
@@ -181,6 +184,7 @@ fn main() {
         startup::mark("fonts_install");
         config::install(cx);
         startup::mark("config_install");
+        motion::sync(cx);
         update::install(cx);
         menus::install(cx);
         startup::mark("menus_install");

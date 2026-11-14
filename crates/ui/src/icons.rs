@@ -53,8 +53,9 @@ crate::icons! {
     pub GIT_ICON = "git",
     /// 让 AI 写东西。
     pub SPARKLE_ICON = "sparkle",
-    /// 搜索框前面的过滤图标。
+    /// 搜索框前面的过滤图标和搜索图标。
     pub FILTER_ICON = "filter",
+    pub SEARCH_ICON = "search",
     pub STASH_APPLY_ICON = "stash-apply",
     pub STASH_POP_ICON = "stash-pop",
     pub DIFF_ICON = "diff",
@@ -75,7 +76,8 @@ crate::icons! {
     pub SPLIT_DOWN_ICON = "split-down",
     /// 深色底上的提示符。
     pub PROMPT_ICON = "prompt",
-    pub PIXEL_QUESTION_ICON = "pixel-question",
+    /// 去看等回答的分屏。
+    pub EYE_ICON = "eye",
     /// 防止休眠、内存、终端数、端口和远程主机。
     pub COFFEE_ICON = "coffee",
     pub MEMORY_ICON = "memory",
@@ -95,6 +97,8 @@ crate::icons! {
     pub KEYBOARD_ICON = "keyboard",
     pub MIC_ICON = "mic",
     pub MONITOR_ICON = "monitor",
+    /// 试听提示音。
+    pub VOLUME_ICON = "volume",
 }
 
 /// GitHub Actions 页的标签和工作流的图标，运行和 step 各种状态的图标（出自 vscode-github-actions，MIT，

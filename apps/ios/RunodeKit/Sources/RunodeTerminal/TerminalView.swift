@@ -41,6 +41,10 @@
         private lazy var accessoryBar = KeyboardAccessoryBar(owner: self)
         /// 软键盘收着时界面底部那条按键栏，由 `makeRestingKeyBar` 给出去。
         private weak var restingBar: KeyboardAccessoryBar?
+        /// 底部那条按键栏的配色。跟着软键盘的辅助栏不用它：那条在键盘的窗口里，用系统色才和键盘协调。
+        public var keyBarPalette: KeyBarPalette? {
+            didSet { restingBar?.palette = keyBarPalette }
+        }
         private var refreshScheduled = false
         /// 下一次刷新最早在这时候，见 `scheduleRefresh`。
         private var nextRefresh = ContinuousClock.now
@@ -583,6 +587,7 @@
         /// 一个键打开软键盘。不用先弹软键盘就能按 Esc、Ctrl、方向键。
         public func makeRestingKeyBar() -> UIView {
             let bar = KeyboardAccessoryBar(owner: self, resting: true)
+            bar.palette = keyBarPalette
             bar.setControlLatched(controlLatched)
             bar.setDictating(dictating)
             restingBar = bar

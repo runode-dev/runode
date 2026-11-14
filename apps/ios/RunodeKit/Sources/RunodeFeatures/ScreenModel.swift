@@ -239,9 +239,9 @@ public final class ScreenModel {
     public func name(of display: ScreenDisplay) -> String {
         let size = "\(display.width)×\(display.height)"
         guard let index = displays.firstIndex(of: display), index > 0 else {
-            return String(localized: "主屏 · \(size)")
+            return String(localized: "主屏，\(size)")
         }
-        return String(localized: "副屏 \(index) · \(size)")
+        return String(localized: "副屏 \(index)，\(size)")
     }
 
     private func request(_ display: ScreenDisplay) {

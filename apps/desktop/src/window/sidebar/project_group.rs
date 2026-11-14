@@ -8,27 +8,27 @@ use std::{
 
 use gpui::{
     AccessibleAction, AnyElement, App, Axis, ClickEvent, Context, Div, FontWeight, Modifiers, Render, Role,
-    SharedString, Stateful, Window, div, img, prelude::*, px, svg,
+    SharedString, Stateful, Window, div, prelude::*, px, relative, svg,
 };
 
-use super::{ROW_ICON_SIZE, drag_chip, drop_marker};
+use super::{SIDEBAR_INSET, TREE_LINE_INSET, TREE_ROW_INSET, drag_chip, drop_marker, mono_font};
 use crate::{
     host_client::hosts::HostId,
     ui::{
         button::{Button, ButtonSize},
         font_size::{self, FontSize, scaled},
-        icons::{
-            CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COLLAPSE_ALL_ICON, EXPAND_ALL_ICON, FOLDER_ICON, FOLDER_PLUS_ICON,
-            PLUS_ICON,
-        },
-        theme::{AGENT_BLOCKED_COLOR, ActiveTheme as _},
+        icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COLLAPSE_ALL_ICON, EXPAND_ALL_ICON, PLUS_ICON},
+        status_mark::{MarkKind, status_mark},
+        theme::ActiveTheme as _,
         tooltip::tooltip,
     },
     window::{NewWorkspace, PressDown as _, WindowView},
 };
 
 /// 项目的组头。
-const PROJECT_HEADER_HEIGHT: f32 = 28.;
+const PROJECT_HEADER_HEIGHT: f32 = 30.;
+/// 组头上新建工作树按钮（`ButtonSize::IconXs`）的边长，悬停时它盖在分支上。
+const NEW_WORKTREE_SIZE: f32 = 16.;
 /// 列表顶上写「项目」的那一条。
 const PROJECTS_BAR_HEIGHT: f32 = 26.;
 
@@ -140,38 +140,45 @@ impl WindowView {
         workspace.bell() || workspace.mark(cx).is_some_and(|mark| mark.status.needs_attention())
     }
 
-    /// 列表顶上的一条：「项目」，右边是一起收起或展开所有项目、添加项目的按钮。
+    /// 列表顶上的一条：「项目」，右边是添加项目的按钮，悬停时另露出一起收起或展开所有项目的按钮。
     pub(super) fn render_projects_bar(&self, cx: &mut Context<Self>) -> Div {
-        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
         let (icon, toggle_label) = if self.all_projects_collapsed() {
             (EXPAND_ALL_ICON, rust_i18n::t!("workspace.expand_all"))
         } else {
             (COLLAPSE_ALL_ICON, rust_i18n::t!("workspace.collapse_all"))
         };
         let add_label = rust_i18n::t!("workspace.add_project");
+        let group = SharedString::from("projects-bar");
+        // 和列表一样先让出 `SIDEBAR_INSET`，「项目」和组头的箭头对齐。
         div()
             .flex_none()
             .h(scaled(PROJECTS_BAR_HEIGHT))
-            .pl(px(14.))
-            .pr(px(8.))
+            .group(group.clone())
+            .pl(px(SIDEBAR_INSET + 6.))
+            .pr(px(SIDEBAR_INSET + 2.))
             .flex()
             .items_center()
             .gap(px(2.))
-            .text_size(FontSize::Small)
-            .text_color(fg.opacity(0.5))
+            .text_size(FontSize::Body)
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(muted)
             .child(div().flex_1().min_w_0().truncate().child(rust_i18n::t!("workspace.projects")))
             .child(
                 Button::new("projects-toggle-all", toggle_label.clone())
-                    .with_size(ButtonSize::IconXs)
+                    .with_size(ButtonSize::Icon)
                     .icon(icon)
                     .icon_size(13.)
                     .tooltip(tooltip(toggle_label, None))
+                    // 用透明度藏，辅助工具照样按得到。
+                    .opacity(0.)
+                    .group_hover(group, |button| button.opacity(1.))
                     .on_press_down(cx, |this, _, cx| this.toggle_all_projects(cx)),
             )
             .child(
                 Button::new("projects-add", add_label.clone())
-                    .with_size(ButtonSize::IconXs)
-                    .icon(FOLDER_PLUS_ICON)
+                    .with_size(ButtonSize::Icon)
+                    .icon(PLUS_ICON)
                     .icon_size(13.)
                     .tooltip(tooltip(add_label, Some(&NewWorkspace)))
                     .on_press_down(cx, |this, window, cx| this.new_workspace(&NewWorkspace, window, cx)),
@@ -197,12 +204,20 @@ impl WindowView {
             let attention =
                 group_range.clone().filter(|ix| !shown(ix)).any(|ix| self.workspace_needs_attention(ix, cx));
             let first = group_range.start == range.start;
-            let mut rows = vec![
-                self.render_project_header(host, dir, group_range.clone(), collapsed, attention, cx).into_any_element(),
-            ];
-            for ix in group_range.clone().filter(shown) {
-                rows.push(self.render_row(ix, modifiers, cx).into_any_element());
-            }
+            let header = self.render_project_header(host, dir, group_range.clone(), collapsed, attention, cx);
+            let rows: Vec<_> = group_range.clone().filter(shown).map(|ix| self.render_row(ix, modifiers, cx)).collect();
+            // 组头下面的行缩进，左边一条竖线把它们和组头连起来。
+            let tree = (!rows.is_empty()).then(|| {
+                div()
+                    .ml(px(TREE_LINE_INSET))
+                    .pl(px(TREE_ROW_INSET))
+                    .border_l_1()
+                    .border_color(cx.theme().border)
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .children(rows)
+            });
             let (over_host, over_dir) = (host.clone(), dir.to_path_buf());
             let (drop_host, drop_dir) = (host.clone(), dir.to_path_buf());
             let ix = group_range.start;
@@ -227,15 +242,28 @@ impl WindowView {
                             this.move_project(&drop_host, &dragged.dir, &drop_dir, cx);
                         }
                     }))
-                    .children(rows)
+                    .child(header)
+                    .children(tree)
                     .into_any_element(),
             );
         }
         groups
     }
 
-    /// 项目的组头：仓库 owner 的 GitHub 头像（没有时画文件夹）和项目名，悬停时露出新建工作树（项目是仓库时）
-    /// 和收起的按钮；点一下收起、展开，按住能拖动排序。项目里的 workspace 是 `range`。
+    /// 项目组头上写的分支：项目里开着主工作树的那个 workspace 的位置和当前分支；没开主工作树、还没问到或者不在
+    /// 仓库里时为空。
+    pub(super) fn main_worktree_branch(&self, host: &HostId, dir: &Path) -> Option<(usize, &SharedString)> {
+        self.workspaces.iter().enumerate().find_map(|(ix, workspace)| {
+            let main = workspace.repo.main_worktree.as_deref()?;
+            let is_main = main == workspace.dir || main == workspace.real_dir();
+            (workspace.host == *host && workspace.project_dir() == dir && is_main)
+                .then(|| workspace.repo.branch.as_ref().map(|branch| (ix, branch)))?
+        })
+    }
+
+    /// 项目的组头：收起、展开的箭头和项目名，右边是主工作树的分支（当前 workspace 就是它、有没推的提交时
+    /// 后面写 ↑ 和个数）；悬停时分支让给新建工作树的按钮（项目是仓库时）。点一下收起、展开，按住能拖动
+    /// 排序。项目里的 workspace 是 `range`。
     fn render_project_header(
         &self,
         host: &HostId,
@@ -246,8 +274,16 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
         let workspaces = &self.workspaces[range.clone()];
-        let avatar = workspaces.iter().find_map(|workspace| workspace.repo.avatar.clone());
+        let branch = self.main_worktree_branch(host, dir).map(|(ix, branch)| {
+            // 只有当前 workspace 读着 git 状态。
+            let git = self.workspace().project.git.as_ref().filter(|_| ix == self.active);
+            match git.map_or(0, |git| git.main.info.ahead) {
+                0 => branch.to_string(),
+                ahead => format!("{branch} ↑{ahead}"),
+            }
+        });
         // 只有知道主工作树的仓库才能新建工作树；名字和提示也按它写，不写 git 目录。
         let main_worktree = workspaces.iter().find_map(|workspace| workspace.repo.main_worktree.clone());
         let shown_dir = main_worktree.as_deref().unwrap_or(dir);
@@ -262,12 +298,15 @@ impl WindowView {
         };
         let key = SharedString::from(project_key(host, dir));
         let group = SharedString::from(format!("{key}-group"));
-        let a11y_description =
-            [Some(path.clone()), attention.then(|| rust_i18n::t!("workspace.host_attention").into_owned())]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · ");
+        let a11y_description = [
+            Some(path.clone()),
+            branch.clone(),
+            attention.then(|| rust_i18n::t!("workspace.host_attention").into_owned()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
         let (toggle_host, toggle_dir) = (host.clone(), dir.to_path_buf());
         let a11y = |expand: Option<bool>, cx: &mut Context<Self>| {
             let (host, dir) = (toggle_host.clone(), toggle_dir.clone());
@@ -278,11 +317,6 @@ impl WindowView {
         };
         let (expand, collapse, flip) = (a11y(Some(true), cx), a11y(Some(false), cx), a11y(None, cx));
         let (press_host, press_dir) = (host.clone(), dir.to_path_buf());
-        let icon =
-            div().flex_none().size(px(ROW_ICON_SIZE)).flex().items_center().justify_center().map(|slot| match avatar {
-                Some(avatar) => slot.child(img(avatar).size(px(ROW_ICON_SIZE)).rounded(px(4.))),
-                None => slot.child(svg().path(FOLDER_ICON).size(px(14.)).text_color(fg.opacity(0.6))),
-            });
         let new_worktree = main_worktree.is_some().then(|| {
             let label = rust_i18n::t!("workspace.new_worktree", project = name.as_str()).into_owned();
             let (host, dir) = (host.clone(), dir.to_path_buf());
@@ -291,12 +325,21 @@ impl WindowView {
                 .icon(PLUS_ICON)
                 .icon_size(12.)
                 .tooltip(tooltip(label, None))
+                .absolute()
+                .right_0()
+                .top(relative(0.5))
+                .mt(px(-NEW_WORKTREE_SIZE / 2.))
                 // 悬停在组头上才显出来，几个组头不一排排都是按钮；用透明度藏，辅助工具照样按得到。
                 .opacity(0.)
                 .group_hover(group.clone(), |button| button.opacity(1.))
                 .on_press_down(cx, move |this, window, cx| {
                     this.open_new_worktree(Some((host.clone(), dir.clone())), window, cx)
                 })
+        });
+        let has_button = new_worktree.is_some();
+        // 收起时藏起来的行里有要处理的，名字后面画一个不闪的等回答标记。
+        let attention_mark = attention.then(|| {
+            status_mark(SharedString::from(format!("{key}-attention")), MarkKind::Waiting { blink: false }, 10., cx)
         });
         div()
             .id(key)
@@ -310,12 +353,12 @@ impl WindowView {
             .flex_none()
             .h(scaled(PROJECT_HEADER_HEIGHT))
             .group(group.clone())
-            .pl(px(8.))
-            .pr(px(4.))
-            .rounded(px(6.))
+            .pl(px(5.))
+            .pr(px(8.))
+            .rounded(px(7.))
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(px(7.))
             .text_color(fg.opacity(0.9))
             .hover(|header| header.bg(cx.theme().accent))
             .tooltip(tooltip(path, None))
@@ -324,27 +367,37 @@ impl WindowView {
                 this.toggle_project(&press_host, &press_dir, None, cx);
             }))
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .child(icon)
-            .child(div().flex_1().min_w_0().truncate().font_weight(FontWeight::SEMIBOLD).child(name))
-            .when(attention, |header| {
-                header.child(div().flex_none().size(px(6.)).rounded_full().bg(gpui::rgb(AGENT_BLOCKED_COLOR)))
-            })
-            .children(new_worktree)
-            // 收起时箭头一直显示，提醒这个项目里还有藏着的行。
+            .child(
+                svg()
+                    .path(if collapsed { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON })
+                    .flex_none()
+                    .size(px(12.))
+                    .text_color(muted),
+            )
+            .child(div().min_w_0().truncate().text_size(FontSize::Medium).font_weight(FontWeight::SEMIBOLD).child(name))
+            .children(attention_mark)
             .child(
                 div()
+                    .ml_auto()
                     .flex_none()
-                    .size(px(16.))
+                    .relative()
+                    .h_full()
+                    .min_w(px(NEW_WORKTREE_SIZE))
+                    .max_w(relative(0.5))
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .when(!collapsed, |chevron| chevron.opacity(0.).group_hover(group, |chevron| chevron.opacity(1.)))
-                    .child(
-                        svg()
-                            .path(if collapsed { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON })
-                            .size(px(12.))
-                            .text_color(fg.opacity(0.4)),
-                    ),
+                    .justify_end()
+                    .children(branch.map(|branch| {
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(mono_font(cx))
+                            .text_size(FontSize::Small)
+                            .text_color(muted)
+                            .when(has_button, |text| text.group_hover(group.clone(), |text| text.invisible()))
+                            .child(branch)
+                    }))
+                    .children(new_worktree),
             )
     }
 }

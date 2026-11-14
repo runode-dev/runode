@@ -8,7 +8,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::OnceLock,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use runode_agent::{Foreground, RuleBook, conversation, identify_job};
@@ -46,6 +46,11 @@ fn rules() -> &'static RuleBook {
     RULES.get_or_init(|| RuleBook::new(runode_paths::Dirs::from_env().agent_detection_dir().as_deref()))
 }
 
+/// 系统时钟的 Unix 毫秒；时钟在 1970 年以前时为 0。
+fn unix_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(u64::MAX))
+}
+
 fn home() -> Option<&'static Path> {
     static HOME: OnceLock<Option<PathBuf>> = OnceLock::new();
     HOME.get_or_init(|| runode_paths::Dirs::from_env().home).as_deref()
@@ -78,6 +83,11 @@ impl HostSession {
             if agent.map(|agent| agent.kind) != self.agent.map(|agent| agent.kind) {
                 self.conversation = None;
                 self.foreground_probe.conversation_read_at = None;
+            }
+            if agent.is_none() {
+                self.agent_since_ms = None;
+            } else if agent != self.agent {
+                self.agent_since_ms = Some(unix_ms());
             }
             self.agent = agent;
             tracing::debug!(agent = ?self.agent, "foreground agent changed");
@@ -192,6 +202,68 @@ mod tests {
         assert!(session.agent_deadline().is_some());
         assert!(session.poll_agent_at(fed + EVAL_INTERVAL));
         assert_eq!(session.agent, claude(AgentState::Idle));
+    }
+
+    const BLOCKED_SCREEN: &str =
+        "\x1b]0;✳ 修 bug\x07\x1b[H\x1b[2J Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. No\r\n Esc to cancel";
+
+    /// 屏幕上摆着 Claude 要用户回答的问题、已经认成 `Blocked` 的会话。
+    fn blocked_host() -> HostSession {
+        use runode_types::{
+            agent::{Agent, AgentState},
+            grid::GridSize,
+        };
+
+        let mut session = idle_host();
+        session.resize(GridSize { cols: 60, rows: 8, cell_width_px: 8, cell_height_px: 16 });
+        assert_eq!(session.agent_since_ms, None);
+        assert!(session.feed(BLOCKED_SCREEN.as_bytes()));
+        assert_eq!(session.agent, Some(Agent { kind: AgentKind::Claude, state: AgentState::Blocked }));
+        session
+    }
+
+    #[test]
+    fn the_agent_since_moves_when_the_state_changes() {
+        use runode_agent::EVAL_INTERVAL;
+        use runode_types::agent::AgentState;
+
+        let mut session = blocked_host();
+        let blocked_at = session.agent_since_ms.expect("set when the agent appears");
+        assert_eq!(session.meta().agent_since_ms, Some(blocked_at));
+        // 比真实时刻早的标记：换了状态后一定被改掉。
+        session.agent_since_ms = Some(1);
+        let fed = Instant::now();
+        session.feed(b"\x1b[H\x1b[2J\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\r\n\xe2\x9d\xaf\r\n\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80");
+        assert!(session.poll_agent_at(fed + EVAL_INTERVAL));
+        assert_eq!(session.agent.map(|agent| agent.state), Some(AgentState::Idle));
+        assert!(session.agent_since_ms.is_some_and(|since| since >= blocked_at), "{:?}", session.agent_since_ms);
+    }
+
+    #[test]
+    fn the_agent_since_stays_while_the_state_holds() {
+        use runode_agent::EVAL_INTERVAL;
+        use runode_types::agent::AgentState;
+
+        let mut session = blocked_host();
+        session.agent_since_ms = Some(1);
+        // 程序重画了同一个问题：重新判定，结论不变。
+        let fed = Instant::now();
+        session.feed(BLOCKED_SCREEN.as_bytes());
+        assert!(session.agent_deadline().is_some_and(|at| at <= fed + EVAL_INTERVAL));
+        assert!(!session.poll_agent_at(fed + EVAL_INTERVAL));
+        assert_eq!(session.agent.map(|agent| agent.state), Some(AgentState::Blocked));
+        assert_eq!(session.agent_since_ms, Some(1));
+    }
+
+    #[test]
+    fn the_agent_since_survives_a_handoff() {
+        let mut session = blocked_host();
+        session.agent_since_ms = Some(1_234);
+        let mut imported = bare_host();
+        imported.restore(session.export());
+        assert_eq!(imported.agent, session.agent);
+        assert_eq!(imported.agent_since_ms, Some(1_234));
+        assert_eq!(imported.meta().agent_since_ms, Some(1_234));
     }
 
     /// 对话文件在认出 agent 之后才写、状态不变时换了对话号，都要跟上；读不到时不丢上次的。

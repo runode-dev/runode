@@ -46,6 +46,7 @@ fn meta() -> SessionMeta {
         title: Some("修 bug".into()),
         fallback_title: Some("zsh".into()),
         agent: Some(Agent { kind: AgentKind::Claude, state: AgentState::Blocked }),
+        agent_since_ms: Some(1_790_000_000_000),
         conversation: None,
         cwd: Some("/Users/ethan/中文".into()),
         prompt_cwd: Some("/tmp".into()),

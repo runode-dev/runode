@@ -4,8 +4,12 @@
 //!
 //! 窗口的根元素用 `apply` 设上，里面的界面跟着继承。提示和拖动的预览画在窗口的根上，不在窗口根元素里面，
 //! 要各自再设一遍（`tooltip`、`tabs::drag_chip`）。
+//!
+//! 界面里要等宽的字（分支、路径、快捷键）用 `mono` 取配置的终端字体。
 
-use gpui::{App, FontFallbacks, Global, SharedString, Styled};
+use std::sync::Arc;
+
+use gpui::{App, FontFallbacks, FontFeatures, Global, SharedString, Styled};
 
 /// 界面文字的字体族和缺字时依次换用的字体；只在 Linux 上设。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,10 +41,23 @@ pub fn pick(installed: &[String], traditional: bool) -> Option<UiFont> {
     })
 }
 
-/// 给元素设上界面字体，它里面的文字跟着继承；没设 `UiFont` 时原样返回。
+/// 界面里的等宽字体：配置的终端字体里的第一个，app 每次读到配置都设一遍。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MonoFont(pub SharedString);
+
+impl Global for MonoFont {}
+
+/// 界面里的等宽字体；没设 `MonoFont` 或配置里没写字体时为空，调用方照继承的字体画。
+pub fn mono(cx: &App) -> Option<SharedString> {
+    cx.try_global::<MonoFont>().map(|font| font.0.clone()).filter(|family| !family.is_empty())
+}
+
+/// 给元素设上界面字体和等宽数字（OpenType 的 `tnum`），它里面的文字跟着继承：数字一变，计数、时间这类
+/// 并排的数字不左右跳。没设 `UiFont` 时只设等宽数字。
 pub fn apply<E: Styled>(mut element: E, cx: &App) -> E {
+    let style = element.text_style();
+    style.font_features = Some(FontFeatures(Arc::new(vec![("tnum".into(), 1)])));
     if let Some(font) = cx.try_global::<UiFont>() {
-        let style = element.text_style();
         style.font_family = Some(font.family.clone());
         style.font_fallbacks = font.fallbacks.clone();
     }

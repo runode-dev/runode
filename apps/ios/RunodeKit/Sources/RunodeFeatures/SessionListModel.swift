@@ -21,6 +21,52 @@ public enum SessionGroup: Hashable, Sendable, CaseIterable {
     }
 }
 
+/// 会话列表顶上的筛选：全部会话，或只看等你回答的、在干活的。
+public enum SessionFilter: Hashable, Sendable, CaseIterable {
+    case all
+    case waiting
+    case working
+
+    /// 只留这一类的会话；`all` 为空，什么都留。
+    var group: SessionGroup? {
+        switch self {
+        case .all: nil
+        case .waiting: .waiting
+        case .working: .working
+        }
+    }
+}
+
+/// 一个会话在界面上标的状态，比 `SessionGroup` 细：没有 agent 的会话再分前台在跑别的程序和只有 shell。
+public enum SessionStatus: Hashable, Sendable {
+    /// agent 停下来等回答。
+    case waiting
+    /// agent 在干活。
+    case working
+    /// 有 agent，但空闲或状态认不出。
+    case agentIdle
+    /// 前台在跑 shell 以外的程序，带着界面上写的程序名。
+    case running(String)
+    case shell
+    /// shell 已经退出，会话还留着。
+    case exited
+
+    public static func of(_ session: SessionInfo) -> SessionStatus {
+        if session.exited { return .exited }
+        if let agent = session.meta.agent {
+            switch agent.state {
+            case .blocked: return .waiting
+            case .working: return .working
+            case .idle, .unknown: return .agentIdle
+            }
+        }
+        if !session.meta.foregroundIsShell, let foreground = session.meta.foreground, !foreground.isEmpty {
+            return .running(Presentation.programLabel(foreground))
+        }
+        return .shell
+    }
+}
+
 /// 列表里的一节：电脑上的 app 里的一个工作区，或者不在任何窗口里的会话。
 public struct SessionSection: Hashable, Sendable, Identifiable {
     public enum ID: Hashable, Sendable {
@@ -105,6 +151,8 @@ struct PreviewThrottle {
 public final class SessionListModel {
     /// 预览读多少行：读回来以后去掉空行再取最后几行。
     static let previewReadLines: UInt32 = 12
+    /// 等你回答的会话多读几行：提问连同上面的问题、下面的提示要整个读进来才认得出（`AgentPrompt`）。
+    static let waitingReadLines: UInt32 = 16
     /// 预览显示几行：两行够看出在干什么，卡片矮一些，一屏多放几张。
     public static let previewLines = 2
     /// 等你回答的会话的预览多显示一行，问题和选项才看得全。
@@ -125,6 +173,8 @@ public final class SessionListModel {
     public private(set) var windows: [WindowLayout] = []
     /// 每个会话屏幕底部的几行，去掉了空行。
     public private(set) var previews: [SessionId: [String]] = [:]
+    /// 等你回答的会话屏幕上认出来的提问，和 `previews` 读自同一次读屏幕；认不出、不在等回答时没有。
+    public private(set) var prompts: [SessionId: AgentPrompt] = [:]
     /// 连上后收到过一次列表。
     public private(set) var loaded = false {
         didSet { onSessionsChanged() }
@@ -180,6 +230,11 @@ public final class SessionListModel {
     @ObservationIgnored private var pendingPreviews: [SessionId: PreviewRead] = [:]
     /// 读着的时候又要刷新的会话：这次（连同退回读屏幕底部的后半）有了回话再读一次。
     @ObservationIgnored private var previewsAgain: Set<SessionId> = []
+    /// 答过提问、还没见它从屏幕上换掉的会话：所答的提问，答时的 `SessionMeta.agentSince`，和读到的还是它时
+    /// 还能再读几次。
+    @ObservationIgnored private var answeredPrompts: [SessionId: (asked: AgentPrompt.Asked, since: Date?, rereads: Int)] = [:]
+    /// 答过以后提问一直没换时最多再读这么多次；读完还没换，按键多半没起作用，提问照旧认出来。
+    static let answeredRereads = 5
     /// 在等回话的列命令的请求，按请求编号记着列的目录。
     @ObservationIgnored private var pendingTasks: [UInt32: String] = [:]
     /// 正在列的目录：取请求编号之前就记上，同一个目录不会同时要两次。
@@ -252,6 +307,23 @@ public final class SessionListModel {
             sections.append(SessionSection(id: .background, sessions: rest))
         }
         return sections
+    }
+
+    /// 按 `filter` 筛过的 `sections`：`all` 原样返回，没有会话的工作区照留；否则每节只留这一类的会话，
+    /// 一个都不剩的节整节去掉。
+    public func sections(matching filter: SessionFilter) -> [SessionSection] {
+        guard let group = filter.group else { return sections }
+        return sections.compactMap { section in
+            var section = section
+            section.sessions = section.sessions.filter { SessionGroup.of($0) == group }
+            return section.sessions.isEmpty ? nil : section
+        }
+    }
+
+    /// 合 `filter` 的会话有几个。
+    public func count(_ filter: SessionFilter) -> Int {
+        guard let group = filter.group else { return sessions.count }
+        return sessions.count { SessionGroup.of($0) == group }
     }
 
     /// 订阅连接的事件并要求连接。
@@ -451,6 +523,7 @@ public final class SessionListModel {
         sessions.removeAll { $0.id == id }
         watching.remove(id)
         previews[id] = nil
+        prompts[id] = nil
         quickReplies[id] = nil
     }
 
@@ -459,10 +532,22 @@ public final class SessionListModel {
     public func quickReply(for id: SessionId) -> QuickReplyModel {
         if let existing = quickReplies[id] { return existing }
         let model = QuickReplyModel(sessionId: id, link: link, connected: connected && listCurrent) { [weak self] id in
-            self?.requestPreview(id)
+            self?.answered(id)
         }
         quickReplies[id] = model
         return model
+    }
+
+    /// 回答送到了：认出来的提问作废，免得接着按到下一问上。按键刚写进去、agent 还没重画，这时读到的
+    /// 还是所答的那个提问（光标也许挪了，状态栏也许变了），所以记下它（`AgentPrompt.asked`），读到的还是它
+    /// 时不认；屏幕读两次，后一次隔一个 `previewInterval`。
+    func answered(_ id: SessionId) {
+        if let prompt = prompts[id] {
+            answeredPrompts[id] = (prompt.asked, session(id)?.meta.agentSince, Self.answeredRereads)
+        }
+        prompts[id] = nil
+        requestPreview(id)
+        requestPreview(id)
     }
 
     /// 终端页开始看这个会话。
@@ -625,8 +710,32 @@ public final class SessionListModel {
         case .lastCommand:
             link.send(.readScreen(id: id, lines: nil, command: 1))
         case .bottomLines:
-            link.send(.readScreen(id: id, lines: Self.previewReadLines))
+            let waiting = session(id).map(SessionGroup.of) == .waiting
+            link.send(.readScreen(id: id, lines: waiting ? Self.waitingReadLines : Self.previewReadLines))
         }
+    }
+
+    /// 会话不在等回答了（或者没了）：认出来的提问作废。
+    private func dropStalePrompt(_ id: SessionId) {
+        guard session(id).map(SessionGroup.of) != .waiting else { return }
+        prompts[id] = nil
+        answeredPrompts[id] = nil
+    }
+
+    /// 等回答的会话读回来的屏幕：认出提问就记下。刚答过、屏幕上还是所答的那个提问时不认，隔一会儿再读。
+    /// agent 进入等待的时刻和答时记下的不同，就是新的一次等待，提问一样也照认。
+    private func notePrompt(_ id: SessionId, screen: String) {
+        let prompt = AgentPrompt.parse(screen.split(separator: "\n", omittingEmptySubsequences: false).map(String.init))
+        if let prompt, let answered = answeredPrompts[id], answered.since == session(id)?.meta.agentSince,
+            answered.asked == prompt.asked, answered.rereads > 0
+        {
+            answeredPrompts[id]?.rereads -= 1
+            prompts[id] = nil
+            requestPreview(id)
+            return
+        }
+        answeredPrompts[id] = nil
+        prompts[id] = prompt
     }
 
     /// 读最近一条命令的输出没成（没有 shell 集成、还没跑过命令、上一条命令没有输出）：马上改读屏幕
@@ -705,6 +814,8 @@ public final class SessionListModel {
             loaded = true
             let present = Set(list.map(\.id))
             previews = previews.filter { present.contains($0.key) }
+            answeredPrompts = answeredPrompts.filter { present.contains($0.key) }
+            for id in prompts.keys { dropStalePrompt(id) }
             shellPaths = shellPaths.filter { present.contains($0.key) }
             if searchedPath != nil { findAgentsIfPathChanged() }
             for session in list where !screens.contains(session.id) && !watching.contains(session.id) {
@@ -716,12 +827,14 @@ public final class SessionListModel {
             }
         case .attached(let attached):
             update(attached.id) { $0.meta = attached.meta }
+            dropStalePrompt(attached.id)
             noteShell(attached.shell, of: attached.id)
             if let settings = attached.settings { setTheme(AppTheme(settings)) }
         case .themeApplied(_, let settings):
             setTheme(AppTheme(settings))
         case .meta(let id, let meta, let shell):
             update(id) { $0.meta = meta }
+            dropStalePrompt(id)
             noteShell(shell, of: id)
             requestPreview(id)
         case .bell(let id):
@@ -729,7 +842,8 @@ public final class SessionListModel {
         case .screenText(let id, let text, _):
             let read = pendingPreviews.removeValue(forKey: id) ?? .bottomLines(atPrompt: false)
             guard session(id) != nil else { return }
-            let limit = session(id).map(SessionGroup.of) == .waiting ? Self.waitingPreviewLines : Self.previewLines
+            let waiting = session(id).map(SessionGroup.of) == .waiting
+            let limit = waiting ? Self.waitingPreviewLines : Self.previewLines
             switch read {
             case .lastCommand:
                 let lines = Presentation.previewLines(text, limit: limit)
@@ -738,12 +852,19 @@ public final class SessionListModel {
                     return
                 }
                 previews[id] = lines
+                prompts[id] = nil
             case .bottomLines(let atPrompt):
                 previews[id] = Presentation.previewLines(text, limit: limit, atPrompt: atPrompt)
+                if waiting {
+                    notePrompt(id, screen: text)
+                } else {
+                    prompts[id] = nil
+                }
             }
             finishPreview(id)
         case .exited(let id, _):
             update(id) { $0.exited = true }
+            dropStalePrompt(id)
         case .resync(let id, _):
             // 读得太慢被宿主摘掉了订阅：重新只看状态，不然这个会话的状态就停在旧的上了。终端页开着的
             // 会话归终端页自己重连，这里不发，不然会顶掉它要屏幕的订阅。
@@ -813,6 +934,7 @@ public final class SessionListModel {
                 watching.remove(id)
                 sessions.removeAll { $0.id == id }
                 previews[id] = nil
+                prompts[id] = nil
                 pendingPreviews[id] = nil
                 previewsAgain.remove(id)
             } else if let id, req == nil, let read = pendingPreviews.removeValue(forKey: id) {

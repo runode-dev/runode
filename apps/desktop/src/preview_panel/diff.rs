@@ -1,7 +1,7 @@
 //! 预览栏里的 diff 标签，内联显示差异：从 Git 面板点开改动的文件（工作区、已暂存或
 //! 某个提交里的），整篇显示，没改的行照常排着，删掉的行红底插在原来的位置，加的行绿底，左边两栏是
 //! 旧行号和新行号，按文件类型高亮；成对的删掉和加的行里真正改了的字再垫深一点的底色。每块改动
-//! 前面一行块头，工作区和暂存区的块头上有按块暂存、丢弃、取消暂存的按钮。顶上一条能跳到上一处、下一处改动，打开时先滚到第一处。
+//! 前面一行块头，工作区和暂存区的块头上有按块暂存、取消暂存的复选框和放弃这一块的按钮。顶上一条能跳到上一处、下一处改动，打开时先滚到第一处。
 //!
 //! 整篇 diff 由 `runode_git::Repo::file_view` 读；工作区和暂存区的 diff 跟着扫描结果重读，
 //! 滚动位置不动，文件已经没有这种改动时写一句「没有改动」，标签留着。
@@ -17,21 +17,23 @@ use std::{
     },
 };
 
+use crate::i18n::action_for;
 use crate::ui::{
-    a11y::{A11yPress, StaticText},
+    a11y::{A11yPress, PressDown as _, StaticText},
     button::{Button, ButtonSize},
+    checkbox::Checkbox,
     font_size::FontSize,
     hsla,
-    icons::{ARROW_DOWN_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON, PROMPT_ICON},
+    icons::{ARROW_DOWN_ICON, SPARKLE_ICON},
     panel::{added_label, removed_label},
     scrollbar::{row_markers, scrollbar},
     theme::{ADDED, REMOVED},
     tooltip::tooltip,
 };
 use gpui::{
-    AnyElement, Axis, Context, HighlightStyle, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent,
-    PromptButton, PromptLevel, Role, ScrollStrategy, SharedString, StyledText, Window, combine_highlights, div,
-    prelude::*, px, svg, uniform_list,
+    AnyElement, App, Axis, Context, HighlightStyle, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent,
+    PromptButton, PromptLevel, Role, ScrollStrategy, SharedString, StyledText, Toggled, Window, combine_highlights,
+    div, prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
 use runode_preview::Span;
@@ -537,17 +539,7 @@ impl PreviewPanel {
             run(self, window, cx);
             return;
         }
-        let answer = crate::prompt::show(
-            window,
-            PromptLevel::Warning,
-            &rust_i18n::t!("preview.diff.discard_hunk_title"),
-            Some(&rust_i18n::t!("git.irreversible")),
-            &[
-                PromptButton::new(rust_i18n::t!("git.discard_confirm")),
-                PromptButton::cancel(rust_i18n::t!("git.cancel")),
-            ],
-            cx,
-        );
+        let answer = ask_discard_hunk(window, cx);
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() == Some(0) {
                 this.update_in(cx, run).ok();
@@ -703,7 +695,9 @@ impl PreviewPanel {
             .collect()
     }
 
-    /// 一块改动的块头，能按块操作时右边有按钮：工作区的是丢弃和暂存这一块，暂存区的是取消暂存。
+    /// 一块改动的块头：能按块操作时最左边是复选框，工作区的没勾、勾上是暂存这一块，暂存区的勾着、取消是取消暂存；
+    /// 中间是块所在的函数（`hunk_title`）；右边是文字按钮，工作区能按块操作时有放弃这一块，哪种 diff 都有交给
+    /// agent。按钮和复选框的名字带上块的 `hunk_name`。
     fn render_diff_header(
         &self,
         hunk: usize,
@@ -715,37 +709,45 @@ impl PreviewPanel {
         let Some(Loaded::Diff(content)) = self.preview().and_then(|preview| preview.content.as_ref()) else {
             return row.into_any_element();
         };
-        let header = content.view.file.hunks[hunk].header.clone();
-        // 没有按块操作的是「交给 agent」，哪种 diff 都有。
-        let mut buttons: Vec<(&'static str, &'static str, Option<HunkAction>)> =
-            vec![(PROMPT_ICON, "git.quote_hunk", None)];
-        buttons.extend(match (&target.side, actionable) {
-            (DiffSide::Worktree, true) => vec![
-                (DISCARD_ICON, "git.discard_hunk", Some(HunkAction::Discard)),
-                (PLUS_ICON, "git.stage_hunk", Some(HunkAction::Stage)),
-            ],
-            (DiffSide::Index, true) => vec![(MINUS_ICON, "git.unstage_hunk", Some(HunkAction::Unstage))],
-            _ => Vec::new(),
-        });
+        let header = &content.view.file.hunks[hunk].header;
+        let (title, name) = (hunk_title(header), hunk_name(header));
+        let check = match (&target.side, actionable) {
+            (DiffSide::Worktree, true) => Some((Toggled::False, HunkAction::Stage)),
+            (DiffSide::Index, true) => Some((Toggled::True, HunkAction::Unstage)),
+            _ => None,
+        };
+        let mut buttons: Vec<(Option<&'static str>, &'static str, Option<HunkAction>)> = Vec::new();
+        if target.side == DiffSide::Worktree && actionable {
+            buttons.push((None, "git.discard_hunk", Some(HunkAction::Discard)));
+        }
+        buttons.push((Some(SPARKLE_ICON), "git.quote_hunk", None));
         // 按钮挂在 diff 的行里，跟着正文的 `preview-font-size` 走，不跟界面字号，才装得进这一行。
         let font_size = self.input.font_size;
         let fg_hsla = cx.theme().foreground;
         let (header_bg, hover_bg) = (cx.theme().mix(0.05), cx.theme().mix(0.12));
+        let check = check.map(|(state, action)| {
+            let label = action_for(&rust_i18n::t!("git.stage_hunk"), &name);
+            Checkbox::new(("preview-diff-hunk-check", hunk), label, state)
+                .cursor_pointer()
+                .on_press_down(cx, move |this, window, cx| this.hunk_button(hunk, Some(action), window, cx))
+        });
         // id 按块号取，不按行号：暂存一块后前面的行少了，行号整体平移，辅助工具会按到别的块上。
         row.id(("preview-diff-header", hunk))
             .role(Role::Group)
-            .aria_label(header.clone())
+            .aria_label(name.clone())
             .px(px(8.))
             .gap(px(6.))
             .bg(header_bg)
-            .child(div().flex_1().min_w_0().truncate().text_color(fg_hsla.opacity(0.5)).child(header))
+            .children(check)
+            .child(div().flex_1().min_w_0().truncate().text_color(fg_hsla.opacity(0.5)).child(title))
             .children(buttons.into_iter().enumerate().map(|(bi, (icon, key, action))| {
                 // 只有按下的处理，辅助工具按不到，另外登记。
                 let view = cx.entity().downgrade();
+                let text = rust_i18n::t!(key).into_owned();
                 div()
                     .id(("preview-diff-hunk-button", hunk * 4 + bi))
                     .role(Role::Button)
-                    .aria_label(rust_i18n::t!(key).into_owned())
+                    .aria_label(action_for(&text, &name))
                     .on_a11y_press(view, move |this, window, cx| this.hunk_button(hunk, action, window, cx))
                     .flex_none()
                     .px(px(6.))
@@ -757,8 +759,8 @@ impl PreviewPanel {
                     .text_size(px(font_size - 2.))
                     .text_color(fg_hsla.opacity(0.8))
                     .hover(|button| button.bg(hover_bg))
-                    .child(svg().path(icon).size(px(12.)).text_color(fg_hsla.opacity(0.75)))
-                    .child(rust_i18n::t!(key).into_owned())
+                    .children(icon.map(|icon| svg().path(icon).size(px(12.)).text_color(fg_hsla.opacity(0.75))))
+                    .child(text)
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| {
@@ -771,9 +773,79 @@ impl PreviewPanel {
     }
 }
 
+/// 放弃一块改动前问一下；答第一个按钮（放弃）时收到 0。
+pub(crate) fn ask_discard_hunk(window: &mut Window, cx: &mut App) -> futures::channel::oneshot::Receiver<usize> {
+    crate::prompt::show(
+        window,
+        PromptLevel::Warning,
+        &rust_i18n::t!("preview.diff.discard_hunk_title"),
+        Some(&rust_i18n::t!("git.irreversible")),
+        &[PromptButton::new(rust_i18n::t!("git.discard_confirm")), PromptButton::cancel(rust_i18n::t!("git.cancel"))],
+        cx,
+    )
+}
+
+/// 块头上写的那一块在哪。
+#[derive(Debug, PartialEq, Eq)]
+struct HunkPlace {
+    /// `@@` 后面 git 认出的所在函数那一段，没有时为空。
+    function: Option<String>,
+    /// 行号范围（首、尾），新文件里的；只删了行的是旧文件里的。取不出时为空。
+    lines: Option<(u32, u32)>,
+}
+
+/// 从块头 `@@ -a,b +c,d @@ 函数` 里取出块在哪；格式不对、函数和行号都取不出时为空。
+fn hunk_place(header: &str) -> Option<HunkPlace> {
+    let rest = header.strip_prefix("@@")?;
+    let (ranges, function) = rest.split_once("@@")?;
+    let function = Some(function.trim()).filter(|function| !function.is_empty()).map(str::to_owned);
+    let range = |sign: char| -> Option<(u32, u32)> {
+        let range = ranges.split_whitespace().find_map(|part| part.strip_prefix(sign))?;
+        let (start, count) = match range.split_once(',') {
+            Some((start, count)) => (start.parse().ok()?, count.parse().ok()?),
+            None => (range.parse().ok()?, 1),
+        };
+        Some((start, count))
+    };
+    let lines = match range('+') {
+        Some((_, 0)) => range('-'),
+        new => new,
+    }
+    .map(|(start, count): (u32, u32)| (start, start.saturating_add(count.max(1) - 1)));
+    (function.is_some() || lines.is_some()).then_some(HunkPlace { function, lines })
+}
+
+/// 行号范围的写法。
+fn lines_text((start, end): (u32, u32)) -> String {
+    if start == end {
+        rust_i18n::t!("git.hunk_line", line = start).into_owned()
+    } else {
+        rust_i18n::t!("git.hunk_lines", start = start, end = end).into_owned()
+    }
+}
+
+/// 块头上写的字：所在的函数，没有时写行号；块头取不出来时照原样。
+pub(crate) fn hunk_title(header: &str) -> String {
+    match hunk_place(header) {
+        Some(HunkPlace { function: Some(function), .. }) => function,
+        Some(HunkPlace { lines: Some(lines), .. }) => lines_text(lines),
+        _ => header.to_owned(),
+    }
+}
+
+/// 块报给辅助工具的名字：`hunk_title` 再带上行号，同一个函数里的几块才分得清。
+pub(crate) fn hunk_name(header: &str) -> String {
+    match hunk_place(header) {
+        Some(HunkPlace { function: Some(function), lines: Some(lines) }) => {
+            [function, lines_text(lines)].join(rust_i18n::t!("a11y.separator").as_ref())
+        }
+        _ => hunk_title(header),
+    }
+}
+
 /// 交给 agent 的一块改动：`路径:起-止`（新文件里的行号，只删了行的用旧文件的），下面是这块 diff。围栏比块里
 /// 最长的一串反引号长，不提前收尾。
-fn hunk_quote(path: &Path, hunk: &git::Hunk) -> String {
+pub(crate) fn hunk_quote(path: &Path, hunk: &git::Hunk) -> String {
     let new: Vec<u32> = hunk.lines.iter().filter_map(|line| line.new).collect();
     let numbers = if new.is_empty() { hunk.lines.iter().filter_map(|line| line.old).collect() } else { new };
     let place = match (numbers.first(), numbers.last()) {
@@ -830,6 +902,25 @@ mod tests {
         let new_lines = vec!["a much longer new line".to_owned(), "b".to_owned(), "c".to_owned()];
         let rows = git::merge_rows(&file, &new_lines).unwrap();
         DiffView { file, new_lines, rows }
+    }
+
+    /// 块头写 git 认出的函数；没有时写新文件里的行号，只删了行的写旧文件的，省掉的行数算一行。
+    #[test]
+    fn hunk_headers_name_their_place() {
+        let function = "@@ -116,3 +116,6 @@ fn read_frame(r: &mut impl Read)";
+        let lines = |start, end| Some(HunkPlace { function: None, lines: Some((start, end)) });
+        assert_eq!(
+            hunk_place(function),
+            Some(HunkPlace { function: Some("fn read_frame(r: &mut impl Read)".into()), lines: Some((116, 121)) })
+        );
+        assert_eq!(hunk_place("@@ -1,2 +3,4 @@"), lines(3, 6));
+        assert_eq!(hunk_place("@@ -7 +7 @@"), lines(7, 7));
+        assert_eq!(hunk_place("@@ -5,2 +4,0 @@"), lines(5, 6));
+        assert_eq!(hunk_place("@@ -1 +4294967295,9 @@"), lines(u32::MAX, u32::MAX));
+        assert_eq!(hunk_place("not a header"), None);
+        // 同一个函数里的两块，报给辅助工具的名字靠行号分开。
+        assert_ne!(hunk_name("@@ -1,2 +1,2 @@ fn a()"), hunk_name("@@ -9,2 +9,2 @@ fn a()"));
+        assert_eq!(hunk_title("@@ -1,2 +1,2 @@ fn a()"), "fn a()");
     }
 
     /// 行号取新文件的首尾，只删了行的取旧文件的；代码里的三个反引号不会提前收尾。

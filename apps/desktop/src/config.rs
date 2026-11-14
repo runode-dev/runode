@@ -252,6 +252,7 @@ fn apply(cx: &mut App, config: Config, seen: Stamps) {
     // 主题 token 的初值；各窗口画的时候再换成自己的配色（`window::install_theme`）。
     let palette = runode_ui::theme::ansi_colors(&config.palette);
     cx.set_global(runode_ui::theme::Theme::new(config.foreground, config.background, palette));
+    cx.set_global(runode_ui::font::MonoFont(config.font_family.first().cloned().unwrap_or_default().into()));
     cx.set_global(AppConfig(Arc::new(config)));
 }
 

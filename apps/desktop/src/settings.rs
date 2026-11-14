@@ -1,6 +1,6 @@
 //! 设置页：配置文件里的每一项做成开关、选项、输入框或列表，改了就写回 runode 自己的配置文件
 //! （`runode_config::ConfigFile`，文件里别的行原样留着），再重载配置让各个窗口跟着变。铺在终端窗口
-//! 里（`window::show_settings`），盖住侧栏和终端；点左上的返回或按 Esc 发 `Close`，回到终端。
+//! 里（`window::show_settings`），盖住侧栏和终端；点右上的关闭或按 Esc 发 `Close`，回到终端。
 //!
 //! 显示的是合起来生效的值：Ghostty 的配置、主题和 runode 的配置文件叠在一起之后的结果。runode 的
 //! 配置文件里写了的项旁边有恢复按钮，点了删掉那几行，回到 Ghostty、主题或内置的值。输入框停手
@@ -39,25 +39,28 @@ use runode_config::{Config, ConfigFile};
 
 use crate::{
     config::AppConfig,
-    ui::icons::ARROW_LEFT_ICON,
+    i18n::tr,
+    ui::icons::{CLOSE_ICON, CODE_ICON, SEARCH_ICON},
     ui::{
         a11y::{Hide, Press},
+        button::{Button, ButtonVariant},
         font_size::{FontSize, scaled},
-        input::{InputEvent, InputState},
+        input::{Input, InputEvent, InputState},
+        kbd::Kbd,
     },
 };
-use pages::Page;
+use pages::{Group, Page};
 use picker::Picker;
 
 /// 左边页面列表的宽度，按基准字号的点数。
-const NAV_WIDTH: f32 = 200.;
+const NAV_WIDTH: f32 = 220.;
 /// 输入框停手这么久之后写回。
 const COMMIT_DELAY: Duration = Duration::from_millis(700);
 
 /// 问还有工作区、终端用着哪些远端主机。
 type HostsInUse = Box<dyn Fn(&App) -> HashSet<crate::host_client::hosts::HostId>>;
 
-/// 点了返回、按了 Esc 或关分屏的键：窗口收起设置页。
+/// 点了关闭、按了 Esc 或关分屏的键：窗口收起设置页。
 pub struct Close;
 
 // 关分屏的键在设置页里收起设置页，见 `keybinds::bind`。
@@ -112,6 +115,13 @@ pub struct SettingsView {
     _hosts: Subscription,
     /// 正在改显示名的配对的电脑。
     renaming_machine: Option<paired_machines::Renaming>,
+    /// 「不提醒的 agent」的筛选框，第一次画那一组时建。
+    agent_filter: Option<(Entity<InputState>, Subscription)>,
+    /// 「不提醒的 agent」没选上的全列出来，不只列前几个。
+    agents_expanded: bool,
+    /// 左边的搜索框；有字时页面换成各页对得上的项（`render_search`）。
+    search: Entity<InputState>,
+    _search: Subscription,
 }
 
 impl EventEmitter<Close> for SettingsView {}
@@ -123,6 +133,18 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> Self {
         let observe = cx.observe_global_in::<AppConfig>(window, |this, window, cx| this.config_changed(window, cx));
+        let label = rust_i18n::t!("settings.search").into_owned();
+        let placeholder = rust_i18n::t!("settings.search_placeholder").into_owned();
+        let search = cx.new(|cx| InputState::new(String::new(), cx).with_label(label).with_placeholder(placeholder));
+        // Esc 清掉搜索，焦点还给页面，再按一次才收起设置页。
+        let search_events = cx.subscribe_in(&search, window, |this, _, event: &InputEvent, window, cx| match event {
+            InputEvent::Changed(_) => cx.notify(),
+            InputEvent::Dismiss => {
+                this.clear_search(cx);
+                window.focus(&this.focus_handle, cx);
+            }
+            InputEvent::Next | InputEvent::Previous => {}
+        });
         let mut view = Self {
             focus_handle: cx.focus_handle(),
             page: Page::General,
@@ -143,6 +165,10 @@ impl SettingsView {
             hosts_in_use: Box::new(hosts_in_use),
             _hosts: cx.observe_global::<crate::remote_hosts::HostsChanged>(|_, cx| cx.notify()),
             renaming_machine: None,
+            agent_filter: None,
+            agents_expanded: false,
+            search,
+            _search: search_events,
         };
         view.refresh_autostart(cx);
         view.refresh_firewall(cx);
@@ -188,6 +214,11 @@ impl SettingsView {
         self.keybinds.stop_recording();
         self.scroll.set_offset(point(px(0.), px(0.)));
         window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    fn clear_search(&mut self, cx: &mut Context<Self>) {
+        self.search.update(cx, |search, cx| search.set_query(String::new(), cx));
         cx.notify();
     }
 
@@ -399,32 +430,67 @@ impl SettingsView {
         cx.notify();
     }
 
+    /// 左边的页面列表：顶上是搜索框，下面按组列出各页，最下面是打开配置文件。
     fn render_nav(&self, theme: &Theme, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
-        let item = |id: &'static str, icon: &'static str, label: String, selected: bool| {
+        let item = |id: SharedString, icon: &'static str, label: String, selected: bool| {
+            let color = if selected { theme.foreground } else { theme.subtle_foreground };
             div()
                 .id(id)
                 .aria_label(label.clone())
-                .h(scaled(34.))
+                .flex_none()
+                .h(scaled(30.))
                 .px(px(10.))
                 .flex()
                 .items_center()
                 .gap(px(10.))
-                .rounded(px(8.))
-                .text_size(FontSize::Large)
+                .rounded(px(7.))
+                .text_size(FontSize::Medium)
+                .text_color(color)
                 .map(|item| {
                     if selected {
-                        item.bg(theme.mix(0.12)).text_color(theme.foreground)
+                        item.bg(theme.tab_active).font_weight(gpui::FontWeight::SEMIBOLD)
                     } else {
-                        item.text_color(theme.foreground.opacity(0.75)).hover(|item| item.bg(theme.mix(0.07)))
+                        item.hover(|item| item.bg(theme.accent).text_color(theme.foreground))
                     }
                 })
-                .child(svg().flex_none().path(icon).size(px(16.)).text_color(theme.foreground.opacity(0.7)))
+                .child(svg().flex_none().path(icon).size(px(15.)).text_color(color))
                 .child(div().min_w_0().truncate().child(label))
         };
-        let back = item("settings-back", ARROW_LEFT_ICON, rust_i18n::t!("settings.back").into_owned(), false)
+        let groups: Vec<_> = Group::ALL
+            .into_iter()
+            .map(|group| {
+                let title = group.title();
+                let heading = div()
+                    .id(SharedString::from(format!("settings-group-{}", group.id())))
+                    .role(Role::Heading)
+                    .aria_level(2)
+                    .aria_label(title.clone())
+                    .pt(px(14.))
+                    .pb(px(6.))
+                    .pl(px(10.))
+                    .text_size(FontSize::Body)
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(theme.muted_foreground)
+                    .child(title.clone());
+                let pages = div()
+                    .id(SharedString::from(format!("settings-pages-{}", group.id())))
+                    .role(Role::TabList)
+                    .aria_label(title)
+                    .flex()
+                    .flex_col()
+                    .gap(px(1.))
+                    .children(group.pages().map(|page| {
+                        item(page.id().into(), page.icon(), page.title(), page == self.page)
+                            .role(Role::Tab)
+                            .aria_selected(page == self.page)
+                            .on_press(cx, move |this, window, cx| this.select_page(page, window, cx))
+                    }));
+                div().flex().flex_col().child(heading).child(pages)
+            })
+            .collect();
+        let open_config = item("settings-open-config".into(), CODE_ICON, tr("menu.open_config"), false)
             .role(Role::Button)
-            .mb(px(8.))
-            .on_press(cx, |_, _, cx| cx.emit(Close));
+            .on_press(cx, |_, _, cx| crate::config::open(cx));
         div()
             .flex_none()
             .w(scaled(NAV_WIDTH))
@@ -436,6 +502,20 @@ impl SettingsView {
             .border_color(theme.control_border)
             .id("settings-nav")
             .child(titlebar_strip())
+            .child(
+                div().flex_none().px(px(10.)).pb(px(4.)).flex().child(
+                    Input::new(&self.search)
+                        .prefix(svg().flex_none().path(SEARCH_ICON).size(px(13.)).text_color(theme.muted_foreground))
+                        .flex_1()
+                        .min_w_0()
+                        .h(scaled(30.))
+                        .px(px(10.))
+                        .gap(px(8.))
+                        .rounded(px(8.))
+                        .bg(theme.field)
+                        .text_size(FontSize::Medium),
+                ),
+            )
             // 界面字号调大、窗口又矮时一列放不下，自己滚。
             .child(
                 div()
@@ -445,19 +525,11 @@ impl SettingsView {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
                     .px(px(10.))
                     .pb(px(10.))
-                    .child(back)
-                    .child(div().id("settings-pages").role(Role::TabList).flex().flex_col().gap(px(2.)).children(
-                        Page::ALL.into_iter().map(|page| {
-                            item(page.id(), page.icon(), page.title(), page == self.page)
-                                .role(Role::Tab)
-                                .aria_selected(page == self.page)
-                                .on_press(cx, move |this, window, cx| this.select_page(page, window, cx))
-                        }),
-                    )),
+                    .children(groups),
             )
+            .child(div().flex_none().px(px(10.)).pt(px(6.)).pb(px(14.)).flex().flex_col().child(open_config))
     }
 
     /// Esc：焦点在页面本身（不在输入框、挑选浮层里，也没在录快捷键）时收起。
@@ -513,6 +585,31 @@ impl Render for SettingsView {
         let picker = self.render_picker(theme, cx);
         // 挑选浮层挡住了后面的页面，开着时后面的不报给辅助工具。
         let modal = picker.is_some();
+        // 盖在顶上那一条的右端：挡住下面的拖动区，按下才是点按钮，不是拖窗口。
+        let close = Button::new("settings-close", rust_i18n::t!("settings.close_label").into_owned())
+            .variant(ButtonVariant::Ghost)
+            .icon(CLOSE_ICON)
+            .icon_size(13.)
+            .h(scaled(28.))
+            .pl(px(9.))
+            .pr(px(6.))
+            .gap(px(7.))
+            .rounded(px(7.))
+            .text_color(theme.subtle_foreground)
+            .occlude()
+            .child(rust_i18n::t!("settings.close").into_owned())
+            .child(Kbd::new("esc"))
+            .on_press(cx, |_, _, cx| cx.emit(Close));
+        let close = div()
+            .id("settings-close-area")
+            .aria_hidden(modal)
+            .absolute()
+            .top_0()
+            .right(px(14.))
+            .h(px(crate::window::TITLEBAR_HEIGHT))
+            .flex()
+            .items_center()
+            .child(close);
         div()
             .key_context("Settings")
             .track_focus(&self.focus_handle)
@@ -537,6 +634,7 @@ impl Render for SettingsView {
                         .child(div().mx_auto().w_full().max_w(px(760.)).px(px(32.)).pb(px(32.)).child(content)),
                 ),
             )
+            .child(close)
             .children(picker)
     }
 }

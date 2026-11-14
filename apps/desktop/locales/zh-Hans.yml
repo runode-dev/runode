@@ -83,7 +83,7 @@ agent:
   status:
     blocked: 等你回答
     done: 干完了
-    working: 工作中
+    working: 干活中
     idle: 空闲
   picker:
     none: 没有在运行的 agent。在终端里运行 claude、codex 这类 agent，或者从新建标签页按钮旁的菜单开一个。
@@ -195,6 +195,32 @@ workspace:
   pair_found: 局域网里开着远程访问的电脑：
   pair_found_hint: 到这台电脑上复制配对链接
   pair_found_picked: "在 %{host} 上打开 Runode 的「配对设备」页，点「复制配对链接」，粘贴到上面。"
+sidebar:
+  search: 搜索 agent
+  nav: 导航
+  tasks: 任务
+  tasks_both: "%{todo} 个待办，%{running} 个在跑"
+  tasks_todo: "%{todo} 个待办"
+  tasks_running: "%{running} 个在跑"
+  tasks_needs_you: "%{count} 个需要你"
+  phone: 手机
+  phone_live: "%{name} 连着"
+inbox:
+  title: 需要你
+  watching: "正在看，等了 %{time}"
+  waited: "等了 %{time}"
+  watching_just: 正在看，刚开始等
+  waited_just: 刚开始等
+  detail_blocked: "%{agent} 在 %{place} 里等你回答"
+  empty: 没有会话在等你
+  show_terminal: 看终端
+prompts:
+  option_for: "%{number}. %{text}：%{title}"
+  asking: "在问：%{question}"
+time:
+  under_minute: 1 分钟不到
+  minutes: "%{n} 分钟"
+  hours: "%{n} 小时"
 worktree:
   title: 新建工作树
   close: 关闭
@@ -342,6 +368,10 @@ background:
   end_detail: 其中还有 %{count} 个 agent 在运行，会随之结束。
 panel:
   label: 右侧面板
+  changes: 改动
+  actions: Actions
+  changed_files: "%{count} 个文件有改动"
+  review_commit: 看改动并提交
   not_repo: 不在 git 仓库里
   git_missing:
     macos: "这台 Mac 上还没装 git。在终端里运行 xcode-select --install 装上命令行工具，装好后不用重开 Runode。"
@@ -401,6 +431,7 @@ tooltip:
   show_panel: 显示面板
   hide_panel: 隐藏面板
   tasks: 命令
+  tasks_last: "命令：%{command}"
   remote_desktop: 远程桌面
   close_search: 关闭搜索
   close_split: 关闭分屏
@@ -488,7 +519,6 @@ git:
     empty: agent 返回的提交说明是空的。
     prompt_too_long: "提示词太长，%{binary} 的命令行放不下。请精简模板，或者换一个从标准输入读提示词的 agent。"
     menu: 生成提交说明…
-    button: 用 AI 生成提交说明
   checkout: 切换分支…
   create_branch: 新建分支…
   picker:
@@ -504,8 +534,9 @@ git:
     in_worktree: "在工作树 %{name} 里"
   quote_hunk: 交给 agent
   stage_hunk: 暂存这一块
-  unstage_hunk: 取消暂存这一块
   discard_hunk: 放弃这一块
+  hunk_line: "第 %{line} 行"
+  hunk_lines: "第 %{start}–%{end} 行"
   irreversible: 此操作不能撤销。
   discard_confirm: 放弃更改
   cancel: 取消
@@ -545,6 +576,14 @@ git:
   commit_and_sync: 提交并同步
   undo_last_commit: 撤销上次提交
   commit_more: 更多提交方式
+  files_will_commit: "%{count} 个文件，勾上的 %{checked} 个会提交"
+  check_all: 全部勾上
+  partly_checked: 只勾了一部分
+  regenerate: 重新生成
+  draft_note: 照最近几条提交的写法起的草，可以直接改。
+  commit_files: "提交 %{count} 个文件"
+  committed: "提交好了 %{hash}"
+  push_commits: "推送 %{count} 个提交"
   sync_changes: "同步更改 %{behind}↓ %{ahead}↑"
   publish_branch: 发布分支
   publish: 发布
@@ -640,7 +679,8 @@ layout:
   open: 打开
   hint: ←→ 选方向 · 1–4 选个数 · 回车打开 · Esc 取消
 settings:
-  back: 返回
+  close: 关闭
+  close_label: 关闭设置
   remove: 删除
   language_name: 简体中文
   invalid: "这个值不对：%{err}"
@@ -654,16 +694,28 @@ settings:
   no_home: 找不到主目录，没地方放配置文件
   write_failed: "没能写入配置文件：%{err}"
   reset: 从配置文件里删掉这一项，回到默认
+  reset_for: "%{name}：从配置文件里删掉这一项，回到默认"
+  reset_short: 恢复默认
   default: 默认
   follow_system: 跟随系统
   no_sound: 无
+  preview_sound_for: "试听%{name}"
   notifications_denied: "系统设置里没有允许 Runode 发通知，通知不会弹出来。"
   open_notification_settings: 打开通知设置
-  test_notification: 发送测试通知
+  test_notification: 发一条试试
+  notifications_need_app: 现在跑的不是打包好的 Runode.app，发不出去
   no_matches: "没有匹配项"
+  search: 搜索设置
+  search_placeholder: 名字、说明或配置项
+  go_to_page: 去这一页
   fallback_font: 备用字体 %{n}
   add_fallback_font: 添加备用字体…
   other_agents: 其他程序
+  agent_filter: "在 %{count} 个 agent 里筛选"
+  filter_for: "筛选%{name}"
+  selected_count: "已选 %{count} 个"
+  show_more: "展开其余 %{count} 个"
+  show_less: 收起
   config_file: 位置
   config_file_hint: "这里的设置写进 %{path}，文件里别的行原样保留。Ghostty 配置里写的值也生效，这里设了的以这里为准。"
   config_file_placeholder: 要引入的文件路径，比如 ~/.runode/colors.conf
@@ -680,7 +732,24 @@ settings:
     ssh: 远程主机
     remote: 远程访问
     keybinds: 快捷键
+  group:
+    interface: 界面
+    work: 工作
+    connect: 连接
+  page_desc:
+    general: 界面语言、自动更新、防止睡眠和登录时启动，以及设置写在哪个文件里。
+    appearance: 主题、字体和窗口的样子，以及状态栏上显示哪些。
+    colors: 终端的前景、背景、光标、选中和搜索用什么颜色，以及调色板。
+    keybinds: 每个动作按哪个键，可以改、可以加，也可以不用默认的那套。
+    terminal: 光标、键盘、回滚历史和剪贴板，以及命令在哪里跑。
+    files: 文件树里点文件怎么预览、预览栏的字号，以及 Git 要不要自动抓取。
+    agents: agent 干完或者等你回答时怎么叫你，以及它开的分屏怎么摆。
+    dictation: 语音输入用哪个离线模型、离线用不了时交给哪家云端识别，以及要不要让大模型润色。
+    ssh: 连过的 SSH 主机、配对的电脑，以及连远程主机时用的 ssh 设置。
+    remote: 让配对的手机和电脑连进这台电脑，以及手机上收不收通知。
   section:
+    alerts: 提醒
+    splits: 分屏
     color_scheme: 配色
     config_file: 配置文件
     font: 字体
@@ -988,7 +1057,6 @@ clipboard:
   allow: 允许
   deny: 不允许
 machine:
-  live: 已连接
   revoke_title: "撤销和「%{device}」的配对？"
   revoke_detail: 它会马上断开，要重新配对才能再连上。
   revoke: "撤销配对"
@@ -1008,7 +1076,13 @@ status:
   hide_bar: 隐藏状态栏
   bar: 状态栏
   resources_title: 资源
-  resources_tooltip: Runode 一共占用的内存 · 终端数
+  resources_tooltip: Runode 一共占用的内存和终端数
+  terminals: "%{count} 个终端"
+  ports_count: "%{count} 个端口"
+  waiting: "%{count} 个等你"
+  waiting_jump: 跳到等得最久的那个
+  working: "%{count} 个在干活"
+  branch_ahead: "比上游多 %{count} 个提交"
   name: 名称
   memory: 内存
   no_terminals: 这个窗口里没有终端
@@ -1052,8 +1126,18 @@ mobile:
   copy_link: "复制安装链接"
   next: "继续"
   back: "返回"
-  pair_title: "配对这台电脑。"
-  pair_body: "在手机上打开 Runode，点「配对电脑」，然后扫码。"
+  close: "关闭"
+  page_title: "手机"
+  page_body: "在手机上看 agent、回答它们的提问。另一台电脑上的 Runode 也在这里配对。"
+  pair_new: "配对新手机"
+  step1: "在 iPhone 上打开 Runode，点「配对电脑」。"
+  step2: "用手机扫左边的二维码。"
+  step3: "配好后，手机首页会列出这台电脑。"
+  waiting_scan: "等手机来扫"
+  expires_before: "这个码还有"
+  expires_after: "失效"
+  expires_at: "这个码 %{time} 失效"
+  manual: "扫不了？手动输入"
   name_label: "电脑名"
   name_hint: "手机上会看到「%{name}」。留空则用这台电脑自己的名字。"
   network_label: "网络"
@@ -1066,12 +1150,22 @@ mobile:
   refresh_networks: "重新读取网络"
   pair_qr: "配对二维码"
   install_qr: "安装二维码"
-  devices: "配对过的设备"
-  copy_code: "复制配对链接"
+  devices: "已配对的设备"
+  no_devices: "还没有配对过的设备。"
+  unpair_note: "撤销配对后，那台设备要重新配对才能再连上。"
+  live: "连着"
+  device_more: "「%{name}」的更多操作"
+  remote_title: "远程访问"
+  remote_on: "让配对过的设备连过来"
+  remote_on_hint: "关掉以后连不上，配对记录还留着。"
+  anywhere: "不在同一个网络也能连"
+  anywhere_hint: "先试着直连，连不上再走中继；内容两头加密。"
+  push: "agent 等你回答时推到手机"
+  push_hint: "手机没开着 Runode 也能收到提醒。"
+  test_push: "推一条试试"
   copied: "已复制"
   copy_hint: "要配对另一台电脑，在那台电脑的 Runode 里选「添加远程主机 → Runode 配对」，粘贴这个链接。有效期和二维码一样。"
-  expires: "%{time} 后过期"
-  regenerate: "重新生成"
+  regenerate: "换一个码"
   off: "远程访问还没打开。打开后，配对过的手机和电脑就能连上这台电脑的终端。"
   turn_on: "打开远程访问"
   generate: "生成二维码"
@@ -1081,23 +1175,22 @@ mobile:
   keep: "退出后保持连接"
   done: "完成"
   again: "再配一台"
-  paired_intro_title: "你的手机已配对。"
-  computers_paired_title: "你的电脑已配对。"
-  paired_intro_body: "打开手机上的 Runode 接着干活，或者再配一台。"
   paired_on: "配对于 %{date}"
   date: "%{y}/%{m}/%{d}"
-  pair_another: "与另一台设备配对"
   kind_mobile: "手机"
   kind_desktop: "电脑"
 kanban:
-  title: 看板
-  entry_needs_you: "%{count} 个任务需要你处理"
+  title: 任务
   host_too_old: 终端宿主太旧，不认得看板；重开 Runode 让它升级。
+  views: 任务视图
+  board: 看板
   schedules: 定时
+  schedule_count: "%{count} 个定时"
+  project_filter: 项目
+  all_projects: 全部项目
+  today: "今天做完 %{done} 个，现在 %{running} 个在跑"
   new_todo: 新建任务
   new_schedule: 新建定时
-  close: 关闭看板
-  close_schedules: 关闭定时
   close_history: 关闭记录
   count: "%{count} 个任务"
   empty: 没有任务
@@ -1111,9 +1204,18 @@ kanban:
   reopen: 取消完成
   edit: 编辑任务
   in_review: "待评审"
-  failed: "没做成"
   queued: "排队中"
-  queued_after: "等 #%{number}"
+  queued_after_line: "排在 #%{number} 后面，它做完自动开始"
+  ran_for: "已经跑了 %{time}"
+  limit: "时限 %{time}"
+  in_worktree: "%{agent}，在工作树里"
+  took: "%{agent} 用了 %{time}"
+  not_finished: "%{agent} 没做完"
+  continue: 接着做
+  view_terminal: 看终端
+  next_schedule: 下一个定时
+  schedule_line: "%{repeat}，在 %{place} 里，交给 %{agent}"
+  all_schedules: "全部 %{count} 个定时"
   paused: "已停用"
   create_pr: "推送分支并开 PR"
   remove_todo: 删除任务
@@ -1192,11 +1294,13 @@ kanban:
     title_placeholder: 空着时用提示词的第一行
     prompt: 交给 agent 的提示词
     prompt_placeholder: 要 agent 做什么？%{key} 保存
-    workspace: 工作区
+    prompt_hint: 标题空着时用第一行，提示词原样交给 agent
+    close: 关闭
+    workspace: 项目
     choose_dir: 选择目录…
     picker_failed: "打不开系统的文件选择窗口。"
     picker_failed_linux: "打不开系统的文件选择窗口：它要装 xdg-desktop-portal 和你所用桌面的 portal 后端。"
-    agent: Agent
+    agent: 交给
     model: 模型
     effort: 强度
     default: 默认
@@ -1207,8 +1311,45 @@ kanban:
     no_models: "问不到 %{agent} 的模型。"
     empty_models: "%{agent} 没有给出模型，可能要先登录或者配好 API 密钥。"
     agent_missing: "找不到 %{agent} 命令。请先安装，或者确认它在 shell 的 PATH 里。"
-    worktree: 在独立的工作树里做
-    when: 什么时候跑
+    worktree: 在单独的工作树里做，不碰我手上的改动
+    when: 什么时候做
+    start_now: 马上开始
+    start_manual: 放进待办
+    start_after: 排在别的后面
+    start_schedule: 定时
+    now_hint: 存好就开一个终端跑起来，卡片直接进「进行中」。
+    manual_hint: 先放在「待办」里，等你点卡片上的开始才跑。
+    queued_hint: 放在「待办」里排队，有空位就按顺序自动开始。
+    queue_any: 不等哪张，有空位就开始
+    queue_lead: 排进队里，等
+    queue_tail: 做完、在跑的少于上限时自动开始
+    after_hint: 它做完就自动开始；它没做成，这个也记成没做成。
+    after_task: "#%{number} %{title}"
+    after_gone: 不在看板上的任务
+    clock_at: 在
+    next_fires: "接下来三次：%{first}、%{second}、%{third}。每次到点建一个新任务。"
+    next_fire: "下一次：%{first}。到点建一个新任务。"
+    fire_today: "今天 %{time}"
+    fire_tomorrow: "明天 %{time}"
+    limit_custom: 自己定
+    create_and_start: 创建并开始
+    create_todo: 放进待办
+    create_queued: 排进队列
+    create_schedule: 建好定时
+    summary:
+      agent_model: "%{agent}（%{model}）"
+      here: "交给 %{agent}，在 %{project} 里做。"
+      here_limit: "交给 %{agent}，在 %{project} 里做，最多跑 %{limit}。"
+      worktree: "交给 %{agent}，在 %{project} 的新工作树里做。"
+      worktree_limit: "交给 %{agent}，在 %{project} 的新工作树里做，最多跑 %{limit}。"
+      now: "存好就开始：%{body}"
+      manual: "先放进待办，等你点开始：%{body}"
+      queued: "放进待办排队，有空位就开始：%{body}"
+      after: "等 #%{number} 做完自动开始：%{body}"
+      after_gone: "等的任务做完自动开始：%{body}"
+      once: "%{time} 开一个新任务：%{body}"
+      repeat: "%{when} 开一个新任务：%{body}"
+      due: "到点开一个新任务：%{body}"
     kind_once: 一次
     kind_daily: 每天
     kind_every: 每隔
@@ -1228,7 +1369,6 @@ kanban:
     bad_every: "间隔至少要一分钟。"
     templates: 模板
     template_blank: 空白
-    templates_hint: "把 Markdown 文件放进模板目录，就能加自己的模板。"
     templates_open: "打开模板目录"
     skills: Skill
     none: 不用
@@ -1252,10 +1392,6 @@ kanban:
     bad_cron: "写五段：分 时 日 月 星期。"
     cron_never: 这个 cron 表达式永远等不到。
     queue: 开始方式
-    queue_manual: 我来开始
-    queue_queued: 排队，轮到就开始
-    queue_after: "等 #%{number} 做完：%{title}"
-    queue_after_gone: 等一个不在看板上的任务
     host_too_old_for: "在跑的终端宿主太旧，不认得%{what}；退出 Runode 再打开。"
   template:
     issue: 修复 Issue
@@ -1651,3 +1787,22 @@ pane_window:
   pop_in: 放回主窗口
   keep_on_top: 置顶
   stop_on_top: 取消置顶
+review:
+  title: 改动
+  files: "%{count} 个文件"
+  back: 回到终端
+  committed: "%{count} 个文件提交好了"
+  none_left: 没有别的改动了
+  collapse: 收起
+  expand: 展开
+  open_diff: 在预览栏里看改动
+  unstage_first: 先撤回暂存才能放弃
+  new_file: 新文件
+  deleted: 已删除
+  renamed: 改了名
+  conflicted: 有冲突
+  binary: 二进制文件
+  too_large: 改动太多
+a11y:
+  action_for: "%{action}：%{title}"
+  separator: "，"

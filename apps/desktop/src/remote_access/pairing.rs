@@ -10,13 +10,17 @@
 //! 配好以后和命令行一样提醒 `runode_config::TERMINAL_HOST`：它关着时退出 app 宿主跟着退出，远程
 //! 访问跟着停，手机就连不上了。
 
-use std::{net::IpAddr, rc::Rc, time::Duration};
+use std::{
+    net::IpAddr,
+    rc::Rc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 use gpui::{Bounds, Context, Hsla, SharedString, Task, Window, canvas, div, fill, point, prelude::*, px, size};
 use qrcode::{Color, EcLevel, QrCode};
 use runode_paths::Dirs;
 use runode_protocol::remote::PAIRING_TTL;
-use runode_remote::{Bind, ListenerStatus, PairingProgress, PairingTicket, host_name, listener_status, now_unix};
+use runode_remote::{Bind, ListenerStatus, PairingProgress, PairingTicket, host_name, listener_status};
 
 use crate::config::AppConfig;
 
@@ -82,8 +86,8 @@ pub struct Waiting {
     uri: SharedString,
     qr: Rc<Qr>,
     polls: u32,
-    /// 上次画的时候还剩几秒，变了才重画。
-    shown_secs: u64,
+    /// 口令过期的时刻，生成口令时从 `PairingTicket::expires_at` 折算一次，各次重画取到的都一样。
+    expires_at: Instant,
     _poll: Task<()>,
 }
 
@@ -96,10 +100,21 @@ impl Waiting {
         self.qr.clone()
     }
 
-    /// 口令还剩多久过期，写成「分:秒」。
-    pub fn remaining(&self) -> String {
-        remaining(self.shown_secs)
+    /// 口令过期的时刻，给界面画倒计时。过期由轮询口令文件发现，不按它算。
+    pub fn expires_at(&self) -> Instant {
+        self.expires_at
     }
+
+    /// 口令过期的时刻，Unix 秒。
+    pub fn expires_unix(&self) -> u64 {
+        self.ticket.expires_at()
+    }
+}
+
+/// Unix 秒 `at` 折成本进程的 `Instant`；已经过去的折成现在。
+fn instant_at(at: u64) -> Instant {
+    let at = UNIX_EPOCH + Duration::from_secs(at);
+    Instant::now() + at.duration_since(SystemTime::now()).unwrap_or_default()
 }
 
 /// 画好的二维码：每个模块深还是浅，含四周的留白。
@@ -122,6 +137,11 @@ impl Qr {
         Some(Self { width, dark })
     }
 
+    /// 一边有几个模块，含四周的留白。
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
     /// 第 `y` 行里连着的深色模块，(起点, 长度)；连成一段画，相邻模块之间不会露出细缝。
     fn runs(&self, y: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
         let line = &self.dark[y * self.width..(y + 1) * self.width];
@@ -134,11 +154,6 @@ impl Qr {
             .filter(|(_, run)| run[0])
             .map(|(start, run)| (start, run.len()))
     }
-}
-
-/// 剩下的时间，写成「分:秒」。
-fn remaining(secs: u64) -> String {
-    format!("{}:{:02}", secs / 60, secs % 60)
 }
 
 fn io_failed(err: std::io::Error) -> String {
@@ -163,7 +178,7 @@ impl Pairing {
             let uri = ticket.uri(status, &[]).map_err(io_failed)?.to_string();
             let qr = Qr::new(&uri).ok_or_else(|| rust_i18n::t!("settings.pairing.too_long").into_owned())?;
             Ok::<_, String>(Waiting {
-                shown_secs: ticket.expires_at().saturating_sub(now_unix()),
+                expires_at: instant_at(ticket.expires_at()),
                 dirs,
                 ticket,
                 uri: uri.into(),
@@ -204,11 +219,6 @@ impl Pairing {
                         {
                             Pairing::Failed(rust_i18n::t!("settings.pairing.stopped").into_owned())
                         } else {
-                            let secs = waiting.ticket.expires_at().saturating_sub(now_unix());
-                            if secs != waiting.shown_secs {
-                                waiting.shown_secs = secs;
-                                cx.notify();
-                            }
                             return;
                         }
                     }
@@ -288,9 +298,11 @@ mod tests {
     }
 
     #[test]
-    fn remaining_time_reads_as_minutes_and_seconds() {
-        assert_eq!(remaining(600), "10:00");
-        assert_eq!(remaining(65), "1:05");
-        assert_eq!(remaining(0), "0:00");
+    fn past_unix_times_become_now() {
+        let before = Instant::now();
+        assert!(instant_at(0) >= before);
+        let ahead = instant_at(runode_remote::now_unix() + 60);
+        assert!(ahead > before + Duration::from_secs(58));
+        assert!(ahead <= Instant::now() + Duration::from_secs(60));
     }
 }

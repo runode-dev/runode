@@ -19,7 +19,8 @@ use crate::{
 #[derive(IntoElement)]
 pub struct Segmented {
     div: Stateful<Div>,
-    items: Vec<Stateful<Div>>,
+    /// 各段，以及跟在文字后面的那一小段（`trailing`）。
+    items: Vec<(Stateful<Div>, Option<SharedString>)>,
     fill: bool,
 }
 
@@ -28,6 +29,14 @@ impl Segmented {
     pub fn new(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Self {
         let div = div().id(id).role(Role::RadioGroup).aria_label(label);
         Self { div, items: Vec::new(), fill: false }
+    }
+
+    /// 最后加的那一段在文字后面再写一小段（比如个数），字小一号、颜色淡；`description` 是辅助工具读的说法。
+    pub fn trailing(mut self, text: impl Into<SharedString>, description: impl Into<SharedString>) -> Self {
+        if let Some((item, _)) = self.items.pop() {
+            self.items.push((item.aria_description(description), Some(text.into())));
+        }
+        self
     }
 
     /// 加一段：`label` 是显示的文字，也是报给辅助工具的名字，`selected` 是选没选，点了调 `pick`。
@@ -61,7 +70,7 @@ impl Segmented {
             })
             .on_press(cx, pick)
             .child(label);
-        self.items.push(item);
+        self.items.push((item, None));
         self
     }
 
@@ -77,6 +86,11 @@ impl RenderOnce for Segmented {
         let theme = cx.theme();
         let Self { mut div, items, fill } = self;
         let user = std::mem::take(div.style());
+        let muted = theme.muted_foreground;
+        let items = items.into_iter().map(|(item, trailing)| match trailing {
+            Some(text) => item.gap(px(6.)).child(gpui::div().text_size(FontSize::Small).text_color(muted).child(text)),
+            None => item,
+        });
         let mut div = div
             .flex()
             .h(scaled(26.))
@@ -87,7 +101,7 @@ impl RenderOnce for Segmented {
             .border_1()
             .border_color(theme.control_border)
             .text_size(FontSize::Body)
-            .children(items.into_iter().map(|item| -> AnyElement {
+            .children(items.map(|item| -> AnyElement {
                 if fill { item.flex_1().justify_center().into_any_element() } else { item.into_any_element() }
             }));
         div.style().refine(&user);

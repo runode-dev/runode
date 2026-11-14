@@ -79,8 +79,11 @@ public final class TerminalModel {
     public private(set) var scrolledBack = false
     /// 软键盘（或硬件键盘的输入焦点）在终端上。
     public private(set) var keyboardVisible = false
-    /// 终端的背景色，导航栏、空白区跟着它。
+    /// 终端的背景色和前景色，导航栏、底栏、空白区按它们配色（`chromeTheme`）。
     public private(set) var background = TermSettings.default.background
+    public private(set) var foreground = TermSettings.default.foreground
+    /// 终端页四周（导航栏、分屏标签、底栏、按键栏）的配色，跟着这个终端的主题走。
+    public var chromeTheme: AppTheme { AppTheme(background: background, foreground: foreground) }
     /// 在等用户确认结束会话。
     public var isConfirmingKill = false
     /// 底部的快速回复：agent 停下来等回答时出现。
@@ -111,6 +114,7 @@ public final class TerminalModel {
     @ObservationIgnored private let ownerProbeDelay: Duration
     @ObservationIgnored private let onOpen: @MainActor (SessionId) -> Void
     @ObservationIgnored private let onClose: @MainActor (SessionId) -> Void
+    @ObservationIgnored private let onAnswerScreenChange: @MainActor (SessionId) -> Void
     /// Claude Code 全屏界面的滚轮：按它的加速规则攒着发，见 `ClaudeWheelPacer`。
     @ObservationIgnored private var claudeWheel = ClaudeWheelPacer()
     @ObservationIgnored private var claudeWheelAnchor = (column: 0, row: 0)
@@ -125,11 +129,15 @@ public final class TerminalModel {
     /// `onOpen`、`onClose` 告诉会话列表终端页开始、不再看这个会话（见 `SessionListModel.screenOpened`）。
     /// `ownerProbeDelay` 是 `ownerHint` 不为 `none` 时，重放完以后等宿主报 `SizeOwner` 的时间，等不到
     /// 就当作没有 owner。`linkState` 是这台电脑的连接状态，订阅到第一个事件之前标题下面照它显示。
+    /// `onAnswerScreenChange` 在等回答（`isAwaitingAnswer`）时每收到一段输出调一次，来得很勤，要自己节流。
+    /// `onAnswered` 在 `quickReply` 的一批按键或文字送到后调。
     public init(
         sessionId: SessionId, title: String, agent: Agent? = nil, link: any HostLink, linkState: LinkState = .idle,
         ownerHint: SizeOwnerHint = .unknown, sizePreference: SizePreference = .automatic,
         ownerProbeDelay: Duration = .milliseconds(400),
         onOpen: @escaping @MainActor (SessionId) -> Void = { _ in },
+        onAnswerScreenChange: @escaping @MainActor (SessionId) -> Void = { _ in },
+        onAnswered: @escaping @MainActor (SessionId) -> Void = { _ in },
         onClose: @escaping @MainActor (SessionId) -> Void
     ) {
         self.sessionId = sessionId
@@ -143,7 +151,8 @@ public final class TerminalModel {
         self.autoFit = ownerHint == .none
         self.onOpen = onOpen
         self.onClose = onClose
-        self.quickReply = QuickReplyModel(sessionId: sessionId, link: link, connected: false)
+        self.onAnswerScreenChange = onAnswerScreenChange
+        self.quickReply = QuickReplyModel(sessionId: sessionId, link: link, connected: false, onDelivered: onAnswered)
     }
 
     /// 现在按手机屏幕决定尺寸。
@@ -423,6 +432,7 @@ public final class TerminalModel {
             }
             terminal.feed(frame.payload)
             display?.terminalContentDidChange()
+            if isAwaitingAnswer { onAnswerScreenChange(sessionId) }
         }
     }
 
@@ -456,6 +466,7 @@ public final class TerminalModel {
             everAttached = true
             gridSize = attached.size
             background = settings.background
+            foreground = settings.foreground
             if let title = attached.meta.displayTitle { self.title = title }
             agent = attached.meta.agent
             if case .exited = phase {} else { phase = .replaying }
@@ -482,6 +493,7 @@ public final class TerminalModel {
             guard !awaitingAttach, let terminal else { return }
             settings = newSettings
             background = newSettings.background
+            foreground = newSettings.foreground
             terminal.applyTheme(newSettings)
             display?.terminalSettingsDidChange(newSettings)
         case .meta(_, let meta, _):

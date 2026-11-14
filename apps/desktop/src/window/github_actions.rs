@@ -2,7 +2,6 @@
 //! shell 报告的 PATH 和固定到状态栏上的工作流，画面板外框和顶上的标签，替它在旁边的终端里跑 gh、
 //! 在预览栏里开工作流文件，存档固定的工作流和三段的高度。
 
-use crate::ui::theme::ActiveTheme as _;
 use std::path::PathBuf;
 
 use crate::github_actions::{ActionsEvent, ActionsPanel, Input, PROGRAM, render_pinned};
@@ -77,9 +76,13 @@ impl WindowView {
         });
     }
 
-    pub(super) fn render_github_actions_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
-        let shell =
-            self.side_panel_shell("github-actions-panel", width, cx).bg(cx.theme().mix(0.03)).text_size(FontSize::Body);
+    pub(super) fn render_github_actions_panel(
+        &mut self,
+        width: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let shell = self.side_panel_shell("github-actions-panel", width, window, cx).text_size(FontSize::Body);
         if !self.git_button_visible() {
             let local = self.workspace().host.is_local();
             return shell.child(panel_message(crate::git_view::not_repo_text(local, cx), cx));

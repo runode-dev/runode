@@ -1,4 +1,5 @@
-//! 窗口底部的状态栏，右边四块，点了在上面弹出各自的浮层：
+//! 窗口底部的状态栏。右边先是这个窗口里 agent 的两个计数：几个在等你回答（点了跳到等得最久的那个）、几个在干活
+//! （点了打开 agent 列表），没有时不画；后面四块点了在上面弹出各自的浮层：
 //!
 //! - 防止休眠：开启、agent 在干活时、关闭三种，记在配置的 `prevent-sleep` 里，要挡时拿着一个 `system_probe::Caffeinate`；
 //! - 内存和终端数：runode 自己（app、单独跑的宿主和各个终端里的进程）一共占多少内存，所有窗口里有
@@ -9,8 +10,9 @@
 //! - 远程主机：连过几台 SSH 主机，没有时不显示；浮层里列出各台的连接状态，能连上、断开，或者去设置页管理
 //!   （`host_list`）。
 //!
-//! 左边是 GitHub Actions 页里固定到状态栏上的工作流，见 `render_pinned_workflows`；当前工作区在 SSH 主机上时
-//! 后面跟着那台主机的连接状态，连着时写出心跳测的延迟（`RemoteHost::latency`）。
+//! 左边最前面是当前工作区的分支（点了打开 Git 面板），不在仓库里时不画；接着是 GitHub Actions 页里固定到状态栏上的
+//! 工作流（`render_pinned_workflows`）；当前工作区在 SSH 主机上时后面跟着那台主机的连接状态，连着时写出心跳测的
+//! 延迟（`RemoteHost::latency`）。分支和两个计数常显，不进 `status-bar-hidden`。
 //!
 //! 用户点了「检查更新…」以后，查和下载期间最左边还有一块转着圈的「正在检查更新…」，见 `update::status_label`。
 //!
@@ -39,22 +41,33 @@ use runode_types::{
     color::Rgb,
 };
 
-use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, remote};
+use super::{
+    GotoAgent, PressDown, ToggleStatusBar, WindowView,
+    agents::{self, Status as AgentStatus},
+    cards,
+    files::MenuItem,
+    project::SidePanel,
+    remote,
+    sidebar::inbox::waiting_oldest_first,
+};
 use crate::host_client::hosts::{self, HostId};
 use crate::project_host::ProjectHost;
 use crate::system_probe::{self as probe, Caffeinate, Helper, POLL_INTERVAL, Port, Procs, Usage};
-use crate::ui::a11y::{A11yPress, StaticText};
+use crate::ui::a11y::{A11yPress, Press as _, StaticText};
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::menu::MenuHost as _;
 use crate::ui::panel::sync_icon;
 use crate::{
     config::AppConfig,
     ui::icons::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SERVER_ICON, SHELL_ICON,
+        BRANCH_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON,
+        SERVER_ICON,
     },
     ui::{
+        font,
         font_size::{FontSize, scaled},
         hsla,
+        status_mark::{MarkKind, status_mark},
         tooltip::tooltip,
     },
 };
@@ -62,6 +75,14 @@ use crate::{
 /// 隔多久重新问一次在监听的端口：状态栏上只是个小数字，`lsof` 又比 `ps` 慢得多；开着端口浮层时每次都问。
 const PORTS_INTERVAL: Duration = Duration::from_secs(15);
 pub(super) const STATUS_BAR_HEIGHT: f32 = 26.;
+/// 状态栏上一块的高度、左右留白，以及块与块、块里图标和文字之间的间距。
+const ITEM_HEIGHT: f32 = STATUS_BAR_HEIGHT - 4.;
+const ITEM_PADDING: f32 = 8.;
+const ITEM_GAP: f32 = 6.;
+/// 整条左右留白。
+const BAR_PADDING: f32 = 10.;
+/// 分支、等你和在干活几块的图标和标记。
+const MARK_SIZE: f32 = 12.;
 /// 浮层离状态栏和窗口边留的距离。
 const POPOVER_GAP: f32 = 6.;
 /// 资源浮层里 CPU 和内存两列的宽度。
@@ -487,7 +508,7 @@ impl WindowView {
         self.panes().map(|(_, view)| view)
     }
 
-    pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_status_bar(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let fg_h = cx.theme().foreground;
         let host = &self.workspace().host;
         let (sleep, effective, total, terminals, ours) = match cx.try_global::<Status>() {
@@ -500,7 +521,8 @@ impl WindowView {
             ),
             None => (PreventSleep::Off, false, Usage::default(), 0, 0),
         };
-        let icon = |path: &'static str| svg().flex_none().path(path).size(px(13.)).text_color(fg_h.opacity(0.6));
+        let (waiting, working) =
+            agent_counts(self.window_entries(window, cx).into_iter().map(|entry| entry.mark.status));
         // 点说的是这会儿有没有在防睡眠；关着时它总是灰的，和「关闭」两个字重复，不画。
         let dot = (sleep != PreventSleep::Off).then(|| {
             div().flex_none().size(px(6.)).rounded_full().bg(if effective {
@@ -515,12 +537,12 @@ impl WindowView {
         let sleep_item = self
             // 上面只写着「开启」「关闭」，不说是什么开关。
             .status_item("status-sleep", StatusPopover::Sleep, Some(rust_i18n::t!("status.sleep_title").into()), cx)
-            .aria_description(format!("{} · {sleep_state}", sleep_label(sleep)))
-            .child(icon(COFFEE_ICON))
+            .aria_description(format!("{} {sleep_state}", sleep_label(sleep)))
             .child(sleep_label(sleep))
             .children(dot);
         // 还没量到内存（刚启动、头一次采样没回来）时写一道横线，不写 0。
         let memory = if total.memory == 0 { "—".to_owned() } else { format_bytes(total.memory) };
+        let terminals = rust_i18n::t!("status.terminals", count = terminals).into_owned();
         let resources_item = self
             .status_item(
                 "status-resources",
@@ -528,12 +550,10 @@ impl WindowView {
                 Some(rust_i18n::t!("status.resources_tooltip").into()),
                 cx,
             )
-            .aria_description(format!("{}: {memory} · {terminals}", rust_i18n::t!("status.resources_tooltip")))
-            .child(icon(MEMORY_ICON))
-            .child(memory)
-            .child(div().text_color(fg_h.opacity(0.35)).child("·"))
-            .child(icon(SHELL_ICON))
-            .child(terminals.to_string());
+            .aria_description(format!("{terminals} {memory}"))
+            .child(terminals)
+            .child(memory);
+        let ports = rust_i18n::t!("status.ports_count", count = ours).into_owned();
         let ports_item = self
             .status_item(
                 "status-ports",
@@ -541,9 +561,11 @@ impl WindowView {
                 Some(rust_i18n::t!("status.ports_tooltip").into()),
                 cx,
             )
-            .aria_description(ours.to_string())
-            .child(icon(PLUG_ICON))
-            .child(ours.to_string());
+            .aria_description(ports.clone())
+            .child(ports);
+        let branch_item = self.render_branch_item(cx);
+        let waiting_item = (waiting > 0).then(|| self.render_waiting_item(waiting, cx));
+        let working_item = (working > 0).then(|| self.render_working_item(working, cx));
         let update = crate::update::status_label(cx).map(|label| {
             div()
                 .id("status-update")
@@ -576,13 +598,13 @@ impl WindowView {
             let name = crate::remote_hosts::display_name(host, cx);
             div()
                 .id("status-host")
-                .aria_static_text(format!("{name} · {state}"))
+                .aria_static_text(format!("{name} {state}"))
                 .flex_none()
-                .h(px(STATUS_BAR_HEIGHT - 6.))
-                .px(px(6.))
+                .h(px(ITEM_HEIGHT))
+                .px(px(ITEM_PADDING))
                 .flex()
                 .items_center()
-                .gap(px(5.))
+                .gap(px(ITEM_GAP))
                 .tooltip(tooltip(crate::remote_hosts::status_text(&status), None))
                 .child(div().flex_none().size(px(6.)).rounded_full().bg(color))
                 .child(name)
@@ -599,12 +621,12 @@ impl WindowView {
             .flex_none()
             .w_full()
             .h(px(STATUS_BAR_HEIGHT))
-            .px(px(6.))
+            .px(px(BAR_PADDING))
             .flex()
             .items_center()
-            .gap(px(2.))
+            .gap(px(ITEM_GAP))
             .text_size(FontSize::Small)
-            .text_color(fg_h.opacity(0.7))
+            .text_color(cx.theme().subtle_foreground)
             .when(!cards(cx), |bar| bar.border_t_1().border_color(cx.theme().border))
             // 右键选显示哪几块，或者藏起整条；几块全藏起来时这一条还在，照样能右键找回来。
             .on_mouse_down(
@@ -614,10 +636,13 @@ impl WindowView {
                     this.open_status_menu(event.position, cx);
                 }),
             )
-            // 左边是 GitHub Actions 页里固定的工作流，其余几块靠右。
+            // 左边是分支和 GitHub Actions 页里固定的工作流，其余几块靠右。
+            .children(branch_item)
             .children(pinned)
             .children(host_item)
             .child(div().flex_1())
+            .children(waiting_item)
+            .children(working_item)
             .children(update)
             .when(shown(StatusItem::Sleep), |bar| bar.child(sleep_item))
             .when(shown(StatusItem::Resources), |bar| bar.child(resources_item))
@@ -705,23 +730,12 @@ impl WindowView {
             )
         });
         let view = cx.entity().downgrade();
-        div()
-            .id(id)
-            .role(Role::Button)
+        bar_button(id, cx)
             .aria_label(title)
             .aria_expanded(open.is_some())
             .relative()
-            .flex_none()
-            .h(px(STATUS_BAR_HEIGHT - 6.))
-            .px(px(6.))
-            .rounded(px(4.))
-            .flex()
-            .items_center()
-            .gap(px(5.))
-            .cursor_pointer()
             .when(open.is_some(), |item| item.bg(cx.theme().mix(0.07)))
             .when_some(hint.filter(|_| open.is_none()), |item, hint| item.tooltip(tooltip(hint, None)))
-            .hover(|item| item.bg(cx.theme().mix(0.10)))
             // 浮层开着时在捕获阶段就关掉、不再往下传：浮层自己的「点到外面就关」和下面再打开的都不跑。
             .capture_any_mouse_down(cx.listener(move |this, _, _, cx| {
                 if this.status_popover.is_some_and(|open| open.same_kind(popover)) {
@@ -745,6 +759,73 @@ impl WindowView {
                 cx.notify();
             })
             .children(content)
+    }
+
+    /// 当前工作区的分支，有没推的提交时后面写 ↑ 和个数；点了打开 Git 面板。不在仓库里、还没问到时为空。
+    fn render_branch_item(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let workspace = self.workspace();
+        let branch = workspace.repo.branch.clone()?;
+        // 读着的 git 状态是终端所在目录的仓库，和工作区的分支对得上才用它的 ahead。
+        let ahead = workspace
+            .project
+            .git
+            .as_ref()
+            .filter(|git| git.main.info.branch.as_deref() == Some(branch.as_ref()))
+            .map_or(0, |git| git.main.info.ahead);
+        let text = match ahead {
+            0 => branch.to_string(),
+            ahead => format!("{branch} ↑{ahead}"),
+        };
+        let show_git = rust_i18n::t!("tooltip.show_git").into_owned();
+        let description = match ahead {
+            0 => show_git.clone(),
+            ahead => format!("{} {show_git}", rust_i18n::t!("status.branch_ahead", count = ahead)),
+        };
+        let icon = svg().flex_none().path(BRANCH_ICON).size(px(MARK_SIZE)).text_color(cx.theme().subtle_foreground);
+        Some(
+            bar_button("status-branch", cx)
+                .aria_label(branch)
+                .aria_description(description)
+                .tooltip(tooltip(show_git, None))
+                .when_some(font::mono(cx), |item, family| item.font_family(family))
+                .child(icon)
+                .child(text)
+                .on_press(cx, |this, window, cx| this.set_panel(Some(SidePanel::Git), window, cx)),
+        )
+    }
+
+    /// 这个窗口里有 `count` 个 agent 在等你回答；点了跳到等得最久的那个。
+    fn render_waiting_item(&self, count: usize, cx: &mut Context<Self>) -> Stateful<Div> {
+        let text = rust_i18n::t!("status.waiting", count = count).into_owned();
+        let jump = rust_i18n::t!("status.waiting_jump").into_owned();
+        bar_button("status-waiting", cx)
+            .aria_label(text.clone())
+            .aria_description(jump.clone())
+            .tooltip(tooltip(jump, None))
+            .text_color(cx.theme().warning_text)
+            .child(status_mark("status-waiting-mark", MarkKind::Waiting { blink: false }, MARK_SIZE, cx))
+            .child(text)
+            .on_press(cx, |this, window, cx| {
+                let entries = this.window_entries(window, cx);
+                let oldest = waiting_oldest_first(entries, |entry| (entry.mark.status, entry.changed_at));
+                if let Some(entry) = oldest.first() {
+                    agents::reveal(entry.window, entry.pane, cx);
+                }
+            })
+    }
+
+    /// 这个窗口里有 `count` 个 agent 在干活；点了打开 agent 列表。
+    fn render_working_item(&self, count: usize, cx: &mut Context<Self>) -> Stateful<Div> {
+        let text = rust_i18n::t!("status.working", count = count).into_owned();
+        let open_list = rust_i18n::t!("action.goto_agent").into_owned();
+        bar_button("status-working", cx)
+            .aria_label(text.clone())
+            .aria_description(open_list.clone())
+            .tooltip(tooltip(open_list, None))
+            .text_color(cx.theme().info)
+            .child(status_mark("status-working-mark", MarkKind::Working { spin: true }, MARK_SIZE, cx))
+            .child(text)
+            .on_press(cx, |this, window, cx| this.goto_agent(&GotoAgent, window, cx))
     }
 
     fn render_sleep_popover(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1152,6 +1233,32 @@ impl WindowView {
     }
 }
 
+/// 状态栏上能点的一块：按钮的角色、大小和悬停的底色，名字和点了做什么由调用方加。
+fn bar_button(id: &'static str, cx: &App) -> Stateful<Div> {
+    let hover = cx.theme().mix(0.10);
+    div()
+        .id(id)
+        .role(Role::Button)
+        .flex_none()
+        .h(px(ITEM_HEIGHT))
+        .px(px(ITEM_PADDING))
+        .rounded(px(6.))
+        .flex()
+        .items_center()
+        .gap(px(ITEM_GAP))
+        .cursor_pointer()
+        .hover(move |item| item.bg(hover))
+}
+
+/// 等你回答和在干活的各有几个。
+fn agent_counts(marks: impl Iterator<Item = AgentStatus>) -> (usize, usize) {
+    marks.fold((0, 0), |(waiting, working), status| match status {
+        AgentStatus::Blocked => (waiting + 1, working),
+        AgentStatus::Working => (waiting, working + 1),
+        AgentStatus::Done | AgentStatus::Idle => (waiting, working),
+    })
+}
+
 fn sleep_label(mode: PreventSleep) -> String {
     let key = match mode {
         PreventSleep::On => "status.sleep_on",
@@ -1232,5 +1339,13 @@ mod tests {
     fn bytes_switch_to_gigabytes() {
         assert_eq!(format_bytes(875 * 1024 * 1024 + 400 * 1024), "875.4 MB");
         assert_eq!(format_bytes(1280 * 1024 * 1024), "1.25 GB");
+    }
+
+    #[test]
+    fn agent_counts_split_waiting_and_working() {
+        use AgentStatus::{Blocked, Done, Idle, Working};
+        assert_eq!(agent_counts([Blocked, Working, Done, Blocked, Idle, Working, Working].into_iter()), (2, 3));
+        assert_eq!(agent_counts([Done, Idle].into_iter()), (0, 0));
+        assert_eq!(agent_counts(std::iter::empty()), (0, 0));
     }
 }

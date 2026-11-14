@@ -5,7 +5,7 @@
 
 use gpui::{
     App, Div, ElementId, FontWeight, InteractiveElement, Interactivity, IntoElement, ParentElement, RenderOnce,
-    SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::*, px,
+    SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::*, px, svg,
 };
 
 use crate::{
@@ -23,6 +23,10 @@ pub enum BadgeVariant {
     Secondary,
     /// 描一圈边，没有底色。
     Outline,
+    /// 状态色（`Theme::warning`、`info`、`success`）淡淡一层底，字是同色读得清的那一档。
+    Warning,
+    Info,
+    Success,
 }
 
 #[derive(IntoElement)]
@@ -30,15 +34,22 @@ pub struct Badge {
     div: Div,
     text: SharedString,
     variant: BadgeVariant,
+    icon: Option<&'static str>,
 }
 
 impl Badge {
     pub fn new(text: impl Into<SharedString>) -> Self {
-        Self { div: div(), text: text.into(), variant: BadgeVariant::default() }
+        Self { div: div(), text: text.into(), variant: BadgeVariant::default(), icon: None }
     }
 
     pub fn variant(mut self, variant: BadgeVariant) -> Self {
         self.variant = variant;
+        self
+    }
+
+    /// 画在字前面的图标，颜色跟字。
+    pub fn icon(mut self, icon: &'static str) -> Self {
+        self.icon = Some(icon);
         self
     }
 
@@ -52,7 +63,7 @@ impl Badge {
 impl RenderOnce for Badge {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme();
-        let Self { mut div, text, variant } = self;
+        let Self { mut div, text, variant, icon } = self;
         let user = std::mem::take(div.style());
         let div = div
             .flex_none()
@@ -70,9 +81,18 @@ impl RenderOnce for Badge {
             }
             BadgeVariant::Secondary => div.bg(theme.mix(0.12)).text_color(theme.muted_foreground),
             BadgeVariant::Outline => div.border_1().border_color(theme.input).text_color(theme.foreground),
+            BadgeVariant::Warning => div.bg(theme.warning.opacity(0.15)).text_color(theme.warning_text),
+            BadgeVariant::Info => div.bg(theme.info.opacity(0.15)).text_color(theme.info),
+            BadgeVariant::Success => div.bg(theme.success.opacity(0.15)).text_color(theme.success),
         };
         div.style().refine(&user);
-        div.child(gpui::div().min_w_0().truncate().child(text))
+        // 图标不继承字色，取盖过调用方样式之后的字色。
+        let color = div.style().text.color;
+        div.when_some(icon, |div, icon| {
+            div.gap(px(3.))
+                .child(svg().path(icon).flex_none().size(px(10.)).when_some(color, |svg, c| svg.text_color(c)))
+        })
+        .child(gpui::div().min_w_0().truncate().child(text))
     }
 }
 

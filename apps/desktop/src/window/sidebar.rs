@@ -1,7 +1,10 @@
-//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是配对设备入口（`mobile`），下面是
-//! 后台会话（`background`）。workspace 按项目（`project_group`）归组；有 workspace 在别的主机上时先按主机分组，
-//! 每组一个组头，能收起、在那台主机上新建。每行两行字：状态圆点和名字，下面是当前分支（`repo`）。
+//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是找 agent、新建任务的一行，下面是在等你
+//! 回答的 agent（`inbox`），最下面是导航（`nav`），列表和导航之间是后台会话（`background`）。workspace 按项目
+//! （`project_group`）归组；有 workspace 在别的主机上时先按主机分组，每组一个组头，能收起、在那台主机上新建。
+//! 每行一行字：状态标记和名字，右边是 agent 的名字，没有 agent 时是和项目不同的当前分支（`repo`）。
 
+pub(super) mod inbox;
+mod nav;
 mod project_group;
 mod repo;
 
@@ -15,42 +18,40 @@ use crate::ui::icons::system_logos;
 use crate::ui::panel::split_handle;
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
-    AccessibleAction, Action, AnyElement, App, Axis, Context, Div, ExternalPaths, Focusable, FontWeight, Hsla,
-    Modifiers, MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, Window,
-    WindowControlArea, div, prelude::*, px, relative, svg,
+    AccessibleAction, Action, AnyElement, App, Axis, Context, Div, ExternalPaths, Focusable, FontWeight, Modifiers,
+    MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, Window, WindowControlArea, div,
+    prelude::*, px, relative, svg,
 };
 
 use super::{
-    CARD_GAP, CloseWorkspace, DIVIDER_GRAB_WIDTH, DIVIDER_STEP, Divider, NewTab, NewWorkspace, PressDown, RenameTarget,
-    RenameWorkspace, Renaming, SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT,
-    TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView,
+    AGENT_MARK_SIZE_SMALL, CARD_GAP, CloseWorkspace, DIVIDER_GRAB_WIDTH, DIVIDER_STEP, Divider, NewTab, NewWorkspace,
+    PressDown, RenameTarget, RenameWorkspace, Renaming, SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE,
+    TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView,
     agents::Status as AgentStatus,
     background, cards, drag_window,
     inline_edit::InlineEdit,
     pane_move::DraggedPane,
-    titlebar::{drag_chip, drop_marker, shortcut_hint, styled_agent_mark},
+    titlebar::{agent_mark, drag_chip, drop_marker, shortcut_hint},
 };
 use crate::ui::a11y::A11yPress;
 use crate::ui::menu::{MenuHost as _, MenuItem};
 use crate::{
     host_client::hosts::{self, HostId, Status},
-    menus::OpenSettings,
     remote_hosts::{self, status_text},
     ui::icons::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, MONITOR_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SETTINGS_ICON,
-        SIDEBAR_ICON,
+        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, MONITOR_ICON, PENCIL_ICON, PLUS_ICON, SERVER_ICON, SIDEBAR_ICON,
     },
     ui::{
         font_size::{self, FontSize, scaled},
         hsla,
-        theme::{ADDED, AGENT_BLOCKED_COLOR, MODIFIED, REMOVED},
+        theme::{ADDED, MODIFIED, REMOVED},
         tooltip::tooltip,
     },
 };
 pub(super) use repo::RepoBadge;
 
 /// 侧栏的默认宽度，比红绿灯宽得多，红绿灯落在侧栏顶上。
-const SIDEBAR_WIDTH: f32 = 200.;
+const SIDEBAR_WIDTH: f32 = 240.;
 /// 拖动侧栏宽度的范围；最窄也要放得下红绿灯。
 const SIDEBAR_MIN_WIDTH: f32 = 140.;
 const SIDEBAR_MAX_WIDTH: f32 = 480.;
@@ -66,17 +67,19 @@ fn sidebar_toggle_left(fullscreen: bool) -> f32 {
 pub(super) fn sidebar_toggle_inset(fullscreen: bool) -> f32 {
     sidebar_toggle_left(fullscreen) + SIDEBAR_TOGGLE_WIDTH + 8.
 }
-/// 顶上配对设备、看板这些入口一行的高度。
-pub(super) const ROW_HEIGHT: f32 = 30.;
-/// 每个 workspace 一项，两行字：上面是状态和名字，下面是分支。
-const WORKSPACE_ROW_HEIGHT: f32 = 42.;
-const WORKSPACE_NAME_LINE: f32 = 18.;
-const WORKSPACE_DETAIL_LINE: f32 = 16.;
-/// 没选中的行的字色，入口和 workspace 行一样。
-pub(super) const ROW_TEXT_OPACITY: f32 = 0.78;
-/// 侧栏每行名字前的图标那一格：项目的头像或文件夹、workspace 的状态圆点，配对设备入口和新建按钮的图标也占
-/// 这么宽，几处的文字才对齐。
-pub(super) const ROW_ICON_SIZE: f32 = 16.;
+/// 侧栏顶上几段（搜索行、「需要你」、项目栏）之间的间距。
+const SECTION_GAP: f32 = 18.;
+/// 侧栏里各段离侧栏左右两边的留白。
+const SIDEBAR_INSET: f32 = 6.;
+/// 每个 workspace 一项，一行字。
+const WORKSPACE_ROW_HEIGHT: f32 = 30.;
+/// 项目组头下面的 workspace 行往右缩进：左边的竖线离组头左边 `TREE_LINE_INSET`，行离竖线 `TREE_ROW_INSET`。
+const TREE_LINE_INSET: f32 = 10.;
+const TREE_ROW_INSET: f32 = 8.;
+/// 没选中的行的字色，导航和 workspace 行一样。
+const ROW_TEXT_OPACITY: f32 = 0.78;
+/// 主机组头和导航每行名字前的图标那一格，两处的文字才对齐。
+const ROW_ICON_SIZE: f32 = 16.;
 /// 改名输入框的高度。
 const RENAME_FIELD_HEIGHT: f32 = 18.;
 /// 按主机分组时每组顶上的组头。
@@ -97,9 +100,9 @@ pub(super) fn shortcut_modifiers(select: &dyn Action, last: &dyn Action, is_last
     modifiers(select).or_else(|| if is_last { modifiers(last) } else { None })
 }
 
-/// 配置里终端的第一个字体，侧栏写分支、目录时用作等宽字体。
+/// 侧栏写分支、目录时用的等宽字体。
 pub(super) fn mono_font(cx: &App) -> SharedString {
-    cx.global::<crate::config::AppConfig>().0.font_family.first().cloned().unwrap_or_default().into()
+    crate::ui::font::mono(cx).unwrap_or_default()
 }
 
 /// 拖动中的 workspace：拖动时跟着鼠标画出来，放到另一行上时按 `id` 挪位置。
@@ -118,9 +121,10 @@ struct DraggedWorkspace {
 
 impl Render for DraggedWorkspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 底色和当前 workspace 那一行一样。
-        let bg = cx.theme().mix(0.10);
-        drag_chip(px(self.width - 12.), px(WORKSPACE_ROW_HEIGHT * font_size::scale(cx)), self.name.clone(), bg, cx)
+        // 底色和当前 workspace 那一行一样，宽度也照项目下缩进的行。
+        let bg = cx.theme().tab_active;
+        let width = self.width - 2. * SIDEBAR_INSET - TREE_LINE_INSET - TREE_ROW_INSET;
+        drag_chip(px(width), px(WORKSPACE_ROW_HEIGHT * font_size::scale(cx)), self.name.clone(), bg, cx)
     }
 }
 
@@ -189,8 +193,9 @@ impl WindowView {
             .on_press_down(cx, |this, window, cx| this.toggle_sidebar(&ToggleSidebar, window, cx))
     }
 
-    pub(super) fn render_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let modifiers = window.modifiers();
+        let inbox = self.render_inbox(window, cx);
         let rows = self.render_workspace_rows(modifiers, cx);
         let drop_bg = cx.theme().mix(0.08);
         div()
@@ -214,13 +219,9 @@ impl WindowView {
                     .window_control_area(WindowControlArea::Drag)
                     .on_mouse_down(MouseButton::Left, drag_window),
             )
-            .child(self.render_mobile_entry(cx))
-            .child(self.render_new_todo_entry(modifiers, cx))
-            .child(self.render_schedules_entry(modifiers, cx))
-            .child(self.render_kanban_entry(modifiers, cx))
-            // 配对设备、新建任务、定时和看板的入口不是 workspace，和下面的列表用一条线隔开。
-            .child(div().flex_none().mx(px(14.)).mb(px(4.)).h(px(1.)).bg(cx.theme().border))
-            .child(self.render_projects_bar(cx))
+            .child(self.render_sidebar_search(cx))
+            .children(inbox.map(|inbox| div().flex_none().mt(px(SECTION_GAP)).px(px(SIDEBAR_INSET)).child(inbox)))
+            .child(self.render_projects_bar(cx).mt(px(SECTION_GAP)))
             .child(
                 div()
                     .id("workspace-list")
@@ -231,14 +232,14 @@ impl WindowView {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.sidebar_scroll)
-                    .px(px(6.))
+                    .px(px(SIDEBAR_INSET))
                     .flex()
                     .flex_col()
                     .gap(px(2.))
                     .children(rows),
             )
             .children(self.render_background(cx))
-            .child(self.render_sidebar_footer(cx))
+            .child(self.render_sidebar_nav(cx))
     }
 
     /// 列表里的各行：按项目分段，每段前面是项目的组头（`render_project_groups`）。有在别的主机上的就先按主机
@@ -378,6 +379,7 @@ impl WindowView {
         let press = toggle.clone();
         let new_on = host.clone();
         let editing = renaming.is_some();
+        let warning = cx.theme().warning;
         div()
             .id(key.clone())
             .role(Role::Button)
@@ -449,9 +451,7 @@ impl WindowView {
                 }
             }))
             .when(attention, |header| {
-                header.child(
-                    div().flex_none().size(px(HOST_STATUS_DOT)).rounded_full().bg(gpui::rgb(AGENT_BLOCKED_COLOR)),
-                )
+                header.child(div().flex_none().size(px(HOST_STATUS_DOT)).rounded_full().bg(warning))
             })
             .children(rename)
             .when(!editing, |header| {
@@ -496,10 +496,11 @@ impl WindowView {
     fn render_row(&self, ix: usize, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
-        // 开着配对设备页、看板时高亮的是入口。
+        // 开着配对设备页、看板时高亮的是导航里的那一行。
         let active = ix == self.active && !matches!(self.page, Some(super::Page::Mobile(_) | super::Page::Kanban(_)));
-        let active_bg = cx.theme().accent_selected;
-        let hover_bg = cx.theme().accent;
+        let theme = cx.theme();
+        let (active_bg, hover_bg) = (theme.tab_active, theme.accent);
+        let (muted, subtle) = (theme.muted_foreground, theme.subtle_foreground);
         let close_label = rust_i18n::t!("menu.close_workspace");
         let close_tooltip = tooltip(close_label.clone(), None);
         let fg = cx.theme().foreground;
@@ -527,29 +528,44 @@ impl WindowView {
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
-        // 名字前是状态：有 agent 时是它的标记，没有时开着终端是绿点，一个终端都没有是空心圆点。等用户回答的
-        // 另在右边写成显眼的标签。
+        // 名字前是状态：有 agent 时是它的标记，没有时开着终端是 shell 的提示符，一个终端都没有是空心圆点。当前
+        // 行的光标不闪，用户正看着它。
         let blocked = mark.is_some_and(|mark| mark.status == AgentStatus::Blocked);
-        let status =
-            div().flex_none().w(px(ROW_ICON_SIZE)).h_full().flex().items_center().justify_center().child(match mark {
-                Some(mark) => styled_agent_mark(mark, ("workspace-agent", id), fg, cards(cx)),
-                None => div()
-                    .size(px(7.))
-                    .rounded_full()
-                    .map(|dot| if live { dot.bg(hsla(ADDED)) } else { dot.border_1().border_color(fg.opacity(0.35)) })
-                    .into_any_element(),
-            });
+        let status = if mark.is_some() || live {
+            agent_mark(mark, ("workspace-agent", id), AGENT_MARK_SIZE_SMALL, !active && blocked, cx)
+        } else {
+            div()
+                .flex_none()
+                .size(px(AGENT_MARK_SIZE_SMALL))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(div().size(px(7.)).rounded_full().border_1().border_color(muted))
+                .into_any_element()
+        };
         let name: AnyElement = match renaming {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx))).into_any_element(),
-            None => div().min_w_0().truncate().child(workspace.name.clone()).into_any_element(),
+            None => div()
+                .min_w_0()
+                .truncate()
+                .when(active, |name| name.font_weight(FontWeight::MEDIUM))
+                .child(workspace.name.clone())
+                .into_any_element(),
         };
-        // 名字下面一行用等宽字写分支，不在仓库里时写目录。
-        let detail = match &repo.branch {
-            Some(branch) => branch.clone(),
-            None => workspace.host.display_dir(&workspace.dir).into(),
+        // 名字右边是 agent 的名字；没有 agent 时，分支和项目组头上写的不一样才用等宽字写出来。
+        let label = match mark {
+            Some(mark) => Some(div().child(mark.kind.display_name())),
+            None => repo
+                .branch
+                .clone()
+                .filter(|branch| {
+                    self.main_worktree_branch(&workspace.host, workspace.project_dir())
+                        .is_none_or(|(_, main)| main != branch)
+                })
+                .map(|branch| div().font_family(mono_font(cx)).child(branch)),
         };
-        // 名字右边按着快捷键的修饰键或者单按 ⌘ 时是快捷键提示（按 ⌘ 是找快捷键时最先按的键）；后面是等回答的
-        // 标签和响铃的圆点。悬停时这些都让给关闭按钮。
+        // 按着快捷键的修饰键或者单按 ⌘ 时这里换成快捷键提示（按 ⌘ 是找快捷键时最先按的键）；后面是响铃的圆点。
+        // 悬停时这些都让给关闭按钮。
         let is_last = ix + 1 == self.workspaces.len();
         let held = modifiers == Modifiers::command()
             || shortcut_modifiers(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx) == Some(modifiers);
@@ -559,33 +575,14 @@ impl WindowView {
             .items_center()
             .gap(px(6.))
             .text_size(FontSize::Small)
-            .text_color(fg.opacity(if active { 0.55 } else { 0.4 }))
+            .text_color(if active { subtle } else { muted })
             .group_hover(group.clone(), |trailing| trailing.invisible())
             .map(|trailing| {
                 if held {
                     trailing.children(shortcut_hint(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx))
                 } else {
-                    trailing
+                    trailing.children(label.map(|label| label.min_w_0().truncate()))
                 }
-            })
-            .when(blocked, |trailing| {
-                let amber = Hsla::from(gpui::rgb(AGENT_BLOCKED_COLOR));
-                // 浅色底上琥珀色的字太浅，压暗了才读得清；底色照旧是淡淡的琥珀色。
-                let text = if cx.theme().is_light { Hsla { l: 0.32, ..amber } } else { amber };
-                trailing.child(
-                    div()
-                        .flex_none()
-                        .h(scaled(16.))
-                        .px(px(6.))
-                        .rounded(px(4.))
-                        .flex()
-                        .items_center()
-                        .bg(amber.opacity(0.16))
-                        .text_color(text)
-                        .text_size(FontSize::Tiny)
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(AgentStatus::Blocked.label()),
-                )
             })
             .when(workspace.bell(), |trailing| {
                 trailing.child(div().flex_none().size(px(6.)).rounded_full().bg(fg.opacity(0.8)))
@@ -613,10 +610,11 @@ impl WindowView {
             .flex_none()
             .h(scaled(WORKSPACE_ROW_HEIGHT))
             .px(px(8.))
-            .rounded(px(6.))
+            .rounded(px(7.))
             .flex()
-            .flex_col()
-            .justify_center()
+            .items_center()
+            .gap(px(8.))
+            .text_size(FontSize::Medium)
             .map(|row| {
                 if active {
                     row.bg(active_bg).text_color(fg)
@@ -682,97 +680,37 @@ impl WindowView {
             }))
             // 右键菜单从指针处弹出，指针还停在行上，提示会盖住菜单的第一项。
             .when_some(dir.filter(|_| self.menu().is_none()), |row, dir| row.tooltip(tooltip(dir, None)))
+            .child(status)
+            .child(div().flex_1().min_w_0().child(name))
             .child(
                 div()
                     .flex_none()
-                    .h(scaled(WORKSPACE_NAME_LINE))
+                    .relative()
+                    .h_full()
+                    .min_w(px(TAB_CLOSE_SIZE))
+                    .max_w(relative(0.5))
                     .flex()
                     .items_center()
-                    .gap(px(6.))
-                    .child(status)
-                    .child(div().flex_1().min_w_0().child(name))
+                    .justify_end()
+                    .child(trailing)
                     .child(
-                        div()
-                            .flex_none()
-                            .relative()
-                            .h_full()
-                            .min_w(px(TAB_CLOSE_SIZE))
-                            .max_w(relative(0.5))
-                            .flex()
-                            .items_center()
-                            .justify_end()
-                            .child(trailing)
-                            .child(
-                                Button::new(("workspace-close", id), close_label)
-                                    .with_size(ButtonSize::IconXs)
-                                    .text_size(px(14.))
-                                    .child("×")
-                                    .absolute()
-                                    .right_0()
-                                    .top(relative(0.5))
-                                    .mt(px(-TAB_CLOSE_SIZE / 2.))
-                                    .reveal_on_hover(group)
-                                    .tooltip(close_tooltip)
-                                    .on_press_down(cx, move |this, window, cx| {
-                                        if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {
-                                            this.confirm_close_workspace(ix, window, cx);
-                                        }
-                                    }),
-                            ),
+                        Button::new(("workspace-close", id), close_label)
+                            .with_size(ButtonSize::IconXs)
+                            .text_size(px(14.))
+                            .child("×")
+                            .absolute()
+                            .right_0()
+                            .top(relative(0.5))
+                            .mt(px(-TAB_CLOSE_SIZE / 2.))
+                            .reveal_on_hover(group)
+                            .tooltip(close_tooltip)
+                            .on_press_down(cx, move |this, window, cx| {
+                                if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {
+                                    this.confirm_close_workspace(ix, window, cx);
+                                }
+                            }),
                     ),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .h(scaled(WORKSPACE_DETAIL_LINE))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(div().flex_none().w(px(ROW_ICON_SIZE)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .font_family(mono_font(cx))
-                            .text_size(FontSize::Small)
-                            .text_color(fg.opacity(if active { 0.55 } else { 0.4 }))
-                            .child(detail),
-                    ),
-            )
-    }
-
-    /// 侧栏底部一行：左边新建工作区，右边打开设置页。
-    fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Div {
-        let settings = rust_i18n::t!("workspace.settings");
-        let settings_tooltip = tooltip(settings.clone(), Some(&OpenSettings));
-        div().flex_none().h(scaled(32.)).m(px(6.)).flex().gap(px(2.)).child(self.render_new_workspace_button(cx)).child(
-            Button::new("sidebar-settings", settings)
-                .icon(SETTINGS_ICON)
-                .icon_size(15.)
-                .with_size(ButtonSize::Icon)
-                .w(px(32.))
-                .h_auto()
-                .rounded(px(6.))
-                .tooltip(settings_tooltip)
-                .on_press_down(cx, |this, window, cx| this.open_settings(window, cx)),
-        )
-    }
-
-    fn render_new_workspace_button(&self, cx: &mut Context<Self>) -> Button {
-        let tooltip = tooltip(rust_i18n::t!("workspace.new"), Some(&NewWorkspace));
-        let fg = cx.theme().foreground;
-        Button::new("new-workspace", rust_i18n::t!("workspace.new"))
-            .flex_1()
-            .min_w_0()
-            .h_auto()
-            .px(px(8.))
-            .justify_start()
-            .text_color(fg.opacity(0.55))
-            .child(div().flex_none().w(px(ROW_ICON_SIZE)).flex().justify_center().text_size(px(14.)).child("+"))
-            .child(div().min_w_0().truncate().child(rust_i18n::t!("workspace.new").into_owned()))
-            .tooltip(tooltip)
-            .on_press_down(cx, |this, window, cx| this.new_workspace(&NewWorkspace, window, cx))
     }
 
     /// 右键点了 workspace `id`：先切过去，再在 `position` 弹出新建标签、改名、关掉这几样的菜单，都对着它办。

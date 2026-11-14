@@ -195,6 +195,32 @@ workspace:
   pair_found: "Computers with remote access on this network:"
   pair_found_hint: Copy the pairing link on this computer
   pair_found_picked: "On %{host}, open Runode's Devices page, click \"Copy Pairing Link\", and paste it above."
+sidebar:
+  search: Find an agent
+  nav: Navigation
+  tasks: Tasks
+  tasks_both: "To do: %{todo}, running: %{running}"
+  tasks_todo: "To do: %{todo}"
+  tasks_running: "Running: %{running}"
+  tasks_needs_you: "Needs you: %{count}"
+  phone: Phone
+  phone_live: "%{name} connected"
+inbox:
+  title: Needs you
+  watching: "Watching, waited %{time}"
+  waited: "Waited %{time}"
+  watching_just: Watching, just asked
+  waited_just: Just asked
+  detail_blocked: "%{agent} is waiting for you in %{place}"
+  empty: Nothing is waiting for you
+  show_terminal: Show terminal
+prompts:
+  option_for: "%{number}. %{text}: %{title}"
+  asking: "Asking: %{question}"
+time:
+  under_minute: under a minute
+  minutes: "%{n} min"
+  hours: "%{n} h"
 worktree:
   title: New Worktree
   close: Close
@@ -342,6 +368,10 @@ background:
   end_detail: "Agents still running in them: %{count}. They will be stopped."
 panel:
   label: Side Panel
+  changes: Changes
+  actions: Actions
+  changed_files: "Changed files: %{count}"
+  review_commit: Review and commit
   not_repo: Not a git repository
   git_missing:
     macos: "Git is not installed on this Mac. Run xcode-select --install in a terminal to install the command line tools; no need to restart Runode afterwards."
@@ -401,6 +431,7 @@ tooltip:
   show_panel: Show Panel
   hide_panel: Hide Panel
   tasks: Tasks
+  tasks_last: "Command: %{command}"
   remote_desktop: Remote Desktop
   close_search: Close Search
   close_split: Close Split
@@ -488,7 +519,6 @@ git:
     empty: The agent returned an empty commit message.
     prompt_too_long: "The prompt is too long for the command line of %{binary}. Shorten the template, or pick an agent that reads the prompt from standard input."
     menu: Generate Commit Message…
-    button: Generate commit message with AI
   checkout: Checkout to…
   create_branch: Create Branch…
   picker:
@@ -504,8 +534,9 @@ git:
     in_worktree: "in worktree %{name}"
   quote_hunk: Send to Agent
   stage_hunk: Stage Hunk
-  unstage_hunk: Unstage Hunk
   discard_hunk: Discard Hunk
+  hunk_line: "Line %{line}"
+  hunk_lines: "Lines %{start}–%{end}"
   irreversible: This can't be undone.
   discard_confirm: Discard Changes
   cancel: Cancel
@@ -545,6 +576,14 @@ git:
   commit_and_sync: Commit & Sync
   undo_last_commit: Undo Last Commit
   commit_more: More Commit Actions
+  files_will_commit: "%{count} files changed, the %{checked} checked will be committed"
+  check_all: Check All
+  partly_checked: Partly checked
+  regenerate: Regenerate
+  draft_note: Drafted in the style of your recent commits, edit it freely.
+  commit_files: "Commit %{count} Files"
+  committed: "Committed %{hash}"
+  push_commits: "Push %{count} Commits"
   sync_changes: "Sync Changes %{behind}↓ %{ahead}↑"
   publish_branch: Publish Branch
   publish: Publish
@@ -640,7 +679,8 @@ layout:
   open: Open
   hint: ←→ direction · 1–4 count · Return to open · Esc to cancel
 settings:
-  back: Back
+  close: Close
+  close_label: Close Settings
   remove: Remove
   language_name: English
   invalid: "Not a valid value: %{err}"
@@ -654,16 +694,28 @@ settings:
   no_home: There is no home directory to keep the configuration file in
   write_failed: "Could not write the configuration file: %{err}"
   reset: Remove from the configuration file and go back to the default
+  reset_for: "%{name}: remove from the configuration file and go back to the default"
+  reset_short: Reset
   default: Default
   follow_system: Follow system
   no_sound: None
+  preview_sound_for: "Preview %{name}"
   notifications_denied: "System Settings doesn't allow Runode to send notifications, so none will appear."
   open_notification_settings: Open Notification Settings
-  test_notification: Send Test Notification
+  test_notification: Send a Test
+  notifications_need_app: This build is not the packaged Runode.app, so none will be sent
   no_matches: No matches
+  search: Search settings
+  search_placeholder: Name, description or config key
+  go_to_page: Go to Page
   fallback_font: Fallback font %{n}
   add_fallback_font: Add Fallback Font…
   other_agents: Other programs
+  agent_filter: "Filter %{count} agents"
+  filter_for: "Filter %{name}"
+  selected_count: "Selected: %{count}"
+  show_more: "Show %{count} more"
+  show_less: Show less
   config_file: Location
   config_file_hint: "Settings here are written to %{path}; other lines in the file are kept. Values set in the Ghostty configuration also apply unless overridden here."
   config_file_placeholder: Path of a file to include, such as ~/.runode/colors.conf
@@ -680,7 +732,24 @@ settings:
     ssh: Remote Hosts
     remote: Remote Access
     keybinds: Keyboard Shortcuts
+  group:
+    interface: Interface
+    work: Work
+    connect: Connections
+  page_desc:
+    general: Interface language, updates, sleep and starting at login, and which file your settings are written to.
+    appearance: Theme, fonts and how windows look, and what the status bar shows.
+    colors: The terminal's foreground, background, cursor, selection and search colors, and its palette.
+    keybinds: Which keys run which actions. Change them, add your own, or drop the defaults.
+    terminal: Cursor, keyboard, scrollback and clipboard, and where tasks run.
+    files: How clicking a file in the tree previews it, the preview font size, and whether Git fetches on its own.
+    agents: How agents get your attention when they finish or need an answer, and how their splits are laid out.
+    dictation: Which offline model dictation uses, which cloud service takes over when it can't, and whether a model polishes the text.
+    ssh: SSH hosts you've connected to, paired computers, and the ssh settings used to reach them.
+    remote: Let paired phones and computers connect to this one, and choose whether phones get notifications.
   section:
+    alerts: Alerts
+    splits: Splits
     color_scheme: Color Scheme
     config_file: Configuration File
     font: Font
@@ -988,7 +1057,6 @@ clipboard:
   allow: Allow
   deny: Don’t Allow
 machine:
-  live: Connected
   revoke_title: "Unpair “%{device}”?"
   revoke_detail: It's disconnected right away and has to pair again to connect.
   revoke: "Unpair"
@@ -1008,7 +1076,13 @@ status:
   hide_bar: Hide Status Bar
   bar: Status Bar
   resources_title: Resources
-  resources_tooltip: Memory used by Runode · Terminals
+  resources_tooltip: Memory and terminals used by Runode
+  terminals: "Terminals: %{count}"
+  ports_count: "Ports: %{count}"
+  waiting: "Waiting: %{count}"
+  waiting_jump: Jump to the one waiting longest
+  working: "Working: %{count}"
+  branch_ahead: "%{count} ahead of upstream"
   name: Name
   memory: Memory
   no_terminals: No terminals in this window
@@ -1052,8 +1126,18 @@ mobile:
   copy_link: "Copy Install Link"
   next: "Continue"
   back: "Back"
-  pair_title: "Pair this computer."
-  pair_body: "Open Runode on your phone, tap Pair a Computer, then scan the code."
+  close: "Close"
+  page_title: "Phone"
+  page_body: "Check on your agents and answer their questions from your phone. Runode on another computer pairs here too."
+  pair_new: "Pair a New Phone"
+  step1: "Open Runode on your iPhone and tap Pair a Computer."
+  step2: "Scan the code on the left with your phone."
+  step3: "Once paired, this computer shows on the phone's home screen."
+  waiting_scan: "Waiting for a scan"
+  expires_before: "This code has"
+  expires_after: "left"
+  expires_at: "This code expires at %{time}"
+  manual: "Can't scan? Enter it by hand"
   name_label: "Computer name"
   name_hint: "Phones will see “%{name}”. Leave empty to use this computer's own name."
   network_label: "Network"
@@ -1067,10 +1151,20 @@ mobile:
   pair_qr: "Pairing QR Code"
   install_qr: "Install QR Code"
   devices: "Paired Devices"
-  copy_code: "Copy Pairing Link"
+  no_devices: "No paired devices yet."
+  unpair_note: "Once revoked, a device has to pair again to reconnect."
+  live: "Connected"
+  device_more: "More Actions for %{name}"
+  remote_title: "Remote Access"
+  remote_on: "Let paired devices connect"
+  remote_on_hint: "When off, they can't connect, but stay paired."
+  anywhere: "Connect from other networks"
+  anywhere_hint: "Tries a direct path first, then a relay. End-to-end encrypted."
+  push: "Notify your phone when an agent waits for you"
+  push_hint: "Arrives even when Runode isn't open on the phone."
+  test_push: "Send a Test"
   copied: "Copied"
   copy_hint: "To pair another computer, paste the link into Runode there: Add Remote Host → Runode Pairing. It expires along with the code."
-  expires: "Expires in %{time}"
   regenerate: "New Code"
   off: "Remote access is off. With it on, paired phones and computers can reach this computer's terminals."
   turn_on: "Turn On Remote Access"
@@ -1081,23 +1175,22 @@ mobile:
   keep: "Stay Connected After Quitting"
   done: "Done"
   again: "Pair Another"
-  paired_intro_title: "Your phone is paired."
-  computers_paired_title: "Your computers are paired."
-  paired_intro_body: "Open Runode on your phone to pick up where you left off, or pair another device."
   paired_on: "Paired %{date}"
   date: "%{m}/%{d}/%{y}"
-  pair_another: "Pair Another Device"
   kind_mobile: "Phone"
   kind_desktop: "Computer"
 kanban:
-  title: Kanban
-  entry_needs_you: "Needs you: %{count}"
+  title: Tasks
   host_too_old: The terminal host is too old for the Kanban; restart Runode to upgrade it.
+  views: Task views
+  board: Board
   schedules: Schedules
+  schedule_count: "%{count} schedule(s)"
+  project_filter: Project
+  all_projects: All projects
+  today: "Done today: %{done}. Running now: %{running}."
   new_todo: New Task
   new_schedule: New Schedule
-  close: Close the Kanban
-  close_schedules: Close Schedules
   close_history: Close History
   count: "%{count} task(s)"
   empty: Nothing here
@@ -1111,9 +1204,18 @@ kanban:
   reopen: "Mark as Not Done"
   edit: Edit Task
   in_review: "In review"
-  failed: "Failed"
   queued: "Queued"
-  queued_after: "After #%{number}"
+  queued_after_line: "Queued after #%{number}; starts when it's done"
+  ran_for: "Running for %{time}"
+  limit: "Limit %{time}"
+  in_worktree: "%{agent}, in a worktree"
+  took: "%{agent} took %{time}"
+  not_finished: "%{agent} didn't finish"
+  continue: Continue
+  view_terminal: View terminal
+  next_schedule: Next schedule
+  schedule_line: "%{repeat}, in %{place}, by %{agent}"
+  all_schedules: "All schedules (%{count})"
   paused: "Paused"
   create_pr: "Push Branch and Open PR"
   remove_todo: "Delete Task"
@@ -1192,7 +1294,9 @@ kanban:
     title_placeholder: Defaults to the first line of the prompt
     prompt: Prompt for the agent
     prompt_placeholder: What should the agent do? %{key} saves
-    workspace: Workspace
+    prompt_hint: "Without a title, the first line is used; the prompt goes to the agent as written."
+    close: Close
+    workspace: Project
     choose_dir: "Choose a Directory…"
     picker_failed: "Could not open the system file picker."
     picker_failed_linux: "Could not open the system file picker; it needs xdg-desktop-portal and a portal backend for your desktop installed."
@@ -1207,8 +1311,45 @@ kanban:
     no_models: "Could not get the models from %{agent}."
     empty_models: "%{agent} gave no models. You may need to sign in or set an API key first."
     agent_missing: "Cannot find the %{agent} command. Install it, or make sure it is on your shell's PATH."
-    worktree: Work in its own worktree
-    when: Runs
+    worktree: Work in its own worktree, away from my changes
+    when: When
+    start_now: Start Now
+    start_manual: To Do
+    start_after: After Another
+    start_schedule: Schedule
+    now_hint: "Opens a terminal and runs as soon as it is saved; the card goes straight to In Progress."
+    manual_hint: "Waits in To Do until you press Start on its card."
+    queued_hint: "Waits in To Do and starts by itself, in order, when there is room."
+    queue_any: "No task, start when there is room"
+    queue_lead: Queue up and wait for
+    queue_tail: "to finish, then start when fewer than the limit are running"
+    after_hint: "Starts by itself once that task is done; if that task fails, this one is marked failed too."
+    after_task: "#%{number} %{title}"
+    after_gone: A task no longer on the board
+    clock_at: at
+    next_fires: "Next three: %{first}, %{second}, %{third}. Each one opens a new task."
+    next_fire: "Next: %{first}. It opens a new task."
+    fire_today: "today at %{time}"
+    fire_tomorrow: "tomorrow at %{time}"
+    limit_custom: Custom
+    create_and_start: Create and Start
+    create_todo: Add to To Do
+    create_queued: Add to Queue
+    create_schedule: Create Schedule
+    summary:
+      agent_model: "%{agent} (%{model})"
+      here: "%{agent} works in %{project}."
+      here_limit: "%{agent} works in %{project} for up to %{limit}."
+      worktree: "%{agent} works in a new worktree of %{project}."
+      worktree_limit: "%{agent} works in a new worktree of %{project} for up to %{limit}."
+      now: "Starts once saved. %{body}"
+      manual: "Waits in To Do until you start it. %{body}"
+      queued: "Queued to start when there is room. %{body}"
+      after: "Starts after #%{number} is done. %{body}"
+      after_gone: "Starts after the task it waits for is done. %{body}"
+      once: "Opens a new task %{time}. %{body}"
+      repeat: "%{when}: opens a new task. %{body}"
+      due: "Opens a new task when it is due. %{body}"
     kind_once: Once
     kind_daily: Daily
     kind_every: Every
@@ -1228,7 +1369,6 @@ kanban:
     bad_every: "The interval must be at least one minute."
     templates: Templates
     template_blank: Blank
-    templates_hint: "Add your own templates as Markdown files in the templates folder."
     templates_open: "Open Templates Folder"
     skills: Skills
     none: None
@@ -1252,10 +1392,6 @@ kanban:
     bad_cron: "Write five fields: minute hour day month weekday."
     cron_never: This cron expression never comes.
     queue: Start
-    queue_manual: When I start it
-    queue_queued: "Queue: start when there is room"
-    queue_after: "After #%{number} is done: %{title}"
-    queue_after_gone: After a task no longer on the board
     host_too_old_for: "The running terminal host is too old for %{what}; quit Runode and open it again."
   template:
     issue: Fix an issue
@@ -1574,3 +1710,22 @@ pane_window:
   pop_in: Put back in the main window
   keep_on_top: Keep on Top
   stop_on_top: Stop Keeping on Top
+review:
+  title: Changes
+  files: "%{count} files"
+  back: Back to Terminal
+  committed: "%{count} files committed"
+  none_left: No other changes
+  collapse: Collapse
+  expand: Expand
+  open_diff: View Changes in Preview
+  unstage_first: Unstage to Discard
+  new_file: New file
+  deleted: Deleted
+  renamed: Renamed
+  conflicted: Conflicted
+  binary: Binary file
+  too_large: Too many changes
+a11y:
+  action_for: "%{action}: %{title}"
+  separator: ", "

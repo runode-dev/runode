@@ -2,6 +2,8 @@
 
 use std::{
     collections::HashMap,
+    path::Path,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -12,19 +14,22 @@ use crate::ui::{
     font_size::{self, FontSize, scaled},
     hsla,
     icons::{
-        BRANCH_ICON, CHECK_ICON, DISCARD_ICON, GIT_ICON, PENCIL_ICON, PLUS_ICON, TERMINAL_ICON, TRASH_ICON,
+        BRANCH_ICON, CHECK_ICON, CLOCK_ICON, DISCARD_ICON, FOLDER_ICON, GIT_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON,
+        TERMINAL_ICON, TRASH_ICON,
         github_actions::{FAILURE_ICON, PENDING_ICON, SUCCESS_ICON},
     },
     scrollbar::scrollbar,
+    status_mark::{MarkKind, status_mark},
     tabs::{drag_chip, drop_marker},
-    theme::{ADDED, AGENT_BLOCKED_COLOR, AGENT_DONE_COLOR, ActiveTheme as _, MODIFIED, REMOVED},
+    theme::{ADDED, ActiveTheme as _, MODIFIED, REMOVED},
 };
 use gpui::{
     AccessibleAction, Animation, AnimationExt as _, AnyElement, App, Axis, Bounds, Context, Div, ElementId, FontWeight,
-    Hsla, Pixels, Render, Role, SharedString, Stateful, Window, canvas, div, ease_out_quint, prelude::*, px, svg,
+    Pixels, Render, Role, SharedString, Stateful, Window, canvas, div, ease_out_quint, prelude::*, px, relative, svg,
 };
+use runode_agent::prompt::Prompt;
 use runode_protocol::{
-    ClientMsg,
+    ClientMsg, SessionId,
     todo::{Column, DropAction, Outcome, Todo, column, drop_action},
 };
 use runode_types::agent::Agent;
@@ -32,16 +37,24 @@ use runode_types::agent::Agent;
 use super::{
     Kanban, KanbanEvent, Page, RING_WIDTH, agent_text, card_shadow, column_name,
     dialog::Editing,
-    history_link, icon_button, label_row, named, needs_you_badge,
+    history_link, icon_button, label_row, named,
     store::{self, Step, TodoData},
-    when::{short_time, unix_now},
+    when::{limit_text, limit_used, short_time, unix_now, until_next_minute},
 };
-use crate::gh::{Checks, PullRequest};
+use crate::{
+    agent_prompts,
+    gh::{Checks, PullRequest},
+    git_panel::ago::{ago, instant_of, waited},
+    host_client::hosts::HostId,
+    i18n::action_for,
+};
 
 /// 一列最窄这么宽（基准字号下的点数）；窗口放不下四列时横着滚。
 const COLUMN_MIN_WIDTH: f32 = 168.;
-/// 进行中那一列的圆点。
-const IN_PROGRESS_COLOR: u32 = 0x3B82F6;
+/// 列头状态标记的边长。
+const COLUMN_ICON_SIZE: f32 = 14.;
+/// 列的底往前景色偏多少：比页面略浮起一档，卡片（`Theme::surface`）再浮一档。
+const COLUMN_TINT: f32 = 0.04;
 /// 换列的卡片飞多久。
 const FLY: Duration = Duration::from_millis(380);
 /// 落下后淡入、描边褪掉要多久。
@@ -106,17 +119,28 @@ fn drop_before(dragged: &DraggedTodo, column: Column, ix: usize, target: &str, t
     todos.get(at + 1).map(|todo| todo.id.clone())
 }
 
-/// 按列分好的任务，列里保持宿主给的先后。
-fn columns(data: &TodoData, now: u64) -> [Vec<&Todo>; 4] {
+/// 按列分好的任务，列里保持宿主给的先后；`place` 不为空时只要目录正好是它的任务。
+fn columns<'a>(data: &'a TodoData, now: u64, place: Option<&Path>) -> [Vec<&'a Todo>; 4] {
     let mut columns: [Vec<&Todo>; 4] = Default::default();
-    for todo in &data.todos {
+    for todo in data.todos.iter().filter(|todo| place.is_none_or(|dir| todo.spec.dir == dir)) {
         let session = todo.session.and_then(|id| data.sessions.get(&id));
         columns[column_index(column(todo, session, now))].push(todo);
     }
     columns
 }
 
+/// 进行中那一列有几张卡片，不管看板按哪个项目筛选。
+pub(super) fn running(data: &TodoData, now: u64) -> usize {
+    columns(data, now, None)[column_index(Column::InProgress)].len()
+}
+
 impl Kanban {
+    /// 按项目筛选后进行中那一列卡片的会话，按卡片的先后：卡片在这一列时会话一定还在。
+    pub(super) fn running_sessions(&self, data: &TodoData) -> Vec<SessionId> {
+        let grouped = columns(data, unix_now(), self.place_filter.as_deref());
+        grouped[column_index(Column::InProgress)].iter().filter_map(|todo| todo.session).collect()
+    }
+
     /// 卡片拖到 `to` 列放下：先做那一列的动作，再挪到 `before` 前面（放在列里的空白处时为空，不挪；同一列里
     /// 放在空白处时挪到这一列的最后）。
     fn drop_todo(&mut self, dragged: &DraggedTodo, to: Column, before: Option<String>, cx: &mut Context<Self>) {
@@ -141,7 +165,7 @@ impl Kanban {
         let before = match before {
             Some(before) if before == id => None,
             Some(before) => Some(Some(before)),
-            None if action == DropAction::Reorder => Some(Self::after_column(to, cx)),
+            None if action == DropAction::Reorder => Some(Self::after_column(to, self.place_filter.as_deref(), cx)),
             None => None,
         };
         if let Some(before) = before {
@@ -154,10 +178,11 @@ impl Kanban {
         }
     }
 
-    /// 排到 `column` 这一列最后要挪到谁前面：所有任务里紧跟在这一列最后一张后面的那张，没有时为空。
-    fn after_column(column: Column, cx: &App) -> Option<String> {
+    /// 排到 `column` 这一列（按 `place` 筛过）最后要挪到谁前面：所有任务里紧跟在这一列最后一张后面的那张，
+    /// 没有时为空。
+    fn after_column(column: Column, place: Option<&Path>, cx: &App) -> Option<String> {
         let data = store::data(cx);
-        let last = columns(data, unix_now())[column_index(column)].last().map(|todo| todo.id.clone())?;
+        let last = columns(data, unix_now(), place)[column_index(column)].last().map(|todo| todo.id.clone())?;
         let ix = data.todos.iter().position(|todo| todo.id == last)?;
         data.todos.get(ix + 1).map(|todo| todo.id.clone())
     }
@@ -165,7 +190,9 @@ impl Kanban {
     /// 辅助工具调先后：在同一列里和上一张（`up`）或下一张换位置。
     fn nudge_todo(&mut self, id: &str, up: bool, cx: &mut Context<Self>) {
         let data = store::data(cx);
-        let Some(column) = columns(data, unix_now()).into_iter().find(|cards| cards.iter().any(|todo| todo.id == id))
+        let Some(column) = columns(data, unix_now(), self.place_filter.as_deref())
+            .into_iter()
+            .find(|cards| cards.iter().any(|todo| todo.id == id))
         else {
             return;
         };
@@ -190,7 +217,7 @@ impl Kanban {
         }
         let current: HashMap<String, Column> = Column::ALL
             .into_iter()
-            .zip(columns(store::data(cx), unix_now()))
+            .zip(columns(store::data(cx), unix_now(), self.place_filter.as_deref()))
             .flat_map(|(column, cards)| cards.into_iter().map(move |todo| (todo.id.clone(), column)))
             .collect();
         self.moves.retain(|id, moving| moving.at.elapsed() < FLY + LAND && current.contains_key(id));
@@ -227,8 +254,9 @@ impl Kanban {
             let to = geometry.cards.get(id).copied().unwrap_or(from);
             let (from, to) = (from.origin - origin, Bounds { origin: to.origin - origin, size: to.size });
             let width = (moving.from.map_or(to.size.width, |from| from.size.width), to.size.width);
+            let text = self.card_text(todo, data, now, cx);
             let face = self
-                .card_face(todo, data, now, named("todo-flight-agent", id), None, None, cx)
+                .card_face(todo, &text, data, now, named("todo-flight-agent", id), None, Vec::new(), cx)
                 .absolute()
                 .shadow(card_shadow(None, true));
             let ease = ease_out_quint();
@@ -255,7 +283,7 @@ impl Kanban {
 
     pub(super) fn render_columns(&self, data: &TodoData, a11y: bool, cx: &mut Context<Self>) -> Div {
         let now = unix_now();
-        let grouped = columns(data, now);
+        let grouped = columns(data, now, self.place_filter.as_deref());
         let columns: Vec<_> = Column::ALL
             .iter()
             .zip(&grouped)
@@ -318,35 +346,34 @@ impl Kanban {
                 .child(label_row(("todo-column-empty", column_index(column)), text.into_owned(), fg.opacity(0.4)))
                 .children(add)
         });
-        // 需要你那一列有卡片时计数是个实心的徽标，一眼看得到。
-        let badge = column == Column::NeedsYou && !cards.is_empty();
-        let tally = if badge {
-            needs_you_badge(cards.len()).into_any_element()
-        } else {
-            div()
-                .flex_none()
-                .text_size(FontSize::Tiny)
-                .text_color(fg.opacity(0.5))
-                .child(cards.len().to_string())
-                .into_any_element()
-        };
-        // 窄的一栏里标题、计数、说明和链接挤不下一行，只列最近几天这句放在链接的悬停提示里。
-        let window_hint = (column == Column::Done).then(|| {
-            let window = rust_i18n::t!("kanban.done_window").into_owned();
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .items_center()
-                .justify_end()
-                .text_size(FontSize::Small)
-                .font_weight(FontWeight::NORMAL)
-                .child(
-                    history_link("todo-done-history")
+        let theme = cx.theme();
+        let (muted, warning_text) = (theme.muted_foreground, theme.warning_text);
+        // 需要你那一列有卡片时整列描一圈琥珀色的边、列名也用琥珀色。
+        let waiting = column == Column::NeedsYou && !cards.is_empty();
+        let border = if waiting { theme.warning.opacity(0.6) } else { theme.border };
+        let tally = div().flex_none().text_color(muted).child(cards.len().to_string());
+        // 列头右端：完成那一列是进记录页的链接，待办那一列是新建任务的按钮。
+        let trailing = match column {
+            Column::Done => {
+                // 窄的一栏里标题、计数、说明和链接挤不下一行，只列最近几天这句放在链接的悬停提示里。
+                let window = rust_i18n::t!("kanban.done_window").into_owned();
+                Some(
+                    history_link("todo-done-history", cx)
                         .aria_description(window.clone())
                         .tooltip(crate::ui::tooltip::tooltip(window, None))
-                        .on_press(cx, |this, _, cx| this.show_history(None, cx)),
+                        .on_press(cx, |this, _, cx| this.show_history(None, cx))
+                        .into_any_element(),
                 )
+            }
+            Column::Todo => Some(
+                icon_button("todo-column-add", PLUS_ICON, rust_i18n::t!("kanban.new_todo").into_owned())
+                    .on_press(cx, |_, _, cx| cx.emit(KanbanEvent::NewTodo))
+                    .into_any_element(),
+            ),
+            Column::InProgress | Column::NeedsYou => None,
+        };
+        let trailing = trailing.map(|trailing| {
+            div().flex_1().min_w_0().flex().items_center().justify_end().text_size(FontSize::Small).child(trailing)
         });
         let accept_bg = cx.theme().mix(0.1);
         div()
@@ -359,21 +386,27 @@ impl Kanban {
             .h_full()
             .flex()
             .flex_col()
-            .rounded(px(10.))
-            .bg(cx.theme().mix(0.05))
+            .rounded(px(12.))
+            .bg(cx.theme().mix(COLUMN_TINT))
+            .border_1()
+            .border_color(border)
             .child(
                 div()
                     .flex_none()
-                    .h(scaled(36.))
-                    .px(px(12.))
+                    .h(scaled(40.))
+                    .px(px(14.))
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(div().flex_none().size(px(7.)).rounded_full().bg(column_color(column, fg)))
-                    .child(name)
+                    .child(column_icon(column, cards, data, cx))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .when(waiting, |name| name.text_color(warning_text))
+                            .child(name),
+                    )
                     .child(tally)
-                    .children(window_hint),
+                    .children(trailing),
             )
             .child(
                 div()
@@ -403,58 +436,147 @@ impl Kanban {
             )
     }
 
-    /// 卡片的样子，看板上的和飞着的共用：第一行是目录，`corner` 和编号摆在右上角；有分支时下面一行是
-    /// 分支；再下面是标题；最后一行是 agent、开始的时间和来自哪个定时，`primary` 摆在右下角。`agent_id`
-    /// 给 agent 标记用（它转圈要 id）。
+    /// 卡片上随列和状态变的几句话（`CardText`），画卡片和报给辅助工具共用。
+    fn card_text(&self, todo: &Todo, data: &TodoData, now: u64, cx: &App) -> CardText {
+        let session = todo.session.and_then(|id| data.sessions.get(&id));
+        let column = column(todo, session, now);
+        let agent = agent_text(&todo.spec.agent);
+        let failed = todo.outcome == Some(Outcome::Failed);
+        let prompt = todo
+            .session
+            .filter(|_| column == Column::NeedsYou && session.is_some() && !failed)
+            .and_then(|id| agent_prompts::prompt(&(HostId::Local, id), cx));
+        let when = match column {
+            Column::NeedsYou => self.waiting_since(todo, data).map(|at| {
+                let time = waited(Instant::now().saturating_duration_since(at).as_secs());
+                (rust_i18n::t!("inbox.waited", time = time).into_owned(), true)
+            }),
+            Column::Done => todo.done_at.map(|at| (ago(i64::try_from(at).unwrap_or(i64::MAX)), false)),
+            Column::Todo | Column::InProgress => None,
+        };
+        let footer = match column {
+            _ if failed => rust_i18n::t!("kanban.not_finished", agent = agent),
+            Column::InProgress if todo.worktree_dir.is_some() => rust_i18n::t!("kanban.in_worktree", agent = agent),
+            Column::Done => match todo.started.zip(todo.done_at) {
+                Some((started, done)) => {
+                    rust_i18n::t!("kanban.took", agent = agent, time = waited(done.saturating_sub(started)))
+                }
+                None => agent.into(),
+            },
+            _ => agent.into(),
+        }
+        .into_owned();
+        let limit = todo.spec.time_limit;
+        let progress = limit.zip(todo.started).filter(|_| column == Column::InProgress).map(|(limit, started)| {
+            let ran = now.saturating_sub(started);
+            Progress {
+                ran: rust_i18n::t!("kanban.ran_for", time = waited(ran)).into_owned(),
+                limit: rust_i18n::t!("kanban.limit", time = limit_text(limit)).into_owned(),
+                used: limit_used(ran, limit),
+            }
+        });
+        let queued = (todo.queued && todo.started.is_none()).then(|| {
+            // 等的任务不在看板上（早就完成了）时只写排队中。
+            match todo.after.as_ref().and_then(|after| data.todos.iter().find(|other| &other.id == after)) {
+                Some(after) => rust_i18n::t!("kanban.queued_after_line", number = after.number).into_owned(),
+                None => rust_i18n::t!("kanban.queued").into_owned(),
+            }
+        });
+        let excerpt = todo
+            .session
+            .filter(|_| column == Column::InProgress)
+            .and_then(|id| self.excerpts.get(id))
+            .map(<[String]>::to_vec);
+        CardText {
+            place: self.place_name(&todo.spec.dir),
+            when,
+            footer,
+            limit: limit.filter(|_| column == Column::Todo).map(limit_text),
+            progress,
+            queued,
+            failed,
+            prompt,
+            excerpt,
+        }
+    }
+
+    /// 离卡片上下一处按分钟变的字（需要你的等了多久、进行中的时限进度）还有多久；没有这样的卡片时为空。
+    pub(super) fn minute_wait(&self, data: &TodoData) -> Option<Duration> {
+        let now = unix_now();
+        let instant = Instant::now();
+        let [_, running, needs_you, _] = columns(data, now, self.place_filter.as_deref());
+        let ran = running
+            .into_iter()
+            .filter(|todo| todo.spec.time_limit.is_some())
+            .filter_map(|todo| todo.started)
+            .map(|started| until_next_minute(Duration::from_secs(now.saturating_sub(started))));
+        let waits = needs_you
+            .into_iter()
+            .filter_map(|todo| self.waiting_since(todo, data))
+            .map(|at| until_next_minute(instant.saturating_duration_since(at)));
+        ran.chain(waits).min()
+    }
+
+    /// 需要你的卡片从什么时候起等：宿主报的 `SessionMeta::agent_since_ms`，没报时用 `Input::agent_changed`；
+    /// 都没有时为空，卡片上不写等了多久。
+    fn waiting_since(&self, todo: &Todo, data: &TodoData) -> Option<Instant> {
+        let id = todo.session?;
+        match data.sessions.get(&id).and_then(|session| session.meta.agent_since_ms) {
+            Some(since) => Some(instant_of(since)),
+            None => self.input.agent_changed.get(&id).copied(),
+        }
+    }
+
+    /// 卡片的样子，看板上的和飞着的共用：第一行是目录，右边是等了多久或完成在多久以前和编号，`corner` 浮在
+    /// 右上角；下面依次是分支、PR、标题、agent 的提问和回答的按钮、终端摘录、时限的进度、结果和排队的说法；最后一行是
+    /// agent 怎么样了，`actions`
+    /// 摆在右下角。`agent_id` 给 agent 标记用（它转圈要 id）。
     #[allow(clippy::too_many_arguments)]
     fn card_face(
         &self,
         todo: &Todo,
+        text: &CardText,
         data: &TodoData,
         now: u64,
         agent_id: ElementId,
         corner: Option<Div>,
-        primary: Option<Button>,
+        actions: Vec<Button>,
         cx: &mut Context<Self>,
     ) -> Div {
-        let (fg, bg) = (cx.theme().foreground, cx.theme().background);
+        let theme = cx.theme();
+        let (bg, border, control_border) = (theme.surface, theme.border, theme.control_border);
+        let (subtle, muted, warning_text) = (theme.subtle_foreground, theme.muted_foreground, theme.warning_text);
+        let (success, destructive, info, track) = (theme.success, theme.destructive, theme.info, theme.mix(0.12));
+        let well = theme.background;
+        let mono = crate::ui::font::mono(cx);
         let session = todo.session.and_then(|id| data.sessions.get(&id));
         let agent = session.and_then(|info| info.meta.agent);
-        let place = self.place_name(&todo.spec.dir);
         let schedule = todo.schedule.as_ref().and_then(|id| data.schedules.iter().find(|s| &s.id == id));
-        let from = schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned());
-        let footer: Vec<String> = [
-            agent.is_none().then(|| agent_text(&todo.spec.agent)),
-            todo.started.map(|at| short_time(at, now)),
-            from.clone(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        // 卡片上只写时间，窄列里放得下；悬停时说清是什么时间。
+        // 开始的时间和来自哪个定时不占卡片上的地方，悬停在最后一行上时说。
         let footer_tip: Vec<String> = [
-            agent.is_none().then(|| agent_text(&todo.spec.agent)),
             todo.started.map(|at| rust_i18n::t!("kanban.started_at", time = short_time(at, now)).into_owned()),
-            from,
+            schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned()),
         ]
         .into_iter()
         .flatten()
         .collect();
-        let muted = fg.opacity(0.55);
-        let failed = todo.outcome == Some(Outcome::Failed);
-        // agent 报的结果（或者宿主读下的屏幕）只露第一行，悬停看全文。
+        // agent 报的结果（或者宿主读下的屏幕）只露第一行，悬停看全文；没做成的标时钟、红字，做完的标对勾。
         let result = todo.result.as_deref().and_then(|result| {
             let first = result.lines().find(|line| !line.trim().is_empty())?.trim().to_owned();
+            let icon =
+                if text.failed { Some((CLOCK_ICON, destructive)) } else { todo.done_at.map(|_| (CHECK_ICON, success)) };
             Some(
                 div()
                     .id(named("todo-result", &todo.id))
                     .aria_static_text(first.clone())
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
                     .min_w_0()
-                    .truncate()
-                    .text_size(FontSize::Small)
-                    .text_color(if failed { cx.theme().destructive } else { muted })
+                    .text_color(if text.failed { destructive } else { subtle })
                     .tooltip(crate::ui::tooltip::tooltip(result.to_owned(), None))
-                    .child(first),
+                    .children(icon.map(|(icon, color)| svg().path(icon).flex_none().size(px(12.)).text_color(color)))
+                    .child(div().min_w_0().truncate().child(first)),
             )
         });
         let top = div()
@@ -463,42 +585,22 @@ impl Kanban {
             .gap(px(6.))
             .min_w_0()
             .h(scaled(20.))
-            .text_size(FontSize::Small)
-            .text_color(muted)
-            .child(place_badge(&place))
+            .text_size(FontSize::Body)
+            .text_color(subtle)
+            .child(svg().path(FOLDER_ICON).flex_none().size(px(12.)).text_color(subtle))
             // 名字至少留这么宽：悬停时右上角多出几个按钮，`~` 这样的短名字照样整个露出来，长的露个开头。
-            .child(div().min_w(scaled(20.)).truncate().child(place))
+            .child(div().min_w(scaled(20.)).truncate().child(text.place.clone()))
             .child(div().flex_1())
             .when(self.in_review(todo, data, now), |row| {
                 row.child(Badge::new(rust_i18n::t!("kanban.in_review").into_owned()).variant(BadgeVariant::Secondary))
             })
-            .when(failed, |row| {
-                let text = rust_i18n::t!("kanban.failed").into_owned();
-                row.child(
-                    Badge::new(text.clone())
-                        .id(named("todo-failed", &todo.id))
-                        .aria_static_text(text)
-                        .variant(BadgeVariant::Outline)
-                        .border_color(cx.theme().destructive)
-                        .text_color(cx.theme().destructive),
-                )
-            })
-            .when(todo.queued && todo.started.is_none(), |row| {
-                // 等的任务不在看板上（早就完成了）时只写排队中。
-                let after = todo.after.as_ref().and_then(|after| data.todos.iter().find(|other| &other.id == after));
-                let text = match after {
-                    Some(after) => rust_i18n::t!("kanban.queued_after", number = after.number).into_owned(),
-                    None => rust_i18n::t!("kanban.queued").into_owned(),
-                };
-                row.child(
-                    Badge::new(text.clone())
-                        .id(named("todo-queued", &todo.id))
-                        .aria_static_text(text)
-                        .variant(BadgeVariant::Secondary),
-                )
+            .when_some(text.when.clone(), |row, (when, waiting)| {
+                row.child(div().flex_none().when(waiting, |when| when.text_color(warning_text)).child(when))
             })
             // 没有编号（0）时不写。
-            .when(todo.number > 0, |row| row.child(div().flex_none().child(format!("#{}", todo.number))));
+            .when(todo.number > 0, |row| {
+                row.child(div().flex_none().text_color(muted).child(format!("#{}", todo.number)))
+            });
         // 分支单独一行，和目录挤在一行时窄列里两个都截得认不出。
         let branch = todo.branch.clone().map(|branch| {
             div()
@@ -507,34 +609,117 @@ impl Kanban {
                 .gap(px(4.))
                 .min_w_0()
                 .text_size(FontSize::Small)
-                .text_color(muted)
-                .child(svg().path(BRANCH_ICON).flex_none().size(px(11.)).text_color(fg.opacity(0.45)))
-                .child(div().min_w_0().truncate().child(branch))
+                .text_color(subtle)
+                .child(svg().path(BRANCH_ICON).flex_none().size(px(11.)).text_color(muted))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .when_some(mono.clone(), |name, mono| name.font_family(mono))
+                        .child(branch),
+                )
         });
         let pull = self.pulls.get(&todo.id).map(|pr| pull_row(pr, &todo.id, cx));
-        // 放不下时右边的按钮折到下一行靠右，不把 agent 和时间挤成省略号。
+        let asked = text.prompt.as_ref().zip(todo.session).map(|(prompt, id)| {
+            let open = todo.clone();
+            agent_prompts::render_prompt(
+                &(HostId::Local, id),
+                prompt,
+                &todo.spec.title,
+                TERMINAL_ICON,
+                rust_i18n::t!("kanban.open").into_owned(),
+                move |_, _, cx| Self::open_session(id, &open, cx),
+                cx,
+            )
+        });
+        // 每行放不下时截断：摘录只让人看一眼 agent 在干什么，全文在终端里。
+        let excerpt = text.excerpt.as_ref().map(|lines| {
+            div()
+                .id(named("todo-excerpt", &todo.id))
+                .aria_static_text(lines.join("\n"))
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .px(px(10.))
+                .py(px(8.))
+                .rounded(px(6.))
+                .bg(well)
+                .border_1()
+                .border_color(border)
+                .text_size(FontSize::Small)
+                .text_color(subtle)
+                .when_some(mono.clone(), |excerpt, mono| excerpt.font_family(mono))
+                .children(lines.iter().map(|line| div().min_w_0().truncate().child(line.clone())))
+        });
+        let progress = text.progress.as_ref().map(|progress| {
+            div()
+                .id(named("todo-progress", &todo.id))
+                .role(Role::ProgressIndicator)
+                .aria_label(rust_i18n::t!("kanban.dialog.time_limit").into_owned())
+                .aria_value(format!("{}。{}", progress.ran, progress.limit))
+                .aria_min_numeric_value(0.)
+                .aria_max_numeric_value(1.)
+                .aria_numeric_value(f64::from(progress.used))
+                .flex()
+                .flex_col()
+                .gap(px(5.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .text_color(subtle)
+                        .child(div().min_w_0().truncate().child(progress.ran.clone()))
+                        .child(div().ml_auto().flex_none().child(progress.limit.clone())),
+                )
+                .child(
+                    div()
+                        .h(px(3.))
+                        .rounded_full()
+                        .bg(track)
+                        .child(div().h_full().w(relative(progress.used)).rounded_full().bg(info)),
+                )
+        });
+        let queued = text.queued.clone().map(|line| {
+            div()
+                .id(named("todo-queued", &todo.id))
+                .aria_static_text(line.clone())
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .min_w_0()
+                .text_color(subtle)
+                .child(div().flex_none().child("↳"))
+                .child(div().min_w_0().truncate().child(line))
+        });
+        let limit = text
+            .limit
+            .clone()
+            .map(|limit| Badge::new(limit).variant(BadgeVariant::Secondary).icon(CLOCK_ICON).h(scaled(20.)).px(px(7.)));
+        // 放不下时右边的按钮折到下一行靠右，不把 agent 挤成省略号。
         let bottom = div()
             .flex()
             .flex_wrap()
             .items_center()
             .gap(px(6.))
             .min_w_0()
-            .min_h(scaled(22.))
+            .min_h(scaled(26.))
             .when_some(agent, |row, agent| row.child((self.marks.render)(agent, agent_id, cx)))
             .child(
                 div()
                     .id(named("todo-footer", &todo.id))
-                    .flex_grow(1.)
                     .min_w_0()
                     .truncate()
-                    .text_size(FontSize::Small)
-                    .text_color(muted)
-                    .when(!footer_tip.is_empty(), |text| {
-                        text.tooltip(crate::ui::tooltip::tooltip(footer_tip.join(" · "), None))
+                    .text_color(subtle)
+                    .when(!footer_tip.is_empty(), |footer| {
+                        footer.tooltip(crate::ui::tooltip::tooltip(footer_tip.join("\n"), None))
                     })
-                    .child(footer.join(" · ")),
+                    .child(text.footer.clone()),
             )
-            .children(primary.map(|primary| div().ml_auto().child(primary)));
+            .children(limit)
+            .when(!actions.is_empty(), |row| {
+                row.child(div().ml_auto().flex().items_center().gap(px(6.)).children(actions))
+            });
         // 悬停时的操作按钮浮在右上角、盖住编号和目录名，不占顶上那一行：窄列里三五个按钮排进去会把卡片撑破。
         let corner = corner.map(|corner| {
             corner
@@ -549,16 +734,18 @@ impl Kanban {
         div()
             .relative()
             .flex_none()
-            .px(px(12.))
-            .py(px(10.))
+            .px(px(14.))
+            .py(px(12.))
             .flex()
             .flex_col()
-            .gap(px(6.))
-            .rounded(px(8.))
+            .gap(px(8.))
+            .rounded(px(10.))
             .bg(bg)
             .border_1()
-            .border_color(fg.opacity(0.08))
-            .shadow(card_shadow(None, false))
+            .map(|card| match text.queued {
+                Some(_) => card.border_dashed().border_color(control_border),
+                None => card.border_color(border),
+            })
             .child(top)
             .children(branch)
             .children(pull)
@@ -568,10 +755,15 @@ impl Kanban {
                     .overflow_hidden()
                     .text_ellipsis()
                     .line_clamp(2)
-                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(FontSize::Title)
+                    .font_weight(FontWeight::SEMIBOLD)
                     .child(todo.spec.title.clone()),
             )
+            .children(asked)
+            .children(excerpt)
+            .children(progress)
             .children(result)
+            .children(queued)
             .child(bottom)
             .children(corner)
     }
@@ -597,76 +789,124 @@ impl Kanban {
     ) -> AnyElement {
         let session = todo.session.and_then(|id| data.sessions.get(&id));
         let agent = session.and_then(|info| info.meta.agent);
-        let place = self.place_name(&todo.spec.dir);
+        let text = self.card_text(todo, data, now, cx);
         let schedule = todo.schedule.as_ref().and_then(|id| data.schedules.iter().find(|s| &s.id == id));
-        let status = agent.map_or_else(|| agent_text(&todo.spec.agent), self.marks.describe);
         let started =
             todo.started.map(|at| rust_i18n::t!("kanban.started_at", time = short_time(at, now)).into_owned());
         let from = schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned());
-        let pull = self.pulls.get(&todo.id).map(pull_summary);
-        let line2: Vec<String> = [Some(place), todo.branch.clone(), pull].into_iter().flatten().collect();
         let review = self.in_review(todo, data, now).then(|| rust_i18n::t!("kanban.in_review").into_owned());
-        let line3: Vec<String> = [review, Some(status), started, from].into_iter().flatten().collect();
-        let number = if todo.number > 0 { format!("#{}", todo.number) } else { String::new() };
-        let description =
-            [number, line2.join(" · "), line3.join(" · "), rust_i18n::t!("kanban.reorder_hint").into_owned()]
-                .into_iter()
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-                .join("。");
+        let number = (todo.number > 0).then(|| format!("#{}", todo.number));
+        let limit = text.limit.as_ref().map(|limit| rust_i18n::t!("kanban.limit", time = limit).into_owned());
+        let progress = text.progress.as_ref().map(|progress| format!("{}。{}", progress.ran, progress.limit));
+        let description = [
+            number,
+            Some(text.place.clone()),
+            todo.branch.clone(),
+            self.pulls.get(&todo.id).map(pull_summary),
+            review,
+            text.when.as_ref().map(|(when, _)| when.clone()),
+            text.prompt
+                .as_ref()
+                .and_then(|prompt| prompt.question.last())
+                .map(|question| rust_i18n::t!("prompts.asking", question = question).into_owned()),
+            Some(text.footer.clone()),
+            agent.map(self.marks.describe),
+            limit,
+            progress,
+            text.queued.clone(),
+            started,
+            from,
+            Some(rust_i18n::t!("kanban.reorder_hint").into_owned()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("。");
         let drops: [Option<DropAction>; 4] = Column::ALL.map(|to| drop_action(todo, session, to, now));
         let dragged =
             DraggedTodo { id: todo.id.clone(), from: column, ix, drops, title: todo.spec.title.clone().into() };
         let id = todo.id.clone();
         let open_session = todo.session.filter(|_| session.is_some());
-        // 这一列最该做的事是右下角的主按钮，别的收在右上角，鼠标移到卡片上（或者辅助工具开着）才露出来。
-        let primary = if todo.started.is_none() && todo.done_at.is_none() {
+        // 这一列最该做的事是右下角的按钮，别的收在右上角，鼠标移到卡片上（或者辅助工具开着）才露出来；右下角已经
+        // 能打开终端、标为完成时右上角不再放。
+        let mut actions: Vec<Button> = Vec::new();
+        let (mut opens, mut finishes) = (false, false);
+        // 辅助工具读到的按钮名带上卡片的标题，各张卡片上的同一种按钮才分得清。
+        let title = todo.spec.title.as_str();
+        let action = |button_id: &'static str, key: &str| {
+            let label = rust_i18n::t!(key).into_owned();
+            Button::new(button_id, label.clone()).aria_label(action_for(&label, title))
+        };
+        if todo.started.is_none() && todo.done_at.is_none() {
             let id = id.clone();
-            Some(
-                Button::new("todo-start", rust_i18n::t!("kanban.start").into_owned())
-                    .variant(ButtonVariant::Default)
+            actions.push(
+                action("todo-start", "kanban.start")
+                    .variant(ButtonVariant::Outline)
                     .with_size(ButtonSize::Sm)
+                    .icon(PLAY_ICON)
+                    .icon_size(10.)
                     .font_weight(FontWeight::MEDIUM)
                     .cursor_pointer()
                     .on_press(cx, move |this, _, cx| this.start_todo(id.clone(), cx)),
-            )
-        } else if column == Column::NeedsYou {
-            Some(match open_session {
+            );
+        } else if text.failed {
+            if let Some(session_id) = open_session {
+                let todo = todo.clone();
+                actions.push(
+                    action("todo-view-terminal", "kanban.view_terminal")
+                        .variant(ButtonVariant::Ghost)
+                        .with_size(ButtonSize::Sm)
+                        .cursor_pointer()
+                        .on_press(cx, move |_, _, cx| Self::open_session(session_id, &todo, cx)),
+                );
+            }
+            let todo = todo.clone();
+            actions.push(
+                action("todo-continue", "kanban.continue")
+                    .variant(ButtonVariant::Outline)
+                    .with_size(ButtonSize::Sm)
+                    .cursor_pointer()
+                    .on_press(cx, move |this, _, cx| this.open_todo(&todo, cx)),
+            );
+            opens = true;
+        } else if matches!(column, Column::InProgress | Column::NeedsYou) {
+            match open_session {
+                // 打开终端的按钮在提问的部件里。
+                Some(_) if text.prompt.is_some() => opens = true,
                 Some(session_id) => {
                     let todo = todo.clone();
-                    Button::new("todo-open", rust_i18n::t!("kanban.open").into_owned())
-                        .variant(ButtonVariant::Default)
-                        .with_size(ButtonSize::Sm)
-                        .font_weight(FontWeight::MEDIUM)
-                        .cursor_pointer()
-                        .on_press(cx, move |_, _, cx| Self::open_session(session_id, &todo, cx))
+                    actions.push(
+                        action("todo-open", "kanban.open")
+                            .variant(ButtonVariant::Outline)
+                            .with_size(ButtonSize::Sm)
+                            .cursor_pointer()
+                            .on_press(cx, move |_, _, cx| Self::open_session(session_id, &todo, cx)),
+                    );
+                    opens = true;
                 }
-                None => {
+                None if column == Column::NeedsYou => {
                     let id = id.clone();
-                    Button::new("todo-done", rust_i18n::t!("kanban.finish").into_owned())
-                        .variant(ButtonVariant::Default)
-                        .with_size(ButtonSize::Sm)
-                        .font_weight(FontWeight::MEDIUM)
-                        .cursor_pointer()
-                        .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), true, cx))
+                    actions.push(
+                        action("todo-done", "kanban.finish")
+                            .variant(ButtonVariant::Outline)
+                            .with_size(ButtonSize::Sm)
+                            .cursor_pointer()
+                            .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), true, cx)),
+                    );
+                    finishes = true;
                 }
-            })
-        } else {
-            None
-        };
-        let primary_id = primary.as_ref().map(|_| match column {
-            Column::NeedsYou if open_session.is_some() => "open",
-            Column::NeedsYou => "done",
-            _ => "start",
-        });
+                None => {}
+            }
+        }
         let shown = a11y || self.hovered.as_ref() == Some(&todo.id);
         let mut buttons: Vec<Button> = Vec::new();
         if shown {
-            if todo.session.is_some() && primary_id != Some("open") {
+            if todo.session.is_some() && !opens {
                 let todo = todo.clone();
                 let label = rust_i18n::t!("kanban.open").into_owned();
                 buttons.push(
-                    icon_button("todo-open", TERMINAL_ICON, label)
+                    icon_button("todo-open", TERMINAL_ICON, label.clone())
+                        .aria_label(action_for(&label, title))
                         .on_press(cx, move |this, _, cx| this.open_todo(&todo, cx)),
                 );
             }
@@ -675,12 +915,13 @@ impl Kanban {
                 let todo = todo.clone();
                 let label = rust_i18n::t!("kanban.create_pr").into_owned();
                 buttons.push(
-                    icon_button("todo-create-pr", GIT_ICON, label)
+                    icon_button("todo-create-pr", GIT_ICON, label.clone())
+                        .aria_label(action_for(&label, title))
                         .disabled(creating)
                         .on_press(cx, move |this, _, cx| this.create_pull_request(&todo, cx)),
                 );
             }
-            if primary_id != Some("done") {
+            if !finishes {
                 let done = todo.done_at.is_none();
                 // 完成了的再按是重新打开，换成撤回的箭头，和「标为完成」的勾分开。
                 let (button_id, icon, label) = if done {
@@ -691,28 +932,34 @@ impl Kanban {
                 let label = label.into_owned();
                 let id = id.clone();
                 buttons.push(
-                    icon_button(button_id, icon, label)
+                    icon_button(button_id, icon, label.clone())
+                        .aria_label(action_for(&label, title))
                         .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), done, cx)),
                 );
             }
             {
                 let todo = todo.clone();
                 let label = rust_i18n::t!("kanban.edit").into_owned();
-                buttons.push(icon_button("todo-edit", PENCIL_ICON, label).on_press(cx, move |this, window, cx| {
-                    this.open_dialog(false, Some(Editing::Todo(todo.clone())), window, cx)
-                }));
+                buttons.push(
+                    icon_button("todo-edit", PENCIL_ICON, label.clone())
+                        .aria_label(action_for(&label, title))
+                        .on_press(cx, move |this, window, cx| {
+                            this.open_dialog(false, Some(Editing::Todo(todo.clone())), window, cx)
+                        }),
+                );
             }
             {
                 let id = id.clone();
                 let label = rust_i18n::t!("kanban.remove_todo").into_owned();
                 buttons.push(
-                    icon_button("todo-remove", TRASH_ICON, label)
+                    icon_button("todo-remove", TRASH_ICON, label.clone())
+                        .aria_label(action_for(&label, title))
                         .on_press(cx, move |this, window, cx| this.remove_todo(id.clone(), window, cx)),
                 );
             }
         }
         let corner = (!buttons.is_empty()).then(|| div().flex().gap(px(2.)).children(buttons));
-        let face = self.card_face(todo, data, now, named("todo-agent", &todo.id), corner, primary, cx);
+        let face = self.card_face(todo, &text, data, now, named("todo-agent", &todo.id), corner, actions, cx);
         let geometry = self.geometry.clone();
         let (up_id, down_id, hover_id, bounds_id) = (id.clone(), id.clone(), id.clone(), id);
         let card = face
@@ -784,30 +1031,58 @@ impl Kanban {
     }
 }
 
-/// 目录名首字母的小方块。
-fn place_badge(place: &str) -> Div {
-    let (initial, color) = crate::ui::avatar::letter_avatar(place);
-    div()
-        .flex_none()
-        .size(scaled(16.))
-        .rounded(px(4.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(crate::ui::hsla(color))
-        .text_size(FontSize::Tiny)
-        .font_weight(FontWeight::BOLD)
-        .text_color(gpui::white())
-        .child(initial)
+/// 卡片上随列和状态变的几句话。
+struct CardText {
+    /// 目录给人看的名字。
+    place: String,
+    /// 编号前面的时间，和它要不要用琥珀色：需要你的写等了多久，完成的写完成在多久以前。
+    when: Option<(String, bool)>,
+    /// 最后一行：agent，和它这一次干得怎么样。
+    footer: String,
+    /// 待办的卡片上写的时限。
+    limit: Option<String>,
+    /// 进行中、有时限的卡片上的进度。
+    progress: Option<Progress>,
+    /// 排着队的说法。
+    queued: Option<String>,
+    /// agent 报了没做成。
+    failed: bool,
+    /// 需要你的、会话还在的卡片上认出的 agent 提问。
+    prompt: Option<Arc<Prompt>>,
+    /// 进行中的卡片上，任务会话屏幕底部最后几行有字的输出；没读到时为空。
+    excerpt: Option<Vec<String>>,
 }
 
-/// 列头圆点的颜色；`fg` 是主题的前景色。
-fn column_color(column: Column, fg: Hsla) -> Hsla {
+/// 时限的进度：跑了多久、时限多长，用掉了几成（0 到 1）。
+struct Progress {
+    ran: String,
+    limit: String,
+    used: f32,
+}
+
+/// 列头的标记：待办是空心圆，别的列是那一列状态的 `status_mark`。进行中的盲文格只在列里有 agent 在干活时转
+/// （那时卡片上的标记已经在转），不给缓存着的看板添一个常驻的动画。
+fn column_icon(column: Column, cards: &[&Todo], data: &TodoData, cx: &App) -> AnyElement {
     match column {
-        Column::Todo => fg.opacity(0.35),
-        Column::InProgress => gpui::rgb(IN_PROGRESS_COLOR).into(),
-        Column::NeedsYou => gpui::rgb(AGENT_BLOCKED_COLOR).into(),
-        Column::Done => gpui::rgb(AGENT_DONE_COLOR).into(),
+        Column::Todo => div()
+            .flex_none()
+            .size(px(COLUMN_ICON_SIZE))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(div().size(px(12.)).rounded_full().border(px(1.5)).border_color(cx.theme().muted_foreground))
+            .into_any_element(),
+        Column::InProgress => {
+            let spin = cards.iter().any(|todo| {
+                let session = todo.session.and_then(|id| data.sessions.get(&id));
+                session.and_then(|info| info.meta.agent).is_some_and(Agent::is_working)
+            });
+            status_mark("todo-column-working", MarkKind::Working { spin }, COLUMN_ICON_SIZE, cx)
+        }
+        Column::NeedsYou => {
+            status_mark("todo-column-waiting", MarkKind::Waiting { blink: false }, COLUMN_ICON_SIZE, cx)
+        }
+        Column::Done => status_mark("todo-column-done", MarkKind::Done, COLUMN_ICON_SIZE, cx),
     }
 }
 
@@ -896,6 +1171,25 @@ mod tests {
         assert_eq!(before(0, Column::Done, 1), Some("b".into()));
     }
 
+    /// 按项目筛选只留目录正好是它的任务（子目录里的不算），各列照旧分。
+    #[test]
+    fn columns_filter_by_place() {
+        let mut elsewhere = todo("b", Some(1), None);
+        elsewhere.spec.dir = "/other".into();
+        let mut nested = todo("d", None, None);
+        nested.spec.dir = "/src/sub".into();
+        let data = TodoData {
+            todos: vec![todo("a", None, None), elsewhere, todo("c", None, Some(5)), nested],
+            ..TodoData::default()
+        };
+        let ids = |cards: &Vec<&Todo>| cards.iter().map(|todo| todo.id.clone()).collect::<Vec<_>>();
+        let src = columns(&data, 1_000, Some(Path::new("/src")));
+        assert_eq!(src.each_ref().map(ids), [vec!["a"], vec![], vec![], vec!["c"]]);
+        let other = columns(&data, 1_000, Some(Path::new("/other")));
+        assert_eq!(other.each_ref().map(ids), [vec![], vec![], vec!["b"], vec![]]);
+        assert_eq!(columns(&data, 1_000, None).iter().map(Vec::len).sum::<usize>(), 4);
+    }
+
     #[test]
     fn columns_keep_the_hosts_order() {
         let data = TodoData {
@@ -908,7 +1202,7 @@ mod tests {
             ..TodoData::default()
         };
         let ids = |cards: &Vec<&Todo>| cards.iter().map(|todo| todo.id.clone()).collect::<Vec<_>>();
-        let grouped = columns(&data, 1_000);
+        let grouped = columns(&data, 1_000, None);
         assert_eq!(grouped.each_ref().map(ids), [vec!["a", "d"], vec![], vec!["b"], vec!["c"]]);
     }
 }

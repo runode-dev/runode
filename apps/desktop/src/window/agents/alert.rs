@@ -64,7 +64,7 @@ pub fn program(tag: String, title: String, body: String, cx: &mut App) {
     }
 }
 
-/// 设置页里的「发送测试通知」：播放「干完了」的提示音，在 .app 里发一条测试通知。第一次发时
+/// 设置页里的「发一条试试」：播放「干完了」的提示音，在 .app 里发一条测试通知。第一次发时
 /// 系统会弹出授权框。点它时标识认不出分屏，什么都不做。
 pub fn test(cx: &mut App) {
     if let Some(sound) = &cx.global::<AppConfig>().0.agent_done_sound {

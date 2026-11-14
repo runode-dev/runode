@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 
 use crate::file_tree::{FileTree, FileTreeEvent, Input};
 use futures::FutureExt as _;
-use gpui::{Context, Div, Entity, Focusable, PromptButton, PromptLevel, Stateful, Window, div, prelude::*, px};
+use gpui::{
+    Context, Div, Entity, Focusable, FontWeight, PromptButton, PromptLevel, Stateful, Window, div, prelude::*, px,
+};
 use runode_config::PreviewClick;
 use runode_types::{session::SessionMeta, shell::Shell};
 
@@ -21,6 +23,7 @@ pub(super) use crate::ui::menu::{MenuButton, MenuItem};
 use super::{WindowView, project::SidePanel};
 use crate::{
     config::AppConfig,
+    git_view,
     host_client::{
         hosts::HostId,
         ssh::{self, upload::Upload},
@@ -28,7 +31,11 @@ use crate::{
     project_host::ProjectHost,
     terminal_view::TerminalView,
     ui::{
-        font_size::{self, FontSize},
+        a11y::{Press as _, StaticText as _},
+        button::{Button, ButtonVariant},
+        font,
+        font_size::{self, FontSize, scaled},
+        panel::{added_label, removed_label},
         theme::ActiveTheme as _,
     },
 };
@@ -187,15 +194,64 @@ impl WindowView {
         })
     }
 
-    /// 右侧面板的文件树页：外框和顶上的标签在这里画，里面是文件树。
-    pub(super) fn render_files_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// 右侧面板的文件树页：外框和顶上的标签在这里画，里面是文件树，主仓库里有改动时底下是改动的摘要和
+    /// 切到 Git 页的按钮。
+    pub(super) fn render_files_panel(&mut self, width: f32, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let input = self.file_tree_input(cx);
         self.file_tree.update(cx, |tree, _| tree.set_input(input));
         let font_size = FontSize::Medium.points() * font_size::scale(cx);
-        self.side_panel_shell("files-panel", width, cx)
-            .bg(cx.theme().mix(0.03))
+        let summary = self.render_change_summary(cx);
+        self.side_panel_shell("files-panel", width, window, cx)
             .text_size(px(font_size))
             .child(div().flex_1().min_h_0().child(self.file_tree.clone()))
+            .children(summary)
+    }
+
+    /// 文件树页底下的一块：几个文件有改动、一共增删几行，下面是打开 Review 页看改动、提交的按钮。不在仓库里
+    /// 或没有改动时为空。
+    fn render_change_summary(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let (files, added, removed) = self.workspace().project.git.as_deref().map(git_view::change_summary)?;
+        if files == 0 {
+            return None;
+        }
+        let theme = cx.theme();
+        let (border, subtle, success, destructive) =
+            (theme.border, theme.subtle_foreground, theme.success, theme.destructive);
+        let mono = font::mono(cx);
+        let text = rust_i18n::t!("panel.changed_files", count = files).into_owned();
+        let stat = |label: Div, color| {
+            label.text_color(color).when_some(mono.clone(), |label, family| label.font_family(family))
+        };
+        let line = div()
+            .id("change-summary")
+            .aria_static_text(format!("{text} +{added} -{removed}"))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .text_size(FontSize::Body)
+            .text_color(subtle)
+            .child(div().flex_1().min_w_0().truncate().child(text))
+            .child(stat(added_label(added), success))
+            .child(stat(removed_label(removed), destructive));
+        let review = Button::new("review-commit", rust_i18n::t!("panel.review_commit").into_owned())
+            .variant(ButtonVariant::Secondary)
+            .w_full()
+            .h(scaled(30.))
+            .rounded(px(8.))
+            .font_weight(FontWeight::MEDIUM)
+            .on_press(cx, |this, window, cx| this.show_review(window, cx));
+        Some(
+            div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .p(px(10.))
+                .border_t_1()
+                .border_color(border)
+                .child(line)
+                .child(review),
+        )
     }
 
     /// 文件树要窗口办的事。

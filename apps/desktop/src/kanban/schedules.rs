@@ -1,15 +1,16 @@
 //! 定时页：各个定时的规则、下次什么时候跑、最近开出的几张任务，编辑和删除。
 
+use crate::i18n::action_for;
 use crate::menus::OpenSettings;
 use crate::ui::{
-    a11y::Press,
+    a11y::{Press, StaticText as _},
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{FontSize, scaled},
-    icons::{BAN_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, TRASH_ICON},
+    icons::{BAN_ICON, CHEVRON_RIGHT_ICON, CLOCK_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, TRASH_ICON},
     scrollbar::scrollbar,
     theme::ActiveTheme as _,
 };
-use gpui::{AnyElement, Axis, Context, Div, FontWeight, Role, Stateful, Window, div, prelude::*, px};
+use gpui::{AnyElement, Axis, Context, Div, FontWeight, Role, Stateful, Window, div, prelude::*, px, svg};
 use runode_protocol::{
     ClientMsg,
     todo::{Schedule, Todo, column, holds_schedule},
@@ -34,7 +35,77 @@ fn recent_runs<'a>(todos: &'a [Todo], schedule: &str) -> Vec<&'a Todo> {
     runs
 }
 
+/// 下一个到点的定时：没停用、会再到点的里面 `next_fire` 最早的。
+fn next_schedule(schedules: &[Schedule]) -> Option<&Schedule> {
+    schedules
+        .iter()
+        .filter(|schedule| !schedule.paused)
+        .filter_map(|schedule| schedule.next_fire.map(|at| (at, schedule)))
+        .min_by_key(|(at, _)| *at)
+        .map(|(_, schedule)| schedule)
+}
+
 impl Kanban {
+    /// 任务页底下那条：下一个定时的名字、什么时候、规则、在哪、交给谁，右边进定时页；没有会再到点的定时时为空。
+    pub(super) fn render_next_schedule(&self, data: &TodoData, cx: &mut Context<Self>) -> Option<Div> {
+        let schedule = next_schedule(&data.schedules)?;
+        let at = schedule.next_fire?;
+        let theme = cx.theme();
+        let (fg, subtle, muted, surface, border) =
+            (theme.foreground, theme.subtle_foreground, theme.muted_foreground, theme.surface, theme.border);
+        let heading = rust_i18n::t!("kanban.next_schedule").into_owned();
+        let time = short_time(at, unix_now());
+        let line = rust_i18n::t!(
+            "kanban.schedule_line",
+            repeat = describe_when(&schedule.when),
+            place = self.place_name(&schedule.spec.dir),
+            agent = agent_text(&schedule.spec.agent)
+        )
+        .into_owned();
+        let spoken = [heading.as_str(), schedule.spec.title.as_str(), time.as_str(), line.as_str()].join("。");
+        let all = rust_i18n::t!("kanban.all_schedules", count = data.schedules.len()).into_owned();
+        let all = Button::new("todo-all-schedules", all.clone())
+            .variant(ButtonVariant::Ghost)
+            .with_size(ButtonSize::Sm)
+            .flex_none()
+            .ml_auto()
+            .gap(px(3.))
+            .cursor_pointer()
+            .child(all)
+            .child(svg().path(CHEVRON_RIGHT_ICON).flex_none().size(px(11.)).text_color(muted))
+            .on_press(cx, |this, _, cx| this.set_page(Page::Schedules, cx));
+        Some(
+            div()
+                .flex_none()
+                .h(scaled(44.))
+                .px(px(14.))
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .rounded(px(12.))
+                .bg(surface)
+                .border_1()
+                .border_color(border)
+                .text_color(subtle)
+                .child(svg().path(CLOCK_ICON).flex_none().size(px(14.)).text_color(subtle))
+                .child(
+                    div()
+                        .id("todo-next-schedule")
+                        .aria_static_text(spoken)
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(12.))
+                        .child(div().flex_none().font_weight(FontWeight::SEMIBOLD).text_color(fg).child(heading))
+                        .child(div().min_w_0().truncate().child(schedule.spec.title.clone()))
+                        .child(div().flex_none().text_color(fg).child(time))
+                        .child(div().min_w_0().truncate().child(line)),
+                )
+                .child(all),
+        )
+    }
+
     /// 删掉定时，先问一句：宿主那边是硬删，定时的提示词和规则找不回来。
     fn remove_schedule(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let data = store::data(cx);
@@ -187,10 +258,13 @@ impl Kanban {
                 .into_any_element()
             })
             .collect();
+        // 辅助工具读到的按钮名带上定时的标题，各个定时下面的同一种按钮才分得清。
+        let title = schedule.spec.title.as_str();
         {
             let id = schedule.id.clone();
             run_rows.push(
-                history_link(named("todo-schedule-history", &schedule.id))
+                history_link(named("todo-schedule-history", &schedule.id), cx)
+                    .aria_label(action_for(&rust_i18n::t!("kanban.all_history"), title))
                     .on_press(cx, move |this, _, cx| this.show_history(Some(id.clone()), cx))
                     .into_any_element(),
             );
@@ -198,9 +272,11 @@ impl Kanban {
         let edit = {
             let schedule = schedule.clone();
             let label = rust_i18n::t!("kanban.edit_schedule").into_owned();
-            icon_button("todo-schedule-edit", PENCIL_ICON, label).on_press(cx, move |this, window, cx| {
-                this.open_dialog(true, Some(Editing::Schedule(schedule.clone())), window, cx)
-            })
+            icon_button("todo-schedule-edit", PENCIL_ICON, label.clone())
+                .aria_label(action_for(&label, title))
+                .on_press(cx, move |this, window, cx| {
+                    this.open_dialog(true, Some(Editing::Schedule(schedule.clone())), window, cx)
+                })
         };
         let pause = {
             let (id, paused) = (schedule.id.clone(), !schedule.paused);
@@ -209,7 +285,8 @@ impl Kanban {
             } else {
                 (PLAY_ICON, rust_i18n::t!("kanban.resume_schedule").into_owned())
             };
-            icon_button("todo-schedule-pause", icon, label.clone()).on_press(cx, move |this, _, cx| {
+            let name = action_for(&label, title);
+            icon_button("todo-schedule-pause", icon, label.clone()).aria_label(name).on_press(cx, move |this, _, cx| {
                 if store::host_below(cx, 3) {
                     let text = rust_i18n::t!("kanban.dialog.host_too_old_for", what = label.as_str()).into_owned();
                     this.show_toast(ToastState::Failed(text), cx);
@@ -222,7 +299,8 @@ impl Kanban {
         let remove = {
             let id = schedule.id.clone();
             let label = rust_i18n::t!("kanban.remove_schedule").into_owned();
-            icon_button("todo-schedule-remove", TRASH_ICON, label)
+            icon_button("todo-schedule-remove", TRASH_ICON, label.clone())
+                .aria_label(action_for(&label, title))
                 .on_press(cx, move |this, window, cx| this.remove_schedule(id.clone(), window, cx))
         };
         // 停用的三行字各调淡一档，一眼和还在排的分开；下面的记录链接照样能点，不跟着淡。
@@ -285,5 +363,26 @@ mod tests {
         let todos = [run("d", 4), run("c", 3), todo("x", None, None), run("b", 2), run("e", 5), run("a", 1)];
         let ids: Vec<_> = recent_runs(&todos, "s").iter().map(|todo| todo.id.as_str()).collect();
         assert_eq!(ids, ["e", "d", "c"]);
+    }
+
+    /// 下一个定时跳过停用的和不会再到点的。
+    #[test]
+    fn next_schedule_skips_paused_and_finished() {
+        let schedule = |id: &str, next_fire: Option<u64>, paused: bool| Schedule {
+            id: id.into(),
+            spec: todo(id, None, None).spec,
+            when: runode_protocol::todo::When::Every { minutes: 60 },
+            last_fired: 0,
+            next_fire,
+            paused,
+        };
+        let schedules = [
+            schedule("paused", Some(10), true),
+            schedule("over", None, false),
+            schedule("later", Some(30), false),
+            schedule("soon", Some(20), false),
+        ];
+        assert_eq!(next_schedule(&schedules).map(|s| s.id.as_str()), Some("soon"));
+        assert_eq!(next_schedule(&schedules[..2]).map(|s| s.id.as_str()), None);
     }
 }

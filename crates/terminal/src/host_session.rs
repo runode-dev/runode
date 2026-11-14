@@ -151,6 +151,8 @@ pub struct HostSession {
     title: Option<String>,
     /// 前台 agent 和它的状态，由 `agent_tracker` 合成；不是 agent 在前台时为 `None`。
     agent: Option<Agent>,
+    /// `agent` 换成现在这个值的时刻，对外是 `SessionMeta::agent_since_ms`。
+    agent_since_ms: Option<u64>,
     /// 前台 agent 在进行的对话，见 `SessionMeta::conversation`。
     conversation: Option<Conversation>,
     /// 识别前台 agent 用的各路信号和去抖状态，见 `runode_agent::Tracker`。
@@ -260,6 +262,7 @@ impl HostSession {
             replies,
             title: None,
             agent: None,
+            agent_since_ms: None,
             conversation: None,
             agent_tracker: Tracker::new(),
             foreground_probe: detect::ForegroundProbe::default(),
@@ -427,6 +430,7 @@ impl HostSession {
         self.title.clone_from(&meta.title);
         self.fallback_title.clone_from(&meta.fallback_title);
         self.agent = meta.agent;
+        self.agent_since_ms = meta.agent_since_ms;
         self.conversation.clone_from(&meta.conversation);
         self.cwd.clone_from(&meta.cwd);
         self.prompt_cwd.clone_from(&meta.prompt_cwd);
@@ -576,6 +580,7 @@ impl HostSession {
             title: self.title.clone(),
             fallback_title: self.fallback_title.clone(),
             agent: self.agent,
+            agent_since_ms: self.agent_since_ms,
             conversation: self.conversation.clone(),
             cwd: self.cwd.clone(),
             foreground_is_shell: self.foreground_is_shell,

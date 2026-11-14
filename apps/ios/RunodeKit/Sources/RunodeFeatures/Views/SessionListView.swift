@@ -6,8 +6,9 @@
     import UIKit
 
     /// 一台电脑上的会话，按工作区分节（分节见 `SessionListModel.sections`），节头能新开终端、长按改名。
-    /// 一个会话一张卡片，带 agent 状态和屏幕最后几行的预览，等你回答的带快速回复；点开终端，左滑结束，
-    /// 长按有更多操作。有会话等你回答时列表顶上汇总一张卡片。右上角新开终端、新建工作区，打开远程桌面。
+    /// 顶上能筛出只看等你回答的、在干活的。一个会话一张卡片，样子按 `SessionStatus` 分：等你回答的带屏幕
+    /// 摘录和一排快速回复的按键，在干活的带屏幕最后一行，其余只有标题和状态；点开终端，左滑结束，长按有
+    /// 更多操作。右上角新开终端、新建工作区，打开远程桌面。
     struct SessionListView: View {
         @Bindable var model: SessionListModel
         let onOpen: (SessionId) -> Void
@@ -19,17 +20,13 @@
         var fontSize: Double? = nil
         @Environment(\.displayScale) private var displayScale
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+        @Environment(\.appTheme) private var theme
         /// 页面的大小，后台新开会话时按它和字号算网格（`spawnSize`）。
         @State private var pageSize: CGSize?
         /// 正在改名的工作区和输入框里的名字。
         @State private var renaming: SessionSection?
         @State private var renameText = ""
-
-        var body: some View {
-            ScrollViewReader { proxy in
-                list(proxy)
-            }
-        }
+        @State private var filter = SessionFilter.all
 
         /// 和打开终端后适配的网格一样大，宿主起会话时就不用再改尺寸。
         private func updateSpawnSize() {
@@ -66,26 +63,28 @@
             }
         }
 
-        private func list(_ proxy: ScrollViewProxy) -> some View {
+        var body: some View {
+            let sections = model.sections(matching: filter)
             List {
-                if !model.linkState.isConnected {
-                    Section {
+                // 两行放在同一节里：普通样式的列表只在同一节的行之间留 `listRowSpacing` 的空，节与节之间不留。
+                Section {
+                    if !model.linkState.isConnected {
                         ConnectionStatusRow(state: model.linkState, onRetry: model.reconnect)
                             .cardBackground()
                             .plainListRow()
                     }
-                }
-                let waiting = model.sections.flatMap { section in
-                    section.sessions.filter { SessionGroup.of($0) == .waiting }.map { (section: section, session: $0) }
-                }
-                if !waiting.isEmpty {
-                    Section {
-                        WaitingSummary(items: waiting) { id in
-                            withAnimation { proxy.scrollTo(id, anchor: .top) }
-                        }
+                    // 一个会话都没有时不出筛选条；筛着的时候会话没了也留着，才切得回全部。
+                    if !model.sessions.isEmpty || filter != .all {
+                        SessionFilterBar(selection: $filter, count: model.count)
+                            .plainListRow()
                     }
                 }
-                ForEach(model.sections) { section in
+                if sections.isEmpty, filter != .all {
+                    Section {
+                        FilterEmptyRow(filter: filter) { filter = .all }
+                    }
+                }
+                ForEach(sections) { section in
                     Section {
                         WorkspaceHeader(
                             section: section, canSpawn: model.canSpawn(in: section), isSpawning: model.isSpawning,
@@ -102,7 +101,7 @@
                 }
             }
             .cardList()
-            .animation(.default, value: model.sections.map(\.sessions.count))
+            .animation(.default, value: sections.map(\.sessions.count))
             .overlay {
                 // 有空工作区时每一节自己写着「没有终端」，整页的空状态只在一节都没有时出。
                 if model.loaded, model.sections.isEmpty, model.linkState.isConnected {
@@ -138,8 +137,8 @@
                             .disabled(!model.linkState.isConnected)
                     }
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu("新建", systemImage: "plus") {
+                NewMenuItem {
+                    Menu {
                         Section {
                             spawnItem(agent: nil) {
                                 Label("新开终端", systemImage: "terminal")
@@ -153,7 +152,10 @@
                         Button("新建工作区", systemImage: "folder.badge.plus") {
                             model.beginNewWorkspace()
                         }
+                    } label: {
+                        NewMenuLabel()
                     }
+                    .modifier(ProminentToolbarButton())
                     .disabled(!model.linkState.isConnected || model.isSpawning)
                 }
             }
@@ -167,6 +169,7 @@
                     ) { dir, name in
                         Task { await model.createWorkspace(at: dir, name: name) }
                     }
+                    .appTheme(theme)
                 }
             }
             .refreshable {
@@ -204,37 +207,53 @@
             }
         }
 
-        /// 一个会话一张卡片，整张能点开终端。等回答的会话卡片下半截是快速回复，只有上半截能点开。
+        /// 一个会话一张卡片，样子按 `SessionStatus` 分。等你回答的卡片只有头部能点开终端，下面的按键是快速
+        /// 回复，两者不能套在一个按钮里；别的卡片整张能点开。
         @ViewBuilder
         private func card(_ session: SessionInfo, in section: SessionSection) -> some View {
-            let summary = SessionRow(
-                session: session, workspaceDir: section.dir, preview: model.previews[session.id] ?? [],
-                split: model.panes(sharingTabWith: session.id).first { $0.id == session.id },
-                tab: model.tabNumber(of: session.id))
-            if SessionGroup.of(session) == .waiting {
-                VStack(alignment: .leading, spacing: 10) {
-                    Button { onOpen(session.id) } label: { summary.contentShape(Rectangle()) }
+            let head = SessionRow(session: session, workspaceDir: section.dir, tab: model.tabNumber(of: session.id))
+            let preview = model.previews[session.id] ?? []
+            switch SessionStatus.of(session) {
+            case .waiting:
+                // 认出了提问时选项单独成键，摘录只放问题。
+                let prompt = model.prompts[session.id]
+                let excerpt = prompt?.question ?? preview
+                VStack(alignment: .leading, spacing: 8) {
+                    Button { onOpen(session.id) } label: { head.contentShape(Rectangle()) }
                         .buttonStyle(.plain)
-                    QuickReplyBar(model: model.quickReply(for: session.id))
+                    if !excerpt.isEmpty {
+                        ScreenPreview(lines: excerpt, tone: .primary)
+                    }
+                    QuickReplyBar(
+                        model: model.quickReply(for: session.id), prompt: prompt, optionLayout: .compact,
+                        showsDraft: false)
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel("回复「\(Presentation.sessionTitle(session))」")
                 }
-                .cardBackground()
-                // 等回答的卡片描一圈橙边，混在别的卡片里也一眼认得出。
-                .overlay(RoundedRectangle.card.strokeBorder(AgentBadge.tint(for: .waiting).opacity(0.6), lineWidth: 1.5))
-            } else {
-                Button { onOpen(session.id) } label: { summary }
-                    .buttonStyle(CardButtonStyle())
+                .cardBackground(padding: 12)
+            case .working:
+                Button { onOpen(session.id) } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        head
+                        if !preview.isEmpty {
+                            ScreenPreview(lines: Array(preview.suffix(1)))
+                        }
+                    }
+                }
+                .buttonStyle(CardButtonStyle())
+            case let status:
+                Button { onOpen(session.id) } label: {
+                    head
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                }
+                .buttonStyle(CardButtonStyle(padding: 0))
+                .opacity(status == .exited ? 0.6 : 1)
             }
         }
 
-        /// 标题下面一行连接状态：连着时带地址。
         private var linkSubtitle: String {
-            switch model.linkState {
-            case .connected(_, let address?): String(localized: "已连接 · \(Presentation.displayAddress(address))")
-            // 等重连的交给 `linkStatus`：电脑离线和按退避重连的文案不一样。
-            default: Presentation.linkStatus(model.linkState)
-            }
+            Presentation.linkRoute(model.linkState)
         }
 
         private func row(_ session: SessionInfo, in section: SessionSection) -> some View {
@@ -256,7 +275,7 @@
                     }
                     TasksSection(model: model, session: session) { onOpen(session.id) }
                     Section(
-                        "\(Presentation.gridSize(session.size)) · \(Presentation.sizeOwner(session.sizeOwner))"
+                        "\(Presentation.gridSize(session.size))，\(Presentation.sizeOwner(session.sizeOwner))"
                     ) {
                         Button("结束会话", systemImage: "xmark.circle", role: .destructive) {
                             model.killTarget = session.id
@@ -319,45 +338,162 @@
         }
     }
 
-    /// 列表顶上的一张卡片：等你回答的会话一个一行，写着它在哪个工作区。点一行滚到它的卡片，快速回复在那里。
-    private struct WaitingSummary: View {
-        let items: [(section: SessionSection, session: SessionInfo)]
-        let onSelect: (SessionId) -> Void
-        @ScaledMetric(relativeTo: .subheadline) private var iconSize: CGFloat = 18
+    /// 列表顶上的分段筛选：全部、等你、干活中，各带会话数。等你的有会话时那一段的字一律是琥珀色，没选中
+    /// 也看得出有人在等。字号到了无障碍档时三段竖着排。
+    private struct SessionFilterBar: View {
+        @Binding var selection: SessionFilter
+        let count: (SessionFilter) -> Int
+        @Environment(\.themeColors) private var colors
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+        private static let outerRadius: CGFloat = 14
+        private static let segmentRadius: CGFloat = 12
+        private static let segmentHeight: CGFloat = 38
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 4) {
-                Label("\(items.count) 个等你回答", systemImage: Presentation.symbol(for: .waiting))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AgentBadge.tint(for: .waiting))
-                    .accessibilityAddTraits(.isHeader)
-                ForEach(items, id: \.session.id) { item in
-                    Button { onSelect(item.session.id) } label: {
-                        HStack(spacing: 8) {
-                            SessionIcon(agent: item.session.meta.agent?.kind, size: iconSize)
-                            Text(Presentation.sessionTitle(item.session))
-                                .lineLimit(1)
-                            Spacer(minLength: 8)
-                            Text(Presentation.sectionTitle(item.section))
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            Image(systemName: "arrow.down")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                                .accessibilityHidden(true)
-                        }
-                        .font(.subheadline)
-                        .frame(minHeight: 36)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("滚到这个终端的卡片")
+            let shape = RoundedRectangle(cornerRadius: Self.outerRadius, style: .continuous)
+            let layout =
+                dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+            layout {
+                ForEach(SessionFilter.allCases, id: \.self) { filter in
+                    segment(filter)
                 }
             }
-            .cardBackground()
-            .overlay(RoundedRectangle.card.strokeBorder(AgentBadge.tint(for: .waiting).opacity(0.6), lineWidth: 1.5))
+            .padding(2)
+            .background(colors.well, in: shape)
+            .overlay(shape.strokeBorder(colors.hairline, lineWidth: 1).allowsHitTesting(false))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("筛选会话")
+        }
+
+        private func segment(_ filter: SessionFilter) -> some View {
+            let selected = selection == filter
+            let number = count(filter)
+            let title = Self.title(filter)
+            let shape = RoundedRectangle(cornerRadius: Self.segmentRadius, style: .continuous)
+            let alert = filter == .waiting && number > 0
+            return Button {
+                selection = filter
+            } label: {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.subheadline.weight(selected ? .semibold : .regular))
+                        .foregroundStyle(
+                            alert
+                                ? AnyShapeStyle(colors.waiting)
+                                : selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    Text(verbatim: String(number))
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(alert ? AnyShapeStyle(colors.waiting) : AnyShapeStyle(.secondary))
+                }
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: Self.segmentHeight)
+                .background(selected ? colors.raised : .clear, in: shape)
+                .contentShape(shape)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(title)，\(number) 个")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+        }
+
+        private static func title(_ filter: SessionFilter) -> String {
+            switch filter {
+            case .all: String(localized: "全部")
+            case .waiting: String(localized: "等你")
+            case .working: String(localized: "干活中")
+            }
+        }
+    }
+
+    /// 筛出来一个会话都没有时列表里的那一行，带一个回到全部的按钮。
+    private struct FilterEmptyRow: View {
+        let filter: SessionFilter
+        let onShowAll: () -> Void
+
+        var body: some View {
+            VStack(spacing: 12) {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button(action: onShowAll) {
+                    Text("看全部")
+                        .padding(.horizontal, 16)
+                }
+                .buttonStyle(SurfaceButtonStyle(.raised))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 24)
             .plainListRow()
+        }
+
+        private var message: String {
+            switch filter {
+            case .waiting: String(localized: "没有在等你的会话")
+            case .all, .working: String(localized: "没有在干活的会话")
+            }
+        }
+    }
+
+    /// 新建菜单的标签：强调色的实心圆，图标用页面的底色。系统的实心样式图标固定是白的，前景色是白的时会
+    /// 看不见，所以 iOS 26 上自己画圆；圆画在标签里，工具栏只照标签画菜单，套在菜单外面的底色不画。
+    private struct NewMenuLabel: View {
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.themeColors) private var colors
+
+        /// 和导航栏上别的按钮的玻璃底一样大。
+        private static let diameter: CGFloat = 44
+
+        var body: some View {
+            if #available(iOS 26, *) {
+                Image(systemName: "plus")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(colors.page)
+                    .frame(width: Self.diameter, height: Self.diameter)
+                    .background(.tint, in: Circle())
+                    .contentShape(Circle())
+                    .opacity(isEnabled ? 1 : 0.4)
+                    .accessibilityLabel("新建")
+            } else {
+                Label("新建", systemImage: "plus")
+            }
+        }
+    }
+
+    /// 新建菜单在工具栏上的按钮样式；iOS 26 上圆由 `NewMenuLabel` 画，所在的工具栏项要去掉系统的玻璃底
+    /// （`NewMenuItem`）。
+    private struct ProminentToolbarButton: ViewModifier {
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.themeColors) private var colors
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if #available(iOS 26, *) {
+                content.buttonStyle(.plain)
+            } else {
+                content
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(colors.page) : AnyShapeStyle(.secondary))
+            }
+        }
+    }
+
+    /// 放新建菜单的工具栏项。
+    private struct NewMenuItem<Content: View>: ToolbarContent {
+        @ViewBuilder let content: () -> Content
+
+        var body: some ToolbarContent {
+            if #available(iOS 26, *) {
+                item.sharedBackgroundVisibility(.hidden)
+            } else {
+                item
+            }
+        }
+
+        private var item: some ToolbarContent {
+            ToolbarItem(placement: .primaryAction) { content() }
         }
     }
 
@@ -371,55 +507,74 @@
         /// 收到的为空时开普通终端，否则起这家 agent。
         let onSpawn: (InstalledAgent?) -> Void
         let onRename: () -> Void
-        @ScaledMetric(relativeTo: .subheadline) private var iconWidth: CGFloat = 24
+        /// 图标定宽，文件夹和后台那一节的月亮宽窄不一，定了宽各节的标题才对齐。
+        @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 20
 
         var body: some View {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                // 图标单独一列，目录和「没有终端」才和标题的字左对齐，不缩回图标底下。
-                Image(systemName: Presentation.sectionSymbol(section))
-                    .font(.subheadline.weight(.semibold))
-                    .frame(width: iconWidth)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 8) {
+                    Image(systemName: Presentation.sectionSymbol(section))
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .frame(width: iconWidth)
+                        .accessibilityHidden(true)
                     Text(Presentation.sectionTitle(section))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
                         .accessibilityAddTraits(.isHeader)
-                    if let detail = Presentation.sectionDetail(section) {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if let directory = Presentation.sectionDirectory(section) {
+                        Text(directory)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.head)
                     }
-                    // 空工作区不另起一张卡片，在标题下写一行，一屏才放得下有会话的那几节。
-                    if section.sessions.isEmpty {
-                        Text("没有终端")
+                    if let window = Presentation.sectionWindow(section) {
+                        Text(window)
                             .font(.caption)
                             .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .fixedSize()
                     }
-                }
-                Spacer(minLength: 8)
-                if canSpawn {
-                    Group {
-                        if agents.isEmpty {
-                            Button { onSpawn(nil) } label: { spawnLabel }
-                        } else {
-                            Menu {
-                                SpawnKindItems(agents: agents, action: onSpawn)
-                            } label: {
-                                spawnLabel
+                    Spacer(minLength: 8)
+                    if canSpawn {
+                        Group {
+                            if agents.isEmpty {
+                                Button { onSpawn(nil) } label: { spawnLabel }
+                            } else {
+                                Menu {
+                                    SpawnKindItems(agents: agents, action: onSpawn)
+                                } label: {
+                                    spawnLabel
+                                }
                             }
                         }
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .buttonStyle(.borderless)
+                        .disabled(isSpawning)
+                        .accessibilityLabel("在「\(Presentation.sectionTitle(section))」里新开终端")
                     }
-                    .font(.body.weight(.semibold))
-                    .buttonStyle(.borderless)
-                    .disabled(isSpawning)
-                    .accessibilityLabel("在「\(Presentation.sectionTitle(section))」里新开终端")
                 }
+                .frame(minHeight: 32)
+                // 后台那一节没有目录，说明它是什么的那句另起一行；空工作区不另起一张卡片，也在这里写一行，
+                // 一屏才放得下有会话的那几节。两行都和标题的字左对齐。
+                Group {
+                    if case .background = section.id, let detail = Presentation.sectionDetail(section) {
+                        Text(detail)
+                    }
+                    if section.sessions.isEmpty {
+                        Text("没有终端")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.leading, iconWidth + 8)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .padding(.top, 2)
+            .padding(.horizontal, 4)
             .contentShape(Rectangle())
             .contextMenu {
                 if case .workspace = section.id {
@@ -442,78 +597,57 @@
         private var spawnLabel: some View {
             Label("在这里新开终端", systemImage: "plus")
                 .labelStyle(.iconOnly)
-                .frame(minWidth: 44, minHeight: 44)
+                .frame(minWidth: 44, minHeight: 32, alignment: .trailing)
                 .contentShape(Rectangle())
         }
     }
 
+    /// 会话卡片的头部：状态标记，标题，下面一行说状态（`Presentation.sessionSubtitle`），末尾是标签页号；
+    /// 会话不在工作区的目录里时再起一行写它的目录。状态由那行字说，读屏不念标记。
     private struct SessionRow: View {
         let session: SessionInfo
         /// 所在工作区的目录：会话就在这里时卡片上不再写一遍。
         let workspaceDir: String?
-        let preview: [String]
-        /// 电脑上它所在的标签分了屏时是它那个分屏，卡片上标出它在标签里的位置。
-        var split: SplitPane?
         /// 电脑上它在工作区里是第几个标签页，同一个工作区的几张卡片靠它分得开。
         var tab: Int?
-        /// 标题前图标的边长，跟着标题的字号缩放。
-        @ScaledMetric(relativeTo: .headline) private var iconSize: CGFloat = 22
-        /// 状态图标定宽，转圈和月亮宽窄不一，定了宽各张卡片的标题才对齐。
-        @ScaledMetric(relativeTo: .subheadline) private var stateIconWidth: CGFloat = 20
+        @ScaledMetric(relativeTo: .callout) private var glyphSize: CGFloat = 18
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    SessionIcon(agent: session.meta.agent?.kind, size: iconSize)
-                        // 图标的中线对着第一行字的中间（标题的大写字母高约为图标边长的 0.54）。
-                        .alignmentGuide(.firstTextBaseline) { [iconSize] d in d[VerticalAlignment.center] + iconSize * 0.27 }
-                        .opacity(session.exited ? 0.5 : 1)
-                    // 没有 agent 时不留这块空，shell 的标题紧挨着前面的图标。
-                    if Presentation.agentStatus(session.meta.agent) != nil {
-                        AgentStateIcon(agent: session.meta.agent)
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: stateIconWidth)
-                    }
+            HStack(spacing: 10) {
+                StatusGlyph(StatusMark(SessionStatus.of(session)), size: glyphSize)
+                VStack(alignment: .leading, spacing: 1) {
                     Text(Presentation.sessionTitle(session))
-                        .font(.headline)
-                        .foregroundStyle(session.exited ? .secondary : .primary)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
                         .lineLimit(2)
-                    if session.exited {
-                        Text("已退出")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .background(.quaternary, in: Capsule())
-                    }
-                    if split != nil || tab != nil {
-                        HStack(spacing: 4) {
-                            if let split { PaneGlyph(rect: split.rect) }
-                            if let tab {
-                                Text("标签页 \(tab)")
-                            } else {
-                                Text("分屏")
-                            }
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        TimelineView(AgentClockSchedule(session)) { context in
+                            Text(Presentation.sessionSubtitle(session, now: context.date))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .background(.quaternary, in: Capsule())
-                        .fixedSize()
+                        if let tab {
+                            Text("标签页 \(tab)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                     }
-                    Spacer(minLength: 8)
-                    DisclosureChevron()
+                    if let directory = Presentation.sessionDirectory(session.meta.cwd, in: workspaceDir) {
+                        Text(directory)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
                 }
-                if let directory = Presentation.sessionDirectory(session.meta.cwd, in: workspaceDir) {
-                    CompactLabel(text: directory, systemImage: "folder")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                }
-                if !preview.isEmpty {
-                    ScreenPreview(lines: preview)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                DisclosureChevron()
             }
+            .frame(minHeight: 42)
+            .padding(.horizontal, 2)
             .accessibilityElement(children: .combine)
             .accessibilityHint("打开这个终端")
         }

@@ -36,7 +36,7 @@ use crate::ui::{
     panel::{DIVIDER_GRAB_WIDTH, chevron, panel_message, panel_title, split_handle},
     row_buttons::{RowButton, button, row_buttons},
     scrollbar::scrollbar,
-    theme::{ADDED, MODIFIED, REMOVED},
+    theme::{ADDED, REMOVED},
     tooltip::tooltip,
 };
 use gpui::{
@@ -1331,16 +1331,16 @@ fn gh_error(err: String) -> String {
     }
 }
 
-/// 状态的图标，按状态上色：成功绿、失败红、在跑和排队黄，其余灰。
+/// 状态的图标，按状态上色：成功绿、失败红、在跑和排队是主题的 `info`，要人处理的是 `warning`，其余灰。
 fn state_icon(state: State, cx: &App) -> gpui::Svg {
     let (icon, color) = match state {
         State::Success => (SUCCESS_ICON, hsla(ADDED)),
         State::Failure => (FAILURE_ICON, hsla(REMOVED)),
         State::Cancelled => (CANCELLED_ICON, cx.theme().foreground.opacity(0.5)),
         State::Skipped => (SKIPPED_ICON, cx.theme().foreground.opacity(0.5)),
-        State::InProgress => (INPROGRESS_ICON, hsla(MODIFIED)),
-        State::Queued => (QUEUED_ICON, hsla(MODIFIED)),
-        State::Waiting | State::ActionRequired => (WAITING_ICON, hsla(MODIFIED)),
+        State::InProgress => (INPROGRESS_ICON, cx.theme().info),
+        State::Queued => (QUEUED_ICON, cx.theme().info),
+        State::Waiting | State::ActionRequired => (WAITING_ICON, cx.theme().warning),
         State::Pending => (PENDING_ICON, cx.theme().foreground.opacity(0.5)),
     };
     svg().flex_none().path(icon).size(px(13.)).text_color(color)

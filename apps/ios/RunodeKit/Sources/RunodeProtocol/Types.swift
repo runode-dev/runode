@@ -416,17 +416,20 @@ public struct SessionMeta: Hashable, Sendable, Decodable {
     public var title: String?
     public var fallbackTitle: String?
     public var agent: Agent?
+    /// 前台 agent 进入现在这个种类和状态的时刻，按电脑的钟取。没有 agent，或宿主不报时为空。
+    public var agentSince: Date?
     public var cwd: String?
     public var foregroundIsShell: Bool
     public var foreground: String?
 
     public init(
-        title: String? = nil, fallbackTitle: String? = nil, agent: Agent? = nil, cwd: String? = nil,
-        foregroundIsShell: Bool = false, foreground: String? = nil
+        title: String? = nil, fallbackTitle: String? = nil, agent: Agent? = nil, agentSince: Date? = nil,
+        cwd: String? = nil, foregroundIsShell: Bool = false, foreground: String? = nil
     ) {
         self.title = title
         self.fallbackTitle = fallbackTitle
         self.agent = agent
+        self.agentSince = agentSince
         self.cwd = cwd
         self.foregroundIsShell = foregroundIsShell
         self.foreground = foreground
@@ -435,6 +438,7 @@ public struct SessionMeta: Hashable, Sendable, Decodable {
     enum CodingKeys: String, CodingKey {
         case title, agent, cwd, foreground
         case fallbackTitle = "fallback_title"
+        case agentSinceMs = "agent_since_ms"
         case foregroundIsShell = "foreground_is_shell"
     }
 
@@ -443,6 +447,10 @@ public struct SessionMeta: Hashable, Sendable, Decodable {
         title = try c.decodeIfPresent(String.self, forKey: .title)
         fallbackTitle = try c.decodeIfPresent(String.self, forKey: .fallbackTitle)
         agent = try? c.decodeIfPresent(Agent.self, forKey: .agent)
+        // Unix 毫秒；只用来显示时长、认新的一次等待，读不了就当宿主没报。
+        agentSince = (try? c.decodeIfPresent(UInt64.self, forKey: .agentSinceMs))
+            .flatMap { $0 }
+            .map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
         // 宿主的 `PathBuf` 不是合法 UTF-8 时序列化不出来，能读到的都是字符串。
         cwd = try? c.decodeIfPresent(String.self, forKey: .cwd)
         foregroundIsShell = try c.decodeIfPresent(Bool.self, forKey: .foregroundIsShell) ?? false

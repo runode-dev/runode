@@ -11,7 +11,9 @@ mod keys;
 
 use std::path::{Path, PathBuf};
 
-use gpui::{Action, App, Context, Entity, EntityId, Focusable, MouseButton, SharedString, Window, prelude::*, px};
+use gpui::{
+    Action, App, Context, Entity, EntityId, Focusable, MouseButton, SharedString, Window, div, prelude::*, px, svg,
+};
 use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
@@ -34,10 +36,24 @@ use crate::{
     config::AppConfig,
     host_client,
     terminal_view::TerminalView,
-    ui::icons::{KEYBOARD_ICON, PENCIL_ICON, PLAY_ICON, TRASH_ICON},
-    ui::{display_dir, tooltip::tooltip},
+    ui::icons::{CHEVRON_DOWN_ICON, KEYBOARD_ICON, PENCIL_ICON, PLAY_ICON, TRASH_ICON},
+    ui::{
+        display_dir, font,
+        font_size::{self, FontSize, scaled},
+        theme::ActiveTheme as _,
+        tooltip::tooltip,
+    },
     window::WindowView,
 };
+
+/// 带着上次跑的命令的命令按钮：左右留白、两头图标的边长、图标和命令之间的空隙，以及命令最宽多宽
+/// （按基准字号的点数）。
+const TASK_BUTTON_PADDING: (f32, f32) = (9., 10.);
+const TASK_BUTTON_ICON: f32 = 10.;
+const TASK_BUTTON_GAP: f32 = 8.;
+const TASK_COMMAND_MAX_WIDTH: f32 = 160.;
+/// 等宽字一个字的宽度，按字号的倍数算，估命令按钮的宽度用。
+const MONO_ADVANCE: f32 = 0.6;
 
 /// 宿主从这些文件里读命令（锁文件决定用哪个包管理器），它们变了就重列。
 const TASK_FILES: [&str; 9] = [
@@ -372,15 +388,61 @@ impl WindowView {
         }
     }
 
-    /// 标题栏右上角、面板开关左边的命令按钮，菜单挂在它下面，开着时底色亮一些。
+    /// 命令按钮画出来的宽度，标题栏按它给右上角那组按钮让位。带着上次跑的命令时命令的宽度按等宽字估
+    /// （`MONO_ADVANCE`），最宽到 `TASK_COMMAND_MAX_WIDTH`。
+    pub(super) fn tasks_button_width(&self, cx: &App) -> f32 {
+        let Some(command) = &self.workspace().project.tasks_last else { return TOGGLE_WIDTH };
+        let text = command.chars().count() as f32 * MONO_ADVANCE * FontSize::Body.points();
+        let chrome = 2. + TASK_BUTTON_PADDING.0 + TASK_BUTTON_PADDING.1 + 2. * (TASK_BUTTON_ICON + TASK_BUTTON_GAP);
+        chrome + text.min(TASK_COMMAND_MAX_WIDTH) * font_size::scale(cx)
+    }
+
+    /// 标题栏右上角、面板开关左边的命令按钮，菜单挂在它下面，开着时底色亮一些。跑过命令时按钮上写着
+    /// 上次跑的那条，没跑过时只有图标。
     pub(super) fn render_tasks_button(&self, window: &Window, cx: &mut Context<Self>) -> Toggle {
         let view = cx.entity().downgrade();
         let open = self.tasks_menu_open();
-        Toggle::new("tasks", PLAY_ICON, rust_i18n::t!("tooltip.tasks"))
+        let last = self.workspace().project.tasks_last.clone();
+        let label = match &last {
+            Some(command) => rust_i18n::t!("tooltip.tasks_last", command = command),
+            None => rust_i18n::t!("tooltip.tasks"),
+        };
+        Toggle::new("tasks", PLAY_ICON, label)
             .pressed(open)
             .aria_expanded(open)
-            .w(px(TOGGLE_WIDTH))
-            .h(px(TOGGLE_HEIGHT))
+            .map(|button| match last {
+                Some(command) => {
+                    let theme = cx.theme();
+                    let text = div()
+                        .min_w_0()
+                        .max_w(scaled(TASK_COMMAND_MAX_WIDTH))
+                        .truncate()
+                        .text_size(FontSize::Body)
+                        .text_color(theme.foreground)
+                        .when_some(font::mono(cx), |text, family| text.font_family(family))
+                        .child(command);
+                    let chevron = svg()
+                        .flex_none()
+                        .path(CHEVRON_DOWN_ICON)
+                        .size(px(TASK_BUTTON_ICON))
+                        .text_color(theme.muted_foreground);
+                    button
+                        .icon_size(TASK_BUTTON_ICON)
+                        // 标题栏高度定死，界面字号调大时按钮不超出标题栏。
+                        .h(scaled(28.))
+                        .max_h(px(super::TITLEBAR_HEIGHT - 4.))
+                        .pl(px(TASK_BUTTON_PADDING.0))
+                        .pr(px(TASK_BUTTON_PADDING.1))
+                        .gap(px(TASK_BUTTON_GAP))
+                        .rounded(px(7.))
+                        .border_1()
+                        .border_color(theme.control_border)
+                        .text_color(theme.subtle_foreground)
+                        .child(text)
+                        .child(chevron)
+                }
+                None => button.w(px(TOGGLE_WIDTH)).h(px(TOGGLE_HEIGHT)),
+            })
             // 菜单开着时不挂提示：按下就开，鼠标停在按钮上，提示到点会盖在菜单上面。
             .when(!open, |button| button.tooltip(tooltip(rust_i18n::t!("tooltip.tasks"), Some(&ToggleTasks))))
             // 菜单开着时在捕获阶段就关掉、不再往下传：菜单自己的「点到外面就关」和下面再打开的都不跑。

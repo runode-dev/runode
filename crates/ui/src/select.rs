@@ -16,6 +16,7 @@ pub struct SelectTrigger {
     div: Stateful<Div>,
     value: SharedString,
     leading: Option<AnyElement>,
+    trailing: Option<AnyElement>,
     extra: Vec<AnyElement>,
 }
 
@@ -24,7 +25,7 @@ impl SelectTrigger {
     pub fn new(id: impl Into<ElementId>, name: impl Into<SharedString>, value: impl Into<SharedString>) -> Self {
         let value = value.into();
         let div = div().id(id).role(Role::ComboBox).aria_label(name).aria_value(value.clone());
-        Self { div, value, leading: None, extra: Vec::new() }
+        Self { div, value, leading: None, trailing: None, extra: Vec::new() }
     }
 
     /// 画在值左边的东西，比如图标、色块。
@@ -32,12 +33,18 @@ impl SelectTrigger {
         self.leading = Some(leading.into_any_element());
         self
     }
+
+    /// 画在值右边、箭头左边的补充，比如项目的分支名；放不下时先截断值。
+    pub fn trailing(mut self, trailing: impl IntoElement) -> Self {
+        self.trailing = Some(trailing.into_any_element());
+        self
+    }
 }
 
 impl RenderOnce for SelectTrigger {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let chevron = cx.theme().foreground.opacity(0.6);
-        let Self { mut div, value, leading, extra } = self;
+        let Self { mut div, value, leading, trailing, extra } = self;
         let user = std::mem::take(div.style());
         let mut div = div
             .min_w_0()
@@ -47,6 +54,7 @@ impl RenderOnce for SelectTrigger {
             .cursor_pointer()
             .children(leading)
             .child(gpui::div().flex_1().min_w_0().truncate().child(value))
+            .children(trailing)
             .child(svg().flex_none().path(CHEVRON_DOWN_ICON).size(px(12.)).text_color(chevron))
             .children(extra);
         div.style().refine(&user);

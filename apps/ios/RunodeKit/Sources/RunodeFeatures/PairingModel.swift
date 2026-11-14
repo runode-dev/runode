@@ -28,6 +28,8 @@ public final class PairingModel {
     @ObservationIgnored private var running: Task<MachineRecord, any Error>?
     /// 配对页关掉了：之后配好的不再存。
     @ObservationIgnored private var cancelled = false
+    /// 已经配成的码：回到扫码时镜头里往往还是它，再扫到不重配同一台电脑。
+    @ObservationIgnored private var pairedCodes: Set<String> = []
 
     /// `onPaired` 把配好的电脑存下来，存不下时抛出，配对页显示失败。
     public init(
@@ -55,12 +57,13 @@ public final class PairingModel {
         await pair(text: linkText)
     }
 
-    /// 扫到一个二维码。正在配对或者已经配好时忽略。
+    /// 扫到一个二维码。正在配对、已经配好，或者这个码已经配成过时忽略。
     public func scanned(_ code: String) async {
         switch phase {
         case .pairing, .paired: return
         default: break
         }
+        guard !pairedCodes.contains(code) else { return }
         linkText = code
         await pair(text: code)
     }
@@ -107,6 +110,7 @@ public final class PairingModel {
                 phase = .failed(String(localized: "存不下这台电脑：\(error.localizedDescription)"))
                 return
             }
+            pairedCodes.insert(text)
             phase = .paired(machine)
         } catch where cancelled {
             return

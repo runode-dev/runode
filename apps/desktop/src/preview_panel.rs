@@ -68,6 +68,7 @@ use runode_git::{self as git, FileStatus, HunkAction, Section};
 use runode_preview::{Content, ImageFormat, Span};
 
 pub use diff::DiffTarget;
+pub(crate) use diff::{ask_discard_hunk, hunk_name, hunk_quote, hunk_title};
 
 use marks::{Mark, line_marks};
 pub use tabs::FileTab;
@@ -76,7 +77,7 @@ use tabs::PreviewTabs;
 /// 行高比字号多出的部分。
 const ROW_EXTRA_HEIGHT: f32 = 8.;
 /// 一行最多画这么多列，再长的截掉；复制时仍是整行。
-const MAX_COLUMNS: usize = 2000;
+pub(crate) const MAX_COLUMNS: usize = 2000;
 /// 正文上下留的空。
 const BODY_PADDING: f32 = 6.;
 /// 长行右边缘渐隐的宽度。

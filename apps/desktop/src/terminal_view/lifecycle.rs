@@ -921,6 +921,7 @@ impl TerminalView {
         let (size, cwd, visible) = (self.screen.last_size(), self.cwd(), self.screen.visible());
         if let Some(old) = self.id.take() {
             self.host_link.kill(old);
+            crate::agent_prompts::ended(&(self.host.clone(), old), cx);
         }
         self.start_resume = self.conversation();
         let meta =
@@ -1068,9 +1069,13 @@ impl TerminalView {
         let window_watches = WindowWatches::new(&focus_handle, &pane_focus, window, cx);
 
         // 关掉的终端不会再画下一帧，画过的图片在这里交还贴图。
+        // 结束了的会话不会再报状态，它等回答时认出的提问在这里去掉；没结束的（转到后台的）还有别处在跟。
         cx.on_release(|view: &mut Self, cx| {
             for (_, image) in view.images.drain() {
                 crate::ui::drop_render_image(image, cx);
+            }
+            if let Some(id) = view.id.filter(|_| view.ended || view.screen.exited()) {
+                crate::agent_prompts::ended(&(view.host.clone(), id), cx);
             }
         })
         .detach();
@@ -1182,6 +1187,11 @@ impl TerminalView {
     /// 会话所在的主机。
     pub fn host(&self) -> &HostId {
         &self.host
+    }
+
+    /// 到会话所在主机的连接。
+    pub fn host_link(&self) -> &HostLink {
+        &self.host_link
     }
 
     /// 和宿主断开了，画面停在最后一屏。
@@ -1326,9 +1336,10 @@ impl TerminalView {
         meta.foreground.as_deref().filter(|_| !meta.foreground_is_shell).map(|name| program_label(name).to_owned())
     }
 
-    /// 前台 agent 上次换了种类或状态的时刻。
+    /// 前台 agent 进入现在这个种类和状态的时刻：宿主报了 `SessionMeta::agent_since_ms` 就按它折算，没报时用
+    /// 这边看到它变了的时刻。
     pub fn agent_changed_at(&self) -> Instant {
-        self.agent_changed_at
+        self.meta().agent_since_ms.map_or(self.agent_changed_at, crate::git_panel::ago::instant_of)
     }
 
     /// 终端用的字体，Git 面板和预览栏里的代码也用它。

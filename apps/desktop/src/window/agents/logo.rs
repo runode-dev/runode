@@ -65,40 +65,6 @@ fn logo_of(kind: AgentKind) -> Option<Logo> {
     })
 }
 
-/// `kind` 自己的颜色：卡片样式下它等回答时的圆点、在标签图标叠里压在后面时铺的颜色都用它。
-/// 单色 logo 的 agent 多半没有，为 `None`。
-pub(in crate::window) fn brand_color(kind: AgentKind) -> Option<u32> {
-    Some(match kind {
-        AgentKind::Claude => 0xD97757,
-        AgentKind::Codex => 0x10A37F,
-        AgentKind::Gemini | AgentKind::Antigravity => 0x3186FF,
-        AgentKind::Devin => 0x21C19A,
-        AgentKind::GithubCopilot => 0x6E40C9,
-        AgentKind::Kimi => 0x1783FF,
-        AgentKind::Kiro => 0x9046FF,
-        AgentKind::Amp => 0xF34E3F,
-        AgentKind::Hermes => 0x7C3AED,
-        AgentKind::Qodercli => 0x2ADB5C,
-        AgentKind::Qwen => 0x6F69F7,
-        AgentKind::Junie => 0x47E054,
-        AgentKind::OpenHands => 0xE0C34A,
-        AgentKind::Trae => 0x32F08C,
-        AgentKind::CodeBuddy => 0x6C4DFF,
-        AgentKind::MistralVibe => 0xFA500F,
-        AgentKind::Jules => 0x715CD7,
-        AgentKind::Omp => 0xF97316,
-        AgentKind::Muse => 0x0081FB,
-        _ => return None,
-    })
-}
-
-/// 标签图标叠里压在后面的那几块铺的颜色：`brand_color`，没有的用灰色；认不出是哪个的 agent 为
-/// `None`，和普通程序一样画。
-pub(in crate::window) fn accent(kind: AgentKind) -> Option<u32> {
-    logo_of(kind)?;
-    Some(brand_color(kind).unwrap_or(0x6B7280))
-}
-
 /// 按原色画 `path` 这个 logo，边长 `size`。
 pub(in crate::window) fn colored_logo(path: &'static str, size: Pixels) -> AnyElement {
     img(path).flex_none().size(size).into_any_element()

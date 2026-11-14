@@ -12,12 +12,19 @@ use crate::hsla;
 /// 改动和文件状态的颜色，深浅背景上都看得清。
 pub const ADDED: Rgb = Rgb(0x57, 0xAB, 0x5A);
 pub const REMOVED: Rgb = Rgb(0xE5, 0x53, 0x4B);
-pub const MODIFIED: Rgb = Rgb(0xD2, 0xA8, 0x3E);
+pub const MODIFIED: Rgb = Rgb(0x53, 0x9B, 0xF5);
 pub const RENAMED: Rgb = Rgb(0x53, 0x9B, 0xF5);
 
-/// agent 等用户回答、干完了用户还没看时标记的颜色。
-pub const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
-pub const AGENT_DONE_COLOR: u32 = 0x3FB950;
+/// 状态色，深浅主题各一套，不跟调色板走：琥珀只用于「agent 在等你」这类要用户出手的提醒，蓝是在干活，
+/// 绿是做完和新增。`WARNING_TEXT_LIGHT` 是浅色底上读得清的琥珀字，`WARNING_FOREGROUND` 是琥珀实底上的字。
+const WARNING_DARK: Rgb = Rgb(0xF5, 0xA8, 0x3C);
+const WARNING_LIGHT: Rgb = Rgb(0xE8, 0x95, 0x1F);
+const WARNING_TEXT_LIGHT: Rgb = Rgb(0x9A, 0x5B, 0x00);
+const WARNING_FOREGROUND: Rgb = Rgb(0x1B, 0x12, 0x03);
+const INFO_DARK: Rgb = Rgb(0x7F, 0xA9, 0xFF);
+const INFO_LIGHT: Rgb = Rgb(0x2F, 0x6B, 0xDB);
+const SUCCESS_DARK: Rgb = Rgb(0x7F, 0xD4, 0x9B);
+const SUCCESS_LIGHT: Rgb = Rgb(0x1F, 0x8A, 0x3E);
 
 /// 调色板里没配置的强调色和出错色。
 const RING_FALLBACK: Rgb = Rgb(0x3b, 0x82, 0xf6);
@@ -47,6 +54,21 @@ pub struct Theme {
     /// 不起眼的底色和淡下去的字。
     pub muted: Hsla,
     pub muted_foreground: Hsla,
+    /// 次一级的字，比 `foreground` 淡、比 `muted_foreground` 浓。
+    pub subtle_foreground: Hsla,
+    /// 非终端的卡片（右侧面板、收件箱、看板列、设置卡）的底色。
+    pub surface: Hsla,
+    /// 嵌在窗口外框上的搜索框的底色。
+    pub field: Hsla,
+    /// 要用户出手的提醒（agent 在等你）：`warning` 用于标记和实底，`warning_text` 是写在普通底面上的
+    /// 琥珀字，`warning_foreground` 是 `warning` 实底上的字。
+    pub warning: Hsla,
+    pub warning_text: Hsla,
+    pub warning_foreground: Hsla,
+    /// 在干活。
+    pub info: Hsla,
+    /// 做完、新增。
+    pub success: Hsla,
     /// `background` 底面上的行悬停时的底色，和选中（当前的、打开着的）那行的底色；字用 `foreground`。
     pub accent: Hsla,
     pub accent_selected: Hsla,
@@ -81,6 +103,9 @@ impl Theme {
     pub fn new(fg: Rgb, bg: Rgb, ansi: [Rgb; 16]) -> Self {
         let mix = |k: f32| hsla(bg.mix(fg, k));
         let (track, active) = tab_track_colors(fg, bg);
+        let light = is_light(fg, bg);
+        let pick = |light_color: Rgb, dark_color: Rgb| hsla(if light { light_color } else { dark_color });
+        let warning = pick(WARNING_LIGHT, WARNING_DARK);
         Self {
             background: hsla(bg),
             foreground: hsla(fg),
@@ -95,6 +120,14 @@ impl Theme {
             secondary_foreground: hsla(fg),
             muted: mix(0.04),
             muted_foreground: hsla(fg).opacity(0.5),
+            subtle_foreground: hsla(fg).opacity(0.7),
+            surface: if light { hsla(bg) } else { mix(0.07) },
+            field: if light { hsla(bg) } else { mix(0.016) },
+            warning,
+            warning_text: if light { hsla(WARNING_TEXT_LIGHT) } else { warning },
+            warning_foreground: hsla(WARNING_FOREGROUND),
+            info: pick(INFO_LIGHT, INFO_DARK),
+            success: pick(SUCCESS_LIGHT, SUCCESS_DARK),
             accent: mix(0.06),
             accent_selected: mix(0.10),
             destructive: hsla(ansi[1]),
@@ -105,7 +138,7 @@ impl Theme {
             frame: hsla(frame_color(fg, bg)),
             tab_track: hsla(track),
             tab_active: hsla(active),
-            is_light: is_light(fg, bg),
+            is_light: light,
             ansi,
             fg,
             bg,
@@ -164,16 +197,17 @@ pub fn is_light(fg: Rgb, bg: Rgb) -> bool {
     luma(bg) > luma(fg)
 }
 
-/// 卡片样式下窗口的底色，衬在卡片后面：浅色主题往前景色混一点，深色主题往黑色压一些，两种都比
-/// 终端背景深一档。
+/// 卡片样式下窗口的底色，衬在卡片后面：两种主题都往前景色混一点。浅色主题里比终端背景深一档，
+/// 深色主题里比终端背景亮一档。
 pub fn frame_color(fg: Rgb, bg: Rgb) -> Rgb {
-    if is_light(fg, bg) { bg.mix(fg, 0.06) } else { bg.mix(Rgb(0, 0, 0), 0.4) }
+    if is_light(fg, bg) { bg.mix(fg, 0.06) } else { bg.mix(fg, 0.04) }
 }
 
 /// 卡片样式下标签条的底色，以及条里当前标签那颗胶囊的颜色。浅色主题里条介于外框
-/// 和卡片之间、胶囊就是卡片的白；深色主题里卡片已经比外框亮，条用卡片的颜色，胶囊再亮一档。
+/// 和卡片之间、胶囊就是卡片的白；深色主题里条和外框同色，胶囊亮出来。
 pub fn tab_track_colors(fg: Rgb, bg: Rgb) -> (Rgb, Rgb) {
-    if is_light(fg, bg) { (frame_color(fg, bg).mix(bg, 0.5), bg) } else { (bg, bg.mix(fg, 0.12)) }
+    let frame = frame_color(fg, bg);
+    if is_light(fg, bg) { (frame.mix(bg, 0.5), bg) } else { (frame, bg.mix(fg, 0.11)) }
 }
 
 #[cfg(test)]
@@ -219,10 +253,21 @@ mod tests {
             let luma = |c: Rgb| 0.299 * f32::from(c.0) + 0.587 * f32::from(c.1) + 0.114 * f32::from(c.2);
             let light = luma(bg) > luma(fg);
             assert_eq!(theme.is_light, light);
-            let frame = if light { bg.mix(fg, 0.06) } else { bg.mix(Rgb(0, 0, 0), 0.4) };
+            let frame = if light { bg.mix(fg, 0.06) } else { bg.mix(fg, 0.04) };
             assert_eq!(theme.frame, hsla(frame));
-            let (track, pill) = if light { (frame.mix(bg, 0.5), bg) } else { (bg, bg.mix(fg, 0.12)) };
+            let (track, pill) = if light { (frame.mix(bg, 0.5), bg) } else { (frame, bg.mix(fg, 0.11)) };
             assert_eq!((theme.tab_track, theme.tab_active), (hsla(track), hsla(pill)));
+            // 次一级的字和非终端的底面。
+            assert_eq!(theme.subtle_foreground, f.opacity(0.7));
+            let (surface, field) = if light { (bg, bg) } else { (bg.mix(fg, 0.07), bg.mix(fg, 0.016)) };
+            assert_eq!((theme.surface, theme.field), (hsla(surface), hsla(field)));
+            // 状态色是固定值，不跟调色板。
+            let rgb = |c: u32| hsla(Rgb((c >> 16) as u8, (c >> 8) as u8, c as u8));
+            let (warning, warning_text, info, success) =
+                if light { (0xE8951F, 0x9A5B00, 0x2F6BDB, 0x1F8A3E) } else { (0xF5A83C, 0xF5A83C, 0x7FA9FF, 0x7FD49B) };
+            assert_eq!((theme.warning, theme.warning_text), (rgb(warning), rgb(warning_text)));
+            assert_eq!(theme.warning_foreground, rgb(0x1B1203));
+            assert_eq!((theme.info, theme.success), (rgb(info), rgb(success)));
             for k in [0.04, 0.08, 0.10, 0.12, 0.14, 0.22] {
                 assert_eq!(theme.mix(k), hsla(bg.mix(fg, k)));
             }

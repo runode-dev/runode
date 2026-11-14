@@ -13,6 +13,7 @@
         @Bindable var model: ScreenModel
         @State private var keyboardVisible = false
         @Environment(\.dismiss) private var dismiss
+        @Environment(\.appTheme) private var theme
 
         var body: some View {
             VStack(spacing: 0) {
@@ -113,6 +114,7 @@
             }
             .sheet(isPresented: $model.askingPassword) {
                 UnlockSheet(model: model)
+                    .appTheme(theme)
             }
             .navigationTitle(model.machine.name)
             .toolbar(.hidden, for: .navigationBar)

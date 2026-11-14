@@ -49,7 +49,7 @@ impl WindowView {
         let down_text = (down > 0).then(|| rust_i18n::t!("status.hosts_down", count = down).into_owned());
         let icon = svg().flex_none().path(SERVER_ICON).size(px(13.)).text_color(cx.theme().foreground.opacity(0.6));
         let description = match &down_text {
-            Some(down_text) => format!("{label} · {down_text}"),
+            Some(down_text) => format!("{label} {down_text}"),
             None => label.clone(),
         };
         Some(

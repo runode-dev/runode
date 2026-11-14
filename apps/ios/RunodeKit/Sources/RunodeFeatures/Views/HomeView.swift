@@ -5,8 +5,9 @@
     import SwiftUI
     import UIKit
 
-    /// 首页：顶上是连着的电脑上加起来的统计，接着是等你回答的会话（带快速回复）、配对过的电脑、
-    /// 上次打开的终端和快捷操作。配对过的电脑在 App 处于前台时都连着（见 `AppModel`）。
+    /// 首页：顶上一句话说有几个会话在等你，接着是等你回答的会话（一次摊开一张，带快速回复）、配对过的
+    /// 电脑和上次打开的终端，底下钉着配对和新开终端两个按钮。配对过的电脑在 App 处于前台时都连着
+    /// （`AppModel.keepHomeRefreshing`）。
     struct HomeView: View {
         @Bindable var app: AppModel
         /// 就是 `app.machineList`，单独拿着才能给改名、删除的对话框做绑定。
@@ -14,15 +15,19 @@
         @Environment(\.displayScale) private var displayScale
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
         @Environment(\.themeColors) private var colors
+        @ScaledMetric(relativeTo: .subheadline) private var pairIconSize: CGFloat = 17
+        @ScaledMetric(relativeTo: .subheadline) private var spawnIconSize: CGFloat = 16
         /// 首页的大小，和终端页差不多；新开会话按它和设置里的字号算网格尺寸。
         @State private var pageSize: CGSize?
+        /// 「等你回答」里用户翻到的那张卡（`WaitingSession.id`），由 `HomePager` 解读。
+        @State private var focusedWaiting: String?
 
         var body: some View {
             content
                 .leadingNavigationTitle("Runode", showsMark: true)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        Button("设置", systemImage: "gearshape") { app.showingSettings = true }
+                        Button("设置", systemImage: "slider.horizontal.3") { app.showingSettings = true }
                     }
                 }
                 .task(id: machines.machines.map(\.id)) { await app.keepHomeRefreshing() }
@@ -62,101 +67,112 @@
                 .background(colors.page)
             } else {
                 List {
-                    summarySection
+                    headlineSection
                     waitingSection
                     machineSection
                     resumeSection
-                    actionSection
                 }
                 .cardList()
                 .animation(.default, value: app.waitingSessions.map(\.id))
                 .refreshable { app.refreshHome() }
+                .safeAreaInset(edge: .bottom) { actionBar }
             }
         }
 
         // MARK: 各块
 
-        /// 统计和快捷操作那两排：字号到了无障碍档时横着放不下，改成竖排。
+        /// 底栏那一排：字号到了无障碍档时横着放不下，改成竖排。
         private var tileRow: AnyLayout {
             dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
         }
 
-        private var summarySection: some View {
-            let summary = app.summary
-            return Section {
-                tileRow {
-                    StatTile(
-                        value: summary.waiting, title: String(localized: "等你回答"), systemImage: Presentation.symbol(for: .waiting),
-                        tint: summary.waiting > 0 ? .orange : .secondary)
-                    StatTile(
-                        value: summary.working, title: String(localized: "干活中"), systemImage: Presentation.symbol(for: .working),
-                        tint: summary.working > 0 ? .primary : .secondary)
-                    StatTile(
-                        value: summary.sessions, title: String(localized: "会话"), systemImage: "terminal.fill",
-                        tint: summary.sessions > 0 ? .primary : .secondary)
-                }
-                .padding(.top, 8)
-                .plainListRow()
+        private var headlineSection: some View {
+            Section {
+                // 大标题是一页的开头，和下面的卡片、分组隔得比卡片之间开。
+                HomeHeadline(summary: app.summary)
+                    .padding(.bottom, 8)
+                    .plainListRow()
             }
         }
 
         @ViewBuilder
         private var waitingSection: some View {
             let waiting = app.waitingSessions
-            if !waiting.isEmpty {
+            let ids = waiting.map(\.id)
+            if let current = HomePager.current(focusedWaiting, in: ids), let index = ids.firstIndex(of: current) {
+                let item = waiting[index]
                 Section {
-                    ListSectionHeader(title: String(localized: "等你回答"))
-                    ForEach(waiting) { item in
-                        WaitingCard(item: item, showsMachine: machines.machines.count > 1) {
-                            app.openTerminal(machine: item.list.machine.id, session: item.session.id)
+                    VStack(spacing: 0) {
+                        WaitingCard(
+                            item: item, showsMachine: machines.machines.count > 1, position: index + 1,
+                            count: waiting.count,
+                            onOpen: { app.openTerminal(machine: item.list.machine.id, session: item.session.id) },
+                            onNext: { focusedWaiting = HomePager.next(after: current, in: ids) },
+                            onPrevious: { focusedWaiting = HomePager.previous(before: current, in: ids) }
+                        )
+                        .cardBackground(padding: 14)
+                        .animation(.default, value: item.id)
+                        // 盖在下面那截卡边的上沿上。
+                        .zIndex(1)
+                        if waiting.count > 1 {
+                            StackEdge()
                         }
-                        .cardBackground()
-                        .plainListRow()
                     }
+                    .plainListRow()
                 }
             }
         }
 
         private var machineSection: some View {
-            Section {
+            let all = machines.machines
+            return Section {
                 ListSectionHeader(title: String(localized: "电脑"))
-                ForEach(machines.machines) { machine in
-                    Button {
-                        app.path = [.machine(machine.id)]
-                    } label: {
-                        MachineCard(machine: machine, list: app.sessionList(for: machine.id))
-                    }
-                    .buttonStyle(CardButtonStyle())
-                    .plainListRow()
-                    .trailingSwipeActions {
-                        // 不用 `.destructive`，理由同会话列表左滑结束：系统会先把这一行移走，确认框跟着消失。
-                        Button("删除", systemImage: "trash") {
-                            machines.deleteTarget = machine.id
+                VStack(spacing: 0) {
+                    ForEach(Array(all.enumerated()), id: \.element.id) { index, machine in
+                        if index > 0 {
+                            Rectangle().fill(colors.hairline).frame(height: 1)
                         }
-                        .tint(.red)
-                        Button("改名", systemImage: "pencil") {
-                            machines.beginRename(machine.id)
-                        }
-                        .tint(.orange)
+                        machineRow(machine, first: index == 0, last: index == all.count - 1)
                     }
-                    .contextMenu {
-                        Button("打开", systemImage: "terminal") { app.path = [.machine(machine.id)] }
-                        Button("改名", systemImage: "pencil") { machines.beginRename(machine.id) }
-                        Button("删除", systemImage: "trash", role: .destructive) { machines.deleteTarget = machine.id }
-                    }
-                    // 确认框挂在卡片上：iOS 26 起它是指向所挂视图的气泡，挂在整页上会指到屏幕中间。
-                    .confirmationDialog(
-                        "删除这台电脑？", isPresented: confirmsDelete(machine.id), titleVisibility: .visible
-                    ) {
-                        Button("删除", role: .destructive) { Task { await machines.delete(machine.id) } }
-                    } message: {
-                        // 连着时删除前先请电脑解除配对（`AppModel.leave`）；没连着时等它再连上。
-                        if app.sessionList(for: machine.id)?.linkState.isConnected == true {
-                            Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对；这台电脑上的配对记录也一起撤销。")
-                        } else {
-                            Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。\n现在没连着这台电脑：等它下次连上再撤销它上面的配对记录，在那之前它的 agent 等回答时可能还会推送到这部手机。也可以在那台电脑上 Runode 的「配对设备」页里撤销。")
-                        }
-                    }
+                }
+                .background(colors.card, in: .group)
+                .overlay(RoundedRectangle.group.strokeBorder(colors.hairline, lineWidth: 1).allowsHitTesting(false))
+                .plainListRow()
+            }
+        }
+
+        /// 电脑组里的一行。整组只占列表的一行，没法左滑，改名和删除靠长按菜单和读屏的操作。
+        private func machineRow(_ machine: MachineRecord, first: Bool, last: Bool) -> some View {
+            let open = { app.path = [.machine(machine.id)] }
+            let rename = { machines.beginRename(machine.id) }
+            let delete = { machines.deleteTarget = machine.id }
+            let radius = CornerRadius.group
+            return MachineRow(
+                machine: machine, list: app.sessionList(for: machine.id), onOpen: open, onRename: rename,
+                onDelete: delete
+            )
+            .contentShape(
+                .contextMenuPreview,
+                UnevenRoundedRectangle(
+                    topLeadingRadius: first ? radius : 0, bottomLeadingRadius: last ? radius : 0,
+                    bottomTrailingRadius: last ? radius : 0, topTrailingRadius: first ? radius : 0, style: .continuous)
+            )
+            .contextMenu {
+                Button("打开", systemImage: "terminal", action: open)
+                Button("改名", systemImage: "pencil", action: rename)
+                Button("删除", systemImage: "trash", role: .destructive, action: delete)
+            }
+            // 确认框挂在这一行上：iOS 26 起它是指向所挂视图的气泡，挂在整页上会指到屏幕中间。
+            .confirmationDialog(
+                "删除这台电脑？", isPresented: confirmsDelete(machine.id), titleVisibility: .visible
+            ) {
+                Button("删除", role: .destructive) { Task { await machines.delete(machine.id) } }
+            } message: {
+                // 连着时删除前先请电脑解除配对（`AppModel.leave`）；没连着时等它再连上。
+                if app.sessionList(for: machine.id)?.linkState.isConnected == true {
+                    Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对；这台电脑上的配对记录也一起撤销。")
+                } else {
+                    Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。\n现在没连着这台电脑：等它下次连上再撤销它上面的配对记录，在那之前它的 agent 等回答时可能还会推送到这部手机。也可以在那台电脑上 Runode 的「配对设备」页里撤销。")
                 }
             }
         }
@@ -173,39 +189,73 @@
             if let resume = app.resume {
                 Section {
                     ListSectionHeader(title: String(localized: "上次打开"))
+                    // 连上以后才有会话实时的状态；没连上时只写电脑的名字。
+                    let live = app.sessionList(for: resume.machine.id)?.session(resume.session)
                     Button(action: app.resumeRecent) {
-                        ResumeCard(item: resume)
+                        ResumeCard(
+                            item: resume, mark: live.map { StatusMark(SessionStatus.of($0)) } ?? .idle, live: live)
                     }
-                    .buttonStyle(CardButtonStyle())
+                    .buttonStyle(.plain)
                     .plainListRow()
                 }
             }
         }
 
-        private var actionSection: some View {
+        /// 钉在页面底下的配对和新开终端两个按钮。
+        private var actionBar: some View {
             let spawnable = app.spawnableLists
             let targets = spawnTargets
-            return Section {
-                ListSectionHeader(title: String(localized: "快捷操作"))
-                tileRow {
-                    ActionTile(title: String(localized: "配对电脑"), systemImage: "qrcode.viewfinder", busy: false) {
-                        app.startPairing()
+            let busy = spawnable.contains(where: \.isSpawning)
+            return tileRow {
+                Button {
+                    app.startPairing()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "qrcode.viewfinder")
+                            .font(.system(size: pairIconSize))
+                        Text("配对电脑")
                     }
-                    let busy = spawnable.contains(where: \.isSpawning)
-                    if targets.count == 1, let target = targets.first, target.list.agents.isEmpty {
-                        ActionTile(title: String(localized: "新开终端"), systemImage: "plus", busy: busy) {
-                            spawn(at: target)
-                        }
-                    } else {
-                        ActionTile(title: String(localized: "新开终端"), systemImage: "plus", busy: busy, menu: {
-                            spawnMenu(targets)
-                        })
-                        .disabled(spawnable.isEmpty)
-                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.bottom, 16)
-                .plainListRow()
+                .buttonStyle(SurfaceButtonStyle(.secondary, height: 50, cornerRadius: CornerRadius.action))
+                if targets.count == 1, let target = targets.first, target.list.agents.isEmpty {
+                    Button {
+                        spawn(at: target)
+                    } label: {
+                        spawnLabel(busy: busy)
+                    }
+                    .buttonStyle(SurfaceButtonStyle(.primary, height: 50, cornerRadius: CornerRadius.action))
+                    .disabled(busy)
+                } else {
+                    Menu {
+                        spawnMenu(targets)
+                    } label: {
+                        spawnLabel(busy: busy)
+                            .actionSurface(.primary, height: 50, cornerRadius: CornerRadius.action)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busy || spawnable.isEmpty)
+                }
             }
+            .font(.subheadline)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(colors.page)
+        }
+
+        private func spawnLabel(busy: Bool) -> some View {
+            HStack(spacing: 8) {
+                if busy {
+                    // 实心的主按钮上字用页面的底色，转圈跟着。
+                    ProgressView()
+                        .tint(colors.page)
+                } else {
+                    Image(systemName: "plus")
+                        .font(.system(size: spawnIconSize, weight: .bold))
+                }
+                Text("新开终端")
+            }
+            .frame(maxWidth: .infinity)
         }
 
         /// 新开会话能开在哪：有 `spawnChoices` 的电脑一个工作区一项，让用户挑；别的电脑一台一项，开在电脑上
@@ -228,9 +278,10 @@
                 }
                 return choices.map { section in
                     var name = Presentation.sectionTitle(section)
-                    if let window = section.window { name += " · " + String(localized: "窗口 \(window)") }
+                    if let window = section.window { name = String(localized: "\(name)，窗口 \(window)") }
                     return SpawnTarget(
-                        id: "\(list.machine.id)/\(section.id)", title: lists.count > 1 ? "\(machine) · \(name)" : name,
+                        id: "\(list.machine.id)/\(section.id)",
+                        title: lists.count > 1 ? String(localized: "\(machine)，\(name)") : name,
                         list: list, section: section)
                 }
             }
@@ -387,261 +438,332 @@
         }
     }
 
-    /// 卡片左边的图标：浅底圆角方块。
-    private struct IconTile: View {
-        let systemImage: String
-        var tint: Color = .secondary
-        @Environment(\.themeColors) private var colors
-        @ScaledMetric(relativeTo: .title3) private var side: CGFloat = 40
-        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-        /// 只是装饰：字号到了无障碍档时不画，宽度留给卡片上的字。
-        var body: some View {
-            if !dynamicTypeSize.isAccessibilitySize {
-                Image(systemName: systemImage)
-                    .font(.title3)
-                    .foregroundStyle(tint)
-                    .frame(width: side, height: side)
-                    .background(colors.fill, in: .inner)
-                    .accessibilityHidden(true)
-            }
-        }
-    }
-
-    /// 统计那一排里的一格：大数字，右上角一个图标，下面一行说明。数是零时整格用灰色，一眼看出哪项有事。
-    private struct StatTile: View {
-        let value: Int
-        let title: String
-        let systemImage: String
-        let tint: Color
-        @Environment(\.themeColors) private var colors
+    /// 首页顶上的一句话（`Presentation.homeTitle`），有会话在等你时后面闪着光标；下面一行补充
+    /// （`Presentation.homeDetail`），说的是在干活的会话时前面带盲文格。
+    private struct HomeHeadline: View {
+        let summary: HomeSummary
+        @ScaledMetric(relativeTo: .subheadline) private var glyphSize: CGFloat = 15
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(value, format: .number)
-                        .font(.title2.weight(.bold).monospacedDigit())
-                        .contentTransition(.numericText(value: Double(value)))
-                    Spacer(minLength: 4)
-                    Image(systemName: systemImage)
-                        .font(.footnote)
-                        .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(Presentation.homeTitle(summary))
+                        .font(.title.weight(.semibold))
+                        .monospacedDigit()
+                    if summary.waiting > 0 {
+                        BlinkingCursor()
+                            // 光标底边比基线低一截，和汉字的下沿齐。
+                            .alignmentGuide(.firstTextBaseline) { d in d.height * 11 / 13 }
+                    }
                 }
-                .foregroundStyle(tint)
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if let detail = Presentation.homeDetail(summary) {
+                    HStack(spacing: 7) {
+                        if summary.working > 0 {
+                            StatusGlyph(.working, size: glyphSize)
+                        }
+                        Text(detail)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
+            .padding(.horizontal, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(colors.card, in: .card)
-            .animation(.default, value: value)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(title) \(value)")
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
         }
     }
 
-    /// 快捷操作那一排里的一格。
-    private struct ActionTile<MenuItems: View>: View {
-        let title: String
-        let systemImage: String
-        let busy: Bool
-        /// 点了直接办的事；为空时点了弹出 `menuItems` 的菜单。
-        let action: (() -> Void)?
-        @ViewBuilder let menuItems: () -> MenuItems
-        @Environment(\.isEnabled) private var isEnabled
+    /// 等你回答的会话不止一个时，摊开的那张卡底下露出的一截卡边，表示后面还有。只是装饰。
+    private struct StackEdge: View {
         @Environment(\.themeColors) private var colors
-        @ScaledMetric(relativeTo: .body) private var iconSide: CGFloat = 32
+
+        var body: some View {
+            let shape = UnevenRoundedRectangle(
+                bottomLeadingRadius: CornerRadius.group, bottomTrailingRadius: CornerRadius.group, style: .continuous)
+            // 上沿压在卡片底下，描边只露出左右和下面三条。
+            shape.fill(colors.stackEdge)
+                .overlay(shape.strokeBorder(colors.hairline, lineWidth: 1))
+                .frame(height: 20)
+                .padding(.top, -10)
+                .padding(.horizontal, 16)
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// 电脑那一行前面的标记：等你回答、在干活是对应的 `StatusGlyph`，连不上是叉，连着而只有普通会话时
+    /// 是提示符，没连上时不画。和后面第一行字的中线对齐。
+    private struct MachineLineMark: View {
+        let tone: MachineLine.Tone
+        let connected: Bool
+        @ScaledMetric(relativeTo: .footnote) private var size: CGFloat = 12
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             Group {
-                if let action {
-                    Button(action: action) { tile }
-                } else {
-                    Menu { menuItems() } label: { tile }
+                switch tone {
+                case .waiting: StatusGlyph(.waiting, size: size)
+                case .working: StatusGlyph(.working, size: size)
+                case .failure:
+                    Image(systemName: "xmark")
+                        .font(.system(size: size * 0.8, weight: .bold))
+                        .foregroundStyle(colors.failure)
+                        .frame(width: size, height: size)
+                case .neutral:
+                    if connected { StatusGlyph(.idle, size: size) }
                 }
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
-            .disabled(busy)
-        }
-
-        private var tile: some View {
-            HStack(spacing: 10) {
-                Group {
-                    if busy {
-                        ProgressView()
-                    } else {
-                        Image(systemName: systemImage)
-                            .font(.body.weight(.semibold))
-                    }
-                }
-                .frame(width: iconSide, height: iconSide)
-                .background(colors.fill, in: .inner)
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 0)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 56)
-            .background(colors.card, in: .card)
-            .contentShape(.card)
+            // footnote 的大写字母高约为标记边长的四分之三，中线在基线上方半个字高。
+            .alignmentGuide(.firstTextBaseline) { [size] d in d[VerticalAlignment.center] + size * 0.375 }
+            .accessibilityHidden(true)
         }
     }
 
-    extension ActionTile where MenuItems == EmptyView {
-        init(title: String, systemImage: String, busy: Bool, action: @escaping () -> Void) {
-            self.init(title: title, systemImage: systemImage, busy: busy, action: action, menuItems: { EmptyView() })
-        }
-    }
-
-    extension ActionTile {
-        /// 点了弹出菜单的一格。
-        init(title: String, systemImage: String, busy: Bool, @ViewBuilder menu: @escaping () -> MenuItems) {
-            self.init(title: title, systemImage: systemImage, busy: busy, action: nil, menuItems: menu)
-        }
-    }
-
-    /// 连接状态前面的小圆点：连着绿，等着重连橙，失败红，其余灰。用符号画：跟着字号缩放，和后面的字按基线对齐。
-    private struct StatusDot: View {
-        let state: LinkState
-
-        var body: some View {
-            Image(systemName: "circle.fill")
-                .font(.caption2)
-                .imageScale(.small)
-                .foregroundStyle(color)
-                .accessibilityHidden(true)
-        }
-
-        private var color: Color {
-            switch state {
-            case .connected: .green
-            case .waiting: .orange
-            case .failed: .red
-            case .idle, .connecting: .secondary
-            }
-        }
-    }
-
-    /// 一台电脑：名字，下面是连接状态和会话数。
-    private struct MachineCard: View {
+    /// 电脑组里的一台电脑：名字，下面是连接状态和会话数，点了打开它的会话列表。断开了在等重连或者连不上时，
+    /// 右边是立刻重连的「重试」，和打开列表的那块并排（列表里按钮套按钮点不了里面那个）。
+    private struct MachineRow: View {
         let machine: MachineRecord
         let list: SessionListModel?
+        let onOpen: () -> Void
+        let onRename: () -> Void
+        let onDelete: () -> Void
+        @ScaledMetric(relativeTo: .body) private var iconSize: CGFloat = 20
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             let state = list?.linkState ?? .idle
-            HStack(spacing: 12) {
-                IconTile(systemImage: "laptopcomputer", tint: state.isConnected ? .primary : .secondary)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(machine.name)
-                        .font(.headline)
-                        .foregroundStyle(state.isConnected ? .primary : .secondary)
-                        .lineLimit(2)
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        StatusDot(state: state)
-                        LinkClock(state: state) { now in
-                            Text(
-                                Presentation.machineSummary(
-                                    state, sessions: list?.sessions ?? [], loaded: list?.loaded ?? false, now: now))
+            let retries = Self.offersRetry(state)
+            HStack(spacing: 0) {
+                Button(action: onOpen) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "laptopcomputer")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: iconSize, height: iconSize)
+                            .foregroundStyle(state.isConnected ? HierarchicalShapeStyle.primary : .tertiary)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(machine.name)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(state.isConnected ? HierarchicalShapeStyle.primary : .secondary)
+                                .lineLimit(2)
+                            LinkClock(state: state) { now in
+                                let line = Presentation.machineLine(
+                                    state: state, sessions: list?.sessions ?? [], loaded: list?.loaded ?? false,
+                                    now: now)
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    MachineLineMark(tone: line.tone, connected: state.isConnected)
+                                    Text(attributed(line))
+                                }
+                            }
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
                         }
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        Spacer(minLength: 0)
+                        if !retries {
+                            DisclosureChevron()
+                        }
                     }
+                    .padding(.leading, 14)
+                    .padding(.trailing, retries ? 12 : 14)
+                    .padding(.vertical, retries ? 6 : 8)
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                Spacer(minLength: 8)
-                DisclosureChevron()
+                .buttonStyle(.plain)
+                .accessibilityHint("打开这台电脑上的会话")
+                .accessibilityActions {
+                    Button("改名", action: onRename)
+                    Button("删除", action: onDelete)
+                }
+                if retries {
+                    Button {
+                        list?.reconnect()
+                    } label: {
+                        Text("重试")
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 16)
+                    }
+                    .buttonStyle(SurfaceButtonStyle(.raised))
+                    .padding(.trailing, 6)
+                    .accessibilityHint(Text("重新连接 \(machine.name)"))
+                }
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityHint("打开这台电脑上的会话")
+        }
+
+        /// 断开了在等重连、或者连不上不再自动重试时，给用户一个立刻重连的按钮。
+        private static func offersRetry(_ state: LinkState) -> Bool {
+            switch state {
+            case .waiting, .failed: true
+            case .idle, .connecting, .connected: false
+            }
+        }
+
+        private func attributed(_ line: MachineLine) -> AttributedString {
+            var result = AttributedString()
+            if let emphasis = line.emphasis {
+                var head = AttributedString(emphasis)
+                switch line.tone {
+                case .waiting: head.swiftUI.foregroundColor = colors.waiting
+                case .working: head.swiftUI.foregroundColor = colors.working
+                case .failure: head.swiftUI.foregroundColor = colors.failure
+                case .neutral: break
+                }
+                result += head
+            }
+            result += AttributedString(line.text)
+            return result
         }
     }
 
+    /// 上次打开的终端，样子和电脑组里的一行一样：前面是会话状态的标记，下面是会话在干什么和电脑名。
     private struct ResumeCard: View {
         let item: ResumeItem
+        let mark: StatusMark
+        /// 会话实时的状态，下面那行由 `Presentation.sessionSubtitle` 说；还没连上、不知道时为空。
+        let live: SessionInfo?
+        @ScaledMetric(relativeTo: .body) private var iconSize: CGFloat = 20
+        @ScaledMetric(relativeTo: .body) private var glyphSize: CGFloat = 16
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             HStack(spacing: 12) {
-                IconTile(systemImage: item.agent == nil ? "apple.terminal" : "sparkles", tint: .primary)
-                VStack(alignment: .leading, spacing: 3) {
+                StatusGlyph(mark, size: glyphSize)
+                    .frame(width: iconSize)
+                VStack(alignment: .leading, spacing: 1) {
                     Text(item.title)
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                    Text(subtitle)
+                    subtitle
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
                 }
                 Spacer(minLength: 8)
                 DisclosureChevron()
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .background(colors.card, in: .group)
+            .overlay(RoundedRectangle.group.strokeBorder(colors.hairline, lineWidth: 1).allowsHitTesting(false))
+            .contentShape(.group)
             .accessibilityElement(children: .combine)
             .accessibilityHint("打开这个终端")
         }
 
-        private var subtitle: String {
-            var parts = [item.machine.name]
-            if let status = Presentation.agentStatus(item.agent) { parts.append(status.text) }
-            if let directory = Presentation.directory(item.directory) { parts.append(directory) }
-            return parts.joined(separator: " · ")
+        @ViewBuilder private var subtitle: some View {
+            if let live {
+                TimelineView(AgentClockSchedule(live)) { context in
+                    let status = Presentation.sessionSubtitle(live, now: context.date)
+                    // 状态在前：一行放不下时截掉的是电脑名。
+                    Text(String(localized: "\(status)，\(item.machine.name)"))
+                }
+            } else {
+                Text(item.machine.name)
+            }
         }
     }
 
-    /// 等你回答的一个会话：点上半部分打开终端，下面直接快速回复。
+    /// 等你回答的一个会话：头部是标题和状态，不止一个在等时右边的「1 / 2」翻到下一张；中间是屏幕的摘录，
+    /// 点头部或摘录打开终端；下面直接快速回复。
     private struct WaitingCard: View {
         let item: WaitingSession
         let showsMachine: Bool
+        /// 这张是等你回答的第几个，从 1 数。
+        let position: Int
+        let count: Int
         let onOpen: () -> Void
+        let onNext: () -> Void
+        let onPrevious: () -> Void
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
-                Button(action: onOpen) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .top, spacing: 8) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(Presentation.sessionTitle(item.session))
-                                    .font(.headline)
-                                    .lineLimit(2)
-                                AgentBadge(agent: item.session.meta.agent, showsState: false)
-                                if let place {
-                                    Text(place)
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.head)
-                                }
-                            }
-                            Spacer(minLength: 0)
-                            DisclosureChevron()
-                                .padding(.top, 4)
-                        }
-                        // 预览和下面的按键、输入框一样占满卡片的宽，不让右上角的箭头挤窄。
-                        let preview = item.list.previews[item.session.id] ?? []
-                        if !preview.isEmpty {
-                            ScreenPreview(lines: preview)
-                        }
+                HStack(spacing: 10) {
+                    header
+                    if count > 1 {
+                        pageButton
                     }
-                    .contentShape(Rectangle())
-                    .accessibilityElement(children: .combine)
+                }
+                .frame(minHeight: 44)
+                // 认出了提问时选项单独列在下面，摘录只放问题。
+                let prompt = item.list.prompts[item.session.id]
+                let preview = prompt?.question ?? item.list.previews[item.session.id] ?? []
+                if !preview.isEmpty {
+                    Button(action: onOpen) {
+                        HStack(spacing: 0) {
+                            ScreenPreview(lines: preview, tone: .primary)
+                            DisclosureChevron()
+                                .padding(.trailing, 10)
+                        }
+                        // 和 `ScreenPreview` 自己的底同色，箭头看着在同一个底槽里。
+                        .background(colors.well, in: .inner)
+                        .contentShape(.inner)
+                    }
+                    .buttonStyle(.plain)
                     .accessibilityHint("打开这个终端")
                 }
-                .buttonStyle(.plain)
-                QuickReplyBar(model: item.list.quickReply(for: item.session.id))
+                QuickReplyBar(model: item.list.quickReply(for: item.session.id), prompt: prompt)
                     .accessibilityElement(children: .contain)
                     .accessibilityLabel("回复「\(Presentation.sessionTitle(item.session))」")
             }
         }
 
-        /// 在哪台电脑的哪个目录：只配对了一台电脑时不写电脑的名字。
-        private var place: String? {
-            let parts = [showsMachine ? item.list.machine.name : nil, Presentation.directory(item.session.meta.cwd)]
-                .compactMap { $0 }
-            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        /// 标题和状态。读屏时上下轻扫翻到别的等你回答的会话。
+        @ViewBuilder
+        private var header: some View {
+            let button = Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Presentation.sessionTitle(item.session))
+                        .font(.headline)
+                        .lineLimit(2)
+                    TimelineView(AgentClockSchedule(item.session)) { context in
+                        Text(
+                            Presentation.sessionSubtitle(
+                                item.session, machine: showsMachine ? item.list.machine.name : nil, now: context.date)
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("打开这个终端")
+            if count > 1 {
+                button
+                    .accessibilityValue(Text("第 \(position) 个，共 \(count) 个"))
+                    .accessibilityAdjustableAction { direction in
+                        switch direction {
+                        case .increment: onNext()
+                        case .decrement: onPrevious()
+                        @unknown default: break
+                        }
+                    }
+            } else {
+                button
+            }
+        }
+
+        /// 「1 / 2」：点了循环翻到下一张。
+        private var pageButton: some View {
+            Button(action: onNext) {
+                Text(verbatim: "\(position) / \(count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 26)
+                    .background(colors.raised, in: .capsule)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("下一个等你的会话")
+            .accessibilityValue(Text("第 \(position) 个，共 \(count) 个"))
         }
     }
 #endif

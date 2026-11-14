@@ -22,6 +22,7 @@
         @State private var showingBranches = false
         @FocusState private var editingMessage: Bool
         @Environment(\.themeColors) private var colors
+        @Environment(\.appTheme) private var theme
 
         var body: some View {
             List {
@@ -62,6 +63,7 @@
             }
             .sheet(isPresented: $showingBranches) {
                 GitBranchSheet(model: model)
+                    .appTheme(theme)
             }
             .confirmationDialog(
                 discardTitle, isPresented: Binding(get: { !discarding.isEmpty }, set: { if !$0 { discarding = [] } }),
@@ -182,7 +184,7 @@
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 36)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(SurfaceButtonStyle(.raised, height: 36))
             .disabled(model.running != nil || !model.isReady)
         }
 
@@ -420,14 +422,15 @@
     }
 
     /// 并成一张卡片的一组行里的一行：第一行圆上面的角、最后一行圆下面的角，不是最后一行的底下画分隔线。
+    /// 整组外面描一圈 1pt 的 `ThemeColors.hairline`，每行只描属于自己的那几条边。
     private struct GroupedCardRow: ViewModifier {
         let isFirst: Bool
         let isLast: Bool
         @Environment(\.themeColors) private var colors
 
         func body(content: Content) -> some View {
-            let top = isFirst ? CornerRadius.card : 0
-            let bottom = isLast ? CornerRadius.card : 0
+            let top = isFirst ? CornerRadius.group : 0
+            let bottom = isLast ? CornerRadius.group : 0
             let shape = UnevenRoundedRectangle(
                 topLeadingRadius: top, bottomLeadingRadius: bottom, bottomTrailingRadius: bottom,
                 topTrailingRadius: top, style: .continuous)
@@ -437,6 +440,14 @@
                 .padding(.vertical, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(colors.card, in: shape)
+                .overlay {
+                    // 中间的行把描边的上下两条推出行外再裁掉，相邻的行之间才不多出一道横线。
+                    shape.strokeBorder(colors.hairline, lineWidth: 1)
+                        .padding(.top, isFirst ? 0 : -1)
+                        .padding(.bottom, isLast ? 0 : -1)
+                        .clipped()
+                        .allowsHitTesting(false)
+                }
                 .overlay(alignment: .bottom) {
                     if !isLast { Divider().padding(.leading, 48) }
                 }
@@ -449,6 +460,9 @@
         let file: GitFile
         var showsDirectory = true
 
+        /// 状态字母那个小方块的圆角：方块小，`CornerRadius` 里的几档都会把它圆成近乎圆形。
+        private static let letterCornerRadius: CGFloat = 6
+
         var body: some View {
             let parts = Presentation.gitPathParts(file.path)
             HStack(spacing: 10) {
@@ -456,7 +470,9 @@
                     .font(.caption.monospaced().weight(.bold))
                     .foregroundStyle(Self.tint(file.status))
                     .frame(width: 22, height: 22)
-                    .background(Self.tint(file.status).opacity(0.14), in: .inner)
+                    .background(
+                        Self.tint(file.status).opacity(0.14),
+                        in: RoundedRectangle(cornerRadius: Self.letterCornerRadius, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(parts.name)
                         .font(.body)

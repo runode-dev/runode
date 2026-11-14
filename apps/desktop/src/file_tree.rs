@@ -39,11 +39,11 @@ use crate::ui::{
     actions::{Copy, Cut, FocusTerminal, Paste},
     button::{Button, ButtonSize},
     file_icons::{file_icon, folder_icon},
+    font,
     font_size::{self, FontSize},
-    hsla,
     icons::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CODE_ICON, FILTER_ICON, FOLDER_OPEN_ICON, MORE_ICON, REFRESH_ICON,
-        VIEW_LIST_ICON, VIEW_TREE_ICON,
+        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CODE_ICON, FOLDER_OPEN_ICON, MORE_ICON, REFRESH_ICON, VIEW_LIST_ICON,
+        VIEW_TREE_ICON,
     },
     menu::{Menu, MenuAnchors, MenuHost, MenuItem},
     panel::panel_title,
@@ -60,7 +60,7 @@ use gpui::{
 use runode_git as git;
 use runode_ssh::Destination;
 
-use crate::git_view::status_color;
+use crate::git_view::status_tint;
 
 pub use listing::{Listings, list_dirs};
 pub use search::SearchOptions;
@@ -113,7 +113,7 @@ actions!(
 );
 
 /// 行高比字号多出的部分。
-const ROW_EXTRA_HEIGHT: f32 = 10.;
+const ROW_EXTRA_HEIGHT: f32 = 14.;
 /// 每深一层往右缩进的宽度。
 const INDENT: f32 = 12.;
 /// 行的左边距。
@@ -769,7 +769,7 @@ impl FileTree {
             .w_full()
             .pl(px(ROW_PADDING))
             .pr(px(6.))
-            .rounded(px(4.))
+            .rounded(px(6.))
             .flex()
             .items_center()
             .overflow_hidden()
@@ -780,13 +780,13 @@ impl FileTree {
     fn render_file_row(&self, ix: usize, font_size: f32, focused: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         let row = self.state().rows.get(ix)?;
         let theme = cx.theme();
-        let selected_bg = theme.mix(if focused { 0.16 } else { 0.10 });
+        let selected_bg = if focused { theme.tab_active } else { theme.tab_active.opacity(0.6) };
         let hover_bg = theme.accent;
         let drop_bg = theme.mix(0.20);
-        let fg = theme.foreground;
+        let (fg, info) = (theme.foreground, theme.info);
         let color = match row.decoration {
-            Decoration::None | Decoration::Ignored => fg.opacity(0.85),
-            Decoration::Status(status) | Decoration::ContainsChanges(status) => hsla(status_color(status)),
+            Decoration::None | Decoration::Ignored | Decoration::ContainsChanges(_) => fg.opacity(0.85),
+            Decoration::Status(status) => status_tint(status, theme),
         };
         let selected_path = self.state().selected.clone().filter(|selected| row.holds(selected));
         let selected = selected_path.is_some();
@@ -800,14 +800,25 @@ impl FileTree {
         // 并成一行的目录按最里层的名字挑图标。
         let last = row.path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
         let icon = if row.is_dir { folder_icon(&last, row.expanded) } else { file_icon(&last) };
-        // 行尾的 git 标记：文件写状态字母，含改动的目录画一个点。
-        let badge = match row.decoration {
+        // 行尾的 git 标记：文件用等宽小字写状态字母，含改动的目录画一个点。
+        let status = match row.decoration {
             Decoration::Status(status) => Some(status.letter()),
             Decoration::ContainsChanges(_) => Some("•"),
             Decoration::None | Decoration::Ignored => None,
         };
-        let status = badge;
-        let badge = badge.map(|text| div().flex_none().pl(px(6.)).text_color(color).child(text));
+        let badge = match row.decoration {
+            Decoration::Status(status) => Some(
+                div()
+                    .flex_none()
+                    .pl(px(6.))
+                    .text_size(FontSize::Small)
+                    .text_color(color)
+                    .when_some(font::mono(cx), |badge, family| badge.font_family(family))
+                    .child(status.letter()),
+            ),
+            Decoration::ContainsChanges(_) => Some(div().flex_none().ml(px(6.)).size(px(6.)).rounded_full().bg(info)),
+            Decoration::None | Decoration::Ignored => None,
+        };
         let renaming = self.renaming(row);
         let name: AnyElement = match renaming {
             _ if row.top != row.path => {
@@ -1196,7 +1207,7 @@ impl Render for FileTree {
         self.focus_menu(window, cx);
         let font_size = FontSize::Medium.points() * font_size::scale(cx);
         let header = self.render_header(cx);
-        let search_box = self.render_file_search_box(cx);
+        let search_box = self.render_file_search_box(window, cx);
         let content = match self.render_file_search_results(font_size, cx) {
             Some(results) => results,
             None => self.render_file_tree(font_size, cx).into_any_element(),

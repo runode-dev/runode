@@ -362,13 +362,13 @@ import Testing
     @Test func writesTheTimeInTheInterfaceLanguage() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let branch = GitBranch(name: "main", subject: "init", date: "3 days ago", time: 1_700_000_000 - 3 * 86_400)
-        #expect(Presentation.gitBranchDetail(branch, now: now, locale: Locale(identifier: "zh-Hans")) == "init · 3天前")
-        #expect(Presentation.gitBranchDetail(branch, now: now, locale: Locale(identifier: "en")) == "init · 3 days ago")
+        #expect(Presentation.gitBranchDetail(branch, now: now, locale: Locale(identifier: "zh-Hans")) == "init，3天前")
+        #expect(Presentation.gitBranchDetail(branch, now: now, locale: Locale(identifier: "en")) == "init，3 days ago")
     }
 
     /// 旧宿主不给时间戳，用 git 的原话；什么都没有时只剩标题。
     @Test func fallsBackToTheHostsWords() {
-        #expect(Presentation.gitBranchDetail(GitBranch(name: "main", subject: "init", date: "3 days ago")) == "init · 3 days ago")
+        #expect(Presentation.gitBranchDetail(GitBranch(name: "main", subject: "init", date: "3 days ago")) == "init，3 days ago")
         #expect(Presentation.gitBranchDetail(GitBranch(name: "main", subject: "init")) == "init")
     }
 }

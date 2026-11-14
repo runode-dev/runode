@@ -262,6 +262,30 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(attached.meta.displayTitle == "修 bug")
     }
 
+    /// agent 进入现在状态的时刻按 Unix 毫秒读成 `Date`；宿主没报时为空，读不了的也当没报。
+    @Test func agentSinceIsReadFromMilliseconds() throws {
+        let since = Date(timeIntervalSince1970: 1_790_000_000)
+        guard case .attached(let attached) = try decode("attached") else {
+            Issue.record("not attached")
+            return
+        }
+        #expect(attached.meta.agentSince == since)
+        guard case .sessionList(let sessions) = try decode("session_list") else {
+            Issue.record("not a session list")
+            return
+        }
+        #expect(try #require(sessions.first).meta.agentSince == since)
+        guard case .meta(_, let meta, _) = try decode("meta") else {
+            Issue.record("not meta")
+            return
+        }
+        #expect(meta.agentSince == nil)
+        let odd = Data(#"{"agent_since_ms":"soon","title":"t"}"#.utf8)
+        let decoded = try JSONDecoder().decode(SessionMeta.self, from: odd)
+        #expect(decoded.agentSince == nil)
+        #expect(decoded.title == "t")
+    }
+
     @Test func shellsAreTitledByTheirProgramName() {
         let fish = SessionMeta(title: "/p/t/proj", foregroundIsShell: true, foreground: "fish")
         #expect(fish.displayTitle == "fish")

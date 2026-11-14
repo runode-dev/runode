@@ -53,7 +53,7 @@
 - 同一个泛词在两处出现时，各自加上领域限定，读代码时才分得清说的是哪一个：比如预览里读文件、高亮这些不碰界面的部分叫 `preview`，预览栏的界面是 `desktop` 里的 `preview_panel`。
 - 模块名用 snake_case。有子模块的模块写成 `foo.rs` 加 `foo/` 目录，不用 `foo/mod.rs`；只有 `tests/common/mod.rs` 按 cargo 的惯例保留，这样 cargo 不把它当成一个单独的测试。
 - 一个模块的单元测试超过三百行左右时挪到 `foo/tests.rs`，`foo.rs` 里只留 `#[cfg(test)] mod tests;`。
-- 界面代码只分两处：能复用的部件和所有图标放在 `ui`，入口用 `use runode_ui as ui` 接进来，各模块写 `crate::ui::…`；部件要回调视图的写成对视图类型泛型（`RowButton<V>`、`MenuHost`）。只有桌面用的整页视图（`terminal_view`、`settings`、`github_actions`、`file_tree`、`git_panel`、`preview_panel`、`kanban`、`screen_viewer`、`mobile_page`）是 `desktop` 的顶层模块，各是独立的 Entity，和窗口只经 `set_input` 和自己的事件说话；`window` 下同名的模块是把它们接进窗口的接入层。不为单个页开 crate。`desktop` 顶层另外只放应用级的胶水，只被一个功能用的模块放进那个功能的目录。
+- 界面代码只分两处：能复用的部件和所有图标放在 `ui`，入口用 `use runode_ui as ui` 接进来，各模块写 `crate::ui::…`；部件要回调视图的写成对视图类型泛型（`RowButton<V>`、`MenuHost`）。只有桌面用的整页视图（`terminal_view`、`settings`、`github_actions`、`file_tree`、`git_panel`、`preview_panel`、`kanban`、`screen_viewer`、`mobile_page`、`review`）是 `desktop` 的顶层模块，各是独立的 Entity，和窗口只经 `set_input` 和自己的事件说话；`window` 下同名的模块是把它们接进窗口的接入层。不为单个页开 crate。`desktop` 顶层另外只放应用级的胶水，只被一个功能用的模块放进那个功能的目录。
 
 # 桌面界面
 

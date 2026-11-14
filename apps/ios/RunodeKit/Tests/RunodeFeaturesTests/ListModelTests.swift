@@ -420,6 +420,52 @@ import Testing
         #expect(model.spawnChoices.isEmpty)
     }
 
+    /// 筛选只留那一类的会话，筛空了的节整节去掉；全部照旧，连空工作区一起。
+    @Test func filtersKeepOnlyMatchingSessions() {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        func agent(_ id: SessionId, _ state: AgentState) -> SessionInfo {
+            var session = info(id, title: "t")
+            session.meta.agent = Agent(kind: AgentKind("claude"), state: state)
+            return session
+        }
+        model.handle(
+            .message(.sessionList([agent(sessionA, .blocked), agent(sessionB, .working), info(sessionC, title: "c")])))
+        let tab = TabLayout(
+            index: 1, active: true,
+            panes: [PaneLayout(index: 1, id: sessionA, focused: true), PaneLayout(index: 2, id: sessionB)])
+        model.handle(
+            .message(
+                .layout(
+                    req: 0,
+                    windows: [
+                        WindowLayout(
+                            index: 1,
+                            workspaces: [
+                                WorkspaceLayout(index: 1, name: "a", dir: "/Users/ethan/a", tabs: [tab]),
+                                WorkspaceLayout(index: 2, name: "空", dir: "/Users/ethan/empty", tabs: []),
+                            ])
+                    ])))
+        #expect(model.sections(matching: .all) == model.sections)
+        #expect(
+            model.sections(matching: .all).map(\.id) == [
+                .workspace(window: 1, index: 1), .workspace(window: 1, index: 2), .background,
+            ])
+        let waiting = model.sections(matching: .waiting)
+        #expect(waiting.map(\.id) == [.workspace(window: 1, index: 1)])
+        #expect(waiting.flatMap(\.sessions).map(\.id) == [sessionA])
+        let working = model.sections(matching: .working)
+        #expect(working.map(\.id) == [.workspace(window: 1, index: 1)])
+        #expect(working.flatMap(\.sessions).map(\.id) == [sessionB])
+        #expect(model.count(.all) == 3)
+        #expect(model.count(.waiting) == 1)
+        #expect(model.count(.working) == 1)
+        // 没有在等的会话时整节去掉，一节都不剩。
+        model.handle(.message(.meta(id: sessionA, meta: SessionMeta(title: "t"), shell: nil)))
+        #expect(model.sections(matching: .waiting).isEmpty)
+        #expect(model.count(.waiting) == 0)
+    }
+
     /// 工作区有几个标签页时卡片标出第几个；只有一个标签页、不在窗口里的不标。
     @Test func tabNumberCountsWithinTheWorkspace() {
         let model = SessionListModel(machine: machineRecord(), link: link)
@@ -774,6 +820,22 @@ actor UnwritableMachineStore: MachineStore {
         #expect(paired.count == 1)
     }
 
+    /// 配好后回到扫码，镜头里还是刚才那张码：不重配同一台；换一张码照常配。
+    @Test func goingBackToScanDoesNotPairTheSameCodeAgain() async {
+        var paired: [MachineRecord] = []
+        let model = PairingModel(
+            pairing: FakePairing { _ in machineRecord() }, deviceName: "x",
+            now: { Date(timeIntervalSince1970: 1_800_000_000) }, onPaired: { paired.append($0) })
+        await model.scanned(link())
+        #expect(paired.count == 1)
+        model.reset()
+        await model.scanned(link())
+        #expect(model.phase == .idle)
+        #expect(paired.count == 1)
+        await model.scanned(link(exp: 1_900_000_001))
+        #expect(paired.count == 2)
+    }
+
     /// 配对前给用户看的电脑名和地址从输入框里的链接解析出来；不是配对链接时没有。
     @Test func theInvitationIsShownBeforePairing() {
         let model = PairingModel(pairing: FakePairing { _ in machineRecord() }, deviceName: "x", onPaired: { _ in })
@@ -1030,6 +1092,16 @@ actor UnwritableMachineStore: MachineStore {
         #expect(Presentation.sectionDetail(second) == "窗口 2")
         let repo = SessionSection(id: .workspace(window: 1, index: 1), name: "runode", dir: "/Users/ethan/dev/runode", sessions: [])
         #expect(Presentation.sectionDetail(repo) == "~/dev/runode")
+        var repoInSecond = repo
+        repoInSecond.window = 2
+        #expect(Presentation.sectionDetail(repoInSecond) == "窗口 2，~/dev/runode")
+        #expect(Presentation.sectionDirectory(home) == nil)
+        #expect(Presentation.sectionWindow(home) == nil)
+        #expect(Presentation.sectionDirectory(repo) == "~/dev/runode")
+        #expect(Presentation.sectionWindow(second) == "窗口 2")
+        let background = SessionSection(id: .background, sessions: [])
+        #expect(Presentation.sectionDirectory(background) == nil)
+        #expect(Presentation.sectionWindow(background) == nil)
     }
 
     @Test func programLabelsDropTheExeSuffix() {
@@ -1066,8 +1138,7 @@ actor UnwritableMachineStore: MachineStore {
         let labels = try JSONDecoder().decode(Agents.self, from: Data(contentsOf: fixture)).agents.map(\.kind)
         try #require(labels.contains("claude"))
         let mapped = Set(labels.compactMap { Presentation.agentLogoAsset(AgentKind($0)) })
-        // `prompt` 是 shell 那块的提示符，不是 agent 的 logo。
-        #expect(mapped == images.subtracting(["prompt"]))
+        #expect(mapped == images)
         // 符号链接指着的 SVG 都在。
         for image in images {
             #expect(FileManager.default.fileExists(atPath: catalog.appending(path: "\(image).imageset/\(image).svg").path))
@@ -1085,11 +1156,66 @@ actor UnwritableMachineStore: MachineStore {
         #expect(Presentation.sessionDirectory(nil, in: ws) == nil)
     }
 
+    /// 宿主没报时刻时只说状态。
     @Test func agentStatesReadNaturally() {
-        #expect(Presentation.agentStatus(Agent(kind: AgentKind("claude"), state: .working))?.text == "Claude Code · 干活中")
-        #expect(Presentation.agentStatus(Agent(kind: AgentKind("codex"), state: .idle))?.text == "Codex · 空闲")
-        #expect(Presentation.agentStatus(Agent(kind: AgentKind("new"), state: .blocked))?.text == "new · 等你回答")
-        #expect(Presentation.agentStatus(Agent(kind: AgentKind("x"), state: .unknown("z"))) == nil)
+        func status(_ kind: String, _ state: AgentState) -> String? {
+            Presentation.agentStatus(Agent(kind: AgentKind(kind), state: state), since: nil, now: .now)?.text
+        }
+        #expect(status("claude", .working) == "Claude Code，干活中")
+        #expect(status("codex", .idle) == "Codex，空闲")
+        #expect(status("new", .blocked) == "new，等你回答")
+        #expect(status("x", .unknown("z")) == nil)
+        #expect(Presentation.agentStatus(nil, since: nil, now: .now) == nil)
+    }
+
+    /// 有时刻、满一分钟时说等了、干了多久：只写最大的一个单位，往下取整；不满一分钟（包括时刻比现在晚）
+    /// 照旧只说状态；空闲不写时长。
+    @Test func agentStatesSayHowLong() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let zh = Locale(identifier: "zh-Hans")
+        func status(_ state: AgentState, ago: TimeInterval, locale: Locale = zh) -> String? {
+            Presentation.agentStatus(
+                Agent(kind: AgentKind("claude"), state: state), since: now.addingTimeInterval(-ago), now: now,
+                locale: locale)?.text
+        }
+        #expect(status(.blocked, ago: 12 * 60 + 40) == "Claude Code 等了 12分钟")
+        #expect(status(.working, ago: 2 * 3600 + 59 * 60) == "Claude Code 干了 2小时")
+        #expect(status(.blocked, ago: 59) == "Claude Code，等你回答")
+        #expect(status(.working, ago: 30) == "Claude Code，干活中")
+        #expect(status(.blocked, ago: 60) == "Claude Code 等了 1分钟")
+        #expect(status(.idle, ago: 600) == "Claude Code，空闲")
+        #expect(status(.blocked, ago: -90) == "Claude Code，等你回答")
+        #expect(status(.working, ago: 5 * 60, locale: Locale(identifier: "en")) == "Claude Code 干了 5 minutes")
+    }
+
+    /// 时长的重画时刻：从 `since` 起每满一分钟；时刻比现在晚时等到 `since` 起的第一分钟。
+    @Test func agentClockTicks() {
+        let since = Date(timeIntervalSince1970: 1_790_000_000)
+        func offsets(from start: TimeInterval, count: Int) -> [TimeInterval] {
+            Array(AgentClock.ticks(since: since, from: since.addingTimeInterval(start)).prefix(count))
+                .map { ($0.timeIntervalSince(since) * 1000).rounded() / 1000 }
+        }
+        #expect(offsets(from: 3, count: 4) == [3, 60, 120, 180])
+        #expect(offsets(from: 60, count: 3) == [60, 120, 180])
+        #expect(offsets(from: 150, count: 3) == [150, 180, 240])
+        #expect(offsets(from: -5, count: 3) == [-5, 60, 120])
+    }
+
+    /// 时长在三种界面语言下写出来的样子。
+    @Test func agentElapsedFollowsTheLocale() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        func elapsed(_ seconds: TimeInterval, _ locale: String) -> String? {
+            Presentation.agentElapsed(since: now.addingTimeInterval(-seconds), now: now, locale: Locale(identifier: locale))
+        }
+        #expect(elapsed(59, "en") == nil)
+        #expect(elapsed(12 * 60, "zh-Hans") == "12分钟")
+        #expect(elapsed(12 * 60, "en") == "12 minutes")
+        #expect(elapsed(12 * 60, "zh-Hant") == "12分鐘")
+        #expect(elapsed(60, "en") == "1 minute")
+        #expect(elapsed(2 * 3600, "zh-Hans") == "2小时")
+        #expect(elapsed(2 * 3600, "en") == "2 hours")
+        #expect(elapsed(2 * 3600, "zh-Hant") == "2小時")
+        #expect(Presentation.agentElapsed(since: nil, now: now) == nil)
     }
 
     @Test func sizeOwners() {
@@ -1239,5 +1365,39 @@ actor UnwritableMachineStore: MachineStore {
             link.sent.last.map { if case .listDirs(_, "//server/share/team/dev") = $0 { true } else { false } } == true)
         let share = await listed("//server/share", ["team"])
         #expect(share.parent == nil)
+    }
+}
+
+@Suite struct SessionStatusTests {
+    func session(
+        agent: AgentState? = nil, foregroundIsShell: Bool = true, foreground: String? = "zsh", exited: Bool = false
+    ) -> SessionInfo {
+        SessionInfo(
+            id: sessionA, size: smallGrid,
+            meta: SessionMeta(
+                title: "t", agent: agent.map { Agent(kind: AgentKind("claude"), state: $0) },
+                foregroundIsShell: foregroundIsShell, foreground: foreground),
+            exited: exited)
+    }
+
+    @Test func agentStates() {
+        #expect(SessionStatus.of(session(agent: .blocked)) == .waiting)
+        #expect(SessionStatus.of(session(agent: .working)) == .working)
+        #expect(SessionStatus.of(session(agent: .idle)) == .agentIdle)
+        #expect(SessionStatus.of(session(agent: .unknown("thinking"))) == .agentIdle)
+    }
+
+    /// 前台不是 shell 时带程序名，Windows 的 `.exe` 去掉；只有 shell 时是 `shell`。
+    @Test func programsAndShells() {
+        #expect(SessionStatus.of(session(foregroundIsShell: false, foreground: "vim")) == .running("vim"))
+        #expect(SessionStatus.of(session(foregroundIsShell: false, foreground: "nvim.exe")) == .running("nvim"))
+        #expect(SessionStatus.of(session()) == .shell)
+        #expect(SessionStatus.of(session(foregroundIsShell: false, foreground: nil)) == .shell)
+    }
+
+    /// 退出了的会话不看 agent 和前台程序。
+    @Test func exitedWins() {
+        #expect(SessionStatus.of(session(agent: .blocked, exited: true)) == .exited)
+        #expect(SessionStatus.of(session(foregroundIsShell: false, foreground: "vim", exited: true)) == .exited)
     }
 }

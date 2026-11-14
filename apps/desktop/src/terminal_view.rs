@@ -256,7 +256,8 @@ pub struct TerminalView {
     menu: Option<Menu>,
     /// 收宿主发来的输出和状态的任务，见 `read_events`。
     _reader: Task<()>,
-    /// 前台 agent 上次换了种类或状态的时刻，agent 列表按它排同一状态里的先后。
+    /// 这边看到前台 agent 上次换了种类或状态的时刻；宿主没报 `SessionMeta::agent_since_ms` 时由
+    /// `agent_changed_at` 交出去，agent 列表按它排同一状态里的先后。
     agent_changed_at: Instant,
     _hold_timeout: Option<Task<()>>,
     /// 图片动画到下一帧时重画的计时器。

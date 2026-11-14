@@ -25,12 +25,13 @@
                     .appTheme(app.theme)
             }
             .fullScreenCover(item: $app.pairing) { model in
-                PairingView(model: model) { machine in
+                PairingView(model: model, settings: app.settings, theme: app.theme) { machine in
                     app.pairing = nil
                     if let machine {
                         app.path = [.machine(machine.id)]
                     }
                 }
+                .appTheme(app.theme)
             }
             .onChange(of: scenePhase) { _, phase in
                 app.setActive(phase != .background)

@@ -160,6 +160,40 @@ fn attaching_a_missing_session_fails() {
     assert!(matches!(next(&mut rx), LinkEvent::Msg(HostMsg::Error { id: Some(got), .. }) if got == id));
 }
 
+/// 读屏和按键经真的宿主来回：读到的是屏幕文字，按的键 cat 回显出来；读屏的回话交给读的一方，不交给看着
+/// 这个会话的视图；读不存在的会话报错，登记都撤干净。
+#[cfg(unix)]
+#[test]
+fn reading_the_screen_and_sending_keys_round_trip() {
+    let dir = temp_dir("read-screen");
+    let host = Host::new(BuildId(BUILD.into()));
+    let link = connected(&host);
+    let id = spawn(&link, script(&dir, "hello.sh", "printf 'ready\\n'\nexec /bin/cat"));
+    let mut view = link.attach(id, None, AttachMode::MetaOnly);
+    assert!(matches!(next(&mut view), LinkEvent::Screen(_)));
+    let read_until = |needle: &str| {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let text = link.read_screen(id, 5, WAIT).unwrap();
+            if text.contains(needle) {
+                return;
+            }
+            assert!(Instant::now() < deadline, "{needle:?} never showed up in {text:?}");
+            thread::sleep(Duration::from_millis(20));
+        }
+    };
+    read_until("ready");
+    link.send_keys(id, vec!["h".into(), "i".into()], WAIT).unwrap();
+    read_until("hi");
+    assert!(link.read_screen(SessionId(42), 5, WAIT).is_err());
+    assert!(link.inner.state().screen_reads.is_empty());
+    assert!(link.inner.state().replies.is_empty());
+    while let Ok(event) = view.try_recv() {
+        assert!(!matches!(event, LinkEvent::Msg(HostMsg::ScreenText { .. })), "the view got a screen read");
+    }
+    link.kill(id);
+}
+
 #[test]
 fn ui_requests_go_to_the_desktop_and_replies_come_back() {
     let host = Host::new(BuildId(BUILD.into()));

@@ -315,6 +315,9 @@ public final class AppModel {
             sessionId: session, title: info?.meta.displayTitle ?? String(localized: "终端"), agent: info?.meta.agent,
             link: list.link, linkState: list.linkState, ownerHint: hint, sizePreference: settings.preferences.defaultSize,
             onOpen: { [weak list] id in list?.screenOpened(id) },
+            // 终端页回答行的选项取自 `SessionListModel.prompts`，屏幕变了要它重读。
+            onAnswerScreenChange: { [weak list] id in list?.requestPreview(id) },
+            onAnswered: { [weak list] id in list?.answered(id) },
             onClose: { [weak list] id in list?.screenClosed(id) })
         terminals[route] = model
         if active { model.open() }

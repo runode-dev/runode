@@ -147,7 +147,8 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         let model = model()
         model.handle(.message(.sessionList([info(waiting, .blocked), info(plain, nil)])))
         #expect(Set(readScreens(link.sent)) == [waiting, plain])
-        #expect(link.sent.contains(.readScreen(id: waiting, lines: SessionListModel.previewReadLines)))
+        #expect(link.sent.contains(.readScreen(id: waiting, lines: SessionListModel.waitingReadLines)))
+        #expect(link.sent.contains(.readScreen(id: plain, lines: SessionListModel.previewReadLines)))
     }
 
     @Test func metaAndBellRefreshButAtMostOncePerSecond() async {
@@ -203,6 +204,26 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(model.previews[plain] == [" ❯ 1. Yes", "   2. No"])
     }
 
+    /// 等回答的会话从读回来的屏幕认出提问；不等了就作废，不等回答的会话不认。
+    @Test func waitingScreensArePromptsUntilAnswered() {
+        let model = model()
+        model.handle(.message(.sessionList([info(waiting, .blocked), info(plain, .working)])))
+        let screen = "────────\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n"
+        model.handle(.message(.screenText(id: waiting, text: screen, truncated: false)))
+        model.handle(.message(.screenText(id: plain, text: screen, truncated: false)))
+        #expect(model.prompts[waiting]?.question == ["Do you want to proceed?"])
+        #expect(model.prompts[waiting]?.options.map(\.text) == ["Yes", "No"])
+        #expect(model.prompts[plain] == nil)
+        // 屏幕上认不出提问：退回通用的键。
+        model.handle(.message(.screenText(id: waiting, text: "● 等一下\n", truncated: false)))
+        #expect(model.prompts[waiting] == nil)
+        model.handle(.message(.screenText(id: waiting, text: screen, truncated: false)))
+        #expect(model.prompts[waiting] != nil)
+        model.handle(
+            .message(.meta(id: waiting, meta: SessionMeta(title: "x", agent: Agent(kind: AgentKind("claude"), state: .working)))))
+        #expect(model.prompts[waiting] == nil)
+    }
+
     func idleShell() -> SessionInfo {
         var shell = info(plain, nil)
         shell.meta.foregroundIsShell = true
@@ -215,7 +236,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         let model = model()
         model.handle(.message(.sessionList([idleShell(), info(waiting, .blocked)])))
         #expect(link.sent.contains(.readScreen(id: plain, lines: nil, command: 1)))
-        #expect(link.sent.contains(.readScreen(id: waiting, lines: SessionListModel.previewReadLines)))
+        #expect(link.sent.contains(.readScreen(id: waiting, lines: SessionListModel.waitingReadLines)))
         let output = "Cargo.lock  apps\n\nREADME.md  crates\n"
         model.handle(.message(.screenText(id: plain, text: output, truncated: false)))
         #expect(model.previews[plain] == ["Cargo.lock  apps", "README.md  crates"])
@@ -448,6 +469,121 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(reply.deliveredCount == 1)
         #expect(readScreens(link.sent) == [waiting])
     }
+
+    /// 答完以后读到的还是答之前的屏幕时不再认成提问，屏幕换了才认新的；屏幕一直不变，读够次数后照旧认出来。
+    @Test func theAnsweredPromptDoesNotComeBackFromTheOldScreen() async throws {
+        let clock = ManualClock()
+        let model = SessionListModel(machine: machineRecord(), link: link, now: { clock.now })
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(waiting, .blocked)])))
+        let first = "────────\n Run the tests?\n ❯ 1. Yes\n   2. No\n\n"
+        let second = "────────\n Push to main?\n ❯ 1. Yes\n   2. No\n\n"
+        func answer() async throws {
+            link.clearSent()
+            await model.quickReply(for: waiting).press(QuickKey.standard[0])
+            guard case .sendKeys(let req, _, _)? = link.sent.first else {
+                Issue.record("the key was not sent")
+                return
+            }
+            clock.advance(.seconds(2))
+            model.handle(.message(.done(req: req)))
+        }
+        model.handle(.message(.screenText(id: waiting, text: first, truncated: false)))
+        #expect(model.prompts[waiting]?.question == ["Run the tests?"])
+        try await answer()
+        #expect(model.prompts[waiting] == nil)
+        model.handle(.message(.screenText(id: waiting, text: first, truncated: false)))
+        #expect(model.prompts[waiting] == nil, "the agent has not redrawn yet")
+        model.handle(.message(.screenText(id: waiting, text: second, truncated: false)))
+        #expect(model.prompts[waiting]?.question == ["Push to main?"])
+        // 按键没起作用、屏幕一直是那一幅：读够次数后提问回来。
+        try await answer()
+        for _ in 0..<SessionListModel.answeredRereads {
+            model.handle(.message(.screenText(id: waiting, text: second, truncated: false)))
+            #expect(model.prompts[waiting] == nil)
+        }
+        model.handle(.message(.screenText(id: waiting, text: second, truncated: false)))
+        #expect(model.prompts[waiting]?.question == ["Push to main?"])
+    }
+
+    /// 按键后先读到的可能是 agent 只挪了光标记号的一帧，选项还是答之前那些，不认成新提问。
+    @Test func theAnsweredPromptDoesNotComeBackWhenOnlyTheCursorMoved() async throws {
+        let clock = ManualClock()
+        let model = SessionListModel(machine: machineRecord(), link: link, now: { clock.now })
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(waiting, .blocked)])))
+        let before = "────────\n Run the tests?\n ❯ 1. Yes\n   2. No\n\n"
+        let moved = "────────\n Run the tests?\n   1. Yes\n ❯ 2. No\n\n"
+        model.handle(.message(.screenText(id: waiting, text: before, truncated: false)))
+        #expect(model.prompts[waiting]?.question == ["Run the tests?"])
+        link.clearSent()
+        await model.quickReply(for: waiting).press(QuickKey.standard[1])
+        guard case .sendKeys(let req, _, _)? = link.sent.first else {
+            Issue.record("the key was not sent")
+            return
+        }
+        clock.advance(.seconds(2))
+        model.handle(.message(.done(req: req)))
+        #expect(model.prompts[waiting] == nil)
+        model.handle(.message(.screenText(id: waiting, text: moved, truncated: false)))
+        #expect(model.prompts[waiting] == nil, "only the cursor moved")
+    }
+
+    /// 答完后提问还在屏幕上、只是别处的字变了（agent 的状态栏在走秒）：还是所答的那一问，不认。
+    @Test func theAnsweredPromptDoesNotComeBackWhileOtherLinesChange() async throws {
+        let clock = ManualClock()
+        let model = SessionListModel(machine: machineRecord(), link: link, now: { clock.now })
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(waiting, .blocked)])))
+        let before = "────────\n Run the tests?\n ❯ 1. Yes\n   2. No\n\n 12s elapsed\n"
+        let after = "────────\n Run the tests?\n ❯ 1. Yes\n   2. No\n\n 13s elapsed\n"
+        model.handle(.message(.screenText(id: waiting, text: before, truncated: false)))
+        #expect(model.prompts[waiting]?.question == ["Run the tests?"])
+        link.clearSent()
+        await model.quickReply(for: waiting).press(QuickKey.standard[0])
+        guard case .sendKeys(let req, _, _)? = link.sent.first else {
+            Issue.record("the key was not sent")
+            return
+        }
+        clock.advance(.seconds(2))
+        model.handle(.message(.done(req: req)))
+        #expect(model.prompts[waiting] == nil)
+        model.handle(.message(.screenText(id: waiting, text: after, truncated: false)))
+        #expect(model.prompts[waiting] == nil, "only the status line changed")
+    }
+
+    /// 答完后 agent 进入等待的时刻变了：是新的一次等待，屏幕和答之前一模一样也照常认出；时刻没变、
+    /// 屏幕也没变时不认。
+    @Test func aNewWaitIsAPromptEvenOnTheSameScreen() async throws {
+        let clock = ManualClock()
+        let model = SessionListModel(machine: machineRecord(), link: link, now: { clock.now })
+        let first = Date(timeIntervalSince1970: 1_790_000_000)
+        let second = first.addingTimeInterval(30)
+        func blocked(since: Date) -> SessionMeta {
+            SessionMeta(title: "\(waiting)", agent: Agent(kind: AgentKind("claude"), state: .blocked), agentSince: since)
+        }
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([SessionInfo(id: waiting, size: smallGrid, meta: blocked(since: first))])))
+        let screen = "────────\n Run the tests?\n ❯ 1. Yes\n   2. No\n\n"
+        func answer() async throws {
+            link.clearSent()
+            await model.quickReply(for: waiting).press(QuickKey.standard[0])
+            guard case .sendKeys(let req, _, _)? = link.sent.first else {
+                Issue.record("the key was not sent")
+                return
+            }
+            clock.advance(.seconds(2))
+            model.handle(.message(.done(req: req)))
+        }
+        model.handle(.message(.screenText(id: waiting, text: screen, truncated: false)))
+        #expect(model.prompts[waiting]?.question == ["Run the tests?"])
+        try await answer()
+        model.handle(.message(.screenText(id: waiting, text: screen, truncated: false)))
+        #expect(model.prompts[waiting] == nil, "the same wait on the same screen")
+        model.handle(.message(.meta(id: waiting, meta: blocked(since: second))))
+        model.handle(.message(.screenText(id: waiting, text: screen, truncated: false)))
+        #expect(model.prompts[waiting]?.question == ["Run the tests?"])
+    }
 }
 
 @MainActor
@@ -486,25 +622,74 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(Presentation.linkStatus(.connecting) == "连接中…")
     }
 
-    @Test func terminalSubtitleCombinesAgentAndLink() {
-        let agent = Agent(kind: AgentKind("claude"), state: .blocked)
-        #expect(
-            Presentation.terminalSubtitle(agent: agent, link: .connected(hostName: "homelab", address: nil), phase: .live)
-                == "Claude Code · 等你回答")
-        #expect(
-            Presentation.terminalSubtitle(agent: agent, link: .connecting, phase: .live) == "Claude Code · 等你回答 · 连接中…")
-        #expect(
-            Presentation.terminalSubtitle(agent: nil, link: .connected(hostName: "homelab", address: nil), phase: .live)
-                == "已连接")
-        #expect(Presentation.terminalSubtitle(agent: nil, link: .connecting, phase: .exited(0)) == "shell 已退出")
+    @Test func terminalSubtitleNamesTheMachineOrTheTrouble() {
+        let connected = LinkState.connected(hostName: "homelab", address: nil)
+        #expect(Presentation.terminalSubtitle(machine: "MacBook Pro", link: connected, phase: .live) == "MacBook Pro")
+        #expect(Presentation.terminalSubtitle(machine: "MacBook Pro", link: .connecting, phase: .live) == "连接中…")
+        #expect(Presentation.terminalSubtitle(machine: nil, link: connected, phase: .live) == "已连接")
+        #expect(Presentation.terminalSubtitle(machine: "MacBook Pro", link: .connecting, phase: .exited(0)) == "shell 已退出")
+        #expect(Presentation.terminalSubtitle(machine: "MacBook Pro", link: connected, phase: .gone("没了")) == "会话已结束")
     }
 
-    @Test func addressesAreShownWithoutTheInterfaceScope() {
-        #expect(Presentation.displayAddress("10.0.0.10%en0") == "10.0.0.10")
-        #expect(Presentation.displayAddress("fe80::1c2:3%en0") == "局域网")
-        #expect(Presentation.displayAddress("FE80::be24:11ff:fe8f:b9") == "局域网")
-        #expect(Presentation.displayAddress("fd7a:115c:a1e0::1") == "fd7a:115c:a1e0::1")
-        #expect(Presentation.displayAddress("192.168.1.20") == "192.168.1.20")
+    /// 宿主没报 agent 进入现在状态的时刻时只说状态。
+    @Test func sessionSubtitleSaysWhatTheSessionIsDoing() {
+        #expect(Presentation.sessionSubtitle(info(waiting, .blocked), now: .now) == "Claude Code 在等你")
+        #expect(
+            Presentation.sessionSubtitle(info(waiting, .blocked), machine: "homelab", now: .now)
+                == "Claude Code 在 homelab 上等你")
+        #expect(Presentation.sessionSubtitle(info(working, .working), now: .now) == "Claude Code 在干活")
+        #expect(Presentation.sessionSubtitle(info(working, .idle), now: .now) == "Claude Code 空闲")
+        var vim = info(plain, nil)
+        vim.meta.foreground = "vim"
+        #expect(Presentation.sessionSubtitle(vim, now: .now) == "在跑 vim")
+        var shell = info(plain, nil)
+        shell.meta.foregroundIsShell = true
+        shell.meta.foreground = "zsh"
+        #expect(Presentation.sessionSubtitle(shell, now: .now) == "空闲")
+        #expect(Presentation.sessionSubtitle(info(waiting, .blocked, exited: true), now: .now) == "已退出")
+    }
+
+    /// 有时刻、满一分钟时说等了、干了多久，往下取整到分钟或小时；不满一分钟（包括时刻比现在晚）照旧只说状态，
+    /// 空闲不写时长。
+    @Test func sessionSubtitleSaysHowLong() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        func subtitle(
+            _ id: SessionId, _ state: AgentState, ago: TimeInterval, machine: String? = nil,
+            locale: Locale = Locale(identifier: "zh-Hans")
+        ) -> String {
+            var session = info(id, state)
+            session.meta.agentSince = now.addingTimeInterval(-ago)
+            return Presentation.sessionSubtitle(session, machine: machine, now: now, locale: locale)
+        }
+        #expect(subtitle(waiting, .blocked, ago: 59) == "Claude Code 在等你")
+        #expect(subtitle(waiting, .blocked, ago: 59, machine: "homelab") == "Claude Code 在 homelab 上等你")
+        #expect(subtitle(waiting, .blocked, ago: 60) == "Claude Code 等了 1分钟")
+        #expect(subtitle(waiting, .blocked, ago: 12 * 60 + 59) == "Claude Code 等了 12分钟")
+        #expect(subtitle(waiting, .blocked, ago: 12 * 60, machine: "homelab") == "Claude Code 在 homelab 上等了 12分钟")
+        #expect(subtitle(working, .working, ago: 2 * 3600 + 59 * 60) == "Claude Code 干了 2小时")
+        #expect(subtitle(working, .working, ago: 30) == "Claude Code 在干活")
+        #expect(subtitle(working, .idle, ago: 600) == "Claude Code 空闲")
+        #expect(subtitle(waiting, .blocked, ago: -120) == "Claude Code 在等你")
+        #expect(subtitle(working, .working, ago: 5 * 60, locale: Locale(identifier: "en")) == "Claude Code 干了 5 minutes")
+    }
+
+    @Test func linkRouteTellsLocalFromDirectFromTunnelled() {
+        func route(_ address: String?) -> String {
+            Presentation.linkRoute(.connected(hostName: "homelab", address: address))
+        }
+        #expect(route("192.168.1.20") == "已连接，局域网直连")
+        #expect(route("10.0.0.10%en0") == "已连接，局域网直连")
+        #expect(route("172.20.1.2") == "已连接，局域网直连")
+        #expect(route("169.254.3.4") == "已连接，局域网直连")
+        #expect(route("fe80::1c2:3%en0") == "已连接，局域网直连")
+        #expect(route("FD7A:115C:A1E0::1") == "已连接，局域网直连")
+        #expect(route("ethans-mbp.local") == "已连接，局域网直连")
+        #expect(route("::ffff:192.168.1.20") == "已连接，局域网直连")
+        #expect(route("172.32.1.2") == "已连接，直连")
+        #expect(route("203.0.113.7") == "已连接，直连")
+        #expect(route("2001:db8::1") == "已连接，直连")
+        #expect(route(nil) == "已连接，跨网络")
+        #expect(Presentation.linkRoute(.connecting) == "连接中…")
     }
 
     /// shell 在提示符上等输入时，最后一个有字的行（光标所在的提示符）不进预览。

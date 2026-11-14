@@ -73,7 +73,7 @@ private struct TwoMachines {
         second.handle(.ready(generation: 1))
         second.handle(.message(.sessionList([info(sessionB, .blocked)])))
         second.handle(.state(.waiting(reason: "断了", retryAt: .now + 5)))
-        #expect(machines.app.summary == HomeSummary(waiting: 1, working: 1, sessions: 3))
+        #expect(machines.app.summary == HomeSummary(waiting: 1, working: 1, sessions: 3, connected: 1))
         #expect(machines.app.waitingSessions.map(\.session.id) == [waiting])
         #expect(machines.app.spawnableLists.map(\.machine.id) == [machines.first.id])
     }
@@ -185,12 +185,52 @@ private struct TwoMachines {
 
     @Test func machineCardsSummariseTheirSessions() {
         let connected = LinkState.connected(hostName: "homelab", address: nil)
-        #expect(
-            Presentation.machineSummary(
-                connected, sessions: [info(waiting, .blocked), info(working, .working), info(plain, nil)], loaded: true)
-                == "3 个会话 · 1 个等你回答 · 1 个在干活")
-        #expect(Presentation.machineSummary(connected, sessions: [info(plain, nil, exited: true)], loaded: true) == "没有终端")
-        #expect(Presentation.machineSummary(connected, sessions: [], loaded: false) == "已连接")
-        #expect(Presentation.machineSummary(.idle, sessions: [info(plain, nil)], loaded: true) == "未连接")
+        func line(_ state: LinkState, _ sessions: [SessionInfo], loaded: Bool = true) -> MachineLine {
+            Presentation.machineLine(state: state, sessions: sessions, loaded: loaded)
+        }
+        let waitingLine = line(connected, [info(waiting, .blocked), info(working, .working), info(plain, nil)])
+        #expect(waitingLine.tone == .waiting)
+        #expect((waitingLine.emphasis ?? "") + waitingLine.text == "1 个等你，共 3 个会话")
+        let workingLine = line(connected, [info(working, .working), info(plain, nil)])
+        #expect(workingLine == MachineLine(tone: .working, emphasis: "1 个在干活", text: "，共 2 个会话"))
+        #expect(line(connected, [info(plain, nil)]) == MachineLine(tone: .neutral, text: "1 个会话"))
+        #expect(line(connected, [info(plain, nil, exited: true)]) == MachineLine(tone: .neutral, text: "没有终端"))
+        #expect(line(connected, [], loaded: false) == MachineLine(tone: .neutral, text: "已连接"))
+        #expect(line(.idle, [info(plain, nil)]) == MachineLine(tone: .neutral, text: "未连接"))
+        #expect(line(.failed(.gateVersion(9)), []) == MachineLine(tone: .failure, emphasis: "连不上", text: ""))
+    }
+
+    @Test func homeTitleLeadsWithWhatNeedsYou() {
+        func title(_ summary: HomeSummary) -> (String, String?) {
+            (Presentation.homeTitle(summary), Presentation.homeDetail(summary))
+        }
+        #expect(title(HomeSummary(waiting: 2, working: 1, sessions: 4, connected: 1)) == ("2 个会话在等你", "另有 1 个在干活"))
+        #expect(title(HomeSummary(waiting: 1, working: 0, sessions: 4, connected: 1)) == ("1 个会话在等你", nil))
+        #expect(title(HomeSummary(waiting: 0, working: 3, sessions: 4, connected: 2)) == ("3 个会话在干活", nil))
+        #expect(title(HomeSummary(waiting: 0, working: 0, sessions: 4, connected: 1)) == ("没有会话在等你", "共 4 个会话"))
+        #expect(title(HomeSummary(waiting: 0, working: 0, sessions: 0, connected: 1)) == ("没有会话在等你", "没有终端"))
+        #expect(title(HomeSummary()) == ("还没连上电脑", nil))
+    }
+
+    @Test func waitingCardsPageInALoop() {
+        let ids = ["a", "b", "c"]
+        #expect(HomePager.current(nil, in: ids) == "a")
+        #expect(HomePager.current("b", in: ids) == "b")
+        #expect(HomePager.next(after: "a", in: ids) == "b")
+        #expect(HomePager.next(after: "c", in: ids) == "a")
+        #expect(HomePager.previous(before: "b", in: ids) == "a")
+        #expect(HomePager.previous(before: "a", in: ids) == "c")
+        #expect(HomePager.next(after: "a", in: ["a"]) == "a")
+        #expect(HomePager.current(nil, in: []) == nil)
+        #expect(HomePager.next(after: nil, in: []) == nil)
+    }
+
+    /// 翻到的那张答完、不在列表里了，退回第一张，再往后翻从第一张接着翻。
+    @Test func waitingCardsFallBackToTheFirstWhenTheFocusedOneIsGone() {
+        let ids = ["a", "c"]
+        #expect(HomePager.current("b", in: ids) == "a")
+        #expect(HomePager.next(after: HomePager.current("b", in: ids), in: ids) == "c")
+        #expect(HomePager.next(after: "b", in: ids) == "a")
+        #expect(HomePager.previous(before: "b", in: ids) == "a")
     }
 }

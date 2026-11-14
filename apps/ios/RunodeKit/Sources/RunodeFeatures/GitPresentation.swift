@@ -43,7 +43,9 @@ extension Presentation {
             formatter.locale = locale
             return formatter.localizedString(for: Date(timeIntervalSince1970: TimeInterval(time)), relativeTo: now)
         } ?? branch.date
-        return [branch.subject, when].filter { !$0.isEmpty }.joined(separator: " · ")
+        if branch.subject.isEmpty { return when }
+        if when.isEmpty { return branch.subject }
+        return String(localized: "\(branch.subject)，\(when)")
     }
 
     /// 界面文字实际用的语言：系统语言 app 没有译文时界面退回中文，日期也跟着界面写，不按系统的地区设置。
@@ -58,7 +60,7 @@ extension Presentation {
         return String(localized: "还没有提交")
     }
 
-    /// 和上游差几个提交：`origin/main · ↑2 ↓1`、`origin/main · 已同步`；没有上游时说明能不能推。
+    /// 和上游差几个提交：`origin/main，↑2 ↓1`、`origin/main，已同步`；没有上游时说明能不能推。
     public static func gitUpstream(_ status: GitStatus) -> String {
         guard let upstream = status.upstream else {
             return status.hasRemote ? String(localized: "还没有上游，推送时会设好") : String(localized: "没有配置远端")
@@ -66,7 +68,8 @@ extension Presentation {
         var counts: [String] = []
         if status.ahead > 0 { counts.append("↑\(status.ahead)") }
         if status.behind > 0 { counts.append("↓\(status.behind)") }
-        return "\(upstream) · \(counts.isEmpty ? String(localized: "已同步") : counts.joined(separator: " "))"
+        let sync = counts.isEmpty ? String(localized: "已同步") : counts.joined(separator: " ")
+        return String(localized: "\(upstream)，\(sync)")
     }
 
     /// 做到一半的操作的提醒；没有时为空。

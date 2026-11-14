@@ -52,6 +52,12 @@ pub fn tr(key: &str) -> String {
     rust_i18n::t!(key).into_owned()
 }
 
+/// 报给辅助工具的按钮名：做什么（`action`）加上对着哪一项（`title`），一屏里有好几个同样的按钮时
+/// 靠它分清。
+pub fn action_for(action: &str, title: &str) -> String {
+    rust_i18n::t!("a11y.action_for", action = action, title = title).into_owned()
+}
+
 /// `key` 下分系统写的那一条（`<key>.macos`、`.windows`、`.linux`）：文件管理器和回收站各系统叫法不同。
 pub fn os_key(key: &str) -> String {
     os_key_on(key, Some(std::env::consts::OS))

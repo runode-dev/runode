@@ -1,21 +1,16 @@
-//! 侧栏顶上的「配对设备」：窗口主区域换成配对设备页（`mobile_page`）。切到任何一个标签或 workspace
+//! 侧栏导航里的「手机」：窗口主区域换成配对设备页（`mobile_page`）。切到任何一个标签或 workspace
 //! （`activate`）、按 Esc 就收起。
 
-use std::rc::Rc;
-
 use gpui::{
-    AnyElement, App, Context, Div, Entity, Focusable as _, MouseButton, Role, Stateful, StyleRefinement, Subscription,
-    Window, WindowControlArea, div, prelude::*, px, svg,
+    AnyElement, App, Context, Entity, Focusable as _, MouseButton, StyleRefinement, Subscription, Window,
+    WindowControlArea, div, prelude::*, px,
 };
 
-use super::{
-    CARD_GAP, TITLEBAR_HEIGHT, WindowView, cards, drag_window,
-    sidebar::{ROW_HEIGHT, ROW_ICON_SIZE, ROW_TEXT_OPACITY},
-};
+use super::{CARD_GAP, TITLEBAR_HEIGHT, WindowView, cards, drag_window};
 use crate::{
+    config::AppConfig,
     mobile_page::{MobileEvent, MobilePage, Step},
-    ui::icons::PHONE_ICON,
-    ui::{a11y::A11yPress, card::Card, font_size::scaled, theme::ActiveTheme as _},
+    ui::card::Card,
 };
 
 /// 开着的配对设备页。
@@ -39,10 +34,14 @@ pub(crate) fn show_pairing(cx: &mut App) {
     });
 }
 
-/// 在后台跟着配对过的设备，只在有窗口开着配对设备页时读。
+/// 在后台跟着配对过的设备，只在有窗口开着配对设备页时读；远程访问开着时，露着侧栏（导航上写着连着的
+/// 设备）的窗口也算。
 pub fn watch_devices(cx: &mut App) {
     crate::mobile_page::devices::watch(cx, |cx| {
-        super::remote::windows(cx).iter().any(|handle| handle.read(cx).is_ok_and(|view| view.mobile_page().is_some()))
+        let listening = cx.global::<AppConfig>().0.remote_access;
+        super::remote::windows(cx).iter().any(|handle| {
+            handle.read(cx).is_ok_and(|view| view.mobile_page().is_some() || (listening && view.sidebar_visible()))
+        })
     });
 }
 
@@ -84,82 +83,20 @@ impl WindowView {
         }
     }
 
-    /// 侧栏顶上的入口，引导页开着时高亮。
-    pub(super) fn render_mobile_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let label = rust_i18n::t!("mobile.entry").into_owned();
-        page_entry("mobile-entry", PHONE_ICON, label, self.mobile_page().is_some(), cx, |this, window, cx| {
-            this.show_mobile(window, cx);
-        })
-    }
-
     /// 引导页开着时窗口的内容。缓存：窗口跟着终端输出几乎每帧都重画，这一页只在自己的状态变了时重画。辅助工具
-    /// 开着时不缓存，GPUI 才会逐帧重建报给辅助工具的节点。
+    /// 开着时不缓存，GPUI 才会逐帧重建报给辅助工具的节点。这一页里转着的盲文格紧跟在它后面画
+    /// （`MobilePage::spinner_overlay`）。
     pub(super) fn render_mobile_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(page) = self.mobile_page().map(|page| page.view.clone()) else { return Vec::new() };
+        let overlay = page.read(cx).spinner_overlay();
         let page = if window.is_a11y_active() {
             page.into_any_element()
         } else {
             page.cached(StyleRefinement::default().size_full()).into_any_element()
         };
+        let page = div().size_full().child(page).child(overlay).into_any_element();
         self.render_page_body(page, true, window, cx)
     }
-}
-
-/// 侧栏顶上打开一页（配对设备、看板）的入口，那一页开着时高亮。按下鼠标就开，辅助工具的按下另外登记。
-/// 开着的状态报成按下着（`aria_toggled`）而不是选中：AccessKit 不给带选中状态的按钮 Invoke，Windows 上
-/// 辅助工具就按不动它。
-pub(super) fn page_entry(
-    id: &'static str,
-    icon: &'static str,
-    label: String,
-    active: bool,
-    cx: &mut Context<WindowView>,
-    open: impl Fn(&mut WindowView, &mut Window, &mut Context<WindowView>) + 'static,
-) -> Stateful<Div> {
-    let active_bg = cx.theme().accent_selected;
-    let hover_bg = cx.theme().accent;
-    let fg = cx.theme().foreground;
-    let open = Rc::new(open);
-    let press = open.clone();
-    let view = cx.entity().downgrade();
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(label.clone())
-        .aria_toggled(active.into())
-        .flex_none()
-        .h(scaled(ROW_HEIGHT))
-        .mx(px(6.))
-        .mb(px(2.))
-        .px(px(8.))
-        .rounded(px(6.))
-        .flex()
-        .items_center()
-        .gap(px(6.))
-        .map(|row| {
-            if active {
-                row.bg(active_bg).text_color(fg)
-            } else {
-                row.text_color(fg.opacity(ROW_TEXT_OPACITY)).hover(|row| row.bg(hover_bg).text_color(fg))
-            }
-        })
-        .child(
-            div()
-                .flex_none()
-                .w(px(ROW_ICON_SIZE))
-                .flex()
-                .justify_center()
-                .child(svg().path(icon).size(px(14.)).text_color(fg.opacity(if active { 0.9 } else { 0.6 }))),
-        )
-        .child(div().min_w_0().truncate().child(label))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                open(this, window, cx);
-            }),
-        )
-        .on_a11y_press(view, move |this, window, cx| press(this, window, cx))
 }
 
 impl WindowView {

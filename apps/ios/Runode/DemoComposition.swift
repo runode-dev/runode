@@ -98,14 +98,14 @@
             size: GridSize(cols: 64, rows: 20, cellWidthPx: 16, cellHeightPx: 32),
             meta: SessionMeta(
                 title: demoText("重构连接层", "Refactor the connection layer"), agent: Agent(kind: AgentKind("claude"), state: .blocked),
-                cwd: "/Users/ethan/dev/runode"),
+                agentSince: Date(timeIntervalSinceNow: -12 * 60), cwd: "/Users/ethan/dev/runode"),
             clients: 1, claimed: true, sizeOwner: demoMachineName)
         static let codex = SessionInfo(
             id: SessionId("fedcba98765432100011223344556677")!,
             size: GridSize(cols: 100, rows: 30, cellWidthPx: 16, cellHeightPx: 32),
             meta: SessionMeta(
                 title: demoText("补 iOS 的单元测试", "Add iOS unit tests"), agent: Agent(kind: AgentKind("codex"), state: .working),
-                cwd: "/Users/ethan/dev/runode/apps/ios"),
+                agentSince: Date(timeIntervalSinceNow: -47 * 60), cwd: "/Users/ethan/dev/runode/apps/ios"),
             clients: 0, claimed: false, sizeOwner: nil)
         static let shell = SessionInfo(
             id: SessionId("aaaabbbbccccdddd0011223344556677")!,
@@ -210,6 +210,11 @@
                 emit(.message(.done(req: req)))
             case .git(let req, let id, let request):
                 emit(.message(git(req: req, id: id, request: request)))
+            case .open(let req, _, _, _, _):
+                // 假宿主开不出新会话，新开终端落到已有的普通 shell 上。
+                emit(.message(.opened(req: req, id: Self.shell.id)))
+            case .spawn(let req, _, _, _, _):
+                emit(.message(.spawned(req: req, id: Self.shell.id)))
             default:
                 break
             }

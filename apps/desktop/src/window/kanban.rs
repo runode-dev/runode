@@ -1,7 +1,7 @@
 //! 把铺满窗口的看板接到窗口上。看板本身在 `kanban`：打开时建一个 `Kanban`，收起时丢掉。
 //! 这里启动时把和宿主说话的办法交给它（`watch_todos`），每次画之前交给它各 workspace 的目录和名字、当前的
-//! 目录、定时能不能在后台跑，画它的外框（和配对设备页共用 `render_page_body`）和侧栏顶上新建任务、定时、看板三个
-//! 入口（按着修饰键时右边写着快捷键）；卡片上 agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事
+//! 目录、定时能不能在后台跑、任务会话所在分屏的 agent 上次换状态的时刻，画它的外框（和配对设备页共用 `render_page_body`）；卡片上 agent 的状态标记照
+//! 标签上的画（`AGENT_MARKS`）。它要窗口办的事
 //! （收起、换页、把任务会话接进窗口）经 `KanbanEvent` 交回来，它的对话框画在窗口最上层。
 //!
 //! 看板和配对设备页一样盖住标签和分屏：切到任何一个标签或 workspace、按 Esc 就收起。卡片的「打开终端」
@@ -11,30 +11,16 @@ use std::path::{Path, PathBuf};
 
 use crate::host_client::hosts::HostId;
 use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
-use gpui::{
-    Action, AnyElement, App, Context, Div, Entity, Focusable as _, Modifiers, Stateful, StyleRefinement, Subscription,
-    Window, div, prelude::*,
-};
+use gpui::{AnyElement, App, Context, Entity, Focusable as _, StyleRefinement, Subscription, Window, prelude::*};
 use runode_protocol::{SessionId, todo::Todo};
 
 use super::{
-    NewTodo, ToggleKanban, ToggleSchedules, WindowView,
+    AGENT_MARK_SIZE, NewTodo, ToggleKanban, ToggleSchedules, WindowView,
     agents::{self, Mark},
     remote,
-    sidebar::shortcut_modifiers,
-    titlebar::styled_agent_mark,
+    titlebar::agent_mark,
 };
-use crate::{
-    config::AppConfig,
-    host_client,
-    terminal_view::TerminalView,
-    ui::icons::{CLOCK_ICON, KANBAN_ICON, PLUS_ICON},
-    ui::{
-        font_size::FontSize,
-        theme::ActiveTheme as _,
-        tooltip::{shortcut_text, tooltip},
-    },
-};
+use crate::{config::AppConfig, host_client, terminal_view::TerminalView};
 
 /// 开着的看板。
 pub(super) struct OpenKanban {
@@ -44,7 +30,7 @@ pub(super) struct OpenKanban {
 
 /// 卡片上 agent 的状态标记，和标签上的一样（不记干完了没看）。
 const AGENT_MARKS: AgentMarks = AgentMarks {
-    render: |agent, id, cx| styled_agent_mark(Mark::new(agent, false), id, cx.theme().foreground, super::cards(cx)),
+    render: |agent, id, cx| agent_mark(Some(Mark::new(agent, false)), id, AGENT_MARK_SIZE, false, cx),
     describe: |agent| Mark::new(agent, false).describe(),
 };
 
@@ -54,6 +40,8 @@ pub fn watch_todos(cx: &mut App) {
         ask: |step| host_client::ask_todos(step),
         list_sessions: host_client::list_sessions,
         board: host_client::host_board,
+        read_screen: host_client::read_screen,
+        send_keys: host_client::send_keys,
     };
     crate::kanban::watch(host, host_client::todos_changed(), cx);
 }
@@ -72,9 +60,9 @@ fn best_workspace(dirs: &[&Path], dir: &Path, worktree: Option<&Path>, home: Opt
 }
 
 impl WindowView {
-    /// 打开或收起看板；开着的是定时页时换到任务页，开着新建、编辑任务那一页时回到看板（`close_todo_page`）。
+    /// 打开或收起看板；开着的是定时页时换到任务页，开着看板的对话框时不理。
     pub(super) fn toggle_kanban(&mut self, _: &ToggleKanban, window: &mut Window, cx: &mut Context<Self>) {
-        if self.todo_dialog(cx).is_some() || self.close_todo_page(window, cx) {
+        if self.todo_dialog(cx).is_some() {
             return;
         }
         if self.showing_todo_page(false, cx) {
@@ -84,12 +72,11 @@ impl WindowView {
         }
     }
 
-    /// 打开或收起定时页；开着的是任务页（或新建、编辑任务那一页，`close_todo_page`）时换到定时页。
+    /// 打开或收起定时页；开着的是任务页时换到定时页，开着看板的对话框时不理。
     pub(super) fn toggle_schedules(&mut self, _: &ToggleSchedules, window: &mut Window, cx: &mut Context<Self>) {
         if self.todo_dialog(cx).is_some() {
             return;
         }
-        self.close_todo_page(window, cx);
         if self.showing_todo_page(true, cx) {
             self.close_kanban(window, cx);
         } else {
@@ -97,7 +84,8 @@ impl WindowView {
         }
     }
 
-    /// 打开新建任务那一页，上回离开时写到一半的接着写。看板没开着时它单独占着这一页，取消就收起，存好了才露出看板。
+    /// 打开新建任务的对话框，上回收起时写到一半的接着写（`todo_draft`）。看板没开着时看板只为它而开，没存就关掉
+    /// 时一起收起。
     pub(super) fn new_todo(&mut self, _: &NewTodo, window: &mut Window, cx: &mut Context<Self>) {
         if !self.leave_todo_page(window, cx) {
             return;
@@ -110,8 +98,8 @@ impl WindowView {
         }
     }
 
-    /// 用户要去别处：写到一半的新建任务那一页收起来留着（`todo_draft`），看板只为这一页开着时一起收起，
-    /// 否则露出看板；开着别的对话框或页时为假，留在原处，免得丢掉写了一半的内容。
+    /// 用户按键、拖文件夹这类要去别处：新建任务的对话框收起来留着（`todo_draft`），看板只为它开着时一起收起，
+    /// 否则露出看板；开着编辑的对话框时为假，留在原处，免得丢掉写了一半的内容。
     pub(super) fn leave_todo_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(board) = self.kanban_page().map(|board| board.view.clone()) else { return true };
         let alone = board.read(cx).creating();
@@ -124,18 +112,18 @@ impl WindowView {
         !self.dialog_open(cx)
     }
 
-    /// 看板开着写到一半的新建任务那一页，离开时能收起来留着（`leave_todo_page`）。
+    /// 看板开着新建任务的对话框，离开时能收起来留着（`leave_todo_page`）。
     pub(super) fn drafting(&self, cx: &App) -> bool {
         self.kanban_page().is_some_and(|board| board.view.read(cx).drafting(cx))
     }
 
-    /// 看板的新建、编辑对话框或任务那一页开着：换页、收起或再开一个会丢掉写了一半的内容。
+    /// 看板的新建、编辑对话框开着：换页、收起或再开一个会丢掉写了一半的内容。
     pub(super) fn dialog_open(&self, cx: &App) -> bool {
         self.kanban_page().is_some_and(|board| board.view.read(cx).editing())
     }
 
-    /// 关掉看板里新建、编辑任务那一页，新建的收起来留着；没开着时为假。
-    fn close_todo_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    /// 关掉看板里新建、编辑任务的对话框，新建的收起来留着；没开着时为假。
+    pub(super) fn close_todo_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(board) = self.kanban_page().map(|board| board.view.clone()) else { return false };
         if let Some(draft) = board.update(cx, |board, cx| board.take_draft(window, cx)) {
             self.todo_draft = Some(draft);
@@ -144,7 +132,7 @@ impl WindowView {
         board.update(cx, |board, cx| board.close_page(window, cx))
     }
 
-    /// 看板开着，显示的是定时页（`schedules`）或任务页；开着新建任务那一页时都不算。
+    /// 看板开着，显示的是定时页（`schedules`）或任务页；开着新建任务的对话框时都不算。
     fn showing_todo_page(&self, schedules: bool, cx: &App) -> bool {
         self.kanban_page().is_some_and(|board| {
             let board = board.view.read(cx);
@@ -163,7 +151,7 @@ impl WindowView {
                 let view = cx.new(|cx| Kanban::new(AGENT_MARKS, schedules, cx));
                 // 先交一次输入：从「新建任务」打开时对话框当场就要填工作区，等不到画的时候。`resident` 画定时页时
                 // 才查，这里先当没开。
-                let input = self.kanban_input(false, cx);
+                let input = self.kanban_input(false, window, cx);
                 view.update(cx, |board, _| board.set_input(input));
                 let events = cx.subscribe_in(&view, window, Self::on_kanban_event);
                 self.page = Some(super::Page::Kanban(OpenKanban { view, _events: events }));
@@ -195,6 +183,7 @@ impl WindowView {
             KanbanEvent::PageChanged => cx.notify(),
             KanbanEvent::OpenSession { session, todo } => self.open_todo_session(*session, todo, window, cx),
             KanbanEvent::NewTodo => self.new_todo(&NewTodo, window, cx),
+            KanbanEvent::StashDraft(dialog) => self.todo_draft = Some(dialog.clone()),
         }
     }
 
@@ -253,52 +242,9 @@ impl WindowView {
         .detach();
     }
 
-    /// 侧栏顶上的新建任务入口，开着新建任务那一页时高亮。
-    pub(super) fn render_new_todo_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
-        let label = rust_i18n::t!("kanban.new_todo").into_owned();
-        let active = self.kanban_page().is_some_and(|board| board.view.read(cx).drafting(cx));
-        super::mobile_page::page_entry("new-todo-entry", PLUS_ICON, label.clone(), active, cx, |this, window, cx| {
-            this.new_todo(&NewTodo, window, cx);
-        })
-        .tooltip(tooltip(label, Some(&NewTodo)))
-        .children(entry_shortcut(&NewTodo, modifiers, cx))
-    }
-
-    /// 侧栏顶上的定时入口，看板开着定时页时高亮。
-    pub(super) fn render_schedules_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
-        let label = rust_i18n::t!("kanban.schedules").into_owned();
-        let active = self.showing_todo_page(true, cx);
-        super::mobile_page::page_entry("schedules-entry", CLOCK_ICON, label.clone(), active, cx, |this, window, cx| {
-            this.close_todo_page(window, cx);
-            this.show_kanban(true, window, cx);
-        })
-        .tooltip(tooltip(label, Some(&ToggleSchedules)))
-        .children(entry_shortcut(&ToggleSchedules, modifiers, cx))
-    }
-
-    /// 侧栏顶上的看板入口，看板开着任务页时高亮；有需要你处理的任务时右边是它们的数。
-    pub(super) fn render_kanban_entry(&self, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
-        let label = rust_i18n::t!("kanban.title").into_owned();
-        let active = self.showing_todo_page(false, cx);
-        let count = crate::kanban::needs_you(cx);
-        let shortcut = entry_shortcut(&ToggleKanban, modifiers, cx);
-        let pushed = shortcut.is_some();
-        super::mobile_page::page_entry("kanban-entry", KANBAN_ICON, label.clone(), active, cx, |this, window, cx| {
-            this.close_todo_page(window, cx);
-            this.show_kanban(false, window, cx);
-        })
-        .tooltip(tooltip(label, Some(&ToggleKanban)))
-        .children(shortcut)
-        .when(count > 0, |entry| {
-            entry
-                .aria_description(rust_i18n::t!("kanban.entry_needs_you", count = count).into_owned())
-                .child(crate::kanban::needs_you_badge(count).when(!pushed, |badge| badge.ml_auto()))
-        })
-    }
-
     /// 看板的任务在本机的宿主上跑，只交这台电脑上的工作区；当前工作区在远端主机上时，新建任务先填第一个
     /// 本机工作区的目录，一个都没有时填 home 目录。
-    fn kanban_input(&self, resident: bool, cx: &App) -> Input {
+    fn kanban_input(&self, resident: bool, window: &Window, cx: &App) -> Input {
         let local: Vec<_> = self.workspaces.iter().filter(|workspace| workspace.host.is_local()).collect();
         let current = self.workspace();
         let dir = if current.host.is_local() {
@@ -311,6 +257,14 @@ impl WindowView {
             dir: dir.or_else(|| runode_paths::Dirs::from_env().home).unwrap_or_default(),
             shell_path: self.terminal_path(Some(&HostId::Local), cx),
             resident,
+            agent_changed: self
+                .agent_entries(window, cx)
+                .into_iter()
+                .filter_map(|entry| {
+                    let view = entry.view.read(cx);
+                    view.host().is_local().then(|| view.session_id()).flatten().map(|id| (id, entry.changed_at))
+                })
+                .collect(),
         }
     }
 
@@ -321,7 +275,7 @@ impl WindowView {
         let resident = board.read(cx).showing_schedules()
             && cx.global::<AppConfig>().0.terminal_host
             && runode_autostart::is_installed(runode_autostart::Kind::Host, &runode_paths::Dirs::from_env());
-        let input = self.kanban_input(resident, cx);
+        let input = self.kanban_input(resident, window, cx);
         if board.update(cx, |board, _| board.set_input(input)) {
             // 画的时候发的通知不会再要一帧，等这一帧画完再通知。
             let board = board.clone();
@@ -339,22 +293,8 @@ impl WindowView {
 
     /// 看板开着的新建、编辑对话框，画在窗口最上层。
     pub(super) fn todo_dialog(&self, cx: &App) -> Option<Entity<TodoDialog>> {
-        self.kanban_page().and_then(|board| board.view.read(cx).dialog(cx))
+        self.kanban_page().and_then(|board| board.view.read(cx).dialog())
     }
-}
-
-/// 侧栏入口右边淡淡的快捷键，从键位表里查，快捷键改了也跟着变；没绑时没有。和 workspace 那几行一样，只在
-/// 按着它的修饰键或者单按 ⌘ 时显示，平时只在悬停提示里写着。不按时不占位置，看板的徽标一直贴着右边。
-fn entry_shortcut(action: &dyn Action, modifiers: Modifiers, cx: &App) -> Option<Div> {
-    let held = modifiers == Modifiers::command() || shortcut_modifiers(action, action, false, cx) == Some(modifiers);
-    shortcut_text(action, cx).filter(|_| held).map(|text| {
-        div()
-            .flex_none()
-            .ml_auto()
-            .text_size(FontSize::Small)
-            .text_color(cx.theme().foreground.opacity(0.5))
-            .child(text)
-    })
 }
 
 #[cfg(test)]

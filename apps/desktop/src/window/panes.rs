@@ -12,8 +12,8 @@ use std::{
 
 use gpui::{
     Action, AnyElement, App, Context, CursorStyle, Div, DragMoveEvent, EntityId, ExternalPaths, Focusable, FontWeight,
-    Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, Role, SharedString, Stateful, StyleRefinement, Window, canvas,
-    div, prelude::*, px, relative, svg,
+    MouseButton, MouseDownEvent, MouseMoveEvent, Role, SharedString, Stateful, StyleRefinement, Window, canvas, div,
+    prelude::*, px, relative,
 };
 use runode_protocol::SessionId;
 use runode_types::{
@@ -23,15 +23,15 @@ use runode_types::{
 };
 
 use super::{
-    AGENT_MARK_WIDTH, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight, NewTab,
+    AGENT_MARK_SIZE, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight, NewTab,
     PANE_HEADER_HEIGHT, PressDown, RATIO_STEP, TogglePaneFold, TogglePaneZoom, WindowView,
-    agents::{Mark, Status, logo::agent_logo},
+    agents::{Mark, Status},
     cards,
     model::Tab,
     pane_float::{MovePaneToWindow, TogglePaneFloat},
     pane_move::{DraggedPane, zone_at},
     status_bar,
-    titlebar::{pane_label, styled_agent_mark},
+    titlebar::{agent_mark, pane_label},
 };
 use crate::file_tree::DraggedFile;
 use crate::ui::a11y::StaticText;
@@ -43,10 +43,11 @@ use crate::ui::{
 use crate::{
     ui::icons::{
         CHEVRON_UP_ICON, CLOSE_ICON, DOCK_ICON, FLOAT_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, POP_OUT_ICON,
-        SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON, TERMINAL_ICON,
+        SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON,
     },
     ui::{
-        font_size::FontSize,
+        font,
+        font_size::{FontSize, scaled},
         tooltip::{shortcut_text, tooltip},
     },
 };
@@ -332,6 +333,7 @@ impl WindowView {
         let badge = badges.get(&id).map(|text| driver_badge(("driver-badge", id), text.clone(), cx));
         let cards = cards(cx) || floating;
         let label = pane_label(view.read(cx));
+        let mark = tab.pane_mark(id, cx);
         let (split, focused) = (!tab.zoomed && !tab.root.is_leaf(), id == tab.focused);
         let terminal = div()
             .relative()
@@ -391,14 +393,14 @@ impl WindowView {
                 this.drop_paths_on_pane(id, dropped.paths(), true, window, cx);
             }));
         if !cards {
-            return pane_group(terminal.id(("pane", id)), label, split, focused).into_any_element();
+            return pane_group(terminal.id(("pane", id)), label, mark, split, focused).into_any_element();
         }
         let group = SharedString::from(format!("pane-{}", id.as_u64()));
         // 折叠的分屏只画标题条（摆在终端区底部，见 `render_panes`），终端不画；位置照样记下，按方向
         // 切换时能切过去。
         if split && tab.folded(id) {
             let layout = self.layout.clone();
-            return pane_group(Card::new().id(("pane", id)), label, split, focused)
+            return pane_group(pane_card(id, cx), label, mark, split, focused)
                 .aria_expanded(false)
                 .group(group.clone())
                 .relative()
@@ -417,7 +419,7 @@ impl WindowView {
         // 卡片：上面是标题条，下面是终端。终端四周留一点，它的方角落在卡片的圆角里面。终端用四边
         // 定位撑满标题条下面的部分：百分比的高度在这里会按整张卡片算，比剩下的高出一个标题条。
         let inset = px(4.);
-        pane_group(Card::new().id(("pane", id)), label, split, focused)
+        pane_group(pane_card(id, cx), label, mark, split, focused)
             .when(split, |el| el.aria_expanded(true))
             .group(group.clone())
             .size_full()
@@ -434,9 +436,8 @@ impl WindowView {
             .into_any_element()
     }
 
-    /// 卡片样式下和浮着的终端顶上的标题条：agent 的状态标记（前台不是 agent 时是终端图标，开来跑的命令还在跑时
-    /// 是转圈）和终端标题，
-    /// 右边是向右、向下分屏，浮动，放大或还原，关闭分屏的按钮，当前分屏一直显示，别的分屏悬停时显示；
+    /// 卡片样式下和浮着的终端顶上的标题条：名字、agent 是哪家、目录（开来跑的命令还在跑时前面是在干活的
+    /// 标记），右边是 agent 状态的胶囊和向右、向下分屏，浮动，放大或还原，关闭分屏的按钮，当前分屏一直显示，别的分屏悬停时显示；
     /// 分屏窄于 `PANE_BUTTONS_MIN_WIDTH` 时不放。浮着的终端只有停靠和关闭，一直显示。
     /// 点标题条切到这个分屏，双击放大或还原；浮着的按住标题条拖着挪。
     fn render_pane_header(
@@ -455,23 +456,42 @@ impl WindowView {
         let view = tab.panes[&id].0.read(cx);
         let (name, dir) = pane_label(view);
         let task_running = view.task().is_some() && view.running().is_some();
-        let fg_hsla = cx.theme().foreground;
-        // 有 logo 的 agent：前面放 logo，状态标记跟在标题后面；没有 logo 的 agent 状态标记放前面。
+        let theme = cx.theme();
+        let fg_hsla = theme.foreground;
         let mark = tab.pane_mark(id, cx);
-        let logo = mark.and_then(|mark| agent_logo(mark.kind, px(14.), fg_hsla.opacity(0.85)));
-        let trailing_mark = logo.is_some().then_some(mark).flatten();
-        let icon = match (logo, mark) {
-            (Some(logo), _) => logo,
-            (None, Some(mark)) => styled_agent_mark(mark, ("pane-agent", id), fg_hsla, true),
-            (None, None) if task_running => task_spinner(id, fg_hsla),
-            (None, None) => div()
-                .flex_none()
-                .w(px(AGENT_MARK_WIDTH + 2.))
-                .flex()
-                .justify_center()
-                .child(svg().path(TERMINAL_ICON).size(px(14.)).text_color(fg_hsla.opacity(0.6)))
-                .into_any_element(),
-        };
+        let spinner = (mark.is_none() && task_running).then(|| task_spinner(id, cx));
+        // agent 的名字已经当了标题时不再写一遍。
+        let agent_text = mark
+            .map(|mark| mark.kind)
+            .filter(|kind| kind.is_known() && kind.display_name() != &*name)
+            .map(|kind| kind.display_name());
+        let agent_name = agent_text.map(|text| div().flex_none().text_color(theme.subtle_foreground).child(text));
+        let dir_text = dir.clone();
+        let dir = dir.map(|dir| {
+            div()
+                .min_w_0()
+                .truncate()
+                .text_color(theme.muted_foreground)
+                .when_some(font::mono(cx), |dir, family| dir.font_family(family))
+                .child(dir)
+        });
+        // 状态写在右边的胶囊里；空闲时不放。
+        let status = mark.and_then(|mark| {
+            let variant = match mark.status {
+                Status::Blocked => BadgeVariant::Warning,
+                Status::Working => BadgeVariant::Info,
+                Status::Done => BadgeVariant::Success,
+                Status::Idle => return None,
+            };
+            Some(
+                Badge::new(mark.status.label())
+                    .variant(variant)
+                    .h(scaled(20.))
+                    .px(px(9.))
+                    .text_size(FontSize::Body)
+                    .font_weight(FontWeight::MEDIUM),
+            )
+        });
         type Handler = fn(&mut WindowView, EntityId, &mut Window, &mut Context<WindowView>);
         let hover_bg = cx.theme().accent;
         let mut button = |key: &'static str,
@@ -604,28 +624,49 @@ impl WindowView {
             // 不能用 display 切换，见 `render_tab` 里关闭按钮的说明。
             .when(!(current && split) && !folded && !floating, |buttons| buttons.reveal_on_hover(group));
         let dragged = DraggedPane::new(id, name.clone());
+        // 报成以分屏名字命名的一组，里面的按钮在辅助工具里有了所属，各分屏的同一种按钮分得清。
+        let description = [
+            agent_text.map(SharedString::from),
+            dir_text,
+            mark.filter(|mark| !matches!(mark.status, Status::Idle)).map(|mark| mark.status.label()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(rust_i18n::t!("a11y.separator").as_ref());
         div()
             .id(("pane-header", id))
+            .role(Role::Group)
+            .aria_label(name.clone())
+            .when(!description.is_empty(), |header| header.aria_description(description))
             // 拖浮着的终端的标题是挪它（`start_float_drag`），拖分屏的标题是把它挪到别处。
             .when(!floating, |header| header.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
             .flex_none()
             .h(px(PANE_HEADER_HEIGHT))
-            .pl(px(10.))
-            .pr(px(6.))
+            .pl(px(14.))
+            .pr(px(8.))
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(px(10.))
             .text_size(FontSize::Body)
             // 条高定死，界面字号调到最大时默认的行高比条还高，折叠的那条会把字截掉一半；行高收紧到放得下。
             .line_height(relative(1.2))
-            .font_weight(FontWeight::MEDIUM)
             .text_color(fg_hsla.opacity(if current || !split { 0.9 } else { 0.55 }))
-            .child(icon)
-            .child(div().flex_shrink_0().max_w(relative(0.6)).truncate().child(name))
+            .children(spinner)
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .max_w(relative(0.6))
+                    .truncate()
+                    .text_size(FontSize::Medium)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(name),
+            )
+            .children(agent_name)
             // 折叠的分屏也写目录：几个都是 bash 时只靠它分得清，放不下就截短。
-            .children(dir.map(|dir| div().min_w_0().truncate().text_color(fg_hsla.opacity(0.45)).child(dir)))
-            .children(trailing_mark.map(|mark| styled_agent_mark(mark, ("pane-agent", id), fg_hsla, true)))
+            .children(dir)
             .child(div().flex_1())
+            .children(status)
             .children((!narrow || folded).then_some(buttons))
             // 折叠的分屏整条都能点，点了展开。
             .when(folded, |header| header.cursor_pointer().hover(|header| header.bg(hover_bg)))
@@ -881,34 +922,44 @@ impl WindowView {
     }
 }
 
-/// 把分屏报成一组，名字（`label`）是标题条上写的；分了屏（`split`）时标出它是不是当前分屏。经典样式下
-/// 是终端本身，卡片样式下是那张卡片。
+/// 把分屏报成一组，名字（`label`）是标题条上写的，说明是目录和 agent 的状态（`mark`）；分了屏（`split`）
+/// 时标出它是不是当前分屏。经典样式下是终端本身，卡片样式下是那张卡片。
 fn pane_group<E: StatefulInteractiveElement + IntoElement>(
     el: E,
     (name, dir): (SharedString, Option<SharedString>),
+    mark: Option<Mark>,
     split: bool,
     focused: bool,
 ) -> E {
+    let description = [dir.map(String::from), mark.map(Mark::describe)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(rust_i18n::t!("a11y.separator").as_ref());
     el.role(Role::Group)
         .aria_label(name)
-        .when_some(dir, |el, dir| el.aria_description(dir))
+        .when(!description.is_empty(), |el| el.aria_description(description))
         .when(split, |el| el.aria_selected(focused))
 }
 
-/// 标题条前面的转圈：开来跑的命令还在跑，用标题的颜色。
-fn task_spinner(id: EntityId, fg: Hsla) -> AnyElement {
+/// 装着分屏 `id` 的卡片，边是 `Theme::border`。
+fn pane_card(id: EntityId, cx: &App) -> Card {
+    Card::new().id(("pane", id)).border_color(cx.theme().border)
+}
+
+/// 标题条前面在干活的标记：开来跑的命令还在跑。
+fn task_spinner(id: EntityId, cx: &App) -> AnyElement {
     let mark = Mark { kind: AgentKind::Other, status: Status::Working };
     div()
         .id(("pane-task", id))
         .role(Role::Status)
         .aria_label(rust_i18n::t!("tasks.running"))
         .flex_none()
-        .w(px(AGENT_MARK_WIDTH + 2.))
+        .w(px(AGENT_MARK_SIZE))
         .flex()
         .justify_center()
         .items_center()
-        .text_color(fg.opacity(0.85))
-        .child(styled_agent_mark(mark, ("pane-task-spinner", id), fg, true))
+        .child(agent_mark(Some(mark), ("pane-task-spinner", id), AGENT_MARK_SIZE, false, cx))
         .into_any_element()
 }
 

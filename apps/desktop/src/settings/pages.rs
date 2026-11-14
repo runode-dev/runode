@@ -1,23 +1,34 @@
 //! 设置页的各页：每页有哪些项、各用什么控件，以及主题、字体、调色板这些不止一个控件的项。
 
-use crate::ui::icons::{MINUS_ICON, REFRESH_ICON};
-use crate::ui::{a11y::StaticText as _, chip::Chip, segmented::Segmented, theme::Theme};
-use gpui::{AnyElement, Context, Div, ElementId, Role, SharedString, Window, div, prelude::*, px};
+use crate::ui::icons::{
+    ALERT_NOTE_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CHEVRON_UP_ICON, MINUS_ICON, SEARCH_ICON, VOLUME_ICON,
+};
+use crate::ui::{
+    a11y::StaticText as _,
+    chip::Chip,
+    segmented::Segmented,
+    theme::{ActiveTheme as _, Theme},
+};
+use gpui::{
+    AnyElement, AppContext as _, Context, Div, ElementId, Entity, Role, SharedString, Window, div, prelude::*, px, svg,
+};
 use runode_config::StatusItem;
 use runode_types::{agent::AgentKind, speech::DictationCloud};
 
 use super::{
     Commit, SettingsView,
-    controls::{Cards, Press, dropdown, error_text, input_box, row, stacked, swatch},
+    controls::{Cards, Press, RowExtras, dropdown, error_text, input_box, row, row_with, stacked, swatch},
     picker::{PickItem, PickTarget},
 };
 use crate::{
-    i18n::{os_key, tr},
+    i18n::{action_for, os_key, tr},
     ui::{
         button::{Button, ButtonSize, ButtonVariant},
         display_dir,
-        font_size::FontSize,
+        font_size::{FontSize, scaled},
         hsla,
+        input::{Input, InputEvent, InputState},
+        status_mark::{MarkKind, status_mark},
         switch::Switch,
     },
 };
@@ -47,6 +58,7 @@ enum Item {
     FontFamily,
     Palette,
     StatusBarHidden,
+    /// 不提醒的 agent：自成一组，小标题后面跟着说明，卡片里是筛选框和一排小签。
     AgentExclude,
     ConfigFiles,
     ConfigFileActions,
@@ -79,19 +91,56 @@ enum Control {
     Sound,
 }
 
+/// 左边页面列表里的一组页。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Group {
+    Interface,
+    Work,
+    Connect,
+}
+
+impl Group {
+    pub const ALL: [Self; 3] = [Self::Interface, Self::Work, Self::Connect];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Interface => "interface",
+            Self::Work => "work",
+            Self::Connect => "connect",
+        }
+    }
+
+    pub fn title(self) -> String {
+        tr(&format!("settings.group.{}", self.id()))
+    }
+
+    /// 这一组的页，按 `Page::ALL` 的先后。
+    pub fn pages(self) -> impl Iterator<Item = Page> {
+        Page::ALL.into_iter().filter(move |page| page.group() == self)
+    }
+}
+
 impl Page {
     pub const ALL: [Self; 10] = [
         Self::General,
         Self::Appearance,
         Self::Colors,
+        Self::Keybinds,
         Self::Terminal,
         Self::Files,
         Self::Agents,
         Self::Dictation,
         Self::Ssh,
         Self::Remote,
-        Self::Keybinds,
     ];
+
+    pub fn group(self) -> Group {
+        match self {
+            Self::General | Self::Appearance | Self::Colors | Self::Keybinds => Group::Interface,
+            Self::Terminal | Self::Files | Self::Agents | Self::Dictation => Group::Work,
+            Self::Ssh | Self::Remote => Group::Connect,
+        }
+    }
 
     pub fn id(self) -> &'static str {
         match self {
@@ -110,6 +159,11 @@ impl Page {
 
     pub fn title(self) -> String {
         tr(&format!("settings.page.{}", self.id()))
+    }
+
+    /// 标题下面说这一页管什么的一句话。
+    pub fn description(self) -> String {
+        tr(&format!("settings.page_desc.{}", self.id()))
     }
 
     pub fn icon(self) -> &'static str {
@@ -226,10 +280,12 @@ impl Page {
                 Row("git-auto-fetch", Switch),
             ],
             Self::Agents => &[
+                Section("alerts"),
                 Row("agent-notifications", Switch),
                 Row("agent-done-sound", Sound),
                 Row("agent-blocked-sound", Sound),
                 AgentExclude,
+                Section("splits"),
                 Row("agent-split-fold", Switch),
             ],
             Self::Remote => &[
@@ -347,103 +403,297 @@ fn unique_key(earlier: &[String], value: &str) -> String {
     }
 }
 
+/// 不提醒哪些 agent 的键。
+const EXCLUDE_KEY: &str = "agent-notifications-exclude";
+
+/// 没在筛选、也没展开时，没选上的 agent 显示这么多个。
+const COLLAPSED_AGENTS: usize = 12;
+
+/// 「不提醒的 agent」里的一个小标签。
+struct ExcludeChoice {
+    /// 写进配置的名字（`AgentKind::label`）。
+    label: &'static str,
+    /// 显示的名字。
+    name: String,
+    on: bool,
+}
+
+/// 能选的 agent，最后是「其他程序」；`excluded` 是配置里不提醒的那些。
+fn exclude_choices(excluded: &[String]) -> Vec<ExcludeChoice> {
+    AgentKind::ALL
+        .into_iter()
+        .chain([AgentKind::Other])
+        .map(|kind| {
+            let label = kind.label();
+            let name = match kind {
+                AgentKind::Other => rust_i18n::t!("settings.other_agents").into_owned(),
+                kind => kind.display_name().to_owned(),
+            };
+            ExcludeChoice { label, name, on: excluded.iter().any(|value| value == label) }
+        })
+        .collect()
+}
+
+/// 显示哪些小标签、还藏着几个，选上的排在前面。`query`（已经转成小写）不空时列出名字对得上的，不藏；
+/// 空着时没选上的只列前 `COLLAPSED_AGENTS` 个，`expanded` 时全列。
+fn shown_agents<'a>(choices: &'a [ExcludeChoice], query: &str, expanded: bool) -> (Vec<&'a ExcludeChoice>, usize) {
+    let matches = |choice: &&ExcludeChoice| {
+        query.is_empty() || choice.name.to_lowercase().contains(query) || choice.label.contains(query)
+    };
+    let (mut shown, rest): (Vec<_>, Vec<_>) = choices.iter().filter(matches).partition(|choice| choice.on);
+    let keep = if query.is_empty() && !expanded { COLLAPSED_AGENTS.min(rest.len()) } else { rest.len() };
+    let hidden = rest.len() - keep;
+    shown.extend(rest.into_iter().take(keep));
+    (shown, hidden)
+}
+
 /// 语言的名字，用它自己的文字写。
 pub(super) fn language_name(locale: &str) -> String {
     rust_i18n::t!("settings.language_name", locale = locale).into_owned()
 }
 
+impl Item {
+    /// 搜索设置时拿来对的文字：`locale` 和英文的标题、说明，配置项还有键名本身，界面不是英文时照着配置
+    /// 文件里的英文写法也搜得到。不是配置项的几项用画出来的标题或所在小节的标题。
+    fn search_texts(self, locale: &str) -> Vec<String> {
+        let both = |key: &str| {
+            [rust_i18n::t!(key, locale = locale).into_owned(), rust_i18n::t!(key, locale = "en").into_owned()]
+        };
+        let key_texts = |key: &str| {
+            let title = format!("settings.key.{}", tr_key(key));
+            let mut texts = both(&title).to_vec();
+            let (hint, en_hint) = (hint_key(key, locale), hint_key(key, "en"));
+            texts.push(rust_i18n::t!(&hint, locale = locale).into_owned());
+            texts.push(rust_i18n::t!(&en_hint, locale = "en").into_owned());
+            texts.push(key.to_owned());
+            texts
+        };
+        match self {
+            Item::Section(name) => both(&format!("settings.section.{name}")).to_vec(),
+            Item::Row(key, _) => key_texts(key),
+            Item::Theme => [both("settings.section.color_scheme").to_vec(), key_texts("theme")].concat(),
+            Item::FontFamily => key_texts("font-family"),
+            Item::Palette => key_texts("palette"),
+            Item::StatusBarHidden => key_texts("status-bar-hidden"),
+            Item::AgentExclude => key_texts(EXCLUDE_KEY),
+            Item::ConfigFiles => key_texts("config-file"),
+            Item::ConfigFileActions => both("settings.config_file").to_vec(),
+            Item::Pairing => [both("settings.pairing.title"), both("settings.pairing.hint")].concat(),
+            Item::Firewall => [both("settings.firewall.title"), both("settings.firewall.hint")].concat(),
+            Item::TestPush => [both("settings.test_push.title"), both("settings.test_push.hint")].concat(),
+            Item::Autostart => both("settings.section.login").to_vec(),
+            Item::Dictation => both("settings.dictation.title").to_vec(),
+            Item::SshHosts => both("settings.section.ssh_hosts").to_vec(),
+            Item::PairedMachines => both("settings.section.paired_machines").to_vec(),
+        }
+    }
+
+    /// `query` 已经转成小写。
+    fn matches(self, query: &str, locale: &str) -> bool {
+        self.search_texts(locale).iter().any(|text| text.to_lowercase().contains(query))
+    }
+
+    /// 自己画小标题的项：前面不再补所在小节的标题。
+    fn opens_section(self) -> bool {
+        matches!(self, Item::Section(_) | Item::Theme | Item::AgentExclude)
+    }
+}
+
+/// `items` 里显示着（`shown`）、对得上 `query`（已经转成小写）的项，第一项前面补上它所在的小节；小节的标题
+/// 对得上时这一节显示着的项都算。
+fn search_items(items: &[Item], shown: impl Fn(&Item) -> bool, query: &str, locale: &str) -> Vec<Item> {
+    let mut found = Vec::new();
+    // 当前小节，和它的标题对不对得上；补进结果以后清掉，不再补。
+    let mut section = None;
+    let mut section_hit = false;
+    for item in items.iter().copied().filter(|item| shown(item)) {
+        if let Item::Section(_) = item {
+            section = Some(item);
+            section_hit = item.matches(query, locale);
+            continue;
+        }
+        if section_hit || item.matches(query, locale) {
+            if let Some(section) = section.take().filter(|_| !item.opens_section()) {
+                found.push(section);
+            }
+            found.push(item);
+        }
+    }
+    found
+}
+
 impl SettingsView {
     pub(super) fn render_page(&mut self, theme: &Theme, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let query = self.search.read(cx).query().trim().to_lowercase();
+        if !query.is_empty() {
+            return self.render_search(&query, theme, window, cx);
+        }
         let title = div()
             .id("settings-title")
             .role(Role::Heading)
             .aria_level(1)
             .aria_label(self.page.title())
             .pt(px(8.))
-            .pb(px(12.))
+            .pb(px(4.))
             .text_size(FontSize::Display)
             .font_weight(gpui::FontWeight::SEMIBOLD)
             .child(self.page.title());
-        let page = div().flex().flex_col().child(title);
+        let description = self.page.description();
+        let description = div()
+            .id("settings-description")
+            .aria_static_text(description.clone())
+            .pb(px(2.))
+            .text_size(FontSize::Medium)
+            .text_color(theme.subtle_foreground)
+            .child(description);
+        let page = div().flex().flex_col().child(title).child(description);
         if self.page == Page::Keybinds {
             return page.child(self.render_keybinds(theme, window, cx));
         }
         // 小标题把一页分成几组，每组收进一张卡片。
         let mut cards = Cards::new(page, theme);
-        // 发布的版本经中转推官方 App，用不着直连 APNs 的密钥，这一节只在自己编译的版本里显示。
-        let official = runode_protocol::push::RELAY_URL.is_some();
-        let autostart = super::autostart::any_supported();
-        let cloud = self.config.dictation_cloud;
-        let firewall_blocked = self.config.remote_access && self.firewall.blocked();
-        let shown = |item: &&Item| {
-            !(official
-                && matches!(
-                    item,
-                    Item::Section("push_key")
-                        | Item::Row("apns-key-file" | "apns-key-id" | "apns-team-id" | "apns-bundle-id", _)
-                ))
-                && (autostart || !matches!(item, Item::Section("login") | Item::Autostart))
-                && (firewall_blocked || !matches!(item, Item::Firewall))
-                // Linux 上的 app 自己换不了新版本，更新交给装它的包管理器，后台也不查，开关没有用。
-                && (!cfg!(target_os = "linux") || !matches!(item, Item::Row("auto-update", _)))
-                // Option 当不当 Alt、提示音（`sound`）只有 macOS 上才有。
-                && (cfg!(target_os = "macos")
-                    || !matches!(
-                        item,
-                        Item::Section("keyboard")
-                            | Item::Row("macos-option-as-alt" | "agent-done-sound" | "agent-blocked-sound", _)
-                    ))
-                // 只显示选中的那家云端识别的几项。
-                && match item {
-                    Item::Row(key, _) if key.starts_with("dictation-openai-") => cloud == DictationCloud::OpenAi,
-                    Item::Row(key, _) if key.starts_with("dictation-doubao-") => cloud == DictationCloud::Doubao,
-                    _ => true,
-                }
-        };
-        for item in self.page.items().iter().filter(shown) {
-            let element = match *item {
-                Item::Section(name) => {
-                    cards.section(tr(&format!("settings.section.{name}")));
-                    continue;
-                }
-                Item::Row(key, control) => self.render_row(key, control, theme, window, cx).into_any_element(),
-                // 预览卡不进卡片，选主题的下拉自成一组。
-                Item::Theme => {
-                    cards.section(tr("settings.section.color_scheme"));
-                    cards.raw(self.render_theme_modes(theme, cx).into_any_element());
-                    for row in self.render_theme_rows(theme, cx) {
-                        cards.push(row);
-                    }
-                    continue;
-                }
-                Item::FontFamily => self.render_font_family(theme, cx).into_any_element(),
-                Item::Palette => self.render_palette(theme, window, cx).into_any_element(),
-                Item::StatusBarHidden => self.render_status_bar_hidden(theme, cx).into_any_element(),
-                Item::AgentExclude => self.render_agent_exclude(theme, cx).into_any_element(),
-                Item::ConfigFiles => self.render_config_files(theme, window, cx).into_any_element(),
-                Item::ConfigFileActions => self.render_config_file_actions(theme, cx).into_any_element(),
-                Item::Pairing => self.render_pairing(theme, cx).into_any_element(),
-                Item::Firewall => self.render_firewall(theme, cx).into_any_element(),
-                Item::TestPush => self.render_test_push(theme, cx).into_any_element(),
-                Item::Autostart => self.render_autostart(theme, cx).into_any_element(),
-                Item::Dictation => self.render_dictation(theme, cx).into_any_element(),
-                Item::SshHosts => self.render_ssh_hosts(theme, cx).into_any_element(),
-                Item::PairedMachines => self.render_paired_machines(theme, cx).into_any_element(),
-            };
-            cards.push(element);
+        let items: Vec<Item> = self.page.items().iter().copied().filter(|item| self.item_shown(item)).collect();
+        for item in items {
+            self.push_item(&mut cards, item, theme, window, cx);
         }
         cards.finish()
     }
 
-    /// runode 的配置文件里写了 `key` 时的恢复按钮。
+    /// 搜索框有字时的页面：按 `Page::ALL` 的先后，每页一个标题和去那一页的按钮，下面是这一页对得上 `query`
+    /// （已经转成小写）的项。快捷键页不在里面。
+    fn render_search(&mut self, query: &str, theme: &Theme, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let locale = crate::i18n::current();
+        let mut out = div().flex().flex_col().pt(px(8.));
+        let mut found = false;
+        for page in Page::ALL {
+            let items = search_items(page.items(), |item| self.item_shown(item), query, &locale);
+            if items.is_empty() {
+                continue;
+            }
+            found = true;
+            let title = page.title();
+            let heading = div()
+                .id(id("settings-search-page", page.id()))
+                .role(Role::Heading)
+                .aria_level(2)
+                .aria_label(title.clone())
+                .min_w_0()
+                .truncate()
+                .text_size(FontSize::Large)
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .child(title.clone());
+            let go = rust_i18n::t!("settings.go_to_page").into_owned();
+            let go = Button::new(id("settings-search-go", page.id()), go.clone())
+                .aria_label(action_for(&go, &title))
+                .variant(ButtonVariant::Ghost)
+                .with_size(ButtonSize::Sm)
+                .gap(px(3.))
+                .text_color(theme.subtle_foreground)
+                .child(go)
+                .child(svg().flex_none().path(CHEVRON_RIGHT_ICON).size(px(11.)).text_color(theme.muted_foreground))
+                .on_press(cx, move |this, window, cx| {
+                    this.clear_search(cx);
+                    this.select_page(page, window, cx);
+                });
+            let header = div().pt(px(20.)).flex().items_center().justify_between().gap(px(8.)).child(heading).child(go);
+            let mut cards = Cards::new(div().flex().flex_col().child(header), theme);
+            for item in items {
+                self.push_item(&mut cards, item, theme, window, cx);
+            }
+            out = out.child(cards.finish());
+        }
+        if !found {
+            let text = rust_i18n::t!("settings.no_matches").into_owned();
+            out = out.child(
+                div()
+                    .id("settings-search-empty")
+                    .aria_static_text(text.clone())
+                    .pt(px(20.))
+                    .text_color(theme.muted_foreground)
+                    .child(text),
+            );
+        }
+        out
+    }
+
+    /// 这一项在这台机器、这份配置下显示不显示。
+    fn item_shown(&self, item: &Item) -> bool {
+        match item {
+            // 发布的版本经中转推官方 App，用不着直连 APNs 的密钥，这一节只在自己编译的版本里显示。
+            Item::Section("push_key")
+            | Item::Row("apns-key-file" | "apns-key-id" | "apns-team-id" | "apns-bundle-id", _) => {
+                runode_protocol::push::RELAY_URL.is_none()
+            }
+            Item::Section("login") | Item::Autostart => super::autostart::any_supported(),
+            Item::Firewall => self.config.remote_access && self.firewall.blocked(),
+            // Linux 上的 app 自己换不了新版本，更新交给装它的包管理器，后台也不查，开关没有用。
+            Item::Row("auto-update", _) => !cfg!(target_os = "linux"),
+            // Option 当不当 Alt、提示音（`sound`）只有 macOS 上才有。
+            Item::Section("keyboard")
+            | Item::Row("macos-option-as-alt" | "agent-done-sound" | "agent-blocked-sound", _) => {
+                cfg!(target_os = "macos")
+            }
+            // 只显示选中的那家云端识别的几项。
+            Item::Row(key, _) if key.starts_with("dictation-openai-") => {
+                self.config.dictation_cloud == DictationCloud::OpenAi
+            }
+            Item::Row(key, _) if key.starts_with("dictation-doubao-") => {
+                self.config.dictation_cloud == DictationCloud::Doubao
+            }
+            _ => true,
+        }
+    }
+
+    /// 把 `item` 画进 `cards`：小标题另起一组，别的项进当前这组的卡片。
+    fn push_item(&mut self, cards: &mut Cards, item: Item, theme: &Theme, window: &mut Window, cx: &mut Context<Self>) {
+        let element = match item {
+            Item::Section(name) => {
+                cards.section(tr(&format!("settings.section.{name}")));
+                return;
+            }
+            Item::Row(key, control) => self.render_row(key, control, theme, window, cx).into_any_element(),
+            // 预览卡不进卡片，选主题的下拉自成一组。
+            Item::Theme => {
+                cards.section(tr("settings.section.color_scheme"));
+                cards.raw(self.render_theme_modes(theme, cx).into_any_element());
+                for row in self.render_theme_rows(theme, cx) {
+                    cards.push(row);
+                }
+                return;
+            }
+            Item::FontFamily => self.render_font_family(theme, cx).into_any_element(),
+            Item::Palette => self.render_palette(theme, window, cx).into_any_element(),
+            Item::StatusBarHidden => self.render_status_bar_hidden(theme, cx).into_any_element(),
+            Item::AgentExclude => {
+                cards.section_with_note(key_title(EXCLUDE_KEY), key_hint(EXCLUDE_KEY));
+                cards.push(self.render_agent_exclude(theme, window, cx).into_any_element());
+                return;
+            }
+            Item::ConfigFiles => self.render_config_files(theme, window, cx).into_any_element(),
+            Item::ConfigFileActions => self.render_config_file_actions(theme, cx).into_any_element(),
+            Item::Pairing => self.render_pairing(theme, cx).into_any_element(),
+            Item::Firewall => self.render_firewall(theme, cx).into_any_element(),
+            Item::TestPush => self.render_test_push(theme, cx).into_any_element(),
+            Item::Autostart => self.render_autostart(theme, cx).into_any_element(),
+            Item::Dictation => self.render_dictation(theme, cx).into_any_element(),
+            Item::SshHosts => self.render_ssh_hosts(theme, cx).into_any_element(),
+            Item::PairedMachines => self.render_paired_machines(theme, cx).into_any_element(),
+        };
+        cards.push(element);
+    }
+
+    /// runode 的配置文件里写了 `key` 时的恢复按钮。辅助工具读到的名字带上这一项的标题，一页里好几个恢复
+    /// 按钮才分得清。
     pub(super) fn reset(&self, key: &'static str, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.file.has(key).then(|| {
-            let label = rust_i18n::t!("settings.reset").into_owned();
-            Button::new(id("reset", key), label.clone())
-                .icon(REFRESH_ICON)
-                .icon_size(12.)
-                .with_size(ButtonSize::IconSm)
-                .tooltip(crate::ui::tooltip::tooltip(label, None))
+            let explain = rust_i18n::t!("settings.reset").into_owned();
+            Button::new(id("reset", key), rust_i18n::t!("settings.reset_short").into_owned())
+                .aria_label(rust_i18n::t!("settings.reset_for", name = key_title(key)).into_owned())
+                .variant(ButtonVariant::Ghost)
+                .with_size(ButtonSize::Sm)
+                .px(px(8.))
+                .text_color(cx.theme().subtle_foreground)
+                .tooltip(crate::ui::tooltip::tooltip(explain, None))
                 .on_press(cx, move |this, _, cx| this.write_or_report(key, Vec::new(), cx))
                 .into_any_element()
         })
@@ -545,17 +795,49 @@ impl SettingsView {
                     .into_any_element()
             }
             Control::Sound => {
-                let label = match current.first().map(String::as_str) {
-                    None | Some("none") => rust_i18n::t!("settings.no_sound").into_owned(),
-                    Some(name) => name.to_owned(),
+                let sound = match current.first().map(String::as_str) {
+                    None | Some("none") => None,
+                    Some(name) => Some(name.to_owned()),
                 };
-                dropdown(id("dropdown", key), key_title(key), None, label, 180., theme)
-                    .on_press(cx, move |this, window, cx| this.open_sound_picker(key, window, cx))
-                    .into_any_element()
+                let label = sound.clone().unwrap_or_else(|| rust_i18n::t!("settings.no_sound").into_owned());
+                let name = rust_i18n::t!("settings.preview_sound_for", name = key_title(key)).into_owned();
+                let preview = Button::new(id("preview-sound", key), name.clone())
+                    .icon(VOLUME_ICON)
+                    .with_size(ButtonSize::Icon)
+                    .tooltip(crate::ui::tooltip::tooltip(name, None));
+                let preview = match sound {
+                    Some(sound) => preview.on_press(cx, move |_, _, _| crate::sound::play(&sound)),
+                    None => preview.disabled(true),
+                };
+                let picker = dropdown(id("dropdown", key), key_title(key), None, label, 180., theme)
+                    .on_press(cx, move |this, window, cx| this.open_sound_picker(key, window, cx));
+                div().flex().items_center().gap(px(8.)).child(preview).child(picker).into_any_element()
             }
         };
         let reset = self.reset(key, cx);
-        row(key_title(key), Some(key_hint(key)), control, reset, error, theme)
+        // 两种提示音前面画它提醒的那种状态的标记。
+        let leading = match key {
+            "agent-done-sound" => Some(status_mark("mark-agent-done-sound", MarkKind::Done, 13., cx)),
+            "agent-blocked-sound" => {
+                Some(status_mark("mark-agent-blocked-sound", MarkKind::Waiting { blink: false }, 13., cx))
+            }
+            _ => None,
+        };
+        let note = (key == "agent-notifications" && !crate::alerts::notifications_available()).then(|| {
+            let text = rust_i18n::t!("settings.notifications_need_app").into_owned();
+            div()
+                .id("notifications-need-app")
+                .aria_static_text(text.clone())
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .text_size(FontSize::Small)
+                .text_color(theme.muted_foreground)
+                .child(svg().flex_none().path(ALERT_NOTE_ICON).size(px(12.)).text_color(theme.muted_foreground))
+                .child(text)
+                .into_any_element()
+        });
+        row_with(key_title(key), Some(key_hint(key)), RowExtras { leading, note }, control, reset, error, theme)
     }
 
     fn open_language_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -600,7 +882,9 @@ impl SettingsView {
             let picker = dropdown(format!("font-{key}"), title.clone(), None, name.clone(), 240., theme)
                 .on_press(cx, move |this, window, cx| this.open_font_picker(ix, Some(current.clone()), window, cx));
             let remove = (count > 1).then(|| {
-                Button::new(format!("remove-font-{key}"), rust_i18n::t!("settings.remove"))
+                let label = rust_i18n::t!("settings.remove");
+                Button::new(format!("remove-font-{key}"), label.clone())
+                    .aria_label(action_for(&label, &name))
                     .icon(MINUS_ICON)
                     .icon_size(12.)
                     .with_size(ButtonSize::IconSm)
@@ -704,44 +988,121 @@ impl SettingsView {
         row(key_title(KEY), Some(key_hint(KEY)), control, reset, error, theme)
     }
 
-    fn render_agent_exclude(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        const KEY: &str = "agent-notifications-exclude";
-        let excluded = self.config.values(KEY);
-        let chips: Vec<_> = AgentKind::ALL
+    /// 「不提醒的 agent」的筛选框，第一次用到时建；在框里按 Esc 把焦点还给设置页。
+    fn agent_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<InputState> {
+        if let Some((field, _)) = &self.agent_filter {
+            return field.clone();
+        }
+        // 名字和占位文字各说一件事：读屏读空框时两样都念。
+        let label = rust_i18n::t!("settings.filter_for", name = key_title(EXCLUDE_KEY)).into_owned();
+        let placeholder = rust_i18n::t!("settings.agent_filter", count = exclude_choices(&[]).len()).into_owned();
+        let field = cx.new(|cx| InputState::new(String::new(), cx).with_label(label).with_placeholder(placeholder));
+        let changed = cx.subscribe_in(&field, window, |this, _, event: &InputEvent, window, cx| match event {
+            InputEvent::Changed(_) => cx.notify(),
+            InputEvent::Dismiss => window.focus(&this.focus_handle, cx),
+            InputEvent::Next | InputEvent::Previous => {}
+        });
+        self.agent_filter = Some((field.clone(), changed));
+        field
+    }
+
+    /// 不提醒的 agent，一个一个小标签；写回时写成一行，逗号隔开。
+    fn render_agent_exclude(&mut self, theme: &Theme, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        const KEY: &str = EXCLUDE_KEY;
+        let filter = self.agent_filter(window, cx);
+        let query = filter.read(cx).query().trim().to_lowercase();
+        let choices = exclude_choices(&self.config.values(KEY));
+        let selected = choices.iter().filter(|choice| choice.on).count();
+        let (shown, hidden) = shown_agents(&choices, &query, self.agents_expanded);
+        let chips: Vec<_> = shown
             .into_iter()
-            .chain([AgentKind::Other])
-            .enumerate()
-            .map(|(ix, kind)| {
-                let label = kind.label();
-                let on = excluded.iter().any(|name| name == label);
-                let name = match kind {
-                    AgentKind::Other => rust_i18n::t!("settings.other_agents").into_owned(),
-                    kind => kind.display_name().to_owned(),
-                };
-                Chip::new(("exclude", ix), name, on).on_press(cx, move |this, _, cx| {
-                    let mut values = this.config.values(KEY);
-                    if on {
-                        values.retain(|name| name != label);
-                    } else {
-                        values.push(label.to_owned());
-                    }
-                    this.write_or_report(KEY, this.with_clear(KEY, values), cx);
-                })
+            .map(|choice| {
+                let (label, on) = (choice.label, choice.on);
+                // id 按 agent 取：筛选、展开时显示的小标签变了，同一个 agent 的 id 不变。
+                Chip::new(SharedString::from(format!("exclude-{label}")), choice.name.clone(), on)
+                    .rounded_full()
+                    .px(px(11.))
+                    .h(scaled(28.))
+                    .on_press(cx, move |this, _, cx| {
+                        let mut values = this.config.values(KEY);
+                        if on {
+                            values.retain(|name| name != label);
+                        } else {
+                            values.push(label.to_owned());
+                        }
+                        this.write_or_report(KEY, this.with_clear(KEY, values), cx);
+                    })
             })
             .collect();
+        let empty = (chips.is_empty() && !query.is_empty()).then(|| {
+            let text = rust_i18n::t!("settings.no_matches").into_owned();
+            div()
+                .id("agent-exclude-empty")
+                .aria_static_text(text.clone())
+                .text_size(FontSize::Body)
+                .text_color(theme.muted_foreground)
+                .child(text)
+        });
+        // 没在筛选时才能展开、收起；展开着时收起按钮一直在。
+        let expanded = self.agents_expanded;
+        let more = (query.is_empty() && (hidden > 0 || expanded)).then(|| {
+            let (text, icon) = if expanded {
+                (rust_i18n::t!("settings.show_less").into_owned(), CHEVRON_UP_ICON)
+            } else {
+                (rust_i18n::t!("settings.show_more", count = hidden).into_owned(), CHEVRON_DOWN_ICON)
+            };
+            Button::new("agent-exclude-more", text.clone())
+                .variant(ButtonVariant::Ghost)
+                .aria_expanded(expanded)
+                .text_color(theme.subtle_foreground)
+                .child(text)
+                .child(svg().flex_none().path(icon).size(px(12.)).text_color(theme.subtle_foreground))
+                .on_press(cx, |this, _, cx| {
+                    this.agents_expanded = !this.agents_expanded;
+                    cx.notify();
+                })
+        });
+        let search_icon = svg().flex_none().path(SEARCH_ICON).size(px(13.)).text_color(theme.muted_foreground);
+        let field = Input::new(&filter)
+            .prefix(search_icon)
+            .flex_1()
+            .min_w_0()
+            .h(scaled(30.))
+            .px(px(10.))
+            .gap(px(8.))
+            .rounded(px(8.))
+            .bg(theme.field)
+            .text_size(FontSize::Medium);
+        let count = rust_i18n::t!("settings.selected_count", count = selected).into_owned();
+        let count = div()
+            .id("agent-exclude-count")
+            .aria_static_text(count.clone())
+            .flex_none()
+            .text_size(FontSize::Body)
+            .text_color(theme.subtle_foreground)
+            .child(count);
         let reset = self.reset(KEY, cx);
         let error = self.errors.get(KEY).cloned();
-        stacked(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, error, theme), theme).child(
-            div()
-                .id(KEY)
-                .role(gpui::Role::Group)
-                .aria_label(key_title(KEY))
-                .pb(px(12.))
-                .flex()
-                .flex_wrap()
-                .gap(px(6.))
-                .children(chips),
-        )
+        div()
+            .pt(px(14.))
+            .pb(px(16.))
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .child(div().flex().items_center().gap(px(8.)).child(field).child(count).children(reset))
+            .child(
+                div()
+                    .id(KEY)
+                    .role(gpui::Role::Group)
+                    .aria_label(key_title(KEY))
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(6.))
+                    .children(chips)
+                    .children(empty),
+            )
+            .children(more.map(|more| div().flex().child(more)))
+            .children(error.map(|err| error_text("agent-exclude-error", err, theme)))
     }
 
     fn render_config_files(&mut self, theme: &Theme, window: &mut Window, cx: &mut Context<Self>) -> Div {
@@ -759,7 +1120,9 @@ impl SettingsView {
             let error = self.errors.get(&id).cloned();
             let remove = files.get(ix).map(|file| {
                 let key = unique_key(&files[..ix], file);
-                Button::new(format!("remove-config-file-{key}"), rust_i18n::t!("settings.remove"))
+                let label = rust_i18n::t!("settings.remove");
+                Button::new(format!("remove-config-file-{key}"), label.clone())
+                    .aria_label(action_for(&label, file))
                     .icon(MINUS_ICON)
                     .icon_size(12.)
                     .with_size(ButtonSize::IconSm)
@@ -879,6 +1242,103 @@ mod tests {
                 }
                 for value in control_values(key, *control) {
                     assert_eq!(runode_config::check_value(key, value), Ok(()), "{key} = {value}");
+                }
+            }
+        }
+    }
+
+    /// 左边的列表按组列页：每一页在且只在一组里，各组按 `Page::ALL` 的先后接起来正好是 `Page::ALL`，
+    /// 列表的顺序和 `Page::ALL` 一致；每组都有标题的翻译。
+    #[test]
+    fn every_page_has_a_group() {
+        let listed: Vec<Page> = Group::ALL.into_iter().flat_map(Group::pages).collect();
+        assert_eq!(listed, Page::ALL);
+        for locale in rust_i18n::available_locales!() {
+            for group in Group::ALL {
+                assert!(group.pages().next().is_some(), "{group:?} is empty");
+                let key = format!("settings.group.{}", group.id());
+                assert!(!rust_i18n::t!(&key, locale = &locale).contains("settings."), "{locale} misses {key}");
+            }
+        }
+    }
+
+    /// 每一页标题下面都有一句说明。
+    #[test]
+    fn every_page_has_a_description() {
+        for locale in rust_i18n::available_locales!() {
+            for page in Page::ALL {
+                let key = format!("settings.page_desc.{}", page.id());
+                let text = rust_i18n::t!(&key, locale = &locale);
+                assert!(!text.contains("settings.") && !text.trim().is_empty(), "{locale} misses {key}");
+            }
+        }
+    }
+
+    fn choices(names: &[(&'static str, bool)]) -> Vec<ExcludeChoice> {
+        names.iter().map(|&(label, on)| ExcludeChoice { label, name: label.to_uppercase(), on }).collect()
+    }
+
+    /// 没在筛选时选上的排在前面，没选上的收起时只列前几个；筛选时列出对得上的，不藏。
+    #[test]
+    fn excluded_agents_come_first_and_the_rest_fold() {
+        let mut names: Vec<(&'static str, bool)> = vec![("aider", true)];
+        let rest = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10", "a11", "a12", "a13"];
+        names.extend(rest.iter().map(|name| (*name, false)));
+        names.push(("other", true));
+        let all = choices(&names);
+        let labels = |(shown, _): &(Vec<&ExcludeChoice>, usize)| shown.iter().map(|c| c.label).collect::<Vec<_>>();
+
+        let folded = shown_agents(&all, "", false);
+        assert_eq!(labels(&folded)[..3], ["aider", "other", "a0"]);
+        assert_eq!(folded.0.len(), 2 + COLLAPSED_AGENTS);
+        assert_eq!(folded.1, rest.len() - COLLAPSED_AGENTS);
+
+        let expanded = shown_agents(&all, "", true);
+        assert_eq!((expanded.0.len(), expanded.1), (all.len(), 0));
+
+        let filtered = shown_agents(&all, "a1", false);
+        assert_eq!(labels(&filtered), ["a1", "a10", "a11", "a12", "a13"]);
+        assert_eq!(filtered.1, 0);
+    }
+
+    /// 搜索按当前语言的标题、说明，英文的标题，和键名都找得到一行。
+    #[test]
+    fn search_finds_rows_by_title_hint_and_english_name() {
+        let row = Item::Row("scrollback-limit", Control::Text(120.));
+        for query in ["回滚历史", "字节", "scrollback size", "scrollback-limit"] {
+            assert!(row.matches(query, "zh-Hans"), "{query}");
+        }
+        assert!(!row.matches("字号", "zh-Hans"));
+    }
+
+    /// 小节的标题对得上时这一节的项都列出来，小节的标题补在它们前面。
+    #[test]
+    fn search_lists_a_matching_section_with_its_rows() {
+        let found = search_items(Page::Terminal.items(), |_| true, "剪贴板", "zh-Hans");
+        let names: Vec<String> = found
+            .iter()
+            .map(|item| match item {
+                Item::Section(name) => format!("#{name}"),
+                Item::Row(key, _) => (*key).to_owned(),
+                _ => "?".to_owned(),
+            })
+            .collect();
+        assert_eq!(names, ["#clipboard", "clipboard-write", "clipboard-read"]);
+    }
+
+    /// 每一项在各种语言下都有拿来搜的文字，没有漏翻译的。
+    #[test]
+    fn every_item_has_search_text() {
+        for locale in rust_i18n::available_locales!() {
+            for page in Page::ALL {
+                for item in page.items() {
+                    let texts = item.search_texts(&locale);
+                    assert!(!texts.is_empty(), "{locale} {page:?}");
+                    for text in texts {
+                        // 漏了翻译时拿到的是不带空格的键本身。
+                        let key = text.starts_with("settings.") && !text.contains(' ');
+                        assert!(!text.trim().is_empty() && !key, "{locale} {page:?}: {text}");
+                    }
                 }
             }
         }

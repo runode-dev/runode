@@ -25,9 +25,7 @@ use gpui::{
 };
 use runode_protocol::{ClientMsg, HostMsg, SessionId, SessionInfo};
 
-use super::{
-    AGENT_MARK_WIDTH, PressDown, WindowView, agents::Mark, cards, quit::held_sessions, titlebar::styled_agent_mark,
-};
+use super::{AGENT_MARK_SIZE_SMALL, PressDown, WindowView, agents::Mark, quit::held_sessions, titlebar::agent_mark};
 use crate::{
     host_client::{self, Mode},
     terminal_view::{DEFAULT_TITLE, TerminalView},
@@ -357,10 +355,13 @@ fn background_row(ix: usize, session: &SessionInfo, cx: &mut Context<WindowView>
     let id = session.id;
     let hover_bg = cx.theme().accent;
     let fg = cx.theme().foreground;
-    let mark = match session.meta.agent {
-        Some(agent) => styled_agent_mark(Mark::new(agent, false), ("background-agent", ix), fg, cards(cx)),
-        None => div().flex_none().w(px(AGENT_MARK_WIDTH)).into_any_element(),
-    };
+    let mark = agent_mark(
+        session.meta.agent.map(|agent| Mark::new(agent, false)),
+        ("background-agent", ix),
+        AGENT_MARK_SIZE_SMALL,
+        false,
+        cx,
+    );
     let agent = session.meta.agent.map(|agent| Mark::new(agent, false).describe());
     let dir = session.meta.cwd.as_deref().map(display_dir);
     let description = [agent.clone(), dir.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · ");

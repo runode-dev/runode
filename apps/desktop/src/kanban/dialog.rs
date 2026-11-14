@@ -1,13 +1,15 @@
 //! 新建、编辑任务和定时的对话框：标题、提示词、在哪个工作区或目录里做、agent 和它的模型、强度（见 `runode_agent::models`），
 //! 要用的 skill、以哪个自定义 agent 的身份跑（`skills`）、附上的文件，免不免确认，要不要独立的工作树，做完要不要自动标完成，
-//! 开始后多久没做完就算没做成（时限）；还没开始的任务另挑开始方式：我来开始、排队，或者等另一个任务做完，存好以后另发
-//! `ClientMsg::QueueTodo`；定时多一组什么时候跑（一次、每天某时可选星期几、每隔几分钟、cron 表达式）。时间都按本机的本地时间
-//! 填、显示（`runode_todo::LocalTime`）。填得不对时在对话框里说，不发请求；宿主那边还会再查一遍。时限、排队和 cron 要宿主
-//! 认得相应的看板级别（`store::host_below`），不认得时也在对话框里说，不发。
+//! 开始后多久没做完就算没做成（时限）；新建的和还没开始的任务另挑什么时候做（`StartMode`）：马上开始、放进待办等我来
+//! 开始、排队（可以指定先等另一个任务做完），排队的存好以后另发 `ClientMsg::QueueTodo`；新建时还能挑定时，定时多一组
+//! 什么时候跑（一次、每天某时可选星期几、每隔几分钟、cron 表达式），下面列出接下来几次到点的时刻。时间都按本机的本地
+//! 时间填、显示（`runode_todo::LocalTime`）。底栏用一句话（`summary_in`）说照现在填的会怎么做。填得不对时在对话框里说，
+//! 不发请求；宿主那边还会再查一遍。时限、排队和 cron 要宿主认得相应的看板级别（`store::host_below`），不认得时也在
+//! 对话框里说，不发。
 //!
-//! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，关掉、存好了经 `DialogEvent` 告诉看板。定时的
-//! 盖住整个窗口，由 app 画在窗口的最上层（`Kanban::dialog`）；任务的是看板里的一页（`TodoDialog::page`），由看板
-//! 画，新建时左边列出模板（`templates`），点一个就照它填好，带 `{{input}}` 的另要填一项（issue、PR 号），保存时换进去。
+//! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，收起、存好了经 `DialogEvent` 告诉看板。它盖住整个
+//! 窗口，由 app 画在窗口的最上层（`Kanban::dialog`）。新建时标题栏的「模板」菜单列出模板（`templates`），挑一个就照它
+//! 填好，带 `{{input}}` 的另要填一项（issue、PR 号），保存时换进去。
 
 use crate::ui::dialog::{backdrop, is_dismiss_key};
 use std::{
@@ -22,30 +24,31 @@ use std::{
 use crate::kanban::{
     skills::{self, Found},
     templates::{self, Template},
+    when,
 };
 use crate::ui::{
     a11y::{Disable as _, Press, PressDown as _, StaticText},
     base_name,
-    button::{Button, ButtonSize, ButtonVariant},
+    button::{Button, ButtonVariant},
     chip::Chip,
     dialog::Dialog,
     display_dir,
     font_size::{FontSize, scaled},
-    icons::{CLOSE_ICON, PLUS_ICON},
+    icons::{CHECK_ICON, CLOSE_ICON, FOLDER_ICON, PLUS_ICON, SPARKLE_ICON},
     input::{Input, InputEvent, InputState},
+    kbd::Kbd,
     menu::{Menu, MenuHost, MenuItem},
     panel::TITLEBAR_HEIGHT,
     scrollbar::scrollbar,
     segmented::Segmented,
     select::SelectTrigger,
-    switch::Switch,
     textarea::{Textarea, TextareaEvent, TextareaState},
     theme::ActiveTheme as _,
 };
 use gpui::{
     Action, App, Axis, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, KeyDownEvent,
     MouseButton, PathPromptOptions, Render, Role, ScrollHandle, SharedString, Subscription, Window, canvas, div,
-    prelude::*, px,
+    prelude::*, px, svg,
 };
 use runode_protocol::{
     ClientMsg, HostMsg,
@@ -109,13 +112,25 @@ pub(crate) struct PickTodoSubagent {
     name: Option<String>,
 }
 
-/// 开始方式菜单的一项：`queued` 为假是我来开始；排队时 `after` 是要先等做完的任务。
+/// 「排在别的后面」菜单的一项：`queued` 为假是不排队；排队时 `after` 是要先等做完的任务，为空是不等哪个。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(crate) struct PickTodoQueue {
     queued: bool,
     after: Option<String>,
 }
+
+/// 「模板」菜单的一项：第 `index` 个模板，为空时是空白的。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(crate) struct PickTodoTemplate {
+    index: Option<usize>,
+}
+
+/// 「模板」菜单的最后一项：打开模板目录。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(crate) struct OpenTodoTemplates;
 
 /// 对话框改的是哪一个；新建时为空。
 #[derive(Clone)]
@@ -134,6 +149,7 @@ enum Combo {
     Skills,
     Subagent,
     After,
+    Template,
 }
 
 /// 定时跑的方式，对话框里四选一。
@@ -145,16 +161,42 @@ enum Kind {
     Cron,
 }
 
+/// 新建的和还没开始的任务什么时候做，对话框里分段挑一段；由 `TodoDialog` 的 `schedule`、`start`、`queued` 定
+/// （`start_mode_of`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartMode {
+    /// 存好就开始。
+    Now,
+    /// 放进待办，等用户点开始。
+    Manual,
+    /// 排队：要等的任务（`TodoDialog::after`，可以不等哪个）做完、在跑的少于上限时开始。
+    Queue,
+    /// 存成定时，只有新建时能挑。
+    Schedule,
+}
+
+/// 时限现成的几档，分钟数；别的由用户自己填。
+const LIMIT_PRESETS: [u32; 3] = [15, 30, 60];
+
+/// 对话框面板的宽度。
+const DIALOG_WIDTH: f32 = 660.;
+
+/// 左栏标签的宽度，按基准字号的点数。
+const LABEL_WIDTH: f32 = 110.;
+
+/// 下拉框、小签和左栏标签共用的一行高，按基准字号的点数。
+const CONTROL_HEIGHT: f32 = 30.;
+
 /// 新建、编辑任务和定时的对话框，见模块说明。
 pub struct TodoDialog {
-    /// 是定时（否则是任务）。
-    schedule: bool,
-    /// 是看板里的一页（任务的），不是盖住窗口的对话框（定时的）。
-    pub(crate) page: bool,
+    /// 是定时（否则是任务）；新建时随「什么时候做」选没选定时变。
+    pub(crate) schedule: bool,
     editing: Option<Editing>,
-    /// 新建任务时左边列的模板，后台读好前为空；挑着的是第几个，空白的为空。
+    /// 新建时「模板」菜单里列的模板，后台读好前为空；挑着的是第几个，空白的为空。
     templates: Vec<Template>,
     template: Option<usize>,
+    /// 模板目录，没有家目录时为空。
+    templates_dir: Option<PathBuf>,
     /// 挑着的模板要另外填的一项（`Template::input`），换模板时跟着换说明。
     input: Entity<InputState>,
     input_events: Option<Subscription>,
@@ -175,6 +217,8 @@ pub struct TodoDialog {
     /// 标题和按钮之间那些栏的滚动位置，滚动条读它。
     fields_scroll: ScrollHandle,
     dir: PathBuf,
+    /// `dir` 所在仓库当前的分支，写在项目框里；后台读好前、不在仓库里时为空。
+    branch: Option<String>,
     worktree: bool,
     /// 挑上的 skill、自定义 agent 和附上的文件，见 `TodoSpec`；`found` 是在 `dir` 能找到的 skill 和自定义 agent。
     skills: Vec<String>,
@@ -185,6 +229,10 @@ pub struct TodoDialog {
     auto_done: bool,
     /// 时限，分钟数，空着是不限（`TodoSpec::time_limit`）。
     time_limit: Entity<InputState>,
+    /// 时限选了「自己定」：露出时限的输入框，填的正好是 `LIMIT_PRESETS` 里的一档也不跳回那一档。
+    custom_limit: bool,
+    /// 还没开始的任务选了马上开始：存好就交给看板开始（`DialogEvent::Saved` 的 `start`），排队的不算。
+    start: bool,
     /// 还没开始的任务要不要排队、要先等哪个任务做完（`Todo::queued`、`Todo::after`），存好以后经
     /// `ClientMsg::QueueTodo` 交给宿主。
     queued: bool,
@@ -210,7 +258,7 @@ pub struct TodoDialog {
     /// 开着的菜单是哪个框的，菜单挂在它下面。
     menu_for: Option<Combo>,
     /// 各个框上一帧的下沿离窗口顶多远（按 `Combo` 的次序），菜单最高到窗口底边。
-    combo_bottoms: Rc<[Cell<f32>; 7]>,
+    combo_bottoms: Rc<[Cell<f32>; 8]>,
     _events: Vec<Subscription>,
 }
 
@@ -238,6 +286,88 @@ fn parse_minutes(text: &str) -> Option<u32> {
 /// 时限栏：空着是不限，否则是至少一分钟的分钟数；写得不对时为 `Err`。
 fn parse_time_limit(text: &str) -> Result<Option<u32>, ()> {
     if text.trim().is_empty() { Ok(None) } else { parse_minutes(text).map(Some).ok_or(()) }
+}
+
+/// 时限栏写的 `text` 落在哪一档小签上：`Some(None)` 是不限，`Some(Some(n))` 是 `LIMIT_PRESETS` 里的 n 分钟，
+/// 为空是自己定（`custom` 选着、或者写的不是现成的一档）。
+fn limit_preset(text: &str, custom: bool) -> Option<Option<u32>> {
+    match parse_time_limit(text) {
+        _ if custom => None,
+        Ok(None) => Some(None),
+        Ok(Some(minutes)) if LIMIT_PRESETS.contains(&minutes) => Some(Some(minutes)),
+        _ => None,
+    }
+}
+
+/// `when` 从 `now` 起接下来最多三次到点的时刻。
+fn next_fires(when: &When, now: u64) -> Vec<u64> {
+    std::iter::successors(runode_todo::next_fire(when, now), |at| runode_todo::next_fire(when, *at)).take(3).collect()
+}
+
+/// 底栏那句话开头说的什么时候做。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lead<'a> {
+    /// 开始过的任务：不说什么时候。
+    Plain,
+    Now,
+    Manual,
+    Queued,
+    /// 等第几号任务做完；它已经不在看板上时为空。
+    After(Option<u64>),
+    /// 一次性的定时，到点的时刻（`when::fire_text`）。
+    Once(&'a str),
+    /// 重复的定时，规则的说法（`when::describe_when`）。
+    Repeat(&'a str),
+    /// 定时的规则还没填对或者读不懂，说不出什么时候。
+    Due,
+}
+
+/// 底栏那句话要说的：什么时候做、交给谁（模型没挑时为空）、在哪个项目里、开不开工作树、时限几分钟。
+struct Summary<'a> {
+    lead: Lead<'a>,
+    agent: &'a str,
+    model: Option<&'a str>,
+    project: &'a str,
+    worktree: bool,
+    limit: Option<u32>,
+}
+
+/// 按 `locale` 把 `summary` 拼成一整句：各种组合都是 locale 里的整句，代码里不拼标点。
+fn summary_in(summary: &Summary, locale: &str) -> String {
+    let agent = match summary.model {
+        Some(model) => {
+            rust_i18n::t!("kanban.dialog.summary.agent_model", locale = locale, agent = summary.agent, model = model)
+                .into_owned()
+        }
+        None => summary.agent.to_owned(),
+    };
+    let body_key = match (summary.worktree, summary.limit.is_some()) {
+        (false, false) => "kanban.dialog.summary.here",
+        (false, true) => "kanban.dialog.summary.here_limit",
+        (true, false) => "kanban.dialog.summary.worktree",
+        (true, true) => "kanban.dialog.summary.worktree_limit",
+    };
+    let limit = summary.limit.map(|minutes| when::limit_text_in(minutes, locale)).unwrap_or_default();
+    let body =
+        rust_i18n::t!(body_key, locale = locale, agent = agent, project = summary.project, limit = limit).into_owned();
+    let lead = |key: &str| rust_i18n::t!(key, locale = locale, body = body).into_owned();
+    match summary.lead {
+        Lead::Plain => body.clone(),
+        Lead::Now => lead("kanban.dialog.summary.now"),
+        Lead::Manual => lead("kanban.dialog.summary.manual"),
+        Lead::Queued => lead("kanban.dialog.summary.queued"),
+        Lead::After(Some(number)) => {
+            rust_i18n::t!("kanban.dialog.summary.after", locale = locale, number = number, body = body).into_owned()
+        }
+        Lead::After(None) => lead("kanban.dialog.summary.after_gone"),
+        Lead::Once(time) => {
+            rust_i18n::t!("kanban.dialog.summary.once", locale = locale, time = time, body = body).into_owned()
+        }
+        Lead::Repeat(when) => {
+            rust_i18n::t!("kanban.dialog.summary.repeat", locale = locale, when = when, body = body).into_owned()
+        }
+        Lead::Due => lead("kanban.dialog.summary.due"),
+    }
 }
 
 /// 任务 `from` 顺着 `Todo::after` 一个个往前等，会等到任务 `me`（`from` 就是 `me` 也算）。
@@ -284,9 +414,19 @@ fn queue_change(
     changed.then(|| (queued, after.map(str::to_owned)))
 }
 
-/// 开始方式里等任务 `todo` 做完的那一项的文字。
+/// 对话框的 `schedule`、`start`、`queued` 落在「什么时候做」的哪一段：定时先于排队，排队先于马上开始。
+fn start_mode_of(schedule: bool, start: bool, queued: bool) -> StartMode {
+    match (schedule, queued, start) {
+        (true, _, _) => StartMode::Schedule,
+        (false, true, _) => StartMode::Queue,
+        (false, false, true) => StartMode::Now,
+        (false, false, false) => StartMode::Manual,
+    }
+}
+
+/// 「排在别的后面」里任务 `todo` 的写法：编号和标题。
 fn after_label(todo: &Todo) -> String {
-    rust_i18n::t!("kanban.dialog.queue_after", number = todo.number, title = todo.spec.title.as_str()).into_owned()
+    rust_i18n::t!("kanban.dialog.after_task", number = todo.number, title = todo.spec.title.as_str()).into_owned()
 }
 
 /// 提示词的第一行，标题空着时用它。
@@ -296,8 +436,10 @@ fn first_line(text: &str) -> &str {
 
 /// 对话框要看板办的事。
 pub(crate) enum DialogEvent {
-    /// 按了取消、Esc 或点了外面：关掉，焦点交回看板。
+    /// 按了 Esc、× 或点了外面：收起，焦点交回看板；新建的写了字时（`TodoDialog::worth_keeping`）留着下次接着写。
     Dismissed,
+    /// 按了取消：关掉，写了的不留，焦点交回看板。
+    Discarded,
     /// 宿主办成了：关掉，焦点同样交回看板；按的是「保存并开始」时 `start` 是要接着开始的任务。`failed` 是存好了、
     /// 后面跟的请求没办成的原因。
     Saved { start: Option<String>, failed: Option<String> },
@@ -327,7 +469,8 @@ impl TodoDialog {
         // 新建任务时目录在 git 仓库里就默认开工作树（`check_repo` 在后台看完再打开）；定时默认不开，每次到点都
         // 开一个会越堆越多。
         let worktree = spec.as_ref().is_some_and(|spec| spec.worktree);
-        let new_todo = spec.is_none() && !schedule;
+        let creating = spec.is_none();
+        let new_todo = creating && !schedule;
         let field = |text: String, label: &str, placeholder: &str, cx: &mut Context<Self>| {
             let (label, placeholder) = (rust_i18n::t!(label).into_owned(), rust_i18n::t!(placeholder).into_owned());
             let select = text.len();
@@ -377,34 +520,32 @@ impl TodoDialog {
         let clock = field(clock_text, "kanban.dialog.daily", "kanban.dialog.daily_placeholder", cx);
         let minutes = field(minutes_text, "kanban.dialog.every", "kanban.dialog.every_placeholder", cx);
         let cron = field(cron_text, "kanban.dialog.cron", "kanban.dialog.cron_placeholder", cx);
-        let time_limit = field(
-            spec.as_ref().and_then(|spec| spec.time_limit).map(|limit| limit.to_string()).unwrap_or_default(),
-            "kanban.dialog.time_limit",
-            "kanban.dialog.time_limit_placeholder",
-            cx,
-        );
+        let limit_text =
+            spec.as_ref().and_then(|spec| spec.time_limit).map(|limit| limit.to_string()).unwrap_or_default();
+        let custom_limit = limit_preset(&limit_text, false).is_none();
+        let time_limit = field(limit_text, "kanban.dialog.time_limit", "kanban.dialog.time_limit_placeholder", cx);
         let (queued, after) = match &editing {
             Some(Editing::Todo(todo)) => (todo.queued, todo.after.clone()),
             _ => (false, None),
         };
         let input = cx.new(|cx| InputState::new(String::new(), cx));
-        // 输入框里回车保存，Esc 关掉对话框；提示词里 ⌘回车保存。
+        // 输入框里回车、提示词里 ⌘回车都按底栏的主按钮办，Esc 关掉对话框。
         let mut events = Vec::new();
         for input in [&title, &command, &at, &clock, &minutes, &cron, &time_limit] {
             events.push(Self::subscribe_input(input, window, cx));
         }
         events.push(cx.subscribe_in(&prompt, window, |this, _, event: &TextareaEvent, _, cx| match event {
-            TextareaEvent::Submit => this.save(false, cx),
+            TextareaEvent::Submit => this.save(this.start, cx),
             TextareaEvent::Changed => this.clear_error(cx),
         }));
         window.focus(&title.focus_handle(cx), cx);
         let spec = spec.unwrap_or_default();
         let mut dialog = Self {
             schedule,
-            page: !schedule,
             editing,
             templates: Vec::new(),
             template: None,
+            templates_dir: runode_paths::Dirs::from_env().todo_templates_dir(),
             input_events: None,
             input,
             title,
@@ -418,6 +559,7 @@ impl TodoDialog {
             fields_scroll: ScrollHandle::new(),
             failed: HashMap::new(),
             dir,
+            branch: None,
             worktree,
             skills: spec.skills,
             subagent: spec.subagent,
@@ -426,6 +568,8 @@ impl TodoDialog {
             auto: spec.auto,
             auto_done: spec.auto_done,
             time_limit,
+            custom_limit,
+            start: false,
             queued,
             after,
             locked,
@@ -446,9 +590,12 @@ impl TodoDialog {
         };
         if new_todo {
             dialog.check_repo(cx);
+        }
+        if creating {
             dialog.load_templates(cx);
         }
         dialog.find_skills(cx);
+        dialog.find_branch(cx);
         dialog.find_installed(new_todo, cx);
         if let Some(pick) = &dialog.agent {
             dialog.fetch_models(pick.agent, cx);
@@ -500,10 +647,10 @@ impl TodoDialog {
             .any(|agent| installed.get(agent).copied().unwrap_or(false))
     }
 
-    /// 输入框里回车保存，Esc 关掉对话框，改了字就收起上次的报错。
+    /// 输入框里回车按底栏的主按钮办，Esc 关掉对话框，改了字就收起上次的报错。
     fn subscribe_input(input: &Entity<InputState>, window: &mut Window, cx: &mut Context<Self>) -> Subscription {
         cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| match event {
-            InputEvent::Next => this.save(false, cx),
+            InputEvent::Next => this.save(this.start, cx),
             InputEvent::Dismiss => cx.emit(DialogEvent::Dismissed),
             InputEvent::Changed(_) => this.clear_error(cx),
             InputEvent::Previous => {}
@@ -519,12 +666,13 @@ impl TodoDialog {
 
     /// 在后台读模板（`templates::load`），读好了列出来。
     fn load_templates(&mut self, cx: &mut Context<Self>) {
-        let dir = runode_paths::Dirs::from_env().todo_templates_dir();
+        let dir = self.templates_dir.clone();
         let load = cx.background_executor().spawn(async move { templates::load(dir.as_deref()) });
         cx.spawn(async move |this, cx| {
             let templates = load.await;
             this.update(cx, |dialog, cx| {
                 dialog.templates = templates;
+                dialog.refresh_menu(cx);
                 cx.notify();
             })
             .ok();
@@ -556,7 +704,8 @@ impl TodoDialog {
 
     /// 照第 `index` 个模板填好（为空时是空白的）：免不免确认和工作树换成它的，skill 加上它的；标题、提示词
     /// 是空的或者还是上一个模板的原样时换成它的，用户改过的不动。要另外填一项的，那一栏换上它的说明，焦点给它。
-    fn pick_template(&mut self, index: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
+    fn pick_template(&mut self, action: &PickTodoTemplate, window: &mut Window, cx: &mut Context<Self>) {
+        let index = action.index;
         let before = self.template.map(|index| self.templates[index].clone()).unwrap_or_default();
         let untouched = |text: &str, original: &str| text.trim().is_empty() || text.trim() == original.trim();
         self.template = index.filter(|index| *index < self.templates.len());
@@ -588,6 +737,38 @@ impl TodoDialog {
         window.focus(&focus, cx);
         self.error = None;
         cx.notify();
+    }
+
+    /// 打开模板目录，没有就先建：它在 home 下的点目录里，访达和资源管理器默认都看不到。
+    fn open_templates(&mut self, _: &OpenTodoTemplates, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(dir) = &self.templates_dir else { return };
+        if let Err(err) = std::fs::create_dir_all(dir) {
+            tracing::warn!("cannot create {}: {err}", dir.display());
+        }
+        cx.open_with_system(dir);
+    }
+
+    /// 「模板」菜单：空白和各个模板，挑着的打勾，最后是打开模板目录；还没有模板时只有最后一项，没有家目录时
+    /// 连它也没有。
+    fn template_items(&self) -> Vec<Option<MenuItem>> {
+        let mut items: Vec<Option<MenuItem>> = Vec::new();
+        if !self.templates.is_empty() {
+            let blank = rust_i18n::t!("kanban.dialog.template_blank").into_owned();
+            let named = self.templates.iter().enumerate().map(|(index, template)| (Some(index), template.name.clone()));
+            items.extend(std::iter::once((None, blank)).chain(named).map(|(index, label)| {
+                let action = Box::new(PickTodoTemplate { index });
+                Some(MenuItem::checkbox(label, None, self.template == index, action))
+            }));
+        }
+        if let Some(dir) = &self.templates_dir {
+            if !items.is_empty() {
+                items.push(None);
+            }
+            let open = rust_i18n::t!("kanban.dialog.templates_open").into_owned();
+            let item = MenuItem::label(open, None, Some(Box::new(OpenTodoTemplates))).with_tooltip(display_dir(dir));
+            items.push(Some(item));
+        }
+        items
     }
 
     /// 系统选择框的结果：选好的路径；取消了为空，打不开时还在对话框里写出原因。
@@ -660,6 +841,22 @@ impl TodoDialog {
         cx.notify();
     }
 
+    /// 现在选着的什么时候做。
+    fn start_mode(&self) -> StartMode {
+        start_mode_of(self.schedule, self.start, self.queued)
+    }
+
+    /// 换什么时候做：换到定时时存成定时、不开始也不排队；离开排队时不再等谁。
+    fn pick_start(&mut self, mode: StartMode, cx: &mut Context<Self>) {
+        self.schedule = mode == StartMode::Schedule;
+        self.start = mode == StartMode::Now;
+        self.queued = mode == StartMode::Queue;
+        if mode != StartMode::Queue {
+            self.after = None;
+        }
+        cx.notify();
+    }
+
     /// 在编辑的任务；新建、编辑定时时为空。
     fn editing_todo(&self) -> Option<&Todo> {
         match &self.editing {
@@ -668,12 +865,9 @@ impl TodoDialog {
         }
     }
 
-    /// 开始方式菜单：我来开始、排队，再是能等的任务（`after_candidates`），等着的那个不在里面时也列上。
-    fn after_items(&self, cx: &App) -> Vec<Option<MenuItem>> {
+    /// 能排在后面等的任务的 id 和写法（`after_candidates`），等着的那个不在里面时也列上。
+    fn after_choices(&self, cx: &App) -> Vec<(String, String)> {
         let todos = &store::data(cx).todos;
-        let item = |label: String, checked: bool, queued: bool, after: Option<String>| {
-            Some(MenuItem::checkbox(label, None, checked, Box::new(PickTodoQueue { queued, after })))
-        };
         let mut afters: Vec<(String, String)> =
             after_candidates(todos, self.editing_todo().map(|todo| todo.id.as_str()))
                 .into_iter()
@@ -684,41 +878,34 @@ impl TodoDialog {
         {
             afters.push((after.clone(), self.after_text(after, cx)));
         }
-        let mut items = vec![
-            item(rust_i18n::t!("kanban.dialog.queue_manual").into_owned(), !self.queued, false, None),
-            item(
-                rust_i18n::t!("kanban.dialog.queue_queued").into_owned(),
-                self.queued && self.after.is_none(),
-                true,
-                None,
-            ),
-        ];
-        if !afters.is_empty() {
+        afters
+    }
+
+    /// 「排在别的后面」的菜单：先是不等哪个，再是能等的各个任务，挑着的打勾。
+    fn after_items(&self, cx: &App) -> Vec<Option<MenuItem>> {
+        let any = rust_i18n::t!("kanban.dialog.queue_any").into_owned();
+        let any =
+            MenuItem::checkbox(any, None, self.after.is_none(), Box::new(PickTodoQueue { queued: true, after: None }));
+        let choices = self.after_choices(cx);
+        let mut items = vec![Some(any)];
+        if !choices.is_empty() {
             items.push(None);
         }
-        items.extend(afters.into_iter().map(|(id, label)| {
+        items.extend(choices.into_iter().map(|(id, label)| {
             let checked = self.after.as_ref() == Some(&id);
-            item(label, checked, true, Some(id))
+            let action = Box::new(PickTodoQueue { queued: true, after: Some(id) });
+            Some(MenuItem::checkbox(label, None, checked, action))
         }));
         items
     }
 
-    /// 等任务 `after` 做完的文字；它已经不在看板上时不写是哪个。
+    /// 任务 `after` 的写法；它已经不在看板上时不写是哪个。
     fn after_text(&self, after: &str, cx: &App) -> String {
         store::data(cx)
             .todos
             .iter()
             .find(|todo| todo.id == after)
-            .map_or_else(|| rust_i18n::t!("kanban.dialog.queue_after_gone").into_owned(), after_label)
-    }
-
-    /// 开始方式那一栏显示的文字。
-    fn queue_text(&self, cx: &App) -> String {
-        match (&self.after, self.queued) {
-            (_, false) => rust_i18n::t!("kanban.dialog.queue_manual").into_owned(),
-            (None, true) => rust_i18n::t!("kanban.dialog.queue_queued").into_owned(),
-            (Some(after), true) => self.after_text(after, cx),
-        }
+            .map_or_else(|| rust_i18n::t!("kanban.dialog.after_gone").into_owned(), after_label)
     }
 
     /// 存好以后要发的 `ClientMsg::QueueTodo` 的 `(queued, after)`；不是还能开始的任务、或者不用发时为空。
@@ -786,9 +973,31 @@ impl TodoDialog {
         .detach();
     }
 
-    /// 换了目录：重新看要不要工作树，再问一遍挑着的 agent 的模型清单（有的 agent 读项目里的配置）。
+    /// 在后台读 `dir` 所在仓库当前的分支（`runode_git::current_branch`），读完了还是这个目录时换上。
+    fn find_branch(&mut self, cx: &mut Context<Self>) {
+        let dir = self.dir.clone();
+        let branch = cx.background_executor().spawn({
+            let dir = dir.clone();
+            async move { runode_git::current_branch(&dir) }
+        });
+        cx.spawn(async move |this, cx| {
+            let branch = branch.await;
+            this.update(cx, |dialog, cx| {
+                if dialog.dir == dir {
+                    dialog.branch = branch;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 换了目录：重新看要不要工作树、在哪个分支上，再问一遍挑着的 agent 的模型清单（有的 agent 读项目里的配置）。
     fn dir_changed(&mut self, cx: &mut Context<Self>) {
         self.check_repo(cx);
+        self.branch = None;
+        self.find_branch(cx);
         self.find_skills(cx);
         // shortcut: 上一次还在问着时不再问，清单按旧目录的算；目录换得比 agent 答得快时再按目录分开记。
         if let Some(pick) = &self.agent {
@@ -901,6 +1110,7 @@ impl TodoDialog {
             Combo::Skills => self.skill_items(),
             Combo::Subagent => self.subagent_items(),
             Combo::After => self.after_items(cx),
+            Combo::Template => self.template_items(),
         }
     }
 
@@ -1019,7 +1229,7 @@ impl TodoDialog {
     fn combo_menu(&self, combo: Combo, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
         let bottom = self.combo_bottoms[combo as usize].get();
         self.menu_for.filter(|open| *open == combo).and_then(|_| match combo {
-            Combo::Effort | Combo::Subagent | Combo::After => self.render_dropdown_menu(bottom, window, cx),
+            Combo::Effort | Combo::Subagent | Combo::Template => self.render_dropdown_menu(bottom, window, cx),
             _ => self.render_dropdown_menu_rightward(bottom, window, cx),
         })
     }
@@ -1109,12 +1319,18 @@ impl TodoDialog {
         }
     }
 
-    /// 是写到一半的新建任务那一页，离开时能收起来留着；正在存的不算。
+    /// 是新建的对话框，收起时能留着下次接着写；正在存的不算。
     pub(crate) fn draft(&self) -> bool {
-        self.page && self.editing.is_none() && !self.saving
+        self.editing.is_none() && !self.saving
     }
 
-    /// 标题输入框的焦点，收起来的那一页重新摆出来时交给它。
+    /// 按 Esc、× 或点外面收起时值得留着：是 `draft`，标题或提示词写了字。
+    pub(crate) fn worth_keeping(&self, cx: &App) -> bool {
+        let blank = self.title.read(cx).query().trim().is_empty() && self.prompt.read(cx).text().trim().is_empty();
+        self.draft() && !blank
+    }
+
+    /// 标题输入框的焦点，收起来的对话框重新打开时交给它。
     pub(crate) fn title_focus(&self, cx: &App) -> FocusHandle {
         self.title.focus_handle(cx)
     }
@@ -1136,7 +1352,7 @@ impl TodoDialog {
             }
         };
         let queue = self.queue_to_send();
-        let start = start && !self.queued;
+        let start = start && self.startable() && !self.queued;
         let edited = self.editing_todo().map(|todo| todo.id.clone());
         self.saving = true;
         self.error = None;
@@ -1203,10 +1419,79 @@ fn grow_input(state: &Entity<InputState>) -> Input {
     Input::new(state).h_auto().min_h(scaled(28.)).py(px(4.))
 }
 
-/// 一栏：上面一行说明，下面是 `child`。
-fn field(label: String, child: gpui::AnyElement, cx: &App) -> Div {
-    let fg_h = cx.theme().foreground;
-    div().flex().flex_col().gap(px(6.)).child(div().text_color(fg_h.opacity(0.7)).child(label)).child(child)
+/// 表单的一行：左边一栏定宽的标签，和右边 `child` 的第一行对齐。
+fn row(label: String, child: impl IntoElement, cx: &App) -> Div {
+    let subtle = cx.theme().subtle_foreground;
+    div()
+        .flex()
+        .items_start()
+        .gap(px(12.))
+        .child(
+            div()
+                .flex_none()
+                .w(scaled(LABEL_WIDTH))
+                .min_h(scaled(CONTROL_HEIGHT))
+                .flex()
+                .items_center()
+                .text_size(FontSize::Body)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(subtle)
+                .child(label),
+        )
+        .child(div().flex_1().min_w_0().child(child))
+}
+
+/// 控件下面或旁边的一句说明，报给辅助工具。
+fn hint(id: impl Into<gpui::ElementId>, text: String, cx: &App) -> gpui::Stateful<Div> {
+    let muted = cx.theme().muted_foreground;
+    div().id(id).aria_static_text(text.clone()).text_size(FontSize::Small).text_color(muted).child(text)
+}
+
+/// 定时、开始方式下面的小卡：底色比对话框深一档，和外框分开。
+fn card(cx: &App) -> Div {
+    let theme = cx.theme();
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .px(px(14.))
+        .py(px(12.))
+        .rounded(px(10.))
+        .bg(theme.field)
+        .border_1()
+        .border_color(theme.border)
+}
+
+/// 一排里的小签：胶囊形，和下拉框一样高。
+fn pill(chip: Chip) -> Chip {
+    chip.h(scaled(28.)).px(px(11.)).rounded_full()
+}
+
+/// 复选框：一个小方块打勾，后面一行字，点字也算点方块。不可用时灰掉、报给辅助工具，调用方别挂点击。
+fn checkbox(id: &'static str, label: String, checked: bool, enabled: bool, cx: &App) -> gpui::Stateful<Div> {
+    let theme = cx.theme();
+    let (primary, on_primary, border) = (theme.primary, theme.primary_foreground, theme.control_border);
+    let mark = div().flex_none().size(px(16.)).rounded(px(5.)).flex().items_center().justify_center().map(|mark| {
+        if checked {
+            mark.bg(primary).child(svg().path(CHECK_ICON).size(px(11.)).text_color(on_primary))
+        } else {
+            mark.border_1().border_color(border)
+        }
+    });
+    div()
+        .id(id)
+        .role(Role::CheckBox)
+        .aria_label(label.clone())
+        .aria_toggled(checked.into())
+        .min_h(scaled(CONTROL_HEIGHT))
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .when(enabled, |checkbox| checkbox.cursor_pointer())
+        .when(!enabled, |checkbox| checkbox.opacity(0.6))
+        .aria_disabled(!enabled)
+        .child(mark)
+        .child(label)
 }
 
 impl TodoDialog {
@@ -1223,20 +1508,23 @@ impl TodoDialog {
         cx: &App,
     ) -> SelectTrigger {
         let theme = cx.theme();
-        let hover_bg = theme.mix(0.10);
-        let (bg_h, input_border) = (theme.background, theme.input);
+        let hover_bg = theme.mix(0.14);
+        let (bg, border) = (theme.secondary, theme.control_border);
         let open = self.menu_for == Some(kind) && self.dropdown_open();
         let bottoms = self.combo_bottoms.clone();
         SelectTrigger::new(id, label, value)
             .aria_expanded(open)
             .relative()
-            .min_h(scaled(28.))
-            .px(px(8.))
-            .rounded(px(6.))
-            .bg(bg_h)
+            .flex_none()
+            .max_w(scaled(300.))
+            .h(scaled(CONTROL_HEIGHT))
+            .pl(px(10.))
+            .pr(px(8.))
+            .gap(px(7.))
+            .rounded(px(8.))
+            .bg(bg)
             .border_1()
-            // 和上下的输入框（`Input`）一样的边框。
-            .border_color(input_border)
+            .border_color(border)
             .when(enabled, |combo| combo.hover(move |combo| combo.bg(hover_bg)))
             .when(!enabled, |combo| combo.cursor_default().opacity(0.6))
             .aria_disabled(!enabled)
@@ -1249,7 +1537,8 @@ impl TodoDialog {
             .children(menu)
     }
 
-    /// 对话框里能打字的框，按显示的先后：模板要填的那一项、标题、提示词、定时的时间、自定义 agent 的命令、时限。
+    /// 对话框里能打字的框，按显示的先后：模板要填的那一项、标题、提示词、自定义 agent 的命令、定时的时间、
+    /// 自己定的时限。
     fn text_fields(&self, cx: &App) -> Vec<FocusHandle> {
         let template_input = self.template.and_then(|index| self.templates[index].input.as_ref()).map(|_| &self.input);
         let when = match self.kind {
@@ -1263,7 +1552,8 @@ impl TodoDialog {
         let inputs = template_input.into_iter().chain([&self.title]);
         let mut fields: Vec<FocusHandle> = inputs.map(|input| input.focus_handle(cx)).collect();
         fields.push(self.prompt.focus_handle(cx));
-        fields.extend(when.into_iter().chain(command).chain([&self.time_limit]).map(|input| input.focus_handle(cx)));
+        let limit = self.limit_choice(cx).is_none().then_some(&self.time_limit);
+        fields.extend(command.into_iter().chain(when).chain(limit).map(|input| input.focus_handle(cx)));
         fields
     }
 
@@ -1284,26 +1574,79 @@ impl TodoDialog {
         window.focus(&fields[next], cx);
     }
 
-    /// 对话框的标题：新建还是编辑，任务还是定时。
+    /// 对话框的标题：新建的一律是新建任务（定时也在里面挑），编辑的分任务和定时。
     fn heading(&self) -> String {
         match (&self.editing, self.schedule) {
             (Some(_), false) => rust_i18n::t!("kanban.edit"),
             (Some(_), true) => rust_i18n::t!("kanban.edit_schedule"),
-            (None, false) => rust_i18n::t!("kanban.new_todo"),
-            (None, true) => rust_i18n::t!("kanban.new_schedule"),
+            (None, _) => rust_i18n::t!("kanban.new_todo"),
         }
         .into_owned()
     }
 
-    fn render_title(title: String) -> impl IntoElement {
+    /// 标题栏的「模板」框：框里是挑着的模板名，没挑时写「模板」；只有新建时有，菜单一项都没有时也不画。
+    fn render_template_picker(&self, window: &Window, cx: &mut Context<Self>) -> Option<SelectTrigger> {
+        if self.editing.is_some() || (self.templates.is_empty() && self.templates_dir.is_none()) {
+            return None;
+        }
+        let subtle = cx.theme().subtle_foreground;
+        let name = rust_i18n::t!("kanban.dialog.templates").into_owned();
+        let picked = self.template.map(|index| self.templates[index].name.clone());
+        let value = picked.clone().unwrap_or_else(|| name.clone());
+        // 没挑时框里写的是框的名字，报给辅助工具的值写空白。
+        let state = picked.unwrap_or_else(|| rust_i18n::t!("kanban.dialog.template_blank").into_owned());
+        let menu = self.combo_menu(Combo::Template, window, cx);
+        let picker = self
+            .combo("todo-dialog-template", Combo::Template, name, value, true, menu, cx)
+            .aria_value(state)
+            .max_w(scaled(200.))
+            .h(scaled(28.))
+            .bg(gpui::transparent_black())
+            .border_color(gpui::transparent_black())
+            .text_color(subtle);
+        Some(Self::opens_menu(Combo::Template, picker, cx))
+    }
+
+    /// 顶上一条：标题，右边是「模板」框（`render_template_picker`）、关掉的按钮和它的键。
+    fn render_header(&self, title: String, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let templates = self.render_template_picker(window, cx);
+        let subtle = cx.theme().subtle_foreground;
+        let close = Button::new("todo-dialog-close", rust_i18n::t!("kanban.dialog.close").into_owned())
+            .variant(ButtonVariant::Ghost)
+            .icon(CLOSE_ICON)
+            .icon_size(13.)
+            .h(scaled(28.))
+            .pl(px(9.))
+            .pr(px(6.))
+            .gap(px(7.))
+            .rounded(px(7.))
+            .text_color(subtle)
+            .cursor_pointer()
+            .child(Kbd::new("esc"))
+            .on_press(cx, |_, _, cx| cx.emit(DialogEvent::Dismissed));
         div()
-            .id("todo-dialog-title")
-            .role(Role::Heading)
-            .aria_level(1)
-            .aria_label(title.clone())
-            .text_size(FontSize::Title)
-            .font_weight(FontWeight::BOLD)
-            .child(title)
+            .flex()
+            .items_center()
+            .gap(px(10.))
+            .pl(px(20.))
+            .pr(px(14.))
+            .pt(px(14.))
+            .pb(px(12.))
+            .child(
+                div()
+                    .id("todo-dialog-title")
+                    .role(Role::Heading)
+                    .aria_level(1)
+                    .aria_label(title.clone())
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(FontSize::Title)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title),
+            )
+            .children(templates)
+            .child(close)
     }
 
     /// 标题和按钮之间的各栏；窗口矮时只有这些滚动，标题和保存按钮总在。默认大小的窗口里附件和下面的开关就在
@@ -1318,26 +1661,24 @@ impl TodoDialog {
             .overflow_y_scroll()
             .flex()
             .flex_col()
-            .gap(px(12.))
-            .children(self.render_template_input(cx))
-            .child(field(
-                rust_i18n::t!("kanban.dialog.title_label").into_owned(),
-                grow_input(&self.title).into_any_element(),
-                cx,
-            ))
-            .child(field(
-                rust_i18n::t!("kanban.dialog.prompt").into_owned(),
-                Textarea::new(&self.prompt).min_h(scaled(28.)).py(px(4.)).flex().items_center().into_any_element(),
-                cx,
-            ))
-            .children(self.render_when(cx))
-            .child(self.render_workspace(window, cx))
-            .child(self.render_agent_row(window, cx))
-            .child(self.render_skills_row(window, cx))
-            .child(self.render_run_row(window, cx))
-            .child(self.render_attachments(cx))
-            .child(self.render_switches(cx));
-        // 不是整页时面板的高度跟着内容，压得住各栏的只有伸缩，百分比的高度压不住。
+            .gap(px(16.))
+            .child(self.render_composer(cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.))
+                    .children(self.render_template_input(cx))
+                    .child(self.render_workspace(window, cx))
+                    .child(self.render_agent_row(window, cx))
+                    .child(self.render_skills_row(window, cx))
+                    .children(self.render_start(window, cx))
+                    .children(self.render_when(cx))
+                    .child(self.render_time_limit(cx))
+                    .child(self.render_attachments(cx))
+                    .child(self.render_switches(cx)),
+            );
+        // 面板的高度跟着内容，压得住各栏的只有伸缩，百分比的高度压不住。
         div().flex_1().min_h_0().mr(px(-SCROLLBAR_GUTTER)).relative().flex().flex_col().child(fields).child(scrollbar(
             "todo-dialog-scrollbar",
             self.fields_scroll.clone(),
@@ -1345,118 +1686,185 @@ impl TodoDialog {
         ))
     }
 
-    /// 挑着的模板要另外填的那一项，放在最上面。
+    /// 标题和提示词：标题一行，下面是提示词的框，框底下一行说明。
+    fn render_composer(&self, cx: &App) -> impl IntoElement {
+        let prompt_hint = rust_i18n::t!("kanban.dialog.prompt_hint").into_owned();
+        let title = Input::new(&self.title).h(scaled(34.)).px(px(14.)).rounded(px(10.)).text_size(FontSize::Large);
+        let prompt = Textarea::new(&self.prompt)
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .px(px(14.))
+            .pt(px(12.))
+            .pb(px(8.))
+            .rounded(px(10.))
+            .text_size(FontSize::Large)
+            .child(hint("todo-dialog-prompt-hint", prompt_hint, cx));
+        div().flex().flex_col().gap(px(8.)).child(title).child(prompt)
+    }
+
+    /// 挑着的模板要另外填的那一项，放在各行的最上面。
     fn render_template_input(&self, cx: &App) -> Option<Div> {
         self.template
             .and_then(|index| self.templates[index].input.clone())
-            .map(|label| field(label, grow_input(&self.input).into_any_element(), cx))
+            .map(|label| row(label, grow_input(&self.input), cx))
     }
 
-    /// 定时跑的方式和时间：一次、每天（可以只挑几天）、每隔、cron；只有定时有。
-    fn render_when(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let fg_h = cx.theme().foreground;
-        self.schedule.then(|| {
-            let kind = |group: Segmented, id: &'static str, kind: Kind, label: &str, cx: &mut Context<Self>| {
-                group.option(
-                    id,
-                    rust_i18n::t!(label).into_owned(),
-                    self.kind == Some(kind),
-                    cx,
-                    move |dialog, window, cx| {
-                        dialog.kind = Some(kind);
-                        let input = match kind {
-                            Kind::Once => dialog.at.clone(),
-                            Kind::Daily => dialog.clock.clone(),
-                            Kind::Every => dialog.minutes.clone(),
-                            Kind::Cron => dialog.cron.clone(),
-                        };
-                        window.focus(&input.focus_handle(cx), cx);
-                        cx.notify();
-                    },
-                )
-            };
-            let when_label = rust_i18n::t!("kanban.dialog.when").into_owned();
-            let kinds = Segmented::new("todo-dialog-when", when_label.clone());
-            let kinds = kind(kinds, "todo-dialog-once", Kind::Once, "kanban.dialog.kind_once", cx);
-            let kinds = kind(kinds, "todo-dialog-daily", Kind::Daily, "kanban.dialog.kind_daily", cx);
-            let kinds = kind(kinds, "todo-dialog-every", Kind::Every, "kanban.dialog.kind_every", cx);
-            let kinds = kind(kinds, "todo-dialog-cron", Kind::Cron, "kanban.dialog.kind_cron", cx);
-            let when_input = match self.kind {
-                Some(Kind::Once) => grow_input(&self.at).into_any_element(),
-                Some(Kind::Daily) => grow_input(&self.clock).into_any_element(),
-                Some(Kind::Cron) => {
-                    let hint = rust_i18n::t!("kanban.dialog.cron_hint").into_owned();
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(4.))
-                        .child(grow_input(&self.cron))
-                        .child(
-                            div()
-                                .id("todo-dialog-cron-hint")
-                                .aria_static_text(hint.clone())
-                                .text_size(FontSize::Small)
-                                .text_color(fg_h.opacity(0.55))
-                                .child(hint),
-                        )
-                        .into_any_element()
-                }
-                // 框里只有数字，单位写在后面。
-                Some(Kind::Every) => div()
+    /// 什么时候做：分段挑马上开始、放进待办、排在别的后面，新建时还能挑定时，下面一张小卡说明会怎样。排在别的
+    /// 后面时在卡里挑先等哪个（也可以不等哪个），定时时卡里填什么时候跑（`when_card`）。只有新建的和还能开始的
+    /// 任务有。
+    fn render_start(&self, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
+        let creating = self.editing.is_none();
+        if !creating && !self.startable() {
+            return None;
+        }
+        let mode = self.start_mode();
+        let label = rust_i18n::t!("kanban.dialog.when").into_owned();
+        let option = |group: Segmented, id: &'static str, choice: StartMode, key: &str, cx: &mut Context<Self>| {
+            group.option(id, rust_i18n::t!(key).into_owned(), mode == choice, cx, move |dialog, _, cx| {
+                dialog.pick_start(choice, cx);
+            })
+        };
+        let group = Segmented::new("todo-dialog-start", label.clone()).fill().h(scaled(CONTROL_HEIGHT)).w_full();
+        let group = option(group, "todo-dialog-start-now", StartMode::Now, "kanban.dialog.start_now", cx);
+        let group = option(group, "todo-dialog-start-manual", StartMode::Manual, "kanban.dialog.start_manual", cx);
+        let group = option(group, "todo-dialog-start-queue", StartMode::Queue, "kanban.dialog.start_after", cx);
+        let group = if creating {
+            option(group, "todo-dialog-start-schedule", StartMode::Schedule, "kanban.dialog.start_schedule", cx)
+        } else {
+            group
+        };
+        let note = |key: &str, cx: &App| hint("todo-dialog-start-hint", rust_i18n::t!(key).into_owned(), cx);
+        let card = match mode {
+            StartMode::Now => card(cx).child(note("kanban.dialog.now_hint", cx)),
+            StartMode::Manual => card(cx).child(note("kanban.dialog.manual_hint", cx)),
+            StartMode::Queue => {
+                let subtle = cx.theme().subtle_foreground;
+                let value = match self.after.as_deref() {
+                    Some(after) => self.after_text(after, cx),
+                    None => rust_i18n::t!("kanban.dialog.queue_any").into_owned(),
+                };
+                let name = rust_i18n::t!("kanban.dialog.start_after").into_owned();
+                let menu = self.combo_menu(Combo::After, window, cx);
+                let after = self.combo("todo-dialog-after", Combo::After, name, value, true, menu, cx);
+                let after = Self::opens_menu(Combo::After, after, cx);
+                let lead = rust_i18n::t!("kanban.dialog.queue_lead").into_owned();
+                let tail = rust_i18n::t!("kanban.dialog.queue_tail").into_owned();
+                let pick = div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(8.))
-                    .child(grow_input(&self.minutes).w(scaled(96.)))
-                    .child(div().text_color(fg_h.opacity(0.7)).child(rust_i18n::t!("kanban.dialog.every").into_owned()))
-                    .into_any_element(),
-                None => {
-                    let hint = rust_i18n::t!("kanban.dialog.unknown_hint").into_owned();
-                    div()
-                        .id("todo-dialog-unknown")
-                        .aria_static_text(hint.clone())
-                        .text_size(FontSize::Small)
-                        .text_color(fg_h.opacity(0.55))
-                        .child(hint)
-                        .into_any_element()
-                }
-            };
-            let days = (self.kind == Some(Kind::Daily)).then(|| {
-                let pills: Vec<_> = week_order()
-                    .map(|day| {
-                        let on = self.days & (1 << day) != 0;
-                        let label = weekday(day);
-                        Chip::new(("todo-weekday", usize::from(day)), label, on).on_press(cx, move |dialog, _, cx| {
-                            dialog.days ^= 1 << day;
-                            cx.notify();
-                        })
-                    })
-                    .collect();
-                div().flex().flex_col().gap(px(4.)).child(div().flex().flex_wrap().gap(px(4.)).children(pills)).child(
-                    div()
-                        .text_size(FontSize::Small)
-                        .text_color(fg_h.opacity(0.55))
-                        .child(rust_i18n::t!("kanban.dialog.days_hint").into_owned()),
-                )
-            });
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .child(div().text_color(fg_h.opacity(0.7)).child(when_label))
-                        .child(kinds),
-                )
-                .child(when_input)
-                .children(days)
-        })
+                    .child(div().text_color(subtle).child(lead))
+                    .child(after)
+                    .child(div().text_color(subtle).child(tail));
+                let hint = if self.after.is_some() { "kanban.dialog.after_hint" } else { "kanban.dialog.queued_hint" };
+                card(cx).child(pick).child(note(hint, cx))
+            }
+            StartMode::Schedule => self.when_card(cx),
+        };
+        Some(row(label, div().flex().flex_col().gap(px(8.)).child(group).child(card), cx))
     }
 
-    /// 工作区那一栏；任务开始过了就不能再改。
+    /// 编辑定时时什么时候跑那一行（`when_card`），没有分段；新建的不画。
+    fn render_when(&self, cx: &mut Context<Self>) -> Option<Div> {
+        if !self.schedule || self.editing.is_none() {
+            return None;
+        }
+        let label = rust_i18n::t!("kanban.dialog.when").into_owned();
+        Some(row(label, self.when_card(cx), cx))
+    }
+
+    /// 定时什么时候跑的小卡：一排小签挑一次、每天（可以只挑几天）、每隔、cron，后面接着填时间，下面列出接下来
+    /// 几次到点的时刻。
+    fn when_card(&self, cx: &mut Context<Self>) -> Div {
+        let subtle = cx.theme().subtle_foreground;
+        let kinds = [
+            ("todo-dialog-kind-once", Kind::Once, "kanban.dialog.kind_once"),
+            ("todo-dialog-kind-daily", Kind::Daily, "kanban.dialog.kind_daily"),
+            ("todo-dialog-kind-every", Kind::Every, "kanban.dialog.kind_every"),
+            ("todo-dialog-kind-cron", Kind::Cron, "kanban.dialog.kind_cron"),
+        ]
+        .map(|(id, kind, key)| {
+            pill(Chip::new(id, rust_i18n::t!(key).into_owned(), self.kind == Some(kind))).on_press(
+                cx,
+                move |dialog, window, cx| {
+                    dialog.kind = Some(kind);
+                    let input = match kind {
+                        Kind::Once => dialog.at.clone(),
+                        Kind::Daily => dialog.clock.clone(),
+                        Kind::Every => dialog.minutes.clone(),
+                        Kind::Cron => dialog.cron.clone(),
+                    };
+                    window.focus(&input.focus_handle(cx), cx);
+                    cx.notify();
+                },
+            )
+        });
+        let at_word =
+            || div().ml(px(6.)).text_color(subtle).child(rust_i18n::t!("kanban.dialog.clock_at").into_owned());
+        let field = |input: &Entity<InputState>, width: f32| Input::new(input).w(scaled(width)).h(scaled(28.));
+        // 框后面跟的：一次、每天前面写「在」，每隔的框里只有数字、单位写在后面，cron 用等宽字。
+        let input: Vec<gpui::AnyElement> = match self.kind {
+            Some(Kind::Once) => vec![at_word().into_any_element(), field(&self.at, 150.).into_any_element()],
+            Some(Kind::Daily) => vec![at_word().into_any_element(), field(&self.clock, 72.).into_any_element()],
+            Some(Kind::Every) => vec![
+                field(&self.minutes, 64.).ml(px(6.)).into_any_element(),
+                div().text_color(subtle).child(rust_i18n::t!("kanban.dialog.every").into_owned()).into_any_element(),
+            ],
+            Some(Kind::Cron) => {
+                let mono = crate::ui::font::mono(cx);
+                let cron = Input::new(&self.cron)
+                    .flex_1()
+                    .min_w(scaled(140.))
+                    .h(scaled(28.))
+                    .ml(px(6.))
+                    .when_some(mono, |input, family| input.font_family(family));
+                vec![cron.into_any_element()]
+            }
+            None => Vec::new(),
+        };
+        let first = div().flex().flex_wrap().items_center().gap(px(6.)).children(kinds).children(input);
+        let days = (self.kind == Some(Kind::Daily)).then(|| {
+            let pills: Vec<_> = week_order()
+                .map(|day| {
+                    let on = self.days & (1 << day) != 0;
+                    let label = weekday(day);
+                    Chip::new(("todo-weekday", usize::from(day)), label, on).on_press(cx, move |dialog, _, cx| {
+                        dialog.days ^= 1 << day;
+                        cx.notify();
+                    })
+                })
+                .collect();
+            div().flex().flex_wrap().items_center().gap(px(4.)).children(pills).child(
+                hint("todo-dialog-days-hint", rust_i18n::t!("kanban.dialog.days_hint").into_owned(), cx).ml(px(4.)),
+            )
+        });
+        let cron_hint = (self.kind == Some(Kind::Cron))
+            .then(|| hint("todo-dialog-cron-hint", rust_i18n::t!("kanban.dialog.cron_hint").into_owned(), cx));
+        let fires = match self.kind {
+            None => Some(hint("todo-dialog-unknown", rust_i18n::t!("kanban.dialog.unknown_hint").into_owned(), cx)),
+            // 填得不对时不列；为什么不对等保存时在底栏说。
+            Some(_) => self.typed_when(cx).ok().and_then(|when| {
+                let now = when::unix_now();
+                let times: Vec<String> =
+                    next_fires(&when, now).into_iter().map(|at| when::fire_text(at, now)).collect();
+                let text = match times.as_slice() {
+                    [] => return None,
+                    [first, second, third] => {
+                        rust_i18n::t!("kanban.dialog.next_fires", first = first, second = second, third = third)
+                    }
+                    [first, ..] => rust_i18n::t!("kanban.dialog.next_fire", first = first),
+                };
+                Some(hint("todo-dialog-next-fires", text.into_owned(), cx).text_color(subtle))
+            }),
+        };
+        card(cx).child(first).children(days).children(cron_hint).children(fires)
+    }
+
+    /// 项目那一行：在哪个工作区或目录里做（框里带着当前的分支），要不要独立的工作树；任务开始过了就都不能再改。
     fn render_workspace(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.theme().muted_foreground;
         let workspace_label = rust_i18n::t!("kanban.dialog.workspace").into_owned();
         let workspace_text = self
             .workspaces
@@ -1464,21 +1872,48 @@ impl TodoDialog {
             .find(|(dir, _)| *dir == self.dir)
             .map_or_else(|| display_dir(&self.dir), |(_, name)| name.to_string());
         let menu = self.combo_menu(Combo::Workspace, window, cx);
-        let workspace = self.combo(
-            "todo-dialog-workspace",
-            Combo::Workspace,
-            workspace_label.clone(),
-            workspace_text,
-            !self.locked,
-            menu,
-            cx,
-        );
+        let mut workspace = self
+            .combo(
+                "todo-dialog-workspace",
+                Combo::Workspace,
+                workspace_label.clone(),
+                workspace_text,
+                !self.locked,
+                menu,
+                cx,
+            )
+            .leading(svg().path(FOLDER_ICON).flex_none().size(px(13.)).text_color(muted));
+        if let Some(branch) = self.branch.clone() {
+            let mono = crate::ui::font::mono(cx);
+            let text = div()
+                .flex_none()
+                .max_w(scaled(120.))
+                .truncate()
+                .text_size(FontSize::Small)
+                .text_color(muted)
+                .when_some(mono, |text, family| text.font_family(family))
+                .child(branch.clone());
+            workspace = workspace.trailing(text).aria_description(branch);
+        }
         let workspace = if self.locked { workspace } else { Self::opens_menu(Combo::Workspace, workspace, cx) };
-        field(workspace_label, workspace.into_any_element(), cx)
+        let worktree_label = rust_i18n::t!("kanban.dialog.worktree").into_owned();
+        let worktree = checkbox("todo-dialog-worktree", worktree_label, self.worktree, !self.locked, cx).when(
+            !self.locked,
+            |checkbox| {
+                checkbox.on_press(cx, |dialog, _, cx| {
+                    dialog.worktree = !dialog.worktree;
+                    cx.notify();
+                })
+            },
+        );
+        let controls =
+            div().flex().flex_wrap().items_center().gap_x(px(14.)).gap_y(px(8.)).child(workspace).child(worktree);
+        row(workspace_label, controls, cx)
     }
 
-    /// 挑了 agent 时并排挑模型和强度；自己写命令时下面是命令框。
-    fn render_agent_row(&self, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+    /// 交给谁那一行：agent，挑了 agent 时接着挑模型和强度；自己写命令时下面是命令框。
+    fn render_agent_row(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.theme().muted_foreground;
         let default = rust_i18n::t!("kanban.dialog.default").into_owned();
         let agent_label = rust_i18n::t!("kanban.dialog.agent").into_owned();
         let agent_text = self.agent.as_ref().map_or_else(
@@ -1488,14 +1923,19 @@ impl TodoDialog {
         let menu = self.combo_menu(Combo::Agent, window, cx);
         let agent = Self::opens_menu(
             Combo::Agent,
-            self.combo("todo-dialog-agent", Combo::Agent, agent_label.clone(), agent_text, true, menu, cx),
+            self.combo("todo-dialog-agent", Combo::Agent, agent_label.clone(), agent_text, true, menu, cx)
+                .leading(svg().path(SPARKLE_ICON).flex_none().size(px(13.)).text_color(muted)),
             cx,
         );
-        match &self.agent {
+        // 框里值前面淡淡写上它是什么。
+        let named = |label: String| div().flex_none().text_color(muted).child(label);
+        let controls = div().flex().flex_wrap().items_center().gap(px(6.)).child(agent);
+        let column = div().flex().flex_col().gap(px(6.));
+        let column = match &self.agent {
             Some(pick) => {
                 let launcher = pick.launcher();
                 let catalog = cached(launcher);
-                // 没有模型或强度参数的 agent 不画那一栏；强度接在模型名后面的，挑了模型才能挑强度。
+                // 没有模型或强度参数的 agent 不画那个框；强度接在模型名后面的，挑了模型才能挑强度。
                 let model = launcher.model_arg.map(|_| {
                     let text = pick.model.as_deref().map_or_else(
                         || default.clone(),
@@ -1505,7 +1945,8 @@ impl TodoDialog {
                     let menu = self.combo_menu(Combo::Model, window, cx);
                     Self::opens_menu(
                         Combo::Model,
-                        self.combo("todo-dialog-model", Combo::Model, label, text, true, menu, cx),
+                        self.combo("todo-dialog-model", Combo::Model, label.clone(), text, true, menu, cx)
+                            .leading(named(label)),
                         cx,
                     )
                 });
@@ -1514,42 +1955,26 @@ impl TodoDialog {
                     let text = pick.effort.clone().filter(|_| enabled).unwrap_or_else(|| default.clone());
                     let label = rust_i18n::t!("kanban.dialog.effort").into_owned();
                     let menu = self.combo_menu(Combo::Effort, window, cx);
-                    let effort = self.combo("todo-dialog-effort", Combo::Effort, label, text, enabled, menu, cx);
+                    let effort = self
+                        .combo("todo-dialog-effort", Combo::Effort, label.clone(), text, enabled, menu, cx)
+                        .leading(named(label));
                     if enabled { Self::opens_menu(Combo::Effort, effort, cx) } else { effort }
                 });
-                let column = |key: &str, child: SelectTrigger| {
-                    div().flex_1().min_w_0().child(field(rust_i18n::t!(key).into_owned(), child.into_any_element(), cx))
-                };
-                let row = div()
-                    .flex()
-                    .gap(px(8.))
-                    .child(column("kanban.dialog.agent", agent))
-                    .children(model.map(|model| column("kanban.dialog.model", model)))
-                    .children(effort.map(|effort| column("kanban.dialog.effort", effort)));
                 // 找不到命令时开始了也只会在终端里报错，挑的时候就说出来。
                 let missing = self.agent_missing().then(|| {
                     let note = rust_i18n::t!("kanban.dialog.agent_missing", agent = launcher.label).into_owned();
-                    div()
-                        .id("todo-dialog-agent-missing")
-                        .aria_static_text(note.clone())
-                        .text_size(FontSize::Small)
-                        .text_color(cx.theme().destructive)
-                        .child(note)
+                    hint("todo-dialog-agent-missing", note, cx).text_color(cx.theme().destructive)
                 });
-                div().flex().flex_col().gap(px(6.)).child(row).children(missing).into_any_element()
+                column.child(controls.children(model).children(effort)).children(missing)
             }
-            None => div()
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .child(field(agent_label, agent.into_any_element(), cx))
-                .child(grow_input(&self.command))
-                .into_any_element(),
-        }
+            None => column.child(controls).child(grow_input(&self.command)),
+        };
+        row(agent_label, column, cx)
     }
 
-    /// skill 那一栏，和自定义 agent 并排。
+    /// skill 那一行，挑着的 agent 能用自定义 agent 时接着挑它。
     fn render_skills_row(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.theme().muted_foreground;
         let none = rust_i18n::t!("kanban.dialog.none").into_owned();
         let skills_label = rust_i18n::t!("kanban.dialog.skills").into_owned();
         let skills_text = if self.skills.is_empty() { none.clone() } else { self.skills.join(", ") };
@@ -1565,49 +1990,73 @@ impl TodoDialog {
             let label = rust_i18n::t!("kanban.dialog.subagent").into_owned();
             let text = self.subagent.clone().unwrap_or_else(|| none.clone());
             let menu = self.combo_menu(Combo::Subagent, window, cx);
-            let subagent = self.combo("todo-dialog-subagent", Combo::Subagent, label.clone(), text, true, menu, cx);
-            let subagent = Self::opens_menu(Combo::Subagent, subagent, cx);
-            div().flex_1().min_w_0().child(field(label, subagent.into_any_element(), cx))
+            let subagent = self
+                .combo("todo-dialog-subagent", Combo::Subagent, label.clone(), text, true, menu, cx)
+                .leading(div().flex_none().text_color(muted).child(label));
+            Self::opens_menu(Combo::Subagent, subagent, cx)
         });
-        div()
-            .flex()
-            .gap(px(8.))
-            .child(div().flex_1().min_w_0().child(field(skills_label, skills.into_any_element(), cx)))
-            .children(subagent)
+        let controls = div().flex().flex_wrap().items_center().gap(px(6.)).child(skills).children(subagent);
+        row(skills_label, controls, cx)
     }
 
-    /// 时限那一栏；还没开始的任务和开始方式并排。开始过的任务照样能改时限。
-    fn render_run_row(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let fg_h = cx.theme().foreground;
-        // 框里只有数字，单位写在后面。
-        let limit = div().flex().items_center().gap(px(8.)).child(grow_input(&self.time_limit).w(scaled(96.))).child(
-            div().text_color(fg_h.opacity(0.7)).child(rust_i18n::t!("kanban.dialog.time_limit_unit").into_owned()),
-        );
-        let hint = rust_i18n::t!("kanban.dialog.time_limit_hint").into_owned();
-        let time_limit = div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(4.))
-            .child(field(rust_i18n::t!("kanban.dialog.time_limit").into_owned(), limit.into_any_element(), cx))
-            .child(
-                div()
-                    .id("todo-dialog-time-limit-hint")
-                    .aria_static_text(hint.clone())
-                    .text_size(FontSize::Small)
-                    .text_color(fg_h.opacity(0.55))
-                    .child(hint),
-            );
-        let queue = self.startable().then(|| {
-            let label = rust_i18n::t!("kanban.dialog.queue").into_owned();
-            let text = self.queue_text(cx);
-            let menu = self.combo_menu(Combo::After, window, cx);
-            let queue = self.combo("todo-dialog-queue", Combo::After, label.clone(), text, true, menu, cx);
-            let queue = Self::opens_menu(Combo::After, queue, cx);
-            div().flex_1().min_w_0().child(field(label, queue.into_any_element(), cx))
+    /// 时限栏写的落在哪一档小签上（`limit_preset`）。
+    fn limit_choice(&self, cx: &App) -> Option<Option<u32>> {
+        limit_preset(self.time_limit.read(cx).query(), self.custom_limit)
+    }
+
+    /// 时限换成现成的一档（为空是不限），收起自己定的框。
+    fn set_limit(&mut self, minutes: Option<u32>, cx: &mut Context<Self>) {
+        self.custom_limit = false;
+        let text = minutes.map(|minutes| minutes.to_string()).unwrap_or_default();
+        self.time_limit.update(cx, |input, cx| input.set_query(text, cx));
+        cx.notify();
+    }
+
+    /// 时限那一行：不限、现成的几档和自己定的小签，自己定时后面是分钟数的框；下面一句说明。开始过的任务照样能改。
+    fn render_time_limit(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let subtle = cx.theme().subtle_foreground;
+        let choice = self.limit_choice(cx);
+        let none = pill(Chip::new(
+            "todo-limit-none",
+            rust_i18n::t!("kanban.dialog.time_limit_placeholder").into_owned(),
+            choice == Some(None),
+        ))
+        .on_press(cx, |dialog, _, cx| dialog.set_limit(None, cx));
+        let presets = LIMIT_PRESETS.map(|minutes| {
+            pill(Chip::new(("todo-limit", minutes as usize), when::limit_text(minutes), choice == Some(Some(minutes))))
+                .on_press(cx, move |dialog, _, cx| dialog.set_limit(Some(minutes), cx))
         });
-        div().flex().gap(px(8.)).child(time_limit).children(queue)
+        let custom = pill(Chip::new(
+            "todo-limit-custom",
+            rust_i18n::t!("kanban.dialog.limit_custom").into_owned(),
+            choice.is_none(),
+        ))
+        .on_press(cx, |dialog, window, cx| {
+            dialog.custom_limit = true;
+            window.focus(&dialog.time_limit.focus_handle(cx), cx);
+            cx.notify();
+        });
+        // 框里只有数字，单位写在后面。
+        let input = choice.is_none().then(|| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(Input::new(&self.time_limit).w(scaled(64.)).h(scaled(28.)))
+                .child(div().text_color(subtle).child(rust_i18n::t!("kanban.dialog.time_limit_unit").into_owned()))
+        });
+        let chips = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(6.))
+            .child(none)
+            .children(presets)
+            .child(custom)
+            .children(input);
+        let note = hint("todo-dialog-time-limit-hint", rust_i18n::t!("kanban.dialog.time_limit_hint").into_owned(), cx);
+        let label = rust_i18n::t!("kanban.dialog.time_limit").into_owned();
+        row(label, div().flex().flex_col().gap(px(6.)).child(chips).child(note), cx)
     }
 
     /// 附件一个一块，写文件名，报给辅助工具的是整个路径；后面跟着添加的按钮。
@@ -1651,175 +2100,150 @@ impl TodoDialog {
                 .py(px(3.))
                 .cursor_pointer()
                 .on_press(cx, |dialog, window, cx| dialog.browse_attachments(window, cx));
-        field(
-            rust_i18n::t!("kanban.dialog.attachments").into_owned(),
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(6.))
-                .children(chips)
-                .child(add_attachment)
-                .into_any_element(),
-            cx,
-        )
+        let controls = div().flex().flex_wrap().items_center().gap(px(6.)).children(chips).child(add_attachment);
+        row(rust_i18n::t!("kanban.dialog.attachments").into_owned(), controls, cx)
     }
 
-    /// 要不要工作树、免确认一路跑完、做完自动标完成的三个开关，排在一行。
+    /// 免确认一路跑完、做完自动标完成的两个复选框，排在一行，左栏不写标签。
     fn render_switches(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let auto_label = rust_i18n::t!("kanban.dialog.auto").into_owned();
-        let auto = Switch::new("todo-dialog-auto", auto_label.clone(), self.auto)
-            .label(auto_label)
-            .cursor_pointer()
+        let auto = checkbox("todo-dialog-auto", rust_i18n::t!("kanban.dialog.auto").into_owned(), self.auto, true, cx)
             .on_press(cx, |dialog, _, cx| {
                 dialog.auto = !dialog.auto;
                 cx.notify();
             });
         let auto_done_label = rust_i18n::t!("kanban.dialog.auto_done").into_owned();
-        let auto_done = Switch::new("todo-dialog-auto-done", auto_done_label.clone(), self.auto_done)
-            .label(auto_done_label)
-            .cursor_pointer()
-            .on_press(cx, |dialog, _, cx| {
+        let auto_done = checkbox("todo-dialog-auto-done", auto_done_label, self.auto_done, true, cx).on_press(
+            cx,
+            |dialog, _, cx| {
                 dialog.auto_done = !dialog.auto_done;
                 cx.notify();
-            });
-        let worktree_label = rust_i18n::t!("kanban.dialog.worktree").into_owned();
-        // 一行字配一个开关，点字也算点开关。
-        let worktree = Switch::new("todo-dialog-worktree", worktree_label.clone(), self.worktree)
-            .label(worktree_label)
-            .cursor_pointer()
-            .when(!self.locked, |pill| {
-                pill.on_press(cx, |dialog, _, cx| {
-                    dialog.worktree = !dialog.worktree;
-                    cx.notify();
-                })
-            })
-            .when(self.locked, |pill| pill.opacity(0.6))
-            .aria_disabled(self.locked);
-        div().flex().flex_wrap().gap(px(16.)).child(worktree).child(auto).child(auto_done)
+            },
+        );
+        row(String::new(), div().flex().flex_wrap().gap_x(px(16.)).child(auto).child(auto_done), cx)
     }
 
-    /// 存的时候没办成的原因。
-    fn render_error(&self, cx: &App) -> Option<impl IntoElement> {
-        let destructive = cx.theme().destructive;
-        self.error.clone().map(|error| {
-            div().id("todo-dialog-error").aria_static_text(error.clone()).text_color(destructive).child(error)
-        })
-    }
-
-    /// 底下的报错、取消、保存和保存并开始。
-    fn render_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // 对话框底下的按钮：比 `ButtonSize::Default` 高一些，高度由上下留白撑开。
-        let button = |id: &'static str, label: String, variant: ButtonVariant| {
-            Button::new(id, label).variant(variant).h_auto().py(px(5.)).cursor_pointer()
+    /// 照现在填的会怎么做的那句话（`summary_in`）。
+    fn summary(&self, cx: &App) -> String {
+        let agent = match &self.agent {
+            Some(pick) => pick.launcher().label.to_owned(),
+            // 自己写的命令说程序名，空着时说是自己写的命令。
+            None => self
+                .command
+                .read(cx)
+                .query()
+                .split_whitespace()
+                .next()
+                .map_or_else(|| rust_i18n::t!("kanban.dialog.custom").into_owned(), str::to_owned),
         };
-        let cancel = button("todo-dialog-cancel", rust_i18n::t!("kanban.cancel").into_owned(), ButtonVariant::Ghost)
-            .on_press(cx, |_, _, cx| cx.emit(DialogEvent::Dismissed));
-        let save = button("todo-dialog-save", rust_i18n::t!("kanban.save").into_owned(), ButtonVariant::Secondary)
-            .when(self.saving, |button| button.opacity(0.5))
-            .on_press(cx, |this, _, cx| this.save(false, cx));
-        // 「找不到命令」只按 PATH 找，shell 里用别名装的 agent 也会被说成找不到，所以照样让开始。
-        // 排队的交给宿主轮到时开始，不另给「保存并开始」。
-        let save_and_start = (self.startable() && !self.queued).then(|| {
-            button(
-                "todo-dialog-save-start",
-                rust_i18n::t!("kanban.save_and_start").into_owned(),
-                ButtonVariant::Default,
-            )
-            .when(self.saving, |button| button.opacity(0.5))
-            .on_press(cx, |this, _, cx| this.save(true, cx))
+        let model = self.agent.as_ref().and_then(|pick| {
+            let model = pick.model.as_deref()?;
+            Some(cached(pick.launcher()).map_or_else(|| model.to_owned(), |catalog| catalog.label(model).to_owned()))
         });
-        // 报错放在按钮左边的空处，不另占一行，免得把上面各栏挤出可见范围。
-        div()
-            .pt(px(4.))
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .child(div().flex_1().min_w_0().children(self.render_error(cx)))
-            .child(cancel)
-            .child(save)
-            .children(save_and_start)
+        let project = self
+            .workspaces
+            .iter()
+            .find(|(dir, _)| *dir == self.dir)
+            .map_or_else(|| base_name(&self.dir), |(_, name)| name.to_string());
+        let limit = parse_time_limit(self.time_limit.read(cx).query()).ok().flatten();
+        let now = when::unix_now();
+        let schedule_when = self.schedule.then(|| self.typed_when(cx).ok()).flatten();
+        let when_text = match &schedule_when {
+            Some(When::Once { at }) => when::fire_text(*at, now),
+            Some(When::Unknown) | None => String::new(),
+            Some(rule) => when::describe_when(rule),
+        };
+        let lead = match self.start_mode() {
+            StartMode::Schedule => match schedule_when {
+                Some(When::Once { .. }) => Lead::Once(&when_text),
+                Some(When::Unknown) | None => Lead::Due,
+                Some(_) => Lead::Repeat(&when_text),
+            },
+            _ if !self.startable() => Lead::Plain,
+            StartMode::Now => Lead::Now,
+            StartMode::Manual => Lead::Manual,
+            StartMode::Queue => match self.after.as_deref() {
+                None => Lead::Queued,
+                Some(after) => {
+                    Lead::After(store::data(cx).todos.iter().find(|todo| todo.id == after).map(|todo| todo.number))
+                }
+            },
+        };
+        let summary =
+            Summary { lead, agent: &agent, model: model.as_deref(), project: &project, worktree: self.worktree, limit };
+        summary_in(&summary, &rust_i18n::locale())
     }
 
-    /// 新建任务那一页左边的模板，空白的在最前面。
-    fn render_templates(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let theme = cx.theme();
-        let hover_bg = theme.mix(0.10);
-        let primary_bg = theme.mix(0.16);
-        let fg_h = theme.foreground;
-        let pill = |id: gpui::ElementId, label: String, on: bool| {
-            div()
-                .id(id)
-                .role(Role::RadioButton)
-                .aria_label(label.clone())
-                .aria_toggled(on.into())
-                .px(px(10.))
-                .py(px(3.))
-                .rounded(px(4.))
-                .cursor_pointer()
-                .when(on, |pill| pill.bg(primary_bg))
-                .when(!on, |pill| pill.hover(move |pill| pill.bg(hover_bg)))
-                .child(label)
+    /// 底栏主按钮上的字：新建时说按下会怎样，编辑时是保存，还没开始的任务选了马上开始时是保存并开始。
+    fn primary_label(&self) -> String {
+        let new = self.editing.is_none();
+        let key = match (self.start_mode(), self.startable()) {
+            (StartMode::Schedule, _) if new => "kanban.dialog.create_schedule",
+            (StartMode::Now, true) if new => "kanban.dialog.create_and_start",
+            (StartMode::Now, true) => "kanban.save_and_start",
+            (StartMode::Manual, true) if new => "kanban.dialog.create_todo",
+            (StartMode::Queue, true) if new => "kanban.dialog.create_queued",
+            _ => "kanban.save",
         };
-        (self.page && self.editing.is_none()).then(|| {
-            let label = rust_i18n::t!("kanban.dialog.templates").into_owned();
-            let blank = rust_i18n::t!("kanban.dialog.template_blank").into_owned();
-            let rows: Vec<_> = std::iter::once((None, "blank".to_owned(), blank))
-                .chain(self.templates.iter().enumerate().map(|(index, t)| (Some(index), t.id.clone(), t.name.clone())))
-                .map(|(index, id, name)| {
-                    let id = gpui::ElementId::Name(format!("todo-template-{id}").into());
-                    pill(id, name, self.template == index)
-                        .truncate()
-                        .on_press(cx, move |dialog, window, cx| dialog.pick_template(index, window, cx))
-                })
-                .collect();
-            // 模板目录在 home 下的点目录里，访达和资源管理器默认都看不到，给个按钮直接打开；路径放在悬停提示里。
-            let hint = runode_paths::Dirs::from_env().todo_templates_dir().map(|dir| {
-                let hint = rust_i18n::t!("kanban.dialog.templates_hint").into_owned();
-                let shown = display_dir(&dir);
-                let open =
-                    Button::new("todo-templates-open", rust_i18n::t!("kanban.dialog.templates_open").into_owned())
-                        .variant(ButtonVariant::Link)
-                        .with_size(ButtonSize::Sm)
-                        .cursor_pointer()
-                        .aria_description(shown.clone())
-                        .tooltip(crate::ui::tooltip::tooltip(shown, None))
-                        .on_press(cx, move |_, _, cx| {
-                            if let Err(err) = std::fs::create_dir_all(&dir) {
-                                tracing::warn!("cannot create {}: {err}", dir.display());
-                            }
-                            cx.open_with_system(&dir);
-                        });
+        rust_i18n::t!(key).into_owned()
+    }
+
+    /// 底栏：左边是存的时候没办成的原因，没有时是照现在填的会怎么做；右边是取消和主按钮。
+    fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let (border, subtle, destructive) = (theme.border, theme.subtle_foreground, theme.destructive);
+        let (primary_fg, mono_fg) = (theme.primary_foreground, theme.primary_foreground.opacity(0.7));
+        let note = match self.error.clone() {
+            Some(error) => {
+                div().id("todo-dialog-error").aria_static_text(error.clone()).text_color(destructive).child(error)
+            }
+            None => {
+                let summary = self.summary(cx);
                 div()
-                    .pt(px(8.))
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .id("todo-templates-hint")
-                            .aria_static_text(hint.clone())
-                            .text_size(FontSize::Small)
-                            .text_color(fg_h.opacity(0.55))
-                            .child(hint),
-                    )
-                    .child(open)
-            });
-            div()
-                .id("todo-templates")
-                .role(Role::RadioGroup)
-                .aria_label(label.clone())
-                .flex_none()
-                .w(scaled(200.))
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .overflow_y_scroll()
-                .child(div().pb(px(6.)).text_color(fg_h.opacity(0.7)).child(label))
-                .children(rows)
-                .children(hint)
-        })
+                    .id("todo-dialog-summary")
+                    .aria_static_text(summary.clone())
+                    .line_clamp(2)
+                    .text_size(FontSize::Small)
+                    .text_color(subtle)
+                    .child(summary)
+            }
+        };
+        let cancel = Button::new("todo-dialog-cancel", rust_i18n::t!("kanban.cancel").into_owned())
+            .variant(ButtonVariant::Outline)
+            .h(scaled(32.))
+            .px(px(14.))
+            .rounded(px(8.))
+            .cursor_pointer()
+            .on_press(cx, |_, _, cx| cx.emit(DialogEvent::Discarded));
+        // 「找不到命令」只按 PATH 找，shell 里用别名装的 agent 也会被说成找不到，所以照样让开始。键是提示词框
+        // 提交的键（`TextareaEvent::Submit`）。
+        let label = self.primary_label();
+        let submit = Button::new("todo-dialog-save", label.clone())
+            .variant(ButtonVariant::Default)
+            .h(scaled(32.))
+            .pl(px(14.))
+            .pr(px(8.))
+            .gap(px(8.))
+            .rounded(px(8.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .cursor_pointer()
+            .when(self.saving, |button| button.opacity(0.5))
+            .child(label)
+            .child(Kbd::new(crate::keybinds::secondary_text("enter")).bg(primary_fg.opacity(0.1)).text_color(mono_fg))
+            .on_press(cx, |this, _, cx| this.save(this.start, cx));
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_x(px(14.))
+            .gap_y(px(10.))
+            .pl(px(20.))
+            .pr(px(14.))
+            .pt(px(12.))
+            .pb(px(14.))
+            .border_t_1()
+            .border_color(border)
+            .child(div().flex_1().min_w(scaled(200.)).child(note))
+            .child(div().flex_none().flex().gap(px(8.)).child(cancel).child(submit))
     }
 }
 
@@ -1830,9 +2254,8 @@ impl Render for TodoDialog {
             window.focus(&field, cx);
         }
         let title = self.heading();
-        let page = self.page;
+        let surface = cx.theme().surface;
         let panel = Dialog::new("todo-dialog", title.clone())
-            .when(page, |panel| panel.role(Role::Group))
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::pick_agent))
             .on_action(cx.listener(Self::pick_model))
@@ -1841,6 +2264,8 @@ impl Render for TodoDialog {
             .on_action(cx.listener(Self::pick_skill))
             .on_action(cx.listener(Self::pick_subagent))
             .on_action(cx.listener(Self::pick_queue))
+            .on_action(cx.listener(Self::pick_template))
+            .on_action(cx.listener(Self::open_templates))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if is_dismiss_key(&event.keystroke) {
                     cx.stop_propagation();
@@ -1849,35 +2274,70 @@ impl Render for TodoDialog {
                     this.tab_between_fields(event, window, cx);
                 }
             }))
-            .when(page, |panel| panel.flex_1().min_w_0().max_w(px(720.)))
-            .when(!page, |panel| panel.w(px(480.)).max_w_full())
+            .w(px(DIALOG_WIDTH))
+            .max_w_full()
             .max_h_full()
-            .p(px(20.))
+            .rounded(px(14.))
+            .bg(surface)
             .flex()
             .flex_col()
-            .gap(px(12.))
-            .child(Self::render_title(title))
-            .child(self.render_fields(window, cx))
-            .child(self.render_buttons(cx));
-        if page {
-            return div()
-                .id("todo-page")
-                .size_full()
-                .flex()
-                .gap(px(16.))
-                .children(self.render_templates(cx))
-                .child(panel)
-                .into_any_element();
-        }
+            .child(self.render_header(title, window, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .px(px(20.))
+                    .pb(px(18.))
+                    .flex()
+                    .flex_col()
+                    .child(self.render_fields(window, cx)),
+            )
+            .child(self.render_footer(cx));
         backdrop("todo-dialog-backdrop")
             .pt(px(TITLEBAR_HEIGHT + 32.))
             .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| cx.emit(DialogEvent::Dismissed)))
             .child(panel)
-            .into_any_element()
     }
 }
 
 impl TodoDialog {
+    /// 定时那几栏现在填的规则；填得不对时是说明的键和该去改的那一栏。只有编辑读不懂的定时、还没选一种时是
+    /// `When::Unknown`：保存时就不发 `when`，规则照原样留着。
+    fn typed_when(&self, cx: &App) -> Result<When, (&'static str, &Entity<InputState>)> {
+        Ok(match self.kind {
+            None => When::Unknown,
+            Some(Kind::Once) => {
+                let original = match &self.editing {
+                    Some(Editing::Schedule(Schedule { when: When::Once { at }, .. })) => Some(*at),
+                    _ => None,
+                };
+                When::Once {
+                    at: once_at(self.at.read(cx).query(), original).ok_or(("kanban.dialog.bad_once", &self.at))?,
+                }
+            }
+            Some(Kind::Daily) => {
+                let (hour, minute) = runode_todo::parse_clock(self.clock.read(cx).query())
+                    .ok_or(("kanban.dialog.bad_daily", &self.clock))?;
+                When::Daily { hour, minute, days: self.days }
+            }
+            Some(Kind::Every) => When::Every {
+                minutes: parse_minutes(self.minutes.read(cx).query())
+                    .ok_or(("kanban.dialog.bad_every", &self.minutes))?,
+            },
+            Some(Kind::Cron) => {
+                let expr = self.cron.read(cx).query().trim().to_owned();
+                if !runode_todo::valid_cron(&expr) {
+                    return Err(("kanban.dialog.bad_cron", &self.cron));
+                }
+                let when = When::Cron { expr };
+                if runode_todo::next_fire(&when, when::unix_now()).is_none() {
+                    return Err(("kanban.dialog.cron_never", &self.cron));
+                }
+                when
+            }
+        })
+    }
+
     /// 按填的内容造出要发的请求；填得不对时是给人看的原因和该去改的那一栏。
     fn request(&self, cx: &App) -> Result<store::Step, (String, FocusHandle)> {
         let wrong = |key: &str, field: FocusHandle| (rust_i18n::t!(key).into_owned(), field);
@@ -1942,40 +2402,7 @@ impl TodoDialog {
                 _ => Box::new(move |req| ClientMsg::AddTodo { req, spec }),
             });
         }
-        let when = match self.kind {
-            // 只有编辑读不懂的定时、还没选一种时为空：下面就不发 `when`，规则照原样留着。
-            None => When::Unknown,
-            Some(Kind::Once) => {
-                let original = match &self.editing {
-                    Some(Editing::Schedule(Schedule { when: When::Once { at }, .. })) => Some(*at),
-                    _ => None,
-                };
-                When::Once {
-                    at: once_at(self.at.read(cx).query(), original)
-                        .ok_or_else(|| wrong("kanban.dialog.bad_once", self.at.focus_handle(cx)))?,
-                }
-            }
-            Some(Kind::Daily) => {
-                let (hour, minute) = runode_todo::parse_clock(self.clock.read(cx).query())
-                    .ok_or_else(|| wrong("kanban.dialog.bad_daily", self.clock.focus_handle(cx)))?;
-                When::Daily { hour, minute, days: self.days }
-            }
-            Some(Kind::Every) => When::Every {
-                minutes: parse_minutes(self.minutes.read(cx).query())
-                    .ok_or_else(|| wrong("kanban.dialog.bad_every", self.minutes.focus_handle(cx)))?,
-            },
-            Some(Kind::Cron) => {
-                let expr = self.cron.read(cx).query().trim().to_owned();
-                if !runode_todo::valid_cron(&expr) {
-                    return Err(wrong("kanban.dialog.bad_cron", self.cron.focus_handle(cx)));
-                }
-                let when = When::Cron { expr };
-                if runode_todo::next_fire(&when, crate::kanban::when::unix_now()).is_none() {
-                    return Err(wrong("kanban.dialog.cron_never", self.cron.focus_handle(cx)));
-                }
-                when
-            }
-        };
+        let when = self.typed_when(cx).map_err(|(key, input)| wrong(key, input.focus_handle(cx)))?;
         check_time_limit()?;
         let original = match &self.editing {
             Some(Editing::Schedule(schedule)) => Some(&schedule.when),
@@ -2046,6 +2473,96 @@ mod tests {
         assert_eq!(parse_time_limit(" 15 "), Ok(Some(15)));
     }
 
+    /// 时限栏写的落在哪一档：空着是不限，现成的几档各是各的，别的和选了自己定的都是自己定。
+    #[test]
+    fn limit_presets_follow_the_text() {
+        assert_eq!(limit_preset(" ", false), Some(None));
+        assert_eq!(limit_preset("30", false), Some(Some(30)));
+        assert_eq!(limit_preset(" 60 ", false), Some(Some(60)));
+        assert_eq!(limit_preset("45", false), None);
+        assert_eq!(limit_preset("x", false), None);
+        assert_eq!(limit_preset("30", true), None);
+        assert_eq!(limit_preset("", true), None);
+    }
+
+    /// 接下来几次：重复的列三次，一次性的只有一次，过去了的一次都没有。
+    #[test]
+    fn next_fires_list_up_to_three() {
+        let now = 1_800_000_000;
+        assert_eq!(next_fires(&When::Every { minutes: 15 }, now), [now + 900, now + 1800, now + 2700]);
+        assert_eq!(next_fires(&When::Once { at: now + 60 }, now), [now + 60]);
+        assert!(next_fires(&When::Once { at: now - 60 }, now).is_empty());
+        assert!(next_fires(&When::Unknown, now).is_empty());
+        let daily = next_fires(&When::Daily { hour: 9, minute: 0, days: 0 }, now);
+        assert_eq!(daily.len(), 3);
+        assert!(daily.windows(2).all(|pair| pair[1] > pair[0]));
+    }
+
+    /// 底栏那句话：开头的什么时候做、有没有模型、开不开工作树、有没有时限各种搭配，三种语言都是整句。
+    #[test]
+    fn summaries_read_as_sentences() {
+        let summary = |lead, model, worktree, limit| Summary {
+            lead,
+            agent: "Claude Code",
+            model,
+            project: "demo",
+            worktree,
+            limit,
+        };
+        let cases = [
+            (
+                summary(Lead::Repeat("每天 09:00"), Some("opus"), true, Some(30)),
+                "zh-Hans",
+                "每天 09:00 开一个新任务：交给 Claude Code（opus），在 demo 的新工作树里做，最多跑 30 分钟。",
+            ),
+            (summary(Lead::Now, None, false, None), "zh-Hans", "存好就开始：交给 Claude Code，在 demo 里做。"),
+            (
+                summary(Lead::After(Some(3)), Some("opus"), false, Some(60)),
+                "zh-Hans",
+                "等 #3 做完自动开始：交给 Claude Code（opus），在 demo 里做，最多跑 1 小时。",
+            ),
+            (summary(Lead::Plain, None, true, None), "zh-Hans", "交给 Claude Code，在 demo 的新工作树里做。"),
+            (
+                summary(Lead::Queued, None, false, None),
+                "zh-Hans",
+                "放进待办排队，有空位就开始：交给 Claude Code，在 demo 里做。",
+            ),
+            (
+                summary(Lead::Manual, Some("opus"), true, None),
+                "zh-Hant",
+                "先放進待辦，等你點開始：交給 Claude Code（opus），在 demo 的新工作樹裡做。",
+            ),
+            (
+                summary(Lead::Queued, None, false, Some(15)),
+                "zh-Hant",
+                "放進待辦排隊，有空位就開始：交給 Claude Code，在 demo 裡做，最多跑 15 分鐘。",
+            ),
+            (
+                summary(Lead::Now, Some("opus"), true, Some(30)),
+                "en",
+                "Starts once saved. Claude Code (opus) works in a new worktree of demo for up to 30 min.",
+            ),
+            (
+                summary(Lead::Once("tomorrow at 09:00"), None, false, None),
+                "en",
+                "Opens a new task tomorrow at 09:00. Claude Code works in demo.",
+            ),
+            (
+                summary(Lead::After(None), None, true, None),
+                "en",
+                "Starts after the task it waits for is done. Claude Code works in a new worktree of demo.",
+            ),
+            (
+                summary(Lead::Due, None, false, Some(60)),
+                "en",
+                "Opens a new task when it is due. Claude Code works in demo for up to 1 h.",
+            ),
+        ];
+        for (summary, locale, want) in cases {
+            assert_eq!(summary_in(&summary, locale), want, "{locale}");
+        }
+    }
+
     #[test]
     fn queue_change_sends_only_what_changed() {
         // 新建：不排队不发，排队才发。
@@ -2057,6 +2574,22 @@ mod tests {
         assert_eq!(queue_change(Some((false, None)), false, None), None);
         assert_eq!(queue_change(Some((true, Some("b"))), true, Some("c")), Some((true, Some("c".into()))));
         assert_eq!(queue_change(Some((true, Some("b"))), false, Some("b")), Some((false, None)));
+    }
+
+    /// 分段跟着字段走：定时盖过排队和马上开始，排队盖过马上开始，都没有时是放进待办。
+    #[test]
+    fn start_modes_follow_the_fields() {
+        let cases = [
+            ((true, true, true), StartMode::Schedule),
+            ((true, false, false), StartMode::Schedule),
+            ((false, true, true), StartMode::Queue),
+            ((false, false, true), StartMode::Queue),
+            ((false, true, false), StartMode::Now),
+            ((false, false, false), StartMode::Manual),
+        ];
+        for ((schedule, start, queued), want) in cases {
+            assert_eq!(start_mode_of(schedule, start, queued), want, "{schedule} {start} {queued}");
+        }
     }
 
     fn todo(id: &str, after: Option<&str>, started: Option<u64>, done_at: Option<u64>) -> Todo {

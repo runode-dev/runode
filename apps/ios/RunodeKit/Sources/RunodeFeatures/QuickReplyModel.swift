@@ -25,6 +25,9 @@ public struct QuickKey: Hashable, Sendable, Identifiable {
         QuickKey(label: "↑", key: "up", accessibilityLabel: String(localized: "上"), symbol: "arrowtriangle.up.fill"),
         QuickKey(label: "↓", key: "down", accessibilityLabel: String(localized: "下"), symbol: "arrowtriangle.down.fill"),
     ]
+
+    /// 终端页底部回答那一行的键：选项编号。终端本身能打字，别的键不放。
+    public static let options = Array(standard.prefix(3))
 }
 
 /// 一个会话的快速回复：按键经 `send_keys`、文字经 `paste` 加 `send_keys ["enter"]` 发给宿主，不用

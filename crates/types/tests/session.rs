@@ -18,6 +18,7 @@ fn round_trips_through_json() {
         title: Some("修 bug".into()),
         fallback_title: Some("runode".into()),
         agent: Some(Agent { kind: AgentKind::GithubCopilot, state: AgentState::Blocked }),
+        agent_since_ms: Some(1_790_000_000_000),
         conversation: Some(Conversation { kind: AgentKind::Claude, id: "ab-12".into() }),
         cwd: Some("/tmp/中文".into()),
         prompt_cwd: Some("/tmp".into()),
@@ -34,7 +35,22 @@ fn round_trips_through_json() {
     };
     let json = serde_json::to_string(&meta).unwrap();
     assert!(json.contains(r#""kind":"github_copilot","state":"blocked""#), "{json}");
+    assert!(json.contains(r#""agent_since_ms":1790000000000"#), "{json}");
     assert_eq!(serde_json::from_str::<SessionMeta>(&json).unwrap(), meta);
+}
+
+/// 没有 agent 时刻的状态不写这个键，读回来仍是 `None`。
+#[test]
+fn agent_since_is_omitted_when_absent() {
+    let meta = SessionMeta {
+        agent: Some(Agent { kind: AgentKind::Codex, state: AgentState::Working }),
+        ..SessionMeta::default()
+    };
+    let json = serde_json::to_string(&meta).unwrap();
+    assert!(!json.contains("agent_since_ms"), "{json}");
+    let back: SessionMeta = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, meta);
+    assert_eq!(back.agent_since_ms, None);
 }
 
 /// 操作记录：`by` 可以缺，新的一方才有的操作读成 `Unknown`，整份状态照样读得了。

@@ -36,6 +36,7 @@
         /// 最后一次知道的、这个会话所在标签里的分屏。会话结束后电脑关掉它的分屏，布局里就找不到它了，
         /// 所以先记着；换到别的标签的会话后，不含它的旧值不算数。
         @State private var tabMates: [SessionId] = []
+        @ScaledMetric(relativeTo: .headline) private var titleGlyphSize: CGFloat = 15
 
         private var background: Color { Color(model.background) }
         private var scheme: ColorScheme { model.background.isDark ? .dark : .light }
@@ -69,14 +70,11 @@
                 .animation(.easeOut(duration: 0.2), value: model.isAwaitingAnswer)
                 .navigationTitle(model.title)
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(background.opacity(0.92), for: .navigationBar)
+                .toolbarBackground(Color(model.chromeTheme.page), for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
                 .toolbarColorScheme(scheme, for: .navigationBar)
-                // 有分屏标签栏时它已标出当前会话，导航栏不再重复一个标题。
-                .toolbar(removing: tabPanes.isEmpty ? nil : .title)
                 .toolbar {
-                    ToolbarItem(placement: .principal) { if tabPanes.isEmpty { titleView } }
-                    ToolbarItem(placement: .primaryAction) { sizeMenu }
+                    TitleItem { titleView }
                     ToolbarItem(placement: .primaryAction) { moreMenu }
                 }
                 // 之后电脑在布局变了时推 `LayoutChanged`，列表收到就重新要。
@@ -118,6 +116,7 @@
                 } message: {
                     Text(dictation?.errorMessage ?? "")
                 }
+                .environment(\.themeColors, chrome)
         }
 
         private var paneIds: [SessionId] { tabPanes.map(\.id) }
@@ -129,31 +128,50 @@
         private var paneTabs: some View {
             if !tabPanes.isEmpty {
                 PaneTabBar(panes: tabPanes, current: model.sessionId, onSelect: onSelectPane)
-                    .background(background.opacity(0.92))
-                    .overlay(alignment: .bottom) { Divider() }
+                    .background(chrome.page)
+                    .overlay(alignment: .bottom) { chrome.hairline.frame(height: 1) }
                     .environment(\.colorScheme, scheme)
             }
         }
 
+        /// 终端四周的配色，整页放进环境；这一页自己画底栏时直接取。
+        private var chrome: ThemeColors { ThemeColors(model.chromeTheme) }
+
+        /// 分屏时标题是工作区的名字，当前会话由下面的分屏标签标出；没分屏时是会话名，前面带它的状态。
         private var titleView: some View {
             LinkClock(state: model.linkState) { now in
                 VStack(spacing: 0) {
-                    Text(model.title)
-                        .font(.headline)
-                        .lineLimit(1)
+                    Group {
+                        if tabPanes.isEmpty {
+                            HStack(spacing: 6) {
+                                StatusGlyph(model.agent.map { StatusMark($0.state) } ?? .idle, size: titleGlyphSize)
+                                Text(model.title)
+                            }
+                        } else {
+                            Text(workspaceTitle)
+                        }
+                    }
+                    .font(.headline)
+                    .lineLimit(1)
                     Text(
                         Presentation.terminalSubtitle(
-                            agent: model.agent, link: model.linkState, phase: model.phase, now: now)
+                            machine: machine?.name, link: model.linkState, phase: model.phase, now: now)
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
+                .multilineTextAlignment(.center)
                 .dynamicTypeSize(...DynamicTypeSize.xxLarge)
                 .environment(\.colorScheme, scheme)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isHeader)
             }
+        }
+
+        private var workspaceTitle: String {
+            sessions?.sections.first { $0.sessions.contains { $0.id == model.sessionId } }
+                .map(Presentation.sectionTitle) ?? model.title
         }
 
         /// 终端底部正中的提示：正在听、正在识别。
@@ -183,8 +201,9 @@
         /// 会话列表里这个终端的信息（目录、前台程序），菜单里的命令据此列出、判断能不能跑。
         private var session: SessionInfo? { sessions?.session(model.sessionId) }
 
+        /// 「⋯」菜单里的终端尺寸子菜单，图标表示现在适配的是手机还是电脑。
         private var sizeMenu: some View {
-            Menu {
+            Menu("终端尺寸", systemImage: model.fitsPhone ? "iphone" : "laptopcomputer") {
                 Picker(
                     "终端尺寸",
                     selection: Binding(get: { model.sizePreference }, set: { model.setSizePreference($0) })
@@ -200,13 +219,9 @@
                         Text("网格 \(Presentation.gridSize(size))")
                     }
                 }
-            } label: {
-                Image(systemName: model.fitsPhone ? "iphone" : "laptopcomputer")
             }
             // 会话结束了，尺寸改不了了。
             .disabled(model.isEnded)
-            .accessibilityLabel("终端尺寸：\(Presentation.sizePreference(model.fitsPhone ? .fitPhone : .followMachine))")
-            .accessibilityHint("在适配手机和跟随电脑之间切换")
         }
 
         private var moreMenu: some View {
@@ -215,6 +230,7 @@
                     Button("键盘", systemImage: "keyboard") { model.showKeyboard() }
                 }
                 Button("回到最新", systemImage: "arrow.down.to.line") { model.scrollToBottom() }
+                sizeMenu
                 // 会话结束了宿主那边就没有它了，Git 请求只会回「no session」。
                 if !model.isEnded {
                     Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit() }
@@ -339,37 +355,121 @@
             return .secondary
         }
 
+        /// 底部的回答行和按键栏；两样都没有时整条不占地方。
+        @ViewBuilder
         private var bottomBars: some View {
-            VStack(spacing: 0) {
-                if model.isAwaitingAnswer {
-                    QuickReplyBar(model: model.quickReply, prompt: awaitingPrompt)
-                        .padding(.horizontal)
-                        .padding(.vertical, 10)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+            // 软键盘弹出时键盘上方有一样的辅助栏，这条就收起来。不加动画：和键盘让出的地方在同一次布局里
+            // 换好，终端只改一次大小；渐隐的话动画的每一帧都让宿主改一次尺寸。
+            let restingBar = model.keyboardVisible || model.isEnded ? nil : terminalView
+            if model.isAwaitingAnswer || restingBar != nil {
+                VStack(spacing: 8) {
+                    if model.isAwaitingAnswer {
+                        AnswerRow(
+                            model: model.quickReply, prompt: sessions?.prompts[model.sessionId],
+                            agentName: model.agent?.kind.displayName)
+                            .padding(.horizontal, 10)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    // 按键栏铺满宽度，左右的空由它自己留，拖动时键在边缘淡出。
+                    if let restingBar {
+                        RestingKeyBar(terminalView: restingBar)
+                            .frame(height: 52)
+                    }
                 }
-                // 软键盘弹出时键盘上方有一样的辅助栏，这条就收起来。尺寸跟随谁看导航栏右边的图标。不加动画：
-                // 和键盘让出的地方在同一次布局里换好，终端只改一次大小；渐隐的话动画的每一帧都让宿主改一次尺寸。
-                if !model.keyboardVisible, !model.isEnded, let terminalView {
-                    RestingKeyBar(terminalView: terminalView)
-                        .frame(height: 44)
-                }
+                .padding(.top, 8)
+                .padding(.bottom, restingBar == nil ? 8 : 0)
+                .background(chrome.page)
+                .overlay(alignment: .top) { chrome.hairline.frame(height: 1) }
+                .environment(\.colorScheme, scheme)
             }
-            .background(.bar)
-            .environment(\.colorScheme, scheme)
-        }
-
-        private var awaitingPrompt: String {
-            let name = model.agent?.kind.displayName ?? "Agent"
-            return String(localized: "\(name) 在等你回答")
         }
     }
 
-    /// 终端页顶上的一排分屏标签，一个分屏一个：小图画出它在电脑上那个标签里的位置，带 agent 的状态，
-    /// 别的分屏在等回答时描一圈橙边。点了切过去；当前的那个滚到中间。
+    /// 终端页底部回答 agent 的那一行：琥珀标记加「等你回答」，右边几个选项编号键。一行放不下时字在上、
+    /// 键在下，键在一行里也放不下时横着滚。只有键，不带输入框：终端本身就能打字。
+    private struct AnswerRow: View {
+        @Bindable var model: QuickReplyModel
+        /// 屏幕上认出来的提问：有时一个选项一个键，默认项是琥珀色；没有时是 `QuickKey.options`。
+        let prompt: AgentPrompt?
+        /// 在等回答的 agent 的名字，读屏时念「回复「名字」」。
+        let agentName: String?
+        @Environment(\.themeColors) private var colors
+        @ScaledMetric(relativeTo: .footnote) private var glyphSize: CGFloat = 15
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 4) {
+                        label
+                        Spacer(minLength: 8)
+                        keys
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        label
+                        keys
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        label
+                        ScrollView(.horizontal, showsIndicators: false) { keys }
+                    }
+                }
+                .padding(.leading, 4)
+                if let error = model.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(colors.failure)
+                }
+            }
+            .sensoryFeedback(.success, trigger: model.deliveredCount)
+            .sensoryFeedback(.error, trigger: model.failedCount)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("回复「\(agentName ?? "Agent")」")
+        }
+
+        private var label: some View {
+            HStack(spacing: 4) {
+                StatusGlyph(.waiting, size: glyphSize)
+                    .padding(.trailing, 3)
+                Text("等你回答")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(colors.waiting)
+            }
+        }
+
+        private var keys: some View {
+            HStack(spacing: 4) {
+                if let prompt {
+                    ForEach(prompt.options) { option in
+                        key(option.key, kind: option.selected ? .waiting : .secondary)
+                            .accessibilityAddTraits(option.selected ? .isSelected : [])
+                    }
+                } else {
+                    ForEach(QuickKey.options) { key($0, kind: .secondary) }
+                }
+            }
+            .disabled(!model.isConnected)
+        }
+
+        private func key(_ key: QuickKey, kind: ActionKind) -> some View {
+            Button {
+                Task { await model.press(key) }
+            } label: {
+                Text(verbatim: key.label)
+                    .font(.subheadline.monospaced().weight(.bold))
+                    .frame(width: 56)
+            }
+            .buttonStyle(SurfaceButtonStyle(kind, cornerRadius: CornerRadius.key))
+            .accessibilityLabel("发送 \(key.accessibilityLabel)")
+        }
+    }
+
+    /// 终端页顶上的一排分屏标签，一个分屏一个：状态标记加会话名。点了切过去；当前的那个滚到中间。
     private struct PaneTabBar: View {
         let panes: [SplitPane]
         let current: SessionId
         let onSelect: (SessionId) -> Void
+        @Environment(\.themeColors) private var colors
+        @ScaledMetric(relativeTo: .subheadline) private var glyphSize: CGFloat = 15
 
         var body: some View {
             ScrollViewReader { proxy in
@@ -379,8 +479,9 @@
                             tab(pane).id(pane.id)
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
                 }
                 .onAppear { proxy.scrollTo(current, anchor: .center) }
                 // 切分屏时页面不重建，只换了 `current`。
@@ -390,36 +491,36 @@
 
         private func tab(_ pane: SplitPane) -> some View {
             let selected = pane.id == current
-            let waiting = !selected && SessionGroup.of(pane.session) == .waiting
-            return Button {
-                guard !selected else { return }
-                UISelectionFeedbackGenerator().selectionChanged()
-                onSelect(pane.id)
-            } label: {
-                HStack(spacing: 6) {
-                    PaneGlyph(rect: pane.rect)
-                    if Presentation.agentStatus(pane.session.meta.agent) != nil {
-                        AgentStateIcon(agent: pane.session.meta.agent)
-                            .imageScale(.small)
+            let title = Presentation.sessionTitle(pane.session)
+            let meta = pane.session.meta
+            let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
+            return TimelineView(AgentClockSchedule(agent: meta.agent, since: meta.agentSince)) { context in
+                let status = Presentation.agentStatus(meta.agent, since: meta.agentSince, now: context.date)
+                Button {
+                    guard !selected else { return }
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    onSelect(pane.id)
+                } label: {
+                    HStack(spacing: 8) {
+                        StatusGlyph(status.map { StatusMark($0.state) } ?? .idle, size: glyphSize)
+                        Text(title)
+                            .lineLimit(1)
                     }
-                    Text(Presentation.sessionTitle(pane.session))
-                        .lineLimit(1)
+                    .font(.subheadline.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? .primary : .secondary)
+                    .opacity(pane.session.exited ? 0.5 : 1)
+                    .padding(.horizontal, 14)
+                    .frame(maxWidth: 220, minHeight: 44)
+                    .background(selected ? colors.raised : .clear, in: shape)
+                    .contentShape(shape)
                 }
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? .primary : .secondary)
-                .opacity(pane.session.exited ? 0.5 : 1)
-                .padding(.horizontal, 12)
-                .frame(maxWidth: 220, minHeight: 36)
-                .background(selected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: .capsule)
-                .overlay {
-                    if waiting { Capsule().strokeBorder(AgentBadge.tint(for: .waiting), lineWidth: 1.5) }
-                }
-                .contentShape(.capsule)
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(title)
+                .accessibilityValue(status?.text ?? "")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityHint(selected ? "" : String(localized: "切到这个分屏"))
             }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .accessibilityHint(selected ? "" : String(localized: "切到这个分屏"))
         }
     }
 
@@ -477,6 +578,7 @@
             view.bellHaptics = preferences.bellHaptics
             view.acceptsInput = !model.isEnded
             view.dictating = dictating
+            view.keyBarPalette = KeyBarPalette(theme: model.chromeTheme)
             context.coordinator.onDictation = onDictation
         }
 
@@ -508,6 +610,33 @@
             func terminalView(_ view: TerminalView, dictation press: DictationPress) {
                 onDictation(press)
             }
+        }
+    }
+
+    extension KeyBarPalette {
+        /// 底部按键栏照主题配色：键是卡片的底加细线、前景色的字，按下去时反过来。
+        init(theme: AppTheme) {
+            self.init(
+                key: UIColor(theme.card), border: UIColor(theme.hairline), label: UIColor(theme.foreground),
+                selectedKey: UIColor(theme.foreground), selectedLabel: UIColor(theme.page))
+        }
+    }
+
+    /// 导航栏正中的标题。
+    private struct TitleItem<Content: View>: ToolbarContent {
+        @ViewBuilder let content: () -> Content
+
+        var body: some ToolbarContent {
+            // iOS 26 起导航栏上的项都有一块玻璃底，标题不要。
+            if #available(iOS 26, *) {
+                item.sharedBackgroundVisibility(.hidden)
+            } else {
+                item
+            }
+        }
+
+        private var item: some ToolbarContent {
+            ToolbarItem(placement: .principal) { content() }
         }
     }
 #endif

@@ -37,14 +37,14 @@ impl WindowView {
     }
 
     /// 右侧面板的 Git 页：外框和顶上的标签在这里画，里面是页。
-    pub(super) fn render_git_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_git_panel(&mut self, width: f32, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let input = Input { width, status_bar_height: status_bar::height(cx) };
         let (id, project) = (self.workspace().id, ProjectHost::of(&self.workspace().host));
         self.git_panel.update(cx, |panel, _| {
             panel.set_workspace(id, project);
             panel.set_input(input);
         });
-        self.side_panel_shell("git-panel", width, cx)
+        self.side_panel_shell("git-panel", width, window, cx)
             .bg(cx.theme().background)
             .text_size(FontSize::Body)
             .child(div().flex_1().min_h_0().child(self.git_panel.clone()))

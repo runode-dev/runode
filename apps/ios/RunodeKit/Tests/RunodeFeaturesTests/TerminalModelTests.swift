@@ -85,6 +85,23 @@ import Testing
         #expect(model.terminal?.size == bigger)
     }
 
+    @Test func chromeFollowsTheTheme() throws {
+        let model = live()
+        #expect(model.chromeTheme == AppTheme(TermSettings.default))
+        var theme = TermSettings.default
+        theme.background = Rgb(hex: 0xFFFFFF)
+        theme.foreground = Rgb(hex: 0x101010)
+        model.handle(.message(.themeApplied(id: sessionA, settings: theme)))
+        #expect(model.chromeTheme.background == Rgb(hex: 0xFFFFFF))
+        #expect(model.chromeTheme.foreground == Rgb(hex: 0x101010))
+        #expect(!model.chromeTheme.isDark)
+    }
+
+    @Test func answerRowOffersTheFirstThreeStandardKeys() {
+        #expect(QuickKey.options == Array(QuickKey.standard.prefix(3)))
+        #expect(QuickKey.options.map(\.key) == ["1", "2", "3"])
+    }
+
     @Test func resyncDropsTheOldStreamUntilAttached() throws {
         let model = live()
         link.clearSent()

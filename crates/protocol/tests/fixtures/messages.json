@@ -730,6 +730,7 @@
           "kind": "claude",
           "state": "blocked"
         },
+        "agent_since_ms": 1790000000000,
         "cwd": "/Users/ethan/中文",
         "driver": {
           "action": "paste",
@@ -1529,6 +1530,7 @@
               "kind": "claude",
               "state": "blocked"
             },
+            "agent_since_ms": 1790000000000,
             "cwd": "/Users/ethan/中文",
             "driver": {
               "action": "paste",

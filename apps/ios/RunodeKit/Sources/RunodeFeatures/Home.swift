@@ -24,6 +24,8 @@ public struct HomeSummary: Hashable, Sendable {
     public var working = 0
     /// 没退出的会话。
     public var sessions = 0
+    /// 连着的电脑。
+    public var connected = 0
 }
 
 /// 首页「上次打开」那一块要显示的东西。
@@ -51,6 +53,28 @@ public struct WaitingSession: Identifiable {
     }
 }
 
+/// 首页「等你回答」一次只摊开一张卡，这里定摊开哪张、怎么翻。参数里的 `ids` 是 `WaitingSession.id`，
+/// 按 `AppModel.waitingSessions` 的顺序。
+enum HomePager {
+    /// 摊开的那张：用户翻到的 `focused` 还在列表里就是它，否则（没翻过，或者它已经答完不在了）是第一张。
+    static func current(_ focused: String?, in ids: [String]) -> String? {
+        if let focused, ids.contains(focused) { return focused }
+        return ids.first
+    }
+
+    /// 从 `current` 往后翻一张，翻过最后一张回到第一张。
+    static func next(after current: String?, in ids: [String]) -> String? {
+        guard let current, let index = ids.firstIndex(of: current) else { return ids.first }
+        return ids[(index + 1) % ids.count]
+    }
+
+    /// 从 `current` 往前翻一张，翻过第一张回到最后一张。
+    static func previous(before current: String?, in ids: [String]) -> String? {
+        guard let current, let index = ids.firstIndex(of: current) else { return ids.first }
+        return ids[(index + ids.count - 1) % ids.count]
+    }
+}
+
 extension AppModel {
     /// 配对过的每台电脑的会话列表，按配对的先后。
     public var machineLists: [SessionListModel] {
@@ -61,6 +85,7 @@ extension AppModel {
     public var summary: HomeSummary {
         var summary = HomeSummary()
         for list in machineLists where list.linkState.isConnected {
+            summary.connected += 1
             for session in list.sessions where !session.exited {
                 summary.sessions += 1
                 switch SessionGroup.of(session) {

@@ -59,11 +59,37 @@ private struct Setup {
         let darkTheme = AppTheme(dark)
         #expect(darkTheme.isDark)
         #expect(darkTheme.page == dark.background)
-        #expect(darkTheme.card == dark.background.mixed(with: dark.foreground, by: 0.08))
+        #expect(darkTheme.card == dark.background.mixed(with: dark.foreground, by: 0.05))
         let lightTheme = AppTheme(light)
         #expect(!lightTheme.isDark)
         #expect(lightTheme.card == light.background)
         #expect(lightTheme.page == Rgb(hex: 0xF2F2F2))
+    }
+
+    /// 深色下由暗到亮是底槽、页面、卡片、凸起的块、细线、粗一点的线；浅色下卡片最亮。
+    @Test func surfacesStayOrdered() {
+        func luminance(_ rgb: Rgb) -> Double {
+            0.2126 * Double(rgb.r) + 0.7152 * Double(rgb.g) + 0.0722 * Double(rgb.b)
+        }
+        let darkTheme = AppTheme(dark)
+        let ordered = [
+            darkTheme.well, darkTheme.page, darkTheme.card, darkTheme.raised, darkTheme.hairline,
+            darkTheme.strongHairline,
+        ].map(luminance)
+        #expect(ordered == ordered.sorted())
+        #expect(Set(ordered).count == ordered.count)
+        let lightTheme = AppTheme(light)
+        let others = [
+            lightTheme.page, lightTheme.raised, lightTheme.well, lightTheme.hairline, lightTheme.strongHairline,
+            lightTheme.stackEdge,
+        ]
+        #expect(others.allSatisfy { luminance($0) < luminance(lightTheme.card) })
+    }
+
+    @Test func statusPaletteFollowsDarkness() {
+        #expect(AppTheme(dark).status == .dark)
+        #expect(AppTheme(light).status == .light)
+        #expect(StatusPalette.dark != StatusPalette.light)
     }
 
     @Test func isDarkUntilAMachineReportsATheme() async {

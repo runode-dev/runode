@@ -1,12 +1,12 @@
-//! 开关（照 shadcn 的 `Switch`）：一条圆角的轨道，里面一颗白色的圆钮。打开时钮在右边、轨道是
-//! `Theme::ring`，关着时轨道是淡淡的前景色。自带 `Role::Switch`、报给辅助工具的名字和开没开；点击照旧用
+//! 开关（照 shadcn 的 `Switch`）：一条圆角的轨道，里面一颗圆钮。打开时钮在右边、轨道是 `Theme::primary`、
+//! 钮是 `Theme::primary_foreground`，关着时轨道是淡淡的前景色、钮是白的。自带 `Role::Switch`、报给辅助工具的名字和开没开；点击照旧用
 //! `a11y` 的 `Press`，不可用时调用方自己灰掉、报 `aria_disabled`、不挂点击。
 //!
 //! 给了 `label` 时那段文字画在轨道右边，和轨道是同一个节点，点文字也算点开关。调用方接着写的样式盖在
 //! 组件自己的上面，写法同 `Button`。
 
 use gpui::{
-    App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement, RenderOnce, SharedString,
+    App, Div, ElementId, Hsla, InteractiveElement, Interactivity, IntoElement, ParentElement, RenderOnce, SharedString,
     Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::*, px,
 };
 
@@ -33,8 +33,8 @@ impl Switch {
     }
 }
 
-/// 把 `el` 画成轨道，里面一颗圆钮。
-fn track<E: Styled + ParentElement + FluentBuilder>(el: E, checked: bool, color: gpui::Hsla) -> E {
+/// 把 `el` 画成 `color` 的轨道，里面一颗 `knob` 色的圆钮。
+fn track<E: Styled + ParentElement + FluentBuilder>(el: E, checked: bool, color: Hsla, knob: Hsla) -> E {
     el.w(px(34.))
         .h(px(20.))
         .flex_none()
@@ -43,18 +43,24 @@ fn track<E: Styled + ParentElement + FluentBuilder>(el: E, checked: bool, color:
         .flex()
         .when(checked, |track| track.justify_end())
         .bg(color)
-        .child(div().size(px(16.)).rounded_full().bg(gpui::white()).shadow_sm())
+        .child(div().size(px(16.)).rounded_full().bg(knob).shadow_sm())
 }
 
 impl RenderOnce for Switch {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme();
-        let color = if self.checked { theme.ring } else { theme.foreground.opacity(0.18) };
+        let (color, knob) = if self.checked {
+            (theme.primary, theme.primary_foreground)
+        } else {
+            (theme.foreground.opacity(0.18), gpui::white())
+        };
         let Self { mut div, checked, text } = self;
         let user = std::mem::take(div.style());
         let mut div = match text {
-            None => track(div, checked, color),
-            Some(text) => div.flex().items_center().gap(px(8.)).child(track(gpui::div(), checked, color)).child(text),
+            None => track(div, checked, color, knob),
+            Some(text) => {
+                div.flex().items_center().gap(px(8.)).child(track(gpui::div(), checked, color, knob)).child(text)
+            }
         };
         div.style().refine(&user);
         div

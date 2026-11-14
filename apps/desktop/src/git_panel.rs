@@ -1,9 +1,10 @@
-//! 右侧的 Git 面板：顶上是当前分支和同步按钮，下面是提交说明框和提交
-//! 按钮，再下面按冲突、已暂存、未暂存分段列出改动的文件和储藏。文件和改动块都能暂存、取消暂存
-//! 或丢掉，标题栏的「更多」菜单里是拉取、推送、分支和储藏这些操作。
+//! 右侧的 Git 面板：顶上是当前分支和同步按钮，下面一行是全部勾上的复选框和勾上几个文件，再下面按冲突、
+//! 已暂存、未暂存分段列出改动的文件和储藏，最下面是提交区：提交说明框和提交按钮，刚提交好时换成推送和撤销。
+//! 文件前面的复选框勾上的是整个暂存了的；文件和改动块都能暂存、取消暂存或丢掉，标题栏的「更多」菜单里是拉取、
+//! 推送、分支和储藏这些操作。
 //!
 //! 仓库里有子模块或嵌套仓库时，每个仓库一块：块头是可以收起的仓库名和
-//! 分支，展开后是这个仓库自己的分支栏、提交说明框和各段改动，仓库的操作挪到块头的「更多」菜单，
+//! 分支，展开后是这个仓库自己的分支栏、提交区、全部勾上的一行和各段改动，仓库的操作挪到块头的「更多」菜单，
 //! 标题栏的「更多」只留面板的显示设置（树形式、显示子模块和嵌套仓库、显示其他工作树）。块里的
 //! 按钮作用到这块的仓库；菜单和快捷键派发的动作作用到 `GitPanel::git_target` 选的仓库。
 //!
@@ -35,33 +36,35 @@ use std::{
 
 use crate::WorkspaceId;
 use crate::ui::{
-    a11y::{Disable, PressDown, StaticText},
+    a11y::{Disable, Press, PressDown, StaticText},
     actions::{FocusTerminal, InsertFilePath},
     badge::{Badge, BadgeVariant},
     base_name,
-    button::{Button, ButtonSize},
+    button::{Button, ButtonSize, ButtonVariant},
+    checkbox::Checkbox,
     font_size::{FontSize, scaled},
-    hsla,
     icons::{
         BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, GIT_ICON, MORE_ICON, REFRESH_ICON, SPARKLE_ICON, STASH_APPLY_ICON,
         STASH_POP_ICON, SYNC_ICON, VIEW_LIST_ICON, VIEW_TREE_ICON,
     },
+    kbd::Kbd,
     menu::{Menu, MenuAnchors, MenuHost, MenuItem},
     panel::{TITLEBAR_HEIGHT, added_label, panel_message, panel_title, removed_label, sync_icon},
     scrollbar::list_scrollbar,
     textarea::{Textarea, TextareaEvent, TextareaState},
-    theme::{ActiveTheme as _, MODIFIED},
+    theme::ActiveTheme as _,
     tooltip::tooltip,
 };
 use gpui::{
-    Action, AnyElement, App, Context, Div, EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent, Render,
-    Role, SharedString, Stateful, Window, actions, div, list, prelude::*, px, svg, uniform_list,
+    Action, AnyElement, App, Context, Div, Entity, EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent,
+    Render, Role, SharedString, Stateful, Window, actions, div, list, prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, DiffSide, HunkAction, Operation, RepoKind, Section};
 
 pub use run::show_git_error;
 
 use rows::{Busy, GitRow, GitSection, PanelState};
+pub(crate) use rows::{Committed, changed_range, file_checked};
 
 use crate::project_host::{ProjectHost, ProjectRepo};
 
@@ -156,6 +159,8 @@ enum PrimaryAction {
     Commit,
     Sync,
     Publish,
+    /// 刚提交好以后推送；还没有上游时顺带发布。
+    Push,
 }
 
 /// app 每次画面板之前交进来的东西，见 `GitPanel::set_input`。
@@ -322,6 +327,7 @@ impl GitPanel {
         if !state.replace_git(git) {
             return;
         }
+        state.update_committed();
         (state.tree, state.show_subs, state.show_worktrees) = view;
         state.relayout();
         if ws == self.ws {
@@ -384,6 +390,15 @@ impl GitPanel {
         self.state().busy(root).is_some()
     }
 
+    /// workspace `ws` 里刚提交好、提交区还换着推送和撤销的那几次，带着各自仓库的根目录。
+    pub(crate) fn committed(&self, ws: WorkspaceId) -> Vec<(PathBuf, Committed)> {
+        let Some(state) = self.workspaces.get(&ws) else { return Vec::new() };
+        let mut committed: Vec<_> =
+            state.repos.iter().filter_map(|(root, panel)| Some((root.clone(), panel.committed.clone()?))).collect();
+        committed.sort_by(|a, b| a.0.cmp(&b.0));
+        committed
+    }
+
     /// 预览栏的 diff 里按块暂存、取消暂存或丢掉：在当前 workspace 里根目录是 `root` 的仓库里对 `file` 的第
     /// `hunk` 块做 `action`。做完马上重读，不等扫描，再发 `HunkApplied`。仓库正忙时什么也不做。
     pub fn apply_hunk(
@@ -412,11 +427,16 @@ impl GitPanel {
     ) {
         let area = self.commit_box(root);
         let before = area.as_ref().map(|area| area.read(cx).text().to_owned());
-        self.run_git(root, Busy::Message, window, cx, op, move |_, message, _, cx| {
+        let (ws, target) = (self.ws, root.to_path_buf());
+        self.run_git(root, Busy::Message, window, cx, op, move |this, message, _, cx| {
             if let Some(area) = area
                 && Some(area.read(cx).text()) == before.as_deref()
             {
                 area.update(cx, |area, cx| area.set_text(message, cx));
+                let written = area.read(cx).text().to_owned();
+                if let Some(state) = this.workspaces.get_mut(&ws) {
+                    state.repo_mut(&target).drafted = Some(written);
+                }
             }
         });
     }
@@ -616,7 +636,8 @@ impl GitPanel {
             block
                 .child(self.render_branch_bar(repo, cx))
                 .children(repo.info.operation.map(|operation| operation_banner(&repo.root, operation, cx)))
-                .child(self.render_commit_area(repo, cx))
+                .child(self.render_commit_area(repo, false, cx))
+                .children(self.render_check_row(repo, cx))
         })
     }
 
@@ -741,18 +762,180 @@ impl GitPanel {
             .children(sync)
     }
 
-    /// 一个仓库的提交说明框，下面是提交按钮和旁边弹出更多提交方式的箭头。没有改动时提交
-    /// 按钮换成同步或者发布分支。
-    fn render_commit_area(&self, repo: &git::Snapshot, cx: &mut Context<Self>) -> Div {
+    /// 改动列表上面的一行：全部勾上的复选框（勾上的是整个暂存了的文件，按下全部勾上时取消暂存全部，否则暂存
+    /// 全部），后面写一共几个文件、勾上的几个会提交。没有改动时不画。
+    fn render_check_row(&self, repo: &git::Snapshot, cx: &mut Context<Self>) -> Option<Div> {
+        let (total, checked, state) = rows::check_counts(repo);
+        if total == 0 {
+            return None;
+        }
+        let busy = self.state().busy(&repo.root).is_some();
+        let summary = rust_i18n::t!("git.files_will_commit", count = total, checked = checked).into_owned();
+        let root = repo.root.clone();
+        let check = Checkbox::new(repo_id("git-check-all", &root), rust_i18n::t!("git.check_all"), state)
+            .aria_description(summary.clone())
+            .aria_disabled(busy)
+            .when(!busy, |check| {
+                check.cursor_pointer().on_press_down(cx, move |this, window, cx| {
+                    this.set_git_active(&root);
+                    if state == gpui::Toggled::True {
+                        this.run_git(&root, Busy::Stage, window, cx, ProjectRepo::unstage_all, |_, (), _, _| {});
+                    } else {
+                        this.stage_all(root.clone(), window, cx);
+                    }
+                })
+            });
+        Some(
+            div()
+                .flex_none()
+                .h(scaled(list::ROW_HEIGHT + 4.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .text_color(cx.theme().muted_foreground)
+                .child(check)
+                .child(
+                    div()
+                        .id(repo_id("git-check-summary", &repo.root))
+                        .aria_static_text(summary.clone())
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(summary),
+                ),
+        )
+    }
+
+    /// 一个仓库的提交区，`at_bottom` 时在改动列表下面（上沿一条线），否则在它上面（下沿一条线）。刚提交好时
+    /// 换成 `render_committed`，否则是 `render_commit_form`。
+    fn render_commit_area(&self, repo: &git::Snapshot, at_bottom: bool, cx: &mut Context<Self>) -> Div {
+        let Some(panel) = self.state().repos.get(&repo.root) else {
+            return div();
+        };
+        let body = match (&panel.committed, &panel.commit_box) {
+            (Some(committed), _) => self.render_committed(repo, committed, cx),
+            (None, Some(area)) => self.render_commit_form(repo, area, panel.drafted.as_deref(), cx),
+            (None, None) => return div(),
+        };
+        div()
+            .flex_none()
+            .px(px(10.))
+            .py(px(8.))
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .border_color(cx.theme().border)
+            .map(|area| if at_bottom { area.border_t_1() } else { area.border_b_1() })
+            .child(body)
+    }
+
+    /// 刚提交好以后的提交区：提交好了和短哈希、说明的第一行，下面是推送（有远端时；还没有上游时是发布分支）
+    /// 和撤销上次提交。
+    fn render_committed(&self, repo: &git::Snapshot, committed: &Committed, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme();
+        let (fg, muted, success) = (theme.foreground, theme.muted_foreground, theme.success);
+        let info = &repo.info;
+        let root = repo.root.clone();
+        let running = self.state().busy(&root);
+        let busy = running.is_some();
+        let head = committed.head.clone().unwrap_or_default();
+        let title = rust_i18n::t!("git.committed", hash = head.as_str()).into_owned();
+        let status = [title.clone(), committed.subject.clone()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(rust_i18n::t!("a11y.separator").as_ref());
+        // 同时落后上游时直接推送会被拒，给同步。
+        let push_label = match (&info.upstream, info.has_remote) {
+            (Some(_), _) if info.behind > 0 => Some((
+                rust_i18n::t!("git.sync_changes", behind = info.behind, ahead = info.ahead).into_owned(),
+                PrimaryAction::Sync,
+            )),
+            (Some(_), _) => {
+                Some((rust_i18n::t!("git.push_commits", count = info.ahead).into_owned(), PrimaryAction::Push))
+            }
+            (None, true) if info.branch.is_some() => {
+                Some((rust_i18n::t!("git.publish_branch").into_owned(), PrimaryAction::Push))
+            }
+            _ => None,
+        };
+        let push = push_label.map(|(label, action)| {
+            let label = running.map_or(label, Busy::label);
+            let root = root.clone();
+            Button::new(repo_id("git-push-committed", &root), label)
+                .variant(ButtonVariant::Default)
+                .flex_1()
+                .min_w_0()
+                .disabled(busy)
+                .when(!busy, |button| {
+                    button
+                        .cursor_pointer()
+                        .on_press(cx, move |this, window, cx| this.run_primary(&root, action, window, cx))
+                })
+        });
+        let undo =
+            Button::new(repo_id("git-undo-committed", &root), rust_i18n::t!("git.undo_last_commit").into_owned())
+                .variant(ButtonVariant::Outline)
+                .flex_none()
+                .disabled(busy)
+                .when(!busy, |button| {
+                    let root = root.clone();
+                    button
+                        .cursor_pointer()
+                        .on_press(cx, move |this, window, cx| this.undo_last_commit(&root, window, cx))
+                });
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(
+                div()
+                    .id(repo_id("git-committed", &root))
+                    .role(Role::Status)
+                    .aria_label(status)
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .min_w_0()
+                            .child(svg().flex_none().path(CHECK_ICON).size(px(13.)).text_color(success))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(fg)
+                                    .child(title),
+                            ),
+                    )
+                    .when(!committed.subject.is_empty(), |status| {
+                        status.child(div().min_w_0().truncate().text_color(muted).child(committed.subject.clone()))
+                    }),
+            )
+            .child(div().flex().gap(px(6.)).children(push).child(undo))
+    }
+
+    /// 提交说明：小标题和右边让 AI 起草的「重新生成」，说明框，框里还是 AI 写的那段（`drafted`）时下面说一句是
+    /// 起的草；最下面是提交按钮和旁边弹出更多提交方式的箭头。没有改动时提交按钮换成同步或者发布分支。
+    fn render_commit_form(
+        &self,
+        repo: &git::Snapshot,
+        area: &Entity<TextareaState>,
+        drafted: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let panel = self.state();
         let (info, dirty, root) = (&repo.info, !repo.is_clean(), repo.root.clone());
         let running = panel.busy(&root);
         let busy = running.is_some();
-        let fg_hsla = cx.theme().foreground;
-        let Some(area) = panel.repos.get(&root).and_then(|repo| repo.commit_box.clone()) else {
-            return div();
-        };
-        let has_message = !area.read(cx).text().trim().is_empty();
+        let text = area.read(cx).text();
+        let has_message = !text.trim().is_empty();
+        let drafted = drafted.is_some_and(|drafted| has_message && drafted == text);
         let primary = if dirty {
             PrimaryAction::Commit
         } else if info.upstream.is_some() && (info.ahead > 0 || info.behind > 0) {
@@ -762,8 +945,13 @@ impl GitPanel {
         } else {
             PrimaryAction::Commit
         };
+        // 提交的文件数：有暂存的是暂存了的，没有时提交会问要不要暂存全部，是全部改了的。
+        let files = if repo.staged.is_empty() { rows::check_counts(repo).0 } else { repo.staged.len() };
         let (icon, label) = match primary {
-            PrimaryAction::Commit => (CHECK_ICON, rust_i18n::t!("git.commit").into_owned()),
+            PrimaryAction::Commit if files > 0 => {
+                (CHECK_ICON, rust_i18n::t!("git.commit_files", count = files).into_owned())
+            }
+            PrimaryAction::Commit | PrimaryAction::Push => (CHECK_ICON, rust_i18n::t!("git.commit").into_owned()),
             PrimaryAction::Sync => {
                 (SYNC_ICON, rust_i18n::t!("git.sync_changes", behind = info.behind, ahead = info.ahead).into_owned())
             }
@@ -771,8 +959,10 @@ impl GitPanel {
         };
         // 推送、拉取要跑好几秒：跑的时候按钮写着在做什么，连远端的图标还转着圈，免得以为没点上。
         let label = running.map_or(label, Busy::label);
-        // 主按钮的底色由前景混进背景算出，跟着主题走。
-        let (accent, accent_hover, on_accent) = (cx.theme().mix(0.16), cx.theme().mix(0.22), fg_hsla);
+        let theme = cx.theme();
+        let (accent, on_accent, muted, border) =
+            (theme.primary, theme.primary_foreground, theme.muted_foreground, theme.border);
+        let accent_hover = accent.opacity(0.9);
         let icon = match running {
             Some(running) if running.is_remote() => {
                 sync_icon(repo_id("git-commit-icon", &repo.root), true, 14., on_accent)
@@ -780,51 +970,61 @@ impl GitPanel {
             _ => svg().flex_none().path(icon).size(px(14.)).text_color(on_accent).into_any_element(),
         };
         let enabled = !busy && (primary != PrimaryAction::Commit || (dirty && has_message));
-        // 说明框右上角让 AI 写说明的按钮：有改动、仓库没在忙时才能点，写的时候说明框底下的提交按钮
-        // 写着在生成。
+        // 提交说明框按 cmd-enter 提交，主按钮上标出来。
+        let shortcut = (primary == PrimaryAction::Commit && running.is_none()).then(|| {
+            Kbd::new(crate::keybinds::secondary_text("enter"))
+                .bg(on_accent.opacity(0.1))
+                .text_color(on_accent.opacity(0.7))
+        });
+        // 让 AI 起草说明：有改动、仓库没在忙时才能点，写的时候提交按钮写着在生成。
         let can_write = dirty && !busy;
-        let sparkle = div()
-            .id(repo_id("git-commit-sparkle", &repo.root))
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("git.ai_message.button").into_owned())
-            .aria_disabled(!can_write)
-            .absolute()
-            .top(px(2.))
-            .right(px(2.))
-            .size(px(24.))
-            .rounded(px(4.))
+        let regenerate = Button::new(repo_id("git-regenerate", &repo.root), rust_i18n::t!("git.regenerate"))
+            .icon(SPARKLE_ICON)
+            .icon_size(12.)
+            .variant(ButtonVariant::Ghost)
+            .with_size(ButtonSize::Sm)
+            .disabled(!can_write)
+            .when(can_write, |button| {
+                let root = root.clone();
+                button.cursor_pointer().on_press(cx, move |_, _, cx| {
+                    cx.emit(GitPanelEvent::WriteCommitMessage { root: root.clone(), ask: false })
+                })
+            });
+        let heading = div()
             .flex()
             .items_center()
-            .justify_center()
-            // 说明框整块是文字光标，按钮上换回箭头，能点时是手指。
-            .cursor_default()
-            .tooltip(tooltip(rust_i18n::t!("git.ai_message.button"), None))
-            .child(svg().path(SPARKLE_ICON).size(px(18.)).text_color(fg_hsla.opacity(if can_write {
-                0.75
-            } else {
-                0.3
-            })))
-            .when(can_write, |sparkle| {
-                let root = root.clone();
-                sparkle
-                    .cursor_pointer()
-                    .hover(|sparkle| sparkle.bg(fg_hsla.opacity(0.08)))
-                    .on_press_down(cx, move |_, _, cx| {
-                        cx.emit(GitPanelEvent::WriteCommitMessage { root: root.clone(), ask: false })
-                    })
-            });
-        let commit_box = Textarea::new(&area)
+            .gap(px(6.))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(FontSize::Small)
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(muted)
+                    .child(rust_i18n::t!("git.message_label").into_owned()),
+            )
+            .child(regenerate);
+        let commit_box = Textarea::new(area)
             .id(repo_id("git-commit-box", &repo.root))
-            .relative()
             .flex_none()
             .w_full()
-            .pl(px(6.))
-            .pr(px(30.))
-            .py(px(4.))
-            .rounded(px(4.))
+            .px(px(8.))
+            .py(px(6.))
+            .rounded(px(6.))
             .bg(cx.theme().mix(0.04))
-            .cursor_text()
-            .child(sparkle);
+            .border_1()
+            .border_color(border)
+            .cursor_text();
+        let note = drafted.then(|| {
+            let note = rust_i18n::t!("git.draft_note").into_owned();
+            div()
+                .id(repo_id("git-draft-note", &repo.root))
+                .aria_static_text(note.clone())
+                .text_size(FontSize::Small)
+                .text_color(muted)
+                .child(note)
+        });
         let main = div()
             .id(repo_id("git-commit", &repo.root))
             .role(Role::Button)
@@ -842,6 +1042,7 @@ impl GitPanel {
             .text_color(on_accent)
             .child(icon)
             .child(div().min_w_0().truncate().child(label))
+            .children(shortcut)
             .when(enabled, |main| {
                 let root = root.clone();
                 main.hover(move |main| main.bg(accent_hover))
@@ -872,25 +1073,15 @@ impl GitPanel {
                     this.open_commit_menu(&root, position, cx)
                 })
             });
-        div()
-            .flex_none()
-            .px(px(10.))
-            .pb(px(8.))
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(commit_box)
-            .child(
-                div()
-                    .flex_none()
-                    .h(scaled(COMMIT_BUTTON_HEIGHT))
-                    .flex()
-                    .when(!enabled, |buttons| buttons.opacity(0.5))
-                    .child(main)
-                    .child(more),
-            )
+        div().flex().flex_col().gap(px(6.)).child(heading).child(commit_box).children(note).child(
+            div()
+                .flex_none()
+                .h(scaled(COMMIT_BUTTON_HEIGHT))
+                .flex()
+                .when(!enabled, |buttons| buttons.opacity(0.5))
+                .child(main)
+                .child(more),
+        )
     }
 
     /// 提交按钮旁边箭头弹出的菜单：各种提交方式，作用到根目录是 `root` 的仓库。
@@ -1218,8 +1409,9 @@ impl Render for GitPanel {
                     .flex_col()
                     .child(self.render_branch_bar(git, cx))
                     .children(git.info.operation.map(|operation| operation_banner(&git.root, operation, cx)))
-                    .child(self.render_commit_area(git, cx))
+                    .children(self.render_check_row(git, cx))
                     .child(list)
+                    .child(self.render_commit_area(git, true, cx))
                     .into_any_element()
             }
         };
@@ -1310,7 +1502,7 @@ fn operation_banner(root: &Path, operation: Operation, cx: &App) -> Stateful<Div
         .px(px(8.))
         .py(px(4.))
         .rounded(px(4.))
-        .bg(hsla(MODIFIED).opacity(0.15))
+        .bg(cx.theme().warning.opacity(0.15))
         .text_color(cx.theme().foreground)
         .child(text.into_owned())
 }

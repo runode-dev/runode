@@ -21,6 +21,10 @@ pub struct SessionMeta {
     pub fallback_title: Option<String>,
     /// 前台 agent 和它的状态；不是 agent 在前台时为 `None`。
     pub agent: Option<Agent>,
+    /// 前台 agent 进入现在这个种类和状态的时刻，按宿主的系统时钟取 Unix 毫秒；同一状态重复判定不变。
+    /// 不是 agent 在前台时为 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_since_ms: Option<u64>,
     /// 前台 agent 正在进行的对话；认不出是哪场、或者那家 agent 不能按号接回时为 `None`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation: Option<Conversation>,

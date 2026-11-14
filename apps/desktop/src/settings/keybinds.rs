@@ -460,7 +460,9 @@ impl SettingsView {
             let nth = seen.entry(line.clone()).or_default();
             *nth += 1;
             let id = SharedString::from(format!("remove-bad-keybind-{line}-{nth}"));
-            let remove = Button::new(id, rust_i18n::t!("settings.remove"))
+            let label = rust_i18n::t!("settings.remove");
+            let remove = Button::new(id, label.clone())
+                .aria_label(crate::i18n::action_for(&label, &line))
                 .icon(MINUS_ICON)
                 .icon_size(12.)
                 .with_size(ButtonSize::IconSm)
@@ -591,6 +593,7 @@ impl SettingsView {
                     SharedString::from(format!("keybind-remove-{usage}-{}", bound.trigger)),
                     remove_label.clone(),
                 )
+                .aria_label(crate::i18n::action_for(&remove_label, &caps_text(&bound.trigger)))
                 .icon(BAN_ICON)
                 .icon_size(12.)
                 .with_size(ButtonSize::IconSm)

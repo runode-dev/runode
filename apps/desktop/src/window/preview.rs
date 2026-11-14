@@ -170,6 +170,20 @@ impl WindowView {
         })
     }
 
+    /// 「交给 agent」：把 `text` 贴进 `quote_target` 选的分屏，焦点交给它。
+    pub(super) fn quote_to_agent(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(pane) = self.quote_target(cx) {
+            self.focus_pane_in_active_tab(pane, window, cx);
+        }
+        if let Some(view) = self.focused_view().cloned() {
+            // 预览盖着终端，退到后面才看得到贴进去的字。
+            self.send_preview_back(cx);
+            cx.notify();
+            window.focus(&view.focus_handle(cx), cx);
+            view.update(cx, |view, cx| view.paste_text(text, window, cx));
+        }
+    }
+
     /// 监听到 `paths` 变了：当前预览的文件在里面就重读。
     pub(super) fn preview_files_changed(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         self.with_preview(cx, |panel, cx| panel.files_changed(paths, cx));
@@ -273,18 +287,7 @@ impl WindowView {
                 cx.notify();
                 self.insert_paths(vec![path.clone()], *lines, window, cx);
             }
-            PreviewEvent::Quote(text) => {
-                if let Some(pane) = self.quote_target(cx) {
-                    self.focus_pane_in_active_tab(pane, window, cx);
-                }
-                if let Some(view) = self.focused_view().cloned() {
-                    // 预览盖着终端，退到后面才看得到贴进去的字。
-                    self.send_preview_back(cx);
-                    cx.notify();
-                    window.focus(&view.focus_handle(cx), cx);
-                    view.update(cx, |view, cx| view.paste_text(text.clone(), window, cx));
-                }
-            }
+            PreviewEvent::Quote(text) => self.quote_to_agent(text.clone(), window, cx),
             // 经 Git 面板跑，和面板上的操作一起按仓库排队；做完它发 `GitPanelEvent::HunkApplied`，再重读 diff。
             PreviewEvent::ApplyHunk { root, file, hunk, action } => {
                 self.with_git_panel(cx, |panel, cx| panel.apply_hunk(root, file.clone(), *hunk, *action, window, cx));

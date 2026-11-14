@@ -1,5 +1,5 @@
 //! 读线程（`host-link-reader`）：读宿主发来的帧，按会话分发成 `LinkEvent`。输出帧按通道找到会话，
-//! 快照帧拼好到 `SnapshotEnd` 作为一份 `Screen` 交出去，带 `req` 的回话交给等着的调用方，
+//! 快照帧拼好到 `SnapshotEnd` 作为一份 `Screen` 交出去，带 `req` 的回话和读屏的回话交给等着的调用方，
 //! `UiRequest` 交给界面；连接断开或者宿主说 `Goodbye` 时退出。每帧都带着读线程自己那条连接的代数，
 //! 连接已经换过时丢掉：换上新连接后旧连接上已经读进来的帧不能按新连接的通道、请求号和会话处理。
 
@@ -192,7 +192,19 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
                 let _ = reply.send(HostMsg::Error { req: Some(req), id, message, reason });
             }
         }
+        HostMsg::ScreenText { id, text, .. } if state.screen_reads.contains_key(&id) => {
+            answer_screen_read(&mut state, id, Ok(text));
+        }
         HostMsg::Error { req, id: Some(id), message, reason } => {
+            // 连接着这个会话时的错误先算连接的：它不交出去，视图就一直卡在连接中；读屏没拿到回话只是等到超时。
+            // 登记着的读屏都已经不等了时，错误照常交给看这个会话的视图。
+            if req.is_none()
+                && state.screen_reads.contains_key(&id)
+                && !state.sessions.get(&id).is_some_and(|route| route.attaching > 0)
+                && answer_screen_read(&mut state, id, Err(crate::host_client::error_text(&message, reason.as_ref())))
+            {
+                return;
+            }
             let Some(route) = state.sessions.get_mut(&id) else {
                 tracing::debug!("error from the host about session {id}: {message}");
                 return;
@@ -234,6 +246,28 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
             }
         }
     }
+}
+
+/// 把会话 `id` 的一次读屏回话交给最早登记、还在等的调用方；已经不等了的（超时走了）跳过，回话交给下一个。
+/// 返回交出去了没有：登记的都已经不等了时为假。
+///
+/// shortcut: 超时那次读屏晚到的回话会交给下一次读屏，拿到的是旧屏幕；读屏的回话带上请求编号后去掉这条路。
+fn answer_screen_read(state: &mut State, id: SessionId, mut answer: Result<String, String>) -> bool {
+    let Some(waiting) = state.screen_reads.get_mut(&id) else { return false };
+    let mut delivered = false;
+    while let Some(reader) = waiting.pop_front() {
+        match reader.send(answer) {
+            Ok(()) => {
+                delivered = true;
+                break;
+            }
+            Err(mpsc::SendError(back)) => answer = back,
+        }
+    }
+    if waiting.is_empty() {
+        state.screen_reads.remove(&id);
+    }
+    delivered
 }
 
 /// 消息里的会话目录和转来的界面请求里的目录，`\` 换成 `/`（`Link::set_windows_paths`）。

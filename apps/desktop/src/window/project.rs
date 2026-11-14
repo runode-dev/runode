@@ -27,11 +27,12 @@ use gpui::{
 // 面板外框在 `runode_ui::panel`，窗口里各面板从这里引。
 use crate::host_client::hosts::HostId;
 use crate::project_host::ProjectHost;
-use crate::ui::a11y::A11yPress;
+use crate::ui::a11y::{A11yPress, PressDown as _};
 pub(super) use crate::ui::panel::panel_message;
 use crate::ui::panel::panel_shell;
 use crate::{
-    ui::icons::{FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON, github_actions::WORKFLOW_ICON as ACTIONS_WORKFLOW_ICON},
+    ui::icons::PANEL_RIGHT_ICON,
+    ui::tabs::{TabsList, TabsTrigger},
     ui::{font_size::FontSize, theme::ActiveTheme as _, tooltip::tooltip},
 };
 
@@ -561,7 +562,12 @@ impl WindowView {
     }
 
     /// 右侧面板显示着的那一页，收着时为空。
-    pub(super) fn render_side_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_side_panel(
+        &mut self,
+        width: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let panel = self.workspace().panel?;
         let unavailable = match panel {
             SidePanel::GitHubActions => self.on_remote().then(|| rust_i18n::t!("panel.remote").into_owned()),
@@ -569,16 +575,15 @@ impl WindowView {
         };
         if let Some(message) = unavailable {
             let shell = self
-                .side_panel_shell("remote-panel", width, cx)
-                .bg(cx.theme().mix(0.03))
+                .side_panel_shell("remote-panel", width, window, cx)
                 .text_size(FontSize::Body)
                 .child(panel_message(message, cx));
             return Some(shell.into_any_element());
         }
         match panel {
-            SidePanel::Files => Some(self.render_files_panel(width, cx).into_any_element()),
-            SidePanel::Git => Some(self.render_git_panel(width, cx).into_any_element()),
-            SidePanel::GitHubActions => Some(self.render_github_actions_panel(width, cx).into_any_element()),
+            SidePanel::Files => Some(self.render_files_panel(width, window, cx).into_any_element()),
+            SidePanel::Git => Some(self.render_git_panel(width, window, cx).into_any_element()),
+            SidePanel::GitHubActions => Some(self.render_github_actions_panel(width, window, cx).into_any_element()),
         }
     }
 
@@ -647,7 +652,8 @@ impl WindowView {
     /// 右侧面板都收着时标题栏右边给右上角那组按钮让出的宽度，窗口按钮另算。
     pub(super) fn panel_toggles_inset(&self, cx: &App) -> f32 {
         let count = TOGGLE_COUNT + if self.remote_desktop_button_shown(cx) { 1. } else { 0. };
-        TOGGLE_WIDTH * count + TOGGLE_GAP * (count - 1.) + TOGGLE_MARGIN + 6.
+        // 命令按钮带着上次跑的命令时比别的按钮宽，单独算。
+        TOGGLE_WIDTH * (count - 1.) + self.tasks_button_width(cx) + TOGGLE_GAP * (count - 1.) + TOGGLE_MARGIN + 6.
     }
 
     /// 标题栏右上角的按钮：没有菜单栏的系统上先是「更多」按钮，workspace 所在的 SSH 主机看得了远程桌面时接着是远程桌面
@@ -660,6 +666,7 @@ impl WindowView {
         let toggle = Toggle::new("toggle-panel", PANEL_RIGHT_ICON, text.clone().into_owned())
             .pressed(shown)
             .aria_expanded(shown)
+            .when(shown, |toggle| toggle.bg(cx.theme().tab_active))
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
             .tooltip(tooltip(text, None))
@@ -690,52 +697,63 @@ impl WindowView {
     /// 右侧面板各页的外框，顶上是切换各页的标签，下面的内容由调用方接着加。整块报成一个有名字的组：
     /// GPUI 只把同时有 `id` 和 `role` 的元素当作辅助工具的父节点，外框没有 role 时标签和这一页的内容
     /// 都挂到外面的节点上，辅助工具分不出哪些是面板的。
-    pub(super) fn side_panel_shell(&self, id: &'static str, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
-        panel_shell(id, width, cards(cx), cx)
+    pub(super) fn side_panel_shell(
+        &self,
+        id: &'static str,
+        width: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let cards = cards(cx);
+        panel_shell(id, width, cards, cx)
+            .when(!cards, |shell| shell.bg(cx.theme().mix(0.03)))
             .role(Role::Group)
             .aria_label(rust_i18n::t!("panel.label").into_owned())
-            .child(self.render_panel_tabs(cx))
+            .child(self.render_panel_tabs(window, cx))
     }
 
-    /// 右侧面板顶上那排切换文件树和 Git 的标签，显示着的那个底色亮一些。经典样式下标题栏右上角的
-    /// 开关按钮盖在这一条的右端。
-    pub(super) fn render_panel_tabs(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let tab = |page: SidePanel, cx: &mut Context<Self>| {
-            let (id, icon, text, action): (_, _, _, &dyn Action) = match page {
-                SidePanel::Files => ("tab-files", FILES_ICON, rust_i18n::t!("tooltip.show_files"), &ToggleFiles),
-                SidePanel::Git => ("tab-git", GIT_ICON, rust_i18n::t!("tooltip.show_git"), &ToggleGit),
+    /// 右侧面板顶上切换文件、改动和 Actions 的标签，「改动」后面带着主仓库里有改动的文件数。卡片样式下
+    /// 标签直接放在卡片顶上；经典样式下放在和标题栏等高、能拖动窗口的一条里，右端让给标题栏右上角的开关
+    /// 按钮（`render_panel_toggles`），标签的高度也跟着那排按钮定死。
+    pub(super) fn render_panel_tabs(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let cards = cards(cx);
+        let changes = self.workspace().project.git.as_ref().map_or(0, |git| git.main.statuses.len());
+        let trigger = |page: SidePanel, cx: &mut Context<Self>| {
+            let (id, label, text, action): (_, _, _, &dyn Action) = match page {
+                SidePanel::Files => {
+                    ("tab-files", rust_i18n::t!("files.tree"), rust_i18n::t!("tooltip.show_files"), &ToggleFiles)
+                }
+                SidePanel::Git => {
+                    ("tab-git", rust_i18n::t!("panel.changes"), rust_i18n::t!("tooltip.show_git"), &ToggleGit)
+                }
                 SidePanel::GitHubActions => (
                     "tab-github-actions",
-                    ACTIONS_WORKFLOW_ICON,
+                    rust_i18n::t!("panel.actions"),
                     rust_i18n::t!("tooltip.show_github_actions"),
                     &ToggleGitHubActions,
                 ),
             };
-            let view = cx.entity().downgrade();
-            Toggle::new(id, icon, text.clone().into_owned())
-                .pressed(self.workspace().panel == Some(page))
-                .role(Role::Tab)
-                .aria_selected(self.workspace().panel == Some(page))
-                .w(px(TOGGLE_WIDTH))
-                .h(px(TOGGLE_HEIGHT))
+            let count = (page == SidePanel::Git && changes > 0).then_some(changes);
+            TabsTrigger::new(id, label.into_owned(), self.workspace().panel == Some(page))
+                .count(count)
+                .when_some(count, |tab, count| {
+                    tab.aria_description(rust_i18n::t!("panel.changed_files", count = count).into_owned())
+                })
+                .when(!cards, |tab| tab.h(px(TOGGLE_HEIGHT)))
                 .tooltip(tooltip(text, Some(action)))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.set_panel(Some(page), window, cx);
-                    }),
-                )
-                .on_a11y_press(view, move |this, window, cx| this.set_panel(Some(page), window, cx))
+                .on_press_down(cx, move |this, window, cx| this.set_panel(Some(page), window, cx))
         };
-        self.panel_header(cx)
-            .id("panel-tabs")
-            .role(Role::TabList)
-            .px(px(6.))
-            .gap(px(TOGGLE_GAP))
-            .child(tab(SidePanel::Files, cx))
-            .when(self.git_button_visible() || self.git_install_hint(cx), |tabs| tabs.child(tab(SidePanel::Git, cx)))
-            .when(self.github_actions_tab_visible(cx), |tabs| tabs.child(tab(SidePanel::GitHubActions, cx)))
+        let tabs = TabsList::new("panel-tabs", rust_i18n::t!("panel.label").into_owned())
+            .trigger(trigger(SidePanel::Files, cx))
+            .when(self.git_button_visible() || self.git_install_hint(cx), |tabs| {
+                tabs.trigger(trigger(SidePanel::Git, cx))
+            })
+            .when(self.github_actions_tab_visible(cx), |tabs| tabs.trigger(trigger(SidePanel::GitHubActions, cx)));
+        if cards {
+            return tabs.flex_none().m(px(8.)).mb_0().into_any_element();
+        }
+        let toggles = self.panel_toggles_inset(cx) + super::titlebar::window_controls_width(window);
+        self.panel_header(cx).pl(px(6.)).pr(px(toggles)).child(tabs.flex_1().min_w_0()).into_any_element()
     }
 
     /// 右侧面板顶上的一条，见 `runode_ui::panel::panel_header`。

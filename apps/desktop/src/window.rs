@@ -40,6 +40,7 @@ mod quit;
 mod remote;
 mod remove_worktree;
 mod resize_request;
+mod review;
 mod screen_viewer;
 mod settings_page;
 mod sidebar;
@@ -227,8 +228,10 @@ const NEW_TAB_MENU_BUTTON_WIDTH: f32 = 24.;
 const TAB_MIN_WIDTH: f32 = 64.;
 /// 标签最宽的宽度；标签少时不再拉宽，靠左排开，后面紧跟新建标签按钮。
 const TAB_MAX_WIDTH: f32 = 200.;
-/// 标题前面 agent 状态标记的宽度，固定下来标题才不会随转圈的字符左右跳。
-const AGENT_MARK_WIDTH: f32 = 12.;
+/// 状态标记（`titlebar::agent_mark`）的边长：标签、分屏标题条和看板卡片上的用 `AGENT_MARK_SIZE`，侧栏、
+/// agent 列表和后台会话这类列表行里的用 `AGENT_MARK_SIZE_SMALL`。
+const AGENT_MARK_SIZE: f32 = 14.;
+const AGENT_MARK_SIZE_SMALL: f32 = 13.;
 
 /// 装上存档（`persist::install`）和系统发起的退出的收尾（`quit::install`）。要在打开窗口之前调用。
 pub fn install(cx: &mut App) {
@@ -238,8 +241,10 @@ pub fn install(cx: &mut App) {
 
 /// 卡片之间、卡片到窗口边的间距。
 const CARD_GAP: f32 = 8.;
-/// 卡片样式下标题栏里标签条的高度，标签是条里的胶囊，上下各留 2 点。
+/// 卡片样式下标题栏里标签条的高度，也是标签胶囊的高度。
 const TAB_TRACK_HEIGHT: f32 = 28.;
+/// 卡片样式下标签之间的空隙。
+const TAB_GAP: f32 = 4.;
 
 /// 窗口用卡片样式，见 `WindowStyle`。
 /// 按配色 `fg`、`bg` 和配置的调色板换上全 app 共用的主题 token（`Theme`），返回换上的：同一次绘制里接着画的
@@ -353,9 +358,9 @@ pub struct WindowView {
     page: Option<Page>,
     /// 开着的远程桌面：占满内容区的那台和看板一样盖住标签和分屏，浮动的浮在上面。
     screen_viewers: screen_viewer::ScreenViewers,
-    /// 离开时收起来的写到一半的新建任务那一页，下回新建任务时接着写。
+    /// 收起来的写到一半的新建任务对话框，下回新建任务时接着写。
     todo_draft: Option<Entity<crate::kanban::TodoDialog>>,
-    /// 正在办用户按的窗口动作（`act`）：这时换标签算用户要离开新建任务那一页。
+    /// 正在办用户按的窗口动作（`act`）：这时换标签算用户要离开新建任务的对话框。
     acting: bool,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
     empty_focus: FocusHandle,
@@ -368,6 +373,9 @@ pub struct WindowView {
     /// 显示着驱动标记时，到最早的那个该消失的时候（`now_ms` 的毫秒数）重画的计时器，见
     /// `schedule_driver_redraw`。
     driver_redraw: Option<(u64, Task<()>)>,
+    /// 侧栏「需要你」里有等回答的分屏时，到等得最久的那个满下一个整分钟的时刻重画的计时器，见
+    /// `schedule_inbox_redraw`。
+    inbox_redraw: Option<(Instant, Task<()>)>,
     /// 最近一次把路径打进终端（`insert_paths`）的任务：下一次等它打完再打，先后不乱。
     inserting: Option<Shared<Task<()>>>,
     /// workspace、标签和分屏节点的标识都从这里取。
@@ -395,6 +403,8 @@ pub struct WindowView {
     _visibility_watch: Subscription,
     /// 配置重载后重画，文件树的字号等跟着变。
     _config_watch: Subscription,
+    /// 认出的 agent 提问（`agent_prompts::Prompts`）变了时重画：侧栏是缓存的视图，只在窗口通知时重画。
+    _prompts_watch: Subscription,
     project_watcher: project::Watcher,
     /// 包成缓存视图的几块界面，见 `Slot`。第一次画窗口时才建：建 `WindowView` 时它还没有实体。
     slots: Option<Slots>,
@@ -434,6 +444,8 @@ impl WindowView {
         let display_watch = cx.observe_window_display(window, remember_bounds);
         let activation_watch = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
+                // 系统的「减少动态效果」可能在 app 不在前台时改了，切回窗口时重读。
+                crate::motion::sync(cx);
                 this.refresh_project(cx);
                 this.refresh_preview_if_changed(cx);
                 // 切回这个窗口就算看到了当前分屏。
@@ -450,8 +462,11 @@ impl WindowView {
         });
         let project_watcher = project::Watcher::new(window, cx);
         let config_watch = cx.observe_global::<AppConfig>(|this, cx| {
-            // 界面跟着 `ui-font-size` 缩放，Git 面板有多个仓库时的列表记着量过的行高，要重新量。
+            // 界面跟着 `ui-font-size` 缩放，Git 面板有多个仓库时的列表和 Review 页的列表记着量过的行高，要重新量。
             this.git_panel.read(cx).remeasure();
+            if let Some(page) = this.review_page() {
+                page.view.read(cx).remeasure();
+            }
             // 字号、语言、卡片样式变了，自己缓存的视图也要重画。
             for id in this.cached_views() {
                 App::notify(cx, id);
@@ -521,6 +536,7 @@ impl WindowView {
             arrange_picker: None,
             status_popover: None,
             driver_redraw: None,
+            inbox_redraw: None,
             inserting: None,
             next_id: 0,
             layout: Rc::default(),
@@ -536,6 +552,7 @@ impl WindowView {
             _activation_watch: activation_watch,
             _visibility_watch: visibility_watch,
             _config_watch: config_watch,
+            _prompts_watch: cx.observe_global::<crate::agent_prompts::Prompts>(|_, cx| cx.notify()),
             project_watcher,
             slots: None,
             slot_theme: None,
@@ -664,6 +681,7 @@ impl WindowView {
         let page = match &self.page {
             Some(Page::Kanban(board)) => Some(board.view.entity_id()),
             Some(Page::Mobile(page)) => Some(page.view.entity_id()),
+            Some(Page::Review(page)) => Some(page.view.entity_id()),
             Some(Page::Settings(_)) | None => None,
         };
         let screens = self.screen_viewers.views().map(Entity::entity_id);
@@ -680,11 +698,11 @@ impl WindowView {
 
     fn render_panel_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let width = self.right_panel_widths(f32::from(window.viewport_size().width)).panel;
-        self.render_side_panel(width, cx).unwrap_or_else(|| Empty.into_any_element())
+        self.render_side_panel(width, window, cx).unwrap_or_else(|| Empty.into_any_element())
     }
 
-    fn render_status_bar_slot(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        self.render_status_bar(cx).into_any_element()
+    fn render_status_bar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.render_status_bar(window, cx).into_any_element()
     }
 }
 
@@ -764,6 +782,8 @@ enum Page {
     Mobile(mobile_page::OpenMobile),
     /// 看板，盖住标签和分屏；新建、编辑任务和定时的对话框也在它身上。
     Kanban(kanban::OpenKanban),
+    /// 看改动并提交的页，只盖住终端区，标题栏和右侧面板照旧。
+    Review(review::OpenReview),
 }
 
 impl WindowView {
@@ -788,7 +808,14 @@ impl WindowView {
         }
     }
 
-    /// 收起盖着终端区的看板、配对设备页和占满内容区的远程桌面，露出标签和分屏（设置页不动）：看板写到
+    fn review_page(&self) -> Option<&review::OpenReview> {
+        match &self.page {
+            Some(Page::Review(page)) => Some(page),
+            _ => None,
+        }
+    }
+
+    /// 收起盖着终端区的看板、配对设备页、Review 页和占满内容区的远程桌面，露出标签和分屏（设置页不动）：看板写到
     /// 一半的新建任务先收起来留着，配对设备页改了的电脑名先写回；看板开着别的对话框、不让走时什么都不收，
     /// 返回假。
     fn leave_pages(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -797,6 +824,7 @@ impl WindowView {
         }
         self.leave_mobile(cx);
         self.drop_kanban();
+        self.drop_review();
         self.leave_screen_page(window, cx);
         true
     }
@@ -808,13 +836,14 @@ impl WindowView {
 }
 
 impl Focusable for WindowView {
-    /// 开着设置页、配对设备页、看板时是它，文件盖着终端区时是预览；否则是有焦点的终端，当前
+    /// 开着设置页、配对设备页、看板、Review 页时是它，文件盖着终端区时是预览；否则是有焦点的终端，当前
     /// workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         match &self.page {
             Some(Page::Settings(page)) => return page.view.focus_handle(cx),
             Some(Page::Mobile(page)) => return page.view.focus_handle(cx),
             Some(Page::Kanban(board)) => return board.view.focus_handle(cx),
+            Some(Page::Review(page)) => return page.view.focus_handle(cx),
             None => {}
         }
         if let Some(focus) = self.docked_screen_focus(cx) {
@@ -931,7 +960,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::select_last_tab))
             .on_action(Self::act(cx, Self::new_split_right))
             .on_action(Self::act(cx, Self::new_split_down))
-            // 设置页、看板、配对设备页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏；
+            // 设置页、看板、配对设备页、Review 页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏；
             // 看板的对话框开着时不理；`modal_dialog_open` 时也不理，免得关掉对话框底下的页或分屏。
             .on_action(cx.listener(|this, action, window, cx| match &this.page {
                 _ if this.modal_dialog_open() => {}
@@ -942,6 +971,7 @@ impl Render for WindowView {
                     }
                 }
                 Some(Page::Mobile(_)) => this.close_mobile(window, cx),
+                Some(Page::Review(_)) => this.close_review(window, cx),
                 None => {
                     if !this.close_screen_for_pane(window, cx) {
                         this.close_pane(action, window, cx);
@@ -987,7 +1017,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::toggle_github_actions))
             .on_action(Self::act(cx, Self::goto_agent))
             .on_action(Self::act(cx, Self::next_agent))
-            // 新建任务那一页开着时也接（不经 `act` 挡掉）：侧栏的入口露在外面，按了要回到看板、定时页。
+            // 不经 `act`：看板的对话框开着时由它们自己不理。
             .on_action(cx.listener(Self::toggle_kanban))
             .on_action(Self::act(cx, Self::toggle_remote_desktop))
             .on_action(cx.listener(Self::toggle_schedules))
@@ -1103,6 +1133,8 @@ impl WindowView {
             let width = f32::from(window.viewport_size().width) - sidebar_width - widths.panel;
             self.render_preview(width, window, cx)
         });
+        // 没有预览在最前时，开着的审阅页盖在终端区上。
+        let covering = front_preview.or_else(|| self.render_review(window, cx));
         let panel =
             self.workspace().panel.is_some().then(|| self.render_right_column(&slots.panel, widths.panel, window, cx));
         let right_handle =
@@ -1110,11 +1142,12 @@ impl WindowView {
         let panel_toggles = (titlebar_shown || right_column).then(|| {
             self.render_panel_toggles(window, cx)
                 .absolute()
-                .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
+                .top_0()
+                .h(px(TITLEBAR_HEIGHT))
                 .right(px(project::TOGGLE_MARGIN + titlebar::window_controls_width(window)))
         });
         let titlebar = titlebar_shown.then(|| row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window, cx));
-        let panes = covered_panes(panes, front_preview.is_some());
+        let panes = covered_panes(panes, covering.is_some());
         let main = div()
             .flex_1()
             .min_w_0()
@@ -1122,7 +1155,7 @@ impl WindowView {
             .flex()
             .flex_col()
             .children(titlebar)
-            .child(div().relative().flex_1().min_h_0().child(panes).children(front_preview));
+            .child(div().relative().flex_1().min_h_0().child(panes).children(covering));
         let mut body: Vec<AnyElement> = Vec::new();
         body.extend(sidebar);
         body.push(main.into_any_element());
@@ -1195,7 +1228,7 @@ impl WindowView {
                     .pr(px(inset))
                     .flex()
                     .text_color(fg.opacity(0.55))
-                    .child(titled(title, mark, "window-agent", fg).flex_1())
+                    .child(titled(title, mark, "window-agent", false, cx).flex_1())
                     .into_any_element(),
             ]
         };
@@ -1240,6 +1273,8 @@ impl WindowView {
             let width = viewport - sidebar_width - 2. * CARD_GAP - panel;
             self.render_preview(width, window, cx)
         });
+        // 没有预览在最前时，开着的审阅页盖在终端区上。
+        let covering = front_preview.or_else(|| self.render_review(window, cx));
         let panel =
             self.workspace().panel.is_some().then(|| self.render_right_column(&slots.panel, widths.panel, window, cx));
         let right_handle = self.workspace().panel.is_some().then(|| {
@@ -1247,7 +1282,7 @@ impl WindowView {
             self.render_right_handle(Divider::Panel, right, cx)
         });
         let titlebar = row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window, cx);
-        let panes = covered_panes(panes, front_preview.is_some());
+        let panes = covered_panes(panes, covering.is_some());
         let content = div()
             .flex_1()
             .min_h_0()
@@ -1256,7 +1291,7 @@ impl WindowView {
             .pl(px(CARD_GAP))
             .pr(px(CARD_GAP))
             .pb(px(CARD_GAP))
-            .child(div().relative().flex_1().min_w_0().h_full().child(panes).children(front_preview))
+            .child(div().relative().flex_1().min_w_0().h_full().child(panes).children(covering))
             .children(panel);
         let main = div().flex_1().min_w_0().h_full().flex().flex_col().child(titlebar).child(content);
         let mut body: Vec<AnyElement> = Vec::new();
@@ -1275,9 +1310,9 @@ impl WindowView {
         let sidebar_visible = self.sidebar_visible();
         let left_inset = if sidebar_visible { CARD_GAP } else { sidebar::sidebar_toggle_inset(window.is_fullscreen()) };
         let sidebar_width = if sidebar_visible { self.sidebar_width() } else { 0. };
-        // 标签平分标题栏除去两头的宽度（右侧面板在标题栏下面，不占它的宽度），连同标签条的内边距和
-        // 标签间的空隙一起扣掉，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，挤不下就让标签条
-        // 滚动；拖动时的预览也照这个宽度画。
+        // 标签平分标题栏除去两头的宽度（右侧面板在标题栏下面，不占它的宽度），连同标签间的空隙一起
+        // 扣掉，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，挤不下就让标签条滚动；拖动时的预览也照
+        // 这个宽度画。
         let fixed = sidebar_width
             + left_inset
             + NEW_TAB_BUTTON_WIDTH
@@ -1285,8 +1320,7 @@ impl WindowView {
             + titlebar::window_controls_width(window);
         let tab_count_f = tab_count.max(1) as f32;
         let tab_width =
-            px(((viewport - fixed - 2. * (tab_count_f + 1.)) / tab_count_f).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH));
-        let track_bg = cx.theme().tab_track;
+            px(((viewport - fixed - TAB_GAP * (tab_count_f - 1.)) / tab_count_f).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH));
         let workspace = self.workspace().id;
         let drop_bg = cx.theme().ring.opacity(0.12);
         let strip = div()
@@ -1295,10 +1329,7 @@ impl WindowView {
             .flex_initial()
             .min_w_0()
             .h(px(TAB_TRACK_HEIGHT))
-            .p(px(2.))
-            .gap(px(2.))
-            .rounded(px(TAB_TRACK_HEIGHT / 2. - 4.))
-            .bg(track_bg)
+            .gap(px(TAB_GAP))
             .flex()
             .items_center()
             .overflow_x_scroll()
@@ -1320,7 +1351,6 @@ impl WindowView {
                 this.drop_pane_as_tab(dragged.pane, workspace, window, cx);
             }))
             .child(div().flex_none().w(px(left_inset)).h_full().window_control_area(WindowControlArea::Drag))
-            // 没有标签时标签条是空的，只剩带底色的内边距，不画。
             .when(tab_count > 0, |titlebar| titlebar.child(strip))
             .child(self.render_new_tab_button_card(window, cx))
             // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。

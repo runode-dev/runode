@@ -217,6 +217,69 @@ pub(crate) struct RepoPanel {
     pub commit_events: Option<Subscription>,
     pub busy: Option<Busy>,
     pub graph: Graph,
+    /// AI 写进提交说明框的那段字：框里还是它时说明下面说一句是起的草。
+    pub drafted: Option<String>,
+    /// 刚提交好的那次，提交区换成推送和撤销；读到的状态说它不再留着时清掉。
+    pub committed: Option<Committed>,
+}
+
+/// 刚提交好的一次。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Committed {
+    /// 提交前 HEAD 的短哈希（还没有提交时为空）：读到的 HEAD 还是它时，提交以后的状态还没读到。
+    pub before: Option<String>,
+    /// 提交出去的 HEAD 的短哈希；还没读到时为空。
+    pub head: Option<String>,
+    /// 说明的第一行。
+    pub subject: String,
+    /// 提交出去几个文件。
+    pub files: usize,
+}
+
+impl Committed {
+    /// 读到仓库的状态 `repo` 以后还留不留着：HEAD 从提交出去的那个挪开了（又提交、撤销、换了分支）、又暂存了
+    /// 改动（在攒下一次提交）、或者推到上游了时不留。提交以后的状态还没读到时留着。
+    pub fn still_shown(&mut self, repo: &git::Snapshot) -> bool {
+        let info = &repo.info;
+        if self.head.is_none() {
+            if info.head == self.before {
+                return true;
+            }
+            self.head = info.head.clone();
+        }
+        let pushed = info.upstream.is_some() && info.ahead == 0;
+        info.head == self.head && repo.staged.is_empty() && !pushed
+    }
+}
+
+/// 一个仓库的改动有几个文件、其中几个有暂存的改动（勾上或半勾的，提交时带上），和整体勾没勾：没有暂存的是没勾，
+/// 全部暂存了的是勾上，其余是半勾。同一个文件暂存了一部分时只算一个文件。
+pub(crate) fn check_counts(repo: &git::Snapshot) -> (usize, usize, gpui::Toggled) {
+    let staged: HashSet<&Path> = repo.staged.iter().map(|file| file.path.as_path()).collect();
+    let unstaged: HashSet<&Path> = repo.unstaged.iter().map(|file| file.path.as_path()).collect();
+    let total = staged.union(&unstaged).count();
+    let checked = staged.len();
+    let state = if staged.is_empty() {
+        gpui::Toggled::False
+    } else if unstaged.is_empty() {
+        gpui::Toggled::True
+    } else {
+        gpui::Toggled::Mixed
+    };
+    (total, checked, state)
+}
+
+/// 段 `section` 里路径是 `path` 的文件勾没勾：暂存区的勾上、工作区的没勾，暂存了一部分的（两段里都有）是半勾。
+pub(crate) fn file_checked(repo: &git::Snapshot, section: Section, path: &Path) -> gpui::Toggled {
+    let other = match section {
+        Section::Staged => Section::Unstaged,
+        Section::Unstaged => Section::Staged,
+    };
+    if repo.files(other).iter().any(|file| file.path == path) {
+        gpui::Toggled::Mixed
+    } else {
+        (section == Section::Staged).into()
+    }
 }
 
 /// 以树形式查看时的一个目录行。
@@ -478,6 +541,19 @@ impl PanelState {
         true
     }
 
+    /// 按读到的状态去掉各仓库不再留着的刚提交好的那次（`Committed::still_shown`）。
+    pub fn update_committed(&mut self) {
+        let Some(git) = self.git.clone() else { return };
+        for repo in git.iter() {
+            if let Some(panel) = self.repos.get_mut(&repo.root)
+                && let Some(committed) = panel.committed.as_mut()
+                && !committed.still_shown(repo)
+            {
+                panel.committed = None;
+            }
+        }
+    }
+
     /// 按自己记着的 `git` 重新排行。
     pub fn relayout(&mut self) {
         let git = self.git.clone();
@@ -606,12 +682,12 @@ impl PanelState {
 
 /// `old` 换成 `new` 时变了的那一段：在 `old` 里的范围，以及换成了几行。
 #[derive(Debug, PartialEq, Eq)]
-struct Changed {
-    old: Range<usize>,
-    new_len: usize,
+pub(crate) struct Changed {
+    pub old: Range<usize>,
+    pub new_len: usize,
 }
 
-fn changed_range<T: PartialEq>(old: &[T], new: &[T]) -> Changed {
+pub(crate) fn changed_range<T: PartialEq>(old: &[T], new: &[T]) -> Changed {
     let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
     let room = old.len().min(new.len()) - prefix;
     let suffix = old.iter().rev().zip(new.iter().rev()).take(room).take_while(|(a, b)| a == b).count();
@@ -972,6 +1048,46 @@ mod tests {
         assert!(!panel.toggle_commit(root, "b", Some(&repos)));
         assert!(panel.repo_mut(root).graph.changes.is_empty());
         assert_eq!(panel.graph_rows.len(), 3);
+    }
+
+    /// 暂存了一部分的文件算一个文件、算进会提交的，整体是半勾；全部暂存了是勾上，什么都没暂存是没勾。
+    #[test]
+    fn counts_checked_files() {
+        let mut snapshot = repo("", RepoKind::Main, &["a.txt", "b.txt"]);
+        assert_eq!(check_counts(&snapshot), (2, 0, gpui::Toggled::False));
+        snapshot.staged = repo("", RepoKind::Main, &["b.txt", "c.txt"]).unstaged;
+        assert_eq!(check_counts(&snapshot), (3, 2, gpui::Toggled::Mixed));
+        assert_eq!(file_checked(&snapshot, Section::Staged, Path::new("c.txt")), gpui::Toggled::True);
+        assert_eq!(file_checked(&snapshot, Section::Staged, Path::new("b.txt")), gpui::Toggled::Mixed);
+        assert_eq!(file_checked(&snapshot, Section::Unstaged, Path::new("b.txt")), gpui::Toggled::Mixed);
+        assert_eq!(file_checked(&snapshot, Section::Unstaged, Path::new("a.txt")), gpui::Toggled::False);
+        snapshot.unstaged.clear();
+        assert_eq!(check_counts(&snapshot), (2, 2, gpui::Toggled::True));
+    }
+
+    /// 刚提交好的那次等读到新的 HEAD 才认它；HEAD 挪开、又暂存了改动、推到上游了都不再留着。
+    #[test]
+    fn committed_state_lasts_until_the_next_change() {
+        let mut snapshot = repo("", RepoKind::Main, &["left.txt"]);
+        snapshot.info.head = Some("old".into());
+        let mut committed = Committed { before: Some("old".into()), head: None, subject: "fix".into(), files: 1 };
+        assert!(committed.still_shown(&snapshot));
+        assert_eq!(committed.head, None);
+        snapshot.info.head = Some("new".into());
+        snapshot.info.upstream = Some("origin/main".into());
+        snapshot.info.ahead = 1;
+        assert!(committed.still_shown(&snapshot));
+        assert_eq!(committed.head.as_deref(), Some("new"));
+
+        let mut staged = snapshot.clone();
+        staged.staged = repo("", RepoKind::Main, &["next.txt"]).unstaged;
+        assert!(!committed.clone().still_shown(&staged));
+        let mut pushed = snapshot.clone();
+        pushed.info.ahead = 0;
+        assert!(!committed.clone().still_shown(&pushed));
+        let mut undone = snapshot;
+        undone.info.head = Some("old".into());
+        assert!(!committed.still_shown(&undone));
     }
 
     #[test]
