@@ -28,6 +28,9 @@ const TODOS_DB: &str = if cfg!(debug_assertions) { "todos-dev.db" } else { "todo
 /// 接不上，就会在原目录新开终端、把同一场 agent 对话再接回一次。
 const WINDOWS_FILE: &str = if cfg!(debug_assertions) { "windows-dev.json" } else { "windows.json" };
 
+/// 引导页的进度标记。调试构建另用一份：判断首次启动要看窗口存档在不在，标记得跟着同一构建的存档走。
+const ONBOARDING_FILE: &str = if cfg!(debug_assertions) { "onboarding-dev" } else { "onboarding" };
+
 /// `sockaddr_un.sun_path` 的长度（各系统里最短的那个），含结尾的 NUL；socket 路径的
 /// 字节数要比它小，否则绑定和连接都会失败。
 const SUN_PATH_LEN: usize = 104;
@@ -309,6 +312,11 @@ impl Dirs {
     /// 窗口布局的存档。
     pub fn windows_file(&self) -> Option<PathBuf> {
         self.data_file(WINDOWS_FILE)
+    }
+
+    /// 首次启动的引导页走到哪了：还没走完，还是已经走完或跳过。
+    pub fn onboarding_file(&self) -> Option<PathBuf> {
+        self.data_file(ONBOARDING_FILE)
     }
 
     /// 用户给经 SSH 连的主机起的显示名，按连接目标记。
@@ -693,6 +701,7 @@ mod tests {
         let dirs = dirs(&[("HOME", "/home/me")]);
         assert_eq!(dirs.config_file(), Some("/home/me/.runode/config.conf".into()));
         assert_eq!(dirs.windows_file(), Some(PathBuf::from("/home/me/.runode").join(WINDOWS_FILE)));
+        assert_eq!(dirs.onboarding_file(), Some(PathBuf::from("/home/me/.runode").join(ONBOARDING_FILE)));
         assert_eq!(dirs.todos_db(), Some(PathBuf::from("/home/me/.runode").join(TODOS_DB)));
         assert_eq!(dirs.themes_dir(), Some("/home/me/.runode/themes".into()));
         assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.runode/agent-detection".into()));

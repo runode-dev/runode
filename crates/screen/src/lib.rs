@@ -311,6 +311,18 @@ pub fn request_permissions() -> Permissions {
     platform::request_permissions()
 }
 
+/// 只请求「屏幕录制」，返回请求后的状态：第一次请求时系统弹框，之后只能用户到系统设置里开。
+#[cfg(target_os = "macos")]
+pub fn request_screen_capture() -> bool {
+    platform::request_screen_capture()
+}
+
+/// 只请求注入键鼠要的「辅助功能」，返回请求后的状态：一个进程里最多弹一次框，之后只能用户到系统设置里开。
+#[cfg(target_os = "macos")]
+pub fn request_post_event() -> bool {
+    platform::request_post_event()
+}
+
 /// Windows 和 Linux 上采集和注入都不用系统设置里的授权；Wayland 的 portal 在开始采集时自己问用户。
 #[cfg(any(windows, target_os = "linux"))]
 pub fn permissions() -> Permissions {

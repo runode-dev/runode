@@ -19,6 +19,8 @@ runode-remote.workspace = true
 runode-todo.workspace = true
 # `todo add --model --effort` 照桌面的写法把模型和强度拼进 agent 的命令。
 runode-agent.workspace = true
+# `skill install`：装编进二进制的 skill。
+runode-agent-skill.workspace = true
 anyhow.workspace = true
 # `wait --for text` 按正则找屏幕上的行。
 regex.workspace = true

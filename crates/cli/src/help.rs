@@ -8,15 +8,14 @@ Drive the terminals of the running Runode app from the command line.
 Usage: runode [COMMAND]
 
 Without a command, runode opens its window. `rn` is a short name for runode:
-`rn list` is `runode list`. Except remote and service, commands talk to the
-running Runode app; inside a Runode terminal they find it through
+`rn list` is `runode list`. Except remote, service and skill, commands talk
+to the running Runode app; inside a Runode terminal they find it through
 RUNODE_SOCKET, and RUNODE_SESSION names the terminal they run in. In a
 terminal runode opened on an SSH host, they talk to the Runode on that host
 and see only the terminals running there.
 
-To teach your agents to use Runode, install its skill:
-  npx skills add runode-dev/runode --skill runode -g
-and update it with `npx skills update runode -g`.
+To teach your agents to use Runode, run `runode skill install`; the Runode
+app updates the skill when it starts.
 
 Commands:
   list         List the terminal sessions
@@ -32,6 +31,7 @@ Commands:
   schedule     Start a task for an agent at set times
   remote       Pair phones and computers for remote access and manage them
   service      Start Runode at login, and upgrade the running host
+  skill        Install the agent skill that teaches agents to use Runode
   completions  Print a completion script for your shell
   help         Show this help, or the help of a command
   version      Show the version
@@ -62,6 +62,7 @@ pub(crate) const PAGES: &[(&str, &str)] = &[
     ("schedule", SCHEDULE),
     ("remote", REMOTE),
     ("service", SERVICE),
+    ("skill", SKILL),
     ("completions", COMPLETIONS),
     ("session", SESSION),
 ];
@@ -490,6 +491,27 @@ Arguments:
         sessions, so a phone with remote-access = true can connect without
         the app open and task board schedules start on time
   app   The Runode app, opened at the next login (macOS and Windows)
+
+Options:
+  -h, --help  Show this help
+";
+
+const SKILL: &str = "\
+Install the skill that teaches agents to use Runode, as built into this
+version. It goes to ~/.agents/skills/runode, where agents such as Codex read
+skills. Claude Code, Antigravity and Kiro look elsewhere: when they are
+installed, their skills directory gets a link to it (a copy on Windows). A
+link, file or skill of your own in that place is left alone. Installing again
+replaces the files. When the Runode app starts, it brings a skill Runode
+installed up to its own version. A copy installed with `npx skills add` is
+taken over, and its entry is removed from the skills CLI lock file so that
+`npx skills update` does not put the old one back.
+
+Usage: runode skill install
+
+Commands:
+  install  Install the skill for the agents on this computer, for example on
+           an SSH host where no Runode window opens
 
 Options:
   -h, --help  Show this help

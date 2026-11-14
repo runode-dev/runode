@@ -657,7 +657,9 @@ impl WindowView {
                 let host = view.read(cx).host().clone();
                 self.open_remote_path(wi, &host, path, *dir, window, cx);
             }
-            TerminalEvent::Exited => self.close_pane_by_id(id, window, cx),
+            TerminalEvent::Exited => {
+                super::onboarding::with_background(true, || self.close_pane_by_id(id, window, cx));
+            }
         }
     }
 

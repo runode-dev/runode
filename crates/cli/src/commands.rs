@@ -270,6 +270,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
         Command::ServiceUninstall { kind } => crate::service::uninstall(env, kind, out)?,
         Command::ServiceStatus => crate::service::status(env, out)?,
         Command::ServiceUpgrade => crate::service::upgrade(env, out)?,
+        Command::SkillInstall => crate::skill::install(env, out)?,
         Command::TodoAdd { spec, start, queue } => crate::todo::add(env, spec, start, queue, out)?,
         Command::TodoQueue { id, queue } => crate::todo::queue(env, id, queue)?,
         Command::TodoLimit { limit } => crate::todo::limit(env, limit, out)?,

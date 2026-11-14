@@ -69,12 +69,13 @@ Every version is on [Releases](https://github.com/runode-dev/runode/releases). T
 
 ## Quick start
 
-Teach your agents how to use runode by installing its skill (works with Claude Code, Codex and other agents):
+Teach your agents how to use runode by installing its skill (works with Claude Code, Codex and other agents). The app keeps it up to date from then on:
 
 ```sh
-npx skills add runode-dev/runode --skill runode -g
-npx skills update runode -g    # later, to get the latest version
+runode skill install
 ```
+
+You can also install it with the skills CLI instead: `npx skills add runode-dev/runode --skill runode -g`.
 
 From then on the agent drives neighbouring terminals when it needs to. You can use it by hand as well:
 

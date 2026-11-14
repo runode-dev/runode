@@ -26,7 +26,6 @@ pub use keys::{RunTaskKey, TaskKeys};
 use super::{
     InstallSkill, ToggleTasks, cards,
     files::{MenuButton, MenuItem},
-    model::home_dir,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
 };
 use crate::ui::a11y::A11yPress;
@@ -119,6 +118,33 @@ fn group_key(source: &TaskSource) -> PathBuf {
 /// 这一组是自己加的命令（本项目的或通用的）。
 fn is_custom(source: &TaskSource) -> bool {
     matches!(source.kind, TaskSourceKind::Custom | TaskSourceKind::Global)
+}
+
+/// 装上编进这一版的所有 skill，交回装到了哪里，一行一个：每个 skill 先是正本（是用户自己管的链接时说没动它），
+/// 再是用得上它的 agent 和它那边的目录，最后是被别的东西占着、没动的位置。家目录下的路径写成 `~` 开头。
+fn install_skills() -> std::io::Result<String> {
+    let dirs = Dirs::from_env();
+    let env = runode_agent_skill::Env::from_dirs(&dirs, |key| std::env::var_os(key));
+    let shown = |path: &Path| {
+        dirs.home
+            .as_deref()
+            .and_then(|home| runode_paths::home_relative(path, home, std::path::MAIN_SEPARATOR))
+            .unwrap_or_else(|| path.display().to_string())
+    };
+    let mut lines = Vec::new();
+    for report in runode_agent_skill::install_all(&env)? {
+        let canonical = shown(&report.canonical);
+        lines.push(if report.left_as_is {
+            rust_i18n::t!("skill_install.left_as_is", path = canonical).into_owned()
+        } else {
+            canonical
+        });
+        lines.extend(report.linked.iter().map(|(agent, dir)| format!("{agent}: {}", shown(dir))));
+        lines.extend(
+            report.skipped.iter().map(|path| rust_i18n::t!("skill_install.skipped", path = shown(path)).into_owned()),
+        );
+    }
+    Ok(lines.join("\n"))
 }
 
 /// 命令菜单最上面一项：打开添加命令的对话框。
@@ -254,46 +280,26 @@ impl WindowView {
         self.focus_pane_in_active_tab(pane, window, cx);
     }
 
-    /// 菜单里的「安装 Agent Skill」：在家目录开一个终端跑安装命令，装的过程和出错都看得到。本机终端报的 PATH
-    /// 里没有 npx 时先说要装 Node.js，可以去它的网站，也可以照样运行：shell 里延迟加载的 nvm 这类把 npx 做成函数，
-    /// PATH 里找不到。
+    /// 菜单里的「安装 Agent Skill」：在后台把编进这一版的 skill 装到这台电脑上，装完弹框说装到了哪里，
+    /// 没装上时说原因。
     pub(super) fn install_skill(&mut self, _: &InstallSkill, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(home) = home_dir() else {
-            return;
-        };
-        let local = self
-            .workspaces
-            .get(self.active)
-            .is_none_or(|workspace| workspace.host == crate::host_client::hosts::HostId::Local);
-        let path = self.terminal_path(Some(&crate::host_client::hosts::HostId::Local), cx);
-        let missing = local
-            && path.is_some_and(|path| {
-                let dirs: Vec<_> = std::env::split_paths(&path).filter(|dir| dir.is_absolute()).collect();
-                runode_terminal::shells::find_command(&dirs, "npx").is_none()
-            });
-        let command = "npx skills add runode-dev/runode --skill runode -g";
-        if !missing {
-            self.run_in_terminal(&home, command.into(), window, cx);
-            return;
-        }
-        let answer = crate::prompt::show(
-            window,
-            gpui::PromptLevel::Info,
-            &rust_i18n::t!("skill_install.no_npx_title"),
-            Some(&rust_i18n::t!("skill_install.no_npx_detail")),
-            &[
-                gpui::PromptButton::new(rust_i18n::t!("skill_install.open_nodejs")),
-                gpui::PromptButton::new(rust_i18n::t!("skill_install.run_anyway")),
-                gpui::PromptButton::cancel(rust_i18n::t!("skill_install.cancel")),
-            ],
-            cx,
-        );
-        cx.spawn_in(window, async move |this, cx| match answer.await.ok() {
-            Some(0) => cx.update(|_, cx| cx.open_url("https://nodejs.org/")).unwrap_or(()),
-            Some(1) => {
-                this.update_in(cx, |this, window, cx| this.run_in_terminal(&home, command.into(), window, cx)).ok();
-            }
-            _ => {}
+        let job = cx.background_spawn(async { install_skills() });
+        cx.spawn_in(window, async move |_, cx| {
+            let (level, title, detail) = match job.await {
+                Ok(paths) => (
+                    gpui::PromptLevel::Info,
+                    rust_i18n::t!("skill_install.done_title"),
+                    rust_i18n::t!("skill_install.done_detail", paths = paths).into_owned(),
+                ),
+                Err(err) => (gpui::PromptLevel::Warning, rust_i18n::t!("skill_install.failed_title"), err.to_string()),
+            };
+            let Ok(answer) = cx.update(|window, cx| {
+                let ok = gpui::PromptButton::cancel(rust_i18n::t!("skill_install.ok"));
+                crate::prompt::show(window, level, &title, Some(&detail), &[ok], cx)
+            }) else {
+                return;
+            };
+            answer.await.ok();
         })
         .detach();
     }

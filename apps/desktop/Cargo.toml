@@ -41,6 +41,8 @@ runode-speech.workspace = true
 runode-todo.workspace = true
 # 自己加命令、录快捷键时改写 tasks.json。
 runode-tasks.workspace = true
+# 引导页和菜单把编进这一版的 skill 装给 agent，启动时让 runode 装过的那份跟上这一版。
+runode-agent-skill.workspace = true
 # Markdown 引用的图片解码前先读头算解码后多大。
 gif.workspace = true
 image.workspace = true
@@ -107,11 +109,13 @@ raw-window-handle.workspace = true
 objc2.workspace = true
 # 远程桌面记住的解锁密码存进钥匙串。
 objc2-security = { workspace = true, features = ["std", "SecBase", "SecItem"] }
-objc2-core-foundation = { workspace = true, features = ["std", "CFBase", "CFData", "CFDictionary", "CFString"] }
+objc2-core-foundation = { workspace = true, features = ["std", "CFArray", "CFBase", "CFCGTypes", "CFData", "CFDictionary", "CFNumber", "CFString"] }
+# 管理权限的浮窗贴着系统设置的窗口摆：从窗口服务器的窗口列表里读它的位置大小，按屏幕的范围认出它在哪块屏上。
+objc2-core-graphics = { workspace = true, features = ["std", "CGDirectDisplay", "CGError", "CGGeometry", "CGWindow"] }
 # 「关于」面板的内容和系统偏好的语言；文件树删除文件时移到废纸篓，用 NSFileManager。提示音用 NSSound 按名字播放系统声音。
-# 文件树问本机有没有程序认编辑器的链接前缀，用 NSWorkspace。
-objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSFileManager", "NSLocale", "NSString", "NSURL"] }
-objc2-app-kit = { workspace = true, features = ["std", "block2", "NSAlert", "NSButton", "NSControl", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent", "NSView", "NSWindow", "NSScreen", "NSSound", "NSWorkspace"] }
+# 文件树问本机有没有程序认编辑器的链接前缀，用 NSWorkspace；管理权限的浮窗经 NSWorkspace 的通知知道系统设置退出了。
+objc2-foundation = { workspace = true, features = ["std", "block2", "NSArray", "NSData", "NSDictionary", "NSError", "NSFileManager", "NSLocale", "NSNotification", "NSOperation", "NSString", "NSURL"] }
+objc2-app-kit = { workspace = true, features = ["std", "block2", "libc", "NSAlert", "NSButton", "NSControl", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent", "NSRunningApplication", "NSView", "NSWindow", "NSScreen", "NSSound", "NSWorkspace"] }
 # 问系统设置里有没有允许发通知，设置页在被拒时提示。
 objc2-user-notifications = { workspace = true, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationSettings"] }
 block2.workspace = true

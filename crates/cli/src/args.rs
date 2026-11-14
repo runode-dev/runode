@@ -92,6 +92,8 @@ pub(crate) enum Command {
     ServiceStatus,
     /// 让这个构建的宿主接手正在跑的宿主的会话。
     ServiceUpgrade,
+    /// 把编进这一版的 skill 装给这台电脑上的 agent。
+    SkillInstall,
     /// 往看板上加一张任务。
     TodoAdd {
         spec: Spec,
@@ -496,6 +498,17 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     Command::ServiceUpgrade
                 }
                 other => return Err(format!("service knows {}, not {other}", subcommand_list("service", "and"))),
+            }
+        }
+        "skill" => {
+            let (what, words) =
+                words.split_first().ok_or_else(|| format!("skill needs {}", subcommand_list("skill", "or")))?;
+            match what.as_str() {
+                "install" => {
+                    no_more(words, 0, "skill install")?;
+                    Command::SkillInstall
+                }
+                other => return Err(format!("skill knows {}, not {other}", subcommand_list("skill", "and"))),
             }
         }
         "todo" => {
@@ -1017,6 +1030,9 @@ mod tests {
         assert!(parse("service install both").unwrap_err().contains("host and app"));
         assert!(parse("service status app").unwrap_err().contains("does not take"));
         assert!(parse("service").is_err());
+        assert_eq!(parse("skill install"), Ok(Command::SkillInstall));
+        assert!(parse("skill install runode").unwrap_err().contains("does not take"));
+        assert!(parse("skill").is_err());
         assert!(parse("remote").unwrap_err().contains("pair, devices or revoke"));
         assert!(parse("remote frob").unwrap_err().contains("not frob"));
         assert!(parse("remote revoke").unwrap_err().contains("DEVICE"));

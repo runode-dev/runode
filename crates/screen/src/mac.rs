@@ -75,14 +75,24 @@ pub(crate) fn permissions() -> Permissions {
     Permissions { screen_capture: CGPreflightScreenCaptureAccess(), post_event }
 }
 
+pub(crate) fn request_permissions() -> Permissions {
+    let post_event = request_post_event();
+    Permissions { screen_capture: request_screen_capture(), post_event }
+}
+
+pub(crate) fn request_screen_capture() -> bool {
+    use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
+
+    CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
+}
+
 /// 「辅助功能」用带提示的 `AXIsProcessTrustedWithOptions` 请求，它弹的对话框带「打开系统设置」，也会把程序
 /// 列进辅助功能的列表；`CGRequestPostEventAccess` 在新系统上不弹框，只记一条被拒的授权。
 /// `AXIsProcessTrustedWithOptions` 每调一次都弹框，一个进程里只带提示调一次。
-pub(crate) fn request_permissions() -> Permissions {
+pub(crate) fn request_post_event() -> bool {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use objc2_core_foundation::{CFBoolean, CFDictionary, CFString, CFType};
-    use objc2_core_graphics::CGRequestScreenCaptureAccess;
 
     #[link(name = "ApplicationServices", kind = "framework")]
     unsafe extern "C" {
@@ -90,14 +100,12 @@ pub(crate) fn request_permissions() -> Permissions {
     }
 
     static PROMPTED: AtomicBool = AtomicBool::new(false);
-    let now = permissions();
-    let post_event = now.post_event
+    permissions().post_event
         || (!PROMPTED.swap(true, Ordering::Relaxed) && {
             let key = CFString::from_static_str("AXTrustedCheckOptionPrompt");
             let value: &CFType = CFBoolean::new(true);
             let options = CFDictionary::<CFString, CFType>::from_slices(&[&*key], &[value]);
             // SAFETY: 选项字典的键值是这个函数认的类型。
             unsafe { AXIsProcessTrustedWithOptions(options.as_opaque()) != 0 }
-        });
-    Permissions { screen_capture: now.screen_capture || CGRequestScreenCaptureAccess(), post_event }
+        })
 }

@@ -32,7 +32,7 @@ pub fn prompt(
     let (title, detail) = (title.to_owned(), detail.to_owned());
     let answers = answers.to_vec();
     cx.defer(move |cx| {
-        let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else { return };
+        let Some(window) = crate::window::front_any_window(cx) else { return };
         let Ok(answer) =
             window.update(cx, |_, window, cx| crate::prompt::show(window, level, &title, Some(&detail), &answers, cx))
         else {
@@ -87,12 +87,6 @@ pub fn notifications_available() -> bool {
 /// 系统不再弹授权框，只能去系统设置里打开。
 #[cfg(target_os = "macos")]
 pub fn notifications_denied(cx: &mut App) -> bool {
-    use std::ptr::NonNull;
-
-    use block2::RcBlock;
-    use futures::StreamExt as _;
-    use objc2_user_notifications::{UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter};
-
     if !notifications_available() {
         return false;
     }
@@ -101,15 +95,9 @@ pub fn notifications_denied(cx: &mut App) -> bool {
     if std::mem::replace(&mut notified.asking, true) {
         return denied;
     }
-    let (tx, mut rx) = futures::channel::mpsc::unbounded();
-    let completion = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
-        // SAFETY: 回调期间 settings 是有效的对象。
-        let status = unsafe { settings.as_ref() }.authorizationStatus();
-        tx.unbounded_send(status == UNAuthorizationStatus::Denied).ok();
-    });
-    UNUserNotificationCenter::currentNotificationCenter().getNotificationSettingsWithCompletionHandler(&completion);
+    let access = notification_access();
     cx.spawn(async move |cx| {
-        let now = rx.next().await;
+        let now = access.await.map(|access| access == NotificationAccess::Denied);
         cx.update(|cx| {
             let notified = cx.global_mut::<Notifications>();
             notified.asking = false;
@@ -121,6 +109,62 @@ pub fn notifications_denied(cx: &mut App) -> bool {
     })
     .detach();
     denied
+}
+
+/// 系统设置里给 Runode 发通知的授权。
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotificationAccess {
+    /// 还没问过用户，请求时系统会弹授权框。
+    NotDetermined,
+    /// 拒绝了，系统不再弹框，只能去系统设置里打开。
+    Denied,
+    Allowed,
+}
+
+/// 问通知中心现在的授权，问不到时为空。只在 .app 里调（`notifications_available`）。
+#[cfg(target_os = "macos")]
+pub fn notification_access() -> impl Future<Output = Option<NotificationAccess>> + use<> {
+    use std::ptr::NonNull;
+
+    use block2::RcBlock;
+    use futures::StreamExt as _;
+    use objc2_user_notifications::{UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter};
+
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let completion = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
+        // SAFETY: 回调期间 settings 是有效的对象。
+        let access = match unsafe { settings.as_ref() }.authorizationStatus() {
+            UNAuthorizationStatus::NotDetermined => NotificationAccess::NotDetermined,
+            UNAuthorizationStatus::Denied => NotificationAccess::Denied,
+            _ => NotificationAccess::Allowed,
+        };
+        tx.unbounded_send(access).ok();
+    });
+    UNUserNotificationCenter::currentNotificationCenter().getNotificationSettingsWithCompletionHandler(&completion);
+    async move { rx.next().await }
+}
+
+/// 请求发通知的授权，没问过时系统弹框；用户答完（或系统直接给出结果）时完成。只在 .app 里调。
+#[cfg(target_os = "macos")]
+pub fn request_notifications() -> impl Future<Output = ()> + use<> {
+    use block2::RcBlock;
+    use futures::StreamExt as _;
+    use objc2::runtime::Bool;
+    use objc2_foundation::NSError;
+    use objc2_user_notifications::{UNAuthorizationOptions, UNUserNotificationCenter};
+
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let completion = RcBlock::new(move |_: Bool, _: *mut NSError| {
+        tx.unbounded_send(()).ok();
+    });
+    UNUserNotificationCenter::currentNotificationCenter().requestAuthorizationWithOptions_completionHandler(
+        UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+        &completion,
+    );
+    async move {
+        rx.next().await;
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

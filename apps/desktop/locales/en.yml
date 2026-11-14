@@ -5,6 +5,7 @@ menu:
   reload_config: Reload Configuration
   install_skill: Install Agent Skill
   settings: Settings…
+  get_started: Get Started…
   services: Services
   hide: Hide Runode
   hide_others: Hide Others
@@ -1701,11 +1702,12 @@ copy:
   windows: Copy
   linux: Copy
 skill_install:
-  no_npx_title: "npx was not found on this computer"
-  no_npx_detail: "Installing the Agent Skill uses npx, which comes with Node.js. Install Node.js, then try again."
-  open_nodejs: "Open nodejs.org"
-  run_anyway: "Run Anyway"
-  cancel: "Cancel"
+  done_title: "Agent Skill installed"
+  done_detail: "%{paths}"
+  left_as_is: "%{path} is a link you manage; left it as it is."
+  skipped: "Skipped %{path}: something of yours is there, left untouched."
+  failed_title: "Couldn't install the Agent Skill"
+  ok: "OK"
 pane_window:
   pop_in: Put back in the main window
   keep_on_top: Keep on Top
@@ -1726,6 +1728,70 @@ review:
   conflicted: Conflicted
   binary: Binary file
   too_large: Too many changes
+onboarding:
+  title: "Get Started with Runode"
+  close: "Close"
+  logo: "Runode logo"
+  welcome_title: "Welcome to Runode"
+  welcome_body: "Runode is a terminal built for AI coding agents. The next few steps set up how it looks, install the agent skill, and show a few keys worth knowing."
+  continue: "Continue"
+  skip: "Skip for now"
+  back: "Back"
+  look_title: "Customize the look and feel"
+  look_body: "Pick a color scheme and a theme. Changes apply right away."
+  scheme: "Color scheme"
+  scheme_auto: "Auto"
+  scheme_light: "Light"
+  scheme_dark: "Dark"
+  themes: "Theme"
+  default_theme: "Default theme"
+  builtin_themes: "Built-in themes"
+  themes_hint: "More themes in Settings › Appearance."
+  themes_loading: "Loading themes…"
+  write_failed: "Couldn't save the theme: %{err}"
+  setup_title: "Integrations and permissions"
+  setup_body: "Teach your agents to drive Runode, and grant what remote desktop needs."
+  skill_title: "Runode Agent Skill"
+  skill_recommended: "Recommended"
+  skill_body: "Lets your agents open panes, run commands and read other terminals. Updates with the app."
+  skill_install: "Install"
+  skill_installing: "Installing…"
+  skill_installed: "Installed"
+  skill_failed: "Install failed: %{err}"
+  skill_linked: "Also set up for %{agents}."
+  separator: ", "
+  permissions_title: "System Permissions"
+  permissions_none: "None granted yet"
+  permissions_some: "%{n} of %{total} granted"
+  permissions_all: "All granted"
+  permissions_body: "Let agents reach protected folders, get notified, and use this Mac from your phone or another computer."
+  permissions_manage_title: "Manage permissions"
+  permissions_drag_hint: "If Runode isn't in the list, drag the icon from the floating panel into it, or click Show in Finder and drag from there."
+  permissions_reveal: "Show in Finder"
+  permissions_panel_hint: "Drag the icon above into the list in System Settings."
+  permissions_panel_icon: "Runode, drag into the list in System Settings"
+  permissions_panel_close: "Close"
+  permissions_all_granted: "All granted"
+  permissions_open_settings: "%{name}: Open System Settings"
+  permission_disk: "Full Disk Access"
+  permission_disk_hint: "Lets programs and agents running in Runode read protected folders such as Mail, Photos and other apps' data."
+  permission_screen: "Screen Recording"
+  permission_screen_hint: "Lets you see this Mac's screen from your phone or another computer."
+  permission_input: "Accessibility"
+  permission_input_hint: "Lets you control this Mac's keyboard and mouse remotely."
+  permission_notifications: "Notifications"
+  permission_notifications_hint: "Tells you when an agent finishes or needs your answer, and when an update is ready."
+  permission_granted: "Granted"
+  permission_granted_named: "%{name}: granted"
+  permission_grant: "%{name}: Grant…"
+  grant: "Grant…"
+  done_title: "You're all set"
+  done_body: "A few keys worth knowing, from your keymap."
+  key_goto_agent: "List all agents"
+  key_next_agent: "Jump to the agent that needs you"
+  key_split_right: "Split right"
+  not_bound: "Not bound"
+  start: "Start Using Runode"
 a11y:
   action_for: "%{action}: %{title}"
   separator: ", "

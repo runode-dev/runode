@@ -181,14 +181,18 @@ pub(super) fn sort_entries<T>(entries: &mut [T], key: impl Fn(&T) -> (Status, In
 /// 切到这个窗口里的这个分屏：激活应用和窗口，切到它所在的 workspace 和标签并聚焦它。推迟到
 /// 当前的更新结束后再做，从这个窗口自己的回调里调用也不会重复借用。
 pub(super) fn reveal(target: WindowHandle<WindowView>, pane: EntityId, cx: &mut App) {
+    // 推迟后办的时候已经出了调用方的 `with_background`，先记下是不是后台转来的。
+    let background = super::onboarding::in_background();
     cx.defer(move |cx| {
         cx.activate(true);
-        target
-            .update(cx, |view, window, cx| {
-                window.activate_window();
-                view.show_pane(pane, window, cx);
-            })
-            .ok();
+        super::onboarding::with_background(background, || {
+            target
+                .update(cx, |view, window, cx| {
+                    window.activate_window();
+                    view.show_pane(pane, window, cx);
+                })
+                .ok();
+        });
     });
 }
 

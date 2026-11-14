@@ -2,7 +2,7 @@
 //! ⌃⌥⇧⌘、连写（⌃⇧T），别处用 Ctrl、Alt、Shift 和 Win（Windows）或 Super（Linux），加号连起来（Ctrl+Shift+T）；
 //! 连按的几个键用空格隔开。
 
-use gpui::{KeybindingKeystroke, Modifiers};
+use gpui::{Action, App, KeybindingKeystroke, Modifiers};
 
 /// Ctrl、Alt、Shift 和 Cmd（Windows 上是 Win 键，Linux 上是 Super 键）的键帽。
 pub const MODIFIER_CAPS: [&str; 4] = if cfg!(target_os = "macos") {
@@ -37,6 +37,16 @@ pub fn text(keystrokes: &[KeybindingKeystroke]) -> String {
         .map(|keystroke| join(&caps(*keystroke.modifiers(), keystroke.key())))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// `action` 在键位表里的快捷键，连按的每个键拆成一组键帽，给每个键帽画一块的地方用。后加的绑定优先，取最后
+/// 一个；没绑定时为空。
+pub fn binding_caps(action: &dyn Action, cx: &App) -> Option<Vec<Vec<String>>> {
+    let keymap = cx.key_bindings();
+    let keymap = keymap.borrow();
+    keymap.bindings_for_action(action).next_back().map(|binding| {
+        binding.keystrokes().iter().map(|keystroke| caps(*keystroke.modifiers(), keystroke.key())).collect()
+    })
 }
 
 /// 键本身的键帽：macOS 上回车、方向这些用符号，别处写名字；字母和别的键大写。

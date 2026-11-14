@@ -1,7 +1,43 @@
-//! 仓库里教 agent 用 runode 的 skill（`skills/`），用户用 `npx skills add` 从 GitHub 装：每个 skill 只有
-//! `SKILL.md` 和 `references/<主题>.md`，元数据齐全，链到的 reference 都在。
+//! 仓库里教 agent 用 runode 的 skill（`skills/`）：每个 skill 只有 `SKILL.md` 和 `references/<主题>.md`，
+//! 元数据齐全，链到的 reference 都在，编进二进制的和盘上的一样。
 
 use std::path::Path;
+
+use runode_agent_skill::BUNDLED;
+
+#[test]
+fn bundled_skills_match_the_files_on_disk() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills");
+    let mut on_disk = Vec::new();
+    let mut dirs = vec![root.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.file_name().unwrap().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                let relative = path.strip_prefix(&root).unwrap();
+                let relative: Vec<_> = relative.components().map(|part| part.as_os_str().to_string_lossy()).collect();
+                on_disk.push((relative.join("/"), std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    on_disk.sort();
+    let mut bundled: Vec<(String, String)> = BUNDLED
+        .iter()
+        .flat_map(|skill| {
+            skill.files.iter().map(|(path, content)| (format!("{}/{path}", skill.name), content.to_string()))
+        })
+        .collect();
+    bundled.sort();
+    assert_eq!(bundled, on_disk);
+    for skill in BUNDLED {
+        assert_eq!(skill.files[0].0, "SKILL.md", "{}", skill.name);
+    }
+}
 
 #[test]
 fn every_skill_is_well_formed() {

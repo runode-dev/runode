@@ -31,6 +31,8 @@ actions!(
         /// 检查更新；新版本下好了时是重启以更新，见 `update::menu_clicked`。
         CheckForUpdates,
         OpenSettings,
+        /// 打开首次启动的引导页。
+        ShowGetStarted,
         OpenConfiguration,
         ReloadConfiguration,
         Quit,
@@ -52,6 +54,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &About, cx| crate::about::show(cx));
     cx.on_action(|_: &CheckForUpdates, cx| crate::update::menu_clicked(cx));
     cx.on_action(|_: &OpenSettings, cx| crate::window::show_settings(cx));
+    cx.on_action(|_: &ShowGetStarted, cx| crate::window::show_onboarding(cx));
     cx.on_action(|_: &OpenConfiguration, cx| crate::config::open(cx));
     cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
     cx.on_action(|_: &Quit, cx| crate::window::quit(cx));
@@ -89,6 +92,7 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(crate::update::menu_label(cx), CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action(tr("menu.settings"), OpenSettings),
+                MenuItem::action(tr("menu.get_started"), ShowGetStarted),
                 MenuItem::action(tr("menu.install_skill"), InstallSkill),
                 MenuItem::separator(),
                 MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),

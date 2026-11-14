@@ -563,8 +563,9 @@ impl WindowView {
     fn render_row(&self, ix: usize, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
-        // 开着配对设备页、看板时高亮的是导航里的那一行。
-        let active = ix == self.active && !matches!(self.page, Some(super::Page::Mobile(_) | super::Page::Kanban(_)));
+        // 开着配对设备页、看板时高亮的是导航里的那一行；开着引导页时哪个 workspace 都不高亮。
+        let active = ix == self.active
+            && !matches!(self.page, Some(super::Page::Mobile(_) | super::Page::Kanban(_) | super::Page::Onboarding(_)));
         let theme = cx.theme();
         let (active_bg, hover_bg) = (theme.tab_active, theme.accent);
         let (muted, subtle) = (theme.muted_foreground, theme.subtle_foreground);

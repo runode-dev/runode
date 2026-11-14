@@ -11,6 +11,7 @@ use gpui::{AnyWindowHandle, App, Context, Entity, EntityId, Task, Window, Window
 use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
 use runode_types::{grid::GridSize, pane::Axis};
 
+use super::onboarding::with_background;
 use super::persist::format;
 use super::{WindowView, agents::reveal, cards, clipboard, layout_report};
 use crate::host_client::hosts::HostId;
@@ -50,7 +51,9 @@ pub fn serve(host: HostId, link: Link, cx: &mut App) {
                             HostId::Local => super::model::inspect_dir(dir.clone()).await,
                             HostId::Ssh(_) | HostId::Paired(_) => (true, dir.clone()),
                         };
-                        let reply = cx.update(|cx| open_workspace(&host, req, &dir, is_dir, &real, focus, name, cx));
+                        let reply = cx.update(|cx| {
+                            with_background(true, || open_workspace(&host, req, &dir, is_dir, &real, focus, name, cx))
+                        });
                         link.ui_reply(ticket, reply.wait().await);
                     })
                     .detach();
@@ -58,7 +61,7 @@ pub fn serve(host: HostId, link: Link, cx: &mut App) {
                 continue;
             }
             // 要等远端主机上的会话开好的回话自己等，不挡住后面的请求。
-            match cx.update(|cx| handle(&host, request, cx)) {
+            match cx.update(|cx| with_background(true, || handle(&host, request, cx))) {
                 Reply::Now(reply) => link.ui_reply(ticket, reply),
                 Reply::Later(task) => {
                     let link = link.clone();
@@ -98,7 +101,7 @@ fn opened(req: u32, window: WindowHandle<WindowView>, view: &Entity<TerminalView
     Reply::Later(cx.spawn(async move |cx| match waiting.await {
         Ok(Some(id)) => {
             if focus {
-                cx.update(|cx| reveal(window, pane, cx));
+                cx.update(|cx| with_background(true, || reveal(window, pane, cx)));
             }
             HostMsg::Opened { req, id }
         }
@@ -319,9 +322,14 @@ pub(crate) fn front_window(cx: &App) -> Option<WindowHandle<WindowView>> {
 }
 
 /// 最前面那个窗口，终端窗口和单独的远程桌面窗口都算。app 不在前台时（辅助工具、自动化按菜单）没有活动窗口，
-/// 按窗口的前后顺序取最前面的。
+/// 按窗口的前后顺序取最前面的。管理权限的浮窗不算：它浮在最上层、点过就成了活动窗口，菜单的退出确认、最小化
+/// 不该冲着它办。
 pub(crate) fn front_any_window(cx: &App) -> Option<AnyWindowHandle> {
-    cx.active_window().or_else(|| cx.window_stack()?.into_iter().next()).or_else(|| cx.windows().into_iter().next())
+    let eligible = |window: &AnyWindowHandle| !crate::onboarding::is_permissions_panel(*window, cx);
+    cx.active_window()
+        .filter(eligible)
+        .or_else(|| cx.window_stack()?.into_iter().find(eligible))
+        .or_else(|| cx.windows().into_iter().find(eligible))
 }
 
 /// 别的进程要开的终端开在显示着的地方时，shell 要等下一次布局量出实际尺寸才启动（`TerminalView::start`）；

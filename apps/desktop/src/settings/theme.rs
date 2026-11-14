@@ -22,7 +22,7 @@ use crate::{
 
 /// `theme` 的值拆开：一个主题，或者浅色、深色外观各一个。没设时就是 runode 自己的配色那个主题。
 #[derive(Debug, PartialEq)]
-pub(super) enum ThemeChoice {
+pub(crate) enum ThemeChoice {
     Single(String),
     Pair { light: String, dark: String },
 }
@@ -75,7 +75,7 @@ impl ThemeChoice {
 
 /// 画预览和色块用的三个颜色。
 #[derive(Clone, Copy)]
-pub(super) struct Look {
+pub(crate) struct Look {
     bg: Rgb,
     fg: Rgb,
     /// 调色板里的蓝色，和设置页的强调色一样取。
@@ -89,15 +89,17 @@ impl Look {
         0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b) > 127.5
     }
 
-    fn of(config: &Config) -> Self {
+    pub(crate) fn of(config: &Config) -> Self {
         let accent = config.palette.iter().rfind(|(i, _)| *i == 4).map_or(Rgb(0x3b, 0x82, 0xf6), |(_, c)| *c);
         Self { bg: config.background, fg: config.foreground, accent }
     }
 }
 
 /// 预览卡上没有具体主题可画时（比如还没选浅色、深色主题）用的浅色和深色。
-const PLAIN_LIGHT: Look = Look { bg: Rgb(0xff, 0xff, 0xff), fg: Rgb(0x1d, 0x1d, 0x1f), accent: Rgb(0x3b, 0x82, 0xf6) };
-const PLAIN_DARK: Look = Look { bg: Rgb(0x16, 0x16, 0x18), fg: Rgb(0xe5, 0xe5, 0xe7), accent: Rgb(0x60, 0xa5, 0xfa) };
+pub(crate) const PLAIN_LIGHT: Look =
+    Look { bg: Rgb(0xff, 0xff, 0xff), fg: Rgb(0x1d, 0x1d, 0x1f), accent: Rgb(0x3b, 0x82, 0xf6) };
+pub(crate) const PLAIN_DARK: Look =
+    Look { bg: Rgb(0x16, 0x16, 0x18), fg: Rgb(0xe5, 0xe5, 0xe7), accent: Rgb(0x60, 0xa5, 0xfa) };
 
 impl SettingsView {
     fn open_theme_picker(
@@ -266,7 +268,7 @@ impl SettingsView {
 }
 
 /// 一个缩小的窗口：左边侧栏几道横线，右边一块内容，第一道线是强调色。几个并排时各占一份。
-fn preview(look: Look) -> Div {
+pub(crate) fn preview(look: Look) -> Div {
     let (bg, fg) = (hsla(look.bg), hsla(look.fg));
     let line = |width: f32, color: gpui::Hsla| div().flex_none().h(px(4.)).w(px(width)).rounded_full().bg(color);
     div()

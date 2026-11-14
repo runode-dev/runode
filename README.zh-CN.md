@@ -69,12 +69,13 @@ Linux（x86_64 和 aarch64）上在图形界面的终端里跑同一个安装脚
 
 ## 快速上手
 
-装上 runode 的 skill，把用法教给你的 agent（Claude Code、Codex 等都能用）：
+装上 runode 的 skill，把用法教给你的 agent（Claude Code、Codex 等都能用），之后 app 会让它跟上新版：
 
 ```sh
-npx skills add runode-dev/runode --skill runode -g
-npx skills update runode -g    # 以后更新到最新
+runode skill install
 ```
+
+也可以用 skills CLI 装：`npx skills add runode-dev/runode --skill runode -g`。
 
 之后 agent 会在需要时自己操作旁边的终端。你也可以亲手用：
 

@@ -1,10 +1,9 @@
 //! 应用图标与「关于 Runode」面板（macOS 上是系统的关于面板，别的系统上是一个弹框）。
 
-/// 应用图标，由矢量源图渲染成 256×256 的 PNG 后编进二进制，只给未打包运行时用。
-/// 不用 1024 的大图：Dock 图标最大也就 128 点（Retina 下 256 像素），而设成应用图标时
+/// 应用图标，由矢量源图渲染成 256×256 的 PNG 后编进二进制：未打包运行时设成 Dock 图标，界面里画大 logo
+/// 也用它。不用 1024 的大图：Dock 图标最大也就 128 点（Retina 下 256 像素），而设成应用图标时
 /// AppKit 按原尺寸栅格化，大图白白多占内存、拖慢开窗。
-#[cfg(target_os = "macos")]
-const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+pub(crate) const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 /// 设置 Dock 和关于面板用的应用图标。程序还没打包成 .app 时系统找不到图标文件，
 /// 只能在启动时显式设置；打包后系统直接用 bundle 里的图标，这里什么都不做。
@@ -33,15 +32,22 @@ pub fn install_icon() {
 /// 可执行文件是否在 `*.app/Contents/MacOS/` 里。
 #[cfg(target_os = "macos")]
 pub(crate) fn in_app_bundle() -> bool {
-    let Ok(exe) = std::env::current_exe() else {
-        return false;
-    };
+    app_bundle().is_some()
+}
+
+/// 可执行文件所在的 `*.app`；不在 `*.app/Contents/MacOS/` 里时为空。
+#[cfg(target_os = "macos")]
+pub(crate) fn app_bundle() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
     let mut dirs = exe.ancestors().skip(1);
-    let names = [dirs.next(), dirs.next(), dirs.next()];
-    matches!(
-        names.map(|dir| dir.and_then(|dir| dir.file_name()).and_then(|name| name.to_str())),
-        [Some("MacOS"), Some("Contents"), Some(app)] if app.ends_with(".app")
-    )
+    let dirs = [dirs.next(), dirs.next(), dirs.next()];
+    let names = dirs.map(|dir| dir.and_then(|dir| dir.file_name()).and_then(|name| name.to_str()));
+    match (names, dirs[2]) {
+        ([Some("MacOS"), Some("Contents"), Some(app)], Some(bundle)) if app.ends_with(".app") => {
+            Some(bundle.to_path_buf())
+        }
+        _ => None,
+    }
 }
 
 /// 打开 macOS 标准关于面板。名称、版本、版权来自构建脚本嵌进可执行文件的应用信息表，

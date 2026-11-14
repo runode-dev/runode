@@ -1,0 +1,15 @@
+[package]
+name = "runode-agent-skill"
+description = "The skills that teach agents to use runode, built into the binary and installed the way the skills CLI lays them out"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+runode-paths.workspace = true
+# 接管 skills CLI 装的那份时改它的 lock 文件，别的字段和键的顺序原样留着。
+serde_json = { workspace = true, features = ["preserve_order"] }
+
+[lints]
+workspace = true

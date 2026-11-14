@@ -37,6 +37,7 @@ mod logging;
 mod menus;
 mod mobile_page;
 mod motion;
+mod onboarding;
 mod prespawn;
 mod preview_panel;
 mod process_env;
@@ -204,6 +205,8 @@ fn main() {
         // 交给第一个窗口里从家目录开始的终端；没用上就丢掉，丢掉时会结束它。
         let mut shell = prespawn::take();
         startup::mark("prespawn_take");
+        // 引导页靠窗口存档在不在认出全新安装，要在开窗口之前看。
+        let first = onboarding::first_launch();
         let saved = window::saved_window_options(cx);
         if saved.is_empty() {
             open_window(cx, shell.take());
@@ -214,6 +217,20 @@ fn main() {
         }
         host_client::hosts::hold_new_hosts(false);
         startup::mark("open_window");
+        let skill_env =
+            runode_agent_skill::Env::from_dirs(&runode_paths::Dirs::from_env(), |key| std::env::var_os(key));
+        cx.background_executor()
+            .spawn(async move {
+                match runode_agent_skill::refresh(&skill_env) {
+                    Ok(true) => tracing::info!("updated the agent skill to this version"),
+                    Ok(false) => {}
+                    Err(err) => tracing::warn!("failed to update the agent skill: {err}"),
+                }
+            })
+            .detach();
+        if first {
+            window::show_onboarding(cx);
+        }
         // 先结束没用上的 shell，再看宿主里有没有没在窗口里显示的会话，免得把它也列进去。
         drop(shell);
         window::watch_background(cx);

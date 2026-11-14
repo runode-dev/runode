@@ -1,5 +1,5 @@
 //! 没有菜单栏的系统（Windows、Linux）上标题栏右上角的「更多」按钮：按下弹出菜单，放 macOS 只在菜单栏的
-//! 应用菜单和文件菜单里才有入口的几条命令（新窗口、设置、配置文件、装 skill、检查更新、关于、退出），
+//! 应用菜单和文件菜单里才有入口的几条命令（新窗口、设置、入门引导、配置文件、装 skill、检查更新、关于、退出），
 //! 以及侧栏收起时就没了入口的看板、定时和新建任务。
 
 use gpui::{Action, App, Context, Focusable as _, MouseButton, Window, prelude::*, px};
@@ -12,7 +12,7 @@ use crate::{
     i18n::tr,
     menus::{
         About, CheckForUpdates, NewWindow, OpenConfiguration, OpenSettings, Quit, QuitAndEndSessions,
-        ReloadConfiguration,
+        ReloadConfiguration, ShowGetStarted,
     },
     ui::{
         a11y::A11yPress as _,
@@ -37,6 +37,7 @@ fn items(cx: &App) -> Vec<Option<MenuItem>> {
         item(tr("menu.toggle_schedules"), Box::new(ToggleSchedules)),
         None,
         item(tr("menu.settings"), Box::new(OpenSettings)),
+        item(tr("menu.get_started"), Box::new(ShowGetStarted)),
         item(tr("menu.open_config"), Box::new(OpenConfiguration)),
         item(tr("menu.reload_config"), Box::new(ReloadConfiguration)),
         item(tr("menu.install_skill"), Box::new(InstallSkill)),

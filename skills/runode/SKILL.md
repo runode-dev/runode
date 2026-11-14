@@ -11,7 +11,9 @@ other terminal in the app. `RUNODE_SESSION` holds the id of your own terminal
 and `RUNODE_SOCKET` tells `runode` where the app is; if `runode` is not on your
 PATH, use `"$RUNODE_BIN"`. `rn` is a short name for it. In a terminal that
 runode opened on an SSH host, `runode` drives the terminals on that host only;
-terminals on your own computer or on other hosts are out of its reach.
+terminals on your own computer or on other hosts are out of its reach. To give
+the agents on an SSH host or another machine this skill, run
+`runode skill install` there.
 
 Run `runode help` for the commands and `runode help COMMAND` (for example
 `runode help send`) for the full reference of one. The essentials follow.

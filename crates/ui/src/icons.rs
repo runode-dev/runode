@@ -26,6 +26,10 @@ crate::icons! {
     pub CHECK_ICON = "check",
     pub ARROW_DOWN_ICON = "arrow-down",
     pub ARROW_UP_ICON = "arrow-up",
+    /// 跳到 app 外面（系统设置）去办。
+    pub ARROW_UP_RIGHT_ICON = "arrow-up-right",
+    /// 通知。
+    pub BELL_ICON = "bell",
     pub MAXIMIZE_ICON = "maximize",
     pub MINIMIZE_ICON = "minimize",
     /// 搬到单独的窗口里、搬回来。

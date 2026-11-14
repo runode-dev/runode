@@ -3,6 +3,9 @@
 
 use gpui::{AnyWindowHandle, App, Pixels, Point, Window};
 
+#[cfg(target_os = "macos")]
+pub(crate) use native::ns_window;
+
 /// 这个窗口所在的系统上 app 能自己摆窗口（`move_window`）：Linux 上只有 X11 能，Wayland 不让程序摆窗口的位置。
 pub(super) fn follows_drag(window: &Window) -> bool {
     native::can_move(window)
@@ -30,7 +33,8 @@ mod native {
 
     pub(super) struct NativeWindow(Retained<NSWindow>);
 
-    fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
+    /// GPUI 窗口 `window` 底下的 NSWindow；只在主线程上用。
+    pub(crate) fn ns_window(window: &Window) -> Option<Retained<NSWindow>> {
         let handle = raw_window_handle::HasWindowHandle::window_handle(window).ok()?;
         let RawWindowHandle::AppKit(handle) = handle.as_raw() else { return None };
         // SAFETY: GPUI 的 AppKit 句柄指着窗口的内容视图，窗口开着时一直有效；这里在主线程上。

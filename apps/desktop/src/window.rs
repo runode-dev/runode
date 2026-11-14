@@ -29,6 +29,7 @@ mod more_menu;
 mod new_tab;
 mod new_workspace;
 mod new_worktree;
+mod onboarding;
 mod open;
 mod pane_float;
 mod pane_move;
@@ -66,8 +67,12 @@ use runode_types::{
 pub(crate) use agents::{alert::test as test_notification, reveal_notified};
 pub use arrange::ArrangePanes;
 pub use background::refresh as watch_background;
+#[cfg(target_os = "macos")]
+pub(crate) use drag_out::ns_window;
 pub(crate) use mobile_page::show_pairing;
 pub use mobile_page::watch_devices;
+#[cfg(target_os = "macos")]
+pub(crate) use open::base_options;
 pub(crate) use open::{open_window, open_window_with};
 pub use pane_float::{MovePaneToWindow, TogglePaneFloat};
 pub use pane_move::{MovePaneToNewTab, SwapPane};
@@ -87,6 +92,7 @@ pub use crate::file_tree::{
 };
 pub use kanban::watch_todos;
 pub(crate) use new_workspace::add_remote_host;
+pub(crate) use onboarding::show_onboarding;
 pub(crate) use screen_viewer::show_remote_desktop;
 pub(crate) use settings_page::show_settings;
 pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
@@ -682,6 +688,7 @@ impl WindowView {
             Some(Page::Kanban(board)) => Some(board.view.entity_id()),
             Some(Page::Mobile(page)) => Some(page.view.entity_id()),
             Some(Page::Review(page)) => Some(page.view.entity_id()),
+            Some(Page::Onboarding(page)) => Some(page.view.entity_id()),
             Some(Page::Settings(_)) | None => None,
         };
         let screens = self.screen_viewers.views().map(Entity::entity_id);
@@ -784,6 +791,8 @@ enum Page {
     Kanban(kanban::OpenKanban),
     /// 看改动并提交的页，只盖住终端区，标题栏和右侧面板照旧。
     Review(review::OpenReview),
+    /// 首次启动的引导页，盖住标签和分屏。
+    Onboarding(onboarding::OpenOnboarding),
 }
 
 impl WindowView {
@@ -815,14 +824,25 @@ impl WindowView {
         }
     }
 
-    /// 收起盖着终端区的看板、配对设备页、Review 页和占满内容区的远程桌面，露出标签和分屏（设置页不动）：看板写到
-    /// 一半的新建任务先收起来留着，配对设备页改了的电脑名先写回；看板开着别的对话框、不让走时什么都不收，
-    /// 返回假。
+    fn onboarding_page(&self) -> Option<&onboarding::OpenOnboarding> {
+        match &self.page {
+            Some(Page::Onboarding(page)) => Some(page),
+            _ => None,
+        }
+    }
+
+    /// 收起盖着终端区的看板、配对设备页、Review 页、引导页和占满内容区的远程桌面，露出标签和分屏（设置页不动）：
+    /// 看板写到一半的新建任务先收起来留着，配对设备页改了的电脑名先写回；看板开着别的对话框、不让走时什么都不收，
+    /// 返回假。引导页收起并记成走完，后台转来的事（`onboarding::in_background`）里不收：标签里的程序退出、
+    /// `runode open --focus` 这些也走到这里，不能替用户关掉引导页。
     fn leave_pages(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.leave_todo_page(window, cx) {
             return false;
         }
         self.leave_mobile(cx);
+        if !onboarding::in_background() {
+            self.leave_onboarding(cx);
+        }
         self.drop_kanban();
         self.drop_review();
         self.leave_screen_page(window, cx);
@@ -836,7 +856,7 @@ impl WindowView {
 }
 
 impl Focusable for WindowView {
-    /// 开着设置页、配对设备页、看板、Review 页时是它，文件盖着终端区时是预览；否则是有焦点的终端，当前
+    /// 开着设置页、配对设备页、看板、Review 页、引导页时是它，文件盖着终端区时是预览；否则是有焦点的终端，当前
     /// workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         match &self.page {
@@ -844,6 +864,7 @@ impl Focusable for WindowView {
             Some(Page::Mobile(page)) => return page.view.focus_handle(cx),
             Some(Page::Kanban(board)) => return board.view.focus_handle(cx),
             Some(Page::Review(page)) => return page.view.focus_handle(cx),
+            Some(Page::Onboarding(page)) => return page.view.focus_handle(cx),
             None => {}
         }
         if let Some(focus) = self.docked_screen_focus(cx) {
@@ -878,6 +899,8 @@ impl Render for WindowView {
             (theme.background, vec![page.view.clone().into_any_element()])
         } else if self.mobile_page().is_some() {
             (framed, self.render_mobile_body(window, cx))
+        } else if self.onboarding_page().is_some() {
+            (framed, self.render_onboarding_body(window, cx))
         } else if self.kanban_page().is_some() {
             (framed, self.render_todo_body(window, cx))
         } else if self.screen_docked() {
@@ -901,7 +924,7 @@ impl Render for WindowView {
         let commit_message_dialog = self.render_commit_message_dialog(cx);
         let todo_dialog = self.todo_dialog(cx);
         let asking = ask.is_some();
-        let status_bar = (self.settings_page().is_none() && status_bar::shown(cx))
+        let status_bar = (self.settings_page().is_none() && self.onboarding_page().is_none() && status_bar::shown(cx))
             .then(|| row_slot(&self.slots(cx).status_bar, status_bar::STATUS_BAR_HEIGHT, window, cx));
         // 这几个浮层挡住了后面的界面，开着时后面的不报给辅助工具。
         let modal = agent_picker.is_some()
@@ -960,7 +983,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::select_last_tab))
             .on_action(Self::act(cx, Self::new_split_right))
             .on_action(Self::act(cx, Self::new_split_down))
-            // 设置页、看板、配对设备页、Review 页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏；
+            // 设置页、看板、配对设备页、Review 页、引导页开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏；
             // 看板的对话框开着时不理；`modal_dialog_open` 时也不理，免得关掉对话框底下的页或分屏。
             .on_action(cx.listener(|this, action, window, cx| match &this.page {
                 _ if this.modal_dialog_open() => {}
@@ -972,6 +995,7 @@ impl Render for WindowView {
                 }
                 Some(Page::Mobile(_)) => this.close_mobile(window, cx),
                 Some(Page::Review(_)) => this.close_review(window, cx),
+                Some(Page::Onboarding(_)) => this.close_onboarding(window, cx),
                 None => {
                     if !this.close_screen_for_pane(window, cx) {
                         this.close_pane(action, window, cx);
@@ -1290,7 +1314,8 @@ impl WindowView {
             .gap(px(CARD_GAP))
             .pl(px(CARD_GAP))
             .pr(px(CARD_GAP))
-            .pb(px(CARD_GAP))
+            // 状态栏的文字上下本就留着空，再垫 `CARD_GAP` 会让卡片和状态栏离得比状态栏到窗口底边远。
+            .when(!status_bar::shown(cx), |content| content.pb(px(CARD_GAP)))
             .child(div().relative().flex_1().min_w_0().h_full().child(panes).children(covering))
             .children(panel);
         let main = div().flex_1().min_w_0().h_full().flex().flex_col().child(titlebar).child(content);

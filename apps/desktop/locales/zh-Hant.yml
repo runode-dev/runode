@@ -5,6 +5,7 @@ menu:
   reload_config: 重新載入設定
   install_skill: 安裝 Agent Skill
   settings: 設定…
+  get_started: 入門引導…
   services: 服務
   hide: 隱藏 Runode
   hide_others: 隱藏其他
@@ -1778,11 +1779,12 @@ copy:
   windows: 複製
   linux: 複製
 skill_install:
-  no_npx_title: "這台電腦上沒找到 npx"
-  no_npx_detail: "安裝 Agent Skill 要用 Node.js 附帶的 npx，先裝好 Node.js 再試。"
-  open_nodejs: "打開 nodejs.org"
-  run_anyway: "仍然執行"
-  cancel: "取消"
+  done_title: "已安裝 Agent Skill"
+  done_detail: "%{paths}"
+  left_as_is: "%{path} 是你自己管的連結，沒動。"
+  skipped: "%{path} 已經有你自己的東西，沒動。"
+  failed_title: "沒裝上 Agent Skill"
+  ok: "好"
 pane_window:
   pop_in: 放回主視窗
   keep_on_top: 置頂
@@ -1803,6 +1805,70 @@ review:
   conflicted: 有衝突
   binary: 二進位檔案
   too_large: 變更太多
+onboarding:
+  title: "開始使用 Runode"
+  close: "關閉"
+  logo: "Runode 標誌"
+  welcome_title: "歡迎使用 Runode"
+  welcome_body: "Runode 是給 AI 程式設計 agent 用的終端機。接下來幾步定好外觀、裝上 agent skill，再看幾個值得記住的快捷鍵。"
+  continue: "繼續"
+  skip: "暫時跳過"
+  back: "返回"
+  look_title: "自訂外觀"
+  look_body: "選配色和主題，選了馬上生效。"
+  scheme: "配色"
+  scheme_auto: "自動"
+  scheme_light: "淺色"
+  scheme_dark: "深色"
+  themes: "主題"
+  default_theme: "預設主題"
+  builtin_themes: "內建主題"
+  themes_hint: "更多主題在設定 › 外觀裡。"
+  themes_loading: "正在讀取主題…"
+  write_failed: "沒能儲存主題：%{err}"
+  setup_title: "整合與權限"
+  setup_body: "教 agent 使用 Runode，替遠端桌面開好需要的權限。"
+  skill_title: "Runode Agent Skill"
+  skill_recommended: "推薦"
+  skill_body: "讓 agent 能開窗格、執行指令、讀取其他終端機，隨 app 一起更新。"
+  skill_install: "安裝"
+  skill_installing: "正在安裝…"
+  skill_installed: "已安裝"
+  skill_failed: "沒裝上：%{err}"
+  skill_linked: "也替 %{agents} 裝好了。"
+  separator: "、"
+  permissions_title: "系統權限"
+  permissions_none: "尚未授權"
+  permissions_some: "已授權 %{n} 項，共 %{total} 項"
+  permissions_all: "全部已授權"
+  permissions_body: "讓 agent 能讀取受保護的資料夾、傳送提醒給你，也能在手機或其他電腦上使用這台 Mac。"
+  permissions_manage_title: "管理權限"
+  permissions_drag_hint: "列表裡沒有 Runode 時，把浮動視窗上的圖示拖進系統設定的列表，或按「在 Finder 中顯示」從 Finder 拖。"
+  permissions_reveal: "在 Finder 中顯示"
+  permissions_panel_hint: "把上面的圖示拖進系統設定的列表。"
+  permissions_panel_icon: "Runode，拖進系統設定的列表"
+  permissions_panel_close: "關閉"
+  permissions_all_granted: "都開好了"
+  permissions_open_settings: "%{name}：打開系統設定"
+  permission_disk: "完整磁碟取用權限"
+  permission_disk_hint: "讓終端機裡執行的程式和 agent 能讀寫受保護的資料夾，例如郵件、照片和其他 app 的資料。"
+  permission_screen: "螢幕錄製"
+  permission_screen_hint: "在手機或其他電腦上檢視這台 Mac 的螢幕。"
+  permission_input: "輔助使用"
+  permission_input_hint: "在手機或其他電腦上操作這台 Mac 的鍵盤和滑鼠。"
+  permission_notifications: "通知"
+  permission_notifications_hint: "agent 完成或等你回答時、有更新時提醒你。"
+  permission_granted: "已授權"
+  permission_granted_named: "%{name}：已授權"
+  permission_grant: "%{name}：授權…"
+  grant: "授權…"
+  done_title: "準備好了"
+  done_body: "幾個值得記住的快捷鍵，取自你的鍵位表。"
+  key_goto_agent: "列出所有 agent"
+  key_next_agent: "跳到要處理的 agent"
+  key_split_right: "向右分割"
+  not_bound: "未綁定"
+  start: "開始使用 Runode"
 a11y:
   action_for: "%{action}：%{title}"
   separator: "，"

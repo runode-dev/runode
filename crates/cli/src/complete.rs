@@ -394,7 +394,7 @@ fn candidates(previous: &[String], current: &str, env: &Env) -> (Also, Vec<(Stri
             (Also::Nothing, sessions(env))
         }
         ("open", _, _) if line.literal => (Also::Files, Vec::new()),
-        ("todo" | "schedule" | "remote" | "service" | "completions", None, 0) => {
+        ("todo" | "schedule" | "remote" | "service" | "skill" | "completions", None, 0) => {
             (Also::Nothing, owned(subcommands(command)))
         }
         ("todo", Some(sub @ ("show" | "start" | "done" | "rm" | "queue" | "unqueue")), 1) => {
@@ -529,6 +529,7 @@ mod tests {
             ("schedule", &[Some("add"), Some("list"), Some("rm"), Some("pause"), Some("resume")]),
             ("remote", &[Some("pair"), Some("devices"), Some("revoke")]),
             ("service", &[Some("install"), Some("uninstall"), Some("status"), Some("upgrade")]),
+            ("skill", &[Some("install")]),
             ("completions", &[Some("bash")]),
         ];
         for &(command, subs) in pages {

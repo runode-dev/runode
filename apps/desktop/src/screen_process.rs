@@ -458,10 +458,29 @@ fn watch(outbox: &Outbox, reported: runode_screen::Permissions) -> StopFlag {
 #[cfg(target_os = "macos")]
 const PERMISSIONS_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// 这台电脑现在的授权。macOS 上另起 `runode --screen-permissions` 来查，查不成时退回本进程里查到的。`watch`
-/// 每秒都查，接连查不成时只记第一次。
+/// 远程桌面要的授权，加上「完全磁盘访问」。
 #[cfg(target_os = "macos")]
-fn current_permissions() -> runode_screen::Permissions {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Access {
+    pub(crate) screen: runode_screen::Permissions,
+    pub(crate) full_disk: bool,
+}
+
+/// 这台电脑现在的屏幕录制和输入授权。
+#[cfg(target_os = "macos")]
+pub(crate) fn current_permissions() -> runode_screen::Permissions {
+    current_access().screen
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn current_permissions() -> runode_screen::Permissions {
+    runode_screen::permissions()
+}
+
+/// 这台电脑现在的授权。另起 `runode --screen-permissions` 来查：本进程里查到的会是缓存着的旧结果，完全磁盘
+/// 访问也只对新起的进程生效；查不成时退回本进程里查到的。`watch` 每秒都查，接连查不成时只记第一次。
+#[cfg(target_os = "macos")]
+pub(crate) fn current_access() -> Access {
     use crate::subprocess::{RunError, output_within};
     static FAILING: AtomicBool = AtomicBool::new(false);
     let output = match runode_paths::runode_exe() {
@@ -470,12 +489,13 @@ fn current_permissions() -> runode_screen::Permissions {
     };
     let failure = match output {
         Ok(output) if output.status.success() => match output.stdout[..] {
-            [screen_capture, post_event] => {
+            [screen_capture, post_event, full_disk] => {
                 FAILING.store(false, Ordering::Relaxed);
-                return runode_screen::Permissions {
+                let screen = runode_screen::Permissions {
                     screen_capture: screen_capture == b'1',
                     post_event: post_event == b'1',
                 };
+                return Access { screen, full_disk: full_disk == b'1' };
             }
             _ => format!("unexpected output {:?}", String::from_utf8_lossy(&output.stdout)),
         },
@@ -485,21 +505,31 @@ fn current_permissions() -> runode_screen::Permissions {
     if !FAILING.swap(true, Ordering::Relaxed) {
         tracing::warn!("cannot check the permissions, using this process's: {failure}");
     }
-    runode_screen::permissions()
+    Access { screen: runode_screen::permissions(), full_disk: full_disk_access() }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn current_permissions() -> runode_screen::Permissions {
-    runode_screen::permissions()
+/// 有没有「完全磁盘访问」：系统没有查它的接口，试着只读打开受它保护的 TCC 库，打得开就算有。
+#[cfg(target_os = "macos")]
+fn full_disk_access() -> bool {
+    runode_paths::Dirs::from_env()
+        .home
+        .is_some_and(|home| std::fs::File::open(home.join("Library/Application Support/com.apple.TCC/TCC.db")).is_ok())
 }
 
-/// `runode --screen-permissions`：把这个进程查到的屏幕录制、输入授权按 `0`、`1` 两个字符打到标准输出。
+/// `runode --screen-permissions`：把这个进程查到的屏幕录制、输入和完全磁盘访问的授权按 `0`、`1` 三个字符
+/// 打到标准输出。
 #[cfg(target_os = "macos")]
 pub fn print_permissions() -> i32 {
     let permissions = runode_screen::permissions();
     let mut out = io::stdout().lock();
-    let written = write!(out, "{}{}", u8::from(permissions.screen_capture), u8::from(permissions.post_event))
-        .and_then(|()| out.flush());
+    let written = write!(
+        out,
+        "{}{}{}",
+        u8::from(permissions.screen_capture),
+        u8::from(permissions.post_event),
+        u8::from(full_disk_access())
+    )
+    .and_then(|()| out.flush());
     i32::from(written.is_err())
 }
 

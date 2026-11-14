@@ -51,6 +51,8 @@ use crate::{
 };
 use pages::{Group, Page};
 use picker::Picker;
+pub(crate) use picker::ThemeSlot;
+pub(crate) use theme::{Look, PLAIN_DARK, PLAIN_LIGHT, ThemeChoice, preview};
 
 /// 左边页面列表的宽度，按基准字号的点数。
 const NAV_WIDTH: f32 = 220.;

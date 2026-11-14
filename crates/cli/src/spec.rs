@@ -18,6 +18,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("schedule", "Start a task for an agent at set times"),
     ("remote", "Pair phones and computers for remote access and manage them"),
     ("service", "Start Runode at login, and upgrade the running host"),
+    ("skill", "Install the agent skill that teaches agents to use Runode"),
     ("completions", "Print a completion script for your shell"),
     ("help", "Show this help, or the help of a command"),
     ("version", "Show the version"),
@@ -56,6 +57,7 @@ pub(crate) fn subcommands(command: &str) -> &'static [(&'static str, &'static st
             ("status", "Show which login services are installed"),
             ("upgrade", "Hand the running host's sessions to a host of this build"),
         ],
+        "skill" => &[("install", "Install the skill for the agents on this computer")],
         "completions" => &[("bash", ""), ("fish", ""), ("zsh", "")],
         _ => &[],
     }

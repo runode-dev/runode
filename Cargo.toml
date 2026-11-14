@@ -30,6 +30,7 @@ runode-preview = { path = "crates/preview" }
 runode-files = { path = "crates/files" }
 runode-ssh = { path = "crates/ssh" }
 runode-agent = { path = "crates/agent" }
+runode-agent-skill = { path = "crates/agent-skill" }
 runode-remote = { path = "crates/remote" }
 runode-update = { path = "crates/update" }
 runode-autostart = { path = "crates/autostart" }
