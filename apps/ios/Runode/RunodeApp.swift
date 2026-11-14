@@ -81,8 +81,10 @@ enum AppComposition {
         dependencies.speechModels = URL.applicationSupportDirectory.appending(path: "speech-models")
         dependencies.pushIdentity = PushIdentity(
             info: Bundle.main.infoDictionary ?? [:], bundle: Bundle.main.bundleIdentifier)
+        // 官方 App 的 device token 只经中转交出去，没有可用的中转时不登记推送。
         if Bundle.main.bundleIdentifier == RelayRegister.officialBundle {
             dependencies.pushRelay = HTTPPushRelay(info: Bundle.main.infoDictionary ?? [:])
+            if dependencies.pushRelay == nil { dependencies.pushIdentity = nil }
         }
         return dependencies
     }

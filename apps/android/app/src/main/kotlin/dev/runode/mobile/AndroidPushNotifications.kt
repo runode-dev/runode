@@ -158,9 +158,13 @@ class AndroidPushNotifications private constructor(private val context: Context)
     }
 }
 
-/** 把推送用到的三项装进来：通知的系统接口、按 applicationId 定的 App 身份、编译时配的中转。 */
+/**
+ * 把推送用到的三项装进来：通知的系统接口、按 applicationId 定的 App 身份、编译时配的中转。
+ * 官方 App 的 token 只经中转交出去，没有可用的中转时不装身份，什么都不登记。
+ */
 fun AppDependencies.installPush(context: Context) {
     notifications = AndroidPushNotifications.shared(context)
-    pushIdentity = PushIdentity.of(BuildConfig.APPLICATION_ID)
-    pushRelay = HttpPushRelay.configured(BuildConfig.RUNODE_PUSH_RELAY)
+    val relay = HttpPushRelay.configured(BuildConfig.RUNODE_PUSH_RELAY)
+    pushRelay = relay
+    pushIdentity = relay?.let { PushIdentity.of(BuildConfig.APPLICATION_ID) }
 }

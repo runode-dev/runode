@@ -23,8 +23,6 @@ public struct PushRelayError: Error, Hashable, LocalizedError {
 
 /// 经 HTTPS 找中转服务换句柄。
 public struct HTTPPushRelay: PushRelay {
-    /// 官方中转服务。
-    public static let official = HTTPPushRelay(base: URL(string: "https://push.runode.dev")!)
     /// Info.plist 里记中转服务基址的键，值来自 build setting `RUNODE_PUSH_RELAY`。
     public static let infoKey = "RunodePushRelay"
     /// 换一次句柄最多等这么久。
@@ -36,11 +34,11 @@ public struct HTTPPushRelay: PushRelay {
         self.base = base
     }
 
-    /// 从 App 的 Info.plist 读基址；没写、build setting 没展开、不是 https 时用 `official`。
-    public init(info: [String: Any]) {
+    /// 从 App 的 Info.plist 读基址；没写、build setting 没展开、不是 https 时为空。
+    public init?(info: [String: Any]) {
         let raw = (info[Self.infoKey] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
-        let url = URL(string: raw).flatMap { $0.scheme == "https" && $0.host() != nil ? $0 : nil }
-        self.init(base: url ?? Self.official.base)
+        guard let url = URL(string: raw), url.scheme == "https", url.host()?.isEmpty == false else { return nil }
+        self.init(base: url)
     }
 
     public func handle(for request: RelayRegister) async throws -> String {

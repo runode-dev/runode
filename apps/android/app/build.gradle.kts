@@ -1,3 +1,5 @@
+import java.net.URI
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -9,8 +11,11 @@ if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
-/** 推送中转的基址，编译时用 Gradle 属性 `RUNODE_PUSH_RELAY` 换掉，本地测中转时用。 */
-val pushRelay: String = providers.gradleProperty("RUNODE_PUSH_RELAY").getOrElse("https://push.runode.dev")
+/** 推送中转的基址，编译时用 Gradle 属性 `RUNODE_PUSH_RELAY` 换掉，本地测中转时用；必须是带主机的 https 地址。 */
+val pushRelay: String = providers.gradleProperty("RUNODE_PUSH_RELAY").getOrElse("https://push.runode.dev").trim()
+require(runCatching { URI(pushRelay) }.getOrNull()?.let { it.scheme == "https" && !it.host.isNullOrEmpty() } == true) {
+    "RUNODE_PUSH_RELAY 要是带主机的 https 地址：$pushRelay"
+}
 
 android {
     namespace = "dev.runode.mobile"

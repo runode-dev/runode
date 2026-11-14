@@ -53,17 +53,14 @@ class HttpPushRelay(val base: URI) : PushRelay {
     }
 
     companion object {
-        /** 官方中转服务。 */
-        val official: HttpPushRelay = HttpPushRelay(URI("https://push.runode.dev"))
-
         /** 换一次句柄最多等这么久。 */
         internal val timeout: Duration = 10.seconds
 
-        /** 按构建时配的基址（比如 BuildConfig 里的值）建；没配、配的不是带主机的 https 时用 [official]。 */
-        fun configured(raw: String?): HttpPushRelay {
+        /** 按构建时配的基址（BuildConfig 里的值）建；没配、配的不是带主机的 https 时为空。 */
+        fun configured(raw: String?): HttpPushRelay? {
             val uri = raw?.trim()?.let { runCatching { URI(it) }.getOrNull() }
                 ?.takeIf { it.scheme == "https" && !it.host.isNullOrEmpty() }
-            return uri?.let(::HttpPushRelay) ?: official
+            return uri?.let(::HttpPushRelay)
         }
     }
 }
