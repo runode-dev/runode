@@ -33,6 +33,26 @@ powershell -NoProfile -File scripts/windows/setup-conpty.ps1 -Destination target
 cargo test -p runode-terminal
 ```
 
+## Android 开发
+
+Android app 是 `apps/android` 下的 Gradle 工程，macOS 和 Linux 上都能编。需要 JDK 21、Android SDK、同一版 zig、rustup 和 [cargo-ndk](https://github.com/bbqsrc/cargo-ndk)。在 SDK Manager 里装上 `apps/android/gradle/libs.versions.toml` 里 `ndk` 和 `cmake` 两项写的那一版 NDK 和 CMake，再设好 `ANDROID_HOME`；脚本默认用 SDK 里版本最新的 NDK，装了好几版时用 `ANDROID_NDK_HOME` 指定。cargo-ndk 没装的话，`make android-tunnel` 会用 `cargo install` 装上。
+
+app 要的三份原生库 Gradle 不会自己去编，第一次构建前，以及 ghostty 子模块、拨号库的代码或 sherpa-onnx 的版本变了以后，先在仓库根目录准备好，缺了哪份 Gradle 会直接报错：
+
+```sh
+make android-vt       # 从 vendor/ghostty 编 libghostty-vt（要 zig 和 NDK）
+make android-tunnel   # 编 iroh 拨号库 librunode_tunnel.so（要 rustup、cargo-ndk 和 NDK）
+make android-speech   # 下载离线识别用的 sherpa-onnx，按 SHA-256 核对
+make android-test     # 跑 JVM 上的单元测试
+make run-android      # 调试构建，装到连着的设备或模拟器上启动
+```
+
+设备测试在 `apps/android` 里跑 `./gradlew connectedDebugAndroidTest`，要先开好模拟器或连上手机。识别模型的测试从设备上的 `/data/local/tmp/runode-speech-models` 读模型，没放就跳过。
+
+推送用 Firebase。Firebase 项目的配置 `google-services.json` 放在 `apps/android/app/` 下，它不进 git；没有这个文件 app 照样能编能跑，只是不登记推送。
+
+CI 的 Android 工作流在 Linux 上做同样的准备，跑单元测试、Android lint 和拨号库的 clippy，再在 API 31 和 36 的模拟器上跑设备测试。
+
 ## 提交 PR 前
 
 ```sh

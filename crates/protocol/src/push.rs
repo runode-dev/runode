@@ -1,15 +1,15 @@
-//! agent 停下来等回答时，会话所在电脑的宿主经 APNs 给手机推一条普通通知，标题是「<agent> 在等你回答」，
-//! 副标题是会话标题和电脑名，正文是屏幕底部的问题。看板上的任务做完了（agent 干完活停下来，不是在等
-//! 回答）时推另一种（`NotificationKind::TodoDone`），标题是「任务做完了」，副标题是任务标题和电脑名，
-//! 没有正文。这里是推送的线上格式：发给 APNs 的 payload 和请求头里要用的值，以及经中转服务发送时的
-//! 请求体。
+//! agent 停下来等回答时，会话所在电脑的宿主给手机推一条普通通知，标题是「<agent> 在等你回答」，副标题
+//! 是会话标题和电脑名，正文是屏幕底部的问题。看板上的任务做完了（agent 干完活停下来，不是在等回答）时
+//! 推另一种（`NotificationKind::TodoDone`），标题是「任务做完了」，副标题是任务标题和电脑名，没有正文。
+//! iPhone 上的通知经 Apple 的 APNs 送到，Android 上的经 Google 的 FCM（`PushService`）。这里是推送的线上
+//! 格式：发给 APNs 的 payload 和请求头里要用的值、发给 FCM 的请求体，以及经中转服务发送时的请求体。
 //!
 //! # 流程
 //!
-//! 1. 手机在前台连上某台电脑时发 `ClientMsg::PushRegister`，交出推送用的凭据：自己签名打包的 App 交
-//!    APNs 的 device token，官方 App 交中转服务给的句柄。电脑记在配对设备表里，手机断开后照样能推。
-//!    注销是 `token` 为空的同一条消息。这条消息只在手机经远程访问连上来时由监听方办，不到宿主那里，
-//!    见 `remote` 的模块文档。
+//! 1. 手机在前台连上某台电脑时发 `ClientMsg::PushRegister`，交出推送用的凭据：自己签名打包的 iOS App
+//!    交 APNs 的 device token，官方 App（iOS 和 Android 都是 `OFFICIAL_BUNDLE`）交中转服务给的句柄。
+//!    电脑记在配对设备表里，手机断开后照样能推。注销是 `token` 为空的同一条消息。这条消息只在手机经
+//!    远程访问连上来时由监听方办，不到宿主那里，见 `remote` 的模块文档。
 //! 2. 那台电脑上有会话的 agent 停下来等回答时，电脑给每台登记过的手机发一条通知（`notify_payload`）。
 //!    一次等回答只推一次，等的时候屏幕上的问题变了不再推。通知的 `apns-collapse-id` 是会话标识
 //!    （`Notification::collapse_id`），同一个会话再等时新通知替掉通知中心里的旧的；`thread-id` 是电脑，
@@ -18,10 +18,11 @@
 //!    （`Notification::todo_done`），一次做完只推一次；`apns-collapse-id` 也是任务的会话标识。agent 报了
 //!    没做成时推另一种（`NotificationKind::TodoFailed`，标题「任务没做成」，正文是它报的结果）。
 //!
-//! 官方 App 的推送经中转服务发（它持有签 APNs 请求的密钥）。官方 App 拿到 device token 后为每台电脑向
-//! 中转服务换一个句柄（`RelayRegister`），电脑只拿得到句柄，推送时交回去（`RelayNotify`）：中转服务从
-//! 句柄里解出 device token 和 APNs 环境，句柄只替换它时报的那台电脑（`machine`）推，泄露了也冒充不了
-//! 别的电脑，按句柄限频。自己签名打包的 App 由电脑拿用户配置的密钥直连 APNs。
+//! 官方 App 的推送经中转服务发（它持有签 APNs 请求的密钥和 FCM 的服务账号）。官方 App 拿到 device token
+//! 或 FCM 的 registration token 后为每台电脑向中转服务换一个句柄（`RelayRegister`），电脑只拿得到句柄，
+//! 推送时交回去（`RelayNotify`）：中转服务从句柄里解出 token 和发给谁（APNs 的哪个环境，或者 FCM），
+//! 句柄只替换它时报的那台电脑（`machine`）推，泄露了也冒充不了别的电脑，按句柄限频。电脑不分平台，
+//! 官方 App 的都交给中转。自己签名打包的 iOS App 由电脑拿用户配置的密钥直连 APNs。
 //!
 //! # 线上格式
 //!
@@ -29,14 +30,19 @@
 //! 点开通知时据此打开那个会话。时间是 Unix 秒，由调用方传入 `now`。payload 超过 `MAX_APNS_PAYLOAD`
 //! 字节时先从最上面一行起删 `lines`，删完还超就缩短 `title`，见 `notify_payload`。
 //!
-//! 中转请求体的键是 snake_case，都带 `v`（`RELAY_VERSION`）。中转服务按请求体拼出和 `notify_payload`
-//! 一样的 payload、带上同样的请求头（`apns_headers`）发给 APNs，所以请求体里的内容已经照 payload 的上限删减过。出错时
-//! 中转服务原样带回 APNs 的 HTTP 状态和 `PushError`；句柄解不开时回 400 `BadDeviceToken`，和 `machine`
+//! 发给 FCM 的是只带 `data` 的消息（`fcm_message`），不用 FCM 的 `notification`：标题、副标题由 Android
+//! App 按 `data` 里的字段用自己的本地化文案拼，`data` 里的值都是字符串。`data` 超过 `MAX_FCM_DATA` 字节时
+//! 照 APNs payload 的规矩删减。
+//!
+//! 中转请求体的键是 snake_case，都带 `v`（`RELAY_VERSION`）。发给 APNs 时中转服务按请求体拼出和
+//! `notify_payload` 一样的 payload、带上同样的请求头（`apns_headers`），所以请求体里的内容已经照 payload
+//! 的上限删减过；发给 FCM 时按请求体拼 `fcm_message`。出错时中转服务原样带回 APNs 的 HTTP 状态和
+//! `PushError`，FCM 的回话换成同样意思的 APNs 状态；句柄解不开时回 400 `BadDeviceToken`，和 `machine`
 //! 对不上时回 403，限流时回 429 带 `Retry-After`。APNs 不认 device token（410、400 `BadDeviceToken`）时
 //! 中转服务先换另一个 APNs 环境再发一次，两边都不认才回错：电脑收到这两种回话就删掉登记，不再自己换环境。
 //!
-//! 和 `remote` 一样，`tests/fixtures/push` 里存着照规格另外写出来的样例（不由这里的类型生成），手机端
-//! 的测试读同一批文件；改格式要两边一起改。
+//! 和 `remote` 一样，`tests/fixtures/push` 里存着照规格另外写出来的样例（不由这里的类型生成），两个手机端
+//! 的测试读同一批文件；改格式要几边一起改。
 
 use runode_types::session::SessionMeta;
 use serde::{Deserialize, Serialize};
@@ -65,6 +71,12 @@ pub const RELAY_REGISTER: &str = "/v1/register";
 pub const RELAY_NOTIFY: &str = "/v1/notify";
 /// `ClientMsg::PushRegister` 的 `token`（device token 或句柄）最多这么多个字符。
 pub const MAX_TOKEN_LEN: usize = 512;
+/// FCM registration token 最多这么多个字符：中转把它原样封进句柄，句柄写成 base64url 后还不能超过
+/// `MAX_TOKEN_LEN`，这里另外留了余量。
+pub const MAX_FCM_TOKEN_LEN: usize = 320;
+/// 发给 FCM 的 `data` 编成 JSON 最多这么多字节。比 FCM 的上限小一点：FCM 按自己的算法数字节，和这里
+/// 编出来的 JSON 不完全一样。
+pub const MAX_FCM_DATA: usize = 4000;
 /// 官方 App 的 bundle id：登记的是它时经中转服务推送。
 pub const OFFICIAL_BUNDLE: &str = "dev.runode.mobile";
 /// 没有标题时 `Notification::title` 用的名字。
@@ -92,6 +104,25 @@ impl ApnsEnv {
     /// 另一个环境：登记的环境可能不对，一边不认 device token 时换这个再推一次。
     pub fn other(self) -> Self {
         if self == Self::Production { Self::Development } else { Self::Production }
+    }
+}
+
+/// 推送经哪家的服务送到手机：iPhone 是 Apple 的 APNs，Android 是 Google 的 FCM。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PushService {
+    #[default]
+    Apns,
+    Fcm,
+    /// 比自己新的一方才有的服务，推不了。
+    #[serde(other)]
+    Unknown,
+}
+
+impl PushService {
+    /// 线上不写出 APNs：只认 APNs 的一方照旧读得懂。
+    pub fn is_apns(&self) -> bool {
+        *self == Self::Apns
     }
 }
 
@@ -260,11 +291,14 @@ pub fn notify_payload(notification: &Notification) -> Option<Vec<u8>> {
 pub struct RelayRegister {
     /// `RELAY_VERSION`。
     pub v: u32,
+    /// APNs 的环境；FCM 时填 `Production`，中转不看。
     pub env: ApnsEnv,
-    /// device token，十六进制。
+    /// APNs 的 device token（十六进制），或者 FCM 的 registration token 原文。
     pub token: String,
     /// 手机给这台电脑编的 UUID（`ClientMsg::PushRegister::machine`）。
     pub machine: String,
+    #[serde(default, skip_serializing_if = "PushService::is_apns")]
+    pub service: PushService,
 }
 
 /// `RELAY_REGISTER` 的回话。
@@ -274,14 +308,15 @@ pub struct RelayHandle {
     pub handle: String,
 }
 
-/// 经中转服务发通知（`RELAY_NOTIFY`）：中转服务照 `notify_payload` 拼 payload，请求头照直连时的写。
+/// 经中转服务发通知（`RELAY_NOTIFY`）：发给 APNs 时中转服务照 `notify_payload` 拼 payload，请求头照直连时
+/// 的写；发给 FCM 时照 `fcm_message` 拼。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelayNotify {
     /// `RELAY_VERSION`。
     pub v: u32,
     /// 手机登记时交来的句柄（`RelayHandle`）。
     pub handle: String,
-    /// `apns-expiration`，Unix 秒。
+    /// 过了这个时刻就不送了：APNs 的 `apns-expiration`，FCM 的 `ttl` 也按它算。Unix 秒。
     pub expiration: u64,
     pub notification: Notification,
 }
@@ -292,6 +327,28 @@ impl RelayNotify {
         let (_, notification) = fit(notification)?;
         Some(Self { v: RELAY_VERSION, handle, expiration: now + EXPIRES_AFTER, notification })
     }
+}
+
+/// 发给 FCM 的通知：FCM HTTP v1 `messages:send` 的请求体，发给 registration token `token`，`expiration`
+/// 和 `now` 都是 Unix 秒，两者之差是 `ttl`（已经过了时是 0）。
+///
+/// 只带 `data`，值都是字符串：`kind` 是 `NotificationKind` 的写法（等回答的也写），`machine`、`machine_name`、
+/// `session`、`title`、`agent` 照 `Notification`，`body` 是 `lines` 用换行连起来的。`android` 里是高优先级、
+/// `collapse_key` 是会话标识，同一个会话的新通知替掉还没送到的旧的。`data` 超过 `MAX_FCM_DATA` 字节时
+/// 照 `notify_payload` 的规矩删行、缩短标题，删光了还超时为 `None`。
+pub fn fcm_message(token: &str, notification: &Notification, expiration: u64, now: u64) -> Option<Vec<u8>> {
+    let (_, notification) =
+        fit_within(notification, MAX_FCM_DATA, |notification| serde_json::to_vec(&FcmData::new(notification)).ok())?;
+    let message = FcmMessage {
+        token,
+        data: FcmData::new(&notification),
+        android: FcmAndroid {
+            priority: "HIGH",
+            ttl: format!("{}s", expiration.saturating_sub(now)),
+            collapse_key: notification.collapse_id(),
+        },
+    };
+    serde_json::to_vec(&FcmRequest { message }).ok()
 }
 
 /// APNs 回错误时的响应体（`{"reason":"BadDeviceToken"}` 这类），中转服务出错时也回这个样子。
@@ -348,13 +405,68 @@ fn encode(notification: &Notification) -> Option<Vec<u8>> {
     serde_json::to_vec(&Payload { aps, machine: &notification.machine, session: notification.session }).ok()
 }
 
+/// FCM 请求体外面那一层。
+#[derive(Serialize)]
+struct FcmRequest<'a> {
+    message: FcmMessage<'a>,
+}
+
+#[derive(Serialize)]
+struct FcmMessage<'a> {
+    token: &'a str,
+    data: FcmData<'a>,
+    android: FcmAndroid,
+}
+
+/// FCM 消息的 `data`。
+#[derive(Serialize)]
+struct FcmData<'a> {
+    kind: NotificationKind,
+    machine: &'a str,
+    machine_name: &'a str,
+    session: SessionId,
+    title: &'a str,
+    agent: &'a str,
+    body: String,
+}
+
+impl<'a> FcmData<'a> {
+    fn new(notification: &'a Notification) -> Self {
+        Self {
+            kind: notification.kind,
+            machine: &notification.machine,
+            machine_name: &notification.machine_name,
+            session: notification.session,
+            title: &notification.title,
+            agent: &notification.agent,
+            body: notification.lines.join("\n"),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct FcmAndroid {
+    priority: &'static str,
+    ttl: String,
+    collapse_key: String,
+}
+
 /// 编出来超过 `MAX_APNS_PAYLOAD` 时照 `notify_payload` 说的删行、缩短标题。返回编好的 payload 和删减后
 /// 的内容。
 fn fit(notification: &Notification) -> Option<(Vec<u8>, Notification)> {
+    fit_within(notification, MAX_APNS_PAYLOAD, encode)
+}
+
+/// `encode` 编出来超过 `limit` 字节时照 `notify_payload` 说的删行、缩短标题。
+fn fit_within(
+    notification: &Notification,
+    limit: usize,
+    encode: impl Fn(&Notification) -> Option<Vec<u8>>,
+) -> Option<(Vec<u8>, Notification)> {
     let mut notification = notification.clone();
     loop {
         let bytes = encode(&notification)?;
-        if bytes.len() <= MAX_APNS_PAYLOAD {
+        if bytes.len() <= limit {
             return Some((bytes, notification));
         }
         if !notification.lines.is_empty() {

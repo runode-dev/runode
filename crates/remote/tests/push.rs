@@ -4,7 +4,11 @@
 mod common;
 
 use common::*;
-use runode_protocol::{ClientMsg, HostMsg, push::ApnsEnv, remote::DeviceId};
+use runode_protocol::{
+    ClientMsg, HostMsg,
+    push::{ApnsEnv, OFFICIAL_BUNDLE, PushService},
+    remote::DeviceId,
+};
 use runode_remote::{PushRegistration, push_registrations, revoke_device};
 
 const TOKEN: &str = "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011";
@@ -17,6 +21,7 @@ fn register(req: u32, token: Option<&str>) -> Vec<u8> {
         bundle: "cn.barey.runode".into(),
         machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
         machine_name: "Ethan 的 MacBook Pro".into(),
+        service: PushService::Apns,
     })
     .unwrap()
 }
@@ -77,7 +82,39 @@ fn bad_registrations_are_refused() {
     );
     phone.send_control(newer_env.as_bytes());
     assert!(matches!(phone.read_host_msg(), HostMsg::Error { req: Some(2), id: None, .. }));
+    let newer_service = format!(
+        r#"{{"type":"push_register","req":3,"token":"{TOKEN}","env":"production","bundle":"b","machine":"m","machine_name":"n","service":"hms"}}"#
+    );
+    phone.send_control(newer_service.as_bytes());
+    assert!(matches!(phone.read_host_msg(), HostMsg::Error { req: Some(3), id: None, .. }));
     assert!(push_registrations(&harness.dirs).unwrap().is_empty());
+
+    nothing_else_reached_the_host(&mut phone, &host);
+}
+
+/// Android 的官方 App 登记时带 `service`，记进设备表；不带的读成 APNs。
+#[test]
+fn android_registrations_keep_their_service() {
+    let harness = Harness::start("pushfcm");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    let (mut phone, host) = harness.bridged(device_id, &key);
+
+    let android = ClientMsg::PushRegister {
+        req: 1,
+        token: Some("q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ-aE5uR_oTiBlM".into()),
+        env: ApnsEnv::Production,
+        bundle: OFFICIAL_BUNDLE.into(),
+        machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
+        machine_name: "Mac".into(),
+        service: PushService::Fcm,
+    };
+    phone.send_control(&serde_json::to_vec(&android).unwrap());
+    assert_eq!(phone.read_host_msg(), HostMsg::Done { req: 1 });
+    assert_eq!(registration(&harness, device_id).unwrap().service, PushService::Fcm);
+    phone.send_control(&register(2, Some(TOKEN)));
+    assert_eq!(phone.read_host_msg(), HostMsg::Done { req: 2 });
+    assert_eq!(registration(&harness, device_id).unwrap().service, PushService::Apns);
 
     nothing_else_reached_the_host(&mut phone, &host);
 }

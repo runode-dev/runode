@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 下载识别模型（SpeechModels）。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 语音输入录麦克风（SpeechRecorder），运行时由界面层向用户要。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+</manifest>

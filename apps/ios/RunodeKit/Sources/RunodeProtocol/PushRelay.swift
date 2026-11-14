@@ -10,15 +10,31 @@ public struct RelayRegister: Hashable, Sendable, Encodable {
 
     public var v: UInt32 = 1
     public var env: ApnsEnv
-    /// device token，十六进制。
+    /// APNs 的 device token（十六进制），或者 FCM 的 registration token 原文。
     public var token: String
     /// 手机给这台电脑编的 UUID（`ClientMsg.pushRegister` 的 `machine`）。
     public var machine: String
+    /// 推送经哪家送到手机；是 `apns` 时不写出来。
+    public var service: PushService
 
-    public init(env: ApnsEnv, token: String, machine: String) {
+    public init(env: ApnsEnv, token: String, machine: String, service: PushService = .apns) {
         self.env = env
         self.token = token
         self.machine = machine
+        self.service = service
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v, env, token, machine, service
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(v, forKey: .v)
+        try c.encode(env, forKey: .env)
+        try c.encode(token, forKey: .token)
+        try c.encode(machine, forKey: .machine)
+        if service != .apns { try c.encode(service, forKey: .service) }
     }
 }
 

@@ -1442,6 +1442,16 @@
       "token": "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011",
       "type": "push_register"
     },
+    "push_register_fcm": {
+      "bundle": "dev.runode.mobile",
+      "env": "production",
+      "machine": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+      "machine_name": "Ethan 的 MacBook Pro",
+      "req": 12,
+      "service": "fcm",
+      "token": "q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ-aE5uR_oTiBlM",
+      "type": "push_register"
+    },
     "push_unregister": {
       "bundle": "cn.barey.runode",
       "env": "development",

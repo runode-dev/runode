@@ -7072,6 +7072,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "runode-android-tunnel"
+version = "0.1.20"
+dependencies = [
+ "iroh",
+ "jni 0.22.4",
+ "tokio",
+]
+
+[[package]]
 name = "runode-autostart"
 version = "0.1.20"
 dependencies = [

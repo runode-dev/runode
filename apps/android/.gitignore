@@ -1,0 +1,11 @@
+build/
+.gradle/
+.kotlin/
+.cxx/
+.idea/
+*.iml
+local.properties
+app/google-services.json
+app/*.keystore
+terminal/src/main/jniLibs/
+connection/src/main/jniLibs/

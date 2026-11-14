@@ -5,7 +5,10 @@ mod common;
 
 use common::{Peer, host};
 use runode_host::{ClientMsg, HostMsg};
-use runode_protocol::{ClientKind, push::ApnsEnv};
+use runode_protocol::{
+    ClientKind,
+    push::{ApnsEnv, PushService},
+};
 
 #[test]
 fn the_host_does_not_take_push_registrations() {
@@ -18,6 +21,7 @@ fn the_host_does_not_take_push_registrations() {
         bundle: "cn.barey.runode".into(),
         machine: "m".into(),
         machine_name: "Mac".into(),
+        service: PushService::Apns,
     });
     assert!(matches!(phone.reply(), HostMsg::Error { req: Some(3), id: None, .. }));
     // 连接照旧。

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="terminal_label">终端</string>
+    <string name="terminal_hint">轻点两下打开键盘</string>
+    <string name="terminal_key_control">Ctrl（粘住）</string>
+    <string name="terminal_key_left">左</string>
+    <string name="terminal_key_down">下</string>
+    <string name="terminal_key_up">上</string>
+    <string name="terminal_key_right">右</string>
+    <string name="terminal_key_return">回车</string>
+    <string name="terminal_key_paste">粘贴</string>
+    <string name="terminal_key_dictation">语音输入</string>
+    <string name="terminal_key_recording">正在录音</string>
+    <string name="terminal_key_show_keyboard">打开键盘</string>
+    <string name="terminal_key_hide_keyboard">收起键盘</string>
+</resources>

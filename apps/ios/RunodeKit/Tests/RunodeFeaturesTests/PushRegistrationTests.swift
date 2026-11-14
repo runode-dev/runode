@@ -64,7 +64,7 @@ extension FakeLink {
     /// 发出去的登记推送，按先后。
     var registrations: [SentRegistration] {
         sent.compactMap {
-            guard case let .pushRegister(req, token, env, bundle, machine, machineName) = $0 else { return nil }
+            guard case let .pushRegister(req, token, env, bundle, machine, machineName, _) = $0 else { return nil }
             return SentRegistration(
                 req: req, token: token, env: env, bundle: bundle, machine: machine, machineName: machineName)
         }

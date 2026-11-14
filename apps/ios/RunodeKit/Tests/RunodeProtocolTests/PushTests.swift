@@ -67,6 +67,13 @@ private let sampleSession = "0123456789abcdef0011223344556677"
             env: .production, token: "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011",
             machine: sampleMachine.uuidString)
         #expect(try sameJSON(JSONEncoder().encode(register), PushSamples.data("relay_register.json")))
+        // Android 的官方 App 多带 `service`；iOS 的不写它。
+        let fcm = RelayRegister(
+            env: .production,
+            token:
+                "fGx3Q9kVTm2b7WcLr0pYnA:APA91bE7tq2Kc0VhS8xJm4RzL1wPdN6uYf3Hg5oBk9aTe2Ci7Xv0Mn4Qs8Dj1Ur6Wy3Pl5Zh2Ko9Ib7Ga4Fc0Ex_-",
+            machine: sampleMachine.uuidString, service: .fcm)
+        #expect(try sameJSON(JSONEncoder().encode(fcm), PushSamples.data("relay_register_fcm.json")))
         let handle = try JSONDecoder().decode(RelayHandle.self, from: PushSamples.data("relay_handle.json"))
         #expect(handle.handle == "q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ-aE5uR_oTiBlM")
         let error = try JSONDecoder().decode(PushError.self, from: PushSamples.data("push_error.json"))

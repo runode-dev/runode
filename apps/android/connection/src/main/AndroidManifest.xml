@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 连电脑的 TLS 连接和推送中转的 HTTPS。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 电脑离线时等本机网络恢复或变化再连（NetworkChanges）。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Wi-Fi 默认丢掉组播，找电脑的 Bonjour（NsdDiscovery）要拿着 MulticastLock。 -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+</manifest>

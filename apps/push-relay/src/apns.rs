@@ -34,7 +34,7 @@ pub struct Push {
     pub collapse_id: String,
 }
 
-/// APNs 的回话。
+/// 推送服务的回话，中转按它回电脑。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reply {
     pub status: u16,

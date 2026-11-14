@@ -7,8 +7,8 @@ use std::path::Path;
 use runode_protocol::{
     SessionId,
     push::{
-        ApnsEnv, BLOCKED_LINES, LINE_LIMIT, MAX_APNS_PAYLOAD, Notification, PushError, RELAY_VERSION, RelayHandle,
-        RelayNotify, RelayRegister, TEXT_LIMIT, notify_payload,
+        ApnsEnv, BLOCKED_LINES, LINE_LIMIT, MAX_APNS_PAYLOAD, MAX_FCM_DATA, Notification, PushError, PushService,
+        RELAY_VERSION, RelayHandle, RelayNotify, RelayRegister, TEXT_LIMIT, fcm_message, notify_payload,
     },
 };
 use runode_types::{
@@ -20,6 +20,8 @@ use serde_json::Value;
 
 const NOW: u64 = 1_760_000_000;
 const TOKEN: &str = "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011";
+const FCM_TOKEN: &str =
+    "fGx3Q9kVTm2b7WcLr0pYnA:APA91bE7tq2Kc0VhS8xJm4RzL1wPdN6uYf3Hg5oBk9aTe2Ci7Xv0Mn4Qs8Dj1Ur6Wy3Pl5Zh2Ko9Ib7Ga4Fc0Ex_-";
 const HANDLE: &str = "q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ-aE5uR_oTiBlM";
 const MACHINE: &str = "6F9619FF-8B86-D011-B42D-00C04FC964FF";
 const SESSION: SessionId = SessionId(0x0123_4567_89ab_cdef_0011_2233_4455_6677);
@@ -75,11 +77,69 @@ fn relay_requests_match_the_fixtures() {
     let notify = RelayNotify::new(HANDLE.into(), &notification(), NOW).unwrap();
     assert_eq!(notify.expiration, NOW + 1800);
     matches("relay_notify.json", &notify);
-    let register =
-        RelayRegister { v: RELAY_VERSION, env: ApnsEnv::Production, token: TOKEN.into(), machine: MACHINE.into() };
+    let register = RelayRegister {
+        v: RELAY_VERSION,
+        env: ApnsEnv::Production,
+        token: TOKEN.into(),
+        machine: MACHINE.into(),
+        service: PushService::Apns,
+    };
     matches("relay_register.json", &register);
     matches("relay_handle.json", &RelayHandle { handle: HANDLE.into() });
     matches("push_error.json", &PushError { reason: "BadDeviceToken".into() });
+}
+
+/// Android 的官方 App 换句柄时多带 `service`，APNs 的不写它，只认 APNs 的中转照旧读得懂。
+#[test]
+fn fcm_registrations_match_the_fixture() {
+    let register = RelayRegister {
+        v: RELAY_VERSION,
+        env: ApnsEnv::Production,
+        token: FCM_TOKEN.into(),
+        machine: MACHINE.into(),
+        service: PushService::Fcm,
+    };
+    matches("relay_register_fcm.json", &register);
+    assert_eq!(serde_json::from_str::<PushService>(r#""hms""#).unwrap(), PushService::Unknown);
+}
+
+/// 发给 FCM 的请求体：只带 `data`，值都是字符串，`ttl` 是到过期还剩的秒数，`collapse_key` 是会话标识。
+#[test]
+fn fcm_messages_match_the_fixtures() {
+    let blocked = fcm_message(FCM_TOKEN, &notification(), NOW + 1800, NOW).unwrap();
+    assert_eq!(String::from_utf8(blocked).unwrap(), fixture("fcm_message.json"));
+    let done = Notification::todo_done(MACHINE.into(), "Ethan 的 MacBook Pro", SESSION, "给设置页加暗色模式");
+    let done = fcm_message(FCM_TOKEN, &done, NOW + 1800, NOW).unwrap();
+    assert_eq!(String::from_utf8(done).unwrap(), fixture("fcm_message_todo_done.json"));
+    // 已经过了时的 `ttl` 是 0。
+    let late: Value = serde_json::from_slice(&fcm_message(FCM_TOKEN, &notification(), NOW, NOW + 5).unwrap()).unwrap();
+    assert_eq!(late["message"]["android"]["ttl"], "0s");
+}
+
+/// `data` 超过上限时照 APNs payload 的规矩先删最上面的行，删光了还超才缩短标题，再不行就不发。
+#[test]
+fn oversized_fcm_data_drops_lines_then_shortens_the_title() {
+    let data = |notification: &Notification| -> Option<Value> {
+        let message: Value = serde_json::from_slice(&fcm_message(FCM_TOKEN, notification, NOW, NOW)?).unwrap();
+        Some(message["message"]["data"].clone())
+    };
+    let mut notification = notification();
+    notification.lines = (0..3).map(|i| format!("{i}{}", "x".repeat(1500))).collect();
+    let fitted = data(&notification).unwrap();
+    assert!(fitted.to_string().len() <= MAX_FCM_DATA);
+    let lines: Vec<&str> = fitted["body"].as_str().unwrap().split('\n').collect();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].starts_with('1') && lines[1].starts_with('2'));
+
+    notification.lines = vec!["x".repeat(5000)];
+    notification.title = "标".repeat(2000);
+    let fitted = data(&notification).unwrap();
+    assert_eq!(fitted["body"], "");
+    let title = fitted["title"].as_str().unwrap();
+    assert!(title.ends_with('…') && title.chars().count() < 2000, "{title}");
+
+    let huge = Notification { machine_name: "x".repeat(5000), ..notification };
+    assert_eq!(fcm_message(FCM_TOKEN, &huge, NOW, NOW), None);
 }
 
 /// 任务做完的通知：标题换成任务做完的键、不带参数，副标题同等回答的；没有正文。中转请求体带 `kind`，

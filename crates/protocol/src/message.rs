@@ -48,7 +48,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     git::{GitBranch, GitFileDiff, GitRequest, GitStatus},
     layout::WindowLayout,
-    push::ApnsEnv,
+    push::{ApnsEnv, PushService},
     tasks::TaskSource,
     todo::{Outcome, Schedule, Todo, TodoSpec, When},
 };
@@ -337,10 +337,11 @@ pub enum ClientMsg {
     Shutdown { kill_sessions: bool },
     /// 手机登记（`token` 为空时注销）这台电脑给它推通知用的凭据，见 `push`：官方 App
     /// （`push::OFFICIAL_BUNDLE`）交中转服务给的句柄，别的交 APNs 的 device token（十六进制）。
-    /// `env` 是 token 所属的 APNs 环境，`bundle` 是 App 的 bundle id（APNs 的 topic），
-    /// `machine` 是手机给这台电脑编的 UUID、`machine_name` 是手机上显示的电脑名，推送时原样带回
-    /// （`push::Notification`）。只有手机经远程访问连上来时由监听方记进配对设备表、回 `Done`，
-    /// 不到宿主；宿主直接收到时回 `Error`。
+    /// `env` 是 token 所属的 APNs 环境，`bundle` 是 App 的 bundle id（APNs 的 topic；Android 上是
+    /// applicationId），`machine` 是手机给这台电脑编的 UUID、`machine_name` 是手机上显示的电脑名，推送时
+    /// 原样带回（`push::Notification`）。`service` 是推送经哪家送到手机，Android 的官方 App 报 `Fcm`、`env`
+    /// 填 `Production`。只有手机经远程访问连上来时由监听方记进配对设备表、回 `Done`，不到宿主；宿主直接
+    /// 收到时回 `Error`。
     PushRegister {
         req: u32,
         token: Option<String>,
@@ -348,6 +349,8 @@ pub enum ClientMsg {
         bundle: String,
         machine: String,
         machine_name: String,
+        #[serde(default, skip_serializing_if = "PushService::is_apns")]
+        service: PushService,
     },
     /// 手机不再连这台电脑（删掉了它，或者重新配对、换下了这一次配对的钥匙）：监听方把发来的这台设备从配对
     /// 设备表里撤掉（推送登记一起），回 `Done`，这条连接随后断开。只有手机经远程访问连上来时由监听方办，

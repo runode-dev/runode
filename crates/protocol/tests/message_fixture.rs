@@ -14,7 +14,7 @@ use runode_protocol::{
         GitBranch, GitFile, GitFileDiff, GitFileStatus, GitHunk, GitLine, GitLineKind, GitOperation, GitRequest,
         GitStatus,
     },
-    push::ApnsEnv,
+    push::{ApnsEnv, PushService},
 };
 use runode_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -254,6 +254,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 bundle: "cn.barey.runode".into(),
                 machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
                 machine_name: "Ethan 的 MacBook Pro".into(),
+                service: PushService::Apns,
             },
         ),
         (
@@ -265,6 +266,19 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 bundle: "cn.barey.runode".into(),
                 machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
                 machine_name: "Ethan 的 MacBook Pro".into(),
+                service: PushService::Apns,
+            },
+        ),
+        (
+            "push_register_fcm",
+            ClientMsg::PushRegister {
+                req: 12,
+                token: Some("q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ-aE5uR_oTiBlM".into()),
+                env: ApnsEnv::Production,
+                bundle: "dev.runode.mobile".into(),
+                machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
+                machine_name: "Ethan 的 MacBook Pro".into(),
+                service: PushService::Fcm,
             },
         ),
         ("keep_awake", ClientMsg::KeepAwake),

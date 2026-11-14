@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="terminal_label">終端機</string>
+    <string name="terminal_hint">輕點兩下開啟鍵盤</string>
+    <string name="terminal_key_control">Ctrl（黏住）</string>
+    <string name="terminal_key_left">左</string>
+    <string name="terminal_key_down">下</string>
+    <string name="terminal_key_up">上</string>
+    <string name="terminal_key_right">右</string>
+    <string name="terminal_key_return">Return</string>
+    <string name="terminal_key_paste">貼上</string>
+    <string name="terminal_key_dictation">語音輸入</string>
+    <string name="terminal_key_recording">正在錄音</string>
+    <string name="terminal_key_show_keyboard">開啟鍵盤</string>
+    <string name="terminal_key_hide_keyboard">收起鍵盤</string>
+</resources>

@@ -1,0 +1,561 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 会话和终端 -->
+    <string name="terminal_default_title">Terminal</string>
+    <string name="this_phone">this phone</string>
+    <string name="failure_detail">%1$s: %2$s</string>
+    <string name="detail_separator">%1$s · %2$s</string>
+
+    <!-- agent 状态 -->
+    <string name="agent_working">Working</string>
+    <string name="idle">Idle</string>
+    <string name="agent_waiting">Waiting for You</string>
+    <string name="session_waiting_on">%1$s is waiting for you on %2$s</string>
+    <string name="session_waiting">%1$s is waiting for you</string>
+    <string name="session_working">%1$s is working</string>
+    <string name="session_waited">%1$s has been waiting for %2$s</string>
+    <string name="session_waited_on">%1$s has been waiting on %2$s for %3$s</string>
+    <string name="session_worked">%1$s has been working for %2$s</string>
+    <string name="session_agent_idle">%1$s is idle</string>
+    <string name="session_running">Running %1$s</string>
+    <string name="session_exited">Exited</string>
+
+    <!-- 尺寸 -->
+    <string name="size_owner_none">Size not set by anyone</string>
+    <string name="size_owner_named">Size set by %1$s</string>
+    <string name="size_owner_computer">Size set by the computer</string>
+    <string name="size_owner_mine">Size set by this phone</string>
+    <string name="size_owner_other">Size set by another device</string>
+    <string name="size_automatic">Auto</string>
+    <string name="size_fit_phone">Fit Phone</string>
+    <string name="size_follow_machine">Follow Computer</string>
+
+    <!-- 连接状态 -->
+    <string name="link_idle">Not connected</string>
+    <string name="link_connecting">Connecting…</string>
+    <string name="link_connected">Connected</string>
+    <string name="link_connected_to">Connected to %1$s</string>
+    <string name="link_waiting_offline">%1$s, will connect when the computer is back online</string>
+    <string name="link_waiting_retry">%1$s, will reconnect automatically</string>
+    <string name="link_failed">Connection Failed</string>
+    <string name="link_status_connecting">Connecting…</string>
+    <string name="link_status_offline">Computer offline. Will connect when it is back</string>
+    <plurals name="link_status_retry_in">
+        <item quantity="one">Disconnected. Reconnecting in %1$d second</item>
+        <item quantity="other">Disconnected. Reconnecting in %1$d seconds</item>
+    </plurals>
+    <string name="link_status_retrying">Disconnected. Reconnecting</string>
+    <string name="link_route_tunnel">Connected over the internet</string>
+    <string name="link_route_local">Connected on the local network</string>
+    <string name="link_route_direct">Connected directly</string>
+    <string name="link_reconnecting">Reconnecting</string>
+
+    <!-- 连接失败的原因 -->
+    <string name="failure_unknown_device">This computer no longer recognizes this phone. The pairing may have been revoked on the computer. Delete it and pair again.</string>
+    <string name="failure_bad_signature">Signature check failed. Delete this computer and pair again.</string>
+    <string name="failure_pairing_invalid">The pairing code is wrong, expired, or already used. Generate a new QR code on your computer.</string>
+    <string name="failure_rate_limited">Too many attempts. The computer is refusing connections for now; will retry automatically.</string>
+    <string name="failure_disabled">Remote access is off on the computer, or the computer is having trouble right now</string>
+    <string name="failure_rejected">The computer refused the connection (%1$s)</string>
+    <string name="failure_gate_version">Runode on your computer uses a newer connection method (version %1$d). Update this app.</string>
+    <string name="failure_incompatible">Runode on your computer isn\'t compatible with this app version: %1$s</string>
+    <string name="failure_missing_key">The device key for this computer is missing. Delete it and pair again.</string>
+    <string name="failure_fingerprint_mismatch">The certificate fingerprint doesn\'t match the one from pairing. You may have connected to a different device.</string>
+    <string name="failure_timeout">Connection timed out</string>
+    <string name="failure_no_address">No addresses to try</string>
+    <string name="failure_invitation_expired">The QR code has expired. Generate a new one on your computer.</string>
+    <string name="failure_protocol_violation">The computer\'s response doesn\'t follow the protocol: %1$s</string>
+    <string name="failure_connection_failed">Connection failed: %1$s</string>
+    <string name="failure_closed">Connection lost: %1$s</string>
+    <string name="failure_host_closed">The computer closed the connection</string>
+    <string name="failure_goodbye_handoff">Runode on your computer was updated. Reconnecting</string>
+    <string name="failure_goodbye_shutdown">Runode on your computer quit</string>
+    <string name="failure_goodbye_error">The computer closed the connection: %1$s</string>
+    <string name="failure_key_store">Keystore error: %1$s</string>
+
+    <!-- 宿主标出原因的错误 -->
+    <string name="host_error_not_found">%1$s does not exist</string>
+    <string name="host_error_not_a_directory">%1$s is not a folder</string>
+    <string name="host_error_permission_denied">No permission to open %1$s</string>
+    <string name="host_error_not_absolute">%1$s is not a full path; start it with / or a drive letter</string>
+
+    <!-- 首页 -->
+    <string name="machine_unreachable">Can’t connect</string>
+    <string name="no_terminals">No terminals</string>
+    <plurals name="machine_sessions_total">
+        <item quantity="one">, %1$d session in all</item>
+        <item quantity="other">, %1$d sessions in all</item>
+    </plurals>
+    <plurals name="machine_waiting">
+        <item quantity="one">%1$d waiting</item>
+        <item quantity="other">%1$d waiting</item>
+    </plurals>
+    <plurals name="machine_working">
+        <item quantity="one">%1$d working</item>
+        <item quantity="other">%1$d working</item>
+    </plurals>
+    <plurals name="machine_sessions">
+        <item quantity="one">%1$d session</item>
+        <item quantity="other">%1$d sessions</item>
+    </plurals>
+    <plurals name="home_waiting">
+        <item quantity="one">%1$d session is waiting for you</item>
+        <item quantity="other">%1$d sessions are waiting for you</item>
+    </plurals>
+    <plurals name="home_working">
+        <item quantity="one">%1$d session is working</item>
+        <item quantity="other">%1$d sessions are working</item>
+    </plurals>
+    <string name="home_nothing_waiting">Nothing is waiting for you</string>
+    <string name="home_no_computer">No computer connected</string>
+    <plurals name="home_more_working">
+        <item quantity="one">%1$d more working</item>
+        <item quantity="other">%1$d more working</item>
+    </plurals>
+    <plurals name="home_sessions_total">
+        <item quantity="one">%1$d session in all</item>
+        <item quantity="other">%1$d sessions in all</item>
+    </plurals>
+
+    <!-- 会话列表 -->
+    <string name="section_background">Background</string>
+    <string name="section_workspace">Workspace %1$d</string>
+    <string name="section_background_detail">No window on the computer is showing these terminals</string>
+    <string name="section_window">Window %1$d</string>
+    <string name="spawn_failed">Couldn\'t open a new terminal</string>
+    <string name="create_workspace_failed">Couldn\'t create the workspace</string>
+    <string name="kill_disconnected">Not connected; couldn\'t end the session</string>
+    <string name="rename_workspace_failed">Couldn\'t rename: %1$s</string>
+    <string name="tasks_custom">My Commands</string>
+    <string name="tasks_global">General Commands</string>
+    <string name="tasks_run_ended">Run · terminal has ended</string>
+    <string name="tasks_run">Run</string>
+    <string name="tasks_run_busy">Run · %1$s is in the foreground, runs in a new terminal</string>
+    <string name="tasks_run_new">Run · runs in a new terminal</string>
+
+    <!-- 终端页 -->
+    <string name="terminal_shell_exited">Shell exited</string>
+    <string name="terminal_session_ended">Session ended</string>
+    <string name="terminal_create_failed">Couldn\'t create the terminal: %1$s</string>
+    <string name="terminal_gone">This terminal was closed on the computer.</string>
+
+    <!-- 快速回复 -->
+    <string name="key_return">Return</string>
+    <string name="key_up">Up</string>
+    <string name="key_down">Down</string>
+    <string name="prompt_option">%1$d: %2$s</string>
+    <string name="reply_too_long">The text is too long to send</string>
+    <string name="reply_not_sent">Not sent: %1$s</string>
+    <string name="reply_connection_lost">The connection dropped; your reply may not have been delivered</string>
+    <string name="not_connected">Not connected</string>
+
+    <!-- 配对和电脑列表 -->
+    <plurals name="pairing_addresses_more">
+        <item quantity="one">%2$s and more (%1$d address)</item>
+        <item quantity="other">%2$s and more (%1$d addresses)</item>
+    </plurals>
+    <string name="pairing_link_invalid">This isn\'t a Runode pairing link</string>
+    <string name="pairing_link_version">The pairing link is version %1$d, which this app is too old to read. Update it first.</string>
+    <string name="pairing_link_missing">The pairing link is missing %1$s</string>
+    <string name="pairing_link_bad_field">%1$s in the pairing link is invalid</string>
+    <string name="pairing_save_failed">Couldn\'t save this computer: %1$s</string>
+    <string name="pairing_failed_detail">Pairing failed: %1$s</string>
+    <string name="machine_rename_failed">Couldn\'t change the name: %1$s</string>
+    <string name="machine_delete_failed">Couldn\'t delete this computer: %1$s</string>
+
+    <!-- Git 页 -->
+    <string name="git_too_many_files">Too many files to send at once</string>
+    <string name="git_status_failed">Couldn\'t read the repository status: %1$s</string>
+    <string name="git_action_failed">%1$s failed: %2$s</string>
+    <string name="git_connection_lost">The connection dropped; the operation may not have finished. Check the status after reconnecting.</string>
+    <string name="git_diff_failed">Couldn\'t read changes to this file: %1$s</string>
+    <string name="git_branches_failed">Couldn\'t read branches: %1$s</string>
+    <string name="git_file_modified">Modified</string>
+    <string name="git_file_added">Added</string>
+    <string name="git_file_deleted">Deleted</string>
+    <string name="git_file_renamed">Renamed</string>
+    <string name="git_file_untracked">Untracked</string>
+    <string name="git_file_conflicted">Conflicts</string>
+    <string name="git_detached">Detached at %1$s</string>
+    <string name="git_no_commits">No commits yet</string>
+    <string name="git_no_upstream">No upstream yet; it is set when you push</string>
+    <string name="git_no_remote">No remote configured</string>
+    <string name="git_synced">Synced</string>
+    <string name="git_operation_merge">Merge</string>
+    <string name="git_operation_rebase">Rebase</string>
+    <string name="git_operation_cherry_pick">Cherry-pick</string>
+    <string name="git_operation_revert">Revert</string>
+    <string name="git_operation_in_progress">%1$s is in progress. Resolve the conflicts, then continue or abort on your computer.</string>
+    <string name="git_action_stage">Stage</string>
+    <string name="git_action_unstage">Unstage</string>
+    <string name="git_action_discard">Discard Changes</string>
+    <string name="git_action_commit">Commit</string>
+    <string name="git_action_fetch">Fetch</string>
+    <string name="git_action_pull">Pull</string>
+    <string name="git_action_push">Push</string>
+    <string name="git_action_sync">Sync</string>
+    <string name="git_action_checkout">Switch Branch</string>
+    <string name="git_running_stage">Staging…</string>
+    <string name="git_running_unstage">Unstaging…</string>
+    <string name="git_running_discard">Discarding changes…</string>
+    <string name="git_running_commit">Committing…</string>
+    <string name="git_running_fetch">Fetching…</string>
+    <string name="git_running_pull">Pulling…</string>
+    <string name="git_running_push">Pushing…</string>
+    <string name="git_running_sync">Syncing…</string>
+    <string name="git_running_checkout">Switching branch…</string>
+
+    <!-- 多久以前 -->
+    <plurals name="elapsed_minutes">
+        <item quantity="one">%1$d minute</item>
+        <item quantity="other">%1$d minutes</item>
+    </plurals>
+    <plurals name="elapsed_hours">
+        <item quantity="one">%1$d hour</item>
+        <item quantity="other">%1$d hours</item>
+    </plurals>
+    <plurals name="time_seconds_ago">
+        <item quantity="one">%1$d second ago</item>
+        <item quantity="other">%1$d seconds ago</item>
+    </plurals>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">%1$d minute ago</item>
+        <item quantity="other">%1$d minutes ago</item>
+    </plurals>
+    <plurals name="time_hours_ago">
+        <item quantity="one">%1$d hour ago</item>
+        <item quantity="other">%1$d hours ago</item>
+    </plurals>
+    <plurals name="time_days_ago">
+        <item quantity="one">%1$d day ago</item>
+        <item quantity="other">%1$d days ago</item>
+    </plurals>
+    <plurals name="time_weeks_ago">
+        <item quantity="one">%1$d week ago</item>
+        <item quantity="other">%1$d weeks ago</item>
+    </plurals>
+    <plurals name="time_months_ago">
+        <item quantity="one">%1$d month ago</item>
+        <item quantity="other">%1$d months ago</item>
+    </plurals>
+    <plurals name="time_years_ago">
+        <item quantity="one">%1$d year ago</item>
+        <item quantity="other">%1$d years ago</item>
+    </plurals>
+
+    <!-- 远程桌面 -->
+    <string name="screen_unlock_unsupported">The password has characters a US keyboard can\'t type; unlock it at the computer</string>
+    <string name="screen_unlock_reason">Unlock your computer\'s lock screen</string>
+    <string name="screen_remember_reason">Remember your computer\'s login password</string>
+    <string name="screen_still_locked">Your computer is still locked; the password may be wrong</string>
+    <string name="screen_main_display">Main Display · %1$s</string>
+    <string name="screen_other_display">Display %1$d · %2$s</string>
+    <string name="screen_stopped_signed_out">Nobody is signed in on that computer. Reconnect once someone signs in</string>
+    <string name="screen_stopped_no_desktop">No desktop is signed in on that computer\'s screen for the user Runode runs as there (X11 or Wayland): sign in to a desktop session on its screen as that user, then reconnect. A server without a desktop cannot be viewed</string>
+    <string name="screen_stopped_other_user">Someone else is signed in on that computer\'s screen. Remote desktop shows only the desktop of the user Runode runs as there: sign in as that user on its screen (or switch to them), then reconnect</string>
+    <string name="screen_stopped_no_screen_capture">That Mac has no Screen Recording permission for Runode yet: turn on Runode in System Settings › Privacy &amp; Security › Screen &amp; System Audio Recording on that Mac, then reconnect</string>
+    <string name="screen_stopped_declined">Screen sharing was not allowed on that computer: the prompt on its screen was declined or nobody answered it. Reconnect to ask again, then choose Share on that screen</string>
+    <string name="screen_stopped_no_encoder">That computer has no usable video encoder (Windows N without the Media Feature Pack, for example), so its screen cannot be shown</string>
+    <string name="screen_permission_screen_recording">Screen Recording</string>
+    <string name="screen_permission_accessibility">Accessibility</string>
+
+    <!-- 语音输入 -->
+    <string name="dictation_no_permission">Runode has no microphone permission. Turn it on in Settings.</string>
+    <string name="dictation_download_model_first">Download the speech model in Settings first</string>
+    <string name="dictation_silent">The microphone recorded only silence. Check Runode\'s microphone permission.</string>
+    <string name="dictation_no_microphone">No usable microphone</string>
+    <string name="dictation_model_incomplete">The speech model is incomplete. Delete it in Settings and download it again.</string>
+    <string name="dictation_download_corrupt">A downloaded model file failed verification. Try again.</string>
+    <string name="dictation_download_http">Download failed (HTTP %1$d)</string>
+    <string name="dictation_unsupported">Speech recognition is not available on this device</string>
+    <string name="dictation_no_model_anywhere">Neither this phone nor the computer has the speech model yet. Download it in Settings.</string>
+
+    <!-- 推送通知 -->
+    <string name="agent_blocked_title">%1$s is waiting for your answer</string>
+    <string name="agent_blocked_title_unnamed">A terminal is waiting for your answer</string>
+    <string name="todo_done_title">Task finished</string>
+    <string name="todo_failed_title">Task failed</string>
+    <string name="notification_channel_blocked">Waiting for your answer</string>
+    <string name="notification_channel_tasks">Tasks</string>
+
+    <!-- 各页共用 -->
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_ok">OK</string>
+    <string name="action_open">Open</string>
+    <string name="action_rename">Rename</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_close">Close</string>
+    <string name="action_back">Back</string>
+    <string name="action_paste">Paste</string>
+    <string name="error_title">Something Went Wrong</string>
+    <string name="name_field">Name</string>
+    <string name="open_terminal_hint">Open This Terminal</string>
+    <string name="reply_to">Reply to “%1$s”</string>
+    <string name="send_key">Send %1$s</string>
+    <string name="draft_placeholder">Or type a reply</string>
+    <string name="send_reply">Send Reply</string>
+    <plurals name="show_all_options">
+        <item quantity="one">Show %1$d option</item>
+        <item quantity="other">Show all %1$d options</item>
+    </plurals>
+    <string name="screen_preview">Screen preview: %1$s</string>
+    <string name="list_separator">, </string>
+    <string name="new_terminal">New Terminal</string>
+    <string name="new_agent">New %1$s</string>
+    <string name="spawn_kind_terminal">Terminal</string>
+    <string name="git">Git</string>
+    <string name="remote_desktop">Remote Desktop</string>
+    <string name="settings">Settings</string>
+    <string name="new_workspace">New Workspace</string>
+    <string name="machine_not_found">Can\'t find this computer</string>
+    <string name="terminal_not_found">Can\'t find this terminal</string>
+
+    <!-- 首页 -->
+    <string name="home_computers">Computer</string>
+    <string name="home_last_opened">Last Opened</string>
+    <string name="home_pair">Pair a Computer</string>
+    <string name="home_spawn_where">Where to open a new terminal?</string>
+    <string name="home_spawn_which_machine">Open a new terminal on which computer?</string>
+    <string name="home_spawn_window">%1$s · Window %2$d</string>
+    <string name="home_spawn_target">%1$s · %2$s</string>
+    <string name="home_open_machine_hint">Open Sessions on This Computer</string>
+    <string name="home_reconnect">Reconnect to %1$s</string>
+    <string name="home_resume_detail">%1$s, %2$s</string>
+    <string name="home_page_position">%1$d of %2$d</string>
+    <string name="home_next_waiting">Next Waiting Session</string>
+    <string name="home_previous_waiting">Previous Waiting Session</string>
+    <string name="home_delete_title">Delete this computer?</string>
+    <string name="home_delete_connected">Deletes the device key this phone keeps for it; you will need to scan the code again to pair. The pairing record on this computer is revoked too.</string>
+    <string name="home_delete_offline">Deletes the device key this phone keeps for it; you will need to scan the code again to pair.\nThis computer is not connected right now: its pairing record is revoked the next time it connects, and until then its agents may still notify this phone when they need an answer. You can also revoke it in Runode\'s Paired Devices page on that computer.</string>
+    <string name="onboarding_title">Connect to Your Computer</string>
+    <string name="onboarding_detail">Pair with Runode on your computer to see what your agents are doing, answer their questions, and open any terminal to keep working.</string>
+    <string name="onboarding_how">How to Pair</string>
+    <string name="onboarding_step_command">Run the Pairing Command</string>
+    <string name="onboarding_step_command_detail">Run `runode remote pair` in a terminal on your computer. A QR code appears on its screen.</string>
+    <string name="onboarding_step_scan">Scan Code</string>
+    <string name="onboarding_step_scan_detail">Tap the button above to scan, and point the camera at the QR code on your computer\'s screen. Once paired, your computer appears here.</string>
+
+    <!-- 会话列表 -->
+    <string name="sessions_empty_title">No terminals on this computer</string>
+    <string name="sessions_empty_detail">Open a new terminal to use it on your phone.</string>
+    <string name="sessions_loading">Loading sessions…</string>
+    <string name="sessions_new">New</string>
+    <string name="sessions_rename_workspace">Rename Workspace</string>
+    <string name="sessions_end">End</string>
+    <string name="sessions_copy_folder">Copy Folder</string>
+    <string name="end_session">End Session</string>
+    <string name="end_terminal_title">End this terminal?</string>
+    <string name="end_terminal_named">“%1$s” closes on the computer too, and the programs running in it end.</string>
+    <string name="sessions_filter">Filter Sessions</string>
+    <string name="filter_all">All</string>
+    <string name="filter_waiting">Waiting</string>
+    <string name="filter_working">Working</string>
+    <string name="filter_count">%1$s, %2$d</string>
+    <string name="filter_empty_waiting">Nothing is waiting for you</string>
+    <string name="filter_empty_working">Nothing is working</string>
+    <string name="filter_show_all">Show All</string>
+    <string name="spawn_in_section">New Terminal in “%1$s”</string>
+    <string name="spawn_here">New Terminal Here</string>
+    <string name="section_no_terminals">No terminals</string>
+    <string name="session_tab">Tab %1$d</string>
+
+    <!-- 终端页 -->
+    <string name="terminal_jump_to_latest">Jump to Latest</string>
+    <string name="terminal_listening">Listening…</string>
+    <string name="terminal_recognizing">Recognizing…</string>
+    <string name="terminal_size">Terminal Size</string>
+    <string name="terminal_grid">Grid %1$s</string>
+    <string name="terminal_keyboard">Keyboard</string>
+    <string name="terminal_options">Terminal Options</string>
+    <string name="end_terminal_detail">It closes on the computer too, and the programs running in it end.</string>
+    <string name="terminal_ended">ENDED</string>
+    <string name="terminal_exited_status">Shell exited (exit code %1$d)</string>
+    <string name="terminal_exited">Shell exited</string>
+    <string name="terminal_connection_failed">Connection Failed</string>
+    <string name="terminal_connecting">Connecting…</string>
+    <string name="terminal_waiting_for_you">Waiting for You</string>
+    <string name="terminal_switch_pane">Switch to this pane</string>
+    <string name="dictation_failed">Dictation Failed</string>
+    <string name="dictation_download">Download</string>
+    <string name="open_system_settings">Open Settings</string>
+
+    <!-- 配对 -->
+    <string name="pairing_paste_link">Paste Pairing Link</string>
+    <string name="pairing_in_progress">Pairing with %1$s…</string>
+    <string name="pairing_scan_again">Scan Again</string>
+    <string name="pairing_scan_hint">Fit the QR code from your computer inside the frame</string>
+    <string name="pairing_scan_detail">Open Devices in Runode on your computer to see it</string>
+    <string name="pairing_done">Paired</string>
+    <string name="pairing_done_detail">Paired with %1$s</string>
+    <string name="pairing_notify">Notify me when an agent asks a question</string>
+    <string name="pairing_notify_detail">Works even when Runode isn’t open</string>
+    <string name="pairing_view_sessions">View Sessions</string>
+    <string name="pairing_another">Pair Another</string>
+    <string name="pairing_confirm_title">Pair with This Computer?</string>
+    <string name="pairing_confirm_detail">The pairing link you opened connects to this computer.</string>
+    <string name="pairing_paste_detail">Copy the link below the QR code in the terminal on your computer.</string>
+    <string name="pairing_check_machine">Make sure this is your own computer before pairing.</string>
+    <string name="pairing_pair">Pair</string>
+    <string name="pairing_link_field" translatable="false">runode://pair?…</string>
+    <string name="scanner_no_permission">Camera access is off. Turn it on in Settings, or paste the pairing link.</string>
+    <string name="scanner_no_camera">This device has no usable camera. Paste the pairing link instead.</string>
+    <string name="scanner_failed">This camera can\'t read QR codes. Paste the pairing link instead.</string>
+
+    <!-- Git 页的界面 -->
+    <string name="git_clean">No changes; the working tree is clean</string>
+    <string name="git_not_repo_title">Not in a Git repository</string>
+    <string name="git_not_repo_detail">This terminal\'s current folder isn\'t in a Git repository. cd into a repository in the terminal, then pull down to refresh.</string>
+    <string name="git_loading">Reading repository…</string>
+    <string name="git_remote_badge" translatable="false">%1$s %2$d</string>
+    <string name="git_commit_message">Commit Message</string>
+    <plurals name="git_commit_staged">
+        <item quantity="one">Commit %1$d Staged File</item>
+        <item quantity="other">Commit %1$d Staged Files</item>
+    </plurals>
+    <plurals name="git_commit_all">
+        <item quantity="one">Commit All %1$d Change</item>
+        <item quantity="other">Commit All %1$d Changes</item>
+    </plurals>
+    <string name="git_staged_header">Staged %1$d</string>
+    <string name="git_changes_header">Changes %1$d</string>
+    <string name="git_stage_all">Stage All</string>
+    <string name="git_unstage_all">Unstage All</string>
+    <string name="git_view_changes">View Changes</string>
+    <string name="git_copy_path">Copy Path</string>
+    <string name="git_discard_one">Discard changes in %1$s?</string>
+    <plurals name="git_discard_many">
+        <item quantity="one">Discard changes in %1$d file?</item>
+        <item quantity="other">Discard changes in %1$d files?</item>
+    </plurals>
+    <string name="git_discard_detail">Untracked files will be deleted from the computer, and discarded changes can\'t be recovered. Staged changes are not affected.</string>
+    <plurals name="git_conflicts_title">
+        <item quantity="one">Stage %1$d file that still has conflicts?</item>
+        <item quantity="other">Stage %1$d files that still have conflicts?</item>
+    </plurals>
+    <string name="git_conflicts_detail">Staging marks them as resolved, and any conflict markers left in them will be committed.</string>
+    <string name="git_refresh">Refresh</string>
+    <string name="git_view_list">View as List</string>
+    <string name="git_view_tree">View as Tree</string>
+    <string name="git_actions">Git Actions</string>
+    <string name="git_binary">Binary</string>
+    <string name="git_file_label">%1$s, %2$s, added lines: %3$d, removed lines: %4$d</string>
+    <plurals name="git_folder_label">
+        <item quantity="one">Folder %2$s, %1$d file</item>
+        <item quantity="other">Folder %2$s, %1$d files</item>
+    </plurals>
+    <string name="git_expanded">Expanded</string>
+    <string name="git_collapsed">Collapsed</string>
+    <string name="git_expand">Expand</string>
+    <string name="git_collapse">Collapse</string>
+    <string name="git_binary_title">Binary File</string>
+    <string name="git_binary_detail">Line-by-line changes aren\'t shown for binary files.</string>
+    <string name="git_nothing_title">Nothing to show</string>
+    <string name="git_too_large">The file is too large; its contents weren\'t read.</string>
+    <string name="git_no_line_changes">This file has no line-by-line changes.</string>
+    <string name="git_diff_truncated">Too many changes; only the first ones are shown.</string>
+    <string name="git_diff_loading">Loading changes…</string>
+    <string name="git_diff_error_title">Couldn\'t Read Changes</string>
+    <string name="git_no_more_changes">No more changes</string>
+    <string name="git_no_staged_left">This file has no staged changes left.</string>
+    <string name="git_no_unstaged_left">This file has no unstaged changes left.</string>
+    <string name="git_line_added">Added</string>
+    <string name="git_line_removed">Removed</string>
+    <string name="git_line_unchanged">Unchanged</string>
+    <string name="git_line_label">%1$s: %2$s</string>
+    <string name="git_local_branches">Local Branches</string>
+    <string name="git_remote_branches">Remote Branches</string>
+    <string name="git_no_branches">No branches</string>
+    <string name="git_branches_loading">Loading branches…</string>
+    <string name="git_current_branch">Current Branch</string>
+
+    <!-- 远程桌面页 -->
+    <string name="screen_connecting">Connecting to the remote desktop…</string>
+    <string name="screen_needs_permission">Runode on the Computer Needs Permission</string>
+    <string name="screen_disconnected">Remote Desktop Disconnected</string>
+    <string name="screen_reconnect">Reconnect</string>
+    <string name="screen_missing_permission">Runode on the computer doesn\'t have the “%1$s” permission yet. Turn it on in System Settings › Privacy &amp; Security.</string>
+    <string name="screen_unlock">Unlock Computer</string>
+    <string name="screen_unlock_action">Unlock</string>
+    <string name="screen_password">Login password</string>
+    <string name="screen_remember">Remember with Biometrics</string>
+    <string name="screen_password_detail">The password is sent to your computer and typed into its lock screen. If you remember it, it stays on this phone only and needs your fingerprint, face, or screen lock every time.</string>
+    <string name="screen_trackpad_mode">Switch to Trackpad Mode</string>
+    <string name="screen_touch_mode">Switch to Touch Mode</string>
+    <string name="screen_switch_display">Switch Display</string>
+    <string name="screen_computer_screen">Computer screen</string>
+    <string name="screen_show_keyboard">Show Keyboard</string>
+    <string name="screen_hide_keyboard">Hide Keyboard</string>
+    <string name="screen_key_esc">Esc key</string>
+    <string name="screen_key_tab">Tab key</string>
+    <string name="screen_hold_command">Hold Command</string>
+    <string name="screen_hold_control">Hold Control</string>
+    <string name="screen_hold_option">Hold Option</string>
+    <string name="screen_hold_shift">Hold Shift</string>
+    <string name="screen_arrow_left">Left arrow</string>
+    <string name="screen_arrow_up">Up arrow</string>
+    <string name="screen_arrow_down">Down arrow</string>
+    <string name="screen_arrow_right">Right arrow</string>
+
+    <!-- 设置页 -->
+    <string name="settings_done">Done</string>
+    <string name="settings_terminal">Terminal</string>
+    <string name="settings_default_size">Default Size</string>
+    <string name="settings_font_follows">Font size follows the system</string>
+    <string name="settings_font_size">Font Size</string>
+    <string name="settings_font_points">%1$d pt</string>
+    <string name="settings_font_preview">Font size preview</string>
+    <string name="settings_font_smaller">Smaller</string>
+    <string name="settings_font_larger">Larger</string>
+    <string name="settings_bell">Vibrate on Bell</string>
+    <string name="settings_terminal_footer">The default size applies to newly opened terminals; you can also change it temporarily from the top right of the terminal screen. Auto fits the phone when no window on the computer is showing the terminal, and otherwise follows the computer.</string>
+    <string name="settings_dictation">Dictation</string>
+    <string name="settings_dictation_source">Recognize</string>
+    <string name="settings_dictation_phone">On This Phone</string>
+    <string name="settings_dictation_computer">On the Computer</string>
+    <string name="settings_phone_model">Model on This Phone</string>
+    <string name="settings_model_downloaded">Downloaded, %1$s</string>
+    <string name="settings_model_not_downloaded">Not downloaded, about %1$s</string>
+    <string name="settings_model_downloading">Downloading, %1$s</string>
+    <string name="settings_model_delete">Delete the Model on This Phone</string>
+    <string name="settings_dictation_footer">Hold the microphone key above the keyboard on a terminal and speak; release it to type the words into the terminal. Tap it instead to keep recording until you tap again. Recognizing on this phone works offline; until the model is downloaded on this phone, speech goes to the computer, which uses the model set in its own settings.</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_notifications_off">Notifications are off for Runode in Settings. Turn them on to get alerts.</string>
+    <string name="settings_push_token_failed">Could not get a push token: %1$s</string>
+    <string name="settings_push_failed">Couldn\'t register for push: %1$s</string>
+    <string name="settings_notifications_footer">When an agent stops to wait for your answer, your computer sends you a notification through Google\'s push service, even with Runode closed. The question on screen is also sent through the push service.</string>
+    <string name="settings_pair_new">Pair a New Computer</string>
+    <string name="settings_this_phone">This Phone</string>
+    <string name="settings_device_name">Device Name</string>
+    <string name="settings_device_footer">This name is used when the computer refers to this phone, for example to show who sets a terminal\'s size. It takes effect the next time you connect to the computer. The name in the computer\'s paired devices list is the one from pairing and only updates after you pair again. Leave empty to use the system name.</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_version_value">%1$s (%2$s)</string>
+    <string name="settings_licenses">Open Source Licenses</string>
+    <string name="machine_name_footer">This only changes the name shown on this phone.</string>
+    <string name="machine_pairing_info">Pairing Info</string>
+    <string name="machine_host_name">Computer Name</string>
+    <string name="machine_paired_at">Paired</string>
+    <string name="machine_last_address">Last Address</string>
+    <string name="machine_device_id">Device ID</string>
+    <string name="machine_fingerprint">Certificate Fingerprint</string>
+    <string name="machine_delete">Delete This Computer</string>
+    <string name="machine_delete_footer">Deletes the device key this phone keeps for it; you will need to scan the code again to pair. While this computer is connected, its pairing record is revoked too.</string>
+    <string name="machine_delete_offline">This computer is not connected right now: its pairing record is revoked the next time it connects, and until then its agents may still notify this phone when they need an answer. You can also revoke it in Runode\'s Paired Devices page on that computer.</string>
+    <string name="machine_deleted">This computer has been deleted</string>
+
+    <!-- 目录选择器 -->
+    <string name="picker_now_in">Now in %1$s</string>
+    <string name="picker_footer_workspace">The new workspace\'s first terminal opens in this folder.</string>
+    <string name="picker_footer_background">Runode on your computer has no window open, so it can\'t create a workspace. It will open a background terminal in this folder instead.</string>
+    <string name="picker_parent">Parent Folder</string>
+    <string name="picker_back_to">Back to %1$s</string>
+    <string name="picker_truncated">Too many subfolders; only the first ones are listed.</string>
+    <string name="picker_error_title">Couldn\'t list this folder</string>
+    <string name="picker_back_to_last">Back to Last Folder</string>
+    <string name="picker_loading">Loading folder…</string>
+    <string name="picker_empty">No subfolders</string>
+    <string name="picker_show_hidden">Show Hidden Folders</string>
+    <string name="picker_create">Create Here</string>
+</resources>

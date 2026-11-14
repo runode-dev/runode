@@ -16,6 +16,7 @@ ONLY = {
     "runode-update": set(),
     "runode-protocol": {"runode-types"},
     "runode-agent": {"runode-types"},
+    "runode-android-tunnel": set(),
 }
 
 

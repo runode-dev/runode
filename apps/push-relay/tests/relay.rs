@@ -1,4 +1,4 @@
-//! 两个接口对着假的 APNs 跑：请求体用 `runode_protocol::push` 的类型拼，线上格式由那边对着样例锁住。
+//! 两个接口对着假的 APNs 和 FCM 跑：请求体用 `runode_protocol::push` 的类型拼，线上格式由那边对着样例锁住。
 
 use std::{
     collections::VecDeque,
@@ -15,10 +15,14 @@ use axum::{
 };
 use runode_protocol::{
     SessionId,
-    push::{ApnsEnv, EXPIRES_AFTER, Notification, RELAY_VERSION, RelayNotify, RelayRegister, notify_payload},
+    push::{
+        ApnsEnv, EXPIRES_AFTER, MAX_FCM_TOKEN_LEN, Notification, PushService, RELAY_VERSION, RelayNotify,
+        RelayRegister, notify_payload,
+    },
 };
 use runode_push::{
     apns::{Apns, Push, Reply, now_unix},
+    fcm::Fcm,
     handle::{Keys, generate_key},
     server::{Relay, router},
 };
@@ -27,6 +31,8 @@ use tower::ServiceExt as _;
 
 const TOKEN: &str = "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011";
 const MACHINE: &str = "6F9619FF-8B86-D011-B42D-00C04FC964FF";
+const FCM_TOKEN: &str =
+    "fGx3Q9kVTm2b7WcLr0pYnA:APA91bE7tq2Kc0VhS8xJm4RzL1wPdN6uYf3Hg5oBk9aTe2Ci7Xv0Mn4Qs8Dj1Ur6Wy3Pl5Zh2Ko9Ib7Ga4Fc0Ex_-";
 
 /// 假的 APNs：记下发来的推送，按排好的回话答，没排的回 200；`delay` 不为空时每次先等这么久。
 #[derive(Default)]
@@ -48,16 +54,43 @@ impl Apns for FakeApns {
     }
 }
 
+/// 假的 FCM：记下发来的请求体，按排好的回话答，没排的回 200。
+#[derive(Default)]
+struct FakeFcm {
+    sent: Mutex<Vec<Value>>,
+    replies: Mutex<VecDeque<Result<Reply, String>>>,
+}
+
+impl Fcm for FakeFcm {
+    async fn send(&self, message: &[u8]) -> Result<Reply, String> {
+        self.sent.lock().unwrap().push(serde_json::from_slice(message).unwrap());
+        let ok = Reply { status: 200, reason: String::new(), retry_after: None };
+        self.replies.lock().unwrap().pop_front().unwrap_or(Ok(ok))
+    }
+}
+
 struct Harness {
     app: Router,
     apns: Arc<FakeApns>,
+    fcm: Arc<FakeFcm>,
 }
 
 impl Harness {
     fn new() -> Self {
+        Self::with_keys(&format!("1={}", generate_key().unwrap()), true)
+    }
+
+    /// 用 `keys` 封句柄；`fcm` 为假时像没配 FCM 的服务账号那样起。
+    fn with_keys(keys: &str, fcm: bool) -> Self {
         let apns = Arc::new(FakeApns::default());
-        let keys = Keys::parse(&format!("1={}", generate_key().unwrap())).unwrap();
-        Self { app: router(Arc::new(Relay::new(keys, apns.clone(), false))), apns }
+        let fake_fcm = Arc::new(FakeFcm::default());
+        let keys = Keys::parse(keys).unwrap();
+        let relay = Relay::new(keys, apns.clone(), fcm.then(|| fake_fcm.clone()), false);
+        Self { app: router(Arc::new(relay)), apns, fcm: fake_fcm }
+    }
+
+    fn fcm_sent(&self) -> Vec<Value> {
+        self.fcm.sent.lock().unwrap().clone()
     }
 
     fn reply(&self, status: u16, reason: &str, retry_after: Option<&str>) {
@@ -84,9 +117,19 @@ impl Harness {
     }
 
     async fn register(&self, env: ApnsEnv, token: &str, machine: &str) -> (StatusCode, Value) {
-        let request = RelayRegister { v: RELAY_VERSION, env, token: token.into(), machine: machine.into() };
+        self.register_to(PushService::Apns, env, token, machine).await
+    }
+
+    async fn register_to(&self, service: PushService, env: ApnsEnv, token: &str, machine: &str) -> (StatusCode, Value) {
+        let request = RelayRegister { v: RELAY_VERSION, env, token: token.into(), machine: machine.into(), service };
         let (status, _, body) = self.post("/v1/register", serde_json::to_vec(&request).unwrap(), [10, 0, 0, 1]).await;
         (status, body)
+    }
+
+    async fn fcm_handle(&self) -> String {
+        let (status, body) = self.register_to(PushService::Fcm, ApnsEnv::Production, FCM_TOKEN, MACHINE).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["handle"].as_str().unwrap().to_owned()
     }
 
     async fn handle(&self) -> String {
@@ -250,4 +293,82 @@ async fn bad_registrations_are_refused() {
     assert_eq!((status, body["reason"].as_str()), (StatusCode::BAD_REQUEST, Some("BadRequest")));
     let (status, _, _) = relay.post("/v1/notify", vec![b' '; 9 * 1024], [10, 0, 0, 1]).await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+/// FCM 的句柄发给 FCM，不碰 APNs：请求体是 `fcm_message` 拼的，token 是登记时交来的原文。
+#[tokio::test]
+async fn fcm_handles_deliver_through_fcm() {
+    let relay = Harness::new();
+    let handle = relay.fcm_handle().await;
+    assert!(!handle.contains(FCM_TOKEN));
+    let (status, _, body) = relay.notify(&handle, &notification()).await;
+    assert_eq!((status, body), (StatusCode::OK, Value::Null));
+    assert!(relay.sent().is_empty());
+    let sent = relay.fcm_sent();
+    assert_eq!(sent.len(), 1);
+    let message = &sent[0]["message"];
+    assert_eq!(message["token"], FCM_TOKEN);
+    assert_eq!(message["data"]["kind"], "todo_done");
+    assert_eq!(message["data"]["title"], "加暗色模式");
+    assert_eq!(message["android"]["collapse_key"], "0123456789abcdef0011223344556677");
+    let ttl = message["android"]["ttl"].as_str().unwrap().trim_end_matches('s').parse::<u64>().unwrap();
+    assert!((EXPIRES_AFTER - 5..=EXPIRES_AFTER).contains(&ttl), "{ttl}");
+}
+
+/// FCM 说 token 作废了：换成电脑认得的 410 带回去，不像 APNs 那样换环境再发。
+#[tokio::test]
+async fn fcm_errors_are_passed_back_without_retrying() {
+    let relay = Harness::new();
+    let handle = relay.fcm_handle().await;
+    let gone = Reply { status: 410, reason: "Unregistered".into(), retry_after: None };
+    relay.fcm.replies.lock().unwrap().push_back(Ok(gone));
+    let (status, _, body) = relay.notify(&handle, &notification()).await;
+    assert_eq!((status, body["reason"].as_str()), (StatusCode::GONE, Some("Unregistered")));
+    assert_eq!(relay.fcm_sent().len(), 1);
+
+    let quota = Reply { status: 429, reason: "TooManyRequests".into(), retry_after: Some("60".into()) };
+    relay.fcm.replies.lock().unwrap().push_back(Ok(quota));
+    let (status, retry, _) = relay.notify(&handle, &notification()).await;
+    assert_eq!((status, retry.as_deref()), (StatusCode::TOO_MANY_REQUESTS, Some("60")));
+
+    relay.fcm.replies.lock().unwrap().push_back(Err("connection reset".into()));
+    let (status, _, body) = relay.notify(&handle, &notification()).await;
+    assert_eq!((status, body["reason"].as_str()), (StatusCode::BAD_GATEWAY, Some("FcmUnreachable")));
+    assert!(relay.sent().is_empty());
+}
+
+#[tokio::test]
+async fn bad_fcm_registrations_are_refused() {
+    let relay = Harness::new();
+    let too_long = "A".repeat(MAX_FCM_TOKEN_LEN + 1);
+    for token in ["", "has space", "slash/token", "点", too_long.as_str()] {
+        let (status, body) = relay.register_to(PushService::Fcm, ApnsEnv::Production, token, MACHINE).await;
+        assert_eq!((status, body["reason"].as_str()), (StatusCode::BAD_REQUEST, Some("BadDeviceToken")), "{token}");
+    }
+    let longest = "A".repeat(MAX_FCM_TOKEN_LEN);
+    assert_eq!(relay.register_to(PushService::Fcm, ApnsEnv::Production, &longest, MACHINE).await.0, StatusCode::OK);
+    // FCM 不看 `env`。
+    let (status, _) = relay.register_to(PushService::Fcm, ApnsEnv::Unknown, FCM_TOKEN, MACHINE).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = relay.register_to(PushService::Fcm, ApnsEnv::Production, FCM_TOKEN, "not-a-uuid").await;
+    assert_eq!((status, body["reason"].as_str()), (StatusCode::BAD_REQUEST, Some("BadMachine")));
+    let newer =
+        serde_json::json!({ "v": 1, "env": "production", "token": FCM_TOKEN, "machine": MACHINE, "service": "hms" });
+    let (status, _, body) = relay.post("/v1/register", newer.to_string().into_bytes(), [10, 0, 0, 1]).await;
+    assert_eq!((status, body["reason"].as_str()), (StatusCode::BAD_REQUEST, Some("BadService")));
+}
+
+/// 没配 FCM 的服务账号：FCM 的登记回明确的原因；之前封好的 FCM 句柄也发不出去，电脑放弃这一条、登记留着。
+#[tokio::test]
+async fn without_fcm_its_registrations_and_handles_are_refused() {
+    let keys = format!("1={}", generate_key().unwrap());
+    let handle = Harness::with_keys(&keys, true).fcm_handle().await;
+    let relay = Harness::with_keys(&keys, false);
+    let (status, body) = relay.register_to(PushService::Fcm, ApnsEnv::Production, FCM_TOKEN, MACHINE).await;
+    assert_eq!((status, body["reason"].as_str()), (StatusCode::BAD_REQUEST, Some("FcmNotConfigured")));
+    let (status, _, body) = relay.notify(&handle, &notification()).await;
+    assert_eq!((status, body["reason"].as_str()), (StatusCode::BAD_REQUEST, Some("FcmNotConfigured")));
+    // APNs 照旧。
+    let apns = relay.handle().await;
+    assert_eq!(relay.notify(&apns, &notification()).await.0, StatusCode::OK);
 }

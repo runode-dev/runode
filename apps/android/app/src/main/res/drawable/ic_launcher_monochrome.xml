@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主题图标：前景的单色版，颜色由系统按壁纸换 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <group
+        android:pivotX="512"
+        android:pivotY="512"
+        android:scaleX="0.85"
+        android:scaleY="0.85">
+        <path
+            android:pathData="M310,374L472,512L310,650"
+            android:strokeWidth="70"
+            android:strokeColor="#FFFFFF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M581,618h128a33,33 0,0 1,33 33a33,33 0,0 1,-33 33h-128a33,33 0,0 1,-33 -33a33,33 0,0 1,33 -33z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M706,300a28,28 0,1 0,56 0a28,28 0,1 0,-56 0z" />
+    </group>
+</vector>

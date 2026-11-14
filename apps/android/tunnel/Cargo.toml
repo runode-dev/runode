@@ -1,0 +1,20 @@
+[package]
+name = "runode-android-tunnel"
+description = "iroh dialing for the runode Android app, called over JNI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "runode_tunnel"
+# 只编成给 app 加载的 librunode_tunnel.so；单元测试在 src 里，cargo test 照样编得出测试程序。
+crate-type = ["cdylib"]
+
+[dependencies]
+iroh.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+jni.workspace = true
+
+[lints]
+workspace = true

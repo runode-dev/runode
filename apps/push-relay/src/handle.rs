@@ -1,5 +1,7 @@
-//! 句柄：APNs 环境、电脑的 UUID 和 device token 用 AES-256-GCM 封起来，前面带上密钥编号和 nonce，
-//! 整个 base64url（不带填充）。解得开就是这个中转发出去的，内容没被改过。
+//! 句柄：发给谁（`Target`，一个字节）、电脑的 UUID 和 token 用 AES-256-GCM 封起来，前面带上密钥编号和
+//! nonce，整个 base64url（不带填充）。解得开就是这个中转发出去的，内容没被改过。
+//!
+//! 电脑存着中转发出去的句柄，所以发给谁的那个字节只能追加新值，已有的取值和附加数据（`AAD`）不能改。
 
 use ring::{
     aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey},
@@ -14,12 +16,21 @@ use runode_protocol::{
 /// 封进句柄的东西。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sealed {
-    pub env: ApnsEnv,
+    pub target: Target,
     pub machine: [u8; 16],
+    /// APNs 的 device token（解开十六进制后的字节），或者 FCM 的 registration token 原文。
     pub token: Vec<u8>,
 }
 
-/// 绑在密文上的附加数据：换了句柄格式就换它，旧格式的句柄解不开。
+/// 推送发给谁。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// APNs 的这个环境。
+    Apns(ApnsEnv),
+    Fcm,
+}
+
+/// 绑在密文上的附加数据；换掉它，电脑存着的句柄就全都解不开了。
 const AAD: &[u8] = b"runode-push-v1";
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
@@ -59,7 +70,7 @@ impl Keys {
         let mut nonce = [0u8; NONCE_LEN];
         self.rng.fill(&mut nonce)?;
         let mut data = Vec::with_capacity(1 + 16 + sealed.token.len() + AES_256_GCM.tag_len());
-        data.push(env_byte(sealed.env).ok_or(Unspecified)?);
+        data.push(target_byte(sealed.target).ok_or(Unspecified)?);
         data.extend_from_slice(&sealed.machine);
         data.extend_from_slice(&sealed.token);
         key.seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::from(AAD), &mut data)?;
@@ -82,14 +93,15 @@ impl Keys {
         let nonce = Nonce::try_assume_unique_for_key(nonce).ok()?;
         let mut data = sealed.to_vec();
         let plain = key.open_in_place(nonce, Aad::from(AAD), &mut data).ok()?;
-        let (&env, rest) = plain.split_first()?;
+        let (&target, rest) = plain.split_first()?;
         let (machine, token) = rest.split_at_checked(16)?;
-        let env = match env {
-            0 => ApnsEnv::Production,
-            1 => ApnsEnv::Development,
+        let target = match target {
+            0 => Target::Apns(ApnsEnv::Production),
+            1 => Target::Apns(ApnsEnv::Development),
+            2 => Target::Fcm,
             _ => return None,
         };
-        Some(Sealed { env, machine: machine.try_into().ok()?, token: token.to_vec() })
+        Some(Sealed { target, machine: machine.try_into().ok()?, token: token.to_vec() })
     }
 }
 
@@ -100,11 +112,13 @@ pub fn generate_key() -> Result<String, Unspecified> {
     Ok(encode_base64url(&key))
 }
 
-fn env_byte(env: ApnsEnv) -> Option<u8> {
-    match env {
-        ApnsEnv::Production => Some(0),
-        ApnsEnv::Development => Some(1),
-        ApnsEnv::Unknown => None,
+/// 封进句柄的那个字节，`Keys::open` 照它解回来。
+fn target_byte(target: Target) -> Option<u8> {
+    match target {
+        Target::Apns(ApnsEnv::Production) => Some(0),
+        Target::Apns(ApnsEnv::Development) => Some(1),
+        Target::Fcm => Some(2),
+        Target::Apns(ApnsEnv::Unknown) => None,
     }
 }
 
@@ -134,10 +148,12 @@ pub fn encode_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use runode_protocol::push::MAX_FCM_TOKEN_LEN;
+
     use super::*;
 
     fn sealed() -> Sealed {
-        Sealed { env: ApnsEnv::Development, machine: [7; 16], token: vec![0x80, 0xf0, 0x0a, 0xff] }
+        Sealed { target: Target::Apns(ApnsEnv::Development), machine: [7; 16], token: vec![0x80, 0xf0, 0x0a, 0xff] }
     }
 
     #[test]
@@ -148,6 +164,30 @@ mod tests {
         assert_eq!(keys.open(&handle), Some(sealed()));
         // nonce 每次都换，同样的内容封出来不一样。
         assert_ne!(keys.seal(&sealed()).unwrap(), handle);
+        for target in [Target::Apns(ApnsEnv::Production), Target::Fcm] {
+            let other = Sealed { target, ..sealed() };
+            assert_eq!(keys.open(&keys.seal(&other).unwrap()), Some(other));
+        }
+        let unknown = Sealed { target: Target::Apns(ApnsEnv::Unknown), ..sealed() };
+        assert!(keys.seal(&unknown).is_err());
+    }
+
+    /// 只认 APNs 的那一版中转封的句柄（这把密钥封的、APNs 开发环境）照样解得开。
+    #[test]
+    fn handles_sealed_before_fcm_still_open() {
+        let keys = Keys::parse("1=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8").unwrap();
+        let handle = "AUAY3Q01jEjkrOlHBsDPLE1skW3NZ7OuuKCaGsOqxhHVbH1t920O7GpTRSyVbN72HMs";
+        assert_eq!(keys.open(handle), Some(sealed()));
+    }
+
+    /// 最长的 FCM token 封出来的句柄也不超过电脑收的 token 长度。
+    #[test]
+    fn the_longest_fcm_token_fits_in_a_handle() {
+        let keys = Keys::parse(&format!("255={}", generate_key().unwrap())).unwrap();
+        let longest = Sealed { target: Target::Fcm, machine: [7; 16], token: vec![b'A'; MAX_FCM_TOKEN_LEN] };
+        let handle = keys.seal(&longest).unwrap();
+        assert!(handle.len() <= MAX_TOKEN_LEN, "{}", handle.len());
+        assert_eq!(keys.open(&handle), Some(longest));
     }
 
     /// 换密钥：新的放前面，旧密钥封的句柄照样解得开；去掉旧密钥后就解不开了。

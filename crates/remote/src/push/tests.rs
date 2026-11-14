@@ -16,7 +16,7 @@ use std::{
 use runode_paths::Dirs;
 use runode_protocol::{
     ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo,
-    push::{ApnsEnv, EXPIRES_AFTER, Notification, NotificationKind, OFFICIAL_BUNDLE},
+    push::{ApnsEnv, EXPIRES_AFTER, Notification, NotificationKind, OFFICIAL_BUNDLE, PushService},
     read_frame,
     remote::{Bytes, DeviceId},
     todo::{Todo, TodoSpec},
@@ -108,6 +108,10 @@ impl Scratch {
 
     /// 配对一台设备，登记 `bundle` 的 device token。
     fn register(&self, env: ApnsEnv, bundle: &str) {
+        self.register_to(PushService::Apns, env, bundle);
+    }
+
+    fn register_to(&self, service: PushService, env: ApnsEnv, bundle: &str) {
         let device = Device {
             device_id: DEVICE,
             name: "手机".into(),
@@ -121,6 +125,7 @@ impl Scratch {
             device_id: DEVICE,
             token: TOKEN.into(),
             env,
+            service,
             bundle: bundle.into(),
             machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
             machine_name: "Mac".into(),
@@ -757,6 +762,7 @@ fn the_official_app_needs_a_relay() {
         device_id: DEVICE,
         token: TOKEN.into(),
         env: ApnsEnv::Production,
+        service: PushService::Apns,
         bundle: OFFICIAL_BUNDLE.into(),
         machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
         machine_name: "Mac".into(),
@@ -769,6 +775,52 @@ fn the_official_app_needs_a_relay() {
     let key =
         ApnsKey { key_file: "k.p8".into(), key_id: "K".into(), team_id: "T".into(), bundle: OFFICIAL_BUNDLE.into() };
     assert_eq!(route(&registration, &PushSettings { direct: Some(key), ..relay }), Some(RELAY_PROD));
+}
+
+/// Android 的官方 App 和 iOS 的一样经中转推，电脑不分平台；自己签名打包的 Android App 不推，配了同一个
+/// bundle 的 APNs 密钥也不直连；比自己新的服务不推。
+#[test]
+fn android_apps_route_through_the_relay_only() {
+    let official = PushRegistration {
+        device_id: DEVICE,
+        token: TOKEN.into(),
+        env: ApnsEnv::Production,
+        service: PushService::Fcm,
+        bundle: OFFICIAL_BUNDLE.into(),
+        machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
+        machine_name: "Mac".into(),
+        updated_at: 1,
+    };
+    let key =
+        ApnsKey { key_file: "k.p8".into(), key_id: "K".into(), team_id: "T".into(), bundle: "dev.example".into() };
+    let settings =
+        PushSettings { relay: Some("https://relay.example".into()), direct: Some(key), ..PushSettings::default() };
+    assert_eq!(route(&official, &settings), Some(RELAY_PROD));
+    assert_eq!(route(&official, &PushSettings { relay: None, ..settings.clone() }), None);
+    let own = PushRegistration { bundle: "dev.example".into(), ..official.clone() };
+    assert_eq!(route(&own, &settings), None);
+    let newer = PushRegistration { service: PushService::Unknown, ..official };
+    assert_eq!(route(&newer, &settings), None);
+}
+
+/// 经中转推 Android 的官方 App 时，请求和 iOS 的一样，句柄交给中转。
+#[test]
+fn android_registrations_are_pushed_through_the_relay() {
+    let scratch = Scratch::new("android");
+    let host = FakeHost::default();
+    let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();
+    pusher.set_settings(PushSettings {
+        delay: Duration::ZERO,
+        relay: Some("https://relay.example".into()),
+        ..PushSettings::default()
+    });
+    pusher.set_listening(Listening::On);
+    scratch.register_to(PushService::Fcm, ApnsEnv::Production, OFFICIAL_BUNDLE);
+    wait_until("the first session list", || host.list_sessions.load(Ordering::SeqCst) >= 1);
+    host.set(AgentState::Blocked);
+    let requests = scratch.wait_for(1);
+    assert_eq!(url(&requests[0]), "https://relay.example/v1/notify");
+    assert_eq!(body(&requests[0])["handle"], TOKEN);
 }
 
 /// 登记都推不出去（没带中转的构建里只有官方 App 的登记）时不连宿主，单独跑的宿主照常能因空闲退出。

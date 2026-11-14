@@ -10,6 +10,9 @@ inputs:
   cache:
     description: 为 "false" 时不读也不存构建缓存
     default: "true"
+  zig-cache-key:
+    description: 交给 setup-zig 的 cache-key
+    default: desktop
 runs:
   using: composite
   steps:
@@ -17,6 +20,8 @@ runs:
       shell: bash
       run: make submodules
     - uses: ./.github/actions/setup-zig
+      with:
+        cache-key: ${{ inputs.zig-cache-key }}
     # rust-cache 按 rustc 的版本起缓存的键，工具链要先装好。
     - name: 装 Rust 工具链
       shell: bash

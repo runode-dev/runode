@@ -13,7 +13,7 @@ use std::{io, net::IpAddr, path::PathBuf};
 
 use runode_paths::Dirs;
 use runode_protocol::{
-    push::ApnsEnv,
+    push::{ApnsEnv, PushService},
     remote::{Bytes, DeviceId, DeviceKind},
 };
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,9 @@ pub struct PushRegistration {
     /// 推送的凭据：APNs device token（十六进制），官方 App 是中转服务给的句柄。
     pub token: String,
     pub env: ApnsEnv,
+    /// 推送经哪家送到手机。
+    #[serde(default)]
+    pub service: PushService,
     /// App 的 bundle id。
     pub bundle: String,
     /// 手机给这台电脑编的 UUID，推送时原样带回。
@@ -265,6 +268,7 @@ mod tests {
             device_id: DeviceId([n; 16]),
             token: token.into(),
             env: ApnsEnv::Production,
+            service: PushService::Apns,
             bundle: "dev.runode.ios".into(),
             machine: "mac".into(),
             machine_name: "Mac".into(),
@@ -288,6 +292,30 @@ mod tests {
         assert!(set_push(&dirs, push(3, "cc")).unwrap());
         assert!(set_push(&dirs, push(2, "aa")).unwrap());
         assert_eq!(push_registrations(&dirs).unwrap(), [push(3, "cc"), push(2, "aa")]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 登记里没有 `service` 的旧表照样读得了，读成 APNs。
+    #[test]
+    fn registrations_without_a_service_are_apns() {
+        let root = std::env::temp_dir().join(format!("rra-service-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let device = DeviceId([1; 16]);
+        let old = serde_json::json!({
+            "version": 1,
+            "devices": [],
+            "push": [{
+                "device_id": device, "token": "aa", "env": "production", "bundle": "dev.runode.mobile",
+                "machine": "mac", "machine_name": "Mac", "updated_at": 0,
+            }],
+        });
+        dirs.create_remote_access_dir().unwrap();
+        std::fs::write(path(&dirs).unwrap(), old.to_string()).unwrap();
+        let registrations = push_registrations(&dirs).unwrap();
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].service, PushService::Apns);
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -1,7 +1,7 @@
 # 每次推到 main 和每个 PR：检查格式和 crate 分层（cargo-deny）、跑 clippy（含类型检查），测试在另一个任务里并行跑。
 # libghostty-vt 从 vendor/ghostty 用 zig 编译，GPUI 要用 Xcode 的 Metal 编译器编着色器，
 # 所以在 macOS 上跑。发版时 release.yml 也调它（workflow_call），对要发的那个标签再查一遍。
-# iOS 端（RunodeKit）的测试由单独的 ios.yml 跑。
+# iOS 端（RunodeKit）的测试由单独的 ios.yml 跑，Android 端（包括 apps/android/tunnel 的拨号库）由 android.yml 跑。
 name: CI
 
 # 只改文档、iOS/Android 端、发版和 issue 模板这类 Rust 编译和测试用不到的文件时不跑。skills/ 被编进 cli，

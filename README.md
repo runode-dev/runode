@@ -36,7 +36,7 @@ Runode uses [Ghostty](https://ghostty.org)'s libghostty-vt for terminal emulatio
 - **Persistent sessions**: with `terminal-host` on, sessions live in a separate host process and survive quitting, relaunching and upgrading the app. A pane that has to start over picks its Claude Code conversation back up.
 - **SSH hosts**: pick a host when you create a workspace. Runode connects with your system's OpenSSH, installs runode there when needed and reconnects after a drop. Terminals, the file tree, the Git panel and previews work directly on that machine, whether it runs macOS, Linux or Windows. Pasted screenshots and dropped files are uploaded to it, and localhost links are forwarded to your machine.
 - **Pair another computer**: pair with Runode on another computer and use its terminals, files, Git, port forwarding and remote desktop the same way as an SSH host.
-- **Remote from your phone**: the iOS app pairs with your computer over a TLS 1.3 connection. On the same network it connects directly; once you set the network to 0.0.0.0 when pairing, it also reaches your computer from elsewhere through [iroh](https://iroh.computer) by public key, punching a direct path and falling back to a relay. From your phone you can watch terminals, answer agents, start a new agent, run tasks and commit to git.
+- **Remote from your phone**: the iOS and Android apps pair with your computer over a TLS 1.3 connection. On the same network it connects directly; once you set the network to 0.0.0.0 when pairing, it also reaches your computer from elsewhere through [iroh](https://iroh.computer) by public key, punching a direct path and falling back to a relay. From your phone you can watch terminals, answer agents, start a new agent, run tasks and commit to git.
   <br><img src="docs/mobile.gif" alt="iOS app: Claude Code waits for an answer while Codex works, then the Git page shows a diff, stages a file and commits" width="300">
 - **Remote desktop**: see and control a whole screen from your phone, or from Runode on another computer over SSH or pairing. Macs, Windows PCs and Linux machines can all be viewed, with low-latency hardware encoding. It can switch displays and unlock a locked screen with a password you saved.
   <br><img src="docs/remote-desktop.gif" alt="iOS app in landscape showing a Mac's screen: taps open Runode's sidebar, a new tab and the task board" width="900">
@@ -65,7 +65,7 @@ On Windows (x86_64), download `Runode-<version>-windows-x86_64-setup.exe` from t
 
 On Linux (x86_64 and aarch64), the same install script installs the desktop app as an AppImage in a graphical session, adds it to the application menu and keeps it up to date; it needs FUSE (`fuse3`). Prefer your package manager? Download the `.deb` or `.rpm` from the [latest release](https://github.com/runode-dev/runode/releases/latest) instead; these don't update themselves, so install each new version the same way. On a server without a desktop, the script installs just the command line and the terminal host.
 
-Every version is on [Releases](https://github.com/runode-dev/runode/releases). The iOS app isn't on the App Store yet; [build it from source](CONTRIBUTING.md).
+Every version is on [Releases](https://github.com/runode-dev/runode/releases). The iOS and Android apps aren't in the App Store or Google Play yet; [build them from source](CONTRIBUTING.md).
 
 ## Quick start
 
@@ -96,7 +96,7 @@ Runode is not a fork of Ghostty. It uses libghostty-vt as a terminal emulation l
 Any agent that runs in a terminal. More than 20 have their state recognized, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode, Amp, GitHub Copilot, Kimi and Qwen Code, and you can add your own detection rules.
 
 **Which platforms are supported?**
-The desktop app runs on macOS (Apple silicon and Intel), Windows (x86_64) and Linux (x86_64 and aarch64, as an AppImage, deb or rpm), and an iOS app gives remote access. Linux servers without a desktop get the command line and the terminal host; reach them from your phone, or open them as an SSH host from Runode on another computer. SSH hosts can run macOS, Linux or Windows, including ARM64.
+The desktop app runs on macOS (Apple silicon and Intel), Windows (x86_64) and Linux (x86_64 and aarch64, as an AppImage, deb or rpm), and iOS and Android apps give remote access. Linux servers without a desktop get the command line and the terminal host; reach them from your phone, or open them as an SSH host from Runode on another computer. SSH hosts can run macOS, Linux or Windows, including ARM64.
 
 ## Contributing
 

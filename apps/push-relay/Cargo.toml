@@ -1,6 +1,6 @@
 [package]
 name = "runode-push"
-description = "Push relay for the official runode iOS app: seals device tokens into handles and signs pushes to APNs"
+description = "Push relay for the official runode apps: seals push tokens into handles and sends pushes to APNs and FCM"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

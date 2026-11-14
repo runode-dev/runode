@@ -1,9 +1,9 @@
 [workspace]
 resolver = "3"
 # apps/ 下不全是 Rust 项目（手机端是各平台自己的工程），Rust 的 app 单独列出。
-members = ["crates/*", "apps/desktop", "apps/push-relay"]
-# 不带 -p 的 cargo 命令覆盖全部 crate，推送中转除外：它只在服务器上跑，开发桌面时不用跟着编 axum；
-# 要编它用 `-p runode-push` 或 `--workspace`。
+members = ["crates/*", "apps/desktop", "apps/push-relay", "apps/android/tunnel"]
+# 不带 -p 的 cargo 命令覆盖全部 crate，推送中转和 Android 的 iroh 拨号除外：推送中转只在服务器上跑，开发桌面时
+# 不用跟着编 axum；Android 那个只给手机编。要编它们用 `-p` 或 `--workspace`。
 default-members = ["crates/*", "apps/desktop"]
 # vendor 下的依赖不是本 workspace 的成员；不排除的话，根目录下的 path 依赖
 # 会被自动收编为本 workspace 的成员。
@@ -115,6 +115,8 @@ iroh = { version = "1.4", default-features = false, features = ["tls-ring", "por
 # 查别的电脑公布的远程访问；非 macOS 上还用它公布这台的 mDNS 服务（macOS 交给系统的 mDNSResponder）。
 mdns-sd = { version = "0.21", default-features = false }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "macros", "time"] }
+# Android 端经 JNI 调 Rust（iroh 拨号）。
+jni = "0.22"
 # 推送中转的 HTTP 服务和发给 APNs 的 HTTP/2 客户端；TLS 用上面那份 ring 后端的 rustls。
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 reqwest = { version = "0.13", default-features = false, features = ["http2", "rustls-no-provider"] }
@@ -187,6 +189,18 @@ inherits = "release"
 lto = false
 codegen-units = 16
 incremental = true
+
+# Android app 经 JNI 加载的 librunode_tunnel.so（runode-android-tunnel），每个 ABI 一份打进 APK，按体积优化。它只是
+# 拨号、搬字节，吞吐受网络限制，不在乎 opt-level 3 的那点速度。arm64 那份实测：opt-level 3 加 fat LTO 8.31 MB，
+# "s" 加 fat LTO 6.15 MB，"z" 加 fat LTO 5.61 MB，"s" 加 thin LTO 9.09 MB；"z" 只再小 9%，却连热点循环也不展开，
+# 选 "s"。panic 照 release 用 unwind：jni 的 `with_env` 靠它把 panic 变成 Java 异常，iroh 在 Android 上读不到
+# 系统的 DNS 设置时也靠接住 panic 改用公共 DNS。
+[profile.android]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
 
 # 只开现有代码已经满足的规则，防着以后倒退；新加规则时先把代码改干净。
 [workspace.lints.rust]

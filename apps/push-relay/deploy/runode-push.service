@@ -10,6 +10,9 @@ EnvironmentFile=/etc/runode-push/env
 # .p8 交给 systemd 转交，服务的用户是临时分配的，读不到 /etc 下的原文件也没关系。
 LoadCredential=apns.p8:/etc/runode-push/AuthKey.p8
 Environment=APNS_KEY_FILE=%d/apns.p8
+# 给 Android 推送时去掉下面两行的注释：Firebase 的服务账号 JSON 也交给 systemd 转交。
+#LoadCredential=fcm.json:/etc/runode-push/fcm-service-account.json
+#Environment=FCM_SERVICE_ACCOUNT_FILE=%d/fcm.json
 Environment=RELAY_LISTEN=127.0.0.1:8080
 Environment=RELAY_TRUST_PROXY=1
 DynamicUser=yes

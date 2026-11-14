@@ -15,7 +15,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help submodules build release run run-release windows-zip run-ios run-ios-device app install restart dmg check test test-ssh clippy layers fmt fmt-check clean
+.PHONY: help submodules build release run run-release windows-zip run-ios run-ios-device android-vt android-tunnel android-speech android-test run-android app install restart dmg check test test-ssh clippy layers fmt fmt-check clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -53,6 +53,27 @@ run-ios: ## 调试构建 iOS app，装到模拟器上启动
 # 真机用哪台，例如 make run-ios-device IOS_DEVICE="我的 iPhone"；不给时用连着的那台 iPhone。
 run-ios-device: ## Release 构建 iOS app，装到连着的真机上启动
 	IOS_DEVICE="$(IOS_DEVICE)" apps/ios/scripts/run-device.sh
+
+# libghostty-vt 的优化级别，例如 make android-vt ANDROID_VT_OPTIMIZE=Debug；不给时用 ReleaseFast。
+ANDROID_VT_OPTIMIZE ?=
+ADB ?= $(if $(ANDROID_HOME),$(ANDROID_HOME)/platform-tools/adb,adb)
+
+android-vt: ## 编 Android app 用的 libghostty-vt，编 app 前先跑一次
+	apps/android/scripts/build-ghostty-vt.sh $(ANDROID_VT_OPTIMIZE)
+
+android-tunnel: ## 编 Android app 用的 iroh 拨号库（librunode_tunnel.so），编 app 前先跑一次
+	apps/android/scripts/build-tunnel.sh
+
+android-speech: ## 取 Android app 离线识别用的 sherpa-onnx（官方 AAR，按哈希核对），编 app 前先跑一次
+	apps/android/scripts/fetch-sherpa-onnx.sh
+
+android-test: ## 跑 Android app 的单元测试
+	cd apps/android && ./gradlew test
+
+# 装到哪台设备上，例如 make run-android ANDROID_SERIAL=emulator-5554；不给时用连着的那台。
+run-android: ## 调试构建 Android app，装到连着的设备或模拟器上启动
+	cd apps/android && ./gradlew installDebug
+	$(ADB) shell am start -n dev.runode.mobile/.MainActivity
 
 # 本机自己用的包按 Cargo.toml 里的 local profile 编，不开 LTO，改一点代码后重编快得多；
 # make install APP_PROFILE=release 装和发给用户一样的构建。

@@ -1,0 +1,179 @@
+# Android 端：先在 Linux 上编出 app 要的三份原生库（libghostty-vt、iroh 拨号库 runode-android-tunnel、sherpa-onnx），
+# lint 并测拨号库，跑 JVM 上的单元测试和 Android lint、编调试包；再拿同一份原生库在 x86_64 的模拟器上跑设备测试。
+# 手机端解协议用的样例由 Rust 的 protocol 和 agent 测试写出，样例一改也要跑，Rust 那边改了线上格式、手机端解不开时在这里变红。
+name: Android
+
+# vendor/ghostty 是子模块指针；拨号库是 workspace 的成员，依赖的版本和工具链由根上的 Cargo 文件定。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/android/**"
+      - "crates/protocol/tests/fixtures/**"
+      - "crates/agent/tests/fixtures/**"
+      - "vendor/ghostty"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "deny.toml"
+      - "scripts/check-layers.py"
+      - ".github/workflows/android.yml"
+      - ".github/actions/setup-zig/**"
+      - ".github/actions/setup-rust/**"
+  pull_request:
+    paths:
+      - "apps/android/**"
+      - "crates/protocol/tests/fixtures/**"
+      - "crates/agent/tests/fixtures/**"
+      - "vendor/ghostty"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "deny.toml"
+      - "scripts/check-layers.py"
+      - ".github/workflows/android.yml"
+      - ".github/actions/setup-zig/**"
+      - ".github/actions/setup-rust/**"
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            apps/android/**/*.gradle.kts
+            apps/android/gradle/libs.versions.toml
+            apps/android/gradle/wrapper/gradle-wrapper.properties
+      # runner 自带的 NDK 和 CMake 不是 Gradle 要的那一版；ANDROID_NDK_HOME 原本指着自带的默认 NDK，编原生库的脚本和
+      # cargo-ndk 都按它找 NDK。版本取 libs.versions.toml 里的 ndk、cmake。
+      - name: 装 NDK 和 CMake
+        run: |
+          ndk="$(sed -n 's/^ndk = "\(.*\)"$/\1/p' apps/android/gradle/libs.versions.toml)"
+          cmake="$(sed -n 's/^cmake = "\(.*\)"$/\1/p' apps/android/gradle/libs.versions.toml)"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" "cmake;$cmake" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+      # 编 libghostty-vt 的 zig 也由它装；Android 的目标和桌面要编的库不同，zig 的全局缓存各存各的。
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy rustfmt
+          targets: aarch64-linux-android x86_64-linux-android
+          zig-cache-key: android
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-ndk@4.1.2,cargo-deny@0.20.2
+      # ci.yml 不看 apps/android 下的改动，只改拨号库时它的格式和依赖由这里查。
+      - name: 拨号库的格式
+        run: cargo fmt -p runode-android-tunnel -- --check
+      - name: crate 分层
+        run: make layers
+      # 编 libghostty-vt 的脚本把 zig 的本地缓存和依赖包放在 apps/android/build/ghostty-vt 下，ghostty 不变时重跑不用从头编。
+      - name: 定下 libghostty-vt 构建缓存的键
+        id: ghostty
+        run: echo "commit=$(git -C vendor/ghostty rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            apps/android/build/ghostty-vt/zig-cache
+            apps/android/build/ghostty-vt/zig-pkg
+          key: android-ghostty-vt-${{ runner.os }}-${{ steps.ghostty.outputs.commit }}-${{ hashFiles('apps/android/scripts/build-ghostty-vt.sh') }}
+      # 取 sherpa-onnx 的脚本按 SHA-256 认下载目录里已有的 AAR，有了就不再下载。
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/android/build/downloads
+          key: android-sherpa-onnx-${{ hashFiles('apps/android/scripts/fetch-sherpa-onnx.sh') }}
+      - name: 编 libghostty-vt
+        run: apps/android/scripts/build-ghostty-vt.sh
+      - name: 编拨号库
+        run: apps/android/scripts/build-tunnel.sh
+      - name: 取 sherpa-onnx
+        run: apps/android/scripts/fetch-sherpa-onnx.sh
+      # 按 Android 目标 lint 才走得到 cfg(target_os = "android") 的代码；ring 的构建脚本要 NDK 里的 clang，所以经 cargo-ndk。
+      - name: 拨号库的 clippy
+        run: cargo ndk -t arm64-v8a -P 31 clippy -p runode-android-tunnel --locked -- -D warnings
+      - name: 拨号库的单元测试
+        run: cargo test -p runode-android-tunnel --locked
+      - name: 单元测试、lint 和调试包
+        working-directory: apps/android
+        run: ./gradlew test check assembleDebug
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-native
+          path: |
+            apps/android/build/ghostty-vt/aarch64-linux-android/
+            apps/android/build/ghostty-vt/x86_64-linux-android/
+            apps/android/build/sherpa-onnx/
+            apps/android/connection/src/main/jniLibs/
+          if-no-files-found: error
+          retention-days: 1
+
+  # 设备测试用 test 编出的原生库，不再装 zig 和 Rust；Gradle 仍要编 terminal 的 JNI 壳，所以照样装 NDK 和 CMake。
+  # 识别模型的测试在设备上找不到模型时跳过，这里不下模型。
+  emulator:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # 31 是 app 的 minSdk，36 是 targetSdk。
+        api-level: [31, 36]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            apps/android/**/*.gradle.kts
+            apps/android/gradle/libs.versions.toml
+            apps/android/gradle/wrapper/gradle-wrapper.properties
+      - name: 装 NDK 和 CMake
+        run: |
+          ndk="$(sed -n 's/^ndk = "\(.*\)"$/\1/p' apps/android/gradle/libs.versions.toml)"
+          cmake="$(sed -n 's/^cmake = "\(.*\)"$/\1/p' apps/android/gradle/libs.versions.toml)"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" "cmake;$cmake" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-native
+          path: apps/android
+      # 模拟器要用 KVM 加速，runner 上默认只有 root 能开 /dev/kvm。
+      - name: 开放 KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: 设备测试
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          working-directory: apps/android
+          script: ./gradlew connectedDebugAndroidTest

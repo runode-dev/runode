@@ -5,7 +5,7 @@
 use runode_paths::Dirs;
 use runode_protocol::{
     ClientMsg, HostMsg,
-    push::{ApnsEnv, MAX_TOKEN_LEN},
+    push::{ApnsEnv, MAX_TOKEN_LEN, PushService},
     remote::DeviceId,
 };
 
@@ -26,10 +26,10 @@ pub(crate) struct PushRequests<'a> {
 
 impl LocalRequests for PushRequests<'_> {
     fn handle(&mut self, message: &ClientMsg) -> Option<HostMsg> {
-        let ClientMsg::PushRegister { req, token, env, bundle, machine, machine_name } = message else {
+        let ClientMsg::PushRegister { req, token, env, bundle, machine, machine_name, service } = message else {
             return None;
         };
-        Some(match self.register(token.as_deref(), *env, bundle, machine, machine_name) {
+        Some(match self.register(token.as_deref(), *env, *service, bundle, machine, machine_name) {
             Ok(()) => HostMsg::Done { req: *req },
             Err(message) => {
                 // 原因只回给了手机，电脑这边也留一条，推送登记不上时查得到。
@@ -46,6 +46,7 @@ impl PushRequests<'_> {
         &self,
         token: Option<&str>,
         env: ApnsEnv,
+        service: PushService,
         bundle: &str,
         machine: &str,
         machine_name: &str,
@@ -60,6 +61,9 @@ impl PushRequests<'_> {
         if env == ApnsEnv::Unknown {
             return Err("unknown APNs environment".into());
         }
+        if service == PushService::Unknown {
+            return Err("unknown push service".into());
+        }
         for (name, value) in [("bundle", bundle), ("machine", machine), ("machine_name", machine_name)] {
             if value.is_empty() || value.len() > MAX_FIELD_LEN {
                 return Err(format!("{name} must be 1 to {MAX_FIELD_LEN} bytes"));
@@ -69,6 +73,7 @@ impl PushRequests<'_> {
             device_id: device,
             token: token.to_owned(),
             env,
+            service,
             bundle: bundle.to_owned(),
             machine: machine.to_owned(),
             machine_name: machine_name.to_owned(),
@@ -77,7 +82,7 @@ impl PushRequests<'_> {
         if !devices::set_push(self.dirs, registration).map_err(|err| table_error(&err))? {
             return Err("this device is no longer paired".into());
         }
-        tracing::info!("remote device {device} registered for push notifications ({env:?})");
+        tracing::info!("remote device {device} registered for push notifications ({service:?}, {env:?})");
         Ok(())
     }
 }

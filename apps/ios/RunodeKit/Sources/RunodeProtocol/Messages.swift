@@ -53,6 +53,13 @@ public enum ApnsEnv: String, Hashable, Sendable, Encodable {
     case development
 }
 
+/// 推送经哪家的服务送到手机：iPhone 是 `apns`，Android 是 `fcm`。是 `apns` 时
+/// 不写出来，只认 APNs 的电脑和中转照旧读得懂。
+public enum PushService: String, Hashable, Sendable, Encodable {
+    case apns
+    case fcm
+}
+
 /// 前端发给宿主的消息。只定义手机这个前端会发的几种；宿主对手机连接上的 `Shutdown`、交接、`UiReply`、
 /// `SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就发不出去。JSON 的样子和宿主的
 /// `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。
@@ -107,9 +114,10 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 登记这台电脑推等回答通知用的凭据（`token` 为空时注销）：官方 App 交中转服务换来的句柄，别的交 APNs
     /// 的 device token（十六进制）。回 `Done`，办不了时回带编号的 `Error`。`bundle` 是 App 的 bundle id，
     /// `machine` 是给这台电脑编的 UUID、`machineName` 是显示的电脑名，推送时原样带回。由电脑上的远程访问
-    /// 记进配对设备表，不到宿主。
+    /// 记进配对设备表，不到宿主。`service` 是推送经哪家送到手机。
     case pushRegister(
-        req: UInt32, token: String?, env: ApnsEnv, bundle: String, machine: String, machineName: String)
+        req: UInt32, token: String?, env: ApnsEnv, bundle: String, machine: String, machineName: String,
+        service: PushService = .apns)
     /// 不再连这台电脑：电脑上的远程访问把这部手机从配对设备表里撤掉（推送登记一起），回 `Done`，随后断开。
     /// 不到宿主。
     case unpair(req: UInt32)
@@ -222,7 +230,7 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(req, forKey: Key("req"))
             try c.encode(id, forKey: Key("id"))
             try c.encode(request, forKey: Key("request"))
-        case let .pushRegister(req, token, env, bundle, machine, machineName):
+        case let .pushRegister(req, token, env, bundle, machine, machineName, service):
             try c.encode("push_register", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
             try c.encode(token, forKey: Key("token"))
@@ -230,6 +238,7 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(bundle, forKey: Key("bundle"))
             try c.encode(machine, forKey: Key("machine"))
             try c.encode(machineName, forKey: Key("machine_name"))
+            if service != .apns { try c.encode(service, forKey: Key("service")) }
         case .unpair(let req):
             try c.encode("unpair", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))

@@ -75,7 +75,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         "list_tasks", "find_commands", "find_commands_path", "spawn",
         "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
         "read_screen", "read_screen_command", "send_keys", "paste",
-        "push_register", "push_unregister", "keep_awake", "unpair",
+        "push_register", "push_unregister", "push_register_fcm", "keep_awake", "unpair",
     ])
     func matchesTheHost(_ name: String) throws {
         let message: ClientMsg =
@@ -119,6 +119,11 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
                 .pushRegister(
                     req: 11, token: nil, env: .development, bundle: "cn.barey.runode",
                     machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF", machineName: "Ethan 的 MacBook Pro")
+            case "push_register_fcm":
+                .pushRegister(
+                    req: 12, token: "q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ-aE5uR_oTiBlM", env: .production,
+                    bundle: "dev.runode.mobile", machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+                    machineName: "Ethan 的 MacBook Pro", service: .fcm)
             case "keep_awake": .keepAwake
             case "unpair": .unpair(req: 9)
             default: .listSessions
