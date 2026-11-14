@@ -673,6 +673,53 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(subtitle(working, .working, ago: 5 * 60, locale: Locale(identifier: "en")) == "Claude Code 干了 5 minutes")
     }
 
+    /// 前面画着 agent logo 时，说 agent 的几句去掉它的名字，别的照旧。
+    @Test func sessionSubtitleCanLeaveTheAgentUnnamed() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        func subtitle(_ id: SessionId, _ state: AgentState, ago: TimeInterval?, machine: String? = nil) -> String {
+            var session = info(id, state)
+            session.meta.agentSince = ago.map { now.addingTimeInterval(-$0) }
+            return Presentation.sessionSubtitle(
+                session, machine: machine, now: now, locale: Locale(identifier: "zh-Hans"), namesAgent: false)
+        }
+        #expect(subtitle(waiting, .blocked, ago: 12 * 60, machine: "homelab") == "在 homelab 上等了 12分钟")
+        #expect(subtitle(waiting, .blocked, ago: nil, machine: "homelab") == "在 homelab 上等你")
+        #expect(subtitle(waiting, .blocked, ago: 12 * 60) == "等了 12分钟")
+        #expect(subtitle(waiting, .blocked, ago: nil) == "在等你")
+        #expect(subtitle(working, .working, ago: 2 * 3600) == "干了 2小时")
+        #expect(subtitle(working, .working, ago: nil) == "在干活")
+        #expect(subtitle(working, .idle, ago: 600) == "空闲")
+        var vim = info(plain, nil)
+        vim.meta.foreground = "vim"
+        #expect(Presentation.sessionSubtitle(vim, now: now, namesAgent: false) == "在跑 vim")
+    }
+
+    /// 工作区标题行上的 agent：跑着收了 logo 的 agent、没退出的会话按节里的先后各一个，后台那一节没有；
+    /// 读屏的说法一个 agent 一句，不带时长。
+    @Test func sectionAgentsListTheAgentsWithLogos() {
+        func agentSession(_ id: String, _ kind: String, _ state: AgentState, exited: Bool = false) -> SessionInfo {
+            var session = SessionInfo(
+                id: SessionId(id)!, size: smallGrid,
+                meta: SessionMeta(title: id, agent: Agent(kind: AgentKind(kind), state: state)), exited: exited)
+            session.meta.agentSince = Date(timeIntervalSince1970: 0)
+            return session
+        }
+        let claude = agentSession("44444444444444444444444444444444", "claude", .blocked)
+        let codex = agentSession("55555555555555555555555555555555", "codex", .working)
+        let aider = agentSession("66666666666666666666666666666666", "aider", .working)
+        let gone = agentSession("77777777777777777777777777777777", "gemini", .idle, exited: true)
+        let idle = agentSession("88888888888888888888888888888888", "gemini", .idle)
+        let sessions = [codex, info(plain, nil), aider, claude, gone, idle]
+        let workspace = SessionSection(id: .workspace(window: 1, index: 0), sessions: sessions)
+        let agents = Presentation.sectionAgents(workspace)
+        #expect(agents.map(\.id) == [codex.id, claude.id, idle.id])
+        #expect(Presentation.sectionAgents(SessionSection(id: .background, sessions: sessions)).isEmpty)
+        #expect(
+            Presentation.sectionAgentsSummary(agents)
+                == "\(AgentKind("codex").displayName) 在干活，Claude Code 在等你，\(AgentKind("gemini").displayName) 空闲")
+        #expect(Presentation.sectionAgentsSummary([]) == nil)
+    }
+
     @Test func linkRouteTellsLocalFromDirectFromTunnelled() {
         func route(_ address: String?) -> String {
             Presentation.linkRoute(.connected(hostName: "homelab", address: address))

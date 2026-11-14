@@ -790,4 +790,40 @@
             }
         }
     }
+
+    /// 会话卡片上说状态的一行（`Presentation.sessionSubtitle`）：会话里有收了 logo 的 agent 时，agent 的名字换成
+    /// 它的 logo 画在最前面；读屏照旧念带名字的整句。`machine` 嵌进等你回答的那句，`trailingMachine` 用「，」
+    /// 接在整行末尾，一行放不下时先截掉它。字体、颜色和行数由调用方设。
+    struct SessionSubtitleLine: View {
+        let session: SessionInfo
+        var machine: String?
+        var trailingMachine: String?
+        let now: Date
+        @ScaledMetric(relativeTo: .footnote) private var logoSize: CGFloat = 15
+
+        var body: some View {
+            let named = sentence(Presentation.sessionSubtitle(session, machine: machine, now: now))
+            if let kind = session.meta.agent?.kind, let asset = Presentation.agentLogoAsset(kind) {
+                HStack(spacing: 6) {
+                    // 单色的 logo 按资源目录里的设置跟着前景色，比旁边次要色的字亮一档。
+                    Image(asset, bundle: .module)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: logoSize, height: logoSize)
+                        .foregroundStyle(Color.primary)
+                        .accessibilityHidden(true)
+                    Text(sentence(Presentation.sessionSubtitle(session, machine: machine, now: now, namesAgent: false)))
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(named))
+            } else {
+                Text(named)
+            }
+        }
+
+        private func sentence(_ status: String) -> String {
+            guard let trailingMachine else { return status }
+            return String(localized: "\(status)，\(trailingMachine)")
+        }
+    }
 #endif

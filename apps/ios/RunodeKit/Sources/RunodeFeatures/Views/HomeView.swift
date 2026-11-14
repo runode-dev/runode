@@ -656,9 +656,7 @@
         @ViewBuilder private var subtitle: some View {
             if let live {
                 TimelineView(AgentClockSchedule(live)) { context in
-                    let status = Presentation.sessionSubtitle(live, now: context.date)
-                    // 状态在前：一行放不下时截掉的是电脑名。
-                    Text(String(localized: "\(status)，\(item.machine.name)"))
+                    SessionSubtitleLine(session: live, trailingMachine: item.machine.name, now: context.date)
                 }
             } else {
                 Text(item.machine.name)
@@ -720,9 +718,9 @@
                         .font(.headline)
                         .lineLimit(2)
                     TimelineView(AgentClockSchedule(item.session)) { context in
-                        Text(
-                            Presentation.sessionSubtitle(
-                                item.session, machine: showsMachine ? item.list.machine.name : nil, now: context.date)
+                        SessionSubtitleLine(
+                            session: item.session, machine: showsMachine ? item.list.machine.name : nil,
+                            now: context.date
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)

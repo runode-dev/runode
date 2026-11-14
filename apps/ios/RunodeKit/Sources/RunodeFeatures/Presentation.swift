@@ -210,23 +210,32 @@ public enum Presentation {
 
     /// 会话卡片上说状态的一句。给了 `machine`（会话所在电脑的名字）时，等你回答的那句带上它。在等和在干活时，
     /// `agentElapsed` 写得出时长就说等了、干了多久。时长按 `locale` 写，不给时按 `interfaceLocale`。
+    /// `namesAgent` 为假时说 agent 的几句不带它的名字，留给前面画着 agent logo 的地方用。
     public static func sessionSubtitle(
-        _ session: SessionInfo, machine: String? = nil, now: Date, locale: Locale? = nil
+        _ session: SessionInfo, machine: String? = nil, now: Date, locale: Locale? = nil, namesAgent: Bool = true
     ) -> String {
         let agent = session.meta.agent?.kind.displayName ?? ""
         let elapsed = agentElapsed(since: session.meta.agentSince, now: now, locale: locale ?? interfaceLocale)
         switch SessionStatus.of(session) {
         case .waiting:
-            switch (machine, elapsed) {
-            case (let machine?, let elapsed?): return String(localized: "\(agent) 在 \(machine) 上等了 \(elapsed)")
-            case (let machine?, nil): return String(localized: "\(agent) 在 \(machine) 上等你")
-            case (nil, let elapsed?): return String(localized: "\(agent) 等了 \(elapsed)")
-            case (nil, nil): return String(localized: "\(agent) 在等你")
+            switch (machine, elapsed, namesAgent) {
+            case (let machine?, let elapsed?, true): return String(localized: "\(agent) 在 \(machine) 上等了 \(elapsed)")
+            case (let machine?, let elapsed?, false): return String(localized: "在 \(machine) 上等了 \(elapsed)")
+            case (let machine?, nil, true): return String(localized: "\(agent) 在 \(machine) 上等你")
+            case (let machine?, nil, false): return String(localized: "在 \(machine) 上等你")
+            case (nil, let elapsed?, true): return String(localized: "\(agent) 等了 \(elapsed)")
+            case (nil, let elapsed?, false): return String(localized: "等了 \(elapsed)")
+            case (nil, nil, true): return String(localized: "\(agent) 在等你")
+            case (nil, nil, false): return String(localized: "在等你")
             }
         case .working:
-            if let elapsed { return String(localized: "\(agent) 干了 \(elapsed)") }
-            return String(localized: "\(agent) 在干活")
-        case .agentIdle: return String(localized: "\(agent) 空闲")
+            switch (elapsed, namesAgent) {
+            case (let elapsed?, true): return String(localized: "\(agent) 干了 \(elapsed)")
+            case (let elapsed?, false): return String(localized: "干了 \(elapsed)")
+            case (nil, true): return String(localized: "\(agent) 在干活")
+            case (nil, false): return String(localized: "在干活")
+            }
+        case .agentIdle: return namesAgent ? String(localized: "\(agent) 空闲") : String(localized: "空闲")
         case .running(let program): return String(localized: "在跑 \(program)")
         case .shell: return String(localized: "空闲")
         case .exited: return String(localized: "已退出")
@@ -341,7 +350,8 @@ public enum Presentation {
         }
     }
 
-    /// agent 的 logo 在资源里的名字，和桌面上 `agent_logo` 用的是同一批 SVG；没收 logo 的为空。
+    /// agent 的 logo 在资源里的名字，和桌面上 `agent_logo` 用的是同一批 SVG；靠滤镜晕色的（antigravity）资源目录画不出，
+    /// 用从 SVG 栅格化的 PNG，SVG 改了要重出。没收 logo 的为空。
     public static func agentLogoAsset(_ kind: AgentKind) -> String? {
         let assets: [String: String] = [
             "pi": "pi", "claude": "claude", "codex": "codex", "gemini": "gemini", "cursor": "cursor",
@@ -349,9 +359,31 @@ public enum Presentation {
             "open_code": "opencode", "github_copilot": "github-copilot", "kimi": "kimi", "kiro": "kiro", "amp": "amp",
             "grok": "grok", "hermes": "hermes", "kilo": "kilo", "qodercli": "qoder", "qwen": "qwen", "goose": "goose",
             "junie": "junie", "open_hands": "openhands", "trae": "trae", "code_buddy": "codebuddy",
-            "mistral_vibe": "mistral-vibe", "jules": "jules", "omp": "omp",
+            "mistral_vibe": "mistral-vibe", "jules": "jules", "omp": "omp", "muse": "muse",
         ]
         return assets[kind.label]
+    }
+
+    /// 工作区标题行上画 logo 的会话：跑着收了 logo 的 agent、还没退出的，一个会话一个，按在节里的先后；
+    /// 后台那一节为空。
+    public static func sectionAgents(_ section: SessionSection) -> [SessionInfo] {
+        guard case .workspace = section.id else { return [] }
+        return section.sessions.filter { session in
+            guard !session.exited, let kind = session.meta.agent?.kind else { return false }
+            return agentLogoAsset(kind) != nil
+        }
+    }
+
+    /// 读屏在工作区标题上念的各个 agent 在干什么，一个 agent 一句；没有时为空。不带时长：标题行不跟着时钟重画。
+    public static func sectionAgentsSummary(_ agents: [SessionInfo]) -> String? {
+        let phrases = agents.map { session in
+            var session = session
+            session.meta.agentSince = nil
+            return sessionSubtitle(session, now: .now)
+        }
+        guard var summary = phrases.first else { return nil }
+        for phrase in phrases.dropFirst() { summary = String(localized: "\(summary)，\(phrase)") }
+        return summary
     }
 
     public static func sessionTitle(_ session: SessionInfo) -> String {

@@ -498,7 +498,8 @@
     }
 
     /// 一节的标题：工作区的名字和目录，右边一个在这个工作区里新开终端的按钮（电脑上装着 agent 时是挑开终端
-    /// 还是哪家 agent 的菜单），长按菜单能新开终端、改名；后台那一节只有标题。
+    /// 还是哪家 agent 的菜单），按钮左边是工作区里各个 agent 的 logo，长按菜单能新开终端、改名；后台那一节
+    /// 只有标题。
     private struct WorkspaceHeader: View {
         let section: SessionSection
         let canSpawn: Bool
@@ -511,6 +512,7 @@
         @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 20
 
         var body: some View {
+            let agentSessions = Presentation.sectionAgents(section)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     Image(systemName: Presentation.sectionSymbol(section))
@@ -524,6 +526,7 @@
                         .lineLimit(1)
                         .layoutPriority(1)
                         .accessibilityAddTraits(.isHeader)
+                        .accessibilityValue(Presentation.sectionAgentsSummary(agentSessions) ?? "")
                     if let directory = Presentation.sectionDirectory(section) {
                         Text(directory)
                             .font(.caption.monospaced())
@@ -539,6 +542,10 @@
                             .fixedSize()
                     }
                     Spacer(minLength: 8)
+                    if !agentSessions.isEmpty {
+                        SectionAgentLogos(sessions: agentSessions)
+                            .fixedSize()
+                    }
                     if canSpawn {
                         Group {
                             if agents.isEmpty {
@@ -602,6 +609,57 @@
         }
     }
 
+    /// 工作区标题行上并排的 agent logo（`Presentation.sectionAgents`），右下角的圆点说它在等你回答还是在干活，
+    /// 空闲的不画点；超过 `limit` 个的写成「+N」。只有图形，读屏不念。
+    private struct SectionAgentLogos: View {
+        let sessions: [SessionInfo]
+        private static let limit = 3
+        @ScaledMetric(relativeTo: .subheadline) private var logoSize: CGFloat = 16
+        @ScaledMetric(relativeTo: .subheadline) private var spacing: CGFloat = 9
+        @ScaledMetric(relativeTo: .subheadline) private var dotSize: CGFloat = 7
+        @ScaledMetric(relativeTo: .subheadline) private var ringWidth: CGFloat = 2
+        @Environment(\.themeColors) private var colors
+
+        var body: some View {
+            HStack(spacing: spacing) {
+                ForEach(sessions.prefix(Self.limit), id: \.id) { session in
+                    if let kind = session.meta.agent?.kind, let asset = Presentation.agentLogoAsset(kind) {
+                        Image(asset, bundle: .module)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: logoSize, height: logoSize)
+                            .foregroundStyle(Color.primary)
+                            .overlay(alignment: .bottomTrailing) { dot(session) }
+                    }
+                }
+                if sessions.count > Self.limit {
+                    Text(verbatim: "+\(sessions.count - Self.limit)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityHidden(true)
+        }
+
+        /// 圆点外面描一圈页面底色，压在 logo 上也分得开。
+        @ViewBuilder private func dot(_ session: SessionInfo) -> some View {
+            let color: Color? =
+                switch StatusMark(SessionStatus.of(session)) {
+                case .waiting: colors.waiting
+                case .working: colors.working
+                case .idle, .done: nil
+                }
+            if let color {
+                Circle()
+                    .fill(color)
+                    .frame(width: dotSize, height: dotSize)
+                    .padding(ringWidth)
+                    .background(colors.page, in: .circle)
+                    .offset(x: ringWidth, y: ringWidth)
+            }
+        }
+    }
+
     /// 会话卡片的头部：状态标记，标题，下面一行说状态（`Presentation.sessionSubtitle`），末尾是标签页号；
     /// 会话不在工作区的目录里时再起一行写它的目录。状态由那行字说，读屏不念标记。
     private struct SessionRow: View {
@@ -622,7 +680,7 @@
                         .lineLimit(2)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         TimelineView(AgentClockSchedule(session)) { context in
-                            Text(Presentation.sessionSubtitle(session, now: context.date))
+                            SessionSubtitleLine(session: session, now: context.date)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)

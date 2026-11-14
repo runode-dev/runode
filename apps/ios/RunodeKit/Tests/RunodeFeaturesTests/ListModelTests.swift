@@ -1139,9 +1139,12 @@ actor UnwritableMachineStore: MachineStore {
         try #require(labels.contains("claude"))
         let mapped = Set(labels.compactMap { Presentation.agentLogoAsset(AgentKind($0)) })
         #expect(mapped == images)
-        // 符号链接指着的 SVG 都在。
+        // 每个 imageset 里都有图：符号链接指着的 SVG 在，或者栅格化好的 PNG 在。
         for image in images {
-            #expect(FileManager.default.fileExists(atPath: catalog.appending(path: "\(image).imageset/\(image).svg").path))
+            let set = catalog.appending(path: "\(image).imageset")
+            let svg = FileManager.default.fileExists(atPath: set.appending(path: "\(image).svg").path)
+            let png = FileManager.default.fileExists(atPath: set.appending(path: "\(image)@3x.png").path)
+            #expect(svg || png, "\(image).imageset 里没有图")
         }
         #expect(Presentation.agentLogoAsset(AgentKind("aider")) == nil)
     }
