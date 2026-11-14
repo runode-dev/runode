@@ -125,6 +125,18 @@ impl SettingsView {
         self.write_or_report("theme", vec![theme.value()], cx);
     }
 
+    /// 挑 `slot` 时先换上 `name` 看效果用的 `theme` 值：按文件里的配置拼，浅色、深色分开时放在当前外观那一边，
+    /// 挑的不是当前外观那一栏也看得到，设置页仍是分开的样子。
+    pub(super) fn theme_preview(&self, slot: ThemeSlot, name: String) -> String {
+        let dark = self.config.dark;
+        let side = match slot {
+            ThemeSlot::Single => ThemeSlot::Single,
+            ThemeSlot::Light | ThemeSlot::Dark if dark => ThemeSlot::Dark,
+            ThemeSlot::Light | ThemeSlot::Dark => ThemeSlot::Light,
+        };
+        ThemeChoice::parse(Config::load(dark).theme.as_deref()).with(side, name).value()
+    }
+
     /// 点了一张预览卡：换成一个主题时留深色那个；换成分开时原来那个留在它那一边，另一边用 runode 自己的。
     fn pick_theme_mode(&mut self, mode: &str, cx: &mut Context<Self>) {
         match (mode, ThemeChoice::parse(self.config.theme.as_deref())) {

@@ -127,7 +127,17 @@ impl Config {
         Self::load_except(dark, Some(key))
     }
 
+    /// runode 配置文件里 `key` 的各行换成一行 `value` 后会读到的配置，文件不动。
+    pub fn load_with(dark: bool, key: &str, value: &str) -> Self {
+        Self::load_replacing(dark, Some(key), Some(value))
+    }
+
     fn load_except(dark: bool, skip: Option<&str>) -> Self {
+        Self::load_replacing(dark, skip, None)
+    }
+
+    /// 删掉 runode 配置文件里 `skip` 的各行，有 `value` 时在末尾补一行 `skip = value`。
+    fn load_replacing(dark: bool, skip: Option<&str>, value: Option<&str>) -> Self {
         let mut sources = Vec::new();
         // Ghostty 的几个配置文件算一层，其中有同一个文件（比如符号链接过去的）只读一次。
         let mut visited = HashSet::new();
@@ -139,6 +149,9 @@ impl Config {
             .collect();
         let mut runode = config_path().map(|path| read_entries(&path, &mut sources)).unwrap_or_default();
         runode.retain(|e| Some(e.key.as_str()) != skip);
+        if let (Some(key), Some(value)) = (skip, value) {
+            runode.push(Entry { key: key.to_owned(), value: value.to_owned(), origin: String::new() });
+        }
         Self::from_layers(&[ghostty, runode], dark, &mut sources)
     }
 

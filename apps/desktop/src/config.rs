@@ -233,6 +233,15 @@ pub fn reload(cx: &mut App) {
     apply(cx, config, seen);
 }
 
+/// 先让 runode 配置文件里 `key` 换成 `value` 的效果生效，文件不动；`reload` 回到文件里的配置。
+pub fn preview(key: &str, value: &str, cx: &mut App) {
+    let dark = system_is_dark(cx);
+    let before = watch_stamp(&cx.global::<AppConfig>().0);
+    let config = Config::load_with(dark, key, value);
+    let seen = seen_after(&before, &config);
+    apply(cx, config, seen);
+}
+
 /// 让 `config` 生效并广播给各视图，`seen` 记作读它时各配置文件的修改时间。
 fn apply(cx: &mut App, config: Config, seen: Stamps) {
     // 先换语言再广播，观察配置的菜单和视图重画时就是新语言。

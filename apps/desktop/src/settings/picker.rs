@@ -4,11 +4,14 @@
 use crate::ui::icons::CHECK_ICON;
 use crate::ui::picker::{match_rank, matches_query, nav_delta};
 use crate::ui::theme::Theme;
+use runode_config::Config;
 use std::ops::Range;
+use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{
     AnyElement, Context, Entity, Focusable, KeyDownEvent, MouseButton, Role, ScrollStrategy, SharedString,
-    Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
+    Subscription, Task, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 
 use super::SettingsView;
@@ -22,6 +25,8 @@ use crate::ui::{
 const PICKER_WIDTH: f32 = 420.;
 const ROW_HEIGHT: f32 = 28.;
 const VISIBLE_ROWS: f32 = 12.;
+/// 键盘挪到一个主题后停这么久才换上它。
+const PREVIEW_DELAY: Duration = Duration::from_millis(120);
 
 /// 选了以后写到哪里。
 #[derive(Clone)]
@@ -72,6 +77,10 @@ pub(super) struct Picker {
     field: Entity<InputState>,
     /// 高亮的那一行，在筛过的列表里数。
     highlighted: usize,
+    /// 挑主题时键盘挪过高亮、先换上看过效果，没选就关掉时要换回文件里的配置。
+    previewed: bool,
+    /// 等着换上键盘挪到的主题，见 `PREVIEW_DELAY`；跟着浮层一起丢掉就不换了。
+    preview: Option<Task<()>>,
     scroll: UniformListScrollHandle,
     _subscription: Subscription,
 }
@@ -125,6 +134,8 @@ impl SettingsView {
             target,
             field,
             highlighted: highlighted.unwrap_or(0),
+            previewed: false,
+            preview: None,
             scroll,
             _subscription: subscription,
         });
@@ -132,9 +143,16 @@ impl SettingsView {
     }
 
     pub(super) fn close_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.picker = None;
+        self.drop_picker(cx);
         window.focus(&self.focus_handle, cx);
         cx.notify();
+    }
+
+    /// 没选就丢掉浮层；先换上看过效果的，换回文件里的配置。
+    pub(crate) fn drop_picker(&mut self, cx: &mut gpui::App) {
+        if self.picker.take().is_some_and(|picker| picker.previewed) {
+            crate::config::reload(cx);
+        }
     }
 
     fn confirm_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -176,7 +194,16 @@ impl SettingsView {
                 fonts.retain(|font| seen.insert(font.clone()));
                 self.write_or_report("font-family", fonts, cx);
             }
-            PickTarget::Theme(slot) => self.set_theme(slot, value, cx),
+            PickTarget::Theme(slot) => {
+                // 预览时换上的值可能放在另一边，`set_theme` 要按文件里的配置拼；写成了会重载，没写成要自己换回去。
+                if picker.previewed {
+                    self.config = Arc::new(Config::load(self.config.dark));
+                }
+                self.set_theme(slot, value, cx);
+                if picker.previewed && self.errors.contains_key("theme") {
+                    crate::config::reload(cx);
+                }
+            }
         }
         cx.notify();
     }
@@ -200,6 +227,23 @@ impl SettingsView {
         cx.stop_propagation();
         picker.highlighted = picker.highlighted.saturating_add_signed(step).min(count - 1);
         picker.scroll.scroll_to_item(picker.highlighted, ScrollStrategy::Nearest);
+        if let PickTarget::Theme(slot) = picker.target
+            && let Some(&ix) = picker.visible(cx).get(picker.highlighted)
+        {
+            let name = picker.items[ix].value.clone();
+            // 按住方向键连着挪时只换上停下来的那个：每换一次要重读配置、通知各宿主。
+            picker.preview = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(PREVIEW_DELAY).await;
+                this.update(cx, |this, cx| {
+                    if let Some(picker) = &mut this.picker {
+                        picker.previewed = true;
+                    }
+                    let value = this.theme_preview(slot, name);
+                    crate::config::preview("theme", &value, cx);
+                })
+                .ok();
+            }));
+        }
         cx.notify();
     }
 

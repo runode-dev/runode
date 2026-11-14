@@ -90,7 +90,10 @@ impl WindowView {
         else {
             return false;
         };
-        page.view.update(cx, |view, cx| view.commit_all(cx));
+        page.view.update(cx, |view, cx| {
+            view.commit_all(cx);
+            view.drop_picker(cx);
+        });
         true
     }
 }

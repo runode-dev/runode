@@ -147,6 +147,8 @@ impl SettingsView {
             }
             InputEvent::Next | InputEvent::Previous => {}
         });
+        // 挑主题时看过的效果不管设置页是怎么离开的都要换回去。
+        cx.on_release(|this: &mut Self, cx| this.drop_picker(cx)).detach();
         let mut view = Self {
             focus_handle: cx.focus_handle(),
             page: Page::General,
@@ -212,7 +214,7 @@ impl SettingsView {
         self.page = page;
         self.fields.clear();
         self.errors.clear();
-        self.picker = None;
+        self.drop_picker(cx);
         self.keybinds.stop_recording();
         self.scroll.set_offset(point(px(0.), px(0.)));
         window.focus(&self.focus_handle, cx);
