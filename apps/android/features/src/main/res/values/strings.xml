@@ -17,6 +17,14 @@
     <string name="session_waited_on">%1$s has been waiting on %2$s for %3$s</string>
     <string name="session_worked">%1$s has been working for %2$s</string>
     <string name="session_agent_idle">%1$s is idle</string>
+    <string name="session_waiting_on_unnamed">Waiting for you on %1$s</string>
+    <string name="session_waiting_unnamed">Waiting for you</string>
+    <string name="session_working_unnamed">Working</string>
+    <string name="session_waited_unnamed">Waiting for %1$s</string>
+    <string name="session_waited_on_unnamed">Waiting on %1$s for %2$s</string>
+    <string name="session_worked_unnamed">Working for %1$s</string>
+    <string name="section_agents_more" translatable="false">+%1$d</string>
+    <string name="list_pair">%1$s, %2$s</string>
     <string name="session_running">Running %1$s</string>
     <string name="session_exited">Exited</string>
 
@@ -322,7 +330,6 @@
     <string name="home_spawn_target">%1$s · %2$s</string>
     <string name="home_open_machine_hint">Open Sessions on This Computer</string>
     <string name="home_reconnect">Reconnect to %1$s</string>
-    <string name="home_resume_detail">%1$s, %2$s</string>
     <string name="home_page_position">%1$d of %2$d</string>
     <string name="home_next_waiting">Next Waiting Session</string>
     <string name="home_previous_waiting">Previous Waiting Session</string>

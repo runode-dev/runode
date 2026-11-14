@@ -33,6 +33,9 @@ data class MachineLine(
     }
 }
 
+/** 一家 agent 的 logo：[colored] 为真时 [drawable] 按原色画，否则它是单色的，界面按前景色染色。 */
+data class AgentLogo(@param:DrawableRes val drawable: Int, val colored: Boolean)
+
 /** agent 状态旁的时长按 [STEP_MS] 往下取整，不满一步不写；从 agent 进入这个状态的时刻起每满一步重画一次。 */
 object AgentClock {
     const val STEP_MS = 60_000L
@@ -267,26 +270,54 @@ object Presentation {
 
     /**
      * 会话卡片上说状态的一句。给了 [machine]（会话所在电脑的名字）时，等你回答的那句带上它。在等和在干活时，[agentElapsed]
-     * 写得出时长就说等了、干了多久。
+     * 写得出时长就说等了、干了多久。[namesAgent] 为假时说 agent 的几句不带它的名字，留给前面画着 agent logo 的地方用。
      */
-    fun sessionSubtitle(session: SessionInfo, machine: String? = null, now: Instant): UiText {
+    fun sessionSubtitle(session: SessionInfo, machine: String? = null, now: Instant, namesAgent: Boolean = true): UiText {
         val agent = session.meta.agent?.kind?.displayName ?: ""
         val elapsed = agentElapsed(session.meta.agentSinceMs, now)
         return when (val status = SessionStatus.of(session)) {
             SessionStatus.Waiting -> when {
-                machine != null && elapsed != null -> UiText.res(R.string.session_waited_on, agent, machine, elapsed)
-                machine != null -> UiText.res(R.string.session_waiting_on, agent, machine)
-                elapsed != null -> UiText.res(R.string.session_waited, agent, elapsed)
-                else -> UiText.res(R.string.session_waiting, agent)
+                machine != null && elapsed != null ->
+                    if (namesAgent) UiText.res(R.string.session_waited_on, agent, machine, elapsed)
+                    else UiText.res(R.string.session_waited_on_unnamed, machine, elapsed)
+                machine != null ->
+                    if (namesAgent) UiText.res(R.string.session_waiting_on, agent, machine)
+                    else UiText.res(R.string.session_waiting_on_unnamed, machine)
+                elapsed != null ->
+                    if (namesAgent) UiText.res(R.string.session_waited, agent, elapsed) else UiText.res(R.string.session_waited_unnamed, elapsed)
+                else -> if (namesAgent) UiText.res(R.string.session_waiting, agent) else UiText.res(R.string.session_waiting_unnamed)
             }
-            SessionStatus.Working ->
-                if (elapsed != null) UiText.res(R.string.session_worked, agent, elapsed) else UiText.res(R.string.session_working, agent)
-            SessionStatus.AgentIdle -> UiText.res(R.string.session_agent_idle, agent)
+            SessionStatus.Working -> when {
+                elapsed != null ->
+                    if (namesAgent) UiText.res(R.string.session_worked, agent, elapsed) else UiText.res(R.string.session_worked_unnamed, elapsed)
+                else -> if (namesAgent) UiText.res(R.string.session_working, agent) else UiText.res(R.string.session_working_unnamed)
+            }
+            SessionStatus.AgentIdle -> if (namesAgent) UiText.res(R.string.session_agent_idle, agent) else UiText.res(R.string.idle)
             is SessionStatus.Running -> UiText.res(R.string.session_running, status.program)
             SessionStatus.Shell -> UiText.res(R.string.idle)
             SessionStatus.Exited -> UiText.res(R.string.session_exited)
         }
     }
+
+    /**
+     * 工作区标题行上画 logo 的会话：跑着收了 logo 的 agent、shell 还没退出的，按 [SessionSection.sessions] 的先后；后台那一节
+     * 为空。
+     */
+    fun sectionAgents(section: SessionSection): List<SessionInfo> {
+        if (section.id !is SessionSection.Id.Workspace) return emptyList()
+        return section.sessions.filter { session ->
+            val agent = session.meta.agent ?: return@filter false
+            !session.exited && agentLogo(agent.kind) != null
+        }
+    }
+
+    /**
+     * [agents]（[sectionAgents] 挑出来的会话）各自在干什么，带着 agent 的名字、不带时长，用「，」连成一句，给只画了 logo 的
+     * 标题行读屏用；没有会话时为空。
+     */
+    fun sectionAgentsSummary(agents: List<SessionInfo>): UiText? = agents
+        .map { sessionSubtitle(it.copy(meta = it.meta.copy(agentSinceMs = null)), now = Instant.now()) }
+        .reduceOrNull { summary, phrase -> UiText.res(R.string.list_pair, summary, phrase) }
 
     /** 会话列表标题下面一行：连着时说经哪条路连的，没连着时是连接状态。没有地址的连接走的是跨网络的隧道。 */
     fun linkRoute(state: LinkState, now: Instant = Instant.now()): UiText {
@@ -381,9 +412,17 @@ object Presentation {
         SizePreference.FollowMachine -> UiText.res(R.string.size_follow_machine)
     }
 
-    /** agent 的 logo：由桌面上 `agent_logo` 用的那批 SVG 转成的单色 VectorDrawable，界面按前景色染色；没收 logo 的为空。 */
-    @DrawableRes
-    fun agentLogo(kind: AgentKind): Int? = agentLogos[kind.label]
+    /**
+     * agent 的 logo，由桌面上 `agent_logo` 用的那批 SVG 转成 VectorDrawable；靠滤镜晕色的（antigravity）VectorDrawable 画
+     * 不出，用从 SVG 栅格化的各密度 PNG，SVG 改了要重出。[coloredLogos] 里的是彩色 logo，按原色画。没收 logo 的为空。
+     */
+    fun agentLogo(kind: AgentKind): AgentLogo? =
+        agentLogos[kind.label]?.let { AgentLogo(it, colored = kind.label in coloredLogos) }
+
+    private val coloredLogos = setOf(
+        "claude", "gemini", "devin", "antigravity", "kimi", "kiro", "amp", "qwen", "junie", "trae", "code_buddy", "mistral_vibe",
+        "muse",
+    )
 
     private val agentLogos = mapOf(
         "pi" to R.drawable.agent_logo_pi, "claude" to R.drawable.agent_logo_claude, "codex" to R.drawable.agent_logo_codex,
@@ -396,7 +435,7 @@ object Presentation {
         "qwen" to R.drawable.agent_logo_qwen, "goose" to R.drawable.agent_logo_goose, "junie" to R.drawable.agent_logo_junie,
         "open_hands" to R.drawable.agent_logo_openhands, "trae" to R.drawable.agent_logo_trae,
         "code_buddy" to R.drawable.agent_logo_codebuddy, "mistral_vibe" to R.drawable.agent_logo_mistral_vibe,
-        "jules" to R.drawable.agent_logo_jules, "omp" to R.drawable.agent_logo_omp,
+        "jules" to R.drawable.agent_logo_jules, "omp" to R.drawable.agent_logo_omp, "muse" to R.drawable.agent_logo_muse,
     )
 
     fun sessionTitle(session: SessionInfo): UiText =

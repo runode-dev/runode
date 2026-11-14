@@ -33,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -65,6 +67,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -73,6 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -92,6 +98,7 @@ import dev.runode.mobile.features.ui.theme.resolve
 import dev.runode.mobile.features.ui.theme.themeColors
 import dev.runode.mobile.protocol.Agent
 import dev.runode.mobile.protocol.AgentKind
+import dev.runode.mobile.protocol.SessionInfo
 import java.time.Instant
 import kotlinx.coroutines.delay
 
@@ -517,11 +524,51 @@ internal fun SpawnKindItems(agents: List<InstalledAgent>, onPick: (InstalledAgen
     }
 }
 
-/** 菜单里一家 agent 名字前的 logo，按前景色染色；没收 logo 的用通用的图标。 */
+/** 一家 agent 的 logo：按原色的照原样画，单色的和没收 logo 时用的通用图标染成 [tint]。只有图形，读屏不念。 */
 @Composable
-internal fun AgentLogoIcon(kind: AgentKind, modifier: Modifier = Modifier) {
+internal fun AgentLogoIcon(kind: AgentKind, modifier: Modifier = Modifier, tint: Color = LocalContentColor.current) {
     val logo = Presentation.agentLogo(kind)
-    if (logo != null) Icon(painterResource(logo), null, modifier) else Icon(AppIcons.sparkles, null, modifier)
+    when {
+        logo == null -> Icon(AppIcons.sparkles, null, modifier, tint = tint)
+        logo.colored -> Icon(painterResource(logo.drawable), null, modifier, tint = Color.Unspecified)
+        else -> Icon(painterResource(logo.drawable), null, modifier, tint = tint)
+    }
+}
+
+/**
+ * 会话卡片上说状态的一行（[Presentation.sessionSubtitle]），一行放不下时截掉末尾：会话里有收了 logo 的 agent 时，agent 的
+ * 名字换成它的 logo 画在最前面，单色的 logo 用正文色，比旁边的字亮一档；读屏照旧念带名字的整句。[machine] 嵌进等你回答的那句，
+ * [trailingMachine] 用「，」接在整行末尾，截的时候先截掉它。读屏的字放在 text 而不是 contentDescription 里，外层合并语义时
+ * 才不盖掉标题。
+ */
+@Composable
+internal fun SessionSubtitleLine(
+    session: SessionInfo,
+    now: Instant,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    machine: String? = null,
+    trailingMachine: String? = null,
+) {
+    @Composable
+    fun line(status: String) = if (trailingMachine != null) stringResource(R.string.list_pair, status, trailingMachine) else status
+    val named = line(Presentation.sessionSubtitle(session, machine, now).resolve())
+    val kind = session.meta.agent?.kind
+    if (kind == null || Presentation.agentLogo(kind) == null) {
+        Text(named, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
+        return
+    }
+    val unnamed = line(Presentation.sessionSubtitle(session, machine, now, namesAgent = false).resolve())
+    val logoSize = with(LocalDensity.current) { 15.sp.toDp() }
+    Row(
+        modifier.clearAndSetSemantics { text = AnnotatedString(named) },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        AgentLogoIcon(kind, Modifier.size(logoSize), tint = themeColors.primary)
+        Text(unnamed, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
 }
 
 /** 只有一个「好」的出错提示；[message] 为空时不出。 */

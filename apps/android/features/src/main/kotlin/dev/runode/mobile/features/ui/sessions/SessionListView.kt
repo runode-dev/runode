@@ -3,6 +3,7 @@ package dev.runode.mobile.features.ui.sessions
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -56,12 +59,15 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.runode.mobile.features.R
 import dev.runode.mobile.features.model.InstalledAgent
 import dev.runode.mobile.features.model.Presentation
@@ -84,6 +90,7 @@ import dev.runode.mobile.features.ui.PromptOptionLayout
 import dev.runode.mobile.features.ui.QuickReplyBar
 import dev.runode.mobile.features.ui.ScreenPadding
 import dev.runode.mobile.features.ui.ScreenPreview
+import dev.runode.mobile.features.ui.SessionSubtitleLine
 import dev.runode.mobile.features.ui.SpawnKindItems
 import dev.runode.mobile.features.ui.TopBar
 import dev.runode.mobile.features.ui.agentClock
@@ -420,37 +427,47 @@ private fun WorkspaceHeader(
                 )
                 .padding(start = 4.dp, end = 4.dp, top = 8.dp),
         ) {
-            Row(Modifier.defaultMinSize(minHeight = 32.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (isWorkspace) AppIcons.folder else AppIcons.moon,
-                    contentDescription = null,
-                    tint = colors.secondary,
-                    modifier = Modifier.width(20.dp).height(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    title,
-                    style = Type.subheadline.copy(fontWeight = FontWeight.SemiBold),
-                    maxLines = 1,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Presentation.sectionDirectory(section)?.let { directory ->
+            // 名字、目录和窗口占掉 logo 和「+」以外的宽度，放不下时先截目录；logo 和「+」各节都贴右。
+            Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 32.dp), verticalAlignment = Alignment.CenterVertically) {
+                val agentSessions = Presentation.sectionAgents(section)
+                // 读屏念标题时接着念各个 agent 在干什么，再念目录；logo 自己不报。
+                val spoken = Presentation.sectionAgentsSummary(agentSessions)?.resolve()
+                    ?.let { stringResource(R.string.list_pair, title, it) } ?: title
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (isWorkspace) AppIcons.folder else AppIcons.moon,
+                        contentDescription = null,
+                        tint = colors.secondary,
+                        modifier = Modifier.width(20.dp).height(18.dp),
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        directory,
-                        style = Type.caption,
-                        fontFamily = FontFamily.Monospace,
-                        color = colors.tertiary,
+                        title,
+                        style = Type.subheadline.copy(fontWeight = FontWeight.SemiBold),
                         maxLines = 1,
-                        overflow = TextOverflow.StartEllipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = Modifier.clearAndSetSemantics {
+                            heading()
+                            text = AnnotatedString(spoken)
+                        },
                     )
+                    Presentation.sectionDirectory(section)?.let { directory ->
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            directory,
+                            style = Type.caption,
+                            fontFamily = FontFamily.Monospace,
+                            color = colors.tertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.StartEllipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                    Presentation.sectionWindow(section)?.let { window ->
+                        Spacer(Modifier.width(8.dp))
+                        Text(window.resolve(), style = Type.caption, color = colors.tertiary, maxLines = 1)
+                    }
                 }
-                Presentation.sectionWindow(section)?.let { window ->
-                    Spacer(Modifier.width(8.dp))
-                    Text(window.resolve(), style = Type.caption, color = colors.tertiary, maxLines = 1)
-                }
-                Spacer(Modifier.weight(1f))
+                if (agentSessions.isNotEmpty()) SectionAgentLogos(agentSessions, Modifier.padding(start = 8.dp))
                 if (canSpawn) {
                     Box {
                         Box(
@@ -610,6 +627,60 @@ private fun SessionCard(
     }
 }
 
+private const val SECTION_LOGO_LIMIT = 3
+
+/** 标题行上 logo 的边长、logo 之间的间距、状态圆点的直径和圆点外面那圈底色的宽度，都随字号缩放。 */
+private val SectionLogoSize = 16.sp
+private val SectionLogoSpacing = 9.sp
+private val SectionDotSize = 7.sp
+private val SectionDotRing = 2.sp
+
+/**
+ * 工作区标题行上各个 agent 的 logo，[sessions] 一个会话一个，右下角压一个描着页面底色的状态圆点：等你回答、在干活各用状态标记
+ * 的颜色，空闲不画。最多画 [SECTION_LOGO_LIMIT] 个，多出来的写「+N」。只有图形，读屏不报。
+ */
+@Composable
+private fun SectionAgentLogos(sessions: List<SessionInfo>, modifier: Modifier = Modifier) {
+    val colors = themeColors
+    val density = LocalDensity.current
+    val logoSize = with(density) { SectionLogoSize.toDp() }
+    val ring = with(density) { SectionDotRing.toDp() }
+    val dotSize = with(density) { SectionDotSize.toDp() }
+    Row(
+        modifier.clearAndSetSemantics {},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(with(density) { SectionLogoSpacing.toDp() }),
+    ) {
+        for (session in sessions.take(SECTION_LOGO_LIMIT)) {
+            val kind = session.meta.agent?.kind ?: continue
+            val dot = when (SessionStatus.of(session)) {
+                SessionStatus.Waiting -> colors.waiting
+                SessionStatus.Working -> colors.working
+                else -> null
+            }
+            Box(Modifier.size(logoSize)) {
+                AgentLogoIcon(kind, Modifier.fillMaxSize(), tint = colors.primary)
+                if (dot != null) {
+                    // 圆心压在 logo 右下角往外一点，描边盖住 logo 的边。
+                    val outer = dotSize + ring * 2
+                    Canvas(Modifier.align(Alignment.BottomEnd).offset(outer / 4, outer / 4).size(outer)) {
+                        drawCircle(colors.page)
+                        drawCircle(dot, radius = dotSize.toPx() / 2)
+                    }
+                }
+            }
+        }
+        if (sessions.size > SECTION_LOGO_LIMIT) {
+            Text(
+                stringResource(R.string.section_agents_more, sessions.size - SECTION_LOGO_LIMIT),
+                style = Type.caption,
+                color = colors.secondary,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
 /**
  * 会话卡片的头部：状态标记，标题，下面一行说状态（[Presentation.sessionSubtitle]），末尾是标签页号；会话不在工作区的目录
  * 里时再起一行写它的目录。状态由那行字说，读屏不念标记。
@@ -635,12 +706,11 @@ private fun SessionRow(session: SessionInfo, workspaceDir: String?, tab: Int?, m
                 overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    Presentation.sessionSubtitle(session, now = agentClock(session.meta.agent, session.meta.agentSinceMs)).resolve(),
+                SessionSubtitleLine(
+                    session,
+                    now = agentClock(session.meta.agent, session.meta.agentSinceMs),
                     style = Type.footnote,
                     color = colors.secondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 if (tab != null) {

@@ -14,6 +14,13 @@
     <string name="session_waited_on">%1$s 在 %2$s 上等了 %3$s</string>
     <string name="session_worked">%1$s 工作了 %2$s</string>
     <string name="session_agent_idle">%1$s 閒置中</string>
+    <string name="session_waiting_on_unnamed">在 %1$s 上等你</string>
+    <string name="session_waiting_unnamed">在等你</string>
+    <string name="session_working_unnamed">在工作</string>
+    <string name="session_waited_unnamed">等了 %1$s</string>
+    <string name="session_waited_on_unnamed">在 %1$s 上等了 %2$s</string>
+    <string name="session_worked_unnamed">工作了 %1$s</string>
+    <string name="list_pair">%1$s，%2$s</string>
     <string name="session_running">正在執行 %1$s</string>
     <string name="session_exited">已結束</string>
     <string name="size_owner_none">尺寸無人控制</string>
@@ -267,7 +274,6 @@
     <string name="home_spawn_target">%1$s · %2$s</string>
     <string name="home_open_machine_hint">開啟這台電腦上的工作階段</string>
     <string name="home_reconnect">重新連接 %1$s</string>
-    <string name="home_resume_detail">%1$s，%2$s</string>
     <string name="home_page_position">第 %1$d 個，共 %2$d 個</string>
     <string name="home_next_waiting">下一個等你的工作階段</string>
     <string name="home_previous_waiting">上一個等你的工作階段</string>

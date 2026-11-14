@@ -595,9 +595,16 @@ class PresentationTests {
             .map { it.jsonObject.getValue("kind").jsonPrimitive.content }
         assertTrue("claude" in labels)
         val bundled = R.drawable::class.java.fields.filter { it.name.startsWith("agent_logo_") }.map { it.getInt(null) }.toSet()
-        val mapped = labels.mapNotNull { Presentation.agentLogo(AgentKind(it)) }.toSet()
+        val mapped = labels.mapNotNull { Presentation.agentLogo(AgentKind(it))?.drawable }.toSet()
         assertEquals(bundled, mapped)
         assertNull(Presentation.agentLogo(AgentKind("aider")))
+        // 按原色画、不染色的是这一组，别的 logo 都是单色的。
+        val colored = labels.filter { Presentation.agentLogo(AgentKind(it))?.colored == true }.toSet()
+        val expected = setOf(
+            "claude", "gemini", "devin", "antigravity", "kimi", "kiro", "amp", "qwen", "junie", "trae", "code_buddy", "mistral_vibe",
+            "muse",
+        )
+        assertEquals(expected, colored)
     }
 }
 

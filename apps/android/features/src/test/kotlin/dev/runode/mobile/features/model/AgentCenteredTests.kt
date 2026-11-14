@@ -654,6 +654,53 @@ class StatusTextTests {
         assertEquals("Claude Code 等了 12分钟", Presentation.sessionSubtitle(blocked, null, now).simplifiedChinese)
     }
 
+    @Test fun sessionSubtitleLeavesTheAgentNameToTheLogo() {
+        val now = Instant.ofEpochMilli(10_000_000)
+        fun unnamed(session: SessionInfo, machine: String? = null) =
+            Presentation.sessionSubtitle(session, machine, now, namesAgent = false).english
+        fun since(session: SessionInfo, minutes: Long) =
+            session.copy(meta = session.meta.copy(agentSinceMs = now.toEpochMilli() - minutes * 60_000))
+        val blocked = info(waiting, AgentState.Blocked)
+        assertEquals("Waiting for you", unnamed(blocked))
+        assertEquals("Waiting for you on homelab", unnamed(blocked, "homelab"))
+        assertEquals("Waiting for 12 minutes", unnamed(since(blocked, 12)))
+        assertEquals("Waiting on homelab for 12 minutes", unnamed(since(blocked, 12), "homelab"))
+        val busy = info(working, AgentState.Working)
+        assertEquals("Working", unnamed(busy))
+        assertEquals("Working for 12 minutes", unnamed(since(busy, 12)))
+        assertEquals("Idle", unnamed(info(working, AgentState.Idle)))
+        val vim = info(plain, null).let { it.copy(meta = it.meta.copy(foreground = "vim")) }
+        assertEquals("Running vim", unnamed(vim))
+        assertEquals("Exited", unnamed(info(waiting, AgentState.Blocked, exited = true)))
+        assertEquals("在 homelab 上等了 12分钟", Presentation.sessionSubtitle(since(blocked, 12), "homelab", now, namesAgent = false).simplifiedChinese)
+        assertEquals("干了 12分钟", Presentation.sessionSubtitle(since(busy, 12), null, now, namesAgent = false).simplifiedChinese)
+    }
+
+    @Test fun sectionAgentsAreTheLiveAgentsWithLogos() {
+        val unknown = info(plain, AgentState.Working).let { it.copy(meta = it.meta.copy(agent = Agent(AgentKind("aider"), AgentState.Working))) }
+        val sessions = listOf(
+            info(waiting, AgentState.Blocked),
+            info(plain, null),
+            unknown,
+            info(working, AgentState.Idle),
+            info(working, AgentState.Working, exited = true),
+        )
+        val workspace = SessionSection(SessionSection.Id.Workspace(1u, 0u), "runode", "/Users/ethan/dev/runode", sessions = sessions)
+        assertEquals(listOf(sessions[0], sessions[3]), Presentation.sectionAgents(workspace))
+        assertEquals(emptyList<SessionInfo>(), Presentation.sectionAgents(SessionSection(SessionSection.Id.Background, sessions = sessions)))
+    }
+
+    @Test fun sectionAgentsSummarySaysEachAgentWithoutDurations() {
+        fun longAgo(session: SessionInfo) = session.copy(meta = session.meta.copy(agentSinceMs = 0))
+        val agents = listOf(longAgo(info(waiting, AgentState.Blocked)), longAgo(info(working, AgentState.Working)), info(working, AgentState.Idle))
+        assertEquals(
+            "Claude Code is waiting for you, Claude Code is working, Claude Code is idle",
+            Presentation.sectionAgentsSummary(agents).english,
+        )
+        assertEquals("Claude Code 在等你，Claude Code 在干活", Presentation.sectionAgentsSummary(agents.take(2)).simplifiedChinese)
+        assertNull(Presentation.sectionAgentsSummary(emptyList()))
+    }
+
     @Test fun linkRouteTellsLocalFromDirectFromTunnelled() {
         fun route(address: String?) = Presentation.linkRoute(LinkState.Connected("homelab", address)).english
         val local = "Connected on the local network"

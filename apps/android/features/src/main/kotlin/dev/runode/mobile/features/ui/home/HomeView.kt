@@ -102,6 +102,7 @@ import dev.runode.mobile.features.ui.PreviewTone
 import dev.runode.mobile.features.ui.QuickReplyBar
 import dev.runode.mobile.features.ui.ScreenPadding
 import dev.runode.mobile.features.ui.ScreenPreview
+import dev.runode.mobile.features.ui.SessionSubtitleLine
 import dev.runode.mobile.features.ui.SpawnKindItems
 import dev.runode.mobile.features.ui.TopBar
 import dev.runode.mobile.features.ui.agentClock
@@ -118,6 +119,7 @@ import dev.runode.mobile.features.ui.theme.cardBackground
 import dev.runode.mobile.features.ui.theme.inlineCode
 import dev.runode.mobile.features.ui.theme.resolve
 import dev.runode.mobile.features.ui.theme.themeColors
+import dev.runode.mobile.protocol.SessionInfo
 import dev.runode.mobile.terminal.TerminalView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -178,10 +180,7 @@ fun HomeView(app: AppModel) {
                             val live = app.sessionList(resume.machine.id)?.session(resume.session)
                             ResumeCard(
                                 item = resume,
-                                mark = live?.let { StatusMark.of(SessionStatus.of(it)) } ?: StatusMark.Idle,
-                                status = live?.let {
-                                    Presentation.sessionSubtitle(it, now = agentClock(it.meta.agent, it.meta.agentSinceMs)).resolve()
-                                },
+                                live = live,
                                 onOpen = { app.resumeRecent() },
                             )
                         }
@@ -287,16 +286,12 @@ private fun WaitingCard(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(title, style = Type.headline, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    Presentation.sessionSubtitle(
-                        session,
-                        if (showsMachine) list.machine.name else null,
-                        agentClock(session.meta.agent, session.meta.agentSinceMs),
-                    ).resolve(),
+                SessionSubtitleLine(
+                    session,
+                    now = agentClock(session.meta.agent, session.meta.agentSinceMs),
                     style = Type.footnote,
                     color = colors.secondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    machine = if (showsMachine) list.machine.name else null,
                 )
             }
             if (count > 1) {
@@ -499,11 +494,14 @@ private fun MachineLineMark(tone: MachineLine.Tone, connected: Boolean) {
     }
 }
 
-/** 上次打开的终端，样子和电脑组里的一行一样：前面是会话状态的标记，下面是电脑名和会话在干什么。 */
+/**
+ * 上次打开的终端，样子和电脑组里的一行一样：前面是会话状态的标记，下面是会话在干什么和电脑名，状态在前，一行放不下时截掉的
+ * 是电脑名。[live] 是电脑上还在的那个会话，没有时标记画空闲、下面只写电脑名。
+ */
 @Composable
-private fun ResumeCard(item: ResumeItem, mark: StatusMark, status: String?, onOpen: () -> Unit) {
+private fun ResumeCard(item: ResumeItem, live: SessionInfo?, onOpen: () -> Unit) {
     val colors = themeColors
-    val subtitle = status?.let { stringResource(R.string.home_resume_detail, item.machine.name, it) } ?: item.machine.name
+    val mark = live?.let { StatusMark.of(SessionStatus.of(it)) } ?: StatusMark.Idle
     Row(
         Modifier
             .fillMaxWidth()
@@ -519,7 +517,17 @@ private fun ResumeCard(item: ResumeItem, mark: StatusMark, status: String?, onOp
         Box(Modifier.width(20.dp), contentAlignment = Alignment.Center) { StatusGlyph(mark, 16.dp) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(item.title.resolve(), style = Type.subheadline.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, style = Type.footnote, color = colors.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (live != null) {
+                SessionSubtitleLine(
+                    live,
+                    now = agentClock(live.meta.agent, live.meta.agentSinceMs),
+                    style = Type.footnote,
+                    color = colors.secondary,
+                    trailingMachine = item.machine.name,
+                )
+            } else {
+                Text(item.machine.name, style = Type.footnote, color = colors.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         DisclosureChevron()
     }
