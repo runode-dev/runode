@@ -92,7 +92,8 @@ shown does not mean on screen.
 ";
 
 const READ: &str = "\
-Print the text on a session's screen.
+Print the text on a session's screen. A line the terminal wrapped comes back
+as one line.
 
 Usage: runode read [SESSION] [--lines N | --command [N]]
 
@@ -101,7 +102,7 @@ Arguments:
              session`
 
 Options:
-      --lines N      Print N lines from the bottom, scrollback included
+      --lines N      Print the last N screen rows, scrollback included
       --command [N]  Print the output of the Nth last command (default 1);
                      needs shell integration
   -h, --help         Show this help
@@ -165,7 +166,7 @@ Options:
                                  the line
                         quiet SECS
                                  the screen did not change for SECS
-      --lines N       With `--for text`: look only at the last N lines
+      --lines N       With `--for text`: look only at the last N screen rows
       --new           With `--for text`: skip the lines already there. A line
                       that is cleared and printed again unchanged is not new
       --timeout SECS  Give up after SECS

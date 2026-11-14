@@ -669,6 +669,51 @@ fn screen_tail_reads_the_bottom_of_the_screen() {
     assert_eq!(screen_tail(&empty, Some(2)).unwrap(), "");
 }
 
+fn grid(cols: u16, rows: u16) -> Terminal<'static, 'static> {
+    new_terminal(GridSize { cols, rows, cell_width_px: 1, cell_height_px: 1 }).unwrap()
+}
+
+/// 终端软折开的行接回一行：折点上的空格留着，硬换行不接，被挤到下一行的宽字符不多出空格。
+#[test]
+fn screen_tail_joins_soft_wrapped_lines() {
+    let mut t = grid(10, 6);
+    t.vt_write(b"abcdefghi jkl\r\nxxxxxxxx(esc)\r\nend");
+    assert_eq!(screen_tail(&t, None).unwrap(), "abcdefghi jkl\nxxxxxxxx(esc)\nend\n");
+    let mut wide = grid(5, 3);
+    wide.vt_write("abcd中文".as_bytes());
+    assert_eq!(screen_tail(&wide, None).unwrap(), "abcd中文\n");
+    // 识别规则看的是屏幕行，不接。
+    assert_eq!(detection_text(&t).unwrap().unwrap(), "abcdefghi\njkl\nxxxxxxxx(e\nsc)\nend\n");
+}
+
+/// 按行数取到的最上面是软折下来的半截时，往上补到那条逻辑行的开头，最多补一屏高。
+#[test]
+fn screen_tail_extends_a_cut_line_upwards() {
+    let mut t = grid(4, 2);
+    t.vt_write(b"0123456789");
+    assert_eq!(screen_tail(&t, Some(1)).unwrap(), "0123456789\n");
+    let mut long = grid(4, 2);
+    long.vt_write(&[b'a'; 20]);
+    assert_eq!(screen_tail(&long, Some(1)).unwrap(), "a".repeat(12) + "\n");
+    // 一屏的读法也往回滚历史里补。
+    let mut tail = grid(5, 2);
+    tail.vt_write(b"0123456789\r\nx");
+    assert_eq!(screen_tail(&tail, None).unwrap(), "0123456789\nx\n");
+}
+
+/// 窄终端把选项末尾的 `(esc)` 折到下一行开头，读屏接回来以后选项文字是完整的。
+#[test]
+fn a_wrapped_option_reads_whole() {
+    let mut t = grid(52, 12);
+    t.vt_write(
+        " Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. Yes, and don't ask again for rm commands\r\n   \
+          3. No, and tell Claude what to do differently (esc)\r\n"
+            .as_bytes(),
+    );
+    let prompt = runode_agent::prompt::parse(&screen_tail(&t, Some(24)).unwrap()).unwrap();
+    assert_eq!(prompt.options[2].text, "No, and tell Claude what to do differently");
+}
+
 #[test]
 fn snapshot_format_reads_the_envelope() {
     assert_eq!(snapshot_format().unwrap(), 1);

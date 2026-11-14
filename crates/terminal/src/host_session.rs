@@ -718,8 +718,8 @@ impl HostSession {
         Ok(replay)
     }
 
-    /// 屏幕底部的文字：`lines` 为 `None` 时是当前一屏，否则是含回滚历史的最底下这么多行，
-    /// 见 `vt::screen_tail`。
+    /// 屏幕底部的文字：`lines` 为 `None` 时是当前一屏，否则是含回滚历史的最底下这么多屏幕行；
+    /// 终端软折开的行接回一行。
     pub fn screen_text(&self, lines: Option<u32>) -> Result<String> {
         Ok(vt::screen_tail(&self.terminal, lines)?)
     }

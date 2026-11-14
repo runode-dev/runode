@@ -445,7 +445,8 @@ pub(crate) fn detection_text(terminal: &Terminal<'_, '_>) -> Result<Option<Strin
 }
 
 /// 屏幕底部的文字，给前端读屏幕用：`lines` 为 `None` 时是活动区的一屏，否则是整个屏幕（含
-/// 回滚历史）里最后一个有字的行往上这么多行，活动区里还没写到的空行不算。一行一个 `\n`，
+/// 回滚历史）里最后一个有字的行往上这么多屏幕行，活动区里还没写到的空行不算。终端软折开的行
+/// 接回一行，最上面是半截时往上补到那条逻辑行的开头，最多补一屏高。一个逻辑行一个 `\n`，
 /// 行尾空白去掉，末尾的空行去掉。
 pub(crate) fn screen_tail(terminal: &Terminal<'_, '_>, lines: Option<u32>) -> Result<String> {
     let total = terminal.total_rows()?;
@@ -454,7 +455,7 @@ pub(crate) fn screen_tail(terminal: &Terminal<'_, '_>, lines: Option<u32>) -> Re
         return Ok(String::new());
     }
     let Some(lines) = lines else {
-        let mut picked = screen_lines(terminal, total.saturating_sub(rows), total - 1)?;
+        let mut picked = logical_lines(terminal, total.saturating_sub(rows), total - 1, rows)?;
         while picked.last().is_some_and(String::is_empty) {
             picked.pop();
         }
@@ -473,14 +474,15 @@ pub(crate) fn screen_tail(terminal: &Terminal<'_, '_>, lines: Option<u32>) -> Re
         }
         end = start;
     }
-    let picked = screen_lines(terminal, end.saturating_sub(lines as usize), end - 1)?;
+    let picked = logical_lines(terminal, end.saturating_sub(lines as usize), end - 1, rows)?;
     Ok(picked.into_iter().map(|line| line + "\n").collect())
 }
 
 /// `command_output` 找到的结果。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CommandOutput {
-    /// 那条命令的输出，格式同 `screen_tail`。`truncated` 为真时它的提示符和输出的开头已经被挤出
+    /// 那条命令的输出：一个逻辑行（终端软折开的行接回一行）一个 `\n`，行尾空白去掉，末尾的
+    /// 空行去掉。`truncated` 为真时它的提示符和输出的开头已经被挤出
     /// 回滚历史，给的是还留着的部分。
     Found { text: String, truncated: bool },
     /// 屏幕上（含回滚历史）没有 shell 集成标出的提示符。
@@ -560,7 +562,7 @@ pub(crate) fn command_output(terminal: &Terminal<'_, '_>, n: u32) -> Result<Comm
     } else {
         return Ok(CommandOutput::Fewer(commands));
     };
-    let mut lines = if first < end { screen_lines(terminal, first, end - 1)? } else { Vec::new() };
+    let mut lines = if first < end { logical_lines(terminal, first, end - 1, 0)? } else { Vec::new() };
     while lines.last().is_some_and(String::is_empty) {
         lines.pop();
     }
@@ -605,6 +607,31 @@ pub(crate) fn scroll_margins(terminal: &Terminal<'_, '_>) -> Result<((u16, u16),
 /// 整个屏幕（含回滚历史）第 `first` 到 `last` 行的纯文字，一行一项，行尾空白去掉。软换行
 /// 不接起来，和屏幕上的行一一对应；末尾的空行可能没有。
 pub(crate) fn screen_lines(terminal: &Terminal<'_, '_>, first: usize, last: usize) -> Result<Vec<String>> {
+    format_lines(terminal, first, last, false)
+}
+
+/// 整个屏幕（含回滚历史）第 `first` 到 `last` 行的纯文字，一项一个逻辑行：终端软折开的行
+/// 接回一行，行尾空白去掉；末尾的空行可能没有。`first` 落在上一行软折下来的半截上时，往上
+/// 补到那条逻辑行的开头，最多补 `extend` 行，补不到就从半截开始。
+pub(crate) fn logical_lines(
+    terminal: &Terminal<'_, '_>,
+    first: usize,
+    last: usize,
+    extend: usize,
+) -> Result<Vec<String>> {
+    let mut first = first;
+    let floor = first.saturating_sub(extend);
+    while first > floor {
+        let point = Point::Screen(PointCoordinate { x: 0, y: u32::try_from(first).unwrap_or(u32::MAX) });
+        if !terminal.grid_ref(point)?.row()?.is_wrap_continuation()? {
+            break;
+        }
+        first -= 1;
+    }
+    format_lines(terminal, first, last, true)
+}
+
+fn format_lines(terminal: &Terminal<'_, '_>, first: usize, last: usize, unwrap: bool) -> Result<Vec<String>> {
     let cols = terminal.cols()?;
     let point = |x: u16, y: usize| Point::Screen(PointCoordinate { x, y: u32::try_from(y).unwrap_or(u32::MAX) });
     let selection = Selection::new(
@@ -613,7 +640,7 @@ pub(crate) fn screen_lines(terminal: &Terminal<'_, '_>, first: usize, last: usiz
         false,
     );
     let mut formatter = Formatter::new(terminal)?;
-    formatter.set_format(Format::Plain)?.set_unwrap(false)?.set_trim(true)?;
+    formatter.set_format(Format::Plain)?.set_unwrap(unwrap)?.set_trim(true)?;
     // SAFETY: 选区的两端取自同一个终端当前的屏幕。
     unsafe { formatter.set_selection(Some(&selection)) }?;
     let bytes = formatter.format_alloc(None)?;

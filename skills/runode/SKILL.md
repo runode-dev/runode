@@ -116,7 +116,7 @@ Without `--for`, `wait` waits for `stopped`: the agent is idle, asking a
 question, or gone. `--for working`, `idle` or `blocked` wait for that state.
 `--for text` looks at the whole screen, so without `--new` it also matches
 what is already there, the command you just typed included; `--lines N` widens
-it to the last N lines, scrollback included. `--new` compares how many times
+it to the last N screen rows, scrollback included. `--new` compares how many times
 each matching line is there, so a watcher that clears the screen and prints
 the same line again (`cargo watch -c`, `jest --watch`) never shows it as new;
 match something that changes every run (a line with the time) or use
@@ -132,9 +132,11 @@ with `--wait`. Status 3 means the terminal exited.
 ```sh
 runode read right --command       # output of the last command (needs shell integration)
 runode read right --command 2     # the one before it
-runode read right --lines 200     # the last 200 lines, scrollback included
+runode read right --lines 200     # the last 200 screen rows, scrollback included
 runode read right                 # what is on the screen now
 ```
+
+A line the terminal wrapped comes back as one line.
 
 Prefer `--command` after running something: you get exactly that command's
 output. When its start has scrolled away, runode says so on stderr.
