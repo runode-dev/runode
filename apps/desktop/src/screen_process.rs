@@ -508,12 +508,14 @@ pub(crate) fn current_access() -> Access {
     Access { screen: runode_screen::permissions(), full_disk: full_disk_access() }
 }
 
-/// 有没有「完全磁盘访问」：系统没有查它的接口，试着只读打开受它保护的 TCC 库，打得开就算有。
+/// 有没有「完全磁盘访问」：系统没有查它的接口，试着只读打开受它保护的 TCC 库，打得开一个就算有。系统级的
+/// 库总在；用户级的库有的系统上没有，不能只看它。
 #[cfg(target_os = "macos")]
 fn full_disk_access() -> bool {
-    runode_paths::Dirs::from_env()
-        .home
-        .is_some_and(|home| std::fs::File::open(home.join("Library/Application Support/com.apple.TCC/TCC.db")).is_ok())
+    const TCC_DB: &str = "Library/Application Support/com.apple.TCC/TCC.db";
+    let opens = |path: &std::path::Path| std::fs::File::open(path).is_ok();
+    opens(&std::path::Path::new("/").join(TCC_DB))
+        || runode_paths::Dirs::from_env().home.is_some_and(|home| opens(&home.join(TCC_DB)))
 }
 
 /// `runode --screen-permissions`：把这个进程查到的屏幕录制、输入和完全磁盘访问的授权按 `0`、`1` 三个字符
