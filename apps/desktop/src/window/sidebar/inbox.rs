@@ -1,18 +1,18 @@
 //! 侧栏顶上的「需要你」：本窗口里在等用户回答的 agent 分屏，一个分屏一行，等得最久的在上面，按下跳到那个分屏。
-//! 本窗口有 agent、却没有一个在等时是一个虚线框的空状态，一个 agent 都没有时整段不画。
+//! 没有一个在等时整段不画。
 
 use std::time::{Duration, Instant};
 
-use gpui::{AnyElement, Context, FontWeight, Role, Window, div, prelude::*, px, svg};
+use gpui::{AnyElement, Context, FontWeight, Role, Window, div, prelude::*, px};
 
 use super::project_group::project_name;
 use crate::{
     agent_prompts,
     git_panel::ago::waited,
     ui::{
-        a11y::{Press as _, StaticText as _},
+        a11y::Press as _,
         font_size::{FontSize, scaled},
-        icons::{CHECK_ICON, EYE_ICON},
+        icons::EYE_ICON,
         theme::ActiveTheme as _,
     },
     window::{
@@ -28,7 +28,7 @@ const ROW_INSET: f32 = 11.;
 const ROW_LINE_HEIGHT: f32 = 22.;
 /// 标记和名字的间距。
 const MARK_GAP: f32 = 8.;
-/// 卡片和空状态虚线框的圆角。
+/// 卡片的圆角。
 const CARD_RADIUS: f32 = 12.;
 /// 卡片最多占窗口高度的这个比例，行多了在卡片里滚动，下面的项目列表不会被挤没。
 const MAX_HEIGHT_RATIO: f32 = 0.4;
@@ -55,15 +55,14 @@ fn next_redraw(waits: impl IntoIterator<Item = Instant>, now: Instant) -> Option
 }
 
 impl WindowView {
-    /// 侧栏的「需要你」：有等回答的分屏时是标题和一张卡片，没有时是空状态；本窗口一个 agent 都没有时为 `None`。
+    /// 侧栏的「需要你」：标题和一张卡片；没有等回答的分屏时为 `None`。
     /// 顺带排好下一次重画。
     pub(super) fn render_inbox(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let entries = self.window_entries(window, cx);
-        let any_agent = !entries.is_empty();
         let waiting = waiting_oldest_first(entries, |entry| (entry.mark.status, entry.changed_at));
         self.schedule_inbox_redraw(waiting.iter().map(|entry| entry.changed_at), cx);
         if waiting.is_empty() {
-            return any_agent.then(|| render_empty(cx));
+            return None;
         }
         let theme = cx.theme();
         let (surface, border, warning_text) = (theme.surface, theme.border, theme.warning_text);
@@ -231,29 +230,6 @@ impl WindowView {
         });
         self.inbox_redraw = Some((due, task));
     }
-}
-
-/// 本窗口有 agent、但没有一个在等回答：一个虚线框，对勾和一句话。
-fn render_empty(cx: &mut Context<WindowView>) -> AnyElement {
-    let theme = cx.theme();
-    let (control_border, subtle, success) = (theme.control_border, theme.subtle_foreground, theme.success);
-    let text = rust_i18n::t!("inbox.empty").into_owned();
-    div()
-        .id("inbox-empty")
-        .aria_static_text(text.clone())
-        .flex()
-        .items_center()
-        .gap(px(8.))
-        .px(px(ROW_INSET))
-        .py(px(10.))
-        .rounded(px(CARD_RADIUS))
-        .border_1()
-        .border_dashed()
-        .border_color(control_border)
-        .text_color(subtle)
-        .child(svg().path(CHECK_ICON).flex_none().size(px(14.)).text_color(success))
-        .child(div().min_w_0().truncate().child(text))
-        .into_any_element()
 }
 
 #[cfg(test)]

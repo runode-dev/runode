@@ -213,7 +213,6 @@ inbox:
   watching_just: 正在看，刚开始等
   waited_just: 刚开始等
   detail_blocked: "%{agent} 在 %{place} 里等你回答"
-  empty: 没有会话在等你
   show_terminal: 看终端
 prompts:
   option_for: "%{number}. %{text}：%{title}"

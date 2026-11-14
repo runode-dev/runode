@@ -213,7 +213,6 @@ inbox:
   watching_just: Watching, just asked
   waited_just: Just asked
   detail_blocked: "%{agent} is waiting for you in %{place}"
-  empty: Nothing is waiting for you
   show_terminal: Show terminal
 prompts:
   option_for: "%{number}. %{text}: %{title}"
