@@ -3,11 +3,14 @@ package dev.runode.mobile.features.ui
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -150,6 +153,8 @@ class PageTests {
         val app = app()
         onMain { app.showingSettings = true }
         compose.setContent { RunodeApp(app) }
+        // 电脑那一段在设置页靠下，屏幕矮时还没组合出来，先滚过去。
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Studio"))
         compose.onNodeWithText("Studio").performClick()
         compose.onNodeWithText(context.getString(R.string.machine_delete)).performClick()
         compose.onNodeWithText(context.getString(R.string.home_delete_title)).assertIsDisplayed()
