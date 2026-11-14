@@ -2,8 +2,8 @@
 # Release 构建 iOS app，装到连着的真机上启动。Debug 不做优化，手机上画一帧要多两成，刷新又按耗时限速，
 # 帧率跟着掉，真机上试手感要用 Release；要断点调试时在 Xcode 里跑 Debug。
 #
-# 用哪台：IOS_DEVICE 给了就用这个名字或 UDID 的那台；没给时用第一台已经和这台电脑配对、连着的 iPhone
-# （数据线或同一个网络都行）。ghostty-vt 的 xcframework 还没编过时先编一份。
+# 用哪台：IOS_DEVICE 给了就用这个名字或 UDID 的那台；没给时用第一台已经和这台电脑配对的 iPhone，
+# 连着的优先（数据线或同一个网络都行）。ghostty-vt 的 xcframework 还没编过时先编一份。
 #
 # 签名用工程里设的开发团队，自动签名；描述文件缺了由 xcodebuild 去开发者账号里补，所以 Xcode 里要登录过
 # 这个团队的账号。手机上要打开开发者模式；第一次装时还要在「设置 → 通用 → VPN 与设备管理」里信任开发者。
@@ -24,8 +24,9 @@ devices_json="$(mktemp)"
 trap 'rm -f "$devices_json"' EXIT
 xcrun devicectl list devices --json-output "$devices_json" >/dev/null
 
-# 从 devicectl 的 JSON 里挑一台真机：按名字或 UDID 找，没给时挑连着的 iPhone；没有连着的就不挑，
-# 免得跑完耗时的 Release 构建才在安装时失败。
+# 从 devicectl 的 JSON 里挑一台真机：按名字或 UDID 找，没给时先挑隧道已连上的 iPhone，没有就挑已配对的
+# （经局域网配对的手机闲着时隧道会断开，xcodebuild 装机时自己连上）；没配对的不挑，免得跑完耗时的
+# Release 构建才在安装时失败。
 udid="$(/usr/bin/python3 -I -c '
 import json, sys
 want = sys.argv[2]
@@ -33,8 +34,10 @@ devices = [
     d for d in json.load(open(sys.argv[1]))["result"]["devices"]
     if d["hardwareProperties"].get("reality") == "physical" and d["hardwareProperties"].get("platform") == "iOS"
 ]
+def paired(d):
+    return d["connectionProperties"].get("pairingState") == "paired"
 def connected(d):
-    return d["connectionProperties"].get("pairingState") == "paired" and d["connectionProperties"].get("tunnelState") == "connected"
+    return paired(d) and d["connectionProperties"].get("tunnelState") == "connected"
 if want:
     picked = [
         d for d in devices
@@ -42,7 +45,7 @@ if want:
     ]
 else:
     phones = [d for d in devices if d["hardwareProperties"].get("deviceType") == "iPhone"]
-    picked = [d for d in phones if connected(d)]
+    picked = [d for d in phones if connected(d)] or [d for d in phones if paired(d)]
 print(picked[0]["hardwareProperties"]["udid"] if picked else "")
 ' "$devices_json" "${IOS_DEVICE:-}")"
 if [[ -z "$udid" ]]; then
