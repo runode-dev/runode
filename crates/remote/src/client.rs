@@ -8,7 +8,8 @@
 //! 连配对过的电脑时先单独试一个首选的地址（上次连上的，或调用方给的），它在 `PREFERRED_HEAD_START` 里过了
 //! 门禁就用它，Bonjour、iroh 都不开。它失败了或者没来得及，几条路同时走（`race`）：直连的地址错开一点先后
 //! 一个个开（前一个失败了马上开下一个），死地址不拖着后面的；Bonjour 按指纹找到的地址找到了再加进来；有跨
-//! 网络的地址时稍等一下再开 iroh，局域网通的时候用不上它。先过门禁的那条胜出（还没完的首选地址也算一条），
+//! 网络的地址时稍等一下再开 iroh，局域网通的时候用不上它。配对时直连和 Bonjour 都失败了才开 iroh，在局域网里
+//! 配对的总是记下直连的地址。先过门禁的那条胜出（还没完的首选地址也算一条），
 //! 之后才开、才到的关掉。调用方给的 `Cancel` 取消了时马上放弃，还在连的几条一起断掉。
 
 mod cancel;
@@ -143,10 +144,10 @@ pub struct Dialed {
     pub addr: Option<SocketAddr>,
 }
 
-/// 用配对链接 `uri` 配对，这边叫 `device_name`。链接里的地址、局域网里 Bonjour 找到的同一指纹的那台、
-/// （链接带 `node` 时）跨网络连接一起连，配对口令只能用一次，所以只拿最先握完手、收到 `RemoteChallenge`
-/// 的那条去配对，别的关掉。成功后记下这台电脑，返回过了门禁的连接。`cancel` 取消了时马上返回
-/// `DialError::Cancelled`。
+/// 用配对链接 `uri` 配对，这边叫 `device_name`。链接里的地址和局域网里 Bonjour 找到的同一指纹的那台一起连，
+/// 都失败了（链接带 `node` 时）才开跨网络连接；配对口令只能用一次，所以只拿最先握完手、收到
+/// `RemoteChallenge` 的那条去配对，别的关掉。成功后记下这台电脑，返回过了门禁的连接。`cancel` 取消了时马上
+/// 返回 `DialError::Cancelled`。
 pub fn pair(dirs: &Dirs, uri: &PairingUri, device_name: &str, cancel: &Cancel) -> Result<Dialed, DialError> {
     if now_unix() >= uri.expires_at {
         return Err(DialError::Expired);
@@ -158,7 +159,8 @@ pub fn pair(dirs: &Dirs, uri: &PairingUri, device_name: &str, cancel: &Cancel) -
         Gate::Pair { secret: uri.secret, name: device_name.into(), claimed: AtomicBool::new(false) },
     ));
     let direct = uri.addrs.iter().map(|ip| SocketAddr::new(*ip, uri.port)).collect();
-    let won = race.run(None, direct, uri.node.clone(), cancel).map_err(|err| match err {
+    let tunnel = uri.node.clone().map(TunnelRoute::Fallback);
+    let won = race.run(None, direct, tunnel, cancel).map_err(|err| match err {
         DialError::Rejected(RejectReason::PairingInvalid) if now_unix() >= uri.expires_at => DialError::Expired,
         err => err,
     })?;
@@ -199,7 +201,8 @@ pub fn dial_via(dirs: &Dirs, id: &str, prefer: Option<SocketAddr>, cancel: &Canc
             direct.push(addr);
         }
     }
-    let won = race.run(prefer.or(machine.last_addr), direct, machine.node.clone(), cancel)?;
+    let tunnel = machine.node.clone().map(TunnelRoute::Delayed);
+    let won = race.run(prefer.or(machine.last_addr), direct, tunnel, cancel)?;
     let recorded = store::connected(dirs, id, &won.host_name, won.node.as_deref(), won.addr).unwrap_or_else(|err| {
         tracing::warn!("cannot record how {id} was reached: {err}");
         None
@@ -306,6 +309,14 @@ enum Route {
     Tunnel(String),
 }
 
+/// 跨网络连接（带着 `node`）什么时候开。
+enum TunnelRoute {
+    /// 晚 `TUNNEL_DELAY` 开，和直连、Bonjour 一起走。
+    Delayed(String),
+    /// 直连和 Bonjour 都失败了才开。
+    Fallback(String),
+}
+
 impl Race {
     fn new(fingerprint: [u8; FINGERPRINT_LEN], key: EcdsaKeyPair, gate: Gate) -> Self {
         Self {
@@ -319,14 +330,14 @@ impl Race {
     }
 
     /// 有 `prefer` 时先单独连它，`PREFERRED_HEAD_START` 里过了门禁就用它；它失败了或没来得及，直连 `direct`、
-    /// Bonjour 和（有 `node` 时）跨网络连接一起走，返回先过门禁的那条。被拒（限速除外：按来源算，别的路未必被限）
-    /// 马上结束；都失败时按限速、指纹不对、协议不对、连不上的先后报一个。`cancel` 取消了时马上报
-    /// `DialError::Cancelled`。返回时还没完的几条都断掉。
+    /// Bonjour 和（有 `tunnel` 时，按 `TunnelRoute` 说的时候）跨网络连接一起走，返回先过门禁的那条。被拒（限速
+    /// 除外：按来源算，别的路未必被限）马上结束；都失败时按限速、指纹不对、协议不对、连不上的先后报一个。
+    /// `cancel` 取消了时马上报 `DialError::Cancelled`。返回时还没完的几条都断掉。
     fn run(
         self: &Arc<Self>,
         prefer: Option<SocketAddr>,
         direct: Vec<SocketAddr>,
-        node: Option<String>,
+        tunnel: Option<TunnelRoute>,
         cancel: &Cancel,
     ) -> Result<Won, DialError> {
         if cancel.is_cancelled() {
@@ -341,7 +352,7 @@ impl Race {
                 stop.cancel();
             })
         };
-        let result = self.run_inner(tx, &rx, prefer, direct, node);
+        let result = self.run_inner(tx, &rx, prefer, direct, tunnel);
         drop(cancelled);
         self.stop.cancel();
         match result {
@@ -356,7 +367,7 @@ impl Race {
         rx: &mpsc::Receiver<Event>,
         prefer: Option<SocketAddr>,
         direct: Vec<SocketAddr>,
-        node: Option<String>,
+        tunnel: Option<TunnelRoute>,
     ) -> Result<Won, DialError> {
         let mut pending = 0;
         let mut failures = Failures::default();
@@ -375,34 +386,60 @@ impl Race {
                 return result;
             }
         }
-        let mut source = |name: &str, body: Source| {
-            let (race, tx) = (self.clone(), tx.clone());
-            let spawned = thread::Builder::new().name(format!("remote-dial-{name}")).spawn(move || {
-                body(&race, &tx);
-                let _ = tx.send(Event::SourceDone);
-            });
-            match spawned {
-                Ok(_) => pending += 1,
-                Err(err) => tracing::warn!("cannot start dialing {name}: {err}"),
-            }
-        };
         let direct = direct.into_iter().map(Route::Direct).collect();
-        source("direct", Box::new(move |race, tx| race.stagger(tx, direct)));
-        source("bonjour", Box::new(|race, tx| race.bonjour(tx)));
-        if let Some(node) = node {
-            source(
-                "tunnel",
-                Box::new(move |race, tx| {
+        self.source(&tx, &mut pending, "direct", Box::new(move |race, tx| race.stagger(tx, direct)));
+        self.source(&tx, &mut pending, "bonjour", Box::new(|race, tx| race.bonjour(tx)));
+        let fallback = match tunnel {
+            Some(TunnelRoute::Delayed(node)) => {
+                let body: Source = Box::new(move |race, tx| {
                     if !race.stop.sleep(TUNNEL_DELAY) {
-                        let _ = tx.send(Event::Started);
-                        let _ = tx.send(Event::Finished(race.attempt(&Route::Tunnel(node))));
+                        race.open_tunnel(tx, node);
                     }
-                }),
-            );
-        }
-        drop(tx);
+                });
+                self.source(&tx, &mut pending, "tunnel", body);
+                None
+            }
+            Some(TunnelRoute::Fallback(node)) => {
+                tunnel::warm();
+                Some(node)
+            }
+            None => None,
+        };
         let deadline = self.deadline;
-        self.collect(rx, &mut pending, &mut failures, deadline).unwrap_or_else(|| Err(failures.worst()))
+        if let Some(result) = self.collect(rx, &mut pending, &mut failures, deadline) {
+            return result;
+        }
+        // `pending` 还有剩的是到了 `deadline`；口令已经交给了失败的那条时，跨网络连上了也配不了对。
+        let claimed = matches!(&self.gate, Gate::Pair { claimed, .. } if claimed.load(Ordering::Relaxed));
+        if let Some(node) = fallback
+            && pending == 0
+            && !claimed
+        {
+            self.source(&tx, &mut pending, "tunnel", Box::new(move |race, tx| race.open_tunnel(tx, node)));
+            if let Some(result) = self.collect(rx, &mut pending, &mut failures, deadline) {
+                return result;
+            }
+        }
+        Err(failures.worst())
+    }
+
+    /// 在自己的线程里跑来源 `body`，开起来了 `pending` 加一。
+    fn source(self: &Arc<Self>, tx: &mpsc::Sender<Event>, pending: &mut usize, name: &str, body: Source) {
+        let (race, tx) = (self.clone(), tx.clone());
+        let spawned = thread::Builder::new().name(format!("remote-dial-{name}")).spawn(move || {
+            body(&race, &tx);
+            let _ = tx.send(Event::SourceDone);
+        });
+        match spawned {
+            Ok(_) => *pending += 1,
+            Err(err) => tracing::warn!("cannot start dialing {name}: {err}"),
+        }
+    }
+
+    /// 经跨网络连接连 `node`，结果报给 `tx`。
+    fn open_tunnel(&self, tx: &mpsc::Sender<Event>, node: String) {
+        let _ = tx.send(Event::Started);
+        let _ = tx.send(Event::Finished(self.attempt(&Route::Tunnel(node))));
     }
 
     /// 收各条路的结果，直到有了定论（胜出的、被拒的、取消了）、`pending` 条都结束了或到了 `until`；后两种为

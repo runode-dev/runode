@@ -61,6 +61,18 @@ fn shared() -> io::Result<Shared> {
     Ok(built)
 }
 
+/// 在后台把端点建好，之后的 `open` 不用再等它。
+pub(super) fn warm() {
+    let spawned = thread::Builder::new().name("remote-tunnel-warm".into()).spawn(|| {
+        if let Err(err) = shared() {
+            tracing::debug!("cannot start iroh ahead of time: {err}");
+        }
+    });
+    if let Err(err) = spawned {
+        tracing::debug!("cannot start iroh ahead of time: {err}");
+    }
+}
+
 /// 经 iroh 连到 `node`，开一条双向流，返回接在它上面的本机 TCP 连接。最晚到 `until`；`stop` 取消了时停下正在
 /// 进行的 iroh 连接，返回 `DialError::Cancelled`。
 pub(super) fn open(node: &str, until: Instant, stop: &Cancel) -> Result<TcpStream, DialError> {
