@@ -130,6 +130,14 @@ impl Workspace {
     pub(super) fn mark(&self, cx: &App) -> Option<Mark> {
         summarize(self.tabs.iter().filter_map(|tab| tab.mark(cx)))
     }
+
+    /// 每个跑着 agent 的分屏一个标记，按标签的顺序、标签里按分屏的排列；前台不是 agent 的分屏不算。
+    pub(super) fn agent_marks(&self, cx: &App) -> Vec<Mark> {
+        self.tabs
+            .iter()
+            .flat_map(|tab| tab.root.leaves().into_iter().filter_map(|pane| tab.pane_mark(pane, cx)))
+            .collect()
+    }
 }
 
 /// agent 列表里的一行：哪个窗口的哪个分屏，以及显示和排序用的信息。

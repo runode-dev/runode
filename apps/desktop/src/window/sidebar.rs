@@ -18,16 +18,16 @@ use crate::ui::icons::system_logos;
 use crate::ui::panel::split_handle;
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
-    AccessibleAction, Action, AnyElement, App, Axis, Context, Div, ExternalPaths, Focusable, FontWeight, Modifiers,
-    MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, Window, WindowControlArea, div,
-    prelude::*, px, relative, svg,
+    AccessibleAction, Action, AnyElement, App, Axis, Context, Div, ExternalPaths, Focusable, FontWeight, Hsla,
+    Modifiers, MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, Window,
+    WindowControlArea, div, prelude::*, px, relative, svg,
 };
 
 use super::{
     AGENT_MARK_SIZE_SMALL, CARD_GAP, CloseWorkspace, DIVIDER_GRAB_WIDTH, DIVIDER_STEP, Divider, NewTab, NewWorkspace,
     PressDown, RenameTarget, RenameWorkspace, Renaming, SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE,
     TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView,
-    agents::Status as AgentStatus,
+    agents::{Mark, Status as AgentStatus, logo::agent_logo},
     background, cards, drag_window,
     inline_edit::InlineEdit,
     pane_move::DraggedPane,
@@ -44,6 +44,7 @@ use crate::{
     ui::{
         font_size::{self, FontSize, scaled},
         hsla,
+        status_mark::{MarkKind, status_mark},
         theme::{ADDED, MODIFIED, REMOVED},
         tooltip::tooltip,
     },
@@ -67,15 +68,82 @@ fn sidebar_toggle_left(fullscreen: bool) -> f32 {
 pub(super) fn sidebar_toggle_inset(fullscreen: bool) -> f32 {
     sidebar_toggle_left(fullscreen) + SIDEBAR_TOGGLE_WIDTH + 8.
 }
+/// 侧栏的底色：卡片样式下侧栏直接画在外框上。
+fn sidebar_background(cx: &App) -> Hsla {
+    if cards(cx) { cx.theme().frame } else { cx.theme().mix(0.03) }
+}
+
+/// workspace 行右边的 agent 图标，一个 agent 一个，单色的 logo 染成 `fg`。右下角的圆点是那个 agent 的状态：
+/// 等回答琥珀色，在干活蓝色，干完了没看绿色，空闲不画；圆点描一圈 `ring`，压在图标上也分得开。认不出是哪家的
+/// agent 画成提示符。图标定宽、不能截断，所以按 `room`（可用的宽度）少画几个，画不下的并进「+N」，至少画一个。
+fn agent_icons(agents: &[Mark], room: f32, ring: Hsla, fg: Hsla, cx: &App) -> Div {
+    let theme = cx.theme();
+    let size = px(AGENT_ICON_SIZE);
+    // 「+N」按每个字符约一个等宽字宽估。
+    let more_width = |more: usize| {
+        if more == 0 { 0. } else { AGENT_ICON_GAP + (more.to_string().len() + 1) as f32 * 7. * font_size::scale(cx) }
+    };
+    let fits = |shown: usize| {
+        let icons = shown as f32 * AGENT_ICON_SIZE + shown.saturating_sub(1) as f32 * AGENT_ICON_GAP;
+        icons + more_width(agents.len() - shown) <= room
+    };
+    let shown = (1..=agents.len().min(MAX_AGENT_ICONS)).rev().find(|&shown| fits(shown)).unwrap_or(1);
+    let icons = agents.iter().take(shown).map(|agent| {
+        let logo = agent_logo(agent.kind, size, fg)
+            .unwrap_or_else(|| status_mark("workspace-agent-other", MarkKind::Idle, AGENT_ICON_SIZE, cx));
+        let dot = match agent.status {
+            AgentStatus::Blocked => Some(theme.warning),
+            AgentStatus::Working => Some(theme.info),
+            AgentStatus::Done => Some(theme.success),
+            AgentStatus::Idle => None,
+        };
+        let outer = AGENT_DOT_SIZE + AGENT_DOT_RING * 2.;
+        div().relative().flex_none().flex().child(logo).children(dot.map(|color| {
+            div()
+                .absolute()
+                .right(px(-outer / 2. + 1.))
+                .bottom(px(-outer / 2. + 1.))
+                .size(px(outer))
+                .rounded_full()
+                .bg(ring)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(div().size(px(AGENT_DOT_SIZE)).rounded_full().bg(color))
+        }))
+    });
+    let more = agents.len() - shown;
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(AGENT_ICON_GAP))
+        .children(icons)
+        .when(more > 0, |row| row.child(div().flex_none().text_size(FontSize::Small).child(format!("+{more}"))))
+}
+
 /// 侧栏顶上几段（搜索行、「需要你」、项目栏）之间的间距。
 const SECTION_GAP: f32 = 18.;
 /// 侧栏里各段离侧栏左右两边的留白。
 const SIDEBAR_INSET: f32 = 6.;
 /// 每个 workspace 一项，一行字。
 const WORKSPACE_ROW_HEIGHT: f32 = 30.;
+/// workspace 行左右的留白。
+const WORKSPACE_ROW_PADDING: f32 = 8.;
+/// workspace 行右边那格（分支或 agent 图标、快捷键提示、响铃）最多占行宽的比例，余下的留给名字。
+const TRAILING_MAX_WIDTH: f32 = 0.5;
+const TRAILING_GAP: f32 = 6.;
+const BELL_DOT_SIZE: f32 = 6.;
 /// 项目组头下面的 workspace 行往右缩进：左边的竖线离组头左边 `TREE_LINE_INSET`，行离竖线 `TREE_ROW_INSET`。
 const TREE_LINE_INSET: f32 = 10.;
 const TREE_ROW_INSET: f32 = 8.;
+/// workspace 行右边最多画几个 agent 图标，多出来的写成「+N」。
+const MAX_AGENT_ICONS: usize = 3;
+const AGENT_ICON_SIZE: f32 = 14.;
+/// 图标之间的间距，要放得下伸出图标的半个状态点。
+const AGENT_ICON_GAP: f32 = 7.;
+const AGENT_DOT_SIZE: f32 = 6.;
+const AGENT_DOT_RING: f32 = 1.5;
 /// 没选中的行的字色，导航和 workspace 行一样。
 const ROW_TEXT_OPACITY: f32 = 0.78;
 /// 主机组头和导航每行名字前的图标那一格，两处的文字才对齐。
@@ -205,8 +273,7 @@ impl WindowView {
             .h_full()
             .flex()
             .flex_col()
-            // 卡片样式下侧栏直接画在外框上。
-            .when(!cards(cx), |sidebar| sidebar.bg(cx.theme().mix(0.03)).border_r_1().border_color(cx.theme().border))
+            .when(!cards(cx), |sidebar| sidebar.bg(sidebar_background(cx)).border_r_1().border_color(cx.theme().border))
             // 从访达拖来的东西悬在侧栏上时提示放下能开 workspace；放下由窗口根上的 `open_dropped_dirs` 办。
             .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(drop_bg))
             .text_size(FontSize::Body)
@@ -285,7 +352,7 @@ impl WindowView {
     ) -> Stateful<Div> {
         let fg = cx.theme().foreground;
         // 状态圆点的描边和侧栏同色。
-        let background = if cards(cx) { cx.theme().frame } else { cx.theme().mix(0.03) };
+        let background = sidebar_background(cx);
         let name = match host {
             HostId::Local => rust_i18n::t!("workspace.host_local_group").into_owned(),
             remote => remote_hosts::display_name(remote, cx),
@@ -508,6 +575,7 @@ impl WindowView {
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.target == RenameTarget::Workspace(id));
         let repo = &workspace.repo;
         let mark = workspace.mark(cx);
+        let agents = workspace.agent_marks(cx);
         let live = !workspace.tabs.is_empty();
         let host = (!workspace.host.is_local()).then(|| {
             let status = hosts::status_of(&workspace.host);
@@ -515,19 +583,15 @@ impl WindowView {
         });
         // 目录不画出来，悬停时看提示；和名字一样（比如家目录的 `~`）时不提示。
         let dir = Some(workspace.host.display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
-        // 名字之外报给辅助工具的：主机、分支、目录，以及只画成图形的 agent 状态和响铃。
-        let a11y_description = [
-            host,
-            repo.branch.as_ref().map(ToString::to_string),
-            dir.clone(),
-            mark.map(|mark| mark.describe()),
-            (!live).then(|| rust_i18n::t!("workspace.no_terminals").into_owned()),
-            workspace.bell().then(|| rust_i18n::t!("workspace.bell").into_owned()),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" · ");
+        // 名字之外报给辅助工具的：主机、分支、目录，以及只画成图形的各个 agent 和它们的状态、响铃。
+        let a11y_description = [host, repo.branch.as_ref().map(ToString::to_string), dir.clone()]
+            .into_iter()
+            .flatten()
+            .chain(agents.iter().map(|agent| agent.describe()))
+            .chain((!live).then(|| rust_i18n::t!("workspace.no_terminals").into_owned()))
+            .chain(workspace.bell().then(|| rust_i18n::t!("workspace.bell").into_owned()))
+            .collect::<Vec<_>>()
+            .join(" · ");
         // 名字前是状态：有 agent 时是它的标记，没有时开着终端是 shell 的提示符，一个终端都没有是空心圆点。当前
         // 行的光标不闪，用户正看着它。
         let blocked = mark.is_some_and(|mark| mark.status == AgentStatus::Blocked);
@@ -552,17 +616,28 @@ impl WindowView {
                 .child(workspace.name.clone())
                 .into_any_element(),
         };
-        // 名字右边是 agent 的名字；没有 agent 时，分支和项目组头上写的不一样才用等宽字写出来。
-        let label = match mark {
-            Some(mark) => Some(div().child(mark.kind.display_name())),
-            None => repo
-                .branch
+        // 名字右边是各个 agent 的图标；没有 agent 时，分支和项目组头上写的不一样才用等宽字写出来。状态点的
+        // 描边不跟着悬停的底色变：悬停时右边整个隐去。
+        let ring = if active { active_bg } else { sidebar_background(cx) };
+        let logo_fg = if active { fg } else { fg.opacity(ROW_TEXT_OPACITY) };
+        // 右边那格最多占行宽的 `TRAILING_MAX_WIDTH`；行宽照项目下缩进的行估（竖线 1px），响铃的圆点另占一格。
+        let row_width = self.sidebar_width()
+            - 2. * SIDEBAR_INSET
+            - TREE_LINE_INSET
+            - 1.
+            - TREE_ROW_INSET
+            - 2. * WORKSPACE_ROW_PADDING;
+        let room = row_width * TRAILING_MAX_WIDTH - if workspace.bell() { BELL_DOT_SIZE + TRAILING_GAP } else { 0. };
+        let label = if agents.is_empty() {
+            repo.branch
                 .clone()
                 .filter(|branch| {
                     self.main_worktree_branch(&workspace.host, workspace.project_dir())
                         .is_none_or(|(_, main)| main != branch)
                 })
-                .map(|branch| div().font_family(mono_font(cx)).child(branch)),
+                .map(|branch| div().min_w_0().truncate().font_family(mono_font(cx)).child(branch))
+        } else {
+            Some(agent_icons(&agents, room, ring, logo_fg, cx))
         };
         // 按着快捷键的修饰键或者单按 ⌘ 时这里换成快捷键提示（按 ⌘ 是找快捷键时最先按的键）；后面是响铃的圆点。
         // 悬停时这些都让给关闭按钮。
@@ -573,7 +648,7 @@ impl WindowView {
             .min_w_0()
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(px(TRAILING_GAP))
             .text_size(FontSize::Small)
             .text_color(if active { subtle } else { muted })
             .group_hover(group.clone(), |trailing| trailing.invisible())
@@ -581,11 +656,11 @@ impl WindowView {
                 if held {
                     trailing.children(shortcut_hint(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx))
                 } else {
-                    trailing.children(label.map(|label| label.min_w_0().truncate()))
+                    trailing.children(label)
                 }
             })
             .when(workspace.bell(), |trailing| {
-                trailing.child(div().flex_none().size(px(6.)).rounded_full().bg(fg.opacity(0.8)))
+                trailing.child(div().flex_none().size(px(BELL_DOT_SIZE)).rounded_full().bg(fg.opacity(0.8)))
             });
         let dragged = DraggedWorkspace {
             id,
@@ -609,7 +684,7 @@ impl WindowView {
             .group(group.clone())
             .flex_none()
             .h(scaled(WORKSPACE_ROW_HEIGHT))
-            .px(px(8.))
+            .px(px(WORKSPACE_ROW_PADDING))
             .rounded(px(7.))
             .flex()
             .items_center()
@@ -688,7 +763,7 @@ impl WindowView {
                     .relative()
                     .h_full()
                     .min_w(px(TAB_CLOSE_SIZE))
-                    .max_w(relative(0.5))
+                    .max_w(relative(TRAILING_MAX_WIDTH))
                     .flex()
                     .items_center()
                     .justify_end()
