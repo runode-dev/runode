@@ -469,6 +469,7 @@ impl FakeHost {
                         todos: self.todos.lock().unwrap().is_some(),
                         board: 0,
                         shells: false,
+                        screen_req: false,
                         desktops: 0,
                         os: String::new(),
                         home: None,
@@ -507,7 +508,12 @@ impl FakeHost {
                 }
                 ClientMsg::ReadScreen { id, lines, .. } => {
                     assert_eq!(lines, Some(30));
-                    HostMsg::ScreenText { id, text: "Do you want to proceed?\n❯ 1. Yes\n".into(), truncated: false }
+                    HostMsg::ScreenText {
+                        req: None,
+                        id,
+                        text: "Do you want to proceed?\n❯ 1. Yes\n".into(),
+                        truncated: false,
+                    }
                 }
                 other => panic!("the pusher sent {other:?}"),
             };

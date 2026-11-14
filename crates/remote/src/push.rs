@@ -406,7 +406,7 @@ impl Poller {
         for action in actions {
             match action {
                 Action::ReadScreen(id) => {
-                    let read = ClientMsg::ReadScreen { id, lines: Some(SCREEN_LINES), command: None };
+                    let read = ClientMsg::ReadScreen { req: None, id, lines: Some(SCREEN_LINES), command: None };
                     if self.host.as_ref().is_some_and(|link| link.send(&read).is_err()) {
                         self.host = None;
                     }

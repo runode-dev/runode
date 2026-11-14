@@ -138,7 +138,7 @@ fn info(peer: &mut Peer, id: SessionId) -> (SessionInfo, Vec<Seen>) {
 
 /// 等这条连接之前的请求都在会话线程里办完：读一次屏幕，之前收到的都不要。
 fn settle(peer: &mut Peer, id: SessionId) {
-    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: None });
+    peer.send(&ClientMsg::ReadScreen { req: None, id, lines: None, command: None });
     until(peer, |message| matches!(message, HostMsg::ScreenText { .. }));
 }
 

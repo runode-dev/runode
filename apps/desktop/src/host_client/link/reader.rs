@@ -192,14 +192,24 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
                 let _ = reply.send(HostMsg::Error { req: Some(req), id, message, reason });
             }
         }
-        HostMsg::ScreenText { id, text, .. } if state.screen_reads.contains_key(&id) => {
+        message @ HostMsg::ScreenText { req: Some(req), .. } => match state.replies.remove(&req) {
+            Some(reply) => {
+                let _ = reply.send(message);
+            }
+            None => tracing::debug!("dropped a screen read answered after its caller gave up: {message:?}"),
+        },
+        // 宿主回 `Attach` 的错误不带 `req`，这边发的带 `req` 的请求都登记在 `replies` 里：没登记的只能是调用方
+        // 已经不等了的回话，不能当成哪个会话出了错。
+        HostMsg::Error { req: Some(req), message, .. } => {
+            tracing::debug!("dropped an error for request {req} after its caller gave up: {message}");
+        }
+        HostMsg::ScreenText { req: None, id, text, .. } if state.screen_reads.contains_key(&id) => {
             answer_screen_read(&mut state, id, Ok(text));
         }
-        HostMsg::Error { req, id: Some(id), message, reason } => {
+        HostMsg::Error { req: None, id: Some(id), message, reason } => {
             // 连接着这个会话时的错误先算连接的：它不交出去，视图就一直卡在连接中；读屏没拿到回话只是等到超时。
             // 登记着的读屏都已经不等了时，错误照常交给看这个会话的视图。
-            if req.is_none()
-                && state.screen_reads.contains_key(&id)
+            if state.screen_reads.contains_key(&id)
                 && !state.sessions.get(&id).is_some_and(|route| route.attaching > 0)
                 && answer_screen_read(&mut state, id, Err(crate::host_client::error_text(&message, reason.as_ref())))
             {
@@ -217,7 +227,8 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
                     return;
                 }
             }
-            if !(route.deliver(LinkEvent::Msg(HostMsg::Error { req, id: Some(id), message, reason })) && route.settle())
+            if !(route.deliver(LinkEvent::Msg(HostMsg::Error { req: None, id: Some(id), message, reason }))
+                && route.settle())
             {
                 drop_route(&mut state, id);
             }
@@ -248,10 +259,10 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
     }
 }
 
-/// 把会话 `id` 的一次读屏回话交给最早登记、还在等的调用方；已经不等了的（超时走了）跳过，回话交给下一个。
-/// 返回交出去了没有：登记的都已经不等了时为假。
+/// 宿主回读屏不带 `req` 时，把会话 `id` 的一次读屏回话交给最早登记、还在等的调用方；已经不等了的（超时走了）
+/// 跳过，回话交给下一个。返回交出去了没有：登记的都已经不等了时为假。
 ///
-/// shortcut: 超时那次读屏晚到的回话会交给下一次读屏，拿到的是旧屏幕；读屏的回话带上请求编号后去掉这条路。
+/// shortcut: 超时那次读屏晚到的回话会交给下一次读屏，拿到的是旧屏幕；连着的宿主都报 `screen_req` 后去掉这条路。
 fn answer_screen_read(state: &mut State, id: SessionId, mut answer: Result<String, String>) -> bool {
     let Some(waiting) = state.screen_reads.get_mut(&id) else { return false };
     let mut delivered = false;

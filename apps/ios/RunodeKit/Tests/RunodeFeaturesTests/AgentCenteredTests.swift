@@ -26,7 +26,7 @@ final class ManualClock {
 
 private func readScreens(_ sent: [ClientMsg]) -> [SessionId] {
     sent.compactMap {
-        if case .readScreen(let id, _, _) = $0 { return id }
+        if case .readScreen(let id, _, _, _) = $0 { return id }
         return nil
     }
 }

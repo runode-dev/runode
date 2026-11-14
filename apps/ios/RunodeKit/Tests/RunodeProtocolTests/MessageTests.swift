@@ -390,6 +390,17 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(try decode("command_finished") == .commandFinished(id: id))
     }
 
+    /// 读屏带了 `req` 时写出去，回话里的 `req` 读回来；不带时不写这个键。
+    @Test func screenReadsCarryTheirReq() throws {
+        func keys(_ message: ClientMsg) throws -> [String: Any] {
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(message)) as? [String: Any] ?? [:]
+        }
+        #expect(try keys(.readScreen(id: id, lines: 3, req: 7))["req"] as? Int == 7)
+        #expect(try keys(.readScreen(id: id, lines: 3))["req"] == nil)
+        let json = #"{"type":"screen_text","id":"\#(id)","text":"a","req":7}"#
+        #expect(try JSONDecoder().decode(HostMsg.self, from: Data(json.utf8)) == .screenText(id: id, text: "a", truncated: false, req: 7))
+    }
+
     @Test func unknownKindsAndValuesAreTolerated() throws {
         let unknown = try JSONDecoder().decode(HostMsg.self, from: Data(#"{"type":"from_the_future","x":1}"#.utf8))
         #expect(unknown == .unknown("from_the_future"))

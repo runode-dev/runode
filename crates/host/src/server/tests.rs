@@ -153,7 +153,7 @@ fn waiting_for_answers_does_not_hold_up_input() {
         }
     };
     send(&mut stream, &ClientMsg::ListSessions);
-    send(&mut stream, &ClientMsg::ReadScreen { id: stuck, lines: None, command: None });
+    send(&mut stream, &ClientMsg::ReadScreen { req: None, id: stuck, lines: None, command: None });
     write_frame(&mut *stream, FrameKind::Input, channel, b"through\r").unwrap();
     let mut output = Vec::new();
     while !output.windows(7).any(|w| w == b"through") {
@@ -192,7 +192,7 @@ fn too_many_waiting_requests_are_refused() {
     let (stuck, release) = stuck_session(&host);
     let (mut stream, frames) = greet(&host, ClientKind::Cli);
     for _ in 0..=MAX_WAITING {
-        send(&mut stream, &ClientMsg::ReadScreen { id: stuck, lines: None, command: None });
+        send(&mut stream, &ClientMsg::ReadScreen { req: None, id: stuck, lines: None, command: None });
     }
     match message(&frames) {
         HostMsg::Error { id: Some(id), message, .. } => {
@@ -233,7 +233,7 @@ fn stuck_git_requests_do_not_take_the_other_slots() {
         }
         other => panic!("expected the extra git request to be refused: {other:?}"),
     }
-    send(&mut stream, &ClientMsg::ReadScreen { id: other, lines: None, command: None });
+    send(&mut stream, &ClientMsg::ReadScreen { req: None, id: other, lines: None, command: None });
     assert!(matches!(message(&frames), HostMsg::ScreenText { id, .. } if id == other));
     drop(release);
     host.shared.kill_all();
@@ -250,10 +250,11 @@ fn a_backed_up_connection_gets_no_more_snapshots_or_replies() {
     let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
     out.queued.streaming.fetch_add(OUTBOX_LIMIT + 1, Ordering::Relaxed);
     send(&mut stream, &ClientMsg::Attach { id, size: None, mode: AttachMode::VtReplay });
-    send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
-    for _ in 0..2 {
+    send(&mut stream, &ClientMsg::ReadScreen { req: Some(5), id, lines: None, command: None });
+    for expected in [None, Some(5)] {
         match message(&frames) {
-            HostMsg::Error { id: Some(errored), message, .. } => {
+            HostMsg::Error { req, id: Some(errored), message, .. } => {
+                assert_eq!(req, expected);
                 assert_eq!(errored, id);
                 assert!(message.starts_with(ERROR_BACKED_UP), "{message}");
             }
@@ -272,7 +273,7 @@ fn a_backed_up_connection_gets_no_more_snapshots_or_replies() {
         }
     }
     out.queued.streaming.fetch_sub(OUTBOX_LIMIT + 1, Ordering::Relaxed);
-    send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
+    send(&mut stream, &ClientMsg::ReadScreen { req: None, id, lines: None, command: None });
     assert!(matches!(message(&frames), HostMsg::ScreenText { .. }));
     send(&mut stream, &ClientMsg::ListSessions);
     assert!(matches!(message(&frames), HostMsg::SessionList { .. }));
@@ -288,7 +289,7 @@ fn mobile_connections_back_up_sooner() {
         let (mut stream, frames) = greet(&host, client);
         let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
         out.queued.streaming.fetch_add(MOBILE_OUTBOX_LIMIT + 1, Ordering::Relaxed);
-        send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
+        send(&mut stream, &ClientMsg::ReadScreen { req: None, id, lines: None, command: None });
         match message(&frames) {
             HostMsg::Error { message, .. } if backed_up => assert!(message.starts_with(ERROR_BACKED_UP), "{message}"),
             HostMsg::ScreenText { .. } if !backed_up => {}

@@ -206,8 +206,9 @@ fn client_messages_round_trip() {
         ClientMsg::WriteClipboard { id: ID, text: "复制的 文字\n\u{1b}".into() },
         ClientMsg::ReadClipboard { id: ID, ask: true, program: Some("nvim".into()) },
         ClientMsg::ReadClipboard { id: ID, ask: false, program: None },
-        ClientMsg::ReadScreen { id: ID, lines: Some(100), command: None },
-        ClientMsg::ReadScreen { id: ID, lines: None, command: Some(2) },
+        ClientMsg::ReadScreen { req: None, id: ID, lines: Some(100), command: None },
+        ClientMsg::ReadScreen { req: None, id: ID, lines: None, command: Some(2) },
+        ClientMsg::ReadScreen { req: Some(7), id: ID, lines: Some(100), command: None },
         ClientMsg::SendKeys { req: 5, id: ID, keys: vec!["ctrl-c".into(), "down*3".into(), "f5".into()] },
         ClientMsg::Paste { req: 6, id: ID, text: "echo 中文\nls\n".into() },
         ClientMsg::Layout { req: 7 },
@@ -305,6 +306,7 @@ fn host_messages_round_trip() {
             todos: false,
             board: 0,
             shells: false,
+            screen_req: false,
             desktops: 0,
             os: String::new(),
             home: None,
@@ -320,6 +322,7 @@ fn host_messages_round_trip() {
             todos: false,
             board: 2,
             shells: true,
+            screen_req: false,
             desktops: 0,
             os: "linux".into(),
             home: Some("/home/me".into()),
@@ -384,8 +387,9 @@ fn host_messages_round_trip() {
         HostMsg::Exited { id: ID, status: Some(130) },
         HostMsg::Bell { id: ID },
         HostMsg::ResizeWindow { id: ID, rows: 0, columns: 120 },
-        HostMsg::ScreenText { id: ID, text: "$ ls\n".into(), truncated: false },
-        HostMsg::ScreenText { id: ID, text: "tail\n".into(), truncated: true },
+        HostMsg::ScreenText { req: None, id: ID, text: "$ ls\n".into(), truncated: false },
+        HostMsg::ScreenText { req: None, id: ID, text: "tail\n".into(), truncated: true },
+        HostMsg::ScreenText { req: Some(7), id: ID, text: "$ ls\n".into(), truncated: false },
         HostMsg::Layout { req: 7, windows: layout() },
         HostMsg::Layout { req: 8, windows: Vec::new() },
         HostMsg::UiRequest { ui: 1, request: Box::new(ClientMsg::Layout { req: 7 }) },
@@ -644,9 +648,32 @@ fn version_3_fields_have_old_defaults() {
         }
     );
     let read: ClientMsg = serde_json::from_str(&format!(r#"{{"type":"read_screen","id":"{ID}","lines":3}}"#)).unwrap();
-    assert_eq!(read, ClientMsg::ReadScreen { id: ID, lines: Some(3), command: None });
+    assert_eq!(read, ClientMsg::ReadScreen { req: None, id: ID, lines: Some(3), command: None });
     let text: HostMsg = serde_json::from_str(&format!(r#"{{"type":"screen_text","id":"{ID}","text":"x"}}"#)).unwrap();
-    assert_eq!(text, HostMsg::ScreenText { id: ID, text: "x".into(), truncated: false });
+    assert_eq!(text, HostMsg::ScreenText { req: None, id: ID, text: "x".into(), truncated: false });
+    for json in [
+        serde_json::to_string(&read).unwrap(),
+        serde_json::to_string(&text).unwrap(),
+        serde_json::to_string(&HostMsg::Welcome {
+            protocol: 3,
+            build: BuildId("x".into()),
+            host_pid: 9,
+            snapshot_format: 1,
+            standalone: false,
+            handoff: 0,
+            keep_awake: false,
+            todos: false,
+            board: 0,
+            shells: false,
+            screen_req: false,
+            desktops: 0,
+            os: String::new(),
+            home: None,
+        })
+        .unwrap(),
+    ] {
+        assert!(!json.contains("req"), "{json}");
+    }
     let attached: HostMsg = serde_json::from_str(&format!(
         r#"{{"type":"attached","id":"{ID}","channel":1,"size":{},"mode":"meta_only","meta":{{}}}}"#,
         serde_json::to_string(&size()).unwrap()
@@ -684,6 +711,7 @@ fn welcome_reports_the_system_and_home_only_when_known() {
         todos: true,
         board: 0,
         shells: true,
+        screen_req: false,
         desktops: 0,
         os: os.into(),
         home: home.map(Into::into),
@@ -716,6 +744,7 @@ fn welcome_with_a_non_utf8_home_still_serializes() {
         todos: true,
         board: 0,
         shells: true,
+        screen_req: false,
         desktops: 0,
         os: "linux".into(),
         home: Some(OsStr::from_bytes(b"/home/\xff").into()),
@@ -1045,6 +1074,8 @@ fn the_req_of_an_encoded_reply() {
     assert_eq!(req_in(&HostMsg::Spawned { req: 3, id: ID }), Some(3));
     assert_eq!(req_in(&HostMsg::Error { req: None, id: Some(ID), message: "gone".into(), reason: None }), None);
     assert_eq!(req_in(&HostMsg::Bell { id: ID }), None);
+    assert_eq!(req_in(&HostMsg::ScreenText { req: Some(7), id: ID, text: "x".into(), truncated: false }), Some(7));
+    assert_eq!(req_in(&HostMsg::ScreenText { req: None, id: ID, text: "x".into(), truncated: false }), None);
     let ui = HostMsg::UiRequest { ui: 1, request: Box::new(ClientMsg::ListTodos { req: 9 }) };
     assert_eq!(req_in(&ui), None);
 }

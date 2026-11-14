@@ -57,7 +57,7 @@ fn input_and_output_flow_over_the_socket() {
     peer.input(channel, b"hello\r");
     peer.wait_for_output(channel, b"hello");
 
-    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: None });
+    peer.send(&ClientMsg::ReadScreen { req: None, id, lines: None, command: None });
     let HostMsg::ScreenText { text, truncated, .. } = peer.reply() else { panic!("expected screen text") };
     assert!(text.contains("hello") && !truncated, "{text:?}");
 
@@ -188,7 +188,7 @@ fn attaching_again_replaces_the_channel() {
     peer.wait_for_output(new, b"again");
     let sessions = peer.sessions();
     assert_eq!(sessions.iter().find(|info| info.id == id).map(|info| info.clients), Some(1));
-    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: None });
+    peer.send(&ClientMsg::ReadScreen { req: None, id, lines: None, command: None });
     let HostMsg::ScreenText { text, .. } = peer.reply() else { panic!("expected screen text") };
     assert!(!text.contains("ignored"), "{text:?}");
     peer.send(&ClientMsg::Kill { id });
@@ -349,7 +349,7 @@ fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
     }
     view.feed(&output);
     assert!(!view.take_bell(), "the end of the report rang the bell");
-    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: None });
+    peer.send(&ClientMsg::ReadScreen { req: None, id, lines: None, command: None });
     let HostMsg::ScreenText { text, .. } = peer.reply() else { panic!("expected screen text") };
     assert!(text.contains("visible"), "{text:?}");
     assert_eq!(view.screen_text().unwrap().trim_end(), text.trim_end());
@@ -1004,6 +1004,43 @@ fn welcome_reports_the_system_and_home() {
         }
         other => panic!("expected welcome, got {other:?}"),
     }
+}
+
+/// 读屏的回话和读不了时的 `Error` 原样带回请求里的 `req`，没给时也不带；`Welcome::screen_req` 报宿主这样做。
+#[test]
+fn screen_reads_carry_their_req_back() {
+    let dir = temp_dir("screenreq");
+    let (_host, socket) = listen(&dir);
+    let mut peer = Peer::connect(&socket);
+    peer.send(&ClientMsg::Hello {
+        protocol: PROTOCOL_VERSION,
+        build: BuildId(BUILD.into()),
+        client: ClientKind::Cli,
+        caps: Caps::default(),
+        session: None,
+        device: None,
+    });
+    assert!(matches!(peer.message(), HostMsg::Welcome { screen_req: true, .. }));
+    let id = peer.spawn(CAT);
+
+    peer.send(&ClientMsg::ReadScreen { req: Some(7), id, lines: None, command: None });
+    match peer.reply() {
+        HostMsg::ScreenText { req, id: read, .. } => assert_eq!((req, read), (Some(7), id)),
+        other => panic!("expected screen text, got {other:?}"),
+    }
+    peer.send(&ClientMsg::ReadScreen { req: None, id, lines: None, command: None });
+    assert!(matches!(peer.reply(), HostMsg::ScreenText { req: None, .. }));
+
+    let missing = SessionId(u32::MAX.into());
+    peer.send(&ClientMsg::ReadScreen { req: Some(8), id: missing, lines: None, command: None });
+    match peer.reply() {
+        HostMsg::Error { req, id, .. } => assert_eq!((req, id), (Some(8), Some(missing))),
+        other => panic!("expected an error, got {other:?}"),
+    }
+    peer.send(&ClientMsg::ReadScreen { req: None, id: missing, lines: None, command: None });
+    assert!(matches!(peer.reply(), HostMsg::Error { req: None, id: Some(got), .. } if got == missing));
+
+    peer.send(&ClientMsg::Kill { id });
 }
 
 /// 界面读不懂转来的请求时回的 `Error` 不带 `req`，宿主转回去时补上原请求的。

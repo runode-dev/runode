@@ -112,7 +112,7 @@ fn command_output_needs_prompt_marks() {
     // 输出到了宿主那份 VT 才读得到。
     let deadline = Instant::now() + WAIT;
     loop {
-        peer.send(&ClientMsg::ReadScreen { id, lines: None, command: Some(1) });
+        peer.send(&ClientMsg::ReadScreen { req: None, id, lines: None, command: Some(1) });
         match peer.reply() {
             HostMsg::ScreenText { text, truncated, .. } if text == "one\ntwo\n" => {
                 assert!(!truncated);
@@ -127,7 +127,7 @@ fn command_output_needs_prompt_marks() {
     // 没有标记的会话；换一条连接问，免得混进刚才那个会话结束的消息。
     let mut peer = Peer::hello(&socket, false);
     let id = peer.spawn(CAT);
-    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: Some(1) });
+    peer.send(&ClientMsg::ReadScreen { req: None, id, lines: None, command: Some(1) });
     let reply = peer.reply();
     let HostMsg::Error { id: Some(errored), message, .. } = reply else { panic!("expected an error: {reply:?}") };
     assert_eq!(errored, id);

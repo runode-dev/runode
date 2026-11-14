@@ -64,7 +64,7 @@ fn host(name: &str, meta: SessionMeta, then: Vec<HostMsg>, screen: Option<&'stat
             replies
         }
         ClientMsg::ReadScreen { id, .. } => match screen {
-            Some(text) => vec![HostMsg::ScreenText { id: *id, text: text.into(), truncated: false }],
+            Some(text) => vec![HostMsg::ScreenText { req: None, id: *id, text: text.into(), truncated: false }],
             None => vec![],
         },
         ClientMsg::Layout { req } => {
@@ -178,6 +178,7 @@ fn an_unknown_goodbye_reason_closes_the_connection() {
                             todos: false,
                             board: 0,
                             shells: false,
+                            screen_req: false,
                             desktops: 0,
                             os: String::new(),
                             home: None,
@@ -260,7 +261,7 @@ fn waiting_for_quiet_resumes_on_the_new_host() {
         ClientMsg::ReadScreen { id, .. } => {
             reads += 1;
             if reads == 1 {
-                return vec![HostMsg::ScreenText { id: *id, text: "$\n".into(), truncated: false }];
+                return vec![HostMsg::ScreenText { req: None, id: *id, text: "$\n".into(), truncated: false }];
             }
             hand_over(&new_socket, old_path.lock().unwrap().as_deref().unwrap());
             vec![handoff()]
@@ -284,7 +285,7 @@ fn waiting_for_quiet_starts_over_on_the_new_host() {
         ClientMsg::ReadScreen { id, .. } => {
             new_reads += 1;
             let text = format!("line {}\n", new_reads.min(3));
-            vec![HostMsg::ScreenText { id: *id, text, truncated: false }]
+            vec![HostMsg::ScreenText { req: None, id: *id, text, truncated: false }]
         }
         _ => vec![],
     });
@@ -298,7 +299,7 @@ fn waiting_for_quiet_starts_over_on_the_new_host() {
         ClientMsg::ReadScreen { id, .. } => {
             reads += 1;
             if reads == 1 {
-                return vec![HostMsg::ScreenText { id: *id, text: "$\n".into(), truncated: false }];
+                return vec![HostMsg::ScreenText { req: None, id: *id, text: "$\n".into(), truncated: false }];
             }
             // 交接比 `--for quiet` 的 0.3 秒还久。
             thread::sleep(Duration::from_millis(500));

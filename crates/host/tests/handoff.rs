@@ -164,6 +164,7 @@ fn role_fake_old() {
             todos: false,
             board: 0,
             shells: false,
+            screen_req: false,
             desktops: 0,
             os: String::new(),
             home: None,
@@ -916,6 +917,7 @@ fn a_goodbye_for_a_handoff_means_busy() {
         todos: false,
         board: 0,
         shells: false,
+        screen_req: false,
         desktops: 0,
         os: String::new(),
         home: None,
@@ -1113,7 +1115,7 @@ fn handoff_timing() {
         let deadline = Instant::now() + Duration::from_secs(300);
         for &id in &ids {
             loop {
-                cli.send(&ClientMsg::ReadScreen { id, lines: Some(2), command: None });
+                cli.send(&ClientMsg::ReadScreen { req: None, id, lines: Some(2), command: None });
                 match cli.reply() {
                     HostMsg::ScreenText { text, .. } if text.contains("filled") => break,
                     _ => thread::sleep(Duration::from_millis(100)),

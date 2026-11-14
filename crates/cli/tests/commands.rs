@@ -33,7 +33,12 @@ fn host(name: &str, state: Option<AgentState>, then: Vec<AgentState>) -> FakeHos
             replies
         }
         ClientMsg::ReadScreen { id, lines, .. } => {
-            vec![HostMsg::ScreenText { id: *id, text: format!("screen of {id}, {lines:?} lines\n"), truncated: false }]
+            vec![HostMsg::ScreenText {
+                req: None,
+                id: *id,
+                text: format!("screen of {id}, {lines:?} lines\n"),
+                truncated: false,
+            }]
         }
         ClientMsg::Layout { req } => no_window(*req),
         _ => vec![],

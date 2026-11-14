@@ -378,6 +378,7 @@ impl Connection {
             todos: true,
             board: runode_protocol::todo::BOARD_LEVEL,
             shells: true,
+            screen_req: true,
             desktops,
             os: std::env::consts::OS.to_owned(),
             home: runode_paths::Dirs::from_env().home.map(crate::browse::forward_slashes),
@@ -486,7 +487,7 @@ impl Connection {
                 self.shared.deliver(id, Inbox::Focus { connection: self.id });
             }
             ClientMsg::Focus { focused: false, .. } => {}
-            ClientMsg::ReadScreen { id, lines, command } => self.read_screen(id, lines, command),
+            ClientMsg::ReadScreen { req, id, lines, command } => self.read_screen(req, id, lines, command),
             ClientMsg::SendKeys { req, id, keys } => match parse_key_list(&keys) {
                 Ok(keys) => self.deliver_done(req, id, DriveAction::Keys, Inbox::Keys(keys)),
                 Err(err) => self.error(Some(req), Some(id), err),
@@ -774,40 +775,37 @@ impl Connection {
 
     /// 读屏幕，`command` 给了时读倒数第几条命令的输出：请求在这里送到会话线程（排在这条连接
     /// 之前送去的输入后面），回话另起线程等。
-    fn read_screen(&self, id: SessionId, lines: Option<u32>, command: Option<u32>) {
+    fn read_screen(&self, req: Option<u32>, id: SessionId, lines: Option<u32>, command: Option<u32>) {
         if self.out.backed_up() {
-            self.error(None, Some(id), ERROR_BACKED_UP.into());
+            self.error(req, Some(id), ERROR_BACKED_UP.into());
             return;
         }
         let Some(slot) = self.waiting.enter() else {
-            self.error(None, Some(id), ERROR_TOO_MANY_WAITING.into());
+            self.error(req, Some(id), ERROR_TOO_MANY_WAITING.into());
             return;
         };
         let (reply, text) = mpsc::channel();
         if !self.shared.deliver(id, Inbox::ReadScreen { lines, command, reply }) {
-            self.error(None, Some(id), format!("{ERROR_NO_SESSION} {id}"));
+            self.error(req, Some(id), format!("{ERROR_NO_SESSION} {id}"));
             return;
         }
         let out = self.out.clone();
         answer_later("host-read-screen", move || {
             let message = match text.recv_timeout(REPLY_TIMEOUT) {
-                Ok(Ok((text, truncated))) => HostMsg::ScreenText { id, text, truncated },
+                Ok(Ok((text, truncated))) => HostMsg::ScreenText { req, id, text, truncated },
                 // 读命令输出时的错误（没有 shell 集成这类）本身就是给读的一方看的说明。
                 Ok(Err(err)) if command.is_some() => {
-                    HostMsg::Error { req: None, id: Some(id), message: format!("{err:#}"), reason: None }
+                    HostMsg::Error { req, id: Some(id), message: format!("{err:#}"), reason: None }
                 }
                 Ok(Err(err)) => HostMsg::Error {
-                    req: None,
+                    req,
                     id: Some(id),
                     message: format!("failed to read the screen: {err:#}"),
                     reason: None,
                 },
-                Err(_) => HostMsg::Error {
-                    req: None,
-                    id: Some(id),
-                    message: format!("session {id} did not answer"),
-                    reason: None,
-                },
+                Err(_) => {
+                    HostMsg::Error { req, id: Some(id), message: format!("session {id} did not answer"), reason: None }
+                }
             };
             out.control(&message);
             drop(slot);

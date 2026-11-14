@@ -180,8 +180,11 @@ pub enum ClientMsg {
     },
     /// 读会话屏幕上的文字，宿主回 `ScreenText`。`lines` 为 `None` 时是当前一屏，否则是从最后
     /// 一个有字的行往上这么多行，含回滚历史。`command` 为 `Some(n)` 时不看 `lines`，读倒数第
-    /// n 条命令（1 是最近一条）的输出，要 shell 集成标出的提示符。
+    /// n 条命令（1 是最近一条）的输出，要 shell 集成标出的提示符。给了 `req` 时，宿主回的
+    /// `ScreenText` 和读不了时的 `Error` 都带着它；不给时都不带，前端只能按会话认。
     ReadScreen {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        req: Option<u32>,
         id: SessionId,
         lines: Option<u32>,
         #[serde(default)]
@@ -497,6 +500,9 @@ pub enum HostMsg {
         board: u32,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         shells: bool,
+        /// 回 `ClientMsg::ReadScreen` 时带上请求里的 `req`；为假时回话一律不带。
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        screen_req: bool,
         #[serde(default, skip_serializing_if = "is_zero")]
         desktops: u32,
         #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -630,8 +636,10 @@ pub enum HostMsg {
         branches: Vec<GitBranch>,
     },
     /// 回 `ReadScreen`：一行一个 `\n`，行尾空白去掉。`truncated` 为真时要的内容开头已经被挤出
-    /// 回滚历史，给的只是还留着的部分。
+    /// 回滚历史，给的只是还留着的部分。`req` 是回的那条 `ReadScreen` 的 `req`。
     ScreenText {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        req: Option<u32>,
         id: SessionId,
         text: String,
         #[serde(default)]

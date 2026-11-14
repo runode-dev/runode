@@ -80,7 +80,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             let session = own_or(session, env, "read")?;
             let connection = Connection::open(env)?;
             let id = resolve(&connection, env, &session)?.id;
-            connection.send(&ClientMsg::ReadScreen { id, lines, command })?;
+            connection.send(&ClientMsg::ReadScreen { req: None, id, lines, command })?;
             match connection.reply()? {
                 HostMsg::ScreenText { text, truncated, .. } => {
                     if truncated {
@@ -584,7 +584,7 @@ fn screen_keeping_events(
     lines: Option<u32>,
     deadline: Option<Instant>,
 ) -> Result<String, Failure> {
-    connection.send(&ClientMsg::ReadScreen { id, lines, command: None })?;
+    connection.send(&ClientMsg::ReadScreen { req: None, id, lines, command: None })?;
     let reply = connection.reply_before(deadline).map_err(|err| expired(err, deadline))?;
     // 宿主摘掉了订阅（这边读得太慢）：之后会话结束了也收不到 `Exited`，读下去只会等到超时。
     if connection.lost(id) && !connection.exited(id) {

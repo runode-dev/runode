@@ -275,6 +275,7 @@ fn answers_to_requests_from_an_earlier_connection_are_dropped() {
             todos: false,
             board: 0,
             shells: false,
+            screen_req: false,
             desktops: 0,
             os: String::new(),
             home: None,
@@ -581,6 +582,7 @@ fn a_host_with_another_snapshot_format_gets_asked_for_replays() {
             todos: false,
             board: 0,
             shells: false,
+            screen_req: false,
             desktops: 0,
             os: String::new(),
             home: None,
@@ -601,8 +603,13 @@ fn a_host_with_another_snapshot_format_gets_asked_for_replays() {
     assert_eq!(asked_rx.recv_timeout(WAIT).unwrap(), AttachMode::VtReplay);
 }
 
-/// 一个按脚本说话的宿主：握手后由 `then` 接着处理这条连接。
+/// 回读屏不带 `req` 的假宿主。
 fn fake_host(then: impl FnOnce(UnixStream) + Send + 'static) -> Link {
+    fake_host_with(false, then)
+}
+
+/// 一个按脚本说话的宿主，`Welcome` 里报传进来的 `screen_req`：握手后由 `then` 接着处理这条连接。
+fn fake_host_with(screen_req: bool, then: impl FnOnce(UnixStream) + Send + 'static) -> Link {
     let (ours, theirs) = UnixStream::pair().unwrap();
     thread::spawn(move || {
         let mut stream = theirs;
@@ -619,6 +626,7 @@ fn fake_host(then: impl FnOnce(UnixStream) + Send + 'static) -> Link {
             todos: false,
             board: 0,
             shells: false,
+            screen_req,
             desktops: 0,
             os: String::new(),
             home: None,
@@ -810,6 +818,110 @@ fn a_task_listing_that_times_out_keeps_the_connection() {
     assert!(rx.try_recv().is_err(), "the session did not hear Lost");
 }
 
+/// 假宿主写一条控制消息。
+fn answer(stream: &mut UnixStream, message: &HostMsg) {
+    let frame = Frame::control(message).unwrap();
+    write_frame(stream, frame.kind, 0, &frame.payload).unwrap();
+}
+
+/// 宿主回读屏带 `req` 时，超时的那次读屏晚到的回话丢掉：不交给下一次读屏，也不交给看这个会话的视图，
+/// 连接照用。
+#[test]
+fn a_screen_read_that_times_out_does_not_answer_the_next_one() {
+    let id = SessionId(1);
+    let link = fake_host_with(true, move |mut stream| {
+        let mut first = None;
+        while let Ok(Some(frame)) = read_frame(&mut stream) {
+            match frame.message::<ClientMsg>() {
+                Ok(ClientMsg::Attach { id, .. }) => answer(
+                    &mut stream,
+                    &HostMsg::Attached {
+                        id,
+                        channel: 1,
+                        size: SIZE,
+                        mode: AttachMode::MetaOnly,
+                        meta: SessionMeta::default(),
+                        settings: None,
+                        shell: None,
+                    },
+                ),
+                // 第一次先不回，第二次来时先补上第一次的。
+                Ok(ClientMsg::ReadScreen { req: Some(req), .. }) => match first {
+                    None => first = Some(req),
+                    Some(old) => {
+                        let text = |req, text: &str| HostMsg::ScreenText {
+                            req: Some(req),
+                            id,
+                            text: text.into(),
+                            truncated: false,
+                        };
+                        answer(&mut stream, &text(old, "old\n"));
+                        answer(&mut stream, &text(req, "new\n"));
+                    }
+                },
+                _ => {}
+            }
+        }
+    });
+    let mut view = link.attach(id, None, AttachMode::MetaOnly);
+    assert!(matches!(next(&mut view), LinkEvent::Screen(_)));
+    assert!(link.read_screen(id, 5, Duration::from_millis(100)).is_err());
+    assert_eq!(link.read_screen(id, 5, WAIT).unwrap(), "new\n");
+    assert!(link.connected());
+    assert!(link.inner.state().replies.is_empty());
+    while let Ok(event) = view.try_recv() {
+        assert!(!matches!(event, LinkEvent::Msg(HostMsg::ScreenText { .. })), "the view got a screen read");
+    }
+}
+
+/// 正连着一个会话时，调用方已经不等了的读屏补回一条带 `req` 的 `Error`：丢掉，不当成这次没连成。
+#[test]
+fn a_late_screen_read_error_does_not_fail_an_attach() {
+    let id = SessionId(1);
+    let (gave_up, gave_up_rx) = mpsc::channel::<()>();
+    let link = fake_host_with(true, move |mut stream| {
+        let req = loop {
+            let frame = read_frame(&mut stream).unwrap().unwrap();
+            if let Ok(ClientMsg::ReadScreen { req: Some(req), .. }) = frame.message::<ClientMsg>() {
+                break req;
+            }
+        };
+        gave_up_rx.recv().unwrap();
+        let late = HostMsg::Error { req: Some(req), id: Some(id), message: "too late".into(), reason: None };
+        answer(&mut stream, &late);
+        // 回了列会话，读线程就已经办过前面那条 `Error`。
+        while let Ok(Some(frame)) = read_frame(&mut stream) {
+            if let Ok(ClientMsg::ListSessions) = frame.message::<ClientMsg>() {
+                answer(&mut stream, &HostMsg::SessionList { sessions: Vec::new() });
+            }
+        }
+    });
+    let mut view = link.attach(id, None, AttachMode::Snapshot);
+    assert!(link.read_screen(id, 5, Duration::from_millis(100)).is_err());
+    gave_up.send(()).unwrap();
+    assert!(link.list_sessions(WAIT).unwrap().is_empty());
+    assert!(view.try_recv().is_err(), "the view heard about the late error");
+    assert_eq!(link.inner.state().sessions[&id].attaching, 1);
+}
+
+/// 回读屏不带 `req` 的宿主收到的读屏也不带，回话按会话交给读的一方。
+#[test]
+fn an_older_host_gets_screen_reads_without_req() {
+    let id = SessionId(1);
+    let (sent, sent_rx) = mpsc::channel();
+    let link = fake_host_with(false, move |mut stream| {
+        while let Ok(Some(frame)) = read_frame(&mut stream) {
+            if let Ok(ClientMsg::ReadScreen { req, id, .. }) = frame.message::<ClientMsg>() {
+                let _ = sent.send(req);
+                answer(&mut stream, &HostMsg::ScreenText { req: None, id, text: "screen\n".into(), truncated: false });
+            }
+        }
+    });
+    assert_eq!(link.read_screen(id, 5, WAIT).unwrap(), "screen\n");
+    assert_eq!(sent_rx.recv_timeout(WAIT).unwrap(), None);
+    assert!(link.inner.state().screen_reads.is_empty());
+}
+
 /// 读线程核对过代数、还没补发时连接正好换了：补发的 `Kill`（开好的会话没人要）和 `UiReply`（界面不收
 /// 请求了）只发在原来那条连接上，不发给新宿主，免得杀掉新宿主上编号相同的会话。
 #[test]
@@ -876,6 +988,7 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
             todos: false,
             board: 0,
             shells: false,
+            screen_req: false,
             desktops: 0,
             os: String::new(),
             home: None,

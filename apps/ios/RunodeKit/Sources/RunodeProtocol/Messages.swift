@@ -93,8 +93,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     case kill(id: SessionId)
     /// 读会话屏幕底部的文字：从最后一个有字的行往上 `lines` 行（含回滚历史），为空时是当前一屏。
     /// `command` 为 `n` 时不看 `lines`，读倒数第 n 条命令（1 是最近一条）的输出，不含提示符，要 shell
-    /// 集成标出的提示符。宿主回 `ScreenText`，出错时回带着会话标识的 `Error`。不用连上会话。
-    case readScreen(id: SessionId, lines: UInt32?, command: UInt32? = nil)
+    /// 集成标出的提示符。宿主回 `ScreenText`，出错时回带着会话标识的 `Error`。不用连上会话。给了 `req` 时，
+    /// 回话和 `Error` 都带着它；不给时都不带，只能按会话认。
+    case readScreen(id: SessionId, lines: UInt32?, command: UInt32? = nil, req: UInt32? = nil)
     /// 发控制键（`enter`、`esc`、`up`、`1` 这类写法），宿主按它那份 VT 当前的模式编码后写进去，回
     /// `Done`。不用连上会话。
     case sendKeys(req: UInt32, id: SessionId, keys: [String])
@@ -200,8 +201,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
         case let .kill(id):
             try c.encode("kill", forKey: Key("type"))
             try c.encode(id, forKey: Key("id"))
-        case let .readScreen(id, lines, command):
+        case let .readScreen(id, lines, command, req):
             try c.encode("read_screen", forKey: Key("type"))
+            try c.encodeIfPresent(req, forKey: Key("req"))
             try c.encode(id, forKey: Key("id"))
             try c.encode(lines, forKey: Key("lines"))
             try c.encode(command, forKey: Key("command"))
@@ -346,7 +348,8 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     case bell(id: SessionId)
     case opened(req: UInt32, id: SessionId)
     case done(req: UInt32)
-    case screenText(id: SessionId, text: String, truncated: Bool)
+    /// 读到的屏幕文字；`req` 是回的那条 `readScreen` 的 `req`。
+    case screenText(id: SessionId, text: String, truncated: Bool, req: UInt32? = nil)
     /// 回 `Layout`。
     case layout(req: UInt32, windows: [WindowLayout])
     /// 电脑上 app 的布局变了，想知道新的布局再发 `Layout`。只发给这条连接上问过 `Layout` 的。
@@ -409,7 +412,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         case .attached(let attached): attached.id
         case .snapshotEnd(let id), .resized(let id, _), .themeApplied(let id, _), .meta(let id, _, _),
             .commandFinished(let id), .resync(let id, _), .exited(let id, _), .bell(let id),
-            .screenText(let id, _, _), .sizeOwner(let id, _, _), .spawned(_, let id), .opened(_, let id):
+            .screenText(let id, _, _, _), .sizeOwner(let id, _, _), .spawned(_, let id), .opened(_, let id):
             id
         case .error(_, let id, _): id
         default: nil
@@ -479,7 +482,8 @@ public enum HostMsg: Hashable, Sendable, Decodable {
             self = .screenText(
                 id: try c.decode(SessionId.self, forKey: .id),
                 text: try c.decode(String.self, forKey: .text),
-                truncated: try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false)
+                truncated: try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false,
+                req: try c.decodeIfPresent(UInt32.self, forKey: .req))
         case "layout":
             self = .layout(
                 req: try c.decode(UInt32.self, forKey: .req),

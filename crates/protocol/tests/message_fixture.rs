@@ -238,8 +238,8 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ("resize", ClientMsg::Resize { id: ID, size: size() }),
         ("focus", ClientMsg::Focus { id: ID, focused: true }),
         ("kill", ClientMsg::Kill { id: ID }),
-        ("read_screen", ClientMsg::ReadScreen { id: ID, lines: Some(8), command: None }),
-        ("read_screen_command", ClientMsg::ReadScreen { id: ID, lines: None, command: Some(1) }),
+        ("read_screen", ClientMsg::ReadScreen { req: None, id: ID, lines: Some(8), command: None }),
+        ("read_screen_command", ClientMsg::ReadScreen { req: None, id: ID, lines: None, command: Some(1) }),
         (
             "send_keys",
             ClientMsg::SendKeys { req: 5, id: ID, keys: ["1", "enter", "esc", "up"].map(String::from).to_vec() },
@@ -285,6 +285,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 todos: false,
                 board: 0,
                 shells: true,
+                screen_req: false,
                 desktops: 0,
                 os: "macos".into(),
                 home: Some("/Users/ethan".into()),
@@ -413,7 +414,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 ],
             },
         ),
-        ("screen_text", HostMsg::ScreenText { id: ID, text: "a\n".into(), truncated: false }),
+        ("screen_text", HostMsg::ScreenText { req: None, id: ID, text: "a\n".into(), truncated: false }),
         ("layout", HostMsg::Layout { req: 0, windows: layout() }),
         ("layout_changed", HostMsg::LayoutChanged),
         (

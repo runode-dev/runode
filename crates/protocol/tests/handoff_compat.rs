@@ -93,6 +93,7 @@ fn welcome_with_handoff_is_readable() {
             todos: false,
             board: 0,
             shells: false,
+            screen_req: false,
             desktops: 0,
             os: String::new(),
             home: None,

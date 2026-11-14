@@ -110,7 +110,7 @@ impl Outbox {
     pub(crate) fn control(&self, message: &HostMsg) -> bool {
         match Frame::control(message) {
             // 写线程写不出超过上限的帧，只能断开整条连接，重连后再要还是断：这条不发，回话改回 `Error`，请求方
-            // 不必等到超时。读屏幕的回话（`ScreenText`）不带 `req`，前端按会话认。
+            // 不必等到超时。请求没带 `req` 的读屏回话（`ScreenText`）也不带，前端按会话认，所以还要带上 `id`。
             Ok(frame) if frame.payload.len() > MAX_PAYLOAD as usize => {
                 tracing::warn!("dropping a control message of {} bytes, over the frame limit", frame.payload.len());
                 let req = HostMsg::req_in(&frame.payload);
@@ -301,16 +301,23 @@ mod tests {
             other => panic!("expected an error for the request: {other:?}"),
         }
         let id = SessionId(1);
-        assert!(out.control(&HostMsg::ScreenText { id, text: huge.clone(), truncated: false }));
+        assert!(out.control(&HostMsg::ScreenText { req: None, id, text: huge.clone(), truncated: false }));
         let Ok(Out::Frame { payload: screen, .. }) = rx.try_recv() else { panic!("expected a control frame") };
         let frame = Frame { kind: FrameKind::Control, channel, payload: screen.to_vec() };
         assert!(
             matches!(frame.message::<HostMsg>().unwrap(), HostMsg::Error { req: None, id: Some(got), .. } if got == id),
             "the screen text turns into an error for its session"
         );
+        assert!(out.control(&HostMsg::ScreenText { req: Some(9), id, text: huge.clone(), truncated: false }));
+        let Ok(Out::Frame { payload: numbered, .. }) = rx.try_recv() else { panic!("expected a control frame") };
+        let frame = Frame { kind: FrameKind::Control, channel, payload: numbered.to_vec() };
+        assert!(
+            matches!(frame.message::<HostMsg>().unwrap(), HostMsg::Error { req: Some(9), id: Some(got), .. } if got == id),
+            "the numbered screen text turns into an error for its request"
+        );
         assert!(out.control(&HostMsg::Error { req: None, id: None, message: huge, reason: None }));
         assert!(rx.try_recv().is_err());
-        assert_eq!(out.streaming(), payload.len() + screen.len());
+        assert_eq!(out.streaming(), payload.len() + screen.len() + numbered.len());
     }
 
     /// 说了 `Caps::shell_report` 的连接：`Meta` 里的 shell 集成报告拆出来，和上一次发的一样就不带；

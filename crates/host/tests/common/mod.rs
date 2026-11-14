@@ -318,7 +318,7 @@ impl Peer {
 
     /// 读会话的屏幕：`lines` 为 `None` 时是当前一屏，否则是含回滚历史的最底下这么多行。
     pub fn screen_text(&mut self, id: SessionId, lines: Option<u32>) -> String {
-        self.send(&ClientMsg::ReadScreen { id, lines, command: None });
+        self.send(&ClientMsg::ReadScreen { req: None, id, lines, command: None });
         match self.reply() {
             HostMsg::ScreenText { id: read, text, .. } if read == id => text,
             other => panic!("expected the screen, got {other:?}"),
@@ -329,7 +329,7 @@ impl Peer {
     pub fn wait_screen(&mut self, id: SessionId, lines: Option<u32>, mut done: impl FnMut(&str) -> bool) -> String {
         let deadline = Instant::now() + WAIT;
         loop {
-            self.send(&ClientMsg::ReadScreen { id, lines, command: None });
+            self.send(&ClientMsg::ReadScreen { req: None, id, lines, command: None });
             let text = match self.reply() {
                 HostMsg::ScreenText { id: read, text, .. } if read == id => text,
                 // 调试构建的 VT 啃积压的输出时，读屏排在后面会过了宿主等回话的时限：宿主只是忙，接着等。

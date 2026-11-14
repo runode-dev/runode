@@ -78,7 +78,7 @@ fn app(name: &str, windows: Option<Vec<WindowLayout>>, own: Option<u128>) -> Fak
             }],
         },
         ClientMsg::ReadScreen { id, .. } => {
-            vec![HostMsg::ScreenText { id: *id, text: format!("{id}\n"), truncated: false }]
+            vec![HostMsg::ScreenText { req: None, id: *id, text: format!("{id}\n"), truncated: false }]
         }
         _ => vec![],
     });

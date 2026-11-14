@@ -113,6 +113,7 @@ pub fn welcome(todos: bool) -> HostMsg {
         todos,
         board: if todos { runode_protocol::todo::BOARD_LEVEL } else { 0 },
         shells: false,
+        screen_req: false,
         desktops: 0,
         os: String::new(),
         home: None,

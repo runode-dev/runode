@@ -202,7 +202,7 @@
             case .focus(let id, true):
                 guard Self.sessions.first(where: { $0.id == id })?.sizeOwner == nil else { return }
                 emit(.message(.sizeOwner(id: id, mine: true, owner: demoText("演示 iPhone", "Demo iPhone"))))
-            case .readScreen(let id, _, let command):
+            case .readScreen(let id, _, let command, _):
                 // 普通 shell 有 shell 集成：读最近一条命令的输出时只给输出；别的会话读屏幕。
                 let text = command != nil && id == Self.shell.id ? Self.shellLastOutput : Self.plain(Self.screen(for: id))
                 emit(.message(.screenText(id: id, text: text, truncated: false)))

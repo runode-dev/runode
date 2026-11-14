@@ -201,7 +201,7 @@ fn killed_sessions_go_quiet() {
     let output = peer.wait(channel, |message, _| matches!(message, Some(HostMsg::Exited { .. })));
     assert!(!contains(&output, b"after"));
     assert!(peer.sessions().is_empty());
-    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: None });
+    peer.send(&ClientMsg::ReadScreen { req: None, id, lines: None, command: None });
     assert!(matches!(peer.reply(), HostMsg::Error { id: Some(errored), .. } if errored == id));
 }
 
@@ -336,7 +336,7 @@ fn attaching_after_the_shell_exited() {
     let (_, screen) = peer.attach(id, AttachMode::Snapshot);
     assert!(screen.starts_with(b"GHOSTSNP"));
     assert!(matches!(peer.reply(), HostMsg::Exited { id: exited, .. } if exited == id));
-    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: None });
+    peer.send(&ClientMsg::ReadScreen { req: None, id, lines: None, command: None });
     let HostMsg::ScreenText { text, .. } = peer.reply() else { panic!("expected screen text") };
     assert!(text.contains("-l"), "{text:?}");
     assert_eq!(peer.sessions().iter().map(|info| (info.id, info.exited)).collect::<Vec<_>>(), [(id, true)]);

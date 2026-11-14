@@ -49,7 +49,7 @@ fn host(name: &str, meta: SessionMeta, then: Vec<HostMsg>, screens: Vec<&'static
         ClientMsg::ReadScreen { id, .. } => {
             let mut screens = screens.lock().unwrap();
             let text = if screens.len() > 1 { screens.remove(0) } else { screens[0].clone() };
-            vec![HostMsg::ScreenText { id: *id, text, truncated: false }]
+            vec![HostMsg::ScreenText { req: None, id: *id, text, truncated: false }]
         }
         ClientMsg::SendKeys { req, .. } | ClientMsg::Paste { req, .. } => vec![HostMsg::Done { req: *req }],
         ClientMsg::Layout { req } => {
@@ -113,7 +113,7 @@ fn a_window_resize_request_is_not_an_answer() {
         }],
         ClientMsg::ReadScreen { id, .. } => vec![
             HostMsg::ResizeWindow { id: *id, rows: 50, columns: 120 },
-            HostMsg::ScreenText { id: *id, text: "error: boom\n".into(), truncated: false },
+            HostMsg::ScreenText { req: None, id: *id, text: "error: boom\n".into(), truncated: false },
         ],
         _ => vec![],
     });
@@ -347,7 +347,7 @@ fn read_a_command_and_say_when_it_was_cut_off() {
     let fake = FakeHost::start("readcmd", |message| match message {
         ClientMsg::ListSessions => vec![HostMsg::SessionList { sessions: vec![session(id(S), at_prompt())] }],
         ClientMsg::ReadScreen { id, command: Some(n), .. } => {
-            vec![HostMsg::ScreenText { id: *id, text: format!("output of {n}\n"), truncated: *n > 1 }]
+            vec![HostMsg::ScreenText { req: None, id: *id, text: format!("output of {n}\n"), truncated: *n > 1 }]
         }
         _ => vec![],
     });
@@ -392,7 +392,7 @@ fn a_lost_subscription_ends_a_text_wait() {
     let fake = screen_host("screen-resync", |id| {
         vec![
             HostMsg::Resync { id, reason: "the client reads too slowly".into() },
-            HostMsg::ScreenText { id, text: "$\n".into(), truncated: false },
+            HostMsg::ScreenText { req: None, id, text: "$\n".into(), truncated: false },
         ]
     });
     let started = Instant::now();

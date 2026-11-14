@@ -284,7 +284,7 @@ struct State {
     /// 等 `SessionList` 的调用方，按发请求的先后。
     lists: VecDeque<mpsc::Sender<Vec<SessionInfo>>>,
     /// 等读屏回话（`ScreenText`，或者带这个会话、不带 `req` 的 `Error`）的调用方，按会话、按发请求的先后；
-    /// 有登记的会话的这两种消息交给它们，不交给看这个会话的视图。
+    /// 有登记的会话的这两种消息交给它们，不交给看这个会话的视图。只在 `screen_req` 为假时用。
     screen_reads: HashMap<SessionId, VecDeque<mpsc::Sender<Result<String, String>>>>,
     /// 最近一次换的主题和选项（`SetOptions` 的两项），重连后补发。
     theme: Option<TermSettings>,
@@ -305,6 +305,8 @@ struct State {
     board: u32,
     /// 现在这条连接上的宿主认得 `ListShells`、`FindCommands`，不认得时这两条不发。
     shells: bool,
+    /// 现在这条连接上的宿主回读屏时带 `req`（`HostMsg::Welcome::screen_req`）。
+    screen_req: bool,
     /// 现在这条连接上的宿主在 `Welcome` 里报的系统和家目录，没报时为空。
     os: String,
     home: Option<PathBuf>,
@@ -595,6 +597,7 @@ impl Link {
             state.todos = welcome.todos;
             state.board = welcome.board;
             state.shells = welcome.shells;
+            state.screen_req = welcome.screen_req;
             state.os = welcome.os;
             state.home = welcome.home;
             *self.inner.writer() =
@@ -948,9 +951,17 @@ impl Link {
     }
 
     /// 会话 `id` 屏幕上从最后一个有字的行往上 `lines` 行的文字（`ClientMsg::ReadScreen`），最多等 `timeout`。
-    /// 宿主另起线程等会话回话，超时连接照用。回话不带请求编号，按会话认：超时的这次登记留着，晚到的回话交给
-    /// 排在后面的读屏，没人等了就丢掉。
+    /// 宿主另起线程等会话回话，超时连接照用。宿主回读屏时带 `req`（`State::screen_req`）的，回话按 `req` 认，
+    /// 超时的这次撤掉登记，晚到的回话丢掉；不带的按会话认，超时的这次登记留着，晚到的回话交给排在后面的读屏，
+    /// 没人等了就丢掉。
     pub fn read_screen(&self, id: SessionId, lines: u32, timeout: Duration) -> Result<String> {
+        if self.inner.state().screen_req {
+            let read = |req| ClientMsg::ReadScreen { req: Some(req), id, lines: Some(lines), command: None };
+            return match self.request_on(read, timeout, OnTimeout::Wait)? {
+                HostMsg::ScreenText { text, .. } => Ok(text),
+                other => Err(anyhow!("unexpected answer from the host: {other:?}")),
+            };
+        }
         let (tx, rx) = mpsc::channel();
         let generation = {
             let mut state = self.inner.state();
@@ -960,7 +971,7 @@ impl Link {
             state.screen_reads.entry(id).or_default().push_back(tx);
             state.generation
         };
-        let message = ClientMsg::ReadScreen { id, lines: Some(lines), command: None };
+        let message = ClientMsg::ReadScreen { req: None, id, lines: Some(lines), command: None };
         if let Err(err) = self.inner.control_on(generation, &message) {
             return Err(anyhow!("failed to ask the host: {err}"));
         }
@@ -1079,6 +1090,7 @@ struct Welcome {
     todos: bool,
     board: u32,
     shells: bool,
+    screen_req: bool,
     desktops: u32,
     os: String,
     home: Option<PathBuf>,
@@ -1111,6 +1123,7 @@ fn handshake(stream: &UnixStream, build: &BuildId, timeout: Duration) -> Result<
                     todos,
                     board,
                     shells,
+                    screen_req,
                     desktops,
                     os,
                     home,
@@ -1124,6 +1137,7 @@ fn handshake(stream: &UnixStream, build: &BuildId, timeout: Duration) -> Result<
                         todos,
                         board,
                         shells,
+                        screen_req,
                         desktops,
                         os,
                         home,

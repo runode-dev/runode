@@ -839,7 +839,7 @@ public final class SessionListModel {
             requestPreview(id)
         case .bell(let id):
             requestPreview(id)
-        case .screenText(let id, let text, _):
+        case .screenText(let id, let text, _, _):
             let read = pendingPreviews.removeValue(forKey: id) ?? .bottomLines(atPrompt: false)
             guard session(id) != nil else { return }
             let waiting = session(id).map(SessionGroup.of) == .waiting
