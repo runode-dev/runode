@@ -130,8 +130,8 @@ mod tests {
         let rgb = |r, g, b| Some(TerminalColor::Rgb(Rgb(r, g, b)));
         assert_eq!(config.cursor_color, rgb(0xf5, 0xe0, 0xdc));
         assert_eq!(config.cursor_text, rgb(0x1e, 0x1e, 0x2e));
-        assert_eq!(config.selection_background, rgb(0x58, 0x5b, 0x70));
-        assert!(config.palette.contains(&(15, Rgb(0xba, 0xc2, 0xde))));
+        assert_eq!(config.selection_background, rgb(0xf5, 0xe0, 0xdc));
+        assert!(config.palette.contains(&(15, Rgb(0xa6, 0xad, 0xc8))));
         assert!(bundled_theme("No Such Theme").is_none());
     }
 
