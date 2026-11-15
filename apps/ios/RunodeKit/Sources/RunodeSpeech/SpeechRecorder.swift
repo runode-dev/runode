@@ -67,12 +67,19 @@ public final class SpeechRecorder: @unchecked Sendable {
         #if os(iOS)
             let session = AVAudioSession.sharedInstance()
             // 不和别的 App 混音：它们在放的声音录音期间被打断，不然扬声器放出来的也会被麦克风收进去、一起转写；
-            // 停用时 `.notifyOthersOnDeactivation` 让它们接着放。
-            try session.setCategory(.record, mode: .default)
+            // 停用时 `.notifyOthersOnDeactivation` 让它们接着放。打断不了的（可混音的 App、系统声音）交给
+            // `startEngine` 开的语音处理消掉，它要输入输出两头都在，所以是 playAndRecord。
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
             try session.setActive(true)
         #endif
         do {
-            try startEngine()
+            do {
+                try startEngine(voiceProcessing: true)
+            } catch {
+                // 开着语音处理在有的路由上起不来，关掉再录，只是不消回声。
+                try? engine.inputNode.setVoiceProcessingEnabled(false)
+                try startEngine(voiceProcessing: false)
+            }
         } catch {
             #if os(iOS)
                 try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -81,8 +88,13 @@ public final class SpeechRecorder: @unchecked Sendable {
         }
     }
 
-    private func startEngine() throws {
+    private func startEngine(voiceProcessing: Bool) throws {
         let input = engine.inputNode
+        // 语音处理从麦克风里去掉此刻设备自己放出来的声音（回声消除）；开不起来时照样录。
+        // 输入格式要在开了之后再读，开之前读到的不对。
+        if voiceProcessing, (try? input.setVoiceProcessingEnabled(true)) != nil {
+            input.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: false, duckingLevel: .min)
+        }
         let format = input.outputFormat(forBus: 0)
         guard let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Self.sampleRate, channels: 1, interleaved: false),
             let converter = AVAudioConverter(from: format, to: target)

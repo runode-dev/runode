@@ -176,7 +176,7 @@ impl TerminalView {
             return false;
         }
         if let Some(Dictation::Recording { recorder: Some(recorder), .. }) = self.dictation.take() {
-            cx.background_spawn(async move { drop(recorder.stop()) }).detach();
+            drop(recorder);
         }
         cx.notify();
         true

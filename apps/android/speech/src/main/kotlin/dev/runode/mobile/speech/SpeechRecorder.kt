@@ -9,6 +9,7 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,6 +25,7 @@ class SpeechRecorder(
 ) {
     private var record: AudioRecord? = null
     private var reader: Thread? = null
+    private var canceler: AcousticEchoCanceler? = null
     private val audio = context.getSystemService(AudioManager::class.java)
 
     /**
@@ -66,37 +68,53 @@ class SpeechRecorder(
             .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
             .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
             .build()
-        val record = try {
-            AudioRecord.Builder()
-                // 给识别用的音源：系统不做降噪、自动增益这类为通话做的处理。
-                .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-                .setAudioFormat(format)
-                .setBufferSizeInBytes(maxOf(minimum, chunkSamples * Float.SIZE_BYTES * 4))
-                .build()
-        } catch (_: SecurityException) {
-            throw SpeechError.NoPermission
-        } catch (_: UnsupportedOperationException) {
-            throw SpeechError.MicrophoneUnavailable
-        }
-        if (record.state != AudioRecord.STATE_INITIALIZED) {
-            record.release()
-            throw SpeechError.MicrophoneUnavailable
+        val bufferSize = maxOf(minimum, chunkSamples * Float.SIZE_BYTES * 4)
+        // 通话音源上系统做回声消除，去掉此刻设备自己放出来的声音；建不起来时退回给识别用的音源，不消回声。
+        val record = open(MediaRecorder.AudioSource.VOICE_COMMUNICATION, format, bufferSize)
+            ?: open(MediaRecorder.AudioSource.VOICE_RECOGNITION, format, bufferSize)
+            ?: throw SpeechError.MicrophoneUnavailable
+        // 有的机型通话音源本身不消回声，另挂一个；挂不上不影响录音。
+        val canceler = if (AcousticEchoCanceler.isAvailable()) {
+            runCatching { AcousticEchoCanceler.create(record.audioSessionId)?.also { it.enabled = true } }.getOrNull()
+        } else {
+            null
         }
         requestFocus()
-        try {
+        val started = try {
             record.startRecording()
+            record.recordingState == AudioRecord.RECORDSTATE_RECORDING
         } catch (_: IllegalStateException) {
-            record.release()
-            abandonFocus()
-            throw SpeechError.MicrophoneUnavailable
+            false
         }
-        if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+        if (!started) {
+            canceler?.release()
             record.release()
             abandonFocus()
             throw SpeechError.MicrophoneUnavailable
         }
         this.record = record
+        this.canceler = canceler
         reader = thread(name = "runode-speech-recorder") { read(record) }
+    }
+
+    /** 用 [source] 建一个初始化好的录音；这个音源建不起来时返回 null。 */
+    private fun open(source: Int, format: AudioFormat, bufferSize: Int): AudioRecord? {
+        val record = try {
+            AudioRecord.Builder()
+                .setAudioSource(source)
+                .setAudioFormat(format)
+                .setBufferSizeInBytes(bufferSize)
+                .build()
+        } catch (_: SecurityException) {
+            throw SpeechError.NoPermission
+        } catch (_: UnsupportedOperationException) {
+            return null
+        }
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            return null
+        }
+        return record
     }
 
     /** 录音的线程：一块块读到 [AudioRecord.stop] 为止。 */
@@ -122,10 +140,12 @@ class SpeechRecorder(
             } catch (_: IllegalStateException) {
             }
             reader?.join()
+            canceler?.release()
             record.release()
             abandonFocus()
         }
         record = null
+        canceler = null
         reader = null
         val samples = synchronized(lock) { samples.copyOf(count) }
         if (samples.isNotEmpty() && samples.all { it == 0f }) throw SpeechError.Silent

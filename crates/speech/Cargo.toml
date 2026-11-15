@@ -1,6 +1,6 @@
 [package]
 name = "runode-speech"
-description = "Speech-to-text: downloads and verifies the recognition models, records the microphone and transcribes it on the device with sherpa-onnx, or in the cloud, and polishes the text with a language model"
+description = "Speech-to-text: downloads and verifies the recognition models, records the microphone with the computer's own playback cancelled out of it, transcribes it on the device with sherpa-onnx or in the cloud, and polishes the text with a language model"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,12 +14,35 @@ cpal = { workspace = true, optional = true }
 serde_json.workspace = true
 sha2.workspace = true
 sherpa-onnx.workspace = true
+# 录音时消掉本机外放的声音（Windows、Linux 上回采系统输出当参考）。
+sonora = { workspace = true, optional = true }
 tracing.workspace = true
+
+# Linux 上录麦克风和回采外放都走 PulseAudio 协议（纯 Rust 实现，不链 libpulse），连不上时退回 ALSA。
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { workspace = true, optional = true, features = ["pulseaudio"] }
+
+# macOS 上用 AVAudioEngine 的语音处理录麦克风，由系统消掉本机外放的声音。
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = { workspace = true, optional = true }
+objc2 = { workspace = true, optional = true }
+objc2-avf-audio = { workspace = true, optional = true, features = [
+    "std",
+    "block2",
+    "AVAudioBuffer",
+    "AVAudioEngine",
+    "AVAudioFormat",
+    "AVAudioIONode",
+    "AVAudioNode",
+    "AVAudioTime",
+    "AVAudioTypes",
+] }
+objc2-foundation = { workspace = true, optional = true, features = ["std", "NSError", "NSProcessInfo", "NSString"] }
 
 [features]
 default = ["recording"]
 # 录麦克风（`Recorder`）。不开时 `Recorder::start` 报错，可执行文件不依赖声卡的库。
-recording = ["dep:cpal"]
+recording = ["dep:cpal", "dep:sonora", "dep:block2", "dep:objc2", "dep:objc2-avf-audio", "dep:objc2-foundation"]
 
 [lints]
 workspace = true

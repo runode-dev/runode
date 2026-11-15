@@ -103,6 +103,8 @@ objc2-core-video = { version = "0.3", default-features = false }
 objc2-core-graphics = { version = "0.3", default-features = false }
 objc2-core-foundation = { version = "0.3", default-features = false }
 objc2-security = { version = "0.3", default-features = false }
+# 语音输入：用 AVAudioEngine 的语音处理录麦克风，系统消掉本机外放的声音。
+objc2-avf-audio = { version = "0.3", default-features = false }
 dispatch2 = { version = "0.3", default-features = false }
 # 从 GPUI 的窗口拿到 NSWindow：程序要求改窗口尺寸时直接设 frame，保持左上角不动。
 raw-window-handle = "0.6"
@@ -128,8 +130,12 @@ rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"
 # 语音转文字（Apache-2.0）：sherpa-onnx 的 Rust 封装，构建时下载它预编译的静态库（连同 onnxruntime）
 # 链进来；只许 runode-speech 直接依赖，见 deny.toml。
 sherpa-onnx = "2"
-# 录麦克风：macOS 上是 CoreAudio，Windows 上是 WASAPI，Linux 上是 ALSA。
+# 录麦克风：macOS 上是 CoreAudio，Windows 上是 WASAPI；Linux 上走 PulseAudio 协议（PipeWire 经
+# pipewire-pulse 也认），没有时退回 ALSA。
 cpal = "0.18"
+# 录音时的回声消除（BSD-3-Clause）：WebRTC AEC3 的纯 Rust 移植，把本机外放的声音从麦克风里减掉。
+# 不开 `examples` 特性，不拉进它示例程序用的 cpal、clap。只许 runode-speech 直接依赖。
+sonora = { version = "0.3", default-features = false }
 # 核对下载的模型文件。
 sha2 = "0.11"
 # 配对的二维码：`runode remote pair` 画在终端里，设置页画在界面上；不要默认特性（画成图片、SVG 用不上）。
