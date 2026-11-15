@@ -331,11 +331,13 @@
         @Environment(\.themeColors) private var colors
 
         func body(content: Content) -> some View {
-            // 系统顶边的滚动边缘效果在导航栏底下画一条分隔线，所以关掉它，自己从页面底色渐隐。
+            // 系统顶边的滚动边缘效果在导航栏底下画一条分隔线，所以关掉它，导航栏铺实心的页面底色，
+            // 滚上去的内容藏在导航栏底下，不和标题叠着。
             if #available(iOS 26, *) {
                 themed(content)
                     .scrollEdgeEffectHidden(true, for: .top)
-                    .overlay(alignment: .top) { TopFade(color: colors.page) }
+                    .toolbarBackground(colors.page, for: .navigationBar)
+                    .toolbarBackground(.visible, for: .navigationBar)
             } else {
                 themed(content)
             }
@@ -345,29 +347,6 @@
             content
                 .scrollContentBackground(.hidden)
                 .background(colors.page)
-        }
-    }
-
-    /// 盖住导航栏那一截、再往下渐隐的页面底色：滚上去的内容在标题底下淡出，不和标题叠着。
-    private struct TopFade: View {
-        let color: Color
-        private static let fadeHeight: CGFloat = 16
-
-        var body: some View {
-            GeometryReader { proxy in
-                let top = proxy.safeAreaInsets.top
-                LinearGradient(
-                    stops: [
-                        .init(color: color, location: 0),
-                        .init(color: color, location: top / (top + Self.fadeHeight)),
-                        .init(color: color.opacity(0), location: 1),
-                    ], startPoint: .top, endPoint: .bottom
-                )
-                .frame(height: top + Self.fadeHeight)
-                .offset(y: -top)
-            }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
         }
     }
 
