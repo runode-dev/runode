@@ -69,17 +69,35 @@ class SpeechRecorder(
             .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
             .build()
         val bufferSize = maxOf(minimum, chunkSamples * Float.SIZE_BYTES * 4)
-        // 通话音源上系统做回声消除，去掉此刻设备自己放出来的声音；建不起来时退回给识别用的音源，不消回声。
-        val record = open(MediaRecorder.AudioSource.VOICE_COMMUNICATION, format, bufferSize)
-            ?: open(MediaRecorder.AudioSource.VOICE_RECOGNITION, format, bufferSize)
-            ?: throw SpeechError.MicrophoneUnavailable
+        requestFocus()
+        // 通话音源上系统做回声消除，去掉此刻设备自己放出来的声音；建不起来或开始不了录音时（比如通话音源正被
+        // 别的通话占着）退回给识别用的音源，系统不消回声，只剩另挂的回声消除。
+        val started = try {
+            begin(MediaRecorder.AudioSource.VOICE_COMMUNICATION, format, bufferSize)
+                ?: begin(MediaRecorder.AudioSource.VOICE_RECOGNITION, format, bufferSize)
+        } catch (error: SpeechError) {
+            abandonFocus()
+            throw error
+        }
+        if (started == null) {
+            abandonFocus()
+            throw SpeechError.MicrophoneUnavailable
+        }
+        val (record, canceler) = started
+        this.record = record
+        this.canceler = canceler
+        reader = thread(name = "runode-speech-recorder") { read(record) }
+    }
+
+    /** 用 [source] 建好录音、挂上回声消除并开始录；这个音源建不起来或开始不了录音时返回 null。 */
+    private fun begin(source: Int, format: AudioFormat, bufferSize: Int): Pair<AudioRecord, AcousticEchoCanceler?>? {
+        val record = open(source, format, bufferSize) ?: return null
         // 有的机型通话音源本身不消回声，另挂一个；挂不上不影响录音。
         val canceler = if (AcousticEchoCanceler.isAvailable()) {
             runCatching { AcousticEchoCanceler.create(record.audioSessionId)?.also { it.enabled = true } }.getOrNull()
         } else {
             null
         }
-        requestFocus()
         val started = try {
             record.startRecording()
             record.recordingState == AudioRecord.RECORDSTATE_RECORDING
@@ -89,12 +107,9 @@ class SpeechRecorder(
         if (!started) {
             canceler?.release()
             record.release()
-            abandonFocus()
-            throw SpeechError.MicrophoneUnavailable
+            return null
         }
-        this.record = record
-        this.canceler = canceler
-        reader = thread(name = "runode-speech-recorder") { read(record) }
+        return record to canceler
     }
 
     /** 用 [source] 建一个初始化好的录音；这个音源建不起来时返回 null。 */

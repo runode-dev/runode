@@ -1,30 +1,40 @@
 //! 用回采到的外放声音把它的回声从麦克风录音里消掉，交给 sonora（WebRTC AEC3 的移植）。整段录完
-//! 才一次处理，两条音轨按采集时刻对齐后逐帧交给它。
+//! 才一次处理：两条音轨先都重采样到 `SAMPLE_RATE`，按采集时刻对齐后逐帧交给它。
 
-use anyhow::ensure;
 use sonora::{
     AudioProcessing, Config, StreamConfig,
     config::{EchoCanceller, HighPassFilter},
 };
 
 use super::Track;
+use crate::SAMPLE_RATE;
 
 /// 参考音轨的峰值低于它就当外放没有声音，录音原样交回。
 const AUDIBLE: f32 = 1e-4;
 
-/// sonora 一帧是 10 ms，采样率要能被它整除。
+/// sonora 一帧的长度是一秒的这么多分之一，采样率要能被它整除。
 const FRAMES_PER_SEC: u32 = 100;
 
-/// 从 `mic` 里消掉 `reference` 的回声，交回和 `mic` 一样长、一样采样率的音频。外放没有声音、不用
-/// 消时是 `None`；采样率不能按 `FRAMES_PER_SEC` 分成整帧时报错。
-pub(super) fn cancel(mic: &Track, reference: &Track) -> anyhow::Result<Option<Vec<f32>>> {
+const _: () = assert!(SAMPLE_RATE.is_multiple_of(FRAMES_PER_SEC));
+
+/// 一帧的样本数。
+const FRAME_LEN: usize = (SAMPLE_RATE / FRAMES_PER_SEC) as usize;
+
+/// 从 `mic` 里消掉 `reference` 的回声，交回 `SAMPLE_RATE` 上和 `mic` 一样长的音频。外放没有声音，
+/// 或者消回声失败时，交回只重采样过的 `mic`。
+pub(super) fn cancel(mic: Track, reference: Track) -> Vec<f32> {
+    let mic = mic.into_resampled();
     if reference.samples.iter().all(|s| s.abs() < AUDIBLE) {
-        return Ok(None);
+        return mic.samples;
     }
-    for rate in [mic.rate, reference.rate] {
-        ensure!(rate > 0 && rate % FRAMES_PER_SEC == 0, "unsupported sample rate {rate} for echo cancellation");
+    let reference = reference.into_resampled();
+    match process(&mic.samples, &align(&mic, &reference)) {
+        Ok(cleaned) => cleaned,
+        Err(err) => {
+            tracing::warn!("消回声失败，交出原样的录音：{err:#}");
+            mic.samples
+        }
     }
-    process(mic, &align(mic, reference), reference.rate).map(Some)
 }
 
 /// 把 `reference` 挪到 `mic` 的时间轴上：参考晚开始的在前面补 0，早开始的去掉多出的开头。
@@ -46,7 +56,7 @@ fn align(mic: &Track, reference: &Track) -> Vec<f32> {
 
 /// 按 `FRAMES_PER_SEC` 逐帧先交参考、再交麦克风。参考已经对齐在麦克风的时间轴上，所以告诉它的延迟是 0，
 /// 剩下的声学延迟由 AEC3 自己估。参考比麦克风短的部分当静音，末尾不满一帧的补 0 处理完再截回原长。
-fn process(mic: &Track, reference: &[f32], reference_rate: u32) -> anyhow::Result<Vec<f32>> {
+fn process(mic: &[f32], reference: &[f32]) -> anyhow::Result<Vec<f32>> {
     let config = Config {
         echo_canceller: Some(EchoCanceller::default()),
         high_pass_filter: Some(HighPassFilter::default()),
@@ -54,26 +64,24 @@ fn process(mic: &Track, reference: &[f32], reference_rate: u32) -> anyhow::Resul
     };
     let mut apm = AudioProcessing::builder()
         .config(config)
-        .capture_config(StreamConfig::new(mic.rate, 1))
-        .render_config(StreamConfig::new(reference_rate, 1))
+        .capture_config(StreamConfig::new(SAMPLE_RATE, 1))
+        .render_config(StreamConfig::new(SAMPLE_RATE, 1))
         .build();
-    let capture_len = (mic.rate / FRAMES_PER_SEC) as usize;
-    let render_len = (reference_rate / FRAMES_PER_SEC) as usize;
-    let mut capture = vec![0.; capture_len];
-    let mut cleaned = vec![0.; capture_len];
-    let mut render = vec![0.; render_len];
-    let mut render_out = vec![0.; render_len];
-    let mut out = Vec::with_capacity(mic.samples.len().next_multiple_of(capture_len));
-    for frame in 0..mic.samples.len().div_ceil(capture_len) {
-        fill(&mut render, reference, frame * render_len);
+    let mut capture = [0.; FRAME_LEN];
+    let mut cleaned = [0.; FRAME_LEN];
+    let mut render = [0.; FRAME_LEN];
+    let mut render_out = [0.; FRAME_LEN];
+    let mut out = Vec::with_capacity(mic.len().next_multiple_of(FRAME_LEN));
+    for offset in (0..mic.len()).step_by(FRAME_LEN) {
+        fill(&mut render, reference, offset);
         apm.process_render_f32(&[&render], &mut [&mut render_out])?;
         // 只在超出它收得下的范围、被夹住时报错，0 不会。
         let _ = apm.set_stream_delay_ms(0);
-        fill(&mut capture, &mic.samples, frame * capture_len);
+        fill(&mut capture, mic, offset);
         apm.process_capture_f32(&[&capture], &mut [&mut cleaned])?;
         out.extend_from_slice(&cleaned);
     }
-    out.truncate(mic.samples.len());
+    out.truncate(mic.len());
     Ok(out)
 }
 
@@ -89,7 +97,7 @@ fn fill(frame: &mut [f32], from: &[f32], offset: usize) {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::*;
+    use super::{super::resample, *};
 
     const SECS: usize = 10;
     /// 只看最后这几秒：AEC3 前几秒还在收敛。
@@ -158,14 +166,12 @@ mod tests {
 
     #[test]
     fn removes_echo_of_the_playback() {
-        let rate = 48_000;
+        let rate = SAMPLE_RATE;
         let len = SECS * rate as usize;
         let reference: Vec<f32> = noise(len, 1).into_iter().map(|s| s * 0.3).collect();
         let mic = mix(&echo_of(&reference, rate, Duration::from_millis(40)), &floor(len));
         let start = Instant::now();
-        let cleaned = cancel(&track(mic.clone(), rate, start), &track(reference, rate, start))
-            .unwrap()
-            .expect("playback is audible");
+        let cleaned = cancel(track(mic.clone(), rate, start), track(reference, rate, start));
         assert_eq!(cleaned.len(), mic.len());
         let reduction = tail_db(&mic, rate) - tail_db(&cleaned, rate);
         assert!(reduction >= 30., "echo reduced by only {reduction:.1} dB");
@@ -173,68 +179,59 @@ mod tests {
 
     #[test]
     fn keeps_near_end_when_playback_is_silent() {
-        let rate = 48_000;
+        let rate = SAMPLE_RATE;
         let len = SECS * rate as usize;
         let mic = mix(&speech(len, rate), &floor(len));
-        let start = Instant::now();
-        let cleaned = process(&track(mic.clone(), rate, start), &vec![0.; len], rate).unwrap();
+        let cleaned = process(&mic, &vec![0.; len]).unwrap();
         let loss = tail_db(&mic, rate) - tail_db(&cleaned, rate);
         assert!(loss.abs() <= 1., "near-end changed by {loss:.1} dB");
     }
 
     #[test]
     fn keeps_near_end_when_playback_does_not_reach_the_mic() {
-        let rate = 48_000;
+        let rate = SAMPLE_RATE;
         let len = SECS * rate as usize;
         let reference: Vec<f32> = noise(len, 2).into_iter().map(|s| s * 0.5).collect();
         let mic = mix(&speech(len, rate), &floor(len));
         let start = Instant::now();
-        let cleaned = cancel(&track(mic.clone(), rate, start), &track(reference, rate, start))
-            .unwrap()
-            .expect("playback is audible");
+        let cleaned = cancel(track(mic.clone(), rate, start), track(reference, rate, start));
         let loss = tail_db(&mic, rate) - tail_db(&cleaned, rate);
         assert!(loss <= 1., "near-end lost {loss:.1} dB");
     }
 
     #[test]
     fn handles_different_capture_and_render_rates() {
-        let (mic_rate, reference_rate) = (44_100, 48_000);
+        cancels_echo_across_rates(44_100, 48_000);
+    }
+
+    #[test]
+    fn handles_rates_that_do_not_split_into_frames() {
+        cancels_echo_across_rates(22_050, 48_000);
+    }
+
+    /// 麦克风和回采各在自己的采样率上，交回的是 `SAMPLE_RATE` 上消过回声的录音。
+    fn cancels_echo_across_rates(mic_rate: u32, reference_rate: u32) {
         let reference: Vec<f32> = noise(SECS * reference_rate as usize, 3).into_iter().map(|s| s * 0.3).collect();
-        // 按时间在参考上线性插值，得到麦克风采样率上的回声。
-        let at_mic_rate: Vec<f32> = (0..SECS * mic_rate as usize)
-            .map(|n| {
-                let x = n as f64 * f64::from(reference_rate) / f64::from(mic_rate);
-                let i = x as usize;
-                let frac = (x - i as f64) as f32;
-                let next = reference.get(i + 1).copied().unwrap_or(0.);
-                reference[i] * (1. - frac) + next * frac
-            })
-            .collect();
+        // 带抗混叠滤波地换到麦克风的采样率上：真麦克风采样前也滤掉了收不下的高频。
+        let at_mic_rate = sherpa_onnx::LinearResampler::create(reference_rate as i32, mic_rate as i32)
+            .unwrap()
+            .resample(&reference, true);
         let mic = mix(&echo_of(&at_mic_rate, mic_rate, Duration::from_millis(40)), &floor(at_mic_rate.len()));
         let start = Instant::now();
-        let cleaned = cancel(&track(mic.clone(), mic_rate, start), &track(reference, reference_rate, start))
-            .unwrap()
-            .expect("playback is audible");
-        assert_eq!(cleaned.len(), mic.len());
+        let cleaned = cancel(track(mic.clone(), mic_rate, start), track(reference, reference_rate, start));
+        let resampled = resample(&mic, mic_rate);
+        assert_eq!(cleaned.len(), resampled.len());
         assert!(cleaned.iter().all(|s| s.is_finite()));
-        let reduction = tail_db(&mic, mic_rate) - tail_db(&cleaned, mic_rate);
+        let reduction = tail_db(&resampled, SAMPLE_RATE) - tail_db(&cleaned, SAMPLE_RATE);
         assert!(reduction >= 20., "echo reduced by only {reduction:.1} dB");
     }
 
     #[test]
     fn silent_playback_returns_the_recording_untouched() {
         let start = Instant::now();
-        let mic = track(noise(4410, 4), 44_100, start);
+        let mic = noise(1600, 4);
         let reference = track(vec![0.; 4800], 48_000, start);
-        assert_eq!(cancel(&mic, &reference).unwrap(), None);
-    }
-
-    #[test]
-    fn rejects_rates_that_do_not_split_into_10_ms_frames() {
-        let start = Instant::now();
-        let mic = track(noise(2205, 5), 22_050, start);
-        let reference = track(noise(4800, 6), 48_000, start);
-        assert!(cancel(&mic, &reference).is_err());
+        assert_eq!(cancel(track(mic.clone(), SAMPLE_RATE, start), reference), mic);
     }
 
     #[test]

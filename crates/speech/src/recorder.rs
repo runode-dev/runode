@@ -71,19 +71,11 @@ impl Recorder {
         if !mic.samples.is_empty() && mic.samples.iter().all(|&s| s == 0.) {
             return Err(Silent.into());
         }
-        let rate = mic.rate;
-        let samples = match reference {
+        Ok(match reference {
             #[cfg(all(feature = "recording", not(target_os = "macos")))]
-            Some(reference) => match echo::cancel(&mic, &reference) {
-                Ok(cleaned) => cleaned.unwrap_or(mic.samples),
-                Err(err) => {
-                    tracing::warn!("消回声失败，交出原样的录音：{err:#}");
-                    mic.samples
-                }
-            },
-            _ => mic.samples,
-        };
-        Ok(resample(&samples, rate))
+            Some(reference) => echo::cancel(mic, reference),
+            _ => mic.into_resampled().samples,
+        })
     }
 }
 
@@ -146,6 +138,14 @@ impl Track {
         }
         let room = max.saturating_sub(self.samples.len());
         self.samples.extend(block.into_iter().take(room));
+    }
+
+    /// 换到 `SAMPLE_RATE` 上的同一条音轨，起点不变。
+    fn into_resampled(self) -> Self {
+        if self.rate == SAMPLE_RATE {
+            return self;
+        }
+        Self { samples: resample(&self.samples, self.rate), rate: SAMPLE_RATE, ..self }
     }
 }
 
@@ -270,10 +270,8 @@ where
     Ok(stream)
 }
 
+/// 把 `rate` 上的 `samples` 重采样到 `SAMPLE_RATE`。
 fn resample(samples: &[f32], rate: u32) -> Vec<f32> {
-    if rate == SAMPLE_RATE {
-        return samples.to_vec();
-    }
     let Some(resampler) = i32::try_from(rate).ok().and_then(|rate| LinearResampler::create(rate, SAMPLE_RATE as i32))
     else {
         return Vec::new();
