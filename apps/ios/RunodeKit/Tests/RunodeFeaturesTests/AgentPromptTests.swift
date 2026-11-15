@@ -74,7 +74,7 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
         let screen =
             "────────\n ☐ 午饭\n\n午饭吃什么？\n\n❯ 1. 面条\n  2. 米饭\n────────\n  3. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to\ncancel\n"
         let prompt = try #require(parse(screen))
-        #expect(prompt.question == ["☐ 午饭", "午饭吃什么？"])
+        #expect(prompt.question == ["午饭吃什么？"])
         #expect(texts(prompt) == ["面条", "米饭", "Chat about this"])
     }
 
@@ -227,6 +227,13 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
         #expect(first.asked != reworded.asked)
     }
 
+    /// 一次问几个问题时问题上面的标签条不算问题。
+    @Test func questionTabBarIsNotQuestion() throws {
+        let screen = "────────\n←  ☐ 引导步骤  ✔ Submit  →\n\n新用户引导要包含哪些步骤？\n\n❯ 1. [ ] 选主题\n  2. [ ] 装 skill\n"
+        let prompt = try #require(parse(screen))
+        #expect(prompt.question == ["新用户引导要包含哪些步骤？"])
+    }
+
     /// Claude Code 的多选题：选项以复选框开头，勾没勾和去掉复选框后的原文分得出来，后面不带复选框的几项照旧；
     /// 光标停的那一项不算默认项，读屏的原文不带复选框，比是不是同一个提问时仍带着复选框。
     @Test func claudeMultiSelect() throws {
@@ -252,6 +259,7 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
         #expect(prompt.options.allSatisfy { !prompt.isDefault($0) })
         #expect(prompt.options.first?.key.accessibilityLabel.contains("[") == false)
         #expect(prompt.asked.options.first == "[ ] 首页双 tab 切换")
+        #expect(prompt.question == ["新用户引导先做哪一步？"])
 
         let toggled = try #require(parse(screen.replacingOccurrences(of: "[ ] 首页", with: "[✔] 首页")))
         #expect(toggled.asked != prompt.asked)

@@ -84,7 +84,7 @@ class AgentPromptTests {
                     "Enter to select · ↑/↓ to navigate · Esc to\ncancel\n",
             ),
         )
-        assertEquals(listOf("☐ 午饭", "午饭吃什么？"), prompt.question)
+        assertEquals(listOf("午饭吃什么？"), prompt.question)
         assertEquals(listOf("面条", "米饭", "Chat about this"), texts(prompt))
     }
 
@@ -233,6 +233,14 @@ class AgentPromptTests {
         assertEquals(listOf(1, 2), numbers(2))
         assertEquals(listOf(1, 3), numbers(3))
         assertEquals(listOf(1, 5), numbers(5))
+    }
+
+    /** 一次问几个问题时问题上面的标签条不算问题。 */
+    @Test fun questionTabBarIsNotQuestion() {
+        val prompt = assertNotNull(
+            parse(screen("────────", "←  ☐ 引导步骤  ✔ Submit  →", "", "新用户引导要包含哪些步骤？", "", "❯ 1. [ ] 选主题", "  2. [ ] 装 skill")),
+        )
+        assertEquals(listOf("新用户引导要包含哪些步骤？"), prompt.question)
     }
 
     /** Claude Code 的多选题：选项以复选框开头，显示和读屏用去掉复选框的字，比较是不是同一个提问仍用原文。 */

@@ -60,6 +60,10 @@ pub const MAX_QUESTION_LINES: usize = 4;
 /// 选项末尾的括号里不超过这么多字时当作按键提示去掉。
 pub const MAX_HINT_LENGTH: usize = 6;
 
+/// 一次问几个问题时 Claude 在问题上面画的标签条（`← ☐ 标题 ☒ 标题 ✔ Submit →`，只问一个时是 `☐ 标题`）
+/// 行首的字。标签只是问题的简称，不算问题。
+const TAB_BAR_LEADS: [char; 3] = ['←', '☐', '☒'];
+
 /// 选项行开头表示光标停在这一项的记号。
 const MARKERS: [char; 5] = ['❯', '›', '>', '▶', '●'];
 /// 框两边的竖线。
@@ -68,7 +72,7 @@ const BORDERS: [char; 3] = ['│', '┃', '║'];
 /// 从屏幕文字里认出提问。认法：从下往上，跳过空行、制表线和至多 `MAX_TRAILING_LINES` 行别的字，
 /// 找到一块编号从 1 起连续、至少两项的选项；选项之间可以夹空行和制表线，缩进到选项正文那一列的下一行
 /// 算折行，接到上一项后面。选项块上面至多 `MAX_QUESTION_LINES` 行有字的行是问题，遇到制表线或别的
-/// 选项为止。行首行尾的框线（`BORDERS`）先去掉。选项超过 `MAX_OPTIONS` 个时认不出。
+/// 选项为止，标签条（`TAB_BAR_LEADS`）跳过。行首行尾的框线（`BORDERS`）先去掉。选项超过 `MAX_OPTIONS` 个时认不出。
 pub fn parse(screen: &str) -> Option<Prompt> {
     let entries = merge(screen.split('\n').map(Entry::new));
     let mut index = entries.len();
@@ -120,11 +124,16 @@ pub fn parse(screen: &str) -> Option<Prompt> {
         match &entries[index] {
             Entry::Blank => {}
             Entry::Rule | Entry::Option(_) => break,
+            Entry::Text { text, .. } if is_tab_bar(text) => {}
             Entry::Text { text, .. } => question.push(text.clone()),
         }
     }
     question.reverse();
     Some(Prompt { question, options })
+}
+
+fn is_tab_bar(text: &str) -> bool {
+    text.starts_with(TAB_BAR_LEADS)
 }
 
 /// 屏幕底部最后 `lines` 行有字的输出，从上往下，去掉了框线和两头的空白：跳过空行和制表线；底部有

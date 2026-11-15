@@ -74,11 +74,19 @@ public struct AgentPrompt: Hashable, Sendable {
     static let maxQuestionLines = 2
     /// 选项末尾的括号里不超过这么多字时当作按键提示去掉。
     static let maxHintLength = 6
+    /// 一次问几个问题时 Claude 在问题上面画的标签条（`← ☐ 标题 ☒ 标题 ✔ Submit →`，只问一个时是 `☐ 标题`）
+    /// 行首的字。标签只是问题的简称，不算问题。
+    static let tabBarLeads: Set<Character> = ["←", "☐", "☒"]
+
+    static func isTabBar(_ text: String) -> Bool {
+        text.first.map(tabBarLeads.contains) ?? false
+    }
 
     /// 从屏幕文字（一行一个）里认出提问。认法：从下往上，跳过空行、制表线和至多 `maxTrailingLines`
     /// 行别的字，找到一块编号从 1 起连续、至少两项的选项；选项之间可以夹空行和制表线，缩进到选项正文
     /// 那一列的下一行算折行，接到上一项后面。选项块上面至多 `maxQuestionLines` 行有字的行是问题，
-    /// 遇到制表线或别的选项为止。行首行尾的框线（`│`）先去掉。选项超过 `maxOptions` 个时认不出。
+    /// 遇到制表线或别的选项为止，标签条（`tabBarLeads`）跳过。行首行尾的框线（`│`）先去掉。选项超过
+    /// `maxOptions` 个时认不出。
     public static func parse(_ lines: [String]) -> AgentPrompt? {
         let entries = merge(lines.map(Entry.init))
         var index = entries.count - 1
@@ -117,6 +125,7 @@ public struct AgentPrompt: Hashable, Sendable {
             switch entries[index] {
             case .blank: break
             case .rule, .option: break scan
+            case .text(let text, _) where isTabBar(text): break
             case .text(let text, _): question.insert(text, at: 0)
             }
             index -= 1

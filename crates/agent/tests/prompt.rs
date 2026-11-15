@@ -80,6 +80,15 @@ fn question_keeps_the_lines_nearest_the_options() {
     assert_eq!(prompt.question.last().map(String::as_str), Some("f"));
 }
 
+/// 一次问几个问题时问题上面的标签条不算问题。
+#[test]
+fn claude_question_tabs() {
+    let screen =
+        "────────\n←  ☐ 引导步骤  ✔ Submit  →\n\n新用户引导要包含哪些步骤？\n\n❯ 1. [ ] 选主题\n  2. [ ] 装 skill\n";
+    let prompt = parse(screen).unwrap();
+    assert_eq!(prompt.question, ["新用户引导要包含哪些步骤？"]);
+}
+
 /// 选项下面隔着空行的按键提示不影响。
 #[test]
 fn claude_with_key_hint() {
@@ -95,7 +104,7 @@ fn claude_with_key_hint() {
 fn claude_question() {
     let screen = "────────\n ☐ 午饭\n\n午饭吃什么？\n\n❯ 1. 面条\n  2. 米饭\n────────\n  3. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to\ncancel\n";
     let prompt = parse(screen).unwrap();
-    assert_eq!(prompt.question, ["☐ 午饭", "午饭吃什么？"]);
+    assert_eq!(prompt.question, ["午饭吃什么？"]);
     assert_eq!(texts(&prompt), ["面条", "米饭", "Chat about this"]);
 }
 
