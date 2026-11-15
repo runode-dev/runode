@@ -48,12 +48,19 @@ fn claude() {
     assert_eq!(screen(Claude, "● 改好了。\n\n────────\n❯\n────────\n  ? for shortcuts\n"), "idle");
     // 等后台 agent 的那行被提示挤开，底下 agent 清单里还在跑的那行照样算干活。
     let footer = "────────\n❯\n────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n\n  ⏺ main\n";
-    let waiting = "✻ Waiting for 1 background agent to finish\n\n✦ Heads up · 上下文不够\n  1: Learn more   0: Dismiss\n\n";
+    let waiting =
+        "✻ Waiting for 1 background agent to finish\n\n✦ Heads up · 上下文不够\n  1: Learn more   0: Dismiss\n\n";
     assert_eq!(
-        screen(Claude, &format!("{waiting}{footer}  ◯ implementer  正在运行 typecheck      35m 1s · ↓ 129.4k tokens\n")),
+        screen(
+            Claude,
+            &format!("{waiting}{footer}  ◯ implementer  正在运行 typecheck      35m 1s · ↓ 129.4k tokens\n")
+        ),
         "working"
     );
-    assert_eq!(screen(Claude, &format!("● 改好了。\n\n{footer}  ◯ reviewer  在审查改动   30s · ↓ 33.7k tokens\n")), "working");
+    assert_eq!(
+        screen(Claude, &format!("● 改好了。\n\n{footer}  ◯ reviewer  在审查改动   30s · ↓ 33.7k tokens\n")),
+        "working"
+    );
     assert_eq!(screen(Claude, &format!("● 改好了。\n\n{footer}")), "idle");
     let running = "  ◯ reviewer  在审查改动   30s · ↓ 33.7k tokens\n";
     // 子 agent 在跑时主线程弹出权限提示，仍是等回答。
@@ -114,7 +121,10 @@ fn codex() {
     assert_eq!(title(Codex, "runode"), "idle");
     assert_eq!(title(Codex, "Action Required | runode"), "blocked");
     assert_eq!(
-        screen(Codex, "  Update available · 0.158.0 -> 0.160.0\n\n  › 1. Update now\n    2. Skip\n\n  enter continue · esc skip\n"),
+        screen(
+            Codex,
+            "  Update available · 0.158.0 -> 0.160.0\n\n  › 1. Update now\n    2. Skip\n\n  enter continue · esc skip\n"
+        ),
         "blocked"
     );
     assert_eq!(

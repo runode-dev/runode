@@ -166,7 +166,7 @@ fn word_changes(view: &DiffView, cancel: &AtomicBool) -> WordChanges {
             while ix < lines.len() {
                 let removed = run(ix, LineKind::Removed);
                 let added = run(removed.end, LineKind::Added);
-                for (old, new) in removed.clone().zip(added.clone()) {
+                for (old, new) in removed.zip(added.clone()) {
                     if cancel.load(Ordering::Relaxed) {
                         break;
                     }
