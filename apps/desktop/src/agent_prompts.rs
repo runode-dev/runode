@@ -16,7 +16,7 @@ use std::{
 };
 
 use anyhow::Result;
-use gpui::{App, Context, Div, Entity, Global, Task, Window, div, prelude::*, px};
+use gpui::{AnyElement, App, Context, Div, Entity, Global, Task, Window, div, prelude::*, px};
 use runode_agent::prompt::{self, Prompt};
 use runode_protocol::SessionId;
 use runode_types::agent::AgentState;
@@ -38,8 +38,10 @@ use crate::{
 /// 一个会话：所在的主机和宿主里的标识。
 pub type Key = (HostId, SessionId);
 
-/// 选项按钮和打开终端的图标按钮的高度（基准字号下的点数）。
+/// 打开终端的图标按钮的边长、单行选项按钮的高度（基准字号下的点数）。
 const BUTTON_HEIGHT: f32 = 26.;
+/// 选项的原文最多折成几行，再长的截断、悬停看全文。
+const OPTION_LINES: usize = 2;
 
 /// 读屏幕底部多少行：要装得下 `prompt::MAX_QUESTION_LINES` 行问题、`prompt::MAX_OPTIONS` 个折了行的选项和
 /// 下面的按键提示。
@@ -540,9 +542,9 @@ fn schedule_rereads(key: &Key, serial: u64, after: Vec<Duration>, cx: &mut App) 
 }
 
 /// 会话 `key` 认出的提问 `prompt` 画成的部件：上面是问题，等宽的小字放在深色的小框里，每行放不下时截断、悬停
-/// 看全文；下面是各选项的按钮，写编号和原文，第一项是琥珀色的主按钮，按下替用户回答（`answer`），回答在路上时
-/// 都禁掉；最右是图标 `open_icon` 的按钮，按下调 `open`，`open_label` 是它做什么。`title` 是会话的标题，放进
-/// 按钮报给辅助工具的名字里，几张卡片上的同一种按钮才分得清。
+/// 看全文；下面是各选项的按钮，一项一行，写编号和原文，第一项是琥珀色的主按钮，按下替用户回答（`answer`），
+/// 回答在路上时都禁掉；问题框右边（没有问题时在选项右边）是图标 `open_icon` 的按钮，按下调 `open`，
+/// `open_label` 是它做什么。`title` 是会话的标题，放进按钮报给辅助工具的名字里，几张卡片上的同一种按钮才分得清。
 pub fn render_prompt<V: 'static>(
     key: &Key,
     prompt: &Prompt,
@@ -583,14 +585,28 @@ pub fn render_prompt<V: 'static>(
         let text = format!("{number}. {}", option.text);
         let label = rust_i18n::t!("prompts.option_for", number = number, text = option.text.as_str(), title = title)
             .into_owned();
-        // 放不下一行时各占一行，长的截断；按钮里的字由自己的子元素画，才截得断。
+        // 按钮里的字由自己的子元素画，才折得了行、截得断；编号单独一栏，折了行的原文对齐在编号右边。
+        // 上下留白收得够小，单行时由 `min_h` 定高，和打开的图标按钮一样高。
         let button = Button::new(("prompt-option", usize::from(number)), label)
-            .flex_grow(1.)
+            .w_full()
             .min_w_0()
-            .max_w_full()
+            .h_auto()
+            .min_h(scaled(BUTTON_HEIGHT))
+            .py(px(2.))
+            .items_start()
+            .justify_start()
             .disabled(busy)
-            .tooltip(tooltip(text.clone(), None))
-            .child(div().min_w_0().truncate().child(text));
+            .tooltip(tooltip(text, None))
+            .child(div().flex_none().opacity(0.7).child(format!("{number}.")))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_left()
+                    .line_clamp(OPTION_LINES)
+                    .text_ellipsis()
+                    .child(option.text.clone()),
+            );
         let button = if ix == 0 {
             button
                 .variant(ButtonVariant::Default)
@@ -616,14 +632,19 @@ pub fn render_prompt<V: 'static>(
         .cursor_pointer()
         .tooltip(tooltip(open_label, None))
         .on_press(cx, open);
-    div().flex().flex_col().gap(px(8.)).children(question).child(
-        div()
+    let options = div().flex_1().min_w_0().flex().flex_col().gap(px(4.)).children(options);
+    // 选项要占满整行，打开的按钮不和选项挤在一起。
+    let beside =
+        |main: AnyElement, open_button: Button| div().flex().items_start().gap(px(6.)).child(main).child(open_button);
+    match question {
+        Some(question) => div()
             .flex()
-            .items_start()
-            .gap(px(6.))
-            .child(div().flex_1().min_w_0().flex().flex_wrap().gap(px(6.)).children(options))
-            .child(open_button),
-    )
+            .flex_col()
+            .gap(px(8.))
+            .child(beside(question.flex_1().min_w_0().into_any_element(), open_button))
+            .child(options),
+        None => beside(options.into_any_element(), open_button),
+    }
 }
 
 #[cfg(test)]
