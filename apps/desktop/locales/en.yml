@@ -1193,7 +1193,6 @@ kanban:
   today: "Done today: %{done}. Running now: %{running}."
   new_todo: New Task
   new_schedule: New Schedule
-  close_history: Close History
   count: "%{count} task(s)"
   empty: Nothing here
   empty_done: "Nothing finished in the last 7 days"
@@ -1254,7 +1253,6 @@ kanban:
   no_history: No finished tasks yet
   load_more: "Load More"
   done_at: "Finished %{time}"
-  back: Back
   pr:
     number: "PR #%{number}"
     merged: "Merged"

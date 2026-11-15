@@ -1193,7 +1193,6 @@ kanban:
   today: "今天做完 %{done} 个，现在 %{running} 个在跑"
   new_todo: 新建任务
   new_schedule: 新建定时
-  close_history: 关闭记录
   count: "%{count} 个任务"
   empty: 没有任务
   empty_done: "最近 7 天没有完成的任务"
@@ -1254,7 +1253,6 @@ kanban:
   no_history: 还没有完成的任务
   load_more: 加载更多
   done_at: "完成于 %{time}"
-  back: 返回
   pr:
     number: "PR #%{number}"
     merged: "已合并"

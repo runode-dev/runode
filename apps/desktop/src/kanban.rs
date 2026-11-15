@@ -10,7 +10,7 @@
 //! 看板是一个单独的视图（`Kanban`），app 打开时建、收起时丢掉，一个窗口最多一个。它和配对设备页一样盖住
 //! 标签和分屏，摆在哪由 app 管。和宿主说话经 app 启动时交进来的 `Host`（`watch`），数据全 app 一份。各
 //! workspace 的目录和名字、新建时默认的目录、定时能不能在后台跑由 app 每次画之前经 `set_input` 交进来；卡片上
-//! agent 的状态标记和标签、侧栏上的一样，由 app 画（`AgentMarks`）。按了关闭、Esc（`KanbanEvent::Close`），
+//! agent 的状态标记和标签、侧栏上的一样，由 app 画（`AgentMarks`）。收起看板（`KanbanEvent::Close`）、
 //! 卡片的「打开终端」（`KanbanEvent::OpenSession`：把任务的会话接进窗口）交给 app 办，会话没了时先请宿主另开
 //! 一个接着 agent 上次的对话（`open_todo`）。对话框盖住整个窗口，由 app 画在窗口最上层（`Kanban::dialog`）。
 //!
@@ -42,7 +42,7 @@ use crate::ui::{
     base_name,
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{FontSize, scaled},
-    icons::{ARROW_LEFT_ICON, CHECK_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, FOLDER_ICON, PLUS_ICON},
+    icons::{CHECK_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, FOLDER_ICON, PLUS_ICON},
     kbd::Kbd,
     menu::{Menu, MenuHost, MenuItem},
     segmented::Segmented,
@@ -112,7 +112,7 @@ pub struct AgentMarks {
 
 /// 要 app 办的事。
 pub enum KanbanEvent {
-    /// 收起看板：按了关闭或 Esc。
+    /// 收起看板：按了 Esc，或者只为对话框才开的看板在对话框没存就关掉时。
     Close,
     /// 换了一页（侧栏的入口、定时的运行记录点回任务页），侧栏上的入口跟着换高亮。
     PageChanged,
@@ -713,8 +713,7 @@ impl Kanban {
             .children(menu)
     }
 
-    /// 顶上一行：标题、在几页之间换的分段、看板页的项目筛选、今天的总结，以及这一页的新建按钮；记录页另有
-    /// 返回和关闭。
+    /// 顶上一行：标题、在几页之间换的分段、看板页的项目筛选、今天的总结，以及这一页的新建按钮。
     fn render_header(
         &self,
         data: &store::TodoData,
@@ -726,12 +725,6 @@ impl Kanban {
         let subtle = theme.subtle_foreground;
         let title = rust_i18n::t!("kanban.title").into_owned();
         let page = self.page;
-        // 记录页回到进来的那一页：只看一个定时的回定时页。
-        let back = (page == Page::History).then(|| {
-            let label = rust_i18n::t!("kanban.back").into_owned();
-            let to = if self.history.schedule.is_some() { Page::Schedules } else { Page::Todos };
-            icon_button("kanban-back", ARROW_LEFT_ICON, label).on_press(cx, move |this, _, cx| this.set_page(to, cx))
-        });
         let schedules = data.schedules.len();
         let views = Segmented::new("kanban-views", rust_i18n::t!("kanban.views").into_owned())
             .option(
@@ -813,17 +806,12 @@ impl Kanban {
             ),
             Page::History => None,
         };
-        let close = (page == Page::History).then(|| {
-            let label = rust_i18n::t!("kanban.close_history").into_owned();
-            icon_button("kanban-close", CLOSE_ICON, label).on_press(cx, |_, _, cx| cx.emit(KanbanEvent::Close))
-        });
         div()
             .flex_none()
             .flex()
             .flex_wrap()
             .items_center()
             .gap(px(12.))
-            .children(back)
             .child(
                 div()
                     .id("kanban-title")
@@ -840,7 +828,6 @@ impl Kanban {
             .child(div().flex_1())
             .child(summary)
             .children(primary)
-            .children(close)
     }
 }
 
