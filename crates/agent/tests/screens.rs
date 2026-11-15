@@ -46,6 +46,23 @@ fn claude() {
         "working"
     );
     assert_eq!(screen(Claude, "● 改好了。\n\n────────\n❯\n────────\n  ? for shortcuts\n"), "idle");
+    // 等后台 agent 的那行被提示挤开，底下 agent 清单里还在跑的那行照样算干活。
+    let footer = "────────\n❯\n────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n\n  ⏺ main\n";
+    let waiting = "✻ Waiting for 1 background agent to finish\n\n✦ Heads up · 上下文不够\n  1: Learn more   0: Dismiss\n\n";
+    assert_eq!(
+        screen(Claude, &format!("{waiting}{footer}  ◯ implementer  正在运行 typecheck      35m 1s · ↓ 129.4k tokens\n")),
+        "working"
+    );
+    assert_eq!(screen(Claude, &format!("● 改好了。\n\n{footer}  ◯ reviewer  在审查改动   30s · ↓ 33.7k tokens\n")), "working");
+    assert_eq!(screen(Claude, &format!("● 改好了。\n\n{footer}")), "idle");
+    // 起了名字的会话：选单的提示行下面是名字分隔线和任务面板。
+    assert_eq!(
+        screen(
+            Claude,
+            " Which one?\n ❯ 1. A\n   2. B\n\n Enter to select · ↑/↓ to navigate · Esc to cancel\n\n──────── my-session ─\n  2 tasks (1 done, 1 open)\n  ✔ 写测试\n  ◻ 提交\n"
+        ),
+        "blocked"
+    );
     assert_eq!(
         screen(
             Claude,
@@ -80,6 +97,10 @@ fn codex() {
     assert_eq!(title(Codex, "⠋ runode"), "working");
     assert_eq!(title(Codex, "runode"), "idle");
     assert_eq!(title(Codex, "Action Required | runode"), "blocked");
+    assert_eq!(
+        screen(Codex, "  Update available · 0.158.0 -> 0.160.0\n\n  › 1. Update now\n    2. Skip\n\n  enter continue · esc skip\n"),
+        "blocked"
+    );
     assert_eq!(
         verdict(Codex, "• Working (5s • esc to interrupt)\n\n› Ask Codex to do anything\n", "runode", ""),
         "working"
