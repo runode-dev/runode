@@ -10,9 +10,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
@@ -35,6 +37,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -57,12 +61,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
@@ -84,6 +90,7 @@ import dev.runode.mobile.features.ui.DisclosureChevron
 import dev.runode.mobile.features.ui.EmptyState
 import dev.runode.mobile.features.ui.ErrorDialog
 import dev.runode.mobile.features.ui.LeadingTitle
+import dev.runode.mobile.features.ui.ListSectionHeader
 import dev.runode.mobile.features.ui.LoadingState
 import dev.runode.mobile.features.ui.PreviewTone
 import dev.runode.mobile.features.ui.PromptOptionLayout
@@ -110,7 +117,8 @@ import dev.runode.mobile.protocol.TaskSource
 import dev.runode.mobile.terminal.TerminalView
 
 /**
- * 一台电脑上的会话，按工作区分节（[SessionListModel.sections]），节头能新开终端、长按改名。顶上能筛出只看等你回答的、
+ * 一台电脑上的会话，按工作区分节（[SessionListModel.sections]），节头能新开终端、长按改名；没有会话的工作区并成列表最底下
+ * 的一张卡（[EmptyWorkspaceGroup]）。顶上能筛出只看等你回答的、
  * 在干活的。一个会话一张卡片，样子按 [SessionStatus] 分：等你回答的带屏幕摘录和一排快速回复的按键，在干活的带屏幕最后
  * 一行，其余只有标题和状态；点开终端，长按有更多操作。右上角新开终端，打开远程桌面。
  *
@@ -184,7 +192,9 @@ fun SessionListView(
                     if (sections.isEmpty() && filter != SessionFilter.All) {
                         item(key = "filter-empty") { FilterEmpty(filter) { filter = SessionFilter.All } }
                     }
-                    for (section in sections) {
+                    // 有会话的节各自一个节头带着自己的卡片；没有会话的工作区并成最底下的一张卡。
+                    val (filled, empty) = sections.partition { it.sessions.isNotEmpty() }
+                    for (section in filled) {
                         item(key = "section-${section.id}") {
                             WorkspaceHeader(
                                 section = section,
@@ -199,9 +209,24 @@ fun SessionListView(
                             SessionCard(model, session, section, onOpen, onOpenGit, context)
                         }
                     }
+                    if (empty.isNotEmpty()) {
+                        item(key = "empty-workspaces-header") {
+                            ListSectionHeader(stringResource(R.string.sessions_empty_workspaces), Modifier.padding(top = 8.dp))
+                        }
+                        item(key = "empty-workspaces") {
+                            EmptyWorkspaceGroup(
+                                sections = empty,
+                                canSpawn = model::canSpawn,
+                                isSpawning = model.isSpawning,
+                                agents = model.agents,
+                                onSpawn = { section, agent -> model.spawn(section, agent) },
+                                onRename = { renaming = it },
+                            )
+                        }
+                    }
                     item(key = "bottom") { Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)) }
                 }
-                // 有空工作区时每一节自己写着「没有终端」，整页的空状态只在一节都没有时出。
+                // 空工作区收在列表底下那张卡里，整页的空状态只在一节都没有时出。
                 if (model.loaded && model.sections.isEmpty() && connected) {
                     EmptyState(
                         stringResource(R.string.sessions_empty_title),
@@ -425,7 +450,8 @@ private fun WorkspaceHeader(
                 .then(
                     if (isWorkspace) Modifier.combinedClickable(onLongClick = { menu = true }, onClick = {}) else Modifier,
                 )
-                .padding(start = 4.dp, end = 4.dp, top = 8.dp),
+                // 节头离上一组远、离自己的卡片近（下方只有列表的行距），看得出它带着下面的卡片。
+                .padding(start = 4.dp, end = 4.dp, top = 14.dp),
         ) {
             // 名字、目录和窗口占掉 logo 和「+」以外的宽度，放不下时先截目录；logo 和「+」各节都贴右。
             Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 32.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -450,22 +476,7 @@ private fun WorkspaceHeader(
                             text = AnnotatedString(spoken)
                         },
                     )
-                    Presentation.sectionDirectory(section)?.let { directory ->
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            directory,
-                            style = Type.caption,
-                            fontFamily = FontFamily.Monospace,
-                            color = colors.tertiary,
-                            maxLines = 1,
-                            overflow = TextOverflow.StartEllipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                    }
-                    Presentation.sectionWindow(section)?.let { window ->
-                        Spacer(Modifier.width(8.dp))
-                        Text(window.resolve(), style = Type.caption, color = colors.tertiary, maxLines = 1)
-                    }
+                    SectionDirectoryAndWindow(section)
                 }
                 if (agentSessions.isNotEmpty()) SectionAgentLogos(agentSessions, Modifier.padding(start = 8.dp))
                 if (canSpawn) {
@@ -490,38 +501,185 @@ private fun WorkspaceHeader(
                     }
                 }
             }
-            // 后台那一节没有目录，说明它是什么的那句另起一行；空工作区不另起一张卡片，也在这里写一行。两行都和标题的字左对齐。
+            // 后台那一节没有目录，说明它是什么的那句另起一行，和标题的字左对齐。
             if (!isWorkspace) {
                 Presentation.sectionDetail(section)?.let {
                     Text(it.resolve(), style = Type.caption, color = colors.tertiary, modifier = Modifier.padding(start = 28.dp))
                 }
             }
-            if (section.sessions.isEmpty()) {
+        }
+        WorkspaceMenu(menu, onDismiss = { menu = false }, canSpawn, isSpawning, agents, onSpawn, onRename)
+    }
+}
+
+/** 工作区长按的菜单：能新开终端时先是新开（装着 agent 时挑开终端还是哪一家），再是改名。 */
+@Composable
+private fun WorkspaceMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    canSpawn: Boolean,
+    isSpawning: Boolean,
+    agents: List<InstalledAgent>,
+    onSpawn: (InstalledAgent?) -> Unit,
+    onRename: () -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (canSpawn) {
+            if (agents.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.spawn_here)) },
+                    enabled = !isSpawning,
+                    onClick = { onDismiss(); onSpawn(null) },
+                )
+            } else {
+                SpawnKindItems(agents) {
+                    onDismiss()
+                    onSpawn(it)
+                }
+            }
+        }
+        DropdownMenuItem(text = { Text(stringResource(R.string.action_rename)) }, onClick = { onDismiss(); onRename() })
+    }
+}
+
+/** 名字后面的目录（[DirectoryText]）和「窗口 N」；目录能占的宽度是这一行剩下的全部，「窗口 N」紧跟在它后面。 */
+@Composable
+private fun RowScope.SectionDirectoryAndWindow(section: SessionSection) {
+    val colors = themeColors
+    Presentation.sectionDirectory(section)?.let { directory ->
+        Spacer(Modifier.width(8.dp))
+        DirectoryText(directory, Modifier.weight(1f, fill = false))
+    }
+    Presentation.sectionWindow(section)?.let { window ->
+        Spacer(Modifier.width(8.dp))
+        Text(window.resolve(), style = Type.caption, color = colors.tertiary, maxLines = 1)
+    }
+}
+
+/**
+ * 等宽小字的目录，单行：量过能用的宽度，用 [Presentation.directoryCandidates] 里第一个放得下的写法；都放不下时用最短的
+ * 那个、截掉开头，末尾的目录名留着。读屏念完整的目录。
+ */
+@Composable
+private fun DirectoryText(directory: String, modifier: Modifier = Modifier) {
+    val style = LocalTextStyle.current.merge(Type.caption.copy(fontFamily = FontFamily.Monospace))
+    val measurer = rememberTextMeasurer()
+    val candidates = remember(directory) { Presentation.directoryCandidates(directory) }
+    BoxWithConstraints(modifier.clearAndSetSemantics { text = AnnotatedString(directory) }) {
+        val shown = if (!constraints.hasBoundedWidth) {
+            candidates.first()
+        } else {
+            candidates.firstOrNull { measurer.measure(it, style, maxLines = 1, softWrap = false).size.width <= constraints.maxWidth }
+                ?: candidates.last()
+        }
+        Text(shown, style = style, color = themeColors.tertiary, maxLines = 1, softWrap = false, overflow = TextOverflow.StartEllipsis)
+    }
+}
+
+/**
+ * 没有会话的工作区并成的一张卡，一个工作区一行（[EmptyWorkspaceRow]），行间一条细线。
+ */
+@Composable
+private fun EmptyWorkspaceGroup(
+    sections: List<SessionSection>,
+    canSpawn: (SessionSection) -> Boolean,
+    isSpawning: Boolean,
+    agents: List<InstalledAgent>,
+    onSpawn: (SessionSection, InstalledAgent?) -> Unit,
+    onRename: (SessionSection) -> Unit,
+) {
+    val colors = themeColors
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(Shapes.group)
+            .background(colors.card, Shapes.group)
+            .border(1.dp, colors.hairline, Shapes.group),
+    ) {
+        sections.forEachIndexed { index, section ->
+            if (index > 0) HorizontalDivider(thickness = 1.dp, color = colors.hairline)
+            EmptyWorkspaceRow(
+                section = section,
+                canSpawn = canSpawn(section),
+                isSpawning = isSpawning,
+                agents = agents,
+                onSpawn = { onSpawn(section, it) },
+                onRename = { onRename(section) },
+            )
+        }
+    }
+}
+
+/**
+ * 空工作区卡里的一行：名字、目录、「窗口 N」，能新开终端时右边一个「+」。整行点了在这个工作区里新开终端（电脑上装着 agent
+ * 时先挑开终端还是哪一家），正在新开时点了不动；不能新开的工作区点了和长按一样出 [WorkspaceMenu]。读屏把整行当一个
+ * 按钮，名字后面接着念目录和窗口。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun EmptyWorkspaceRow(
+    section: SessionSection,
+    canSpawn: Boolean,
+    isSpawning: Boolean,
+    agents: List<InstalledAgent>,
+    onSpawn: (InstalledAgent?) -> Unit,
+    onRename: () -> Unit,
+) {
+    val colors = themeColors
+    val title = Presentation.sectionTitle(section).resolve()
+    var menu by remember { mutableStateOf(false) }
+    var spawnMenu by remember { mutableStateOf(false) }
+    val label = if (canSpawn) stringResource(R.string.spawn_in_section, title) else title
+    val spoken = Presentation.sectionDetail(section)?.resolve()?.let { stringResource(R.string.list_pair, label, it) } ?: label
+    Box {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = 48.dp)
+                .combinedClickable(
+                    role = Role.Button,
+                    onLongClick = { menu = true },
+                    onClick = {
+                        when {
+                            !canSpawn -> menu = true
+                            isSpawning -> {}
+                            agents.isEmpty() -> onSpawn(null)
+                            else -> spawnMenu = true
+                        }
+                    },
+                )
+                .clearAndSetSemantics {
+                    contentDescription = spoken
+                    role = Role.Button
+                }
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    stringResource(R.string.section_no_terminals),
-                    style = Type.caption,
-                    color = colors.tertiary,
-                    modifier = Modifier.padding(start = 28.dp),
+                    title,
+                    style = Type.subheadline.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.primary,
+                    maxLines = 1,
+                )
+                SectionDirectoryAndWindow(section)
+            }
+            if (canSpawn) {
+                Icon(
+                    AppIcons.plus,
+                    contentDescription = null,
+                    tint = colors.secondary,
+                    modifier = Modifier.padding(start = 12.dp).size(18.dp),
                 )
             }
         }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            if (canSpawn) {
-                if (agents.isEmpty()) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.spawn_here)) },
-                        enabled = !isSpawning,
-                        onClick = { menu = false; onSpawn(null) },
-                    )
-                } else {
-                    SpawnKindItems(agents) {
-                        menu = false
-                        onSpawn(it)
-                    }
-                }
+        DropdownMenu(expanded = spawnMenu, onDismissRequest = { spawnMenu = false }) {
+            SpawnKindItems(agents) {
+                spawnMenu = false
+                onSpawn(it)
             }
-            DropdownMenuItem(text = { Text(stringResource(R.string.action_rename)) }, onClick = { menu = false; onRename() })
         }
+        WorkspaceMenu(menu, onDismiss = { menu = false }, canSpawn, isSpawning, agents, onSpawn, onRename)
     }
 }
 

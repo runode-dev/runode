@@ -307,7 +307,7 @@
     <string name="filter_show_all">看全部</string>
     <string name="spawn_in_section">在「%1$s」裡新開終端機</string>
     <string name="spawn_here">在這裡新開終端機</string>
-    <string name="section_no_terminals">沒有終端機</string>
+    <string name="sessions_empty_workspaces">沒有終端機的工作區</string>
     <string name="session_tab">分頁 %1$d</string>
     <string name="terminal_jump_to_latest">回到最新</string>
     <string name="terminal_listening">正在聽…</string>

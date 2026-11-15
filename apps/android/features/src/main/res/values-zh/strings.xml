@@ -307,7 +307,7 @@
     <string name="filter_show_all">看全部</string>
     <string name="spawn_in_section">在「%1$s」里新开终端</string>
     <string name="spawn_here">在这里新开终端</string>
-    <string name="section_no_terminals">没有终端</string>
+    <string name="sessions_empty_workspaces">没有终端的工作区</string>
     <string name="session_tab">标签页 %1$d</string>
     <string name="terminal_jump_to_latest">回到最新</string>
     <string name="terminal_listening">正在听…</string>

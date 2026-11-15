@@ -5,10 +5,11 @@
     import SwiftUI
     import UIKit
 
-    /// 一台电脑上的会话，按工作区分节（分节见 `SessionListModel.sections`），节头能新开终端、长按改名。
-    /// 顶上能筛出只看等你回答的、在干活的。一个会话一张卡片，样子按 `SessionStatus` 分：等你回答的带屏幕
-    /// 摘录和一排快速回复的按键，在干活的带屏幕最后一行，其余只有标题和状态；点开终端，左滑结束，长按有
-    /// 更多操作。右上角新开终端、新建工作区，打开远程桌面。
+    /// 一台电脑上的会话，按工作区分节（`SessionListModel.sections`），节头能新开终端、长按改名；没有终端的
+    /// 工作区不各占一节，并成最底下一张列表卡（`EmptyWorkspaces`）。顶上能筛出只看等你回答的、在干活的。
+    /// 一个会话一张卡片，样子按 `SessionStatus` 分：等你回答的带屏幕摘录和一排快速回复的按键，在干活的带
+    /// 屏幕最后一行，其余只有标题和状态；点开终端，左滑结束，长按有更多操作。右上角新开终端、新建工作区，
+    /// 打开远程桌面。
     struct SessionListView: View {
         @Bindable var model: SessionListModel
         let onOpen: (SessionId) -> Void
@@ -65,6 +66,12 @@
 
         var body: some View {
             let sections = model.sections(matching: filter)
+            let populated = sections.filter { !$0.sessions.isEmpty }
+            let empty = sections.filter(\.sessions.isEmpty)
+            let beginRename = { (section: SessionSection) in
+                renameText = Presentation.sectionTitle(section)
+                renaming = section
+            }
             List {
                 // 两行放在同一节里：普通样式的列表只在同一节的行之间留 `listRowSpacing` 的空，节与节之间不留。
                 Section {
@@ -84,26 +91,34 @@
                         FilterEmptyRow(filter: filter) { filter = .all }
                     }
                 }
-                ForEach(sections) { section in
+                ForEach(populated) { section in
                     Section {
                         WorkspaceHeader(
                             section: section, canSpawn: model.canSpawn(in: section), isSpawning: model.isSpawning,
                             agents: model.agents,
                             onSpawn: { agent in Task { await model.spawn(in: section, agent: agent) } },
-                            onRename: {
-                                renameText = Presentation.sectionTitle(section)
-                                renaming = section
-                            })
+                            onRename: { beginRename(section) })
                         ForEach(section.sessions, id: \.id) { session in
                             row(session, in: section)
                         }
+                    }
+                }
+                if !empty.isEmpty {
+                    Section {
+                        ListSectionHeader(title: String(localized: "没有终端的工作区"))
+                            .padding(.top, 12)
+                        EmptyWorkspaces(
+                            sections: empty, canSpawn: model.canSpawn(in:), isSpawning: model.isSpawning,
+                            agents: model.agents,
+                            onSpawn: { section, agent in Task { await model.spawn(in: section, agent: agent) } },
+                            onRename: beginRename)
                     }
                 }
             }
             .cardList()
             .animation(.default, value: sections.map(\.sessions.count))
             .overlay {
-                // 有空工作区时每一节自己写着「没有终端」，整页的空状态只在一节都没有时出。
+                // 整页的空状态只在一节都没有时出：有工作区、只是都没有终端时列的是 `EmptyWorkspaces`。
                 if model.loaded, model.sections.isEmpty, model.linkState.isConnected {
                     ContentUnavailableView {
                         Label("这台电脑上没有终端", systemImage: "terminal")
@@ -499,7 +514,7 @@
 
     /// 一节的标题：工作区的名字和目录，右边一个在这个工作区里新开终端的按钮（电脑上装着 agent 时是挑开终端
     /// 还是哪家 agent 的菜单），按钮左边是工作区里各个 agent 的 logo，长按菜单能新开终端、改名；后台那一节
-    /// 只有标题。
+    /// 只有标题。上面留的空比到自己卡片的空大，看得出它管的是下面那几张。
     private struct WorkspaceHeader: View {
         let section: SessionSection
         let canSpawn: Bool
@@ -527,21 +542,7 @@
                         .layoutPriority(1)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityValue(Presentation.sectionAgentsSummary(agentSessions) ?? "")
-                    if let directory = Presentation.sectionDirectory(section) {
-                        Text(directory)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    }
-                    if let window = Presentation.sectionWindow(section) {
-                        Text(window)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                    Spacer(minLength: 8)
+                    WorkspacePlace(section: section)
                     if !agentSessions.isEmpty {
                         SectionAgentLogos(sessions: agentSessions)
                             .fixedSize()
@@ -566,21 +567,15 @@
                     }
                 }
                 .frame(minHeight: 32)
-                // 后台那一节没有目录，说明它是什么的那句另起一行；空工作区不另起一张卡片，也在这里写一行，
-                // 一屏才放得下有会话的那几节。两行都和标题的字左对齐。
-                Group {
-                    if case .background = section.id, let detail = Presentation.sectionDetail(section) {
-                        Text(detail)
-                    }
-                    if section.sessions.isEmpty {
-                        Text("没有终端")
-                    }
+                // 后台那一节没有目录，说明它是什么的那句另起一行，和标题的字左对齐。
+                if case .background = section.id, let detail = Presentation.sectionDetail(section) {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, iconWidth + 8)
                 }
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .padding(.leading, iconWidth + 8)
             }
-            .padding(.top, 2)
+            .padding(.top, 18)
             .padding(.horizontal, 4)
             .contentShape(Rectangle())
             .contextMenu {
@@ -606,6 +601,97 @@
                 .labelStyle(.iconOnly)
                 .frame(minWidth: 44, minHeight: 32, alignment: .trailing)
                 .contentShape(Rectangle())
+        }
+    }
+
+    /// 工作区名字后面那一段：目录，开着不止一个窗口时再写第几个窗口。占满名字右边剩下的宽度；目录的各种
+    /// 写法（`Presentation.directoryCandidates`）都放不下时用最短的那个、截掉开头，末尾的目录名留着。读屏念
+    /// 完整的目录。
+    private struct WorkspacePlace: View {
+        let section: SessionSection
+
+        var body: some View {
+            HStack(spacing: 8) {
+                if let directory = Presentation.sectionDirectory(section) {
+                    ViewThatFits(in: .horizontal) {
+                        ForEach(Presentation.directoryCandidates(directory), id: \.self) { candidate in
+                            Text(verbatim: candidate)
+                        }
+                    }
+                    .truncationMode(.head)
+                    .font(.caption.monospaced())
+                    .accessibilityLabel(directory)
+                }
+                if let window = Presentation.sectionWindow(section) {
+                    Text(window)
+                        .font(.caption)
+                        .fixedSize()
+                }
+            }
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 没有终端的工作区并成的一张列表卡，一个工作区一行：名字和目录，整行是一个菜单，在里面新开终端（挑开
+    /// 终端还是哪家 agent）或改名。整张卡只占列表的一行。
+    private struct EmptyWorkspaces: View {
+        let sections: [SessionSection]
+        let canSpawn: (SessionSection) -> Bool
+        let isSpawning: Bool
+        let agents: [InstalledAgent]
+        /// 第二个参数为空时开普通终端，否则起这家 agent。
+        let onSpawn: (SessionSection, InstalledAgent?) -> Void
+        let onRename: (SessionSection) -> Void
+        @Environment(\.themeColors) private var colors
+
+        var body: some View {
+            VStack(spacing: 0) {
+                ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
+                    if index > 0 {
+                        Rectangle().fill(colors.hairline).frame(height: 1)
+                    }
+                    row(section)
+                }
+            }
+            .background(colors.card, in: .group)
+            .overlay(RoundedRectangle.group.strokeBorder(colors.hairline, lineWidth: 1).allowsHitTesting(false))
+            .plainListRow()
+        }
+
+        private func row(_ section: SessionSection) -> some View {
+            let title = Presentation.sectionTitle(section)
+            let spawns = canSpawn(section)
+            return Menu {
+                if spawns {
+                    Section {
+                        SpawnKindItems(agents: agents) { agent in onSpawn(section, agent) }
+                    }
+                    .disabled(isSpawning)
+                }
+                Button("改名", systemImage: "pencil") { onRename(section) }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    WorkspacePlace(section: section)
+                    if spawns {
+                        Image(systemName: "plus")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(minHeight: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(spawns ? String(localized: "在「\(title)」里新开终端") : title)
+            .accessibilityValue(Presentation.sectionDetail(section) ?? "")
         }
     }
 

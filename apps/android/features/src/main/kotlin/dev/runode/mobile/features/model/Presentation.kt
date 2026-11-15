@@ -99,6 +99,18 @@ object Presentation {
         return path
     }
 
+    /**
+     * [directory] 写出来的目录放不下时从长到短的各种写法：先是 [path] 本身，再每次从前面多去掉一段、换成 `…/`，最短只剩
+     * 最后一段；界面挑第一个放得下的，截断只落在两段之间。只有一段的（`~`、`/`、`runode`）只有它自己。按 `/` 分段，
+     * 一个 `/` 都没有的按 `\` 分（Windows 电脑上的目录），省略号后面跟的也是它。
+     */
+    fun directoryCandidates(path: String): List<String> {
+        val separator = if ('/' in path) '/' else '\\'
+        val parts = path.split(separator).filter { it.isNotEmpty() }
+        if (parts.size <= 1) return listOf(path)
+        return listOf(path) + (1 until parts.size).map { "…$separator" + parts.drop(it).joinToString(separator.toString()) }
+    }
+
     /** 配对时列出的电脑地址：IPv4 在前，只写前两个，其余的只说还有几个；电脑的网卡多时整串地址又长又难认。 */
     internal fun pairingAddresses(addresses: List<String>, port: UShort): UiText {
         val ordered = addresses.filterNot { ':' in it } + addresses.filter { ':' in it }

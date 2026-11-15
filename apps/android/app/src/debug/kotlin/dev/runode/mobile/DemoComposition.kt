@@ -509,7 +509,7 @@ private class DemoLink(private val flags: Set<String>) : HostLink {
             ),
         )
 
-        /** 一个工作区：第一个标签左右分屏放两个 agent，第二个标签是普通 shell。 */
+        /** 一个有终端的工作区：第一个标签左右分屏放两个 agent，第二个标签是普通 shell；另外两个一个标签都没有。 */
         val layout: List<WindowLayout> = run {
             val split = TabLayout(
                 index = 1u,
@@ -521,7 +521,11 @@ private class DemoLink(private val flags: Set<String>) : HostLink {
             )
             val shellTab = TabLayout(index = 2u, panes = listOf(PaneLayout(1u, shell.id, PaneRect(0u, 0u, 1000u, 1000u))))
             val workspace = WorkspaceLayout(1u, name = "runode", dir = "/Users/ethan/dev/runode", active = true, tabs = listOf(split, shellTab))
-            listOf(WindowLayout(1u, front = true, workspaces = listOf(workspace)))
+            val empty = listOf(
+                WorkspaceLayout(2u, name = "web", dir = "/Volumes/dev/example.com/web", tabs = emptyList()),
+                WorkspaceLayout(3u, name = "~", dir = "/Users/ethan", tabs = emptyList()),
+            )
+            listOf(WindowLayout(1u, front = true, workspaces = listOf(workspace) + empty))
         }
 
         fun screen(id: SessionId): String = when (id) {

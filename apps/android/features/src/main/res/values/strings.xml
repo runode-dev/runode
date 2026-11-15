@@ -365,7 +365,7 @@
     <string name="filter_show_all">Show All</string>
     <string name="spawn_in_section">New Terminal in “%1$s”</string>
     <string name="spawn_here">New Terminal Here</string>
-    <string name="section_no_terminals">No terminals</string>
+    <string name="sessions_empty_workspaces">Workspaces without terminals</string>
     <string name="session_tab">Tab %1$d</string>
 
     <!-- 终端页 -->

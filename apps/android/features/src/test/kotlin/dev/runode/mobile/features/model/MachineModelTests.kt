@@ -492,6 +492,21 @@ class PresentationTests {
         assertNull(Presentation.directory(null))
     }
 
+    @Test fun directoryCandidatesDropWholeSegmentsFromTheFront() {
+        assertEquals(
+            listOf("/Volumes/dev/example.com/runode", "…/dev/example.com/runode", "…/example.com/runode", "…/runode"),
+            Presentation.directoryCandidates("/Volumes/dev/example.com/runode"),
+        )
+        assertEquals(listOf("~/dev/runode", "…/dev/runode", "…/runode"), Presentation.directoryCandidates("~/dev/runode"))
+        assertEquals(listOf("~"), Presentation.directoryCandidates("~"))
+        assertEquals(listOf("/"), Presentation.directoryCandidates("/"))
+        assertEquals(listOf("runode"), Presentation.directoryCandidates("runode"))
+        assertEquals(
+            listOf("C:\\Users\\ethan\\runode", "…\\Users\\ethan\\runode", "…\\ethan\\runode", "…\\runode"),
+            Presentation.directoryCandidates("C:\\Users\\ethan\\runode"),
+        )
+    }
+
     @Test fun sectionDetailSkipsADirectoryThatRepeatsTheTitle() {
         val home = SessionSection(SessionSection.Id.Workspace(1u, 0u), "~", "/Users/ethan", sessions = emptyList())
         assertNull(Presentation.sectionDetail(home))

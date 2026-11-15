@@ -1084,6 +1084,21 @@ actor UnwritableMachineStore: MachineStore {
         #expect(Presentation.directory(nil) == nil)
     }
 
+    @Test func directoryCandidatesDropLeadingSegmentsWhole() {
+        #expect(
+            Presentation.directoryCandidates("/Volumes/dev/example.com/runode") == [
+                "/Volumes/dev/example.com/runode", "…/dev/example.com/runode", "…/example.com/runode", "…/runode",
+            ])
+        #expect(Presentation.directoryCandidates("~/dev/runode") == ["~/dev/runode", "…/dev/runode", "…/runode"])
+        #expect(Presentation.directoryCandidates("~") == ["~"])
+        #expect(Presentation.directoryCandidates("/") == ["/"])
+        #expect(Presentation.directoryCandidates("/tmp") == ["/tmp"])
+        #expect(
+            Presentation.directoryCandidates(#"C:\Users\ethan\runode"#) == [
+                #"C:\Users\ethan\runode"#, #"…\Users\ethan\runode"#, #"…\ethan\runode"#, #"…\runode"#,
+            ])
+    }
+
     @Test func sectionDetailSkipsADirectoryThatRepeatsTheTitle() {
         let home = SessionSection(id: .workspace(window: 1, index: 0), name: "~", dir: "/Users/ethan", sessions: [])
         #expect(Presentation.sectionDetail(home) == nil)

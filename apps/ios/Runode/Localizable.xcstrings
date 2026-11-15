@@ -5749,6 +5749,29 @@
         }
       }
     },
+    "没有终端的工作区" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workspaces Without Terminals"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有终端的工作区"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有終端機的工作區"
+          }
+        }
+      }
+    },
     "没有配置远端" : {
       "extractionState" : "manual",
       "localizations" : {

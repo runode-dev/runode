@@ -181,7 +181,8 @@
                                 id: id, channel: 0, size: size(of: session), mode: .metaOnly, meta: session.meta,
                                 settings: Self.theme))))
             case .layout(let req):
-                // 一个工作区：第一个标签左右分屏放两个 agent，第二个标签是普通 shell。
+                // 一个有终端的工作区：第一个标签左右分屏放两个 agent，第二个标签是普通 shell；另外两个一个标签
+                // 都没有。
                 let split = TabLayout(
                     index: 1, active: true,
                     panes: [
@@ -194,7 +195,14 @@
                     index: 2, panes: [PaneLayout(index: 1, id: Self.shell.id, rect: PaneRect(x: 0, y: 0, width: 1000, height: 1000))])
                 let workspace = WorkspaceLayout(
                     index: 1, name: "runode", dir: "/Users/ethan/dev/runode", active: true, tabs: [split, shell])
-                emit(.message(.layout(req: req, windows: [WindowLayout(index: 1, front: true, workspaces: [workspace])])))
+                let empty = [
+                    WorkspaceLayout(index: 2, name: "web", dir: "/Volumes/dev/example.com/web", tabs: []),
+                    WorkspaceLayout(index: 3, name: "~", dir: "/Users/ethan", tabs: []),
+                ]
+                emit(
+                    .message(
+                        .layout(
+                            req: req, windows: [WindowLayout(index: 1, front: true, workspaces: [workspace] + empty)])))
             case .resize(let id, let size):
                 guard Self.sessions.first(where: { $0.id == id })?.sizeOwner == nil else { return }
                 sizes.withLock { $0[id] = size }

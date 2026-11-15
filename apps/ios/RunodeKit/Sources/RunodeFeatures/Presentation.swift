@@ -98,6 +98,16 @@ public enum Presentation {
         return path
     }
 
+    /// 一个目录从长到短的几种写法：整个写出来，再从前面一段一段去掉、换成 `…/`，最后只剩末尾那一段。
+    /// 界面按宽度挑放得下的最长的那个，不从一段中间截。按 `/` 分段，一个 `/` 都没有的按 `\` 分（Windows 电脑上的
+    /// 目录），省略号后面跟的也是它。
+    public static func directoryCandidates(_ directory: String) -> [String] {
+        let separator: Character = directory.contains("/") ? "/" : "\\"
+        let parts = directory.split(separator: separator)
+        guard parts.count > 1 else { return [directory] }
+        return [directory] + (1..<parts.count).map { "…\(separator)" + parts[$0...].joined(separator: String(separator)) }
+    }
+
     /// 配对时列出的电脑地址：IPv4 在前，只写前两个，其余的只说还有几个；电脑的网卡多时整串地址又长又难认。
     static func pairingAddresses(_ addresses: [String], port: UInt16) -> String {
         let ordered = addresses.filter { !$0.contains(":") } + addresses.filter { $0.contains(":") }
