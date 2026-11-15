@@ -2,13 +2,7 @@
 
 use std::time::Instant;
 
-use libghostty_vt::{
-    key,
-    key::OptionAsAlt,
-    paste,
-    screen::Screen,
-    terminal::{Mode, ScrollViewport},
-};
+use libghostty_vt::{key, key::OptionAsAlt, mode::Mode, paste, screen::Screen, terminal::ScrollViewport};
 use runode_types::{input::KeyInput, settings};
 
 use super::Session;

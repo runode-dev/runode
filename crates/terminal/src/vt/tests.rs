@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use super::*;
-use libghostty_vt::{kitty::graphics::PlacementIterator, terminal::Mode};
+use libghostty_vt::{kitty::graphics::PlacementIterator, mode::Mode};
 
 /// 测试数据用的伪随机数，固定种子，结果可重现。
 pub(crate) struct Rng(u64);
@@ -258,7 +258,7 @@ fn replay_keeps_soft_wraps_and_pending_wrap() {
     assert!(a.is_cursor_pending_wrap().unwrap());
     let mut b = replayed(&a);
     let wrapped = |t: &Terminal<'_, '_>, y| {
-        t.grid_ref(Point::Active(PointCoordinate { x: 0, y })).unwrap().row().unwrap().is_wrapped().unwrap()
+        t.grid_ref(Point::Active(point::Coordinate { x: 0, y })).unwrap().row().unwrap().is_wrapped().unwrap()
     };
     assert!(wrapped(&b, 0));
     assert!(!wrapped(&b, 1));
@@ -339,7 +339,7 @@ fn replay_keeps_the_hyperlinks_of_cells() {
     let b = replayed(&a);
     let uri = |t: &Terminal<'_, '_>, x: u16| {
         let mut buf = [0u8; 64];
-        let len = t.grid_ref(Point::Active(PointCoordinate { x, y: 0 })).unwrap().hyperlink_uri(&mut buf).unwrap();
+        let len = t.grid_ref(Point::Active(point::Coordinate { x, y: 0 })).unwrap().hyperlink_uri(&mut buf).unwrap();
         buf[..len].to_vec()
     };
     for t in [&a, &b] {
@@ -496,7 +496,7 @@ fn replay_loses_what_the_formatter_cannot_express() {
     let a = new_terminal(size(20, 4)).unwrap();
     let mut b = replayed(&a);
     let mut theme = b.default_color_palette().unwrap();
-    theme.0[2] = libghostty_vt::style::RgbColor { r: 1, g: 2, b: 3 };
+    theme.0[2] = libghostty_vt::color::Rgb { r: 1, g: 2, b: 3 };
     b.set_default_color_palette(Some(theme)).unwrap();
     assert_ne!(b.color_palette().unwrap().0[2], theme.0[2]);
 

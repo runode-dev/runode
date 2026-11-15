@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use libghostty_vt::{
     Terminal,
-    terminal::{Mode, ModeKind},
+    mode::{self, Mode},
 };
 use runode_types::{
     color::Rgb,
@@ -46,7 +46,7 @@ const MODES: [Mode; 16] = [
     Mode::ANY_MOUSE,
     Mode::IN_BAND_RESIZE,
     Mode::KEYPAD_KEYS,
-    Mode::new(1048, ModeKind::Dec),
+    Mode::new(1048, mode::Kind::Dec),
 ];
 
 /// 逐行比文字的回滚历史最多几行；更早的只比行数（见 `state` 的 `scrollback`），免得测试太慢。

@@ -33,11 +33,7 @@ use std::{
 };
 
 use anyhow::Result;
-use libghostty_vt::{
-    key, mouse,
-    search::Search,
-    terminal::{PointCoordinate, Terminal},
-};
+use libghostty_vt::{Terminal, key, mouse, point, search::Search};
 
 use runode_types::{
     grid::{GridPoint, GridSize},
@@ -288,9 +284,9 @@ impl Session {
     }
 
     /// 指针所在的视口单元格；落在网格外时取最近的边上的单元格。
-    fn viewport_cell(&self, at: GridPoint) -> PointCoordinate {
+    fn viewport_cell(&self, at: GridPoint) -> point::Coordinate {
         let size = self.size.get();
-        PointCoordinate {
+        point::Coordinate {
             x: (at.x.max(0.) as u16).min(size.cols.saturating_sub(1)),
             y: u32::from((at.y.max(0.) as u16).min(size.rows.saturating_sub(1))),
         }

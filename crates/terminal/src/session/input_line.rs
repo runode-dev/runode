@@ -2,9 +2,9 @@
 
 use libghostty_vt::{
     key,
+    point::{self, Point},
     screen::{CellSemanticContent, Screen},
     selection::Order,
-    terminal::{Point, PointCoordinate, PointSpace},
 };
 use runode_types::{frame::Cell, grid::GridPoint};
 
@@ -97,8 +97,8 @@ impl Session {
                 return Ok(None);
             }
             let selection = selection.to_ordered(&self.terminal, Order::Forward)?;
-            let start = self.terminal.point_from_grid_ref(&selection.start(), PointSpace::Active)?;
-            let end = self.terminal.point_from_grid_ref(&selection.end(), PointSpace::Active)?;
+            let start = self.terminal.point_from_grid_ref(&selection.start(), point::Space::Active)?;
+            let end = self.terminal.point_from_grid_ref(&selection.end(), point::Space::Active)?;
             let (Some(start), Some(end)) = (start, end) else {
                 return Ok(None);
             };
@@ -132,7 +132,7 @@ impl Session {
         let mut prompt = Vec::with_capacity((bottom - top + 1) as usize * usize::from(cols));
         for y in top..=bottom {
             for x in 0..cols {
-                let cell = self.terminal.grid_ref(Point::Active(PointCoordinate { x, y }))?.cell()?;
+                let cell = self.terminal.grid_ref(Point::Active(point::Coordinate { x, y }))?.cell()?;
                 prompt.push(cell.semantic_content()? == CellSemanticContent::Prompt);
             }
         }

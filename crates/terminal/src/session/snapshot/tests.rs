@@ -11,8 +11,9 @@
 
 use libghostty_vt::{
     Terminal,
+    mode::Mode,
+    point::{self, Point},
     selection::Selection,
-    terminal::{Mode, Point, PointCoordinate},
 };
 use runode_types::settings::TermSettings;
 
@@ -72,7 +73,7 @@ const MODES: [Mode; 44] = [
     Mode::VISIBILITY_REPORT,
     Mode::IN_BAND_RESIZE,
     Mode::PASTE_EVENTS,
-    Mode::new(1048, libghostty_vt::terminal::ModeKind::Dec),
+    Mode::new(1048, libghostty_vt::mode::Kind::Dec),
 ];
 
 /// 逐个单元格比的回滚历史最多几行，再多的只比文字，免得测试太慢。
@@ -90,7 +91,7 @@ fn state(terminal: &Terminal<'static, '_>, history: usize, detailed: bool) -> Ve
     let active = usize::from(terminal.rows().unwrap());
     let first = total - active - history;
     let cols = terminal.cols().unwrap();
-    let at = |x, y: usize| Point::Screen(PointCoordinate { x, y: y as u32 });
+    let at = |x, y: usize| Point::Screen(point::Coordinate { x, y: y as u32 });
     let mut rows = String::new();
     let detailed_rows = if detailed { total - active - history.min(DETAILED_HISTORY)..total } else { 0..0 };
     for y in detailed_rows {
@@ -199,7 +200,7 @@ fn assert_same(
     let mut history = expected.scrollback_rows().unwrap().min(actual.scrollback_rows().unwrap());
     let continuation = |terminal: &Terminal<'static, 'static>, from_bottom: usize| {
         let y = terminal.total_rows().unwrap() - from_bottom;
-        let at = Point::Screen(PointCoordinate { x: 0, y: y as u32 });
+        let at = Point::Screen(point::Coordinate { x: 0, y: y as u32 });
         terminal.grid_ref(at).unwrap().row().unwrap().is_wrap_continuation().unwrap()
     };
     let rows = usize::from(expected.rows().unwrap());

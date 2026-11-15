@@ -1,10 +1,6 @@
 //! 鼠标：程序开启鼠标上报时把按键、移动和滚轮按它要求的格式发给它；没开时滚轮滚动回滚历史。
 
-use libghostty_vt::{
-    key, mouse,
-    screen::Screen,
-    terminal::{Mode, ScrollViewport},
-};
+use libghostty_vt::{key, mode::Mode, mouse, screen::Screen, terminal::ScrollViewport};
 use runode_types::{
     grid::GridPoint,
     input::{Mods, MouseAction, MouseButton},

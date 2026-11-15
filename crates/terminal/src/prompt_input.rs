@@ -6,8 +6,9 @@
 use libghostty_vt::{
     Terminal,
     error::{Error, Result},
-    screen::{CellSemanticContent, CellWide, GridRef, RowSemanticPrompt, Screen},
-    terminal::{Point, PointCoordinate},
+    grid_ref::GridRef,
+    point::{self, Point},
+    screen::{CellSemanticContent, CellWide, RowSemanticPrompt, Screen},
 };
 
 /// 光标所在的那条输入：提示符之后的文字，连同软换行接在一起的上下几行。
@@ -40,7 +41,7 @@ impl Slot {
 
 /// 活动区第 `y` 行连同软换行接在一起的上下几行，从哪一行到哪一行（都含）；`rows` 是活动区的行数。
 pub(crate) fn wrapped_rows(terminal: &Terminal<'_, '_>, y: u32, rows: u32) -> Result<(u32, u32)> {
-    let row = |y: u32| terminal.grid_ref(Point::Active(PointCoordinate { x: 0, y }))?.row();
+    let row = |y: u32| terminal.grid_ref(Point::Active(point::Coordinate { x: 0, y }))?.row();
     let mut top = y;
     while top > 0 && row(top)?.is_wrap_continuation()? {
         top -= 1;
@@ -69,7 +70,7 @@ pub fn read(terminal: &Terminal<'_, '_>) -> Result<Option<PromptInput>> {
     let mut slots = Vec::with_capacity((bottom - top + 1) as usize * usize::from(cols));
     for y in top..=bottom {
         for x in 0..cols {
-            let grid_ref = terminal.grid_ref(Point::Active(PointCoordinate { x, y }))?;
+            let grid_ref = terminal.grid_ref(Point::Active(point::Coordinate { x, y }))?;
             let prompt = grid_ref.cell()?.semantic_content()? == CellSemanticContent::Prompt;
             slots.push((slot(&grid_ref)?, prompt));
         }
@@ -109,11 +110,11 @@ pub fn submitted_command(terminal: &Terminal<'_, '_>) -> Result<Option<String>> 
     let mut found_prompt = false;
     let mut y = u32::from(terminal.cursor_y()?);
     loop {
-        let row = terminal.grid_ref(Point::Active(PointCoordinate { x: 0, y }))?.row()?;
+        let row = terminal.grid_ref(Point::Active(point::Coordinate { x: 0, y }))?.row()?;
         let mut text = String::new();
         let (mut input, mut prompt) = (false, false);
         for x in 0..cols {
-            let grid_ref = terminal.grid_ref(Point::Active(PointCoordinate { x, y }))?;
+            let grid_ref = terminal.grid_ref(Point::Active(point::Coordinate { x, y }))?;
             match grid_ref.cell()?.semantic_content()? {
                 CellSemanticContent::Input => {
                     input = true;
@@ -283,7 +284,7 @@ mod tests {
         t.on_semantic_prompt({
             let seen = seen.clone();
             move |term, event| {
-                if let Ok(libghostty_vt::terminal::SemanticPromptKind::OutputStart) = event.kind() {
+                if let Ok(libghostty_vt::effect::SemanticPromptKind::OutputStart) = event.kind() {
                     seen.borrow_mut().push(submitted_command(term).unwrap());
                 }
             }

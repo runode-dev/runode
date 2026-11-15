@@ -36,12 +36,15 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use libghostty_vt::{
-    screen::Screen,
-    terminal::{
-        ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode,
-        PrimaryDeviceAttributes, ProgramStatusState, ProgressState, ResizeWindow, SecondaryDeviceAttributes,
-        SemanticPromptKind, SizeReportSize, Terminal, UnknownSequence,
+    Terminal,
+    effect::{
+        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, PrimaryDeviceAttributes,
+        ProgramStatusState, ProgressState, ResizeWindow, SecondaryDeviceAttributes, SemanticPromptKind,
+        UnknownSequence,
     },
+    mode::Mode,
+    report::{ColorScheme, SizeReportSize},
+    screen::Screen,
 };
 use runode_agent::Tracker;
 use runode_types::{
@@ -500,7 +503,7 @@ impl HostSession {
             return;
         }
         let mut buf = [0; 16];
-        match scheme.encode_report(&mut buf) {
+        match scheme.encode(&mut buf) {
             Ok(len) => {
                 self.replies.set(self.replies.get() + 1);
                 self.writer.reply(&buf[..len]);

@@ -13,7 +13,8 @@
 
 use libghostty_vt::{
     Terminal,
-    terminal::{Boundary, ClipboardWrite, ClipboardWriteError, StringEnd, WriteStop},
+    effect::{ClipboardWrite, ClipboardWriteError},
+    terminal::{Boundary, StringEnd, WriteStop},
 };
 use runode_types::clipboard::MAX_CLIPBOARD_BYTES;
 

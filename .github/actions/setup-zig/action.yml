@@ -10,7 +10,7 @@ runs:
     - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
       id: zig
       with:
-        version: 0.17.0
+        version: 0.17.1
     # 编 libghostty 时 zig 要从 ghostty 的源站下载依赖包，源站断连会让整轮构建失败；compiler_rt、libc++ 这类
     # 通用库也编在全局缓存里，每轮重编要一分多钟。整个全局缓存存进 Actions 缓存，两样都省掉。
     - name: 定下 zig 全局缓存的位置

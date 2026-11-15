@@ -3,7 +3,7 @@
 //! 那里，所以在这里编，和用户在界面里按同一个键时程序收到的一样。
 
 use anyhow::Result;
-use libghostty_vt::{key, paste, terminal::Mode};
+use libghostty_vt::{key, mode::Mode, paste};
 use runode_types::input::{KeyChord, Mods};
 
 use super::HostSession;

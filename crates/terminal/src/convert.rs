@@ -1,18 +1,18 @@
 //! 在共用的数据类型和 libghostty 的类型之间转换：对外只用前者，调 libghostty 时才换。
 
-use libghostty_vt::{key, style::RgbColor, terminal::CursorStyle};
+use libghostty_vt::{color, key, terminal::CursorStyle};
 use runode_types::{
     color::Rgb,
     input::{Key, Mods},
     settings,
 };
 
-pub(crate) fn rgb(color: RgbColor) -> Rgb {
+pub(crate) fn rgb(color: color::Rgb) -> Rgb {
     Rgb(color.r, color.g, color.b)
 }
 
-pub(crate) fn ghostty_rgb(Rgb(r, g, b): Rgb) -> RgbColor {
-    RgbColor { r, g, b }
+pub(crate) fn ghostty_rgb(Rgb(r, g, b): Rgb) -> color::Rgb {
+    color::Rgb { r, g, b }
 }
 
 pub(crate) fn ghostty_cursor_style(style: settings::CursorStyle) -> CursorStyle {

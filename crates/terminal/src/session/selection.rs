@@ -7,12 +7,12 @@ use std::{
 
 use libghostty_vt::{
     fmt::{Format, Formatter},
-    screen::GridRef,
+    grid_ref::GridRef,
+    point::{self, Point},
     selection::{
         Adjustment,
         gesture::{self, AutoscrollTickEvent, DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
     },
-    terminal::{Point, PointSpace},
 };
 use runode_types::{grid::GridPoint, input::SelectionAdjust};
 
@@ -208,10 +208,10 @@ impl Session {
 
     /// `grid_ref` 不在视口里时它在整个屏幕（含回滚历史）中的行号；已经看得到时为 `None`。
     fn reveal_row(&self, grid_ref: &GridRef<'_>) -> libghostty_vt::error::Result<Option<u32>> {
-        if self.terminal.point_from_grid_ref(grid_ref, PointSpace::Viewport)?.is_some() {
+        if self.terminal.point_from_grid_ref(grid_ref, point::Space::Viewport)?.is_some() {
             return Ok(None);
         }
-        Ok(self.terminal.point_from_grid_ref(grid_ref, PointSpace::Screen)?.map(|p| p.y))
+        Ok(self.terminal.point_from_grid_ref(grid_ref, point::Space::Screen)?.map(|p| p.y))
     }
 
     /// 当前屏幕连同回滚历史的纯文本：软换行处接起来，行尾空白去掉。

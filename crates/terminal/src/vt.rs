@@ -14,11 +14,12 @@ use libghostty_vt::{
     error::{Error, Result},
     fmt::{Extras, Format, Formatter},
     kitty::graphics::{Image, ImageFormat, PlacementIterator},
+    mode::Mode,
+    point::{self, Point},
     render::{CursorVisualStyle, RenderState},
     screen::{CellSemanticContent, RowSemanticPrompt, Screen},
     selection::Selection,
     snapshot::Decoder,
-    terminal::{Mode, Point, PointCoordinate},
 };
 use runode_types::{
     color::TerminalColor,
@@ -537,7 +538,7 @@ pub(crate) enum CommandOutput {
 pub(crate) fn command_output(terminal: &Terminal<'_, '_>, n: u32) -> Result<CommandOutput> {
     let total = terminal.total_rows()?;
     let cols = terminal.cols()?;
-    let point = |x: u16, y: usize| Point::Screen(PointCoordinate { x, y: u32::try_from(y).unwrap_or(u32::MAX) });
+    let point = |x: u16, y: usize| Point::Screen(point::Coordinate { x, y: u32::try_from(y).unwrap_or(u32::MAX) });
     let row = |y: usize| terminal.grid_ref(point(0, y))?.row();
     let typed_in = |y: usize| -> Result<bool> {
         for x in 0..cols {
@@ -613,7 +614,7 @@ pub(crate) fn snapshot_format() -> std::result::Result<u16, SnapshotError> {
 /// 滚动区域的上下边距（DECSTBM，从 0 起、含两端），以及设没设左右边距（DECSLRM）。libghostty-vt
 /// 没有直接读的接口，借格式化只输出左上一格加上滚动区域解出来：区域不是整屏时它才写出这两条序列。
 pub(crate) fn scroll_margins(terminal: &Terminal<'_, '_>) -> Result<((u16, u16), bool)> {
-    let corner = || terminal.grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }));
+    let corner = || terminal.grid_ref(Point::Active(point::Coordinate { x: 0, y: 0 }));
     let selection = Selection::new(corner()?, corner()?, false);
     let mut formatter = Formatter::new(terminal)?;
     formatter.set_format(Format::Vt)?.set_extras(Extras::SCROLLING_REGION)?;
@@ -653,7 +654,7 @@ pub(crate) fn logical_lines(
     let mut first = first;
     let floor = first.saturating_sub(extend);
     while first > floor {
-        let point = Point::Screen(PointCoordinate { x: 0, y: u32::try_from(first).unwrap_or(u32::MAX) });
+        let point = Point::Screen(point::Coordinate { x: 0, y: u32::try_from(first).unwrap_or(u32::MAX) });
         if !terminal.grid_ref(point)?.row()?.is_wrap_continuation()? {
             break;
         }
@@ -664,7 +665,7 @@ pub(crate) fn logical_lines(
 
 fn format_lines(terminal: &Terminal<'_, '_>, first: usize, last: usize, unwrap: bool) -> Result<Vec<String>> {
     let cols = terminal.cols()?;
-    let point = |x: u16, y: usize| Point::Screen(PointCoordinate { x, y: u32::try_from(y).unwrap_or(u32::MAX) });
+    let point = |x: u16, y: usize| Point::Screen(point::Coordinate { x, y: u32::try_from(y).unwrap_or(u32::MAX) });
     let selection = Selection::new(
         terminal.grid_ref(point(0, first))?,
         terminal.grid_ref(point(cols.saturating_sub(1), last))?,

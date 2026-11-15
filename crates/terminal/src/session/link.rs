@@ -9,8 +9,9 @@ use std::{
 use libghostty_vt::{
     Terminal,
     error::{Error, Result},
-    screen::{CellWide, GridRef, Row},
-    terminal::{Point, PointCoordinate},
+    grid_ref::GridRef,
+    point::{self, Point},
+    screen::{CellWide, Row},
 };
 use runode_types::grid::GridPoint;
 
@@ -194,7 +195,7 @@ fn join_hard_wraps(terminal: &Terminal<'_, '_>, line: &[LineCell], rows: u16) ->
 /// 读出视口第 `y` 行所在的逻辑行：往上找到软换行的开头，往下接到不再软换行的那一行，只在视口里找。
 fn logical_line(terminal: &Terminal<'_, '_>, y: u16, rows: u16) -> Result<Vec<LineCell>> {
     let cols = terminal.cols()?;
-    let grid_ref = |x: u16, y: u16| terminal.grid_ref(Point::Viewport(PointCoordinate { x, y: u32::from(y) }));
+    let grid_ref = |x: u16, y: u16| terminal.grid_ref(Point::Viewport(point::Coordinate { x, y: u32::from(y) }));
     let row = |y: u16| -> Result<Row> { grid_ref(0, y)?.row() };
     let mut top = y;
     while top > 0 && row(top)?.is_wrap_continuation()? {
