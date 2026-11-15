@@ -182,4 +182,10 @@ git -C vendor/libghostty-rs push git@github.com:runode-dev/libghostty-rs.git mai
 
 在 worktree 里做的，推完把主检出的两个子模块 `fetch` 后 `checkout -B main origin/main` 挪到新提交上，再把 runode 的改动搬到本地 main，只提交这几个路径（主检出常有别的未提交改动，不要一起带进去）。
 
-再推 runode（如果用户要推）。推完可以删掉备份分支，或者留给用户决定。
+按 ssh 地址推不会更新本地的 `origin/main`，git status 会显示没推。推完在两个子模块里 `fetch origin`，让 main 跟踪 `origin/main`（libghostty-rs 变基时 main 常被设成跟踪 `upstream/master`），再用 `git ls-remote` 核对远端 `main` 等于本地 HEAD：
+
+```sh
+git -C vendor/libghostty-rs fetch origin && git -C vendor/libghostty-rs branch -u origin/main main
+```
+
+再推 runode（如果用户要推）。fork 和 runode 都推上去、核对过之后，删掉两个子模块里的本地备份分支 `runode-backup-*`，以前几轮留下的一起删；报告里写上每个被删分支原来指向的提交，万一要找回，还能从 reflog 里按提交号取回来。备份分支只在本地，不推到远端。
