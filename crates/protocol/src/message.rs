@@ -335,7 +335,7 @@ pub enum ClientMsg {
     /// 让宿主退出。`kill_sessions` 为假时会话跟着宿主一起留到交接或者下次启动，见
     /// `GoodbyeReason`。
     Shutdown { kill_sessions: bool },
-    /// 手机登记（`token` 为空时注销）这台电脑给它推通知用的凭据，见 `push`：官方 App
+    /// 手机登记（`token` 为空时注销）这台电脑给它推通知用的凭据，见 `push`：带中转的官方构建
     /// （`push::OFFICIAL_BUNDLE`）交中转服务给的句柄，别的交 APNs 的 device token（十六进制）。
     /// `env` 是 token 所属的 APNs 环境，`bundle` 是 App 的 bundle id（APNs 的 topic；Android 上是
     /// applicationId），`machine` 是手机给这台电脑编的 UUID、`machine_name` 是手机上显示的电脑名，推送时

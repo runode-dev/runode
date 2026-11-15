@@ -7,7 +7,8 @@
 //! # 流程
 //!
 //! 1. 手机在前台连上某台电脑时发 `ClientMsg::PushRegister`，交出推送用的凭据：自己签名打包的 iOS App
-//!    交 APNs 的 device token，官方 App（iOS 和 Android 都是 `OFFICIAL_BUNDLE`）交中转服务给的句柄。
+//!    交 APNs 的 device token，带中转的官方构建（iOS 和 Android 都是 `OFFICIAL_BUNDLE`）交中转服务给的句柄，
+//!    没带中转的官方 iOS 构建也交 device token。
 //!    电脑记在配对设备表里，手机断开后照样能推。注销是 `token` 为空的同一条消息。这条消息只在手机经
 //!    远程访问连上来时由监听方办，不到宿主那里，见 `remote` 的模块文档。
 //! 2. 那台电脑上有会话的 agent 停下来等回答时，电脑给每台登记过的手机发一条通知（`notify_payload`）。

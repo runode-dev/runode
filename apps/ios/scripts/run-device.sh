@@ -53,8 +53,11 @@ if [[ -z "$udid" ]]; then
   exit 1
 fi
 
+# 装上的包用开发证书签名，APNs 给的是 sandbox 的 device token，所以照 Debug 报 development 环境、不带中转，
+# 直接把 device token 交给电脑，电脑配了 APNs 密钥才推得到。
 xcodebuild -project "$ios_dir/Runode.xcodeproj" -scheme Runode -configuration Release \
-  -destination "platform=iOS,id=$udid" -derivedDataPath "$derived" -allowProvisioningUpdates -quiet build
+  -destination "platform=iOS,id=$udid" -derivedDataPath "$derived" -allowProvisioningUpdates -quiet \
+  RUNODE_APS_ENVIRONMENT=development RUNODE_PUSH_RELAY= build
 
 xcrun devicectl device install app --device "$udid" "$derived/Build/Products/Release-iphoneos/Runode.app"
 xcrun devicectl device process launch --device "$udid" --terminate-existing "$bundle_id"
