@@ -209,6 +209,9 @@ impl Kanban {
                     .cursor_pointer()
                     .on_press(cx, |_, window, cx| window.dispatch_action(Box::new(OpenSettings), cx));
             div()
+                .w_full()
+                .max_w(scaled(880.))
+                .mx_auto()
                 .flex()
                 .flex_col()
                 .items_start()
@@ -265,8 +268,10 @@ impl Kanban {
                         .track_scroll(&self.schedules_scroll)
                         .flex()
                         .flex_col()
-                        .gap(px(8.))
-                        .children(rows)
+                        .children((!rows.is_empty()).then(|| {
+                            // 宽窗口里卡片不铺满：标题、下一次的时间和右边的按钮离得太远，眼睛要横扫整屏。
+                            div().w_full().max_w(scaled(880.)).mx_auto().flex().flex_col().gap(px(8.)).children(rows)
+                        }))
                         .children(empty),
                 )
                 .child(scrollbar("todo-schedules-scrollbar", self.schedules_scroll.clone(), Axis::Vertical)),
@@ -290,7 +295,7 @@ impl Kanban {
                 .filter(|todo| todo.schedule.as_deref() == Some(schedule.id.as_str()) && todo.done_at.is_none())
                 .max_by_key(|todo| todo.created)
                 .is_some_and(|todo| holds_schedule(todo, todo.session.and_then(|id| data.sessions.get(&id)), now));
-        let next = if held { format!("{next} · {}", rust_i18n::t!("kanban.next_held")) } else { next };
+        let held_text = held.then(|| rust_i18n::t!("kanban.next_held").into_owned());
         let place = self.place_name(&schedule.spec.dir);
         let worktree = schedule.spec.worktree.then(|| rust_i18n::t!("kanban.worktree_on").into_owned());
         let details: Vec<String> =
@@ -329,6 +334,7 @@ impl Kanban {
             let id = schedule.id.clone();
             run_rows.push(
                 history_link(named("todo-schedule-history", &schedule.id), cx)
+                    .px(px(6.))
                     .aria_label(action_for(&rust_i18n::t!("kanban.all_history"), title))
                     .on_press(cx, move |this, _, cx| this.show_history(Some(id.clone()), cx))
                     .into_any_element(),
@@ -368,59 +374,102 @@ impl Kanban {
                 .aria_label(action_for(&label, title))
                 .on_press(cx, move |this, window, cx| this.remove_schedule(id.clone(), window, cx))
         };
-        // 停用的三行字各调淡一档，一眼和还在排的分开；下面的记录链接照样能点，不跟着淡。
-        let (title_alpha, rule_alpha, details_alpha) = if schedule.paused { (0.6, 0.5, 0.4) } else { (1., 0.75, 0.55) };
+        // 停用的字各调淡一档，一眼和还在排的分开；下面的记录链接照样能点，不跟着淡。
+        let (title_alpha, details_alpha) = if schedule.paused { (0.6, 0.4) } else { (1., 0.55) };
         let run_line = run_line_in(schedule, now, &rust_i18n::locale());
-        let mut description = format!("{rule}。{next}。{}", details.join(" · "));
+        let failed = run_line.as_ref().is_some_and(|(_, failed)| *failed);
+        let spoken_next = match &held_text {
+            Some(held) => format!("{next} · {held}"),
+            None => next.clone(),
+        };
+        let mut description = format!("{rule}。{spoken_next}。{}", details.join(" · "));
         if let Some((line, _)) = &run_line {
             description = format!("{description}。{line}");
         }
-        let run_line = run_line.map(|(line, failed)| {
-            let color = if failed { cx.theme().destructive } else { fg.opacity(details_alpha) };
-            div().text_size(FontSize::Small).text_color(color).truncate().child(line)
-        });
+        let theme = cx.theme();
+        let (destructive, warning, muted) = (theme.destructive, theme.warning_text, theme.muted_foreground);
+        let small = |text: String, color| div().text_size(FontSize::Small).text_color(color).truncate().child(text);
+        let run_line =
+            run_line.map(|(line, failed)| small(line, if failed { destructive } else { fg.opacity(details_alpha) }));
+        // 这一行是要用户留意的提醒，折行写全，不截断。
+        let held_line = held_text.map(|text| div().text_size(FontSize::Small).text_color(warning).child(text));
+        let idle = schedule.paused || schedule.next_fire.is_none();
+        // 左边的图标说状态：停用、上次先跑的命令失败了、在排；不会再跑的和停用的一样调淡。
+        let (status_icon, status_color) = if schedule.paused {
+            (BAN_ICON, muted)
+        } else if failed {
+            (CLOCK_ICON, destructive)
+        } else if idle {
+            (CLOCK_ICON, muted)
+        } else {
+            (CLOCK_ICON, fg.opacity(0.7))
+        };
+        // 下一次什么时候是最要紧的一条，和标题放在一行、靠右；停用和不会再跑时调淡。
+        let next_color = if idle { muted } else { fg };
+        let meta = [rule].into_iter().chain(details).collect::<Vec<_>>().join(" · ");
         div()
             .id(named("todo-schedule", &schedule.id))
             .role(Role::ListItem)
             .aria_label(schedule.spec.title.clone())
             .aria_description(description)
             .flex_none()
-            .p(px(12.))
+            .py(px(10.))
+            .pl(px(12.))
+            .pr(px(6.))
             .flex()
-            .gap(px(12.))
+            .items_start()
+            .gap(px(10.))
             .rounded(px(8.))
-            .bg(cx.theme().mix(0.03))
+            .border_1()
+            .border_color(theme.border.opacity(0.6))
+            .bg(theme.mix(0.03))
+            .child(div().flex_none().pt(px(3.)).child(svg().path(status_icon).size(px(14.)).text_color(status_color)))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap(px(4.))
+                    .gap(px(3.))
                     .child(
                         div()
-                            .truncate()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(fg.opacity(title_alpha))
-                            .child(schedule.spec.title.clone()),
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(fg.opacity(title_alpha))
+                                    .child(schedule.spec.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_size(FontSize::Small)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(next_color)
+                                    .child(next),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(2.))
+                                    .child(pause)
+                                    .child(edit)
+                                    .child(remove),
+                            ),
                     )
-                    .child(
-                        div()
-                            .text_size(FontSize::Small)
-                            .text_color(fg.opacity(rule_alpha))
-                            .child(format!("{rule} · {next}")),
-                    )
-                    .child(
-                        div()
-                            .text_size(FontSize::Small)
-                            .text_color(fg.opacity(details_alpha))
-                            .truncate()
-                            .child(details.join(" · ")),
-                    )
+                    .child(small(meta, fg.opacity(details_alpha)))
+                    .children(held_line)
                     .children(run_line)
-                    .child(div().pt(px(4.)).flex().flex_wrap().items_center().gap(px(4.)).children(run_rows)),
+                    // 链接按钮自带的左边距往回收，文字和上面几行对齐。
+                    .child(div().ml(px(-6.)).flex().flex_wrap().items_center().gap(px(4.)).children(run_rows)),
             )
-            .child(div().flex_none().flex().items_start().gap(px(2.)).child(pause).child(edit).child(remove))
     }
 }
 
