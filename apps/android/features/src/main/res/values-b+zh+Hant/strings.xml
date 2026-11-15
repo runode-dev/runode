@@ -123,6 +123,8 @@
     <string name="key_up">上</string>
     <string name="key_down">下</string>
     <string name="prompt_option">%1$d：%2$s</string>
+    <string name="prompt_option_checked">已勾選</string>
+    <string name="prompt_option_unchecked">未勾選</string>
     <string name="reply_too_long">文字太長了，發不出去</string>
     <string name="reply_not_sent">沒送出去：%1$s</string>
     <string name="reply_connection_lost">連線中斷了，回覆可能沒送到</string>

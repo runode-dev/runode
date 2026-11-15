@@ -467,8 +467,12 @@
             HStack(spacing: 4) {
                 if let prompt {
                     ForEach(prompt.options) { option in
-                        key(option.key, kind: option.selected ? .waiting : .secondary)
-                            .accessibilityAddTraits(option.selected ? .isSelected : [])
+                        key(
+                            option.key, kind: prompt.isDefault(option) ? .waiting : .secondary,
+                            checked: option.checkbox?.checked
+                        )
+                        .checkboxAccessibility(option)
+                        .accessibilityAddTraits(prompt.isDefault(option) ? .isSelected : [])
                     }
                 } else {
                     ForEach(QuickKey.options) { key($0, kind: .secondary) }
@@ -477,13 +481,19 @@
             .disabled(!model.isConnected)
         }
 
-        private func key(_ key: QuickKey, kind: ActionKind) -> some View {
+        /// `checked` 不为空时在编号后画复选框。
+        private func key(_ key: QuickKey, kind: ActionKind, checked: Bool? = nil) -> some View {
             Button {
                 Task { await model.press(key) }
             } label: {
-                Text(verbatim: key.label)
-                    .font(.subheadline.monospaced().weight(.bold))
-                    .frame(width: 56)
+                HStack(spacing: 4) {
+                    Text(verbatim: key.label)
+                    if let checked {
+                        OptionCheckbox(checked: checked)
+                    }
+                }
+                .font(.subheadline.monospaced().weight(.bold))
+                .frame(minWidth: 56)
             }
             .buttonStyle(SurfaceButtonStyle(kind, cornerRadius: CornerRadius.key))
             .accessibilityLabel("发送 \(key.accessibilityLabel)")

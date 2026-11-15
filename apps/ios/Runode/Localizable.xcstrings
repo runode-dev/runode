@@ -3482,6 +3482,29 @@
         }
       }
     },
+    "已勾选" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checked"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已勾选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已勾選"
+          }
+        }
+      }
+    },
     "已断开" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4963,6 +4986,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未變更"
+          }
+        }
+      }
+    },
+    "未勾选" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unchecked"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未勾选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未勾選"
           }
         }
       }

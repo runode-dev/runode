@@ -67,6 +67,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -236,6 +237,7 @@ internal enum class PromptOptionLayout {
 /**
  * 认出来的提问（[AgentPrompt]）的选项，按下去交给 [onPress] 发编号键。默认项是琥珀色，其余中性；原文在 [PromptOptionLayout.Rows]
  * 里至多折成两行、在 [PromptOptionLayout.Compact] 里只占一行，再长就截断。读屏念「发送 编号：原文」，默认项是选中的。
+ * 带复选框的项在编号后画勾没勾，读屏念勾没勾；多选题（[AgentPrompt.isMultiSelect]）没有默认项。
  */
 @Composable
 internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enabled: Boolean, onPress: (QuickKey) -> Unit) {
@@ -244,13 +246,18 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
         PromptOptionLayout.Rows -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             for (option in prompt.options) {
                 val label = stringResource(R.string.send_key, option.key.accessibilityLabel.resolve())
+                val state = checkboxState(option.checkbox)
+                val highlighted = prompt.highlights(option)
                 SurfaceButton(
-                    kind = if (option.selected) ActionKind.Waiting else ActionKind.Raised,
+                    kind = if (highlighted) ActionKind.Waiting else ActionKind.Raised,
                     onClick = { onPress(option.key) },
                     enabled = enabled,
                     height = 46.dp,
-                    selected = option.selected,
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
+                    selected = prompt.selection(option),
+                    modifier = Modifier.fillMaxWidth().semantics {
+                        contentDescription = label
+                        if (state != null) stateDescription = state
+                    },
                 ) {
                     Row(
                         Modifier.fillMaxWidth().padding(start = 10.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
@@ -261,7 +268,7 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
                             Modifier
                                 .size(24.dp)
                                 .background(
-                                    if (option.selected) colors.onWaitingFill.copy(alpha = 0.18f) else colors.well,
+                                    if (highlighted) colors.onWaitingFill.copy(alpha = 0.18f) else colors.well,
                                     RoundedCornerShape(7.dp),
                                 ),
                             contentAlignment = Alignment.Center,
@@ -272,8 +279,9 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
                                 fontFamily = FontFamily.Monospace,
                             )
                         }
+                        option.checkbox?.let { CheckboxGlyph(it, 20.dp) }
                         Text(
-                            option.text,
+                            option.shownText,
                             style = Type.subheadline.copy(fontWeight = FontWeight.Normal),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
@@ -287,22 +295,31 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
             val shown = prompt.compactOptions
             for (option in shown) {
                 val label = stringResource(R.string.send_key, option.key.accessibilityLabel.resolve())
+                val state = checkboxState(option.checkbox)
+                val highlighted = prompt.highlights(option)
                 SurfaceButton(
-                    kind = if (option.selected) ActionKind.Waiting else ActionKind.Raised,
+                    kind = if (highlighted) ActionKind.Waiting else ActionKind.Raised,
                     onClick = { onPress(option.key) },
                     enabled = enabled,
-                    selected = option.selected,
+                    selected = prompt.selection(option),
                     contentPadding = 12.dp,
-                    modifier = Modifier.weight(1f).semantics { contentDescription = label },
+                    modifier = Modifier.weight(1f).semantics {
+                        contentDescription = label
+                        if (state != null) stateDescription = state
+                    },
                 ) {
                     Text(
                         option.number.toString(),
                         style = Type.callout.copy(fontWeight = FontWeight.Normal),
                         fontFamily = FontFamily.Monospace,
-                        color = if (option.selected) colors.onWaitingFill.copy(alpha = 0.6f) else colors.secondary,
+                        color = if (highlighted) colors.onWaitingFill.copy(alpha = 0.6f) else colors.secondary,
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text(option.text, style = Type.callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    option.checkbox?.let {
+                        CheckboxGlyph(it, 16.dp)
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(option.shownText, style = Type.callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (prompt.options.size > shown.size) {
@@ -320,13 +337,23 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         for (option in prompt.options) {
                             val description = stringResource(R.string.send_key, option.key.accessibilityLabel.resolve())
+                            val state = checkboxState(option.checkbox)
                             DropdownMenuItem(
-                                text = { Text("${option.number}. ${option.text}") },
+                                text = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${option.number}.")
+                                        option.checkbox?.let { CheckboxGlyph(it, 18.dp) }
+                                        Text(option.shownText)
+                                    }
+                                },
                                 onClick = {
                                     expanded = false
                                     onPress(option.key)
                                 },
-                                modifier = Modifier.semantics { contentDescription = description },
+                                modifier = Modifier.semantics {
+                                    contentDescription = description
+                                    if (state != null) stateDescription = state
+                                },
                             )
                         }
                     }
@@ -334,6 +361,27 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
             }
         }
     }
+}
+
+/** 选项按钮是不是画成默认项：多选题里按编号是切换勾没勾，光标停的那一项不是默认答案。 */
+internal fun AgentPrompt.highlights(option: AgentPrompt.Option): Boolean = !isMultiSelect && option.selected
+
+/** 交给 [SurfaceButton] 的 `selected`：多选题不报选中，勾没勾由 [checkboxState] 报。 */
+internal fun AgentPrompt.selection(option: AgentPrompt.Option): Boolean? = if (isMultiSelect) null else option.selected
+
+/** 选项的复选框给读屏的状态（勾没勾），没有复选框时为 null。 */
+@Composable
+internal fun checkboxState(checkbox: AgentPrompt.Checkbox?): String? =
+    checkbox?.let { stringResource(if (it.checked) R.string.prompt_option_checked else R.string.prompt_option_unchecked) }
+
+/** 选项编号后面的复选框图标，不进读屏。 */
+@Composable
+internal fun CheckboxGlyph(checkbox: AgentPrompt.Checkbox, size: Dp) {
+    Icon(
+        if (checkbox.checked) AppIcons.checkboxChecked else AppIcons.checkbox,
+        contentDescription = null,
+        modifier = Modifier.size(size),
+    )
 }
 
 /**

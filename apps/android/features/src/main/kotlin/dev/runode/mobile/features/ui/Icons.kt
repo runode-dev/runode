@@ -77,6 +77,8 @@ internal object AppIcons {
     val hammer = stroke("hammer", "M14 4l6 6-3 3-6-6zM11 7l-8 8 3 3 8-8")
     val box = stroke("box", "M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10")
     val terminal = stroke("terminal", "M4 17l6-6-6-6M12 19h8")
+    val checkbox = stroke("checkbox", rect(4f, 4f, 16f, 16f, 3f))
+    val checkboxChecked = stroke("checkboxChecked", rect(4f, 4f, 16f, 16f, 3f) + "M8 12l3 3 5-6", width = 2.2f)
     val document = stroke("document", "M14 3H6a1 1 0 0 0 -1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1 -1V8zM14 3v5h5")
 
     private fun rect(x: Float, y: Float, w: Float, h: Float, r: Float): String =

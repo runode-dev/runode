@@ -235,6 +235,50 @@ class AgentPromptTests {
         assertEquals(listOf(1, 5), numbers(5))
     }
 
+    /** Claude Code 的多选题：选项以复选框开头，显示和读屏用去掉复选框的字，比较是不是同一个提问仍用原文。 */
+    @Test fun multiSelectCheckboxes() {
+        val prompt = assertNotNull(
+            parse(
+                screen(
+                    " 首页要改哪些？",
+                    " ❯ 1. [ ] 首页双 tab 切换",
+                    "   2. [✔] SuperAgent 按钮",
+                    "   3. [x] 搜索按钮",
+                    "   4. Type something.",
+                    "   5. Chat about this",
+                ),
+            ),
+        )
+        assertTrue(prompt.isMultiSelect)
+        assertEquals(
+            listOf(
+                AgentPrompt.Checkbox(false, "首页双 tab 切换"),
+                AgentPrompt.Checkbox(true, "SuperAgent 按钮"),
+                AgentPrompt.Checkbox(true, "搜索按钮"),
+                null,
+                null,
+            ),
+            prompt.options.map { it.checkbox },
+        )
+        assertEquals(
+            listOf("首页双 tab 切换", "SuperAgent 按钮", "搜索按钮", "Type something.", "Chat about this"),
+            prompt.options.map { it.shownText },
+        )
+        assertEquals("[ ] 首页双 tab 切换", prompt.asked.options.first())
+        assertTrue(prompt.options.first().key.accessibilityLabel.english!!.contains("1: 首页双 tab 切换"))
+    }
+
+    /** 方括号里不是空格或勾的记号时不算复选框；没有复选框的提问不是多选题。 */
+    @Test fun singleSelectIsNotMultiSelect() {
+        val single = assertNotNull(parse(screen(" Do you want to proceed?", " ❯ 1. Yes", "   2. [beta] No")))
+        assertNull(single.options[1].checkbox)
+        assertEquals("[beta] No", single.options[1].shownText)
+        assertTrue(!single.isMultiSelect)
+        assertNull(AgentPrompt.Option(1, "[?] maybe", false).checkbox)
+        assertNull(AgentPrompt.Option(1, "[", false).checkbox)
+        assertEquals(AgentPrompt.Checkbox(true, "done"), AgentPrompt.Option(1, "[*]done", false).checkbox)
+    }
+
     /** 选项的键就是编号，读屏带着原文。 */
     @Test fun optionKeySendsTheNumber() {
         val option = AgentPrompt.Option(2, "No", false)

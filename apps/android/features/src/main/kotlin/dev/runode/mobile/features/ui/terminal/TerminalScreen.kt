@@ -91,12 +91,16 @@ import dev.runode.mobile.features.model.SizePreference
 import dev.runode.mobile.features.model.SplitPane
 import dev.runode.mobile.features.model.TerminalModel
 import dev.runode.mobile.features.ui.AppIcons
+import dev.runode.mobile.features.ui.CheckboxGlyph
 import dev.runode.mobile.features.ui.CircleIconButton
 import dev.runode.mobile.features.ui.ConfirmDialog
 import dev.runode.mobile.features.ui.HapticOnChange
 import dev.runode.mobile.features.ui.TopBar
 import dev.runode.mobile.features.ui.agentClock
+import dev.runode.mobile.features.ui.checkboxState
+import dev.runode.mobile.features.ui.highlights
 import dev.runode.mobile.features.ui.linkClock
+import dev.runode.mobile.features.ui.selection
 import dev.runode.mobile.features.ui.sessions.TaskListItems
 import dev.runode.mobile.features.ui.sessions.TaskSourceItems
 import dev.runode.mobile.features.ui.theme.ActionKind
@@ -597,10 +601,16 @@ private fun AnswerRow(model: QuickReplyModel, prompt: AgentPrompt?, agentName: S
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (prompt != null) {
                     for (option in prompt.options) {
-                        AnswerKey(model, option.key, if (option.selected) ActionKind.Waiting else ActionKind.Secondary, option.selected)
+                        AnswerKey(
+                            model,
+                            option.key,
+                            if (prompt.highlights(option)) ActionKind.Waiting else ActionKind.Secondary,
+                            prompt.selection(option),
+                            option.checkbox,
+                        )
                     }
                 } else {
-                    for (key in QuickKey.options) AnswerKey(model, key, ActionKind.Secondary, null)
+                    for (key in QuickKey.options) AnswerKey(model, key, ActionKind.Secondary, null, null)
                 }
             }
         }
@@ -613,18 +623,27 @@ private fun AnswerRow(model: QuickReplyModel, prompt: AgentPrompt?, agentName: S
     }
 }
 
+/** 一个答题键：编号，选项带复选框（[checkbox]）时编号后画勾没勾，读屏念勾没勾。 */
 @Composable
-private fun AnswerKey(model: QuickReplyModel, key: QuickKey, kind: ActionKind, selected: Boolean?) {
+private fun AnswerKey(model: QuickReplyModel, key: QuickKey, kind: ActionKind, selected: Boolean?, checkbox: AgentPrompt.Checkbox?) {
     val description = stringResource(R.string.send_key, key.accessibilityLabel.resolve())
+    val state = checkboxState(checkbox)
     SurfaceButton(
         kind,
         onClick = { model.press(key) },
         enabled = model.isConnected,
         cornerRadius = CornerRadius.key,
         selected = selected,
-        modifier = Modifier.width(56.dp).semantics { contentDescription = description },
+        modifier = Modifier.width(56.dp).semantics {
+            contentDescription = description
+            if (state != null) stateDescription = state
+        },
     ) {
         Text(key.label, style = Type.subheadline.copy(fontWeight = FontWeight.Bold), fontFamily = FontFamily.Monospace)
+        if (checkbox != null) {
+            Spacer(Modifier.width(3.dp))
+            CheckboxGlyph(checkbox, 15.dp)
+        }
     }
 }
 

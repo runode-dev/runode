@@ -17,10 +17,46 @@ public struct AgentPrompt: Hashable, Sendable {
 
         public var id: Int { number }
 
-        /// 选这一项的键：编号本身，读屏念「编号：原文」。
-        public var key: QuickKey {
-            QuickKey(label: String(number), key: String(number), accessibilityLabel: String(localized: "\(number)：\(text)"))
+        /// 多选题里的选项原文以复选框开头：`[ ]` 是没勾，`checkMarks` 里的字放在方括号里是勾上了。返回勾没勾和
+        /// 去掉复选框、再去掉开头空白后的原文；不以复选框开头的为 `nil`。按 Unicode 标量认，`[✔️]` 这种带变体
+        /// 选择符的不算复选框。
+        public var checkbox: (checked: Bool, text: String)? {
+            let scalars = Array(text.unicodeScalars.prefix(3))
+            guard scalars.count == 3, scalars[0] == "[", scalars[2] == "]" else { return nil }
+            let checked: Bool
+            if scalars[1] == " " {
+                checked = false
+            } else if Self.checkMarks.contains(scalars[1]) {
+                checked = true
+            } else {
+                return nil
+            }
+            let rest = Substring(text.unicodeScalars.dropFirst(3))
+            return (checked, String(rest.drop { $0.isWhitespace }))
         }
+
+        /// 界面上显示的原文：有复选框时去掉它，复选框另外画。
+        public var displayText: String { checkbox?.text ?? text }
+
+        /// 复选框勾上时方括号里的字。
+        private static let checkMarks: Set<Unicode.Scalar> = ["x", "X", "✓", "✔", "*"]
+
+        /// 选这一项的键：编号本身，读屏念「编号：原文」，原文不带复选框。
+        public var key: QuickKey {
+            QuickKey(
+                label: String(number), key: String(number),
+                accessibilityLabel: String(localized: "\(number)：\(displayText)"))
+        }
+    }
+
+    /// 多选题：有选项以复选框开头（`Option.checkbox`）。按编号键切换那一项勾没勾，不是选定它。
+    public var isMultiSelect: Bool {
+        options.contains { $0.checkbox != nil }
+    }
+
+    /// 回车会选的那一项：单选题里带光标记号的。多选题没有。
+    func isDefault(_ option: Option) -> Bool {
+        option.selected && !isMultiSelect
     }
 
     /// 列表卡片上并排放的选项：多于两项时放第一项和最后一项，两项时就是这两项。

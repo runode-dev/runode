@@ -226,4 +226,45 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
         #expect(first.asked != other.asked)
         #expect(first.asked != reworded.asked)
     }
+
+    /// Claude Code 的多选题：选项以复选框开头，勾没勾和去掉复选框后的原文分得出来，后面不带复选框的几项照旧；
+    /// 光标停的那一项不算默认项，读屏的原文不带复选框，比是不是同一个提问时仍带着复选框。
+    @Test func claudeMultiSelect() throws {
+        let screen = """
+             ☐ 引导步骤
+             新用户引导先做哪一步？
+             ❯ 1. [ ] 首页双 tab 切换
+               2. [✔] SuperAgent 按钮
+               3. [x] 搜索按钮
+               4. Type something.
+               5. Chat about this
+
+            """
+        let prompt = try #require(parse(screen))
+        #expect(prompt.isMultiSelect)
+        #expect(prompt.options.map { $0.checkbox?.checked } == [false, true, true, nil, nil])
+        #expect(prompt.options.map { $0.checkbox?.text } == ["首页双 tab 切换", "SuperAgent 按钮", "搜索按钮", nil, nil])
+        #expect(
+            prompt.options.map(\.displayText) == [
+                "首页双 tab 切换", "SuperAgent 按钮", "搜索按钮", "Type something.", "Chat about this",
+            ])
+        #expect(prompt.options.first?.selected == true)
+        #expect(prompt.options.allSatisfy { !prompt.isDefault($0) })
+        #expect(prompt.options.first?.key.accessibilityLabel.contains("[") == false)
+        #expect(prompt.asked.options.first == "[ ] 首页双 tab 切换")
+
+        let toggled = try #require(parse(screen.replacingOccurrences(of: "[ ] 首页", with: "[✔] 首页")))
+        #expect(toggled.asked != prompt.asked)
+    }
+
+    /// 单选题、方括号里不是勾的字都不算复选框；单选题光标停的那一项是默认项。
+    @Test func notACheckbox() throws {
+        let prompt = try #require(parse(" Do you want to proceed?\n ❯ 1. Yes\n   2. [beta] No\n"))
+        #expect(!prompt.isMultiSelect)
+        #expect(prompt.options.allSatisfy { $0.checkbox == nil })
+        #expect(prompt.options.map(\.displayText) == ["Yes", "[beta] No"])
+        #expect(prompt.options.map(prompt.isDefault) == [true, false])
+        #expect(AgentPrompt.Option(number: 1, text: "[?] Maybe", selected: false).checkbox == nil)
+        #expect(AgentPrompt.Option(number: 1, text: "[ ]", selected: false).checkbox?.text == "")
+    }
 }

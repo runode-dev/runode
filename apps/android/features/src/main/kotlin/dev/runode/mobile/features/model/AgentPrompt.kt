@@ -21,10 +21,36 @@ data class AgentPrompt(
     ) {
         val id: Int get() = number
 
-        /** 选这一项的键：编号本身，读屏念「编号：原文」。 */
+        /**
+         * 多选题里的选项原文以复选框开头：`[ ]` 是没勾，[checkMarks] 里的字放在方括号里是勾上了。不以复选框开头的为 null。
+         */
+        val checkbox: Checkbox?
+            get() {
+                if (text.length < 2 || text[0] != '[') return null
+                val mark = text.codePointAt(1)
+                val close = 1 + Character.charCount(mark)
+                if (text.getOrNull(close) != ']') return null
+                val checked = when (mark) {
+                    ' '.code -> false
+                    in checkMarks -> true
+                    else -> return null
+                }
+                return Checkbox(checked, text.substring(close + 1).trimStart())
+            }
+
+        /** 显示和读屏用的字：有复选框时去掉它。 */
+        val shownText: String get() = checkbox?.text ?: text
+
+        /** 选这一项的键：编号本身，读屏念「编号：[shownText]」。 */
         val key: QuickKey
-            get() = QuickKey(number.toString(), number.toString(), UiText.res(R.string.prompt_option, number, text))
+            get() = QuickKey(number.toString(), number.toString(), UiText.res(R.string.prompt_option, number, shownText))
     }
+
+    /** 选项开头的复选框：勾没勾，和去掉复选框、再去掉开头空白后的原文。 */
+    data class Checkbox(val checked: Boolean, val text: String)
+
+    /** 多选题：有选项以复选框开头（[Option.checkbox]）。按编号键切换那一项勾没勾，不是选定它，所以没有默认答案。 */
+    val isMultiSelect: Boolean get() = options.any { it.checkbox != null }
 
     /**
      * 一个提问的问题和各项原文，不记光标停在哪一项。两幅屏幕上是不是同一个提问按它比：屏幕上别处的字（agent 的状态栏、
@@ -120,6 +146,9 @@ data class AgentPrompt(
 
         /** 选项末尾的括号里不超过这么多字时当作按键提示去掉。 */
         internal const val maxHintLength = 6
+
+        /** 复选框勾上时方括号里的字，按 code point。 */
+        internal val checkMarks: Set<Int> = setOf('x', 'X', '✓', '✔', '*').mapTo(HashSet()) { it.code }
 
         /**
          * 从屏幕文字（一行一个）里认出提问。认法：从下往上，跳过空行、制表线和至多 [maxTrailingLines] 行别的字，找到一块
