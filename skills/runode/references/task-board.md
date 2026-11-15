@@ -159,6 +159,26 @@ does not remember anything between runs: not handing out the same failure
 twice is up to CMD, which can keep its state in a directory named after
 `RUNODE_SCHEDULE`.
 
-Ready-made scripts to adapt (CI failures on main, new issues with a label, a
-command that fails, a new upstream release) and the skeleton they share are
-in [scheduled-checks.md](scheduled-checks.md).
+A script that hands out a CI failure on main once, saved as
+`scripts/ci-failures.sh` in the repository:
+
+```sh
+#!/bin/sh
+state="${XDG_STATE_HOME:-$HOME/.local/state}/ci-failures/$RUNODE_SCHEDULE"
+mkdir -p "$state" || exit 1
+run=$(gh run list --branch main --limit 1 --json databaseId,conclusion \
+  --jq '.[0] | select(.conclusion == "failure") | .databaseId') || exit 1
+if [ -z "$run" ]; then echo "main is green" >&2; exit 0; fi
+if [ "$(cat "$state/last" 2>/dev/null)" = "$run" ]; then
+  echo "run $run was handed out already" >&2; exit 0
+fi
+echo "$run" > "$state/last"
+echo "CI run $run on main failed. The end of the failing log:"
+gh run view "$run" --log-failed | tail -n 200
+```
+
+```sh
+runode schedule add 'Fix CI on main' --every 30 --worktree --auto --auto-done \
+  --time-limit 60 --run 'sh scripts/ci-failures.sh' \
+  --prompt 'Find and fix the cause of this failure, then commit on your branch.'
+```

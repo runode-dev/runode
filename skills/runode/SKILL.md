@@ -221,8 +221,6 @@ runode schedule add 'Dependency report' --daily 09:00 --days mon-fri --auto-done
 To start an agent only when there is work, give the schedule `--run CMD`: when
 due, runode runs CMD first and starts a task only if it prints something to
 stdout, which is added to the prompt (`--run 'sh scripts/ci-failures.sh'`).
-Scripts to start from are in
-[references/scheduled-checks.md](references/scheduled-checks.md).
 
 How to split the work and write the prompts, follow the tasks, and set up
 schedules: [references/task-board.md](references/task-board.md).
