@@ -286,7 +286,9 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             };
             crate::todo::report(env, outcome, text)?
         }
-        Command::ScheduleAdd { spec, timing } => crate::todo::add_schedule(env, spec, timing, out)?,
+        Command::ScheduleAdd { spec, timing, run, run_timeout } => {
+            crate::todo::add_schedule(env, spec, timing, run, run_timeout, out)?;
+        }
         Command::ScheduleList { json } => crate::todo::list_schedules(env, json, out)?,
         Command::ScheduleRemove { id } => crate::todo::remove_schedule(env, id)?,
         Command::SchedulePause { id, paused } => crate::todo::pause_schedule(env, id, paused)?,

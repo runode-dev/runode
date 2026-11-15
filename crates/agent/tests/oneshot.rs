@@ -1,10 +1,12 @@
-//! 只打印结果地跑一次 agent：提示词放进参数还是经标准输入给，限时跑完、取输出。
+//! 在后台限时跑完一条命令、取输出；只打印结果地跑一次 agent：提示词放进参数还是经标准输入给。
 
 use std::time::{Duration, Instant};
 #[cfg(unix)]
-use std::{fs, path::Path, thread};
+use std::{fs, path::Path, process::Command, thread};
 
 use runode_agent::oneshot::{self, RunError, run, with_prompt};
+#[cfg(unix)]
+use runode_agent::oneshot::{Finished, run_command};
 
 /// 测试里等程序跑完的时限，正常跑完都远用不到。
 const TIMEOUT: Duration = Duration::from_secs(180);
@@ -82,6 +84,70 @@ fn kills_the_whole_process_group_at_the_deadline() {
     let err = run("sh", &["-c".into(), "sleep 30 & wait".into()], None, &dir, None, &[], timeout).unwrap_err();
     assert!(matches!(err, RunError::Timeout), "{err:?}");
     assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+#[cfg(unix)]
+fn shell(script: &str) -> Command {
+    let mut command = Command::new("sh");
+    command.args(["-c", script]).current_dir(std::env::temp_dir());
+    command
+}
+
+/// 退出码不是 0 也交回输出和退出状态；成功时标准错误也拿得到。
+#[cfg(unix)]
+#[test]
+fn run_command_returns_both_outputs_and_the_status() {
+    let done = run_command(shell("echo out; echo err >&2"), None, TIMEOUT, 1024).unwrap();
+    assert!(done.status.success());
+    assert_eq!((done.stdout.as_slice(), done.stderr.as_slice(), done.overflow), (&b"out\n"[..], &b"err\n"[..], false));
+    let done = run_command(shell("echo boom >&2; exit 3"), None, TIMEOUT, 1024).unwrap();
+    assert_eq!(done.status.code(), Some(3));
+    assert_eq!(done.stderr, b"boom\n");
+    let done = run_command(shell("wc -c"), Some("abc".into()), TIMEOUT, 1024).unwrap();
+    assert_eq!(String::from_utf8_lossy(&done.stdout).trim(), "3");
+}
+
+/// 输出远超管道缓冲和上限时只留前 `limit` 个字节，剩下的照样读完丢掉，命令不卡在写管道上；只有标准
+/// 输出超了才报 `overflow`。
+#[cfg(unix)]
+#[test]
+fn run_command_caps_the_outputs() {
+    let started = Instant::now();
+    let script = "head -c 2000000 /dev/zero; echo done >&2";
+    let Finished { status, stdout, stderr, overflow } = run_command(shell(script), None, TIMEOUT, 1000).unwrap();
+    assert!(status.success());
+    assert_eq!((stdout.len(), overflow), (1000, true));
+    assert_eq!(stderr, b"done\n");
+    let script = "head -c 2000000 /dev/zero >&2; echo done";
+    let Finished { stdout, stderr, overflow, .. } = run_command(shell(script), None, TIMEOUT, 1000).unwrap();
+    assert_eq!((stdout.as_slice(), stderr.len(), overflow), (&b"done\n"[..], 1000, false));
+    assert!(started.elapsed() < Duration::from_secs(30));
+}
+
+/// 到时限连命令拉起的子孙一起杀掉。
+#[cfg(unix)]
+#[test]
+fn run_command_kills_descendants_at_the_deadline() {
+    let marker = std::env::temp_dir().join(format!("runode-agent-run-command-{}", std::process::id()));
+    fs::remove_file(&marker).ok();
+    let mut command = shell(r#"sleep 30 & echo $! > "$1"; wait"#);
+    command.args(["sh", &marker.display().to_string()]);
+    let started = Instant::now();
+    let err = run_command(command, None, Duration::from_secs(1), 1024).unwrap_err();
+    assert!(matches!(err, RunError::Timeout), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+    let pid = fs::read_to_string(&marker).unwrap();
+    fs::remove_file(&marker).ok();
+    let pid = pid.trim();
+    // 被杀的 `sleep` 过继给 init 后才被收尸，等它从进程表里消失。
+    loop {
+        let alive = Command::new("kill").args(["-0", pid]).stderr(std::process::Stdio::null()).status().unwrap();
+        if !alive.success() {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(20), "the background sleep {pid} is still running");
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// 拿着输出管道的后台进程自己另起了进程组、杀整组杀不到它时，到时限稍等一会儿就报超时，不一直等。

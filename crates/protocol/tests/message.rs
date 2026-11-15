@@ -7,7 +7,7 @@ use runode_protocol::{
     message::InvalidSessionId,
     push::{ApnsEnv, PushService},
     read_frame,
-    todo::{Outcome, Schedule, Todo, TodoSpec, When},
+    todo::{Outcome, RunOutcome, Schedule, ScheduleRun, Todo, TodoSpec, When},
     write_frame,
 };
 use runode_types::{
@@ -285,12 +285,35 @@ fn client_messages_round_trip() {
         ClientMsg::ListDoneTodos { req: 29, schedule: Some("0000cafe".into()), offset: 100 },
         ClientMsg::MoveTodo { req: 25, id: "0000abcd".into(), before: Some("0000beef".into()) },
         ClientMsg::MoveTodo { req: 26, id: "0000abcd".into(), before: None },
-        ClientMsg::AddSchedule { req: 27, spec: todo_spec(), when: When::Daily { hour: 9, minute: 30, days: 62 } },
+        ClientMsg::AddSchedule {
+            req: 27,
+            spec: todo_spec(),
+            when: When::Daily { hour: 9, minute: 30, days: 62 },
+            run: None,
+            run_timeout: None,
+        },
+        ClientMsg::AddSchedule {
+            req: 27,
+            spec: todo_spec(),
+            when: When::Every { minutes: 5 },
+            run: Some("gh pr list --json number\n| jq length".into()),
+            run_timeout: Some(10),
+        },
         ClientMsg::UpdateSchedule {
             req: 28,
             id: "0000cafe".into(),
             spec: None,
             when: Some(When::Every { minutes: 15 }),
+            run: None,
+            run_timeout: None,
+        },
+        ClientMsg::UpdateSchedule {
+            req: 28,
+            id: "0000cafe".into(),
+            spec: None,
+            when: None,
+            run: Some(String::new()),
+            run_timeout: Some(0),
         },
         ClientMsg::RemoveSchedule { req: 29, id: "0000cafe".into() },
         ClientMsg::ReportTodo { req: 30, id: "#5".into(), outcome: Outcome::Silent, result: "nothing new".into() },
@@ -466,6 +489,9 @@ fn host_messages_round_trip() {
                 last_fired: 1_760_000_000,
                 next_fire: Some(1_760_003_600),
                 paused: true,
+                run: Some("./check.sh".into()),
+                run_timeout: Some(3),
+                last_run: Some(ScheduleRun { at: 1_760_000_030, outcome: RunOutcome::Fired, output: "2 new".into() }),
             }],
             max_running: 2,
         },
@@ -492,6 +518,59 @@ fn todo_messages_fill_in_defaults() {
     assert!(matches!(welcome, HostMsg::Welcome { todos: false, shells: false, .. }));
     let changed: HostMsg = serde_json::from_str(r#"{"type":"todos_changed"}"#).unwrap();
     assert_eq!(changed, HostMsg::TodosChanged);
+}
+
+/// 定时不带先跑的命令时，消息和定时写出来和没有这几个字段时一样，旧宿主、旧前端照样读；读不懂的结果为
+/// `Unknown`。
+#[test]
+fn schedule_commands_stay_off_the_wire_when_absent() {
+    let json = serde_json::to_string(&ClientMsg::AddSchedule {
+        req: 1,
+        spec: todo_spec(),
+        when: When::Every { minutes: 5 },
+        run: None,
+        run_timeout: None,
+    })
+    .unwrap();
+    assert!(!json.contains("\"run"), "{json}");
+    let json = serde_json::to_string(&ClientMsg::UpdateSchedule {
+        req: 2,
+        id: "0000cafe".into(),
+        spec: None,
+        when: None,
+        run: None,
+        run_timeout: None,
+    })
+    .unwrap();
+    assert_eq!(json, r#"{"type":"update_schedule","req":2,"id":"0000cafe","spec":null,"when":null}"#);
+    let update: ClientMsg = serde_json::from_str(r#"{"type":"update_schedule","req":2,"id":"0000cafe"}"#).unwrap();
+    assert_eq!(
+        update,
+        ClientMsg::UpdateSchedule {
+            req: 2,
+            id: "0000cafe".into(),
+            spec: None,
+            when: None,
+            run: None,
+            run_timeout: None
+        }
+    );
+
+    let schedule = Schedule {
+        id: "0000cafe".into(),
+        spec: todo_spec(),
+        when: When::Every { minutes: 5 },
+        last_fired: 1,
+        next_fire: None,
+        paused: false,
+        run: None,
+        run_timeout: None,
+        last_run: None,
+    };
+    let json = serde_json::to_string(&schedule).unwrap();
+    assert!(!json.contains("\"run"), "{json}");
+    let run: ScheduleRun = serde_json::from_str(r#"{"at":5,"outcome":"later"}"#).unwrap();
+    assert_eq!(run, ScheduleRun { at: 5, outcome: RunOutcome::Unknown, output: String::new() });
 }
 
 #[test]

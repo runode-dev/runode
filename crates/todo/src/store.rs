@@ -10,12 +10,12 @@ use std::{
 use runode_types::{
     random::random_hex,
     session::SessionId,
-    todo::{Outcome, Schedule, Todo, TodoSpec, When},
+    todo::{Outcome, RunOutcome, Schedule, ScheduleRun, Todo, TodoSpec, When},
 };
 use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior, params};
 
 /// 这个版本认得的表结构。
-const VERSION: i64 = 5;
+const VERSION: i64 = 6;
 
 /// 完成了的任务给前端最近这么久（秒）的，更早的留在库里。
 pub const DONE_KEPT: u64 = 7 * 24 * 60 * 60;
@@ -86,7 +86,15 @@ CREATE TABLE schedules (
     time_limit INTEGER,
     paused INTEGER NOT NULL DEFAULT 0,
     -- `When::Cron` 的写法。
-    cron TEXT
+    cron TEXT,
+    -- `Schedule::run`；为空时到点直接开任务。
+    run TEXT,
+    -- `Schedule::run_timeout`，分钟。
+    run_timeout INTEGER,
+    -- `Schedule::last_run`：跑完的时刻、`RunOutcome::name` 和输出；还没跑过时 run_at 为空。
+    run_at INTEGER,
+    run_outcome TEXT,
+    run_output TEXT
 );
 ";
 
@@ -106,6 +114,12 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE schedules ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;
      ALTER TABLE schedules ADD COLUMN cron TEXT;
      INSERT INTO meta VALUES ('max_running', 0);",
+    // 定时到点先跑的命令、它的超时和上一次的结果。
+    "ALTER TABLE schedules ADD COLUMN run TEXT;
+     ALTER TABLE schedules ADD COLUMN run_timeout INTEGER;
+     ALTER TABLE schedules ADD COLUMN run_at INTEGER;
+     ALTER TABLE schedules ADD COLUMN run_outcome TEXT;
+     ALTER TABLE schedules ADD COLUMN run_output TEXT;",
 ];
 
 const _: () = assert!(FIRST_MIGRATED + MIGRATIONS.len() as i64 == VERSION);
@@ -114,7 +128,8 @@ const TODO_COLUMNS: &str = "id, number, title, prompt, dir, agent, worktree, ski
      auto_done, time_limit, created, started, session, worktree_dir, branch, done_at, schedule, rank, outcome, result, \
      queued, after_todo";
 const SCHEDULE_COLUMNS: &str = "id, title, prompt, dir, agent, worktree, skills, subagent, attachments, auto, \
-     auto_done, time_limit, kind, at, hour, minute, days, minutes, cron, last_fired, paused";
+     auto_done, time_limit, kind, at, hour, minute, days, minutes, cron, last_fired, paused, run, run_timeout, run_at, \
+     run_outcome, run_output";
 
 /// 库出了错：错误说明。
 pub type Result<T> = std::result::Result<T, String>;
@@ -214,6 +229,16 @@ fn schedule(row: &Row<'_>) -> rusqlite::Result<Schedule> {
         last_fired: secs(row.get("last_fired")?),
         next_fire: None,
         paused: row.get("paused")?,
+        run: row.get("run")?,
+        run_timeout: row.get::<_, Option<i64>>("run_timeout")?.and_then(|minutes| u32::try_from(minutes).ok()),
+        last_run: match row.get::<_, Option<i64>>("run_at")? {
+            Some(at) => Some(ScheduleRun {
+                at: secs(at),
+                outcome: RunOutcome::from_name(&row.get::<_, Option<String>>("run_outcome")?.unwrap_or_default()),
+                output: row.get::<_, Option<String>>("run_output")?.unwrap_or_default(),
+            }),
+            None => None,
+        },
     })
 }
 
@@ -660,15 +685,23 @@ impl Store {
         tx.commit().map_err(failed)
     }
 
-    /// 加一个定时，从 `now` 算起。返回新定时的标识。
-    pub fn add_schedule(&mut self, spec: &TodoSpec, when: &When, now: u64) -> Result<String> {
+    /// 加一个定时，从 `now` 算起；`run` 为空串、`run_timeout` 为 0 时都当没给。返回新定时的标识。
+    pub fn add_schedule(
+        &mut self,
+        spec: &TodoSpec,
+        when: &When,
+        run: Option<&str>,
+        run_timeout: Option<u32>,
+        now: u64,
+    ) -> Result<String> {
         let tx = self.conn.transaction().map_err(failed)?;
         let id = new_id(&tx)?;
         let (kind, [at, hour, minute, days, minutes], cron) = when_columns(when)?;
         tx.execute(
             &format!(
                 "INSERT INTO schedules ({SCHEDULE_COLUMNS})
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 0)"
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 0,
+                 ?21, ?22, NULL, NULL, NULL)"
             ),
             params![
                 id,
@@ -690,7 +723,9 @@ impl Store {
                 days,
                 minutes,
                 cron,
-                now as i64
+                now as i64,
+                run.filter(|run| !run.is_empty()),
+                run_timeout.filter(|minutes| *minutes != 0)
             ],
         )
         .map_err(failed)?;
@@ -698,15 +733,32 @@ impl Store {
         Ok(id)
     }
 
-    /// 改定时，只改给了的部分；改了 `when` 时从 `now` 重新算起。没有这个定时时为假。
+    /// 改定时，只改给了的部分；改了 `when` 时从 `now` 重新算起。`run` 给空串时清掉（到点直接开任务），
+    /// `run_timeout` 给 0 时清回默认。没有这个定时时为假。
     pub fn update_schedule(
         &mut self,
         id: &str,
         spec: Option<&TodoSpec>,
         when: Option<&When>,
+        run: Option<&str>,
+        run_timeout: Option<u32>,
         now: u64,
     ) -> Result<bool> {
         let tx = self.conn.transaction().map_err(failed)?;
+        if let Some(run) = run {
+            tx.execute(
+                "UPDATE schedules SET run = ?2 WHERE id = ?1",
+                params![id, Some(run).filter(|run| !run.is_empty())],
+            )
+            .map_err(failed)?;
+        }
+        if let Some(minutes) = run_timeout {
+            tx.execute(
+                "UPDATE schedules SET run_timeout = ?2 WHERE id = ?1",
+                params![id, Some(minutes).filter(|minutes| *minutes != 0)],
+            )
+            .map_err(failed)?;
+        }
         if let Some(spec) = spec {
             tx.execute(
                 "UPDATE schedules SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6, skills = ?7,
@@ -758,6 +810,57 @@ impl Store {
         mark_fired(&tx, &current, now)?;
         tx.commit().map_err(failed)?;
         Ok(Some(todo))
+    }
+
+    /// 带 `Schedule::run` 的定时 `id` 到点了：记下到点的时刻（一次性的删掉），返回记下时它的样子，命令照它跑，
+    /// 跑完交给 `finish_schedule_run`。照库里它现在的样子、在一个事务里办；定时已经删掉了、停着、没有 `run`、
+    /// 或者照现在的样子还没到点时什么都不做，为空。
+    pub fn fire_schedule_run(&mut self, id: &str, now: u64) -> Result<Option<Schedule>> {
+        let tx = self.conn.transaction().map_err(failed)?;
+        let Some(current) = due_schedule(&tx, id, now)?.filter(|current| !current.paused && current.run.is_some())
+        else {
+            return Ok(None);
+        };
+        mark_fired(&tx, &current, now)?;
+        tx.commit().map_err(failed)?;
+        Ok(Some(current))
+    }
+
+    /// 记下 `fire_schedule_run` 交出的定时 `schedule` 这次跑命令的结果 `run`；给了 `todo` 时另加一张排着队的
+    /// 任务，建立时刻是 `run.at`。命令跑的时候定时被删掉了就丢掉这次的结果，被删掉或者停了都不开任务，停了时
+    /// 本该开任务的这次记成 `RunOutcome::Idle`；一次性的定时到点时已经删掉，照样开。都在一个事务里办。返回新
+    /// 任务的标识。
+    pub fn finish_schedule_run(
+        &mut self,
+        schedule: &Schedule,
+        run: &ScheduleRun,
+        todo: Option<&TodoSpec>,
+    ) -> Result<Option<String>> {
+        let tx = self.conn.transaction().map_err(failed)?;
+        let paused: Option<bool> = tx
+            .query_row("SELECT paused FROM schedules WHERE id = ?1", [&schedule.id], |row| row.get(0))
+            .optional()
+            .map_err(failed)?;
+        let live = paused == Some(false);
+        if paused.is_some() {
+            let outcome = match run.outcome {
+                RunOutcome::Fired if !live => RunOutcome::Idle,
+                outcome => outcome,
+            };
+            tx.execute(
+                "UPDATE schedules SET run_at = ?2, run_outcome = ?3, run_output = ?4 WHERE id = ?1",
+                params![schedule.id, run.at as i64, outcome.name(), run.output],
+            )
+            .map_err(failed)?;
+        }
+        let todo = match todo {
+            Some(spec) if live || matches!(schedule.when, When::Once { .. }) => {
+                Some(insert_todo(&tx, spec, run.at, Some(&schedule.id), true)?)
+            }
+            _ => None,
+        };
+        tx.commit().map_err(failed)?;
+        Ok(todo)
     }
 
     /// 定时 `id` 到点了、这次跳过（比如上次开出的任务还在干活），不开任务：记下到点的时刻（一次性的删掉）。

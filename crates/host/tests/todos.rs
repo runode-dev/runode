@@ -24,6 +24,8 @@ use runode_host::SessionId;
 use runode_host::{ClientMsg, Host, HostMsg, Stopped};
 #[cfg(unix)]
 use runode_protocol::SessionInfo;
+#[cfg(unix)]
+use runode_protocol::todo::RunOutcome;
 use runode_protocol::todo::{Column, Schedule, Todo, TodoSpec, When, column};
 #[cfg(unix)]
 use runode_types::agent::AgentState;
@@ -475,7 +477,26 @@ fn edits_are_announced_and_checked() {
         (8, ClientMsg::AddTodo { req: 8, spec: spec(" ", &dir, "claude") }),
         (9, ClientMsg::AddTodo { req: 9, spec: spec("t", &dir.join("missing"), "claude") }),
         (10, ClientMsg::AddTodo { req: 10, spec: TodoSpec { worktree: true, ..spec("t", &dir, "claude") } }),
-        (11, ClientMsg::AddSchedule { req: 11, spec: spec("t", &dir, "claude"), when: When::Once { at: 1 } }),
+        (
+            11,
+            ClientMsg::AddSchedule {
+                req: 11,
+                spec: spec("t", &dir, "claude"),
+                when: When::Once { at: 1 },
+                run: None,
+                run_timeout: None,
+            },
+        ),
+        (
+            12,
+            ClientMsg::AddSchedule {
+                req: 12,
+                spec: spec("t", &dir, "claude"),
+                when: When::Every { minutes: 5 },
+                run: Some(" ".into()),
+                run_timeout: None,
+            },
+        ),
         (13, ClientMsg::GetTodo { req: 13, id: "#99".into() }),
     ] {
         assert!(matches!(ask(&mut peer, &message), HostMsg::Error { req: Some(r), .. } if r == req), "{message:?}");
@@ -511,7 +532,13 @@ fn a_missed_schedule_fires_once_when_the_board_opens() {
         host.serve_todos(db.clone());
         let mut peer = Peer::hello(&socket, false);
         let when = When::Every { minutes: 60 };
-        peer.send(&ClientMsg::AddSchedule { req: 1, spec: spec("Nightly report", &dir, &agent), when });
+        peer.send(&ClientMsg::AddSchedule {
+            req: 1,
+            spec: spec("Nightly report", &dir, &agent),
+            when,
+            run: None,
+            run_timeout: None,
+        });
         let HostMsg::TodoAdded { req: 1, id } = peer.reply() else { panic!("expected the schedule") };
         id
     };
@@ -537,7 +564,13 @@ fn a_missed_schedule_fires_once_when_the_board_opens() {
 fn schedules_keep_a_standalone_host_up() {
     let (host, dir, mut peer) = board("todo-idle");
     let when = When::Every { minutes: 60 };
-    peer.send(&ClientMsg::AddSchedule { req: 1, spec: spec("Hourly", &dir, "claude"), when });
+    peer.send(&ClientMsg::AddSchedule {
+        req: 1,
+        spec: spec("Hourly", &dir, "claude"),
+        when,
+        run: None,
+        run_timeout: None,
+    });
     let HostMsg::TodoAdded { id, .. } = peer.reply() else { panic!("expected the schedule") };
     drop(peer);
 
@@ -614,7 +647,13 @@ fn a_schedule_skips_while_its_last_agent_is_blocked() {
     let ask_body = "printf 'Bash command\\n\\nDo you want to proceed?\\n  1. Yes\\n  2. No\\n\\nEsc to cancel\\n'";
     let agent = script(&dir, "agent", &format!("{ask_body}\nexec '{}' 1000", claude.display()));
     let when = When::Every { minutes: 60 };
-    peer.send(&ClientMsg::AddSchedule { req: 1, spec: spec("Nightly fix", &dir, &agent), when });
+    peer.send(&ClientMsg::AddSchedule {
+        req: 1,
+        spec: spec("Nightly fix", &dir, &agent),
+        when,
+        run: None,
+        run_timeout: None,
+    });
     let HostMsg::TodoAdded { req: 1, id: schedule } = peer.reply() else { panic!("expected the schedule") };
     let store = runode_todo::Store::open(&dir.join("todos.db")).unwrap();
     let fired = |peer: &mut Peer| board_state(peer).1.iter().all(|schedule| schedule.last_fired > 1);
@@ -655,7 +694,13 @@ fn a_schedule_whose_todo_cannot_start_does_not_pile_up() {
         host.serve_todos(db.clone());
         let mut peer = Peer::hello(&socket, false);
         let when = When::Every { minutes: 60 };
-        peer.send(&ClientMsg::AddSchedule { req: 1, spec: spec("Gone", &work, "true"), when });
+        peer.send(&ClientMsg::AddSchedule {
+            req: 1,
+            spec: spec("Gone", &work, "true"),
+            when,
+            run: None,
+            run_timeout: None,
+        });
         let HostMsg::TodoAdded { req: 1, id } = peer.reply() else { panic!("expected the schedule") };
         id
     };
@@ -679,10 +724,133 @@ fn a_schedule_whose_todo_cannot_start_does_not_pile_up() {
     // 改成一次性的：到点时上次那张仍没开始成，跳过并删掉这个定时，不再开新的。
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let when = Some(When::Once { at: now + 2 });
-    let update = ClientMsg::UpdateSchedule { req: 3, id: schedule.clone(), spec: None, when };
+    let update =
+        ClientMsg::UpdateSchedule { req: 3, id: schedule.clone(), spec: None, when, run: None, run_timeout: None };
     assert!(matches!(ask(&mut peer, &update), HostMsg::Done { req: 3 }));
     wait_until("the one-off run", || board_state(&mut peer).1.is_empty());
     let (todos, _) = board_state(&mut peer);
     let from_schedule = todos.iter().filter(|todo| todo.schedule.as_deref() == Some(schedule.as_str())).count();
     assert_eq!(from_schedule, 1);
+}
+
+/// 加一个每小时到点、到点先跑 `run` 的定时，返回它的标识。
+#[cfg(unix)]
+fn add_run_schedule(peer: &mut Peer, spec: TodoSpec, run: &str) -> String {
+    let add = ClientMsg::AddSchedule {
+        req: 1,
+        spec,
+        when: When::Every { minutes: 60 },
+        run: Some(run.into()),
+        run_timeout: None,
+    };
+    match ask(peer, &add) {
+        HostMsg::TodoAdded { req: 1, id } => id,
+        other => panic!("expected the schedule, got {other:?}"),
+    }
+}
+
+/// 让定时 `id` 马上到点：上一次到点改到很久以前，加一张别的任务叫醒定时的线程。
+#[cfg(unix)]
+fn make_due(peer: &mut Peer, dir: &Path, id: &str) {
+    runode_todo::Store::open(&dir.join("todos.db")).unwrap().set_fired(id, 1).unwrap();
+    add(peer, spec("Poke", dir, "true"));
+}
+
+#[cfg(unix)]
+fn schedule_of(peer: &mut Peer, id: &str) -> Schedule {
+    board_state(peer).1.into_iter().find(|schedule| schedule.id == id).expect("the schedule is gone")
+}
+
+#[cfg(unix)]
+fn todos_of(peer: &mut Peer, schedule: &str) -> Vec<Todo> {
+    list(peer).into_iter().filter(|todo| todo.schedule.as_deref() == Some(schedule)).collect()
+}
+
+/// 到点先跑的命令有输出：开一张来自定时的任务，标题照定时的，提示词后面接着命令的输出。
+#[cfg(unix)]
+#[test]
+fn a_schedule_command_with_output_opens_a_todo() {
+    let (_host, dir, mut peer) = board("todo-run-fired");
+    let spec = TodoSpec { prompt: "提示词".into(), ..spec("Fix CI", &dir, "true") };
+    let schedule = add_run_schedule(&mut peer, spec, "printf 'fix it'");
+    make_due(&mut peer, &dir, &schedule);
+    let mut todos = Vec::new();
+    wait_until("the todo from the command", || {
+        todos = todos_of(&mut peer, &schedule);
+        !todos.is_empty()
+    });
+    assert_eq!(todos.len(), 1);
+    assert_eq!((todos[0].spec.title.as_str(), todos[0].spec.prompt.as_str()), ("Fix CI", "提示词\n\nfix it"));
+    assert_eq!(schedule_of(&mut peer, &schedule).last_run.unwrap().outcome, RunOutcome::Fired);
+}
+
+/// 命令退出码为 0、没有输出：这次没事，不开任务，标准错误记下来。
+#[cfg(unix)]
+#[test]
+fn a_quiet_schedule_command_opens_nothing() {
+    let (_host, dir, mut peer) = board("todo-run-idle");
+    let schedule = add_run_schedule(&mut peer, spec("Quiet", &dir, "true"), "echo log >&2");
+    make_due(&mut peer, &dir, &schedule);
+    let mut last_run = None;
+    wait_until("the command to finish", || {
+        last_run = schedule_of(&mut peer, &schedule).last_run;
+        last_run.is_some()
+    });
+    let last_run = last_run.unwrap();
+    assert_eq!((last_run.outcome, last_run.output.as_str()), (RunOutcome::Idle, "log"));
+    assert!(todos_of(&mut peer, &schedule).is_empty());
+}
+
+/// 命令退出码不为 0：算失败，不开任务，标准错误记下来。
+#[cfg(unix)]
+#[test]
+fn a_failing_schedule_command_opens_nothing() {
+    let (_host, dir, mut peer) = board("todo-run-failed");
+    let schedule = add_run_schedule(&mut peer, spec("Fails", &dir, "true"), "echo out; echo boom >&2; exit 3");
+    make_due(&mut peer, &dir, &schedule);
+    let mut last_run = None;
+    wait_until("the command to finish", || {
+        last_run = schedule_of(&mut peer, &schedule).last_run;
+        last_run.is_some()
+    });
+    let last_run = last_run.unwrap();
+    assert_eq!((last_run.outcome, last_run.output.as_str()), (RunOutcome::Failed, "boom"));
+    assert!(todos_of(&mut peer, &schedule).is_empty());
+}
+
+/// 上次开出的任务还没开始：到点跳过，命令也不跑。
+#[cfg(unix)]
+#[test]
+fn a_schedule_command_waits_for_the_last_todo() {
+    let (_host, dir, mut peer) = board("todo-run-held");
+    let marker = dir.join("ran");
+    let schedule = add_run_schedule(&mut peer, spec("Held", &dir, "true"), &format!("touch '{}'", marker.display()));
+    runode_todo::Store::open(&dir.join("todos.db"))
+        .unwrap()
+        .add_todo(&spec("Last time", &dir, "true"), 1, Some(&schedule))
+        .unwrap();
+    make_due(&mut peer, &dir, &schedule);
+    wait_until("the skipped run", || schedule_of(&mut peer, &schedule).last_fired > 1);
+    // 跑了的话，命令也要一会儿才建出文件。
+    thread::sleep(Duration::from_millis(500));
+    assert!(!marker.exists(), "the command ran");
+    assert!(schedule_of(&mut peer, &schedule).last_run.is_none());
+}
+
+/// 上一次的命令还在跑：再到点跳过，不另跑一份。
+#[cfg(unix)]
+#[test]
+fn a_schedule_command_still_running_is_not_run_again() {
+    let (_host, dir, mut peer) = board("todo-run-busy");
+    let count = dir.join("count");
+    let run = format!("echo run >> '{}'; sleep 10", count.display());
+    let schedule = add_run_schedule(&mut peer, spec("Slow", &dir, "true"), &run);
+    make_due(&mut peer, &dir, &schedule);
+    wait_for_file(&count);
+    make_due(&mut peer, &dir, &schedule);
+    wait_until("the second time it is due", || schedule_of(&mut peer, &schedule).last_fired > 1);
+    // 另跑了一份的话，它也要一会儿才写进文件。
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(std::fs::read_to_string(&count).unwrap(), "run\n");
+    assert!(schedule_of(&mut peer, &schedule).last_run.is_none());
 }

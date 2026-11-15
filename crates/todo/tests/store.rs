@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use runode_todo::{DONE_KEPT, Store};
 use runode_types::{
     session::SessionId,
-    todo::{Outcome, TodoSpec, When},
+    todo::{Outcome, RunOutcome, ScheduleRun, TodoSpec, When},
 };
 use rusqlite::Connection;
 fn spec(title: &str) -> TodoSpec {
@@ -86,8 +86,8 @@ fn todos_round_trip_and_keep_their_order() {
 fn schedules_round_trip() {
     let mut store = Store::open(&temp_db("schedules")).unwrap();
     let daily = When::Daily { hour: 9, minute: 30, days: 0b0011_1110 };
-    let id = store.add_schedule(&spec("report"), &daily, 100).unwrap();
-    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 15 }, 100).unwrap();
+    let id = store.add_schedule(&spec("report"), &daily, None, None, 100).unwrap();
+    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 15 }, None, None, 100).unwrap();
     let listed = store.list_schedules().unwrap();
     assert_eq!(
         listed.iter().map(|s| (s.id.as_str(), &s.when, s.last_fired)).collect::<Vec<_>>(),
@@ -97,18 +97,20 @@ fn schedules_round_trip() {
     store.set_fired(&id, 500).unwrap();
     assert_eq!(store.list_schedules().unwrap()[0].last_fired, 500);
     // 改了 `when` 时从现在重新算起；只改 spec 不动它。
-    assert!(store.update_schedule(&id, Some(&spec("weekly")), None, 600).unwrap());
+    assert!(store.update_schedule(&id, Some(&spec("weekly")), None, None, None, 600).unwrap());
     assert_eq!(store.list_schedules().unwrap()[0].last_fired, 500);
-    assert!(store.update_schedule(&id, None, Some(&When::Once { at: 9_999 }), 700).unwrap());
+    assert!(store.update_schedule(&id, None, Some(&When::Once { at: 9_999 }), None, None, 700).unwrap());
     let changed = &store.list_schedules().unwrap()[0];
     assert_eq!(
         (changed.spec.title.as_str(), &changed.when, changed.last_fired),
         ("weekly", &When::Once { at: 9_999 }, 700)
     );
-    assert!(!store.update_schedule("nothere", None, None, 700).unwrap());
+    assert!(!store.update_schedule("nothere", None, None, None, None, 700).unwrap());
     // 存不下的时刻不收，原来的不动。
-    assert!(store.add_schedule(&spec("never"), &When::Once { at: u64::MAX }, 700).is_err());
-    assert!(store.update_schedule(&id, Some(&spec("never")), Some(&When::Once { at: u64::MAX }), 800).is_err());
+    assert!(store.add_schedule(&spec("never"), &When::Once { at: u64::MAX }, None, None, 700).is_err());
+    assert!(
+        store.update_schedule(&id, Some(&spec("never")), Some(&When::Once { at: u64::MAX }), None, None, 800).is_err()
+    );
     let kept = &store.list_schedules().unwrap()[0];
     assert_eq!((kept.spec.title.as_str(), &kept.when), ("weekly", &When::Once { at: 9_999 }));
 
@@ -133,11 +135,11 @@ fn skills_subagent_attachments_and_auto_round_trip() {
     let empty = spec("empty");
     assert!(store.update_todo(&id, Some(&empty), None).unwrap());
     assert_eq!(store.todo_by_id(&id).unwrap().unwrap().spec, empty);
-    let schedule = store.add_schedule(&full, &When::Every { minutes: 5 }, 100).unwrap();
+    let schedule = store.add_schedule(&full, &When::Every { minutes: 5 }, None, None, 100).unwrap();
     assert_eq!(store.list_schedules().unwrap()[0].spec, full);
     let fired = store.fire_schedule(&schedule, 1_000).unwrap().unwrap();
     assert_eq!(store.todo_by_id(&fired).unwrap().unwrap().spec, full);
-    assert!(store.update_schedule(&schedule, Some(&empty), None, 100).unwrap());
+    assert!(store.update_schedule(&schedule, Some(&empty), None, None, None, 100).unwrap());
     assert_eq!(store.list_schedules().unwrap()[0].spec, empty);
 }
 
@@ -147,7 +149,7 @@ fn upgrades_a_version_3_database() {
     let path = temp_db("v3");
     let mut store = Store::open(&path).unwrap();
     let todo = store.add_todo(&spec("old"), 100, None).unwrap();
-    store.add_schedule(&spec("old"), &When::Every { minutes: 5 }, 100).unwrap();
+    store.add_schedule(&spec("old"), &When::Every { minutes: 5 }, None, None, 100).unwrap();
     drop(store);
     Connection::open(&path)
         .unwrap()
@@ -162,6 +164,11 @@ fn upgrades_a_version_3_database() {
              ALTER TABLE schedules DROP COLUMN time_limit;
              ALTER TABLE schedules DROP COLUMN paused;
              ALTER TABLE schedules DROP COLUMN cron;
+             ALTER TABLE schedules DROP COLUMN run;
+             ALTER TABLE schedules DROP COLUMN run_timeout;
+             ALTER TABLE schedules DROP COLUMN run_at;
+             ALTER TABLE schedules DROP COLUMN run_outcome;
+             ALTER TABLE schedules DROP COLUMN run_output;
              DELETE FROM meta WHERE key = 'max_running';
              PRAGMA user_version = 3;",
         )
@@ -176,6 +183,143 @@ fn upgrades_a_version_3_database() {
     assert!(store.update_todo(&todo, Some(&auto_done), None).unwrap());
     assert!(store.todo_by_id(&todo).unwrap().unwrap().spec.auto_done);
     assert!(store.set_outcome(&todo, Some(Outcome::Ok), Some("done")).unwrap());
+}
+
+/// 版本 5 的库升上来：原有的定时没有先跑的命令、没跑过，之后能照常写。
+#[test]
+fn upgrades_a_version_5_database() {
+    let path = temp_db("v5");
+    let mut store = Store::open(&path).unwrap();
+    let id = store.add_schedule(&spec("old"), &When::Every { minutes: 5 }, None, None, 100).unwrap();
+    drop(store);
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "ALTER TABLE schedules DROP COLUMN run;
+             ALTER TABLE schedules DROP COLUMN run_timeout;
+             ALTER TABLE schedules DROP COLUMN run_at;
+             ALTER TABLE schedules DROP COLUMN run_outcome;
+             ALTER TABLE schedules DROP COLUMN run_output;
+             PRAGMA user_version = 5;",
+        )
+        .unwrap();
+    let mut store = Store::open(&path).unwrap();
+    let schedule = &store.list_schedules().unwrap()[0];
+    assert_eq!(
+        (&schedule.spec, &schedule.run, schedule.run_timeout, &schedule.last_run),
+        (&spec("old"), &None, None, &None)
+    );
+    assert!(store.update_schedule(&id, None, None, Some("git fetch"), Some(10), 200).unwrap());
+    let schedule = &store.list_schedules().unwrap()[0];
+    assert_eq!((schedule.run.as_deref(), schedule.run_timeout), (Some("git fetch"), Some(10)));
+}
+
+/// 先跑的命令和超时：加的时候存下，改时只动给了的，空串和 0 清掉。
+#[test]
+fn schedule_commands_round_trip() {
+    let mut store = Store::open(&temp_db("run")).unwrap();
+    let every = When::Every { minutes: 5 };
+    let command = "gh pr list --json number\n| jq length";
+    let id = store.add_schedule(&spec("poll"), &every, Some(command), Some(3), 100).unwrap();
+    let plain = store.add_schedule(&spec("plain"), &every, Some(""), Some(0), 100).unwrap();
+    let read = |store: &Store, id: &str| {
+        let schedule = store.list_schedules().unwrap().into_iter().find(|s| s.id == id).unwrap();
+        (schedule.run, schedule.run_timeout)
+    };
+    assert_eq!(read(&store, &id), (Some(command.into()), Some(3)));
+    assert_eq!(read(&store, &plain), (None, None));
+
+    assert!(store.update_schedule(&id, Some(&spec("poll v2")), None, None, None, 200).unwrap());
+    assert_eq!(read(&store, &id), (Some(command.into()), Some(3)));
+    assert!(store.update_schedule(&id, None, None, Some("true"), None, 200).unwrap());
+    assert_eq!(read(&store, &id), (Some("true".into()), Some(3)));
+    assert!(store.update_schedule(&id, None, None, None, Some(0), 200).unwrap());
+    assert_eq!(read(&store, &id), (Some("true".into()), None));
+    assert!(store.update_schedule(&id, None, None, Some(""), Some(7), 200).unwrap());
+    assert_eq!(read(&store, &id), (None, Some(7)));
+    assert!(!store.update_schedule("nothere", None, None, Some("true"), None, 200).unwrap());
+}
+
+/// 到点跑命令：只有带命令、没停的定时到了点才交出来，记下到点的时刻；一次性的交出来时就删掉。
+#[test]
+fn firing_a_schedule_run_marks_it_fired() {
+    let mut store = Store::open(&temp_db("fire-run")).unwrap();
+    let every = When::Every { minutes: 1 };
+    let poll = store.add_schedule(&spec("poll"), &every, Some("check"), None, 100).unwrap();
+    let plain = store.add_schedule(&spec("plain"), &every, None, None, 100).unwrap();
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, Some("check"), None, 100).unwrap();
+
+    assert_eq!(store.fire_schedule_run(&poll, 150).unwrap(), None);
+    let fired = store.fire_schedule_run(&poll, 160).unwrap().unwrap();
+    assert_eq!((fired.id.as_str(), fired.run.as_deref(), fired.last_fired), (poll.as_str(), Some("check"), 100));
+    assert_eq!(store.list_schedules().unwrap()[0].last_fired, 160);
+    assert_eq!(store.fire_schedule_run(&poll, 160).unwrap(), None);
+
+    assert_eq!(store.fire_schedule_run(&plain, 1_000).unwrap(), None);
+    assert!(store.set_paused(&poll, true, 300).unwrap());
+    assert_eq!(store.fire_schedule_run(&poll, 1_000).unwrap(), None);
+
+    assert!(store.fire_schedule_run(&once, 250).unwrap().is_some());
+    assert_eq!(store.fire_schedule_run(&once, 250).unwrap(), None);
+    assert_eq!(store.list_schedules().unwrap().len(), 2);
+    assert!(store.list_todos(1_000).unwrap().is_empty());
+}
+
+/// 跑完的结果记在定时上，要开任务时加一张排着队的；跑的时候定时被删掉或停了就不开，一次性的照样开。
+#[test]
+fn finishing_a_schedule_run_records_it_and_queues_a_todo() {
+    let path = temp_db("finish-run");
+    let mut store = Store::open(&path).unwrap();
+    let every = When::Every { minutes: 1 };
+    let poll = store.add_schedule(&spec("poll"), &every, Some("check"), None, 100).unwrap();
+    let fired = store.fire_schedule_run(&poll, 160).unwrap().unwrap();
+
+    let idle = ScheduleRun { at: 170, outcome: RunOutcome::Idle, output: String::new() };
+    assert_eq!(store.finish_schedule_run(&fired, &idle, None).unwrap(), None);
+    assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(idle));
+
+    let found = ScheduleRun { at: 180, outcome: RunOutcome::Fired, output: "2 new issues".into() };
+    let task = TodoSpec { prompt: "triage\n\n2 new issues".into(), ..spec("poll") };
+    let todo = store.finish_schedule_run(&fired, &found, Some(&task)).unwrap().unwrap();
+    let todo = store.todo_by_id(&todo).unwrap().unwrap();
+    assert_eq!(
+        (&todo.spec, todo.created, todo.schedule.as_deref(), todo.queued),
+        (&task, 180, Some(poll.as_str()), true)
+    );
+    assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(found.clone()));
+
+    // 跑的时候停了：记下结果，不开任务。
+    assert!(store.set_paused(&poll, true, 190).unwrap());
+    let failed = ScheduleRun { at: 200, outcome: RunOutcome::Failed, output: "exit status 1".into() };
+    assert_eq!(store.finish_schedule_run(&fired, &failed, Some(&task)).unwrap(), None);
+    assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(failed));
+    // 停着时本该开任务的这次记成没事。
+    let found_late = ScheduleRun { at: 210, ..found.clone() };
+    assert_eq!(store.finish_schedule_run(&fired, &found_late, Some(&task)).unwrap(), None);
+    assert_eq!(
+        store.list_schedules().unwrap()[0].last_run,
+        Some(ScheduleRun { outcome: RunOutcome::Idle, ..found_late })
+    );
+
+    // 跑的时候删掉了：不开任务。
+    assert!(store.remove_schedule(&poll).unwrap());
+    assert_eq!(store.finish_schedule_run(&fired, &found, Some(&task)).unwrap(), None);
+    assert_eq!(store.list_todos(1_000).unwrap().len(), 1);
+
+    // 一次性的到点时就删了，照样开。
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 300 }, Some("check"), None, 100).unwrap();
+    let fired = store.fire_schedule_run(&once, 300).unwrap().unwrap();
+    assert!(store.finish_schedule_run(&fired, &found, Some(&spec("deploy"))).unwrap().is_some());
+    assert_eq!(store.list_todos(1_000).unwrap().len(), 2);
+
+    // 别的版本写的结果读成 `Unknown`。
+    let later = store.add_schedule(&spec("later"), &every, Some("check"), None, 100).unwrap();
+    Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE schedules SET run_at = 400, run_outcome = 'later' WHERE id = ?1", [&later])
+        .unwrap();
+    let last_run = store.list_schedules().unwrap().into_iter().find(|s| s.id == later).unwrap().last_run;
+    assert_eq!(last_run, Some(ScheduleRun { at: 400, outcome: RunOutcome::Unknown, output: String::new() }));
 }
 
 /// 结局和结果：只改给了的那项；重新开始时清掉，接着上次的对话时留着。
@@ -247,7 +391,7 @@ fn queued_todos_wait_without_cycles() {
 #[test]
 fn paused_schedules_do_not_fire() {
     let mut store = Store::open(&temp_db("pause")).unwrap();
-    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, 100).unwrap();
+    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, None, None, 100).unwrap();
     assert!(store.set_paused(&every, true, 150).unwrap());
     assert!(store.list_schedules().unwrap()[0].paused);
     assert_eq!(store.fire_schedule(&every, 1_000).unwrap(), None);
@@ -261,26 +405,26 @@ fn paused_schedules_do_not_fire() {
     assert!(store.todo_by_id(&todo).unwrap().unwrap().queued);
 
     let cron = When::Cron { expr: "30 9 * * 1-5".into() };
-    store.add_schedule(&spec("standup"), &cron, 100).unwrap();
+    store.add_schedule(&spec("standup"), &cron, None, None, 100).unwrap();
     assert_eq!(store.list_schedules().unwrap()[1].when, cron);
 }
 
 #[test]
 fn firing_a_schedule_follows_what_the_database_says_now() {
     let mut store = Store::open(&temp_db("fire")).unwrap();
-    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, 100).unwrap();
-    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, 100).unwrap();
+    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, None, None, 100).unwrap();
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, None, None, 100).unwrap();
 
     // 还没到点：不开任务。
     assert_eq!(store.fire_schedule(&every, 150).unwrap(), None);
     // 到点：开一张照现在的内容的任务，记下到点的时刻。
-    assert!(store.update_schedule(&every, Some(&spec("poll v2")), None, 0).unwrap());
+    assert!(store.update_schedule(&every, Some(&spec("poll v2")), None, None, None, 0).unwrap());
     let todo = store.fire_schedule(&every, 160).unwrap().unwrap();
     let todo = store.todo_by_id(&todo).unwrap().unwrap();
     assert_eq!((todo.spec.title.as_str(), todo.schedule.as_deref()), ("poll v2", Some(every.as_str())));
     assert_eq!(store.list_schedules().unwrap()[0].last_fired, 160);
     // 改了时间（从改的时刻重新算起）以后，按旧的样子到点的这次不开。
-    assert!(store.update_schedule(&every, None, Some(&When::Every { minutes: 10 }), 300).unwrap());
+    assert!(store.update_schedule(&every, None, Some(&When::Every { minutes: 10 }), None, None, 300).unwrap());
     assert_eq!(store.fire_schedule(&every, 400).unwrap(), None);
 
     // 一次性的开完就删；删掉了的不再开。
@@ -296,19 +440,19 @@ fn firing_a_schedule_follows_what_the_database_says_now() {
 #[test]
 fn skipping_a_schedule_follows_what_the_database_says_now() {
     let mut store = Store::open(&temp_db("skip")).unwrap();
-    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, 100).unwrap();
-    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, 100).unwrap();
+    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, None, None, 100).unwrap();
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, None, None, 100).unwrap();
 
     assert!(!store.skip_schedule(&every, 150).unwrap());
     assert!(store.skip_schedule(&every, 160).unwrap());
     assert_eq!(store.list_schedules().unwrap()[0].last_fired, 160);
     // 决定跳过以后被改了时间（从改的时刻重新算起）：按旧的样子到点的这次不记。
-    assert!(store.update_schedule(&every, None, Some(&When::Every { minutes: 10 }), 300).unwrap());
+    assert!(store.update_schedule(&every, None, Some(&When::Every { minutes: 10 }), None, None, 300).unwrap());
     assert!(!store.skip_schedule(&every, 400).unwrap());
     assert_eq!(store.list_schedules().unwrap()[0].last_fired, 300);
 
     // 一次性的挪到以后了：不删。到了点再跳过就删掉，删掉了的什么都不做。
-    assert!(store.update_schedule(&once, None, Some(&When::Once { at: 1_000 }), 300).unwrap());
+    assert!(store.update_schedule(&once, None, Some(&When::Once { at: 1_000 }), None, None, 300).unwrap());
     assert!(!store.skip_schedule(&once, 400).unwrap());
     assert!(store.skip_schedule(&once, 1_000).unwrap());
     assert!(!store.skip_schedule(&once, 1_000).unwrap());
@@ -320,7 +464,7 @@ fn skipping_a_schedule_follows_what_the_database_says_now() {
 fn a_schedule_that_fails_to_add_its_todo_is_left_as_it_was() {
     let path = temp_db("fire-fails");
     let mut store = Store::open(&path).unwrap();
-    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, 100).unwrap();
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, None, None, 100).unwrap();
     // 加任务那一步失败：发编号的计数没了。
     Connection::open(&path).unwrap().execute("DELETE FROM meta", []).unwrap();
     assert!(store.fire_schedule(&once, 250).is_err());

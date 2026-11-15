@@ -381,8 +381,16 @@ pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Resu
     Ok(())
 }
 
-/// 加一个定时，打印它的标识。工作树要用户要了才开，目录不在 git 仓库里时报错。
-pub(crate) fn add_schedule(env: &Env, spec: Spec, timing: Timing, out: &mut dyn Write) -> Result<()> {
+/// 加一个定时，打印它的标识。工作树要用户要了才开，目录不在 git 仓库里时报错。`run`、`run_timeout` 是
+/// `Schedule::run`、`Schedule::run_timeout`。
+pub(crate) fn add_schedule(
+    env: &Env,
+    spec: Spec,
+    timing: Timing,
+    run: Option<String>,
+    run_timeout: Option<u32>,
+    out: &mut dyn Write,
+) -> Result<()> {
     let spec = spec.resolve()?;
     if spec.worktree && !in_git_repo(&spec.dir) {
         bail!("{} is not in a git repository, so it cannot have a worktree", spec.dir.display());
@@ -401,8 +409,11 @@ pub(crate) fn add_schedule(env: &Env, spec: Spec, timing: Timing, out: &mut dyn 
     if matches!(when, When::Cron { .. }) {
         need_board(&connection, 3, "--cron")?;
     }
+    if run.is_some() {
+        need_board(&connection, 4, "--run")?;
+    }
     let req = connection.req();
-    connection.send(&ClientMsg::AddSchedule { req, spec, when })?;
+    connection.send(&ClientMsg::AddSchedule { req, spec, when, run, run_timeout })?;
     writeln!(out, "{}", added(&connection)?)?;
     Ok(())
 }
@@ -425,12 +436,16 @@ pub(crate) fn list_schedules(env: &Env, json: bool, out: &mut dyn Write) -> Resu
             schedule.id.clone(),
             when_text(&schedule.when, local),
             if schedule.paused { "paused".into() } else { schedule.next_fire.map_or_else(|| "-".into(), local) },
+            match (&schedule.run, &schedule.last_run) {
+                (Some(_), Some(last)) => format!("{} {}", last.outcome.name(), local(last.at)),
+                _ => "-".into(),
+            },
             schedule.spec.agent.clone(),
             schedule.spec.title.clone(),
             tilde(&schedule.spec.dir, home),
         ]
     });
-    table(&["ID", "WHEN", "NEXT", "AGENT", "TITLE", "DIR"], rows, out)
+    table(&["ID", "WHEN", "NEXT", "LAST", "AGENT", "TITLE", "DIR"], rows, out)
 }
 
 pub(crate) fn remove_schedule(env: &Env, id: String) -> Result<()> {

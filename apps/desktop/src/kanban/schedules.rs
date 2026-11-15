@@ -13,8 +13,9 @@ use crate::ui::{
 use gpui::{AnyElement, Axis, Context, Div, FontWeight, Role, Stateful, Window, div, prelude::*, px, svg};
 use runode_protocol::{
     ClientMsg,
-    todo::{Schedule, Todo, column, holds_schedule},
+    todo::{RunOutcome, Schedule, Todo, column, holds_schedule},
 };
+use std::path::Path;
 
 use super::{
     Kanban, Page, ToastState, agent_text, column_name,
@@ -33,6 +34,31 @@ fn recent_runs<'a>(todos: &'a [Todo], schedule: &str) -> Vec<&'a Todo> {
     runs.sort_by_key(|todo| std::cmp::Reverse(todo.created));
     runs.truncate(RECENT_RUNS);
     runs
+}
+
+/// 命令 `command` 跑的程序的文件名：第一个词去掉引号和目录。
+fn program_name(command: &str) -> &str {
+    let word = command.split_whitespace().next().unwrap_or_default().trim_matches(['"', '\'']);
+    Path::new(word).file_name().and_then(|name| name.to_str()).unwrap_or(word)
+}
+
+/// 定时卡片上先跑的命令那一行：跑哪个程序，跑过的再接上一次的结果；为真的是上一次失败了。没有命令时为空。
+fn run_line_in(schedule: &Schedule, now: u64, locale: &str) -> Option<(String, bool)> {
+    let command = schedule.run.as_deref()?;
+    let program = rust_i18n::t!("kanban.run_command", locale = locale, program = program_name(command)).into_owned();
+    let Some(last) = &schedule.last_run else { return Some((program, false)) };
+    let time = short_time(last.at, now);
+    let output = last.output.lines().map(str::trim).rfind(|line| !line.is_empty());
+    let result = match (last.outcome, output) {
+        (RunOutcome::Idle, _) => rust_i18n::t!("kanban.run_idle", locale = locale, time = time),
+        (RunOutcome::Fired, _) => rust_i18n::t!("kanban.run_fired", locale = locale, time = time),
+        (RunOutcome::Failed, Some(output)) => {
+            rust_i18n::t!("kanban.run_failed", locale = locale, time = time, output = output)
+        }
+        (RunOutcome::Failed, None) => rust_i18n::t!("kanban.run_failed_bare", locale = locale, time = time),
+        (RunOutcome::Unknown, _) => rust_i18n::t!("kanban.run_unknown", locale = locale, time = time),
+    };
+    Some((format!("{program} · {result}"), last.outcome == RunOutcome::Failed))
 }
 
 /// 下一个到点的定时：没停用、会再到点的里面 `next_fire` 最早的。
@@ -305,11 +331,20 @@ impl Kanban {
         };
         // 停用的三行字各调淡一档，一眼和还在排的分开；下面的记录链接照样能点，不跟着淡。
         let (title_alpha, rule_alpha, details_alpha) = if schedule.paused { (0.6, 0.5, 0.4) } else { (1., 0.75, 0.55) };
+        let run_line = run_line_in(schedule, now, &rust_i18n::locale());
+        let mut description = format!("{rule}。{next}。{}", details.join(" · "));
+        if let Some((line, _)) = &run_line {
+            description = format!("{description}。{line}");
+        }
+        let run_line = run_line.map(|(line, failed)| {
+            let color = if failed { cx.theme().destructive } else { fg.opacity(details_alpha) };
+            div().text_size(FontSize::Small).text_color(color).truncate().child(line)
+        });
         div()
             .id(named("todo-schedule", &schedule.id))
             .role(Role::ListItem)
             .aria_label(schedule.spec.title.clone())
-            .aria_description(format!("{rule}。{next}。{}", details.join(" · ")))
+            .aria_description(description)
             .flex_none()
             .p(px(12.))
             .flex()
@@ -343,6 +378,7 @@ impl Kanban {
                             .truncate()
                             .child(details.join(" · ")),
                     )
+                    .children(run_line)
                     .child(div().pt(px(4.)).flex().flex_wrap().items_center().gap(px(4.)).children(run_rows)),
             )
             .child(div().flex_none().flex().items_start().gap(px(2.)).child(pause).child(edit).child(remove))
@@ -375,6 +411,9 @@ mod tests {
             last_fired: 0,
             next_fire,
             paused,
+            run: None,
+            run_timeout: None,
+            last_run: None,
         };
         let schedules = [
             schedule("paused", Some(10), true),
@@ -384,5 +423,48 @@ mod tests {
         ];
         assert_eq!(next_schedule(&schedules).map(|s| s.id.as_str()), Some("soon"));
         assert_eq!(next_schedule(&schedules[..2]).map(|s| s.id.as_str()), None);
+    }
+
+    #[test]
+    fn program_names_drop_dirs_and_quotes() {
+        assert_eq!(program_name("~/.runode/scripts/gha-watch.sh --repo x"), "gha-watch.sh");
+        assert_eq!(program_name("'./check.sh' -v"), "check.sh");
+        assert_eq!(program_name("gh run list"), "gh");
+        assert_eq!(program_name("  "), "");
+    }
+
+    /// 卡片上先跑的命令那一行：没跑过只说跑哪个程序，失败时接上输出的最后一行。
+    #[test]
+    fn run_lines_tell_the_last_outcome() {
+        use runode_protocol::todo::ScheduleRun;
+        let now = 1_800_000_000;
+        let schedule = |run: Option<&str>, last_run: Option<ScheduleRun>| Schedule {
+            id: "s".into(),
+            spec: todo("s", None, None).spec,
+            when: runode_protocol::todo::When::Every { minutes: 10 },
+            last_fired: 0,
+            next_fire: None,
+            paused: false,
+            run: run.map(str::to_owned),
+            run_timeout: None,
+            last_run,
+        };
+        let last = |outcome, output: &str| Some(ScheduleRun { at: now - 60, outcome, output: output.into() });
+        let time = short_time(now - 60, now);
+        assert_eq!(run_line_in(&schedule(None, None), now, "en"), None);
+        assert_eq!(
+            run_line_in(&schedule(Some("~/bin/watch.sh"), None), now, "zh-Hans"),
+            Some(("先跑 watch.sh".to_owned(), false))
+        );
+        let failed = schedule(Some("~/bin/watch.sh"), last(RunOutcome::Failed, "checking\ngh: auth required\n\n"));
+        assert_eq!(
+            run_line_in(&failed, now, "zh-Hans"),
+            Some((format!("先跑 watch.sh · 上次 {time} 失败：gh: auth required"), true))
+        );
+        let idle = schedule(Some("watch.sh"), last(RunOutcome::Idle, ""));
+        assert_eq!(
+            run_line_in(&idle, now, "en"),
+            Some((format!("runs watch.sh first · last {time}: nothing to do"), false))
+        );
     }
 }

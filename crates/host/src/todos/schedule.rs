@@ -2,8 +2,9 @@
 //!
 //! 错过的（电脑睡着、宿主没在跑）补一次：上一次到点后的下一次已经过了就算到点，开一张任务，把到点的
 //! 时刻记成现在，下一次从现在算起，所以睡了三天醒来也只补一次。同一个定时上次开出的任务还在干活、或者
-//! agent 停在权限询问上时这次跳过，免得两个 agent 改同一处。定时开出的任务和用户排进队的一样，由 `start_queued`
-//! 按看板的并发上限开始。
+//! agent 停在权限询问上时这次跳过，免得两个 agent 改同一处。带 `Schedule::run` 的定时到点先另起线程跑命令
+//! （`Shared::start_run`），按它的结果开任务；上一次的命令还没跑完时这次也跳过。定时开出的任务和用户排进队的
+//! 一样，由 `start_queued` 按看板的并发上限开始。
 
 use std::{
     sync::{Arc, Weak},
@@ -73,7 +74,8 @@ impl Shared {
             };
             soonest = soonest.into_iter().chain(next).min();
         }
-        (soonest, Some(schedules.iter().any(|schedule| !schedule.paused)))
+        // 命令还在跑的也算：一次性的定时到点时已经删掉，命令跑完才开任务。
+        (soonest, Some(schedules.iter().any(|schedule| !schedule.paused) || self.todos.runs_pending()))
     }
 
     /// 开始排着队的任务：按先后，等的任务做完了（删掉了也算）、看板上进行中的少于并发上限时开始；等的任务没做成
@@ -180,9 +182,14 @@ impl Shared {
         }
     }
 
-    /// 定时到点：记下到点的时刻（一次性的删掉），加一张排着队的新任务；上次开出的那张还在排队、没开始成、还在
-    /// 干活或者停在询问上时跳过。
+    /// 定时到点：记下到点的时刻（一次性的删掉），加一张排着队的新任务，带 `Schedule::run` 的先跑命令、按结果开；
+    /// 上次的命令还在跑，或者上次开出的那张还在排队、没开始成、还在干活、停在询问上时跳过。
     fn fire(&self, schedule: &Schedule, now: u64) {
+        if self.todos.run_pending(&schedule.id) {
+            tracing::info!("schedule {} skips this run: its last command is still running", schedule.id);
+            self.skip(schedule, now);
+            return;
+        }
         // 查不到上次那张时不开：库只是一时打不开的话，开出来可能和还在干活的上一个 agent 撞在一起；下一轮再看。
         let previous = match self.todos.with_db(|db| db.latest_open_todo_of(&schedule.id)) {
             Ok(previous) => previous,
@@ -203,14 +210,11 @@ impl Shared {
                 schedule.id,
                 todo.id
             );
-            // 一次性的到过就没了，跳过也删掉：只记到点的话它再也不会到点，却一直留着让宿主不空闲。`schedule` 是
-            // 这一轮开头读的，查上一张任务、问会话的这一会儿可能被改过：`skip_schedule` 照库里现在的样子办。
-            match self.todos.with_db(|db| db.skip_schedule(&schedule.id, now)) {
-                // 下一次到点变了，看板要重读。
-                Ok(true) => self.todos_changed(),
-                Ok(false) => tracing::info!("schedule {} was removed or changed before it was skipped", schedule.id),
-                Err(err) => tracing::warn!("cannot record that schedule {} fired: {err}", schedule.id),
-            }
+            self.skip(schedule, now);
+            return;
+        }
+        if schedule.run.is_some() {
+            self.fire_run(schedule, now);
             return;
         }
         // `schedule` 是这一轮开头读的，之后可能被删、被改过：`fire_schedule` 照库里现在的样子办。
@@ -222,6 +226,34 @@ impl Shared {
             Ok(None) => tracing::info!("schedule {} was removed or changed before it fired", schedule.id),
             // 不通知：通知会叫醒定时的线程马上再来一轮，记不进库时就成了空转；下一轮（最多 `MAX_SLEEP`）再试。
             Err(err) => tracing::warn!("schedule {} could not add its todo: {err}", schedule.id),
+        }
+    }
+
+    /// 定时这次到点跳过、不开任务：记下到点的时刻。一次性的到过就没了，跳过也删掉：只记到点的话它再也不会
+    /// 到点，却一直留着让宿主不空闲。
+    fn skip(&self, schedule: &Schedule, now: u64) {
+        // `schedule` 是这一轮开头读的，决定跳过的这一会儿可能被改过：`skip_schedule` 照库里现在的样子办。
+        match self.todos.with_db(|db| db.skip_schedule(&schedule.id, now)) {
+            // 下一次到点变了，看板要重读。
+            Ok(true) => self.todos_changed(),
+            Ok(false) => tracing::info!("schedule {} was removed or changed before it was skipped", schedule.id),
+            Err(err) => tracing::warn!("cannot record that schedule {} fired: {err}", schedule.id),
+        }
+    }
+
+    /// 带 `Schedule::run` 的定时到点：记下到点的时刻（一次性的删掉），另起线程跑命令（`start_run`）。
+    fn fire_run(&self, schedule: &Schedule, now: u64) {
+        // 照库里现在的样子办：这一轮开头读到以后可能被删、被停、去掉了命令。
+        match self.todos.with_db(|db| db.fire_schedule_run(&schedule.id, now)) {
+            Ok(Some(current)) => {
+                // 下一次到点变了，看板要重读。
+                self.todos_changed();
+                tracing::info!("schedule {} fired: running its command", schedule.id);
+                self.start_run(current);
+            }
+            Ok(None) => tracing::info!("schedule {} was removed or changed before it fired", schedule.id),
+            // 不通知：记不进库时叫醒定时的线程只会空转，下一轮再试。
+            Err(err) => tracing::warn!("schedule {} could not record that it fired: {err}", schedule.id),
         }
     }
 }

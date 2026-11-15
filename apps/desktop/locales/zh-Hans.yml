@@ -1241,6 +1241,12 @@ kanban:
   next: "下一次 %{time}"
   next_held: 上次开出的任务还在干活或在等你回答，到点先跳过
   worktree_on: 独立工作树
+  run_command: "先跑 %{program}"
+  run_idle: "上次 %{time} 没事"
+  run_fired: "上次 %{time} 开了任务"
+  run_failed: "上次 %{time} 失败：%{output}"
+  run_failed_bare: "上次 %{time} 失败"
+  run_unknown: "上次 %{time} 跑过"
   done_window: "完成这一栏只列最近 7 天的任务"
   all_history: 全部记录
   history: 记录
@@ -1352,6 +1358,9 @@ kanban:
       once: "%{time} 开一个新任务：%{body}"
       repeat: "%{when} 开一个新任务：%{body}"
       due: "到点开一个新任务：%{body}"
+      once_run: "%{time} 先跑命令，有输出才开一个新任务：%{body}"
+      repeat_run: "%{when} 先跑命令，有输出才开一个新任务：%{body}"
+      due_run: "到点先跑命令，有输出才开一个新任务：%{body}"
     kind_once: 一次
     kind_daily: 每天
     kind_every: 每隔
@@ -1387,6 +1396,12 @@ kanban:
     time_limit_unit: 分钟
     time_limit_hint: "开始后过了这么久，agent 还在干活或停在询问上就记成没做成，没有窗口开着它的终端时结束终端。"
     bad_time_limit: "时限写分钟数，至少 1，或者空着。"
+    run: 先跑命令
+    run_placeholder: "./scripts/check-ci.sh"
+    run_hint: "到点先在项目目录里跑这条命令：标准输出不为空时接在提示词后面开任务，为空这次就不开；日志写到标准错误。上次的任务没做完时不跑。"
+    run_timeout: 命令超时分钟数
+    run_timeout_lead: 超时
+    bad_run_timeout: "超时写分钟数，1 到 %{max}，空着是 %{default} 分钟。"
     kind_cron: Cron
     cron: cron 表达式
     cron_placeholder: "30 9 * * 1-5"

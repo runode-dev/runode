@@ -402,9 +402,18 @@ pub enum ClientMsg {
         #[serde(default)]
         before: Option<String>,
     },
-    /// 加一个定时，回 `TodoAdded`。
-    AddSchedule { req: u32, spec: TodoSpec, when: When },
-    /// 改定时，只改给了的部分；改了 `when` 时从现在重新算起。回 `Done`。
+    /// 加一个定时，回 `TodoAdded`。`run`、`run_timeout` 宿主的 `Welcome::board` 不小于 4 时才认得。
+    AddSchedule {
+        req: u32,
+        spec: TodoSpec,
+        when: When,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_timeout: Option<u32>,
+    },
+    /// 改定时，只改给了的部分；改了 `when` 时从现在重新算起。`run` 给空串时清掉，`run_timeout` 给 0 时清回
+    /// 默认，这两个宿主的 `Welcome::board` 不小于 4 时才认得。回 `Done`。
     UpdateSchedule {
         req: u32,
         id: String,
@@ -412,6 +421,10 @@ pub enum ClientMsg {
         spec: Option<TodoSpec>,
         #[serde(default)]
         when: Option<When>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_timeout: Option<u32>,
     },
     /// 删掉定时，回 `Done`；它开出来的任务留着。
     RemoveSchedule { req: u32, id: String },

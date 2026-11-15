@@ -388,6 +388,7 @@ Usage: runode schedule add TITLE... (--at TIME | --daily HH:MM [--days DAYS] |
                            [--cwd DIR] [--agent CMD] [--model MODEL]
                            [--effort EFFORT] [--skill NAME]... [--worktree]
                            [--auto] [--auto-done] [--time-limit MINUTES]
+                           [--run CMD [--run-timeout MINUTES]]
        runode schedule list [--json]
        runode schedule rm ID
        runode schedule pause ID
@@ -395,7 +396,8 @@ Usage: runode schedule add TITLE... (--at TIME | --daily HH:MM [--days DAYS] |
 
 Commands:
   add     Add a schedule and print its id
-  list    List the schedules with when they fire and the next time they will
+  list    List the schedules with when they fire, the next time they will and
+          how the last --run went (LAST: idle, fired or failed, and when)
   rm      Remove a schedule; the tasks it started stay
   pause   Stop a schedule from firing until it is resumed
   resume  Let a paused schedule fire again, counting from now: the times it
@@ -428,8 +430,28 @@ Options:
                        branch; DIR must be in a git repository
       --auto-done      With `add`: mark each task done once its agent has
                        worked and stopped (see `runode help todo`)
+      --run CMD        With `add`: when due, first run CMD in DIR (see below)
+                       and start a task only if it prints something; one
+                       line, put anything longer in a script
+      --run-timeout MINUTES
+                       With --run: count the run as failed after MINUTES
+                       (default 5, at most 1440)
       --json           With `list`: print JSON instead of a table
   -h, --help           Show this help
+
+With --run, a due schedule first runs CMD in DIR without a terminal (`sh -c`,
+`cmd /C` on Windows), so a check that finds nothing to do costs no agent and
+no tokens. If CMD exits 0 and prints to stdout, a task is started with the
+schedule's title, its prompt being --prompt followed by that output (or just
+the output). If CMD exits 0 and prints nothing, nothing happens. A non-zero
+exit, running past --run-timeout or printing more than 64 KiB counts as
+failed. Write logs to stderr; Runode keeps the end of it, and `list` shows how
+the last run went. The schedule is skipped while its last task is unfinished
+or its last run is still going. CMD gets RUNODE_SCHEDULE (the schedule id, to
+keep its state apart), RUNODE_SOCKET and the login shell's PATH with Runode's
+directory added, so it can call runode. A CMD that never prints to stdout only
+runs and never starts an agent. Keeping track across runs, such as not handing
+out the same failure twice, is up to CMD.
 ";
 
 const REMOTE: &str = "\

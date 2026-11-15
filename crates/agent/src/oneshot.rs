@@ -1,12 +1,12 @@
-//! 让 agent 的命令行不进交互、只打印结果地跑一次：各家的调用方式（`Cli`），和在后台限时跑完、取它的
-//! 输出（`run`）。这些调用都关掉执行命令、读写文件的工具，不留会话记录。模型不在这里选，由调用方加在参数里，比如
-//! `--model sonnet`。
+//! 在后台限时跑完一条命令、取它的输出（`run_command`）；在它上面让 agent 的命令行不进交互、只打印结果地
+//! 跑一次：各家的调用方式（`Cli`），和跑完取标准输出（`run`）。agent 的这些调用都关掉执行命令、读写文件的
+//! 工具，不留会话记录。模型不在这里选，由调用方加在参数里，比如 `--model sonnet`。
 
 use std::{
     ffi::{OsStr, OsString},
     io::{self, ErrorKind, Read, Write},
     path::Path,
-    process::{Child, Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -30,7 +30,7 @@ pub const PROMPT: &str = "{prompt}";
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(10);
 /// 到时限杀掉整组以后，再等输出管道关上这么久。
 pub(crate) const KILL_GRACE: Duration = Duration::from_secs(1);
-/// 等 agent 退出时最多隔这么久看一次。
+/// 等命令退出时最多隔这么久看一次。
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// 一家 agent 只打印结果的命令行。
@@ -118,14 +118,14 @@ pub fn with_prompt(args: Vec<String>, prompt: &str) -> (Vec<String>, Option<Stri
     (args, (!on_argv).then(|| prompt.to_owned()))
 }
 
-/// `run` 没拿到输出的原因，由调用方说给用户听。
+/// `run_command` 和 `run` 没拿到输出的原因，由调用方说给用户听。
 #[derive(Debug)]
 pub enum RunError {
     /// 找不到程序：没装，或者不在 PATH 里。
     Missing,
     /// 到时限没跑完，或者它退了、别的进程还一直拿着输出管道。
     Timeout,
-    /// 退出码不是 0：去掉首尾空白的标准错误，它为空时是标准输出，都为空时是退出状态。
+    /// 只有 `run` 报：退出码不是 0，去掉首尾空白的标准错误，它为空时是标准输出，都为空时是退出状态。
     Failed(String),
     /// 拉不起来、接不上管道、等不到退出这类别的错。
     Io(io::Error),
@@ -156,26 +156,57 @@ pub fn run(
     timeout: Duration,
 ) -> Result<String, RunError> {
     let mut command = Command::new(program);
-    command
-        .args(args)
-        .current_dir(dir)
-        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // 包装脚本拉起的真 agent、后台的 helper 到时限时一起杀掉。
-    crate::process::isolate(&mut command);
+    command.args(args).current_dir(dir);
     if let Some(path) = path {
         command.env("PATH", path);
     }
     command.envs(env.iter().map(|(name, value)| (name, value)));
+    let Finished { status, stdout, stderr, .. } = run_command(command, stdin, timeout, usize::MAX)?;
+    let (stdout, stderr) =
+        (String::from_utf8_lossy(&stdout).into_owned(), String::from_utf8_lossy(&stderr).into_owned());
+    if !status.success() {
+        let detail = [stderr.trim(), stdout.trim()].into_iter().find(|text| !text.is_empty());
+        return Err(RunError::Failed(detail.map_or_else(|| status.to_string(), str::to_owned)));
+    }
+    Ok(stdout)
+}
+
+/// `run_command` 跑完的命令：退出状态和读到的输出。
+#[derive(Debug)]
+pub struct Finished {
+    pub status: ExitStatus,
+    /// 标准输出的前 `limit` 个字节。
+    pub stdout: Vec<u8>,
+    /// 标准错误的前 `limit` 个字节，超出的丢掉、不另报。
+    pub stderr: Vec<u8>,
+    /// 标准输出超过了 `limit`，超出的已丢掉。
+    pub overflow: bool,
+}
+
+/// 跑调用方配好程序、参数、目录和环境的 `command`，`stdin` 不为空时从标准输入交给它；过了 `timeout`
+/// 连同它拉起的子孙一起杀掉，报 `RunError::Timeout`。标准输入、输出和进程组由这里设，调用方设的不算。
+/// 两条输出各只留前 `limit` 个字节，超出的照样读完丢掉，命令不会卡在写管道上。退出码不是 0 不算错，
+/// 由调用方看 `Finished::status`。
+pub fn run_command(
+    mut command: Command,
+    stdin: Option<String>,
+    timeout: Duration,
+    limit: usize,
+) -> Result<Finished, RunError> {
+    command
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // 包装脚本拉起的真程序、后台的 helper 到时限时一起杀掉。
+    crate::process::isolate(&mut command);
     let mut child = command.spawn().map_err(|err| match err.kind() {
         ErrorKind::NotFound => RunError::Missing,
         _ => RunError::Io(err),
     })?;
     let group = child.id();
     let kill_group = || crate::process::kill_tree(group);
-    // 提示词和输出都可能比管道的缓冲大，一边等 agent 退出一边写、读，不然两边都停下来等对方。
-    let mut pipes = match Pipes::new(&mut child, stdin) {
+    // 标准输入和输出都可能比管道的缓冲大，一边等命令退出一边写、读，不然两边都停下来等对方。
+    let mut pipes = match Pipes::new(&mut child, stdin, limit) {
         Ok(pipes) => pipes,
         Err(err) => {
             kill_group();
@@ -197,7 +228,7 @@ pub fn run(
         }
         pipes.pump((deadline - now).min(POLL_INTERVAL));
     }
-    // agent 退了，组里还有进程拿着输出管道时读不到头：等到时限，再杀掉整组读完剩下的。拿着管道的
+    // 命令退了，组里还有进程拿着输出管道时读不到头：等到时限，再杀掉整组读完剩下的。拿着管道的
     // 进程自己另开了进程组或会话、杀不到它时，再等一会儿还读不到头就算超时，不一直等下去；返回时
     // `pipes` 跟着关掉，那个进程再写只会写不进去。
     let mut until = deadline;
@@ -217,36 +248,34 @@ pub fn run(
         pipes.pump(until - now);
     }
     let status = child.wait().map_err(RunError::Io)?;
-    let (stdout, stderr) = pipes.into_outputs();
-    let (stdout, stderr) =
-        (String::from_utf8_lossy(&stdout).into_owned(), String::from_utf8_lossy(&stderr).into_owned());
-    if !status.success() {
-        let detail = [stderr.trim(), stdout.trim()].into_iter().find(|text| !text.is_empty());
-        return Err(RunError::Failed(detail.map_or_else(|| status.to_string(), str::to_owned)));
-    }
-    Ok(stdout)
+    let (stdout, stderr, overflow) = pipes.into_outputs();
+    Ok(Finished { status, stdout, stderr, overflow })
 }
 
-/// `run` 拉起的 agent 的三条管道，都设成非阻塞，在当前线程里用 `poll` 一起写、读，不另起线程：
+/// `run_command` 拉起的命令的三条管道，都设成非阻塞，在当前线程里用 `poll` 一起写、读，不另起线程：
 /// 拿着管道的后代杀不到时，这边到时限丢掉 `Pipes` 就关上了，没有线程卡在读写上，fd 也不漏。
 #[cfg(unix)]
 struct Pipes {
     stdin: Option<ChildStdin>,
-    /// 要写进标准输入的提示词，和写到了哪儿。
+    /// 要写进标准输入的内容，和写到了哪儿。
     input: Vec<u8>,
     written: usize,
     /// 读到头或读出错时为空。
     stdout: Option<ChildStdout>,
     stderr: Option<ChildStderr>,
+    /// 两条输出各留的字节上限。
+    limit: usize,
     stdout_bytes: Vec<u8>,
     stderr_bytes: Vec<u8>,
+    /// 标准输出有超过 `limit` 丢掉的。
+    overflow: bool,
 }
 
 #[cfg(unix)]
 impl Pipes {
-    fn new(child: &mut Child, input: Option<String>) -> io::Result<Self> {
+    fn new(child: &mut Child, input: Option<String>, limit: usize) -> io::Result<Self> {
         let input = input.map(String::into_bytes).unwrap_or_default();
-        // 没有要写的就直接关上标准输入，agent 读到头。
+        // 没有要写的就直接关上标准输入，命令读到头。
         let stdin = child.stdin.take().filter(|_| !input.is_empty());
         let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
         let fds = [
@@ -257,12 +286,22 @@ impl Pipes {
         for fd in fds.into_iter().flatten() {
             set_nonblocking(fd)?;
         }
-        Ok(Self { stdin, input, written: 0, stdout, stderr, stdout_bytes: Vec::new(), stderr_bytes: Vec::new() })
+        Ok(Self {
+            stdin,
+            input,
+            written: 0,
+            stdout,
+            stderr,
+            limit,
+            stdout_bytes: Vec::new(),
+            stderr_bytes: Vec::new(),
+            overflow: false,
+        })
     }
 
-    /// 读到的标准输出和标准错误。
-    fn into_outputs(self) -> (Vec<u8>, Vec<u8>) {
-        (self.stdout_bytes, self.stderr_bytes)
+    /// 读到的标准输出、标准错误，和标准输出有没有超过上限。
+    fn into_outputs(self) -> (Vec<u8>, Vec<u8>, bool) {
+        (self.stdout_bytes, self.stderr_bytes, self.overflow)
     }
 
     /// 标准输出和标准错误都读到头了。
@@ -293,11 +332,11 @@ impl Pipes {
         }
         // 不细分是哪条就绪：fd 都是非阻塞的，没就绪的那几条只会得到 `WouldBlock`。
         self.feed();
-        read_some(&mut self.stdout, &mut self.stdout_bytes);
-        read_some(&mut self.stderr, &mut self.stderr_bytes);
+        self.overflow |= read_some(&mut self.stdout, &mut self.stdout_bytes, self.limit);
+        read_some(&mut self.stderr, &mut self.stderr_bytes, self.limit);
     }
 
-    /// 往标准输入写一次；写完了或 agent 不收了（管道读端关了）就关上，和不收时不报错一样。
+    /// 往标准输入写一次；写完了或命令不收了（管道读端关了）就关上，和不收时不报错一样。
     fn feed(&mut self) {
         let Some(pipe) = &mut self.stdin else {
             return;
@@ -313,19 +352,28 @@ impl Pipes {
     }
 }
 
-/// 从 `pipe` 读一次，读到的接在 `bytes` 后面；读到头或出错时关上，读到的照样留着。
+/// 从 `pipe` 读一次，读到的接在 `bytes` 后面，`bytes` 最多留到 `limit` 个字节，超出的丢掉、返回真；
+/// 读到头或出错时关上，读到的照样留着。
 #[cfg(unix)]
-fn read_some(pipe: &mut Option<impl Read>, bytes: &mut Vec<u8>) {
+fn read_some(pipe: &mut Option<impl Read>, bytes: &mut Vec<u8>, limit: usize) -> bool {
     let Some(reader) = pipe else {
-        return;
+        return false;
     };
     let mut buf = [0; 16 * 1024];
     match reader.read(&mut buf) {
         Ok(0) => *pipe = None,
-        Ok(read) => bytes.extend_from_slice(&buf[..read]),
+        Ok(read) => return keep_within(bytes, &buf[..read], limit),
         Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) => {}
         Err(_) => *pipe = None,
     }
+    false
+}
+
+/// 把 `read` 接在 `bytes` 后面，`bytes` 最多留到 `limit` 个字节；有丢掉的时返回真。
+fn keep_within(bytes: &mut Vec<u8>, read: &[u8], limit: usize) -> bool {
+    let keep = read.len().min(limit.saturating_sub(bytes.len()));
+    bytes.extend_from_slice(&read[..keep]);
+    keep < read.len()
 }
 
 #[cfg(unix)]
@@ -347,22 +395,23 @@ struct Pipes {
     read: Arc<(Mutex<Collected>, Condvar)>,
 }
 
-/// 读到的标准输出、标准错误，和还没读到头的有几条。
+/// 读到的标准输出、标准错误（各最多留 `limit` 个字节），标准输出有没有超过上限，和还没读到头的有几条。
 #[cfg(windows)]
 #[derive(Default)]
 struct Collected {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+    overflow: bool,
     open: usize,
 }
 
 #[cfg(windows)]
 impl Pipes {
-    fn new(child: &mut Child, input: Option<String>) -> io::Result<Self> {
+    fn new(child: &mut Child, input: Option<String>, limit: usize) -> io::Result<Self> {
         let input = input.map(String::into_bytes).unwrap_or_default();
-        // 没有要写的就直接关上标准输入，agent 读到头。
+        // 没有要写的就直接关上标准输入，命令读到头。
         if let Some(mut stdin) = child.stdin.take().filter(|_| !input.is_empty()) {
-            // agent 不收时写会失败，和不收时不报错一样。
+            // 命令不收时写会失败，和不收时不报错一样。
             thread::Builder::new().name("agent-oneshot-stdin".into()).spawn(move || drop(stdin.write_all(&input)))?;
         }
         let read = Arc::new((Mutex::new(Collected { open: 2, ..Collected::default() }), Condvar::new()));
@@ -376,7 +425,11 @@ impl Pipes {
                             Ok(0) => break,
                             Ok(n) => {
                                 let mut out = read.0.lock().unwrap_or_else(PoisonError::into_inner);
-                                if err { &mut out.stderr } else { &mut out.stdout }.extend_from_slice(&buf[..n]);
+                                if err {
+                                    keep_within(&mut out.stderr, &buf[..n], limit);
+                                } else if keep_within(&mut out.stdout, &buf[..n], limit) {
+                                    out.overflow = true;
+                                }
                             }
                             Err(err) if err.kind() == ErrorKind::Interrupted => {}
                             Err(_) => break,
@@ -394,10 +447,10 @@ impl Pipes {
         Ok(Self { read })
     }
 
-    /// 读到的标准输出和标准错误。
-    fn into_outputs(self) -> (Vec<u8>, Vec<u8>) {
+    /// 读到的标准输出、标准错误，和标准输出有没有超过上限。
+    fn into_outputs(self) -> (Vec<u8>, Vec<u8>, bool) {
         let mut out = self.read.0.lock().unwrap_or_else(PoisonError::into_inner);
-        (std::mem::take(&mut out.stdout), std::mem::take(&mut out.stderr))
+        (std::mem::take(&mut out.stdout), std::mem::take(&mut out.stderr), out.overflow)
     }
 
     /// 标准输出和标准错误都读到头了。

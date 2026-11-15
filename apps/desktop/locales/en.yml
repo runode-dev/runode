@@ -1241,6 +1241,12 @@ kanban:
   next: "next %{time}"
   next_held: skipped while the last task is still working or waiting for you
   worktree_on: own worktree
+  run_command: "runs %{program} first"
+  run_idle: "last %{time}: nothing to do"
+  run_fired: "last %{time}: opened a task"
+  run_failed: "last %{time} failed: %{output}"
+  run_failed_bare: "last %{time} failed"
+  run_unknown: "last ran %{time}"
   done_window: "This column lists only the last 7 days"
   all_history: All history
   history: History
@@ -1352,6 +1358,9 @@ kanban:
       once: "Opens a new task %{time}. %{body}"
       repeat: "%{when}: opens a new task. %{body}"
       due: "Opens a new task when it is due. %{body}"
+      once_run: "Runs the command %{time} and opens a new task if it prints anything. %{body}"
+      repeat_run: "%{when}: runs the command and opens a new task if it prints anything. %{body}"
+      due_run: "Runs the command when it is due and opens a new task if it prints anything. %{body}"
     kind_once: Once
     kind_daily: Daily
     kind_every: Every
@@ -1387,6 +1396,12 @@ kanban:
     time_limit_unit: minutes
     time_limit_hint: "Marked failed if its agent is still working or asking this long after it starts; its terminal ends unless a window shows it."
     bad_time_limit: "Write the time limit in minutes, at least 1, or leave it empty."
+    run: Run first
+    run_placeholder: "./scripts/check-ci.sh"
+    run_hint: "When due, runs this command in the project folder first: if it prints anything, the output is added after the prompt and a task opens; if it prints nothing, no task opens this time. Write logs to stderr. Skipped while the last task is unfinished."
+    run_timeout: Command timeout in minutes
+    run_timeout_lead: time out after
+    bad_run_timeout: "Write the timeout in minutes, from 1 to %{max}, or leave it empty for %{default}."
     kind_cron: Cron
     cron: Cron expression
     cron_placeholder: "30 9 * * 1-5"

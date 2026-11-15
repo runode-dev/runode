@@ -2,13 +2,15 @@
 //! 里打。
 
 use runode_git::Repo;
-use runode_protocol::todo::{TodoSpec, When};
+use runode_protocol::todo::{MAX_RUN_TIMEOUT, TodoSpec, When};
 
 /// 提示词最长这么多字节：它要放进环境变量，系统给参数和环境变量的空间有限。
-const MAX_PROMPT: usize = 64 * 1024;
+pub(super) const MAX_PROMPT: usize = 64 * 1024;
 /// 新交来的任务和定时的标题最长这么多字节（`check_title`）：看板每张卡片都带着它，列看板（`ListTodos`）
 /// 一次回所有未完成的任务。
 const MAX_TITLE: usize = 1024;
+/// 定时到点先跑的命令最长这么多字节：列看板时每个定时都带着它。
+const MAX_RUN: usize = 4 * 1024;
 
 /// 前端给的任务内容能不能用：本机任何进程和配对的手机都能发这些消息，见模块文档。
 pub(super) fn check_spec(spec: &TodoSpec) -> Result<(), String> {
@@ -59,6 +61,26 @@ pub(super) fn check_text(spec: &TodoSpec) -> Result<(), String> {
     }
     if spec.agent.trim().is_empty() || spec.agent.chars().any(char::is_control) {
         return Err("the agent must be a one-line command".into());
+    }
+    Ok(())
+}
+
+/// 定时到点先跑的命令（`Schedule::run`）能不能用：不能全是空白，只能有一行、不带控制字符（Windows 的
+/// `cmd /C` 遇到换行就不往下跑，桌面也用单行框编辑它）；超时要在 1 到 `MAX_RUN_TIMEOUT` 分钟之间。没给的不查。
+pub(super) fn check_run(run: Option<&str>, run_timeout: Option<u32>) -> Result<(), String> {
+    if let Some(run) = run {
+        if run.trim().is_empty() {
+            return Err("the command to run is empty".into());
+        }
+        if run.chars().any(char::is_control) {
+            return Err("the command to run must be one line without control characters".into());
+        }
+        if run.len() > MAX_RUN {
+            return Err(format!("the command to run is longer than {} KiB", MAX_RUN / 1024));
+        }
+    }
+    if run_timeout.is_some_and(|minutes| !(1..=MAX_RUN_TIMEOUT).contains(&minutes)) {
+        return Err(format!("the command timeout must be between 1 and {MAX_RUN_TIMEOUT} minutes"));
     }
     Ok(())
 }
@@ -129,5 +151,16 @@ mod tests {
         assert!(check_when(&cron("30 9 * * 1-5"), 1_760_000_000).is_ok());
         assert!(check_when(&cron("30 9 * *"), 1_760_000_000).unwrap_err().contains("not a cron expression"));
         assert!(check_when(&cron("0 0 31 2 *"), 1_760_000_000).unwrap_err().contains("never comes"));
+
+        assert!(check_run(None, None).is_ok());
+        assert!(check_run(Some("gh pr list --json number && exit 0"), Some(1)).is_ok());
+        assert!(check_run(Some("gh pr list\nexit 0"), None).is_err());
+        assert!(check_run(Some("echo a\tb"), None).is_err());
+        assert!(check_run(Some(&"x".repeat(MAX_RUN)), Some(MAX_RUN_TIMEOUT)).is_ok());
+        assert!(check_run(Some(" \n\t"), None).is_err());
+        assert!(check_run(Some("echo a\0b"), None).is_err());
+        assert!(check_run(Some(&"x".repeat(MAX_RUN + 1)), None).is_err());
+        assert!(check_run(None, Some(0)).is_err());
+        assert!(check_run(None, Some(MAX_RUN_TIMEOUT + 1)).is_err());
     }
 }

@@ -13,6 +13,7 @@
 mod auto_done;
 mod check;
 mod command;
+mod run;
 mod schedule;
 mod worktree;
 
@@ -34,7 +35,7 @@ use runode_protocol::{
 use runode_todo::Store;
 use runode_types::agent::AgentState;
 
-use check::{check_spec, check_text, check_title, check_when};
+use check::{check_run, check_spec, check_text, check_title, check_when};
 use command::{
     ENV_TODO_ARG, ENV_TODO_BATCH_ARG, ENV_TODO_PROMPT, ENV_TODO_SETUP, WINDOWS_COMMAND_LINE, agent_command,
     agent_session, agent_with_options, batch_quote, passes_command_line, resume_command_line, windows_quote,
@@ -108,6 +109,8 @@ struct State {
     generation: u64,
     /// 正在开始、或者正在清工作树的任务，见 `Todos::claim`。
     busy: HashSet<String>,
+    /// 到点先跑的命令（`Schedule::run`）还没跑完的定时：在里面的定时到点时跳过，不再跑一份。
+    running_runs: HashSet<String>,
 }
 
 /// `Todos::claim` 占住的任务，丢掉时放开。
@@ -607,13 +610,21 @@ impl Shared {
     }
 
     /// 回 `ClientMsg::AddSchedule`。
-    pub(crate) fn add_schedule(&self, req: u32, spec: &TodoSpec, when: &When) -> Result<HostMsg, String> {
+    pub(crate) fn add_schedule(
+        &self,
+        req: u32,
+        spec: &TodoSpec,
+        when: &When,
+        run: Option<&str>,
+        run_timeout: Option<u32>,
+    ) -> Result<HostMsg, String> {
         self.todos_writable()?;
         check_title(spec)?;
         check_spec(spec)?;
         let now = unix_now();
         check_when(when, now)?;
-        let id = self.todos.with_db(|db| db.add_schedule(spec, when, now))?;
+        check_run(run, run_timeout)?;
+        let id = self.todos.with_db(|db| db.add_schedule(spec, when, run, run_timeout, now))?;
         self.todos_changed();
         Ok(HostMsg::TodoAdded { req, id })
     }
@@ -625,12 +636,16 @@ impl Shared {
         id: &str,
         spec: Option<&TodoSpec>,
         when: Option<&When>,
+        run: Option<&str>,
+        run_timeout: Option<u32>,
     ) -> Result<HostMsg, String> {
         self.todos_writable()?;
         let now = unix_now();
         spec.map_or(Ok(()), |spec| check_title(spec).and_then(|()| check_spec(spec)))?;
         when.map_or(Ok(()), |when| check_when(when, now))?;
-        if !self.todos.with_db(|db| db.update_schedule(id, spec, when, now))? {
+        // 空串和 0 是清掉，不用查。
+        check_run(run.filter(|run| !run.is_empty()), run_timeout.filter(|minutes| *minutes != 0))?;
+        if !self.todos.with_db(|db| db.update_schedule(id, spec, when, run, run_timeout, now))? {
             return Err(format!("no schedule {id}"));
         }
         self.todos_changed();

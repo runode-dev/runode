@@ -131,3 +131,54 @@ computer slept fires once when it wakes; one whose last task is still
 queued, working or asking is skipped. A task that could not start is tried again
 after 1 and 5 more minutes, then marked failed. Schedules
 fire while runode runs, or its host runs in the background.
+
+### Start an agent only when there is work
+
+A check that usually finds nothing (is CI red, is there a new issue, did the
+nightly job fail) should not cost an agent and its tokens every time. Give the
+schedule `--run CMD`: when due, runode first runs CMD in DIR without a
+terminal (`sh -c`, `cmd /C` on Windows) and decides by what it does. CMD is
+one line; put anything longer in a script and run that.
+
+- Exit 0 with output on stdout: a task is started with the schedule's title;
+  its prompt is `--prompt` followed by the output (just the output without
+  `--prompt`).
+- Exit 0 with no output: nothing happens; no task, no agent.
+- A non-zero exit, running past `--run-timeout MINUTES` (default 5, at most
+  1440) or more than 64 KiB of output: the run counts as failed and no task
+  is started.
+
+So stdout is only for the prompt; write logs to stderr. runode keeps the end
+of stderr, and `runode schedule list` shows the last run in LAST (`idle`,
+`fired` or `failed`, and when; `--json` has the output). A schedule is skipped
+while the task it last started is unfinished or its last run is still going.
+CMD gets `RUNODE_SCHEDULE` (the schedule id), `RUNODE_SOCKET` and the login
+shell's PATH with runode's directory added, so it can call `runode` itself; a
+CMD that never prints to stdout only runs and never starts an agent. runode
+does not remember anything between runs: not handing out the same failure
+twice is up to CMD, which can keep its state in a directory named after
+`RUNODE_SCHEDULE`.
+
+A script that hands out a CI failure on main once, saved as
+`scripts/ci-failures.sh` in the repository:
+
+```sh
+#!/bin/sh
+state="${XDG_STATE_HOME:-$HOME/.local/state}/ci-failures/$RUNODE_SCHEDULE"
+mkdir -p "$state" || exit 1
+run=$(gh run list --branch main --limit 1 --json databaseId,conclusion \
+  --jq '.[0] | select(.conclusion == "failure") | .databaseId') || exit 1
+if [ -z "$run" ]; then echo "main is green" >&2; exit 0; fi
+if [ "$(cat "$state/last" 2>/dev/null)" = "$run" ]; then
+  echo "run $run was handed out already" >&2; exit 0
+fi
+echo "$run" > "$state/last"
+echo "CI run $run on main failed. The end of the failing log:"
+gh run view "$run" --log-failed | tail -n 200
+```
+
+```sh
+runode schedule add 'Fix CI on main' --every 30 --worktree --auto --auto-done \
+  --time-limit 60 --run 'sh scripts/ci-failures.sh' \
+  --prompt 'Find and fix the cause of this failure, then commit on your branch.'
+```

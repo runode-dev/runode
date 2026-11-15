@@ -5,7 +5,7 @@ use std::{net::IpAddr, path::PathBuf, time::Duration};
 use runode_autostart::Kind;
 use runode_protocol::{
     Placement,
-    todo::{Outcome, When},
+    todo::{MAX_RUN_TIMEOUT, Outcome, When},
 };
 use runode_todo::LocalTime;
 use runode_types::input::parse_key_list;
@@ -132,10 +132,12 @@ pub(crate) enum Command {
         outcome: Outcome,
         text: Text,
     },
-    /// 加一个定时；工作树默认不开（`Spec::worktree` 是用户要了）。
+    /// 加一个定时；工作树默认不开（`Spec::worktree` 是用户要了）。`run_timeout` 只跟着 `run` 给，分钟。
     ScheduleAdd {
         spec: Spec,
         timing: Timing,
+        run: Option<String>,
+        run_timeout: Option<u32>,
     },
     ScheduleList {
         json: bool,
@@ -305,6 +307,23 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                         .filter(|&n: &u32| n > 0)
                         .ok_or_else(|| format!("--time-limit takes minutes, not {minutes}"))?,
                 );
+            }
+            "--run" => {
+                let command = value(&mut rest, arg)?;
+                if command.trim().is_empty() {
+                    return Err("--run needs a command".into());
+                }
+                if command.chars().any(char::is_control) {
+                    return Err("--run takes a one-line command; put longer ones in a script".into());
+                }
+                flags.run = Some(command.to_owned());
+            }
+            "--run-timeout" => {
+                let minutes = value(&mut rest, arg)?;
+                flags.run_timeout =
+                    Some(minutes.parse().ok().filter(|n: &u32| (1..=MAX_RUN_TIMEOUT).contains(n)).ok_or_else(
+                        || format!("--run-timeout takes minutes from 1 to {MAX_RUN_TIMEOUT}, not {minutes}"),
+                    )?);
             }
             "--at" => {
                 let at = value(&mut rest, arg)?;
@@ -592,6 +611,9 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     if flags.days.is_some() && flags.daily.is_none() {
                         return Err("--days needs --daily".into());
                     }
+                    if flags.run_timeout.is_some() && flags.run.is_none() {
+                        return Err("--run-timeout needs --run".into());
+                    }
                     let timing = match (flags.at.take(), flags.daily.take(), flags.every.take(), flags.cron.take()) {
                         (Some(at), None, None, None) => Timing::At(at),
                         (None, Some((hour, minute)), None, None) => {
@@ -602,7 +624,12 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                         _ => return Err("schedule add needs one of --at, --daily, --every and --cron".into()),
                     };
                     let worktree = std::mem::take(&mut flags.worktree);
-                    Command::ScheduleAdd { spec: flags.spec(words, worktree), timing }
+                    Command::ScheduleAdd {
+                        spec: flags.spec(words, worktree),
+                        timing,
+                        run: flags.run.take(),
+                        run_timeout: flags.run_timeout.take(),
+                    }
                 }
                 "list" => {
                     no_more(words, 0, "schedule list")?;
@@ -678,6 +705,8 @@ struct Flags {
     daily: Option<(u8, u8)>,
     days: Option<u8>,
     every: Option<u32>,
+    run: Option<String>,
+    run_timeout: Option<u32>,
 }
 
 impl Flags {
@@ -740,6 +769,8 @@ impl Flags {
             (self.daily.is_some(), "--daily"),
             (self.days.is_some(), "--days"),
             (self.every.is_some(), "--every"),
+            (self.run.is_some(), "--run"),
+            (self.run_timeout.is_some(), "--run-timeout"),
         ]
         .into_iter()
         .find_map(|(set, flag)| set.then_some(flag))
@@ -1143,10 +1174,31 @@ mod tests {
             Ok(Command::ScheduleAdd {
                 spec: Spec { title: "daily report".into(), worktree: true, auto_done: true, ..Spec::default() },
                 timing: Timing::At(LocalTime { year: 2026, month: 10, day: 13, hour: 14, minute: 0 }),
+                run: None,
+                run_timeout: None,
             })
         );
+        let run = |args: &[&str]| {
+            add(args).map(|command| match command {
+                Command::ScheduleAdd { run, run_timeout, .. } => (run, run_timeout),
+                _ => unreachable!(),
+            })
+        };
+        assert_eq!(
+            run(&["schedule", "add", "r", "--every", "5", "--run", "./check.sh --ci", "--run-timeout", "30"]),
+            Ok((Some("./check.sh --ci".into()), Some(30)))
+        );
+        assert_eq!(run(&["schedule", "add", "r", "--every", "5", "--run", "true"]), Ok((Some("true".into()), None)));
+        assert!(parse("schedule add r --every 5 --run-timeout 5").unwrap_err().contains("--run-timeout needs --run"));
+        assert!(run(&["schedule", "add", "r", "--every", "5", "--run", " "]).unwrap_err().contains("needs a command"));
+        assert!(run(&["schedule", "add", "r", "--every", "5", "--run", "a\nb"]).unwrap_err().contains("one-line"));
+        for minutes in ["0", "1441", "soon"] {
+            let err = parse(&format!("schedule add r --every 5 --run true --run-timeout {minutes}")).unwrap_err();
+            assert!(err.contains("1 to 1440"), "{minutes}: {err}");
+        }
+        assert!(parse("todo add r --run true").unwrap_err().contains("does not take --run"));
         let timing = |args: &str| match parse(args) {
-            Ok(Command::ScheduleAdd { timing, spec: Spec { worktree: false, .. } }) => Ok(timing),
+            Ok(Command::ScheduleAdd { timing, spec: Spec { worktree: false, .. }, .. }) => Ok(timing),
             other => Err(format!("{other:?}")),
         };
         let daily = |days| Ok(Timing::Repeat(When::Daily { hour: 9, minute: 30, days }));

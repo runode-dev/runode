@@ -583,12 +583,14 @@ impl Connection {
             ClientMsg::MoveTodo { req, id, before } => {
                 self.todos(req, "host-move-todo", move |shared| shared.move_todo(req, &id, before.as_deref()));
             }
-            ClientMsg::AddSchedule { req, spec, when } => {
-                self.todos(req, "host-add-schedule", move |shared| shared.add_schedule(req, &spec, &when));
+            ClientMsg::AddSchedule { req, spec, when, run, run_timeout } => {
+                self.todos(req, "host-add-schedule", move |shared| {
+                    shared.add_schedule(req, &spec, &when, run.as_deref(), run_timeout)
+                });
             }
-            ClientMsg::UpdateSchedule { req, id, spec, when } => {
+            ClientMsg::UpdateSchedule { req, id, spec, when, run, run_timeout } => {
                 self.todos(req, "host-update-schedule", move |shared| {
-                    shared.update_schedule(req, &id, spec.as_ref(), when.as_ref())
+                    shared.update_schedule(req, &id, spec.as_ref(), when.as_ref(), run.as_deref(), run_timeout)
                 })
             }
             ClientMsg::RemoveSchedule { req, id } => {

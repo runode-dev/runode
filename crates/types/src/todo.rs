@@ -2,7 +2,7 @@
 //! 看板的库里，前端经宿主的消息读写；卡片在看板的哪一列另由协议按会话的状态推出来。
 //!
 //! 开始一个任务时，宿主在任务的目录（或给它新开的工作树）里开一个会话，在提示符上跑
-//! `<agent> "<提示词>"`。
+//! `<agent> "<提示词>"`。定时带着 `Schedule::run` 时，到点先跑这条命令，按它的输出决定开不开任务。
 
 use std::path::PathBuf;
 
@@ -162,7 +162,8 @@ pub struct Todo {
     pub after: Option<String>,
 }
 
-/// 一个定时：到点时按 `spec` 新建一张任务并开始它。
+/// 一个定时：到点时按 `spec` 新建一张任务并开始它。有 `run` 时到点先跑这条命令，按它的退出码和输出决定
+/// 开不开任务（`RunOutcome`）。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Schedule {
     pub id: String,
@@ -176,6 +177,68 @@ pub struct Schedule {
     /// 停着：到点也不开任务；接着用时从那一刻算起，停着时错过的不补。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub paused: bool,
+    /// 到点先在 `spec.dir` 里跑的 shell 命令：退出码为 0 且有输出时开任务，输出接在提示词后面；退出码为 0、
+    /// 没有输出时这次不开；别的退出码算失败。为空时到点直接开任务。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    /// `run` 最多跑这么多分钟（1 到 `MAX_RUN_TIMEOUT`），过了算失败；为空时用 `DEFAULT_RUN_TIMEOUT`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_timeout: Option<u32>,
+    /// 上一次跑 `run` 的结果；还没跑过时为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<ScheduleRun>,
+}
+
+/// `Schedule::run_timeout` 为空时命令最多跑的分钟数。
+pub const DEFAULT_RUN_TIMEOUT: u32 = 5;
+
+/// `Schedule::run_timeout` 最多能给的分钟数。
+pub const MAX_RUN_TIMEOUT: u32 = 24 * 60;
+
+/// 定时到点跑了一次 `Schedule::run`。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduleRun {
+    /// 跑完的时刻，Unix 时间的秒数。
+    pub at: u64,
+    pub outcome: RunOutcome,
+    /// 命令标准错误的末尾；失败时是出错的说明，退出码不为 0 时是标准错误的末尾、它为空时是退出状态。都没有时
+    /// 为空。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub output: String,
+}
+
+/// 跑 `Schedule::run` 的结果。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunOutcome {
+    /// 退出码为 0、没有输出：没事，不开任务。
+    Idle,
+    /// 退出码为 0、有输出：开了任务。
+    Fired,
+    /// 退出码不为 0、超时或者起不来：不开任务。
+    Failed,
+    /// 新版本加的、读不懂的结果。
+    #[serde(other)]
+    Unknown,
+}
+
+impl RunOutcome {
+    pub const ALL: [RunOutcome; 3] = [RunOutcome::Idle, RunOutcome::Fired, RunOutcome::Failed];
+
+    /// 线上和库里的写法；`Unknown` 为 `unknown`。
+    pub fn name(self) -> &'static str {
+        match self {
+            RunOutcome::Idle => "idle",
+            RunOutcome::Fired => "fired",
+            RunOutcome::Failed => "failed",
+            RunOutcome::Unknown => "unknown",
+        }
+    }
+
+    /// `name` 的反面；认不得的为 `Unknown`。
+    pub fn from_name(name: &str) -> Self {
+        Self::ALL.into_iter().find(|outcome| outcome.name() == name).unwrap_or(RunOutcome::Unknown)
+    }
 }
 
 /// 定时什么时候到点，按宿主所在电脑的本地时间。

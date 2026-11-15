@@ -2,10 +2,10 @@
 //! 要用的 skill、以哪个自定义 agent 的身份跑（`skills`）、附上的文件，免不免确认，要不要独立的工作树，做完要不要自动标完成，
 //! 开始后多久没做完就算没做成（时限）；新建的和还没开始的任务另挑什么时候做（`StartMode`）：马上开始、放进待办等我来
 //! 开始、排队（可以指定先等另一个任务做完），排队的存好以后另发 `ClientMsg::QueueTodo`；新建时还能挑定时，定时多一组
-//! 什么时候跑（一次、每天某时可选星期几、每隔几分钟、cron 表达式），下面列出接下来几次到点的时刻。时间都按本机的本地
-//! 时间填、显示（`runode_todo::LocalTime`）。底栏用一句话（`summary_in`）说照现在填的会怎么做。填得不对时在对话框里说，
-//! 不发请求；宿主那边还会再查一遍。时限、排队和 cron 要宿主认得相应的看板级别（`store::host_below`），不认得时也在
-//! 对话框里说，不发。
+//! 什么时候跑（一次、每天某时可选星期几、每隔几分钟、cron 表达式），下面列出接下来几次到点的时刻，和到点先跑的命令
+//! （`Schedule::run`）。时间都按本机的本地时间填、显示（`runode_todo::LocalTime`）。底栏用一句话（`summary_in`）说照现在
+//! 填的会怎么做。填得不对时在对话框里说，不发请求；宿主那边还会再查一遍。时限、排队、cron 和先跑的命令要宿主认得相应的
+//! 看板级别（`store::host_below`），不认得时也在对话框里说，不发。
 //!
 //! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，收起、存好了经 `DialogEvent` 告诉看板。它盖住整个
 //! 窗口，由 app 画在窗口的最上层（`Kanban::dialog`）。新建时标题栏的「模板」菜单列出模板（`templates`），挑一个就照它
@@ -52,7 +52,7 @@ use gpui::{
 };
 use runode_protocol::{
     ClientMsg, HostMsg,
-    todo::{DEFAULT_AGENT, Outcome, Schedule, Todo, TodoSpec, When},
+    todo::{DEFAULT_AGENT, DEFAULT_RUN_TIMEOUT, MAX_RUN_TIMEOUT, Outcome, Schedule, Todo, TodoSpec, When},
 };
 
 use crate::kanban::store;
@@ -248,6 +248,9 @@ pub struct TodoDialog {
     cron: Entity<InputState>,
     /// 每天跑时只在这几天（第 0 位是星期日），全不选是每天。
     days: u8,
+    /// 定时到点先跑的命令（`Schedule::run`），空着是不跑；超时是分钟数，空着用宿主的默认值。
+    run: Entity<InputState>,
+    run_timeout: Entity<InputState>,
     error: Option<String>,
     /// 填得不对的那一栏，下一次画时把焦点交给它。
     focus_wrong: Option<FocusHandle>,
@@ -288,6 +291,26 @@ fn parse_time_limit(text: &str) -> Result<Option<u32>, ()> {
     if text.trim().is_empty() { Ok(None) } else { parse_minutes(text).map(Some).ok_or(()) }
 }
 
+/// 先跑的命令的超时栏：空着是用默认值，否则是 1 到 `MAX_RUN_TIMEOUT` 的分钟数；写得不对时为 `Err`。
+fn parse_run_timeout(text: &str) -> Result<Option<u32>, ()> {
+    parse_time_limit(text).and_then(|minutes| match minutes {
+        Some(minutes) if minutes > MAX_RUN_TIMEOUT => Err(()),
+        minutes => Ok(minutes),
+    })
+}
+
+/// 定时请求里的 `run`、`run_timeout`（`ClientMsg::AddSchedule`、`ClientMsg::UpdateSchedule`）。新建（`editing` 为假）
+/// 时命令空着两样都不给，超时只跟着命令给；编辑时命令一律给，空串是清掉，超时空着给 0，清回默认。
+fn run_fields(editing: bool, run: &str, timeout: Option<u32>) -> (Option<String>, Option<u32>) {
+    if editing {
+        (Some(run.to_owned()), Some(timeout.unwrap_or(0)))
+    } else if run.is_empty() {
+        (None, None)
+    } else {
+        (Some(run.to_owned()), timeout)
+    }
+}
+
 /// 时限栏写的 `text` 落在哪一档小签上：`Some(None)` 是不限，`Some(Some(n))` 是 `LIMIT_PRESETS` 里的 n 分钟，
 /// 为空是自己定（`custom` 选着、或者写的不是现成的一档）。
 fn limit_preset(text: &str, custom: bool) -> Option<Option<u32>> {
@@ -322,7 +345,8 @@ enum Lead<'a> {
     Due,
 }
 
-/// 底栏那句话要说的：什么时候做、交给谁（模型没挑时为空）、在哪个项目里、开不开工作树、时限几分钟。
+/// 底栏那句话要说的：什么时候做、交给谁（模型没挑时为空）、在哪个项目里、开不开工作树、时限几分钟；定时的 `run`
+/// 是到点先跑命令、有输出才开任务。
 struct Summary<'a> {
     lead: Lead<'a>,
     agent: &'a str,
@@ -330,6 +354,7 @@ struct Summary<'a> {
     project: &'a str,
     worktree: bool,
     limit: Option<u32>,
+    run: bool,
 }
 
 /// 按 `locale` 把 `summary` 拼成一整句：各种组合都是 locale 里的整句，代码里不拼标点。
@@ -361,11 +386,14 @@ fn summary_in(summary: &Summary, locale: &str) -> String {
         }
         Lead::After(None) => lead("kanban.dialog.summary.after_gone"),
         Lead::Once(time) => {
-            rust_i18n::t!("kanban.dialog.summary.once", locale = locale, time = time, body = body).into_owned()
+            let key = if summary.run { "kanban.dialog.summary.once_run" } else { "kanban.dialog.summary.once" };
+            rust_i18n::t!(key, locale = locale, time = time, body = body).into_owned()
         }
         Lead::Repeat(when) => {
-            rust_i18n::t!("kanban.dialog.summary.repeat", locale = locale, when = when, body = body).into_owned()
+            let key = if summary.run { "kanban.dialog.summary.repeat_run" } else { "kanban.dialog.summary.repeat" };
+            rust_i18n::t!(key, locale = locale, when = when, body = body).into_owned()
         }
+        Lead::Due if summary.run => lead("kanban.dialog.summary.due_run"),
         Lead::Due => lead("kanban.dialog.summary.due"),
     }
 }
@@ -524,6 +552,23 @@ impl TodoDialog {
             spec.as_ref().and_then(|spec| spec.time_limit).map(|limit| limit.to_string()).unwrap_or_default();
         let custom_limit = limit_preset(&limit_text, false).is_none();
         let time_limit = field(limit_text, "kanban.dialog.time_limit", "kanban.dialog.time_limit_placeholder", cx);
+        let (run_text, run_timeout_text) = match &editing {
+            Some(Editing::Schedule(schedule)) => (
+                schedule.run.clone().unwrap_or_default(),
+                schedule.run_timeout.map(|minutes| minutes.to_string()).unwrap_or_default(),
+            ),
+            _ => (String::new(), String::new()),
+        };
+        let run = field(run_text, "kanban.dialog.run", "kanban.dialog.run_placeholder", cx);
+        let run_timeout = {
+            let label = rust_i18n::t!("kanban.dialog.run_timeout").into_owned();
+            let select = run_timeout_text.len();
+            cx.new(|cx| {
+                InputState::editing(run_timeout_text, select, cx)
+                    .with_label(label)
+                    .with_placeholder(DEFAULT_RUN_TIMEOUT.to_string())
+            })
+        };
         let (queued, after) = match &editing {
             Some(Editing::Todo(todo)) => (todo.queued, todo.after.clone()),
             _ => (false, None),
@@ -531,7 +576,7 @@ impl TodoDialog {
         let input = cx.new(|cx| InputState::new(String::new(), cx));
         // 输入框里回车、提示词里 ⌘回车都按底栏的主按钮办，Esc 关掉对话框。
         let mut events = Vec::new();
-        for input in [&title, &command, &at, &clock, &minutes, &cron, &time_limit] {
+        for input in [&title, &command, &at, &clock, &minutes, &cron, &run, &run_timeout, &time_limit] {
             events.push(Self::subscribe_input(input, window, cx));
         }
         events.push(cx.subscribe_in(&prompt, window, |this, _, event: &TextareaEvent, _, cx| match event {
@@ -579,6 +624,8 @@ impl TodoDialog {
             minutes,
             cron,
             days,
+            run,
+            run_timeout,
             error: None,
             focus_wrong: None,
             saving: false,
@@ -1538,7 +1585,7 @@ impl TodoDialog {
     }
 
     /// 对话框里能打字的框，按显示的先后：模板要填的那一项、标题、提示词、自定义 agent 的命令、定时的时间、
-    /// 自己定的时限。
+    /// 定时先跑的命令和它的超时、自己定的时限。
     fn text_fields(&self, cx: &App) -> Vec<FocusHandle> {
         let template_input = self.template.and_then(|index| self.templates[index].input.as_ref()).map(|_| &self.input);
         let when = match self.kind {
@@ -1549,11 +1596,12 @@ impl TodoDialog {
             _ => None,
         };
         let command = self.agent.is_none().then_some(&self.command);
+        let run = if self.schedule { vec![&self.run, &self.run_timeout] } else { Vec::new() };
         let inputs = template_input.into_iter().chain([&self.title]);
         let mut fields: Vec<FocusHandle> = inputs.map(|input| input.focus_handle(cx)).collect();
         fields.push(self.prompt.focus_handle(cx));
         let limit = self.limit_choice(cx).is_none().then_some(&self.time_limit);
-        fields.extend(command.into_iter().chain(when).chain(limit).map(|input| input.focus_handle(cx)));
+        fields.extend(command.into_iter().chain(when).chain(run).chain(limit).map(|input| input.focus_handle(cx)));
         fields
     }
 
@@ -1674,6 +1722,7 @@ impl TodoDialog {
                     .child(self.render_skills_row(window, cx))
                     .children(self.render_start(window, cx))
                     .children(self.render_when(cx))
+                    .children(self.render_run(cx))
                     .child(self.render_time_limit(cx))
                     .child(self.render_attachments(cx))
                     .child(self.render_switches(cx)),
@@ -1860,6 +1909,32 @@ impl TodoDialog {
             }),
         };
         card(cx).child(first).children(days).children(cron_hint).children(fires)
+    }
+
+    /// 定时到点先跑的命令那一行：等宽字的命令框，后面是超时的分钟数，下面一句说明；命令框空着就是不跑命令。
+    fn render_run(&self, cx: &App) -> Option<Div> {
+        if !self.schedule {
+            return None;
+        }
+        let subtle = cx.theme().subtle_foreground;
+        let mono = crate::ui::font::mono(cx);
+        let command = Input::new(&self.run)
+            .flex_1()
+            .min_w(scaled(180.))
+            .h(scaled(28.))
+            .when_some(mono, |input, family| input.font_family(family));
+        // 框里只有数字，前面写超时、单位写在后面。
+        let timeout = div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .child(div().text_color(subtle).child(rust_i18n::t!("kanban.dialog.run_timeout_lead").into_owned()))
+            .child(Input::new(&self.run_timeout).w(scaled(64.)).h(scaled(28.)))
+            .child(div().text_color(subtle).child(rust_i18n::t!("kanban.dialog.time_limit_unit").into_owned()));
+        let line = div().flex().flex_wrap().items_center().gap(px(8.)).child(command).child(timeout);
+        let note = hint("todo-dialog-run-hint", rust_i18n::t!("kanban.dialog.run_hint").into_owned(), cx);
+        let label = rust_i18n::t!("kanban.dialog.run").into_owned();
+        Some(row(label, div().flex().flex_col().gap(px(6.)).child(line).child(note), cx))
     }
 
     /// 项目那一行：在哪个工作区或目录里做（框里带着当前的分支），要不要独立的工作树；任务开始过了就都不能再改。
@@ -2168,8 +2243,16 @@ impl TodoDialog {
                 }
             },
         };
-        let summary =
-            Summary { lead, agent: &agent, model: model.as_deref(), project: &project, worktree: self.worktree, limit };
+        let run = self.schedule && !self.run.read(cx).query().trim().is_empty();
+        let summary = Summary {
+            lead,
+            agent: &agent,
+            model: model.as_deref(),
+            project: &project,
+            worktree: self.worktree,
+            limit,
+            run,
+        };
         summary_in(&summary, &rust_i18n::locale())
     }
 
@@ -2403,22 +2486,35 @@ impl TodoDialog {
             });
         }
         let when = self.typed_when(cx).map_err(|(key, input)| wrong(key, input.focus_handle(cx)))?;
+        let run = self.run.read(cx).query().trim().to_owned();
+        let run_timeout = parse_run_timeout(self.run_timeout.read(cx).query()).map_err(|()| {
+            let error =
+                rust_i18n::t!("kanban.dialog.bad_run_timeout", max = MAX_RUN_TIMEOUT, default = DEFAULT_RUN_TIMEOUT)
+                    .into_owned();
+            (error, self.run_timeout.focus_handle(cx))
+        })?;
         check_time_limit()?;
-        let original = match &self.editing {
-            Some(Editing::Schedule(schedule)) => Some(&schedule.when),
+        let editing = match &self.editing {
+            Some(Editing::Schedule(schedule)) => Some(schedule),
             _ => None,
         };
+        let original = editing.map(|schedule| &schedule.when);
         if matches!(when, When::Cron { .. }) && original != Some(&when) && store::host_below(cx, 3) {
             return Err(too_old("kanban.dialog.kind_cron", self.cron.focus_handle(cx)));
         }
+        let had_run = editing.is_some_and(|schedule| schedule.run.is_some());
+        if (!run.is_empty() || had_run) && store::host_below(cx, 4) {
+            return Err(too_old("kanban.dialog.run", self.run.focus_handle(cx)));
+        }
+        let (run, run_timeout) = run_fields(editing.is_some(), &run, run_timeout);
         Ok(match &self.editing {
             Some(Editing::Schedule(schedule)) => {
                 let id = schedule.id.clone();
                 // 没改什么时候跑时不发 `when`，宿主就不会从现在重新算起。
                 let when = (when != schedule.when).then_some(when);
-                Box::new(move |req| ClientMsg::UpdateSchedule { req, id, spec: Some(spec), when })
+                Box::new(move |req| ClientMsg::UpdateSchedule { req, id, spec: Some(spec), when, run, run_timeout })
             }
-            _ => Box::new(move |req| ClientMsg::AddSchedule { req, spec, when }),
+            _ => Box::new(move |req| ClientMsg::AddSchedule { req, spec, when, run, run_timeout }),
         })
     }
 }
@@ -2473,6 +2569,26 @@ mod tests {
         assert_eq!(parse_time_limit(" 15 "), Ok(Some(15)));
     }
 
+    #[test]
+    fn parses_run_timeouts() {
+        assert_eq!(parse_run_timeout(" "), Ok(None));
+        assert_eq!(parse_run_timeout("0"), Err(()));
+        assert_eq!(parse_run_timeout("x"), Err(()));
+        assert_eq!(parse_run_timeout(" 10 "), Ok(Some(10)));
+        assert_eq!(parse_run_timeout(&MAX_RUN_TIMEOUT.to_string()), Ok(Some(MAX_RUN_TIMEOUT)));
+        assert_eq!(parse_run_timeout(&(MAX_RUN_TIMEOUT + 1).to_string()), Err(()));
+    }
+
+    /// 新建时没命令就什么都不给，超时只跟着命令走；编辑时命令空串是清掉，超时空着是 0（清回默认）。
+    #[test]
+    fn run_fields_follow_create_and_edit() {
+        assert_eq!(run_fields(false, "", Some(10)), (None, None));
+        assert_eq!(run_fields(false, "./check.sh", None), (Some("./check.sh".into()), None));
+        assert_eq!(run_fields(false, "./check.sh", Some(10)), (Some("./check.sh".into()), Some(10)));
+        assert_eq!(run_fields(true, "", None), (Some(String::new()), Some(0)));
+        assert_eq!(run_fields(true, "./check.sh", Some(10)), (Some("./check.sh".into()), Some(10)));
+    }
+
     /// 时限栏写的落在哪一档：空着是不限，现成的几档各是各的，别的和选了自己定的都是自己定。
     #[test]
     fn limit_presets_follow_the_text() {
@@ -2508,7 +2624,9 @@ mod tests {
             project: "demo",
             worktree,
             limit,
+            run: false,
         };
+        let run = |lead| Summary { run: true, ..summary(lead, None, false, None) };
         let cases = [
             (
                 summary(Lead::Repeat("每天 09:00"), Some("opus"), true, Some(30)),
@@ -2557,6 +2675,18 @@ mod tests {
                 "en",
                 "Opens a new task when it is due. Claude Code works in demo for up to 1 h.",
             ),
+            (
+                run(Lead::Repeat("每隔 10 分钟")),
+                "zh-Hans",
+                "每隔 10 分钟 先跑命令，有输出才开一个新任务：交给 Claude Code，在 demo 里做。",
+            ),
+            (run(Lead::Due), "zh-Hant", "到點先跑命令，有輸出才開一個新任務：交給 Claude Code，在 demo 裡做。"),
+            (
+                run(Lead::Once("tomorrow at 09:00")),
+                "en",
+                "Runs the command tomorrow at 09:00 and opens a new task if it prints anything. Claude Code works in demo.",
+            ),
+            (run(Lead::Now), "en", "Starts once saved. Claude Code works in demo."),
         ];
         for (summary, locale, want) in cases {
             assert_eq!(summary_in(&summary, locale), want, "{locale}");

@@ -12,7 +12,7 @@ use common::*;
 use runode_cli::exit;
 use runode_protocol::{
     ClientMsg, HostMsg, SessionId,
-    todo::{DEFAULT_AGENT, Outcome, Schedule, Todo, TodoSpec, When},
+    todo::{DEFAULT_AGENT, Outcome, RunOutcome, Schedule, ScheduleRun, Todo, TodoSpec, When},
 };
 use runode_types::agent::{AgentKind, AgentState};
 use unicode_width::UnicodeWidthStr as _;
@@ -345,6 +345,9 @@ fn show_prints_everything_about_one_task() {
         last_fired: 0,
         next_fire: None,
         paused: false,
+        run: None,
+        run_timeout: None,
+        last_run: None,
     };
     let fake = host("todoshow", vec![gone], vec![nightly]);
     let (code, out, err) = run("todo show #4", &fake.env);
@@ -466,6 +469,35 @@ fn schedule_add_sends_when_and_no_worktree_by_default() {
 }
 
 #[test]
+fn schedule_add_sends_the_command_to_run_first() {
+    let fake = host("schedrun", vec![], vec![]);
+    let (code, out, err) = run_args(
+        &["schedule", "add", "ci", "--every", "10", "--run", "./check-ci.sh main", "--run-timeout", "15"],
+        &fake,
+    );
+    assert_eq!((code, out.as_str()), (exit::OK, "0000beef\n"), "{err}");
+    let sent = requests(&fake);
+    let [ClientMsg::AddSchedule { run, run_timeout, .. }] = sent.as_slice() else { panic!("{sent:?}") };
+    assert_eq!((run.as_deref(), *run_timeout), (Some("./check-ci.sh main"), Some(15)));
+
+    // 看板只到第 3 级的宿主不认得 `run`，不发给它。
+    let old = FakeHost::start("schedrunold", |message| match message {
+        ClientMsg::Hello { .. } => {
+            let mut hello = welcome(true);
+            if let HostMsg::Welcome { board, .. } = &mut hello {
+                *board = 3;
+            }
+            vec![hello]
+        }
+        _ => vec![],
+    });
+    let (code, _, err) = run_args(&["schedule", "add", "ci", "--every", "10", "--run", "true"], &old);
+    assert_eq!(code, exit::FAILED);
+    assert!(err.contains("too old for --run"), "{err}");
+    assert_eq!(requests(&old), []);
+}
+
+#[test]
 fn schedule_list_writes_when_and_next_in_local_time() {
     // 先加一个一次性的，拿到它换算出的 Unix 时间，再让宿主照它列出来：钟点写回去得是同一个。
     let fake = host("schedonce", vec![], vec![]);
@@ -482,7 +514,17 @@ fn schedule_list_writes_when_and_next_in_local_time() {
         last_fired: 0,
         next_fire,
         paused: false,
+        run: None,
+        run_timeout: None,
+        last_run: None,
     };
+    // 一个跑过命令（这次没事），一个有命令还没跑过。
+    let checked = Schedule {
+        run: Some("./check.sh".into()),
+        last_run: Some(ScheduleRun { at, outcome: RunOutcome::Idle, output: String::new() }),
+        ..schedule("0000000d", When::Every { minutes: 15 }, None)
+    };
+    let fresh = Schedule { run: Some("./check.sh".into()), ..schedule("0000000e", When::Every { minutes: 15 }, None) };
     let fake = host(
         "schedlist",
         vec![],
@@ -490,6 +532,8 @@ fn schedule_list_writes_when_and_next_in_local_time() {
             schedule("0000000a", When::Daily { hour: 9, minute: 30, days: 0b011_1110 }, Some(at)),
             schedule("0000000b", When::Every { minutes: 15 }, None),
             schedule("0000000c", When::Once { at }, Some(at)),
+            checked,
+            fresh,
         ],
     );
     let (code, out, err) = run("schedule list", &fake.env);
@@ -499,10 +543,12 @@ fn schedule_list_writes_when_and_next_in_local_time() {
     assert_eq!(
         rows,
         [
-            vec!["ID", "WHEN", "NEXT", "AGENT", "TITLE", "DIR"],
-            vec!["0000000a", "daily 09:30 mon-fri", "2099-01-02 03:04", "claude", "report", "/tmp/project"],
-            vec!["0000000b", "every 15m", "-", "claude", "report", "/tmp/project"],
-            vec!["0000000c", "once 2099-01-02 03:04", "2099-01-02 03:04", "claude", "report", "/tmp/project"],
+            vec!["ID", "WHEN", "NEXT", "LAST", "AGENT", "TITLE", "DIR"],
+            vec!["0000000a", "daily 09:30 mon-fri", "2099-01-02 03:04", "-", "claude", "report", "/tmp/project"],
+            vec!["0000000b", "every 15m", "-", "-", "claude", "report", "/tmp/project"],
+            vec!["0000000c", "once 2099-01-02 03:04", "2099-01-02 03:04", "-", "claude", "report", "/tmp/project"],
+            vec!["0000000d", "every 15m", "-", "idle 2099-01-02 03:04", "claude", "report", "/tmp/project"],
+            vec!["0000000e", "every 15m", "-", "-", "claude", "report", "/tmp/project"],
         ],
         "{out}"
     );
@@ -511,4 +557,6 @@ fn schedule_list_writes_when_and_next_in_local_time() {
     let listed: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(listed[1]["when"], serde_json::json!({ "kind": "every", "minutes": 15 }));
     assert_eq!(listed[2]["next_fire"], at);
+    assert_eq!(listed[3]["run"], "./check.sh");
+    assert_eq!(listed[3]["last_run"], serde_json::json!({ "at": at, "outcome": "idle" }));
 }

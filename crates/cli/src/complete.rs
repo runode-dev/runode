@@ -174,6 +174,8 @@ const SCHEDULE_ADD_OPTS: &[Opt] = &[
     AUTO,
     AUTO_DONE,
     TIME_LIMIT,
+    opt("--run", "Run CMD first and start a task only if it prints something", Value::Free),
+    opt("--run-timeout", "With --run: fail the run after MINUTES", Value::Free),
     HELP,
 ];
 const PAIR_OPTS: &[Opt] =
