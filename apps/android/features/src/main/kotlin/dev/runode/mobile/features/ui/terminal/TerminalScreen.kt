@@ -195,7 +195,12 @@ private fun TerminalPage(
     LaunchedEffect(recording) { if (recording) haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
 
     val onDictation by rememberUpdatedState<(DictationPress) -> Unit> { press ->
-        dictation?.press(press, machine, preferences.dictationSource) { text -> model.send(TerminalInput.Paste(text)) }
+        // 文字发给按下麦克风时的会话；识别完之前切了分屏的话，终端视图已经换成别的会话的。
+        val pressedView = terminalView
+        dictation?.press(press, machine, preferences.dictationSource) { text ->
+            val view = terminalView
+            if (view != null && view === pressedView) view.paste(text) else model.send(TerminalInput.Paste(text))
+        }
     }
     val delegate = remember(model) { Delegate(model) { onDictation(it) } }
     val banner = bannerMessage(model, connectingLong)

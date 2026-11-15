@@ -1367,7 +1367,8 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
         paste(clip.getItemAt(0).coerceToText(context).toString())
     }
 
-    internal fun paste(text: String) {
+    /** 把一段文字当作用户粘贴的发出去。 */
+    fun paste(text: String) {
         if (text.isEmpty()) return
         emit(TerminalInput.Paste(text))
     }

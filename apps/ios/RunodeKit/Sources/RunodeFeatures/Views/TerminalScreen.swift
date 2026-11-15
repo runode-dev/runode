@@ -53,7 +53,14 @@
                 onMake: { view in terminalView = view },
                 onDictation: { press in
                     dictation?.press(press, machine: machine, source: preferences.dictationSource) { [model] text in
-                        model.send(.paste(text))
+                        // 文字发给按下麦克风时的会话；识别完之前切了分屏的话，终端视图已经接到别的会话上。
+                        if let terminalView,
+                            (terminalView.delegate as? TerminalViewRepresentable.Coordinator)?.model === model
+                        {
+                            terminalView.pasteText(text)
+                        } else {
+                            model.send(.paste(text))
+                        }
                     }
                 })
                 .overlay(alignment: .top) { banner }

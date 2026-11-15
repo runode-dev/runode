@@ -1265,6 +1265,12 @@
             emit(.paste(text))
         }
 
+        /// 把一段文字当作用户粘贴的发出去。
+        public func pasteText(_ text: String) {
+            guard !text.isEmpty else { return }
+            emit(.paste(text))
+        }
+
         /// 选中的文字写进剪贴板，退出选中。
         public override func copy(_ sender: Any?) {
             guard let text = terminal?.selectionText(), !text.isEmpty else {
