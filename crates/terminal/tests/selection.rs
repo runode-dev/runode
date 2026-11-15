@@ -68,3 +68,15 @@ fn double_click_selects_a_word_and_typing_clears_it() {
     session.commit_text("x");
     assert_eq!(session.selection_text(), None);
 }
+
+#[test]
+fn double_click_stops_at_full_width_punctuation() {
+    let mut session = idle_session();
+    // 「你好，世界」：你 0-1、好 2-3、， 4-5、世 6-7、界 8-9 列。
+    session.feed("你好，世界".as_bytes());
+    for _ in 0..2 {
+        session.select_press(at(6.5, 0.5), REPEAT);
+        session.select_release(at(6.5, 0.5));
+    }
+    assert_eq!(session.selection_text().as_deref(), Some("世界"));
+}

@@ -28,14 +28,27 @@ pub(super) struct Selecting {
     pointer: (GridPoint, bool),
 }
 
+/// 双击选词时的词边界：Ghostty 默认的那组，加上中文的全角标点。没有标点隔开的一串汉字算一个词。
+const WORD_BOUNDARIES: &[char] = &[
+    '\0', ' ', '\t', '\'', '"', '│', '`', '|', ':', ';', ',', '(', ')', '[', ']', '{', '}', '<', '>', '$', '，', '。',
+    '、', '；', '：', '？', '！', '“', '”', '‘', '’', '（', '）', '《', '》', '【', '】', '「', '」', '『', '』', '…',
+    '—',
+];
+
 impl Selecting {
     pub(super) fn new() -> libghostty_vt::error::Result<Self> {
+        let mut press = PressEvent::new()?;
+        press.set_word_boundary_codepoints(WORD_BOUNDARIES)?;
+        let mut drag = DragEvent::new()?;
+        drag.set_word_boundary_codepoints(WORD_BOUNDARIES)?;
+        let mut autoscroll = AutoscrollTickEvent::new()?;
+        autoscroll.set_word_boundary_codepoints(WORD_BOUNDARIES)?;
         Ok(Self {
             gesture: Gesture::new()?,
-            press: PressEvent::new()?,
-            drag: DragEvent::new()?,
+            press,
+            drag,
             release: ReleaseEvent::new()?,
-            autoscroll: AutoscrollTickEvent::new()?,
+            autoscroll,
             epoch: Instant::now(),
             pointer: Default::default(),
         })
