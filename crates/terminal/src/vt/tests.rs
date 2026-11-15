@@ -669,6 +669,16 @@ fn screen_tail_reads_the_bottom_of_the_screen() {
     assert_eq!(screen_tail(&empty, Some(2)).unwrap(), "");
 }
 
+/// 读屏时 Kitty 的占位符格（连同记行列的附加符）读成空格，后面的字照常，整行是图的读成空行。
+#[test]
+fn screen_reads_blank_kitty_placeholders() {
+    let mut t = grid(10, 3);
+    t.vt_write("a\u{10EEEE}\u{0305}\u{0305}\u{10EEEE}\u{0305}\u{030D}b\u{0301}\r\n".as_bytes());
+    t.vt_write("\u{10EEEE}\u{030D}\u{0305}\u{10EEEE}\r\nend".as_bytes());
+    assert_eq!(screen_tail(&t, None).unwrap(), "a  b\u{0301}\n\nend\n");
+    assert_eq!(blank_kitty_placeholders("x\u{10EEEE}\u{0305}\ny"), "x \ny");
+}
+
 fn grid(cols: u16, rows: u16) -> Terminal<'static, 'static> {
     new_terminal(GridSize { cols, rows, cell_width_px: 1, cell_height_px: 1 }).unwrap()
 }

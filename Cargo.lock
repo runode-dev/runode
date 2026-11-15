@@ -7313,6 +7313,7 @@ dependencies = [
  "runode-paths",
  "runode-types",
  "tracing",
+ "unicode-width",
  "windows-sys 0.61.2",
 ]
 

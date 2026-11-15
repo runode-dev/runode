@@ -23,10 +23,10 @@ use runode_types::{
 };
 
 use super::{SYNC_OUTPUT_TIMEOUT, Session, search::search_highlights};
-use crate::{convert::rgb, vt::log_err};
-
-/// Kitty 图形协议的 Unicode 占位符。
-const KITTY_PLACEHOLDER: char = '\u{10EEEE}';
+use crate::{
+    convert::rgb,
+    vt::{KITTY_PLACEHOLDER, log_err},
+};
 
 /// 把 libghostty 的 render state 复制进 `Frame`。和 render-hold 回调共用，
 /// 因为同步更新一开始，回调就要立即截下当前帧。

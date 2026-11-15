@@ -675,5 +675,35 @@ fn format_lines(terminal: &Terminal<'_, '_>, first: usize, last: usize, unwrap: 
     // SAFETY: 选区的两端取自同一个终端当前的屏幕。
     unsafe { formatter.set_selection(Some(&selection)) }?;
     let bytes = formatter.format_alloc(None)?;
-    Ok(String::from_utf8_lossy(&bytes).split('\n').map(|line| line.trim_end().to_owned()).collect())
+    let text = String::from_utf8_lossy(&bytes);
+    let text = blank_kitty_placeholders(&text);
+    Ok(text.split('\n').map(|line| line.trim_end().to_owned()).collect())
+}
+
+/// Kitty 图形协议的 Unicode 占位符：标出虚拟放置的图片占哪几格，后面跟着记行列的组合附加符。
+pub(crate) const KITTY_PLACEHOLDER: char = '\u{10EEEE}';
+
+/// 把读出的文字里每个占位符格（占位符连同紧跟的零宽字符）换成一个空格：屏幕上那格画的是图，
+/// 读出来是空白，列也不错开。
+pub(crate) fn blank_kitty_placeholders(text: &str) -> Cow<'_, str> {
+    use unicode_width::UnicodeWidthChar;
+
+    if !text.contains(KITTY_PLACEHOLDER) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut in_placeholder = false;
+    for c in text.chars() {
+        if c == KITTY_PLACEHOLDER {
+            in_placeholder = true;
+            out.push(' ');
+            continue;
+        }
+        if in_placeholder && c != '\n' && c.width() == Some(0) {
+            continue;
+        }
+        in_placeholder = false;
+        out.push(c);
+    }
+    Cow::Owned(out)
 }
