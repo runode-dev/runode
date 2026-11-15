@@ -14,9 +14,15 @@ cpal = { workspace = true, optional = true }
 serde_json.workspace = true
 sha2.workspace = true
 sherpa-onnx.workspace = true
-# 录音时消掉本机外放的声音（Windows、Linux 上回采系统输出当参考）。
-sonora = { workspace = true, optional = true }
 tracing.workspace = true
+
+# 录音时消掉本机外放的声音（Windows、Linux 上回采系统输出当参考）。
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+sonora = { workspace = true, optional = true }
+
+# macOS 由系统消回声，只有测试用到回声消除。
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+sonora.workspace = true
 
 # Linux 上录麦克风和回采外放都走 PulseAudio 协议（纯 Rust 实现，不链 libpulse），连不上时退回 ALSA。
 [target.'cfg(target_os = "linux")'.dependencies]
