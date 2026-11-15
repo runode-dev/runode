@@ -239,7 +239,10 @@ fn plain_text(formatter: &mut Formatter<'_, '_, '_>) -> libghostty_vt::error::Re
     let text = String::from_utf8_lossy(&bytes);
     Ok(match blank_kitty_placeholders(&text) {
         Cow::Borrowed(text) => text.to_owned(),
-        // 图在行尾时换出来的空格也是行尾空白。
-        Cow::Owned(text) => text.split('\n').map(str::trim_end).collect::<Vec<_>>().join("\n"),
+        // 格式化把占位符格算作有字，换成空格以后要补上它的修剪：去掉行尾的空格和末尾的空行。
+        Cow::Owned(text) => {
+            let text = text.split('\n').map(|line| line.trim_end_matches(' ')).collect::<Vec<_>>().join("\n");
+            text.trim_end_matches('\n').to_owned()
+        }
     })
 }

@@ -73,6 +73,12 @@ fn copied_text_has_no_placeholders() {
     session.select_all();
     assert_eq!(session.selection_text().as_deref(), Some("a b\n\nc"));
     assert_eq!(session.screen_text().as_deref().map(str::trim_end), Some("a b\n\nc"));
+
+    // 选区停在图片行上时，和停在空白上一样不带末尾的空行。
+    let mut session = idle_session();
+    session.feed("text\r\n\u{10EEEE}\u{0305}\u{0305}\r\n\u{10EEEE}\u{030D}\u{0305}".as_bytes());
+    session.select_all();
+    assert_eq!(session.selection_text().as_deref(), Some("text"));
 }
 
 /// 界面那份 VT 自己不读文件：按文件传的图要宿主改写成直接传才收得到。
