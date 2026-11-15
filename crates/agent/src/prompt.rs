@@ -17,7 +17,8 @@ pub struct Prompt {
 pub struct PromptOption {
     /// 选这一项要按的数字键。
     pub number: u8,
-    /// 屏幕上的原文：折到下一行的接上了，末尾的按键提示（`(esc)` 这种短括号）去掉了。
+    /// 屏幕上的原文，末尾的按键提示（`(esc)` 这种短括号）去掉了。agent 因为一行放不下折到下一行的接上了，
+    /// 原文里的换行（Claude 选项的标签和说明之间）留作 `\n`。
     pub text: String,
     /// 带着光标记号（`MARKERS`）的那一项，回车选的就是它。
     pub selected: bool,
@@ -71,7 +72,7 @@ const BORDERS: [char; 3] = ['│', '┃', '║'];
 
 /// 从屏幕文字里认出提问。认法：从下往上，跳过空行、制表线和至多 `MAX_TRAILING_LINES` 行别的字，
 /// 找到一块编号从 1 起连续、至少两项的选项；选项之间可以夹空行和制表线，缩进到选项正文那一列的下一行
-/// 算折行，接到上一项后面。选项块上面至多 `MAX_QUESTION_LINES` 行有字的行是问题，遇到制表线或别的
+/// 算这一项的续行。选项块上面至多 `MAX_QUESTION_LINES` 行有字的行是问题，遇到制表线或别的
 /// 选项为止，标签条（`TAB_BAR_LEADS`）跳过。行首行尾的框线（`BORDERS`）先去掉。选项超过 `MAX_OPTIONS` 个时认不出。
 pub fn parse(screen: &str) -> Option<Prompt> {
     let entries = merge(screen.split('\n').map(Entry::new));
@@ -87,7 +88,7 @@ pub fn parse(screen: &str) -> Option<Prompt> {
                     return None;
                 }
             }
-            Entry::Blank | Entry::Rule => {}
+            Entry::Blank | Entry::Rule(_) => {}
         }
     };
     if !(2..=MAX_OPTIONS).contains(&last) {
@@ -96,40 +97,166 @@ pub fn parse(screen: &str) -> Option<Prompt> {
 
     // `index` 指着还没看的那一行的下一行：走到 0 就是看完了。
     let mut index = index + 1;
-    let mut options = Vec::new();
+    let mut lines = Vec::new();
     let mut expected = last;
     while expected > 0 {
         index = index.checked_sub(1)?;
         match &entries[index] {
-            Entry::Blank | Entry::Rule => {}
+            Entry::Blank | Entry::Rule(_) => {}
             Entry::Text { .. } => return None,
             Entry::Option(line) => {
                 if line.number != expected {
                     return None;
                 }
-                options.push(PromptOption {
-                    number: line.number,
-                    text: strip_hint(&line.text),
-                    selected: line.selected,
-                });
+                lines.push(line);
                 expected -= 1;
             }
         }
     }
-    options.reverse();
+    lines.reverse();
 
+    let block_top = index;
     let mut question = Vec::new();
     while index > 0 && question.len() < MAX_QUESTION_LINES {
         index -= 1;
         match &entries[index] {
             Entry::Blank => {}
-            Entry::Rule | Entry::Option(_) => break,
+            Entry::Rule(_) | Entry::Option(_) => break,
             Entry::Text { text, .. } if is_tab_bar(text) => {}
             Entry::Text { text, .. } => question.push(text.clone()),
         }
     }
     question.reverse();
+    let width = block_width(&entries[rule_above(&entries, block_top)..]);
+    let options = lines
+        .into_iter()
+        .map(|line| PromptOption {
+            number: line.number,
+            text: strip_hint(&join_rows(&line.rows, width)),
+            selected: line.selected,
+        })
+        .collect();
     Some(Prompt { question, options })
+}
+
+/// 选项块（从 `block_top` 起）上面最近的那条制表线，中间隔着别的选项或者没有时就是 `block_top`。
+fn rule_above(entries: &[Entry], block_top: usize) -> usize {
+    match entries[..block_top].iter().rposition(|entry| matches!(entry, Entry::Rule(_) | Entry::Option(_))) {
+        Some(index) if matches!(entries[index], Entry::Rule(_)) => index,
+        _ => block_top,
+    }
+}
+
+/// 估计终端有几列：提问这一块里最宽的制表线或选项行。Claude 在提问上面画一条满宽的分隔线；没有时估小了，
+/// 续行都当作放不下折下来的接上。框的上下沿不算，框里的字到不了那么宽。
+fn block_width(entries: &[Entry]) -> usize {
+    entries
+        .iter()
+        .map(|entry| match entry {
+            Entry::Rule(width) => *width,
+            Entry::Option(line) => line.rows.iter().map(|row| row.end).max().unwrap_or(0),
+            Entry::Blank | Entry::Text { .. } => 0,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// 把一项的几行接成原文。agent 折行时西文按词、中日韩文字按字断开：下一行开头那个词（到空白或宽字符为止；
+/// 以宽字符开头时就是这一个字）接在上一行后面会超出 `width` 的，是放不下才折的，接回去，两边都是宽字符
+/// （中日韩文字）时不加空格；放得下却换了行的是原文里的换行，留作 `\n`。
+fn join_rows(rows: &[Row], width: usize) -> String {
+    let mut text = String::new();
+    let mut previous: Option<&Row> = None;
+    for row in rows {
+        if let Some(previous) = previous {
+            let word = first_word_width(&row.text);
+            if previous.end + 1 + word > width {
+                let wide = |c: Option<char>| c.is_some_and(|c| cell_width(c) == 2);
+                if !(wide(previous.text.chars().last()) && wide(row.text.chars().next())) {
+                    text.push(' ');
+                }
+            } else {
+                text.push('\n');
+            }
+        }
+        text.push_str(&row.text);
+        previous = Some(row);
+    }
+    text
+}
+
+/// 一行开头那个不能断开的词占几列。
+fn first_word_width(text: &str) -> usize {
+    match text.chars().next() {
+        Some(first) if cell_width(first) == 2 => 2,
+        _ => text.chars().take_while(|&c| !c.is_whitespace() && cell_width(c) == 1).count(),
+    }
+}
+
+/// 字在终端里占几列：East Asian Width 为宽（W）和全角（F）的字占两列，别的算一列。
+fn cell_width(c: char) -> usize {
+    let code = u32::from(c);
+    if WIDE.iter().any(|&(start, end)| (start..=end).contains(&code)) { 2 } else { 1 }
+}
+
+/// 占两列的字的码位区间。
+const WIDE: [(u32, u32); 52] = [
+    (0x1100, 0x115F),
+    (0x231A, 0x231B),
+    (0x2329, 0x232A),
+    (0x23E9, 0x23EC),
+    (0x23F0, 0x23F0),
+    (0x23F3, 0x23F3),
+    (0x25FD, 0x25FE),
+    (0x2614, 0x2615),
+    (0x2648, 0x2653),
+    (0x267F, 0x267F),
+    (0x2693, 0x2693),
+    (0x26A1, 0x26A1),
+    (0x26AA, 0x26AB),
+    (0x26BD, 0x26BE),
+    (0x26C4, 0x26C5),
+    (0x26CE, 0x26CE),
+    (0x26D4, 0x26D4),
+    (0x26EA, 0x26EA),
+    (0x26F2, 0x26F3),
+    (0x26F5, 0x26F5),
+    (0x26FA, 0x26FA),
+    (0x26FD, 0x26FD),
+    (0x2705, 0x2705),
+    (0x270A, 0x270B),
+    (0x2728, 0x2728),
+    (0x274C, 0x274C),
+    (0x274E, 0x274E),
+    (0x2753, 0x2755),
+    (0x2757, 0x2757),
+    (0x2795, 0x2797),
+    (0x27B0, 0x27B0),
+    (0x27BF, 0x27BF),
+    (0x2B1B, 0x2B1C),
+    (0x2B50, 0x2B50),
+    (0x2B55, 0x2B55),
+    (0x2E80, 0x303E),
+    (0x3041, 0x33FF),
+    (0x3400, 0x4DBF),
+    (0x4E00, 0x9FFF),
+    (0xA000, 0xA4CF),
+    (0xAC00, 0xD7A3),
+    (0xF900, 0xFAFF),
+    (0xFE10, 0xFE19),
+    (0xFE30, 0xFE6F),
+    (0xFF00, 0xFF60),
+    (0xFFE0, 0xFFE6),
+    (0x1F004, 0x1F004),
+    (0x1F0CF, 0x1F0CF),
+    (0x1F18E, 0x1F251),
+    (0x1F300, 0x1F64F),
+    (0x1F680, 0x1FAFF),
+    (0x20000, 0x3FFFD),
+];
+
+fn width_of(text: &str) -> usize {
+    text.chars().map(cell_width).sum()
 }
 
 fn is_tab_bar(text: &str) -> bool {
@@ -146,7 +273,7 @@ pub fn excerpt(screen: &str, lines: usize) -> Vec<String> {
         .iter()
         .rev()
         .filter_map(|row| match Entry::new(row) {
-            Entry::Blank | Entry::Rule => None,
+            Entry::Blank | Entry::Rule(_) => None,
             Entry::Text { .. } | Entry::Option(_) => Some(unboxed(row).trim().to_owned()),
         })
         .take(lines)
@@ -162,11 +289,11 @@ fn input_box_top(rows: &[&str]) -> Option<usize> {
     for (index, row) in rows.iter().enumerate().rev() {
         match Entry::new(row) {
             Entry::Blank => {}
-            Entry::Rule if edge(row) == Some('╰') => {
+            Entry::Rule(_) if edge(row) == Some('╰') => {
                 bottom = Some(index);
                 break;
             }
-            Entry::Rule | Entry::Text { .. } | Entry::Option(_) => {
+            Entry::Rule(_) | Entry::Text { .. } | Entry::Option(_) => {
                 trailing += 1;
                 if trailing > MAX_TRAILING_LINES {
                     return None;
@@ -185,12 +312,13 @@ fn edge(row: &str) -> Option<char> {
 /// 屏幕上的一行。
 enum Entry {
     Blank,
-    /// 只有制表符（分隔线、框的上下沿）。
-    Rule,
-    /// 别的字，带着去掉的行首空白有几个字。
+    /// 只有制表符（分隔线、框的上下沿），带着占几列；框的上下沿记作 0。
+    Rule(usize),
+    /// 别的字，带着去掉的行首空白有几个字、字的末尾在第几列。
     Text {
         text: String,
         indent: usize,
+        end: usize,
     },
     Option(OptionLine),
 }
@@ -201,13 +329,14 @@ impl Entry {
         if line.chars().all(char::is_whitespace) {
             Entry::Blank
         } else if line.chars().all(|c| c.is_whitespace() || is_box_drawing(c)) {
-            Entry::Rule
+            let corner = matches!(edge(line), Some('╭' | '╰' | '┌' | '└'));
+            Entry::Rule(if corner { 0 } else { width_of(line) })
         } else if let Some(option) = OptionLine::new(line) {
             Entry::Option(option)
         } else {
             let rest = line.trim_start();
             let indent = line[..line.len() - rest.len()].chars().count();
-            Entry::Text { text: rest.to_owned(), indent }
+            Entry::Text { text: rest.to_owned(), indent, end: width_of(line) }
         }
     }
 }
@@ -237,7 +366,8 @@ fn unboxed_range(raw: &str) -> Range<usize> {
 /// 一行选项：行首空白，可选的光标记号，一两位数字，`.` 或 `)`，空白，正文。
 struct OptionLine {
     number: u8,
-    text: String,
+    /// 选项那一行的正文和接在下面的续行。
+    rows: Vec<Row>,
     selected: bool,
     /// 正文从第几个字开始，折行的缩进要到这里。
     text_column: usize,
@@ -262,22 +392,27 @@ impl OptionLine {
             return None;
         }
         let text_column = line.chars().count() - text.chars().count();
-        Some(OptionLine { number, text: text.to_owned(), selected, text_column })
+        let row = Row { text: text.to_owned(), end: width_of(line) };
+        Some(OptionLine { number, rows: vec![row], selected, text_column })
     }
 }
 
-/// 选项下面紧跟着、缩进到正文那一列的字是这一项折下来的，接上去。
+/// 选项的一行正文，带着它的末尾在屏幕的第几列。
+struct Row {
+    text: String,
+    end: usize,
+}
+
+/// 选项下面紧跟着、缩进到正文那一列的字是这一项的续行，收进去。
 fn merge(entries: impl Iterator<Item = Entry>) -> Vec<Entry> {
     let mut merged: Vec<Entry> = Vec::new();
     for entry in entries {
-        if let (Entry::Text { text, indent }, Some(Entry::Option(option))) = (&entry, merged.last_mut())
-            && *indent >= option.text_column
-        {
-            option.text.push(' ');
-            option.text.push_str(text);
-            continue;
+        match (entry, merged.last_mut()) {
+            (Entry::Text { text, indent, end }, Some(Entry::Option(option))) if indent >= option.text_column => {
+                option.rows.push(Row { text, end });
+            }
+            (entry, _) => merged.push(entry),
         }
-        merged.push(entry);
     }
     merged
 }

@@ -10,7 +10,8 @@ public struct AgentPrompt: Hashable, Sendable {
 
     public struct Option: Hashable, Sendable, Identifiable {
         public var number: Int
-        /// 屏幕上的原文：折到下一行的接上了，末尾的按键提示（`(esc)` 这种短括号）去掉了。
+        /// 屏幕上的原文，末尾的按键提示（`(esc)` 这种短括号）去掉了。agent 因为一行放不下折到下一行的接上了，
+        /// 原文里的换行（Claude 选项的标签和说明之间）留作 `\n`。
         public var text: String
         /// 带着光标记号（`OptionLine.markers`）的那一项，回车选的就是它。
         public var selected: Bool
@@ -84,7 +85,7 @@ public struct AgentPrompt: Hashable, Sendable {
 
     /// 从屏幕文字（一行一个）里认出提问。认法：从下往上，跳过空行、制表线和至多 `maxTrailingLines`
     /// 行别的字，找到一块编号从 1 起连续、至少两项的选项；选项之间可以夹空行和制表线，缩进到选项正文
-    /// 那一列的下一行算折行，接到上一项后面。选项块上面至多 `maxQuestionLines` 行有字的行是问题，
+    /// 那一列的下一行算这一项的续行。选项块上面至多 `maxQuestionLines` 行有字的行是问题，
     /// 遇到制表线或别的选项为止，标签条（`tabBarLeads`）跳过。行首行尾的框线（`│`）先去掉。选项超过
     /// `maxOptions` 个时认不出。
     public static func parse(_ lines: [String]) -> AgentPrompt? {
@@ -103,7 +104,7 @@ public struct AgentPrompt: Hashable, Sendable {
             return nil
         }
 
-        var options: [Option] = []
+        var lines: [OptionLine] = []
         var expected = last.number
         while expected > 0 {
             guard index >= 0 else { return nil }
@@ -114,23 +115,105 @@ public struct AgentPrompt: Hashable, Sendable {
                 return nil
             case .option(let line):
                 guard line.number == expected else { return nil }
-                options.append(Option(number: line.number, text: stripHint(line.text), selected: line.selected))
+                lines.append(line)
                 expected -= 1
             }
             index -= 1
         }
 
+        let blockTop = index + 1
         var question: [String] = []
         scan: while index >= 0, question.count < maxQuestionLines {
             switch entries[index] {
             case .blank: break
             case .rule, .option: break scan
-            case .text(let text, _) where isTabBar(text): break
-            case .text(let text, _): question.insert(text, at: 0)
+            case .text(let text, _, _) where isTabBar(text): break
+            case .text(let text, _, _): question.insert(text, at: 0)
             }
             index -= 1
         }
-        return AgentPrompt(question: question, options: options.reversed())
+        let width = blockWidth(entries[ruleAbove(entries, blockTop: blockTop)...])
+        let options = lines.reversed().map {
+            Option(number: $0.number, text: stripHint(joinRows($0.rows, width: width)), selected: $0.selected)
+        }
+        return AgentPrompt(question: question, options: options)
+    }
+
+    /// 选项块（从 `blockTop` 起）上面最近的那条制表线，中间隔着别的选项或者没有时就是 `blockTop`。
+    private static func ruleAbove(_ entries: [Entry], blockTop: Int) -> Int {
+        for index in stride(from: blockTop - 1, through: 0, by: -1) {
+            switch entries[index] {
+            case .rule: return index
+            case .option: return blockTop
+            case .blank, .text: continue
+            }
+        }
+        return blockTop
+    }
+
+    /// 估计终端有几列：提问这一块里最宽的制表线或选项行。Claude 在提问上面画一条满宽的分隔线；没有时估小了，
+    /// 续行都当作放不下折下来的接上。框的上下沿不算，框里的字到不了那么宽。
+    private static func blockWidth(_ entries: ArraySlice<Entry>) -> Int {
+        entries.map { entry in
+            switch entry {
+            case .rule(let width): width
+            case .option(let line): line.rows.map(\.end).max() ?? 0
+            case .blank, .text: 0
+            }
+        }.max() ?? 0
+    }
+
+    /// 把一项的几行接成原文。agent 折行时西文按词、中日韩文字按字断开：下一行开头那个词（到空白或宽字符为止；
+    /// 以宽字符开头时就是这一个字）接在上一行后面会超出 `width` 的，是放不下才折的，接回去，两边都是宽字符
+    /// （中日韩文字）时不加空格；放得下却换了行的是原文里的换行，留作 `\n`。
+    private static func joinRows(_ rows: [Row], width: Int) -> String {
+        var text = ""
+        var previous: Row?
+        for row in rows {
+            if let previous {
+                let word = firstWordWidth(row.text)
+                if previous.end + 1 + word > width {
+                    let wide = { (scalar: Unicode.Scalar?) in scalar.map { cellWidth($0) == 2 } ?? false }
+                    if !(wide(previous.text.unicodeScalars.last) && wide(row.text.unicodeScalars.first)) {
+                        text += " "
+                    }
+                } else {
+                    text += "\n"
+                }
+            }
+            text += row.text
+            previous = row
+        }
+        return text
+    }
+
+    /// 一行开头那个不能断开的词占几列。
+    private static func firstWordWidth(_ text: String) -> Int {
+        let scalars = text.unicodeScalars
+        if let first = scalars.first, cellWidth(first) == 2 { return 2 }
+        return scalars.prefix { !$0.properties.isWhitespace && cellWidth($0) == 1 }.count
+    }
+
+    /// 字在终端里占几列：East Asian Width 为宽（W）和全角（F）的字占两列，别的算一列。
+    static func cellWidth(_ scalar: Unicode.Scalar) -> Int {
+        wide.contains { $0.contains(scalar.value) } ? 2 : 1
+    }
+
+    /// 占两列的字的码位区间。
+    private static let wide: [ClosedRange<UInt32>] = [
+        0x1100...0x115F, 0x231A...0x231B, 0x2329...0x232A, 0x23E9...0x23EC, 0x23F0...0x23F0, 0x23F3...0x23F3,
+        0x25FD...0x25FE, 0x2614...0x2615, 0x2648...0x2653, 0x267F...0x267F, 0x2693...0x2693, 0x26A1...0x26A1,
+        0x26AA...0x26AB, 0x26BD...0x26BE, 0x26C4...0x26C5, 0x26CE...0x26CE, 0x26D4...0x26D4, 0x26EA...0x26EA,
+        0x26F2...0x26F3, 0x26F5...0x26F5, 0x26FA...0x26FA, 0x26FD...0x26FD, 0x2705...0x2705, 0x270A...0x270B,
+        0x2728...0x2728, 0x274C...0x274C, 0x274E...0x274E, 0x2753...0x2755, 0x2757...0x2757, 0x2795...0x2797,
+        0x27B0...0x27B0, 0x27BF...0x27BF, 0x2B1B...0x2B1C, 0x2B50...0x2B50, 0x2B55...0x2B55, 0x2E80...0x303E,
+        0x3041...0x33FF, 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xA000...0xA4CF, 0xAC00...0xD7A3, 0xF900...0xFAFF,
+        0xFE10...0xFE19, 0xFE30...0xFE6F, 0xFF00...0xFF60, 0xFFE0...0xFFE6, 0x1F004...0x1F004, 0x1F0CF...0x1F0CF,
+        0x1F18E...0x1F251, 0x1F300...0x1F64F, 0x1F680...0x1FAFF, 0x20000...0x3FFFD,
+    ]
+
+    static func cellWidth<S: Sequence<Unicode.Scalar>>(_ scalars: S) -> Int {
+        scalars.reduce(0) { $0 + cellWidth($1) }
     }
 
     /// 一个提问的问题和各项原文，不记光标停在哪一项。两幅屏幕上是不是同一个提问按它比：屏幕上别处的字
@@ -147,10 +230,10 @@ public struct AgentPrompt: Hashable, Sendable {
     /// 屏幕上的一行。
     private enum Entry {
         case blank
-        /// 只有制表符（分隔线、框的上下沿）。
-        case rule
-        /// 别的字，带着去掉的行首空白有多宽。
-        case text(String, indent: Int)
+        /// 只有制表符（分隔线、框的上下沿），带着占几列；框的上下沿记作 0。
+        case rule(Int)
+        /// 别的字，带着去掉的行首空白有多宽、字的末尾在第几列。
+        case text(String, indent: Int, end: Int)
         case option(OptionLine)
 
         init(_ raw: String) {
@@ -158,12 +241,15 @@ public struct AgentPrompt: Hashable, Sendable {
             if line.allSatisfy(\.isWhitespace) {
                 self = .blank
             } else if line.unicodeScalars.allSatisfy({ $0.properties.isWhitespace || Self.isBoxDrawing($0) }) {
-                self = .rule
+                let edge = line.drop { $0.isWhitespace }.first
+                let corner = edge.map { ["╭", "╰", "┌", "└"].contains($0) } ?? false
+                self = .rule(corner ? 0 : AgentPrompt.cellWidth(line.unicodeScalars))
             } else if let option = OptionLine(line) {
                 self = .option(option)
             } else {
                 let indent = line.prefix { $0.isWhitespace }.count
-                self = .text(String(line.dropFirst(indent)), indent: indent)
+                self = .text(
+                    String(line.dropFirst(indent)), indent: indent, end: AgentPrompt.cellWidth(line.unicodeScalars))
             }
         }
 
@@ -191,7 +277,8 @@ public struct AgentPrompt: Hashable, Sendable {
     /// 一行选项：行首空白，可选的光标记号，一两位数字，`.` 或 `)`，空白，正文。
     private struct OptionLine {
         var number: Int
-        var text: String
+        /// 选项那一行的正文和接在下面的续行。
+        var rows: [Row]
         var selected: Bool
         /// 正文从第几个字开始，折行的缩进要到这里。
         var textColumn: Int
@@ -212,19 +299,25 @@ public struct AgentPrompt: Hashable, Sendable {
             rest = rest.dropFirst(gap.count)
             guard !rest.isEmpty else { return nil }
             self.number = number
-            text = String(rest)
+            rows = [Row(text: String(rest), end: AgentPrompt.cellWidth(line.unicodeScalars))]
             textColumn = line.count - rest.count
         }
     }
 
-    /// 选项下面紧跟着、缩进到正文那一列的字是这一项折下来的，接上去。
+    /// 选项的一行正文，带着它的末尾在屏幕的第几列。
+    private struct Row {
+        var text: String
+        var end: Int
+    }
+
+    /// 选项下面紧跟着、缩进到正文那一列的字是这一项的续行，收进去。
     private static func merge(_ entries: [Entry]) -> [Entry] {
         var merged: [Entry] = []
         for entry in entries {
-            if case .text(let text, let indent) = entry, case .option(var option) = merged.last,
+            if case .text(let text, let indent, let end) = entry, case .option(var option) = merged.last,
                 indent >= option.textColumn
             {
-                option.text += " " + text
+                option.rows.append(Row(text: text, end: end))
                 merged[merged.count - 1] = .option(option)
             } else {
                 merged.append(entry)

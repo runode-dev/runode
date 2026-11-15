@@ -108,6 +108,67 @@ class AgentPromptTests {
         )
     }
 
+    /**
+     * Claude 的选项标签下面一行是说明：放得下却换了行的是原文的换行，留着；说明太长被折到下一行的接回去，中文接中文不加
+     * 空格。终端多宽按满宽的分隔线算。
+     */
+    @Test fun claudeOptionDescriptionsKeepTheirLineBreaks() {
+        val prompt = assertNotNull(
+            parse(
+                screen(
+                    "─".repeat(74),
+                    " ☐ 回调方式",
+                    "",
+                    "回调式接 CI 失败用哪条路？",
+                    "",
+                    "❯ 1. 仓库 webhook+中转转发 (Recommended)",
+                    "     runode 用 gh api 给仓库建 webhook，URL 里带电脑的 iroh 公钥；经 iroh",
+                    "     转给那台电脑。",
+                    "  2. 官方 GitHub App",
+                    "     用户点一下就装好，不要 admin；中转得存「安装→电脑」的对应关系，变成",
+                    "     有状态的服务",
+                    "  3. Type something.",
+                ),
+            ),
+        )
+        assertEquals(
+            listOf(
+                "仓库 webhook+中转转发 (Recommended)\nrunode 用 gh api 给仓库建 webhook，URL 里带电脑的 iroh 公钥；经 iroh 转给那台电脑。",
+                "官方 GitHub App\n用户点一下就装好，不要 admin；中转得存「安装→电脑」的对应关系，变成有状态的服务",
+                "Type something.",
+            ),
+            texts(prompt),
+        )
+    }
+
+    /** 中文说明没有空格：下一行开头的字放得下就是原文的换行。分隔线和选项之间隔着凑满的几行问题，宽度照样按它算。 */
+    @Test fun chineseDescriptionsAndALongQuestionKeepLineBreaks() {
+        val prompt = assertNotNull(
+            parse(
+                screen(
+                    "─".repeat(74),
+                    " Bash command",
+                    "   cargo test",
+                    "   跑测试",
+                    " Do you want to proceed?",
+                    " ❯ 1. Yes, and don't ask again",
+                    "      for cargo test",
+                    "   2. 官方 GitHub App",
+                    "      用户点一下就装好不需要管理员权限中转得存对应关系",
+                    "   3. No",
+                ),
+            ),
+        )
+        assertEquals(
+            listOf(
+                "Yes, and don't ask again\nfor cargo test",
+                "官方 GitHub App\n用户点一下就装好不需要管理员权限中转得存对应关系",
+                "No",
+            ),
+            texts(prompt),
+        )
+    }
+
     /** Codex 问能不能跑命令：每项后面的 `(y)`、`(a)` 是快捷键，去掉。 */
     @Test fun codexApproval() {
         val prompt = assertNotNull(

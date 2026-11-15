@@ -14,7 +14,10 @@ data class AgentPrompt(
 ) {
     data class Option(
         val number: Int,
-        /** 屏幕上的原文：折到下一行的接上了，末尾的按键提示（`(esc)` 这种短括号）去掉了。 */
+        /**
+         * 屏幕上的原文，末尾的按键提示（`(esc)` 这种短括号）去掉了。agent 因为一行放不下折到下一行的接上了，原文里的换行
+         * （Claude 选项的标签和说明之间）留作 `\n`。
+         */
         val text: String,
         /** 带着光标记号（[OptionLine.markers]）的那一项，回车选的就是它。 */
         val selected: Boolean,
@@ -68,11 +71,11 @@ data class AgentPrompt(
     private sealed class Entry {
         data object Blank : Entry()
 
-        /** 只有制表符（分隔线、框的上下沿）。 */
-        data object Rule : Entry()
+        /** 只有制表符（分隔线、框的上下沿），带着占几列；框的上下沿记作 0。 */
+        data class Rule(val width: Int) : Entry()
 
-        /** 别的字，带着去掉的行首空白有多宽。 */
-        data class Text(val text: String, val indent: Int) : Entry()
+        /** 别的字，带着去掉的行首空白有多宽、字的末尾在第几列。 */
+        data class Text(val text: String, val indent: Int, val end: Int) : Entry()
 
         data class Option(val line: OptionLine) : Entry()
 
@@ -81,10 +84,13 @@ data class AgentPrompt(
                 val line = unboxed(raw)
                 return when {
                     line.all { it.isWhitespace() } -> Blank
-                    line.all { it.isWhitespace() || isBoxDrawing(it) } -> Rule
+                    line.all { it.isWhitespace() || isBoxDrawing(it) } -> {
+                        val corner = line.trimStart().firstOrNull() in setOf('╭', '╰', '┌', '└')
+                        Rule(if (corner) 0 else widthOf(line))
+                    }
                     else -> OptionLine.of(line)?.let(::Option) ?: run {
                         val indent = line.takeWhile { it.isWhitespace() }.length
-                        Text(line.substring(indent), indent)
+                        Text(line.substring(indent), indent, widthOf(line))
                     }
                 }
             }
@@ -107,7 +113,8 @@ data class AgentPrompt(
     /** 一行选项：行首空白，可选的光标记号，一两位数字，`.` 或 `)`，空白，正文。 */
     private data class OptionLine(
         val number: Int,
-        val text: String,
+        /** 选项那一行的正文和接在下面的续行。 */
+        val rows: List<Row>,
         val selected: Boolean,
         /** 正文从第几个字开始，折行的缩进要到这里。 */
         val textColumn: Int,
@@ -129,10 +136,13 @@ data class AgentPrompt(
                 if (gap.isEmpty()) return null
                 rest = rest.drop(gap.length)
                 if (rest.isEmpty()) return null
-                return OptionLine(number, rest, selected, line.length - rest.length)
+                return OptionLine(number, listOf(Row(rest, widthOf(line))), selected, line.length - rest.length)
             }
         }
     }
+
+    /** 选项的一行正文，带着它的末尾在屏幕的第几列。 */
+    private data class Row(val text: String, val end: Int)
 
     companion object {
         /** 每个选项都只要按一个数字键。 */
@@ -160,7 +170,7 @@ data class AgentPrompt(
 
         /**
          * 从屏幕文字（一行一个）里认出提问。认法：从下往上，跳过空行、制表线和至多 [maxTrailingLines] 行别的字，找到一块
-         * 编号从 1 起连续、至少两项的选项；选项之间可以夹空行和制表线，缩进到选项正文那一列的下一行算折行，接到上一项后面。
+         * 编号从 1 起连续、至少两项的选项；选项之间可以夹空行和制表线，缩进到选项正文那一列的下一行算这一项的续行。
          * 选项块上面至多 [maxQuestionLines] 行有字的行是问题，遇到制表线或别的选项为止，标签条（[tabBarLeads]）跳过。
          * 行首行尾的框线（`│`）先去掉。
          * 选项超过 [maxOptions] 个时认不出。
@@ -181,41 +191,137 @@ data class AgentPrompt(
             val last = (entries.getOrNull(index) as? Entry.Option)?.line ?: return null
             if (last.number !in 2..maxOptions) return null
 
-            val options = mutableListOf<Option>()
+            val lines = mutableListOf<OptionLine>()
             var expected = last.number
             while (expected > 0) {
                 if (index < 0) return null
                 when (val entry = entries[index]) {
-                    Entry.Blank, Entry.Rule -> {}
+                    Entry.Blank, is Entry.Rule -> {}
                     is Entry.Text -> return null
                     is Entry.Option -> {
                         if (entry.line.number != expected) return null
-                        options += Option(entry.line.number, stripHint(entry.line.text), entry.line.selected)
+                        lines += entry.line
                         expected -= 1
                     }
                 }
                 index -= 1
             }
 
+            val blockTop = index + 1
             val question = ArrayDeque<String>()
             scan@ while (index >= 0 && question.size < maxQuestionLines) {
                 when (val entry = entries[index]) {
                     Entry.Blank -> {}
-                    Entry.Rule, is Entry.Option -> break@scan
+                    is Entry.Rule, is Entry.Option -> break@scan
                     is Entry.Text -> if (!isTabBar(entry.text)) question.addFirst(entry.text)
                 }
                 index -= 1
             }
-            return AgentPrompt(question.toList(), options.reversed())
+            val width = blockWidth(entries.subList(ruleAbove(entries, blockTop), entries.size))
+            val options = lines.reversed().map { Option(it.number, stripHint(joinRows(it.rows, width)), it.selected) }
+            return AgentPrompt(question.toList(), options)
         }
 
-        /** 选项下面紧跟着、缩进到正文那一列的字是这一项折下来的，接上去。 */
+        /** 选项块（从 `blockTop` 起）上面最近的那条制表线，中间隔着别的选项或者没有时就是 `blockTop`。 */
+        private fun ruleAbove(entries: List<Entry>, blockTop: Int): Int {
+            for (index in blockTop - 1 downTo 0) {
+                when (entries[index]) {
+                    is Entry.Rule -> return index
+                    is Entry.Option -> return blockTop
+                    Entry.Blank, is Entry.Text -> {}
+                }
+            }
+            return blockTop
+        }
+
+        /**
+         * 估计终端有几列：提问这一块里最宽的制表线或选项行。Claude 在提问上面画一条满宽的分隔线；没有时估小了，续行都当作
+         * 放不下折下来的接上。框的上下沿不算，框里的字到不了那么宽。
+         */
+        private fun blockWidth(entries: List<Entry>): Int =
+            entries.maxOfOrNull { entry ->
+                when (entry) {
+                    is Entry.Rule -> entry.width
+                    is Entry.Option -> entry.line.rows.maxOf { it.end }
+                    Entry.Blank, is Entry.Text -> 0
+                }
+            } ?: 0
+
+        /**
+         * 把一项的几行接成原文。agent 折行时西文按词、中日韩文字按字断开：下一行开头那个词（到空白或宽字符为止；以宽字符
+         * 开头时就是这一个字）接在上一行后面会超出 `width` 的，是放不下才折的，接回去，两边都是宽字符（中日韩文字）时
+         * 不加空格；放得下却换了行的是原文里的换行，留作 `\n`。
+         */
+        private fun joinRows(rows: List<Row>, width: Int): String {
+            val text = StringBuilder()
+            var previous: Row? = null
+            for (row in rows) {
+                if (previous != null) {
+                    val word = firstWordWidth(row.text)
+                    if (previous.end + 1 + word > width) {
+                        val last = previous.text.codePointBefore(previous.text.length)
+                        val first = row.text.codePointAt(0)
+                        if (!(cellWidth(last) == 2 && cellWidth(first) == 2)) text.append(' ')
+                    } else {
+                        text.append('\n')
+                    }
+                }
+                text.append(row.text)
+                previous = row
+            }
+            return text.toString()
+        }
+
+        /** 一行开头那个不能断开的词占几列。 */
+        private fun firstWordWidth(text: String): Int {
+            if (text.isEmpty()) return 0
+            if (cellWidth(text.codePointAt(0)) == 2) return 2
+            var width = 0
+            var index = 0
+            while (index < text.length) {
+                val codePoint = text.codePointAt(index)
+                if (Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint) || cellWidth(codePoint) == 2) break
+                width += 1
+                index += Character.charCount(codePoint)
+            }
+            return width
+        }
+
+        /** 字在终端里占几列：East Asian Width 为宽（W）和全角（F）的字占两列，别的算一列。 */
+        private fun cellWidth(codePoint: Int): Int = if (wide.any { codePoint in it }) 2 else 1
+
+        /** 占两列的字的码位区间。 */
+        private val wide: List<IntRange> = listOf(
+            0x1100..0x115F, 0x231A..0x231B, 0x2329..0x232A, 0x23E9..0x23EC, 0x23F0..0x23F0, 0x23F3..0x23F3,
+            0x25FD..0x25FE, 0x2614..0x2615, 0x2648..0x2653, 0x267F..0x267F, 0x2693..0x2693, 0x26A1..0x26A1,
+            0x26AA..0x26AB, 0x26BD..0x26BE, 0x26C4..0x26C5, 0x26CE..0x26CE, 0x26D4..0x26D4, 0x26EA..0x26EA,
+            0x26F2..0x26F3, 0x26F5..0x26F5, 0x26FA..0x26FA, 0x26FD..0x26FD, 0x2705..0x2705, 0x270A..0x270B,
+            0x2728..0x2728, 0x274C..0x274C, 0x274E..0x274E, 0x2753..0x2755, 0x2757..0x2757, 0x2795..0x2797,
+            0x27B0..0x27B0, 0x27BF..0x27BF, 0x2B1B..0x2B1C, 0x2B50..0x2B50, 0x2B55..0x2B55, 0x2E80..0x303E,
+            0x3041..0x33FF, 0x3400..0x4DBF, 0x4E00..0x9FFF, 0xA000..0xA4CF, 0xAC00..0xD7A3, 0xF900..0xFAFF,
+            0xFE10..0xFE19, 0xFE30..0xFE6F, 0xFF00..0xFF60, 0xFFE0..0xFFE6, 0x1F004..0x1F004, 0x1F0CF..0x1F0CF,
+            0x1F18E..0x1F251, 0x1F300..0x1F64F, 0x1F680..0x1FAFF, 0x20000..0x3FFFD,
+        )
+
+        private fun widthOf(text: String): Int {
+            var width = 0
+            var index = 0
+            while (index < text.length) {
+                val codePoint = text.codePointAt(index)
+                width += cellWidth(codePoint)
+                index += Character.charCount(codePoint)
+            }
+            return width
+        }
+
+        /** 选项下面紧跟着、缩进到正文那一列的字是这一项的续行，收进去。 */
         private fun merge(entries: List<Entry>): List<Entry> {
             val merged = mutableListOf<Entry>()
             for (entry in entries) {
                 val previous = merged.lastOrNull()
                 if (entry is Entry.Text && previous is Entry.Option && entry.indent >= previous.line.textColumn) {
-                    merged[merged.size - 1] = Entry.Option(previous.line.copy(text = previous.line.text + " " + entry.text))
+                    merged[merged.size - 1] =
+                        Entry.Option(previous.line.copy(rows = previous.line.rows + Row(entry.text, entry.end)))
                 } else {
                     merged += entry
                 }
