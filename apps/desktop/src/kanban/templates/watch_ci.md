@@ -14,3 +14,5 @@ The output below lists the workflow runs that failed on the default branch, with
 3. Otherwise fix it, changing only the files the fix needs, and run the checks related to the failure until they pass.
 4. Commit on the current branch, push the branch, and open a pull request with `gh pr create`.
 5. Finish by printing the pull request's URL.
+
+Write the commit message and the pull request the way a teammate who knows the code would, not like an AI assistant: plain, specific sentences in the language the project already writes in; no greetings, thanks, praise or offers to help further; no filler such as "it's worth noting" or "overall"; no headings, bold labels or bullet lists where a few sentences will do; no emoji.

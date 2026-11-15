@@ -15,3 +15,5 @@ Resolve the GitHub issue shown in the output below end to end, without stopping 
 3. Commit with a message that explains the change and ends with `Fixes #<number>`.
 4. Push the branch and open a pull request with `gh pr create`, with `Fixes #<number>` in its body.
 5. Finish by printing the pull request's URL.
+
+Write the commit message and the pull request the way a teammate who knows the code would, not like an AI assistant: plain, specific sentences in the language the project already writes in; no greetings, thanks, praise or offers to help further; no filler such as "it's worth noting" or "overall"; no headings, bold labels or bullet lists where a few sentences will do; no emoji.
