@@ -74,10 +74,13 @@ impl Recorder {
         let rate = mic.rate;
         let samples = match reference {
             #[cfg(all(feature = "recording", not(target_os = "macos")))]
-            Some(reference) => echo::cancel(&mic, &reference).unwrap_or_else(|err| {
-                tracing::warn!("消回声失败，交出原样的录音：{err:#}");
-                mic.samples
-            }),
+            Some(reference) => match echo::cancel(&mic, &reference) {
+                Ok(cleaned) => cleaned.unwrap_or(mic.samples),
+                Err(err) => {
+                    tracing::warn!("消回声失败，交出原样的录音：{err:#}");
+                    mic.samples
+                }
+            },
             _ => mic.samples,
         };
         Ok(resample(&samples, rate))
@@ -111,6 +114,10 @@ struct Track {
     /// 对齐。还没收到样本时是 `None`。
     #[cfg_attr(not(any(test, feature = "recording")), expect(dead_code, reason = "只有录音时读"))]
     start: Option<Instant>,
+    /// 中间断了时补 0（`GAP`）。只给回采的音轨开：麦克风一直交数据，给它补只会把采集时刻的抖动
+    /// 变成插进录音里的静音。
+    #[cfg_attr(not(any(test, feature = "recording")), expect(dead_code, reason = "只有录音时读"))]
+    pad_gaps: bool,
 }
 
 /// 一块样本该在的位置比音轨已有的长度多出超过这么久，才当成中间断了、先补上 0：WASAPI 回采的
@@ -120,12 +127,12 @@ const GAP: Duration = Duration::from_millis(20);
 
 impl Track {
     #[cfg(any(test, feature = "recording"))]
-    fn new(rate: u32) -> Self {
-        Self { samples: Vec::new(), rate, start: None }
+    fn new(rate: u32, pad_gaps: bool) -> Self {
+        Self { samples: Vec::new(), rate, start: None, pad_gaps }
     }
 
-    /// 接上采集时刻是 `at` 的一块样本。比该在的位置晚出 `GAP` 以上时先补 0；早了不往回挪，接着
-    /// 排在后面。总长不超过 `MAX_RECORDING_SECS`。
+    /// 接上采集时刻是 `at` 的一块样本。开着 `pad_gaps` 时，比该在的位置晚出 `GAP` 以上的先补 0；
+    /// 早了不往回挪，接着排在后面。总长不超过 `MAX_RECORDING_SECS`。
     #[cfg(any(test, feature = "recording"))]
     fn push(&mut self, at: Instant, block: impl IntoIterator<Item = f32>) {
         let max = self.rate as usize * MAX_RECORDING_SECS as usize;
@@ -133,7 +140,7 @@ impl Track {
         let rate = f64::from(self.rate);
         let due = (at.saturating_duration_since(start).as_secs_f64() * rate).round() as usize;
         let gap = due.saturating_sub(self.samples.len());
-        if gap as f64 > GAP.as_secs_f64() * rate {
+        if self.pad_gaps && gap as f64 > GAP.as_secs_f64() * rate {
             let len = (self.samples.len() + gap).min(max);
             self.samples.resize(len, 0.);
         }
@@ -196,7 +203,7 @@ fn open() -> anyhow::Result<Session> {
     // 开着 cpal 的 `pulseaudio` 特性时，Linux 上默认的 host 在连得上 PulseAudio 时是它，否则是 ALSA。
     let host = cpal::default_host();
     let device = host.default_input_device().context("no microphone")?;
-    let (stream, mic) = capture(&device, device.default_input_config()?)?;
+    let (stream, mic) = capture(&device, device.default_input_config()?, false)?;
     #[cfg(any(windows, target_os = "linux"))]
     let (streams, reference) = match loopback::open(&host) {
         Ok((loopback, reference)) => (vec![stream, loopback], Some(reference)),
@@ -210,10 +217,15 @@ fn open() -> anyhow::Result<Session> {
     Ok(Session { streams: Streams::Cpal(streams), mic, reference })
 }
 
-/// 用 `config` 开 `device` 的输入流，几个声道混成单声道写进返回的音轨，开好就开始录。
+/// 用 `config` 开 `device` 的输入流，几个声道混成单声道写进返回的音轨，音轨按 `pad_gaps` 补不补
+/// 中间断掉的部分；开好就开始录。
 #[cfg(feature = "recording")]
-fn capture(device: &cpal::Device, config: SupportedStreamConfig) -> anyhow::Result<(cpal::Stream, Shared)> {
-    let track = Shared::new(Mutex::new(Track::new(config.sample_rate())));
+fn capture(
+    device: &cpal::Device,
+    config: SupportedStreamConfig,
+    pad_gaps: bool,
+) -> anyhow::Result<(cpal::Stream, Shared)> {
+    let track = Shared::new(Mutex::new(Track::new(config.sample_rate(), pad_gaps)));
     let channels = usize::from(config.channels());
     let stream = match config.sample_format() {
         SampleFormat::F32 => build::<f32>(device, config.into(), channels, &track)?,
@@ -282,7 +294,7 @@ mod tests {
     #[test]
     fn blocks_on_time_are_appended_without_padding() {
         let t0 = Instant::now();
-        let mut track = Track::new(RATE);
+        let mut track = Track::new(RATE, true);
         track.push(t0, [1.; 10]);
         track.push(t0 + ms(10), [1.; 10]);
         track.push(t0 + ms(20), [1.; 10]);
@@ -293,7 +305,7 @@ mod tests {
     #[test]
     fn jitter_within_gap_is_not_padded() {
         let t0 = Instant::now();
-        let mut track = Track::new(RATE);
+        let mut track = Track::new(RATE, true);
         track.push(t0, [1.; 10]);
         // 晚到 15 ms、早到 5 ms 都当成抖动，接着往后排。
         track.push(t0 + ms(25), [1.; 10]);
@@ -304,7 +316,7 @@ mod tests {
     #[test]
     fn gap_beyond_threshold_is_padded_with_silence() {
         let t0 = Instant::now();
-        let mut track = Track::new(RATE);
+        let mut track = Track::new(RATE, true);
         track.push(t0, [1.; 10]);
         track.push(t0 + ms(110), [1.; 10]);
         assert_eq!(track.samples.len(), 120);
@@ -314,9 +326,18 @@ mod tests {
     }
 
     #[test]
+    fn gap_is_not_padded_without_pad_gaps() {
+        let t0 = Instant::now();
+        let mut track = Track::new(RATE, false);
+        track.push(t0, [1.; 10]);
+        track.push(t0 + ms(110), [1.; 10]);
+        assert_eq!(track.samples, vec![1.; 20]);
+    }
+
+    #[test]
     fn block_from_before_start_is_appended() {
         let t0 = Instant::now() + ms(1000);
-        let mut track = Track::new(RATE);
+        let mut track = Track::new(RATE, true);
         track.push(t0, [1.; 10]);
         track.push(t0 - ms(100), [2.; 10]);
         assert_eq!(track.start, Some(t0));
@@ -328,7 +349,7 @@ mod tests {
     fn track_stops_growing_at_the_limit() {
         let t0 = Instant::now();
         let max = (RATE * MAX_RECORDING_SECS) as usize;
-        let mut track = Track::new(RATE);
+        let mut track = Track::new(RATE, true);
         track.push(t0, [1.; 10]);
         track.push(t0 + Duration::from_secs(u64::from(MAX_RECORDING_SECS) + 10), [1.; 10]);
         assert_eq!(track.samples.len(), max);

@@ -11,7 +11,7 @@ use super::{Shared, capture};
 pub(super) fn open(host: &cpal::Host) -> anyhow::Result<(cpal::Stream, Shared)> {
     let output = host.default_output_device().context("no output device")?;
     let config = output.default_output_config()?;
-    capture(&output, config)
+    capture(&output, config, true)
 }
 
 /// 开始回采 `host` 默认 sink 放出来的声音，交出开着的流和它写的音轨。`host` 不是 PulseAudio
@@ -27,5 +27,5 @@ pub(super) fn open(host: &cpal::Host) -> anyhow::Result<(cpal::Stream, Shared)> 
         .find(|device| device.id().is_ok_and(|id| id == monitor))
         .with_context(|| format!("no monitor source for {}", sink.id()))?;
     let config = device.default_input_config()?;
-    capture(&device, config)
+    capture(&device, config, true)
 }

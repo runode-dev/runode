@@ -69,7 +69,7 @@ pub(super) fn open() -> anyhow::Result<(Engine, Shared)> {
             "unsupported sample format {:?}",
             format.commonFormat()
         );
-        let track = Shared::new(Mutex::new(Track::new(rate.round() as u32)));
+        let track = Shared::new(Mutex::new(Track::new(rate.round() as u32, false)));
         let tap = tap(track.clone());
         input.installTapOnBus_bufferSize_format_block(0, TAP_FRAMES, Some(&format), RcBlock::as_ptr(&tap));
         // 装上回调之后才交给 `Engine`：它 drop 时摘回调。
