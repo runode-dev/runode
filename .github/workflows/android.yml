@@ -110,6 +110,8 @@ jobs:
       # 按 Android 目标 lint 才走得到 cfg(target_os = "android") 的代码；ring 的构建脚本要 NDK 里的 clang，所以经 cargo-ndk。
       - name: 拨号库的 clippy
         run: cargo ndk -t arm64-v8a -P 31 clippy -p runode-android-tunnel --locked -- -D warnings
+        env:
+          CARGO_BUILD_WARNINGS: deny
       - name: 拨号库的单元测试
         run: cargo test -p runode-android-tunnel --locked
       - name: 单元测试、lint 和调试包

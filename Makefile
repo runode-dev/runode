@@ -131,8 +131,15 @@ test-ssh: ## 经假的 ssh 测连 SSH 主机：部署、桥接、断线重连、
 	RUNODE_TEST_OLD_BINARY="$${CARGO_TARGET_DIR:-$(CURDIR)/target}/debug/runode-test-old" \
 		$(CARGO) test -p runode -- --ignored --test-threads=1 fake_ssh
 
+# 带 -D warnings 时 cargo 自己的警告（如清单里没用到的依赖）也算失败，-D warnings 管不到它们。只有测试
+# 用到的依赖在 --all-targets 下算用上了，所以再不带测试查一遍；那一遍的产物上一遍已经编好。
 clippy: ## 运行 clippy
+ifneq ($(findstring -D warnings,$(CLIPPY_ARGS)),)
+	CARGO_BUILD_WARNINGS=deny $(CARGO) clippy --workspace --all-targets $(CLIPPY_ARGS)
+	CARGO_BUILD_WARNINGS=deny $(CARGO) clippy --workspace $(CLIPPY_ARGS)
+else
 	$(CARGO) clippy --workspace --all-targets $(CLIPPY_ARGS)
+endif
 
 layers: ## 检查 crate 分层：谁能依赖谁（cargo-deny）和几个 crate 只依赖谁（scripts/check-layers.py）
 	cargo deny check bans
