@@ -10,8 +10,8 @@
     }
 
     /// 认出来的提问（`AgentPrompt`）的选项，按下去交给 `press` 发编号键。默认项（`AgentPrompt.isDefault`）
-    /// 是琥珀色，其余中性；有复选框的项在编号后画出勾没勾，原文去掉复选框。原文在 `rows` 里至多折成两行、
-    /// 在 `compact` 里只占一行，再长就截断。
+    /// 是琥珀色，其余中性；有复选框的项在编号后画出勾没勾，原文去掉复选框。`rows` 里的原文由 `OptionText` 画，
+    /// `compact` 里只有一行标签，再长就截断。
     struct PromptOptions: View {
         let prompt: AgentPrompt
         let layout: PromptOptionLayout
@@ -45,9 +45,8 @@
                                 OptionCheckbox(checked: checkbox.checked)
                                     .font(.subheadline)
                             }
-                            Text(verbatim: option.displayText)
+                            OptionText(option: option)
                                 .font(.subheadline)
-                                .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                                 .truncationMode(.tail)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -76,7 +75,7 @@
                             if let checkbox = option.checkbox {
                                 OptionCheckbox(checked: checkbox.checked)
                             }
-                            Text(verbatim: option.displayText)
+                            Text(verbatim: option.label)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         }
@@ -89,7 +88,13 @@
                 if prompt.options.count > shown.count {
                     Menu {
                         ForEach(prompt.options) { option in
-                            let title = Text(verbatim: "\(option.number). \(option.displayText)")
+                            // 菜单项的第二个 `Text` 系统当副标题画。
+                            let title = Group {
+                                Text(verbatim: "\(option.number). \(option.label)")
+                                if let detail = option.detail {
+                                    Text(verbatim: detail)
+                                }
+                            }
                             // 菜单里的内容会转成系统菜单项，自定义的图标和读屏值带不过去；复选框用 `Toggle`，
                             // 系统画勾、读屏报勾没勾。勾没勾以屏幕为准，按下只发编号键。
                             if let checkbox = option.checkbox {
@@ -114,6 +119,27 @@
                     .buttonStyle(.plain)
                     .accessibilityLabel("看全部 \(prompt.options.count) 个选项")
                 }
+            }
+        }
+    }
+
+    /// `rows` 里选项的原文，合起来至多两行：有说明（`AgentPrompt.Option.detail`）时标签和说明各一行、说明淡一级，
+    /// 没有时标签折成两行。
+    private struct OptionText: View {
+        let option: AgentPrompt.Option
+
+        var body: some View {
+            if let detail = option.detail {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: option.label)
+                        .lineLimit(1)
+                    Text(verbatim: detail)
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text(verbatim: option.label)
+                    .lineLimit(2)
             }
         }
     }

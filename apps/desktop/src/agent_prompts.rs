@@ -44,6 +44,27 @@ const BUTTON_HEIGHT: f32 = 26.;
 /// 选项的原文最多折成几行，再长的截断、悬停看全文。
 const OPTION_LINES: usize = 2;
 
+/// 选项按钮里的字。原文第一行是标签，换行后面的是说明（Claude 的选项），说明照终端里的样子淡一些，和标签
+/// 合起来也不超过 `OPTION_LINES` 行。
+fn option_text(text: &str) -> Div {
+    let body = div().flex_1().min_w_0().text_left();
+    match text.split_once('\n') {
+        Some((label, description)) => body
+            .flex()
+            .flex_col()
+            .child(div().min_w_0().truncate().child(label.to_owned()))
+            .child(
+                div()
+                    .min_w_0()
+                    .opacity(0.7)
+                    .line_clamp(OPTION_LINES - 1)
+                    .text_ellipsis()
+                    .child(description.replace('\n', " ")),
+            ),
+        None => body.line_clamp(OPTION_LINES).text_ellipsis().child(text.to_owned()),
+    }
+}
+
 /// 读屏幕底部多少行：要装得下 `prompt::MAX_QUESTION_LINES` 行问题、`prompt::MAX_OPTIONS` 个折了行的选项和
 /// 下面的按键提示。
 const SCREEN_LINES: u32 = 24;
@@ -612,9 +633,7 @@ pub fn render_prompt<V: 'static>(
             .disabled(busy)
             .tooltip(tooltip(text, None))
             .child(lead)
-            .child(
-                div().flex_1().min_w_0().text_left().line_clamp(OPTION_LINES).text_ellipsis().child(shown.to_owned()),
-            );
+            .child(option_text(shown));
         let button = if ix == 0 && !multi_select {
             button
                 .variant(ButtonVariant::Default)

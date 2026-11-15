@@ -337,6 +337,16 @@ class AgentPromptTests {
         assertTrue(prompt.options.first().key.accessibilityLabel.english!!.contains("1: 首页双 tab 切换"))
     }
 
+    /** 原文第一行是标签，换行后面的是说明，几行说明并成一行；复选框不算进标签。 */
+    @Test fun labelAndDetail() {
+        val described = AgentPrompt.Option(1, "[x] --run CMD\n先跑命令\n再起 agent", false)
+        assertEquals("--run CMD", described.label)
+        assertEquals("先跑命令 再起 agent", described.detail)
+        val plain = AgentPrompt.Option(2, "Type something.", false)
+        assertEquals("Type something.", plain.label)
+        assertNull(plain.detail)
+    }
+
     /** 方括号里不是空格或勾的记号时不算复选框；没有复选框的提问不是多选题。 */
     @Test fun singleSelectIsNotMultiSelect() {
         val single = assertNotNull(parse(screen(" Do you want to proceed?", " ❯ 1. Yes", "   2. [beta] No")))

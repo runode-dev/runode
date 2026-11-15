@@ -39,6 +39,17 @@ public struct AgentPrompt: Hashable, Sendable {
         /// 界面上显示的原文：有复选框时去掉它，复选框另外画。
         public var displayText: String { checkbox?.text ?? text }
 
+        /// `displayText` 的第一行：选项的标签。
+        public var label: String {
+            String(displayText.prefix { $0 != "\n" })
+        }
+
+        /// `displayText` 换行后面的说明（Claude 的选项有），几行并成一行；没有时为 `nil`。
+        public var detail: String? {
+            guard let newline = displayText.firstIndex(of: "\n") else { return nil }
+            return displayText[displayText.index(after: newline)...].replacingOccurrences(of: "\n", with: " ")
+        }
+
         /// 复选框勾上时方括号里的字。
         private static let checkMarks: Set<Unicode.Scalar> = ["x", "X", "✓", "✔", "*"]
 

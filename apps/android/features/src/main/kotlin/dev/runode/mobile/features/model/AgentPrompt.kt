@@ -44,6 +44,13 @@ data class AgentPrompt(
         /** 显示和读屏用的字：有复选框时去掉它。 */
         val shownText: String get() = checkbox?.text ?: text
 
+        /** [shownText] 的第一行：选项的标签。 */
+        val label: String get() = shownText.substringBefore('\n')
+
+        /** [shownText] 换行后面的说明（Claude 的选项有），几行并成一行；没有时为 null。 */
+        val detail: String?
+            get() = shownText.indexOf('\n').takeIf { it >= 0 }?.let { shownText.substring(it + 1).replace('\n', ' ') }
+
         /** 选这一项的键：编号本身，读屏念「编号：[shownText]」。 */
         val key: QuickKey
             get() = QuickKey(number.toString(), number.toString(), UiText.res(R.string.prompt_option, number, shownText))

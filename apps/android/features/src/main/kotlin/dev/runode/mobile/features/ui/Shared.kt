@@ -235,8 +235,8 @@ internal enum class PromptOptionLayout {
 }
 
 /**
- * 认出来的提问（[AgentPrompt]）的选项，按下去交给 [onPress] 发编号键。默认项是琥珀色，其余中性；原文在 [PromptOptionLayout.Rows]
- * 里至多折成两行、在 [PromptOptionLayout.Compact] 里只占一行，再长就截断。读屏念「发送 编号：原文」，默认项是选中的。
+ * 认出来的提问（[AgentPrompt]）的选项，按下去交给 [onPress] 发编号键。默认项是琥珀色，其余中性；[PromptOptionLayout.Rows] 里的原文由
+ * [OptionText] 画，[PromptOptionLayout.Compact] 里只有一行标签，再长就截断。读屏念「发送 编号：原文」，默认项是选中的。
  * 带复选框的项在编号后画勾没勾，读屏念勾没勾；多选题（[AgentPrompt.isMultiSelect]）没有默认项。
  */
 @Composable
@@ -280,13 +280,7 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
                             )
                         }
                         option.checkbox?.let { CheckboxGlyph(it, 20.dp) }
-                        Text(
-                            option.shownText,
-                            style = Type.subheadline.copy(fontWeight = FontWeight.Normal),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
+                        OptionText(option, highlighted, Modifier.weight(1f))
                     }
                 }
             }
@@ -319,7 +313,7 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
                         CheckboxGlyph(it, 16.dp)
                         Spacer(Modifier.width(4.dp))
                     }
-                    Text(option.shownText, style = Type.callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(option.label, style = Type.callout, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (prompt.options.size > shown.size) {
@@ -343,7 +337,10 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Text("${option.number}.")
                                         option.checkbox?.let { CheckboxGlyph(it, 18.dp) }
-                                        Text(option.shownText)
+                                        Column {
+                                            Text(option.label)
+                                            option.detail?.let { Text(it, style = Type.footnote, color = colors.secondary) }
+                                        }
                                     }
                                 },
                                 onClick = {
@@ -373,6 +370,31 @@ internal fun AgentPrompt.selection(option: AgentPrompt.Option): Boolean? = if (i
 @Composable
 internal fun checkboxState(checkbox: AgentPrompt.Checkbox?): String? =
     checkbox?.let { stringResource(if (it.checked) R.string.prompt_option_checked else R.string.prompt_option_unchecked) }
+
+/**
+ * [PromptOptionLayout.Rows] 里选项的原文，合起来至多两行：有说明（[AgentPrompt.Option.detail]）时标签和说明各一行、说明淡一级，
+ * 没有时标签折成两行。
+ */
+@Composable
+private fun OptionText(option: AgentPrompt.Option, highlighted: Boolean, modifier: Modifier) {
+    val style = Type.subheadline.copy(fontWeight = FontWeight.Normal)
+    val detail = option.detail
+    if (detail == null) {
+        Text(option.label, style = style, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = modifier)
+        return
+    }
+    val colors = themeColors
+    Column(modifier) {
+        Text(option.label, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            detail,
+            style = style,
+            color = if (highlighted) colors.onWaitingFill.copy(alpha = 0.7f) else colors.secondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 /** 选项编号后面的复选框图标，不进读屏。 */
 @Composable

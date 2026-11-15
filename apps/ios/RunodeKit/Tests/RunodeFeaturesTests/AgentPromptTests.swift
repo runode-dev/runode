@@ -324,4 +324,14 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
         #expect(AgentPrompt.Option(number: 1, text: "[?] Maybe", selected: false).checkbox == nil)
         #expect(AgentPrompt.Option(number: 1, text: "[ ]", selected: false).checkbox?.text == "")
     }
+
+    /// 原文第一行是标签，换行后面的是说明，几行说明并成一行；复选框不算进标签。
+    @Test func labelAndDetail() {
+        let described = AgentPrompt.Option(number: 1, text: "[x] --run CMD\n先跑命令\n再起 agent", selected: false)
+        #expect(described.label == "--run CMD")
+        #expect(described.detail == "先跑命令 再起 agent")
+        let plain = AgentPrompt.Option(number: 2, text: "Type something.", selected: false)
+        #expect(plain.label == "Type something.")
+        #expect(plain.detail == nil)
+    }
 }
