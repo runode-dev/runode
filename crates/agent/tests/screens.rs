@@ -68,7 +68,7 @@ fn claude() {
     );
     // 输入框里形如清单行的文字不算。
     assert_eq!(
-        screen(Claude, &format!("● 改好了。\n\n────────\n❯ {}────────\n  ? for shortcuts\n", running.trim_start())),
+        screen(Claude, &format!("● 改好了。\n\n────────\n❯ 看看这行\n{running}────────\n  ? for shortcuts\n")),
         "idle"
     );
     // 起了名字的会话：选单的提示行下面是名字分隔线和任务面板。
