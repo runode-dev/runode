@@ -8,8 +8,8 @@
 //!
 //! 1. 手机在前台连上某台电脑时发 `ClientMsg::PushRegister`，交出推送用的凭据：自己签名打包的 iOS App
 //!    交 APNs 的 device token，带中转的官方构建（iOS 和 Android 都是 `OFFICIAL_BUNDLE`）交中转服务给的句柄，
-//!    没带中转的官方 iOS 构建也交 device token。
-//!    电脑记在配对设备表里，手机断开后照样能推。注销是 `token` 为空的同一条消息。这条消息只在手机经
+//!    没带中转的官方 iOS 构建也交 device token，没带中转的 Android 构建交 FCM 的 registration token
+//!    原文。电脑记在配对设备表里，手机断开后照样能推。注销是 `token` 为空的同一条消息。这条消息只在手机经
 //!    远程访问连上来时由监听方办，不到宿主那里，见 `remote` 的模块文档。
 //! 2. 那台电脑上有会话的 agent 停下来等回答时，电脑给每台登记过的手机发一条通知（`notify_payload`）。
 //!    一次等回答只推一次，等的时候屏幕上的问题变了不再推。通知的 `apns-collapse-id` 是会话标识
@@ -23,7 +23,11 @@
 //! 或 FCM 的 registration token 后为每台电脑向中转服务换一个句柄（`RelayRegister`），电脑只拿得到句柄，
 //! 推送时交回去（`RelayNotify`）：中转服务从句柄里解出 token 和发给谁（APNs 的哪个环境，或者 FCM），
 //! 句柄只替换它时报的那台电脑（`machine`）推，泄露了也冒充不了别的电脑，按句柄限频。电脑不分平台，
-//! 官方 App 的都交给中转。自己签名打包的 iOS App 由电脑拿用户配置的密钥直连 APNs。
+//! 官方 App 交来的句柄都交给中转。自己签名打包的 iOS App 由电脑拿用户配置的密钥直连 APNs。
+//!
+//! 没带中转的 Android 构建交来的是 FCM registration token 原文。原文里带冒号，句柄只有 base64url 字母、
+//! 没有冒号，电脑靠这一点分辨两者；电脑配了 Firebase 服务账号（`FcmServiceAccount`）时拿它直连 FCM，
+//! 请求体同样是 `fcm_message`，回话同样换成 APNs 的状态（`fcm_apns_status`）。
 //!
 //! # 线上格式
 //!
@@ -70,7 +74,8 @@ pub const RELAY_URL: Option<&str> = option_env!("RUNODE_PUSH_RELAY");
 pub const RELAY_REGISTER: &str = "/v1/register";
 /// 发通知：`POST`，体是 `RelayNotify`，回 200。
 pub const RELAY_NOTIFY: &str = "/v1/notify";
-/// `ClientMsg::PushRegister` 的 `token`（device token 或句柄）最多这么多个字符。
+/// `ClientMsg::PushRegister` 的 `token`（device token、句柄，或者没带中转的 Android 构建交的 FCM
+/// registration token 原文）最多这么多个字符。
 pub const MAX_TOKEN_LEN: usize = 512;
 /// FCM registration token 最多这么多个字符：中转把它原样封进句柄，句柄写成 base64url 后还不能超过
 /// `MAX_TOKEN_LEN`，这里另外留了余量。
@@ -78,6 +83,12 @@ pub const MAX_FCM_TOKEN_LEN: usize = 320;
 /// 发给 FCM 的 `data` 编成 JSON 最多这么多字节。比 FCM 的上限小一点：FCM 按自己的算法数字节，和这里
 /// 编出来的 JSON 不完全一样。
 pub const MAX_FCM_DATA: usize = 4000;
+/// 发 FCM 的服务账号要的权限：只能发 FCM 消息。
+pub const FCM_SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
+/// 拿 JWT 换 FCM 的 access token 时的 `grant_type`，已经按表单的规矩转义过。
+const GRANT_TYPE: &str = "urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer";
+/// 签给 Google 的 JWT 的有效期，Google 收的最长就是一小时。
+const JWT_LIFETIME: u64 = 60 * 60;
 /// 官方 App 的 bundle id：登记的是它时经中转服务推送。
 pub const OFFICIAL_BUNDLE: &str = "dev.runode.mobile";
 /// 没有标题时 `Notification::title` 用的名字。
@@ -350,6 +361,138 @@ pub fn fcm_message(token: &str, notification: &Notification, expiration: u64, no
         },
     };
     serde_json::to_vec(&FcmRequest { message }).ok()
+}
+
+/// FCM 的 registration token：1 到 `MAX_FCM_TOKEN_LEN` 个 `A-Z a-z 0-9 : _ -`。
+pub fn is_fcm_token(token: &str) -> bool {
+    let valid = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b':' | b'_' | b'-');
+    (1..=MAX_FCM_TOKEN_LEN).contains(&token.len()) && token.bytes().all(valid)
+}
+
+/// Firebase 控制台下载的服务账号 JSON 里发 FCM 要用的几项，都不为空。
+#[derive(Clone, PartialEq, Eq)]
+pub struct FcmServiceAccount {
+    pub client_email: String,
+    /// PEM 包着的 PKCS#8 RSA 私钥。
+    pub private_key: String,
+    pub project_id: String,
+    /// 换 access token 的端点，也是签给 Google 的 JWT 的 `aud`。
+    pub token_uri: String,
+}
+
+impl FcmServiceAccount {
+    /// 读服务账号 JSON 的原文。错误是接在文件名后面的半句（``has no `token_uri` ``）。私钥是不是 RSA
+    /// 由调用方签名时自己核对。
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let account: serde_json::Value =
+            serde_json::from_str(text).map_err(|err| format!("is not a service account JSON: {err}"))?;
+        let field = |name: &str| {
+            account[name]
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .ok_or_else(|| format!("has no `{name}`"))
+        };
+        Ok(Self {
+            client_email: field("client_email")?,
+            private_key: field("private_key")?,
+            project_id: field("project_id")?,
+            token_uri: field("token_uri")?,
+        })
+    }
+
+    /// 这个 Firebase 项目发消息（`messages:send`）的网址。
+    pub fn send_url(&self) -> String {
+        format!("https://fcm.googleapis.com/v1/projects/{}/messages:send", self.project_id)
+    }
+}
+
+/// 向 `token_uri` 换 access token 用的 JWT（RS256）：`header.claims` 交给 `sign` 签（RSASSA-PKCS1-v1_5、
+/// SHA-256），再拼上签名。`iat` 是签的时刻，Unix 秒。
+pub fn fcm_assertion<E>(
+    client_email: &str,
+    token_uri: &str,
+    iat: u64,
+    sign: impl FnOnce(&[u8]) -> Result<Vec<u8>, E>,
+) -> Result<String, E> {
+    use crate::remote::encode_base64url;
+    let header = serde_json::json!({ "alg": "RS256", "typ": "JWT" });
+    let claims = serde_json::json!({
+        "iss": client_email,
+        "scope": FCM_SCOPE,
+        "aud": token_uri,
+        "iat": iat,
+        "exp": iat + JWT_LIFETIME,
+    });
+    let input = format!(
+        "{}.{}",
+        encode_base64url(header.to_string().as_bytes()),
+        encode_base64url(claims.to_string().as_bytes())
+    );
+    let signature = sign(input.as_bytes())?;
+    Ok(format!("{input}.{}", encode_base64url(&signature)))
+}
+
+/// 拿 `fcm_assertion` 签的 JWT 换 access token 的请求体（`application/x-www-form-urlencoded`，`POST` 到
+/// `token_uri`）。JWT 只有 base64url 字母和点，不用再转义。
+pub fn fcm_token_request(assertion: &str) -> String {
+    format!("grant_type={GRANT_TYPE}&assertion={assertion}")
+}
+
+/// 从 token 端点的回话里读出 access token 和它还有几秒过期（`expires_in`）。读不到时 `Err` 是回话里的
+/// `error`，有 `error_description` 时接在后面；连这些也没有时为空。
+pub fn fcm_access_token(body: &[u8]) -> Result<(String, u64), String> {
+    let body: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    if let (Some(token), Some(lifetime)) = (body["access_token"].as_str(), body["expires_in"].as_u64()) {
+        return Ok((token.to_owned(), lifetime));
+    }
+    let error = body["error"].as_str().unwrap_or_default();
+    Err(match body["error_description"].as_str() {
+        Some(description) if !description.is_empty() => format!("{error}: {description}"),
+        _ => error.to_owned(),
+    })
+}
+
+/// FCM 的回话（HTTP 状态和响应体）换成电脑认得的 APNs 状态和原因：成功是 200、原因为空；token 作废了
+/// （`UNREGISTERED`）是 410 `Unregistered`，token 不对（针对 token 的 `INVALID_ARGUMENT`、
+/// `SENDER_ID_MISMATCH`）是 400 `BadDeviceToken`，电脑见了都删掉登记；限额（`QUOTA_EXCEEDED`）是 429
+/// `TooManyRequests`。别的照 FCM 的状态带回，原因是它的错误码。
+pub fn fcm_apns_status(status: u16, body: &[u8]) -> (u16, String) {
+    if (200..300).contains(&status) {
+        return (200, String::new());
+    }
+    let body: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    let error = &body["error"];
+    let details = error["details"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let code = details_of(details, "google.firebase.fcm.v1.FcmError")
+        .find_map(|detail| detail["errorCode"].as_str())
+        .or_else(|| error["status"].as_str())
+        .unwrap_or_default();
+    let about_token = || {
+        let field = details_of(details, "google.rpc.BadRequest")
+            .flat_map(|detail| detail["fieldViolations"].as_array().map(Vec::as_slice).unwrap_or_default())
+            .any(|violation| violation["field"] == "message.token");
+        let message = error["message"].as_str().unwrap_or_default().to_ascii_lowercase();
+        field || message.contains("registration token")
+    };
+    let (status, reason) = match code {
+        "UNREGISTERED" => (410, "Unregistered"),
+        "SENDER_ID_MISMATCH" => (400, "BadDeviceToken"),
+        "INVALID_ARGUMENT" if about_token() => (400, "BadDeviceToken"),
+        "QUOTA_EXCEEDED" => (429, "TooManyRequests"),
+        code => (status, code),
+    };
+    (status, reason.to_owned())
+}
+
+/// FCM 错误详情里 `@type` 是 `type_name` 的那几项。
+fn details_of<'a>(
+    details: &'a [serde_json::Value],
+    type_name: &'a str,
+) -> impl Iterator<Item = &'a serde_json::Value> + 'a {
+    details.iter().filter(move |detail| {
+        detail["@type"].as_str().is_some_and(|t| t.strip_prefix("type.googleapis.com/") == Some(type_name))
+    })
 }
 
 /// APNs 回错误时的响应体（`{"reason":"BadDeviceToken"}` 这类），中转服务出错时也回这个样子。

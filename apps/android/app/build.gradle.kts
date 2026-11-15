@@ -11,10 +11,20 @@ if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
-/** 推送中转的基址，编译时用 Gradle 属性 `RUNODE_PUSH_RELAY` 换掉，本地测中转时用；必须是带主机的 https 地址。 */
-val pushRelay: String = providers.gradleProperty("RUNODE_PUSH_RELAY").getOrElse("https://push.runode.dev").trim()
-require(runCatching { URI(pushRelay) }.getOrNull()?.let { it.scheme == "https" && !it.host.isNullOrEmpty() } == true) {
-    "RUNODE_PUSH_RELAY 要是带主机的 https 地址：$pushRelay"
+/**
+ * 推送中转的基址。release 默认用正式的中转；debug 默认不带中转，FCM 的 token 原文直接交给配了 Firebase 服务账号的电脑。
+ * Gradle 属性 `RUNODE_PUSH_RELAY` 给了时所有构建类型都用它，空串表示不带中转，本地测中转时用
+ * `-PRUNODE_PUSH_RELAY=https://…`；非空时必须是带主机的 https 地址。
+ */
+val pushRelayProperty: String? = providers.gradleProperty("RUNODE_PUSH_RELAY").orNull?.trim()
+
+fun pushRelay(default: String): String = (pushRelayProperty ?: default).also { relay ->
+    require(
+        relay.isEmpty() ||
+            runCatching { URI(relay) }.getOrNull()?.let { it.scheme == "https" && !it.host.isNullOrEmpty() } == true,
+    ) {
+        "RUNODE_PUSH_RELAY 要是带主机的 https 地址或空串：$relay"
+    }
 }
 
 android {
@@ -28,10 +38,17 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        buildConfigField("String", "RUNODE_PUSH_RELAY", "\"$pushRelay\"")
-
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            buildConfigField("String", "RUNODE_PUSH_RELAY", "\"${pushRelay("")}\"")
+        }
+        getByName("release") {
+            buildConfigField("String", "RUNODE_PUSH_RELAY", "\"${pushRelay("https://push.runode.dev")}\"")
         }
     }
 

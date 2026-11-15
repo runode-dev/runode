@@ -841,6 +841,7 @@ settings:
     apns_key_id: 密钥 ID
     apns_team_id: Team ID
     apns_bundle_id: App 的 bundle ID
+    fcm_service_account_file: Firebase 服务账号文件
     agent_notifications: 通知
     agent_notifications_exclude: 不提醒的 agent
     agent_done_sound: agent 干完时的提示音
@@ -915,6 +916,7 @@ settings:
     apns_key_id: 这把密钥的 10 位 ID，也在文件名 AuthKey_ID.p8 里。
     apns_team_id: Apple 开发者账号的 10 位 Team ID。
     apns_bundle_id: 自己编译的手机 App 的 bundle ID。这个 App 交来 device token 时用上面的密钥直连 APNs，和官方 App 同一个 bundle ID 也一样；经中转登记的照旧经中转推。
+    fcm_service_account_file: Firebase 控制台下载的服务账号 JSON，~ 表示 $HOME。自己编译的 Android App 交来 FCM token 时用它直连 Google 推送；经中转登记的照旧经中转推。
     agent_notifications:
       macos: agent 在你没在看的分屏里干完了或者等你回答时发系统通知。只有打包好的 Runode.app 能发通知。
       windows: agent 在你没在看的分屏里干完了或者等你回答时发系统通知。

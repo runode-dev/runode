@@ -20,7 +20,7 @@ pub(crate) struct Request {
     pub(crate) url: String,
     /// 名字和值；名字小写。
     pub(crate) headers: Vec<(&'static str, String)>,
-    /// JSON 请求体；没有时不发体。
+    /// 请求体，没有时不发体；`headers` 里没有 `content-type` 时按 JSON 发。
     pub(crate) body: Option<Vec<u8>>,
     /// 要 HTTP/2：APNs 只说 HTTP/2，中转服务 HTTP/1.1 也行。
     pub(crate) http2: bool,
@@ -157,7 +157,9 @@ fn config(request: &Request) -> String {
         out.push_str(&format!("header = {}\n", quoted(&format!("{name}: {value}"))));
     }
     if let Some(body) = &request.body {
-        out.push_str(&format!("header = {}\n", quoted("content-type: application/json")));
+        if !request.headers.iter().any(|(name, _)| *name == "content-type") {
+            out.push_str(&format!("header = {}\n", quoted("content-type: application/json")));
+        }
         // `data-raw` 不把开头的 `@` 当成文件名。
         out.push_str(&format!("data-raw = {}\n", quoted(&String::from_utf8_lossy(body))));
     }
@@ -235,6 +237,20 @@ mod tests {
         let delete =
             Request { method: "DELETE", url: "https://x".into(), headers: Vec::new(), body: None, http2: false };
         assert_eq!(config(&delete), "url = \"https://x\"\nrequest = \"DELETE\"\n");
+        // 自己带了 content-type 的（换 FCM access token 的表单）不再补 JSON 的。
+        let form = Request {
+            method: "POST",
+            url: "https://oauth2.googleapis.com/token".into(),
+            headers: vec![("content-type", "application/x-www-form-urlencoded".into())],
+            body: Some(b"grant_type=a%3Ab&assertion=x.y.z".to_vec()),
+            http2: false,
+        };
+        assert_eq!(
+            config(&form),
+            "url = \"https://oauth2.googleapis.com/token\"\nrequest = \"POST\"\n\
+             header = \"content-type: application/x-www-form-urlencoded\"\n\
+             data-raw = \"grant_type=a%3Ab&assertion=x.y.z\"\n"
+        );
     }
 
     #[test]

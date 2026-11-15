@@ -305,6 +305,7 @@ impl Page {
                 Row("apns-key-id", Text(300.)),
                 Row("apns-team-id", Text(300.)),
                 Row("apns-bundle-id", Text(300.)),
+                Row("fcm-service-account-file", Text(300.)),
                 TestPush,
             ],
             Self::Keybinds => &[],
@@ -620,11 +621,12 @@ impl SettingsView {
     /// 这一项在这台机器、这份配置下显示不显示。
     fn item_shown(&self, item: &Item) -> bool {
         match item {
-            // 直连 APNs 的密钥只有自己编译手机 App 的开发者用得上。
+            // 直连 APNs、FCM 的密钥只有自己编译手机 App 的开发者用得上。
             Item::Section("push_key")
-            | Item::Row("apns-key-file" | "apns-key-id" | "apns-team-id" | "apns-bundle-id", _) => {
-                self.config.developer_mode
-            }
+            | Item::Row(
+                "apns-key-file" | "apns-key-id" | "apns-team-id" | "apns-bundle-id" | "fcm-service-account-file",
+                _,
+            ) => self.config.developer_mode,
             Item::Section("login") | Item::Autostart => super::autostart::any_supported(),
             Item::Firewall => self.config.remote_access && self.firewall.blocked(),
             // Linux 上的 app 自己换不了新版本，更新交给装它的包管理器，后台也不查，开关没有用。
@@ -1191,6 +1193,7 @@ fn key_placeholder(key: &str) -> SharedString {
         "apns-key-id" => return "ABC123DEFG".into(),
         "apns-team-id" => return "DEF123GHIJ".into(),
         "apns-bundle-id" => return "com.example.runode".into(),
+        "fcm-service-account-file" => return "~/runode-firebase-adminsdk.json".into(),
         "dictation-words" => return "runode, Ghostty, GPUI".into(),
         "dictation-polish-url" => return "https://api.deepseek.com/v1".into(),
         "dictation-polish-model" => return "deepseek-chat".into(),

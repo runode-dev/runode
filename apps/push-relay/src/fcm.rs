@@ -13,17 +13,12 @@ use ring::{
     rand::SystemRandom,
     signature::{RSA_PKCS1_SHA256, RsaKeyPair},
 };
-use runode_protocol::{push::pem_der, remote::encode_base64url};
-use serde_json::Value;
+use runode_protocol::push::{
+    FcmServiceAccount, fcm_access_token, fcm_apns_status, fcm_assertion, fcm_token_request, is_bad_token, pem_der,
+};
 
 use crate::apns::{Reply, now_unix};
 
-/// 服务账号要的权限：只能发 FCM 消息。
-pub const SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
-/// 换 access token 时的 `grant_type`，已经按表单的规矩转义过。
-const GRANT_TYPE: &str = "urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer";
-/// 签给 Google 的 JWT 的有效期，Google 收的最长就是一小时。
-const JWT_LIFETIME: u64 = 60 * 60;
 /// access token 离过期还有这么久就换新的，不拿快过期的去发。
 const RENEW_BEFORE: Duration = Duration::from_secs(5 * 60);
 /// 一次请求最多等这么久。
@@ -53,21 +48,12 @@ pub struct Client {
 }
 
 impl Client {
-    /// 读 Firebase 控制台下载的服务账号 JSON：`client_email`、`private_key`（PEM 包着的 PKCS#8 RSA 私钥）、
-    /// `project_id`、`token_uri`。
+    /// 读 Firebase 控制台下载的服务账号 JSON 文件。
     pub fn new(account_file: &Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(account_file)
             .map_err(|err| format!("cannot read the FCM service account {}: {err}", account_file.display()))?;
-        let account: Value = serde_json::from_str(&text)
-            .map_err(|err| format!("{} is not a service account JSON: {err}", account_file.display()))?;
-        let field = |name: &str| {
-            account[name]
-                .as_str()
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-                .ok_or_else(|| format!("{} has no `{name}`", account_file.display()))
-        };
-        let der = pem_der(&field("private_key")?)
+        let account = FcmServiceAccount::parse(&text).map_err(|err| format!("{} {err}", account_file.display()))?;
+        let der = pem_der(&account.private_key)
             .ok_or_else(|| format!("the private key in {} is not PEM", account_file.display()))?;
         let key = RsaKeyPair::from_pkcs8(&der)
             .map_err(|err| format!("the private key in {} is not an RSA key: {err}", account_file.display()))?;
@@ -80,16 +66,16 @@ impl Client {
         Ok(Self {
             http,
             key,
-            client_email: field("client_email")?,
-            token_uri: field("token_uri")?,
-            send_url: send_url(&field("project_id")?),
+            send_url: account.send_url(),
+            client_email: account.client_email,
+            token_uri: account.token_uri,
             access: Mutex::new(None),
         })
     }
 
     /// 签好的 JWT，拿去换 access token。
     fn assertion(&self) -> Result<String, String> {
-        assertion(&self.client_email, &self.token_uri, now_unix(), |input| {
+        fcm_assertion(&self.client_email, &self.token_uri, now_unix(), |input| {
             let mut signature = vec![0; self.key.public().modulus_len()];
             self.key
                 .sign(&RSA_PKCS1_SHA256, &SystemRandom::new(), input, &mut signature)
@@ -109,7 +95,7 @@ impl Client {
                 return Ok(token.clone());
             }
         }
-        let body = format!("grant_type={GRANT_TYPE}&assertion={}", self.assertion()?);
+        let body = fcm_token_request(&self.assertion()?);
         let response = self
             .http
             .post(&self.token_uri)
@@ -119,14 +105,11 @@ impl Client {
             .await
             .map_err(|err| format!("cannot reach Google for an FCM access token: {}", err.without_url()))?;
         let status = response.status().as_u16();
-        let body: Value = serde_json::from_slice(&response.bytes().await.unwrap_or_default()).unwrap_or_default();
-        let (Some(token), Some(lifetime)) = (body["access_token"].as_str(), body["expires_in"].as_u64()) else {
-            let why = body["error"].as_str().unwrap_or_default();
-            return Err(format!("Google gave no FCM access token: HTTP {status} {why}"));
-        };
+        let (token, lifetime) = fcm_access_token(&response.bytes().await.unwrap_or_default())
+            .map_err(|why| format!("Google gave no FCM access token: HTTP {status} {why}"))?;
         let renew_at = Instant::now() + Duration::from_secs(lifetime).saturating_sub(RENEW_BEFORE);
-        *self.access.lock().unwrap_or_else(PoisonError::into_inner) = Some((token.to_owned(), renew_at));
-        Ok(token.to_owned())
+        *self.access.lock().unwrap_or_else(PoisonError::into_inner) = Some((token.clone(), renew_at));
+        Ok(token)
     }
 
     async fn post(&self, message: &[u8], access_token: &str) -> Result<Reply, String> {
@@ -158,79 +141,19 @@ impl Fcm for Client {
     }
 }
 
-/// Firebase 项目 `project` 发消息的网址。
-fn send_url(project: &str) -> String {
-    format!("https://fcm.googleapis.com/v1/projects/{project}/messages:send")
-}
-
-/// 向 `token_uri` 换 access token 用的 JWT（RS256）：`header.claims` 交给 `sign` 签（RSASSA-PKCS1-v1_5、
-/// SHA-256），再拼上签名。`iat` 是签的时刻，Unix 秒。
-fn assertion<E>(
-    client_email: &str,
-    token_uri: &str,
-    iat: u64,
-    sign: impl FnOnce(&[u8]) -> Result<Vec<u8>, E>,
-) -> Result<String, E> {
-    let header = serde_json::json!({ "alg": "RS256", "typ": "JWT" });
-    let claims = serde_json::json!({
-        "iss": client_email,
-        "scope": SCOPE,
-        "aud": token_uri,
-        "iat": iat,
-        "exp": iat + JWT_LIFETIME,
-    });
-    let input = format!(
-        "{}.{}",
-        encode_base64url(header.to_string().as_bytes()),
-        encode_base64url(claims.to_string().as_bytes())
-    );
-    let signature = sign(input.as_bytes())?;
-    Ok(format!("{input}.{}", encode_base64url(&signature)))
-}
-
-/// FCM 的回话（HTTP 状态、响应体和 `Retry-After`）换成电脑认得的 APNs 状态：token 作废了
-/// （`UNREGISTERED`）是 410 `Unregistered`，token 不对（针对 token 的 `INVALID_ARGUMENT`、
-/// `SENDER_ID_MISMATCH`）是 400 `BadDeviceToken`，电脑见了都删掉登记；限额（`QUOTA_EXCEEDED`）是 429
-/// `TooManyRequests`，带上 FCM 给的 `Retry-After`。别的照 FCM 的状态带回，原因是它的错误码。
+/// FCM 的回话（HTTP 状态、响应体和 `Retry-After`）换成电脑认得的 APNs 回话（`fcm_apns_status`）。成功的
+/// 和电脑见了会删掉登记的不带 `Retry-After`，别的带上 FCM 给的。
 pub fn reply(status: u16, body: &[u8], retry_after: Option<String>) -> Reply {
-    let answer = |status, reason: &str, retry_after| Reply { status, reason: reason.to_owned(), retry_after };
-    if (200..300).contains(&status) {
-        return answer(200, "", None);
-    }
-    let body: Value = serde_json::from_slice(body).unwrap_or_default();
-    let error = &body["error"];
-    let details = error["details"].as_array().map(Vec::as_slice).unwrap_or_default();
-    let code = details_of(details, "google.firebase.fcm.v1.FcmError")
-        .find_map(|detail| detail["errorCode"].as_str())
-        .or_else(|| error["status"].as_str())
-        .unwrap_or_default();
-    let about_token = || {
-        let field = details_of(details, "google.rpc.BadRequest")
-            .flat_map(|detail| detail["fieldViolations"].as_array().map(Vec::as_slice).unwrap_or_default())
-            .any(|violation| violation["field"] == "message.token");
-        let message = error["message"].as_str().unwrap_or_default().to_ascii_lowercase();
-        field || message.contains("registration token")
-    };
-    match code {
-        "UNREGISTERED" => answer(410, "Unregistered", None),
-        "SENDER_ID_MISMATCH" => answer(400, "BadDeviceToken", None),
-        "INVALID_ARGUMENT" if about_token() => answer(400, "BadDeviceToken", None),
-        "QUOTA_EXCEEDED" => answer(429, "TooManyRequests", retry_after),
-        code => answer(status, code, retry_after),
-    }
-}
-
-/// 错误详情里 `@type` 是 `type_name` 的那几项。
-fn details_of<'a>(details: &'a [Value], type_name: &'a str) -> impl Iterator<Item = &'a Value> + 'a {
-    details.iter().filter(move |detail| {
-        detail["@type"].as_str().is_some_and(|t| t.strip_prefix("type.googleapis.com/") == Some(type_name))
-    })
+    let (status, reason) = fcm_apns_status(status, body);
+    let retry_after = if status == 200 || is_bad_token(status, &reason) { None } else { retry_after };
+    Reply { status, reason, retry_after }
 }
 
 #[cfg(test)]
 mod tests {
     use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
     use runode_protocol::remote::decode_base64url;
+    use serde_json::Value;
 
     use super::*;
 
@@ -290,31 +213,6 @@ mod tests {
         assert_eq!(status_and_reason(&reply(404, project.to_string().as_bytes(), None)), (404, "NOT_FOUND"));
     }
 
-    #[test]
-    fn assertions_carry_the_scope_and_audience() {
-        let jwt = assertion("relay@p.iam.gserviceaccount.com", "https://oauth2.googleapis.com/token", 1_000, |input| {
-            Ok::<_, ()>(input.len().to_be_bytes().to_vec())
-        })
-        .unwrap();
-        let parts: Vec<&str> = jwt.split('.').collect();
-        let header: Value = serde_json::from_slice(&decode_base64url(parts[0]).unwrap()).unwrap();
-        assert_eq!(header, serde_json::json!({ "alg": "RS256", "typ": "JWT" }));
-        let claims: Value = serde_json::from_slice(&decode_base64url(parts[1]).unwrap()).unwrap();
-        assert_eq!(
-            claims,
-            serde_json::json!({
-                "iss": "relay@p.iam.gserviceaccount.com",
-                "scope": SCOPE,
-                "aud": "https://oauth2.googleapis.com/token",
-                "iat": 1_000,
-                "exp": 1_000 + JWT_LIFETIME,
-            })
-        );
-        let signed = format!("{}.{}", parts[0], parts[1]);
-        assert_eq!(decode_base64url(parts[2]).unwrap(), signed.len().to_be_bytes());
-        assert_eq!(send_url("runode-1234"), "https://fcm.googleapis.com/v1/projects/runode-1234/messages:send");
-    }
-
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("runode-push-fcm-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -350,7 +248,7 @@ mod tests {
         let path = dir.join("account.json");
         std::fs::write(&path, account.to_string()).unwrap();
         let client = Client::new(&path).unwrap();
-        assert_eq!(client.send_url, send_url("runode-1234"));
+        assert_eq!(client.send_url, "https://fcm.googleapis.com/v1/projects/runode-1234/messages:send");
         let jwt = client.assertion().unwrap();
         let parts: Vec<&str> = jwt.split('.').collect();
         let public = client.key.public().as_ref().to_vec();

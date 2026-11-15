@@ -17,8 +17,8 @@ use axum::{
     routing::post,
 };
 use runode_protocol::push::{
-    ApnsEnv, EXPIRES_AFTER, MAX_FCM_TOKEN_LEN, PushError, PushService, RELAY_NOTIFY, RELAY_REGISTER, RELAY_VERSION,
-    RelayHandle, RelayNotify, RelayRegister, fcm_message, notify_payload,
+    ApnsEnv, EXPIRES_AFTER, PushError, PushService, RELAY_NOTIFY, RELAY_REGISTER, RELAY_VERSION, RelayHandle,
+    RelayNotify, RelayRegister, fcm_message, is_fcm_token, notify_payload,
 };
 
 use crate::{
@@ -200,12 +200,6 @@ async fn notify<A: Apns, F: Fcm>(
     };
     tracing::info!("push via {service} answered {} {} after {:?}", reply.status, reply.reason, started.elapsed());
     relay_reply(reply)
-}
-
-/// FCM 的 registration token：1 到 `MAX_FCM_TOKEN_LEN` 个 `A-Z a-z 0-9 : _ -`。
-fn is_fcm_token(token: &str) -> bool {
-    let valid = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b':' | b'_' | b'-');
-    (1..=MAX_FCM_TOKEN_LEN).contains(&token.len()) && token.bytes().all(valid)
 }
 
 /// 发给 APNs；不认 device token 时换另一个环境再发一次，两边都不认才算不认。另一个环境那次连不上时

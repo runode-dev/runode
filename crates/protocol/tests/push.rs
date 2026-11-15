@@ -7,9 +7,11 @@ use std::path::Path;
 use runode_protocol::{
     SessionId,
     push::{
-        ApnsEnv, BLOCKED_LINES, LINE_LIMIT, MAX_APNS_PAYLOAD, MAX_FCM_DATA, Notification, PushError, PushService,
-        RELAY_VERSION, RelayHandle, RelayNotify, RelayRegister, TEXT_LIMIT, fcm_message, notify_payload,
+        ApnsEnv, BLOCKED_LINES, FCM_SCOPE, FcmServiceAccount, LINE_LIMIT, MAX_APNS_PAYLOAD, MAX_FCM_DATA, Notification,
+        PushError, PushService, RELAY_VERSION, RelayHandle, RelayNotify, RelayRegister, TEXT_LIMIT, fcm_access_token,
+        fcm_assertion, fcm_message, fcm_token_request, notify_payload,
     },
+    remote::decode_base64url,
 };
 use runode_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -114,6 +116,79 @@ fn fcm_messages_match_the_fixtures() {
     // 已经过了时的 `ttl` 是 0。
     let late: Value = serde_json::from_slice(&fcm_message(FCM_TOKEN, &notification(), NOW, NOW + 5).unwrap()).unwrap();
     assert_eq!(late["message"]["android"]["ttl"], "0s");
+}
+
+/// 换 FCM access token 的 JWT 带着服务账号、权限和 token 端点，有效期一小时；签名接在 `header.claims` 后面。
+#[test]
+fn fcm_assertions_carry_the_scope_and_audience() {
+    let jwt = fcm_assertion("relay@p.iam.gserviceaccount.com", "https://oauth2.googleapis.com/token", 1_000, |input| {
+        Ok::<_, ()>(input.len().to_be_bytes().to_vec())
+    })
+    .unwrap();
+    let parts: Vec<&str> = jwt.split('.').collect();
+    let header: Value = serde_json::from_slice(&decode_base64url(parts[0]).unwrap()).unwrap();
+    assert_eq!(header, serde_json::json!({ "alg": "RS256", "typ": "JWT" }));
+    let claims: Value = serde_json::from_slice(&decode_base64url(parts[1]).unwrap()).unwrap();
+    assert_eq!(
+        claims,
+        serde_json::json!({
+            "iss": "relay@p.iam.gserviceaccount.com",
+            "scope": FCM_SCOPE,
+            "aud": "https://oauth2.googleapis.com/token",
+            "iat": 1_000,
+            "exp": 1_000 + 3600,
+        })
+    );
+    let signed = format!("{}.{}", parts[0], parts[1]);
+    assert_eq!(decode_base64url(parts[2]).unwrap(), signed.len().to_be_bytes());
+    assert_eq!(
+        fcm_token_request(&jwt),
+        format!("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={jwt}")
+    );
+}
+
+fn service_account() -> Value {
+    serde_json::json!({
+        "type": "service_account",
+        "project_id": "runode-1234",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
+        "client_email": "relay@runode-1234.iam.gserviceaccount.com",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    })
+}
+
+/// 服务账号读出发 FCM 要的几项；缺哪项（没有、不是字符串或为空）时错误里写出是哪一项。
+#[test]
+fn fcm_service_accounts_name_the_missing_field() {
+    let account = FcmServiceAccount::parse(&service_account().to_string()).unwrap();
+    assert_eq!(account.client_email, "relay@runode-1234.iam.gserviceaccount.com");
+    assert_eq!(account.private_key, "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n");
+    assert_eq!(account.token_uri, "https://oauth2.googleapis.com/token");
+    assert_eq!(account.send_url(), "https://fcm.googleapis.com/v1/projects/runode-1234/messages:send");
+
+    for (field, value) in [
+        ("client_email", Value::Null),
+        ("private_key", Value::from(7)),
+        ("project_id", Value::from("")),
+        ("token_uri", Value::Null),
+    ] {
+        let mut missing = service_account();
+        missing[field] = value;
+        let err = FcmServiceAccount::parse(&missing.to_string()).err().unwrap();
+        assert_eq!(err, format!("has no `{field}`"));
+    }
+    assert!(FcmServiceAccount::parse("not json").err().unwrap().contains("not a service account JSON"));
+}
+
+/// token 端点回了 access token 时读出它和有效秒数；回错时把 `error` 和 `error_description` 带出来。
+#[test]
+fn fcm_access_tokens_are_read_from_the_reply() {
+    let ok = br#"{"access_token":"ya29.abc","expires_in":3599,"token_type":"Bearer"}"#;
+    assert_eq!(fcm_access_token(ok), Ok(("ya29.abc".to_owned(), 3599)));
+    let denied = br#"{"error":"invalid_grant","error_description":"Invalid JWT Signature."}"#;
+    assert_eq!(fcm_access_token(denied), Err("invalid_grant: Invalid JWT Signature.".to_owned()));
+    assert_eq!(fcm_access_token(br#"{"error":"invalid_client"}"#), Err("invalid_client".to_owned()));
+    assert_eq!(fcm_access_token(b"<html>bad gateway</html>"), Err(String::new()));
 }
 
 /// `data` 超过上限时照 APNs payload 的规矩先删最上面的行，删光了还超才缩短标题，再不行就不发。

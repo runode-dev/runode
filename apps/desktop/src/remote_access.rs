@@ -4,7 +4,7 @@
 //! 接到本进程里起的项目服务上（`connect_project`）。开关（配置项
 //! `remote-access`）、端口（`remote-access-port`）、给手机看的名字（`remote-access-name`）和在哪听、
 //! 经不经互联网（`remote-access-address`）随配置变，几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
-//! 这几项和 `apns-*`）同样随配置变，见 `push_settings`。
+//! 这几项、`apns-*` 和 `fcm-service-account-file`）同样随配置变，见 `push_settings`。
 //!
 //! 宿主跑在 app 里时，app 每次应用配置都告诉它（见 `host_client::configure`）；单独跑的宿主
 //! （`runode --host`）不管界面，自己读配置文件，文件变了就重读（`follow_config`）。app 连着单独跑的
@@ -75,6 +75,10 @@ pub fn push_settings(config: &Config) -> PushSettings {
         text: config.remote_access_push_text,
         delay: config.remote_access_push_delay,
         direct,
+        fcm_account: config
+            .fcm_service_account_file
+            .as_ref()
+            .map(|file| runode_paths::Dirs::from_env().expand_home(file)),
         ..PushSettings::default()
     }
 }
@@ -345,11 +349,13 @@ mod tests {
             apns_key_id: Some("X".into()),
             apns_team_id: Some("T".into()),
             apns_bundle_id: Some("cn.example.app".into()),
+            fcm_service_account_file: Some("/keys/firebase-adminsdk.json".into()),
             remote_access_push_text: false,
             ..Config::default()
         };
         let settings = push_settings(&config);
         assert!(!settings.text);
+        assert_eq!(settings.fcm_account.as_deref(), Some(std::path::Path::new("/keys/firebase-adminsdk.json")));
         let key = settings.direct.unwrap();
         assert_eq!((key.key_file.to_str(), key.bundle.as_str()), (Some("/keys/AuthKey_X.p8"), "cn.example.app"));
         // 缺了一项不直连。

@@ -116,6 +116,7 @@ impl Config {
             "apns-key-id" => self.apns_key_id.iter().cloned().collect(),
             "apns-team-id" => self.apns_team_id.iter().cloned().collect(),
             "apns-bundle-id" => self.apns_bundle_id.iter().cloned().collect(),
+            "fcm-service-account-file" => self.fcm_service_account_file.iter().cloned().collect(),
             "agent-notifications" => bool(self.agent_notifications),
             "agent-split-fold" => bool(self.agent_split_fold),
             "agent-notifications-exclude" => {
@@ -156,6 +157,7 @@ mod tests {
              file-tree-preview-click = double\nprevent-sleep = agent\npalette = 3=#010203\nremote-access = true\n\
              remote-access-push = false\nremote-access-push-delay = 30\napns-key-file = ~/AuthKey_X.p8\n\
              apns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\n\
+             fcm-service-account-file = ~/firebase-adminsdk.json\n\
              clipboard-write = deny\nclipboard-read = allow"]);
         let text: String = KEYS
             .iter()

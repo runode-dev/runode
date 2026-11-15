@@ -11,15 +11,17 @@
 //! 不满足条件时断开这条连接，单独跑的宿主照常能因空闲退出。
 //!
 //! 推送的路线按登记定：iOS App 交的是 device token、bundle id 等于配置的 `ApnsKey::bundle` 时用那把
-//! 密钥直连 APNs，官方 App 的 `OFFICIAL_BUNDLE` 也一样（开发者自己编译的官方 App 不带中转）；别的官方
-//! App 登记的是中转的句柄，不分 iOS 还是 Android，只在这个构建带着中转（`RELAY_URL`）时经中转服务推；
-//! 其余跳过（每个 bundle 记一次日志）。
+//! 密钥直连 APNs，官方 App 的 `OFFICIAL_BUNDLE` 也一样（开发者自己编译的官方 App 不带中转）；Android App
+//! 交的是 FCM registration token 原文（没带中转的构建，不论 bundle id）时，配了服务账号
+//! （`PushSettings::fcm_account`）就直连 FCM；别的官方 App 登记的是中转的句柄，不分 iOS 还是 Android，只在
+//! 这个构建带着中转（`RELAY_URL`）时经中转服务推；其余跳过（每个 bundle 记一次日志）。
 //!
 //! 发出去的通知撤不回，答完的由手机自己清掉。宿主交接时会回 `Goodbye`，这边断开后照常重连：交接回滚了
 //! 就接着推；交接成了旧宿主不再接连接，这个进程随即停掉远程访问，推送由新宿主进程里的 `Pusher` 接着办。
 
 mod apns;
 mod curl;
+mod fcm;
 mod preview;
 mod probe;
 mod rounds;
@@ -49,7 +51,7 @@ use self::{
     apns::{Route, Via},
     curl::Curl,
     rounds::{Action, Rounds},
-    send::{Sender, Target},
+    send::{Credentials, Sender, Target},
 };
 use crate::{
     Connect, UnixStream,
@@ -75,6 +77,8 @@ pub struct PushSettings {
     pub delay: Duration,
     /// 直连 APNs 用的密钥；没配时为 `None`，只能经中转推官方 App。
     pub direct: Option<ApnsKey>,
+    /// 直连 FCM 用的 Firebase 服务账号 JSON；没配时为 `None`。
+    pub fcm_account: Option<PathBuf>,
     /// 中转服务的基址；这个构建没带中转时为 `None`，见 `RELAY_URL`。
     pub relay: Option<String>,
 }
@@ -86,6 +90,7 @@ impl Default for PushSettings {
             text: true,
             delay: Duration::from_secs(10),
             direct: None,
+            fcm_account: None,
             relay: RELAY_URL.map(str::to_owned),
         }
     }
@@ -188,8 +193,8 @@ struct Poller {
     registrations_failing: bool,
     /// curl 能不能用，第一次要推时看一次。
     curl_ok: Option<bool>,
-    /// 交给发送线程的密钥和中转基址，变了才再交。
-    sent_settings: Option<(Option<ApnsKey>, Option<String>)>,
+    /// 交给发送线程的凭据和中转基址，变了才再交。
+    sent_settings: Option<Credentials>,
     /// 下次要会话列表、读设备表的时刻。
     next_poll: Instant,
     /// 连不上宿主的次数：第一次记警告，之后只记调试日志。
@@ -234,9 +239,13 @@ impl Poller {
                 }
                 (state.settings.clone(), state.listening)
             };
-            let wanted = (settings.direct.clone(), settings.relay.clone());
+            let wanted = Credentials {
+                apns: settings.direct.clone(),
+                fcm: settings.fcm_account.clone(),
+                relay: settings.relay.clone(),
+            };
             if self.sent_settings.as_ref() != Some(&wanted) {
-                self.sender.settings(wanted.0.clone(), wanted.1.clone());
+                self.sender.settings(wanted.clone());
                 self.sent_settings = Some(wanted);
             }
             let now = Instant::now();
@@ -397,7 +406,7 @@ impl Poller {
                 true
             }
             Err(err) => {
-                tracing::warn!("push notifications are off: curl is needed to reach APNs ({err})");
+                tracing::warn!("push notifications are off: curl is needed to reach the push services ({err})");
                 false
             }
         })
@@ -454,10 +463,13 @@ impl Poller {
                 if self.skipped.insert(registration.bundle.clone()) {
                     let device_token =
                         registration.service == PushService::Apns && is_device_token(&registration.token);
-                    let why = if registration.bundle == OFFICIAL_BUNDLE && !device_token {
+                    let fcm_token = registration.service == PushService::Fcm && is_raw_fcm_token(&registration.token);
+                    let why = if fcm_token {
+                        "no FCM service account is configured"
+                    } else if registration.bundle == OFFICIAL_BUNDLE && !device_token {
                         "this build has no push relay"
                     } else if registration.service == PushService::Fcm {
-                        "only the official Android app can be pushed to"
+                        "only the official Android app can be pushed through the relay"
                     } else {
                         "no APNs key is configured for it"
                     };
@@ -487,14 +499,16 @@ fn route(registration: &PushRegistration, settings: &PushSettings) -> Option<Rou
         return None;
     }
     let device_token = registration.service == PushService::Apns && is_device_token(&registration.token);
+    let fcm_token = registration.service == PushService::Fcm && is_raw_fcm_token(&registration.token);
     let via = if device_token && settings.direct.as_ref().is_some_and(|key| key.bundle == registration.bundle) {
         Via::Direct
-    } else if registration.bundle == OFFICIAL_BUNDLE && !device_token {
+    } else if fcm_token && settings.fcm_account.is_some() {
+        Via::Fcm
+    } else if registration.bundle == OFFICIAL_BUNDLE && !device_token && !fcm_token {
         settings.relay.as_ref()?;
         Via::Relay
     } else {
-        // 中转只认自己封的句柄，device token 不交给它。
-        // shortcut: 自己签名打包的 Android App 不推送，有人要时再加服务账号的直连
+        // 中转只认自己封的句柄，device token 和 FCM token 原文不交给它。
         return None;
     };
     Some(Route { env: registration.env, via })
@@ -504,6 +518,11 @@ fn route(registration: &PushRegistration, settings: &PushSettings) -> Option<Rou
 /// 官方 App 也交 device token。
 fn is_device_token(token: &str) -> bool {
     !token.is_empty() && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// `token` 是 FCM registration token 原文，不是中转的句柄：原文带冒号，句柄是 base64url，不会有冒号。
+fn is_raw_fcm_token(token: &str) -> bool {
+    token.contains(':') && runode_protocol::push::is_fcm_token(token)
 }
 
 /// 到宿主的一条连接：读的一半在单独的线程里，把控制消息送到 `messages`。丢掉时断开，读的线程随之

@@ -1,5 +1,5 @@
 //! 设置页的「发送测试推送」：不等 agent，马上给设备表里每条能推的登记发一条通知，看密钥和登记对不对。
-//! 路线和请求跟 `Pusher` 一样（`route`、`apns`），但不重试、不改设备表：错误只报给调用方，换环境、
+//! 路线和请求跟 `Pusher` 一样（`route`、`apns`、`fcm`），但不重试、不改设备表：错误只报给调用方，换环境、
 //! 删登记这些留给真推送时的发送线程。不经监听和宿主，所以 app 连着单独跑的宿主、监听开在那边时也能用。
 
 use runode_paths::Dirs;
@@ -10,6 +10,7 @@ use super::{
     PushSettings,
     apns::{self, DirectKey, Outcome, Via},
     curl::Curl,
+    fcm::{self, FcmKey},
     route,
 };
 use crate::devices;
@@ -46,6 +47,8 @@ pub(super) fn probe(dirs: &Dirs, settings: &PushSettings, content: &TestPush, cu
         Some(Err(why)) => (None, Some(why)),
         None => (None, None),
     };
+    // 服务账号读不了也只算直连 FCM 的那几条推不到。
+    let mut fcm_key = settings.fcm_account.as_deref().map(FcmKey::load);
     let session = SessionId::random().map_err(|err| format!("cannot pick a session id: {err}"))?;
     let meta = SessionMeta { title: Some(content.title.clone()), ..SessionMeta::default() };
     let mut errors = Vec::new();
@@ -67,16 +70,28 @@ pub(super) fn probe(dirs: &Dirs, settings: &PushSettings, content: &TestPush, cu
         }
         let notification =
             Notification::new(registration.machine.clone(), &registration.machine_name, session, &meta, &content.lines);
-        let outcome = match apns::request(
-            route,
-            &registration.token,
-            &notification,
-            direct.as_mut(),
-            settings.relay.as_deref(),
-            crate::now_unix(),
-        ) {
-            Ok(request) => apns::outcome(route.via, curl.send(&request)),
-            Err(why) => Outcome::Failed(why),
+        let now = crate::now_unix();
+        let outcome = if route.via == Via::Fcm {
+            match fcm_key.as_mut() {
+                Some(Ok(key)) => fcm::push(key, curl, &registration.token, &notification, now),
+                Some(Err(why)) => {
+                    errors.push(why.clone());
+                    continue;
+                }
+                None => Outcome::Failed("no FCM service account is configured".to_owned()),
+            }
+        } else {
+            match apns::request(
+                route,
+                &registration.token,
+                &notification,
+                direct.as_mut(),
+                settings.relay.as_deref(),
+                now,
+            ) {
+                Ok(request) => apns::outcome(route.via, curl.send(&request)),
+                Err(why) => Outcome::Failed(why),
+            }
         };
         let why = match outcome {
             Outcome::Done => {
@@ -84,6 +99,7 @@ pub(super) fn probe(dirs: &Dirs, settings: &PushSettings, content: &TestPush, cu
                 continue;
             }
             Outcome::Retry { why, .. } | Outcome::BadToken(why) | Outcome::BadKey(why) | Outcome::Failed(why) => why,
+            Outcome::ExpiredJwt if route.via == Via::Fcm => "FCM refused the access token".to_owned(),
             Outcome::ExpiredJwt => "APNs says the token has expired".to_owned(),
         };
         errors.push(format!("cannot push ({:?}, {:?}): {why}", route.env, route.via));

@@ -16,7 +16,7 @@ use std::{
 use runode_paths::Dirs;
 use runode_protocol::{
     ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo,
-    push::{ApnsEnv, EXPIRES_AFTER, Notification, NotificationKind, OFFICIAL_BUNDLE, PushService},
+    push::{ApnsEnv, EXPIRES_AFTER, Notification, NotificationKind, OFFICIAL_BUNDLE, PushService, fcm_message},
     read_frame,
     remote::{Bytes, DeviceId},
     todo::{Todo, TodoSpec},
@@ -32,9 +32,10 @@ use super::{
     ApnsKey, Listening, PushSettings, Pusher, TestPush,
     apns::{Route, Via, test_key},
     curl::Curl,
+    fcm::test_account,
     probe::probe,
     route,
-    send::{Sender, Target},
+    send::{Credentials, Sender, Target},
 };
 use crate::devices::{self, Device, PushRegistration};
 
@@ -43,9 +44,17 @@ const PATIENCE: Duration = Duration::from_secs(15);
 const TOKEN: &str = "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011";
 /// 中转封的句柄（base64url），官方 App 经中转登记时交的是它。
 const HANDLE: &str = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8w-_";
+/// FCM registration token 原文，没带中转的 Android 构建交的是它。
+const FCM_TOKEN: &str = "cXk2bTRhR3Q:APA91bH-q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ_aE5uR";
+/// `test_account` 的项目发消息的网址。
+const FCM_SEND_URL: &str = "https://fcm.googleapis.com/v1/projects/runode-test/messages:send";
+const TOKEN_URI: &str = "https://oauth.example/token";
+/// 换 access token 的请求回的话。
+const ACCESS_TOKEN: &str = r#"HTTP/2 200\r\n\r\n{"access_token":"ya29.t","expires_in":3599}"#;
 const DEVICE: DeviceId = DeviceId([7; 16]);
 const SESSION: SessionId = SessionId(0x0123_4567_89ab_cdef_0011_2233_4455_6677);
 const RELAY_PROD: Route = Route { env: ApnsEnv::Production, via: Via::Relay };
+const FCM_PROD: Route = Route { env: ApnsEnv::Production, via: Via::Fcm };
 
 /// 测试用的目录，结束时删掉。
 struct Scratch {
@@ -114,6 +123,10 @@ impl Scratch {
     }
 
     fn register_to(&self, service: PushService, env: ApnsEnv, bundle: &str) {
+        self.register_token(service, env, bundle, if bundle == OFFICIAL_BUNDLE { HANDLE } else { TOKEN });
+    }
+
+    fn register_token(&self, service: PushService, env: ApnsEnv, bundle: &str, token: &str) {
         let device = Device {
             device_id: DEVICE,
             name: "手机".into(),
@@ -125,7 +138,7 @@ impl Scratch {
         devices::add(&self.dirs, device).unwrap();
         let registration = PushRegistration {
             device_id: DEVICE,
-            token: if bundle == OFFICIAL_BUNDLE { HANDLE } else { TOKEN }.into(),
+            token: token.into(),
             env,
             service,
             bundle: bundle.into(),
@@ -188,8 +201,17 @@ fn notification(lines: &[&str]) -> Notification {
 }
 
 fn target(route: Route, lines: &[&str]) -> Target {
-    let token = if route.via == Via::Relay { HANDLE } else { TOKEN };
+    let token = match route.via {
+        Via::Relay => HANDLE,
+        Via::Direct => TOKEN,
+        Via::Fcm => FCM_TOKEN,
+    };
     Target { route, device: DEVICE, token: token.into(), notification: notification(lines) }
+}
+
+/// 交给发送线程的配置，不直连 FCM。
+fn credentials(apns: Option<ApnsKey>, relay: Option<&str>) -> Credentials {
+    Credentials { apns, fcm: None, relay: relay.map(str::to_owned) }
 }
 
 /// 请求体里的 JSON。
@@ -215,7 +237,7 @@ fn header<'a>(config: &'a str, name: &str) -> Option<&'a str> {
 fn notifications_through_the_relay() {
     let scratch = Scratch::new("relay");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, Some("https://relay.example".into()));
+    sender.settings(credentials(None, Some("https://relay.example")));
     let before = crate::now_unix();
     sender.notify(vec![target(RELAY_PROD, &["Proceed?"])]);
     let requests = scratch.wait_for(1);
@@ -236,7 +258,7 @@ fn a_curl_without_http2_still_reaches_the_relay() {
     let (key_file, _) = test_key(&scratch.root);
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     let key = ApnsKey { key_file, key_id: "K".into(), team_id: "T".into(), bundle: "dev.example.app".into() };
-    sender.settings(Some(key), Some("https://relay.example".into()));
+    sender.settings(credentials(Some(key), Some("https://relay.example")));
     sender.notify(vec![target(Route { env: ApnsEnv::Development, via: Via::Direct }, &["direct"])]);
     sender.notify(vec![target(RELAY_PROD, &["relay"])]);
     let requests = scratch.wait_for(1);
@@ -251,7 +273,7 @@ fn direct_pushes_sign_with_the_key() {
     let (key_file, _) = test_key(&scratch.root);
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     let key = ApnsKey { key_file, key_id: "K".into(), team_id: "T".into(), bundle: "dev.example.app".into() };
-    sender.settings(Some(key), Some("https://relay.example".into()));
+    sender.settings(credentials(Some(key), Some("https://relay.example")));
     let route = Route { env: ApnsEnv::Development, via: Via::Direct };
     let before = crate::now_unix();
     sender.notify(vec![target(route, &["Proceed?"])]);
@@ -276,10 +298,10 @@ fn direct_pushes_sign_with_the_key() {
     thread::sleep(Duration::from_millis(500));
     assert_eq!(scratch.requests().len(), 2);
     let (key_file, _) = test_key(&scratch.root);
-    sender.settings(
+    sender.settings(credentials(
         Some(ApnsKey { key_file, key_id: "K2".into(), team_id: "T".into(), bundle: "dev.example.app".into() }),
-        Some("https://relay.example".into()),
-    );
+        Some("https://relay.example"),
+    ));
     sender.notify(vec![target(route, &["c"])]);
     let requests = scratch.wait_for(3);
     assert_eq!(body(&requests[2])["aps"]["alert"]["body"], "c");
@@ -297,7 +319,7 @@ fn a_missing_key_file_is_read_again_later() {
         team_id: "T".into(),
         bundle: "dev.example.app".into(),
     };
-    sender.settings(Some(key), Some("https://relay.example".into()));
+    sender.settings(credentials(Some(key), Some("https://relay.example")));
     let route = Route { env: ApnsEnv::Development, via: Via::Direct };
     sender.notify(vec![target(route, &["a"])]);
     // 发送线程按先后办命令、按先后发排着的通知：等到这条中转的发出去，`a` 就已经因为读不到密钥
@@ -320,7 +342,7 @@ fn bad_tokens_try_the_other_environment() {
     let (key_file, _) = test_key(&scratch.root);
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     let key = ApnsKey { key_file, key_id: "K".into(), team_id: "T".into(), bundle: "dev.example.app".into() };
-    sender.settings(Some(key), None);
+    sender.settings(credentials(Some(key), None));
     let route = Route { env: ApnsEnv::Production, via: Via::Direct };
     scratch.rule("/3/device", r#"HTTP/2 400\r\n\r\n{"reason":"BadDeviceToken"}"#);
     sender.notify(vec![target(route, &[])]);
@@ -343,7 +365,7 @@ fn bad_relay_handles_are_dropped() {
     let scratch = Scratch::new("badhandle");
     scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, Some("https://relay.example".into()));
+    sender.settings(credentials(None, Some("https://relay.example")));
     scratch.rule("/v1/notify", r#"HTTP/2 400\r\n\r\n{"reason":"BadDeviceToken"}"#);
     sender.notify(vec![target(RELAY_PROD, &[])]);
     scratch.wait_for(1);
@@ -357,7 +379,7 @@ fn bad_relay_handles_are_dropped() {
 fn failures_are_retried() {
     let scratch = Scratch::new("retry");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, Some("https://relay.example".into()));
+    sender.settings(credentials(None, Some("https://relay.example")));
     scratch.rule("/v1/notify", "FAIL");
     let started = Instant::now();
     sender.notify(vec![target(RELAY_PROD, &[])]);
@@ -371,7 +393,7 @@ fn failures_are_retried() {
 fn an_absurd_retry_after_gives_up_without_stopping_the_sender() {
     let scratch = Scratch::new("retryafter");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, Some("https://relay.example".into()));
+    sender.settings(credentials(None, Some("https://relay.example")));
     scratch
         .rule("/v1/notify", r#"HTTP/2 429\r\nretry-after: 18446744073709551615\r\n\r\n{"reason":"TooManyRequests"}"#);
     sender.notify(vec![target(RELAY_PROD, &["first"])]);
@@ -386,7 +408,7 @@ fn an_absurd_retry_after_gives_up_without_stopping_the_sender() {
 fn backing_off_notifications_are_cancelled_or_replaced() {
     let scratch = Scratch::new("cancel");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, Some("https://relay.example".into()));
+    sender.settings(credentials(None, Some("https://relay.example")));
     scratch.rule("/v1/notify", "FAIL");
     sender.notify(vec![target(RELAY_PROD, &["old"])]);
     scratch.wait_for(1);
@@ -409,7 +431,7 @@ fn backing_off_notifications_are_cancelled_or_replaced() {
 fn backing_off_notifications_follow_the_registrations() {
     let scratch = Scratch::new("keep");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, Some("https://relay.example".into()));
+    sender.settings(credentials(None, Some("https://relay.example")));
     scratch.rule("/v1/notify", "FAIL");
     sender.notify(vec![target(RELAY_PROD, &[])]);
     scratch.wait_for(1);
@@ -804,8 +826,9 @@ fn a_configured_key_takes_device_tokens_of_the_official_app() {
     assert_eq!(route(&token, &PushSettings { direct: None, ..settings }), None);
 }
 
-/// Android 的官方 App 和 iOS 的一样经中转推，电脑不分平台；自己签名打包的 Android App 不推，配了同一个
-/// bundle 的 APNs 密钥也不直连；比自己新的服务不推。
+/// Android 的官方 App 和 iOS 的一样经中转推，电脑不分平台；自己签名打包的 Android App 交句柄的不推，配了
+/// 同一个 bundle 的 APNs 密钥也不直连；比自己新的服务不推。交 FCM token 原文的（没带中转的构建）不论
+/// bundle，配了服务账号时直连 FCM，没配时不推，也不交给中转。
 #[test]
 fn android_apps_route_through_the_relay_only() {
     let official = PushRegistration {
@@ -826,8 +849,106 @@ fn android_apps_route_through_the_relay_only() {
     assert_eq!(route(&official, &PushSettings { relay: None, ..settings.clone() }), None);
     let own = PushRegistration { bundle: "dev.example".into(), ..official.clone() };
     assert_eq!(route(&own, &settings), None);
+
+    let fcm = PushSettings { fcm_account: Some("fcm.json".into()), ..settings.clone() };
+    let raw = PushRegistration { token: FCM_TOKEN.into(), ..official.clone() };
+    let own_raw = PushRegistration { bundle: "dev.example".into(), ..raw.clone() };
+    assert_eq!(route(&raw, &fcm), Some(FCM_PROD));
+    assert_eq!(route(&own_raw, &fcm), Some(FCM_PROD));
+    assert_eq!(route(&raw, &settings), None);
+    assert_eq!(route(&own_raw, &settings), None);
+    // 句柄照旧经中转；APNs 的登记带冒号也不直连 FCM。
+    assert_eq!(route(&official, &fcm), Some(RELAY_PROD));
+    assert_eq!(route(&own, &fcm), None);
+    let apns_raw = PushRegistration { service: PushService::Apns, ..own_raw };
+    assert_eq!(route(&apns_raw, &fcm), None);
+
     let newer = PushRegistration { service: PushService::Unknown, ..official };
     assert_eq!(route(&newer, &settings), None);
+}
+
+/// 交 FCM token 原文的登记直连 FCM：先拿服务账号签的 JWT 换 access token（表单），再带着它发
+/// `fcm_message`；换来的 access token 下一条接着用。
+#[test]
+fn raw_fcm_tokens_are_pushed_straight_to_fcm() {
+    let scratch = Scratch::new("fcm");
+    let account = test_account(&scratch.root, TOKEN_URI);
+    let host = FakeHost::default();
+    let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();
+    pusher.set_settings(PushSettings {
+        delay: Duration::ZERO,
+        fcm_account: Some(account),
+        relay: None,
+        ..PushSettings::default()
+    });
+    pusher.set_listening(Listening::On);
+    scratch.rule("oauth.example/token", ACCESS_TOKEN);
+    scratch.register_token(PushService::Fcm, ApnsEnv::Production, "dev.example.debug", FCM_TOKEN);
+    wait_until("the first session list", || host.list_sessions.load(Ordering::SeqCst) >= 1);
+    host.set(AgentState::Blocked);
+    let requests = scratch.wait_for(2);
+    assert_eq!(url(&requests[0]), TOKEN_URI);
+    assert_eq!(header(&requests[0], "content-type"), Some("application/x-www-form-urlencoded"));
+    assert!(requests[0].contains("data-raw = \"grant_type="), "{}", requests[0]);
+    assert_eq!(url(&requests[1]), FCM_SEND_URL);
+    assert_eq!(header(&requests[1], "authorization"), Some("Bearer ya29.t"));
+    assert_eq!(header(&requests[1], "content-type"), Some("application/json"));
+    let expected = fcm_message(FCM_TOKEN, &notification(&["Do you want to proceed?"]), EXPIRES_AFTER, 0).unwrap();
+    assert_eq!(body(&requests[1]), serde_json::from_slice::<serde_json::Value>(&expected).unwrap());
+
+    host.set(AgentState::Working);
+    thread::sleep(Duration::from_millis(2500));
+    host.set(AgentState::Blocked);
+    let requests = scratch.wait_for(3);
+    assert_eq!(url(&requests[2]), FCM_SEND_URL);
+    assert_eq!(header(&requests[2], "authorization"), Some("Bearer ya29.t"));
+}
+
+/// 直连 FCM 出错时：access token 不认（401）重换了再发；token 作废了（404 `UNREGISTERED`）直接删登记，
+/// 不换环境重发；换 access token 时 Google 不认服务账号（400 `invalid_grant`），之后直连 FCM 的都不发。
+#[test]
+fn fcm_errors_are_handled() {
+    let scratch = Scratch::new("fcm-errors");
+    scratch.register_token(PushService::Fcm, ApnsEnv::Production, "dev.example.debug", FCM_TOKEN);
+    let account = test_account(&scratch.root, TOKEN_URI);
+    let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
+    sender.settings(Credentials { apns: None, fcm: Some(account.clone()), relay: None });
+    let access_token = |n: u32| {
+        let response = format!(r#"HTTP/2 200\r\n\r\n{{"access_token":"ya29.{n}","expires_in":3599}}"#);
+        scratch.rule("oauth.example/token", &response);
+    };
+
+    access_token(1);
+    scratch.rule("messages:send", r#"HTTP/2 401\r\n\r\n{"error":{"code":401,"status":"UNAUTHENTICATED"}}"#);
+    access_token(2);
+    sender.notify(vec![target(FCM_PROD, &["a"])]);
+    let requests = scratch.wait_for(4);
+    assert_eq!(url(&requests[2]), TOKEN_URI);
+    assert_eq!(header(&requests[1], "authorization"), Some("Bearer ya29.1"));
+    assert_eq!(header(&requests[3], "authorization"), Some("Bearer ya29.2"));
+    assert_eq!(scratch.registrations().len(), 1);
+
+    let unregistered = r#"{"error":{"code":404,"status":"NOT_FOUND","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}"#;
+    scratch.rule("messages:send", &format!(r"HTTP/2 404\r\n\r\n{unregistered}"));
+    sender.notify(vec![target(FCM_PROD, &["b"])]);
+    scratch.wait_for(5);
+    wait_until("the registration is dropped", || scratch.registrations().is_empty());
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(scratch.requests().len(), 5);
+
+    // 换一个服务账号文件：重读，没有换来的 access token。
+    let other = scratch.root.join("other-account.json");
+    std::fs::copy(&account, &other).unwrap();
+    sender.settings(Credentials { apns: None, fcm: Some(other), relay: None });
+    scratch.rule(
+        "oauth.example/token",
+        r#"HTTP/2 400\r\n\r\n{"error":"invalid_grant","error_description":"Invalid JWT"}"#,
+    );
+    sender.notify(vec![target(FCM_PROD, &["c"])]);
+    scratch.wait_for(6);
+    sender.notify(vec![target(FCM_PROD, &["d"])]);
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(scratch.requests().len(), 6);
 }
 
 /// 经中转推 Android 的官方 App 时，请求和 iOS 的一样，句柄交给中转。
@@ -890,4 +1011,39 @@ fn a_test_push_notifies_each_phone() {
     assert!(err.contains("BadDeviceToken"), "{err}");
     // 不改设备表。
     assert_eq!(scratch.registrations()[0].env, ApnsEnv::Development);
+}
+
+/// 测试推送也能直连 FCM：换了 access token 再发；服务账号没配、读不了时回原因，不发请求；FCM 说 token
+/// 作废了也只报原因，不删登记。
+#[test]
+fn a_test_push_reaches_fcm() {
+    let scratch = Scratch::new("probe-fcm");
+    let account = test_account(&scratch.root, TOKEN_URI);
+    let settings = PushSettings { enabled: false, fcm_account: Some(account), relay: None, ..PushSettings::default() };
+    let content = TestPush { title: "测试推送".into(), lines: vec!["推送没问题。".into()] };
+    let probe = |settings: &PushSettings| probe(&scratch.dirs, settings, &content, &scratch.curl);
+    scratch.register_token(PushService::Fcm, ApnsEnv::Production, "dev.example.debug", FCM_TOKEN);
+    scratch.rule("oauth.example/token", ACCESS_TOKEN);
+    assert_eq!(probe(&settings), Ok(1));
+    let requests = scratch.wait_for(2);
+    assert_eq!(url(&requests[0]), TOKEN_URI);
+    assert_eq!(url(&requests[1]), FCM_SEND_URL);
+    assert_eq!(header(&requests[1], "authorization"), Some("Bearer ya29.t"));
+    let message = &body(&requests[1])["message"];
+    assert_eq!(message["token"], FCM_TOKEN);
+    assert_eq!(message["data"]["body"], "推送没问题。");
+
+    let err = probe(&PushSettings { fcm_account: None, ..settings.clone() }).unwrap_err();
+    assert!(err.contains("dev.example.debug"), "{err}");
+    let err =
+        probe(&PushSettings { fcm_account: Some(scratch.root.join("missing.json")), ..settings.clone() }).unwrap_err();
+    assert!(err.contains("missing.json"), "{err}");
+    scratch.wait_for(2);
+
+    let unregistered = r#"{"error":{"code":404,"status":"NOT_FOUND","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}"#;
+    scratch.rule("oauth.example/token", ACCESS_TOKEN);
+    scratch.rule("messages:send", &format!(r"HTTP/2 404\r\n\r\n{unregistered}"));
+    let err = probe(&settings).unwrap_err();
+    assert!(err.contains("Unregistered"), "{err}");
+    assert_eq!(scratch.registrations().len(), 1);
 }

@@ -270,6 +270,20 @@ class PushRegistrationTests {
         assertEquals(2, relay.requests.size)
     }
 
+    /** 没有中转时电脑拿到 FCM 的 token 原文，自己的 applicationId 也照样登记。 */
+    @Test fun withoutARelayMachinesGetTheTokenItself() = runTest {
+        val identity = PushIdentity.of("com.example.runode", relayed = false)
+        val push = registration(identity = identity)
+        val fcmToken = "dRk3:APA91bH-x_y"
+        system.give(fcmToken)
+        assertTrue(eventually { push.token != null })
+        push.connected(machine, link)
+        assertTrue(eventually { link.registrations.size == 1 })
+        assertEquals(fcmToken, link.registrations.last().token)
+        assertEquals("com.example.runode", link.registrations.last().bundle)
+        assertEquals(PushService.Fcm, link.registrations.last().service)
+    }
+
     /** 断开再连上时重新换句柄：电脑不认句柄时会删掉登记、不告诉手机，交回旧的还是推不到。 */
     @Test fun reconnectingExchangesTheHandleAgain() = runTest {
         val relay = FakePushRelay()
@@ -383,11 +397,16 @@ class PushRegistrationTests {
         assertTrue(eventually { system.authorizationRequests == 1 })
     }
 
-    /** 只有官方 App 经中转、FCM 推；别的 applicationId 不登记。 */
+    /** 经中转时只有官方 App 登记；不经中转时任何 applicationId 都经 FCM 登记。 */
     @Test fun identityComesFromTheApplicationId() {
-        assertEquals(pushIdentity, PushIdentity.of("dev.runode.mobile"))
-        assertNull(PushIdentity.of("dev.runode.mobile.debug"))
-        assertNull(PushIdentity.of("com.example.runode"))
+        assertEquals(pushIdentity, PushIdentity.of("dev.runode.mobile", relayed = true))
+        assertNull(PushIdentity.of("dev.runode.mobile.debug", relayed = true))
+        assertNull(PushIdentity.of("com.example.runode", relayed = true))
+        assertEquals(pushIdentity, PushIdentity.of("dev.runode.mobile", relayed = false))
+        assertEquals(
+            PushIdentity(ApnsEnv.Production, "com.example.runode", PushService.Fcm),
+            PushIdentity.of("com.example.runode", relayed = false),
+        )
     }
 }
 

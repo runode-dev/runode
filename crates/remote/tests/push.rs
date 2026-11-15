@@ -116,6 +116,25 @@ fn android_registrations_keep_their_service() {
     assert_eq!(phone.read_host_msg(), HostMsg::Done { req: 2 });
     assert_eq!(registration(&harness, device_id).unwrap().service, PushService::Apns);
 
+    // 没带中转的 Android 构建交 FCM token 原文，带冒号；APNs 的 token 带冒号照样不收。
+    let raw = "cXk2bTRhR3Q:APA91bH-q2b9Xk0Lr7mVt3pZw8sYc1nH4dF6gJ_aE5uR";
+    let fcm = ClientMsg::PushRegister {
+        req: 3,
+        token: Some(raw.into()),
+        env: ApnsEnv::Production,
+        bundle: "dev.example".into(),
+        machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
+        machine_name: "Mac".into(),
+        service: PushService::Fcm,
+    };
+    phone.send_control(&serde_json::to_vec(&fcm).unwrap());
+    assert_eq!(phone.read_host_msg(), HostMsg::Done { req: 3 });
+    let registered = registration(&harness, device_id).unwrap();
+    assert_eq!((registered.token.as_str(), registered.service), (raw, PushService::Fcm));
+    phone.send_control(&register(4, Some(raw)));
+    assert!(matches!(phone.read_host_msg(), HostMsg::Error { req: Some(4), id: None, .. }));
+    assert_eq!(registration(&harness, device_id).unwrap().token, raw);
+
     nothing_else_reached_the_host(&mut phone, &host);
 }
 

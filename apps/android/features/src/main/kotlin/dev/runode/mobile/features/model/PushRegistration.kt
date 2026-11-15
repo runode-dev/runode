@@ -25,8 +25,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
 /**
- * 通知的系统接口：Android 上是 FCM 和 `NotificationManager`，由 App 入口给，测试换成假的。等回答的通知由电脑经中转、FCM
- * 推来，App 只要通知权限、拿推送的 token、在前台时清掉已经答完的。
+ * 通知的系统接口：Android 上是 FCM 和 `NotificationManager`，由 App 入口给，测试换成假的。等回答的通知由电脑经中转、
+ * 或者用自己配的 Firebase 服务账号直接经 FCM 推来，App 只要通知权限、拿推送的 token、在前台时清掉已经答完的。
  */
 interface PushNotifications {
     /** 要通知权限：没问过时弹系统的询问框，问过的直接给现在的结果。允许时为真。 */
@@ -55,11 +55,12 @@ data class DeliveredNotification(val id: String, val link: SessionLink)
 data class PushIdentity(val environment: ApnsEnv, val bundle: String, val service: PushService) {
     companion object {
         /**
-         * 按 App 的 applicationId 定：官方 App（[RelayRegister.officialBundle]）经中转、FCM 推，环境固定填 production；别的
-         * applicationId 没有能推它的 FCM 项目，为空，不登记推送。
+         * 按 App 的 applicationId 和推送是否经中转（[relayed]）定，都经 FCM 推，环境固定填 production。经中转时只认官方 App
+         * （[RelayRegister.officialBundle]），中转的 Firebase 项目只推得到它，别的为空，不登记推送；不经中转时 token 属于构建
+         * 里 Firebase 配置的那个项目，由配了它的服务账号的电脑直接推，任何 applicationId 都登记。
          */
-        fun of(applicationId: String): PushIdentity? =
-            if (applicationId == RelayRegister.officialBundle) {
+        fun of(applicationId: String, relayed: Boolean): PushIdentity? =
+            if (!relayed || applicationId == RelayRegister.officialBundle) {
                 PushIdentity(ApnsEnv.Production, applicationId, PushService.Fcm)
             } else {
                 null
@@ -69,7 +70,8 @@ data class PushIdentity(val environment: ApnsEnv, val bundle: String, val servic
 
 /**
  * 向各台电脑登记推送：电脑上有会话的 agent 停下来等回答时，用这里交出的凭据给手机推一条通知，手机不用连着。有中转服务
- * （[relay]）时交的是先为这台电脑换来的句柄，电脑拿不到推送的 token；换不到时和电脑回错一样记下原因。
+ * （[relay]）时交的是先为这台电脑换来的句柄，电脑拿不到推送的 token，换不到时和电脑回错一样记下原因；没有中转时交的是
+ * 推送的 token 原文，由电脑直接经 FCM 推。
  *
  * 打开着提醒时，每台电脑连上（`Ready`）都要一次通知权限，有了结果才登记；允许了才要推送的 token，token 变了再登记一次。
  * 系统不允许、或设置里关掉提醒时对电脑注销（`token` 为空的同一条消息）：电脑记着登记，不注销它会接着推问题的内容。

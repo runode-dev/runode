@@ -169,7 +169,7 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
             "The name paired phones show for this computer. When empty, the computer name from System Settings › General › Sharing. Takes effect within a few seconds; connected phones drop briefly and reconnect."
         }
         "remote-access-push" => {
-            "When an agent waits for your answer, send a notification to paired phones, even when the Runode app on the phone is closed: true, false. The phone registers for this when it connects; the official app's pushes go through the push relay, an app you build yourself is pushed with the apns-* keys below when they are set."
+            "When an agent waits for your answer, send a notification to paired phones, even when the Runode app on the phone is closed: true, false. The phone registers for this when it connects; the official app's pushes go through the push relay, an app you build yourself is pushed with the apns-* keys or fcm-service-account-file below when they are set."
         }
         "remote-access-push-text" => {
             "Include the question and choices from the bottom of the screen in the notification: true, false. With false only the title and the agent are sent."
@@ -184,6 +184,9 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "apns-team-id" => "Your Apple developer team ID (10 characters).",
         "apns-bundle-id" => {
             "The bundle ID of your build of the phone app; registrations from this app are pushed with your key."
+        }
+        "fcm-service-account-file" => {
+            "Push straight to Google instead of through the relay, for an Android app you build yourself: the service account JSON downloaded from the Firebase console (Project settings › Service accounts › Generate new private key), from the same Firebase project as the google-services.json in the app; ~/ for the home directory. A phone whose app registered its FCM token itself is pushed with this account; registrations through the relay still go through the relay. Shown in Settings when developer-mode is on."
         }
         "agent-notifications" => {
             "Post a system notification when an agent is waiting for your answer or has finished in a split you are not looking at: true, false. Notifications only work in the packaged Runode.app."

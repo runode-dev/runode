@@ -166,12 +166,12 @@ class AndroidPushNotifications private constructor(private val context: Context)
 }
 
 /**
- * 把推送用到的三项装进来：通知的系统接口、按 applicationId 定的 App 身份、编译时配的中转。
- * 官方 App 的 token 只经中转交出去，没有可用的中转时不装身份，什么都不登记。
+ * 把推送用到的三项装进来：通知的系统接口、按 applicationId 和有没有中转定的 App 身份、编译时配的中转。
+ * 带中转的构建只交句柄；没带中转的直接交 FCM 的 token，由配了 Firebase 服务账号的电脑直连 FCM 推送。
  */
 fun AppDependencies.installPush(context: Context) {
     notifications = AndroidPushNotifications.shared(context)
     val relay = HttpPushRelay.configured(BuildConfig.RUNODE_PUSH_RELAY)
     pushRelay = relay
-    pushIdentity = relay?.let { PushIdentity.of(BuildConfig.APPLICATION_ID) }
+    pushIdentity = PushIdentity.of(BuildConfig.APPLICATION_ID, relayed = relay != null)
 }

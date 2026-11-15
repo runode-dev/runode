@@ -22,7 +22,7 @@ use super::curl::{Request, Response};
 /// 签好的 JWT 用这么久就换新的（APNs 要求 20 分钟到 1 小时之间换）。
 const JWT_LIFETIME: Duration = Duration::from_secs(40 * 60);
 
-/// 推送走哪条路：APNs 环境，直连还是经中转。
+/// 推送走哪条路：APNs 环境，直连 APNs、经中转还是直连 FCM。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Route {
     pub(crate) env: ApnsEnv,
@@ -38,10 +38,12 @@ impl Route {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Via {
-    /// 用配置里的密钥直连 APNs。
+    /// 用配置里的 APNs 密钥直连 APNs。
     Direct,
     /// 经中转服务。
     Relay,
+    /// 用配置里的服务账号直连 FCM（`fcm::push`）；FCM 不分环境，`Route::env` 不起作用。
+    Fcm,
 }
 
 /// 直连 APNs 用的密钥：从 .p8 文件读出来的 P-256 私钥，和签 JWT 要的 key id、team id，以及 App 的
@@ -114,6 +116,8 @@ pub(crate) fn request(
             let url = format!("{}{RELAY_NOTIFY}", relay.trim_end_matches('/'));
             Ok(Request { method: "POST", url, headers: Vec::new(), body: Some(body), http2: false })
         }
+        // FCM 要先换 access token，不在这里拼请求。
+        Via::Fcm => Err("an FCM push is not an APNs request".to_owned()),
     }
 }
 
@@ -128,15 +132,16 @@ pub(crate) enum Outcome {
     },
     /// device token 不认（410 或 400 `BadDeviceToken`），可能是登记的环境不对。
     BadToken(String),
-    /// 直连用的密钥不对（403 `InvalidProviderToken`）。
+    /// 直连用的凭据不对：APNs 的密钥（403 `InvalidProviderToken`），或者 FCM 的服务账号。
     BadKey(String),
-    /// JWT 过期（403 `ExpiredProviderToken`）：重签了再试。
+    /// 直连用的令牌过期或被拒：APNs 的 JWT（403 `ExpiredProviderToken`）重签，FCM 的 access token 重换，
+    /// 然后再试。
     ExpiredJwt,
     /// 别的错误，不再试。
     Failed(String),
 }
 
-/// 看 `via` 上的响应（`Err` 是没拿到响应）该怎么办。
+/// 看 `via` 上的响应（`Err` 是没拿到响应）该怎么办。只管 `Via::Direct` 和 `Via::Relay`。
 pub(crate) fn outcome(via: Via, response: Result<Response, String>) -> Outcome {
     let response = match response {
         Ok(response) => response,

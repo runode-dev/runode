@@ -14,7 +14,8 @@ use crate::ui::button::{Button, ButtonVariant};
 
 const ERROR_ID: &str = "test-push";
 /// 测试推送用到的配置项，按下时都要已经写回。
-const APNS_KEYS: [&str; 4] = ["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id"];
+const PUSH_KEYS: [&str; 5] =
+    ["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id", "fcm-service-account-file"];
 
 #[derive(Default)]
 pub(super) enum State {
@@ -50,7 +51,7 @@ impl SettingsView {
         self.errors.remove(ERROR_ID);
         // 刚改的密钥几项可能还没写回（停手计时没到、按下时焦点还在输入框里）：先写回，写不进去的不测。
         self.commit_all(cx);
-        if APNS_KEYS.iter().any(|key| self.errors.contains_key(*key)) {
+        if PUSH_KEYS.iter().any(|key| self.errors.contains_key(*key)) {
             cx.notify();
             return;
         }

@@ -204,6 +204,8 @@ pub struct Config {
     pub apns_key_id: Option<String>,
     pub apns_team_id: Option<String>,
     pub apns_bundle_id: Option<String>,
+    /// 直连 FCM 用的 Firebase 服务账号 JSON，`~/` 开头时从家目录算。
+    pub fcm_service_account_file: Option<String>,
     /// 界面语言的标签，照配置里写的；`None` 表示跟随系统。
     pub language: Option<String>,
     /// agent 等用户回答或者干完了、用户又没在看那个分屏时，发系统通知。
@@ -298,6 +300,7 @@ impl Default for Config {
             apns_key_id: None,
             apns_team_id: None,
             apns_bundle_id: None,
+            fcm_service_account_file: None,
             language: None,
             agent_notifications: true,
             agent_notifications_exclude: Vec::new(),

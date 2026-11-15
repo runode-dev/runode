@@ -97,7 +97,7 @@ pub const KEYS: &[&[&str]] = &[
         "remote-access-push-text",
         "remote-access-push-delay",
     ],
-    &["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id"],
+    &["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id", "fcm-service-account-file"],
     &[
         "agent-notifications",
         "agent-notifications-exclude",
@@ -457,6 +457,7 @@ impl Config {
             "apns-key-id" => self.apns_key_id = text(value),
             "apns-team-id" => self.apns_team_id = text(value),
             "apns-bundle-id" => self.apns_bundle_id = text(value),
+            "fcm-service-account-file" => self.fcm_service_account_file = text(value),
             "agent-notifications" => {
                 self.agent_notifications = or_default(empty, defaults.agent_notifications, || parse_bool(value))?;
             }
@@ -912,10 +913,11 @@ unknown-key = whatever
             (d.remote_access_push, d.remote_access_push_text, d.remote_access_push_delay),
             (true, true, Duration::from_secs(10))
         );
-        assert_eq!(d.apns_key_file, None);
+        assert_eq!((&d.apns_key_file, &d.fcm_service_account_file), (&None, &None));
         let config = load(&[
             "remote-access-push = false\nremote-access-push-text = false\nremote-access-push-delay = 30\n\
-             apns-key-file =  ~/keys/AuthKey_X.p8 \napns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app",
+             apns-key-file =  ~/keys/AuthKey_X.p8 \napns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\n\
+             fcm-service-account-file = ~/keys/firebase-adminsdk.json ",
         ]);
         assert_eq!(
             (config.remote_access_push, config.remote_access_push_text, config.remote_access_push_delay),
@@ -926,12 +928,17 @@ unknown-key = whatever
             (config.apns_key_id.as_deref(), config.apns_team_id.as_deref(), config.apns_bundle_id.as_deref()),
             (Some("X"), Some("T"), Some("cn.example.app"))
         );
+        assert_eq!(config.fcm_service_account_file.as_deref(), Some("~/keys/firebase-adminsdk.json"));
         // 秒数写错的保留前面的值；值为空回到默认。
         for bad in ["-1", "2.5", "soon"] {
             let config = load(&[&format!("remote-access-push-delay = 5\nremote-access-push-delay = {bad}")]);
             assert_eq!(config.remote_access_push_delay, Duration::from_secs(5), "{bad}");
         }
         assert_eq!(load(&["apns-key-id = X\napns-key-id ="]).apns_key_id, None);
+        assert_eq!(
+            load(&["fcm-service-account-file = a.json\nfcm-service-account-file ="]).fcm_service_account_file,
+            None
+        );
     }
 
     #[test]

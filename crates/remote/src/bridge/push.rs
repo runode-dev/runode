@@ -57,7 +57,7 @@ impl PushRequests<'_> {
             tracing::info!("remote device {device} unregistered from push notifications");
             return Ok(());
         };
-        check_token(token)?;
+        check_token(token, service)?;
         if env == ApnsEnv::Unknown {
             return Err("unknown APNs environment".into());
         }
@@ -88,10 +88,13 @@ impl PushRequests<'_> {
 }
 
 /// token 是 1 到 `MAX_TOKEN_LEN` 个 base64url 字母：device token 的十六进制数字和中转的句柄都在里面。
-fn check_token(token: &str) -> Result<(), String> {
-    let valid = |b: u8| b.is_ascii_alphanumeric() || b == b'-' || b == b'_';
+/// `service` 是 FCM 时另外允许冒号：没带中转的 Android 构建交的是 FCM registration token 原文。
+fn check_token(token: &str, service: PushService) -> Result<(), String> {
+    let colon = service == PushService::Fcm;
+    let valid = |b: u8| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || (colon && b == b':');
     if token.is_empty() || token.len() > MAX_TOKEN_LEN || !token.bytes().all(valid) {
-        return Err(format!("a push token is 1 to {MAX_TOKEN_LEN} base64url characters"));
+        let allowed = if colon { "base64url characters or colons" } else { "base64url characters" };
+        return Err(format!("a push token is 1 to {MAX_TOKEN_LEN} {allowed}"));
     }
     Ok(())
 }

@@ -72,10 +72,10 @@ class AppDependencies(
     /** 通知的系统接口；为空时不登记推送、不清通知（测试、演示模式，以及没带 Firebase 配置的构建）。 */
     var notifications: PushNotifications? = null
 
-    /** 登记推送时报给电脑的 App 身份，App 入口按 applicationId 定（[PushIdentity.of]）；为空时不登记推送。 */
+    /** 登记推送时报给电脑的 App 身份，App 入口按 applicationId 和有没有中转定（[PushIdentity.of]）；为空时不登记推送。 */
     var pushIdentity: PushIdentity? = null
 
-    /** 官方 App 换推送句柄的中转服务；为空时直接把推送的 token 交给电脑。 */
+    /** 官方 App 换推送句柄的中转服务；为空时直接把推送的 token 交给电脑，由电脑直连 FCM。 */
     var pushRelay: PushRelay? = null
 
     /** 连上一台电脑的远程桌面；为空时没有远程桌面的入口（测试、演示模式）。 */
