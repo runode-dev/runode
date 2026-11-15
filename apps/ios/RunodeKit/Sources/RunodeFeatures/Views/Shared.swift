@@ -326,7 +326,8 @@
         }
     }
 
-    /// 滚动视图（`List`、`Form`）去掉系统的底色，铺 `ThemeColors.page`。
+    /// 滚动视图（`List`、`Form`）去掉系统的底色，铺 `ThemeColors.page`；iOS 26 起所在那一页的导航栏底色
+    /// 也由它定，同一页不要再设 `toolbarBackground`。
     private struct PageBackground: ViewModifier {
         @Environment(\.themeColors) private var colors
 
