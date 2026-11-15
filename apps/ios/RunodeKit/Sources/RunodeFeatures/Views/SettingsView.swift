@@ -68,7 +68,7 @@
                 Text("外观")
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("跟随电脑时用电脑上终端的配色，几台电脑不一样时用上次打开的终端所在的那台；终端页总按各自会话的配色显示。")
+                    Text("跟随电脑时用电脑上终端的配色，几台电脑不一样时用上次打开的终端所在的那台；终端本身总按各自会话的配色显示。")
                     if AppLocalization.needsRelaunch(for: language) {
                         Text("重新打开 Runode 后换成所选的语言。")
                     }

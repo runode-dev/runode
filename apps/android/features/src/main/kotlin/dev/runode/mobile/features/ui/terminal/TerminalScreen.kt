@@ -128,7 +128,8 @@ import kotlinx.coroutines.delay
 
 /**
  * 终端页：顶栏是会话名和连接状态，分了屏时下面一排分屏标签；中间是终端，断线时顶上叠一条横幅，结束了斜盖一枚印章；
- * 底下是等你回答时的回答行和按键栏（软键盘弹出时它跟在键盘上面）。整页按这个会话的主题（[TerminalModel.chromeTheme]）上色。
+ * 底下是等你回答时的回答行和按键栏（软键盘弹出时它跟在键盘上面）。顶栏、分屏标签和底栏跟着外层套的 app 主题，
+ * 终端和叠在它上面的横幅、印章、提示按这个会话的主题（[TerminalModel.chromeTheme]）上色。
  *
  * @param sessions 这台电脑的会话列表：分屏、认出来的提问从它取
  * @param dictation 语音输入；为空时麦克风键不起作用
@@ -138,24 +139,6 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun TerminalScreen(
-    model: TerminalModel,
-    preferences: AppPreferences,
-    sessions: SessionListModel?,
-    dictation: DictationModel?,
-    machine: MachineRecord?,
-    onBack: () -> Unit,
-    onOpenGit: () -> Unit,
-    onSelectPane: (SessionId) -> Unit,
-    onPaneEnded: (List<SessionId>) -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    RunodeTheme(model.chromeTheme) {
-        TerminalPage(model, preferences, sessions, dictation, machine, onBack, onOpenGit, onSelectPane, onPaneEnded, onOpenSettings)
-    }
-}
-
-@Composable
-private fun TerminalPage(
     model: TerminalModel,
     preferences: AppPreferences,
     sessions: SessionListModel?,
@@ -217,57 +200,59 @@ private fun TerminalPage(
             PaneTabBar(panes, model.sessionId, onSelectPane)
             HorizontalDivider(thickness = 1.dp, color = colors.hairline)
         }
-        Box(Modifier.weight(1f).fillMaxWidth().background(model.background.toColor())) {
-            // 换了分屏时整个终端视图重建，新的视图按自己的大小报「适配手机」的网格。
-            androidx.compose.runtime.key(model) {
-                Terminal(
-                    delegate = delegate,
-                    modifier = Modifier.fillMaxSize(),
-                    topObstruction = if (banner == null) 0.dp else bannerHeight,
-                    fontSizeOverride = preferences.fontSize?.toFloat(),
-                    bellHaptics = preferences.bellHaptics,
-                    acceptsInput = !model.isEnded,
-                    dictating = recording,
-                    onMake = { view ->
-                        terminalView = view
-                        model.attachDisplay(view)
-                    },
-                    onRelease = { view ->
-                        model.detachDisplay(view)
-                        if (terminalView === view) terminalView = null
-                    },
-                )
-            }
-            if (banner != null) {
-                Banner(
-                    banner,
-                    model,
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .onSizeChanged { bannerHeight = with(density) { it.height.toDp() } + 8.dp },
-                )
-            }
-            androidx.compose.animation.AnimatedVisibility(
-                visible = model.isEnded,
-                enter = scaleIn(initialScale = 1.4f) + fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.Center),
-            ) { EndedStamp(model.phase) }
-            dictation?.phase?.takeIf { it != DictationModel.Phase.Idle }?.let { phase ->
-                DictationBadge(phase, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
-            }
-            if (model.scrolledBack) {
-                SurfaceButton(
-                    ActionKind.Primary,
-                    onClick = { model.scrollToBottom() },
-                    height = 48.dp,
-                    cornerRadius = 24.dp,
-                    contentPadding = 18.dp,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                ) {
-                    Icon(AppIcons.jumpToLatest, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.terminal_jump_to_latest), style = Type.subheadline)
+        RunodeTheme(model.chromeTheme) {
+            Box(Modifier.weight(1f).fillMaxWidth().background(model.background.toColor())) {
+                // 换了分屏时整个终端视图重建，新的视图按自己的大小报「适配手机」的网格。
+                androidx.compose.runtime.key(model) {
+                    Terminal(
+                        delegate = delegate,
+                        modifier = Modifier.fillMaxSize(),
+                        topObstruction = if (banner == null) 0.dp else bannerHeight,
+                        fontSizeOverride = preferences.fontSize?.toFloat(),
+                        bellHaptics = preferences.bellHaptics,
+                        acceptsInput = !model.isEnded,
+                        dictating = recording,
+                        onMake = { view ->
+                            terminalView = view
+                            model.attachDisplay(view)
+                        },
+                        onRelease = { view ->
+                            model.detachDisplay(view)
+                            if (terminalView === view) terminalView = null
+                        },
+                    )
+                }
+                if (banner != null) {
+                    Banner(
+                        banner,
+                        model,
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .onSizeChanged { bannerHeight = with(density) { it.height.toDp() } + 8.dp },
+                    )
+                }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = model.isEnded,
+                    enter = scaleIn(initialScale = 1.4f) + fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.align(Alignment.Center),
+                ) { EndedStamp(model.phase) }
+                dictation?.phase?.takeIf { it != DictationModel.Phase.Idle }?.let { phase ->
+                    DictationBadge(phase, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
+                }
+                if (model.scrolledBack) {
+                    SurfaceButton(
+                        ActionKind.Primary,
+                        onClick = { model.scrollToBottom() },
+                        height = 48.dp,
+                        cornerRadius = 24.dp,
+                        contentPadding = 18.dp,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    ) {
+                        Icon(AppIcons.jumpToLatest, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.terminal_jump_to_latest), style = Type.subheadline)
+                    }
                 }
             }
         }

@@ -45,7 +45,7 @@ import dev.runode.mobile.protocol.TermSettings
 fun Rgb.toColor(): Color = Color(r.toInt(), g.toInt(), b.toInt())
 
 /**
- * 终端页以外的界面上的几种底色和字色，从主题（[AppTheme]）的底色和前景色推出来，进出终端页时底色和明暗不跳。界面上不直接
+ * 界面上（终端本身除外）的几种底色和字色，从主题（[AppTheme]）的底色和前景色推出来，进出终端页时底色和明暗不跳。界面上不直接
  * 用 Material 的颜色，一律从 [LocalThemeColors] 取。状态色取自 `StatusPalette`，只表示状态。
  */
 @Immutable
@@ -154,7 +154,7 @@ val themeColors: ThemeColors
 
 /**
  * 套用主题：配色放进 [LocalThemeColors]，Material 的部件按 [ThemeColors.colorScheme] 上色，字默认是正文色。根界面套一次，
- * 终端页按它那个会话的主题再套一次。
+ * 终端页的终端区域按它那个会话的主题再套一次。
  */
 @Composable
 fun RunodeTheme(theme: AppTheme, content: @Composable () -> Unit) {

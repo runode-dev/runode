@@ -79,10 +79,10 @@ public final class TerminalModel {
     public private(set) var scrolledBack = false
     /// 软键盘（或硬件键盘的输入焦点）在终端上。
     public private(set) var keyboardVisible = false
-    /// 终端的背景色和前景色，导航栏、底栏、空白区按它们配色（`chromeTheme`）。
+    /// 终端的背景色和前景色。
     public private(set) var background = TermSettings.default.background
     public private(set) var foreground = TermSettings.default.foreground
-    /// 终端页四周（导航栏、分屏标签、底栏、按键栏）的配色，跟着这个终端的主题走。
+    /// 由终端的背景色和前景色推出的主题。
     public var chromeTheme: AppTheme { AppTheme(background: background, foreground: foreground) }
     /// 在等用户确认结束会话。
     public var isConfirmingKill = false

@@ -440,7 +440,7 @@
     <string name="theme_dark">深色</string>
     <string name="follow_system">跟随系统</string>
     <string name="settings_language">语言</string>
-    <string name="settings_appearance_footer">跟随电脑时用电脑上终端的配色，几台电脑不一样时用上次打开的终端所在的那台；终端页总按各自会话的配色显示。</string>
+    <string name="settings_appearance_footer">跟随电脑时用电脑上终端的配色，几台电脑不一样时用上次打开的终端所在的那台；终端本身总按各自会话的配色显示。</string>
     <string name="settings_terminal">终端</string>
     <string name="settings_default_size">默认尺寸</string>
     <string name="settings_font_follows">字号跟随系统</string>

@@ -10546,25 +10546,25 @@
         }
       }
     },
-    "跟随电脑时用电脑上终端的配色，几台电脑不一样时用上次打开的终端所在的那台；终端页总按各自会话的配色显示。" : {
+    "跟随电脑时用电脑上终端的配色，几台电脑不一样时用上次打开的终端所在的那台；终端本身总按各自会话的配色显示。" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Follow Computer uses your computer's terminal colors; if your computers differ, it uses the one where you last opened a terminal. Terminal pages always use their own session's colors."
+            "value" : "Follow Computer uses your computer's terminal colors; if your computers differ, it uses the one where you last opened a terminal. Terminals themselves always use their own session's colors."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "跟随电脑时用电脑上终端的配色，几台电脑不一样时用上次打开的终端所在的那台；终端页总按各自会话的配色显示。"
+            "value" : "跟随电脑时用电脑上终端的配色，几台电脑不一样时用上次打开的终端所在的那台；终端本身总按各自会话的配色显示。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "跟隨電腦時用電腦上終端機的配色，幾台電腦不一樣時用上次開啟的終端機所在的那台；終端機頁總按各自工作階段的配色顯示。"
+            "value" : "跟隨電腦時用電腦上終端機的配色，幾台電腦不一樣時用上次開啟的終端機所在的那台；終端機本身總按各自工作階段的配色顯示。"
           }
         }
       }

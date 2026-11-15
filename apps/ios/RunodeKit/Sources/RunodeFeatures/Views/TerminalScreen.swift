@@ -26,12 +26,9 @@
         var machine: MachineRecord?
         /// 打开 app 的设置页，语音输入缺模型时从弹框过去下载。
         var onOpenSettings: () -> Void = {}
-        /// 这一页显示了，或者显示着时背景换了深浅；带着背景是不是深色。
-        var onShown: (Bool) -> Void = { _ in }
-        /// 这一页不显示了（返回了，或者上面又推了一页）。
-        var onHidden: () -> Void = {}
         @Environment(\.openURL) private var openURL
-        @State private var isShown = false
+        /// 外层套的 app 主题，导航栏、分屏标签和底栏按它上色。
+        @Environment(\.appTheme) private var appTheme
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
         /// 嵌着的终端视图，底部的按键栏按了发给它。
@@ -44,12 +41,16 @@
         @ScaledMetric(relativeTo: .headline) private var titleGlyphSize: CGFloat = 15
 
         private var background: Color { Color(model.background) }
+        /// 叠在终端上的横幅、提示、按钮用的深浅模式，跟着终端的背景；它们的强调色是终端的前景色。
         private var scheme: ColorScheme { model.background.isDark ? .dark : .light }
+        /// 导航栏、分屏标签和底栏的主题；外层没套主题时按终端的配色。
+        private var chromeTheme: AppTheme { appTheme ?? model.chromeTheme }
+        private var chromeScheme: ColorScheme { chromeTheme.isDark ? .dark : .light }
 
         var body: some View {
             TerminalViewRepresentable(
                 model: model, preferences: preferences, topObstruction: bannerMessage == nil ? 0 : bannerHeight,
-                dictating: dictation?.phase == .recording,
+                dictating: dictation?.phase == .recording, keyBarTheme: chromeTheme,
                 onMake: { view in terminalView = view },
                 onDictation: { press in
                     dictation?.press(press, machine: machine, source: preferences.dictationSource) { [model] text in
@@ -72,6 +73,8 @@
                         Button("回到最新", systemImage: "arrow.down.to.line") { model.scrollToBottom() }
                             .prominentButtonStyle()
                             .controlSize(.large)
+                            .tint(Color(model.foreground))
+                            .environment(\.colorScheme, scheme)
                             .padding()
                             .transition(.opacity)
                     }
@@ -82,9 +85,9 @@
                 .animation(.easeOut(duration: 0.2), value: model.isAwaitingAnswer)
                 .navigationTitle(model.title)
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(Color(model.chromeTheme.page), for: .navigationBar)
+                .toolbarBackground(Color(chromeTheme.page), for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
-                .toolbarColorScheme(scheme, for: .navigationBar)
+                .toolbarColorScheme(chromeScheme, for: .navigationBar)
                 .toolbar {
                     TitleItem { titleView }
                     ToolbarItem(placement: .primaryAction) { moreMenu }
@@ -107,22 +110,7 @@
                     if ended, tabMates.contains(model.sessionId) { onPaneEnded(tabMates) }
                 }
                 .sensoryFeedback(.start, trigger: dictation?.phase == .recording) { _, recording in recording }
-                .onAppear {
-                    isShown = true
-                    onShown(model.background.isDark)
-                }
-                .onDisappear {
-                    dictation?.cancel()
-                    isShown = false
-                    onHidden()
-                }
-                .onChange(of: model.background.isDark) { _, isDark in
-                    if isShown { onShown(isDark) }
-                }
-                // 切分屏只换 `model`，这一页不重新出现，要重新报一次，`onHidden` 撤的才是现在这个。
-                .onChange(of: ObjectIdentifier(model)) {
-                    if isShown { onShown(model.background.isDark) }
-                }
+                .onDisappear { dictation?.cancel() }
                 .alert(
                     "语音输入没有成功",
                     isPresented: Binding(
@@ -157,12 +145,12 @@
                 PaneTabBar(panes: tabPanes, current: model.sessionId, onSelect: onSelectPane)
                     .background(chrome.page)
                     .overlay(alignment: .bottom) { chrome.hairline.frame(height: 1) }
-                    .environment(\.colorScheme, scheme)
+                    .environment(\.colorScheme, chromeScheme)
             }
         }
 
-        /// 终端四周的配色，整页放进环境；这一页自己画底栏时直接取。
-        private var chrome: ThemeColors { ThemeColors(model.chromeTheme) }
+        /// 导航栏、分屏标签和底栏的配色，整页放进环境；这一页自己画底栏时直接取。
+        private var chrome: ThemeColors { ThemeColors(chromeTheme) }
 
         /// 分屏时标题是工作区的名字，当前会话由下面的分屏标签标出；没分屏时是会话名，前面带它的状态。
         private var titleView: some View {
@@ -190,7 +178,7 @@
                 }
                 .multilineTextAlignment(.center)
                 .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                .environment(\.colorScheme, scheme)
+                .environment(\.colorScheme, chromeScheme)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isHeader)
             }
@@ -303,6 +291,7 @@
                     .padding(.vertical, 6)
                     .frame(minHeight: 44)
                     .background(.regularMaterial, in: .card)
+                    .tint(Color(model.foreground))
                     .environment(\.colorScheme, scheme)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
@@ -407,7 +396,7 @@
                 .padding(.bottom, restingBar == nil ? 8 : 0)
                 .background(chrome.page)
                 .overlay(alignment: .top) { chrome.hairline.frame(height: 1) }
-                .environment(\.colorScheme, scheme)
+                .environment(\.colorScheme, chromeScheme)
             }
         }
     }
@@ -580,6 +569,8 @@
         var topObstruction: CGFloat = 0
         /// 正在录音，麦克风键显示成按下去的样子。
         var dictating = false
+        /// 按键栏照它配色。
+        var keyBarTheme: AppTheme
         /// 建好了终端视图，页面的按键栏要用它。
         var onMake: (TerminalView) -> Void = { _ in }
         var onDictation: (DictationPress) -> Void = { _ in }
@@ -615,7 +606,7 @@
             view.bellHaptics = preferences.bellHaptics
             view.acceptsInput = !model.isEnded
             view.dictating = dictating
-            view.keyBarPalette = KeyBarPalette(theme: model.chromeTheme)
+            view.keyBarPalette = KeyBarPalette(theme: keyBarTheme)
             context.coordinator.onDictation = onDictation
         }
 

@@ -38,8 +38,8 @@ import dev.runode.mobile.features.ui.theme.themeColors
 
 /**
  * App 的根界面：首页，往里是 [AppModel.path] 上的会话列表、终端页这些。配对页、设置页盖在整个导航栈上。系统的返回键依次
- * 关掉配对页、设置页，再退回导航栈的上一页；在首页时交给系统。终端页以外的界面按设置里选的配色（[AppModel.theme]），
- * 终端页按它那个会话的主题上色。App 进出前台时告诉 [AppModel.setActive]。
+ * 关掉配对页、设置页，再退回导航栈的上一页；在首页时交给系统。界面按设置里选的配色（[AppModel.theme]），终端本身除外。
+ * App 进出前台时告诉 [AppModel.setActive]。
  */
 @Composable
 fun RunodeApp(app: AppModel) {
@@ -117,11 +117,10 @@ private fun Destination(app: AppModel, route: Route) {
         is Route.Terminal -> {
             val session = app.shownSession(route.machine, route.session)
             val model = app.terminal(route.machine, session)
+            SystemBars(themeColors.isDark)
             if (model == null) {
-                SystemBars(themeColors.isDark)
                 MissingPage(stringResource(R.string.terminal_not_found), back)
             } else {
-                SystemBars(model.chromeTheme.isDark)
                 TerminalScreen(
                     model = model,
                     preferences = app.settings.preferences,

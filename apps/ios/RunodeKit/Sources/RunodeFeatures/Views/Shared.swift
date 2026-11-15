@@ -11,7 +11,7 @@
         }
     }
 
-    /// 终端页以外的界面上的几种底色，从主题（`AppTheme`）的底色和前景色推出来；环境里没设时（预览）用
+    /// 界面上（终端本身除外）的几种底色，从主题（`AppTheme`）的底色和前景色推出来；环境里没设时（预览）用
     /// 系统的。界面上不直接用系统的底色和填充色，一律从环境里的这一份取。
     struct ThemeColors {
         /// 页面，相当于 `systemGroupedBackground`。
@@ -100,9 +100,8 @@
         /// 套用主题：底色和主题本身放进环境，深色主题用深色模式（字、系统控件、键盘跟着变），浅色主题用浅色
         /// 模式；按钮、链接这些强调色用终端的前景色，和桌面一样黑白为主，不用系统的蓝色。`preferredColorScheme`
         /// 传不进 sheet，弹出的页面各自再套一次。
-        /// `colorScheme` 不为空时深浅模式用它，不按主题。
-        func appTheme(_ theme: AppTheme, colorScheme: ColorScheme? = nil) -> some View {
-            modifier(AppThemeModifier(theme: theme, colorScheme: colorScheme))
+        func appTheme(_ theme: AppTheme) -> some View {
+            modifier(AppThemeModifier(theme: theme))
         }
 
         /// 从环境取来的主题：为空时原样。
@@ -119,7 +118,6 @@
 
     private struct AppThemeModifier: ViewModifier {
         let theme: AppTheme
-        let colorScheme: ColorScheme?
         @Environment(\.followsSystemColorScheme) private var followsSystemColorScheme
 
         func body(content: Content) -> some View {
@@ -127,7 +125,7 @@
                 .environment(\.themeColors, ThemeColors(theme))
                 .environment(\.appTheme, theme)
                 .tint(Color(theme.foreground))
-                .preferredColorScheme(colorScheme ?? (followsSystemColorScheme ? nil : theme.isDark ? .dark : .light))
+                .preferredColorScheme(followsSystemColorScheme ? nil : theme.isDark ? .dark : .light)
         }
     }
 

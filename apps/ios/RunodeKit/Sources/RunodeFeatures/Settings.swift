@@ -14,7 +14,7 @@ public struct AppPreferences: Hashable, Sendable, Codable {
     /// agent 停下来等回答时，由电脑经推送发通知提醒。关掉时向各台电脑注销推送。
     public var alertsBlockedAgents = true
     public var dictationSource: DictationSource = .phone
-    /// 终端页以外的界面用哪套配色；终端页总按各自会话的主题。
+    /// 界面用哪套配色；终端本身总按各自会话的主题。
     public var appearance: AppAppearance = .computer
 
     public init() {}
@@ -35,7 +35,7 @@ public struct AppPreferences: Hashable, Sendable, Codable {
     }
 }
 
-/// 设置里的「主题」：终端页以外的界面用哪套配色。
+/// 设置里的「主题」：界面用哪套配色，终端本身除外。
 public enum AppAppearance: String, Hashable, Sendable, CaseIterable, Codable {
     /// 从电脑上终端的主题推出来（`AppModel.computerTheme`）。
     case computer

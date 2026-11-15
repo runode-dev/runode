@@ -7,7 +7,7 @@ import java.util.Locale
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** 终端页以外的界面用哪套配色；终端页总按各自会话的主题上色。 */
+/** 界面用哪套配色；终端本身总按各自会话的主题上色。 */
 @Serializable
 enum class AppAppearance {
     /** 跟电脑上终端的主题走，按 [AppModel.computerTheme] 挑电脑。 */

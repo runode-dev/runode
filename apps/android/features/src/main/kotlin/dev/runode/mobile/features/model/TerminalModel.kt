@@ -170,13 +170,13 @@ class TerminalModel(
     /** 软键盘（或硬件键盘的输入焦点）在终端上；视图设。 */
     var keyboardVisible by mutableStateOf(false)
 
-    /** 终端的背景色和前景色，顶栏、底栏、空白区按它们配色（[chromeTheme]）。 */
+    /** 终端的背景色和前景色。 */
     var background by mutableStateOf(TermSettings.default.background)
         private set
     var foreground by mutableStateOf(TermSettings.default.foreground)
         private set
 
-    /** 终端页四周（顶栏、分屏标签、底栏、按键栏）的配色，跟着这个终端的主题走。 */
+    /** 由终端的背景色和前景色推出的主题。 */
     val chromeTheme: AppTheme get() = AppTheme(background, foreground)
 
     /** 在等用户确认结束会话。 */

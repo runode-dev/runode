@@ -363,7 +363,7 @@ class AppModel(private val dependencies: AppDependencies) {
         return model
     }
 
-    /** 终端页以外的界面用的主题，按设置里的 [AppAppearance] 挑；[systemDark] 是系统现在是不是深色模式。 */
+    /** 界面用的主题（终端本身除外），按设置里的 [AppAppearance] 挑；[systemDark] 是系统现在是不是深色模式。 */
     fun theme(systemDark: Boolean): AppTheme = when (settings.preferences.appearance) {
         AppAppearance.Computer -> computerTheme
         AppAppearance.Light -> AppTheme.light
