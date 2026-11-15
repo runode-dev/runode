@@ -80,6 +80,32 @@ pub fn parse_clock(text: &str) -> Option<(u8, u8)> {
     (hour < 24 && minute < 60).then_some((hour, minute))
 }
 
+/// 星期几的写法，从星期日起，下标就是 `When::Daily` 的 `days` 里的位。
+pub const DAYS: [&str; 7] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+/// 读一周里的哪几天，得 `When::Daily` 的 `days`：`DAYS` 里的写法用逗号隔开，或者 `mon-fri` 这样的范围，
+/// 不分大小写。
+pub fn parse_days(text: &str) -> Option<u8> {
+    let day = |name: &str| DAYS.iter().position(|&day| day == name.trim().to_ascii_lowercase());
+    let mut bits = 0u8;
+    for part in text.split(',') {
+        let (from, to) = match part.split_once('-') {
+            Some((from, to)) => (day(from)?, day(to)?),
+            None => (day(part)?, day(part)?),
+        };
+        // `fri-mon` 跨过周末，绕回星期日。
+        let mut at = from;
+        loop {
+            bits |= 1 << at;
+            if at == to {
+                break;
+            }
+            at = (at + 1) % 7;
+        }
+    }
+    Some(bits)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

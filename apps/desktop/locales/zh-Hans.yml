@@ -1410,6 +1410,12 @@ kanban:
     cron_never: 这个 cron 表达式永远等不到。
     queue: 开始方式
     host_too_old_for: "在跑的终端宿主太旧，不认得%{what}；退出 Runode 再打开。"
+    templates_schedules: 定时
+    unknown_script: "Runode 没有叫 %{name} 的内置脚本。"
+    bad_run_input: '%{label}里不能有 " 或 %，命令没法原样传过去。'
+    template_many_repeats: "这个模板的 daily、every、cron 写了不止一个，先按第一个来。"
+    template_bad_days: "这个模板的 days 读不懂：%{days}。先按每天跑，可以在下面挑星期几。"
+    template_unknown_script: "这个模板要跑的脚本 Runode 没有：%{name}。"
   template:
     issue: 修复 Issue
     issue_input: Issue 号或链接
@@ -1417,6 +1423,10 @@ kanban:
     pr_fix_input: PR 号或链接
     pr_review: 评审 PR
     pr_review_input: PR 号或链接
+    watch_ci: CI 巡检
+    review_requests: 评审新 PR
+    new_issues: 处理新 issue
+    new_issues_input: issue 标签
 github_actions:
   name: 名字
   dialog_cancel: 取消

@@ -36,10 +36,49 @@ fn recent_runs<'a>(todos: &'a [Todo], schedule: &str) -> Vec<&'a Todo> {
     runs
 }
 
-/// 命令 `command` 跑的程序的文件名：第一个词去掉引号和目录。
-fn program_name(command: &str) -> &str {
-    let word = command.split_whitespace().next().unwrap_or_default().trim_matches(['"', '\'']);
-    Path::new(word).file_name().and_then(|name| name.to_str()).unwrap_or(word)
+/// 交给它们跑的是后面的脚本，卡片上写脚本的名字。
+const INTERPRETERS: &[&str] = &["sh", "bash", "zsh", "dash", "powershell", "pwsh", "python", "python3", "node"];
+
+/// 命令 `command` 跑的程序的文件名（去掉引号和目录）：第一个词是解释器时换成它跑的脚本，即 `-File` 后面的词，
+/// 没有 `-File` 时是第一个不以 `-` 开头的词。
+fn program_name(command: &str) -> String {
+    let words = command_words(command);
+    let file_name = |word: &str| Path::new(word).file_name().and_then(|name| name.to_str()).unwrap_or(word).to_owned();
+    let Some(first) = words.first() else { return String::new() };
+    let program = file_name(first);
+    let stem = program.strip_suffix(".exe").unwrap_or(&program).to_ascii_lowercase();
+    if !INTERPRETERS.contains(&stem.as_str()) {
+        return program;
+    }
+    let rest = &words[1..];
+    let script = match rest.iter().position(|word| word.eq_ignore_ascii_case("-File")) {
+        Some(at) => rest.get(at + 1),
+        None => rest.iter().find(|word| !word.starts_with('-')),
+    };
+    script.map_or(program, |script| file_name(script))
+}
+
+/// `command` 按空白分成的词，单引号或双引号括起的部分算在一个词里、去掉引号。
+fn command_words(command: &str) -> Vec<String> {
+    let (mut words, mut word, mut quote, mut started) = (Vec::new(), String::new(), None, false);
+    for ch in command.chars() {
+        match (quote, ch) {
+            (Some(open), _) if ch == open => quote = None,
+            (Some(_), _) => word.push(ch),
+            (None, '"' | '\'') => (quote, started) = (Some(ch), true),
+            (None, _) if ch.is_whitespace() => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            (None, _) => (started, _) = (true, word.push(ch)),
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
 }
 
 /// 定时卡片上先跑的命令那一行：跑哪个程序，跑过的再接上一次的结果；为真的是上一次失败了。没有命令时为空。
@@ -431,6 +470,13 @@ mod tests {
         assert_eq!(program_name("'./check.sh' -v"), "check.sh");
         assert_eq!(program_name("gh run list"), "gh");
         assert_eq!(program_name("  "), "");
+        assert_eq!(program_name("sh ~/.runode/schedule-scripts/new-issues.sh 'good first'"), "new-issues.sh");
+        assert_eq!(program_name("bash -e check.sh"), "check.sh");
+        assert_eq!(program_name("sh"), "sh");
+        assert_eq!(
+            program_name(r#"powershell -NoProfile -ExecutionPolicy Bypass -File "/my dir/watch-ci.ps1" "a b""#),
+            "watch-ci.ps1"
+        );
     }
 
     /// 卡片上先跑的命令那一行：没跑过只说跑哪个程序，失败时接上输出的最后一行。

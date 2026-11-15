@@ -6,9 +6,10 @@
 //! 定时的线程也要到下一轮（最多半分钟）才看到，所以宿主在跑时改看板仍经它的消息。
 
 mod local_time;
+pub mod run_scripts;
 mod schedule;
 mod store;
 
-pub use local_time::{LocalTime, parse_clock};
+pub use local_time::{DAYS, LocalTime, parse_clock, parse_days};
 pub use schedule::{next_fire, valid_cron};
 pub use store::{DONE_KEPT, Result, Store};

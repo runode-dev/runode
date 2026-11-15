@@ -9,7 +9,8 @@
 //!
 //! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，收起、存好了经 `DialogEvent` 告诉看板。它盖住整个
 //! 窗口，由 app 画在窗口的最上层（`Kanban::dialog`）。新建时标题栏的「模板」菜单列出模板（`templates`），挑一个就照它
-//! 填好，带 `{{input}}` 的另要填一项（issue、PR 号），保存时换进去。
+//! 填好，带 `{{input}}` 的另要填一项（issue、PR 号），保存时换进去；定时模板另把「什么时候做」换成定时、填好什么时候跑
+//! 和先跑的命令。
 
 use crate::ui::dialog::{backdrop, is_dismiss_key};
 use std::{
@@ -197,6 +198,11 @@ pub struct TodoDialog {
     template: Option<usize>,
     /// 模板目录，没有家目录时为空。
     templates_dir: Option<PathBuf>,
+    /// 定时先跑命令用的内置脚本的目录（`Dirs::schedule_scripts_dir`）和家目录，`{{script:…}}` 按它们换；没有家目录时为空。
+    scripts_dir: Option<PathBuf>,
+    home: Option<PathBuf>,
+    /// 挑定时模板时把「什么时候做」换成了定时，换之前选着的是哪一段；换回不是定时的模板时回到它。
+    mode_before_template: Option<StartMode>,
     /// 挑着的模板要另外填的一项（`Template::input`），换模板时跟着换说明。
     input: Entity<InputState>,
     input_events: Option<Subscription>,
@@ -309,6 +315,21 @@ fn run_fields(editing: bool, run: &str, timeout: Option<u32>) -> (Option<String>
     } else {
         (Some(run.to_owned()), timeout)
     }
+}
+
+/// 定时模板的 `repeat` 是什么规则；它写的时间对话框不认时为空。
+fn repeat_when(repeat: &templates::Repeat) -> Option<When> {
+    Some(match repeat {
+        templates::Repeat::Daily { clock, days } => {
+            let (hour, minute) = runode_todo::parse_clock(clock)?;
+            When::Daily { hour, minute, days: *days }
+        }
+        templates::Repeat::Every { minutes } => When::Every { minutes: parse_minutes(minutes)? },
+        templates::Repeat::Cron { expr } => {
+            let expr = expr.trim();
+            runode_todo::valid_cron(expr).then(|| When::Cron { expr: expr.to_owned() })?
+        }
+    })
 }
 
 /// 时限栏写的 `text` 落在哪一档小签上：`Some(None)` 是不限，`Some(Some(n))` 是 `LIMIT_PRESETS` 里的 n 分钟，
@@ -585,12 +606,16 @@ impl TodoDialog {
         }));
         window.focus(&title.focus_handle(cx), cx);
         let spec = spec.unwrap_or_default();
+        let dirs = runode_paths::Dirs::from_env();
         let mut dialog = Self {
             schedule,
             editing,
             templates: Vec::new(),
             template: None,
-            templates_dir: runode_paths::Dirs::from_env().todo_templates_dir(),
+            templates_dir: dirs.todo_templates_dir(),
+            scripts_dir: dirs.schedule_scripts_dir(),
+            home: dirs.home,
+            mode_before_template: None,
             input_events: None,
             input,
             title,
@@ -713,8 +738,10 @@ impl TodoDialog {
 
     /// 在后台读模板（`templates::load`），读好了列出来。
     fn load_templates(&mut self, cx: &mut Context<Self>) {
-        let dir = self.templates_dir.clone();
-        let load = cx.background_executor().spawn(async move { templates::load(dir.as_deref()) });
+        let (dir, scripts, home) = (self.templates_dir.clone(), self.scripts_dir.clone(), self.home.clone());
+        let load = cx
+            .background_executor()
+            .spawn(async move { templates::load(dir.as_deref(), scripts.as_deref(), home.as_deref()) });
         cx.spawn(async move |this, cx| {
             let templates = load.await;
             this.update(cx, |dialog, cx| {
@@ -749,8 +776,10 @@ impl TodoDialog {
         .detach();
     }
 
-    /// 照第 `index` 个模板填好（为空时是空白的）：免不免确认和工作树换成它的，skill 加上它的；标题、提示词
-    /// 是空的或者还是上一个模板的原样时换成它的，用户改过的不动。要另外填一项的，那一栏换上它的说明，焦点给它。
+    /// 照第 `index` 个模板填好（为空时是空白的）：免不免确认、自动标完成、工作树、时限和先跑命令的超时换成它的，
+    /// skill 加上它的；标题、提示词和先跑的命令是空的或者还是上一个模板的原样时换成它的，用户改过的不动。定时模板把
+    /// 「什么时候做」换成定时、什么时候跑换成它的，换回不是定时的模板时回到原来那一段。要另外填一项的，那一栏换上它的
+    /// 说明和先填的值，焦点给它；模板写得不对时说出来，焦点给该改的那一栏。
     fn pick_template(&mut self, action: &PickTodoTemplate, window: &mut Window, cx: &mut Context<Self>) {
         let index = action.index;
         let before = self.template.map(|index| self.templates[index].clone()).unwrap_or_default();
@@ -763,7 +792,14 @@ impl TodoDialog {
         if untouched(self.prompt.read(cx).text(), &before.prompt) {
             self.prompt.update(cx, |area, cx| area.set_text(template.prompt.clone(), cx));
         }
+        if untouched(self.run.read(cx).query(), &before.run) {
+            self.run.update(cx, |input, cx| input.set_query(template.run.clone(), cx));
+        }
+        self.run_timeout.update(cx, |input, cx| input.set_query(template.run_timeout.clone(), cx));
+        self.time_limit.update(cx, |input, cx| input.set_query(template.time_limit.clone(), cx));
+        self.custom_limit = limit_preset(&template.time_limit, false).is_none();
         self.auto = template.auto;
+        self.auto_done = template.auto_done;
         for skill in &template.skills {
             if !self.skills.contains(skill) {
                 self.skills.push(skill.clone());
@@ -771,19 +807,67 @@ impl TodoDialog {
         }
         self.worktree = template.worktree;
         self.check_repo(cx);
-        let focus = match &template.input {
+        match &template.repeat {
+            Some(repeat) => {
+                if !self.schedule {
+                    self.mode_before_template = Some(self.start_mode());
+                }
+                self.pick_start(StartMode::Schedule, cx);
+                self.set_repeat(repeat, cx);
+            }
+            None if before.repeat.is_some() => {
+                if let Some(mode) = self.mode_before_template.take()
+                    && self.schedule
+                {
+                    self.pick_start(mode, cx);
+                }
+            }
+            None => {}
+        }
+        let mut focus = match &template.input {
             Some(label) => {
-                let (label, placeholder) = (label.clone(), label.clone());
-                self.input =
-                    cx.new(|cx| InputState::new(String::new(), cx).with_label(label).with_placeholder(placeholder));
+                let (label, placeholder, value) = (label.clone(), label.clone(), template.input_default.clone());
+                self.input = cx.new(|cx| InputState::new(value, cx).with_label(label).with_placeholder(placeholder));
                 self.input_events = Some(Self::subscribe_input(&self.input, window, cx));
                 self.input.focus_handle(cx)
             }
             None => self.title.focus_handle(cx),
         };
+        self.error = template.problem.as_ref().map(templates::Problem::message);
+        if let Some(problem) = &template.problem {
+            let field = match problem {
+                templates::Problem::UnknownScript(_) => &self.run,
+                templates::Problem::Days(_) => &self.clock,
+                templates::Problem::ManyRepeats => self.kind_input(),
+            };
+            focus = field.focus_handle(cx);
+        }
         window.focus(&focus, cx);
-        self.error = None;
         cx.notify();
+    }
+
+    /// 定时什么时候跑换成定时模板的 `repeat`。
+    fn set_repeat(&mut self, repeat: &templates::Repeat, cx: &mut Context<Self>) {
+        let (kind, input, text) = match repeat {
+            templates::Repeat::Daily { clock, days } => {
+                self.days = *days;
+                (Kind::Daily, &self.clock, clock)
+            }
+            templates::Repeat::Every { minutes } => (Kind::Every, &self.minutes, minutes),
+            templates::Repeat::Cron { expr } => (Kind::Cron, &self.cron, expr),
+        };
+        input.update(cx, |input, cx| input.set_query(text.clone(), cx));
+        self.kind = Some(kind);
+    }
+
+    /// 现在挑着的定时方式的那一栏；读不懂的规则还没挑方式时是每天的那栏。
+    fn kind_input(&self) -> &Entity<InputState> {
+        match self.kind {
+            Some(Kind::Once) => &self.at,
+            Some(Kind::Daily) | None => &self.clock,
+            Some(Kind::Every) => &self.minutes,
+            Some(Kind::Cron) => &self.cron,
+        }
     }
 
     /// 打开模板目录，没有就先建：它在 home 下的点目录里，访达和资源管理器默认都看不到。
@@ -795,16 +879,38 @@ impl TodoDialog {
         cx.open_with_system(dir);
     }
 
-    /// 「模板」菜单：空白和各个模板，挑着的打勾，最后是打开模板目录；还没有模板时只有最后一项，没有家目录时
-    /// 连它也没有。
+    /// 「模板」菜单：空白和各个任务模板，再是灰着的「定时」小标题和各个定时模板（下面一句说什么时候跑，模板写得不对
+    /// 时说哪里不对），挑着的打勾，最后是打开模板目录；还没有模板时只有最后一项，没有家目录时连它也没有。
     fn template_items(&self) -> Vec<Option<MenuItem>> {
         let mut items: Vec<Option<MenuItem>> = Vec::new();
         if !self.templates.is_empty() {
+            let item = |index: Option<usize>, label: String| {
+                MenuItem::checkbox(label, None, self.template == index, Box::new(PickTodoTemplate { index }))
+            };
             let blank = rust_i18n::t!("kanban.dialog.template_blank").into_owned();
-            let named = self.templates.iter().enumerate().map(|(index, template)| (Some(index), template.name.clone()));
-            items.extend(std::iter::once((None, blank)).chain(named).map(|(index, label)| {
-                let action = Box::new(PickTodoTemplate { index });
-                Some(MenuItem::checkbox(label, None, self.template == index, action))
+            items.push(Some(item(None, blank)));
+            let indexed = || self.templates.iter().enumerate();
+            items.extend(
+                indexed()
+                    .filter(|(_, template)| template.repeat.is_none())
+                    .map(|(index, template)| Some(item(Some(index), template.name.clone()))),
+            );
+            let schedules: Vec<_> = indexed().filter(|(_, template)| template.repeat.is_some()).collect();
+            if !schedules.is_empty() {
+                items.push(None);
+                let heading = rust_i18n::t!("kanban.dialog.templates_schedules").into_owned();
+                items.push(Some(MenuItem::label(heading, None, None)));
+            }
+            items.extend(schedules.into_iter().map(|(index, template)| {
+                let description = match (&template.problem, template.repeat.as_ref().and_then(repeat_when)) {
+                    (Some(problem), _) => Some(problem.message()),
+                    (None, when) => when.map(|when| when::describe_when(&when)),
+                };
+                let entry = item(Some(index), template.name.clone());
+                Some(match description {
+                    Some(description) => entry.with_description(description),
+                    None => entry,
+                })
             }));
         }
         if let Some(dir) = &self.templates_dir {
@@ -1405,9 +1511,22 @@ impl TodoDialog {
         self.error = None;
         cx.notify();
         // 目录在不在放到单独的线程上查（`fs_probe::off_thread`），查过了再发；起不了线程时交给宿主查。开始过的
-        // 任务目录改不了，宿主也允许原目录没了（agent 还在工作树里跑）时只改文字，不查。
+        // 任务目录改不了，宿主也允许原目录没了（agent 还在工作树里跑）时只改文字，不查。有先跑命令的定时先在
+        // 这里写出内置脚本（`templates::install_scripts`），第一次到点时它们已经在了。
         let dir = (!self.locked).then(|| self.dir.clone());
-        let dir_ok = crate::fs_probe::off_thread(move || dir.is_none_or(|dir| dir.is_dir()), true);
+        let scripts =
+            self.scripts_dir.clone().filter(|_| self.schedule && !self.run.read(cx).query().trim().is_empty());
+        let dir_ok = crate::fs_probe::off_thread(
+            move || {
+                if let Some(scripts) = scripts
+                    && let Err(err) = templates::install_scripts(&scripts)
+                {
+                    tracing::warn!("failed to write the schedule scripts: {err}");
+                }
+                dir.is_none_or(|dir| dir.is_dir())
+            },
+            true,
+        );
         cx.spawn(async move |this, cx| {
             let answer = if dir_ok.await {
                 let Ok(answer) = this.update(cx, |_, cx| store::ask(cx, message)) else {
@@ -2426,6 +2545,13 @@ impl TodoDialog {
         let wrong = |key: &str, field: FocusHandle| (rust_i18n::t!(key).into_owned(), field);
         let mut prompt = self.prompt.read(cx).text().trim().to_owned();
         let mut typed = self.title.read(cx).query().trim().to_owned();
+        // 手写的 `{{script:…}}` 也换掉；模板读进来时已经换过的不再变。
+        let mut run =
+            templates::expand_run(self.run.read(cx).query().trim(), self.scripts_dir.as_deref(), self.home.as_deref())
+                .map_err(|name| {
+                    let error = rust_i18n::t!("kanban.dialog.unknown_script", name = name).into_owned();
+                    (error, self.run.focus_handle(cx))
+                });
         if let Some(label) = self.template.and_then(|index| self.templates[index].input.as_ref()) {
             let input = self.input.read(cx).query().trim();
             if input.is_empty() {
@@ -2434,6 +2560,14 @@ impl TodoDialog {
             }
             prompt = templates::fill(&prompt, input);
             typed = templates::fill(&typed, input);
+            if self.schedule
+                && let Ok(text) = &run
+            {
+                run = templates::fill_run(text, input, cfg!(windows)).map_err(|()| {
+                    let error = rust_i18n::t!("kanban.dialog.bad_run_input", label = label).into_owned();
+                    (error, self.input.focus_handle(cx))
+                });
+            }
         }
         let title = if typed.is_empty() { first_line(&prompt).to_owned() } else { typed };
         if title.is_empty() {
@@ -2486,7 +2620,7 @@ impl TodoDialog {
             });
         }
         let when = self.typed_when(cx).map_err(|(key, input)| wrong(key, input.focus_handle(cx)))?;
-        let run = self.run.read(cx).query().trim().to_owned();
+        let run = run?;
         let run_timeout = parse_run_timeout(self.run_timeout.read(cx).query()).map_err(|()| {
             let error =
                 rust_i18n::t!("kanban.dialog.bad_run_timeout", max = MAX_RUN_TIMEOUT, default = DEFAULT_RUN_TIMEOUT)

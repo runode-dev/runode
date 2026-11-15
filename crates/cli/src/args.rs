@@ -819,34 +819,9 @@ fn until<'a>(rest: &mut impl Iterator<Item = &'a String>) -> Result<Until, Strin
     })
 }
 
-/// 一周里的哪几天，`When::Daily` 的 `days`：`mon,wed,fri` 或者 `mon-fri` 这样的范围，第 0 位是星期日。
 fn days(text: &str) -> Result<u8, String> {
-    let day = |name: &str| {
-        DAYS.iter()
-            .position(|&day| day == name.trim().to_ascii_lowercase())
-            .ok_or_else(|| format!("--days takes days like mon,wed or mon-fri, not {text}"))
-    };
-    let mut bits = 0u8;
-    for part in text.split(',') {
-        let (from, to) = match part.split_once('-') {
-            Some((from, to)) => (day(from)?, day(to)?),
-            None => (day(part)?, day(part)?),
-        };
-        // `fri-mon` 跨过周末，绕回星期日。
-        let mut at = from;
-        loop {
-            bits |= 1 << at;
-            if at == to {
-                break;
-            }
-            at = (at + 1) % 7;
-        }
-    }
-    Ok(bits)
+    runode_todo::parse_days(text).ok_or_else(|| format!("--days takes days like mon,wed or mon-fri, not {text}"))
 }
-
-/// 星期几的写法，从星期日起，同 `When::Daily` 的位。
-pub(crate) const DAYS: [&str; 7] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 fn no_more(words: &[String], most: usize, name: &str) -> Result<(), String> {
     match words.get(most) {

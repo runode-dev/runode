@@ -79,11 +79,11 @@ jobs:
         run: cargo metadata --locked --format-version 1 >/dev/null
       - name: 检查 crate 分层
         run: make layers
-      # 一行安装的脚本用户直接从 main 上取，改坏了就装不上。
-      - name: 检查安装脚本
+      # 一行安装的脚本用户直接从 main 上取，改坏了就装不上；定时先跑命令的内置脚本编进 app、写到用户机器上跑。
+      - name: 检查 shell 脚本
         run: |
           brew install shellcheck
-          shellcheck scripts/install.sh
+          shellcheck scripts/install.sh crates/todo/src/run_scripts/*.sh
       - name: clippy
         run: make clippy CLIPPY_ARGS="-- -D warnings"
 

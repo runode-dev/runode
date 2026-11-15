@@ -1410,6 +1410,12 @@ kanban:
     cron_never: This cron expression never comes.
     queue: Start
     host_too_old_for: "The running terminal host is too old for %{what}; quit Runode and open it again."
+    templates_schedules: Schedules
+    unknown_script: "Runode has no built-in script called %{name}."
+    bad_run_input: '%{label} cannot contain " or % here: the command could not pass it on as written.'
+    template_many_repeats: "This template sets more than one of daily, every and cron; the first one is used."
+    template_bad_days: "This template's days cannot be read: %{days}. It runs every day until you pick the days."
+    template_unknown_script: "This template runs a script Runode does not have: %{name}."
   template:
     issue: Fix an issue
     issue_input: Issue number or URL
@@ -1417,6 +1423,10 @@ kanban:
     pr_fix_input: PR number or URL
     pr_review: Review a PR
     pr_review_input: PR number or URL
+    watch_ci: Watch CI
+    review_requests: Review requested PRs
+    new_issues: Handle labeled issues
+    new_issues_input: Issue label
 github_actions:
   name: Name
   dialog_cancel: Cancel

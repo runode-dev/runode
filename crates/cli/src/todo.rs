@@ -14,12 +14,12 @@ use runode_protocol::{
 };
 use runode_remote::now_unix;
 
-use runode_todo::LocalTime;
+use runode_todo::{DAYS, LocalTime};
 
 pub(crate) use crate::args::Spec;
 use crate::{
     Env,
-    args::{DAYS, Queue, Timing},
+    args::{Queue, Timing},
     client::{Connection, kind},
     output::{plain, table, tilde},
 };

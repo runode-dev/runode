@@ -65,6 +65,7 @@ use runode_types::agent::Agent;
 
 pub use dialog::TodoDialog;
 pub use store::{Host, Step, Tally, tally, todo_sessions, watch};
+pub(crate) use templates::install_scripts;
 
 use board::{Geometry, Move};
 use dialog::{DialogEvent, Editing};

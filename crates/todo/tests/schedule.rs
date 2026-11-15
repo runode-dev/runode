@@ -117,3 +117,19 @@ fn cron_rejects_what_it_cannot_read() {
     // 写得出来却永远对不上的日子不会到点。
     assert_eq!(next_fire(&cron("0 0 30 2 *"), 1_760_000_000), None);
 }
+
+#[test]
+fn days_take_lists_and_ranges_that_wrap_past_the_weekend() {
+    use runode_todo::{DAYS, parse_days};
+    assert_eq!(parse_days("mon-fri"), Some(0b011_1110));
+    assert_eq!(parse_days("sat,sun"), Some(0b100_0001));
+    assert_eq!(parse_days("fri-mon"), Some(0b110_0011));
+    assert_eq!(parse_days(" Mon , WED "), Some(0b000_1010));
+    assert_eq!(parse_days("sun-sat"), Some(0b111_1111));
+    for (bit, day) in DAYS.iter().enumerate() {
+        assert_eq!(parse_days(day), Some(1 << bit), "{day}");
+    }
+    for bad in ["funday", "", "mon,", "mon-", "monday", "mon-fri-sat"] {
+        assert_eq!(parse_days(bad), None, "{bad}");
+    }
+}

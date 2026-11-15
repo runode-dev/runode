@@ -217,14 +217,20 @@ fn main() {
         }
         host_client::hosts::hold_new_hosts(false);
         startup::mark("open_window");
-        let skill_env =
-            runode_agent_skill::Env::from_dirs(&runode_paths::Dirs::from_env(), |key| std::env::var_os(key));
+        let dirs = runode_paths::Dirs::from_env();
+        let skill_env = runode_agent_skill::Env::from_dirs(&dirs, |key| std::env::var_os(key));
+        let scripts_dir = dirs.schedule_scripts_dir();
         cx.background_executor()
             .spawn(async move {
                 match runode_agent_skill::refresh(&skill_env) {
                     Ok(true) => tracing::info!("updated the agent skill to this version"),
                     Ok(false) => {}
                     Err(err) => tracing::warn!("failed to update the agent skill: {err}"),
+                }
+                if let Some(dir) = scripts_dir
+                    && let Err(err) = kanban::install_scripts(&dir)
+                {
+                    tracing::warn!("failed to write the schedule scripts: {err}");
                 }
             })
             .detach();

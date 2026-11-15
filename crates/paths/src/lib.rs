@@ -349,6 +349,11 @@ impl Dirs {
         self.data_file("templates")
     }
 
+    /// 定时先跑命令用的内置脚本，桌面写出；脚本把去重状态记在它下面的 `state/<定时 id>/`。
+    pub fn schedule_scripts_dir(&self) -> Option<PathBuf> {
+        self.data_file("schedule-scripts")
+    }
+
     /// 语音转文字的识别模型，按模型分子目录。下载一次几百 MB 到 1 GB 多，所以放根目录不放缓存。
     pub fn speech_models_dir(&self) -> Option<PathBuf> {
         self.data_file("speech-models")
@@ -704,6 +709,7 @@ mod tests {
         assert_eq!(dirs.onboarding_file(), Some(PathBuf::from("/home/me/.runode").join(ONBOARDING_FILE)));
         assert_eq!(dirs.todos_db(), Some(PathBuf::from("/home/me/.runode").join(TODOS_DB)));
         assert_eq!(dirs.themes_dir(), Some("/home/me/.runode/themes".into()));
+        assert_eq!(dirs.schedule_scripts_dir(), Some("/home/me/.runode/schedule-scripts".into()));
         assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.runode/agent-detection".into()));
         assert_eq!(dirs.shell_integration_dir(), Some("/home/me/.runode/cache/shell-integration".into()));
         assert_eq!(dirs.prespawn_size_file(), Some("/home/me/.runode/cache/first-terminal-size".into()));
