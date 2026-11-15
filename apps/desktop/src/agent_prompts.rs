@@ -49,18 +49,16 @@ const OPTION_LINES: usize = 2;
 fn option_text(text: &str) -> Div {
     let body = div().flex_1().min_w_0().text_left();
     match text.split_once('\n') {
-        Some((label, description)) => body
-            .flex()
-            .flex_col()
-            .child(div().min_w_0().truncate().child(label.to_owned()))
-            .child(
+        Some((label, description)) => {
+            body.flex().flex_col().child(div().min_w_0().truncate().child(label.to_owned())).child(
                 div()
                     .min_w_0()
                     .opacity(0.7)
                     .line_clamp(OPTION_LINES - 1)
                     .text_ellipsis()
                     .child(description.replace('\n', " ")),
-            ),
+            )
+        }
         None => body.line_clamp(OPTION_LINES).text_ellipsis().child(text.to_owned()),
     }
 }
