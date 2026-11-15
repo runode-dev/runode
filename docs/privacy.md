@@ -1,5 +1,7 @@
 # Runode Privacy Policy
 
+[简体中文](privacy.zh-CN.md)
+
 Last updated: November 16, 2026
 
 Runode is a terminal for AI coding agents on your Mac, with an iOS app that controls it remotely. This policy covers the Runode Mac app and the Runode iOS app.
@@ -32,40 +34,3 @@ Runode is a developer tool and is not directed at children.
 ## Changes and contact
 
 Changes to this policy are published at this address. For questions, open an issue at https://github.com/runode-dev/runode/issues.
-
----
-
-# Runode 隐私政策
-
-最后更新：2026 年 11 月 16 日
-
-Runode 是 Mac 上为 AI 编程 agent 做的终端，另有一个 iOS app 用来远程操作它。本政策适用于 Runode 的 Mac app 和 iOS app。
-
-## 我们不收集你的数据
-
-Runode 没有账号，不做统计分析，没有广告，也不追踪你。我们没有任何服务器存你的终端、文件、语音或其他个人数据，app 里显示的一切都来自你自己的 Mac。
-
-## 你的数据去了哪里
-
-- **手机和 Mac 之间。** iOS app 只和你扫码配对过的 Mac 通信，连接用 TLS 1.3 端到端加密，并绑定那台 Mac 的证书。在同一个网络里直接连到 Mac；不在同一个网络时，只有你允许经互联网连接（配对时网络选 0.0.0.0）才经 iroh 项目（n0）运营的公共中继转发，中继只经手加密后的数据，读不到内容。
-- **通知。** agent 需要你时，Mac 经我们的推送中转（push.runode.dev）发通知：iPhone 的交给 Apple 推送通知服务，Android 手机的交给 Google 的 Firebase 云消息（FCM）。手机只把推送令牌交给中转，换回每台 Mac 各一个加密的句柄，Mac 只拿得到句柄。中转实时把通知转给 Apple 或 Google，不保存。在 Android 上，通知的文字作为消息数据经 FCM 送到手机，由 app 自己显示。
-- **自己编译的 app 的通知。** 你从源码编译、不带中转的手机 app 把推送令牌直接交给配对过的 Mac，记在 Mac 的配对设备表里。Mac 用你配置的 APNs 密钥直接发给 Apple 推送通知服务，或者用你配置的 Firebase 服务账号直接发给 FCM，不经我们的中转。这些通知走的是你自己的 Apple 或 Google 开发者账号，适用它们的条款。
-- **语音输入。** 语音在手机上用离线模型识别，或交给你的 Mac 识别，录音不会发给我们。如果你在 Mac app 里配置了云端识别或文字润色服务，音频或文字会发给你配置的服务商，适用该服务商的条款。
-- **语音模型下载。** 离线语音模型从 Hugging Face 或 ModelScope 下载，这些网站看到的是一次普通的下载请求。
-- **更新。** Mac app 向 GitHub Releases 查询新版本，并从 GitHub 下载。
-- **存在你设备上的。** 配对过的 Mac、各项设置，以及你选择保存的 Mac 登录密码（iOS 上存在钥匙串里，用面容 ID 取出；Android 上用 Android Keystore 里的密钥加密，用指纹或人脸取出）都只留在你的设备上。
-
-## 权限
-
-- **相机**：只用来扫配对二维码。
-- **麦克风**：只在你按住麦克风键语音输入时使用。
-- **本地网络**：找到并连接你的 Mac。
-- **面容 ID**：取出保存的 Mac 登录密码。
-
-## 儿童
-
-Runode 是开发者工具，不面向儿童。
-
-## 变更和联系方式
-
-本政策的变更会发布在这个地址。有问题请在 https://github.com/runode-dev/runode/issues 提 issue。
