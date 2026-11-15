@@ -4,9 +4,12 @@
     import RunodeTerminal
     import SwiftUI
     import UIKit
+    import UIKit.UIGestureRecognizerSubclass
 
-    /// 远程桌面页：电脑的整块屏幕。触屏模式点按是左键，长按是右键，单指拖是按着左键拖；触控板模式单指挪
-    /// 光标，点按是左键，双指点按是右键，长按后拖是按着左键拖。双指滑是滚动，捏合放大，放大后双指拖着看别处。
+    /// 远程桌面页：电脑的整块屏幕。触屏模式点按是左键，长按后原地松手是右键、接着拖是按着左键拖，没放大时单指
+    /// 拖也是按着左键拖，放大后单指拖是挪画面；触控板模式单指挪光标，点按是左键，点一下再按住拖是按着左键拖。
+    /// 两种模式下双指点按、一指按住另一指点都是右键。双指滑是滚动，捏合放大，放大后双指拖着看别处，按着左键
+    /// 拖到或光标挪到页面边上时画面跟着往那边挪。
     /// 整页全屏，不要导航栏和状态栏，返回按钮浮在左上角，电脑有几块屏幕时右上角能切换。底部一条快捷键
     /// （软键盘没有的键，右端开关软键盘），软键盘弹出时这条跟着键盘走（`ScreenKeyBar`）。
     struct RemoteDesktopScreen: View {
@@ -260,10 +263,42 @@
         private let model: ScreenModel
         private let scrollRecognizer = UIPanGestureRecognizer()
         private let press = UILongPressGestureRecognizer()
-        /// 只在触控板模式用；触屏模式下关着，单击才不用等它失败。
-        let rightTap = UITapGestureRecognizer()
+        /// 单指拖；触屏模式放大着时关掉，单指拖交给滚动视图挪画面。
+        private let drag = UIPanGestureRecognizer()
+        private let rightTap = SecondFingerTap()
+        private let touches = TouchSequence()
         private var lastScroll = CGPoint.zero
         private var lastPoint = CGPoint.zero
+        /// 触屏模式这次长按走到哪一步。
+        private var pressState = PressState.idle
+        /// 长按开始时手指在窗口上的位置，量挪开了多远。
+        private var pressStart = CGPoint.zero
+        /// 这次长按、单指拖开始时是不是触控板模式：中途切了模式，收尾照开始时的走，左键才不会一直按着。
+        private var pressTrackpad = false
+        private var dragTrackpad = false
+        /// 触控板模式点一下的左键压到双击的时限过了才发：时限里又按下时，这一下是双击或点按拖移的开头。
+        private var pendingClick: Task<Void, Never>?
+        /// 这次按下时上一下点按的左键还压着没发。
+        private var armed = false
+        /// 触控板模式点一下再按住拖着，左键按着。
+        private var tapDragging = false
+        /// 这一轮触摸在触屏模式下已经右键过。
+        private var rightClicked = false
+        /// 这一轮触摸按下时画面还在惯性滑动：这一下是让画面停下，不是点电脑。
+        private var stoppedScroll = false
+        /// 触屏模式按着左键拖时手指停在页面边上，每一帧挪画面。
+        private var edgeLink: CADisplayLink?
+        private weak var edgeRecognizer: UIGestureRecognizer?
+
+        private enum PressState {
+            case idle
+            /// 按住了还没挪开，带着按下时在画面上的位置。
+            case holding(CGPoint)
+            /// 原地松手，同一轮事件处理完、另一根手指也没点过时在这里右键。
+            case released(CGPoint)
+            /// 挪开了，按着左键拖。
+            case dragging
+        }
         /// 触控板模式的光标。
         let cursor = UIImageView(image: UIImage(systemName: "cursorarrow"))
         /// 换了尺寸时退回不放大：放大着时 `layoutSubviews` 不重排，画面会留在旧比例的框里，点的位置就对不上。
@@ -274,11 +309,12 @@
                 setNeedsLayout()
             }
         }
-        /// 在触控板模式：显示光标、认双指单击。切进来时电脑上的光标挪到显示的光标那里，点下去的就是看到的位置。
+        /// 在触控板模式：显示光标。切进来时电脑上的光标挪到显示的光标那里，点下去的就是看到的位置。
         var trackpad = false {
             didSet {
                 cursor.isHidden = !trackpad
-                rightTap.isEnabled = trackpad
+                rightTap.requiresStillHeld = !trackpad
+                updatePanning()
                 if trackpad, !oldValue { model.moveCursor(dx: 0, dy: 0) }
             }
         }
@@ -304,10 +340,13 @@
 
             let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
             press.addTarget(self, action: #selector(pressed))
+            press.minimumPressDuration = Self.pressDuration
             rightTap.addTarget(self, action: #selector(rightTapped))
-            rightTap.numberOfTouchesRequired = 2
-            tap.require(toFail: rightTap)
-            rightTap.isEnabled = false
+            touches.onBegan = { [weak self] in self?.touchesBegan() }
+            touches.onEnded = { [weak self] in
+                // 点按、拖动的收尾在同一轮触摸事件里处理完以后再看压着的左键用掉没有。
+                Task { @MainActor in self?.flushArmedClick() }
+            }
             cursor.tintColor = .white
             cursor.isHidden = true
             cursor.layer.shadowOpacity = 1
@@ -316,11 +355,11 @@
             cursor.isUserInteractionEnabled = false
             video.addSubview(cursor)
             placeCursor(x: model.cursor.x, y: model.cursor.y)
-            let drag = UIPanGestureRecognizer(target: self, action: #selector(dragged))
+            drag.addTarget(self, action: #selector(dragged))
             drag.maximumNumberOfTouches = 1
             scrollRecognizer.minimumNumberOfTouches = 2
             scrollRecognizer.addTarget(self, action: #selector(scrolled))
-            for recognizer in [tap, rightTap, press, drag, scrollRecognizer] {
+            for recognizer in [tap, rightTap, touches, press, drag, scrollRecognizer] {
                 video.addGestureRecognizer(recognizer)
             }
             video.isUserInteractionEnabled = true
@@ -386,10 +425,26 @@
             }
             // 放大着时滚动视图变了尺寸（软键盘弹出收起、转屏），偏移收回能滚到的范围里。
             guard !isTracking, !isDecelerating, !isZooming, !isZoomBouncing else { return }
-            let clamped = CGPoint(
-                x: min(max(contentOffset.x, -inset.left), size.width + inset.right - bounds.width),
-                y: min(max(contentOffset.y, -inset.top), size.height + inset.bottom - bounds.height))
+            let clamped = clampedOffset(contentOffset)
             if contentOffset != clamped { contentOffset = clamped }
+        }
+
+        /// `offset` 收进能滚到的范围里。
+        private func clampedOffset(_ offset: CGPoint) -> CGPoint {
+            let inset = contentInset
+            return CGPoint(
+                x: min(max(offset.x, -inset.left), contentSize.width + inset.right - bounds.width),
+                y: min(max(offset.y, -inset.top), contentSize.height + inset.bottom - bounds.height))
+        }
+
+        /// 放大着时把画面挪 `delta`（到能滚到的边为止）；挪动了返回 true。
+        @discardableResult
+        private func panZoomed(by delta: CGPoint) -> Bool {
+            guard zoomScale > 1.01, delta != .zero else { return false }
+            let next = clampedOffset(CGPoint(x: contentOffset.x + delta.x, y: contentOffset.y + delta.y))
+            guard next != contentOffset else { return false }
+            contentOffset = next
+            return true
         }
 
         /// 光标随放大反向缩小、看着大小不变，箭头尖钉在电脑光标的位置上。
@@ -407,78 +462,384 @@
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { video }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
-            let zoomed = zoomScale > 1.01
             placeCursor(x: model.cursor.x, y: model.cursor.y)
             placeContent()
+            updatePanning()
+        }
+
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            flushArmedClick()
+        }
+
+        func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+            flushArmedClick()
+        }
+
+        /// 放大着时由滚动视图挪画面：触屏模式单指、双指都挪，触控板模式双指挪（单指要挪光标）。没放大时双指滑是
+        /// 电脑上的滚动。
+        private func updatePanning() {
+            let zoomed = zoomScale > 1.01
+            panGestureRecognizer.minimumNumberOfTouches = zoomed && !trackpad ? 1 : 2
             panGestureRecognizer.isEnabled = zoomed
             scrollRecognizer.isEnabled = !zoomed
+            drag.isEnabled = trackpad || !zoomed
         }
 
         /// 手势在画面上的位置换成比例。
         private func fraction(_ recognizer: UIGestureRecognizer) -> (Double, Double) {
-            let point = recognizer.location(in: video)
+            fraction(of: recognizer.location(in: video))
+        }
+
+        /// 画面上的点换成比例。
+        private func fraction(of point: CGPoint) -> (Double, Double) {
             let size = video.bounds.size
             guard size.width > 0, size.height > 0 else { return (0, 0) }
             return (Double(point.x / size.width), Double(point.y / size.height))
         }
 
+        /// 一轮触摸的第一根手指按下：上一下点按的左键还压着时，触控板模式下这一下接着它，触屏模式下先把它发出去。
+        private func touchesBegan() {
+            rightClicked = false
+            stoppedScroll = isDecelerating
+            guard let pendingClick else { return }
+            pendingClick.cancel()
+            self.pendingClick = nil
+            if trackpad { armed = true } else { model.clickAtCursor(.left) }
+        }
+
+        /// 压着的左键这一轮没连成双击或点按拖移，照常发出去。
+        private func flushArmedClick() {
+            guard armed else { return }
+            armed = false
+            model.clickAtCursor(.left)
+        }
+
         @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
-            guard model.pointerMode == .touch else { return model.clickAtCursor(.left) }
-            let (x, y) = fraction(recognizer)
-            model.tap(x: x, y: y, view: recognizer.location(in: self))
-        }
-
-        @objc private func rightTapped(_ recognizer: UITapGestureRecognizer) {
-            if model.pointerMode == .trackpad { model.clickAtCursor(.right) }
-        }
-
-        @objc private func pressed(_ recognizer: UILongPressGestureRecognizer) {
+            if stoppedScroll { return }
             guard model.pointerMode == .trackpad else {
-                guard recognizer.state == .began else { return }
                 let (x, y) = fraction(recognizer)
-                return model.rightClick(x: x, y: y)
+                return model.tap(x: x, y: y, view: recognizer.location(in: self))
             }
+            if armed {
+                armed = false
+                model.clickAtCursor(.left)
+                model.clickAtCursor(.left)
+                return
+            }
+            pendingClick = Task { @MainActor [weak self] in
+                // 睡醒后到排上主线程之间也可能被取消。
+                guard (try? await Task.sleep(for: Self.doubleTapWindow)) != nil, !Task.isCancelled, let self else {
+                    return
+                }
+                self.pendingClick = nil
+                self.model.clickAtCursor(.left)
+            }
+        }
+
+        @objc private func rightTapped(_ recognizer: SecondFingerTap) {
+            // 按着左键拖的时候不插一下右键。
+            if tapDragging { return }
+            if case .dragging = pressState { return }
+            if model.pointerMode == .trackpad {
+                flushArmedClick()
+                return model.clickAtCursor(.right)
+            }
+            pressState = .idle
+            rightClick(at: recognizer.heldLocation(in: video))
+        }
+
+        /// 触屏模式在画面上的 `point` 右键；长按松手和另一根手指点一下都会走到这里，一轮触摸只右键一次。
+        private func rightClick(at point: CGPoint) {
+            guard !rightClicked else { return }
+            rightClicked = true
+            let (x, y) = fraction(of: point)
+            model.rightClick(x: x, y: y)
+        }
+
+        /// 触屏模式：长按认出来时震一下，原地松手是右键，挪开了是从按下的地方按着左键拖。触控板模式：长按挪的是
+        /// 光标，上一下点按压着时是点按拖移。
+        @objc private func pressed(_ recognizer: UILongPressGestureRecognizer) {
+            if recognizer.state == .began { pressTrackpad = model.pointerMode == .trackpad }
+            if pressTrackpad {
+                trackpadMoved(recognizer)
+                return
+            }
+            switch recognizer.state {
+            case .began:
+                flushArmedClick()
+                pressState = .holding(recognizer.location(in: video))
+                pressStart = recognizer.location(in: nil)
+                // 放大着时滚动视图的单指平移也在等这根手指，取消掉，接下来挪的是长按拖动。
+                panGestureRecognizer.isEnabled = false
+                updatePanning()
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            case .changed:
+                if case .dragging = pressState {
+                    let (x, y) = fraction(recognizer)
+                    return model.drag(.moved, x: x, y: y)
+                }
+                guard case .holding(let start) = pressState else { return }
+                let now = recognizer.location(in: nil)
+                guard hypot(now.x - pressStart.x, now.y - pressStart.y) > Self.pressSlop else { return }
+                pressState = .dragging
+                let (x, y) = fraction(of: start)
+                model.drag(.began, x: x, y: y)
+                let (mx, my) = fraction(recognizer)
+                model.drag(.moved, x: mx, y: my)
+                startEdgePan(recognizer)
+            case .ended:
+                switch pressState {
+                case .holding(let start):
+                    // 同一轮事件里另一根手指的点按可能还没处理，处理完了再看还要不要右键。
+                    pressState = .released(start)
+                    Task { @MainActor [weak self] in
+                        guard let self, case .released(let start) = self.pressState else { return }
+                        self.pressState = .idle
+                        self.rightClick(at: start)
+                    }
+                case .dragging: endPressDrag(recognizer)
+                default: pressState = .idle
+                }
+            case .cancelled, .failed:
+                if case .dragging = pressState { endPressDrag(recognizer) } else { pressState = .idle }
+            default: break
+            }
+        }
+
+        private func endPressDrag(_ recognizer: UIGestureRecognizer) {
+            stopEdgePan()
+            pressState = .idle
+            let (x, y) = fraction(recognizer)
+            model.drag(.ended, x: x, y: y)
+        }
+
+        /// 触控板模式单指挪光标；上一下点按的左键压着时，这一下按着左键拖。
+        private func trackpadMoved(_ recognizer: UIGestureRecognizer) {
             let point = recognizer.location(in: video)
             switch recognizer.state {
-            case .began: model.dragAtCursor(down: true)
-            case .changed:
+            case .began:
+                if armed {
+                    armed = false
+                    tapDragging = true
+                    model.dragAtCursor(down: true)
+                }
+            case .changed where video.bounds.width > 0 && video.bounds.height > 0:
                 model.moveCursor(
                     dx: Double((point.x - lastPoint.x) / video.bounds.width),
                     dy: Double((point.y - lastPoint.y) / video.bounds.height))
-            case .ended, .cancelled, .failed: model.dragAtCursor(down: false)
+                revealCursor()
+            case .ended, .cancelled, .failed:
+                if tapDragging {
+                    tapDragging = false
+                    model.dragAtCursor(down: false)
+                }
             default: break
             }
-            lastPoint = point
+            // 画面挪过以后按挪过的位置算下一下的位移，光标才不跟着画面多走。
+            lastPoint = recognizer.location(in: video)
         }
 
         @objc private func dragged(_ recognizer: UIPanGestureRecognizer) {
-            if model.pointerMode == .trackpad {
-                let point = recognizer.location(in: video)
-                // 长按拖着时由 `pressed` 挪光标。
-                if recognizer.state == .changed, ![.began, .changed].contains(press.state), video.bounds.width > 0 {
-                    model.moveCursor(
-                        dx: Double((point.x - lastPoint.x) / video.bounds.width),
-                        dy: Double((point.y - lastPoint.y) / video.bounds.height))
-                }
-                lastPoint = point
+            if recognizer.state == .began { dragTrackpad = model.pointerMode == .trackpad }
+            if dragTrackpad {
+                trackpadMoved(recognizer)
                 return
             }
             let (x, y) = fraction(recognizer)
             switch recognizer.state {
-            case .began: model.drag(.began, x: x, y: y)
+            case .began:
+                flushArmedClick()
+                model.drag(.began, x: x, y: y)
+                startEdgePan(recognizer)
             case .changed: model.drag(.moved, x: x, y: y)
-            case .ended, .cancelled, .failed: model.drag(.ended, x: x, y: y)
+            case .ended, .cancelled, .failed:
+                stopEdgePan()
+                model.drag(.ended, x: x, y: y)
             default: break
             }
         }
 
+        /// 光标出了页面边上那一圈时把放大着的画面挪到光标露出来。
+        private func revealCursor() {
+            let point = video.convert(
+                CGPoint(x: model.cursor.x * video.bounds.width, y: model.cursor.y * video.bounds.height), to: self)
+            let area = bounds.insetBy(dx: Self.edgeZone, dy: Self.edgeZone)
+            let dx = point.x < area.minX ? point.x - area.minX : point.x > area.maxX ? point.x - area.maxX : 0
+            let dy = point.y < area.minY ? point.y - area.minY : point.y > area.maxY ? point.y - area.maxY : 0
+            panZoomed(by: CGPoint(x: dx, y: dy))
+        }
+
+        private func startEdgePan(_ recognizer: UIGestureRecognizer) {
+            // CADisplayLink 强引用 self，换下的那个不失效就一直跑。
+            stopEdgePan()
+            edgeRecognizer = recognizer
+            let link = CADisplayLink(target: self, selector: #selector(edgeTick))
+            link.add(to: .main, forMode: .common)
+            edgeLink = link
+        }
+
+        private func stopEdgePan() {
+            edgeLink?.invalidate()
+            edgeLink = nil
+        }
+
+        /// 触屏模式按着左键拖、手指停在页面边上那一圈时，放大着的画面往那边挪，越靠边越快，手指下的位置跟着变。
+        @objc private func edgeTick() {
+            guard let recognizer = edgeRecognizer, [.began, .changed].contains(recognizer.state) else {
+                return stopEdgePan()
+            }
+            let point = recognizer.location(in: self)
+            func axis(_ value: CGFloat, _ low: CGFloat, _ high: CGFloat) -> CGFloat {
+                if value < low + Self.edgeZone { return -Self.edgeStep * min(1, (low + Self.edgeZone - value) / Self.edgeZone) }
+                if value > high - Self.edgeZone { return Self.edgeStep * min(1, (value - high + Self.edgeZone) / Self.edgeZone) }
+                return 0
+            }
+            let delta = CGPoint(x: axis(point.x, bounds.minX, bounds.maxX), y: axis(point.y, bounds.minY, bounds.maxY))
+            guard panZoomed(by: delta) else { return }
+            let (x, y) = fraction(recognizer)
+            model.drag(.moved, x: x, y: y)
+        }
+
+        /// 双击的两下之间最长隔多久。
+        private static let doubleTapWindow: Duration = .milliseconds(300)
+        /// 按住多久算长按。
+        private static let pressDuration: TimeInterval = 0.35
+        /// 长按开始以后手指挪开多远就不再是右键、开始按着左键拖。
+        private static let pressSlop: CGFloat = 4
+        /// 手指或光标离页面边不到这么远时，放大着的画面往那边挪。
+        private static let edgeZone: CGFloat = 40
+        /// 手指停在页面最边上时画面每一帧挪多远。
+        private static let edgeStep: CGFloat = 12
+
         @objc private func scrolled(_ recognizer: UIPanGestureRecognizer) {
             let translation = recognizer.translation(in: video)
-            if recognizer.state == .began { lastScroll = .zero }
+            if recognizer.state == .began {
+                lastScroll = .zero
+                flushArmedClick()
+            }
             model.scroll(
                 dx: translation.x - lastScroll.x, dy: translation.y - lastScroll.y, viewWidth: video.bounds.width)
             lastScroll = translation
         }
+    }
+
+    /// 第二根手指点一下：两指一起点，或一指按住、另一指点。第二根落下以后两根手指哪根挪开了（那是捏合或滚动）、
+    /// 第二根按得太久、落下第三根手指都不算；`requiresStillHeld` 时先按下的那根在第二根落下前挪开了也不算。
+    /// 不拦别的手势，也不被别的手势拦。
+    final class SecondFingerTap: UIGestureRecognizer {
+        var requiresStillHeld = true
+        private var held: UITouch?
+        private var heldStart = CGPoint.zero
+        private var heldLast = CGPoint.zero
+        private var second: UITouch?
+        private var secondStart = CGPoint.zero
+        private var secondAt: TimeInterval = 0
+        private static let slop: CGFloat = 10
+        private static let maxDuration: TimeInterval = 0.5
+
+        /// 先按下的那根手指（抬起了就是抬起时）在 `view` 上的位置。
+        func heldLocation(in view: UIView) -> CGPoint {
+            view.convert(heldLast, from: nil)
+        }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            for touch in touches {
+                if held == nil {
+                    held = touch
+                    heldStart = touch.location(in: nil)
+                    heldLast = heldStart
+                } else if second == nil {
+                    second = touch
+                    secondStart = touch.location(in: nil)
+                    secondAt = touch.timestamp
+                    heldStart = heldLast
+                } else {
+                    state = .failed
+                    return
+                }
+            }
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            for touch in touches {
+                let point = touch.location(in: nil)
+                if touch === held {
+                    heldLast = point
+                    if requiresStillHeld || second != nil, Self.distance(point, heldStart) > Self.slop {
+                        state = .failed
+                    }
+                } else if touch === second, Self.distance(point, secondStart) > Self.slop {
+                    state = .failed
+                }
+            }
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+            if let held, touches.contains(held) {
+                heldLast = held.location(in: nil)
+            }
+            if let second, touches.contains(second) {
+                state = second.timestamp - secondAt <= Self.maxDuration ? .recognized : .failed
+            } else if second == nil {
+                state = .failed
+            }
+        }
+
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+            state = .failed
+        }
+
+        override func reset() {
+            held = nil
+            second = nil
+        }
+
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+
+        private static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+            hypot(a.x - b.x, a.y - b.y)
+        }
+    }
+
+    /// 只看一轮触摸的头尾：第一根手指按下时调 `onBegan`，手指都抬起时调 `onEnded`。自己从不认出手势，不拦别的。
+    final class TouchSequence: UIGestureRecognizer {
+        var onBegan: (() -> Void)?
+        var onEnded: (() -> Void)?
+        private var down = 0
+
+        override init(target: Any?, action: Selector?) {
+            super.init(target: target, action: action)
+            cancelsTouchesInView = false
+            delaysTouchesEnded = false
+        }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            if down == 0 { onBegan?() }
+            down += touches.count
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+            lifted(touches.count)
+        }
+
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+            lifted(touches.count)
+        }
+
+        private func lifted(_ count: Int) {
+            down -= count
+            guard down <= 0 else { return }
+            onEnded?()
+            state = .failed
+        }
+
+        override func reset() {
+            down = 0
+        }
+
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
     }
 
     /// 显示画面：帧拼成样本交给 `AVSampleBufferDisplayLayer`，由它解码、马上显示。

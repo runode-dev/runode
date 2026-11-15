@@ -68,13 +68,20 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.changedToDown
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
@@ -122,6 +129,10 @@ import dev.runode.mobile.terminal.KeyBarPalette
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 远程桌面页：横屏、全屏（藏起状态栏和导航栏，从边上划出来），离开时换回原来的方向和系统栏。页面本身在
@@ -157,8 +168,10 @@ private fun hideSystemBars(window: Window): () -> Unit {
 }
 
 /**
- * 电脑的整块屏幕。触屏模式点按是左键，长按是右键，单指拖是按着左键拖；触控板模式单指挪光标，点按是左键，双指点按是
- * 右键，长按后拖是按着左键拖。双指滑是滚动，捏合放大，放大后双指拖着看别处。返回按钮浮在左上角，右上角是解锁、切换
+ * 电脑的整块屏幕。触屏模式点按是左键，长按后原地松手是右键、接着拖是按着左键拖，没放大时单指拖也是按着左键拖，
+ * 放大后单指拖是挪画面；触控板模式单指挪光标，点按是左键，点一下再按住拖是按着左键拖。两种模式下双指点按、一指按住
+ * 另一指点都是右键。双指滑是滚动，捏合放大，放大后双指拖着看别处，按着左键拖到或光标挪到页面边上时画面跟着往那边
+ * 挪。返回按钮浮在左上角，右上角是解锁、切换
  * 指针模式和（有几块屏幕时）切换屏幕。底部一条快捷键（软键盘没有的键，右端开关软键盘），软键盘弹出时跟在键盘上面。
  * 进来时开始连（[ScreenModel.start]），离开页面时由 `AppModel` 断开。
  */
@@ -356,7 +369,9 @@ private fun ScreenSurface(model: ScreenModel, modifier: Modifier) {
         reachTop = cutout.getTop(density) + reach,
     )
     val shown = Rect(fitted.topLeft * zoom + pan, fitted.size * zoom)
-    val currentShown by rememberUpdatedState(shown)
+    // 手势里每挪一下都可能改 zoom 和 pan，画面在哪按这一刻的值算，不等重组。
+    val currentFitted by rememberUpdatedState(fitted)
+    val haptics = LocalHapticFeedback.current
     var cursor by remember { mutableStateOf(model.cursor) }
     DisposableEffect(model) {
         model.onCursor = { x, y -> cursor = x to y }
@@ -403,7 +418,12 @@ private fun ScreenSurface(model: ScreenModel, modifier: Modifier) {
                     role = Role.Image
                 }
                 .pointerInput(model) {
-                    screenGestures(model, { currentShown }) { centroid, panChange, zoomChange ->
+                    screenGestures(
+                        model,
+                        shown = { Rect(currentFitted.topLeft * zoom + pan, currentFitted.size * zoom) },
+                        zoomed = { zoom > 1.01f },
+                        haptic = { haptics.performHapticFeedback(HapticFeedbackType.LongPress) },
+                    ) { centroid, panChange, zoomChange ->
                         val next = (zoom * zoomChange).coerceIn(1f, MaxZoom)
                         val moved = centroid - (centroid - pan) * (next / zoom) + panChange
                         zoom = next
@@ -456,30 +476,92 @@ private enum class Opening {
 }
 
 /**
- * 画面上的手势，[shown] 是画面现在摆在哪里（放大后的）。双指捏合或放大后的双指拖交给 [transform]（捏合中心、平移、
- * 缩放倍数），没放大时双指滑是滚动。
+ * 画面上的手势，[shown] 是画面现在摆在哪里（放大后的），[zoomed] 是放大着。双指捏合、放大后的双指拖和触屏模式
+ * 放大后的单指拖交给 [transform]（捏合中心、平移、缩放倍数），没放大时双指滑是滚动；放大着时按着左键拖到页面边上、
+ * 光标挪到页面边上，也经 [transform] 把画面往那边挪。触屏模式的长按在认出来时调 [haptic]。
  */
 private suspend fun PointerInputScope.screenGestures(
     model: ScreenModel,
     shown: () -> Rect,
+    zoomed: () -> Boolean,
+    haptic: () -> Unit,
     transform: (centroid: Offset, pan: Offset, zoom: Float) -> Unit,
-) = awaitEachGesture {
-    val down = awaitFirstDown(requireUnconsumed = false)
+) = coroutineScope {
+    // 触控板模式点一下的左键压到双击的时限过了才发：时限里又按下时，这一下是双击或点按拖移的开头。
+    var pendingClick: Job? = null
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        val armed = pendingClick != null
+        pendingClick?.cancel()
+        pendingClick = null
+        screenGesture(model, down, armed, shown, zoomed, haptic, transform) {
+            pendingClick = launch {
+                delay(viewConfiguration.doubleTapTimeoutMillis)
+                pendingClick = null
+                model.clickAtCursor(ScreenMouseButton.Left)
+            }
+        }
+    }
+}
+
+/**
+ * 从 [down] 开始的一次手势。[armed] 是上一下点按的左键还压着没发（触控板模式）；这次点按时 [deferClick] 把它压下。
+ */
+private suspend fun AwaitPointerEventScope.screenGesture(
+    model: ScreenModel,
+    down: PointerInputChange,
+    armed: Boolean,
+    shown: () -> Rect,
+    zoomed: () -> Boolean,
+    haptic: () -> Unit,
+    transform: (centroid: Offset, pan: Offset, zoom: Float) -> Unit,
+    deferClick: () -> Unit,
+) {
     val slop = viewConfiguration.touchSlop
     val trackpad = model.pointerMode == ScreenModel.PointerMode.Trackpad
+    val edge = EdgeZone.toPx()
+    val edgeStep = EdgeStep.toPx()
     fun fraction(point: Offset): Pair<Double, Double> {
         val rect = shown()
         if (rect.width <= 0f || rect.height <= 0f) return 0.0 to 0.0
         return ScreenModel.clamped(((point.x - rect.left) / rect.width).toDouble()) to
             ScreenModel.clamped(((point.y - rect.top) / rect.height).toDouble())
     }
+    /** [point] 离页面边不到 [edge] 时画面这一下往那边挪多少，越靠边越快。 */
+    fun edgePush(point: Offset): Offset {
+        fun axis(value: Float, extent: Float) = when {
+            value < edge -> edgeStep * min(1f, (edge - value) / edge)
+            value > extent - edge -> -edgeStep * min(1f, (value - extent + edge) / edge)
+            else -> 0f
+        }
+        return Offset(axis(point.x, size.width.toFloat()), axis(point.y, size.height.toFloat()))
+    }
+    /** 光标出了页面边上那一圈时把画面挪到光标露出来（没放大时 [transform] 挪不动）。 */
+    fun revealCursor() {
+        val rect = shown()
+        val (x, y) = model.cursor
+        val point = Offset(rect.left + x.toFloat() * rect.width, rect.top + y.toFloat() * rect.height)
+        fun axis(value: Float, extent: Float) = when {
+            value < edge -> edge - value
+            value > extent - edge -> extent - edge - value
+            else -> 0f
+        }
+        val push = Offset(axis(point.x, size.width.toFloat()), axis(point.y, size.height.toFloat()))
+        if (push != Offset.Zero) transform(Offset.Zero, push, 1f)
+    }
     fun cursorDelta(from: Offset, to: Offset) {
         val rect = shown()
         if (rect.width <= 0f || rect.height <= 0f) return
         model.moveCursor(((to.x - from.x) / rect.width).toDouble(), ((to.y - from.y) / rect.height).toDouble())
+        revealCursor()
+    }
+    fun rightClickAt(point: Offset) {
+        if (!shown().contains(point)) return
+        val (x, y) = fraction(point)
+        model.rightClick(x, y)
     }
     // 等到长按的时限还没分出来（没抬起、没挪开、没落下第二根手指）就是长按，为空。
-    val opening = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+    val opening = withTimeoutOrNull(LongPressMillis) {
         var decided: Opening? = null
         while (decided == null) {
             val event = awaitPointerEvent()
@@ -495,78 +577,142 @@ private suspend fun PointerInputScope.screenGestures(
         }
         decided
     }
-    when (opening) {
-        Opening.Tap -> when {
-            trackpad -> model.clickAtCursor(ScreenMouseButton.Left)
+    // 上一下点按压着的左键：这次是点按就连成双击，是拖或长按就是点按拖移，别的手势先把它发出去。
+    if (armed && (!trackpad || opening == Opening.TwoFingers)) model.clickAtCursor(ScreenMouseButton.Left)
+    val dragging = armed && trackpad && (opening == Opening.Drag || opening == null)
+    when {
+        opening == Opening.Tap -> when {
+            trackpad && armed -> repeat(2) { model.clickAtCursor(ScreenMouseButton.Left) }
+            trackpad -> deferClick()
             shown().contains(down.position) -> {
                 val (x, y) = fraction(down.position)
                 model.tap(x, y, down.position / density)
             }
         }
-        null -> {
-            // 长按：触屏模式是右键；触控板模式按下左键，拖着挪光标，松手时松开。
-            if (!trackpad) {
-                if (shown().contains(down.position)) {
-                    val (x, y) = fraction(down.position)
-                    model.rightClick(x, y)
-                }
-                untilReleased(down.id) { _, _ -> }
-            } else {
-                model.dragAtCursor(true)
-                untilReleased(down.id) { from, to -> cursorDelta(from, to) }
-                model.dragAtCursor(false)
+        opening == Opening.TwoFingers -> twoFingers(model, down, trackpad, shown, zoomed, ::rightClickAt, transform)
+        opening == null && !trackpad -> {
+            // 长按的右键松手时才发，按着时另一根手指点一下就在按住的地方右键；挪开了就是从按下的地方按着左键拖。
+            haptic()
+            var tapped = false
+            var moved = false
+            untilReleased(
+                down.id,
+                onMove = { _, to -> if ((to - down.position).getDistance() > PressDragSlop.toPx()) moved = true },
+                onSecondTap = {
+                    tapped = true
+                    rightClickAt(down.position)
+                },
+                until = { moved && !tapped },
+            )
+            val held = currentEvent.changes.firstOrNull { it.id == down.id }?.pressed == true
+            when {
+                moved && !tapped && held -> touchDrag(down, down.position, ::fraction, ::edgePush, model, transform)
+                !moved && !tapped -> rightClickAt(down.position)
             }
         }
-        Opening.Drag -> {
+        trackpad -> {
+            if (dragging) model.dragAtCursor(true)
+            untilReleased(
+                down.id,
+                onMove = ::cursorDelta,
+                onSecondTap = if (dragging) null else ({ model.clickAtCursor(ScreenMouseButton.Right) }),
+            )
+            if (dragging) model.dragAtCursor(false)
+        }
+        // 放大着时单指拖是挪画面，要在电脑上拖就长按后再拖。
+        zoomed() -> untilReleased(down.id, onMove = { from, to -> transform(Offset.Zero, to - from, 1f) })
+        else -> {
             val start = currentEvent.changes.firstOrNull { it.id == down.id }?.position ?: down.position
-            if (trackpad) {
-                untilReleased(down.id) { from, to -> cursorDelta(from, to) }
-            } else {
-                val (x, y) = fraction(start)
-                model.drag(ScreenModel.DragPhase.Began, x, y)
-                val end = untilReleased(down.id) { _, to ->
-                    val (mx, my) = fraction(to)
-                    model.drag(ScreenModel.DragPhase.Moved, mx, my)
-                }
-                val (ex, ey) = fraction(end ?: start)
-                model.drag(ScreenModel.DragPhase.Ended, ex, ey)
+            touchDrag(down, start, ::fraction, ::edgePush, model, transform)
+        }
+    }
+}
+
+/**
+ * 触屏模式从 [start] 按下左键拖，跟着 [down] 那根手指到它抬起。手指停在页面边上时也每一帧经 [edgePush] 挪画面，
+ * 手指下的位置跟着变。
+ */
+private suspend fun AwaitPointerEventScope.touchDrag(
+    down: PointerInputChange,
+    start: Offset,
+    fraction: (Offset) -> Pair<Double, Double>,
+    edgePush: (Offset) -> Offset,
+    model: ScreenModel,
+    transform: (centroid: Offset, pan: Offset, zoom: Float) -> Unit,
+) {
+    var last = currentEvent.changes.firstOrNull { it.id == down.id }?.position ?: start
+    var sent = fraction(start)
+    model.drag(ScreenModel.DragPhase.Began, sent.first, sent.second)
+    while (true) {
+        val event = withTimeoutOrNull(EdgeFrameMillis) { awaitPointerEvent() }
+        if (event != null) {
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            change.consume()
+            last = change.position
+            if (!change.pressed) break
+        }
+        val push = edgePush(last)
+        if (push != Offset.Zero) transform(Offset.Zero, push, 1f)
+        val now = fraction(last)
+        if (now != sent) {
+            model.drag(ScreenModel.DragPhase.Moved, now.first, now.second)
+            sent = now
+        }
+    }
+    model.drag(ScreenModel.DragPhase.Ended, sent.first, sent.second)
+}
+
+/**
+ * 两根手指：捏合或放大后的拖交给 [transform]，没放大时滑是滚动。第二根手指按下后很快抬起（两指一起点，或一指按住、
+ * 另一指点）是右键：触控板模式在光标处，触屏模式经 [rightClickAt] 点在先按下的那根手指处。
+ */
+private suspend fun AwaitPointerEventScope.twoFingers(
+    model: ScreenModel,
+    down: PointerInputChange,
+    trackpad: Boolean,
+    shown: () -> Rect,
+    zoomed: () -> Boolean,
+    rightClickAt: (Offset) -> Unit,
+    transform: (centroid: Offset, pan: Offset, zoom: Float) -> Unit,
+) {
+    val slop = viewConfiguration.touchSlop
+    val secondDown = currentEvent.changes.filter { it.id != down.id && it.pressed }.maxOfOrNull { it.uptimeMillis }
+        ?: down.uptimeMillis
+    var first = currentEvent.changes.firstOrNull { it.id == down.id }?.position ?: down.position
+    var mode = TwoFingerMode.Undecided
+    var totalPan = Offset.Zero
+    var totalZoom = 1f
+    while (true) {
+        val event = awaitPointerEvent()
+        event.changes.firstOrNull { it.id == down.id }?.let { first = it.position }
+        val pressed = event.changes.count { it.pressed }
+        if (pressed < 2 && mode == TwoFingerMode.Undecided) {
+            val lifted = event.changes.maxOfOrNull { it.uptimeMillis } ?: secondDown
+            if (lifted - secondDown < viewConfiguration.longPressTimeoutMillis) {
+                if (trackpad) model.clickAtCursor(ScreenMouseButton.Right) else rightClickAt(first)
+            }
+            mode = TwoFingerMode.Done
+        }
+        event.changes.forEach { it.consume() }
+        if (pressed == 0) break
+        if (pressed < 2 || mode == TwoFingerMode.Done) continue
+        val panChange = event.calculatePan()
+        val zoomChange = event.calculateZoom()
+        val centroid = event.calculateCentroid(useCurrent = true)
+        if (mode == TwoFingerMode.Undecided) {
+            totalPan += panChange
+            totalZoom *= zoomChange
+            val pinched = abs(1 - totalZoom) * event.calculateCentroidSize(useCurrent = true) > slop
+            mode = when {
+                pinched -> TwoFingerMode.Transform
+                totalPan.getDistance() > slop -> if (zoomed()) TwoFingerMode.Transform else TwoFingerMode.Scroll
+                else -> TwoFingerMode.Undecided
             }
         }
-        Opening.TwoFingers -> {
-            val began = down.uptimeMillis
-            var mode = TwoFingerMode.Undecided
-            var totalPan = Offset.Zero
-            var totalZoom = 1f
-            var ended = began
-            while (true) {
-                val event = awaitPointerEvent()
-                ended = event.changes.maxOfOrNull { it.uptimeMillis } ?: ended
-                if (event.changes.none { it.pressed }) break
-                if (event.changes.count { it.pressed } < 2) continue
-                val panChange = event.calculatePan()
-                val zoomChange = event.calculateZoom()
-                val centroid = event.calculateCentroid(useCurrent = true)
-                event.changes.forEach { it.consume() }
-                if (mode == TwoFingerMode.Undecided) {
-                    totalPan += panChange
-                    totalZoom *= zoomChange
-                    val pinched = abs(1 - totalZoom) * event.calculateCentroidSize(useCurrent = true) > slop
-                    mode = when {
-                        pinched -> TwoFingerMode.Transform
-                        totalPan.getDistance() > slop -> if (shown().width > size.width * 1.01f) TwoFingerMode.Transform else TwoFingerMode.Scroll
-                        else -> TwoFingerMode.Undecided
-                    }
-                }
-                when (mode) {
-                    TwoFingerMode.Scroll -> model.scroll(panChange.x, panChange.y, shown().width)
-                    TwoFingerMode.Transform -> transform(centroid, panChange, zoomChange)
-                    TwoFingerMode.Undecided -> {}
-                }
-            }
-            // 两指点一下：触控板模式是右键。
-            if (mode == TwoFingerMode.Undecided && trackpad && ended - began < viewConfiguration.longPressTimeoutMillis) {
-                model.clickAtCursor(ScreenMouseButton.Right)
-            }
+        when (mode) {
+            TwoFingerMode.Scroll -> model.scroll(panChange.x, panChange.y, shown().width)
+            TwoFingerMode.Transform -> transform(centroid, panChange, zoomChange)
+            TwoFingerMode.Undecided, TwoFingerMode.Done -> {}
         }
     }
 }
@@ -575,22 +721,69 @@ private enum class TwoFingerMode {
     Undecided,
     Scroll,
     Transform,
+
+    /** 点过了，或按得太久不算点：剩下的只等手指都抬起。 */
+    Done,
 }
 
-/** 跟着 [pointer] 那根手指到它抬起，每挪一下交给 [onMove]（上一个位置、这一个位置）；返回最后的位置。 */
-private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.untilReleased(
-    pointer: androidx.compose.ui.input.pointer.PointerId,
+/** 手指或光标离页面边不到这么远时，放大着的画面往那边挪。 */
+private val EdgeZone = 40.dp
+
+/** 手指停在页面最边上时画面每一帧挪多远。 */
+private val EdgeStep = 12.dp
+
+/** 手指停在页面边上不动时多久挪一次画面。 */
+private const val EdgeFrameMillis = 16L
+
+/** 按住多久算长按。 */
+private const val LongPressMillis = 350L
+
+/** 长按开始以后手指挪开多远就不再是右键、开始按着左键拖。 */
+private val PressDragSlop = 4.dp
+
+/**
+ * 跟着 [pointer] 那根手指到它抬起，每挪一下交给 [onMove]（上一个位置、这一个位置）；返回最后的位置。给了
+ * [onSecondTap] 时，按着期间另一根手指点一下（按下到抬起不到长按的时限、没挪开）就调它；每一下之后 [until] 为真时
+ * 不再跟，手指还按着就返回。
+ */
+private suspend fun AwaitPointerEventScope.untilReleased(
+    pointer: PointerId,
     onMove: (Offset, Offset) -> Unit,
+    onSecondTap: (() -> Unit)? = null,
+    until: () -> Boolean = { false },
 ): Offset? {
+    val slop = viewConfiguration.touchSlop
     var last: Offset? = currentEvent.changes.firstOrNull { it.id == pointer }?.position
+    // 另一根手指按下的那一下；挪开了就是 null，等它抬起再认下一根。
+    var other: PointerInputChange? = null
+    var otherId: PointerId? = null
     while (true) {
         val event = awaitPointerEvent()
+        for (change in event.changes) {
+            if (change.id == pointer) continue
+            if (change.changedToDown() && otherId == null) {
+                otherId = change.id
+                other = change
+            } else if (change.id == otherId) {
+                val start = other
+                if (start != null && (change.position - start.position).getDistance() > slop) other = null
+                if (change.changedToUp()) {
+                    if (start != null && other != null && change.uptimeMillis - start.uptimeMillis < viewConfiguration.longPressTimeoutMillis) {
+                        onSecondTap?.invoke()
+                    }
+                    otherId = null
+                    other = null
+                }
+            }
+            change.consume()
+        }
         val change = event.changes.firstOrNull { it.id == pointer } ?: return last
         val previous = last ?: change.previousPosition
         if (change.position != previous) onMove(previous, change.position)
         last = change.position
         change.consume()
         if (!change.pressed) return last
+        if (until()) return last
     }
 }
 
