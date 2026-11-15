@@ -1719,7 +1719,10 @@ copy:
   linux: Copy
 skill_install:
   done_title: "Agent Skill installed"
-  done_detail: "%{paths}"
+  done_at: "Installed in %{path}."
+  done_agents: "Also set up for %{agents}."
+  done_hint: "New agent sessions will pick it up."
+  separator: ", "
   left_as_is: "%{path} is a link you manage; left it as it is."
   skipped: "Skipped %{path}: something of yours is there, left untouched."
   failed_title: "Couldn't install the Agent Skill"
