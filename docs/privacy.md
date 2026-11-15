@@ -1,6 +1,6 @@
 # Runode Privacy Policy
 
-Last updated: October 24, 2026
+Last updated: November 16, 2026
 
 Runode is a terminal for AI coding agents on your Mac, with an iOS app that controls it remotely. This policy covers the Runode Mac app and the Runode iOS app.
 
@@ -12,6 +12,7 @@ Runode has no accounts, no analytics, no advertising and no tracking. We don't r
 
 - **Between your phone and your Mac.** The iOS app talks only to Macs you have paired by scanning a QR code. The connection is end-to-end encrypted with TLS 1.3 and pinned to your Mac's certificate. On the same network it goes directly to your Mac. Elsewhere, only if you allow connections over the internet (network 0.0.0.0 when pairing), it is relayed through public relay servers run by the iroh project (n0); those relays only see encrypted traffic and cannot read it.
 - **Notifications.** To notify your phone when an agent needs you, your Mac sends the notification through our push relay (push.runode.dev) to Apple Push Notification service for an iPhone, or to Google's Firebase Cloud Messaging (FCM) for an Android phone. Your phone gives its push token only to the relay, which hands back a sealed handle for each Mac; your Mac only ever sees that handle. The relay forwards notifications to Apple or Google in real time and does not store them. On Android the notification text travels through FCM as message data, and the app shows it itself.
+- **Notifications from apps you build yourself.** A phone app you build from source without the relay gives its push token directly to the Macs it is paired with, which keep it in their list of paired devices. Your Mac then sends notifications straight to Apple Push Notification service with the APNs key you configured, or to FCM with the Firebase service account you configured, without going through our relay. Those notifications are handled under your own Apple or Google developer account, under their terms.
 - **Voice input.** Speech is recognized on your phone with an offline model, or on your Mac. Recordings are not sent to us. If you set up a cloud speech or text service in the Mac app, audio or text is sent to the provider you configured, under that provider's terms.
 - **Speech model downloads.** The offline speech model is downloaded from Hugging Face or ModelScope. Those sites see an ordinary download request.
 - **Updates.** The Mac app checks GitHub Releases for new versions and downloads them from GitHub.
@@ -36,7 +37,7 @@ Changes to this policy are published at this address. For questions, open an iss
 
 # Runode 隐私政策
 
-最后更新：2026 年 10 月 24 日
+最后更新：2026 年 11 月 16 日
 
 Runode 是 Mac 上为 AI 编程 agent 做的终端，另有一个 iOS app 用来远程操作它。本政策适用于 Runode 的 Mac app 和 iOS app。
 
@@ -48,6 +49,7 @@ Runode 没有账号，不做统计分析，没有广告，也不追踪你。我�
 
 - **手机和 Mac 之间。** iOS app 只和你扫码配对过的 Mac 通信，连接用 TLS 1.3 端到端加密，并绑定那台 Mac 的证书。在同一个网络里直接连到 Mac；不在同一个网络时，只有你允许经互联网连接（配对时网络选 0.0.0.0）才经 iroh 项目（n0）运营的公共中继转发，中继只经手加密后的数据，读不到内容。
 - **通知。** agent 需要你时，Mac 经我们的推送中转（push.runode.dev）发通知：iPhone 的交给 Apple 推送通知服务，Android 手机的交给 Google 的 Firebase 云消息（FCM）。手机只把推送令牌交给中转，换回每台 Mac 各一个加密的句柄，Mac 只拿得到句柄。中转实时把通知转给 Apple 或 Google，不保存。在 Android 上，通知的文字作为消息数据经 FCM 送到手机，由 app 自己显示。
+- **自己编译的 app 的通知。** 你从源码编译、不带中转的手机 app 把推送令牌直接交给配对过的 Mac，记在 Mac 的配对设备表里。Mac 用你配置的 APNs 密钥直接发给 Apple 推送通知服务，或者用你配置的 Firebase 服务账号直接发给 FCM，不经我们的中转。这些通知走的是你自己的 Apple 或 Google 开发者账号，适用它们的条款。
 - **语音输入。** 语音在手机上用离线模型识别，或交给你的 Mac 识别，录音不会发给我们。如果你在 Mac app 里配置了云端识别或文字润色服务，音频或文字会发给你配置的服务商，适用该服务商的条款。
 - **语音模型下载。** 离线语音模型从 Hugging Face 或 ModelScope 下载，这些网站看到的是一次普通的下载请求。
 - **更新。** Mac app 向 GitHub Releases 查询新版本，并从 GitHub 下载。
