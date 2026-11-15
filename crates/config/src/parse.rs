@@ -87,7 +87,7 @@ pub const KEYS: &[&[&str]] = &[
     &["clipboard-write", "clipboard-read", "vt-window-resize-allowed"],
     &[TERMINAL_HOST],
     &["ssh-program", "ssh-control-persist", "ssh-restore-on-launch"],
-    &["auto-update"],
+    &["auto-update", "developer-mode"],
     &[
         REMOTE_ACCESS,
         "remote-access-port",
@@ -423,6 +423,9 @@ impl Config {
                 self.git_auto_fetch = or_default(empty, defaults.git_auto_fetch, || parse_bool(value))?;
             }
             "auto-update" => self.auto_update = or_default(empty, defaults.auto_update, || parse_bool(value))?,
+            "developer-mode" => {
+                self.developer_mode = or_default(empty, defaults.developer_mode, || parse_bool(value))?;
+            }
             "remote-access" => self.remote_access = or_default(empty, defaults.remote_access, || parse_bool(value))?,
             "remote-access-port" => {
                 self.remote_access_port = or_default(empty, defaults.remote_access_port, || {

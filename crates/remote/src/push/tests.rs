@@ -41,6 +41,8 @@ use crate::devices::{self, Device, PushRegistration};
 /// 等异步的结果最多这么久。
 const PATIENCE: Duration = Duration::from_secs(15);
 const TOKEN: &str = "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011";
+/// 中转封的句柄（base64url），官方 App 经中转登记时交的是它。
+const HANDLE: &str = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8w-_";
 const DEVICE: DeviceId = DeviceId([7; 16]);
 const SESSION: SessionId = SessionId(0x0123_4567_89ab_cdef_0011_2233_4455_6677);
 const RELAY_PROD: Route = Route { env: ApnsEnv::Production, via: Via::Relay };
@@ -123,7 +125,7 @@ impl Scratch {
         devices::add(&self.dirs, device).unwrap();
         let registration = PushRegistration {
             device_id: DEVICE,
-            token: TOKEN.into(),
+            token: if bundle == OFFICIAL_BUNDLE { HANDLE } else { TOKEN }.into(),
             env,
             service,
             bundle: bundle.into(),
@@ -186,7 +188,8 @@ fn notification(lines: &[&str]) -> Notification {
 }
 
 fn target(route: Route, lines: &[&str]) -> Target {
-    Target { route, device: DEVICE, token: TOKEN.into(), notification: notification(lines) }
+    let token = if route.via == Via::Relay { HANDLE } else { TOKEN };
+    Target { route, device: DEVICE, token: token.into(), notification: notification(lines) }
 }
 
 /// 请求体里的 JSON。
@@ -219,7 +222,7 @@ fn notifications_through_the_relay() {
     assert_eq!(url(&requests[0]), "https://relay.example/v1/notify");
     let notify = body(&requests[0]);
     assert_eq!(notify["v"].as_u64(), Some(1));
-    assert_eq!(notify["handle"], TOKEN);
+    assert_eq!(notify["handle"], HANDLE);
     assert_eq!(notify["notification"]["lines"], serde_json::json!(["Proceed?"]));
     assert_eq!(notify["notification"]["session"], SESSION.to_string());
     let expiration = notify["expiration"].as_u64().unwrap();
@@ -760,7 +763,7 @@ fn an_unreadable_device_table_keeps_the_registrations() {
 fn the_official_app_needs_a_relay() {
     let registration = PushRegistration {
         device_id: DEVICE,
-        token: TOKEN.into(),
+        token: HANDLE.into(),
         env: ApnsEnv::Production,
         service: PushService::Apns,
         bundle: OFFICIAL_BUNDLE.into(),
@@ -770,11 +773,35 @@ fn the_official_app_needs_a_relay() {
     };
     let relay = PushSettings { relay: Some("https://relay.example".into()), ..PushSettings::default() };
     assert_eq!(route(&registration, &relay), Some(RELAY_PROD));
-    assert_eq!(route(&registration, &PushSettings { relay: None, ..relay.clone() }), None);
-    // 官方 App 登记的是句柄，配了同一个 bundle 的密钥也不直连。
+    assert_eq!(route(&registration, &PushSettings { relay: None, ..relay }), None);
+}
+
+/// 配了官方 App 的 bundle 的密钥时，交 device token 的（自己编译、没带中转的官方 App）直连，带不带中转
+/// 都一样；没配密钥时不推，device token 不交给中转。交句柄的照旧经中转。
+#[test]
+fn a_configured_key_takes_device_tokens_of_the_official_app() {
+    let handle = PushRegistration {
+        device_id: DEVICE,
+        token: HANDLE.into(),
+        env: ApnsEnv::Development,
+        service: PushService::Apns,
+        bundle: OFFICIAL_BUNDLE.into(),
+        machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
+        machine_name: "Mac".into(),
+        updated_at: 1,
+    };
     let key =
         ApnsKey { key_file: "k.p8".into(), key_id: "K".into(), team_id: "T".into(), bundle: OFFICIAL_BUNDLE.into() };
-    assert_eq!(route(&registration, &PushSettings { direct: Some(key), ..relay }), Some(RELAY_PROD));
+    let settings =
+        PushSettings { relay: Some("https://relay.example".into()), direct: Some(key), ..PushSettings::default() };
+    let relay_dev = Route { env: ApnsEnv::Development, via: Via::Relay };
+    let direct_dev = Route { env: ApnsEnv::Development, via: Via::Direct };
+    assert_eq!(route(&handle, &settings), Some(relay_dev));
+    assert_eq!(route(&handle, &PushSettings { relay: None, ..settings.clone() }), None);
+    let token = PushRegistration { token: TOKEN.into(), ..handle };
+    assert_eq!(route(&token, &settings), Some(direct_dev));
+    assert_eq!(route(&token, &PushSettings { relay: None, ..settings.clone() }), Some(direct_dev));
+    assert_eq!(route(&token, &PushSettings { direct: None, ..settings }), None);
 }
 
 /// Android 的官方 App 和 iOS 的一样经中转推，电脑不分平台；自己签名打包的 Android App 不推，配了同一个
@@ -820,7 +847,7 @@ fn android_registrations_are_pushed_through_the_relay() {
     host.set(AgentState::Blocked);
     let requests = scratch.wait_for(1);
     assert_eq!(url(&requests[0]), "https://relay.example/v1/notify");
-    assert_eq!(body(&requests[0])["handle"], TOKEN);
+    assert_eq!(body(&requests[0])["handle"], HANDLE);
 }
 
 /// 登记都推不出去（没带中转的构建里只有官方 App 的登记）时不连宿主，单独跑的宿主照常能因空闲退出。

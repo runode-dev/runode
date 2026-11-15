@@ -104,6 +104,7 @@ impl Config {
             "ssh-restore-on-launch" => bool(self.ssh_restore_on_launch),
             "git-auto-fetch" => bool(self.git_auto_fetch),
             "auto-update" => bool(self.auto_update),
+            "developer-mode" => bool(self.developer_mode),
             "remote-access" => bool(self.remote_access),
             "remote-access-port" => vec![self.remote_access_port.to_string()],
             "remote-access-name" => self.remote_access_name.iter().cloned().collect(),

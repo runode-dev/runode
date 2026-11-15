@@ -194,6 +194,7 @@ impl Page {
                 Row("terminal-host", Switch),
                 Row("auto-update", Switch),
                 Row("prevent-sleep", Choice),
+                Row("developer-mode", Switch),
                 Section("login"),
                 Autostart,
                 Section("config_file"),
@@ -619,10 +620,10 @@ impl SettingsView {
     /// 这一项在这台机器、这份配置下显示不显示。
     fn item_shown(&self, item: &Item) -> bool {
         match item {
-            // 发布的版本经中转推官方 App，用不着直连 APNs 的密钥，这一节只在自己编译的版本里显示。
+            // 直连 APNs 的密钥只有自己编译手机 App 的开发者用得上。
             Item::Section("push_key")
             | Item::Row("apns-key-file" | "apns-key-id" | "apns-team-id" | "apns-bundle-id", _) => {
-                runode_protocol::push::RELAY_URL.is_none()
+                self.config.developer_mode
             }
             Item::Section("login") | Item::Autostart => super::autostart::any_supported(),
             Item::Firewall => self.config.remote_access && self.firewall.blocked(),

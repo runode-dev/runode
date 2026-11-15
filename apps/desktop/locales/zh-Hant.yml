@@ -829,6 +829,7 @@ settings:
     ssh_control_persist: 閒置連線保留
     ssh_restore_on_launch: 啟動時重連
     auto_update: 自動更新
+    developer_mode: 開發者模式
     remote_access: 遠端存取
     remote_access_port: 連接埠
     remote_access_name: "電腦名稱"
@@ -902,6 +903,7 @@ settings:
     ssh_control_persist: 最後一個終端機關掉後，到這台主機的連線再留多少秒，這期間重連不用再輸入密碼。0 是一直留著。結束 Runode 時總會中斷。
     ssh_restore_on_launch: 打開 Runode、恢復 SSH 主機上的工作區和終端機時馬上連那台主機。關掉後等你點「立即重連」才連，打開 Runode 時不會先問密碼。下次啟動起生效。
     auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
+    developer_mode: 在設定裡顯示給開發者用的幾項，比如推送到自己編譯的手機 App 用的 APNs 金鑰。只管顯示，設定檔裡寫了的照樣生效。
     remote_access: "讓配對過的手機和電腦連上這台電腦的終端機：在同一個網路裡直接連；配對頁的網路選 0.0.0.0 時，不在同一個網路也能經網際網路連過來，必要時走中繼，內容照樣加密。在下面配對，或者用 runode remote pair。"
     remote_access_port: TCP 連接埠，1 到 65535。
     remote_access_name: "配對過的手機和電腦上顯示的名稱，留空時用系統的電腦名稱。改了以後連著的裝置會斷開一下再連上。"
@@ -912,7 +914,7 @@ settings:
     apns_key_file: Apple 開發者帳號裡下載的 .p8 檔案，~ 表示 $HOME。四項都填了才直連 APNs。
     apns_key_id: 這把金鑰的 10 位 ID，也在檔名 AuthKey_ID.p8 裡。
     apns_team_id: Apple 開發者帳號的 10 位 Team ID。
-    apns_bundle_id: 自己編譯的手機 App 的 bundle ID。
+    apns_bundle_id: 自己編譯的手機 App 的 bundle ID。這個 App 交來 device token 時用上面的金鑰直連 APNs，和官方 App 同一個 bundle ID 也一樣；經中轉登記的照舊經中轉推。
     agent_notifications:
       macos: agent 在你沒在看的分割畫面裡完成或等你回答時發系統通知。只有打包好的 Runode.app 能發通知。
       windows: agent 在你沒在看的分割畫面裡完成或等你回答時發系統通知。

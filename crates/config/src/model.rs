@@ -181,6 +181,8 @@ pub struct Config {
     /// 启动后和之后每隔几个小时查一次新版本，有了就在后台下载好、退出时装上；关着时只在菜单里点
     /// 「检查更新」时查。只有用 Developer ID 签过名的 Runode.app 会自己更新。
     pub auto_update: bool,
+    /// 设置页显示给开发者用的几项（直连 APNs 的密钥）。只管显示，配了的项照样生效。
+    pub developer_mode: bool,
     /// 让手机这类别的设备经网络连上宿主（远程访问）。改了几秒内生效，不用重启 app。
     pub remote_access: bool,
     /// 远程访问监听的 TCP 端口。
@@ -282,6 +284,7 @@ impl Default for Config {
             ssh_restore_on_launch: true,
             git_auto_fetch: true,
             auto_update: true,
+            developer_mode: false,
             vt_window_resize_allowed: false,
             remote_access: false,
             // 和 `runode_protocol::remote::DEFAULT_PORT` 一样；config 不依赖 protocol，桌面的测试对着两边。

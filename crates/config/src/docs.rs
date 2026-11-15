@@ -155,6 +155,9 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "auto-update" => {
             "Check for a new version of Runode when it starts and every few hours after that: true, false. With true, a new version is downloaded in the background and installed when you quit Runode; with false, Runode only checks when you choose Check for Updates in the Runode menu. Only a Runode.app signed by its publisher updates itself."
         }
+        "developer-mode" => {
+            "Show settings for developers in the Settings window, such as the APNs key for pushing to a phone app you build yourself: true, false (default). It only changes what Settings shows; settings written in the file take effect either way."
+        }
         "remote-access" => {
             "Let paired phones and computers reach this computer's terminals, directly on the same network, and over the internet from elsewhere when remote-access-address is 0.0.0.0 (through an end-to-end encrypted relay when a direct path fails): true, false. Pair a device with `runode remote pair`, list paired devices with `runode remote devices`, and remove one with `runode remote revoke`. Takes effect within a few seconds, without restarting Runode."
         }
@@ -166,7 +169,7 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
             "The name paired phones show for this computer. When empty, the computer name from System Settings › General › Sharing. Takes effect within a few seconds; connected phones drop briefly and reconnect."
         }
         "remote-access-push" => {
-            "When an agent waits for your answer, send a notification to paired phones, even when the Runode app on the phone is closed: true, false. The phone registers for this when it connects; the official app's pushes go through the push relay, an app you build yourself needs the apns-* keys below."
+            "When an agent waits for your answer, send a notification to paired phones, even when the Runode app on the phone is closed: true, false. The phone registers for this when it connects; the official app's pushes go through the push relay, an app you build yourself is pushed with the apns-* keys below when they are set."
         }
         "remote-access-push-text" => {
             "Include the question and choices from the bottom of the screen in the notification: true, false. With false only the title and the agent are sent."
@@ -175,7 +178,7 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
             "Seconds an agent has to keep waiting before the phone is notified, so quick answers at the computer don't buzz the phone: a whole number, 0 notifies right away."
         }
         "apns-key-file" => {
-            "Push straight to Apple instead of through the relay, for an app you sign yourself: the .p8 key file downloaded from your Apple developer account; ~/ for the home directory. Only used together with apns-key-id, apns-team-id and apns-bundle-id."
+            "Push straight to Apple instead of through the relay, for a phone app you build and sign yourself: the .p8 key file downloaded from your Apple developer account; ~/ for the home directory. Only used together with apns-key-id, apns-team-id and apns-bundle-id. A phone whose app has that bundle ID and registered an APNs device token is pushed with this key, even when the bundle ID is the official app's; registrations through the relay still go through the relay. Shown in Settings when developer-mode is on."
         }
         "apns-key-id" => "The ID of that key (10 characters, also in the file name AuthKey_<ID>.p8).",
         "apns-team-id" => "Your Apple developer team ID (10 characters).",

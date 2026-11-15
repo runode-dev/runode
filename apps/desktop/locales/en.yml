@@ -829,6 +829,7 @@ settings:
     ssh_control_persist: Keep idle connections
     ssh_restore_on_launch: Reconnect at launch
     auto_update: Update automatically
+    developer_mode: Developer mode
     remote_access: Remote access
     remote_access_port: Port
     remote_access_name: "Computer name"
@@ -902,6 +903,7 @@ settings:
     ssh_control_persist: Seconds the connection to a host stays open after its last terminal closes, so reconnecting meanwhile asks for no password. 0 keeps it open. Quitting Runode always closes it.
     ssh_restore_on_launch: Connects to SSH hosts right away when Runode reopens workspaces and terminals that are on them. Turn it off to connect only when you click Reconnect, so launching Runode does not ask for passwords. Takes effect from the next launch.
     auto_update: Check for new versions in the background, download them and install them when Runode quits.
+    developer_mode: Show settings for developers, such as the APNs key for pushing to a phone app you build yourself. It only changes what is shown here; settings in the config file take effect either way.
     remote_access: "Lets paired phones and computers reach this computer's terminals on the same network, and over the internet from elsewhere when the network on the pairing page is 0.0.0.0, through an encrypted relay when needed. Pair below, or with runode remote pair."
     remote_access_port: TCP port, 1 to 65535.
     remote_access_name: "The name paired phones and computers show. When empty, the system computer name. Connected devices drop briefly when it changes."
@@ -912,7 +914,7 @@ settings:
     apns_key_file: The .p8 key file from your Apple developer account; ~ stands for $HOME. All four fields are needed to push straight to APNs.
     apns_key_id: The 10-character ID of that key, also in its file name AuthKey_ID.p8.
     apns_team_id: Your 10-character Apple developer team ID.
-    apns_bundle_id: The bundle ID of your build of the phone app.
+    apns_bundle_id: "The bundle ID of your build of the phone app. When it registers a device token, it is pushed straight to APNs with the key above, even with the official app's bundle ID; registrations through the relay still go through the relay."
     agent_notifications:
       macos: Notifies you when an agent you are not looking at finishes or needs an answer. Only the packaged Runode.app can notify.
       windows: Notifies you when an agent you are not looking at finishes or needs an answer.

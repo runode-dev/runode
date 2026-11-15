@@ -10,9 +10,10 @@
 //! `Attach`：只看状态的连接也会让会话的 `SessionInfo::clients` 加一，桌面靠它为零回收后台已退出的会话。
 //! 不满足条件时断开这条连接，单独跑的宿主照常能因空闲退出。
 //!
-//! 推送的路线按登记的 bundle id 定：官方 App 的 `OFFICIAL_BUNDLE` 登记的是中转的句柄，不分 iOS 还是
-//! Android，只在这个构建带着中转（`RELAY_URL`）时经中转服务推；别的 iOS App 等于配置的 `ApnsKey::bundle`
-//! 时用那把密钥直连 APNs；其余跳过（每个 bundle 记一次日志）。
+//! 推送的路线按登记定：iOS App 交的是 device token、bundle id 等于配置的 `ApnsKey::bundle` 时用那把
+//! 密钥直连 APNs，官方 App 的 `OFFICIAL_BUNDLE` 也一样（开发者自己编译的官方 App 不带中转）；别的官方
+//! App 登记的是中转的句柄，不分 iOS 还是 Android，只在这个构建带着中转（`RELAY_URL`）时经中转服务推；
+//! 其余跳过（每个 bundle 记一次日志）。
 //!
 //! 发出去的通知撤不回，答完的由手机自己清掉。宿主交接时会回 `Goodbye`，这边断开后照常重连：交接回滚了
 //! 就接着推；交接成了旧宿主不再接连接，这个进程随即停掉远程访问，推送由新宿主进程里的 `Pusher` 接着办。
@@ -451,7 +452,9 @@ impl Poller {
         for registration in &self.registrations {
             let Some(route) = route(registration, settings) else {
                 if self.skipped.insert(registration.bundle.clone()) {
-                    let why = if registration.bundle == OFFICIAL_BUNDLE {
+                    let device_token =
+                        registration.service == PushService::Apns && is_device_token(&registration.token);
+                    let why = if registration.bundle == OFFICIAL_BUNDLE && !device_token {
                         "this build has no push relay"
                     } else if registration.service == PushService::Fcm {
                         "only the official Android app can be pushed to"
@@ -483,18 +486,24 @@ fn route(registration: &PushRegistration, settings: &PushSettings) -> Option<Rou
     if registration.env == ApnsEnv::Unknown || registration.service == PushService::Unknown {
         return None;
     }
-    let via = if registration.bundle == OFFICIAL_BUNDLE {
+    let device_token = registration.service == PushService::Apns && is_device_token(&registration.token);
+    let via = if device_token && settings.direct.as_ref().is_some_and(|key| key.bundle == registration.bundle) {
+        Via::Direct
+    } else if registration.bundle == OFFICIAL_BUNDLE && !device_token {
         settings.relay.as_ref()?;
         Via::Relay
-    } else if registration.service == PushService::Fcm {
-        // shortcut: 自己签名打包的 Android App 不推送，有人要时再加服务账号的直连
-        return None;
-    } else if settings.direct.as_ref().is_some_and(|key| key.bundle == registration.bundle) {
-        Via::Direct
     } else {
+        // 中转只认自己封的句柄，device token 不交给它。
+        // shortcut: 自己签名打包的 Android App 不推送，有人要时再加服务账号的直连
         return None;
     };
     Some(Route { env: registration.env, via })
+}
+
+/// `token` 是 APNs 的 device token（十六进制），不是中转的句柄（base64url）：自己编译、没带中转的
+/// 官方 App 也交 device token。
+fn is_device_token(token: &str) -> bool {
+    !token.is_empty() && token.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// 到宿主的一条连接：读的一半在单独的线程里，把控制消息送到 `messages`。丢掉时断开，读的线程随之
