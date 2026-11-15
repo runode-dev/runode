@@ -136,6 +136,13 @@ mod tests {
     }
 
     #[test]
+    fn bundled_theme_names_keep_their_colons() {
+        assert!(bundled_theme("Analog Heartbeat: Phosphor").is_some());
+        assert!(BUNDLED_THEMES.iter().all(|(name, _)| !name.contains("%3A")));
+        assert!(BUNDLED_THEMES.is_sorted_by(|(a, _), (b, _)| a < b));
+    }
+
+    #[test]
     fn default_theme_matches_the_built_in_colors() {
         let mut config = Config::default();
         config.apply_layer(&parse_entries(bundled_theme(DEFAULT_THEME).unwrap(), DEFAULT_THEME));
