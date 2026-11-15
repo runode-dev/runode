@@ -65,6 +65,16 @@ fn unicode_placeholders_are_blank() {
     assert_eq!((image.x, image.y, image.width, image.height), (0., 0., 2., 1.));
 }
 
+/// 复制选区和取整屏文字时占位符格读成空格，图在行尾时不留行尾空白。
+#[test]
+fn copied_text_has_no_placeholders() {
+    let mut session = idle_session();
+    session.feed("a\u{10EEEE}\u{0305}\u{0305}b\r\n\u{10EEEE}\u{030D}\u{0305}\u{10EEEE}\r\nc".as_bytes());
+    session.select_all();
+    assert_eq!(session.selection_text().as_deref(), Some("a b\n\nc"));
+    assert_eq!(session.screen_text().as_deref().map(str::trim_end), Some("a b\n\nc"));
+}
+
 /// 界面那份 VT 自己不读文件：按文件传的图要宿主改写成直接传才收得到。
 #[test]
 fn images_read_from_files_are_refused() {

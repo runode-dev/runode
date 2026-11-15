@@ -1,6 +1,9 @@
 //! 选区：鼠标拖选（libghostty 的手势状态机）、键盘调整、全选，以及取出选中的和整屏的文字。
 
-use std::time::{Duration, Instant};
+use std::{
+    borrow::Cow,
+    time::{Duration, Instant},
+};
 
 use libghostty_vt::{
     fmt::{Format, Formatter},
@@ -14,6 +17,7 @@ use libghostty_vt::{
 use runode_types::{grid::GridPoint, input::SelectionAdjust};
 
 use super::{Session, log_err};
+use crate::vt::blank_kitty_placeholders;
 
 /// 鼠标选区：libghostty 的手势状态机，加上各类事件复用的对象。
 pub(super) struct Selecting {
@@ -232,5 +236,10 @@ impl Session {
 fn plain_text(formatter: &mut Formatter<'_, '_, '_>) -> libghostty_vt::error::Result<String> {
     formatter.set_format(Format::Plain)?.set_unwrap(true)?.set_trim(true)?;
     let bytes = formatter.format_alloc(None)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    let text = String::from_utf8_lossy(&bytes);
+    Ok(match blank_kitty_placeholders(&text) {
+        Cow::Borrowed(text) => text.to_owned(),
+        // 图在行尾时换出来的空格也是行尾空白。
+        Cow::Owned(text) => text.split('\n').map(str::trim_end).collect::<Vec<_>>().join("\n"),
+    })
 }
