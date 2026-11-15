@@ -1009,7 +1009,8 @@ settings:
     send: 发送
     sending: 发送中…
     sent: "已推给 %{count} 台手机。"
-    no_phone: "还没有手机登记推送：在手机上打开 Runode，连上这台电脑。"
+    no_phone: "还没有配对的手机：先配对一台手机，再在手机上打开 Runode 连上这台电脑。"
+    not_registered: "配对过的手机都还没登记推送：在手机上打开 Runode 连一次这台电脑，设置的「通知」里要开着提醒；登记不上时原因也显示在那里。"
     failed: "发送失败：%{err}"
     push_title: Runode 测试推送
     push_line: 推送没问题。

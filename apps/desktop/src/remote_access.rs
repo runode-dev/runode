@@ -79,6 +79,26 @@ pub fn push_settings(config: &Config) -> PushSettings {
     }
 }
 
+/// 发一次测试推送（`runode_remote::send_test_push`），回推到了几台；一台都没推到时回给用户看的那句话。
+/// 会阻塞，调用方放到后台跑。
+pub fn send_test_push(
+    dirs: &runode_paths::Dirs,
+    settings: &PushSettings,
+    content: &runode_remote::TestPush,
+) -> Result<usize, String> {
+    match runode_remote::send_test_push(dirs, settings, content) {
+        Ok(0) => {
+            // 配对了手机却没有登记时，要用户去手机上重连、看原因，和还没配对分开提示。
+            let paired = runode_remote::list_devices(dirs)
+                .is_ok_and(|devices| devices.iter().any(|device| device.kind.is_mobile()));
+            let key = if paired { "settings.test_push.not_registered" } else { "settings.test_push.no_phone" };
+            Err(rust_i18n::t!(key).into_owned())
+        }
+        Ok(count) => Ok(count),
+        Err(err) => Err(rust_i18n::t!("settings.test_push.failed", err = err).into_owned()),
+    }
+}
+
 /// 门禁过了的连接接到 `host` 上的远程访问，先关着，由调用方按配置 `apply`。起不了后台线程时
 /// 记日志，返回 `None`。
 pub fn service(host: &Host) -> Option<Service> {

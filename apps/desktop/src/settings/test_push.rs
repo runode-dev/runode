@@ -61,23 +61,15 @@ impl SettingsView {
             title: rust_i18n::t!("settings.test_push.push_title").into_owned(),
             lines: vec![rust_i18n::t!("settings.test_push.push_line").into_owned()],
         };
-        let job = cx.background_spawn(async move { runode_remote::send_test_push(&dirs, &settings, &content) });
+        let job = cx.background_spawn(async move { crate::remote_access::send_test_push(&dirs, &settings, &content) });
         self.test_push = State::Sending {
             _task: cx.spawn(async move |this, cx| {
                 let result = job.await;
                 this.update(cx, |this, cx| {
                     this.test_push = match result {
-                        Ok(0) => {
-                            this.errors
-                                .insert(ERROR_ID.into(), rust_i18n::t!("settings.test_push.no_phone").into_owned());
-                            State::Idle
-                        }
                         Ok(count) => State::Sent(count),
-                        Err(err) => {
-                            this.errors.insert(
-                                ERROR_ID.into(),
-                                rust_i18n::t!("settings.test_push.failed", err = err).into_owned(),
-                            );
+                        Err(message) => {
+                            this.errors.insert(ERROR_ID.into(), message);
                             State::Idle
                         }
                     };

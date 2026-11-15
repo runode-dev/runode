@@ -1009,7 +1009,8 @@ settings:
     send: 傳送
     sending: 傳送中…
     sent: "已推給 %{count} 台手機。"
-    no_phone: "還沒有手機登記推送：在手機上打開 Runode，連上這台電腦。"
+    no_phone: "還沒有配對的手機：先配對一台手機，再在手機上打開 Runode 連上這台電腦。"
+    not_registered: "配對過的手機都還沒登記推送：在手機上打開 Runode 連一次這台電腦，設定的「通知」裡要開著提醒；登記不上時原因也顯示在那裡。"
     failed: "傳送失敗：%{err}"
     push_title: Runode 測試推送
     push_line: 推送沒問題。

@@ -1009,7 +1009,8 @@ settings:
     send: Send
     sending: Sending…
     sent: "Sent to %{count} phone(s)."
-    no_phone: "No phone has registered for push yet. Open Runode on the phone and connect to this computer."
+    no_phone: "No phone is paired yet. Pair one first, then open Runode on the phone and connect to this computer."
+    not_registered: "No paired phone has registered for push yet. Open Runode on the phone and connect to this computer once, with alerts on under Notifications in its Settings; if it can't register, the reason is shown there."
     failed: "Could not send: %{err}"
     push_title: Runode test push
     push_line: Push notifications work.
