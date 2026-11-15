@@ -266,6 +266,7 @@ fn redacted_shell_reports_keep_the_terminals_in_step() {
 }
 
 /// 1 到 `count` 号 Kitty 图片的尺寸和像素，没有的是 `None`。
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn images(terminal: &Terminal<'static, 'static>, count: u32) -> Vec<Option<(u32, u32, Vec<u8>)>> {
     let graphics = terminal.kitty_graphics().unwrap();
     (1..=count)
