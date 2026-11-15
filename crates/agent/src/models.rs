@@ -31,6 +31,9 @@ pub struct Launcher {
     pub effort_needs_model: bool,
     /// 不问权限、一路跑完的参数，连着前面的空格；没有、或者本来就不问的为空。见 `with_options`。
     pub auto_arg: Option<&'static str>,
+    /// 用 `auto_arg` 时还要交给 agent 的设置：设置文件路径前面的参数（连着前后的空格）和文件的内容；不用的为空。
+    /// 设置写进文件、只把路径放进命令：Windows PowerShell 给原生程序拼命令行时不转义参数里的双引号。
+    auto_settings: Option<(&'static str, &'static str)>,
     /// 以自定义 agent 的身份跑的参数，在名字前面，连着前面的空格；没有的为空。
     pub subagent_arg: Option<&'static str>,
     /// 提示词前面的参数（`-i`、`--prompt`），连着前面的空格；提示词直接跟在后面的为空。
@@ -83,6 +86,8 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --effort "),
         effort_needs_model: false,
         auto_arg: Some(" --permission-mode bypassPermissions"),
+        // 头一回进这个模式要确认一遍、默认选退出，无人值守的任务会停在那里；这项设置跳过确认。
+        auto_settings: Some((" --settings ", "{\"skipDangerousModePermissionPrompt\":true}")),
         subagent_arg: Some(" --agent "),
         prompt_arg: "",
         resume_arg: Some(" --continue"),
@@ -113,6 +118,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_needs_model: false,
         // 只免确认（`--full-auto`）还在沙箱里，连不上网，`gh` 推不了分支。
         auto_arg: Some(" --dangerously-bypass-approvals-and-sandbox"),
+        auto_settings: None,
         subagent_arg: None,
         prompt_arg: "",
         resume_arg: Some(" resume --last"),
@@ -135,6 +141,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --thinking "),
         effort_needs_model: false,
         auto_arg: None,
+        auto_settings: None,
         subagent_arg: None,
         prompt_arg: "",
         resume_arg: Some(" --continue"),
@@ -152,6 +159,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --thinking "),
         effort_needs_model: false,
         auto_arg: None,
+        auto_settings: None,
         subagent_arg: None,
         prompt_arg: "",
         resume_arg: Some(" --continue"),
@@ -169,6 +177,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some("'#'"),
         effort_needs_model: true,
         auto_arg: None,
+        auto_settings: None,
         subagent_arg: None,
         prompt_arg: " --prompt",
         resume_arg: None,
@@ -189,6 +198,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: None,
         effort_needs_model: false,
         auto_arg: None,
+        auto_settings: None,
         subagent_arg: None,
         // 直接跟在后面的是项目目录。
         prompt_arg: " --prompt",
@@ -203,6 +213,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --reasoning-effort "),
         effort_needs_model: false,
         auto_arg: Some(" --allow-all-tools --allow-all-paths"),
+        auto_settings: None,
         subagent_arg: Some(" --agent "),
         prompt_arg: " -i",
         resume_arg: Some(" --continue"),
@@ -218,6 +229,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: None,
         effort_needs_model: false,
         auto_arg: Some(" --force"),
+        auto_settings: None,
         subagent_arg: None,
         prompt_arg: "",
         resume_arg: Some(" resume"),
@@ -232,6 +244,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --effort "),
         effort_needs_model: false,
         auto_arg: None,
+        auto_settings: None,
         subagent_arg: None,
         // 提示词直接跟在后面会报多余的参数。
         prompt_arg: " -i",
@@ -247,6 +260,7 @@ pub const LAUNCHERS: &[Launcher] = &[
         effort_arg: Some(" --reasoning-effort "),
         effort_needs_model: false,
         auto_arg: None,
+        auto_settings: None,
         subagent_arg: None,
         prompt_arg: "",
         resume_arg: None,
@@ -753,17 +767,29 @@ pub fn start_command(command: &str, session: &str) -> String {
 
 /// 加上免确认（`auto`）和以自定义 agent（`subagent`）的身份跑的参数，插在程序名后面，`start_command`、
 /// `resume_command` 照样认得出是哪家、续接时也带着。那家没有这个参数、认不出是哪家（自己写的命令）时不加；
-/// 名字不是 `subagent_name` 那样的也不加：它要原样拼进 shell 命令，`quote` 不转义单引号。
-pub fn with_options(command: &str, auto: bool, subagent: Option<&str>) -> String {
+/// 名字不是 `subagent_name` 那样的也不加：它要原样拼进 shell 命令，`quote` 不转义单引号。`settings` 是调用方
+/// 照 `auto_settings` 写好的设置文件，免确认时跟在免确认的参数后面；路径里有单引号、不是 UTF-8 时同样不加。
+pub fn with_options(command: &str, auto: bool, subagent: Option<&str>, settings: Option<&Path>) -> String {
     let Some((spec, rest)) = launcher_of(command) else { return command.to_owned() };
     let mut with = spec.command.to_owned();
     if let Some(arg) = spec.auto_arg.filter(|_| auto) {
         with += arg;
+        let path = settings.and_then(Path::to_str).filter(|path| !path.contains('\''));
+        if let (Some((arg, _)), Some(path)) = (spec.auto_settings, path) {
+            with += &format!("{arg}{}", quote(path));
+        }
     }
     if let (Some(arg), Some(name)) = (spec.subagent_arg, subagent.filter(|name| subagent_name(name))) {
         with += &format!("{arg}{name}");
     }
     with + rest
+}
+
+/// `command` 那家免确认时要交给它的设置文件：按哪个程序名（`Launcher::program`）存一份，和文件的内容。认不出、
+/// 那家不用时为空。
+pub fn auto_settings(command: &str) -> Option<(&'static str, &'static str)> {
+    let (spec, _) = launcher_of(command)?;
+    spec.auto_settings.map(|(_, contents)| (spec.program(), contents))
 }
 
 /// 自定义 agent 的名字能不能用：只有字母、数字和 `-_.:`，拼进 shell 命令不用加引号。

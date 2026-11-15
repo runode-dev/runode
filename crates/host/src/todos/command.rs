@@ -1,6 +1,9 @@
 //! 任务会话的提示符上打的命令：按各家 shell 的写法从环境变量取提示词、起 agent；Windows 上的 PowerShell
 //! 另用按命令行和 cmd 的规矩引好的提示词。
 
+use std::path::PathBuf;
+
+use runode_paths::Dirs;
 use runode_protocol::todo::TodoSpec;
 use runode_types::shell::Shell;
 
@@ -164,7 +167,26 @@ pub(super) fn batch_quote(arg: &str) -> String {
 
 /// 任务要跑的 agent 命令，带上免确认和自定义 agent 的参数（`runode_agent::models::with_options`）。
 pub(super) fn agent_with_options(spec: &TodoSpec) -> String {
-    runode_agent::models::with_options(&spec.agent, spec.auto, spec.subagent.as_deref())
+    let settings = spec.auto.then(|| auto_settings_file(&spec.agent, &Dirs::from_env())).flatten();
+    runode_agent::models::with_options(&spec.agent, spec.auto, spec.subagent.as_deref(), settings.as_deref())
+}
+
+/// 写好 `agent` 那家免确认时要的设置文件（`runode_agent::models::auto_settings`），返回它的路径；内容没变时不重写。
+/// 那家不用、或者写不出来时为空，agent 照样起，只是不带这个设置。
+fn auto_settings_file(agent: &str, dirs: &Dirs) -> Option<PathBuf> {
+    let (program, contents) = runode_agent::models::auto_settings(agent)?;
+    let path = dirs.agent_settings_file(program)?;
+    if std::fs::read(&path).is_ok_and(|old| old == contents.as_bytes()) {
+        return Some(path);
+    }
+    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, contents));
+    match written {
+        Ok(()) => Some(path),
+        Err(err) => {
+            tracing::warn!(path = %path.display(), "couldn't write the agent settings: {err}");
+            None
+        }
+    }
 }
 
 /// 任务这次开始时给 agent 的对话号，续接时由同样的任务标识和开始时刻再算出来，不用另存。写成 UUID 的样子，
@@ -176,6 +198,26 @@ pub(super) fn agent_session(todo: &str, started: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_settings_are_written_for_agents_that_need_them() {
+        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-agent-settings", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dirs = Dirs { cache: Some(dir.clone()), ..Dirs::default() };
+        let path = auto_settings_file("claude --model opus", &dirs).unwrap();
+        assert_eq!(path, dir.join("agent-settings/claude.json"));
+        let (_, contents) = runode_agent::models::auto_settings("claude").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+        // 被改过的照内置的写回去。
+        std::fs::write(&path, "{}").unwrap();
+        assert_eq!(auto_settings_file("claude", &dirs), Some(path.clone()));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+        assert_eq!(auto_settings_file("codex", &dirs), None);
+        // 写不出来时不带设置。
+        let blocked = Dirs { cache: Some(path), ..Dirs::default() };
+        assert_eq!(auto_settings_file("claude", &blocked), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn agent_sessions_look_like_uuids() {

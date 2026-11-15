@@ -375,6 +375,11 @@ impl Dirs {
         self.data_file("agent-detection")
     }
 
+    /// runode 起 agent 时交给它的设置文件，按 agent 的程序名一份；内容由 runode 照内置的写，可以重新生成。
+    pub fn agent_settings_file(&self, program: &str) -> Option<PathBuf> {
+        self.cache_file(&format!("agent-settings/{program}.json"))
+    }
+
     /// 解出 shell 集成脚本的目录。
     pub fn shell_integration_dir(&self) -> Option<PathBuf> {
         self.cache_file("shell-integration")

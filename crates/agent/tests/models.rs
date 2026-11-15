@@ -1,7 +1,9 @@
 //! `Pick` 拼出的命令和从命令认回来的要对得上。
 
+use std::path::Path;
+
 use runode_agent::models::{
-    LAUNCHERS, Pick, listed, resume_command, same_kind, start_command, subagent_name, with_options,
+    LAUNCHERS, Pick, auto_settings, listed, resume_command, same_kind, start_command, subagent_name, with_options,
 };
 
 /// 命令开头是 `command` 的那一项。
@@ -59,7 +61,7 @@ fn lists_one_launcher_per_agent() {
 /// 能指定对话号的开始时带上号，别家原样。
 #[test]
 fn options_go_after_the_program_and_survive_resuming() {
-    let claude = with_options("claude --model opus", true, Some("code-reviewer"));
+    let claude = with_options("claude --model opus", true, Some("code-reviewer"), None);
     assert_eq!(claude, "claude --permission-mode bypassPermissions --agent code-reviewer --model opus");
     assert_eq!(
         resume_command(&claude, "S").as_deref(),
@@ -67,15 +69,47 @@ fn options_go_after_the_program_and_survive_resuming() {
     );
     // 会被 shell 再解释的名字不拼进去。
     assert!(subagent_name("plugin:reviewer_2.1") && !subagent_name("") && !subagent_name("a b"));
-    assert_eq!(with_options("claude", false, Some("x'; touch /tmp/pwn; echo '")), "claude");
+    assert_eq!(with_options("claude", false, Some("x'; touch /tmp/pwn; echo '"), None), "claude");
     // 没有这个参数的那家、自己写的命令都不加。
     assert_eq!(
-        with_options("codex -m gpt-5", true, Some("x")),
+        with_options("codex -m gpt-5", true, Some("x"), None),
         "codex --dangerously-bypass-approvals-and-sandbox -m gpt-5"
     );
-    assert_eq!(with_options("pi", true, Some("x")), "pi");
-    assert_eq!(with_options("claudex --yolo", true, Some("x")), "claudex --yolo");
-    assert_eq!(with_options("claude", false, None), "claude");
+    assert_eq!(with_options("pi", true, Some("x"), None), "pi");
+    assert_eq!(with_options("claudex --yolo", true, Some("x"), None), "claudex --yolo");
+    assert_eq!(with_options("claude", false, None, None), "claude");
+}
+
+/// 免确认时把设置文件跟在免确认的参数后面，续接时也带着；不免确认、那家不用、路径放不进单引号时不加。
+#[test]
+fn auto_settings_follow_the_auto_arg() {
+    let settings = Path::new("/Users/a b/.runode/cache/agent-settings/claude.json");
+    let claude = with_options("claude --model opus", true, None, Some(settings));
+    assert_eq!(
+        claude,
+        "claude --permission-mode bypassPermissions --settings '/Users/a b/.runode/cache/agent-settings/claude.json' \
+         --model opus"
+    );
+    assert_eq!(
+        resume_command(&claude, "S").as_deref(),
+        Some(
+            "claude --resume S --permission-mode bypassPermissions \
+             --settings '/Users/a b/.runode/cache/agent-settings/claude.json' --model opus"
+        )
+    );
+    assert_eq!(
+        with_options("claude", true, Some("x"), Some(Path::new("/home/a/claude.json"))),
+        "claude --permission-mode bypassPermissions --settings /home/a/claude.json --agent x"
+    );
+    assert_eq!(with_options("claude", false, None, Some(settings)), "claude");
+    assert_eq!(with_options("codex", true, None, Some(settings)), "codex --dangerously-bypass-approvals-and-sandbox");
+    assert_eq!(
+        with_options("claude", true, None, Some(Path::new("/Users/o'brien/claude.json"))),
+        "claude --permission-mode bypassPermissions"
+    );
+    assert_eq!(auto_settings("claude --model opus"), Some(("claude", "{\"skipDangerousModePermissionPrompt\":true}")));
+    assert_eq!(auto_settings("codex"), None);
+    assert_eq!(auto_settings("claudex"), None);
 }
 
 #[test]
