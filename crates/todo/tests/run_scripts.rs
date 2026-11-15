@@ -185,7 +185,7 @@ const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 #[test]
 fn watch_ci_is_quiet_when_everything_passes() {
     let sandbox = Sandbox::new("ci-pass");
-    sandbox.fixture("run-list", &format!("12\tCI\t{SHA}\tsuccess\n11\tLint\t{SHA}\tneutral\n"));
+    sandbox.fixture("run-list", &format!("12\tCI\t{SHA}\tcompleted\tsuccess\n11\tLint\t{SHA}\tcompleted\tneutral\n"));
     assert_eq!(fire(&sandbox, "watch-ci", &["main"]), "");
     assert_eq!(sandbox.state("pending"), "");
 }
@@ -193,7 +193,7 @@ fn watch_ci_is_quiet_when_everything_passes() {
 #[test]
 fn watch_ci_fires_once_for_a_new_failure() {
     let sandbox = Sandbox::new("ci-once");
-    sandbox.fixture("run-list", &format!("21\t构建 CI\t{SHA}\tfailure\n20\tLint\t{SHA}\tsuccess\n"));
+    sandbox.fixture("run-list", &format!("21\t构建 CI\t{SHA}\tcompleted\tfailure\n20\tLint\t{SHA}\tcompleted\tsuccess\n"));
     sandbox.fixture("run-view-21", &failed_log("error: boom"));
     let out = fire(&sandbox, "watch-ci", &["main"]);
     assert!(out.starts_with("These GitHub Actions workflows failed on main."), "{out}");
@@ -209,7 +209,7 @@ fn watch_ci_skips_cancelled_runs_to_the_last_conclusion() {
     let sandbox = Sandbox::new("ci-cancelled");
     sandbox.fixture(
         "run-list",
-        &format!("33\tCI\t{SHA}\tcancelled\n32\tCI\t{SHA}\tskipped\n31\tCI\t{SHA}\tfailure\n30\tCI\t{SHA}\tsuccess\n"),
+        &format!("33\tCI\t{SHA}\tcompleted\tcancelled\n32\tCI\t{SHA}\tcompleted\tskipped\n31\tCI\t{SHA}\tcompleted\tfailure\n30\tCI\t{SHA}\tcompleted\tsuccess\n"),
     );
     sandbox.fixture("run-view-31", &failed_log("broken"));
     let out = fire(&sandbox, "watch-ci", &["main"]);
@@ -217,18 +217,74 @@ fn watch_ci_skips_cancelled_runs_to_the_last_conclusion() {
     assert!(out.contains("broken"), "{out}");
 }
 
+/// 最新的一次还在跑（前面几次被它取消了）时不派更早的失败，pending 照旧；跑完失败了才派。
+#[test]
+fn watch_ci_waits_for_a_run_in_progress() {
+    let sandbox = Sandbox::new("ci-in-progress");
+    std::fs::create_dir_all(sandbox.root.join("scripts/state/t1")).unwrap();
+    std::fs::write(sandbox.root.join("scripts/state/t1/pending"), "Lint\n").unwrap();
+    sandbox.fixture(
+        "run-list",
+        &format!(
+            "93\tCI\t{SHA}\tin_progress\t\n92\tLint\t{SHA}\tqueued\t\n91\tCI\t{SHA}\tcompleted\tcancelled\n\
+             90\tCI\t{SHA}\tcompleted\tfailure\n89\tLint\t{SHA}\tcompleted\tsuccess\n"
+        ),
+    );
+    sandbox.fixture("run-view-90", &failed_log("stale"));
+    assert_eq!(fire(&sandbox, "watch-ci", &["main"]), "");
+    assert_eq!(sandbox.state("pending"), "Lint\n");
+
+    sandbox.fixture(
+        "run-list",
+        &format!("93\tCI\t{SHA}\tcompleted\tfailure\n91\tCI\t{SHA}\tcompleted\tcancelled\n"),
+    );
+    sandbox.fixture("run-view-93", &failed_log("fresh"));
+    let out = fire(&sandbox, "watch-ci", &["main"]);
+    assert!(out.contains("## CI (run 93, ") && out.contains("fresh"), "{out}");
+}
+
+/// 日志里 runner 收尾的输出和 action 的标记不占末尾的行数，留下的是报错。
+#[test]
+fn watch_ci_drops_the_runner_cleanup_from_logs() {
+    let sandbox = Sandbox::new("ci-cleanup");
+    sandbox.fixture("run-list", &format!("95\tCI\t{SHA}\tcompleted\tfailure\n"));
+    let mut log = String::new();
+    for (job, text) in [
+        ("check", "error: formatting differs"),
+        ("check", "##[error]Process completed with exit code 2."),
+        ("check", "Post job cleanup."),
+        ("check", "[command]/opt/homebrew/bin/git version"),
+        ("test", "##[start-action display=Run actions/cache;id=1]"),
+        ("test", "test failed: boom"),
+        ("test", "##[end-action id=1;outcome=skipped]"),
+        ("test", "Post job cleanup."),
+        ("test", "Cleaning up orphan processes"),
+    ] {
+        writeln!(log, "{job}\tUNKNOWN STEP\t2024-05-01T10:00:00.0000000Z {text}").unwrap();
+    }
+    sandbox.fixture("run-view-95", &log);
+    let out = fire(&sandbox, "watch-ci", &["main"]);
+    assert!(
+        out.ends_with(
+            "## CI (run 95, commit 012345678, failure)\nerror: formatting differs\n\
+             ##[error]Process completed with exit code 2.\ntest failed: boom\n"
+        ),
+        "{out}"
+    );
+}
+
 #[test]
 fn watch_ci_fires_again_after_the_workflow_passed() {
     let sandbox = Sandbox::new("ci-refire");
-    sandbox.fixture("run-list", &format!("41\tCI\t{SHA}\tfailure\n"));
+    sandbox.fixture("run-list", &format!("41\tCI\t{SHA}\tcompleted\tfailure\n"));
     sandbox.fixture("run-view-41", &failed_log("first"));
     assert!(fire(&sandbox, "watch-ci", &["main"]).contains("first"));
 
-    sandbox.fixture("run-list", &format!("42\tCI\t{SHA}\tsuccess\n41\tCI\t{SHA}\tfailure\n"));
+    sandbox.fixture("run-list", &format!("42\tCI\t{SHA}\tcompleted\tsuccess\n41\tCI\t{SHA}\tcompleted\tfailure\n"));
     assert_eq!(fire(&sandbox, "watch-ci", &["main"]), "");
     assert_eq!(sandbox.state("pending"), "");
 
-    sandbox.fixture("run-list", &format!("43\tCI\t{SHA}\ttimed_out\n42\tCI\t{SHA}\tsuccess\n41\tCI\t{SHA}\tfailure\n"));
+    sandbox.fixture("run-list", &format!("43\tCI\t{SHA}\tcompleted\ttimed_out\n42\tCI\t{SHA}\tcompleted\tsuccess\n41\tCI\t{SHA}\tcompleted\tfailure\n"));
     sandbox.fixture("run-view-43", &failed_log("second"));
     let out = fire(&sandbox, "watch-ci", &["main"]);
     assert!(out.contains("## CI (run 43, commit 012345678, timed_out)\nsecond"), "{out}");
@@ -239,7 +295,7 @@ fn watch_ci_fires_at_most_three_workflows_at_a_time() {
     let sandbox = Sandbox::new("ci-three");
     let mut list = String::new();
     for (id, name) in (51..).zip(["A", "B", "C", "D", "E"]) {
-        writeln!(list, "{id}\t{name}\t{SHA}\tfailure").unwrap();
+        writeln!(list, "{id}\t{name}\t{SHA}\tcompleted\tfailure").unwrap();
         sandbox.fixture(&format!("run-view-{id}"), &failed_log(&format!("log of {name}")));
     }
     sandbox.fixture("run-list", &list);
@@ -264,7 +320,7 @@ fn watch_ci_keeps_long_logs_short() {
     }
     let mut list = String::new();
     for id in 61..65 {
-        writeln!(list, "{id}\tWorkflow {id}\t{SHA}\tfailure").unwrap();
+        writeln!(list, "{id}\tWorkflow {id}\t{SHA}\tcompleted\tfailure").unwrap();
         sandbox.fixture(&format!("run-view-{id}"), &log);
     }
     sandbox.fixture("run-list", &list);
@@ -278,7 +334,7 @@ fn watch_ci_keeps_long_logs_short() {
 #[test]
 fn watch_ci_fails_when_gh_fails() {
     let sandbox = Sandbox::new("ci-gh-fails");
-    sandbox.fixture("run-list", &format!("71\tCI\t{SHA}\tfailure\n"));
+    sandbox.fixture("run-list", &format!("71\tCI\t{SHA}\tcompleted\tfailure\n"));
     let output = sandbox.run_with("watch-ci", &["main"], true);
     assert!(!output.status.success());
     assert_eq!(stdout(&output), "");
@@ -289,7 +345,7 @@ fn watch_ci_fails_when_gh_fails() {
 fn watch_ci_watches_the_default_branch_without_an_argument() {
     let sandbox = Sandbox::new("ci-default-branch");
     sandbox.fixture("repo-view", "trunk\n");
-    sandbox.fixture("run-list", &format!("81\tCI\t{SHA}\tsuccess\n"));
+    sandbox.fixture("run-list", &format!("81\tCI\t{SHA}\tcompleted\tsuccess\n"));
     assert_eq!(fire(&sandbox, "watch-ci", &[]), "");
     assert!(sandbox.gh_log().contains(&logged(&["--branch", "trunk"])), "{}", sandbox.gh_log());
 }
@@ -438,16 +494,14 @@ fn real_gh_prints_the_expected_columns() {
         "list",
         "--branch",
         branch.trim(),
-        "--status",
-        "completed",
         "--limit",
         "60",
         "--json",
-        "databaseId,workflowName,headSha,conclusion",
+        "databaseId,workflowName,headSha,status,conclusion",
         "--jq",
-        ".[] | [.databaseId, .workflowName, .headSha, .conclusion] | @tsv",
+        ".[] | [.databaseId, .workflowName, .headSha, .status, .conclusion] | @tsv",
     ]);
-    assert_columns(&runs, 4);
+    assert_columns(&runs, 5);
     let pr_list = |search: &str| {
         gh(&[
             "pr",

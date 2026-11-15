@@ -2,7 +2,8 @@
 #
 # 定时的先跑命令：查一次分支上的 GitHub Actions，某个 workflow 最新一次有结论的运行失败了、还没派过时，把失败
 # 日志的末尾写到标准输出，runode 据此开任务；没事时标准输出为空。派过的 workflow 记在状态目录的 pending 里，
-# 它在这个分支上重新通过之后再失败才会再派。日志一律写标准错误。
+# 它在这个分支上重新通过之后再失败才会再派。workflow 在这个分支上最新的一次还在排队或在跑时这次不看它：新的
+# 提交可能已经修好，等它跑完再说。日志一律写标准错误。
 # 用法：watch-ci.ps1 [分支]，不给时用仓库的默认分支。
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -61,15 +62,22 @@ function Limit-Bytes([string]$Text, [int]$Max) {
     return $Text
 }
 
-# --log-failed 每行是 `job<TAB>step<TAB>时间戳 内容`（时间戳前可能有 BOM），只留内容的最后几行。
+# --log-failed 每行是 `job<TAB>step<TAB>时间戳 内容`（时间戳前可能有 BOM），只留内容的最后几行。每个 job 从
+# `Post job cleanup.` 起是 runner 收尾的输出，和 `##[start-action`、`##[end-action` 标记一样丢掉，末尾留下的才是
+# 报错。
 function Get-LogTail([string]$Id) {
     $lines = Invoke-GhLines 'run', 'view', $Id, '--log-failed'
     if ($LASTEXITCODE -ne 0) {
         Write-Log "cannot fetch the failed log of run $Id"
         return "(gh run view $Id --log-failed failed; look at the run on GitHub)"
     }
+    $cleanup = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $clean = foreach ($line in $lines) {
+        $job = ($line -split "`t", 2)[0]
         $text = $line -replace '^[^\t]*\t[^\t]*\t', '' -replace '^﻿', '' -replace '^\d{4}-\d\d-\d\dT[\d:.]+Z ', ''
+        if ($text -ceq 'Post job cleanup.') { [void]$cleanup.Add($job) }
+        if ($cleanup.Contains($job) -or $text.StartsWith('##[start-action', [StringComparison]::Ordinal) `
+                -or $text.StartsWith('##[end-action', [StringComparison]::Ordinal)) { continue }
         Limit-Bytes $text $LineBytes
     }
     return (@($clean | Select-Object -Last $LogLines) -join "`n")
@@ -85,20 +93,23 @@ if (-not $Branch) {
     if (-not $Branch) { Write-Log 'cannot tell the default branch'; exit 1 }
 }
 
-$runs = Invoke-Gh 'run', 'list', '--branch', $Branch, '--status', 'completed', '--limit', '60', `
-    '--json', 'databaseId,workflowName,headSha,conclusion', `
-    '--jq', '.[] | [.databaseId, .workflowName, .headSha, .conclusion] | @tsv'
+$runs = Invoke-Gh 'run', 'list', '--branch', $Branch, '--limit', '60', `
+    '--json', 'databaseId,workflowName,headSha,status,conclusion', `
+    '--jq', '.[] | [.databaseId, .workflowName, .headSha, .status, .conclusion] | @tsv'
 
-# gh 按新到旧给，每个 workflow 只看最新一次有结论的运行（cancelled、skipped 不算结论）。最新一次通过的移出
-# pending；失败了、不在 pending 里的派，一次最多 $MaxRuns 个。
+# gh 按新到旧给，每个 workflow 只看最新一次有结论的运行（cancelled、skipped 不算结论）；在那之前碰到还没跑完的
+# 就这次不看它，pending 照旧。最新一次通过的移出 pending；失败了、不在 pending 里的派，一次最多 $MaxRuns 个。
 $pending = Read-State $PendingFile
 $latest = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $send = [Collections.Generic.List[object]]::new()
 foreach ($line in $runs) {
     $fields = $line -split "`t"
-    if ($fields.Count -lt 4) { continue }
-    $id, $workflow, $sha, $conclusion = $fields[0], $fields[1], $fields[2], $fields[3]
-    if ($conclusion -ceq 'cancelled' -or $conclusion -ceq 'skipped' -or -not $latest.Add($workflow)) { continue }
+    if ($fields.Count -lt 5) { continue }
+    $id, $workflow, $sha, $status, $conclusion = $fields[0], $fields[1], $fields[2], $fields[3], $fields[4]
+    if ($latest.Contains($workflow)) { continue }
+    if ($status -cne 'completed') { [void]$latest.Add($workflow); continue }
+    if ($conclusion -ceq 'cancelled' -or $conclusion -ceq 'skipped') { continue }
+    [void]$latest.Add($workflow)
     if ($conclusion -ceq 'success' -or $conclusion -ceq 'neutral') {
         [void]$pending.Remove($workflow)
     } elseif (($conclusion -ceq 'failure' -or $conclusion -ceq 'timed_out' -or $conclusion -ceq 'startup_failure') `
