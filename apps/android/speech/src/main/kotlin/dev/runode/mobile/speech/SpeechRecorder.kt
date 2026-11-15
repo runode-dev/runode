@@ -3,7 +3,10 @@ package dev.runode.mobile.speech
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import kotlin.concurrent.thread
@@ -21,6 +24,29 @@ class SpeechRecorder(
 ) {
     private var record: AudioRecord? = null
     private var reader: Thread? = null
+    private val audio = context.getSystemService(AudioManager::class.java)
+
+    /**
+     * 录音期间独占的音频焦点：别的 App 在放的声音暂停，不然扬声器放出来的也会被麦克风收进去、一起转写；
+     * 交还后它们接着放。
+     */
+    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build(),
+        )
+        .build()
+
+    /** 要不到焦点也照样录：只是别的声音可能被一起转写。 */
+    private fun requestFocus() {
+        audio.requestAudioFocus(focus)
+    }
+
+    private fun abandonFocus() {
+        audio.abandonAudioFocusRequest(focus)
+    }
     private val lock = Any()
     private var samples = FloatArray(0)
     private var count = 0
@@ -56,14 +82,17 @@ class SpeechRecorder(
             record.release()
             throw SpeechError.MicrophoneUnavailable
         }
+        requestFocus()
         try {
             record.startRecording()
         } catch (_: IllegalStateException) {
             record.release()
+            abandonFocus()
             throw SpeechError.MicrophoneUnavailable
         }
         if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
             record.release()
+            abandonFocus()
             throw SpeechError.MicrophoneUnavailable
         }
         this.record = record
@@ -94,6 +123,7 @@ class SpeechRecorder(
             }
             reader?.join()
             record.release()
+            abandonFocus()
         }
         record = null
         reader = null

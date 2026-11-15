@@ -66,8 +66,9 @@ public final class SpeechRecorder: @unchecked Sendable {
     private func startNow() throws {
         #if os(iOS)
             let session = AVAudioSession.sharedInstance()
-            // 不停掉别的 App 在放的声音，只压低它。
-            try session.setCategory(.playAndRecord, mode: .default, options: [.duckOthers, .defaultToSpeaker])
+            // 不和别的 App 混音：它们在放的声音录音期间被打断，不然扬声器放出来的也会被麦克风收进去、一起转写；
+            // 停用时 `.notifyOthersOnDeactivation` 让它们接着放。
+            try session.setCategory(.record, mode: .default)
             try session.setActive(true)
         #endif
         do {
