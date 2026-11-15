@@ -10,5 +10,5 @@ Review the pull request shown in the output below, without stopping to ask. Its 
 
 1. Read it with `gh pr view <number> --comments` and `gh pr diff <number>`, and read the code around what it changes.
 2. Look for bugs, missing tests, security problems and anything that goes against the project's conventions. Do not change any files.
-3. Post the review with `gh pr review <number> --comment --body-file <file>`, giving the file and line of each finding; when there is nothing to fix, approve it with `--approve` instead.
+3. Post the review with `gh pr review <number> --comment --body-file <file>`, giving the file and line of each finding, or saying that you found nothing to fix. Do not approve or request changes: a person decides that.
 4. Finish by printing the review.
