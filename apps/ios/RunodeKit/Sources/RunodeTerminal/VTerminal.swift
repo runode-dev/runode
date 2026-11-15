@@ -44,13 +44,17 @@ public final class VTerminal {
     private let cellFieldPointers: UnsafeMutablePointer<UnsafeMutableRawPointer?>
     private static let cellKeys = [
         GHOSTTY_CELL_DATA_CONTENT_TAG, GHOSTTY_CELL_DATA_WIDE, GHOSTTY_CELL_DATA_HAS_TEXT, GHOSTTY_CELL_DATA_HAS_STYLING,
+        GHOSTTY_CELL_DATA_CODEPOINT,
     ]
     private struct CellFields {
         var tag = GHOSTTY_CELL_CONTENT_CODEPOINT
         var wide = GHOSTTY_CELL_WIDE_NARROW
         var hasText = false
         var styled = false
+        var codepoint: UInt32 = 0
     }
+    /// Kitty 图形协议的 Unicode 占位符。
+    private static let kittyPlaceholder: UInt32 = 0x10EEEE
     private let hold = RenderHold()
     /// 最近一次改尺寸、最近一次喂字节的时刻，见 `isRenderHeld`。
     private var resizedAt = ContinuousClock.now - .seconds(10)
@@ -107,6 +111,7 @@ public final class VTerminal {
             UnsafeMutableRawPointer(cellFields.pointer(to: \.wide)!),
             UnsafeMutableRawPointer(cellFields.pointer(to: \.hasText)!),
             UnsafeMutableRawPointer(cellFields.pointer(to: \.styled)!),
+            UnsafeMutableRawPointer(cellFields.pointer(to: \.codepoint)!),
         ]
         cellFieldPointers.initialize(from: fieldPointers, count: fieldPointers.count)
         self.size = size
@@ -691,7 +696,9 @@ public final class VTerminal {
         case GHOSTTY_CELL_WIDE_SPACER_HEAD: cell.width = .spacerHead
         default: cell.width = .narrow
         }
-        if fields.hasText {
+        // Kitty 的 Unicode 占位符只标出虚拟放置的图片画在哪几格，字符本身（连同记行列的组合附加符）
+        // 不画；图片没加载上时这几格也是空白。
+        if fields.hasText, fields.codepoint != Self.kittyPlaceholder {
             cell.text = readGrapheme()
         }
         // 前景色只来自样式，背景色来自样式或只有背景色的格子（`CONTENT_TAG` 是 `BG_COLOR_*`）。

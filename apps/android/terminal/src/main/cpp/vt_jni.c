@@ -391,6 +391,9 @@ static bool push_grapheme(Vt *vt, uint32_t value) {
     return true;
 }
 
+// Kitty 图形协议的 Unicode 占位符。
+#define KITTY_PLACEHOLDER 0x10EEEEu
+
 // 当前格子的字素簇按 SNAPSHOT_CELL_TEXT 的写法记到 *text；内存不够时返回假。
 static bool read_grapheme(Vt *vt, int32_t *text) {
     uint32_t stack[16];
@@ -409,7 +412,10 @@ static bool read_grapheme(Vt *vt, int32_t *text) {
     }
     bool ok = true;
     *text = 0;
-    if (result == GHOSTTY_SUCCESS && buffer.len == 1) {
+    if (result == GHOSTTY_SUCCESS && buffer.len > 0 && buffer.ptr[0] == KITTY_PLACEHOLDER) {
+        // Kitty 的 Unicode 占位符只标出虚拟放置的图片画在哪几格，字符本身（连同记行列的组合附加符）
+        // 不画；图片没加载上时这几格也是空白。
+    } else if (result == GHOSTTY_SUCCESS && buffer.len == 1) {
         *text = (int32_t)buffer.ptr[0];
     } else if (result == GHOSTTY_SUCCESS && buffer.len > 1) {
         *text = SNAPSHOT_CELL_TEXT_GRAPHEME | (int32_t)vt->graphemes_len;

@@ -45,6 +45,19 @@ import Testing
         #expect(decoded == [255, 0, 0, 128])
     }
 
+    /// 虚拟放置的图片画在占位符的格子上，占位符本身不画；图片没加载上时那几格也是空白。
+    @Test func unicodePlaceholdersAreBlank() throws {
+        // 前景色 1 指 1 号图片，U+0305、U+030D 分别记第 0、1 号，两格是第 0 行的第 0、1 列。
+        let placeholders = "\u{1b}[38;5;1m\u{10EEEE}\u{0305}\u{0305}\u{10EEEE}\u{0305}\u{030D}\u{1b}[m|"
+        let (_, bare) = try frame(after: placeholders)
+        #expect(bare.cells[0].prefix(3).map(\.text) == ["", "", "|"])
+
+        let (_, placed) = try frame(
+            after: "\u{1b}_Ga=T,U=1,f=32,i=1,s=2,v=2,c=2,r=1,q=2;/wAA/wD/AP8AAP///////w==\u{1b}\\" + placeholders)
+        #expect(placed.cells[0].prefix(3).map(\.text) == ["", "", "|"])
+        #expect(!placed.images.isEmpty)
+    }
+
     /// 从文件读的图片宿主不收，这份也不收，两边才对得上。
     @Test func imagesFromFilesAreRefused() throws {
         let url = FileManager.default.temporaryDirectory.appending(path: "runode-kitty-\(UUID()).rgba")

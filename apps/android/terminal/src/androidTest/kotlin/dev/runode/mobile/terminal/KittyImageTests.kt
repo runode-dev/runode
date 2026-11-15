@@ -61,6 +61,22 @@ class KittyImageTests {
         }
     }
 
+    /** 虚拟放置的图片画在占位符的格子上，占位符本身不画；图片没加载上时那几格也是空白。 */
+    @Test
+    fun unicodePlaceholdersAreBlank() {
+        // 前景色 1 指 1 号图片，U+0305、U+030D 分别记第 0、1 号，两格是第 0 行的第 0、1 列。
+        val placeholders = "\u001b[38;5;1m\uDBFB\uDEEE\u0305\u0305\uDBFB\uDEEE\u0305\u030D\u001b[m|"
+        afterFeeding(placeholders) { _, frame ->
+            assertEquals(listOf("", "", "|"), frame.cells[0].take(3).map { it.text })
+        }
+        afterFeeding(
+            "\u001b_Ga=T,U=1,f=32,i=1,s=2,v=2,c=2,r=1,q=2;/wAA/wD/AP8AAP///////w==\u001b\\" + placeholders,
+        ) { _, frame ->
+            assertEquals(listOf("", "", "|"), frame.cells[0].take(3).map { it.text })
+            assertTrue(frame.images.isNotEmpty())
+        }
+    }
+
     /** 从文件读的图片宿主不收，这份也不收，两边才对得上。 */
     @Test
     fun imagesFromFilesAreRefused() {
