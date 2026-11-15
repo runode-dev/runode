@@ -81,3 +81,20 @@ pub const REPEAT: Duration = Duration::from_millis(500);
 pub fn at(x: f32, y: f32) -> GridPoint {
     GridPoint { x, y }
 }
+
+pub fn base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        for i in 0..4 {
+            out.push(if i <= chunk.len() { char::from(TABLE[(n >> (18 - 6 * i) & 63) as usize]) } else { '=' });
+        }
+    }
+    out
+}
+
+/// 程序按文件传 Kitty 图片的命令：`keys` 是控制键，载荷是 `path` 的 base64。
+pub fn file_command(keys: &str, path: &std::path::Path) -> Vec<u8> {
+    format!("\x1b_G{keys};{}\x1b\\", base64(path.to_str().unwrap().as_bytes())).into_bytes()
+}

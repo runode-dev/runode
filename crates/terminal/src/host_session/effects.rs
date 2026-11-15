@@ -7,6 +7,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+use libghostty_vt::terminal::Boundary;
 use runode_types::{
     agent::AgentState,
     shell::{FinishedCommand, ShellNames},
@@ -14,6 +15,7 @@ use runode_types::{
 
 use super::{
     ClipboardRequest, HostSession,
+    kitty_media::Step,
     shell_report::{self, Report},
 };
 
@@ -124,19 +126,32 @@ pub(super) enum PromptEvent {
     CommandEnd(Option<i32>),
 }
 
+/// `HostSession::feed_output` 喂完一块输出的结果。
+#[derive(Debug)]
+pub struct Fed {
+    /// 标题或 agent 状态变了。
+    pub changed: bool,
+    /// 要转给前端的字节：`None` 时就是喂进来的那块原样；`Some` 时是这份，VT 实际吃进的就是它，
+    /// 可能是空的（整块都还扣着）。
+    pub rewritten: Option<Vec<u8>>,
+}
+
 impl HostSession {
-    /// 把 PTY 输出喂给 VT，返回标题或 agent 状态是否变化。agent 状态要读屏幕判断的部分按
-    /// 时间节流，不一定在这次判断，见 `HostSession::agent_deadline`。程序读写剪贴板的请求记下来，
-    /// 由 `take_clipboard` 取走。
+    /// 把 PTY 输出喂给 VT，只返回标题或 agent 状态是否变化，给不往前端转发输出的调用方用。
     pub fn feed(&mut self, data: &[u8]) -> bool {
-        // 读剪贴板的请求在 VT 处理到它的那个位置记下，和回调记下的写请求按真实的先后排。
-        let effects = &self.effects;
-        self.clipboard_queries.write(&mut self.terminal, data, |query| {
-            if let Ok(mut requests) = effects.clipboard.try_borrow_mut() {
-                requests.push(ClipboardRequest::Read(query));
-            }
-        });
+        self.feed_output(data).changed
+    }
+
+    /// 把 PTY 输出喂给 VT，返回标题或 agent 状态是否变化，以及要转给前端的字节。agent 状态要读
+    /// 屏幕判断的部分按时间节流，不一定在这次判断，见 `HostSession::agent_deadline`。程序读写
+    /// 剪贴板的请求记下来，由 `take_clipboard` 取走。
+    ///
+    /// 按文件、临时文件传的 Kitty 图片在这里读出来改写成直接传（`kitty_media`），VT 吃进的是
+    /// 改写后的字节。`Fed::rewritten` 是 `Some` 时，转给前端的必须是这份而不是 `data`，前端的
+    /// VT 才和这里一致。
+    pub fn feed_output(&mut self, data: &[u8]) -> Fed {
         let now = Instant::now();
+        let rewritten = self.write_vt(data, now);
         self.agent_tracker.output(data, now);
         let mut changed = false;
         // 不少 shell 每次出提示符都重发一遍同样的标题，agent 工作时每一帧转圈都改一次标题，
@@ -159,7 +174,63 @@ impl HostSession {
         }
         let changed = changed | self.poll_agent_at(now);
         self.meta_dirty |= changed;
-        changed
+        Fed { changed, rewritten }
+    }
+
+    /// 把 `data` 喂给 VT，Kitty 图形命令的 APC 经 `kitty_media` 扣下、改写；返回 VT 实际吃进的
+    /// 字节，和 `data` 一样时是 `None`。`now` 是现在，改写预算按它补。
+    fn write_vt(&mut self, data: &[u8], now: Instant) -> Option<Vec<u8>> {
+        // 只在吃进的和 `data` 不一样以后才建：之前吃进的就是 `data[..done]`。
+        let mut fed: Option<Vec<u8>> = None;
+        let mut done = 0;
+        loop {
+            let rest = &data[done..];
+            if self.kitty_media.holding() {
+                match self.kitty_media.step(rest, now) {
+                    // 扣下的是 `rest`。
+                    Step::Held => {
+                        return match fed {
+                            None if rest.is_empty() => None,
+                            fed => Some(fed.unwrap_or_else(|| data[..done].to_vec())),
+                        };
+                    }
+                    Step::Pass(used) => {
+                        self.terminal.vt_write(&rest[..used]);
+                        if let Some(fed) = &mut fed {
+                            fed.extend_from_slice(&rest[..used]);
+                        }
+                        done += used;
+                    }
+                    Step::Replace(bytes, used) => {
+                        self.terminal.vt_write(&bytes);
+                        fed.get_or_insert_with(|| data[..done].to_vec()).extend_from_slice(&bytes);
+                        done += used;
+                    }
+                }
+                continue;
+            }
+            if rest.is_empty() {
+                return fed;
+            }
+            // 读剪贴板的请求在 VT 处理到它的那个位置记下，和回调记下的写请求按真实的先后排。
+            let effects = &self.effects;
+            let stop = self.clipboard_queries.write(&mut self.terminal, rest, Boundary::APC_START, |query| {
+                if let Ok(mut requests) = effects.clipboard.try_borrow_mut() {
+                    requests.push(ClipboardRequest::Read(query));
+                }
+            });
+            let used = stop.map_or(rest.len(), |(used, _)| used);
+            if let Some(fed) = &mut fed {
+                fed.extend_from_slice(&rest[..used]);
+            }
+            done += used;
+            // SOS 和 PM 也报 APC 的开头，按引导字节分出真正的 APC。
+            if let Some((_, stop)) = stop
+                && matches!(stop.byte, Some(b'_' | 0x9f))
+            {
+                self.kitty_media.start();
+            }
+        }
     }
 
     /// 取走 shell 集成报告运行完了的命令，带着运行的目录和退出码，按结束的先后。每次 `feed`
@@ -272,6 +343,35 @@ mod tests {
         // 前台已经回到 shell（这里的 `cat`），不带前缀的标题不再算 agent 的。
         assert!(session.feed(b"\x1b]0;~\x07"));
         assert_eq!(session.agent, None);
+    }
+
+    /// 一块输出里几条按文件传的大图同一时刻改写：转出去的总量受改写预算限制，超出的那条原样放行；
+    /// 过一阵它就改写得成了。
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn file_rewrites_in_one_output_share_the_budget() {
+        use super::super::kitty_media::IMAGE_FILE_MAX_BYTES;
+
+        let path = std::env::temp_dir().join(format!("runode-kitty-budget-{}.png", std::process::id()));
+        std::fs::File::create(&path).unwrap().set_len(IMAGE_FILE_MAX_BYTES / 8 * 3).unwrap();
+        let mut encoded = Vec::new();
+        crate::vt::encode_base64(path.to_str().unwrap().as_bytes(), &mut encoded);
+        let command = |id: u32| [format!("\x1b_Ga=t,t=f,f=100,i={id},q=2;").as_bytes(), &encoded, b"\x1b\\"].concat();
+        let commands: Vec<_> = (1..=3).map(command).collect();
+
+        let mut session = idle_host();
+        let now = Instant::now();
+        let forwarded = session.write_vt(&commands.concat(), now).expect("rewritten");
+        let found = |command: &[u8]| memchr::memmem::find(&forwarded, command).is_some();
+        assert!(!found(&commands[0]) && !found(&commands[1]));
+        assert!(found(&commands[2]), "the third command passes through");
+        // 预算的容量经 base64 以后，再加上每块的引导和结束。
+        let max = usize::try_from(IMAGE_FILE_MAX_BYTES).unwrap() / 3 * 4 / 100 * 101;
+        assert!(forwarded.len() <= max + commands[2].len(), "{}", forwarded.len());
+
+        let later = session.write_vt(&commands[2], now + std::time::Duration::from_secs(1));
+        std::fs::remove_file(&path).unwrap();
+        assert!(later.is_some_and(|bytes| memchr::memmem::find(&bytes, &encoded).is_none()));
     }
 
     #[test]

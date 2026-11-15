@@ -262,7 +262,7 @@ fn scanner_answers(bytes: &[u8], cuts: &[usize]) -> Vec<Vec<u8>> {
     let mut answers = Vec::new();
     let mut start = 0;
     for end in cuts.iter().copied().chain([bytes.len()]) {
-        scanner.write(&mut terminal, &bytes[start..end], |query| answers.push(query.answer("")));
+        scanner.write(&mut terminal, &bytes[start..end], Boundary::empty(), |query| answers.push(query.answer("")));
         start = end;
     }
     answers

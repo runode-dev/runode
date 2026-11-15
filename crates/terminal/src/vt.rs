@@ -84,8 +84,8 @@ pub(crate) fn terminal_size(terminal: &Terminal<'_, '_>) -> Result<GridSize> {
 /// `scrollback_bytes` 是回滚历史最多占多少字节，即配置项 `scrollback-limit`；`None` 表示不限，
 /// 只按行数算。调低回滚上限会立刻丢掉超出的历史。默认颜色和光标样式由 `apply_theme` 设，不在这里。
 ///
-/// Kitty 图片只收直接写在序列里的：从文件、临时文件、共享内存读的，两份 VT 各读一遍会对不上
-/// （临时文件读完就删）。程序问的时候宿主那份如实回不支持，程序（比如 `kitten icat`）就改用直接传。
+/// Kitty 图片只收直接写在序列里的，VT 不读文件、临时文件和共享内存：几份 VT 各读一遍会对不上
+/// （临时文件读完就删，各份 VT 也不一定在同一台机器上）。按这几种方式传的命令 VT 回不支持。
 pub(crate) fn configure_common(terminal: &mut Terminal<'_, '_>, scrollback_bytes: Option<usize>) -> Result<()> {
     terminal
         .set_scrollback_max_lines(Some(SCROLLBACK_LINES))?
@@ -354,13 +354,15 @@ fn replay_images(terminal: &Terminal<'static, '_>, mut budget: usize, out: &mut 
     Ok(())
 }
 
+/// Kitty 图形协议直接传（`t=d`）时一块 base64 数据的上限，协议规定的。
+pub(crate) const KITTY_CHUNK_BYTES: usize = 4096;
+
 /// 用 Kitty 图形协议把 `rgba` 当 `id` 号图片传过去（`a=t`，不放出来），按协议的上限分块。
 fn transmit_image(id: u32, width: u32, height: u32, rgba: &[u8], out: &mut Vec<u8>) {
-    const CHUNK: usize = 4096;
     let mut encoded = Vec::with_capacity(rgba.len().div_ceil(3) * 4);
     encode_base64(rgba, &mut encoded);
-    let count = encoded.len().div_ceil(CHUNK);
-    for (n, chunk) in encoded.chunks(CHUNK).enumerate() {
+    let count = encoded.len().div_ceil(KITTY_CHUNK_BYTES);
+    for (n, chunk) in encoded.chunks(KITTY_CHUNK_BYTES).enumerate() {
         let more = u8::from(n + 1 < count);
         if n == 0 {
             out.extend_from_slice(format!("\x1b_Ga=t,f=32,i={id},s={width},v={height},m={more},q=2;").as_bytes());
@@ -397,6 +399,35 @@ pub(crate) fn encode_base64(data: &[u8], out: &mut Vec<u8>) {
             out.push(if k <= chunk.len() { ALPHABET[*digit as usize] } else { b'=' });
         }
     }
+}
+
+/// 标准 base64 解码，末尾的 `=` 补齐可有可无；有别的字符、长度不对或补齐不对时是 `None`。
+pub(crate) fn decode_base64(text: &[u8]) -> Option<Vec<u8>> {
+    fn digit(c: u8) -> Option<u32> {
+        let value = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        Some(u32::from(value))
+    }
+    let body = text.strip_suffix(b"==").or_else(|| text.strip_suffix(b"=")).unwrap_or(text);
+    if (body.len() != text.len() && !text.len().is_multiple_of(4)) || body.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(body.len() / 4 * 3 + 2);
+    for chunk in body.chunks(4) {
+        let mut n = 0;
+        for &c in chunk {
+            n = (n << 6) | digit(c)?;
+        }
+        n <<= 6 * (4 - chunk.len());
+        out.extend_from_slice(&n.to_be_bytes()[1..chunk.len()]);
+    }
+    Some(out)
 }
 
 /// `format_replay` 的格式化器：带上格式化能复原的全部终端状态。软折行的行接起来输出，靠自动

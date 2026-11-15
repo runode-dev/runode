@@ -128,9 +128,10 @@ fn pair(size: GridSize, started: bool) -> (HostSession, Session) {
     (host, view)
 }
 
+/// 宿主喂 `data`，界面喂宿主转出来的字节。
 fn feed(host: &mut HostSession, view: &mut Session, data: &[u8]) {
-    host.feed(data);
-    view.feed(data);
+    let fed = host.feed_output(data);
+    view.feed(fed.rewritten.as_deref().unwrap_or(data));
 }
 
 fn differential(seed: u64, started: bool) {
@@ -262,6 +263,63 @@ fn redacted_shell_reports_keep_the_terminals_in_step() {
     }
     assert!(!redacted.windows(16).any(|w| w == b"0123456789abcdef"), "a report survived");
     assert_same("redacted", &host, &view);
+}
+
+/// 1 到 `count` 号 Kitty 图片的尺寸和像素，没有的是 `None`。
+fn images(terminal: &Terminal<'static, 'static>, count: u32) -> Vec<Option<(u32, u32, Vec<u8>)>> {
+    let graphics = terminal.kitty_graphics().unwrap();
+    (1..=count)
+        .map(|id| {
+            let image = graphics.as_ref()?.image(id)?;
+            Some((image.width().unwrap(), image.height().unwrap(), vt::image_rgba(&image)?.into_owned()))
+        })
+        .collect()
+}
+
+/// 输出里夹着按文件传的图（有读得到的，也有文件不存在的），随机切块：宿主改写后转出来的字节
+/// 喂给界面，两份 VT 的状态和图片每一步都一样，读得到的图两边都有。
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn images_read_from_files_keep_the_terminals_in_step() {
+    const PIXELS: &[u8] = &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255];
+    const COUNT: u32 = 12;
+    let path = std::env::temp_dir().join(format!("runode-kitty-mirror-{}.rgba", std::process::id()));
+    std::fs::write(&path, PIXELS).unwrap();
+    let missing = path.with_extension("missing");
+    let mut rng = Rng::new(7);
+    let output = mixed_output(&mut rng, 80, 60);
+    let mut data = Vec::new();
+    let mut id = 0;
+    for &byte in &output {
+        data.push(byte);
+        if id < COUNT && rng.chance(1) {
+            id += 1;
+            let file = if id % 4 == 0 { &missing } else { &path };
+            let mut encoded = Vec::new();
+            vt::encode_base64(file.to_str().unwrap().as_bytes(), &mut encoded);
+            data.extend(format!("\x1b_Ga=T,t=f,f=32,s=2,v=2,i={id},q=2;").as_bytes());
+            data.extend(encoded);
+            data.extend(b"\x1b\\");
+        }
+    }
+    assert_eq!(id, COUNT, "not enough images in the output");
+    let (mut host, mut view) = pair(GridSize { cols: 60, rows: 12, cell_width_px: 8, cell_height_px: 16 }, false);
+    let mut rest = &data[..];
+    let mut step = 0;
+    while !rest.is_empty() {
+        let n = (1 + rng.below(256)).min(rest.len());
+        feed(&mut host, &mut view, &rest[..n]);
+        rest = &rest[n..];
+        step += 1;
+        assert_same(&format!("step {step}"), &host, &view);
+        assert_eq!(images(host.terminal(), COUNT), images(&view.terminal, COUNT), "step {step}");
+    }
+    std::fs::remove_file(&path).unwrap();
+    let images = images(host.terminal(), COUNT);
+    for (n, image) in images.iter().enumerate() {
+        let read = (n + 1) % 4 != 0;
+        assert_eq!(image.is_some(), read, "image {}", n + 1);
+    }
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {

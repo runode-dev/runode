@@ -718,3 +718,19 @@ fn a_wrapped_option_reads_whole() {
 fn snapshot_format_reads_the_envelope() {
     assert_eq!(snapshot_format().unwrap(), 1);
 }
+
+#[test]
+fn base64_decodes_what_it_encodes_with_or_without_padding() {
+    let mut rng = Rng::new(7);
+    for len in 0..40 {
+        let data: Vec<u8> = (0..len).map(|_| rng.next() as u8).collect();
+        let mut encoded = Vec::new();
+        encode_base64(&data, &mut encoded);
+        assert_eq!(decode_base64(&encoded).as_deref(), Some(&data[..]));
+        let unpadded = encoded.strip_suffix(b"==").or_else(|| encoded.strip_suffix(b"=")).unwrap_or(&encoded);
+        assert_eq!(decode_base64(unpadded).as_deref(), Some(&data[..]));
+    }
+    for bad in [&b"A"[..], b"AAAAA", b"AB=", b"A===", b"AB=C", b"AB C", b"AB-_", b"AAA=AAAA"] {
+        assert_eq!(decode_base64(bad), None, "{:?}", String::from_utf8_lossy(bad));
+    }
+}

@@ -11,12 +11,17 @@
 //! 把会话交给新宿主（`HostSession::export`、`HostSession::import`）。VT 回调累积的变化和 shell
 //! 集成的报告在 `effects`，程序读写剪贴板（OSC 52）的请求在 `clipboard`，前台 agent 的识别在
 //! `detect`，转给别的进程前抹掉报告内容的 `ReportRedactor` 在 `redact`，别的进程发来的控制键和
-//! 粘贴的编码在 `keys`。
+//! 粘贴的编码在 `keys`。程序按文件传的 Kitty 图片由 `kitty_media` 读出来改成直接传。
 
 mod clipboard;
 mod detect;
 mod effects;
 mod keys;
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "linux")),
+    allow(dead_code, reason = "只在 macOS 和 Linux 上读文件、改写")
+)]
+mod kitty_media;
 mod redact;
 mod shell_report;
 
@@ -54,6 +59,7 @@ use crate::{
     vt::{self, CommandOutput, SnapshotError},
 };
 pub use clipboard::{ClipboardQuery, ClipboardRequest};
+pub use effects::Fed;
 use effects::{Effects, PromptEvent};
 pub use redact::{RedactorState, ReportRedactor};
 use shell_report::SHELL_REPORT;
@@ -185,6 +191,8 @@ pub struct HostSession {
     settings: TermSettings,
     /// 在喂给 VT 的字节流旁边认剪贴板的读请求，见 `clipboard`。
     clipboard_queries: clipboard::QueryScanner,
+    /// 把按文件传的 Kitty 图片改写成直接传，正扣着一条没收完的 APC 时里面是它的内容。
+    kitty_media: kitty_media::MediumRewriter,
     /// `SessionMeta` 里的东西可能变了，见 `take_meta`。
     meta_dirty: bool,
     /// 上次交出去的 `SessionMeta`，没变的不再交。
@@ -278,6 +286,7 @@ impl HostSession {
             input_at: None,
             settings,
             clipboard_queries: clipboard::QueryScanner::default(),
+            kitty_media: kitty_media::MediumRewriter::default(),
             meta_dirty: true,
             last_meta: None,
         })
@@ -679,15 +688,25 @@ impl HostSession {
         self.replies.get()
     }
 
-    /// 把 VT 的全部状态编成快照，见 `vt::encode_snapshot`。VT 正停在一条很长的序列中间时
-    /// 返回 `SnapshotError::Unfinished`，等下一批输出后再试。
+    /// 把 VT 的全部状态编成快照，见 `vt::encode_snapshot`。VT 正停在一条很长的序列中间、或者
+    /// 正扣着一条 Kitty 图形命令的内容（扣着的字节不在 VT 里，编进快照就丢了）时返回
+    /// `SnapshotError::Unfinished`，等下一批输出后再试。
     pub fn snapshot(&self) -> Result<Vec<u8>, SnapshotError> {
+        if self.kitty_media.holding() {
+            return Err(SnapshotError::Unfinished);
+        }
         vt::encode_snapshot(&self.terminal)
     }
 
-    /// 用 VT 序列重画当前状态，快照格式对不上时兜底，见 `vt::format_replay`。
+    /// 用 VT 序列重画当前状态，快照格式对不上时兜底，见 `vt::format_replay`。正扣着一条 Kitty
+    /// 图形命令时末尾补上 APC 的引导 `ESC _`：之后的输出接着这条命令，接收的 VT 也要停在 APC 里，
+    /// 那些字节才不会被当成文字画出来。
     pub fn vt_replay(&self) -> Result<Vec<u8>> {
-        Ok(vt::format_replay(&self.terminal, self.settings.cursor_style)?)
+        let mut replay = vt::format_replay(&self.terminal, self.settings.cursor_style)?;
+        if self.kitty_media.holding() {
+            replay.extend_from_slice(b"\x1b_");
+        }
+        Ok(replay)
     }
 
     /// 给别的进程的快照，之后给它的输出是经 `redactor` 抹过的。和 `snapshot` 不同的只在输出流
@@ -696,8 +715,11 @@ impl HostSession {
     /// 报告（ST，报告本来就不改 VT 的状态，见 `ReportRedactor`），再开一条只有开头 `ESC ] 6973;`
     /// 的，编出的快照停在同样的状态，只是没有报告的内容；之后抹过的输出接着喂，报告照样在
     /// 原来的结束序列处结束。
+    ///
+    /// 正扣着一条 Kitty 图形命令时照样编得出：VT 停在 APC 的引导 `ESC _` 后面，续接里只有它，
+    /// 前端之后收到的是这条命令改写后的内容，接上正好。
     pub fn redacted_snapshot(&self, redactor: &ReportRedactor) -> Result<Vec<u8>, SnapshotError> {
-        let snapshot = self.snapshot()?;
+        let snapshot = vt::encode_snapshot(&self.terminal)?;
         if !redactor.in_report() {
             return Ok(snapshot);
         }

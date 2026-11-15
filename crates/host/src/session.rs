@@ -806,12 +806,16 @@ impl Runner {
         })
     }
 
-    /// 一块 PTY 输出：先原样转给前端，再喂宿主的 VT，然后处理它带来的变化。这块输出里响了铃的，
-    /// 紧跟着它发 `Bell`，要求发通知的发 `Notify`：界面那份 VT 降成只看状态（后台标签）时靠它们。
+    /// 一块 PTY 输出：先喂宿主的 VT，再把 VT 实际吃进的字节转给前端，然后处理它带来的变化。
+    /// 这块输出里响了铃的，紧跟着它发 `Bell`，要求发通知的发 `Notify`：界面那份 VT 降成只看状态
+    /// （后台标签）时靠它们。
     /// 要求改窗口尺寸的同样紧跟着发 `ResizeWindow`：界面那份 VT 重放屏幕时会再认一遍，所以只认宿主这边的。
     fn output(&mut self, data: &Arc<[u8]>) {
-        self.emit(Event::Output(data.clone()));
-        self.session.feed(data);
+        match self.session.feed_output(data).rewritten {
+            None => self.emit(Event::Output(data.clone())),
+            Some(bytes) if !bytes.is_empty() => self.emit(Event::Output(bytes.into())),
+            Some(_) => {}
+        }
         if self.session.take_bell() {
             self.emit(Event::msg(HostMsg::Bell { id: self.id }));
         }

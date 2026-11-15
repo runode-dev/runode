@@ -13,7 +13,7 @@
 
 use libghostty_vt::{
     Terminal,
-    terminal::{Boundary, ClipboardWrite, ClipboardWriteError, StringEnd},
+    terminal::{Boundary, ClipboardWrite, ClipboardWriteError, StringEnd, WriteStop},
 };
 use runode_types::clipboard::MAX_CLIPBOARD_BYTES;
 
@@ -126,42 +126,53 @@ pub(super) struct QueryScanner {
 }
 
 impl QueryScanner {
-    /// 把 `data` 喂给 `terminal`，每处理完一条读请求就把它交给 `found`，再接着喂后面的字节。
+    /// 把 `data` 喂给 `terminal`，每处理完一条读请求就把它交给 `found`，再接着喂后面的字节。碰到
+    /// `stop_at` 里的边界时停下，返回已经喂进去的字节数（含碰到边界的那个字节）和 VT 报的停法；
+    /// 全部喂完是 `None`。`stop_at` 不能含 OSC 的边界。
     pub(super) fn write(
         &mut self,
         terminal: &mut Terminal<'_, '_>,
-        mut data: &[u8],
+        data: &[u8],
+        stop_at: Boundary,
         mut found: impl FnMut(ClipboardQuery),
-    ) {
+    ) -> Option<(usize, WriteStop)> {
         const OSC: Boundary = Boundary::OSC_START.union(Boundary::OSC_END);
+        let mut rest = data;
         loop {
-            let stop = match terminal.vt_write_until(data, OSC) {
+            let stop = match terminal.vt_write_until(rest, OSC | stop_at) {
                 Ok(Some(stop)) => stop,
-                Ok(None) => return self.collect(data),
+                Ok(None) => {
+                    self.collect(rest);
+                    return None;
+                }
                 Err(err) => {
                     tracing::warn!("vt write until an OSC boundary failed: {err}");
                     self.in_osc = false;
-                    return terminal.vt_write(data);
+                    terminal.vt_write(rest);
+                    return None;
                 }
             };
-            let (done, rest) = data.split_at(stop.consumed);
-            data = rest;
+            let (done, after) = rest.split_at(stop.consumed);
+            rest = after;
             if stop.reached.contains(Boundary::OSC_START) {
                 (self.in_osc, self.len) = (true, 0);
-                continue;
+            } else if stop.reached.contains(Boundary::OSC_END) {
+                // 结束的那个字节不是内容。
+                self.collect(&done[..done.len().saturating_sub(1)]);
+                let bel = match stop.end {
+                    Some(StringEnd::Bel) => Some(true),
+                    Some(StringEnd::StEsc) => Some(false),
+                    _ => None,
+                };
+                if std::mem::take(&mut self.in_osc)
+                    && self.len <= QUERY_MAX
+                    && let Some(query) = bel.and_then(|bel| parse_query(&self.body[..self.len], bel))
+                {
+                    found(query);
+                }
             }
-            // 结束的那个字节不是内容。
-            self.collect(&done[..done.len().saturating_sub(1)]);
-            let bel = match stop.end {
-                Some(StringEnd::Bel) => Some(true),
-                Some(StringEnd::StEsc) => Some(false),
-                _ => None,
-            };
-            if std::mem::take(&mut self.in_osc)
-                && self.len <= QUERY_MAX
-                && let Some(query) = bel.and_then(|bel| parse_query(&self.body[..self.len], bel))
-            {
-                found(query);
+            if stop.reached.intersects(stop_at) {
+                return Some((data.len() - rest.len(), stop));
             }
         }
     }
