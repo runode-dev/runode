@@ -1797,9 +1797,7 @@ copy:
 skill_install:
   done_title: "已安裝 Agent Skill"
   done_at: "裝在 %{path}。"
-  done_agents: "也替 %{agents} 接上了。"
-  done_hint: "新開的 agent 會話裡就能用。"
-  separator: "、"
+  done_hint: "新開的 agent 工作階段裡就能用。"
   left_as_is: "%{path} 是你自己管的連結，沒動。"
   skipped: "%{path} 已經有你自己的東西，沒動。"
   failed_title: "沒裝上 Agent Skill"

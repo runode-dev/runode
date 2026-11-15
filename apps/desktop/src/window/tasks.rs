@@ -121,8 +121,8 @@ fn is_custom(source: &TaskSource) -> bool {
 }
 
 /// 装上编进这一版的所有 skill，交回给用户看的说明，一句一行：每个 skill 装在哪个正本（是用户自己管的链接时说
-/// 没动它），被别的东西占着、没动的位置，再一句替哪些 agent 接上了（只写名字，不列各自的目录），最后提示新开的
-/// 会话才用得上。家目录下的路径写成 `~` 开头。
+/// 没动它），被别的东西占着、没动的位置，再一句替哪些 agent 接上了，最后提示新开的会话才用得上。家目录下的
+/// 路径写成 `~` 开头。
 fn install_skills() -> std::io::Result<String> {
     let dirs = Dirs::from_env();
     let env = runode_agent_skill::Env::from_dirs(&dirs, |key| std::env::var_os(key));
@@ -151,8 +151,8 @@ fn install_skills() -> std::io::Result<String> {
         }
     }
     if !agents.is_empty() {
-        let agents = agents.join(&rust_i18n::t!("skill_install.separator"));
-        lines.push(rust_i18n::t!("skill_install.done_agents", agents = agents).into_owned());
+        let agents = agents.join(&rust_i18n::t!("onboarding.separator"));
+        lines.push(rust_i18n::t!("onboarding.skill_linked", agents = agents).into_owned());
     }
     lines.push(rust_i18n::t!("skill_install.done_hint").into_owned());
     Ok(lines.join("\n"))
@@ -297,11 +297,7 @@ impl WindowView {
         let job = cx.background_spawn(async { install_skills() });
         cx.spawn_in(window, async move |_, cx| {
             let (level, title, detail) = match job.await {
-                Ok(paths) => (
-                    gpui::PromptLevel::Info,
-                    rust_i18n::t!("skill_install.done_title"),
-                    paths,
-                ),
+                Ok(paths) => (gpui::PromptLevel::Info, rust_i18n::t!("skill_install.done_title"), paths),
                 Err(err) => (gpui::PromptLevel::Warning, rust_i18n::t!("skill_install.failed_title"), err.to_string()),
             };
             let Ok(answer) = cx.update(|window, cx| {
