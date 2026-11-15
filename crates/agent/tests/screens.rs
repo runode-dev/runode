@@ -55,6 +55,22 @@ fn claude() {
     );
     assert_eq!(screen(Claude, &format!("● 改好了。\n\n{footer}  ◯ reviewer  在审查改动   30s · ↓ 33.7k tokens\n")), "working");
     assert_eq!(screen(Claude, &format!("● 改好了。\n\n{footer}")), "idle");
+    let running = "  ◯ reviewer  在审查改动   30s · ↓ 33.7k tokens\n";
+    // 子 agent 在跑时主线程弹出权限提示，仍是等回答。
+    assert_eq!(
+        screen(
+            Claude,
+            &format!(
+                "────────\n Bash command\n   rm -rf build\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend\n\n  ⏺ main\n{running}"
+            )
+        ),
+        "blocked"
+    );
+    // 输入框里形如清单行的文字不算。
+    assert_eq!(
+        screen(Claude, &format!("● 改好了。\n\n────────\n❯ {}────────\n  ? for shortcuts\n", running.trim_start())),
+        "idle"
+    );
     // 起了名字的会话：选单的提示行下面是名字分隔线和任务面板。
     assert_eq!(
         screen(

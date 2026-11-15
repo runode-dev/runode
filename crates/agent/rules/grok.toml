@@ -75,7 +75,7 @@ any = [
 ]
 
 # Background commands, monitors, and subagents left running after Grok returns
-# to its prompt do not count as working, matching Claude and agy.
+# to its prompt do not count as working, matching agy.
 
 [[rules]]
 id = "osc_progress_working"

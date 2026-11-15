@@ -46,6 +46,10 @@ not = [
   { contains = ["do you want to proceed?"] },
   { contains = ["esc to cancel"] },
   { contains = ["waiting for permission"] },
+  { contains = ["do you want to allow this connection?"] },
+  { contains = ["would you like to"] },
+  { contains = ["tab to amend"] },
+  { contains = ["ctrl+e to explain"] },
 ]
 
 [[rules]]
