@@ -1231,6 +1231,9 @@ kanban:
   remove_schedule: "Delete Schedule"
   pause_schedule: "Pause Schedule"
   resume_schedule: "Resume Schedule"
+  fire_schedule: "Run Now"
+  fire_schedule_held: "The last task is still working or waiting for you; it can run again once that stops"
+  fire_schedule_running: "The command it runs first is still running"
   remove_schedule_detail: "Its prompt and schedule are deleted too and can't be recovered."
   schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit Runode or log in again, turn on “Keep sessions after quitting” and “Run the host in the background at login” in Settings."
   schedules_open_settings: Open Settings
@@ -1246,6 +1249,7 @@ kanban:
   run_failed: "last %{time} failed: %{output}"
   run_failed_bare: "last %{time} failed"
   run_unknown: "last ran %{time}"
+  run_running: "running…"
   done_window: "This column lists only the last 7 days"
   all_history: All history
   history: History
@@ -1272,6 +1276,8 @@ kanban:
     started: Task started
     failed: "Couldn’t start the task: %{reason}"
     request_failed: "Couldn’t do that: %{reason}"
+    fired: Opened a task
+    fired_run: "Running %{program} first; a task opens if it prints anything"
     close: Dismiss
   column:
     todo: To Do

@@ -192,6 +192,7 @@ impl crate::ClientMsg {
             | ReportTodo { .. }
             | QueueTodo { .. }
             | PauseSchedule { .. }
+            | FireSchedule { .. }
             | SetMaxRunning { .. }
             | Unknown => None,
         }

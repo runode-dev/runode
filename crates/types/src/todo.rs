@@ -187,6 +187,9 @@ pub struct Schedule {
     /// 上一次跑 `run` 的结果；还没跑过时为空。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_run: Option<ScheduleRun>,
+    /// 上一次触发的 `run` 命令还在跑；宿主填，不存库。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub running: bool,
 }
 
 /// `Schedule::run_timeout` 为空时命令最多跑的分钟数。

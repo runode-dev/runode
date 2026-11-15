@@ -94,6 +94,7 @@ fn host(name: &str, todos: Vec<Todo>, schedules: Vec<Schedule>) -> FakeHost {
         | ClientMsg::ReportTodo { req, .. }
         | ClientMsg::QueueTodo { req, .. }
         | ClientMsg::PauseSchedule { req, .. }
+        | ClientMsg::FireSchedule { req, .. }
         | ClientMsg::SetMaxRunning { req, .. } => {
             vec![HostMsg::Done { req: *req }]
         }
@@ -118,7 +119,9 @@ fn queue_limit_and_pause_go_to_the_host() {
     assert_eq!(run("todo limit 4", &fake.env).0, exit::OK);
     assert_eq!(run("todo unqueue 6", &fake.env).0, exit::OK);
     assert_eq!(run("schedule pause 0000cafe", &fake.env).0, exit::OK);
+    assert_eq!(run("schedule fire 0000cafe", &fake.env).0, exit::OK);
     let sent = requests(&fake);
+    assert!(sent.iter().any(|message| matches!(message, ClientMsg::FireSchedule { id, .. } if id == "0000cafe")));
     assert!(sent.iter().any(|message| matches!(message, ClientMsg::SetMaxRunning { max_running: 4, .. })));
     assert!(sent.iter().any(|message| matches!(message, ClientMsg::QueueTodo { queued: false, after: None, .. })));
     assert!(sent.iter().any(|message| matches!(message, ClientMsg::PauseSchedule { paused: true, .. })));
@@ -348,6 +351,7 @@ fn show_prints_everything_about_one_task() {
         run: None,
         run_timeout: None,
         last_run: None,
+        running: false,
     };
     let fake = host("todoshow", vec![gone], vec![nightly]);
     let (code, out, err) = run("todo show #4", &fake.env);
@@ -517,14 +521,21 @@ fn schedule_list_writes_when_and_next_in_local_time() {
         run: None,
         run_timeout: None,
         last_run: None,
+        running: false,
     };
-    // 一个跑过命令（这次没事），一个有命令还没跑过。
+    // 一个跑过命令（这次没事），一个有命令还没跑过，一个命令还在跑。
     let checked = Schedule {
         run: Some("./check.sh".into()),
         last_run: Some(ScheduleRun { at, outcome: RunOutcome::Idle, output: String::new() }),
         ..schedule("0000000d", When::Every { minutes: 15 }, None)
     };
     let fresh = Schedule { run: Some("./check.sh".into()), ..schedule("0000000e", When::Every { minutes: 15 }, None) };
+    let busy = Schedule {
+        run: Some("./check.sh".into()),
+        last_run: Some(ScheduleRun { at, outcome: RunOutcome::Idle, output: String::new() }),
+        running: true,
+        ..schedule("0000000f", When::Every { minutes: 15 }, None)
+    };
     let fake = host(
         "schedlist",
         vec![],
@@ -534,6 +545,7 @@ fn schedule_list_writes_when_and_next_in_local_time() {
             schedule("0000000c", When::Once { at }, Some(at)),
             checked,
             fresh,
+            busy,
         ],
     );
     let (code, out, err) = run("schedule list", &fake.env);
@@ -549,6 +561,7 @@ fn schedule_list_writes_when_and_next_in_local_time() {
             vec!["0000000c", "once 2099-01-02 03:04", "2099-01-02 03:04", "-", "claude", "report", "/tmp/project"],
             vec!["0000000d", "every 15m", "-", "idle 2099-01-02 03:04", "claude", "report", "/tmp/project"],
             vec!["0000000e", "every 15m", "-", "-", "claude", "report", "/tmp/project"],
+            vec!["0000000f", "every 15m", "-", "running", "claude", "report", "/tmp/project"],
         ],
         "{out}"
     );

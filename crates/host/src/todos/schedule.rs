@@ -4,7 +4,8 @@
 //! 时刻记成现在，下一次从现在算起，所以睡了三天醒来也只补一次。同一个定时上次开出的任务还在干活、或者
 //! agent 停在权限询问上时这次跳过，免得两个 agent 改同一处。带 `Schedule::run` 的定时到点先另起线程跑命令
 //! （`Shared::start_run`），按它的结果开任务；上一次的命令还没跑完时这次也跳过。定时开出的任务和用户排进队的
-//! 一样，由 `start_queued` 按看板的并发上限开始。
+//! 一样，由 `start_queued` 按看板的并发上限开始。手动立即触发（`Shared::fire_now`）走同样的让路判断，要让路时
+//! 回绝，但不记到点的时刻。
 
 use std::{
     sync::{Arc, Weak},
@@ -12,7 +13,7 @@ use std::{
 };
 
 use runode_protocol::todo::{Column, Outcome, Schedule, Todo, column, holds_schedule};
-use runode_todo::next_fire;
+use runode_todo::{FiredNow, next_fire};
 
 use super::{Todos, unix_now};
 use crate::Shared;
@@ -182,36 +183,46 @@ impl Shared {
         }
     }
 
-    /// 定时到点：记下到点的时刻（一次性的删掉），加一张排着队的新任务，带 `Schedule::run` 的先跑命令、按结果开；
-    /// 上次的命令还在跑，或者上次开出的那张还在排队、没开始成、还在干活、停在询问上时跳过。
-    fn fire(&self, schedule: &Schedule, now: u64) {
-        if self.todos.run_pending(&schedule.id) {
-            tracing::info!("schedule {} skips this run: its last command is still running", schedule.id);
-            self.skip(schedule, now);
-            return;
+    /// 定时 `id` 这次要不要让路：上次的命令还在跑，或者上次开出的那张还在排队、没开始成、还在干活、停在询问上时
+    /// 为让路的原因，不用让路时为空。读不了库时出错：库只是一时打不开的话，开出来可能和还在干活的上一个 agent
+    /// 撞在一起，调用方不开。
+    fn held_back(&self, id: &str, now: u64) -> Result<Option<HeldBack>, String> {
+        if self.todos.run_pending(id) {
+            return Ok(Some(HeldBack::Running));
         }
-        // 查不到上次那张时不开：库只是一时打不开的话，开出来可能和还在干活的上一个 agent 撞在一起；下一轮再看。
-        let previous = match self.todos.with_db(|db| db.latest_open_todo_of(&schedule.id)) {
-            Ok(previous) => previous,
+        let Some(todo) = self.todos.with_db(|db| db.latest_open_todo_of(id))? else { return Ok(None) };
+        let holds = match todo.session.map(|session| (session, self.session_info(session))) {
+            // 会话还在却没及时回话：看不出它在不在干活，当它在干，免得两个 agent 一起跑。
+            Some((session, None)) => self.registry().sessions.contains_key(&session),
+            found => holds_schedule(&todo, found.and_then(|(_, info)| info).as_ref(), now),
+        };
+        Ok(holds.then_some(HeldBack::Todo(todo.id)))
+    }
+
+    /// 定时到点：记下到点的时刻（一次性的删掉），加一张排着队的新任务，带 `Schedule::run` 的先跑命令、按结果开；
+    /// 要让路（`held_back`）时跳过，读不了库时下一轮再看。
+    fn fire(&self, schedule: &Schedule, now: u64) {
+        let _firing = self.todos.firing();
+        match self.held_back(&schedule.id, now) {
+            Ok(None) => {}
+            Ok(Some(held)) => {
+                match held {
+                    HeldBack::Running => {
+                        tracing::info!("schedule {} skips this run: its last command is still running", schedule.id);
+                    }
+                    HeldBack::Todo(todo) => tracing::info!(
+                        "schedule {} skips this run: its last todo {todo} has not started, is still in progress or is \
+                         blocked",
+                        schedule.id
+                    ),
+                }
+                self.skip(schedule, now);
+                return;
+            }
             Err(err) => {
                 tracing::warn!("schedule {} cannot read its last todo: {err}", schedule.id);
                 return;
             }
-        };
-        if let Some(todo) = &previous
-            && match todo.session.map(|session| (session, self.session_info(session))) {
-                // 会话还在却没及时回话：看不出它在不在干活，当它在干，免得两个 agent 一起跑。
-                Some((session, None)) => self.registry().sessions.contains_key(&session),
-                found => holds_schedule(todo, found.and_then(|(_, info)| info).as_ref(), now),
-            }
-        {
-            tracing::info!(
-                "schedule {} skips this run: its last todo {} has not started, is still in progress or is blocked",
-                schedule.id,
-                todo.id
-            );
-            self.skip(schedule, now);
-            return;
         }
         if schedule.run.is_some() {
             self.fire_run(schedule, now);
@@ -246,14 +257,50 @@ impl Shared {
         // 照库里现在的样子办：这一轮开头读到以后可能被删、被停、去掉了命令。
         match self.todos.with_db(|db| db.fire_schedule_run(&schedule.id, now)) {
             Ok(Some(current)) => {
-                // 下一次到点变了，看板要重读。
-                self.todos_changed();
                 tracing::info!("schedule {} fired: running its command", schedule.id);
-                self.start_run(current);
+                self.start_run(current, false);
+                // 下一次到点变了、命令开跑了，看板要重读。
+                self.todos_changed();
             }
             Ok(None) => tracing::info!("schedule {} was removed or changed before it fired", schedule.id),
             // 不通知：记不进库时叫醒定时的线程只会空转，下一轮再试。
             Err(err) => tracing::warn!("schedule {} could not record that it fired: {err}", schedule.id),
         }
     }
+
+    /// 手动立即触发定时 `id` 一次（`Store::fire_schedule_now`）：没有 `run` 的加一张排着队的任务，由定时的线程
+    /// 照常开始；有的另起线程跑命令。要让路（`held_back`）、读不了库、定时不存在时出错。
+    pub(super) fn fire_now(&self, id: &str) -> Result<(), String> {
+        let _firing = self.todos.firing();
+        let now = unix_now();
+        match self.held_back(id, now)? {
+            None => {}
+            Some(HeldBack::Running) => return Err(format!("schedule {id} is still running its last command")),
+            Some(HeldBack::Todo(_)) => return Err(format!("schedule {id} still has an unfinished todo")),
+        }
+        match self.todos.with_db(|db| db.fire_schedule_now(id, now))? {
+            None => Err(format!("no schedule {id}")),
+            Some(FiredNow::Todo(todo)) => {
+                tracing::info!("schedule {id} fired by hand: todo {todo}");
+                self.todos_changed();
+                Ok(())
+            }
+            Some(FiredNow::Run(current)) => {
+                if !self.start_run(*current, true) {
+                    return Err(format!("schedule {id} is still running its last command"));
+                }
+                tracing::info!("schedule {id} fired by hand: running its command");
+                self.todos_changed();
+                Ok(())
+            }
+        }
+    }
+}
+
+/// 定时这次要让路的原因。
+enum HeldBack {
+    /// 上次的命令还在跑。
+    Running,
+    /// 上次开出的这张任务还挡着。
+    Todo(String),
 }

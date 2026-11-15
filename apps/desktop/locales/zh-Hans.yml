@@ -1231,6 +1231,9 @@ kanban:
   remove_schedule: 删除定时
   pause_schedule: 停用定时
   resume_schedule: 恢复定时
+  fire_schedule: 立即运行一次
+  fire_schedule_held: 上次开出的任务还在干活或在等你回答，等它停下才能再运行
+  fire_schedule_running: 先跑的命令还在跑
   remove_schedule_detail: 它的提示词和定时规则会一起删掉，删了找不回来。
   schedules_need_host: "定时只在终端宿主跑着时生效。要在退出 Runode 后、重新登录后也照常跑，在设置里打开「退出后保留会话」和「登录时在后台启动宿主」。"
   schedules_open_settings: 打开设置
@@ -1246,6 +1249,7 @@ kanban:
   run_failed: "上次 %{time} 失败：%{output}"
   run_failed_bare: "上次 %{time} 失败"
   run_unknown: "上次 %{time} 跑过"
+  run_running: 正在跑…
   done_window: "完成这一栏只列最近 7 天的任务"
   all_history: 全部记录
   history: 记录
@@ -1272,6 +1276,8 @@ kanban:
     started: 任务已开始
     failed: 没能开始任务：%{reason}
     request_failed: 没能办成：%{reason}
+    fired: 已开出一张任务
+    fired_run: "正在先跑 %{program}，有输出才开任务"
     close: 关掉提示
   column:
     todo: 待办

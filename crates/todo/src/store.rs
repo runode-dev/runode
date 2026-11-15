@@ -138,6 +138,15 @@ fn failed(err: rusqlite::Error) -> String {
     format!("the todo database failed: {err}")
 }
 
+/// `Store::fire_schedule_now` 办成的样子。
+#[derive(Debug, PartialEq, Eq)]
+pub enum FiredNow {
+    /// 开了一张排着队的任务，是它的标识。
+    Todo(String),
+    /// 定时带 `Schedule::run`，是它现在的样子，命令照它跑。
+    Run(Box<Schedule>),
+}
+
 /// 打开着的任务库。
 #[derive(Debug)]
 pub struct Store {
@@ -239,6 +248,7 @@ fn schedule(row: &Row<'_>) -> rusqlite::Result<Schedule> {
             }),
             None => None,
         },
+        running: false,
     })
 }
 
@@ -826,25 +836,48 @@ impl Store {
         Ok(Some(current))
     }
 
-    /// 记下 `fire_schedule_run` 交出的定时 `schedule` 这次跑命令的结果 `run`；给了 `todo` 时另加一张排着队的
-    /// 任务，建立时刻是 `run.at`。命令跑的时候定时被删掉了就丢掉这次的结果，被删掉或者停了都不开任务，停了时
-    /// 本该开任务的这次记成 `RunOutcome::Idle`；一次性的定时到点时已经删掉，照样开。都在一个事务里办。返回新
-    /// 任务的标识。
+    /// 手动立即触发定时 `id` 一次：不管到没到点、停没停，不记到点的时刻，一次性的也不删。照库里它现在的样子
+    /// 办：有 `run` 时不写库，交出它的样子，命令照它跑，跑完交给 `finish_schedule_run`；没有时在一个事务里加
+    /// 一张排着队的任务。定时不存在时为空。
+    pub fn fire_schedule_now(&mut self, id: &str, now: u64) -> Result<Option<FiredNow>> {
+        let tx = self.conn.transaction().map_err(failed)?;
+        let Some(current) = tx
+            .query_row(&format!("SELECT {SCHEDULE_COLUMNS} FROM schedules WHERE id = ?1"), [id], schedule)
+            .optional()
+            .map_err(failed)?
+        else {
+            return Ok(None);
+        };
+        if current.run.is_some() {
+            return Ok(Some(FiredNow::Run(Box::new(current))));
+        }
+        let todo = insert_todo(&tx, &current.spec, now, Some(id), true)?;
+        tx.commit().map_err(failed)?;
+        Ok(Some(FiredNow::Todo(todo)))
+    }
+
+    /// 记下 `fire_schedule_run` 或 `fire_schedule_now` 交出的定时 `schedule` 这次跑命令的结果 `run`；给了 `todo`
+    /// 时另加一张排着队的任务，建立时刻是 `run.at`。命令跑的时候定时被删掉了就丢掉这次的结果。到点跑的
+    /// （`by_hand` 为假）被删掉或者停了都不开任务，手动触发的（`by_hand`）停了也开、被删掉了不开；一次性的定时
+    /// 到点时就删掉，命令跑的时候也可能到点，都照样开。本该开任务却不开的这次记成 `RunOutcome::Idle`。都在一个
+    /// 事务里办。返回新任务的标识。
     pub fn finish_schedule_run(
         &mut self,
         schedule: &Schedule,
         run: &ScheduleRun,
         todo: Option<&TodoSpec>,
+        by_hand: bool,
     ) -> Result<Option<String>> {
         let tx = self.conn.transaction().map_err(failed)?;
         let paused: Option<bool> = tx
             .query_row("SELECT paused FROM schedules WHERE id = ?1", [&schedule.id], |row| row.get(0))
             .optional()
             .map_err(failed)?;
-        let live = paused == Some(false);
+        let opens = matches!(schedule.when, When::Once { .. })
+            || if by_hand { paused.is_some() } else { paused == Some(false) };
         if paused.is_some() {
             let outcome = match run.outcome {
-                RunOutcome::Fired if !live => RunOutcome::Idle,
+                RunOutcome::Fired if !opens => RunOutcome::Idle,
                 outcome => outcome,
             };
             tx.execute(
@@ -854,9 +887,7 @@ impl Store {
             .map_err(failed)?;
         }
         let todo = match todo {
-            Some(spec) if live || matches!(schedule.when, When::Once { .. }) => {
-                Some(insert_todo(&tx, spec, run.at, Some(&schedule.id), true)?)
-            }
+            Some(spec) if opens => Some(insert_todo(&tx, spec, run.at, Some(&schedule.id), true)?),
             _ => None,
         };
         tx.commit().map_err(failed)?;

@@ -605,6 +605,9 @@ impl Connection {
             ClientMsg::PauseSchedule { req, id, paused } => {
                 self.todos(req, "host-pause-schedule", move |shared| shared.pause_schedule(req, &id, paused));
             }
+            ClientMsg::FireSchedule { req, id } => {
+                self.todos(req, "host-fire-schedule", move |shared| shared.fire_schedule(req, &id));
+            }
             ClientMsg::SetMaxRunning { req, max_running } => {
                 self.todos(req, "host-max-running", move |shared| shared.set_max_running(req, max_running));
             }

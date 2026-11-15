@@ -6,7 +6,7 @@ use crate::ui::{
     a11y::{Press, StaticText as _},
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{FontSize, scaled},
-    icons::{BAN_ICON, CHEVRON_RIGHT_ICON, CLOCK_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, TRASH_ICON},
+    icons::{BAN_ICON, CHEVRON_RIGHT_ICON, CLOCK_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, TRASH_ICON, ZAP_ICON},
     scrollbar::scrollbar,
     theme::ActiveTheme as _,
 };
@@ -18,7 +18,7 @@ use runode_protocol::{
 use std::path::Path;
 
 use super::{
-    Kanban, Page, ToastState, agent_text, column_name,
+    Kanban, Page, TOAST_LINGER, ToastState, agent_text, column_name,
     dialog::Editing,
     history_link, icon_button, label_row, named,
     store::{self, TodoData},
@@ -51,6 +51,18 @@ fn program_name(command: &str) -> String {
         return program;
     }
     let rest = &words[1..];
+    // `-c`（含 `-ec` 这样合写的短参数）、`-Command`、node 的 `-e`、`-p` 后面是一段脚本正文，不是文件，
+    // 写不出名字，写解释器本身。
+    let inline = |word: &String| {
+        let short = word
+            .strip_prefix('-')
+            .filter(|flags| !flags.is_empty() && flags.len() <= 4 && flags.chars().all(|ch| ch.is_ascii_lowercase()));
+        short.is_some_and(|flags| flags.contains('c') || (stem == "node" && (flags == "e" || flags == "p")))
+            || word.eq_ignore_ascii_case("-Command")
+    };
+    if rest.iter().any(inline) {
+        return program;
+    }
     let script = match rest.iter().position(|word| word.eq_ignore_ascii_case("-File")) {
         Some(at) => rest.get(at + 1),
         None => rest.iter().find(|word| !word.starts_with('-')),
@@ -81,10 +93,14 @@ fn command_words(command: &str) -> Vec<String> {
     words
 }
 
-/// 定时卡片上先跑的命令那一行：跑哪个程序，跑过的再接上一次的结果；为真的是上一次失败了。没有命令时为空。
+/// 定时卡片上先跑的命令那一行：跑哪个程序，正在跑的接上「正在跑」，跑过的再接上一次的结果；为真的是上一次失败了。
+/// 没有命令时为空。
 fn run_line_in(schedule: &Schedule, now: u64, locale: &str) -> Option<(String, bool)> {
     let command = schedule.run.as_deref()?;
     let program = rust_i18n::t!("kanban.run_command", locale = locale, program = program_name(command)).into_owned();
+    if schedule.running {
+        return Some((format!("{program} · {}", rust_i18n::t!("kanban.run_running", locale = locale)), false));
+    }
     let Some(last) = &schedule.last_run else { return Some((program, false)) };
     let time = short_time(last.at, now);
     let output = last.output.lines().map(str::trim).rfind(|line| !line.is_empty());
@@ -197,6 +213,28 @@ impl Kanban {
         .detach();
     }
 
+    /// 请宿主立即触发一次定时 `id`，不改它下次到点的时刻；`program` 是它先跑的程序名，没有时为空。
+    /// 办成了弹出提示条，过一会儿收起。
+    fn fire_schedule_now(&mut self, id: String, program: Option<String>, cx: &mut Context<Self>) {
+        let sent = store::send(cx, vec![Box::new(move |req| ClientMsg::FireSchedule { req, id })]);
+        cx.spawn(async move |this, cx| {
+            if let Err(reason) = sent.await {
+                let text = rust_i18n::t!("kanban.toast.request_failed", reason = reason).into_owned();
+                this.update(cx, |this, cx| this.show_toast(ToastState::Failed(text), cx)).ok();
+                return;
+            }
+            let text = match program {
+                Some(program) => rust_i18n::t!("kanban.toast.fired_run", program = program),
+                None => rust_i18n::t!("kanban.toast.fired"),
+            }
+            .into_owned();
+            let Ok(serial) = this.update(cx, |this, cx| this.show_toast(ToastState::Done(text), cx)) else { return };
+            cx.background_executor().timer(TOAST_LINGER).await;
+            this.update(cx, |this, cx| this.set_toast(serial, None, cx)).ok();
+        })
+        .detach();
+    }
+
     pub(super) fn render_schedules(&self, data: &TodoData, cx: &mut Context<Self>) -> Div {
         let fg = cx.theme().foreground;
         let now = unix_now();
@@ -287,14 +325,14 @@ impl Kanban {
             Some(at) => rust_i18n::t!("kanban.next", time = short_time(at, now)).into_owned(),
             None => rust_i18n::t!("kanban.no_next").into_owned(),
         };
-        // 宿主到点时看的是没完成的里面最后开出的那张。
-        let held = schedule.next_fire.is_some()
-            && data
-                .todos
-                .iter()
-                .filter(|todo| todo.schedule.as_deref() == Some(schedule.id.as_str()) && todo.done_at.is_none())
-                .max_by_key(|todo| todo.created)
-                .is_some_and(|todo| holds_schedule(todo, todo.session.and_then(|id| data.sessions.get(&id)), now));
+        // 宿主到点和立即触发时看的都是没完成的里面最后开出的那张。
+        let last_holds = data
+            .todos
+            .iter()
+            .filter(|todo| todo.schedule.as_deref() == Some(schedule.id.as_str()) && todo.done_at.is_none())
+            .max_by_key(|todo| todo.created)
+            .is_some_and(|todo| holds_schedule(todo, todo.session.and_then(|id| data.sessions.get(&id)), now));
+        let held = schedule.next_fire.is_some() && last_holds;
         let held_text = held.then(|| rust_i18n::t!("kanban.next_held").into_owned());
         let place = self.place_name(&schedule.spec.dir);
         let worktree = schedule.spec.worktree.then(|| rust_i18n::t!("kanban.worktree_on").into_owned());
@@ -366,6 +404,39 @@ impl Kanban {
                 let id = id.clone();
                 Self::send_todos(vec![Box::new(move |req| ClientMsg::PauseSchedule { req, id, paused })], cx)
             })
+        };
+        // 宿主这时会回绝立即触发：灰着，提示里说为什么。停用的照样能触发。
+        let fire = {
+            let label = rust_i18n::t!("kanban.fire_schedule").into_owned();
+            let busy = if last_holds {
+                Some(rust_i18n::t!("kanban.fire_schedule_held").into_owned())
+            } else if schedule.running {
+                Some(rust_i18n::t!("kanban.fire_schedule_running").into_owned())
+            } else {
+                None
+            };
+            let disabled = busy.is_some();
+            let mut button = icon_button("todo-schedule-fire", ZAP_ICON, busy.clone().unwrap_or_else(|| label.clone()))
+                .aria_label(action_for(&label, title))
+                .disabled(disabled);
+            // 读屏的人看不到提示，灰着的原因另报给辅助工具。
+            if let Some(why) = busy {
+                button = button.aria_description(why);
+            }
+            if disabled {
+                button
+            } else {
+                let id = schedule.id.clone();
+                let program = schedule.run.as_deref().map(program_name);
+                button.on_press(cx, move |this, _, cx| {
+                    if store::host_below(cx, 5) {
+                        let text = rust_i18n::t!("kanban.dialog.host_too_old_for", what = label.as_str()).into_owned();
+                        this.show_toast(ToastState::Failed(text), cx);
+                        return;
+                    }
+                    this.fire_schedule_now(id.clone(), program.clone(), cx)
+                })
+            }
         };
         let remove = {
             let id = schedule.id.clone();
@@ -459,6 +530,7 @@ impl Kanban {
                                     .flex()
                                     .items_center()
                                     .gap(px(2.))
+                                    .child(fire)
                                     .child(pause)
                                     .child(edit)
                                     .child(remove),
@@ -502,6 +574,7 @@ mod tests {
             run: None,
             run_timeout: None,
             last_run: None,
+            running: false,
         };
         let schedules = [
             schedule("paused", Some(10), true),
@@ -522,6 +595,11 @@ mod tests {
         assert_eq!(program_name("sh ~/.runode/schedule-scripts/new-issues.sh 'good first'"), "new-issues.sh");
         assert_eq!(program_name("bash -e check.sh"), "check.sh");
         assert_eq!(program_name("sh"), "sh");
+        assert_eq!(program_name("sh -c 'sleep 8; echo found'"), "sh");
+        assert_eq!(program_name("pwsh -NoProfile -Command Get-Date"), "pwsh");
+        assert_eq!(program_name("bash -ec 'set -x; ./check'"), "bash");
+        assert_eq!(program_name("node -e 'console.log(1)'"), "node");
+        assert_eq!(program_name("node --check watch.js"), "watch.js");
         assert_eq!(
             program_name(r#"powershell -NoProfile -ExecutionPolicy Bypass -File "/my dir/watch-ci.ps1" "a b""#),
             "watch-ci.ps1"
@@ -543,6 +621,7 @@ mod tests {
             run: run.map(str::to_owned),
             run_timeout: None,
             last_run,
+            running: false,
         };
         let last = |outcome, output: &str| Some(ScheduleRun { at: now - 60, outcome, output: output.into() });
         let time = short_time(now - 60, now);
@@ -561,5 +640,9 @@ mod tests {
             run_line_in(&idle, now, "en"),
             Some((format!("runs watch.sh first · last {time}: nothing to do"), false))
         );
+        // 正在跑时不再接上次的结果，上次失败了也不标红。
+        let running = Schedule { running: true, ..failed };
+        assert_eq!(run_line_in(&running, now, "zh-Hans"), Some(("先跑 watch.sh · 正在跑…".to_owned(), false)));
+        assert_eq!(run_line_in(&Schedule { running: true, ..schedule(None, None) }, now, "en"), None);
     }
 }

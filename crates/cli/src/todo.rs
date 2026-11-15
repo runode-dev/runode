@@ -437,6 +437,7 @@ pub(crate) fn list_schedules(env: &Env, json: bool, out: &mut dyn Write) -> Resu
             when_text(&schedule.when, local),
             if schedule.paused { "paused".into() } else { schedule.next_fire.map_or_else(|| "-".into(), local) },
             match (&schedule.run, &schedule.last_run) {
+                (Some(_), _) if schedule.running => "running".into(),
                 (Some(_), Some(last)) => format!("{} {}", last.outcome.name(), local(last.at)),
                 _ => "-".into(),
             },
@@ -459,6 +460,13 @@ pub(crate) fn pause_schedule(env: &Env, id: String, paused: bool) -> Result<()> 
     need_board(&connection, 3, if paused { "schedule pause" } else { "schedule resume" })?;
     let req = connection.req();
     connection.request_done(&ClientMsg::PauseSchedule { req, id, paused })
+}
+
+pub(crate) fn fire_schedule(env: &Env, id: String) -> Result<()> {
+    let connection = open(env)?;
+    need_board(&connection, 5, "schedule fire")?;
+    let req = connection.req();
+    connection.request_done(&ClientMsg::FireSchedule { req, id })
 }
 
 /// 定时什么时候到点，人看的写法：`daily 09:30 mon-fri`、`every 15m`、`once 2026-10-13 14:00`、`cron 30 9 * * 1-5`。

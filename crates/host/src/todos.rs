@@ -55,6 +55,9 @@ pub(crate) struct Todos {
     sessions: Mutex<Watched>,
     /// 会话线程要定时的线程马上再看一轮（自动完成的任务空闲下来了），不等看板变了。
     nudged: AtomicBool,
+    /// 触发定时（到点的和手动的）从判断要不要让路到加上任务、占住命令都拿着它，同一个定时不会被两处同时
+    /// 触发、各开一张。拿着它时只拿别的锁、不等命令跑完；别处拿着别的锁时不拿它。
+    firing: Mutex<()>,
 }
 
 /// 任务用的会话，看板第 `generation` 次变了以后读到的。
@@ -158,6 +161,10 @@ impl Todos {
 
     fn watched(&self) -> MutexGuard<'_, Watched> {
         self.sessions.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn firing(&self) -> MutexGuard<'_, ()> {
+        self.firing.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// 在库上做 `f`。看板没开、库打不开时报错；`f` 出错时关掉库，下次重新打开。
@@ -336,8 +343,11 @@ impl Shared {
             self.todos.with_db(|db| Ok((db.list_todos(now)?, db.list_schedules()?, db.max_running()?)))?;
         // 看板变了时没读到库的话，会话名单还是旧的，借这次读到的补上。
         self.remember_todo_sessions(generation, &todos);
-        for schedule in schedules.iter_mut().filter(|schedule| !schedule.paused) {
-            schedule.next_fire = runode_todo::next_fire(&schedule.when, schedule.last_fired);
+        for schedule in &mut schedules {
+            if !schedule.paused {
+                schedule.next_fire = runode_todo::next_fire(&schedule.when, schedule.last_fired);
+            }
+            schedule.running = self.todos.run_pending(&schedule.id);
         }
         Ok(HostMsg::Todos { req, todos, schedules, max_running })
     }
@@ -366,6 +376,13 @@ impl Shared {
             return Err(format!("no schedule {id}"));
         }
         self.todos_changed();
+        Ok(HostMsg::Done { req })
+    }
+
+    /// 回 `ClientMsg::FireSchedule`。
+    pub(crate) fn fire_schedule(&self, req: u32, id: &str) -> Result<HostMsg, String> {
+        self.todos_writable()?;
+        self.fire_now(id)?;
         Ok(HostMsg::Done { req })
     }
 

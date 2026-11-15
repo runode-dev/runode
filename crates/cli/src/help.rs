@@ -393,15 +393,21 @@ Usage: runode schedule add TITLE... (--at TIME | --daily HH:MM [--days DAYS] |
        runode schedule rm ID
        runode schedule pause ID
        runode schedule resume ID
+       runode schedule fire ID
 
 Commands:
   add     Add a schedule and print its id
   list    List the schedules with when they fire, the next time they will and
-          how the last --run went (LAST: idle, fired or failed, and when)
+          how the last --run went (LAST: idle, fired or failed, and when;
+          running while CMD runs)
   rm      Remove a schedule; the tasks it started stay
   pause   Stop a schedule from firing until it is resumed
   resume  Let a paused schedule fire again, counting from now: the times it
           missed while paused do not fire
+  fire    Start the schedule once now, as if it were due: runs --run CMD
+          first if it has one. When it fires next stays the same, and a
+          paused schedule fires too. Refused while its last task is
+          unfinished or its last command is still running
 
 Arguments:
   TITLE...  With `add`: the title of the tasks it starts, words joined by
@@ -451,7 +457,7 @@ or its last run is still going. CMD gets RUNODE_SCHEDULE (the schedule id, to
 keep its state apart), RUNODE_SOCKET and the login shell's PATH with Runode's
 directory added, so it can call runode. A CMD that never prints to stdout only
 runs and never starts an agent. Keeping track across runs, such as not handing
-out the same failure twice, is up to CMD.
+out the same failure twice, is up to CMD. `schedule fire` first runs CMD too.
 ";
 
 const REMOTE: &str = "\

@@ -448,6 +448,10 @@ pub enum ClientMsg {
     },
     /// 停用或者接着用定时（`Schedule::paused`），回 `Done`。宿主的 `Welcome::board` 不小于 3 时才认得。
     PauseSchedule { req: u32, id: String, paused: bool },
+    /// 立即触发一次定时，不等到点，不改它的到点时刻；带 `Schedule::run` 的先跑命令，停用的也照样触发。开出任务
+    /// 或者命令开跑后回 `Done`；上次的命令还在跑、上次开出的任务还挡着（`holds_schedule`）时回 `Error`。宿主的
+    /// `Welcome::board` 不小于 5 时才认得。
+    FireSchedule { req: u32, id: String },
     /// 设看板的并发上限（`HostMsg::Todos::max_running`），回 `Done`。宿主的 `Welcome::board` 不小于 3 时才认得。
     SetMaxRunning { req: u32, max_running: u32 },
     /// 比自己新的一方才有的消息。宿主回 `HostMsg::Error`，连接照旧。

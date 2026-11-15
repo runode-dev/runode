@@ -92,6 +92,8 @@ crate::icons! {
     pub PHONE_ICON = "phone",
     /// 定时和看板。
     pub CLOCK_ICON = "clock",
+    /// 立即触发一次定时。
+    pub ZAP_ICON = "zap",
     pub KANBAN_ICON = "kanban",
     /// 返回和设置各页的图标。
     pub ARROW_LEFT_ICON = "arrow-left",

@@ -292,6 +292,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
         Command::ScheduleList { json } => crate::todo::list_schedules(env, json, out)?,
         Command::ScheduleRemove { id } => crate::todo::remove_schedule(env, id)?,
         Command::SchedulePause { id, paused } => crate::todo::pause_schedule(env, id, paused)?,
+        Command::ScheduleFire { id } => crate::todo::fire_schedule(env, id)?,
         Command::Completions { shell } => out.write_all(crate::complete::script(shell).as_bytes())?,
     }
     Ok(())

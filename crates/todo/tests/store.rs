@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use runode_todo::{DONE_KEPT, Store};
+use runode_todo::{DONE_KEPT, FiredNow, Store};
 use runode_types::{
     session::SessionId,
     todo::{Outcome, RunOutcome, ScheduleRun, TodoSpec, When},
@@ -275,12 +275,12 @@ fn finishing_a_schedule_run_records_it_and_queues_a_todo() {
     let fired = store.fire_schedule_run(&poll, 160).unwrap().unwrap();
 
     let idle = ScheduleRun { at: 170, outcome: RunOutcome::Idle, output: String::new() };
-    assert_eq!(store.finish_schedule_run(&fired, &idle, None).unwrap(), None);
+    assert_eq!(store.finish_schedule_run(&fired, &idle, None, false).unwrap(), None);
     assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(idle));
 
     let found = ScheduleRun { at: 180, outcome: RunOutcome::Fired, output: "2 new issues".into() };
     let task = TodoSpec { prompt: "triage\n\n2 new issues".into(), ..spec("poll") };
-    let todo = store.finish_schedule_run(&fired, &found, Some(&task)).unwrap().unwrap();
+    let todo = store.finish_schedule_run(&fired, &found, Some(&task), false).unwrap().unwrap();
     let todo = store.todo_by_id(&todo).unwrap().unwrap();
     assert_eq!(
         (&todo.spec, todo.created, todo.schedule.as_deref(), todo.queued),
@@ -291,11 +291,11 @@ fn finishing_a_schedule_run_records_it_and_queues_a_todo() {
     // 跑的时候停了：记下结果，不开任务。
     assert!(store.set_paused(&poll, true, 190).unwrap());
     let failed = ScheduleRun { at: 200, outcome: RunOutcome::Failed, output: "exit status 1".into() };
-    assert_eq!(store.finish_schedule_run(&fired, &failed, Some(&task)).unwrap(), None);
+    assert_eq!(store.finish_schedule_run(&fired, &failed, Some(&task), false).unwrap(), None);
     assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(failed));
     // 停着时本该开任务的这次记成没事。
     let found_late = ScheduleRun { at: 210, ..found.clone() };
-    assert_eq!(store.finish_schedule_run(&fired, &found_late, Some(&task)).unwrap(), None);
+    assert_eq!(store.finish_schedule_run(&fired, &found_late, Some(&task), false).unwrap(), None);
     assert_eq!(
         store.list_schedules().unwrap()[0].last_run,
         Some(ScheduleRun { outcome: RunOutcome::Idle, ..found_late })
@@ -303,13 +303,13 @@ fn finishing_a_schedule_run_records_it_and_queues_a_todo() {
 
     // 跑的时候删掉了：不开任务。
     assert!(store.remove_schedule(&poll).unwrap());
-    assert_eq!(store.finish_schedule_run(&fired, &found, Some(&task)).unwrap(), None);
+    assert_eq!(store.finish_schedule_run(&fired, &found, Some(&task), false).unwrap(), None);
     assert_eq!(store.list_todos(1_000).unwrap().len(), 1);
 
     // 一次性的到点时就删了，照样开。
     let once = store.add_schedule(&spec("deploy"), &When::Once { at: 300 }, Some("check"), None, 100).unwrap();
     let fired = store.fire_schedule_run(&once, 300).unwrap().unwrap();
-    assert!(store.finish_schedule_run(&fired, &found, Some(&spec("deploy"))).unwrap().is_some());
+    assert!(store.finish_schedule_run(&fired, &found, Some(&spec("deploy")), false).unwrap().is_some());
     assert_eq!(store.list_todos(1_000).unwrap().len(), 2);
 
     // 别的版本写的结果读成 `Unknown`。
@@ -385,6 +385,56 @@ fn queued_todos_wait_without_cycles() {
     assert_eq!(store.max_running().unwrap(), 0);
     store.set_max_running(3).unwrap();
     assert_eq!(store.max_running().unwrap(), 3);
+}
+
+/// 手动立即触发：不管到没到点、停没停，开一张排着队的任务，不记到点的时刻，一次性的也不删；带命令的不写库，
+/// 交出它现在的样子；没有这个定时时为空。
+#[test]
+fn firing_a_schedule_now_leaves_its_time_alone() {
+    let mut store = Store::open(&temp_db("fire-now")).unwrap();
+    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 60 }, None, None, 100).unwrap();
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 10_000 }, None, None, 100).unwrap();
+    let paused = store.add_schedule(&spec("paused"), &When::Every { minutes: 60 }, None, None, 100).unwrap();
+    assert!(store.set_paused(&paused, true, 100).unwrap());
+    let run = store.add_schedule(&spec("check"), &When::Every { minutes: 60 }, Some("check"), None, 100).unwrap();
+
+    let Some(FiredNow::Todo(todo)) = store.fire_schedule_now(&every, 150).unwrap() else { panic!("no todo") };
+    let todo = store.todo_by_id(&todo).unwrap().unwrap();
+    assert_eq!((todo.schedule.as_deref(), todo.queued, todo.created), (Some(every.as_str()), true, 150));
+    let Some(FiredNow::Todo(_)) = store.fire_schedule_now(&once, 150).unwrap() else { panic!("no todo") };
+    let Some(FiredNow::Todo(_)) = store.fire_schedule_now(&paused, 150).unwrap() else { panic!("no todo") };
+    assert_eq!(store.list_todos(1_000).unwrap().len(), 3);
+
+    let before = store.list_schedules().unwrap();
+    let Some(FiredNow::Run(current)) = store.fire_schedule_now(&run, 150).unwrap() else { panic!("no run") };
+    assert_eq!(&*current, before.iter().find(|schedule| schedule.id == run).unwrap());
+    assert_eq!(store.list_schedules().unwrap(), before);
+    assert!(before.iter().all(|schedule| schedule.last_fired == 100));
+    assert_eq!(store.list_todos(1_000).unwrap().len(), 3);
+
+    assert_eq!(store.fire_schedule_now("nothere", 150).unwrap(), None);
+}
+
+/// 手动触发的命令跑完：定时停了也开任务，跑的时候被删掉了不开；一次性的被删掉了（跑的时候到了点）照样开。
+#[test]
+fn finishing_a_schedule_run_by_hand_ignores_pausing() {
+    let mut store = Store::open(&temp_db("finish-by-hand")).unwrap();
+    let every = When::Every { minutes: 60 };
+    let poll = store.add_schedule(&spec("poll"), &every, Some("check"), None, 100).unwrap();
+    assert!(store.set_paused(&poll, true, 100).unwrap());
+    let Some(FiredNow::Run(fired)) = store.fire_schedule_now(&poll, 150).unwrap() else { panic!("no run") };
+    let found = ScheduleRun { at: 160, outcome: RunOutcome::Fired, output: String::new() };
+    assert!(store.finish_schedule_run(&fired, &found, Some(&spec("poll")), true).unwrap().is_some());
+    assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(found.clone()));
+
+    assert!(store.remove_schedule(&poll).unwrap());
+    assert_eq!(store.finish_schedule_run(&fired, &found, Some(&spec("poll")), true).unwrap(), None);
+
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 10_000 }, Some("check"), None, 100).unwrap();
+    let Some(FiredNow::Run(fired)) = store.fire_schedule_now(&once, 150).unwrap() else { panic!("no run") };
+    assert!(store.remove_schedule(&once).unwrap());
+    assert!(store.finish_schedule_run(&fired, &found, Some(&spec("deploy")), true).unwrap().is_some());
+    assert_eq!(store.list_todos(1_000).unwrap().len(), 2);
 }
 
 /// 停着的定时到点不开任务；接着用时从那一刻算起，停着时错过的不补。定时开出的任务排着队，cron 存得住。

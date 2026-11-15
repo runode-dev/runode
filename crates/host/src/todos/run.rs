@@ -67,12 +67,13 @@ impl Todos {
 }
 
 impl Shared {
-    /// 另起线程跑 `Store::fire_schedule_run` 交出的定时 `schedule` 的命令，跑完记下结果、按结果开任务
-    /// （`finish_run`）。它上一次的命令还没跑完时什么都不做。线程只拿着宿主的弱引用，宿主没了就不记。
-    pub(super) fn start_run(&self, schedule: Schedule) {
+    /// 另起线程跑 `Store::fire_schedule_run` 或 `Store::fire_schedule_now`（`by_hand`）交出的定时 `schedule` 的
+    /// 命令，跑完记下结果、按结果开任务（`finish_run`）。它上一次的命令还没跑完时什么都不做，为假。线程只拿着
+    /// 宿主的弱引用，宿主没了就不记。
+    pub(super) fn start_run(&self, schedule: Schedule, by_hand: bool) -> bool {
         let Some(running) = Running::new(&self.todos, &schedule.id) else {
             tracing::info!("schedule {} is still running its last command", schedule.id);
-            return;
+            return false;
         };
         let env = self.env.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let shared = self.me.clone();
@@ -82,7 +83,7 @@ impl Shared {
             let timeout = Duration::from_secs(u64::from(minutes) * 60);
             let (run, todo) = execute(&schedule, &env, command_path(&env), timeout);
             if let Some(shared) = shared.upgrade() {
-                shared.finish_run(&schedule, &run, todo.as_ref(), Some(running));
+                shared.finish_run(&schedule, &run, todo.as_ref(), Some(running), by_hand);
             }
         });
         if let Err(err) = spawned {
@@ -92,19 +93,27 @@ impl Shared {
                 outcome: RunOutcome::Failed,
                 output: format!("Runode could not start the command: {err}"),
             };
-            self.finish_run(&fallback, &run, None, None);
+            self.finish_run(&fallback, &run, None, None, by_hand);
         }
+        true
     }
 
-    /// 记下定时 `schedule` 这次跑命令的结果 `run`，给了 `todo` 时加一张排着队的任务（`Store::finish_schedule_run`），
-    /// 再叫醒定时的线程去开始它；`running` 记进库以后放开。不归这个宿主办（正在交出会话、要退出了）时丢掉这次
-    /// 的结果。
-    fn finish_run(&self, schedule: &Schedule, run: &ScheduleRun, todo: Option<&TodoSpec>, running: Option<Running>) {
+    /// 记下定时 `schedule` 这次跑命令的结果 `run`，给了 `todo` 时加一张排着队的任务（`Store::finish_schedule_run`，
+    /// `by_hand` 照传），再叫醒定时的线程去开始它；`running` 记进库以后放开。不归这个宿主办（正在交出会话、要
+    /// 退出了）时丢掉这次的结果。
+    fn finish_run(
+        &self,
+        schedule: &Schedule,
+        run: &ScheduleRun,
+        todo: Option<&TodoSpec>,
+        running: Option<Running>,
+        by_hand: bool,
+    ) {
         if let Err(why) = self.todos_writable() {
             tracing::info!("schedule {} ran its command, but the result is dropped: {why}", schedule.id);
             return;
         }
-        let finished = self.todos.with_db(|db| db.finish_schedule_run(schedule, run, todo));
+        let finished = self.todos.with_db(|db| db.finish_schedule_run(schedule, run, todo, by_hand));
         // 先放开再通知：叫醒的定时线程马上再看，这个定时又到点时不因还占着跳过。
         drop(running);
         match finished {
@@ -116,7 +125,11 @@ impl Shared {
                 tracing::info!("schedule {} ran its command: {}", schedule.id, run.outcome.name());
                 self.todos_changed();
             }
-            Err(err) => tracing::warn!("cannot record the command run of schedule {}: {err}", schedule.id),
+            Err(err) => {
+                tracing::warn!("cannot record the command run of schedule {}: {err}", schedule.id);
+                // 命令不再占着（`Schedule::running`），看板照样要重读。
+                self.todos_changed();
+            }
         }
     }
 }
@@ -259,6 +272,7 @@ mod tests {
             run: Some(run.into()),
             run_timeout: None,
             last_run: None,
+            running: false,
         }
     }
 

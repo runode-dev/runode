@@ -195,6 +195,8 @@ enum ToastState {
     /// 正在推送任务的分支、开 PR。
     Creating,
     Started,
+    /// 办成了，带着要显示的话；过 `TOAST_LINGER` 自己收起。
+    Done(String),
     /// 没办成，带着要显示的话；不自己收起，等用户关掉或被新的顶掉。
     Failed(String),
 }
@@ -556,7 +558,7 @@ impl Kanban {
             ToastState::Starting => rust_i18n::t!("kanban.toast.starting").into_owned(),
             ToastState::Creating => rust_i18n::t!("kanban.toast.creating_pr").into_owned(),
             ToastState::Started => rust_i18n::t!("kanban.toast.started").into_owned(),
-            ToastState::Failed(text) => text.clone(),
+            ToastState::Done(text) | ToastState::Failed(text) => text.clone(),
         };
         // 前景色作底、背景色写字，和后面的看板反着，深色浅色主题下都分得开。
         let (toast_bg, toast_fg) = (cx.theme().mix_inverse(0.15), cx.theme().background);
@@ -564,7 +566,7 @@ impl Kanban {
             ToastState::Starting | ToastState::Creating => {
                 div().child(braille("todo-toast-spinner", 12.)).into_any_element()
             }
-            ToastState::Started => {
+            ToastState::Started | ToastState::Done(_) => {
                 svg().path(CHECK_ICON).size(px(12.)).text_color(cx.theme().success).into_any_element()
             }
             // 细线的叉在反色的提示条上看不清，又和右边的关闭按钮一个样：红底圆点里放白叉。

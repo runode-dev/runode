@@ -115,8 +115,13 @@ runode schedule add 'Standup notes' --cron '30 9 * * 1-5' --prompt '...'
 runode schedule add 'Release notes' --at '2026-11-02 10:00' --prompt '...'
 runode schedule list     # WHEN and NEXT, the next time it fires
 runode schedule pause ID # NEXT shows paused; resume ID counts from then on
+runode schedule fire ID  # fire it once now to try it; NEXT stays
 runode schedule rm ID    # the tasks it started stay
 ```
+
+`schedule fire` works on a paused schedule too, runs `--run CMD` first like a
+due schedule, and is refused while its last task is unfinished or its last
+run is still going.
 
 `--cron` takes one crontab line (minute hour day month weekday) for times the
 other forms cannot say.
@@ -150,8 +155,9 @@ one line; put anything longer in a script and run that.
 
 So stdout is only for the prompt; write logs to stderr. runode keeps the end
 of stderr, and `runode schedule list` shows the last run in LAST (`idle`,
-`fired` or `failed`, and when; `--json` has the output). A schedule is skipped
-while the task it last started is unfinished or its last run is still going.
+`fired` or `failed`, and when, or `running`; `--json` has the output). A
+schedule is skipped while the task it last started is unfinished or its last
+run is still going.
 CMD gets `RUNODE_SCHEDULE` (the schedule id), `RUNODE_SOCKET` and the login
 shell's PATH with runode's directory added, so it can call `runode` itself; a
 CMD that never prints to stdout only runs and never starts an agent. runode

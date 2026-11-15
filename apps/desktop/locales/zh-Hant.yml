@@ -1231,6 +1231,9 @@ kanban:
   remove_schedule: 刪除定時
   pause_schedule: 停用定時
   resume_schedule: 恢復定時
+  fire_schedule: 立即執行一次
+  fire_schedule_held: 上次開出的任務還在做或在等你回答，等它停下才能再執行
+  fire_schedule_running: 先跑的命令還在跑
   remove_schedule_detail: 它的提示詞和定時規則會一起刪掉，刪了找不回來。
   schedules_need_host: "定時只在終端機宿主執行時生效。要在結束 Runode 後、重新登入後也照常跑，在設定裡打開「結束後保留工作階段」和「登入時在背景啟動宿主」。"
   schedules_open_settings: 打開設定
@@ -1246,6 +1249,7 @@ kanban:
   run_failed: "上次 %{time} 失敗：%{output}"
   run_failed_bare: "上次 %{time} 失敗"
   run_unknown: "上次 %{time} 跑過"
+  run_running: 正在跑…
   done_window: "完成這一欄只列最近 7 天的任務"
   all_history: 全部記錄
   history: 記錄
@@ -1272,6 +1276,8 @@ kanban:
     started: 任務已開始
     failed: 沒能開始任務：%{reason}
     request_failed: 沒能辦成：%{reason}
+    fired: 已開出一張任務
+    fired_run: "正在先跑 %{program}，有輸出才開任務"
     close: 關掉提示
   column:
     todo: 待辦

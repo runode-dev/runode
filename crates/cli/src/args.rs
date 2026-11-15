@@ -150,6 +150,9 @@ pub(crate) enum Command {
         id: String,
         paused: bool,
     },
+    ScheduleFire {
+        id: String,
+    },
     /// 打印给这种 shell 装的补全脚本。
     Completions {
         shell: Shell,
@@ -644,6 +647,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     no_more(words, 1, &name)?;
                     let id = words.first().ok_or_else(|| format!("{name} needs an ID"))?.clone();
                     Command::SchedulePause { id, paused: what == "pause" }
+                }
+                "fire" => {
+                    no_more(words, 1, "schedule fire")?;
+                    Command::ScheduleFire { id: words.first().ok_or("schedule fire needs an ID")?.clone() }
                 }
                 other => return Err(format!("schedule knows {}, not {other}", subcommand_list("schedule", "and"))),
             }
@@ -1209,7 +1216,9 @@ mod tests {
         assert!(parse("todo add r --worktree").unwrap_err().contains("does not take --worktree"));
         assert_eq!(parse("schedule list --json"), Ok(Command::ScheduleList { json: true }));
         assert_eq!(parse("schedule rm 0a1b2c3d"), Ok(Command::ScheduleRemove { id: "0a1b2c3d".into() }));
-        assert!(parse("schedule").unwrap_err().contains("add, list, rm, pause or resume"));
+        assert_eq!(parse("schedule fire 0a1b2c3d"), Ok(Command::ScheduleFire { id: "0a1b2c3d".into() }));
+        assert!(parse("schedule fire").unwrap_err().contains("schedule fire needs an ID"));
+        assert!(parse("schedule").unwrap_err().contains("add, list, rm, pause, resume or fire"));
     }
 
     #[test]

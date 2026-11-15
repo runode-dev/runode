@@ -320,6 +320,7 @@ fn client_messages_round_trip() {
         ClientMsg::QueueTodo { req: 31, id: "#6".into(), queued: true, after: Some("#5".into()) },
         ClientMsg::PauseSchedule { req: 32, id: "0000cafe".into(), paused: true },
         ClientMsg::SetMaxRunning { req: 33, max_running: 2 },
+        ClientMsg::FireSchedule { req: 34, id: "0000cafe".into() },
     ];
     for message in messages {
         assert_eq!(through_frame(&message), message);
@@ -492,6 +493,7 @@ fn host_messages_round_trip() {
                 run: Some("./check.sh".into()),
                 run_timeout: Some(3),
                 last_run: Some(ScheduleRun { at: 1_760_000_030, outcome: RunOutcome::Fired, output: "2 new".into() }),
+                running: true,
             }],
             max_running: 2,
         },
@@ -566,6 +568,7 @@ fn schedule_commands_stay_off_the_wire_when_absent() {
         run: None,
         run_timeout: None,
         last_run: None,
+        running: false,
     };
     let json = serde_json::to_string(&schedule).unwrap();
     assert!(!json.contains("\"run"), "{json}");

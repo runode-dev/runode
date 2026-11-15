@@ -403,7 +403,7 @@ fn candidates(previous: &[String], current: &str, env: &Env) -> (Also, Vec<(Stri
             (Also::Nothing, todos(env, sub))
         }
         ("todo", Some("report"), 1) => (Also::Nothing, owned(OUTCOMES)),
-        ("schedule", Some("rm" | "pause" | "resume"), 1) => (Also::Nothing, schedules(env)),
+        ("schedule", Some("rm" | "pause" | "resume" | "fire"), 1) => (Also::Nothing, schedules(env)),
         ("remote", Some("revoke"), 1) => (Also::Nothing, devices(env)),
         ("service", Some("install" | "uninstall"), 1) => (Also::Nothing, owned(&service_kinds())),
         _ => (Also::Nothing, Vec::new()),
@@ -528,7 +528,7 @@ mod tests {
                     Some("limit"),
                 ],
             ),
-            ("schedule", &[Some("add"), Some("list"), Some("rm"), Some("pause"), Some("resume")]),
+            ("schedule", &[Some("add"), Some("list"), Some("rm"), Some("pause"), Some("resume"), Some("fire")]),
             ("remote", &[Some("pair"), Some("devices"), Some("revoke")]),
             ("service", &[Some("install"), Some("uninstall"), Some("status"), Some("upgrade")]),
             ("skill", &[Some("install")]),

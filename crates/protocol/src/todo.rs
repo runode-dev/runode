@@ -28,8 +28,8 @@ pub const DONE_TODOS_PAGE: u32 = 100;
 /// 这个版本的宿主认得的看板消息到哪一级（`HostMsg::Welcome::board`），前端发某一级的消息前先看宿主够不够：
 /// 1 加了 `ClientMsg::ReportTodo`，2 认得 `TodoSpec::time_limit`（旧宿主收到时悄悄丢掉），3 加了
 /// `ClientMsg::QueueTodo`、`ClientMsg::PauseSchedule`、`ClientMsg::SetMaxRunning`，认得 `When::Cron`，4 认得
-/// `ClientMsg::AddSchedule`、`ClientMsg::UpdateSchedule` 的 `run`、`run_timeout`。
-pub const BOARD_LEVEL: u32 = 4;
+/// `ClientMsg::AddSchedule`、`ClientMsg::UpdateSchedule` 的 `run`、`run_timeout`，5 认得 `ClientMsg::FireSchedule`。
+pub const BOARD_LEVEL: u32 = 5;
 
 /// 带 `TodoSpec::auto_done` 的任务的 agent 停在询问上这么多秒还没人答，宿主就记成没做成（`Outcome::Failed`），
 /// 没有窗口开着它的终端时结束终端。

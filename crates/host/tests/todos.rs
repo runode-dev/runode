@@ -733,6 +733,75 @@ fn a_schedule_whose_todo_cannot_start_does_not_pile_up() {
     assert_eq!(from_schedule, 1);
 }
 
+/// 加一个每小时到点、到点直接开任务的定时，返回它的标识。
+fn add_schedule(peer: &mut Peer, spec: TodoSpec) -> String {
+    let add = ClientMsg::AddSchedule { req: 1, spec, when: When::Every { minutes: 60 }, run: None, run_timeout: None };
+    match ask(peer, &add) {
+        HostMsg::TodoAdded { req: 1, id } => id,
+        other => panic!("expected the schedule, got {other:?}"),
+    }
+}
+
+fn fire_now(peer: &mut Peer, id: &str) -> HostMsg {
+    ask(peer, &ClientMsg::FireSchedule { req: 5, id: id.into() })
+}
+
+/// 定时 `id` 和它开出的任务。
+fn schedule_and_todos(peer: &mut Peer, id: &str) -> (Schedule, Vec<Todo>) {
+    let (todos, schedules) = board_state(peer);
+    let schedule = schedules.into_iter().find(|schedule| schedule.id == id).expect("the schedule is gone");
+    (schedule, todos.into_iter().filter(|todo| todo.schedule.as_deref() == Some(id)).collect())
+}
+
+/// 手动立即触发：开一张来自定时的任务，到点时刻不变；停用的也照样开；没有这个定时时回错。
+#[test]
+fn firing_a_schedule_by_hand_opens_a_todo_and_keeps_its_time() {
+    let (_host, dir, mut peer) = board("todo-fire-now");
+    let schedule = add_schedule(&mut peer, spec("Now", &dir, "true"));
+    let (before, _) = schedule_and_todos(&mut peer, &schedule);
+    assert!(matches!(fire_now(&mut peer, &schedule), HostMsg::Done { req: 5 }));
+    let (after, todos) = schedule_and_todos(&mut peer, &schedule);
+    assert_eq!(todos.len(), 1);
+    assert_eq!((after.last_fired, after.next_fire), (before.last_fired, before.next_fire));
+
+    let paused = add_schedule(&mut peer, spec("Paused", &dir, "true"));
+    let pause = ClientMsg::PauseSchedule { req: 4, id: paused.clone(), paused: true };
+    assert!(matches!(ask(&mut peer, &pause), HostMsg::Done { req: 4 }));
+    assert!(matches!(fire_now(&mut peer, &paused), HostMsg::Done { req: 5 }));
+    assert_eq!(schedule_and_todos(&mut peer, &paused).1.len(), 1);
+
+    assert!(matches!(fire_now(&mut peer, "nothere"), HostMsg::Error { req: Some(5), .. }));
+}
+
+/// 上次开出的任务还挡着：手动触发回错，不再开一张。
+#[test]
+fn firing_a_schedule_by_hand_waits_for_the_last_todo() {
+    let (_host, dir, mut peer) = board("todo-fire-now-held");
+    let schedule = add_schedule(&mut peer, spec("Held", &dir, "true"));
+    runode_todo::Store::open(&dir.join("todos.db"))
+        .unwrap()
+        .add_todo(&spec("Last time", &dir, "true"), 1, Some(&schedule))
+        .unwrap();
+    assert!(matches!(fire_now(&mut peer, &schedule), HostMsg::Error { req: Some(5), .. }));
+    assert_eq!(schedule_and_todos(&mut peer, &schedule).1.len(), 1);
+}
+
+/// 手动触发带命令的定时：照样先跑命令、按输出开任务，到点时刻不变。
+#[cfg(unix)]
+#[test]
+fn firing_a_schedule_command_by_hand_opens_a_todo() {
+    let (_host, dir, mut peer) = board("todo-fire-now-run");
+    let schedule = add_run_schedule(&mut peer, spec("Run now", &dir, "true"), "printf 'fix it'");
+    let before = schedule_of(&mut peer, &schedule);
+    assert!(matches!(fire_now(&mut peer, &schedule), HostMsg::Done { req: 5 }));
+    wait_until("the todo from the command", || !todos_of(&mut peer, &schedule).is_empty());
+    assert_eq!(todos_of(&mut peer, &schedule).len(), 1);
+    let after = schedule_of(&mut peer, &schedule);
+    assert_eq!(after.last_run.unwrap().outcome, RunOutcome::Fired);
+    assert_eq!(after.last_fired, before.last_fired);
+    wait_until("the command to let go", || !schedule_of(&mut peer, &schedule).running);
+}
+
 /// 加一个每小时到点、到点先跑 `run` 的定时，返回它的标识。
 #[cfg(unix)]
 fn add_run_schedule(peer: &mut Peer, spec: TodoSpec, run: &str) -> String {
