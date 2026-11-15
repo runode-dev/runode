@@ -328,37 +328,88 @@
 
         required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+        /// UIScrollView 缩放时把 `contentSize` 定为画面缩放后的大小，所以画面的原点须留在内容的 (0, 0)，
+        /// 摆在哪由 `placeContent` 用 `contentInset` 定。
         override func layoutSubviews() {
             super.layoutSubviews()
-            guard zoomScale == 1 else { return }
-            contentSize = bounds.size
-            defer { placeCursor(x: model.cursor.x, y: model.cursor.y) }
-            guard let videoSize, videoSize.width > 0, videoSize.height > 0 else {
-                video.frame = bounds
-                return
+            if zoomScale == 1 {
+                let size = restingArea.size
+                let fitted =
+                    if let videoSize, videoSize.width > 0, videoSize.height > 0 {
+                        AVMakeRect(aspectRatio: videoSize, insideRect: CGRect(origin: .zero, size: size)).size
+                    } else {
+                        size
+                    }
+                video.frame = CGRect(origin: .zero, size: fitted)
+                contentSize = fitted
+                placeCursor(x: model.cursor.x, y: model.cursor.y)
             }
-            let fitted = AVMakeRect(aspectRatio: videoSize, insideRect: bounds)
-            // 两边的黑边放不下浮动按钮时，画面让到按钮那一条下面，电脑屏幕的左上角、右上角才点得到。
-            let reach = FloatingButton.margin + FloatingButton.size
-            let top = safeAreaInsets.top + reach
-            guard fitted.minX < safeAreaInsets.left + reach, fitted.minY < top else {
-                video.frame = fitted
-                return
-            }
-            let below = bounds.inset(by: UIEdgeInsets(top: top, left: 0, bottom: 0, right: 0))
-            video.frame = AVMakeRect(aspectRatio: videoSize, insideRect: below)
+            placeContent()
         }
 
+        /// 不放大时画面在其中按比例放到最大、居中的区域。两边的黑边放不下浮动按钮时让到按钮那一条下面，
+        /// 电脑屏幕的左上角、右上角才点得到。
+        private var restingArea: CGRect {
+            let full = CGRect(origin: .zero, size: bounds.size)
+            guard let videoSize, videoSize.width > 0, videoSize.height > 0 else { return full }
+            let fitted = AVMakeRect(aspectRatio: videoSize, insideRect: full)
+            let reach = FloatingButton.margin + FloatingButton.size
+            let top = safeAreaInsets.top + reach
+            guard fitted.minX < safeAreaInsets.left + reach, fitted.minY < top else { return full }
+            return full.inset(by: UIEdgeInsets(top: top, left: 0, bottom: 0, right: 0))
+        }
+
+        /// 画面放得下的方向上居中在 `restingArea` 里、拖不动。放大以后画面的四边最远拖到安全区边上，
+        /// 上边最远拖到浮动按钮那一条下面，电脑屏幕的边角都露得出来、点得到。
+        private func placeContent() {
+            let area = restingArea
+            let size = contentSize
+            let zoomed = zoomScale > 1
+            let reach = FloatingButton.margin + FloatingButton.size
+            let floor =
+                zoomed
+                ? UIEdgeInsets(
+                    top: safeAreaInsets.top + reach, left: safeAreaInsets.left,
+                    bottom: safeAreaInsets.bottom, right: safeAreaInsets.right)
+                : .zero
+            let left = max(floor.left, area.minX + (area.width - size.width) / 2)
+            let top = max(floor.top, area.minY + (area.height - size.height) / 2)
+            let inset = UIEdgeInsets(
+                top: top, left: left,
+                bottom: max(floor.bottom, bounds.height - top - size.height),
+                right: max(floor.right, bounds.width - left - size.width))
+            if contentInset != inset { contentInset = inset }
+            if !zoomed {
+                let rest = CGPoint(x: -inset.left, y: -inset.top)
+                if contentOffset != rest { contentOffset = rest }
+                return
+            }
+            // 放大着时滚动视图变了尺寸（软键盘弹出收起、转屏），偏移收回能滚到的范围里。
+            guard !isTracking, !isDecelerating, !isZooming, !isZoomBouncing else { return }
+            let clamped = CGPoint(
+                x: min(max(contentOffset.x, -inset.left), size.width + inset.right - bounds.width),
+                y: min(max(contentOffset.y, -inset.top), size.height + inset.bottom - bounds.height))
+            if contentOffset != clamped { contentOffset = clamped }
+        }
+
+        /// 光标随放大反向缩小、看着大小不变，箭头尖钉在电脑光标的位置上。
         func placeCursor(x: Double, y: Double) {
+            cursor.transform = .identity
             cursor.sizeToFit()
-            cursor.frame.origin = CGPoint(x: x * video.bounds.width, y: y * video.bounds.height)
+            let scale = 1 / zoomScale
+            cursor.transform = CGAffineTransform(scaleX: scale, y: scale)
+            let size = cursor.bounds.size
+            cursor.center = CGPoint(
+                x: x * video.bounds.width + size.width * scale / 2,
+                y: y * video.bounds.height + size.height * scale / 2)
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { video }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
             let zoomed = zoomScale > 1.01
-            cursor.transform = CGAffineTransform(scaleX: 1 / zoomScale, y: 1 / zoomScale)
+            placeCursor(x: model.cursor.x, y: model.cursor.y)
+            placeContent()
             panGestureRecognizer.isEnabled = zoomed
             scrollRecognizer.isEnabled = !zoomed
         }
