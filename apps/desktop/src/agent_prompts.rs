@@ -16,7 +16,7 @@ use std::{
 };
 
 use anyhow::Result;
-use gpui::{AnyElement, App, Context, Div, Entity, Global, Task, Window, div, prelude::*, px};
+use gpui::{AnyElement, App, Context, Div, Entity, Global, Task, Toggled, Window, div, prelude::*, px};
 use runode_agent::prompt::{self, Prompt};
 use runode_protocol::SessionId;
 use runode_types::agent::AgentState;
@@ -28,6 +28,7 @@ use crate::{
     ui::{
         a11y::{Press as _, StaticText as _},
         button::{Button, ButtonSize, ButtonVariant},
+        checkbox::checkbox_box,
         font,
         font_size::{FontSize, scaled},
         theme::ActiveTheme as _,
@@ -542,9 +543,10 @@ fn schedule_rereads(key: &Key, serial: u64, after: Vec<Duration>, cx: &mut App) 
 }
 
 /// 会话 `key` 认出的提问 `prompt` 画成的部件：上面是问题，等宽的小字放在深色的小框里，每行放不下时截断、悬停
-/// 看全文；下面是各选项的按钮，一项一行，写编号和原文，第一项是琥珀色的主按钮，按下替用户回答（`answer`），
-/// 回答在路上时都禁掉；问题框右边（没有问题时在选项右边）是图标 `open_icon` 的按钮，按下调 `open`，
-/// `open_label` 是它做什么。`title` 是会话的标题，放进按钮报给辅助工具的名字里，几张卡片上的同一种按钮才分得清。
+/// 看全文；下面是各选项的按钮，一项一行，写编号和原文，原文开头的复选框画成方块；单选题的第一项是琥珀色的
+/// 主按钮。按下替用户回答（`answer`），回答在路上时都禁掉；问题框右边（没有问题时在选项右边）是图标
+/// `open_icon` 的按钮，按下调 `open`，`open_label` 是它做什么。`title` 是会话的标题，放进按钮报给辅助工具的
+/// 名字里，几张卡片上的同一种按钮才分得清。
 pub fn render_prompt<V: 'static>(
     key: &Key,
     prompt: &Prompt,
@@ -580,11 +582,22 @@ pub fn render_prompt<V: 'static>(
             .when_some(mono, |question, mono| question.font_family(mono))
             .children(lines)
     });
+    // 多选题没有哪一项是默认答案。
+    let multi_select = prompt.multi_select();
     let options = prompt.options.iter().enumerate().map(|(ix, option)| {
         let number = option.number;
-        let text = format!("{number}. {}", option.text);
-        let label = rust_i18n::t!("prompts.option_for", number = number, text = option.text.as_str(), title = title)
-            .into_owned();
+        let checkbox = option.checkbox();
+        let shown = checkbox.map_or(option.text.as_str(), |(_, text)| text);
+        let text = format!("{number}. {shown}");
+        let label = rust_i18n::t!("prompts.option_for", number = number, text = shown, title = title).into_owned();
+        // 编号和复选框占一行高，复选框才和第一行字居中对齐。
+        let lead = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .child(div().opacity(0.7).child(format!("{number}.")))
+            .when_some(checkbox, |lead, (checked, _)| lead.child(checkbox_box(Toggled::from(checked), cx)));
         // 按钮里的字由自己的子元素画，才折得了行、截得断；编号单独一栏，折了行的原文对齐在编号右边。
         // 上下留白收得够小，单行时由 `min_h` 定高，和打开的图标按钮一样高。
         let button = Button::new(("prompt-option", usize::from(number)), label)
@@ -595,19 +608,14 @@ pub fn render_prompt<V: 'static>(
             .py(px(2.))
             .items_start()
             .justify_start()
+            .toggled(checkbox.map(|(checked, _)| checked))
             .disabled(busy)
             .tooltip(tooltip(text, None))
-            .child(div().flex_none().opacity(0.7).child(format!("{number}.")))
+            .child(lead)
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_left()
-                    .line_clamp(OPTION_LINES)
-                    .text_ellipsis()
-                    .child(option.text.clone()),
+                div().flex_1().min_w_0().text_left().line_clamp(OPTION_LINES).text_ellipsis().child(shown.to_owned()),
             );
-        let button = if ix == 0 {
+        let button = if ix == 0 && !multi_select {
             button
                 .variant(ButtonVariant::Default)
                 .bg(warning)

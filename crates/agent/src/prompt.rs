@@ -23,6 +23,33 @@ pub struct PromptOption {
     pub selected: bool,
 }
 
+impl PromptOption {
+    /// 多选题里的选项原文以复选框开头：`[ ]` 是没勾，`CHECK_MARKS` 里的字放在方括号里是勾上了。返回勾没勾和
+    /// 去掉复选框后的原文；不以复选框开头的为 `None`。
+    pub fn checkbox(&self) -> Option<(bool, &str)> {
+        let rest = self.text.strip_prefix('[')?;
+        let mut chars = rest.chars();
+        let mark = chars.next()?;
+        let text = chars.as_str().strip_prefix(']')?.trim_start();
+        let checked = match mark {
+            ' ' => false,
+            mark if CHECK_MARKS.contains(&mark) => true,
+            _ => return None,
+        };
+        Some((checked, text))
+    }
+}
+
+impl Prompt {
+    /// 多选题：有选项以复选框开头（`PromptOption::checkbox`）。按编号键切换那一项勾没勾，不是选定它。
+    pub fn multi_select(&self) -> bool {
+        self.options.iter().any(|option| option.checkbox().is_some())
+    }
+}
+
+/// 复选框勾上时方括号里的字。
+const CHECK_MARKS: [char; 5] = ['x', 'X', '✓', '✔', '*'];
+
 /// 每个选项都只要按一个数字键。
 pub const MAX_OPTIONS: u8 = 9;
 /// 提问的选项或 agent 的输入框下面最多容几行别的字（按键提示、agent 的状态栏）；再多就不算贴着屏幕

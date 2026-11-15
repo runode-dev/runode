@@ -390,3 +390,31 @@ fn excerpt_of_nothing_is_empty() {
     assert!(excerpt("some output", 0).is_empty());
     assert!(excerpt("\n\n────\n", 2).is_empty());
 }
+
+/// Claude Code 的多选题：选项以复选框开头，勾没勾和去掉复选框后的原文分得出来；后面不带复选框的几项照旧。
+#[test]
+fn claude_multi_select() {
+    let screen = "\
+ ☐ 引导步骤
+ 新用户引导先做哪一步？
+ ❯ 1. [ ] 首页双 tab 切换
+   2. [✔] SuperAgent 按钮
+   3. [x] 搜索按钮
+   4. Type something.
+   5. Chat about this
+";
+    let prompt = parse(screen).unwrap();
+    assert!(prompt.multi_select());
+    let boxes: Vec<_> = prompt.options.iter().map(|option| option.checkbox()).collect();
+    assert_eq!(
+        boxes,
+        [Some((false, "首页双 tab 切换")), Some((true, "SuperAgent 按钮")), Some((true, "搜索按钮")), None, None]
+    );
+}
+
+/// 单选题、方括号里不是勾的字都不算复选框。
+#[test]
+fn not_a_checkbox() {
+    let prompt = parse(" Do you want to proceed?\n ❯ 1. Yes\n   2. [beta] No\n").unwrap();
+    assert!(!prompt.multi_select());
+}
