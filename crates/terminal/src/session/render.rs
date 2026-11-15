@@ -25,6 +25,9 @@ use runode_types::{
 use super::{SYNC_OUTPUT_TIMEOUT, Session, search::search_highlights};
 use crate::{convert::rgb, vt::log_err};
 
+/// Kitty 图形协议的 Unicode 占位符。
+const KITTY_PLACEHOLDER: char = '\u{10EEEE}';
+
 /// 把 libghostty 的 render state 复制进 `Frame`。和 render-hold 回调共用，
 /// 因为同步更新一开始，回调就要立即截下当前帧。
 pub(super) struct Renderer {
@@ -238,6 +241,11 @@ impl Renderer {
                     let out = &mut cells[x];
                     // 一次批量读取拿到渲染所需的全部字段，比逐个 getter 少几次 FFI。
                     let read = cell.read(&colors.palette, &mut out.text)?;
+                    // Kitty 的 Unicode 占位符只标出虚拟放置的图片画在哪几格，字符本身（连同记行列的
+                    // 组合附加符）不画；图片没加载上时这几格也是空白。
+                    if out.text.starts_with(KITTY_PLACEHOLDER) {
+                        out.text.clear();
+                    }
                     out.wide = read.wide == CellWide::Wide;
                     out.spacer = matches!(read.wide, CellWide::SpacerTail | CellWide::SpacerHead);
                     let mut fg = read.fg_color.map_or(foreground, rgb);

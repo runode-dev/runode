@@ -46,6 +46,24 @@ fn images_on_the_alternate_screen_are_in_the_frame() {
     assert_eq!(session.frame().images.len(), 1);
 }
 
+/// 虚拟放置的图片画在占位符的格子上，占位符本身不画；图片没加载上时那几格也是空白。
+#[test]
+fn unicode_placeholders_are_blank() {
+    // 前景色 1 指 1 号图片，U+0305、U+030D 分别记第 0、1 号，两格是第 0 行的第 0、1 列。
+    let placeholders = "\x1b[38;5;1m\u{10EEEE}\u{0305}\u{0305}\u{10EEEE}\u{0305}\u{030D}\x1b[m|";
+    let mut session = idle_session();
+    session.feed(placeholders.as_bytes());
+    assert_eq!(common::row_text(&session.frame(), 0), "  |");
+
+    let mut session = idle_session();
+    session.feed(b"\x1b_Ga=T,U=1,f=32,i=1,s=2,v=2,c=2,r=1,q=2;/wAA/wD/AP8AAP///////w==\x1b\\");
+    session.feed(placeholders.as_bytes());
+    let frame = session.frame();
+    assert_eq!(common::row_text(&frame, 0), "  |");
+    let [image] = frame.images.clone().try_into().unwrap();
+    assert_eq!((image.x, image.y, image.width, image.height), (0., 0., 2., 1.));
+}
+
 /// 从文件读的图片两份 VT 各读一遍会对不上，所以不收；程序问时宿主照实回答，会改用直接传。
 #[test]
 fn images_read_from_files_are_refused() {
