@@ -1,8 +1,8 @@
 //! 登录时自启：macOS 写 launchd 的 LaunchAgent（`~/Library/LaunchAgents`），Linux 写 systemd 的
 //! 用户服务（用户服务管理器自己查找的 `$XDG_CONFIG_HOME/systemd/user`，见 `systemd_unit_files`），Windows
 //! 登记在当前用户的 `Run` 键下（`run_key`）。能拉起两样东西（`Kind`）：无界面的宿主
-//! （`runode --host`，手机远程访问靠它在后台等着）和桌面 app（Linux 上没有）。app 在 macOS 13 起
-//! 登记成系统的登录项（`SMAppService`），更早的系统上也写 LaunchAgent。
+//! （`runode --host`，手机远程访问靠它在后台等着）和桌面 app（Linux 上没有）。app 登记成系统的
+//! 登录项（`SMAppService`），登录项不可用（`login_item::available`）时也写 LaunchAgent。
 //! 有没有装就看服务文件在不在、登录项登没登记，不另存状态；命令行（`runode service`）和设置页用的是同一套。
 
 use std::{
@@ -118,9 +118,9 @@ fn systemd_unit_files(dirs: &Dirs) -> Vec<PathBuf> {
 }
 
 /// 服务管理器的环境（`systemctl --user show-environment` 的输出，一行一个 `KEY=VALUE`）里 `key` 的值。
-/// 值里带空格等字符时有两种引法：有的 systemd 把整行括进双引号，里面的 `"`、`\`、`` ` ``、`$` 前加反斜杠；
-/// 更新的只引值，写成 `KEY=$'…'`，里面是 C 风格的转义（`unescape_ansi_c`）。
-fn manager_var(env: &str, key: &str) -> Option<String> {
+/// 值里带空格等字符时认两种引法：整行括进双引号，里面的 `"`、`\`、`` ` ``、`$` 前加反斜杠；或者只引值，
+/// 写成 `KEY=$'…'`，里面是 C 风格的转义（`unescape_ansi_c`）。
+pub fn manager_var(env: &str, key: &str) -> Option<String> {
     env.lines().find_map(|line| {
         if let Some(quoted) = line.strip_prefix('"').and_then(|line| line.strip_suffix('"')) {
             let mut out = String::new();

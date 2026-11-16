@@ -88,8 +88,8 @@ pub(super) fn offer_agent(dirs: &runode_paths::Dirs) {
         return;
     };
     let shown = String::from_utf8_lossy(&output.stdout);
-    let current = shown.lines().find_map(|line| line.strip_prefix("SSH_AUTH_SOCK="));
-    if current.is_some_and(|current| Path::new(current) != link) {
+    let current = runode_autostart::manager_var(&shown, "SSH_AUTH_SOCK");
+    if current.is_some_and(|current| Path::new(&current) != link) {
         return;
     }
     let assignment = format!("SSH_AUTH_SOCK={}", link.display());
