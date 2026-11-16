@@ -34,8 +34,8 @@ class MediaConnection private constructor(
 
     /** 边读边发 [file]，不整个读进内存，等电脑存好，返回它在电脑上的绝对路径。电脑存不了时抛 [MediaFailure]。 */
     suspend fun send(file: File, progress: MediaProgress? = null): String {
-        val input = withContext(Dispatchers.IO) { FileInputStream(file) }
-        return input.use { send(it, file.length(), progress) }
+        val (input, length) = withContext(Dispatchers.IO) { FileInputStream(file) to file.length() }
+        return input.use { send(it, length, progress) }
     }
 
     /**

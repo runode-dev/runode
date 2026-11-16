@@ -97,8 +97,8 @@ $runs = Invoke-Gh 'run', 'list', '--branch', $Branch, '--limit', '60', `
     '--json', 'databaseId,workflowName,headSha,status,conclusion', `
     '--jq', '.[] | [.databaseId, .workflowName, .headSha, .status, .conclusion] | @tsv'
 
-# gh 按新到旧给，每个 workflow 只看最新一次有结论的运行（cancelled、skipped 不算结论）；在那之前碰到还没跑完的
-# 就这次不看它，pending 照旧。最新一次通过的移出 pending；失败了、不在 pending 里的派，一次最多 $MaxRuns 个。
+# gh 按新到旧给，每个 workflow 只看最新一次有结论的运行（cancelled、skipped、action_required 不算结论）；在那之前
+# 碰到还没跑完的就这次不看它，pending 照旧，等人批准的（waiting）跳过，它不知道要等多久。最新一次通过的移出 pending；失败了、不在 pending 里的派，一次最多 $MaxRuns 个。
 $pending = Read-State $PendingFile
 $latest = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $send = [Collections.Generic.List[object]]::new()
@@ -107,8 +107,9 @@ foreach ($line in $runs) {
     if ($fields.Count -lt 5) { continue }
     $id, $workflow, $sha, $status, $conclusion = $fields[0], $fields[1], $fields[2], $fields[3], $fields[4]
     if ($latest.Contains($workflow)) { continue }
+    if ($status -ceq 'waiting') { continue }
     if ($status -cne 'completed') { [void]$latest.Add($workflow); continue }
-    if ($conclusion -ceq 'cancelled' -or $conclusion -ceq 'skipped') { continue }
+    if ($conclusion -ceq 'cancelled' -or $conclusion -ceq 'skipped' -or $conclusion -ceq 'action_required') { continue }
     [void]$latest.Add($workflow)
     if ($conclusion -ceq 'success' -or $conclusion -ceq 'neutral') {
         [void]$pending.Remove($workflow)

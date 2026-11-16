@@ -79,18 +79,14 @@ fn receive(stream: &UnixStream, root: Option<&Path>, len: usize) -> anyhow::Resu
             bail!("the file is longer than the {len} bytes announced");
         }
         received += frame.payload.len();
-        sink = sink.take(root, &frame.payload, HEAD_LEN.min(len));
+        sink = sink.take(root, &frame.payload);
     }
-    Ok(match sink {
-        Sink::File(upload) => MediaHostMsg::Saved { path: upload.keep() },
-        Sink::Failed(reason) => MediaHostMsg::Failed { reason },
-        Sink::Head(_) => unreachable!("the head is never longer than the whole file"),
-    })
+    Ok(sink.finish(root))
 }
 
 /// 收到的字节去哪。
 enum Sink<'a> {
-    /// 还没攒够认格式的文件头。
+    /// 还没攒够 `HEAD_LEN` 字节的文件头；整个文件比它短时收完了仍在这里。
     Head(Vec<u8>),
     File(Upload<'a>),
     /// 存不了，余下的字节读了扔掉。
@@ -98,24 +94,38 @@ enum Sink<'a> {
 }
 
 impl<'a> Sink<'a> {
-    /// 接着收 `bytes`；攒够 `head_len` 字节的文件头时认格式、建文件。
-    fn take(self, root: Option<&'a Path>, bytes: &[u8], head_len: usize) -> Self {
+    /// 接着收 `bytes`；攒够 `HEAD_LEN` 字节的文件头时认格式、建文件。
+    fn take(self, root: Option<&'a Path>, bytes: &[u8]) -> Self {
         match self {
             Self::Head(mut head) => {
                 head.extend_from_slice(bytes);
-                if head.len() < head_len {
+                if head.len() < HEAD_LEN {
                     return Self::Head(head);
                 }
-                match Upload::begin(root, &head) {
-                    Ok(upload) => Self::File(upload),
-                    Err(reason) => Self::Failed(reason),
-                }
+                Self::start(root, &head)
             }
             Self::File(mut upload) => match upload.append(bytes) {
                 Ok(()) => Self::File(upload),
                 Err(err) => Self::Failed(format!("cannot save the file: {err}")),
             },
             failed @ Self::Failed(_) => failed,
+        }
+    }
+
+    /// 收完了，回给手机的结果。
+    fn finish(self, root: Option<&'a Path>) -> MediaHostMsg {
+        match self {
+            Self::Head(head) => Self::start(root, &head).finish(root),
+            Self::File(upload) => MediaHostMsg::Saved { path: upload.keep() },
+            Self::Failed(reason) => MediaHostMsg::Failed { reason },
+        }
+    }
+
+    /// 按文件头 `head` 建文件，不会是 `Head`。
+    fn start(root: Option<&'a Path>, head: &[u8]) -> Self {
+        match Upload::begin(root, head) {
+            Ok(upload) => Self::File(upload),
+            Err(reason) => Self::Failed(reason),
         }
     }
 }
@@ -174,7 +184,13 @@ fn format(head: &[u8]) -> Option<(&'static str, &'static str)> {
     } else if head.len() >= 12 && head.starts_with(b"RIFF") && &head[8..12] == b"WEBP" {
         "webp"
     } else if head.len() >= 12 && &head[4..8] == b"ftyp" {
-        return Some(("video", if &head[8..12] == b"qt  " { "mov" } else { "mp4" }));
+        // HEIF 系的图片（HEIC、AVIF）和佳能 CR3 原始图也是 ISO 媒体文件，按主品牌认出来挡掉。
+        return match &head[8..12] {
+            b"qt  " => Some(("video", "mov")),
+            b"heic" | b"heix" | b"heim" | b"heis" | b"hevc" | b"hevx" | b"hevm" | b"hevs" | b"mif1" | b"msf1"
+            | b"avif" | b"avis" | b"avci" | b"avcs" | b"crx " => None,
+            _ => Some(("video", "mp4")),
+        };
     } else {
         return None;
     };
@@ -317,6 +333,26 @@ mod tests {
         assert_eq!((mp4.extension().unwrap(), mov.extension().unwrap()), ("mp4".as_ref(), "mov".as_ref()));
         assert!(mp4.file_name().unwrap().to_string_lossy().starts_with("video-"));
         assert_eq!((fs::read(&mp4).unwrap(), fs::read(&mov).unwrap()), (MP4.to_vec(), MOV.to_vec()));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn heif_images_are_not_taken_for_videos() {
+        let (root, phone, _) = ready("heif");
+        send_file(&phone, b"\0\0\0\x18ftypheic\0\0\0\0mif1heic");
+        assert!(matches!(reply(&phone), MediaHostMsg::Failed { .. }));
+        send_file(&phone, b"\0\0\0\x1cftypavif\0\0\0\0avifmif1miaf");
+        assert!(matches!(reply(&phone), MediaHostMsg::Failed { .. }));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_shorter_than_the_head_is_still_recognised() {
+        let (root, phone, _) = ready("short");
+        send_file(&phone, b"GIF89a");
+        assert_eq!(fs::read(saved(&phone)).unwrap(), b"GIF89a");
+        send_file(&phone, b"short");
+        assert!(matches!(reply(&phone), MediaHostMsg::Failed { .. }));
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -37,8 +37,8 @@ runs=$(gh run list --branch "$branch" --limit 60 \
   --json databaseId,workflowName,headSha,status,conclusion \
   --jq '.[] | [.databaseId, .workflowName, .headSha, .status, .conclusion] | @tsv') || { log "gh run list failed"; exit 1; }
 
-# gh 按新到旧给，每个 workflow 只看最新一次有结论的运行（cancelled、skipped 不算结论）；在那之前碰到还没跑完的
-# 就这次不看它，pending 照旧。最新一次通过的移出 pending；失败了、不在 pending 里的派，一次最多 MAX_RUNS 个。
+# gh 按新到旧给，每个 workflow 只看最新一次有结论的运行（cancelled、skipped、action_required 不算结论）；在那之前
+# 碰到还没跑完的就这次不看它，pending 照旧，等人批准的（waiting）跳过，它不知道要等多久。最新一次通过的移出 pending；失败了、不在 pending 里的派，一次最多 MAX_RUNS 个。
 # 输出 `send` 行是这次派的，`keep` 行是 pending 里留下的。
 plan=$(printf '%s\n' "$runs" | PENDING_LIST=$(cat "$PENDING") MAX_RUNS=$MAX_RUNS awk -F "$TAB" '
   BEGIN {
@@ -47,8 +47,9 @@ plan=$(printf '%s\n' "$runs" | PENDING_LIST=$(cat "$PENDING") MAX_RUNS=$MAX_RUNS
     limit = ENVIRON["MAX_RUNS"] + 0
   }
   NF < 5 || ($2 in latest) { next }
+  $4 == "waiting" { next }
   $4 != "completed" { latest[$2] = 1; next }
-  $5 == "cancelled" || $5 == "skipped" { next }
+  $5 == "cancelled" || $5 == "skipped" || $5 == "action_required" { next }
   { latest[$2] = 1 }
   $5 == "success" || $5 == "neutral" { delete pending[$2]; next }
   ($5 == "failure" || $5 == "timed_out" || $5 == "startup_failure") && !($2 in pending) && sent < limit {

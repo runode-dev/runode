@@ -52,6 +52,7 @@ fn escapes_image_paths_with_backslashes() {
     assert_eq!(escape("/tmp/it's.png"), r"/tmp/it\'s.png");
     assert_eq!(escape("/tmp/截图.png"), "/tmp/截图.png");
     assert_eq!(escape("=a=b"), r"\=a=b");
+    assert_eq!(escape("/tmp/a\nb.png"), "'/tmp/a\nb.png'");
     assert_eq!(Quoting::PowerShell.escape(r"C:\tmp\shot.png"), r"C:\tmp\shot.png");
     assert_eq!(Quoting::Cmd.escape(r"C:\Users\me\it's.png"), r#""C:\Users\me\it's.png""#);
 }

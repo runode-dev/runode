@@ -223,9 +223,10 @@ impl Quoting {
     /// 和 `quote` 一样只放过常见字符；sh 的写法里其余字符前面加反斜杠，像访达把文件拖进终端时那样，
     /// 别的写法里反斜杠不是转义，照 `quote` 括起来。
     /// 图片路径用这种写法：Claude Code 按「空格后跟 `/`」拆开几个路径，引号只在整段两头时才去掉，
-    /// 几个带引号的路径连在一起它就认不出来了；反斜杠转义它和 Codex 都能还原。
+    /// 几个带引号的路径连在一起它就认不出来了；反斜杠转义它和 Codex 都能还原。带换行时照 `quote` 括起来：
+    /// 反斜杠加换行在 sh 里是续行，换行会被吃掉。
     pub fn escape(self, text: &str) -> String {
-        if self != Self::Posix {
+        if self != Self::Posix || text.contains('\n') {
             return self.quote(text);
         }
         let mut escaped = String::with_capacity(text.len());

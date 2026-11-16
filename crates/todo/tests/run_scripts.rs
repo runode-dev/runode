@@ -243,6 +243,21 @@ fn watch_ci_waits_for_a_run_in_progress() {
     assert!(out.contains("## CI (run 93, ") && out.contains("fresh"), "{out}");
 }
 
+/// 等人批准的运行（waiting、action_required）不挡住更早的失败。
+#[test]
+fn watch_ci_looks_past_runs_waiting_for_approval() {
+    let sandbox = Sandbox::new("ci-waiting");
+    sandbox.fixture(
+        "run-list",
+        &format!(
+            "53\tCI\t{SHA}\twaiting\t\n52\tCI\t{SHA}\tcompleted\taction_required\n51\tCI\t{SHA}\tcompleted\tfailure\n"
+        ),
+    );
+    sandbox.fixture("run-view-51", &failed_log("still broken"));
+    let out = fire(&sandbox, "watch-ci", &["main"]);
+    assert!(out.contains("## CI (run 51, ") && out.contains("still broken"), "{out}");
+}
+
 /// 日志里 runner 收尾的输出和 action 的标记不占末尾的行数，留下的是报错。
 #[test]
 fn watch_ci_drops_the_runner_cleanup_from_logs() {

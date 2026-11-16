@@ -75,8 +75,8 @@ enum class MediaSendRemedy {
     UpdateComputer,
 }
 
-/** 读不出用户挑的图片、转不了用户挑的视频。 */
-internal class MediaUnreadable(val video: Boolean, cause: Exception) :
+/** 读不出用户挑的图片、转不了用户挑的视频，或者处理出来是空的。 */
+internal class MediaUnreadable(val video: Boolean, cause: Exception? = null) :
     Exception(if (video) "the video could not be converted" else "the image could not be read", cause)
 
 /** 读到的图片、处理过的图片或视频超过 `maxMediaBytes`。 */
@@ -192,7 +192,9 @@ class MediaSendModel internal constructor(
                         phase = Phase.Preparing(index, count)
                         val file = prepareVideo(videos, item)
                         try {
-                            if (withContext(work) { file.length() } > maxMediaBytes) throw MediaTooLarge(video = true)
+                            val length = withContext(work) { file.length() }
+                            if (length == 0L) throw MediaUnreadable(video = true)
+                            if (length > maxMediaBytes) throw MediaTooLarge(video = true)
                             phase = Phase.Sending(index, count, 0f, video = true)
                             connection().send(file) { sent, total -> phase = Phase.Sending(index, count, fraction(sent, total), true) }
                         } finally {
@@ -227,6 +229,7 @@ class MediaSendModel internal constructor(
         } catch (e: Exception) {
             throw MediaUnreadable(video = false, e)
         }
+        if (data.isEmpty()) throw MediaUnreadable(video = false)
         if (data.size > maxMediaBytes) throw MediaTooLarge(video = false)
         return data
     }
