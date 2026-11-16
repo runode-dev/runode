@@ -316,8 +316,8 @@ class SessionListModel(
     private val quickReplies = mutableMapOf<SessionId, QuickReplyModel>()
 
     /**
-     * 每个会话在等的那次读屏幕是哪种，回话按会话对上：`ScreenText` 不带请求编号，宿主又是各自起线程回话，两次同时在路上时
-     * 回话可能先后颠倒、对错读法，所以同一个会话同时只读一次（[sendPreviewRead]）。
+     * 每个会话在等的那次读屏幕是哪种，回话按会话对上：这些读屏不带请求编号，回话也不带，宿主又是各自起线程回话，两次同时
+     * 在路上时回话可能先后颠倒、对错读法，所以同一个会话同时只读一次（[sendPreviewRead]）。
      */
     private val pendingPreviews = mutableMapOf<SessionId, PreviewRead>()
 
@@ -620,7 +620,7 @@ class SessionListModel(
 
     /** 这个会话的快速回复，第一次要时建好。送到以后刷新它的预览。重连后收到新列表之前不能发：卡片还是断开前的，那个会话可能已经不在等这个回答了。 */
     fun quickReply(id: SessionId): QuickReplyModel = quickReplies.getOrPut(id) {
-        QuickReplyModel(id, link, connected && listCurrent) { answered(it) }
+        QuickReplyModel(id, link, connected && listCurrent, onStale = { requestPreview(it) }) { answered(it) }
     }
 
     /**
@@ -911,7 +911,7 @@ class SessionListModel(
                 requestPreview(message.id)
             }
             is HostMsg.Bell -> requestPreview(message.id)
-            is HostMsg.ScreenText -> screenText(message)
+            is HostMsg.ScreenText -> if (message.req == null) screenText(message)
             is HostMsg.Exited -> {
                 update(message.id) { it.copy(exited = true) }
                 dropStalePrompt(message.id)

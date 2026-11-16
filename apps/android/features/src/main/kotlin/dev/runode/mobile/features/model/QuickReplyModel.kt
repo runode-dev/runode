@@ -21,8 +21,8 @@ data class QuickKey(
     val accessibilityLabel: UiText,
     /** 图标的名字（`return`、`arrowtriangle.up.fill` 这类），界面换成自己的图标。 */
     val symbol: String? = null,
-    /** 按下去依次发给宿主的键，`send_keys` 的写法。 */
-    val keys: List<String> = listOf(key),
+    /** 选提问里一项的键：所答的提问。 */
+    val answers: AgentPrompt.Asked? = null,
 ) {
     val id: String get() = key
 
@@ -50,12 +50,14 @@ data class QuickKey(
  * 那份 VT 当前的模式编码）。宿主回 `Done` 算送到，回带着请求编号的 `Error` 算失败。会话列表上等回答的每一行、终端页
  * 底部各有一个，连接断开、连上由它们告诉这里。
  *
- * [onDelivered] 在一批请求都送到后调，比如刷新这个会话的预览。
+ * [onDelivered] 在一批请求都送到后调，比如刷新这个会话的预览。[onStale] 在回答前重读到的屏幕上换了提问、没有发键时调，
+ * 界面上的提问该跟着刷新了。
  */
 class QuickReplyModel(
     val sessionId: SessionId,
     private val link: HostLink,
     connected: Boolean = true,
+    private val onStale: (SessionId) -> Unit = {},
     private val onDelivered: (SessionId) -> Unit = {},
 ) {
     /** 文本框里的字。 */
@@ -84,14 +86,58 @@ class QuickReplyModel(
     private var restored: String? = null
     private var batchFailed = false
 
+    /** 回答前重读屏幕的请求：所答的提问和要选的编号。 */
+    private val rereads = mutableMapOf<UInt, Pair<AgentPrompt.Asked, Int>>()
+
+    /**
+     * 在路上的那个回答眼下等的请求：先是重读，再是按键。同时只有一个回答在路上，前一个的键还没送到时重读到的还是所答的
+     * 提问，看不出它已经答过了。
+     */
+    private var answering: UInt? = null
+
+    /** 有回答在路上时又点的选项，按点的先后排着。 */
+    private val queued = ArrayDeque<Pair<AgentPrompt.Asked, Int>>()
+
+    /**
+     * 在路上的是单选题的按键：它一送到这一问就答完了，agent 却未必已经重画，这时又点的对的是答过的这一问，作废。多选题点
+     * 一项只切换勾选、不离开这一问，排着的照答。
+     */
+    private var answeredOnce = false
+
     val canSendDraft: Boolean get() = draft.isNotBlank()
 
-    /** 按一个键。 */
+    /**
+     * 按一个键。选提问里一项的键（[QuickKey.answers]）先重读屏幕，上面还是所答的提问才按读到的提问上选这一项的键
+     * （[AgentPrompt.keys]）；换了提问就不按，算失败。有回答在路上时先排着，它的键送到或失败了再重读。
+     */
     fun press(key: QuickKey) {
         if (!ensureConnected()) return
+        val number = key.key.toIntOrNull()
+        if (key.answers != null && number != null) {
+            if (answeredOnce) return
+            begin(emptyList())
+            if (answering == null) answer(key.answers, number) else queued.addLast(key.answers to number)
+            return
+        }
         val req = link.nextRequestId()
         begin(listOf(req))
-        link.send(ClientMsg.SendKeys(req, sessionId, key.keys))
+        link.send(ClientMsg.SendKeys(req, sessionId, listOf(key.key)))
+    }
+
+    private fun answer(asked: AgentPrompt.Asked, number: Int) {
+        val req = link.nextRequestId()
+        pending += req
+        rereads[req] = asked to number
+        answering = req
+        link.send(ClientMsg.ReadScreen(sessionId, SessionListModel.waitingReadLines, req = req))
+    }
+
+    /** 在路上的回答完了（送到、失败或换了提问）：排着的下一个接着答。 */
+    private fun answerEnded() {
+        answering = null
+        answeredOnce = false
+        val (asked, number) = queued.removeFirstOrNull() ?: return
+        answer(asked, number)
     }
 
     /** 把文本框里的字粘贴进去再按回车。 */
@@ -153,14 +199,39 @@ class QuickReplyModel(
                 if (message.req !in pending) return false
                 pending -= message.req
                 unsent.remove(message.req)
+                if (message.req == answering) answerEnded()
+            }
+            is HostMsg.ScreenText -> {
+                val req = message.req ?: return false
+                val (asked, number) = rereads.remove(req) ?: return false
+                val found = AgentPrompt.parse(message.text.split("\n"))?.takeIf { it.choices == asked }
+                val keys = found?.keys(number)
+                if (found != null && keys != null) {
+                    val send = link.nextRequestId()
+                    pending += send
+                    answering = send
+                    if (!found.isMultiSelect) {
+                        answeredOnce = true
+                        queued.clear()
+                    }
+                    link.send(ClientMsg.SendKeys(send, sessionId, keys))
+                } else {
+                    batchFailed = true
+                    errorMessage = UiText.res(R.string.reply_question_changed)
+                    onStale(sessionId)
+                    answerEnded()
+                }
+                pending -= req
             }
             is HostMsg.Error -> {
                 val req = message.req
                 if (req == null || req !in pending) return false
                 pending -= req
+                rereads.remove(req)
                 restoreDraft(unsent.remove(req))
                 batchFailed = true
                 errorMessage = UiText.res(R.string.reply_not_sent, Presentation.hostError(message))
+                if (req == answering) answerEnded()
             }
             else -> return false
         }
@@ -180,6 +251,10 @@ class QuickReplyModel(
         isConnected = false
         if (pending.isEmpty()) return
         pending.clear()
+        rereads.clear()
+        answering = null
+        answeredOnce = false
+        queued.clear()
         // 连着发了几条都没回话时按发出的先后拼回去，只放回一段的话别的就丢了。
         if (unsent.isNotEmpty()) restoreDraft(unsent.keys.sorted().mapNotNull { unsent[it] }.joinToString("\n"))
         unsent.clear()

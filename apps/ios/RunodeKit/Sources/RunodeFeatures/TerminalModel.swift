@@ -152,7 +152,8 @@ public final class TerminalModel {
         self.onOpen = onOpen
         self.onClose = onClose
         self.onAnswerScreenChange = onAnswerScreenChange
-        self.quickReply = QuickReplyModel(sessionId: sessionId, link: link, connected: false, onDelivered: onAnswered)
+        self.quickReply = QuickReplyModel(
+            sessionId: sessionId, link: link, connected: false, onDelivered: onAnswered, onStale: onAnswerScreenChange)
     }
 
     /// 现在按手机屏幕决定尺寸。

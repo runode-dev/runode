@@ -54,14 +54,16 @@ data class AgentPrompt(
             get() = shownText.indexOf('\n').takeIf { it >= 0 }?.let { shownText.substring(it + 1).replace('\n', ' ') }
     }
 
-    /**
-     * 选 [option] 的键：编号本身，[needsEnter] 时跟着按回车；多选题不跟回车。读屏念
-     * 「编号：[Option.shownText]」。
-     */
+    /** 选 [option] 的键，显示编号，读屏念「编号：[Option.shownText]」。 */
     fun key(option: Option): QuickKey {
         val number = option.number.toString()
-        val keys = if (needsEnter && !isMultiSelect) listOf(number, "enter") else listOf(number)
-        return QuickKey(number, number, UiText.res(R.string.prompt_option, option.number, option.shownText), keys = keys)
+        return QuickKey(number, number, UiText.res(R.string.prompt_option, option.number, option.shownText), answers = choices)
+    }
+
+    /** 选编号 [number] 那一项要按的键：编号本身，[needsEnter] 时再按回车；多选题不跟回车。提问里没有这一项时为 null。 */
+    fun keys(number: Int): List<String>? {
+        if (options.none { it.number == number }) return null
+        return if (needsEnter && !isMultiSelect) listOf(number.toString(), "enter") else listOf(number.toString())
     }
 
     /** 选项开头的复选框：勾没勾，和去掉复选框、再去掉开头空白后的原文。 */
@@ -77,6 +79,9 @@ data class AgentPrompt(
     data class Asked(val question: List<String>, val options: List<String>)
 
     val asked: Asked get() = Asked(question, options.map { it.text })
+
+    /** 问题和各项去掉复选框的原文：两幅屏幕上它一样时，复选框勾没勾不同也算同一题。 */
+    val choices: Asked get() = Asked(question, options.map { it.shownText })
 
     /** 挑出的两项：多于两项时是第一项和最后一项，两项时就是这两项。 */
     val compactOptions: List<Option>

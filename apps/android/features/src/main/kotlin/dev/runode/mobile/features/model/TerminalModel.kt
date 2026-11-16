@@ -183,7 +183,7 @@ class TerminalModel(
     var isConfirmingKill by mutableStateOf(false)
 
     /** 底部的快速回复：agent 停下来等回答时出现。 */
-    val quickReply = QuickReplyModel(sessionId, link, connected = false, onDelivered = onAnswered)
+    val quickReply = QuickReplyModel(sessionId, link, connected = false, onStale = onAnswerScreenChange, onDelivered = onAnswered)
 
     /** 手机这边的 VT。归这个模型管，换下来、页面关掉时由它 [VTerminal.close]；视图只借来读和滚视口。 */
     var terminal: VTerminal? = null

@@ -304,14 +304,126 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(!reply.handle(.done(req: req + 100)))
     }
 
-    /// 一个键带着几个键时在同一个请求里依次发。
-    @Test func aKeyWithFollowUpsGoesOutInOneRequest() async {
-        let reply = QuickReplyModel(sessionId: waiting, link: link)
-        await reply.press(QuickKey(label: "2", key: "2", accessibilityLabel: "2", then: ["enter"]))
-        guard case .sendKeys(_, waiting, ["2", "enter"])? = link.sent.first, link.sent.count == 1 else {
-            Issue.record("expected one send_keys 2 enter, got \(link.sent)")
+    /// 选提问里一项先重读屏幕，还是那一题才按读到的提问上要按的键，一个请求发完。
+    @Test func anOptionRereadsTheScreenBeforeAnswering() async throws {
+        var delivered: [SessionId] = []
+        var stale: [SessionId] = []
+        let reply = QuickReplyModel(
+            sessionId: waiting, link: link, onDelivered: { delivered.append($0) }, onStale: { stale.append($0) })
+        let shown = try #require(AgentPrompt.parse(Self.preview(cursorAt: 1)))
+        await reply.press(shown.key(for: shown.options[1]))
+        guard case .readScreen(waiting, _, nil, let read?)? = link.sent.first, link.sent.count == 1 else {
+            Issue.record("expected read_screen, got \(link.sent)")
             return
         }
+        // 光标挪过了也还是这一题。
+        #expect(reply.handle(.screenText(id: waiting, text: Self.preview(cursorAt: 2).joined(separator: "\n"), truncated: false, req: read)))
+        guard case .sendKeys(let send, waiting, ["2", "enter"])? = link.sent.last, link.sent.count == 2 else {
+            Issue.record("expected send_keys 2 enter, got \(link.sent)")
+            return
+        }
+        #expect(delivered.isEmpty)
+        #expect(reply.handle(.done(req: send)))
+        #expect(delivered == [waiting])
+        #expect(stale.isEmpty)
+    }
+
+    /// 重读到的屏幕上换了提问：不按，算失败，让界面刷新提问。
+    @Test func anOptionIsNotPressedOnAChangedQuestion() async throws {
+        var stale: [SessionId] = []
+        let reply = QuickReplyModel(sessionId: waiting, link: link, onStale: { stale.append($0) })
+        let shown = try #require(AgentPrompt.parse(Self.preview(cursorAt: 1)))
+        await reply.press(shown.key(for: shown.options[1]))
+        guard case .readScreen(_, _, _, let read?)? = link.sent.first else {
+            Issue.record("expected read_screen, got \(link.sent)")
+            return
+        }
+        #expect(reply.handle(.screenText(id: waiting, text: " Next?\n ❯ 1. Yes\n   2. No\n", truncated: false, req: read)))
+        #expect(link.sent.count == 1)
+        #expect(reply.failedCount == 1)
+        #expect(reply.errorMessage != nil)
+        #expect(stale == [waiting])
+    }
+
+    /// 连着点两个复选框：后一下重读到的屏幕上前一项已经勾上，也还是同一题。
+    @Test func aCheckboxStillCountsAfterAnotherWasTicked() async throws {
+        let reply = QuickReplyModel(sessionId: waiting, link: link)
+        let shown = try #require(AgentPrompt.parse([" Pick", " ❯ 1. [ ] A", "   2. [ ] B"]))
+        await reply.press(shown.key(for: shown.options[1]))
+        guard case .readScreen(_, _, _, let read?)? = link.sent.first else {
+            Issue.record("expected read_screen, got \(link.sent)")
+            return
+        }
+        #expect(reply.handle(.screenText(id: waiting, text: " Pick\n   1. [x] A\n ❯ 2. [ ] B\n", truncated: false, req: read)))
+        guard case .sendKeys(_, waiting, ["2"])? = link.sent.last else {
+            Issue.record("expected send_keys 2, got \(link.sent)")
+            return
+        }
+    }
+
+    /// 单选题的回答在路上时又点的选项作废：键送到时 agent 未必已经重画，重读认不出这一问已经答过。
+    @Test func anotherOptionOnASingleChoiceIsDropped() async throws {
+        var delivered: [SessionId] = []
+        let reply = QuickReplyModel(sessionId: waiting, link: link, onDelivered: { delivered.append($0) })
+        let shown = try #require(AgentPrompt.parse(Self.preview(cursorAt: 1)))
+        await reply.press(shown.key(for: shown.options[0]))
+        await reply.press(shown.key(for: shown.options[1]))
+        guard case .readScreen(_, _, _, let read?)? = link.sent.first, link.sent.count == 1 else {
+            Issue.record("expected one read_screen, got \(link.sent)")
+            return
+        }
+        let screen = Self.preview(cursorAt: 1).joined(separator: "\n")
+        #expect(reply.handle(.screenText(id: waiting, text: screen, truncated: false, req: read)))
+        guard case .sendKeys(let send, waiting, ["1", "enter"])? = link.sent.last, link.sent.count == 2 else {
+            Issue.record("expected send_keys 1 enter, got \(link.sent)")
+            return
+        }
+        await reply.press(shown.key(for: shown.options[1]))
+        #expect(reply.handle(.done(req: send)))
+        #expect(link.sent.count == 2)
+        #expect(delivered == [waiting])
+        #expect(reply.failedCount == 0)
+    }
+
+    /// 多选题的回答在路上时又点的复选框排着，前一个送到后照样重读、切换。
+    @Test func checkboxesQueueBehindEachOther() async throws {
+        let reply = QuickReplyModel(sessionId: waiting, link: link)
+        let shown = try #require(AgentPrompt.parse([" Pick", " ❯ 1. [ ] A", "   2. [ ] B"]))
+        await reply.press(shown.key(for: shown.options[0]))
+        await reply.press(shown.key(for: shown.options[1]))
+        guard case .readScreen(_, _, _, let first?)? = link.sent.first, link.sent.count == 1 else {
+            Issue.record("expected one read_screen, got \(link.sent)")
+            return
+        }
+        #expect(reply.handle(.screenText(id: waiting, text: " Pick\n ❯ 1. [ ] A\n   2. [ ] B\n", truncated: false, req: first)))
+        guard case .sendKeys(let send, waiting, ["1"])? = link.sent.last else {
+            Issue.record("expected send_keys 1, got \(link.sent)")
+            return
+        }
+        #expect(reply.handle(.done(req: send)))
+        guard case .readScreen(_, _, _, let second?)? = link.sent.last, link.sent.count == 3 else {
+            Issue.record("expected a second read_screen, got \(link.sent)")
+            return
+        }
+        #expect(reply.handle(.screenText(id: waiting, text: " Pick\n ❯ 1. [x] A\n   2. [ ] B\n", truncated: false, req: second)))
+        guard case .sendKeys(_, waiting, ["2"])? = link.sent.last, link.sent.count == 4 else {
+            Issue.record("expected send_keys 2, got \(link.sent)")
+            return
+        }
+    }
+
+    private static func preview(cursorAt cursor: Int) -> [String] {
+        [
+            " Which one?",
+            "",
+            "\(cursor == 1 ? "❯" : " ") 1. Keep it           ┌──────┐",
+            "\(cursor == 2 ? "❯" : " ") 2. Revert it         │ code │",
+            "                       └──────┘",
+            "",
+            "  Notes: press n to add notes",
+            "",
+            " Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel",
+        ]
     }
 
     @Test func textIsPastedThenEntered() async {

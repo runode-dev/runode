@@ -61,13 +61,17 @@ public struct AgentPrompt: Hashable, Sendable {
         options.contains { $0.checkbox != nil }
     }
 
-    /// 选 `option` 的键：编号本身，`needsEnter` 时再按回车；多选题不跟回车。
-    /// 读屏念「编号：原文」，原文不带复选框。
+    /// 选 `option` 的键，显示编号，读屏念「编号：原文」，原文不带复选框。
     public func key(for option: Option) -> QuickKey {
         QuickKey(
             label: String(option.number), key: String(option.number),
-            accessibilityLabel: String(localized: "\(option.number)：\(option.displayText)"),
-            then: needsEnter && !isMultiSelect ? ["enter"] : [])
+            accessibilityLabel: String(localized: "\(option.number)：\(option.displayText)"), answers: choices)
+    }
+
+    /// 选编号 `number` 那一项要按的键：编号本身，`needsEnter` 时再按回车；多选题不跟回车。提问里没有这一项时为空。
+    func keys(for number: Int) -> [String]? {
+        guard options.contains(where: { $0.number == number }) else { return nil }
+        return needsEnter && !isMultiSelect ? [String(number), "enter"] : [String(number)]
     }
 
     /// 回车会选的那一项：单选题里带光标记号的。多选题没有。
@@ -282,6 +286,11 @@ public struct AgentPrompt: Hashable, Sendable {
 
     var asked: Asked {
         Asked(question: question, options: options.map(\.text))
+    }
+
+    /// 问题和各项去掉复选框的原文：两幅屏幕上它一样时，复选框勾没勾不同也算同一题。
+    var choices: Asked {
+        Asked(question: question, options: options.map(\.displayText))
     }
 
     /// 屏幕上的一行。

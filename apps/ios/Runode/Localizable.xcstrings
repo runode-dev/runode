@@ -1308,6 +1308,29 @@
         }
       }
     },
+    "提问已经变了，没有发" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The question changed, nothing was sent"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提问已经变了，没有发"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提問已經變了，沒有送出"
+          }
+        }
+      }
+    },
     "放弃 %@ 的改动？" : {
       "extractionState" : "manual",
       "localizations" : {

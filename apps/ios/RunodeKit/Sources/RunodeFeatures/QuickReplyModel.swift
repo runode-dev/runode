@@ -10,18 +10,20 @@ public struct QuickKey: Hashable, Sendable, Identifiable {
     public let key: String
     public let accessibilityLabel: String
     public var symbol: String?
-    /// 按下去依次发的键，第一个是 `key`。
-    public let keys: [String]
+    /// 选提问里一项的键：所答的提问。
+    let answers: AgentPrompt.Asked?
 
     public var id: String { key }
 
-    /// `then` 是按了 `key` 之后接着发的键。
-    init(label: String, key: String, accessibilityLabel: String, symbol: String? = nil, then: [String] = []) {
+    init(
+        label: String, key: String, accessibilityLabel: String, symbol: String? = nil,
+        answers: AgentPrompt.Asked? = nil
+    ) {
         self.label = label
         self.key = key
         self.accessibilityLabel = accessibilityLabel
         self.symbol = symbol
-        keys = [key] + then
+        self.answers = answers
     }
 
     /// 回答 agent 提问最常用的几个键：选项编号、是否、回车、Esc、上下移动选项。
@@ -65,16 +67,30 @@ public final class QuickReplyModel {
     /// 上次放回文本框的字：文本框还是它时，再有没送到的接在后面，几条都失败时不只剩第一条。
     @ObservationIgnored private var restored: String?
     @ObservationIgnored private var batchFailed = false
+    /// 回答前重读屏幕的请求：所答的提问和要选的编号。
+    @ObservationIgnored private var rereads: [UInt32: (asked: AgentPrompt.Asked, number: Int)] = [:]
+    /// 在路上的那个回答眼下等的请求：先是重读，再是按键。同时只有一个回答在路上，前一个的键还没送到时重读到的
+    /// 还是所答的提问，看不出它已经答过了。
+    @ObservationIgnored private var answering: UInt32?
+    /// 有回答在路上时又点的选项，按点的先后排着。
+    @ObservationIgnored private var queued: [(asked: AgentPrompt.Asked, number: Int)] = []
+    /// 在路上的是单选题的按键：它一送到这一问就答完了，agent 却未必已经重画，这时又点的对的是答过的这一问，作废。
+    /// 多选题点一项只切换勾选、不离开这一问，排着的照答。
+    @ObservationIgnored private var answeredOnce = false
     @ObservationIgnored private let onDelivered: @MainActor (SessionId) -> Void
+    @ObservationIgnored private let onStale: @MainActor (SessionId) -> Void
 
-    /// `onDelivered` 在一批请求都送到后调，比如刷新这个会话的预览。
+    /// `onDelivered` 在一批请求都送到后调，比如刷新这个会话的预览。`onStale` 在回答前重读到的屏幕上换了提问、
+    /// 没有发键时调，界面上的提问该跟着刷新了。
     public init(
         sessionId: SessionId, link: any HostLink, connected: Bool = true,
-        onDelivered: @escaping @MainActor (SessionId) -> Void = { _ in }
+        onDelivered: @escaping @MainActor (SessionId) -> Void = { _ in },
+        onStale: @escaping @MainActor (SessionId) -> Void = { _ in }
     ) {
         self.sessionId = sessionId
         self.link = link
         self.isConnected = connected
+        self.onStale = onStale
         self.onDelivered = onDelivered
     }
 
@@ -82,12 +98,40 @@ public final class QuickReplyModel {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// 按一个键：它的几个键（`QuickKey.keys`）在一个请求里发。
+    /// 按一个键。选提问里一项的键（`QuickKey.answers`）先重读屏幕，上面还是所答的提问才按读到的提问上选这一项的键
+    /// （`AgentPrompt.keys(for:)`）；换了提问就不按，算失败。有回答在路上时先排着，它的键送到或失败了再重读。
     public func press(_ key: QuickKey) async {
         guard ensureConnected() else { return }
+        if let asked = key.answers, let number = Int(key.key) {
+            guard !answeredOnce else { return }
+            begin([])
+            if answering == nil {
+                answer(asked, number)
+            } else {
+                queued.append((asked, number))
+            }
+            return
+        }
         let req = link.nextRequestId()
         begin([req])
-        link.send(.sendKeys(req: req, id: sessionId, keys: key.keys))
+        link.send(.sendKeys(req: req, id: sessionId, keys: [key.key]))
+    }
+
+    private func answer(_ asked: AgentPrompt.Asked, _ number: Int) {
+        let req = link.nextRequestId()
+        pending.insert(req)
+        rereads[req] = (asked, number)
+        answering = req
+        link.send(.readScreen(id: sessionId, lines: SessionListModel.waitingReadLines, req: req))
+    }
+
+    /// 在路上的回答完了（送到、失败或换了提问）：排着的下一个接着答。
+    private func answerEnded() {
+        answering = nil
+        answeredOnce = false
+        guard !queued.isEmpty else { return }
+        let (asked, number) = queued.removeFirst()
+        answer(asked, number)
     }
 
     /// 把文本框里的字粘贴进去再按回车。
@@ -149,11 +193,33 @@ public final class QuickReplyModel {
         case .done(let req) where pending.contains(req):
             pending.remove(req)
             unsent[req] = nil
+            if req == answering { answerEnded() }
+        case .screenText(_, let text, _, let req?) where rereads[req] != nil:
+            let (asked, number) = rereads.removeValue(forKey: req)!
+            let found = AgentPrompt.parse(text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init))
+            if let found, found.choices == asked, let keys = found.keys(for: number) {
+                let send = link.nextRequestId()
+                pending.insert(send)
+                answering = send
+                if !found.isMultiSelect {
+                    answeredOnce = true
+                    queued.removeAll()
+                }
+                link.send(.sendKeys(req: send, id: sessionId, keys: keys))
+            } else {
+                batchFailed = true
+                errorMessage = String(localized: "提问已经变了，没有发")
+                onStale(sessionId)
+                answerEnded()
+            }
+            pending.remove(req)
         case .error(let req?, _, let message) where pending.contains(req):
             pending.remove(req)
+            rereads[req] = nil
             restoreDraft(unsent.removeValue(forKey: req))
             batchFailed = true
             errorMessage = String(localized: "没发出去：\(message)")
+            if req == answering { answerEnded() }
         default:
             return false
         }
@@ -173,6 +239,10 @@ public final class QuickReplyModel {
         isConnected = false
         guard !pending.isEmpty else { return }
         pending.removeAll()
+        rereads.removeAll()
+        answering = nil
+        answeredOnce = false
+        queued.removeAll()
         // 连着发了几条都没回话时按发出的先后拼回去，只放回一段的话别的就丢了。
         if !unsent.isEmpty { restoreDraft(unsent.keys.sorted().compactMap { unsent[$0] }.joined(separator: "\n")) }
         unsent.removeAll()

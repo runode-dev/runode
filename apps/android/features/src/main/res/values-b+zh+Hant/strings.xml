@@ -127,6 +127,7 @@
     <string name="prompt_option_unchecked">未勾選</string>
     <string name="reply_too_long">文字太長了，發不出去</string>
     <string name="reply_not_sent">沒送出去：%1$s</string>
+    <string name="reply_question_changed">提問已經變了，沒有送出</string>
     <string name="reply_connection_lost">連線中斷了，回覆可能沒送到</string>
     <string name="not_connected">未連線</string>
     <plurals name="pairing_addresses_more">

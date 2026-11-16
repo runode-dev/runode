@@ -363,7 +363,8 @@ class AgentPromptTests {
         val prompt = assertNotNull(parse(" Do you want to proceed?\n ❯ 1. Yes\n   2. No\n"))
         val key = prompt.key(prompt.options[1])
         assertEquals("2", key.key)
-        assertEquals(listOf("2"), key.keys)
+        assertEquals(listOf("2"), prompt.keys(2))
+        assertNull(prompt.keys(3))
         assertEquals("2", key.label)
         assertTrue(key.accessibilityLabel.english!!.contains("No"))
     }
@@ -372,11 +373,11 @@ class AgentPromptTests {
     @Test fun optionKeyAddsEnterBesidePreview() {
         val prompt = assertNotNull(parse(claudePreview))
         val key = prompt.key(prompt.options[1])
-        assertEquals(listOf("2", "enter"), key.keys)
+        assertEquals(listOf("2", "enter"), prompt.keys(2))
         assertEquals("2", key.label)
         assertTrue(key.accessibilityLabel.english!!.contains("2: Revert the change"))
         val checkboxes = assertNotNull(parse(" Pick\n ❯ 1. [ ] A\n   2. [x] B\n")).copy(needsEnter = true)
-        assertEquals(listOf("1"), checkboxes.key(checkboxes.options[0]).keys)
+        assertEquals(listOf("1"), checkboxes.keys(1))
     }
 
     /** Claude 给选项配了代码预览：框裁掉后照常认，按了编号键还要回车。 */

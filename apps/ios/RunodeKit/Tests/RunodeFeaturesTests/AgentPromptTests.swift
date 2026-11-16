@@ -251,7 +251,8 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
         let prompt = try #require(parse(" Proceed?\n ❯ 1. Yes\n   2. No\n"))
         let key = prompt.key(for: prompt.options[1])
         #expect(key.key == "2")
-        #expect(key.keys == ["2"])
+        #expect(prompt.keys(for: 2) == ["2"])
+        #expect(prompt.keys(for: 3) == nil)
         #expect(key.label == "2")
         #expect(key.accessibilityLabel.contains("No"))
     }
@@ -259,11 +260,11 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
     /// 有预览的提问按了编号键再按回车；多选题按编号键是切换勾选，不跟着回车。
     @Test func optionKeyAddsEnterOnlyWhereTheNumberJustMovesTheCursor() throws {
         let preview = try #require(parse(claudePreview))
-        #expect(preview.key(for: preview.options[1]).keys == ["2", "enter"])
+        #expect(preview.keys(for: 2) == ["2", "enter"])
         #expect(preview.key(for: preview.options[1]).accessibilityLabel.contains("Revert the change"))
         var checkboxes = try #require(parse(" Pick\n ❯ 1. [ ] A\n   2. [x] B\n"))
         checkboxes.needsEnter = true
-        #expect(checkboxes.key(for: checkboxes.options[1]).keys == ["2"])
+        #expect(checkboxes.keys(for: 2) == ["2"])
     }
 
     /// Claude 给选项配了代码预览：预览框画在选项右边，框下面一行说明，再下面是不带编号的「Chat about this」和

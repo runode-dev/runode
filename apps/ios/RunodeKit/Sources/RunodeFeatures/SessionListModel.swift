@@ -226,7 +226,7 @@ public final class SessionListModel {
     @ObservationIgnored private var throttle: PreviewThrottle
     @ObservationIgnored private let now: () -> ContinuousClock.Instant
     @ObservationIgnored private var quickReplies: [SessionId: QuickReplyModel] = [:]
-    /// 每个会话在等的那次读屏幕是哪种，回话按会话对上：`ScreenText` 不带请求编号，宿主又是各自起线程
+    /// 每个会话在等的那次读屏幕是哪种，回话按会话对上：这些读屏不带请求编号，回话也不带，宿主又是各自起线程
     /// 回话，两次同时在路上时回话可能先后颠倒、对错读法，所以同一个会话同时只读一次（`sendPreviewRead`）。
     @ObservationIgnored private var pendingPreviews: [SessionId: PreviewRead] = [:]
     /// 读着的时候又要刷新的会话：这次（连同退回读屏幕底部的后半）有了回话再读一次。
@@ -532,9 +532,10 @@ public final class SessionListModel {
     /// 那个会话可能已经不在等这个回答了。
     public func quickReply(for id: SessionId) -> QuickReplyModel {
         if let existing = quickReplies[id] { return existing }
-        let model = QuickReplyModel(sessionId: id, link: link, connected: connected && listCurrent) { [weak self] id in
-            self?.answered(id)
-        }
+        let model = QuickReplyModel(
+            sessionId: id, link: link, connected: connected && listCurrent,
+            onDelivered: { [weak self] id in self?.answered(id) },
+            onStale: { [weak self] id in self?.requestPreview(id) })
         quickReplies[id] = model
         return model
     }
@@ -840,7 +841,7 @@ public final class SessionListModel {
             requestPreview(id)
         case .bell(let id):
             requestPreview(id)
-        case .screenText(let id, let text, _, _):
+        case .screenText(let id, let text, _, nil):
             let read = pendingPreviews.removeValue(forKey: id) ?? .bottomLines(atPrompt: false)
             guard session(id) != nil else { return }
             let waiting = session(id).map(SessionGroup.of) == .waiting

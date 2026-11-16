@@ -323,13 +323,97 @@ class QuickReplyTests {
 
     private val link = FakeLink()
 
-    /** 一个键带着几个键名（[QuickKey.keys]）时一次 `send_keys` 依次发出。 */
-    @Test fun aKeyWithSeveralNamesGoesOutInOneSendKeys() {
-        val reply = QuickReplyModel(waiting, link)
-        reply.press(QuickKey("2", "2", UiText.Raw("2"), keys = listOf("2", "enter")))
-        val keys = assertIs<ClientMsg.SendKeys>(link.sent.single())
+    /** 选提问里一项先重读屏幕，还是那一题（光标挪过了也算）才按读到的提问上要按的键，一次 `send_keys` 发完。 */
+    @Test fun anOptionRereadsTheScreenBeforeAnswering() {
+        val delivered = mutableListOf<SessionId>()
+        val stale = mutableListOf<SessionId>()
+        val reply = QuickReplyModel(waiting, link, onStale = { stale += it }) { delivered += it }
+        val shown = assertNotNull(AgentPrompt.parse(previewPrompt(cursorAt = 1)))
+        reply.press(shown.key(shown.options[1]))
+        val read = assertIs<ClientMsg.ReadScreen>(link.sent.single())
+        assertEquals(waiting, read.id)
+        assertTrue(reply.handle(HostMsg.ScreenText(waiting, previewPrompt(cursorAt = 2).joinToString("\n"), false, read.req)))
+        val keys = assertIs<ClientMsg.SendKeys>(link.sent.last())
         assertEquals(ClientMsg.SendKeys(keys.req, waiting, listOf("2", "enter")), keys)
+        assertTrue(delivered.isEmpty())
+        assertTrue(reply.handle(HostMsg.Done(keys.req)))
+        assertEquals(listOf(waiting), delivered)
+        assertTrue(stale.isEmpty())
     }
+
+    /** 重读到的屏幕上换了提问：不按，算失败，让界面刷新提问。 */
+    @Test fun anOptionIsNotPressedOnAChangedQuestion() {
+        val stale = mutableListOf<SessionId>()
+        val reply = QuickReplyModel(waiting, link, onStale = { stale += it })
+        val shown = assertNotNull(AgentPrompt.parse(previewPrompt(cursorAt = 1)))
+        reply.press(shown.key(shown.options[1]))
+        val read = assertIs<ClientMsg.ReadScreen>(link.sent.single())
+        assertTrue(reply.handle(HostMsg.ScreenText(waiting, " Next?\n ❯ 1. Yes\n   2. No\n", false, read.req)))
+        assertEquals(1, link.sent.size)
+        assertEquals(1, reply.failedCount)
+        assertNotNull(reply.errorMessage)
+        assertEquals(listOf(waiting), stale)
+    }
+
+    /** 连着点两个复选框：后一下重读到的屏幕上前一项已经勾上，也还是同一题。 */
+    @Test fun aCheckboxStillCountsAfterAnotherWasTicked() {
+        val reply = QuickReplyModel(waiting, link)
+        val shown = assertNotNull(AgentPrompt.parse(listOf(" Pick", " ❯ 1. [ ] A", "   2. [ ] B")))
+        reply.press(shown.key(shown.options[1]))
+        val read = assertIs<ClientMsg.ReadScreen>(link.sent.single())
+        assertTrue(reply.handle(HostMsg.ScreenText(waiting, " Pick\n   1. [x] A\n ❯ 2. [ ] B\n", false, read.req)))
+        val keys = assertIs<ClientMsg.SendKeys>(link.sent.last())
+        assertEquals(listOf("2"), keys.keys)
+    }
+
+    /** 单选题的回答在路上时又点的选项作废：键送到时 agent 未必已经重画，重读认不出这一问已经答过。 */
+    @Test fun anotherOptionOnASingleChoiceIsDropped() {
+        val delivered = mutableListOf<SessionId>()
+        val reply = QuickReplyModel(waiting, link) { delivered += it }
+        val shown = assertNotNull(AgentPrompt.parse(previewPrompt(cursorAt = 1)))
+        reply.press(shown.key(shown.options[0]))
+        reply.press(shown.key(shown.options[1]))
+        val read = assertIs<ClientMsg.ReadScreen>(link.sent.single())
+        assertTrue(reply.handle(HostMsg.ScreenText(waiting, previewPrompt(cursorAt = 1).joinToString("\n"), false, read.req)))
+        val keys = assertIs<ClientMsg.SendKeys>(link.sent.last())
+        assertEquals(listOf("1", "enter"), keys.keys)
+        assertEquals(2, link.sent.size)
+        reply.press(shown.key(shown.options[1]))
+        assertTrue(reply.handle(HostMsg.Done(keys.req)))
+        assertEquals(2, link.sent.size)
+        assertEquals(listOf(waiting), delivered)
+        assertEquals(0, reply.failedCount)
+    }
+
+    /** 多选题的回答在路上时又点的复选框排着，前一个送到后照样重读、切换。 */
+    @Test fun checkboxesQueueBehindEachOther() {
+        val reply = QuickReplyModel(waiting, link)
+        val shown = assertNotNull(AgentPrompt.parse(listOf(" Pick", " ❯ 1. [ ] A", "   2. [ ] B")))
+        reply.press(shown.key(shown.options[0]))
+        reply.press(shown.key(shown.options[1]))
+        val first = assertIs<ClientMsg.ReadScreen>(link.sent.single())
+        assertTrue(reply.handle(HostMsg.ScreenText(waiting, " Pick\n ❯ 1. [ ] A\n   2. [ ] B\n", false, first.req)))
+        val keys = assertIs<ClientMsg.SendKeys>(link.sent.last())
+        assertEquals(listOf("1"), keys.keys)
+        assertTrue(reply.handle(HostMsg.Done(keys.req)))
+        val second = assertIs<ClientMsg.ReadScreen>(link.sent.last())
+        assertEquals(3, link.sent.size)
+        assertTrue(reply.handle(HostMsg.ScreenText(waiting, " Pick\n ❯ 1. [x] A\n   2. [ ] B\n", false, second.req)))
+        assertEquals(listOf("2"), assertIs<ClientMsg.SendKeys>(link.sent.last()).keys)
+        assertEquals(4, link.sent.size)
+    }
+
+    private fun previewPrompt(cursorAt: Int): List<String> = listOf(
+        " Which one?",
+        "",
+        "${if (cursorAt == 1) "❯" else " "} 1. Keep it           ┌──────┐",
+        "${if (cursorAt == 2) "❯" else " "} 2. Revert it         │ code │",
+        "                       └──────┘",
+        "",
+        "  Notes: press n to add notes",
+        "",
+        " Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel",
+    )
 
     @Test fun keysGoOutAsSendKeys() {
         val reply = QuickReplyModel(waiting, link)

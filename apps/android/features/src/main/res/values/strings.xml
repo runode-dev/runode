@@ -156,6 +156,7 @@
     <string name="prompt_option_unchecked">Not checked</string>
     <string name="reply_too_long">The text is too long to send</string>
     <string name="reply_not_sent">Not sent: %1$s</string>
+    <string name="reply_question_changed">The question changed, nothing was sent</string>
     <string name="reply_connection_lost">The connection dropped; your reply may not have been delivered</string>
     <string name="not_connected">Not connected</string>
 
