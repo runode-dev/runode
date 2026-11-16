@@ -691,6 +691,9 @@ struct MacWindowState {
     // the titlebar or delay titlebar clicks (a delay first observed on macOS 27). Such
     // windows draw their own titlebar and move the window via `start_window_move`.
     app_owns_titlebar_drag: bool,
+    // The window drag in progress when the platform layer moves the window itself rather
+    // than handing the drag to AppKit; `None` when no such drag is in progress.
+    manual_window_drag: Option<ManualWindowDrag>,
     fullscreen_restore_bounds: Bounds<Pixels>,
     is_exiting_fullscreen: bool,
     simple_fullscreen_state: Option<SimpleFullscreenState>,
@@ -1153,6 +1156,7 @@ impl MacWindow {
                 external_files_dragged: false,
                 first_mouse: false,
                 app_owns_titlebar_drag,
+                manual_window_drag: None,
                 fullscreen_restore_bounds: Bounds::default(),
                 is_exiting_fullscreen: false,
                 simple_fullscreen_state: None,
@@ -2257,7 +2261,7 @@ impl PlatformWindow for MacWindow {
     }
 
     fn start_window_move(&self) {
-        let this = self.0.lock();
+        let mut this = self.0.lock();
         if this.simple_fullscreen_state.is_some() {
             return;
         }
@@ -2266,7 +2270,30 @@ impl PlatformWindow for MacWindow {
         unsafe {
             let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
             let event: *mut AnyObject = msg_send![app, currentEvent];
-            let _: () = msg_send![window, performWindowDragWithEvent: event];
+            if window_drag_handoff_unreliable() {
+                if event.is_null() || this.is_fullscreen() || this.is_exiting_fullscreen {
+                    return;
+                }
+                let movable: Bool = msg_send![window, isMovable];
+                if !movable.as_bool() {
+                    return;
+                }
+                let event_type: NSEventType = msg_send![event, type];
+                if !matches!(
+                    event_type,
+                    NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged
+                ) {
+                    return;
+                }
+                let frame: NSRect = msg_send![window, frame];
+                this.manual_window_drag = Some(ManualWindowDrag {
+                    start_mouse: msg_send![class!(NSEvent), mouseLocation],
+                    start_origin: frame.origin,
+                    moved: false,
+                });
+            } else {
+                let _: () = msg_send![window, performWindowDragWithEvent: event];
+            }
         }
     }
 
@@ -2855,6 +2882,34 @@ extern "C" fn handle_view_event(this: &AnyObject, _: Sel, native_event: *mut Any
     let mut lock = window_state.as_ref().lock();
     let window_height = lock.content_size().height;
     let native_event_type: NSEventType = unsafe { msg_send![native_event, type] };
+    let native_window = lock.native_window;
+    if let Some(drag) = lock.manual_window_drag.as_mut() {
+        match native_event_type {
+            NSEventType::LeftMouseDragged => {
+                let origin = drag.origin_for_current_mouse(native_window);
+                drag.moved = true;
+                drop(lock);
+                // Not under the lock: `setFrameOrigin:` calls `window_did_move` synchronously.
+                unsafe {
+                    let _: () = msg_send![native_window, setFrameOrigin: origin];
+                }
+                return;
+            }
+            NSEventType::LeftMouseUp => {
+                let moved = drag.moved;
+                lock.manual_window_drag = None;
+                if moved {
+                    // The release that ends a window move is not passed on, so it does
+                    // not count as a click on whatever was under the pointer.
+                    lock.last_left_mouse_down_event = None;
+                    lock.synthetic_drag_counter += 1;
+                    return;
+                }
+            }
+            NSEventType::LeftMouseDown => lock.manual_window_drag = None,
+            _ => {}
+        }
+    }
     match native_event_type {
         NSEventType::LeftMouseDown => {
             // AppKit owns `native_event` for the callback; retain it so the drag session can still
@@ -3138,6 +3193,61 @@ extern "C" fn window_did_exit_fullscreen(this: &AnyObject, _: Sel, _: *mut AnyOb
 
 pub(crate) fn is_macos_version_at_least(version: NSOperatingSystemVersion) -> bool {
     NSProcessInfo::processInfo().isOperatingSystemAtLeastVersion(version)
+}
+
+// From macOS 27.2 WindowServer intermittently rejects the drag that `performWindowDragWithEvent:`
+// asks for ("no client initiated window drag trait gesture"), leaving the window in place, so
+// `start_window_move` moves the window itself there.
+// shortcut: such drags do not reach system features driven by server-side drags (edge tiling,
+// Mission Control, Spaces); hand the drag back to AppKit once WindowServer accepts it again.
+fn window_drag_handoff_unreliable() -> bool {
+    static UNRELIABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *UNRELIABLE.get_or_init(|| {
+        is_macos_version_at_least(NSOperatingSystemVersion {
+            majorVersion: 27,
+            minorVersion: 2,
+            patchVersion: 0,
+        })
+    })
+}
+
+struct ManualWindowDrag {
+    // Pointer position in screen coordinates when the drag started.
+    start_mouse: NSPoint,
+    start_origin: NSPoint,
+    moved: bool,
+}
+
+impl ManualWindowDrag {
+    // The window origin that keeps the pointer at the same spot in the window, with the top
+    // edge kept below the menu bar of the screen under the pointer.
+    fn origin_for_current_mouse(&self, native_window: *mut AnyObject) -> NSPoint {
+        unsafe {
+            let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
+            let mut origin = NSPoint::new(
+                self.start_origin.x + mouse.x - self.start_mouse.x,
+                self.start_origin.y + mouse.y - self.start_mouse.y,
+            );
+            let frame: NSRect = msg_send![native_window, frame];
+            let screens: *mut AnyObject = msg_send![class!(NSScreen), screens];
+            let count: NSUInteger = msg_send![screens, count];
+            for index in 0..count {
+                let screen: *mut AnyObject = msg_send![screens, objectAtIndex: index];
+                let screen_frame: NSRect = msg_send![screen, frame];
+                let contains_mouse = mouse.x >= screen_frame.origin.x
+                    && mouse.x <= screen_frame.origin.x + screen_frame.size.width
+                    && mouse.y >= screen_frame.origin.y
+                    && mouse.y <= screen_frame.origin.y + screen_frame.size.height;
+                if contains_mouse {
+                    let visible: NSRect = msg_send![screen, visibleFrame];
+                    let max_y = visible.origin.y + visible.size.height - frame.size.height;
+                    origin.y = origin.y.min(max_y);
+                    break;
+                }
+            }
+            origin
+        }
+    }
 }
 
 fn ns_error_description(error: *mut AnyObject) -> String {
