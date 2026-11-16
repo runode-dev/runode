@@ -12,7 +12,7 @@ import dev.runode.mobile.protocol.HostMsg
 import dev.runode.mobile.protocol.SessionId
 
 /**
- * 快速回复栏上的一个键：显示的字、发给宿主的键名（`send_keys` 的写法）、给读屏读的名字。功能键另带 [symbol]，
+ * 快速回复栏上的一个键：显示的字、键名（`send_keys` 的写法）、给读屏读的名字。功能键另带 [symbol]，
  * 界面按它画图标、不显示字。
  */
 data class QuickKey(
@@ -21,6 +21,8 @@ data class QuickKey(
     val accessibilityLabel: UiText,
     /** 图标的名字（`return`、`arrowtriangle.up.fill` 这类），界面换成自己的图标。 */
     val symbol: String? = null,
+    /** 按下去依次发给宿主的键，`send_keys` 的写法。 */
+    val keys: List<String> = listOf(key),
 ) {
     val id: String get() = key
 
@@ -89,7 +91,7 @@ class QuickReplyModel(
         if (!ensureConnected()) return
         val req = link.nextRequestId()
         begin(listOf(req))
-        link.send(ClientMsg.SendKeys(req, sessionId, listOf(key.key)))
+        link.send(ClientMsg.SendKeys(req, sessionId, key.keys))
     }
 
     /** 把文本框里的字粘贴进去再按回车。 */

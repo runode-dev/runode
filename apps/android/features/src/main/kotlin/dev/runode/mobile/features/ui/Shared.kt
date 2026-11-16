@@ -235,7 +235,7 @@ internal enum class PromptOptionLayout {
 }
 
 /**
- * 认出来的提问（[AgentPrompt]）的选项，按下去交给 [onPress] 发编号键。默认项是琥珀色，其余中性；[PromptOptionLayout.Rows] 里的原文由
+ * 认出来的提问（[AgentPrompt]）的选项，按下去交给 [onPress] 发这一项的键（[AgentPrompt.key]）。默认项是琥珀色，其余中性；[PromptOptionLayout.Rows] 里的原文由
  * [OptionText] 画，[PromptOptionLayout.Compact] 里只有一行标签，再长就截断。读屏念「发送 编号：原文」，默认项是选中的。
  * 带复选框的项在编号后画勾没勾，读屏念勾没勾；多选题（[AgentPrompt.isMultiSelect]）没有默认项。
  */
@@ -245,12 +245,12 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
     when (layout) {
         PromptOptionLayout.Rows -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             for (option in prompt.options) {
-                val label = stringResource(R.string.send_key, option.key.accessibilityLabel.resolve())
+                val label = stringResource(R.string.send_key, prompt.key(option).accessibilityLabel.resolve())
                 val state = checkboxState(option.checkbox)
                 val highlighted = prompt.highlights(option)
                 SurfaceButton(
                     kind = if (highlighted) ActionKind.Waiting else ActionKind.Raised,
-                    onClick = { onPress(option.key) },
+                    onClick = { onPress(prompt.key(option)) },
                     enabled = enabled,
                     height = 46.dp,
                     selected = prompt.selection(option),
@@ -288,12 +288,12 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
         PromptOptionLayout.Compact -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val shown = prompt.compactOptions
             for (option in shown) {
-                val label = stringResource(R.string.send_key, option.key.accessibilityLabel.resolve())
+                val label = stringResource(R.string.send_key, prompt.key(option).accessibilityLabel.resolve())
                 val state = checkboxState(option.checkbox)
                 val highlighted = prompt.highlights(option)
                 SurfaceButton(
                     kind = if (highlighted) ActionKind.Waiting else ActionKind.Raised,
-                    onClick = { onPress(option.key) },
+                    onClick = { onPress(prompt.key(option)) },
                     enabled = enabled,
                     selected = prompt.selection(option),
                     contentPadding = 12.dp,
@@ -330,7 +330,7 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
                     }
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         for (option in prompt.options) {
-                            val description = stringResource(R.string.send_key, option.key.accessibilityLabel.resolve())
+                            val description = stringResource(R.string.send_key, prompt.key(option).accessibilityLabel.resolve())
                             val state = checkboxState(option.checkbox)
                             DropdownMenuItem(
                                 text = {
@@ -345,7 +345,7 @@ internal fun PromptOptions(prompt: AgentPrompt, layout: PromptOptionLayout, enab
                                 },
                                 onClick = {
                                     expanded = false
-                                    onPress(option.key)
+                                    onPress(prompt.key(option))
                                 },
                                 modifier = Modifier.semantics {
                                     contentDescription = description

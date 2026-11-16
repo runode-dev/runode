@@ -484,3 +484,132 @@ fn not_a_checkbox() {
     let prompt = parse(" Do you want to proceed?\n ❯ 1. Yes\n   2. [beta] No\n").unwrap();
     assert!(!prompt.multi_select());
 }
+
+/// Claude 给选项配了代码预览：预览框画在选项右边，框下面一行说明，再下面是不带编号的「Chat about this」和按键
+/// 提示。框裁掉后照常认，按了编号键还要回车。
+const CLAUDE_PREVIEW: &str = "\
+───────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Makefile
+
+│ Should I keep or revert the Makefile change that made the layers target use $(CARGO) instead of bare
+│ cargo?
+
+❯ 1. Keep the change              ┌──────────────────────────────────────────┐
+  2. Revert the change            │ layers: ## ...                           │
+                                  │         $(CARGO) deny check bans         │
+                                  │         python3 scripts/check-layers.py  │
+                                  └──────────────────────────────────────────┘
+
+                                  Notes: press n to add notes
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────
+  Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel
+";
+
+#[test]
+fn claude_question_with_previews() {
+    let prompt = parse(CLAUDE_PREVIEW).unwrap();
+    assert_eq!(
+        prompt.question,
+        [
+            "Should I keep or revert the Makefile change that made the layers target use $(CARGO) instead of bare",
+            "cargo?"
+        ]
+    );
+    assert_eq!(texts(&prompt), ["Keep the change", "Revert the change"]);
+    assert_eq!(selected(&prompt), [true, false]);
+    assert!(prompt.needs_enter);
+}
+
+/// 预览框跟着光标换内容，框比选项多几行时选项下面的框里也是预览，不算续行。
+#[test]
+fn claude_preview_taller_than_options_with_cursor_moved() {
+    let screen = "\
+ Which one?
+
+  1. Alpha            ┌──────────┐
+❯ 2. Beta             │ beta()   │
+  3. Gamma            │   .x()   │
+                      │   .y()   │
+                      └──────────┘
+
+                      Notes: press n to add notes
+
+  Chat about this
+
+Enter to select · Esc to cancel
+";
+    let prompt = parse(screen).unwrap();
+    assert_eq!(prompt.question, ["Which one?"]);
+    assert_eq!(texts(&prompt), ["Alpha", "Beta", "Gamma"]);
+    assert_eq!(selected(&prompt), [false, true, false]);
+    assert!(prompt.needs_enter);
+}
+
+/// 没有预览的提问按编号键就选定。
+#[test]
+fn plain_prompt_needs_no_enter() {
+    let prompt = parse(" Do you want to proceed?\n ❯ 1. Yes\n   2. No (esc)\n").unwrap();
+    assert!(!prompt.needs_enter);
+}
+
+/// 选项比预览那一栏高时，框下面的说明画在某个选项右边，裁掉，不混进选项原文。
+#[test]
+fn claude_preview_shorter_than_options() {
+    let screen = "\
+ Which one?
+
+❯ 1. Alpha            ┌──────────┐
+  2. Beta             │ a()      │
+  3. Gamma            └──────────┘
+  4. Delta
+  5. Echo             Notes: press n to add notes
+
+Enter to select · Esc to cancel
+";
+    let prompt = parse(screen).unwrap();
+    assert_eq!(texts(&prompt), ["Alpha", "Beta", "Gamma", "Delta", "Echo"]);
+    assert!(prompt.needs_enter);
+}
+
+/// 上面的输出里有编号项旁边画着框，下面是没有预览的提问：不算预览，选项也不裁。
+#[test]
+fn box_beside_a_numbered_line_above_a_plain_prompt() {
+    let screen = "\
+ 1. Client   ┌────────┐
+             │ server │
+             └────────┘
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for this command
+   3. No, and tell Claude what to do differently (esc)
+";
+    let prompt = parse(screen).unwrap();
+    assert_eq!(prompt.question, ["Do you want to proceed?"]);
+    assert_eq!(texts(&prompt).len(), 3);
+    assert!(!prompt.needs_enter);
+}
+
+/// 预览里的示意图自己画着框：选项右边靠下的内框不当成预览框。
+#[test]
+fn claude_preview_with_a_box_inside() {
+    let screen = "\
+❯ 1. Sidebar          ┌────────────────────┐
+  2. Tabs             │  ┌──────┐          │
+  3. Single           │  │ nav  │  main    │
+                      │  └──────┘          │
+                      └────────────────────┘
+
+                      Notes: press n to add notes
+
+  Chat about this
+
+Enter to select · Esc to cancel
+";
+    let prompt = parse(screen).unwrap();
+    assert_eq!(texts(&prompt), ["Sidebar", "Tabs", "Single"]);
+    assert!(prompt.needs_enter);
+}

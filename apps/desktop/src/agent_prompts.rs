@@ -138,6 +138,7 @@ impl Asked {
     }
 
     /// 屏幕 `screen` 上认出的提问，认不出时为空。
+    #[cfg(test)]
     fn on(screen: &str) -> Option<Self> {
         prompt::parse(screen).map(|prompt| Self::of(&prompt))
     }
@@ -387,7 +388,7 @@ pub fn watch_terminal(view: &Entity<TerminalView>, cx: &mut App) {
 }
 
 /// 替用户回答会话 `key` 认出的提问，选编号 `number` 那一项：先重读屏幕，上面还是用户看到的那个提问（`Asked`）
-/// 才按这个数字键，不是了只按读到的更新提问。没认出提问、提问里没有这一项、上一次回答还没办完时什么都
+/// 才按选这一项的键（`answer_keys`），不是了只按读到的更新提问。没认出提问、提问里没有这一项、上一次回答还没办完时什么都
 /// 不做。
 pub fn answer(key: &Key, number: u8, cx: &mut App) {
     let Some(entry) = watched(key, cx) else { return };
@@ -473,14 +474,24 @@ fn run(job: Job, id: SessionId, access: &Access) -> Outcome {
         Err(err) => return Outcome::Failed(err),
     };
     match job {
-        Job::Answer { number, expected } if Asked::on(&screen).as_ref() == Some(&expected) => {
-            match (access.keys)(id, vec![number.to_string()]) {
+        Job::Answer { number, expected } => match prompt::parse(&screen) {
+            Some(found) if Asked::of(&found) == expected => match (access.keys)(id, answer_keys(&found, number)) {
                 Ok(()) => Outcome::Sent,
                 Err(err) => Outcome::Failed(err),
-            }
-        }
-        _ => Outcome::Screen(screen),
+            },
+            _ => Outcome::Screen(screen),
+        },
+        Job::Read => Outcome::Screen(screen),
     }
+}
+
+/// 在提问 `prompt` 上选第 `number` 项要按的键。多选题不跟回车。
+fn answer_keys(prompt: &Prompt, number: u8) -> Vec<String> {
+    let mut keys = vec![number.to_string()];
+    if prompt.needs_enter && !prompt.multi_select() {
+        keys.push("enter".to_owned());
+    }
+    keys
 }
 
 /// 在跟的会话 `key` 的记账。
@@ -979,5 +990,16 @@ mod tests {
         assert!(!state.awaiting_change());
         state.meta(true, Some(1));
         assert!(state.note_screen(ASKING));
+    }
+
+    #[test]
+    fn answer_keys_add_enter_only_where_the_number_just_moves_the_cursor() {
+        let mut prompt = prompt::parse(ASKING).unwrap();
+        assert_eq!(answer_keys(&prompt, 2), ["2"]);
+        prompt.needs_enter = true;
+        assert_eq!(answer_keys(&prompt, 2), ["2", "enter"]);
+        let mut checkboxes = prompt::parse(" Pick\n ❯ 1. [ ] A\n   2. [x] B\n").unwrap();
+        checkboxes.needs_enter = true;
+        assert_eq!(answer_keys(&checkboxes, 1), ["1"]);
     }
 }

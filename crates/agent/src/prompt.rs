@@ -1,5 +1,5 @@
-//! agent 在屏幕底部问的带编号的问题：上面几行问的是什么，下面一列选项。选一项发的是它的编号键，
-//! 认错了的后果和用户自己按一个数字键一样。屏幕文字由调用方读好了交进来，一行一个，用 `\n` 分开。
+//! agent 在屏幕底部问的带编号的问题：上面几行问的是什么，下面一列选项。选一项发的是它的编号键（`Prompt::needs_enter`
+//! 时再按回车），认错了的后果和用户自己按这几个键一样。屏幕文字由调用方读好了交进来，一行一个，用 `\n` 分开。
 
 use std::ops::Range;
 
@@ -10,6 +10,8 @@ pub struct Prompt {
     pub question: Vec<String>,
     /// 从 1 起连续编号，至少两个。
     pub options: Vec<PromptOption>,
+    /// 按了编号键还要按回车才选定：Claude 给选项配了预览（画在选项右边的框）时，编号键只把光标挪到那一项。
+    pub needs_enter: bool,
 }
 
 /// 提问里的一个选项。
@@ -74,8 +76,29 @@ const BORDERS: [char; 3] = ['│', '┃', '║'];
 /// 找到一块编号从 1 起连续、至少两项的选项；选项之间可以夹空行和制表线，缩进到选项正文那一列的下一行
 /// 算这一项的续行。选项块上面至多 `MAX_QUESTION_LINES` 行有字的行是问题，遇到制表线或别的
 /// 选项为止，标签条（`TAB_BAR_LEADS`）跳过。行首行尾的框线（`BORDERS`）先去掉。选项超过 `MAX_OPTIONS` 个时认不出。
+/// 选项右边配了预览时（`preview_corners`），从框上沿那一行起各行只取框那一列左边的部分再认，框上沿那一行要落在
+/// 认出的选项块里才算；从上往下逐个试，都不算时照没有预览认。
 pub fn parse(screen: &str) -> Option<Prompt> {
-    let entries = merge(screen.split('\n').map(Entry::new));
+    let rows: Vec<&str> = screen.split('\n').collect();
+    for (start, column) in preview_corners(&rows) {
+        let cropped: Vec<&str> = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| match split_at_column(row, column) {
+                Some((left, _)) if index >= start => left,
+                _ => row,
+            })
+            .collect();
+        if let Some(prompt) = parse_rows(&cropped, Some(start)) {
+            return Some(prompt);
+        }
+    }
+    parse_rows(&rows, None)
+}
+
+/// 按 `parse` 的认法认 `rows`；给了 `corner` 时它是预览框上沿所在的行，要落在选项块第一项到最后一项之间。
+fn parse_rows(rows: &[&str], corner: Option<usize>) -> Option<Prompt> {
+    let entries = merge(rows.iter().enumerate().map(|(row, raw)| Entry::at(raw, row)));
     let mut index = entries.len();
     let mut trailing = 0;
     let last = loop {
@@ -114,6 +137,11 @@ pub fn parse(screen: &str) -> Option<Prompt> {
         }
     }
     lines.reverse();
+    if let Some(corner) = corner
+        && !(lines.first()?.row..=lines.last()?.row).contains(&corner)
+    {
+        return None;
+    }
 
     let block_top = index;
     let mut question = Vec::new();
@@ -136,7 +164,33 @@ pub fn parse(screen: &str) -> Option<Prompt> {
             selected: line.selected,
         })
         .collect();
-    Some(Prompt { question, options })
+    Some(Prompt { question, options, needs_enter: corner.is_some() })
+}
+
+/// Claude 给选项配了预览时把它画在选项右边的框里，框和框下面的说明都在框那一列的右边，选项折行留在左边。
+/// 从上往下列出左边是选项、右边隔着空白画着框上沿（`┌`）的行，各带着它的下标和框从第几列起；预览里画的内框和
+/// 上面输出里的框也会列进来。
+fn preview_corners<'a>(rows: &'a [&'a str]) -> impl Iterator<Item = (usize, usize)> + 'a {
+    rows.iter().enumerate().filter_map(|(index, row)| {
+        let corner = row.find("  ┌")? + 2;
+        OptionLine::new(row[..corner].trim_end())?;
+        Some((index, width_of(&row[..corner])))
+    })
+}
+
+/// 把 `row` 在第 `column` 列切成两段；不够那么宽、或者那一列落在宽字符中间时为空。
+fn split_at_column(row: &str, column: usize) -> Option<(&str, &str)> {
+    let mut width = 0;
+    for (index, c) in row.char_indices() {
+        if width == column {
+            return Some(row.split_at(index));
+        }
+        width += cell_width(c);
+        if width > column {
+            return None;
+        }
+    }
+    None
 }
 
 /// 选项块（从 `block_top` 起）上面最近的那条制表线，中间隔着别的选项或者没有时就是 `block_top`。
@@ -324,6 +378,15 @@ enum Entry {
 }
 
 impl Entry {
+    /// 屏幕第 `row` 行 `raw`。
+    fn at(raw: &str, row: usize) -> Self {
+        let mut entry = Self::new(raw);
+        if let Entry::Option(option) = &mut entry {
+            option.row = row;
+        }
+        entry
+    }
+
     fn new(raw: &str) -> Self {
         let line = unboxed(raw);
         if line.chars().all(char::is_whitespace) {
@@ -371,6 +434,8 @@ struct OptionLine {
     selected: bool,
     /// 正文从第几个字开始，折行的缩进要到这里。
     text_column: usize,
+    /// 选项那一行是屏幕的第几行。
+    row: usize,
 }
 
 impl OptionLine {
@@ -393,7 +458,7 @@ impl OptionLine {
         }
         let text_column = line.chars().count() - text.chars().count();
         let row = Row { text: text.to_owned(), end: width_of(line) };
-        Some(OptionLine { number, rows: vec![row], selected, text_column })
+        Some(OptionLine { number, rows: vec![row], selected, text_column, row: 0 })
     }
 }
 

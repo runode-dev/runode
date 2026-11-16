@@ -323,6 +323,14 @@ class QuickReplyTests {
 
     private val link = FakeLink()
 
+    /** 一个键带着几个键名（[QuickKey.keys]）时一次 `send_keys` 依次发出。 */
+    @Test fun aKeyWithSeveralNamesGoesOutInOneSendKeys() {
+        val reply = QuickReplyModel(waiting, link)
+        reply.press(QuickKey("2", "2", UiText.Raw("2"), keys = listOf("2", "enter")))
+        val keys = assertIs<ClientMsg.SendKeys>(link.sent.single())
+        assertEquals(ClientMsg.SendKeys(keys.req, waiting, listOf("2", "enter")), keys)
+    }
+
     @Test fun keysGoOutAsSendKeys() {
         val reply = QuickReplyModel(waiting, link)
         reply.press(QuickKey.standard.first { it.key == "enter" })

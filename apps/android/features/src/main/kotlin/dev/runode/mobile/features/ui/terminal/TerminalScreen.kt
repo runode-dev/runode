@@ -715,7 +715,7 @@ private fun AnswerRow(model: QuickReplyModel, prompt: AgentPrompt?, agentName: S
                     for (option in prompt.options) {
                         AnswerKey(
                             model,
-                            option.key,
+                            prompt.key(option),
                             if (prompt.highlights(option)) ActionKind.Waiting else ActionKind.Secondary,
                             prompt.selection(option),
                             option.checkbox,

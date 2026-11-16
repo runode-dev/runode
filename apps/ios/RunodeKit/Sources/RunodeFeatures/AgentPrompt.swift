@@ -1,12 +1,14 @@
 import Foundation
 
-/// agent 在屏幕底部问的带编号的问题：上面一两行问的是什么，下面一列选项。按下去发的是选项的编号键，
-/// 认错了的后果和通用的数字键一样。
+/// agent 在屏幕底部问的带编号的问题：上面一两行问的是什么，下面一列选项。按下去发的是选项的编号键
+/// （`needsEnter` 时再按回车），认错了的后果和用户自己按这几个键一样。
 public struct AgentPrompt: Hashable, Sendable {
     /// 选项上面有字的几行，从上往下，去掉了行首的空白。可能为空。
     public var question: [String]
     /// 从 1 起连续编号，至少两个。
     public var options: [Option]
+    /// 按了编号键还要按回车才选定：Claude 给选项配了预览（画在选项右边的框）时，编号键只把光标挪到那一项。
+    public var needsEnter = false
 
     public struct Option: Hashable, Sendable, Identifiable {
         public var number: Int
@@ -52,18 +54,20 @@ public struct AgentPrompt: Hashable, Sendable {
 
         /// 复选框勾上时方括号里的字。
         private static let checkMarks: Set<Unicode.Scalar> = ["x", "X", "✓", "✔", "*"]
-
-        /// 选这一项的键：编号本身，读屏念「编号：原文」，原文不带复选框。
-        public var key: QuickKey {
-            QuickKey(
-                label: String(number), key: String(number),
-                accessibilityLabel: String(localized: "\(number)：\(displayText)"))
-        }
     }
 
     /// 多选题：有选项以复选框开头（`Option.checkbox`）。按编号键切换那一项勾没勾，不是选定它。
     public var isMultiSelect: Bool {
         options.contains { $0.checkbox != nil }
+    }
+
+    /// 选 `option` 的键：编号本身，`needsEnter` 时再按回车；多选题不跟回车。
+    /// 读屏念「编号：原文」，原文不带复选框。
+    public func key(for option: Option) -> QuickKey {
+        QuickKey(
+            label: String(option.number), key: String(option.number),
+            accessibilityLabel: String(localized: "\(option.number)：\(option.displayText)"),
+            then: needsEnter && !isMultiSelect ? ["enter"] : [])
     }
 
     /// 回车会选的那一项：单选题里带光标记号的。多选题没有。
@@ -98,9 +102,21 @@ public struct AgentPrompt: Hashable, Sendable {
     /// 行别的字，找到一块编号从 1 起连续、至少两项的选项；选项之间可以夹空行和制表线，缩进到选项正文
     /// 那一列的下一行算这一项的续行。选项块上面至多 `maxQuestionLines` 行有字的行是问题，
     /// 遇到制表线或别的选项为止，标签条（`tabBarLeads`）跳过。行首行尾的框线（`│`）先去掉。选项超过
-    /// `maxOptions` 个时认不出。
+    /// `maxOptions` 个时认不出。选项右边配了预览时（`previewCorners`），从框上沿那一行起各行只取框那一列左边的
+    /// 部分再认，框上沿那一行要落在认出的选项块里才算；从上往下逐个试，都不算时照没有预览认。
     public static func parse(_ lines: [String]) -> AgentPrompt? {
-        let entries = merge(lines.map(Entry.init))
+        for (start, column) in previewCorners(lines) {
+            let cropped = lines.indices.map { index in
+                index >= start ? left(of: lines[index], column: column) ?? lines[index] : lines[index]
+            }
+            if let prompt = parse(rows: cropped, corner: start) { return prompt }
+        }
+        return parse(rows: lines, corner: nil)
+    }
+
+    /// 按 `parse(_:)` 的认法认 `rows`；给了 `corner` 时它是预览框上沿所在的行，要落在选项块第一项到最后一项之间。
+    private static func parse(rows: [String], corner: Int?) -> AgentPrompt? {
+        let entries = merge(rows.indices.map { Entry(rows[$0], row: $0) })
         var index = entries.count - 1
         var trailing = 0
         while index >= 0 {
@@ -131,6 +147,9 @@ public struct AgentPrompt: Hashable, Sendable {
             }
             index -= 1
         }
+        if let corner, let first = lines.last, let last = lines.first, !(first.row...last.row).contains(corner) {
+            return nil
+        }
 
         let blockTop = index + 1
         var question: [String] = []
@@ -147,7 +166,34 @@ public struct AgentPrompt: Hashable, Sendable {
         let options = lines.reversed().map {
             Option(number: $0.number, text: stripHint(joinRows($0.rows, width: width)), selected: $0.selected)
         }
-        return AgentPrompt(question: question, options: options)
+        return AgentPrompt(question: question, options: options, needsEnter: corner != nil)
+    }
+
+    /// Claude 给选项配了预览时把它画在选项右边的框里，框和框下面的说明都在框那一列的右边，选项折行留在左边。
+    /// 从上往下列出左边是选项、右边隔着空白画着框上沿（`┌`）的行，各带着它的下标和框从第几列起；预览里画的内框和
+    /// 上面输出里的框也会列进来。
+    private static func previewCorners(_ lines: [String]) -> [(start: Int, column: Int)] {
+        lines.indices.compactMap { index -> (start: Int, column: Int)? in
+            let line = lines[index]
+            guard let gap = line.range(of: "  ┌") else { return nil }
+            var left = line[..<gap.lowerBound]
+            let column = cellWidth(left.unicodeScalars) + 2
+            while let last = left.last, last.isWhitespace { left.removeLast() }
+            guard OptionLine(left) != nil else { return nil }
+            return (index, column)
+        }
+    }
+
+    /// `line` 第 `column` 列左边的部分；不够那么宽、或者那一列落在宽字符中间时为空。
+    private static func left(of line: String, column: Int) -> String? {
+        let scalars = line.unicodeScalars
+        var width = 0
+        for index in scalars.indices {
+            if width == column { return String(scalars[..<index]) }
+            width += cellWidth(scalars[index])
+            if width > column { return nil }
+        }
+        return nil
     }
 
     /// 选项块（从 `blockTop` 起）上面最近的那条制表线，中间隔着别的选项或者没有时就是 `blockTop`。
@@ -247,6 +293,15 @@ public struct AgentPrompt: Hashable, Sendable {
         case text(String, indent: Int, end: Int)
         case option(OptionLine)
 
+        /// 屏幕第 `row` 行 `raw`。
+        init(_ raw: String, row: Int) {
+            self.init(raw)
+            if case .option(var option) = self {
+                option.row = row
+                self = .option(option)
+            }
+        }
+
         init(_ raw: String) {
             let line = Self.unboxed(raw)
             if line.allSatisfy(\.isWhitespace) {
@@ -293,6 +348,8 @@ public struct AgentPrompt: Hashable, Sendable {
         var selected: Bool
         /// 正文从第几个字开始，折行的缩进要到这里。
         var textColumn: Int
+        /// 选项那一行是屏幕的第几行。
+        var row = 0
 
         static let markers: Set<Character> = ["❯", "›", ">", "▶", "●"]
 

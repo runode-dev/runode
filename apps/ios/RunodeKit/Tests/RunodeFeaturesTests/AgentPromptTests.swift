@@ -247,11 +247,149 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
     }
 
     /// 选项的键就是编号，读屏带着原文。
-    @Test func optionKeySendsTheNumber() {
-        let option = AgentPrompt.Option(number: 2, text: "No", selected: false)
-        #expect(option.key.key == "2")
-        #expect(option.key.label == "2")
-        #expect(option.key.accessibilityLabel.contains("No"))
+    @Test func optionKeySendsTheNumber() throws {
+        let prompt = try #require(parse(" Proceed?\n ❯ 1. Yes\n   2. No\n"))
+        let key = prompt.key(for: prompt.options[1])
+        #expect(key.key == "2")
+        #expect(key.keys == ["2"])
+        #expect(key.label == "2")
+        #expect(key.accessibilityLabel.contains("No"))
+    }
+
+    /// 有预览的提问按了编号键再按回车；多选题按编号键是切换勾选，不跟着回车。
+    @Test func optionKeyAddsEnterOnlyWhereTheNumberJustMovesTheCursor() throws {
+        let preview = try #require(parse(claudePreview))
+        #expect(preview.key(for: preview.options[1]).keys == ["2", "enter"])
+        #expect(preview.key(for: preview.options[1]).accessibilityLabel.contains("Revert the change"))
+        var checkboxes = try #require(parse(" Pick\n ❯ 1. [ ] A\n   2. [x] B\n"))
+        checkboxes.needsEnter = true
+        #expect(checkboxes.key(for: checkboxes.options[1]).keys == ["2"])
+    }
+
+    /// Claude 给选项配了代码预览：预览框画在选项右边，框下面一行说明，再下面是不带编号的「Chat about this」和
+    /// 按键提示。框裁掉后照常认，按了编号键还要回车。
+    private let claudePreview = """
+        ───────────────────────────────────────────────────────────────────────────────────────────────────────
+         ☐ Makefile
+
+        │ Should I keep or revert the Makefile change that made the layers target use $(CARGO) instead of bare
+        │ cargo?
+
+        ❯ 1. Keep the change              ┌──────────────────────────────────────────┐
+          2. Revert the change            │ layers: ## ...                           │
+                                          │         $(CARGO) deny check bans         │
+                                          │         python3 scripts/check-layers.py  │
+                                          └──────────────────────────────────────────┘
+
+                                          Notes: press n to add notes
+
+        ───────────────────────────────────────────────────────────────────────────────────────────────────────
+          Chat about this
+
+        Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel
+
+        """
+
+    @Test func claudeQuestionWithPreviews() throws {
+        let prompt = try #require(parse(claudePreview))
+        #expect(
+            prompt.question == [
+                "Should I keep or revert the Makefile change that made the layers target use $(CARGO) instead of bare",
+                "cargo?",
+            ])
+        #expect(texts(prompt) == ["Keep the change", "Revert the change"])
+        #expect(prompt.options.map(\.selected) == [true, false])
+        #expect(prompt.needsEnter)
+    }
+
+    /// 预览框跟着光标换内容，框比选项多几行时选项下面的框里也是预览，不算续行。
+    @Test func claudePreviewTallerThanOptionsWithCursorMoved() throws {
+        let screen = """
+             Which one?
+
+              1. Alpha            ┌──────────┐
+            ❯ 2. Beta             │ beta()   │
+              3. Gamma            │   .x()   │
+                                  │   .y()   │
+                                  └──────────┘
+
+                                  Notes: press n to add notes
+
+              Chat about this
+
+            Enter to select · Esc to cancel
+
+            """
+        let prompt = try #require(parse(screen))
+        #expect(prompt.question == ["Which one?"])
+        #expect(texts(prompt) == ["Alpha", "Beta", "Gamma"])
+        #expect(prompt.options.map(\.selected) == [false, true, false])
+        #expect(prompt.needsEnter)
+    }
+
+    /// 没有预览的提问按编号键就选定。
+    @Test func plainPromptNeedsNoEnter() throws {
+        let prompt = try #require(parse(" Do you want to proceed?\n ❯ 1. Yes\n   2. No (esc)\n"))
+        #expect(!prompt.needsEnter)
+    }
+
+    /// 选项比预览那一栏高时，框下面的说明画在某个选项右边，裁掉，不混进选项原文。
+    @Test func claudePreviewShorterThanOptions() throws {
+        let screen = """
+             Which one?
+
+            ❯ 1. Alpha            ┌──────────┐
+              2. Beta             │ a()      │
+              3. Gamma            └──────────┘
+              4. Delta
+              5. Echo             Notes: press n to add notes
+
+            Enter to select · Esc to cancel
+
+            """
+        let prompt = try #require(parse(screen))
+        #expect(texts(prompt) == ["Alpha", "Beta", "Gamma", "Delta", "Echo"])
+        #expect(prompt.needsEnter)
+    }
+
+    /// 上面的输出里有编号项旁边画着框，下面是没有预览的提问：不算预览，选项也不裁。
+    @Test func boxBesideANumberedLineAboveAPlainPrompt() throws {
+        let screen = """
+             1. Client   ┌────────┐
+                         │ server │
+                         └────────┘
+
+             Do you want to proceed?
+             ❯ 1. Yes
+               2. Yes, and don't ask again for this command
+               3. No, and tell Claude what to do differently (esc)
+
+            """
+        let prompt = try #require(parse(screen))
+        #expect(prompt.question == ["Do you want to proceed?"])
+        #expect(texts(prompt).count == 3)
+        #expect(!prompt.needsEnter)
+    }
+
+    /// 预览里的示意图自己画着框：选项右边靠下的内框不当成预览框。
+    @Test func claudePreviewWithABoxInside() throws {
+        let screen = """
+            ❯ 1. Sidebar          ┌────────────────────┐
+              2. Tabs             │  ┌──────┐          │
+              3. Single           │  │ nav  │  main    │
+                                  │  └──────┘          │
+                                  └────────────────────┘
+
+                                  Notes: press n to add notes
+
+              Chat about this
+
+            Enter to select · Esc to cancel
+
+            """
+        let prompt = try #require(parse(screen))
+        #expect(texts(prompt) == ["Sidebar", "Tabs", "Single"])
+        #expect(prompt.needsEnter)
     }
 
     /// 列表卡片并排放第一项和最后一项，编号和原文照旧；只有两项时就是这两项。
@@ -260,7 +398,7 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
         #expect(three.compactOptions.map(\.number) == [1, 3])
         #expect(three.compactOptions.map(\.text) == ["Yes", "No"])
         #expect(three.compactOptions.map(\.selected) == [true, false])
-        #expect(three.compactOptions.map(\.key.key) == ["1", "3"])
+        #expect(three.compactOptions.map { three.key(for: $0).key } == ["1", "3"])
         let two = try #require(parse(" Proceed?\n   1. Yes\n ❯ 2. No\n"))
         #expect(two.compactOptions == two.options)
     }
@@ -306,7 +444,7 @@ private func texts(_ prompt: AgentPrompt?) -> [String] {
             ])
         #expect(prompt.options.first?.selected == true)
         #expect(prompt.options.allSatisfy { !prompt.isDefault($0) })
-        #expect(prompt.options.first?.key.accessibilityLabel.contains("[") == false)
+        #expect(prompt.options.first.map { prompt.key(for: $0).accessibilityLabel.contains("[") } == false)
         #expect(prompt.asked.options.first == "[ ] 首页双 tab 切换")
         #expect(prompt.question == ["新用户引导先做哪一步？"])
 

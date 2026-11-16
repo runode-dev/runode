@@ -334,7 +334,7 @@ class AgentPromptTests {
             prompt.options.map { it.shownText },
         )
         assertEquals("[ ] 首页双 tab 切换", prompt.asked.options.first())
-        assertTrue(prompt.options.first().key.accessibilityLabel.english!!.contains("1: 首页双 tab 切换"))
+        assertTrue(prompt.key(prompt.options.first()).accessibilityLabel.english!!.contains("1: 首页双 tab 切换"))
     }
 
     /** 原文第一行是标签，换行后面的是说明，几行说明并成一行；复选框不算进标签。 */
@@ -360,9 +360,162 @@ class AgentPromptTests {
 
     /** 选项的键就是编号，读屏带着原文。 */
     @Test fun optionKeySendsTheNumber() {
-        val option = AgentPrompt.Option(2, "No", false)
-        assertEquals("2", option.key.key)
-        assertEquals("2", option.key.label)
-        assertTrue(option.key.accessibilityLabel.english!!.contains("No"))
+        val prompt = assertNotNull(parse(" Do you want to proceed?\n ❯ 1. Yes\n   2. No\n"))
+        val key = prompt.key(prompt.options[1])
+        assertEquals("2", key.key)
+        assertEquals(listOf("2"), key.keys)
+        assertEquals("2", key.label)
+        assertTrue(key.accessibilityLabel.english!!.contains("No"))
+    }
+
+    /** 选项配了预览时编号键只挪光标，选项的键跟着按回车；读屏念的不变。多选题按编号键是切换勾选，不跟回车。 */
+    @Test fun optionKeyAddsEnterBesidePreview() {
+        val prompt = assertNotNull(parse(claudePreview))
+        val key = prompt.key(prompt.options[1])
+        assertEquals(listOf("2", "enter"), key.keys)
+        assertEquals("2", key.label)
+        assertTrue(key.accessibilityLabel.english!!.contains("2: Revert the change"))
+        val checkboxes = assertNotNull(parse(" Pick\n ❯ 1. [ ] A\n   2. [x] B\n")).copy(needsEnter = true)
+        assertEquals(listOf("1"), checkboxes.key(checkboxes.options[0]).keys)
+    }
+
+    /** Claude 给选项配了代码预览：框裁掉后照常认，按了编号键还要回车。 */
+    @Test fun claudeQuestionWithPreviews() {
+        val prompt = assertNotNull(parse(claudePreview))
+        assertEquals(
+            listOf(
+                "Should I keep or revert the Makefile change that made the layers target use \$(CARGO) instead of bare",
+                "cargo?",
+            ),
+            prompt.question,
+        )
+        assertEquals(listOf("Keep the change", "Revert the change"), texts(prompt))
+        assertEquals(listOf(true, false), prompt.options.map { it.selected })
+        assertTrue(prompt.needsEnter)
+    }
+
+    /** 预览框跟着光标换内容，框比选项多几行时选项下面的框里也是预览，不算续行。 */
+    @Test fun claudePreviewTallerThanOptionsWithCursorMoved() {
+        val prompt = assertNotNull(
+            parse(
+                screen(
+                    " Which one?",
+                    "",
+                    "  1. Alpha            ┌──────────┐",
+                    "❯ 2. Beta             │ beta()   │",
+                    "  3. Gamma            │   .x()   │",
+                    "                      │   .y()   │",
+                    "                      └──────────┘",
+                    "",
+                    "                      Notes: press n to add notes",
+                    "",
+                    "  Chat about this",
+                    "",
+                    "Enter to select · Esc to cancel",
+                    "",
+                ),
+            ),
+        )
+        assertEquals(listOf("Which one?"), prompt.question)
+        assertEquals(listOf("Alpha", "Beta", "Gamma"), texts(prompt))
+        assertEquals(listOf(false, true, false), prompt.options.map { it.selected })
+        assertTrue(prompt.needsEnter)
+    }
+
+    /** 选项比预览那一栏高时，框下面的说明画在某个选项右边，裁掉，不混进选项原文。 */
+    @Test fun claudePreviewShorterThanOptions() {
+        val prompt = assertNotNull(
+            parse(
+                screen(
+                    " Which one?",
+                    "",
+                    "❯ 1. Alpha            ┌──────────┐",
+                    "  2. Beta             │ a()      │",
+                    "  3. Gamma            └──────────┘",
+                    "  4. Delta",
+                    "  5. Echo             Notes: press n to add notes",
+                    "",
+                    "Enter to select · Esc to cancel",
+                    "",
+                ),
+            ),
+        )
+        assertEquals(listOf("Alpha", "Beta", "Gamma", "Delta", "Echo"), texts(prompt))
+        assertTrue(prompt.needsEnter)
+    }
+
+    /** 上面的输出里有编号项旁边画着框，下面是没有预览的提问：不算预览，选项也不裁。 */
+    @Test fun boxBesideANumberedLineAboveAPlainPrompt() {
+        val prompt = assertNotNull(
+            parse(
+                screen(
+                    " 1. Client   ┌────────┐",
+                    "             │ server │",
+                    "             └────────┘",
+                    "",
+                    " Do you want to proceed?",
+                    " ❯ 1. Yes",
+                    "   2. Yes, and don't ask again for this command",
+                    "   3. No, and tell Claude what to do differently (esc)",
+                    "",
+                ),
+            ),
+        )
+        assertEquals(listOf("Do you want to proceed?"), prompt.question)
+        assertEquals(3, texts(prompt).size)
+        assertTrue(!prompt.needsEnter)
+    }
+
+    /** 预览里的示意图自己画着框：选项右边靠下的内框不当成预览框。 */
+    @Test fun claudePreviewWithABoxInside() {
+        val prompt = assertNotNull(
+            parse(
+                screen(
+                    "❯ 1. Sidebar          ┌────────────────────┐",
+                    "  2. Tabs             │  ┌──────┐          │",
+                    "  3. Single           │  │ nav  │  main    │",
+                    "                      │  └──────┘          │",
+                    "                      └────────────────────┘",
+                    "",
+                    "                      Notes: press n to add notes",
+                    "",
+                    "  Chat about this",
+                    "",
+                    "Enter to select · Esc to cancel",
+                    "",
+                ),
+            ),
+        )
+        assertEquals(listOf("Sidebar", "Tabs", "Single"), texts(prompt))
+        assertTrue(prompt.needsEnter)
+    }
+
+    /** 没有预览的提问按编号键就选定。 */
+    @Test fun plainPromptNeedsNoEnter() {
+        val prompt = assertNotNull(parse(" Do you want to proceed?\n ❯ 1. Yes\n   2. No (esc)\n"))
+        assertTrue(!prompt.needsEnter)
     }
 }
+
+/** Claude 给选项配了代码预览：预览框画在选项右边，框下面一行说明，再下面是不带编号的「Chat about this」和按键提示。 */
+private val claudePreview = screen(
+    "───────────────────────────────────────────────────────────────────────────────────────────────────────",
+    " ☐ Makefile",
+    "",
+    "│ Should I keep or revert the Makefile change that made the layers target use \$(CARGO) instead of bare",
+    "│ cargo?",
+    "",
+    "❯ 1. Keep the change              ┌──────────────────────────────────────────┐",
+    "  2. Revert the change            │ layers: ## ...                           │",
+    "                                  │         \$(CARGO) deny check bans         │",
+    "                                  │         python3 scripts/check-layers.py  │",
+    "                                  └──────────────────────────────────────────┘",
+    "",
+    "                                  Notes: press n to add notes",
+    "",
+    "───────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  Chat about this",
+    "",
+    "Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel",
+    "",
+)

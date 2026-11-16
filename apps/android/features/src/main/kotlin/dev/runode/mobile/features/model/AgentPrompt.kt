@@ -3,14 +3,16 @@ package dev.runode.mobile.features.model
 import dev.runode.mobile.features.R
 
 /**
- * agent 在屏幕底部问的带编号的问题：上面一两行问的是什么，下面一列选项。按下去发的是选项的编号键，认错了的后果和
- * 通用的数字键一样。
+ * agent 在屏幕底部问的带编号的问题：上面一两行问的是什么，下面一列选项。按下去发的是选项的编号键（[needsEnter] 时
+ * 再按回车），认错了的后果和用户自己按这几个键一样。
  */
 data class AgentPrompt(
     /** 选项上面有字的几行，从上往下，去掉了行首的空白。可能为空。 */
     val question: List<String>,
     /** 从 1 起连续编号，至少两个。 */
     val options: List<Option>,
+    /** 按了编号键还要按回车才选定：Claude 给选项配了预览（画在选项右边的框）时，编号键只把光标挪到那一项。 */
+    val needsEnter: Boolean = false,
 ) {
     data class Option(
         val number: Int,
@@ -50,10 +52,16 @@ data class AgentPrompt(
         /** [shownText] 换行后面的说明（Claude 的选项有），几行并成一行；没有时为 null。 */
         val detail: String?
             get() = shownText.indexOf('\n').takeIf { it >= 0 }?.let { shownText.substring(it + 1).replace('\n', ' ') }
+    }
 
-        /** 选这一项的键：编号本身，读屏念「编号：[shownText]」。 */
-        val key: QuickKey
-            get() = QuickKey(number.toString(), number.toString(), UiText.res(R.string.prompt_option, number, shownText))
+    /**
+     * 选 [option] 的键：编号本身，[needsEnter] 时跟着按回车；多选题不跟回车。读屏念
+     * 「编号：[Option.shownText]」。
+     */
+    fun key(option: Option): QuickKey {
+        val number = option.number.toString()
+        val keys = if (needsEnter && !isMultiSelect) listOf(number, "enter") else listOf(number)
+        return QuickKey(number, number, UiText.res(R.string.prompt_option, option.number, option.shownText), keys = keys)
     }
 
     /** 选项开头的复选框：勾没勾，和去掉复选框、再去掉开头空白后的原文。 */
@@ -87,6 +95,13 @@ data class AgentPrompt(
         data class Option(val line: OptionLine) : Entry()
 
         companion object {
+            /** 屏幕第 `row` 行 `raw`。 */
+            fun at(raw: String, row: Int): Entry =
+                when (val entry = of(raw)) {
+                    is Option -> Option(entry.line.copy(row = row))
+                    else -> entry
+                }
+
             fun of(raw: String): Entry {
                 val line = unboxed(raw)
                 return when {
@@ -125,6 +140,8 @@ data class AgentPrompt(
         val selected: Boolean,
         /** 正文从第几个字开始，折行的缩进要到这里。 */
         val textColumn: Int,
+        /** 选项那一行是屏幕的第几行。 */
+        val row: Int = 0,
     ) {
         companion object {
             val markers = setOf('❯', '›', '>', '▶', '●')
@@ -179,11 +196,23 @@ data class AgentPrompt(
          * 从屏幕文字（一行一个）里认出提问。认法：从下往上，跳过空行、制表线和至多 [maxTrailingLines] 行别的字，找到一块
          * 编号从 1 起连续、至少两项的选项；选项之间可以夹空行和制表线，缩进到选项正文那一列的下一行算这一项的续行。
          * 选项块上面至多 [maxQuestionLines] 行有字的行是问题，遇到制表线或别的选项为止，标签条（[tabBarLeads]）跳过。
-         * 行首行尾的框线（`│`）先去掉。
-         * 选项超过 [maxOptions] 个时认不出。
+         * 行首行尾的框线（`│`）先去掉。选项超过 [maxOptions] 个时认不出。
+         * 选项右边配了预览时（[previewCorners]），从框上沿那一行起各行只取框那一列左边的部分再认，框上沿那一行要落在
+         * 认出的选项块里才算；从上往下逐个试，都不算时照没有预览认。
          */
         fun parse(lines: List<String>): AgentPrompt? {
-            val entries = merge(lines.map(Entry::of))
+            for ((start, column) in previewCorners(lines)) {
+                val cropped = lines.mapIndexed { index, row ->
+                    if (index >= start) splitAtColumn(row, column)?.first ?: row else row
+                }
+                parseRows(cropped, start)?.let { return it }
+            }
+            return parseRows(lines, null)
+        }
+
+        /** 按 [parse] 的认法认 `rows`；给了 `corner` 时它是预览框上沿所在的行，要落在选项块第一项到最后一项之间。 */
+        private fun parseRows(rows: List<String>, corner: Int?): AgentPrompt? {
+            val entries = merge(rows.mapIndexed { row, raw -> Entry.at(raw, row) })
             var index = entries.size - 1
             var trailing = 0
             while (index >= 0) {
@@ -213,6 +242,7 @@ data class AgentPrompt(
                 }
                 index -= 1
             }
+            if (corner != null && corner !in lines.last().row..lines.first().row) return null
 
             val blockTop = index + 1
             val question = ArrayDeque<String>()
@@ -226,7 +256,35 @@ data class AgentPrompt(
             }
             val width = blockWidth(entries.subList(ruleAbove(entries, blockTop), entries.size))
             val options = lines.reversed().map { Option(it.number, stripHint(joinRows(it.rows, width)), it.selected) }
-            return AgentPrompt(question.toList(), options)
+            return AgentPrompt(question.toList(), options, needsEnter = corner != null)
+        }
+
+        /**
+         * Claude 给选项配了预览时把它画在选项右边的框里，框和框下面的说明都在框那一列的右边，选项折行留在左边。从上往下
+         * 列出左边是选项、右边隔着空白画着框上沿（`┌`）的行，各带着它的下标和框从第几列起；预览里画的内框和上面输出里的框
+         * 也会列进来。
+         */
+        private fun previewCorners(lines: List<String>): List<Pair<Int, Int>> =
+            lines.indices.mapNotNull { index ->
+                val row = lines[index]
+                val gap = row.indexOf("  ┌")
+                if (gap < 0) return@mapNotNull null
+                val left = row.substring(0, gap + 2)
+                if (OptionLine.of(left.trimEnd()) == null) null else index to widthOf(left)
+            }
+
+        /** 把 `row` 在第 `column` 列切成两段；不够那么宽、或者那一列落在宽字符中间时为 null。 */
+        private fun splitAtColumn(row: String, column: Int): Pair<String, String>? {
+            var width = 0
+            var index = 0
+            while (index < row.length) {
+                if (width == column) return row.substring(0, index) to row.substring(index)
+                val codePoint = row.codePointAt(index)
+                width += cellWidth(codePoint)
+                if (width > column) return null
+                index += Character.charCount(codePoint)
+            }
+            return null
         }
 
         /** 选项块（从 `blockTop` 起）上面最近的那条制表线，中间隔着别的选项或者没有时就是 `blockTop`。 */

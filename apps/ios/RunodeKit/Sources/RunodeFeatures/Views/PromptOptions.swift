@@ -9,7 +9,7 @@
         case compact
     }
 
-    /// 认出来的提问（`AgentPrompt`）的选项，按下去交给 `press` 发编号键。默认项（`AgentPrompt.isDefault`）
+    /// 认出来的提问（`AgentPrompt`）的选项，按下去把选项的键（`AgentPrompt.key(for:)`）交给 `press`。默认项（`AgentPrompt.isDefault`）
     /// 是琥珀色，其余中性；有复选框的项在编号后画出勾没勾，原文去掉复选框。`rows` 里的原文由 `OptionText` 画，
     /// `compact` 里只有一行标签，再长就截断。
     struct PromptOptions: View {
@@ -31,7 +31,7 @@
                 ForEach(prompt.options) { option in
                     let isDefault = prompt.isDefault(option)
                     Button {
-                        press(option.key)
+                        press(prompt.key(for: option))
                     } label: {
                         HStack(spacing: 12) {
                             Text(verbatim: String(option.number))
@@ -66,7 +66,7 @@
             return HStack(spacing: 6) {
                 ForEach(shown) { option in
                     Button {
-                        press(option.key)
+                        press(prompt.key(for: option))
                     } label: {
                         HStack(spacing: 6) {
                             Text(verbatim: String(option.number))
@@ -98,17 +98,17 @@
                             // 菜单里的内容会转成系统菜单项，自定义的图标和读屏值带不过去；复选框用 `Toggle`，
                             // 系统画勾、读屏报勾没勾。勾没勾以屏幕为准，按下只发编号键。
                             if let checkbox = option.checkbox {
-                                Toggle(isOn: Binding(get: { checkbox.checked }, set: { _ in press(option.key) })) {
+                                Toggle(isOn: Binding(get: { checkbox.checked }, set: { _ in press(prompt.key(for: option)) })) {
                                     title
                                 }
-                                .accessibilityLabel("发送 \(option.key.accessibilityLabel)")
+                                .accessibilityLabel("发送 \(prompt.key(for: option).accessibilityLabel)")
                             } else {
                                 Button {
-                                    press(option.key)
+                                    press(prompt.key(for: option))
                                 } label: {
                                     title
                                 }
-                                .accessibilityLabel("发送 \(option.key.accessibilityLabel)")
+                                .accessibilityLabel("发送 \(prompt.key(for: option).accessibilityLabel)")
                             }
                         }
                     } label: {
@@ -158,7 +158,7 @@
     extension View {
         /// 选项键的读屏：「发送 编号：原文」，有复选框的念勾没勾，默认项带上选中。
         func optionAccessibility(_ option: AgentPrompt.Option, in prompt: AgentPrompt) -> some View {
-            accessibilityLabel("发送 \(option.key.accessibilityLabel)")
+            accessibilityLabel("发送 \(prompt.key(for: option).accessibilityLabel)")
                 .checkboxAccessibility(option)
                 .accessibilityAddTraits(prompt.isDefault(option) ? .isSelected : [])
         }

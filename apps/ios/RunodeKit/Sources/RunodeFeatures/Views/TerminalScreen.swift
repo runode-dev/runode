@@ -571,7 +571,7 @@
                 if let prompt {
                     ForEach(prompt.options) { option in
                         key(
-                            option.key, kind: prompt.isDefault(option) ? .waiting : .secondary,
+                            prompt.key(for: option), kind: prompt.isDefault(option) ? .waiting : .secondary,
                             checked: option.checkbox?.checked
                         )
                         .checkboxAccessibility(option)

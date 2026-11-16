@@ -151,8 +151,9 @@ struct PreviewThrottle {
 public final class SessionListModel {
     /// 预览读多少行：读回来以后去掉空行再取最后几行。
     static let previewReadLines: UInt32 = 12
-    /// 等你回答的会话多读几行：提问连同上面的问题、下面的提示要整个读进来才认得出（`AgentPrompt`）。
-    static let waitingReadLines: UInt32 = 16
+    /// 等你回答的会话多读几行：提问连同上面的问题、下面的提示要整个读进来才认得出（`AgentPrompt`），
+    /// 选项右边画着预览框时还要连框带框下面的说明一起读进来。
+    static let waitingReadLines: UInt32 = 24
     /// 预览显示几行：两行够看出在干什么，卡片矮一些，一屏多放几张。
     public static let previewLines = 2
     /// 等你回答的会话的预览多显示一行，问题和选项才看得全。

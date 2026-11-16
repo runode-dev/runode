@@ -1053,8 +1053,11 @@ class SessionListModel(
         /** 预览读多少行：读回来以后去掉空行再取最后几行。 */
         internal val previewReadLines: UInt = 12u
 
-        /** 等你回答的会话多读几行：提问连同上面的问题、下面的提示要整个读进来才认得出（[AgentPrompt]）。 */
-        internal val waitingReadLines: UInt = 16u
+        /**
+         * 等你回答的会话多读几行：提问连同上面的问题、下面的提示要整个读进来才认得出（[AgentPrompt]），选项配了预览时
+         * 下面还有预览框和它的说明。
+         */
+        internal val waitingReadLines: UInt = 24u
 
         /** 预览显示几行：两行够看出在干什么，卡片矮一些，一屏多放几张。 */
         const val previewLines = 2

@@ -304,6 +304,16 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(!reply.handle(.done(req: req + 100)))
     }
 
+    /// 一个键带着几个键时在同一个请求里依次发。
+    @Test func aKeyWithFollowUpsGoesOutInOneRequest() async {
+        let reply = QuickReplyModel(sessionId: waiting, link: link)
+        await reply.press(QuickKey(label: "2", key: "2", accessibilityLabel: "2", then: ["enter"]))
+        guard case .sendKeys(_, waiting, ["2", "enter"])? = link.sent.first, link.sent.count == 1 else {
+            Issue.record("expected one send_keys 2 enter, got \(link.sent)")
+            return
+        }
+    }
+
     @Test func textIsPastedThenEntered() async {
         var delivered: [SessionId] = []
         let reply = QuickReplyModel(sessionId: waiting, link: link) { delivered.append($0) }

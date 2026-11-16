@@ -10,8 +10,19 @@ public struct QuickKey: Hashable, Sendable, Identifiable {
     public let key: String
     public let accessibilityLabel: String
     public var symbol: String?
+    /// 按下去依次发的键，第一个是 `key`。
+    public let keys: [String]
 
     public var id: String { key }
+
+    /// `then` 是按了 `key` 之后接着发的键。
+    init(label: String, key: String, accessibilityLabel: String, symbol: String? = nil, then: [String] = []) {
+        self.label = label
+        self.key = key
+        self.accessibilityLabel = accessibilityLabel
+        self.symbol = symbol
+        keys = [key] + then
+    }
 
     /// 回答 agent 提问最常用的几个键：选项编号、是否、回车、Esc、上下移动选项。
     public static let standard: [QuickKey] = [
@@ -71,12 +82,12 @@ public final class QuickReplyModel {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// 按一个键。
+    /// 按一个键：它的几个键（`QuickKey.keys`）在一个请求里发。
     public func press(_ key: QuickKey) async {
         guard ensureConnected() else { return }
         let req = link.nextRequestId()
         begin([req])
-        link.send(.sendKeys(req: req, id: sessionId, keys: [key.key]))
+        link.send(.sendKeys(req: req, id: sessionId, keys: key.keys))
     }
 
     /// 把文本框里的字粘贴进去再按回车。
