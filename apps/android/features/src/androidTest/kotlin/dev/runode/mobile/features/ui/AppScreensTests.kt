@@ -112,11 +112,17 @@ class AppScreensTests {
         val app = app()
         connect(app)
         compose.setContent { RunodeApp(app) }
-        val key = onMain { assertNotNull(app.sessionList(machine.id)?.prompts?.get(sessionA)).options.first().key.key }
+        val keys = onMain { assertNotNull(app.sessionList(machine.id)?.prompts?.get(sessionA)?.keys(1)) }
         link.clearSent()
         compose.onNodeWithText("Yes").performClick()
+        compose.waitUntil(TIMEOUT_MS) { link.sent.any { it is ClientMsg.ReadScreen && it.id == sessionA && it.req != null } }
+        val read = link.sent.filterIsInstance<ClientMsg.ReadScreen>().first { it.id == sessionA && it.req != null }
+        onMain {
+            val list = assertNotNull(app.sessionList(machine.id))
+            list.handle(HostEvent.Message(HostMsg.ScreenText(sessionA, question, truncated = false, req = read.req)))
+        }
         compose.waitUntil(TIMEOUT_MS) {
-            link.sent.any { it is ClientMsg.SendKeys && it.id == sessionA && it.keys == listOf(key) }
+            link.sent.any { it is ClientMsg.SendKeys && it.id == sessionA && it.keys == keys }
         }
     }
 
