@@ -58,7 +58,7 @@
             set {}
         }
         public var keyboardAppearance: UIKeyboardAppearance {
-            get { .dark }
+            get { keyboardIsDark ? .dark : .light }
             set {}
         }
 

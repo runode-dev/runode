@@ -9,13 +9,19 @@
         /// 按下去的样子（粘住的修饰键、开着的键盘、正在录音）的底和字。
         public var selectedKey: UIColor
         public var selectedLabel: UIColor
+        /// 跟在软键盘上面那条栏的底：软键盘浮在页面上时，栏后面露出的是页面内容。
+        public var background: UIColor
 
-        public init(key: UIColor, border: UIColor, label: UIColor, selectedKey: UIColor, selectedLabel: UIColor) {
+        public init(
+            key: UIColor, border: UIColor, label: UIColor, selectedKey: UIColor, selectedLabel: UIColor,
+            background: UIColor
+        ) {
             self.key = key
             self.border = border
             self.label = label
             self.selectedKey = selectedKey
             self.selectedLabel = selectedLabel
+            self.background = background
         }
     }
 
@@ -25,11 +31,12 @@
     open class KeyBar: UIInputView, UIInputViewAudioFeedback, UIScrollViewDelegate {
         /// 横着能拖的那排键。
         public let keys = UIStackView()
-        /// 按钮的配色；为空时用系统色。跟在软键盘上的栏在键盘的窗口里，留空才和键盘协调。
+        /// 按钮的配色；为空时用系统色。
         public var palette: KeyBarPalette? {
             didSet {
                 guard palette != oldValue else { return }
                 for button in allButtons { recolor(button) }
+                if !resting { backgroundColor = palette?.background }
             }
         }
         private let scroll = LayoutReportingScrollView()
@@ -39,9 +46,11 @@
         /// `styled` 做过的按钮，换配色时逐个重新上色。
         private var allButtons: [UIButton] = []
         private let keyInset: CGFloat
+        private let resting: Bool
 
         public init(resting: Bool, height: CGFloat = 44, keyInset: CGFloat = 6) {
             self.keyInset = keyInset
+            self.resting = resting
             super.init(
                 frame: CGRect(x: 0, y: 0, width: 320, height: height), inputViewStyle: resting ? .default : .keyboard)
             if resting { backgroundColor = .clear }

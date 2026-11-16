@@ -40,12 +40,26 @@
         /// 视口上面那一行（`ScreenFrame.above`），平滑滚动错开时从顶上露出来。
         private let aboveGrid = TerminalGridView()
         private let markedLabel = UILabel()
-        private lazy var accessoryBar = KeyboardAccessoryBar(owner: self)
+        private lazy var accessoryBar: KeyboardAccessoryBar = {
+            let bar = KeyboardAccessoryBar(owner: self)
+            bar.palette = keyBarPalette
+            return bar
+        }()
         /// 软键盘收着时界面底部那条按键栏，由 `makeRestingKeyBar` 给出去。
         private weak var restingBar: KeyboardAccessoryBar?
-        /// 底部那条按键栏的配色。跟着软键盘的辅助栏不用它：那条在键盘的窗口里，用系统色才和键盘协调。
+        /// 两条按键栏的配色。
         public var keyBarPalette: KeyBarPalette? {
-            didSet { restingBar?.palette = keyBarPalette }
+            didSet {
+                restingBar?.palette = keyBarPalette
+                accessoryBar.palette = keyBarPalette
+            }
+        }
+        /// 软键盘用深色还是浅色。
+        public var keyboardIsDark = true {
+            didSet {
+                guard keyboardIsDark != oldValue else { return }
+                if isFirstResponder { reloadInputViews() }
+            }
         }
         private var refreshScheduled = false
         /// 下一次刷新最早在这时候，见 `scheduleRefresh`。

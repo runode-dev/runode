@@ -569,7 +569,7 @@
         var topObstruction: CGFloat = 0
         /// 正在录音，麦克风键显示成按下去的样子。
         var dictating = false
-        /// 按键栏照它配色。
+        /// 按键栏和软键盘照它配色、定深浅。
         var keyBarTheme: AppTheme
         /// 建好了终端视图，页面的按键栏要用它。
         var onMake: (TerminalView) -> Void = { _ in }
@@ -607,6 +607,7 @@
             view.acceptsInput = !model.isEnded
             view.dictating = dictating
             view.keyBarPalette = KeyBarPalette(theme: keyBarTheme)
+            view.keyboardIsDark = keyBarTheme.isDark
             context.coordinator.onDictation = onDictation
         }
 
@@ -646,7 +647,8 @@
         init(theme: AppTheme) {
             self.init(
                 key: UIColor(theme.card), border: UIColor(theme.hairline), label: UIColor(theme.foreground),
-                selectedKey: UIColor(theme.foreground), selectedLabel: UIColor(theme.page))
+                selectedKey: UIColor(theme.foreground), selectedLabel: UIColor(theme.page),
+                background: UIColor(theme.page))
         }
     }
 
