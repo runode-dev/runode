@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Runode with Claude Code waiting for an answer, Pi done, and the tests Pi ran in the pane below" width="900">
+  <img src="docs/screenshot.png" alt="Runode with Claude Code waiting on a question whose options show on the sidebar card, Codex done, and the tests Codex ran in the pane below" width="900">
 </p>
 
 ## About
@@ -28,25 +28,26 @@ Runode uses [Ghostty](https://ghostty.org)'s libghostty-vt for terminal emulatio
 
 ## Features
 
-- **Agent-aware**: recognizes 20+ agents, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode and Amp, and marks each tab and sidebar entry as working, waiting for you, or done but unread.
+- **Agent-aware**: recognizes 20+ agents, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode and Amp, and marks each tab and sidebar entry as working, waiting for you, or done but unread. When an agent asks a numbered question, answer it from the sidebar's Needs You list or its task card without switching to that terminal.
 - **Notifications and jumping**: notifies you and plays a sound when you're not looking. `⌘⇧A` lists the agents in every window, and `⌘⌥A` jumps straight to the next one that needs you. Notifications that programs send with OSC 9 or OSC 777 become system notifications too.
 - **Start agents from the tab menu**: the new tab menu lists the agents installed on the workspace's machine, local or over SSH, and starts one in a new tab; `⌃⌘1` to `⌃⌘9` open them by number. On Windows it also picks between PowerShell, Command Prompt and Git Bash.
 - **Scriptable**: the built-in `runode` CLI lists, reads and drives every terminal. Agents use it to run commands in a neighbouring pane, wait for them, read the output, or direct another agent.
-  <br><img src="docs/agents.gif" alt="Two Claude Code panes: the left one asks a question, the right one runs cargo test in a new pane below and summarizes it" width="900">
+  <br><img src="docs/agents.gif" alt="Claude Code asks a question and is answered from the sidebar card while Codex opens a pane below with runode, runs cargo test in it and summarizes the result" width="900">
+- **Projects and worktrees**: the sidebar groups workspaces by machine and then by repository, so every worktree of a repo sits under one project. Create a worktree on a new branch from the project header, and remove it along with its workspace when you close it.
 - **Persistent sessions**: with `terminal-host` on, sessions live in a separate host process and survive quitting, relaunching and upgrading the app. A pane that has to start over picks its Claude Code conversation back up.
 - **SSH hosts**: pick a host when you create a workspace. Runode connects with your system's OpenSSH, installs runode there when needed and reconnects after a drop. Terminals, the file tree, the Git panel and previews work directly on that machine, whether it runs macOS, Linux or Windows. Pasted screenshots and dropped files are uploaded to it, and localhost links are forwarded to your machine.
 - **Pair another computer**: pair with Runode on another computer and use its terminals, files, Git, port forwarding and remote desktop the same way as an SSH host.
-- **Remote from your phone**: the iOS and Android apps pair with your computer over a TLS 1.3 connection. On the same network it connects directly; once you set the network to 0.0.0.0 when pairing, it also reaches your computer from elsewhere through [iroh](https://iroh.computer) by public key, punching a direct path and falling back to a relay. From your phone you can watch terminals, answer agents, start a new agent, run tasks and commit to git.
-  <br><img src="docs/mobile.gif" alt="iOS app: Claude Code waits for an answer while Codex works, then the Git page shows a diff, stages a file and commits" width="300">
+- **Remote from your phone**: the iOS and Android apps pair with your computer over a TLS 1.3 connection. On the same network it connects directly; once you set the network to 0.0.0.0 when pairing, it also reaches your computer from elsewhere through [iroh](https://iroh.computer) by public key, punching a direct path and falling back to a relay. From your phone you can watch terminals, answer agents, start a new agent, send it photos and videos, run tasks and commit to git.
+  <br><img src="docs/mobile.gif" alt="iOS app: a Claude Code question shows on the home screen, the terminal opens, the phone picks an option and Claude makes the change" width="300">
 - **Remote desktop**: see and control a whole screen from your phone, or from Runode on another computer over SSH or pairing. Macs, Windows PCs and Linux machines can all be viewed, with low-latency hardware encoding. It can switch displays and unlock a locked screen with a password you saved.
-  <br><img src="docs/remote-desktop.gif" alt="iOS app in landscape showing a Mac's screen: taps open Runode's sidebar, a new tab and the task board" width="900">
+  <br><img src="docs/remote-desktop.gif" alt="iOS app in landscape showing a Mac's screen: taps switch Runode to Claude Code's tab, open the task board and go back to the terminal" width="900">
 - **Voice input**: dictate into the terminal on your computer or your phone. Speech is recognized offline with a local model; cloud recognition and polishing the text with an LLM are optional.
-- **Task board**: a kanban board for agent work. A schedule opens a terminal and starts an agent on a task at the time you set, and a task whose PR gets merged is marked done. Agents use it too, through `runode todo` and `runode schedule`.
-  <br><img src="docs/kanban.gif" alt="Task board: a new task is added, two tasks start, move to Needs You, and one is marked done" width="900">
+- **Task board**: a kanban board for agent work. Tasks can queue behind each other, run under a time limit and mark themselves done when the agent reports back. A schedule starts an agent at a set time or cron, optionally only when a check command finds something; built-in templates watch CI, review new PRs and triage new issues, and wait for the PR's checks to pass before finishing. A task whose PR gets merged is marked done. Agents use it too, through `runode todo` and `runode schedule`.
+  <br><img src="docs/kanban.gif" alt="Task board: a new task is started from the dialog, moves to In Progress and then Needs You with the agent’s options on the card, and the tasks end up Done" width="900">
 - **Floating panes**: float a pane over the others and dock it back, move panes between tabs and workspaces, or drag a terminal or remote desktop out into a window of its own.
 - **Project commands**: `⌘⇧R` lists the project's Makefile targets, package.json scripts and commands you add yourself. They run in a split beside you, and each project can bind its own shortcuts to them.
 - **Project panels**: a file tree, syntax-highlighted previews you can edit and save, and a Git panel that can stage hunks, commit, switch branches, and pull or push. An LLM can write the commit message, a diff hunk goes to the agent in the current terminal with one click, and a GitHub Actions page shows the repository's workflow runs.
-  <br><img src="docs/panels.gif" alt="File tree, Markdown and Rust previews, and the Git panel staging a hunk and committing" width="900">
+  <br><img src="docs/panels.gif" alt="File tree, formatted Markdown and highlighted Rust previews, and the Git panel staging a hunk and committing" width="900">
 - **Status bar**: keeps the computer awake while an agent works, shows memory use and listening ports, and forwards ports from SSH hosts to your machine.
 - **Ghostty compatible**: reads your existing Ghostty config and themes. Images sent with the Kitty graphics protocol, such as from `kitten icat`, show up on your computer and your phone.
 - **Native**: written in Rust, not Electron. The UI comes in English, Simplified Chinese and Traditional Chinese, and the app updates itself.

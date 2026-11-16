@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Runode 窗口：左边 Claude Code 在等回答，右上 Pi 已经干完，右下是 Pi 跑的测试" width="900">
+  <img src="docs/screenshot.png" alt="Runode 窗口：Claude Code 在等回答，选项显示在侧栏的卡片上，Codex 已经干完，下方窗格是它跑的测试" width="900">
 </p>
 
 ## 简介
@@ -28,25 +28,26 @@ Runode 用 [Ghostty](https://ghostty.org) 的 libghostty-vt 做终端仿真，�
 
 ## 特性
 
-- **认得出 agent**：认出 Claude Code、Codex、Gemini CLI、Cursor、OpenCode、Amp 等二十多种 agent，在标签和侧栏上标出它在工作、在等你，还是干完了你还没看。
+- **认得出 agent**：认出 Claude Code、Codex、Gemini CLI、Cursor、OpenCode、Amp 等二十多种 agent，在标签和侧栏上标出它在工作、在等你，还是干完了你还没看。agent 问带编号选项的问题时，在侧栏的「需要你」或看板卡片上直接点选项回答，不用切到那个终端。
 - **提醒与跳转**：你没在看时发通知、出提示音；`⌘⇧A` 列出所有窗口里的 agent，`⌘⌥A` 直接跳到下一个需要你的。程序用 OSC 9、OSC 777 发的通知也转成系统通知。
 - **从标签菜单起 agent**：新建标签的菜单列出工作区所在机器上装着的 agent，本机和 SSH 主机都行，点一下就在新标签里起它，`⌃⌘1` 到 `⌃⌘9` 按序号开。Windows 上还能挑 PowerShell、命令提示符或 Git Bash。
 - **可编程**：自带 `runode` 命令行，能列出、读取、操作每个终端。agent 能用它在旁边的窗格跑命令、等结果、读输出，或者指挥另一个 agent。
-  <br><img src="docs/agents.gif" alt="两个 Claude Code 窗格：左边在问问题，右边在下方新窗格里跑 cargo test 并总结结果" width="900">
+  <br><img src="docs/agents.gif" alt="Claude Code 提问，在侧栏卡片上点选项回答；Codex 用 runode 在下方开窗格跑 cargo test 并总结结果" width="900">
+- **项目和工作树**：侧栏先按机器、再按仓库把工作区归组，同一个仓库的各个工作树归在一个项目下。在项目组头上从新分支建工作树，关工作区时能连工作树一起删掉。
 - **会话常驻**：打开 `terminal-host` 后，会话由独立的宿主进程持有，退出、重开、升级 app 都不断。不得不重开的窗格会接着 Claude Code 上次的对话。
 - **SSH 远端主机**：新建工作区时选一台主机，Runode 调系统的 OpenSSH 连过去，需要时自动装好 runode，断线后自动接回。终端、文件树、Git 面板和预览都直接读写那台机器，macOS、Linux、Windows 都行。粘贴的截图和拖进来的文件先传到那台主机，点开 localhost 网址自动把端口转到本机。
 - **配对另一台电脑**：和别的电脑上的 Runode 配对后，它的终端、文件、Git、端口转发和远程桌面都能像 SSH 主机一样用。
-- **手机远程**：iOS 和 Android app 和电脑配对，连接用 TLS 1.3 加密。在同一个网络里直连；配对时网络选 0.0.0.0 后，不在同一个网络也能经 [iroh](https://iroh.computer) 按公钥连过来，能打洞就直连，打不通走中继。在手机上能看终端、回复 agent、新开 agent、跑命令、提交 git。
-  <br><img src="docs/mobile.gif" alt="iOS app：Claude Code 在等回答、Codex 在干活，接着在 Git 页看 diff、暂存一个文件并提交" width="300">
+- **手机远程**：iOS 和 Android app 和电脑配对，连接用 TLS 1.3 加密。在同一个网络里直连；配对时网络选 0.0.0.0 后，不在同一个网络也能经 [iroh](https://iroh.computer) 按公钥连过来，能打洞就直连，打不通走中继。在手机上能看终端、回复 agent、新开 agent、把照片和视频发给它、跑命令、提交 git。
+  <br><img src="docs/mobile.gif" alt="iOS app：首页显示 Claude Code 的提问，打开终端在手机上选一个选项，Claude 接着改完" width="300">
 - **远程桌面**：在手机上，或在另一台电脑的 Runode 里经 SSH、配对，看到并操控整个屏幕。Mac、Windows 和 Linux 的电脑都能看，用硬件编码，延迟低。能切换显示器，电脑锁屏时用存着的密码解锁。
-  <br><img src="docs/remote-desktop.gif" alt="iOS app 横屏显示 Mac 的屏幕：点按打开 Runode 的侧栏、新标签和看板" width="900">
+  <br><img src="docs/remote-desktop.gif" alt="iOS app 横屏显示 Mac 的屏幕：点按切到 Claude Code 的标签、打开看板，再回到终端" width="900">
 - **语音输入**：在电脑和手机上都能说话输入到终端。默认用本地模型离线识别，也可以交给云端识别、用大模型润色。
-- **看板**：给 agent 派活的看板。到了定的时间自动开终端、起 agent 做任务，任务的 PR 合并后自动标完成。agent 也能用 `runode todo`、`runode schedule` 操作它。
-  <br><img src="docs/kanban.gif" alt="看板：新加一个任务，启动两个任务，它们挪到需要你，其中一个标为完成" width="900">
+- **看板**：给 agent 派活的看板。任务能排队、设时限，agent 报了结局就自动标完成。定时按设的时间或 cron 起 agent，也可以先跑一条检查命令、查到东西才开工；内置的模板能巡检 CI、评审新 PR、处理新 issue，开完 PR 等检查都过了才收尾。任务的 PR 合并后自动标完成。agent 也能用 `runode todo`、`runode schedule` 操作它。
+  <br><img src="docs/kanban.gif" alt="看板：在对话框里新建任务并马上开始，挪到进行中，再到需要你、卡片上显示 agent 的选项，最后任务都完成" width="900">
 - **浮动分屏**：分屏能浮到别的分屏上面、再停靠回去，能挪到别的标签或工作区，终端和远程桌面还能拖出去变成单独的窗口。
 - **项目命令**：`⌘⇧R` 列出项目的 Makefile 目标、package.json scripts 和你自己加的命令，在旁边的分屏里跑，每个项目能给它们绑各自的快捷键。
 - **项目面板**：文件树、带语法高亮且能编辑保存的文件预览，加上 Git 面板，能按块暂存、提交、切分支、推拉。提交说明可以让大模型写，diff 的一块改动点一下就交给当前终端里的 agent，GitHub Actions 页能看仓库的工作流运行。
-  <br><img src="docs/panels.gif" alt="文件树、Markdown 和 Rust 文件预览，以及 Git 面板暂存一块改动并提交" width="900">
+  <br><img src="docs/panels.gif" alt="文件树、排好版的 Markdown 和高亮的 Rust 预览，以及 Git 面板暂存一块改动并提交" width="900">
 - **状态栏**：agent 干活时不让电脑睡眠，显示内存占用和在监听的端口，能把 SSH 主机上的端口转到本机。
 - **兼容 Ghostty**：直接读你现有的 Ghostty 配置和主题。支持 Kitty 图形协议，`kitten icat` 这类程序输出的图片在电脑和手机上都能看到。
 - **原生**：Rust 写成，不是 Electron。界面有简体中文、繁体中文和英文，支持自动更新。
