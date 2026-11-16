@@ -73,6 +73,11 @@ fn sidebar_background(cx: &App) -> Hsla {
     if cards(cx) { cx.theme().frame } else { cx.theme().mix(0.03) }
 }
 
+/// 侧栏里的行悬停时的底色，要和 `sidebar_background` 分得开。
+pub(super) fn sidebar_hover(cx: &App) -> Hsla {
+    if cards(cx) { cx.theme().frame_hover } else { cx.theme().accent }
+}
+
 /// workspace 行右边的 agent 图标，一个 agent 一个，单色的 logo 染成 `fg`。右下角的圆点按那个 agent 的
 /// 状态着色，空闲不画；圆点描一圈 `ring`，压在图标上也分得开。认不出是哪家的
 /// agent 画成提示符。图标定宽、不能截断，所以按 `room`（可用的宽度）少画几个，画不下的并进「+N」，至少画一个。
@@ -265,7 +270,7 @@ impl WindowView {
         let modifiers = window.modifiers();
         let inbox = self.render_inbox(window, cx);
         let rows = self.render_workspace_rows(modifiers, cx);
-        let drop_bg = cx.theme().mix(0.08);
+        let drop_bg = if cards(cx) && cx.theme().is_light { cx.theme().mix(0.14) } else { cx.theme().mix(0.08) };
         div()
             .id("sidebar")
             .flex_none()
@@ -567,7 +572,7 @@ impl WindowView {
         let active = ix == self.active
             && !matches!(self.page, Some(super::Page::Mobile(_) | super::Page::Kanban(_) | super::Page::Onboarding(_)));
         let theme = cx.theme();
-        let (active_bg, hover_bg) = (theme.tab_active, theme.accent);
+        let (active_bg, hover_bg) = (theme.tab_active, sidebar_hover(cx));
         let (muted, subtle) = (theme.muted_foreground, theme.subtle_foreground);
         let close_label = rust_i18n::t!("menu.close_workspace");
         let close_tooltip = tooltip(close_label.clone(), None);

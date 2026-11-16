@@ -360,7 +360,7 @@ impl WindowView {
             .items_center()
             .gap(px(7.))
             .text_color(fg.opacity(0.9))
-            .hover(|header| header.bg(cx.theme().accent))
+            .hover(|header| header.bg(super::sidebar_hover(cx)))
             .tooltip(tooltip(path, None))
             // 松开时才收起、展开：按下就办的话，拖动排序一按住组就先收起了。拖动过后不算点击。
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {

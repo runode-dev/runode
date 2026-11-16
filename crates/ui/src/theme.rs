@@ -87,6 +87,9 @@ pub struct Theme {
     /// 卡片样式下标签条的底色和当前标签那颗胶囊的颜色，见 `tab_track_colors`。
     pub tab_track: Hsla,
     pub tab_active: Hsla,
+    /// 卡片样式下直接画在外框上的行和按钮（侧栏的行、标签条里的标签）悬停时的底色，要和 `frame`、
+    /// `tab_active` 都分得开。
+    pub frame_hover: Hsla,
     /// 背景比前景亮，是浅色主题。
     pub is_light: bool,
     /// 调色板的 ANSI 16 色。
@@ -138,6 +141,7 @@ impl Theme {
             frame: hsla(frame_color(fg, bg)),
             tab_track: hsla(track),
             tab_active: hsla(active),
+            frame_hover: if light { hsla(track) } else { mix(0.06) },
             is_light: light,
             ansi,
             fg,
@@ -200,7 +204,7 @@ pub fn is_light(fg: Rgb, bg: Rgb) -> bool {
 /// 卡片样式下窗口的底色，衬在卡片后面：两种主题都往前景色混一点。浅色主题里比终端背景深一档，
 /// 深色主题里比终端背景亮一档。
 pub fn frame_color(fg: Rgb, bg: Rgb) -> Rgb {
-    if is_light(fg, bg) { bg.mix(fg, 0.06) } else { bg.mix(fg, 0.04) }
+    if is_light(fg, bg) { bg.mix(fg, 0.085) } else { bg.mix(fg, 0.04) }
 }
 
 /// 卡片样式下标签条的底色，以及条里当前标签那颗胶囊的颜色。浅色主题里条介于外框
@@ -253,10 +257,12 @@ mod tests {
             let luma = |c: Rgb| 0.299 * f32::from(c.0) + 0.587 * f32::from(c.1) + 0.114 * f32::from(c.2);
             let light = luma(bg) > luma(fg);
             assert_eq!(theme.is_light, light);
-            let frame = if light { bg.mix(fg, 0.06) } else { bg.mix(fg, 0.04) };
+            let frame = if light { bg.mix(fg, 0.085) } else { bg.mix(fg, 0.04) };
             assert_eq!(theme.frame, hsla(frame));
             let (track, pill) = if light { (frame.mix(bg, 0.5), bg) } else { (frame, bg.mix(fg, 0.11)) };
             assert_eq!((theme.tab_track, theme.tab_active), (hsla(track), hsla(pill)));
+            assert_eq!(theme.frame_hover, if light { hsla(track) } else { theme.accent });
+            assert_ne!(theme.frame_hover, theme.frame);
             // 次一级的字和非终端的底面。
             assert_eq!(theme.subtle_foreground, f.opacity(0.7));
             let (surface, field) = if light { (bg, bg) } else { (bg.mix(fg, 0.07), bg.mix(fg, 0.016)) };

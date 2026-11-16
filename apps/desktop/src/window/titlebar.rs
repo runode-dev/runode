@@ -124,7 +124,7 @@ impl Render for DraggedFileTab {
 
 /// 当前标签的底色和悬停时的底色：卡片样式下当前标签是一颗胶囊，别的标签平时没有底色。
 fn tab_backgrounds(cards: bool, cx: &App) -> (Hsla, Hsla) {
-    if cards { (cx.theme().tab_active, cx.theme().accent) } else { (cx.theme().mix(0.08), cx.theme().mix(0.04)) }
+    if cards { (cx.theme().tab_active, cx.theme().frame_hover) } else { (cx.theme().mix(0.08), cx.theme().mix(0.04)) }
 }
 
 /// 居中的标题，有 agent 时前面加上它的状态标记；`blink` 时等回答的标记闪烁。
@@ -713,7 +713,7 @@ pub(super) fn window_controls<T: 'static>(window: &Window, cx: &mut Context<T>) 
         return None;
     }
     let fg = cx.theme().foreground;
-    let hover = cx.theme().mix(0.08);
+    let hover = if super::cards(cx) { cx.theme().frame_hover } else { cx.theme().mix(0.08) };
     let view = cx.entity().downgrade();
     // Windows 上用系统标题栏的图标字体，Linux 上没有这个字体，用图标。
     let button = |id: &'static str,

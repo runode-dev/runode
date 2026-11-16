@@ -215,8 +215,12 @@ fn page_entry(
     open: impl Fn(&mut WindowView, &mut Window, &mut Context<WindowView>) + 'static,
 ) -> Stateful<Div> {
     let theme = cx.theme();
-    let (active_bg, hover_bg, fg, muted) =
-        (theme.accent_selected, theme.accent, theme.foreground, theme.muted_foreground);
+    let (active_bg, hover_bg, fg, muted) = (
+        if crate::window::cards(cx) { theme.tab_active } else { theme.accent_selected },
+        super::sidebar_hover(cx),
+        theme.foreground,
+        theme.muted_foreground,
+    );
     let open = Rc::new(open);
     let press = open.clone();
     let view = cx.entity().downgrade();

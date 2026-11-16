@@ -780,7 +780,9 @@ impl FileTree {
     fn render_file_row(&self, ix: usize, font_size: f32, focused: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         let row = self.state().rows.get(ix)?;
         let theme = cx.theme();
-        let selected_bg = if focused { theme.tab_active } else { theme.tab_active.opacity(0.6) };
+        // 选中行的底色要和面板的底色分得开。
+        let selected = if theme.is_light { theme.accent_selected } else { theme.tab_active };
+        let selected_bg = if focused { selected } else { selected.opacity(0.6) };
         let hover_bg = theme.accent;
         let drop_bg = theme.mix(0.20);
         let (fg, info) = (theme.foreground, theme.info);
