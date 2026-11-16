@@ -280,8 +280,8 @@ impl Shared {
 
     /// 会话 `id` 的 agent 状态（`agent`）、前台是不是 shell 变了，或者会话结束了（`ended`：shell 退出或者
     /// 会话被收掉，会话线程报的）：告诉问过 `ListTodos` 的连接，前端不用轮询会话的状态。没做完的任务的卡片
-    /// 可能换了列；完成了的任务只在会话结束时报，卡片上打开终端的按钮要跟着收起，agent 的状态变了不影响它。
-    /// 自动完成的任务另记下 agent 干过活、什么时候空闲下来的（`Watched::worked`）。
+    /// 可能换了列；完成了的任务的会话里 agent 还在干活时，桌面侧栏的计数也要算上它，会话结束时卡片上打开终端
+    /// 的按钮要跟着收起。自动完成的任务另记下 agent 干过活、什么时候空闲下来的（`Watched::worked`）。
     pub(crate) fn todo_session_changed(&self, id: SessionId, ended: bool, agent: Option<AgentState>) {
         let mut watched = self.todos.watched();
         if ended && let Some(at @ None) = watched.ending.get_mut(&id) {
@@ -319,9 +319,7 @@ impl Shared {
         if nudge {
             self.todos.nudge();
         }
-        if watch.open || ended {
-            self.peers().todos_changed();
-        }
+        self.peers().todos_changed();
     }
 
     /// 有没有在用的定时或者排着队的任务：有时单独跑的宿主不因空闲退出，见 `Host::run_until_idle`。

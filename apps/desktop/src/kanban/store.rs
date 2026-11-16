@@ -55,14 +55,14 @@ pub fn todo_sessions(cx: &App) -> HashSet<SessionId> {
     data(cx).todos.iter().filter_map(|todo| todo.session).collect()
 }
 
-/// 看板上没做完的任务按列各有几张，侧栏的导航上显示。
+/// 看板上的任务按列各有几张，侧栏的导航上显示。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Tally {
     /// 需要你那一列。
     pub needs_you: usize,
     /// 待办那一列。
     pub todo: usize,
-    /// 进行中那一列。
+    /// 进行中那一列，加上会话里 agent 还在干活的完成了的任务。
     pub running: usize,
 }
 
@@ -73,15 +73,22 @@ pub fn tally(cx: &App) -> Tally {
     cx.try_global::<Tally>().copied().unwrap_or_default()
 }
 
-/// `data` 里的任务在 Unix 时间 `now` 时各列的数。
+/// `data` 里的任务在 Unix 时间 `now` 时各列的数。完成了的任务的会话里 agent 还在干活时也算在跑：标成完成后
+/// agent 可能接着干，侧栏上要看得出还有 agent 在跑。
 fn tally_of(data: &TodoData, now: u64) -> Tally {
     let mut tally = Tally::default();
     for todo in &data.todos {
-        match column(todo, todo.session.and_then(|id| data.sessions.get(&id)), now) {
+        let session = todo.session.and_then(|id| data.sessions.get(&id));
+        match column(todo, session, now) {
             Column::NeedsYou => tally.needs_you += 1,
             Column::Todo => tally.todo += 1,
             Column::InProgress => tally.running += 1,
-            Column::Done => {}
+            Column::Done => {
+                let working = session.filter(|info| !info.exited).and_then(|info| info.meta.agent);
+                if working.is_some_and(|agent| agent.state == AgentState::Working) {
+                    tally.running += 1;
+                }
+            }
         }
     }
     tally
@@ -378,26 +385,47 @@ mod tests {
         assert_eq!(grace_ends(&todos).collect::<Vec<_>>(), [1_000 + START_GRACE]);
     }
 
+    fn session(agent: Option<AgentState>, exited: bool) -> SessionInfo {
+        use runode_types::agent::{Agent, AgentKind};
+        SessionInfo {
+            id: SessionId(1),
+            size: runode_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 },
+            meta: runode_types::session::SessionMeta {
+                agent: agent.map(|state| Agent { kind: AgentKind::Claude, state }),
+                ..Default::default()
+            },
+            clients: 0,
+            claimed: false,
+            exited,
+            size_owner: None,
+        }
+    }
+
     /// 没开始的算待办，宽限期里的算在跑，会话没了的算需要你，做完了的不算。
     #[test]
     fn tallies_open_todos_by_column() {
         let now = 10_000;
-        let session = SessionInfo {
-            id: SessionId(1),
-            size: runode_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 },
-            meta: runode_types::session::SessionMeta::default(),
-            clients: 0,
-            claimed: false,
-            exited: false,
-            size_owner: None,
-        };
         let data = TodoData {
             todos: vec![todo(None, None), todo(None, None), todo(Some(now - 1), None), todo(Some(now - 1), Some(now))],
-            sessions: HashMap::from([(SessionId(1), session)]),
+            sessions: HashMap::from([(SessionId(1), session(None, false))]),
             ..TodoData::default()
         };
         assert_eq!(tally_of(&data, now), Tally { needs_you: 0, todo: 2, running: 1 });
         let gone = TodoData { sessions: HashMap::new(), ..data };
         assert_eq!(tally_of(&gone, now), Tally { needs_you: 1, todo: 2, running: 0 });
+    }
+
+    /// 完成了的任务的会话里 agent 还在干活时算在跑，空闲或者会话退出了不算。
+    #[test]
+    fn done_todos_with_a_working_agent_count_as_running() {
+        let now = 10_000;
+        let data = |state, exited| TodoData {
+            todos: vec![todo(Some(1), Some(2))],
+            sessions: HashMap::from([(SessionId(1), session(Some(state), exited))]),
+            ..TodoData::default()
+        };
+        assert_eq!(tally_of(&data(AgentState::Working, false), now).running, 1);
+        assert_eq!(tally_of(&data(AgentState::Idle, false), now).running, 0);
+        assert_eq!(tally_of(&data(AgentState::Working, true), now).running, 0);
     }
 }
