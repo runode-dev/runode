@@ -144,10 +144,17 @@ fn serve(listener: &UnixListener) {
         active.fetch_add(1, Ordering::Relaxed);
         let counter = active.clone();
         let spawned = thread::Builder::new().name("screen-connection".into()).spawn(move || {
+            // 线程正常返回或 panic 展开时都归还活动连接计数。
+            struct Done(Arc<AtomicUsize>);
+            impl Drop for Done {
+                fn drop(&mut self) {
+                    self.0.fetch_sub(1, Ordering::Relaxed);
+                }
+            }
+            let _done = Done(counter);
             if let Err(err) = connection(stream) {
                 tracing::info!("screen connection ended: {err}");
             }
-            counter.fetch_sub(1, Ordering::Relaxed);
         });
         if let Err(err) = spawned {
             tracing::warn!("cannot serve a screen connection: {err}");
