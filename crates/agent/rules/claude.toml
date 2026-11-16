@@ -1,7 +1,7 @@
 id = "claude"
-version = "2026.10.11.1"
+version = "2026.11.16.1"
 min_engine_version = 2
-updated_at = "2026-10-11T00:00:00Z"
+updated_at = "2026-11-16T00:00:00Z"
 aliases = ["claude-code"]
 
 [[rules]]
@@ -42,6 +42,26 @@ visible_working = true
 # "Waiting for N background agents" line away from the prompt box. Only rows of
 # running agents carry the elapsed time and token count; the main thread row is bare.
 line_regex = ['^\s*[\x{25EF}\x{23FA}]\s+\S+\s{2,}\S.*\s\d+[smh](?:\s+\d+[smh])?\s+·\s+[↓↑]\s*[\d.]+[kKmM]?\s+tokens\s*$']
+not = [
+  { contains = ["do you want to proceed?"] },
+  { contains = ["esc to cancel"] },
+  { contains = ["waiting for permission"] },
+  { contains = ["do you want to allow this connection?"] },
+  { contains = ["would you like to"] },
+  { contains = ["tab to amend"] },
+  { contains = ["ctrl+e to explain"] },
+]
+
+[[rules]]
+id = "background_shell_working"
+state = "working"
+priority = 965
+region = "after_last_horizontal_rule"
+visible_working = true
+# A shell Claude started in the background shows as "N shell(s)" in the footer under
+# the prompt box. Claude sits at the prompt while it waits for one (gh pr checks
+# --watch, a build) and picks up again when it exits, so the turn is not over.
+line_regex = ['(?:^\s*|·\s+)[1-9]\d* shells?(?:\s+·|\s*$)']
 not = [
   { contains = ["do you want to proceed?"] },
   { contains = ["esc to cancel"] },

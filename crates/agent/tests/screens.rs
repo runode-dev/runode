@@ -62,6 +62,14 @@ fn claude() {
         "working"
     );
     assert_eq!(screen(Claude, &format!("● 改好了。\n\n{footer}")), "idle");
+    // 后台 shell 还在跑：Claude 停在输入框等它结束，还没干完。
+    let prompt_box = "● 正在等 CI。\n\n────────\n❯\n────────\n";
+    assert_eq!(screen(Claude, &format!("{prompt_box}  ⏵⏵ bypass permissions on · PR #6 · 1 shell\n")), "working");
+    assert_eq!(screen(Claude, &format!("{prompt_box}  ? for shortcuts · 2 shells · PR #6\n")), "working");
+    assert_eq!(screen(Claude, &format!("{prompt_box}  1 shell\n")), "working");
+    assert_eq!(screen(Claude, &format!("{prompt_box}  ⏵⏵ bypass permissions on · PR #6\n")), "idle");
+    // 输入框里打的字不算。
+    assert_eq!(screen(Claude, "● 好了。\n\n────────\n❯ 1 shell\n────────\n  ? for shortcuts\n"), "idle");
     let running = "  ◯ reviewer  在审查改动   30s · ↓ 33.7k tokens\n";
     // 子 agent 在跑时主线程弹出权限提示，仍是等回答。
     assert_eq!(
