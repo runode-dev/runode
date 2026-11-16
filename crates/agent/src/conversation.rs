@@ -30,7 +30,9 @@ pub fn resume_command(conversation: &Conversation) -> Option<String> {
     crate::models::resume_command("claude", &conversation.id)
 }
 
-/// 对话号要原样打进 shell，只认 ASCII 字母、数字和 `-`。
+/// 对话号要原样打进 shell、跟在 `--resume` 后面，只认 ASCII 字母、数字和 `-`，开头不能是 `-`，免得被当成选项。
 fn valid(id: &str) -> bool {
-    !id.is_empty() && id.len() <= MAX_ID && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    id.len() <= MAX_ID
+        && id.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }

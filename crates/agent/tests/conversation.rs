@@ -29,5 +29,6 @@ fn only_id_like_conversations_are_resumed() {
     assert_eq!(resume_command(&claude("ab-12")).as_deref(), Some("claude --resume ab-12"));
     assert_eq!(resume_command(&claude("a; rm -rf ~")), None);
     assert_eq!(resume_command(&claude("")), None);
+    assert_eq!(resume_command(&claude("--dangerously-skip-permissions")), None);
     assert_eq!(resume_command(&Conversation { kind: AgentKind::Codex, id: "ab".into() }), None);
 }
