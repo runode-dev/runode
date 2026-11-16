@@ -409,6 +409,39 @@ fn failed_todos_are_pushed_once_with_their_result() {
     assert_eq!(round(&mut rounds, std::slice::from_ref(&failed), &[idle(A)], secs(t, 2)), []);
 }
 
+/// 推过没做成的任务又接着干、或者被删掉：那条通知过时了，撤掉（还在退避的也不再发）。
+#[test]
+fn failure_pushes_are_cancelled_once_the_failure_is_over() {
+    let t = Instant::now();
+    let open = todo("1", A);
+    let failed = Todo { outcome: Some(Outcome::Failed), ..open.clone() };
+    let mut rounds = Rounds::new(DELAY, true);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    assert!(matches!(
+        round(&mut rounds, std::slice::from_ref(&failed), &[idle(A)], secs(t, 2))[..],
+        [Action::TodoFailed(..)]
+    ));
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&open), &[working(A)], secs(t, 4)), [Action::Cancel(A)]);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&open), &[working(A)], secs(t, 6)), []);
+
+    let mut rounds = Rounds::new(DELAY, true);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    round(&mut rounds, std::slice::from_ref(&failed), &[idle(A)], secs(t, 2));
+    assert_eq!(round(&mut rounds, &[], &[idle(A)], secs(t, 4)), [Action::Cancel(A)]);
+    // 续接保留 `outcome`：原会话又干起活来，或者另开了会话。
+    let mut rounds = Rounds::new(DELAY, true);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    round(&mut rounds, std::slice::from_ref(&failed), &[idle(A)], secs(t, 2));
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&failed), &[working(A)], secs(t, 4)), [Action::Cancel(A)]);
+    assert_eq!(round(&mut rounds, std::slice::from_ref(&failed), &[working(A)], secs(t, 6)), []);
+
+    let mut rounds = Rounds::new(DELAY, true);
+    round(&mut rounds, std::slice::from_ref(&open), &[working(A)], t);
+    round(&mut rounds, std::slice::from_ref(&failed), &[idle(A)], secs(t, 2));
+    let elsewhere = Todo { session: Some(B), ..failed.clone() };
+    assert_eq!(round(&mut rounds, &[elsewhere], &[idle(A), working(B)], secs(t, 4)), [Action::Cancel(A)]);
+}
+
 /// agent 说没什么要告诉用户的：停下来、自动完成都不推。
 #[test]
 fn silent_todos_are_not_pushed() {

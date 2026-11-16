@@ -19,7 +19,7 @@
 //! 一条没做成，不再按做完推。重连时清掉记着的任务表和各任务的列，第一次看到的任务只记基线，规矩同会话。
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
 
@@ -78,6 +78,8 @@ struct TodoTrack {
     idle: bool,
     /// agent 报了没做成。
     failed: bool,
+    /// 这次没做成推过了、推的是哪个会话，还没好转（接着干、做完或删掉）。
+    failed_pushed: Option<SessionId>,
 }
 
 #[derive(Default)]
@@ -160,16 +162,30 @@ impl Rounds {
                 !info.exited && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Idle)
             });
             let failed = todo.outcome == Some(Outcome::Failed) && column != Column::Done;
+            let mut failed_pushed = previous.as_ref().and_then(|track| track.failed_pushed);
+            // 推过没做成以后不再是没做成、换了会话或者又干起活来（`Todo::outcome` 还可能是没做成）：那条过时了，
+            // 还在退避的也不再发。会话在等回答时不撤，等回答的通知按会话替掉了它。
+            let resumed = column == Column::InProgress
+                && previous.as_ref().is_some_and(|track| track.column != Column::InProgress);
+            if let Some(session) = failed_pushed
+                && (!failed || todo.session != Some(session) || resumed)
+            {
+                if !blocked(session) {
+                    actions.push(Action::Cancel(session));
+                }
+                failed_pushed = None;
+            }
             // 报了没做成：变成这样时推一条，替掉做完的那条，不再等宽限期。
             if failed
                 && let (Some(previous), Some(session)) = (&previous, todo.session)
                 && !previous.failed
             {
                 let lines = match &todo.result {
-                    Some(result) if self.text => result.lines().map(str::to_owned).collect(),
+                    Some(result) if self.text => result.lines().take(BLOCKED_LINES).map(str::to_owned).collect(),
                     _ => Vec::new(),
                 };
                 actions.push(Action::TodoFailed(session, todo.spec.title.clone(), lines));
+                failed_pushed = Some(session);
             }
             // agent 说没什么要告诉用户的，做完了也不推。
             let silent = todo.outcome == Some(Outcome::Silent);
@@ -210,14 +226,18 @@ impl Rounds {
                 pushed = Some(info.id);
                 actions.push(Action::TodoDone(info.id, todo.spec.title.clone()));
             }
-            tracked.insert(todo.id.clone(), TodoTrack { column, finished_at, pushed, idle, failed });
+            tracked.insert(todo.id.clone(), TodoTrack { column, finished_at, pushed, idle, failed, failed_pushed });
         }
         // 删掉了的任务推过的也撤。
-        for session in self.todo_tracked.values().filter_map(|track| track.pushed) {
+        for session in self.todo_tracked.values().flat_map(|track| track.pushed.into_iter().chain(track.failed_pushed))
+        {
             if !blocked(session) {
                 actions.push(Action::Cancel(session));
             }
         }
+        // 一个任务推过的做完和没做成可能是同一个会话，撤一次就够。
+        let mut cancelled = HashSet::new();
+        actions.retain(|action| !matches!(action, Action::Cancel(session) if !cancelled.insert(*session)));
         self.todo_tracked = tracked;
         self.todos = None;
         self.sessions = None;
