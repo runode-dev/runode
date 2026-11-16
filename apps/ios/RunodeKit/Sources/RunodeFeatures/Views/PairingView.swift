@@ -347,8 +347,8 @@
         private var confirmsOnly: Bool { opened && model.invitation != nil }
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(confirmsOnly ? "和这台电脑配对？" : "粘贴配对链接").font(.headline)
                     Text(confirmsOnly ? "打开的配对链接要连这台电脑。" : "在电脑的 Runode 里点侧栏的「手机」，复制二维码下面的配对链接。")
                         .font(.subheadline)
@@ -365,12 +365,23 @@
                         .background(colors.fill, in: .inner)
                 }
                 if let invitation = model.invitation {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(invitation.hostName, systemImage: "desktopcomputer")
-                            .font(.subheadline.weight(.semibold))
-                        Text(verbatim: Presentation.pairingAddresses(invitation.addresses, port: invitation.port))
-                            .font(.footnote.monospaced())
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "desktopcomputer")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(invitation.hostName)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(verbatim: Presentation.pairingAddresses(invitation.addresses, port: invitation.port))
+                                    .font(.footnote.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(12)
+                        .background(colors.fill, in: .inner)
                         Text("确认这是你自己的电脑再配对。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -394,7 +405,10 @@
                 }
                 .frame(minHeight: 44)
             }
-            .padding(16)
+            // 顶上多留些，标题不贴着拖拽条。
+            .padding(.horizontal, 20)
+            .padding(.top, 28)
+            .padding(.bottom, 12)
             .fixedSize(horizontal: false, vertical: true)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
             .presentationDetents([.height(height)])
