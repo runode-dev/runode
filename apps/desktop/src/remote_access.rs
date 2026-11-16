@@ -150,7 +150,7 @@ fn connect_project(build: &str) -> Result<UnixStream, ChannelRefusal> {
 pub fn follow_config(host: &Host) -> Option<Following> {
     let service = Arc::new(service(host)?);
     // 宿主进程里没有界面，系统外观无从知道；远程访问的两项和主题无关，按深色读即可。读之前先取各配置
-    // 文件的修改时间（同 `config::reload`）：读的时候、开始盯之前有人改了，看配置的线程头一轮就重读。
+    // 文件的修改时间：读的时候、开始盯之前有人改了，看配置的线程头一轮就重读。
     let before = crate::config::watch_stamp(&Config::default());
     let config = Config::load(true);
     let seen = crate::config::seen_after(&before, &config);

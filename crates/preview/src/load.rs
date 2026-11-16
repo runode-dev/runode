@@ -107,7 +107,7 @@ fn decode_text(mut bytes: Vec<u8>, cut: bool) -> Content {
             Err(_) => return Content::Binary,
         }
     };
-    // 只切出要留的 `MAX_LINES` 行：2MB 全是换行时全切出来是两百万个 `String`，绝大部分随即丢掉。
+    // 只切出要留的 `MAX_LINES` 行：文本全是换行时全切出来，每个字节一个 `String`，绝大部分随即丢掉。
     let mut segments = text.split('\n');
     let mut lines: Vec<String> =
         segments.by_ref().take(MAX_LINES).map(|line| line.strip_suffix('\r').unwrap_or(line).to_owned()).collect();

@@ -9,7 +9,7 @@
 //!
 //! 命令的解析在 `args`，连宿主和收发消息在 `client`，按写法找会话在 `select`，各个命令在
 //! `commands`，用法说明在 `help`，远程访问在 `remote`，看板（`todo`、
-//! `schedule`）在 `todo`，定时的本地钟点在 `local_time`，shell 补全在 `complete`。
+//! `schedule`）在 `todo`，shell 补全在 `complete`。
 
 mod args;
 mod client;

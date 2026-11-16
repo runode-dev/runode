@@ -58,13 +58,12 @@ pub enum HandoffPart {
         /// 监听的 socket 的路径。描述符传过去后路径不变，shell 里的 `RUNODE_SOCKET` 照样有效。
         #[serde(with = "os_path::required")]
         socket: PathBuf,
-        /// 会话里的程序读写剪贴板的规矩，见 `ClientMsg::SetOptions`。旧宿主没有这一项，新宿主按默认值读，
-        /// 等桌面重连后补发。
+        /// 会话里的程序读写剪贴板的规矩（`ClientMsg::SetOptions`）。缺这一项时按默认值读，等桌面重连后补发。
         #[serde(default)]
         clipboard: ClipboardAccess,
-        /// 宿主手里的布局，见 `ClientMsg::LayoutChanged`。旧宿主没有这一项，新宿主从空的开始；读不懂
-        /// （`WindowLayout` 后来加了必填的字段）时也从空的开始：丢了布局只是没开 app 时一时看不到工作区，
-        /// 不能为它放弃交接，所以 `WindowLayout` 不受上面冻结的约束。
+        /// 宿主手里的布局（`ClientMsg::LayoutChanged`）。缺这一项或读不懂（比如 `WindowLayout` 多了必填的
+        /// 字段）时从空的开始：丢了布局只是没开 app 时一时看不到工作区，不能为它放弃交接，所以
+        /// `WindowLayout` 不受上面冻结的约束。
         #[serde(default, deserialize_with = "or_default")]
         layout: Vec<WindowLayout>,
         /// 旧宿主不因空闲退出（比如登录自启拉起的宿主），新宿主接手后照办。为空时由新宿主自己定。
