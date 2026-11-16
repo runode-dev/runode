@@ -374,10 +374,10 @@ private fun PasteLinkSheet(model: PairingModel, onSubmit: () -> Unit, onDismiss:
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, containerColor = colors.card) {
         Column(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     stringResource(if (confirmsOnly) R.string.pairing_confirm_title else R.string.pairing_paste_link),
                     style = Type.headline,
@@ -420,17 +420,31 @@ private fun PasteLinkSheet(model: PairingModel, onSubmit: () -> Unit, onDismiss:
                 LaunchedEffect(Unit) { if (!opened) focus.requestFocus() }
             }
             model.invitation?.let { invitation ->
-                Column(Modifier.semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(AppIcons.laptop, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text(invitation.hostName, style = Type.subheadline.copy(fontWeight = FontWeight.SemiBold))
+                Column(Modifier.semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(colors.fill, Shapes.inner)
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            AppIcons.laptop,
+                            contentDescription = null,
+                            tint = colors.secondary,
+                            modifier = Modifier.size(24.dp),
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(invitation.hostName, style = Type.subheadline.copy(fontWeight = FontWeight.SemiBold))
+                            Text(
+                                Presentation.pairingAddresses(invitation.addresses, invitation.port).resolve(),
+                                style = Type.footnote,
+                                fontFamily = FontFamily.Monospace,
+                                color = colors.secondary,
+                            )
+                        }
                     }
-                    Text(
-                        Presentation.pairingAddresses(invitation.addresses, invitation.port).resolve(),
-                        style = Type.footnote,
-                        fontFamily = FontFamily.Monospace,
-                        color = colors.secondary,
-                    )
                     Text(stringResource(R.string.pairing_check_machine), style = Type.footnote, color = colors.secondary)
                 }
             }
