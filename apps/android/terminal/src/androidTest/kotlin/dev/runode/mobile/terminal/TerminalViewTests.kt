@@ -7,6 +7,7 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -367,10 +368,12 @@ class TerminalViewTests {
         val recorder = Recorder()
         selectingView("\u001b[?1000hselection world", recorder) { vt, view, grid ->
             assertTrue(view.beginSelection(grid.x(1), grid.y(0)))
+            // 两下轻点的事件时间隔开超过双击的时限，GestureDetector 才把第二下也当单击，不看测试跑得快慢。
+            var down = SystemClock.uptimeMillis()
             fun tap(x: Float, y: Float) {
-                val down = SystemClock.uptimeMillis()
                 view.dispatchTouchEvent(touch(down, down, MotionEvent.ACTION_DOWN, x, y))
                 view.dispatchTouchEvent(touch(down, down + 50, MotionEvent.ACTION_UP, x, y))
+                down += 50 + ViewConfiguration.getDoubleTapTimeout() + 100
             }
             tap(grid.x(4), grid.y(0))
             assertTrue(vt.hasSelection)
