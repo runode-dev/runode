@@ -394,12 +394,13 @@ Usage: runode schedule add TITLE... (--at TIME | --daily HH:MM [--days DAYS] |
        runode schedule pause ID
        runode schedule resume ID
        runode schedule fire ID
+       runode schedule runs ID [--json]
 
 Commands:
   add     Add a schedule and print its id
   list    List the schedules with when they fire, the next time they will and
           how the last --run went (LAST: idle, fired or failed, and when;
-          running while CMD runs)
+          running while CMD runs); `runs ID` shows the runs before
   rm      Remove a schedule; the tasks it started stay
   pause   Stop a schedule from firing until it is resumed
   resume  Let a paused schedule fire again, counting from now: the times it
@@ -408,6 +409,11 @@ Commands:
           first if it has one. When it fires next stays the same, and a
           paused schedule fires too. Refused while its last task is
           unfinished or its last command is still running
+  runs    List the --run results of a schedule, newest first: when, and
+          idle; fired, with the task it started; skipped, with the unfinished
+          task that held it back, or none if the last command was still
+          running; or failed, with the end of stderr. Only the latest 500 of
+          a schedule are kept
 
 Arguments:
   TITLE...  With `add`: the title of the tasks it starts, words joined by
@@ -442,7 +448,8 @@ Options:
       --run-timeout MINUTES
                        With --run: count the run as failed after MINUTES
                        (default 5, at most 1440)
-      --json           With `list`: print JSON instead of a table
+      --json           With `list` and `runs`: print JSON instead of a table;
+                       for `runs` it has the whole output
   -h, --help           Show this help
 
 With --run, a due schedule first runs CMD in DIR without a terminal (`sh -c`,
@@ -451,9 +458,10 @@ no tokens. If CMD exits 0 and prints to stdout, a task is started with the
 schedule's title, its prompt being --prompt followed by that output (or just
 the output). If CMD exits 0 and prints nothing, nothing happens. A non-zero
 exit, running past --run-timeout or printing more than 64 KiB counts as
-failed. Write logs to stderr; Runode keeps the end of it, and `list` shows how
-the last run went. The schedule is skipped while its last task is unfinished
-or its last run is still going. CMD gets RUNODE_SCHEDULE (the schedule id, to
+failed. Write logs to stderr; Runode keeps the end of it, `list` shows how
+the last run went and `runs ID` the ones before. The schedule is skipped while
+its last task is unfinished or its last run is still going; `runs` lists the
+skips too. CMD gets RUNODE_SCHEDULE (the schedule id, to
 keep its state apart), RUNODE_SOCKET and the login shell's PATH with Runode's
 directory added, so it can call runode. A CMD that never prints to stdout only
 runs and never starts an agent. Keeping track across runs, such as not handing

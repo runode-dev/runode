@@ -23,6 +23,7 @@ mod dialog;
 mod excerpts;
 mod history;
 mod pulls;
+mod runs;
 mod schedules;
 mod skills;
 mod store;
@@ -132,6 +133,7 @@ pub struct Kanban {
     columns_scroll: ScrollHandle,
     schedules_scroll: ScrollHandle,
     history_scroll: ScrollHandle,
+    runs_scroll: ScrollHandle,
     history: History,
     /// 上一帧各卡片和看板画在哪，画的时候记下。
     geometry: Rc<RefCell<Geometry>>,
@@ -238,6 +240,7 @@ impl Kanban {
             columns_scroll: ScrollHandle::new(),
             schedules_scroll: ScrollHandle::new(),
             history_scroll: ScrollHandle::new(),
+            runs_scroll: ScrollHandle::new(),
             history: History::default(),
             geometry: Rc::default(),
             seen: None,
@@ -484,7 +487,7 @@ impl Kanban {
     /// 删掉任务；它的会话还在（会话留着，在后台照常跑）或开始了还没做完时先问一句。
     fn remove_todo(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let data = store::data(cx);
-        let Some(todo) = data.todos.iter().chain(&self.history.todos).find(|todo| todo.id == id) else { return };
+        let Some(todo) = data.todos.iter().chain(&self.history.todos.items).find(|todo| todo.id == id) else { return };
         let alive = todo.session.is_some_and(|session| data.sessions.get(&session).is_some_and(|info| !info.exited));
         // 开始了还没做完的删了就接不上 agent 上次的对话，先问；没开始的和做完的直接删。
         let unfinished = todo.started.is_some() && todo.done_at.is_none();

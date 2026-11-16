@@ -153,6 +153,11 @@ pub(crate) enum Command {
     ScheduleFire {
         id: String,
     },
+    /// 列定时的检查记录。
+    ScheduleRuns {
+        id: String,
+        json: bool,
+    },
     /// 打印给这种 shell 装的补全脚本。
     Completions {
         shell: Shell,
@@ -651,6 +656,11 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                 "fire" => {
                     no_more(words, 1, "schedule fire")?;
                     Command::ScheduleFire { id: words.first().ok_or("schedule fire needs an ID")?.clone() }
+                }
+                "runs" => {
+                    no_more(words, 1, "schedule runs")?;
+                    let id = words.first().ok_or("schedule runs needs an ID")?.clone();
+                    Command::ScheduleRuns { id, json: std::mem::take(&mut flags.json) }
                 }
                 other => return Err(format!("schedule knows {}, not {other}", subcommand_list("schedule", "and"))),
             }
@@ -1218,7 +1228,14 @@ mod tests {
         assert_eq!(parse("schedule rm 0a1b2c3d"), Ok(Command::ScheduleRemove { id: "0a1b2c3d".into() }));
         assert_eq!(parse("schedule fire 0a1b2c3d"), Ok(Command::ScheduleFire { id: "0a1b2c3d".into() }));
         assert!(parse("schedule fire").unwrap_err().contains("schedule fire needs an ID"));
-        assert!(parse("schedule").unwrap_err().contains("add, list, rm, pause, resume or fire"));
+        assert_eq!(
+            parse("schedule runs 0a1b2c3d --json"),
+            Ok(Command::ScheduleRuns { id: "0a1b2c3d".into(), json: true })
+        );
+        assert_eq!(parse("schedule runs 0a1b2c3d"), Ok(Command::ScheduleRuns { id: "0a1b2c3d".into(), json: false }));
+        assert!(parse("schedule runs").unwrap_err().contains("schedule runs needs an ID"));
+        assert!(parse("schedule runs a b").unwrap_err().contains("does not take b"));
+        assert!(parse("schedule").unwrap_err().contains("add, list, rm, pause, resume, fire or runs"));
     }
 
     #[test]

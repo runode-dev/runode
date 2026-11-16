@@ -206,17 +206,21 @@ impl Shared {
         match self.held_back(&schedule.id, now) {
             Ok(None) => {}
             Ok(Some(held)) => {
-                match held {
+                let blocker = match held {
                     HeldBack::Running => {
                         tracing::info!("schedule {} skips this run: its last command is still running", schedule.id);
+                        None
                     }
-                    HeldBack::Todo(todo) => tracing::info!(
-                        "schedule {} skips this run: its last todo {todo} has not started, is still in progress or is \
-                         blocked",
-                        schedule.id
-                    ),
-                }
-                self.skip(schedule, now);
+                    HeldBack::Todo(todo) => {
+                        tracing::info!(
+                            "schedule {} skips this run: its last todo {todo} has not started, is still in progress \
+                             or is blocked",
+                            schedule.id
+                        );
+                        Some(todo)
+                    }
+                };
+                self.skip(schedule, now, blocker.as_deref());
                 return;
             }
             Err(err) => {
@@ -241,10 +245,10 @@ impl Shared {
     }
 
     /// 定时这次到点跳过、不开任务：记下到点的时刻。一次性的到过就没了，跳过也删掉：只记到点的话它再也不会
-    /// 到点，却一直留着让宿主不空闲。
-    fn skip(&self, schedule: &Schedule, now: u64) {
+    /// 到点，却一直留着让宿主不空闲。`blocker` 是挡住它的那张任务，上次的命令还在跑时为空。
+    fn skip(&self, schedule: &Schedule, now: u64, blocker: Option<&str>) {
         // `schedule` 是这一轮开头读的，决定跳过的这一会儿可能被改过：`skip_schedule` 照库里现在的样子办。
-        match self.todos.with_db(|db| db.skip_schedule(&schedule.id, now)) {
+        match self.todos.with_db(|db| db.skip_schedule(&schedule.id, now, blocker)) {
             // 下一次到点变了，看板要重读。
             Ok(true) => self.todos_changed(),
             Ok(false) => tracing::info!("schedule {} was removed or changed before it was skipped", schedule.id),

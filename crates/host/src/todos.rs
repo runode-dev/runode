@@ -30,7 +30,7 @@ use std::{
 use runode_git::Repo;
 use runode_protocol::{
     HostMsg, SessionId,
-    todo::{DONE_TODOS_PAGE, Outcome, RESULT_LIMIT, Todo, TodoSpec, When},
+    todo::{DONE_TODOS_PAGE, Outcome, RESULT_LIMIT, SCHEDULE_RUNS_PAGE, Todo, TodoSpec, When},
 };
 use runode_todo::Store;
 use runode_types::agent::AgentState;
@@ -398,6 +398,15 @@ impl Shared {
     pub(crate) fn list_done_todos(&self, req: u32, schedule: Option<&str>, offset: u32) -> Result<HostMsg, String> {
         let (todos, more) = self.todos.with_db(|db| db.list_done_todos(schedule, offset, DONE_TODOS_PAGE))?;
         Ok(HostMsg::DoneTodos { req, todos, more })
+    }
+
+    /// 回 `ClientMsg::ListScheduleRuns`。
+    pub(crate) fn list_schedule_runs(&self, req: u32, schedule: &str, offset: u32) -> Result<HostMsg, String> {
+        let (runs, more) = self
+            .todos
+            .with_db(|db| db.list_schedule_runs(schedule, offset, SCHEDULE_RUNS_PAGE))?
+            .ok_or_else(|| format!("no schedule {schedule}"))?;
+        Ok(HostMsg::ScheduleRuns { req, runs, more })
     }
 
     /// 回 `ClientMsg::AddTodo`。

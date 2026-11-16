@@ -12,4 +12,4 @@ mod store;
 
 pub use local_time::{DAYS, LocalTime, parse_clock, parse_days};
 pub use schedule::{next_fire, valid_cron};
-pub use store::{DONE_KEPT, FiredNow, Result, Store};
+pub use store::{DONE_KEPT, FiredNow, Result, SCHEDULE_RUNS_KEPT, Store};

@@ -116,6 +116,7 @@ runode schedule add 'Release notes' --at '2026-11-02 10:00' --prompt '...'
 runode schedule list     # WHEN and NEXT, the next time it fires
 runode schedule pause ID # NEXT shows paused; resume ID counts from then on
 runode schedule fire ID  # fire it once now to try it; NEXT stays
+runode schedule runs ID  # past --run results, newest first, skips included
 runode schedule rm ID    # the tasks it started stay
 ```
 
@@ -157,7 +158,10 @@ So stdout is only for the prompt; write logs to stderr. runode keeps the end
 of stderr, and `runode schedule list` shows the last run in LAST (`idle`,
 `fired` or `failed`, and when, or `running`; `--json` has the output). A
 schedule is skipped while the task it last started is unfinished or its last
-run is still going.
+run is still going. `runode schedule runs ID` lists the earlier runs and skips,
+newest first, with the task each started or was held back by and the last line
+of stderr; `--json` has the whole output. The latest 500 of a schedule are
+kept.
 CMD gets `RUNODE_SCHEDULE` (the schedule id), `RUNODE_SOCKET` and the login
 shell's PATH with runode's directory added, so it can call `runode` itself; a
 CMD that never prints to stdout only runs and never starts an agent. runode

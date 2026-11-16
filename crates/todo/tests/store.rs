@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use runode_todo::{DONE_KEPT, FiredNow, Store};
+use runode_todo::{DONE_KEPT, FiredNow, SCHEDULE_RUNS_KEPT, Store};
 use runode_types::{
     session::SessionId,
     todo::{Outcome, RunOutcome, ScheduleRun, TodoSpec, When},
@@ -170,6 +170,7 @@ fn upgrades_a_version_3_database() {
              ALTER TABLE schedules DROP COLUMN run_outcome;
              ALTER TABLE schedules DROP COLUMN run_output;
              DELETE FROM meta WHERE key = 'max_running';
+             DROP TABLE schedule_runs;
              PRAGMA user_version = 3;",
         )
         .unwrap();
@@ -200,6 +201,7 @@ fn upgrades_a_version_5_database() {
              ALTER TABLE schedules DROP COLUMN run_at;
              ALTER TABLE schedules DROP COLUMN run_outcome;
              ALTER TABLE schedules DROP COLUMN run_output;
+             DROP TABLE schedule_runs;
              PRAGMA user_version = 5;",
         )
         .unwrap();
@@ -212,6 +214,49 @@ fn upgrades_a_version_5_database() {
     assert!(store.update_schedule(&id, None, None, Some("git fetch"), Some(10), 200).unwrap());
     let schedule = &store.list_schedules().unwrap()[0];
     assert_eq!((schedule.run.as_deref(), schedule.run_timeout), (Some("git fetch"), Some(10)));
+}
+
+/// 版本 6 的库升上来：定时原有的上一次结果进了检查记录，读不懂的结果和空的输出照样记。
+#[test]
+fn upgrades_a_version_6_database() {
+    let path = temp_db("v6");
+    let mut store = Store::open(&path).unwrap();
+    let every = When::Every { minutes: 5 };
+    let poll = store.add_schedule(&spec("poll"), &every, Some("check"), None, 100).unwrap();
+    let bare = store.add_schedule(&spec("bare"), &every, Some("check"), None, 100).unwrap();
+    let never = store.add_schedule(&spec("never"), &every, Some("check"), None, 100).unwrap();
+    let ship = store.add_schedule(&spec("ship"), &every, Some("check"), None, 100).unwrap();
+    let fired = store.fire_schedule_run(&poll, 400).unwrap().unwrap();
+    let failed = ScheduleRun { at: 410, outcome: RunOutcome::Failed, output: "exit status 1".into() };
+    store.finish_schedule_run(&fired, &failed, None, false).unwrap();
+    let shipping = store.fire_schedule_run(&ship, 400).unwrap().unwrap();
+    let opened = ScheduleRun { at: 420, outcome: RunOutcome::Fired, output: String::new() };
+    let shipped = store.finish_schedule_run(&shipping, &opened, Some(&spec("ship")), false).unwrap().unwrap();
+    drop(store);
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(&format!(
+            "DROP TABLE schedule_runs;
+             UPDATE schedules SET run_at = 300 WHERE id = '{bare}';
+             PRAGMA user_version = 6;"
+        ))
+        .unwrap();
+    let mut store = Store::open(&path).unwrap();
+    let runs = |store: &Store, id: &str| -> Vec<ScheduleRun> {
+        store.list_schedule_runs(id, 0, 10).unwrap().unwrap().0.into_iter().map(|record| record.run).collect()
+    };
+    assert_eq!(runs(&store, &poll), std::slice::from_ref(&failed));
+    assert_eq!(runs(&store, &bare), [ScheduleRun { at: 300, outcome: RunOutcome::Unknown, output: String::new() }]);
+    assert!(runs(&store, &never).is_empty());
+    // 回填的开了任务的那次连上那张任务。
+    let (records, _) = store.list_schedule_runs(&ship, 0, 10).unwrap().unwrap();
+    assert_eq!(
+        records.into_iter().map(|record| (record.run, record.todo)).collect::<Vec<_>>(),
+        [(opened, Some(shipped))]
+    );
+    let idle = ScheduleRun { at: 420, outcome: RunOutcome::Idle, output: String::new() };
+    store.finish_schedule_run(&fired, &idle, None, false).unwrap();
+    assert_eq!(runs(&store, &poll), [idle, failed]);
 }
 
 /// 先跑的命令和超时：加的时候存下，改时只动给了的，空串和 0 清掉。
@@ -276,7 +321,7 @@ fn finishing_a_schedule_run_records_it_and_queues_a_todo() {
 
     let idle = ScheduleRun { at: 170, outcome: RunOutcome::Idle, output: String::new() };
     assert_eq!(store.finish_schedule_run(&fired, &idle, None, false).unwrap(), None);
-    assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(idle));
+    assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(idle.clone()));
 
     let found = ScheduleRun { at: 180, outcome: RunOutcome::Fired, output: "2 new issues".into() };
     let task = TodoSpec { prompt: "triage\n\n2 new issues".into(), ..spec("poll") };
@@ -292,25 +337,44 @@ fn finishing_a_schedule_run_records_it_and_queues_a_todo() {
     assert!(store.set_paused(&poll, true, 190).unwrap());
     let failed = ScheduleRun { at: 200, outcome: RunOutcome::Failed, output: "exit status 1".into() };
     assert_eq!(store.finish_schedule_run(&fired, &failed, Some(&task), false).unwrap(), None);
-    assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(failed));
+    assert_eq!(store.list_schedules().unwrap()[0].last_run, Some(failed.clone()));
     // 停着时本该开任务的这次记成没事。
     let found_late = ScheduleRun { at: 210, ..found.clone() };
     assert_eq!(store.finish_schedule_run(&fired, &found_late, Some(&task), false).unwrap(), None);
     assert_eq!(
         store.list_schedules().unwrap()[0].last_run,
-        Some(ScheduleRun { outcome: RunOutcome::Idle, ..found_late })
+        Some(ScheduleRun { outcome: RunOutcome::Idle, ..found_late.clone() })
+    );
+    // 每次都进检查记录，新的在前；开了任务的带上那张任务和它的编号。
+    let (runs, more) = store.list_schedule_runs(&poll, 0, 10).unwrap().unwrap();
+    assert!(!more);
+    assert_eq!(
+        runs.into_iter().map(|record| (record.run, record.todo, record.number)).collect::<Vec<_>>(),
+        [
+            (ScheduleRun { outcome: RunOutcome::Idle, ..found_late }, None, None),
+            (failed, None, None),
+            (found.clone(), Some(todo.id.clone()), Some(todo.number)),
+            (idle, None, None),
+        ]
     );
 
-    // 跑的时候删掉了：不开任务。
+    // 跑的时候删掉了：不开任务，也不记。
     assert!(store.remove_schedule(&poll).unwrap());
     assert_eq!(store.finish_schedule_run(&fired, &found, Some(&task), false).unwrap(), None);
     assert_eq!(store.list_todos(1_000).unwrap().len(), 1);
+    assert_eq!(store.list_schedule_runs(&poll, 0, 10).unwrap(), None);
+    let left: i64 = Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT count(*) FROM schedule_runs WHERE schedule = ?1", [&poll], |row| row.get(0))
+        .unwrap();
+    assert_eq!(left, 0);
 
-    // 一次性的到点时就删了，照样开。
+    // 一次性的到点时就删了，照样开；定时没了，不记。
     let once = store.add_schedule(&spec("deploy"), &When::Once { at: 300 }, Some("check"), None, 100).unwrap();
     let fired = store.fire_schedule_run(&once, 300).unwrap().unwrap();
     assert!(store.finish_schedule_run(&fired, &found, Some(&spec("deploy")), false).unwrap().is_some());
     assert_eq!(store.list_todos(1_000).unwrap().len(), 2);
+    assert_eq!(store.list_schedule_runs(&once, 0, 10).unwrap(), None);
 
     // 别的版本写的结果读成 `Unknown`。
     let later = store.add_schedule(&spec("later"), &every, Some("check"), None, 100).unwrap();
@@ -493,21 +557,102 @@ fn skipping_a_schedule_follows_what_the_database_says_now() {
     let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, None, None, 100).unwrap();
     let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, None, None, 100).unwrap();
 
-    assert!(!store.skip_schedule(&every, 150).unwrap());
-    assert!(store.skip_schedule(&every, 160).unwrap());
+    assert!(!store.skip_schedule(&every, 150, None).unwrap());
+    assert!(store.skip_schedule(&every, 160, None).unwrap());
     assert_eq!(store.list_schedules().unwrap()[0].last_fired, 160);
     // 决定跳过以后被改了时间（从改的时刻重新算起）：按旧的样子到点的这次不记。
     assert!(store.update_schedule(&every, None, Some(&When::Every { minutes: 10 }), None, None, 300).unwrap());
-    assert!(!store.skip_schedule(&every, 400).unwrap());
+    assert!(!store.skip_schedule(&every, 400, None).unwrap());
     assert_eq!(store.list_schedules().unwrap()[0].last_fired, 300);
 
     // 一次性的挪到以后了：不删。到了点再跳过就删掉，删掉了的什么都不做。
     assert!(store.update_schedule(&once, None, Some(&When::Once { at: 1_000 }), None, None, 300).unwrap());
-    assert!(!store.skip_schedule(&once, 400).unwrap());
-    assert!(store.skip_schedule(&once, 1_000).unwrap());
-    assert!(!store.skip_schedule(&once, 1_000).unwrap());
+    assert!(!store.skip_schedule(&once, 400, None).unwrap());
+    assert!(store.skip_schedule(&once, 1_000, None).unwrap());
+    assert!(!store.skip_schedule(&once, 1_000, None).unwrap());
     assert_eq!(store.list_schedules().unwrap().iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), [every.as_str()]);
     assert!(store.list_todos(1_000).unwrap().is_empty());
+}
+
+/// 跳过的这次：带命令、没停着的记一条 `Skipped`，带上挡住它的任务；没有命令的、停着的不记，一次性的跳过就
+/// 连同记录删掉。
+#[test]
+fn skipping_a_schedule_run_records_it() {
+    let mut store = Store::open(&temp_db("skip-run")).unwrap();
+    let every = When::Every { minutes: 1 };
+    let poll = store.add_schedule(&spec("poll"), &every, Some("check"), None, 100).unwrap();
+    let plain = store.add_schedule(&spec("plain"), &every, None, None, 100).unwrap();
+    let paused = store.add_schedule(&spec("paused"), &every, Some("check"), None, 100).unwrap();
+    assert!(store.set_paused(&paused, true, 100).unwrap());
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, Some("check"), None, 100).unwrap();
+    let blocker = store.add_todo(&spec("last"), 100, Some(&poll)).unwrap();
+    let number = store.todo_by_id(&blocker).unwrap().unwrap().number;
+
+    assert!(store.skip_schedule(&poll, 160, Some(&blocker)).unwrap());
+    // 还没到点：不记。
+    assert!(!store.skip_schedule(&poll, 170, None).unwrap());
+    assert!(store.skip_schedule(&poll, 220, None).unwrap());
+    let (runs, more) = store.list_schedule_runs(&poll, 0, 10).unwrap().unwrap();
+    assert!(!more);
+    assert_eq!(
+        runs.into_iter().map(|record| (record.run, record.todo, record.number)).collect::<Vec<_>>(),
+        [
+            (ScheduleRun { at: 220, outcome: RunOutcome::Skipped, output: String::new() }, None, None),
+            (ScheduleRun { at: 160, outcome: RunOutcome::Skipped, output: String::new() }, Some(blocker), Some(number)),
+        ]
+    );
+
+    assert!(store.skip_schedule(&plain, 160, None).unwrap());
+    assert!(store.list_schedule_runs(&plain, 0, 10).unwrap().unwrap().0.is_empty());
+    assert!(store.skip_schedule(&paused, 160, None).unwrap());
+    assert!(store.list_schedule_runs(&paused, 0, 10).unwrap().unwrap().0.is_empty());
+    assert!(store.skip_schedule(&once, 200, None).unwrap());
+    assert_eq!(store.list_schedule_runs(&once, 0, 10).unwrap(), None);
+}
+
+/// 每个定时只留最新的 `SCHEDULE_RUNS_KEPT` 条，不动别的定时的；翻页时说清后面还有没有。
+#[test]
+fn schedule_runs_keep_only_the_newest() {
+    let mut store = Store::open(&temp_db("runs-kept")).unwrap();
+    let every = When::Every { minutes: 1 };
+    let poll = store.add_schedule(&spec("poll"), &every, Some("check"), None, 100).unwrap();
+    let other = store.add_schedule(&spec("other"), &every, Some("check"), None, 100).unwrap();
+    let fired = store.fire_schedule_run(&poll, 160).unwrap().unwrap();
+    let other_fired = store.fire_schedule_run(&other, 160).unwrap().unwrap();
+    let run = |at| ScheduleRun { at, outcome: RunOutcome::Idle, output: String::new() };
+    store.finish_schedule_run(&other_fired, &run(500), None, false).unwrap();
+    let kept = u64::from(SCHEDULE_RUNS_KEPT);
+    for at in 1_000..1_000 + kept + 2 {
+        store.finish_schedule_run(&fired, &run(at), None, false).unwrap();
+    }
+    let ats = |offset, limit| -> (Vec<u64>, bool) {
+        let (runs, more) = store.list_schedule_runs(&poll, offset, limit).unwrap().unwrap();
+        (runs.into_iter().map(|record| record.run.at).collect(), more)
+    };
+    let (all, more) = ats(0, SCHEDULE_RUNS_KEPT + 10);
+    assert!(!more);
+    assert_eq!(all, (1_002..1_000 + kept + 2).rev().collect::<Vec<_>>());
+    assert!(ats(0, SCHEDULE_RUNS_KEPT - 1).1);
+    assert!(!ats(0, SCHEDULE_RUNS_KEPT).1);
+    assert_eq!(ats(SCHEDULE_RUNS_KEPT - 1, 10), (vec![1_002], false));
+    assert_eq!(store.list_schedule_runs(&other, 0, 10).unwrap().unwrap().0.len(), 1);
+}
+
+/// 删掉任务以后记录不再连到它：它的标识会发给以后的新任务。
+#[test]
+fn removing_a_todo_unlinks_its_schedule_runs() {
+    let mut store = Store::open(&temp_db("runs-todo")).unwrap();
+    let poll = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, Some("check"), None, 100).unwrap();
+    let fired = store.fire_schedule_run(&poll, 160).unwrap().unwrap();
+    let found = ScheduleRun { at: 170, outcome: RunOutcome::Fired, output: String::new() };
+    let todo = store.finish_schedule_run(&fired, &found, Some(&spec("poll")), false).unwrap().unwrap();
+    let linked = |store: &Store| {
+        let record = store.list_schedule_runs(&poll, 0, 10).unwrap().unwrap().0.remove(0);
+        (record.todo, record.number)
+    };
+    assert_eq!(linked(&store), (Some(todo.clone()), Some(1)));
+    store.remove_todo(&todo).unwrap();
+    assert_eq!(linked(&store), (None, None));
 }
 
 #[test]

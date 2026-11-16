@@ -21,6 +21,7 @@ use super::{
     Kanban, Page, TOAST_LINGER, ToastState, agent_text, column_name,
     dialog::Editing,
     history_link, icon_button, label_row, named,
+    runs::last_line,
     store::{self, TodoData},
     when::{describe_when, run_label, short_time, unix_now},
 };
@@ -103,7 +104,7 @@ fn run_line_in(schedule: &Schedule, now: u64, locale: &str) -> Option<(String, b
     }
     let Some(last) = &schedule.last_run else { return Some((program, false)) };
     let time = short_time(last.at, now);
-    let output = last.output.lines().map(str::trim).rfind(|line| !line.is_empty());
+    let output = last_line(&last.output);
     let result = match (last.outcome, output) {
         (RunOutcome::Idle, _) => rust_i18n::t!("kanban.run_idle", locale = locale, time = time),
         (RunOutcome::Fired, _) => rust_i18n::t!("kanban.run_fired", locale = locale, time = time),
@@ -111,7 +112,9 @@ fn run_line_in(schedule: &Schedule, now: u64, locale: &str) -> Option<(String, b
             rust_i18n::t!("kanban.run_failed", locale = locale, time = time, output = output)
         }
         (RunOutcome::Failed, None) => rust_i18n::t!("kanban.run_failed_bare", locale = locale, time = time),
-        (RunOutcome::Unknown, _) => rust_i18n::t!("kanban.run_unknown", locale = locale, time = time),
+        (RunOutcome::Skipped | RunOutcome::Unknown, _) => {
+            rust_i18n::t!("kanban.run_unknown", locale = locale, time = time)
+        }
     };
     Some((format!("{program} · {result}"), last.outcome == RunOutcome::Failed))
 }

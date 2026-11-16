@@ -185,6 +185,7 @@ impl crate::ClientMsg {
             | StartTodo { .. }
             | ResumeTodo { .. }
             | ListDoneTodos { .. }
+            | ListScheduleRuns { .. }
             | GetTodo { .. }
             | MoveTodo { .. }
             | AddSchedule { .. }

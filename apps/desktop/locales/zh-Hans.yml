@@ -1253,6 +1253,23 @@ kanban:
   run_failed_bare: "上次 %{time} 失败"
   run_unknown: "上次 %{time} 跑过"
   run_running: 正在跑…
+  run_record_idle: 没事
+  run_record_fired: "开了任务 #%{number}"
+  run_record_fired_unnumbered: 开了任务
+  run_record_fired_gone: 开了任务（已删除）
+  run_record_failed: 失败
+  run_record_skipped: "跳过：任务 #%{number} 还没做完"
+  run_record_skipped_unnumbered: 跳过：上次开出的任务还没做完
+  run_record_skipped_running: 跳过：上次的检查或任务还没结束
+  run_record_unknown: 跑过，结果看不懂
+  run_output: 命令输出
+  show_output: 展开输出
+  hide_output: 收起输出
+  open_run_todo: 打开任务
+  history_tabs: 记录的种类
+  runs_tab: 检查记录
+  todos_tab: 开出的任务
+  no_runs: 还没有检查记录
   done_window: "完成这一栏只列最近 7 天的任务"
   all_history: 全部记录
   history: 记录

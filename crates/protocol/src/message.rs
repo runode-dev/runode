@@ -50,7 +50,7 @@ use crate::{
     layout::WindowLayout,
     push::{ApnsEnv, PushService},
     tasks::TaskSource,
-    todo::{Outcome, Schedule, Todo, TodoSpec, When},
+    todo::{Outcome, Schedule, ScheduleRunRecord, Todo, TodoSpec, When},
 };
 
 /// 是哪一次构建，由版本号和构建时的标识拼成，宿主和前端各自报。快照格式还没有兼容保证，
@@ -395,6 +395,10 @@ pub enum ClientMsg {
     /// 翻完成了的任务（完成了多久的都有），完成得晚的在前，跳过前 `offset` 张；`schedule` 给了时只要这个定时
     /// 开出的。回 `DoneTodos`，一次最多 `todo::DONE_TODOS_PAGE` 张。
     ListDoneTodos { req: u32, schedule: Option<String>, offset: u32 },
+    /// 翻定时的检查记录（`ScheduleRunRecord`），新的在前，跳过前 `offset` 条。回 `ScheduleRuns`，一次最多
+    /// `todo::SCHEDULE_RUNS_PAGE` 条；每个定时只留最近 `runode_todo::SCHEDULE_RUNS_KEPT` 条。没有这个定时时回
+    /// `Error`。宿主的 `Welcome::board` 不小于 6 时才认得。
+    ListScheduleRuns { req: u32, schedule: String, offset: u32 },
     /// 要一张任务的全部内容，完成了多久的都行，回 `Todo`。这几条要任务标识的消息（`UpdateTodo`、
     /// `RemoveTodo`、`StartTodo`、`ResumeTodo`、`MoveTodo` 和它）都也认编号，写成 `5` 或 `#5`（`Todo::number`）；
     /// 正好也是哪张任务的标识时按标识算。
@@ -779,6 +783,12 @@ pub enum HostMsg {
     DoneTodos {
         req: u32,
         todos: Vec<Todo>,
+        more: bool,
+    },
+    /// 回 `ClientMsg::ListScheduleRuns`：这一页的检查记录；`more` 是后面还有。
+    ScheduleRuns {
+        req: u32,
+        runs: Vec<ScheduleRunRecord>,
         more: bool,
     },
     /// 回 `ClientMsg::GetTodo`。

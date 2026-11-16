@@ -578,6 +578,11 @@ impl Connection {
                     shared.list_done_todos(req, schedule.as_deref(), offset)
                 })
             }
+            ClientMsg::ListScheduleRuns { req, schedule, offset } => {
+                self.todos(req, "host-list-schedule-runs", move |shared| {
+                    shared.list_schedule_runs(req, &schedule, offset)
+                })
+            }
             ClientMsg::GetTodo { req, id } => {
                 self.todos(req, "host-get-todo", move |shared| shared.get_todo(req, &id));
             }

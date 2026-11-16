@@ -471,7 +471,8 @@ fn edits_are_announced_and_checked() {
         other => panic!("expected the done todos, got {other:?}"),
     }
 
-    // 不对的请求：没有这个任务（标识、编号）、标题空着、目录不存在、不在仓库里却要工作树、时间已经过了。
+    // 不对的请求：没有这个任务（标识、编号）、标题空着、目录不存在、不在仓库里却要工作树、时间已经过了、
+    // 问检查记录的定时不存在。
     for (req, message) in [
         (7, ClientMsg::RemoveTodo { req: 7, id: "nothere".into() }),
         (8, ClientMsg::AddTodo { req: 8, spec: spec(" ", &dir, "claude") }),
@@ -498,6 +499,7 @@ fn edits_are_announced_and_checked() {
             },
         ),
         (13, ClientMsg::GetTodo { req: 13, id: "#99".into() }),
+        (15, ClientMsg::ListScheduleRuns { req: 15, schedule: "nothere".into(), offset: 0 }),
     ] {
         assert!(matches!(ask(&mut peer, &message), HostMsg::Error { req: Some(r), .. } if r == req), "{message:?}");
     }
@@ -835,7 +837,7 @@ fn todos_of(peer: &mut Peer, schedule: &str) -> Vec<Todo> {
     list(peer).into_iter().filter(|todo| todo.schedule.as_deref() == Some(schedule)).collect()
 }
 
-/// 到点先跑的命令有输出：开一张来自定时的任务，标题照定时的，提示词后面接着命令的输出。
+/// 到点先跑的命令有输出：开一张来自定时的任务，标题照定时的，提示词后面接着命令的输出；检查记录里记下这张任务。
 #[cfg(unix)]
 #[test]
 fn a_schedule_command_with_output_opens_a_todo() {
@@ -851,9 +853,10 @@ fn a_schedule_command_with_output_opens_a_todo() {
     assert_eq!(todos.len(), 1);
     assert_eq!((todos[0].spec.title.as_str(), todos[0].spec.prompt.as_str()), ("Fix CI", "提示词\n\nfix it"));
     assert_eq!(schedule_of(&mut peer, &schedule).last_run.unwrap().outcome, RunOutcome::Fired);
+    assert_eq!(schedule_runs(&mut peer, &schedule), [(RunOutcome::Fired, String::new(), Some(todos[0].id.clone()))]);
 }
 
-/// 命令退出码为 0、没有输出：这次没事，不开任务，标准错误记下来。
+/// 命令退出码为 0、没有输出：这次没事，不开任务，标准错误记下来，检查记录里也是。
 #[cfg(unix)]
 #[test]
 fn a_quiet_schedule_command_opens_nothing() {
@@ -868,6 +871,7 @@ fn a_quiet_schedule_command_opens_nothing() {
     let last_run = last_run.unwrap();
     assert_eq!((last_run.outcome, last_run.output.as_str()), (RunOutcome::Idle, "log"));
     assert!(todos_of(&mut peer, &schedule).is_empty());
+    assert_eq!(schedule_runs(&mut peer, &schedule), [(RunOutcome::Idle, "log".into(), None)]);
 }
 
 /// 命令退出码不为 0：算失败，不开任务，标准错误记下来。
@@ -887,14 +891,25 @@ fn a_failing_schedule_command_opens_nothing() {
     assert!(todos_of(&mut peer, &schedule).is_empty());
 }
 
-/// 上次开出的任务还没开始：到点跳过，命令也不跑。
+/// 经 `ClientMsg::ListScheduleRuns` 问定时 `id` 的检查记录，新的在前：结果、输出和记下的任务。
+#[cfg(unix)]
+fn schedule_runs(peer: &mut Peer, id: &str) -> Vec<(RunOutcome, String, Option<String>)> {
+    match ask(peer, &ClientMsg::ListScheduleRuns { req: 9, schedule: id.into(), offset: 0 }) {
+        HostMsg::ScheduleRuns { req: 9, runs, more: false } => {
+            runs.into_iter().map(|record| (record.run.outcome, record.run.output, record.todo)).collect()
+        }
+        other => panic!("expected the schedule runs, got {other:?}"),
+    }
+}
+
+/// 上次开出的任务还没开始：到点跳过，命令也不跑，检查记录里记一条跳过、带上挡住它的任务。
 #[cfg(unix)]
 #[test]
 fn a_schedule_command_waits_for_the_last_todo() {
     let (_host, dir, mut peer) = board("todo-run-held");
     let marker = dir.join("ran");
     let schedule = add_run_schedule(&mut peer, spec("Held", &dir, "true"), &format!("touch '{}'", marker.display()));
-    runode_todo::Store::open(&dir.join("todos.db"))
+    let last = runode_todo::Store::open(&dir.join("todos.db"))
         .unwrap()
         .add_todo(&spec("Last time", &dir, "true"), 1, Some(&schedule))
         .unwrap();
@@ -904,9 +919,10 @@ fn a_schedule_command_waits_for_the_last_todo() {
     thread::sleep(Duration::from_millis(500));
     assert!(!marker.exists(), "the command ran");
     assert!(schedule_of(&mut peer, &schedule).last_run.is_none());
+    assert_eq!(schedule_runs(&mut peer, &schedule), [(RunOutcome::Skipped, String::new(), Some(last))]);
 }
 
-/// 上一次的命令还在跑：再到点跳过，不另跑一份。
+/// 上一次的命令还在跑：再到点跳过，不另跑一份，检查记录里记一条跳过、不带任务。
 #[cfg(unix)]
 #[test]
 fn a_schedule_command_still_running_is_not_run_again() {
@@ -922,4 +938,5 @@ fn a_schedule_command_still_running_is_not_run_again() {
     thread::sleep(Duration::from_millis(500));
     assert_eq!(std::fs::read_to_string(&count).unwrap(), "run\n");
     assert!(schedule_of(&mut peer, &schedule).last_run.is_none());
+    assert_eq!(schedule_runs(&mut peer, &schedule), [(RunOutcome::Skipped, String::new(), None)]);
 }

@@ -210,6 +210,22 @@ pub struct ScheduleRun {
     pub output: String,
 }
 
+/// 定时检查记录里的一条：跑了一次 `Schedule::run`，或者到点了但让路没跑（`RunOutcome::Skipped`）。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduleRunRecord {
+    /// 库里的行号，同一个看板里不重，删掉的也不再用。
+    pub id: u64,
+    #[serde(flatten)]
+    pub run: ScheduleRun,
+    /// `RunOutcome::Fired` 时是这次开出的任务，`RunOutcome::Skipped` 时是挡住它的那张没完成的任务；没有、
+    /// 或者那张任务已经删了时为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todo: Option<String>,
+    /// `todo` 那张任务的 `Todo::number`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u64>,
+}
+
 /// 跑 `Schedule::run` 的结果。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -220,13 +236,16 @@ pub enum RunOutcome {
     Fired,
     /// 退出码不为 0、超时或者起不来：不开任务。
     Failed,
+    /// 到点了，但上次开出的任务还没完成、或者上次的命令还在跑，让路没跑命令。只出现在检查记录
+    /// （`ScheduleRunRecord`）里，`Schedule::last_run` 不会是它。
+    Skipped,
     /// 新版本加的、读不懂的结果。
     #[serde(other)]
     Unknown,
 }
 
 impl RunOutcome {
-    pub const ALL: [RunOutcome; 3] = [RunOutcome::Idle, RunOutcome::Fired, RunOutcome::Failed];
+    pub const ALL: [RunOutcome; 4] = [RunOutcome::Idle, RunOutcome::Fired, RunOutcome::Failed, RunOutcome::Skipped];
 
     /// 线上和库里的写法；`Unknown` 为 `unknown`。
     pub fn name(self) -> &'static str {
@@ -234,6 +253,7 @@ impl RunOutcome {
             RunOutcome::Idle => "idle",
             RunOutcome::Fired => "fired",
             RunOutcome::Failed => "failed",
+            RunOutcome::Skipped => "skipped",
             RunOutcome::Unknown => "unknown",
         }
     }

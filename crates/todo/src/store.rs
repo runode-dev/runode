@@ -10,15 +10,18 @@ use std::{
 use runode_types::{
     random::random_hex,
     session::SessionId,
-    todo::{Outcome, RunOutcome, Schedule, ScheduleRun, Todo, TodoSpec, When},
+    todo::{Outcome, RunOutcome, Schedule, ScheduleRun, ScheduleRunRecord, Todo, TodoSpec, When},
 };
 use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior, params};
 
 /// 这个版本认得的表结构。
-const VERSION: i64 = 6;
+const VERSION: i64 = 7;
 
 /// 完成了的任务给前端最近这么久（秒）的，更早的留在库里。
 pub const DONE_KEPT: u64 = 7 * 24 * 60 * 60;
+
+/// 每个定时的检查记录（`schedule_runs` 表）留最新的这么多条，更早的删掉。
+pub const SCHEDULE_RUNS_KEPT: u32 = 500;
 
 const SCHEMA: &str = "
 CREATE TABLE todos (
@@ -96,6 +99,17 @@ CREATE TABLE schedules (
     run_outcome TEXT,
     run_output TEXT
 );
+-- 定时的检查记录 `ScheduleRunRecord`，outcome 是 `RunOutcome::name`。任务删掉时 todo 置空，定时删掉时
+-- 它的记录一起删。
+CREATE TABLE schedule_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    output TEXT NOT NULL,
+    todo TEXT
+);
+CREATE INDEX schedule_runs_schedule ON schedule_runs (schedule, at);
 ";
 
 /// 认得的旧版本怎么升上来：第 i 段把版本 `FIRST_MIGRATED + i` 的库升一版，旧库从它的版本起依次跑到最后。
@@ -120,6 +134,22 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE schedules ADD COLUMN run_at INTEGER;
      ALTER TABLE schedules ADD COLUMN run_outcome TEXT;
      ALTER TABLE schedules ADD COLUMN run_output TEXT;",
+    // 定时的检查记录，原有的上一次结果先记进去；那次开出的任务建立时刻就是 run_at。
+    "CREATE TABLE schedule_runs (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         schedule TEXT NOT NULL,
+         at INTEGER NOT NULL,
+         outcome TEXT NOT NULL,
+         output TEXT NOT NULL,
+         todo TEXT
+     );
+     CREATE INDEX schedule_runs_schedule ON schedule_runs (schedule, at);
+     INSERT INTO schedule_runs (schedule, at, outcome, output, todo)
+         SELECT s.id, s.run_at, COALESCE(s.run_outcome, 'unknown'), COALESCE(s.run_output, ''),
+             CASE WHEN s.run_outcome = 'fired' THEN
+                 (SELECT t.id FROM todos t WHERE t.schedule = s.id AND t.created = s.run_at LIMIT 1)
+             END
+         FROM schedules s WHERE s.run_at IS NOT NULL;",
 ];
 
 const _: () = assert!(FIRST_MIGRATED + MIGRATIONS.len() as i64 == VERSION);
@@ -322,12 +352,56 @@ fn due_schedule(tx: &Transaction<'_>, id: &str, now: u64) -> Result<Option<Sched
 /// 在 `tx` 里记下定时 `current` 在 `now` 到了点：一次性的删掉，别的记下到点的时刻。
 fn mark_fired(tx: &Transaction<'_>, current: &Schedule, now: u64) -> Result<()> {
     if matches!(current.when, When::Once { .. }) {
-        tx.execute("DELETE FROM schedules WHERE id = ?1", [&current.id]).map_err(failed)?;
+        forget_schedule(tx, &current.id)?;
     } else {
         tx.execute("UPDATE schedules SET last_fired = ?2 WHERE id = ?1", params![current.id, now as i64])
             .map_err(failed)?;
     }
     Ok(())
+}
+
+/// 在 `tx` 里删掉定时 `id` 和它的检查记录；没有这个定时时为假。
+fn forget_schedule(tx: &Transaction<'_>, id: &str) -> Result<bool> {
+    let removed = tx.execute("DELETE FROM schedules WHERE id = ?1", [id]).map_err(failed)? > 0;
+    tx.execute("DELETE FROM schedule_runs WHERE schedule = ?1", [id]).map_err(failed)?;
+    Ok(removed)
+}
+
+/// 在 `tx` 里给定时 `schedule` 记一条检查记录，再删掉它超出 `SCHEDULE_RUNS_KEPT` 的旧记录。
+fn insert_run(
+    tx: &Transaction<'_>,
+    schedule: &str,
+    at: u64,
+    outcome: RunOutcome,
+    output: &str,
+    todo: Option<&str>,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO schedule_runs (schedule, at, outcome, output, todo) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![schedule, at as i64, outcome.name(), output, todo],
+    )
+    .map_err(failed)?;
+    tx.execute(
+        "DELETE FROM schedule_runs WHERE schedule = ?1 AND id NOT IN (
+             SELECT id FROM schedule_runs WHERE schedule = ?1 ORDER BY at DESC, id DESC LIMIT ?2)",
+        params![schedule, SCHEDULE_RUNS_KEPT],
+    )
+    .map_err(failed)?;
+    Ok(())
+}
+
+/// `schedule_runs` 和 `todos` 连起来读出的一行：id、at、outcome、output、todo、number。
+fn schedule_run_record(row: &Row<'_>) -> rusqlite::Result<ScheduleRunRecord> {
+    Ok(ScheduleRunRecord {
+        id: u64::try_from(row.get::<_, i64>(0)?).unwrap_or(0),
+        run: ScheduleRun {
+            at: secs(row.get(1)?),
+            outcome: RunOutcome::from_name(&row.get::<_, String>(2)?),
+            output: row.get(3)?,
+        },
+        todo: row.get(4)?,
+        number: row.get::<_, Option<i64>>(5)?.and_then(|number| u64::try_from(number).ok()),
+    })
 }
 
 /// `When` 存成的几列：种类，`at`、`hour`、`minute`、`days`、`minutes`，以及 `cron`。
@@ -403,6 +477,38 @@ impl Store {
         let more = todos.len() > limit as usize;
         todos.truncate(limit as usize);
         Ok((todos, more))
+    }
+
+    /// 定时 `schedule` 的检查记录，新的在前，跳过前 `offset` 条、最多 `limit` 条，另给后面还有没有：多要一条
+    /// 看看。没有这个定时时为空。
+    pub fn list_schedule_runs(
+        &self,
+        schedule: &str,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Option<(Vec<ScheduleRunRecord>, bool)>> {
+        let exists: bool = self
+            .conn
+            .query_row("SELECT EXISTS (SELECT 1 FROM schedules WHERE id = ?1)", [schedule], |row| row.get(0))
+            .map_err(failed)?;
+        if !exists {
+            return Ok(None);
+        }
+        let mut statement = self
+            .conn
+            .prepare(
+                "SELECT r.id, r.at, r.outcome, r.output, r.todo, t.number FROM schedule_runs r
+                 LEFT JOIN todos t ON t.id = r.todo
+                 WHERE r.schedule = ?1 ORDER BY r.at DESC, r.id DESC LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(failed)?;
+        let rows = statement
+            .query_map(params![schedule, limit.saturating_add(1), offset], schedule_run_record)
+            .map_err(failed)?;
+        let mut runs: Vec<ScheduleRunRecord> = rows.collect::<rusqlite::Result<_>>().map_err(failed)?;
+        let more = runs.len() > limit as usize;
+        runs.truncate(limit as usize);
+        Ok(Some((runs, more)))
     }
 
     pub fn todo_by_id(&self, id: &str) -> Result<Option<Todo>> {
@@ -594,6 +700,8 @@ impl Store {
             .optional()
             .map_err(failed)?;
         tx.execute("UPDATE todos SET after_todo = NULL WHERE after_todo = ?1", [id]).map_err(failed)?;
+        // 标识会发给以后的新任务，记录不能连到那张上。
+        tx.execute("UPDATE schedule_runs SET todo = NULL WHERE todo = ?1", [id]).map_err(failed)?;
         tx.commit().map_err(failed)?;
         Ok(removed)
     }
@@ -860,7 +968,7 @@ impl Store {
     /// 时另加一张排着队的任务，建立时刻是 `run.at`。命令跑的时候定时被删掉了就丢掉这次的结果。到点跑的
     /// （`by_hand` 为假）被删掉或者停了都不开任务，手动触发的（`by_hand`）停了也开、被删掉了不开；一次性的定时
     /// 到点时就删掉，命令跑的时候也可能到点，都照样开。本该开任务却不开的这次记成 `RunOutcome::Idle`。都在一个
-    /// 事务里办。返回新任务的标识。
+    /// 事务里办。定时还在时这次另记进检查记录（`list_schedule_runs`）。返回新任务的标识。
     pub fn finish_schedule_run(
         &mut self,
         schedule: &Schedule,
@@ -875,6 +983,10 @@ impl Store {
             .map_err(failed)?;
         let opens = matches!(schedule.when, When::Once { .. })
             || if by_hand { paused.is_some() } else { paused == Some(false) };
+        let todo = match todo {
+            Some(spec) if opens => Some(insert_todo(&tx, spec, run.at, Some(&schedule.id), true)?),
+            _ => None,
+        };
         if paused.is_some() {
             let outcome = match run.outcome {
                 RunOutcome::Fired if !opens => RunOutcome::Idle,
@@ -885,23 +997,25 @@ impl Store {
                 params![schedule.id, run.at as i64, outcome.name(), run.output],
             )
             .map_err(failed)?;
+            insert_run(&tx, &schedule.id, run.at, outcome, &run.output, todo.as_deref())?;
         }
-        let todo = match todo {
-            Some(spec) if opens => Some(insert_todo(&tx, spec, run.at, Some(&schedule.id), true)?),
-            _ => None,
-        };
         tx.commit().map_err(failed)?;
         Ok(todo)
     }
 
     /// 定时 `id` 到点了、这次跳过（比如上次开出的任务还在干活），不开任务：记下到点的时刻（一次性的删掉）。
     /// 和 `fire_schedule` 一样照库里它现在的样子、在一个事务里办：决定跳过以后它可能被改过、被别处触发过，
-    /// 照现在的样子已经没了、或者还没到点时什么都不做，为假，不拿旧的到点时刻盖掉新的。
-    pub fn skip_schedule(&mut self, id: &str, now: u64) -> Result<bool> {
+    /// 照现在的样子已经没了、或者还没到点时什么都不做，为假，不拿旧的到点时刻盖掉新的。带 `Schedule::run`、
+    /// 没停着的另记一条 `RunOutcome::Skipped` 的检查记录，`blocker` 是挡住它的那张任务（上次的命令还在跑时为空）。
+    pub fn skip_schedule(&mut self, id: &str, now: u64, blocker: Option<&str>) -> Result<bool> {
         let tx = self.conn.transaction().map_err(failed)?;
         let Some(current) = due_schedule(&tx, id, now)? else {
             return Ok(false);
         };
+        // 先记再标到点：一次性的标到点时连同记录一起删掉。
+        if current.run.is_some() && !current.paused {
+            insert_run(&tx, id, now, RunOutcome::Skipped, "", blocker)?;
+        }
         mark_fired(&tx, &current, now)?;
         tx.commit().map_err(failed)?;
         Ok(true)
@@ -915,8 +1029,11 @@ impl Store {
         Ok(())
     }
 
-    /// 删掉定时；没有时为假。
-    pub fn remove_schedule(&self, id: &str) -> Result<bool> {
-        Ok(self.conn.execute("DELETE FROM schedules WHERE id = ?1", [id]).map_err(failed)? > 0)
+    /// 删掉定时和它的检查记录；没有时为假。
+    pub fn remove_schedule(&mut self, id: &str) -> Result<bool> {
+        let tx = self.conn.transaction().map_err(failed)?;
+        let removed = forget_schedule(&tx, id)?;
+        tx.commit().map_err(failed)?;
+        Ok(removed)
     }
 }

@@ -1228,6 +1228,7 @@ fn todo_requests_get_their_answers_and_changes_are_announced() {
         worktree: false,
         ..Default::default()
     };
+    let schedule_spec = spec.clone();
     let HostMsg::TodoAdded { id, .. } = link.request(|req| ClientMsg::AddTodo { req, spec }, WAIT).unwrap() else {
         panic!("expected the new todo");
     };
@@ -1238,6 +1239,13 @@ fn todo_requests_get_their_answers_and_changes_are_announced() {
     assert!(matches!(moved, HostMsg::Done { .. }), "{moved:?}");
     let done = link.request(|req| ClientMsg::ListDoneTodos { req, schedule: None, offset: 0 }, WAIT).unwrap();
     assert!(matches!(done, HostMsg::DoneTodos { ref todos, more: false, .. } if todos.is_empty()), "{done:?}");
+    let when = runode_protocol::todo::When::Every { minutes: 60 };
+    let add_schedule = |req| ClientMsg::AddSchedule { req, spec: schedule_spec, when, run: None, run_timeout: None };
+    let HostMsg::TodoAdded { id: schedule, .. } = link.request(add_schedule, WAIT).unwrap() else {
+        panic!("expected the new schedule");
+    };
+    let runs = link.request(|req| ClientMsg::ListScheduleRuns { req, schedule, offset: 0 }, WAIT).unwrap();
+    assert!(matches!(runs, HostMsg::ScheduleRuns { ref runs, more: false, .. } if runs.is_empty()), "{runs:?}");
     // 宿主回的错带着请求编号，交回给等着的一方，连接照旧。
     let missing = link.request(|req| ClientMsg::RemoveTodo { req, id: "nothere".into() }, WAIT);
     assert!(missing.is_err());

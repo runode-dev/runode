@@ -112,6 +112,7 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, mut message: HostMsg) {
         | HostMsg::Layout { req, .. }
         | HostMsg::Todos { req, .. }
         | HostMsg::DoneTodos { req, .. }
+        | HostMsg::ScheduleRuns { req, .. }
         | HostMsg::Todo { req, .. }
         | HostMsg::TodoAdded { req, .. }
         | HostMsg::Done { req }

@@ -193,7 +193,9 @@ fn options(command: &str, sub: Option<&str>) -> &'static [Opt] {
         ("swap", _) => SWAP_OPTS,
         ("todo", Some("add")) => TODO_ADD_OPTS,
         ("todo", Some("queue")) => &[AFTER, HELP],
-        ("todo", Some("list" | "show")) | ("schedule", Some("list")) | ("remote", Some("devices")) => &[JSON, HELP],
+        ("todo", Some("list" | "show")) | ("schedule", Some("list" | "runs")) | ("remote", Some("devices")) => {
+            &[JSON, HELP]
+        }
         ("schedule", Some("add")) => SCHEDULE_ADD_OPTS,
         ("remote", Some("pair")) => PAIR_OPTS,
         _ => &[HELP],
@@ -403,7 +405,7 @@ fn candidates(previous: &[String], current: &str, env: &Env) -> (Also, Vec<(Stri
             (Also::Nothing, todos(env, sub))
         }
         ("todo", Some("report"), 1) => (Also::Nothing, owned(OUTCOMES)),
-        ("schedule", Some("rm" | "pause" | "resume" | "fire"), 1) => (Also::Nothing, schedules(env)),
+        ("schedule", Some("rm" | "pause" | "resume" | "fire" | "runs"), 1) => (Also::Nothing, schedules(env)),
         ("remote", Some("revoke"), 1) => (Also::Nothing, devices(env)),
         ("service", Some("install" | "uninstall"), 1) => (Also::Nothing, owned(&service_kinds())),
         _ => (Also::Nothing, Vec::new()),
@@ -528,7 +530,10 @@ mod tests {
                     Some("limit"),
                 ],
             ),
-            ("schedule", &[Some("add"), Some("list"), Some("rm"), Some("pause"), Some("resume"), Some("fire")]),
+            (
+                "schedule",
+                &[Some("add"), Some("list"), Some("rm"), Some("pause"), Some("resume"), Some("fire"), Some("runs")],
+            ),
             ("remote", &[Some("pair"), Some("devices"), Some("revoke")]),
             ("service", &[Some("install"), Some("uninstall"), Some("status"), Some("upgrade")]),
             ("skill", &[Some("install")]),

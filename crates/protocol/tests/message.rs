@@ -7,7 +7,7 @@ use runode_protocol::{
     message::InvalidSessionId,
     push::{ApnsEnv, PushService},
     read_frame,
-    todo::{Outcome, RunOutcome, Schedule, ScheduleRun, Todo, TodoSpec, When},
+    todo::{Outcome, RunOutcome, Schedule, ScheduleRun, ScheduleRunRecord, Todo, TodoSpec, When},
     write_frame,
 };
 use runode_types::{
@@ -284,6 +284,7 @@ fn client_messages_round_trip() {
         ClientMsg::ResumeTodo { req: 30, id: "#5".into() },
         ClientMsg::GetTodo { req: 28, id: "#5".into() },
         ClientMsg::ListDoneTodos { req: 29, schedule: Some("0000cafe".into()), offset: 100 },
+        ClientMsg::ListScheduleRuns { req: 35, schedule: "0000cafe".into(), offset: 100 },
         ClientMsg::MoveTodo { req: 25, id: "0000abcd".into(), before: Some("0000beef".into()) },
         ClientMsg::MoveTodo { req: 26, id: "0000abcd".into(), before: None },
         ClientMsg::AddSchedule {
@@ -502,6 +503,8 @@ fn host_messages_round_trip() {
         },
         HostMsg::Todo { req: 28, todo: sample_todo() },
         HostMsg::DoneTodos { req: 29, todos: vec![sample_todo()], more: true },
+        HostMsg::ScheduleRuns { req: 35, runs: schedule_run_records(), more: true },
+        HostMsg::ScheduleRuns { req: 35, runs: Vec::new(), more: false },
         HostMsg::TodoAdded { req: 20, id: "0000abcd".into() },
         HostMsg::TodosChanged,
     ];
@@ -577,6 +580,39 @@ fn schedule_commands_stay_off_the_wire_when_absent() {
     assert!(!json.contains("\"run"), "{json}");
     let run: ScheduleRun = serde_json::from_str(r#"{"at":5,"outcome":"later"}"#).unwrap();
     assert_eq!(run, ScheduleRun { at: 5, outcome: RunOutcome::Unknown, output: String::new() });
+}
+
+/// 检查记录：一条开了任务、带任务和编号，一条让路跳过、不带任务。
+fn schedule_run_records() -> Vec<ScheduleRunRecord> {
+    vec![
+        ScheduleRunRecord {
+            id: 7,
+            run: ScheduleRun { at: 1_760_000_030, outcome: RunOutcome::Fired, output: "2 new".into() },
+            todo: Some("0000abcd".into()),
+            number: Some(5),
+        },
+        ScheduleRunRecord {
+            id: 6,
+            run: ScheduleRun { at: 1_759_996_400, outcome: RunOutcome::Skipped, output: String::new() },
+            todo: None,
+            number: None,
+        },
+    ]
+}
+
+/// 检查记录的字段和 `ScheduleRun` 摊在同一层，没有任务时不写 `todo`、`number`。
+#[test]
+fn schedule_run_records_are_flat_and_skip_missing_todos() {
+    let [fired, skipped] = <[ScheduleRunRecord; 2]>::try_from(schedule_run_records()).unwrap();
+    let fired = serde_json::to_value(&fired).unwrap();
+    assert_eq!(
+        fired,
+        serde_json::json!({"id":7,"at":1_760_000_030,"outcome":"fired","output":"2 new","todo":"0000abcd","number":5})
+    );
+    let skipped = serde_json::to_value(&skipped).unwrap();
+    let keys: Vec<&str> = skipped.as_object().unwrap().keys().map(String::as_str).collect();
+    assert!(!keys.contains(&"todo") && !keys.contains(&"number"), "{skipped}");
+    assert_eq!(skipped["outcome"], "skipped");
 }
 
 #[test]

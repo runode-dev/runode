@@ -12,8 +12,9 @@ use common::*;
 use runode_cli::exit;
 use runode_protocol::{
     ClientMsg, HostMsg, SessionId,
-    todo::{DEFAULT_AGENT, Outcome, RunOutcome, Schedule, ScheduleRun, Todo, TodoSpec, When},
+    todo::{DEFAULT_AGENT, Outcome, RunOutcome, Schedule, ScheduleRun, ScheduleRunRecord, Todo, TodoSpec, When},
 };
+use runode_todo::LocalTime;
 use runode_types::agent::{AgentKind, AgentState};
 use unicode_width::UnicodeWidthStr as _;
 
@@ -572,4 +573,129 @@ fn schedule_list_writes_when_and_next_in_local_time() {
     assert_eq!(listed[2]["next_fire"], at);
     assert_eq!(listed[3]["run"], "./check.sh");
     assert_eq!(listed[3]["last_run"], serde_json::json!({ "at": at, "outcome": "idle" }));
+}
+
+/// 宿主照给的检查记录回 `ListScheduleRuns`，`more` 是后面还有；别的定时回没有这个定时。
+fn runs_host(name: &str, runs: Vec<ScheduleRunRecord>, more: bool) -> FakeHost {
+    FakeHost::start(name, move |message| match message {
+        ClientMsg::Hello { .. } => vec![welcome(true)],
+        ClientMsg::ListScheduleRuns { req, schedule, .. } if schedule == "0000cafe" => {
+            vec![HostMsg::ScheduleRuns { req: *req, runs: runs.clone(), more }]
+        }
+        ClientMsg::ListScheduleRuns { req, schedule, .. } => {
+            vec![HostMsg::Error { req: Some(*req), id: None, message: format!("no schedule {schedule}"), reason: None }]
+        }
+        _ => vec![],
+    })
+}
+
+#[test]
+fn schedule_runs_lists_each_run_newest_first() {
+    let at = 4_000_000_000;
+    let local = LocalTime::from_unix(at).unwrap().to_string();
+    let record = |id, outcome, output: &str, number: Option<u64>| ScheduleRunRecord {
+        id,
+        run: ScheduleRun { at, outcome, output: output.into() },
+        todo: number.map(|number| format!("0000000{number}")),
+        number,
+    };
+    let runs = vec![
+        record(4, RunOutcome::Skipped, "", Some(5)),
+        record(3, RunOutcome::Skipped, "", None),
+        record(2, RunOutcome::Failed, "fetching\nexit 2: no network\n\n", None),
+        record(1, RunOutcome::Fired, "", Some(5)),
+        record(0, RunOutcome::Idle, "", None),
+    ];
+    let fake = runs_host("schedruns", runs, false);
+    let (code, out, err) = run("schedule runs 0000cafe", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    let rows: Vec<Vec<&str>> =
+        out.lines().map(|line| line.split("  ").map(str::trim).filter(|c| !c.is_empty()).collect()).collect();
+    assert_eq!(
+        rows,
+        [
+            vec!["AT", "OUTCOME", "TASK", "OUTPUT"],
+            vec![local.as_str(), "skipped", "#5"],
+            vec![local.as_str(), "skipped", "-"],
+            vec![local.as_str(), "failed", "-", "exit 2: no network"],
+            vec![local.as_str(), "fired", "#5"],
+            vec![local.as_str(), "idle", "-"],
+        ],
+        "{out}"
+    );
+    assert!(matches!(
+        requests(&fake).as_slice(),
+        [ClientMsg::ListScheduleRuns { schedule, offset: 0, .. }] if schedule == "0000cafe"
+    ));
+
+    let (code, out, _) = run("schedule runs 0000cafe --json", &fake.env);
+    assert_eq!(code, exit::OK);
+    let listed: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 5);
+    assert_eq!(
+        listed[0],
+        serde_json::json!({ "id": 4, "at": at, "outcome": "skipped", "todo": "00000005", "number": 5 })
+    );
+    assert_eq!(listed[2]["output"], "fetching\nexit 2: no network\n\n");
+
+    // 没有这个定时时宿主回的错照样报出来。
+    let (code, _, err) = run("schedule runs 0000dead", &fake.env);
+    assert_eq!(code, exit::FAILED);
+    assert!(err.contains("no schedule 0000dead"), "{err}");
+}
+
+#[test]
+fn schedule_runs_says_when_there_are_none_or_more() {
+    let fake = runs_host("schedrunsnone", vec![], false);
+    assert_eq!(run("schedule runs 0000cafe", &fake.env).1, "No runs yet.\n");
+
+    let idle = ScheduleRunRecord {
+        id: 1,
+        run: ScheduleRun { at: 4_000_000_000, outcome: RunOutcome::Idle, output: String::new() },
+        todo: None,
+        number: None,
+    };
+    // 宿主说后面还有时接着翻，两页都列出来。
+    let fired = ScheduleRunRecord {
+        id: 0,
+        run: ScheduleRun { outcome: RunOutcome::Fired, ..idle.run.clone() },
+        ..idle.clone()
+    };
+    let fake = FakeHost::start("schedrunsmore", move |message| match message {
+        ClientMsg::Hello { .. } => vec![welcome(true)],
+        ClientMsg::ListScheduleRuns { req, offset: 0, .. } => {
+            vec![HostMsg::ScheduleRuns { req: *req, runs: vec![idle.clone()], more: true }]
+        }
+        ClientMsg::ListScheduleRuns { req, .. } => {
+            vec![HostMsg::ScheduleRuns { req: *req, runs: vec![fired.clone()], more: false }]
+        }
+        _ => vec![],
+    });
+    let (code, out, err) = run("schedule runs 0000cafe", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(out.contains("idle") && out.contains("fired"), "{out}");
+    let offsets: Vec<u32> = requests(&fake)
+        .iter()
+        .filter_map(|message| match message {
+            ClientMsg::ListScheduleRuns { offset, .. } => Some(*offset),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(offsets, [0, 1]);
+
+    // 看板只到第 5 级的宿主不认得 `ListScheduleRuns`，不发给它。
+    let old = FakeHost::start("schedrunsold", |message| match message {
+        ClientMsg::Hello { .. } => {
+            let mut hello = welcome(true);
+            if let HostMsg::Welcome { board, .. } = &mut hello {
+                *board = 5;
+            }
+            vec![hello]
+        }
+        _ => vec![],
+    });
+    let (code, _, err) = run("schedule runs 0000cafe", &old.env);
+    assert_eq!(code, exit::FAILED);
+    assert!(err.contains("too old for schedule runs"), "{err}");
+    assert_eq!(requests(&old), []);
 }

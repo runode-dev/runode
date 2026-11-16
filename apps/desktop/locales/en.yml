@@ -1253,6 +1253,23 @@ kanban:
   run_failed_bare: "last %{time} failed"
   run_unknown: "last ran %{time}"
   run_running: "running…"
+  run_record_idle: Nothing to do
+  run_record_fired: "Opened task #%{number}"
+  run_record_fired_unnumbered: Opened a task
+  run_record_fired_gone: Opened a task (deleted)
+  run_record_failed: Failed
+  run_record_skipped: "Skipped: task #%{number} isn't done yet"
+  run_record_skipped_unnumbered: "Skipped: the last task isn't done yet"
+  run_record_skipped_running: "Skipped: the last check or task wasn't finished yet"
+  run_record_unknown: Ran, with a result this version can't read
+  run_output: Command output
+  show_output: Show full output
+  hide_output: Hide full output
+  open_run_todo: Open Task
+  history_tabs: History view
+  runs_tab: Checks
+  todos_tab: Opened Tasks
+  no_runs: No checks yet
   done_window: "This column lists only the last 7 days"
   all_history: All history
   history: History

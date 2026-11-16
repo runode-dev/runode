@@ -469,6 +469,48 @@ pub(crate) fn fire_schedule(env: &Env, id: String) -> Result<()> {
     connection.request_done(&ClientMsg::FireSchedule { req, id })
 }
 
+/// 列定时 `id` 留着的全部检查记录，新的在前；表格里的输出只取最后一个非空行，`json` 时整条照给。
+pub(crate) fn schedule_runs(env: &Env, id: String, json: bool, out: &mut dyn Write) -> Result<()> {
+    let connection = open(env)?;
+    need_board(&connection, 6, "schedule runs")?;
+    let mut runs = Vec::new();
+    loop {
+        let req = connection.req();
+        let offset = u32::try_from(runs.len()).unwrap_or(u32::MAX);
+        connection.send(&ClientMsg::ListScheduleRuns { req, schedule: id.clone(), offset })?;
+        let (page, more) = match connection.reply()? {
+            HostMsg::ScheduleRuns { runs, more, .. } => (runs, more),
+            other => bail!("unexpected answer: {}", kind(&other)),
+        };
+        // 空页也停：宿主说还有却什么都没给时不空转。
+        let done = !more || page.is_empty();
+        runs.extend(page);
+        if done {
+            break;
+        }
+    }
+    if json {
+        serde_json::to_writer_pretty(&mut *out, &runs)?;
+        writeln!(out)?;
+        return Ok(());
+    }
+    if runs.is_empty() {
+        writeln!(out, "No runs yet.")?;
+        return Ok(());
+    }
+    let local = |at: u64| LocalTime::from_unix(at).map_or_else(|| at.to_string(), |at| at.to_string());
+    let rows = runs.iter().map(|record| {
+        vec![
+            local(record.run.at),
+            record.run.outcome.name().to_owned(),
+            record.number.map_or_else(|| "-".into(), |number| format!("#{number}")),
+            record.run.output.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or_default().to_owned(),
+        ]
+    });
+    table(&["AT", "OUTCOME", "TASK", "OUTPUT"], rows, out)?;
+    Ok(())
+}
+
 /// 定时什么时候到点，人看的写法：`daily 09:30 mon-fri`、`every 15m`、`once 2026-10-13 14:00`、`cron 30 9 * * 1-5`。
 fn when_text(when: &When, local: impl Fn(u64) -> String) -> String {
     match *when {

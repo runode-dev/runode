@@ -46,6 +46,7 @@ pub(crate) fn subcommands(command: &str) -> &'static [(&'static str, &'static st
             ("pause", "Stop a schedule from firing"),
             ("resume", "Let a paused schedule fire again"),
             ("fire", "Fire a schedule once now"),
+            ("runs", "List the past --run results of a schedule"),
         ],
         "remote" => &[
             ("pair", "Pair a phone or another computer"),
