@@ -98,6 +98,11 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 return Err(Failure::Exited);
             }
             let id = info.id;
+            // 输入整个备好了才连上会话、开始收它的状态变化。
+            let text = match text {
+                Text::Given(text) => text,
+                Text::Stdin => stdin_text()?,
+            };
             // 先连上再发，之后 agent 的状态变化和命令结束才不会漏掉。
             let (channel, mut meta) = attach(&connection, id)?;
             // 刚开的终端还没出提示符时认不出 shell 集成，只能等屏幕安静，命令失败也照样算成功。
@@ -105,10 +110,6 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             if wait && (enter || presses_enter(&keys)) && meta.foreground_is_shell {
                 meta = wait_for_prompt(&connection, id, meta)?;
             }
-            let text = match text {
-                Text::Given(text) => text,
-                Text::Stdin => stdin_text()?,
-            };
             let waiting = wait.then(|| send_wait(&meta, enter || presses_enter(&keys)));
             // 打进去的换行 shell 当回车执行，等命令只等得到第一条运行完；数条数又对不上续行和
             // heredoc，所以什么都没打之前就拒绝。
