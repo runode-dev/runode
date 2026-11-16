@@ -115,7 +115,9 @@
                 }
                 .safeAreaInset(edge: .top, spacing: 0) { paneTabs }
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBars }
-                .background(background.ignoresSafeArea())
+                // 终端底色不铺进键盘让出的区域：软键盘浮在页面上，它圆角外露出的是那里，要和按键栏一样是页面底色。
+                .background(background.ignoresSafeArea(.container))
+                .background(Color(chromeTheme.page).ignoresSafeArea())
                 .animation(.easeOut(duration: 0.2), value: model.isAwaitingAnswer)
                 .navigationTitle(model.title)
                 .navigationBarTitleDisplayMode(.inline)
