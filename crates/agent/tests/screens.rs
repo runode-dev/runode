@@ -10,7 +10,7 @@ fn verdict(kind: AgentKind, screen: &str, title: &str, progress: &str) -> &'stat
     match rules.evaluate(Signals { screen: Some(screen), title, progress }) {
         Verdict::Matched { state: AgentState::Working, .. } => "working",
         Verdict::Matched { state: AgentState::Idle, .. } => "idle",
-        Verdict::Matched { state: AgentState::Blocked, visible, rule } => {
+        Verdict::Matched { state: AgentState::Blocked, visible, rule, .. } => {
             assert!(visible, "{kind:?} blocker {rule} should be visible");
             "blocked"
         }

@@ -292,6 +292,36 @@ fn program_status_records_are_kept_per_id() {
 }
 
 #[test]
+fn rules_can_override_a_reported_idle() {
+    let mut f = Fixture::started(Claude);
+    let start = GRACE_MS;
+    // Claude 回合结束就报告空闲，后台 shell 还在跑时底栏写着 `1 shell`。
+    let footer = |rest: &str| format!("● Waiting.\n\n────\n❯\n────\n  ⏵⏵ auto mode on{rest}\n");
+    f.output(start, &footer(" · 1 shell"));
+    f.tracker.program_status("", "claude-code", Some(Idle), f.at(start));
+    assert_eq!(f.poll(start), agent(Claude, Working));
+    // 打开 transcript 查看器时看不出状态，照旧算在干活。
+    let step = EVAL_INTERVAL.as_millis() as u64;
+    f.output(start + step, "● Waiting.\n\nShowing detailed transcript · ctrl+o to toggle\n");
+    assert_eq!(f.poll(start + step), agent(Claude, Working));
+    // shell 跑完，底栏一变就按报告的空闲算。
+    let later = start + 2 * step;
+    f.output(later, &footer(""));
+    assert_eq!(f.poll(later), agent(Claude, Idle));
+    // 报告的不是空闲时照旧按报告算。
+    f.tracker.program_status("", "claude-code", Some(Blocked), f.at(later + 1));
+    f.output(later + 1, &footer(" · 1 shell"));
+    assert_eq!(f.poll(later + 1), agent(Claude, Blocked));
+    // 自己报告的工作中不算盖过的：开着 transcript 查看器时报告空闲就是空闲。
+    let viewer = later + 1 + step;
+    f.tracker.program_status("", "claude-code", Some(Working), f.at(viewer));
+    f.output(viewer, "● Working.\n\nShowing detailed transcript · ctrl+o to toggle\n");
+    assert_eq!(f.poll(viewer), agent(Claude, Working));
+    f.tracker.program_status("", "claude-code", Some(Idle), f.at(viewer + step));
+    assert_eq!(f.poll(viewer + step), agent(Claude, Idle));
+}
+
+#[test]
 fn an_unreadable_screen_still_compares_the_title_and_progress() {
     let mut f = Fixture::started(Letta);
     // letta 用 `4;3;` 报告在等用户；解析后的进度只说在进行中。

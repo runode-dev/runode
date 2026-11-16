@@ -27,6 +27,9 @@
 //! `skip_state_update = true` 的规则（状态必须是 unknown）命中时，这次不改状态：屏幕上是
 //! agent 自己的历史记录、菜单这类看不出当前状态的界面。不跳过的 unknown 规则命中时当作
 //! 没有规则命中。
+//!
+//! `overrides_reported_idle = true` 的规则（状态必须是 working）命中时，agent 自己报告了空闲
+//! 也算在干活：agent 只按自己的回合报告状态，回合外还在跑的事（比如后台 shell）要靠屏幕认出来。
 
 use std::cell::OnceCell;
 
@@ -37,9 +40,11 @@ use serde::Deserialize;
 use crate::{identify, region::Region};
 
 /// 支持到第几版规则格式；规则文件的 `min_engine_version` 比它大时不用。
-pub const ENGINE_VERSION: u32 = 3;
+pub const ENGINE_VERSION: u32 = 4;
 /// `top_non_empty_lines` 从第几版格式开始有。
 const TOP_LINES_ENGINE_VERSION: u32 = 3;
+/// `overrides_reported_idle` 从第几版格式开始有。
+const OVERRIDES_ENGINE_VERSION: u32 = 4;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +80,8 @@ struct RuleSpec {
     visible_working: bool,
     #[serde(default)]
     skip_state_update: bool,
+    #[serde(default)]
+    overrides_reported_idle: bool,
     #[serde(default)]
     all: Vec<GateSpec>,
     #[serde(default)]
@@ -138,6 +145,7 @@ struct Rule {
     /// 命中就说明界面上确实摆着 `state` 这个状态。
     visible: bool,
     skip: bool,
+    overrides_reported_idle: bool,
     gate: Gate,
 }
 
@@ -172,6 +180,8 @@ pub enum Verdict<'r> {
         state: AgentState,
         /// 界面上确实摆着这个状态，见规则的 `visible_*`。
         visible: bool,
+        /// 这个结论能盖过 agent 用 OSC 7501 报告的空闲。
+        overrides_reported_idle: bool,
         rule: &'r str,
     },
     /// 命中的规则要求这次不改状态。
@@ -234,7 +244,12 @@ impl RuleSet {
                 return Verdict::Hold { rule: &rule.id };
             }
             return match rule.state {
-                Some(state) => Verdict::Matched { state, visible: rule.visible, rule: &rule.id },
+                Some(state) => Verdict::Matched {
+                    state,
+                    visible: rule.visible,
+                    overrides_reported_idle: rule.overrides_reported_idle,
+                    rule: &rule.id,
+                },
                 None => Verdict::Unknown,
             };
         }
@@ -260,6 +275,14 @@ fn compile_rule(rule: RuleSpec, min_engine: Option<u32>) -> Result<Rule, String>
     if rule.skip_state_update && (rule.state != Some(StateSpec::Unknown) || any_visible) {
         return Err("skip_state_update needs state = \"unknown\" and no visible_* flag".into());
     }
+    if rule.overrides_reported_idle {
+        if rule.state != Some(StateSpec::Working) {
+            return Err("overrides_reported_idle needs state = \"working\"".into());
+        }
+        if min_engine.is_some_and(|v| v < OVERRIDES_ENGINE_VERSION) {
+            return Err(format!("overrides_reported_idle needs min_engine_version {OVERRIDES_ENGINE_VERSION}"));
+        }
+    }
     let visible = match state {
         Some(AgentState::Idle) => rule.visible_idle,
         Some(AgentState::Working) => rule.visible_working,
@@ -281,6 +304,7 @@ fn compile_rule(rule: RuleSpec, min_engine: Option<u32>) -> Result<Rule, String>
         region,
         visible,
         skip: rule.skip_state_update,
+        overrides_reported_idle: rule.overrides_reported_idle,
         gate: compile_gate(gate, false)?,
     })
 }

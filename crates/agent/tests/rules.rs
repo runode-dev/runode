@@ -20,6 +20,19 @@ not = [{ contains = [" "] }]"#,
 }
 
 #[test]
+fn only_working_rules_on_a_new_engine_override_a_reported_idle() {
+    let file = |state: &str, engine: &str| {
+        format!(
+            "id = \"claude\"\n{engine}\n[[rules]]\nid = \"r\"\nstate = \"{state}\"\noverrides_reported_idle = true\ncontains = [\"ok\"]\n"
+        )
+    };
+    assert!(RuleSet::parse(&file("working", "min_engine_version = 4")).is_ok());
+    assert!(RuleSet::parse(&file("working", "")).is_ok());
+    assert!(RuleSet::parse(&file("idle", "min_engine_version = 4")).is_err());
+    assert!(RuleSet::parse(&file("working", "min_engine_version = 3")).is_err());
+}
+
+#[test]
 fn rules_without_a_screen_still_compare_the_title_and_progress() {
     let set = RuleSet::parse(
         r#"

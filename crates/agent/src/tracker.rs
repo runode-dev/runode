@@ -7,7 +7,8 @@
 //! - 是哪个 agent：前台进程认出来的优先，其次是标题前缀报告的，再次是 OSC 7501 报告的 `app`
 //!   认得出的；只有 OSC 7501 或进度报告时是 pi（标题像 pi 的）或 `AgentKind::Other`。都没有
 //!   就不算有 agent。
-//! - 什么状态：程序用 OSC 7501 报告了的，就是它报告的，不比规则、不看输出、也不等确认空闲。
+//! - 什么状态：程序用 OSC 7501 报告了的，就是它报告的，不看输出、也不等确认空闲；只在它报告
+//!   空闲时比一次规则，命中的规则能盖过报告的空闲（`overrides_reported_idle`）就算工作中。
 //!   否则先用这种 agent 的识别规则（`RuleBook`）去比屏幕、标题和进度报告的原文；规则
 //!   说不准时用标题前缀和进度报告里 agent 自己报告的状态；再没有就当它空闲。
 //! - 规则没给出明摆着的状态、只是推测空闲时，持续有输出（不是在回显用户的按键）就算工作中。
@@ -94,6 +95,8 @@ pub struct Tracker {
     last_eval: Option<Instant>,
     /// 上次求值时是靠输出活动判成工作中的，输出停下后要再求值一次。
     by_activity: bool,
+    /// 上次求值的工作中是规则盖过 agent 报告的空闲得来的。
+    overriding: bool,
     /// 交接前公布的 agent，见 `resume`：前台换程序或回到 shell 之前，别的信号认不出是哪个 agent
     /// 时按它算；它的进程这时才被认出来的，不算刚启动，没有启动宽限期。
     carried: Option<Agent>,
@@ -381,6 +384,7 @@ impl Tracker {
         rules: &RuleBook,
         screen: impl FnOnce() -> Option<String>,
     ) -> Option<Agent> {
+        let was_overriding = std::mem::take(&mut self.overriding);
         let Some(kind) = self.kind() else {
             self.pending_idle = None;
             self.by_activity = false;
@@ -390,10 +394,30 @@ impl Tracker {
         if self.grace_from.is_some_and(|from| now >= from + STARTUP_GRACE) {
             self.grace_from = None;
         }
+        let set = rules.rules(kind);
         if let Some(state) = self.status_state() {
             self.pending_idle = None;
             self.by_activity = false;
-            return Some(Agent { kind, state });
+            let overridden = state == AgentState::Idle
+                && self.grace_from.is_none()
+                && set.as_deref().is_some_and(|set| {
+                    let screen = screen();
+                    let verdict = set.evaluate(Signals {
+                        screen: screen.as_deref(),
+                        title: &self.title_text,
+                        progress: self.progress_text.latest(),
+                    });
+                    match verdict {
+                        Verdict::Matched { state, overrides_reported_idle, .. } => {
+                            overrides_reported_idle && state == AgentState::Working
+                        }
+                        // 看不出当前状态的界面上，盖过了的照旧盖着。
+                        Verdict::Hold { .. } => was_overriding,
+                        Verdict::Unknown => false,
+                    }
+                });
+            self.overriding = overridden;
+            return Some(Agent { kind, state: if overridden { AgentState::Working } else { state } });
         }
         let reported = self.reported_state();
         if let Some(from) = self.grace_from {
@@ -406,7 +430,6 @@ impl Tracker {
         }
 
         // 读不到屏幕时照样比标题和进度报告的规则。
-        let set = rules.rules(kind);
         let screen = set.as_ref().and_then(|_| screen());
         let verdict = set.as_deref().map_or(Verdict::Unknown, |set| {
             set.evaluate(Signals {
