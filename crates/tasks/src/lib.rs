@@ -40,7 +40,7 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     let mut sources = Vec::new();
     let dirs = runode_paths::Dirs::from_env();
     if let Some(file) = dirs.tasks_file()
-        && let Some(text) = read_small(&file)
+        && let Some(text) = read_text(&file)
     {
         sources.extend(custom_sources(&text, &file, dir));
     }
@@ -49,9 +49,10 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     if let Some(file) = makefile
         && let Some(make) = make_program()
         && let Some(prefix) = make_prefix(make, dir, file.parent().unwrap_or(dir))
-        && let Some(text) = read_small(&file)
+        && let Some(bytes) = read_small(&file)
     {
-        let targets = makefile_targets(&text);
+        // Makefile 的注释可能是别的编码写的，不该让整个文件列不出来，所以有损解码。
+        let targets = makefile_targets(&String::from_utf8_lossy(&bytes));
         let (tasks, truncated) = first_tasks(targets, |(name, description)| TaskEntry {
             command: format!("{prefix} {}", quote(&name)),
             name,
@@ -61,7 +62,7 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     }
     let package = ancestors.iter().find_map(|at| named_file(at, &["package.json"]));
     if let Some(file) = package
-        && let Some(text) = read_small(&file)
+        && let Some(text) = read_text(&file)
         && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
     {
         let at = file.parent().unwrap_or(dir);
@@ -121,7 +122,7 @@ fn custom_sources(text: &str, file: &Path, dir: &Path) -> Vec<TaskSource> {
 /// 给看板新开的工作树先跑的命令：`tasks.json` 的 `setup` 里给 `dir`（任务的目录）自己或上级的、最深的
 /// 那一项，在工作树里跑。没有文件、读不懂、没配时为 `None`。和 `list` 一样会读文件。
 pub fn worktree_setup(dir: &Path) -> Option<String> {
-    let text = read_small(&runode_paths::Dirs::from_env().tasks_file()?)?;
+    let text = read_text(&runode_paths::Dirs::from_env().tasks_file()?)?;
     setup_in(&text, dir)
 }
 
@@ -196,17 +197,22 @@ fn windows_make(path: Option<&std::ffi::OsStr>) -> Option<&'static str> {
     ["make", "mingw32-make"].into_iter().find(|name| dirs.iter().any(|dir| dir.join(format!("{name}.exe")).is_file()))
 }
 
-/// 读整个文件；比 `MAX_FILE_BYTES` 大的返回 None，不截断着读。
-fn read_small(file: &Path) -> Option<String> {
-    let mut text = String::new();
+/// 读整个文件的字节；比 `MAX_FILE_BYTES` 大的返回 None，不截断着读。
+fn read_small(file: &Path) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
     // 多读一个字节才知道超没超；不先看文件长度，读的过程中文件可能变大。
-    fs::File::open(file).ok()?.take(MAX_FILE_BYTES + 1).read_to_string(&mut text).ok()?;
-    (text.len() as u64 <= MAX_FILE_BYTES).then_some(text)
+    fs::File::open(file).ok()?.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() as u64 <= MAX_FILE_BYTES).then_some(bytes)
+}
+
+/// `read_small` 读出的整个文件要是 UTF-8：JSON 里的命令和名字原样拿去跑，不能有字节被换掉。
+fn read_text(file: &Path) -> Option<String> {
+    String::from_utf8(read_small(file)?).ok()
 }
 
 /// Makefile 里显式写出来的目标和它那一行 `##` 后面的说明，按先后、去重。不算以 `.` 开头的特殊目标
 /// （`.PHONY` 等）、模式规则（`%`）、带变量的（`$`）、像文件路径的（`/`）和 `quotable` 不收的，也不算
-/// 变量赋值。只列得出 `MAX_TASKS` 个，收到多一个（看得出列不全）就不往下找了。
+/// 变量赋值，也不算带替换字符的（换掉的字节不再是原来的目标名）。只列得出 `MAX_TASKS` 个，收到多一个（看得出列不全）就不往下找了。
 fn makefile_targets(text: &str) -> Vec<(String, Option<String>)> {
     let mut targets: Vec<(String, Option<String>)> = Vec::new();
     let mut seen = HashSet::new();
@@ -227,7 +233,11 @@ fn makefile_targets(text: &str) -> Vec<(String, Option<String>)> {
             continue;
         }
         for name in names.split_whitespace() {
-            if name.starts_with('.') || name.contains(['%', '/']) || !quotable(name) || !seen.insert(name) {
+            if name.starts_with('.')
+                || name.contains(['%', '/', char::REPLACEMENT_CHARACTER])
+                || !quotable(name)
+                || !seen.insert(name)
+            {
                 continue;
             }
             targets.push((name.to_owned(), description.map(str::to_owned)));
@@ -483,6 +493,17 @@ build: other
         let sources = list(&root.join("wo\\rk/link")).unwrap();
         fs::remove_dir_all(&root).unwrap();
         assert!(sources.iter().all(|source| source.kind != TaskSourceKind::Makefile), "{sources:?}");
+    }
+
+    /// 注释里有不成 UTF-8 的字节（GBK、Latin-1 写的作者名）时照样读出来，目标照列。
+    #[test]
+    fn a_file_with_invalid_utf8_is_still_read() {
+        let file = std::env::temp_dir().join(format!("runode-tasks-latin1-{}", std::process::id()));
+        fs::write(&file, b"# caf\xe9\nbuild:\ncaf\xff:\n").unwrap();
+        let bytes = read_small(&file);
+        fs::remove_file(&file).unwrap();
+        let text = String::from_utf8_lossy(bytes.as_deref().expect("a Makefile with a Latin-1 comment is read"));
+        assert_eq!(makefile_targets(&text), [("build".to_owned(), None)]);
     }
 
     #[test]
